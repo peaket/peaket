@@ -27,9 +27,10 @@ const ACCOUNT_DIGITS = '110987654321';
 const HOLDER = '김배상';
 /** 47,500원의 10% = 4,750원(원 미만 없음). 코드 상수와 다른 시험 값 */
 const AMOUNT = 4_750;
-/** 시험 사이에 비울 표. partner_receivable을 가리키는 외래키(receivable_move 0016, guarantee_collection 0026)의 표를 같은 truncate에 넣는다.
- * cascade는 쓰지 않는다: 새 외래키가 생기면 조용히 다른 표까지 비우지 않고 이 시험이 실패해 드러낸다(FIX-payment-int) */
-const RESET_SQL = 'truncate compensation_transfer, receivable_move, guarantee_collection, partner_receivable';
+/** 시험 사이에 비울 표. partner_receivable을 가리키는 외래키(receivable_movement 0016·0028, guarantee_collection 0026)의 표를 같은 truncate에 넣는다.
+ * cascade는 쓰지 않는다: 새 외래키가 생기면 조용히 다른 표까지 비우지 않고 이 시험이 실패해 드러낸다(FIX-payment-int).
+ * 0028(FIX-invariant-m3)부터 옛 이름 receivable_move는 뷰라 truncate할 수 없다. 표의 이름(receivable_movement)을 쓴다 */
+const RESET_SQL = 'truncate compensation_transfer, receivable_movement, guarantee_collection, partner_receivable';
 
 type Answer = { transferId: string; status: 'REQUESTED' | 'PAID' | 'FAILED' | 'UNAVAILABLE'; failureReason?: string };
 class FakePort implements CompensationTransferPort {

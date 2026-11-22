@@ -106,6 +106,11 @@ CREATE VIEW "receivable_move" WITH (security_invoker = true) AS SELECT "id", "re
 
 시험 담당이 채운다. 정방향 묶음이라 구현 뒤에 쓰므로, 새 시험이 잡는 것은 아래 '틀린 구현 표본'과 이 계획 커밋 트리의 실제 동작(0026까지 적용한 payment DB에서 M3가 `원본에 표 없음: receivable_movement`로 SKIPPED)으로 보인다.
 
+- 방법: 이 계획 커밋(`19386edc2`)을 따로 꺼낸 작업 폴더(`D:/l5m3pre`, 설치 폴더는 이 작업 폴더의 것을 이어 붙임)에 시험 파일만 옮겨 돌렸다. 통합은 Docker 잠금을 잡고 실제 PostgreSQL 18로 돌렸다. 끝난 뒤 작업 폴더를 지웠다.
+- 단위(8 실패): 검사기 `test/report.test.ts` J-T24 ④ 셋(`summaryLine`·`skipWarnings` 없음), payment `test/settlement-migration.test.ts` PRF180 M3 ⑥(0028 없음)과 `test/payment-schema.test.ts` 기록 차례·파일 목록 둘(0028 없음), `loadtest/test/v1.test.mjs` PRF215 코드리뷰 H2·재확인1 둘(기대 목록이 아직 M1~M5를 품음).
+- 통합(19 실패): 검사기 J-T24 ③(`skip` 칸 없음) 하나, `test-int/payment-migrated.int.test.ts` 다섯(①②⑤, `runCli`가 없어 파일 가져오기에서 실패). 가져오기 실패가 아니라 실제 동작으로 지는지 보려고 `runCli` 부분을 뺀 사본으로 ①②만 다시 돌렸다: ①은 0027까지 적용한 DB에서 M3가 `SKIPPED`라 지고, ②는 `relation "receivable_movement" does not exist`로 진다. payment `settlement.int.test.ts` 넷(0016 표 목록, PRF180 M3 ⑦⑧⑨), `payment-grpc.int.test.ts` PRF180 표 목록 하나, `compensation-transfer.int.test.ts` 여덟(`RESET_SQL`의 `receivable_movement`가 없음).
+- 합계 27개가 계획 트리에서 지고 구현 트리에서 통과한다(아래 '시험 결과').
+
 ## 확인 명령
 
 Docker가 필요하다. 잠금을 잡고 돌린 뒤 놓는다(잠금이 비어 있지 않으면 기다린다. 갈래 안에서 한 담당만 잡는다).
@@ -159,7 +164,25 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 
 ## 시험 결과
 
-(시험 담당)
+시험 담당 `lane5-fixm3-test`, 구현 커밋 `87562b14a` 위. 시험 ID는 감독 결정으로 정본 M3 시나리오 J-T24(`docs/features/settlement.md` §13: '남은 금액이 늘 금액 − 이동 기록 합과 같다')를 쓴다. 정본 J-T24 문장에는 ①② 같은 세부 번호가 없어 겹치는 번호가 없다.
+
+| 계획 이름 | 쓴 이름 | 자리 |
+| --- | --- | --- |
+| J-T25 M3 ① | J-T24 ① M3 | `services/invariant-checker/test-int/payment-migrated.int.test.ts`(새), `test-int/postgres.ts`에 빈 DB `payment_migrated` |
+| J-T25 M3 ② | J-T24 ② M3 | 같은 파일 |
+| J-T25 M3 ③ | J-T24 ③ M3 | `services/invariant-checker/test-int/invariants.int.test.ts` |
+| J-T25 M3 ④ | J-T24 ④ M3(셋) | `services/invariant-checker/test/report.test.ts` |
+| J-T25 M3 ⑤ | J-T24 ⑤ M3(셋: payment만 · 표 없는 DB · 틀린 남은 금액) | `test-int/payment-migrated.int.test.ts` |
+| PRF180 M3 ⑥ | 그대로 | `services/payment-svc/test/settlement-migration.test.ts` |
+| PRF180 M3 ⑦·⑧ | 그대로 | `services/payment-svc/test-int/settlement.int.test.ts` |
+| (감독 요청 (가)) | PRF180 M3 ⑨ | 같은 파일. 저장소의 상계(지급 묶음 트랜잭션)·보증 충당·이동 기록 넣기가 옛 이름 뷰를 거쳐 `receivable_movement`에 쓰이고 저장소 읽기 셋이 표의 행·이동 ID 그대로인지 본다 |
+
+- 감독 요청 (나)는 J-T24 ①②⑤다: payment 마이그레이션을 모두 적용한 DB(`migratePayment`)에서 M3가 SKIPPED 없이 PASS 한 번, 남은 금액을 0으로 둔 행으로 FAIL 한 번(`amount=1000000 remaining=0 moved=500000`), 명령 경계(`runCli`)로 끝 코드 0·0·1과 표준 출력 요약 줄·표준 오류 경고 줄·`invariants.csv`를 본다. 마이그레이터는 경로 글 동적 가져오기로 부른다(검사기 tsconfig에 `allowJs`가 없어 정적 가져오기를 못 한다).
+- 고친 기존 시험(기대값만 따라잡음, 이름 그대로): `payment-schema.test.ts` 둘(0028 차례·파일 목록), `payment-grpc.int.test.ts` PRF180 표 목록(`receivable_movement`, 옛 이름 뷰는 relkind `v`라 목록에 없음을 주석으로 적음), `compensation-transfer.int.test.ts` `RESET_SQL`(표 이름), `settlement.int.test.ts` 0016 시험(표 종류까지: 표 둘 `BASE TABLE`, 옛 이름 `VIEW`), `loadtest/test/v1.test.mjs` H2(기대 `['P5','S3']`, M3가 SKIPPED면 '더 M3' 단언을 더함)·재확인1(546줄, 시험 자료를 S3·P5 기대에 맞춤, '더 P3' 단언 그대로), `loadtest/e2e/v1-rehearsal.e2e.mjs` 7줄 주석·132줄(`불변식 SKIPPED: P5·S3(기대 P5·S3,`). 리허설은 kind 무대라 돌리지 않았고 `node --check`만 했다.
+- 새 시험 13개(J-T24 아홉: ①②③ 하나씩·④ 셋·⑤ 셋 · PRF180 M3 넷: ⑥⑦⑧⑨), 고친 기존 시험 8개(e2e 하나 포함).
+- 구현 트리 결과: 단위 payment-svc 3,228 통과, invariant-checker 25 통과, `node --test "loadtest/test/*.test.mjs"` 538 통과, `pnpm lint` 0, payment-svc·invariant-checker typecheck 0. 통합 invariant-checker 41 통과, payment-svc 28파일 614 통과·2 건너뜀(원래 있던 것). 전체 실행 한 번에 `payment-checkout.int.test.ts` P-T26 하나가 졌으나 그 파일만 다시 돌려 29 통과(앞선 전체 실행에서도 통과, 부하 때 흔들림).
+- **구현 결함 후보(감독 결정 필요)**: PostgreSQL 18은 NOT NULL도 이름 있는 제약(`contype n`)으로 적는데, 표 이름을 바꿔도 따라 바뀌지 않아 0028 뒤에 `receivable_move_amount_not_null`·`_id_not_null`·`_kind_not_null`·`_moved_at_not_null`·`_receivable_id_not_null`·`_statement_id_not_null` 여섯이 옛 머리로 남는다(실제 DB에서 확인). 정본 `docs/data.md` §4 ①은 기본 키·CHECK 둘·외래 키 둘·인덱스 하나만 바꾸라고 하므로 PRF180 M3 ⑦의 '옛 머리 이름이 어디에도 없다'는 `contype <> 'n'`으로 정본 범위에 맞췄다(주석에 까닭). 여섯도 바꾸려면 0028에 `RENAME CONSTRAINT` 여섯을 더하고 정본 §4 ①·계획 'SQL 0028'·⑥의 문장 목록·⑦의 조건을 함께 고친다.
+- 시험이 정한 것: 표의 칸 차례는 0026이 `id`·`kind`를 뒤에 더해 뷰(`id`부터)와 다르다. ⑦은 칸을 이름·종류로 견준다(앱은 칸 이름으로 읽고 쓴다).
 
 ## 리뷰
 
@@ -174,3 +197,4 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | lane5-fixm3-plan | claude-opus-5-5 | 2026-11-23T06:40:00+09:00 | 2026-11-23T07:20:00+09:00 |
+| test | lane5-fixm3-test | claude-opus-5-5 | 2026-11-23T07:33:00+09:00 | 2026-11-23T08:22:00+09:00 |

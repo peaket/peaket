@@ -1,7 +1,7 @@
 // 결과 파일(invariants.csv·invariants-detail.ndjson)과 종료 코드(docs/verification.md §2.5, docs/perf-ledger.md, [ASVS v5.0.0-14.2.4]).
 import { describe, expect, it } from 'vitest';
 import { parseCliArgs } from '../src/cli-args.js';
-import { DETAIL_LIMIT, exitCode, kstIso, toCsv, toDetailNdjson, type InvariantResult } from '../src/report.js';
+import { DETAIL_LIMIT, exitCode, kstIso, skipWarnings, summaryLine, toCsv, toDetailNdjson, type InvariantResult } from '../src/report.js';
 
 const r = (o: Partial<InvariantResult>): InvariantResult => ({ id: 'S1', name: '오버셀(좌석 판매)', sources: ['purchase'], violations: 0, unknown: 0, result: 'PASS', details: [], ...o });
 const AS_OF = Date.parse('2026-11-02T01:00:00.000Z');
@@ -42,6 +42,39 @@ describe('종료 코드', () => {
   it('하나라도 FAIL이면 1, 아니면 0', () => {
     expect(exitCode([r({}), r({ result: 'SKIPPED' })])).toBe(0);
     expect(exitCode([r({}), r({ result: 'FAIL', violations: 1 })])).toBe(1);
+  });
+});
+
+// docs/verification.md §2.5 '건너뜀(SKIPPED)을 드러내기' ①②(FIX-invariant-m3). 줄 꼴은 계획 docs/review/plans/FIX-invariant-m3.md '공개 인터페이스'다
+describe('SKIPPED 요약 줄과 경고', () => {
+  const skipped = (id: string, sources: string[], reason: string, skip: NonNullable<InvariantResult['skip']>) => r({ id, sources, result: 'SKIPPED', reason, skip });
+  // 일부러 불변식 목록(INVARIANTS) 차례가 아니게 섞는다: M3·P5·Q1 차례로 넣어도 Q1·P5·M3 차례로 적어야 한다
+  const mixed = [
+    skipped('M3', ['payment'], '원본에 표 없음: receivable_movement', { kind: 'table', names: ['receivable_movement'] }),
+    r({ id: 'S1' }),
+    skipped('P5', ['payment', 'purchase', 'ticket'], '원본 없음: ticket', { kind: 'source', names: ['ticket'] }),
+    r({ id: 'M1', sources: ['payment'], result: 'FAIL', violations: 2 }),
+    skipped('Q1', ['records'], '시험 기록 없음', { kind: 'records', names: [] }),
+    skipped('M1', ['payment'], '원본에 표 없음: settlement_statement, payout', { kind: 'table', names: ['settlement_statement', 'payout'] }),
+    r({ id: 'P1', sources: ['payment'] }),
+  ];
+
+  it('J-T24 ④ M3 요약 줄은 PASS·FAIL·SKIPPED 개수와 SKIPPED 불변식·까닭을 불변식 목록 차례로 적는다', () => {
+    expect(summaryLine(mixed)).toBe('요약: PASS 2 · FAIL 1 · SKIPPED 4 — Q1(시험 기록 없음), P5(원본 없음: ticket), M1(원본에 표 없음: settlement_statement, payout), M3(원본에 표 없음: receivable_movement)');
+  });
+
+  it('J-T24 ④ M3 SKIPPED가 없으면 요약 줄 끝이 SKIPPED 없음이다', () => {
+    expect(summaryLine([r({}), r({ id: 'M3', sources: ['payment'] }), r({ id: 'P1', result: 'FAIL', violations: 1 })])).toBe('요약: PASS 2 · FAIL 1 · SKIPPED 0 — SKIPPED 없음');
+  });
+
+  it('J-T24 ④ M3 경고는 붙은 원본에 표가 없어 건너뛴 것(table)만 불변식 목록 차례로 한 줄씩 내고, 원본·기록이 없어 건너뛴 것은 내지 않는다', () => {
+    expect(skipWarnings(mixed)).toEqual([
+      '경고: M1 원본(payment)에 붙었는데 표가 없다: settlement_statement, payout — 기능이 아직 없거나 표 이름이 docs/data.md와 다르다',
+      '경고: M3 원본(payment)에 붙었는데 표가 없다: receivable_movement — 기능이 아직 없거나 표 이름이 docs/data.md와 다르다',
+    ]);
+    expect(skipWarnings(mixed.filter((x) => x.skip?.kind !== 'table'))).toEqual([]);
+    // 경고가 있어도 끝 코드는 FAIL만 본다(SKIPPED는 끝 코드를 바꾸지 않는다)
+    expect(exitCode(mixed.filter((x) => x.result !== 'FAIL'))).toBe(0);
   });
 });
 

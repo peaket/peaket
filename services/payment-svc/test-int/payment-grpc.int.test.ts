@@ -171,7 +171,8 @@ describe('마이그레이션과 표 모양', () => {
     const tables = async () => (await q<{ relname: string }>(`select relname from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r', 'p') and relname !~ '^outbox_p' order by relname`)).map((r) => r.relname);
     const before = await tables();
     // 0027(F-07-5, ADR-0368 결정 7)이 statement_adjustment를 더해 30개다
-    expect(before).toEqual(['compensation_transfer', 'event_pg_config', 'guarantee_collection', 'outbox', 'partner_receivable', 'payment', 'payment_cancel', 'payment_channel_limit', 'payment_confirm_job', 'payment_entry_pause', 'payment_entry_trial', 'payment_event', 'payment_pg_channel_observed', 'payout', 'payout_account', 'payout_batch', 'payout_batch_audit', 'pg_switch', 'receivable_move', 'reconciliation_diff', 'reconciliation_run', 'reconciliation_seen', 'seller_kyc', 'settlement_statement', 'settlement_statement_audit', 'settlement_webhook_receipt', 'statement_adjustment', 'statement_dispute', 'statement_source', 'webhook_receipt']);
+    // 0028(FIX-invariant-m3)은 receivable_move를 정본 이름 receivable_movement로 바꿨다. 옛 이름은 뷰(relkind v)라 이 목록(r·p)에 없다
+    expect(before).toEqual(['compensation_transfer', 'event_pg_config', 'guarantee_collection', 'outbox', 'partner_receivable', 'payment', 'payment_cancel', 'payment_channel_limit', 'payment_confirm_job', 'payment_entry_pause', 'payment_entry_trial', 'payment_event', 'payment_pg_channel_observed', 'payout', 'payout_account', 'payout_batch', 'payout_batch_audit', 'pg_switch', 'receivable_movement', 'reconciliation_diff', 'reconciliation_run', 'reconciliation_seen', 'seller_kyc', 'settlement_statement', 'settlement_statement_audit', 'settlement_webhook_receipt', 'statement_adjustment', 'statement_dispute', 'statement_source', 'webhook_receipt']);
     await migratePayment(pgc!.url);
     await migratePayment(pgc!.url);
     expect(await tables()).toEqual(before);

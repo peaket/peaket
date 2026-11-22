@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { emptyRecords, type TestRecords } from '../src/records.js';
+import { skipWarnings } from '../src/report.js';
 import { runInvariantChecks, type CheckRun } from '../src/run.js';
 import type { SourceName } from '../src/tables.js';
 import { TABLES, startPostgres, type DbName, type PostgresServer } from './postgres.js';
@@ -87,6 +88,34 @@ describe('원본·기록이 없을 때', () => {
     const { run } = await check({ payment: 'bare' });
     expect(run.results.filter((r) => r.result === 'SKIPPED').map((r) => r.id)).toEqual(['P1', 'P3', 'P4', 'P5', 'P6', 'M1', 'M2', 'M3', 'M4', 'M5']);
     expect(res(run, 'M4').reason).toMatch(/statement_source/);
+  });
+
+  // docs/verification.md §2.5 '건너뜀(SKIPPED)을 드러내기' ②: 까닭을 셋으로 나누고, 붙은 원본에 표가 없는 것만 경고한다(FIX-invariant-m3)
+  it('J-T24 ③ M3 붙은 원본에 표가 없으면 skip이 table과 없는 표 이름이고 경고에 들며, 원본을 주지 않은 것(source)과 기록이 없는 것(records)은 경고에 없다', async () => {
+    const { run } = await check({ payment: 'bare', records: null, sources: ['purchase', 'payment'] });
+    expect(res(run, 'M3').skip).toEqual({ kind: 'table', names: ['partner_receivable', 'receivable_movement'] });
+    expect(res(run, 'M3').reason).toBe('원본에 표 없음: partner_receivable, receivable_movement');
+    expect(res(run, 'P3').skip).toEqual({ kind: 'table', names: ['payment', 'payment_event', 'payment_cancel'] });
+    expect(res(run, 'S3').skip).toEqual({ kind: 'source', names: ['ticket'] });
+    expect(res(run, 'P5').skip).toEqual({ kind: 'source', names: ['ticket'] });
+    expect(res(run, 'Q1').skip).toEqual({ kind: 'records', names: [] });
+    expect(res(run, 'P6').skip).toEqual({ kind: 'records', names: [] });
+    // 세어진 불변식에는 skip이 없다
+    expect(res(run, 'S1').skip).toBeUndefined();
+    expect(res(run, 'S1').result).toBe('PASS');
+    const w = (id: string, names: string) => `경고: ${id} 원본(payment)에 붙었는데 표가 없다: ${names} — 기능이 아직 없거나 표 이름이 docs/data.md와 다르다`;
+    expect(skipWarnings(run.results)).toEqual([
+      w('P1', 'payment'),
+      w('P3', 'payment, payment_event, payment_cancel'),
+      w('P4', 'payment'),
+      w('M1', 'settlement_statement, payout'),
+      w('M2', 'settlement_statement, payout'),
+      w('M3', 'partner_receivable, receivable_movement'),
+      w('M4', 'settlement_statement, statement_source'),
+      w('M5', 'settlement_statement, statement_source, payment, reconciliation_run'),
+    ]);
+    // 같은 실행의 SKIPPED는 열넷(기록 Q1·Q2·P2·P6, 원본 S3·P5, 표 P1·P3·P4·M1~M5)이고 경고는 표 까닭 여덟뿐이다
+    expect(run.results.filter((r) => r.result === 'SKIPPED').map((r) => r.id)).toEqual(['Q1', 'Q2', 'S3', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'M1', 'M2', 'M3', 'M4', 'M5']);
   });
 });
 

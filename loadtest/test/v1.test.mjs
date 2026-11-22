@@ -359,9 +359,13 @@ describe('runner/v1.mjs 코드 리뷰 반영', async () => {
   test('PRF215_코드리뷰H2_불변식 SKIPPED가 정본의 기대 목록(S3·P5·M1~M5)과 다르면 문제로 돌려주고 목록을 적는다', () => {
     const head = 'id,name,sources,violations,unknown,result,as_of';
     const row = (id, result) => `${id},이름,src,${result === 'SKIPPED' ? '' : 0},${result === 'SKIPPED' ? '' : 0},${result},2026-11-10T00:00:00.000+09:00`;
-    const ok = [head, ...['S1', 'S2', 'S4', 'P1', 'P2', 'P3', 'P4', 'P6', 'Q1', 'Q2'].map((id) => row(id, 'PASS')), ...['S3', 'P5', 'M1', 'M2', 'M3', 'M4', 'M5'].map((id) => row(id, 'SKIPPED'))].join('\n');
-    assert.deepEqual(v1r.V1_EXPECTED_SKIPPED, ['M1', 'M2', 'M3', 'M4', 'M5', 'P5', 'S3']);
-    assert.deepEqual(v1r.skippedProblem(ok), { skipped: ['M1', 'M2', 'M3', 'M4', 'M5', 'P5', 'S3'], problem: null });
+    // FIX-invariant-m3: 정본 §3.10 기대 목록이 S3·P5로 줄었다(v1 결제 DB는 payment 마이그레이션을 모두 적용해 M1~M5가 세어진다, M3는 0028 뒤). 시험 이름은 계획대로 그대로 둔다
+    const ok = [head, ...['S1', 'S2', 'S4', 'P1', 'P2', 'P3', 'P4', 'P6', 'Q1', 'Q2', 'M1', 'M2', 'M3', 'M4', 'M5'].map((id) => row(id, 'PASS')), ...['S3', 'P5'].map((id) => row(id, 'SKIPPED'))].join('\n');
+    assert.deepEqual(v1r.V1_EXPECTED_SKIPPED, ['P5', 'S3']);
+    assert.deepEqual(v1r.skippedProblem(ok), { skipped: ['P5', 'S3'], problem: null });
+    // M3가 다시 SKIPPED면(이동 기록 표 이름이 정본과 어긋남, FIX-invariant-m3 전의 v1 무대) 문제다
+    const m3 = ok.replace(row('M3', 'PASS'), row('M3', 'SKIPPED'));
+    assert.match(v1r.skippedProblem(m3).problem, /기대와 다른 SKIPPED: 더 M3\(기대 P5·S3, /);
     // P3가 표가 없어 SKIPPED면(리뷰 전 K7 ②) 문제다
     const p3 = ok.replace(row('P3', 'PASS'), row('P3', 'SKIPPED'));
     assert.match(v1r.skippedProblem(p3).problem, /기대와 다른 SKIPPED: 더 P3/);
@@ -545,7 +549,8 @@ describe('재확인 리뷰: 판정·기록 쪽 가짜 통과', async () => {
 
   test('PRF215_재확인1_SKIPPED가 기대 목록과 다르면 장부 판정이 무효이고 collect 인자에 --invalid-reason이 실린다', async () => {
     const { collectArgs } = await import('../runner/results.mjs');
-    const bad = v1r.skippedProblem(csvOf(['S3', 'P3', 'P5', 'M1', 'M2', 'M3', 'M4', 'M5']));
+    // FIX-invariant-m3: 기대 목록이 S3·P5로 줄었다(정본 §3.10). 시험 자료를 그 목록에 맞춘다
+    const bad = v1r.skippedProblem(csvOf(['S3', 'P3', 'P5']));
     assert.ok(bad.problem);
     const judge = v1r.v1LedgerJudge({ valid: true, reasons: [] }, { skipped: bad });
     assert.equal(judge.valid, false);
@@ -553,7 +558,7 @@ describe('재확인 리뷰: 판정·기록 쪽 가짜 통과', async () => {
     const args = collectArgs({ runId: '2026-11-10-k7-v1-local-1k', kpi: 'K7', version: 'v1', profile: 'local-1k', durationS: 60, warmupS: 5, scenario: 'loadtest/scenarios/v1-payment.js', summaryFile: 's.json', infraFile: 'i.txt', notes: 'n', ...(judge.valid ? {} : { invalidReason: judge.reasons.join('; ') }) });
     assert.match(args[args.indexOf('--invalid-reason') + 1], /SKIPPED/);
     // 기대 목록 그대로면 판정을 바꾸지 않는다. 진입 시행·정지 기록 사유도 같은 길로 더한다
-    const ok = v1r.skippedProblem(csvOf(['S3', 'P5', 'M1', 'M2', 'M3', 'M4', 'M5']));
+    const ok = v1r.skippedProblem(csvOf(['S3', 'P5']));
     assert.deepEqual(v1r.v1LedgerJudge({ valid: true, reasons: [] }, { skipped: ok }), { valid: true, reasons: [] });
     assert.deepEqual(v1r.v1LedgerJudge({ valid: false, reasons: ['발생기'] }, { entry: { reasons: ['진입 시행 2/3건'] }, pause: ['정지 기록'] }).reasons, ['발생기', '진입 시행 2/3건', '정지 기록']);
   });

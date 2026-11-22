@@ -52,6 +52,8 @@ const TAG_0025 = '0025_payout_batch_approval';
 const TAG_0026 = '0026_settlement_payout_agency';
 // F-07-5(ADR-0368, docs/data.md statement_adjustment·settlement_statement.adjustment_amount): 정산서 수기 조정·이의 처리 칸
 const TAG_0027 = '0027_settlement_adjustment_dispute';
+/** 미수금 이동 기록 표 이름을 정본 receivable_movement로 바꾸고 옛 이름은 자동 갱신 뷰로 남긴다(FIX-invariant-m3, docs/data.md §4 '미수금 이동 기록 표 이름 맞추기') */
+const TAG_0028 = '0028_receivable_movement_rename';
 /** 비워 둔 번호(docs/lanes/coord.md)가 있으면 그 자리를 건너 견준다. 지금은 없다(0022를 BAT-600이 채웠다) */
 const RESERVED_ELSEWHERE = new Set<number>([]);
 const reservedFile = (f: string) => [...RESERVED_ELSEWHERE].some((n) => f.startsWith(`${String(n).padStart(4, '0')}_`));
@@ -641,6 +643,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
 
   // BAT-420-rest 리뷰 반영 RV-03(정본 변경 반영, 시험 담당 l3-b420-test): 0023 payment_cancel.fail_reason을 더했다.
   // BAT-600이 비워 두었던 0022(payment.order_kind)를 채웠다. 비워 둔 번호가 다시 생기면 reservedFile이 그 자리를 건너 견준다
+  // FIX-invariant-m3: 0028(미수금 이동 기록 표 이름 바꾸기)을 더했다. 시험 이름은 계획(기존 시험 이름 그대로)에 따라 두고 아래 목록·차례만 따라잡는다
   test('PRF182_PRF183_기록은 0000~0027 차례이고 SQL 파일과 맞는다(0021은 GAT-080 payment_cancel, 0022는 BAT-600 주문 종류, 0023은 fail_reason, 0024는 BAT-425 시도 번호·배상 송금, 0025는 BAT-625 승인 감사, 0026은 BAT-630 보증 충당·KYC 셀러 상태, 0027은 F-07-5 수기 조정·이의 처리)', () => {
     expect(journal.dialect).toBe('postgresql');
     for (const e of journal.entries.filter((x) => RESERVED_ELSEWHERE.has(x.idx))) expect(e.tag, `${e.idx}`).toMatch(new RegExp(`^${String(e.idx).padStart(4, '0')}_`));
@@ -676,6 +679,7 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [25, TAG_0025],
       [26, TAG_0026],
       [27, TAG_0027],
+      [28, TAG_0028],
     ]);
     for (const e of journal.entries) {
       expect(e.breakpoints, e.tag).toBe(true);
@@ -708,16 +712,18 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     expect(journal.entries[25]!.when).toBeGreaterThan(journal.entries[24]!.when);
     expect(journal.entries[26]!.when).toBeGreaterThan(journal.entries[25]!.when);
     expect(journal.entries[27]!.when).toBeGreaterThan(journal.entries[26]!.when);
-    // 0024는 0023보다, 0025는 0024보다, 0026은 0025보다, 0027은 0026보다 뒤에 만들었다
-    expect(known.at(-1)!.tag).toBe(TAG_0027);
+    // FIX-invariant-m3: 0028은 0027 위로 쌓았다(마이그레이터는 적용 기록의 마지막 when보다 늦은 것만 돌린다)
+    expect(journal.entries[28]!.when).toBeGreaterThan(journal.entries[27]!.when);
+    // 0024는 0023보다, 0025는 0024보다, 0026은 0025보다, 0027은 0026보다, 0028은 0027보다 뒤에 만들었다
+    expect(known.at(-1)!.tag).toBe(TAG_0028);
     expect(known.at(-1)!.when).toBeGreaterThan(known.at(-2)!.when);
   });
 
   test('PRF180_migrations 폴더의 SQL과 스냅샷은 기록에 있는 것뿐이다', () => {
     // 비워 둔 번호는 지금 없다(0022는 BAT-600이 채웠다). reservedFile은 그 자리를 지키는 장치로 남긴다
     for (const f of readdirSync(MIGRATIONS).filter((x) => x.endsWith('.sql') && reservedFile(x))) expect(journal.entries.map((e) => `${e.tag}.sql`), f).toContain(f);
-    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql') && !reservedFile(f))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`, `${TAG_0013}.sql`, `${TAG_0014}.sql`, `${TAG_0015}.sql`, `${TAG_0016}.sql`, `${TAG_0017}.sql`, `${TAG_0018}.sql`, `${TAG_0019}.sql`, `${TAG_0020}.sql`, `${TAG_0021}.sql`, `${TAG_0022}.sql`, `${TAG_0023}.sql`, `${TAG_0024}.sql`, `${TAG_0025}.sql`, `${TAG_0026}.sql`, `${TAG_0027}.sql`]);
-    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json') && !reservedFile(f))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json', '0013_snapshot.json', '0014_snapshot.json', '0015_snapshot.json', '0016_snapshot.json', '0017_snapshot.json', '0018_snapshot.json', '0019_snapshot.json', '0020_snapshot.json', '0021_snapshot.json', '0022_snapshot.json', '0023_snapshot.json', '0024_snapshot.json', '0025_snapshot.json', '0026_snapshot.json', '0027_snapshot.json']);
+    expect(readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql') && !reservedFile(f))).toEqual([`${TAG}.sql`, `${TAG_0001}.sql`, `${TAG_0002}.sql`, `${TAG_0003}.sql`, `${TAG_0004}.sql`, `${TAG_0005}.sql`, `${TAG_0006}.sql`, `${TAG_0007}.sql`, `${TAG_0008}.sql`, `${TAG_0009}.sql`, `${TAG_0010}.sql`, `${TAG_0011}.sql`, `${TAG_0012}.sql`, `${TAG_0013}.sql`, `${TAG_0014}.sql`, `${TAG_0015}.sql`, `${TAG_0016}.sql`, `${TAG_0017}.sql`, `${TAG_0018}.sql`, `${TAG_0019}.sql`, `${TAG_0020}.sql`, `${TAG_0021}.sql`, `${TAG_0022}.sql`, `${TAG_0023}.sql`, `${TAG_0024}.sql`, `${TAG_0025}.sql`, `${TAG_0026}.sql`, `${TAG_0027}.sql`, `${TAG_0028}.sql`]);
+    expect(readdirSync(join(MIGRATIONS, 'meta')).filter((f) => f.endsWith('_snapshot.json') && !reservedFile(f))).toEqual(['0000_snapshot.json', '0001_snapshot.json', '0002_snapshot.json', '0003_snapshot.json', '0004_snapshot.json', '0005_snapshot.json', '0006_snapshot.json', '0007_snapshot.json', '0008_snapshot.json', '0009_snapshot.json', '0010_snapshot.json', '0011_snapshot.json', '0012_snapshot.json', '0013_snapshot.json', '0014_snapshot.json', '0015_snapshot.json', '0016_snapshot.json', '0017_snapshot.json', '0018_snapshot.json', '0019_snapshot.json', '0020_snapshot.json', '0021_snapshot.json', '0022_snapshot.json', '0023_snapshot.json', '0024_snapshot.json', '0025_snapshot.json', '0026_snapshot.json', '0027_snapshot.json', '0028_snapshot.json']);
   });
 
   test('P-T16_리뷰 고침 H4: 0004 스냅샷의 앞은 0003 스냅샷이고, SQL은 pg_tx_id 칸만 더한다 [ASVS v5.0.0-2.2.3]', () => {

@@ -1,10 +1,11 @@
 // 통합 시험용 PostgreSQL 18 컨테이너(packages/platform/test-int/postgres.ts와 같은 방식: 라이브러리 없이 docker 명령). Docker 엔진이 떠 있어야 한다.
 // 원본 DB 셋(purchase·payment·ticket)과 표가 없는 bare를 한 서버에 만든다. 표 칸은 docs/data.md의 정본 칸이고, 검사기가 읽지 않아야 할 칸(개인정보)도 둔다.
+// payment_migrated는 빈 DB다. 시험이 payment-svc 마이그레이션을 모두 적용해 실제 payment 표로 검사기의 표 목록을 본다(손으로 만든 표만으로는 이름 차이를 못 본다, docs/verification.md §2.5, FIX-invariant-m3).
 import { execFileSync } from 'node:child_process';
 import pg from 'pg';
 
 export const POSTGRES_IMAGE = 'postgres:18-alpine';
-export const DATABASES = ['purchase', 'payment', 'ticket', 'bare'] as const;
+export const DATABASES = ['purchase', 'payment', 'ticket', 'bare', 'payment_migrated'] as const;
 export type DbName = (typeof DATABASES)[number];
 
 const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
