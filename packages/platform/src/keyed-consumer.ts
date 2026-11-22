@@ -106,7 +106,8 @@ const TRANSIENT_MESSAGES = /Connection terminated|connection error|Query read ti
 
 export function isTransientError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  if (TRANSIENT_NAMES.has(err.name)) return true;
+  // 하위 형(SchemaUnavailableError 등)은 이름을 바꿔도 일시 실패다. 이름 목록은 다른 사본에서 온 TransientError를 위해 남긴다(BAT-220)
+  if (err instanceof TransientError || TRANSIENT_NAMES.has(err.name)) return true;
   // 풀 대기 초과(429 server-busy)·판정 못 함(503) 같은 자기 과부하·의존성 거절
   if (err.name === 'ProblemError' && [429, 503].includes((err as { status?: number }).status ?? 0)) return true;
   const code = (err as { code?: unknown }).code;
