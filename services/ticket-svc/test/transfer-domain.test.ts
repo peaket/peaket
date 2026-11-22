@@ -44,7 +44,7 @@ describe('양도 마감·기한', () => {
   it('R-T1 양도 요청 뒤 48시간 경과 — 기한은 48시간과 양도 마감 가운데 이른 때다', () => {
     expect(offerExpiryMs(NOW, NOW + 72 * HOUR)).toBe(NOW + 48 * HOUR);
     // 양도 마감(공연 시작 2시간 전)이 48시간보다 이르면 그때 만료된다
-    expect(offerExpiryMs(NOW, NOW + 10 * HOUR)).toBe(NOW + 10 * HOUR);
+    expect(offerExpiryMs(NOW, NOW + 12 * HOUR)).toBe(NOW + 10 * HOUR);
     expect(offerExpiryMs(NOW, undefined)).toBe(NOW + 48 * HOUR);
     expect(marketCloseAtMs(NOW + 5 * HOUR)).toBe(NOW + 3 * HOUR);
     expect(marketCloseAtMs(undefined)).toBeUndefined();

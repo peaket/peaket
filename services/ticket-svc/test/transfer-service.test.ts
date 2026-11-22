@@ -1,6 +1,7 @@
 // 양도 유스케이스 시험(BUILD_ORDER GAT-050·GAT-055). 메모리 저장소로 요청·수락·거절·철회·만료·돌려주기·잠금을 본다.
 // 실제 PostgreSQL 행 잠금·동시성은 test-int/transfer.int.test.ts가 본다.
 import { describe, expect, it } from 'vitest';
+import { fakeClock } from '@peaket/platform';
 import { MemoryTicketStore } from '../src/modules/ticket/adapters/memory-ticket-store.js';
 import { MemoryTransferStore } from '../src/modules/ticket/adapters/memory-transfer-store.js';
 import { Transfers, type TransferReauthGate } from '../src/modules/ticket/application/transfers.js';
@@ -45,7 +46,7 @@ function setup(o: { gate?: TransferReauthGate } = {}) {
     store,
     reauth: gate,
     recipientRefSecret: SECRET,
-    clock: { now: () => NOW },
+    clock: fakeClock({ now: NOW }),
     directory: {
       resolveMemberCode: async (code) =>
         code === 'PEAKET-0001'
@@ -60,17 +61,20 @@ function setup(o: { gate?: TransferReauthGate } = {}) {
 
 async function issue(tickets: MemoryTicketStore, o: Partial<TicketRecord> = {}): Promise<TicketRecord> {
   const t = ticketRecord(o);
+  // 같은 저장소에 여러 표를 넣으므로 주문 ID는 표마다 다르게 만든다(기본값은 한 표만 쓰는 시험용)
+  const orderId = `0193f2c0-0000-7000-8000-${t.ticketId.slice(-12)}`;
   await tickets.issue(
     {
-      orderId: t.orderId,
+      orderId,
       eventId: t.eventId,
       payerAccountId: t.payerAccountId,
       seatIds: [t.seatId],
       issueGeneration: t.issueGeneration,
       eventStartsAtMs: t.eventStartsAtMs,
       fingerprint: `f-${t.ticketId}`,
+      nowMs: NOW,
     },
-    [t],
+    [{ ...t, orderId }],
   );
   return t;
 }

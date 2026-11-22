@@ -2,7 +2,7 @@
 // docs/security/authz-matrix.md §6 '받는 쪽 작업 op', docs/features/identity.md §7.1).
 // 서명(9.1.1)·exp(9.2.1)·typ/iss(9.2.2)·aud(9.2.3)·sid/act/op·sub·남은 수명·jti 한 번 쓰기를 본다.
 import { generateKeyPairSync, randomUUID, sign, type KeyObject } from 'node:crypto';
-import { MemoryReauthJtiStore } from '@peaket/platform';
+import { fakeClock, MemoryReauthJtiStore } from '@peaket/platform';
 import { describe, expect, it } from 'vitest';
 import { JwksFanReauthGate, ReauthUnavailable } from '../src/modules/ticket/adapters/jwks-fan-reauth-gate.js';
 import type { TransferAct, TransferOp } from '../src/modules/ticket/application/transfers.js';
@@ -40,7 +40,7 @@ function token(over: Record<string, unknown> = {}, o: { key?: KeyObject; header?
 }
 
 function gateAt(o: { nowMs?: number; fetch?: typeof fetch } = {}) {
-  const clock = { now: () => o.nowMs ?? NOW };
+  const clock = fakeClock({ now: o.nowMs ?? NOW });
   const jti = new MemoryReauthJtiStore();
   const gate = new JwksFanReauthGate({
     jwksUrl: JWKS_URL,
