@@ -270,7 +270,17 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 
 ## 리뷰
 
-리뷰 담당(보안 관점, 다른 세션)이 채운다. RV-01부터 적고, 막는 지적은 '시험 먼저 → 구현'으로 고친다.
+리뷰 담당(보안 관점, 다른 세션 `lane3-w12corenotify-review`)이 0043·`main.ts`·`NotifyModule`·`assertDatabaseRole`·배포 값·시험을 견줬다. 기준은 ADR-0350 결정 1~5, ADR-0241 결정 1·4·6·7, devops.md §7.1, plan §1.2·§4다.
+
+| # | 지적 | 판정 | 고침 |
+| --- | --- | --- | --- |
+| RV-01 | **막음**: `assertDatabaseRole`의 소유자 검사가 `production`·`event`만 본다. `core_notify` 로그인이 `webhook_endpoint`·`webhook_delivery`의 소유자이면 행 보안을 건너뛰는데도 시작 확인이 통과한다. 계획 §4 '발송기 주소가 슈퍼유저·표 소유자'의 기대와 어긋난다 | 막음(중간) | 소유자 검사 표 목록에 두 표를 더한다. 시험은 발송기 로그인이 소유한 같은 이름의 표를 별도 스키마에 만들어 `dist/main.js`가 소유자로 멈추는지 본다(시험 먼저) |
+| RV-02 | 원장 INSERT 정책이 `true`라 `core_notify` 권한을 가진 코드는 아무 끝점·아무 사건의 발송 행을 넣을 수 있다. 발송기 코드 자체가 그 일을 하므로 역할 안에서는 막지 못한다 | 막지 않음(남는 위험) | ADR-0350 '결과'와 계획 §12에 적었다. 팬 경로 역할이 이 연결을 받지 못하는 것이 이 묶음의 경계다 |
+| RV-03 | `NotifyModule`의 database 갈래가 `database` 인자를 계속 받지만 쓰지 않는다. 나중에 누가 그 인자를 `NOTIFY_APP_STORE`에 다시 잇는 실수를 부를 수 있다 | 막지 않음(정리) | RV-01 고침 커밋에서 `database` 인자를 없애 `notifyDatabase`만 남긴다 |
+| RV-04 | 운영 Secret에 `PEAKET_NOTIFY_DATABASE_URL`을 넣는 일은 이 저장소 밖(배포 묶음)이다. 새 코드는 그 값이 없으면 시작하지 않으므로 배포 순서가 틀리면 파드가 뜨지 않는다 | 막지 않음(배포 절차) | 계획 §감독에게 2와 ADR-0350 결정 2에 적었다. 로컬 데모 Secret은 이 묶음이 채웠다 |
+| RV-05 | AZ-T19 ⑦이 `core_notify` 정책만 골라 보고, 같은 표에 남은 `core_app` 정책은 보지 않는다. 회수 전 상태를 시험하지 않는다는 계획 §8의 결정과 같다 | 막지 않음(의도) | 다음 배포의 회수 시험이 `core_app`의 42501과 정책 삭제를 본다 |
+
+- 그 밖에 확인한 것: 0043의 REVOKE→GRANT 차례(0042와 같다), 정책 식의 상태 조건, `webhook_delivery` UPDATE 칸 일곱과 `payload` 제외, 시작 확인 3종(없음·다른 역할·슈퍼유저)의 프로세스 시험, `AppModule.register`의 필수 인자, 데모 `core_notify_login`·Secret, 정본 문장(§5.3·§7·data.md·notify.md §13). 막는 지적은 RV-01 하나다.
 
 ## 검증
 
