@@ -76,7 +76,19 @@
 
 ## 검증
 
-검증 예정: `purchase-migration.int.test.ts`·`event-refund.int.test.ts` 재실행, `typecheck`, V-T40 두 파일과 `identity-grpc.int` 재확인. 검증 커밋에서 결과 표를 채운다.
+2026-11-22, `lane3-w12purchase-verify`(시험 담당·리뷰 담당과 다른 세션). Docker 잠금 `lane3-W12-purchase-fixes`로 잡고 놓았고, peaket 컨테이너는 0이다.
+
+| 명령 | 결과 |
+| --- | --- |
+| `pnpm --filter @peaket/purchase-svc test:integration test-int/purchase-migration.int.test.ts test-int/event-refund.int.test.ts` | **2파일 125/125 통과**(88+37). 고치기 전 1+1 실패 |
+| `pnpm --filter @peaket/purchase-svc typecheck` | 0 |
+| `pnpm --filter @peaket/purchase-svc test:integration test-int/payment-model.int.test.ts` | 51/51 통과(같은 트리, 이전 실행) |
+| `pnpm --filter @peaket/purchase-svc test:integration test-int/seat-model.int.test.ts` | 28/28 통과(같은 트리, 이전 실행) |
+| `pnpm --filter @peaket/purchase-svc test:integration test-int/identity-grpc.int.test.ts` | 48/48 통과(같은 트리, 이전 실행) |
+| `git diff --stat e7f15543d..HEAD -- services/purchase-svc/src services/purchase-svc/migrations` | 출력 없음(제품 무변경) |
+
+- purchase-svc 통합 전체는 돌리지 않았다(대상 파일만). CI 실행 44946865589(`node / node`)의 purchase 실패도 정확히 이 둘이었다.
+- 제품 코드·마이그레이션·계약은 바꾸지 않았다.
 
 ## 담당 표
 
