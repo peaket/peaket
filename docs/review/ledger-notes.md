@@ -103,7 +103,6 @@ BAT-085(BAS-150)가 2026-11-20에 끝났다. 아래 항목의 상태·수는 바
 | B-T15 ② | 다른 단계 |  | HOT-400 | `GetVerdictEvidence`를 부르는 신원을 ops-svc로 줄이는 것은 메시 L7 허용 목록이다(B-T20 ⑩과 같다, BAT-200에서 정함, 2026-11-10) |
 | I-T56 ⑤ | 다른 단계 |  | HOT-400 | `CheckReverification`을 queue-svc 신원으로만 받는 것은 메시 L7 허용 목록이다(BAT-200에서 정함, 2026-11-10) |
 | Q-T36 ⑦ | 다른 단계 |  | HOT-251 | 명단 사본(대기열 Redis)이 그 수명에 지워지는 것은 사본을 쓰는 core-svc 어댑터가 본다(소유자 결정 2026-11-10, OPEN[33] (가), ADR-0261 결정 9). 어댑터는 HOT-251(묶음 BAT-158)이 만든다. 사본에 넘기는 수명은 BAT-157의 Q-T36 ④가 본다(2026-11-10) |
-| SR-T8 ③ | 다른 단계 |  | LCH-090·GAT-110 | 판매 중지·재개(LCH-090, 묶음 BAT-620)와 회차 전부 취소(GAT-110, 묶음 BAT-420)를 처리하는 유스케이스가 아직 없다. 그 단계가 같은 트랜잭션에서 `syncSearchReadModel`을 부르고 커밋 뒤 CDN `/v1/search*` 무효화와 `search_removed` 줄을 남기는지 본다. 동기화 함수와 경로 무효화 포트는 BAT-165 웨이브 7이 만든다(ADR-0271 결정 2·8, 2026-11-16) |
 | SR-T11 ② | 다른 단계 |  | HOT-450 | CloudFront 캐시 정책이 쿠키를 키에서 빼는지는 배포 구성 검사다. 입구 CDN 배포(HOT-450, 묶음 BAT-070) 몫이고 BAT-165 범위에서 뺐다(2026-11-16) |
 | catalog-review:v5.0.0-1.3.9 | 해당 없음 |  | — | memcache를 쓰지 않는다. 자동완성은 core-svc 파드 메모리 사전에서 답하고 사용자 입력을 Redis 키로 쓰지 않는다(ADR-0094) |
 | frontend:v5.0.0-3.5.4 | 다른 단계 |  | GAT-040 | 화면 호스트 넷(`www`·`partner`·`console`·`scanner`)은 이미 나뉘어 있다(ADR-0065 결정 1). 남은 몫은 같은 `www`에 둔 월렛 서비스 워커 범위다: 정본은 `/my/tickets/sw.js`·범위 `/my/tickets/`(docs/frontend.md §5.4)인데 BAT-350(R-554)은 `/serwist/sw.js`·`Service-Worker-Allowed: /my/tickets`(끝 `/` 없음)로 냈다. 범위·위치 PoC는 GAT-040(wbs 5.1.4) 몫이고, 관제 원격 위젯 출처는 OPS-350이다. BAT-170 웨이브 7에서 다시 판정(2026-11-16) |

@@ -494,6 +494,11 @@ erDiagram
         jsonb requested_place "새 공연장 요청(이름·주소). 판매 승인 때 운영자가 기존 공연장에 잇거나 새로 만들고 비운다(ADR-0093 결정 3, ADR-0198 결정 4)"
         jsonb requested_artists "새 아티스트 이름 요청(이름과 보이는 순서). 기존 아티스트는 production_artist로 잇는다. 판매 승인 때 운영자가 잇거나 만들고 비운다(ADR-0093 결정 4, ADR-0198 결정 4)"
         jsonb accessible_seating_check "판매 승인 요청 때 서버가 다시 센 휠체어석 수·기준 수·위치 확인 좌석 수·온라인 판매 휠체어석 수와 파트너 확인·부족 이유(FR-023, ADR-0062)"
+        timestamptz suspended_at "판매 중지 시각(ADR-0123, BAT-620). sale_review = SUSPENDED일 때만 있다"
+        text suspension_reason_code "판매 중지 사유 코드 SELLER_IDENTITY·LEGAL_REQUEST·FRAUD_SUSPECTED·OTHER(ADR-0123 결정 2). SUSPENDED일 때만 있다"
+        text suspension_reason "판매 중지 사유 1~1,000자. SUSPENDED일 때만 있다"
+        text suspension_approval_id "판매 중지를 실행한 승인 업무 ID. 같은 업무의 다시 부르기를 멱등으로 가른다"
+        jsonb suspension_open_event_ids "중지 때 이미 판매 중이던 회차 ID 배열. 재개는 이 회차와 아직 오픈 전인 회차만 다시 연다(중지 동안 오픈 시각이 지난 회차는 열지 않는다, ADR-0123 결정 5)"
         timestamptz created_at
     }
     production_image {
