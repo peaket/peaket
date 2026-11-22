@@ -19,6 +19,7 @@ const ACCOUNT = '0190f3a1-7c2e-7a00-8000-0000000c0011';
 const OTHER = '0190f3a1-7c2e-7a00-8000-0000000c0012';
 const ADMIN = '0190f3a1-7c2e-7a00-8000-0000000c0013';
 const PROMOTER = '0190f3a1-7c2e-7a00-8000-0000000c0014';
+const EDGE = '0190f3a1-7c2e-7a00-8000-0000000c0015';
 const TOKEN = 'maintenance-invite-token-1';
 const hash = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 
@@ -118,7 +119,6 @@ describe('배정 만료 정비·시간 필터 [BAT-450C]', () => {
   });
 
   test('I-T87 ③ hasAssigned는 지금 창 안의 ASSIGNED만 센다(미래·지난·취소 false, 시작·끝 정각 true) [ASVS v5.0.0-6.5.1]', async () => {
-    const EDGE = '0190f3a1-7c2e-7a00-8000-0000000c0015';
     seed('current', { status: 'ASSIGNED', accountId: ACCOUNT, validFromMs: NOW - 1, validUntilMs: NOW + 1 });
     seed('future', { status: 'ASSIGNED', accountId: OTHER, eventId: EVENT_2, validFromMs: NOW + 1, validUntilMs: NOW + HOUR });
     seed('past', { status: 'ASSIGNED', accountId: OTHER, eventId: EVENT_3, validFromMs: NOW - 2 * HOUR, validUntilMs: NOW - 1 });
