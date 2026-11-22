@@ -6,6 +6,7 @@
 - **이 갈래가 고치는 기록**: 이 파일, BUILD_ORDER의 자기 줄 체크, 커밋 본문의 정합 점검 행이다. 3일 넘는 작업을 ①②로 나누면 그 나눔 글을 wbs.md·wbs.csv 설명 칸에 쓴다(wbs §3). R 표·요약 §4·wbs 상태 칸은 고치지 않는다(갈래 1이 `node tools/ci/records.mjs`로 맞춘다).
 
 ## 다음 할 일
+- **2026-11-22 W12-core-notify 끝(R-757)**: 웹훅 발송기를 팬 경로 역할 `core_app`에서 전용 그룹 역할 `core_notify`로 옮겼다. 0043이 역할·권한·정책(끝점 읽기+FAILING 끄기 세 칸, 원장 넣기·읽기+결과 일곱 칸)을 만들고, `PEAKET_NOTIFY_DATABASE_URL`이 없거나 `core_notify`가 아닌 로그인·슈퍼유저·표 소유자·다른 역할 겸함이면 시작하지 않는다. AZ-T19 ①~⑧, 대상 통합 46/46, 단위 783/783, 표본 11/11. 리뷰 RV-01(소유자 검사) 고침, RV-02(원장 INSERT 정책 true)는 남는 위험. **다음 배포/다음 묶음이 `core_app`의 두 표 권한·정책 넷을 거둔다**(두 번 나눔, ADR-0351 결정 5). 계획 `docs/review/plans/W12-core-notify.md`, ADR-0351. develop에 합치지 않았다.
 - **2026-11-22 W12-purchase-fixes 끝(R-755)**: purchase 기존 실패 둘은 제품 결함이 아니라 시험 결함이었다 — `purchase-migration.int`의 CHECK 목록에 0030·0031 제약을 더하고, `event-refund.int` GAT-110 P3는 주입 시계로 Outbox 파티션 날을 맞췄다(88/88·37/37). V-T40은 R-745로 이미 해결(51/51·28/28). `identity-grpc.int`는 실제 루프백 gRPC 서버를 부르며 150/50ms 벽시계 마감이 흔들림 후보. 계획 `docs/review/plans/W12-purchase-fixes.md`, plan·test·review·verify·record 5커밋. develop에 합치지 않았다.
 - **2026-11-21 BAT-197 끝(R-725)**: 다음 차례는 BAT-410(GAT-050·GAT-055·GAT-060) → W8-audit2b(명단 접속기록, 계획 `docs/review/plans/W8-audit2b.md`, core 번호는 감독 확인). 작업 폴더 `D:/ticketpass-lane3`.
 - **2026-11-21 BAT-045 끝(R-722)**: 다음 차례는 BAT-185(HOT-012, AWS 계정 뒤) → BAT-190(BAS-250, OPEN[23] (다) 결정 뒤) → BAT-197(BOT-080) → BAT-410(GAT-050·GAT-055·GAT-060) → W8-audit2b(명단 접속기록, 계획 `docs/review/plans/W8-audit2b.md`, core 번호는 감독 확인). 작업 폴더 `D:/ticketpass-lane3`.
