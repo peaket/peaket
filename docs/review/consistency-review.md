@@ -853,6 +853,7 @@
 | R-759 | GAT-220 장부 빈칸 6·C2-06·C2-07·C2-09·같은 기기 동시 승인 500 | docs/features/identity.md, docs/security/asvs/offline-gate.md, docs/api/openapi.yaml, docs/review/plans/BAT-450A.md | 시험 먼저→구현→리뷰 RV-01·RV-05 고침→검증 9/9, ledger --require 통과 | 닫힘 |
 | R-760 | 굿즈 결제 시도 재생이 결제창 값(공개 키·구매자 키·돌아올 주소)을 결과 참조에 통째로 담아 재생이 그대로 돌려줘, 출처가 바뀌면 다른 상점 결제창으로 갈 수 있었다 | services/core-svc shop 결제 시도·멱등 저장소, docs/api/guidelines.md §4, data.md, openapi, ADR-0337·0352, payment.md P-T77 | 결과 참조=시도 ID, 재생이 PrepareCheckout을 같은 시도 ID·고정 결제사로 다시 불러 지금 설정 값, 404·5xx·503 가드, 옛 JSON 참조 호환 | 해결. 주문·시도 행 무결성(RV-01)·포트원 paymentId 규격 밖(RV-03)·배포 창(RV-04)은 남음 |
 | R-761 | GAT-210 파트너 초대가 없어 만들기·명단·해제·재발송·메일·회차 소유 대조를 못 했다 | docs/features/identity.md, docs/api/openapi.yaml, docs/api/proto/README.md, docs/data.md, docs/security/authz-matrix.md, docs/security/asvs/offline-gate.md, docs/adr/0353, services/identity-svc, deploy/gateways, deploy/platform/mesh | 시험 먼저→구현→리뷰 RV-01→검증 11/12→V-01 고침, Docker 10/10, ledger --require 14 | 닫힘 |
+| R-762 | GAT-210 배정이 24시간·회차 종료 뒤에도 INVITED/ASSIGNED로 남고, hasStaffAssignment·명단이 지난 배정을 세며, promoter_id 없는 옛 배정이 기기 승인을 막고, ASVS 판정이 실제 시험과 어긋났다 | docs/BUILD_ORDER.md, docs/review/plans/BAT-450C.md, docs/data.md, docs/features/identity.md, docs/security/asvs/offline-gate.md, services/identity-svc | 시험 먼저→구현→리뷰 RV-01·RV-02 고침→검증 9/9, Docker 46, ledger --require 17, GAT-210 체크 | 닫힘 |
 
 ## 4. 숫자 일치표
 
