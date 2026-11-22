@@ -46,7 +46,8 @@ describe('BAT-465 제어 gRPC ApplyControl (purchase-svc)', () => {
 
   test('R584_모르는_종류와_모양이_틀린_요청은_거절한다', async () => {
     const w = deps();
-    await expect(applyControl(req({ kind: 'CONTROL_KIND_SALE_PAUSE' }), w.deps)).rejects.toMatchObject({ code: 12 });
+    // F-02-1(ADR-0365 결정 2): 명령 3(CONTROL_KIND_SALE_PAUSE)은 이제 받는다. 받지 않는 종류의 예는 명령 1로 바꾼다
+    await expect(applyControl(req({ kind: 'CONTROL_KIND_ADMISSION_TARGET' }), w.deps)).rejects.toMatchObject({ code: 12 });
     await expect(applyControl(req({ scope: 'not-a-uuid' }), w.deps)).rejects.toMatchObject({ code: 3 });
     await expect(applyControl(req({ desiredStateJson: '{"paused":true}' }), w.deps)).rejects.toMatchObject({ code: 3 });
     expect(suspendedOf('{"suspended":false}')).toBe(false);
