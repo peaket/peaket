@@ -10,58 +10,77 @@
 
 PEAKET은 대규모 동시 접속 환경에서 한정된 고가치 재화(좌석)를 단 1건의 오버셀(초과 판매)이나 이중 결제 없이 공정하고 안정적으로 판매하기 위해 설계된 분산 고동시성 티케팅 플랫폼입니다.
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ [1. 클라이언트 계층]                                                                   │
-│   • 팬 브라우저 (100만 대기자)          • 현장 게이트 스캐너 (오프라인 검증 단말)       │
-└───────────────────────────┬────────────────────────────────────────┬───────────────────┘
-                            │ (1. 티케팅 접속)                       │
-                            ▼                                        │
-┌───────────────────────────────────────────────────────────┐        │
-│ [2. 엣지 및 보안 계층]                                    │        │
-│   • AWS WAF / Cloudflare (DDoS·악성 봇 1선 차단)          │        │
-│   • CloudFront CDN (정적 파일 & 대기열 1초 캐시)          │        │
-│   • 공개 난수 비콘 (drand 타임스탬프 로비 셔플 시드 공급) │        │
-└───────────────────────────┬───────────────────────────────┘        │
-                            │ (원 서버 통과 트래픽)                  │
-                            ▼                                        │
-┌───────────────────────────────────────────────────────────┐        │
-│ [3. 진입 및 유입 제어 계층]                               │        │
-│   • Fastify API Gateway (JSON 스키마 사전 검증)           │        │
-│   • 진입 서버 파드 (2ms INCRBY 로컬 카운터 버퍼링)        │        │
-│   • 유입 제어 루프 (PID 기반 백엔드 초당 ~28명 승급 통제) │        │
-└───────────────────────────┬───────────────────────────────┘        │
-                            │ (입장 허가 토큰 검증 통과)             │
-                            ▼                                        │
-┌───────────────────────────────────────────────────────────┐        │
-│ [4. 도메인 마이크로서비스 계층]                           │        │
-│   • 대기열 서비스 (순번 발급 및 세그먼트 상태 생성)       │        │
-│   • 좌석 서비스 (Redis Lua Soft Hold, 50ms 미만 선점)     │        │
-│   • 주문/결제 서비스 (2단계 Saga & 결제 멱등 제어)        │        │
-│   • 티켓 발권 서비스 (ECDSA P-256 전자서명 TOTP QR)       │        │
-│   • 실시간 관제탑 & 포렌식 서비스 (메트릭 수집 및 2인승인)│        │
-└──────────────┬────────────────────────────┬───────────────┘        │
-               │                            │                        │
-               ▼                            ▼                        │
-┌───────────────────────────────┐ ┌─────────────────────────┐        │
-│ [5. 데이터 & 메시징 계층]     │ │ [6. 외부 연동]          │        │
-│ • Redis 대기열 (INCR / TTL)   │ │ • PG 결제 대행사        │        │
-│ • Redis 좌석 샤드 (비트맵)    │ │   (2단계 인증-승인 분리)│        │
-│ • PostgreSQL (Hard Sale 원장) │ └─────────────────────────┘        │
-│ • Kafka (acks=all 이벤트)     │                                    │
-│ • ClickHouse & S3 (콜드 원장) │                                    │
-└───────────────────────────────┘                                    │
-               ▲                                                     │
-               └───────── (동적 QR 로컬 오프라인 검증: p95 150ms) ───┘
-```
+```mermaid
+flowchart TD
+    subgraph ClientTier["클라이언트 계층"]
+        WebUser["웹/모바일 브라우저<br/>(100만 대기자)"]
+        GateDevice["현장 게이트 단말<br/>(오프라인 검증 단말)"]
+    end
 
-| 계층 | 핵심 컴포넌트 | 엔지니어링 핵심 스펙 |
-| :--- | :--- | :--- |
-| **클라이언트** | 웹/모바일 브라우저, 현장 단말 | 100만 대기자 흡수, 오프라인 ECDSA 로컬 서명 검증 |
-| **엣지/보안** | WAF, CloudFront CDN, drand 비콘 | 1초 TTL 캐시로 오리진 부하 $O(F)$ 고정, ChaCha20 결정론적 셔플 |
-| **유입 제어** | Fastify API GW, PID 루프 | 2ms 배치 카운팅, Little's Law 기준 초당 28명(28 TPS) 제한 승급 |
-| **도메인 서비스** | 대기열, 좌석, 주문, 발권, 관제 | 1단계 Redis Lua 선점(7분) $\rightarrow$ 2단계 PostgreSQL Hard Sale |
-| **스토리지** | Redis, Aurora PG, Kafka, ClickHouse | 오버셀 0건 수학적 보장, Forward Recovery 원장 결제 보존 |
+    subgraph EdgeTier["엣지 및 보안 계층"]
+        WAF["AWS WAF / Cloudflare<br/>(DDoS 및 봇 1선 방어)"]
+        CDN["CloudFront CDN<br/>(정적 파일 및 대기열 1초 캐시)"]
+        Beacon["공개 난수 비콘<br/>(drand 타임스탬프)"]
+    end
+
+    subgraph IngressTier["진입 및 유입 제어 계층"]
+        APIGW["Fastify API 게이트웨이<br/>(스키마 사전검증)"]
+        IngressPod["진입 서버 파드<br/>(2ms INCRBY 로컬 버퍼링)"]
+        AdmissionLoop["유입 제어 루프<br/>(PID 기반 초당 ~28명 승급)"]
+    end
+
+    subgraph CoreServices["도메인 마이크로서비스 계층"]
+        QueueSvc["대기열 서비스<br/>(순번 발급 및 상태 생성)"]
+        SeatSvc["좌석 서비스<br/>(Redis Lua Soft Hold)"]
+        OrderSvc["주문/결제 서비스<br/>(2단계 Saga 및 멱등 제어)"]
+        TicketSvc["티켓 발권 서비스<br/>(ECDSA P-256 서명 TOTP)"]
+        ControlSvc["관제탑 서비스<br/>(실시간 메트릭 및 2인 승인)"]
+        ForensicSvc["감사/포렌식 서비스<br/>(이상 거래 탐지)"]
+    end
+
+    subgraph StorageTier["데이터 및 메시징 계층"]
+        RedisQueue[("Redis 대기열 클러스터<br/>(Atomic INCR / TTL)")]
+        RedisSeat[("Redis 좌석 샤드 클러스터<br/>(비트맵 / 7분 Soft Hold)")]
+        AuroraPG[("PostgreSQL / Aurora<br/>(Hard Sale 유니크 제약 / Saga 원장)")]
+        KafkaCluster[("Kafka 이벤트 스트림<br/>(Transactional Outbox / acks=all)")]
+        ClickHouseCold[("ClickHouse & S3<br/>(Parquet 원장 및 감사 로그)")]
+    end
+
+    subgraph ExternalPG["외부 연동"]
+        PGGateway["PG 결제 대행사<br/>(2단계 인증-승인 분리)"]
+    end
+
+    %% Edge Connections
+    WebUser -->|"1. 티케팅 접속"| WAF
+    WAF --> CDN
+    CDN -->|"대기열 상태 폴링 흡수 (1초 캐시)"| WebUser
+    Beacon -.->|"로비 셔플 시드 공급"| QueueSvc
+
+    %% Ingress Connections
+    CDN -->|"원 서버 통과 트래픽"| APIGW
+    APIGW --> IngressPod
+    IngressPod -->|"2ms 배치 INCR"| RedisQueue
+    QueueSvc -->|"1,000명 단위 상태 파일 발행"| CDN
+
+    %% Core Services Connections
+    AdmissionLoop -->|"좌석 화면 입장 토큰 검증"| SeatSvc
+    SeatSvc <-->|"원자적 Lua 스크립트 실행"| RedisSeat
+    SeatSvc -->|"1단계 선점 완료 시"| OrderSvc
+    OrderSvc <-->|"2단계 Hard Sale PENDING / 원장 기록"| AuroraPG
+    OrderSvc <-->|"최종 결제 승인 API (Forward Recovery)"| PGGateway
+    OrderSvc -->|"결제 완료 이벤트 발행"| KafkaCluster
+    KafkaCluster --> TicketSvc
+    KafkaCluster --> ForensicSvc
+    TicketSvc --> AuroraPG
+
+    %% Offline Gate Connection
+    GateDevice -->|"오프라인 동적 QR 로컬 검증 (ECDSA 서명)"| GateDevice
+
+    %% Observability & Control
+    CoreServices -.->|"텔레메트리 스트림"| ControlSvc
+    ControlSvc -.->|"비상 회로 차단기 / 2인 승인 제어"| APIGW
+    ForensicSvc --> ClickHouseCold
+```
 
 ### 5대 핵심 도메인 아키텍처 개요
 

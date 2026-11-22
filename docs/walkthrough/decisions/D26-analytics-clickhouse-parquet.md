@@ -49,28 +49,43 @@
 
 ## 3. 고른 이유와 상세 아키텍처 다이어그램
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [실시간 이벤트 수집 (Kafka MSK)]                                       │
-│ • sales-events (판매 이벤트) ──▶ TypeScript 스트림 워커                │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ (1초 / 1,000건 마이크로 배치)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [ClickHouse OLAP 실시간 관제]                                          │
-│ • ReplicatedMergeTree 엔진 기반 다차원 집계 (0.5초 쿼리 응답)          │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ (티켓팅 종료 후 일단위 Parquet 덤프)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [AWS S3 영구 보존 (Snappy 압축 Parquet WORM)]                          │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph Ingestion ["1. 실시간 이벤트 수집"]
+        Kafka["Kafka (sales-events 토픽)"]
+        RTWorker["Ops Real-time Loader (TS Worker)"]
+        BatchWorker["Analytics Bronze Loader"]
+        Kafka --> RTWorker
+        Kafka --> BatchWorker
+    end
 
-| 저장 계층 | 보관 기간 및 포맷 | 목적 및 비용 최적화 |
-| :--- | :--- | :--- |
-| **ClickHouse** | 90일 (인메모리 컬럼형) | 실시간 관제 대시보드 및 부정 거래 이상 징후 즉각 탐지 |
-| **S3 Parquet** | 5년 법정 보존 (WORM) | 불변 원장 보존 및 대용량 분석 스토리지 비용 90% 이상 절감 |
+    subgraph ClickHouseLayer ["2. ClickHouse 단일 분석 저장소"]
+        direction TB
+        subgraph OpsPath ["관제 실시간 경로 (잠정/R0)"]
+            OpsRaw["ops_rt_events (원시 적재, 30일 보관)"]
+            OpsQuery["조회 시점 즉시 집계 (p95 < 100ms)"]
+            OpsRaw --> OpsQuery
+        end
+
+        subgraph MedallionPath ["사후 분석 정합 경로 (메달리온 스타 스키마)"]
+            Bronze["Bronze Layer: analytics_raw_events (90일, 원본 오프셋 대조)"]
+            Silver["Silver Layer: fact_events_deduped (90일, 중복 제거 & 지연 반영)"]
+            Gold["Gold Layer: Star Schema 사실/차원 테이블 (2년, 가명화 집계)"]
+            Bronze -->|dbt 배치 정제| Silver -->|R0~R3 단계별 마감 실행| Gold
+        end
+    end
+
+    subgraph ColdArchive ["3. 장기 영구 아카이브 (Cold Storage)"]
+        ArchiveWorker["Archive Exporter (Parquet Worker)"]
+        S3Bucket["Amazon S3: s3://peaket-archive/events/{eventId}.parquet"]
+        S3Engine["ClickHouse s3() 테이블 엔진 (archive.<표>)"]
+        Gold -->|2년 경과 시 내보내기| ArchiveWorker --> S3Bucket
+        S3Bucket -.->|과거 회차 다년간 비교 쿼리| S3Engine
+    end
+
+    RTWorker --> OpsRaw
+    BatchWorker --> Bronze
+```
 
 ### 핵심 매커니즘 4가지
 

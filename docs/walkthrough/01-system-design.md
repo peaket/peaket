@@ -104,34 +104,43 @@ PEAKET은 시스템의 서비스 범위를 명확히 규정하고 법적·비즈
 
 ### 시각 다이어그램: 시스템 맥락 다이어그램 (System Context)
 
-```
-┌─────────────────────────────────┐           ┌─────────────────────────────────────────┐
-│ [4대 시스템 사용자]             │           │ [PEAKET 코어 플랫폼] (통신판매중개자)   │
-│ • 팬 (소비자 웹 / 모바일 월렛)  │──예매/결제─▶│ • 대기열 관리 (순번 발급/CDN 배포)      │
-│ • 파트너 (공연 주최사 콘솔)     │──공연 등록─▶│ • 2단계 좌석 선점 (Soft Hold / Hard)   │
-│ • 운영자 & CS 요원 (관제탑)     │──관제/제어─▶│ • 결제 2단계 Saga & Forward Recovery    │
-│ • 현장 스태프 (게이트 스캐너)   │──검표 로그─▶│ • ECDSA 동적 TOTP 발권 및 포렌식 원장 │
-└─────────────────────────────────┘           └────────────────────┬────────────────────┘
-                                                                   │ 외부 연동
-                                                                   ▼
-┌───────────────────────────────────────────────────────────────────────────────────────┐
-│ [외부 연동 시스템]                                                                    │
-│ • 외부 결제사 (PG: 토스·포트원)    ──▶ 판매대금 주최사 직접 정산 (PG 에이전시 모델)   │
-│ • 소셜 IDP (카카오·네이버·구글)    ──▶ OAuth2 / OIDC 간편 인증                         │
-│ • 본인확인 (KCB·다날)              ──▶ 주민번호 대체 불변 식별자(CI) 암호화 보관       │
-│ • 봇 판정 (Cloudflare Turnstile)   ──▶ 상호작용 없는 암호화 사람 증명 토큰 검증       │
-│ • 공개 분산 난수 (drand 비콘)      ──▶ 라운드 공개 난수 수집 (로비 셔플 시드 공급)     │
-│ • 법정 기관 (KOPIS 전산망)         ──▶ 공연예술통합전산망 법정 예매 내역 100% 전송    │
-└───────────────────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart LR
+    subgraph Users["4대 시스템 사용자"]
+        fan["팬 (소비자)<br/>소비자 웹 & 모바일 월렛"]
+        partner["파트너 (공연 주최사)<br/>파트너 콘솔"]
+        ops["운영자 & CS 요원<br/>실시간 관제 콘솔"]
+        staff["현장 스태프<br/>오프라인 게이트 스캐너"]
+    end
 
-| 연동 주체 | 상호작용 데이터 | 주요 엔지니어링 / 법적 요구사항 |
-| :--- | :--- | :--- |
-| **팬 / 소비자** | 티켓 예매, 대기열 조회, 결제, 동적 QR 보관 | 100만 대기 흡수, Web Locks 단일 리더 탭 통제 |
-| **공연 파트너** | 공연 등록, 좌석 등급 배치, 판매/정산 조회 | PG사 직접 정산(PG Agency)으로 정산금 유용 방지 |
-| **운영자 / CS** | 실시간 메트릭 모니터링, 서킷 브레이커 제어 | 긴급 명령 시 2인 상호 승인(Dual-Control) 필수 |
-| **현장 스태프** | 입장 게이트 오프라인 동적 QR 검표 | 통신 두절 시에도 100% 로컬 ECDSA 서명 검증 |
-| **외부 시스템** | PG, IDP, 본인인증, drand, KOPIS | 멱등 키 전진 복구, 셔플 난수 조작 방지, 법정 보고 |
+    subgraph Core["PEAKET 분산 시스템 (통신판매중개자)"]
+        peaket["PEAKET 코어 플랫폼<br/>대기열 · 좌석선점 · 결제Saga · 발권"]:::coreNode
+    end
+
+    subgraph Externals["외부 연동 시스템"]
+        pg["외부 결제사 (PG)<br/>토스페이먼츠 · 포트원"]
+        idp["소셜 IDP 인증<br/>카카오 · 네이버 · 구글"]
+        kyc["휴대폰 본인확인<br/>KCB · 다날 (CI 발급)"]
+        turnstile["봇 판정 서비스<br/>Cloudflare Turnstile"]
+        drand["공개 분산 난수 비콘<br/>League of Entropy (drand)"]
+        kopis["공연예술통합전산망<br/>KOPIS 예매정보 연계"]
+    end
+
+    fan -->|"예매 · 대기 · 결제 · 티켓보관"| peaket
+    partner -->|"공연등록 · 회차승인 · 정산조회"| peaket
+    ops -->|"실시간 관제 · 비상제어 · CS"| peaket
+    staff -->|"스캐너 동기화 · 검표로그 전송"| peaket
+
+    peaket -->|"결제승인/취소 (2-Phase)"| pg
+    pg -->|"판매대금 직접 정산지급"| partner
+    peaket -->|"OAuth2 로그인"| idp
+    peaket -->|"주민번호 대체 식별자(CI)"| kyc
+    peaket -->|"사람 확인 토큰 검증"| turnstile
+    peaket -->|"라운드 난수 수집 (셔플 시드)"| drand
+    peaket -->|"법정 예매내역 전송"| kopis
+
+    classDef coreNode fill:#fde68a,stroke:#b45309,stroke-width:2px,color:#1f2937
+```
 
 ---
 
@@ -250,33 +259,35 @@ $$
 
 ### 시각 다이어그램: 트래픽 특성별 부하 분해도
 
-```
-                      [대기자 100만 명]
-                              │
-          ┌───────────────────┴───────────────────┐
-          │ (대기 상태 폴링)                      │ (정각 진입 피크 20만 RPS)
-          ▼                                       ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [대기 인원에 비례하는 수평 확장 계층]                                  │
-│ • CloudFront CDN 에지: 대기상태 파일 조회 5.4만 RPS, 셔플 배포 12.5만 │
-│ • 진입 게이트웨이 (gw-queue): 2ms INCRBY 버퍼링 (캐시 미스 1,000 RPS)  │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    │ (200ms 제어 루프: 초당 약 28명 승급)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [초당 28명 유입으로 고정된 불변 계층]                                  │
-│ • 좌석 선택 화면: 동시 연결 5,000개 엄격 제한                          │
-│ • 좌석 Soft Hold: Redis Lua 비트맵 선점 (피크 1,000~2,000 RPS)         │
-│ • 결제 승인 접수: 202 비동기 접수 (최대 300 TPS)                       │
-│ • RDBMS 원장 쓰기: PostgreSQL 판매 확정 (초당 약 28 TPS 고정 수렴)     │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart LR
+    fan(["대기자 100만 명"])
 
-| 계층 분류 | 주요 컴포넌트 | 처리 부하 및 제어 메커니즘 |
-| :--- | :--- | :--- |
-| **대기 인원 비례 계층** | CloudFront CDN, gw-queue | 1초 캐싱으로 오리진 부하 $O(F)$ 격리, 피크 20만 RPS 흡수 |
-| **고정 불변 계층** | 좌석 화면, Redis Lua, PG 원장 | Little's Law 기반 초당 28명 제한 승급, DB 쓰기 28 TPS 고정 |
+    subgraph Proportional["100만 대기 인원에 비례하는 계층 (수평 확장 & CDN)"]
+        cdn["CDN 에지 (CloudFront)<br/>대기상태 파일 조회: 5.4만 RPS<br/>셔플결과 배포: 12.5만 RPS"]
+        entry["진입 게이트웨이 (gw-queue)<br/>정각 진입 피크: 최대 20만 RPS<br/>(로비 셔플 시 4.8만 RPS)"]
+    end
+
+    subgraph Invariant["입장 속도로 고정된 불변 계층 (초당 약 28명 유입)"]
+        seat["좌석 선택 화면<br/>동시 연결: 5,000개 고정"]
+        hold["좌석 Soft Hold 선점<br/>피크: 1,000~2,000 RPS"]
+        pay["결제 승인 접수<br/>최대 상한: 300 TPS"]
+        db[("PostgreSQL 원장 쓰기<br/>초당 약 28 TPS 고정")]
+    end
+
+    fan -->|"대기 상태 폴링"| cdn
+    fan -->|"오픈 정각 진입"| entry
+    cdn -->|"캐시 미스 시 원 서버 초당 1,000건"| entry
+    entry -->|"200ms 제어 루프로 초당 28명 배출"| seat
+    seat -->|"비트맵 점유"| hold
+    hold -->|"주문 생성 & 결제"| pay
+    pay -->|"판매 확정 트랜잭션"| db
+
+    classDef prop fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#1f2937
+    classDef inv fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#1f2937
+    class Proportional prop
+    class Invariant inv
+```
 
 ---
 
@@ -338,42 +349,41 @@ $$
 
 PEAKET은 도메인 주도 설계(DDD)의 Bounded Context 원칙에 따라, 서비스 간 데이터베이스 공유를 엄격히 금지합니다.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [1. 클라이언트 트래픽 계층]                                            │
-│   • 팬 브라우저 & 모바일 월렛 (Next.js / 바닐라 PWA)                   │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [2. 인메모리 계층] (독립 Redis 클러스터 3종)                           │
-│   • Redis 대기열: seq 카운터, serving 순번, removed 비트맵             │
-│   • Redis 좌석: 5만석 비트맵, 7분 Soft Hold 해시, Sharded Pub/Sub      │
-│   • Redis 세션/캐시: 분산 세션 토큰, 분당 API Rate Limit 카운터        │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [3. RDBMS 원장 계층] (독립 PostgreSQL 클러스터 5종)                    │
-│   • PG purchase: purchase_order, seat_sale (부분 유니크 인덱스)        │
-│   • PG payment: payment 결제 원장, 일일 대사 기록                      │
-│   • PG ticket: ticket 발행 원장, 기기 바인딩 ECDSA 공개키              │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ (Outbox 릴레이 100ms 폴링)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [4. 비동기 메시지 버스] (Kafka MSK 클러스터 3종)                       │
-│   • Kafka trade.*: 주문 생성, 결제 완료, 좌석 확정 트랜잭션 이벤트     │
-│   • Kafka telemetry.*: 대기열 행동 신호, 분산 추적 로그                │
-│   • Kafka control.*: 서킷 브레이커, 판매 정지 등 긴급 제어 이벤트      │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph Clients["클라이언트 트래픽 계층"]
+        fanApp["팬 브라우저 & 모바일 월렛"]
+    end
 
-| 계층 | 저장소 | 관리 데이터 및 원자성 보장 |
-| :--- | :--- | :--- |
-| **인메모리** | Redis 3종 | 대기열 순번(원자적 INCR), 좌석 선점(단일 스레드 Lua), 세션 캐시 |
-| **RDBMS** | PostgreSQL 5종 | 도메인별 DB 분리(DDD), `seat_sale` 부분 유니크 인덱스 오버셀 차단 |
-| **메시지 버스**| Kafka MSK 3종 | Transactional Outbox 기반 이벤트 발행(acks=all), 서비스 간 결합도 제거 |
+    subgraph MemoryTier["인메모리 계층 (독립 Redis 클러스터 3종)"]
+        rq[("Redis 대기열<br/>seq 카운터 · removed 비트맵")]
+        rs[("Redis 좌석<br/>5만석 비트맵 · 7분 Hold 해시")]
+        rc[("Redis 세션/캐시<br/>분산 세션 토큰 · Rate Limit")]
+    end
+
+    subgraph EventStream["비동기 메시지 버스 (Kafka MSK 3종)"]
+        kTrade["Kafka trade.*<br/>(주문 · 결제 · 좌석 확정 이벤트)"]
+        kTelem["Kafka telemetry.*<br/>(대기열 행동 신호 · 로그)"]
+        kCtrl["Kafka control.*<br/>(설정형 운영 명령)"]
+    end
+
+    subgraph RelationalTier["RDBMS 원장 계층 (독립 PostgreSQL 5종)"]
+        pgp[("PG purchase<br/>purchase_order · seat_sale")]
+        pgy[("PG payment<br/>payment 원장 · 대사 기록")]
+        pgt[("PG ticket<br/>ticket 원장 · 기기 바인딩")]
+    end
+
+    fanApp --> MemoryTier
+    MemoryTier --> RelationalTier
+    RelationalTier -->|"Outbox 릴레이 (100ms 폴링)"| EventStream
+
+    classDef mem fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#1f2937
+    classDef rdb fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1f2937
+    classDef evt fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#1f2937
+    class MemoryTier mem
+    class RelationalTier rdb
+    class EventStream evt
+```
 
 - **RDBMS 테이블 미파티셔닝 및 샤딩 배제 (ADR-0028, ADR-0114)**:  
   5년치 누적 데이터를 추산했을 때 주문 테이블은 약 1,700만 행, 티켓 테이블은 약 3,500만 행입니다. 이는 PostgreSQL의 B-Tree 인덱스가 단일 노드 메모리(Buffer Pool) 내에서 충분히 고속 처리할 수 있는 크기입니다. 무리한 샤딩(Sharding)이나 분산 DB(CockroachDB)는 2단계 커밋 오버헤드와 트랜잭션 지연만 가중시키므로 단일 쓰기 인스턴스를 유지합니다.
@@ -416,40 +426,51 @@ PEAKET은 도메인 주도 설계(DDD)의 Bounded Context 원칙에 따라, 서�
 
 ### 나이브한 v0 모놀리스 아키텍처
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [클라이언트 계층]                                                      │
-│   • 사용자 브라우저 (단일 스레드 Canvas 렉: K5)                        │
-│   • 현장 게이트 스캐너 (온라인 실시간 API 호출 의존: K10)              │
-│   • 운영자 콘솔 (단순 임계치 알림 지연: K8)                            │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [v0 모놀리스 서버] (단일 프로세스 / 단일 클러스터)                     │
-│   • 대기열 모듈: 매 폴링마다 ZRANK 정렬 연산 폭주 (K1)                 │
-│   • 좌석 선점 모듈: SELECT ... FOR UPDATE 비관적 락 커넥션 고갈 (K2, K3)│
-│   • 좌석 변경 브로드캐스트: 전체 좌석 거대 JSON 전송 대역폭 폭발 (K4)  │
-│   • 보안/유입 제어: 단순 IP 기반 Rate Limit 매크로 우회 (K6)           │
-│   • 주문/결제 모듈: 외부 PG 동기 HTTP 체이닝 블로킹 (K7)               │
-│   • 인프라 오토스케일링: CPU 기반 지연 HPA 오픈 정각 순식간 다운 (K9)  │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [단일 공유 스토리지 계층]                                              │
-│   • 단일 Redis: 100만 명 Sorted Set 정렬 연산 CPU 100% 마비            │
-│   • 단일 PostgreSQL: 좌석·주문·결제·티켓 경합으로 데드락 및 커넥션 풀 고갈│
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph Clients["클라이언트 계층"]
+        browser["사용자 브라우저<br/>(단일 스레드 Canvas 좌석 렌더링)"]
+        scanner["현장 게이트 스캐너"]
+        ops["운영자 콘솔"]
+    end
 
-| 파탄 번호 | 파탄 원인 및 증상 | PEAKET 프로덕션 해결책 |
-| :--- | :--- | :--- |
-| **K1 / K2** | Redis ZRANK 정렬 폭주 & RDBMS 행 락 데드락 | CDN 1초 구간 파일 폴링 & Redis Lua 비트맵 Soft Hold |
-| **K3 / K4** | DB 커넥션 풀 고갈 & 대용량 좌석 JSON 전송 | 2단계 선점(In-Memory $\rightarrow$ RDBMS) & 100ms 바이너리 델타 |
-| **K5 / K6** | 메인 스레드 렌더링 렉 & IP 기반 매크로 우회 | Web Worker 오프스크린 캔버스 & 6대 봇 위험도 점수제 |
-| **K7 / K8** | 외부 PG 동기 호출 블로킹 & 알림 지연 | 202 비동기 접수 + 전진 복구 & Prometheus 번레이트 경보 |
-| **K9 / K10** | CPU 지연 HPA 스케일링 & 현장 통신망 두절 | T-40분 사전 프로비저닝(Karpenter) & 100% 오프라인 ECDSA 검표 |
+    subgraph Monolith["v0 모놀리스 서버 (단일 프로세스 / 단일 클러스터)"]
+        queueMod["대기열 모듈"]
+        seatMod["좌석 선점 모듈"]
+        orderMod["주문/결제 모듈"]
+        ticketMod["발권/검표 모듈"]
+    end
+
+    subgraph Storage["단일 공유 스토리지 계층"]
+        v0Redis[("단일 Redis<br/>Sorted Set 대기열")]
+        v0PG[("단일 PostgreSQL<br/>좌석·주문·결제·티켓 통합 원장")]
+    end
+
+    subgraph External["외부 시스템"]
+        pgSim["외부 PG사"]
+    end
+
+    browser -->|"K1: 매 폴링마다 순위 계산 요청"| queueMod
+    queueMod -->|"K1: ZRANK 정렬 연산"| v0Redis
+
+    browser -->|"K2, K3: 좌석 클릭"| seatMod
+    seatMod -->|"K2, K3: SELECT ... FOR UPDATE"| v0PG
+
+    seatMod -->|"K4: 전체 변경 좌석 JSON 브로드캐스트"| browser
+    browser -.->|"K5: 메인 스레드 Canvas 렉 (INP 저하)"| browser
+
+    browser -->|"K6: 단순 IP Rate Limit 우회"| Monolith
+    orderMod -->|"K7: 동기 HTTP 체이닝 호출"| pgSim
+
+    ops -->|"K8: 단순 고정 임계치 알림 지연"| Monolith
+    Monolith -.->|"K9: CPU 기반 지연 HPA 스케일링"| Monolith
+    scanner -->|"K10: 순수 온라인 실시간 API 검표"| ticketMod
+
+    classDef v0Node fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#1f2937
+    classDef storageNode fill:#f3f4f6,stroke:#4b5563,stroke-width:2px,color:#1f2937
+    class Monolith v0Node
+    class Storage storageNode
+```
 
 ---
 
@@ -560,35 +581,42 @@ PEAKET은 도메인 주도 설계(DDD)의 Bounded Context 원칙에 따라, 서�
 
 ### 시각 다이어그램: 대기열 CDN 적응형 폴링 아키텍처
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [대기실 클라이언트 (100만 사용자)]                                     │
-│   • 임박 대기자 (1분 이내): 0.5초 적응형 지터 폴링                     │
-│   • 중간 대기자 (1~5분):   5초 적응형 지터 폴링                       │
-│   • 원거리 대기자 (5분 이상): 20초 적응형 지터 폴링                    │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ GET segment-states/{seg}.json
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [CloudFront CDN 에지] (queue-files)                                    │
-│   • 1초 TTL 캐시 레이어 (초당 5.4만 RPS 에지 흡수, 히트율 98%+)        │
-└───────────────────┬────────────────────────────────┬───────────────────┘
-                    │ (캐시 만료 시에만 오리진 조회) │ (5xx 장애 시 자동 페일오버)
-                    ▼                                ▼
-┌─────────────────────────────────────────┐  ┌───────────────────────────┐
-│ [오리진 인프라] (초당 약 1,000 RPS 고정)│  │ [정적 미러 백업]          │
-│ • 진입 게이트웨이 (gw-queue)            │  │ • AWS S3 버킷             │
-│ • queue-svc: 1초마다 1,000개 세그먼트 생성│  │   (구간 상태 JSON 미러링) │
-│ • Redis 대기열: seq 카운터, serving 순번│  └───────────────────────────┘
-└─────────────────────────────────────────┘
-```
+```mermaid
+flowchart LR
+    subgraph Clients["대기실 클라이언트 (100만 사용자)"]
+        room1["임박 대기자 (1분 이내)<br/>0.5초 적응형 폴링"]
+        room2["중간 대기자 (1~5분)<br/>5초 적응형 폴링"]
+        room3["원거리 대기자 (5분 이상)<br/>20초 적응형 폴링"]
+    end
 
-| 구성 요소 | 역할 및 트래픽 규모 | 부하 차단 및 고가용성 메커니즘 |
-| :--- | :--- | :--- |
-| **클라이언트** | 대기 순번에 따른 거리 기반 적응형 폴링 | Web Locks 단일 리더 탭만 폴링, BroadcastChannel 전파 |
-| **CloudFront** | 1초 TTL 캐시로 대기열 상태 파일 서빙 | 100만 대기자의 초당 5.4만 RPS를 에지에서 98% 이상 흡수 |
-| **오리진** | queue-svc가 1초 주기로 상태 집계 및 푸시 | 오리진 인입량을 초당 1,000 RPS 이하로 엄격히 고정 |
-| **AWS S3** | 오리진 장애 시 즉각 우회되는 백업 미러 | Origin Group 페일오버로 오리진 마비 시 무중단 서빙 |
+    subgraph Edge["CloudFront CDN 에지 (queue-files)"]
+        cache["1초 TTL 캐시 레이어<br/>(에지 수신: 초당 5.4만 RPS)"]
+    end
+
+    subgraph Origin["오리진 인프라 (초당 1,000 RPS 고정)"]
+        gwq["진입 게이트웨이 (gw-queue)"]
+        qsvc["queue-svc<br/>(1초마다 구간 파일 1,000개 생성)"]
+        qredis[("Redis 대기열<br/>seq 카운터 · serving · removed 비트맵")]
+        s3[("AWS S3 버킷<br/>(구간 파일 백업 미러링)")]
+    end
+
+    room1 -->|"GET segment-states/{seg}.json"| cache
+    room2 -->|"GET segment-states/{seg}.json"| cache
+    room3 -->|"GET segment-states/{seg}.json"| cache
+
+    cache -->|"캐시 만료 시에만 오리진 조회"| gwq
+    gwq --> qsvc
+    qsvc -->|"1초 주기 상태 집계"| qredis
+    qsvc -->|"구간 파일 푸시"| gwq
+    qsvc -.->|"비동기 복제"| s3
+
+    cache -.->|"오리진 5xx 장애 시 자동 페일오버"| s3
+
+    classDef edgeNode fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#1f2937
+    classDef originNode fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1f2937
+    class Edge edgeNode
+    class Origin originNode
+```
 
 ---
 
@@ -714,12 +742,6 @@ sequenceDiagram
     Fan->>Fan: 최종 대기 순번 확정 후 대기실 화면 전환
 ```
 
-| 시점 | 단계 및 주체 | 핵심 동작 및 보안 보장 |
-| :--- | :--- | :--- |
-| **T-10분** | 로비 진입 및 봇 검증 | Turnstile 사람 확인 토큰 검증, Redis Set에 참가자 등록, 무순번 토큰 발급 |
-| **T=0 정각** | 결정론적 셔플링 | drand 라운드 공개 난수 + 참가자 Merkle Root 합성, ChaCha20 무작위 재배열 |
-| **T+0~8초** | 분산 세그먼트 배포 | 1,000개 분할 정적 JSON 파일 배포로 오리진 병목 없이 8초 내 100만 전원 순번 확정 |
-
 ---
 
 ### 트레이드오프: 로비 셔플 vs 순수 선착순
@@ -806,44 +828,48 @@ sequenceDiagram
 
 ### 시각 다이어그램: 200ms 입장 제어 폐루프 및 AIMD 피드백 루프
 
-```
-┌─────────────────────────────────┐
-│ [실시간 관측 계층]              │
-│ • Prometheus 메트릭             │──(30초 창 p99 지표 전송)──┐
-│   (purchase p99 & DB 오류율)    │                          │
-└─────────────────────────────────┘                          ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [admission-ctrl] (단일 선출 리더)                                      │
-│ • AIMD 혼잡 제어기: 정상 시 유입 +2% 점진 증액, 이상 징후 시 -50% 급감 │
-│ • 200ms 제어 루프: 빈자리 = 목표 인원(5,000) - 현재 활성 세션 - InFlight│
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ (Fencing Token 기반 원자적 순번 전진)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [Redis 대기열]                                                         │
-│ • currentServingSeq (현재 입장 허용 순번 끝단)                         │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-    ┌───────────────────────────────┴───────────────────────────────┐
-    │                                                               │
-    │ 1. 내 순번 <= serving 감지 시 입장 요청                       │ 4. 세션 시작/종료
-    ▼                                                               ▼
-┌───────────────────────────┐                           ┌────────────────────────┐
-│ [queue-svc]               │                           │ [Kafka trade.sessions] │
-│ • 5분 서명 입장 토큰 발급 │                           │ • 세션 라이프사이클    │
-└─────────────┬─────────────┘                           └────────────────────────┘
-              │ 2. 입장 토큰으로 좌석도 스냅샷 요청                ▲
-              ▼                                                    │ 3. 세션 등록
-┌──────────────────────────────────────────────────────────────────┴─────┐
-│ [purchase-svc] (구매 세션 관리)                                        │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart LR
+    subgraph Observability["실시간 관측 계층"]
+        prom["Prometheus 메트릭<br/>(purchase-svc p99 & DB 오류율)"]
+    end
 
-| 컴포넌트 | 역할 및 제어 주기 | 혼잡 제어 및 안전 불변식 |
-| :--- | :--- | :--- |
-| **AIMD 제어기** | 200ms 주기 폐루프 유입 통제 | p99 150ms 초과 시 입장 목표를 50% 즉각 삭감하여 다운스트림 붕괴 방지 |
-| **admission-ctrl** | k8s Lease 기반 단일 리더 선출 | Fencing Token(단조 증가 에포크)으로 스플릿 브레인 구 리더 잔여 쓰기 차단 |
-| **queue-svc** | 5분 유효 서명 입장 토큰 발급 | serving 순번 이하 대기자만 Ed25519 서명 토큰을 받아 좌석 화면 진입 |
+    subgraph AdmissionController["admission-ctrl (단일 선출 리더)"]
+        aimd["AIMD 혼잡 제어기<br/>(정상 시 +2% / 이상 시 -50%)"]
+        loop["200ms 제어 루프<br/>빈자리 = 목표 - 세션 - InFlight"]
+    end
+
+    subgraph QueueStorage["대기열 인메모리 (Redis)"]
+        serving[("currentServingSeq<br/>(현재 입장 가능 순번 끝단)")]
+    end
+
+    subgraph ClientFlow["팬 입장 흐름"]
+        fan(["대기 중인 팬"])
+        qsvc["queue-svc<br/>(입장 확정 처리)"]
+        pur["purchase-svc<br/>(구매 세션 관리)"]
+    end
+
+    subgraph EventBus["Kafka 메시지 버스"]
+        sessionTopic["Kafka 토픽<br/>trade.purchase-sessions"]
+    end
+
+    prom -->|"30초 창 p99 지표 전송"| aimd
+    aimd -->|"동적 목표치 (Target) 갱신"| loop
+    loop -->|"Fencing Token 기반 원자적 순번 전진"| serving
+
+    fan -->|"1. 내 순번 <= serving 감지 시 입장 요청"| qsvc
+    qsvc -->|"2. 5분 유효 서명 입장 토큰 발급"| fan
+    fan -->|"3. 입장 토큰으로 좌석도 스냅샷 요청"| pur
+
+    pur -->|"4. 세션 시작 이벤트 발행"| sessionTopic
+    pur -->|"5. 세션 만료/예매 완료 이벤트 발행"| sessionTopic
+    sessionTopic -->|"실시간 활성 세션 수 피드백"| loop
+
+    classDef ctrl fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#1f2937
+    classDef storage fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1f2937
+    class AdmissionController ctrl
+    class QueueStorage storage
+```
 
 ---
 
@@ -1005,12 +1031,6 @@ sequenceDiagram
     end
 ```
 
-| 단계 | 저장소 및 프로토콜 | 불변식 및 오류 처리 메커니즘 |
-| :--- | :--- | :--- |
-| **1단계 Soft Hold** | Redis Lua 비트맵 (p99 50ms) | 좌석당 1비트 검사, 1인 4매 한도 검증, 7분 TTL 후 자동 만료 회수 |
-| **2단계 Hard Sale** | PostgreSQL `seat_sale` 테이블 | `status IN ('PENDING', 'SOLD')` 부분 유니크 인덱스로 오버셀 물리적 차단 |
-| **Pivot Point 결제** | 외부 PG 2단계(인증-승인) 분리 | PG 승인 완료 후에는 발권 실패 시에도 절대 결제 취소 없이 전진 복구(Forward Recovery) |
-
 ---
 
 ### p99 50ms 좌석 선점 지연 시간 예산 (Latency Budget)
@@ -1106,33 +1126,36 @@ sequenceDiagram
 
 ### 시각 다이어그램: 좌석 델타 스트리밍 및 Worker 오프스크린 렌더링 흐름
 
-```
-┌─────────────────────────────────┐
-│ [purchase-svc & Redis]          │
-│ • hold.lua (좌석 상태 변경)     │
-│ • Redis Sharded Pub/Sub 클러스터│
-└────────────────┬────────────────┘
-                 │ SPUBLISH s:E:sec:101 (구역별 메시지 팬아웃)
-                 ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [realtime-gw] (실시간 웹소켓 게이트웨이)                               │
-│ • 구역별 채널 구독자: 사용자가 확대(Zoom)하여 보고 있는 구역만 청취   │
-│ • 100ms 마이크로 배치 버퍼: 구역 변경사항을 바이너리 패킹 (< 200B)     │
-└────────────────┬───────────────────────────────────────────────────────┘
-                 │ WebSocket 바이너리 프레임 (초당 최대 10회 브로드캐스트)
-                 ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [팬 브라우저 (클라이언트)]                                             │
-│ • 메인 스레드 (WebSocket): Zero-copy ArrayBuffer 수신, 터치 입력 처리 │
-│ • Web Worker 스레드: OffscreenCanvas 비동기 렌더링 (50KB Uint8Array)   │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart LR
+    subgraph CoreEngine["purchase-svc & 스토리지"]
+        lua["hold.lua<br/>(좌석 상태 변경)"]
+        sredis[("좌석 Redis 클러스터<br/>(구역별 Sharded Pub/Sub)")]
+    end
 
-| 레이어 | 기술 스택 | 데이터 전송량 및 UI 성능 최적화 |
-| :--- | :--- | :--- |
-| **스토리지** | Redis Sharded Pub/Sub | 전체 브로드캐스트 대신 해당 구역(Section) 채널만 격리 발행 |
-| **게이트웨이** | realtime-gw (100ms 마이크로 배치)| 개별 변경 이벤트를 100ms 버퍼로 묶어 프레임 크기를 200바이트 이하로 압축 |
-| **클라이언트** | Web Worker + OffscreenCanvas | 5만 석 좌석맵 렌더링을 메인 스레드에서 완전 분리하여 INP 200ms 이하 달성 |
+    subgraph RealtimeLayer["실시간 게이트웨이 (realtime-gw)"]
+        sub["구역별 채널 구독자<br/>(보는 구역만 청취)"]
+        batch["100ms 마이크로 배치 버퍼<br/>(바이너리 패킹 < 200B)"]
+    end
+
+    subgraph BrowserApp["팬 브라우저 (클라이언트)"]
+        ws["메인 스레드 (WebSocket)<br/>터치 입력 & 줌/팬 처리"]
+        worker["Web Worker 스레드<br/>OffscreenCanvas 렌더링<br/>(50KB Uint8Array 상태 유지)"]
+    end
+
+    lua -->|"SPUBLISH s:E:sec:101 (좌석 변경)"| sredis
+    sredis -->|"구역 메시지 팬아웃"| sub
+    sub --> batch
+    batch -->|"WebSocket 바이너리 프레임"| ws
+    ws -->|"ArrayBuffer 전송 (Zero-copy)"| worker
+
+    classDef core fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1f2937
+    classDef rgw fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#1f2937
+    classDef client fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#1f2937
+    class CoreEngine core
+    class RealtimeLayer rgw
+    class BrowserApp client
+```
 
 ---
 
@@ -1289,12 +1312,6 @@ sequenceDiagram
     Relay->>Kafka: 결제 완료 이벤트 발행 (acks=all)
 ```
 
-| 단계 | 원자성 및 일관성 보장 메커니즘 | 장애 발생 시 복구 경로 |
-| :--- | :--- | :--- |
-| **1. PENDING 확보** | RDBMS 로컬 트랜잭션으로 유니크 인덱스 선점 | 실패 시 PG 승인을 호출하지 않고 409 Conflict 즉시 반환 (미출금) |
-| **2. PG사 결제 승인**| `confirm-{orderId}` 멱등 키 기반 단일 승인 | 타임아웃 시 자동 단건 조회로 상태 확정 (이중 결제 0건) |
-| **3. 전진 복구** | PG 승인 완료 후에는 절대로 결제를 취소하지 않음 | ticket-svc 순단 시 `ticket_issue_job`에 적재 후 백그라운드 재시도 |
-
 ---
 
 ### 트레이드오프: 결제 Saga 및 이벤트 릴레이 구조
@@ -1393,43 +1410,81 @@ gw-queue             gw-fan          gw-partner      gw-ops          gw-scanner
 
 ### 시각 다이어그램: 마이크로서비스 경계 및 게이트웨이 분리도
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [외부 클라이언트]                                                      │
-│ • 팬 (소비자 웹)    • 파트너 콘솔    • 운영 관제탑    • 현장 스캐너     │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [CloudFront CDN + AWS WAF] (L7 DDoS 및 악성 봇 1선 방어)               │
-└───────┬──────────────┬───────────────┬───────────────┬─────────────────┘
-        │              │               │               │
-        ▼              ▼               ▼               ▼
-┌──────────────┐┌──────────────┐┌──────────────┐┌──────────────┐┌────────┐
-│ gw-queue     ││ gw-fan       ││ gw-partner   ││ gw-ops       ││gws     │
-│ (대기열 전용)││ (구매/월렛)  ││ (파트너/웹훅)││ (사내망 전용)││(현장)  │
-└───────┬──────┘└──────┬───────┘└──────┬───────┘└──────┬───────┘└───┬────┘
-        │              │               │               │            │
-        ▼              ▼               ▼               ▼            ▼
-┌──────────────┐┌──────────────┐┌──────────────┐┌──────────────┐┌────────┐
-│ queue-svc    ││ purchase-svc ││ payment-svc  ││ ops-svc      ││ticket  │
-│ admission-ctrl│ realtime-gw  ││ core-svc     ││ (제어 평면)  ││-svc    │
-└───────┬──────┘└──────┬───────┘└──────┬───────┘└──────┬───────┘└───┬────┘
-        │              │               │               │ (긴급 제어 direct gRPC)
-        ▼              ▼               ▼               ▼            ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [이벤트 버스 & 서비스 메시]                                            │
-│ • Kafka 클러스터 (trade.*, telemetry.*) • Istio Ambient mTLS           │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph Clients["외부 클라이언트"]
+        fanApp["팬 (소비자 웹)"]
+        partnerApp["파트너 콘솔"]
+        opsApp["운영 관제탑"]
+        scannerApp["현장 게이트 스캐너"]
+    end
 
-| 게이트웨이 | 라우팅 대상 도메인 | 트래픽 격리 및 보안 정책 |
-| :--- | :--- | :--- |
-| **gw-queue** | queue-svc, admission-ctrl | 대기열 정각 진입 피크(20만 RPS) 흡수, 가벼운 연결 처리 |
-| **gw-fan** | purchase-svc, realtime-gw | 인메모리 좌석 선점 및 5,000개 웹소켓 델타 연결 전담 |
-| **gw-partner**| payment-svc, core-svc | 공연 등록, 웹훅 승인, 파트너 콘솔 전용 mTLS |
-| **gw-ops** | ops-svc | 사내망 IP 화이트리스트, 2인 승인 비상 제어 채널 |
-| **gw-scanner**| ticket-svc | 현장 스캐너 전용, 비동기 검표 배치 로그 수신 |
+    subgraph EdgeLayer["에지 레이어"]
+        cf["CloudFront CDN + AWS WAF"]
+    end
+
+    subgraph Gateways["5대 박형 게이트웨이 (Envoy Gateway)"]
+        gwq["gw-queue<br/>(대기열 전용)"]
+        gwf["gw-fan<br/>(구매 · 월렛)"]
+        gwp["gw-partner<br/>(파트너 · 웹훅)"]
+        gwo["gw-ops<br/>(사내망 전용)"]
+        gws["gw-scanner<br/>(현장 전용)"]
+    end
+
+    subgraph Services["10대 마이크로서비스 (NestJS / Fastify)"]
+        qsvc["queue-svc"]
+        adm["admission-ctrl"]
+        pur["purchase-svc"]
+        rgw["realtime-gw"]
+        pay["payment-svc"]
+        tkt["ticket-svc"]
+        idn["identity-svc"]
+        trust["trust-svc"]
+        opsv["ops-svc"]
+        core["core-svc"]
+    end
+
+    subgraph MessageBus["이벤트 버스"]
+        kafka["Kafka 클러스터 (trade.*)"]
+    end
+
+    fanApp --> cf
+    partnerApp --> cf
+    opsApp --> cf
+    scannerApp --> cf
+
+    cf --> gwq
+    cf --> gwf
+    cf --> gwp
+    cf --> gwo
+    cf --> gws
+
+    gwq --> qsvc
+    gwf --> pur
+    gwf --> rgw
+    gwf --> core
+    gwp --> pay
+    gwo --> opsv
+    gws --> tkt
+
+    qsvc -->|"gRPC"| trust
+    pur -->|"gRPC"| pay
+    pur -->|"gRPC"| tkt
+    pur -->|"gRPC"| idn
+    pur -->|"Sharded Pub/Sub"| rgw
+
+    pur -->|"Outbox"| kafka
+    pay -->|"Outbox"| kafka
+    tkt -->|"Outbox"| kafka
+
+    opsv -.->|"긴급 제어 direct gRPC"| adm
+    opsv -.->|"긴급 제어 direct gRPC"| pur
+
+    classDef gw fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#1f2937
+    classDef svc fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1f2937
+    class Gateways gw
+    class Services svc
+```
 
 ---
 
@@ -1522,32 +1577,42 @@ T+1분 이후: KEDA 다중 선행 지표 동적 스케일아웃
 
 ### 시각 다이어그램: 사전 예열 및 점진 확장 파이프라인
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [오픈 전 스케줄링 (T-40분)]                                            │
-│ • KEDA Cron 트리거 (T-40분 정밀 기동) ──▶ Karpenter 온디맨드 EC2 선점  │
-│ • 핫패스 워커 노드 풀 프로비저닝 ─────▶ T-30분 Go/No-Go 시스템 전수 점검│
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ 사전 예열 완료 (minReplicas 50대 유지)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [오픈 후 다중 선행 지표 (T=0 동적 오토스케일링)]                       │
-│ • 대기열 큐 인입 깊이 (Queue Depth) ──┐                                │
-│ • Kafka 컨슈머 랙 (Consumer Lag)   ──┼──▶ KEDA 오토스케일러 (격리 실행)│
-│ • Node.js 이벤트 루프 p99 지연     ──┘         │                       │
-└────────────────────────────────────────────────┼───────────────────────┘
-                                                 │ 선행 부하 기반 즉각 증설
-                                                 ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [10대 마이크로서비스 파드군] (gw-queue, purchase-svc 등)               │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart LR
+    subgraph Prewarming["오픈 전 스케줄링 (T-40분)"]
+        cron["KEDA Cron 트리거<br/>(T-40분 정밀 기동)"]
+        karp["Karpenter 컨트롤러<br/>(온디맨드 EC2 선점)"]
+        nodes["핫패스 워커 노드 풀<br/>(사전 프로비저닝 완료)"]
+        check["T-30분 Go/No-Go 검증<br/>(DB · Redis · PG 연동)"]
+    end
 
-| 단계 | 스케줄 및 제어 주체 | 동작 내용 및 성능 목표 |
-| :--- | :--- | :--- |
-| **T-40분 예열** | KEDA Cron + Karpenter | CPU 부하를 기다리지 않고 노드 풀과 파드를 사전에 100% 프로비저닝 |
-| **T-30분 점검** | Go/No-Go 자동화 스크립트 | DB 커넥션 풀, Redis 연결, PG사 헬스체크 완료 시 최종 오픈 승인 |
-| **T=0 동적 확장**| 선행 지표 기반 KEDA | 이벤트 루프 지연 및 큐 깊이를 기반으로 파드 반응성 지연 0초 유지 |
+    subgraph Signals["오픈 후 다중 선행 지표 (T=0)"]
+        qdepth["대기열 큐 인입 깊이"]
+        lag["Kafka 컨슈머 랙 (Lag)"]
+        evloop["Node.js 이벤트 루프 지연 (p99)"]
+    end
+
+    subgraph DynamicScaling["동적 오토스케일링"]
+        keda["KEDA 오토스케일러<br/>(시스템 노드에서 격리 실행)"]
+        pods["10대 마이크로서비스 파드<br/>(gw-queue 50대 등 사전 완비)"]
+    end
+
+    cron -->|"minReplicas 사전 상향"| keda
+    keda -->|"노드 증설 요청"| karp
+    karp -->|"EC2 인스턴스 투입"| nodes
+    nodes -->|"파드 배치 및 캐시 웜업"| pods
+    check -->|"최종 오픈 승인"| pods
+
+    qdepth --> keda
+    lag --> keda
+    evloop --> keda
+    keda -->|"선행 부하 기반 즉각 증설"| pods
+
+    classDef pre fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#1f2937
+    classDef sig fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1f2937
+    class Prewarming pre
+    class Signals sig
+```
 
 ---
 
@@ -1624,35 +1689,51 @@ T+1분 이후: KEDA 다중 선행 지표 동적 스케일아웃
 
 ### 시각 다이어그램: 관제탑 메트릭 파이프라인 및 제어 흐름
 
-```
-┌─────────────────────────────────┐
-│ [마이크로서비스 파드군]         │
-│ • 10대 서비스 (/metrics 노출)   │───┬────────────────────────────────┐
-└─────────────────────────────────┘   │                                │
-                                      │ (5초 주기 메트릭 스크랩)       │ (트랜잭션 이벤트)
-                                      ▼                                ▼
-┌─────────────────────────────────────────┐  ┌───────────────────────────┐
-│ [Fast Path: 경보 및 자동제어]           │  │ [Deep Path: 실시간 BI 관제]│
-│ • Prometheus 로컬 (5초 스크랩)          │  │ • Kafka 클러스터          │
-│ • Alertmanager (2분 창 10배 번레이트)   │  │ • ops-rt 스트림 워커      │
-│ • 온콜 엔지니어 삐삐 호출               │  │ • ClickHouse 분석 DB      │
-│ • admission-ctrl (AIMD 목표 자동 감축)  │  │ • 관제탑 콘솔 (SSE 스트림)│
-└─────────────────────────────────────────┘  └─────────────┬─────────────┘
-                                                           │
-                                                           │ 비상 명령 전파
-                                                           ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [Command Path: 운영 제어 평면 (ops-svc)]                               │
-│ • 정지 명령 (1인 단독 긴급 실행) • 재개 명령 (2인 상호 승인 필수)      │
-│ • 타겟 서비스 파드로 direct gRPC 제어 신호 직달 (전파 지연 < 1초)      │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart LR
+    subgraph DataSources["마이크로서비스 파드군"]
+        svcs["10대 마이크로서비스<br/>(/metrics 노출 & Kafka 이벤트)"]
+    end
 
-| 파이프라인 | 기반 기술 및 주기 | 역할 및 SLA |
-| :--- | :--- | :--- |
-| **Fast Path** | Prometheus + Alertmanager (5초) | 에러 버짓 소진율(Burn Rate) 즉각 감지, 60초 내 장애 경보 |
-| **Deep Path** | Kafka + ClickHouse (0.5초) | 실시간 매출, 좌석 점유율, 봇 탐지율을 관제탑 대시보드에 스트리밍 |
-| **Command Path**| ops-svc direct gRPC (< 1초) | 판매 중단(1인 즉각) 및 재개(2인 승인)를 전 파드에 1초 내 직달 |
+    subgraph FastPath["경보 & 자동제어 (Prometheus)"]
+        prom["Prometheus 로컬 인스턴스<br/>(5초 주기 고속 스크래핑)"]
+        am["Alertmanager<br/>(2분 창 10배 번레이트 감지)"]
+        oncall(["온콜 엔지니어 삐삐 호출"])
+        adm["admission-ctrl<br/>(AIMD 목표 자동 감축)"]
+    end
+
+    subgraph DeepPath["실시간 BI 관제 (ClickHouse)"]
+        kafka["Kafka 클러스터"]
+        opsrt["ops-rt 스트림 워커"]
+        ch[("ClickHouse 분석 DB<br/>(0.5초 쿼리 집계)")]
+        console["실시간 관제탑 콘솔 (SSE)"]
+    end
+
+    subgraph CommandPath["운영 제어 채널"]
+        opsv["ops-svc 제어 평면"]
+        targetPods["타겟 서비스 파드"]
+    end
+
+    svcs -->|"Prometheus 스크랩"| prom
+    prom -->|"번레이트 임계치 초과"| am
+    am --> oncall
+    prom -->|"기록 규칙 직접 읽기"| adm
+
+    svcs -->|"도메인 트랜잭션 이벤트"| kafka
+    kafka --> opsrt
+    opsrt --> ch
+    ch -->|"0.5초 주기 SQL"| opsv
+    opsv -->|"SSE 스트리밍"| console
+
+    console -->|"정지 명령 (1인 단독)"| opsv
+    console -->|"재개 명령 (2인 상호 승인)"| opsv
+    opsv -.->|"긴급 제어 direct gRPC"| targetPods
+
+    classDef fast fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#1f2937
+    classDef deep fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1f2937
+    class FastPath fast
+    class DeepPath deep
+```
 
 ---
 
@@ -1781,12 +1862,6 @@ sequenceDiagram
     end
 ```
 
-| 단계 | 검증 위치 및 프로토콜 | 오프라인 보안 및 정합성 보장 |
-| :--- | :--- | :--- |
-| **사전 동기화** | ticket-svc $\rightarrow$ IndexedDB | 당일 회차 5만 장의 티켓 식별자 및 ECDSA 공개키 로컬 캐싱 (4.2MB) |
-| **오프라인 검표**| 스캐너 기기 내부 WebCrypto | 인터넷 없이 로컬에서 서명 진위, 구역 일치, 15초 유효시간 즉각 판정 (p95 150ms) |
-| **사후 동기화** | 스캐너 $\rightarrow$ 중앙 서버 | 망 복구 시 검표 로그를 비동기 업로드하여 복제 티켓 다중 게이트 통과 감지 |
-
 ---
 
 ### 트레이드오프: 비대칭키 ECDSA 오프라인 vs 대칭키 TOTP
@@ -1860,32 +1935,70 @@ sequenceDiagram
 
 ### 시각 다이어그램: 전체 저장소 아키텍처 맵
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [10대 마이크로서비스] (queue, admission, purchase, payment, ticket 등) │
-└───────┬──────────────┬───────────────┬───────────────┬─────────────────┘
-        │              │               │               │
-        ▼              ▼               ▼               ▼
-┌──────────────┐┌──────────────┐┌──────────────┐┌────────────────────────┐
-│ Redis 대기열 ││ Redis 좌석   ││ Redis 세션   ││ PostgreSQL 클러스터 5종│
-│ • seq 카운터 ││ • 5만석 비트 ││ • JWT 세션   ││ • purchase 원장       │
-│ • serving    ││ • Soft Hold  ││ • Rate Limit ││ • payment 원장        │
-│ • removed    ││ • Pub/Sub    ││ • 메타 캐시  ││ • ticket 원장         │
-└──────────────┘└──────────────┘└──────────────┘└───────────┬────────────┘
-                                                            │ Outbox 릴레이
-                                                            ▼
-┌──────────────────────────────┐                ┌────────────────────────┐
-│ [분석 및 영구 아카이빙 계층] │                │ [Kafka MSK 메시지 버스]│
-│ • ClickHouse OLAP (실시간 BI)│◀──(이벤트 적재)─│ • trade.* (거래 원장)  │
-│ • AWS S3 버킷 (Parquet 원장) │                │ • telemetry.* (로그)   │
-└──────────────────────────────┘                └────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph Microservices["10대 마이크로서비스"]
+        qsvc["queue-svc"]
+        adm["admission-ctrl"]
+        pur["purchase-svc"]
+        rgw["realtime-gw"]
+        pay["payment-svc"]
+        tkt["ticket-svc"]
+        opsv["ops-svc"]
+        shared["identity · core"]
+    end
 
-| 저장소 계층 | 인스턴스 및 엔진 | 보관 데이터 및 일관성 수준 |
-| :--- | :--- | :--- |
-| **인메모리** | Redis 클러스터 3종 | 대기열 순번, 5만 석 선점 비트맵 (p99 50ms 미만, 최종적 일관성) |
-| **RDBMS** | PostgreSQL 독립 5종 | 주문, 결제, 발권 금융 원장 (Strict ACID, 부분 유니크 인덱스) |
-| **메시징/분석**| Kafka MSK & ClickHouse | Transactional Outbox 보장, 초 단위 다차원 분석 및 S3 콜드 아카이브 |
+    subgraph MemoryTier["인메모리 계층 (Redis 클러스터 3종)"]
+        rq[("Redis 대기열<br/>seq · removed · serving")]
+        rs[("Redis 좌석<br/>5만석 비트맵 · hold")]
+        rc[("Redis 세션/캐시<br/>JWT 세션 · Rate Limit")]
+    end
+
+    subgraph EventTier["메시지 브로커 (Kafka MSK 3종)"]
+        kTrade["Kafka trade.*<br/>(거래 트랜잭션)"]
+        kTelem["Kafka telemetry.*<br/>(행동 로그)"]
+        kCtrl["Kafka control.*<br/>(운영 설정)"]
+    end
+
+    subgraph RDBMSTier["관계형 원장 계층 (PostgreSQL 클러스터 5종)"]
+        pgp[("PG purchase<br/>주문 · seat_sale · quota")]
+        pgy[("PG payment<br/>결제 원장 · 대사")]
+        pgt[("PG ticket<br/>티켓 원장 · 스캔로그")]
+        pgo[("PG ops 전용<br/>명령 감사 로그")]
+        pgs[("PG 공유<br/>회원 계정 · 공연 정보")]
+    end
+
+    subgraph AnalyticsTier["분석 및 영구 아카이빙 계층"]
+        ch[("ClickHouse OLAP<br/>실시간 관제 다차원 BI")]
+        s3[("AWS S3 버킷<br/>Parquet 영구 아카이브")]
+    end
+
+    qsvc --> rq
+    adm --> rq
+    pur --> rs
+    rgw -.->|"구독만 (SPUBLISH)"| rs
+    shared --> rc
+
+    pur --> pgp
+    pay --> pgy
+    tkt --> pgt
+    opsv --> pgo
+    shared --> pgs
+
+    pgp -->|"Outbox 릴레이"| kTrade
+    pgy -->|"Outbox 릴레이"| kTrade
+    tkt -->|"Outbox 릴레이"| kTrade
+
+    kTrade --> ch
+    ch -.->|"회차 종료 후 덤프"| s3
+
+    classDef mem fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#1f2937
+    classDef rdb fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1f2937
+    classDef evt fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#1f2937
+    class MemoryTier mem
+    class RDBMSTier rdb
+    class EventTier evt
+```
 
 ---
 
@@ -1930,33 +2043,30 @@ sequenceDiagram
 
 ### 시각 다이어그램: 3단계 장애 격리 및 페일 패스트 파이프라인
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [1단계: 에지 및 게이트웨이 즉각 차단 (Envoy)]                          │
-│ • CloudFront / Envoy Gateway 타임아웃 및 서지 큐 초과 감지             │
-│ • HTTP 503 + Retry-After로 다운스트림 트래픽 즉각 컷오프 (시스템 보호) │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ (정상 범위 요청만 통과)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [2단계: 서비스 내부 격벽 및 서킷 브레이커 (opossum)]                   │
-│ • 외부 PG사 / 타 서비스 gRPC 오류 감지 시 서킷 즉각 오픈               │
-│ • 동시 실행 벌크헤드 격리 및 감내 모드(Degraded Mode) 전환             │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ (정상 트랜잭션 쓰기)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [3단계: 스토리지 불변식 절대 수호]                                     │
-│ • Redis 마스터 다운 시: 비상 RDBMS 우회 금지, 503 유예로 오버셀 0건 사수│
-│ • DB 유니크 제약 위반 시: PG 승인 미호출로 미출금 100% 보장           │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph Detection["1단계: 에지 및 게이트웨이 즉각 차단 (Envoy)"]
+        edgeCheck["CloudFront / Envoy Gateway"]
+        edgeCheck -->|"타임아웃 / 서지 큐 초과"| f503["HTTP 503 + Retry-After<br/>(다운스트림 트래픽 즉각 컷오프)"]
+        edgeCheck -->|"정상 범위 요청"| svcLayer["마이크로서비스 계층"]
+    end
 
-| 격벽 계층 | 차단 및 감내 메커니즘 | 절대 수호하는 비즈니스 불변식 |
-| :--- | :--- | :--- |
-| **1단계 에지** | Envoy 서지 큐 초과 시 503 즉각 반환 | 백엔드 파드로의 연쇄 부하 폭주 차단 |
-| **2단계 서비스**| opossum 서킷 브레이커 & 벌크헤드 | 외부 PG사 장애 시 격리 및 멱등 재시도 큐 대기 |
-| **3단계 스토리지**| 단일 ACID 트랜잭션 & 부분 유니크 인덱스 | 인프라 장애 중에도 **오버셀 0건**, **무단 출금 0건** 수학적 사수 |
+    subgraph Isolation["2단계: 서비스 내부 격벽 및 서킷 브레이커"]
+        svcLayer -->|"외부 PG / gRPC 오류"| cb["opossum 서킷 브레이커 오픈<br/>(동시 실행 벌크헤드 격리)"]
+        cb -->|"장애 지속 시"| degrade["감내 모드 (Degraded Mode)<br/>(재시도 큐 적재 & 보조 PG 수동 전환)"]
+    end
+
+    subgraph InvariantProtection["3단계: 스토리지 불변식 절대 수호"]
+        svcLayer -->|"정상 트랜잭션 쓰기"| storageLayer["저장소 계층"]
+        storageLayer -->|"Redis 마스터 다운"| defer["구매 503 유예 (오버셀 0건 사수)"]
+        storageLayer -->|"DB 유니크 제약 위반"| noCharge["PG 승인 미호출 (미출금 100% 보장)"]
+    end
+
+    classDef fail fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#1f2937
+    classDef ok fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1f2937
+    class f503,cb,degrade,defer,noCharge fail
+    class edgeCheck,svcLayer,storageLayer ok
+```
 
 ---
 
@@ -2166,38 +2276,59 @@ PEAKET은 대기열, 좌석 선점, 결제 Saga의 3대 핵심 분산 제어 로
 
 ### 시각 다이어그램: 4대 공학적 증명 전략 파이프라인
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [제1기둥: 규칙 형식 검증 (Formal Verification)]                        │
-│ • Quint / TLA+ 모델 체커: 분산 동시성 인터리빙 상태 공간 전수 탐색     │
-│ • ZeroOverSelling (오버셀 0건), StrictMonotonic (순번 단조증가) 증명   │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-┌───────────────────────────────────┴────────────────────────────────────┐
-│ [제2기둥: 실제 크기 벤치마크 (Real-Size Benchmark)]                    │
-│ • 5만 석 비트맵 단일 노드 1:1,000 좌석 경합 실측 (Lua 실행 p99 < 0.3ms)│
-│ • 결제 300 TPS 로컬 트랜잭션 및 WebSocket 5,000 연결 브로드캐스트 실측 │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-┌───────────────────────────────────┴────────────────────────────────────┐
-│ [제3기둥: 수학적 수식 외삽 (Mathematical Extrapolation)]               │
-│ • Little's Law 및 USL 모델: 1천/1만/10만 실측으로 공식 유효성 증명     │
-│ • 100만 대기자 오리진 1,000 RPS 수렴 및 20만 RPS 선형 확장 증명        │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-┌───────────────────────────────────┴────────────────────────────────────┐
-│ [제4기둥: 벤더 공식 스펙 문서 인용 (Vendor Official Specs)]            │
-│ • AWS CloudFront 250k RPS / 150 Gbps 공식 쿼터 보장                    │
-│ • 외부 PG사 승인 한도(600 TPS)에 안전계수 0.5를 적용한 300 TPS 확정    │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph Layer1["제1기둥: 규칙 형식 검증 (Formal Verification)"]
+        quint["Quint / TLA+ 모델 검사기<br/>(상태 공간 전수 탐색)"]
+        prop1["ZeroOverSelling (오버셀 0건)"]
+        prop2["StrictMonotonicSequence (순번 단조증가)"]
+        prop3["NoDoubleCharge (이중결제 0건)"]
+    end
 
-| 검증 축 | 적용 기법 | 검증 대상 및 도출된 보장 |
-| :--- | :--- | :--- |
-| **제1기둥: 정형 검증** | Quint 모델 검사기 | 1ms 오차 경합 시에도 좀비 좌석 회수 및 오버셀 0건 기계적 증명 |
-| **제2기둥: 벤치마크** | 고성능 단일 노드 부하 | 5만 석 인메모리 비트맵 연산 속도 및 로컬 트랜잭션 처리량 실측 |
-| **제3기둥: 수식 외삽** | Little's Law & USL 공식| 대규모 클라우드 테스트 비용 없이 100만 명 환경의 안정성 증명 |
-| **제4기둥: 벤더 스펙** | AWS / PG사 공식 SLA | 클라우드 인프라 한계 및 금융망 처리량의 보수적 설계 정합성 확인 |
+    subgraph Layer2["제2기둥: 실제 크기 PC 벤치마크 (Real-Size Benchmark)"]
+        bench["단일 고성능 노드 스트레스 테스트"]
+        b1["5만석 비트맵 & 1:1,000 좌석 경합 실측"]
+        b2["결제 300 TPS 로컬 트랜잭션 실측"]
+        b3["WebSocket 5,000 연결 델타 브로드캐스트"]
+    end
+
+    subgraph Layer3["제3기둥: 수학적 수식 외삽 (Mathematical Extrapolation)"]
+        math["Little's Law & USL 확장 모델"]
+        ext1["1천/1만/10만 소규모 실측 검증"]
+        ext2["이론 공식 기반 100만 오리진 1,000 RPS 도출"]
+        ext3["비공유 게이트웨이 20만 RPS 선형 확장 증명"]
+    end
+
+    subgraph Layer4["제4기둥: 벤더 공식 스펙 문서 인용 (Vendor Official Specs)"]
+        vendor["클라우드 & 외부 PG 공식 문서 인용"]
+        v1["AWS CloudFront 250k RPS / 150 Gbps 쿼터"]
+        v2["외부 PG 승인 한도에 안전계수 0.5 적용"]
+    end
+
+    quint --> prop1
+    quint --> prop2
+    quint --> prop3
+
+    bench --> b1
+    bench --> b2
+    bench --> b3
+
+    math --> ext1
+    ext1 --> ext2
+    ext1 --> ext3
+
+    vendor --> v1
+    vendor --> v2
+
+    classDef l1 fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#1f2937
+    classDef l2 fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#1f2937
+    classDef l3 fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1f2937
+    classDef l4 fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#1f2937
+    class Layer1 l1
+    class Layer2 l2
+    class Layer3 l3
+    class Layer4 l4
+```
 
 ---
 
@@ -2220,48 +2351,130 @@ PEAKET은 대기열, 좌석 선점, 결제 Saga의 3대 핵심 분산 제어 로
 
 18단계의 치열한 아키텍처 진화를 거쳐 완성된 PEAKET의 최종 분산 시스템 아키텍처입니다.
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ [1. 4대 사용자 클라이언트 계층]                                                        │
-│ • 팬 (소비자 웹 / 월렛)  • 파트너 콘솔 (주최사)  • 운영 관제탑  • 게이트 스캐너 PWA    │
-└───────────────────────────┬────────────────────────────────────────────────────────────┘
-                            │ (HTTPS / WebSocket)
-                            ▼
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ [2. 에지 및 보안 전송 계층]                                                            │
-│ • CloudFront (www): 정적 셸 & 공연 상세    • CloudFront (queue-files): 1초 캐시 구간 파일│
-│ • CloudFront (queue-api): 정각 진입 API    • AWS WAF: L7 DDoS 및 악성 봇 차단          │
-└───────────────────────────┬────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ [3. 5대 박형 게이트웨이 (Envoy Gateway)]                                               │
-│ • gw-queue (대기열)  • gw-fan (구매/월렛)  • gw-partner  • gw-ops  • gw-scanner       │
-└───────────────────────────┬────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ [4. 10대 마이크로서비스 계층 (Istio Ambient Mesh)]                                     │
-│ • queue-svc (순번 발급)   • admission-ctrl (200ms 제어 루프) • purchase-svc (좌석 선점)│
-│ • realtime-gw (웹소켓)    • payment-svc (2단계 승인)         • ticket-svc (발권)       │
-│ • identity-svc (인증/CI)  • trust-svc (봇 판정)              • ops-svc (비상 제어)     │
-└───────┬───────────────────┬───────────────────┬────────────────────┬───────────────────┘
-        │                   │                   │                    │
-        ▼                   ▼                   ▼                    ▼
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐     ┌──────────────┐
-│ 대기열 인프라│    │ 좌석/구매원장│    │ 결제/티켓원장│     │ 이벤트/분석  │
-│ • Redis 대기 │    │ • Redis 좌석 │    │ • PG payment │     │ • Kafka      │
-│ • S3 미러링  │    │ • PG purchase│    │ • PG ticket  │     │ • ClickHouse │
-└──────────────┘    └──────────────┘    └──────────────┘     └──────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph Clients["4대 사용자 클라이언트 계층"]
+        fan(["팬 (소비자 웹 / 모바일 월렛)"])
+        partner(["파트너 콘솔 (공연 기획사)"])
+        ops(["실시간 관제탑 콘솔"])
+        scanner(["현장 게이트 스캐너 PWA"])
+    end
 
-| 계층 | 주요 컴포넌트 | 핵심 엔지니어링 스펙 |
-| :--- | :--- | :--- |
-| **클라이언트** | 웹/모바일, PWA 스캐너 | 바닐라 정적 셸(50KB), 100% 오프라인 ECDSA 검표(p95 150ms) |
-| **에지 전송** | CloudFront CDN 3종, WAF | 1초 TTL 캐시로 대기열 부하 흡수, Turnstile 봇 1선 방어 |
-| **게이트웨이** | Envoy 게이트웨이 5종 | 도메인별 트래픽 완벽 격리, TLS 종단 및 경량 인증 |
-| **마이크로서비스**| Istio Ambient 10대 서비스 | 200ms 폐루프 유입 통제, Redis Lua 비트맵 Soft Hold, 2단계 Saga |
-| **스토리지** | Redis, Aurora PG, Kafka | 5만 석 오버셀 0건, 멱등 Saga 전진 복구, 0.5초 실시간 관제 |
+    subgraph EdgeTier["에지 및 보안 전송 계층"]
+        cfWww["CloudFront (www)<br/>정적 셸 & 공연 상세"]
+        cfQueue["CloudFront (queue-files)<br/>구간 상태 파일 1초 캐시"]
+        cfApi["CloudFront (queue-api)<br/>정각 진입 API"]
+        waf["AWS WAF<br/>L7 DDoS 방어"]
+    end
+
+    subgraph GatewayTier["5대 박형 게이트웨이 (Envoy Gateway)"]
+        gwq["gw-queue<br/>(대기열 전용)"]
+        gwf["gw-fan<br/>(구매 · 월렛)"]
+        gwp["gw-partner<br/>(파트너 · 웹훅)"]
+        gwo["gw-ops<br/>(사내망 전용)"]
+        gws["gw-scanner<br/>(현장 전용)"]
+    end
+
+    subgraph ServiceTier["10대 마이크로서비스 계층 (Istio Ambient Mesh)"]
+        qsvc["queue-svc<br/>(순번 발급 · 구간 파일)"]
+        adm["admission-ctrl<br/>(200ms 제어 루프 · AIMD)"]
+        pur["purchase-svc<br/>(좌석 Soft Hold · 주문 Saga)"]
+        rgw["realtime-gw<br/>(5,000 WebSocket)"]
+        pay["payment-svc<br/>(2단계 승인 · 정산)"]
+        tkt["ticket-svc<br/>(발권 · 오프라인 카탈로그)"]
+        idn["identity-svc<br/>(인증 · CI HMAC)"]
+        trust["trust-svc<br/>(6대 봇 점수기)"]
+        opsv["ops-svc<br/>(12대 명령 제어 평면)"]
+        core["core-svc<br/>(공연 메타 · 굿즈)"]
+    end
+
+    subgraph InfluxStorage["대기열 인프라"]
+        rq[("Redis 대기열<br/>seq · removed · serving")]
+        s3Queue[("AWS S3 버킷<br/>구간 파일 미러링")]
+    end
+
+    subgraph BookingStorage["좌석 및 구매 원장"]
+        rs[("Redis 좌석<br/>5만석 비트맵 · 7분 Hold")]
+        pgp[("PG purchase<br/>seat_sale 부분유니크")]
+    end
+
+    subgraph CoreStorage["결제 및 티켓 원장"]
+        pgy[("PG payment<br/>결제 원장")]
+        pgt[("PG ticket<br/>티켓 원장")]
+        tokyo[("도쿄 리전 복제본")]
+    end
+
+    subgraph MessageAnalytics["이벤트 & 실시간 분석"]
+        kTrade["Kafka (trade.*)"]
+        ch[("ClickHouse OLAP<br/>0.5초 실시간 매트릭스")]
+    end
+
+    subgraph Externals["외부 시스템"]
+        pgExt["외부 PG사 (토스 / 포트원)"]
+        drand["drand 난수 비콘"]
+        turnstile["Cloudflare Turnstile"]
+    end
+
+    fan --> cfWww
+    fan --> cfQueue
+    fan --> cfApi
+    partner --> waf
+    ops --> gwo
+    scanner -->|"오프라인 판정 후 사후 동기화"| gws
+
+    cfApi --> gwq
+    cfQueue -.->|"오리진 5xx 시 페일오버"| s3Queue
+    cfQueue --> gwq
+    waf --> gwf
+    waf --> gwp
+
+    gwq --> qsvc
+    gwf --> pur
+    gwf --> rgw
+    gwf --> core
+    gwp --> pay
+    gws --> tkt
+    gwo --> opsv
+
+    qsvc --> rq
+    adm --> rq
+    adm -->|"라운드 난수 수집"| drand
+    qsvc --> s3Queue
+    qsvc -->|"gRPC"| trust
+    trust --> turnstile
+
+    adm -->|"200ms 제어 루프로 초당 28명 배출"| pur
+    pur --> rs
+    pur --> pgp
+    pur -->|"gRPC"| pay
+    pur -->|"gRPC"| tkt
+    pur -->|"gRPC"| idn
+    pur -->|"Sharded Pub/Sub"| rgw
+
+    pay --> pgy
+    pay -->|"confirm-{orderId}"| pgExt
+    tkt --> pgt
+    pgt -->|"비동기 복제"| tokyo
+
+    pgp -->|"Outbox 릴레이"| kTrade
+    pgy -->|"Outbox 릴레이"| kTrade
+    tkt -->|"Outbox 릴레이"| kTrade
+    kTrade --> ch
+
+    opsv -.->|"긴급 제어 direct gRPC"| adm
+    opsv -.->|"긴급 제어 direct gRPC"| pur
+
+    classDef edge fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#1f2937
+    classDef gw fill:#e0e7ff,stroke:#4338ca,stroke-width:2px,color:#1f2937
+    classDef svc fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1f2937
+    classDef store fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#1f2937
+    class EdgeTier edge
+    class GatewayTier gw
+    class ServiceTier svc
+    class InfluxStorage store
+    class BookingStorage store
+    class CoreStorage store
+```
 
 ---
 

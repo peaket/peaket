@@ -20,39 +20,42 @@
 
 ### 좌석 라이프사이클 종합 상태 전이도
 
-```
-┌──────────────┐     EVAL hold.lua (p99 50ms)     ┌──────────────┐
-│  빈 좌석 (0) │─────────────────────────────────▶│  Soft Hold   │
-│  가용 상태   │                                  │ (비트 1, 7분)│
-└──────────────┘                                  └──────┬───────┘
-       ▲                                                 │
-       │                                                 │ 주문서 작성 진입
-       │ (7분 만료 / 취소표 회수)                        ▼
-       │                                          ┌──────────────┐
-       │                                          │  주문서 홀드 │
-       │                                          │  결제 대기   │
-       │                                          └──────┬───────┘
-       │                                                 │
-       │                                                 │ 결제 승인 접수 (202)
-       │                                                 ▼
-       │                                          ┌──────────────┐
-       │ (결제 취소 / DB 제약 위반)               │  Hard Sale   │
-       └──────────────────────────────────────────│ (PG PENDING) │
-                                                  └──────┬───────┘
-                                                         │
-                                                         │ 결제 승인 완료 (200 OK)
-                                                         ▼
-                                                  ┌──────────────┐
-                                                  │     SOLD     │ (판매 확정 완료)
-                                                  └──────────────┘
-```
+```mermaid
+flowchart TD
+    EMPTY["빈 좌석\n(비트 0, 가용 상태)"]
+    HELD["Soft Hold\n(Redis 비트 1, 7분 TTL, 연장 1회 3분)"]
+    ORDERED["주문 생성 후 홀드\n(결제 대기 진입)"]
+    PAUSED["시간 동결 홀드\n(결제사 장애 일시정지)"]
+    PINNED["좌석 묶기 상태\n(Saga 직전 pin.lua 만료 인덱스 제외)"]
+    PENDING["Hard Sale 사전 예약\n(PG seat_sale PENDING, 부분 유니크 확보)"]
+    SOLD["판매 확정\n(PG seat_sale SOLD, 발권 완료)"]
+    RETURNED["예매 취소 좌석\n(PG seat_sale RETURNED, 이력 보존)"]
+    EXPIRED["홀드 만료\n(EXPIRED 사건 발행, 재노출 대기)"]
+    PRIO["우선 구매 보류\n(부정 예매 소명 팬 전용 48시간 격리)"]
 
-| 좌석 상태 | 관리 저장소 | 불변식 및 점유 규칙 |
-| :--- | :--- | :--- |
-| **빈 좌석 (0)** | Redis 비트맵 | 0비트 상태로 누구나 선점 시도 가능 |
-| **Soft Hold** | Redis 비트맵 + Expiry 해시 | 1비트 검사, 1인 4매 한도, 7분 TTL 후 자동 만료 스위퍼 회수 |
-| **Hard Sale** | PostgreSQL `seat_sale` 테이블 | `status IN ('PENDING', 'SOLD')` 부분 유니크 인덱스로 오버셀 차단 |
-| **SOLD** | PostgreSQL 최종 원장 | 금융 결제 승인 완료 후 티켓 발권 완료 상태 |
+    EMPTY -->|"hold.lua 검사 통과"| HELD
+    HELD -->|"주문서 생성"| ORDERED
+    ORDERED -->|"결제사 장애 일시정지 신호"| PAUSED
+    PAUSED -->|"결제 재개"| ORDERED
+    PAUSED -->|"세션 최대 체류 45분 도달"| EXPIRED
+    HELD -->|"7분 TTL 만료 (스위퍼 회수)"| EXPIRED
+    ORDERED -->|"결제창 미진입 만료"| EXPIRED
+    EXPIRED -->|"30초 동일 계정 쿨다운 / 타인 즉시 가용"| EMPTY
+
+    ORDERED -->|"결제 접수 202 직후 Saga 시작"| PINNED
+    PINNED -->|"PostgreSQL reserve 성공"| PENDING
+    PINNED -->|"Saga 묶기 실패 / 남의 좌석"| ORDERED
+    PENDING -->|"PG 승인 성공 (markSold)"| SOLD
+    PENDING -->|"PG 승인 거절 / 10분 기한 초과 (releasePending)"| EMPTY
+    PENDING -.->|"승인 응답 단절 (UNKNOWN)"| PENDING
+
+    SOLD -->|"사용자 예매 취소 / 환불"| RETURNED
+    RETURNED -->|"비트맵 0 리셋 및 델타 송출"| EMPTY
+
+    EMPTY -->|"부정 예매 소명 인용 (GrantPriorityPurchase)"| PRIO
+    PRIO -->|"권리 팬 입장 및 홀드 전환"| HELD
+    PRIO -->|"48시간 기한 만료"| EMPTY
+```
 
 ### 2대 서브시스템의 책임 분리
 
@@ -136,32 +139,32 @@ PEAKET은 핫패스(Hot-Path)에서 RDBMS 쓰기를 완전히 배제하고, 회�
 
 `hold.lua`는 다음 순서로 엄격하게 검증을 수행하며, 조건 위반 시 즉시 실행을 중단한다:
 
+```mermaid
+flowchart TD
+    START["홀드 요청 유입 (EVALSHA hold.lua)"] --> STEP1{"1. 세대 키(epoch) 존재하는가?"}
+    STEP1 -- "아니오" --> ERR_EPOCH["NOT_READY 반환 (HTTP 503)"]
+    STEP1 -- "예" --> STEP2{"2. 멱등키(idem) 존재하는가?"}
+    
+    STEP2 -- "예 (동일 지문)" --> OK_REPLAY["IDEM_REPLAY (이전 201 응답 재생)"]
+    STEP2 -- "예 (다른 지문)" --> ERR_REUSE["IDEM_REUSED (HTTP 422 멱등키 재사용)"]
+    STEP2 -- "아니오" --> STEP3{"3. 판매 제어(ctl) 정상인가?"}
+    
+    STEP3 -- "정지/중지 상태" --> ERR_PAUSE["PAUSED (HTTP 423 sale-paused)"]
+    STEP3 -- "정상" --> STEP4{"4. 비트맵(bitmap) 좌석 비어있는가?"}
+    
+    STEP4 -- "하나라도 비트 1" --> ERR_CONFLICT["CONFLICT (HTTP 409 seat-already-held)"]
+    STEP4 -- "모두 비트 0" --> STEP5{"5. 30초 내 방금 놓은 좌석인가?"}
+    
+    STEP5 -- "rel ZSET 점수 > 지금" --> ERR_REHOLD["REHOLD_WAIT (HTTP 409 seat-recently-released)"]
+    STEP5 -- "쿨다운 통과" --> STEP6{"6. 보유 수 + n <= 1인 한도인가?"}
+    
+    STEP6 -- "한도 초과" --> ERR_LIMIT["QUOTA_EXCEEDED (HTTP 422 limit-exceeded)"]
+    STEP6 -- "한도 이내" --> GUARDS{"7. 쓰기 전 지킴 (Guards)\n• 키 만료 시각 > TIME\n• quota/secver 표준 10진 정수\n• fence < 2^53 - 1"}
+    
+    GUARDS -- "데이터 불일치" --> ERR_CORRUPT["PEAKET_CORRUPT_KEY / FENCE_OVERFLOW"]
+    GUARDS -- "검증 통과" --> WRITE["8. 원자적 일괄 쓰기\n• BITFIELD 비트 1 설정\n• HSET hold 메타데이터 기록\n• ZADD 만료 인덱스 등록\n• INCRBY 계정 쿼터 증가\n• 멱등키 Hash 기록 (7분 TTL)\n• HINCRBY secver 구역 버전 +1\n• XADD Stream HELD 이벤트 발행\n• SPUBLISH 샤드 Pub/Sub 델타 송출"]
+    WRITE --> SUCCESS["성공 반환 (OK, fencingToken, heldAt, exp) -> HTTP 201"]
 ```
-[홀드 요청 유입 (EVALSHA hold.lua)]
-              │
-              ▼
-   [1. 세대 키(epoch) 존재하는가?] ──아니오──▶ [NOT_READY 반환 (HTTP 503)]
-              │ (예)
-              ▼
-   [2. 멱등키(idem) 존재하는가?]   ──예 (동일)──▶ [IDEM_REPLAY (이전 201 응답 재생)]
-              │ (예, 다른 좌석: 409)
-              │ (신규 요청)
-              ▼
-   [3. 1인 4매 한도 초과인가?]    ──예 (초과)──▶ [ERR_QUOTA_EXCEEDED (HTTP 409)]
-              │ (한도 이내)
-              ▼
-   [4. 좌석 비트가 이미 1인가?]   ──예 (선점됨)─▶ [ERR_ALREADY_HELD (HTTP 409)]
-              │ (가용 좌석 0비트)
-              ▼
-   [5. 비트 1 세팅 & 7분 TTL 해시 등록] ──▶ [OK: 201 Created (Hold 토큰 발급)]
-```
-
-| 판정 단계 | 검사 항목 | 방어 결함 |
-| :--- | :--- | :--- |
-| **1. Epoch 검사** | 센티널 페일오버 진행 여부 확인 | 마스터 전환 중 잘못된 노드 쓰기 방지 (503 유예) |
-| **2. 멱등성 검사** | `idemKey` 및 지문 대조 | 네트워크 재시도 시 동일 선점 응답 100% 무결 재현 |
-| **3. 구매 한도** | `user_holds:{event}:{userId}` 매수 | 매크로의 1인 다량 티켓 싹쓸이 차단 (최대 4매) |
-| **4. 비트맵 검사** | `GETBIT` 연산 (p99 < 0.3ms) | 수천 명 동시 클릭 시 단 1명만 원자적 1비트 선점 |
 
 #### 4. 동시 홀드 요청 처리 시퀀스 다이어그램
 
@@ -196,12 +199,6 @@ sequenceDiagram
         GW-->>Fan: 409 Conflict 반환 (과금 및 리소스 낭비 0건)
     end
 ```
-
-| 순번 | 작업 주체 | 핵심 동작 및 지연시간 예산 |
-| :--- | :--- | :--- |
-| **1~2** | Web Worker $\rightarrow$ gw-fan | 좌석 ID 오름차순 정렬(데드락 방지) 후 게이트웨이 전달 (3ms) |
-| **3~5** | purchase-svc $\rightarrow$ Redis | 단일 스레드 hold.lua 원자적 실행 (순수 연산 p99 < 0.3ms, 전체 50ms) |
-| **6~8** | Redis $\rightarrow$ Kafka & 클라이언트 | Stream 이벤트 발행 및 7분 유효 Hold 토큰 응답 반환 |
 
 #### 5. 자동 좌석 배정(AUTO) 모드의 원자적 선점
 자동 좌석 배정(POL-035, FR-050)에서는 팬이 개별 좌석을 선택하지 않고 희망 조건(1순위 등급, 매수, 휠체어석)을 대기 중에 미리 저장해 둔다. 입장 차례가 오면 브라우저가 자동 배정 API를 호출한다.  
@@ -279,30 +276,27 @@ BullMQ 등 무거운 작업 큐를 사용하지 않고, Redis Sorted Set(`s:{eve
    - 구역 버전 카운터(`secver`)를 1 증가시키고 Stream에 `EXPIRED` 이벤트 발행.
    - 샤드 Pub/Sub `SPUBLISH`를 통해 해당 구역 채널로 상태 0(가용) 델타를 송출하여 **p99 3초 이내에 좌석맵 화면에 즉시 재노출(NFR-025)**.
 
-```
-┌─────────────────────────────────┐
-│ [1초 주기 스위퍼 파이프라인]    │
-│ • 1초 타이머 틱 ───────────────▶│───(분산 락 획득)───┐
-└─────────────────────────────────┘                    │
-                                                       ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [ZRANGE s:{event}:expiry 만료 좌석 최대 100개 조회]                    │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ (만료 좌석 존재 시)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [원자적 만료 회수 Lua 스크립트 (sweep.lua)]                            │
-│ • 좌석 비트 1 -> 0 클리어 (가용 좌석 복원)                            │
-│ • 유저 선점 목록 및 Expiry ZSet 인덱스 원자적 제거                     │
-│ • SPUBLISH 좌석 취소 복원 델타 발행 ──▶ 실시간 웹소켓 전파            │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart LR
+    subgraph Sweeper["1초 주기 스위퍼 파이프라인"]
+        TICK["1초 타이머 틱"] --> LEASE{"s:{event:E}:sweep\n분산 임대 획득?"}
+        LEASE -- "성공" --> SCAN["ZRANGE s:{event:E}:expiry\n만료 좌석 최대 100개 조회"]
+        SCAN --> EXEC_LUA["만료 Lua 스크립트 실행"]
+    end
 
-| 스위퍼 컴포넌트 | 실행 주기 및 한도 | 안정성 보장 메커니즘 |
-| :--- | :--- | :--- |
-| **분산 임대 (Lease)** | `s:{event}:sweep` (1초) | 중복 스위퍼 실행 방지, 리더 노드 다운 시 자동 임대 만료 |
-| **100개 배치 처리** | `ZRANGE ... LIMIT 0 100` | 대량 만료 시에도 단일 Lua 실행 시간을 1ms 이하로 제한 |
-| **SPUBLISH 전파** | 회수 즉시 브로드캐스트 | 취소표 발생 즉시 5,000명 대기자 좌석 화면에 0.1초 내 갱신 |
+    subgraph AtomicLua["원자적 만료 회수 Lua"]
+        EXEC_LUA --> VERIFY{"펜싱 토큰 & 소유자 일치?\n(결제 진행/연장 여부 확인)"}
+        VERIFY -- "불일치" --> SKIP["해당 좌석 안전 건너뛰기"]
+        VERIFY -- "일치" --> ATOMIC_WRITE["• 비트맵 0 클리어\n• 홀드 Hash 삭제\n• 만료 ZSET 제거\n• 계정 쿼터 차감\n• 30초 쿨다운 ZSET 등록"]
+    end
+
+    subgraph Broadcast["실시간 재노출 파이프라인 (p99 3s)"]
+        ATOMIC_WRITE --> STREAM["Redis Stream EXPIRED 발행"]
+        ATOMIC_WRITE --> PUB["SPUBLISH s:{event:E}:sec:{secId}"]
+        PUB --> RTGW["realtime-gw (WebSocket)"]
+        RTGW --> CLIENT["브라우저 좌석맵 초록색(가용) 복원"]
+    end
+```
 
 #### 3. 방금 놓은 좌석 30초 쿨다운 (Seat Squatting 방지)
 - **공격 시나리오**: 홀드가 7분 만료되거나 스스로 해제(`DELETE /holds/{holdId}`)한 직후, 동일 계정이 매크로를 이용해 해당 좌석을 즉시 재선점하면 구매 세션 최대 체류 시간인 **45분 동안 특정 좌석을 독점 점유**할 수 있다.
@@ -409,12 +403,6 @@ sequenceDiagram
     end
     end
 ```
-
-| 단계 | 트랜잭션 경계 | 장애 시 안전 불변식 |
-| :--- | :--- | :--- |
-| **pin.lua** | Redis 인메모리 좌석 고정 | 결제창 체류 중 7분 TTL 만료로 인한 취소표 가로채기 방지 |
-| **Hard PENDING** | PostgreSQL 단일 ACID 트랜잭션 | 23505 Unique Violation 시 결제사 승인 API 미호출 (미출금) |
-| **SOLD 확정** | PG 승인 완료 후 원장 전진 | 금융 승인 후 내부 발권 순단 시에도 절대 취소 없이 전진 발권 |
 
 #### 5. Redis 전면 장애 시 복구 런북 (RB-06)
 만약 데이터센터 장애 등으로 좌석 Redis 클러스터가 완전히 셧다운되고 인메모리 데이터가 전무한 상태로 복구되더라도 데이터 유실은 발생하지 않는다:

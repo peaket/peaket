@@ -47,26 +47,36 @@
 
 PEAKET은 **"중요도에 따라 클러스터를 물리 분리하고, 단일 파티션 내에서 비즈니스 서브키 기반의 동시 처리 파이프라인을 구축한다"**는 설계를 확립했다.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [3대 물리 분리 Amazon MSK 클러스터 (Kafka 3.9 KRaft)]                  │
-│                                                                        │
-│   [1. trade-control 클러스터 (거래/제어)]                               │
-│   • 브로커 6대 (3 AZ), acks=all, min.isr=2, unclean.leader.election=false│
-│   • 주문, 결제, 발권, 2인 승인 긴급 명령 (단 1건의 유실도 불허)       │
-│                                                                        │
-│   [2. telemetry 클러스터 (관측/행동 로그)]                             │
-│   • 브로커 3대, acks=1 (처리량 최적화), 대기열 신호 및 분산 추적 로그   │
-│                                                                        │
-│   [3. analytics 클러스터 (분석 전용)]                                  │
-│   • ClickHouse 및 S3 Parquet 아카이브 전용 파이프라인                  │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph MSK_Clusters["3대 물리 분리 Amazon MSK 클러스터 (Kafka 3.9 KRaft)"]
+        MSK_TRADE["1. 거래/제어 MSK (trade-control)\n- 브로커 6대 (3 AZ x 2대)\n- 복제본 3, min.isr=2\n- unclean.leader.election=false\n- 토픽: trade.*, control.*"]
+        MSK_TELEM["2. 텔레메트리 MSK (telemetry)\n- 브로커 3대\n- 장애 시 유실 허용 (Best-Effort)\n- 토픽: telemetry.*"]
+        MSK_OBS["3. 관측 전용 MSK (observability)\n- Grafana Tempo 3.x 스팬 수집 전용"]
+    end
 
-| 클러스터 | 데이터 성격 | 신뢰성 및 가용성 설정 |
-| :--- | :--- | :--- |
-| **trade-control** | 금융 및 긴급 제어 | `acks=all`, 리더 선출 엄격 제어로 데이터 유실 RPO 0초 사수 |
-| **telemetry** | 초당 수만 건 텔레메트리 | `acks=1`로 처리량 극대화, 장애 시 거래 코어 클러스터와 완벽 격리 |
+    subgraph ConsumerPipeline["파티션 내 업무 키 동시성 컨슈머 엔진 (packages/platform)"]
+        POLL["1. 단일 파티션 배치 폴링\n(eventId = 'E1001' 파티션 0번에서 500건 일괄 수신)"]
+        DISPATCHER["2. 인메모리 키 디스패처\nHash(order_id 또는 seat_id) % 32"]
+        subgraph Workers["32개 독립 워커 스레드 풀"]
+            W1["Worker 1 (주문 A 순차 실행)"]
+            W2["Worker 2 (주문 B 순차 실행)"]
+            W32["Worker 32 (주문 Z 순차 실행)"]
+        end
+        COMMIT_MGR["3. 워터마크 순서 보장 커밋 관리자\n(선행 오프셋이 모두 처리 완료된 지점까지만 commitSync)"]
+    end
+
+    subgraph RecoveryPath["독 사건(Poison Pill) 격리"]
+        HELD_TABLE[("서비스 DB held_event 테이블\n- 5회 연속 실패 시 격리\n- 해당 order_id만 보류, 타 키 지속")]
+    end
+
+    MSK_TRADE --> POLL
+    POLL --> DISPATCHER
+    DISPATCHER --> W1 & W2 & W32
+    W1 & W2 & W32 --> COMMIT_MGR
+    COMMIT_MGR -->|"Offset Commit"| MSK_TRADE
+    W1 -.->|"5회 실패 시"| HELD_TABLE
+```
 
 ### 핵심 매커니즘 4가지
 

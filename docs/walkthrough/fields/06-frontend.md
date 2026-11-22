@@ -19,43 +19,38 @@ PEAKET의 프론트엔드는 대규모 분산 시스템 설계 프레임워크�
 
 ### 프론트엔드 핵심 파이프라인 및 계층 아키텍처
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [1. 브라우저 런타임 최적화]                                            │
-│ • T=0 대기실 바닐라 정적 셸 (gzip JS 15KB / CSS 8KB, React 없음)       │
-│ • Web Locks API & BroadcastChannel (다중 탭 중 단일 리더만 폴링)       │
-│ • Web Worker + OffscreenCanvas (5만 석 Uint8Array 비트맵 렌더러)       │
-│ • FSD 계층 아키텍처 (app -> pages -> widgets -> features -> entities) │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [2. 상태 관리 소유권 단일화]                                           │
-│ • 서버 캐시: TanStack Query    • 전역 UI: Zustand                     │
-│ • 유한 상태 머신: XState v5    • 폼/스키마: React Hook Form + Zod     │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [3. 클라이언트 부하 제어 규칙 (19개 규칙)]                             │
-│ • CORS 사전 요청(OPTIONS) 제거 (text/plain 전송으로 1-RTT 단축)        │
-│ • 거리 기반 적응형 지터 폴링 (0.5s / 5s / 20s)                         │
-│ • 좌석 델타 100ms 마이크로 배치 브로드캐스트                           │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [4. CloudFront CDN & gw-queue]                                         │
-│ • 1,000명 세그먼트 정적 JSON 엣지 캐시 • 핫패스 게이트웨이 직결       │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph BrowserRuntime["1. 브라우저 런타임 최적화"]
+        STATIC_SHELL["T=0 대기실 바닐라 정적 셸<br/>(gzip JS 15KB / CSS 8KB, React 없음)"]
+        WEB_LOCKS["Web Locks API & BroadcastChannel<br/>(다중 탭 중 단일 리더만 폴링)"]
+        WORKER_CANVAS["Web Worker + OffscreenCanvas<br/>(5만 석 Uint8Array 비트맵 렌더러)"]
+        FSD_LAYER["FSD 계층 아키텍처<br/>(app $\rightarrow$ pages $\rightarrow$ widgets $\rightarrow$ features $\rightarrow$ entities $\rightarrow$ shared)"]
+    end
 
-| 최적화 영역 | 핵심 기술 | 달성 지표 및 효과 |
-| :--- | :--- | :--- |
-| **정적 대기실** | 순수 바닐라 HTML/JS 셸 | 번들 23KB (JS 15KB, CSS 8KB), 모바일 단말 크래시 0건 |
-| **다중 탭 제어**| Web Locks & BroadcastChannel | 10개 탭을 열어도 오리진 요청은 1개 탭만 발생 (부하 90% 절감) |
-| **좌석맵 렌더러**| Web Worker + OffscreenCanvas | 5만 석 1초 내 렌더링, 메인 스레드 부하 0 (INP 200ms 이하) |
-| **상태 관리** | TanStack Query, Zustand, XState | 도구 파편화 방지 및 FSD 린트(Steiger) 계층 역참조 차단 |
+    subgraph StateManagement["2. 상태 소유권 매트릭스"]
+        TQ["서버 데이터 캐시: TanStack Query v5"]
+        ZS["전역 클라이언트 UI: Zustand v5"]
+        XS["유한 상태 머신: XState v5 (결제/양도)"]
+        RHF["폼 및 스키마 검증: RHF + Zod"]
+    end
+
+    subgraph ClientLoadShaping["3. 클라이언트 부하 제어 규칙 (19개 규칙)"]
+        CORS_AVOID["CORS 사전 요청(OPTIONS) 제거<br/>(text/plain 전송으로 RTT 단축)"]
+        ADAPT_POLL["거리 기반 적응형 지터 폴링<br/>(0.5s / 5s / 20s, 하한 보장 지터)"]
+        WS_THROTTLE["좌석 델타 100ms 마이크로 배치 브로드캐스트"]
+    end
+
+    subgraph EdgeCDN["4. CloudFront CDN & 게이트웨이"]
+        CF_WAIT["1,000명 세그먼트 정적 JSON 엣지 캐시"]
+        GW_QUEUE["gw-queue (핫패스 게이트웨이 직접 직결)"]
+    end
+
+    STATIC_SHELL --> WEB_LOCKS --> ADAPT_POLL --> CF_WAIT
+    STATIC_SHELL -.->|"진입 요청"| CORS_AVOID --> GW_QUEUE
+    WORKER_CANVAS <--> WS_THROTTLE
+    FSD_LAYER --> TQ & ZS & XS & RHF
+```
 
 ---
 
@@ -105,25 +100,34 @@ PEAKET의 프론트엔드는 대규모 분산 시스템 설계 프레임워크�
 
 100만 명의 관객이 오픈 시각에 몰리는 대기실(SCR-007, 008)은 React의 가상 DOM 오버헤드를 걷어내고 순수 바닐라 HTML/JS로 렌더링된다.
 
-```
-┌─────────────────── 브라우저 다중 탭 환경 (Multi-Tab Coordination) ─────────────────────┐
-│                                                                                        │
-│  [탭 1 (리더 탭)]             [탭 2 (대기 탭)]              [탭 3 (대기 탭)]           │
-│   • navigator.locks.request    • navigator.locks 대기        • navigator.locks 대기    │
-│   • 'queue_polling_leader' 락  • (대기 중 리더 획득 시 승급) • (대기 중 리더 획득 시 승급) │
-│   • 유일하게 CDN 폴링 수행     • 폴링 안 함                  • 폴링 안 함              │
-│            │                          ▲                             ▲                  │
-│            │                          │                             │                  │
-│            └──── BroadcastChannel ────┴─────────────────────────────┘                  │
-│                  (최신 대기 순번 및 입장 토큰 전파)                                    │
-└────────────────────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph MultiTab["브라우저 다중 탭 환경 (Multi-Tab Coordination)"]
+        TAB1["탭 1 (Active)"]
+        TAB2["탭 2 (Background)"]
+        TAB3["탭 3 (Background)"]
+        WEBLOCKS{"navigator.locks.request<br/>('queue_leader_lock')"}
+        BC["BroadcastChannel ('queue_sync_channel')"]
+    end
 
-| 컴포넌트 | 메커니즘 | 다중 탭 부하 방어 효과 |
-| :--- | :--- | :--- |
-| **Web Locks API** | `navigator.locks.request` | 단 하나의 브라우저 탭만 리더로 선출되어 실제 네트워크 폴링 전담 |
-| **BroadcastChannel** | `new BroadcastChannel('queue')` | 리더 탭이 수신한 세그먼트 순번을 형제 탭에 로컬 메모리로 즉시 전파 |
-| **장애 시 자동 승급** | 리더 탭 닫힘 시 Lock 자동 해제 | 대기 중이던 다음 탭이 지연 없이 즉각 리더로 승격하여 폴링 승계 |
+    subgraph PollingEngine["단일 리더 폴링 엔진"]
+        LEADER["리더 탭 (Leader Tab)"]
+        TIMER["적응형 타이머<br/>(0.5s / 5s / 20s + 지터)"]
+        FETCH["CDN 세그먼트 JSON Fetch<br/>(Cache-Control: no-cache)"]
+    end
+
+    subgraph StateUpdate["UI 렌더링"]
+        CALC["로컬 비트맵 결번 계산<br/>(정확한 앞 인원 산출)"]
+        DOM["DOM 텍스트 노드 직접 치환<br/>(innerText 갱신, 리플로우 0)"]
+    end
+
+    TAB1 & TAB2 & TAB3 --> WEBLOCKS
+    WEBLOCKS -->|"락 획득 성공"| LEADER
+    WEBLOCKS -.->|"락 대기 (슬레이브)"| TAB2 & TAB3
+    LEADER --> TIMER --> FETCH --> CALC --> DOM
+    CALC -->|"최신 상태 브로드캐스트"| BC
+    BC -->|"수신 즉시 DOM 갱신"| TAB2 & TAB3
+```
 
 1. **바닐라 정적 셸 배포**:
    - React 19 번들은 기본 66KiB이므로, 대기실은 프레임워크 없이 순수 JavaScript(15KB)와 CSS(8KB)로 단일 빌드된다.
@@ -161,12 +165,6 @@ sequenceDiagram
     Worker->>Worker: O(1) 배열 인덱스 역산 및 좌석 ID 판정
     Worker-->>Main: 좌석 선점 요청 트리거 (holdToken 발급 API 호출)
 ```
-
-| 단계 | 브라우저 보안 및 제어 | 이중 결제 차단 메커니즘 |
-| :--- | :--- | :--- |
-| **세션 서명** | WebCrypto 비대칭키 HMAC 서명 | 브라우저 콘솔이나 봇 스크립트의 주문 변조 차단 (ADR-0124) |
-| **결제 승인 직렬화**| `navigator.locks.request('pay')` | 결제창 팝업 복귀 시 다중 탭에서 승인 API 동시 발송 원천 차단 |
-| **멱등성 확인** | `confirm-{orderId}` 멱등 키 전송 | 네트워크 순단 재시도 시에도 결제사는 단 1건만 최종 승인 |
 
 - **메모리 효율성**: 좌석 5만 개를 JavaScript 객체로 생성하면 10MB 이상의 힙 메모리가 소모된다. PEAKET은 좌석당 1바이트(상태 코드)를 할당하는 `Uint8Array(50000)` 단일 TypedArray(약 50KB)로 좌석 상태를 관리한다.
 - **메인 스레드 격리**: 터치 줌/팬 이벤트만 메인 스레드가 수신하여 오프셋 좌표를 Worker로 넘기며, 렌더링 연산 전체가 Worker에서 수행되므로 화면 조작 반응성(INP)이 200ms 이하로 완벽히 유지된다.

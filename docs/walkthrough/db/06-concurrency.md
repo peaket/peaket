@@ -53,26 +53,26 @@ PEAKET은 단 하나의 동시성 기법에 의존하지 않고, **비즈니스 
 
 ### 3.2 경합 유형별 6대 동시성 제어 무기 배치
 
-```
-[동시성 쓰기 요청 인입]
-          │
-          ▼
-    [경합 특성 판별]
-          │
-          ├──▶ 1. 초고경합 핫스팟 (오픈 좌석 선점) ──▶ [Redis 원자적 Lua 비트맵]
-          ├──▶ 2. 절대적 중복 차단 (결제, 판매 확정) ─▶ [PostgreSQL 부분 유니크 인덱스]
-          ├──▶ 3. 단일 수량 전이 (인원 한도, 재고) ──▶ [원자적 단일 UPDATE ... WHERE]
-          ├──▶ 4. 다중 행 복합 갱신 (양도, 취소)   ──▶ [DB 트랜잭션 행 정렬 비관적 락]
-          └──▶ 5. 분산 단일 리더 (루프, 배치)     ──▶ [k8s Lease + Fencing Token]
-```
+```mermaid
+flowchart TD
+    Req["동시성 쓰기 요청 인입"]
+    CheckPath{"경합 특성 판별"}
 
-| 동시성 패턴 | 적용 대상 도메인 | 핵심 엔지니어링 메커니즘 |
-| :--- | :--- | :--- |
-| **Redis Lua** | 좌석 Soft Hold | 단일 스레드 직렬 실행으로 락 없는 원자적 선점 (p99 < 0.3ms) |
-| **부분 유니크 인덱스** | `seat_sale` 판매 확정 | RDBMS 하드웨어 레벨에서 물리적 오버셀 0건 수학적 차단 |
-| **단일 UPDATE WHERE** | 구매 한도(`quota`) | 행 잠금 대기 시간 없이 단일 SQL 조건절로 원자적 차감 |
-| **행 정렬 비관적 락** | 복수 좌석 주문 | 좌석 ID 오름차순 정렬 후 락 획득으로 교착 상태(Deadlock) 원천 방지 |
-| **Fencing Token** | admission-ctrl 리더 | 단조 증가 번호 대조로 스플릿 브레인 구 리더 잔여 쓰기 기각 |
+    Path1["1. 초고경합 핫스팟 (오픈 정각 좌석 선점)"]
+    Path2["2. 절대적 중복 차단 (결제 승인, 좌석 확정)"]
+    Path3["3. 단일 수량/상태 전이 (한도 차감, 재고)"]
+    Path4["4. 다중 행 복합 갱신 (티켓 양도, 취소, 스캔)"]
+    Path5["5. 분산 리더/지연 쓰기 방어 (입장 제어, 릴레이)"]
+    Path6["6. 작업 큐 워커 경쟁 (알림, 웹훅 발송)"]
+
+    Req --> CheckPath
+    CheckPath --> Path1 --> W1["Redis Lua 원자적 직렬화<br/>(단일 샤드, p99 50ms)"]
+    CheckPath --> Path2 --> W2["PostgreSQL 부분 유니크 인덱스<br/>(물리적 커널 레벨 제약)"]
+    CheckPath --> Path3 --> W3["조건부 갱신 (CAS Update)<br/>(used + n <= limit_count)"]
+    CheckPath --> Path4 --> W4["비관적 행 잠금 (SELECT FOR UPDATE)<br/>(짧은 트랜잭션, 1초 타임아웃)"]
+    CheckPath --> Path5 --> W5["단조증가 펜싱 토큰 & 세대 번호<br/>(fencing_token, seatEpoch)"]
+    CheckPath --> Path6 --> W6["FOR UPDATE SKIP LOCKED<br/>(경합 없는 안전한 배치 풀링)"]
+```
 
 1. **인메모리 원자적 직렬화 (Redis Lua)**:
    - 좌석 홀드(`hold.lua`), 실시간 1인 예매 쿼터 카운터, 대기열 순번 발급(`INCR`).
@@ -119,11 +119,6 @@ sequenceDiagram
     Storage-->>WorkerA: 412 Precondition Failed (유령 쓰기 완벽 차단!)
 ```
 
-| 단계 | 메커니즘 | 분산 시스템 방어 결함 |
-| :--- | :--- | :--- |
-| **리더 승격** | k8s Lease 만료 후 번호 증가 | 장애 노드 격리 후 새 리더에게 단조 증가 에포크(Fencing Token) 발급 |
-| **구 리더 쓰기 기각**| 스토리지의 단조 증가 토큰 대조 | 롱 GC에서 깨어난 구 리더의 잔여 쓰기 패킷을 100% 무효화 |
-
 #### PEAKET의 4대 펜싱/세대 번호 명세
 1. **홀드 펜싱 토큰 (`seat_hold.fencing_token`)**:
    - Redis `hold.lua`가 좌석 선점 시마다 회차별 단조증가 번호를 채번한다.
@@ -143,31 +138,29 @@ sequenceDiagram
 
 네트워크 재시도, 브라우저 다중 클릭, 메시지 브로커 재전송으로 인한 중복 실행을 3개 계층에서 철저히 걸러낸다:
 
-```
-[쓰기 요청 수신 (Idempotency-Key 포함)]
-                   │
-                   ▼
-         [UUIDv4 형식 검증] ──(비정상)──▶ [400 idempotency-key-invalid]
-                   │ (정상)
-                   ▼
-    [DB order_idempotency에 행 존재하는가?]
-                   │
-       ┌───────────┴───────────┐
-       │ (예: 이미 처리됨)     │ (아니오: 신규 요청)
-       ▼                       ▼
-[동일 요청 지문 대조]   [업무 쓰기 및 멱등 행을 단일 ACID 트랜잭션으로 커밋]
-       │                       │
- ┌─────┴─────┐                 ▼
- │동일: 재현 │불일치: 변조   [201 Created 응답 반환]
- ▼           ▼
-[이전 응답] [409 Conflict]
-```
+```mermaid
+flowchart TD
+    Req["쓰기 요청 수신 (Idempotency-Key 포함)"]
+    Fmt{"UUIDv4 형식 검증"}
+    Bad["400 idempotency-key-invalid"]
+    Find{"DB order_idempotency에<br/>(account_id, op, key) 행이 존재하는가?"}
+    Run["업무 쓰기 및 멱등 행을<br/>단일 ACID 트랜잭션의 첫 문장으로 커밋"]
+    Same{"요청 지문 (SHA-256)이<br/>기존 기록과 일치하는가?"}
+    Reused["422 idempotency-key-reused<br/>(요청 변조 거부)"]
+    Done{"기존 요청이<br/>완전히 커밋되었는가?"}
+    Replay["저장된 최초 응답<br/>그대로 반환 (Replay)"]
+    Wait["1초 대기 후 미완료 시<br/>409 idempotency-request-in-progress 반환"]
 
-| 검증 단계 | 동작 내용 | 이중 처리 방어 효과 |
-| :--- | :--- | :--- |
-| **형식 검증** | UUIDv4 정규식 검사 | 임의 문자열로 인한 인덱스 파편화 방지 |
-| **지문 대조** | `request_hash = SHA256(payload)` | 동일 키로 다른 금액이나 좌석 요청 시 즉각 409 차단 |
-| **단일 트랜잭션** | 비즈니스 쓰기와 멱등 행 동시 커밋 | 멱등 행만 남고 주문이 누락되는 상태 불일치 원천 제거 |
+    Req --> Fmt
+    Fmt -->|"불일치"| Bad
+    Fmt -->|"일치"| Find
+    Find -->|"신규 키"| Run
+    Find -->|"기존 키"| Same
+    Same -->|"지문 불일치"| Reused
+    Same -->|"지문 일치"| Done
+    Done -->|"처리 완료"| Replay
+    Done -->|"처리 중"| Wait
+```
 
 | 계층 | 멱등 키 및 저장소 | 유효 범위 및 수명 | 중복 방어 메커니즘 |
 | :---: | :--- | :--- | :--- |

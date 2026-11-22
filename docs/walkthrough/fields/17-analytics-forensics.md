@@ -20,29 +20,37 @@
 
 ### 분석 및 사후 포렌식 종합 파이프라인
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [Kafka 이벤트 버스 (T+60분 온세일 종료 시점)]                          │
-│ • 거래 및 텔레메트리 원천 스트림 (trade.*, telemetry.*)               │
-│ • T+60분 원천 기록 동결 (SHA-256 해시 체인 및 Merkle Root 앵커링)     │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-    ┌───────────────────────────────┴───────────────────────────────┐
-    │ (가명화 ETL 스트리밍)                                         │ (암호화 원본 보존)
-    ▼                                                               ▼
-┌─────────────────────────────────────────┐  ┌───────────────────────────┐
-│ [비즈니스 분석 경로 (ClickHouse & S3)]  │  │ [포렌식 감사 경로 (S3 Cold)]│
-│ • Bronze: 가명화 원천 이벤트 적재       │  │ • 원본 이벤트 영구 보존   │
-│ • Silver: 세션별 결합 타임라인 집계     │  │ • KMS WORM(변조 불가) 보관│
-│ • Gold: 차수별 판매/전환율 다차원 마트  │  │ • 분쟁 시 포렌식 리플레이  │
-└─────────────────────────────────────────┘  └───────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph EventStream["Kafka 이벤트 버스 (T+60분 종료 시점)"]
+        RawEvents["거래/텔레메트리 스트림 (trade.*, telemetry.*)"]
+        Freeze["T+60분 원천 기록 고정 (SHA-256 해시 사슬)"]
+        RawEvents --> Freeze
+    end
 
-| 저장소 경로 | 보관 데이터 및 암호화 수준 | 분석 및 법적 활용 |
-| :--- | :--- | :--- |
-| **ClickHouse 분석** | 개인정보 가명화(HMAC) 이벤트 | 실시간 매출, 봇 탐지율, 단계별 이탈률 0.5초 쿼리 분석 |
-| **S3 Cold 아카이브**| 원본 이벤트 + Merkle 증명서 | WORM(Write Once Read Many) 정책으로 5년간 법적 증거 보존 |
-| **포렌식 리플레이** | 초 단위 타임라인 재현 | 매크로 부정 예매 적발 시 사법 기관 제출용 입증 로그 생성 |
+    subgraph AnalyticsMedallion["비즈니스 분석 경로 (가명 ClickHouse & S3)"]
+        Bronze["Bronze: 원시 이벤트 가명화 수집"]
+        Silver["Silver: 회차별 HMAC 익명화 (개인식별 배제)"]
+        Gold["Gold: 15개 스타 스키마 팩트마트 (R0~R3 마감)"]
+        Bronze --> Silver --> Gold
+        Gold --> BizReport["공연 정산 리포트 및 정책 수립"]
+    end
+
+    subgraph ForensicInvestigation["사후 포렌식 수사 경로 (실명 inv DB & 워커)"]
+        InvIngest["inv-ingest: 실명 원천 적재 (공연일 + 30일 보존)"]
+        GraphMatch["R1~R6 다차원 연결 그래프 분석<br/>(동일기기/결제/연락처 묶음 탐지)"]
+        CaseDesk["사건 작업대 (SCR-071): 조사관 배정"]
+        Appeal["소명 절차 (3일) & 양도 잠금 (최대 14일)"]
+        TwoPerson["2인 승인 (Commander 실질 심사)"]
+        ExecAction["예매 강제 취소 (전액 환급) & 계정 정지"]
+        EvidenceLock["증거 묶음 생성 (S3 Object Lock 영구보존)"]
+        
+        InvIngest --> GraphMatch --> CaseDesk --> Appeal --> TwoPerson --> ExecAction --> EvidenceLock
+    end
+
+    Freeze -->|"가명 변환 파이프라인"| Bronze
+    Freeze -->|"실명 수사 데이터 적재"| InvIngest
+```
 
 ### 핵심 3대 서브시스템
 

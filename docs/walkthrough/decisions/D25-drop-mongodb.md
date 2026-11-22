@@ -54,25 +54,42 @@
 
 ## 3. 고른 이유와 상세 아키텍처 다이어그램
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [클라이언트 & CDN 캐시 (ISR 300초)]                                    │
-│ • 상품 상세 조회 트래픽 95% 이상을 엣지 캐시가 전담                    │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ (캐시 미스 시 원 서버)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [PostgreSQL JSONB + B-Tree / GIN 인덱스]                               │
-│ • MongoDB 별도 운영 클러스터 완전 제거 (인프라 파편화 해소)            │
-│ • 구조화된 정형 데이터(주문/회원)와 유연한 비정형 메타(공연상세)를     │
-│   단일 PostgreSQL 인스턴스에서 통합 관리                               │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph ClientLayer ["1. 클라이언트 & CDN 캐시"]
+        User["사용자 웹/앱"]
+        CDN["CloudFront CDN (ISR 300초)"]
+        User -->|상품 상세 조회| CDN
+    end
 
-| 항목 | MongoDB 유지 시 단점 | PostgreSQL JSONB 채택 효과 |
-| :--- | :--- | :--- |
-| **운영 복잡성** | NoSQL 별도 백업, 모니터링, 페일오버 구축 | PostgreSQL 단일 스택으로 운영 비용 및 장애 표면 최소화 |
-| **트랜잭션 결합** | RDBMS 주문과 NoSQL 상품 간 트랜잭션 단절 | 주문과 공연 재고 변경을 단일 ACID 트랜잭션으로 원자적 갱신 |
+    subgraph ServiceLayer ["2. Shop 서비스 & 계약 검증"]
+        ShopAPI["Shop Service (@peaket/shop)"]
+        ZodSchema["Zod 스키마 검증 (@peaket/validation)<br/>ProductAttributesSchema.parse()"]
+        ShopAPI --> ZodSchema
+    end
+
+    subgraph DBLayer ["3. Aurora PostgreSQL Core DB (단일 트랜잭션 커밋)"]
+        direction TB
+        subgraph TxBlock ["BEGIN TRANSACTION"]
+            T1["INSERT INTO product<br/>(id, type, price, commission_rate_bp, attributes jsonb)"]
+            T2["INSERT INTO product_inventory<br/>(product_id, available_stock, reserved_stock)"]
+            T3["INSERT INTO outbox_event<br/>(event_type: 'SHOP_PRODUCT_CREATED')"]
+        end
+        T1 --> T2 --> T3
+    end
+
+    subgraph AsyncWorker ["4. 비동기 릴레이 & 페이지 재검증"]
+        OutboxRelay["Outbox Polling Relay (100ms)"]
+        Kafka["Kafka (product-events 토픽)"]
+        RevalidateWorker["Next.js On-Demand ISR Revalidator"]
+        OutboxRelay --> Kafka --> RevalidateWorker
+        RevalidateWorker -.->|캐시 갱신 태그 퍼지| CDN
+    end
+
+    CDN -.->|Cache Miss| ShopAPI
+    ZodSchema --> TxBlock
+    T3 -.-> OutboxRelay
+```
 
 ### 핵심 매커니즘 4가지
 

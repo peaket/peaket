@@ -38,26 +38,39 @@
 
 PEAKET은 **"사용자 체감 응답 속도는 인메모리 Soft Hold가 책임지고, 금융/법적 원장 불변성은 PostgreSQL Hard Sale이 영구 수호한다"**는 원칙 아래 **3중 방어선(3-tier Zero Oversell Defense)**을 구축했다.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [1선 방어] Redis 원자적 Lua 홀드 (In-Memory Soft Hold)                 │
-│ • 1,000명 동시 경합 시 단일 스레드 직렬 실행 (hold.lua)                │
-│ • 5만 석 6.25KB 비트맵 원자적 검사 및 7분 만료 TTL 설정 (p99 50ms)     │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ (승자 1명만 결제창 진입)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [2선 방어] PostgreSQL 부분 유니크 인덱스 (RDBMS Hard Sale)              │
-│ • INSERT INTO seat_sale (event_id, seat_id, 'PENDING')                │
-│ • 부분 유니크: UNIQUE (event_id, seat_id) WHERE status IN (PENDING,SOLD)│
-│ • Redis 마스터 증발로 2명이 동시 유입되어도 DB 레벨에서 1명 즉시 차단  │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph Tier1["[1선] Redis 원자적 Lua 홀드 (Soft Hold)"]
+        direction TB
+        LuaReq["사용자 좌석 클릭 인입<br/>(1,000명 동시 경합)"]
+        LuaExec["hold.lua 단일 스레드 직렬 실행<br/>- 5만 석 6.25KB 비트맵 검사<br/>- 1인 구매 한도 검사<br/>- 7분 만료 TTL 설정"]
+        LuaWinner["1명 선점 성공<br/>(p99 50ms 이내)"]
+        LuaLoser["999명 즉각 탈락<br/>(409 Conflict 반환)"]
+        LuaReq --> LuaExec
+        LuaExec -->|"비트 0 -> 1"| LuaWinner
+        LuaExec -->|"이미 비트 1"| LuaLoser
+    end
 
-| 방어선 | 담당 기술 | 처리 속도 및 보장 불변식 |
-| :--- | :--- | :--- |
-| **1선 방어** | Redis Lua 비트맵 | p99 50ms 초고속 선점, 인기 좌석 1:1,000 클릭 경합 흡수 |
-| **2선 방어** | PostgreSQL 유니크 인덱스 | 분산 락 오류나 Redis 페일오버 중에도 물리적 오버셀 정확히 0건 사수 |
+    subgraph Tier2["[2선] PostgreSQL 부분 유니크 인덱스 (Hard Sale)"]
+        direction TB
+        PGReq["결제창 인증 완료 후 승인 요청"]
+        PGInsert["INSERT INTO seat_sale (status='PENDING')"]
+        PGIndex{"부분 유니크 인덱스 검사<br/>UNIQUE (event_id, seat_id)<br/>WHERE status IN ('PENDING', 'SOLD')"}
+        PGSuccess["유니크 검증 통과 (1행 삽입)<br/>-> 외부 PG 승인 API 호출"]
+        PGFail["23505 Unique Violation 발생!<br/>-> 승인 API 미호출, 즉시 409 종료<br/>(과금 0원, 환불 0건)"]
+        PGReq --> PGInsert --> PGIndex
+        PGIndex -->|"유니크 통과"| PGSuccess
+        PGIndex -->|"중복 충돌"| PGFail
+    end
+
+    subgraph Tier3["[3선] 단조증가 펜싱 토큰 & 회차 세대 (Fencing & Epoch)"]
+        direction TB
+        FenceCheck["비동기 릴레이 & 분산 워커<br/>- fencing_token 단조증가 검증<br/>- seatEpoch 세대 번호 대조<br/>-> 늦게 도착한 지연 쓰기(Stale Write) 무조건 폐기"]
+    end
+
+    LuaWinner -.->|"결제창 진입 (30~60초)"| PGReq
+    PGSuccess -.->|"Kafka trade.seats"| FenceCheck
+```
 
 ---
 
@@ -103,24 +116,15 @@ ON seat_sale (event_id, seat_id)
 WHERE status IN ('PENDING', 'SOLD');
 ```
 
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: "결제 접수 후 판매 확정 트랜잭션 시작"
+    PENDING --> SOLD: "외부 PG 승인 성공 (200 OK)"
+    PENDING --> [*]: "외부 PG 승인 실패 / 타임아웃 (PENDING 행 DELETE)"
+    SOLD --> PENDING: "가상계좌 입금 오류 시 보정 재진입"
+    SOLD --> RETURNED: "고객 예매 취소 / 환불 확정"
+    RETURNED --> PENDING: "취소표 발생 시 신규 예매자 선점"
 ```
-┌──────────────┐     결제 접수 트랜잭션     ┌──────────────┐
-│  [*] 시작    │───────────────────────────▶│   PENDING    │
-└──────────────┘                            └──────┬───────┘
-                                                   │
-                                                   │ 외부 PG 승인 성공 (200 OK)
-                                                   ▼
-┌──────────────┐     사용자 예매 취소       ┌──────────────┐
-│   RETURNED   │◀───────────────────────────│     SOLD     │
-│ (재판매 회수)│                            │  (판매 확정) │
-└──────────────┘                            └──────────────┘
-```
-
-| 상태 | 유효 조건 | 부분 유니크 인덱스 대상 여부 |
-| :--- | :--- | :--- |
-| **PENDING** | 결제 진행 중 (최대 10분) | **포함 (유니크 강제)**: 동일 좌석 추가 PENDING 차단 |
-| **SOLD** | 결제 승인 완료 확정 | **포함 (유니크 강제)**: 동일 좌석 재판매 불가 |
-| **RETURNED**| 예매 취소 및 환불 완료 | **제외**: 유니크 인덱스 대상에서 빠져 취소표 재판매 허용 |
 
 1. **절대적 오버셀 원천 차단**:
    - Redis 마스터 장애로 인한 쓰기 유실로 두 명의 사용자에게 동일 좌석의 Soft Hold가 발급되었더라도, PostgreSQL 커널 레벨의 부분 유니크 인덱스에서 두 번째 INSERT 요청은 `23505 Unique Violation` 에러를 발생시키며 즉각 롤백된다.
@@ -197,11 +201,6 @@ sequenceDiagram
     GW->>PG: UPDATE seat_sale SET status='SOLD' WHERE seat_id='12A'
     GW-->>UserA: 200 OK (예매 및 결제 최종 완료!)
 ```
-
-| 케이스 | Redis 1단계 판정 | PostgreSQL 2단계 동작 |
-| :--- | :--- | :--- |
-| **승자 A** | 0비트 확인 $\rightarrow$ 1비트 원자적 세팅 성공 (201) | `seat_sale`에 PENDING 행 정상 삽입 및 결제 승인 진행 |
-| **패자 B** | 이미 1비트 세팅 확인 $\rightarrow$ 즉각 409 Conflict 거절 | DB 및 결제창으로 유입되지 않아 불필요한 백엔드 부하 0 |
 
 ---
 

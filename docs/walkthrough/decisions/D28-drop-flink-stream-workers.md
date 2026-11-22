@@ -52,24 +52,44 @@ Kafka의 비즈니스 이벤트 토픽을 소비하여 처리해야 하는 백�
 
 ## 3. 고른 이유와 상세 아키텍처 다이어그램
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [Kafka MSK 클러스터 (sales-events, bot-signals)]                       │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [경량 TypeScript 스트림 워커 풀 (Node.js Consumer)]                    │
-│ • 무거운 Java / Apache Flink 클러스터 인프라 완전 제거                 │
-│ • 마이크로 배치 집계 후 ClickHouse 및 Redis에 초고속 적재              │
-│ • JVM 힙 메모리 및 복잡한 체크포인트 운영 부담 0                       │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph KafkaBrokers ["1. Kafka 클러스터 (MSK)"]
+        TopicSales["sales-events 토픽 (파티션 12개)"]
+        TopicBot["bot-signals 토픽 (파티션 12개)"]
+    end
 
-| 스트리밍 엔진 | Apache Flink 대비 | 경량 Node.js 워커 이점 |
-| :--- | :--- | :--- |
-| **운영 오버헤드** | Java JVM 튜닝 및 상태 백엔드 관리 필요 | 모노레포와 100% 동일한 TypeScript 언어 및 빠른 디버깅 |
-| **리소스 비용** | 상시 고사양 마스터/태스크 노드 비용 | 파드 단위 수평 확장으로 인프라 비용 대폭 절감 |
+    subgraph TSWorkers ["2. TypeScript 경량 스트림 워커 풀 (K8s Pods)"]
+        direction TB
+        W1["Ops Real-time Worker (ops-rt)<br/>- Confluent JS Consumer<br/>- 250ms 마이크로 배치 버퍼링"]
+        W2["Analytics Bronze Worker<br/>- KMS 가명화 & PII 마스킹"]
+        W3["Bot Window Re-assessor<br/>- 10분 Sliding Counter (Redis)"]
+        W4["Forensic Loader (inv-ingest)<br/>- 부정 예매 증거 적재"]
+    end
+
+    subgraph ClickHouseOps ["3. ClickHouse 단일 분석 저장소"]
+        OpsRaw["ops_rt_events (원시 파티션 테이블)"]
+        OpsQuery["대시보드 실시간 조회 쿼리<br/>SELECT count(DISTINCT eventKey), sum(amount)<br/>WHERE event_time >= NOW() - INTERVAL 10 MINUTE"]
+        OpsRaw --> OpsQuery
+    end
+
+    subgraph StorageSinks ["4. 저장소 반영 & 원자적 오프셋 커밋"]
+        RedisSession["Redis 세션·캐시 클러스터"]
+        BronzeRaw["analytics_bronze_events"]
+    end
+
+    TopicSales --> W1
+    TopicSales --> W2
+    TopicBot --> W3
+    TopicSales --> W4
+
+    W1 -->|단순 고속 INSERT| OpsRaw
+    W2 -->|가명화 레코드 적재| BronzeRaw
+    W3 -->|카운터 갱신| RedisSession
+    
+    OpsRaw -.->|Write 성공 확인 후| W1
+    W1 -.->|"수동 오프셋 동기 커밋 (at-least-once)"| TopicSales
+```
 
 ### 핵심 매커니즘 4가지
 

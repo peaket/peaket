@@ -20,24 +20,50 @@ PEAKET의 화면 아키텍처는 **4개 독립 웹 애플리케이션(소비자 
 
 ### 4대 애플리케이션 화면 아키텍처 다이어그램
 
-```
-┌─────────────────────────────────┐           ┌─────────────────────────────────────────┐
-│ [1. 소비자 웹 (Consumer Web)]   │           │ [2. 파트너 & 운영 & 현장 콘솔]          │
-│ • SCR-001~006 홈, 상세, 로그인  │           │ • 파트너 콘솔 (SCR-021~027)             │
-│ • SCR-007~009 로비, 대기실      │           │   공연/좌석 등록, 실시간 판매 현황 조회 │
-│ • SCR-010~013 좌석선택, 결제창  │           │ • 실시간 관제탑 콘솔 (SCR-028~034)      │
-│ • SCR-014~020 발권, 예매내역    │           │   메트릭 대시보드, 2인 승인 비상제어   │
-│ • SCR-041~045 티켓 월렛, 양도   │           │ • 현장 게이트 스캐너 PWA (SCR-035~040)  │
-│                                 │           │   오프라인 QR 검표, 기기 페어링         │
-└─────────────────────────────────┘           └─────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph FanApp["1. 소비자 웹 (Consumer Web, 35화면)"]
+        HOME["SCR-001 홈 / 탐색"]
+        DETAIL["SCR-002 공연 상세 (POL-004 고지)"]
+        LOBBY["SCR-007 로비 (T-10분 정적 셸)"]
+        QUEUE["SCR-008 대기열 (정확한 앞 인원)"]
+        SEAT["SCR-010 5만 석 좌석맵 (Canvas Worker)"]
+        PAY["SCR-011 주문/결제 $\rightarrow$ SCR-012 결과"]
+        WALLET["SCR-013 모바일 티켓 (15초 회전 QR)"]
+        VERIFY["SCR-009 추가 검증 큐 (Turnstile)"]
+        PROOF["SCR-019 셔플 암호학적 검증"]
+    end
 
-| 앱 구분 | 화면 수 | 기술 스택 및 주요 렌더링 전략 |
-| :--- | :--- | :--- |
-| **소비자 웹** | 35개 화면 | Next.js App Router (핫패스 대기실은 순수 바닐라 정적 셸) |
-| **파트너 콘솔** | 12개 화면 | Next.js 대시보드, 좌석 배치 위젯 (TanStack Table) |
-| **관제탑 콘솔** | 15개 화면 | 실시간 SSE 스트림 연동, 2인 승인 모달 팝업 |
-| **게이트 스캐너**| 7개 화면 | 바닐라 PWA, IndexedDB 로컬 카탈로그, WebCrypto 비대칭키 검증 |
+    subgraph PartnerApp["2. 파트너 콘솔 (Partner Console, 12화면)"]
+        P_ROUND["SCR-063 공연 개요 (회차 허브)"]
+        P_EDITOR["SCR-022 좌석맵 그래픽 에디터"]
+        P_SUBMIT["SCR-021 공연 등록 $\rightarrow$ 판매 승인 신청"]
+        P_DASH["SCR-026 실시간 판매 대시보드"]
+        P_SETTLE["SCR-027 정산 리포트 / 명단"]
+    end
+
+    subgraph OpsApp["3. 관제 콘솔 (Control Console, 19화면, 다크모드)"]
+        O_DASH["SCR-029 온세일 중앙 대시보드"]
+        O_CMD["SCR-030 12개 운영 명령 하달 (dry-run, 2인 승인)"]
+        O_AUDIT["SCR-031 감사 로그 불변 기록"]
+        O_REPLAY["SCR-069 포렌식 리플레이 $\rightarrow$ SCR-071 사건 작업대"]
+        O_LEGAL["SCR-032 법정 조치 (24h 암표 차단)"]
+    end
+
+    subgraph ScannerApp["4. 게이트 스캐너 (Gate Scanner PWA, 5화면, 라이트모드)"]
+        S_LOGIN["SCR-036 RFC 8628 기기 승인 로그인"]
+        S_PREP["SCR-033 검표 준비 (로컬 서명키 동기화)"]
+        S_SCAN["SCR-034 티켓 스캔 / 150ms 로컬 판정"]
+        S_SYNC["SCR-035 영구 큐 동기화 상태"]
+    end
+
+    DETAIL --> LOBBY --> QUEUE --> SEAT --> PAY --> WALLET
+    QUEUE -.->|"의심 트래픽"| VERIFY -.->|"통과"| QUEUE
+    QUEUE -.->|"결과 재현"| PROOF
+    WALLET ==>|"현장 스캔"| S_SCAN
+    O_CMD -.->|"3초 킬스위치 제어"| FanApp
+    P_SUBMIT -.->|"승인 요청"| O_DASH
+```
 
 ---
 
@@ -98,27 +124,44 @@ IA·유저플로우·화면설계서([docs/planning/04-ia-flows-screens.md](../.
 
 ### 3.2 핵심 예매 및 대기실 유저 플로우 (F-01, F-02, F-03)
 
-```
-[SCR-002 공연상세] ──▶ [SCR-007 사전로비] ──(T=0 셔플)──▶ [SCR-008 대기실]
-                             │                                 │
-                             │ (봇 의심 탐지)                  │ (순번 도달)
-                             ▼                                 ▼
-                     [SCR-009 추가검증]               [SCR-010 좌석맵 선택]
-                                                               │
-                                                               │ (Soft Hold 성공)
-                                                               ▼
-[SCR-014 예매완료] ◀── [SCR-013 외부 결제창] ◀── [SCR-011 주문서 작성]
-        │
-        ▼
-[SCR-041 모바일 티켓 월렛] ──(현장 검표)──▶ [SCR-035 게이트 스캐너 판정]
-```
+```mermaid
+flowchart TD
+    subgraph F01_F02["F-01 & F-02: 대기열 및 좌석 예매 여정"]
+        D_PAGE["공연 상세 (SCR-002)<br/>정렬 방식 표준 문구 고지"]
+        LOBBY_ROOM["오픈 전 로비 (SCR-007)<br/>순번 없는 참가 토큰 발급"]
+        T0_SHUFFLE{"T=0 오픈 도달"}
+        WAIT_ROOM["정규 대기열 (SCR-008)<br/>정확한 앞 인원 & 예상 시간"]
+        AFTER_OPEN["오픈 후 도착자<br/>(2초 동시 도착 묶음)"]
+        ADMIT_CONFIRM["입장 확정 (FR-008)<br/>purchase-svc 세션 생성"]
+        SEAT_MAP["5만 석 좌석맵 (SCR-010)<br/>Worker Canvas 렌더링"]
+        SEAT_HOLD["좌석 홀드 (7분 TTL)<br/>1인 1석 원자적 선점"]
+    end
 
-| 여정 단계 | 전환 화면 | 핵심 사용자 경험 및 시스템 보장 |
-| :--- | :--- | :--- |
-| **대기 단계** | SCR-007 $\rightarrow$ 008 | 로비 참가 후 drand 난수 셔플로 순번 확정, 1초 적응형 폴링 |
-| **선점 단계** | SCR-010 | 5만 석 Web Worker 캔버스 렌더링, 1클릭 Soft Hold (7분 TTL) |
-| **결제 단계** | SCR-011 $\rightarrow$ 013 | PENDING 부분 유니크 인덱스 확보 후 외부 PG사 결제 승인 |
-| **발권/입장** | SCR-014 $\rightarrow$ 041 $\rightarrow$ 035 | ECDSA 전자서명 15초 동적 QR 발급 및 오프라인 즉각 검표 |
+    subgraph F03["F-03: 주문 및 2단계 결제 Saga"]
+        ORDER_FORM["주문/결제 정보 입력 (SCR-011)"]
+        PENDING_LOCK["좌석 PENDING 상태 전이<br/>(결제창 30분 열림 보장)"]
+        PG_WINDOW["PG사 인증창 (토스/포트원)"]
+        AUTH_OK{"인증 성공 여부"}
+        CONFIRM_CALL["서버 결제 승인 요청<br/>(POST /v1/orders/{orderId}/payment-acceptance)"]
+        PAY_RESULT["결제 완료 (SCR-012)<br/>월렛 티켓 즉시 발급 (SCR-013)"]
+        FAIL_EXPIRE["홀드 만료 및 3초 내 재노출<br/>좌석맵 복귀 안내"]
+    end
+
+    D_PAGE -->|"T-10분 진입"| LOBBY_ROOM
+    D_PAGE -->|"T>0 진입"| AFTER_OPEN
+    LOBBY_ROOM --> T0_SHUFFLE
+    T0_SHUFFLE -->|"Commit-Reveal 셔플"| WAIT_ROOM
+    AFTER_OPEN -->|"로비 참가자 뒤 배치"| WAIT_ROOM
+    WAIT_ROOM -->|"serving >= 내 순번"| ADMIT_CONFIRM
+    ADMIT_CONFIRM --> SEAT_MAP
+    SEAT_MAP -->|"좌석 클릭"| SEAT_HOLD
+    SEAT_HOLD --> ORDER_FORM
+    ORDER_FORM --> PENDING_LOCK --> PG_WINDOW
+    PG_WINDOW --> AUTH_OK
+    AUTH_OK -->|"성공"| CONFIRM_CALL --> PAY_RESULT
+    AUTH_OK -->|"실패 / 타임아웃"| FAIL_EXPIRE
+    SEAT_HOLD -.->|"7분 무입력 만료"| FAIL_EXPIRE
+```
 
 ---
 
@@ -127,25 +170,39 @@ IA·유저플로우·화면설계서([docs/planning/04-ia-flows-screens.md](../.
 공연장 현장 네트워크 단절에 대비한 PWA 스캐너의 완전 오프라인 검표 메커니즘을 규정한다.
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    participant Scanner as "현장 게이트 스캐너 PWA"
-    participant Console as "운영 책임자 콘솔"
+flowchart TD
+    subgraph StaffAuth["F-09: 스캐너 RFC 8628 기기 승인"]
+        SCANNER_QR["스캐너 화면에 일회용 승인 QR 표출 (SCR-036)"]
+        STAFF_PHONE["스태프 개인 스마트폰으로 QR 스캔 (SCR-051)"]
+        AUTH_CONFIRM["스태프 계정 확인 및 8자리 코드 승인"]
+        DEVICE_TOKEN["스캐너에 기기 세션 DPoP 토큰 발급"]
+    end
 
-    Scanner->>Console: 일회용 승인 QR 표출 (SCR-036)<br/>(RFC 8628 기기 코드)
-    Console->>Console: QR 코드 스캔 (SCR-033)
-    Console->>Console: 스태프 권한 인가<br/>(게이트 번호·자격 증명 바인딩)
-    Console->>Scanner: 기기 바인딩 완료 토큰 발급<br/>(ECDSA 서명 검증 키 다운로드)
-    Scanner->>Scanner: 100% 오프라인 검표 모드 진입 (SCR-035)
+    subgraph OfflineGate["F-04: 오프라인 회전 QR 입장 검표"]
+        CAMERA["카메라 뷰파인더 구동 (SCR-034, Web Worker 디코딩)"]
+        QR_PARSE["티켓 15초 회전 QR 디코딩 (ECDSA P-256 서명, 타임스탬프)"]
+        TIME_CHECK{"단말 시계 기준 ±30초 유효?"}
+        SIG_CHECK{"로컬 공개키 전자서명 유효?"}
+        LOCAL_DB{"단말 로컬 SQLite 기입장 여부?"}
+        PASS["입장 통과 (초록 화면, 150ms 이내)"]
+        REJECT["입장 거부 (빨간 화면, 사유 고지)"]
+        LOG_QUEUE["로컬 영구 SQLite 큐에 기록 저장"]
+        SYNC_LOOP["네트워크 복구 시 60초 주기 서버 동기화 (SCR-035)"]
+    end
 
-    Note over Scanner: 당일 회차 공개키·취소 목록을 로컬에 캐싱
+    SCANNER_QR --> STAFF_PHONE --> AUTH_CONFIRM --> DEVICE_TOKEN
+    DEVICE_TOKEN --> CAMERA
+    CAMERA --> QR_PARSE --> TIME_CHECK
+    TIME_CHECK -->|"유효"| SIG_CHECK
+    TIME_CHECK -->|"만료"| REJECT
+    SIG_CHECK -->|"서명 일치"| LOCAL_DB
+    SIG_CHECK -->|"위조"| REJECT
+    LOCAL_DB -->|"최초 입장"| PASS
+    LOCAL_DB -->|"이미 입장함"| REJECT
+    PASS --> LOG_QUEUE
+    REJECT --> LOG_QUEUE
+    LOG_QUEUE --> SYNC_LOOP
 ```
-
-| 단계 | 프로토콜 및 동작 | 보안 보장 |
-| :--- | :--- | :--- |
-| **1. 기기 코드 표출** | 스캐너 화면에 RFC 8628 기반 동적 QR 생성 | 미인가 단말의 게이트 검표 앱 임의 설치 원천 차단 |
-| **2. 책임자 인가** | 관리자 권한 콘솔로 현장 스캔 승인 | 게이트 번호(1~20번) 및 스태프 자격 증명 바인딩 |
-| **3. 카탈로그 수령** | 당일 회차 공개키 및 취소 목록 로컬 캐싱 | 현장 네트워크 두절 시에도 오프라인 단독 판정 완비 |
 
 ---
 

@@ -51,21 +51,37 @@
 
 ## 3. 고른 이유와 상세 아키텍처 다이어그램
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [공개 저장소: github.com/peaket-team/peaket (단일 모노레포)]           │
-│                                                                        │
-│   • docs/     : 정본 설계서, Walkthrough 해설서, ADR 182건 전수        │
-│   • apps/     : 10개 마이크로서비스 및 4대 프론트엔드 웹/PWA           │
-│   • packages/ : 공유 도메인 타입, Drizzle 스키마, 디자인 시스템 토큰   │
-│   • tools/    : 정형 검증 Quint 모델, 벤치마크 스트레스 스크립트       │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph PublicRepo ["공개 저장소: github.com/peaket-team/peaket (Monorepo)"]
+        direction TB
+        Docs["docs/ (정본 설계서, Walkthrough, ADR 182건)"]
+        Apps["apps/ (10개 마이크로서비스 + 4개 프론트엔드)"]
+        Packages["packages/ (@peaket/platform, @peaket/contracts)"]
+        Deploy["deploy/ (Terraform IaC, Helm Charts, Argo CD 매니페스트)"]
+        LoadTest["loadtest/ (k6 부하 시나리오, Toxiproxy 카오스 스크립트)"]
+        
+        Packages -->|pnpm workspace: 프로토콜| Apps
+        Apps -.->|Affected CI 빌드| Deploy
+    end
 
-| 디렉터리 | 구성 내용 | 모노레포 도입 이점 |
-| :--- | :--- | :--- |
-| **apps / packages**| 전사 서비스 및 공유 패키지 | 스키마 변경 시 프론트/백엔드 타입 즉시 컴파일 검증 (동기화 100%) |
-| **docs / tools** | 아키텍처 정본 및 검증 도구 | 코드와 문서의 단일 커밋 동기화로 설계와 구현 간 괴리 0건 |
+    subgraph PrivateRepo ["비공개 저장소: github.com/peaket-team/peaket-bots (Private)"]
+        direction TB
+        Level1["Level 1: 단순 HTTP 스크립트 봇"]
+        Level2["Level 2: 헤드리스 브라우저 멀티 세션 봇"]
+        Level3["Level 3: 인간 입력 궤적 모방형 지능형 봇 (POL-026 극비)"]
+    end
+
+    subgraph Tooling ["개발 생산성 & 거버넌스 도구"]
+        Turbo["Turborepo (원격 캐싱 & 변경 의존 그래프 추적)"]
+        CodeOwners["CODEOWNERS (폴더별 가상 팀 코드 리뷰 규칙)"]
+        ContractCheck["Contract-Check CI (하위 호환성 깨짐 자동 검출)"]
+    end
+
+    Turbo --> PublicRepo
+    CodeOwners --> PublicRepo
+    ContractCheck --> PublicRepo
+```
 
 ### 핵심 매커니즘 4가지
 

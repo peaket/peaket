@@ -38,28 +38,46 @@
 
 PEAKET은 **"ACID 트랜잭션은 단 하나의 서비스, 단 하나의 데이터베이스 인스턴스 안으로 엄격히 한정한다"**는 대원칙을 고수한다. 서비스 경계를 넘나드는 데이터 정합성은 **Saga 오케스트레이션**, **Transactional Outbox 패턴**, **Kafka 비동기 릴레이**, **멱등 수신자(Idempotent Consumer)**의 조합으로 달성한다.
 
-```
-┌─────────────────────────────────┐
-│ [purchase-svc (Saga 오케스트라)]│
-│ • 주문 상태 전이 엔진           │
-└────────────────┬────────────────┘
-                 │
-                 ├──(로컬 ACID 커밋)──▶ [purchase DB: seat_sale & outbox]
-                 ├──(결제 승인 gRPC)───▶ [payment-svc: 결제 원장 & outbox]
-                 └──(발권 지시 gRPC)───▶ [ticket-svc: 티켓 원장 & outbox]
-                                                │
-                                                ▼ (100ms 폴링 워커)
-┌────────────────────────────────────────────────────────────────────────┐
-│ [Kafka MSK (trade.* 토픽 계층)]                                        │
-│ • 각 서비스 DB의 Transactional Outbox 릴레이가 acks=all로 안전 발행    │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart LR
+    subgraph PurchaseSvc["purchase-svc (Saga 오케스트레이터)"]
+        Saga["주문 Saga 엔진"]
+    end
 
-| 서비스 | 트랜잭션 경계 | 원자성 및 이벤트 발행 |
-| :--- | :--- | :--- |
-| **purchase-svc** | 주문 생성 및 좌석 Hard Sale | 로컬 DB 커밋 시 Outbox 행을 원자적으로 동시 기록 |
-| **payment-svc** | 외부 PG 승인 및 결제 원장 | PG 승인 완료 즉시 결제 완료 Outbox 이벤트 적재 |
-| **ticket-svc** | 티켓 번호 생성 및 기기 바인딩 | 발권 완료 Outbox 이벤트 적재 및 클라이언트 전파 |
+    subgraph PDBGroup["purchase DB"]
+        PDB[("주문·좌석판매 원장")]
+        POutbox[("purchase_outbox")]
+    end
+
+    subgraph PayGroup["payment-svc & payment DB"]
+        PaySvc["payment-svc"]
+        PayDB[("결제 원장")]
+        PayOutbox[("payment_outbox")]
+    end
+
+    subgraph TicketGroup["ticket-svc & ticket DB"]
+        TktSvc["ticket-svc"]
+        TktDB[("티켓 원장")]
+    end
+
+    Kafka["Kafka 브로커 (trade.*)"]
+    PRelay["purchase-outbox-relay"]
+    PayRelay["payment-outbox-relay"]
+
+    Saga -->|"①~④, ⑥, ⑧ 로컬 트랜잭션"| PDB
+    PDB -.->|"같은 트랜잭션 적재"| POutbox
+    POutbox --> PRelay --> Kafka
+
+    Saga -->|"⑤ 결제 승인 명령 (gRPC 202 접수)"| PaySvc
+    PaySvc -->|"로컬 트랜잭션 커밋"| PayDB
+    PayDB -.->|"같은 트랜잭션 적재"| PayOutbox
+    PayOutbox --> PayRelay --> Kafka
+
+    Kafka -->|"승인 완료 이벤트 소비"| Saga
+    Saga -.->|"5초 지연 시 Pull 폴백"| PaySvc
+    Saga -->|"⑦ 발권 명령 (주문 ID 멱등)"| TktSvc
+    TktSvc -->|"티켓 원장 커밋"| TDB
+```
 
 ---
 
@@ -140,12 +158,6 @@ sequenceDiagram
     Purchase-->>User: 200 OK (예매 및 발권 완료 안내)
 ```
 
-| 단계 | 책임 서비스 | 실패 시 복구 정책 |
-| :--- | :--- | :--- |
-| **PENDING 확보** | purchase-svc | DB 제약 충돌 시 즉각 롤백 및 409 반환 (과금 0원) |
-| **PG 승인 (Pivot)**| payment-svc | 타임아웃 시 단건 조회 API로 결제 상태 확정 후 동기화 |
-| **전진 복구** | purchase-svc | 결제 승인 후 발권 장애 시에도 절대 취소 없이 재시도 큐 전진 발권 |
-
 - **승인 전 단계 (Compensable Transaction)**:
   - `seat_sale`에 `PENDING` 행을 삽입하다 유니크 제약에 걸리거나 결제창 인증 유효시간이 지나면, 즉시 트랜잭션을 롤백하고 주문을 FAILED로 마감한다. 고객 카드 승인이 발생하기 전이므로 환불할 금액이 전혀 없다.
 - **승인 고비 단계 (Pivot Step)**:
@@ -192,25 +204,18 @@ PEAKET은 복잡한 Debezium CDC(Change Data Capture) 대신 **Kubernetes Lease 
 
 Kafka 이벤트 브로커가 네트워크 폭주나 점검으로 인해 지연되더라도 핵심 예매 흐름은 중단되지 않는다:
 
-```
-[결제 승인 완료]
-       │
-       ▼
-[Kafka trade.payments 이벤트가 5초 내 도착했는가?]
-       │
-       ├────(예: 정상 Push 경로)────▶ [이벤트 소비 즉시 처리 (주문 확정)]
-       │
-       └────(아니오: 지연/순단)─────▶ [purchase-svc -> payment-svc 직접 호출]
-                                      (BatchGetPayments gRPC Pull 폴백)
-                                              │
-                                              ▼
-                                      [결제 원장 상태 대조 후 주문 확정]
-```
+```mermaid
+flowchart TD
+    Start["결제 승인 완료"]
+    WaitKafka{"Kafka trade.payments 이벤트가<br/>5초 이내에 도착했는가?"}
+    ProcessPush["이벤트 소비 즉시 처리<br/>(Push 경로)"]
+    FallbackPull["purchase-svc -> payment-svc<br/>BatchGetPayments 직접 호출 (Pull 폴백)"]
+    Apply["주문 원장 결제 결과 반영<br/>WHERE payment_event_seq < $new_seq"]
 
-| 전달 경로 | 메커니즘 | 보장 SLA |
-| :--- | :--- | :--- |
-| **주 경로 (Push)** | Kafka 이벤트 스트리밍 | 정상 상황에서 100ms 이내에 이벤트 전달 및 주문 확정 완료 |
-| **보조 경로 (Pull)**| gRPC 직접 단건 조회 폴백 | Kafka 클러스터 전면 장애 시에도 결제 확정 SLA 3초 이내 사수 |
+    Start --> WaitKafka
+    WaitKafka -->|"예 (정상 99.9%)"| ProcessPush --> Apply
+    WaitKafka -->|"아니오 (5초 초과 지연)"| FallbackPull --> Apply
+```
 
 - **5초 타임아웃 Pull 폴백**: 결제 접수 후 5초가 지나도록 Kafka 승인 이벤트가 오지 않으면, purchase-svc는 payment-svc의 gRPC `BatchGetPayments`를 호출하여 승인 결과를 직접 당겨온다.
 - **쓰기 인스턴스 직접 조회**: payment-svc는 읽기 복제본(Replica)의 복제 지연으로 방금 승인된 결과를 놓치는 일이 없도록, 마스터(쓰기) 인스턴스에서 원장을 직접 조회한다.

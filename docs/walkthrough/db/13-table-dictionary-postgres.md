@@ -65,7 +65,6 @@ erDiagram
     admin_account ||--o{ admin_known_source : "익숙한 출발지"
     admin_account ||--o{ admin_account_request : "관리 호출 멱등 기록"
 ```
-> **관계 요약**: `account`(팬 회원)와 `admin_account`(관리자)는 물리적으로 엄격히 분리되며, 본인확인 정보(`identity_verification`)는 1:1 옵셔널 관계로 격리 보관됩니다. 상세 필드는 아래 테이블 명세를 참조하십시오.
 
 | 표 | 논리 DB | 담는 것 | 왜 따로 두나 | 키·핵심 칸 | 누가 쓰고 읽나 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -153,7 +152,6 @@ erDiagram
     seat ||--o{ event_seat_price : ""
     event ||--o{ kopis_report : "1일 전송"
 ```
-> **관계 요약**: `venue`(공연장) 및 `seat`(물리 좌석)은 불변 마스터이며, `event_seat_price`를 통해 회차별 동적 가격이 매핑됩니다.
 
 (나) 검색·홈·판매 자격 명단
 
@@ -178,7 +176,6 @@ erDiagram
     production ||--o{ sale_eligibility_list : "판매 자격 명단"
     sale_eligibility_list ||--o{ sale_eligibility_member : "명단의 계정"
 ```
-> **관계 요약**: 검색 색인 문서(`search_document`)는 비동기로 생성되며, 팬클럽 선예매 자격은 `sale_eligibility_member`로 검증됩니다.
 
 | 표 | 논리 DB | 담는 것 | 왜 따로 두나 | 키·핵심 칸 | 누가 쓰고 읽나 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -260,7 +257,6 @@ erDiagram
     event_cancellation_request ||--o{ event_refund_pg_part : "결제사 몫"
     sale_control
 ```
-> **관계 요약**: `seat_sale`은 `(event_id, seat_id)` 부분 유니크 인덱스로 오버셀을 차단하고, `purchase_quota`가 1인 4매 한도를 원자적으로 통제합니다.
 
 | 표 | 논리 DB | 담는 것 | 왜 따로 두나 | 키·핵심 칸 | 누가 쓰고 읽나 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -331,7 +327,6 @@ erDiagram
     payment ||--o{ payment_cancel : "부분·전액 취소"
     reconciliation_run
 ```
-> **관계 요약**: `payment_attempt`는 1회에 단 1건의 활성 결제 시도만 허용하며, `settlement_statement`는 대사 완료 원장에 기초하여 자동 생성됩니다.
 
 | 표 | 논리 DB | 담는 것 | 왜 따로 두나 | 키·핵심 칸 | 누가 쓰고 읽나 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -397,7 +392,6 @@ erDiagram
     event ||--|| scanner_seq : "변경 번호 카운터"
     gate_flag ||--o{ gate_flag_scan : "든 스캔"
 ```
-> **관계 요약**: `ticket`은 발권 시 단말 기기 공개키(`ticket_device_key`)와 바인딩되며, 현장 스캐너 판정 로그는 `scan_log`에 영구 기록됩니다.
 
 | 표 | 논리 DB | 담는 것 | 왜 따로 두나 | 키·핵심 칸 | 누가 쓰고 읽나 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -471,7 +465,6 @@ erDiagram
     account ||--o{ appeal : "소명"
     appeal }o--o| cs_case : "처리함 건 APPEAL"
 ```
-> **관계 요약**: 굿즈 주문은 현장 수령(`pickup_slot`)과 연계되며, 부정 거래 소명(`appeal`)은 `cs_case`로 일원화되어 처리됩니다.
 
 **그림 2. 알림·찜·파트너 웹훅**
 
@@ -491,7 +484,6 @@ erDiagram
     notification_dedup
     fraud_appeal_notice
 ```
-> **관계 요약**: 수만 명의 알림 대상자는 `broadcast_chunk`로 청크 분할되어 지터 발송되며, 파트너 연동은 `webhook_delivery`로 멱등 보장됩니다.
 
 두 그림의 `account`·`production`·`event`·`promoter`·`purchase_order`·`cs_case`는 다른 묶음의 표다(정본 ⑥ 그림의 '다른 그림에서 컬럼을 적은 표'). 이 가운데 `account`·`purchase_order`·`cs_case`로 가는 선은 논리 DB를 건너므로 외래키 없이 ID만 둔다. `notification_dedup`·`fraud_appeal_notice`는 정본 그림에 관계선이 없어 상자만 둔다.
 
@@ -562,7 +554,6 @@ erDiagram
     audit_chain_head ||--o| audit_chain : "last_seq·mac_seq"
     audit_checkpoint ||--|{ audit_chain : "first_seq~last_seq 묶음"
 ```
-> **관계 요약**: 모든 운영자 긴급 제어 명령은 `command_approval`(2인 승인)을 거치며, `audit_chain`에 SHA-256 해시 체인으로 불변 기록됩니다.
 
 정본 ⑦ 그림의 선은 첫째와 셋째 둘뿐이다. 나머지 넷은 칸(`command_actor.command_id`, `audit_chain.record_id`, `audit_chain_head.last_seq`, `audit_checkpoint.first_seq`·`last_seq`)으로 이은 관계를 이 그림에서 더한 것이다.
 
@@ -602,7 +593,6 @@ erDiagram
     approval_request ||--o{ approval_summary_view : "사건 요약 첫 열람(ADR-0173)"
     account ||--o{ booking_restriction : "예매 제한"
 ```
-> **관계 요약**: 매크로 적발 계정의 예매 제한 해제는 단독 처리가 불가하며 다자간 투표(`approval_vote`)를 통해서만 집행됩니다.
 
 | 표 | 논리 DB | 담는 것 | 왜 따로 두나 | 키·핵심 칸 | 누가 쓰고 읽나 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -644,7 +634,6 @@ erDiagram
     admin_account ||--o{ access_finding : "점검 대상"
     admin_account ||--o{ admin_data_access : "열람·내려받기 기록"
 ```
-> **관계 요약**: 사법 기관 개인정보 제공은 `provision_ledger`(법정 대장)에 기록되며, 보안 사고는 `incident_filing`에 의무 보고됩니다.
 
 | 표 | 논리 DB | 담는 것 | 왜 따로 두나 | 키·핵심 칸 | 누가 쓰고 읽나 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -689,7 +678,6 @@ erDiagram
     event ||--o{ ops_presence : "보고 있는 회차"
     event |o--o{ ops_alert_record : "회차 경보(있을 때)"
 ```
-> **관계 요약**: 티켓 오픈 중 발생하는 모든 경보와 관제 지휘관 참석 여부는 회차별로 구조화되어 실시간 기록됩니다.
 
 정본 ⑦ 그림에 `ops_push_event`·`ops_presence`·`ops_alert_record`의 선은 없다. 이 그림의 세 선은 각 표의 `event_id` 칸으로 이은 것이다.
 
@@ -737,7 +725,6 @@ erDiagram
     fraud_case ||--o{ evidence_bundle : "증거 묶음"
     evidence_bundle ||--o{ evidence_custody_log : "관리 연속성"
 ```
-> **관계 요약**: 탐지된 매크로 클러스터는 `fraud_case`로 입건되어 `evidence_bundle`에 담기며, `custody_log`(관리 연속성)로 무결성이 증명됩니다.
 
 `fraud_case`에서 `booking_restriction`으로 가는 선은 정본 ⑦ 그림에 없고, `booking_restriction.fraud_case_id` 칸으로 이은 것이다.
 

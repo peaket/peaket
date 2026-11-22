@@ -43,25 +43,36 @@
 
 ## 3. 고른 이유와 상세 아키텍처 다이어그램
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [디자인 시스템 & 제로 런타임 스타일 파이프라인]                        │
-│ • tokens.json (단일 원천 디자인 토큰, W3C DTCG 형식)                   │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Style Dictionary 변환
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ • Tailwind CSS v4 (@theme 제로 런타임 유틸리티 클래스)                 │
-│ • 컴포넌트 라이브러리: Radix UI 헤드리스 접근성(A11y) 보장             │
-│ • 테스트 도구: Vitest (단위 테스트) + Playwright (E2E 브라우저 테스트) │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph DesignSystem ["1. 디자인 시스템 & 제로 런타임 스타일 파이프라인"]
+        Tokens["tokens.json (단일 원천 디자인 토큰)"]
+        StyleDict["Style Dictionary"]
+        Tailwind["Tailwind v4 (@theme CSS 변수)"]
+        SEED["당근 SEED Design System (Recipe CSS 번들)"]
+        Tokens --> StyleDict --> Tailwind & SEED
+    end
 
-| 스타일/테스트 도구 | 채택 기술 | 이점 |
-| :--- | :--- | :--- |
-| **스타일링** | Tailwind v4 (CSS 변수) | 런타임 CSS-in-JS 오버헤드를 0으로 만들어 브라우저 렌더링 최적화 |
-| **접근성** | Radix UI Primitive | 스크린 리더 및 키보드 네비게이션 웹 표준 준수 |
-| **테스트** | Playwright + Vitest | 모바일 브라우저 환경에서의 동적 QR 및 대기실 E2E 무결성 검증 |
+    subgraph FormValidation ["2. 폼 관리 & 전사 단일 스키마 파이프라인"]
+        OpenAPI["API Contract (OpenAPI / Protobuf)"]
+        Orval["Orval Code Generator"]
+        ZodSchema["@peaket/contracts (공통 Zod Schema)"]
+        RHF["React Hook Form (비제어 입력 래퍼)"]
+        OpenAPI --> Orval --> ZodSchema --> RHF
+    end
+
+    subgraph ModernTest ["3. 현대적 테스트 피라미드"]
+        Unit["Vitest: 순수 유틸리티 & 비즈니스 로직 단위 테스트"]
+        Integration["React Testing Library: 사용자 관점 접근성(Role/Text) 컴포넌트 테스트"]
+        E2E["Playwright: 결제-대기열 E2E 브라우저 시나리오 검증"]
+    end
+
+    subgraph CSPSecurity ["4. 정적 렌더링 보안 연동"]
+        CSPPolicy["CSP 헤더: style-src-attr 'unsafe-inline' (SEED style 속성 수용)<br/>script-src 'nonce-...' (XSS 완벽 방어)"]
+    end
+
+    Tailwind -.-> CSPPolicy
+```
 
 ### 핵심 매커니즘 4가지
 

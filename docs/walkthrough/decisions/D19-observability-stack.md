@@ -48,26 +48,42 @@
 
 PEAKET은 **"판단과 조작은 자체 관제탑에서 수행하고, 분석과 오류 관리는 최고의 도구(Grafana/Sentry)로 딥링크 분리하며, 데이터는 서울 리전 내 오픈소스 표준으로 축적한다"**는 원칙을 확립했다.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [자체 관제탑 콘솔 (SCR-014 조작 평면)]                                 │
-│ • 실시간 상황판 (REST + SSE): 입장 속도, 활성 세션, 에러 버짓 소진율   │
-│ • 1인 일시정지 / 2인 재개 승인 대화형 제어 인터페이스                   │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ (특이 징후 발견 시 심층 딥링크)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [외부 전문 관측 도구 심층 딥링크 (Deep-Link)]                          │
-│ • Grafana 메트릭 대시보드 (p99 레이턴시 상세)                          │
-│ • Tempo 분산 트레이싱 (TraceID 기반 지연 병목 지점 정밀 분석)          │
-│ • OpenSearch / ClickHouse 로그 뷰어 (상세 에러 스택 트레이스)          │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph ControlConsole["자체 관제탑 콘솔 (SCR-014, 조작 평면)"]
+        DASHBOARD["실시간 상황판 (REST + SSE)\n- 입장 제어 속도, 활성 세션, 에러 버짓 소진율\n- 1인 일시정지 / 2인 재개 승인 인터페이스"]
+        DEEPLINK["'자세히 보기 ↗' 원클릭 딥링크\n(동일 회차/시간대/TraceID 파라미터 전달)"]
+    end
 
-| 도구 계층 | 역할 | 엔지니어링 활용 |
-| :--- | :--- | :--- |
-| **자체 관제 콘솔** | 운영 조작 및 실시간 상황 인지 | 엔지니어가 아닌 현장 지휘관도 즉시 상황을 파악하고 제어 명령 집행 |
-| **전문 관측 도구** | 심층 디버깅 및 트레이스 추적 | 지연 스파이크 발생 시 1클릭으로 해당 트랜잭션의 전 구간 호출 추적 |
+    subgraph AnalysisTools["심층 분석 도구 계층 (원인 규명 평면)"]
+        GRAFANA["Grafana 대시보드\n(PromQL 기반 시스템/비즈니스 메트릭 드릴다운)"]
+        SENTRY["Sentry 에러 콘솔\n(스택 트레이스, 릴리스 커밋, 브라우저 환경 추적)"]
+    end
+
+    subgraph InClusterPrometheus["인클러스터 초저지연 메트릭 (15일 보존)"]
+        PROMETHEUS["Prometheus 클러스터 (로컬 EBS)\n- /metrics 5초 스크랩\n- 200ms admission-ctrl 루프 직접 질의\n- KEDA 오토스케일러 직접 질의"]
+    end
+
+    subgraph CentralStorage["장기 오픈소스 관측성 스토리지 (서울 리전 내부)"]
+        MIMIR["Grafana Mimir (메트릭 13개월)\n- 5분 롤업(agg5m) 장기 보존\n- 3개 AZ 3중 복제 고전 아키텍처"]
+        LOKI["Grafana Loki (로그)\n- 본문 풀텍스트 인덱싱 배제 (라벨 인덱싱)\n- S3 백엔드 초저비용 보관"]
+        TEMPO["Grafana Tempo (트레이스)\n- 관측 전용 MSK 큐 기반 대용량 스팬 수집"]
+    end
+
+    subgraph SamplingPipeline["OTel 수집 및 샘플링 파이프라인 (ADR-0125)"]
+        GW_QUEUE["gw-queue (진입 20만 RPS)\n[0.1% 헤드 샘플링]"]
+        APP_SVCS["내부 서비스 파드군\n[TraceId 56비트 해시 기반 로그/트레이스 짝맞춤]"]
+    end
+
+    DASHBOARD --> DEEPLINK
+    DEEPLINK --> GRAFANA & SENTRY
+
+    PROMETHEUS -->|"200ms 즉시 응답"| DASHBOARD
+    PROMETHEUS -->|"5분 롤업 전송"| MIMIR
+
+    GW_QUEUE & APP_SVCS --> LOKI & TEMPO
+    GRAFANA --> MIMIR & LOKI & TEMPO
+```
 
 ### 핵심 매커니즘 4가지
 

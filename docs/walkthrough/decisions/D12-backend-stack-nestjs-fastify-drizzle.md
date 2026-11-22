@@ -46,30 +46,37 @@
 
 PEAKET은 **"프레임워크 성능뿐만 아니라 플랫폼 라이브러리의 단일화와 컴파일 타임 SQL 검증"**을 달성하기 위해 Fastify와 Drizzle의 조합을 최종 선정했다.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [NestJS 10.x 애플리케이션 계층]                                        │
-│ • FastifyAdapter 단일 표준: Express 대비 2배 이상의 처리량 및 낮은 지연 │
-│ • AsyncLocalStorage: 분산 추적 TraceID 및 세션 컨텍스트 전역 자동 주입 │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [Drizzle ORM & TypeScript 정적 타입 계층]                             │
-│ • 무거운 런타임 오버헤드(Prisma/TypeORM) 완전 제거                     │
-│ • SQL 친화적 스키마 선언 및 컴파일 타임 타입 검증 (Zero-Overhead)     │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ (순수 SQL 수준 고속 실행)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [PostgreSQL 18.x 데이터베이스]                                         │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph NestJSFramework["NestJS 10.x 애플리케이션 계층"]
+        ROUTER["NestJS HTTP Router\n(FastifyAdapter 단일 표준 적용)"]
+        ALS["AsyncLocalStorage 요청 컨텍스트\n(TraceID, SessionID 공유 - RequestScope 금지)"]
+        VALID["입력 스키마 검증\n- 핫패스(좌석): Fastify 사전 컴파일 JSON Schema\n- 일반: ZodValidationPipe"]
+    end
 
-| 스택 구성 | 채택 기술 | 선정 근거 |
-| :--- | :--- | :--- |
-| **HTTP 엔진** | NestJS + Fastify | Node.js 환경에서 메모리 사용량 절감 및 고속 JSON 직렬화 제공 |
-| **ORM / 쿼리** | Drizzle ORM | 쿼리 빌더 오버헤드를 0으로 유지하며 타입 안정성과 부분 인덱스 지원 |
+    subgraph FastifyEngine["Fastify 고성능 엔진 계층"]
+        FAST_JSON["fast-json-stringify\n(사전 컴파일 직렬화, JSON.stringify 대비 2배 빠름)"]
+        RAW_BODY["fastify-raw-body\n(결제 웹훅 HMAC 서명 검증 단일화)"]
+    end
+
+    subgraph DrizzleData["Drizzle ORM & Database Access 계층"]
+        DRIZZLE_BUILDER["Drizzle Typed Query Builder\n- db.select().from(seats)\n- .where(eq(seats.status, 'HELD'))\n- .for('update', { skipLocked: true })"]
+        PREPARED["PreparedStatement 캐싱 (.prepare())\n(핫패스 쿼리 컴파일 오버헤드 0ms)"]
+        MIGRATION["drizzle-kit 표준 DDL 관리\n(형상 관리 가능한 순수 SQL 마이그레이션)"]
+    end
+
+    subgraph DriverLayer["PostgreSQL 물리 드라이버 (node-postgres / PgBouncer)"]
+        PG_POOL["PgBouncer 트랜잭션 풀링"]
+        AURORA[("Aurora PostgreSQL Cluster")]
+    end
+
+    ROUTER --> ALS --> VALID
+    VALID --> FAST_JSON & RAW_BODY
+    VALID --> DRIZZLE_BUILDER
+    DRIZZLE_BUILDER --> PREPARED
+    PREPARED --> PG_POOL --> AURORA
+    MIGRATION -.-> AURORA
+```
 
 ### 핵심 매커니즘 4가지
 

@@ -19,32 +19,33 @@ PEAKET의 디자인 시스템은 대규모 티케팅 환경의 극단적 사용 
 
 ### 디자인 토큰 파이프라인 및 컴포넌트 아키텍처 다이어그램
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [단일 소스 관리 체계 (Single Source of Truth)]                         │
-│ • docs/design/tokens.json (W3C DTCG 형식, 218개 토큰)                  │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Style Dictionary 빌드
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [플랫폼별 산출물 자동 생성]                                            │
-│ • packages/tokens/css/tokens.css (CSS 변수)                            │
-│ • packages/tokens/tailwind/preset.js (Tailwind 테마 프리셋)            │
-│ • packages/tokens/ts/tokens.d.ts (타입스크립트 정적 타입)              │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ [4대 앱 일괄 적용]                                                     │
-│ • 소비자 웹 (Next.js)  • 파트너 콘솔  • 관제탑 콘솔  • 게이트 스캐너 PWA│
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph SSOT["단일 소스 관리 체계 (Single Source of Truth)"]
+        TOKENS["docs/design/tokens.json<br/>(W3C DTCG 형식, 218개 토큰)"]
+        SEED_BASE["@seed-design/css 3.0<br/>(Apache-2.0 오픈소스 토대)"]
+        BRAND_OVERRIDE["PEAKET 브랜드 & 접근성 오버라이드<br/>(인디고 브랜드, 텍스트 800번대 보정)"]
+    end
 
-| 레이어 | 저장소 및 포맷 | 동기화 보장 규칙 |
-| :--- | :--- | :--- |
-| **SSOT** | `tokens.json` (W3C DTCG) | 색상, 간격, 타이포그래피 등 모든 디자인 수치의 유일한 원천 |
-| **빌드 엔진** | Style Dictionary | 토큰 변경 시 CSS, Tailwind, TypeScript 선언 자동 동기화 |
-| **소비 앱** | 4대 프론트엔드 모노레포 앱 | 하드코딩 스타일 금지(ESLint), 토큰 기반 일관된 UI/UX 유지 |
+    subgraph Pipeline["Style Dictionary 빌드 파이프라인"]
+        SD_BUILD["Style Dictionary v5 빌드 엔진"]
+        CSS_VARS["CSS 커스텀 프로퍼티<br/>(:root, [data-theme='dark'])"]
+        TW_THEME["Tailwind v4 @theme 설정<br/>(유틸리티 클래스 자동 매핑)"]
+        TS_CONST["TypeScript 정적 상수<br/>(Canvas 2D 좌석맵용 RGB 매핑)"]
+    end
+
+    subgraph Components["83개 컴포넌트 아키텍처 (CMP-001 ~ CMP-083)"]
+        SEED_PURE["1. SEED 순수 활용 (16개)<br/>Button, TextField, Checkbox 등"]
+        SEED_EXT["2. SEED 확장 (26개)<br/>QueuePanel, RotatingQR, DataTable 등"]
+        PEAKET_DOM["3. 피켓 전용 도메인 부품 (41개)<br/>SeatMap Canvas, HeatmapGrid, AuditTimeline 등"]
+    end
+
+    TOKENS --> SD_BUILD
+    SEED_BASE & BRAND_OVERRIDE --> TOKENS
+    SD_BUILD --> CSS_VARS & TW_THEME & TS_CONST
+    CSS_VARS & TW_THEME --> SEED_PURE & SEED_EXT
+    TS_CONST --> PEAKET_DOM
+```
 
 ---
 
@@ -84,30 +85,100 @@ PEAKET의 디자인 시스템은 대규모 티케팅 환경의 극단적 사용 
 
 ### 3.1 83개 컴포넌트 (CMP-001 ~ CMP-083) 3계층 카탈로그
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ [67개 컴포넌트 4단계 계층 체계]                                        │
-│                                                                        │
-│   [계층 1] SEED 순수 활용 컴포넌트 (16개)                              │
-│   • Button, Input, Checkbox, Modal, Toast, Badge, Dropdown 등          │
-│                                                                        │
-│   [계층 2] SEED 조합 복합 컴포넌트 (18개)                              │
-│   • Header, BottomSheet, Stepper, SearchBar, Pagination, EmptyState 등 │
-│                                                                        │
-│   [계층 3] 도메인 특화 컴포넌트 (17개)                                │
-│   • SeatMapCanvas, QueueStatusCard, DynamicQRCode, TicketCard 등       │
-│                                                                        │
-│   [계층 4] 관제 및 대시보드 컴포넌트 (16개)                            │
-│   • MetricChart, ApprovalModal, IncidentTimeline, LogViewer 등        │
-└────────────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TD
+    subgraph Layer1["1. SEED 순수 활용 (16개)"]
+        C01["CMP-001 Button"]
+        C02["CMP-002 Link"]
+        C03["CMP-003 IconButton"]
+        C04["CMP-004 TextField"]
+        C05["CMP-005 TextArea"]
+        C06["CMP-006 PasswordField"]
+        C07["CMP-007 OTPField"]
+        C08["CMP-008 PhoneField"]
+        C09["CMP-009 ConsentCheckbox"]
+        C10["CMP-010 Select / Radio"]
+        C11["CMP-011 Toggle"]
+        C13["CMP-013 Stepper"]
+        C18["CMP-018 Toast"]
+        C19["CMP-019 Dialog (Modal)"]
+        C30["CMP-030 Tabs"]
+        C44["CMP-044 Skeleton"]
+    end
 
-| 계층 구분 | 컴포넌트 수 | 설계 원칙 및 성능 제약 |
-| :--- | :--- | :--- |
-| **계층 1: 기본 UI** | 16개 | 디자인 시스템 표준 SEED 컴포넌트 직접 활용, 접근성(A11y) 보장 |
-| **계층 2: 복합 패턴** | 18개 | 기본 UI를 조합한 공통 네비게이션 및 폼 레이아웃 |
-| **계층 3: 도메인 코어**| 17개 | 5만 석 Web Worker 캔버스, 15초 회전 동적 QR 등 티케팅 핵심 |
-| **계층 4: 관제탑** | 16개 | SSE 실시간 차트, 2인 승인 안전 모달, 초 단위 감사 타임라인 |
+    subgraph Layer2["2. SEED 확장 컴포넌트 (26개)"]
+        C12["CMP-012 FormErrorSummary"]
+        C14["CMP-014 Countdown"]
+        C15["CMP-015 QueuePanel"]
+        C16["CMP-016 ProgressBar"]
+        C17["CMP-017 NoticeBanner"]
+        C20["CMP-020 DangerConfirm"]
+        C23["CMP-023 SeatStatusBadge"]
+        C28["CMP-028 TicketCard"]
+        C29["CMP-029 RotatingQR"]
+        C31["CMP-031 DataTable"]
+        C32["CMP-032 StatTile"]
+        C40["CMP-040 DeadlineBadge"]
+        C43["CMP-043 EmptyState"]
+        C45["CMP-045 ErrorState"]
+        C46["CMP-046 PermissionDenied"]
+        C50["CMP-050 ReorderList"]
+        C52["CMP-052 DeviceSessionList"]
+        C55["CMP-055 AccountLinkPrompt"]
+        C64["CMP-064 ReauthPrompt"]
+        C65["CMP-065 AppShell"]
+        C66["CMP-066 RoundPicker"]
+        C68["CMP-068 NotifyPermissionSheet"]
+        C71["CMP-071 Carousel"]
+        C72["CMP-072 ProductionCard"]
+        C73["CMP-073 ReviewCard"]
+        C74["CMP-074 ProductCard"]
+    end
+
+    subgraph Layer3["3. 피켓 전용 도메인 부품 (41개)"]
+        C21["CMP-021 SeatMap (Canvas)"]
+        C22["CMP-022 SeatList (접근성)"]
+        C24["CMP-024 PriceTierLegend"]
+        C25["CMP-025 SeatSummary"]
+        C26["CMP-026 SeatPicker"]
+        C27["CMP-027 PaymentWidgetFrame"]
+        C33["CMP-033 TimeSeriesChart"]
+        C34["CMP-034 HeatmapGrid"]
+        C35["CMP-035 Widget (관제)"]
+        C36["CMP-036 CommandCard"]
+        C37["CMP-037 ApprovalStepper"]
+        C38["CMP-038 DryRunPreview"]
+        C39["CMP-039 AuditTimeline"]
+        C41["CMP-041 ScanResult"]
+        C42["CMP-042 CameraView"]
+        C47["CMP-047 HumanCheckBox"]
+        C48["CMP-048 ReportButton"]
+        C49["CMP-049 ShuffleProofPanel"]
+        C51["CMP-051 SeatMapEditorCanvas"]
+        C53["CMP-053 DeviceApprovalPanel"]
+        C54["CMP-054 RefundQuote"]
+        C56["CMP-056 MergeSummary"]
+        C57["CMP-057 AutoAssignPanel"]
+        C58["CMP-058 SellerNotice"]
+        C59["CMP-059 TransferOfferCard"]
+        C60["CMP-060 ApprovalPanel"]
+        C61["CMP-061 BulkRefundProgress"]
+        C62["CMP-062 BankAccountForm"]
+        C63["CMP-063 AppealForm"]
+        C67["CMP-067 AddressForm"]
+        C69["CMP-069 MediaUploader"]
+        C70["CMP-070 RichTextEditor"]
+        C75["CMP-075 ReportDialog"]
+        C76["CMP-076 ImageUploader"]
+        C77["CMP-077 SeatFillPanel"]
+        C78["CMP-078 TemplatePicker"]
+        C79["CMP-079 ScatterBrush"]
+        C80["CMP-080 LinkGraph"]
+        C81["CMP-081 CaseStatusBadge"]
+        C82["CMP-082 ReplaySourceBadge"]
+        C83["CMP-083 StepBaselineChart"]
+    end
+```
 
 ---
 
