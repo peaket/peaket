@@ -850,6 +850,7 @@
 | R-756 | 날짜 고정 판매 열기 시험이 2026-11-29·12-02/03이 지나면 now < openAt·판매 종료 규칙·PEXPIREAT 만료 때문에 실패할 수 있었다 | services/purchase-svc/test-int/sale-open.int.test.ts, services/core-svc/test-int/sale-open.int.test.ts, services/core-svc/test/partner-production.http.test.ts, 계획 W12-datefix | 오픈·시작을 Date.now()+n일로, 만료 단언도 같은 값에서, HTTP는 UTC 11:00으로 정비 창 회피 | 해결. 리뷰·검증 막는 지적 없음 |
 | R-757 | 웹훅 발송기가 팬 경로 DB 역할 core_app으로 붙어 사칭 발송·원장 조작·끝점 비밀 읽기가 가능했다 | services/core-svc/migrations/0043_core_notify_role.sql, src/main.ts·app.module.ts·notify.module.ts, test-int/notify-role.int.test.ts·startup-db-role.int.test.ts, 계획 W12-core-notify·ADR-0351 | 그룹 역할 core_notify와 전용 연결·시작 확인으로 발송기를 옮기고, core_app 회수는 다음 배포로 넘겼다 | 해결(회수는 다음 배포) |
 | R-758 | BAT-617 화면이 BAT-616 서버와 계약(artistIds·aliases)에서 어긋나고 메모리/DB가 갈렸으며, 관제 상세가 core_ops의 공연장 권한 없이 500이 났다 | docs/api/openapi.yaml, packages/contracts·api-client 생성물, apps/partner·console-host, services/core-svc sale-review 저장소·0044, 계획 BAT-617 | 승인 본문 정리·상세 읽기 칸·메모리 정합·화면 연결·core_ops place id·name 권한 | 해결. LCH-080 아티스트 연결은 잔여 |
+| R-759 | GAT-220 장부 빈칸 6·C2-06·C2-07·C2-09·같은 기기 동시 승인 500 | docs/features/identity.md, docs/security/asvs/offline-gate.md, docs/api/openapi.yaml, docs/review/plans/BAT-450A.md | 시험 먼저→구현→리뷰 RV-01·RV-05 고침→검증 9/9, ledger --require 통과 | 닫힘 |
 
 ## 4. 숫자 일치표
 
