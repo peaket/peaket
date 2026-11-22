@@ -159,7 +159,7 @@ describe('배정 만료·promoter 정본화 PostgreSQL [BAT-450C]', () => {
 
   test('I-T87 ④ listSelf·명단은 정비 전에도 지난 ASSIGNED를 ENDED로 보이고, 역할 유효 끝이 지난 초대는 410이다', async () => {
     await seed({ id: L3, status: 'ASSIGNED', eventId: EC, accountId: ACCOUNT, validUntil: new Date(NOW - 1) });
-    const self = await invitations.listSelf({ accountId: ACCOUNT, limit: 10, nowMs: NOW });
+    const self = await invitations.listSelf({ accountId: ACCOUNT, limit: 10 });
     expect(self.items.find((x) => x.assignmentId === L3)).toMatchObject({ status: 'ENDED' });
     await expect(rowOf(L3)).resolves.toMatchObject({ status: 'ASSIGNED' });
     const page = await store.listByEvent({ eventId: EC, limit: 10, nowMs: NOW });

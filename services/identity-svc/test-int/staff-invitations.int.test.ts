@@ -148,10 +148,10 @@ describe('staff 초대 PostgreSQL [GAT-210]', () => {
     await database.pool.query("update staff_assignment set status = 'ENDED' where id = $1", [A1]);
     await seedInvitation({ id: A4, token: 'db-invite-token-4', eventId: EVENT_3, role: 'gate_staff', status: 'ASSIGNED', accountId: ACCOUNT, validFrom: new Date(NOW + HOUR) });
     await seedInvitation({ id: A5, token: 'db-invite-token-5', eventId: EVENT_2, role: 'gate_lead', status: 'REVOKED', accountId: ACCOUNT, validFrom: new Date(NOW - 2 * HOUR) });
-    const first = await invitations.listSelf({ accountId: ACCOUNT, limit: 1, nowMs: NOW });
+    const first = await invitations.listSelf({ accountId: ACCOUNT, limit: 1 });
     expect(first.items).toHaveLength(1);
     expect(first.items[0]).toMatchObject({ assignmentId: A4, status: 'ASSIGNED', activeScannerDeviceName: null });
-    const second = await invitations.listSelf({ accountId: ACCOUNT, cursor: first.nextCursor, limit: 10, nowMs: NOW });
+    const second = await invitations.listSelf({ accountId: ACCOUNT, cursor: first.nextCursor, limit: 10 });
     expect(second.items.map((x) => x.assignmentId)).toEqual([A1, A5]);
   });
 });

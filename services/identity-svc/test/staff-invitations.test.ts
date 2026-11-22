@@ -168,12 +168,12 @@ describe('StaffInvitations [GAT-210]', () => {
       validFromMs: NOW + 2 * HOUR,
       validUntilMs: NOW + 3 * HOUR,
     });
-    const first = await invitations.listSelf({ accountId: ACCOUNT, limit: 1, nowMs: NOW });
+    const first = await invitations.listSelf({ accountId: ACCOUNT, limit: 1 });
     expect(first.items).toHaveLength(1);
     expect(first.items[0]).toMatchObject({ assignmentId: 'a-2', status: 'ENDED', activeScannerDeviceName: null });
-    const second = await invitations.listSelf({ accountId: ACCOUNT, cursor: first.nextCursor, limit: 10, nowMs: NOW });
+    const second = await invitations.listSelf({ accountId: ACCOUNT, cursor: first.nextCursor, limit: 10 });
     expect(second.items.map((x) => x.assignmentId)).toEqual(['a-1']);
-    await expect(invitations.listSelf({ accountId: ACCOUNT, limit: 101, nowMs: NOW })).rejects.toBeInstanceOf(StaffInvitationError);
+    await expect(invitations.listSelf({ accountId: ACCOUNT, limit: 101 })).rejects.toBeInstanceOf(StaffInvitationError);
   });
 
   test('I-T21 ⑫ 네이버만 연결한 계정(검증 이메일 없음)은 수락이 403이고, 검증된 같은 이메일 계정은 수락된다', async () => {

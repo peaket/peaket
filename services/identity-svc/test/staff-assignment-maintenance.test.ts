@@ -135,7 +135,7 @@ describe('배정 만료 정비·시간 필터 [BAT-450C]', () => {
 
   test('I-T87 ④ listSelf·명단은 정비 전에도 지난 ASSIGNED를 ENDED로 보이고, 역할 유효 끝이 지난 초대는 410이다', async () => {
     seed('a-past', { status: 'ASSIGNED', accountId: ACCOUNT, validUntilMs: NOW - 1, inviteEmail: undefined, inviteTokenHash: undefined });
-    const self = await invitations.listSelf({ accountId: ACCOUNT, limit: 10, nowMs: NOW });
+    const self = await invitations.listSelf({ accountId: ACCOUNT, limit: 10 });
     expect(self.items).toHaveLength(1);
     expect(self.items[0]).toMatchObject({ assignmentId: 'a-past', status: 'ENDED' });
     expect(store.assignments.get('a-past')).toMatchObject({ status: 'ASSIGNED' });
