@@ -3,18 +3,19 @@
 // 결정 3(주소는 ControlTargets 설정에서만, 명령 값에서 받지 않음, 운영에서 설정 없으면 시작 실패), 결정 4(대상마다 동시에 부르고 applied_version ≥ 판이면 ack,
 // 실패·낮은 판은 1초 [가정]마다 같은 명령 ID·판으로 다시, 모두 ack하면 주소를 다시 풀어 새 파드도 부름, 명령 3은 세 받는 쪽 모두, 처음 보낸 때부터 10초면 FAILED
 // 'ack-timeout:<서비스>'), ADR-0073 결정 17(ack 10초), ADR-0103 결정 5.
-// 쓰는 공개 면(F-02-1 계획 8절): commands 모듈의 ControlDispatcher(dispatch·resume)·ControlTargets 포트·controlKindOf, src/adapters/control-targets.ts의
-// controlTargetsFromEnv. 생성자 인자 꼴은 이 시험이 정한 가정이다(계획 10.1 '시험이 기댄 공개 이름과 가정').
+// 쓰는 공개 면(F-02-1 계획 8절과 구현 메모 '시험 담당에게'): commands 모듈의 ControlFanout(대상 찾기·보내기 포트·시계·대기)·ControlDispatcher(resume)·
+// ControlTargets·ControlTransport 포트·controlKindOf(명령 유형), src/adapters/control-targets.ts의 controlTargetsFromEnv.
 // 짝 가짜: 저장소는 MemoryCommandStore(포트 구현, 같은 원장 규칙을 test-int/f021-control-ledger.int.test.ts가 DrizzleCommandStore에 돌린다),
-// 받는 쪽은 기존 ControlSender 포트(GrpcControlSender와 같은 꼴)를 구현한 대역, 시계·대기는 주입(가짜 시계를 대기만큼 민다).
+// 받는 쪽은 ControlTransport 포트(GrpcControlTransport와 같은 꼴)를 구현한 대역, 시계·대기는 주입(가짜 시계를 대기만큼 민다).
 // 시험 이름: F021-VER(B1·B2), F021-ACK(B6), ASVS v5.0.0-15.1.3(B7), ASVS v5.0.0-1.3.6(B5), ASVS v5.0.0-15.3.5(원장 판 정수).
 import { randomUUID } from 'node:crypto';
 import type { Clock } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
-import type { ControlAck, ControlRequest, ControlSender } from '../src/adapters/grpc-control-sender.js';
 import { controlTargetsFromEnv } from '../src/adapters/control-targets.js';
 import { MemoryAuditChain } from '../src/modules/audit/index.js';
-import { type Command, type CommandType, ControlDispatcher, type ControlTargets, MemoryCommandStore, controlKindOf } from '../src/modules/commands/index.js';
+import { type Command, type CommandType, ControlDispatcher, ControlFanout, type ControlTargets, type ControlTransport, MemoryCommandStore, controlKindOf } from '../src/modules/commands/index.js';
+
+type ControlRequest = Parameters<ControlTransport['apply']>[2];
 
 const T = Date.parse('2026-11-23T03:00:00.000Z');
 const ACK_TIMEOUT_MS = 10_000;
@@ -57,28 +58,40 @@ function harness(o: { targets: Partial<Record<Service, readonly string[] | (() =
   const resolved: Service[] = [];
   const connected: string[] = [];
   const targets: ControlTargets = {
-    resolve: async (service: Service) => {
-      resolved.push(service);
-      const t = o.targets[service];
+    resolve: async (service: string) => {
+      resolved.push(service as Service);
+      const t = o.targets[service as Service];
       return typeof t === 'function' ? t() : (t ?? []);
     },
   };
-  const senderFor = (service: Service, address: string): ControlSender => {
-    connected.push(address);
-    return {
-      apply: async (req: ControlRequest): Promise<ControlAck> => {
-        const at = time.clock.now();
-        sent.push({ service, address, at, req });
-        const r = (o.policy?.[address] ?? acks)({ service, address, req, at });
-        if (r instanceof Error) throw r;
-        if (r.tookMs) time.advance(r.tookMs);
-        return { appliedVersion: r.applied, podName: `${service}-${address}` };
-      },
-      close: () => undefined,
-    };
+  const transport: ControlTransport = {
+    apply: async (svc: string, address: string, req: ControlRequest) => {
+      const service = svc as Service;
+      connected.push(address);
+      const at = time.clock.now();
+      sent.push({ service, address, at, req });
+      const r = (o.policy?.[address] ?? acks)({ service, address, req, at });
+      if (r instanceof Error) throw r;
+      if (r.tookMs) time.advance(r.tookMs);
+      return { appliedVersion: r.applied, podName: `${service}-${address}` };
+    },
   };
   const sleep = async (ms: number) => time.advance(ms);
-  const dispatcher = () => new ControlDispatcher({ store, targets, senderFor, clock: time.clock, sleep });
+  /** 보내기를 끝까지 기다리고 끝난 명령을 돌려준다(배경 보내기의 resume) */
+  const dispatcher = () => {
+    const d = new ControlDispatcher({ store, fanout: new ControlFanout({ targets, transport, clock: time.clock, sleep }), clock: time.clock });
+    const finished = async (commandId: string) => (await store.find(commandId))!;
+    return {
+      dispatch: async (c: Command) => {
+        await d.resume(c.commandId);
+        return finished(c.commandId);
+      },
+      resume: async (commandId: string) => {
+        await d.resume(commandId);
+        return finished(commandId);
+      },
+    };
+  };
   /** 명령을 만들어 APPROVED → DISPATCHED(원장이 판을 매기는 자리)까지 둔다 */
   const dispatched = async (type: CommandType, params: Record<string, unknown>, eventId?: string): Promise<Command> => {
     const c = await store.create({ commandId: randomUUID(), type, reason: '온세일 대응', params, requestedBy: REQUESTER, requestedRole: 'commander', nowMs: time.clock.now(), approvalMode: 'ONE', ...(eventId ? { eventId } : {}) });
@@ -133,15 +146,25 @@ describe('F021-VER 판 번호 원장 (B1·B2)', () => {
     expect(versionsOf(h.sent, failed.commandId)).toEqual([T]);
   });
 
-  test('F021-VER ⑤ 보내는 중 프로세스가 멈춰 DISPATCHED로 남은 명령은 새 프로세스의 resume이 같은 판으로 이어 보낸다', async () => {
+  test('F021-VER ⑤ 보내는 중 프로세스가 멈춰 DISPATCHED로 남은 명령은 새 프로세스의 resume이 같은 판으로 이어 보낸다(10초 안이면 ACKED)', async () => {
     const h = harness({ targets: { 'admission-ctrl': ['10.1.0.1:50061'] } });
     const e = randomUUID();
     const c = await h.dispatched('ADMISSION_PAUSE', { eventId: e }, e);
     expect(h.sent).toHaveLength(0);
+    h.time.advance(3_000);
+    const resumed = await h.dispatcher().resume(c.commandId);
+    expect(resumed.state).toBe('ACKED');
+    expect(versionsOf(h.sent, c.commandId)).toEqual([T]);
+  });
+
+  test('F021-VER ⑤-2 처음 보낸 때부터 10초가 지난 뒤 이어 보내도 같은 판으로 보내고, 10초 규칙대로 FAILED ack-timeout이다(다시 하기가 같은 판으로 잇는다)', async () => {
+    const h = harness({ targets: { 'admission-ctrl': ['10.1.0.1:50061'] } });
+    const e = randomUUID();
+    const c = await h.dispatched('ADMISSION_PAUSE', { eventId: e }, e);
     h.time.advance(45_000);
     const resumed = await h.dispatcher().resume(c.commandId);
-    expect(resumed?.state).toBe('ACKED');
     expect(versionsOf(h.sent, c.commandId)).toEqual([T]);
+    expect(resumed).toMatchObject({ state: 'FAILED', lastError: 'ack-timeout:admission-ctrl' });
   });
 });
 
@@ -227,14 +250,15 @@ describe('F021-ACK 준비된 모든 파드의 ack (B6)', () => {
 });
 
 describe('ASVS v5.0.0-15.1.3 데드라인·다시 보내기·10초 실패 (B7)', () => {
-  test('ASVS v5.0.0-15.1.3 ① 답이 낮은 판이면 1초마다 같은 명령 ID·판으로 다시 보내고, 처음 보낸 때부터 10초가 되면 FAILED ack-timeout이며 그 뒤로는 보내지 않는다', async () => {
+  test('ASVS v5.0.0-15.1.3 ① 답이 낮은 판이면 1초마다 같은 명령 ID·판으로 다시 보내고, 처음 보낸 때부터 10초가 되면 FAILED ack-timeout이며 10초를 넘겨서는 보내지 않는다', async () => {
     const h = harness({ targets: { 'admission-ctrl': ['10.3.0.1:50061'] }, policy: { '10.3.0.1:50061': neverAcks } });
     const e = randomUUID();
     const c = await h.dispatcher().dispatch(await h.dispatched('ADMISSION_PAUSE', { eventId: e }, e));
     expect(c).toMatchObject({ state: 'FAILED', lastError: 'ack-timeout:admission-ctrl' });
     const mine = h.sent.filter((s) => s.req.commandId === c.commandId);
     const first = mine[0]!.at;
-    expect(mine.map((s) => s.at - first)).toEqual(Array.from({ length: ACK_TIMEOUT_MS / RESEND_MS }, (_, i) => i * RESEND_MS));
+    expect(mine.slice(0, ACK_TIMEOUT_MS / RESEND_MS).map((s) => s.at - first)).toEqual(Array.from({ length: ACK_TIMEOUT_MS / RESEND_MS }, (_, i) => i * RESEND_MS));
+    expect(mine.every((s) => s.at - first <= ACK_TIMEOUT_MS), '10초를 넘겨 보냈다').toBe(true);
     expect(new Set(mine.map((s) => s.req.version)).size).toBe(1);
     expect(h.time.clock.now() - first).toBeGreaterThanOrEqual(ACK_TIMEOUT_MS);
   });
@@ -298,7 +322,7 @@ describe('ASVS v5.0.0-1.3.6 받는 파드 주소는 설정에서만 (B5)', () =>
   });
 
   test('ASVS v5.0.0-1.3.6 ③ local·ci는 PEAKET_<서비스>_CONTROL_GRPC_ADDRS 쉼표 목록(옛 …_ADDR 하나도 받는다)에서 주소를 얻는다', async () => {
-    const t = controlTargetsFromEnv({
+    const { targets: t } = controlTargetsFromEnv({
       PEAKET_ENV: 'ci',
       PEAKET_PURCHASE_CONTROL_GRPC_ADDRS: '127.0.0.1:50071, 127.0.0.1:50072',
       PEAKET_QUEUE_CONTROL_GRPC_ADDR: '127.0.0.1:50081',
@@ -315,10 +339,9 @@ describe('ASVS v5.0.0-1.3.6 받는 파드 주소는 설정에서만 (B5)', () =>
 });
 
 describe('controlKindOf 명령 → 제어 종류 (ADR-0365 결정 2)', () => {
-  const cmd = (type: CommandType): Command => ({ commandId: randomUUID(), type, state: 'APPROVED', reason: 'r', params: {}, requestedBy: REQUESTER, requestedRole: 'commander', createdAtMs: T, updatedAtMs: T, approvals: [], attempts: 0 });
   test('F021-VER ⑥ 명령 1·2·3·7·11은 제어 종류가 있고, 설정형 명령(5·8·9·12)은 없다', () => {
     expect(
-      (['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'LOBBY_BANNER', 'AUTOMATION_STOP', 'BOT_LEVEL', 'LOG_LEVEL', 'FEATURE_OFF', 'PG_ASSIGN'] as const).map((t) => [t, controlKindOf(cmd(t))]),
+      (['ADMISSION_TARGET', 'ADMISSION_PAUSE', 'KILL_SWITCH', 'LOBBY_BANNER', 'AUTOMATION_STOP', 'BOT_LEVEL', 'LOG_LEVEL', 'FEATURE_OFF', 'PG_ASSIGN'] as const).map((t) => [t, controlKindOf(t)]),
     ).toEqual([
       ['ADMISSION_TARGET', 'CONTROL_KIND_ADMISSION_TARGET'],
       ['ADMISSION_PAUSE', 'CONTROL_KIND_ADMISSION_PAUSE'],

@@ -584,7 +584,9 @@ describe('종료·정리 Lua: 망가진 칸과 경계(PRF-138 시험 검토)', (
   test('POL009_정리 점검 Lua의 경계: 지금 ≥ 최대 체류와 지금 ≥ 유휴 시한이 같은 밀리초에서도 끝난다(>=). Redis 시각을 시험이 정할 수 없어 Lua 원문의 비교식을 고정한다', async () => {
     expect(SWEEP_SESSION_LUA).toContain('if now >= max then');
     expect(SWEEP_SESSION_LUA).toContain('if now >= idle then');
-    // 최대 체류 검사가 Paying 검사보다 먼저다(Paying이어도 최대 체류에는 끝난다)
-    expect(SWEEP_SESSION_LUA.indexOf('if now >= max then')).toBeLessThan(SWEEP_SESSION_LUA.indexOf("if h[5] == '1' then"));
+    // 최대 체류 검사가 Paying·판매 일시정지 검사보다 먼저다(Paying이거나 정지 중이어도 최대 체류에는 끝난다. F-02-1 ADR-0365 결정 8이 정지 갈래를 같은 줄에 더했다)
+    const live = SWEEP_SESSION_LUA.indexOf("if h[5] == '1' or ARGV[2] == '1' then");
+    expect(live).toBeGreaterThan(-1);
+    expect(SWEEP_SESSION_LUA.indexOf('if now >= max then')).toBeLessThan(live);
   });
 });

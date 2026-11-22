@@ -4,8 +4,8 @@
 //        정본 칸(target·targetUntil, admitPaused·admitPausedUntil, paused, allPaused, autoStopped, aimdResumeAt)과 종류별 판·명령 칸을 쓰는지.
 //        로컬·CI 시작은 메모리 Lease라 이 프로세스 하나가 리더다. 새 리더의 등장은 리더 세대 키(q:{event:E}:leader)를 더 큰 세대로 올려 흉내 낸다
 //        (새 리더의 BUMP와 같은 쓰기, test-int/leader-store.int.test.ts Q-T30과 같은 방법).
-//   (나) 리더 아닌 파드(세대 없음)와 낮은 세대의 파드: 모듈 공개 면의 ApplyLeaderControl을 진짜 저장소(RedisLeaderStore, 실제 Lua)와 Lease 세대 짝 가짜
-//        (Elector 포트)로 부른다. 계획 8절의 이름이다. 부르는 꼴(생성자·run)은 이 시험이 정한 가정이다(F-02-1 계획 10.1 '시험이 기댄 공개 이름과 가정').
+//   (나) 리더 아닌 파드(세대 없음)와 낮은 세대의 파드: 모듈 공개 면의 ApplyLeaderControl(계획 8절)을 진짜 저장소(RedisLeaderStore, 실제 Lua)·진짜 펜싱 표시
+//        (리더 루프 AdmissionLeader)와 Lease 세대 짝 가짜(Elector 포트)로 부른다. run의 답(APPLIED·NOT_LEADER·FENCED)은 구현 메모 '시험 담당에게'의 꼴이다.
 // 판·꼴 검사: ASVS v5.0.0-1.4.2·15.3.5·2.1.1(F-02-1 계획 9절). 장부 밖 세부는 F021-LDR(B10·B11).
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -15,7 +15,7 @@ import { Writable } from 'node:stream';
 import { createHotRedis, fakeClock, type HotRedis } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { RedisLeaderStore } from '../src/modules/leader/adapters/redis-leader-store.js';
-import { ApplyLeaderControl, type Elector } from '../src/modules/leader/index.js';
+import { AdmissionLeader, ApplyLeaderControl, type ApplyLeaderControlInput, type Elector } from '../src/modules/leader/index.js';
 import { start, type StartedService } from '../src/start.js';
 import { type ApplyRequest, type ControlClient, controlClient, freePort, status, until } from '../../queue-svc/test-int/control-client.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
@@ -204,16 +204,19 @@ describe('Q-T30 리더 아닌 파드와 옛 리더의 제어 쓰기 (ApplyLeader
   };
   const applyWith = (gen: number | undefined) => {
     const e = electorAt(gen);
-    return { ...e, apply: new ApplyLeaderControl(new RedisLeaderStore(redis), e.elector, fakeClock({ now: Date.now() })) };
+    const store = new RedisLeaderStore(redis);
+    // 펜싱 표시는 리더 루프 그 자체다(FENCED를 본 세대로는 루프도 제어도 쓰지 않는다)
+    const fence = new AdmissionLeader(store, { run: async () => ({ status: 'PUBLISHED' }) }, e.elector, fakeClock({ now: Date.now() }));
+    return { ...e, apply: new ApplyLeaderControl(store, e.elector, fence) };
   };
   /** ApplyLeaderControl.run이 받는 요청(proto ApplyControlRequest의 칸, 판은 수) */
-  const leaderReq = (scope: string, kind: string, version: number, desiredStateJson: string) => ({ commandId: randomUUID(), scope, kind, version, desiredStateJson });
+  const leaderReq = (scope: string, kind: ApplyLeaderControlInput['kind'], version: number, desiredStateJson: string): ApplyLeaderControlInput => ({ commandId: randomUUID(), scope, kind, version, desiredStateJson });
   const pauseReq = (scope: string, version: number, paused: boolean) => leaderReq(scope, 'CONTROL_KIND_ADMISSION_PAUSE', version, JSON.stringify({ paused, expiresAtMs: null }));
 
   test('Q-T30 ① 리더가 아닌 파드(세대 없음)는 UNAVAILABLE not-leader이고 아무것도 쓰지 않는다', async () => {
     const e = randomUUID();
     const w = applyWith(undefined);
-    await expect(w.apply.run(pauseReq(e, 100, true))).rejects.toMatchObject({ code: status.UNAVAILABLE, message: expect.stringContaining('not-leader') });
+    expect(await w.apply.run(pauseReq(e, 100, true))).toEqual({ status: 'NOT_LEADER' });
     expect(await exists(ctl(e))).toBe(0);
     expect(await exists(leaderKey(e))).toBe(0);
   });
@@ -221,18 +224,18 @@ describe('Q-T30 리더 아닌 파드와 옛 리더의 제어 쓰기 (ApplyLeader
   test('Q-T30 ② 새 리더가 세대를 올리면 옛 리더의 제어 쓰기는 UNAVAILABLE fenced이고 칸·판이 그대로다. 그 파드는 그 세대로 다른 회차에도 쓰지 않는다(대기 파드)', async () => {
     const e = randomUUID();
     const old = applyWith(3);
-    expect(await old.apply.run(pauseReq(e, 100, true))).toMatchObject({ appliedVersion: 100 });
+    expect(await old.apply.run(pauseReq(e, 100, true))).toMatchObject({ status: 'APPLIED', appliedVersion: 100 });
     expect(Number(await redis.command(['GET', leaderKey(e)], { key: leaderKey(e) }))).toBe(3);
     // 새 리더(세대 4)가 같은 회차에 판 200으로 쓴다
     const fresh = applyWith(4);
-    expect(await fresh.apply.run(pauseReq(e, 200, true))).toMatchObject({ appliedVersion: 200 });
+    expect(await fresh.apply.run(pauseReq(e, 200, true))).toMatchObject({ status: 'APPLIED', appliedVersion: 200 });
     // 옛 리더(세대 3)가 더 큰 판으로 풀려 한다 → FENCED
-    await expect(old.apply.run(pauseReq(e, 300, false))).rejects.toMatchObject({ code: status.UNAVAILABLE, message: expect.stringContaining('fenced') });
+    expect(await old.apply.run(pauseReq(e, 300, false))).toEqual({ status: 'FENCED' });
     expect(await hash(ctl(e))).toMatchObject({ admitPaused: '1', admitRev: '200' });
     expect(Number(await redis.command(['GET', leaderKey(e)], { key: leaderKey(e) }))).toBe(4);
     // 대기 파드로 돌아갔다: 같은 세대로는 세대 키가 없는 다른 회차에도 쓰지 않는다(리더 루프의 'FENCED를 받으면 그 세대로는 더 쓰지 않는다'와 같다)
     const other = randomUUID();
-    await expect(old.apply.run(pauseReq(other, 50, true))).rejects.toMatchObject({ code: status.UNAVAILABLE });
+    expect((await old.apply.run(pauseReq(other, 50, true))).status).not.toBe('APPLIED');
     expect(await exists(ctl(other))).toBe(0);
   });
 
@@ -243,7 +246,7 @@ describe('Q-T30 리더 아닌 파드와 옛 리더의 제어 쓰기 (ApplyLeader
     await old.apply.run(pauseReq(e, 401, true));
     // 새 리더가 서며 세대부터 올린다(BUMP)
     expect(await new RedisLeaderStore(redis).bump(e, 8, Date.now() + 86_400_000)).toBe('OK');
-    await expect(old.apply.run(pauseReq(e, 402, false))).rejects.toMatchObject({ code: status.UNAVAILABLE, message: expect.stringContaining('fenced') });
+    expect(await old.apply.run(pauseReq(e, 402, false))).toEqual({ status: 'FENCED' });
     expect(await new RedisLeaderStore(redis).control(e, Date.now())).toMatchObject({ paused: true, target: 1_500 });
   });
 
