@@ -64,6 +64,15 @@
 - core-svc 409 단언은 `services/core-svc/test-int/sale-suspension.int.test.ts` 263·266행이 `{ type: 'https://peaket.example/problems/sale-suspension-conflict' }`를 이미 단언한다. 이 이름은 계획이 더할 목록 줄과 같아 시험 파일을 고칠 필요가 없다. 이 시험은 openapi를 읽지 않으므로 구현 전에도 통과한다(구현 뒤 회귀 확인만 한다).
 - 실패가 구현을 요구하는 방향으로 먼저 섰다. 새 시험 파일은 만들지 않았다(계획 3).
 
+## 구현 메모
+
+구현 담당 `w12pt2-impl`(deepseek-v4.1-flash), 2026-11-22 16:50~16:53 KST.
+
+- **계약**: `x-peaket-problem-types`의 `sale-setting-locked` 뒤에 `sale-suspension-conflict: { status: 409, title: "판매 승인 상태와 맞지 않습니다" }`를 더했다. 서비스 코드(`internal-sale-suspension.controller.ts:39`)와 status·title이 글자까지 같다.
+- **생성물**: `contracts gen`은 바뀐 것이 없고(생성물이 이 목록을 쓰지 않는다), `api-client gen`이 `problem-types.ts`의 union과 `PROBLEM_TYPES` 표에 두 줄을 더했다. `gateway-routes --write`가 다섯 생성 파일의 둘째 줄 계약 지문만 `65f89e95…`에서 `4850cf22…`로 바꿨다. 경로·메서드·백엔드·필터는 그대로다(`git diff` 1줄씩).
+- **구현 중 드러난 셋째 어긋남**: 목록 줄을 더하니 PRF192가 `missing` 단언을 지나 제목 단언으로 넘어가, BAT-455 알림 코드가 남긴 제목 불일치 두 개를 보고했다. `fan-notify.controller.ts:56`의 `invalid-query` 제목 `eventIds는 50개까지입니다`와 `internal-notify-identity.controller.ts:38`의 `invalid-body` 제목 `identity 사건 모양이 올바르지 않습니다`다. 표준 제목(`목록 조건이 올바르지 않습니다`·`요청 본문이 올바르지 않습니다`)으로 바꾸고 구체 사유는 `detail`로 내렸다. 새 type은 만들지 않았다(guidelines §2). 첫 실패 확인 때는 `missing` 단언이 먼저 서 이 둘이 보이지 않았다.
+- **게이트**: platform PRF192 2/2, `gateway-routes --check` 0, `gateway-routes.test.mjs` 41/41, `contracts gen:check` 같음, `api-client gen:check` 같음·`api-client test` 116/116, core 알림 시험 3파일 11/11, typecheck 4패키지(의존 포함 10 tasks), `pnpm lint` 0.
+
 ## 리뷰
 
 ## 검증

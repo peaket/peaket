@@ -296,6 +296,7 @@ export type ProblemType =
   | 'sale-review-scales-missing'
   | 'sale-setting-locked'
   | 'sale-stop-unavailable'
+  | 'sale-suspension-conflict'
   | 'scale-change-closed'
   | 'scale-change-not-approved'
   | 'scale-change-not-up'
@@ -654,6 +655,7 @@ export const PROBLEM_TYPES = {
   'sale-review-scales-missing': { status: 422, title: "모든 회차의 공연 규모를 정해 주세요" },
   'sale-setting-locked': { status: 409, title: "지금은 바꿀 수 없는 항목입니다" },
   'sale-stop-unavailable': { status: 503, title: "판매를 멈추지 못해 확정하지 않았습니다" },
+  'sale-suspension-conflict': { status: 409, title: "판매 승인 상태와 맞지 않습니다" },
   'scale-change-closed': { status: 409, title: "규모를 바꿀 수 있는 시각이 지났습니다" },
   'scale-change-not-approved': { status: 422, title: "판매 승인된 공연만 규모를 올릴 수 있습니다" },
   'scale-change-not-up': { status: 422, title: "지금보다 큰 규모로만 올릴 수 있습니다" },

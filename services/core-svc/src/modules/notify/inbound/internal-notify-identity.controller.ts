@@ -35,7 +35,7 @@ export class InternalNotifyIdentityController {
   @ContractRouteSchema({ responses: { 202: Response } })
   async receive(@Body() body: unknown) {
     const parsed = BodySchema.safeParse(body);
-    if (!parsed.success) throw new ProblemError({ type: 'invalid-body', status: 400, title: 'identity 사건 모양이 올바르지 않습니다' });
+    if (!parsed.success) throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다', detail: 'identity 사건 모양이 올바르지 않습니다' });
     try {
       if (parsed.data.type === 'LOGIN_METHOD_CHANGED') {
         const r = await this.intake.loginMethodChanged(parsed.data);

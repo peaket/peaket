@@ -53,7 +53,7 @@ export class FanNotifyController {
   @Header('Cache-Control', 'no-store')
   async list(@ContractQuery(ListSubscriptionsQueryParams) q: z.output<typeof ListSubscriptionsQueryParams>, @CurrentPrincipal() me: Principal): Promise<SubscriptionPage> {
     const eventIds = q.eventIds ? q.eventIds.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
-    if (eventIds && eventIds.length > 50) throw new ProblemError({ type: 'invalid-query', status: 400, title: 'eventIds는 50개까지입니다' });
+    if (eventIds && eventIds.length > 50) throw new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다', detail: 'eventIds는 50개까지입니다' });
     return this.subscriptions.list(me.accountId, eventIds, q.cursor ?? null, q.limit ?? 20);
   }
 
