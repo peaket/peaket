@@ -25,7 +25,7 @@ import { layoutVenueId } from '../src/modules/catalog/domain/seatmap-layout.js';
 import { FakeIdentity, NOW_MS, testMedia } from '../test/support.js';
 import { buildDist, freePort, logSink, multipart, SERVICE_DIR, until, waitReady } from './media-support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
-import { ensureSearchLogin, loginFor } from './roles.js';
+import { ensureNotifyLogin, ensureSearchLogin, loginFor } from './roles.js';
 
 type Svc = Awaited<ReturnType<typeof createService>>;
 
@@ -1417,6 +1417,8 @@ describe('시작 파일(main.ts) 조립', () => {
       PEAKET_PARTNER_DATABASE_URL: pg.urlFor('core_partner_login', 'peaket-test'),
       // 검색 전용 연결(W7L2-S6): 앱 주소로 대신하지 않는다
       PEAKET_SEARCH_DATABASE_URL: await ensureSearchLogin(admin, pg),
+      // 발송기 전용 연결(ADR-0351): 팬 경로 주소로 대신하지 않는다
+      PEAKET_NOTIFY_DATABASE_URL: await ensureNotifyLogin(admin, pg),
       PEAKET_OPS_DATABASE_URL: pg.urlFor('core_ops_login', 'peaket-test'),
       PEAKET_IDENTITY_GRPC_URL: `127.0.0.1:${identityPort}`,
       PEAKET_IMAGE_GRPC_URL: '127.0.0.1:1',

@@ -22,7 +22,7 @@ import type { SearchQuery } from '../src/modules/catalog/domain/search.js';
 import { FakeIdentity, quiet, testMedia } from '../test/support.js';
 import { buildDist, freePort, logLines, SERVICE_DIR, until, waitReady } from './media-support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
-import { ensureSearchLogin, loginFor } from './roles.js';
+import { ensureNotifyLogin, ensureSearchLogin, loginFor } from './roles.js';
 
 // 이름 비교 값을 새로 만든 호출을 센다(동작은 그대로 넘긴다). core-svc가 부른 것만 세진다(패키지 안의 호출은 세지 않는다)
 vi.mock(import('@peaket/search-normalize'), async (orig) => {
@@ -403,6 +403,8 @@ describe('A5 시작 파일(main.ts) 조립', () => {
       PEAKET_DATABASE_URL: pg.urlFor('core_app_login', 'peaket-test'),
       PEAKET_PARTNER_DATABASE_URL: pg.urlFor('core_partner_login', 'peaket-test'),
       PEAKET_SEARCH_DATABASE_URL: await ensureSearchLogin(admin, pg),
+      // 발송기 전용 연결(ADR-0351): 팬 경로 주소로 대신하지 않는다
+      PEAKET_NOTIFY_DATABASE_URL: await ensureNotifyLogin(admin, pg),
       PEAKET_OPS_DATABASE_URL: pg.urlFor('core_ops_login', 'peaket-test'),
       PEAKET_IDENTITY_GRPC_URL: '127.0.0.1:1',
       PEAKET_IMAGE_GRPC_URL: '127.0.0.1:1',

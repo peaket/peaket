@@ -21,7 +21,7 @@ import { DrizzleSaleMaintenanceStore, GrpcMemberCodeDirectory, MemorySaleEligibi
 import { FakeIdentity, testMedia } from '../test/support.js';
 import { buildDist, freePort, logSink, multipart, SERVICE_DIR, until, waitReady } from './media-support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
-import { ensureSearchLogin, loginFor } from './roles.js';
+import { ensureNotifyLogin, ensureSearchLogin, loginFor } from './roles.js';
 
 type Svc = Awaited<ReturnType<typeof createService>>;
 
@@ -674,6 +674,8 @@ describe('시작 파일(main.ts)과 relay 정비 일 조립', () => {
       PEAKET_PARTNER_DATABASE_URL: pg.urlFor('core_partner_login', 'peaket-test'),
       // 검색 전용 연결(W7L2-S6): 앱 주소로 대신하지 않는다
       PEAKET_SEARCH_DATABASE_URL: await ensureSearchLogin(admin, pg),
+      // 발송기 전용 연결(ADR-0351): 팬 경로 주소로 대신하지 않는다
+      PEAKET_NOTIFY_DATABASE_URL: await ensureNotifyLogin(admin, pg),
       PEAKET_OPS_DATABASE_URL: pg.urlFor('core_ops_login', 'peaket-test'),
       PEAKET_IDENTITY_GRPC_URL: identityAddress,
       PEAKET_IMAGE_GRPC_URL: '127.0.0.1:1',
@@ -733,7 +735,17 @@ describe('시작 파일(main.ts)과 relay 정비 일 조립', () => {
     const line = out.split('\n').find((l) => l.startsWith('{"tasks"'))!;
     // 후기 정비 일은 review-temp-block-expire(매일) → review-purge-legacy(정비 시간, I-T83 ⑧, W8-audit2a 리뷰 A2) 차례다
     expect(JSON.parse(line)).toMatchObject({
-      tasks: [['sale-eligibility-purge', 'daily'], ['sale-eligibility-copy', 'daily'], ['review-temp-block-expire', 'daily'], ['review-purge-legacy', 'window']],
+      tasks: [
+        ['sale-eligibility-purge', 'daily'],
+        ['sale-eligibility-copy', 'daily'],
+        ['review-temp-block-expire', 'daily'],
+        ['review-purge-legacy', 'window'],
+        // BAT-455 알림 표 정비 넷(월 파티션·90일 지난 파티션·끝난 구독·7일 지난 중복 키)
+        ['notification-delivery-partitions', 'daily'],
+        ['notification-delivery-purge', 'window'],
+        ['notification-subscription-expired', 'daily'],
+        ['notification-dedup-purge', 'daily'],
+      ],
       purge: { purged: 0, dropFailed: 0 },
     });
   }, 180_000);

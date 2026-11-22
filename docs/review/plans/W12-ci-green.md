@@ -15,6 +15,7 @@
 | `node --test tools/ci/mesh-policies.test.mjs` | **실패**(같은 까닭) | 시험이 `--check`의 생성 대조를 그대로 부른다. 도구가 만든 파일을 손으로 고치지 않고 원천을 고쳐 `--write`로 다시 만들어야 한다 |
 | CI `node` 잡 `137218448527`의 core-svc 통합 시험 네 파일 | **4파일 3시험 실패** | 네 파일이 `dist/main.js`를 띄우는 환경에 `PEAKET_NOTIFY_DATABASE_URL`이 없다. `main.ts`가 `PEAKET_NOTIFY_DATABASE_URL이 없다(웹훅 발송기 전용 core_notify 사용자, 비밀 관리에서 넣는다)`로 끝나 `PEAKET_PUBLIC_FILE_DIR` 같은 뒤 환경 값 검사에 닿지도 못했다 |
 | 같은 실행의 직전 전체 실행 `45014387044`(`1e63a6404`, BAT-011 이전) | **같은 네 파일 실패** | W12-core-notify가 합쳐진 뒤 `develop`의 비문서 커밋에서 같은 실패가 먼저 났다. BAT-011이 만든 실패가 아니다. 문서만 바꾼 커밋은 `node` 잡을 건너뛰어 초록불로 보였다 |
+| `sale-eligibility`의 `시작 파일(main.ts)과 relay 정비 일 조립`(발송기 연결을 준 뒤 다시) | **1 실패** | 발송기 연결을 주자 시작은 지나갔지만, 정비 일 목록 단언이 BAT-455가 더한 알림 정비 넷(`notification-delivery-partitions`·`notification-delivery-purge`·`notification-subscription-expired`·`notification-dedup-purge`)을 모른 채 넷만 기대해 실패했다. 발송기 연결 실패에 가려져 있던 같은 묶음의 시험 결함이다 |
 
 - **시험 쪽 고침 하나**: core-svc 통합 시험 환경 조립 네 곳에 발송기 전용 로그인 주소를 더한다. 제품 코드와 시험 단언은 바꾸지 않는다. 고치기 전 실패는 위 표에 남긴다.
 - **mesh 쪽 고침 하나**: `port-allow.yaml`에 메서드 한 줄을 더하고 생성기를 돌린다. 생성 파일은 손으로 고치지 않는다.
@@ -32,7 +33,8 @@
 1. `services/core-svc/test-int/roles.ts`에 `ensureNotifyLogin(admin, pg)`를 더한다. `ensureSearchLogin`과 같은 꼴로, `core_notify` 그룹 역할에 붙은 로그인 사용자(`core_notify_login`, `NOBYPASSRLS NOSUPERUSER`)를 한 번만 만들고 그 주소를 돌려준다. 0043 마이그레이션이 만든 역할을 쓴다.
 2. `dist/main.js`를 띄우는 네 시험의 환경 조립에 `PEAKET_NOTIFY_DATABASE_URL: await ensureNotifyLogin(admin, pg)`를 더한다: `test-int/search-bat166.int.test.ts`, `test-int/sale-eligibility.int.test.ts`, `test-int/seatmap-editor.int.test.ts`, `test-int/seatmap-save.int.test.ts`.
 3. `test-int/startup-db-role.int.test.ts`는 이미 `core_notify_login`을 직접 만들고 AZ-T19 ④를 본다. 그 파일은 바꾸지 않는다. `ensureNotifyLogin`은 그 파일과 같은 역할·비밀번호를 쓰되, 여러 번 불러도 한 번만 만든다.
-4. 제품 코드(`src/main.ts`)와 시작 확인 규칙은 바꾸지 않는다. 시험이 운영 시작 파일의 필수 값을 빠뜨린 것을 채우는 일이다.
+4. `sale-eligibility`의 정비 일 목록 단언에 BAT-455가 더한 알림 정비 넷을 더한다. `CORE_MAINTENANCE_TASK_NAMES`와 `maintenance-tasks.ts`가 내는 차례 그대로다.
+5. 제품 코드(`src/main.ts`)와 시작 확인 규칙은 바꾸지 않는다. 시험이 운영 시작 파일의 필수 값과 정비 일 목록을 빠뜨린 것을 채우는 일이다.
 
 ## 손댈 파일
 
@@ -43,7 +45,7 @@
 | 3 | `deploy/platform/mesh/meshless-networkpolicies.yaml` | `--write`가 바꾼 것이 있으면 함께(없을 수 있다) |
 | 4 | `services/core-svc/test-int/roles.ts` | `ensureNotifyLogin` 도우미 |
 | 5 | `services/core-svc/test-int/search-bat166.int.test.ts` | `PEAKET_NOTIFY_DATABASE_URL` 환경 값 |
-| 6 | `services/core-svc/test-int/sale-eligibility.int.test.ts` | 같음 |
+| 6 | `services/core-svc/test-int/sale-eligibility.int.test.ts` | `PEAKET_NOTIFY_DATABASE_URL` 환경 값, 정비 일 목록 단언에 알림 정비 넷 |
 | 7 | `services/core-svc/test-int/seatmap-editor.int.test.ts` | 같음 |
 | 8 | `services/core-svc/test-int/seatmap-save.int.test.ts` | 같음 |
 
@@ -56,6 +58,7 @@
 | mesh 생성 대조(기존) | `tools/ci/mesh-policies.test.mjs`, `node tools/ci/mesh-policies.mjs --check` | 원천·라우트·proto로 다시 만든 생성 파일이 저장소와 같다. 구현 전에는 `BlockTicketIssuance` 한 줄이 모자라 실패하고, 원천을 고쳐 `--write`하면 통과한다 |
 | 시작 파일 환경(기존) | `services/core-svc/test-int/seatmap-save.int.test.ts`의 `PEAKET_PUBLIC_FILE_DIR이 없으면 뜨지 않고, …` | 발송기 연결을 준 뒤에는 `PEAKET_PUBLIC_FILE_DIR` 검사까지 닿아 그 값이 없을 때 그 이름을 출력한다. 고치기 전에는 `PEAKET_NOTIFY_DATABASE_URL`에서 멈춘다 |
 | 시작 파일 환경(기존) | `search-bat166`·`sale-eligibility`·`seatmap-editor`의 `시작 파일(main.ts) 조립` | 발송기 연결을 준 운영 시작 파일이 `/ready` 200까지 뜨고 원래 단언을 그대로 통과한다 |
+| 정비 일 목록(기존) | `sale-eligibility`의 `시작 파일(main.ts)과 relay 정비 일 조립` | `coreMaintenanceTasks`가 내는 이름·주기가 `CORE_MAINTENANCE_TASK_NAMES`와 같다. 알림 정비 넷을 더한 뒤 통과한다 |
 | core-svc typecheck | `pnpm --filter @peaket/core-svc typecheck` | 새 도우미와 네 시험의 타입이 맞는다 |
 | 회귀 | `pnpm --filter @peaket/core-svc test:integration test-int/startup-db-role.int.test.ts` | AZ-T5·AZ-T19 ④가 그대로 통과한다. 새 도우미가 0043 역할을 올바로 쓴다 |
 | 역할·기록 | `node tools/ci/roles-check.mjs`·`node tools/ci/records.mjs --check` | plan → test → impl → review → verify 차례와 기록 표가 맞는다 |
@@ -69,6 +72,7 @@
 | --- | --- | --- |
 | S1 | `port-allow.yaml`에서 `BlockTicketIssuance` 줄을 빼고 생성 파일은 그대로 둔다 | `mesh-policies --check` 실패(생성 파일과 원천이 다름) |
 | S2 | `seatmap-save` 시험의 환경에서 `PEAKET_NOTIFY_DATABASE_URL`을 빼거나 `core_app_login` 주소로 바꾼다 | 그 시험이 `PEAKET_NOTIFY_DATABASE_URL이 없다` 또는 `DB 사용자가 core_notify 역할이 아니다`로 실패 |
+| S3 | `services/core-svc/src/maintenance-tasks.ts`에서 `notification-dedup-purge` 한 줄을 지운다 | `sale-eligibility`의 정비 일 목록 시험이 `notification-dedup-purge`가 빠졌다고 실패 |
 
 ## 넘기는 것
 

@@ -20,3 +20,15 @@ export async function ensureSearchLogin(admin: Database, pg: PostgresContainer):
   if (!exists) await admin.db.execute(sql.raw(`CREATE USER ${user} PASSWORD '${password}' NOBYPASSRLS NOSUPERUSER; GRANT core_search TO ${user}`));
   return pg.urlFor(user, password);
 }
+
+/**
+ * 웹훅 발송기 전용 연결의 로그인 사용자(그룹 역할 core_notify, ADR-0351). 여러 번 불러도 한 번만 만든다. 그 주소를 돌려준다.
+ * main.ts를 띄우는 시험은 PEAKET_NOTIFY_DATABASE_URL에 이 주소를 준다
+ */
+export async function ensureNotifyLogin(admin: Database, pg: PostgresContainer): Promise<string> {
+  const user = 'core_notify_login';
+  const password = 'peaket-test';
+  const exists = (await admin.pool.query('select 1 from pg_roles where rolname = $1', [user])).rows.length > 0;
+  if (!exists) await admin.db.execute(sql.raw(`CREATE USER ${user} PASSWORD '${password}' NOBYPASSRLS NOSUPERUSER; GRANT core_notify TO ${user}`));
+  return pg.urlFor(user, password);
+}
