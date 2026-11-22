@@ -63,7 +63,7 @@
 
 14. **판매 승인 화면은 승인 본문을 `scales`·`placeId`(선택)·`accessibleSeatingCheck`(선택)로 좁힌다. 아티스트·다른 이름 연결은 LCH-080 잔여다(보충 2026-11-22, BAT-617).**
     - `POST /v1/ops/sale-reviews/{productionId}/approvals` 본문에서 `artistIds`(필수)·`aliases`를 뺀다. 구현 `SaleApprovalBody`가 `.strict()`로 두 칸을 받지 않고 저장 코드도 없어, 계약을 지키는 생성 클라이언트 본문이 400이 되던 어긋남을 없앤다(RV-05).
-    - 화면은 상세가 준 `placeId`가 있으면 그 값을 싣고, 없으면(새 공연장 요청) 보내지 않아 서버가 지금 값을 그대로 둔다. 관제 상세는 `placeId`·`placeName`·`requestedPlace`·`accessibleSeatingCheck`를, 파트너 현황은 `title`을 더한다. 관제 상세가 등록 공연장 이름을 읽도록 core 0043이 `core_ops`에 `place`의 `id`·`name`만 연다.
+    - 화면은 상세가 준 `placeId`가 있으면 그 값을 싣고, 없으면(새 공연장 요청) 보내지 않아 서버가 지금 값을 그대로 둔다. 관제 상세는 `placeId`·`placeName`·`requestedPlace`·`accessibleSeatingCheck`를, 파트너 현황은 `title`을 더한다. 관제 상세가 등록 공연장 이름을 읽도록 core 0044이 `core_ops`에 `place`의 `id`·`name`만 연다.
     - 운영자가 기존 아티스트·공연장을 잇거나 새로 만드는 경로(`POST /v1/ops/artists`·`POST /v1/ops/places`)와 `production_artist`·`search_alias` 쓰기는 이 묶음에 넣지 않는다. 화면은 읽기 전용 안내만 두고 LCH-080 단계 줄은 체크하지 않는다.
     - 메모리 저장소는 관제 상세의 취소 회차 포함과 목록 정렬 폴백(`created_at`)을 DB와 같게 맞춘다(RV-06).
 
