@@ -1,6 +1,6 @@
 // BAT-455 N-T19 통합: 0045 적용·notification_delivery 파티션·core_app/core_notify 권한·동시 임대(실제 PostgreSQL).
 import 'reflect-metadata';
-import { createDatabase, type Database } from '@peaket/platform';
+import { createDatabase, type Database, ensureMonthlyPartitions, systemClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateCore } from '../scripts/migrate.mjs';
@@ -37,6 +37,8 @@ beforeAll(async () => {
   pg = await startPostgres();
   await migrateCore(pg.url);
   admin = createDatabase({ url: pg.url, applicationName: 'core-svc-fan-notify-int-admin', max: 2 });
+  // migrateCore는 마이그레이션만 돈다(운영 CLI가 파티션을 만든다). 시험은 같은 일을 여기서 한 번 한다
+  await ensureMonthlyPartitions(admin, systemClock, { table: 'notification_delivery', key: 'timestamptz' });
   app = await loginFor(admin, pg, 'core_app_login', 'core_app', 2);
   notify = await loginFor(admin, pg, 'core_notify_login', 'core_notify', 2);
   notify2 = await loginFor(admin, pg, 'core_notify_login2', 'core_notify', 2);
