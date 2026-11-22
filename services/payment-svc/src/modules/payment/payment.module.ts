@@ -7,7 +7,7 @@ import { BatchGetPaymentStates } from './application/batch-get-payment-states.js
 import { ReceivePaymentWebhook, type ReceivePaymentWebhookDeps } from './application/receive-payment-webhook.js';
 import type { PaymentCommandLog, PaymentCommandSignals, PaymentCommandStore, PaymentStateReader } from './domain/ports.js';
 import { InternalCircuitsController, PG_CIRCUITS, type PgCircuitsSource } from './inbound/internal-circuits.controller.js';
-import { PaymentWebhookController } from './inbound/payment-webhook.controller.js';
+import { PaymentWebhookController, SETTLEMENT_WEBHOOK_RECEIVER } from './inbound/payment-webhook.controller.js';
 
 export interface PaymentModuleDeps {
   readonly store: PaymentCommandStore;
@@ -18,6 +18,8 @@ export interface PaymentModuleDeps {
   readonly webhook: Omit<ReceivePaymentWebhookDeps, 'clock'>;
   /** 결제사 서킷 등록부(늦게 묶는다). 없으면 모두 closed로 답한다 */
   readonly circuits?: PgCircuitsSource;
+  /** 토스 지급·셀러 웹훅 수신기(운영 계약·키가 없으면 비운다). */
+  readonly settlementWebhook?: { receive(headers: Record<string, string | string[] | undefined>, rawBody: Buffer): Promise<'ACCEPTED' | 'REJECTED' | 'IGNORED' | 'STORE_FAILED'> };
 }
 
 @Module({})
@@ -29,6 +31,7 @@ export class PaymentModule {
       controllers: [PaymentWebhookController, InternalCircuitsController],
       providers: [
         { provide: PG_CIRCUITS, useValue: deps.circuits ?? (() => undefined) },
+        { provide: SETTLEMENT_WEBHOOK_RECEIVER, useValue: deps.settlementWebhook },
         { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
         InternalTokenGuard,
         { provide: AcceptPaymentCommand, inject: [CLOCK], useFactory: (clock: Clock) => new AcceptPaymentCommand({ store: deps.store, clock, log: deps.log, signals: deps.signals }) },

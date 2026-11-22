@@ -1,6 +1,79 @@
 // 지급대행 어댑터의 순수 부분(토스 지급 웹훅 서명·JWE 설정 경계, 포트원 출금 대사·잔액 원장).
 // 실제 키·계정이 없으므로 전송은 503으로 막고, 서명·대사 규칙만 시험 가능하게 둔다(settlement §5.2·§5.3·§5.5, J-T6·J-T20·J-T25).
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import type { PayoutRecord } from './settlement.js';
+
+/** 토스 지급 한 건의 상한(10억 원 미만). settlement §5.2·J-T4 */
+export const TOSS_PAYOUT_MAX_AMOUNT = 999_999_999;
+/** 토스 지급 요청 하나에 담는 지급 건 수(요청당 20건). settlement §5.2 */
+export const TOSS_PAYOUT_MAX_ITEMS = 20;
+
+/** 10억 원 이상 정산서 지급액을 10억 원 미만 조각으로 나눈다(J-T4). */
+export function splitTossPayoutAmount(amount: number): number[] {
+  if (!Number.isSafeInteger(amount) || amount <= 0) return [];
+  const out: number[] = [];
+  let left = amount;
+  while (left > TOSS_PAYOUT_MAX_AMOUNT) {
+    out.push(TOSS_PAYOUT_MAX_AMOUNT);
+    left -= TOSS_PAYOUT_MAX_AMOUNT;
+  }
+  out.push(left);
+  return out;
+}
+
+/** 지급 건을 토스 요청당 20건으로 나눈다. 순서는 그대로 둔다. */
+export function groupTossPayoutRequests(payouts: readonly PayoutRecord[]): PayoutRecord[][] {
+  const out: PayoutRecord[][] = [];
+  for (let i = 0; i < payouts.length; i += TOSS_PAYOUT_MAX_ITEMS) out.push(payouts.slice(i, i + TOSS_PAYOUT_MAX_ITEMS));
+  return out;
+}
+
+export type TossFailureClass = 'ACCOUNT' | 'TRANSIENT' | 'LIMIT_KYC' | 'UNKNOWN';
+
+/**
+ * 지급 건 FAILED의 세 갈래(settlement §12). 표에 없는 코드는 UNKNOWN으로 사람이 본다.
+ * 코드 목록은 결제사 원문을 확인할 때 채운다(settlement §12 '결제사 오류 코드 표').
+ */
+export function classifyTossFailure(code: string): TossFailureClass {
+  const c = code.trim().toUpperCase();
+  if (/ACCOUNT|BANK.*(NOT_FOUND|CLOSED)|INVALID_ACCOUNT|DEPOSIT_ACCOUNT/.test(c)) return 'ACCOUNT';
+  if (/MAINTENANCE|TEMPORARY|TIMEOUT|NETWORK|SYSTEM|TRY_AGAIN|PROCESSING/.test(c)) return 'TRANSIENT';
+  if (/KYC|LIMIT|EXCEED|QUOTA/.test(c)) return 'LIMIT_KYC';
+  return 'UNKNOWN';
+}
+
+export type TossSettlementEvent =
+  | { kind: 'PAYOUT'; pgPayoutId: string; status: string }
+  | { kind: 'SELLER'; tossSellerId: string; status: string }
+  | { kind: 'IGNORED' };
+
+/**
+ * /v1/webhooks/toss의 정산 사건을 골라 읽는다. 본문의 상태는 참고만 하고 저장은 단건 조회 결과로 한다.
+ * 모르는 사건·모양은 IGNORED이고, 알려진 사건인데 필수 칸이 없으면 null(400)이다.
+ */
+export function parseTossSettlementWebhook(rawBody: string): TossSettlementEvent | null {
+  let body: unknown;
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return null;
+  }
+  if (typeof body !== 'object' || body === null) return null;
+  const b = body as Record<string, unknown>;
+  const eventType = typeof b.eventType === 'string' ? b.eventType : typeof b.type === 'string' ? b.type : '';
+  const data = typeof b.data === 'object' && b.data !== null ? (b.data as Record<string, unknown>) : undefined;
+  if (eventType === 'payout.changed') {
+    const pgPayoutId = typeof data?.payoutId === 'string' ? data.payoutId : typeof data?.id === 'string' ? data.id : undefined;
+    const status = typeof data?.status === 'string' ? data.status : undefined;
+    return pgPayoutId && status ? { kind: 'PAYOUT', pgPayoutId, status } : null;
+  }
+  if (eventType === 'seller.changed') {
+    const tossSellerId = typeof data?.sellerId === 'string' ? data.sellerId : typeof data?.id === 'string' ? data.id : undefined;
+    const status = typeof data?.status === 'string' ? data.status : undefined;
+    return tossSellerId && status ? { kind: 'SELLER', tossSellerId, status } : null;
+  }
+  return { kind: 'IGNORED' };
+}
 
 export interface TossPayoutWebhookInput {
   /** v1: 뒤 base64. 키 교체 중이면 공백으로 이어 최대 4개 */

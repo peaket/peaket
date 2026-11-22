@@ -46,6 +46,15 @@ export interface PayoutBatchView {
   portoneBulkPayoutId?: string;
 }
 
+/** SCR-049 상세(openapi OpsPayoutBatchDetail). payment-svc 내부 묶음 상세를 그대로 중계한다. */
+export interface PayoutBatchDetailView {
+  batch: PayoutBatchView;
+  statements: readonly Record<string, unknown>[];
+  payouts: readonly Record<string, unknown>[];
+  holds: readonly Record<string, unknown>[];
+  kycNotices: readonly { promoterId: string; sellerStatus: string; from: string; to: string; amount: number; threshold: number; notice: boolean }[];
+}
+
 export interface PayoutApprovalView {
   approvalId: string;
   kind: 'PAYOUT_BATCH';

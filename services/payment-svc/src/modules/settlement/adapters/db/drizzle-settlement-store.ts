@@ -1,9 +1,9 @@
 // 정산·지급·KYC Drizzle 저장소(docs/data.md settlement_statement…payout).
 import { and, desc, eq, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
-import type { PayoutBatchAtomicInput, StatementFilter, StatementPage, SettlementStore } from '../../domain/ports.js';
-import { SettlementProblem, type DisputeRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchAuditRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementAuditRecord, type StatementRecord, type StatementSource } from '../../domain/settlement.js';
-import { partnerReceivable, payout, payoutAccount, payoutBatch, payoutBatchAudit, receivableMove, sellerKyc, settlementStatement, settlementStatementAudit, statementDispute, statementSource } from './schema.js';
+import type { GuaranteeCollectionAtomicInput, PayoutBatchAtomicInput, StatementFilter, StatementPage, SettlementStore, StatementUpdate } from '../../domain/ports.js';
+import { SettlementProblem, type DisputeRecord, type GuaranteeCollectionRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchAuditRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementAuditRecord, type StatementRecord, type StatementSource } from '../../domain/settlement.js';
+import { guaranteeCollection, partnerReceivable, payout, payoutAccount, payoutBatch, payoutBatchAudit, receivableMove, sellerKyc, settlementStatement, settlementStatementAudit, settlementWebhookReceipt, statementDispute, statementSource } from './schema.js';
 
 const receivableRecord = (r: typeof partnerReceivable.$inferSelect): ReceivableRecord => ({
   receivableId: r.id,
@@ -227,6 +227,18 @@ export class DrizzleSettlementStore implements SettlementStore {
       .where(eq(settlementStatement.id, record.statementId));
   }
 
+  async applyStatementUpdates(updates: readonly StatementUpdate[]): Promise<void> {
+    if (updates.length === 0) return;
+    await this.db.transaction(async (tx) => {
+      for (const u of updates) {
+        await tx
+          .update(settlementStatement)
+          .set({ status: u.status, holdReason: u.holdReason, offsetAmount: u.offsetAmount, payoutAmount: u.payoutAmount, updatedAt: u.updatedAt })
+          .where(eq(settlementStatement.id, u.statementId));
+      }
+    });
+  }
+
   async insertStatementAudit(record: StatementAuditRecord): Promise<void> {
     await this.db.db.insert(settlementStatementAudit).values({
       id: record.auditId,
@@ -340,7 +352,16 @@ export class DrizzleSettlementStore implements SettlementStore {
           await tx.update(partnerReceivable).set({ remaining: u.remaining, status: u.status, updatedAt: u.updatedAt }).where(eq(partnerReceivable.id, u.receivableId));
         }
         if (input.receivableMoves.length > 0) {
-          await tx.insert(receivableMove).values(input.receivableMoves.map((m) => ({ receivableId: m.receivableId, statementId: m.statementId, amount: m.amount, movedAt: m.movedAt })));
+          await tx.insert(receivableMove).values(
+            input.receivableMoves.map((m) => ({
+              ...(m.moveId ? { id: m.moveId } : {}),
+              receivableId: m.receivableId,
+              statementId: m.statementId,
+              amount: m.amount,
+              kind: m.kind ?? 'OFFSET',
+              movedAt: m.movedAt,
+            })),
+          );
         }
         await tx.insert(payoutBatch).values({
           id: record.batchId,
@@ -538,6 +559,11 @@ export class DrizzleSettlementStore implements SettlementStore {
     return rows[0] ? payoutRecord(rows[0]) : undefined;
   }
 
+  async findPayoutByPgPayoutId(pgPayoutId: string): Promise<PayoutRecord | undefined> {
+    const rows = await this.db.db.select().from(payout).where(eq(payout.pgPayoutId, pgPayoutId)).limit(1);
+    return rows[0] ? payoutRecord(rows[0]) : undefined;
+  }
+
   async savePayout(record: PayoutRecord): Promise<void> {
     await this.db.db
       .update(payout)
@@ -567,6 +593,28 @@ export class DrizzleSettlementStore implements SettlementStore {
           verifiedAt: r.verifiedAt,
           source: r.source,
           updatedAt: r.updatedAt,
+          tossSellerId: r.tossSellerId,
+          tossSellerStatus: r.tossSellerStatus as KycRecord['tossSellerStatus'],
+        }
+      : undefined;
+  }
+
+  async findKycByTossSellerId(tossSellerId: string): Promise<KycRecord | undefined> {
+    const rows = await this.db.db.select().from(sellerKyc).where(eq(sellerKyc.tossSellerId, tossSellerId)).limit(1);
+    const r = rows[0];
+    return r
+      ? {
+          promoterId: r.promoterId,
+          status: r.status as KycRecord['status'],
+          businessVerified: r.businessVerified,
+          representativeVerified: r.representativeVerified,
+          legalName: r.legalName,
+          representative: r.representative,
+          verifiedAt: r.verifiedAt,
+          source: r.source,
+          updatedAt: r.updatedAt,
+          tossSellerId: r.tossSellerId,
+          tossSellerStatus: r.tossSellerStatus as KycRecord['tossSellerStatus'],
         }
       : undefined;
   }
@@ -583,6 +631,8 @@ export class DrizzleSettlementStore implements SettlementStore {
         representative: record.representative ?? null,
         verifiedAt: record.verifiedAt,
         source: record.source,
+        tossSellerId: record.tossSellerId ?? null,
+        tossSellerStatus: record.tossSellerStatus ?? 'PENDING',
         updatedAt: record.updatedAt,
       })
       .onConflictDoUpdate({
@@ -595,6 +645,8 @@ export class DrizzleSettlementStore implements SettlementStore {
           representative: record.representative ?? null,
           verifiedAt: record.verifiedAt,
           source: record.source,
+          tossSellerId: record.tossSellerId ?? null,
+          tossSellerStatus: record.tossSellerStatus ?? 'PENDING',
           updatedAt: record.updatedAt,
         },
       });
@@ -657,6 +709,38 @@ export class DrizzleSettlementStore implements SettlementStore {
     return rows.map(statementRecord);
   }
 
+  async listHeldStatements(pg: Pg, pgStore: PgStore, payoutDate: string): Promise<StatementRecord[]> {
+    const rows = await this.db.db
+      .select()
+      .from(settlementStatement)
+      .where(
+        and(
+          eq(settlementStatement.status, 'HELD'),
+          eq(settlementStatement.pg, pg),
+          eq(settlementStatement.pgStore, pgStore),
+          eq(settlementStatement.payoutDate, payoutDate),
+        ),
+      )
+      .orderBy(settlementStatement.promoterId, settlementStatement.id);
+    return rows.map(statementRecord);
+  }
+
+  async sumScheduledTossPayouts(promoterId: string, from: string, to: string): Promise<number> {
+    const rows = await this.db.db
+      .select({ amount: settlementStatement.payoutAmount })
+      .from(settlementStatement)
+      .where(
+        and(
+          eq(settlementStatement.promoterId, promoterId),
+          eq(settlementStatement.pg, 'TOSS'),
+          gte(settlementStatement.payoutDate, from),
+          lte(settlementStatement.payoutDate, to),
+          inArray(settlementStatement.status, ['NOTIFIED', 'CONFIRMED', 'SCHEDULED', 'HELD']),
+        ),
+      );
+    return rows.reduce((sum, r) => sum + Number(r.amount), 0);
+  }
+
   async findProductStatement(promoterId: string, pg: Pg, pgStore: PgStore, periodStart: string, periodEnd: string): Promise<StatementRecord | undefined> {
     const rows = await this.db.db
       .select()
@@ -707,6 +791,11 @@ export class DrizzleSettlementStore implements SettlementStore {
   async findReceivableBySourceRef(sourceRef: string): Promise<ReceivableRecord | undefined> {
     const rows = await this.db.db.select().from(partnerReceivable).where(eq(partnerReceivable.sourceRef, sourceRef)).limit(1);
     return rows[0] === undefined ? undefined : receivableRecord(rows[0]);
+  }
+
+  async findReceivable(receivableId: string): Promise<ReceivableRecord | undefined> {
+    const rows = await this.db.db.select().from(partnerReceivable).where(eq(partnerReceivable.id, receivableId)).limit(1);
+    return rows[0] ? receivableRecord(rows[0]) : undefined;
   }
 
   async saveReceivable(record: ReceivableRecord): Promise<void> {
@@ -772,11 +861,88 @@ export class DrizzleSettlementStore implements SettlementStore {
   }
 
   async insertReceivableMove(record: ReceivableMoveRecord): Promise<void> {
-    await this.db.db.insert(receivableMove).values({ receivableId: record.receivableId, statementId: record.statementId, amount: record.amount, movedAt: record.movedAt });
+    await this.db.db.insert(receivableMove).values({
+      ...(record.moveId ? { id: record.moveId } : {}),
+      receivableId: record.receivableId,
+      statementId: record.statementId,
+      amount: record.amount,
+      kind: record.kind ?? 'OFFSET',
+      movedAt: record.movedAt,
+    });
   }
 
   async listReceivableMoves(statementId: string): Promise<ReceivableMoveRecord[]> {
     const rows = await this.db.db.select().from(receivableMove).where(eq(receivableMove.statementId, statementId));
-    return rows.map((r) => ({ receivableId: r.receivableId, statementId: r.statementId, amount: r.amount, movedAt: r.movedAt }));
+    return rows.map((r) => ({ moveId: r.id, receivableId: r.receivableId, statementId: r.statementId, amount: r.amount, kind: r.kind as ReceivableMoveRecord['kind'], movedAt: r.movedAt }));
+  }
+
+  async listReceivableMovesForReceivable(receivableId: string): Promise<ReceivableMoveRecord[]> {
+    const rows = await this.db.db.select().from(receivableMove).where(eq(receivableMove.receivableId, receivableId));
+    return rows.map((r) => ({ moveId: r.id, receivableId: r.receivableId, statementId: r.statementId, amount: r.amount, kind: r.kind as ReceivableMoveRecord['kind'], movedAt: r.movedAt }));
+  }
+
+  async findGuaranteeCollection(idempotencyKey: string): Promise<GuaranteeCollectionRecord | undefined> {
+    const rows = await this.db.db.select().from(guaranteeCollection).where(eq(guaranteeCollection.idempotencyKey, idempotencyKey)).limit(1);
+    const r = rows[0];
+    return r
+      ? {
+          collectionId: r.id,
+          idempotencyKey: r.idempotencyKey,
+          receivableId: r.receivableId,
+          promoterId: r.promoterId,
+          guaranteeKind: r.guaranteeKind as GuaranteeCollectionRecord['guaranteeKind'],
+          amount: r.amount,
+          basisAmount: r.basisAmount,
+          guaranteeRateBp: r.guaranteeRateBp,
+          actor: r.actor,
+          reason: r.reason,
+          createdAt: r.createdAt,
+        }
+      : undefined;
+  }
+
+  async collectGuaranteeAtomically(input: GuaranteeCollectionAtomicInput): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const locked = await tx.execute(sql`select id, remaining, status from partner_receivable where id = ${input.collection.receivableId} for update`);
+      const row = (locked.rows as { id: string; remaining: number | string; status: string }[])[0];
+      if (!row) throw new SettlementProblem('guarantee-not-open', 409, '열린 미수금이 아닙니다');
+      if (Number(row.remaining) !== input.receivable.remaining + input.move.amount) {
+        throw new SettlementProblem('guarantee-conflict', 409, '미수금 잔액이 다른 처리와 겹쳤습니다');
+      }
+      await tx.insert(guaranteeCollection).values({
+        id: input.collection.collectionId,
+        idempotencyKey: input.collection.idempotencyKey,
+        receivableId: input.collection.receivableId,
+        promoterId: input.collection.promoterId,
+        guaranteeKind: input.collection.guaranteeKind,
+        amount: input.collection.amount,
+        basisAmount: input.collection.basisAmount,
+        guaranteeRateBp: input.collection.guaranteeRateBp,
+        actor: input.collection.actor,
+        reason: input.collection.reason,
+        createdAt: input.collection.createdAt,
+      });
+      await tx.insert(receivableMove).values({
+        ...(input.move.moveId ? { id: input.move.moveId } : {}),
+        receivableId: input.move.receivableId,
+        statementId: input.move.statementId,
+        amount: input.move.amount,
+        kind: 'GUARANTEE',
+        movedAt: input.move.movedAt,
+      });
+      await tx
+        .update(partnerReceivable)
+        .set({ remaining: input.receivable.remaining, status: input.receivable.status, updatedAt: input.receivable.updatedAt })
+        .where(eq(partnerReceivable.id, input.receivable.receivableId));
+    });
+  }
+
+  async hasSettlementWebhookReceipt(transmissionId: string): Promise<boolean> {
+    const rows = await this.db.db.select().from(settlementWebhookReceipt).where(eq(settlementWebhookReceipt.transmissionId, transmissionId)).limit(1);
+    return rows.length > 0;
+  }
+
+  async recordSettlementWebhookReceipt(transmissionId: string, receivedAt: Date): Promise<void> {
+    await this.db.db.insert(settlementWebhookReceipt).values({ transmissionId, receivedAt }).onConflictDoNothing();
   }
 }

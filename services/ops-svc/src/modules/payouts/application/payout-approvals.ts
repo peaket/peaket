@@ -216,6 +216,37 @@ export class PayoutApprovals {
     return this.d.payments.listBatches(filter);
   }
 
+  getBatchDetail(batchId: string) {
+    return this.d.payments.getBatchDetail(batchId);
+  }
+
+  /** 보증금·이행보증보험 충당(settlement §7). commander가 재인증한 뒤 payment-svc에 넘긴다. */
+  async collectGuarantee(
+    receivableId: string,
+    input: { actor: OpsActor; reason: string; idempotencyKey: string; reauthToken: string | undefined },
+  ): Promise<unknown> {
+    return guard(async () => {
+      if (input.reason.trim() === '') throw new PayoutApprovalProblem('invalid-body', 400, '보증 충당 사유가 필요합니다');
+      if (input.actor.role !== 'commander') throw new PayoutApprovalProblem('approval-role-required', 403, 'commander만 보증 충당을 할 수 있습니다');
+      const verified = await this.d.reauth.verify(input.reauthToken, { sessionId: input.actor.sessionId, act: 'APPROVAL' });
+      if (verified.accountId !== input.actor.accountId) throw new PayoutApprovalProblem('reauth-required', 403, '다시 인증해 주세요');
+      const out = (await this.d.payments.collectGuarantee(receivableId, {
+        actor: input.actor.accountId,
+        sessionId: input.actor.sessionId,
+        ...(input.reauthToken ? { reauthToken: input.reauthToken } : {}),
+        idempotencyKey: input.idempotencyKey,
+        reason: input.reason.trim(),
+      })) as { collection?: { amount?: unknown }; receivable?: { promoterId?: unknown } };
+      await this.#audit('RECEIVABLE_GUARANTEE_COLLECTED', receivableId, input.actor.accountId, {
+        receivableId,
+        amount: out.collection?.amount ?? null,
+        promoterId: out.receivable?.promoterId ?? null,
+        idempotencyKey: input.idempotencyKey,
+      }, this.d.clock.now());
+      return out;
+    });
+  }
+
   listStatements(filter: { kind?: string | undefined; status?: string | undefined; pg?: string | undefined; pgStore?: string | undefined; payoutDate?: string | undefined; limit: number }): Promise<unknown[]> {
     return this.d.payments.listStatements(filter);
   }

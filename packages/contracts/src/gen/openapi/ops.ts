@@ -4367,6 +4367,153 @@ export const ListOpsPayoutBatchesResponse = zod.object({
 })
 
 /**
+ * FR-062, POL-038, POL-039, SCR-049, BAT-630 LCH-110. CS 담당자는 정산 화면을 쓰지 않아 403이다(open-items 72번). 계좌는 은행과 끝 4자리만 싣는다. Cache-Control: no-store
+ * @summary 지급 묶음 상세(정산서·지급 건·보류·KYC 예고)
+ */
+export const GetOpsPayoutBatchParams = zod.object({
+  "batchId": zod.string()
+})
+
+export const GetOpsPayoutBatchResponse = zod.object({
+  "batch": zod.object({
+  "batchId": zod.string().optional(),
+  "pg": zod.enum(['TOSS', 'PORTONE']).optional(),
+  "pgStore": zod.enum(['STANDARD', 'ESCROW']).optional().describe('토스페이먼츠 결제 상점. 같은 지급일·같은 상점이면 회차·상품 정산서가 한 묶음에 든다(추천 적용 2026-10-14, ADR-0062)'),
+  "payoutDate": zod.iso.date().optional(),
+  "totalAmount": zod.int().optional(),
+  "statementCount": zod.int().optional(),
+  "approvalId": zod.string().optional(),
+  "portoneBulkPayoutId": zod.string().optional(),
+  "pgBalance": zod.object({
+  "amount": zod.int().optional(),
+  "pendingAmount": zod.int().optional().describe('토스페이먼츠만. 정산 주기가 지나지 않은 \'정산 대기\' 금액'),
+  "ledgerAmount": zod.int().optional().describe('포트원만. 이체 원장으로 계산한 지급대행 계좌 잔액. operator 입력값과 다르면 작은 값으로 잔액 부족을 판정하고 CS 처리함 건을 만든다(settlement §5.1, 추천 적용 2026-10-28, ADR-0108)'),
+  "source": zod.enum(['PG_API', 'OPERATOR_CONSOLE']).optional(),
+  "observedAt": zod.iso.datetime({"offset":true}).optional(),
+  "observedBy": zod.string().optional().describe('OPERATOR_CONSOLE일 때 입력한 operator')
+}).optional().describe('묶음 때 본 결제사 지급 가능 잔액. 토스페이먼츠는 잔액 API, 포트원은 operator가 콘솔에서 본 값이다. 포트원 값은 검증할 수 없어 지급을 미루는 쪽으로만 쓴다(ADR-0062)'),
+  "status": zod.enum(['PREPARED', 'PENDING_APPROVAL', 'APPROVED', 'SUBMITTED', 'COMPLETED', 'PARTIAL_FAILED']).optional(),
+  "approvalDueAt": zod.iso.datetime({"offset":true}).nullish().describe('승인 기한(지급일 전 영업일 15시, POL-039)')
+}).optional().describe('지급 묶음(지급일·결제사·결제 상점, 2인 승인)'),
+  "statements": zod.array(zod.object({
+  "statementId": zod.string().optional(),
+  "kind": zod.enum(['EVENT', 'PRODUCT']).optional().describe('EVENT는 티켓, PRODUCT는 굿즈·티켓 연동 부가 상품'),
+  "eventId": zod.string().optional().describe('회차. 상품 정산서는 null(ADR-0086)'),
+  "pg": zod.enum(['TOSS', 'PORTONE']).optional(),
+  "pgStore": zod.enum(['STANDARD', 'ESCROW']).optional().describe('토스페이먼츠 결제 상점(ESCROW는 굿즈 택배)'),
+  "periodStart": zod.iso.date().optional().describe('상품 정산서의 주 시작(KST)'),
+  "periodEnd": zod.iso.date().optional().describe('상품 정산서의 주 끝(KST)'),
+  "grossAmount": zod.int().optional(),
+  "refundAmount": zod.int().optional(),
+  "commissionAmount": zod.int().optional(),
+  "commissionVat": zod.int().optional(),
+  "offsetAmount": zod.int().optional(),
+  "payoutAmount": zod.int().optional(),
+  "revision": zod.int().optional().describe('판본. 회차 취소·연기 환급이나 승인된 수기 판단으로 다시 계산하면 1 올린 새 판을 만든다(settlement §4.1, 기술 검토 중간-043)'),
+  "supersedesId": zod.string().nullish().describe('이 판이 대신한 옛 판의 statementId. 첫 판은 null'),
+  "excludedPayments": zod.array(zod.string()).optional().describe('대사 불일치로 이번 계산에서 뺀 결제 ID 목록(settlement §4.1)'),
+  "status": zod.enum(['CALCULATED', 'NOTIFIED', 'DISPUTED', 'CONFIRMED', 'HELD', 'SCHEDULED', 'FAILED', 'PAID', 'CARRIED_OVER', 'SUPERSEDED']).optional().describe('SUPERSEDED는 다시 계산해 새 판으로 바뀐 옛 판이다. 금액은 알린 그대로 남는다(settlement §4.1·§4.4, 추천 적용 2026-10-28, 기술 검토 중간-043)'),
+  "holdReason": zod.enum(['KYC', 'ACCOUNT_CHANGE', 'BALANCE', 'ACCOUNT_MISMATCH', 'SALE_SUSPENDED']).optional().describe('ACCOUNT_MISMATCH는 포트원 파트너의 정산 계좌가 PEAKET 기록과 달라 그 파트너의 포트원 결제분 지급을 멈춘 것(settlement §5.3, 추천 적용 2026-10-28, ADR-0108). SALE_SUSPENDED는 그 회차의 공연이 판매 중지되어 지급을 멈춘 것(settlement §6, 추천 적용 2026-10-28, ADR-0123)'),
+  "disputeDueAt": zod.iso.datetime({"offset":true}).optional(),
+  "payoutDate": zod.iso.date().optional(),
+  "payoutBankCode": zod.string().optional().describe('정산 은행 코드(docs/data.md promoter.payout_bank_code). 화면은 은행 이름으로 바꿔 끝 4자리와 함께 보인다(ADR-0162 결정 5, 추천 적용 2026-10-30)'),
+  "payoutAccountLast4": zod.string().optional()
+}).describe('정산서(회차 정산서는 회차·결제사, 상품 정산서는 파트너·결제사·결제 상점·주 단위, POL-039, ADR-0047, 상품 정산서는 추천 적용 2026-10-14, ADR-0062). 계좌는 끝 4자리만')).optional(),
+  "payouts": zod.array(zod.object({
+  "payoutId": zod.string().optional(),
+  "statementId": zod.string().optional(),
+  "seq": zod.int().optional(),
+  "amount": zod.int().optional(),
+  "refPayoutId": zod.string().optional(),
+  "pgPayoutId": zod.string().nullish(),
+  "status": zod.enum(['REQUESTED', 'IN_PROGRESS', 'COMPLETED', 'FAILED', 'CANCELED']).optional(),
+  "errorCode": zod.string().nullish(),
+  "transferCheck": zod.union([zod.literal('MATCHED'),zod.literal('MISMATCH'),zod.literal('MISSING'),zod.literal(null)]).nullish(),
+  "transferCheckedAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('SCR-049 지급 건(openapi OpsPayout). 계좌번호 전체는 싣지 않는다')).optional(),
+  "holds": zod.array(zod.object({
+  "statementId": zod.string().optional(),
+  "kind": zod.enum(['EVENT', 'PRODUCT']).optional().describe('EVENT는 티켓, PRODUCT는 굿즈·티켓 연동 부가 상품'),
+  "eventId": zod.string().optional().describe('회차. 상품 정산서는 null(ADR-0086)'),
+  "pg": zod.enum(['TOSS', 'PORTONE']).optional(),
+  "pgStore": zod.enum(['STANDARD', 'ESCROW']).optional().describe('토스페이먼츠 결제 상점(ESCROW는 굿즈 택배)'),
+  "periodStart": zod.iso.date().optional().describe('상품 정산서의 주 시작(KST)'),
+  "periodEnd": zod.iso.date().optional().describe('상품 정산서의 주 끝(KST)'),
+  "grossAmount": zod.int().optional(),
+  "refundAmount": zod.int().optional(),
+  "commissionAmount": zod.int().optional(),
+  "commissionVat": zod.int().optional(),
+  "offsetAmount": zod.int().optional(),
+  "payoutAmount": zod.int().optional(),
+  "revision": zod.int().optional().describe('판본. 회차 취소·연기 환급이나 승인된 수기 판단으로 다시 계산하면 1 올린 새 판을 만든다(settlement §4.1, 기술 검토 중간-043)'),
+  "supersedesId": zod.string().nullish().describe('이 판이 대신한 옛 판의 statementId. 첫 판은 null'),
+  "excludedPayments": zod.array(zod.string()).optional().describe('대사 불일치로 이번 계산에서 뺀 결제 ID 목록(settlement §4.1)'),
+  "status": zod.enum(['CALCULATED', 'NOTIFIED', 'DISPUTED', 'CONFIRMED', 'HELD', 'SCHEDULED', 'FAILED', 'PAID', 'CARRIED_OVER', 'SUPERSEDED']).optional().describe('SUPERSEDED는 다시 계산해 새 판으로 바뀐 옛 판이다. 금액은 알린 그대로 남는다(settlement §4.1·§4.4, 추천 적용 2026-10-28, 기술 검토 중간-043)'),
+  "holdReason": zod.enum(['KYC', 'ACCOUNT_CHANGE', 'BALANCE', 'ACCOUNT_MISMATCH', 'SALE_SUSPENDED']).optional().describe('ACCOUNT_MISMATCH는 포트원 파트너의 정산 계좌가 PEAKET 기록과 달라 그 파트너의 포트원 결제분 지급을 멈춘 것(settlement §5.3, 추천 적용 2026-10-28, ADR-0108). SALE_SUSPENDED는 그 회차의 공연이 판매 중지되어 지급을 멈춘 것(settlement §6, 추천 적용 2026-10-28, ADR-0123)'),
+  "disputeDueAt": zod.iso.datetime({"offset":true}).optional(),
+  "payoutDate": zod.iso.date().optional(),
+  "payoutBankCode": zod.string().optional().describe('정산 은행 코드(docs/data.md promoter.payout_bank_code). 화면은 은행 이름으로 바꿔 끝 4자리와 함께 보인다(ADR-0162 결정 5, 추천 적용 2026-10-30)'),
+  "payoutAccountLast4": zod.string().optional()
+}).describe('정산서(회차 정산서는 회차·결제사, 상품 정산서는 파트너·결제사·결제 상점·주 단위, POL-039, ADR-0047, 상품 정산서는 추천 적용 2026-10-14, ADR-0062). 계좌는 끝 4자리만')).optional().describe('같은 지급일·결제사·상점의 HELD 정산서(제외 목록). holdReason이 사유다'),
+  "kycNotices": zod.array(zod.object({
+  "promoterId": zod.string().optional(),
+  "sellerStatus": zod.enum(['PENDING', 'PARTIALLY_APPROVED', 'APPROVED', 'KYC_REQUIRED', 'REJECTED']).optional(),
+  "from": zod.iso.date().optional(),
+  "to": zod.iso.date().optional(),
+  "amount": zod.int().optional(),
+  "threshold": zod.int().optional(),
+  "notice": zod.boolean().optional()
+}).describe('KYC 예고(settlement §6, J-T19). PARTIALLY_APPROVED 셀러의 지급일 앞뒤 6일 토스 지급 합계가 1,000만 원 이상일 때 notice=true')).optional()
+}).describe('SCR-049 묶음 상세(BAT-630 LCH-110). 묶인 정산서·지급 건·같은 지급일의 HELD 정산서·KYC 예고')
+
+/**
+ * FR-062, POL-039 ⑤, settlement §7, BAT-630 LCH-110. 미수금 발생 30일 뒤에만, 그 미수금 근거 정산서의 판매 대금 × 계약 보증 비율까지 충당한다. `receivable_movement.kind=GUARANTEE`와 남은 금액·상태를 한 트랜잭션에 쓴다. 같은 Idempotency-Key 재요청은 처음 결과를 그대로 준다
+ * @summary 미수금 보증금·이행보증보험 충당(commander, 재인증·멱등 키)
+ */
+export const CreateOpsReceivableGuaranteeCollectionParams = zod.object({
+  "receivableId": zod.string()
+})
+
+export const CreateOpsReceivableGuaranteeCollectionHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
+})
+
+export const createOpsReceivableGuaranteeCollectionBodyReasonMax = 2000;
+
+
+
+export const CreateOpsReceivableGuaranteeCollectionBody = zod.object({
+  "reason": zod.string().min(1).max(createOpsReceivableGuaranteeCollectionBodyReasonMax).describe('보증 충당 사유. 팬 개인정보 금지')
+}).strict()
+
+export const CreateOpsReceivableGuaranteeCollectionResponse = zod.object({
+  "collection": zod.object({
+  "collectionId": zod.string().optional(),
+  "idempotencyKey": zod.string().optional(),
+  "receivableId": zod.string().optional(),
+  "promoterId": zod.string().optional(),
+  "guaranteeKind": zod.enum(['DEPOSIT', 'PERFORMANCE_BOND']).optional(),
+  "amount": zod.int().optional(),
+  "basisAmount": zod.int().optional().describe('보증 한도를 계산한 기준 정산서 판매 대금'),
+  "guaranteeRateBp": zod.int().optional(),
+  "actor": zod.string().optional(),
+  "reason": zod.string().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+}).optional().describe('보증금·이행보증보험 충당 한 건(settlement §7, J-T33)'),
+  "receivable": zod.object({
+  "receivableId": zod.string().optional(),
+  "promoterId": zod.string().optional(),
+  "pg": zod.union([zod.literal('TOSS'),zod.literal('PORTONE'),zod.literal(null)]).nullish(),
+  "cause": zod.enum(['REFUND_AFTER_PAYOUT', 'CHARGEBACK', 'COMPENSATION_ADVANCE', 'NEGATIVE_STATEMENT']).optional(),
+  "eventId": zod.string().nullish(),
+  "amount": zod.int().optional(),
+  "remaining": zod.int().optional(),
+  "status": zod.enum(['OPEN', 'OFFSET', 'GUARANTEE', 'BILLED', 'CLOSED', 'WRITTEN_OFF']).optional()
+}).optional().describe('미수금(상계 → 보증 → 청구)')
+})
+
+/**
  * FR-062, ADR-0047. 공개 API에 지급 생성이 없어 콘솔에서 실행하고 일괄 지급 ID를 적음. 결과는 지급 내역 조회로 맞춤
  * @summary 포트원 콘솔 일괄 지급 실행 기록(operator)
  */
@@ -4396,7 +4543,10 @@ export const ListOpsReceivablesQueryParams = zod.object({
 export const ListOpsReceivablesResponse = zod.object({
   "items": zod.array(zod.object({
   "receivableId": zod.string().optional(),
+  "promoterId": zod.string().optional(),
+  "pg": zod.union([zod.literal('TOSS'),zod.literal('PORTONE'),zod.literal(null)]).nullish(),
   "cause": zod.enum(['REFUND_AFTER_PAYOUT', 'CHARGEBACK', 'COMPENSATION_ADVANCE', 'NEGATIVE_STATEMENT']).optional(),
+  "eventId": zod.string().nullish(),
   "amount": zod.int().optional(),
   "remaining": zod.int().optional(),
   "status": zod.enum(['OPEN', 'OFFSET', 'GUARANTEE', 'BILLED', 'CLOSED', 'WRITTEN_OFF']).optional()

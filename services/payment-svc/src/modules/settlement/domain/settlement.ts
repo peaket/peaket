@@ -7,6 +7,9 @@ export type StatementStatus = 'CALCULATED' | 'NOTIFIED' | 'DISPUTED' | 'CONFIRME
 export type HoldReason = 'KYC' | 'ACCOUNT_CHANGE' | 'BALANCE' | 'ACCOUNT_MISMATCH' | 'SALE_SUSPENDED';
 export type DisputeReasonCode = 'GROSS_AMOUNT' | 'REFUND_AMOUNT' | 'COMMISSION' | 'OFFSET' | 'OTHER';
 export type KycStatus = 'PENDING' | 'VERIFIED' | 'REJECTED';
+/** 토스페이먼츠 셀러 상태(settlement §3·§6). PARTIALLY_APPROVED는 KYC 예고 대상이다. */
+export type TossSellerStatus = 'PENDING' | 'PARTIALLY_APPROVED' | 'APPROVED' | 'KYC_REQUIRED' | 'REJECTED';
+export type GuaranteeKind = 'DEPOSIT' | 'PERFORMANCE_BOND';
 export type PayoutBatchStatus = 'PREPARED' | 'PENDING_APPROVAL' | 'APPROVED' | 'SUBMITTED' | 'COMPLETED' | 'PARTIAL_FAILED';
 export type PayoutStatus = 'REQUESTED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'CANCELED';
 export type ReceivableCause = 'REFUND_AFTER_PAYOUT' | 'CHARGEBACK' | 'COMPENSATION_ADVANCE' | 'NEGATIVE_STATEMENT';
@@ -30,9 +33,12 @@ export interface ReceivableRecord {
 }
 
 export interface ReceivableMoveRecord {
+  /** 0026부터 이동마다 하나. 기존 코드는 생략하고 저장소가 채운다 */
+  moveId?: string;
   receivableId: string;
   statementId: string;
   amount: number;
+  kind?: 'OFFSET' | 'GUARANTEE' | 'COLLECTED' | 'WRITE_OFF' | 'REVERSAL';
   movedAt: Date;
 }
 
@@ -68,6 +74,9 @@ export interface KycRecord {
   verifiedAt: Date | null;
   source: string;
   updatedAt: Date;
+  /** 토스 셀러 ID와 상태. seller.changed 웹훅이 상태를 바꾸고 KYC 예고가 이 값을 본다(0026) */
+  tossSellerId?: string | null;
+  tossSellerStatus?: TossSellerStatus;
 }
 
 export interface PayoutAccountRecord {
@@ -174,6 +183,43 @@ export interface PayoutRecord {
   transferCheckedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** 보증 충당 한 건(payment 0026). 멱등 키가 유일하고, 같은 키 재요청은 이 행을 그대로 돌려준다. */
+export interface GuaranteeCollectionRecord {
+  collectionId: string;
+  idempotencyKey: string;
+  receivableId: string;
+  promoterId: string;
+  guaranteeKind: GuaranteeKind;
+  /** 충당한 금액 */
+  amount: number;
+  /** 보증 한도를 계산한 기준(그 미수금 근거 정산서의 판매 대금) */
+  basisAmount: number;
+  guaranteeRateBp: number;
+  actor: string;
+  reason: string;
+  createdAt: Date;
+}
+
+/** KYC 예고 한 건(settlement §6, J-T19). notice=false도 화면이 이유를 보일 수 있게 함께 답한다. */
+export interface KycNotice {
+  promoterId: string;
+  sellerStatus: TossSellerStatus;
+  from: string;
+  to: string;
+  amount: number;
+  threshold: number;
+  notice: boolean;
+}
+
+/** SCR-049 묶음 상세. 묶인 정산서·지급 건·같은 지급일의 HELD 정산서·KYC 예고를 함께 준다. */
+export interface PayoutBatchDetail {
+  batch: ReturnType<typeof payoutBatchView>;
+  statements: StatementView[];
+  payouts: PayoutRecord[];
+  holds: StatementView[];
+  kycNotices: KycNotice[];
 }
 
 /** 지급 묶음 승인 감사(payment 0025). 돈이 움직이는 승인의 성공·거절을 배치와 같은 트랜잭션(성공)이나 따로 남긴다. */

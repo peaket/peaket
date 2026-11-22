@@ -103,6 +103,13 @@ export type ProblemType =
   | 'fraud-run-not-failed'
   | 'fraud-run-retrying'
   | 'fraud-summary-not-viewed'
+  | 'guarantee-basis-unavailable'
+  | 'guarantee-capacity-exhausted'
+  | 'guarantee-conflict'
+  | 'guarantee-contract-missing'
+  | 'guarantee-contract-unavailable'
+  | 'guarantee-not-due'
+  | 'guarantee-not-open'
   | 'hold-already-extended'
   | 'hold-already-ordered'
   | 'hold-in-payment'
@@ -203,6 +210,7 @@ export type ProblemType =
   | 'payout-gateway-unavailable'
   | 'payout-kyc-required'
   | 'payout-not-retryable'
+  | 'pg-balance-unavailable'
   | 'pg-check-unavailable'
   | 'pg-fallback-same-provider'
   | 'pg-unavailable'
@@ -462,6 +470,13 @@ export const PROBLEM_TYPES = {
   'fraud-run-not-failed': { status: 409, title: "다시 돌릴 실패한 분석이 없습니다" },
   'fraud-run-retrying': { status: 409, title: "분석을 자동으로 다시 시도하고 있습니다" },
   'fraud-summary-not-viewed': { status: 409, title: "사건 요약을 먼저 열어 보세요" },
+  'guarantee-basis-unavailable': { status: 422, title: "보증 한도를 계산할 정산서가 없습니다" },
+  'guarantee-capacity-exhausted': { status: 409, title: "계약 보증 한도를 모두 썼습니다" },
+  'guarantee-conflict': { status: 409, title: "미수금 잔액이 다른 처리와 겹쳤습니다" },
+  'guarantee-contract-missing': { status: 409, title: "지금 계약 조건이 없습니다" },
+  'guarantee-contract-unavailable': { status: 503, title: "보증 계약을 확인할 수 없습니다" },
+  'guarantee-not-due': { status: 409, title: "미수금 발생 30일이 지나야 보증으로 충당할 수 있습니다" },
+  'guarantee-not-open': { status: 409, title: "열린 미수금이 아닙니다" },
   'hold-already-extended': { status: 409, title: "이미 연장한 홀드입니다" },
   'hold-already-ordered': { status: 409, title: "이 좌석으로 만든 주문이 이미 있습니다" },
   'hold-in-payment': { status: 409, title: "결제가 진행 중인 홀드입니다" },
@@ -562,6 +577,7 @@ export const PROBLEM_TYPES = {
   'payout-gateway-unavailable': { status: 503, title: "지급대행을 아직 시작할 수 없습니다" },
   'payout-kyc-required': { status: 409, title: "KYC 확인이 끝나지 않아 지급할 수 없습니다" },
   'payout-not-retryable': { status: 409, title: "실패한 지급 건만 다시 보낼 수 있습니다" },
+  'pg-balance-unavailable': { status: 503, title: "결제사 잔액을 확인할 수 없습니다" },
   'pg-check-unavailable': { status: 503, title: "결제사 지정을 지금 확인할 수 없습니다" },
   'pg-fallback-same-provider': { status: 422, title: "대체 결제사가 기본 결제사와 같은 하위 결제사를 거칩니다" },
   'pg-unavailable': { status: 503, title: "결제를 잠시 시작할 수 없습니다" },

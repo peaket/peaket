@@ -14,7 +14,10 @@ import * as zod from 'zod';
 export const ListOpsReceivables200 = zod.object({
   "items": zod.array(zod.object({
   "receivableId": zod.string().optional(),
+  "promoterId": zod.string().optional(),
+  "pg": zod.union([zod.literal('TOSS'),zod.literal('PORTONE'),zod.literal(null)]).nullish(),
   "cause": zod.enum(['REFUND_AFTER_PAYOUT', 'CHARGEBACK', 'COMPENSATION_ADVANCE', 'NEGATIVE_STATEMENT']).optional(),
+  "eventId": zod.string().nullish(),
   "amount": zod.int().optional(),
   "remaining": zod.int().optional(),
   "status": zod.enum(['OPEN', 'OFFSET', 'GUARANTEE', 'BILLED', 'CLOSED', 'WRITTEN_OFF']).optional()

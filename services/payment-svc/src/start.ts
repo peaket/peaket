@@ -100,6 +100,8 @@ import {
   HttpDueEventSettlementSource,
   HttpEventCommissionRateSource,
   HttpPayoutApprovalVerifier,
+  HttpPgBalanceSource,
+  HttpPromoterContractSource,
   HttpSaleSuspensionSource,
   JwksReauthVerifier,
   ManualPortonePayoutGateway,
@@ -256,6 +258,9 @@ let circuitsRef: PgCircuits | undefined;
         ...(env.PEAKET_CORE_HTTP_URL ? { events: new HttpDueEventSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN), eventCommission: new HttpEventCommissionRateSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) } : {}),
         approvals: env.PEAKET_OPS_HTTP_URL ? new HttpPayoutApprovalVerifier(env.PEAKET_OPS_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) : new UnavailablePayoutApprovalVerifier(),
         saleSuspensions: env.PEAKET_CORE_HTTP_URL ? new HttpSaleSuspensionSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) : new UnavailableSaleSuspensionSource(),
+        ...(env.PEAKET_CORE_HTTP_URL ? { promoterContracts: new HttpPromoterContractSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) } : {}),
+        // 토스 잔액 API의 JWE 전송은 운영 계약·키가 있어야 한다. 지금은 어댑터가 없어 확인을 생략한다(settlement §14).
+        pgBalance: new HttpPgBalanceSource(undefined),
         log: lateApprovalLog,
         gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
         reauth: env.PEAKET_IDENTITY_JWKS_URL

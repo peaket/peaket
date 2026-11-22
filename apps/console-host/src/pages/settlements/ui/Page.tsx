@@ -3,6 +3,7 @@
 // 위 상태 바: 단계 종료 후 · 자동 제어 정상 · 11:42:05 · 내 승인 대기(operator 1 · viewer 0 · CS 2).
 // 역할(d5 §3.3): viewer는 읽기('viewer 보기'), operator는 확인 요청·실행 기록, commander는 승인, CS 두 역할은 메뉴에 없음('CS 담당자' 안내).
 import type { ConsoleRole } from '@peaket/ds/ConsoleShell';
+import { useSearchParams } from 'react-router';
 import { useBoardPage, type BoardGaps } from '@/shared/lib/board';
 import { usePreviewHost, useChosenRole } from '@/features/preview-host';
 import { BOARD_PEOPLE } from '@/features/screen-access';
@@ -11,6 +12,7 @@ import { DEFAULT, STATES, type State } from '../states';
 import { MainD, OverlaysD, valsD } from './board-d';
 import { MainM, valsM } from './board-m';
 import { MainT, OverlaysT, valsT } from './board-t';
+import { ConnectedPage } from './ConnectedPage';
 
 const TITLE = '정산 지급';
 /** ?role=로 열면 보드의 그 역할 상태를 처음 값으로 */
@@ -30,6 +32,11 @@ const GAPS: BoardGaps<State> = {
 };
 
 export function Page() {
+  const [sp] = useSearchParams();
+  return __PREVIEW__ && sp.get('state') ? <BoardPage /> : <ConnectedPage />;
+}
+
+function BoardPage() {
   const chosen = useChosenRole();
   const { state, boardStates, layout, close, go } = useBoardPage(TITLE, STATES, (chosen && ROLE_STATE[chosen]) || DEFAULT, GAPS);
   const who = boardRole(state);

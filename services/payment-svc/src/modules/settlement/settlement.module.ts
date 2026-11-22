@@ -2,10 +2,12 @@
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
 import { type Clock, CLOCK, INTERNAL_TOKEN } from '@peaket/platform';
 import { Settlements } from './application/settlements.js';
-import type { DueEventSettlementSource, EventCommissionRateSource, PayoutApprovalVerifier, PayoutGateway, ProductSettlementSource, ReauthVerifier, SaleSuspensionSource, SettlementApprovalLog, SettlementPaymentSource, SettlementStore } from './domain/ports.js';
+import type { DueEventSettlementSource, EventCommissionRateSource, PayoutApprovalVerifier, PayoutGateway, PgBalanceSource, ProductSettlementSource, PromoterContractSource, ReauthVerifier, SaleSuspensionSource, SettlementApprovalLog, SettlementPaymentSource, SettlementStore } from './domain/ports.js';
 import {
   PAYOUT_APPROVAL_VERIFIER,
   PAYOUT_GATEWAY,
+  PG_BALANCE_SOURCE,
+  PROMOTER_CONTRACT_SOURCE,
   REAUTH_VERIFIER,
   SALE_SUSPENSION_SOURCE,
   SETTLEMENT_APPROVAL_LOG,
@@ -26,6 +28,8 @@ export interface SettlementModuleDeps {
   readonly eventCommission?: EventCommissionRateSource;
   readonly approvals: PayoutApprovalVerifier;
   readonly saleSuspensions: SaleSuspensionSource;
+  readonly promoterContracts?: PromoterContractSource;
+  readonly pgBalance?: PgBalanceSource;
   readonly gateways: readonly PayoutGateway[];
   readonly reauth: ReauthVerifier;
   readonly commissionRateBp?: number;
@@ -43,6 +47,8 @@ export class SettlementModule {
       { provide: SETTLEMENT_COMMISSION_SOURCE, useValue: deps.eventCommission },
       { provide: PAYOUT_APPROVAL_VERIFIER, useValue: deps.approvals },
       { provide: SALE_SUSPENSION_SOURCE, useValue: deps.saleSuspensions },
+      { provide: PROMOTER_CONTRACT_SOURCE, useValue: deps.promoterContracts },
+      { provide: PG_BALANCE_SOURCE, useValue: deps.pgBalance },
       { provide: SETTLEMENT_APPROVAL_LOG, useValue: deps.log },
       { provide: PAYOUT_GATEWAY, useValue: deps.gateways },
       { provide: REAUTH_VERIFIER, useValue: deps.reauth },
@@ -57,6 +63,8 @@ export class SettlementModule {
           eventCommission: EventCommissionRateSource | undefined,
           approvals: PayoutApprovalVerifier,
           saleSuspensions: SaleSuspensionSource,
+          promoterContracts: PromoterContractSource | undefined,
+          pgBalance: PgBalanceSource | undefined,
           log: SettlementApprovalLog | undefined,
           gateways: readonly PayoutGateway[],
           reauth: ReauthVerifier,
@@ -70,6 +78,8 @@ export class SettlementModule {
             ...(eventCommission ? { eventCommission } : {}),
             approvals,
             saleSuspensions,
+            ...(promoterContracts ? { promoterContracts } : {}),
+            ...(pgBalance ? { pgBalance } : {}),
             ...(log ? { log } : {}),
             gateways,
             reauth,
@@ -84,6 +94,8 @@ export class SettlementModule {
           SETTLEMENT_COMMISSION_SOURCE,
           PAYOUT_APPROVAL_VERIFIER,
           SALE_SUSPENSION_SOURCE,
+          PROMOTER_CONTRACT_SOURCE,
+          PG_BALANCE_SOURCE,
           SETTLEMENT_APPROVAL_LOG,
           PAYOUT_GATEWAY,
           REAUTH_VERIFIER,

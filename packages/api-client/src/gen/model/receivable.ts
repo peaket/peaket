@@ -10,6 +10,7 @@
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { ReceivableCause } from './receivableCause';
+import type { ReceivablePg } from './receivablePg';
 import type { ReceivableStatus } from './receivableStatus';
 
 /**
@@ -17,7 +18,12 @@ import type { ReceivableStatus } from './receivableStatus';
  */
 export interface Receivable {
   receivableId?: string;
+  promoterId?: string;
+  /** @nullable */
+  pg?: ReceivablePg;
   cause?: ReceivableCause;
+  /** @nullable */
+  eventId?: string | null;
   amount?: number;
   remaining?: number;
   status?: ReceivableStatus;

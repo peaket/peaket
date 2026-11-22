@@ -35,6 +35,9 @@ const ReconfirmBody = z
   .optional();
 const DisputeResolutionBody = z.object({ result: z.enum(['ADJUSTED', 'DISMISSED']), actor: z.string().min(1) }).strict();
 const ReceivableBody = z.object({ promoterId: z.string().uuid(), pg: PgBody, cause: z.enum(['REFUND_AFTER_PAYOUT', 'CHARGEBACK', 'COMPENSATION_ADVANCE', 'NEGATIVE_STATEMENT']), amount: z.number().int().positive() });
+const GuaranteeBody = z
+  .object({ actor: z.string().min(1), sessionId: z.string().min(1), reauthToken: z.string().min(1).optional(), idempotencyKey: z.string().min(1).max(128), reason: z.string().min(1).max(2_000) })
+  .strict();
 
 const StatementView = z
   .object({ statementId: z.string(), kind: z.enum(['EVENT', 'PRODUCT']), pg: z.enum(['TOSS', 'PORTONE']), pgStore: z.enum(['STANDARD', 'ESCROW']), status: z.string(), payoutAmount: z.number() })
@@ -132,6 +135,20 @@ export class InternalSettlementController {
   @ContractRouteSchema({ responses: { 200: BatchPage } })
   async listBatches(@Query() q: Record<string, string | undefined>) {
     return { items: await this.settlements.listBatches({ ...(q.payoutDate ? { payoutDate: q.payoutDate } : {}), ...(q.pg ? { pg: q.pg as Pg } : {}), ...(q.pgStore ? { pgStore: q.pgStore as PgStore } : {}), ...(q.status ? { status: q.status.split(',') } : {}), limit: Math.min(Number(q.limit ?? 100), 100) }) };
+  }
+
+  @Get('payout-batches/:batchId')
+  @ContractRouteSchema({ responses: { 200: z.object({ batch: BatchView, statements: z.array(StatementView), payouts: z.array(PayoutRecord), holds: z.array(StatementView), kycNotices: z.array(z.object({ promoterId: z.string(), sellerStatus: z.string(), from: z.string(), to: z.string(), amount: z.number(), threshold: z.number(), notice: z.boolean() })) }) } })
+  async payoutBatchDetail(@Param('batchId') batchId: string) {
+    return this.settlements.getPayoutBatchDetail(batchId);
+  }
+
+  @Post('receivables/:receivableId/guarantee-collections')
+  @HttpCode(200)
+  @ContractRouteSchema({ responses: { 200: z.record(z.string(), z.unknown()) } })
+  async collectGuarantee(@Param('receivableId') receivableId: string, @Body() body: unknown) {
+    const b = one(GuaranteeBody, body, '보증 충당 본문이 맞지 않습니다');
+    return this.settlements.collectGuarantee(receivableId, b);
   }
 
   @Post('payout-batches/:batchId/approvals')

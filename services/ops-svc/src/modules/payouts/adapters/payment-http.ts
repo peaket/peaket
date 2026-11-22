@@ -1,7 +1,7 @@
 // payment-svc 내부 정산·지급 HTTP 클라이언트. 5xx·연결 실패는 503으로 닫는다.
 import { createExternalHttpClient, ProblemError, type ExternalHttpClient } from '@peaket/platform';
 import type { PayoutPaymentClient } from '../domain/ports.js';
-import type { PayoutBatchView } from '../domain/payout-approval.js';
+import type { PayoutBatchDetailView, PayoutBatchView } from '../domain/payout-approval.js';
 
 const headers = (token?: string): Record<string, string> => ({ 'content-type': 'application/json', ...(token ? { 'x-peaket-internal-token': token } : {}) });
 
@@ -35,6 +35,20 @@ export class HttpPayoutPaymentClient implements PayoutPaymentClient {
     const params = Object.fromEntries(Object.entries({ payoutDate: filter.payoutDate, pg: filter.pg, pgStore: filter.pgStore, status: filter.status?.join(','), limit: String(filter.limit) }).filter(([, v]) => v !== undefined)) as Record<string, string>;
     const res = await this.#client.request({ method: 'GET', path: '/internal/v1/settlements/payout-batches', params, headers: headers(this.token), timeoutCapMs: 10_000 });
     return (await this.#json<{ items: PayoutBatchView[] }>(res, '지급 묶음 목록을 읽지 못했습니다')).items;
+  }
+
+  async getBatchDetail(batchId: string) {
+    return this.#json<PayoutBatchDetailView>(
+      await this.#client.request({ method: 'GET', path: `/internal/v1/settlements/payout-batches/${batchId}`, headers: headers(this.token), timeoutCapMs: 10_000 }),
+      '지급 묶음 상세를 읽지 못했습니다',
+    );
+  }
+
+  async collectGuarantee(receivableId: string, input: { actor: string; sessionId: string; reauthToken?: string | undefined; idempotencyKey: string; reason: string }) {
+    return this.#json<unknown>(
+      await this.#client.request({ method: 'POST', path: `/internal/v1/settlements/receivables/${receivableId}/guarantee-collections`, headers: headers(this.token), body: JSON.stringify(input), timeoutCapMs: 10_000 }),
+      '보증 충당을 저장하지 못했습니다',
+    );
   }
 
   async approveBatch(batchId: string, approvalId: string) {
@@ -87,6 +101,12 @@ export class UnavailablePayoutPaymentClient implements PayoutPaymentClient {
     throw new ProblemError({ type: 'payout-dependency-unavailable', status: 503, title: '지급 서비스에 연결하지 못했습니다' });
   }
   async listBatches(): Promise<PayoutBatchView[]> {
+    throw new ProblemError({ type: 'payout-dependency-unavailable', status: 503, title: '지급 서비스에 연결하지 못했습니다' });
+  }
+  async getBatchDetail(): Promise<PayoutBatchDetailView> {
+    throw new ProblemError({ type: 'payout-dependency-unavailable', status: 503, title: '지급 서비스에 연결하지 못했습니다' });
+  }
+  async collectGuarantee(): Promise<unknown> {
     throw new ProblemError({ type: 'payout-dependency-unavailable', status: 503, title: '지급 서비스에 연결하지 못했습니다' });
   }
   async approveBatch(): Promise<PayoutBatchView> {

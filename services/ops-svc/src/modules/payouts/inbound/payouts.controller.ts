@@ -1,5 +1,5 @@
 // 받는 층: 지급 묶음 승인 업무·정산서·미수금(openapi ops payout-batches·settlements·receivables). 승인함 경로는 approvals 모듈이 맡는다.
-import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Header, Headers, HttpCode, Inject, Param, Post, Query } from '@nestjs/common';
 import { ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, type Principal, ProblemError, Roles } from '@peaket/platform';
 import { z } from 'zod';
 import { PayoutApprovals, type OpsActor } from '../application/payout-approvals.js';
@@ -15,6 +15,9 @@ const BatchBody = z
   .strict();
 const BatchParams = z.object({ batchId: z.string().min(1) });
 const PortoneBody = z.object({ bulkPayoutId: z.string().min(1) });
+const ReceivableParams = z.object({ receivableId: z.string().min(1) });
+const GuaranteeBody = z.object({ reason: z.string().min(1).max(2_000) }).strict();
+const BatchDetailView = z.record(z.string(), z.unknown());
 
 const BatchView = z
   .object({
@@ -73,6 +76,29 @@ export class PayoutsController {
       }),
       nextCursor: null,
     };
+  }
+
+  @Get('payout-batches/:batchId')
+  @Header('Cache-Control', 'no-store')
+  @Roles(['viewer', 'operator', 'commander'])
+  @ContractRouteSchema({ params: BatchParams, responses: { 200: BatchDetailView } })
+  async payoutBatchDetail(@ContractParams(BatchParams) params: z.output<typeof BatchParams>) {
+    return this.approvals.getBatchDetail(params.batchId);
+  }
+
+  @Post('receivables/:receivableId/guarantee-collections')
+  @HttpCode(200)
+  @Roles(['commander'])
+  @ContractRouteSchema({ params: ReceivableParams, body: GuaranteeBody, responses: { 200: BatchDetailView } })
+  async collectGuarantee(
+    @ContractParams(ReceivableParams) params: z.output<typeof ReceivableParams>,
+    @ContractBody(GuaranteeBody) body: z.output<typeof GuaranteeBody>,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Headers('x-reauth-token') reauthToken: string | undefined,
+    @CurrentPrincipal() me: Principal,
+  ) {
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 128) throw new ProblemError({ type: 'idempotency-key-invalid', status: 400, title: '멱등 키(Idempotency-Key)가 없거나 형식이 맞지 않습니다' });
+    return this.approvals.collectGuarantee(params.receivableId, { actor: actorOf(me), reason: body.reason, idempotencyKey, reauthToken });
   }
 
   @Post('payout-batches/:batchId/portone-execution')

@@ -1,7 +1,7 @@
 // 지급 승인 업무 저장·payment-svc 호출·재인증 포트.
 import type { AuditChain } from '../../audit/index.js';
 import type { AuditRecord } from '../../audit/audit.js';
-import type { PayoutApprovalRecord, PayoutBatchView } from './payout-approval.js';
+import type { PayoutApprovalRecord, PayoutBatchDetailView, PayoutBatchView } from './payout-approval.js';
 
 export interface PayoutApprovalStore {
   /** 상태 행과 감사 기록을 같은 트랜잭션에 쓴다(감사 기록이 있으면) */
@@ -16,6 +16,8 @@ export interface PayoutApprovalStore {
 export interface PayoutPaymentClient {
   createBatch(input: { pg: 'TOSS' | 'PORTONE'; pgStore: 'STANDARD' | 'ESCROW'; payoutDate: string; portoneBalance?: { amount: number; observedAt: string } | undefined; actor: string }): Promise<PayoutBatchView>;
   listBatches(filter: { payoutDate?: string | undefined; pg?: string | undefined; pgStore?: string | undefined; status?: readonly string[] | undefined; limit: number }): Promise<PayoutBatchView[]>;
+  /** SCR-049 묶음 상세(정산서·지급 건·보류·KYC 예고). */
+  getBatchDetail(batchId: string): Promise<PayoutBatchDetailView>;
   approveBatch(batchId: string, approvalId: string): Promise<PayoutBatchView>;
   executeBatch(batchId: string): Promise<PayoutBatchView>;
   /** 반려한 배치를 풀어 정산서를 CONFIRMED로 되돌린다(CONS-V02). */
@@ -23,6 +25,8 @@ export interface PayoutPaymentClient {
   recordPortoneExecution(batchId: string, bulkPayoutId: string): Promise<PayoutBatchView>;
   listStatements(filter: { kind?: string | undefined; status?: string | undefined; pg?: string | undefined; pgStore?: string | undefined; payoutDate?: string | undefined; limit: number }): Promise<unknown[]>;
   listReceivables(filter: { limit: number }): Promise<unknown[]>;
+  /** 보증금·이행보증보험 충당(payment-svc 내부). commander 재인증은 ops가 먼저 확인한다. */
+  collectGuarantee(receivableId: string, input: { actor: string; sessionId: string; reauthToken?: string | undefined; idempotencyKey: string; reason: string }): Promise<unknown>;
   /** 결제사 서킷 상태(재개 조건 표시). payment-svc 내부 /internal/v1/circuits */
   listCircuits(): Promise<{ items: { pg: 'TOSS' | 'PORTONE' | 'SIMULATOR'; state: 'closed' | 'half_open' | 'open' }[] }>;
 }

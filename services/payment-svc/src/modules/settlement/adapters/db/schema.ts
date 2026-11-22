@@ -216,11 +216,16 @@ export const sellerKyc = pgTable(
     representative: text('representative'),
     verifiedAt: at('verified_at'),
     source: text('source').notNull().default('MANUAL'),
+    /** 토스 셀러 ID·상태(0026). seller.changed가 바꾸고 KYC 예고가 본다 */
+    tossSellerId: text('toss_seller_id'),
+    tossSellerStatus: text('toss_seller_status').notNull().default('PENDING'),
     updatedAt: at('updated_at').notNull(),
   },
   (t) => [
     check('seller_kyc_status_check', sql`${t.status} in ('PENDING', 'VERIFIED', 'REJECTED')`),
     check('seller_kyc_source_check', sql`${t.source} in ('MANUAL', 'TOSS', 'PORTONE')`),
+    check('seller_kyc_toss_seller_status_check', sql`${t.tossSellerStatus} in ('PENDING', 'PARTIALLY_APPROVED', 'APPROVED', 'KYC_REQUIRED', 'REJECTED')`),
+    uniqueIndex('seller_kyc_toss_seller_id_uidx').on(t.tossSellerId).where(sql`${t.tossSellerId} is not null`),
   ],
 );
 
@@ -268,6 +273,8 @@ export const partnerReceivable = pgTable(
 export const receivableMove = pgTable(
   'receivable_move',
   {
+    /** 0026: 한 정산서에 상계·보증 충당이 함께 붙을 수 있어 (미수금, 정산서) 대신 이동 ID를 기본 키로 쓴다 */
+    id: uuid('id').defaultRandom().primaryKey(),
     receivableId: uuid('receivable_id')
       .notNull()
       .references(() => partnerReceivable.id),
@@ -275,10 +282,41 @@ export const receivableMove = pgTable(
       .notNull()
       .references(() => settlementStatement.id),
     amount: amount('amount').notNull(),
+    kind: text('kind').notNull().default('OFFSET'),
     movedAt: at('moved_at').notNull(),
   },
   (t) => [
-    primaryKey({ columns: [t.receivableId, t.statementId] }),
+    index('receivable_move_receivable_idx').on(t.receivableId, t.movedAt),
     check('receivable_move_amount_check', sql`${t.amount} > 0`),
+    check('receivable_move_kind_check', sql`${t.kind} in ('OFFSET', 'GUARANTEE', 'COLLECTED', 'WRITE_OFF', 'REVERSAL')`),
   ],
 );
+
+export const guaranteeCollection = pgTable(
+  'guarantee_collection',
+  {
+    id: uuid('id').primaryKey(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    receivableId: uuid('receivable_id')
+      .notNull()
+      .references(() => partnerReceivable.id),
+    promoterId: uuid('promoter_id').notNull(),
+    guaranteeKind: text('guarantee_kind').notNull(),
+    amount: amount('amount').notNull(),
+    basisAmount: amount('basis_amount').notNull(),
+    guaranteeRateBp: integer('guarantee_rate_bp').notNull(),
+    actor: text('actor').notNull(),
+    reason: text('reason').notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('guarantee_collection_key_uidx').on(t.idempotencyKey),
+    check('guarantee_collection_kind_check', sql`${t.guaranteeKind} in ('DEPOSIT', 'PERFORMANCE_BOND')`),
+    check('guarantee_collection_amount_check', sql`${t.amount} > 0 and ${t.basisAmount} >= 0 and ${t.guaranteeRateBp} between 0 and 10000`),
+  ],
+);
+
+export const settlementWebhookReceipt = pgTable('settlement_webhook_receipt', {
+  transmissionId: text('transmission_id').primaryKey(),
+  receivedAt: at('received_at').notNull(),
+});

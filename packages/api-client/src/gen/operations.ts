@@ -107,6 +107,7 @@ export type OperationId =
   | 'createOpsPlace'
   | 'createOpsPromoter'
   | 'createOpsPromoterContractTermChange'
+  | 'createOpsReceivableGuaranteeCollection'
   | 'createOpsResearchExport'
   | 'createOpsReviewModeration'
   | 'createOpsSaleReviewApproval'
@@ -266,6 +267,7 @@ export type OperationId =
   | 'getOpsFraudCluster'
   | 'getOpsHomeLayout'
   | 'getOpsLive'
+  | 'getOpsPayoutBatch'
   | 'getOpsPromoter'
   | 'getOpsResearchExport'
   | 'getOpsReview'
@@ -508,6 +510,7 @@ export const OPERATIONS = {
   createOpsPlace: {operationId: "createOpsPlace",method: "POST",path: "/v1/ops/places",host: "ops-api",kind: "write",cookie: true},
   createOpsPromoter: {operationId: "createOpsPromoter",method: "POST",path: "/v1/ops/promoters",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsPromoterContractTermChange: {operationId: "createOpsPromoterContractTermChange",method: "POST",path: "/v1/ops/promoters/{promoterId}/contract-term-changes",host: "ops-api",kind: "write",idempotent: true,cookie: true},
+  createOpsReceivableGuaranteeCollection: {operationId: "createOpsReceivableGuaranteeCollection",method: "POST",path: "/v1/ops/receivables/{receivableId}/guarantee-collections",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsResearchExport: {operationId: "createOpsResearchExport",method: "POST",path: "/v1/ops/research-exports",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsReviewModeration: {operationId: "createOpsReviewModeration",method: "POST",path: "/v1/ops/reviews/{reviewId}/moderation",host: "ops-api",kind: "write",cookie: true},
   createOpsSaleReviewApproval: {operationId: "createOpsSaleReviewApproval",method: "POST",path: "/v1/ops/sale-reviews/{productionId}/approvals",host: "ops-api",kind: "write",cookie: true},
@@ -667,6 +670,7 @@ export const OPERATIONS = {
   getOpsFraudCluster: {operationId: "getOpsFraudCluster",method: "GET",path: "/v1/ops/fraud-clusters/{clusterId}",host: "ops-api",kind: "read",cookie: true},
   getOpsHomeLayout: {operationId: "getOpsHomeLayout",method: "GET",path: "/v1/ops/home-layout",host: "ops-api",kind: "read",cookie: true},
   getOpsLive: {operationId: "getOpsLive",method: "GET",path: "/v1/ops/live",host: "ops-api",kind: "read",cookie: true,sse: true,query: ["eventId"]},
+  getOpsPayoutBatch: {operationId: "getOpsPayoutBatch",method: "GET",path: "/v1/ops/payout-batches/{batchId}",host: "ops-api",kind: "read",cookie: true},
   getOpsPromoter: {operationId: "getOpsPromoter",method: "GET",path: "/v1/ops/promoters/{promoterId}",host: "ops-api",kind: "read",cookie: true},
   getOpsResearchExport: {operationId: "getOpsResearchExport",method: "GET",path: "/v1/ops/research-exports/{exportId}",host: "ops-api",kind: "read",cookie: true},
   getOpsReview: {operationId: "getOpsReview",method: "GET",path: "/v1/ops/reviews/{reviewId}",host: "ops-api",kind: "read",cookie: true},

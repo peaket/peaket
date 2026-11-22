@@ -1,6 +1,8 @@
 // 정산·지급·KYC 저장 포트. 메모리(단위 시험)와 Drizzle(운영)이 같은 모양을 쓴다.
 import type {
   DisputeRecord,
+  GuaranteeCollectionRecord,
+  GuaranteeKind,
   KycRecord,
   PaymentFact,
   PayoutAccountRecord,
@@ -46,6 +48,23 @@ export interface ReceivableUpdate {
   remaining: number;
   status: ReceivableRecord['status'];
   updatedAt: Date;
+}
+
+/** 보증 충당의 원자적 저장(0026). collection·movement·receivable 갱신을 한 트랜잭션에 쓴다. */
+export interface GuaranteeCollectionAtomicInput {
+  collection: GuaranteeCollectionRecord;
+  move: ReceivableMoveRecord;
+  receivable: Pick<ReceivableRecord, 'receivableId' | 'remaining' | 'status' | 'updatedAt'>;
+}
+
+/** core-svc 지금 계약 조건(보증 비율·종류). 없으면 undefined. payment-svc는 계약 없이 보증을 만들지 않는다. */
+export interface PromoterContractSource {
+  current(promoterId: string): Promise<{ commissionRateBp: number; guaranteeRateBp: number; guaranteeKind: GuaranteeKind } | undefined>;
+}
+
+/** 결제사 지급 가능 잔액. 토스만 API가 있고, 없으면 undefined(확인 생략)다. 포트원은 운영자 입력값을 쓴다. */
+export interface PgBalanceSource {
+  available(input: { pg: Pg; pgStore: PgStore }): Promise<{ availableAmount: number; pendingAmount: number } | undefined>;
 }
 
 export interface PayoutBatchAtomicInput {
@@ -100,6 +119,8 @@ export interface SettlementStore {
   listEvent(promoterId: string, eventId: string): Promise<StatementRecord[]>;
   listProduct(promoterId: string, filter: StatementFilter): Promise<StatementPage>;
   saveStatement(record: StatementRecord): Promise<void>;
+  /** 잔액 부족처럼 배치를 만들지 않고 여러 정산서를 HELD로 바꿀 때 한 트랜잭션에 쓴다. */
+  applyStatementUpdates(updates: readonly StatementUpdate[]): Promise<void>;
   insertStatementAudit(record: StatementAuditRecord): Promise<void>;
   insertDispute(record: DisputeRecord): Promise<void>;
   saveDispute(record: DisputeRecord): Promise<void>;
@@ -145,6 +166,24 @@ export interface SettlementStore {
   listOpenReceivables(promoterId: string, pg: Pg): Promise<ReceivableRecord[]>;
   insertReceivableMove(record: ReceivableMoveRecord): Promise<void>;
   listReceivableMoves(statementId: string): Promise<ReceivableMoveRecord[]>;
+  findReceivable(receivableId: string): Promise<ReceivableRecord | undefined>;
+  /** 미수금 하나의 이동 기록(보증 한도 계산). */
+  listReceivableMovesForReceivable(receivableId: string): Promise<ReceivableMoveRecord[]>;
+  /** 멱등 키로 보증 충당 한 건. 없으면 undefined */
+  findGuaranteeCollection(idempotencyKey: string): Promise<GuaranteeCollectionRecord | undefined>;
+  /** 보증 이동·남은 금액·상태를 한 트랜잭션에 쓴다. 같은 미수금의 동시 충당은 행 잠금으로 직렬화한다. */
+  collectGuaranteeAtomically(input: GuaranteeCollectionAtomicInput): Promise<void>;
+  /** 그 파트너의 토스 지급 예정 정산서 합계(지급일 [from, to]). KYC 예고가 쓴다. */
+  sumScheduledTossPayouts(promoterId: string, from: string, to: string): Promise<number>;
+  /** 같은 지급일·결제사·상점의 HELD 정산서(SCR-049 제외 목록). */
+  listHeldStatements(pg: Pg, pgStore: PgStore, payoutDate: string): Promise<StatementRecord[]>;
+  /** 토스 pgPayoutId로 지급 건 찾기(웹훅 단건 조회 반영). */
+  findPayoutByPgPayoutId(pgPayoutId: string): Promise<PayoutRecord | undefined>;
+  /** 토스 셀러 ID로 KYC 찾기(seller.changed). */
+  findKycByTossSellerId(tossSellerId: string): Promise<KycRecord | undefined>;
+  /** 토스 웹훅 전송 ID 중복 확인(0026). */
+  hasSettlementWebhookReceipt(transmissionId: string): Promise<boolean>;
+  recordSettlementWebhookReceipt(transmissionId: string, receivedAt: Date): Promise<void>;
 }
 
 export interface ProductSettlementSource {
@@ -208,6 +247,8 @@ export const SETTLEMENT_PRODUCT_SOURCE = Symbol.for('peaket.settlement.product-s
 export const SETTLEMENT_EVENT_SOURCE = Symbol.for('peaket.settlement.event-source');
 export const SETTLEMENT_COMMISSION_SOURCE = Symbol.for('peaket.settlement.commission-source');
 export const PAYOUT_APPROVAL_VERIFIER = Symbol.for('peaket.settlement.payout-approval-verifier');
+export const PROMOTER_CONTRACT_SOURCE = Symbol.for('peaket.settlement.promoter-contract-source');
+export const PG_BALANCE_SOURCE = Symbol.for('peaket.settlement.pg-balance-source');
 export const SALE_SUSPENSION_SOURCE = Symbol.for('peaket.settlement.sale-suspension-source');
 export const SETTLEMENT_APPROVAL_LOG = Symbol.for('peaket.settlement.approval-log');
 export const PAYOUT_GATEWAY = Symbol.for('peaket.settlement.payout-gateway');

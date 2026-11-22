@@ -183,6 +183,13 @@
       "when": 1795329852652,
       "tag": "0025_payout_batch_approval",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795338398163,
+      "tag": "0026_settlement_payout_agency",
+      "breakpoints": true
     }
   ]
 }

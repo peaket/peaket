@@ -1,5 +1,5 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-ops.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
-# openapi info.version 1.0.0-draft · 계약 sha256 4850cf22a792b3ee94fd181e5d020b94d529b389e84e7795791601aeb5faec5c
+# openapi info.version 1.0.0-draft · 계약 sha256 fa2fcbcfa0ebc27c3d2f0f4a25e888b8a795b1592511fbdc8b29ed18fda51910
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -1800,6 +1800,14 @@ spec:
           method: OPTIONS
         - path:
             type: RegularExpression
+            value: /v1/ops/payout-batches/[^/]+
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/ops/payout-batches/[^/]+
+          method: OPTIONS
+        - path:
+            type: RegularExpression
             value: /v1/ops/payout-batches/[^/]+/portone-execution
           method: POST
         - path:
@@ -1857,6 +1865,14 @@ spec:
         - path:
             type: Exact
             value: /v1/ops/receivables
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/receivables/[^/]+/guarantee-collections
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/ops/receivables/[^/]+/guarantee-collections
           method: OPTIONS
         - path:
             type: Exact

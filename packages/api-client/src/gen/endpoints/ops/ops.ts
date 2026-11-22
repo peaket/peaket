@@ -110,6 +110,7 @@ import type {
   CreateOpsPayoutBatchBody,
   CreateOpsPayoutBatchPortoneExecutionBody,
   CreateOpsPlaceBody,
+  CreateOpsReceivableGuaranteeCollectionBody,
   CreateOpsSaleReviewApprovalBody,
   CreateOpsSaleReviewRejectionBody,
   CreateOpsScannerDeviceBody,
@@ -139,6 +140,7 @@ import type {
   GetOpsLiveParams,
   GetOpsWidget200,
   GetOpsWidgetParams,
+  GuaranteeCollectionResult,
   HomeLayout,
   HomeLayoutInput,
   IncidentFilingCreate,
@@ -194,6 +196,7 @@ import type {
   OpsFanTransferPage,
   OpsFanUnmasking,
   OpsFanUnmaskingCreate,
+  OpsPayoutBatchDetail,
   OpsPromoterCreate,
   OpsPromoterDetail,
   OpsPromoterPage,
@@ -11914,7 +11917,246 @@ export function useListOpsPayoutBatches<TData = Awaited<ReturnType<typeof listOp
 
 
 
-export type createOpsPayoutBatchPortoneExecutionResponse200 = {
+export type getOpsPayoutBatchResponse200 = {
+  data: OpsPayoutBatchDetail
+  status: 200
+}
+
+export type getOpsPayoutBatchResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getOpsPayoutBatchResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOpsPayoutBatchResponseSuccess = (getOpsPayoutBatchResponse200) & {
+  headers: Headers;
+};
+export type getOpsPayoutBatchResponseError = (getOpsPayoutBatchResponse403 | getOpsPayoutBatchResponse404) & {
+  headers: Headers;
+};
+
+export const getGetOpsPayoutBatchUrl = (batchId: string,) => {
+
+
+
+
+  return `/v1/ops/payout-batches/${encodeURIComponent(String(batchId))}`
+}
+
+/**
+ * FR-062, POL-038, POL-039, SCR-049, BAT-630 LCH-110. CS 담당자는 정산 화면을 쓰지 않아 403이다(open-items 72번). 계좌는 은행과 끝 4자리만 싣는다. Cache-Control: no-store
+ * @summary 지급 묶음 상세(정산서·지급 건·보류·KYC 예고)
+ */
+export const getOpsPayoutBatch = async (batchId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsPayoutBatchResponseSuccess> => {
+
+  return orvalFetch<getOpsPayoutBatchResponseSuccess>(getGetOpsPayoutBatchUrl(batchId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsPayoutBatchQueryKey = (batchId: string,) => {
+    return [
+    `/v1/ops/payout-batches/${batchId}`
+    ] as const;
+    }
+
+
+export const getGetOpsPayoutBatchQueryOptions = <TData = Awaited<ReturnType<typeof getOpsPayoutBatch>>, TError = ErrorType<ProblemResponse>>(batchId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsPayoutBatch>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsPayoutBatchQueryKey(batchId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsPayoutBatch>>> = ({ signal }) => getOpsPayoutBatch(batchId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: batchId !== null && batchId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsPayoutBatch>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsPayoutBatchQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsPayoutBatch>>>
+export type GetOpsPayoutBatchQueryError = ErrorType<ProblemResponse>
+
+
+export function useGetOpsPayoutBatch<TData = Awaited<ReturnType<typeof getOpsPayoutBatch>>, TError = ErrorType<ProblemResponse>>(
+ batchId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsPayoutBatch>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsPayoutBatch>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsPayoutBatch>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsPayoutBatch<TData = Awaited<ReturnType<typeof getOpsPayoutBatch>>, TError = ErrorType<ProblemResponse>>(
+ batchId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsPayoutBatch>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsPayoutBatch>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsPayoutBatch>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsPayoutBatch<TData = Awaited<ReturnType<typeof getOpsPayoutBatch>>, TError = ErrorType<ProblemResponse>>(
+ batchId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsPayoutBatch>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 지급 묶음 상세(정산서·지급 건·보류·KYC 예고)
+ */
+
+export function useGetOpsPayoutBatch<TData = Awaited<ReturnType<typeof getOpsPayoutBatch>>, TError = ErrorType<ProblemResponse>>(
+ batchId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsPayoutBatch>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsPayoutBatchQueryOptions(batchId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsReceivableGuaranteeCollectionResponse200 = {
+  data: GuaranteeCollectionResult
+  status: 200
+}
+
+export type createOpsReceivableGuaranteeCollectionResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsReceivableGuaranteeCollectionResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsReceivableGuaranteeCollectionResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsReceivableGuaranteeCollectionResponseSuccess = (createOpsReceivableGuaranteeCollectionResponse200) & {
+  headers: Headers;
+};
+export type createOpsReceivableGuaranteeCollectionResponseError = (createOpsReceivableGuaranteeCollectionResponse403 | createOpsReceivableGuaranteeCollectionResponse404 | createOpsReceivableGuaranteeCollectionResponse409) & {
+  headers: Headers;
+};
+
+export const getCreateOpsReceivableGuaranteeCollectionUrl = (receivableId: string,) => {
+
+
+
+
+  return `/v1/ops/receivables/${encodeURIComponent(String(receivableId))}/guarantee-collections`
+}
+
+/**
+ * FR-062, POL-039 ⑤, settlement §7, BAT-630 LCH-110. 미수금 발생 30일 뒤에만, 그 미수금 근거 정산서의 판매 대금 × 계약 보증 비율까지 충당한다. `receivable_movement.kind=GUARANTEE`와 남은 금액·상태를 한 트랜잭션에 쓴다. 같은 Idempotency-Key 재요청은 처음 결과를 그대로 준다
+ * @summary 미수금 보증금·이행보증보험 충당(commander, 재인증·멱등 키)
+ */
+export const createOpsReceivableGuaranteeCollection = async (receivableId: string,
+    createOpsReceivableGuaranteeCollectionBody: CreateOpsReceivableGuaranteeCollectionBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsReceivableGuaranteeCollectionResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsReceivableGuaranteeCollectionResponseSuccess>(getCreateOpsReceivableGuaranteeCollectionUrl(receivableId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createOpsReceivableGuaranteeCollectionBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsReceivableGuaranteeCollectionMutationKey = () => ['createOpsReceivableGuaranteeCollection'] as const;
+
+export const getCreateOpsReceivableGuaranteeCollectionMutationOptions = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsReceivableGuaranteeCollection>>, TError,CreateOpsReceivableGuaranteeCollectionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsReceivableGuaranteeCollection>>, TError,CreateOpsReceivableGuaranteeCollectionMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsReceivableGuaranteeCollectionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsReceivableGuaranteeCollection>>, CreateOpsReceivableGuaranteeCollectionMutationVariables> = (props) => {
+          const {receivableId,data} = props ?? {};
+
+          return  createOpsReceivableGuaranteeCollection(receivableId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsReceivableGuaranteeCollectionMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsReceivableGuaranteeCollection>>>
+    export type CreateOpsReceivableGuaranteeCollectionMutationBody = BodyType<CreateOpsReceivableGuaranteeCollectionBody>
+    export type CreateOpsReceivableGuaranteeCollectionMutationError = ErrorType<ProblemResponse>
+    export type CreateOpsReceivableGuaranteeCollectionMutationVariables = {receivableId: string;data: BodyType<CreateOpsReceivableGuaranteeCollectionBody>}
+
+    /**
+ * @summary 미수금 보증금·이행보증보험 충당(commander, 재인증·멱등 키)
+ */
+export const useCreateOpsReceivableGuaranteeCollection = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsReceivableGuaranteeCollection>>, TError,CreateOpsReceivableGuaranteeCollectionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsReceivableGuaranteeCollection>>,
+        TError,
+        CreateOpsReceivableGuaranteeCollectionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsReceivableGuaranteeCollectionMutationOptions(options), queryClient);
+    }
+    export type createOpsPayoutBatchPortoneExecutionResponse200 = {
   data: void
   status: 200
 }

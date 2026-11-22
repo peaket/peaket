@@ -237,6 +237,14 @@ x-peaket-problem-types:
     payment-attempts-exceeded: { status: 409, title: "결제 시도 횟수를 넘었습니다" }
     payment-not-accepted: { status: 409, title: "아직 결제를 접수하지 않은 주문입니다" }
     payout-balance-insufficient: { status: 409, title: "결제사 잔액이 모자라 지급일을 미룹니다" }
+    pg-balance-unavailable: { status: 503, title: "결제사 잔액을 확인할 수 없습니다" }
+    guarantee-not-due: { status: 409, title: "미수금 발생 30일이 지나야 보증으로 충당할 수 있습니다" }
+    guarantee-not-open: { status: 409, title: "열린 미수금이 아닙니다" }
+    guarantee-capacity-exhausted: { status: 409, title: "계약 보증 한도를 모두 썼습니다" }
+    guarantee-contract-missing: { status: 409, title: "지금 계약 조건이 없습니다" }
+    guarantee-contract-unavailable: { status: 503, title: "보증 계약을 확인할 수 없습니다" }
+    guarantee-basis-unavailable: { status: 422, title: "보증 한도를 계산할 정산서가 없습니다" }
+    guarantee-conflict: { status: 409, title: "미수금 잔액이 다른 처리와 겹쳤습니다" }
     payout-account-change-hold: { status: 409, title: "정산 계좌 변경 보류 중이라 지급할 수 없습니다" }
     payout-batch-empty: { status: 409, title: "지급할 확정 정산서가 없습니다" }
     payout-batch-exists: { status: 409, title: "이미 지급 묶음이 있습니다" }
@@ -724,7 +732,70 @@ components:
     CsCaseDetail: { description: "CS 처리함 건 상세(GET /v1/ops/cases/{caseId}, 추천 적용 2026-10-19, ADR-0066). 신고한 계정은 싣지 않는다", allOf: [{ $ref: '#/components/schemas/CsCase' }, { type: object, properties: { messages: { type: array, description: "문의 건만. 시간 순 기록(팬·답변·진행 경과)", items: { $ref: '#/components/schemas/InquiryMessage' } }, reports: { type: array, description: "CONTENT_REPORT·RIGHTS_REQUEST만. 신고마다 사유·자세한 내용·접수 시각(신고한 계정 없음)", items: { type: object, properties: { category: { type: string, enum: [SCALPING, MACRO, ABUSE, RIGHTS, ILLEGAL_FILMING, SPAM, OFF_TOPIC, OTHER] }, detail: { type: [string, 'null'], maxLength: 2000, description: "grapheme 500자 [가정]" }, rightsHolder: { type: boolean }, notifyChannel: { type: [string, 'null'], enum: [APP, EMAIL, null] }, createdAt: { type: string, format: date-time } } } }, review: { type: [object, 'null'], description: "신고 대상 후기(본문·별점·사진 파생본)", properties: { reviewId: { type: string }, rating: { type: integer }, body: { type: string }, images: { type: array, items: { $ref: '#/components/schemas/ReviewImage' } } } }, statementDispute: { type: [object, 'null'], description: "STATEMENT_DISPUTE만. 그 정산서 하나의 금액 항목·상태·이의 내용이다. 결제사(pg·결제 상점), 결제사 내부 ID, 결제사 오류 원문, 정산 계좌는 싣지 않는다(SettlementStatement와 다른 모양이다). cs_lead는 이 건에서 이의 기각(POST /v1/ops/settlements/{statementId}/dispute-dismissal)이나 이의를 인정한 수기 조정 요청(POST /v1/ops/settlements/{statementId}/adjustments)을 부른다(소유자 결정 2026-10-30, open-items 72번, 칸은 추천 적용 2026-10-30, docs/features/settlement.md §9, docs/design/d5 §7.6)", properties: { statementId: { type: string }, kind: { type: string, enum: [EVENT, PRODUCT] }, eventId: { type: [string, 'null'] }, periodStart: { type: [string, 'null'], format: date }, periodEnd: { type: [string, 'null'], format: date }, grossAmount: { type: integer, format: int64 }, refundAmount: { type: integer, format: int64 }, commissionAmount: { type: integer, format: int64 }, commissionVat: { type: integer, format: int64 }, offsetAmount: { type: integer, format: int64 }, payoutAmount: { type: integer, format: int64 }, status: { type: string, description: "SettlementStatement.status와 같은 값(이의 중이면 DISPUTED)" }, disputeDueAt: { type: string, format: date-time }, disputeReasonCode: { type: string, enum: [GROSS_AMOUNT, REFUND_AMOUNT, COMMISSION, OFFSET, OTHER], description: "파트너가 낸 이의 사유 코드(POST /v1/partner/settlements/{statementId}/disputes)" }, disputeDetail: { type: [string, 'null'], maxLength: 2000 }, disputedAt: { type: string, format: date-time } } } } }] }
     SettlementStatement: { type: object, description: "정산서(회차 정산서는 회차·결제사, 상품 정산서는 파트너·결제사·결제 상점·주 단위, POL-039, ADR-0047, 상품 정산서는 추천 적용 2026-10-14, ADR-0062). 계좌는 끝 4자리만", properties: { statementId: { type: string }, kind: { type: string, enum: [EVENT, PRODUCT], description: "EVENT는 티켓, PRODUCT는 굿즈·티켓 연동 부가 상품" }, eventId: { type: string, description: "회차. 상품 정산서는 null(ADR-0086)" }, pg: { type: string, enum: [TOSS, PORTONE] }, pgStore: { type: string, enum: [STANDARD, ESCROW], description: "토스페이먼츠 결제 상점(ESCROW는 굿즈 택배)" }, periodStart: { type: string, format: date, description: "상품 정산서의 주 시작(KST)" }, periodEnd: { type: string, format: date, description: "상품 정산서의 주 끝(KST)" }, grossAmount: { type: integer, format: int64 }, refundAmount: { type: integer, format: int64 }, commissionAmount: { type: integer, format: int64 }, commissionVat: { type: integer, format: int64 }, offsetAmount: { type: integer, format: int64 }, payoutAmount: { type: integer, format: int64 }, revision: { type: integer, description: "판본. 회차 취소·연기 환급이나 승인된 수기 판단으로 다시 계산하면 1 올린 새 판을 만든다(settlement §4.1, 기술 검토 중간-043)" }, supersedesId: { type: [string, 'null'], description: "이 판이 대신한 옛 판의 statementId. 첫 판은 null" }, excludedPayments: { type: array, items: { type: string }, description: "대사 불일치로 이번 계산에서 뺀 결제 ID 목록(settlement §4.1)" }, status: { type: string, enum: [CALCULATED, NOTIFIED, DISPUTED, CONFIRMED, HELD, SCHEDULED, FAILED, PAID, CARRIED_OVER, SUPERSEDED], description: "SUPERSEDED는 다시 계산해 새 판으로 바뀐 옛 판이다. 금액은 알린 그대로 남는다(settlement §4.1·§4.4, 추천 적용 2026-10-28, 기술 검토 중간-043)" }, holdReason: { type: string, enum: [KYC, ACCOUNT_CHANGE, BALANCE, ACCOUNT_MISMATCH, SALE_SUSPENDED], description: "ACCOUNT_MISMATCH는 포트원 파트너의 정산 계좌가 PEAKET 기록과 달라 그 파트너의 포트원 결제분 지급을 멈춘 것(settlement §5.3, 추천 적용 2026-10-28, ADR-0108). SALE_SUSPENDED는 그 회차의 공연이 판매 중지되어 지급을 멈춘 것(settlement §6, 추천 적용 2026-10-28, ADR-0123)" }, disputeDueAt: { type: string, format: date-time }, payoutDate: { type: string, format: date }, payoutBankCode: { type: string, description: "정산 은행 코드(docs/data.md promoter.payout_bank_code). 화면은 은행 이름으로 바꿔 끝 4자리와 함께 보인다(ADR-0162 결정 5, 추천 적용 2026-10-30)" }, payoutAccountLast4: { type: string } } }
     PayoutBatch: { type: object, description: "지급 묶음(지급일·결제사·결제 상점, 2인 승인)", properties: { batchId: { type: string }, pg: { type: string, enum: [TOSS, PORTONE] }, pgStore: { type: string, enum: [STANDARD, ESCROW], description: "토스페이먼츠 결제 상점. 같은 지급일·같은 상점이면 회차·상품 정산서가 한 묶음에 든다(추천 적용 2026-10-14, ADR-0062)" }, payoutDate: { type: string, format: date }, totalAmount: { type: integer, format: int64 }, statementCount: { type: integer }, approvalId: { type: string }, portoneBulkPayoutId: { type: string }, pgBalance: { type: object, description: "묶음 때 본 결제사 지급 가능 잔액. 토스페이먼츠는 잔액 API, 포트원은 operator가 콘솔에서 본 값이다. 포트원 값은 검증할 수 없어 지급을 미루는 쪽으로만 쓴다(ADR-0062)", properties: { amount: { type: integer, format: int64 }, pendingAmount: { type: integer, format: int64, description: "토스페이먼츠만. 정산 주기가 지나지 않은 '정산 대기' 금액" }, ledgerAmount: { type: integer, format: int64, description: "포트원만. 이체 원장으로 계산한 지급대행 계좌 잔액. operator 입력값과 다르면 작은 값으로 잔액 부족을 판정하고 CS 처리함 건을 만든다(settlement §5.1, 추천 적용 2026-10-28, ADR-0108)" }, source: { type: string, enum: [PG_API, OPERATOR_CONSOLE] }, observedAt: { type: string, format: date-time }, observedBy: { type: string, description: "OPERATOR_CONSOLE일 때 입력한 operator" } } }, status: { type: string, enum: [PREPARED, PENDING_APPROVAL, APPROVED, SUBMITTED, COMPLETED, PARTIAL_FAILED] }, approvalDueAt: { type: [string, "null"], format: date-time, description: "승인 기한(지급일 전 영업일 15시, POL-039)" } } }
-    Receivable: { type: object, description: "미수금(상계 → 보증 → 청구)", properties: { receivableId: { type: string }, cause: { type: string, enum: [REFUND_AFTER_PAYOUT, CHARGEBACK, COMPENSATION_ADVANCE, NEGATIVE_STATEMENT] }, amount: { type: integer, format: int64 }, remaining: { type: integer, format: int64 }, status: { type: string, enum: [OPEN, OFFSET, GUARANTEE, BILLED, CLOSED, WRITTEN_OFF] } } }
+    Receivable: { type: object, description: "미수금(상계 → 보증 → 청구)", properties: { receivableId: { type: string }, promoterId: { type: string }, pg: { type: [string, 'null'], enum: [TOSS, PORTONE, null] }, cause: { type: string, enum: [REFUND_AFTER_PAYOUT, CHARGEBACK, COMPENSATION_ADVANCE, NEGATIVE_STATEMENT] }, eventId: { type: [string, 'null'] }, amount: { type: integer, format: int64 }, remaining: { type: integer, format: int64 }, status: { type: string, enum: [OPEN, OFFSET, GUARANTEE, BILLED, CLOSED, WRITTEN_OFF] } } }
+    OpsPayout:
+      type: object
+      description: "SCR-049 지급 건(openapi OpsPayout). 계좌번호 전체는 싣지 않는다"
+      properties:
+        payoutId: { type: string }
+        statementId: { type: string }
+        seq: { type: integer }
+        amount: { type: integer, format: int64 }
+        refPayoutId: { type: string }
+        pgPayoutId: { type: [string, 'null'] }
+        status: { type: string, enum: [REQUESTED, IN_PROGRESS, COMPLETED, FAILED, CANCELED] }
+        errorCode: { type: [string, 'null'] }
+        transferCheck: { type: [string, 'null'], enum: [MATCHED, MISMATCH, MISSING, null] }
+        transferCheckedAt: { type: [string, 'null'], format: date-time }
+    KycNotice:
+      type: object
+      description: "KYC 예고(settlement §6, J-T19). PARTIALLY_APPROVED 셀러의 지급일 앞뒤 6일 토스 지급 합계가 1,000만 원 이상일 때 notice=true"
+      properties:
+        promoterId: { type: string }
+        sellerStatus: { type: string, enum: [PENDING, PARTIALLY_APPROVED, APPROVED, KYC_REQUIRED, REJECTED] }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        amount: { type: integer, format: int64 }
+        threshold: { type: integer, format: int64 }
+        notice: { type: boolean }
+    OpsPayoutBatchDetail:
+      type: object
+      description: "SCR-049 묶음 상세(BAT-630 LCH-110). 묶인 정산서·지급 건·같은 지급일의 HELD 정산서·KYC 예고"
+      properties:
+        batch: { $ref: '#/components/schemas/PayoutBatch' }
+        statements:
+          type: array
+          items: { $ref: '#/components/schemas/SettlementStatement' }
+        payouts:
+          type: array
+          items: { $ref: '#/components/schemas/OpsPayout' }
+        holds:
+          type: array
+          description: "같은 지급일·결제사·상점의 HELD 정산서(제외 목록). holdReason이 사유다"
+          items: { $ref: '#/components/schemas/SettlementStatement' }
+        kycNotices:
+          type: array
+          items: { $ref: '#/components/schemas/KycNotice' }
+    GuaranteeCollection:
+      type: object
+      description: "보증금·이행보증보험 충당 한 건(settlement §7, J-T33)"
+      properties:
+        collectionId: { type: string }
+        idempotencyKey: { type: string }
+        receivableId: { type: string }
+        promoterId: { type: string }
+        guaranteeKind: { type: string, enum: [DEPOSIT, PERFORMANCE_BOND] }
+        amount: { type: integer, format: int64 }
+        basisAmount: { type: integer, format: int64, description: "보증 한도를 계산한 기준 정산서 판매 대금" }
+        guaranteeRateBp: { type: integer }
+        actor: { type: string }
+        reason: { type: string }
+        createdAt: { type: string, format: date-time }
+    GuaranteeCollectionResult:
+      type: object
+      properties:
+        collection: { $ref: '#/components/schemas/GuaranteeCollection' }
+        receivable: { $ref: '#/components/schemas/Receivable' }
     ReportStage: { type: string, enum: [R0, R1, R2, R3, FROZEN], description: "마감 단계(POL-040, docs/features/analytics.md §4.2)" }
     DemandForecast: { type: object, description: "수요 예측(POL-030, ADR-0078 결정 1). 개인정보 없음", properties: { eventId: { type: string }, computedAt: { type: string, format: date-time }, trigger: { type: string, enum: [SALE_REVIEW, DAILY, T_MINUS_30] }, subscribers: { type: integer, description: "그 회차의 오픈 알림 구독 수" }, ratioMedian: { type: number }, ratioUpper: { type: number, description: "75번째 백분위" }, sampleCount: { type: integer, description: "비율에 쓴 지난 회차 수(구독 수 0.5~2배)" }, defaultRatioUsed: { type: boolean, description: "sampleCount가 10 미만이라 기본 비율을 씀" }, expectedMedian: { type: integer }, expectedUpper: { type: integer }, suggestedScale: { type: string, enum: [LARGE, MEDIUM, SMALL] }, currentScale: { type: [string, 'null'], enum: [LARGE, MEDIUM, SMALL, null], description: "판매 승인 전이면 null" }, raiseSuggested: { type: boolean, description: "상단이 지금 등급의 상한을 넘음('규모 올리기 검토' 경보)" } } }
     EventReportSummary: { type: object, description: "공연 리포트 판 목록의 한 줄(FR-068)", properties: { eventId: { type: string }, stage: { $ref: '#/components/schemas/ReportStage' }, status: { type: string, enum: [DONE, DELAYED, PENDING] }, closedAt: { type: string, format: date-time }, qualityPassed: { type: boolean }, rulesTriggered: { type: integer }, rulesDeferred: { type: integer } } }
@@ -5865,6 +5936,64 @@ paths:
         '400': { $ref: '#/components/responses/Problem', description: "모르는 필터 값, limit 100 초과" }
         '401': { $ref: '#/components/responses/Unauthorized', description: "액세스 토큰 없음·만료" }
         '403': { $ref: '#/components/responses/Problem', description: "관제 역할이 아님(CS 담당자 포함)" }
+  /v1/ops/payout-batches/{batchId}:
+    get:
+      operationId: getOpsPayoutBatch
+      tags: [ops]
+      x-peaket-roles: [viewer, operator, commander]
+      summary: "지급 묶음 상세(정산서·지급 건·보류·KYC 예고)"
+      description: "FR-062, POL-038, POL-039, SCR-049, BAT-630 LCH-110. CS 담당자는 정산 화면을 쓰지 않아 403이다(open-items 72번). 계좌는 은행과 끝 4자리만 싣는다. Cache-Control: no-store"
+      security:
+        - opsCookie: []
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: "묶음 상세"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpsPayoutBatchDetail' }
+        '403': { $ref: '#/components/responses/Problem', description: "관제 역할이 아님(CS 담당자 포함)" }
+        '404': { $ref: '#/components/responses/Problem', description: "없는 지급 묶음" }
+  /v1/ops/receivables/{receivableId}/guarantee-collections:
+    post:
+      operationId: createOpsReceivableGuaranteeCollection
+      tags: [ops]
+      x-peaket-roles: [commander]
+      x-peaket-trace-rare: true
+      summary: "미수금 보증금·이행보증보험 충당(commander, 재인증·멱등 키)"
+      description: "FR-062, POL-039 ⑤, settlement §7, BAT-630 LCH-110. 미수금 발생 30일 뒤에만, 그 미수금 근거 정산서의 판매 대금 × 계약 보증 비율까지 충당한다. `receivable_movement.kind=GUARANTEE`와 남은 금액·상태를 한 트랜잭션에 쓴다. 같은 Idempotency-Key 재요청은 처음 결과를 그대로 준다"
+      security:
+        - opsCookie: []
+      parameters:
+        - name: receivableId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/ReauthToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000, description: "보증 충당 사유. 팬 개인정보 금지" }
+      responses:
+        '200':
+          description: "충당 결과"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GuaranteeCollectionResult' }
+        '403': { $ref: '#/components/responses/Problem', description: "commander가 아님, 재인증 실패" }
+        '404': { $ref: '#/components/responses/Problem', description: "없는 미수금" }
+        '409': { $ref: '#/components/responses/Problem', description: "30일 전(guarantee-not-due), 열린 미수금 아님, 보증 한도 소진, 계약 없음" }
   /v1/ops/payout-batches/{batchId}/portone-execution:
     post: { operationId: createOpsPayoutBatchPortoneExecution, tags: [ops], x-peaket-roles: [operator], x-peaket-trace-rare: true, summary: "포트원 콘솔 일괄 지급 실행 기록(operator)", description: "FR-062, ADR-0047. 공개 API에 지급 생성이 없어 콘솔에서 실행하고 일괄 지급 ID를 적음. 결과는 지급 내역 조회로 맞춤", security: [{ opsCookie: [] }], parameters: [{ name: batchId, in: path, required: true, schema: { type: string } }], requestBody: { content: { application/json: { schema: { additionalProperties: false, type: object, required: [bulkPayoutId], properties: { bulkPayoutId: { type: string } } } } } }, responses: { '200': { description: 기록됨 }, '409': { $ref: '#/components/responses/Problem', description: 승인 전이거나 포트원 묶음이 아님 } } }
   /v1/ops/receivables:

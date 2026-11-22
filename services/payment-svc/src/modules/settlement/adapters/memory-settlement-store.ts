@@ -1,6 +1,6 @@
 // 정산 메모리 저장소(단위 시험·개발). Drizzle과 같은 포트를 쓴다.
-import type { PayoutBatchAtomicInput, StatementFilter, StatementPage, SettlementStore } from '../domain/ports.js';
-import { SettlementProblem, type DisputeRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchAuditRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementAuditRecord, type StatementRecord, type StatementSource } from '../domain/settlement.js';
+import type { GuaranteeCollectionAtomicInput, PayoutBatchAtomicInput, StatementFilter, StatementPage, SettlementStore, StatementUpdate } from '../domain/ports.js';
+import { SettlementProblem, type DisputeRecord, type GuaranteeCollectionRecord, type KycRecord, type PayoutAccountRecord, type PayoutBatchAuditRecord, type PayoutBatchRecord, type PayoutRecord, type Pg, type PgStore, type ReceivableMoveRecord, type ReceivableRecord, type StatementAuditRecord, type StatementRecord, type StatementSource } from '../domain/settlement.js';
 
 const cursorOf = (s: StatementRecord): string => Buffer.from(`${s.createdAt.getTime()}:${s.statementId}`).toString('base64url');
 const decodeCursor = (cursor: string): { at: number; id: string } | undefined => {
@@ -25,6 +25,8 @@ export class MemorySettlementStore implements SettlementStore {
   readonly accounts = new Map<string, PayoutAccountRecord>();
   readonly receivables = new Map<string, ReceivableRecord>();
   readonly receivableMoves: ReceivableMoveRecord[] = [];
+  readonly guaranteeCollections = new Map<string, GuaranteeCollectionRecord>();
+  readonly webhookReceipts = new Set<string>();
 
   async insertStatement(record: StatementRecord, sources: readonly StatementSource[]): Promise<boolean> {
     const conflicts = [...this.statements.values()].some((s) => {
@@ -67,6 +69,13 @@ export class MemorySettlementStore implements SettlementStore {
   }
   async saveStatement(record: StatementRecord) {
     this.statements.set(record.statementId, { ...record, excludedPayments: [...record.excludedPayments] });
+  }
+  async applyStatementUpdates(updates: readonly StatementUpdate[]) {
+    for (const u of updates) {
+      const s = this.statements.get(u.statementId);
+      if (!s) throw new SettlementProblem('payout-batch-statement-conflict', 409, '정산서를 찾지 못했습니다');
+      this.statements.set(u.statementId, { ...s, status: u.status, holdReason: u.holdReason, offsetAmount: u.offsetAmount, payoutAmount: u.payoutAmount, updatedAt: u.updatedAt });
+    }
   }
   async insertStatementAudit(record: StatementAuditRecord) {
     this.statementAudits.push(record);
@@ -181,8 +190,14 @@ export class MemorySettlementStore implements SettlementStore {
   async savePayout(record: PayoutRecord) {
     this.payouts.set(record.payoutId, record);
   }
+  async findPayoutByPgPayoutId(pgPayoutId: string) {
+    return [...this.payouts.values()].find((p) => p.pgPayoutId === pgPayoutId);
+  }
   async findKyc(promoterId: string) {
     return this.kycs.get(promoterId);
+  }
+  async findKycByTossSellerId(tossSellerId: string) {
+    return [...this.kycs.values()].find((k) => k.tossSellerId === tossSellerId);
   }
   async saveKyc(record: KycRecord) {
     this.kycs.set(record.promoterId, record);
@@ -202,6 +217,17 @@ export class MemorySettlementStore implements SettlementStore {
       .filter((s) => !filter.payoutDate || s.payoutDate === filter.payoutDate)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.statementId.localeCompare(a.statementId))
       .slice(0, filter.limit);
+  }
+  async listHeldStatements(pg: Pg, pgStore: PgStore, payoutDate: string) {
+    return [...this.statements.values()]
+      .filter((s) => s.status === 'HELD' && s.pg === pg && s.pgStore === pgStore && s.payoutDate === payoutDate)
+      .sort((a, b) => a.promoterId.localeCompare(b.promoterId) || a.statementId.localeCompare(b.statementId));
+  }
+  async sumScheduledTossPayouts(promoterId: string, from: string, to: string) {
+    return [...this.statements.values()]
+      .filter((s) => s.promoterId === promoterId && s.pg === 'TOSS' && s.payoutDate !== null && s.payoutDate >= from && s.payoutDate <= to)
+      .filter((s) => s.status === 'NOTIFIED' || s.status === 'CONFIRMED' || s.status === 'SCHEDULED' || s.status === 'HELD')
+      .reduce((sum, s) => sum + s.payoutAmount, 0);
   }
   async findProductStatement(promoterId: string, pg: Pg, pgStore: PgStore, periodStart: string, periodEnd: string) {
     return [...this.statements.values()].find((s) => s.promoterId === promoterId && s.kind === 'PRODUCT' && s.pg === pg && s.pgStore === pgStore && s.periodStart === periodStart && s.periodEnd === periodEnd && s.status !== 'SUPERSEDED');
@@ -238,5 +264,29 @@ export class MemorySettlementStore implements SettlementStore {
   }
   async listReceivableMoves(statementId: string) {
     return this.receivableMoves.filter((m) => m.statementId === statementId);
+  }
+  async findReceivable(receivableId: string) {
+    return this.receivables.get(receivableId);
+  }
+  async listReceivableMovesForReceivable(receivableId: string) {
+    return this.receivableMoves.filter((m) => m.receivableId === receivableId);
+  }
+  async findGuaranteeCollection(idempotencyKey: string) {
+    return this.guaranteeCollections.get(idempotencyKey);
+  }
+  async hasSettlementWebhookReceipt(transmissionId: string) {
+    return this.webhookReceipts.has(transmissionId);
+  }
+  async recordSettlementWebhookReceipt(transmissionId: string) {
+    this.webhookReceipts.add(transmissionId);
+  }
+  async collectGuaranteeAtomically(input: GuaranteeCollectionAtomicInput) {
+    if (this.guaranteeCollections.has(input.collection.idempotencyKey)) return;
+    const r = this.receivables.get(input.collection.receivableId);
+    if (!r) throw new SettlementProblem('guarantee-not-open', 409, '열린 미수금이 아닙니다');
+    if (r.remaining !== input.receivable.remaining + input.move.amount) throw new SettlementProblem('guarantee-conflict', 409, '미수금 잔액이 다른 처리와 겹쳤습니다');
+    this.guaranteeCollections.set(input.collection.idempotencyKey, input.collection);
+    this.receivableMoves.push({ ...input.move, kind: 'GUARANTEE' });
+    this.receivables.set(r.receivableId, { ...r, remaining: input.receivable.remaining, status: input.receivable.status, updatedAt: input.receivable.updatedAt });
   }
 }
