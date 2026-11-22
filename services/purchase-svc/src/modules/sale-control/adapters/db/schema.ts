@@ -1,6 +1,7 @@
 // purchase DB의 판매 정지 표 sale_control(BAT-465 R-584, docs/data.md §3 s:{event:E}:ctl, ADR-0103·0123).
 // 원본은 이 표이고 좌석 Redis s:{event:E}:ctl에 사본을 쓴다. 범위는 EVENT(회차)와 PLATFORM(전체)이다.
 // paused는 명령 3(판매 일시정지), suspended는 판매 승인 업무의 판매 중지다. 재개는 각자의 칸만 내린다.
+// 판 번호는 종류마다 따로다: revision·command_id는 판매 중지, paused_revision·paused_command_id·paused_changed_at은 명령 3(ADR-0365 결정 6, 마이그레이션 0033).
 import { sql } from 'drizzle-orm';
 import { bigint, boolean, check, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
@@ -23,6 +24,12 @@ export const saleControl = pgTable(
     suspensionRef: text('suspension_ref'),
     reason: text('reason'),
     updatedAt: at('updated_at').notNull(),
+    // 명령 3(판매 일시정지)의 판 번호. 0은 한 번도 받지 않음(ADR-0365 결정 6)
+    pausedRevision: bigint('paused_revision', { mode: 'number' }).notNull().default(0),
+    // 명령 3을 마지막으로 바꾼 운영 명령
+    pausedCommandId: uuid('paused_command_id'),
+    // 명령 3이 마지막으로 바뀐 시각(정지가 풀린 시각으로 유휴 시계를 돌려준다, ADR-0365 결정 8)
+    pausedChangedAt: at('paused_changed_at'),
   },
   (t) => [
     uniqueIndex('sale_control_event_key')
@@ -34,5 +41,6 @@ export const saleControl = pgTable(
     check('sale_control_scope_check', sql`${t.scope} in ('EVENT', 'PLATFORM')`),
     check('sale_control_event_check', sql`(${t.scope} = 'EVENT') = (${t.eventId} is not null)`),
     check('sale_control_revision_check', sql`${t.revision} >= 1`),
+    check('sale_control_paused_revision_check', sql`${t.pausedRevision} >= 0`),
   ],
 );

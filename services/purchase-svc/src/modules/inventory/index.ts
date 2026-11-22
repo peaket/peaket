@@ -466,6 +466,8 @@ export {
   type SnapshotReadResult,
   type SeatStore,
   type SessionStartedLog,
+  type SaleIdleClock,
+  type SweepIdleOptions,
   type SweepLeases,
 } from './domain/ports.js';
 export { PurchaseSessionController } from './inbound/purchase-session.controller.js';

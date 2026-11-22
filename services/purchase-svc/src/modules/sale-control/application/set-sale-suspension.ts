@@ -3,11 +3,14 @@
 // 사본이 실패하면 던진다. 명령은 FAILED로 남고 재시도가 같은 명령 ID로 다시 부른다(멱등).
 import type { SaleControlCopies, SaleControlStore } from '../domain/ports.js';
 import type { SaleSuspensionInput, SaleSuspensionResult } from '../domain/sale-control.js';
+import type { SaleControlMemory } from './sale-control-memory.js';
 
 export class SetSaleSuspension {
   constructor(
     private readonly store: SaleControlStore,
     private readonly copies?: SaleControlCopies,
+    /** 파드 메모리(결제 시도·접수의 정지 확인, ADR-0365 결정 7). 없으면 다시 맞춤만 채운다 */
+    private readonly memory?: SaleControlMemory,
   ) {}
 
   async run(input: SaleSuspensionInput): Promise<SaleSuspensionResult> {
@@ -21,6 +24,7 @@ export class SetSaleSuspension {
       nowMs: input.nowMs,
       ...(input.version !== undefined ? { version: input.version } : {}),
     });
+    this.memory?.applySuspension(applied.control.eventId, { suspended: applied.control.suspended, revision: applied.control.revision });
     await this.copies?.write({
       eventId: applied.control.eventId,
       suspended: applied.control.suspended,

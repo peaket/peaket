@@ -3,7 +3,7 @@
 import type { SessionHoldEntry } from '../domain/purchase-session.js';
 import type { Clock } from '@peaket/platform';
 import { assertEndedEntry, assertHoldRecord, assertIndexArgs, sessionCheckAt, type EndedSession, type SweepSessionResult, assertJti, assertOpenInput, assertSeq, assertStartedEntry, type OpenSessionInput, type OpenSessionResult, SESSION_IDLE_MS, SESSION_KEY_GRACE_MS, SESSION_STARTED_GRACE_MS, type SessionEndedEntry, type SessionStartedEntry, type StoredSession } from '../domain/purchase-session.js';
-import type { PurchaseSessionStore, SeatCallOptions, SessionEndedLog, SessionIndex, SessionStartedLog } from '../domain/ports.js';
+import type { PurchaseSessionStore, SeatCallOptions, SessionEndedLog, SessionIndex, SessionStartedLog, SweepIdleOptions } from '../domain/ports.js';
 
 interface Marker {
   startedAtMs: number;
@@ -143,7 +143,7 @@ export class MemoryPurchaseSessionStore implements PurchaseSessionStore {
     return { eventId: s.eventId, journeyId: s.journeyId, ...(holds.length > 0 ? { accountId: s.accountId, holds } : {}) };
   }
 
-  async sweep(jti: string, _o?: SeatCallOptions): Promise<SweepSessionResult> {
+  async sweep(jti: string, o?: SeatCallOptions & SweepIdleOptions): Promise<SweepSessionResult> {
     assertJti(jti);
     const now = this.clock.now();
     this.#expire(jti, now);
@@ -154,7 +154,9 @@ export class MemoryPurchaseSessionStore implements PurchaseSessionStore {
       this.#drop(jti);
       return { kind: 'ENDED', reason: 'MAX_STAY', eventId: s.eventId, journeyId: s.journeyId, endedAtMs: now, ...(holds.length > 0 ? { accountId: s.accountId, holds } : {}) };
     }
-    if (this.#paying.has(jti)) return { kind: 'LIVE', nextCheckMs: Math.min(s.maxStayUntilMs, now + SESSION_IDLE_MS) };
+    // 판매 일시정지 유휴 시계(SWEEP_SESSION_LUA와 같은 규칙, ADR-0365 결정 8)
+    if (o?.idleFloorMs !== undefined && s.idleUntilMs < o.idleFloorMs) s.idleUntilMs = o.idleFloorMs;
+    if (this.#paying.has(jti) || o?.idlePaused === true) return { kind: 'LIVE', nextCheckMs: Math.min(s.maxStayUntilMs, now + SESSION_IDLE_MS) };
     if (now >= s.idleUntilMs) {
       const holds = this.#holdEntries(jti);
       this.#drop(jti);

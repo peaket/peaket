@@ -27,7 +27,7 @@ import {
   sessionStartedFields,
   type StoredSession,
 } from '../domain/purchase-session.js';
-import type { PurchaseSessionStore, SeatCallOptions, SessionEndedLog, SessionHoldLists, SessionIndex, SessionStartedLog } from '../domain/ports.js';
+import type { PurchaseSessionStore, SeatCallOptions, SessionEndedLog, SessionHoldLists, SessionIndex, SessionStartedLog, SweepIdleOptions } from '../domain/ports.js';
 import {
   ADVANCE_SESSION_LUA,
   APPEND_SESSION_ENDED_LUA,
@@ -152,9 +152,12 @@ export class RedisPurchaseSessionStore implements PurchaseSessionStore, SessionH
     throw new Error(`세션 끝내기 Lua가 모르는 결과를 돌려줬다: ${kind}`);
   }
 
-  async sweep(jti: string, o?: SeatCallOptions): Promise<SweepSessionResult> {
+  async sweep(jti: string, o?: SeatCallOptions & SweepIdleOptions): Promise<SweepSessionResult> {
     assertJti(jti);
-    const r = await guard(this.redis.evalScript(SWEEP, [sessionKeys.session(jti)], [String(SESSION_IDLE_MS)], deadlineOf(o)));
+    // 유휴 시계 선택값이 없으면 ARGV는 유휴 ms 하나다(평소 규칙). 있으면 2 정지 '1'·'0', 3 바닥 ms(''이면 없음)
+    const floor = o?.idleFloorMs !== undefined && Number.isSafeInteger(o.idleFloorMs) && o.idleFloorMs > 0 ? String(o.idleFloorMs) : '';
+    const idle = o?.idlePaused === true || floor !== '' ? [o?.idlePaused === true ? '1' : '0', floor] : [];
+    const r = await guard(this.redis.evalScript(SWEEP, [sessionKeys.session(jti)], [String(SESSION_IDLE_MS), ...idle], deadlineOf(o)));
     if (!Array.isArray(r) || r.length < 1) throw new Error(`정리 점검 Lua가 모르는 값을 돌려줬다: ${str(r)}`);
     const kind = str(r[0]);
     if (kind === 'GONE') return { kind: 'GONE' };
