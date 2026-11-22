@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import type { SQL } from 'drizzle-orm';
 import { getTableConfig, PgDialect, type PgTable } from 'drizzle-orm/pg-core';
 import { describe, expect, test } from 'vitest';
-import { orderCancellation, orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob, ticketVoidJob } from '../src/modules/booking/adapters/db/schema.js';
+import { orderCancellation, orderCompensation, orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob, ticketVoidJob } from '../src/modules/booking/adapters/db/schema.js';
 import { SAGA_STEPS } from '../src/modules/booking/domain/saga.js';
 import { eventSale, purchaseQuota, seatHold, seatRebuild, seatSale } from '../src/modules/inventory/adapters/db/schema.js';
 import { priorityGrant } from '../src/modules/priority/adapters/db/schema.js';
@@ -656,13 +656,15 @@ describe('마이그레이션 기록(migrations/meta)', () => {
   const EVENT_REFUND_SHAPES = [eventCancellationRequest, eventRefundItem, eventRefundAttempt].map(shapeOf);
   /** BAT-425 배상금 표(purchase 0030) */
   const compensationShape = shapeOf(compensation);
+  /** BAT-011 보상 세 걸음의 상태 표(purchase 0032, ADR-0354 결정 3, docs/data.md §2 order_compensation) */
+  const orderCompensationShape = shapeOf(orderCompensation);
 
   // 마지막 스냅샷은 기록의 마지막 마이그레이션 것이다(수를 고정하지 않는다, W9-fix2 시험 이의 4)
   test('마지막 스냅샷(기록의 마지막, 지금 0030_snapshot.json)의 표·열·열 기본 키·check 이름이 schema.ts(좌석 표 넷, 회차 판매 상태 표, 주문 표 아홉, 회차 취소·환불 시도 표 셋, 우선 구매 권리 표 하나, 판매 정지 사본 표, 부정 예매 운영자 취소 표 둘, 환급 미룸 표 하나, 배상금 표 하나)와 같다(표 정의만 고치고 마이그레이션을 안 만든 어긋남을 막는다)', () => {
     expect(snapshotFiles.at(-1)).toBe(`${String(journal.entries.at(-1)!.idx).padStart(4, '0')}_snapshot.json`);
     expect(Number(snapshotFiles.at(-1)!.slice(0, 4))).toBeGreaterThanOrEqual(30);
     const snap = snapshotOf(snapshotFiles.at(-1)!);
-    const all = [...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape, ...fraudShapes, holdShape(), compensationShape];
+    const all = [...SHAPES, eventSaleShape, ...ORDER_SHAPES, ...EVENT_REFUND_SHAPES, priorityShape, saleControlShape, ...fraudShapes, holdShape(), compensationShape, orderCompensationShape];
     expect(Object.keys(snap.tables).sort()).toEqual(all.map((s) => `public.${s.name}`).sort());
     for (const s of all) {
       const t = snap.tables[`public.${s.name}`]!;
@@ -783,6 +785,37 @@ describe('마이그레이션 기록(migrations/meta)', () => {
     const after = snapshotOf('0028_snapshot.json');
     expect(after.prevId).toBe(before.id);
     expect(Object.keys(after.tables).sort()).toEqual(Object.keys(before.tables).sort());
+  });
+
+  test('P-T39 ③_BAT-011 0032 SQL은 order_compensation 표 하나와 상태·시도·이유 CHECK, 다시 보내기 부분 색인, purchase_order 외래 키를 만들고 0032 스냅샷은 0031 뒤에서 그 표 하나만 늘린다', () => {
+    const tag = journal.entries.find((e) => e.idx === 32)?.tag;
+    expect(tag).toBe('0032_order_compensation');
+    const raw = readFileSync(join(MIGRATIONS, `${tag}.sql`), 'utf8').replace(/\r\n/g, '\n');
+    expect(raw).not.toMatch(/\b(DROP|TRUNCATE|DELETE FROM|UPDATE "|RENAME)\b/);
+    const text = canon(raw.replace(/^-- .*$/gm, ''));
+    expect(text.match(/create table/gi)).toHaveLength(1);
+    expect(text).toContain('create table order_compensation(');
+    // 표 정의(schema.ts)의 칸·기본값·널 허용·열 기본 키가 SQL과 글자까지 같다
+    for (const c of orderCompensationShape.columns) {
+      const def = `${c.name} ${c.type}${c.hasDefault ? ' default 0' : ''}${c.primary ? ' primary key' : ''}${c.notNull ? ' not null' : ''}`;
+      expect(text, c.name).toContain(def);
+    }
+    for (const k of orderCompensationShape.checks) expect(text, k.name).toContain(`constraint ${k.name} check(${k.expr})`);
+    // ADR-0354 결정 3: 보상 중(STARTED·FENCED)만 다시 보내기 대상이라 부분 색인이다
+    expect(orderCompensationShape.indexes).toEqual([
+      { name: 'order_compensation_next_attempt_idx', unique: false, columns: ['next_attempt_at'], where: canon("status in ('STARTED','FENCED')") },
+    ]);
+    expect(text).toContain(
+      `create index order_compensation_next_attempt_idx on order_compensation using btree(next_attempt_at)where ${canon("status in ('STARTED','FENCED')")}`,
+    );
+    expect(text).toContain(
+      'alter table order_compensation add constraint order_compensation_order_id_purchase_order_id_fk foreign key(order_id)references purchase_order(id)on delete no action on update no action',
+    );
+    const before = snapshotOf('0031_snapshot.json');
+    const after = snapshotOf('0032_snapshot.json');
+    expect(after.prevId).toBe(before.id);
+    expect(Object.keys(after.tables).filter((t) => !(t in before.tables))).toEqual(['public.order_compensation']);
+    expect(Object.keys(before.tables).every((t) => t in after.tables)).toBe(true);
   });
 
   test('GAT-110 D6 schema.ts의 eventRefundHold는 data.md event_refund_hold의 칸(회차 하나에 한 줄)과 기한 검사 expires_at > held_at이다', () => {
