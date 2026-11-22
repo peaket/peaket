@@ -260,6 +260,13 @@
       "when": 1795308000000,
       "tag": "0043_core_notify_role",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795308100000,
+      "tag": "0044_sale_review_place_read",
+      "breakpoints": true
     }
   ]
 }
