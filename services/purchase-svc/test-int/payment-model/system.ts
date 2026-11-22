@@ -24,10 +24,11 @@
 //   payment-svc BatchGetPaymentStates를 부르고 proto 칸 꼴(orderPaymentStateOf)을 purchase 어댑터와 같은 orderPaymentStatesOf로 읽는다, gRPC 없이).
 //   당기기 뒤 반은 같은 사건이 사건 길로도 온다(순번 조건이 건너뛴다). 결제사 쪽 취소(CANCELED)는 당기기가 반영하지 않는 상태라 늘 사건 길이다.
 // - issue·issueAck → TicketIssueRunner.runOne(다시 보내기 간격은 흉내로 지나게 한다) + 대역 ticket-svc(TicketStub). overdue → 흉내로 발권 기한을 지나게 한 뒤 DrizzleTicketIssue.markOverdue.
-// - 흉내(운영 코드가 없다, PRF-173·HOT-160·GAT-280이 잇는다): ticketSvc·ticketBreaks(대역 ticket-svc), csConfirm·eventCancel(하네스 표시),
-//   compStart(큐 행 잠금 → 주문 전이 T20 → 큐 행 지우기를 한 트랜잭션에. 보상 중은 운영 상태가 없어 COMPENSATED + 하네스 표시로 둔다), compFence(대역 ticket-svc의 발권 막기),
-//   compCancel·eventRefund(T24, 결제사 어댑터 cancel을 답 유실 뒤 같은 멱등키로 다시 부른다. 첫 답 UNKNOWN·다시 부른 답 CANCELLED를 단언한다. 결제 원장 CANCELED는
-//   운영 쓰임새가 없어 하네스가 SQL로 적는다, 코드 리뷰 H4). 불변식 ④는 결제사 대역이 받은 취소 요청으로 센다(코드 리뷰 L1).
+// - 흉내(운영 코드가 없다): ticketSvc·ticketBreaks(대역 ticket-svc), csConfirm·eventCancel(하네스 표시),
+//   eventRefund(T24, 결제사 어댑터 cancel을 답 유실 뒤 같은 멱등키로 다시 부른다. 첫 답 UNKNOWN·다시 부른 답 CANCELLED를 단언한다. 결제 원장 CANCELED는
+//   운영 쓰임새가 없어 하네스가 SQL로 적는다, 코드 리뷰 H4). 보상 세 걸음(compStart·compFence·compCancel)은 PRF-173 운영 쓰임새
+//   (StartCompensation·FenceCompensation·CancelCompensation)를 부른다(payment-model/compensation-adapter.ts).
+//   불변식 ④는 결제사 대역이 받은 취소 요청으로 센다(코드 리뷰 L1).
 // 관측(명세 상태 꼴): 주문 상태(AUTHENTICATED → CREATED, UNKNOWN → RESERVED, COMPENSATED + 보상 중 표시 → COMPENSATING), 접수한 시도의 결제사, 발권 큐 행·기한 넘김,
 // 시도(만든 차례가 k), 시뮬레이터의 결제 상태(READY → AUTH, DONE → APPROVED, ABORTED → DECLINED, EXPIRED, CANCELED), 대역이 붙든 요청(req),
 // 결제 원장(ACCEPTED + CONFIRM_SENT → SENT), 대역 ticket-svc. 걸음마다 앞 관측에서 명세 다음 상태(spec.ts)를 계산해 칸마다 견주고 불변식 ①~⑥을 센다
@@ -86,6 +87,7 @@ import {
 } from '../../src/modules/booking/index.js';
 import { DrizzleSeatSales } from '../../src/modules/inventory/index.js';
 import { accountActor, newOrderInput } from '../order-fixtures.js';
+import { HarnessCompensation } from './compensation-adapter.js';
 import type { SpecAction } from './actions.js';
 import { PgProxy } from './pg-proxy.js';
 import { ak, compareState, enabled, initState, invariantViolations, type MState, op, PGS, po, type Scope, specNext, type SpecMove } from './spec.js';
@@ -329,6 +331,7 @@ export class PaymentSystem {
   #resolver!: PaymentUnknownResolver;
   #saga!: OrderSagaRunner;
   #ticketRunner!: TicketIssueRunner;
+  #compensation!: HarnessCompensation;
   #gateways!: StaticPaymentGateways;
   #guards!: PgCallGuards;
   readonly #orderStore: DrizzleOrderStore;
@@ -531,6 +534,20 @@ export class PaymentSystem {
     } as never);
     this.#ticketRunner = new TicketIssueRunner({ jobs: this.#ticketJobs, issuer: this.#tickets, log: noop(), signals: noop(), clock: this.clock, timer: { setInterval: () => 1, clearInterval: () => undefined } });
     this.#puller = new PaymentResultPuller({ targets: this.#pullTargets, reader: this.#reader, apply: this.#apply, log: noop(), signals: noop(), clock: this.clock, timer: { setInterval: () => 1, clearInterval: () => undefined } });
+    // 보상 세 걸음은 하네스 흉내가 아니라 운영 쓰임새를 부른다(V-T40, BAT-011). 대역은 ticket-svc(발권 막기)·payment-svc(전액 취소)뿐이다
+    this.#compensation = new HarnessCompensation({
+      database: this.#pdb,
+      clock: this.clock,
+      paymentIdOf: (orderId) => this.#lastApprovedPaymentId(orderId),
+      fence: async (orderId) => {
+        const t = this.#tickets.tks.get(orderId)!;
+        t.closed = true;
+        if (t.tk === 'ISSUED') t.tk = 'REVOKED';
+        return { blocked: true, alreadyEntered: 0, already_entered: 0 };
+      },
+      cancelPayment: (q) => this.#cancelAtPgWithId(q.orderId, q.cancellationId),
+      reason: 'EVENT_CANCELLED',
+    });
   }
 
   /** 승인 명령 포트를 프로세스 안에서 payment-svc 쓰임새로 잇는다(gRPC 어댑터 GrpcPaymentConfirms와 같은 차례: 보내기 전 표시 → 접수) */
@@ -985,25 +1002,18 @@ export class PaymentSystem {
         this.#cs.add(o);
         return;
       case 'compStart':
-        // 흉내(PRF-173): 보상 시작 = 발권 큐 행 잠금 → 주문 전이 T20 → 큐 행 지우기를 한 트랜잭션에(잠금 차례는 발권 성공 반영과 같은 '큐 행 → 주문 행').
-        // 결제사 취소 전이라 하네스가 보상 중으로 표시한다. 경합 시험에서는 이 트랜잭션도 스케줄러 문 뒤에 선다
-        await this.#pdb.transaction(async (tx) => {
-          await tx.execute(sql`select order_id from ticket_issue_job where order_id = ${ids!.orderId}::uuid for update`);
-          const t = await this.#orderStore.transition(tx, { orderId: ids!.orderId, transition: 'T20', actor: ORDER_SAGA_ACTOR });
-          if (t.status !== 'APPLIED') throw new Error(`compStart: T20 ${JSON.stringify(t)}`);
-          await tx.execute(sql`delete from ticket_issue_job where order_id = ${ids!.orderId}::uuid`);
-        });
+        // 운영 코드(PRF-173): StartCompensation이 큐 행 잠금 → 주문 보상 중 표시 → 큐 행 지우기를 한 트랜잭션에 한다.
+        // 결제사 취소 전이라 하네스가 보상 중으로 표시한다(명세 COMPENSATING). 경합 시험에서는 이 트랜잭션도 스케줄러 문 뒤에 선다
+        await this.#compensation.start(ids!.orderId);
         this.#compensating.add(o);
         return;
-      case 'compFence': {
-        // 흉내(HOT-160): ticket-svc의 주문 단위 발권 막기
-        const t = this.#tickets.tks.get(ids!.orderId)!;
-        t.closed = true;
-        if (t.tk === 'ISSUED') t.tk = 'REVOKED';
+      case 'compFence':
+        // 운영 코드(HOT-161): FenceCompensation → ticket-svc BlockTicketIssuance 대역
+        await this.#compensation.fence(ids!.orderId);
         return;
-      }
       case 'compCancel':
-        await this.#cancelAtPg(o, pre);
+        // 운영 코드(PRF-173): CancelCompensation → payment-svc CancelPayment 대역(같은 cancellation_id)
+        await this.#compensation.cancel(ids!.orderId);
         this.#compensating.delete(o);
         return;
       case 'eventCancel':
@@ -1104,6 +1114,45 @@ export class PaymentSystem {
     if (first.outcome !== 'UNKNOWN' || again.outcome !== 'CANCELLED') this.#violate(`보상·환불의 결제사 취소(주문 ${o}): 첫 답 ${first.outcome}(UNKNOWN이어야 함), 다시 부른 답 ${again.outcome}(CANCELLED여야 함)`);
     // 흉내: 결제 원장 CANCELED(보상·환불 쓰임새가 없다, PRF-173)
     await this.payment.pool.query(`update payment set status = 'CANCELED', status_changed_at = $2 where order_id = $1 and status = 'APPROVED'`, [ids.orderId, new Date(this.clock.now())]);
+  }
+
+  /** 그 주문의 마지막 APPROVED 결제 ID(payment-svc payment 원장, ADR-0354 결정 4). 없으면 빈 글 */
+  async #lastApprovedPaymentId(orderId: string): Promise<string> {
+    const r = await this.payment.pool.query<{ id: string }>(
+      "select id::text from payment where order_id = $1 and status = 'APPROVED' order by attempt_no desc, approved_at desc nulls last limit 1",
+      [orderId],
+    );
+    return r.rows[0]?.id ?? '';
+  }
+
+  /**
+   * 보상의 결제 취소(운영 코드가 부르는 payment-svc CancelPayment 대역). 취소 ID는 운영 코드가 정한 `compensation:{orderId}` 고정 UUIDv8을
+   * 그대로 멱등키(`cancel-{cancellationId}`)로 쓴다. 결제사가 취소를 처리한 뒤 첫 답을 잃고(UNKNOWN), 같은 키로 다시 부르면 CANCELLED다.
+   * 결제 원장 CANCELED는 payment-svc 쓰임새가 아직 없어 대역이 적는다(PRF-173 뒤).
+   */
+  async #cancelAtPgWithId(orderId: string, cancellationId: string): Promise<'CANCELLED' | 'UNKNOWN' | 'REJECTED'> {
+    const o = this.#byOrder.get(orderId)!;
+    const pre = this.obs;
+    const ids = this.#ids.get(o)!;
+    const p = pre.ord[o]!.apg;
+    if (!(pre.env.canceled || pre.ord[o]!.cs)) this.#ghost.badRefund = true;
+    const gateway = this.#gateways.of(PG_NAME[p]!) as PaymentGatewayPort;
+    const paymentRef = p === 1 ? ids.auth.get(1)!.paymentKey! : `pay-${ids.orderId}`;
+    if (pre.pgs[po(p, o)] !== 'APPROVED') {
+      this.#violate(`보상의 결제사 취소: 주문 ${o}의 결제사 상태가 승인이 아니다(${pre.pgs[po(p, o)]})`);
+      return 'REJECTED';
+    }
+    await this.#control(p, 'POST', '/sim/faults', { op: 'cancel', times: 1, kind: 'drop', applied: true });
+    const idemKey = `cancel-${cancellationId}`;
+    const first = await gateway.cancel({ paymentRef, amount: 'ALL', reason: '보상 환불', idemKey });
+    const again = await gateway.cancel({ paymentRef, amount: 'ALL', reason: '보상 환불', idemKey });
+    debug(`${this.eventId} 보상 결제 취소 ${first.outcome} → ${again.outcome} (${cancellationId})`);
+    if (first.outcome !== 'UNKNOWN' || again.outcome !== 'CANCELLED') {
+      this.#violate(`보상의 결제사 취소(주문 ${o}): 첫 답 ${first.outcome}(UNKNOWN이어야 함), 같은 취소 ID로 다시 부른 답 ${again.outcome}(CANCELLED여야 함)`);
+    }
+    // 흉내: 결제 원장 CANCELED(보상 쓰임새가 원장을 쓰는 코드는 PRF-173 밖)
+    await this.payment.pool.query(`update payment set status = 'CANCELED', status_changed_at = $2 where order_id = $1 and status = 'APPROVED'`, [ids.orderId, new Date(this.clock.now())]);
+    return first.outcome === 'UNKNOWN' && again.outcome === 'CANCELLED' ? 'CANCELLED' : 'UNKNOWN';
   }
 
   /** 집중 시험이 쓰는 값 */
