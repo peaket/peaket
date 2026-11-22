@@ -646,19 +646,19 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
               </div>
             </section>
             <WidgetSlot ctx={ctx} remote="queue" title="대기열 진입·입장 처리량" style={{ gridColumn: 'span 2' }}>
-              <EntryThroughputWidget data={F.ENTRY} detailHref={GRAFANA} style={{ gridColumn: 'span 2' }} />
+              <EntryThroughputWidget data={F.ENTRY} pending={ctx.live} detailHref={GRAFANA} style={{ gridColumn: 'span 2' }} />
             </WidgetSlot>
             <WidgetSlot ctx={ctx} remote="queue" title="대기 상태 파일 신선도·셔플 게시">
-              <QueueFileWidget data={F.QUEUE_FILE} detailHref={GRAFANA} />
+              <QueueFileWidget data={F.QUEUE_FILE} pending={ctx.live} detailHref={GRAFANA} />
             </WidgetSlot>
             <WidgetSlot ctx={ctx} remote="queue" title="상태 조회량·CDN·엣지">
-              <CdnEdgeWidget data={F.CDN} detailHref={GRAFANA} />
+              <CdnEdgeWidget data={F.CDN} pending={ctx.live} detailHref={GRAFANA} />
             </WidgetSlot>
             <WidgetSlot ctx={ctx} remote="purchase" title="좌석 홀드 p99">
-              <SeatHoldWidget data={F.SEAT_HOLD} detailHref={GRAFANA} />
+              <SeatHoldWidget data={F.SEAT_HOLD} pending={ctx.live} detailHref={GRAFANA} />
             </WidgetSlot>
             <WidgetSlot ctx={ctx} remote="purchase" title="결제 확정·남은 허용 실패">
-              <PaymentBudgetWidget data={F.PAY_BUDGET} detailHref={GRAFANA} />
+              <PaymentBudgetWidget data={F.PAY_BUDGET} pending={ctx.live} detailHref={GRAFANA} />
             </WidgetSlot>
             <section className="widget" role="region" aria-labelledby="w-heat" style={{ gridColumn: "span 2" }}>
               <div className="widget-head">
@@ -1310,7 +1310,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
             ) : null}
             <AlertPanel {...alertPanelFor('live', v)} renderLink={renderRouterLink} style={{ gridColumn: 'span 2' }} footer={<p className="t-xs muted">{DECISION_ORDER}</p>} />
             <WidgetSlot ctx={ctx} remote="purchase" title="퍼널(F3)" style={{ gridColumn: 'span 2' }}>
-              <FunnelWidget data={F.FUNNEL} detailHref={GRAFANA} freshness={v.isBack ? F.BACK_FRESHNESS : null} style={{ gridColumn: 'span 2' }} />
+              <FunnelWidget data={F.FUNNEL} pending={ctx.live} detailHref={GRAFANA} freshness={v.isBack ? F.BACK_FRESHNESS : null} style={{ gridColumn: 'span 2' }} />
             </WidgetSlot>
             {ctx.live ? (
               <RemoteWidget remote="queue" name="queue-admission-rate" title="입장 비율·빈자리" />
@@ -1603,7 +1603,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
               </div>
             </section>
             <WidgetSlot ctx={ctx} remote="queue" title="대기 순서">
-              <QueueOrderWidget data={F.ORDER} detailHref={GRAFANA} freshness={v.isBack ? F.BACK_FRESHNESS : null} />
+              <QueueOrderWidget data={F.ORDER} pending={ctx.live} detailHref={GRAFANA} freshness={v.isBack ? F.BACK_FRESHNESS : null} />
             </WidgetSlot>
             <section className="widget" role="region" aria-labelledby="w-lsat">
               <div className="widget-head">

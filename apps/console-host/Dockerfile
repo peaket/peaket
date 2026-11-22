@@ -9,7 +9,6 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/api-client/package.json packages/api-client/
 COPY packages/config/package.json packages/config/
 COPY packages/console-contract/package.json packages/console-contract/
-COPY packages/console-contract/package.json packages/console-contract/
 COPY packages/ds/package.json packages/ds/
 COPY packages/seatmap/package.json packages/seatmap/
 COPY apps/widgets/purchase/package.json apps/widgets/purchase/
