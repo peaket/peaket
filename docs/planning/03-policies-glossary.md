@@ -852,8 +852,8 @@ stateDiagram-v2
 | T9 | Confirmed | Scheduled | 지급 묶음 2인 승인 뒤 결제사 요청 |
 | T10 | Scheduled | Held | 지급 전 보류 사유나 다시 계산할 사유(토스페이먼츠는 예약 취소, 포트원은 실행에서 뺌) |
 | T11 | Scheduled | Paid | 모든 지급 건 완료 |
-| T12 | Scheduled | Failed | 지급 건 실패(은행 사정) |
-| T13 | Failed | Scheduled | 계좌 확인 뒤 새 지급 건 요청 |
+| T12 | Scheduled | Failed | 지급 건 실패(은행 사정). 단건 조회로 확인한 실패만 반영하고, 같은 트랜잭션에 `PAYOUT_FAILED`를 쓴다(추천 적용 2026-11-23, ADR-0369 결정 6) |
+| T13 | Failed | Scheduled | 새 순번의 지급 건이 결제사에 접수됨. 계좌 문제는 계좌 확인 뒤 사람이, 점검(일시 오류)은 다음 은행 영업일로 자동으로(2번까지), 한도·KYC는 셀러 APPROVED 확인 뒤 자동으로 한 번 요청한다. 금액·셀러는 처음 지급 건과 같다(docs/features/settlement.md §12, 추천 적용 2026-11-23, ADR-0369 결정 8) |
 | T14 | Notified | Calculated | 다시 계산(회차 취소·연기 환급 또는 승인된 수기 판단, 판본 +1) |
 | T15 | Disputed | Calculated | 같은 사유로 다시 계산(이의는 새 판에 다시 낸다) |
 | T16 | Confirmed | Calculated | 같은 사유로 다시 계산 |
