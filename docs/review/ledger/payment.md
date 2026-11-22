@@ -224,7 +224,7 @@
 
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
-| v5.0.0-2.1.1 | — | L1 | 데이터 항목이 기대 구조에 맞는지 확인하는 입력 검증 규칙을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test/auto-assign.test.ts, services/purchase-svc/test/end-purchase-session.test.ts 외 4곳 |
+| v5.0.0-2.1.1 | — | L1 | 데이터 항목이 기대 구조에 맞는지 확인하는 입력 검증 규칙을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/f021-sale-pause-control.int.test.ts, services/purchase-svc/test/auto-assign.test.ts… |
 | v5.0.0-2.1.2 | — | L2 | 여러 데이터 항목을 함께 볼 때의 논리적·문맥적 일관성을 검증하는 방법을 문서에 정의한다. | 자동 시험 | B | 시험: services/purchase-svc/test/seat-layout.test.ts |
 | v5.0.0-2.1.3 | — | L2 | 사용자별·시스템 전체의 업무 로직 한도와 검증 기대값을 문서화한다. | 다른 단계 | B | 결제 공통 후속 · 결제 공통 경로·게이트웨이의 기존 시험이 맡는다. BAT-050은 ticket-svc 발권·취소·월렛만 본다. |
 | v5.0.0-2.2.1 | — | L1 | 입력이 업무·기능 기대를 만족하는지 허용 목록(값·패턴·범위)이나 미리 정한 규칙의 기대 구조·논리 한도로 검증하고, L1은 업무·보안 결정에 쓰는 입력에… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/fan-notify-http.test.ts 외 69곳 |
@@ -294,7 +294,7 @@
 | v5.0.0-15.3.2 | — | L2 | 백엔드가 외부 URL을 부를 때 의도하지 않은 리디렉션을 따라가지 않는다. | 자동 시험 | B | 시험: services/payment-svc/test/portone-gateway.test.ts, services/payment-svc/test/toss-gateway.test.ts |
 | v5.0.0-15.3.3 | — | L2 | 컨트롤러·액션마다 허용 필드를 제한해 대량 할당 공격을 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test/accept-http.test.ts, services/purchase-svc/test/http.test.ts |
 | v5.0.0-15.3.4 | — | L2 | 모든 프록시·미들웨어가 사용자의 원래 IP를 최종 사용자가 조작할 수 없는 신뢰 필드로 넘기고, 애플리케이션·웹 서버는 그 값을 로그와 레이트 리밋 같은 보안… | 다른 단계 | B | 결제 공통 후속 · 배포·로깅·공급망 공통 통제가 맡는다. BAT-050 범위 밖이다. |
-| v5.0.0-15.3.5 | — | L2 | 변수 타입을 확인하고 엄격한 동등·비교 연산을 써서 타입 혼동을 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts |
+| v5.0.0-15.3.5 | — | L2 | 변수 타입을 확인하고 엄격한 동등·비교 연산을 써서 타입 혼동을 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/f021-sale-pause-control.int.test.ts, services/purchase-svc/test/hold-seats.test.ts 외… |
 | v5.0.0-15.3.6 | — | L2 | 프로토타입 오염을 막도록 JavaScript를 작성한다(객체 리터럴 대신 `Set`·`Map` 등). | 자동 시험 | B | 시험: services/payment-svc/test/portone-gateway.test.ts, services/purchase-svc/test/http.test.ts |
 | v5.0.0-15.3.7 | — | L2 | HTTP 파라미터 오염 공격을 막는다. | 자동 시험 | B | 시험: services/purchase-svc/test/read-seat-snapshot.test.ts, services/purchase-svc/test/snapshot-http.test.ts |
 | v5.0.0-16.2.1 | — | L2 | 로그 항목에 언제, 어디서, 누가, 무엇을 같은 조사용 메타데이터를 넣는다. | 다른 단계 | B | 결제 공통 후속 · 배포·로깅·공급망 공통 통제가 맡는다. BAT-050 범위 밖이다. |
