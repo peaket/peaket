@@ -1,6 +1,6 @@
 # ADR-0365: 제어 gRPC `ApplyControl`의 첫 전면 구현 — 판 번호 원장, 받는 파드 찾기와 ack, 받는 쪽 칸 이름, 판매 일시정지 중 유휴 시계, 설정형 명령의 적용 확인, 사전 모의 센 값(2026-11-23)
 
-- **상태**: 채택(추천 적용, 2026-11-23, BUILD_ORDER F-02-1 OPS-300 계획). [ADR-0102](0102-control-plane-direct-grpc-dedicated-pool-ops-db-audit-chain-worker-break-glass.md)(제어 전용 gRPC)·[ADR-0103](0103-control-as-state-startup-sync-broadcast-topics-compacted-settings.md)(제어는 상태, 판 번호, ack의 뜻)·[ADR-0143](0143-settings-commands-pg-switch-over-grpc-applied-version-outbox.md)(설정형 명령의 적용 확인)·[ADR-0340](0340-ops-command-lifecycle-dry-run-expiry-revert-actor-refs.md) 결정 11(사전 모의 센 값은 받는 쪽이 준다)이 정한 방향은 그대로 두고, 정본에 값이 없어 구현이 정해야 하는 세부만 정한다. 값마다 [가정]이고 측정·운영 뒤 바꿀 수 있다.
+- **상태**: 채택(추천 적용, 2026-11-23, BUILD_ORDER F-02-1 OPS-300 계획). [ADR-0102](0102-control-plane-direct-grpc-dedicated-pool-ops-db-audit-chain-worker-break-glass.md)(제어 전용 gRPC)·[ADR-0103](0103-control-as-state-startup-sync-broadcast-topics-compacted-settings.md)(제어는 상태, 판 번호, ack의 뜻)·[ADR-0143](0143-settings-commands-pg-switch-over-grpc-applied-version-outbox.md)(설정형 명령의 적용 확인)·[ADR-0340](0340-ops-command-lifecycle-dry-run-expiry-revert-actor-refs.md) 결정 11(사전 모의 센 값은 받는 쪽이 준다)이 정한 방향은 그대로 두고, 정본에 값이 없어 구현이 정해야 하는 세부만 정한다. 값마다 [가정]이고 측정·운영 뒤 바꿀 수 있다. 구현 몫: 결정 1~8은 F-02-1, 결정 9~11은 F-02-5가 구현한다(감독 결정 2026-11-23, 크기 5일 어림으로 나눔).
 - **관련**: [docs/features/control-tower.md](../features/control-tower.md) §5 '제어 상태'·'설정형 명령의 적용 확인', §14 C-T6·C-T50·C-T51·C-T54, [docs/features/queue-admission.md](../features/queue-admission.md) §5(리더 상태·펜싱), [docs/features/seat-hold.md](../features/seat-hold.md) §2 '구매 세션 종료와 정리', [docs/data.md](../data.md) §3 `q:{event:E}:ctl`·`q:{admission}:ctl`·`q:{event:E}:notice`·`s:{event:E}:ctl`, docs/planning/03 §2.2 T11, `docs/api/proto/peaket/control/v1/control.proto`, openapi `CommandState.delivery`, [ADR-0056](0056-admission-leader-fencing-and-admission-person-recheck.md), [ADR-0073](0073-third-consistency-audit-delegated-decisions.md) 결정 17, [ADR-0123](0123-sale-review-suspended-takedown-resume-or-cancel.md), [ADR-0226](0226-aimd-safety-limits-and-control-input-first-implementation.md) 결정 7
 - **관련 ID**: OPS-300, C-T6 ①, C-T50, C-T51, C-T54, Q-T30, ASVS v5.0.0-1.4.2·2.1.1·15.1.3·15.3.5
 
@@ -47,15 +47,15 @@
    리더는 `q:{admission}:ctl`의 `allPaused`가 `1`이면 모든 회차의 serving 전진을 0으로 둔다(회차 `paused`와 같다).
 7. **purchase-svc 시작·다시 맞춤.** `sale_control`을 플랫폼 시작 작업의 제어 상태(`ControlStateSource`)로 넘겨, 읽지 못하면 준비 상태가 되지 않는다. 2초마다 다시 읽어 파드 메모리(결제 시도·결제 접수의 정지 확인)를 맞추고, 정지가 걸린 행이 있는 회차(전체 정지면 `s:ctl:events`의 모든 회차)의 `s:{event:E}:ctl`을 원본대로 다시 쓴다(C-T50 '지워도 2초 안에 다시'). 사본 쓰기는 판이 칸보다 클 때만이다.
 8. **판매 일시정지 중 유휴 시계(PRF-138).** `SessionSweeper`는 그 회차(또는 전체)가 일시정지인 동안 유휴 시한으로 세션을 끝내지 않고 다음 볼 시각만 미룬다. 정지가 풀린 뒤 처음 볼 때, 유휴 시한이 '풀린 시각 + 5분 [가정]'보다 이른 세션은 유휴 시한을 그 값으로 다시 쓴다(정지 동안 쓴 시간을 돌려준다). 최대 체류는 그대로 센다(정본이 적은 예외는 유휴뿐이다). 정지 여부는 결정 7의 파드 메모리 상태로 본다.
-9. **설정형 명령 내기.** 명령 5·7(purchase-svc 공지)·8·9는 명령 12처럼 `ACKED` 상태 쓰기와 같은 트랜잭션에 `publishSetting`으로 설정 사건 하나를 쓴다(ADR-0349 결정 5, 값 꼴은 asyncapi `SettingChanged`). 명령 8의 만료(30분)는 정비 바퀴가 `AUTO_EXPIRED`와 같은 트랜잭션에 기본값(`INFO`)의 새 사건을 쓴다. 명령 9를 되돌리면 `enabled: true`의 새 사건이다.
-10. **설정형 명령의 적용 확인.** `ACKED`인 설정형 명령(5·7 purchase-svc·8·9·12)의 `delivery`는 `kind: APPLY_CHECK`다. 상태는 차례로 다음과 같다.
+9. **설정형 명령 내기(F-02-5가 구현).** 명령 5·7(purchase-svc 공지)·8·9는 명령 12처럼 `ACKED` 상태 쓰기와 같은 트랜잭션에 `publishSetting`으로 설정 사건 하나를 쓴다(ADR-0349 결정 5, 값 꼴은 asyncapi `SettingChanged`). 명령 8의 만료(30분)는 정비 바퀴가 `AUTO_EXPIRED`와 같은 트랜잭션에 기본값(`INFO`)의 새 사건을 쓴다. 명령 9를 되돌리면 `enabled: true`의 새 사건이다.
+10. **설정형 명령의 적용 확인(F-02-5가 구현).** `ACKED`인 설정형 명령(5·7 purchase-svc·8·9·12)의 `delivery`는 `kind: APPLY_CHECK`다. 상태는 차례로 다음과 같다.
     - `OUTBOX_WAITING`: 그 명령의 Outbox 행이 5초 넘게 나가지 않았다(ADR-0143 결정 4).
     - `CHECKING`: 나간 뒤 30초까지. 정비 바퀴가 5초 [가정]마다 본다.
     - `CONFIRMED`: 받는 서비스마다 Prometheus `up{service="<서비스>"} == 1`인 파드가 모두 `control_settings_applied_version{service="<서비스>", key="<설정 키>"}` ≥ 그 판(`occurredAt` 밀리초)이다.
     - `UNCONFIRMED`: 30초에 못 미친 파드가 있다. 파드 이름과 그 파드의 판을 `unackedTargets`에 싣고 SEV3 ops 경보 `settings-apply-unconfirmed`(명령마다 하나)를 연다. 그 뒤 10분 동안 1분마다 다시 보고, 모두 맞으면 `CONFIRMED`로 바꾸고 경보를 닫는다.
     - `UNKNOWN`: Prometheus에 닿지 못했다(2초 [가정] 시간 초과). 다음 바퀴에 다시 본다.
     - 받는 서비스: `LOG_LEVEL:<서비스>`는 그 서비스, `FEATURE_FLAG:reviews`는 core-svc, `PG_ASSIGNMENT`는 payment-svc, `BOT_LEVEL`은 trust-svc, purchase-svc 공지(`LOBBY_BANNER`)는 purchase-svc다 [가정]. 표에 없는 설정은 `UNKNOWN`이다. 주소는 `PEAKET_PROMETHEUS_URL`이고 운영에서 없으면 ops-svc 시작이 실패한다.
-11. **사전 모의 센 값 `PreviewControl`.** `ControlReceiver`에 읽기 전용 `PreviewControl(scope, kind, keys) → counts[{key, value, source, measured_at}], unavailable[{key, reason}], pod_name`을 더한다. 아무것도 쓰지 않는다. ops-svc는 키마다 정한 받는 쪽 하나(admission-ctrl은 리더, purchase-svc·queue-svc는 아무 파드 하나)를 데드라인 1초로 부르고, 실패하면 그 키를 `unavailable`에 적는다(0으로 적지 않는다).
+11. **사전 모의 센 값 `PreviewControl`(F-02-5가 구현).** `ControlReceiver`에 읽기 전용 `PreviewControl(scope, kind, keys) → counts[{key, value, source, measured_at}], unavailable[{key, reason}], pod_name`을 더한다. 아무것도 쓰지 않는다. ops-svc는 키마다 정한 받는 쪽 하나(admission-ctrl은 리더, purchase-svc·queue-svc는 아무 파드 하나)를 데드라인 1초로 부르고, 실패하면 그 키를 `unavailable`에 적는다(0으로 적지 않는다).
 
     | 키(ADR-0340 `DRY_RUN_KEYS`) | 받는 쪽 | 센 값 |
     | --- | --- | --- |
@@ -90,4 +90,4 @@
 
 ## 확인
 
-- F-02-1 기록 커밋에서 시험 이름(결정 12)과 장부 항목을 대조하고 이 절에 결과를 적는다.
+- F-02-1·F-02-5 기록 커밋에서 시험 이름(결정 12)과 장부 항목을 대조하고 이 절에 결과를 적는다.
