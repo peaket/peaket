@@ -613,9 +613,10 @@ describe('자동 제어 칸(Q-T42, ADR-0226)', () => {
     expect(await store.schedule(e)).toMatchObject({ pgKey: 'portone', pgTps: 50 });
     await cmd(keys.cfg(e), ['HSET', keys.cfg(e), 'pgTps', '-1']);
     expect((await store.schedule(e))?.pgTps).toBeUndefined();
-    expect(await store.platformControl()).toEqual({ autoStopped: false });
+    // F-02-1(ADR-0365 결정 6): 전체 범위 판매 일시정지 allPaused도 같은 키에서 함께 읽는다
+    expect(await store.platformControl()).toEqual({ autoStopped: false, allPaused: false });
     await cmd(keys.platformCtl(), ['HSET', keys.platformCtl(), 'autoStopped', '1']);
-    expect(await store.platformControl()).toEqual({ autoStopped: true });
+    expect(await store.platformControl()).toEqual({ autoStopped: true, allPaused: false });
     await cmd(keys.platformCtl(), ['HDEL', keys.platformCtl(), 'autoStopped']);
   });
 });
