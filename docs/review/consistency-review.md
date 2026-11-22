@@ -843,6 +843,7 @@
 | R-747 | 검색 정답률 보고서 이름이 ASVS 요약 단계 찾기 꼴과 겹쳐 요약 표가 빠졌다 | services/core-svc/test/search-golden.test.ts, .gitignore, 계획 W12-golden-report | 이름을 search-golden-report.json으로·.gitignore 한 줄 | 고침, 낮음 셋은 정리 목록 |
 | R-750 | 검색 SR-T13 ① P12 시험이 후보 줄마다 이름 비교 값을 새로 만들어 붐비는 CI에서 5초 시간 한도로 흔들렸다 | services/core-svc/test/search-bat166-page.test.ts, 계획 W12-sr13 | 운영 조립과 같은 keysOf를 넘기고 끼어듦 단언 ③을 더함 | 고침, 리뷰 낮음 2·검증 M1b는 정리 목록 |
 | R-752 | core-svc 멱등 기록 표에 행 보안이 없어 세 역할이 모든 작업의 기록을 읽고 고칠 수 있었다 | services/core-svc/migrations/0041_idempotency_record_role_security.sql·journal, shop 재생 대조 6파일, test-int/idempotency-rls·idempotency-migration·shop-replay, test/shop-replay-in-tx, ADR-0337 | 역할·작업별 RLS 정책 10, 칸 권한, 재생 대조·404 | 해결. V8·V5 표본 재검사는 Docker 차례가 없어 다음 검증·CI에 남김 |
+| R-751 | 감사 공개 체크포인트·게시 작업·검증 도구가 없었고, 운영 명령의 남은 몫(명령 12·감내 모드·사후 검토·ops_event·만료 차단 정리)이 비었으며, API 역할이 감사 서명 키 표·서명 칸을 쓸 수 있었다 | services/ops-svc/src/modules/audit, services/ops-svc/src/modules/commands, services/ops-svc/src/relay.ts, services/ops-svc/migrations/0023·0024, services/payment-svc(판정·설정 사건), services/core-svc(끝난 회차 경로), tools/audit-verify, ADR-0348·0349, docs/api·data·control-tower·secrets-and-keys | 머클·RFC 8785 JSON·KMS 서명·OTS·두 버킷·검증 묶음·도구, Outbox 릴레이·명령 12·사후 검토·ops_event·AUTO_EXPIRED, ops_app 권한 축소·게시 전 서명 재확인 | 끝. 구간 5(실제 KMS·S3·WAF·캘린더·CronJob·IAM)는 미검증, RV-04~11은 정리 목록 |
 
 ## 4. 숫자 일치표
 

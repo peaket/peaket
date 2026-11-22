@@ -314,3 +314,11 @@ BAT-197(BOT-080의 REST·화면 몫)이 2026-11-21에 끝났다. 아래 FR-049�
 
 - **코드 영역**: `services/core-svc/src/modules/catalog/**`·`services/purchase-svc/src/modules/inventory/**`다. `tools/ci/ledger.mjs`의 기능별 코드 영역은 넓히지 않았다. purchase-svc·queue-svc 파일이 다른 기능의 태그를 잘못 세는 것을 막으려는 것이고(BAT-615 RV-11), 이 묶음 시험 파일 목록은 위 S-T41 줄에 적었다.
 - **범위 밖**: 5분·대형 30분 간격, 휠체어석 수·위치 재계산, 결제사 지정 고정, 판매 중지·재개 2인 승인과 SCR-048 단추는 LCH-090, 지급대행 등록·예금주·KYC는 LCH-110, SCR-021 5단계·SCR-048 화면은 BAT-617이다. 이 항목은 장부 범위에 넣지 않는다.
+
+## BAT-360 기록(2026-11-22, R-751)
+
+BAT-360(OPS-280·OPS-290)을 2026-11-22에 끝냈다. 계획 5.1대로 셋만 구간 5까지 미검증이고 나머지 27항목은 자동 시험이다. `ledger.mjs --batch BAT-360 --require`가 1로 끝나는 까닭은 이 셋뿐이고, `--allow-unverified`는 0이다.
+
+- **C-T38 ②**: 실제 OpenTimestamps 캘린더로 찍고 몇 시간 뒤 비트코인 완료 증명으로 바꾸는 것, 실제 KMS·Object Lock·출시 주소는 구간 5(ADR-0332). 통합 시험은 가짜 캘린더·moto·local P-256 서명기로 본다.
+- **C-T61 ⑦**: 작업이 마지막으로 성공한 시각(kube-state-metrics `kube_cronjob_status_last_successful_time`)이 늦은 SEV2 경보·kind 클러스터·경보 규칙은 구간 5.
+- **C-T61 ⑧**: 작업 역할이 IP 집합을 읽고 바꾸는 권한이 Terraform 정책 검사·IAM 정책 검사에 드는지, AWS 실물 검사는 구간 5.
