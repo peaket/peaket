@@ -164,6 +164,15 @@
 - **리뷰 RV-01(낮음)**: `transfer-pending`의 표준 제목이 취소 맥락('양도 요청을 철회한 뒤 취소할 수 있습니다')이라 새 양도 요청을 만들려는 팬에게 어색하다. CI·시험을 막지 않으며 후속 묶음에서 type을 나누거나 중립 제목으로 바꾼다.
 - **제목 문구 변경(의도한 깨짐, 낮음)**: ticket-svc 양도·돌려주기 오류 여섯의 `title`이 표준 제목으로 바뀌고, 둘은 사유가 `detail`로 내려간다. 화면은 type으로 문구를 고르므로(`apps/web` ticket-cancel 매핑 확인) 제목을 그대로 쓰는 소비자는 없다.
 
+## 기록
+
+- R-772. `develop` `b918960c6`에서 CI 검사 둘이 실패하던 것을 고쳤다. ⑴ PRF192가 ticket-svc 양도·돌려주기 오류 여덟(`recipient-not-found` 404, `transfer-closed`·`reoffer-not-allowed`·`ticket-ended`·`transfer-expired`·`transfer-not-offered`·`payer-holds`·`entry-recorded` 409)을 `x-peaket-problem-types`에서 찾지 못했다. ⑵ demo-images DS-04가 경로 붙은 `PEAKET_STAFF_INVITATION_URL`을 출처가 아니라 글자까지 같은 값으로 견주어 실패했다.
+  - ⑴ openapi 목록에 여덟 줄을 코드의 status·title 그대로 더하고, `missing` 뒤에 드러난 제목 불일치 여섯(`dependency-unavailable`·`entry-started`·`invalid-body`·`reauth-unavailable`·`transfer-locked`·`transfer-pending`)을 ticket-svc 쪽에서 목록의 표준 제목으로 맞췄다. `transfer-locked`·`transfer-pending`의 구체 사유는 `detail`로 내렸다. 새 type은 만들지 않았다.
+  - ⑵ DS-04를 `new URL(value).origin` 비교로 바꿨다. 포트 검사(`:18\d{3}`)와 `svc.cluster.local` 예외는 그대로 두고, 다른 호스트는 여전히 거절한다.
+  - 생성물: contracts gen은 바뀐 것 없음, api-client `problem-types.ts` 16줄(union·표), 게이트웨이 라우트 다섯 파일의 계약 지문 한 줄씩.
+  - 게이트: PRF192 2/2, demo 두 파일 30/30, `gateway-routes --check` 0, D-T42 41/41, contracts 48/48, api-client 116/116, ticket-svc 235/235, typecheck 43 tasks, lint 0, doc-check 오류 0·경고 4, roles-check·records --check 통과, 틀린 구현 표본 2/2.
+  - 남은 위험: 리뷰 RV-01(`transfer-pending` 제목이 취소 맥락이라 새 양도 요청에 어색함, 후속), 계약 깨짐 검사는 소유자 승인 대기라 예외 목록을 건드리지 않았다. BUILD_ORDER 단계·wbs 상태 변화는 없다.
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
