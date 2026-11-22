@@ -135,6 +135,11 @@
 
 ## 기록
 
+- R-774. `develop` `e3f37f6e8`의 CI 실행 `45025768535`에서 `tools-check`의 mesh 생성 대조와 `node`의 core-svc 시작 시험 네 파일이 실패하던 것을 고쳤다. ⑴ BAT-011이 더한 ticket-svc `BlockTicketIssuance`를 `deploy/platform/mesh/port-allow.yaml`의 `TicketService.methods`에 purchase-svc 호출자로 더하고 `mesh-policies --write`로 `policies.yaml`을 다시 만들었다. ⑵ W12-core-notify(ADR-0351) 뒤로 `main.ts`가 요구하는 `PEAKET_NOTIFY_DATABASE_URL`을 core-svc 시작 시험 네 파일이 주지 않아, `core_notify` 그룹 역할의 로그인을 만드는 `ensureNotifyLogin`을 `test-int/roles.ts`에 더하고 네 곳에 연결했다. ⑶ 같은 실패에 가려져 있던 `sale-eligibility`의 정비 일 목록 단언에 BAT-455의 알림 정비 넷을 더했다.
+  - ⑵는 BAT-011이 만든 실패가 아니라 W12-core-notify가 합쳐진 뒤 `develop`의 비문서 커밋에서 먼저 나던 실패다(직전 실행 `45014387044`). 문서만 바꾼 커밋이 `node` 잡을 건너뛰어 초록불로 보였다.
+  - 게이트: `mesh-policies --check` 0, MG-10 14/14, core-svc typecheck 0, 영향 다섯 파일 100/100, lint 0, doc-check 오류 0·경고 4, roles-check 통과, 틀린 구현 표본 3/3.
+  - 남은 위험: 푸시 뒤 `develop` CI 재실행 결과는 아직 모른다. `node` 잡의 다른 잠복 실패가 더 있으면 그 묶음 담당에게 넘긴다. W12-core-notify RV-02(`webhook_delivery` INSERT 정책 true·`core_app` 권한 회수)는 이 묶음 밖이다. BUILD_ORDER 단계·wbs 상태 변화는 없다.
+
 ## 담당 표
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
