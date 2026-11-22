@@ -16,6 +16,9 @@ export interface SaleSuspensionCopyWrite {
 export const SALE_SUSPENSION_COPIES = Symbol('queue.SaleSuspensionCopies');
 /** 대기열 사본 쓰기. 실패하면 던진다(명령은 FAILED로 남고 재시도가 다시 쓴다) */
 export interface SaleSuspensionCopies {
-  /** q:{event:E}:notice와 q:{event:E}:ctl에 suspended('1'·'0')·suspRev·suspCmd를 쓴다. 다른 칸은 건드리지 않는다 */
-  write(c: SaleSuspensionCopyWrite): Promise<void>;
+  /**
+   * q:{event:E}:notice와 q:{event:E}:ctl에 suspended('1'·'0')·suspRev·suspCmd를 쓴다. 다른 칸은 건드리지 않는다.
+   * 판이 0보다 크면 suspRev보다 클 때만 쓰고 쓴 뒤(또는 지금)의 판을 돌려준다(F-02-1, ADR-0365 결정 1). 판을 돌려주지 않는 구현은 요청 판으로 본다
+   */
+  write(c: SaleSuspensionCopyWrite): Promise<number | void>;
 }
