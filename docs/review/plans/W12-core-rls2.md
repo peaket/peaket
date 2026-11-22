@@ -457,7 +457,25 @@ node tools/ci/roles-check.mjs --base origin/develop --head <합칠 가지>   # �
 
 ## 검증
 
-(검증 담당이 위 8의 표본 결과를 쓴다.)
+검증 담당(세션 `lane2-w12corerls2-verify`)이 2026-11-22에 구현 `6071fb124`·리뷰 `1ac60bb86` 위에서 검증했다. **막는 실패 없음.** 다만 이 PC의 Docker 잠금이 다른 갈래에 잡혀 있어 로컬 통합 시험은 돌리지 못했고, 최종 CI 실행 기록으로 대신했다(아래 2·3).
+
+1. **로컬 게이트**
+   - `corepack pnpm install --frozen-lockfile`: 통과.
+   - `pnpm exec turbo run build --filter=@peaket/core-svc^...`: 5개 작업 통과(platform·contracts·validation·search-normalize·core-svc).
+   - `pnpm --filter @peaket/core-svc typecheck`: 통과. `pnpm --filter @peaket/payment-svc typecheck`: 통과.
+   - `pnpm --filter @peaket/core-svc test`: 105파일 773개 가운데 770 통과·3 실패. 실패 셋은 모두 5초 시간 초과다(`test/fill-search-guard.test.ts` W7L2-S8, `test/internal-notify.test.ts` BAT-425 fake 모드, `test/notify-webhook.http.test.ts` N-T15). 셋을 따로 돌리면 3파일 10개 모두 통과한다(구현 담당이 본 2개와 같은 종류의 기존 흔들림, 바뀐 파일과 관계없다). 최종 CI의 core-svc 단위는 105파일 773개 모두 통과했다(아래 3).
+   - `pnpm lint`: 통과. `python -I -X utf8 tools/doc-check/check_all.py`: 오류 0·경고 4(기존 openapi 셋·mermaid 하나).
+   - `node tools/ci/ledger.mjs --scope AZ-T18 --require`: 통과(항목 8, 자동 시험 8, 빈칸·ID만 0).
+   - `node tools/ci/ledger.mjs --batch W12-core-rls2 --require`: 끝 코드 2 — `docs/BUILD_ORDER.md` 기능 묶음 표에 `W12-core-rls2` 행이 없다(계획 §9대로 이 묶음은 BUILD_ORDER 묶음이 아니라 `--batch`를 쓸 수 없다. `--scope AZ-T18`로 대신했다).
+   - `trace-check --ids AZ-T18`: **돌리지 못했다.** 새 통합 시험 보고서가 필요한데 Docker 잠금 때문에 통합 시험을 돌리지 못했다(아래 2). CI의 core-svc 통합 단계에서 `webhook-merch-grants.int` 18개가 모두 통과한 것이 같은 증거다(아래 3). 잠금이 빈 뒤 `PEAKET_TEST_REPORT=test-report-int.json pnpm --filter @peaket/core-svc test:integration`으로 보고서를 만들면 `node tools/ci/trace-check.mjs --ids "AZ-T18, v5.0.0-8.2.3, v5.0.0-8.4.1" --report services/core-svc/test-report-int.json`을 바로 돌릴 수 있다.
+2. **Docker 잠금**: `bash D:/ticketpass-locks/lock.sh who docker`가 09:24:59~09:55:48에 `lane4-BAT-360`, 09:55:48부터 `lane3-W12-purchase-fixes`를 가리켰다. 지시대로 60초 넘게 기다렸고(09:25~09:26, 그 뒤에도 여러 번 확인), 남의 잠금을 지우거나 가져오지 않았다. 컨테이너는 하나도 만들지 않았고, 확인 시점에 `docker ps`에 `peaket` 컨테이너가 0개다(다른 갈래의 컨테이너 둘은 내 것이 아니므로 건드리지 않았다). 그래서 로컬 통합 시험 대신 아래 CI 기록을 쓴다.
+3. **최종 CI 기록**(구현 `6071fb124`, PR #59 `ci` 실행 `44952894440`, 2026-11-22 06:42~07:03 KST, `gh run view 44952894440 --log-failed`로 확인)
+   - core-svc 통합: 50파일 가운데 49 통과·1 건너뜀(`local-partner-stack.int`, 원래 건너뜀), 시험 503개 가운데 **502 통과·1 건너뜀·실패 0**. `webhook-merch-grants.int` **18/18**(AZ-T18 ①~⑦, ⑧가~카, `USAGE` 판정 ⑧차 포함), `shop-notify.int` 14/14, `shop-order.int` 23/23, `startup-db-role.int` 1/1. 회귀 `shop-cancel`·`shop-return`·`shop-expiry`·`shop-unclaimed`·`shop-refund-account`·`shop-attributes-check`·`shop-migration`·`promoter-contract`·`rls`·`webhook-lease`·`webhook-lease-concurrent` 모두 통과.
+   - payment-svc 통합: 27파일 27 통과, 시험 593개 가운데 591 통과·2 건너뜀. `merch-path-e2e.int` **4/4**(P-T57 ①②·V-T35 ①·P-T58 ①④⑤).
+   - core-svc 단위: 105파일 773개 통과. platform 18/18·identity-svc 32/32·queue-svc 21/21·trust-svc 14/14·admission-ctrl 5/5 통과, `pnpm lint`·typecheck·build 통과. `docs-check`·`lint-guard`·`contract-check`·`tools-check`·`security-scan` 넷 통과.
+   - 실패는 purchase-svc 둘뿐이다: `event-refund.int` GAT-110 P3(outbox insert), `purchase-migration.int` GAT080_0014 — 계획 '실패 확인'에 적힌 기존 실패이고 이 묶음 파일과 관계없다. 그 실패 때문에 그 뒤 realtime-gw·bundle·invariant-checker·web 단계는 돌지 않았고, `ci-summary`도 이 둘로 실패했다. core-svc·payment-svc의 통과와 AZ-T18 판정에는 영향이 없다.
+4. **틀린 구현 표본(계획 §8의 24개)**: **이번에 돌리지 못했다.** 표본마다 통합 시험이 필요한데 Docker 잠금이 계속 다른 갈래에 잡혀 있었다(위 2). 표본을 만들지 않았으므로 0042·시험 파일은 그대로이고 `git status`에 표본 변경이 없다. 다음 차례(감독 또는 잠금이 빈 검증)에서 M1~M24를 돌려 이 절을 채워야 한다. 대신 리뷰 절 1~8에서 0042의 식·칸·차례·판정을 정본과 하나씩 대조했다.
+5. **판정**: 로컬 정적 게이트와 최종 CI의 core-svc·payment-svc 통합이 모두 통과했고, AZ-T18 ①~⑧차·카가 0042 구현 뒤 통과한다(⑧차는 `MEMBER` 트리에서 단언 실패, `USAGE` 구현에서 통과). 막는 실패는 없다. 남은 검증 몫은 (가) 잠금이 빈 뒤 로컬 통합 보고서로 `trace-check`를 돌리는 것, (나) 24개 표본이다.
 
 ## 담당 표
 
@@ -468,6 +486,7 @@ node tools/ci/roles-check.mjs --base origin/develop --head <합칠 가지>   # �
 | impl | lane2-w12corerls2-impl | claude-opus-5-5 | 2026-11-22T05:14+09:00 | 2026-11-22T05:48+09:00 |
 | impl | lane2-w12corerls2-impl2 | claude-opus-5-5 | 2026-11-22T06:37+09:00 | 2026-11-22T06:41+09:00 |
 | review | lane2-w12corerls2-review | deepseek-v4.1-flash | 2026-11-22T09:31+09:00 | 2026-11-22T09:45+09:00 |
+| verify | lane2-w12corerls2-verify | deepseek-v4.1-flash | 2026-11-22T09:45+09:00 | 2026-11-22T10:10+09:00 |
 
 ## 기록
 
