@@ -628,3 +628,60 @@ describe('P-T43: 시험 행과 표', () => {
     expect(await trialOf(fresh)).toBeDefined();
   }, 30_000);
 });
+
+// C-T44 ②(F-02-2 OPS-310 계획 9절): 결제사 장애 뒤의 자동 회복은 PRF-202가 만든 동작이고, 이 묶음이 C-T44 ②의 앞 몫으로 끝까지 본다.
+// 값은 이 파일 머리의 줄인 값이다: 확인 호출 창 3분 → 3초, 시험 재개 첫 20건 → 3건. 승인 기한 10분은 정본 값 그대로 시계를 민다(docs/features/payment.md §2 '정지 판정자의 첫 구현').
+// 해제 명령(commander가 명령 6 해제를 내면 바로 열림)은 services/ops-svc/test-int/f022-pg-switch-e2e.int.test.ts가 실제 제어 gRPC로 본다.
+describe('C-T44 ② 결제사 장애 뒤 자동 회복', () => {
+  const APPROVAL_DEADLINE_MS = 10 * 60_000;
+
+  test('C-T44 ② 시뮬레이터를 승인 기한보다 길게 멈췄다 살리면 확인 호출 3분(줄인 값) 정상 뒤 시험 재개, 첫 20건(줄인 값)이 기준을 넘으면 모두 열린다', async () => {
+    const r = await rig();
+    // 시뮬레이터 멈춤: 승인·조회 모두 결제사 오류(확인 호출이 실패한다)
+    expect((await control('POST', '/sim/faults', { op: 'query', kind: 'pg-error', applied: false })).status).toBe(204);
+    expect((await control('POST', '/sim/faults', { op: 'confirm', kind: 'pg-error', applied: false })).status).toBe(204);
+    r.fake.reading = { openPods: 4, readyPods: 4, sampledAtMs: 0 };
+    await r.tick();
+    expect(await stateOf()).toMatchObject({ stage: 'PROBING', reason: 'PG_FAILURE', actor: 'SYSTEM' });
+    // 승인 기한보다 길게(11분) 멈춰 있는 동안 확인 호출이 실패하고 정지는 그대로다
+    r.fake.reading = { openPods: 0, readyPods: 4, sampledAtMs: 0 };
+    const stoppedFor = APPROVAL_DEADLINE_MS + 60_000;
+    for (let t = 0; t < stoppedFor; t += 30_000) {
+      await r.tick();
+      r.s.clock.advance(30_000);
+    }
+    expect((await stateOf())?.stage).toBe('PROBING');
+    expect(counter(await r.metrics(), 'payment_pg_probe_total{pg="SIMULATOR",outcome="fail"}')).toBeGreaterThanOrEqual(10);
+    // 살린다. 창(줄인 3초)이 차기 전에는 시험 재개로 가지 않는다
+    expect((await control('DELETE', '/sim/faults')).status).toBe(204);
+    const revivedAt = r.s.clock.now();
+    let trialAt: number | undefined;
+    for (let i = 0; i < 30 && trialAt === undefined; i += 1) {
+      await r.tick();
+      if ((await stateOf())?.stage === 'TRIAL') trialAt = r.s.clock.now();
+      else r.s.clock.advance(CONFIG.probeIntervalMs);
+    }
+    expect(trialAt, '살린 뒤 시험 재개로 가야 한다').not.toBeUndefined();
+    expect(trialAt! - revivedAt).toBeGreaterThanOrEqual(CONFIG.probeWindowMs - CONFIG.probeIntervalMs);
+    r.s.clock.advance(ENTRY_PAUSE_CACHE_TTL_MS);
+    // 첫 표본(줄인 3건)이 모두 결론(APPROVED)이면 연다
+    for (let i = 0; i < CONFIG.trialSampleSize; i += 1) {
+      await admitted(r);
+      await drive(r);
+    }
+    await r.tick();
+    expect(await stateOf()).toMatchObject({ stage: 'OPEN', actor: 'SYSTEM' });
+    r.circuits.shutdown();
+  }, 60_000);
+
+  test('C-T44 ② 시험 재개에서 다시 실패하면 정지로 돌아간다', async () => {
+    const r = await rig();
+    await toTrial(r);
+    expect((await control('POST', '/sim/faults', { op: 'confirm', kind: 'pg-error', applied: false })).status).toBe(204);
+    for (let i = 0; i < CONFIG.trialFailureLimit; i += 1) await admitted(r);
+    await drive(r);
+    await r.tick();
+    expect(await stateOf()).toMatchObject({ stage: 'PROBING', reason: 'PG_FAILURE', actor: 'SYSTEM', trial_started_at: null });
+    r.circuits.shutdown();
+  }, 30_000);
+});
