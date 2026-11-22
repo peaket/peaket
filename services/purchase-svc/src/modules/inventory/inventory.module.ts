@@ -46,6 +46,7 @@ import {
   type SeatSignals,
   type SeatStore,
   SWEEP_LEASES,
+  type SaleIdleClock,
   type SweepLeases,
 } from './domain/ports.js';
 import { HoldLifecycleController } from './inbound/hold-lifecycle.controller.js';
@@ -75,6 +76,8 @@ export interface AdmissionOptions {
   onSessionEnded?: EndPurchaseSessionDeps['onEnded'];
   /** 홀드 다시 읽기·해제·연장(BUILD_ORDER HOT-070). 있으면 그 경로를 열고 끝난 세션의 홀드를 푼다 */
   manageHolds?: ManageHolds;
+  /** 판매 일시정지 유휴 시계(sale-control 파드 메모리, ADR-0365 결정 8). 있으면 정리 반복이 정지 동안 유휴로 끝내지 않는다 */
+  salePauses?: SaleIdleClock;
 }
 
 export type InventoryModuleOptions = (
@@ -207,7 +210,17 @@ export class InventoryModule {
             {
               provide: SessionSweeper,
               useFactory: (store: RedisSeatStore, leases: SweepLeases, ending: EndPurchaseSession, clock: Clock, logger?: PlatformLogger) =>
-                new SessionSweeper({ store: o.admission!.store, index: o.admission!.index!, expiries: store, leases, ending, clock, podId: o.podId, ...(logger ? { logger: logger as never } : {}) }),
+                new SessionSweeper({
+                  store: o.admission!.store,
+                  index: o.admission!.index!,
+                  expiries: store,
+                  leases,
+                  ending,
+                  clock,
+                  podId: o.podId,
+                  ...(logger ? { logger: logger as never } : {}),
+                  ...(o.admission!.salePauses ? { pauses: o.admission!.salePauses } : {}),
+                }),
               inject: [SEAT_STORE, SWEEP_LEASES, EndPurchaseSession, CLOCK, optionalLoggerToken],
             },
           ]
