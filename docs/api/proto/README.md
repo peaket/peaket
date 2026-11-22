@@ -12,7 +12,7 @@ docs/api/proto/
   buf.yaml                               형식 검사(STANDARD)와 하위 호환 검사(FILE) 설정
   peaket/common/v1/common.proto          공통 값(원화 금액, 결제사)
   peaket/payment/v1/payment.proto        payment-svc: 결제창 준비·승인·결과 당기기·조회·취소, 새 결제 일시 정지 조회, 지급대행 판매자 등록, 지급 묶음 승인
-  peaket/ticket/v1/ticket.proto          ticket-svc: 발권, 예매 취소, 후기 작성 자격, 보유 티켓 확인, 스캐너 기기 관리, 계정 병합 사전 확인, 승인된 양도 회수, 기기 승인 때 기기 찾기, 부정 예매 양도 잠금(2026-10-31)
+  peaket/ticket/v1/ticket.proto          ticket-svc: 발권, 보상 발권 막기(2026-11-22), 예매 취소, 후기 작성 자격, 보유 티켓 확인, 스캐너 기기 관리, 계정 병합 사전 확인, 승인된 양도 회수, 기기 승인 때 기기 찾기, 부정 예매 양도 잠금(2026-10-31)
   peaket/identity/v1/identity.proto      identity-svc: 결제 직전 본인확인 재확인, 소셜 로그인 뒤 세션 생성과 로그아웃(소비자 웹 앱 서버), 병합을 막는 ops 건 알림, 스캐너 기기별 지금 세션 별명, 스캐너 세션 확인, 알림 받는 사람 묶음 조회, 관리 계정 세션 강제 종료, 추가 검증의 본인확인 재통과 확인, 관리 계정 지정 조회, 관리 계정 관리(목록·상세·초대·역할 변경·재초대·삭제·지정), 부정 예매 조사용 연결 값 묶음 조회(2026-10-31), 관리 경로의 역할·테넌트 판정(2026-10-31, ADR-0172)
   peaket/trust/v1/trust.proto            trust-svc: 위험 판정, 사람이 확인한 라벨 반영, 이의 심사용 판정 근거 읽기(허니팟 기록은 HTTP라 주석만)
   peaket/queue/v1/queue.proto            queue-svc: 대기 중 격리, 봇 판정 이의 제기 내용 읽기와 결과 반영, 예매 제한 반영, 우선 구매 권리 사본(2026-10-31)
@@ -75,6 +75,7 @@ docs/api/proto/
 | ops-svc → payment-svc | `CheckEventPgAssignment` | 명령 12(결제사 지정)의 하위 결제사 사전 판정(미리보기·접수·실행 직전, 쓰지 않음, 데드라인 2초 [가정]). 지금 회차 지정과 결제사별 승인 상한도 준다(추천 적용 2026-11-22, BUILD_ORDER BAT-360) | 읽기라 없음 | docs/features/payment.md §2.2, ADR-0349 결정 3 | 없음(2026-11-22 계약에 처음 적음, ADR-0349) |
 | purchase-svc → payment-svc | `RequestCompensationTransfer` | 주최 측 귀책 배상금 송금 요청(`CompensationTransferService`). 팬이 배상 계좌를 넣으면 purchase-svc가 부른다. 같은 서비스의 `GetCompensationTransfer`는 부르는 쪽이 없다(아무도 부르지 못함). ops-svc는 송금을 부르지 않는다(2026-11-22 W12-mesh로 이 표에 옮김) | `compensation_id` | ADR-0317 결정 1·3, docs/features/transfer-refund.md §5 '배상 계좌 입력' | 있음 |
 | purchase-svc → ticket-svc | `IssueTickets` | 발권(승인 뒤 실패하면 같은 주문 ID로 다시 보낸다, ADR-0106) | `order_id` | docs/features/payment.md §2·§3, docs/features/offline-gate.md §2 | 있음 |
+| purchase-svc → ticket-svc | `BlockTicketIssuance` | 보상 세 걸음의 발권 막기(주문 ID로 멱등, 이미 만든 티켓은 폐기, 막은 뒤의 `IssueTickets`는 `FAILED_PRECONDITION`) | `order_id` | docs/features/payment.md §3, ADR-0354 | 있음(2026-11-22) |
 | purchase-svc → ticket-svc | `CancelTickets` | 예매 취소 때 티켓 키 폐기와 상태 변경 | `cancellation_id` | docs/features/payment.md §4.1, docs/features/transfer-refund.md §3.1 | 있음 |
 | purchase-svc → ticket-svc | `OperatorCancelTickets` | 부정 예매 운영자 취소의 티켓 단계(보유자와 무관, 양도 요청 FRAUD_LOCK 철회, 기대 보유자와 다르면 건너뜀, 2026-11-05 ADR-0197) | (`approval_id`, `ticket_id`) | docs/features/transfer-refund.md §7.4 | 있음 |
 | purchase-svc → ticket-svc | `EventCancelTickets` | 회차 취소 일괄 환불의 티켓 단계(결제자·보유자·진행 중 양도·입장 상태와 무관, 이미 환급·무효인 표는 그대로, 추천 적용 2026-11-16, BUILD_ORDER GAT-110) | (`cancellation_id`, `ticket_id`) | docs/features/transfer-refund.md §5 '대상 선택과 보류 취소 전환' | 있음 |
