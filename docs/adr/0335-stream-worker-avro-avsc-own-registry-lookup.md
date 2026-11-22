@@ -1,6 +1,6 @@
 # ADR-0335: 스트림 작업자의 Avro 읽기는 `avsc`와 직접 짠 레지스트리 조회로 한다(2026-11-22)
 
-- **상태**: 채택(감독 승인 2026-11-22, BUILD_ORDER BAT-220 계획 `bat220-plan-3a8b52c3`의 '감독에게' 2 (가)). OPS-150을 구현하기 전에 정한 것이다(docs/architecture.md §8.6 4의 2). docs/streaming.md §2.1 표의 한 줄과 §2.6의 한 줄을 바꾼다(결정 4).
+- **상태**: 채택(감독 승인 2026-11-22, BUILD_ORDER BAT-220 계획 `bat220-plan-3a8b52c3`의 '감독에게' 2 (가)). OPS-150을 구현하기 전에 정한 것이다(docs/architecture.md §8.6 4의 2). docs/streaming.md §2.1 표의 한 줄과 §2.6의 한 줄을 바꾼다(결정 4). 2026-11-23 결정 1의 '싣는 하위 내보내기'를 생산자용 `@peaket/platform/avro`까지 넓혔다([ADR-0357](0357-producer-avro-encoder-schema-ids-startup-check-telemetry-topics.md) 결정 1).
 - **관련**: [ADR-0099](0099-drop-flink-typescript-stream-workers-read-time-aggregation.md) 결정 2(공용 소비 모듈), [ADR-0191](0191-trust-policy-exact-version-exceptions-seed-semver.md)(신뢰 증거가 약해진 판의 예외), docs/devops.md §4.4(의존성과 취약점), docs/api/avro/README.md §3(등록과 호환), docs/streaming.md §2.6
 - **관련 ID**: ST-T15, ST-T16, OPS-150
 
