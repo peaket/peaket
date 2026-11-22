@@ -129,7 +129,35 @@ Docker 시험은 `test-int/device-approval.int.test.ts`, `ticket-svc/test-int/sc
 
 ## 실패 확인
 
-(시험 담당이 채운다)
+시험 담당 `lane3-bat450a-test`(deepseek-v4.1-flash), 2026-11-22 12:05~12:08 KST. 기준 트리 `aa66c0d2`(계획 커밋)에서 구현 없이 시험만 더해 돌렸다. Docker 잠금은 `lane3-BAT-450A`를 12:07:38에 잡고 12:07:55에 놓았고, 시험 컨테이너가 남지 않았음을 `docker ps`로 확인했다(peaket 0).
+
+### 단위·HTTP(구현 전)
+
+| 파일 | 결과 | 실패한 시험(까닭) |
+| --- | --- | --- |
+| `services/identity-svc/test/device-approval.test.ts` | 17개 중 4 실패 | `C2-06 ①` 저장 반환이 `undefined`(지금은 `save`가 `void`) · `C2-06 ②` 저장 호출 1회(색인 충돌을 보지 않음) · `C2-07 ①` 첫 발급 뒤 레코드·색인이 남음 · `C2-07 ②` 둘째 폴링이 `expired_token`이 아니라 `slow_down` |
+| `services/identity-svc/test/scanner-authorization-http.test.ts` | 5개 중 2 실패 | `C2-09` forwarded-host를 위조하니 400(공개 출처를 보지 않음) · `C2-06 ③` 저장 실패가 200(409가 아님) |
+| `packages/platform/test/scanner-auth.test.ts` | 29개 중 1 실패 | `C2-09` forwarded-host를 위조하니 401(공개 출처를 보지 않음) |
+| `services/ticket-svc/test/scanner-gate-regression.test.ts` | 15개 통과 | `I-T25 ①·②`는 기존 동작에 ID와 감사 기록 단언을 더한 것이라 구현 전에도 통과한다(뒤 변이로 잡히는지 본다) |
+| `apps/scanner/test/live.test.ts` | 15개 통과 | `I-T23 ③`·`I-T24 ③`도 기존 동작에 ID만 더했다 |
+
+### 통합(구현 전, 실제 PostgreSQL 18·Valkey 8.1)
+
+`test-int/device-approval.int.test.ts` **14개 중 4 실패, 10 통과**.
+
+| 시험 | 결과(까닭) |
+| --- | --- |
+| `C2-06 ①` | 실패: `save`가 `undefined`를 돌려주고 색인이 덮어써짐 |
+| `C2-07 ①` | 실패: 첫 발급 뒤에도 `id:devauth`·`id:devcode`가 남음 |
+| `C2-07 ②` | 실패: 동시 폴링 둘 다 토큰을 받음 |
+| `I-T38 ④` | 실패: `DrizzleQueryError`의 `cause.code=23505`(`scanner_session_device_active_key`)가 그대로 올라옴. 500이 될 경로를 재현했고 `ScannerSessionConflict`가 아니다 |
+| `I-T23`·`I-T24`·`I-T37`·`I-T38 ①~③` | 통과: 기존 동작에 ID를 붙였거나 기존 동작을 그대로 본다 |
+
+### 판정
+
+- 새 동작(C2-06·C2-07·C2-09·같은 기기 동시 승인)은 구현 전 트리에서 **값 단언으로 실패**했다(가져오기·문법 오류 아님).
+- ID만 더한 시험은 구현 전에도 통과한다. 그 시험이 판정 기준을 실제로 잡는지는 `## 검증`의 틀린 구현 표본으로 본다.
+- I-T24의 파트너 콘솔 해제 경로는 BAT-450B 몫이라 이 시험은 "배정이 REVOKED가 된 뒤"부터 본다.
 
 ## 리뷰
 
@@ -143,4 +171,5 @@ Docker 시험은 `test-int/device-approval.int.test.ts`, `ticket-svc/test-int/sc
 
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
-| plan | lane3-bat450a-plan | deepseek-v4.1-flash | 2026-11-22T12:00:00+09:00 | 2026-11-22T12:20:00+09:00 |
+| plan | lane3-bat450a-plan | deepseek-v4.1-flash | 2026-11-22T12:00:00+09:00 | 2026-11-22T12:04:00+09:00 |
+| test | lane3-bat450a-test | deepseek-v4.1-flash | 2026-11-22T12:05:00+09:00 | 2026-11-22T12:08:00+09:00 |

@@ -5,7 +5,7 @@ import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { JoseTokenSigner, TokenKeyRing, MemoryDeviceAuthorizations, MemoryDeviceApprovalLimits } from '../src/modules/session/index.js';
-import type { ScannerDeviceLookupAnswer, ScannerDeviceRegistry } from '../src/modules/session/domain/ports.js';
+import type { DeviceAuthorizationStore, ScannerDeviceLookupAnswer, ScannerDeviceRegistry } from '../src/modules/session/domain/ports.js';
 import { HmacIdentityHashers } from '../src/modules/verification/index.js';
 import { fanKey, ISSUER, recordingSignals, testAgency, testDeviceRefs } from './support.js';
 
@@ -29,13 +29,10 @@ let svc: Awaited<ReturnType<typeof createService>>;
 let proofKey: Awaited<ReturnType<typeof generateKeyPair>>;
 let proofJwk: Record<string, unknown>;
 
-beforeAll(async () => {
+async function boot(store?: DeviceAuthorizationStore) {
   const fan = await fanKey();
   const keys = await TokenKeyRing.fromEnv({ PEAKET_ENV: 'ci', PEAKET_FAN_TOKEN_KEY: JSON.stringify(fan.privateJwk) });
-  const pair = await generateKeyPair('ES256', { extractable: true });
-  proofKey = pair;
-  proofJwk = (await exportJWK(pair.publicKey)) as Record<string, unknown>;
-  svc = await createService({
+  return createService({
     name: 'identity-svc',
     module: AppModule.register({
       memory: true,
@@ -45,7 +42,7 @@ beforeAll(async () => {
         deviceRefs: testDeviceRefs(),
         signals: recordingSignals(),
         scannerDevices: new FakeRegistry(),
-        deviceAuthorizations: new MemoryDeviceAuthorizations(() => clock.now()),
+        deviceAuthorizations: store ?? new MemoryDeviceAuthorizations(() => clock.now()),
         deviceApprovalLimits: new MemoryDeviceApprovalLimits(),
         scannerDpopReplay: new Replay(),
       },
@@ -54,6 +51,13 @@ beforeAll(async () => {
     env: { PEAKET_ENV: 'ci' },
     clock,
   });
+}
+
+beforeAll(async () => {
+  const pair = await generateKeyPair('ES256', { extractable: true });
+  proofKey = pair;
+  proofJwk = (await exportJWK(pair.publicKey)) as Record<string, unknown>;
+  svc = await boot();
 });
 afterAll(async () => {
   await svc?.close();
@@ -92,6 +96,60 @@ describe('device authorization HTTP [GAT-220]', () => {
     const noProof = await svc.http.inject({ method: 'POST', url: '/v1/scanner/device-authorizations', headers: baseHeaders(), payload: '{}' });
     expect(noProof.statusCode).toBe(400);
     expect(JSON.parse(noProof.payload)).toMatchObject({ type: 'https://peaket.example/problems/invalid-dpop-proof' });
+  });
+
+  test('C2-09 공개 출처가 있으면 forwarded-host를 위조해도 htu는 공개 출처로 견준다', async () => {
+    process.env.PEAKET_PUBLIC_ORIGIN = 'https://scanner-api.peaket.example';
+    try {
+      const forged = await svc.http.inject({
+        method: 'POST',
+        url: '/v1/scanner/device-authorizations',
+        headers: {
+          ...baseHeaders(),
+          'x-forwarded-host': 'evil.example',
+          dpop: await proof('POST', url('/v1/scanner/device-authorizations'), 'c2-09-ok'),
+        },
+        payload: '{}',
+      });
+      expect(forged.statusCode).toBe(200);
+      const wrong = await svc.http.inject({
+        method: 'POST',
+        url: '/v1/scanner/device-authorizations',
+        headers: {
+          ...baseHeaders(),
+          'x-forwarded-host': 'evil.example',
+          dpop: await proof('POST', 'https://evil.example/v1/scanner/device-authorizations', 'c2-09-bad'),
+        },
+        payload: '{}',
+      });
+      expect(wrong.statusCode).toBe(400);
+    } finally {
+      delete process.env.PEAKET_PUBLIC_ORIGIN;
+    }
+  });
+
+  test('C2-06 ③ 사용자 코드를 잡지 못하면 409 user-code-unavailable로 다시 받게 한다', async () => {
+    const failing = {
+      save: async () => false,
+      findByUserCode: async () => null,
+      get: async () => null,
+      approve: async () => false,
+      deny: async () => false,
+      notePoll: async () => ({ result: 'EXPIRED' }),
+    } as unknown as DeviceAuthorizationStore;
+    const other = await boot(failing);
+    try {
+      const r = await other.http.inject({
+        method: 'POST',
+        url: '/v1/scanner/device-authorizations',
+        headers: { ...baseHeaders(), dpop: await proof('POST', url('/v1/scanner/device-authorizations'), 'c2-06-409') },
+        payload: '{}',
+      });
+      expect(r.statusCode).toBe(409);
+      expect(JSON.parse(r.payload)).toMatchObject({ type: 'https://peaket.example/problems/user-code-unavailable' });
+    } finally {
+      await other.close();
+    }
   });
 
   test('returns authorization_pending before approval', async () => {

@@ -80,7 +80,7 @@ beforeEach(() => {
 });
 
 describe('R-622 C1-01 OVERRIDE는 현장 책임자 본인 세션만 받는다', () => {
-  test('gate_staff·대리 승인·기기 단독은 403이고 아무 기록·표시·변경도 남기지 않는다', async () => {
+  test('I-T25 ① gate_staff·대리 승인·기기 단독은 403이고 아무 기록·표시·변경도 남기지 않는다', async () => {
     const s = scan({ method: 'OVERRIDE', overrideNote: '휴대폰 액정 파손' });
     for (const over of [
       { role: 'gate_staff' as const, proxy: false },
@@ -99,7 +99,7 @@ describe('R-622 C1-01 OVERRIDE는 현장 책임자 본인 세션만 받는다', 
     expect((await store.changes({ eventId: EVENT, after: 0, limit: 10 })).changes).toEqual([]);
   });
 
-  test('gate_lead 본인의 OVERRIDE는 PASS로 저장하고 OVERRIDE_REVIEW 표시와 메모를 남긴다', async () => {
+  test('I-T25 ② gate_lead 본인의 OVERRIDE는 PASS로 저장하고 승인 계정을 감사 기록에 남긴다', async () => {
     const s = scan({ ticketId: T.b, method: 'OVERRIDE', reason: 'OVERRIDE_CAMERA', overrideNote: '카메라 고장, 신분증 확인' });
     const r = await upload([s], { role: 'gate_lead', proxy: false });
     expect(r.flags).toEqual([expect.objectContaining({ ticketId: T.b, kind: 'OVERRIDE_REVIEW', status: 'OPEN' })]);
@@ -109,6 +109,7 @@ describe('R-622 C1-01 OVERRIDE는 현장 책임자 본인 세션만 받는다', 
       reason: 'OVERRIDE_CAMERA',
       overrideNote: '카메라 고장, 신분증 확인',
       flag: 'OVERRIDE_REVIEW',
+      staffAccountId: ACCOUNT,
     });
     const page = await gate.listFlags({ eventIdRaw: EVENT, sessionEventId: EVENT, cursor: undefined, limit: 20 });
     expect(page.items).toEqual([expect.objectContaining({ ticketId: T.b, kind: 'OVERRIDE_REVIEW' })]);

@@ -7,7 +7,8 @@ import { MemoryStaffAssignmentStore } from '../src/modules/session/adapters/memo
 import { DeviceApprovals } from '../src/modules/session/application/device-approvals.js';
 import { PollScannerToken } from '../src/modules/session/application/poll-scanner-token.js';
 import { DeviceAuthorizationError, StartDeviceAuthorization } from '../src/modules/session/application/start-device-authorization.js';
-import type { ScannerDeviceLookupAnswer, ScannerDeviceRegistry, TokenSigner } from '../src/modules/session/domain/ports.js';
+import type { DeviceAuthorizationRecord } from '../src/modules/session/domain/device-approval.js';
+import type { DeviceAuthorizationStore, ScannerDeviceLookupAnswer, ScannerDeviceRegistry, TokenSigner } from '../src/modules/session/domain/ports.js';
 
 const NOW = Date.parse('2026-11-14T03:00:00.000Z');
 const HOUR = 3_600_000;
@@ -84,7 +85,7 @@ beforeEach(() => {
 });
 
 describe('기기 승인 코드 발급 [GAT-220, I-T22]', () => {
-  test('ACTIVE 기기만 코드를 받고, 기기당 시간당 10회로 제한한다', async () => {
+  test('I-T37 ① ACTIVE 기기만 코드를 받고, 기기당 시간당 10회로 제한한다', async () => {
     const w = world();
     const r = await w.start.run({ jkt: JKT });
     expect(r.userCode).toMatch(/^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/);
@@ -186,7 +187,7 @@ describe('기기 승인 화면·승인 [GAT-220, I-T22]', () => {
     await expect(w.poll.run({ deviceCode: expired.deviceCode, jkt: JKT })).rejects.toMatchObject({ code: 'expired_token' });
   });
 
-  test('다른 키 지문과 승인 뒤 폐기는 토큰을 주지 않는다', async () => {
+  test('I-T39 ③ 다른 키 지문과 승인 뒤 폐기는 토큰을 주지 않는다', async () => {
     const w = world();
     const s = await started(w);
     await expect(w.poll.run({ deviceCode: s.deviceCode, jkt: 'B'.repeat(43) })).rejects.toMatchObject({ code: 'expired_token' });
@@ -196,7 +197,7 @@ describe('기기 승인 화면·승인 [GAT-220, I-T22]', () => {
     await expect(w.poll.run({ deviceCode: s.deviceCode, jkt: JKT })).rejects.toMatchObject({ code: 'device_revoked' });
   });
 
-  test('승인 시도는 계정당 10분 5회로 제한한다', async () => {
+  test('I-T37 ② 승인 시도는 계정당 10분 5회로 제한한다', async () => {
     const w = world();
     const s = await started(w);
     for (let i = 0; i < 5; i++) {
@@ -230,7 +231,7 @@ describe('기기 승인 화면·승인 [GAT-220, I-T22]', () => {
     });
   });
 
-  test('기기 코드는 만료 시각과 같아도 만료이고, 배정은 유효 끝과 같아도 유효하다', async () => {
+  test('I-T23 ② 기기 코드는 만료 시각과 같아도 만료이고, 배정은 유효 끝과 같아도 유효하다', async () => {
     const w = world();
     const s = await started(w);
     const rec = w.store.byHash.get(s.hash)!;
@@ -242,7 +243,7 @@ describe('기기 승인 화면·승인 [GAT-220, I-T22]', () => {
     await expect(w.approvals.lookup({ userCode: s2.userCode, accountId: ACCOUNT })).resolves.toBeDefined();
   });
 
-  test('R-622 M5-08 근무 시작 전 배정은 승인(lookup·decide)에서 OUTSIDE_STAFF_HOURS이고 세션을 만들지 않는다', async () => {
+  test('I-T23 ① R-622 M5-08 근무 시작 전 배정은 승인(lookup·decide)에서 OUTSIDE_STAFF_HOURS이고 세션을 만들지 않는다', async () => {
     const w = world();
     const s = await started(w);
     w.assignments.assignments.set('a-1', { ...w.assignments.assignments.get('a-1')!, validFromMs: NOW + 1 });
@@ -257,5 +258,130 @@ describe('기기 승인 화면·승인 [GAT-220, I-T22]', () => {
     w.assignments.assignments.set('a-1', { ...w.assignments.assignments.get('a-1')!, validFromMs: NOW });
     await expect(w.approvals.decide({ userCode: s.userCode, accountId: ACCOUNT, sessionId: 'fan-session', decision: 'APPROVE' })).resolves.toBeUndefined();
     expect(w.assignments.sessions.get('ss-1')).toMatchObject({ assignmentId: 'a-1', terminatedAt: null });
+  });
+});
+
+/** save가 처음 한 번 거절되는 저장소. 사용자 코드 재시도가 저장 호출을 두 번 하는지 센다 */
+class RecordingSaveStore {
+  readonly saved: DeviceAuthorizationRecord[] = [];
+  async save(r: DeviceAuthorizationRecord): Promise<unknown> {
+    this.saved.push(r);
+    return this.saved.length > 1;
+  }
+  async findByUserCode(): Promise<null> {
+    return null;
+  }
+  async get(): Promise<null> {
+    return null;
+  }
+  async approve(): Promise<boolean> {
+    return false;
+  }
+  async deny(): Promise<boolean> {
+    return false;
+  }
+  async notePoll(): Promise<{ result: 'EXPIRED' }> {
+    return { result: 'EXPIRED' };
+  }
+}
+
+describe('C2-06 사용자 확인 코드 색인 원자성', () => {
+  test('C2-06 ① 같은 사용자 코드 색인은 두 번째 저장을 거절하고 첫 레코드·색인을 그대로 둔다', async () => {
+    const w = world();
+    const first = await w.start.run({ jkt: JKT });
+    const hashFirst = (await w.store.findByUserCode(first.userCode))!.deviceCodeHash;
+    const secondHash = 'b'.repeat(64);
+    const saved = await w.store.save({
+      deviceCodeHash: secondHash,
+      userCode: first.userCode,
+      deviceId: 'dev-2',
+      deviceName: '서문-01',
+      promoterId: P1,
+      jkt: JKT,
+      status: 'PENDING',
+      createdAtMs: NOW,
+      expiresAtMs: NOW + 300_000,
+      intervalSec: 5,
+    });
+    expect(saved).toBe(false);
+    expect((await w.store.findByUserCode(first.userCode))!.deviceCodeHash).toBe(hashFirst);
+    expect(await w.store.get(secondHash)).toBeNull();
+  });
+
+  test('C2-06 ② 사용자 코드가 한 번 겹치면 새 코드로 다시 저장한다', async () => {
+    const clock = fakeClock({ now: NOW });
+    const registry = new FakeRegistry();
+    const store = new RecordingSaveStore();
+    const limits = new MemoryDeviceApprovalLimits();
+    const start = new StartDeviceAuthorization(registry, store as unknown as DeviceAuthorizationStore, limits, clock);
+    const r = await start.run({ jkt: JKT });
+    expect(store.saved).toHaveLength(2);
+    expect(store.saved[1]!.userCode).toBe(r.userCode);
+  });
+});
+
+describe('C2-07 첫 토큰 발급 뒤 기기 코드 파기', () => {
+  test('C2-07 ① 첫 토큰 발급이 기기 코드와 색인을 지우고 두 번째 폴링은 expired_token이다', async () => {
+    const w = world();
+    const s = await started(w);
+    await w.approvals.decide({ userCode: s.userCode, accountId: ACCOUNT, sessionId: 'fan-session', decision: 'APPROVE' });
+    await w.poll.run({ deviceCode: s.deviceCode, jkt: JKT });
+    expect(w.store.byHash.has(s.hash)).toBe(false);
+    expect(w.store.byUserCode.has(s.userCode)).toBe(false);
+    await expect(w.poll.run({ deviceCode: s.deviceCode, jkt: JKT })).rejects.toMatchObject({ code: 'expired_token' });
+  });
+
+  test('C2-07 ② 승인 뒤 동시 폴링 두 개 중 하나만 토큰을 받는다', async () => {
+    const w = world();
+    const s = await started(w);
+    await w.approvals.decide({ userCode: s.userCode, accountId: ACCOUNT, sessionId: 'fan-session', decision: 'APPROVE' });
+    const results = await Promise.allSettled([
+      w.poll.run({ deviceCode: s.deviceCode, jkt: JKT }),
+      w.poll.run({ deviceCode: s.deviceCode, jkt: JKT }),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const lost = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    expect((lost.reason as { code?: string }).code).toBe('expired_token');
+  });
+});
+
+describe('I-T38 스캐너 세션 수와 교대', () => {
+  test('I-T38 ① 같은 계정으로 둘째 기기를 승인하면 첫 기기 세션이 끝난다', async () => {
+    const w = world();
+    const first = await started(w);
+    await w.approvals.decide({ userCode: first.userCode, accountId: ACCOUNT, sessionId: 'fan-session-1', decision: 'APPROVE', assignmentId: 'a-1' });
+    expect(w.assignments.sessions.get('ss-1')).toMatchObject({ deviceId: DEVICE, terminatedAt: null });
+
+    w.registry.answer = { ...w.registry.answer, deviceId: '0190f3a1-7c2e-7a00-8000-000000000009' };
+    const second = await started(w);
+    await w.approvals.decide({ userCode: second.userCode, accountId: ACCOUNT, sessionId: 'fan-session-2', decision: 'APPROVE', assignmentId: 'a-1' });
+    expect(w.assignments.sessions.get('ss-1')!.terminatedAt).toBe(NOW);
+    expect(w.assignments.sessions.get('ss-2')).toMatchObject({ deviceId: '0190f3a1-7c2e-7a00-8000-000000000009', terminatedAt: null });
+  });
+
+  test('I-T38 ② 같은 기기에서 다른 스태프가 승인하면 이전 스태프 세션이 끝난다(교대)', async () => {
+    const w = world();
+    w.assignments.accounts.set(OTHER, { verified: true, status: 'ACTIVE' });
+    w.assignments.assignments.set('a-2', {
+      id: 'a-2',
+      accountId: OTHER,
+      status: 'ASSIGNED',
+      eventId: EVENT,
+      role: 'gate_staff',
+      promoterId: P1,
+      invitedBy: ADMIN,
+      validFromMs: NOW - HOUR,
+      validUntilMs: NOW + 2 * HOUR,
+    });
+
+    const first = await started(w);
+    await w.approvals.decide({ userCode: first.userCode, accountId: ACCOUNT, sessionId: 'fan-session-1', decision: 'APPROVE', assignmentId: 'a-1' });
+    expect(w.assignments.sessions.get('ss-1')).toMatchObject({ deviceId: DEVICE, terminatedAt: null });
+
+    const second = await started(w);
+    await w.approvals.decide({ userCode: second.userCode, accountId: OTHER, sessionId: 'fan-session-2', decision: 'APPROVE', assignmentId: 'a-2' });
+    expect(w.assignments.sessions.get('ss-1')!.terminatedAt).toBe(NOW);
+    expect(w.assignments.sessions.get('ss-2')).toMatchObject({ deviceId: DEVICE, terminatedAt: null });
+    expect([...w.assignments.sessions.values()].filter((s) => s.terminatedAt === null)).toHaveLength(1);
   });
 });

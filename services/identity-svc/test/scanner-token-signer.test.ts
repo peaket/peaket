@@ -16,7 +16,7 @@ async function signer() {
 }
 
 describe('현장 스태프 토큰 [GAT-220]', () => {
-  test('cnf.jkt·회차·세션을 묶고 만료는 역할 유효 끝이다', async () => {
+  test('I-T39 ② cnf.jkt·회차·세션을 묶고 만료는 역할 유효 끝이다', async () => {
     const { signer: s, publicKey } = await signer();
     const jkt = 'A'.repeat(43);
     const expiresAtMs = NOW + 2 * 3_600_000;

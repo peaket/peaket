@@ -133,12 +133,12 @@ interface Booted {
   get(headers: Record<string, string>, url?: string): Promise<{ statusCode: number; headers: Record<string, unknown>; payload: string }>;
 }
 
-async function boot(module: unknown = ScannerModule, withScanner = true, mtls?: ScannerMtlsOptions): Promise<Booted> {
+async function boot(module: unknown = ScannerModule, withScanner = true, mtls?: ScannerMtlsOptions, publicOrigin?: string): Promise<Booted> {
   const clock = fakeClock();
   const devices = new FakeDevices();
   const sessions = new FakeSessions();
   const replay = new FakeReplay();
-  const scanner: ScannerAuthWiring = { devices, sessions, replay, ...(mtls ? { mtls } : {}) };
+  const scanner = { devices, sessions, replay, ...(mtls ? { mtls } : {}), ...(publicOrigin ? { publicOrigin } : {}) } as ScannerAuthWiring;
   const logs = collector();
   const svc = await createService({
     name: 'scanner-auth-svc',
@@ -256,6 +256,19 @@ describe('스캐너 기기 증명(GAT-170, O-T37)', () => {
     expect(query.statusCode).toBe(200);
   });
 
+  test('C2-09 공개 출처가 있으면 forwarded-host를 위조해도 htu는 공개 출처로 견준다', async () => {
+    const b = await boot(ScannerModule, true, undefined, 'https://scanner-api.peaket.example');
+    const key = await keyOf();
+    b.devices.byJkt.set(key.jkt, { deviceId: 'dev-1', status: 'ACTIVE', promoterId: 'prom-1' });
+    b.sessions.answers.set('sess-1/dev-1', { valid: true, role: 'gate_staff', eventId: 'ev-1' });
+    const forged = await b.get(headersOf(await proofOf(key), key.jkt, { 'x-forwarded-host': 'evil.example' }));
+    expect(forged.statusCode).toBe(200);
+    const wrong = await b.get(
+      headersOf(await proofOf(key, { htu: 'https://evil.example/v1/scanner-test/shift', jti: 'htu-forged' }), key.jkt, { 'x-forwarded-host': 'evil.example' }),
+    );
+    expect(wrong.statusCode).toBe(401);
+  });
+
   test('DPoP typ가 dpop+jwt가 아니거나 헤더 jwk에 개인키 d가 있으면 401이다', async () => {
     const b = await boot();
     const key = await keyOf();
@@ -285,7 +298,7 @@ describe('스캐너 기기 증명(GAT-170, O-T37)', () => {
     expect(old.statusCode).toBe(401);
   });
 
-  test('O-T37 ⑤ ath와 cnf.jkt가 다르면 401이다', async () => {
+  test('I-T39 ① O-T37 ⑤ ath와 cnf.jkt가 다르면 401이다', async () => {
     const b = await boot();
     const key = await keyOf();
     b.devices.byJkt.set(key.jkt, { deviceId: 'dev-1', status: 'ACTIVE', promoterId: 'prom-1' });

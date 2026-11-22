@@ -135,6 +135,20 @@ async function started() {
   return r;
 }
 
+/** 다른 연결이 scanner_session INSERT의 유일 인덱스를 기다릴 때까지(5초까지) */
+async function untilSessionInsertWait(): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const r = await database.pool.query(
+      `select count(*)::int as n from pg_stat_activity
+       where datname = current_database() and wait_event_type = 'Lock' and query ilike '%insert into "scanner_session"%'`,
+    );
+    if ((r.rows[0] as { n: number }).n > 0) return;
+    await new Promise((x) => setTimeout(x, 20));
+  }
+  throw new Error('scanner_session INSERT가 유일 인덱스를 기다리지 않았다');
+}
+
 describe('기기 승인 PostgreSQL·Valkey [GAT-220]', () => {
   test('0032를 적용·재적용해도 같고 promoter_id와 활성 세션 유일 인덱스가 있다', async () => {
     await migrateIdentity(pg.url);
@@ -174,7 +188,7 @@ describe('기기 승인 PostgreSQL·Valkey [GAT-220]', () => {
     }
   });
 
-  test('기기 코드는 5분·1회용이고 기기당 시간당 10회로 제한한다', async () => {
+  test('I-T37 ③ 기기 코드는 5분·1회용이고 기기당 시간당 10회로 제한한다', async () => {
     const r = await started();
     expect(r.userCode).toMatch(/^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/);
     const rec = await auths.findByUserCode(r.userCode);
@@ -244,7 +258,7 @@ describe('기기 승인 PostgreSQL·Valkey [GAT-220]', () => {
     registry.answer = { ...registry.answer, status: 'ACTIVE' };
   });
 
-  test('승인 시도는 계정당 10분 5회로 제한하고 거부·만료·slow_down을 구분한다', async () => {
+  test('I-T37 ④ 승인 시도는 계정당 10분 5회로 제한하고 거부·만료·slow_down을 구분한다', async () => {
     clock.advance(HOUR);
     const r = await started();
     await expect(poll.run({ deviceCode: r.deviceCode, jkt: JKT })).rejects.toMatchObject({ code: 'authorization_pending' });
@@ -259,6 +273,85 @@ describe('기기 승인 PostgreSQL·Valkey [GAT-220]', () => {
 
     clock.advance(5 * 60_000 + 1);
     await expect(poll.run({ deviceCode: expired.deviceCode, jkt: JKT })).rejects.toMatchObject({ code: 'expired_token' });
+  });
+
+  test('C2-06 ① 실제 Valkey에서 같은 사용자 코드 색인은 SET NX로 거절하고 첫 레코드를 지킨다', async () => {
+    const r = await started();
+    const firstHash = hashDeviceCode(r.deviceCode);
+    const secondHash = 'b'.repeat(64);
+    const saved = await auths.save({
+      deviceCodeHash: secondHash,
+      userCode: r.userCode,
+      deviceId: OTHER_DEVICE,
+      deviceName: '서문-01',
+      promoterId: P1,
+      jkt: JKT,
+      status: 'PENDING',
+      createdAtMs: clock.now(),
+      expiresAtMs: clock.now() + 5 * 60_000,
+      intervalSec: 5,
+    });
+    expect(saved).toBe(false);
+    expect((await auths.findByUserCode(r.userCode))!.deviceCodeHash).toBe(firstHash);
+    expect(await auths.get(secondHash)).toBeNull();
+  });
+
+  test('C2-07 ① 실제 Valkey에서 첫 토큰 발급이 기기 코드·색인을 지우고 두 번째 폴링은 expired_token이다', async () => {
+    clock.advance(HOUR);
+    const r = await started();
+    await approvals.decide({ userCode: r.userCode, accountId: ACCOUNT, sessionId: FAN_SESSION, decision: 'APPROVE', assignmentId: ASSIGN });
+    const token = await poll.run({ deviceCode: r.deviceCode, jkt: JKT });
+    expect(token.access_token).toBe(`staff-${NOW + 24 * HOUR}`);
+    expect(await auths.get(hashDeviceCode(r.deviceCode))).toBeNull();
+    expect(await auths.findByUserCode(r.userCode)).toBeNull();
+    await expect(poll.run({ deviceCode: r.deviceCode, jkt: JKT })).rejects.toMatchObject({ code: 'expired_token' });
+  });
+
+  test('C2-07 ② 실제 Valkey에서 승인 뒤 동시 폴링 두 개 중 하나만 토큰을 받는다', async () => {
+    clock.advance(HOUR);
+    const r = await started();
+    await approvals.decide({ userCode: r.userCode, accountId: ACCOUNT, sessionId: FAN_SESSION, decision: 'APPROVE', assignmentId: ASSIGN });
+    const results = await Promise.allSettled([
+      poll.run({ deviceCode: r.deviceCode, jkt: JKT }),
+      poll.run({ deviceCode: r.deviceCode, jkt: JKT }),
+    ]);
+    expect(results.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
+    const lost = results.find((x) => x.status === 'rejected') as PromiseRejectedResult;
+    expect((lost.reason as { code?: string }).code).toBe('expired_token');
+  });
+
+  test('I-T24 ① 실제 PostgreSQL에서 배정이 REVOKED로 해제되면 다음 확인부터 무효이고 16분 뒤에도 무효다', async () => {
+    clock.advance(HOUR);
+    const r = await started();
+    await approvals.decide({ userCode: r.userCode, accountId: ACCOUNT, sessionId: FAN_SESSION, decision: 'APPROVE', assignmentId: ASSIGN });
+    const session = (await database.pool.query('select id from scanner_session where staff_account_id = $1 and terminated_at is null', [ACCOUNT])).rows[0] as { id: string };
+    expect((await check.run({ scannerSessionId: session.id, deviceId: DEVICE })).valid).toBe(true);
+    await database.pool.query("update staff_assignment set status = 'REVOKED' where id = $1", [ASSIGN]);
+    expect((await check.run({ scannerSessionId: session.id, deviceId: DEVICE })).valid).toBe(false);
+    clock.advance(16 * 60_000);
+    expect((await check.run({ scannerSessionId: session.id, deviceId: DEVICE })).valid).toBe(false);
+  });
+
+  test('I-T38 ④ 같은 기기·다른 계정의 동시 승인은 500 없이 한 세션만 남기고 진 쪽은 ScannerSessionConflict다', async () => {
+    clock.advance(HOUR);
+    const r = await started();
+    const blocker = await database.pool.connect();
+    try {
+      await blocker.query('begin');
+      await blocker.query(
+        `insert into scanner_session (id, staff_assignment_id, staff_account_id, scanner_device_id, role, proxy, approved_at, expires_at)
+         values ($1, $2, $3, $4, 'gate_staff', false, $5, $6)`,
+        [randomUUID(), ASSIGN, ACCOUNT, DEVICE, new Date(clock.now()), new Date(clock.now() + HOUR)],
+      );
+      const pending = approvals.decide({ userCode: r.userCode, accountId: OTHER, sessionId: FAN_SESSION2, decision: 'APPROVE', assignmentId: OTHER_ASSIGN });
+      await untilSessionInsertWait();
+      await blocker.query('commit');
+      await expect(pending).rejects.toMatchObject({ name: 'ScannerSessionConflict' });
+    } finally {
+      blocker.release();
+    }
+    const active = await database.pool.query('select count(*)::int as n from scanner_session where scanner_device_id = $1 and terminated_at is null', [DEVICE]);
+    expect(active.rows[0].n).toBe(1);
   });
 
   test('기기 폐기 세션 종료는 scanner_session을 끝내고 DEVICE_REVOKED Outbox를 남긴다', async () => {

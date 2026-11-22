@@ -219,7 +219,7 @@ describe('근무 준비·배치·준비 보고 실제 PostgreSQL [GAT-170]', () 
     expect(pttl).toBeGreaterThan(0);
   });
 
-  test('기기 인증만으로 올린 스캔은 받고, staff_account_id는 비며 OUT_OF_SESSION 이상 표시가 붙는다', async () => {
+  test('I-T24 ② 기기 인증만으로 올린 스캔은 받고, staff_account_id는 비며 OUT_OF_SESSION 이상 표시가 붙는다', async () => {
     const d = await seededDevice('동문-23');
     await shiftStore.putPlacement({ eventId: EVENT, deviceId: d.deviceId, gateZone: '동문', mode: 'IN', setBy: ADMIN, atMs: NOW, expectedVersion: 0 });
     const path = '/v1/scanner/scans';

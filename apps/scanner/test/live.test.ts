@@ -100,7 +100,7 @@ test('라이브 401·기기 폐기·세션 종료는 재로그인으로 돌린�
   assert.equal(reloginRequired(503, 'scanner-auth-unavailable'), false);
 });
 
-test('DPoP 시계 보정과 세션 만료 타이머는 서버 시각·만료 경계를 쓴다(C1-07·C1-08)', () => {
+test('I-T23 ③ DPoP 시계 보정과 세션 만료 타이머는 서버 시각·만료 경계를 쓴다(C1-07·C1-08)', () => {
   assert.equal(serverClockOffsetMs(new Date(NOW + 4_000).toISOString(), NOW), 4_000);
   assert.equal(serverClockOffsetMs('깨진 시각', NOW), 0);
   assert.equal(sessionExpiryDelayMs(NOW + 10_000, NOW), 10_000);
@@ -145,7 +145,7 @@ test('변경분 페이지는 페이지 끝 번호를 다음 커서로 쓰고, �
   assert.equal(terminated.snapshot.lastSeq, 1);
 });
 
-test('SESSION_TERMINATED 변경분은 그 기기의 세션 종료만 골라 읽는다', () => {
+test('I-T24 ③ SESSION_TERMINATED 변경분은 그 기기의 세션 종료만 골라 읽는다', () => {
   const base = { lastSeq: 13, hasMore: false, versionVector: vector({ seq: 13 }) };
   const other = sessionTerminatedOf({ ...base, changes: [{ seq: 12, kind: 'SESSION_TERMINATED', payload: { v: 1, deviceId: 'other', reason: 'DEVICE_REVOKED' } }] }, 'mine');
   assert.equal(other, undefined);

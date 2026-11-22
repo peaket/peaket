@@ -52,6 +52,14 @@ describe('CheckScannerSession(GAT-170)', () => {
     expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(false);
   });
 
+  test('I-T24 ① 배정이 REVOKED로 해제되면 다음 서버 확인부터 무효이고 16분이 지나도 무효다', async () => {
+    const { check, store, clock } = world();
+    store.sessions.set('ss-1', { ...store.sessions.get('ss-1')!, assignmentStatus: 'REVOKED' });
+    expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(false);
+    clock.advance(16 * 60_000);
+    expect((await check.run({ scannerSessionId: 'ss-1', deviceId: 'dev-1' })).valid).toBe(false);
+  });
+
   test('배정이 ASSIGNED가 아니거나 역할 유효 시간 밖이면 유효하지 않다', async () => {
     const { check, store, clock } = world();
     store.sessions.set('ss-1', { ...store.sessions.get('ss-1')!, assignmentStatus: 'REVOKED' });
