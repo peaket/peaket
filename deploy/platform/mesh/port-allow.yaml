@@ -251,6 +251,7 @@ workloads:
           peaket.ticket.v1.TicketReclaimService: [ops-svc]
           peaket.ticket.v1.TicketService:
             methods:
+              BlockTicketIssuance: [purchase-svc]
               CancelTickets: [purchase-svc]
               CheckReviewEligibility: [core-svc]
               EventCancelTickets: [purchase-svc]

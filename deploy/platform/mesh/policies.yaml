@@ -1267,6 +1267,14 @@ spec:
       to:
         - operation:
             paths:
+              - /peaket.ticket.v1.TicketService/BlockTicketIssuance
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/purchase/sa/purchase-svc
+      to:
+        - operation:
+            paths:
               - /peaket.ticket.v1.TicketService/CancelTickets
     - from:
         - source:
