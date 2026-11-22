@@ -21,7 +21,7 @@ export async function assertDatabaseRole(database: Database, role: ServiceDbRole
       pg_has_role(current_user, ${role}, 'member') as member,
       (${sql.join(others.map((o) => sql`pg_has_role(current_user, ${o}, 'member')`), sql` or `)}) as other,
       (select rolsuper or rolbypassrls from pg_roles where rolname = current_user) as privileged,
-      exists (select 1 from pg_class c where c.relname in ('production', 'event') and c.relkind = 'r' and pg_has_role(current_user, c.relowner, 'member')) as owner
+      exists (select 1 from pg_class c where c.relname in ('production', 'event', 'webhook_endpoint', 'webhook_delivery') and c.relkind = 'r' and pg_has_role(current_user, c.relowner, 'member')) as owner
   `);
   const f = (r.rows as unknown as RoleFacts[])[0];
   if (!f || f.privileged || f.owner) throw new Error(`DB 사용자가 슈퍼유저이거나 표 소유자라 행 보안이 걸리지 않는다(${role}로 접속해야 한다)`);

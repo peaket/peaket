@@ -74,7 +74,7 @@ export class AppModule {
             payments: o.shop?.payments ?? unavailableMerchPayments,
             held: o.shop?.held ?? unavailableHeldTickets,
           }),
-          NotifyModule.register({ storage: 'database', database: o.database, notifyDatabase: o.notifyDatabase, partnerDatabase: o.partnerDatabase, ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}) }),
+          NotifyModule.register({ storage: 'database', notifyDatabase: o.notifyDatabase, partnerDatabase: o.partnerDatabase, ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}) }),
           ExportModule.register({
             storage: 'database',
             database: o.database,

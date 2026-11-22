@@ -20,7 +20,7 @@ export class NotifyModule {
   static register(
     o:
       | { storage: 'memory'; store?: WebhookStore; transport?: WebhookTransport; notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> }
-      | { storage: 'database'; database: Database; /** 웹훅 발송기 전용 core_notify 연결(ADR-0350). 팬 경로 database와 섞지 않는다 */ notifyDatabase: Database; partnerDatabase: Database; transport?: WebhookTransport; notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> },
+      | { storage: 'database'; /** 웹훅 발송기 전용 core_notify 연결(ADR-0350). 팬 경로 DATABASE 풀과 섞지 않는다 */ notifyDatabase: Database; partnerDatabase: Database; transport?: WebhookTransport; notificationTransport?: NotificationTransport; env?: Record<string, string | undefined> },
   ): DynamicModule {
     const providers: Provider[] = [
       {
