@@ -1379,14 +1379,14 @@ erDiagram
     }
     settlement_case_request {
         text event_key PK "CS 처리함 건 요청(payment 0029, ADR-0369 결정 10). 원인이 된 쓰기와 같은 트랜잭션에 넣는다"
-        text kind "PAYOUT_ERROR|PAYOUT_FAILED|PAYOUT_DELAYED|SELLER_KYC_REQUIRED|PG_BALANCE_MISMATCH|PORTONE_PAYOUT_EXECUTION(payment 0030이 더함, ADR-0370 결정 7)"
+        text kind "PAYOUT_ERROR|PAYOUT_FAILED|PAYOUT_DELAYED|SELLER_KYC_REQUIRED|PG_BALANCE_MISMATCH|PORTONE_PAYOUT_EXECUTION(payment 0030이 더함, ADR-0370 결정 7)|PORTONE_LEDGER_MISMATCH(payment 0032가 더함, ADR-0370 결정 8)"
         text source_id "대상(묶음 ID·지급 건 ID·토스 셀러 ID·TOSS:{상점})"
         timestamptz created_at
         timestamptz requested_at "ops-svc가 받은 시각. 비면 정산 일꾼이 30분 [가정]마다 다시 보낸다"
     }
     pg_balance_reconciliation {
         uuid id PK "결제사 잔액 대사 한 번(payment 0029, settlement §5.5, ADR-0369 결정 11)"
-        text pg "TOSS(포트원은 LCH-120)"
+        text pg "TOSS|PORTONE(PORTONE은 payment 0032가 더함, 상점은 STANDARD, 결제사가 보여 주는 잔액은 이체 원장 계산값, ADR-0370 결정 8 ③)"
         text pg_store "STANDARD|ESCROW"
         text kind "MONTHLY|BATCH. MONTHLY는 (pg, pg_store, period_month) 유일, BATCH는 (batch_id) 유일"
         date period_month "MONTHLY만. 그 달 1일"
@@ -1450,6 +1450,35 @@ erDiagram
         text contract_id "등록에 쓴 기본 계약 ID(중개수수료 0, settlement §5.4)"
         timestamptz registered_at
         timestamptz account_updated_at "마지막 정산 계좌 수정 시각"
+        text last_account_check "MATCHED|MISMATCH(마지막 파트너 계좌 대조, payment 0030, ADR-0370 결정 8 ②)"
+        timestamptz last_account_checked_at
+        timestamptz updated_at
+    }
+    portone_transfer {
+        text transfer_id PK "포트원 이체 원장의 출금 하나(payment 0030, settlement §5.3, ADR-0370 결정 8 ①). 겹쳐 읽어도 한 행"
+        text withdrawal_type "출금 유형(원문 값). 유형과 상관없이 모두 본다"
+        uuid payout_id FK "이어진 지급 건. UNLINKED면 null"
+        bigint amount
+        text bank_code "받는 계좌 은행"
+        text account_last4 "받는 계좌 끝 4자리. 계좌번호 전체·예금주명은 두지 않는다"
+        bool holder_matched "예금주가 판매자 상호·대표자와 같은지(비교만 하고 이름은 두지 않는다)"
+        text check_result "MATCHED|MISMATCH|UNLINKED"
+        timestamptz transferred_at
+        timestamptz checked_at
+    }
+    settlement_alert_request {
+        text event_key PK "운영 경보 요청(payment 0030, ADR-0370 결정 8). 원인이 된 쓰기와 같은 트랜잭션에 넣는다"
+        text kind "경보 종류(settlement_portone_withdrawal_unmatched·_partner_account_mismatch·_ledger_sync_stale·_execution_pending [가정 이름])"
+        text severity "SEV2|SEV3"
+        text source_id "대상(이체 ID·파트너 ID·묶음 ID·동기화 이름)"
+        timestamptz created_at
+        timestamptz requested_at "ops-svc 운영 경보 받기가 받은 시각. 비면 정산 일꾼이 30분 [가정]마다 다시 보낸다"
+    }
+    portone_ledger_sync {
+        text name PK "WITHDRAWAL|PARTNER_ACCOUNT(payment 0030, ADR-0370 결정 8 ④)"
+        timestamptz last_success_at "마지막으로 끝까지 성공한 시각. 3,600초 [가정] 넘게 지나면 SEV2"
+        timestamptz read_through "다음 출금 대사가 읽기 시작할 기준(지난 성공 − 30분 [가정])"
+        date halted_on "지급과 이어지지 않는 출금이 나온 날. 그날 남은 포트원 실행 건을 만들지 않는다"
         timestamptz updated_at
     }
     partner_receivable {
@@ -3219,6 +3248,7 @@ erDiagram
 | 같은 달·같은 상점의 결제사 잔액 대사가 두 번 돎(추천 적용 2026-11-23, ADR-0369 결정 11) | `pg_balance_reconciliation`의 `(pg, pg_store, period_month)`(MONTHLY)·`(batch_id)`(BATCH) 유일 인덱스. 둘째는 넣지 못해 CS 건을 만들지 않는다 | J-T25 |
 | 같은 파트너의 정산 계좌 변경 두 번이 겹침, 같은 재인증 토큰을 두 번 씀(추천 적용 2026-11-23, ADR-0370 결정 5) | `payout_account`는 If-Match 판을 조건으로 한 갱신(`WHERE version = $판`)이라 둘째는 0행·412이고, 결제사 수정을 부르기 전에 판을 한 번 더 본다. 재인증 jti는 한 번 쓰기 저장소와 `payout_account_change.reauth_jti` 유일 인덱스가 두 겹으로 막는다 | J-T40 ① |
 | 토스 예약지급 취소(계좌 변경·KYC 필요)와 웹훅 뒤 단건 조회의 결과 반영이 같은 지급 건에 겹침(추천 적용 2026-11-23, ADR-0370 결정 6) | 취소 반영은 지급 건이 `REQUESTED`일 때만 `CANCELED`로 바꾸는 조건부 갱신이고, 정산서는 출발 `SCHEDULED`를 건 조건부 전이(T10)다. 먼저 끝난 쪽만 이기고 둘째는 0행이라 사건을 쓰지 않는다 | J-T40 ⑤⑥ |
+| 두 파드가 같은 포트원 출금을 겹쳐 대사함, 다음 tick이 겹친 시간대를 다시 읽음(추천 적용 2026-11-23, ADR-0370 결정 8 ①) | 리더 파드 하나만 대사하고, `portone_transfer`의 이체 ID 기본 키에 넣는 쓰기와 CS 건 요청을 한 트랜잭션에 둔다. 넣지 못한(이미 있는) 이체는 건을 다시 만들지 않는다 | J-T20 ② |
 | 오프라인 단절 상황에서 복제 티켓의 중복 입장 시도 | 티켓별로 지정한 게이트 구역으로 통제한다(사전 예방). 변경분으로 입장 상태를 공유한다(온라인 스캐너는 두 번째 입장을 거부한다). 업로드된 뒤 서버 판정 표로 중복 입장에 이상 표시를 한다. 올라오지 않은 기록은 찾지 못한다(ADR-0051) | K10 오프라인 정합성 검증 (O-T2, O-T23) |
 | 다중 좌석 판매 확정(Hard Sale) 때 DB 트랜잭션 간 데드락 발생 | 여러 좌석의 PENDING 행을 좌석 고유 ID 오름차순으로 넣는다. 좌석 Redis 장애 때의 비상 우회 경로(정렬 잠금과 `SET LOCAL lock_timeout = '100ms'`, ADR-0083)는 2026-10-28에 없앴다. 장애 조치 동안은 그 회차의 구매 요청을 503으로 미룬다(추천 적용 2026-10-28, ADR-0121) | K3 판매 확정과 v0 행 잠금 홀드 스트레스 테스트(S-T10) |
 | 결제 접수 `reserve`(추천 적용 2026-11-04, ADR-0180, BUILD_ORDER PRF-140 ①): 같은 좌석을 두 주문이 동시에 `PENDING`으로 넣음, 같은 계정의 주문 둘(여러 탭)이 한도 행 하나를 동시에 올림, 같은 주문의 `markSold`와 `releasePending`(승인 성공 응답과 승인 기한 만료)이 겹침 | 좌석은 활성 상태 부분 유일 인덱스에 `INSERT … ON CONFLICT DO NOTHING RETURNING`으로 넣는다. 먼저 넣은 쪽이 아직 커밋하지 않았으면 뒤 쪽은 그 결과를 기다린 뒤 판정한다(커밋되면 경합, 되돌려지면 얻는다). 돌려받지 못한 좌석은 SEAT_TAKEN이고 트랜잭션 전체를 되돌린다. 한도 행은 `ON CONFLICT DO UPDATE … WHERE used + n <= limit` 한 문장이라 읽고 쓰는 사이가 없고, 같은 계정의 주문은 그 행의 쓰기 잠금에서 줄을 선다. 한도 행을 먼저, 좌석을 정렬 순서로 잠가 순환 대기가 없다. `markSold`와 `releasePending`은 바꿀 행을 좌석 ID 순으로 먼저 잠그고(`SELECT … ORDER BY seat_id FOR UPDATE`) 상태 조건(`status = 'PENDING'`)을 잠근 뒤 다시 평가하므로 둘 중 하나만 효과가 있고, 지는 쪽은 0행이다(한도는 `releasePending`이 지운 행 수만큼만 되돌린다). 커밋 응답을 잃은 `reserve` 재시도는 같은 계정·주문의 활성 행이 모두 있으면 아무것도 바꾸지 않는다. 트랜잭션은 모두 READ COMMITTED를 직접 고른다(서버 기본값이 REPEATABLE READ여도 한도 행 경쟁이 40001로 끝나지 않는다). 유일 위반(23505)을 예외로 받지 않고 `DO NOTHING`으로 받아 트랜잭션이 중단되지 않는다 | S-T7·S-T8·S-T10·S-T11(실제 PostgreSQL 통합 시험) |
