@@ -42,21 +42,22 @@ function setup(o: { gate?: TransferReauthGate } = {}) {
   const revoked: string[] = [];
   const store = new MemoryTransferStore({ tickets, revokeKey: (ticketId) => revoked.push(ticketId) });
   const gate: TransferReauthGate = o.gate ?? { verify: async () => true };
+  const clock = fakeClock({ now: NOW });
   const transfers = new Transfers({
     store,
     reauth: gate,
     recipientRefSecret: SECRET,
-    clock: fakeClock({ now: NOW }),
+    clock,
     directory: {
       resolveMemberCode: async (code) =>
-        code === 'PEAKET-0001'
+        code === 'ABC-1234'
           ? { accountId: FRIEND, nickname: '친구' }
-          : code === 'PEAKET-0002'
+          : code === 'XYZ-9999'
             ? { accountId: OTHER, nickname: '다른이' }
             : undefined,
     },
   });
-  return { tickets, store, transfers, revoked, gate };
+  return { tickets, store, transfers, revoked, gate, clock };
 }
 
 async function issue(tickets: MemoryTicketStore, o: Partial<TicketRecord> = {}): Promise<TicketRecord> {
@@ -220,6 +221,19 @@ describe('부정 예매 양도 잠금(ticket-svc 몫)', () => {
     expect((await store.activeTransferLock(EVENT, PAYER, NOW))?.caseId).toBe('0193f2c0-0000-7000-8000-0000000000aa');
     expect(await store.activeTransferLock(EVENT, PAYER, NOW + 2 * HOUR)).toBeUndefined();
     expect(await transfers.lockState(t.ticketId, NOW + 2 * HOUR)).toEqual({ locked: false });
+  });
+});
+
+describe('기한 지난 요청의 표시 해제(RV-01)', () => {
+  it('R-T1 기한이 지난 요청은 새 양도 요청을 만들 때 먼저 만료되어 표시가 풀린다', async () => {
+    const { tickets, store, transfers, clock } = setup();
+    const t = await issue(tickets);
+    const first = await transfers.createOffer({ ticketId: t.ticketId, accountId: PAYER, sessionId: 's1', reauthToken: 'r', recipientRef: ref(FRIEND), idempotencyKey: '0193f2c0-0000-7000-8000-0000000000f1' });
+    clock.advance(49 * HOUR);
+    const second = await transfers.createOffer({ ticketId: t.ticketId, accountId: PAYER, sessionId: 's1', reauthToken: 'r', recipientRef: ref(FRIEND), idempotencyKey: '0193f2c0-0000-7000-8000-0000000000f2' });
+    expect(second.status).toBe('OFFERED');
+    expect(store.offers.get(first.offerId)?.status).toBe('EXPIRED');
+    expect(tickets.tickets.get(t.ticketId)?.transferPending).toBe(true);
   });
 });
 

@@ -112,6 +112,8 @@ describe('돌려주기', () => {
 describe('받는 사람 참조(recipientRef)', () => {
   it('10분 안의 서명 참조만 받고, 만료·변조된 참조는 받지 않는다', () => {
     const ref = signRecipientRef({ secret: 'test-secret', accountId: '0193f2c0-0000-7000-8000-0000000000b2', expiresAtMs: NOW + 10 * 60_000 });
+    // 참조는 불투명해야 한다(RV-03): 앞부분을 풀어도 계정 ID가 보이지 않는다
+    expect(Buffer.from(ref.split('.')[0]!, 'base64url').toString('utf8')).not.toContain('0193f2c0');
     expect(verifyRecipientRef(ref, { secret: 'test-secret', nowMs: NOW })).toBe('0193f2c0-0000-7000-8000-0000000000b2');
     expect(verifyRecipientRef(ref, { secret: 'test-secret', nowMs: NOW + 10 * 60_000 })).toBeUndefined();
     expect(verifyRecipientRef(ref, { secret: 'other', nowMs: NOW })).toBeUndefined();

@@ -146,6 +146,31 @@ describe('양도 PostgreSQL', () => {
   });
 });
 
+describe('만료·같은 키 경합(RV-01·RV-04)', () => {
+  test('R-T1 기한 지난 요청은 새 요청을 만들 때 먼저 만료되어 표시가 풀린다', async () => {
+    const event = randomUUID();
+    const [t] = (await issue(event)).tickets;
+    const first = { offerId: randomUUID(), ticketId: t!.ticketId, fromAccountId: PAYER, toAccountId: FRIEND, status: 'OFFERED' as const, expiresAtMs: NOW + 48 * HOUR, createdAtMs: NOW };
+    expect((await transfers.createOffer(first, NOW)).kind).toBe('CREATED');
+    const second = { ...first, offerId: randomUUID(), expiresAtMs: NOW + 48 * HOUR };
+    expect((await transfers.createOffer(second, NOW + 49 * HOUR)).kind).toBe('CREATED');
+    const rows = await database.pool.query('select id, status from transfer_offer where ticket_id=$1 order by created_at', [t!.ticketId]);
+    expect(rows.rows.map((r) => r.status)).toEqual(['EXPIRED', 'OFFERED']);
+    const ticketRow = await database.pool.query('select transfer_pending from ticket where id=$1', [t!.ticketId]);
+    expect(ticketRow.rows[0].transfer_pending).toBe(true);
+  });
+
+  test('RV-04 같은 Idempotency-Key의 동시 생성은 한 행만 만들고 모두 같은 요청 결과다', async () => {
+    const event = randomUUID();
+    const [t] = (await issue(event)).tickets;
+    const offer = { offerId: randomUUID(), ticketId: t!.ticketId, fromAccountId: PAYER, toAccountId: FRIEND, status: 'OFFERED' as const, expiresAtMs: NOW + 48 * HOUR, createdAtMs: NOW };
+    const results = await Promise.all(Array.from({ length: 8 }, () => transfers.createOffer(offer, NOW)));
+    expect(results.every((r) => r.kind === 'CREATED' || r.kind === 'REPLAYED')).toBe(true);
+    const rows = await database.pool.query('select count(*)::int as n from transfer_offer where id=$1', [offer.offerId]);
+    expect(rows.rows[0].n).toBe(1);
+  });
+});
+
 describe('받는 사람 참조', () => {
   test('10분 참조는 계정을 가리키고 만료되면 받지 않는다', () => {
     const ref = signRecipientRef({ secret: 's', accountId: FRIEND, expiresAtMs: NOW + 600_000 });
