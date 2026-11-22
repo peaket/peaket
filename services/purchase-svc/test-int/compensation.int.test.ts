@@ -324,6 +324,34 @@ test('P-T39 ③_보상_사유가_없으면_보상을_시작하지_않는다', as
   expect(await orderRow(f.orderId)).toEqual({ status: 'APPROVED', event_seq: 1 });
 });
 
+test('P-T39 ③_보상_시작은_APPROVED_주문만_받는다', async () => {
+  const f = await approvedOrder();
+  // 같은 발권 대기 큐 행을 둔 채 주문만 AWAITING_DEPOSIT로 옮긴다(주문 상태 이력 트리거를 맞추려고 같은 트랜잭션에 T10 이력을 쓴다)
+  const client = await purchaseDb.pool.connect();
+  try {
+    await client.query('begin');
+    await client.query("update purchase_order set status = 'AWAITING_DEPOSIT', event_seq = 2 where id = $1", [f.orderId]);
+    await client.query(
+      "insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) values ($1, 2, 'APPROVED', 'AWAITING_DEPOSIT', 'T10', 'test', $2)",
+      [f.orderId, new Date(NOW)],
+    );
+    await client.query('commit');
+  } catch (err) {
+    await client.query('rollback').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  const c = compensation();
+  const result = await c.start.run({ orderId: f.orderId, reason: 'EVENT_CANCELLED', cause: 'EVENT_CANCELLED', eventCancellationRequestId: randomUUID() });
+  expect(result.status).toBe('NOT_APPROVED');
+  expect(await compensationRow(f.orderId)).toBeUndefined();
+  expect(await jobRows(f.orderId)).toHaveLength(1);
+  expect(await orderRow(f.orderId)).toEqual({ status: 'AWAITING_DEPOSIT', event_seq: 2 });
+  expect(await t20Rows(f.orderId)).toEqual([]);
+});
+
 test('P-T39 ③_compFence가_실패하면_결제_취소를_부르지_않고_재시도한다', async () => {
   const f = await approvedOrder();
   const requestId = randomUUID();
