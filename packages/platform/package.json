@@ -21,6 +21,10 @@
       "types": "./dist/telemetry-register.d.ts",
       "default": "./dist/telemetry-register.js"
     },
+    "./avro": {
+      "types": "./dist/avro-entry.d.ts",
+      "default": "./dist/avro-entry.js"
+    },
     "./stream-worker": {
       "types": "./dist/stream-worker.d.ts",
       "default": "./dist/stream-worker.js"

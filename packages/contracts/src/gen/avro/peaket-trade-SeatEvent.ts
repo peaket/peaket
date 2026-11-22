@@ -1,0 +1,260 @@
+// 생성물: docs/api/avro/peaket/trade/SeatEvent.avsc(scripts/avro-schemas.mjs). 손으로 고치지 않는다.
+export const tradeSeatEvent: Readonly<Record<string, unknown>> = {
+  "type": "record",
+  "name": "SeatEvent",
+  "namespace": "peaket.trade",
+  "doc": "좌석 사건. HELD·RELEASED·EXPIRED는 좌석 Redis Stream 릴레이, PENDING·SOLD·AVAILABLE·RETURNED는 판매 행 seat_sale의 Outbox에서 나간다. 토픽 trade.seats, 키 eventId(회차).",
+  "fields": [
+    {
+      "name": "eventId",
+      "doc": "회차 ID",
+      "type": "string"
+    },
+    {
+      "name": "seatId",
+      "type": "string"
+    },
+    {
+      "name": "tierId",
+      "doc": "좌석 등급. 관제 실시간 표의 등급별 판매 좌석(ADR-0072)",
+      "type": "string"
+    },
+    {
+      "name": "sectionId",
+      "doc": "좌석 구역. 관제 실시간 표의 구역별 판매 좌석(ADR-0072)",
+      "type": "string"
+    },
+    {
+      "name": "type",
+      "doc": "HELD·RELEASED·EXPIRED는 홀드(좌석 Redis Stream 릴레이), PENDING·SOLD·AVAILABLE·RETURNED는 판매 행 seat_sale의 Outbox다. AVAILABLE은 판매 예약(PENDING) 행을 지워 좌석을 다시 팔 수 있게 됨(승인 실패·승인 기한 만료, 가상계좌 입금 기한 경과·입금 전 회차 취소), RETURNED는 SOLD 좌석이 예매 취소·회차 취소로 반환됨(seat_sale RETURNED. 취소표로 다시 팔 수 있고, 판매 종료 뒤 반환은 다시 팔지 않는다, ADR-0064). seat-hold §4·§6, docs/planning/03 §2.4",
+      "type": {
+        "type": "enum",
+        "name": "SeatEventType",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "HELD",
+          "RELEASED",
+          "EXPIRED",
+          "PENDING",
+          "SOLD",
+          "AVAILABLE",
+          "RETURNED"
+        ]
+      }
+    },
+    {
+      "name": "fencingToken",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "HELD",
+            "RELEASED",
+            "EXPIRED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "sectionVersion",
+      "doc": "구역별 일련번호. 같은 seatEpoch 안에서만 비교한다(기술 검토 중간-040)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "HELD",
+            "RELEASED",
+            "EXPIRED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "seatEpoch",
+      "doc": "회차 세대. 좌석 Redis 장애 조치·다시 만들기 때 오른다(ADR-0121, 기술 검토 중간-040)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "HELD",
+            "RELEASED",
+            "EXPIRED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "holdId",
+      "doc": "홀드와 판매·만료를 잇는 키(ADR-0052). 홀드 사건에는 늘 있다. 판매 사건은 Saga가 그 좌석의 홀드를 알 때만 싣는다(seat_sale에는 홀드 칸이 없다, ADR-0150)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "HELD",
+            "RELEASED",
+            "EXPIRED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "holdKind",
+      "doc": "홀드 종류. FAN 구매 세션의 홀드, PRIORITY 우선 구매 보류(구매 세션 없음, docs/features/seat-hold.md §5, 추천 적용 2026-10-31, ADR-0171)",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "SeatEventHoldKind",
+          "default": "UNRECOGNIZED",
+          "symbols": [
+            "UNRECOGNIZED",
+            "FAN",
+            "PRIORITY"
+          ]
+        }
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "HELD",
+            "RELEASED",
+            "EXPIRED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "purchaseSessionId",
+      "doc": "구매 세션 ID. holdId와 같은 규칙이다(ADR-0150) 우선 구매 보류(holdKind PRIORITY)에는 비고 priorityGrantId를 싣는다(2026-10-31).",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "HELD",
+            "RELEASED",
+            "EXPIRED"
+          ],
+          "holdKind": [
+            "FAN"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "priorityGrantId",
+      "doc": "우선 구매 권리 ID(priority_grant.id). holdKind PRIORITY일 때(추천 적용 2026-10-31, ADR-0171)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "HELD",
+            "RELEASED",
+            "EXPIRED"
+          ],
+          "holdKind": [
+            "PRIORITY"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "accountId",
+      "doc": "홀드한 계정 ID. 홀드 사건에만 싣는다. 홀드 원장 적재가 seat_hold.account_id에 쓴다. 분석 적재는 가명 처리한다(추천 적용 2026-11-04, BUILD_ORDER PRF-141)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "HELD",
+            "RELEASED",
+            "EXPIRED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "expiresAt",
+      "doc": "홀드 만료 시각. 홀드 사건에만 싣는다. 홀드 원장 적재가 seat_hold.expires_at에 쓴다(추천 적용 2026-11-04, BUILD_ORDER PRF-141)",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "HELD",
+            "RELEASED",
+            "EXPIRED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "occurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값 홀드 사건은 UUID 버전 8(SHA-256('SeatEvent:' + type + ':' + eventId + ':' + holdId + ':' + seatId + ':' + fencingToken)의 앞 16바이트, 추천 적용 2026-11-04, BUILD_ORDER PRF-141)",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    },
+    {
+      "name": "holdLimit",
+      "doc": "홀드 때 판매 정책이 정한 1인 한도(홀드 Hash lim과 같은 값). 팬 홀드의 HELD에만 싣는다(RELEASED·EXPIRED와 우선 구매 보류에는 없다). 홀드 원장 적재가 seat_hold.hold_limit에 쓰고 전체 유실 뒤 다시 만들기가 lim으로 되살린다. 이 칸 전에 낸 사건에는 없으므로 받는 쪽은 없음을 '한도 모름'으로 읽는다. 분석 적재는 버린다(docs/features/seat-hold.md §6 '1인 한도 되살리기', 추천 적용 2026-11-17, W9-fix2)",
+      "type": [
+        "null",
+        "long"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "HELD"
+          ],
+          "holdKind": [
+            "FAN"
+          ]
+        }
+      ]
+    }
+  ]
+};

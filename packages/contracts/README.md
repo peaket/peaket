@@ -23,6 +23,7 @@
 | `@peaket/contracts/openapi/<태그>` | 태그(`queue`, `seats`, `orders`, `ops` …)마다 작업별 경로·쿼리·머리·본문·응답 Zod 스키마. 이름은 작업 이름(`operationId`, docs/api/guidelines.md §10 '작업 이름')에서 나온다(`CreateQueueLobbyParticipantBody`, `CreateEventHoldResponse`). 작업 이름은 경로를 바꿀 때만 바뀐다 |
 | `@peaket/contracts/asyncapi` | asyncapi 메시지 본문마다 Zod 스키마와 타입(메시지 이름 그대로, 예: `OrderEvent`) |
 | `@peaket/contracts/proto` | 내부 gRPC 계약(`docs/api/proto`)의 파일마다 protobufjs JSON 설명자(앞의 `peaket`을 뺀 경로 이름, 예: `identityV1Identity`). 서버는 `.proto` 파일을 읽지 않고 이것을 `@grpc/proto-loader`의 `fromJSON`에 넣는다(Next.js 앱 서버처럼 묶어도 경로가 깨지지 않는다, 2026-11-03 BUILD_ORDER PRF-020). 코드 생성 방식은 BUILD_ORDER BAS-030(proto CI)이 다시 본다 |
+| `@peaket/contracts/avro` | Avro 계약(`docs/api/avro`)의 레코드 전체 이름(예: `peaket.trade.OrderEvent`) → `.avsc` JSON 그대로인 `avroSchemas`와 주제 이름 `avroSubject(토픽, 전체 이름)`(`<토픽>-<전체 이름>`). 서비스의 공용 Avro 인코더(`@peaket/platform/avro`)와 스트림 작업자가 '빌드된 계약 판'으로 쓴다(ADR-0357 결정 2) |
 
 내보내기 조건은 셋이다. `types`와 `development`는 원본 `.ts`, `default`는 `tsc`로 만든 `dist/`의 `.js`다. 그래서 Node(서비스 실행)는 `dist/`를 읽고, Vitest와 번들러의 개발 조건은 원본을 읽는다(빌드 없이 시험). 생성된 모음 파일은 상대 다시 내보내기에 `.js`를 붙인다(`export * from './adminAccount.zod.js'`). TypeScript(NodeNext·Bundler)와 Vite는 `.js`를 원본 `.ts`로 찾는다. 서비스는 묶지 않고 `tsc`로만 빌드한다. esbuild로 묶으면 NestJS 생성자 주입에 필요한 데코레이터 메타데이터가 빠지기 때문이다(2026-11-01 확인, openspec 변경 `add-service-structure-and-request-checks` 결정 10, BUILD_ORDER FND-070).
 

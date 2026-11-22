@@ -9,6 +9,7 @@ import { generate } from 'orval';
 import { parse } from 'yaml';
 import { toOpenApi } from './asyncapi-to-openapi.mjs';
 import { closeAdditionalProperties } from './close-additional-properties.mjs';
+import { AVRO, writeAvroModules } from './avro-schemas.mjs';
 import { PROTO, writeProtoModules } from './proto-descriptors.mjs';
 import { addJsExtensions, annotateRefines, schemaExtension } from './schema-extensions.mjs';
 
@@ -41,9 +42,9 @@ function eachFile(dir, fn) {
 
 /**
  * @param {string} out 만들 폴더(없으면 만든다)
- * @param {{ openapi?: string, asyncapi?: string, proto?: string }} [from] 계약 원본(기본은 docs/api/의 둘과 proto 폴더)
+ * @param {{ openapi?: string, asyncapi?: string, proto?: string, avro?: string }} [from] 계약 원본(기본은 docs/api/의 둘과 proto·avro 폴더)
  */
-export async function generateAll(out, { openapi = OPENAPI, asyncapi = ASYNCAPI, proto = PROTO } = {}) {
+export async function generateAll(out, { openapi = OPENAPI, asyncapi = ASYNCAPI, proto = PROTO, avro = AVRO } = {}) {
   const work = mkdtempSync(join(tmpdir(), 'contracts-input-'));
   try {
     // 생성기에 넣는 계약 사본: additionalProperties: false를 같은 뜻의 { not: {} }로 바꾼다(결정 9)
@@ -70,6 +71,8 @@ export async function generateAll(out, { openapi = OPENAPI, asyncapi = ASYNCAPI,
     });
     // 내부 gRPC 계약의 JSON 설명자(추천 적용 2026-11-03, BUILD_ORDER PRF-020)
     writeProtoModules(join(out, 'proto'), proto);
+    // Avro 계약 판 스키마(서비스의 공용 Avro 인코더와 스트림 작업자가 읽는다, ADR-0357 결정 2)
+    writeAvroModules(join(out, 'avro'), avro);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

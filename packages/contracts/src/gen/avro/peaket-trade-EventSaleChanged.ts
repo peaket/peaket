@@ -1,0 +1,117 @@
+// 생성물: docs/api/avro/peaket/trade/EventSaleChanged.avsc(scripts/avro-schemas.mjs). 손으로 고치지 않는다.
+export const tradeEventSaleChanged: Readonly<Record<string, unknown>> = {
+  "type": "record",
+  "name": "EventSaleChanged",
+  "namespace": "peaket.trade",
+  "doc": "회차 판매 상태가 바뀜(docs/planning/03 §2.15, 추천 적용 2026-10-28, ADR-0122). purchase-svc가 event_sale을 바꾸는 트랜잭션의 Outbox로 trade.seats에 낸다(키 eventId라 그 회차의 SeatEvent와 순서가 맞는다). 판정: 가용 0이 5초 [가정] 이어지면 ALL_HELD, 가용·홀드·결제 중이 0인 판정이 두 번 이어지면 SOLD_OUT, 매진 뒤 판매 종료 전에 좌석이 돌아오면 ON_SALE(매진 풀림). 입금 대기·결과 모름의 판매 예약은 팔린 쪽으로 센다. 토픽 trade.seats, 키 eventId(회차).",
+  "fields": [
+    {
+      "name": "eventId",
+      "doc": "회차 ID",
+      "type": "string"
+    },
+    {
+      "name": "status",
+      "doc": "바뀐 뒤 상태. ALL_HELD는 일시 매진(가용 0, 홀드나 결제 중 남음, 대기는 이어지고 입장만 멈춤)",
+      "type": {
+        "type": "enum",
+        "name": "EventSaleChangedStatus",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "UPCOMING",
+          "ON_SALE",
+          "ALL_HELD",
+          "SOLD_OUT",
+          "ENDED"
+        ]
+      }
+    },
+    {
+      "name": "previousStatus",
+      "doc": "바뀌기 전 상태. SOLD_OUT → ON_SALE이 매진 풀림이다(취소표 알림)",
+      "type": [
+        "null",
+        {
+          "type": "enum",
+          "name": "EventSaleChangedPreviousStatus",
+          "default": "UNRECOGNIZED",
+          "symbols": [
+            "UNRECOGNIZED",
+            "UPCOMING",
+            "ON_SALE",
+            "ALL_HELD",
+            "SOLD_OUT",
+            "ENDED"
+          ]
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "available",
+      "doc": "판정 때 가용 좌석(비트맵에서 비어 있는 판매 대상 좌석)",
+      "type": "long"
+    },
+    {
+      "name": "held",
+      "doc": "판정 때 홀드 수",
+      "type": "long"
+    },
+    {
+      "name": "paying",
+      "doc": "판정 때 결제 중인 판매 예약(승인 결과를 기다리는 PENDING) 수",
+      "type": "long"
+    },
+    {
+      "name": "soldOutTiers",
+      "doc": "판정 때 매진인 등급 ID(좌석맵 판의 tierId) 전체. 없으면 빈 배열. 등급의 가용·홀드·결제 중이 모두 0이면 그 등급은 매진이다. 등급 매진은 회차 판매 상태가 아니라 덧씌우는 표시라, status가 그대로여도 이 목록이 바뀌면 판 번호를 올려 다시 낸다. queue-svc가 대기 상태 파일의 soldOutTiers·TIER_SOLD_OUT으로 쓴다(추천 적용 2026-11-05, BUILD_ORDER HOT-010, ADR-0214 결정 3)",
+      "type": {
+        "type": "array",
+        "items": "string"
+      },
+      "default": []
+    },
+    {
+      "name": "version",
+      "doc": "판 번호. 회차마다 늘어나기만 하고, 받는 쪽은 지금 값보다 클 때만 적용한다. 매진 등급만 바뀌어도 오른다",
+      "type": "long"
+    },
+    {
+      "name": "changedAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    },
+    {
+      "name": "countedAt",
+      "doc": "available·held·paying·avgTicketsPerOrder를 센 시각. 셈을 실은 사건(판이 바뀔 때와 같은 판의 다시 내기)에만 싣는다. queue-svc는 이 칸이 없거나 자기 시계보다 5초 [가정] 넘게 앞서면 셈을 대기 상태 파일에 쓰지 않는다. 이 칸이나 avgTicketsPerOrder의 모양만 틀리면 셈 칸만 버리고 판매 상태는 받는다(추천 적용 2026-11-06, ADR-0219 결정 5)",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "avgTicketsPerOrder",
+      "doc": "그 회차의 이번 판매에서 결제가 끝난 주문의 평균 좌석 수(좌석 수 ÷ 주문 수, 소수 둘째 자리). 그런 주문이 100건 [가정] 이상일 때만 싣는다. queue-svc는 없거나 1~10 밖이면 기본값 2 [가정]를 쓴다(POL-015, 추천 적용 2026-11-06, ADR-0219 결정 6)",
+      "type": [
+        "null",
+        "double"
+      ],
+      "default": null
+    }
+  ]
+};

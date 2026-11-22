@@ -1,0 +1,238 @@
+// 생성물: docs/api/avro/peaket/control/SettingChanged.avsc(scripts/avro-schemas.mjs). 손으로 고치지 않는다.
+export const controlSettingChanged: Readonly<Record<string, unknown>> = {
+  "type": "record",
+  "name": "SettingChanged",
+  "namespace": "peaket.control",
+  "doc": "운영 설정 사건. 토픽 control.settings. ops-svc가 내고 모든 서비스가 구독한다(POL-021, ADR-0044).",
+  "fields": [
+    {
+      "name": "commandId",
+      "type": "string"
+    },
+    {
+      "name": "key",
+      "doc": "FEATURE_FLAG는 비핵심 기능 끄기(명령 9), AUTOMATION_STOP은 쓰지 않는다(명령 11은 제어 gRPC로만 admission-ctrl에 보내고 이 토픽으로는 보내지 않는다, docs/features/control-tower.md §3·§5, ADR-0103 결정 1, 2026-10-29 바로잡음. 지난 판과 맞추려고 기호만 남긴다). PG_ASSIGNMENT는 회차 결제사 지정(명령 12). 결제사 전환은 DEGRADED_MODE의 PAYMENT_PG_FALLBACK 값(ADR-0044). LOG_SAMPLING은 온세일 구간의 정상 로그 줄 표본 비율이다(운영 명령이 아니라 ops-svc의 자동 조치, 범위 PLATFORM, 추천 적용 2026-11-22, ADR-0334 결정 1)",
+      "type": {
+        "type": "enum",
+        "name": "SettingChangedKey",
+        "default": "UNRECOGNIZED",
+        "symbols": [
+          "UNRECOGNIZED",
+          "BOT_LEVEL",
+          "LOG_LEVEL",
+          "FEATURE_FLAG",
+          "DEGRADED_MODE",
+          "LOBBY_BANNER",
+          "PG_ASSIGNMENT",
+          "AUTOMATION_STOP",
+          "LOG_SAMPLING"
+        ]
+      }
+    },
+    {
+      "name": "scope",
+      "doc": "PLATFORM 또는 회차 ID. 결제사 지정·전환은 회차 단위(결제사 지정은 회차 칸, ADR-0093 결정 2)",
+      "type": "string"
+    },
+    {
+      "name": "value",
+      "doc": "키마다 정한 값의 레코드(추천 적용 2026-10-28, 기술 검토 낮음-026. 문자열 JSON이던 것을 바꿨다). 어느 갈래인지는 key가 정하고, 생산자는 key와 맞는 갈래만 낸다. 갈래를 더할 때는 소비자를 먼저 배포한다. 대상(기능 플래그 이름, 로그 레벨을 바꿀 서비스, Degraded 모드 이름, 로그 표본을 바꿀 서비스)은 메시지 키에 있다. 로그 표본의 메시지 키는 PLATFORM:LOG_SAMPLING:*(모든 서비스)이고 마지막 마디가 서비스 이름이면 그 서비스만이다(ADR-0334 결정 1). 재평가 모드는 강도와 따로 고르는 명령 5의 별도 매개변수이고, ENFORCE로 바꾸는 것은 commander만 한다(추천 적용 2026-10-20, ADR-0073)",
+      "type": [
+        {
+          "type": "record",
+          "name": "BotLevelValue",
+          "doc": "BOT_LEVEL(명령 5)",
+          "fields": [
+            {
+              "name": "level",
+              "doc": "완화·기본·강화",
+              "type": {
+                "type": "enum",
+                "name": "BotLevelValueLevel",
+                "default": "UNRECOGNIZED",
+                "symbols": [
+                  "UNRECOGNIZED",
+                  "RELAXED",
+                  "STANDARD",
+                  "AGGRESSIVE"
+                ]
+              }
+            },
+            {
+              "name": "reassessMode",
+              "doc": "대기 중 재평가 끔·그림자·적용(기본 SHADOW)",
+              "type": {
+                "type": "enum",
+                "name": "BotLevelValueReassessMode",
+                "default": "UNRECOGNIZED",
+                "symbols": [
+                  "UNRECOGNIZED",
+                  "OFF",
+                  "SHADOW",
+                  "ENFORCE"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "record",
+          "name": "LogLevelValue",
+          "doc": "LOG_LEVEL(명령 8). 30분 뒤 기본 INFO로 돌아간다(expiresAt)",
+          "fields": [
+            {
+              "name": "level",
+              "type": {
+                "type": "enum",
+                "name": "LogLevelValueLevel",
+                "default": "UNRECOGNIZED",
+                "symbols": [
+                  "UNRECOGNIZED",
+                  "INFO",
+                  "DEBUG",
+                  "TRACE"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "record",
+          "name": "FeatureFlagValue",
+          "doc": "FEATURE_FLAG(명령 9). 플래그 이름은 메시지 키의 대상",
+          "fields": [
+            {
+              "name": "enabled",
+              "type": "boolean"
+            }
+          ]
+        },
+        {
+          "type": "record",
+          "name": "DegradedModeValue",
+          "doc": "DEGRADED_MODE(명령 6). 모드 이름(결제사 전환은 PAYMENT_PG_FALLBACK)은 메시지 키의 대상",
+          "fields": [
+            {
+              "name": "enabled",
+              "type": "boolean"
+            }
+          ]
+        },
+        {
+          "type": "record",
+          "name": "LobbyBannerValue",
+          "doc": "LOBBY_BANNER(명령 7, purchase-svc 쪽). 미리 승인한 문구 템플릿만",
+          "fields": [
+            {
+              "name": "templateId",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "type": "record",
+          "name": "PgAssignmentValue",
+          "doc": "PG_ASSIGNMENT(명령 12). 회차의 기본 결제사와 대체 결제사",
+          "fields": [
+            {
+              "name": "primaryPg",
+              "type": {
+                "type": "enum",
+                "name": "PgAssignmentValuePrimaryPg",
+                "default": "UNRECOGNIZED",
+                "symbols": [
+                  "UNRECOGNIZED",
+                  "TOSS",
+                  "PORTONE"
+                ]
+              }
+            },
+            {
+              "name": "fallbackPg",
+              "type": [
+                "null",
+                {
+                  "type": "enum",
+                  "name": "PgAssignmentValueFallbackPg",
+                  "default": "UNRECOGNIZED",
+                  "symbols": [
+                    "UNRECOGNIZED",
+                    "TOSS",
+                    "PORTONE"
+                  ]
+                }
+              ],
+              "default": null
+            }
+          ]
+        },
+        {
+          "type": "record",
+          "name": "AutomationStopValue",
+          "doc": "AUTOMATION_STOP(명령 11)",
+          "fields": [
+            {
+              "name": "stopped",
+              "type": "boolean"
+            }
+          ]
+        },
+        {
+          "type": "record",
+          "name": "LogSamplingValue",
+          "doc": "LOG_SAMPLING(ops-svc 자동 조치, 명령 번호 없음). 정상 2xx 로그 줄을 oneIn건에 1건 남긴다(4xx·5xx 등 전수 규칙은 그대로, docs/observability.md §7). expiresAt(온세일 윈도우 끝)이 지나면 시작 설정 값(PEAKET_LOG_SAMPLE_ONE_IN)으로 돌아간다(추천 적용 2026-11-22, ADR-0334 결정 1·2)",
+          "fields": [
+            {
+              "name": "oneIn",
+              "doc": "N건에 1건의 N(1 이상 10,000 이하. Avro에는 범위 제약이 없어 받는 쪽이 본다)",
+              "type": "int"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "expiresAt",
+      "doc": "로그 레벨 30분 자동 복귀, 로그 표본의 온세일 윈도우 끝(ADR-0334) 등",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "key": [
+            "LOG_LEVEL",
+            "LOG_SAMPLING"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "actor",
+      "doc": "명령 기록의 가명 참조 actor_ref(UUIDv4, ADR-0149). 관리 계정 ID를 싣지 않는다. 압축 토픽이라 키마다 마지막 사건이 오래 남는다(ADR-0150)",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    },
+    {
+      "name": "occurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "eventKey",
+      "doc": "중복 제거 키(ADR-0052). 같은 사건을 다시 보내면 같은 값",
+      "type": {
+        "type": "string",
+        "logicalType": "uuid"
+      }
+    }
+  ]
+};

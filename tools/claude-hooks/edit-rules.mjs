@@ -6,7 +6,7 @@ import { deny, note, relPath, firstInSession } from './lib.mjs';
 
 // 생성 폴더·파일과 그것을 만드는 명령. 머리줄 표시('생성 파일이다')가 없는 생성물(코드·JSON)은 여기 적는다
 const GENERATED = [
-  [/^packages\/contracts\/src\/gen\//, '원천 docs/api/(openapi·asyncapi·proto)를 고치고 `pnpm --filter @peaket/contracts gen`'],
+  [/^packages\/contracts\/src\/gen\//, '원천 docs/api/(openapi·asyncapi·proto·avro)를 고치고 `pnpm --filter @peaket/contracts gen`'],
   [/^packages\/api-client\/src\/gen\//, '원천 docs/api/openapi.yaml을 고치고 `pnpm --filter @peaket/api-client gen`'],
   [/^packages\/ds\/src\/gen\//, '원천 docs/design/tokens.json을 고치고 `pnpm --filter @peaket/ds tokens`'],
   // 대시보드는 주인 팀 폴더 아래에 있다(deploy/local/dashboards/<폴더>/<이름>.json, ADR-0356 결정 1)
