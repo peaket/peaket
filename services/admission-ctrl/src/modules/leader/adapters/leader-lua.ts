@@ -84,6 +84,25 @@ if mygen < lg then return {'FENCED'} end
 if mygen > lg then redis.call('SET', KEYS[1], mygen) end
 `;
 
+// 제어 gRPC 쓰기(F-02-1 OPS-300, ADR-0365 결정 5·6): 세대 확인(FENCE) 뒤, 판(ARGV 4)이 그 종류의 판 칸(ARGV 2)보다 클 때만 칸을 쓰고 지운다.
+// 같거나 작으면 아무것도 바꾸지 않고 지금 판을 돌려준다. FENCE의 SET이 리더 키 수명을 지우므로 수명(ARGV 6, 0이면 없음)을 다시 건다.
+// KEYS: 1 leader(q:{event:E}:leader 또는 q:{admission}:leader), 2 ctl(같은 슬롯)
+// ARGV: 1 세대, 2 판 칸, 3 명령 칸, 4 판, 5 명령 ID, 6 수명(ms, 0이면 없음), 7 쓸 칸 쌍의 수 n, 8~(7 + 2n) 쓸 칸 이름·값, 그 뒤 지울 칸 이름
+// 돌려주는 값: {'FENCED'} 또는 {'OK', 판 글, 바꿨으면 '1'}
+export const CONTROL_WRITE_LUA = `${EXTEND}${FENCE}
+local keep = tonumber(ARGV[6])
+if keep > 0 then extend(KEYS[1], keep) end
+local cur = tonumber(redis.call('HGET', KEYS[2], ARGV[2]) or '0') or 0
+local rev = tonumber(ARGV[4])
+if rev <= cur then return {'OK', string.format('%.0f', cur), '0'} end
+local n = tonumber(ARGV[7])
+for i = 0, n - 1 do redis.call('HSET', KEYS[2], ARGV[8 + 2 * i], ARGV[9 + 2 * i]) end
+for i = 8 + 2 * n, #ARGV do redis.call('HDEL', KEYS[2], ARGV[i]) end
+redis.call('HSET', KEYS[2], ARGV[2], ARGV[4], ARGV[3], ARGV[5])
+if keep > 0 then extend(KEYS[2], keep) end
+return {'OK', ARGV[4], '1'}
+`;
+
 // 명세 acquire의 BUMP: 리더가 되면 진행 중인 회차마다 세대부터 올린다. KEYS: 1 leader. ARGV: 1 세대, 2 회차 키 수명
 export const BUMP_LUA = `${EXTEND}${FENCE}
 extend(KEYS[1], ARGV[2])

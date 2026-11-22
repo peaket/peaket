@@ -5,8 +5,8 @@ import { type HotRedis, type RedisScript, redisScript } from '@peaket/platform';
 import { ADMISSION_REDIS, WAIT_REDIS } from '../../batch/index.js';
 import { BATCH_RESULT_DELAY_MS, CALLS_KEEP_MS, DISPERSAL_MS, LATE_DISPERSAL_MS, RATIO_WINDOW_MAX_MS, RATIO_WINDOW_MIN_MS, RB05_CONFIRM_WAIT_MS, SCAN_BUDGET, SOON_STALE_MS } from '../domain/plan.js';
 import { isManualFixed, MEMORY_FIELDS } from '../domain/aimd.js';
-import type { ArrivalCloseInput, ArrivalCloseResult, CloseInput, CloseResult, Control, EventPlan, LeaderStore, Rb05Confirm, Rb05Input, Rb05Result, TickInput, TickResult } from '../domain/ports.js';
-import { ARRIVAL_CLOSE_LUA, BUMP_LUA, CLOSE_LUA, RB05_CLEAR_LUA, RB05_LUA, RB05_MARK_LUA, TICK_LUA } from './leader-lua.js';
+import type { ArrivalCloseInput, ArrivalCloseResult, CloseInput, CloseResult, Control, EventPlan, LeaderControlResult, LeaderControlStoreWrite, LeaderStore, Rb05Confirm, Rb05Input, Rb05Result, TickInput, TickResult } from '../domain/ports.js';
+import { ARRIVAL_CLOSE_LUA, BUMP_LUA, CLOSE_LUA, CONTROL_WRITE_LUA, RB05_CLEAR_LUA, RB05_LUA, RB05_MARK_LUA, TICK_LUA } from './leader-lua.js';
 
 export const keys = {
   leader: (e: string) => `q:{event:${e}}:leader`,
@@ -35,8 +35,10 @@ export const keys = {
   notice: (e: string) => `q:{event:${e}}:notice`,
   /** 진행 중인 회차 목록(queue-svc가 일정 사본을 읽을 때 넣는다, ADR-0182 결정 2) */
   events: () => 'q:{admission}:events',
-  /** 회차와 무관한 리더 상태(명령 11 autoStopped, ADR-0226 결정 7) */
+  /** 회차와 무관한 리더 상태(명령 11 autoStopped, ADR-0226 결정 7, 전체 범위 명령 3 allPaused, ADR-0365 결정 6) */
   platformCtl: () => 'q:{admission}:ctl',
+  /** 회차와 무관한 리더 세대(전체 범위 제어 쓰기의 펜싱, ADR-0365 결정 5) */
+  platformLeader: () => 'q:{admission}:leader',
 };
 
 const BUMP = redisScript(BUMP_LUA);
@@ -46,6 +48,7 @@ const ARRIVAL_CLOSE = redisScript(ARRIVAL_CLOSE_LUA);
 const RB05 = redisScript(RB05_LUA);
 const RB05_MARK = redisScript(RB05_MARK_LUA);
 const RB05_CLEAR = redisScript(RB05_CLEAR_LUA);
+const CONTROL_WRITE = redisScript(CONTROL_WRITE_LUA);
 
 const str = (v: unknown): string | null => (v === null || v === undefined ? null : Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
 const int = (v: string | null | undefined): number | null => (v !== null && v !== undefined && /^\d{1,16}$/.test(v) ? Number(v) : null);
@@ -114,9 +117,21 @@ export class RedisLeaderStore implements LeaderStore {
     return { ...(t !== null && isManualFixed(operator, manualEndedAt, nowMs) ? { target: t } : {}), paused: admit || salePaused === '1' || suspended === '1', operator, memory, ...pgOf(pgKey ?? null, pgTps ?? null) };
   }
 
-  async platformControl(): Promise<{ autoStopped: boolean }> {
+  async platformControl(): Promise<{ autoStopped: boolean; allPaused: boolean }> {
     const k = keys.platformCtl();
-    return { autoStopped: str(await this.redis.command(['HGET', k, 'autoStopped'], { key: k })) === '1' };
+    const [autoStopped, allPaused] = ((await this.redis.command(['HMGET', k, 'autoStopped', 'allPaused'], { key: k })) as unknown[]).map(str);
+    return { autoStopped: autoStopped === '1', allPaused: allPaused === '1' };
+  }
+
+  async applyControl(w: LeaderControlStoreWrite): Promise<LeaderControlResult> {
+    const ks = w.eventId !== undefined ? [keys.leader(w.eventId), keys.ctl(w.eventId)] : [keys.platformLeader(), keys.platformCtl()];
+    const pairs = Object.entries(w.set);
+    const args = [String(w.gen), w.revField, w.cmdField, String(w.version), w.commandId, String(w.keepUntilMs ?? 0), String(pairs.length), ...pairs.flat(), ...w.del];
+    const r = (await this.redis.evalScript(CONTROL_WRITE, ks, args)) as unknown[];
+    if (str(r[0]) === 'FENCED') return { kind: 'FENCED' };
+    const applied = Number(str(r[1]));
+    if (str(r[0]) !== 'OK' || !Number.isSafeInteger(applied)) throw new Error('제어 쓰기 Lua가 모르는 값을 돌려줬다');
+    return { kind: 'OK', appliedVersion: applied, changed: str(r[2]) === '1' };
   }
 
   async bump(eventId: string, gen: number, keepUntilMs: number): Promise<'OK' | 'FENCED'> {
