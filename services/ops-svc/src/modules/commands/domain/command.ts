@@ -299,6 +299,21 @@ export interface Command {
   readonly ackedAtMs?: number;
   /** 명령 3·11 사후 검토 보고서 작성 기한(command_post_review.due_at, 처음 DISPATCHED + 48시간, ADR-0349 결정 7). 할 일이 없으면 없다 */
   readonly postReviewDueAtMs?: number;
+  /** 지금 보내는(마지막으로 보낸) 제어 판 번호(ops_command.control_version, 원장이 매김, ADR-0365 결정 1). 제어 gRPC로 보내지 않는 명령은 없다 */
+  readonly controlVersion?: number;
+  /** 그 판을 보내기 시작한 시각(ops_command.control_sent_at). ack 시한 10초의 기준이다(ADR-0073 결정 17) */
+  readonly controlSentAtMs?: number;
+  /** 전파 상태(openapi CommandState.delivery, 상세에서만 붙인다) */
+  readonly delivery?: CommandDeliveryView;
+}
+
+/** 제어 gRPC 명령의 전파 상태(openapi CommandState.delivery의 ACK 갈래, ADR-0365 결정 4) */
+export interface CommandDeliveryView {
+  readonly kind: 'ACK';
+  readonly ackedCount: number;
+  readonly targetCount: number;
+  /** ack하지 않은 받는 쪽('<서비스>/<파드 이름 또는 주소>@<범위>') */
+  readonly unackedTargets: readonly string[];
 }
 
 /** 실행을 요청한 관리 계정. 대상 서비스에 넘길 신원 머리를 만드는 데 쓴다 */

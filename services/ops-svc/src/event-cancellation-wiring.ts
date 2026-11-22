@@ -56,7 +56,9 @@ export function partnerRoleCheckRequired(env: Readonly<Record<string, string | u
 export function eventCancellationDepsFromEnv(i: EventCancellationDepsInput): EventCancellationDeps {
   const coreUrl = i.env.PEAKET_CORE_HTTP_URL;
   const httpSale = has(i.env.PEAKET_PURCHASE_HTTP_URL) && has(i.env.PEAKET_QUEUE_HTTP_URL);
-  const grpcSale = has(i.env.PEAKET_PURCHASE_CONTROL_GRPC_ADDR) && has(i.env.PEAKET_QUEUE_CONTROL_GRPC_ADDR);
+  // 제어 gRPC 받는 쪽 주소(F-02-1: 목록 …_ADDRS·운영 …_DNS도 받는다, ADR-0365 결정 3)
+  const controlConfigured = (prefix: string) => has(i.env[`${prefix}_ADDR`]) || has(i.env[`${prefix}_ADDRS`]) || has(i.env[`${prefix}_DNS`]);
+  const grpcSale = controlConfigured('PEAKET_PURCHASE_CONTROL_GRPC') && controlConfigured('PEAKET_QUEUE_CONTROL_GRPC');
   return {
     ...(httpSale || grpcSale ? { stopper: new HttpEventSaleStopper(i.executor instanceof HttpCommandExecutor ? i.executor.withoutCoreSaleReview() : i.executor) } : {}),
     ...(i.refunds ? { reader: i.refunds } : {}),

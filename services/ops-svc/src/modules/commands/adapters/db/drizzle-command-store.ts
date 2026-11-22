@@ -39,6 +39,9 @@ interface Row {
   requester_account?: string | null;
   /** 사후 검토 작성 기한(command_post_review.due_at, 없으면 null) */
   post_review_due_at?: Date | string | null;
+  /** 지금 보내는 제어 판과 보내기 시작한 시각(마이그레이션 0025, ADR-0365 결정 1·4) */
+  control_version?: number | string | null;
+  control_sent_at?: Date | string | null;
 }
 
 /** 같은 사람 두 번·요청자 본인 승인을 막는 부분 유일 색인(마이그레이션 0021) */
@@ -83,6 +86,8 @@ const toCommand = (r: Row, extra: { approvals?: readonly string[]; revertRequest
   ...(extra.dryRun !== undefined ? { dryRun: extra.dryRun } : {}),
   ...(extra.ackedAtMs !== undefined ? { ackedAtMs: extra.ackedAtMs } : {}),
   ...(r.post_review_due_at !== undefined && r.post_review_due_at !== null ? { postReviewDueAtMs: ms(r.post_review_due_at)! } : {}),
+  ...(r.control_version !== undefined && r.control_version !== null ? { controlVersion: Number(r.control_version) } : {}),
+  ...(r.control_sent_at !== undefined && r.control_sent_at !== null ? { controlSentAtMs: ms(r.control_sent_at)! } : {}),
 });
 
 /** 글자 칸을 UUID로 읽는다(옛 행의 글자 값은 null이 되어 결합에서 빠진다). 대응 표 기본 키 색인을 쓰게 한다 */
@@ -205,6 +210,8 @@ class DbCommandWriter implements CommandWriter {
     if (p.lastError !== undefined) sets.push(sql`last_error = ${p.lastError}`);
     if (p.result !== undefined) sets.push(sql`result = ${p.result === null ? null : JSON.stringify(p.result)}::jsonb`);
     if (p.round !== undefined) sets.push(sql`round = ${p.round}::smallint`);
+    if (p.controlVersion !== undefined) sets.push(sql`control_version = ${p.controlVersion}::bigint`);
+    if (p.controlSentAtMs !== undefined) sets.push(sql`control_sent_at = ${at(p.controlSentAtMs)}::timestamptz`);
     await this.tx.execute(sql`update ops_command set ${sql.join(sets, sql`, `)} where id = ${this.#current.commandId}::uuid`);
     const c = { ...this.#current } as Record<string, unknown>;
     const opt = (k: string, v: unknown) => {
@@ -219,6 +226,8 @@ class DbCommandWriter implements CommandWriter {
     opt('executedAtMs', p.executedAtMs);
     opt('lastError', p.lastError);
     opt('result', p.result);
+    opt('controlVersion', p.controlVersion);
+    opt('controlSentAtMs', p.controlSentAtMs);
     if (p.attempts !== undefined) c.attempts = p.attempts;
     if (p.round !== undefined) c.round = p.round;
     c.updatedAtMs = p.nowMs;
@@ -237,6 +246,28 @@ class DbCommandWriter implements CommandWriter {
 
   async audit(recordType: string, payload: Record<string, unknown>, nowMs: number): Promise<void> {
     await appendAuditIn(this.tx, { recordType, recordId: this.#current.commandId, payload, nowMs });
+  }
+
+  /**
+   * 판 번호 원장(ADR-0365 결정 1): 범위마다 (범위, 종류) 행을 만들어 두고 차례대로 잠근 뒤(FOR UPDATE, 같은 차례라 서로 막히지 않는다)
+   * 새 판 = max(마지막 판 + 1, 지금 밀리초)를 모두에 쓴다. 같은 밀리초의 두 명령도 서로 다른 판이고, 시계가 되돌아가도 줄지 않는다
+   */
+  async assignControlVersion(q: { readonly scopes: readonly string[]; readonly kind: string; readonly nowMs: number }): Promise<number> {
+    const scopes = [...new Set(q.scopes)].sort();
+    const now = new Date(q.nowMs);
+    let last = 0;
+    for (const scope of scopes) {
+      await this.tx.execute(sql`
+        insert into control_version (scope, kind, last_version, command_id, updated_at) values (${scope}, ${q.kind}, 0, ${this.#current.commandId}::uuid, ${now}::timestamptz)
+        on conflict (scope, kind) do nothing`);
+      const [r] = (await this.tx.execute(sql`select last_version from control_version where scope = ${scope} and kind = ${q.kind} for update`)).rows as { last_version: number | string }[];
+      last = Math.max(last, Number(r?.last_version ?? 0));
+    }
+    const version = Math.max(last + 1, q.nowMs);
+    await this.tx.execute(sql`
+      update control_version set last_version = ${version}::bigint, command_id = ${this.#current.commandId}::uuid, updated_at = ${now}::timestamptz
+      where kind = ${q.kind} and scope in (${sql.join(scopes.map((x) => sql`${x}`), sql`, `)})`);
+    return version;
   }
 
   /** 설정 사건을 같은 트랜잭션의 Outbox 행으로(ADR-0349 결정 5). 행 ID는 실제 시계의 UUIDv7이다(일 파티션은 릴레이가 실제 시계로 미리 만든다) */

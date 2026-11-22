@@ -26,6 +26,14 @@ export interface MaintainCommandsExtras {
   readonly blockIpSets?: BlockIpSetReader;
   /** 사후 검토 할 일 열기·기한 경보 */
   readonly postReviews?: PostReviews;
+  /**
+   * 제어 gRPC 명령(F-02-1, ADR-0365 결정 4): DISPATCHED로 남은 명령을 같은 판으로 이어 보내고, AUTO_EXPIRED가 된 명령 2는 새 판으로 입장 일시정지를 푼다.
+   * 없으면 하지 않는다
+   */
+  readonly control?: {
+    resumeDispatched(nowMs: number): Promise<number>;
+    sendNew(command: Command, phase: 'EXPIRE'): Promise<unknown>;
+  };
 }
 
 export interface MaintenanceRound {
@@ -38,6 +46,8 @@ export interface MaintenanceRound {
   readonly blocksExpired?: number;
   /** 연 사후 검토 할 일(0이면 없다) */
   readonly postReviewsOpened?: number;
+  /** 이어 보내기를 시작한 제어 명령(0이면 없다) */
+  readonly controlsResumed?: number;
   /** 낸 사후 검토 기한 경보(0이면 없다) */
   readonly postReviewAlerts?: number;
 }
@@ -80,11 +90,16 @@ export class MaintainCommands {
     };
     const approvalsExpired = await safe(() => this.#each('APPROVAL_EXPIRED', nowMs, async (w) => void (await closeIfApprovalExpired(w, nowMs))));
     const revertsExpired = await safe(() => this.#each('REVERT_EXPIRED', nowMs, async (w) => void (await closeIfApprovalExpired(w, nowMs))));
+    const expired: Command[] = [];
     const autoExpired = await safe(() =>
       this.#each('AUTO_EXPIRE', nowMs, async (w) => {
-        if (w.current.expiresAtMs !== undefined && w.current.expiresAtMs <= nowMs) await writeAutoExpired(w, { reason: 'expired', nowMs });
+        if (w.current.expiresAtMs !== undefined && w.current.expiresAtMs <= nowMs && (await writeAutoExpired(w, { reason: 'expired', nowMs }))) expired.push(w.current);
       }),
     );
+    // 만료 되돌림은 원장의 새 판이다(ADR-0365 결정 1). 받는 쪽(admission-ctrl)도 만료 시각으로 스스로 풀므로 기다리지 않는다(실패는 로그만)
+    const control = this.extras.control;
+    if (control) for (const c of expired) if (c.type === 'ADMISSION_PAUSE') void control.sendNew(c, 'EXPIRE').catch(() => undefined);
+    const controlsResumed = control ? await safe(() => control.resumeDispatched(nowMs)) : 0;
     const compared = await safe(() => this.compareDue(nowMs));
     let actorsPurged = 0;
     if (this.#lastPurgeMs === undefined || nowMs - this.#lastPurgeMs >= this.#purgeIntervalMs) {
@@ -109,6 +124,7 @@ export class MaintainCommands {
       ...(blocksExpired > 0 ? { blocksExpired } : {}),
       ...(review.opened > 0 ? { postReviewsOpened: review.opened } : {}),
       ...(review.alerted > 0 ? { postReviewAlerts: review.alerted } : {}),
+      ...(controlsResumed > 0 ? { controlsResumed } : {}),
     };
   }
 

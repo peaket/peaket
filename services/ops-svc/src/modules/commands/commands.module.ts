@@ -6,6 +6,7 @@ import type { AuditCheckpointService } from '../audit/index.js';
 import { ComputeDryRun } from './application/compute-dry-run.js';
 import { CreateCommand, PreviewCommand } from './application/create-command.js';
 import { DecideCommand } from './application/decide-command.js';
+import { ControlAwareExecutor, ControlDispatcher, type ControlFanout } from './application/dispatch-control.js';
 import { ExecuteCommand } from './application/execute-command.js';
 import { PgAssignmentGate } from './application/pg-assignment-gate.js';
 import { GetCommand } from './application/get-command.js';
@@ -17,7 +18,7 @@ import { RetryCommand } from './application/retry-command.js';
 import { ExtendCommand, RevertCommand } from './application/revert-command.js';
 import { COMMAND_MAINTENANCE_INTERVAL_MS, type CommandType } from './domain/command.js';
 import type { DryRunSource } from './domain/dry-run.js';
-import type { CancelledEventGuard, CommandExecutor, CommandSignals, CommandStore, OnsaleStartSource, PgAssignmentCheck } from './domain/ports.js';
+import type { CancelledEventGuard, CommandExecutor, CommandSignals, CommandStore, ControlDeliveries, OnsaleStartSource, PgAssignmentCheck } from './domain/ports.js';
 import type { ProtectedRangeList } from './domain/protected-ranges.js';
 import { LogCommandSecurityEvents, PromCommandSignals } from './adapters/command-signals.js';
 import { UnavailableDryRunSource } from './adapters/unavailable-dry-run-source.js';
@@ -55,6 +56,11 @@ export interface CommandsModuleExtras {
   readonly blockIpSets?: BlockIpSetReader;
   /** 운영 사건 줄 ops_event(ADR-0349 결정 8). 없으면 서비스 로거로 낸다(시험이 받는 쪽을 넣는다) */
   readonly opsEvents?: OpsEventLog;
+  /**
+   * 제어 gRPC 퍼뜨리기(F-02-1 OPS-300, ADR-0365 결정 3·4). 주면 명령 1·2·3·7·11은 배경 작업이 준비된 모든 파드에 보내 ack로 ACKED가 되고,
+   * 되돌리기·연장·만료 되돌림은 새 판으로 보낸다. deliveries가 있으면 상세가 전파 상태(delivery)를 싣는다. 없으면 전처럼 실행기가 보낸다(target-not-wired)
+   */
+  readonly control?: { readonly fanout: ControlFanout; readonly deliveries?: ControlDeliveries; readonly clock?: { now(): number } };
 }
 
 @Module({})
@@ -84,11 +90,14 @@ export class CommandsModule {
     });
     // 명령 12 판정은 미리보기·접수·실행 직전이 같은 객체를 쓴다(ADR-0349 결정 2·3)
     const pgGate = new PgAssignmentGate(extras.pgAssignment ?? {});
-    const execution = new ExecuteCommand(store, executor, checkpoints, guard, { pgGate });
-    const wired = executor || extras.pgAssignment ? execution : undefined;
+    // 제어 gRPC 배경 보내기(F-02-1). 되돌림·연장은 같은 보내기의 새 판이다(ControlAwareExecutor)
+    const dispatcher = extras.control ? new ControlDispatcher({ store, fanout: extras.control.fanout, clock: extras.control.clock ?? { now: () => Date.now() } }) : undefined;
+    const sender: CommandExecutor | undefined = dispatcher ? new ControlAwareExecutor(executor, dispatcher) : executor;
+    const execution = new ExecuteCommand(store, sender, checkpoints, guard, { pgGate, ...(dispatcher ? { control: dispatcher } : {}) });
+    const wired = sender || extras.pgAssignment ? execution : undefined;
     const createCommand = new CreateCommand(store, wired, guard, { dryRun, security, pgGate });
     const postReviews = new PostReviews({ store, ...(extras.postReviews?.commanders ? { commanders: extras.postReviews.commanders } : {}), ...(extras.postReviews?.alerts ? { alerts: extras.postReviews.alerts } : {}) });
-    const maintain = new MaintainCommands(store, dryRun, extras.maintenance ?? {}, { postReviews, ...(extras.blockIpSets ? { blockIpSets: extras.blockIpSets } : {}) });
+    const maintain = new MaintainCommands(store, dryRun, extras.maintenance ?? {}, { postReviews, ...(extras.blockIpSets ? { blockIpSets: extras.blockIpSets } : {}), ...(dispatcher ? { control: dispatcher } : {}) });
     const maintenance: CommandMaintenanceOptions = { enabled: extras.maintenance?.enabled ?? false, intervalMs: extras.maintenance?.intervalMs ?? COMMAND_MAINTENANCE_INTERVAL_MS };
     // HTTP 수신기와 Kafka 소비자가 같은 처리기를 쓴다(두 길로 같은 사건이 와도 한 번만 만든다).
     onCommandEvent?.(new HandleCommandEvent({ createCommand, store }));
@@ -97,6 +106,7 @@ export class CommandsModule {
       { provide: COMMAND_OPS_EVENTS, useFactory: (logger?: PlatformLogger) => opsEvents.attach(logger), inject: [{ token: PLATFORM_LOGGER, optional: true }] },
       { provide: PostReviews, useValue: postReviews },
       { provide: COMMAND_EXECUTOR, useValue: executor },
+      { provide: ControlDispatcher, useValue: dispatcher },
       { provide: COMMAND_REAUTH, useValue: reauth },
       { provide: COMMAND_SIGNALS, useValue: signals },
       { provide: COMMAND_SECURITY_EVENTS, useFactory: (logger?: PlatformLogger) => security.attach(logger), inject: [{ token: PLATFORM_LOGGER, optional: true }] },
@@ -106,12 +116,12 @@ export class CommandsModule {
       { provide: PreviewCommand, useValue: new PreviewCommand(createCommand) },
       { provide: MaintainCommands, useValue: maintain },
       { provide: ListCommands, useFactory: () => new ListCommands(store) },
-      { provide: GetCommand, useFactory: () => new GetCommand(store) },
+      { provide: GetCommand, useFactory: () => new GetCommand(store, extras.control?.deliveries) },
       // 승인 뒤 실행과 되돌리기 승인 뒤 되돌림 보내기에 실행기를 쓴다(실행기가 없으면 실행 없이 상태만 바뀐다)
       { provide: DecideCommand, useFactory: () => new DecideCommand(store, wired) },
       { provide: RetryCommand, useFactory: () => new RetryCommand(store, execution) },
-      { provide: RevertCommand, useFactory: () => new RevertCommand(store, executor) },
-      { provide: ExtendCommand, useFactory: () => new ExtendCommand(store, executor) },
+      { provide: RevertCommand, useFactory: () => new RevertCommand(store, sender) },
+      { provide: ExtendCommand, useFactory: () => new ExtendCommand(store, sender) },
       CommandMaintenanceJob,
       { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
       InternalTokenGuard,
@@ -120,7 +130,7 @@ export class CommandsModule {
       module: CommandsModule,
       controllers: [CommandsController, CommandDryRunsController, InternalCommandEventsController, PostReviewController],
       providers,
-      exports: [MaintainCommands, COMMAND_SIGNALS, PostReviews],
+      exports: [MaintainCommands, COMMAND_SIGNALS, PostReviews, ControlDispatcher],
     };
   }
 }
