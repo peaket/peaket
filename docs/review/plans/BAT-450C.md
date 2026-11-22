@@ -148,7 +148,23 @@ node tools/ci/records.mjs --check
 
 ## 실패 확인
 
-(시험 담당이 채운다)
+시험 담당 `lane3-bat450c-test`(deepseek-v4.1-flash), 2026-11-22 13:57~14:04 KST. 기준 트리 `bd34095bf`(계획 커밋)에서 구현 없이 시험만 더해 돌렸다. Docker 잠금 `lane3-BAT-450C`를 잡고(14:03) 실제 PostgreSQL 통합 시험까지 돌린 뒤 놓았다.
+
+### 단위·통합(구현 전)
+
+| 파일 | 결과 | 실패한 시험(까닭) |
+| --- | --- | --- |
+| `services/identity-svc/test/staff-assignment-maintenance.test.ts` | **7개 중 7 실패** | I-T87 ①~④·I-T88 ①이 `store.expireDueAssignments is not a function`·`store.closeLegacyAssignments is not a function`으로 실패했다. I-T87 ③은 지금 구현이 시간 창을 보지 않아 미래·취소 배정을 true로 셌고, I-T87 ④는 지난 `ASSIGNED`를 `ASSIGNED`로 보였다. 정비 일 목록 시험은 `staff-assignment-expired`가 없어 실패했다 |
+| `services/identity-svc/test/staff-invitations.test.ts` | **8개 중 8 통과** | I-T21 ⑫(네이버만 연결한 계정 403)는 기존 구현이 이미 지키는 성질이라 구현 전에도 통과한다(성질 시험). `hasAssigned`·`listSelf` 호출에 `nowMs`를 넘기도록 맞췄다 |
+| `services/identity-svc/test/check-scanner-session.test.ts` | **통과** | 기존 `BOT047_hasStaffAssignment` 시험이 시간 창이 없는 시드로 true를 기대해, 시드에 `validFrom`·`validUntil`을 넣었다(새 계약의 시간 필터를 시험이 실제로 본다) |
+| `services/identity-svc/test-int/staff-assignment-maintenance.int.test.ts` | **5개 중 5 실패** | `expireDueAssignments`·`closeLegacyAssignments`가 없어 TypeError, `hasAssigned`는 미래 배정을 true로 셈, `listSelf`는 지난 `ASSIGNED`를 그대로 보였다. 0037 인덱스도 아직 없다 |
+| `services/identity-svc/test-int/withdrawal.int.test.ts` | **실행하지 않음** | 정비 일 목록 기대값에 두 이름을 더했다. 구현 전에는 목록에 없어 실패할 것이고, 구현 뒤 같은 시험으로 다시 확인한다(검증 단계) |
+
+### 판정
+
+- 새 동작(만료 정비·promoter 정리·시간 필터·읽기 표시·유효 끝 지난 초대 410)은 구현 전 트리에서 **모듈 없음(TypeError)·값 불일치**로 실패했다. 시험이 구현을 요구하는 방향으로 먼저 섰다.
+- I-T21 ⑫는 기존 구현의 성질을 이름 붙인 시험이라 구현 전에도 통과한다. 이 묶음의 목적은 "24시간 발급·네이버만 연결" 가운데 시험 이름이 없던 빈칸을 채우는 것이다.
+- 통합 시험은 실제 PostgreSQL에서 돌려 실패를 봤고, 끝나고 `docker ps`에 peaket 컨테이너가 없음을 확인했다.
 
 ## 리뷰
 

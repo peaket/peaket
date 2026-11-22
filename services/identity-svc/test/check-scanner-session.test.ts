@@ -15,7 +15,7 @@ function world() {
   const clock = fakeClock({ now: NOW });
   const store = new MemoryStaffAssignmentStore();
   store.accounts.set('acc-1', { verified: true, status: 'ACTIVE' });
-  store.assignments.set('a-1', { id: 'a-1', accountId: 'acc-1', status: 'ASSIGNED' });
+  store.assignments.set('a-1', { id: 'a-1', accountId: 'acc-1', status: 'ASSIGNED', validFromMs: NOW - HOUR, validUntilMs: NOW + 2 * HOUR });
   const session: ScannerSessionRecord = {
     scannerSessionId: 'ss-1',
     assignmentId: 'a-1',
@@ -128,10 +128,10 @@ describe('CheckScannerSession(GAT-170)', () => {
 
   test('BOT047_hasStaffAssignment는 지금 ASSIGNED인 배정만 true다', async () => {
     const { store } = world();
-    await expect(store.hasAssigned('acc-1')).resolves.toBe(true);
-    await expect(store.hasAssigned('acc-2')).resolves.toBe(false);
+    await expect(store.hasAssigned('acc-1', NOW)).resolves.toBe(true);
+    await expect(store.hasAssigned('acc-2', NOW)).resolves.toBe(false);
     store.assignments.set('a-1', { ...store.assignments.get('a-1')!, status: 'REVOKED' });
-    await expect(store.hasAssigned('acc-1')).resolves.toBe(false);
+    await expect(store.hasAssigned('acc-1', NOW)).resolves.toBe(false);
   });
 
   test('gRPC 처리기는 역할을 계약의 열거 이름으로 바꾼다', async () => {

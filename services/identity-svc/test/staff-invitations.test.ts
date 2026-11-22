@@ -84,7 +84,7 @@ describe('StaffInvitations [GAT-210]', () => {
     expect(store.assignments.get('a-1')).toMatchObject({ accountId: ACCOUNT, status: 'ASSIGNED', consentVersion: STAFF_CONSENT_VERSION });
     expect(store.assignments.get('a-1')?.inviteEmail).toBeUndefined();
     expect(store.assignments.get('a-1')?.inviteTokenHash).toBeUndefined();
-    await expect(store.hasAssigned(ACCOUNT)).resolves.toBe(true);
+    await expect(store.hasAssigned(ACCOUNT, NOW)).resolves.toBe(true);
   });
 
   test('휴대폰 본인확인 전이거나 확인 저장소를 쓸 수 없으면 수락하지 않는다(C2-02)', async () => {
@@ -168,11 +168,22 @@ describe('StaffInvitations [GAT-210]', () => {
       validFromMs: NOW + 2 * HOUR,
       validUntilMs: NOW + 3 * HOUR,
     });
-    const first = await invitations.listSelf({ accountId: ACCOUNT, limit: 1 });
+    const first = await invitations.listSelf({ accountId: ACCOUNT, limit: 1, nowMs: NOW });
     expect(first.items).toHaveLength(1);
     expect(first.items[0]).toMatchObject({ assignmentId: 'a-2', status: 'ENDED', activeScannerDeviceName: null });
-    const second = await invitations.listSelf({ accountId: ACCOUNT, cursor: first.nextCursor, limit: 10 });
+    const second = await invitations.listSelf({ accountId: ACCOUNT, cursor: first.nextCursor, limit: 10, nowMs: NOW });
     expect(second.items.map((x) => x.assignmentId)).toEqual(['a-1']);
-    await expect(invitations.listSelf({ accountId: ACCOUNT, limit: 101 })).rejects.toBeInstanceOf(StaffInvitationError);
+    await expect(invitations.listSelf({ accountId: ACCOUNT, limit: 101, nowMs: NOW })).rejects.toBeInstanceOf(StaffInvitationError);
+  });
+
+  test('I-T21 ⑫ 네이버만 연결한 계정(검증 이메일 없음)은 수락이 403이고, 검증된 같은 이메일 계정은 수락된다', async () => {
+    // 네이버만 연결한 계정은 이메일 검증 표시가 없다(identity §2.1). 수락은 403 EMAIL_MISMATCH로 닫고 배정을 남기지 않는다.
+    store.accounts.set(ACCOUNT, { email: 'staff@example.com', verified: false });
+    await expect(invitations.accept(accept())).rejects.toMatchObject({ code: 'EMAIL_MISMATCH' });
+    expect(store.assignments.get('a-1')).toMatchObject({ status: 'INVITED', accountId: null });
+    expect(store.assignments.get('a-1')?.inviteEmail).toBe('staff@example.com');
+    // 구글·카카오로 같은 이메일이 검증된 계정은 수락한다
+    store.accounts.set(ACCOUNT, { email: 'staff@example.com', verified: true });
+    await expect(invitations.accept(accept())).resolves.toMatchObject({ assignmentId: 'a-1', status: 'ASSIGNED' });
   });
 });

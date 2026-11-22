@@ -131,7 +131,7 @@ describe('staff 초대 PostgreSQL [GAT-210]', () => {
     const row = (await database.pool.query('select account_id, status, accepted_at, consent_version, invite_email, invite_token_hash from staff_assignment where id = $1', [A1])).rows[0];
     expect(row).toMatchObject({ account_id: ACCOUNT, status: 'ASSIGNED', consent_version: STAFF_CONSENT_VERSION, invite_email: null, invite_token_hash: null });
     await expect(invitations.accept(accept())).rejects.toMatchObject({ code: 'INVITATION_INVALID' });
-    await expect(store.hasAssigned(ACCOUNT)).resolves.toBe(true);
+    await expect(store.hasAssigned(ACCOUNT, NOW)).resolves.toBe(true);
   });
 
   test('같은 회차 중복 배정은 409이고, 거절은 EXPIRED로 끝내며 다시 보내도 같다', async () => {
@@ -148,10 +148,10 @@ describe('staff 초대 PostgreSQL [GAT-210]', () => {
     await database.pool.query("update staff_assignment set status = 'ENDED' where id = $1", [A1]);
     await seedInvitation({ id: A4, token: 'db-invite-token-4', eventId: EVENT_3, role: 'gate_staff', status: 'ASSIGNED', accountId: ACCOUNT, validFrom: new Date(NOW + HOUR) });
     await seedInvitation({ id: A5, token: 'db-invite-token-5', eventId: EVENT_2, role: 'gate_lead', status: 'REVOKED', accountId: ACCOUNT, validFrom: new Date(NOW - 2 * HOUR) });
-    const first = await invitations.listSelf({ accountId: ACCOUNT, limit: 1 });
+    const first = await invitations.listSelf({ accountId: ACCOUNT, limit: 1, nowMs: NOW });
     expect(first.items).toHaveLength(1);
     expect(first.items[0]).toMatchObject({ assignmentId: A4, status: 'ASSIGNED', activeScannerDeviceName: null });
-    const second = await invitations.listSelf({ accountId: ACCOUNT, cursor: first.nextCursor, limit: 10 });
+    const second = await invitations.listSelf({ accountId: ACCOUNT, cursor: first.nextCursor, limit: 10, nowMs: NOW });
     expect(second.items.map((x) => x.assignmentId)).toEqual([A1, A5]);
   });
 });
@@ -190,7 +190,7 @@ describe('파트너 초대 만들기·명단·해제·재발송 PostgreSQL [BAT-
   test('I-T21 ⑦ listByEvent는 이메일·계정 ID 없이 수락한 계정의 닉네임과 역할·상태·시간만 준다', async () => {
     await database.pool.query("update account set nickname = '현장 리더' where id = $1", [ACCOUNT]);
     await seedInvitation({ id: A10, token: 'db-new-10b', eventId: EVENT_LIST, role: 'gate_lead', status: 'ASSIGNED', accountId: ACCOUNT });
-    const page = await store.listByEvent({ eventId: EVENT_LIST, limit: 10 });
+    const page = await store.listByEvent({ eventId: EVENT_LIST, limit: 10, nowMs: NOW });
     expect(page.items).toEqual([
       {
         assignmentId: A10,
