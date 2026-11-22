@@ -335,7 +335,9 @@ describe('감사 체인 원본·연쇄 검증(B3-H03)', () => {
 });
 
 describe('CS 처리함 REFUND_FAILED', () => {
-  test('GAT110_REFUND_FAILED는_같은_대상이면_열린_건_하나이고_RESOLVED_뒤에는_새_건이다', async () => {
+  // F-06-2 시험 이의 판단(시험 담당 lane3-f062-test, 2026-11-23): 해결된 건의 같은 eventKey는 새 건 0이다(R-T48 ②, ADR-0364 결정 4, data.md cs_case_request).
+  // 해결 뒤 새 건은 다른 eventKey(새 사건)일 때다(열린 건에서만 (종류, 대상)이 하나, data.md cs_case.status)
+  test('GAT110_REFUND_FAILED는_같은_대상이면_열린_건_하나이고_RESOLVED_뒤_같은_eventKey는_새_건이_없고_새_사건은_새_건이다 R-T48 ②', async () => {
     const target = `cancel-${randomUUID()}`;
     const payload = { eventKey: randomUUID(), kind: 'REFUND_FAILED' as const, sourceId: target, category: 'REFUND', createdAt: new Date(NOW).toISOString() };
 
@@ -347,7 +349,10 @@ describe('CS 처리함 REFUND_FAILED', () => {
     expect(await count('select count(*) as n from cs_case where kind = $1 and target_ref = $2', ['REFUND_FAILED', target])).toBe(1);
 
     await q("update cs_case set status = 'RESOLVED', updated_at = now() where id = $1", [a.case!.caseId]);
-    const c = await receiveCase.handle(payload, NOW + 2);
+    const replay = await receiveCase.handle(payload, NOW + 2);
+    expect([replay.result, replay.case!.caseId]).toEqual(['duplicate', a.case!.caseId]);
+    expect(await count('select count(*) as n from cs_case where kind = $1 and target_ref = $2', ['REFUND_FAILED', target])).toBe(1);
+    const c = await receiveCase.handle({ ...payload, eventKey: randomUUID() }, NOW + 2);
     expect(c.case!.caseId).not.toBe(a.case!.caseId);
     expect(await count('select count(*) as n from cs_case where kind = $1 and target_ref = $2', ['REFUND_FAILED', target])).toBe(2);
 

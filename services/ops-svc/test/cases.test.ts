@@ -55,20 +55,27 @@ describe('CS 처리함 건 접수', () => {
     expect(a.accepted).toBe(true);
     expect(a.case).toMatchObject({ kind: 'JUDGEMENT_PENDING', targetRef: requestId, status: 'OPEN' });
     expect((await handler.handle(pending, NOW + 1)).case!.caseId).toBe(a.case!.caseId);
-    // 같은 대상이라도 종류가 다르면 다른 건이다
-    const refundFailed = await handler.handle({ ...pending, kind: 'REFUND_FAILED' }, NOW + 2);
+    // F-06-2 시험 이의 판단(시험 담당 lane3-f062-test, 2026-11-23): eventKey는 cs_case_request 기본 키로 한 번만 받는다(ADR-0364 결정 4,
+    // data.md cs_case_request.event_key). 같은 eventKey에 종류만 바꾼 요청은 이미 받은 사건(duplicate)이고 새 건이 없다
+    const sameKey = await handler.handle({ ...pending, kind: 'REFUND_FAILED' }, NOW + 2);
+    expect([sameKey.result, sameKey.case!.caseId]).toEqual(['duplicate', a.case!.caseId]);
+    expect(store.cases.size).toBe(1);
+    // 같은 대상이라도 종류가 다르면(다른 사건) 다른 건이다
+    const refundFailed = await handler.handle({ ...pending, eventKey: `refund-failed:${requestId}`, kind: 'REFUND_FAILED' }, NOW + 3);
     expect(refundFailed.case!.caseId).not.toBe(a.case!.caseId);
     expect(store.cases.size).toBe(2);
   });
 
   // BAT-420-rest 리뷰 반영 RV-01(시험 담당 l3-b420-test, 2026-11-19): 정본(transfer-refund §3.1 ⑥ '실패 기록', P-T75)이 환불 대기(REFUND_ACCOUNT_PENDING)를 받는 종류에 더해 셋에서 넷으로 바꿨다(정본 변경 반영)
   // F-07-5 시험 담당(lane5-f075-test, 2026-11-23): 정본 settlement §4.2 '이의 받기'(ADR-0368 결정 5)가 payment-svc의 정산 이의 건(STATEMENT_DISPUTE)을
-  // 내부 HTTP로 받게 해 받는 종류가 넷에서 다섯이 됐다(정본 변경 반영). 그 밖 종류는 여전히 건을 만들지 않는다.
-  test('GAT-090 A4 J-T35 ③ 받는 종류 다섯(REFUND_FAILED·FLAGGED·JUDGEMENT_PENDING·REFUND_ACCOUNT_PENDING·STATEMENT_DISPUTE) 밖은 종류마다 건을 만들지 않는다', async () => {
-    const accepted = new Set(['REFUND_FAILED', 'FLAGGED', 'JUDGEMENT_PENDING', 'REFUND_ACCOUNT_PENDING', 'STATEMENT_DISPUTE']);
+  // 내부 HTTP로 받게 해 받는 종류에 더했다(정본 변경 반영). 그 밖 종류는 여전히 건을 만들지 않는다.
+  // F-06-2 시험 이의 판단(시험 담당 lane3-f062-test, 2026-11-23): ADR-0364 결정 4(transfer-refund §11 R-T48 ①)의 아홉과 위 STATEMENT_DISPUTE를 합쳐 받는 종류는 열이다
+  test('GAT-090 A4 J-T35 ③ R-T48 ③ 받는 종류 열 밖은 종류마다 건을 만들지 않는다', async () => {
+    const accepted = new Set(['REFUND_FAILED', 'FLAGGED', 'JUDGEMENT_PENDING', 'REFUND_ACCOUNT_PENDING', 'COMPENSATION_PENDING', 'VERIFICATION_APPEAL', 'DISPUTE', 'SCANNER_UNREPORTED', 'APPROVAL_EXECUTION_FAILED', 'STATEMENT_DISPUTE']);
     const others = CS_CASE_KINDS.filter((k) => !accepted.has(k));
-    expect(others.length).toBe(CS_CASE_KINDS.length - 5);
-    expect(others).toContain('DISPUTE');
+    expect(others.length).toBe(CS_CASE_KINDS.length - 10);
+    expect(others).toEqual(expect.arrayContaining(['INQUIRY', 'CONTENT_REPORT', 'APPEAL', 'TICKET_NOT_ISSUED']));
+    expect(others).not.toContain('STATEMENT_DISPUTE');
     for (const kind of others) {
       const store = new MemoryCsCaseStore();
       const r = await new ReceiveCaseRequested(store).handle({ ...payload, kind }, NOW);

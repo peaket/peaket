@@ -194,7 +194,9 @@ describe('파트너가 보는 상태 [BAT-420 GAT-110 P]', () => {
       faultOpinion: 'FORCE_MAJEURE',
       evidenceRef: '공연장 대관 취소 통지 제2026-118호 2026-11-15',
       newStartsAt: null,
-      judgementDueAt: null,
+      // F-06-2 시험 이의 판단(시험 담당 lane3-f062-test, 2026-11-23): REQUESTED의 판정 기한은 요청 + 1영업일이다(R-T50 ⑤, ADR-0364 결정 2).
+      // 요청 2026-11-16 10:00 KST(월) + 1영업일 = 11-17 10:00 KST(화). 이 조립은 달력이 없어 주말만 뺀다(결정 1 local·ci)
+      judgementDueAt: '2026-11-17T01:00:00.000Z',
       fault: null,
       judgementSummary: null,
       rejectionReason: null,
