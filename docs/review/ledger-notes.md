@@ -132,9 +132,9 @@ BAT-085(BAS-150)가 2026-11-20에 끝났다. 아래 항목의 상태·수는 바
 | C-T43 | 미검증 | B | BAT-620 | 수요 예측식·기본 비율·규모 올리기·T-30분·LARGE 간격·commander 예외는 core-svc 시험으로 확인했다. 화면의 '규모 올리기 검토'·SEV3 알림(24시간 뒤 SEV2)·감사 로그·변경 동결 달력 재계산은 ops-svc·감사·배포 단계가 없어 아직 볼 수 없다 |
 | D-T12 ② | 미검증 | B | BAT-202 | 조직 Actions 정책은 GitHub 조직 설정이라 저장소 시험으로 보지 못한다. 2026-11-10 조직 API에서 `sha_pinning_required: true`·허용 목록을 읽었지만 동작은 보지 않았다. 소유자가 `infra/stacks/global/github`의 `actions_patterns_allowed`(Scorecard 액션 더함)를 적용한 뒤 태그로 참조한 시험 워크플로가 실패하는지 한 번 보면 '사람 확인'으로 바꾼다(BAT-202 계획 7장 1·2) |
 | SR-T15 ③ | 미검증 |  | AWS 계정 뒤(OPEN 후보) | Aurora 읽기 전용 복제본에서 `REPEATABLE READ` 읽기 전용 트랜잭션이 되는지는 AWS 계정과 클러스터 비용이 있어야 본다(소유자 자원 한도). 대역은 SR-T15 ②의 로컬 PostgreSQL 18 핫 스탠바이 통합 시험이다. BAT-165 범위에서 뺐다(2026-11-16) |
-| C-T38 ② | 미검증 | B | 구간 5(인프라 구축, ADR-0332)·출시 전 | 실제 OpenTimestamps 캘린더로 찍고 몇 시간 뒤 비트코인 확정 증명으로 바꾸는 일은 밖으로 나가는 연결과 확정 시간이 있어야 본다. CI와 local 시험은 가짜 캘린더만 쓴다. 공개 위치에 거는 일은 소유자 몫이다(2026-11-22 BAT-360 계획, ADR-0348 결정 5·6) |
-| C-T61 ⑦ | 미검증 | B | 구간 5(인프라 구축, ADR-0332) | 작업의 마지막 성공 시각(kube-state-metrics `kube_cronjob_status_last_successful_time`)으로 내는 SEV2는 kind 클러스터와 경보 규칙이 있어야 본다(kind 보류, 2026-11-22 BAT-360 계획) |
-| C-T61 ⑧ | 미검증 | B | 구간 5(인프라 구축, ADR-0332), C-T58과 같은 정책 시험 | 작업 역할이 그 IP 집합의 읽기·갱신만 갖는지는 Terraform 정책 시험·IAM 정책 판정의 설계 검사이고 AWS 계정이 없다(2026-11-22 BAT-360 계획) |
+| C-T38 ② | 다른 단계 | B | 구간 5(인프라 구축, ADR-0332)·출시 전, BAT-365 넘김 | 실제 OpenTimestamps 캘린더로 찍고 몇 시간 뒤 비트코인 확정 증명으로 바꾸는 일은 밖으로 나가는 연결과 확정 시간이 있어야 본다. CI와 local 시험은 가짜 캘린더만 쓴다. 공개 위치에 거는 일은 소유자 몫이다. 구간 5 인프라·BAT-365 몫이고 BAT-360 장부 범위 밖이다(2026-11-22 BAT-360 계획·기록 R-751, ADR-0348 결정 5·6) |
+| C-T61 ⑦ | 다른 단계 | B | 구간 5(인프라 구축, ADR-0332), BAT-365 넘김 | 작업의 마지막 성공 시각(kube-state-metrics `kube_cronjob_status_last_successful_time`)으로 내는 SEV2는 kind 클러스터와 경보 규칙이 있어야 본다. 구간 5 인프라·BAT-365 몫이고 BAT-360 장부 범위 밖이다(kind 보류, 2026-11-22 BAT-360 계획·기록 R-751) |
+| C-T61 ⑧ | 다른 단계 | B | 구간 5(인프라 구축, ADR-0332), C-T58과 같은 정책 시험, BAT-365 넘김 | 작업 역할이 그 IP 집합의 읽기·갱신만 갖는지는 Terraform 정책 시험·IAM 정책 판정의 설계 검사이고 AWS 계정이 없다. 구간 5 인프라·BAT-365 몫이고 BAT-360 장부 범위 밖이다(2026-11-22 BAT-360 계획·기록 R-751) |
 
 ## 등급
 
@@ -317,8 +317,8 @@ BAT-197(BOT-080의 REST·화면 몫)이 2026-11-21에 끝났다. 아래 FR-049�
 
 ## BAT-360 기록(2026-11-22, R-751)
 
-BAT-360(OPS-280·OPS-290)을 2026-11-22에 끝냈다. 계획 5.1대로 셋만 구간 5까지 미검증이고 나머지 27항목은 자동 시험이다. `ledger.mjs --batch BAT-360 --require`가 1로 끝나는 까닭은 이 셋뿐이고, `--allow-unverified`는 0이다.
+BAT-360(OPS-280·OPS-290)을 2026-11-22에 끝냈다. 계획 5.1대로 셋은 **다른 단계**(구간 5 인프라·BAT-365)로 넘겼고 BAT-360 장부 범위 밖이다. 이 묶음의 장부 범위는 27항목이고 모두 자동 시험이다. `ledger.mjs --batch BAT-360 --require`는 0이다.
 
-- **C-T38 ②**: 실제 OpenTimestamps 캘린더로 찍고 몇 시간 뒤 비트코인 완료 증명으로 바꾸는 것, 실제 KMS·Object Lock·출시 주소는 구간 5(ADR-0332). 통합 시험은 가짜 캘린더·moto·local P-256 서명기로 본다.
-- **C-T61 ⑦**: 작업이 마지막으로 성공한 시각(kube-state-metrics `kube_cronjob_status_last_successful_time`)이 늦은 SEV2 경보·kind 클러스터·경보 규칙은 구간 5.
-- **C-T61 ⑧**: 작업 역할이 IP 집합을 읽고 바꾸는 권한이 Terraform 정책 검사·IAM 정책 검사에 드는지, AWS 실물 검사는 구간 5.
+- **C-T38 ②**: 실제 OpenTimestamps 캘린더로 찍고 몇 시간 뒤 비트코인 완료 증명으로 바꾸는 것, 실제 KMS·Object Lock·출시 주소는 구간 5(ADR-0332)·BAT-365 몫이다. 통합 시험은 가짜 캘린더·moto·local P-256 서명기로 본다.
+- **C-T61 ⑦**: 작업이 마지막으로 성공한 시각(kube-state-metrics `kube_cronjob_status_last_successful_time`)이 늦은 SEV2 경보·kind 클러스터·경보 규칙은 구간 5·BAT-365 몫이다.
+- **C-T61 ⑧**: 작업 역할이 IP 집합을 읽고 바꾸는 권한이 Terraform 정책 검사·IAM 정책 검사에 드는지, AWS 실물 검사는 구간 5·BAT-365 몫이다.
