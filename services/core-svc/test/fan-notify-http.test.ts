@@ -199,6 +199,18 @@ describe('N-T18 웹 푸시 구독', () => {
     expect(fresh.statusCode).toBe(201);
     expect([...store.push.values()].some((p) => p.id === oldest.id)).toBe(false);
     expect([...store.push.values()].filter((p) => p.accountId === account)).toHaveLength(10);
+
+    // 다른 계정의 구독을 꽉 찬 계정에 다시 묶어도 10개 한도를 지킨다
+    const full = randomUUID();
+    const mover = randomUUID();
+    const moving = { endpoint: 'https://fcm.googleapis.com/send/move', keys: { p256dh, auth } };
+    expect((await registerPush(mover, moving)).statusCode).toBe(201);
+    for (let i = 0; i < 10; i++) {
+      const id = randomUUID();
+      store.push.set(id, { id, accountId: full, endpoint: `https://fcm.googleapis.com/send/f${i}`, endpointHash: `f${i}`.padEnd(43, 'x'), service: 'FCM', p256dh, auth, expiresAt: null, boundAt: new Date(NOW_MS - 20_000 + i), createdAt: new Date(NOW_MS - 20_000 + i) });
+    }
+    expect((await registerPush(full, moving)).statusCode).toBe(200);
+    expect([...store.push.values()].filter((p) => p.accountId === full)).toHaveLength(10);
   });
 });
 
