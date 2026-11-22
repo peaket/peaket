@@ -2,7 +2,7 @@
 // 이 모듈이 전역 DATABASE(platform databaseModule은 @Global)를 있으면 받아 DB 길(알림 표·접속자 표·정비 반복)과 메모리 길을 스스로 고른다.
 // 위젯 값 원천은 live-wiring이 환경 값으로 고른다. 종료 세션 목록은 platform 인증 상태(전역 주입 이름)에서 읽는다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
-import { CLOCK, type Clock, DATABASE, type Database } from '@peaket/platform';
+import { CLOCK, type Clock, DATABASE, type Database, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import { OpsLiveFeed } from './application/ops-live-feed.js';
 import { PresenceHub, type PresenceOptions } from './application/presence.js';
 import { PushHub, type PushHubOptions } from './application/push-hub.js';
@@ -28,7 +28,7 @@ export interface LiveModuleExtras {
   readonly presence?: PresenceStore;
   readonly widgetSources?: readonly WidgetSource[];
   readonly env?: Record<string, string | undefined>;
-  readonly hub?: Omit<PushHubOptions, 'now'>;
+  readonly hub?: Omit<PushHubOptions, 'now' | 'logger'>;
   readonly presenceOptions?: Omit<PresenceOptions, 'now'>;
   readonly widgetOptions?: Omit<WidgetFeedOptions, 'now'>;
   /** 정비 반복을 켤지. 기본은 DB가 있을 때 켠다 */
@@ -54,8 +54,9 @@ export class LiveModule {
       },
       {
         provide: PushHub,
-        useFactory: (source: PushEventSource, clock: Clock) => new PushHub(source, feed, { ...(extras.hub ?? {}), now: () => clock.now() }),
-        inject: [PUSH_EVENT_SOURCE, CLOCK],
+        useFactory: (source: PushEventSource, clock: Clock, logger: PlatformLogger | undefined) =>
+          new PushHub(source, feed, { ...(extras.hub ?? {}), now: () => clock.now(), ...(logger ? { logger } : {}) }),
+        inject: [PUSH_EVENT_SOURCE, CLOCK, { token: PLATFORM_LOGGER, optional: true }],
       },
       {
         provide: PresenceHub,

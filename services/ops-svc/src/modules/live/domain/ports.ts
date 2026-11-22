@@ -6,6 +6,11 @@ import type { WidgetKey, WidgetValue } from './widgets.js';
 export interface PushEventSource {
   /** seq 뒤의 행을 seq 차례로 limit개까지 */
   after(seq: number, limit: number): Promise<readonly PushEventRow[]>;
+  /**
+   * seq 뒤의 행과 seqs에 든 행(건너뛴 빈 번호 다시 보기)을 한 번에(한 스냅숏) seq 차례로 limit개까지.
+   * 없으면 허브가 after로 가장 작은 번호부터 훑는다(작은 대역용)
+   */
+  afterOrAt?(seq: number, seqs: readonly number[], limit: number): Promise<readonly PushEventRow[]>;
   /** 시퀀스의 마지막 값(쓴 적 없으면 0). 아직 커밋 전인 번호를 포함할 수 있다 */
   latest(): Promise<number>;
   /** 창(windowMs) 안 행 가운데 가장 작은 seq(없으면 undefined) */

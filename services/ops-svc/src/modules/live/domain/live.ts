@@ -17,6 +17,12 @@ export const OPS_LIVE_SESSION_CHECK_MS = 5_000;
 export const OPS_LIVE_GAP_WAIT_MS = 2_000;
 /** 한 번에 읽는 알림 행 수 */
 export const OPS_LIVE_READ_LIMIT = 200;
+/** 건너뛴 빈 번호를 늦은 커밋으로 다시 보는 시간 1시간 [가정](다시 붙기 창과 같다, ADR-0360 결정 2) */
+export const OPS_LIVE_LATE_WATCH_MS = OPS_LIVE_REPLAY_WINDOW_MS;
+/** 다시 보는 빈 번호 수의 상한(넘으면 오래된 것부터 버리고 로그를 남긴다) */
+export const OPS_LIVE_LATE_WATCH_MAX = 1_000;
+/** 파드가 읽기를 (다시) 시작할 때 시퀀스 마지막 값에서 거슬러 보는 번호 수. 그 안의 커밋된 마지막 번호가 '지금 순번'이다 */
+export const OPS_LIVE_START_LOOKBACK = 200;
 /** 정비 반복(1시간 지난 알림 행·45초 지난 접속자 행 지우기) 주기 1분 [가정] */
 export const OPS_LIVE_RETENTION_MS = 60_000;
 

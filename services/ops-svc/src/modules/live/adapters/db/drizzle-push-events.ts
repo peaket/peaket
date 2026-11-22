@@ -45,6 +45,18 @@ export class DrizzlePushEvents implements PushEventSource {
     return rows.map(pushRowOf);
   }
 
+  /** seq 뒤 행과 건너뛴 번호(seqs)의 행을 한 문장(한 스냅숏)으로. 번호 목록은 허브가 가진 정수뿐이라 배열 글 하나로 넘긴다 */
+  async afterOrAt(seq: number, seqs: readonly number[], limit: number): Promise<readonly PushEventRow[]> {
+    if (seqs.length === 0) return this.after(seq, limit);
+    const list = `{${seqs.filter((s) => Number.isSafeInteger(s)).join(',')}}`;
+    const rows = (
+      await this.database.db.execute(
+        sql`select seq, kind, event_id, roles, body, created_at from ops_push_event where seq > ${seq} or seq = any(${list}::bigint[]) order by seq limit ${limit}`,
+      )
+    ).rows as unknown as Row[];
+    return rows.map(pushRowOf);
+  }
+
   async latest(): Promise<number> {
     const rows = (await this.database.db.execute(sql`select last_value, is_called from ops_push_event_seq`)).rows as unknown as { last_value: string | number; is_called: boolean }[];
     const r = rows[0];
