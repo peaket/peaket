@@ -56,7 +56,15 @@
 
 ## 검증
 
-- (검증 담당이 채운다) 앞서 잰 게이트 결과와 새 HEAD에서 다시 확인한 결과.
+- 검증 담당 `lane5-w12datefix-verify`, 2026-11-22 10:23~10:36 KST. HEAD는 계획 `fa50400b`·시험 `5c90ef1d`·리뷰 `5532cc95`이고, 리뷰 커밋은 계획 파일만 바꿔 시험 파일 내용은 시험 커밋과 같다. Docker 잠금(`lane5-W12-datefix`)은 10:23:19에 잡아 통합 시험 둘을 마친 뒤 놓았고, `peaket` 컨테이너 0·실행 중 컨테이너 0을 확인했다.
+- 새 HEAD에서 다시 잰 통합 시험:
+  - `pnpm --filter @peaket/purchase-svc test:integration test-int/sale-open.int.test.ts` → Test Files 1 passed, Tests **3/3 passed**(6.16s).
+  - `pnpm --filter @peaket/core-svc test:integration test-int/sale-open.int.test.ts` → Test Files 1 passed, Tests **3/3 passed**(15.38s).
+  - `pnpm --filter @peaket/core-svc test test/partner-production.http.test.ts` → Test Files 1 passed, Tests **17/17 passed**(10.67s).
+- 같은 HEAD에서 다시 잰 단위 시험: purchase **147 파일·4,368/4,368 passed**(68.78s), core **106 파일·779/779 passed**(54.77s). `pnpm --filter @peaket/core-svc typecheck`·`pnpm --filter @peaket/purchase-svc typecheck` 모두 exit 0(오류 0).
+- 앞서 시험 담당이 같은 시험 파일로 잰 결과(purchase 3/3, core 3/3, HTTP 17/17, 단위 4,368·779, typecheck 0)와 같다. 날짜를 실행 시각에서 계산해도 경계·판매 종료·만료 단언이 같은 값에서 움직인다는 것을 두 번의 실행으로 확인했다.
+- 남은 확인: 이 묶음은 `develop`에 합치지 않았고(가지는 `feature/lane5-W12-datefix`), `roles-check`·`records --check`·`doc-check`는 기록 커밋 뒤에 다시 본다.
+
 
 ## 담당 표
 
