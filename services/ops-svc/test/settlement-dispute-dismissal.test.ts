@@ -4,7 +4,8 @@
 import { ProblemError } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { HttpPayoutPaymentClient } from '../src/modules/payouts/index.js';
+import { HttpPayoutPaymentClient, PayoutApprovals } from '../src/modules/payouts/index.js';
+import { statementDisputeView } from '../src/modules/payouts/domain/payout-approval.js';
 import { opsSettlementFlow, paymentStatementView, type OpsRole, type OpsSettlementFlow } from './settlement-flow-support.js';
 
 const NOW = Date.parse('2026-11-19T06:00:00.000Z');
@@ -89,6 +90,51 @@ describe('J-T35 ⑩ 기각 응답 칸(리뷰 RV-03)', () => {
       disputeDueAt: full.disputeDueAt,
     });
     expect(res.payload).not.toContain('1234');
+  });
+});
+
+describe('J-T35 ④·⑩ 검증 보강(한 겹씩)', () => {
+  // 검증 1(계획 §9.1)이 놓친 표본: 역할 가드는 경로(@Roles)와 유스케이스 두 겹이라 한 겹을 빼도 다른 겹이 가렸다(M-07·M-07c).
+  // 경로 겹은 '경로 가드가 먼저 막는다'를(유스케이스까지 가지 않음), 유스케이스 겹은 직접 불러 따로 본다.
+  test('[ASVS v5.0.0-8.2.1] J-T35 ④ 경로 겹: cs_lead 밖 역할의 기각은 경로 가드에서 막혀 유스케이스의 역할 거절(approval-role-required)까지 가지 않는다', async () => {
+    for (const role of ['cs_agent', 'viewer', 'operator', 'commander'] as const satisfies readonly OpsRole[]) {
+      const res = await dismiss(randomUUID(), f.headers(role), { reason: '원장과 같다' });
+      expect({ role, code: res.statusCode }).toEqual({ role, code: 403 });
+      // 경로 가드(플랫폼 RolesGuard)의 거절은 문제 종류 없는 403(about:blank)이다. 유스케이스 거절이면 approval-role-required가 된다
+      expect({ role, type: JSON.parse(res.payload).type }).toEqual({ role, type: 'about:blank' });
+    }
+    expect(f.payments.dismissed).toEqual([]);
+  });
+
+  test('J-T35 ④ 유스케이스 겹: 경로 가드 없이 직접 불러도 cs_lead 밖 역할은 403 approval-role-required이고 payment를 부르지 않는다', async () => {
+    const approvals = f.svc.app.get(PayoutApprovals);
+    for (const role of ['cs_agent', 'viewer', 'operator', 'commander']) {
+      await expect(approvals.dismissStatementDispute(randomUUID(), '원장과 같다', { accountId: randomUUID(), sessionId: randomUUID(), role })).rejects.toMatchObject({
+        status: 403,
+        type: expect.stringContaining('approval-role-required'),
+      });
+    }
+    expect(f.payments.dismissed).toEqual([]);
+  });
+
+  test('J-T35 ⑩ 보기 함수 statementDisputeView는 payment 응답에서 정본 칸만 고른다(경로 응답 스키마와 따로)', () => {
+    const statementId = randomUUID();
+    const full = paymentStatementView(statementId);
+    expect(statementDisputeView(full)).toStrictEqual({
+      statementId,
+      kind: full.kind,
+      eventId: full.eventId,
+      periodStart: full.periodStart,
+      periodEnd: full.periodEnd,
+      grossAmount: full.grossAmount,
+      refundAmount: full.refundAmount,
+      commissionAmount: full.commissionAmount,
+      commissionVat: full.commissionVat,
+      offsetAmount: full.offsetAmount,
+      payoutAmount: full.payoutAmount,
+      status: full.status,
+      disputeDueAt: full.disputeDueAt,
+    });
   });
 });
 

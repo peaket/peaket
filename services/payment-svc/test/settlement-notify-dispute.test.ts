@@ -368,6 +368,11 @@ describe('J-T35 ④ 기각(payment 내부 경로)', () => {
     const events = eventsOf(f, s.statementId).map((e) => e.value);
     expect(events.map((e) => e.type)).toEqual(['STATEMENT_NOTIFIED', 'STATEMENT_DISPUTED', 'STATEMENT_NOTIFIED']);
     expect(events[2]).toMatchObject({ revision: 10, supersedesId: null, salesAmount: 30_000_000, refundAmount: 2_000_000, feeAmount: 2_800_000, occurredAt: new Date(dismissAt).toISOString() });
+    // 검증 보강 X-10(asyncapi SettlementEvent.eventKey '같은 사건을 다시 보내면 같은 값', ADR-0052): 다시 알림은 처음 통지와 다른 사건이라
+    // 중복 제거 키가 달라야 한다. 같으면 받는 쪽이 다시 알림을 처음 통지의 중복으로 버린다
+    expect(events[2]!.eventKey).toMatch(UUID_RE);
+    expect(events[2]!.eventKey).not.toBe(events[0]!.eventKey);
+    expect(new Set(events.map((e) => e.eventKey)).size).toBe(events.length);
     expect(auditsOf(f, s.statementId).at(-1)).toEqual({ from: 'DISPUTED', to: 'NOTIFIED' });
     // 다시 알린 1영업일 안에는 다시 이의할 수 있다
     f.at(Date.parse('2026-11-20T06:00:00.000Z') - 1);

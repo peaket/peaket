@@ -6,6 +6,7 @@ import { ProblemError } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { HttpPayoutPaymentClient } from '../src/modules/payouts/index.js';
+import { SettlementAdjustmentApprovals } from '../src/modules/approvals/index.js';
 import { opsSettlementFlow, type OpsRole, type OpsSettlementFlow } from './settlement-flow-support.js';
 
 const NOW = Date.parse('2026-11-19T06:00:00.000Z');
@@ -168,6 +169,45 @@ describe('J-T36 ④ 승인', () => {
     expect((await view(approvalId, leadNoBody)).statusCode).toBe(200);
     expect((await view(approvalId, f.headers('commander', { json: false }))).statusCode).toBe(200);
     for (const role of ['cs_lead', 'cs_agent', 'operator'] as const) expect({ role, code: (await view(approvalId, f.headers(role, { json: false }))).statusCode }).toEqual({ role, code: 404 });
+  });
+});
+
+describe('J-T36 ①·④ 검증 보강(한 겹씩)', () => {
+  // 검증 1(계획 §9.1)이 놓친 표본: 조정 요청의 역할 가드 두 겹(X-04·X-04c)과, 역할 검사에 가려진 요청자 본인 승인 금지(X-11b).
+  test('[ASVS v5.0.0-8.2.1] J-T36 ① 경로 겹: cs_lead 밖 역할의 조정 요청은 경로 가드에서 막혀 유스케이스의 역할 거절까지 가지 않는다', async () => {
+    for (const role of ['cs_agent', 'viewer', 'operator', 'commander'] as const satisfies readonly OpsRole[]) {
+      const res = await requestAdj(f.headers(role, { idempotencyKey: randomUUID() }));
+      expect({ role, code: res.statusCode }).toEqual({ role, code: 403 });
+      // 경로 가드(플랫폼 RolesGuard)의 거절은 문제 종류 없는 403(about:blank)이다. 유스케이스 거절이면 approval-role-required가 된다
+      expect({ role, type: json(res).type }).toEqual({ role, type: 'about:blank' });
+    }
+    expect(f.payments.registered).toEqual([]);
+    expect(f.store.rows.size).toBe(0);
+  });
+
+  test('J-T36 ① 유스케이스 겹: 경로 가드 없이 직접 불러도 cs_lead 밖 역할의 요청은 403 approval-role-required이고 조정 행·승인 업무가 0이다', async () => {
+    const adjustments = f.svc.app.get(SettlementAdjustmentApprovals);
+    for (const role of ['cs_agent', 'viewer', 'operator', 'commander']) {
+      await expect(adjustments.request(STATEMENT, { amount: BODY.amount, reasonCode: BODY.reasonCode, evidenceNote: BODY.evidenceNote }, randomUUID(), { accountId: randomUUID(), sessionId: randomUUID(), role })).rejects.toMatchObject({
+        status: 403,
+        type: expect.stringContaining('approval-role-required'),
+      });
+    }
+    expect(f.payments.registered).toEqual([]);
+    expect(f.store.rows.size).toBe(0);
+  });
+
+  test('[ASVS v5.0.0-2.3.3] J-T36 ④ 요청자 본인이 commander 세션으로 재인증해 승인해도 403 approval-self-not-allowed이고 적용이 없다', async () => {
+    const { lead, approvalId } = await requested();
+    const accountId = lead['x-user-id']!;
+    const sessionId = randomUUID();
+    f.identity.answers.set(`${accountId}/${sessionId}`, { valid: true, role: 'commander' });
+    f.reauth.accountOf.set(sessionId, accountId);
+    const res = await approve(approvalId, { 'x-user-id': accountId, 'x-session-id': sessionId, 'x-user-aud': 'ops', 'x-user-scope': '', 'x-reauth-token': 'approval-token' });
+    expect(res.statusCode).toBe(403);
+    expect(json(res).type).toContain('approval-self-not-allowed');
+    expect(f.payments.applied).toEqual([]);
+    expect(f.store.rows.get(approvalId)).toMatchObject({ status: 'PENDING_APPROVAL' });
   });
 });
 

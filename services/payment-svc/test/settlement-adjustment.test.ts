@@ -273,6 +273,9 @@ describe('J-T36 ⑤ 적용·반려', () => {
     const events = f.store.outbox.filter((m) => m.value.statementId === d.statementId).map((m) => m.value);
     expect(events.map((e) => e.type)).toEqual(['STATEMENT_NOTIFIED', 'STATEMENT_DISPUTED', 'STATEMENT_NOTIFIED']);
     expect(events[2]).toMatchObject({ salesAmount: 30_000_000, refundAmount: 2_000_000, feeAmount: 2_800_000, revision: 1, occurredAt: new Date(APPLY_AT).toISOString(), eventKey: expect.stringMatching(UUID_RE) });
+    // 검증 보강 X-10(asyncapi SettlementEvent.eventKey, ADR-0052): 조정 적용 뒤 다시 알림은 처음 통지와 다른 사건이라 키가 다르다
+    expect(events[2]!.eventKey).not.toBe(events[0]!.eventKey);
+    expect(new Set(events.map((e) => e.eventKey)).size).toBe(events.length);
 
     // 같은 승인 ID를 다시 적용해도 조정 합계는 한 번만 바뀐다
     const callsBefore = f.adjustmentApprovals.calls;
