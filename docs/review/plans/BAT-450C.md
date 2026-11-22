@@ -199,7 +199,51 @@ node tools/ci/records.mjs --check
 
 ## 검증
 
-(검증 담당이 채운다)
+검증 담당 `lane3-bat450c-verify`(deepseek-v4.1-flash), 2026-11-22 14:41~15:00 KST. 구현·시험·리뷰에 관여하지 않았다. 기준 커밋은 `c726acbd9`(리뷰 반영 뒤)이고, 틀린 구현은 이 작업 폴더에서 하나씩 넣고 관련 시험만 돌린 뒤 `git checkout -- <파일>`로 되돌렸다(제품 파일 차이 없음). Docker 잠금 `lane3-BAT-450C`는 14:03에 잡고 14:59에 놓았으며, 끝나고 `docker ps`에 peaket 컨테이너가 없음을 확인했다.
+
+### 게이트(기준 커밋)
+
+| 검사 | 결과 |
+| --- | --- |
+| identity-svc 단위(이 묶음·영향 파일 4) | **42 통과** |
+| identity-svc 통합(실제 PostgreSQL 5파일) | **46 통과** |
+| typecheck | 통과 |
+| lint(루트) | 통과 |
+| doc-check | 오류 0, 경고 4(기존 3 + mermaid 검사 건너뜀) |
+| `ledger --batch BAT-450C --require` | 범위 17항목, 자동 시험 17, 빈칸·ID만·미검증·다른 단계 0 → **통과** |
+| `trace-check --ids I-T21,I-T87,I-T88` | I-T21 20·I-T87 9·I-T88 2 통과, **대조 통과** |
+| identity 전체 단위(2 workers, 30초 timeout) | 717개 중 **716 통과**, 1개 시간 초과(`D-T50 tenant-rate-limit-wiring`). 아래 '환경 흔들림' 참고 |
+| Docker | 잠금 안에서 통합 46 통과, 끝나고 peaket 컨테이너 0 |
+
+### 전체 단위 시험의 환경 흔들림
+
+- 네 번 돌렸다. ⑴ 4 workers: 717개 중 715 통과, 2 실패(`D-T50`, `I-T3 ⑥`), ⑵ 1 worker: 3 실패(`D-T50`, `I-T3 ⑥`, `AC-T7`), ⑶ 2 workers·30초: 716 통과·1 실패(`D-T50`), ⑷ 2 workers: 파일 6개 실패 가운데 4개는 `beforeAll` 10~60초 시간 초과(`admin-*-http`·`outbound-trace`), 2개는 시험 시간 초과(`D-T50`·`I-T3 ⑥`)였다.
+- 실패한 시험은 이 묶음이 바꾼 파일을 직접 쓰지 않는다. 단독·작은 묶음 실행에서 통과한다(세 파일 함께 28 통과, `admin-password` 포함). 무거운 동적 import·Redis/Kafka 대역이 겹치며 기본 hook 10초를 넘기는 이 Windows 작업 폴더의 환경 문제로 본다. **합치기 전 CI(Linux) 결과로 한 번 더 확인해야 한다**(남은 위험 V-01).
+- 이 묶음의 시험(단위 42·통합 46)은 여러 번 반복해 모두 통과했다.
+
+### 틀린 구현 표본
+
+9개를 넣었고 **9개 모두 잡혔다**.
+
+| 번호 | 넣은 틀린 구현 | 잡은 시험(결과) |
+| --- | --- | --- |
+| M1 | INVITED 만료 경계를 `<`로 바꿔 정각을 남긴다 | I-T87 ① (1 실패/6 통과) |
+| M2 | ASSIGNED 종료 경계를 `<=`로 바꿔 정각을 끝낸다 | I-T87 ② (1 실패/6 통과) |
+| M3 | `hasAssigned`가 시간 창을 보지 않는다 | I-T87 ③ (1 실패/6 통과) |
+| M4 | `listSelf`가 지난 ASSIGNED를 ENDED로 바꾸지 않는다 | I-T87 ④ (1 실패/6 통과) |
+| M5 | 초대 조회가 역할 유효 끝(`valid_until`)을 보지 않는다 | I-T87 ④ (1 실패/6 통과) |
+| M6 | `closeLegacyAssignments`가 promoter 없는 INVITED를 끝내지 않는다 | I-T88 ① (1 실패/6 통과) |
+| M7 | 종료 행의 잔여 이메일·토큰을 지우지 않는다(RV-01) | I-T87 ② (1 실패/6 통과) |
+| M8 | 재발송이 역할 유효 끝을 보지 않는다(RV-02) | I-T21 ⑩ (1 실패/12 통과) |
+| M9 | `hasAssigned`가 `valid_from`을 보지 않아 미래 배정을 센다 | I-T87 ③ (1 실패/6 통과) |
+
+- 표본마다 관련 시험만 돌렸고, 되돌린 뒤 `git status --short`에 제품 파일 차이가 없었다(untracked `.lock-try.log`만 남았다).
+
+### GAT-210 단계 줄 판정
+
+- **체크한다.** 근거: ⑴ 파트너 초대 만들기·명단·해제·재발송·메일 대역(BAT-450B, R-761), ⑵ 24시간·1회용·URL 조각(BAT-450B+A, I-T21 ①~⑫), ⑶ ASVS 재판정(BAT-450C, 11행), ⑷ C2-10·C2-11(BAT-450C, I-T88·I-T87), ⑸ 장부 `--require` 17항목.
+- **한계(단계 줄에 함께 적는다)**: 운영 본인확인기관 계약 전이라 운영 수락은 403/503으로 막힌다(기존 한계). 초대·해제의 불변 감사는 BAT-450D, 운영 메일 대행은 GAT-250/BAT-455다. 화면(SCR-037·050·051·061)은 GAT-360·GAT-230·240 몫이라 체크 대상이 아니다.
+- `wbs 5.5.1` 상태는 BUILD_ORDER 단계 줄을 보고 `records.mjs`가 `완료`로 올린다(손으로 고치지 않는다).
 
 ## 담당 표
 
@@ -207,6 +251,6 @@ node tools/ci/records.mjs --check
 | --- | --- | --- | --- | --- |
 | plan | lane3-bat450c-plan | deepseek-v4.1-flash | 2026-11-22T13:45:00+09:00 | 2026-11-22T14:05:00+09:00 |
 | test | lane3-bat450c-test | deepseek-v4.1-flash | 2026-11-22T14:06:00+09:00 | 2026-11-22T14:25:00+09:00 |
-| impl | lane3-bat450c-impl | deepseek-v4.1-flash | 2026-11-22T14:26:00+09:00 | 2026-11-22T14:50:00+09:00 |
+| impl | lane3-bat450c-impl | deepseek-v4.1-flash | 2026-11-22T14:26:00+09:00 | 2026-11-22T14:40:00+09:00 |
 | review | lane3-bat450c-review | deepseek-v4.1-flash | 2026-11-22T14:30:00+09:00 | 2026-11-22T14:38:00+09:00 |
-| verify | lane3-bat450c-verify | deepseek-v4.1-flash | 2026-11-22T15:06:00+09:00 | 2026-11-22T15:30:00+09:00 |
+| verify | lane3-bat450c-verify | deepseek-v4.1-flash | 2026-11-22T14:41:00+09:00 | 2026-11-22T15:00:00+09:00 |
