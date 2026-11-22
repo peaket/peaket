@@ -168,7 +168,33 @@ node tools/ci/records.mjs --check
 
 ## 리뷰
 
-(리뷰 담당이 채운다)
+리뷰 담당 `lane3-bat450c-review`(deepseek-v4.1-flash), 2026-11-22 14:30~14:38 KST. 받은 것은 `git diff origin/develop..a52b52945`(계획·시험·구현)와 이 계획 파일이다. 코드·시험·계약·정본·마이그레이션을 대조했고, 시험·Docker는 돌리지 않았다. 코드는 고치지 않았다.
+
+결과: **중간 1(고침), 낮음 1(고침), 낮음 6(남은 위험)**. 시간 경계·테넌트·토큰 비노출의 방향은 맞다.
+
+| 번호 | 심각도 | 위치 | 근거 | 고칠 방향 |
+| --- | --- | --- | --- | --- |
+| RV-01 | 중간 | `drizzle-staff-assignment-store.ts` `expireDueAssignments`, `memory-staff-assignment-store.ts` 같은 메서드 | 정비는 이번에 상태를 바꾸는 `INVITED`·`ASSIGNED` 행의 이메일·토큰만 지운다. 이미 `REVOKED`·`ENDED`·`EXPIRED`인 행에 옛 경로·시드·수동 입력이 남긴 `invite_email`·`invite_token_hash`가 있으면 영원히 남는다. data-classification 88은 수락·만료 시 즉시 파기라고 정한다 | `staff-assignment-expired`가 종료 상태의 잔여 초대 이메일·토큰도 한 번에 지우게 한다(건수에는 세지 않는다). 단위·통합 시험에 종료 행의 잔여 값 파기를 더한다 |
+| RV-02 | 낮음 | `partner-staff-invitations.ts` `reissue` | 역할 유효 끝(`valid_until`)이 지난 `INVITED`는 조회·수락이 410인데 재발송은 새 24시간 링크를 보낸다. 정비 전 최대 하루 동안 파트너가 받는 사람에게 죽은 링크를 보낸다 | 재발송도 `valid_until < now`면 409 `staff-invitation-already-accepted`로 닫는다. 시험을 더한다 |
+| RV-03 | 낮음(남은 위험) | `scanner_session` | 배정이 `ENDED`가 되어도 그 배정의 세션 행 `terminated_at`은 비어 있다. `CheckScannerSession`이 시간으로 거부하고 새 승인이 이전 세션을 끝내므로 보안 영향은 없다. 다만 "살아 있는 세션" 수가 실제와 다르다 | 후속 정비(만료 세션의 `terminated_at` 채우기)로 둔다. 이 묶음은 배정 상태에 집중한다 |
+| RV-04 | 낮음(남은 위험) | `offline-gate.md` 16.3.1 | 초대 만들기·재발송·해제의 행위자·사유를 담은 불변 감사 기록이 없다. 이 묶음은 `부분 적용`으로 내리고 까닭을 BAT-450D로 적었다 | BAT-450D에서 감사 표 또는 ops 감사 접수로 붙인다. GAT-210 단계 줄은 "ASVS 판정 갱신"이 수용 기준이라 이 공백을 이유로 막지 않는다 |
+| RV-05 | 낮음(남은 위험) | 운영 수락 | 본인확인기관 계약 전이라 운영에서 초대 수락이 403/503으로 막힌다. GAT-210의 코드·시험 수용 기준은 개발·시험 기록으로 충족한다 | GAT-250/외부 계약 뒤 운영 확인. BUILD_ORDER GAT-210 줄에 이미 적힌 한계다 |
+| RV-06 | 낮음(남은 위험) | 0037 인덱스 | `staff_assignment_invite_expiry_idx`는 `invite_expires_at`만 덮어 `valid_until < now`인 INVITED 분기는 인덱스를 타지 않는다. INVITED 행 수가 적어 지금은 문제가 아니다 | 행이 많아지면 `(valid_until) WHERE status='INVITED'`를 더한다 |
+| RV-07 | 낮음(남은 위험) | `listByEvent` 읽기 표시 | 정비 전에는 DB 상태가 `ASSIGNED`인데 명단은 `ENDED`로 보인다. 그 행을 해제하면 `revokeAssignment`가 `ASSIGNED`를 보고 `REVOKED`로 바꾼다(204). 표시와 저장 상태가 하루 동안 다를 수 있다 | 정비를 하루 한 번보다 자주 돌리거나, 해제가 읽기 표시를 따르게 하는 후속. 지금은 파트너 화면이 GAT-360이라 영향이 작다 |
+| RV-08 | 낮음 | 이 계획 파일 담당 표 | 계획 때 적은 시작·끝 시각은 예상값이다. 실제 역할 시각으로 기록 단계에서 고친다 | 기록 담당이 실제 시각으로 맞춘다 |
+
+- **RV-01·RV-02 고침 순서**: 리뷰 반영도 시험 먼저다. `Fix-By: test` 커밋이 종료 행 잔여 파기와 역할 유효 끝 지난 재발송 409를 시험에 더하고, `Fix-By: impl` 커밋이 저장소 두 곳과 재발송을 고친다.
+
+### 확인한 것(지적 아님)
+
+- **시간 경계**: `invite_expires_at <= now`(만료), `valid_until < now`(종료·거부), `hasAssigned`는 `valid_from <= now <= valid_until`이다. 정비와 읽기 필터와 수락 거부가 같은 쪽을 본다. `valid_until` 정각은 아직 유효하고 1ms 뒤에 끝난다.
+- **개인정보 파기**: 만료·종료·정본화가 상태를 바꾸는 행의 `invite_email`·`invite_token_hash`를 NULL로 만든다. 정비는 토큰·이메일 원문을 로그에 남기지 않고 건수만 돌려준다. RV-01 고침으로 이미 끝난 행의 잔여 값도 지운다.
+- **권한·테넌트**: 파트너 네 작업의 `RolesGuard`·`tenantId`·core 판매자 대조는 바뀌지 않았다. 정비는 전역 일이고 테넌트 입력을 받지 않는다. `listByEvent`의 `nowMs`는 표시만 바꾸고 필터·정렬·커서를 바꾸지 않는다.
+- **멱등**: 두 정비 모두 `WHERE status=...`로 한 번만 상태를 바꾸고, 두 번째 실행은 0건이다. 메모리·Drizzle 저장소가 같은 규칙을 쓴다.
+- **읽기 필터**: `hasAssigned`가 `valid_from`·`valid_until`을 모두 보고, `listSelf`·`listByEvent`는 `ENDED`를 읽을 때 만든다. `EXPIRED`는 `listSelf`에 넣지 않고 `REVOKED`는 기존대로 보인다.
+- **계약·정본**: BUILD_ORDER BAT-450C 장부 범위가 `I-T21, I-T87, I-T88`이고, identity.md I-T87·I-T88 행이 4칸 표 모양을 지킨다. data.md `staff_assignment`의 `promoter_id`·`status` 설명과 422행 아래 문단이 코드와 같다.
+- **ASVS**: 6.5.1·6.5.3·6.5.5·8.2.1·8.2.2·14.2.1·14.2.4·14.3.2·16.2.5·16.3.2는 `적용`, 16.3.1은 `부분 적용`(BAT-450D)이다. 새 시험 태그는 6.5.5·14.2.4·8.2.2에만 달았다(시간 필터에는 맞는 행이 없다).
+- **마이그레이션**: 0037은 부분 인덱스 둘만 만들고 데이터를 바꾸지 않는다. `_journal.json` idx 37이 0036 뒤에 있다. 정비 SQL은 상태·시각 조건으로만 쓰고 값을 문자열로 붙이지 않는다.
 
 ## 검증
 
@@ -181,5 +207,5 @@ node tools/ci/records.mjs --check
 | plan | lane3-bat450c-plan | deepseek-v4.1-flash | 2026-11-22T13:45:00+09:00 | 2026-11-22T14:05:00+09:00 |
 | test | lane3-bat450c-test | deepseek-v4.1-flash | 2026-11-22T14:06:00+09:00 | 2026-11-22T14:25:00+09:00 |
 | impl | lane3-bat450c-impl | deepseek-v4.1-flash | 2026-11-22T14:26:00+09:00 | 2026-11-22T14:50:00+09:00 |
-| review | lane3-bat450c-review | deepseek-v4.1-flash | 2026-11-22T14:51:00+09:00 | 2026-11-22T15:05:00+09:00 |
+| review | lane3-bat450c-review | deepseek-v4.1-flash | 2026-11-22T14:30:00+09:00 | 2026-11-22T14:38:00+09:00 |
 | verify | lane3-bat450c-verify | deepseek-v4.1-flash | 2026-11-22T15:06:00+09:00 | 2026-11-22T15:30:00+09:00 |
