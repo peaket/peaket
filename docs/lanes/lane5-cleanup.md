@@ -19,3 +19,5 @@
 - 흔들린 시험(묶음과 무관, 따로 다시 돌리면 통과): core-svc `test/fill-search-guard.test.ts`(5초 시간 초과, 몰릴 때), `test/internal-notify.test.ts`, purchase-svc `grpc-new-payment-pause`·`cancel-ticket-event-cancelled`(전체로 돌릴 때만). `tools/ci/roles-check.test.mjs`는 묶음 실행에서 15분 제한에 걸렸다(따로 23분, 84개 통과).
 - ticket-svc에는 (account_id, event_id) 인덱스가 없어 `ListHeldTickets`가 계정 인덱스 안에서 회차를 거른다.
 - 다시 올리기: 자기 작업 가지의 `--force-with-lease` 푸시가 세션 권한 판정에 막혀, 다시 올릴 때마다 새 가지·새 초안 PR을 열었다(`feature/lane5-BAT-600-r2`·`-r3`). 시험 담당의 포크 다섯이 Docker 잠금을 따로 잡은 일(2026-11-18 23:20~23:40)은 근거에서 빼고 다시 돌렸다.
+- (2026-11-23 FIX-payment-int 리뷰 RV-02, 중간) 불변식 검사기가 미수금 이동 표를 `receivable_movement`로 찾는다(`services/invariant-checker/src/tables.ts` 35줄, `src/invariants.ts` 45줄 M3). 실제 표는 0016부터 `receivable_move`라 실제 DB에서 M3(미수금 남은 금액 = 금액 − 이동 합)가 건너뜀으로 끝나고, 검사기 시험은 손으로 만든 `receivable_movement` 표를 써 못 본다. 아래 ERD 줄과 함께 고친다.
+- (2026-11-23 FIX-payment-int 계획) `docs/data.md` §2 ERD에 payment 0025·0026 표 셋(`payout_batch_audit`·`guarantee_collection`·`settlement_webhook_receipt`)과 `seller_kyc.toss_seller_id`·`toss_seller_status`가 없고, ERD의 `receivable_movement`와 실제 `receivable_move` 이름이 다르다(BAT-625·630이 data.md를 함께 고치지 않음).
