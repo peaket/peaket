@@ -142,7 +142,9 @@ test('BAT-177 T4 ③ LCP 분해 표는 기록을 화면 이름 차례로 늘어�
   assert.deepEqual(got, expected, '화면 이름 차례로 늘어놓는다');
 });
 
-const WALLET_WARN = {
+// BAT-177-r2(OPEN[52] (나)): 월렛 LCP 임시 알림을 되돌린다. 표 판정은 기록의 값과 한도로만 정하고, 옛 기록에 남은 판정 칸
+// (verdict·warnOnly, BAT-176 시절 lighthouse.spec.mjs가 썼다)은 읽지 않는다(계획 docs/review/plans/BAT-177-r2.md 3·5의 T6 ②·T7).
+const WALLET_OLD_WARN = {
   ...WALLET,
   lcpSummary: null,
   median: { ...WALLET.median, lcpMs: 8040 },
@@ -150,17 +152,21 @@ const WALLET_WARN = {
   warnOnly: [{ metric: 'lcpMs', until: '2026-11-30', reason: '임시, 되돌릴 날: (나)를 합치는 날, 늦어도 2026-11-30 [가정], OPEN[52]' }],
 };
 
-test('BAT-177 T7 ① 월렛 LCP 초과는 알림만으로 적고 다른 화면의 초과는 한도 초과로 적는다', () => {
-  const wallet = cellsOf(lighthouseTable([WALLET_WARN])[2]);
+test("BAT-177-r2 T6 ② 옛 기록에 verdict·warnOnly 칸이 있어도 월렛 LCP 8,040/7,255는 '한도 초과: LCP'이고 '알림만'이 없다", () => {
+  const wallet = cellsOf(lighthouseTable([WALLET_OLD_WARN])[2]);
   assert.equal(wallet[2], '8040 / 7255', 'LCP 칸은 한도 7,255ms를 그대로 보인다');
-  assert.equal(wallet[5], '알림만: LCP(임시, 되돌릴 날: (나)를 합치는 날, 늦어도 2026-11-30 [가정], OPEN[52])');
-  assert.ok(!wallet[5].includes('한도 초과'), wallet[5]);
-  // 한도와 같으면 알림이 아니다(판정 칸이 pass인 기록)
-  const atLimit = { ...WALLET_WARN, median: { ...WALLET_WARN.median, lcpMs: 7255 }, verdict: { lcpMs: 'pass', cls: 'pass', tbtMs: 'pass' }, warnOnly: [] };
-  assert.equal(cellsOf(lighthouseTable([atLimit])[2])[5], '한도 안');
-  // 다른 화면은 같은 초과라도 경고 없이 한도 초과다(홈 LCP 한도 2,500ms)
-  const otherOver = { ...LH[0], median: { ...LH[0].median, lcpMs: 2600 } };
-  assert.equal(cellsOf(lighthouseTable([otherOver])[2])[5], '한도 초과: LCP');
+  assert.equal(wallet[5], '한도 초과: LCP');
+  assert.ok(!lighthouseTable([WALLET_OLD_WARN]).join('\n').includes('알림만'), '표 어디에도 알림만이 없다');
+});
+
+test('BAT-177-r2 T7 ① 월렛 LCP 한도 7,255ms는 넘으면 다른 지표처럼 실패다: 7,256은 한도 초과, 7,255는 한도 안', () => {
+  const at = (lcpMs, extra = {}) => cellsOf(lighthouseTable([{ ...WALLET, median: { ...WALLET.median, lcpMs }, limit: { ...WALLET.limit, lcpMs: 7255 }, ...extra }])[2])[5];
+  assert.equal(at(7256), '한도 초과: LCP');
+  assert.equal(at(7255), '한도 안');
+  // 기록의 판정 칸이 값과 어긋나도 값과 한도로만 판정한다(옛 'warn'·'pass'가 초과를 덮지 않고, 옛 'fail'이 한도 안을 실패로 만들지 않는다)
+  assert.equal(at(7256, { verdict: { lcpMs: 'warn', cls: 'pass', tbtMs: 'pass' } }), '한도 초과: LCP');
+  assert.equal(at(7256, { verdict: { lcpMs: 'pass', cls: 'pass', tbtMs: 'pass' } }), '한도 초과: LCP');
+  assert.equal(at(7255, { verdict: { lcpMs: 'fail', cls: 'pass', tbtMs: 'pass' } }), '한도 안');
 });
 
 const baselinePages = JSON.parse(readFileSync(new URL('./lighthouse-baseline.json', import.meta.url), 'utf8')).pages;
@@ -179,8 +185,8 @@ test('BAT-177 T9 ② 화면마다 실제 한도에서 한 지표만 넘으면 �
   assert.equal(pages.length, 8, '대표 주소는 여덟이다');
   for (const page of pages) {
     const limit = limitsOf(page);
-    // 월렛 LCP만 경고 대상이므로 표 판정은 월렛의 CLS·총 차단 시간만 본다(T7이 경고를 본다)
-    const metrics = page.name === '월렛' ? [['cls', 'CLS'], ['tbtMs', '총 차단 시간']] : [['lcpMs', 'LCP'], ['cls', 'CLS'], ['tbtMs', '총 차단 시간']];
+    // 월렛도 세 지표 모두 같은 경계다(BAT-177-r2에서 월렛 LCP 알림을 되돌렸다)
+    const metrics = [['lcpMs', 'LCP'], ['cls', 'CLS'], ['tbtMs', '총 차단 시간']];
     for (const [key, ko] of metrics) {
       const record = { name: page.name, row: page.row, runs: [], median: { lcpMs: 0, cls: 0, tbtMs: 0 }, limit };
       record.median[key] = Math.round((limit[key] + (key === 'cls' ? 0.01 : 1)) * 1000) / 1000;
