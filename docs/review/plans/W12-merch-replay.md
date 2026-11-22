@@ -281,7 +281,47 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 
 ## 검증
 
-검증 담당이 채운다.
+검증 담당(다른 세션 `lane5-w12merchreplay-verify`)이 2026-11-22 12:30~13:10에 같은 트리에서 돌렸다. Docker 잠금은 `C:\Program Files\Git\bin\bash.exe`로 `lock.sh take docker lane5-W12-merch-replay`를 잡아 표본까지 쓰고 놓았다(peaket 컨테이너 0).
+
+```bash
+corepack pnpm exec turbo run build --filter=@peaket/core-svc^... --filter=@peaket/payment-svc^...
+corepack pnpm --filter @peaket/core-svc typecheck
+corepack pnpm --filter @peaket/payment-svc typecheck
+corepack pnpm --filter @peaket/core-svc test
+PEAKET_TEST_REPORT=test-report-int.json corepack pnpm --filter @peaket/core-svc test:integration test-int/shop-replay.int.test.ts test-int/shop-order.int.test.ts test-int/shop-cancel.int.test.ts test-int/shop-expiry.int.test.ts test-int/shop-refund-account.int.test.ts test-int/shop-return.int.test.ts test-int/shop-unclaimed.int.test.ts test-int/shop-notify.int.test.ts test-int/shop-migration.int.test.ts test-int/idempotency-rls.int.test.ts test-int/idempotency-migration.int.test.ts
+corepack pnpm --filter @peaket/payment-svc test
+PEAKET_TEST_REPORT=payment-test-report-int.json corepack pnpm --filter @peaket/payment-svc test:integration test-int/merch-path-e2e.int.test.ts test-int/payment-merch-grpc.int.test.ts test-int/payment-checkout.int.test.ts
+corepack pnpm --filter @peaket/contracts gen:check
+corepack pnpm --filter @peaket/api-client gen:check
+corepack pnpm lint
+python -I -X utf8 tools/doc-check/check_all.py
+node tools/ci/trace-check.mjs --ids "P-T77" --report services/core-svc/test-report-int.json --report services/payment-svc/payment-test-report-int.json
+node tools/ci/ledger.mjs --batch W12-merch-replay --require
+```
+
+- build·typecheck 둘 다 0(코어·payment). `pnpm lint` 0. doc-check 오류 0(경고 4는 출발점과 같다: openapi 410/504 설명 3, mermaid 검사 건너뜀 1). 계약 생성물 `gen:check` 둘 다 0.
+- 코어 단위: 108파일 789/789. 대상 통합: 11파일 129/129(shop-replay 11, shop-order 23, shop-cancel 22, shop-expiry 12, shop-refund-account 10, shop-return 9, shop-unclaimed 10, shop-notify 14, shop-migration 8, idempotency-rls 8, idempotency-migration 2). payment 단위: 57파일 3,141/3,141. payment 대상 통합: 3파일 72/72(merch-path-e2e 5, payment-merch-grpc 38, payment-checkout 29).
+- `trace-check`: P-T77 통과 6(코어 통합 5·실제 연결 1, 두 보고서의 201개 시험을 봄). 단위 시험 5는 장부가 이름으로 세고, `trace-check` 보고서에는 통합만 실었다.
+- `ledger --batch W12-merch-replay --require`: 항목 5(P-T77 ①~⑤), 자동 시험 5, 빈칸·ID만·미검증·다른 단계 0. 등급 A 5.
+- P-T77 판정 기준과 단언 대조: ①은 기록의 `result_ref`·공개 키·주소·`checkout` 글자, ②는 `PrepareCheckout` 호출 수·`attemptId`·`pinnedPg`·금액·`payMethod`·`pgStore`와 바뀐 공개 키·주소·구매자 키, ③은 404 본문·`checkout` 호출·쓰기·로그 한 줄, ④는 네 실패 갈래의 503·쓰기 0·기록 그대로·같은 키 재시도, ⑤는 결제사·금액·주문 ID 불일치의 503·`field` 로그·쓰기 0을 본다. 어긋난 곳은 없다.
+- **payment-svc typecheck의 출발점 결함 하나**: `merch-path-e2e.int.test.ts`의 core-svc 조립에 W12-core-notify가 필수로 만든 `notifyDatabase`가 빠져 payment-svc typecheck가 실패했다. 이 묶음이 그 시험 파일을 이미 고치므로 `notifyDatabase: coreApp`을 더했다(제품 코드·단언 변화 없음, 시험 커밋 `8e92eb579`).
+
+**틀린 구현 표본(8개, 모두 잡힘)**
+
+| # | 항목 | 틀린 구현 | 실패한 시험 |
+| --- | --- | --- | --- |
+| M1 | ②·④·⑤ | `merch-payment.ts`에 응답 캐시를 두고 재생이 저장한 view를 그대로 돌려준다 | ②(바뀐 공개 키가 나오지 않음), ④(503 대신 201), ⑤(503 대신 201) — 3개 실패 |
+| M2 | ③ | 재생이 `attempt.orderId === 경로 주문`을 보지 않는다 | ③(다른 주문의 시도가 201) |
+| M3 | ④ | `CheckoutFailed`의 `unavailable`·`invalid`를 400 `checkout_invalid`로 답한다 | ④(503 기대, 400) |
+| M4 | ⑤ | `#checkReplay`가 결제창 금액을 주문 금액과 견주지 않는다 | ⑤(금액 +1,000원이 201) |
+| M5 | ① | 메모리 저장소가 `result_ref`에 `{attemptId, pg, clientKey, checkout}` JSON을 넣는다 | ①(기록이 시도 ID가 아님), ④(재생이 실패를 숨김) — 2개 실패 |
+| M6 | ② | `#prepareReplay`가 `pinnedPg`를 넘기지 않는다 | ②(마지막 `PrepareCheckout` 호출에 `pinnedPg` 없음) |
+| M7 | ③ | 재생이 `detail.order.accountId === accountId`를 보지 않는다 | ③(다른 계정의 재생이 201) |
+| M8 | ② | `attemptIdOf`가 옛 JSON 참조를 읽지 않고 UUID만 받는다 | ②(옛 JSON 참조의 재생이 404) |
+
+- 표본마다 `git checkout -- <파일>`로 되돌렸고, 끝난 뒤 `git status --short`가 비었다. DB 저장소(`drizzle-merch-orders.ts`)의 같은 한 줄 표본은 메모리 표본(M5)과 같은 자리라 따로 돌리지 않았고, 통합 ①이 DB에서 같은 단언을 본다.
+- **놓친 표본**: 없다. M1의 캐시가 '저장값을 그대로 돌려주기'를, M8이 '옛 참조를 버리기'를 맡는다.
+- **남은 위험**: RV-01(주문·시도 행 무결성), RV-03(포트원 `paymentId` 규격 밖), RV-04(배포 창). 계획 §12와 ADR-0352에 적었다.
 
 ## 담당 표
 
