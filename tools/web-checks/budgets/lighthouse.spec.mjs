@@ -5,9 +5,8 @@
 // INP는 재지 않는다(탐색 모드는 조작이 없어 INP를 내지 못한다, §5.8). 랩 값이라 '랩 판정'이 아니라 회귀 방지다.
 // 목표를 넘은 주소는 wbs 7.5.2까지 기준선 + 여유를 넘지 않게만 막는다.
 // 회차마다 LCP 요소·네 구간(TTFB·불러오기 지연·불러오기·그리기 지연)을 runs[].lcp에 남기고, 가운데 값 회차를 lcpSummary로 요약한다(BAT-177).
-// 월렛 LCP만 임시 알림(OPEN[52], BAT-176): 지표마다 limits.mjs loadVerdict로 판정하고, 알림이면 실패 대신 시험 주석·경고 줄·기록 파일의 verdict·warnOnly에 남긴다.
-// PR #42 CI에서 월렛 LCP 8,120ms > 한도 7,255ms라 I2(임시 알림 제거)를 보류했다(2026-11-19 감독 결정). 한도·기준선은 그대로다.
-// 어느 화면·지표를 언제까지 알림으로 둘지는 이 파일에 박지 않는다(limits.mjs WARN_ONLY).
+// 월렛 LCP 임시 알림(OPEN[52] (다), BAT-176)은 BAT-177-r2에서 되돌렸다: 모든 화면의 세 지표가 한도를 넘으면 그대로 실패다.
+// 앞 서버가 /_next/static/에 압축을 넘긴 뒤(ADR-0359) 초안 PR #65 CI에서 월렛 LCP 가운데 값 3,850ms ≤ 한도 7,255ms. 한도·기준선은 그대로다.
 // 기록 파일을 먼저 쓴 뒤에 판정한다. 월렛만 lcpSummary가 비면 expect.soft로 실패하고, 다른 화면은 기록만 한다.
 import { test, expect, chromium } from '@playwright/test';
 import lighthouse from 'lighthouse';
@@ -17,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { HOST } from '../seed-css/apps.mjs';
 import { loadLoadTargets, loadTbtLimitMs } from '../lib/canon.mjs';
 import { lighthousePages } from './pages.mjs';
-import { RUNS, loadLimit, loadVerdict, median } from './limits.mjs';
+import { RUNS, loadLimit, median } from './limits.mjs';
 import { lcpSummary, readLcp } from './lcp.mjs';
 
 const targets = loadLoadTargets();
@@ -35,12 +34,6 @@ const METRICS = [
   ['cls', 'CLS', (v) => v.toFixed(3), ''],
   ['tbtMs', '총 차단 시간', (v) => `${Math.round(v)}`, 'ms'],
 ];
-
-/** GitHub Actions 경고 줄(실행 화면에 노란 표시). 값의 %·줄바꿈은 워크플로 명령 규칙대로 바꾼다 */
-const ghEscape = (t) => t.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
-function warnLine(text) {
-  console.log(process.env.GITHUB_ACTIONS === 'true' ? `::warning title=Lighthouse 알림만::${ghEscape(text)}` : `경고(Lighthouse 알림만): ${text}`);
-}
 
 /** Lighthouse가 쓰는 그 puppeteer-core(새 패키지를 들이지 않는다). 탭 저장소는 탭마다 따로라 Lighthouse에 넘길 탭을 먼저 만들어 넣는다 */
 const puppeteer = createRequire(realpathSync(fileURLToPath(new URL('../node_modules/lighthouse/package.json', import.meta.url))))('puppeteer-core');
@@ -75,8 +68,6 @@ test.afterAll(async () => {
 
 for (const page of lighthousePages(HOST)) {
   test(`§5.8 Lighthouse ${page.name}: 가운데 값의 LCP·CLS·총 차단 시간이 한도 안이다`, async () => {
-    // 되돌릴 날 판정에 쓰는 시계는 시험마다 하나다(loadVerdict가 한국 시각 날짜로 바꿔 견준다)
-    const now = new Date();
     const runs = [];
     for (let i = 0; i < RUNS; i++) {
       const seeded = page.sessionStorage ? await tabWithSessionStorage(page.sessionStorage) : null;
@@ -95,16 +86,8 @@ for (const page of lighthousePages(HOST)) {
     const row = { cls: NFR_012_CLS, ...targets.get(page.row) };
     const base = baseline[page.name] ?? {};
     const limit = { lcpMs: loadLimit(row.lcpMs, base.lcpMs, 'lcpMs'), cls: loadLimit(row.cls, base.cls, 'cls'), tbtMs: loadLimit(tbtMs, base.tbtMs, 'tbtMs') };
-    // 지표마다 판정(pass·warn·fail). 한도 값은 그대로 두고, 알림만 항목(limits.mjs WARN_ONLY)에 맞고 되돌릴 날 안일 때만 warn이다
-    const verdict = {};
-    const warnOnly = [];
-    for (const [k] of METRICS) {
-      const v = loadVerdict({ page: page.name, metric: k, value: got[k], limit: limit[k], now });
-      verdict[k] = v.verdict;
-      if (v.verdict === 'warn') warnOnly.push({ metric: k, until: v.until, reason: v.reason });
-    }
     mkdirSync(outDir, { recursive: true });
-    const record = { name: page.name, url: page.url, row: page.row, runs, median: got, target: { ...row, tbtMs }, limit, verdict, warnOnly, lcpSummary: lcpSummary(runs) };
+    const record = { name: page.name, url: page.url, row: page.row, runs, median: got, target: { ...row, tbtMs }, limit, lcpSummary: lcpSummary(runs) };
     // 기록 파일을 먼저 쓴다. LCP 분해를 읽지 못해도 기록(값·판정 근거)을 잃지 않는다(BAT-177).
     writeFileSync(new URL(`${page.name.replace(/\s+/g, '_')}.json`, outDir), `${JSON.stringify(record)}\n`);
     // 월렛만 LCP 요소·분해가 기록됐는지 본다. 다른 화면은 기록만 하고 실패하지 않는다.
@@ -113,13 +96,6 @@ for (const page of lighthousePages(HOST)) {
     }
     for (const [k, ko, fmt, unit] of METRICS) {
       const msg = `${page.name} ${ko} ${fmt(got[k])}${unit} > 한도 ${limit[k]}${unit}`;
-      if (verdict[k] === 'warn') {
-        const w = warnOnly.find((e) => e.metric === k);
-        const text = `${msg}: 실패 대신 알림만(${w.reason}, 되돌릴 날 ${w.until} 한국 시각 끝까지)`;
-        test.info().annotations.push({ type: 'warning', description: text });
-        warnLine(text);
-        continue;
-      }
       expect.soft(got[k], msg).toBeLessThanOrEqual(limit[k]);
     }
   });

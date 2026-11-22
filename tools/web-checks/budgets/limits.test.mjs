@@ -2,7 +2,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { JS_OVER_BUDGET_MARGIN, LOAD_MARGIN, RUNS, WARN_ONLY, jsLimit, kstDate, loadLimit, loadVerdict, median } from './limits.mjs';
+import { JS_OVER_BUDGET_MARGIN, LOAD_MARGIN, RUNS, jsLimit, loadLimit, median } from './limits.mjs';
+// 내보내기 목록을 보는 시험(BAT-177-r2 T6 ①)이 이름공간으로 읽는다
+import * as limitsModule from './limits.mjs';
 import { loadJsBudgets, loadLoadTargets, loadTbtLimitMs, parseJsBudgets, parseLoadTargets, parseTbtLimitMs } from '../lib/canon.mjs';
 import { scriptSrcs } from '../seed-css/apps.mjs';
 import { lighthousePages } from './pages.mjs';
@@ -146,88 +148,28 @@ test('BAT-174 lighthouse.spec.mjs는 RUNS만큼 재고 median으로 LCP·CLS·�
   assert.doesNotMatch(src, /runs\.at\(|runs\[runs\.length/, '마지막 실행 값으로 판정하지 않는다');
 });
 
-// BAT-177: 월렛 LCP 임시 알림(BAT-176)은 PR #42 CI 8,120ms > 한도 7,255ms로 I2를 보류해 유지한다
-// (docs/frontend.md §5.8 'Lighthouse CI', 계획 docs/review/plans/BAT-177.md 5의 T7~T10).
-// 단언 값은 정본 문장(한도 7,255ms = 기준선 5,804ms × 1.25, 되돌릴 날 2026-11-30 한국 시각 끝, 첫 JS 한도 161.6kB)과
-// 계획 5의 숫자다. 코드 상수를 정답으로 가져오지 않는다.
+// BAT-177-r2(OPEN[52] (나), ADR-0359): 월렛 LCP 임시 알림(BAT-176)을 되돌린다. 초안 PR #65 CI(실행 45048960248)에서
+// 월렛 LCP 가운데 값 3,850ms ≤ 한도 7,255ms라 계획 docs/review/plans/BAT-177-r2.md 5의 T6·T7대로 알림 없이 실패로 판정한다.
+// 단언 값은 정본 문장(한도 7,255ms = 기준선 5,804ms × 1.25, 첫 JS 한도 161.6kB)과 계획 4·5의 숫자다. 코드 상수를 정답으로 가져오지 않는다.
 const stripComments = (src) =>
   src
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .split('\n')
     .filter((l) => !l.trim().startsWith('//'))
     .join('\n');
-const at = (iso) => new Date(iso);
-const WALLET_LCP_OVER = { page: '월렛', metric: 'lcpMs', value: 8040, limit: 7255 };
 
-test('BAT-177 T7 ① 알림만 목록은 월렛 LCP 하나뿐이고 되돌릴 날은 2026-11-30이다', () => {
-  assert.deepEqual(
-    WARN_ONLY.map(({ page, metric, until }) => ({ page, metric, until })),
-    [{ page: '월렛', metric: 'lcpMs', until: '2026-11-30' }],
-  );
-  assert.ok(Object.isFrozen(WARN_ONLY), '목록이 얼어 있어야 한다');
-  for (const e of WARN_ONLY) assert.ok(Object.isFrozen(e), '항목이 얼어 있어야 한다');
-  const wallet = WARN_ONLY.find((e) => e.page === '월렛' && e.metric === 'lcpMs');
-  assert.ok(wallet, '월렛 LCP 항목이 있어야 한다');
-  for (const s of ['임시', '되돌릴 날', '(나)를 합치는 날', '2026-11-30', 'OPEN[52]']) assert.ok(wallet.reason.includes(s), `문구에 '${s}'가 없다: ${wallet.reason}`);
+test('BAT-177-r2 T6 ① limits.mjs는 임시 알림(목록·한국 시각 날짜·판정)을 내보내지 않고 한도 계산만 내보낸다', () => {
+  for (const name of ['WARN_ONLY', 'kstDate', 'loadVerdict']) assert.equal(name in limitsModule, false, `limits.mjs가 ${name}를 내보내지 않아야 한다`);
+  // 계획 4: I2 뒤 내보내기는 이 여섯뿐이다
+  assert.deepEqual(Object.keys(limitsModule).sort(), ['JS_OVER_BUDGET_MARGIN', 'LOAD_MARGIN', 'RUNS', 'jsLimit', 'loadLimit', 'median']);
 });
 
-test('BAT-177 T7 ② 월렛 LCP가 한도를 넘으면 경고이고 한도 값은 7,255ms 그대로다', () => {
-  assert.equal(loadLimit(undefined, 5804, 'lcpMs'), 7255);
-  const lh = JSON.parse(readFileSync(new URL('./lighthouse-baseline.json', import.meta.url), 'utf8')).pages;
-  assert.equal(lh['월렛'].lcpMs, 5804, '월렛 기준선은 5,804ms 그대로다');
-  const now = at('2026-11-19T12:00:00+09:00');
-  const v = loadVerdict({ ...WALLET_LCP_OVER, now });
-  assert.equal(v.verdict, 'warn');
-  assert.equal(v.until, '2026-11-30');
-  assert.ok(v.reason.includes('OPEN[52]'), v.reason);
-  // 한도 경계 양쪽: 한도와 같으면 통과, 1ms 넘으면 경고(여유를 더하지 않는다)
-  assert.deepEqual(loadVerdict({ ...WALLET_LCP_OVER, value: 7255, now }), { verdict: 'pass' });
-  assert.equal(loadVerdict({ ...WALLET_LCP_OVER, value: 7256, now }).verdict, 'warn');
-  assert.deepEqual(loadVerdict({ ...WALLET_LCP_OVER, value: 5400, now }), { verdict: 'pass' });
-});
-
-test('BAT-177 T7 ③ 되돌릴 날 경계: 한국 시각 2026-11-30 끝까지 경고, 다음 날부터 실패', () => {
-  for (const iso of ['2026-11-30T00:00:00+09:00', '2026-11-30T23:59:59+09:00', '2026-11-30T23:59:59.999+09:00', '2026-11-30T14:59:59Z']) {
-    assert.equal(loadVerdict({ ...WALLET_LCP_OVER, now: at(iso) }).verdict, 'warn', `${iso}는 아직 한국 시각 2026-11-30이라 경고다`);
-  }
-  // 2026-11-30T15:00:00Z는 UTC 날짜로는 아직 11-30이지만 한국 시각으로는 12-01 0시다
-  for (const iso of ['2026-12-01T00:00:00+09:00', '2026-11-30T15:00:00Z', '2026-12-15T12:00:00+09:00', '2027-01-01T00:00:00+09:00']) {
-    assert.deepEqual(loadVerdict({ ...WALLET_LCP_OVER, now: at(iso) }), { verdict: 'fail' }, `${iso}는 되돌릴 날이 지나 실패다`);
-  }
-  assert.equal(kstDate(at('2026-11-30T15:00:00Z')), '2026-12-01');
-  assert.equal(kstDate(at('2026-11-30T14:59:59.999Z')), '2026-11-30');
-  assert.equal(kstDate(at('2026-11-19T00:00:00+09:00')), '2026-11-19');
-  // 되돌릴 날이 지나도 한도 안이면 통과다
-  assert.deepEqual(loadVerdict({ ...WALLET_LCP_OVER, value: 7000, now: at('2026-12-01T00:00:00+09:00') }), { verdict: 'pass' });
-});
-
-test('BAT-177 T7 ④ 시계가 없거나 망가졌거나 되돌릴 날이 없는 항목은 경고로 새지 않고 던진다', () => {
-  assert.throws(() => loadVerdict({ ...WALLET_LCP_OVER }));
-  assert.throws(() => loadVerdict({ ...WALLET_LCP_OVER, now: new Date('x') }));
-  assert.throws(() => loadVerdict({ ...WALLET_LCP_OVER, now: '2026-11-19' }));
-  assert.throws(() => loadVerdict({ ...WALLET_LCP_OVER, now: Date.parse('2026-11-19T12:00:00+09:00') }), '숫자 시각도 Date가 아니다');
-  assert.throws(() => kstDate(new Date('x')));
-  assert.throws(() => kstDate(undefined));
-  const now = at('2026-11-19T12:00:00+09:00');
-  const good = { page: '월렛', metric: 'lcpMs', until: '2026-11-25', reason: '시험용 까닭' };
-  // 시험용 항목 자체는 경고가 된다(아래 망가진 항목과 대조)
-  assert.deepEqual(loadVerdict({ ...WALLET_LCP_OVER, now, warnOnly: [good] }), { verdict: 'warn', until: '2026-11-25', reason: '시험용 까닭' });
-  const { until: _until, ...noUntil } = good;
-  for (const bad of [noUntil, { ...good, until: '11/30' }, { ...good, until: '2026-11-30T23:59' }, { ...good, reason: '' }, { ...good, reason: '   ' }]) {
-    assert.throws(() => loadVerdict({ ...WALLET_LCP_OVER, now, warnOnly: [bad] }), `망가진 항목 ${JSON.stringify(bad)}`);
-  }
-});
-
-test('BAT-177 T7 ⑤ lighthouse.spec.mjs는 월렛만 loadVerdict로 경고하고 기록 파일을 먼저 쓴다', () => {
+test('BAT-177-r2 T6 ③ lighthouse.spec.mjs에 알림 고리가 없고, 기록 파일을 먼저 쓴 뒤 지표마다 한도와 견준다', () => {
   const spec = stripComments(readFileSync(new URL('./lighthouse.spec.mjs', import.meta.url), 'utf8'));
-  assert.match(spec, /import \{[^}]*\bloadVerdict\b[^}]*\} from '\.\/limits\.mjs'/);
-  assert.match(spec, /loadVerdict\(\{[^}]*page: page\.name[^}]*\bnow\b[^}]*\}\)/, '화면 이름과 시계를 넘겨 판정한다');
-  assert.match(spec, /if \(verdict\[k\] === 'warn'\)/, '경고인 지표만 실패 갈래를 건너뛴다');
-  assert.match(spec, /annotations\.push\(\{ type: 'warning'/, '경고를 시험 주석에 남긴다');
-  assert.ok(spec.includes('::warning title=Lighthouse 알림만::'), '잡 로그에 경고 줄을 남긴다');
-  assert.ok(spec.includes('expect.soft('), '실패 갈래가 남아 있다');
-  assert.ok(spec.includes('toBeLessThanOrEqual(limit'), '한도와 견주는 실패 갈래가 남아 있다');
-  assert.match(spec, /const record = \{.*\blimit, verdict, warnOnly, lcpSummary: lcpSummary\(runs\) \};/, '기록 파일에 경고 판정과 LCP 요약을 함께 쓴다');
+  for (const s of ['loadVerdict', 'warnLine', '::warning', 'warnOnly', 'WARN_ONLY', "type: 'warning'", 'verdict[']) assert.ok(!spec.includes(s), `spec에 '${s}'가 남아 있다`);
+  assert.doesNotMatch(spec, /import \{[^}]*\bloadVerdict\b[^}]*\} from '\.\/limits\.mjs'/);
+  assert.match(spec, /const record = \{[^\n]*\blimit, lcpSummary: lcpSummary\(runs\) \};/, '기록 파일에 판정 칸 없이 값·한도·LCP 요약을 쓴다');
+  assert.equal(spec.match(/expect\.soft\(got\[k\], msg\)\.toBeLessThanOrEqual\(limit\[k\]\);/g)?.length, 1, '지표마다 한도와 견주는 줄이 하나 있다');
   assert.ok(spec.indexOf('writeFileSync(') < spec.indexOf("page.name === '월렛'"), '기록 파일을 먼저 쓰고 월렛 lcpSummary를 본다');
   assert.ok(spec.indexOf('writeFileSync(') < spec.indexOf('expect.soft(got[k]'), '기록 파일을 먼저 쓰고 판정한다');
 });
@@ -240,44 +182,7 @@ test('BAT-177 T8 ① 한도 7,255ms·기준선 5,804ms·RUNS 5·여유는 그대
   assert.deepEqual(LOAD_MARGIN, { ms: 0.25, cls: 0.02 });
 });
 
-test('BAT-177 T7 ⑥ spec의 경고 분기는 continue로 끝나 월렛 초과를 expect.soft로 보내지 않는다', () => {
-  const spec = stripComments(readFileSync(new URL('./lighthouse.spec.mjs', import.meta.url), 'utf8'));
-  const start = spec.indexOf("if (verdict[k] === 'warn')");
-  const assertAt = spec.indexOf('expect.soft(got[k]', start);
-  assert.ok(start >= 0 && assertAt > start, '경고 분기 뒤에 지표 판정이 있다');
-  const branch = spec.slice(start, assertAt);
-  assert.match(branch, /warnOnly\.find\(/, '경고 사유를 찾는다');
-  assert.match(branch, /warnLine\(text\)/, '잡 로그에 경고 줄을 남긴다');
-  assert.match(branch, /continue;/, '경고는 실패 갈래로 가지 않고 다음 지표로 넘어간다');
-  assert.equal(spec.match(/expect\.soft\(got\[k\], msg\)\.toBeLessThanOrEqual\(limit\[k\]\);/g)?.length, 1, '경고가 아닌 지표만 한도와 견준다');
-});
-
-test('BAT-177 T9 ① 월렛 CLS·총 차단 시간과 다른 일곱 화면의 세 지표는 경고 없이 실패다', () => {
-  const now = at('2026-11-19T12:00:00+09:00');
-  const pages = lighthousePages('h').map((p) => p.name);
-  assert.equal(pages.length, 8, '대표 주소는 여덟이다');
-  const others = pages.filter((n) => n !== '월렛');
-  assert.equal(others.length, 7, '월렛을 뺀 대표 주소는 일곱이다');
-  // 한도는 월렛과 같은 값으로 두어 화면 이름으로만 갈리는지 본다
-  const limits = { lcpMs: 7255, cls: 0.1, tbtMs: 200 };
-  const over = { lcpMs: 1, cls: 0.01, tbtMs: 1 };
-  for (const page of others) {
-    for (const metric of ['lcpMs', 'cls', 'tbtMs']) {
-      assert.deepEqual(loadVerdict({ page, metric, value: limits[metric] + over[metric], limit: limits[metric], now }), { verdict: 'fail' }, `${page} ${metric}: 한도 + 1은 실패다`);
-      assert.deepEqual(loadVerdict({ page, metric, value: limits[metric], limit: limits[metric], now }), { verdict: 'pass' }, `${page} ${metric}: 한도 그대로는 통과다`);
-    }
-  }
-  // 월렛도 LCP만 경고이고 CLS·총 차단 시간은 언제나 실패다(계획 5의 0.2/0.1, 300/200)
-  assert.deepEqual(loadVerdict({ page: '월렛', metric: 'cls', value: 0.2, limit: 0.1, now }), { verdict: 'fail' });
-  assert.deepEqual(loadVerdict({ page: '월렛', metric: 'tbtMs', value: 300, limit: 200, now }), { verdict: 'fail' });
-  assert.deepEqual(loadVerdict({ page: '월렛', metric: 'cls', value: 0.1, limit: 0.1, now }), { verdict: 'pass' });
-  assert.deepEqual(loadVerdict({ page: '월렛', metric: 'tbtMs', value: 200, limit: 200, now }), { verdict: 'pass' });
-  // 화면과 지표가 둘 다 맞아야 한다: 이름이 조금 다르거나 지표 이름이 다르면 경고가 아니다
-  assert.equal(loadVerdict({ ...WALLET_LCP_OVER, page: '월렛 ', now }).verdict, 'fail');
-  assert.equal(loadVerdict({ ...WALLET_LCP_OVER, metric: 'LCP', now }).verdict, 'fail');
-});
-
-test('BAT-177 T9 ③ spec은 모든 화면 × 세 지표를 판정하고 지표 loop에서 화면별로 건너뛰지 않는다', () => {
+test('BAT-177 T9 ③ spec은 모든 화면 × 세 지표를 판정하고 지표 loop에서 건너뛰지 않는다(BAT-177-r2: 경고 갈래 없음)', () => {
   const spec = stripComments(readFileSync(new URL('./lighthouse.spec.mjs', import.meta.url), 'utf8'));
   const loopStart = spec.indexOf('for (const [k, ko, fmt, unit] of METRICS) {');
   assert.ok(loopStart >= 0, '지표 판정 loop가 있다');
@@ -296,10 +201,9 @@ test('BAT-177 T9 ③ spec은 모든 화면 × 세 지표를 판정하고 지표 
   }
   assert.ok(loopEnd > loopStart, '지표 loop의 끝을 찾는다');
   const body = spec.slice(loopStart, loopEnd + 1);
-  assert.equal(body.match(/continue;/g)?.length, 1, '지표 loop의 continue는 경고 분기 하나뿐이다');
-  assert.doesNotMatch(body, /if \(page\.name/, '화면 이름으로 지표 판정을 건너뛰지 않는다');
-  assert.match(body, /if \(verdict\[k\] === 'warn'\) \{[\s\S]*?continue;[\s\S]*?\}/, '경고인 지표만 건너뛴다');
-  assert.match(body, /expect\.soft\(got\[k\], msg\)\.toBeLessThanOrEqual\(limit\[k\]\);/, '나머지 지표는 한도와 견준다');
+  assert.equal(body.match(/\bcontinue\b/g)?.length ?? 0, 0, '지표 loop에 continue가 없다');
+  assert.doesNotMatch(body, /\bif \(/, '지표 loop에 갈래가 없다(화면·지표·판정 칸으로 건너뛰지 않는다)');
+  assert.match(body, /expect\.soft\(got\[k\], msg\)\.toBeLessThanOrEqual\(limit\[k\]\);/, '모든 지표를 한도와 견준다');
   // 세 지표를 모두 돈다
   for (const key of ['lcpMs', 'cls', 'tbtMs']) assert.ok(spec.includes(`['${key}',`), `METRICS에 ${key}가 있다`);
 });
