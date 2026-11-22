@@ -80,7 +80,7 @@
   - 번호: ADR 0351부터, core-svc 마이그레이션 0043, 시험 ID AZ-T19, 기록 R-757·R-758.
   - 이 PC의 기본 `bash`는 WSL이라 `D:/ticketpass-locks/lock.sh`를 못 찾는다. 잠금은 `C:\Program Files\Git\bin\bash.exe`로 실행한다(다른 갈래도 같다).
   - 장부 생성물 `docs/review/ledger/*.md`가 합치기로 낡았다(줄 번호 밀림). 이번 묶음들을 합친 뒤 `node tools/ci/ledger.mjs`로 한 번에 재생성해 `docs(ledger)`로 커밋한다.
-  - 2026-11-22 20시 마감: R-750~R-772를 모두 합쳤고 `develop` CI success(`0ca2a30fb`). 갈래 3·5의 웨이브 12 목록 완료. 계약 깨짐 23건은 소유자 승인 2026-11-22(breaking-approved)로 허용 목록에 기록. 남은 것은 갈래 1 BAT-215 결정 대기, BAT-177(11-30), 갈래 4 배포 묶음. 다음 번호: R-773, ADR 0354, core 마이그레이션 0047, payment 0027, identity 0038, ticket 0011.
+  - 2026-11-22 20시 마감: R-750~R-772를 모두 합쳤고 `develop` CI success(`0ca2a30fb`). 갈래 3·5의 웨이브 12 목록 완료. 계약 깨짐 23건은 소유자 승인 2026-11-22(breaking-approved)로 허용 목록에 기록. 남은 것은 갈래 1 BAT-215 결정 대기, BAT-177(11-30), 갈래 4 배포 묶음. 다음 번호: R-773, ADR 0355(0354는 다른 세션의 '전환점 뒤 기능 단위 수직 개발'), core 마이그레이션 0047, payment 0027, identity 0038, ticket 0011.
 
 ## SEG 때 정할 범위 늘어남(ADR-0283 결정 6)
 - 묶음 중에 더한 새 단계는 wbs.csv 일수에 바로 더하지 않고 여기 모아 구간 마무리 때 소유자가 한 번에 정한다(앞선 예: HOT-405 0.75일, 2026-11-18 OPEN[49]).
