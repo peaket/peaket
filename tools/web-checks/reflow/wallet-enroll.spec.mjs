@@ -91,3 +91,30 @@ test.describe(() => {
     expect(await storedKeys(page)).toBe(0);
   });
 });
+
+// F-05-1 구현 결함 2 재현(감독 지시, 2026-11-23): 데스크톱 안내의 ( 그래도 이 기기에 등록 › )을 누르면 실제로 등록한다.
+// 정본: docs/features/offline-gate.md §2 '데스크톱 브라우저로 보이면 … 먼저 보인다 … 사용자가 원하면 데스크톱에서도 등록할 수 있다',
+// docs/design/d5-screen-blueprint.md §5.13 '( 그래도 이 기기에 등록 › )', ADR-0363 결정 10('데스크톱 안내와 같은 꼴' — iOS 탭의 ( 그래도 이 브라우저에 등록 › )은 등록한다)
+test.describe(() => {
+  test.use({ userAgent: WINDOWS_CHROME });
+  test('O-T32 기본 폭: 데스크톱 안내에서 ( 그래도 이 기기에 등록 › )을 누르면 이 기기에 키를 만들어 등록을 보낸다', async ({ page, context }) => {
+    await fanApi(context);
+    expect((await page.goto(`${WEB}${TICKET}`))?.status()).toBe(200);
+    await expect(page.getByRole('button', { name: '지금 동기화' })).toBeVisible();
+    expect(await storedKeys(page)).toBe(0);
+    await page.getByRole('button', { name: `${SEAT}, 그래도 이 기기에 등록` }).click();
+    // 이 기기에 키가 생긴다(등록 흐름은 키를 '확인 전'으로 먼저 저장한 뒤 보낸다, docs/frontend.md §4.2.4)
+    await expect.poll(() => storedKeys(page), { timeout: 15_000, message: '그래도 이 기기에 등록을 눌렀는데 키를 만들지 않았다(토스트만)' }).toBe(1);
+    // 등록 요청 수는 아래 시험이 본다(Windows WebKit은 요청 대역이 교차 출처 POST를 받지 못한다)
+  });
+});
+
+test('O-T32 기본 폭: 데스크톱 ( 그래도 이 기기에 등록 › )은 기기 키 등록 POST를 한 번 보낸다', async ({ page, context, browserName }) => {
+  // skip-until: 2027-06-30 Windows WebKit은 context.route가 교차 출처 POST를 받지 못한다(F-05-1). 키 생성은 위 시험이 세 엔진에서 본다
+  test.skip(browserName === 'webkit', '요청 대역이 WebKit의 교차 출처 POST를 받지 못한다');
+  const calls = await fanApi(context);
+  expect((await page.goto(`${WEB}${TICKET}`))?.status()).toBe(200);
+  await expect(page.getByRole('button', { name: '지금 동기화' })).toBeVisible();
+  await page.getByRole('button', { name: `${SEAT}, 그래도 이 기기에 등록` }).click();
+  await expect.poll(() => calls, { timeout: 15_000, message: '그래도 이 기기에 등록을 눌렀는데 등록 요청이 없다' }).toEqual(['POST']);
+});
