@@ -28,7 +28,6 @@ import {
   type CompensationLog,
   type CompensationPaymentAnswer,
   type CompensationSignals,
-  type CompensationStatus,
   type OrderCompensation,
   type PaymentCancelAnswerName,
   type PaymentCompensator,
@@ -123,19 +122,21 @@ export class FenceCompensation {
   constructor(private readonly o: FenceCompensationDeps) {}
 
   /** @throws Error 보상 행이 없거나 STARTED가 아님, 포트가 던진 것 */
-  async run(input: { readonly orderId: string }): Promise<FenceCompensationAnswer> {
+  async run(input: { readonly orderId: string; readonly leaseUntilMs?: number }): Promise<FenceCompensationAnswer> {
     const row = await this.o.store.get(input.orderId);
     if (!row) throw new Error('보상 행이 없다');
     if (row.status !== 'STARTED') {
       if (row.status === 'FENCED' || row.status === 'COMPENSATED') return { blocked: true, alreadyEntered: 0 };
       throw new Error(`발권을 막을 수 있는 보상 상태가 아니다: ${row.status}`);
     }
+    // 실행기가 claimDue에서 받은 자기 임대를 우선 쓴다. 다시 읽은 행의 새 임대를 채택하지 않는다(RV-02)
+    const lease = input.leaseUntilMs ?? row.leaseUntilMs;
     const answer = await this.o.fence.block({ orderId: row.orderId, reason: row.reason, deadlineMs: COMPENSATION_FENCE_DEADLINE_MS });
     const alreadyEntered = answer.alreadyEntered ?? answer.already_entered ?? 0;
     const written = await this.o.store.fenced({
       orderId: row.orderId,
       nowMs: timeOf(this.o),
-      ...(row.leaseUntilMs === undefined ? {} : { leaseUntilMs: row.leaseUntilMs }),
+      ...(lease === undefined ? {} : { leaseUntilMs: lease }),
     });
     if (!written) throw new Error('보상 행을 FENCED로 쓰지 못했다(다른 실행이 잡았거나 끝냈다)');
     const log = this.o.log ?? noopCompensationLog;
@@ -185,11 +186,13 @@ export class CancelCompensation {
   /**
    * @throws Error 보상 행이 없거나 결제 취소를 부를 상태가 아님(STARTED·FAILED), 결제 포트가 던진 것
    */
-  async run(input: { readonly orderId: string }): Promise<void> {
+  async run(input: { readonly orderId: string; readonly leaseUntilMs?: number }): Promise<void> {
     const row = await this.o.store.get(input.orderId);
     if (!row) throw new Error('보상 행이 없다');
     if (row.status === 'STARTED') throw new Error('발권 막기가 끝나지 않아 결제 취소를 부르지 않는다');
     if (row.status === 'FAILED') throw new Error('이미 실패로 끝난 보상이다');
+    // 실행기가 claimDue에서 받은 자기 임대를 우선 쓴다. 다시 읽은 행의 새 임대를 채택하지 않는다(RV-02)
+    const lease = input.leaseUntilMs ?? row.leaseUntilMs;
     const nowMs = timeOf(this.o);
     const answer = await this.o.payments.cancel({
       orderId: row.orderId,
@@ -204,7 +207,7 @@ export class CancelCompensation {
         orderId: row.orderId,
         nowMs,
         ...(kind.paymentId === undefined && row.paymentId === undefined ? {} : { paymentId: kind.paymentId ?? row.paymentId }),
-        ...(row.leaseUntilMs === undefined ? {} : { leaseUntilMs: row.leaseUntilMs }),
+        ...(lease === undefined ? {} : { leaseUntilMs: lease }),
       });
       if (written.status === 'COMPENSATED') {
         (this.o.signals ?? noopCompensationSignals).result('compensated');
@@ -212,7 +215,7 @@ export class CancelCompensation {
       }
       if (written.status === 'LEASE_LOST') throw new Error('보상 행의 임대를 잃었다(다른 실행이 이어 받는다)');
       // 주문이 APPROVED가 아니다: 결제는 취소됐을 수 있어 사람에게 넘긴다
-      await this.#failed(row, 'ORDER_STALE', nowMs);
+      await this.#failed(row, 'ORDER_STALE', nowMs, lease);
       throw new Error('주문이 APPROVED가 아니라 T20을 쓰지 못했다');
     }
     if (kind.kind === 'RETRY') {
@@ -223,20 +226,20 @@ export class CancelCompensation {
         nextAtMs: nowMs + delay,
         nowMs,
         ...(kind.paymentId === undefined ? {} : { paymentId: kind.paymentId }),
-        ...(row.leaseUntilMs === undefined ? {} : { leaseUntilMs: row.leaseUntilMs }),
+        ...(lease === undefined ? {} : { leaseUntilMs: lease }),
       });
       (this.o.signals ?? noopCompensationSignals).result('retry');
       return;
     }
-    await this.#failed(row, kind.code ?? 'REJECTED', nowMs);
+    await this.#failed(row, kind.code ?? 'REJECTED', nowMs, lease);
   }
 
-  async #failed(row: OrderCompensation, code: string, nowMs: number): Promise<void> {
+  async #failed(row: OrderCompensation, code: string, nowMs: number, lease: number | undefined): Promise<void> {
     const written = await this.o.store.failed({
       orderId: row.orderId,
       code,
       nowMs,
-      ...(row.leaseUntilMs === undefined ? {} : { leaseUntilMs: row.leaseUntilMs }),
+      ...(lease === undefined ? {} : { leaseUntilMs: lease }),
     });
     if (!written) return;
     (this.o.signals ?? noopCompensationSignals).result('failed');
@@ -352,20 +355,24 @@ export class CompensationRunner {
     return { claimed: rows.length, fenced, compensated, retried, failed, measured };
   }
 
-  /** 행 하나. STARTED면 발권 막기부터, 그 뒤 결제 취소. 던지지 않는다 */
+  /** 행 하나. STARTED면 발권 막기부터, 그 뒤 결제 취소. 잡은 임대를 쓰임새에 그대로 넘긴다(RV-02). 던지지 않는다 */
   async #runRow(row: OrderCompensation): Promise<'fenced' | 'compensated' | 'retried' | 'failed' | 'none'> {
+    // claimDue가 받은 자기 임대. 다시 읽은 행의 새 임대를 채택하지 않는다
+    const lease = row.leaseUntilMs;
+    const leaseInput = lease === undefined ? {} : { leaseUntilMs: lease };
     let current = row;
     if (current.status === 'STARTED') {
       try {
-        await this.deps.fence.run({ orderId: current.orderId });
+        await this.deps.fence.run({ orderId: current.orderId, ...leaseInput });
       } catch (err) {
         return this.#failure(current, err, 'fence');
       }
-      current = (await this.deps.jobs.get(current.orderId)) ?? { ...current, status: 'FENCED' as CompensationStatus };
+      const after = await this.deps.jobs.get(current.orderId);
+      current = { ...(after ?? current), status: after?.status ?? 'FENCED', ...leaseInput };
     }
     if (current.status !== 'FENCED' && current.status !== 'COMPENSATED') return 'none';
     try {
-      await this.deps.cancel.run({ orderId: current.orderId });
+      await this.deps.cancel.run({ orderId: current.orderId, ...leaseInput });
     } catch (err) {
       return this.#failure(current, err, 'cancel');
     }

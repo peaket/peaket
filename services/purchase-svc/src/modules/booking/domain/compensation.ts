@@ -193,7 +193,7 @@ export interface CompensationLog {
   runError(q: { readonly stage: string; readonly orderId?: string; readonly err: unknown }): void;
 }
 
-/** 보상 지표: purchase_compensation_total{result}와 order_compensation_jobs{state} */
+/** 보상 지표: purchase_order_compensation_total{result}와 order_compensation_jobs{state} */
 export interface CompensationSignals {
   result(result: 'started' | 'fenced' | 'compensated' | 'retry' | 'failed'): void;
   jobs(state: 'pending' | 'failed', count: number): void;
@@ -209,26 +209,6 @@ export const noopCompensationSignals: CompensationSignals = { result: () => unde
  */
 export function compensationCancellationId(orderId: string): string {
   return uuid8(`compensation:${orderId}`);
-}
-
-/** 결제 시도 하나(시험·읽기 값). paymentId는 결제 원장 ID다 */
-export interface CompensationPaymentAttempt {
-  readonly paymentId: string;
-  readonly attemptNo: number;
-  readonly status: string;
-}
-
-/**
- * 그 주문의 마지막 APPROVED 결제의 payment_id(ADR-0354 결정 4). 뒤에 실패·취소된 시도가 있어도 승인된 결제를 고른다.
- * APPROVED가 없으면 undefined다(부르는 쪽은 보상을 시작하지 않는다)
- */
-export function compensationPaymentIdOf(payments: readonly CompensationPaymentAttempt[]): string | undefined {
-  let found: CompensationPaymentAttempt | undefined;
-  for (const p of payments) {
-    if (p.status !== 'APPROVED') continue;
-    if (found === undefined || p.attemptNo > found.attemptNo) found = p;
-  }
-  return found?.paymentId;
 }
 
 /** 1 이상의 안전한 정수(시도 수)인지 보고 아니면 RangeError */

@@ -207,8 +207,8 @@ export class DrizzleCompensation implements CompensationJobs {
     const paymentId = input.paymentId !== undefined && input.paymentId !== '' ? input.paymentId : null;
     try {
       return await this.#tx(async (tx) => {
-        // ① 보상 행을 잠근다(임대를 주면 자기 임대 조건). 잠금 차례는 보상 행 → 주문 행이다
-        const held = await tx.execute(sql`select status from order_compensation where order_id = ${input.orderId}::uuid for update`);
+        // ① 보상 행을 잠근다(임대를 주면 자기 임대 조건). 잠금 차례는 보상 행 → 주문 행이다. 낡은 임대면 아무것도 쓰지 않는다(RV-02)
+        const held = await tx.execute(sql`select status from order_compensation where order_id = ${input.orderId}::uuid${leaseCond(input.leaseUntilMs)} for update`);
         const row = held.rows[0] as { status: string } | undefined;
         if (!row) return { status: 'LEASE_LOST' } as const;
         const status = statusOf(row.status);
@@ -222,12 +222,12 @@ export class DrizzleCompensation implements CompensationJobs {
         const store = this.#storeAt(input.nowMs);
         const t = await store.transition(tx, { orderId: input.orderId, transition: 'T20', actor: COMPENSATION_ACTOR });
         if (t.status !== 'APPLIED' && t.current !== 'COMPENSATED') throw new CompleteRollback(t.current !== undefined ? { status: 'STALE', current: t.current } : { status: 'STALE' });
-        // ③ 행 COMPENSATED(보상 완료 시각·payment_id·시도 수)
+        // ③ 행 COMPENSATED(보상 완료 시각·payment_id·시도 수). 자기 임대 조건을 UPDATE에도 다시 건다
         await tx.execute(sql`
           update order_compensation
           set status = 'COMPENSATED', canceled_at = ${at}::timestamptz, attempts = attempts + 1,
               payment_id = coalesce(${paymentId}, payment_id), last_error = null, next_attempt_at = null, lease_until = null, updated_at = ${at}::timestamptz
-          where order_id = ${input.orderId}::uuid`);
+          where order_id = ${input.orderId}::uuid${leaseCond(input.leaseUntilMs)}`);
         return { status: 'COMPENSATED' } as const;
       });
     } catch (e) {

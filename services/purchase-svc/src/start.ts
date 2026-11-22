@@ -800,7 +800,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     });
     ticketVoidRunner = new TicketVoidRunner({ jobs: new DrizzleTicketVoid({ database: ticketDb, clock: systemClock }), voider: ticketIssuer.voider, log: new LoggerTicketVoidLog(service.logger), signals: new PromTicketVoidSignals().register(service.metrics.registry), clock: systemClock });
     // 보상 세 걸음(BAT-011, PRF-173, ADR-0354): 발권 막기는 ticket-svc, 결제 취소는 payment-svc다.
-    // 저장소는 발권 실행기와 같은 실행기 전용 풀을 쓰고, 지표 purchase_compensation_total·order_compensation_jobs를 붙인다
+    // 저장소는 발권 실행기와 같은 실행기 전용 풀을 쓰고, 지표 purchase_order_compensation_total·order_compensation_jobs를 붙인다
     const compensationSignalsOf = new PromCompensationSignals().register(service.metrics.registry);
     const compensationLog = new LoggerCompensationLog(service.logger);
     compensationFenceClient = ticketFenceFromEnv(env, {

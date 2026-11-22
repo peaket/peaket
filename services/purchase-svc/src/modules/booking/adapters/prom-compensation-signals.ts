@@ -1,6 +1,7 @@
 // 보상 지표(BAT-011, PRF-173, docs/features/payment.md §3 '보상 세 걸음의 첫 구현', docs/observability.md).
 // PromTicketIssueSignals와 같은 꼴이다(registers: []로 만들고 register(registry)로 서비스 레지스트리에 붙인다).
-// - purchase_compensation_total{result}: started(큐에 새 행)·fenced(발권 막기 끝)·compensated(결제 취소·T20 끝)·retry(다시 보냄)·failed(영구 실패, SEV2)
+// - purchase_order_compensation_total{result}: started(큐에 새 행)·fenced(발권 막기 끝)·compensated(결제 취소·T20 끝)·retry(다시 보냄)·failed(영구 실패, SEV2).
+//   BAT-425 배상금 지표(purchase_compensation_total)와 같은 registry에 붙으므로 이름을 겹치지 않게 둔다(RV-01)
 // - order_compensation_jobs{state}: pending(STARTED·FENCED, 다시 보낼 행)과 failed(FAILED) 행 수(게이지, 10초 [가정]마다)
 import { Counter, Gauge, type Registry } from '@peaket/platform';
 import type { CompensationSignals } from '../domain/compensation.js';
@@ -11,7 +12,7 @@ const RESULT_SET: ReadonlySet<string> = new Set<string>(RESULTS);
 
 export class PromCompensationSignals implements CompensationSignals {
   readonly #total = new Counter({
-    name: 'purchase_compensation_total',
+    name: 'purchase_order_compensation_total',
     help: '보상 세 걸음의 결과(result: started = 큐에 넣음, fenced = 발권 막기 끝, compensated = 결제 취소·COMPENSATED 끝, retry = 다시 보냄, failed = 영구 실패)',
     labelNames: ['result'] as const,
     registers: [],
@@ -38,7 +39,7 @@ export class PromCompensationSignals implements CompensationSignals {
     return this;
   }
 
-  /** purchase_compensation_total{result}를 1 올린다(모르는 값은 이름표 수가 늘지 않게 버린다). 던지지 않는다 */
+  /** purchase_order_compensation_total{result}를 1 올린다(모르는 값은 이름표 수가 늘지 않게 버린다). 던지지 않는다 */
   result(result: ResultName): void {
     if (!RESULT_SET.has(result)) return;
     try {
