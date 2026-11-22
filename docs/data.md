@@ -943,7 +943,7 @@ erDiagram
         timestamptz created_at
     }
     ticket_issue_guard {
-        uuid order_id PK "주문 단위 발권 막기(ticket-svc 0010, 추천 적용 2026-11-22, BUILD_ORDER BAT-011, HOT-161, ADR-0354 결정 2). IssueTickets와 BlockTicketIssuance가 이 행을 먼저 잠가 같은 주문의 발권과 막기를 한 차례로 가른다"
+        uuid order_id PK "주문 단위 발권 막기(ticket-svc 0011, 추천 적용 2026-11-22, BUILD_ORDER BAT-011, HOT-161, ADR-0355 결정 2). IssueTickets와 BlockTicketIssuance가 이 행을 먼저 잠가 같은 주문의 발권과 막기를 한 차례로 가른다"
         timestamptz blocked_at "값이 있으면 막힌 주문이라 뒤에 오는 IssueTickets가 FAILED_PRECONDITION이다. 비어 있으면 발권이 먼저 만든 잠금 자리다(두 갈래를 가르려 널을 허용한다)"
         text reason "막은 사유(감사·로그용, EVENT_CANCELLED 등). 없을 수 있다"
     }
@@ -959,10 +959,10 @@ erDiagram
         timestamptz pull_next_at "결과 당기기의 다음 점검 시각. 고를 때 지금 + 5초 [가정]를 쓴다. 널 허용(추천 적용 2026-11-06, BUILD_ORDER PRF-171)"
     }
     order_compensation {
-        uuid order_id PK "회차 취소가 확정됐는데 발권이 아직 끝나지 않은(APPROVED) 주문 하나(추천 적용 2026-11-22, BUILD_ORDER BAT-011, PRF-173, ADR-0354 결정 3). 주문 상태에 COMPENSATING을 더하지 않고 이 표가 보상 중을 든다"
+        uuid order_id PK "회차 취소가 확정됐는데 발권이 아직 끝나지 않은(APPROVED) 주문 하나(추천 적용 2026-11-22, BUILD_ORDER BAT-011, PRF-173, ADR-0355 결정 3). 주문 상태에 COMPENSATING을 더하지 않고 이 표가 보상 중을 든다"
         text status "STARTED|FENCED|COMPENSATED|FAILED. STARTED·FENCED가 보상 중(명세 COMPENSATING)이고, 결제 취소가 끝나 주문 T20을 쓰는 같은 트랜잭션에서 COMPENSATED가 된다. FAILED는 사람이 확인한다(SEV2)"
         text reason "막는 사유(order_cancellation.reason과 같은 글). 회차 취소는 EVENT_CANCELLED이고 ticket-svc BlockTicketIssuance에 그대로 싣는다"
-        text payment_id "그 주문의 마지막 APPROVED 결제 원장 ID(ADR-0354 결정 4). start가 알고 있으면 그 값, 모르면 payment-svc GetPayment로 찾아 채운다"
+        text payment_id "그 주문의 마지막 APPROVED 결제 원장 ID(ADR-0355 결정 4). start가 알고 있으면 그 값, 모르면 payment-svc GetPayment로 찾아 채운다"
         timestamptz started_at "STARTED를 만든 시각"
         timestamptz fenced_at "ticket-svc가 그 주문의 발권을 막고 이미 만든 티켓을 무효로 한 시각"
         timestamptz canceled_at "보상 완료(결제 취소·주문 T20) 시각. status COMPENSATED일 때만 채운다"
@@ -2962,7 +2962,7 @@ erDiagram
 - 열 번째 마이그레이션(0009, 추천 적용 2026-11-05, BUILD_ORDER PRF-170): `ticket_issue_job`에 `lease_until`·`delayed_at`·`overdue_at`(모두 `timestamptz`, 널 허용)을 더한다. 발권 실행기의 잡기(임대)와 `ISSUE_DELAYED`·발권 기한 넘김 신호를 한 번만 내는 표시다(docs/features/payment.md §2 '발권 호출과 재시도 큐의 첫 구현'). 새 인덱스는 두지 않는다(§5.1).
 - 열한 번째 마이그레이션(0010, 추천 적용 2026-11-06, BUILD_ORDER PRF-171): `order_saga_job.step` CHECK에 `AWAIT`(승인 명령이 접수돼 결과를 기다림)를 더하고, `order_saga_job.pull_next_at timestamptz`(결과 당기기의 다음 점검 시각, 널 허용)를 더한다. 승인 명령이 접수된 작업 행을 지우지 않고 `AWAIT`로 남겨, 결과 당기기가 '접수했는데 결과가 아직 없는 주문'을 이 작은 표에서 찾는다(docs/features/payment.md §2 '결제 결과 당기기의 첫 구현'). 새 인덱스는 두지 않는다(§5.1).
 - 2026-11-13 ticket-svc 첫 마이그레이션(`services/ticket-svc/migrations/0000_ticket.sql`, BUILD_ORDER HOT-160, BAT-050): `ticket_issue (order_id, issue_generation)` 기본 키와 발권 내용 지문, `ticket`(상태 `ISSUED`·`ACTIVE`·`REFUNDED`·`VOIDED` CHECK, `(order_id, issue_generation, seat_id)` 유일, 월렛 색인 `(account_id, created_at, id)`, `transfer_pending`·`fraud_lock_case_id` 자리), `ticket_cancellation (cancellation_id, ticket_id)` 기본 키. 주문·좌석은 다른 논리 DB라 외래키를 걸지 않는다. `ticket_issue`의 기본 키가 같은 주문을 두 번 발권하지 않는 자리다.
-- 2026-11-22 보상 세 걸음과 발권 막기(BUILD_ORDER BAT-011, HOT-161·PRF-173, ADR-0354): purchase 0032(`services/purchase-svc/migrations/0032_order_compensation.sql`)가 `order_compensation`(위 ERD 칸 그대로, 상태 CHECK 넷, `attempts >= 0`, 사유 비지 않음, 주문에 외래 키, 부분 색인 `(next_attempt_at) WHERE status IN ('STARTED','FENCED')`)을 만든다. ticket 0011(`services/ticket-svc/migrations/0011_ticket_issue_guard.sql`)이 `ticket_issue_guard`(위 ERD 칸 그대로)를 만든다. 두 표 모두 끝난 행을 지우지 않고 주문·티켓 기록과 함께 보존한다.
+- 2026-11-22 보상 세 걸음과 발권 막기(BUILD_ORDER BAT-011, HOT-161·PRF-173, ADR-0355): purchase 0032(`services/purchase-svc/migrations/0032_order_compensation.sql`)가 `order_compensation`(위 ERD 칸 그대로, 상태 CHECK 넷, `attempts >= 0`, 사유 비지 않음, 주문에 외래 키, 부분 색인 `(next_attempt_at) WHERE status IN ('STARTED','FENCED')`)을 만든다. ticket 0011(`services/ticket-svc/migrations/0011_ticket_issue_guard.sql`)이 `ticket_issue_guard`(위 ERD 칸 그대로)를 만든다. 두 표 모두 끝난 행을 지우지 않고 주문·티켓 기록과 함께 보존한다.
 - 열두 번째 마이그레이션(0011, 추천 적용 2026-11-09, BUILD_ORDER PRF-172): `purchase_order_session_idx ON purchase_order (purchase_session_id)`를 더한다. 구매 세션이 끝날 때 그 세션의 열린 주문을 찾는 인덱스다(docs/features/payment.md §2 '결제하지 않은 주문 만료의 첫 구현'). 주문 표에 인덱스를 두지 않는 원칙의 예외이고, 까닭과 대가는 §5.1이다.
 - 탈퇴 참여자 마이그레이션(PRF-169, 추천 적용 2026-11-18, BAT-010 계획, ADR-0284): `purchase_order_account_idx ON purchase_order (account_id, id)`를 더한다. 0011과 같은 예외이고 까닭과 대가는 §5.1이다. 번호는 그때의 다음 번호다(지금 마지막은 0027). identity 쪽은 `account.closure_reason` CHECK에 `WITHDRAWAL`을 더하고 `closure_next_check_at`과 부분 인덱스 `account_withdrawal_retry_idx`를 더하는 마이그레이션(그때의 다음 번호, 지금 마지막은 0033)이다.
 - 열세 번째 마이그레이션(0012, 추천 적용 2026-11-09, BUILD_ORDER PRF-144): `event_sale`(회차마다 한 행. 판 번호 `version`은 1 이상, `status`·`previous_status`는 다섯 상태만 `CHECK`, 좌석 수 칸과 `reopen_count`는 0 이상)을 만들고 `seat_sale_pending_idx ON seat_sale (event_id, reserved_at) WHERE status = 'PENDING'`을 더한다(`reserved_at`까지 둔 것은 추천 적용 2026-11-09, BUILD_ORDER PRF-144, 코드 리뷰). 정본 칸에 `previous_status`·`sold_out_tiers`·`open_at`·`counted_at`을 더한 까닭은 같은 판을 다시 낼 때 그 판의 값이 필요하기 때문이다(docs/features/seat-hold.md §4 '판정의 첫 구현'). 인덱스의 까닭과 대가는 §5.1이다.

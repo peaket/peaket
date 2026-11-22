@@ -1,4 +1,4 @@
-# ADR-0354: PRF-173을 보상 핵심과 CS 건 마감으로 나누고, 빠진 발권 막기 RPC를 HOT-161로 더한다
+# ADR-0355: PRF-173을 보상 핵심과 CS 건 마감으로 나누고, 빠진 발권 막기 RPC를 HOT-161로 더한다
 
 - **상태**: 채택(2026-11-22, 소유자 승인 "네 그렇게 해주세요"). PRF-173의 선행을 정리하고, WBS·BUILD_ORDER의 분할을 정한다.
 - **문제**: PRF-173(보상 세 걸음)은 구간 1의 마지막 코드 묶음인데 두 가지로 막혀 있다. ① BUILD_ORDER BAT-011이 선행으로 적은 GAT-280(CS 처리함 건 요청 계약)이 갈래 3·구간 3의 BAT-460에 있어 아직 시작하지 않았다. ② PRF-173의 두 번째 걸음(`compFence`)이 부를 ticket-svc의 주문 단위 발권 막기 RPC가 없다. WBS 2.8.1(HOT-160)은 그 RPC와 `ticket.proto` 고침을 HOT-160이 한다고 적었으나, BAT-050(HOT-160, R-533)은 `IssueTickets`·`CancelTickets`·`ListTickets`만 만들었다. 그 결과 결제 모델 시험 하네스가 `compFence`를 흉내 내고 있고, 회차 취소는 APPROVED 주문을 열린 주문으로 세어 RUNNING에 붙잡지만 그 주문을 보상할 코드가 없다.

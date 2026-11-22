@@ -25,7 +25,7 @@ service TicketService {
   // (order_id, issue_generation)으로 멱등하고 그 세대 이하의 티켓이 대상이다. 이미 입장 기록이 있어도 무효로 하고 그 수를 돌려준다.
   rpc VoidTickets(VoidTicketsRequest) returns (VoidTicketsResponse);
 
-  // 주문 단위 발권 막기(추천 적용 2026-11-22, BUILD_ORDER BAT-011, HOT-161·PRF-173, ADR-0354 결정 2).
+  // 주문 단위 발권 막기(추천 적용 2026-11-22, BUILD_ORDER BAT-011, HOT-161·PRF-173, ADR-0355 결정 2).
   // 회차 취소 확정 보상 세 걸음의 둘째 걸음(specs/payment.qnt compFence)이 부른다. 부르는 쪽은 purchase-svc만이다(내부 토큰·메시 인가).
   // 주문 ID로 멱등하다. 같은 주문의 IssueTickets와 한 줄 잠금(ticket_issue_guard 행)으로 갈라, 막은 뒤의 IssueTickets는 FAILED_PRECONDITION이다.
   // 이미 만든 티켓은 VOIDED로 바꾸고 키를 폐기한다(스캐너 변경분 1분). 다시 부르면 새로 무효로 한 수가 0이고 already_entered는 같은 값이다.
