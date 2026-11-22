@@ -1,0 +1,40 @@
+# Grafana 조직·팀·폴더·역할의 원천(docs/observability.md §9 'Grafana 권한', ADR-0356 결정 2, OPS-040).
+# 값의 정본은 docs/observability.md §9 'Grafana 권한'이다. 이 파일은 그것을 Grafana에 올릴 꼴로 적는다.
+# - 조직 둘: 민감한 데이터 소스(PostgreSQL 쿼리 문장)는 역할이 아니라 조직으로 나눈다(무료판에는 데이터 소스별 권한이 없다)
+# - 팀: 가상 팀(slug는 infra/stacks/global/github/teams.json과 같다. 이름은 그 파일의 description을 쓴다)
+# - 폴더: 대시보드가 있는 팀별 폴더와 '온세일 공용'. 공급자(provisioning/dashboards.yaml)와 대시보드 폴더(deploy/local/dashboards/<uid>/)가 이 목록과 맞아야 한다
+# - 역할: 신원 공급자 그룹 → 조직 역할. 신원 공급자 계정이 없어 그룹 이름은 자리만 둔다(실제 연결은 INF-020, observability §9)
+# 적용: tools/local/grafana-access.mjs(조직·팀이 없을 때만 만든다. 로컬은 node tools/local/cluster.mjs observability가 부른다). 운영 적용 방식은 INF-020.
+# 검사: node tools/ci/observability-config.mjs --check(tools-check)
+orgs:
+  # id는 Grafana 조직 번호다. 프로비저닝 파일의 orgId가 이 번호를 쓴다(빈 Grafana에서 만든 차례와 같다)
+  - id: 1
+    name: PEAKET 관측
+    restricted: false
+  - id: 2
+    name: PEAKET 제한
+    restricted: true
+teams:
+  - { slug: queue, org: 1 }
+  - { slug: purchase, org: 1 }
+  - { slug: ticketing, org: 1 }
+  - { slug: commerce, org: 1 }
+  - { slug: frontend-platform, org: 1 }
+  - { slug: platform, org: 1 }
+  - { slug: data, org: 1 }
+  - { slug: bot-detection, org: 1 }
+  - { slug: architecture, org: 1 }
+folders:
+  # 팀 폴더의 uid는 팀 slug, 제목은 그 팀 이름이다. 서비스 대시보드는 CODEOWNERS의 주인 팀 폴더에 간다(tools/local/dashboards.mjs)
+  - { uid: queue, team: queue, org: 1 }
+  - { uid: purchase, team: purchase, org: 1 }
+  - { uid: ticketing, team: ticketing, org: 1 }
+  - { uid: bot-detection, team: bot-detection, org: 1 }
+  - { uid: platform, team: platform, org: 1 }
+  - { uid: onsale, title: 온세일 공용, org: 1 }
+roles:
+  # 그룹 이름은 자리다 [가정]. 신원 공급자(IAM Identity Center 같은)를 잇는 INF-020에서 확정한다
+  - { group: peaket-grafana-operators, org: 1, role: Viewer, who: '운영자(콘솔 장애 때 읽기)' }
+  - { group: peaket-grafana-engineers, org: 1, role: Editor, who: '엔지니어(Explore. 대시보드는 Git으로만 배포한다)' }
+  - { group: peaket-grafana-admins, org: 1, role: Admin, who: '조직 관리자(플랫폼(SRE) 2명 [가정])' }
+  - { group: peaket-grafana-db-owners, org: 2, role: Viewer, who: '지정한 DB 담당 엔지니어' }

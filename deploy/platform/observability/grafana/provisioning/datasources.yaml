@@ -1,0 +1,31 @@
+# Grafana 데이터 소스 프로비저닝(로컬과 운영에 함께 싣는 것, ADR-0356 결정 2, docs/observability.md §9 'Grafana 권한').
+# 항목마다 조직(orgId, deploy/platform/observability/grafana/access.yaml의 id)을 적는다. 운영에만 있는 데이터 소스는 datasources-platform.yaml이다.
+# 로컬: node tools/local/cluster.mjs observability가 이 파일로 Grafana 설정 ConfigMap을 만든다(사본을 두지 않는다).
+# 검사: node tools/ci/observability-config.mjs --check(PostgreSQL 쿼리 문장은 제한 조직에만)
+apiVersion: 1
+datasources:
+  # 기본 조직 'PEAKET 관측': 클러스터 Prometheus(템플릿 대시보드의 uid prometheus)
+  - name: Prometheus
+    uid: prometheus
+    orgId: 1
+    type: prometheus
+    access: proxy
+    url: http://prometheus.observability.svc:9090
+    isDefault: true
+    editable: false
+  # 제한 조직 'PEAKET 제한': PostgreSQL 쿼리 문장(읽기 전용 모니터링 계정, ADR-0067). 로컬·포트폴리오 측정에서만 쓴다.
+  # 모니터링 계정과 비밀번호 Secret은 이 기능이 만들지 않는다(비밀번호 환경 변수가 없으면 연결만 실패한다)
+  - name: PostgreSQL 쿼리 문장
+    uid: pg-statements
+    orgId: 2
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: postgres.peaket-local.svc.cluster.local:5432
+    user: grafana_monitor
+    jsonData:
+      database: postgres
+      sslmode: disable
+    secureJsonData:
+      password: $__env{PEAKET_GRAFANA_PG_MONITOR_PASSWORD}
+    isDefault: true
+    editable: false

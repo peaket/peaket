@@ -27,7 +27,7 @@
 // - 운영·CI 공급망은 다이제스트로 고정한다. 로컬 kind 무대는 `preloadLocalImages`가 태그 이미지를 노드에 미리 싣고 파드는 태그로 찾는다(BAT-028).
 //   관측(Prometheus·Grafana) 매니페스트는 한 플랫폼(amd64) 매니페스트 다이제스트까지 고정하고, 같은 태그 이미지를 미리 실어 IfNotPresent로 찾게 한다
 //   (여러 플랫폼 목록 다이제스트는 한 플랫폼만 실은 노드와 맞지 않아 Pulling에 머문다). 계정·인증 토큰이 필요한 것은 없다
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -43,6 +43,8 @@ import { DEMO_IMAGES as DEMO_NEW_IMAGES, buildImage as buildDemoImage } from './
 import { DEMO_CONTRACT_FILE, prepareDemoSecrets } from './demo-auth.mjs';
 import { applySeed, checkSeed } from './demo-seed.mjs';
 import { generateV0TokenKey, loadOrCreateV0TokenKey } from './v0-token.mjs';
+import { jsonFilesUnder } from './dashboards.mjs';
+import { applyGrafanaAccess, loadGrafanaAccess, reloadGrafanaProvisioning } from './grafana-access.mjs';
 import { dockerPlatform, kafkaTopicArgs, nodeImageDigest, OBSERVABILITY_IMAGES, pinnedImagePlan, redisTlsCertArgs, V1_DATABASES, V1_HOST_DIRS, V1_IMAGES, V1_KAFKA_TOPICS, V1_NGINX_IMAGE, V1_PRELOAD_IMAGES, v1HelmArgs, v1Layout, v1MigrationJob, v1Plan, v1PostgresObjects, v1PublicConfigMap, v1ScaleDownArgs, v1Secrets, v1SimulatorObjects, v1StateCacheObjects, v1ValkeyObjects } from './v1-objects.mjs';
 import { V1_NAMESPACE, v1Keys } from './v1-stage.mjs';
 
@@ -391,11 +393,97 @@ export function prometheusForwardArgs(port = 9090) {
   return ['-n', 'observability', 'port-forward', '--address', '127.0.0.1', 'svc/prometheus', `${port}:9090`];
 }
 
-/** 대시보드 ConfigMap: deploy/local/dashboards/*.json(tools/local/dashboards.mjs가 만든 파일) */
-function dashboardsConfigMap() {
-  const dir = join(REPO, 'deploy', 'local', 'dashboards');
-  const data = Object.fromEntries(readdirSync(dir).filter((f) => f.endsWith('.json')).sort().map((f) => [f, readFileSync(join(dir, f), 'utf8')]));
+/**
+ * 대시보드 ConfigMap: deploy/local/dashboards/<폴더>/<파일>.json(tools/local/dashboards.mjs가 만든 파일).
+ * ConfigMap 키에는 /를 쓸 수 없어 키를 '<폴더>__<파일>.json'으로 두고, Grafana 파드의 펼치기(초기화 컨테이너 unpack)가 폴더로 되살린다
+ */
+export function dashboardsConfigMap(root = REPO) {
+  const dir = join(root, 'deploy', 'local', 'dashboards');
+  const data = {};
+  for (const rel of jsonFilesUnder(dir)) {
+    const parts = rel.split('/');
+    if (parts.length !== 2 || parts.some((x) => x.includes('__'))) throw new Error(`대시보드 파일은 <폴더>/<파일>.json 꼴이어야 한다(__ 없이): ${rel}`);
+    data[`${parts[0]}__${parts[1]}`] = readFileSync(join(dir, rel), 'utf8');
+  }
+  if (Object.keys(data).length === 0) throw new Error(`대시보드 파일이 없다: ${dir} (node tools/local/dashboards.mjs)`);
   return { apiVersion: 'v1', kind: 'ConfigMap', metadata: { name: 'grafana-dashboards', namespace: 'observability' }, data };
+}
+
+/** 로컬에 싣는 프로비저닝 원천 폴더(ADR-0356 결정 2). 운영에만 있는 데이터 소스(datasources-platform.yaml)는 싣지 않는다 */
+export const GRAFANA_PROVISIONING_DIR = 'deploy/platform/observability/grafana/provisioning';
+
+/**
+ * 프로비저닝 ConfigMap(그 폴더의 datasources.yaml·dashboards.yaml에서 만든다. 사본을 두지 않는다).
+ * 키 넷: 전체(datasources.yaml·dashboards.yaml)와 기본 조직(orgId 1) 몫만 거른 *.base.yaml.
+ * 빈 Grafana에는 제한 조직이 없고, 없는 조직을 적은 프로비저닝은 시작을 실패시키므로 시작은 base로 하고 조직을 만든 뒤 전체로 바꾼다
+ */
+export function grafanaProvisioningConfigMap(root = REPO) {
+  const read = (name) => {
+    const text = readFileSync(join(root, GRAFANA_PROVISIONING_DIR, name), 'utf8');
+    return { text, doc: parseYaml(text) };
+  };
+  const baseOf = (doc, key) => {
+    const items = doc?.[key];
+    if (!Array.isArray(items) || items.length === 0) throw new Error(`${GRAFANA_PROVISIONING_DIR}: ${key} 목록이 비었다`);
+    for (const x of items) if (!Number.isInteger(x.orgId)) throw new Error(`${GRAFANA_PROVISIONING_DIR}: ${x.name}에 orgId가 없다`);
+    return stringifyYaml({ ...doc, [key]: items.filter((x) => x.orgId === 1) });
+  };
+  const ds = read('datasources.yaml');
+  const dash = read('dashboards.yaml');
+  return {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: { name: 'grafana-provisioning', namespace: 'observability' },
+    data: {
+      'datasources.yaml': ds.text,
+      'dashboards.yaml': dash.text,
+      'datasources.base.yaml': baseOf(ds.doc, 'datasources'),
+      'dashboards.base.yaml': baseOf(dash.doc, 'providers'),
+    },
+  };
+}
+
+/** Grafana 파드 안에서 전체 프로비저닝으로 바꿔 쓰는 명령(kubectl 인자). 그 뒤 Grafana에 다시 읽으라고 부른다 */
+export function grafanaFullProvisioningExecArgs() {
+  return [
+    '-n', 'observability', 'exec', 'deploy/grafana', '-c', 'grafana', '--', 'sh', '-c',
+    'cp /etc/peaket/provisioning/datasources.yaml /etc/grafana/provisioning/datasources/datasources.yaml && cp /etc/peaket/provisioning/dashboards.yaml /etc/grafana/provisioning/dashboards/dashboards.yaml',
+  ];
+}
+
+/** kubectl port-forward를 빈 로컬 포트(127.0.0.1에만 묶음)로 띄우고 fn(주소)을 부른 뒤 닫는다 */
+async function withPortForward(args, fn) {
+  const k = await ensureTool('kubectl');
+  const child = spawn(k, ['--kubeconfig', KUBECONFIG, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    const port = await new Promise((resolvePort, reject) => {
+      let out = '';
+      const timer = setTimeout(() => reject(new Error(`포트 전달이 30초 안에 서지 않았다: ${out.trim()}`)), 30_000);
+      const onData = (d) => {
+        out += d;
+        const m = /Forwarding from 127[.]0[.]0[.]1:([0-9]+)/.exec(out);
+        if (m) {
+          clearTimeout(timer);
+          resolvePort(Number(m[1]));
+        }
+      };
+      child.stdout.on('data', onData);
+      child.stderr.on('data', onData);
+      child.on('exit', (code) => {
+        clearTimeout(timer);
+        reject(new Error(`포트 전달이 끝났다(코드 ${code}): ${out.trim()}`));
+      });
+    });
+    return await fn(`http://127.0.0.1:${port}`);
+  } finally {
+    child.kill();
+  }
+}
+
+/** Grafana 관리자 비밀번호(Secret grafana-admin). 화면에 찍지 않는다 */
+async function grafanaAdminPassword() {
+  const b64 = await kubectl(['-n', 'observability', 'get', 'secret', 'grafana-admin', '-o', 'jsonpath={.data.password}'], { quiet: true });
+  return Buffer.from(b64.trim(), 'base64').toString('utf8');
 }
 
 async function observability() {
@@ -407,9 +495,21 @@ async function observability() {
   // create는 last-applied 주석을 남기지 않는다(일반 apply는 비밀번호를 주석에 평문으로 남긴다)
   if (!has.trim()) await kubectl(['create', '-f', '-'], { input: JSON.stringify(grafanaAdminSecret()) });
   // 서버 쪽 적용은 주석에 내용을 한 번 더 넣지 않는다(주석 한도 256KiB에 대시보드가 걸리지 않게)
-  await kubectl(['apply', '--server-side', '--force-conflicts', '-f', '-'], { input: JSON.stringify(dashboardsConfigMap()) });
+  for (const cm of [dashboardsConfigMap(), grafanaProvisioningConfigMap()]) {
+    await kubectl(['apply', '--server-side', '--force-conflicts', '-f', '-'], { input: JSON.stringify(cm) });
+  }
   await kubectl(['-n', 'observability', 'rollout', 'restart', 'deploy/grafana']);
   for (const d of ['prometheus', 'grafana']) await kubectl(['-n', 'observability', 'rollout', 'status', `deploy/${d}`, '--timeout=300s']);
+  // 조직·팀(access.yaml)을 만든 뒤 전체 프로비저닝(제한 조직 몫)으로 바꿔 다시 읽힌다(ADR-0356 결정 2).
+  // Grafana 자료는 emptyDir라 파드가 새로 뜨면 기본 조직 몫으로 돌아간다. 그때는 이 명령을 다시 돌린다
+  step('Grafana 조직·팀(deploy/platform/observability/grafana/access.yaml)');
+  const password = await grafanaAdminPassword();
+  await withPortForward(['-n', 'observability', 'port-forward', '--address', '127.0.0.1', 'svc/grafana', ':3000'], async (baseUrl) => {
+    const r = await applyGrafanaAccess({ baseUrl, auth: { user: 'admin', password }, access: loadGrafanaAccess(REPO) });
+    console.log(`만든 조직 ${r.createdOrgs}개, 만든 팀 ${r.createdTeams}개`);
+    await kubectl(grafanaFullProvisioningExecArgs());
+    await reloadGrafanaProvisioning({ baseUrl, auth: { user: 'admin', password } });
+  });
   step('준비됨');
   console.log('Grafana 보기: node tools/local/cluster.mjs grafana (http://127.0.0.1:3000, 익명 보기)');
 }

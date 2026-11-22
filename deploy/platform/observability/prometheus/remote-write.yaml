@@ -1,0 +1,19 @@
+# 클러스터 Prometheus → Mimir 원격 쓰기 둘(ADR-0356 결정 3, ADR-0077, docs/observability.md §9 보존 표 '시계열 메트릭').
+# - raw: 모든 시계열을 원본 테넌트로 보낸다
+# - agg5m: 5분 집계 기록 규칙의 결과(이름 앞머리 agg5m:, deploy/platform/observability/rules/agg5m.yaml)만 골라 보낸다
+# 운영 Prometheus 설정의 remote_write 칸에 이 내용을 싣는다(적용 방식은 INF-020). 로컬 Prometheus에는 받는 Mimir가 없어 넣지 않는다.
+# Mimir 주소는 모놀리식 배치(ADR-0120)를 가정한 자리다 [가정]. 실제로 원본이 agg5m에 없는지는 INF-040(V-T47 ⑥)에서 본다.
+# 검사: node tools/ci/observability-config.mjs --check
+remote_write:
+  - name: mimir-raw
+    url: http://mimir.observability.svc:8080/api/v1/push
+    headers:
+      X-Scope-OrgID: raw
+  - name: mimir-agg5m
+    url: http://mimir.observability.svc:8080/api/v1/push
+    headers:
+      X-Scope-OrgID: agg5m
+    write_relabel_configs:
+      - source_labels: [__name__]
+        regex: agg5m:.+
+        action: keep

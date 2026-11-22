@@ -1,0 +1,10 @@
+# Mimir 실행 설정 덮어쓰기(runtime config): 테넌트별 보존(ADR-0356 결정 3, ADR-0077·0120, docs/observability.md §9 보존 표 '시계열 메트릭').
+# 값의 정본은 그 보존 표다: 원본(raw)은 일, 5분 집계(agg5m)는 개월로 적혀 있다.
+# 개월은 31일 달로 세어 일로 적는다(모자라게 지우지 않게. 13개월 = 403일). Mimir의 기간 꼴에는 '개월'이 없다.
+# 실제 Mimir(모놀리식)에 올려 테넌트별 보존이 먹는지는 구간 5(INF-040, V-T47 ⑥)에서 본다.
+# 검사: node tools/ci/observability-config.mjs --check(보존 표와 같은지, 원격 쓰기 테넌트와 같은지)
+overrides:
+  raw:
+    compactor_blocks_retention_period: 90d
+  agg5m:
+    compactor_blocks_retention_period: 403d

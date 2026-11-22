@@ -1,6 +1,7 @@
 # 로컬 관측 최소(docs/observability.md §3 '로컬 관측 최소와 템플릿 대시보드', wbs 1.3.1, BUILD_ORDER BSL-070).
 # 운영 관측 스택(wbs 4.1.x) 전에 로컬 측정과 개발에서 서비스 템플릿 지표를 보고 collect.py --prom-url로 읽는다.
-# 올리기: node tools/local/cluster.mjs observability (대시보드 ConfigMap과 Grafana 관리자 Secret은 그 명령이 만든다)
+# 올리기: node tools/local/cluster.mjs observability (Grafana 관리자 Secret, 대시보드 ConfigMap(deploy/local/dashboards/),
+# 프로비저닝 ConfigMap(deploy/platform/observability/grafana/provisioning/의 datasources.yaml·dashboards.yaml)은 그 명령이 만든다. ADR-0356 결정 1·2)
 # 이미지는 다이제스트로 고정한다(2026-11-02 확인). 둘 다 클러스터 안 주소만 갖는다.
 apiVersion: v1
 kind: Namespace
@@ -134,33 +135,6 @@ spec:
   ports:
     - { name: http, port: 9090, targetPort: http }
 ---
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: grafana-provisioning
-  namespace: observability
-data:
-  datasources.yaml: |
-    apiVersion: 1
-    datasources:
-      - name: Prometheus
-        uid: prometheus
-        type: prometheus
-        access: proxy
-        url: http://prometheus.observability.svc:9090
-        isDefault: true
-        editable: false
-  dashboards.yaml: |
-    apiVersion: 1
-    providers:
-      - name: peaket
-        folder: PEAKET
-        type: file
-        disableDeletion: true
-        allowUiUpdates: false
-        options:
-          path: /var/lib/grafana/dashboards
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -177,6 +151,34 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext: { runAsNonRoot: true, runAsUser: 472, runAsGroup: 472, fsGroup: 472, seccompProfile: { type: RuntimeDefault } }
+      # 시작 전에 펼친다: ① 대시보드 ConfigMap의 '<폴더>__<파일>' 키를 /var/lib/grafana/dashboards/<폴더>/<파일>로(ConfigMap 키에는 /를 못 쓴다)
+      # ② 프로비저닝은 기본 조직(orgId 1) 몫만(*.base.yaml). 제한 조직은 Grafana가 뜬 뒤 조직을 만들고(tools/local/grafana-access.mjs)
+      #    전체 파일로 바꿔 다시 읽힌다(cluster.mjs observability). 없는 조직의 orgId를 적은 프로비저닝은 Grafana 시작을 실패시킨다
+      initContainers:
+        - name: unpack
+          image: grafana/grafana:13.2.5@sha256:ffeeebf613b00fede764821c5e5b1545fb376aba561ae91c488e91f219adb25a
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /work/provisioning/datasources /work/provisioning/dashboards /work/dashboards
+              cp /src/provisioning/datasources.base.yaml /work/provisioning/datasources/datasources.yaml
+              cp /src/provisioning/dashboards.base.yaml /work/provisioning/dashboards/dashboards.yaml
+              for f in /src/dashboards/*__*.json; do
+                b=$(basename "$f"); d="${b%%__*}"
+                mkdir -p "/work/dashboards/$d"
+                cp "$f" "/work/dashboards/$d/${b#*__}"
+              done
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          volumeMounts:
+            - { name: provisioning-src, mountPath: /src/provisioning, readOnly: true }
+            - { name: dashboards-src, mountPath: /src/dashboards, readOnly: true }
+            - { name: provisioning, mountPath: /work/provisioning }
+            - { name: dashboards, mountPath: /work/dashboards }
       containers:
         - name: grafana
           image: grafana/grafana:13.2.5@sha256:ffeeebf613b00fede764821c5e5b1545fb376aba561ae91c488e91f219adb25a
@@ -184,6 +186,8 @@ spec:
             # 익명 보기만 연다. 로그인 화면을 끄고, 관리자 비밀번호는 cluster.mjs가 만든 Secret에서만 받는다
             - { name: GF_AUTH_ANONYMOUS_ENABLED, value: "true" }
             - { name: GF_AUTH_ANONYMOUS_ORG_ROLE, value: Viewer }
+            # 익명 보기는 기본 조직(access.yaml의 1번 조직 이름. grafana-access.mjs가 1번 조직 이름을 바꾼다)
+            - { name: GF_AUTH_ANONYMOUS_ORG_NAME, value: PEAKET 관측 }
             - { name: GF_AUTH_DISABLE_LOGIN_FORM, value: "true" }
             - { name: GF_SECURITY_ADMIN_USER, value: admin }
             - name: GF_SECURITY_ADMIN_PASSWORD
@@ -202,17 +206,23 @@ spec:
             limits: { memory: 512Mi }
           securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
           volumeMounts:
-            - { name: provisioning, mountPath: /etc/grafana/provisioning/datasources/datasources.yaml, subPath: datasources.yaml, readOnly: true }
-            - { name: provisioning, mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml, subPath: dashboards.yaml, readOnly: true }
+            # 프로비저닝(펼친 사본, 제한 조직을 더할 때 전체 파일로 바꿔 쓴다)과 그 원본(ConfigMap)
+            - { name: provisioning, mountPath: /etc/grafana/provisioning }
+            - { name: provisioning-src, mountPath: /etc/peaket/provisioning, readOnly: true }
             - { name: dashboards, mountPath: /var/lib/grafana/dashboards, readOnly: true }
             - { name: data, mountPath: /var/lib/grafana }
             - { name: tmp, mountPath: /tmp }
       volumes:
-        - name: provisioning
+        # cluster.mjs observability가 deploy/platform/observability/grafana/provisioning/으로 만든다(기본 조직 몫 *.base.yaml과 전체)
+        - name: provisioning-src
           configMap: { name: grafana-provisioning }
-        # cluster.mjs observability가 deploy/local/dashboards/*.json으로 만든다
-        - name: dashboards
+        # cluster.mjs observability가 deploy/local/dashboards/<폴더>/<파일>.json으로 만든다(키 '<폴더>__<파일>.json')
+        - name: dashboards-src
           configMap: { name: grafana-dashboards }
+        - name: provisioning
+          emptyDir: {}
+        - name: dashboards
+          emptyDir: {}
         - name: data
           emptyDir: {}
         - name: tmp

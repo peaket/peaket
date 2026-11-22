@@ -1,0 +1,23 @@
+# 5분 집계 기록 규칙(ADR-0356 결정 3, docs/observability.md §4 '그 밖의 규칙 평가 간격'의 agg5m 행·§9 보존 표).
+# 이름이 agg5m:으로 시작하는 기록 규칙은 평가 간격 5분인 이 묶음에만 둔다. 원격 쓰기 agg5m은 그 앞머리 하나로 골라 보낸다
+# (deploy/platform/observability/prometheus/remote-write.yaml). 첫 묶음은 서비스별 네 신호 요약(요청 비율·5xx 비율·성공 p99)이다.
+# 28일 남은 예산 규칙은 OPS-090(F-01-5)이 더한다.
+# 검사: node tools/ci/observability-config.mjs --check(앞머리를 단 규칙이 모두 5분 묶음 안에 있는지)
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: agg5m
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: peaket
+spec:
+  groups:
+    - name: agg5m-service-signals
+      interval: 5m
+      rules:
+        - record: agg5m:http_server_requests:rate5m
+          expr: sum by (service) (rate(http_server_request_duration_seconds_count[5m]))
+        - record: agg5m:http_server_errors:ratio_rate5m
+          expr: (sum by (service) (rate(http_server_errors_total[5m])) or 0 * sum by (service) (rate(http_server_request_duration_seconds_count[5m]))) / sum by (service) (rate(http_server_request_duration_seconds_count[5m]))
+        - record: agg5m:http_server_request_duration_seconds:p99_success_5m
+          expr: histogram_quantile(0.99, sum by (service, le) (rate(http_server_request_duration_seconds_bucket{status_class!="5xx"}[5m])))

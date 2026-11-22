@@ -28,9 +28,9 @@ node tools/local/cluster.mjs grafana
 node tools/local/cluster.mjs prometheus
 ```
 
-로컬 관측 최소(Prometheus v3.14.0·Grafana 13.2.5, `deploy/local/observability.yaml`)를 올리고 템플릿 대시보드(`deploy/local/dashboards/*.json`)를 Grafana에 싣습니다. `grafana`는 Grafana를 `http://127.0.0.1:3000`에 포트 전달합니다(익명 보기만, 로그인 화면 없음). Prometheus는 `prometheus.io/scrape` 주석을 단 파드(공용 차트의 서비스·릴레이 파드)를 5초마다 긁습니다. 성능 장부는 `node tools/local/cluster.mjs prometheus`(전용 kubeconfig로 127.0.0.1:9090에 포트 전달)를 켜 두고 `collect.py --prom-url http://127.0.0.1:9090`으로 읽습니다(docs/observability.md §3 '로컬 관측 최소와 템플릿 대시보드'). 확인: `node --test tools/local/e2e/observability.e2e.mjs`(relay-takeover가 올린 example-svc를 씁니다).
+로컬 관측 최소(Prometheus v3.14.0·Grafana 13.2.5, `deploy/local/observability.yaml`)를 올리고 템플릿 대시보드(`deploy/local/dashboards/<팀>/*.json`)를 Grafana에 싣습니다. `grafana`는 Grafana를 `http://127.0.0.1:3000`에 포트 전달합니다(익명 보기만, 로그인 화면 없음). Prometheus는 `prometheus.io/scrape` 주석을 단 파드(공용 차트의 서비스·릴레이 파드)를 5초마다 긁습니다. 성능 장부는 `node tools/local/cluster.mjs prometheus`(전용 kubeconfig로 127.0.0.1:9090에 포트 전달)를 켜 두고 `collect.py --prom-url http://127.0.0.1:9090`으로 읽습니다(docs/observability.md §3 '로컬 관측 최소와 템플릿 대시보드'). 확인: `node --test tools/local/e2e/observability.e2e.mjs`(relay-takeover가 올린 example-svc를 씁니다).
 
-대시보드는 손으로 고치지 않습니다. 생성기를 고친 뒤 `node tools/local/dashboards.mjs`로 다시 쓰고, CI는 `node --test "tools/local/*.test.mjs"` 안에서 `--check`로 커밋된 파일과 견줍니다.
+대시보드는 손으로 고치지 않습니다. 생성기를 고친 뒤 `node tools/local/dashboards.mjs`로 다시 쓰고, CI(tools-check)는 `--check`로 커밋된 파일과 견줍니다. 대상은 docs/architecture.md §3.1 서비스 맵의 업무 서비스와 `example-svc`·`v0-monolith`, 파일은 CODEOWNERS 주인 팀 폴더 `deploy/local/dashboards/<팀>/<서비스>.json`이고 온세일 공용 대시보드가 `onsale/`에 있습니다. Grafana 조직·팀은 `deploy/platform/observability/grafana/access.yaml`, 데이터 소스·공급자는 같은 폴더의 `provisioning/`이 원천이고, `observability` 명령이 그 파일로 ConfigMap을 만들어 기본 조직 몫으로 띄운 뒤 `tools/local/grafana-access.mjs`로 조직·팀을 만들고 제한 조직 몫까지 다시 읽힙니다(ADR-0356 결정 1·2). 검사는 `node tools/ci/observability-config.mjs --check`입니다.
 
 ```bash
 node tools/local/cluster.mjs v0
