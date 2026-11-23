@@ -153,6 +153,23 @@ describe('J-T15 ③ 한도·KYC와 사람의 재요청', () => {
     expect(x.payoutsOf(sid)).toHaveLength(2);
   });
 
+  test('J-T15 ③ KYC_REQUIRED 실패 뒤에는 그 셀러(같은 파트너·같은 상점)의 다른 토스 정산서가 다음 묶음에서 HELD·KYC·PAYOUT_HELD이고, 다른 상점·포트원 정산서는 묶인다(시험 리뷰 TR-02)', async () => {
+    const { x, promoterId, ss, sellers, fact } = await executed([4_000_000]);
+    // 결제사 쪽 그 셀러는 KYC_REQUIRED다(셀러 상태는 단건 조회로 알게 된다, 어떻게 알게 되는지는 구현이 정한다)
+    x.fake.sellers.set(sellers.STANDARD!, { id: sellers.STANDARD!, store: 'STANDARD', refSellerId: `${promoterId}-STANDARD`, businessType: 'CORPORATE', status: 'KYC_REQUIRED' });
+    await fact(x.payoutsOf(ss[0]!.statementId)[0]!, 'FAILED', 'KYC_REQUIRED');
+    const same = await x.confirmed({ promoterId, amount: 1_500_000, payoutDate: MON });
+    const escrow = await x.confirmed({ promoterId, amount: 600_000, payoutDate: MON, pgStore: 'ESCROW' });
+    const portone = await x.confirmed({ promoterId, amount: 700_000, payoutDate: MON, pg: 'PORTONE' });
+    await expect(x.settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: MON, actor: randomUUID() })).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-kyc-required') });
+    expect(x.store.statements.get(same.statementId)).toMatchObject({ status: 'HELD', holdReason: 'KYC', payoutBatchId: null });
+    expect(x.events('PAYOUT_HELD').map((e) => [e.statementId, e.amount])).toEqual([[same.statementId, 1_500_000]]);
+    const e = await x.settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'ESCROW', payoutDate: MON, actor: randomUUID() });
+    expect([e.statementCount, x.store.statements.get(escrow.statementId)?.payoutBatchId]).toEqual([1, e.batchId]);
+    const po = await x.settlements.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: MON, portoneBalance: { amount: 10_000_000, observedAt: new Date(x.clock.now()).toISOString() }, actor: randomUUID() });
+    expect([po.statementCount, x.store.statements.get(portone.statementId)?.payoutBatchId]).toEqual([1, po.batchId]);
+  });
+
   test('J-T15 ③ 같은 금액 사람 재요청은 새 2인 승인 없이 새 순번·감사(행위자 = 계정)이고, 금액·상점을 바꾸면 409 payout-retry-approval-required·지급 건 0이다', async () => {
     const { x, ss, fact } = await executed([5_000_000]);
     const sid = ss[0]!.statementId;

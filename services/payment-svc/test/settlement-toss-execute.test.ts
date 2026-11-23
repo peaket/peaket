@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, test } from 'vitest';
 import { PayoutSubmitWorker } from '../src/modules/settlement/application/payout-submit-worker.js';
-import { HttpSettlementCaseNotice, SettlementDueWorker, SettlementProblem, tossIdempotencyKey, type SaleSuspensionSource } from '../src/modules/settlement/index.js';
+import { HttpSettlementCaseNotice, SettlementDueWorker, SettlementProblem, tossIdempotencyKey, type SaleSuspensionSource, type StatementRecord } from '../src/modules/settlement/index.js';
 import { seedTossSeller } from './settlement-support.js';
 import { kst, tossHarness, type TossHarness, type TossHarnessOptions } from './support/toss-harness.js';
 import { refsOf } from './support/toss-payout-fake.js';
@@ -34,6 +34,7 @@ describe('J-T38 ① 실행 접수', () => {
     await x.partner(promoterId);
     const s = await x.confirmed({ promoterId, amount: 2_500_000_000, payoutDate: MON });
     const batchId = await x.approvedBatch({ payoutDate: MON });
+    expect(x.store.statements.get(s.statementId)).toMatchObject({ status: 'CONFIRMED', payoutBatchId: batchId });
     const view = await x.settlements.executeBatch(batchId);
     expect(view).toMatchObject({ batchId, status: 'SUBMITTED', lastSubmitError: null, nextSubmitAt: null });
     const payouts = x.payoutsOf(s.statementId);
@@ -56,6 +57,8 @@ describe('J-T38 ① 실행 접수', () => {
     await x.partner(promoterId);
     for (let i = 1; i <= 21; i += 1) await x.confirmed({ promoterId, amount: 100_000 + i, payoutDate: MON, statementId: sid(i) });
     const batchId = await x.approvedBatch({ payoutDate: MON });
+    // E-01(ADR-0369 결정 14): 묶은 정산서는 CONFIRMED 그대로이고 payoutBatchId만 채워진다(시험 리뷰 TR-13)
+    expect(Array.from({ length: 21 }, (_, i) => x.store.statements.get(sid(i + 1))).map((st) => [st?.status, st?.payoutBatchId])).toEqual(Array.from({ length: 21 }, () => ['CONFIRMED', batchId]));
     x.fake.inject({ method: 'POST', path: /^\/v2\/payouts$/, when: (r) => refsOf(r).includes(`${sid(21)}-1`) }, 'NO_RESPONSE');
     const view = await x.settlements.executeBatch(batchId);
     const sent = [...posts(x)].sort((a, b) => refsOf(a)[0]!.localeCompare(refsOf(b)[0]!));
@@ -68,6 +71,8 @@ describe('J-T38 ① 실행 접수', () => {
     }
     const last = x.payoutsOf(sid(21))[0]!;
     expect(last.pgPayoutId).toBeNull();
+    // 접수되지 않은 정산서는 SCHEDULED가 아니다(조각이 모두 접수된 정산서만 SCHEDULED)
+    expect(x.store.statements.get(sid(21))).toMatchObject({ status: 'CONFIRMED', payoutBatchId: batchId });
     expect(x.events('PAYOUT_SCHEDULED').map((e) => [e.statementId, e.amount])).toEqual(Array.from({ length: 20 }, (_, i) => [sid(i + 1), 100_000 + i + 1]));
     const failedKey = sent[1]!.headers['idempotency-key'];
     expect(failedKey).toBe(tossIdempotencyKey([last], MON));
@@ -225,6 +230,58 @@ describe('J-T38 ④ 잔액 확인', () => {
     await x.settlements.submitDueBatches();
     expect(posts(x)).toHaveLength(2);
     expect(x.store.batches.get(batchId)?.status).toBe('SUBMITTED');
+  });
+
+  /**
+   * 같은 상점(일반) 화요일 묶음의 지급 건 넷: COMPLETED 100,000·FAILED 200,000·IN_PROGRESS 300,000·REQUESTED 400,000,
+   * 에스크로 상점의 REQUESTED 900,000. 끝나지 않은 일반 상점 예약지급 = 300,000 + 400,000 = 700,000이다(시험 리뷰 TR-10)
+   */
+  async function withMixedOthers() {
+    const x = await open();
+    const other = randomUUID();
+    await x.partner(other);
+    const ss: StatementRecord[] = [];
+    for (const amount of [100_000, 200_000, 300_000, 400_000]) ss.push(await x.confirmed({ promoterId: other, amount, payoutDate: TUE }));
+    await x.settlements.executeBatch(await x.approvedBatch({ payoutDate: TUE }));
+    const at = new Date(x.clock.now());
+    const pg = (i: number) => x.payoutsOf(ss[i]!.statementId)[0]!.pgPayoutId!;
+    await x.settlements.applyPayoutFact({ pgPayoutId: pg(0), status: 'COMPLETED', observedAt: at });
+    await x.settlements.applyPayoutFact({ pgPayoutId: pg(1), status: 'FAILED', errorCode: 'ACCOUNT_CLOSED', observedAt: at });
+    await x.settlements.applyPayoutFact({ pgPayoutId: pg(2), status: 'IN_PROGRESS', observedAt: at });
+    await x.confirmed({ promoterId: other, amount: 900_000, payoutDate: TUE, pgStore: 'ESCROW' });
+    await x.settlements.executeBatch(await x.approvedBatch({ payoutDate: TUE, pgStore: 'ESCROW' }));
+    const promoterId = randomUUID();
+    await x.partner(promoterId);
+    return { x, promoterId };
+  }
+
+  test('J-T38 ④ 요청 직전에 빼는 것은 같은 상점의 끝나지 않은(REQUESTED·IN_PROGRESS) 예약지급뿐이다: COMPLETED·FAILED·다른 상점은 빼지 않는다', async () => {
+    const { x, promoterId } = await withMixedOthers();
+    await x.confirmed({ promoterId, amount: 1_000_000, payoutDate: MON });
+    const batchId = await x.approvedBatch({ payoutDate: MON });
+    const before = posts(x).length;
+    x.fake.balances.STANDARD = { available: 1_699_999, pending: 0 };
+    await x.settlements.executeBatch(batchId);
+    expect(posts(x).length - before).toBe(0);
+    expect(x.cases('PAYOUT_DELAYED').map((c) => c.eventKey)).toEqual([`payout-balance:${batchId}`]);
+    x.fake.balances.STANDARD = { available: 1_700_000, pending: 0 };
+    x.at(FRI_10 + MIN);
+    await x.settlements.submitDueBatches();
+    expect(posts(x).length - before).toBe(1);
+    expect(x.store.batches.get(batchId)?.status).toBe('SUBMITTED');
+  });
+
+  test('J-T38 ④ 묶음을 만들 때의 비교도 같은 상점의 REQUESTED·IN_PROGRESS만 더한다(1원 적으면 HELD·BALANCE, 같으면 묶음)', async () => {
+    const a = await withMixedOthers();
+    const s = await a.x.confirmed({ promoterId: a.promoterId, amount: 1_000_000, payoutDate: MON });
+    a.x.fake.balances.STANDARD = { available: 1_699_999, pending: 0 };
+    await expect(a.x.settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: MON, actor: randomUUID() })).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-balance-insufficient') });
+    expect(a.x.store.statements.get(s.statementId)).toMatchObject({ status: 'HELD', holdReason: 'BALANCE' });
+    await h?.close();
+    const b = await withMixedOthers();
+    await b.x.confirmed({ promoterId: b.promoterId, amount: 1_000_000, payoutDate: MON });
+    b.x.fake.balances.STANDARD = { available: 1_700_000, pending: 0 };
+    expect((await b.x.settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: MON, actor: randomUUID() })).totalAmount).toBe(1_000_000);
   });
 
   test('J-T38 ④ 이 묶음 안에서 이미 접수된 지급 건은 빼지 않는다(남은 둘째 요청 금액과 같은 잔액이면 보낸다)', async () => {
@@ -428,6 +485,30 @@ describe('J-T38 ⑧ 지급일 다음 영업일 12시 미완료 점검', () => {
     expect(x.store.payouts.get(pLate.payoutId)?.status).toBe('IN_PROGRESS');
     expect(x.cases('PAYOUT_DELAYED')).toEqual([expect.objectContaining({ eventKey: `payout-overdue:${pLate.payoutId}`, sourceId: pLate.payoutId })]);
     expect(await x.metricValue('settlement_payout_overdue_total', { pg: 'TOSS' })).toBe(1);
+    // 다음 30분 점검이 같은 미완료 건을 다시 봐도 CS 건·카운터는 그대로 한 번이다(시험 리뷰 TR-05 (가))
+    x.at(kst('2026-12-14T12:30:00.000'));
+    await x.settlements.checkOverduePayouts();
+    expect(x.cases('PAYOUT_DELAYED')).toHaveLength(1);
+    expect(await x.metricValue('settlement_payout_overdue_total', { pg: 'TOSS' })).toBe(1);
+  });
+
+  test('J-T38 ⑧ 정산 일꾼의 30분 tick이 미완료 점검을 부른다: 월요일 11:30 tick은 조회 없음, 12:00 tick에 단건 조회와 PAYOUT_DELAYED(시험 리뷰 TR-05 (나))', async () => {
+    const x = await open({ now: kst('2026-12-10T10:00:00.000') });
+    const promoterId = randomUUID();
+    await x.partner(promoterId);
+    const s = await x.confirmed({ promoterId, amount: 3_300_000, payoutDate: '2026-12-11' });
+    await x.settlements.executeBatch(await x.approvedBatch({ payoutDate: '2026-12-11' }));
+    const p = x.payoutsOf(s.statementId)[0]!;
+    x.fake.setPayout(p.pgPayoutId!, 'IN_PROGRESS');
+    const worker = new SettlementDueWorker({ settlements: x.settlements, leader: { isLeader: () => true }, clock: x.clock, timer: noTimer });
+    x.at(kst('2026-12-14T11:30:00.000'));
+    await worker.tick(false);
+    expect(x.fake.calls('GET', /^\/v2\/payouts\//)).toHaveLength(0);
+    expect(x.cases('PAYOUT_DELAYED')).toEqual([]);
+    x.at(kst('2026-12-14T12:00:00.000'));
+    await worker.tick(false);
+    expect(x.fake.calls('GET', /^\/v2\/payouts\//).map((r) => r.path)).toEqual([`/v2/payouts/${p.pgPayoutId}`]);
+    expect(x.cases('PAYOUT_DELAYED').map((c) => c.eventKey)).toEqual([`payout-overdue:${p.payoutId}`]);
   });
 });
 
@@ -531,6 +612,45 @@ describe('J-T38 ⑨ 09시 토스 지급 묶음 자동 만들기', () => {
   });
 });
 
+describe('J-T38 ⑨ 09시 묶음의 잔액 확인(시험 리뷰 TR-11)', () => {
+  test('J-T38 ⑨ 09시 묶음도 잔액을 견주어 1원 모자라면 그 상점 확정 정산서를 HELD·BALANCE·PAYOUT_HELD로 두고 묶음을 만들지 않는다', async () => {
+    const x = await open({ now: kst('2026-12-04T09:00:00.000') });
+    const a = randomUUID();
+    await x.partner(a);
+    const s1 = await x.confirmed({ promoterId: a, amount: 1_000_000, payoutDate: MON });
+    const s2 = await x.confirmed({ promoterId: a, amount: 2_000_000, payoutDate: MON });
+    x.fake.balances.STANDARD = { available: 2_999_999, pending: 0 };
+    expect(await x.settlements.prepareTossBatches(MON)).toEqual({ prepared: 0 });
+    expect(x.store.batches.size).toBe(0);
+    expect([s1, s2].map((s) => [x.store.statements.get(s.statementId)?.status, x.store.statements.get(s.statementId)?.holdReason])).toEqual([
+      ['HELD', 'BALANCE'],
+      ['HELD', 'BALANCE'],
+    ]);
+    expect(x.events('PAYOUT_HELD').map((e) => [e.statementId, e.amount]).sort()).toEqual([
+      [s1.statementId, 1_000_000],
+      [s2.statementId, 2_000_000],
+    ].sort());
+  });
+
+  test('J-T38 ⑨ 잔액 원천이 세 번(09:00·09:30·10:00) 답하지 않으면 셋째 실패에 PAYOUT_DELAYED(대상 TOSS:{상점}:{지급일}) 한 건이고 그때까지 묶음은 없다', async () => {
+    const x = await open({ now: kst('2026-12-04T09:00:00.000') });
+    const a = randomUUID();
+    await x.partner(a);
+    await x.confirmed({ promoterId: a, amount: 1_000_000, payoutDate: MON });
+    x.fake.inject({ method: 'GET', path: /^\/v2\/balances$/, times: 3 }, 'NO_RESPONSE');
+    const worker = new SettlementDueWorker({ settlements: x.settlements, leader: { isLeader: () => true }, clock: x.clock, timer: noTimer });
+    await worker.tick(false);
+    x.at(kst('2026-12-04T09:30:00.000'));
+    await worker.tick(false);
+    expect(x.cases('PAYOUT_DELAYED')).toEqual([]);
+    x.at(kst('2026-12-04T10:00:00.000'));
+    await worker.tick(false);
+    expect(x.cases('PAYOUT_DELAYED')).toEqual([expect.objectContaining({ eventKey: `TOSS:STANDARD:${MON}`, sourceId: `TOSS:STANDARD:${MON}` })]);
+    expect(x.store.batches.size).toBe(0);
+    expect(x.fake.calls('GET', /^\/v2\/balances$/).filter((r) => r.fault === 'NO_RESPONSE')).toHaveLength(3);
+  });
+});
+
 describe('J-T5 응답 없음·처리 중·마감·두 파드', () => {
   async function batchAt(now: number, statements = 1) {
     const x = await open({ now });
@@ -631,6 +751,9 @@ describe('J-T5 응답 없음·처리 중·마감·두 파드', () => {
     expect(x.store.batches.get(batchId)).toMatchObject({ status: 'APPROVED', payoutDate: TUE, nextSubmitAt: null });
     expect(x.cases('PAYOUT_DELAYED')).toEqual([expect.objectContaining({ kind: 'PAYOUT_DELAYED', sourceId: batchId })]);
     expect(x.events('PAYOUT_HELD').map((e) => [e.statementId, e.amount]).sort()).toEqual(ss.map((s) => [s.statementId, s.payoutAmount]).sort());
+    // E-01(ADR-0369 결정 14): 정산서는 상태 그대로(CONFIRMED·묶음에 붙음) 지급일만 바뀌고, 같은 상태의 감사 한 줄(payout-postponed·system)이 남는다
+    for (const s of ss) expect(x.store.statements.get(s.statementId)).toMatchObject({ status: 'CONFIRMED', payoutBatchId: batchId, payoutDate: TUE });
+    expect(x.store.statementAudits.filter((a) => a.reason === 'payout-postponed').map((a) => [a.statementId, a.fromStatus, a.toStatus, a.actor]).sort()).toEqual(ss.map((s) => [s.statementId, 'CONFIRMED', 'CONFIRMED', 'system']).sort());
     // 마감 뒤에는 자동으로 다시 보내지 않는다
     x.at(DEADLINE + 2 * 60 * MIN);
     await x.settlements.submitDueBatches();
@@ -643,6 +766,36 @@ describe('J-T5 응답 없음·처리 중·마감·두 파드', () => {
     expect(last.headers['idempotency-key']).not.toBe(oldKey);
     expect(x.cases('PAYOUT_DELAYED')).toHaveLength(1);
   });
+
+  for (const cause of ['BALANCE_SHORT', 'PROCESSING'] as const) {
+    test(`J-T5 마감: ${cause === 'BALANCE_SHORT' ? '요청 직전 잔액 부족' : '409 처리 중'}이 22:00까지 이어져도 22:00 점검에서 보내지 않고 지급일을 미루며 PAYOUT_DELAYED(대상 묶음)·정산서마다 PAYOUT_HELD이고 그 뒤 자동 전송 0이다(시험 리뷰 TR-12)`, async () => {
+      const start = kst('2026-12-04T21:29:00.000');
+      const { x, batchId, ss } = await batchAt(start, 2);
+      if (cause === 'BALANCE_SHORT') x.fake.balances.STANDARD = { available: 2_000_000, pending: 0 };
+      else x.fake.inject({ method: 'POST', path: /^\/v2\/payouts$/, times: 5 }, 'PROCESSING');
+      await x.settlements.executeBatch(batchId);
+      let next = start + MIN;
+      for (const gap of [2, 4, 8, 16]) {
+        x.at(next);
+        await x.settlements.submitDueBatches();
+        next += gap * MIN;
+      }
+      expect(next).toBe(DEADLINE);
+      const sentBefore = posts(x).length;
+      expect(sentBefore).toBe(cause === 'BALANCE_SHORT' ? 0 : 5);
+      x.at(DEADLINE);
+      await x.settlements.submitDueBatches();
+      expect(posts(x)).toHaveLength(sentBefore);
+      expect(x.store.batches.get(batchId)).toMatchObject({ status: 'APPROVED', payoutDate: TUE, nextSubmitAt: null });
+      const deadlineCases = x.cases('PAYOUT_DELAYED').filter((c) => c.eventKey !== `payout-balance:${batchId}`);
+      expect(deadlineCases).toEqual([expect.objectContaining({ kind: 'PAYOUT_DELAYED', sourceId: batchId })]);
+      expect(x.events('PAYOUT_HELD').map((e) => [e.statementId, e.amount]).sort()).toEqual(ss.map((s) => [s.statementId, s.payoutAmount]).sort());
+      x.fake.balances.STANDARD = { available: 900_000_000_000, pending: 0 };
+      x.at(DEADLINE + 2 * 60 * MIN);
+      await x.settlements.submitDueBatches();
+      expect(posts(x)).toHaveLength(sentBefore);
+    });
+  }
 
   test('J-T5 두 파드가 같은 묶음을 함께 다시 보내도 전송은 한 번이다(묶음 잡기)', async () => {
     const { x, batchId } = await batchAt(FRI_10);
@@ -667,6 +820,27 @@ describe('J-T5 응답 없음·처리 중·마감·두 파드', () => {
     const b = new PayoutSubmitWorker({ settlements: x.make(), leader: { isLeader: () => true }, clock: x.clock, timer: noTimer });
     await Promise.all([a.tick(), b.tick()]);
     expect(posts(x)).toHaveLength(2);
+  });
+});
+
+describe('J-T5 전송 일꾼의 타이머(시험 리뷰 TR-05 (다))', () => {
+  test('J-T5 전송 일꾼 start()는 60,000ms 간격을 걸고 stop()은 그 손잡이를 푼다', async () => {
+    const x = await open();
+    const intervals: number[] = [];
+    const cleared: unknown[] = [];
+    const handle = { name: 'submit-timer' };
+    const timer = {
+      setInterval: (_fn: () => void, ms: number) => {
+        intervals.push(ms);
+        return handle;
+      },
+      clearInterval: (hd: unknown) => void cleared.push(hd),
+    };
+    const worker = new PayoutSubmitWorker({ settlements: x.settlements, leader: { isLeader: () => true }, clock: x.clock, timer });
+    worker.start();
+    expect(intervals).toEqual([60_000]);
+    await worker.stop();
+    expect(cleared).toEqual([handle]);
   });
 });
 

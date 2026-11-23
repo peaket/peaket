@@ -21,6 +21,7 @@ import {
 import { quiet } from './settlement-flow-support.js';
 import { noApprovals, noSaleSuspensions, seedTossSeller } from './settlement-support.js';
 import { configOf, kst, tossHarness, type TossHarness } from './support/toss-harness.js';
+import { tossWebhookBody } from './support/toss-payout-fake.js';
 
 const NOW = kst('2026-12-03T10:00:00.000');
 const PAYOUT_DATE = '2026-12-07';
@@ -209,7 +210,7 @@ describe('J-T37 ③ 셀러 상태는 단건 조회로만', () => {
     const std = [...x.fake.sellers.values()].find((s) => s.store === 'STANDARD')!;
     std.status = 'KYC_REQUIRED';
     const receiver = new ReceiveSettlementWebhook({ config: x.config, transport: x.transport, settlements: x.settlements, store: x.store, now: () => new Date(x.clock.now()), log: x.log, signals: x.signals });
-    const body = JSON.stringify({ eventType: 'seller.changed', data: { sellerId: std.id, status: 'APPROVED' } });
+    const body = tossWebhookBody('seller.changed', { id: std.id!, status: 'APPROVED' });
     const time = new Date(x.clock.now()).toISOString();
     const signature = `v1:${createHmac('sha256', x.keys.STANDARD.current).update(`${body}:${time}`).digest('base64')}`;
     const answer = await receiver.receive({ 'tosspayments-webhook-signature': signature, 'tosspayments-webhook-transmission-time': time, 'tosspayments-webhook-transmission-id': `tx-${randomUUID()}` }, Buffer.from(body));

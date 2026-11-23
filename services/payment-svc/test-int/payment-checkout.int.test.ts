@@ -53,7 +53,6 @@ import { failure, ledgerOf, msOf, newId, paymentClient, type PaymentClient, tabl
 import { fakeClock, type FakeClock } from '@peaket/platform';
 
 const WEB_ORIGIN = 'https://www.it.example';
-const ENTRY = '2026-12-20T10:00:00.000Z';
 
 let pgc: PostgresContainer | undefined;
 let admin: Database;
@@ -511,7 +510,8 @@ describe('P-T29: 결제사 고정', () => {
   test('HOT-152 넘긴 것: 승인 명령의 입장 시각을 원장에 두고 조회 잡기가 읽는다', async () => {
     const { s, toss, jobs, drive } = await pinned();
     const f = tossConfirm({ authenticatedAtMs: s.clock.now() });
-    const entrySeconds = Math.floor(Date.parse(ENTRY) / 1000);
+    // 입장 시각은 실행 시각 기준 3일 뒤다(고정 날짜는 그날이 지나면 입금 기한 상한을 넘겨 깨진다, F-07-6 감독 지시)
+    const entrySeconds = Math.floor((s.clock.now() + 72 * HOUR) / 1000);
     await unary(s.client, 'ConfirmPayment', { ...f.request, entry_opens_at: { seconds: entrySeconds, nanos: 0 } });
     expect((await admin.pool.query<{ entry_opens_at: Date }>('select entry_opens_at from payment where order_id = $1', [f.orderId])).rows[0]!.entry_opens_at.getTime()).toBe(entrySeconds * 1000);
     toss.confirmAnswer = (ref) => ({ outcome: 'UNKNOWN', paymentRef: ref });

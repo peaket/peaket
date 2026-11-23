@@ -366,11 +366,12 @@ describe('J-T36 수기 조정(실제 DB)', () => {
     return { s, approvalId, b, a };
   };
 
-  test('[ASVS v5.0.0-2.3.4] J-T36 ⑥ 묶음이 먼저면 정산서는 SCHEDULED이고 적용은 409·조정 행은 PENDING 그대로다', async () => {
+  test('[ASVS v5.0.0-2.3.4] J-T36 ⑥ 묶음이 먼저면 정산서는 그 묶음에 붙어(상태 CONFIRMED) 적용은 409·조정 행은 PENDING 그대로다', async () => {
     const { s, approvalId, b, a } = await overlapBatch('batch');
     expect(b.status).toBe('fulfilled');
     expect(a).toMatchObject({ status: 'rejected', reason: { status: 409 } });
-    expect(await statementRow(s.statementId)).toMatchObject({ status: 'SCHEDULED', adjustment_amount: '0', payout_amount: '24920000' });
+    // F-07-6 시험 리뷰 E-01(ADR-0369 결정 14): 묶을 때 상태는 CONFIRMED 그대로이고 payout_batch_id가 채워진다
+    expect(await statementRow(s.statementId)).toMatchObject({ status: 'CONFIRMED', payout_batch_id: expect.any(String), adjustment_amount: '0', payout_amount: '24920000' });
     expect((await adjustment(approvalId))!.status).toBe('PENDING');
   });
 
@@ -396,7 +397,7 @@ describe('J-T36 수기 조정(실제 DB)', () => {
     at(p.c1, DUE_AT);
     await p.a.confirmDueStatements();
     await p.a.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: s.payoutDate!, actor: randomUUID() });
-    expect((await statementRow(s.statementId))!.status).toBe('SCHEDULED');
+    expect(await statementRow(s.statementId)).toMatchObject({ status: 'CONFIRMED', payout_batch_id: expect.any(String) }); // E-01: 묶인 정산서
     await expect(p.a.requestAdjustment(s.statementId, { approvalId: randomUUID(), requestedBy: randomUUID(), amount: -10_000, reasonCode: 'AGREED_DEDUCTION', evidenceNote: '지급 뒤' })).rejects.toMatchObject({
       status: 409,
       type: expect.stringContaining('settlement-adjustment-not-allowed'),

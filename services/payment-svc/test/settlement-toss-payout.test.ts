@@ -6,11 +6,12 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, test } from 'vitest';
 import type { PayoutBatchRecord, PayoutRecord, PgStore, TossSellerStatus } from '../src/modules/settlement/domain/settlement.js';
-import { classifyTossFailure, groupTossPayoutRequests, parseTossSettlementWebhook, splitTossPayoutAmount, verifyTossPayoutSignature } from '../src/modules/settlement/domain/payout-adapters.js';
+import { classifyTossFailure, groupTossPayoutRequests, splitTossPayoutAmount, verifyTossPayoutSignature } from '../src/modules/settlement/domain/payout-adapters.js';
 import { TossPayoutGateway, tossIdempotencyKey } from '../src/modules/settlement/adapters/toss-payout-gateway.js';
 import { ReceiveSettlementWebhook } from '../src/modules/settlement/application/receive-settlement-webhook.js';
 import type { TossPayoutTransport, TossSellerRegistration, TossSendResult } from '../src/modules/settlement/domain/ports.js';
 import { kst, tossHarness, type TossHarness } from './support/toss-harness.js';
+import { tossWebhookBody } from './support/toss-payout-fake.js';
 
 const AT = new Date('2026-11-22T00:00:00.000Z');
 
@@ -176,18 +177,17 @@ describe('J-T34 토스 지급대행', () => {
     const send = (body: string, id: string, signature = sign(body)) =>
       receiver.receive({ 'tosspayments-webhook-signature': signature, 'tosspayments-webhook-transmission-time': time, 'tosspayments-webhook-transmission-id': id }, Buffer.from(body));
 
-    const body = JSON.stringify({ eventType: 'payout.changed', data: { payoutId: p!.pgPayoutId, status: 'COMPLETED' } });
+    const body = tossWebhookBody('payout.changed', { id: p!.pgPayoutId!, status: 'COMPLETED' });
     expect(await send(body, 't-1')).toBe('ACCEPTED');
     expect(x.store.payouts.get(p!.payoutId)).toMatchObject({ status: 'FAILED', errorCode: 'ACCOUNT_CLOSED' });
 
     // 대역 서버에 그 셀러를 만들어 둔다(단건 조회가 KYC_REQUIRED를 준다)
     x.fake.sellers.set(sellers.STANDARD!, { id: sellers.STANDARD!, store: 'STANDARD', refSellerId: `${promoterId}-STANDARD`, businessType: 'CORPORATE', status: 'KYC_REQUIRED' });
-    const sellerBody = JSON.stringify({ eventType: 'seller.changed', data: { sellerId: sellers.STANDARD, status: 'APPROVED' } });
+    const sellerBody = tossWebhookBody('seller.changed', { id: sellers.STANDARD!, status: 'APPROVED' });
     expect(await send(sellerBody, 't-2')).toBe('ACCEPTED');
     expect(x.store.tossSellers.get(`${promoterId}:STANDARD`)?.status).toBe('KYC_REQUIRED');
 
     expect(await send(body, 't-3', 'v1:bad')).toBe('REJECTED');
-    expect(parseTossSettlementWebhook(body)?.kind).toBe('PAYOUT');
     expect(verifyTossPayoutSignature({ signature: sign(body), secrets: [x.keys.STANDARD.current], body, transmissionTime: time, now: new Date(x.clock.now()) })).toBe('OK');
   });
 });

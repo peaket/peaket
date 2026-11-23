@@ -13,7 +13,8 @@ import { configOf, kst, newKeys, type StoreKeys } from './support/toss-harness.j
 import { sealJwe, openJwe, startTossPayoutFake, type TossPayoutFake } from './support/toss-payout-fake.js';
 
 const NOW = kst('2026-12-04T10:00:00.000');
-const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/;
+/** iat 꼴: 공개 안내 `yyyy-MM-dd'T'HH:mm:ss±hh:mm`(밀리초 없음), KST 오프셋(계획 §5.1 (나), settlement §8 JWE 행, 시험 리뷰 TR-14) */
+const IAT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+09:00$/;
 
 let fake: TossPayoutFake | undefined;
 afterEach(async () => {
@@ -49,7 +50,8 @@ describe('J-T37 ① JWE 봉인·풀기', () => {
     const header = req!.jweHeader!;
     expect({ alg: header.alg, enc: header.enc }).toEqual({ alg: 'dir', enc: 'A256GCM' });
     expect(typeof header.iat).toBe('string');
-    expect(header.iat as string).toMatch(ISO);
+    expect(header.iat as string).toMatch(IAT);
+    expect(header.iat).toBe('2026-12-04T10:00:00+09:00');
     expect(Date.parse(header.iat as string)).toBe(NOW);
     expect(Buffer.from(header.nonce as string, 'base64url')).toHaveLength(16);
     // 다섯 조각이고 암호화 키 조각은 비어 있다(dir)
@@ -74,7 +76,7 @@ describe('J-T37 ① JWE 봉인·풀기', () => {
     expect(hb.payload).toEqual(payload);
     expect(ha.header.nonce).not.toBe(hb.header.nonce);
     expect(ha.iv).not.toBe(hb.iv);
-    expect(Date.parse(ha.header.iat as string)).toBe(NOW);
+    expect(ha.header.iat).toBe('2026-12-04T10:00:00+09:00');
     // 대역 서버가 만든 JWE를 구현이 푼다(서로 맞는 구현). 키 목록 가운데 맞는 키로 푼다(교체 중의 옛 키)
     const old = randomBytes(32);
     expect(await openTossJwe(sealJwe(payload, old), [key, old])).toEqual(payload);
@@ -128,6 +130,9 @@ describe('J-T37 ⑦ 공개 안내 모양 대역 서버와의 계약', () => {
     expect(req!.headers.authorization).toBe(basic(r.keys.STANDARD.secretKey));
     expect(req!.headers['idempotency-key']).toBe('peaket-payout-abc');
     expect(String(req!.headers['content-type'])).toMatch(/^text\/plain/);
+    expect(req!.headers['tosspayments-api-security-mode']).toBe('ENCRYPTION');
+    // 이체 적요 transactionDescription은 건마다 필수·1~7자다(토스 공개 문서, settlement §5.2)
+    expect((req!.body as { transactionDescription?: unknown }[]).map((i) => typeof i.transactionDescription === 'string' && i.transactionDescription.length >= 1 && i.transactionDescription.length <= 7)).toEqual([true, true]);
     expect(req!.body).toEqual([
       expect.objectContaining({ refPayoutId: 'stmt-a-1', destination: 'FSEL-A', scheduleType: 'SCHEDULED', payoutDate: '2026-12-07', amount: { currency: 'KRW', value: 999_999_999 } }),
       expect.objectContaining({ refPayoutId: 'stmt-a-2', destination: 'FSEL-A', scheduleType: 'SCHEDULED', payoutDate: '2026-12-07', amount: { currency: 'KRW', value: 1 } }),
@@ -175,7 +180,15 @@ describe('J-T37 ⑦ 공개 안내 모양 대역 서버와의 계약', () => {
     const toCancel = r.fake.payoutByRef('stmt-c-1')!;
     await r.transport.cancelPayout('STANDARD', toCancel.id);
     const cancel = r.fake.calls('POST', /\/cancel$/)[0]!;
-    expect([cancel.path, cancel.headers.authorization, String(cancel.headers['content-type']).startsWith('text/plain'), cancel.decryptError]).toEqual([`/v2/payouts/${toCancel.id}/cancel`, basic(r.keys.STANDARD.secretKey), true, undefined]);
+    // 지급 취소는 본문이 없고 암호화하지 않으며 암호화 머리·text/plain도 없다(토스 공개 문서, settlement §8, ADR-0369 결정 14)
+    expect([cancel.path, cancel.headers.authorization, cancel.rawBody, String(cancel.headers['content-type'] ?? '').startsWith('text/plain'), cancel.headers['tosspayments-api-security-mode'], cancel.headers['idempotency-key']]).toEqual([
+      `/v2/payouts/${toCancel.id}/cancel`,
+      basic(r.keys.STANDARD.secretKey),
+      '',
+      false,
+      undefined,
+      undefined,
+    ]);
     expect(r.fake.payouts.get(toCancel.id)?.status).toBe('CANCELED');
 
     const registration = {
@@ -186,7 +199,7 @@ describe('J-T37 ⑦ 공개 안내 모양 대역 서버와의 계약', () => {
     };
     const seller = await r.transport.registerSeller('ESCROW', registration);
     const sellerReq = r.fake.calls('POST', /^\/v2\/sellers$/)[0]!;
-    expect([sellerReq.headers.authorization, String(sellerReq.headers['content-type']).startsWith('text/plain'), sellerReq.headers['idempotency-key']]).toEqual([basic(r.keys.ESCROW.secretKey), true, undefined]);
+    expect([sellerReq.headers.authorization, String(sellerReq.headers['content-type']).startsWith('text/plain'), sellerReq.headers['tosspayments-api-security-mode'], sellerReq.headers['idempotency-key']]).toEqual([basic(r.keys.ESCROW.secretKey), true, 'ENCRYPTION', undefined]);
     expect(sellerReq.body).toEqual(expect.objectContaining(registration));
     const fakeSeller = [...r.fake.sellers.values()][0]!;
     expect(seller).toEqual({ tossSellerId: fakeSeller.id, status: 'PARTIALLY_APPROVED' });

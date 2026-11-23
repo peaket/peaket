@@ -271,9 +271,9 @@ describe('정산 HTTP·유스케이스', () => {
     const payouts = await store.listPayouts(batch.batchId);
     expect(payouts).toHaveLength(1);
     expect(payouts.map((p) => p.status)).toEqual(['REQUESTED']);
-    await expect(settlements.retryPayout(payouts[0]!.payoutId)).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-not-retryable') });
+    await expect(settlements.retryPayout(payouts[0]!.payoutId, { actorId: randomUUID() })).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-not-retryable') });
     await store.savePayout({ ...payouts[0]!, status: 'FAILED', errorCode: 'PG_ERROR' });
-    const retried = await settlements.retryPayout(payouts[0]!.payoutId);
+    const retried = await settlements.retryPayout(payouts[0]!.payoutId, { actorId: randomUUID() }); // F-07-6: 재요청은 행위자를 받는다(ADR-0369 결정 8)
     expect(retried).toMatchObject({ seq: 2, refPayoutId: `${s.statementId}-2`, status: 'REQUESTED' });
     expect((await store.findStatementById(s.statementId))?.status).toBe('SCHEDULED');
   });
@@ -304,7 +304,8 @@ describe('정산 HTTP·유스케이스', () => {
     const s = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'PORTONE', pgStore: 'STANDARD' });
     await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, status: 'CONFIRMED' });
     const batch = await settlements.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: s.payoutDate!, portoneBalance: { amount: s.payoutAmount, observedAt: NOW.toISOString() }, actor: randomUUID() });
-    expect((await store.findStatementById(s.statementId))?.status).toBe('SCHEDULED');
+    // F-07-6 시험 리뷰 E-01(ADR-0369 결정 14): 묶을 때는 payout_batch_id만 채우고 상태는 CONFIRMED 그대로다. 묶였는지는 그 칸으로 가른다
+    expect(await store.findStatementById(s.statementId)).toMatchObject({ status: 'CONFIRMED', payoutBatchId: batch.batchId });
     expect((await store.listConfirmed('PORTONE', 'STANDARD', s.payoutDate!))).toHaveLength(0);
 
     const extraEvent = randomUUID();

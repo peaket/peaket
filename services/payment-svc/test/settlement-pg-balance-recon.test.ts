@@ -89,7 +89,8 @@ describe('J-T25 결제사 잔액 대사', () => {
     const cases = x.cases('PG_BALANCE_MISMATCH');
     expect(cases).toEqual([expect.objectContaining({ kind: 'PG_BALANCE_MISMATCH', sourceId: 'TOSS:STANDARD', requestedAt: null })]);
     expect(cases[0]!.eventKey).toMatch(UUID);
-    expect(Object.values(record!)).toContain(cases[0]!.eventKey);
+    // 사건 키 = 대사 행 ID(reconciliationId, 계획 §5.1 (라)·(바), 시험 리뷰 TR-15)
+    expect(cases[0]!.eventKey).toBe(record!.reconciliationId);
     expect(x.store.batches.get(batch.batchId)?.status).toBe('PENDING_APPROVAL');
     expect(x.store.statements.get(s.statementId)?.payoutBatchId).toBe(batch.batchId);
     expect(await x.metricValue('settlement_pg_balance_diff_krw', { pg: 'TOSS', store: 'STANDARD' })).toBe(-30_000);
@@ -163,5 +164,47 @@ describe('J-T25 결제사 잔액 대사', () => {
     x.at(kst('2026-11-30T22:30:00.000'));
     await worker.tick(false);
     expect(x.store.pgBalanceReconciliations.filter((r) => r.kind === 'MONTHLY')).toHaveLength(2);
+  });
+
+  test('J-T25 ① 수수료는 지난 대사 뒤 기간만 읽어 앞 누적에 더하고, 이용료는 첫 지급 달부터 달마다 센다(11월 대사 뒤 12월 대사, 시험 리뷰 TR-06)', async () => {
+    const { x, ledger } = await shop({ observed: 16_515_050 });
+    // 정산 행은 날짜가 있고 대역 서버가 조회 기간으로 거른다
+    x.fake.settlementRows.STANDARD = [
+      { paymentKey: 'pk-1', amount: 40_000_000, fee: 1_000_000, date: '2026-11-10' },
+      { paymentKey: 'pk-2', amount: 10_000_000, fee: 234_560, date: '2026-11-20' },
+      { paymentKey: 'pk-3', amount: 20_000_000, fee: 345_670, date: '2026-12-15' },
+    ];
+    const nov = await x.settlements.reconcileTossBalance({ pgStore: 'STANDARD', kind: 'MONTHLY', periodMonth: '2026-11-01' });
+    expect(nov).toMatchObject({ pgFeeAmount: 1_234_560 + 250_390, diffAmount: 0 });
+    // 12월: 장부 누적이 늘고 12월 지급 9건(무료 7건 넘는 2건 × 130원) → 12월 이용료 250,260
+    ledger.rows.set('STANDARD', { approvedAmount: 80_000_000, refundedAmount: 3_000_000, paidOutAmount: 50_000_000, payoutCountByMonth: { '2026-11': 10, '2026-12': 9 }, firstPaymentAt: new Date(kst('2026-11-03T12:00:00.000')) });
+    const fee = 1_234_560 + 345_670 + 250_390 + 250_260;
+    const expected = 80_000_000 - 3_000_000 - fee - 50_000_000;
+    x.fake.balances.STANDARD = { available: expected, pending: 0 };
+    x.at(kst('2026-12-31T22:00:00.000'));
+    const dec = await x.settlements.reconcileTossBalance({ pgStore: 'STANDARD', kind: 'MONTHLY', periodMonth: '2026-12-01' });
+    expect(dec).toMatchObject({ periodMonth: '2026-12-01', cutoffAt: new Date(kst('2026-12-31T22:00:00.000')), pgFeeAmount: fee, expectedAmount: expected, observedAmount: expected, diffAmount: 0, severity: 'NONE' });
+    const queries = x.fake.calls('GET', /^\/v1\/settlements$/).filter((r) => r.store === 'STANDARD');
+    expect(queries.map((r) => [r.query.startDate, r.query.endDate])).toEqual([
+      ['2026-11-03', '2026-11-30'],
+      ['2026-11-30', '2026-12-31'],
+    ]);
+    expect(x.cases('PG_BALANCE_MISMATCH')).toEqual([]);
+  });
+
+  test('J-T25 정산 일꾼: 말일이 주말인 달은 마지막 영업일(2027-01-29 금) 22:00에 돌고(21:59:59.999에는 없음), 말일(31일 일) 22:00에는 새 행이 없다(시험 리뷰 TR-07)', async () => {
+    const { x } = await shop({ observed: 16_515_050, now: kst('2027-01-29T21:59:59.999') });
+    const worker = new SettlementDueWorker({ settlements: x.settlements, leader: { isLeader: () => true }, clock: x.clock, timer: { setInterval: () => 0, clearInterval: () => undefined } });
+    await worker.tick(false);
+    expect(x.store.pgBalanceReconciliations).toEqual([]);
+    x.at(kst('2027-01-29T22:00:00.000'));
+    await worker.tick(false);
+    expect(x.store.pgBalanceReconciliations.map((r) => [r.kind, r.pgStore, r.periodMonth]).sort()).toEqual([
+      ['MONTHLY', 'ESCROW', '2027-01-01'],
+      ['MONTHLY', 'STANDARD', '2027-01-01'],
+    ]);
+    x.at(kst('2027-01-31T22:00:00.000'));
+    await worker.tick(false);
+    expect(x.store.pgBalanceReconciliations).toHaveLength(2);
   });
 });

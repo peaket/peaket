@@ -182,7 +182,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     expect(payouts).toHaveLength(1);
     expect(payouts[0]!.refPayoutId).toBe(`${s.statementId}-1`);
     await store.savePayout({ ...payouts[0]!, status: 'FAILED', errorCode: 'PG_ERROR' });
-    const retried = await settlements.retryPayout(payouts[0]!.payoutId);
+    const retried = await settlements.retryPayout(payouts[0]!.payoutId, { actorId: ACCOUNT }); // F-07-6: 재요청은 행위자를 받는다(ADR-0369 결정 8)
     expect(retried).toMatchObject({ seq: 2, refPayoutId: `${s.statementId}-2`, status: 'REQUESTED' });
     expect((await store.listPayouts(batch.batchId)).map((p) => p.refPayoutId)).toEqual([`${s.statementId}-1`, `${s.statementId}-2`]);
   });
@@ -259,7 +259,8 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     const batch = await settlements.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: '2026-11-24', portoneBalance: { amount: 100_000, observedAt: NOW.toISOString() }, actor: ACCOUNT });
     expect(batch).toMatchObject({ totalAmount: 100_000, statementCount: 1 });
     const bound = await db.pool.query('select status, payout_batch_id from settlement_statement where id = $1', [s1]);
-    expect(bound.rows[0]).toEqual({ status: 'SCHEDULED', payout_batch_id: batch.batchId });
+    // F-07-6 시험 리뷰 E-01(ADR-0369 결정 14): 묶을 때 상태는 CONFIRMED 그대로이고 payout_batch_id로 묶였는지를 가른다
+    expect(bound.rows[0]).toEqual({ status: 'CONFIRMED', payout_batch_id: batch.batchId });
     expect(await store.listConfirmed('PORTONE', 'STANDARD', '2026-11-24')).toHaveLength(0);
 
     const s2 = await statementRow({ promoterId: p2, eventId: randomUUID(), pg: 'PORTONE', payoutDate: '2026-11-24', payoutAmount: 200_000 });

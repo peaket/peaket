@@ -88,7 +88,8 @@ describe('A1V-01 PostgreSQL 지급 묶음 미수금 상계', () => {
     const after = await db.pool.query('select id, offset_amount, payout_amount, status from settlement_statement where id = any($1::uuid[])', [[first, second]]);
     expect(after.rows.reduce((sum: number, row: { offset_amount: string }) => sum + Number(row.offset_amount), 0)).toBe(50_000);
     expect(after.rows.reduce((sum: number, row: { payout_amount: string }) => sum + Number(row.payout_amount), 0)).toBe(128_000);
-    expect(after.rows.every((row: { status: string }) => row.status === 'SCHEDULED')).toBe(true);
+    // F-07-6 시험 리뷰 E-01(ADR-0369 결정 14): 묶을 때 상태는 CONFIRMED 그대로다
+    expect(after.rows.map((row: { status: string }) => row.status)).toEqual(['CONFIRMED', 'CONFIRMED']);
   });
 });
 

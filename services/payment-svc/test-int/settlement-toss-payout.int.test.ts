@@ -215,8 +215,29 @@ describe('J-T37 ② payment 0029', () => {
            values ($1, 'VERIFIED', true, true, $3, 'TOSS', $3, 'old-seller-1', 'KYC_REQUIRED'), ($2, 'PENDING', false, false, null, 'MANUAL', $3, null, 'PENDING')`,
           [withSeller, without, at],
         );
+        // 옛 묶음·지급 건 한 쌍(0029 전 칸만): 0029가 payout.payout_date를 그 묶음의 지급일로 채워야 한다(시험 리뷰 TR-09)
+        const oldStatement = randomUUID();
+        const oldBatch = randomUUID();
+        const oldPayout = randomUUID();
+        await c.query(
+          `insert into settlement_statement (id, promoter_id, kind, event_id, pg, pg_store, gross_amount, refund_amount, commission_amount, commission_vat, payout_amount, status, payout_date, created_at, updated_at)
+           values ($1, $2, 'EVENT', $3, 'TOSS', 'STANDARD', 500000, 0, 0, 0, 500000, 'SCHEDULED', '2026-11-27', $4, $4)`,
+          [oldStatement, withSeller, randomUUID(), at],
+        );
+        await c.query(`insert into payout_batch (id, pg, pg_store, payout_date, total_amount, statement_count, status, created_at, updated_at) values ($1, 'TOSS', 'STANDARD', '2026-11-27', 500000, 1, 'SUBMITTED', $2, $2)`, [oldBatch, at]);
+        await c.query(`insert into payout (id, batch_id, statement_id, seq, amount, ref_payout_id, status, created_at, updated_at) values ($1, $2, $3, 1, 500000, $4, 'REQUESTED', $5, $5)`, [oldPayout, oldBatch, oldStatement, `${oldStatement}-1`, at]);
         await c.end().catch(() => undefined);
         await migratePayment(url);
+        const moved = new pg.Client({ connectionString: url });
+        await moved.connect();
+        try {
+          const [payoutRow] = (await moved.query("select to_char(payout_date, 'YYYY-MM-DD') as payout_date, failure_class, retry_of_payout_id, auto_retry_count from payout where id = $1", [oldPayout])).rows;
+          expect(payoutRow).toEqual({ payout_date: '2026-11-27', failure_class: null, retry_of_payout_id: null, auto_retry_count: 0 });
+          const [batchRow] = (await moved.query('select submit_attempts, next_submit_at, submit_deadline_at, last_submit_error, date_retry_used from payout_batch where id = $1', [oldBatch])).rows;
+          expect(batchRow).toEqual({ submit_attempts: 0, next_submit_at: null, submit_deadline_at: null, last_submit_error: null, date_retry_used: false });
+        } finally {
+          await moved.end();
+        }
         const d = new pg.Client({ connectionString: url });
         await d.connect();
         try {
@@ -445,33 +466,68 @@ describe('J-T15 ② 겹친 실패 반영', () => {
 });
 
 describe('J-T25 결제사 잔액 대사(실제 원장)', () => {
-  test('J-T25 장부 원천이 대사 끝난 승인·취소·완료 지급·달별 지급 건 수를 실제 표에서 읽고, 같은 달 대사를 두 연결이 겹쳐 돌려도 한 행·CS 건 하나다', async () => {
-    const p = pods(kst('2026-11-30T22:00:00.000'));
+  test('J-T25 장부 원천이 대사 끝난 승인·취소·완료 지급 합·달별 지급 건 수를 실제 표에서 읽고(끝나지 않은 건·다른 상점·포트원·DEPOSIT_CANCELED 뺌), 같은 달 대사가 겹쳐도 한 행·CS 건 하나다', async () => {
+    const cutoff = kst('2026-12-31T22:00:00.000');
+    const p = pods(cutoff);
     const approvedAt = new Date(kst('2026-11-03T12:00:00.000'));
-    const pay = async (o: { amount: number; cancelled: number; status: string; pgStore?: 'STANDARD' | 'ESCROW'; pg?: 'TOSS' | 'PORTONE'; approvedAt?: Date | null }) => {
+    const pay = async (o: { amount: number; cancelled: number; status: string; pgStore?: 'STANDARD' | 'ESCROW'; pg?: 'TOSS' | 'PORTONE'; approvedAt?: Date | null; failure?: string }) => {
       const id = randomUUID();
       await db1.pool.query(
-        `insert into payment (id, order_id, event_id, attempt_id, attempt_no, pg, pg_store, pg_payment_ref, amount, cancelled_amount, status, idempotency_key, authenticated_at, status_changed_at, approved_at)
-         values ($1, $2, $3, $4, 1, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13)`,
-        [id, randomUUID(), randomUUID(), randomUUID(), o.pg ?? 'TOSS', o.pgStore ?? 'ESCROW', `ref-${id}`, o.amount, o.cancelled, o.status, `idem-${id}`, approvedAt, o.approvedAt === undefined ? approvedAt : o.approvedAt],
+        `insert into payment (id, order_id, event_id, attempt_id, attempt_no, pg, pg_store, pg_payment_ref, amount, cancelled_amount, status, failure_category, idempotency_key, authenticated_at, status_changed_at, approved_at)
+         values ($1, $2, $3, $4, 1, $5, $6, $7, $8, $9, $10, $11, $12, $13, $13, $14)`,
+        [id, randomUUID(), randomUUID(), randomUUID(), o.pg ?? 'TOSS', o.pgStore ?? 'ESCROW', `ref-${id}`, o.amount, o.cancelled, o.status, o.failure ?? null, `idem-${id}`, approvedAt, o.approvedAt === undefined ? approvedAt : o.approvedAt],
       );
     };
     await pay({ amount: 30_000_000, cancelled: 0, status: 'APPROVED' });
     await pay({ amount: 10_000_000, cancelled: 2_000_000, status: 'PARTIAL_CANCELED' });
     await pay({ amount: 5_000_000, cancelled: 5_000_000, status: 'CANCELED' });
-    // 대사에 들지 않는 것: 승인된 적 없는 취소, 일반 상점, 포트원, 대사 시각 뒤 승인
+    // 대사에 들지 않는 것: 승인된 적 없는 취소, 입금 오류 되돌림(DEPOSIT_CANCELED), 일반 상점, 포트원, 대사 시각 뒤 승인
     await pay({ amount: 900_000, cancelled: 900_000, status: 'CANCELED', approvedAt: null });
+    await pay({ amount: 800_000, cancelled: 800_000, status: 'CANCELED', failure: 'DEPOSIT_CANCELED' });
     await pay({ amount: 7_000_000, cancelled: 0, status: 'APPROVED', pgStore: 'STANDARD' });
     await pay({ amount: 8_000_000, cancelled: 0, status: 'APPROVED', pg: 'PORTONE' });
-    await pay({ amount: 6_000_000, cancelled: 0, status: 'APPROVED', approvedAt: new Date(kst('2026-12-01T09:00:00.000')) });
-    const ledger = await new DrizzlePgLedgerSource(db1).ledger({ pg: 'TOSS', pgStore: 'ESCROW', cutoffAt: new Date(p.clock.now()) });
-    expect(ledger).toMatchObject({ approvedAmount: 45_000_000, refundedAmount: 7_000_000, paidOutAmount: 0, payoutCountByMonth: {}, firstPaymentAt: approvedAt });
+    await pay({ amount: 6_000_000, cancelled: 0, status: 'APPROVED', approvedAt: new Date(kst('2027-01-02T09:00:00.000')) });
+    // 지급 건: 에스크로 토스 COMPLETED 11월·12월 하나씩(셈), REQUESTED·FAILED(안 셈), 일반 상점 COMPLETED·포트원 COMPLETED(안 셈)
+    const payout = async (o: { pg: 'TOSS' | 'PORTONE'; pgStore: 'STANDARD' | 'ESCROW'; date: string; amount: number; status: string }) => {
+      const statementId = randomUUID();
+      const batchId = randomUUID();
+      const at = new Date(cutoff - 86_400_000);
+      await db1.pool.query(
+        `insert into settlement_statement (id, promoter_id, kind, event_id, pg, pg_store, gross_amount, refund_amount, commission_amount, commission_vat, payout_amount, status, payout_date, created_at, updated_at)
+         values ($1, $2, 'EVENT', $3, $4, $5, $6, 0, 0, 0, $6, 'PAID', $7, $8, $8)`,
+        [statementId, randomUUID(), randomUUID(), o.pg, o.pgStore, o.amount, o.date, at],
+      );
+      await db1.pool.query(`insert into payout_batch (id, pg, pg_store, payout_date, total_amount, statement_count, status, created_at, updated_at) values ($1, $2, $3, $4, $5, 1, 'COMPLETED', $6, $6)`, [batchId, o.pg, o.pgStore, o.date, o.amount, at]);
+      await db1.pool.query(
+        `insert into payout (id, batch_id, statement_id, seq, amount, ref_payout_id, status, payout_date, auto_retry_count, created_at, updated_at) values ($1, $2, $3, 1, $4, $5, $6, $7, 0, $8, $8)`,
+        [randomUUID(), batchId, statementId, o.amount, `${statementId}-1`, o.status, o.date, at],
+      );
+    };
+    await payout({ pg: 'TOSS', pgStore: 'ESCROW', date: '2026-11-20', amount: 300_000, status: 'COMPLETED' });
+    await payout({ pg: 'TOSS', pgStore: 'ESCROW', date: '2026-12-10', amount: 200_000, status: 'COMPLETED' });
+    await payout({ pg: 'TOSS', pgStore: 'ESCROW', date: '2026-12-11', amount: 50_000, status: 'REQUESTED' });
+    await payout({ pg: 'TOSS', pgStore: 'ESCROW', date: '2026-12-11', amount: 40_000, status: 'FAILED' });
+    await payout({ pg: 'TOSS', pgStore: 'STANDARD', date: '2026-12-10', amount: 70_000, status: 'COMPLETED' });
+    await payout({ pg: 'PORTONE', pgStore: 'ESCROW', date: '2026-12-10', amount: 60_000, status: 'COMPLETED' });
+    const ledger = await new DrizzlePgLedgerSource(db1).ledger({ pg: 'TOSS', pgStore: 'ESCROW', cutoffAt: new Date(cutoff) });
+    expect(ledger).toEqual({ approvedAmount: 45_000_000, refundedAmount: 7_000_000, paidOutAmount: 500_000, payoutCountByMonth: { '2026-11': 1, '2026-12': 1 }, firstPaymentAt: approvedAt });
 
-    fake.settlementRows.ESCROW = [{ paymentKey: 'pk-e', amount: 45_000_000, fee: 1_000_000 }];
-    // 있어야 할 잔액 = 45,000,000 − 7,000,000 − 1,000,000 − 0(지급 없음, 이용료 없음) = 37,000,000. 보이는 잔액은 1원 적다
-    fake.balances.ESCROW = { available: 36_999_999, pending: 0 };
-    const results = await Promise.all([p.a.reconcileTossBalance({ pgStore: 'ESCROW', kind: 'MONTHLY', periodMonth: '2026-11-01' }), p.b.reconcileTossBalance({ pgStore: 'ESCROW', kind: 'MONTHLY', periodMonth: '2026-11-01' })]);
-    expect(results.filter((r) => r !== undefined)).toEqual([expect.objectContaining({ expectedAmount: 37_000_000, observedAmount: 36_999_999, diffAmount: -1, severity: 'CASE' })]);
+    fake.settlementRows.ESCROW = [{ paymentKey: 'pk-e', amount: 45_000_000, fee: 1_000_000, date: '2026-11-04' }];
+    // 있어야 할 잔액 = 45,000,000 − 7,000,000 − (1,000,000 + 이용료 11월·12월 250,000씩(무료 7건 안)) − 500,000 = 36,000,000. 보이는 잔액은 1원 적다
+    fake.balances.ESCROW = { available: 35_999_999, pending: 0 };
+    // 셋째 연결이 같은 달 대사 행을 먼저 넣고 쥔 채 두 파드의 넣기가 줄을 서게 한 뒤 되돌린다(시험 리뷰 TR-17)
+    await locker.query('begin');
+    await locker.query(
+      `insert into pg_balance_reconciliation (id, pg, pg_store, kind, period_month, batch_id, cutoff_at, approved_amount, refunded_amount, pg_fee_amount, paid_out_amount, peaket_withdrawn_amount, expected_amount, observed_amount, diff_amount, severity, created_at)
+       values ($1, 'TOSS', 'ESCROW', 'MONTHLY', '2026-12-01', null, now(), 0, 0, 0, 0, 0, 0, 0, 0, 'NONE', now())`,
+      [randomUUID()],
+    );
+    const racing = Promise.all([p.a.reconcileTossBalance({ pgStore: 'ESCROW', kind: 'MONTHLY', periodMonth: '2026-12-01' }), p.b.reconcileTossBalance({ pgStore: 'ESCROW', kind: 'MONTHLY', periodMonth: '2026-12-01' })]);
+    await untilWaiting('f076-pod-a');
+    await untilWaiting('f076-pod-b');
+    await locker.query('rollback');
+    const results = await racing;
+    expect(results.filter((r) => r !== undefined)).toEqual([expect.objectContaining({ expectedAmount: 36_000_000, observedAmount: 35_999_999, diffAmount: -1, severity: 'CASE', paidOutAmount: 500_000 })]);
     expect(await q("select id from pg_balance_reconciliation where pg_store = 'ESCROW' and kind = 'MONTHLY'")).toHaveLength(1);
     expect((await q<{ source_id: string }>("select source_id from settlement_case_request where kind = 'PG_BALANCE_MISMATCH' and source_id like 'TOSS:%'")).map((r) => r.source_id)).toEqual(['TOSS:ESCROW']);
   });

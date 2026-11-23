@@ -4,20 +4,26 @@
 //
 // 공개 안내 모양 [가정]:
 // - 인증: 모든 요청 `Authorization: Basic base64(<결제 상점 시크릿 키> + ':')`. 시크릿 키로 결제 상점(STANDARD·ESCROW)을 가른다.
-// - 쓰기 요청(POST /v2/payouts, POST /v2/payouts/{id}/cancel, POST /v2/sellers): 본문은 그 상점 보안 키로 만든 JWE compact
-//   (`alg=dir`, `enc=A256GCM`, 사용자 머리 `iat`·`nonce`), `Content-Type: text/plain`. 응답 본문도(2xx·4xx 모두) 같은 꼴의 JWE다.
+// - 암호화한 쓰기 요청(POST /v2/payouts, POST /v2/sellers): 본문은 그 상점 보안 키로 만든 JWE compact
+//   (`alg=dir`, `enc=A256GCM`, 사용자 머리 `iat`·`nonce`), `Content-Type: text/plain`, `TossPayments-api-security-mode: ENCRYPTION`
+//   (머리가 없으면 400 INVALID_SECURITY_MODE). 응답 본문도(2xx·4xx 모두) 같은 꼴의 JWE다.
 //   지급 요청은 `Idempotency-Key`가 있어야 하고, 같은 키는 처음 응답을 그대로 돌려준다(새 지급을 만들지 않는다).
+// - 지급 취소(POST /v2/payouts/{id}/cancel): 본문이 없고 암호화하지 않는다(본문이 있으면 400). 응답은 평문 JSON이다.
+//   (토스 공개 문서 확인 2026-11-23, settlement §8 JWE 행, ADR-0369 결정 14, 시험 리뷰 TR-19)
 // - 읽기 요청(GET /v2/payouts/{id}, GET /v2/sellers/{id}, GET /v2/balances, GET /v1/settlements): 응답은 평문 JSON이다.
 // - v2 응답 봉투: `{ version, traceId, entityType, entityBody }`. 오류는 `{ version, traceId, error: { code, message } }`.
-// - 지급 요청 평문: 배열 `[{ refPayoutId, destination(토스 셀러 ID), scheduleType: 'SCHEDULED', payoutDate, amount: { currency: 'KRW', value }, transactionDescription? }]`.
+// - 지급 요청 평문: 배열 `[{ refPayoutId, destination(토스 셀러 ID), scheduleType: 'SCHEDULED', payoutDate, amount: { currency: 'KRW', value }, transactionDescription(필수, 1~7자) }]`.
 //   응답 entityBody `{ items: [{ id, refPayoutId, destination, scheduleType, payoutDate, amount, status: 'REQUESTED', error: null, requestedAt }] }`.
 // - 셀러 등록 평문: `{ refSellerId, businessType, company: { name, representativeName, businessRegistrationNumber, email, phone }, account: { bankCode, accountNumber, holderName } }`.
 //   응답 entityBody `{ id, refSellerId, businessType, company, account: { bankCode, accountNumber: 끝 4자리 말고 가림, holderName }, status }`.
 //   상태는 법인 PARTIALLY_APPROVED, 개인사업자 APPROVAL_REQUIRED(settlement §3 그림).
 // - 잔액: entityBody `{ availableAmount: { currency, value }, pendingAmount: { currency, value } }`.
 // - 정산 조회(v1, 수수료): 배열 `[{ paymentKey, orderId, amount, fees: [{ type, fee }], payOutAmount, soldDate, paidOutDate }]`.
+//   `startDate`~`endDate`(양끝 포함, YYYY-MM-DD)에 든 정산 행만 준다(행의 date로 거른다, 시험 리뷰 TR-06).
+// - 웹훅 본문(공개 웹훅 참조): `{ eventType, createdAt, version, eventId, entityType, entityBody }`이고 지급 ID·셀러 ID는 `entityBody.id`다
+//   (아래 tossWebhookBody, 칸 이름 [가정], 시험 리뷰 TR-03). 중복 제거 열쇠는 본문 eventId다(전송 ID는 보낼 때마다 새로 나온다).
 // - 응답 없음은 요청을 다 읽은 뒤 연결을 끊는 것으로 흉내 낸다(시간 초과를 기다리지 않으려고). 모든 응답은 `Connection: close`라 연결을 다시 쓰지 않는다.
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
@@ -57,6 +63,7 @@ export interface FakePayout {
   amount: number;
   status: FakePayoutStatus;
   errorCode: string | null;
+  transactionDescription: string;
 }
 
 export interface FakeSeller {
@@ -115,6 +122,23 @@ export function openJwe(jwe: string, key: Buffer): { header: Record<string, unkn
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** 공개 웹훅 참조 모양의 정산 사건 본문(JSON 글). eventId를 주지 않으면 새로 만든다 */
+export function tossWebhookBody(eventType: 'payout.changed' | 'seller.changed', entity: { id: string; status: string } & Record<string, unknown>, o: { eventId?: string; createdAt?: string } = {}): string {
+  return JSON.stringify({
+    eventType,
+    createdAt: o.createdAt ?? '2026-12-04T10:00:00.000000+09:00',
+    version: '2022-11-16',
+    eventId: o.eventId ?? `evt-${randomBytes(8).toString('hex')}`,
+    entityType: eventType === 'payout.changed' ? 'payout' : 'seller',
+    entityBody: entity,
+  });
+}
+
+/** 웹훅 서명 머리 값(v1: + HMAC-SHA256 base64, 원문 `{본문}:{전송 시각}`, 키 = 보안 키 hex 글 그대로 [가정]) */
+export function signTossWebhook(body: string, transmissionTime: string, keyHex: string): string {
+  return `v1:${createHmac('sha256', keyHex).update(`${body}:${transmissionTime}`).digest('base64')}`;
+}
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** 지급 요청의 refPayoutId 목록(복호한 본문) */
@@ -126,7 +150,7 @@ export interface TossPayoutFake {
   readonly payouts: Map<string, FakePayout>;
   readonly sellers: Map<string, FakeSeller>;
   readonly balances: Record<FakeStore, { available: number; pending: number }>;
-  readonly settlementRows: Record<FakeStore, { paymentKey: string; amount: number; fee: number }[]>;
+  readonly settlementRows: Record<FakeStore, { paymentKey: string; amount: number; fee: number; date?: string }[]>;
   /** 다음 맞는 요청에 장애를 넣는다(times번, 기본 1) */
   inject(rule: { method: string; path: RegExp; store?: FakeStore; when?: (r: RecordedRequest) => boolean; times?: number }, fault: Fault): void;
   /** 그 방법·경로(정규식)의 요청 */
@@ -144,7 +168,7 @@ export async function startTossPayoutFake(keys: Record<FakeStore, FakeStoreKeys>
   const sellers = new Map<string, FakeSeller>();
   const idempotent = new Map<string, { status: number; payload: unknown }>();
   const balances: Record<FakeStore, { available: number; pending: number }> = { STANDARD: { available: 900_000_000_000, pending: 0 }, ESCROW: { available: 900_000_000_000, pending: 0 } };
-  const settlementRows: Record<FakeStore, { paymentKey: string; amount: number; fee: number }[]> = { STANDARD: [], ESCROW: [] };
+  const settlementRows: Record<FakeStore, { paymentKey: string; amount: number; fee: number; date?: string }[]> = { STANDARD: [], ESCROW: [] };
   const rules: FaultRule[] = [];
   let seq = 0;
   const nextId = (prefix: string) => `${prefix}${String((seq += 1)).padStart(6, '0')}`;
@@ -183,7 +207,7 @@ export async function startTossPayoutFake(keys: Record<FakeStore, FakeStoreKeys>
     scheduleType: 'SCHEDULED',
     payoutDate: p.payoutDate,
     amount: { currency: 'KRW', value: p.amount },
-    transactionDescription: '정산 지급',
+    transactionDescription: p.transactionDescription,
     requestedAt: '2026-12-04T10:00:00+09:00',
     status: p.status,
     error: p.errorCode ? { code: p.errorCode, message: `지급 실패 ${p.errorCode}` } : null,
@@ -206,7 +230,8 @@ export async function startTossPayoutFake(keys: Record<FakeStore, FakeStoreKeys>
     const store = storeOf(req.headers.authorization);
     const rec: RecordedRequest = { method, path, query: Object.fromEntries(url.searchParams), headers: { ...req.headers }, store, rawBody };
     requests.push(rec);
-    const write = method === 'POST';
+    const isCancel = method === 'POST' && /^\/v2\/payouts\/[^/]+\/cancel$/.test(path);
+    const write = method === 'POST' && !isCancel;
     if (write && store) {
       try {
         const opened = openJwe(rawBody, keys[store].securityKey);
@@ -242,8 +267,14 @@ export async function startTossPayoutFake(keys: Record<FakeStore, FakeStoreKeys>
       }
       return write ? sealed(res, fault.status ?? 400, errorBody(fault.code), store) : plain(res, fault.status ?? 400, errorBody(fault.code));
     }
+    if (isCancel) {
+      if (rawBody !== '') return plain(res, 400, errorBody('INVALID_REQUEST'));
+      const out = normalWrite(method, path, rec, store);
+      return plain(res, out.status, out.payload);
+    }
     if (write) {
       if (!String(req.headers['content-type'] ?? '').startsWith('text/plain')) return plain(res, 415, errorBody('INVALID_CONTENT_TYPE'));
+      if (String(req.headers['tosspayments-api-security-mode'] ?? '').toUpperCase() !== 'ENCRYPTION') return plain(res, 400, errorBody('INVALID_SECURITY_MODE'));
       if (rec.decryptError) return plain(res, 400, errorBody('INVALID_ENCRYPTION'));
       const out = normalWrite(method, path, rec, store);
       return sealed(res, out.status, out.payload, store);
@@ -269,7 +300,7 @@ export async function startTossPayoutFake(keys: Record<FakeStore, FakeStoreKeys>
       return plain(
         res,
         200,
-        settlementRows[store].map((r) => ({ paymentKey: r.paymentKey, orderId: r.paymentKey, amount: r.amount, fees: [{ type: 'BASE', fee: r.fee }], payOutAmount: r.amount - r.fee, soldDate: rec.query.startDate, paidOutDate: rec.query.endDate })),
+        settlementRows[store].filter((r) => r.date === undefined || (r.date >= rec.query.startDate! && r.date <= rec.query.endDate!)).map((r) => ({ paymentKey: r.paymentKey, orderId: r.paymentKey, amount: r.amount, fees: [{ type: 'BASE', fee: r.fee }], payOutAmount: r.amount - r.fee, soldDate: rec.query.startDate, paidOutDate: rec.query.endDate })),
       );
     }
     return plain(res, 404, errorBody('NOT_FOUND'));
@@ -293,6 +324,9 @@ export async function startTossPayoutFake(keys: Record<FakeStore, FakeStoreKeys>
             i.scheduleType === 'SCHEDULED' &&
             typeof i.payoutDate === 'string' &&
             DATE.test(i.payoutDate) &&
+            typeof i.transactionDescription === 'string' &&
+            i.transactionDescription.length >= 1 &&
+            i.transactionDescription.length <= 7 &&
             isRecord(i.amount) &&
             i.amount.currency === 'KRW' &&
             Number.isSafeInteger(i.amount.value) &&
@@ -300,8 +334,8 @@ export async function startTossPayoutFake(keys: Record<FakeStore, FakeStoreKeys>
             (i.amount.value as number) < 1_000_000_000,
         );
       if (!valid) return { status: 400, payload: errorBody('INVALID_REQUEST') };
-      const created = (items as { refPayoutId: string; destination: string; payoutDate: string; amount: { value: number } }[]).map((i) => {
-        const p: FakePayout = { id: nextId('FPAY'), store, refPayoutId: i.refPayoutId, destination: i.destination, payoutDate: i.payoutDate, amount: i.amount.value, status: 'REQUESTED', errorCode: null };
+      const created = (items as { refPayoutId: string; destination: string; payoutDate: string; transactionDescription: string; amount: { value: number } }[]).map((i) => {
+        const p: FakePayout = { id: nextId('FPAY'), store, refPayoutId: i.refPayoutId, destination: i.destination, payoutDate: i.payoutDate, amount: i.amount.value, status: 'REQUESTED', errorCode: null, transactionDescription: i.transactionDescription };
         payouts.set(p.id, p);
         return p;
       });
