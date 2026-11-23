@@ -108,6 +108,25 @@ describe('우선 구매 권리 Valkey [GAT-135]', () => {
     expect((await admit(eventId, i.grantId)).status).toBe('ADMITTED');
   });
 
+  test('Q-T62 ⑤⑥⑦ USED·EXPIRED 사본은 404이고, 늦은 OFFERED 낮은 판은 되돌리지 않는다', async () => {
+    const eventId = newEvent();
+    await writeSchedule(eventId, openSchedule(Date.now()));
+    const i = grant({ eventId });
+    expect(await set.run(i)).toEqual({ changed: true });
+    expect((await admit(eventId, i.grantId)).status).toBe('ADMITTED');
+
+    expect(await set.run({ ...i, state: 'USED', version: 2 })).toEqual({ changed: true });
+    expect(await priorityGrants.get(i)).toMatchObject({ state: 'USED', version: 2 });
+    await expect(admit(eventId, i.grantId)).rejects.toMatchObject({ code: 'PRIORITY_GRANT_NOT_FOUND' });
+
+    expect(await set.run({ ...i, state: 'OFFERED', version: 1 })).toEqual({ changed: false });
+    expect((await priorityGrants.get(i))?.state).toBe('USED');
+
+    expect(await set.run({ ...i, state: 'EXPIRED', version: 3 })).toEqual({ changed: true });
+    expect((await priorityGrants.get(i))?.state).toBe('EXPIRED');
+    await expect(admit(eventId, i.grantId)).rejects.toMatchObject({ code: 'PRIORITY_GRANT_NOT_FOUND' });
+  });
+
   test('없는 권리·남의 계정·WITHDRAWN·만료·다른 권리 ID는 모두 404 PRIORITY_GRANT_NOT_FOUND다', async () => {
     const eventId = newEvent();
     const now = Date.now();
