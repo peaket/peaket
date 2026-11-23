@@ -223,6 +223,8 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | 새 서비스가 네 신호를 같은 모양으로 낸다 | 위 표의 지표 | NFR-011(REST p95 500ms, 99.9%) | 서비스 대시보드 첫 줄 네 신호(규칙 1, wbs 1.3.1) | 템플릿 자체 경보 없음. 서비스 SLO 경보가 이 지표를 쓴다 | 카나리 분석이 같은 지표로 새 판과 안정판을 견준다(docs/devops.md §6.2) |
 | 정상 분기 거절이 오류율을 올리지 않는다 | `http_server_business_rejections_total`, `http_server_errors_total` | 기능 SLO(예: NFR-003 좌석 홀드는 409를 정상으로 본다) | 오류율 패널 옆 정상 분기 패널 | 없음 | 경합 부하 시험에서 409가 정상 분기 카운터에만 드는지 본다 |
+| 온세일 예산 소진이 경보와 입장 제어 입력으로 이어진다(추천 적용 2026-11-23, F-01-5 계획) | 기록 규칙 `peaket:slo_error_ratio:rate<창>{journey}`, `peaket:slo:budget_alert10x:state`·`peaket:slo:budget_burn50:state{event_id,journey}`, `peaket:payment:pg_cause:state{event_id}`, `peaket:admission:downstream_p99_seconds:30s`·`downstream_error_ratio:30s`(§4 'SLO 기록 규칙과 원천') | NFR-001·NFR-003~NFR-006 | 없음(입장 제어 대시보드와 콘솔의 남은 허용 실패 건수는 이 기능 밖) | `slo_onsale_fast_burn`(SEV1), `slo_onsale_slow_burn`·`payment_confirm_pg_cause`(SEV2) | 저장소: 합성 시계열 규칙 시험(V-T51 ①~⑤). 배포 뒤: 규칙을 실은 Prometheus(INF-040)로 판매 중 회차마다 상태 규칙이 0으로 나오고 `admission_control_input_stale{input="budget_burn"}`가 0인지, 실패를 넣으면 1이 되는지 본다 |
+| 28일 예산 경보와 남은 예산이 나온다(추천 적용 2026-11-23, F-01-5 계획) | `agg5m:slo_errors:increase5m`·`agg5m:slo_requests:increase5m{journey}`, Mimir 규칙 평가기의 `slo:error_budget_remaining:ratio28d{journey}` | 여정별 28일 SLO(§4 NFR 표) | 없음 | `slo_28d_burn_1h`·`slo_28d_burn_6h`(SEV1), `slo_28d_burn_3d`(SEV3) | 저장소: V-T51 ⑥⑦. 배포 뒤: Mimir 규칙 평가기(INF-020)가 여정마다 값을 5분마다 내는지 본다 |
 | 예상하지 못한 오류가 내부 정보 없이 끝나고 원인을 찾을 수 있다 | 500 Problem의 `traceId`, 그 요청의 정규 로그 줄(`level` error, 같은 `traceId`, `err`에 예외 이름·메시지·스택, §7) | 없음 | 오류 패널, 로그 조회 | 5xx 비율은 서비스 SLO 경보 | 오류 응답의 `traceId`로 Loki에서 그 줄을 찾고, 같은 값으로 Tempo의 trace로 넘어간다 |
 | 요청마다 정규 로그 줄 하나가 남고 표본 비율로 다시 셀 수 있다(추천 적용 2026-11-01, openspec 변경 add-service-logging) | 정규 로그 줄(§7)의 `sampleRate`·`status`·`durationMs`, 서버 span의 `peaket.sample.keep` | 로그로 다시 센 요청 수(`sampleRate`의 합)와 `http_server_request_duration_seconds_count`의 차이(Game Day 대조, ADR-0069 결정 11) | 서비스 대시보드의 로그 패널(정상·전수 줄 수) | 없음(4.1.1에서 정한다) | 배포 뒤 오류 응답 하나의 `traceId`로 줄과 trace가 함께 보이는지 본다. 정상 trace를 남긴 요청에는 정상 줄도 있다(V-T30) |
 | 외부 제공자로 추적 문맥이 나가지 않는다(V-T31 ③) | 외부 호출 클라이언트 span(`peaket.provider`·`url.template`), 정규 로그 줄의 `dep` | 없음 | 의존성 패널(`dep`별 소요) | 없음 | 어댑터마다 둔 탐침 시험이 CI에서 돈다(`@peaket/platform/testing`) |
@@ -356,6 +358,30 @@ flowchart LR
 - 간격 규칙 셋을 설정 검사(V-T20, `alert-check`)가 본다. ① 짧은 창과 자동 제어의 조회 창은 그 지표 긁기 간격의 4배 이상이다. ② 제어 입력 없음 판정(30초)은 긁기 간격의 3배 이상이다. ③ 경보 단위 시험의 합성 시계열 간격(`interval`)과 평가 간격(`evaluation_interval`)은 운영 값과 같다(docs/verification.md §2.7).
 - 자동 감축(10배 소진 경보, 50% 소진선)은 Alertmanager를 거치지 않는다. admission-ctrl이 같은 기록 규칙을 읽어 정하므로 `group_wait`이 더해지지 않는다(docs/features/queue-admission.md §5). 읽는 기록 규칙은 연동 여정 넷(`journey` 라벨 `hold`·`seat_status`·`payment_accept`·`payment_confirm` [가정, wbs 4.2.1에서 이름 확정])의 것뿐이다(ADR-0126 결정 1, 표시는 2026-11-01 정합 점검). `journey` 값은 여정 일곱의 이름 한 목록이고 `OpsAlert`의 `journey`도 같은 값을 쓴다. 연동하지 않는 셋은 `detail`·`queue_entry`·`queue_state` [가정, wbs 4.2.1]이다(추천 적용 2026-10-29, ADR-0145 결정 8).
 - 5초 작업은 표본이 15초 작업의 3배다. 그 대상의 시계열 수와 Mimir 저장량은 §8의 시계열 상한과 함께 wbs 4.1.1에서 잰다.
+
+**SLO 기록 규칙과 원천(추천 적용 2026-11-23, F-01-5 계획, 시험 V-T51)**: 아래 번 레이트 알림 표와 자동 감축이 읽는 값을 기록 규칙 세 층으로 만든다. 규칙 파일은 `deploy/platform/observability/rules/slo-onsale.yaml`(평가 5초 묶음)·`rules/slo-28d.yaml`(평가 30초 묶음), 28일 예산의 5분 증가량은 `rules/agg5m.yaml`, Mimir 규칙 평가기의 규칙은 `deploy/platform/observability/mimir/rules/slo-budget28d.yaml`이다. 여정 이름은 위 일곱(`hold`·`seat_status`·`payment_accept`·`payment_confirm`·`detail`·`queue_entry`·`queue_state`)으로, 자동 감축이 읽는 규칙 이름은 ADR-0226 결정 5 그대로 확정한다.
+
+- **1층, 여정별 실패 비율**: `peaket:slo_error_ratio:rate<창>{journey}` = 창 안의 실패 수 ÷ 전체 수. 창은 20s·25s·2m·5m·70m(5초 묶음)과 30m·1h·6h·3d(30초 묶음)다. 원천 서비스가 긁히는 동안(`up{app="<서비스>"}`가 1) 요청이 없으면 0을 내고, 원천 서비스가 긁히지 않으면 값을 내지 않는다(빈 값을 0으로 읽지 않는다, ADR-0069).
+- **임시 원천 [보완]**: 위 NFR 표의 게이트웨이 SLI 히스토그램과 RUM(실사용자 측정) 지표는 아직 저장소에 없다. 그동안은 아래 서비스 쪽 지표를 쓰고, 그 지표가 생기면 1층 규칙만 바꾼다. 임시 원천은 게이트웨이가 낸 실패(게이트웨이 503·시간 초과)를 보지 못하고, 상태 코드를 `status_class`로만 나눠 분모에서 빼야 할 423도 센다. 실패는 5xx나 기준 시간 넘김이다(아래 표의 '에러율').
+
+  | 여정 | 임시 원천 | 실패 | 목표 |
+  | --- | --- | --- | --- |
+  | `hold` | purchase-svc `http_server_request_duration_seconds`(`route="/v1/events/{eventId}/holds"`, `method="POST"`) | `status_class="5xx"` | 99.95% |
+  | `payment_accept` | 같은 지표(`route="/v1/orders/{orderId}/payment-acceptance"`, `method="POST"`) | `status_class="5xx"` | 99.95% |
+  | `payment_confirm` | payment-svc `payment_confirm_resolution_seconds`(경로 둘 모두) | 3초 넘김(전체 − `le="3"` 칸) | 99.95% |
+  | `seat_status` | realtime-gw `realtime_gw_batch_wait_ms` | 300ms 넘김(전체 − `le="300"` 칸). 서버의 묶음 대기만 보므로 화면까지 걸린 시간의 하한이다 | 99%(p99 300ms) |
+  | `queue_entry` | queue-svc `http_server_request_duration_seconds`(`route="/v1/queues/{eventId}/entries"`, `method="POST"`) | `status_class="5xx"` | 99.9% |
+  | `detail`·`queue_state` | 없음. CloudFront·CDN 지표를 가져오는 수집(INF-020)이 생기면 더한다. 그때까지 두 여정의 규칙·경보는 값이 없다 | — | 99.99%·99.95% |
+
+- **2층, 회차 상태**: 진행 중인 회차는 admission-ctrl이 다루는 회차(`admission_target{event_id}`가 있는 회차)다. 1층에 회차 라벨이 없어 여정 상태를 진행 중인 회차마다 같은 값으로 붙인다 [보완]. 두 회차가 함께 온세일이면 한 회차의 실패가 다른 회차의 상태도 켠다(입장 목표를 줄이는 쪽이라 안전하다). 원천에 `event_id`가 생기면 회차별로 바꾼다. 상태 규칙은 모두 5초 묶음에 둔다. admission-ctrl은 30초보다 낡은 표본을 입력 없음으로 본다(docs/features/queue-admission.md §5).
+  - `peaket:slo:budget_alert10x:state{event_id,journey}`: 2분 창과 20초 창이 모두 허용 소진 속도의 10배(아래 표 SEV1 줄)를 넘으면 1, 아니면 0이다.
+  - `peaket:slo:budget_burn50:state{event_id,journey}`: 70분 창의 실패 비율 ÷ (1 − 목표)가 0.5 이상이면 1, 아니면 0이다. 그 창에서 쓴 예산 몫이고, 28일 남은 예산과 같은 비의 정의다. 판매 창이 시작한 시각을 지표로 알 수 없어 지난 70분으로 잰다 [보완]. 한 번 넘으면 admission-ctrl이 기억하므로 값이 다시 0이 되어도 감축은 한 번이다.
+  - `peaket:payment:pg_cause:state{event_id}`: 아래 결제 확정 원인 넷 가운데 하나라도 켜지면 1, 아니면 0이다. 회차의 결제사를 지표로 알 수 없어 결제사 하나라도 원인이면 진행 중인 모든 회차가 1이다 [보완].
+  - `peaket:admission:downstream_p99_seconds:30s`·`peaket:admission:downstream_error_ratio:30s`(라벨 없음): purchase-svc HTTP 요청의 30초 p99와 5xx 비율이다. 결제 결과 long polling(`/v1/orders/{orderId}/payment-status`, 최대 25초 기다림)은 뺀다. 요청이 없으면 0이다.
+- **결제 확정 원인 넷**(아래 표 SEV2 결제 확정 줄, 결제사 `pg`마다): ① 1분 창에서 승인 호출(`payment_confirm_seconds`)의 1% 이상이 2초를 넘김 ② `payment_pg_circuit_open`이 1인 파드가 있음 ③ 1분 창 결제사 오류(`payment_confirm_declined_total{category="PG_ERROR"}`)가 승인 호출의 1% [가정] 이상 ④ 1분 안에 첫 승인 호출의 한도 초과 응답(`pg_throttled_total{first="true"}`)이 1건 이상.
+- **3층, 경보**: `slo_onsale_fast_burn`(SEV1, `kind` slo, 여정 모두), `slo_onsale_slow_burn`(SEV2, `kind` slo, 결제 확정 뺌), `payment_confirm_pg_cause`(SEV2, `kind` cause, `dependency`는 결제사), `slo_28d_burn_1h`·`slo_28d_burn_6h`(SEV1, `kind` slo)·`slo_28d_burn_3d`(SEV3, `kind` slo)다. 온세일 경보는 `event_id`·`journey`를, 28일 경보는 `journey`를 단다. 주석은 §5의 `runbook_url`·`dashboard_url`·`explore_url`이고 `for`는 두지 않는다.
+- **28일 남은 예산**: Prometheus가 5분 묶음에서 1층과 같은 원천의 5분 증가량 `agg5m:slo_errors:increase5m{journey}`·`agg5m:slo_requests:increase5m{journey}`를 남기고, Mimir 규칙 평가기가 5분마다 `slo:error_budget_remaining:ratio28d{journey}` = 1 − (28일 실패 합 ÷ 28일 전체 합) ÷ (1 − 목표)를 낸다. 엣지 502·504 몫(위 '엣지에서 끝난 실패')은 OPS-100이 더한다. 15분보다 낡은 값의 처리는 그 값을 읽는 배포 게이트 쪽 몫이다.
+- **긁기**: 운영 `slo-fast` 작업(5초)은 `deploy/platform/observability/prometheus/scrape-slo-fast.yaml`이다. 대상은 queue-svc·purchase-svc·payment-svc·admission-ctrl과, 좌석 상태 임시 원천인 realtime-gw 파드다. 로컬 Prometheus는 이미 모든 대상을 5초로 긁는다(§3 '로컬 관측 최소'). 규칙 파일을 로컬·운영 Prometheus와 Mimir에 싣는 것은 INF-020·INF-040이다.
 
 **다중 윈도우 멀티 번 레이트 알림 규칙**
 
