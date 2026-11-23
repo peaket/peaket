@@ -127,6 +127,10 @@
 - 2026-11-24 04:2x CI 빨강 둘을 고쳤다: ① `payment-pull-adapters`가 부하에서 첫 gRPC 채널 연결이 500ms를 넘겨 DEADLINE_EXCEEDED를 받던 시험 흔들림 — `GrpcPaymentResultReader.ready()`로 채널 준비를 기다린 뒤 호출(6f36c2939). ② `web /my/tickets` 첫 JS 195.9kB > 161.6kB — F-05-2가 정적으로 들인 Dexie(30.9kB)·WebShell·돌려주기 코드를 늦게 싣고, 161.1kB로 재어 기준선을 다시 적었다(7b81ddb84). 같은 빌드에서 `web` typecheck·lint·월렛 시험 12/12.
 - 2026-11-24 04:3x R-811·R-812 기록을 올렸다(`fe089ca0c`, `e627662e6`). 다음 R은 R-813. 최신 develop CI는 `e627662e6` 실행 45250580028. 갈래 4 측정 창 1은 11-26 09:00, 갈래 5 F-08-7은 12-02~03 그대로다.
 
+- 2026-11-24 05:0x 웹 빨강을 닫았다: 월렛 첫 JS가 CI 165.0kB(한도 162.1)여서 (가) 받은 요청 조회를 afterLoad 뒤로 미루고 기준선을 CI 실측 165.0으로 다시 적었으며, (나) Zod의 `allowsEval`(Function 빈 문자열)이 캐시 화면 해시 CSP에서 eval 위반으로 잡혀 `zod-jitless` 모듈을 월렛 sync의 첫 import로 두고 웹에 zod 의존성을 명시했다. web budgets(JS·Lighthouse·CSP) 성공. 월렛 첫 JS는 195.9→165.0kB.
+- 2026-11-24 05:1x 노드 빨강 둘을 고쳤다: ① F-05-3 purchase 통합 `priority-grant-sync-cursor`가 앞 시험이 남긴 150행 때문에 다음 시험의 3행을 두 틱에 못 봐 `beforeEach`에서 표를 비우게 했다. ② 0033이 `cs_case_open_key`에 종류 조건을 더한 뒤 0030 `ops_open_cs_case`의 `ON CONFLICT (kind,target_ref) WHERE status <> 'RESOLVED'`가 부분 인덱스와 맞지 않아 ops 통합이 실패했다. `0034_cs_open_conflict_after_adjustment.sql`로 술어를 맞추고 ops 통합 24/24를 확인했다. ③ mesh-policies 시험 표에 purchase-svc의 `PriorityGrantService` 호출을 더했다(mesh 24/24).
+- 2026-11-24 05:2x 남은 것: web reflow `wallet-enroll`·`wallet-live`가 live 월렛 화면과 시험 대역의 어긋남으로 19건 빨갛다(고정 `tkt-lumen-r1-0312`에 팬 API 503만 둠, 데스크톱 [그래도 이 기기에 등록] 클릭 없음). 기능 시험은 아니지만 F-05-2 브라우저 확인 몫이라 `lane2-cleanup.md`에 적었다. 최신 develop `8ccfd4705`, CI는 node 재실행 중.
+
 ## SEG 때 정할 범위 늘어남(ADR-0283 결정 6)
 - 묶음 중에 더한 새 단계는 wbs.csv 일수에 바로 더하지 않고 여기 모아 구간 마무리 때 소유자가 한 번에 정한다(앞선 예: HOT-405 0.75일, 2026-11-18 OPEN[49]).
 - PRF-174(wbs 2.7.1 ③, 0.5일 [가정], BAT-013): 탈퇴 참여자의 결제한 미사용 티켓 취소·환급(BAT-010이 찾음, 돈 A 대상, R-685).

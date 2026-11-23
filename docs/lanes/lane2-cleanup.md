@@ -239,3 +239,5 @@
 - F-05-3 구현 리뷰 IR-08(낮음): `queue-svc/test-int/priority-grant.int.test.ts`의 TTL 시험이 실제 시계 150ms 여유를 쓴다. 부하가 크면 `changed: true`가 흔들린다. 가짜 시계나 더 큰 여유로 바꾼다. 구현 담당이 본 1ms 흔들림은 제품 결함이 아니라 이 시험 흔들림으로 본다
 - F-05-3 구현 리뷰 IR-09(낮음): `purchase_priority_grant_sync_total`을 틱이 아니라 행마다 센다. 계획 D5의 '틱의 결과'와 뜻이 다르고 `changed`도 쓰지 않는다. 지표 뜻을 문서에 맞추거나 틱 단위로 바꾼다
 - F-05-3 구현 리뷰 IR-10(낮음): 대조 한 틱이 100개를 차례로 2초 데드라인으로 보내 최악 200초까지 늘어난다. 한 틱 시간 한도나 병렬 상한을 두고, `queue.proto`의 1초 주석과 클라이언트 2초도 맞춘다
+
+- F-05-2 뒤 web reflow wallet-enroll·wallet-live (CI 45267206465): wallet-enroll은 고정 tkt-lumen-r1-0312와 팬 API 503만 두어 실제 월렛이 오류 화면을 그린다(등록 버튼·QR이 없음). wallet-live O-T52 ⑥은 데스크톱 안내 뒤 [그래도 이 기기에 등록]을 누르지 않아 QR을 못 본다. live 월렛 화면에 맞게 시험 대역(티켓 목록)과 클릭 차례를 고친다. F-05-2 기능 시험·브라우저 확인은 이 두 파일이 남았다
