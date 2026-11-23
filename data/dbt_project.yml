@@ -1,0 +1,46 @@
+# PEAKET 분석 변환(docs/features/analytics.md §4·§5, ADR-0052 결정 4, F-04-4).
+# 층: staging(stg_, 브론즈 JSON → 칸) → silver(slv_, eventKey 중복 제거, 회차 단위 delete+insert) → gold(fct_·dim_, run_id 판 + gold.current_run).
+# 재실행 단위는 회차다: --vars '{event_id: <UUID>, run_id: <UUID>, stage: R0|R1|R2|R3}'. 변수는 macros/guards.sql이 형식을 본 뒤에만 SQL에 넣는다(§4.1 'SQL 규칙').
+name: analytics
+version: "0.1.0"
+config-version: 2
+profile: analytics
+
+# 사용 통계를 바깥으로 보내지 않는다(개인정보·외부 전송 금지, 이 저장소 규칙)
+flags:
+  send_anonymous_usage_stats: false
+  use_colors: false
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+target-path: target
+clean-targets: [target, dbt_packages]
+
+vars:
+  event_id: null
+  run_id: null
+  stage: R0
+  # 작은 칸 합치기 기준(analytics §5.2 끝 줄, §11) [가정]
+  small_cell_min: 5
+
+models:
+  analytics:
+    staging:
+      +schema: staging
+      +materialized: view
+    silver:
+      +schema: silver
+      +materialized: incremental
+      +incremental_strategy: delete+insert
+      +unique_key: event_id
+    gold:
+      +schema: gold
+      +materialized: incremental
+      +incremental_strategy: append
+
+seeds:
+  analytics:
+    # 고정 차원(analytics §5.3 '고정'): 결제사·결제 수단·결과·봇 범주·배정 방식
+    +schema: gold

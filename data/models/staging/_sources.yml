@@ -1,0 +1,19 @@
+version: 2
+# 브론즈(F-04-3 analytics-ingest가 싣는다, data/clickhouse/bronze). 칸은 공통 머리 + payload(JSON, 가명·허용 목록을 거침)
+sources:
+  - name: bronze
+    schema: bronze
+    tables:
+      - name: brz_order_event
+      - name: brz_payment_event
+      - name: brz_seat_event
+      - name: brz_event_sale
+      - name: brz_purchase_session
+      - name: brz_ticket_event
+      - name: brz_settlement_event
+      - name: brz_setting_changed
+      - name: brz_queue_entry
+      - name: brz_hold_attempt
+      - name: brz_trust_verdict
+      - name: brz_ref_event
+      - name: brz_ref_seat_map

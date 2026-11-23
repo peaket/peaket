@@ -1,0 +1,6 @@
+# dbt 실행 산출물과 가상 환경(잠금 파일 uv.lock·pyproject.toml만 저장소에 둔다)
+.venv/
+target/
+logs/
+dbt_packages/
+.user.yml

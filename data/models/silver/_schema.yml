@@ -1,0 +1,19 @@
+version: 2
+# 실버 유일성(analytics §5.4 '이벤트 키로 중복을 제거한 사건 단위 표')
+models:
+  - name: slv_order
+    columns: [{ name: event_key, data_tests: [unique, not_null] }, { name: event_id, data_tests: [not_null] }]
+  - name: slv_payment_attempt
+    columns: [{ name: event_key, data_tests: [unique, not_null] }]
+  - name: slv_seat_change
+    columns: [{ name: event_key, data_tests: [unique, not_null] }]
+  - name: slv_ticket
+    columns: [{ name: event_key, data_tests: [unique, not_null] }]
+  - name: slv_hold_attempt
+    columns: [{ name: event_key, data_tests: [unique, not_null] }]
+  - name: slv_trust_label
+    columns: [{ name: event_key, data_tests: [unique, not_null] }]
+  - name: slv_queue_entry
+    columns: [{ name: event_key, data_tests: [unique, not_null] }]
+  - name: slv_event_sale
+    columns: [{ name: event_key, data_tests: [unique, not_null] }]

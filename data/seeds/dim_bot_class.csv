@@ -1,0 +1,11 @@
+bot_class,name
+PASS,바로 통과
+CHALLENGE_PASSED,추가 검증 통과
+CHALLENGE_FAILED,추가 검증 실패
+BLOCKED,차단
+HONEYPOT,허니팟 적중
+LABELED_BOT,사후 라벨 봇
+LABELED_HUMAN,사후 라벨 사람
+CHALLENGED,추가 검증 중
+UNKNOWN,모름
+기타,작은 칸 합침

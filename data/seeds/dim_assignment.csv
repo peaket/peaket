@@ -1,0 +1,7 @@
+assignment,auto_result,name
+PICK,,직접 선택
+AUTO,FIRST,자동 배정 1순위
+AUTO,FIRST_SPLIT,자동 배정 1순위 나눠 앉기
+AUTO,SECOND,자동 배정 2순위
+AUTO,SECOND_SPLIT,자동 배정 2순위 나눠 앉기
+AUTO,MANUAL_REQUIRED,수동 전환

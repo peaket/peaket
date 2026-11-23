@@ -1,0 +1,17 @@
+# 분석 변환(dbt-core + dbt-clickhouse) 실행 환경(docs/features/analytics.md §4.1, ADR-0052 결정 4, F-04-4).
+# 의존성은 해시가 든 잠금 파일(uv.lock)로 고정하고 `uv sync --locked`로만 설치한다. 색인은 PyPI 하나(--extra-index-url 쓰지 않음),
+# 나온 지 3일이 지난 판만 받는다(exclude-newer, docs/devops.md §4.4). 소유자 결정 2026-11-23 "dbt 설치는 받아서 정본대로".
+[project]
+name = "peaket-data"
+version = "0.0.0"
+description = "PEAKET 분석 저장소 dbt 모델(브론즈 → 실버 → 골드)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "dbt-core>=1.9,<2",
+  "dbt-clickhouse>=1.9,<2",
+]
+
+[tool.uv]
+package = false
+exclude-newer = "2026-11-20T00:00:00Z"
+index-strategy = "first-index"

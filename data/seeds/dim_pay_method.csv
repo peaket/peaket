@@ -1,0 +1,5 @@
+pay_method,name
+CARD,카드
+EASY_PAY,간편결제
+TRANSFER,계좌이체
+OTHER,기타
