@@ -31,7 +31,7 @@
 | P-T17 | — | 포트원 웹훅 서명 검증 | 서명이나 헤더에 결함이 있는 요청은 바로 거절된다. 중복 건은 1회 처리되고, 지원하지 않는 이벤트는 안전하게 무시된다. 재전송의 `webhook-id`가… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-process.int.test.ts, services/payment-svc/test-int/payment-webhook.int.test.ts… |
 | P-T18 | — | 공제율 산정 정확도 검증 | 공제 없음(전액 환불), 10%, 20%, 30%, 90% 공제가 정확히 적용되고, 24시간 이내 전액 환급에서 비영업일이 정확히 빠진다. 끝수(추천 적용… | 다른 단계 | A | 미정 · 공제율 산정 정확도 |
 | P-T19 | ① | 입장 개시 후 예매 취소 | ① 금융 환급이 보류되고, 마감 뒤 실행기가 동기화된 들어감·통과 기록을 찾으면 결제사를 부르지 않은 채 '취소 뒤 입장' 이상 표시(CS 처리함… | 자동 시험 | A | 시험: services/purchase-svc/test-int/cancellation.int.test.ts, services/purchase-svc/test/refund-entry-check.test.ts |
-| P-T19 | ② | 입장 개시 후 예매 취소 | ② CS 확인으로 취소가 최종 무효 처리된다 … 는 GAT-280) | 다른 단계 | A | GAT-280 · CS 처리함의 '취소 무효' 확정은 CS 처리함 단계가 만든다. ①③(마감 뒤 입장 기록 대조와 환급)은 GAT-090(BAT-420)의 시험 이름으로 정한다(2026-11-16 세부 나눔… |
+| P-T19 | ② | 입장 개시 후 예매 취소 | ② CS 확인으로 취소가 최종 무효 처리된다 … 는 GAT-280) | 다른 단계 | A | GAT-300 · CS 처리함의 '취소 무효' 확정은 예외 환불과 같은 돈·티켓 상태 전이라 GAT-300이 만든다(2026-11-23 GAT-280에서 옮김, ADR-0364 결정 7). 건 열기·기한은… |
 | P-T19 | ③ | 입장 개시 후 예매 취소 | ③ 입장 기록이 없는 경우에만 입장 기록 마감 뒤 정상 환급된다(세부 나눔 추천 적용 2026-11-16… | 자동 시험 | A | 시험: services/purchase-svc/test-int/cancellation.int.test.ts, services/purchase-svc/test/refund-entry-check.test.ts |
 | P-T20 | — | 회차 취소 일괄 환불 검증 | 모든 주문에 100% 전액 환급이 실행되고, 배상 대상 수·금액 합계와 상계·보증 충당·청구 내역이 정산 리포트에 들어가며(개인 명단은 넣지 않는다), 이중… | 다른 단계 | A | 미정 · 회차 취소 일괄 환불 |
 | P-T21 | — | 취소 멱등성 및 재시도 검증 | 먼저 조회해 이미 취소됐는지 확인한 뒤 재전송해, 단 1회만 환급된다는 것을 입증한다. | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-confirmed-cancel.int.test.ts, services/payment-svc/test/confirmed-cancel.test… |

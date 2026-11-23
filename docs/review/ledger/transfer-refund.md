@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 81 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 67 | 155 |
+| A | 108 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 65 | 181 |
 | B | 77 | 26 | 0 | 0 | 0 | 0 | 0 | 20 | 6 | 129 |
-| 합계 | 158 | 33 | 0 | 0 | 0 | 0 | 0 | 20 | 73 | 284 |
+| 합계 | 185 | 34 | 0 | 0 | 0 | 0 | 0 | 20 | 71 | 310 |
 
 ## docs/features/transfer-refund.md
 
@@ -44,7 +44,7 @@
 | R-T25 | ③ | 회차 취소·연기 때 진행 중인 양도 요청(추천 적용… | ③ 연기 확정 때 양도 요청이 WITHDRAWN(사유 `EVENT_POSTPONED`)이 되고, 회차 취소 요청은 REFUND_WINDOW에 머물다가 기간이… | 빈칸 | A | — |
 | R-T10 | — | 주최 측 귀책 판정, 할인 판매 표 포함 | 배상액이 실제 결제 금액의 10%이고(33,333원 결제는 원 미만 올림으로 3,334원, 기술 검토 낮음-095), PEAKET이 먼저 송금한 뒤 그 금액의… | 빈칸 | A | — |
 | R-T11 | — | 배상 계좌 입력 | DB·로그에 계좌번호가 없다(끝 4자리만) | 빈칸 | A | — |
-| R-T12 | — | 분쟁 접수 후 영업일 경과 | 3영업일·10영업일 기한 배지와 1영업일 전 알림 | 빈칸 | A | — |
+| R-T12 | — | 분쟁 접수 후 영업일 경과 | 3영업일·10영업일 기한 배지와 1영업일 전 알림 | 자동 시험 | A | 시험: services/ops-svc/test/cs-case-deadline-tick.test.ts, services/ops-svc/test/cs-case-deadlines.test.ts |
 | R-T13 | — | 남용 기준 해당 계정 | 시스템은 표시만 한다. `cs_lead`가 확인하기 전에는 예매할 수 있다. `cs_lead`가 제한을 걸면 예매가 막히고 1일 이상의 소명 기한이 안내된다… | 빈칸 | A | — |
 | R-T14 | — | 판매 승인 전 공연 URL 직접 접근 | 404 또는 비공개 안내가 나오고, 대기열에 들어갈 수 없다 | 빈칸 | A | — |
 | R-T15 | — | 결제 직전 화면 | 판매자 이름과 중개자 고지 문장이 보이고, 글씨 크기 규칙을 통과한다 | 빈칸 | A | — |
@@ -52,7 +52,9 @@
 | R-T17 | — | 입장 시작 뒤 수락·돌려주기·회수 | 모두 409 `ENTRY_STARTED`이고, 키와 보유자에 변화가 없다 | 자동 시험 | A | 시험: services/ticket-svc/test-int/transfer.int.test.ts, services/ticket-svc/test/transfer-domain.test.ts 외 2곳 |
 | R-T18 | — | 재승인 대기 중 공개와 판매: 판매 중인 공연의 가격을 바꾼 뒤 공연… | 재승인을 기다리는 동안 공개·판매는 마지막 승인 가격으로 계속된다. 재승인하면 새 가격이 반영되고 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것)가… | 빈칸 | A | — |
 | R-T19 | — | 판매 승인 때 결제사 지정 고정: 지정 없는 공연을 승인한 뒤 플랫폼… | 승인할 때 그 시점의 기본값이 그 공연의 회차마다 지정으로 저장되고(결제사 지정은 회차 칸, §2.1 확인 항목 4, 2026-11-01 정합 점검), 배포… | 빈칸 | A | — |
-| R-T20 | — | CS 처리함 기한과 재발송: 추가 검증 이의·미보고 스캐너·환불 대기… | 기한 배지(10영업일·3영업일·3영업일)와 1영업일 전 알림이 맞다. 환불 계좌 요청이 다음 영업일·그다음 영업일 10:00과 그 뒤 7일마다 나간다. 실패한… | 빈칸 | A | — |
+| R-T20 | ① | CS 처리함 기한과 재발송: 추가 검증 이의·미보고 스캐너·환불 대기… | ① 기한 배지(10영업일·3영업일·3영업일)와 1영업일 전 알림이 맞다 | 자동 시험 | A | 시험: services/ops-svc/test/cs-case-deadline-tick.test.ts, services/ops-svc/test/cs-case-deadlines.test.ts |
+| R-T20 | ② | CS 처리함 기한과 재발송: 추가 검증 이의·미보고 스캐너·환불 대기… | ② 환불 계좌 요청이 다음 영업일·그다음 영업일 10:00과 그 뒤 7일마다 나간다(GAT-130에 합친 GAT-100이 한다, 추천 적용 2026-11-23… | ID만 | A | 시험: services/ops-svc/test/cs-approval-failure-cases.test.ts, services/ops-svc/test/cs-case-deadline-tick.test.ts 외 1곳 |
+| R-T20 | ③ | CS 처리함 기한과 재발송: 추가 검증 이의·미보고 스캐너·환불 대기… | ③ 실패한 승인 업무는 승인자가 approve를 다시 부르면(재인증) 같은 대상·금액으로만 다시 실행된다. 실행이 실패할 때 '승인 업무 실행 실패' 건이 하나… | 자동 시험 | A | 시험: services/ops-svc/test/cs-approval-failure-cases.test.ts |
 | R-T21 | ① | 양도 거절·철회의 멱등키와 알림 링크로 들어오는 경우: ① 같은… | ① 두 번째도 처음 결과를 돌려주고 상태는 한 번만 바뀐다 | 자동 시험 | A | 시험: services/ticket-svc/test/transfer-domain.test.ts, services/ticket-svc/test/transfer-service.test.ts |
 | R-T21 | ② | 양도 거절·철회의 멱등키와 알림 링크로 들어오는 경우: ① 같은… | ② 400 `idempotency-key-invalid`로 거절된다(키 필수, guidelines §4) | 자동 시험 | A | 시험: services/ticket-svc/test/transfer-service.test.ts, services/ticket-svc/test/transfers-http.test.ts |
 | R-T21 | ③ | 양도 거절·철회의 멱등키와 알림 링크로 들어오는 경우: ① 같은… | ③ 링크의 첫 요청에는 팬 쿠키가 실리지 않고 응답은 정적 셸이다. 양도 요청 조회와 수락·거절은 화면 스크립트가 같은 사이트로 보내는 요청으로 간다 | ID만 | A | 시험: services/ticket-svc/test/transfer-domain.test.ts, services/ticket-svc/test/transfer-service.test.ts 외 1곳 |
@@ -170,6 +172,30 @@
 | R-T46 | ③ | 배상 대상 기록과 목록(추천 적용, 2026-11-20… | ③ 그 계정 건만 최근 순으로 오고, 남의 건·없는 건은 같은 404이며 응답에 `accountLast4`만 있고 계좌번호 원문은… | 자동 시험 | A | 시험: services/purchase-svc/test/compensations-http.test.ts |
 | R-T47 | ① | 배상 계좌 입력과 송금(추천 적용, 2026-11-20… | ① 202 `Compensation`이고 `account_last4`는 끝 4자리다. `ACCOUNT_PENDING`이 아니면 409… | 자동 시험 | A | 시험: services/purchase-svc/test/compensations-http.test.ts |
 | R-T47 | ② | 배상 계좌 입력과 송금(추천 적용, 2026-11-20… | ② `REQUESTED`·`PAID`는 그 상태와 `transfer_id`(PAID는 `receivable_id`도)를 저장하고, `FAILED`는 422… | 자동 시험 | A | 시험: services/payment-svc/test-int/compensation-transfer.int.test.ts, services/payment-svc/test/compensation-transfer.tes… |
+| R-T48 | ① | CS 처리함 자동 등록(추천 적용, 2026-11-23, 기능… | ① 종류마다 OPEN 건 하나이고 category와 두 기한이 위 표·d5 §7.6 표의 기한이다(시작은 `dueBaseAt`, 없으면 `createdAt`)… | 자동 시험 | A | 시험: services/ops-svc/test-int/cs-cases.int.test.ts, services/ops-svc/test/cs-case-deadlines.test.ts 외 1곳 |
+| R-T48 | ② | CS 처리함 자동 등록(추천 적용, 2026-11-23, 기능… | ② 앞의 둘은 같은 건 ID이고, 해결된 건의 같은 `eventKey`는 새 건 0이다 | 자동 시험 | A | 시험: services/ops-svc/test-int/cs-cases.int.test.ts, services/ops-svc/test-int/ops-command-audit.int.test.ts 외 1곳 |
+| R-T48 | ③ | CS 처리함 자동 등록(추천 적용, 2026-11-23, 기능… | ③ `accepted: false`이고 행 0, 지표 결과가 `ignored`다 | 자동 시험 | A | 시험: services/ops-svc/test-int/cs-cases.int.test.ts, services/ops-svc/test/cases.test.ts 외 1곳 |
+| R-T48 | ④ | CS 처리함 자동 등록(추천 적용, 2026-11-23, 기능… | ④ HTTP로 보낸 것과 합쳐 건 하나이고, 받지 않는 종류도 보류 행 0으로 넘어간다 | 자동 시험 | A | 시험: services/ops-svc/test-int/cs-cases-kafka.int.test.ts, services/ops-svc/test/cs-case-consumer.test.ts |
+| R-T49 | ① | CS 처리함 목록·상세·갱신의 권한(추천 적용, 2026-11-23… | ① CS 담당자의 목록에는 지급·대사·KYC 건이 0건이고 그 상세는 없는 건과 같은 404다. operator·commander는 모두 본다. viewer는… | 자동 시험 | A | 시험: services/ops-svc/test/ops-cases-http.test.ts |
+| R-T49 | ② | CS 처리함 목록·상세·갱신의 권한(추천 적용, 2026-11-23… | ② 403 `case-update-not-allowed`, 200, 200, 200, 422 `case-assignee-invalid` | 자동 시험 | A | 시험: services/ops-svc/test/ops-cases-http.test.ts |
+| R-T49 | ③ | CS 처리함 목록·상세·갱신의 권한(추천 적용, 2026-11-23… | ③ 428 `precondition-required`, 412 `precondition-failed`, 200이고 `ETag`의 판이 1 오른다 | 자동 시험 | A | 시험: services/ops-svc/test-int/cs-cases.int.test.ts, services/ops-svc/test/ops-cases-http.test.ts |
+| R-T49 | ④ | CS 처리함 목록·상세·갱신의 권한(추천 적용, 2026-11-23… | ④ 422 `case-result-note-required`, 200 RESOLVED와 `resolvedAt`, 409 `case-already-resolved` | 자동 시험 | A | 시험: services/ops-svc/test-int/cs-cases.int.test.ts, services/ops-svc/test/ops-cases-http.test.ts |
+| R-T49 | ⑤ | CS 처리함 목록·상세·갱신의 권한(추천 적용, 2026-11-23… | ⑤ operator가 CS 건을 고치면 403 `case-update-not-allowed`, `cs_lead`가 지급 건을 고치면 없는 건과 같은… | 자동 시험 | A | 시험: services/ops-svc/test/ops-cases-http.test.ts |
+| R-T49 | ⑥ | CS 처리함 목록·상세·갱신의 권한(추천 적용, 2026-11-23… | ⑥ `next_due_at`·ID 차례이고 기한 없는 건은 끝에 온다. `dueWithinDays` n은 n영업일 안에 기한이 드는 건만이고, 빠지거나 겹친… | 자동 시험 | A | 시험: services/ops-svc/test-int/cs-cases.int.test.ts, services/ops-svc/test/ops-cases-http.test.ts |
+| R-T49 | ⑦ | CS 처리함 목록·상세·갱신의 권한(추천 적용, 2026-11-23… | ⑦ 자기 배정 풀기는 200이고 `assignee`가 null이다. 남이 맡은 건을 풀거나 자기에게 옮기면 403… | 자동 시험 | A | 시험: apps/console-host/src/pages/cs-inbox/ui/wiring.test.mjs, services/ops-svc/test/ops-cases-http.test.ts |
+| R-T49 | ⑧ | CS 처리함 목록·상세·갱신의 권한(추천 적용, 2026-11-23… | ⑧ 셋 다 CS 담당자 목록에 0건이고 상세·갱신은 없는 건과 같은 404다. operator·commander는 목록·상세에서 보고… | 자동 시험 | A | 시험: services/ops-svc/test/ops-cases-http.test.ts |
+| R-T49 | ⑨ | CS 처리함 목록·상세·갱신의 권한(추천 적용, 2026-11-23… | ⑨ 422 `case-status-transition-invalid`, 400 `invalid-body`(openapi `maxLength`) | 자동 시험 | A | 시험: services/ops-svc/test/ops-cases-http.test.ts |
+| R-T50 | ① | 영업일 달력과 기한 알림(추천 적용, 2026-11-23, 기능… | ① 정한 날의 같은 KST 시각이고 토·일·공휴일은 세지 않는다. 비영업일에 시작하면 다음 영업일이 첫째 날이다 | 자동 시험 | A | 시험: services/ops-svc/test/cs-business-calendar.test.ts |
+| R-T50 | ② | 영업일 달력과 기한 알림(추천 적용, 2026-11-23, 기능… | ② 1영업일 전 − 1ms에는 경보 0, 1영업일 전에 `CS_CASE_DUE_SOON` SEV3 하나(두 번 돌려도 하나), 기한 − 1ms에는… | 자동 시험 | A | 시험: services/ops-svc/test-int/cs-cases.int.test.ts, services/ops-svc/test/cs-case-deadline-tick.test.ts |
+| R-T50 | ③ | 영업일 달력과 기한 알림(추천 적용, 2026-11-23, 기능… | ③ 두 경보가 풀리고 그 뒤 새 경보 0 | 자동 시험 | A | 시험: services/ops-svc/test-int/cs-cases.int.test.ts, services/ops-svc/test/cs-case-deadline-tick.test.ts |
+| R-T50 | ④ | 영업일 달력과 기한 알림(추천 적용, 2026-11-23, 기능… | ④ local·ci는 주말만 빼고 시작한다. staging·prod와 읽지 못하는 파일은 시작하지 않는다 | 자동 시험 | A | 시험: services/ops-svc/test/cs-business-calendar.test.ts, services/ops-svc/test/cs-calendar-main-wiring.test.ts |
+| R-T50 | ⑤ | 영업일 달력과 기한 알림(추천 적용, 2026-11-23, 기능… | ⑤ REQUESTED 응답의 `judgementDueAt`이 요청 + 1영업일이고, 판정 뒤에는 null이다 | 자동 시험 | A | 시험: services/ops-svc/test-int/cs-cases.int.test.ts, services/ops-svc/test/event-cancellation-judgement-due.test.ts |
+| R-T51 | ① | SCR-045 CS 처리함 화면을 실제 서버에 잇는다(추천 적용… | ① 목록이 `GET /v1/ops/cases` 응답으로 채워지고 행마다 종류·대상·기한 배지(영업일·시간)·상태가 보인다. `DUE_SOON`·`OVERDUE`… | 자동 시험 | A | 시험: apps/console-host/src/pages/cs-inbox/model/live.test.mjs, apps/console-host/src/pages/cs-inbox/ui/wiring.test.mjs 외… |
+| R-T51 | ② | SCR-045 CS 처리함 화면을 실제 서버에 잇는다(추천 적용… | ② PATCH가 `If-Match`와 함께 가고 상태가 바뀐다. 메모가 비면 보내지 않고 오류 요약으로 초점이 간다 | 자동 시험 | A | 시험: apps/console-host/src/pages/cs-inbox/ui/wiring.test.mjs, services/ops-svc/test-int/cs-cases.int.test.ts 외 1곳 |
+| R-T51 | ③ | SCR-045 CS 처리함 화면을 실제 서버에 잇는다(추천 적용… | ③ 412를 받으면 다른 곳에서 먼저 고쳤다는 안내와 [다시 불러오기]가 보인다 | 자동 시험 | A | 시험: apps/console-host/src/pages/cs-inbox/model/live.test.mjs, apps/console-host/src/pages/cs-inbox/ui/wiring.test.mjs 외… |
+| R-T51 | ④ | SCR-045 CS 처리함 화면을 실제 서버에 잇는다(추천 적용… | ④ 둘 다 "없는 건입니다" | 자동 시험 | A | 시험: apps/console-host/src/pages/cs-inbox/model/live.test.mjs, apps/console-host/src/pages/cs-inbox/ui/wiring.test.mjs 외… |
+| R-T51 | ⑤ | SCR-045 CS 처리함 화면을 실제 서버에 잇는다(추천 적용… | ⑤ viewer는 d5 §7.6 viewer 안내, operator는 CS 건에 처리 버튼이 없다 | 자동 시험 | A | 시험: apps/console-host/src/pages/cs-inbox/model/live.test.mjs, apps/console-host/src/pages/cs-inbox/ui/wiring.test.mjs 외… |
+| R-T51 | ⑥ | SCR-045 CS 처리함 화면을 실제 서버에 잇는다(추천 적용… | ⑥ 서버 값으로 다시 그리고, 메모 초안은 브라우저 저장소에 0건이다. 서버 글은 글자 노드로만 그리고 모르는 칸은 버린다 | 자동 시험 | A | 시험: apps/console-host/src/pages/cs-inbox/ui/wiring.test.mjs |
 
 ## docs/security/asvs/transfer-refund.md
 
@@ -180,7 +206,7 @@
 | v5.0.0-1.2.1 | — | L1 | HTTP 응답·HTML·XML 출력은 문맥(HTML 요소·속성·주석, CSS, HTTP 헤더)에 맞게 인코딩해 메시지·문서 구조가 바뀌지 않게 한다. | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/import-check.test.mjs, apps/web/src/_pages/event-detail/model/detail.te… |
 | v5.0.0-1.2.2 | — | L1 | URL을 동적으로 만들 때 신뢰하지 않는 값을 문맥에 맞게 인코딩하고 안전한 프로토콜만 허용한다(`javascript:`·`data:` 금지). | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/preload.test.mjs, packages/api-client/test/policy.test.ts (영역: services/core-svc… |
 | v5.0.0-1.2.3 | — | L1 | JavaScript·JSON을 동적으로 만들 때 인코딩·이스케이프해 구조가 바뀌지 않게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts |
-| v5.0.0-1.2.4 | — | L1 | 데이터 조회·DB 쿼리는 파라미터 쿼리, ORM 등으로 SQL 등 DB 주입을 막는다(저장 프로시저 포함). | 자동 시험 | B | 시험: services/core-svc/test/search.http.test.ts, services/purchase-svc/test-int/booking-restrictions.int.test.ts 외 13곳 |
+| v5.0.0-1.2.4 | — | L1 | 데이터 조회·DB 쿼리는 파라미터 쿼리, ORM 등으로 SQL 등 DB 주입을 막는다(저장 프로시저 포함). | 자동 시험 | B | 시험: services/core-svc/test/search.http.test.ts, services/ops-svc/test/ops-cases-http.test.ts 외 14곳 |
 | v5.0.0-1.2.5 | — | L1 | OS 명령 주입을 막고 OS 호출은 파라미터화하거나 명령줄 인코딩을 쓴다. | 해당 없음 | B | 해당 없음(OS 명령을 부르지 않는다) |
 | v5.0.0-1.2.6 | — | L2 | LDAP 주입을 막는다. | 해당 없음 | B | 해당 없음(LDAP을 쓰지 않는다) |
 | v5.0.0-1.2.7 | — | L2 | XPath 주입을 쿼리 파라미터화·사전 컴파일로 막는다. | 해당 없음 | B | 해당 없음(XPath를 쓰지 않는다) |

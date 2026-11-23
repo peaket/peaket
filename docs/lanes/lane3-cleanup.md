@@ -94,3 +94,13 @@
 - F-05-7 RV-07 낮음: ADR-0362 결정 2 받는 자 줄과 04-ia ④ 글자가 다르고, openapi `GET /v1/identity/scanner-sessions` 설명에 `expires_at > now` 조건이 없다(문서만)
 - F-05-7 RV-08 낮음: 스태프 홈·설정 화면 연결을 소스 글자 정규식으로 본다. 브라우저 확인 뒤 화면 그리기 시험으로 바꿀 후보
 - F-05-7 첫 JS: `/staff/*`·`/my/settings` 네 경로가 CI budgets 잡 경로 목록에 없다. 목록에 더할지 정한다
+- F-06-2 RV-03 중간: 오류 이름의 상태 코드·제목이 목록과 다르고(`invalid-body` 400/422, "없는 건입니다"↔"찾을 수 없습니다") 도우미 함수라 오류 목록 검사가 잡지 못한다(`cs-cases.ts`)
+- F-06-2 RV-06 중간: Kafka 받기가 `.strict()`라 생산자가 선택 칸을 더하면 보류 없이 버린다. asyncapi `CaseRequested`는 닫힌 모양이 아니다(`consumers/case-requests.ts`)
+- F-06-2 RV-07 중간: '판정 대기' 건이 판정·반려 뒤에도 열려 1영업일 뒤 SEV2 경보가 잘못 난다(`event-cancellations.ts`·`cs-judgement-pending.ts`)
+- F-06-2 RV-08 중간: transfer-refund §13 운영 확인 행의 경보 규칙(`ignored` SEV3, 알림 작업 5분 멈춤 SEV3)과 CS 처리함 패널이 없다
+- F-06-2 RV-09 낮음: 실패 건 열기·닫기 실패를 로그·지표 없이 삼킨다(승인 세 모듈)
+- F-06-2 RV-10 낮음: 기한 바퀴가 읽은 뒤 사람이 해결한 건에도 경보를 연다(`cs-case-deadline-tick.ts`)
+- F-06-2 RV-11 낮음: 공휴일 파일 필수를 `staging`·`prod` 글자로만 본다. `PEAKET_ENV`가 비면 platform은 prod로 본다(`business-calendar.ts`). staging·prod 값 파일에 공휴일 파일 연결이 아직 없다
+- F-06-2 RV-13 낮음: 0030 앞의 열린 건은 기한이 비어 경보가 나지 않고 목록 끝에 간다
+- F-06-2 RV-15 낮음: ops-svc 시험이 `apps/console-host`·`packages/api-client` 원본을 의존 선언 밖 상대 경로로 읽는다. CLAUDE.md 큰 그림의 목록에 더하거나 의존을 선언한다
+- F-06-2 검증 1: 어느 표본에도 실패하지 않은 시험 파일 `cs-case-deadlines.test.ts`·`cs-calendar-main-wiring.test.ts`·`cs-inbox-screen-link.test.ts`·콘솔 `model/live.test.mjs`

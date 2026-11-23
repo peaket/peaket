@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 63 | 103 | 0 | 0 | 0 | 10 | 0 | 24 | 126 | 326 |
-| 합계 | 63 | 103 | 0 | 0 | 0 | 10 | 0 | 24 | 126 | 326 |
+| B | 64 | 102 | 0 | 0 | 0 | 10 | 0 | 24 | 126 | 326 |
+| 합계 | 64 | 102 | 0 | 0 | 0 | 10 | 0 | 24 | 126 | 326 |
 
 ## docs/features/control-tower.md
 
@@ -186,7 +186,7 @@
 | v5.0.0-1.2.1 | — | L1 | HTTP 응답·HTML·XML 출력은 문맥(HTML 요소·속성·주석, CSS, HTTP 헤더)에 맞게 인코딩해 메시지·문서 구조가 바뀌지 않게 한다. | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/import-check.test.mjs… |
 | v5.0.0-1.2.2 | — | L1 | URL을 동적으로 만들 때 신뢰하지 않는 값을 문맥에 맞게 인코딩하고 안전한 프로토콜만 허용한다(`javascript:`·`data:` 금지). | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/preload.test.mjs, packages/api-client/test/policy.test.ts (영역: apps/console-host… |
 | v5.0.0-1.2.3 | — | L1 | JavaScript·JSON을 동적으로 만들 때 인코딩·이스케이프해 구조가 바뀌지 않게 한다. | ID만 | B | 다른 곳 시험: apps/web/src/_pages/event-detail/model/detail.test.mjs, services/core-svc/test-int/seatmap-import.int.test.ts… |
-| v5.0.0-1.2.4 | — | L1 | 데이터 조회·DB 쿼리는 파라미터 쿼리, ORM 등으로 SQL 등 DB 주입을 막는다(저장 프로시저 포함). | ID만 | B | 다른 곳 시험: services/core-svc/test/search.http.test.ts, services/purchase-svc/test-int/booking-restrictions.int.test.ts 외… |
+| v5.0.0-1.2.4 | — | L1 | 데이터 조회·DB 쿼리는 파라미터 쿼리, ORM 등으로 SQL 등 DB 주입을 막는다(저장 프로시저 포함). | 자동 시험 | B | 시험: services/ops-svc/test/ops-cases-http.test.ts |
 | v5.0.0-1.2.5 | — | L1 | OS 명령 주입을 막고 OS 호출은 파라미터화하거나 명령줄 인코딩을 쓴다. | 해당 없음 | B | 해당 없음(`ops-svc`는 OS 명령을 부르지 않는다. AWS·Kubernetes는 SDK로 부른다. 런북 Job은 서명을 확인한 고정 이미지의 CLI가 서명 묶음 파일만 읽는다) |
 | v5.0.0-1.2.6 | — | L2 | LDAP 주입을 막는다. | 해당 없음 | B | 해당 없음(LDAP을 쓰지 않는다) |
 | v5.0.0-1.2.7 | — | L2 | XPath 주입을 쿼리 파라미터화·사전 컴파일로 막는다. | 해당 없음 | B | 해당 없음(XPath를 쓰지 않는다) |
@@ -259,8 +259,8 @@
 | v5.0.0-5.4.3 | — | L2 | 신뢰하지 않는 출처의 파일은 백신으로 검사해 알려진 악성 파일을 내려주지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/widgets |
 | v5.0.0-8.1.1 | — | L1 | 인가 문서에 호출자 권한과 자원 속성에 따라 기능 수준·데이터 수준 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/event-summary.http.test.ts 외… |
 | v5.0.0-8.1.2 | — | L2 | 인가 문서에 호출자 권한과 자원 속성(상태 등)에 따라 필드 수준 읽기·쓰기 접근을 제한하는 규칙을 정한다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts, services/realtime-gw/test/hub.test.ts (영역:… |
-| v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/admin-accounts.int.test.ts, services/ops-svc/test/admin-accounts-authz.test.ts 외 3곳 |
-| v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/ops-svc/test-int/admin-accounts.int.test.ts, services/ops-svc/test/admin-accounts-authz.test.ts 외 4곳 |
+| v5.0.0-8.2.1 | — | L1 | 기능 접근을 명시적 권한이 있는 호출자로 제한한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/admin-accounts.int.test.ts, services/ops-svc/test/admin-accounts-authz.test.ts 외 4곳 |
+| v5.0.0-8.2.2 | — | L1 | 데이터 접근을 그 데이터 항목에 명시적 권한이 있는 호출자로 제한해 IDOR·BOLA를 막는다. | 자동 시험 | B | 시험: services/ops-svc/test-int/admin-accounts.int.test.ts, services/ops-svc/test/admin-accounts-authz.test.ts 외 5곳 |
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/ops-svc/test/admin-accounts-authz.test.ts, services/ops-svc/test/approval-visibility.test.ts 외 1곳 |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | 자동 시험 | B | 시험: services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | 해당 없음 | B | 해당 없음(관제 콘솔은 플랫폼 운영자만 쓰고 파트너 테넌트가 들어오지 않는다. 파트너 실시간 판매 현황(§11)은 이 표 범위 밖이다) |

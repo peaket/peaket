@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 122 | 21 | 0 | 0 | 0 | 6 | 0 | 0 | 3 | 152 |
-| 합계 | 122 | 21 | 0 | 0 | 0 | 6 | 0 | 0 | 3 | 152 |
+| B | 122 | 21 | 0 | 0 | 0 | 6 | 0 | 0 | 10 | 159 |
+| 합계 | 122 | 21 | 0 | 0 | 0 | 6 | 0 | 0 | 10 | 159 |
 
 ## docs/features/bot-defense.md
 
@@ -42,7 +42,7 @@
 | B-T10 | ③ | 이의 제기 경로: ① 이의를 보내면 202이고… | ③ 인정하면 queue-svc `PASSED`와 trust-svc `LABELED_HUMAN`이 남고 근거에 차단 목록이 있었으면 키가 지워진다 … 는… | 자동 시험 | B | 시험: services/queue-svc/test-int/appeal-resolve.int.test.ts, services/queue-svc/test/verification-cases.ts 외 1곳 |
 | B-T10 | ④ | 이의 제기 경로: ① 이의를 보내면 202이고… | ④ 기각하면 대기 참여가 `BLOCKED`로 끝나고 trust-svc 라벨은 없다 … 는 queue-svc·trust-svc 몫, 추천 적용… | 자동 시험 | B | 시험: services/queue-svc/test-int/appeal-resolve.int.test.ts, services/queue-svc/test/appeal-grpc.test.ts 외 2곳 |
 | B-T10 | ⑤ | 이의 제기 경로: ① 이의를 보내면 202이고… | ⑤ 같은 건 ID·판 번호로 결과 반영을 두 번 부르면 한 번만 반영된다 … 는 queue-svc·trust-svc 몫, 추천 적용 2026-11-10… | 자동 시험 | B | 시험: services/queue-svc/test/appeal-grpc.test.ts, services/queue-svc/test/verification-cases.ts |
-| B-T10 | ⑥ | 이의 제기 경로: ① 이의를 보내면 202이고… | ⑥ 처리함에 건이 하나 생기고, 결과 반영 호출이 실패하면 ops-svc 작업 워커가 다시 보낸다(ops-svc 몫, | 다른 단계 | B | GAT-280 · 처리함에 건이 하나 생기는 것, 결과 반영 호출을 작업 워커가 다시 보내는 것, 건이 열린 동안의 `SetAccountHold`는 ops-svc 몫이다. queue-svc·trust-svc 쪽… |
+| B-T10 | ⑥ | 이의 제기 경로: ① 이의를 보내면 202이고… | ⑥ 처리함에 건이 하나 생기고, 결과 반영 호출이 실패하면 ops-svc 작업 워커가 다시 보낸다(ops-svc 몫, | 다른 단계 | B | F-06-7 · 2026-11-23 감독 결정: GAT-280 몫이고 F-06-2에서 F-06-7로 나눴다(ADR-0364 결정 8). 건이 하나 생기는 것은 F-06-2의 R-T48 ④도 보고, 결과 반영 호출의… |
 | B-T10 | ⑦ | 이의 제기 경로: ① 이의를 보내면 202이고… | ⑦ ops-svc 밖의 신원이 `VerificationAppealService`를 부르면 거부된다(메시 L7 허용 목록, HOT-400 몫)(추천 적용… | 다른 단계 | B | HOT-400 · 메시 L7 허용 목록이 `VerificationAppealService`를 부르는 신원을 ops-svc로 줄인다(B-T20 ⑩과 같다). queue-svc 처리기는 그 신원을 따로 보지… |
 | B-T11 | — | 추가 검증 제출(`VERIFICATION`): 차단 목록에 있는… | 추가 검증 제출(`VERIFICATION`): 차단 목록에 있는 기기라도 심층 챌린지와 본인확인 재통과면 `PASSED`다. 심층 챌린지 토큰의… | 자동 시험 | B | 시험: services/queue-svc/test-int/appeal-resolve.int.test.ts, services/queue-svc/test-int/verification-store.int.test.ts… |
 | B-T12 | — | 재평가 격리 상한의 분모: 대기 인원 1만 명 회차에 10분 안 후보… | 재평가 격리 상한의 분모: 대기 인원 1만 명 회차에 10분 안 후보 80명을 적용 모드로 넣으면 50명(0.5%)까지 격리되고 나머지는 '상한 도달'로… | 빈칸 | B | — |
@@ -130,6 +130,13 @@
 | B-T27 | ⑨ | 라벨 반영 호출(추천 적용 2026-11-10, §9 '첫 구현'):… | ⑨ 같은 건 ID에 처음과 다른 사람·회차가 오면 `ALREADY_EXISTS`다. `tr:lbl`·`tr:blkv`의 칸 이름과 값에 pid 원문이 없고… | 자동 시험 | B | 시험: services/trust-svc/test-int/apply-label.int.test.ts, services/trust-svc/test-int/main-label.int.test.ts |
 | B-T27 | ⑩ | 라벨 반영 호출(추천 적용 2026-11-10, §9 '첫 구현'):… | ⑩ 표본 검토의 첫째 묶음에 적용 판 `CHALLENGE`, 판 0은 `INVALID_ARGUMENT`다 | 자동 시험 | B | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
 | B-T27 | ⑪ | 라벨 반영 호출(추천 적용 2026-11-10, §9 '첫 구현'):… | ⑪ 같은 라벨의 정정(BOT → HUMAN)은 판정 근거 키가 사라진 뒤에도 앞 판이 찾은 기기의 키를 지운다 연결: FR-049, POL-006 | 자동 시험 | B | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
+| B-T28 | ① | CS 처리함의 이의 심사(추천 적용, 2026-11-23, 기능… | ① `cs_agent`가 `VERIFICATION_APPEAL` 건 상세를 열면 이의 글·사유 범주·확정 신호 여부·판정 출처·판정 시각·지난 30일 추가 검증… | 빈칸 | B | — |
+| B-T28 | ② | CS 처리함의 이의 심사(추천 적용, 2026-11-23, 기능… | ② 인정·기각은 CS 두 역할만 받고 operator·commander는 403 `case-update-not-allowed`, 메모 없음은 422… | 빈칸 | B | — |
+| B-T28 | ③ | CS 처리함의 이의 심사(추천 적용, 2026-11-23, 기능… | ③ 인정하면 queue-svc `ResolveVerificationAppeal`(ACCEPTED, 건 ID, 판)과 trust-svc… | 빈칸 | B | — |
+| B-T28 | ④ | CS 처리함의 이의 심사(추천 적용, 2026-11-23, 기능… | ④ 기각하면 `ResolveVerificationAppeal`(REJECTED)만 한 번이고 `ApplyLabel`은 0번이다 | 빈칸 | B | — |
+| B-T28 | ⑤ | CS 처리함의 이의 심사(추천 적용, 2026-11-23, 기능… | ⑤ 건이 열리면 identity-svc `SetAccountHold`(`VERIFICATION_APPEAL`, 건 ID, OPEN)가, 해결되면 더 큰 판으로… | 빈칸 | B | — |
+| B-T28 | ⑥ | CS 처리함의 이의 심사(추천 적용, 2026-11-23, 기능… | ⑥ queue-svc·trust-svc·identity-svc를 하나씩 멈춘 채 결정해도 결정은 저장되고 202이며, 되살린 뒤 배경 작업이 같은 건… | 빈칸 | B | — |
+| B-T28 | ⑦ | CS 처리함의 이의 심사(추천 적용, 2026-11-23, 기능… | ⑦ SCR-045 이의 심사 패널에서 인정·기각하면 실제 ops-svc에 결정이 가고 패널이 결과로 바뀐다. 이의 글은 글자 노드로만 그린다. 연결:… | 빈칸 | B | — |
 
 ## docs/security/asvs/bot-defense.md
 
