@@ -6,6 +6,7 @@
 // 기준 트리: resolveExcludedPayments·caseRequests가 없어 실패한다(계획 §7).
 import { randomUUID } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
+import { SettlementDueWorker } from '../src/modules/settlement/index.js';
 import { DAY, fact, recalcHarness, seedStatement, type RecalcHarness } from './support/recalc-harness.js';
 
 const NOW = Date.parse('2026-11-23T01:00:00.000Z');
@@ -80,5 +81,26 @@ describe('J-T23 ③ 대사 미완 결제', () => {
     h.at(NOW + DAY + 30 * 60_000);
     await expect(h.settlements.resolveExcludedPayments()).resolves.toMatchObject({ suggested: 1, waiting: 0 });
     expect(suggestions(h)).toEqual([expect.objectContaining({ eventKey: `reconciliation-resolved:${next.statementId}:${w.open.paymentId}`, sourceId: next.statementId })]);
+  });
+
+  // TR-15: 순액은 판매 대금 − 환급 − 수수료 몫 − 부가세(J-T11 식과 같은 버림). TR-04: 정산 일꾼 30분 tick이 실제로 부른다
+  test('J-T23 ③ 부분 환급(20만 원)이 있는 결제가 풀리면 순액 725,200원으로 제안하고, 정산 일꾼 tick(false) 하나가 그 제안 건을 연다', async () => {
+    const h = recalcHarness({ now: NOW });
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    const kept = fact({ amount: 10_000_000 });
+    const open = fact({ amount: 1_000_000, cancelledAmount: 200_000, status: 'PARTIAL_CANCELED', excludedReason: 'RECONCILIATION_OPEN' });
+    h.payments.set(eventId, 'TOSS', [kept, open]);
+    const s = await h.settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
+    h.at(NOW + 30 * 60_000);
+    h.payments.set(eventId, 'TOSS', [kept, { ...open, excludedReason: null }]);
+    const worker = new SettlementDueWorker({ settlements: h.settlements, leader: { isLeader: () => true }, clock: h.clock });
+    await worker.tick(false);
+    const key = `reconciliation-resolved:${s.statementId}:${open.paymentId}`;
+    expect(suggestions(h)).toEqual([expect.objectContaining({ eventKey: key, kind: 'SETTLEMENT_ADJUSTMENT_SUGGESTED', sourceId: s.statementId })]);
+    // 80만 − ⌊80만 × 850 ÷ 10,000⌋(68,000) − 6,800 = 725,200원
+    const detail = h.store.caseRequests.get(key)?.detail ?? '';
+    expect(detail.replace(/,/g, '')).toContain('725200');
+    expect(detail.replace(/,/g, '')).not.toContain('906500');
   });
 });

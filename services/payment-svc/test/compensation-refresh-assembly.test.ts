@@ -13,5 +13,8 @@ const source = (file: string): string =>
 test('R-T47 ③ start.ts는 배상 송금 결과 확정 바퀴를 만들고 시작한다', () => {
   const s = source('start.ts');
   expect(s).toContain('new CompensationRefreshLoop(');
-  expect(s).toMatch(/new CompensationRefreshLoop\([\s\S]*?\.start\(\)/);
+  // 만든 변수 이름의 .start()를 잡는다(파일 뒤쪽 아무 .start()에나 맞지 않게, 시험 리뷰 TR-17 (가))
+  const made = /(?:const|let)\s+(\w+)\s*=\s*new CompensationRefreshLoop\(/.exec(s);
+  expect(made?.[1]).toBeDefined();
+  expect(s).toMatch(new RegExp(String.raw`\b${made![1]}\.start\(\)`));
 });

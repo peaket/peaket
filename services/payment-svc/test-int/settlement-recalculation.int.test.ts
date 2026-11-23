@@ -2,7 +2,9 @@
 // A 등급(돈) 경로를 실제 DB로 본다:
 // - J-T11: 실제 payment·payment_cancel 원장에서 계산 뒤 환급 미수금 한 행(칸 다섯·근거 부분 유일), 두 연결 겹친 tick에도 한 행(F-18), PEAKET 부담 0행.
 // - J-T23 ①: 새 판·옛 판 SUPERSEDED·원본 목록·사건이 한 트랜잭션(원본 넣기를 실패시키면 모두 없음, F-10), 완료 두 번 겹침에 새 판 하나(F-22),
-//   음수 옛 판 미수금 닫기와 상계 묶음이 겹쳐도 이동 합이 미수금을 넘지 않음(F-25).
+//   음수 옛 판 미수금 닫기와 상계 묶음이 겹쳐도 이동 합이 미수금을 넘지 않음(F-25), 음수 미수금이 있는 회차에서 닫기·조정 옮김·새 판 넣기 가운데
+//   하나를 실패시키면 모두 없음(F-25, 시험 리뷰 TR-02), 끝난 뒤 계산 뒤 환급 tick이 같은 환급을 두 번 잡지 않음(TR-01),
+//   이의 결과 SUPERSEDED·적용 전 조정 VOID·조정 합 옮김을 실제 CHECK로(TR-08).
 // - J-T23 ②: 묶음 빼기·되돌림·보류·사건이 한 트랜잭션(되돌림 쓰기를 실패시키면 모두 없음, F-11), 보류 열기와 묶음 만들기 겹침(F-19),
 //   같은 배상 미수금을 결제사가 다른 두 새 판이 겹쳐 상계(F-20).
 // 겹침은 두 연결(두 '파드')로 같은 DB에 동시에 부른다. 실패 주입은 시험 안 트리거다(실행 뒤 지운다). 결제사·은행은 부르지 않는다.
@@ -185,6 +187,19 @@ describe('J-T23 ① 새 판·옛 판·원본 목록이 한 트랜잭션 [실제 
       ['GROSS', 10_000_000],
       ['REFUND', 4_000_000],
     ]);
+    // 대조(TR-14 (나)): 성공 뒤에는 같은 글 검사가 새 판 둘의 STATEMENT_NOTIFIED 두 건을 찾는다
+    const notifiedAfter = await q<{ n: string }>("select count(*) as n from outbox where convert_from(payload, 'UTF8') like '%\"revision\":2%' and convert_from(payload, 'UTF8') like $1", [`%${w.eventId}%`]);
+    expect(Number(notifiedAfter[0]!.n)).toBe(2);
+    // TR-01: 끝난 뒤 계산 뒤 환급 tick은 옛 판(SUPERSEDED)·새 판(원본에 400만 원 환급 줄) 어디에도 미수금을 만들지 않고, 그 뒤 50만 원 더 환불은 새 판으로만 한 행이다
+    p.at(FRIDAY + 30 * 60_000);
+    await p.a.recordRefundsAfterCalculation();
+    expect(await refundReceivables(w.sT.statementId)).toEqual([]);
+    expect(await refundReceivables(newToss.id)).toEqual([]);
+    await cancelRow(w.payT, { amount: 500_000, canceledAt: FRIDAY + 40 * 60_000 });
+    p.at(FRIDAY + 2 * 60 * 60_000);
+    await p.a.recordRefundsAfterCalculation();
+    expect(await refundReceivables(w.sT.statementId)).toEqual([]);
+    expect(await refundReceivables(newToss.id)).toEqual([expect.objectContaining({ refund_amount: 500_000, commission_share: 42_500, commission_vat_share: 4_250, amount: 453_250, source_ref: `refund:${newToss.id}:${w.payT}:4500000` })]);
   });
 
   test('J-T23 ① 두 파드가 완료를 겹쳐 불러도 옛 판마다 새 판은 하나다 [ASVS v5.0.0-2.3.4]', async () => {
@@ -327,7 +342,9 @@ describe('J-T23 ① 음수 옛 판 미수금 닫기와 상계 겹침 [실제 Pos
       p.a.completeEventRecalculation(requestId, { completedAt: new Date(FRIDAY) }),
     ]);
     expect(done.status).toBe('fulfilled');
-    expect(['fulfilled', 'rejected']).toContain(batch.status);
+    // 겹침이 실제로 일어났다(TR-14 (가)): 묶음은 만들어졌고 다른 정산서가 그 묶음에 묶였다
+    expect(batch.status).toBe('fulfilled');
+    expect((await q<{ payout_batch_id: string | null }>('select payout_batch_id from settlement_statement where id = $1', [otherId]))[0]!.payout_batch_id).not.toBeNull();
     const moves = await q<{ kind: string; amount: number }>('select kind, amount from receivable_movement where receivable_id = $1', [negativeId]);
     const offset = moves.filter((m) => m.kind === 'OFFSET').reduce((n, m) => n + m.amount, 0);
     const closed = moves.filter((m) => m.kind === 'SUPERSEDED').reduce((n, m) => n + m.amount, 0);
@@ -338,5 +355,158 @@ describe('J-T23 ① 음수 옛 판 미수금 닫기와 상계 겹침 [실제 Pos
     expect(fresh.payout_amount).toBe(-300_000 + offset);
     // 열린 음수 미수금은 옛 판 것이 없다(새 판 확정 전)
     expect(await q("select id from partner_receivable where promoter_id = $1 and cause = 'NEGATIVE_STATEMENT' and status <> 'CLOSED'", [promoterId])).toEqual([]);
+  });
+});
+
+/** 음수 옛 판(포트원, 수수료율 0bp, 판매 100만·조정 −130만 → 지급액 −30만, CARRIED_OVER)과 그 NEGATIVE_STATEMENT 미수금(30만 중 12만을 다른 정산서가 상계, 남은 18만) */
+async function negativeWorld(p: ReturnType<typeof pods>) {
+  const promoterId = randomUUID();
+  const eventId = randomUUID();
+  const at = new Date(NOW - 10 * DAY);
+  const pay = await paymentRow({ eventId, amount: 1_000_000, pg: 'PORTONE' });
+  const oldId = randomUUID();
+  await db1.pool.query(
+    `insert into settlement_statement (id, promoter_id, kind, event_id, pg, pg_store, gross_amount, refund_amount, commission_amount, commission_vat, offset_amount, adjustment_amount, payout_amount, commission_rate_bp, status, payout_date, created_at, updated_at)
+     values ($1, $2, 'EVENT', $3, 'PORTONE', 'STANDARD', 1000000, 0, 0, 0, 0, -1300000, -300000, 0, 'CARRIED_OVER', '2026-11-20', $4, $4)`,
+    [oldId, promoterId, eventId, at],
+  );
+  await db1.pool.query("insert into statement_source (statement_id, source_id, kind, payment_id, amount) values ($1, $2, 'GROSS', $2, 1000000)", [oldId, pay]);
+  const elsewhere = randomUUID();
+  await db1.pool.query(
+    `insert into settlement_statement (id, promoter_id, kind, event_id, pg, pg_store, gross_amount, refund_amount, commission_amount, commission_vat, offset_amount, payout_amount, commission_rate_bp, status, payout_date, created_at, updated_at)
+     values ($1, $2, 'EVENT', $3, 'PORTONE', 'STANDARD', 500000, 0, 0, 0, 120000, 380000, 0, 'PAID', '2026-11-21', $4, $4)`,
+    [elsewhere, promoterId, randomUUID(), at],
+  );
+  const negativeId = randomUUID();
+  await db1.pool.query(
+    "insert into partner_receivable (id, promoter_id, pg, cause, event_id, source_ref, amount, remaining, status, created_at, updated_at) values ($1, $2, 'PORTONE', 'NEGATIVE_STATEMENT', $3, $4, 300000, 180000, 'OPEN', $5, $5)",
+    [negativeId, promoterId, eventId, `negative-statement:${oldId}`, at],
+  );
+  await db1.pool.query("insert into receivable_movement (id, receivable_id, statement_id, amount, kind, moved_at) values ($1, $2, $3, 120000, 'OFFSET', $4)", [randomUUID(), negativeId, elsewhere, at]);
+  const requestId = randomUUID();
+  await p.a.openEventRecalculation({ requestId, eventId, kind: 'CANCEL', confirmedAt: new Date(NOW) });
+  return { promoterId, eventId, oldId, negativeId, requestId };
+}
+
+const failTrigger = async (name: string, table: string, condition: string) => {
+  await db1.pool.query(`create or replace function ${name}() returns trigger language plpgsql as $f$ begin if ${condition} then raise exception '${name} injected'; end if; return new; end $f$`);
+  await db1.pool.query(`create trigger ${name} before insert on ${table} for each row execute function ${name}()`);
+  return async () => {
+    await db1.pool.query(`drop trigger if exists ${name} on ${table}`);
+    await db1.pool.query(`drop function if exists ${name}()`);
+  };
+};
+
+describe('J-T23 ① 음수 미수금이 있는 회차의 다시 계산은 한 트랜잭션 [실제 PostgreSQL] (F-25, TR-02)', () => {
+  test('J-T23 ① 새 판 원본 넣기·음수 미수금 닫는 이동 넣기를 각각 실패시키면 미수금 18만 원 OPEN·닫는 이동 0·옛 판 CARRIED_OVER·새 판 0·요청 PENDING이고, 걷은 뒤 완료하면 한 번에 된다 [ASVS v5.0.0-2.3.3]', async () => {
+    const p = pods();
+    const w = await negativeWorld(p);
+    p.at(FRIDAY);
+    const untouched = async () => {
+      expect((await q('select remaining, status from partner_receivable where id = $1', [w.negativeId]))[0]).toEqual({ remaining: 180_000, status: 'OPEN' });
+      expect(await q("select id from receivable_movement where receivable_id = $1 and kind = 'SUPERSEDED'", [w.negativeId])).toEqual([]);
+      expect((await q<{ status: string }>('select status from settlement_statement where id = $1', [w.oldId]))[0]!.status).toBe('CARRIED_OVER');
+      expect(await q('select id from settlement_statement where supersedes_id = $1', [w.oldId])).toEqual([]);
+      expect((await q<{ state: string }>('select state from settlement_recalculation where request_id = $1', [w.requestId]))[0]!.state).toBe('PENDING');
+    };
+    // ① 닫기를 먼저 따로 커밋하고 새 판 넣기가 실패하는 구현을 잡는다(빚이 사라짐)
+    const dropSource = await failTrigger('f078_fail_negative_source', 'statement_source', `new.statement_id <> '${w.oldId}'::uuid`);
+    try {
+      await p.a.completeEventRecalculation(w.requestId, { completedAt: new Date(FRIDAY) }).catch(() => undefined);
+      await untouched();
+    } finally {
+      await dropSource();
+    }
+    // ② 새 판을 먼저 따로 커밋하고 닫기가 실패하는 구현을 잡는다(옛 미수금 + 새 판 음수 = 이중)
+    const dropClose = await failTrigger('f078_fail_negative_close', 'receivable_movement', "new.kind = 'SUPERSEDED'");
+    try {
+      await p.a.completeEventRecalculation(w.requestId, { completedAt: new Date(FRIDAY) }).catch(() => undefined);
+      await untouched();
+    } finally {
+      await dropClose();
+    }
+    const done = await p.a.completeEventRecalculation(w.requestId, { completedAt: new Date(FRIDAY) });
+    expect(done.state).toBe('DONE');
+    expect((await q<{ amount: number }>("select amount from receivable_movement where receivable_id = $1 and kind = 'SUPERSEDED'", [w.negativeId])).map((r) => Number(r.amount))).toEqual([180_000]);
+    expect((await q('select remaining, status from partner_receivable where id = $1', [w.negativeId]))[0]).toEqual({ remaining: 0, status: 'CLOSED' });
+    const fresh = await q<{ adjustment_amount: number; payout_amount: number; revision: number }>('select adjustment_amount, payout_amount, revision from settlement_statement where supersedes_id = $1', [w.oldId]);
+    expect(fresh.map((r) => [Number(r.adjustment_amount), Number(r.payout_amount), r.revision])).toEqual([[-1_180_000, -180_000, 2]]);
+  });
+});
+
+describe('J-T23 ② 같은 배상 미수금을 결제사가 다른 두 새 판이 겹쳐 상계 [실제 PostgreSQL] (F-20, TR-07)', () => {
+  test('J-T23 ② 남은 50만 원 배상 미수금을 토스·포트원 묶음 둘이 두 파드에서 겹쳐 상계해도 OFFSET 합 50만·남은 0·CLOSED이고 두 정산서 상계 합이 50만이다 [ASVS v5.0.0-2.3.4]', async () => {
+    const p = pods();
+    const promoterId = randomUUID();
+    const at = new Date(NOW - DAY);
+    await db1.pool.query("insert into seller_kyc (promoter_id, status, business_verified, representative_verified, verified_at, source, updated_at) values ($1, 'VERIFIED', true, true, $2, 'MANUAL', $2)", [promoterId, at]);
+    await db1.pool.query(
+      "insert into toss_seller (promoter_id, pg_store, toss_seller_id, ref_seller_id, status, business_type, registered_at, status_checked_at, updated_at) values ($1, 'STANDARD', $2, $3, 'APPROVED', 'CORPORATE', $4, $4, $4)",
+      [promoterId, `seller-${promoterId.slice(0, 8)}`, `peaket-${promoterId}`, at],
+    );
+    const receivableId = randomUUID();
+    await db1.pool.query("insert into partner_receivable (id, promoter_id, pg, cause, source_ref, amount, remaining, status, created_at, updated_at) values ($1, $2, null, 'COMPENSATION_ADVANCE', $3, 500000, 500000, 'OPEN', $4, $4)", [receivableId, promoterId, `compensation:${randomUUID()}`, at]);
+    const newStatement = async (pg: 'TOSS' | 'PORTONE', payoutDate: string) => {
+      const id = randomUUID();
+      await db1.pool.query(
+        `insert into settlement_statement (id, promoter_id, kind, event_id, pg, pg_store, gross_amount, refund_amount, commission_amount, commission_vat, offset_amount, payout_amount, commission_rate_bp, revision, supersedes_id, status, payout_date, created_at, updated_at)
+         values ($1, $2, 'EVENT', $3, $4, 'STANDARD', 1000000, 0, 0, 0, 0, 1000000, 0, 2, $5, 'CONFIRMED', $6, $7, $7)`,
+        [id, promoterId, randomUUID(), pg, randomUUID(), payoutDate, at],
+      );
+      return id;
+    };
+    const tossId = await newStatement('TOSS', '2026-12-15');
+    const portoneId = await newStatement('PORTONE', '2026-12-16');
+    const results = await Promise.allSettled([
+      p.a.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: '2026-12-15', actor: randomUUID() }),
+      p.b.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: '2026-12-16', portoneBalance: { amount: 100_000_000_000, observedAt: new Date(NOW).toISOString() }, actor: randomUUID() }),
+    ]);
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
+    const offsets = await q<{ amount: number }>("select amount from receivable_movement where receivable_id = $1 and kind = 'OFFSET'", [receivableId]);
+    expect(offsets.reduce((n, m) => n + Number(m.amount), 0)).toBe(500_000);
+    expect((await q('select remaining, status from partner_receivable where id = $1', [receivableId]))[0]).toEqual({ remaining: 0, status: 'CLOSED' });
+    const statementOffsets = await q<{ offset_amount: number }>('select offset_amount from settlement_statement where id = any($1::uuid[])', [[tossId, portoneId]]);
+    expect(statementOffsets.reduce((n, r) => n + Number(r.offset_amount), 0)).toBe(500_000);
+  });
+});
+
+describe('J-T23 ① 이의·조정이 있는 정산서의 다시 계산 [실제 PostgreSQL] (TR-08)', () => {
+  test('J-T23 ① DISPUTED·적용 전 조정이 있는 NOTIFIED·조정 합 3만 원인 HELD를 다시 계산하면 이의 결과 SUPERSEDED·조정 VOID·새 판 조정 합 3만 원·이의 기한 화요일이다', async () => {
+    const p = pods(NOW - 2 * DAY);
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    await paymentRow({ eventId, amount: 10_000_000 });
+    await paymentRow({ eventId, amount: 10_000_000, pgStore: 'ESCROW' });
+    await paymentRow({ eventId, amount: 10_000_000, pg: 'PORTONE' });
+    const disputed = await p.a.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
+    const notified = await p.a.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'ESCROW' });
+    const held = await p.a.calculateEvent({ promoterId, eventId, pg: 'PORTONE', pgStore: 'STANDARD' });
+    const { disputeId } = await p.a.dispute(promoterId, randomUUID(), disputed.statementId, { reasonCode: 'GROSS_AMOUNT' });
+    const approvalId = randomUUID();
+    await db1.pool.query(
+      "insert into statement_adjustment (id, statement_id, approval_id, reason_code, dispute_id, amount, evidence_note, status, requested_by, requested_at, applied_at) values ($1, $2, $3, 'LEDGER_ERROR', null, 5000, '원장 오류', 'PENDING', $4, $5, null)",
+      [randomUUID(), notified.statementId, approvalId, randomUUID(), new Date(NOW - DAY)],
+    );
+    await db1.pool.query("update settlement_statement set status = 'HELD', hold_reason = 'KYC', adjustment_amount = 30000, payout_amount = payout_amount + 30000 where id = $1", [held.statementId]);
+    p.at(NOW);
+    const requestId = randomUUID();
+    await p.a.openEventRecalculation({ requestId, eventId, kind: 'CANCEL', confirmedAt: new Date(NOW) });
+    p.at(FRIDAY);
+    const done = await p.a.completeEventRecalculation(requestId, { completedAt: new Date(FRIDAY) });
+    expect(done.state).toBe('DONE');
+    expect((await q<{ result: string | null }>('select result from statement_dispute where id = $1', [disputeId]))[0]!.result).toBe('SUPERSEDED');
+    expect((await q<{ status: string }>('select status from statement_adjustment where approval_id = $1', [approvalId]))[0]!.status).toBe('VOID');
+    const olds = await q<{ id: string; status: string }>('select id, status from settlement_statement where id = any($1::uuid[]) order by id', [[disputed.statementId, notified.statementId, held.statementId]]);
+    expect(olds.every((r) => r.status === 'SUPERSEDED')).toBe(true);
+    const fresh = await q<{ supersedes_id: string; adjustment_amount: number; dispute_due_at: Date; status: string; revision: number }>(
+      'select supersedes_id, adjustment_amount, dispute_due_at, status, revision from settlement_statement where supersedes_id = any($1::uuid[])',
+      [[disputed.statementId, notified.statementId, held.statementId]],
+    );
+    expect(fresh).toHaveLength(3);
+    for (const r of fresh) {
+      expect(r).toMatchObject({ status: 'NOTIFIED', revision: 2 });
+      expect(Number(r.adjustment_amount)).toBe(r.supersedes_id === held.statementId ? 30_000 : 0);
+      expect(new Date(r.dispute_due_at).toISOString()).toBe('2026-12-01T01:00:00.000Z');
+    }
   });
 });

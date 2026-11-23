@@ -82,6 +82,17 @@ describe('J-T23 ② 정산서 상태별 처리 판정(recalculationActionOf)', (
     expect(recalculationActionOf(s('SCHEDULED', { pieces: ['COMPLETED'] }))).toBe('SKIP');
   });
 
+  // TR-18·U-R3(계획 §5.1 (가)): 토스 SCHEDULED는 FAILED·CANCELED 조각을 셈에서 빼고 남은 조각으로 본다
+  test('J-T23 ② SCHEDULED 토스의 FAILED·CANCELED 조각은 빼고 본다: 남은 조각이 모두 REQUESTED면 CANCEL_TOSS, 남은 조각이 없으면 HOLD, 남은 조각에 IN_PROGRESS가 있으면 SKIP', () => {
+    expect(recalculationActionOf(s('SCHEDULED', { pieces: ['FAILED', 'REQUESTED'] }))).toBe('CANCEL_TOSS');
+    expect(recalculationActionOf(s('SCHEDULED', { pieces: ['CANCELED', 'REQUESTED'] }))).toBe('CANCEL_TOSS');
+    expect(recalculationActionOf(s('SCHEDULED', { pieces: ['CANCELED'] }))).toBe('HOLD');
+    expect(recalculationActionOf(s('SCHEDULED', { pieces: ['FAILED'] }))).toBe('HOLD');
+    expect(recalculationActionOf(s('SCHEDULED', { pieces: [] }))).toBe('HOLD');
+    expect(recalculationActionOf(s('SCHEDULED', { pieces: ['FAILED', 'IN_PROGRESS'] }))).toBe('SKIP');
+    expect(recalculationActionOf(s('SCHEDULED', { pieces: ['CANCELED', 'COMPLETED'] }))).toBe('SKIP');
+  });
+
   test('J-T23 ② SCHEDULED 포트원은 조각 없음·모두 REQUESTED면 CANCEL_PORTONE, IN_PROGRESS·COMPLETED가 있으면 SKIP', () => {
     expect(recalculationActionOf(s('SCHEDULED', { pg: 'PORTONE' }))).toBe('CANCEL_PORTONE');
     expect(recalculationActionOf(s('SCHEDULED', { pg: 'PORTONE', pieces: ['REQUESTED'] }))).toBe('CANCEL_PORTONE');
@@ -291,6 +302,70 @@ describe('J-T23 ① NOTIFIED·DISPUTED·CONFIRMED 정산서의 보류와 다시 
     await expect(h.settlements.completeEventRecalculation(randomUUID(), { completedAt: new Date(FRIDAY) })).rejects.toMatchObject({ type: 'not-found', status: 404 });
   });
 
+  // TR-01(ADR-0380 결정 5): 끝난 뒤(DONE)의 계산 뒤 환급 tick은 SUPERSEDED 옛 판을 빼고, 새 판 원본의 환급 줄을 빼서 같은 환급을 두 번 잡지 않는다
+  test('J-T23 ① 다시 계산이 끝난 뒤 계산 뒤 환급 tick은 미수금 0행이고, 그 뒤 더한 50만 원 환불은 새 판 ID로만 한 행이다 [ASVS v5.0.0-2.3.4]', async () => {
+    const h = recalcHarness({ now: CONFIRMED_AT - DAY });
+    const w = threeStores(h);
+    const sT = await h.settlements.calculateEvent({ promoterId: w.promoterId, eventId: w.eventId, pg: 'TOSS', pgStore: 'STANDARD' });
+    h.at(CONFIRMED_AT);
+    const requestId = randomUUID();
+    await open(h, { requestId, eventId: w.eventId });
+    h.at(FRIDAY - 60_000);
+    h.payments.set(w.eventId, 'TOSS', [fact({ ...w.payT, cancelledAmount: 4_000_000, status: 'PARTIAL_CANCELED', refundedAt: new Date(FRIDAY - 120_000) })], 'STANDARD');
+    // 대기 중 tick: 다시 계산이 넣으므로 0행
+    await h.settlements.recordRefundsAfterCalculation();
+    h.at(FRIDAY);
+    const done = await h.settlements.completeEventRecalculation(requestId, { completedAt: new Date(FRIDAY) });
+    const newId = done.recalculated.find((r) => r.oldStatementId === sT.statementId)!.newStatementId;
+    expect(h.store.statements.get(newId)).toMatchObject({ refundAmount: 4_000_000, revision: 2 });
+    const refundRows = () => [...h.store.receivables.values()].filter((r) => r.cause === 'REFUND_AFTER_PAYOUT');
+    // 끝난 뒤 tick: 옛 판(원본에 환급 줄 없음)·새 판(원본에 400만 원 환급 줄) 어디에도 새 미수금이 없다
+    h.at(FRIDAY + 30 * 60_000);
+    await h.settlements.recordRefundsAfterCalculation();
+    expect(refundRows()).toEqual([]);
+    // 끝난 뒤 50만 원을 더 환불 → 새 판 ID로만 한 행(850bp: 42,500·4,250·453,250)
+    h.at(FRIDAY + 2 * 60 * 60_000);
+    h.payments.set(w.eventId, 'TOSS', [fact({ ...w.payT, cancelledAmount: 4_500_000, status: 'PARTIAL_CANCELED', refundedAt: new Date(FRIDAY + 90 * 60_000) })], 'STANDARD');
+    await h.settlements.recordRefundsAfterCalculation();
+    expect(refundRows()).toEqual([
+      expect.objectContaining({ statementId: newId, refundAmount: 500_000, commissionShare: 42_500, commissionVatShare: 4_250, amount: 453_250, commissionRateBp: 850, sourceRef: `refund:${newId}:${w.payT.paymentId}:4500000` }),
+    ]);
+    expect(refundRows().filter((r) => r.statementId === sT.statementId)).toEqual([]);
+  });
+
+  // TR-05: 대기 중 자동 확정(T5)된 CONFIRMED를 완료가 다시 계산한다(T16), 다른 사유 HELD(KYC)는 사유를 바꾸지 않고 완료 때 다시 계산한다(T17)
+  test('J-T23 ① 대기 중에 자동 확정된 CONFIRMED는 완료 때 다시 계산되고(옛 판 감사 CONFIRMED → SUPERSEDED), KYC로 HELD인 정산서는 사유 그대로 두었다가 완료 때 다시 계산된다', async () => {
+    const h = recalcHarness({ now: CONFIRMED_AT });
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    const at = new Date(CONFIRMED_AT - DAY);
+    const payT = fact({ amount: 10_000_000 });
+    const payP = fact({ amount: 10_000_000 });
+    h.payments.set(eventId, 'TOSS', [payT]);
+    h.payments.set(eventId, 'PORTONE', [payP]);
+    const notified = seedStatement(h.store, { promoterId, eventId, pg: 'TOSS', status: 'NOTIFIED', disputeDueAt: new Date(CONFIRMED_AT + DAY), at });
+    h.store.sources.set(notified.statementId, [{ statementId: notified.statementId, sourceId: payT.paymentId, kind: 'GROSS', paymentId: payT.paymentId, amount: 10_000_000 }]);
+    const kycHeld = seedStatement(h.store, { promoterId, eventId, pg: 'PORTONE', status: 'HELD', holdReason: 'KYC', at });
+    h.store.sources.set(kycHeld.statementId, [{ statementId: kycHeld.statementId, sourceId: payP.paymentId, kind: 'GROSS', paymentId: payP.paymentId, amount: 10_000_000 }]);
+    const requestId = randomUUID();
+    const opened = await open(h, { requestId, eventId });
+    expect(opened.held).toEqual([]);
+    expect(h.store.statements.get(kycHeld.statementId)).toMatchObject({ status: 'HELD', holdReason: 'KYC' });
+    expect(eventsOf(h.store, kycHeld.statementId, 'PAYOUT_HELD')).toEqual([]);
+    h.at(CONFIRMED_AT + DAY);
+    await h.settlements.confirmDueStatements();
+    expect(statusOf(h, notified.statementId)).toBe('CONFIRMED');
+    h.at(FRIDAY);
+    const done = await h.settlements.completeEventRecalculation(requestId, { completedAt: new Date(FRIDAY) });
+    expect(done.recalculated.map((r) => [r.oldStatementId, r.revision]).sort()).toEqual([
+      [notified.statementId, 2],
+      [kycHeld.statementId, 2],
+    ].sort());
+    expect(auditsOf(h.store, notified.statementId).filter((a) => a.toStatus === 'SUPERSEDED')).toEqual([expect.objectContaining({ fromStatus: 'CONFIRMED', reason: `recalculated:${requestId}` })]);
+    expect(auditsOf(h.store, kycHeld.statementId).filter((a) => a.toStatus === 'SUPERSEDED')).toEqual([expect.objectContaining({ fromStatus: 'HELD', reason: `recalculated:${requestId}` })]);
+    expect(liveStatementsOf(h.store, eventId).every((s) => s.status === 'NOTIFIED' && s.revision === 2)).toBe(true);
+  });
+
   // F-22: 완료를 두 번 겹쳐 부름 → 새 판 하나
   test('J-T23 ① 완료 두 번을 겹쳐 불러도 옛 판마다 새 판은 하나이고 두 답이 같다 [ASVS v5.0.0-2.3.4]', async () => {
     const h = recalcHarness({ now: CONFIRMED_AT - DAY });
@@ -420,6 +495,47 @@ describe('J-T23 ① CARRIED_OVER 음수 옛 판의 NEGATIVE_STATEMENT 미수금(
     h.at(TUESDAY);
     await h.settlements.confirmDueStatements();
     expect(openNegatives(h, n.promoterId)).toEqual([expect.objectContaining({ sourceRef: `negative-statement:${newId}`, amount: 300_000 })]);
+  });
+});
+
+// TR-03(ADR-0380 결정 8 끝 문장): 상계가 지급액을 다 써 CARRIED_OVER(offset-exhausted)가 된 옛 판의 OFFSET은 다시 계산 때 REVERSAL로 되돌린다
+describe('J-T23 ① 상계로 지급액 0이 된 CARRIED_OVER 옛 판의 상계 되돌림(TR-03)', () => {
+  test('J-T23 ① 상계가 지급액 100만 원을 다 써 CARRIED_OVER인 옛 판을 다시 계산하면 REVERSAL 한 줄·미수금 되살림이고 새 판 상계 0·지급액 100만 원이다 [ASVS v5.0.0-2.3.3]', async () => {
+    const h = recalcHarness({ now: CONFIRMED_AT });
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    const at = new Date(CONFIRMED_AT - 10 * DAY);
+    const pay = fact({ amount: 1_000_000, refundedAt: null });
+    h.payments.set(eventId, 'TOSS', [pay]);
+    const old = seedStatement(h.store, {
+      promoterId,
+      eventId,
+      pg: 'TOSS',
+      status: 'CARRIED_OVER',
+      grossAmount: 1_000_000,
+      refundAmount: 0,
+      commissionAmount: 0,
+      commissionVat: 0,
+      offsetAmount: 1_000_000,
+      adjustmentAmount: 0,
+      payoutAmount: 0,
+      commissionRateBp: 0,
+      at,
+    });
+    h.store.sources.set(old.statementId, [{ statementId: old.statementId, sourceId: pay.paymentId, kind: 'GROSS', paymentId: pay.paymentId, amount: 1_000_000 }]);
+    const r = seedReceivable(h.store, { promoterId, pg: null, cause: 'COMPENSATION_ADVANCE', sourceRef: `compensation:${randomUUID()}`, amount: 1_000_000, at });
+    const moveId = seedOffset(h.store, { receivableId: r.receivableId, statementId: old.statementId, amount: 1_000_000, at });
+    expect(h.store.receivables.get(r.receivableId)).toMatchObject({ remaining: 0, status: 'CLOSED' });
+    const requestId = randomUUID();
+    await open(h, { requestId, eventId });
+    h.at(FRIDAY);
+    const done = await h.settlements.completeEventRecalculation(requestId, { completedAt: new Date(FRIDAY) });
+    expect(done.recalculated).toEqual([{ oldStatementId: old.statementId, newStatementId: expect.any(String), revision: 2, negativeClosed: null }]);
+    expect(h.store.receivableMoves.filter((m) => m.kind === 'REVERSAL')).toEqual([expect.objectContaining({ receivableId: r.receivableId, statementId: old.statementId, reversesId: moveId, amount: 1_000_000 })]);
+    expect(h.store.receivables.get(r.receivableId)).toMatchObject({ remaining: 1_000_000, status: 'OPEN' });
+    expect(remainingByMoves(h.store, r.receivableId)).toBe(1_000_000);
+    expect(h.store.statements.get(done.recalculated[0]!.newStatementId)).toMatchObject({ status: 'NOTIFIED', offsetAmount: 0, payoutAmount: 1_000_000, grossAmount: 1_000_000 });
+    expect(h.store.statements.get(old.statementId)).toMatchObject({ status: 'SUPERSEDED', offsetAmount: 1_000_000, payoutAmount: 0 });
   });
 });
 
@@ -581,6 +697,89 @@ describe('J-T23 ② 지급을 요청한 뒤의 회차 취소', () => {
     expect(h.toss!.cancels).toHaveLength(cancelsBefore);
   });
 
+  // TR-18·U-R3: 취소 호출은 남은 REQUESTED 조각에만 간다. 남은 조각이 없으면 결제사를 부르지 않고 HELD다
+  test('J-T23 ② 토스 [FAILED, REQUESTED] 조각이면 REQUESTED 조각만 예약 취소하고, [CANCELED] 조각뿐이면 취소 호출 없이 HELD(RECALCULATION)이다', async () => {
+    const h = recalcHarness({ now: CONFIRMED_AT, toss: true });
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    h.payments.set(eventId, 'TOSS', [fact({ amount: 10_000_000 })], 'STANDARD');
+    h.payments.set(eventId, 'TOSS', [fact({ amount: 10_000_000 })], 'ESCROW');
+    const mixed = scheduledToss(h, { promoterId, eventId, pieces: ['FAILED', 'REQUESTED'] });
+    const cancelledOnly = scheduledToss(h, { promoterId, eventId, pieces: ['CANCELED'] });
+    h.store.statements.set(cancelledOnly.s.statementId, { ...h.store.statements.get(cancelledOnly.s.statementId)!, pgStore: 'ESCROW' });
+    const opened = await open(h, { requestId: randomUUID(), eventId });
+    expect([...opened.held].sort()).toEqual([mixed.s.statementId, cancelledOnly.s.statementId].sort());
+    expect(h.toss!.cancels.map((c) => c.pgPayoutId)).toEqual([mixed.pieces[1]!.pgPayoutId]);
+    expect(h.store.payouts.get(mixed.pieces[0]!.payoutId)?.status).toBe('FAILED');
+    expect(h.store.payouts.get(mixed.pieces[1]!.payoutId)?.status).toBe('CANCELED');
+    for (const x of [mixed, cancelledOnly]) expect(h.store.statements.get(x.s.statementId)).toMatchObject({ status: 'HELD', holdReason: 'RECALCULATION' });
+  });
+
+  // TR-06·U-R1(F-26): 완료 때 예약 취소가 계속 실패 중인 토스 SCHEDULED가 남으면 그 정산서만 미루고(요청 PENDING), 다시 하기가 끝내 보류로 바꾸거나 skipped로 옮긴다
+  function retryingAtCompletion(h: RecalcHarness) {
+    const promoterId = randomUUID();
+    const eventId = randomUUID();
+    const pay = fact({ amount: 10_000_000, refundedAt: null });
+    h.payments.set(eventId, 'TOSS', [pay]);
+    const x = scheduledToss(h, { promoterId, eventId, pieces: ['REQUESTED'] });
+    h.store.sources.set(x.s.statementId, [{ statementId: x.s.statementId, sourceId: pay.paymentId, kind: 'GROSS', paymentId: pay.paymentId, amount: 10_000_000 }]);
+    h.toss!.failCancel(x.pieces[0]!.pgPayoutId!, 'NO_RESPONSE', 1_000);
+    return { promoterId, eventId, pay, x };
+  }
+  const refundTo3M = (h: RecalcHarness, w: ReturnType<typeof retryingAtCompletion>) =>
+    h.payments.set(w.eventId, 'TOSS', [fact({ ...w.pay, cancelledAmount: 3_000_000, status: 'PARTIAL_CANCELED', refundedAt: new Date(FRIDAY - 120_000) })]);
+
+  test('J-T23 ② 완료 때 예약 취소가 아직 실패 중인 정산서는 retrying·요청 PENDING으로 남고, 다음 다시 하기에서 취소가 되면 그 자리에서 판 2로 다시 계산되어 DONE이며 환급은 새 판에만 든다', async () => {
+    const h = recalcHarness({ now: CONFIRMED_AT, toss: true });
+    const w = retryingAtCompletion(h);
+    const requestId = randomUUID();
+    await expect(open(h, { requestId, eventId: w.eventId })).resolves.toMatchObject({ retrying: [w.x.s.statementId] });
+    h.at(FRIDAY - 60_000);
+    refundTo3M(h, w);
+    // 대기 중 tick은 그 결제를 건너뛰고 읽은 자리를 지나간다
+    await h.settlements.recordRefundsAfterCalculation();
+    h.at(FRIDAY);
+    const pending = await h.settlements.completeEventRecalculation(requestId, { completedAt: new Date(FRIDAY) });
+    expect(pending).toMatchObject({ state: 'PENDING', retrying: [w.x.s.statementId], recalculated: [] });
+    expect(statusOf(h, w.x.s.statementId)).toBe('SCHEDULED');
+    h.toss!.clearFailures();
+    h.at(FRIDAY + 30 * 60_000);
+    await h.settlements.retryEventRecalculations();
+    const after = h.store.recalculations.get(requestId)!;
+    expect(after.state).toBe('DONE');
+    expect(after.retryStatementIds).toEqual([]);
+    expect(statusOf(h, w.x.s.statementId)).toBe('SUPERSEDED');
+    const fresh = liveStatementsOf(h.store, w.eventId);
+    expect(fresh).toEqual([expect.objectContaining({ revision: 2, supersedesId: w.x.s.statementId, status: 'NOTIFIED', refundAmount: 3_000_000 })]);
+    await h.settlements.recordRefundsAfterCalculation();
+    expect([...h.store.receivables.values()].filter((r) => r.cause === 'REFUND_AFTER_PAYOUT')).toEqual([]);
+  });
+
+  test('J-T23 ② 완료 때 retrying이던 정산서의 조각이 IN_PROGRESS로 바뀌면 다시 하기가 skipped로 옮겨 DONE이고, 대기 중에 지나간 그 정산서 몫 환급은 미수금 한 행이다', async () => {
+    const h = recalcHarness({ now: CONFIRMED_AT, toss: true });
+    const w = retryingAtCompletion(h);
+    const requestId = randomUUID();
+    await open(h, { requestId, eventId: w.eventId });
+    h.at(FRIDAY - 60_000);
+    refundTo3M(h, w);
+    await h.settlements.recordRefundsAfterCalculation();
+    h.at(FRIDAY);
+    await expect(h.settlements.completeEventRecalculation(requestId, { completedAt: new Date(FRIDAY) })).resolves.toMatchObject({ state: 'PENDING', retrying: [w.x.s.statementId] });
+    // 그사이 결제사가 그 조각을 처리하기 시작했다
+    h.store.payouts.set(w.x.pieces[0]!.payoutId, { ...h.store.payouts.get(w.x.pieces[0]!.payoutId)!, status: 'IN_PROGRESS' });
+    h.at(FRIDAY + 30 * 60_000);
+    await h.settlements.retryEventRecalculations();
+    const after = h.store.recalculations.get(requestId)!;
+    expect(after).toMatchObject({ state: 'DONE', retryStatementIds: [], skippedStatementIds: [w.x.s.statementId] });
+    expect(liveStatementsOf(h.store, w.eventId).map((s) => [s.statementId, s.revision, s.status])).toEqual([[w.x.s.statementId, 1, 'SCHEDULED']]);
+    h.at(FRIDAY + 60 * 60_000);
+    await h.settlements.recordRefundsAfterCalculation();
+    // 300만 원 환급(850bp): 255,000·25,500 → 2,719,500원. 새 판에도 미수금에도 빠지지 않고 정확히 한 곳
+    expect([...h.store.receivables.values()].filter((r) => r.cause === 'REFUND_AFTER_PAYOUT')).toEqual([
+      expect.objectContaining({ statementId: w.x.s.statementId, refundAmount: 3_000_000, commissionShare: 255_000, commissionVatShare: 25_500, amount: 2_719_500, sourceRef: `refund:${w.x.s.statementId}:${w.pay.paymentId}:3000000` }),
+    ]);
+  });
+
   test('J-T23 ② 토스 예약 취소 5xx도 retrying이고, 정산 일꾼의 30분 tick이 다시 한다', async () => {
     const h = recalcHarness({ now: CONFIRMED_AT, toss: true });
     const promoterId = randomUUID();
@@ -705,8 +904,8 @@ describe('J-T23 ① 내부 HTTP 두 경로', () => {
     }
   });
 
-  // F-24: 내부 토큰 없음·틀림은 거절이고 아무것도 쓰지 않는다. 정본·계획은 401이라 적었고 플랫폼 InternalTokenGuard는 403을 낸다(계획 §7 '인터페이스 빈칸')
-  test('J-T23 ① 내부 토큰 없음·틀림이면 두 경로 모두 거절(401·403)이고 다시 계산 행·정산서가 생기지 않는다', async () => {
+  // F-24: 내부 토큰 없음·틀림은 401(정본 ADR-0380 결정 2, guidelines §8.1, 감독 결정 U-R2, 시험 리뷰 TR-13)이고 아무것도 쓰지 않는다
+  test('J-T23 ① 내부 토큰 없음·틀림이면 두 경로 모두 401이고 다시 계산 행·정산서가 생기지 않는다', async () => {
     const { svc, store } = await http();
     try {
       const requestId = randomUUID();
@@ -714,9 +913,9 @@ describe('J-T23 ① 내부 HTTP 두 경로', () => {
       const body = JSON.stringify({ eventId: randomUUID(), kind: 'CANCEL', confirmedAt: new Date(CONFIRMED_AT).toISOString() });
       for (const headers of [{ 'content-type': 'application/json' }, { 'content-type': 'application/json', 'x-peaket-internal-token': 'wrong' }]) {
         const put = await svc.http.inject({ method: 'PUT', url, headers, payload: body });
-        expect([401, 403]).toContain(put.statusCode);
+        expect(put.statusCode).toBe(401);
         const post = await svc.http.inject({ method: 'POST', url: `${url}/completion`, headers, payload: JSON.stringify({ completedAt: new Date(FRIDAY).toISOString() }) });
-        expect([401, 403]).toContain(post.statusCode);
+        expect(post.statusCode).toBe(401);
       }
       expect(store.recalculations.size).toBe(0);
       expect(store.statements.size).toBe(0);

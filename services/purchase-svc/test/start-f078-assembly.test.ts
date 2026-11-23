@@ -26,6 +26,15 @@ test('J-T23 ① relay-app.ts·start.ts는 정산 다시 계산 알리기 어댑�
   }
 });
 
-test('R-T47 ③ relay-app.ts는 일괄 환불 실행기 틱에 배상 송금 결과 확정을 잇는다', () => {
-  expect(source('relay-app.ts')).toContain('new RefreshCompensationTransfers(');
+test('R-T47 ③ relay-app.ts는 배상 송금 결과 확정을 만들어 일괄 환불 실행기 의존 compensationRefresh로 넘긴다(만들기만 하고 넘기지 않으면 안 됨, TR-09)', () => {
+  const r = source('relay-app.ts');
+  expect(r).toContain('new RefreshCompensationTransfers(');
+  // 만든 인스턴스를 담은 이름(또는 그 자리의 new 식)이 EventRefundService 의존 compensationRefresh로 들어간다
+  const made = /(?:const|let)\s+(\w+)\s*=\s*new RefreshCompensationTransfers\(/.exec(r);
+  const name = made?.[1];
+  const passed =
+    name === undefined
+      ? /compensationRefresh\s*:\s*new RefreshCompensationTransfers\(/.test(r)
+      : new RegExp(String.raw`compensationRefresh\s*:\s*${name}\b`).test(r) || (name === 'compensationRefresh' && /[{,]\s*compensationRefresh\s*[,}]/.test(r));
+  expect(passed).toBe(true);
 });

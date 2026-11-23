@@ -1,6 +1,8 @@
 // F-07-8 다시 계산 시험의 토스 지급대행 전송 짝 대역. F-07-6 구현의 `TossPayoutTransport`(첫 인자 pgStore, cancelPayout은 { pgPayoutId, status })를 `implements`한다.
-// 이 대역은 F-07-8 시험이 보는 것만 한다: 예약지급 취소(cancelPayout) 호출 기록과 실패 주입(응답 없음 = 연결 끊김, 5xx = TossTransportError 모양의 Error).
+// 이 대역은 F-07-8 시험이 보는 것만 한다: 예약지급 취소(cancelPayout) 호출 기록과 실패 주입. 실패는 진짜 HttpTossPayoutTransport와 같은 오류
+// (응답 없음 TossTransportError('no-response'), 5xx TossTransportError('status-503'))다(시험 리뷰 TR-12).
 // HTTP·JWE 짝 시험(대역 서버)은 F-07-6 시험이 맡는다. F-07-7 시험의 대역(settlement-payout-toss-double.ts)과 파일을 나눠 같은 이름을 쓰지 않는다.
+import { TossTransportError } from '../../src/modules/settlement/adapters/http-toss-payout-transport.js';
 import type { TossPayoutTransport, TossSendResult } from '../../src/modules/settlement/domain/ports.js';
 import type { PayoutStatus, PgStore, TossSellerStatus } from '../../src/modules/settlement/domain/settlement.js';
 
@@ -17,13 +19,16 @@ export class RecalcTossPayout implements TossPayoutTransport {
     this.#failures.set(pgPayoutId, { left: times, kind });
   }
 
+  clearFailures(): void {
+    this.#failures.clear();
+  }
+
   async cancelPayout(pgStore: PgStore, pgPayoutId: string): Promise<{ pgPayoutId: string; status: PayoutStatus }> {
     this.cancels.push({ pgStore, pgPayoutId });
     const f = this.#failures.get(pgPayoutId);
     if (f && f.left > 0) {
       f.left -= 1;
-      if (f.kind === 'NO_RESPONSE') throw Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' });
-      throw Object.assign(new Error('toss 503'), { status: 503 });
+      throw new TossTransportError(f.kind === 'NO_RESPONSE' ? 'no-response' : 'status-503');
     }
     return { pgPayoutId, status: 'CANCELED' };
   }

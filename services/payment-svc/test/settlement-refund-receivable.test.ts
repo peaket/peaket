@@ -7,7 +7,7 @@
 // 기준 트리: refundReceivableOf·recordRefundsAfterCalculation·openEventRecalculation·commissionRateBp 칸이 없어 실패한다(계획 §7).
 import { randomUUID } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
-import { MemorySettlementStore, SettlementProblem } from '../src/modules/settlement/index.js';
+import { MemorySettlementStore, SettlementDueWorker, SettlementProblem, type SettlementDueTimer } from '../src/modules/settlement/index.js';
 import { refundReceivableOf } from '../src/modules/settlement/domain/settlement.js';
 import { approvedTossSeller, DAY, fact, recalcHarness, seedBatch, seedPayout, seedStatement, verifiedKyc, type FactPlus, type RecalcHarness } from './support/recalc-harness.js';
 
@@ -243,14 +243,42 @@ describe('J-T11 계산 뒤 환급의 미수금 만들기(recordRefundsAfterCalcu
     await h.settlements.recordRefundsAfterCalculation().catch(() => undefined);
     expect(store.calls).toBeGreaterThanOrEqual(2);
     expect(h.store.refundScans.get('EVENT_REFUND')).toEqual(scanBefore);
-    const afterFailure = refundReceivables(h.store).length;
-    expect(afterFailure).toBeLessThanOrEqual(1);
+    // 첫 쓰기는 됐고 둘째 쓰기가 실패했다: 정확히 한 행(TR-14 (다))
+    expect(refundReceivables(h.store)).toHaveLength(1);
     store.failAt = 0;
     h.at(NOW + 31 * 60_000);
     await h.settlements.recordRefundsAfterCalculation();
     expect(refundReceivables(h.store).map((r) => r.sourceRef).sort()).toEqual([`refund:${a.statementId}:${a.pay.paymentId}:2500000`, `refund:${b.statementId}:${b.pay.paymentId}:2700000`].sort());
     expect(h.store.refundScans.get('EVENT_REFUND')).toMatchObject({ name: 'EVENT_REFUND' });
-    expect(h.store.refundScans.get('EVENT_REFUND')!.readThrough).toBeInstanceOf(Date);
+    // 성공한 tick 뒤에는 읽은 자리가 두 환급의 끝난 시각을 지났다(옮겼다)
+    expect(h.store.refundScans.get('EVENT_REFUND')!.readThrough.getTime()).toBeGreaterThanOrEqual(NOW + 30_000);
+  });
+});
+
+// TR-04: 정산 일꾼 30분 tick이 계산 뒤 환급 미수금 만들기를 실제로 부른다(판정 함수만 보지 않고 부르는 쪽 바깥 경계에서 본다)
+describe('J-T11 정산 일꾼 30분 tick(SettlementDueWorker)', () => {
+  test('J-T11 ② 정산 일꾼이 30분 간격으로 돌고, 그 tick(false) 하나가 계산 뒤 환급 미수금 한 행을 만든다', async () => {
+    const h = recalcHarness({ now: NOW });
+    const { pay, eventId, statementId } = await paidJT1(h);
+    const intervals: { fn: () => void; ms: number }[] = [];
+    const timer: SettlementDueTimer = {
+      setInterval: (fn, ms) => {
+        intervals.push({ fn, ms });
+        return intervals.length;
+      },
+      clearInterval: () => undefined,
+    };
+    const worker = new SettlementDueWorker({ settlements: h.settlements, leader: { isLeader: () => true }, clock: h.clock, timer });
+    worker.start();
+    expect(intervals.map((i) => i.ms)).toEqual([30 * 60_000]);
+    // 회차 계산(06시)과 겹치지 않는 평일 10:30 KST tick
+    h.at(NOW + 30 * 60_000);
+    refundTo(h, eventId, pay, 2_500_000, NOW + 10 * 60_000);
+    await worker.tick(false);
+    expect(refundReceivables(h.store)).toEqual([expect.objectContaining({ statementId, refundAmount: 500_000, amount: 445_000, sourceRef: `refund:${statementId}:${pay.paymentId}:2500000` })]);
+    await worker.tick(false);
+    expect(refundReceivables(h.store)).toHaveLength(1);
+    await worker.stop();
   });
 });
 

@@ -11,6 +11,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import { migratePurchase } from '../scripts/migrate.mjs';
 import { compensationCaseEventKey, DrizzleCompensations, RequestCompensationAccount } from '../src/modules/refund/index.js';
 import { RefreshCompensationTransfers } from '../src/modules/refund/application/refresh-compensation-transfers.js';
+import { CompensationNotAccountPending } from '../src/modules/refund/domain/compensation.js';
 import type { CompensationCaseNotice } from '../src/modules/refund/domain/ports.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
@@ -27,7 +28,7 @@ class TransferDouble implements TransferPort {
   readonly gets: string[] = [];
   readonly requests: unknown[] = [];
   failGet = false;
-  requestAnswer: { status: 'REQUESTED' | 'PAID'; transferId: string; receivableId?: string } = { status: 'REQUESTED', transferId: 'tr-f078-entry' };
+  requestAnswer: { status: 'REQUESTED' | 'PAID' | 'FAILED'; transferId: string; receivableId?: string } = { status: 'REQUESTED', transferId: 'tr-f078-entry' };
   async request(q: Parameters<TransferPort['request']>[0]) {
     this.requests.push(q);
     return { ...this.requestAnswer, accountLast4: q.account.accountNumber.slice(-4) };
@@ -108,8 +109,17 @@ describe('R-T47 ③ 배상 송금 결과 확정(purchase) [실제 PostgreSQL]', 
     await expect(refresher(db1, transfer, cases).run()).resolves.toEqual({ paid: 0, failed: 1, pending: 0 });
     expect(await row(c.id)).toMatchObject({ status: 'FAILED', receivable_id: null });
     expect(cases.opened).toEqual([{ compensationId: c.id, orderId: c.orderId, nowMs: NOW }]);
-    // 같은 배상의 CS 건은 계좌 입력 실패와 같은 사건 키라 ops가 한 건으로 모은다
+    // 같은 배상의 CS 건은 계좌 입력 실패와 같은 사건 키(compensation:{id})라 ops가 한 건으로 모은다(TR-14 (라): 계좌 입력 실패 건의 키와 대조)
+    const entryFailCases = new RecordingCases();
+    const failing = new TransferDouble();
+    failing.requestAnswer = { status: 'FAILED', transferId: 'tr-f078-entry-failed' };
+    const other = await seed({ status: 'ACCOUNT_PENDING' });
+    await new RequestCompensationAccount({ store: new DrizzleCompensations(db1), transfer: failing, notice: entryFailCases, nowMs: () => NOW })
+      .run({ accountId: other.accountId, compensationId: other.id, account: { bankCode: '088', accountNumber: ACCOUNT_NO, holderName: '김배상' }, reauthToken: undefined, idempotencyKey: randomUUID() })
+      .catch(() => undefined);
+    expect(entryFailCases.opened.map((o) => compensationCaseEventKey(o.compensationId))).toEqual([compensationCaseEventKey(other.id)]);
     expect(compensationCaseEventKey(cases.opened[0]!.compensationId)).toBe(compensationCaseEventKey(c.id));
+    expect(compensationCaseEventKey(c.id)).not.toBe(compensationCaseEventKey(other.id));
     await refresher(db1, transfer, cases).run();
     expect(cases.opened).toHaveLength(1);
   });
@@ -161,7 +171,7 @@ describe('R-T47 ③ 배상 송금 결과 확정(purchase) [실제 PostgreSQL]', 
     transfer.results.set('tr-f078-entry', { status: 'PAID', receivableId });
     await expect(refresher(db1, transfer, cases).run()).resolves.toMatchObject({ paid: 1 });
     // 늦게 다시 온 계좌 입력은 ACCOUNT_PENDING이 아니라 409이고 행을 바꾸지 않는다
-    await expect(entry.run({ accountId: c.accountId, compensationId: c.id, account, reauthToken: undefined, idempotencyKey: randomUUID() })).rejects.toThrow();
+    await expect(entry.run({ accountId: c.accountId, compensationId: c.id, account, reauthToken: undefined, idempotencyKey: randomUUID() })).rejects.toBeInstanceOf(CompensationNotAccountPending);
     expect(await row(c.id)).toMatchObject({ status: 'PAID', receivable_id: receivableId, transfer_id: 'tr-f078-entry' });
     const dump = JSON.stringify((await db1.pool.query('select * from compensation')).rows) + JSON.stringify(cases.opened);
     expect(dump).not.toContain(ACCOUNT_NO);
