@@ -70,7 +70,8 @@ test(
       .filter((g) => g.length > 0)
       .sort((a, b) => a.join(',').localeCompare(b.join(',')));
     // 같은 회차·여정(e1/hold) 둘은 한 몸, 다른 회차(e2)는 따로, 회차 라벨 없는 flow 둘은 한 몸
-    expect(groups).toEqual([[A, B], [C], [F1, F2]]);
+    const expected = [[A, B], [C], [F1, F2]].sort((a, b) => a.join(',').localeCompare(b.join(',')));
+    expect(groups).toEqual(expected);
     // 같은 회차·여정의 둘이 서로 다른 몸으로 새지 않는다
     expect(groups.filter((g) => g.includes(A))).toHaveLength(1);
     expect(groups.find((g) => g.includes(A))).toEqual([A, B]);
