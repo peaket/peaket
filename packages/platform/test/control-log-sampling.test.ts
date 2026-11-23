@@ -5,9 +5,26 @@
 // - 시간: 서비스 시계는 fakeClock, 만료를 알리는 다시 맞춤 주기(setInterval)만 가짜 타이머로 돌린다(한 주기를 정확히 돌려 경계 직전·경계를 잰다).
 // - 정본 값: 윈도우는 [오픈 − 10분, 오픈 + 60분)(POL-028, ADR-0334 결정 3), 온세일 비율 oneIn 100, 범위 1~10,000(asyncapi LogSamplingValue).
 //   시작 설정 값(PEAKET_LOG_SAMPLE_ONE_IN)은 기본 10과 다르게 7로 고른다.
-import { afterEach, describe, expect, test, vi } from 'vitest';
+// - 정상 줄 표본(C-T75 ②)은 정한 trace ID로 확정한다. 운영에서 요청의 trace ID는 자동 계측이 세운 서버 span(활성 OTel 맥락)에서 오고,
+//   inject는 node:http를 거치지 않아 그 span이 없다. 그래서 OTel SDK(startTelemetry, 맥락 관리자를 세운다)를 띄우고 요청을 정한 span 맥락 안에서 보낸다.
+import { ROOT_CONTEXT, TraceFlags, context, trace } from '@opentelemetry/api';
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { CONTROL_TOPICS, controlEventCodec, startControlSync, type BroadcastRecord, type BroadcastSource, type ControlSyncOptions } from '../src/index.js';
+import { startTelemetry } from '../src/telemetry.js';
 import { sample, start, type LogLine, type Started } from './fixture.js';
+
+// 내보내기 없이 맥락 관리자만 쓴다(span은 어디에도 보내지 않는다)
+const telemetry = startTelemetry({ serviceName: 'demo-svc', env: 'ci', spanProcessors: [] });
+afterAll(async () => {
+  await telemetry.shutdown();
+});
+
+// 이 일꾼에서 서비스를 처음 띄우는 값(Nest 모듈 구성 등, 한가할 때 약 1초)을 시험 본문 밖에서 한 번 치른다. 그러지 않으면 파일의 첫 시험이
+// 그 값을 떠안아, 붐비는 기계에서 본문 5초 한도를 넘는다(FIX-ct75 실측: 시험 본문의 요청 18건은 약 50ms). 준비 단계만 30초로 둔다
+beforeAll(async () => {
+  const warm = await start({ PEAKET_ENV: 'ci' });
+  await warm.svc.close();
+}, 30_000);
 
 const MIN = 60_000;
 /** 대형 회차 A의 오픈 시각 T(KST 20:00) */
@@ -146,32 +163,78 @@ async function deliverRejected(p: Pod, key: string, body: ReturnType<typeof samp
 
 const requestLines = (p: Pod) => p.s.requests();
 
+// 정상 표본 문턱(docs/observability.md §7 '표본'): T = 2^56 − ⌊2^56 / N⌋, trace ID 끝 56비트 R ≥ T면 남긴다
+const TWO56 = 2n ** 56n;
+const threshold = (oneIn: number) => TWO56 - TWO56 / BigInt(oneIn);
+const T_START = threshold(START_ONE_IN);
+const T_ONSALE = threshold(ONSALE_ONE_IN);
+/** 문턱 경계 양쪽의 R. 1/7로 남기는 R이 1/100로 남기는 R을 모두 품는다(T_START < T_ONSALE) */
+const R = {
+  top: TWO56 - 1n, // 둘 다 남김
+  onsaleEdge: T_ONSALE, // 1/100에서 남기는 가장 작은 R
+  belowOnsale: T_ONSALE - 1n, // 1/100에서 버림, 1/7에서 남김
+  startEdge: T_START, // 1/7에서 남기는 가장 작은 R, 1/100에서 버림
+  belowStart: T_START - 1n, // 둘 다 버림
+  zero: 0n, // 둘 다 버림
+} as const;
+type RName = keyof typeof R;
+const R_NAMES = Object.keys(R) as RName[];
+/** 앞 18자리 head(요청 묶음 구별)와 끝 56비트 R로 만든 trace ID */
+const traceWith = (head: string, r: bigint) => `${head}${r.toString(16).padStart(14, '0')}`;
+const SPAN_ID = 'b7ad6b7169203331';
+
+/**
+ * 정한 trace ID의 span 맥락 안에서 요청한다(표본 표시는 끈다: 남김은 문턱만으로 정해진다).
+ * Fastify inject는 then을 부를 때 요청을 보내는 지연 객체라, 맥락 안에서 await해야 처리기가 그 맥락을 본다
+ */
+const injectAs = (p: Pod, traceId: string, req: { method: string; url: string }) =>
+  context.with(trace.setSpanContext(ROOT_CONTEXT, { traceId, spanId: SPAN_ID, traceFlags: TraceFlags.NONE }), async () => await p.s.inject(req));
+
 describe('C-T75 ② 서비스 파드가 LOG_SAMPLING을 받는다(ADR-0334 결정 2·4)', () => {
   test('C-T75 ② LOG_SAMPLING(PLATFORM, oneIn 100)을 받으면 정상 2xx 줄의 sampleRate가 100이고 4xx·5xx 줄은 모두 sampleRate 1로 남는다', async () => {
+    // 고른 R이 정본 문턱의 경계 양쪽에 있다(1/7 문턱 < 1/100 문턱)
+    expect(T_START < T_ONSALE).toBe(true);
+    expect([R.onsaleEdge >= T_ONSALE, R.belowOnsale >= T_ONSALE, R.belowOnsale >= T_START, R.startEdge >= T_START, R.startEdge >= T_ONSALE, R.belowStart >= T_START]).toEqual([
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+    ]);
+
     const p = await pod(T - 10 * MIN);
     expect(p.oneIn()).toBe(START_ONE_IN);
+    // 시작 설정 값(1/7)일 때 같은 R 묶음: top·onsaleEdge·belowOnsale·startEdge 넷이 sampleRate 7로 남는다
+    const before = 'a7a7a7a7a7a7a7a7a7';
+    for (const n of R_NAMES) await injectAs(p, traceWith(before, R[n]), { method: 'GET', url: '/v1/demo/items/a1' });
+    expect(requestLines(p).map((l) => [l.status, l.traceId, l.sampleRate])).toEqual(
+      (['top', 'onsaleEdge', 'belowOnsale', 'startEdge'] as const).map((n) => [200, traceWith(before, R[n]), START_ONE_IN]),
+    );
+
     await deliver(p, ALL, sampling({ occurredAt: T - 10 * MIN, expiresAt: T + 60 * MIN }), T - 10 * MIN);
     expect(p.oneIn()).toBe(ONSALE_ONE_IN);
+    const seen = requestLines(p).length;
 
-    // 정상 줄은 trace ID 끝 56비트 문턱으로 고른다(SDK 없이 trace ID는 무작위). 2,000건이면 한 건도 남지 않을 확률이 0.99^2000 ≈ 2e-9다
-    for (let i = 0; i < 2_000; i += 1) await p.s.inject({ method: 'GET', url: '/v1/demo/items/a1' });
-    for (let i = 0; i < 3; i += 1) {
-      await p.s.inject({ method: 'POST', url: '/v1/demo/holds' });
-      await p.s.inject({ method: 'GET', url: '/v1/demo/boom' });
+    // 온세일 1/100: 같은 R 묶음에서 top·onsaleEdge 둘만 sampleRate 100으로 남는다(belowOnsale·startEdge는 이제 버린다)
+    const after = 'b100b100b100b100b1';
+    for (const n of R_NAMES) await injectAs(p, traceWith(after, R[n]), { method: 'GET', url: '/v1/demo/items/a1' });
+    // 4xx·5xx는 표본에서 버릴 trace ID(belowOnsale·zero)여도 모두 sampleRate 1로 남는다
+    const err = 'e000e000e000e000e0';
+    for (const n of ['belowOnsale', 'zero', 'belowOnsale'] as const) {
+      await injectAs(p, traceWith(err, R[n]), { method: 'POST', url: '/v1/demo/holds' });
+      await injectAs(p, traceWith(err, R[n]), { method: 'GET', url: '/v1/demo/boom' });
     }
-    const lines = requestLines(p);
-    const ok = lines.filter((l) => l.status === 200);
-    expect(ok.length).toBeGreaterThan(0);
-    expect(ok.length).toBeLessThan(2_000);
-    expect(new Set(ok.map((l) => l.sampleRate))).toEqual(new Set([ONSALE_ONE_IN]));
-    expect(lines.filter((l) => l.status !== 200).map((l) => [l.status, l.sampleRate])).toEqual([
-      [409, 1],
-      [500, 1],
-      [409, 1],
-      [500, 1],
-      [409, 1],
-      [500, 1],
-    ]);
+    const lines = requestLines(p).slice(seen);
+    expect(lines.filter((l) => l.status === 200).map((l) => [l.traceId, l.sampleRate])).toEqual(
+      (['top', 'onsaleEdge'] as const).map((n) => [traceWith(after, R[n]), ONSALE_ONE_IN]),
+    );
+    expect(lines.filter((l) => l.status !== 200).map((l) => [l.status, l.traceId, l.sampleRate])).toEqual(
+      (['belowOnsale', 'zero', 'belowOnsale'] as const).flatMap((n) => [
+        [409, traceWith(err, R[n]), 1],
+        [500, traceWith(err, R[n]), 1],
+      ]),
+    );
     // 비율이 바뀐 때 정보 줄 하나(docs/observability.md §7 '표본' 받는 쪽 세부)
     expect(p.controlLines().map((l) => [l.level, l.msg, l.oneIn, l.key, l.expiresAt])).toEqual([['info', 'LOG_SAMPLING 적용', ONSALE_ONE_IN, ALL, iso(T + 60 * MIN)]]);
   });
