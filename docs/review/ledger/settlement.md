@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 77 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 19 | 104 |
+| A | 103 | 5 | 0 | 0 | 0 | 0 | 0 | 0 | 12 | 120 |
 | B | 70 | 48 | 0 | 0 | 0 | 0 | 0 | 23 | 12 | 153 |
-| 합계 | 147 | 56 | 0 | 0 | 0 | 0 | 0 | 23 | 31 | 257 |
+| 합계 | 173 | 53 | 0 | 0 | 0 | 0 | 0 | 23 | 24 | 273 |
 
 ## docs/features/settlement.md
 
@@ -15,10 +15,10 @@
 | J-T1 | — | 정산서 계산 | 판매 3,000만 원, 환급 200만 원, 수수료율 10%에서 수수료 280만 원, 부가세 28만 원, 지급액 2,492만 원이 나온다. 지급 건 합계 =… | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement.int.test.ts, services/payment-svc/test/settlement-notify-dispute.test.ts 외… |
 | J-T2 | — | 이의 기간 | 2영업일 안에 이의를 내면 DISPUTED가 되고, 그 정산서만 묶음에서 빠진다. 같은 파트너의 다른 정산서는 지급된다 | 자동 시험 | A | 시험: services/payment-svc/test/settlement-notify-dispute.test.ts |
 | J-T3 | — | 지급 묶음 2인 승인 | 요청자와 같은 사람이 승인하면 403이다. 승인 전에는 결제사에 요청이 나가지 않는다. 합계가 25억 원인 묶음(`int` 상한 약 21억 4,748만 원을… | 자동 시험 | A | 시험: services/ops-svc/test/payout-approval.test.ts |
-| J-T4 | — | 토스페이먼츠 분할 | 25억 원 정산서는 10억 원 미만 3건으로 나눈다. 요청당 20건을 넘으면 요청을 나눈다 | 빈칸 | A | — |
-| J-T5 | — | 멱등 | 같은 지급 건을 다시 보내도 중복 지급이 없다. 오류 응답 뒤 자동 재시도가 멱등키를 바꾸지 않는다(시뮬레이터). 지급 API가 응답하지 않게 하면(시간 초과)… | 빈칸 | A | — |
-| J-T6 | — | 지급 웹훅 서명 | 서명 불일치는 버리고 보안 이벤트로 남긴다. 키 교체 중에는 서명 4개 중 하나가 맞으면 받는다. 받은 뒤에도 단건 조회로 확정한다 | 자동 시험 | A | 시험: services/payment-svc/test/payout-adapters.test.ts |
-| J-T7 | — | KYC 보류 | 시뮬레이터 셀러가 KYC_REQUIRED면 토스페이먼츠 결제분만 HELD가 되고 CS 처리함 건이 생긴다. APPROVED 웹훅 뒤 다시 요청한다. 연결:… | 빈칸 | A | — |
+| J-T4 | — | 토스페이먼츠 분할 | 25억 원 정산서는 10억 원 미만 3건으로 나눈다. 요청당 20건을 넘으면 요청을 나눈다 | 자동 시험 | A | 시험: services/payment-svc/test/settlement-toss-payout.test.ts |
+| J-T5 | — | 멱등 | 같은 지급 건을 다시 보내도 중복 지급이 없다. 오류 응답 뒤 자동 재시도가 멱등키를 바꾸지 않는다(시뮬레이터). 지급 API가 응답하지 않게 하면(시간 초과)… | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-toss-payout.int.test.ts, services/payment-svc/test/settlement-toss-execute… |
+| J-T6 | — | 지급 웹훅 서명 | 서명 불일치는 버리고 보안 이벤트로 남긴다. 키 교체 중에는 서명 4개 중 하나가 맞으면 받는다. 받은 뒤에도 단건 조회로 확정한다 | 자동 시험 | A | 시험: services/payment-svc/test/payout-adapters.test.ts, services/payment-svc/test/settlement-toss-webhook.test.ts |
+| J-T7 | — | KYC 보류 | 시뮬레이터 셀러가 KYC_REQUIRED면 토스페이먼츠 결제분만 HELD가 되고 CS 처리함 건이 생긴다. APPROVED 웹훅 뒤 다시 요청한다. 연결:… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-payout-failure.test.ts, services/payment-svc/test/settlement-toss-seller.test.t… |
 | J-T8 | — | 정산 계좌 변경 | 예금주가 다르면 거부하고 계좌를 남기지 않는다. 같으면 두 결제사 정보를 수정하고, 등록 이메일·전화로 알리고, 3영업일 지급을 보류한다. 표기 차이(추천 적용… | 빈칸 | A | — |
 | J-T9 | — | 포트원 지급 | 수기 정산건 아이디 중복 생성이 없다. 지급일에 '포트원 일괄 지급 실행' 건이 생기고, 실행을 기록한 뒤 지급 내역 조회로 PAID가 된다 | 자동 시험 | A | 시험: services/ops-svc/test/payout-approval.test.ts |
 | J-T10 | — | 테넌트 격리 | 파트너 A가 B의 정산서 ID로 이의하면 없는 정산서 ID와 같은 404이고, B의 회차 정산서 목록을 부르면 없는 회차와 같은 200 빈 목록이다. 둘 다… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-notify-dispute.test.ts |
@@ -30,15 +30,15 @@
 | J-T13 | ④ | 잔액 부족 `HELD`(2026-11-22, BAT-630) | ④ HELD 정산서는 다음 묶음에 들어가지 않고, 증빙으로 푼 것만 들어간다. | 자동 시험 | A | 시험: services/payment-svc/test/settlement-balance-hold.test.ts |
 | J-T13 | ⑤ | 잔액 부족 `HELD`(2026-11-22, BAT-630) | ⑤ 잔액 원천이 실패하면 503 `pg-balance-unavailable`이고 정산서·묶음을 바꾸지 않는다. 포트원 묶음 확인 요청에 잔액 입력이 없으면… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-balance-hold.test.ts |
 | J-T14 | — | 민감 정보 | 계좌번호, 보안 키, JWE 원문이 로그·응답·분석 이벤트에 없다(정적 검사와 로그 표본 검사) | 빈칸 | A | — |
-| J-T15 | ① | 지급 실패 | ① 계좌 해지 … 은 파트너 계좌 확인 요청이 가고 자동 재요청이 없다. | 빈칸 | A | — |
-| J-T15 | ② | 지급 실패 | ② 원천사 점검 … 는 새 순번(가장 큰 순번 + 1)으로 다음 영업일 예약지급이 자동으로 걸리고, 같은 건을 세 번째로 실패시키면 CS 처리함으로 간다. | 빈칸 | A | — |
-| J-T15 | ③ | 지급 실패 | ③ `KYC_REQUIRED` 실패를 만든다. … 은 그 셀러의 토스페이먼츠 지급이 HELD가 된다. 금액이 같은 재요청은 새 2인 승인 없이 나가고 감사… | 빈칸 | A | — |
-| J-T16 | — | 늦은 지급 웹훅 | 서명은 맞고 `transmission-time`이 10분 전인 `payout.changed`를 보낸다. 이때 본문으로 상태를 바꾸지 않고, '늦은 웹훅' 보안… | 빈칸 | A | — |
+| J-T15 | ① | 지급 실패 | ① 계좌 해지 … 은 파트너 계좌 확인 요청이 가고 자동 재요청이 없다. | 자동 시험 | A | 시험: services/payment-svc/test/settlement-payout-failure.test.ts |
+| J-T15 | ② | 지급 실패 | ② 원천사 점검 … 는 새 순번(가장 큰 순번 + 1)으로 다음 영업일 예약지급이 자동으로 걸리고, 같은 건을 세 번째로 실패시키면 CS 처리함으로 간다. | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-toss-payout.int.test.ts, services/payment-svc/test/settlement-payout-failur… |
+| J-T15 | ③ | 지급 실패 | ③ `KYC_REQUIRED` 실패를 만든다. … 은 그 셀러의 토스페이먼츠 지급이 HELD가 된다. 금액이 같은 재요청은 새 2인 승인 없이 나가고 감사… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-payout-failure.test.ts |
+| J-T16 | — | 늦은 지급 웹훅 | 서명은 맞고 `transmission-time`이 10분 전인 `payout.changed`를 보낸다. 이때 본문으로 상태를 바꾸지 않고, '늦은 웹훅' 보안… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-toss-webhook.test.ts |
 | J-T17 | — | 예금주 조회 URL 가림 | 예금주 조회를 부른 뒤 트레이스·로그·OTel Collector 출력 어디에도 계좌번호가 없고 경로 템플릿만 남는다 | 빈칸 | A | — |
 | J-T18 | — | 상품 정산서 | 에스크로 구매 확정 전 주문, 받은 지 7일이 안 된 택배·현장 수령, 반품 요청 중인 항목은 빠진다. 부가 상품은 연결 회차가 끝난 다음 날 들어간다… | 자동 시험 | A | 시험: apps/partner/src/_pages/product-builder/model/settlement-live.test.mjs, services/core-svc/test/export.test.ts 외 1곳 |
 | J-T19 | ① | KYC 예고(2026-11-22, BAT-630) | ① `PARTIALLY_APPROVED` 셀러의 지급일 앞뒤 6일 토스 지급 합계가 1,000만 원이면 묶음 상세와 SCR-049에 예고가 나온다. | 자동 시험 | A | 시험: services/payment-svc/test/settlement-kyc-notice.test.ts |
 | J-T19 | ② | KYC 예고(2026-11-22, BAT-630) | ② 999만 원이거나 셀러가 `APPROVED`이거나 지급일이 창 밖이면 나오지 않는다. | 자동 시험 | A | 시험: services/payment-svc/test/settlement-kyc-notice.test.ts |
-| J-T19 | ③ | KYC 예고(2026-11-22, BAT-630) | ③ `seller.changed` 웹훅이 `PARTIALLY_APPROVED`·`KYC_REQUIRED`·`APPROVED`를… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-kyc-notice.test.ts |
+| J-T19 | ③ | KYC 예고(2026-11-22, BAT-630) | ③ `seller.changed` 웹훅이 `PARTIALLY_APPROVED`·`KYC_REQUIRED`·`APPROVED`를 그 상점 토스 셀러… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-kyc-notice.test.ts |
 | J-T20 | ① | 포트원 출금 대사(추천 적용 2026-10-28, ADR-0108) | ① 정상 일괄 지급 … 은 `MATCHED`이고 경보가 없다. | ID만 | A | 시험: services/payment-svc/test/payout-adapters.test.ts |
 | J-T20 | ② | 포트원 출금 대사(추천 적용 2026-10-28, ADR-0108) | ② 지급 건과 금액이 다른 출금 … 는 다음 30분 동기화에서 SEV2(보안)와 CS 처리함 건이 하나씩 생기고, 그다음 동기화에서 같은 건이 다시 생기지… | ID만 | A | 시험: services/payment-svc/test/payout-adapters.test.ts |
 | J-T20 | ③ | 포트원 출금 대사(추천 적용 2026-10-28, ADR-0108) | ③ 다른 계좌로 간 지급 … 는 다음 30분 동기화에서 SEV2(보안)와 CS 처리함 건이 하나씩 생기고, 그다음 동기화에서 같은 건이 다시 생기지 않는다. | ID만 | A | 시험: services/payment-svc/test/payout-adapters.test.ts |
@@ -58,9 +58,9 @@
 | J-T23 | ② | 다시 계산과 대사 미완 결제(추천 적용 2026-10-28, 기술 검토… | ② 토스페이먼츠 예약지급이 REQUESTED인 정산서와 IN_PROGRESS인 정산서에서 회차 취소를 확정한다 … REQUESTED는 예약 취소 → HELD →… | 빈칸 | A | — |
 | J-T23 | ③ | 다시 계산과 대사 미완 결제(추천 적용 2026-10-28, 기술 검토… | ③ 대사 불일치 결제 1건이 남은 회차를 계산한 뒤, 지급 전과 지급 뒤에 각각 불일치를 푼다. 결과: … 그 결제만 빠진 정산서와 뺀 목록이 나오고, 풀린 뒤… | 빈칸 | A | — |
 | J-T24 | — | 미수금 이동 기록과 되돌림(추천 적용 2026-10-28, 기술 검토… | 미수금 100만 원을 정산서 A(30만 원)·B(70만 원)에서 나눠 상계하고, B의 지급을 실패시킨 뒤 다시 계산한다. 같은 미수금을 두 정산서가 동시에… | 자동 시험 | A | 시험: services/invariant-checker/test-int/invariants.int.test.ts, services/invariant-checker/test-int/payment-migrated.int… |
-| J-T25 | ① | 지급대행 잔액 대사(추천 적용 2026-10-28, 기술 검토… | ① 승인·취소·수수료·지급이 장부와 맞는 상점 … 은 차이 0이고 건이 없다 | ID만 | A | 시험: services/invariant-checker/test-int/invariants.int.test.ts, services/payment-svc/test/payout-adapters.test.ts |
-| J-T25 | ② | 지급대행 잔액 대사(추천 적용 2026-10-28, 기술 검토… | ② 결제사 쪽 잔액만 3만 원 적은 상점 … CS 처리함 '결제사 잔액 대사 차이' 건과 SEV3가 생기고, 묶음은 멈추지 않는다 | ID만 | A | 시험: services/invariant-checker/test-int/invariants.int.test.ts, services/payment-svc/test/payout-adapters.test.ts |
-| J-T25 | ③ | 지급대행 잔액 대사(추천 적용 2026-10-28, 기술 검토… | ③ 끝수 차이 1원만 나는 상점을 둔 채 지급 묶음을 만들고 월말 대사를 돌린다. 결과: … 건이 생기고 '설명된 차이'로 닫을 수 있다. 정산 불변식… | ID만 | A | 시험: services/invariant-checker/test-int/invariants.int.test.ts, services/payment-svc/test/payout-adapters.test.ts |
+| J-T25 | ① | 지급대행 잔액 대사(추천 적용 2026-10-28, 기술 검토… | ① 승인·취소·수수료·지급이 장부와 맞는 상점 … 은 차이 0이고 건이 없다 | 자동 시험 | A | 시험: services/payment-svc/test/settlement-pg-balance-recon.test.ts |
+| J-T25 | ② | 지급대행 잔액 대사(추천 적용 2026-10-28, 기술 검토… | ② 결제사 쪽 잔액만 3만 원 적은 상점 … CS 처리함 '결제사 잔액 대사 차이' 건과 SEV3가 생기고, 묶음은 멈추지 않는다 | 자동 시험 | A | 시험: services/payment-svc/test/settlement-pg-balance-recon.test.ts |
+| J-T25 | ③ | 지급대행 잔액 대사(추천 적용 2026-10-28, 기술 검토… | ③ 끝수 차이 1원만 나는 상점을 둔 채 지급 묶음을 만들고 월말 대사를 돌린다. 결과: … 건이 생기고 '설명된 차이'로 닫을 수 있다. 정산 불변식… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-pg-balance-recon.test.ts |
 | J-T27 | — | 정산 화면의 역할(소유자 결정 2026-10-30, open-items… | `cs_agent`·`cs_lead`로 정산서 목록·미수금 목록·지급 묶음 경로를 부르면 403이다. CS 처리함 목록에는 정산 건 가운데 '정산 이의'만… | 빈칸 | A | — |
 | J-T28 | — | 배상금 미리 지급의 미수금 생성·상계(추천 적용, 2026-11-20… | `PAID`일 때만 `partner_receivable` 1행(`COMPENSATION_ADVANCE`·`pg NULL`·remaining =… | 자동 시험 | A | 시험: services/payment-svc/test-int/compensation-transfer.int.test.ts, services/payment-svc/test-int/settlement-a1v.int.te… |
 | J-T29 | ① | 계약 조건 변경의 2인 승인(2026-11-20, BAT-615… | ① `POST /v1/ops/promoters`로 상호와 첫 계약(수수료율 875bp·보증 700bp·`PERFORMANCE_BOND`)을 넣으면 201이고… | 자동 시험 | A | 시험: services/core-svc/test/ops-promoter.http.test.ts |
@@ -112,10 +112,26 @@
 | J-T36 | ③ | 정산서 수기 조정의 2인 승인(2026-11-23, F-07-5… | ③ `SCHEDULED`·`PAID`·`FAILED`·`CARRIED_OVER`·`SUPERSEDED`·`HELD` 정산서는 요청도 적용도 409… | 자동 시험 | A | 시험: services/ops-svc/test/settlement-adjustment-approval.test.ts, services/payment-svc/test-int/settlement-flow.int.test… |
 | J-T36 | ④ | 정산서 수기 조정의 2인 승인(2026-11-23, F-07-5… | ④ 요청자 본인·`cs_lead`·재인증 없는 commander의 승인은 403이고, 다른 commander가 `act=APPROVAL` 재인증 뒤 승인해야… | 자동 시험 | A | 시험: services/ops-svc/test-int/settlement-adjustment-approval.int.test.ts… |
 | J-T36 | ⑤ | 정산서 수기 조정의 2인 승인(2026-11-23, F-07-5… | ⑤ 적용하면 한 트랜잭션에 조정 행 `APPLIED`, 정산서 조정 합계·지급액(계산 칸은 그대로), 감사, `STATEMENT_NOTIFIED`가 남는다… | 자동 시험 | A | 시험: services/ops-svc/test/settlement-adjustment-approval.test.ts, services/payment-svc/test-int/settlement-flow.int.test… |
-| J-T36 | ⑥ | 정산서 수기 조정의 2인 승인(2026-11-23, F-07-5… | ⑥ 조정 적용과 지급 묶음 만들기를 같은 `CONFIRMED` 정산서에 겹쳐 부르면 하나만 이긴다. 묶음이 먼저면 정산서가 `SCHEDULED`라 적용은… | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-flow.int.test.ts |
+| J-T36 | ⑥ | 정산서 수기 조정의 2인 승인(2026-11-23, F-07-5… | ⑥ 조정 적용과 지급 묶음 만들기를 같은 `CONFIRMED` 정산서에 겹쳐 부르면 하나만 이긴다. 묶음이 먼저면 정산서가 그 묶음에 붙어… | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-flow.int.test.ts |
 | J-T36 | ⑦ | 정산서 수기 조정의 2인 승인(2026-11-23, F-07-5… | ⑦ J-T12처럼 지급액이 0 아래가 된 정산서는 1영업일 뒤 자동 확정 때 `CARRIED_OVER`·`STATEMENT_CARRIED_OVER`가 되고… | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-flow.int.test.ts, services/payment-svc/test/settlement-adjustment.test.ts |
 | J-T36 | ⑧ | 정산서 수기 조정의 2인 승인(2026-11-23, F-07-5… | ⑧ 조정을 적용한 정산서의 지급액은 계산 때 지급액 + 조정 합계와 같다. 지급을 늘리는 조정(+)은 미수금을 만들지 않는다(리뷰 RV-02). | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-flow.int.test.ts, services/payment-svc/test/settlement-adjustment.test.ts |
 | J-T36 | ⑨ | 정산서 수기 조정의 2인 승인(2026-11-23, F-07-5… | ⑨ payment가 적용을 커밋한 뒤 ops가 응답을 받지 못해 승인 업무가 `FAILED`이면, 그 승인을 반려해도 `REJECTED`가 되지 않고… | 자동 시험 | A | 시험: services/ops-svc/test-int/settlement-adjustment-approval.int.test.ts… |
+| J-T37 | ① | 토스 지급대행 전송과 셀러 등록(2026-11-23, F-07-6… | ① 지급 요청·셀러 등록 본문은 JWE compact(`alg=dir`, `enc=A256GCM`, 사용자 머리 `iat`·`nonce`)이고 그 상점 보안… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-toss-transport.test.ts |
+| J-T37 | ② | 토스 지급대행 전송과 셀러 등록(2026-11-23, F-07-6… | ② 셀러 등록은 일반·에스크로 두 상점에 한 번씩 나가고 상점마다 `toss_seller` 한 행이 남는다. 계좌번호 원문은 DB·로그·응답에 0건이고 응답은… | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-toss-payout.int.test.ts, services/payment-svc/test/settlement-toss-seller.t… |
+| J-T37 | ③ | 토스 지급대행 전송과 셀러 등록(2026-11-23, F-07-6… | ③ 셀러 상태는 단건 조회 결과로만 바뀐다. 웹훅 본문이 `APPROVED`여도 조회가 `KYC_REQUIRED`면 `KYC_REQUIRED`다. | 자동 시험 | A | 시험: services/payment-svc/test/settlement-toss-seller.test.ts |
+| J-T37 | ④ | 토스 지급대행 전송과 셀러 등록(2026-11-23, F-07-6… | ④ 토스 정산서는 그 상점 셀러가 없거나 `APPROVAL_REQUIRED`·`PENDING`·`REJECTED`·`KYC_REQUIRED`면 지급 묶음에서… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-toss-execute.test.ts, services/payment-svc/test/settlement-toss-seller.test.ts |
+| J-T37 | ⑤ | 토스 지급대행 전송과 셀러 등록(2026-11-23, F-07-6… | ⑤ 한 상점의 시크릿 키나 보안 키 하나만 있거나 보안 키가 64자 hex가 아니면 시작하지 않는다. 두 상점 모두 설정이 없으면 지급 실행·셀러 등록은 503… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-toss-assembly.test.ts |
+| J-T37 | ⑥ | 토스 지급대행 전송과 셀러 등록(2026-11-23, F-07-6… | ⑥ 설정이 있으면 `start.ts` 조립이 실제 전송·지급 어댑터·잔액 원천·웹훅 수신기를 쓴다(시험 조립과 따로 띄워 본다). | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-toss-start.int.test.ts, services/payment-svc/test/settlement-toss-assembly… |
+| J-T37 | ⑦ | 토스 지급대행 전송과 셀러 등록(2026-11-23, F-07-6… | ⑦ 공개 안내 모양으로 만든 대역 서버에 대해 경로, Basic 인증, `Idempotency-Key`, `Content-Type: text/plain`… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-toss-transport.test.ts |
+| J-T38 | ① | 토스 지급 묶음 자동 만들기, 실행 결과와 지급… | ① 실행이 접수되면 지급 건마다 결제사 지급 ID가 저장되고, 조각이 모두 접수된 정산서만 `SCHEDULED`와 `PAYOUT_SCHEDULED`(금액 =… | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-toss-payout.int.test.ts, services/payment-svc/test/settlement-toss-execute… |
+| J-T38 | ② | 토스 지급 묶음 자동 만들기, 실행 결과와 지급… | ② 25억 원 정산서의 조각 3건 가운데 2건만 `COMPLETED`면 정산서는 `SCHEDULED` 그대로이고, 3건이 모두 끝나면 `PAID`와… | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-toss-payout.int.test.ts, services/payment-svc/test/settlement-toss-execute… |
+| J-T38 | ③ | 토스 지급 묶음 자동 만들기, 실행 결과와 지급… | ③ 오류 응답이면 CS 처리함 `PAYOUT_ERROR` 한 건이 생기고 묶음은 `APPROVED`이며, 같은 묶음을 다시 실행하면 같은 키다. 예약 날짜… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-toss-execute.test.ts |
+| J-T38 | ④ | 토스 지급 묶음 자동 만들기, 실행 결과와 지급… | ④ 요청 직전에 지급 가능 잔액에서 이 묶음 밖의 끝나지 않은 토스 예약지급 합을 뺀 값이 보낼 금액보다 1원 적으면 보내지 않고 `PAYOUT_DELAYED`… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-toss-execute.test.ts |
+| J-T38 | ⑤ | 토스 지급 묶음 자동 만들기, 실행 결과와 지급… | ⑤ 묶음 때 보류된 정산서마다 `PAYOUT_HELD`, 상계로 남은 금액이 0이 된 미수금마다 `RECEIVABLE_CLOSED`가 그 트랜잭션에 남는다. | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-toss-payout.int.test.ts, services/payment-svc/test/settlement-toss-execute… |
+| J-T38 | ⑥ | 토스 지급 묶음 자동 만들기, 실행 결과와 지급… | ⑥ CS 건 요청은 원인이 된 쓰기와 같은 트랜잭션의 `settlement_case_request`에 남는다. ops-svc가 503이어도 다음 30분 점검이… | 자동 시험 | A | 시험: services/ops-svc/test/cases.test.ts, services/ops-svc/test/cs-case-payout-kinds.test.ts 외 2곳 |
+| J-T38 | ⑦ | 토스 지급 묶음 자동 만들기, 실행 결과와 지급… | ⑦ `settlement_payout_failed_total{pg,reason}`·`settlement_webhook_signature_invalid_total`… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-toss-execute.test.ts |
+| J-T38 | ⑧ | 토스 지급 묶음 자동 만들기, 실행 결과와 지급… | ⑧ 지급일 다음 영업일 12:00 KST가 되도록 끝나지 않은 토스 지급 건은 단건 조회로 확인해 반영하고(11:59:59.999에는 조회하지 않는다), 조회… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-toss-execute.test.ts |
+| J-T38 | ⑨ | 토스 지급 묶음 자동 만들기, 실행 결과와 지급… | ⑨ 지급일 전 영업일 09:00 KST에 정산 일꾼이 다음 은행 영업일 지급분 토스 확정 정산서를 결제 상점마다 `PREPARED` 묶음 하나로… | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-toss-payout.int.test.ts, services/payment-svc/test/settlement-toss-execute… |
 
 ## docs/security/asvs/settlement.md
 
@@ -156,8 +172,8 @@
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/core-svc/test-int/catalog.int.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 27곳 |
 | v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/core-svc/test/shop-order.http.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts 외 5곳 |
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts, services/payment-svc/test-int/payment-entry-pause-judg… |
-| v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 29곳 |
-| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 29곳 |
+| v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 30곳 |
+| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 31곳 |
 | v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | 자동 시험 | B | 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/review.http.test.ts 외 14곳 |
 | v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/ops-svc/test/bot-review-http.test.ts |
 | v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/console-host/src/pages/bot-review/ui/wiring.test.mjs, apps/console-host/src/pages/cancellation/model/live.test… |
@@ -197,13 +213,13 @@
 | v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/export-audit.int.test.ts, services/core-svc/test-int/idempotency-migration.int.test.ts 외… |
 | v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | ID만 | B | 다른 곳 시험: services/ticket-svc/test-int/transfer.int.test.ts (영역: services/core-svc, services/ops-svc… |
 | v5.0.0-11.1.2 | — | L2 | 애플리케이션이 쓰는 모든 암호 키·알고리즘·인증서의 암호 목록을 만들어 정기적으로 갱신하고, 키마다 쓸 수 있는 곳과 없는 곳, 보호할 수 있는 데이터와 없는… | 빈칸 | B | 영역: services/core-svc, services/ops-svc, services/payment-svc |
-| v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | 자동 시험 | B | 시험: services/payment-svc/test/payment-method-ref.test.ts |
+| v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | 자동 시험 | B | 시험: services/payment-svc/test/payment-method-ref.test.ts, services/payment-svc/test/settlement-toss-transport.test.ts |
 | v5.0.0-11.2.2 | — | L2 | 난수·인증 암호화·MAC·해시 알고리즘, 키 길이, 라운드, 암호와 운용 모드를 언제든 바꿀 수 있고 키·비밀번호 교체와 데이터 재암호화도 할 수 있게… | 자동 시험 | B | 시험: services/ops-svc/test/audit-mac.test.ts |
 | v5.0.0-11.2.3 | — | L2 | 모든 암호 기본 요소가 최소 128비트 보안 강도를 갖는다. | 자동 시험 | B | 시험: services/ops-svc/test/audit-checkpoint-bytes.test.ts, services/payment-svc/test/portone-gateway.test.ts |
-| v5.0.0-11.3.1 | — | L1 | ECB 같은 안전하지 않은 블록 모드와 PKCS#1 v1.5 같은 약한 패딩을 쓰지 않는다. | 자동 시험 | B | 시험: services/payment-svc/test/virtual-account-deposit.test.ts |
+| v5.0.0-11.3.1 | — | L1 | ECB 같은 안전하지 않은 블록 모드와 PKCS#1 v1.5 같은 약한 패딩을 쓰지 않는다. | 자동 시험 | B | 시험: services/payment-svc/test/settlement-toss-transport.test.ts, services/payment-svc/test/virtual-account-deposit.test… |
 | v5.0.0-11.3.2 | — | L1 | AES-GCM처럼 승인된 암호와 운용 모드만 쓴다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-deposit.int.test.ts, services/payment-svc/test/virtual-account-deposit.test.ts |
 | v5.0.0-11.3.3 | — | L2 | 암호화한 데이터를 인증 암호화(또는 승인된 암호와 MAC의 조합)로 무단 변경에서 보호한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts, services/payment-svc/test-int/payment-deposit.int.test.ts 외… |
-| v5.0.0-11.4.1 | — | L1 | 서명·HMAC·KDF·난수 생성 등 일반 암호 용도에는 승인된 해시 함수만 쓰고 MD5 같은 금지 함수는 쓰지 않는다. | 자동 시험 | B | 시험: services/ops-svc/test/audit-mac.test.ts |
+| v5.0.0-11.4.1 | — | L1 | 서명·HMAC·KDF·난수 생성 등 일반 암호 용도에는 승인된 해시 함수만 쓰고 MD5 같은 금지 함수는 쓰지 않는다. | 자동 시험 | B | 시험: services/ops-svc/test/audit-mac.test.ts, services/payment-svc/test/payout-adapters.test.ts 외 1곳 |
 | v5.0.0-11.4.2 | — | L2 | 비밀번호는 현재 권고 파라미터를 적용한 승인된 비밀번호 해시 함수로 저장한다. | 해당 없음 | B | 해당 없음(이 기능은 비밀번호를 저장하지 않는다. 관리자 비밀번호는 계정·인증 추적 표에서 다룬다) |
 | v5.0.0-11.4.3 | — | L2 | 서명·데이터 인증·무결성에 쓰는 해시는 충돌 저항성과 알맞은 출력 길이를 갖추고, 출력은 충돌 저항이 필요하면 256비트 이상, 제2 역상 저항만 필요하면… | 자동 시험 | B | 시험: services/ops-svc/test/audit-checkpoint-bytes.test.ts |
 | v5.0.0-11.4.4 | — | L2 | 비밀번호에서 비밀 키를 만들 때 키 스트레칭 파라미터가 있는 승인된 KDF를 쓰고, 그 파라미터는 무차별 대입으로 키가 뚫리지 않게 보안과 성능을 맞춰 정한다. | 해당 없음 | B | 해당 없음(비밀번호에서 키를 파생하지 않는다. 보안 키는 결제사가 발급한 무작위 키다) |
@@ -267,7 +283,7 @@
 | v5.0.0-16.4.2 | — | L2 | 로그를 권한 없는 접근과 수정에서 보호한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts |
 | v5.0.0-16.4.3 | — | L2 | 로그를 분석·탐지·경보용으로 논리적으로 분리된 시스템에 안전하게 보낸다. | 빈칸 | B | 영역: services/core-svc, services/ops-svc, services/payment-svc |
 | v5.0.0-16.5.1 | — | L2 | 예상하지 못한 오류나 보안상 민감한 오류에는 일반 메시지를 돌려주고 내부 정보를 드러내지 않는다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/limits-errors.test.mjs, packages/platform/test/problem.test.ts 외 2곳 (영역:… |
-| v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: services/core-svc/test/search.http.test.ts, services/ops-svc/test-int/f022-pg-switch-e2e.int.test.ts 외 28곳 |
+| v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: services/core-svc/test/search.http.test.ts, services/ops-svc/test-int/f022-pg-switch-e2e.int.test.ts 외 30곳 |
 | v5.0.0-16.5.3 | — | L2 | 예외가 나도 안전하게 실패하고, 검증 오류가 있는데도 거래를 처리하는 fail-open을 막는다. | ID만 | B | 다른 곳 시험: packages/platform/test/circuit-breaker.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 71곳… |
 | v5.0.0-2.3.5 | — | L3 | 고가치 업무 흐름에는 여러 사람의 승인을 요구한다. | 자동 시험 | B | 시험: services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-11.2.4 | — | L3 | 모든 암호 연산을 상수 시간으로 하고 비교·계산·반환에서 조기 종료하지 않아 정보가 새지 않게 한다. | 자동 시험 | B | 시험: services/core-svc/test/internal-sale-config-token-boot.test.ts |

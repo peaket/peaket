@@ -51,3 +51,12 @@
 - purchase·ticket 원본 표도 서비스 마이그레이션을 적용한 DB로 시험하는 일(지금은 손으로 만든 표).
 - CLAUDE.md 상대 경로 가져오기 목록: invariant-checker 통합 시험이 `services/payment-svc/scripts/migrate.mjs`를 읽는다(소유자 몫).
 - 흔들림 후보: payment `payment-confirm-runner.int.test.ts` P-T40 리뷰 고침 H1(부하 중 `payment_event` Seq Scan), 단위 `drizzle-payment-store` P-T54 M4(249ms < 250ms 시간 단언), `payment-checkout.int.test.ts` P-T26(전체 실행 때 한 번).
+
+## F-07-6(2026-11-23, R-796)
+
+- 시험 리뷰 TR-18(낮음): 늦게 도착한 옛 셀러 사실(`checkedAt`이 더 이른 것)을 쓰지 않는 차례 규칙이 정본에 없다.
+- 시험 리뷰 남은 것 2: 잔액 대사의 수수료 조회가 앞 대사 날짜부터 양끝을 포함해, 그날 날짜의 정산 행을 두 번 셀 수 있다(C-03 [가정]).
+- 시험 리뷰 TR-14 일부: 토스 전송 시간 한도 시험 없음.
+- E-02 [가정]으로 남은 셋: `iat` 꼴 다른 꼴 허용 여부, 공개 셀러 상태 넷과 PEAKET `PENDING`·`REJECTED`, HMAC 키 인코딩(문서에 없음).
+- 흔들림 후보(부하 중 단위·통합 시간 초과, 단독 통과): payment `settlement-business-calendar`·`settlement-notify-dispute`·`settlement-toss-seller`·`tenant-rate-limit-wiring`·`payment-checkout` P-T26·`payment-sub-provider` P-T46 ④·`payment-entry-pause-judge` P-T43·`payment-grpc` P-T53, ops `cs-inbox-screen-link` R-T51 ①·J-T35 ⑦.
+- 작업 폴더의 `apps/web/.next/types` 옛 빌드 산출물이 typecheck를 한 번 깨뜨렸다(gitignore된 것, 지우면 통과).
