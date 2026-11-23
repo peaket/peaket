@@ -92,7 +92,7 @@ export class ScannerGateController {
       // 기기 인증만으로 올라온 묶음은 본문의 회차를 쓴다(로그아웃·해제·만료 뒤 남은 기록, O-T21·O-T26).
       // 스태프 토큰이 있으면 그 세션의 회차와 대조한다.
       const bodyEventId = Array.isArray(body) ? (body[0] as { eventId?: unknown } | undefined)?.eventId : undefined;
-      return await this.gate.scans({
+      const result = await this.gate.scans({
         eventIdRaw: me.eventId ?? bodyEventId,
         sessionEventId: me.eventId,
         deviceId: me.deviceId ?? '',
@@ -103,6 +103,9 @@ export class ScannerGateController {
         ...(me.staffValidUntilMs !== undefined ? { sessionValidUntilMs: me.staffValidUntilMs } : {}),
         body,
       });
+      // duplicateIds는 지표용 내부 값이라 응답 계약(openapi)에 싣지 않는다
+      const { duplicateIds: _duplicateIds, ...view } = result;
+      return view;
     } catch (e) {
       reject(e);
     }
