@@ -1,6 +1,6 @@
 # 기능 계획: FIX-wallet-tickets(발권 → 월렛 이음매 — 월렛 목록 HTTP 조회와 월렛 실제 데이터, 데모 S1)
 
-- **진행**: 계획 끝(2026-11-23). 시험 씀·실패 확인(2026-11-23, 10절). 시험 리뷰 끝(2026-11-23, 15절 TR-01~08). 지적 반영·반영 확인 끝, 시험 고정(0fe1d5445). 다음은 구현.
+- **진행**: 계획 끝(2026-11-23). 시험 씀·실패 확인(2026-11-23, 10절). 시험 리뷰 끝(2026-11-23, 15절 TR-01~08). 지적 반영·반영 확인 끝, 시험 고정(0fe1d5445). 구현 끝(2026-11-23, '구현 메모', 시험 이의 TO-1·TO-2). 다음은 게이트·기록.
 - **무엇**: 감독 결정 2026-11-23(7일 완성 ADR-0373 결정 1 ①, 시험 먼저 ADR-0372)으로 갈래 4가 맡은 새 일 FIX-wallet-tickets의 작업 목록이다. BUILD_ORDER '기능 단위 계획' 표에 이 ID의 행은 없다(2절 1의 문안을 감독이 coord에 적는다). 검토 기록이고 규범이 아니다. 정본과 다르면 정본이 이긴다.
 - **쉬운 말**: 결제가 끝나면 티켓이 발권되지만, 팬이 '마이 티켓'(월렛)을 열어도 그 티켓을 볼 수 없었다. 월렛이 부르는 목록 주소(`GET /v1/tickets`)는 계약과 게이트웨이에는 있는데, 받아 줄 서버 처리기가 없었기 때문이다. 이 일은 ticket-svc에 그 처리기를 더하고, 월렛 화면이 가짜 그림 대신 그 목록으로 티켓과 회전 QR(15초마다 바뀌는 입장 QR)을 그리게 하고, 시연 시나리오 S1이 DB를 직접 읽는 대신 그 주소와 실제 QR로 '발권 → 월렛'을 확인하게 바꾼다.
 - **바탕**: `D:/ticketpass-lane4-wallet`, 가지 `feature/lane4-FIX-wallet-tickets`, 기준 `origin/develop` `1f3fa58d2`. 계획 담당은 제품·시험 코드를 쓰지 않았고 시험·Docker를 돌리지 않았다. 읽은 조사: 감독이 준 `fan-flow-survey.md` 2절 ①.
@@ -316,7 +316,50 @@
 
 ## 시험 결과
 
-(시험 담당·구현 담당이 채운다)
+구현 담당 fwal-impl-3d8b, 2026-11-23, 트리 `7ea408310`(구현 커밋 넷 뒤). 고정 시험 파일은 고치지 않았다.
+
+| 시험 | 명령(저장소 뿌리 기준) | 결과 |
+| --- | --- | --- |
+| ticket-svc 단위 `test/wallet-tickets-http.test.ts` | `cd services/ticket-svc && npx vitest run test/wallet-tickets-http.test.ts` | 19/19 통과(서비스 전체 35파일 259/259) |
+| ticket-svc 통합 `test-int/wallet-tickets.int.test.ts` | Docker 잠금 `lane4-wallet-impl` 뒤 `npx vitest run --config vitest.integration.config.mjs test-int/wallet-tickets.int.test.ts` | 8/8 통과(25.7초). 시험이 띄운 PostgreSQL은 시험이 지웠고 남은 컨테이너 없음, 잠금 놓음 |
+| ticket-svc 타입 | `npx tsc --noEmit`(contracts·platform·search-normalize 빌드 뒤) | 오류 0 |
+| web `wallet-sync/sync.test.mjs`·`model.test.mjs` | `cd apps/web && node --test src/features/wallet-sync/*.test.mjs` | 19/19 + 4/4 통과 |
+| web `wallet-first-screen.test.mjs`(T6 ①~⑦) | 같은 폴더 | 6/6 통과. web 전체 `pnpm test` 1126/1126 |
+| web 타입·빌드 | `npx tsc --noEmit`, `pnpm --filter @peaket/web build` | 오류 0, 빌드 통과(`/my/tickets` 정적 ○) |
+| 메시 | `node --test deploy/platform/mesh/test/mesh-policies.test.mjs`, `node tools/ci/mesh-policies.mjs --check` | 24/24 통과, 생성물 같음 |
+| 데모 정적 | `node --test tools/local/demo.test.mjs`(FWAL-DEMO ①② 포함), `node tools/local/demo.mjs plan --check` | 33/33 통과, plan 통과. `tools/local/*.test.mjs` 전체는 267 중 2 실패(DS-05/06: 이 작업 폴더에 identity-svc `dist`가 없어 `seed-demo.mjs`가 못 읽음, 이 일과 무관) |
+| 화면 spec `tools/web-checks/reflow/wallet-live.spec.mjs` | 그 폴더 `pnpm install --frozen-lockfile` 뒤 운영 빌드 web 서버(4101)·가짜 API(4010)를 밖에서 띄우고 `PEAKET_WEB_CHECKS_SERVERS=external npx playwright test -c playwright.reflow.config.mjs reflow/wallet-live.spec.mjs --project=chromium-default` | 8 중 6 통과, 2 실패(아래 '시험 이의' TO-1·TO-2, 구현 결함 아님). WebKit·Firefox 프로젝트는 돌리지 않았다(CI reflow 잡 몫) |
+| 첫 JS 예산 `budgets/js.spec.mjs` 월렛 행 | `npx playwright test -c playwright.budgets.config.mjs --project=js -g my/tickets` | 통과, 161.2kB(한도 = 기준선 160.6 + 1 = 161.6kB) |
+| 린트·문서 | `pnpm lint`, `python -I -X utf8 tools/doc-check/check_all.py` | 오류 0, 문서 점검 오류 0(경고 4는 이 일 밖) |
+| 계약 | `pnpm --filter @peaket/contracts gen:check` | 생성물 같음 |
+| 실제 서버 데모 S1 | `node tools/local/demo.mjs play --scenarios S1` | 돌리지 않았다(kind·이미지 빌드, 감독이 Docker 차례를 정한다, 2절 7) |
+
+## 시험 이의
+
+구현 담당 fwal-impl-3d8b가 적는다. 시험 파일은 고치지 않았다(감독 → 시험 담당).
+
+| ID | 시험 | 까닭 | 확인 | 제안 |
+| --- | --- | --- | --- | --- |
+| TO-1 | `wallet-live.spec.mjs` 'O-T48 ⑨' 177행 `page.getByRole('link', { name: /마이 티켓/ })` | 셸 머리(ds WebShell, 기본 폭 lg)에 이미 `마이 티켓` 링크가 있어 펼침 '찾을 수 없음'의 ( 마이 티켓 › )와 둘이 잡힌다(Playwright strict mode violation, 2 elements). 정본 d5 §5.13·frontend §4.2.4가 둘 다 요구하므로 화면을 바꿀 수 없다 | 임시 사본에서 `page.getByRole('main').getByRole('link', …)`로만 바꿔 돌리면 통과(사본은 지웠다) | 본문(`main`) 안으로 좁힌다 |
+| TO-2 | 같은 파일 'O-T48 ⑥ … 회전 QR(TR-04)'(185행)의 `randomUUID()` 티켓 ID | `randomUUID()`는 UUIDv4다. QR v1은 티켓 ID를 UUIDv7로만 싣는다(docs/frontend.md §3.7, `features/wallet-device-key/qr-v1.ts` 'QR v1 티켓 ID는 UUIDv7이어야 합니다'). 등록 201 뒤 화면은 회전 QR 대신 'QR을 만들지 못했습니다'를 그려 `role=img` 대체 글을 찾지 못한다. ticket-svc가 발권하는 티켓 ID는 UUIDv7이다 | 임시 사본에서 시험 ID만 UUIDv7로 만들면 TR-04 포함 8/8 통과 | 시험 값을 UUIDv7 꼴로 만든다(sync·model 시험의 `nextTicket()`처럼) |
+
+- O-T47 ⑧ 401의 `private, no-store`는 시험 이의 없이 풀었다(구현 메모 2).
+
+## 구현 메모
+
+구현 담당 fwal-impl-3d8b(claude-opus-5-5), 2026-11-23. 커밋 `53b152fef`(ticket-svc), `e315aa872`(메시), `6f0ab249b`(웹), `7ea408310`(데모).
+
+1. **ticket-svc**: 새 `inbound/wallet-tickets.controller.ts`(`@Controller('v1/tickets') @Get()`, `@Roles(['fan'])`, 계약 `ListTicketsQueryParams`·`ListTicketsResponse`로 경로 스키마). 계정은 세션 신원(`CurrentPrincipal`)에서만 읽는다. `limit` 생략은 `DEFAULT_WALLET_LIMIT`(20 [가정]). 응답 꼴은 `domain/ticket.ts` `walletListItemOf`(B5·B6). `WalletTicket`에 `gateZone`·`eventStartsAtMs`·`transferLocked`(표의 `fraudLockCaseId`가 있으면 true)·`heldByPayer`(보유자 = 결제자)를 더했고 `walletTicketOf` 하나가 채우므로 메모리·Drizzle 저장소는 고치지 않았다(마이그레이션 없음). gRPC `ListTickets`는 기존 칸만 쓴다(proto 그대로).
+2. **커서·캐시**: `normalizeListInput`이 커서가 있는데 풀리지 않으면 `WalletCursorError`(`TicketInputError`를 이음)를 던진다. HTTP는 400 `invalid-query` '목록 조건이 올바르지 않습니다', gRPC는 기존 `fail`이 `INVALID_ARGUMENT`. 풀기는 base64url 글자만, 시각은 0 이상의 안전한 정수만 받는다. `Cache-Control: private, no-store`는 `TicketModule`의 Nest 미들웨어(`GET v1/tickets`)가 가드보다 먼저 달아 401(가드)·400(경로 스키마)·500(필터)에도 붙는다(purchase-svc `AppModule` no-store 미들웨어와 같은 꼴). 플랫폼은 고치지 않았다.
+3. **조립**: `TicketWiring.tickets`(선택)를 넘기면 처리기를 싣는다. `start.ts`가 `tickets: ticket`을 넘긴다(통합 시험이 `start()`로 확인).
+4. **메시**: `port-allow.yaml` `ListTickets: []`, 생성기 `--write`로 `policies.yaml`·`meshless-networkpolicies.yaml`(web → ticket-svc 50052 통로가 빠졌다. 웹은 ticket-svc gRPC를 다른 데서 부르지 않는다).
+5. **웹 저장소 자리(계획 7절과 다름)**: 월렛 IndexedDB 저장소를 `features/wallet-device-key/store.ts`에서 `entities/wallet/store.ts`로 옮겼다(`git mv`). `features/wallet-sync`가 같은 층의 다른 조각 `wallet-device-key`를 가져오면 린트(ADR-0329 layer-direction 'crossSlice')가 막고 기준선은 늘릴 수 없어서다. `features/wallet-device-key/store.ts`는 `entities/wallet`을 다시 내보내므로 그 조각의 파일과 고정 시험의 가져오기 경로는 그대로다. Dexie 판·색인은 그대로(판 1, 14절 6). 서버 차례는 색인 없는 `order` 칸으로 두고 메모리에서 정렬한다.
+6. **스냅샷 칸**: `order`·`eventId`·`status`·`transferLocked`·`gateZone`·`eventStartsAt`·`received`(목록 항목의 `receivedFromNickname`이 null이 아니면 받은 표)와 회차 요약의 `title`·`placeName`·`startsAt`·`entryOpensAt`·`endsAt`. 목업 미리보기의 표시 글 칸(`whenText` 등)은 선택 칸으로 남겼다. `listTicketSnapshots`는 `status`·`eventId`가 있는 목록 스냅샷만 낸다.
+7. **받기 세부**: 401 갱신은 한 번 받기에 한 번(둘째 401이면 `needs-login`), 갱신 일시 장애는 `failed`·`network`. 앞에서 받은 커서가 다시 오면 `cursor-loop`. `items`가 없거나 표에 `ticketId`·`eventId`·`status`가 없거나 `nextCursor`가 빈 글이면 `bad-response`. 쪽 사이 겹친 표는 앞의 것만 둔다. IndexedDB가 없는 브라우저는 이번 문서 메모리에만 둔다. 갱신 뒤 로그인 주소 함수는 첫 JS를 줄이려고 늦게 싣는 sync 조각이 다시 낸다.
+8. **카드**: `<지난 공연>`은 ISSUED·ACTIVE(유효 표)에만 건다(`endsAt < now`). 환급·무효 등 끝난 표는 그 상태 배지를 둔다. 배지 색: 사용 가능·받은 티켓 초록, 양도 요청 중·취소 접수됨·확인 중 노랑, 무효 빨강, 그 밖 회색.
+9. **화면**: `MyTicketsPage`·`TicketDetailPage`는 운영 빌드에서 늘 `WalletLiveShell`(서버: 첫 HTML '티켓을 불러오는 중입니다'·QR 뼈대 data URI) → `WalletLive`(클라이언트). 목업은 `MyTicketsPreview`·`TicketDetailPreview`(`git mv`, 개발 서버 `?state=`만). 받기 조각은 `afterLoad` 뒤 `import('@/features/wallet-sync/sync')`. 펼침 ID는 붙은 뒤 `location.pathname`에서 읽는다. `useParams`는 빌드 때 셸을 그리지 못했고(Suspense 밖 클라이언트 그리기), 주소 값을 기다리지 않은 대체 셸은 `__NEXT_CLIENT_RESUME` 인라인 스크립트를 실어 캐시 화면 CSP 해시 서버가 막았다(화면이 '불러오는 중'에 멈춤). 그래서 펼침 경로는 `await params`(값은 쓰지 않음)로 요청 때 그린다. 서버 셸은 티켓 ID로 아무것도 읽지 않는다.
+10. **데모 S1**: 도우미 `walletTickets`(GET `/v1/tickets?limit=100`, 커서 끝까지, 20쪽 상한)·`registerWalletDevice`(등록 버튼 → `waitForResponse` device-keys 상태). `wallet-list`는 구매 전 목록에 없던 이 회차 ISSUED 표 정확히 2장, `ticket-qr`은 등록 201·QR 칸 > 0·대체 글에 그 ticketId. S5·S8의 원장 SQL 읽기는 계획대로 그대로다.
+11. **남은 것**: 데모 S1 실제 재생(Docker·kind, 감독 차례), 화면 spec의 WebKit·Firefox(CI reflow 잡), 시험 이의 TO-1·TO-2. `node tools/ci/gateway-routes.mjs --check`는 기준 트리부터 `gw-scanner.routes.yaml`의 계약 sha256 줄이 달라 실패한다(이 일은 openapi·게이트웨이를 건드리지 않았다, `git diff d99564d75 -- docs/api deploy/gateways`가 빔). `roles-check`의 묶음 구성·'리뷰' 절·담당 표 머리 실패는 기록 단계 몫.
 
 ## 15. 리뷰(시험 리뷰)
 
@@ -355,5 +398,5 @@
 | 시험 | fwal-test-2e9a | claude-opus-5-5 | 이 시험 커밋 |
 | 시험 리뷰 | fwal-trev-7c4e | claude-opus-5-5 | 이 리뷰 커밋(지적 TR-01~08) |
 | 시험 리뷰(반영 확인) | fwal-trev-7c4e | claude-opus-5-5 | 반영 확인 커밋(시험 고정 0fe1d5445) |
-| 구현 | | | |
+| 구현 | fwal-impl-3d8b | claude-opus-5-5 | 53b152fef(ticket-svc)·e315aa872(메시)·6f0ab249b(웹)·7ea408310(데모), 구현 메모 커밋 |
 | 기록 | | | |
