@@ -6,8 +6,9 @@
 
 ## 다음
 
-- F-04-3(analytics-ingest): 갈래 1의 F-04-2(분석 이벤트 계약·telemetry 토픽)가 develop에 들어온 뒤 시작한다.
+- F-04-20(queue-svc `QueueAggregate`, 감독 결정) → F-04-4(dbt, 소유자 결정 '받아서 정본대로') → F-04-7 → F-04-5·F-04-6 필요한 몫 → F-04-8.
 
 ## 진행 로그
 
 - 2026-11-23 F-04-1(B, OPS-160, R-791): 작업자 `services/ops-rt`(거래·텔레메트리 토픽 일곱 → ClickHouse `rt` 원시 표 다섯, 쓰기 뒤 커밋, 버리는 그룹 다시 채우기)·`services/rt-pulse`(1초 심장 박동), `data/clickhouse/rt` 표·매개변수 뷰 셋, ops-svc `realtime-table` 모듈(회차마다 0.5초 조회·신선도 두 길·Degraded 3분/5분·거래 사건 끊김 60초·파트너 `live-snapshot` 1분 계산, gw-partner를 ops-svc로), 관제 위젯 키 `rt-sales.summary`와 판매 중 탭 '구역별 잔여석' 실제 값. 통합 ops-rt 5/5(ST-T1 원시 결제 4,700건 → 판매 금액 3,000,000·판매 좌석 3,000 정답과 같음, ST-T4 ClickHouse 30초 멈춤 뒤 500/500, ST-T2 끈 파티션 7.5초·나머지 1.4초), ops-svc 3/3, 장부 10/10 자동 시험. 계획 docs/review/plans/F-04-1.md.
+- 2026-11-23 F-04-3(B, OPS-200·OPS-205 일부, A-T21·A-T22·ST-T22, R-792): 작업자 `services/analytics-ingest`(10토픽, 회차 가명 HMAC-SHA256·KMS GenerateMac/로컬 키, 키 실패면 쓰지 않고 다시 시도, 허용 목록 = 계약 판 − 조사 칸 일곱 − actor, 금지 칸 버림·셈, 쓰기 뒤 커밋, 거절 위치, 커버리지 위치 표·대조 명령, 다시 적재)·`data/clickhouse/bronze` 15표. 통합 4/4(조사 값 0건·두 회차 가명 다름, 강제 종료 뒤 2,000/2,000·커버리지 빈 곳 0, 키 실패 동안 0행, 다시 적재 그대로). 포렌식 몫은 동결 빈칸. 계획 docs/review/plans/F-04-3.md.
