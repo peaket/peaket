@@ -122,6 +122,8 @@ export class SettlementDueWorker {
         () => this.deps.settlements.retryPayoutCases(),
         () => this.deps.settlements.retrySettlementAlerts(),
         () => this.deps.settlements.retryPayoutAccountAudits(),
+        // 계좌 변경 뒤 취소가 실패·무응답이었던 보류 기간 안 토스 예약지급을 다시 취소한다(F-07-7 C-10)
+        () => this.deps.settlements.retryAccountChangeCancellations(),
         () => this.deps.settlements.reconcileRecentBatches(),
         () => this.deps.settlements.checkOverduePayouts(),
       ]) {

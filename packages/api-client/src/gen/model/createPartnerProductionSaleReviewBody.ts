@@ -10,12 +10,12 @@
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { CreatePartnerProductionSaleReviewBodyAccessibleSeating } from './createPartnerProductionSaleReviewBodyAccessibleSeating';
-import type { PayoutAccountChange } from './payoutAccountChange';
+import type { SaleReviewPayoutAccount } from './saleReviewPayoutAccount';
 import type { SellerInfoInput } from './sellerInfoInput';
 
 export type CreatePartnerProductionSaleReviewBody = {
   seller: SellerInfoInput;
-  payoutAccount: PayoutAccountChange;
+  payoutAccount: SaleReviewPayoutAccount;
   /** 휠체어석 확인(FR-023). 서버는 저장된 좌석맵으로 수량·위치·온라인 판매 경고를 다시 센다(추천 적용 2026-10-14, ADR-0062) */
   accessibleSeating: CreatePartnerProductionSaleReviewBodyAccessibleSeating;
 };

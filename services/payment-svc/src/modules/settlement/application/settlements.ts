@@ -2346,6 +2346,27 @@ export class Settlements {
     return { cancelled, waiting };
   }
 
+  /**
+   * 계좌 변경 뒤 예약지급 취소 다시 시도(F-07-7 계획 §5.1 (하) 3, 정리 목록 C-10). 계좌 변경 때의 취소 호출이 실패하거나 응답이 없으면
+   * 보류 기간 안의 REQUESTED 토스 예약지급이 남는다. 정산 일꾼 30분 tick이 보류가 아직 끝나지 않은 파트너의 SCHEDULED 토스 정산서를 다시 찾아 취소를 다시 시도한다.
+   * 이미 취소된 정산서는 HELD라 다시 잡히지 않는다
+   */
+  async retryAccountChangeCancellations(limit = 500): Promise<{ promoters: number; cancelled: number }> {
+    if (!this.d.tossTransport) return { promoters: 0, cancelled: 0 };
+    const now = this.d.clock.now();
+    const scheduled = await this.d.store.listStatements({ status: 'SCHEDULED', pg: 'TOSS', limit });
+    let promoters = 0;
+    let cancelled = 0;
+    for (const promoterId of new Set(scheduled.map((s) => s.promoterId))) {
+      const account = await this.d.store.findPayoutAccount(promoterId);
+      if (!account || account.holdUntil.getTime() <= now) continue;
+      promoters += 1;
+      const out = await this.cancelScheduledTossPayouts({ promoterId, reason: 'ACCOUNT_CHANGE', payoutDateThrough: kstDateOf(account.holdUntil) });
+      cancelled += out.cancelled;
+    }
+    return { promoters, cancelled };
+  }
+
   /** 보내지 않은 정산 계좌 변경 행을 ops 감사(PAYOUT_ACCOUNT_CHANGED)로 보낸다(정산 일꾼 30분마다, ADR-0370 결정 5) */
   async retryPayoutAccountAudits(limit = CASE_RETRY_LIMIT): Promise<{ sent: number; pending: number }> {
     const rows = await this.d.store.listUnsentPayoutAccountChanges(limit);
