@@ -1099,11 +1099,15 @@ export const CreateOpsCommandRejectionResponse = zod.object({
 })
 
 /**
- * BAT-465 GAT-300. FAILED인 명령만 다시 실행한다. 실행 전후 감사 체크포인트를 만들고 SUCCEEDED/FAILED로 끝낸다. 409 command-not-failed.
+ * BAT-465 GAT-300. FAILED인 명령만 다시 실행한다. 실행 전후 감사 체크포인트를 만들고 SUCCEEDED/FAILED로 끝낸다. 409 command-not-failed. 재인증이 필요한 명령(dry-run reauthRequired가 참인 명령, 명령 3·6 등)의 다시 시도는 접수와 같이 X-Reauth-Token(act=OPS_COMMAND, 패스키를 거친 토큰, 한 번)을 요구한다(control-tower §3 '위험 명령 재인증의 첫 구현', 추천 적용 2026-11-23, F-03-4).
  * @summary 실패한 운영 명령 재시도(같은 명령 ID, 시도 횟수 증가)
  */
 export const CreateOpsCommandRetryParams = zod.object({
   "commandId": zod.string()
+})
+
+export const CreateOpsCommandRetryHeader = zod.object({
+  "X-Reauth-Token": zod.string().optional().describe('재인증이 필요한 명령(dry-run reauthRequired가 참인 명령)의 다시 시도일 때 필수(guidelines §7, control-tower §3). 그 밖의 명령은 보내지 않는다')
 })
 
 export const CreateOpsCommandRetryResponse = zod.object({
