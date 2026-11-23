@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 0 | 120 | 0 | 0 | 0 | 0 | 0 | 29 | 39 | 188 |
-| 합계 | 0 | 120 | 0 | 0 | 0 | 0 | 0 | 29 | 39 | 188 |
+| B | 4 | 120 | 0 | 0 | 0 | 1 | 0 | 29 | 39 | 193 |
+| 합계 | 4 | 120 | 0 | 0 | 0 | 1 | 0 | 29 | 39 | 193 |
 
 ## docs/features/analytics.md
 
@@ -38,6 +38,11 @@
 | A-T23 | — | 가명정보 취급자 지정이 있는 commander가 POST… | 지정이 있는 계정만 받고, 파일에 조사 칸과 원문 IP가 없다. 다른 둘은 403 `pseudonym-handler-required`이고 감사 기록과 가명정보… | 빈칸 | B | — |
 | A-T24 | — | 한 회차에서 부정 예매 사건 셋을 만들어 하나는 조치(취소), 하나는… | 실버 `slv_trust_label`에 그 세 출처의 라벨 행이 0건이다. `brz_ops_fraud_summary`에는 회차 × 사유 범주의 수만 있고 계정… | 빈칸 | B | — |
 | A-T25 | — | 같은 좌석을 두 세션이 거의 같은 때 직접 선택으로 잡게 한다(하나는… | 실버에서 두 시도의 `seatIds`가 같고, 진 시도에도 좌석 번호가 남는다. F4 경합 패배율은 바뀌지 않고, 좌석 단위 경합을 좌석 번호로 셀 수 있다 | 빈칸 | B | — |
+| A-T26 | ① | 발행 계약(생산자 단위 시험, asyncapi info '필수 여부'… | ① 공통 판정을 만족하고, CREATED는 `journeyId`·`contactRef`가 있거나 `refMissing`이 참이며, `eventKey`가 지금… | 자동 시험 | B | 시험: services/purchase-svc/test-int/order-events-avro.int.test.ts, services/purchase-svc/test/order-events-avro.test.ts |
+| A-T26 | ② | 발행 계약(생산자 단위 시험, asyncapi info '필수 여부'… | ② 공통 판정을 만족하고, `heldAt`이 같은 홀드의 `SeatEvent` HELD `occurredAt`과 같으며, `retryNo`가 그 구매 세션의… | 자동 시험 | B | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/hold-attempts-avro.test.ts |
+| A-T26 | ③ | 발행 계약(생산자 단위 시험, asyncapi info '필수 여부'… | ③ 공통 판정을 만족한다(실시간 PASS·CHALLENGED의 `journeyId`, 기기 식별값이 있었던 판정의 `deviceRef` 포함) | 자동 시험 | B | 시험: services/purchase-svc/test/seat-behavior.test.ts, services/trust-svc/test/telemetry-avro.test.ts |
+| A-T26 | ④ | 발행 계약(생산자 단위 시험, asyncapi info '필수 여부'… | ④ 공통 판정을 만족하고, 같은 대기표의 끝 기록을 다시 만들면 `eventKey`가 같다 | 다른 단계 | B | 미정 · queue-svc의 사람별 대기 기록 `QueueEntryRecord`·1초 집계 `QueueAggregate` 발행(BUILD_ORDER OPS-190 줄의 PRF-080·HOT-060이 넘긴 것)은… |
+| A-T26 | ⑤ | 발행 계약(생산자 단위 시험, asyncapi info '필수 여부'… | ⑤ 텔레메트리는 그 기록을 버리고 `telemetry_dropped_total{record}`가 1 오르며 경고 로그에 레코드와 칸 이름만 있다(값 없음)… | 자동 시험 | B | 시험: packages/platform/test/avro-encoder.test.ts, services/purchase-svc/test-int/order-events-avro.int.test.ts 외 4곳 |
 
 ## docs/security/asvs/analytics.md
 
@@ -167,7 +172,7 @@
 | v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/features/identity-verify/flow.test.mjs, apps/web/src/features/identity-verify/server/return-post.t… |
 | v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | ID만 | B | 다른 곳 시험: packages/platform/test/diagnose.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 3곳 (영역: 아직 코드가… |
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs, packages/config/eslint/service-security.test.mjs… |
-| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 19곳 (영역: 아직 코드가 없다) |
+| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 20곳 (영역: 아직 코드가 없다) |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/logout.test.mjs, apps/web/src/features/session-cleanup/routine.test.mjs 외 2곳 (영역: 아직… |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | ID만 | B | 다른 곳 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/core-svc/test/fan-notify-http.test.ts 외… |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs 외 2곳 (영역: 아직… |
@@ -189,7 +194,7 @@
 | v5.0.0-16.2.2 | — | L2 | 로그 구성요소의 시각을 동기화하고 UTC 또는 시간대 오프셋을 쓴다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-log.test.ts, services/realtime-gw/test-int/stream.int.test.ts (영역: 아직 코드가 없다) |
 | v5.0.0-16.2.3 | — | L2 | 로그 목록에 적힌 파일과 서비스로만 로그를 저장·전송한다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts (영역: 아직 코드가 없다) |
 | v5.0.0-16.2.4 | — | L2 | 쓰고 있는 로그 처리기가 로그를 읽고 서로 연관 지을 수 있게 하고, 되도록 공통 로그 형식을 쓴다. | ID만 | B | 다른 곳 시험: packages/platform/test/telemetry.test.ts, services/ops-svc/test/ops-event-log.test.ts 외 1곳 (영역: 아직 코드가 없다) |
-| v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | ID만 | B | 다른 곳 시험: loadtest/test/before090.test.mjs, loadtest/test/lib.test.mjs 외 90곳 (영역: 아직 코드가 없다) |
+| v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | ID만 | B | 다른 곳 시험: loadtest/test/before090.test.mjs, loadtest/test/lib.test.mjs 외 91곳 (영역: 아직 코드가 없다) |
 | v5.0.0-16.3.1 | — | L2 | 성공·실패를 포함한 모든 인증 작업을 기록하고, 인증 방식이나 쓴 인증 요소 같은 메타데이터도 남긴다. | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-webhook.int.test.ts, services/payment-svc/test/payment-webhook.test.ts 외… |
 | v5.0.0-16.3.2 | — | L2 | 실패한 인가 시도를 기록하고, L3는 민감 데이터 접근을 포함한 모든 인가 결정을 그 데이터는 빼고 기록한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.t… |
 | v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | ID만 | B | 다른 곳 시험: apps/console-host/src/shared/lib/remotes/remote-policy.test.mjs… |

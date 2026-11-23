@@ -101,7 +101,7 @@
 | D-T38 | — | 서비스를 바꾼 PR에서 계약에 없는 응답 필드를 가진 컨트롤러와… | 두 PR 모두 `contract-check`의 OpenAPI 차이 검사가 실패해 병합되지 않는다. 계약과 같은 판은 통과한다. 운영 이미지에는 문서 경로가 없어… | 자동 시험 | B | 시험: packages/platform/test/contract-sweep.test.ts, packages/platform/test/metrics.test.ts 외 4곳 |
 | D-T39 | ① | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토… | ① : PreSync Job이 실패해 동기화가 멈추고 생산자는 배포되지 않는다. | 자동 시험 | B | 시험: tools/ci/avro-schema.test.mjs |
 | D-T39 | ② | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토… | ② : 주제별 ID가 ConfigMap에 쓰이고, 생산자는 실행 중 레지스트리 호출 0건으로 Outbox 바이트를 만든다. | 자동 시험 | B | 시험: tools/ci/avro-schema.test.mjs |
-| D-T39 | ③ | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토… | ③ : 생산자가 시작하지 않아 카나리가 멈춘다. | 자동 시험 | B | 시험: packages/platform/test/avro.test.ts |
+| D-T39 | ③ | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토… | ③ : 생산자가 시작하지 않아 카나리가 멈춘다. | 자동 시험 | B | 시험: packages/platform/test/avro.test.ts, packages/platform/test/producer-schemas.test.ts |
 | D-T39 | ④ | 스키마 등록 Job(추천 적용 2026-10-28, 기술 검토… | ④ : 같은 ID가 돌아와 ConfigMap이 그대로다. 정적·단위 시험은 `tools/ci/avro-schema.test.mjs`의 D-T39… | 자동 시험 | B | 시험: tools/ci/avro-schema.test.mjs |
 | D-T37 | ① | WAF 규칙표 정적 검사(추천 적용 2026-10-28, 기술 검토… | ① 모두 검사가 실패해 PR이 막힌다. 규칙표와 같은 정상 판은 통과한다 | 빈칸 | B | — |
 | D-T37 | ② | WAF 규칙표 정적 검사(추천 적용 2026-10-28, 기술 검토… | ② 모두 검사가 실패해 PR이 막힌다. 규칙표와 같은 정상 판은 통과한다 | 빈칸 | B | — |

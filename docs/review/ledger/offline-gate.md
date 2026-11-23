@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 72 | 106 | 0 | 0 | 0 | 10 | 0 | 19 | 62 | 269 |
-| 합계 | 72 | 106 | 0 | 0 | 0 | 10 | 0 | 19 | 62 | 269 |
+| B | 99 | 107 | 0 | 0 | 0 | 10 | 0 | 19 | 62 | 297 |
+| 합계 | 99 | 107 | 0 | 0 | 0 | 10 | 0 | 19 | 62 | 297 |
 
 ## docs/features/offline-gate.md
 
@@ -105,6 +105,34 @@
 | O-T50 | ③ | iOS·홈 화면 안내와 영속 저장소(추천 적용 2026-11-23… | ③ 등록하고 `persist()`를 한 번 부른다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/platform.test.mjs, tools/web-checks/reflow/wallet-enroll.spec.mjs |
 | O-T50 | ④ | iOS·홈 화면 안내와 영속 저장소(추천 적용 2026-11-23… | ④ SCR-058로 보낸다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/platform.test.mjs |
 | O-T50 | ⑤ | iOS·홈 화면 안내와 영속 저장소(추천 적용 2026-11-23… | ⑤ 열 때마다 `persist()`를 부르고 결과가 `meta.persistGranted`에 남는다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/platform.test.mjs |
+| O-T48 | ① | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ① 앞 응답의 커서를 그대로 실어 `limit` 100으로 세 번 부르고, 받은 표를 모두 `peaket-wallet`에 쓴 뒤 그 값으로 그린다 | 자동 시험 | B | 시험: services/core-svc/test/internal-notify-ticket.http.test.ts |
+| O-T48 | ② | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ② 빈 화면 "아직 티켓이 없습니다"(docs/design/d5 §5.13) | 자동 시험 | B | 시험: services/core-svc/test/internal-notify-ticket.http.test.ts |
+| O-T48 | ③ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ③ "티켓을 불러오지 못했습니다"와 [ 다시 시도 ]가 보이고, 누르면 다시 부른다 | 자동 시험 | B | 시험: services/core-svc/test/internal-notify-ticket.http.test.ts |
+| O-T48 | ④ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ④ 저장된 표를 그대로 보이고 오프라인 배너에 마지막 동기화 시각이 있다 | 자동 시험 | B | 시험: services/core-svc/test/internal-notify-ticket.http.test.ts |
+| O-T48 | ⑤ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ⑤ 저장된 표를 그리지 않고 로그인 화면(SCR-004)으로 간다 | 자동 시험 | B | 시험: services/core-svc/test/internal-notify-ticket.http.test.ts |
+| O-T48 | ⑥ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ⑥ 앞의 두 상태만 QR 자리가 있다(이 기기에 키가 없으면 입장용 등록 버튼, 등록된 키가 있으면 회전 QR이고 그 대체 글에 그 티켓 ID). 나머지는 QR… | ID만 | B | 시험: services/core-svc/test/internal-notify-ticket.http.test.ts, services/ticket-svc/test-int/device-key-reissue.int.test… |
+| O-T48 | ⑦ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ⑦ 200인 회차는 공연명·장소·시각을 그 요약 값으로 그리고, 실패한 회차의 표도 그대로 보이며 공연명 자리에 "공연 정보를 불러오지 못했습니다"가 있다… | ID만 | B | 시험: services/core-svc/test/internal-notify-ticket.http.test.ts, services/ticket-svc/test-int/device-key-reissue.int.test… |
+| O-T48 | ⑧ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ⑧ 그 표의 표시 값을 저장소에서 지우고 그리지 않는다(그 표의 기기 키는 지우지 않는다) | ID만 | B | 시험: services/core-svc/test/internal-notify-ticket.http.test.ts, services/ticket-svc/test-int/device-key-reissue.int.test… |
+| O-T48 | ⑨ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ⑨ "티켓을 찾을 수 없습니다"(남의 표와 없는 표를 가르지 않는다) | ID만 | B | 시험: services/core-svc/test/internal-notify-ticket.http.test.ts, services/ticket-svc/test-int/device-key-reissue.int.test… |
+| O-T48 | ⑩ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ⑩ 더 부르지 않고 끊김과 같은 실패로 본다(저장된 표가 없으면 "티켓을 불러오지 못했습니다", 있으면 저장된 표와 오프라인 배너) | ID만 | B | 시험: services/core-svc/test/internal-notify-ticket.http.test.ts, services/ticket-svc/test-int/device-key-reissue.int.test… |
+| O-T51 | ① | 월렛 목록 서버(감독 결정 2026-11-23… | ① A가 지금 보유한 표만 최신 발권순(발권 시각 내림차순, 같으면 티켓 ID 내림차순)으로 오고 B의 표는 없다 | 자동 시험 | B | 시험: services/ticket-svc/test-int/wallet-tickets.int.test.ts, services/ticket-svc/test/wallet-tickets-http.test.ts |
+| O-T51 | ② | 월렛 목록 서버(감독 결정 2026-11-23… | ② 2·2·1장이고 겹치거나 빠진 표가 없으며 마지막 쪽에서만 `nextCursor`가 null이다 | 자동 시험 | B | 시험: services/ticket-svc/test-int/wallet-tickets.int.test.ts, services/ticket-svc/test/wallet-tickets-http.test.ts |
+| O-T51 | ③ | 월렛 목록 서버(감독 결정 2026-11-23… | ③ 뺀 것은 20장 [가정]까지, 0·101은 400, 풀리지 않는 커서는 400 `invalid-query`, B의 표 자리 커서는 A의 표만 준다 | 자동 시험 | B | 시험: services/ticket-svc/test-int/wallet-tickets.int.test.ts, services/ticket-svc/test/wallet-tickets-http.test.ts |
+| O-T51 | ④ | 월렛 목록 서버(감독 결정 2026-11-23… | ④ 두 표가 `REFUNDED`·`VOIDED`로 목록에 남는다 | 자동 시험 | B | 시험: services/ticket-svc/test-int/wallet-tickets.int.test.ts, services/ticket-svc/test/wallet-tickets-http.test.ts |
+| O-T51 | ⑤ | 월렛 목록 서버(감독 결정 2026-11-23… | ⑤ 계약 칸만 있다: 주문·좌석·계정 ID, QR 포인터 `PEAKET1:…`, 티켓 키와 그 해시가 없고, ticket 데이터에 없는 칸은 빠져 있다… | 자동 시험 | B | 시험: services/ticket-svc/test-int/wallet-tickets.int.test.ts, services/ticket-svc/test/wallet-tickets-http.test.ts |
+| O-T51 | ⑥ | 월렛 목록 서버(감독 결정 2026-11-23… | ⑥ 둘 다 401이다(팬이 아닌 대상의 신원은 역할과 상관없이 401, docs/security/authz-matrix.md §5.1) | 자동 시험 | B | 시험: services/ticket-svc/test/wallet-tickets-http.test.ts |
+| O-T51 | ⑦ | 월렛 목록 서버(감독 결정 2026-11-23… | ⑦ 그 표가 B의 목록에만 있다 | 자동 시험 | B | 시험: services/ticket-svc/test-int/wallet-tickets.int.test.ts, services/ticket-svc/test/wallet-tickets-http.test.ts |
+| O-T51 | ⑧ | 월렛 목록 서버(감독 결정 2026-11-23… | ⑧ 둘 다 `Cache-Control: private, no-store`이고, 기록 줄에 티켓 키·`PEAKET1:` 값이 없다 | 자동 시험 | B | 시험: services/ticket-svc/test-int/wallet-tickets.int.test.ts, services/ticket-svc/test/wallet-tickets-http.test.ts |
+| O-T52 | ① | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ① 앞 응답의 커서를 그대로 실어 `limit` 100으로 세 번 부르고, 받은 표를 모두 `peaket-wallet`에 쓴 뒤 그 값으로 그린다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-sync/sync.test.mjs |
+| O-T52 | ② | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ② 빈 화면 "아직 티켓이 없습니다"(docs/design/d5 §5.13) | 자동 시험 | B | 시험: apps/web/src/features/wallet-sync/sync.test.mjs, tools/web-checks/reflow/wallet-live.spec.mjs |
+| O-T52 | ③ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ③ "티켓을 불러오지 못했습니다"와 [ 다시 시도 ]가 보이고, 누르면 다시 부른다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-sync/sync.test.mjs, tools/web-checks/reflow/wallet-live.spec.mjs |
+| O-T52 | ④ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ④ 저장된 표를 그대로 보이고 오프라인 배너에 마지막 동기화 시각이 있다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-sync/sync.test.mjs, tools/web-checks/reflow/wallet-live.spec.mjs |
+| O-T52 | ⑤ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ⑤ 저장된 표를 그리지 않고 로그인 화면(SCR-004)으로 간다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-sync/sync.test.mjs, tools/web-checks/reflow/wallet-live.spec.mjs |
+| O-T52 | ⑥ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ⑥ 앞의 두 상태만 QR 자리가 있다(이 기기에 키가 없으면 입장용 등록 버튼, 등록된 키가 있으면 회전 QR이고 그 대체 글에 그 티켓 ID). 나머지는 QR… | 자동 시험 | B | 시험: apps/web/src/features/wallet-sync/model.test.mjs, tools/web-checks/reflow/wallet-live.spec.mjs |
+| O-T52 | ⑦ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ⑦ 200인 회차는 공연명·장소·시각을 그 요약 값으로 그리고, 실패한 회차의 표도 그대로 보이며 공연명 자리에 "공연 정보를 불러오지 못했습니다"가 있다… | 자동 시험 | B | 시험: apps/web/src/features/wallet-sync/sync.test.mjs, tools/web-checks/reflow/wallet-live.spec.mjs |
+| O-T52 | ⑧ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ⑧ 그 표의 표시 값을 저장소에서 지우고 그리지 않는다(그 표의 기기 키는 지우지 않는다) | 자동 시험 | B | 시험: apps/web/src/features/wallet-sync/sync.test.mjs |
+| O-T52 | ⑨ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ⑨ "티켓을 찾을 수 없습니다"(남의 표와 없는 표를 가르지 않는다) | 자동 시험 | B | 시험: tools/web-checks/reflow/wallet-live.spec.mjs |
+| O-T52 | ⑩ | 월렛 화면의 실제 목록(감독 결정 2026-11-23… | ⑩ 더 부르지 않고 끊김과 같은 실패로 본다(저장된 표가 없으면 "티켓을 불러오지 못했습니다", 있으면 저장된 표와 오프라인 배너) | 자동 시험 | B | 시험: apps/web/src/features/wallet-sync/sync.test.mjs |
 
 ## docs/security/asvs/offline-gate.md
 
@@ -245,11 +273,11 @@
 | v5.0.0-14.1.1 | — | L2 | 애플리케이션이 만들고 처리하는 민감 데이터를 Base64·JWT 본문처럼 인코딩만 된 것까지 모두 찾아, 따라야 할 데이터 보호·개인정보 법규와 표준을 반영한… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/v0-monolith/test-int/gate.int.test.ts 외 4곳… |
 | v5.0.0-14.1.2 | — | L2 | 보호 등급마다 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, DB 수준 암호화, 개인정보 보호 기술 같은 보호 요구사항을… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/realtime-gw/test-int/stream.int.test.ts (영역:… |
 | v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/features/identity-verify/flow.test.mjs, apps/web/src/features/identity-verify/server/return-post.t… |
-| v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | ID만 | B | 다른 곳 시험: packages/platform/test/diagnose.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 1곳 (영역:… |
+| v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | 자동 시험 | B | 시험: services/ticket-svc/test-int/wallet-tickets.int.test.ts, services/ticket-svc/test/wallet-tickets-http.test.ts |
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs, packages/config/eslint/service-security.test.mjs… |
-| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 19곳 (영역: apps/scanner) |
+| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 20곳 (영역: apps/scanner) |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/logout.test.mjs, apps/web/src/features/session-cleanup/routine.test.mjs 외 2곳 (영역:… |
-| v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | ID만 | B | 다른 곳 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/core-svc/test/fan-notify-http.test.ts 외… |
+| v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/ticket-svc/test-int/wallet-tickets.int.test.ts… |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 다른 단계 | B | GAT-140 · 스캐너 IndexedDB에 회차 목록을 저장하는 경로가 아직 없다(스캔 큐·스태프 토큰만 있다). 목록 저장·판정을 붙일 때 저장 위치와 개인정보 없음 시험을 더한다. |
 | v5.0.0-15.1.1 | — | L1 | 취약한 서드파티 구성요소와 라이브러리 갱신의 위험 기반 조치 기한을 문서에 정한다. | ID만 | B | 다른 곳 시험: tools/ci/vuln-deadline.test.mjs (영역: apps/scanner) |
 | v5.0.0-15.1.2 | — | L2 | 모든 서드파티 라이브러리의 목록(SBOM)을 유지하고, 미리 정한 믿을 수 있고 계속 관리되는 저장소에서 오는지 확인한다. | ID만 | B | 다른 곳 시험: tools/ci/sbom-find.test.mjs, tools/web-checks/static/assets.test.mjs (영역: apps/scanner) |
@@ -257,7 +285,7 @@
 | v5.0.0-15.2.1 | — | L1 | 문서에 정한 갱신·조치 기한을 넘긴 구성요소가 없다. | ID만 | B | 다른 곳 시험: tools/ci/min-versions.test.mjs (영역: apps/scanner) |
 | v5.0.0-15.2.2 | — | L2 | 시간이 오래 걸리거나 자원을 많이 쓰는 기능에 문서대로 가용성 방어를 구현한다. | ID만 | B | 다른 곳 시험: packages/platform/test-int/maintenance.int.test.ts, packages/platform/test-int/timeouts.int.test.ts 외 10곳 (영역:… |
 | v5.0.0-15.2.3 | — | L2 | 운영 환경에는 필요한 기능만 두고 시험 코드·예제·개발 기능을 노출하지 않는다. | 빈칸 | B | 영역: apps/scanner |
-| v5.0.0-15.3.1 | — | L1 | 데이터 객체에서 필요한 필드만 돌려준다. | ID만 | B | 다른 곳 시험: packages/config/eslint/service-security.test.mjs, services/payment-svc/test-int/payment-new-pause.int.test.ts… |
+| v5.0.0-15.3.1 | — | L1 | 데이터 객체에서 필요한 필드만 돌려준다. | 자동 시험 | B | 시험: services/ticket-svc/test-int/wallet-tickets.int.test.ts, services/ticket-svc/test/wallet-tickets-http.test.ts |
 | v5.0.0-15.3.2 | — | L2 | 백엔드가 외부 URL을 부를 때 의도하지 않은 리디렉션을 따라가지 않는다. | ID만 | B | 다른 곳 시험: packages/config/eslint/service-security.test.mjs, packages/platform/test/telemetry.test.ts 외 3곳 (영역:… |
 | v5.0.0-15.3.3 | — | L2 | 컨트롤러·액션마다 허용 필드를 제한해 대량 할당 공격을 막는다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-checks.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 3곳 (영역:… |
 | v5.0.0-15.3.4 | — | L2 | 모든 프록시·미들웨어가 사용자의 원래 IP를 최종 사용자가 조작할 수 없는 신뢰 필드로 넘기고, 애플리케이션·웹 서버는 그 값을 로그와 레이트 리밋 같은 보안… | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, tools/local/e2e/gateways.e2e.mjs (영역: apps/scanner) |
@@ -269,7 +297,7 @@
 | v5.0.0-16.2.2 | — | L2 | 로그 구성요소의 시각을 동기화하고 UTC 또는 시간대 오프셋을 쓴다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-log.test.ts, services/realtime-gw/test-int/stream.int.test.ts (영역: apps/scanner) |
 | v5.0.0-16.2.3 | — | L2 | 로그 목록에 적힌 파일과 서비스로만 로그를 저장·전송한다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts (영역: apps/scanner) |
 | v5.0.0-16.2.4 | — | L2 | 쓰고 있는 로그 처리기가 로그를 읽고 서로 연관 지을 수 있게 하고, 되도록 공통 로그 형식을 쓴다. | ID만 | B | 다른 곳 시험: packages/platform/test/telemetry.test.ts, services/ops-svc/test/ops-event-log.test.ts 외 1곳 (영역: apps/scanner) |
-| v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | ID만 | B | 다른 곳 시험: loadtest/test/before090.test.mjs, loadtest/test/lib.test.mjs 외 88곳 (영역: apps/scanner) |
+| v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | 자동 시험 | B | 시험: services/ticket-svc/test-int/wallet-tickets.int.test.ts, services/ticket-svc/test/wallet-tickets-http.test.ts |
 | v5.0.0-16.3.1 | — | L2 | 성공·실패를 포함한 모든 인증 작업을 기록하고, 인증 방식이나 쓴 인증 요소 같은 메타데이터도 남긴다. | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-webhook.int.test.ts, services/payment-svc/test/payment-webhook.test.ts 외… |
 | v5.0.0-16.3.2 | — | L2 | 실패한 인가 시도를 기록하고, L3는 민감 데이터 접근을 포함한 모든 인가 결정을 그 데이터는 빼고 기록한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.t… |
 | v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | ID만 | B | 다른 곳 시험: apps/console-host/src/shared/lib/remotes/remote-policy.test.mjs… |
