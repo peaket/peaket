@@ -91,6 +91,17 @@ test('F-03-1 RV-04 원천이 있는 원격 둘의 자리와 퍼블리싱 화면�
 const SOURCED = ['queue-admission-rate', 'purchase-pg-status'];
 /** 호스트가 그리는 원천 있는 칸(F-04-1: 관제 실시간 표 rt-sales.summary를 RtSalesCell이 그린다, control-tower §12 '관제 실시간 표는 … 붙였고') */
 const HOST_SOURCED = ['구역별 잔여석'];
+/** 호스트가 그리는 원천 있는 판단 칸(F-03-3, control-tower §12 '관제 판단 위젯과 링크', ADR-0371 결정 8·10): 칸의 aria-labelledby 제목 id → 원천.
+ *  제목 글은 값에 따라 바뀌므로(예 'T-30분 점검 · 필수 n') 이름이 아니라 퍼블리싱과 같은 제목 id로 가린다.
+ *  진단 힌트(w-ldiag, ops-diagnostics.summary)는 넣지 않는다: ADR-0371 결정 8대로 원천(OPS-050·OPS-090) 전이라 서버가 늘 원천 실패 값을 내므로 원천 연결 전 칸이다. */
+const LIVE_SOURCED = {
+  'w-pf': 'GET /v1/ops/events/{eventId}/readiness + ops-readiness.checklist',
+  'w-burn': 'ops-budget.journeys',
+  'w-lbud': 'ops-budget.journeys',
+  'w-lsat': 'ops-saturation.summary',
+  'w-alert-h': 'GET /v1/ops/alerts + 늘 여는 흐름 alert',
+  'w-ctl': '늘 여는 흐름 control(입장 제어 리더의 Redis 기록)',
+};
 /** 원격 자리의 제목: 보드 원본의 <RemoteWidget name=… title=…>에서 읽는다(서버 그리기에서는 그 제목의 스켈레톤 칸이 된다) */
 const remoteTitles = (() => {
   const src = readFileSync(new URL('./board-d.tsx', import.meta.url), 'utf8');
@@ -133,8 +144,16 @@ const nameOf = (c) => c.attrs['aria-labelledby'] ?? c.attrs['aria-label'] ?? c.a
 test("F-03-1 RV-04 ② 실제 값 화면의 모든 탭에서 원천 있는 원격 둘의 자리 밖 .widget 칸(보드가 직접 그리는 칸 포함)마다 data-source=\"pending\"과 '원천 연결 전' 배지가 있고, 원격 둘의 자리에는 없다", () => {
   assert.deepEqual([...remoteTitles.keys()].sort(), [...SOURCED].sort(), '보드의 원격 자리가 ADR-0360 결정 9의 원천 있는 위젯 둘과 다르다');
   const sourcedTitles = new Set([...remoteTitles.values(), ...HOST_SOURCED]);
+  /** 원천 있는 칸이면 그 가림 이름(제목 글 또는 #제목 id), 아니면 null */
+  const sourcedKeyOf = (c) => {
+    if (sourcedTitles.has(c.attrs['aria-label'])) return c.attrs['aria-label'];
+    const by = c.attrs['aria-labelledby'];
+    return by !== undefined && Object.hasOwn(LIVE_SOURCED, by) ? `#${by}` : null;
+  };
+  const expectedSourced = [...sourcedTitles, ...Object.keys(LIVE_SOURCED).map((id) => `#${id}`)];
   const missing = [];
   const seenSourced = new Set();
+  const compared = new Set();
   let unsourced = 0;
   for (const state of LIVE_STATES) {
     const html = render(state, true);
@@ -142,20 +161,30 @@ test("F-03-1 RV-04 ② 실제 값 화면의 모든 탭에서 원천 있는 원�
     // 칸 찾기가 HTML의 widget 칸을 하나도 놓치지 않는다(시험이 빈 목록을 보고 통과하지 않게)
     assert.equal(cells.length, html.match(/class="widget(?:\s[^"]*)?"/g)?.length ?? 0, `${state} 탭의 칸 찾기가 widget 칸을 놓쳤다`);
     assert.ok(cells.length > 0, `${state} 탭이 위젯 칸을 그리지 않았다`);
+    // 같은 상태의 퍼블리싱 칸(제목 id별 안쪽 HTML): 원천 있는 판단 칸이 고정 자료를 그대로 그리면서 표지만 빠진 것을 가린다
+    const published = new Map(widgetCells(render(state, false)).flatMap((c) => (c.attrs['aria-labelledby'] ? [[c.attrs['aria-labelledby'], c.inner]] : [])));
     for (const c of cells) {
       const pendingInChain = c.chain.some((a) => a['data-source'] === 'pending');
-      if (sourcedTitles.has(c.attrs['aria-label'])) {
-        seenSourced.add(c.attrs['aria-label']);
-        assert.equal(pendingInChain, false, `${state} 탭의 원천 있는 자리 ${c.attrs['aria-label']}에 pending 표지가 있다`);
-        assert.doesNotMatch(c.inner, /원천 연결 전/, `${state} 탭의 원천 있는 자리 ${c.attrs['aria-label']}에 '원천 연결 전' 배지가 있다`);
+      const key = sourcedKeyOf(c);
+      if (key !== null) {
+        seenSourced.add(key);
+        assert.equal(pendingInChain, false, `${state} 탭의 원천 있는 자리 ${key}에 pending 표지가 있다`);
+        assert.doesNotMatch(c.inner, /원천 연결 전/, `${state} 탭의 원천 있는 자리 ${key}에 '원천 연결 전' 배지가 있다`);
+        const by = c.attrs['aria-labelledby'];
+        if (key.startsWith('#') && published.has(by)) {
+          compared.add(by);
+          assert.notEqual(c.inner, published.get(by), `${state} 탭의 원천 있는 자리 ${key}가 퍼블리싱 고정 자료를 그대로 그렸다`);
+        }
         continue;
       }
       unsourced += 1;
       if (!pendingInChain || !c.inner.includes('원천 연결 전')) missing.push(`${state}:${nameOf(c)}${pendingInChain ? '(배지 없음)' : ''}`);
     }
   }
-  // 원격 둘의 자리를 실제로 봤다(제목이 바뀌어 원천 있는 칸이 '없는 칸'으로 섞이지 않게)
-  assert.deepEqual([...seenSourced].sort(), [...sourcedTitles].sort());
+  // 원천 있는 칸(원격 둘·실시간 표 칸·F-03-3 판단 칸)을 모두 실제로 봤다(제목·id가 바뀌어 원천 있는 칸이 '없는 칸'으로 섞이거나 목록만 남지 않게)
+  assert.deepEqual([...seenSourced].sort(), [...expectedSourced].sort());
+  // 고정 자료 대조가 실제로 돌았다. 경보 패널만 빠진다: 퍼블리싱 경보 패널은 ds AlertPanel이라 같은 제목 id가 없다
+  assert.deepEqual([...compared].sort(), Object.keys(LIVE_SOURCED).filter((id) => id !== 'w-alert-h').sort(), '퍼블리싱 고정 자료와 대조한 원천 있는 판단 칸이 모자란다');
   assert.ok(unsourced >= 7, `원천 없는 칸이 ${unsourced}개뿐이다(팀 위젯 일곱보다 적다)`);
   assert.deepEqual(missing, [], `원천 연결 전 표지가 없는 칸 ${missing.length}개`);
 });
