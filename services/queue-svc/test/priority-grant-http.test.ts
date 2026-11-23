@@ -77,7 +77,8 @@ describe('우선 구매 입장 HTTP [GAT-135, Q-T62]', () => {
   });
 
   test('Q-T62 ⑤⑥ 내부 HTTP로 USED·EXPIRED 사본을 받고, 그 권리로 입장하면 404이며 낮은 판은 되돌리지 않는다', async () => {
-    const eventId = newEvent();
+    // 내부 HTTP 계약은 eventId를 UUID로 받는다(newEvent()는 ev- 꼴이라 직접 set.run 시험에서만 쓴다)
+    const eventId = crypto.randomUUID();
     await schedules.set(eventId, openSchedule(NOW));
     const grantId = crypto.randomUUID();
     const exp = new Date(NOW + 48 * 3600_000).toISOString();
