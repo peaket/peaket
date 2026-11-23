@@ -2,6 +2,7 @@
        싣는 칸은 경보 이름과 라벨 severity·kind·event_id·journey·dependency, 주석 summary·runbook_url·dashboard_url·explore_url뿐이다.
        그 밖의 라벨과 description 주석은 싣지 않는다(이용자 식별값이 온콜·협업 도구에 남지 않게). */ -}}
 {{ define "peaket.slack.title" }}[{{ .CommonLabels.severity }}] {{ .CommonLabels.alertname }}{{ end }}
+{{ define "peaket.slack.fallback" }}[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }} ({{ .CommonLabels.severity }}{{ if .CommonLabels.kind }}, {{ .CommonLabels.kind }}{{ end }}){{ end }}
 {{ define "peaket.slack.text" }}{{ range .Alerts }}*{{ .Labels.alertname }}* ({{ .Labels.severity }}{{ if .Labels.kind }}, {{ .Labels.kind }}{{ end }})
 {{ if .Annotations.summary }}{{ .Annotations.summary }}{{ end }}
 {{ if .Labels.event_id }}event_id: {{ .Labels.event_id }}{{ end }}
