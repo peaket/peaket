@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 3 |
-| B | 49 | 3 | 9 | 0 | 1 | 1 | 0 | 0 | 50 | 113 |
-| 합계 | 52 | 3 | 9 | 0 | 1 | 1 | 0 | 0 | 50 | 116 |
+| B | 63 | 4 | 9 | 0 | 2 | 3 | 0 | 0 | 46 | 127 |
+| 합계 | 66 | 4 | 9 | 0 | 2 | 3 | 0 | 0 | 46 | 130 |
 
 ## docs/verification.md
 
@@ -62,10 +62,15 @@
 | V-T28 | ② | Outbox 릴레이의 순서와 유실(추천 적용 2026-10-28… | ②의 로컬 부분(2026-11-01, openspec 변경 add-maintenance-control-and-consumers): 실제 Kafka 컨테이너를… | 측정 | B | HOT-480 · Outbox 릴레이의 순서와 유실 |
 | V-T28 | ③ | Outbox 릴레이의 순서와 유실(추천 적용 2026-10-28… | ③ 전체와 리더가 바뀐 시간의 성능 장부 기록은 wbs 2.12.3 | 측정 | B | HOT-480 · Outbox 릴레이의 순서와 유실 |
 | V-T29 | — | 큰 원장 표의 나눠 지우기(추천 적용 2026-10-28… | 걸린 시간, 잠금 대기 p99, WAL 양, 읽기 복제본 지연 최대값, 표·인덱스 크기(지우기 전·뒤·청소 뒤), 주문 생성 p99 변화가 '실측(PC)'으로… | 빈칸 | B | — |
-| V-T30 | ① | 진입 피크와 수집기·로그 표본(추천 적용 2026-10-28… | ① 앞은 판정 전 버림(`..._sampling_trace_dropped_too_early`) 0, 오류 trace 100% 남김, 메모리가 크기 식 안이다… | 빈칸 | B | — |
-| V-T30 | ② | 진입 피크와 수집기·로그 표본(추천 적용 2026-10-28… | ② 정상 trace를 남긴 요청은 모두 정상 로그 줄이 있고, 정상 줄 비율이 p ± 통계 오차 안이다 | 빈칸 | B | — |
-| V-T30 | ③ | 진입 피크와 수집기·로그 표본(추천 적용 2026-10-28… | ③ gw-queue trace가 0.1% ± 오차로 남고, 고르지 않은 요청의 queue-svc span은 내보내지지 않는다 | 빈칸 | B | — |
-| V-T30 | ④ | 진입 피크와 수집기·로그 표본(추천 적용 2026-10-28… | ④ Loki 거절 0건 | 빈칸 | B | — |
+| V-T30 | ① | 진입 피크와 수집기·로그 표본(추천 적용 2026-10-28… | ① 앞은 판정 전 버림(`..._sampling_trace_dropped_too_early`) 0, 오류 trace 100% 남김, 메모리가 크기 식 안이다… | ID만 | B | 시험: packages/platform/test-int/collector-sampling.int.test.ts, packages/platform/test-int/loki-limits.int.test.ts |
+| V-T30 | ② | 진입 피크와 수집기·로그 표본(추천 적용 2026-10-28… | ② 정상 trace를 남긴 요청은 모두 정상 로그 줄이 있고, 정상 줄 비율이 p ± 통계 오차 안이다 | 자동 시험 | B | 시험: packages/platform/test-int/collector-sampling.int.test.ts |
+| V-T30 | ③ | 진입 피크와 수집기·로그 표본(추천 적용 2026-10-28… | ③ gw-queue trace가 0.1% ± 오차로 남고, 고르지 않은 요청의 queue-svc span은 내보내지지 않는다 | 미검증 | B | INF-040 · gw-queue의 Envoy가 trace를 0.1%만 고르고(`samplingFraction`) 고르지 않은 요청의 queue-svc span이 내보내지지 않는지는 게이트웨이와 수집기를 kind에… |
+| V-T30 | ④ | 진입 피크와 수집기·로그 표본(추천 적용 2026-10-28… | ④ Loki 거절 0건 | 자동 시험 | B | 시험: packages/platform/test-int/loki-limits.int.test.ts |
+| V-T49 | ① | 수집기 2단 설정과 2차 마스킹(추천 적용 2026-11-23… | ① 실제 저장소는 통과하고, 규칙 하나를 깰 때마다 막는다(§1의 항목마다). 설정 파일을 읽지 못하면 통과로 보지 않는다 | 자동 시험 | B | 시험: tools/ci/collector-config.test.mjs |
+| V-T49 | ② | 수집기 2단 설정과 2차 마스킹(추천 적용 2026-11-23… | ② 생성 파일이 표시와 다르면 `--check`가 막고, `--write` 뒤 통과한다. 드문 경로 값은 서버 span의 `http.route` 꼴이다 | 자동 시험 | B | 시험: tools/ci/collector-config.test.mjs |
+| V-T49 | ③ | 수집기 2단 설정과 2차 마스킹(추천 적용 2026-11-23… | ③ 내보낸 바이트에 넣은 원문 값이 0건이고, 그 자리는 `[REDACTED]`이거나 IP 앞부분이다. 같은 글을 `maskPiiText`에 넣은 결과와… | 자동 시험 | B | 시험: packages/platform/test-int/collector-masking.int.test.ts, packages/platform/test/pii-text.test.ts |
+| V-T49 | ④ | 수집기 2단 설정과 2차 마스킹(추천 적용 2026-11-23… | ④ trace마다 모든 span이 한 게이트웨이에만 있고, 두 게이트웨이가 모두 trace를 받았다 | 자동 시험 | B | 시험: packages/platform/test-int/collector-loadbalancing.int.test.ts |
+| V-T49 | ⑤ | 수집기 2단 설정과 2차 마스킹(추천 적용 2026-11-23… | ⑤ 남은 trace가 정책에 맞는 것과 정확히 같고, 판정 전 버림은 0이다. SLO 지연을 넘은 요청의 서버 span에만… | 자동 시험 | B | 시험: packages/platform/test-int/collector-tail-sampling.int.test.ts, packages/platform/test/slo-exceeded.test.ts |
 | V-T31 | ① | 신뢰 경계의 추적 문맥(추천 적용 2026-10-28, 기술 검토… | ① 서버 trace는 요청마다 새 trace-id이고, 보낸 trace-id·Baggage 값이 어느 span에도 부모·속성으로 남지 않는다. 게이트웨이 수집기… | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs, tools/local/e2e/gateways.e2e.mjs |
 | V-T31 | ② | 신뢰 경계의 추적 문맥(추천 적용 2026-10-28, 기술 검토… | ② 서버 trace는 새 trace-id이고 받은 값은 span 링크로만 남는다 … 의 단위 시험(`telemetry-untrusted.test.ts`, 앱… | 자동 시험 | B | 시험: apps/partner/instrumentation.test.mjs, apps/web/instrumentation.test.mjs 외 5곳 |
 | V-T31 | ③ | 신뢰 경계의 추적 문맥(추천 적용 2026-10-28, 기술 검토… | ③ 모든 요청에 `baggage`·`traceparent`·`tracestate`가 없다. 어댑터를 허용 목록 밖에서 기본 HTTP 클라이언트로 바꾼 PR은 이… | 자동 시험 | B | 시험: packages/config/eslint/service-security.test.mjs, packages/platform/test/telemetry.test.ts 외 1곳 |
@@ -94,6 +99,15 @@
 | V-T47 | ⑥ | 대시보드·Grafana 조직·보존 설정을 코드로 두기(추천 적용… | ⑥ Grafana API로 본 조직 둘·폴더·대시보드 수가 원천과 같고, 기본 조직에서 PostgreSQL 데이터 소스가 보이지 않는다. Mimir가 테넌트별… | 미검증 | B | INF-040 · 실제 Grafana·Mimir에 올려 조직 둘·폴더·보존·골라 보내기가 먹는지는 kind 클러스터가 있어야 본다(ADR-0332 결정 4·5, kind 보류). 파일끼리 맞는지는 V-T47… |
 | V-T48 | ① | 직접 운영 시간 기록(추천 적용 2026-11-23, F-01-1… | ① 실제 파일과 머리 줄만 있는 파일은 0, 틀린 파일은 1이고 틀린 줄 번호와 까닭을 모두 찍는다. 없는 파일과 시간 단가를 §11.5에서 읽지 못한 경우는… | 자동 시험 | B | 시험: tools/perf-ledger/ops-hours.test.mjs |
 | V-T48 | ② | 직접 운영 시간 기록(추천 적용 2026-11-23, F-01-1… | ② 부품·활동마다 건수·합계 분·1회 평균 분과, 합계 시간에 §11.5의 시간 단가를 곱한 값을 0.5배·1배·1.5배로 낸다. 기록이 없으면 '기록… | 자동 시험 | B | 시험: tools/perf-ledger/ops-hours.test.mjs |
+| V-T50 | ① | 관측 저장소·exporter·신호 연결 설정을 코드로 두기(추천 적용… | ① Mimir·Loki의 복제 3과 영역 인식, Loki·Tempo 보존이 §9 보존 표와 같다. Tempo 쓰기 큐가 관측 전용 Kafka 변수이고, 서비스… | 자동 시험 | B | 시험: tools/ci/observability-stores.test.mjs |
+| V-T50 | ② | 관측 저장소·exporter·신호 연결 설정을 코드로 두기(추천 적용… | ② 클러스터 Prometheus·Mimir `raw`의 exemplar `traceId` → Tempo, Tempo 서비스 지도 → Mimir `raw`… | 자동 시험 | B | 시험: tools/ci/observability-stores.test.mjs |
+| V-T50 | ③ | 관측 저장소·exporter·신호 연결 설정을 코드로 두기(추천 적용… | ③ `traces_service_graph_request_total{client, server}`가 보낸 짝 수와 같고, 연결 지표가 1이며, 다른 짝(보내지… | 자동 시험 | B | 시험: packages/platform/test-int/tempo-service-graph.int.test.ts |
+| V-T50 | ④ | 관측 저장소·exporter·신호 연결 설정을 코드로 두기(추천 적용… | ④ Loki 라벨 이름이 `namespace`·`service`·`env`·`cluster` 넷뿐이고, 그 밖의… | 자동 시험 | B | 시험: packages/platform/test-int/loki-labels.int.test.ts |
+| V-T50 | ⑤ | 관측 저장소·exporter·신호 연결 설정을 코드로 두기(추천 적용… | ⑤ 노출 지표에 `queryid` 라벨이 있고, 쿼리 문장과 넣은 상수는 0건이며, `queryid` 시계열이 20개를 넘지 않는다 | 자동 시험 | B | 시험: packages/platform/test-int/postgres-exporter.int.test.ts |
+| V-T50 | ⑥ | 관측 저장소·exporter·신호 연결 설정을 코드로 두기(추천 적용… | ⑥ YACE가 가져오는 지표가 docs/observability.md §8 지표 출처 표의 것뿐이고, postgres_exporter 인자가 쿼리 문장 끔·상위… | 자동 시험 | B | 시험: tools/ci/observability-stores.test.mjs |
+| V-T50 | ⑦ | 관측 저장소·exporter·신호 연결 설정을 코드로 두기(추천 적용… | ⑦ platform 폴더 '관측 파이프라인' 대시보드에 증거 수집기 행(대상·결과별 수집, 경보 고른 결과, 거절 까닭), 수집기 행(판정 전 버림, 보내기… | 자동 시험 | B | 시험: tools/local/observability-dashboard.test.mjs |
+| V-T50 | ⑧ | 관측 저장소·exporter·신호 연결 설정을 코드로 두기(추천 적용… | ⑧ 남길 trace(정상 표본에 든 요청, 5xx, SLO 지연 초과)의 지연 히스토그램 점에만 exemplar `traceId`·`spanId`가 붙고… | 다른 단계 | B | OPS-080 뒤 몫(새 기능 행 제안, F-01-4 계획 '감독에게' 1) · 서비스 템플릿이 남길 trace의 지연 점에만 exemplar를 다는 규칙은 F-01-3이 서버 span에 다는… |
+| V-T50 | ⑨ | 관측 저장소·exporter·신호 연결 설정을 코드로 두기(추천 적용… | ⑨ Loki 라벨 넷의 값이 자원 속성(`k8s.namespace.name`·`service.name`·`deployment.environment`·클러스터… | 다른 단계 | B | OPS-080 뒤 몫(새 기능 행 제안, F-01-4 계획 '감독에게' 1) · Loki 라벨 넷을 다는 곳은 F-01-3이 만드는 게이트웨이 수집기… |
 | V-T33 | ① | Redis 클라이언트 비교 PoC(추천 적용 2026-10-28, 기술… | ①이 ±10% [가정] 안이면 node-redis로 확정하고, 결과와 판정을 새 ADR과 성능 장부에 남긴다. 2026-11-01… | 빈칸 | B | — |
 | V-T33 | ② | Redis 클라이언트 비교 PoC(추천 적용 2026-10-28, 기술… | ②는 명령 실패 없이 새 토폴로지로 간다. … 에서 ioredis와 같고 … 노드 죽이기에서 가장 낫고 … (`ASK` 오류 약 150건)· … (약 26%… | 빈칸 | B | — |
 | V-T33 | ③ | Redis 클라이언트 비교 PoC(추천 적용 2026-10-28, 기술… | ③은 스크립트를 다시 싣고 한 번에 성공한다. … 에서 ioredis와 같고 | 빈칸 | B | — |
