@@ -13,6 +13,8 @@ metadata:
 spec:
   groups:
     - name: realtime-gw
+      # 평가 간격: docs/observability.md §4 간격 표 '그 밖의 규칙 평가 간격'(alert-check가 묶음마다 본다, F-01-7)
+      interval: 30s
       rules:
         - alert: realtime_gw_degraded
           # 파드가 Degraded로 바뀐 즉시(0m) SEV2. 그동안 묶음 대기 p99 경보는 이 경보가 대신한다
@@ -25,6 +27,7 @@ spec:
           annotations:
             summary: realtime-gw 좌석 전파가 Degraded(1초 묶음)다
             runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-23-배포-되돌리기와-동결-중-긴급-변경
+            dashboard_url: /d/peaket-svc-realtime-gw
             game_day: G-06
             description: '{{ $labels.namespace }}/{{ $labels.pod }}가 좌석 전파를 1초 묶음으로 바꿨다. 좌석 변경 p99가 50ms를 넘는 창이 18개(3분) 이어졌거나 박자가 돌지 않았다. 묶음 대기 p99 경보는 이 경보로 갈음한다.'
         - alert: realtime_gw_buffer_slow_connections
@@ -38,6 +41,7 @@ spec:
           annotations:
             summary: realtime-gw 연결의 5% 이상이 보내기 버퍼 때문에 1초 묶음이다
             runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-06-좌석-redis-페일오버-대응
+            dashboard_url: /d/peaket-svc-realtime-gw
             game_day: G-06
             description: '버퍼로 1초 간격이 된 연결 비율이 30초 동안 5% [가정] 이상이다. G-06에서 60초 안에 이 경보가 울리는지 본다. 분모는 realtime_gw_connections다.'
         - alert: realtime_gw_batch_wait_p99_high
@@ -54,5 +58,6 @@ spec:
           annotations:
             summary: realtime-gw 묶음 대기의 150ms 초과 비율이 1%를 넘는다
             runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-23-배포-되돌리기와-동결-중-긴급-변경
+            dashboard_url: /d/peaket-svc-realtime-gw
             game_day: G-06
             description: 'Degraded가 아닌데 5분 동안 묶음 대기 150ms [가정]를 넘은 비율이 1%를 넘는다. 지연 경보는 histogram_quantile 대신 le="150" 경계 칸의 비율로 계산한다(docs/observability.md §5). 파드가 Degraded가 되면 이 경보는 realtime_gw_degraded로 갈음한다.'

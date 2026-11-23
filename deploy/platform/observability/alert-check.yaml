@@ -1,0 +1,15 @@
+# 경보 규칙 검사(tools/ci/alert-check.mjs)의 설정(기능 F-01-7, OPS-130, 시험 V-T20 ①③).
+# 정본: docs/observability.md §4 '긁기·평가·알림 간격'의 간격 표('그 밖의 긁기 작업')와 간격 규칙 셋의 '검사 방법' ③(예외 목록).
+# 계획 docs/review/plans/F-01-7.md §5 '설정 파일'. 상수·파일 자리(INPUT_STALE_MS 등)는 도구에 고정이고 여기 두지 않는다.
+# otherScrapeInterval: slo-fast(prometheus/scrape-slo-fast.yaml) 밖 긁기 작업의 간격. 평가 간격이 slo-fast 긁기 간격과 다른 묶음의 원천 지표와,
+#   규칙 시험 입력의 원천 지표 간격으로 쓴다.
+# testIntervalExceptions: 입력 간격 검사(V-T20 ③)만 건너뛸 규칙 시험 묶음. file은 저장소 뿌리 기준, test는 promtool 시험 묶음의 name 그대로다.
+#   까닭이 비었거나 그 시험 묶음이 없으면 검사가 막는다(낡은 예외가 남지 않게). 예외를 더하려면 정본 §4 '검사 방법' ③을 먼저 고친다.
+otherScrapeInterval: 15s
+testIntervalExceptions:
+  - file: deploy/platform/observability/test/slo-28d.test.yaml
+    test: 'V-T51 ⑥ 28일 1배(3일·6시간) 경보는 두 창이 모두 넘을 때만 SEV3이다'
+    reason: '입력 30초. 규칙 시험 도구가 한 조회의 표본을 1만 개로 막아 3일 창을 5초 입력으로 돌릴 수 없다(F-01-5 계획 시험 결과 6)'
+  - file: deploy/platform/observability/test/slo-onsale.test.yaml
+    test: 'V-T20 ④ 긁기 흔들림과 빠진 표본이 있어도 20초 창이 비지 않고 10배 경계를 지킨다'
+    reason: '입력 1초. 긁기 시각 흔들림(5초 안팎)과 빠진 표본을 1초 칸으로 흉내 낸다(F-01-5 계획 시험 결과 6)'
