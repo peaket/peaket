@@ -25,7 +25,7 @@ permissions:
 jobs:
   node:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       # --affected는 기준과 머리 사이 이력이 모두 있어야 한다(얕으면 모두 바뀐 것으로 본다, Turborepo 문서 2026-11-01 확인)
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
