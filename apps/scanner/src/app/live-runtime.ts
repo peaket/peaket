@@ -210,9 +210,12 @@ class LiveRuntime {
         this.#publish();
       },
       onSignedOut: () => {
-        this.#token = undefined;
-        this.#publish();
-        navigate('/login?live=1');
+        // 업로드 401 invalid_token도 로그아웃과 같다. 다만 지금 묶음의 '토큰 없이 한 번 더'(O-T21 ③)가
+        // 끝난 뒤에 런타임을 버린다. 그래야 그 재전송이 옛 API 객체를 잃지 않는다(IR-04).
+        queueMicrotask(() => {
+          this.#resetSession();
+          navigate('/login?live=1');
+        });
       },
     });
     this.#bindBrowserEvents();

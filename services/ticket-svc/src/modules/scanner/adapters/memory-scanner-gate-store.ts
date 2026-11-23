@@ -266,7 +266,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
         // 티켓 구역·기기 배치 구역·배치 모드가 다르면 거부한다(offline-gate §6.4 8, §7.1).
         result = 'REJECT';
         reason = 'WRONG_ZONE';
-      } else if (scan.direction === 'IN' && i.reentryAllowed === true) {
+      } else if (scan.direction === 'IN' && i.reentryAllowed === true && result === 'PASS') {
         if (latest?.direction === 'IN') {
           result = 'CHECK';
           reason = 'NO_EXIT_RECORD';
