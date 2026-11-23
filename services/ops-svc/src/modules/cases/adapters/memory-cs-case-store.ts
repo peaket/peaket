@@ -66,7 +66,9 @@ export class MemoryCsCaseStore implements CsCaseStore, CsAppealStore {
         return { result: 'duplicate', case: c };
       }
     }
-    const existing = this.#openOf(input.kind, input.targetRef);
+    // SETTLEMENT_ADJUSTMENT_SUGGESTED는 같은 정산서라도 결제(사건 키)마다 다른 건이다(F-07-8 J-T23 ③).
+    // eventKey 중복은 위에서 걸러지므로 (종류, 대상) 열린 건 재사용을 이 종류에는 하지 않는다.
+    const existing = input.kind === 'SETTLEMENT_ADJUSTMENT_SUGGESTED' ? undefined : this.#openOf(input.kind, input.targetRef);
     const c = existing ?? newCsCase(input);
     if (!existing) this.cases.set(c.caseId, c);
     if (input.kind === VERIFICATION_APPEAL_KIND && !this.appeals.has(c.caseId)) {

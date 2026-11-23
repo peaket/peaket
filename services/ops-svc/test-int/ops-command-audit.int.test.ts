@@ -114,7 +114,10 @@ describe('0000 마이그레이션과 표 모양', () => {
 
     const idx = await q<{ indexdef: string }>("select indexdef from pg_indexes where schemaname = 'public' and tablename = 'cs_case' and indexname = 'cs_case_open_key'");
     expect(idx.rows).toHaveLength(1);
-    expect(idx.rows[0]!.indexdef).toContain("WHERE (status <> 'RESOLVED'::text)");
+    // F-07-8 J-T23 ③: 대사 풀린 결제마다 다른 건을 열어야 해 SETTLEMENT_ADJUSTMENT_SUGGESTED만 (종류, 대상) 유일에서 뺀다.
+    // 중복은 cs_case_request.event_key가 막는다(0033).
+    expect(idx.rows[0]!.indexdef).toContain("status <> 'RESOLVED'::text");
+    expect(idx.rows[0]!.indexdef).toContain("kind <> 'SETTLEMENT_ADJUSTMENT_SUGGESTED'::text");
 
     const head = await q<{ last_seq: string; last_hash: string }>("select last_seq, encode(last_hash, 'hex') as last_hash from audit_chain_head where id = 1");
     expect(head.rows).toEqual([{ last_seq: '0', last_hash: '' }]);

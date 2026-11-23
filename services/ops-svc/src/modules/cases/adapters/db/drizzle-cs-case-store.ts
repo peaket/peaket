@@ -151,12 +151,24 @@ export class DrizzleCsCaseStore implements CsCaseStore, CsAppealStore {
   }
 
   async #insertOpen(ex: Executor, input: CsCaseOpenInput): Promise<{ case: CsCase; created: boolean }> {
+    // SETTLEMENT_ADJUSTMENT_SUGGESTED는 같은 정산서라도 결제(사건 키)마다 다른 건이다(F-07-8 J-T23 ③).
+    // eventKey 중복은 receive가 먼저 거르므로, 이 종류는 (종류, 대상) 열린 건 유일 인덱스를 쓰지 않고 새로 넣는다.
+    if (input.kind === 'SETTLEMENT_ADJUSTMENT_SUGGESTED') {
+      const inserted = (
+        await ex.execute(sql`
+          insert into cs_case (id, kind, target_ref, status, category, progress_due_at, result_due_at, created_at, updated_at, detail)
+          values (${input.caseId}::uuid, ${input.kind}, ${input.targetRef}, 'OPEN', ${input.category ?? ''}, ${ts(input.progressDueAtMs)}, ${ts(input.resultDueAtMs)},
+                  ${new Date(input.nowMs)}::timestamptz, ${new Date(input.nowMs)}::timestamptz, ${input.detail ?? null})
+          returning ${COLUMNS}`)
+      ).rows as unknown as Row[];
+      return { case: toCase(inserted[0]!), created: true };
+    }
     const inserted = (
       await ex.execute(sql`
         insert into cs_case (id, kind, target_ref, status, category, progress_due_at, result_due_at, created_at, updated_at, detail)
         values (${input.caseId}::uuid, ${input.kind}, ${input.targetRef}, 'OPEN', ${input.category ?? ''}, ${ts(input.progressDueAtMs)}, ${ts(input.resultDueAtMs)},
                 ${new Date(input.nowMs)}::timestamptz, ${new Date(input.nowMs)}::timestamptz, ${input.detail ?? null})
-        on conflict (kind, target_ref) where status <> 'RESOLVED' do nothing
+        on conflict (kind, target_ref) where status <> 'RESOLVED' and kind <> 'SETTLEMENT_ADJUSTMENT_SUGGESTED' do nothing
         returning ${COLUMNS}`)
     ).rows as unknown as Row[];
     if (inserted[0]) return { case: toCase(inserted[0]), created: true };

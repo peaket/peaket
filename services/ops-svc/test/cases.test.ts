@@ -74,7 +74,7 @@ describe('CS 처리함 건 접수', () => {
   // PG_BALANCE_MISMATCH)을 받게 해(J-T38 ⑥, cs-case-payout-kinds.test.ts) 받는 종류는 열다섯이다
   // F-07-7 시험 담당(lane5-f077-test, 2026-11-23, 시험 이의 TO-07): ADR-0370 결정 7·8(계획 I-07)이 포트원 둘(PORTONE_PAYOUT_EXECUTION·PORTONE_LEDGER_MISMATCH)을
   // 받게 해(J-T41 ②·J-T20 ②, cs-case-portone-kinds.test.ts) 받는 종류는 열일곱이다
-  test('GAT-090 A4 J-T35 ③ R-T48 ③ J-T38 ⑥ J-T41 ② 받는 종류 열일곱 밖은 종류마다 건을 만들지 않는다', async () => {
+  test('GAT-090 A4 J-T35 ③ R-T48 ③ J-T38 ⑥ J-T41 ② 받는 종류 열여덟 밖은 종류마다 건을 만들지 않는다', async () => {
     const accepted = new Set([
       'REFUND_FAILED',
       'FLAGGED',
@@ -93,9 +93,10 @@ describe('CS 처리함 건 접수', () => {
       'PG_BALANCE_MISMATCH',
       'PORTONE_PAYOUT_EXECUTION',
       'PORTONE_LEDGER_MISMATCH',
+      'SETTLEMENT_ADJUSTMENT_SUGGESTED',
     ]);
     const others = CS_CASE_KINDS.filter((k) => !accepted.has(k));
-    expect(others.length).toBe(CS_CASE_KINDS.length - 17);
+    expect(others.length).toBe(CS_CASE_KINDS.length - 18);
     expect(others).toEqual(expect.arrayContaining(['INQUIRY', 'CONTENT_REPORT', 'APPEAL', 'TICKET_NOT_ISSUED']));
     expect(others).not.toContain('STATEMENT_DISPUTE');
     // 포트원 실행·원장 불일치는 이제 받는 쪽이다
