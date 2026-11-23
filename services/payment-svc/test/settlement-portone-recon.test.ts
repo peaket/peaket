@@ -152,6 +152,32 @@ describe('J-T20 포트원 출금 대사', () => {
     expect(leaks(dumpStore(h.store) + h.log.text(), '10055555555555', '모르는사람')).toEqual([]);
   });
 
+  test('J-T20 ④ 이어지지 않는 출금이 나오기 전에 이미 연 실행 건이 있으면 그 묶음에 실행 멈춤 건이 새 사건 키로 하나 더 생기고 detail에 실행 멈춤이 적힌다(계획 §5.1 (타) 결정 2)', async () => {
+    const A = partner();
+    const b = batch({ pg: 'PORTONE', payoutDate: PAYOUT_DATE, totalAmount: 1_000_000, statementCount: 1, status: 'SUBMITTED', at: new Date(COMPLETED_AT - 86_400_000) });
+    await h.store.insertPayoutBatch(b);
+    const s = statement({ promoterId: A.P, pg: 'PORTONE', payoutDate: PAYOUT_DATE, status: 'SCHEDULED', payoutAmount: 1_000_000, payoutBatchId: b.batchId, at: new Date(COMPLETED_AT - 86_400_000) });
+    await h.store.saveStatement(s);
+    fake.partnerSettlements.set(PAYOUT_DATE, [{ partnerId: A.partnerId, transferId: s.statementId, settlementAmount: 1_000_000 }]);
+    await h.settlements.preparePortoneExecution(PAYOUT_DATE);
+    const opened = [...h.store.caseRequests.values()].find((c) => c.eventKey === `portone-execution:${b.batchId}`)!;
+    expect(opened.detail ?? '').not.toContain('실행 멈춤');
+    fake.accountTransfers.push(withdrawal({ id: 'at-rogue-2', payoutId: null, withdrawalType: 'TRANSFER', amount: 5_000_000, bank: 'WOORI', accountNumber: '10055555555555', holderName: '모르는사람' }));
+    at(COMPLETED_AT + 30 * 60_000);
+    await h.settlements.reconcilePortoneTransfers();
+    const halted = [...h.store.caseRequests.values()].filter((c) => (c.detail ?? '').includes('실행 멈춤'));
+    expect(halted).toHaveLength(1);
+    expect(halted[0]!.eventKey).not.toBe(opened.eventKey);
+    expect(halted[0]!.sourceId === b.batchId || (halted[0]!.detail ?? '').includes(b.batchId)).toBe(true);
+    // 처음 연 건의 글은 바뀌지 않는다
+    expect(h.store.caseRequests.get(opened.eventKey)?.detail).toBe(opened.detail);
+    expect(leaks(halted[0]!.detail ?? '', '10055555555555', '모르는사람')).toEqual([]);
+    // 다음 tick에 다시 만들지 않는다
+    at(COMPLETED_AT + 60 * 60_000);
+    await h.settlements.reconcilePortoneTransfers();
+    expect([...h.store.caseRequests.values()].filter((c) => (c.detail ?? '').includes('실행 멈춤'))).toHaveLength(1);
+  });
+
   test('J-T20 ⑤ SUCCEEDED 뒤 59분 59.999초에는 MISSING이 없고 1시간에 MISSING과 건이 생기며, 로그·저장소·건·경보에 계좌번호 전체·예금주명이 0건이다 [ASVS v5.0.0-16.2.5]', async () => {
     const A = partner();
     const x = await paid(A.P, 12_193_000, 1);
@@ -278,10 +304,13 @@ describe('J-T21 포트원 계좌 대조와 보류', () => {
     expect(fake.calls('GET /platform/partner-settlements').map((c) => c.query)).toEqual([{ settlementDate: PAYOUT_DATE }]);
     expect(h.store.statements.get(x.sa.statementId)).toMatchObject({ status: 'HELD', holdReason: 'ACCOUNT_MISMATCH' });
     expect(h.store.statements.get(x.sb.statementId)).toMatchObject({ status: 'SCHEDULED' });
+    const request = [...h.store.caseRequests.values()].find((c) => c.eventKey === `portone-execution:${x.batchId}`)!;
+    expect(request.detail).toMatch(/^뺀 정산서: /);
+    expect(request.detail).toContain(`${x.sa.statementId}(ACCOUNT_MISMATCH)`);
+    expect(request.detail).toContain(x.sb.statementId);
+    expect(leaks(request.detail ?? '', ACCOUNT, LEGAL)).toEqual([]);
     await h.settlements.retryPayoutCases();
-    const sent = JSON.stringify(ops.cases.filter((c) => JSON.stringify(c).includes(x.batchId)));
-    expect(sent).toContain(x.sa.statementId);
-    expect(sent).toContain(x.sb.statementId);
+    expect(ops.cases.filter((c) => c.eventKey === `portone-execution:${x.batchId}`).map((c) => c.detail)).toEqual([request.detail]);
   });
 
   test('J-T21 A가 계좌를 다시 내 대조가 맞아도 3영업일 전에는 재확정 409이고, 증빙(accountReconciled)만으로는 풀리지 않으며, 보류가 끝난 뒤에만 CONFIRMED다', async () => {
@@ -404,8 +433,10 @@ describe('J-T22 포트원 잔액 대조와 대사 멈춤', () => {
     fake.clearFaults();
     fake.partnerSettlements.set(PAYOUT_DATE, []);
     await h.settlements.preparePortoneExecution(PAYOUT_DATE);
+    const request = [...h.store.caseRequests.values()].find((c) => c.eventKey === `portone-execution:${b.batchId}`)!;
+    expect(request.detail).toContain('commander 확인 필요');
     await h.settlements.retryPayoutCases();
-    expect(JSON.stringify(ops.cases.filter((c) => JSON.stringify(c).includes(b.batchId)))).toContain('commander 확인 필요');
+    expect(ops.cases.filter((c) => c.eventKey === `portone-execution:${b.batchId}`).map((c) => c.detail)).toEqual([request.detail]);
   });
 
   test('J-T22 ② 지급일 15:00 KST: 14:59:59.999에는 내지 않고 15:00에 일괄 지급 ID 없는 묶음 수 게이지 1·SEV3 한 번이다(정산 일꾼 tick)', async () => {

@@ -8,7 +8,7 @@ import { type AdminAuthz, type AdminAuthzPort, createPlatformLogger, createServi
 import type { Writable } from 'node:stream';
 import { randomUUID } from 'node:crypto';
 import { HttpSettlementCaseNotice, ManualPortonePayoutGateway, MemoryReauthVerifier, MemorySettlementPaymentSource, MemorySettlementStore, settlementApprovalLog, SettlementModule, Settlements, UnavailableTossPayoutGateway } from '../../src/modules/settlement/index.js';
-import type { PayoutApprovalVerifier, PayoutGateway, PgLedgerSource, ReauthVerifier, SaleSuspensionSource, SettlementPaymentSource, SettlementStore, VerifiedPayoutApproval } from '../../src/modules/settlement/domain/ports.js';
+import type { PayoutApprovalVerifier, PayoutGateway, PgLedgerSource, ReauthVerifier, TossPayoutTransport, SaleSuspensionSource, SettlementPaymentSource, SettlementStore, VerifiedPayoutApproval } from '../../src/modules/settlement/domain/ports.js';
 import { portonePayoutConfigured, type PortonePayoutConfig } from '../../src/modules/settlement/domain/payout-adapters.js';
 import { PromSettlementSignals } from '../../src/modules/settlement/adapters/prom-settlement-signals.js';
 import { assembleOpsSettlementSinks, assemblePortonePlatform } from '../../src/start.js';
@@ -76,6 +76,8 @@ export interface HarnessOptions {
   gateways?: readonly PayoutGateway[];
   /** 결제사 잔액 대사의 장부 원천(F-07-6 PgLedgerSource) */
   pgLedger?: PgLedgerSource;
+  /** Settlements에 넣을 토스 전송을 바꿔 끼운다(기본은 toss 기록 대역 그대로, 예: withoutUpdateSeller) */
+  tossTransport?: TossPayoutTransport;
 }
 
 export interface BuiltSettlements<S extends SettlementStore> {
@@ -119,7 +121,7 @@ export function buildSettlements<S extends SettlementStore>(store: S, payments: 
     log: settlementApprovalLog(logger),
     ...(o.ops ? { caseNotice: new HttpSettlementCaseNotice(o.ops.url, INTERNAL_TOKEN) } : {}),
     // 토스 전송·지표·장부 원천은 F-07-6 계획 §7 보충의 칸 이름(tossTransport·signals·pgLedger, test/support/toss-harness.ts와 같음)
-    ...(toss ? { tossTransport: toss } : {}),
+    ...(o.tossTransport ? { tossTransport: o.tossTransport } : toss ? { tossTransport: toss } : {}),
     ...(o.pgLedger ? { pgLedger: o.pgLedger } : {}),
     // ↓ 인터페이스 빈칸(계획 §5.1에 칸 이름이 없음): 포트원 플랫폼은 PayoutAgencies 생성자와 같은 이름을 Settlements 의존에도 쓴다고 가정
     ...(platform.transport ? { portone: platform.transport } : {}),

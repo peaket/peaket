@@ -26,6 +26,7 @@ export interface OpsAlert {
 
 const AUDIT_KEYS = ['eventKey', 'recordType', 'recordId', 'payload', 'occurredAt'];
 const ALERT_KEYS = ['eventKey', 'kind', 'severity', 'source', 'reason', 'detail', 'createdAt'];
+const CASE_KEYS = ['eventKey', 'kind', 'sourceId', 'category', 'followUp', 'hold', 'createdAt', 'dueBaseAt', 'detail'];
 
 export class OpsIntakeFake {
   mode: OpsFakeMode = 'up';
@@ -110,6 +111,20 @@ export class OpsIntakeFake {
           return send(202, { accepted: true, alertId: '00000000-0000-4000-8000-000000000001' });
         }
         if (path === '/internal/v1/cs-cases') {
+          // ops-svc CaseRequestedBody(.strict)에 선택 칸 detail(1~2,000자)만 더한 닫힌 모양(F-07-7 계획 §5.1 (타) 결정 2)
+          const detailOk = body.detail === undefined || (typeof body.detail === 'string' && body.detail.length >= 1 && body.detail.length <= 2_000);
+          const ok =
+            Object.keys(body).every((k) => CASE_KEYS.includes(k)) &&
+            typeof body.eventKey === 'string' &&
+            typeof body.kind === 'string' &&
+            typeof body.sourceId === 'string' &&
+            typeof body.category === 'string' &&
+            typeof body.createdAt === 'string' &&
+            detailOk;
+          if (!ok) {
+            this.malformed.push(body);
+            return send(400, { type: 'invalid-body' });
+          }
           this.cases.push(body);
           return send(202, { accepted: true, caseId: `case-${this.cases.length}` });
         }

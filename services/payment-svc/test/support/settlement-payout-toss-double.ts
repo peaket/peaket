@@ -57,7 +57,7 @@ export class RecordingTossPayout implements TossPayoutTransport {
     throw connectionReset();
   }
 
-  async requestPayouts(pgStore: PgStore): Promise<TossSendResult> {
+  async requestPayouts(pgStore: PgStore, _input?: Parameters<TossPayoutTransport['requestPayouts']>[1]): Promise<TossSendResult> {
     this.#push({ method: 'requestPayouts', pgStore });
     return { kind: 'NO_RESPONSE' };
   }
@@ -98,8 +98,25 @@ export class RecordingTossPayout implements TossPayoutTransport {
     return { availableAmount: 900_000_000_000, pendingAmount: 0 };
   }
 
-  async listSettlementFees(pgStore: PgStore): Promise<number> {
+  async listSettlementFees(pgStore: PgStore, _from?: Date, _to?: Date): Promise<number> {
     this.#push({ method: 'listSettlementFees', pgStore });
     return 0;
   }
+}
+
+/**
+ * 셀러 수정이 없는 전송(F-07-7 계획 §5.1 (타) 결정 1: `updateSeller`는 선택 메서드). 고정된 F-07-6 시험의 FakeTransport처럼
+ * 그 메서드가 없는 전송을 흉내 내고, 나머지 호출은 기록 대역에 그대로 넘긴다(호출 기록은 inner.calls로 본다)
+ */
+export function withoutUpdateSeller(inner: RecordingTossPayout): TossPayoutTransport {
+  const t: TossPayoutTransport = {
+    requestPayouts: (pgStore, input) => inner.requestPayouts(pgStore, input),
+    getPayout: (pgStore, id) => inner.getPayout(pgStore, id),
+    cancelPayout: (pgStore, id) => inner.cancelPayout(pgStore, id),
+    registerSeller: (pgStore, body) => inner.registerSeller(pgStore, body),
+    getSeller: (pgStore, id) => inner.getSeller(pgStore, id),
+    balance: (pgStore) => inner.balance(pgStore),
+    listSettlementFees: (pgStore, from, to) => inner.listSettlementFees(pgStore, from, to),
+  };
+  return t;
 }

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { OpsIntakeFake } from './support/ops-intake-fake.js';
 import { PortonePlatformFake } from './support/portone-platform-fake.js';
+import { RecordingTossPayout, withoutUpdateSeller } from './support/settlement-payout-toss-double.js';
 import { dumpStore, harness, httpService, kyc, leaks, PORTONE_CONTRACT_ID, PORTONE_SECRET, portonePartner, tossSeller, type Harness } from './support/settlement-portone-harness.js';
 
 const NOW = Date.parse('2026-11-23T01:00:00.000Z');
@@ -207,6 +208,42 @@ describe('J-T39 지급대행 등록(payment 몫)', () => {
     expect(fake.calls('PATCH /platform/partners/{id}')).toHaveLength(0);
     expect(h.store.portonePartners.size).toBe(0);
     expect(h.store.accounts.size).toBe(0);
+  });
+
+  test('J-T39 ⑥ 토스 셀러 행이 있는데 전송에 셀러 수정(updateSeller)이 없으면 등록은 503 payout-gateway-unavailable이고 결제사 호출 0·행 그대로다(계획 §5.1 (타) 결정 1)', async () => {
+    const recorder = new RecordingTossPayout();
+    const h = harness({ now: NOW, portone: fake, toss: recorder, tossTransport: withoutUpdateSeller(recorder), ops });
+    const P = randomUUID();
+    fake.holder(BANK_ENUM, ACCOUNT, '(주)피켓엔터');
+    tossSeller(h.store, P, 'STANDARD', 'PARTIALLY_APPROVED', new Date(NOW - 86_400_000));
+    tossSeller(h.store, P, 'ESCROW', 'APPROVED', new Date(NOW - 86_400_000));
+    const before = JSON.stringify([...h.store.tossSellers.values()]);
+    const err = await h.settlements.registerPayoutAgencies(input(P)).catch((e: unknown) => e);
+    expect(problemOf(err)).toMatchObject({ status: 503, type: expect.stringContaining('payout-gateway-unavailable') });
+    expect(recorder.calls).toEqual([]);
+    expect(fake.calls('POST /platform/partners')).toHaveLength(0);
+    expect(fake.calls('PATCH /platform/partners/{id}')).toHaveLength(0);
+    expect(JSON.stringify([...h.store.tossSellers.values()])).toBe(before);
+    expect([h.store.accounts.size, h.store.portonePartners.size]).toEqual([0, 0]);
+  });
+
+  test('J-T39 ⑥ 같은 조건(셀러 수정 없는 전송)의 정산 계좌 변경도 503이고 계좌·변경 기록·결제사가 그대로다(계획 §5.1 (타) 결정 1)', async () => {
+    const recorder = new RecordingTossPayout();
+    const h = harness({ now: NOW, portone: fake, toss: recorder, tossTransport: withoutUpdateSeller(recorder), ops });
+    const P = randomUUID();
+    const since = new Date(NOW - 30 * 86_400_000);
+    h.store.kycs.set(P, kyc(P, since, { legalName: LEGAL, representative: '김대표' }));
+    h.store.accounts.set(P, { promoterId: P, bankCode: '06', accountLast4: '1234', version: 9, changedAt: since, holdUntil: since, holderVerified: true, agencySyncPending: false });
+    const partnerId = portonePartner(h.store, P, since);
+    fake.partners.set(partnerId, { id: partnerId, name: LEGAL, account: { bank: 'KOOKMIN', number: '06400000001234', holder: LEGAL }, defaultContractId: 'c', scheduled: null });
+    tossSeller(h.store, P, 'STANDARD', 'PARTIALLY_APPROVED', since);
+    tossSeller(h.store, P, 'ESCROW', 'PARTIALLY_APPROVED', since);
+    fake.holder(BANK_ENUM, ACCOUNT, LEGAL);
+    await expect(h.settlements.putPayoutAccount(P, 'sid', { bankCode: BANK, accountNumber: ACCOUNT, holderName: LEGAL }, '"9"', 'test-reauth')).rejects.toMatchObject({ status: 503, type: expect.stringContaining('payout-gateway-unavailable') });
+    expect(recorder.calls).toEqual([]);
+    expect(fake.calls('PATCH /platform/partners/{id}')).toHaveLength(0);
+    expect(h.store.accounts.get(P)).toMatchObject({ bankCode: '06', accountLast4: '1234', version: 9, agencySyncPending: false });
+    expect(h.store.payoutAccountChanges).toEqual([]);
   });
 
   test('J-T39 ⑦ 판매자 확인 내부 경로: seller_kyc가 VERIFIED·상호·대표자·확인 시각으로 쓰이고, 같은 값을 두 번 불러도 행이 그대로다', async () => {

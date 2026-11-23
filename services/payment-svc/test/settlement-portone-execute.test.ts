@@ -195,11 +195,15 @@ describe('J-T41 ② 지급일 09:00 KST 실행 건', () => {
     await expect(h.settlements.preparePortoneExecution(PAYOUT_DATE)).resolves.toMatchObject({ cases: 0, held: 0 });
     expect([...h.store.caseRequests.values()].filter((c) => c.kind === 'PORTONE_PAYOUT_EXECUTION')).toHaveLength(1);
     expect(events('PAYOUT_HELD')).toHaveLength(3);
-    // 실행 건이 ops에 가면 본문에 뺀 정산서가 적힌다(보낸 건의 글에 세 정산서 ID가 있고 실행할 정산서는 없다)
+    // 실행 건의 detail(계획 §5.1 (타) 결정 2): '뺀 정산서: {정산서 ID}({사유}), …'. 같은 글이 settlement_case_request에 남고 ops 본문 detail 칸으로 간다
+    const request = [...h.store.caseRequests.values()].find((c) => c.eventKey === `portone-execution:${x.batchId}`)!;
+    expect(request.detail).toMatch(/^뺀 정산서: /);
+    for (const [s, reason] of [[x.hold, 'ACCOUNT_CHANGE'], [x.pending, 'ACCOUNT_CHANGE'], [x.stopped, 'SALE_SUSPENDED']] as const) expect(request.detail).toContain(`${s.statementId}(${reason})`);
+    expect(request.detail).not.toContain(x.ok.statementId);
+    expect(request.detail).not.toContain('commander 확인 필요');
     await h.settlements.retryPayoutCases();
-    const sent = JSON.stringify(ops.cases.filter((c) => JSON.stringify(c).includes(x.batchId)));
-    for (const s of [x.hold, x.pending, x.stopped]) expect(sent).toContain(s.statementId);
-    expect(sent).not.toContain(x.ok.statementId);
+    const sent = ops.cases.filter((c) => c.eventKey === `portone-execution:${x.batchId}`);
+    expect(sent.map((c) => [c.kind, c.sourceId, c.detail])).toEqual([['PORTONE_PAYOUT_EXECUTION', x.batchId, request.detail]]);
   });
 
   test('J-T41 ② 보류 끝이 지급일 09:00 KST와 같으면(이미 끝남) 빼지 않는다', async () => {
