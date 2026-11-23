@@ -80,6 +80,19 @@ class LiveRuntime {
   #needsResync = false;
   #flags: GateFlagView[] = [];
   #bound = false;
+  /** 상태 적용(스캔·변경분·전체 목록)을 한 줄로 세운다. 서로의 로컬 입장 상태·번호를 덮지 않게 한다 */
+  #stateChain: Promise<unknown> = Promise.resolve();
+  /** 로그아웃·재로그인 세대. 늦게 끝난 스캔·변경분을 버리는 데 쓴다 */
+  #epoch = 0;
+
+  #withState<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.#stateChain.then(fn, fn);
+    this.#stateChain = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
 
   subscribe = (fn: () => void): (() => void) => {
     this.#listeners.add(fn);
@@ -113,6 +126,8 @@ class LiveRuntime {
       return;
     }
     this.#token = token;
+    // 새 토큰의 세션 ID만 쓴다. 없으면 옛 세션 ID(meta)를 이어 쓰지 않는다(교대 뒤 다른 계정 귀속 방지)
+    this.#scannerSessionId = scannerSessionIdOf(token);
     const existing = await loadDeviceKey();
     this.#key = existing ?? (await (async () => {
       const created = await generateDpopKey();
@@ -123,7 +138,6 @@ class LiveRuntime {
     this.#queue = await openScanQueue();
     const meta = await this.#store.meta();
     if (meta.clockOffsetMs !== undefined) this.#clockOffsetMs = meta.clockOffsetMs;
-    if (meta.scannerSessionId !== undefined) this.#scannerSessionId = meta.scannerSessionId;
     const stored = await this.#store.load();
     this.#state = stored;
 
@@ -131,24 +145,29 @@ class LiveRuntime {
     try {
       const first = await this.#api.shift();
       this.#shift = first;
-      this.#clockOffsetMs = serverClockOffsetMs(first.serverTime, Date.now());
-      this.#scannerSessionId = scannerSessionIdOf(this.#token) ?? this.#scannerSessionId;
+      this.#measure(first.serverTime);
+      const pkg = await this.#api.package(first.eventId);
+      this.#measure(pkg.serverTime);
+      // 목록 뒤 근무 준비를 한 번 더 받아 그 배치(판)를 쓴다(offline-gate §6.3, RV-17)
+      const second = await this.#api.shift().catch(() => undefined);
+      if (second) {
+        this.#shift = second;
+        this.#measure(second.serverTime);
+      }
+      const base = second ?? first;
+      const placement: Placement = {
+        gateZone: base.placement.gateZone,
+        mode: base.placement.mode,
+        version: base.placement.version ?? 0,
+      };
+      this.#state = packageStateOf(pkg, placement, stored?.eventId === pkg.eventId ? stored.entries : undefined);
+      await this.#store.save(this.#state);
+      this.#lastChangesAtMs = Date.now();
       await this.#store.setMeta({
         ...(this.#clockOffsetMs !== undefined ? { clockOffsetMs: this.#clockOffsetMs } : {}),
         ...(this.#scannerSessionId !== undefined ? { scannerSessionId: this.#scannerSessionId } : {}),
       });
-      const pkg = await this.#api.package(first.eventId);
-      // 목록 뒤 근무 준비를 한 번 더 받아 그 배치(판)를 쓴다(offline-gate §6.3, RV-17)
-      const second = await this.#api.shift().catch(() => first);
-      this.#shift = second;
-      const placement: Placement = {
-        gateZone: second.placement.gateZone,
-        mode: second.placement.mode,
-        version: second.placement.version ?? 0,
-      };
-      this.#state = packageStateOf(pkg, placement, stored?.eventId === pkg.eventId ? stored.entries : undefined);
-      await this.#store.save(this.#state);
-      if (second.role === 'gate_lead') this.#flags = await this.#api.flags(second.eventId).catch(() => []);
+      if (base.role === 'gate_lead') this.#flags = await this.#api.flags(base.eventId).catch(() => []);
     } catch (e) {
       if (e instanceof ScannerApiError && reloginRequired(e.status, e.type)) {
         await this.#relogin(e.title);
@@ -208,10 +227,16 @@ class LiveRuntime {
   #bindBrowserEvents(): void {
     if (this.#bound || typeof window === 'undefined') return;
     this.#bound = true;
-    window.addEventListener('online', () => void this.flushNow());
+    window.addEventListener('online', () => void this.#resume());
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) void this.flushNow();
+      if (!document.hidden) void this.#resume();
     });
+  }
+
+  /** 네트워크·화면이 돌아오면 큐를 올리고 변경분도 바로 받는다(§6.3 주기) */
+  async #resume(): Promise<void> {
+    await this.flushNow();
+    await this.syncChanges();
   }
 
   #errorOf(e: unknown): void {
@@ -221,9 +246,39 @@ class LiveRuntime {
 
   async #relogin(message: string): Promise<void> {
     await clearStaffToken().catch(() => undefined);
-    this.#token = undefined;
+    this.#resetSession();
     this.#set({ mode: 'error', error: message });
     navigate('/login?live=1');
+  }
+
+  /**
+   * 로그아웃·재로그인: 이 문서의 세션 값을 모두 버린다. 다음 ensure가 새 토큰으로 #start한다(IR-04).
+   * 기기 키·저장소·남은 큐는 그대로 둔다(기기 인증 업로드와 오프라인 목록).
+   */
+  #resetSession(): void {
+    this.#epoch += 1;
+    if (this.#changesTimer !== undefined) clearInterval(this.#changesTimer);
+    this.#changesTimer = undefined;
+    if (this.#verdictTimer !== undefined) clearTimeout(this.#verdictTimer);
+    this.#verdictTimer = undefined;
+    this.#uploader?.stop();
+    this.#uploader = undefined;
+    this.#started = false;
+    this.#starting = undefined;
+    this.#api = undefined;
+    this.#token = undefined;
+    this.#shift = undefined;
+    this.#state = undefined;
+    this.#clockOffsetMs = undefined;
+    this.#scannerSessionId = undefined;
+    this.#lastChangesAtMs = undefined;
+    this.#needsResync = false;
+    this.#flags = [];
+    this.#sameQr.clear();
+    const pending = this.#uploadState.pending;
+    this.#uploadState = { pending, failed: false };
+    this.#view = { mode: 'preview', setupState: '준비 중', queue: pending, uploadFailed: false, needsResync: false, ready: false, flags: [] };
+    this.#publish();
   }
 
   #set(patch: Partial<LiveView>): void {
@@ -258,6 +313,12 @@ class LiveRuntime {
   #withOffset(shift: ScannerShiftResponse): ScannerShiftResponse {
     if (this.#clockOffsetMs === undefined) return shift;
     return { ...shift, package: { ...shift.package, clockOffsetMs: this.#clockOffsetMs } };
+  }
+
+  /** 근무 준비·전체 목록 응답의 serverTime으로 오차를 다시 잰다(§6.4 7) */
+  #measure(serverTime: string | undefined): void {
+    if (serverTime === undefined) return;
+    this.#clockOffsetMs = serverClockOffsetMs(serverTime, Date.now());
   }
 
   #ready(): boolean {
@@ -324,27 +385,51 @@ class LiveRuntime {
   async syncChanges(): Promise<void> {
     const api = this.#api;
     const store = this.#store;
-    const current = this.#state;
-    if (!api || !store || !current) return;
+    const snapshot = this.#state;
+    if (!api || !store || !snapshot) return;
+    const epoch = this.#epoch;
     try {
       if (this.#needsResync) {
-        const pkg = await api.package(current.eventId);
-        this.#state = packageStateOf(pkg, current.placement, current.entries);
-        await store.save(this.#state);
-        this.#needsResync = false;
-        this.#lastChangesAtMs = Date.now();
+        const pkg = await api.package(snapshot.eventId);
+        if (epoch !== this.#epoch) return;
+        await this.#withState(async () => {
+          if (epoch !== this.#epoch) return;
+          const latest = this.#state;
+          if (!latest) return;
+          this.#measure(pkg.serverTime);
+          const next = packageStateOf(pkg, latest.placement, latest.entries);
+          this.#state = next;
+          await store.save(next);
+          await store.setMeta({
+            ...(this.#clockOffsetMs !== undefined ? { clockOffsetMs: this.#clockOffsetMs } : {}),
+            ...(this.#scannerSessionId !== undefined ? { scannerSessionId: this.#scannerSessionId } : {}),
+          });
+          this.#needsResync = false;
+          this.#lastChangesAtMs = Date.now();
+        });
         this.#publish();
         return;
       }
-      const page = await api.changes(current.eventId, current.lastSeq);
+      const page = await api.changes(snapshot.eventId, snapshot.lastSeq);
+      if (epoch !== this.#epoch) return;
       const terminated = page.changes.find((c) => c.kind === 'SESSION_TERMINATED' && c.payload.deviceId === this.#shift?.device.deviceId);
       if (terminated) {
         await this.#relogin('이 기기의 스캐너 세션이 끝났습니다. 기기 승인 로그인(SCR-036)을 다시 마쳐 주세요.');
         return;
       }
-      this.#state = applyChangePage(current, page, this.#shift?.device.deviceId ?? '');
-      await store.save(this.#state);
-      this.#lastChangesAtMs = Date.now();
+      // 네트워크를 기다리는 동안 스캔이 끝났을 수 있다. 적용·저장은 지금 상태에 다시 합친다(IR-03)
+      await this.#withState(async () => {
+        if (epoch !== this.#epoch) return;
+        const latest = this.#state;
+        if (!latest) return;
+        if (page.lastSeq > latest.lastSeq) {
+          const next = applyChangePage(latest, page, this.#shift?.device.deviceId ?? '');
+          this.#state = next;
+          await store.save(next);
+        }
+        this.#lastChangesAtMs = Date.now();
+      });
+      if (epoch !== this.#epoch) return;
       this.#publish();
     } catch (e) {
       if (e instanceof ScannerApiError && reloginRequired(e.status, e.type)) {
@@ -355,31 +440,40 @@ class LiveRuntime {
 
   /** 판정 한 번. 준비가 안 됐으면 아무것도 하지 않는다. 같은 QR은 3초 안에 버린다 */
   async scan(raw: string): Promise<void> {
-    const store = this.#store;
-    const queue = this.#queue;
-    const state = this.#state;
-    if (!this.#ready() || !store || !queue || !state || this.#clockOffsetMs === undefined) return;
     const now = Date.now();
     const last = this.#sameQr.get(raw);
     if (last !== undefined && now - last < 3_000) return;
     this.#sameQr.set(raw, now);
-    const sessionId = this.#scannerSessionId;
-    const r = await runScan({
-      raw,
-      state,
-      store,
-      queue,
-      nowMs: now,
-      clockOffsetMs: this.#clockOffsetMs,
-      ...(sessionId !== undefined ? { scannerSessionId: sessionId } : { scannerSessionId: '' }),
+    const epoch = this.#epoch;
+    await this.#withState(async () => {
+      if (epoch !== this.#epoch) return;
+      const store = this.#store;
+      const queue = this.#queue;
+      const state = this.#state;
+      if (!this.#ready() || !store || !queue || !state || this.#clockOffsetMs === undefined) return;
+      const sessionId = this.#scannerSessionId;
+      try {
+        const r = await runScan({
+          raw,
+          state,
+          store,
+          queue,
+          nowMs: now,
+          clockOffsetMs: this.#clockOffsetMs,
+          ...(sessionId !== undefined ? { scannerSessionId: sessionId } : { scannerSessionId: '' }),
+        });
+        if (epoch !== this.#epoch) return;
+        this.#state = r.state;
+        this.#publishVerdict(r.outcome);
+        if (r.recorded) {
+          this.#uploadState = { ...this.#uploadState, pending: await queue.count() };
+          void this.#uploader?.queued().catch(() => undefined);
+        }
+        this.#publish();
+      } catch {
+        if (epoch === this.#epoch) this.#publishVerdict({ result: 'RETRY' });
+      }
     });
-    this.#state = r.state;
-    this.#publishVerdict(r.outcome);
-    if (r.recorded) {
-      this.#uploadState = { ...this.#uploadState, pending: await queue.count() };
-      void this.#uploader?.queued().catch(() => undefined);
-    }
-    this.#publish();
   }
 
   #publishVerdict(outcome: JudgeOutcome): void {
@@ -415,6 +509,8 @@ class LiveRuntime {
       await clearStaffToken().catch(() => undefined);
       this.#token = undefined;
     }
+    // 옛 토큰·세션 ID·변경분 타이머를 버린다. 다음 로그인은 ensure가 새로 뜬다(IR-04)
+    this.#resetSession();
     navigate('/login?live=1');
     return remaining;
   }
@@ -439,13 +535,7 @@ class LiveRuntime {
 
   /** 시험·개발용: 이 문서의 실제 연결을 버린다 */
   reset(): void {
-    if (this.#changesTimer !== undefined) clearInterval(this.#changesTimer);
-    if (this.#verdictTimer !== undefined) clearTimeout(this.#verdictTimer);
-    this.#changesTimer = undefined;
-    this.#verdictTimer = undefined;
-    this.#started = false;
-    this.#starting = undefined;
-    this.#view = { mode: 'preview', setupState: '준비 중', queue: 0, uploadFailed: false, needsResync: false, ready: false, flags: [] };
+    this.#resetSession();
     this.#listeners.clear();
   }
 }
