@@ -57,11 +57,11 @@ test('RG-02 realtime_gw_degraded는 ==1에_for0m으로바로SEV2이고_버퍼포
 
   // 경보 이름이 겹치지 않고, 모든 경보는 런북과 게임데이를 가리킨다
   assert.equal(new Set(all.map((r) => r.alert)).size, all.length);
-  // 심각도: Degraded·버퍼는 SEV2, 묶음 대기 p99는 경고(docs/features/seat-hold.md §7 443행)
+  // 심각도: Degraded·버퍼는 SEV2, 묶음 대기 p99는 경고로 SEV3 sev3(티켓, docs/features/seat-hold.md §7 443행, docs/observability.md §5 심각도 표)
   assert.deepEqual(
     all.map((r) => [r.alert, r.labels?.severity]).sort(),
     [
-      ['realtime_gw_batch_wait_p99_high', 'warning'],
+      ['realtime_gw_batch_wait_p99_high', 'sev3'],
       ['realtime_gw_buffer_slow_connections', 'sev2'],
       ['realtime_gw_degraded', 'sev2'],
     ],
@@ -79,8 +79,8 @@ test('RG-02 묶음대기p99경보는_histogram_quantile대신_le150경계칸비�
   assert.equal(p99.length, 1, '묶음 대기 p99 경보가 하나가 아니다');
   const r = p99[0];
   assert.equal(String(r.for), '5m');
-  // 150ms [가정]를 5분 넘는다는 경고(docs/features/seat-hold.md §7 443행). SEV2가 아니다
-  assert.equal(r.labels.severity, 'warning', '묶음 대기 p99 경보는 경고다(SEV2 아님)');
+  // 150ms [가정]를 5분 넘는다는 경고이고 경보 라벨은 SEV3 sev3(티켓)다(docs/features/seat-hold.md §7 443행). SEV2가 아니다
+  assert.equal(r.labels.severity, 'sev3', '묶음 대기 p99 경보는 SEV3 sev3다(SEV2 아님)');
   // 정본 docs/observability.md §5 512행: 지연 경보는 histogram_quantile 대신 경계 칸(le=150)의 비율로 쓴다
   assert.doesNotMatch(r.expr, /histogram_quantile/, 'histogram_quantile을 썼다(경계 칸 비율로 계산해야 한다)');
   assert.match(r.expr, /realtime_gw_batch_wait_ms_bucket\{[^}]*le\s*=\s*["']150["']/, 'le="150" 경계 칸이 없다');
