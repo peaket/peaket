@@ -52,6 +52,8 @@ jobs:
       - run: node tools/ci/collector-config.mjs --check
       # 진단 증거 보존 규칙 정적 검사(D-T52 ①, 기능 F-01-1): 수명 주기 원천 infra/modules/evidence-bucket/lifecycle.json이 docs/observability.md §9 '진단 증거' 행과 다르면 실패
       - run: node tools/ci/evidence-retention.mjs --check
+      # 관측 저장소·exporter·신호 연결 설정 정적 검사(V-T50 ①②⑥, 기능 F-01-4): Mimir·Loki·Tempo 복제·보존·한도·라벨·쓰기 큐·원격 쓰기, 로컬 판 겹치기, exporter 인자, Grafana 연결
+      - run: node tools/ci/observability-stores.mjs --check
       # 배포 단위 값의 정적 시험(queue-svc·purchase-svc 포트·시작 명령·비밀은 secretEnvFrom·입장 토큰 발급자 셋이 같음, BUILD_ORDER PRF-050·PRF-137, 묶음 BAT-057, ADR-0288 결정 8)
       - run: node --test "deploy/workloads/test/*.test.mjs"
       # Kyverno CEL 정책의 정적 시험과 생성 대조(docs/devops.md §4.3, D-T11·D-T18 ②·D-T33, BUILD_ORDER BAS-150·BAT-085, ADR-0318).

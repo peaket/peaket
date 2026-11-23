@@ -1,7 +1,9 @@
 # Grafana 데이터 소스 프로비저닝 중 운영 관측 스택에만 있는 것(ADR-0356 결정 2, docs/observability.md §9 'Grafana 권한').
 # 로컬에는 Mimir·Loki·Tempo·Pyroscope·ClickHouse가 없어 로컬 ConfigMap에 싣지 않는다(tools/local/cluster.mjs는 datasources.yaml만 읽는다).
-# 주소는 구간 5(INF-020·INF-040)에서 실제 배치에 맞춰 확정한다 [가정]. 데이터 소스 사이 연결(exemplar → Tempo 등)은 OPS-080(F-01-4)이 더한다.
-# 검사: node tools/ci/observability-config.mjs --check
+# 주소는 구간 5(INF-020·INF-040)에서 실제 배치에 맞춰 확정한다 [가정].
+# 데이터 소스 사이 연결(observability §1 '관측 저장소 설정 원천과 로컬 확인'의 Grafana 신호 연결, §2 '신호 연결'): Mimir 원본의 exemplar traceId → Tempo,
+# Tempo의 서비스 지도 → Mimir 원본과 노드 그래프, Tempo → Pyroscope. 로그 꼴에 기대는 연결(Loki traceId 파생 필드 → Tempo, Tempo → Loki)은 OPS-080 뒤 몫이다.
+# 검사: node tools/ci/observability-config.mjs --check, node tools/ci/observability-stores.mjs --check(연결이 같은 조직의 데이터 소스를 가리키는지)
 apiVersion: 1
 datasources:
   # Mimir 테넌트 둘(원본 raw, 5분 집계 agg5m, observability §9 보존 표). 같은 Mimir에 테넌트 머리만 다르다
@@ -13,6 +15,9 @@ datasources:
     url: http://mimir.observability.svc:8080/prometheus
     jsonData:
       httpHeaderName1: X-Scope-OrgID
+      exemplarTraceIdDestinations:
+        - name: traceId
+          datasourceUid: tempo
     secureJsonData:
       httpHeaderValue1: raw
     editable: false
@@ -41,6 +46,19 @@ datasources:
     type: tempo
     access: proxy
     url: http://tempo.observability.svc:3200
+    jsonData:
+      # 서비스 지도: metrics-generator가 Mimir 원본(raw)에 쓴 traces_service_graph_* (§6 '내부 서비스 지도')
+      serviceMap:
+        datasourceUid: mimir-raw
+      nodeGraph:
+        enabled: true
+      # 같은 서비스·시간대의 프로파일(§2 '신호 연결')
+      tracesToProfiles:
+        datasourceUid: pyroscope
+        tags:
+          - key: service.name
+            value: service_name
+        profileTypeId: process_cpu:cpu:nanoseconds:cpu:nanoseconds
     editable: false
   - name: Pyroscope
     uid: pyroscope

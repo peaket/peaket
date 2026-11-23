@@ -1,0 +1,9 @@
+# postgres_exporter 이미지와 인자(docs/observability.md §1 '관측 저장소 설정 원천과 로컬 확인'의 exporter 줄, §8 '쿼리 통계 예외', ADR-0067).
+# 쿼리 통계(pg_stat_statements) 수집기를 켜고, 쿼리 문장 싣기(include_query)는 켜지 않으며, 상위 N개만 낸다(N은 §8의 값).
+# 접속 주소·사용자는 넣지 않는다: 배포(INF-020)와 시험이 환경 변수 DATA_SOURCE_NAME으로 pg_monitor 역할만 가진 모니터링 계정을 준다.
+# 판은 v0.21.1(다이제스트 고정, 시험 도우미 packages/platform/test-int/observability-stores.ts와 같은 값).
+# 검사: node tools/ci/observability-stores.mjs --check, 실제 동작: packages/platform/test-int/postgres-exporter.int.test.ts(V-T50 ⑤)
+image: prometheuscommunity/postgres-exporter:v0.21.1@sha256:3b8e05a84282cd1199ad2fb6c66f362738bf4c68c1547d8f4226a34a7dd6d8d7
+args:
+  - --collector.stat_statements
+  - --collector.stat_statements.limit=20

@@ -22,6 +22,9 @@ const RULES = [
   [/^(services\/|packages\/platform\/|tools\/ci\/(contract-breaking|release-tags|service-openapi)\.mjs$|\.github\/workflows\/contract-check\.yml$)/, ['contracts']],
   // 서비스 템플릿 시험이 지연 칸 목록을 이 문서와 견주고(metrics.test.ts), 계약 전체 대조 시험이 비교 본체를 쓴다(contract-sweep.test.ts)
   [/^(docs\/observability\.md|tools\/ci\/service-openapi\.mjs)$/, ['js']],
+  // 관측 저장소 설정(Loki·Tempo 판, exporter 인자)과 겹치기 도구는 작업 공간 밖이지만 플랫폼 통합 시험(packages/platform/test-int/의 tempo-service-graph·
+  // loki-labels·loki-limits·postgres-exporter, V-T50 ③④⑤·V-T30 ④)이 그것으로 실제 저장소를 띄우고, V-T30 ④는 ADR-0125에서 한도·부하를 읽는다(F-01-4)
+  [/^(deploy\/platform\/observability\/(loki|tempo|exporters)\/|tools\/ci\/observability-stores\.mjs$|docs\/adr\/0125-)/, ['js']],
   [/^(apps|services|packages)\//, ['js']],
   [/^data\//, ['data']],
   [/^infra\//, ['infra']],

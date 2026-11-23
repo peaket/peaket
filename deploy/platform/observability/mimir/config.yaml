@@ -1,0 +1,34 @@
+# Mimir 운영 판 설정(docs/observability.md §1 '관측 저장소 쓰기 경로'의 Mimir 줄과 '관측 저장소 설정 원천과 로컬 확인', ADR-0077 결정 2, ADR-0120).
+# 고전 구조: 인제스터 링을 영역 인식(복제본을 AZ마다 하나씩)으로 3중 복제한다. 쓰기·읽기 정족수 2는 Mimir가 복제 3에서 스스로 정해 설정이 없다.
+# 복제 수의 정본은 §1 Mimir 줄('인제스터 영역 인식 3중 복제')이다. 테넌트별 보존은 runtime-overrides.yaml(F-01-2)이다.
+# 로컬 판은 없다(포트폴리오 로컬 측정은 Prometheus 하나로 하고, Mimir는 규칙 확인과 G-26에서만 띄운다, §1).
+# 영역 이름(instance_availability_zone)·버킷 이름·KMS 권한·memberlist 주소는 배포(INF-020)가 인제스터 영역마다 넣는다 [가정].
+# 검사: node tools/ci/observability-stores.mjs --check(복제 수·영역 인식, 메모리 링·파일 저장소 같은 로컬 값이 없는지)
+multitenancy_enabled: true
+target: all
+server:
+  http_listen_port: 8080
+  grpc_listen_port: 9095
+memberlist:
+  join_members:
+    - mimir-gossip-ring.observability.svc:7946
+ingester:
+  ring:
+    kvstore:
+      store: memberlist
+    replication_factor: 3
+    zone_awareness_enabled: true
+blocks_storage:
+  backend: s3
+  s3:
+    endpoint: s3.ap-northeast-2.amazonaws.com
+    region: ap-northeast-2
+    bucket_name: peaket-obs-mimir-blocks
+  tsdb:
+    dir: /data/tsdb
+  bucket_store:
+    sync_dir: /data/tsdb-sync
+runtime_config:
+  file: /etc/mimir/runtime-overrides.yaml
+usage_stats:
+  enabled: false

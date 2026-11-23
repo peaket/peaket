@@ -12,6 +12,12 @@ datasources:
     access: proxy
     url: http://prometheus.observability.svc:9090
     isDefault: true
+    # exemplar(지표 점에 붙은 요청 기록 ID, observability §2 'SLI 실시간 산출'의 traceId) → Tempo. Tempo는 datasources-platform.yaml에 있고
+    # 로컬에는 없어 로컬에서는 닿지 않는다(§1 '관측 저장소 설정 원천과 로컬 확인'). 검사: node tools/ci/observability-stores.mjs --check
+    jsonData:
+      exemplarTraceIdDestinations:
+        - name: traceId
+          datasourceUid: tempo
     editable: false
   # 제한 조직 'PEAKET 제한': PostgreSQL 쿼리 문장(읽기 전용 모니터링 계정, ADR-0067). 로컬·포트폴리오 측정에서만 쓴다.
   # 모니터링 계정과 비밀번호 Secret은 이 기능이 만들지 않는다(비밀번호 환경 변수가 없으면 연결만 실패한다)

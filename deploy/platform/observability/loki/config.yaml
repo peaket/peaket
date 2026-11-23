@@ -1,0 +1,60 @@
+# Loki 운영 판 설정(docs/observability.md §1 '관측 저장소 설정 원천과 로컬 확인'의 Loki 줄, §7 'Loki 라벨 허용 목록', §9 보존 표 '정형 로그',
+# ADR-0077 결정 2, ADR-0125 결정 4). 값의 정본은 그 자리다. 이 파일은 그 값을 도구 설정 이름으로 적은 것이다.
+# - 복제: 영역 인식 3중 복제와 과반 정족수(§1 Mimir 줄 뒤 'Loki: 영역 인식 3중 복제'). 영역 이름·버킷 이름·KMS 권한은 배포(INF-020)가 넣는다 [가정]
+# - 보존: §9 '정형 로그' 행의 기간(컴팩터가 보존을 지운다)
+# - 받기: OTLP(/otlp/v1/logs)로만 받는다. 색인 라벨은 자원 속성 넷뿐이고(§7), 기본 색인 목록과 서비스 이름 지어 붙이기는 끈다.
+#   나머지 자원 속성과 로그 속성은 구조화 메타데이터가 된다
+# - 한도: ADR-0125 결정 4의 테넌트·스트림 값. 그 밖의 한도는 기본값이다
+# - 인증은 끄고 한 테넌트로 받는다. 보내는 쪽은 메시 정책으로 수집기 둘과 Grafana만 허용한다(INF-020)
+# 로컬 판: local.yaml을 이 파일 위에 겹친다(node tools/ci/observability-stores.mjs --render loki). 로컬 판은 한도·라벨·보존을 덮지 않는다.
+# 검사: node tools/ci/observability-stores.mjs --check
+auth_enabled: false
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9095
+common:
+  path_prefix: /var/loki
+  replication_factor: 3
+  ring:
+    kvstore:
+      store: memberlist
+    zone_awareness_enabled: true
+  storage:
+    s3:
+      region: ap-northeast-2
+      bucketnames: peaket-obs-loki-chunks
+memberlist:
+  join_members:
+    - loki-memberlist.observability.svc:7946
+schema_config:
+  configs:
+    - from: "2026-01-01"
+      store: tsdb
+      object_store: s3
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+compactor:
+  working_directory: /var/loki/compactor
+  retention_enabled: true
+  delete_request_store: s3
+limits_config:
+  retention_period: 30d
+  ingestion_rate_mb: 40
+  ingestion_burst_size_mb: 60
+  per_stream_rate_limit: 15MB
+  per_stream_rate_limit_burst: 30MB
+  discover_service_name: []
+  otlp_config:
+    resource_attributes:
+      ignore_defaults: true
+      attributes_config:
+        - action: index_label
+          attributes:
+            - namespace
+            - service
+            - env
+            - cluster
+analytics:
+  reporting_enabled: false

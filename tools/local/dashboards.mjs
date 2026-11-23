@@ -5,6 +5,8 @@
 // - 대상: docs/architecture.md §3.1 서비스 맵 표의 업무 서비스 전부와 EXTRA_SERVICES(목록을 손으로 적지 않고 표를 읽는다)
 // - 폴더: .github/CODEOWNERS가 정한 주인 팀(그 서비스 폴더에 맞는 가장 아래 줄). EXTRA_SERVICES는 '/services/' 기본 줄의 팀
 // - 온세일 공용 대시보드 하나(ONSALE_FOLDER 폴더): 서비스를 고르는 네 신호와 주석 셋(배포·장애 주입·운영 사건 줄 ops_event)
+// - '관측 파이프라인' 대시보드 하나(PIPELINE_DASHBOARD, platform 폴더): 증거 수집기·OTel 수집기·Loki 행(docs/observability.md §3 운영 확인 표의
+//   증거 수집기·Loki 줄과 §5 '수집기 자체 신호', 기능 F-01-4). 서비스 대시보드가 아니라 첫 행 네 신호 규칙의 대상이 아니다
 // 파일은 deploy/local/dashboards/<폴더>/<이름>.json에 두고, Grafana 공급자(deploy/platform/observability/grafana/provisioning/dashboards.yaml)가
 // 폴더마다 싣는다(화면에서 고친 것은 저장하지 않는다).
 // 쓰는 법(저장소 뿌리에서):
@@ -26,6 +28,8 @@ export const EXTRA_SERVICES = ['example-svc', 'v0-monolith'];
 export const ONSALE_FOLDER = 'onsale';
 /** 온세일 공용 대시보드 파일 이름(확장자 뺌)과 uid */
 export const ONSALE_DASHBOARD = { name: 'onsale', uid: 'peaket-onsale' };
+/** '관측 파이프라인' 대시보드의 파일 이름(확장자 뺌)·uid·폴더(Grafana 폴더 uid, 플랫폼 팀) */
+export const PIPELINE_DASHBOARD = { name: 'observability-pipeline', uid: 'peaket-observability-pipeline', folder: 'platform' };
 
 const DS = { type: 'prometheus', uid: 'prometheus' };
 /** 주석 데이터 소스(Loki, uid loki). 로컬에는 없어 실제 표시는 구간 5(INF-040)에서 본다(ADR-0356 결정 1) */
@@ -263,6 +267,64 @@ export function onsaleDashboard(services) {
   };
 }
 
+/**
+ * '관측 파이프라인' 대시보드(docs/observability.md §3 운영 확인 표의 증거 수집기 줄·Loki 줄, §5 '수집기 자체 신호'). 행 셋:
+ * - 증거 수집기: 대상·결과별 수집 수, 경보 고른 결과, 거절 까닭
+ * - OTel 수집기: 판정 전 버림, 내보내기별 보내기 실패, 큐 사용률(크기 ÷ 용량), 받기 거절. 카운터 이름은 수집기 판에 따라 _total 꼬리가 붙어
+ *   이름 고르기(__name__=~)로 둘 다 받는다
+ * - Loki: 받은 바이트, 까닭별 거절
+ * 같은 입력이면 같은 JSON이다
+ */
+export function pipelineDashboard() {
+  let id = 0;
+  const next = () => ++id;
+  const row = (title, y) => ({ id: next(), type: 'row', title, collapsed: false, gridPos: { h: 1, w: 24, x: 0, y }, panels: [] });
+  // 수집기 카운터: 신호별 이름(spans·log_records·metric_points)과 판에 따른 _total 꼬리를 한 고르기로
+  const counters = (prefix) => `{__name__=~"${['spans', 'log_records', 'metric_points'].map((k) => `${prefix}_${k}(_total)?`).join('|')}"}`;
+  return {
+    uid: PIPELINE_DASHBOARD.uid,
+    title: '관측 파이프라인',
+    description: '증거 수집기·OTel 수집기·Loki가 신호를 받고 보내는지. tools/local/dashboards.mjs가 만든다(손으로 고치지 않는다)',
+    tags: ['peaket', 'observability'],
+    editable: false,
+    schemaVersion: 39,
+    time: { from: 'now-1h', to: 'now' },
+    refresh: '30s',
+    panels: [
+      row('증거 수집기', 0),
+      panel(next(), '대상·결과별 수집 수', { h: 8, w: 8, x: 0, y: 1 }, [
+        [`sum by (target, result) (rate(evidence_collections_total${RANGE}))`, '{{target}} {{result}}'],
+      ], 'ops'),
+      panel(next(), '경보 고른 결과', { h: 8, w: 8, x: 8, y: 1 }, [
+        [`sum by (decision) (rate(evidence_webhook_alerts_total${RANGE}))`, '{{decision}}'],
+      ], 'ops'),
+      panel(next(), '거절 까닭', { h: 8, w: 8, x: 16, y: 1 }, [
+        [`sum by (reason) (rate(evidence_webhook_rejected_total${RANGE}))`, '{{reason}}'],
+      ], 'ops'),
+      row('OTel 수집기', 9),
+      panel(next(), '꼬리 표본기 판정 전 버림', { h: 8, w: 6, x: 0, y: 10 }, [
+        [`sum by (job) (rate({__name__=~"otelcol_processor_tail_sampling_sampling_trace_dropped_too_early(_total)?"}${RANGE}))`, '{{job}}'],
+      ], 'ops'),
+      panel(next(), '내보내기별 보내기 실패', { h: 8, w: 6, x: 6, y: 10 }, [
+        [`sum by (job, exporter) (rate(${counters('otelcol_exporter_send_failed')}${RANGE}))`, '{{job}} {{exporter}}'],
+      ], 'ops'),
+      panel(next(), '내보내기 큐 사용률', { h: 8, w: 6, x: 12, y: 10 }, [
+        ['max by (job, exporter) (otelcol_exporter_queue_size) / max by (job, exporter) (otelcol_exporter_queue_capacity)', '{{job}} {{exporter}}'],
+      ], 'percentunit'),
+      panel(next(), '받기 거절', { h: 8, w: 6, x: 18, y: 10 }, [
+        [`sum by (job, receiver) (rate(${counters('otelcol_receiver_refused')}${RANGE}))`, '{{job}} {{receiver}}'],
+      ], 'ops'),
+      row('Loki', 18),
+      panel(next(), '받은 바이트', { h: 8, w: 12, x: 0, y: 19 }, [
+        [`sum(rate(loki_distributor_bytes_received_total${RANGE}))`, '받은 바이트'],
+      ], 'Bps'),
+      panel(next(), '까닭별 거절', { h: 8, w: 12, x: 12, y: 19 }, [
+        [`sum by (reason) (rate(loki_discarded_samples_total${RANGE}))`, '{{reason}}'],
+      ], 'ops'),
+    ],
+  };
+}
+
 const jsonText = (d) => `${JSON.stringify(d, null, 2)}\n`;
 export const dashboardText = (service) => jsonText(serviceDashboard(service));
 
@@ -271,6 +333,7 @@ export function dashboardFiles(repoRoot) {
   const targets = dashboardTargets(repoRoot);
   const files = targets.map((t) => ({ rel: `${t.folder}/${t.service}.json`, folder: t.folder, text: dashboardText(t.service) }));
   files.push({ rel: `${ONSALE_FOLDER}/${ONSALE_DASHBOARD.name}.json`, folder: ONSALE_FOLDER, text: jsonText(onsaleDashboard(targets.map((t) => t.service))) });
+  files.push({ rel: `${PIPELINE_DASHBOARD.folder}/${PIPELINE_DASHBOARD.name}.json`, folder: PIPELINE_DASHBOARD.folder, text: jsonText(pipelineDashboard()) });
   return files;
 }
 

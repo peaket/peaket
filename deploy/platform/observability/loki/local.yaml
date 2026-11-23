@@ -1,0 +1,31 @@
+# Loki 로컬 판(docs/observability.md §1 '관측 저장소 설정 원천과 로컬 확인'). 운영 판 config.yaml 위에 겹친다:
+#   node tools/ci/observability-stores.mjs --render loki > loki.yaml
+# 겹치기: 표는 키마다 합치고, 목록과 값은 이 파일이 통째로 바꾸며, 값 null은 운영 판의 그 키를 지운다.
+# 단일 프로세스·메모리 링·복제 1·파일 저장소·영역 인식 끔만 바꾼다. 한도·라벨·보존(limits_config)은 덮지 않는다(Docker 시험 V-T50 ④·V-T30 ④가
+# 운영 판의 한도와 라벨을 그대로 본다). 검사: node tools/ci/observability-stores.mjs --check
+common:
+  path_prefix: /loki
+  replication_factor: 1
+  instance_addr: 127.0.0.1
+  ring:
+    kvstore:
+      store: inmemory
+    zone_awareness_enabled: false
+  storage:
+    s3: null
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+memberlist: null
+schema_config:
+  configs:
+    - from: "2026-01-01"
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+compactor:
+  working_directory: /loki/compactor
+  delete_request_store: filesystem

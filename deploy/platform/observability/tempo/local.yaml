@@ -1,0 +1,20 @@
+# Tempo 로컬 판(docs/observability.md §1 '관측 저장소 설정 원천과 로컬 확인'). 운영 판 config.yaml 위에 겹친다:
+#   node tools/ci/observability-stores.mjs --render tempo > tempo.yaml
+# 겹치기: 표는 키마다 합치고, 목록과 값은 이 파일이 통째로 바꾸며, 값 null은 운영 판의 그 키를 지운다.
+# 모놀리식(Kafka 없음, ingest를 지운다), 블록은 컨테이너 안 파일, 원격 쓰기는 시험이 띄운 Prometheus(네트워크 별칭 peaket-prom)로 보낸다.
+# 원격 쓰기 목록은 통째로 바뀌므로 테넌트 머리(X-Scope-OrgID raw)도 운영 판과 같게 적는다. 보존·처리기는 덮지 않는다.
+# 검사: node tools/ci/observability-stores.mjs --check
+ingest: null
+memberlist: null
+metrics_generator:
+  storage:
+    remote_write:
+      - url: http://peaket-prom:9090/api/v1/write
+        headers:
+          X-Scope-OrgID: raw
+storage:
+  trace:
+    backend: local
+    s3: null
+    local:
+      path: /var/tempo/blocks

@@ -28,4 +28,4 @@ pnpm --filter @peaket/evidence-collector test:integration   # 실제 PostgreSQL 
 pnpm --filter @peaket/evidence-collector build && node --import @peaket/platform/telemetry/register dist/main.js
 ```
 
-배포(플랫폼 네임스페이스, NetworkPolicy, `pg_monitor`·Redis 사용자, Alertmanager 수신 설정, 버킷)는 INF-020이다. 수집 실패·거절 경보 규칙은 OPS-100, 대시보드 패널은 OPS-080이다.
+배포(플랫폼 네임스페이스, NetworkPolicy, `pg_monitor`·Redis 사용자, Alertmanager 수신 설정, 버킷)는 INF-020이다. 수집 실패·거절 경보 규칙은 OPS-100, 대시보드 패널은 platform 폴더 '관측 파이프라인' 대시보드의 증거 수집기 행이다(`tools/local/dashboards.mjs`가 만든다, OPS-080).

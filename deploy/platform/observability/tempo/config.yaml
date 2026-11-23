@@ -1,0 +1,57 @@
+# Tempo 운영 판 설정(docs/observability.md §1 '관측 저장소 쓰기 경로'의 Tempo 줄과 '관측 저장소 설정 원천과 로컬 확인', §6 '내부 서비스 지도',
+# §9 보존 표 '분산 트레이스', ADR-0077 결정 2, ADR-0078 결정 3). 값의 정본은 그 자리다.
+# - 마이크로서비스 모드: 부품마다 -target=<부품>을 배포(INF-020)가 준다. 쓰기 큐는 관측 전용 Kafka이고, 주소는 환경 변수
+#   PEAKET_OBS_KAFKA_BROKERS로 받는다(-config.expand-env=true로 펼친다). 거래·텔레메트리 Kafka 변수는 쓰지 않는다.
+#   MSK IAM 자격 파일(§1, docs/review/open-items.md 42번)과 영역·버킷 이름·KMS 권한은 INF-020이 넣는다 [가정]
+# - 보존: §9 '분산 트레이스' 행의 기간(backend_worker가 보존 작업을 한다)
+# - metrics-generator: 서비스 그래프 처리기와 그 연결 지표(traces_service_graph_connection_info)만 켠다. Tempo 3.1.1은 연결 지표를
+#   처리기 목록의 하위 이름 service-graphs-connection-info로 켠다. span 지표 처리기는 켜지 않는다(요청 수·지연은 Prometheus 지표로 본다)
+# - 원격 쓰기: Mimir raw 테넌트 하나뿐(주소는 prometheus/remote-write.yaml의 mimir-raw와 같다)
+# 로컬 판: local.yaml을 이 파일 위에 겹친다(node tools/ci/observability-stores.mjs --render tempo).
+# 검사: node tools/ci/observability-stores.mjs --check
+stream_over_http_enabled: true
+server:
+  http_listen_port: 3200
+  grpc_listen_port: 9095
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+ingest:
+  kafka:
+    address: ${PEAKET_OBS_KAFKA_BROKERS}
+    topic: tempo-ingest
+memberlist:
+  join_members:
+    - tempo-gossip-ring.observability.svc:7946
+metrics_generator:
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://mimir.observability.svc:8080/api/v1/push
+        headers:
+          X-Scope-OrgID: raw
+storage:
+  trace:
+    backend: s3
+    s3:
+      bucket: peaket-obs-tempo-traces
+      endpoint: s3.ap-northeast-2.amazonaws.com
+      region: ap-northeast-2
+    wal:
+      path: /var/tempo/wal
+backend_worker:
+  compaction:
+    block_retention: 336h
+overrides:
+  defaults:
+    metrics_generator:
+      processors:
+        - service-graphs
+        - service-graphs-connection-info
+usage_report:
+  reporting_enabled: false

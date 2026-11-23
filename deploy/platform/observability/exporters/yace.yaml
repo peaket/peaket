@@ -1,0 +1,42 @@
+# CloudWatch 내보내기 도구 YACE(yet-another-cloudwatch-exporter) 설정(docs/observability.md §1 '관측 저장소 설정 원천과 로컬 확인'의 exporter 줄,
+# §8 지표 출처 표의 CloudFront 두 줄, ADR-0089, ADR-0144 결정 7). 그 두 줄만 가져온다. 다른 CloudFront 지표는 조회 요금(GetMetricData)이 들어 가져오지 않는다.
+# - 작업 1(한도 사용률): 모든 배포의 Requests 1분 합계
+# - 작업 2(엣지에서 끝난 실패): 태그로 고른 queue·api 두 배포만 502ErrorRate·504ErrorRate(1분 평균)와 Requests(1분 합계), CloudFront 값이 늦게 와 delay 5분
+# CloudFront 지표는 us-east-1 CloudWatch에만 있다. 배포를 고르는 태그(peaket.io/distribution)는 엣지 배포(INF-020)가 단다 [가정].
+# YACE는 1.0 전이라 판을 고정한다(이미지와 판은 INF-020).
+# 검사: node tools/ci/observability-stores.mjs --check
+apiVersion: v1alpha1
+discovery:
+  jobs:
+    - type: AWS/CloudFront
+      regions:
+        - us-east-1
+      metrics:
+        - name: Requests
+          statistics:
+            - Sum
+          period: 60
+          length: 60
+    - type: AWS/CloudFront
+      regions:
+        - us-east-1
+      searchTags:
+        - key: peaket.io/distribution
+          value: ^(queue|api)$
+      delay: 300
+      metrics:
+        - name: 502ErrorRate
+          statistics:
+            - Average
+          period: 60
+          length: 60
+        - name: 504ErrorRate
+          statistics:
+            - Average
+          period: 60
+          length: 60
+        - name: Requests
+          statistics:
+            - Sum
+          period: 60
+          length: 60
