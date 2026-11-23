@@ -593,6 +593,44 @@ describe('F-05-2 IR-02 자기 양도 막기(구현 리뷰 높음·보안)', () =
     expect([...h.store.offers.values()].filter((o) => o.ticketId === t)).toHaveLength(0);
     expect((await h.get('/v1/transfers', A)).body.items).toEqual([]);
   });
+
+  test('F-05-2 IR-02 ① 비보유자가 같은 표를 자기에게 보내는 요청은 남에게 보내는 요청과 같은 404다(보유자·결제자 검사가 먼저)', async () => {
+    const h = await harness();
+    const t = await h.issue();
+    const selfRef = (await h.post('/v1/transfer-recipient-lookups', C, { body: { memberCode: CODE_C } })).body.recipientRef;
+    const otherRef = (await h.post('/v1/transfer-recipient-lookups', C, { body: { memberCode: CODE_B } })).body.recipientRef;
+    const self = await h.post(`/v1/tickets/${t}/transfers`, C, { body: { recipientRef: selfRef }, reauth: 'r' });
+    const other = await h.post(`/v1/tickets/${t}/transfers`, C, { body: { recipientRef: otherRef }, reauth: 'r' });
+    // 비보유자에게는 자기에게 보내든 남에게 보내든 같은 404여야 표 존재를 가르지 않는다(authz-matrix §4.1·§5.2)
+    expect(self.status, self.raw).toBe(404);
+    expect(other.status, other.raw).toBe(404);
+    expect({ type: self.body.type, title: self.body.title, status: self.body.status }).toEqual({
+      type: other.body.type,
+      title: other.body.title,
+      status: other.body.status,
+    });
+    expect([...h.store.offers.values()].filter((o) => o.ticketId === t)).toHaveLength(0);
+  });
+
+  test('F-05-2 IR-02 ② 옛 자기 요청(from=to)은 받은 요청 목록에 없고 수락은 409 transfer-not-offered다', async () => {
+    const h = await harness();
+    const t = await h.issue();
+    const offerId = randomUUID();
+    h.store.offers.set(offerId, {
+      offerId,
+      ticketId: t,
+      fromAccountId: A,
+      toAccountId: A,
+      status: 'OFFERED',
+      expiresAtMs: h.clock.now() + 48 * HOUR,
+      createdAtMs: h.clock.now(),
+    });
+    expect((await h.get('/v1/transfers', A)).body.items).toEqual([]);
+    const accepted = await h.post(`/v1/transfers/${offerId}/acceptance`, A);
+    expect(accepted.status, accepted.raw).toBe(409);
+    expect(String(accepted.body.type)).toContain('transfer-not-offered');
+    expect(h.store.offers.get(offerId)?.status).toBe('OFFERED');
+  });
 });
 
 describe('F-05-2 T7 [ASVS v5.0.0-2.4.1] 받는 사람 조회 한도(계정당 시간당 10회 [가정], openapi createTransferRecipientLookup)', () => {

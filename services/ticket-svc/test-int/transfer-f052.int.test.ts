@@ -738,3 +738,26 @@ describe('F-05-2 T3 R-T25 ② 운영자 취소 ↔ 수락 경합(PostgreSQL, RV-
     expect(acceptFirst, '수락이 먼저인 표가 없다').toBeGreaterThan(0);
   }, 180_000);
 });
+
+describe('F-05-2 IR-02 옛 자기 요청(from=to) 거르기(PostgreSQL)', () => {
+  test('F-05-2 IR-02 ② 옛 자기 요청은 받은 요청 목록 0건이고 수락은 409 transfer-not-offered다', async () => {
+    const w = world();
+    const [t] = await issue(w.a, w.event);
+    const offerId = randomUUID();
+    // 자기 검사가 없던 때 DB에 남은 from=to 요청을 직접 넣는다(지금 코드로는 다시 만들 수 없다)
+    await q(
+      `insert into transfer_offer (id, ticket_id, from_account_id, to_account_id, status, expires_at, created_at)
+       values ($1, $2, $3, $3, 'OFFERED', $4, $5)`,
+      [offerId, t, w.a, new Date(clock.now() + 48 * HOUR), new Date(clock.now())],
+    );
+    const before = await ticketRow(t!);
+    const list = await get('/v1/transfers', w.a);
+    expect(list.status, list.raw).toBe(200);
+    expect(list.body.items).toEqual([]);
+    const accepted = await post(`/v1/transfers/${offerId}/acceptance`, w.a);
+    expect(accepted.status, accepted.raw).toBe(409);
+    expect(String(accepted.body.type)).toContain('transfer-not-offered');
+    expect(await ticketRow(t!)).toEqual(before);
+    expect((await offerRow(offerId)).status).toBe('OFFERED');
+  });
+});
