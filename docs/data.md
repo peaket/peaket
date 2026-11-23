@@ -1270,7 +1270,7 @@ erDiagram
         uuid supersedes_id "이 판이 대신한 옛 판"
         jsonb excluded_payments "대사 불일치로 이번 계산에서 뺀 결제 ID 목록"
         text status "CALCULATED|NOTIFIED|DISPUTED|CONFIRMED|HELD|SCHEDULED|FAILED|PAID|CARRIED_OVER|SUPERSEDED. SUPERSEDED는 새 판으로 바뀐 옛 판(금액은 알린 그대로)"
-        text hold_reason "KYC|ACCOUNT_CHANGE|BALANCE|ACCOUNT_MISMATCH|SALE_SUSPENDED. ACCOUNT_MISMATCH는 포트원 파트너 정산 계좌가 PEAKET 기록과 다름(ADR-0108). SALE_SUSPENDED는 그 회차의 공연이 판매 중지됨(ADR-0123)"
+        text hold_reason "KYC|ACCOUNT_CHANGE|BALANCE|ACCOUNT_MISMATCH|SALE_SUSPENDED|RECALCULATION. ACCOUNT_MISMATCH는 포트원 파트너 정산 계좌가 PEAKET 기록과 다름(ADR-0108). SALE_SUSPENDED는 그 회차의 공연이 판매 중지됨(ADR-0123). RECALCULATION은 settlement §4.4 HELD의 다시 계산 대기(회차 취소·연기 환급, 추천 적용 2026-11-23, 기능 F-07-8 계획)"
         timestamptz dispute_due_at "통지 뒤 2영업일"
         date payout_date "회차 정산서는 회차 종료 뒤 5영업일, 상품 정산서는 계산일 뒤 4영업일"
         uuid payout_batch_id FK "이 정산서를 지급하는 묶음(payout_batch.id, nullable). 승인 시점에 묶고 실행은 이 목록만 지급한다(0017). 묶여도 상태는 CONFIRMED이고 SCHEDULED는 결제사 접수 때다. 묶였는지는 이 칸으로 가른다(2026-11-23, ADR-0369 결정 14)"
