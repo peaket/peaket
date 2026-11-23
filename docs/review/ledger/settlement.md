@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 76 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 20 | 104 |
+| A | 77 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 19 | 104 |
 | B | 70 | 46 | 0 | 0 | 0 | 0 | 0 | 23 | 14 | 153 |
-| 합계 | 146 | 54 | 0 | 0 | 0 | 0 | 0 | 23 | 34 | 257 |
+| 합계 | 147 | 54 | 0 | 0 | 0 | 0 | 0 | 23 | 33 | 257 |
 
 ## docs/features/settlement.md
 
@@ -57,7 +57,7 @@
 | J-T23 | ① | 다시 계산과 대사 미완 결제(추천 적용 2026-10-28, 기술 검토… | ① NOTIFIED·DISPUTED·CONFIRMED 정산서마다 회차 취소를 확정한다 … 판본 2인 새 판이 CALCULATED로 생기고 옛 판은 금액 그대로… | 빈칸 | A | — |
 | J-T23 | ② | 다시 계산과 대사 미완 결제(추천 적용 2026-10-28, 기술 검토… | ② 토스페이먼츠 예약지급이 REQUESTED인 정산서와 IN_PROGRESS인 정산서에서 회차 취소를 확정한다 … REQUESTED는 예약 취소 → HELD →… | 빈칸 | A | — |
 | J-T23 | ③ | 다시 계산과 대사 미완 결제(추천 적용 2026-10-28, 기술 검토… | ③ 대사 불일치 결제 1건이 남은 회차를 계산한 뒤, 지급 전과 지급 뒤에 각각 불일치를 푼다. 결과: … 그 결제만 빠진 정산서와 뺀 목록이 나오고, 풀린 뒤… | 빈칸 | A | — |
-| J-T24 | — | 미수금 이동 기록과 되돌림(추천 적용 2026-10-28, 기술 검토… | 미수금 100만 원을 정산서 A(30만 원)·B(70만 원)에서 나눠 상계하고, B의 지급을 실패시킨 뒤 다시 계산한다. 같은 미수금을 두 정산서가 동시에… | 빈칸 | A | — |
+| J-T24 | — | 미수금 이동 기록과 되돌림(추천 적용 2026-10-28, 기술 검토… | 미수금 100만 원을 정산서 A(30만 원)·B(70만 원)에서 나눠 상계하고, B의 지급을 실패시킨 뒤 다시 계산한다. 같은 미수금을 두 정산서가 동시에… | 자동 시험 | A | 시험: services/invariant-checker/test-int/invariants.int.test.ts, services/invariant-checker/test-int/payment-migrated.int… |
 | J-T25 | ① | 지급대행 잔액 대사(추천 적용 2026-10-28, 기술 검토… | ① 승인·취소·수수료·지급이 장부와 맞는 상점 … 은 차이 0이고 건이 없다 | ID만 | A | 시험: services/invariant-checker/test-int/invariants.int.test.ts, services/payment-svc/test/payout-adapters.test.ts |
 | J-T25 | ② | 지급대행 잔액 대사(추천 적용 2026-10-28, 기술 검토… | ② 결제사 쪽 잔액만 3만 원 적은 상점 … CS 처리함 '결제사 잔액 대사 차이' 건과 SEV3가 생기고, 묶음은 멈추지 않는다 | ID만 | A | 시험: services/invariant-checker/test-int/invariants.int.test.ts, services/payment-svc/test/payout-adapters.test.ts |
 | J-T25 | ③ | 지급대행 잔액 대사(추천 적용 2026-10-28, 기술 검토… | ③ 끝수 차이 1원만 나는 상점을 둔 채 지급 묶음을 만들고 월말 대사를 돌린다. 결과: … 건이 생기고 '설명된 차이'로 닫을 수 있다. 정산 불변식… | ID만 | A | 시험: services/invariant-checker/test-int/invariants.int.test.ts, services/payment-svc/test/payout-adapters.test.ts |

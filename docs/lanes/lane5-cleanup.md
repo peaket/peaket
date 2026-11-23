@@ -19,7 +19,7 @@
 - 흔들린 시험(묶음과 무관, 따로 다시 돌리면 통과): core-svc `test/fill-search-guard.test.ts`(5초 시간 초과, 몰릴 때), `test/internal-notify.test.ts`, purchase-svc `grpc-new-payment-pause`·`cancel-ticket-event-cancelled`(전체로 돌릴 때만). `tools/ci/roles-check.test.mjs`는 묶음 실행에서 15분 제한에 걸렸다(따로 23분, 84개 통과).
 - ticket-svc에는 (account_id, event_id) 인덱스가 없어 `ListHeldTickets`가 계정 인덱스 안에서 회차를 거른다.
 - 다시 올리기: 자기 작업 가지의 `--force-with-lease` 푸시가 세션 권한 판정에 막혀, 다시 올릴 때마다 새 가지·새 초안 PR을 열었다(`feature/lane5-BAT-600-r2`·`-r3`). 시험 담당의 포크 다섯이 Docker 잠금을 따로 잡은 일(2026-11-18 23:20~23:40)은 근거에서 빼고 다시 돌렸다.
-- (2026-11-23 FIX-payment-int 리뷰 RV-02, 중간) 불변식 검사기가 미수금 이동 표를 `receivable_movement`로 찾는다(`services/invariant-checker/src/tables.ts` 35줄, `src/invariants.ts` 45줄 M3). 실제 표는 0016부터 `receivable_move`라 실제 DB에서 M3(미수금 남은 금액 = 금액 − 이동 합)가 건너뜀으로 끝나고, 검사기 시험은 손으로 만든 `receivable_movement` 표를 써 못 본다. 아래 ERD 줄과 함께 고친다.
+- **R-785로 고침(2026-11-23 FIX-invariant-m3 단계 ①: payment 0028이 표를 정본 이름 `receivable_movement`로 바꾸고 옛 이름 뷰를 둠, 검사기가 실제 payment DB에서 M3를 셈)** (2026-11-23 FIX-payment-int 리뷰 RV-02, 중간) 불변식 검사기가 미수금 이동 표를 `receivable_movement`로 찾는다(`services/invariant-checker/src/tables.ts` 35줄, `src/invariants.ts` 45줄 M3). 실제 표는 0016부터 `receivable_move`라 실제 DB에서 M3(미수금 남은 금액 = 금액 − 이동 합)가 건너뜀으로 끝나고, 검사기 시험은 손으로 만든 `receivable_movement` 표를 써 못 본다. 아래 ERD 줄과 함께 고친다.
 - (2026-11-23 FIX-payment-int 계획) `docs/data.md` §2 ERD에 payment 0025·0026 표 셋(`payout_batch_audit`·`guarantee_collection`·`settlement_webhook_receipt`)과 `seller_kyc.toss_seller_id`·`toss_seller_status`가 없고, ERD의 `receivable_movement`와 실제 `receivable_move` 이름이 다르다(BAT-625·630이 data.md를 함께 고치지 않음).
 
 ## F-07-5(2026-11-23, R-781)
@@ -40,3 +40,14 @@
 - 리뷰 RV-03(정보): ops `settlement-dependency-unavailable`·`payout-dependency-unavailable` 503에 `Retry-After`가 없다(guidelines §2 필수 경우는 아님). FIX-problem-ctor에서 함께 본다.
 - 검증: `packages/platform/turbo.json` 입력 표본(S5·S6)은 상시 시험이 없어 `turbo --dry=json` 열쇠를 손으로 견줘야만 잡힌다.
 - 남은 폴더: `D:/l5ptpre`(실패 확인용, worktree 등록은 지움, 설치 찌꺼기가 남음 — 지우기 명령이 막혀 소유자 몫).
+
+## FIX-invariant-m3(2026-11-23, R-785)
+
+- **출시 태그 기다림 ②**: payment-svc 저장소를 새 이름 `receivable_movement`로 바꾸고 `receivable-move-compat.ts`를 지우며 시험의 날 SQL을 바꾼다(마이그레이션 없음). 조건: 0028이 든 출시 태그가 나온 뒤, 그다음 출시에 넣는다. 그 출시 때 미수금 표를 만지는 기능이 있으면 그 안에서, 없으면 FIX로(감독 결정 2026-11-23).
+- **출시 태그 기다림 ③**: `DROP VIEW "receivable_move"`와 NOT NULL 제약 이름 여섯(`receivable_move_*_not_null`, PostgreSQL 18은 표 이름을 바꿔도 따라 바꾸지 않음) `RENAME CONSTRAINT`, 그때 PRF180 M3 ⑦의 `contype <> 'n'` 조건을 지운다. 조건: ②가 든 출시가 나가고 7일 [가정] 뒤(devops §7.1 N+2).
+- 리뷰 RV-03(낮음): 뷰는 `security_invoker`라 앱 역할에 뷰와 표 둘 다의 권한이 필요하다. 표마다 GRANT 목록을 쓰는 단계(BAS-060 등)가 뷰를 빠뜨리지 않게 한다.
+- 칸 차이: ERD `receivable_movement`의 `created_at`·`reverses_id`·`statement_id` 널 허용과 0016·0026의 `moved_at`·`reverses_id` 없음·`statement_id NOT NULL`이 다르다. 되돌림(`REVERSAL`)을 처음 쓰는 단계 전에 맞춘다.
+- v0 실행 도구(리뷰 RV-02): `loadtest/run.mjs` `runInvariants`는 기대 SKIPPED 목록을 대조하지 않고, `v0_check`에 정산 표가 없어 v0 실행마다 M1~M5 '원본에 표 없음' 경고가 난다. v0 기대 목록을 두고 기대한 표 없음은 경고에서 빼는 일.
+- purchase·ticket 원본 표도 서비스 마이그레이션을 적용한 DB로 시험하는 일(지금은 손으로 만든 표).
+- CLAUDE.md 상대 경로 가져오기 목록: invariant-checker 통합 시험이 `services/payment-svc/scripts/migrate.mjs`를 읽는다(소유자 몫).
+- 흔들림 후보: payment `payment-confirm-runner.int.test.ts` P-T40 리뷰 고침 H1(부하 중 `payment_event` Seq Scan), 단위 `drizzle-payment-store` P-T54 M4(249ms < 250ms 시간 단언), `payment-checkout.int.test.ts` P-T26(전체 실행 때 한 번).

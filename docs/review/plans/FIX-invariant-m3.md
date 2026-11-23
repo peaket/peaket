@@ -153,10 +153,10 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 
 ## 넘기는 것
 
-- **단계 ② → F-07-6(감독 결정, 리뷰 RV-01)**: 저장소를 `receivableMovement`로 바꾸고 `receivable-move-compat.ts`를 지우며 시험의 날 SQL을 새 이름으로 바꾼다. 마이그레이션 없음.
-  - 시작 조건: 0028이 든 출시 태그가 있어야 한다. 없으면 F-07-6은 `receivableMoveCompat`을 그대로 쓰고 ②를 다음 묶음으로 미룬다(또는 ①②를 한 출시에 합치는 예외 ADR을 먼저 낸다). F-07-6은 미수금 상계를 맡아 같은 저장소(`drizzle-settlement-store.ts`)를 고치므로, 새 이름으로 바꾸고 싶어질 자리다.
-- **단계 ③ → F-07-7(감독 결정, 리뷰 RV-01·RV-07)**: `DROP VIEW "receivable_move"` 마이그레이션(그때의 다음 번호). 같은 마이그레이션에서 0028이 남긴 옛 머리의 NOT NULL 제약 이름 여섯(`receivable_move_*_not_null`)을 `RENAME CONSTRAINT`로 `receivable_movement_…`로 바꾼다(PostgreSQL 18은 NOT NULL도 이름 있는 제약으로 두고 표 이름을 바꿔도 따라 바꾸지 않는다).
-  - 시작 조건: ②가 든 출시가 나간 지 7일 [가정] 뒤(`docs/devops.md` §7.1 원칙 3 표의 '축소'). 그 전이면 F-07-7은 ③을 하지 않고 미룬다.
+- **단계 ②·③은 특정 기능에 묶지 않는다(감독 최종 결정 2026-11-23, 리뷰 RV-01 반영)**: 앞서 적은 '② → F-07-6, ③ → F-07-7'은 감독이 거뒀다. 배포 단위는 출시 태그다(아래 '출시' 절). 그래서 ②·③은 출시 태그를 기다리는 일로 `docs/lanes/lane5-cleanup.md`에 적는다.
+  - ② 저장소를 `receivableMovement`로 바꾸고 `receivable-move-compat.ts`를 지우며 시험의 날 SQL을 새 이름으로 바꾼다(마이그레이션 없음): 0028이 든 출시 태그가 나온 뒤, 그다음 출시에 넣는다.
+  - ③ `DROP VIEW "receivable_move"`와 NOT NULL 제약 이름 여섯(`receivable_move_*_not_null`)의 `RENAME CONSTRAINT`(리뷰 RV-07): ②가 든 출시가 나가고 7일 [가정] 뒤(`docs/devops.md` §7.1 표의 N+2).
+  - 그 출시 때 미수금 표를 만지는 기능이 있으면 그 안에서, 없으면 FIX로 한다. 예외 ADR(①② 한 출시)은 쓰지 않는다. 출시 태그 시점은 감독이 소유자에게 올린다.
 - **'출시'를 무엇으로 세나(감독 질문)**: 정본은 앱 배포를 `develop` 합치기가 아니라 출시 후보·출시 태그로 센다. `docs/devops.md` §3.2 유형별 필수 검사 표(서비스 줄): `develop` 병합 뒤에는 검사·CI kind E2E·야간 시험만 돌고, 이미지 빌드·푸시와 데모 승격 PR은 릴리스·핫픽스 가지(출시 후보)에서, 태그와 운영 승격 PR은 `main` 병합 뒤에 한다. 같은 문서 §2.2.5 표(133줄) '출시 후보는 마지막 출시 태그 뒤에 바뀐 배포 단위만 새 이미지로 만든다', 462~480줄 승격 흐름과 '출시 확정은 `main`의 태그'. 144·410줄과 CLAUDE.md의 'Argo CD가 `develop`에서 읽음'·'`develop`에 병합하는 것이 곧 배포'는 `deploy/`(배포 상태)를 고치는 합치기에 대한 말이고, 환경에 무엇이 올라가는지는 환경 디렉터리의 다이제스트(승격 PR)가 정한다. 1인 기간의 `develop` 바로 쌓기(`docs/architecture.md` §8.6 10)는 합치는 방법이지 배포 단위가 아니다. 그래서 이 계획은 ②·③의 조건을 출시 태그 기준으로 둔다. `develop` 합치기 기준으로 바꾸지 않았다.
 - **칸 차이**: ERD `receivable_movement`는 `created_at`·`reverses_id`(되돌린 기록)·`statement_id` 널 허용(보증·회수는 정산서 없음)인데 0016·0026은 `moved_at`·`reverses_id` 없음·`statement_id NOT NULL`이다. M3는 이 칸들을 읽지 않아 이 묶음 밖이다. 되돌림(`REVERSAL`)을 처음 쓰는 단계 전에 맞춰야 한다(정본과 코드 어느 쪽을 고칠지 포함). `docs/lanes/lane5-cleanup.md`에 줄을 더한다(기록 담당).
 - **ERD 누락**: `lane5-cleanup.md` 23줄의 표 셋·`seller_kyc` 칸 누락은 그대로 남는다(이 묶음은 이름 차이만 닫는다).
@@ -271,6 +271,7 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | lane5-fixm3-plan | claude-opus-5-5 | 2026-11-23T06:40:00+09:00 | 2026-11-23T07:20:00+09:00 |
+| impl | lane5-fixm3-impl | claude-opus-5-5 | 2026-11-23T07:20:00+09:00 | 2026-11-23T07:32:00+09:00 |
 | test | lane5-fixm3-test | claude-opus-5-5 | 2026-11-23T07:33:00+09:00 | 2026-11-23T08:22:00+09:00 |
 | review | lane5-fixm3-review | claude-opus-5-5 | 2026-11-23T08:23:00+09:00 | 2026-11-23T08:40:00+09:00 |
 | verify | lane5-fixm3-verify | claude-opus-5-5 | 2026-11-23T08:40:00+09:00 | 2026-11-23T09:35:00+09:00 |
