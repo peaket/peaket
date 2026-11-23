@@ -168,7 +168,7 @@ async function startCollector(o: StartOptions): Promise<CollectorContainer> {
   };
   const logs = () => {
     try {
-      return execFileSync('docker', ['logs', '--tail', '80', id], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      return execFileSync('docker', ['logs', '--tail', '80', id], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 });
     } catch (err) {
       return String(err);
     }

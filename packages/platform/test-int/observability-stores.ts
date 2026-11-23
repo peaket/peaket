@@ -110,7 +110,7 @@ export function startContainer(o: StartOptions): Container {
     id,
     url: (p) => `http://127.0.0.1:${mapped.get(p)}`,
     logs: () => {
-      const r = spawnSync('docker', ['logs', '--tail', '60', id], { encoding: 'utf8' });
+      const r = spawnSync('docker', ['logs', '--tail', '60', id], { encoding: 'utf8', timeout: 300_000 });
       return `${r.stdout}${r.stderr}`;
     },
     stop,
