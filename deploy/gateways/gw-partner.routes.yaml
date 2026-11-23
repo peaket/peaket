@@ -639,6 +639,14 @@ spec:
             type: RegularExpression
             value: /v1/partner/events/[^/]+/cancellation
           method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/live-snapshot
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/events/[^/]+/live-snapshot
+          method: OPTIONS
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -731,14 +739,6 @@ spec:
           method: OPTIONS
         - path:
             type: RegularExpression
-            value: /v1/partner/events/[^/]+/live-snapshot
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/partner/events/[^/]+/live-snapshot
-          method: OPTIONS
-        - path:
-            type: RegularExpression
             value: /v1/partner/events/[^/]+/report
           method: GET
         - path:
@@ -917,6 +917,14 @@ spec:
             type: RegularExpression
             value: /v1/partner/productions/[^/]+/sale-policy
           method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-review
+          method: GET
+        - path:
+            type: RegularExpression
+            value: /v1/partner/productions/[^/]+/sale-review
+          method: POST
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -955,14 +963,6 @@ spec:
     - partner-api.peaket.example
   rules:
     - matches:
-        - path:
-            type: RegularExpression
-            value: /v1/partner/productions/[^/]+/sale-review
-          method: GET
-        - path:
-            type: RegularExpression
-            value: /v1/partner/productions/[^/]+/sale-review
-          method: POST
         - path:
             type: RegularExpression
             value: /v1/partner/productions/[^/]+/sale-review

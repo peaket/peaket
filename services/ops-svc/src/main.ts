@@ -28,6 +28,7 @@ import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
 import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts/index.js';
 import { PromBotReviewSignals } from './modules/bot-review/index.js';
 import { botReviewLabelsFromEnv, botReviewSourceFromEnv } from './bot-review-wiring.js';
+import { realtimeTableFromEnv } from './rt-wiring.js';
 import { HttpCoreContract } from './adapters/http-core-contract.js';
 import { PromCsCaseSignals, ReceiveCaseRequested, loadBusinessCalendar } from './modules/cases/index.js';
 
@@ -153,6 +154,8 @@ const botReviewSignals = new PromBotReviewSignals();
 const botReviewSource = botReviewSourceFromEnv(process.env);
 const botReviewLabels = botReviewLabelsFromEnv(process.env);
 const botReviewActorRef = loadLogPseudonymizer(process.env).pseudonymizer;
+// 관제 실시간 표(OPS-160, F-04-1): rt 뷰 0.5초 조회 보드와 파트너 판매 현황. 소속 확인은 회차 취소와 같은 core 판매 설정 클라이언트다
+const realtimeTable = realtimeTableFromEnv(process.env, { ...(cancellationDeps.owners ? { owners: cancellationDeps.owners } : {}) });
 // 명령·감사 체인 지표(BAT-355): ops_command_dry_run_unavailable_total, ops_audit_mac_lag_seconds, ops_audit_kms_failover_total. 서비스를 만든 뒤 레지스트리에 붙인다
 const commandSignals = new PromCommandSignals();
 const auditSignals = new AuditSignals();
@@ -171,6 +174,7 @@ const service = await createService({
     approvals,
     adminAccounts: { identity: adminIdentity, ...(reauth ? { reauth } : {}) },
     eventCancellations,
+    realtimeTable: realtimeTable.deps,
     botReview: {
       source: botReviewSource.source,
       ...(botReviewLabels ? { labels: botReviewLabels } : {}),
@@ -189,6 +193,9 @@ botReviewSignals.register(service.metrics.registry);
 commandSignals.register(service.metrics.registry);
 auditSignals.register(service.metrics.registry);
 caseSignals.register(service.metrics.registry);
+realtimeTable.signals.register(service.metrics.registry);
+realtimeTable.deps.board.setLog(service.logger);
+for (const warning of realtimeTable.warnings) service.logger.warn({}, warning);
 if (!caseCalendar.fromFile) service.logger.warn({}, 'PEAKET_HOLIDAY_CALENDAR_FILE이 없어 CS 처리함 기한을 주말만 빼고 센다(local·ci만 허락한다)');
 if (botReviewSource.warning) service.logger.warn({}, botReviewSource.warning);
 if (!botReviewLabels) service.logger.warn({}, 'PEAKET_TRUST_GRPC_URL이 없어 표본 판정 HUMAN·BOT이 503 bot-review-label-unavailable이다(UNDECIDED는 기록된다)');

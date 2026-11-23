@@ -1,0 +1,61 @@
+// 관제 실시간 표 모듈 공개 이름(OPS-160, F-04-1). AppModule·rt-wiring·관제 위젯 원천이 이 파일로 가져온다.
+export { RealtimeTableModule, type RealtimeTableModuleDeps } from './realtime-table.module.js';
+export { RtBoard, type RtBoardDeps, type RtBoardHealth, type RtBoardOptions } from './application/rt-board.js';
+export { GetPartnerLiveSnapshot, LIVE_SNAPSHOT_RETRY_AFTER_SECONDS } from './application/get-partner-live-snapshot.js';
+export { ClickHouseRtSource, RT_CLICKHOUSE_READER, RT_HTTP_TIMEOUT_MS, RT_MAX_EXECUTION_SECONDS, dateTime64Param } from './adapters/clickhouse-rt-source.js';
+export { MemoryRtSource, type MemoryRtPart } from './adapters/memory-rt-source.js';
+export { UnavailableRtSource } from './adapters/unavailable-rt-source.js';
+export { PromRtSignals } from './adapters/prom-rt-signals.js';
+export {
+  DEGRADE_AFTER_MS,
+  DEGRADE_P95_SECONDS,
+  FRESHNESS_UNKNOWN_SECONDS,
+  FRESHNESS_WINDOW_MS,
+  PARTNER_EVERY_MS,
+  PARTNER_MINUTES,
+  PROJECTION_WINDOW_MS,
+  RECOVER_AFTER_MS,
+  RT_BUCKET_LOOKBACK_MS,
+  RT_KEEP_MS,
+  RT_POLL_MS,
+  RT_SEAT_MAP_REFRESH_MS,
+  RT_WATCH_MS,
+  RtProblem,
+  RtSourceFailure,
+  TELEMETRY_TOPICS,
+  TRADE_ACTIVE_WINDOW_MS,
+  TRADE_GAP_MS,
+  cumulativeOf,
+  finishedBuckets,
+  freshnessOf,
+  initialDegraded,
+  lastFinishedSecondMs,
+  minuteOf,
+  nextDegraded,
+  partnerSnapshotOf,
+  percentile,
+  projectedSoldOutAtOf,
+  pulseAsOf,
+  recordMinute,
+  remainingOf,
+  seatMapOf,
+  soldPerMinuteOf,
+  tradeGapOf,
+  worseFreshness,
+  type BucketRow,
+  type CumulativeRow,
+  type DegradedState,
+  type Freshness,
+  type FreshnessRow,
+  type MinutePoint,
+  type PartitionRef,
+  type PartnerLiveSnapshot,
+  type RtBucketSeries,
+  type RtCumulative,
+  type RtEventSnapshot,
+  type RtRemaining,
+  type SeatMap,
+  type SeatMapRow,
+  type TelemetryTopic,
+} from './domain/realtime-table.js';
+export type { EventOwners, RtBoardLog, RtQuerySource, RtSignals, RtView, SeatMapSource } from './domain/ports.js';

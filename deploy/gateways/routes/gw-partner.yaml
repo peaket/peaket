@@ -222,10 +222,14 @@ spec:
           namespace: ticket
           port: 8080
     # 회차 취소 요청·상태: BAT-420 처리기가 ops-svc에 있다(docs/features/transfer-refund.md, infra §4.1 '백엔드 대조')
+    # 실시간 판매 현황: F-04-1 처리기가 ops-svc에 있다(docs/streaming.md §4.3 'ops-svc는 회차마다 1분에 한 번', control-tower §11)
     - matches:
         - path:
             type: PathPrefix
             value: /v1/partner/events/{eventId}/cancellation
+        - path:
+            type: PathPrefix
+            value: /v1/partner/events/{eventId}/live-snapshot
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -264,9 +268,6 @@ spec:
         - path:
             type: PathPrefix
             value: /v1/partner/events/{eventId}/gate-status
-        - path:
-            type: PathPrefix
-            value: /v1/partner/events/{eventId}/live-snapshot
         - path:
             type: PathPrefix
             value: /v1/partner/events/{eventId}/report
