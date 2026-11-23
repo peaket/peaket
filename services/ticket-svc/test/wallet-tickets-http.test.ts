@@ -36,7 +36,8 @@ const EVENT = '0193f2c0-0000-7000-8000-00000000e001';
 const OTHER_EVENT = '0193f2c0-0000-7000-8000-00000000e002';
 
 /** 정본 offline-gate §2 '무엇을 싣나'의 계약 칸 가운데 ticket 데이터로 채우는 것(이 밖의 칸은 없어야 한다) */
-const ALLOWED_KEYS = ['ticketId', 'eventId', 'status', 'transferLocked', 'gateZone', 'eventStartsAt', 'cancelDeadline', 'receivedFromNickname'];
+// F-05-2: 진행 중 양도 요청 칸 pendingTransfer(openapi Ticket.pendingTransfer, 결제자 표의 OFFERED 요청만 객체, 그 밖은 null. 계획 docs/review/plans/F-05-2.md 감독 결정 3-(가))
+const ALLOWED_KEYS = ['ticketId', 'eventId', 'status', 'transferLocked', 'gateZone', 'eventStartsAt', 'cancelDeadline', 'receivedFromNickname', 'pendingTransfer'];
 
 class FakeAdmin implements AdminAuthzPort {
   async getAdminAuthz(): Promise<{ valid: boolean; role: string }> {
@@ -366,19 +367,19 @@ describe('월렛 목록 GET /v1/tickets [O-T51]', () => {
 
     // 결제자가 보유한 표, 회차 시작 있음, 빈 구역: 구역 칸 없음, 회차 시작 = 취소 기한, receivedFromNickname은 null
     const w = byId.get(withStart.tickets[0]!.ticketId)!;
-    expect(Object.keys(w).sort()).toEqual(['cancelDeadline', 'eventId', 'eventStartsAt', 'receivedFromNickname', 'status', 'ticketId', 'transferLocked']);
+    expect(Object.keys(w).sort()).toEqual(['cancelDeadline', 'eventId', 'eventStartsAt', 'pendingTransfer', 'receivedFromNickname', 'status', 'ticketId', 'transferLocked']);
     expect(w).toMatchObject({ ticketId: withStart.tickets[0]!.ticketId, eventId: EVENT, status: 'ISSUED', transferLocked: false, receivedFromNickname: null });
     expect(Date.parse(String(w.eventStartsAt))).toBe(STARTS);
     expect(w.cancelDeadline).toBe(w.eventStartsAt);
 
     // 회차 시작이 없는 발권: 두 칸 모두 없다(지금 시각 등 거짓 값을 채우지 않는다)
     const n = byId.get(noStart.tickets[0]!.ticketId)!;
-    expect(Object.keys(n).sort()).toEqual(['eventId', 'receivedFromNickname', 'status', 'ticketId', 'transferLocked']);
+    expect(Object.keys(n).sort()).toEqual(['eventId', 'pendingTransfer', 'receivedFromNickname', 'status', 'ticketId', 'transferLocked']);
 
     // 비지 않은 구역은 그대로
     const z = byId.get(zoned.tickets[0]!.ticketId)!;
     expect(z.gateZone).toBe('B');
-    expect(Object.keys(z).sort()).toEqual(['cancelDeadline', 'eventId', 'eventStartsAt', 'gateZone', 'receivedFromNickname', 'status', 'ticketId', 'transferLocked']);
+    expect(Object.keys(z).sort()).toEqual(['cancelDeadline', 'eventId', 'eventStartsAt', 'gateZone', 'pendingTransfer', 'receivedFromNickname', 'status', 'ticketId', 'transferLocked']);
 
     for (const item of byId.values()) for (const k of Object.keys(item)) expect(ALLOWED_KEYS, `계약 밖 칸 ${k}`).toContain(k);
     // 응답 글 어디에도 계약 밖 값이 없다
@@ -418,7 +419,7 @@ describe('월렛 목록 GET /v1/tickets [O-T51]', () => {
     const received = bPage.body.items ?? [];
     expect(received.map((i) => i.ticketId)).toEqual([given.tickets[0]!.ticketId]);
     // 받은 표: 칸 집합이 정확히 이것이다(receivedFromNickname·transferLockExpiresAt 칸 없음, TR-05)
-    expect(Object.keys(received[0]!).sort()).toEqual(['cancelDeadline', 'eventId', 'eventStartsAt', 'status', 'ticketId', 'transferLocked']);
+    expect(Object.keys(received[0]!).sort()).toEqual(['cancelDeadline', 'eventId', 'eventStartsAt', 'pendingTransfer', 'status', 'ticketId', 'transferLocked']);
     // B 목록 원문에 결제자 A의 계정 ID가 없다
     expect(bPage.raw.includes(A), 'B 목록에 결제자 계정 ID가 있다').toBe(false);
     expect('receivedFromNickname' in received[0]!, '받은 표에 receivedFromNickname 칸이 있다(받은 표의 닉네임은 ticket 데이터에 없다)').toBe(false);
@@ -428,7 +429,7 @@ describe('월렛 목록 GET /v1/tickets [O-T51]', () => {
     const mine = (await h.get('')).body.items ?? [];
     expect(mine.map((i) => [i.ticketId, i.transferLocked])).toEqual([[locked.tickets[0]!.ticketId, true]]);
     // 잠긴 표: 잠금 기한(transferLockExpiresAt)은 ticket 데이터에 없어 칸을 뺀다(TR-05)
-    expect(Object.keys(mine[0]!).sort()).toEqual(['cancelDeadline', 'eventId', 'eventStartsAt', 'receivedFromNickname', 'status', 'ticketId', 'transferLocked']);
+    expect(Object.keys(mine[0]!).sort()).toEqual(['cancelDeadline', 'eventId', 'eventStartsAt', 'pendingTransfer', 'receivedFromNickname', 'status', 'ticketId', 'transferLocked']);
     expect(mine[0]!.receivedFromNickname).toBeNull();
   });
 
