@@ -853,9 +853,10 @@ HTTP_METHODS = ('get', 'put', 'post', 'patch', 'delete', 'head', 'options', 'tra
 # Problem 본문을 약속하지 않는 오류 응답(guidelines §2·§12의 예외 둘): (메서드, 경로, 코드) → 이유. 정적 파일 404는 아래 규칙으로 따로 본다
 PROBLEM_EXEMPT = {('POST', '/v1/scanner/token', '400'): 'RFC 8628·RFC 6749 §5.2 OAuth 오류 본문'}
 STATIC_FILE_RE = re.compile(r'\.[a-z]+$')  # 확장자가 붙은 경로 = CDN이 내는 정적 파일(guidelines §10)
-# If-Match 없이 마지막 저장이 이기는 자기 상태(guidelines §12 '동시 수정'의 예외 셋): (메서드, 경로) → 이유
+# If-Match 없이 마지막 저장이 이기는 자기 상태(guidelines §12 '동시 수정'의 예외): (메서드, 경로) → 이유
 IF_MATCH_EXEMPT = {('PUT', '/v1/productions/{productionId}/wish'): '내 찜',
                    ('PUT', '/v1/scanner/shift/readiness'): '그 기기의 근무 준비',
+                   ('PUT', '/v1/scanner/queue-reports/{eventId}'): '그 기기의 입장 큐 비움 보고',
                    ('PATCH', '/v1/reviews/{reviewId}'): '작성자만 고치는 내 후기',
                    ('PATCH', '/v1/identity/profile'): '내 프로필',
                    ('PUT', '/v1/identity/consents/{kind}'): '내 선택 동의'}
