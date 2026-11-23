@@ -117,11 +117,61 @@ describe('J-T36 조정 승인 업무(실제 DB)', () => {
     expect(payments.effects.get(approvalId)).toBe(1);
   });
 
+  type Injected = Awaited<ReturnType<typeof approve>>;
+  /** 겹친 두 승인 뒤의 돈·DB 불변식과 응답 모양(settlement §4.3 '승인', F-07-5 리뷰 RV-04) */
+  const expectSettledOnce = async (o: { approvalId: string; statementId: string; lead: Record<string, string>; commanders: Record<string, string>[]; results: Injected[]; before: number }) => {
+    const { approvalId, statementId, lead, commanders, results, before } = o;
+    // 돈 불변식: payment가 조정 합계를 바꾼 것은 한 번이고(다시 부른 적용은 처음 결과를 준다), 적용 호출은 이 승인 ID뿐이다
+    expect(payments.effects.get(approvalId)).toBe(1);
+    expect(payments.rows.get(approvalId)).toBe('APPLIED');
+    expect(new Set(payments.applied.slice(before))).toEqual(new Set([approvalId]));
+    // DB: 투표는 두 commander 가운데 하나의 한 행이고 승인 업무는 DONE이다
+    const votes = await admin.query<{ approver_id: string; requester_id: string }>('select approver_id, requester_id from approval_vote where request_id = $1', [approvalId]);
+    expect(votes.rows).toHaveLength(1);
+    const voter = votes.rows[0]!.approver_id;
+    expect(commanders.map((h) => h['x-user-id'])).toContain(voter);
+    expect(votes.rows).toEqual([{ approver_id: voter, requester_id: lead['x-user-id'] }]);
+    expect((await admin.query('select status from approval_request where id = $1', [approvalId])).rows).toEqual([{ status: 'DONE' }]);
+    // 409는 겹친 판정의 거절뿐이다(버전 충돌 또는 이미 DONE)
+    for (const r of results.filter((x) => x.statusCode === 409)) expect(['approval-conflict', 'approval-not-pending']).toContain((JSON.parse(r.payload) as { type: string }).type.split('/').pop());
+    // 200 응답은 모두 같은 DONE 결과다(같은 승인 ID·같은 투표, RV-04 '겹쳐 먼저 저장된 쪽이 DONE이면 그 결과를 준다')
+    const ok = results.filter((r) => r.statusCode === 200).map((r) => JSON.parse(r.payload) as Record<string, unknown>);
+    expect(ok[0]).toMatchObject({ approvalId, kind: 'SETTLEMENT_ADJUSTMENT', targetRef: statementId, status: 'DONE', approvals: [voter], amount: -300_000, canApprove: false });
+    for (const body of ok.slice(1)) expect(body).toEqual(ok[0]);
+  };
+
   test('J-T36 ④ 두 commander가 같은 조정을 겹쳐 승인해도 payment 적용은 한 번이다', async () => {
-    const { approvalId } = await request(randomUUID());
+    const statementId = randomUUID();
+    const { lead, approvalId } = await request(statementId);
     const before = payments.applied.length;
-    const results = await Promise.all([approve(approvalId, headers('commander', { reauth: true })), approve(approvalId, headers('commander', { reauth: true }))]);
-    expect(results.map((r) => r.statusCode).sort()).toEqual([200, 409]);
-    expect(payments.applied.slice(before)).toEqual([approvalId]);
+    const commanders = [headers('commander', { reauth: true }), headers('commander', { reauth: true })];
+    const results = await Promise.all(commanders.map((h) => approve(approvalId, h)));
+    // 둘째가 닿는 때에 따라 두 결과가 다 정상이다(settlement §4.3 '승인', F-07-5 리뷰 RV-04).
+    // 첫째가 EXECUTING을 쓰기 전이나 DONE을 쓴 뒤면 409이고, 적용 중(EXECUTING)이면 새 투표 없이 적용만 다시 불러 같은 DONE 결과로 200이다
+    expect([[200, 200], [200, 409]], results.map((r) => r.payload).join(' | ')).toContainEqual(results.map((r) => r.statusCode).sort());
+    await expectSettledOnce({ approvalId, statementId, lead, commanders, results, before });
+  });
+
+  test('J-T36 ④ 첫 승인이 적용 중(EXECUTING)일 때 닿은 둘째 승인은 투표를 더 쓰지 않고 첫째와 같은 DONE 결과 200이다', async () => {
+    const statementId = randomUUID();
+    const { lead, approvalId } = await request(statementId);
+    const before = payments.applied.length;
+    const commanders = [headers('commander', { reauth: true }), headers('commander', { reauth: true })];
+    // 첫 승인의 payment 적용 안에서 둘째 승인을 보낸다: 그때 DB 승인 업무는 EXECUTING이다(차례를 고정해 [200, 200] 길을 반드시 지난다)
+    let second: Promise<Injected> | undefined;
+    payments.onApply = async () => {
+      payments.onApply = undefined;
+      expect((await admin.query('select status from approval_request where id = $1', [approvalId])).rows).toEqual([{ status: 'EXECUTING' }]);
+      second = approve(approvalId, commanders[1]!);
+      await second;
+    };
+    const first = await approve(approvalId, commanders[0]!).finally(() => {
+      payments.onApply = undefined;
+    });
+    const results = [first, await second!];
+    expect(results.map((r) => r.statusCode), results.map((r) => r.payload).join(' | ')).toEqual([200, 200]);
+    await expectSettledOnce({ approvalId, statementId, lead, commanders, results, before });
+    // 투표는 먼저 EXECUTING을 쓴 첫째 commander의 것이다
+    expect((await admin.query('select approver_id from approval_vote where request_id = $1', [approvalId])).rows).toEqual([{ approver_id: commanders[0]!['x-user-id'] }]);
   });
 });
