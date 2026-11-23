@@ -132,6 +132,42 @@ describe('환급 잇기 배경 작업 EntryCloseDueTick(O-T29 ③)', () => {
     expect((await w.rowOf(rows[20]!.cancellationId)).refundDueAtMs).toBe(CLOSED_AT);
   });
 
+  test('O-T29 ③ 마감을 끝내 모르는 오래된 회차 20개가 앞자리를 막아도, 마감된 새 회차 하나는 두 번째 틱에서 당겨진다(세 번째 틱은 다시 처음부터, 시험 리뷰 RV-06)', async () => {
+    const { EntryCloseDueTick } = await load();
+    const w = await world();
+    const blocked = Array.from({ length: 20 }, () => randomUUID());
+    const fresh = randomUUID();
+    const freshRow = row(fresh, { refundDueAtMs: CAP + 3_600_000 }, STARTS_AT + 3_600_000);
+    await w.seed([...blocked.map((e, i) => row(e, { refundDueAtMs: CAP + i }, STARTS_AT + i)), freshRow]);
+    // 막는 회차는 절반은 아직 마감 전(null), 절반은 모름(undefined)
+    const t = times({ ...Object.fromEntries(blocked.map((e, i) => [e, i % 2 === 0 ? null : undefined])), [fresh]: CLOSED_AT });
+    const tick = new EntryCloseDueTick({ store: w.store, closes: t.closes, nowMs: () => NOW });
+    await expect(tick.run()).resolves.toEqual({ moved: 0 });
+    expect(new Set(t.asked)).toEqual(new Set(blocked));
+    const asked = t.asked.length;
+    await expect(tick.run()).resolves.toEqual({ moved: 1 });
+    expect(t.asked.slice(asked)).toEqual([fresh]);
+    expect((await w.rowOf(freshRow.cancellationId)).refundDueAtMs).toBe(CLOSED_AT);
+    const asked2 = t.asked.length;
+    await expect(tick.run()).resolves.toEqual({ moved: 0 });
+    expect(new Set(t.asked.slice(asked2))).toEqual(new Set(blocked));
+  });
+
+  test('O-T29 ③ 마감 시각을 읽었는데 당길 행이 0이어도(마감 시각이 refund_due_at보다 늦음) 그 회차 결과는 moved 하나이고 행은 그대로다(정본 §7.3 환급 잇기)', async () => {
+    const { EntryCloseDueTick } = await load();
+    const w = await world();
+    const eventId = randomUUID();
+    // 두 서비스 시계 차이: 기다리는 행의 refund_due_at(지금 + 10ms)보다 마감 시각(지금 + 20ms)이 늦다
+    const r = row(eventId, { refundDueAtMs: NOW + 10 });
+    await w.seed([r]);
+    const t = times({ [eventId]: NOW + 20 });
+    const m = metricsOf();
+    await expect(new EntryCloseDueTick({ store: w.store, closes: t.closes, nowMs: () => NOW, metrics: m.metrics }).run()).resolves.toEqual({ moved: 0 });
+    expect(t.asked).toEqual([eventId]);
+    expect(m.counts).toEqual({ moved: 1, not_closed: 0, unavailable: 0 });
+    expect((await w.rowOf(r.cancellationId)).refundDueAtMs).toBe(NOW + 10);
+  });
+
   test('O-T29 ③ 기다리는 행의 기준은 주입한 지금 시각이다(refund_due_at이 지금 이하인 회차는 묻지 않는다)', async () => {
     const { EntryCloseDueTick } = await load();
     const w = await world();

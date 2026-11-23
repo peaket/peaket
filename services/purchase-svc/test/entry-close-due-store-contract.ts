@@ -90,6 +90,34 @@ export function entryCloseDueStoreContract(name: string, make: () => Promise<Ent
       expect(await w.store.waitingEvents(NOW, 21)).toEqual(events);
     });
 
+    test(`O-T29 ③ waitingEvents 차례는 회차의 기다리는 행 가운데 가장 이른 refund_due_at 차례이고(접수 차례가 아니다), 같으면 회차 ID 차례다(정본 §7.3 환급 잇기, 시험 리뷰 정본 빈칸 1)(${name})`, async () => {
+      const w = await make();
+      // 접수는 a가 가장 이르지만 refund_due_at은 가장 늦다. b·c는 refund_due_at이 같아 회차 ID로 가른다. d는 가장 이른 행 하나와 늦은 행 하나를 가진다
+      const [b, c] = [randomUUID(), randomUUID()].sort();
+      const a = randomUUID();
+      const d = randomUUID();
+      await w.seed([
+        row(a, { refundDueAtMs: CAP + 3 * 60_000 }, STARTS_AT),
+        row(c!, { refundDueAtMs: CAP + 60_000 }, STARTS_AT + 3_000),
+        row(b!, { refundDueAtMs: CAP + 60_000 }, STARTS_AT + 2_000),
+        row(d, { refundDueAtMs: CAP + 9 * 60_000 }, STARTS_AT + 1_000),
+        row(d, { refundDueAtMs: CAP + 1 }, STARTS_AT + 4_000),
+        // 기다리는 행이 아닌 이른 값은 차례에 넣지 않는다(입장 기록 있는 행)
+        row(a, { refundDueAtMs: CAP - 60_000, entryRecordedAtMs: STARTS_AT + 60_000 }, STARTS_AT),
+      ]);
+      expect(await w.store.waitingEvents(NOW, 20)).toEqual([d, b, c, a]);
+    });
+
+    test(`O-T29 ③ 돌아가며 보기: afterEventId를 주면 같은 차례에서 그 회차 다음부터 limit개를 준다(끝 다음은 빈 목록, 시험 리뷰 RV-06)(${name})`, async () => {
+      const w = await make();
+      const events = Array.from({ length: 5 }, () => randomUUID());
+      await w.seed(events.map((eventId, i) => row(eventId, { refundDueAtMs: CAP + i * 60_000 }, STARTS_AT + i * 1_000)));
+      expect(await w.store.waitingEvents(NOW, 2)).toEqual(events.slice(0, 2));
+      expect(await w.store.waitingEvents(NOW, 2, events[1])).toEqual(events.slice(2, 4));
+      expect(await w.store.waitingEvents(NOW, 2, events[3])).toEqual(events.slice(4));
+      expect(await w.store.waitingEvents(NOW, 2, events[4])).toEqual([]);
+    });
+
     test(`O-T29 ③ pullDue는 그 회차의 REQUESTED∧입장 기록 없음∧회차 취소 아님∧refund_due_at > 마감인 행만 마감 시각으로 당기고 바꾼 행 수를 준다(건드린 행 모두 단언)(${name})`, async () => {
       const w = await make();
       const eventId = randomUUID();

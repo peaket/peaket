@@ -222,6 +222,32 @@ describe('EntryCloseTick 마감(O-T29 ①②)', () => {
   });
 });
 
+describe('EntryCloseTick 돌아가며 보기(offline-gate §7.3 판단, 시험 리뷰 RV-06)', () => {
+  test('O-T29 ① 끝 시각을 끝내 모르는 오래된 회차 50개가 앞자리를 막아도, 닫을 수 있는 새 회차 하나는 두 번째 판단에서 마감된다(세 번째 판단은 다시 처음부터)', async () => {
+    const r = await rig(R);
+    const blocked: string[] = [];
+    for (let n = 0; n < 50; n++) {
+      const e = await r.event(0, { startsAtMs: STARTS - 3_600_000 - (50 - n) * 1_000 });
+      r.policy.answers.delete(e.eventId); // core가 모르는 회차(ends_at을 읽지 못함)
+      blocked.push(e.eventId);
+    }
+    const fresh = await r.event(0);
+    expect(await r.tick.run()).toMatchObject({ closed: 0 });
+    expect(r.policy.asked).not.toContain(fresh.eventId);
+    expect(new Set(r.policy.asked)).toEqual(new Set(blocked));
+    r.clock.advance(60_000);
+    const asked = r.policy.asked.length;
+    expect(await r.tick.run()).toMatchObject({ closed: 1 });
+    expect(r.policy.asked.slice(asked)).toEqual([fresh.eventId]);
+    expect(await r.h.store.closedAt(fresh.eventId)).toBe(R + 60_000);
+    // 상한보다 적게 나와 끝에 닿았으므로 다음 판단은 처음부터 본다
+    r.clock.advance(60_000);
+    const asked2 = r.policy.asked.length;
+    expect(await r.tick.run()).toMatchObject({ closed: 0 });
+    expect(new Set(r.policy.asked.slice(asked2))).toEqual(new Set(blocked));
+  });
+});
+
 describe('EntryCloseTick 장애·되돌림(O-T29 ⑥)', () => {
   test('O-T29 ⑥ core 내부 입구가 503을 두 번 주면 마감은 ticket-svc에 남고 다시 보내 세 번째에 알린 것으로 적는다(세 번 모두 같은 마감 시각)', async () => {
     const r = await rig(R);

@@ -41,7 +41,7 @@ const ENDS_AT = Date.parse('2026-12-24T12:17:43.219Z');
 const ROLE_END = ENDS_AT + ROLE_END_AFTER_ENDS_MS;
 
 /** 회차 하나를 만들고 판매 설정 사본(rev 7·entryClosedAtMs null)을 core_ops로 쓴다 */
-async function seedEvent(): Promise<{ eventId: string; config: EventSaleConfig }> {
+async function seedEvent(o: { withConfig?: boolean } = {}): Promise<{ eventId: string; config: EventSaleConfig }> {
   const eventId = randomUUID();
   await admin.db.insert(event).values({
     id: eventId,
@@ -74,7 +74,7 @@ async function seedEvent(): Promise<{ eventId: string; config: EventSaleConfig }
     eligGates: [],
     eligLists: [],
   };
-  await new DrizzleSaleConfigStore(opsDb).put([config], []);
+  if (o.withConfig !== false) await new DrizzleSaleConfigStore(opsDb).put([config], []);
   return { eventId, config };
 }
 
@@ -210,18 +210,32 @@ describe('PUT /internal/v1/events/{eventId}/entry-closed (실제 PostgreSQL, O-T
     expect((await configRow(eventId)).payload.entryClosedAtMs).toBe(ROLE_END);
   });
 
-  test('O-T29 ③-5 없는 회차는 404이고, 본문이 틀리면(빠짐·오프셋 없는 시각·글자) 쓰지 않는다', async () => {
+  test('O-T29 ③-5 없는 회차는 404이고, 본문 형식이 틀리면(빠짐·오프셋 없는 시각·글자·숫자) 정확히 400이며 쓰지 않는다. 이어 보낸 정상 본문은 200이다(시험 리뷰 RV-04)', async () => {
     const missing = await put(randomUUID(), { closedAt: new Date(ROLE_END).toISOString() });
     expect(missing.statusCode).toBe(404);
     expect(JSON.parse(missing.payload)).toMatchObject({ status: 404 });
     const { eventId } = await seedEvent();
     for (const body of [{}, { closedAt: '2026-12-24T14:17:43.219' }, { closedAt: 'tomorrow' }, { closedAt: ROLE_END }]) {
       const r = await put(eventId, body);
-      expect(r.statusCode, JSON.stringify(body)).toBeGreaterThanOrEqual(400);
-      expect(r.statusCode, JSON.stringify(body)).toBeLessThan(500);
-      expect(r.statusCode, JSON.stringify(body)).not.toBe(404);
+      expect(r.statusCode, JSON.stringify(body)).toBe(400);
+      expect(JSON.parse(r.payload), JSON.stringify(body)).toMatchObject({ status: 400 });
     }
     expect(await eventClosedAt(eventId)).toBeNull();
+    expect((await configRow(eventId)).payload.entryClosedAtMs).toBeNull();
+    const ok = await put(eventId, { closedAt: new Date(ROLE_END + 1).toISOString() });
+    expect(ok.statusCode).toBe(200);
+    expect(await eventClosedAt(eventId)).toBe(ROLE_END + 1);
+  });
+
+  test('O-T29 ③-7 회차는 있는데 판매 설정 사본 행이 없으면 event.entry_closed_at만 쓰고 200이며 사본은 만들지 않는다(정본 §7.3 core 알림, 시험 리뷰 RV-14)', async () => {
+    const { eventId } = await seedEvent({ withConfig: false });
+    const closedAt = ROLE_END + 9_001;
+    const r = await put(eventId, { closedAt: kst(closedAt) });
+    expect(r.statusCode).toBe(200);
+    expect(Date.parse((JSON.parse(r.payload) as { entryClosedAt: string }).entryClosedAt)).toBe(closedAt);
+    expect(await eventClosedAt(eventId)).toBe(closedAt);
+    const rows = await admin.pool.query('select 1 from event_sale_config where event_id = $1', [eventId]);
+    expect(rows.rows).toHaveLength(0);
   });
 
   test('O-T29 ③-6 내부 토큰이 없거나 틀리면 401이고 쓰지 않는다', async () => {

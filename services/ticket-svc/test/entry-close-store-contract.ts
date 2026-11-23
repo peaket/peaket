@@ -71,6 +71,24 @@ export function entryCloseStoreContract(name: string, make: () => Promise<EntryC
       expect(await close(h, eventId, R + 40)).toEqual({ closed: true, reason: 'ALL_REPORTED', closedAtMs: R + 40, unreported: 0 });
     });
 
+    test('O-T29 ⑤ 같은 기기의 값이 다른 보고 둘이 겹쳐도 둘 다 stored이고 던지지 않으며, 뒤의 판단은 둘 가운데 한 값대로다(10회, 시험 리뷰 RV-05)', async () => {
+      const h = await make();
+      for (let round = 0; round < 10; round++) {
+        const { eventId, deviceIds } = await eventWith(h, 1);
+        const deviceId = deviceIds[0]!;
+        const results = await Promise.all([
+          h.store.putQueueReport({ eventId, deviceId, pendingUploads: 0, nowMs: R + 1 }),
+          h.store.putQueueReport({ eventId, deviceId, pendingUploads: 4, nowMs: R + 1 }),
+        ]);
+        expect(results, `회차 ${round}`).toEqual(['stored', 'stored']);
+        const d = await close(h, eventId, R + 2);
+        // 0이 남았으면 ALL_REPORTED로 마감, 4가 남았으면 대기 끝 전이라 마감 안 함. 그 밖의 답은 없다
+        expect([JSON.stringify({ closed: true, reason: 'ALL_REPORTED', closedAtMs: R + 2, unreported: 0 }), JSON.stringify({ closed: false, unreported: 0 })], `회차 ${round}`).toContain(
+          JSON.stringify(d.closed ? { closed: d.closed, reason: d.reason, closedAtMs: d.closedAtMs, unreported: d.unreported } : { closed: d.closed, unreported: d.unreported }),
+        );
+      }
+    });
+
     test('O-T29 ① 역할 유효 끝 1ms 전에 받은 비움 보고는 세지 않는다(R 판단 미마감), 역할 유효 끝에 받은 보고는 센다', async () => {
       const h = await make();
       const early = await eventWith(h, 1);
@@ -178,6 +196,23 @@ export function entryCloseStoreContract(name: string, make: () => Promise<EntryC
       const now = base + 3_000;
       expect(await h.store.candidates({ nowMs: now, limit: 2 })).toEqual([e1, e2]);
       expect(await h.store.candidates({ nowMs: now, limit: 50 })).toEqual([e1, e2, e3]);
+    });
+    test('O-T29 ① 돌아가며 보기: afterEventId를 주면 (회차 시작, 회차 ID) 차례에서 그 회차 다음부터 limit개를 주고, 시작이 같으면 회차 ID 차례다(시험 리뷰 RV-06)', async () => {
+      const h = await make();
+      // 앞 후보 시험(1991년)보다 이른 1989년 시작을 쓴다(공유 DB에서 그 시험의 회차가 섞이지 않게)
+      const base = Date.parse('1989-07-08T09:10:11.012Z');
+      // 시작이 같은 셋은 회차 ID 차례다(심는 차례는 거꾸로), 하나는 1ms 더 늦다
+      const same = [randomUUID(), randomUUID(), randomUUID()];
+      const ordered = [...same].sort();
+      same.sort().reverse();
+      const later = randomUUID();
+      for (const id of same) await h.seedEvent(id, base);
+      await h.seedEvent(later, base + 1);
+      const now = base + 1;
+      expect(await h.store.candidates({ nowMs: now, limit: 50 })).toEqual([...ordered, later]);
+      expect(await h.store.candidates({ nowMs: now, limit: 2, afterEventId: ordered[0]! })).toEqual([ordered[1], ordered[2]]);
+      expect(await h.store.candidates({ nowMs: now, limit: 2, afterEventId: ordered[2]! })).toEqual([later]);
+      expect(await h.store.candidates({ nowMs: now, limit: 2, afterEventId: later })).toEqual([]);
     });
   });
 }

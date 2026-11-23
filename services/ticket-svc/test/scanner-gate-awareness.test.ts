@@ -87,32 +87,44 @@ describe('중복 입장 갈림의 앞 기록 번호(O-T2 ①, offline-gate §7.1
     }
   });
 
-  test('O-T2 ① 늦은 기록(보정 시각이 더 이름)을 나중에 올리면 정상이 바뀌고, 내려간 기록의 갈림은 새 정상의 state_seq로 본다', async () => {
+  /**
+   * 내림 장면 하나: 새 회차에 늦은 기록(knownSeq k)을 먼저 올리고, 다른 티켓으로 번호를 올린 뒤(bump), 이른 기록을 올린다.
+   * L = bump 뒤 회차 마지막 번호, sLate·sEarly = 두 기록의 state_seq(SCAN_STATE 번호). 회차마다 번호가 1부터라 같은 장면이면 L·sEarly − L이 같다
+   */
+  async function demotion(k: number) {
     const r = rig();
     const ticketId = r.ticket();
-    // 1분 늦게 찍힌 기록이 먼저 올라와 정상이 된다
-    const late = scanOf(r.eventId, ticketId, T0 + 60_000, 0);
+    const late = scanOf(r.eventId, ticketId, T0 + 60_000, k);
     expect((await upload(r, DEVICE_B, late)).flags).toEqual([]);
+    const sLate = await stateSeqOf(r, late);
     await bump(r);
+    const L = (await r.store.changes({ eventId: r.eventId, after: 0, limit: 10_000 })).lastSeq;
     const early = scanOf(r.eventId, ticketId, T0, 0);
     const res = await upload(r, DEVICE_A, early);
     const sEarly = await stateSeqOf(r, early);
-    // 내려간 기록(late)의 knownSeq 0 < 새 정상의 state_seq → CONCURRENT
-    expect(sEarly).toBeGreaterThan(0);
-    expect(res.flags.map((f) => ({ ticketId: f.ticketId, kind: f.kind, awareness: f.awareness }))).toEqual([{ ticketId, kind: 'DUPLICATE', awareness: 'CONCURRENT' }]);
-    // 정상은 보정 시각이 가장 이른 기록이고 늦은 기록은 중복으로 내려갔다
-    expect(r.store.scans.get(early.id)).toMatchObject({ result: 'PASS', flag: 'NONE' });
-    expect(r.store.scans.get(late.id)).toMatchObject({ result: 'REJECT', reason: 'ALREADY_IN', flag: 'DUPLICATE' });
-  });
+    return { r, late, early, res, sLate, L, sEarly };
+  }
 
-  test('O-T2 ① 내려간 기록의 knownSeq가 새 정상의 state_seq 이상이면 KNOWN이다(앞 기록을 알고도 통과)', async () => {
-    const r = rig();
-    const ticketId = r.ticket();
-    const late = scanOf(r.eventId, ticketId, T0 + 60_000, 1_000_000);
-    await upload(r, DEVICE_B, late);
-    const early = scanOf(r.eventId, ticketId, T0, 0);
-    const res = await upload(r, DEVICE_A, early);
-    expect(res.flags.map((f) => ({ kind: f.kind, awareness: f.awareness }))).toEqual([{ kind: 'DUPLICATE', awareness: 'KNOWN' }]);
+  test('O-T2 ① 늦은 기록을 먼저 올린 뒤 이른 기록이 오면 정상이 바뀌고, 내려간 기록의 갈림은 새 정상의 state_seq로 본다: knownSeq가 s_late 이상·s_early 미만이면 CONCURRENT, s_early면 KNOWN(시험 리뷰 RV-02)', async () => {
+    // 먼저 같은 장면을 한 번 돌려 번호를 잰다(knownSeq 값은 번호에 닿지 않는다)
+    const probe = await demotion(0);
+    expect(probe.L, '번호를 올렸다').toBeGreaterThan(probe.sLate);
+    expect(probe.sEarly, '새 정상의 번호는 bump 뒤').toBeGreaterThan(probe.L);
+    const gap = probe.sEarly - probe.L;
+    for (const [k, awareness] of [
+      // s_late ≤ k < s_early: 내려간 기록 자기 번호(s_late)와 견주는 틀린 구현과 지금 마지막 번호(L)와 견주는 옛 구현은 KNOWN을 낸다
+      [probe.L + gap - 1, 'CONCURRENT'],
+      [probe.L + gap, 'KNOWN'],
+    ] as const) {
+      const d = await demotion(k);
+      // 장면이 같아 번호도 같다(다르면 이 시험의 고른 값이 무효다)
+      expect({ L: d.L, sEarly: d.sEarly, sLate: d.sLate }, `k=${k}`).toEqual({ L: probe.L, sEarly: probe.sEarly, sLate: probe.sLate });
+      expect(k, `k=${k}`).toBeGreaterThanOrEqual(d.sLate);
+      expect(d.res.flags.map((f) => ({ ticketId: f.ticketId, kind: f.kind, awareness: f.awareness })), `k=${k}`).toEqual([{ ticketId: d.late.ticketId, kind: 'DUPLICATE', awareness }]);
+      // 정상은 보정 시각이 가장 이른 기록이고 늦은 기록은 중복으로 내려갔다
+      expect(d.r.store.scans.get(d.early.id)).toMatchObject({ result: 'PASS', flag: 'NONE' });
+      expect(d.r.store.scans.get(d.late.id)).toMatchObject({ result: 'REJECT', reason: 'ALREADY_IN', flag: 'DUPLICATE' });
+    }
   });
 
   test('O-T2 ① 두 오프라인 스캐너(knownSeq 같음)의 1분 간격 중복은 올리는 차례를 바꿔도 표시 하나·정상은 이른 기록·나중 기록은 CONCURRENT다', async () => {
