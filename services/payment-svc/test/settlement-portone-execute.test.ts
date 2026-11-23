@@ -238,8 +238,9 @@ describe('J-T41 ② 지급일 09:00 KST 실행 건', () => {
     const P = partner();
     const { batchId } = await approvedBatch([{ P: P.P, amount: 5_000_000 }]);
     await execute(batchId);
-    at(NINE_KST - 86_400_000);
-    await expect(h.settlements.preparePortoneExecution('2026-12-01')).resolves.toEqual({ cases: 0, held: 0, halted: false });
+    // 시계는 앞으로만 간다: 실행(12-01 15:00 KST) 뒤의 지급일이 아닌 날(12-03) 09:00 KST에 부른다(시험 이의 TO-01)
+    at(NINE_KST + 86_400_000);
+    await expect(h.settlements.preparePortoneExecution('2026-12-03')).resolves.toEqual({ cases: 0, held: 0, halted: false });
     expect([...h.store.caseRequests.values()].filter((c) => c.kind === 'PORTONE_PAYOUT_EXECUTION')).toEqual([]);
   });
 });

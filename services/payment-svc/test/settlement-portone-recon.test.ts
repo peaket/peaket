@@ -218,7 +218,8 @@ describe('J-T20 포트원 출금 대사', () => {
     at(COMPLETED_AT + 3_600_000 + 30 * 60_000);
     await h.settlements.reconcilePortoneTransfers();
     expect(ledgerCases()).toHaveLength(1);
-    expect(leaks(dumpStore(h.store) + h.log.text() + JSON.stringify(ops.alerts), ACCOUNT, LEGAL)).toEqual([]);
+    // 판매자 상호는 seller_kyc에 저장하는 값이라(시험이 심음) 그 표를 빼고, 예금주명·계좌번호가 다른 곳에 없는지 본다(시험 이의 TO-03)
+    expect(leaks(dumpStore(h.store, { except: ['kycs'] }) + h.log.text() + JSON.stringify(ops.alerts), ACCOUNT, LEGAL)).toEqual([]);
   });
 
   test('J-T20 ② 30분 tick이 출금 대사와 경보 보내기를 부른다(일꾼 tick)', async () => {
@@ -490,6 +491,8 @@ describe('J-T22 포트원 잔액 대조와 대사 멈춤', () => {
 
   test('J-T22 ② 계좌 대조(PARTNER_ACCOUNT)는 마지막 성공 뒤 89,999.999초에는 경보가 없고 90,000초(25시간)에 SEV2 한 번이다(계획 §5.1 (파) (다), TR-11)', async () => {
     const P0 = EIGHT_TODAY - 86_400_000; // 어제 08:00 KST
+    // 시계는 앞으로만 간다: 경계 1분 앞에서 시작하는 조립을 따로 만든다(시험 이의 TO-02)
+    h = harness({ now: P0 + 90_000_000 - 60_000, portone: fake, toss: true, ops });
     sync('PARTNER_ACCOUNT', P0);
     at(P0 + 90_000_000 - 1);
     sync('WITHDRAWAL', h.clock.now() - 60_000);

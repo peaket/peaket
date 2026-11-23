@@ -8,13 +8,16 @@ import { createService, fakeClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
-import { MemoryCsCaseStore, ReceiveCaseRequested, type CaseRequested } from '../src/modules/cases/index.js';
+import { MemoryCsCaseStore, PromCsCaseSignals, ReceiveCaseRequested, type CaseRequested } from '../src/modules/cases/index.js';
 import { FakeIdentity, quiet } from './support.js';
 
 const NOW = Date.parse('2026-12-02T00:00:00.000Z');
 let svc: Awaited<ReturnType<typeof createService>>;
 beforeAll(async () => {
-  svc = await createService({ name: 'ops-svc', module: AppModule.register({ memory: true }), env: { PEAKET_ENV: 'ci' }, clock: fakeClock({ now: NOW }), logDestination: quiet(), adminAuthz: new FakeIdentity() });
+  // 지표 ops_cs_case_requests_total을 보려면 CS 건 지표 기록기를 조립에 넘기고 서비스 레지스트리에 붙인다(cs-support.ts와 같음, 시험 이의 TO-05)
+  const signals = new PromCsCaseSignals();
+  svc = await createService({ name: 'ops-svc', module: AppModule.register({ memory: true, caseSignals: signals }), env: { PEAKET_ENV: 'ci' }, clock: fakeClock({ now: NOW }), logDestination: quiet(), adminAuthz: new FakeIdentity() });
+  signals.register(svc.metrics.registry);
 });
 afterAll(async () => {
   await svc?.close();

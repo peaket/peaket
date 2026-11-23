@@ -1,7 +1,8 @@
 // J-T38 ⑥ ops-svc가 지급 쪽 CS 건 다섯 종류를 받는다(F-07-6 LCH-110, ADR-0369 결정 10, docs/features/settlement.md §5.2·§6·§12).
 // payment-svc HttpSettlementCaseNotice.openCase가 POST /internal/v1/cs-cases로 보내는 모양(eventKey·kind·sourceId·category SETTLEMENT·createdAt)을 그대로 쓴다.
 // 다섯(SELLER_KYC_REQUIRED·PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED·PG_BALANCE_MISMATCH)은 건을 열고, 같은 사건 키는 한 건이며,
-// 목록 밖 종류(정산 운영 종류라도 PORTONE_PAYOUT_EXECUTION·PORTONE_LEDGER_MISMATCH 등)는 여전히 받지 않는다(accepted false).
+// 목록 밖 종류는 여전히 받지 않는다(accepted false). F-07-7(ADR-0370 결정 7·8, 계획 I-07)부터 PORTONE_PAYOUT_EXECUTION·PORTONE_LEDGER_MISMATCH는 받는다
+// (그 두 종류는 F-07-7 cs-case-portone-kinds.test.ts가 본다, F-07-7 시험 이의 TO-06으로 목록 밖 예에서 뺐다).
 import 'reflect-metadata';
 import { createService, fakeClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
@@ -56,8 +57,8 @@ describe('J-T38 ⑥ 지급 쪽 CS 건 종류', () => {
     expect(store.cases.size).toBe(5);
   });
 
-  test('J-T38 ⑥ 목록 밖 종류(PORTONE_PAYOUT_EXECUTION·PORTONE_LEDGER_MISMATCH·UNKNOWN_PAYMENT·모르는 이름)는 여전히 받지 않는다', async () => {
-    for (const kind of ['PORTONE_PAYOUT_EXECUTION', 'PORTONE_LEDGER_MISMATCH', 'UNKNOWN_PAYMENT', 'PAYOUT_CANCELED']) {
+  test('J-T38 ⑥ 목록 밖 종류(UNKNOWN_PAYMENT·모르는 이름·포트원 비슷한 지어낸 이름)는 여전히 받지 않는다', async () => {
+    for (const kind of ['UNKNOWN_PAYMENT', 'PAYOUT_CANCELED', 'PORTONE_PAYOUT', 'portone_ledger_mismatch']) {
       const r = await post(body(kind, randomUUID(), randomUUID()));
       expect([kind, r.statusCode, JSON.parse(r.payload)]).toEqual([kind, 202, { accepted: false }]);
     }

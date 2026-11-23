@@ -281,8 +281,9 @@ export function portonePartner(store: MemorySettlementStore, promoterId: string,
 }
 
 /** 메모리 저장소의 모든 칸을 한 글로(원문 0건 단언용) */
-export function dumpStore(store: MemorySettlementStore): string {
-  return JSON.stringify(store, (_k, v: unknown) => (v instanceof Map ? [...v.entries()] : v instanceof Set ? [...v] : v));
+export function dumpStore(store: MemorySettlementStore, o: { except?: readonly string[] } = {}): string {
+  const skip = new Set(o.except ?? []);
+  return JSON.stringify(store, (k, v: unknown) => (skip.has(k) ? undefined : v instanceof Map ? [...v.entries()] : v instanceof Set ? [...v] : v));
 }
 
 // ---- HTTP 조립(Fastify 주입) ----
