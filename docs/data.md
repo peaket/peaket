@@ -1600,6 +1600,7 @@ erDiagram
     device_key ||--o| device_key_notice : "입장 키 알림(ADR-0363)"
     ticket ||--o{ ticket_addon : ""
     event ||--|| scanner_seq : "회차별 변경 일련번호 카운터(ADR-0086)"
+    event ||--o| scanner_event_policy : "스캐너 변경분용 입장 정책 사본(추천 적용 2026-11-23, F-05-4)"
     gate_flag ||--o{ gate_flag_scan : "이상 표시에 든 스캔(ADR-0086)"
     ticket ||--o{ ticket_operator_cancellation : "부정 예매 운영자 취소의 표별 결과(추천 적용 2026-11-16, GAT-080)"
     ticket ||--o{ ticket_cancellation : "팬 취소·일괄 환불의 티켓 단계 기록(HOT-160, 사유 칸은 GAT-080 다시 보기 R1)"
@@ -1771,6 +1772,12 @@ erDiagram
     scanner_seq {
         uuid event_id PK
         bigint last_seq "변경을 적는 트랜잭션에서 UPDATE … RETURNING으로 올림. 시퀀스 금지(ADR-0086)"
+    }
+    scanner_event_policy {
+        uuid event_id PK
+        boolean reentry_allowed "core-svc event.reentry_allowed의 사본. 다르면 같은 트랜잭션에서 조건부로 바꾸고 scanner_change POLICY를 적는다(offline-gate §6.3, ticket 0013)"
+        bigint policy_seq "마지막으로 적은 POLICY 변경 번호. 처음 만들 때 0"
+        timestamptz observed_at "core 값을 마지막으로 맞춘 시각"
     }
     gate_flag_scan {
         uuid ticket_id "gate_flag의 티켓(보존 삭제 때 티켓으로 찾는다). 기본 키는 (flag_id, scan_event_id)(ADR-0114)"
@@ -2847,6 +2854,7 @@ erDiagram
 | `ticket.payer_account_id` | 주문의 계정 | 발권 | 바뀌지 않음 | 없음(그 시점 값) |
 | `ticket.event_id`·`seat_id` | 주문 항목 | 발권 | 바뀌지 않음 | 없음 |
 | `ticket.gate_zone` | 좌석 값이 있으면 `seat.gate_zone`, 없으면 `section.gate_zone` | 발권 | 오픈 뒤 바꿀 수 있음 | ticket-svc가 티켓 값을 고치고 `scanner_change`로 알린다 |
+| `scanner_event_policy.reentry_allowed` | core-svc `event.reentry_allowed` | 스캐너 목록·변경분 요청 때(5초 캐시) | 오픈 뒤 불허 → 허용만 | 다르면 ticket-svc가 사본을 조건부로 바꾸고 `scanner_change` `POLICY`로 알린다(offline-gate §6.3, 추천 적용 2026-11-23, F-05-4) |
 | `event.commission_rate_bp` | `promoter_contract.commission_rate_bp`(지금 계약. 없으면 채우지 않는다) | 판매 승인(0033 이전 승인분은 마이그레이션 백필) | 바뀌지 않음 | 없음(ADR-0060·0320) |
 | `merch_order_item.unit_price`·`order_item.unit_price` | 상품·등급 가격 | 주문 | 바뀌지 않음 | 없음 |
 | `product.commission_rate_bp` | `promoter.commission_rate_bp`(`promoter_contract`) | 상품을 처음 게시할 때 | 바뀌지 않음 | 없음(ADR-0062) |
