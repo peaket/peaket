@@ -131,6 +131,8 @@
 - 2026-11-24 05:1x 노드 빨강 둘을 고쳤다: ① F-05-3 purchase 통합 `priority-grant-sync-cursor`가 앞 시험이 남긴 150행 때문에 다음 시험의 3행을 두 틱에 못 봐 `beforeEach`에서 표를 비우게 했다. ② 0033이 `cs_case_open_key`에 종류 조건을 더한 뒤 0030 `ops_open_cs_case`의 `ON CONFLICT (kind,target_ref) WHERE status <> 'RESOLVED'`가 부분 인덱스와 맞지 않아 ops 통합이 실패했다. `0034_cs_open_conflict_after_adjustment.sql`로 술어를 맞추고 ops 통합 24/24를 확인했다. ③ mesh-policies 시험 표에 purchase-svc의 `PriorityGrantService` 호출을 더했다(mesh 24/24).
 - 2026-11-24 05:2x 남은 것: web reflow `wallet-enroll`·`wallet-live`가 live 월렛 화면과 시험 대역의 어긋남으로 19건 빨갛다(고정 `tkt-lumen-r1-0312`에 팬 API 503만 둠, 데스크톱 [그래도 이 기기에 등록] 클릭 없음). 기능 시험은 아니지만 F-05-2 브라우저 확인 몫이라 `lane2-cleanup.md`에 적었다. 최신 develop `8ccfd4705`, CI는 node 재실행 중.
 
+- 2026-11-24 05:3x 노드 마지막 빨강을 닫았다: `f021-e2e-control`이 purchase-svc를 띄울 때 `PEAKET_SCHEMA_IDS_FILE`가 없어 시작 전에 죽었다. `seatDir/schema-ids.json`을 쓰고 env로 넘겨 실제 PostgreSQL·Valkey·gRPC 통합 3/3을 확인했다(`17fdd1ca6`). ci-node 시한을 30→45분으로 늘려 전체 통합이 끝까지 돌았고, **CI 실행 45285278501 성공**. 남은 것은 web reflow `wallet-enroll`·`wallet-live`의 live 월렛 화면 불일치(19건, `lane2-cleanup.md`)와 갈래 4 측정 창(11-26 09:00)·갈래 5 F-08-7(12-02) 일정이다.
+
 ## SEG 때 정할 범위 늘어남(ADR-0283 결정 6)
 - 묶음 중에 더한 새 단계는 wbs.csv 일수에 바로 더하지 않고 여기 모아 구간 마무리 때 소유자가 한 번에 정한다(앞선 예: HOT-405 0.75일, 2026-11-18 OPEN[49]).
 - PRF-174(wbs 2.7.1 ③, 0.5일 [가정], BAT-013): 탈퇴 참여자의 결제한 미사용 티켓 취소·환급(BAT-010이 찾음, 돈 A 대상, R-685).
