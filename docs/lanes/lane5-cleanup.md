@@ -34,3 +34,9 @@
 - 상품 정산서: core 원천이 지금 항목 상태로 거르므로, 정산 기준일 뒤·그 주 계산 전 전액 환급 항목이 판매·환급 양쪽에서 빠진다(지급액·수수료는 같고 두 칸 합계만 정본 §4.5와 다름).
 - 흔들림 후보(2026-11-23 FIX-payment-int 합치기 때): BAT-215·220 뒤 트리의 payment 통합 전체에서 `payment-process` PRF180 설정 시험·`purchase-path-e2e` V4 ③·P-T25 둘이 부하 중 실패, 두 파일만 다시 돌리면 28 통과.
 - 남은 폴더: `D:/ticketpass-lane5-F-07-5-pre`(실패 확인용 작업 폴더, worktree 등록은 지웠으나 긴 경로로 폴더가 남음. 지우기 명령이 막혀 소유자 몫).
+
+## FIX-problem-types(2026-11-23, R-784)
+
+- 리뷰 RV-03(정보): ops `settlement-dependency-unavailable`·`payout-dependency-unavailable` 503에 `Retry-After`가 없다(guidelines §2 필수 경우는 아님). FIX-problem-ctor에서 함께 본다.
+- 검증: `packages/platform/turbo.json` 입력 표본(S5·S6)은 상시 시험이 없어 `turbo --dry=json` 열쇠를 손으로 견줘야만 잡힌다.
+- 남은 폴더: `D:/l5ptpre`(실패 확인용, worktree 등록은 지움, 설치 찌꺼기가 남음 — 지우기 명령이 막혀 소유자 몫).

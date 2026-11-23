@@ -191,7 +191,7 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 | 역할 | 세션 ID | 모델 | 시작 | 끝 |
 | --- | --- | --- | --- | --- |
 | plan | lane5-fixpt-plan | claude-opus-5-5 | 2026-11-23T08:40:00+09:00 | 2026-11-23T09:10:00+09:00 |
-| impl | | | | |
+| impl | lane5-fixpt-impl | claude-opus-5-5 | 2026-11-23T09:02:00+09:00 | 2026-11-23T09:07:00+09:00 |
 | test | lane5-fixpt-test | claude-opus-5-5 | 2026-11-23T09:08:00+09:00 | 2026-11-23T09:16:00+09:00 |
 | review | lane5-fixpt-review | claude-opus-5-5 | 2026-11-23T09:17:00+09:00 | 2026-11-23T09:25:00+09:00 |
 | verify | lane5-fixpt-verify | claude-opus-5-5 | 2026-11-23T09:22:00+09:00 | 2026-11-23T09:33:00+09:00 |
