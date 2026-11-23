@@ -50,6 +50,12 @@ export const ACCEPTED_KINDS: ReadonlySet<CsCaseKind> = new Set<CsCaseKind>([
   'APPROVAL_EXECUTION_FAILED',
   // payment-svc가 이의를 받은 뒤 여는 정산 이의(F-07-5 ADR-0368 결정 5, settlement §4.2)
   'STATEMENT_DISPUTE',
+  // payment-svc 토스 지급 쪽 건(F-07-6 ADR-0369 결정 10, settlement §5.2·§5.5·§6·§12). 대상 = 묶음·지급 건·토스 셀러 ID·TOSS:{상점}
+  'SELLER_KYC_REQUIRED',
+  'PAYOUT_ERROR',
+  'PAYOUT_FAILED',
+  'PAYOUT_DELAYED',
+  'PG_BALANCE_MISMATCH',
 ]);
 
 /**

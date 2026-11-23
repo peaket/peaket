@@ -3,8 +3,12 @@
 // - 평일 06시(KST) 정기 tick: 회차가 끝난 다음 영업일에 core-svc에서 끝난 회차를 읽어 결제가 있는 결제사·상점만 정산서를 만든다.
 //   지급일은 계산일이 아니라 회차 종료일 +5영업일이다(정본 §4.1·§5.1, A1V-02).
 // - 그날이 주의 첫 영업일(KST 공휴일 달력)이면 06시에 지난주 월~일 상품 정산서를 계산·통지한다(settlement §4.5). 같은 주는 두 번 만들지 않는다.
+// - 토스 지급(F-07-6 ADR-0369 결정 10~13): 30분마다 보내지 못한 지급 쪽 CS 건 다시 보내기·대사 없는 최근 묶음의 BATCH 잔액 대사·지급일 다음 영업일 12시 미완료 점검,
+//   은행 영업일 09:00 KST 뒤 첫 tick에 다음 은행 영업일 지급분 토스 묶음(PREPARED) 미리 만들기(실패하면 다음 tick에 다시),
+//   매월 마지막 은행 영업일 22:00 KST 뒤 첫 tick에 두 상점 월 잔액 대사. 토스 지급대행 전송이 조립되지 않았으면 하지 않는다.
 import { type Clock } from '@peaket/platform';
 import type { Settlements } from './settlements.js';
+import { nextBankBusinessDay } from '../domain/payout-failure.js';
 import { dateOnly } from '../domain/settlement.js';
 
 export interface SettlementDueLeadership {
@@ -52,6 +56,10 @@ export class SettlementDueWorker {
   #tickPromise: Promise<void> | undefined;
   #lastRegularRunDay: string | undefined;
   #lastProductPeriod: string | undefined;
+  /** 09시 토스 묶음을 모두 만든 KST 날짜 */
+  #preparedDay: string | undefined;
+  /** 월 잔액 대사를 마친 달('YYYY-MM') */
+  #reconciledMonth: string | undefined;
 
   constructor(private readonly deps: SettlementDueWorkerDeps) {}
 
@@ -101,6 +109,16 @@ export class SettlementDueWorker {
       } catch (e) {
         this.deps.log?.failed?.(e);
       }
+      // 토스 지급 쪽 30분 일(ADR-0369 결정 10·11·12). 하나의 실패가 나머지를 멈추지 않는다
+      for (const job of [() => this.deps.settlements.retryPayoutCases(), () => this.deps.settlements.reconcileRecentBatches(), () => this.deps.settlements.checkOverduePayouts()]) {
+        try {
+          await job();
+        } catch (e) {
+          this.deps.log?.failed?.(e);
+        }
+      }
+      await this.#prepareTossBatches(today, hour, weekday);
+      await this.#monthlyReconciliation(today, hour, weekday);
       const regularDue = hour === 6 && weekday && this.#lastRegularRunDay !== today;
       if (force || regularDue) {
         try {
@@ -134,6 +152,34 @@ export class SettlementDueWorker {
       this.deps.log?.productSkipped?.({ periodStart: period?.periodStart ?? '', periodEnd: period?.periodEnd ?? '', reason: e instanceof Error ? e.message.slice(0, 200) : 'unknown' });
       return 0;
     }
+  }
+
+  /** 은행 영업일 09:00 KST 뒤 첫 tick에 다음 은행 영업일 지급분 토스 묶음(ADR-0369 결정 13). 한 상점이라도 실패하면 다음 tick에 다시 한다 */
+  async #prepareTossBatches(today: string, hour: number, weekday: boolean): Promise<void> {
+    if (!this.deps.settlements.tossPayoutEnabled() || !weekday || hour < 9 || this.#preparedDay === today) return;
+    try {
+      const out = await this.deps.settlements.runTossBatchPreparation(nextBankBusinessDay(today));
+      if (out.failedStores.length === 0) this.#preparedDay = today;
+    } catch (e) {
+      this.deps.log?.failed?.(e);
+    }
+  }
+
+  /** 매월 마지막 은행 영업일 22:00 KST 뒤 첫 tick에 두 상점 월 잔액 대사(ADR-0369 결정 11). 같은 달은 저장소 유일 인덱스도 막는다 */
+  async #monthlyReconciliation(today: string, hour: number, weekday: boolean): Promise<void> {
+    const month = today.slice(0, 7);
+    if (!this.deps.settlements.tossReconciliationEnabled() || !weekday || hour < 22 || this.#reconciledMonth === month) return;
+    if (nextBankBusinessDay(today).slice(0, 7) === month) return;
+    let ok = true;
+    for (const pgStore of ['STANDARD', 'ESCROW'] as const) {
+      try {
+        await this.deps.settlements.reconcileTossBalance({ pgStore, kind: 'MONTHLY', periodMonth: `${month}-01` });
+      } catch (e) {
+        ok = false;
+        this.deps.log?.failed?.(e);
+      }
+    }
+    if (ok) this.#reconciledMonth = month;
   }
 
   #schedule(): void {

@@ -9,6 +9,7 @@ import type {
   PayoutApprovalVerifier,
   PayoutGateway,
   PgBalanceSource,
+  PgLedgerSource,
   ProductSettlementSource,
   PromoterContractSource,
   ReauthVerifier,
@@ -16,8 +17,11 @@ import type {
   SettlementApprovalLog,
   SettlementCaseNotice,
   SettlementPaymentSource,
+  SettlementSignals,
   SettlementStore,
+  TossPayoutTransport,
 } from './domain/ports.js';
+import type { TossPayoutTerms } from './domain/payout-adapters.js';
 import {
   ADJUSTMENT_APPROVAL_VERIFIER,
   PAYOUT_APPROVAL_VERIFIER,
@@ -58,6 +62,14 @@ export interface SettlementModuleDeps {
   readonly adjustmentApprovals?: AdjustmentApprovalVerifier;
   /** KST 공휴일(PEAKET_HOLIDAY_CALENDAR_FILE). 없으면 주말만 뺀다 */
   readonly holidays?: ReadonlySet<string>;
+  /** 토스 지급대행 전송(F-07-6 ADR-0369). 없으면 셀러 등록 503이고 토스 자동 일을 하지 않는다 */
+  readonly tossTransport?: TossPayoutTransport;
+  /** 정산 지급 지표(ADR-0369 결정 12) */
+  readonly signals?: SettlementSignals;
+  /** 토스 지급대행 이용료 계약 조건 */
+  readonly tossTerms?: TossPayoutTerms;
+  /** 결제사 잔액 대사의 장부 원천 */
+  readonly pgLedger?: PgLedgerSource;
 }
 
 @Module({})
@@ -118,6 +130,10 @@ export class SettlementModule {
             ...(caseNotice ? { caseNotice } : {}),
             ...(adjustmentApprovals ? { adjustmentApprovals } : {}),
             ...(holidays ? { holidays } : {}),
+            ...(deps.tossTransport ? { tossTransport: deps.tossTransport } : {}),
+            ...(deps.signals ? { signals: deps.signals } : {}),
+            ...(deps.tossTerms ? { tossTerms: deps.tossTerms } : {}),
+            ...(deps.pgLedger ? { pgLedger: deps.pgLedger } : {}),
           }),
         inject: [
           SETTLEMENT_STORE,

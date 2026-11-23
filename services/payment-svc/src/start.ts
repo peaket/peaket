@@ -11,7 +11,7 @@ import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import type { Writable } from 'node:stream';
-import { createDatabase, createHotRedis, createService, HotPathMetrics, inClusterLeaseApi, internalGrpcTokenFromEnv, type LeaseApi, LeaseElector, memoryLeaseApi, reauthJtiStoreFromEnv, systemClock, tenantRateLimitRedisUrlFromEnv } from '@peaket/platform';
+import { type Clock, createDatabase, createHotRedis, createService, HotPathMetrics, inClusterLeaseApi, internalGrpcTokenFromEnv, type LeaseApi, LeaseElector, memoryLeaseApi, type PlatformLogger, reauthJtiStoreFromEnv, systemClock, tenantRateLimitRedisUrlFromEnv } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { assertPgAdapters, checkoutAdapterWarnings, loadCheckoutConfig, loadEntryPausePrometheusUrl, loadPaymentServiceConfig, loadPgApprovalTps, loadPgCallGuardConfig, loadPortoneChannelMap, loadPortoneGatewayConfig, loadSimulatorGatewayConfig, loadTossGatewayConfig, PAYMENT_BATCH_POOL_MAX, PAYMENT_HOT_POOL_MAX, webhookAcceptsSimulator } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
@@ -122,11 +122,60 @@ import {
   UnavailableTossPayoutGateway,
   HttpProductSettlementSource,
   type SettlementApprovalLog,
+  DrizzlePgLedgerSource,
+  HttpTossPayoutTransport,
+  PayoutSubmitWorker,
+  PromSettlementSignals,
+  ReceiveSettlementWebhook,
+  TossPayoutGateway,
+  tossPayoutConfigured,
+  tossPayoutTerms,
+  UnconfiguredSettlementWebhook,
+  type PayoutGateway,
+  type PgBalanceSource,
+  type SettlementSignals,
+  type SettlementStore,
+  type SettlementWebhookReceiver,
+  type TossPayoutTransport,
 } from './modules/settlement/index.js';
 import { safeErrorCode } from './safe-error-code.js';
 import { shutdownInOrder } from './shutdown.js';
 
 const SERVICE = 'payment-svc';
+/** 토스페이먼츠 지급대행 API 주소(ASVS 13.2.4 허용 목록). PEAKET_PG_TOSS_PAYOUT_BASE_URL은 local·ci에서만 읽는다(대역 서버) */
+const TOSS_PAYOUT_BASE_URL = 'https://api.tosspayments.com';
+
+/**
+ * 토스 지급대행 조립(F-07-6 ADR-0369 결정 2·5). 결제 상점별 설정(시크릿 키·보안 키)이 있으면 실제 전송·지급 어댑터·잔액 원천과 서명 수신기를,
+ * 없으면 503 어댑터·잔액 확인 생략·'설정 없음' 수신기(정산 사건 400)를 준다. 설정이 반만 있거나 보안 키 모양이 틀리면 던진다(시작 실패, 메시지에 키 값 없음).
+ * 수신기는 Settlements·저장소가 생긴 뒤 createWebhook으로 만든다.
+ */
+export function assembleTossPayout(
+  env: Record<string, string | undefined>,
+  deps: { baseUrl?: string; clock: Clock; log: Pick<PlatformLogger, 'info' | 'warn'>; /** 있으면 전송의 보안 로그를 이것으로 남긴다(start()는 서비스 로거를 늦게 잇는다) */ approvalLog?: SettlementApprovalLog },
+): {
+  gateway: PayoutGateway;
+  pgBalance: PgBalanceSource | undefined;
+  transport: TossPayoutTransport | undefined;
+  baseUrl: string;
+  createWebhook(o: { settlements: Settlements; store: SettlementStore; log: SettlementApprovalLog; signals?: SettlementSignals }): SettlementWebhookReceiver;
+} {
+  const config = tossPayoutConfigured(env);
+  const override = env.PEAKET_ENV === 'local' || env.PEAKET_ENV === 'ci' ? env.PEAKET_PG_TOSS_PAYOUT_BASE_URL?.trim() : undefined;
+  const baseUrl = deps.baseUrl ?? (override ? override : TOSS_PAYOUT_BASE_URL);
+  const now = () => new Date(deps.clock.now());
+  if (!config) {
+    return { gateway: new UnavailableTossPayoutGateway(), pgBalance: undefined, transport: undefined, baseUrl, createWebhook: (o) => new UnconfiguredSettlementWebhook({ log: o.log, now }) };
+  }
+  const transport = new HttpTossPayoutTransport(config, { baseUrl, clock: deps.clock, log: deps.approvalLog ?? settlementApprovalLog(deps.log) });
+  return {
+    gateway: new TossPayoutGateway(transport),
+    pgBalance: new HttpPgBalanceSource(transport),
+    transport,
+    baseUrl,
+    createWebhook: (o) => new ReceiveSettlementWebhook({ config, transport, settlements: o.settlements, store: o.store, now, log: o.log, ...(o.signals ? { signals: o.signals } : {}) }),
+  };
+}
 export interface StartOptions {
   /** 이 서비스의 환경 값(시작 파일은 process.env, 합본은 공통 값과 이 서비스의 환경 파일을 합친 값) */
   env: Record<string, string | undefined>;
@@ -144,6 +193,15 @@ export interface StartedService {
 export async function start(o: StartOptions): Promise<StartedService> {
   const { env } = o;
   const config = loadPaymentServiceConfig(env);
+  // 토스 지급대행 설정(ADR-0369 결정 2). 반만 있거나 보안 키 모양이 틀리면 듣기 전에(DB·포트보다 먼저) 시작 실패다. 전송의 보안 로그는 서비스가 선 뒤 잇는 승인 로그로 남긴다
+  let approvalLog: SettlementApprovalLog | undefined;
+  const lateTossLog: SettlementApprovalLog = {
+    approved: (e) => approvalLog?.approved(e),
+    rejected: (e) => approvalLog?.rejected(e),
+    tossJweInvalid: (e) => approvalLog?.tossJweInvalid?.(e),
+  };
+  const tossPayout = assembleTossPayout(env, { clock: systemClock, log: { info: () => undefined, warn: () => undefined }, approvalLog: lateTossLog });
+  const tossTerms = tossPayoutTerms(env);
   const internalGrpcToken = internalGrpcTokenFromEnv(env);
   const reauthRedisUrl = env.PEAKET_REAUTH_REDIS_URL;
   const reauthRedis = reauthRedisUrl ? await createHotRedis({ url: reauthRedisUrl }) : undefined;
@@ -225,13 +283,23 @@ export async function start(o: StartOptions): Promise<StartedService> {
 /** 서킷 등록부는 createService 뒤에 만들어 늦게 묶는다(내부 /internal/v1/circuits). */
 let circuitsRef: PgCircuits | undefined;
   const lateLog: PaymentCommandLog = { mismatch: (e) => log?.mismatch(e) };
-  let approvalLog: SettlementApprovalLog | undefined;
   const lateApprovalLog: SettlementApprovalLog = {
     approved: (e) => approvalLog?.approved(e),
     rejected: (e) => approvalLog?.rejected(e),
     authzDenied: (e) => approvalLog?.authzDenied?.(e),
     caseNoticeFailed: (e) => approvalLog?.caseNoticeFailed?.(e),
+    payoutCaseNoticeFailed: (e) => approvalLog?.payoutCaseNoticeFailed?.(e),
+    webhookSignatureInvalid: (e) => approvalLog?.webhookSignatureInvalid?.(e),
+    webhookLate: (e) => approvalLog?.webhookLate?.(e),
+    webhookUnconfigured: (e) => approvalLog?.webhookUnconfigured?.(e),
+    tossJweInvalid: (e) => approvalLog?.tossJweInvalid?.(e),
+    payoutJobFailed: (e) => approvalLog?.payoutJobFailed?.(e),
   };
+  // 정산 웹훅 수신기는 Settlements가 선 뒤에 묶는다(createWebhook, 시험 리뷰 TR-16). 그 전에는 오지 않는다(포트가 열리기 전)
+  let settlementReceiver: SettlementWebhookReceiver | undefined;
+  const lateSettlementWebhook: SettlementWebhookReceiver = { receive: (headers, rawBody) => (settlementReceiver ? settlementReceiver.receive(headers, rawBody) : Promise.resolve('STORE_FAILED' as const)) };
+  const settlementStore = new DrizzleSettlementStore(batchDatabase, systemClock);
+  const settlementSignals = new PromSettlementSignals();
   let webhookLog: PaymentWebhookLog | undefined;
   const lateWebhookLog: PaymentWebhookLog = {
     invalid: (e) => webhookLog?.invalid(e),
@@ -261,9 +329,11 @@ let circuitsRef: PgCircuits | undefined;
       signals,
       webhook: { store: new DrizzleWebhookStore({ database: webhookDatabase }), gateways, log: lateWebhookLog, signals: webhookSignals, allowSimulator: webhookAcceptsSimulator(env) },
       circuits: () => circuitsRef,
+      // 토스 지급·셀러 웹훅(payout.changed·seller.changed)은 늘 정산 수신기가 받는다. 설정이 없으면 400이고 결제 웹훅 처리로 넘기지 않는다(ADR-0369 결정 5)
+      settlementWebhook: lateSettlementWebhook,
       settlement: {
         // 정산서 전이는 상태·감사·trade.settlements Outbox를 한 트랜잭션에 쓴다(ADR-0368 결정 2). Outbox 릴레이가 그대로 보낸다
-        store: new DrizzleSettlementStore(batchDatabase, systemClock),
+        store: settlementStore,
         payments: new DrizzleSettlementPaymentSource(batchDatabase),
         products: env.PEAKET_CORE_HTTP_URL ? new HttpProductSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) : new UnavailableProductSettlementSource(),
         ...(env.PEAKET_CORE_HTTP_URL ? { events: new HttpDueEventSettlementSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN), eventCommission: new HttpEventCommissionRateSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) } : {}),
@@ -274,10 +344,14 @@ let circuitsRef: PgCircuits | undefined;
         holidays: settlementHolidays,
         saleSuspensions: env.PEAKET_CORE_HTTP_URL ? new HttpSaleSuspensionSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) : new UnavailableSaleSuspensionSource(),
         ...(env.PEAKET_CORE_HTTP_URL ? { promoterContracts: new HttpPromoterContractSource(env.PEAKET_CORE_HTTP_URL, env.PEAKET_INTERNAL_TOKEN) } : {}),
-        // 토스 잔액 API의 JWE 전송은 운영 계약·키가 있어야 한다. 지금은 어댑터가 없어 확인을 생략한다(settlement §14).
-        pgBalance: new HttpPgBalanceSource(undefined),
+        // 토스 지급대행(F-07-6 ADR-0369): 설정이 있으면 JWE 전송·지급 어댑터·잔액 원천·셀러 등록·잔액 대사 장부를, 없으면 503 어댑터·잔액 확인 생략
+        pgBalance: tossPayout.pgBalance ?? new HttpPgBalanceSource(undefined),
         log: lateApprovalLog,
-        gateways: [new ManualPortonePayoutGateway(), new UnavailableTossPayoutGateway()],
+        gateways: [new ManualPortonePayoutGateway(), tossPayout.gateway],
+        ...(tossPayout.transport ? { tossTransport: tossPayout.transport } : {}),
+        signals: settlementSignals,
+        tossTerms,
+        pgLedger: new DrizzlePgLedgerSource(batchDatabase),
         reauth: env.PEAKET_IDENTITY_JWKS_URL
           ? new JwksReauthVerifier({
               jwksUrl: env.PEAKET_IDENTITY_JWKS_URL,
@@ -293,6 +367,10 @@ let circuitsRef: PgCircuits | undefined;
   });
   log = paymentCommandLog(service.logger);
   approvalLog = settlementApprovalLog(service.logger);
+  // 정산 지급 지표(ADR-0369 결정 12). 승인 실행기 지표 묶음과 따로 붙인다
+  const { registry: settlementRegistry } = service.metrics;
+  settlementSignals.register(settlementRegistry);
+  settlementReceiver = tossPayout.createWebhook({ settlements: service.app.get(Settlements), store: settlementStore, log: lateApprovalLog, signals: settlementSignals });
   webhookLog = paymentWebhookLog(service.logger, systemClock);
   signals.register(service.metrics.registry);
   hotPath.register(service.metrics.registry);
@@ -435,10 +513,18 @@ let circuitsRef: PgCircuits | undefined;
         },
       })
     : undefined;
-  if (settlementDueWorker) {
-    settlementDueElector.start();
-    settlementDueWorker.start();
-  }
+  // 토스 지급 전송 일꾼(ADR-0369 결정 7): 같은 리더가 1분 [가정]마다 다시 보낼 묶음을 보낸다. 토스 지급대행 설정이 있을 때만 뜬다
+  const payoutSubmitWorker = tossPayout.transport
+    ? new PayoutSubmitWorker({
+        settlements: service.app.get(Settlements),
+        leader: settlementDueElector,
+        clock: systemClock,
+        onError: (err) => service.logger.error({ kind: 'settlement-payout-submit-failed', code: safeErrorCode(err) }, '토스 지급 전송 일꾼 실패'),
+      })
+    : undefined;
+  if (settlementDueWorker || payoutSubmitWorker) settlementDueElector.start();
+  settlementDueWorker?.start();
+  payoutSubmitWorker?.start();
 
   let closing: Promise<void> | undefined;
   const shutdown = (): Promise<void> => {
@@ -446,7 +532,14 @@ let circuitsRef: PgCircuits | undefined;
     // gRPC 포트를 닫아 새 호출을 받지 않으면서 두 실행기를 멈춘다(돌던 호출과 그 뒤 쓰기를 기다린다). 그 뒤에 표 맞추기와 관측기를 멈추고(마무리 중의 낮춤도 표에 쓴다, BUILD_ORDER PRF-203 코드 리뷰 F5),
     // 모두 끝나면 서비스와 DB 풀을 닫는다. 앞 단계가 실패해도 뒤 단계를 한다
     return shutdownInOrder({
-      stop: () => [grpc.close(), paymentControl.stop(), confirmRunner.stop(), unknownResolver.stop(), entryPauseJudge.stop().then(() => entryPauseElector.stop()), (settlementDueWorker?.stop() ?? Promise.resolve()).then(() => settlementDueElector.stop())],
+      stop: () => [
+        grpc.close(),
+        paymentControl.stop(),
+        confirmRunner.stop(),
+        unknownResolver.stop(),
+        entryPauseJudge.stop().then(() => entryPauseElector.stop()),
+        Promise.all([settlementDueWorker?.stop() ?? Promise.resolve(), payoutSubmitWorker?.stop() ?? Promise.resolve()]).then(() => settlementDueElector.stop()),
+      ],
       drain: () => [limitSync!.stop(), channelObserver?.whenIdle() ?? Promise.resolve(), pgAssignmentSettings.stop()],
       closeService: () => service.close(),
       closeConnections: () => [controlSync?.close(), Promise.resolve(circuits.shutdown()), database.close(), batchDatabase.close(), confirmDatabase.close(), webhookDatabase.close(), pgHttp?.close(), pgQueryHttp?.close(), tossHttp?.close(), tossQueryHttp?.close(), portoneHttp?.close(), portoneQueryHttp?.close(), tenantRedis?.close(), reauthRedis?.close()],

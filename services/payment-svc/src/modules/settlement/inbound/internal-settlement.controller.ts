@@ -66,6 +66,9 @@ const BatchPage = z.object({ items: z.array(BatchView) });
 const PayoutRecord = z.object({ payoutId: z.string(), batchId: z.string(), status: z.string() }).passthrough();
 const Receivable = z.object({ receivableId: z.string(), promoterId: z.string(), pg: z.enum(['TOSS', 'PORTONE']), cause: z.string(), amount: z.number(), remaining: z.number(), status: z.string() }).passthrough();
 const ReceivablePage = z.object({ items: z.array(Receivable) });
+/** 지급 재요청 본문(ADR-0369 결정 8). amount·pgStore는 바꾸지 않았는지 대조할 값이다 */
+const RetryBody = z.object({ actorId: z.string().min(1).max(128), amount: z.number().int().positive().optional(), pgStore: StoreBody.optional() }).strict();
+const TossSellersResponse = z.object({ bankCode: z.string(), accountLast4: z.string(), sellers: z.array(z.object({ pgStore: z.enum(['STANDARD', 'ESCROW']), status: z.string() })) });
 
 const bad = (title: string): never => {
   throw new ProblemError({ type: 'invalid-query', status: 422, title });
@@ -241,11 +244,25 @@ export class InternalSettlementController {
     return this.settlements.recordPortoneExecution(batchId, bulkPayoutId as string);
   }
 
+  /** 사람의 지급 재요청(ADR-0369 결정 8). 행위자(관리 계정 ID)를 받고, 금액·상점을 바꾸면 409 payout-retry-approval-required다 */
   @Post('payouts/:payoutId/retries')
   @HttpCode(200)
   @ContractRouteSchema({ responses: { 200: PayoutRecord } })
-  async retry(@Param('payoutId') payoutId: string) {
-    return this.settlements.retryPayout(payoutId);
+  async retry(@Param('payoutId') payoutId: string, @Body() body: unknown) {
+    const b = one(RetryBody, body ?? {}, '지급 재요청 본문이 맞지 않습니다');
+    return this.settlements.retryPayout(payoutId, { actorId: b.actorId, ...(b.amount !== undefined ? { amount: b.amount } : {}), ...(b.pgStore !== undefined ? { pgStore: b.pgStore } : {}) });
+  }
+
+  /**
+   * 토스 셀러 등록(F-07-6 ADR-0369 결정 3, 부르는 쪽은 F-07-7 core-svc). 응답은 은행 코드·끝 4자리와 상점별 상태뿐이고 계좌번호를 돌려주지 않는다.
+   * 모양 틀림 422, 한 상점이라도 실패 502 toss-seller-registration-failed(failedStores), 설정 없음 503
+   */
+  @Post('toss-sellers')
+  @HttpCode(200)
+  @ContractRouteSchema({ responses: { 200: TossSellersResponse } })
+  async registerTossSellers(@Body() body: unknown, @Res({ passthrough: true }) reply: Reply) {
+    void reply.header('cache-control', 'no-store');
+    return this.settlements.registerTossSellers(body as Parameters<Settlements['registerTossSellers']>[0]);
   }
 
   @Get('receivables')

@@ -1,4 +1,4 @@
-// ops-svc CS 처리함 '정산 이의' 건 열기(F-07-5 LCH-100, ADR-0368 결정 5, settlement §4.2 '이의 받기').
+// ops-svc CS 처리함 '정산 이의' 건(F-07-5 LCH-100, ADR-0368 결정 5, settlement §4.2 '이의 받기')과 지급 쪽 건(F-07-6 ADR-0369 결정 10) 열기.
 // 이의를 먼저 커밋한 뒤 부른다. ops가 답하지 않거나 받지 않으면 던지고, 이의 행의 case_requested_at이 빈 채로 남아 정산 일꾼이 30분 [가정]마다 다시 보낸다.
 // ops는 같은 종류·같은 정산서의 열린 건을 하나로 모은다(eventKey = 이의 ID). 본문에 이의 글·금액은 싣지 않는다.
 import { createExternalHttpClient, type ExternalHttpClient } from '@peaket/platform';
@@ -22,19 +22,28 @@ export class HttpSettlementCaseNotice implements SettlementCaseNotice {
   }
 
   async openDispute(o: { disputeId: string; statementId: string; createdAt: Date }): Promise<void> {
+    await this.#open({ eventKey: o.disputeId, kind: 'STATEMENT_DISPUTE', sourceId: o.statementId, createdAt: o.createdAt });
+  }
+
+  /** 지급 쪽 다섯 종류(F-07-6 ADR-0369 결정 10). 같은 경로·같은 본문 모양이다(대상 = 묶음·지급 건·토스 셀러·TOSS:{상점}) */
+  async openCase(o: { eventKey: string; kind: string; sourceId: string; createdAt: Date }): Promise<void> {
+    await this.#open(o);
+  }
+
+  async #open(o: { eventKey: string; kind: string; sourceId: string; createdAt: Date }): Promise<void> {
     let res: Awaited<ReturnType<ExternalHttpClient['request']>>;
     try {
       res = await this.#client.request({
         method: 'POST',
         path: '/internal/v1/cs-cases',
         headers: { 'content-type': 'application/json', ...(this.internalToken ? { 'x-peaket-internal-token': this.internalToken } : {}) },
-        body: JSON.stringify({ eventKey: o.disputeId, kind: 'STATEMENT_DISPUTE', sourceId: o.statementId, category: 'SETTLEMENT', createdAt: o.createdAt.toISOString() }),
+        body: JSON.stringify({ eventKey: o.eventKey, kind: o.kind, sourceId: o.sourceId, category: 'SETTLEMENT', createdAt: o.createdAt.toISOString() }),
         timeoutCapMs: 3_000,
       });
     } catch {
       throw unavailable('connection');
     }
-    if (!res.ok) throw unavailable(`status-${res.status}`);
+    if (!res.ok) throw unavailable('status-' + String(res.status));
     let body: unknown;
     try {
       body = await res.json();

@@ -73,8 +73,8 @@ export const getReceiveTossWebhookUrl = () => {
 }
 
 /**
- * FR-041, FR-062, ADR-0015·0044·0047. 인증 없음(gw-partner), payment-svc가 검증. 결제 이벤트는 결제 기록의 결제사가 TOSS일 때만 반영. 지급대행 이벤트(payout.changed·seller.changed)는 tosspayments-webhook-signature를 보안 키 HMAC-SHA256으로 상수 시간 비교하고, 맞아도 단건 조회로 확정
- * @summary 토스페이먼츠 웹훅 수신(PAYMENT_STATUS_CHANGED, DEPOSIT_CALLBACK, payout.changed, seller.changed). 본문 불신, 조회 API 재확인, transmission-id 중복 제거
+ * FR-041, FR-062, ADR-0015·0044·0047. 인증 없음(gw-partner), payment-svc가 검증. 결제 이벤트는 결제 기록의 결제사가 TOSS일 때만 반영. 지급대행 이벤트(payout.changed·seller.changed)는 tosspayments-webhook-signature(원문 {본문}:{전송 시각})를 두 결제 상점의 지금·옛 보안 키 HMAC-SHA256으로 상수 시간 비교하고, 맞아도 단건 조회로 확정. 지급대행 이벤트의 중복 제거는 본문 eventId로 한다(전송 ID는 보낼 때마다 새로 나온다, ADR-0369 결정 14). 같은 eventId가 새 전송 ID로 다시 오면 처리하지 않고 200
+ * @summary 토스페이먼츠 웹훅 수신(PAYMENT_STATUS_CHANGED, DEPOSIT_CALLBACK, payout.changed, seller.changed). 본문 불신, 조회 API 재확인, 결제 이벤트는 transmission-id·지급대행 이벤트는 본문 eventId로 중복 제거
  */
 export const receiveTossWebhook = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<receiveTossWebhookResponseSuccess> => {
 
@@ -126,7 +126,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
     /**
- * @summary 토스페이먼츠 웹훅 수신(PAYMENT_STATUS_CHANGED, DEPOSIT_CALLBACK, payout.changed, seller.changed). 본문 불신, 조회 API 재확인, transmission-id 중복 제거
+ * @summary 토스페이먼츠 웹훅 수신(PAYMENT_STATUS_CHANGED, DEPOSIT_CALLBACK, payout.changed, seller.changed). 본문 불신, 조회 API 재확인, 결제 이벤트는 transmission-id·지급대행 이벤트는 본문 eventId로 중복 제거
  */
 export const useReceiveTossWebhook = <TError = ErrorType<ProblemResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof receiveTossWebhook>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}

@@ -7,6 +7,12 @@ import type {
   KycRecord,
   PaymentFact,
   PayoutAccountRecord,
+  PayoutRetryAuditRecord,
+  PayoutStatus,
+  PgBalanceReconciliationRecord,
+  SettlementCaseRequestRecord,
+  TossSellerRecord,
+  TossSellerStatus,
   PayoutBatchAuditRecord,
   PayoutBatchRecord,
   PayoutRecord,
@@ -65,15 +71,23 @@ export interface StatementTransition {
     adjustmentAmount?: number;
     payoutAmount?: number;
     offsetAmount?: number;
+    /** 마감 넘김의 지급일 미룸(같은 상태 전이, ADR-0369 결정 14 ①) */
+    payoutDate?: string;
   };
-  /** 함께 걸 조건(낙관적 대조): 이의 기한 전·후, 조정 합계·상계가 읽은 값 그대로, 묶음에 붙지 않음 */
+  /** 함께 걸 조건(낙관적 대조): 이의 기한 전·후, 조정 합계·상계가 읽은 값 그대로, 묶음에 붙지 않음, 그 묶음에 붙어 있음 */
   expect?: {
     disputeDueAfter?: Date;
     disputeDueAtOrBefore?: Date;
     adjustmentAmount?: number;
     offsetAmount?: number;
     unbatched?: boolean;
+    payoutBatchId?: string;
   };
+  /**
+   * 조건이 맞지 않아도 함께 쓰는 다른 행을 되돌리지 않고 이 전이만 건너뛴다(감사·사건도 쓰지 않는다). 결제사가 이미 접수한 지급 ID처럼
+   * 정산서 상태와 무관하게 남겨야 하는 쓰기와 한 트랜잭션에 둘 때만 쓴다(PayoutWrite)
+   */
+  optional?: boolean;
   updatedAt: Date;
   audits: readonly StatementAuditRecord[];
   events: readonly SettlementEventValue[];
@@ -116,6 +130,54 @@ export interface PromoterContractSource {
   current(promoterId: string): Promise<{ commissionRateBp: number; guaranteeRateBp: number; guaranteeKind: GuaranteeKind } | undefined>;
 }
 
+/** 지급 건 재요청 한 건(새 순번은 저장소가 정산서 행을 잠근 채 그 정산서의 가장 큰 순번 + 1로 정한다, ADR-0369 결정 8) */
+export interface PayoutRetrySpec {
+  /** 실패한 옛 지급 건. FAILED가 아니거나 이미 다른 지급 건이 대신했으면 쓰기 전체가 실패한다 */
+  oldPayoutId: string;
+  newPayoutId: string;
+  auditId: string;
+  payoutDate: string;
+  autoRetryCount: number;
+  actor: string;
+  reason: PayoutRetryAuditRecord['reason'];
+  at: Date;
+}
+
+/** 지급 건·정산서·묶음·CS 건 요청을 한 트랜잭션에 쓰는 묶음(ADR-0369 결정 6·7·8·10). 하나라도 조건이 맞지 않으면 아무것도 쓰지 않는다 */
+export interface PayoutWrite {
+  /** 지급 건 조건부 갱신. from이 있으면 지금 상태가 그 안일 때만이고 0행이면 쓰기 전체가 실패한다 */
+  payoutUpdates?: readonly {
+    payoutId: string;
+    from?: readonly PayoutStatus[];
+    set: { pgPayoutId?: string | null; status?: PayoutStatus; errorCode?: string | null; failureClass?: PayoutRecord['failureClass']; payoutDate?: string; updatedAt: Date };
+  }[];
+  retries?: readonly PayoutRetrySpec[];
+  transitions?: readonly StatementTransition[];
+  /** 묶음 갱신. expectStatus가 있으면 지금 상태가 그 안일 때만이고 0행이면 쓰기 전체가 실패한다 */
+  batch?: {
+    batchId: string;
+    expectStatus?: readonly PayoutBatchRecord['status'][];
+    set: Partial<Pick<PayoutBatchRecord, 'status' | 'payoutDate' | 'submitAttempts' | 'nextSubmitAt' | 'submitDeadlineAt' | 'lastSubmitError' | 'dateRetryUsed'>> & { updatedAt: Date };
+  };
+  /** 같은 사건 키가 이미 있으면 넣지 않는다 */
+  caseRequests?: readonly SettlementCaseRequestRecord[];
+}
+
+/** 쓰기 결과. ok=false면 아무것도 쓰지 않았다. retried는 만든 새 순번 지급 건 */
+export interface PayoutWriteResult {
+  ok: boolean;
+  retried: readonly PayoutRecord[];
+}
+
+/** 지급 결과 반영의 트랜잭션 안 읽기(지급 건을 조건부로 바꾼 뒤, 정산서·묶음 행을 잠근 채 읽은 값) */
+export interface PayoutFactSnapshot {
+  payout: PayoutRecord;
+  statement: StatementRecord;
+  statementPayouts: readonly PayoutRecord[];
+  batch: PayoutBatchRecord;
+  batchPayouts: readonly PayoutRecord[];
+}
+
 /** 결제사 지급 가능 잔액. 토스만 API가 있고, 없으면 undefined(확인 생략)다. 포트원은 운영자 입력값을 쓴다. */
 export interface PgBalanceSource {
   available(input: { pg: Pg; pgStore: PgStore }): Promise<{ availableAmount: number; pendingAmount: number } | undefined>;
@@ -127,6 +189,13 @@ export interface PayoutBatchAtomicInput {
   statementUpdates: readonly StatementUpdate[];
   receivableUpdates: readonly ReceivableUpdate[];
   receivableMoves: readonly ReceivableMoveRecord[];
+  /**
+   * 09시에 미리 만든 PREPARED 묶음을 이 요청이 묶는다(ADR-0369 결정 13). 있으면 새 행을 넣지 않고 그 행을 batch 값으로 바꾸며,
+   * 트랜잭션의 첫 문장으로 그 행이 아직 PREPARED일 때만 바꾼다(아니면 payout-batch-exists로 전체 롤백)
+   */
+  promotePrepared?: boolean;
+  /** 정산서 갱신 밖에서 같은 트랜잭션에 쓸 사건(상계로 닫힌 미수금의 RECEIVABLE_CLOSED) */
+  events?: readonly SettlementEventValue[];
 }
 
 /** ops-svc payout_approval 한 건을 결제사가 대조할 값만 옮긴 모양. 계좌·사유 글은 싣지 않는다. */
@@ -166,6 +235,27 @@ export interface SettlementApprovalLog {
   authzDenied?(o: { partnerId: string; accountId: string; statementId: string | null; eventId?: string; action: 'list-event' | 'dispute'; at: Date }): void;
   /** CS 처리함 건을 열지 못했다(다음 점검이 다시 보낸다) */
   caseNoticeFailed?(o: { disputeId: string; statementId: string; at: Date; reason?: 'mark-failed' }): void;
+  /** 지급 쪽 CS 건 요청을 보내지 못했다(다음 30분 점검이 다시 보낸다) */
+  payoutCaseNoticeFailed?(o: { eventKey: string; kind: string; at: Date }): void;
+  /** 정산 웹훅 서명 불일치(보안 이벤트, ASVS 16.3.3). 전송 ID·시각만 싣고 키·본문은 싣지 않는다 */
+  webhookSignatureInvalid?(o: { transmissionId: string; at: Date }): void;
+  /** 서명은 맞지만 전송 시각이 5분 넘게 다른 늦은 웹훅(본문을 쓰지 않고 단건 조회로만 확정한다) */
+  webhookLate?(o: { transmissionId: string; sentAt: string; at: Date }): void;
+  /** 토스 지급대행 설정이 없어 정산 사건을 받지 않았다 */
+  webhookUnconfigured?(o: { at: Date }): void;
+  /** 결제사 응답 JWE를 쓰지 않았다(다른 alg·enc, 복호 실패, ASVS 16.3.4). 키·JWE 원문은 싣지 않는다 */
+  tossJweInvalid?(o: { pgStore: PgStore; at: Date }): void;
+  /** 토스 지급의 자동 일(전송·09시 묶음·미완료 점검·잔액 대사·셀러 조회)을 하지 못했다 */
+  payoutJobFailed?(o: { job: string; batchId?: string; pgStore?: PgStore; reason: string; at: Date }): void;
+}
+
+/** 정산 지급 지표(ADR-0369 결정 12, settlement §11) */
+export interface SettlementSignals {
+  payoutFailed(pg: Pg, reason: string): void;
+  webhookSignatureInvalid(): void;
+  sellerKycRequired(pg: Pg, count: number): void;
+  pgBalanceDiff(pg: Pg, pgStore: PgStore, diff: number): void;
+  payoutOverdue(pg: Pg): void;
 }
 
 /** ops-svc 승인 업무 SETTLEMENT_ADJUSTMENT 한 건에서 payment가 대조할 사실(ADR-0368 결정 8). 근거 메모·계좌는 싣지 않는다 */
@@ -190,6 +280,8 @@ export interface AdjustmentApprovalVerifier {
 /** ops-svc CS 처리함 '정산 이의' 건 열기(ADR-0368 결정 5). 열지 못하면 던진다(이의는 그대로 남고 정산 일꾼이 다시 보낸다) */
 export interface SettlementCaseNotice {
   openDispute(o: { disputeId: string; statementId: string; createdAt: Date }): Promise<void>;
+  /** 지급 쪽 다섯 종류(SELLER_KYC_REQUIRED·PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED·PG_BALANCE_MISMATCH, ADR-0369 결정 10). 받지 않으면 던진다 */
+  openCase(o: { eventKey: string; kind: string; sourceId: string; createdAt: Date }): Promise<void>;
 }
 
 export interface SettlementStore {
@@ -281,11 +373,56 @@ export interface SettlementStore {
   listHeldStatements(pg: Pg, pgStore: PgStore, payoutDate: string): Promise<StatementRecord[]>;
   /** 토스 pgPayoutId로 지급 건 찾기(웹훅 단건 조회 반영). */
   findPayoutByPgPayoutId(pgPayoutId: string): Promise<PayoutRecord | undefined>;
-  /** 토스 셀러 ID로 KYC 찾기(seller.changed). */
-  findKycByTossSellerId(tossSellerId: string): Promise<KycRecord | undefined>;
-  /** 토스 웹훅 전송 ID 중복 확인(0026). */
-  hasSettlementWebhookReceipt(transmissionId: string): Promise<boolean>;
-  recordSettlementWebhookReceipt(transmissionId: string, receivedAt: Date): Promise<void>;
+  /** 정산 웹훅 중복 확인은 본문 eventId로 한다(payment 0029, ADR-0369 결정 14) */
+  hasWebhookEvent(eventId: string): Promise<boolean>;
+  /** 받음 기록. 전송 ID가 겹쳐도(같은 전송 ID·새 eventId) 실패하지 않는다 */
+  recordWebhookEvent(o: { eventId: string; transmissionId: string; receivedAt: Date }): Promise<void>;
+  // ---- 토스 지급대행(payment 0029, F-07-6 ADR-0369) ----
+  findTossSeller(promoterId: string, pgStore: PgStore): Promise<TossSellerRecord | undefined>;
+  findTossSellerById(tossSellerId: string): Promise<TossSellerRecord | undefined>;
+  /** 파트너·상점 키로 넣거나 바꾼다 */
+  saveTossSeller(record: TossSellerRecord): Promise<void>;
+  /** 그 상태인 토스 셀러 수(settlement_seller_kyc_required 지표) */
+  countTossSellers(status: TossSellerStatus): Promise<number>;
+  /** 그 파트너·결제사·상점의 HELD 정산서(보류 사유 무관) */
+  listHeldStatementsOf(promoterId: string, pg: Pg, pgStore: PgStore): Promise<StatementRecord[]>;
+  /** 그 파트너·상점 토스 정산서의 실패 지급 건 가운데 그 갈래이고 아직 다른 지급 건이 대신하지 않은 것 */
+  listUnretriedFailedPayouts(o: { promoterId: string; pgStore: PgStore; failureClass: NonNullable<PayoutRecord['failureClass']> }): Promise<PayoutRecord[]>;
+  /** 지급 건·정산서·묶음·CS 건 요청을 한 트랜잭션에 쓴다 */
+  writePayoutChanges(w: PayoutWrite): Promise<PayoutWriteResult>;
+  /**
+   * 지급 결과 반영(ADR-0369 결정 6): 지급 건을 조건부로 바꾸고(0행이면 아무것도 하지 않고 undefined), 정산서·묶음 행을 잠근 채 읽은 값으로
+   * decide가 정한 쓰기를 같은 트랜잭션에 쓴다
+   */
+  applyPayoutFact(o: {
+    payoutId: string;
+    from: readonly PayoutStatus[];
+    set: { status: PayoutStatus; errorCode: string | null; failureClass: PayoutRecord['failureClass']; updatedAt: Date };
+    decide: (s: PayoutFactSnapshot) => PayoutWrite;
+  }): Promise<PayoutWriteResult | undefined>;
+  /** CS 건 요청을 넣는다(같은 사건 키는 넣지 않는다). 새로 넣은 수 */
+  insertCaseRequests(records: readonly SettlementCaseRequestRecord[]): Promise<number>;
+  /** 보내지 않은 CS 건 요청(오래된 차례) */
+  listUnsentCaseRequests(limit: number): Promise<SettlementCaseRequestRecord[]>;
+  markCaseRequestSent(eventKey: string, at: Date): Promise<void>;
+  /** 대사 행과(있으면) CS 건 요청을 한 트랜잭션에 쓴다. 같은 달·같은 묶음 유일에 걸리면 아무것도 쓰지 않고 false */
+  insertPgBalanceReconciliation(record: PgBalanceReconciliationRecord, caseRequest?: SettlementCaseRequestRecord): Promise<boolean>;
+  lastPgBalanceReconciliation(pg: Pg, pgStore: PgStore): Promise<PgBalanceReconciliationRecord | undefined>;
+  /** 대사 행이 없는, 그 시각 뒤 만든 토스 묶음 */
+  listBatchesAwaitingReconciliation(since: Date, limit: number): Promise<PayoutBatchRecord[]>;
+  /** 그 상점의 끝나지 않은(REQUESTED·IN_PROGRESS) 토스 예약지급 합. excludeBatchId 묶음은 뺀다 */
+  sumUnfinishedTossPayouts(pgStore: PgStore, excludeBatchId?: string): Promise<number>;
+  /** 묶음 전송 잡기: next_submit_at이 읽은 값 그대로일 때만 next로 바꾼다. 이겼으면 true */
+  claimBatchSubmit(batchId: string, expectedNextSubmitAt: Date | null, next: Date | null): Promise<boolean>;
+  /** next_submit_at이 지난 토스 묶음(APPROVED·SUBMITTED·PARTIAL_FAILED) */
+  listDueSubmitBatches(now: Date, limit: number): Promise<PayoutBatchRecord[]>;
+  /** 지급일 다음 은행 영업일 12:00 KST가 지난 끝나지 않은 토스 지급 건(결제사 지급 ID가 있는 것) */
+  listOverduePayouts(now: Date, limit: number): Promise<PayoutRecord[]>;
+}
+
+/** 결제사 잔액 대사의 장부 원천(대사 끝난 승인·취소 합, 완료 지급 합·달별 건 수, ADR-0369 결정 11) */
+export interface PgLedgerSource {
+  ledger(input: { pg: Pg; pgStore: PgStore; cutoffAt: Date }): Promise<{ approvedAmount: number; refundedAmount: number; paidOutAmount: number; payoutCountByMonth: Record<string, number>; firstPaymentAt: Date | null }>;
 }
 
 export interface ProductSettlementSource {
@@ -317,11 +454,44 @@ export interface SettlementPaymentSource {
 export interface PayoutSubmitInput {
   batch: PayoutBatchRecord;
   payouts: readonly PayoutRecord[];
+  /** 지급 건 ID → 받을 토스 셀러 ID(요청 칸 destination). 토스만 쓴다 */
+  tossSellerIds?: Readonly<Record<string, string>>;
 }
 
+/** 토스 지급 요청 한 번의 결과 넷(ADR-0369 결정 7). 전송 어댑터는 던지지 않고 이것을 돌려준다 */
+export type TossSendResult =
+  | { kind: 'ACCEPTED'; payouts: readonly { refPayoutId: string; pgPayoutId: string; status: PayoutStatus }[] }
+  | { kind: 'REJECTED'; code: string; refPayoutId?: string }
+  | { kind: 'NO_RESPONSE' }
+  | { kind: 'PROCESSING' };
+
+/** 실행 결과. PENDING은 접수되지 않은 요청 묶음이 남았다는 뜻이다. groups는 토스 요청 묶음별 결과다(없으면 묶음 전체의 결과만 아는 실행 기록 어댑터) */
 export interface PayoutSubmitResult {
-  status: 'SUBMITTED' | 'COMPLETED';
-  pgPayoutIds?: Record<string, string>;
+  status: 'SUBMITTED' | 'COMPLETED' | 'PENDING';
+  groups?: readonly { idempotencyKey: string; refPayoutIds: readonly string[]; result: TossSendResult }[];
+}
+
+/** 셀러 등록 본문(결제사로 보내는 평문). 계좌번호는 이 값으로만 넘기고 저장하지 않는다 */
+export interface TossSellerRegistration {
+  refSellerId: string;
+  businessType: 'INDIVIDUAL_BUSINESS' | 'CORPORATE';
+  company: { name: string; representativeName: string; businessRegistrationNumber: string; email: string; phone: string };
+  account: { bankCode: string; accountNumber: string; holderName: string };
+}
+
+/**
+ * 토스페이먼츠 지급대행 전송(F-07-6 ADR-0369 결정 1·7). 모든 메서드의 첫 인자는 결제 상점이다.
+ * requestPayouts는 던지지 않고 결과 넷을 돌려주고, 나머지는 응답을 받지 못하거나 복호가 실패하면 던진다.
+ */
+export interface TossPayoutTransport {
+  requestPayouts(pgStore: PgStore, input: { payoutDate: string; idempotencyKey: string; items: readonly { refPayoutId: string; amount: number; tossSellerId: string }[] }): Promise<TossSendResult>;
+  getPayout(pgStore: PgStore, pgPayoutId: string): Promise<{ pgPayoutId: string; status: PayoutStatus; errorCode?: string }>;
+  cancelPayout(pgStore: PgStore, pgPayoutId: string): Promise<{ pgPayoutId: string; status: PayoutStatus }>;
+  registerSeller(pgStore: PgStore, body: TossSellerRegistration): Promise<{ tossSellerId: string; status: TossSellerStatus }>;
+  getSeller(pgStore: PgStore, tossSellerId: string): Promise<{ tossSellerId: string; status: TossSellerStatus }>;
+  balance(pgStore: PgStore): Promise<{ availableAmount: number; pendingAmount: number }>;
+  /** 그 기간(KST 날짜, 양끝 포함)의 정산 조회 수수료 합 */
+  listSettlementFees(pgStore: PgStore, from: Date, to: Date): Promise<number>;
 }
 
 /** 지급 실행 어댑터. 토스 지급대행 JWE·포트원 콘솔 실행은 이 경계 뒤에 둔다. */

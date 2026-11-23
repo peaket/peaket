@@ -1,7 +1,7 @@
 // 정산·지급·KYC Drizzle 스키마(docs/data.md settlement_statement…payout, seller_kyc·payout_account 보조).
 // 표의 정본은 migrations/0015_settlement.sql이다.
 import { sql } from 'drizzle-orm';
-import { bigint, boolean, check, date, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { type AnyPgColumn, bigint, boolean, check, date, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 const amount = (name: string) => bigint(name, { mode: 'number' });
@@ -177,11 +177,20 @@ export const payoutBatch = pgTable(
     pgBalanceObservedBy: uuid('pg_balance_observed_by'),
     pgBalanceLedgerKrw: amount('pg_balance_ledger_krw'),
     status: text('status').notNull(),
+    /** 토스 전송 시도 수·다음 전송 시각·자동 전송 마감·마지막 전송 결과 이름표·날짜 오류 한 번 재요청(0029, ADR-0369 결정 7) */
+    submitAttempts: integer('submit_attempts').notNull().default(0),
+    nextSubmitAt: at('next_submit_at'),
+    submitDeadlineAt: at('submit_deadline_at'),
+    lastSubmitError: text('last_submit_error'),
+    dateRetryUsed: boolean('date_retry_used').notNull().default(false),
     createdAt: at('created_at').notNull(),
     updatedAt: at('updated_at').notNull(),
   },
   (t) => [
     check('payout_batch_pg_check', sql`${t.pg} in (${PG})`),
+    check('payout_batch_submit_attempts_check', sql`${t.submitAttempts} >= 0`),
+    check('payout_batch_last_submit_error_check', sql`${t.lastSubmitError} is null or char_length(${t.lastSubmitError}) <= 200`),
+    index('payout_batch_next_submit_idx').on(t.nextSubmitAt).where(sql`${t.nextSubmitAt} is not null`),
     check('payout_batch_pg_store_check', sql`${t.pgStore} in (${PG_STORE})`),
     check('payout_batch_status_check', sql`${t.status} in ('PREPARED', 'PENDING_APPROVAL', 'APPROVED', 'SUBMITTED', 'COMPLETED', 'PARTIAL_FAILED')`),
     check('payout_batch_balance_source_check', sql`${t.pgBalanceSource} is null or ${t.pgBalanceSource} in ('PG_API', 'OPERATOR_CONSOLE')`),
@@ -235,10 +244,19 @@ export const payout = pgTable(
     pgTransferId: text('pg_transfer_id'),
     transferCheck: text('transfer_check'),
     transferCheckedAt: at('transfer_checked_at'),
+    /** 예약 지급일·실패 갈래·대신한 실패 지급 건·자동 재요청 수(0029, ADR-0369 결정 8) */
+    payoutDate: date('payout_date', { mode: 'string' }).notNull(),
+    failureClass: text('failure_class'),
+    retryOfPayoutId: uuid('retry_of_payout_id').references((): AnyPgColumn => payout.id),
+    autoRetryCount: integer('auto_retry_count').notNull().default(0),
     createdAt: at('created_at').notNull(),
     updatedAt: at('updated_at').notNull(),
   },
   (t) => [
+    check('payout_failure_class_check', sql`${t.failureClass} is null or ${t.failureClass} in ('ACCOUNT', 'TRANSIENT', 'LIMIT_KYC', 'UNKNOWN')`),
+    check('payout_auto_retry_count_check', sql`${t.autoRetryCount} >= 0`),
+    index('payout_unfinished_idx').on(t.status).where(sql`${t.status} in ('REQUESTED', 'IN_PROGRESS')`),
+    index('payout_retry_of_idx').on(t.retryOfPayoutId).where(sql`${t.retryOfPayoutId} is not null`),
     uniqueIndex('payout_ref_key').on(t.refPayoutId),
     uniqueIndex('payout_batch_statement_seq_key').on(t.batchId, t.statementId, t.seq),
     check('payout_status_check', sql`${t.status} in ('REQUESTED', 'IN_PROGRESS', 'COMPLETED', 'FAILED', 'CANCELED')`),
@@ -361,7 +379,109 @@ export const guaranteeCollection = pgTable(
   ],
 );
 
-export const settlementWebhookReceipt = pgTable('settlement_webhook_receipt', {
-  transmissionId: text('transmission_id').primaryKey(),
-  receivedAt: at('received_at').notNull(),
-});
+export const settlementWebhookReceipt = pgTable(
+  'settlement_webhook_receipt',
+  {
+    transmissionId: text('transmission_id').primaryKey(),
+    /** 본문 eventId. 정산 웹훅 중복 제거는 이 칸으로 한다(0029, ADR-0369 결정 14). 옛 행은 null */
+    eventId: text('event_id'),
+    receivedAt: at('received_at').notNull(),
+  },
+  (t) => [uniqueIndex('settlement_webhook_receipt_event_id_uidx').on(t.eventId).where(sql`${t.eventId} is not null`)],
+);
+
+/** 파트너·결제 상점별 토스 셀러(0029, ADR-0369 결정 3). 계좌 칸은 두지 않는다 */
+export const tossSeller = pgTable(
+  'toss_seller',
+  {
+    promoterId: uuid('promoter_id').notNull(),
+    pgStore: text('pg_store').notNull(),
+    tossSellerId: text('toss_seller_id').notNull(),
+    refSellerId: text('ref_seller_id').notNull(),
+    status: text('status').notNull(),
+    businessType: text('business_type').notNull(),
+    registeredAt: at('registered_at').notNull(),
+    statusCheckedAt: at('status_checked_at').notNull(),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.promoterId, t.pgStore] }),
+    uniqueIndex('toss_seller_toss_seller_id_uidx').on(t.tossSellerId),
+    uniqueIndex('toss_seller_ref_seller_id_uidx').on(t.refSellerId),
+    check('toss_seller_pg_store_check', sql`${t.pgStore} in (${PG_STORE})`),
+    check('toss_seller_status_check', sql`${t.status} in ('PENDING', 'APPROVAL_REQUIRED', 'PARTIALLY_APPROVED', 'APPROVED', 'KYC_REQUIRED', 'REJECTED')`),
+    check('toss_seller_business_type_check', sql`${t.businessType} in ('INDIVIDUAL_BUSINESS', 'CORPORATE')`),
+  ],
+);
+
+/** 지급 건 재요청 기록(0029, 덧붙이기만, ADR-0369 결정 8) */
+export const payoutRetryAudit = pgTable(
+  'payout_retry_audit',
+  {
+    id: uuid('id').primaryKey(),
+    payoutId: uuid('payout_id')
+      .notNull()
+      .references(() => payout.id),
+    newPayoutId: uuid('new_payout_id')
+      .notNull()
+      .references(() => payout.id),
+    oldSeq: integer('old_seq').notNull(),
+    newSeq: integer('new_seq').notNull(),
+    actor: text('actor').notNull(),
+    reason: text('reason').notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [
+    check('payout_retry_audit_reason_check', sql`${t.reason} in ('ACCOUNT', 'TRANSIENT', 'LIMIT_KYC', 'UNKNOWN', 'DATE_ERROR')`),
+    index('payout_retry_audit_payout_idx').on(t.payoutId, t.createdAt),
+  ],
+);
+
+/** 지급 쪽 CS 처리함 건 요청(0029, ADR-0369 결정 10). 원인 쓰기와 같은 트랜잭션에 넣는다 */
+export const settlementCaseRequest = pgTable(
+  'settlement_case_request',
+  {
+    eventKey: text('event_key').primaryKey(),
+    kind: text('kind').notNull(),
+    sourceId: text('source_id').notNull(),
+    createdAt: at('created_at').notNull(),
+    requestedAt: at('requested_at'),
+  },
+  (t) => [
+    check('settlement_case_request_kind_check', sql`${t.kind} in ('PAYOUT_ERROR', 'PAYOUT_FAILED', 'PAYOUT_DELAYED', 'SELLER_KYC_REQUIRED', 'PG_BALANCE_MISMATCH')`),
+    index('settlement_case_request_unsent_idx').on(t.createdAt).where(sql`${t.requestedAt} is null`),
+  ],
+);
+
+/** 결제사 잔액 대사(0029, settlement §5.5, ADR-0369 결정 11) */
+export const pgBalanceReconciliation = pgTable(
+  'pg_balance_reconciliation',
+  {
+    id: uuid('id').primaryKey(),
+    pg: text('pg').notNull(),
+    pgStore: text('pg_store').notNull(),
+    kind: text('kind').notNull(),
+    periodMonth: date('period_month', { mode: 'string' }),
+    batchId: uuid('batch_id'),
+    cutoffAt: at('cutoff_at').notNull(),
+    approvedAmount: amount('approved_amount').notNull(),
+    refundedAmount: amount('refunded_amount').notNull(),
+    pgFeeAmount: amount('pg_fee_amount').notNull(),
+    paidOutAmount: amount('paid_out_amount').notNull(),
+    peaketWithdrawnAmount: amount('peaket_withdrawn_amount').notNull(),
+    expectedAmount: amount('expected_amount').notNull(),
+    observedAmount: amount('observed_amount').notNull(),
+    diffAmount: amount('diff_amount').notNull(),
+    severity: text('severity').notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [
+    check('pg_balance_reconciliation_pg_check', sql`${t.pg} in (${PG})`),
+    check('pg_balance_reconciliation_pg_store_check', sql`${t.pgStore} in (${PG_STORE})`),
+    check('pg_balance_reconciliation_kind_check', sql`${t.kind} in ('MONTHLY', 'BATCH')`),
+    check('pg_balance_reconciliation_severity_check', sql`${t.severity} in ('NONE', 'CASE', 'SEV3')`),
+    uniqueIndex('pg_balance_reconciliation_month_uidx').on(t.pg, t.pgStore, t.periodMonth).where(sql`${t.kind} = 'MONTHLY'`),
+    uniqueIndex('pg_balance_reconciliation_batch_uidx').on(t.batchId).where(sql`${t.kind} = 'BATCH'`),
+    index('pg_balance_reconciliation_last_idx').on(t.pg, t.pgStore, t.cutoffAt),
+  ],
+);

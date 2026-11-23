@@ -9,8 +9,13 @@ export type StatementStatus = 'CALCULATED' | 'NOTIFIED' | 'DISPUTED' | 'CONFIRME
 export type HoldReason = 'KYC' | 'ACCOUNT_CHANGE' | 'BALANCE' | 'ACCOUNT_MISMATCH' | 'SALE_SUSPENDED';
 export type DisputeReasonCode = 'GROSS_AMOUNT' | 'REFUND_AMOUNT' | 'COMMISSION' | 'OFFSET' | 'OTHER';
 export type KycStatus = 'PENDING' | 'VERIFIED' | 'REJECTED';
-/** 토스페이먼츠 셀러 상태(settlement §3·§6). PARTIALLY_APPROVED는 KYC 예고 대상이다. */
-export type TossSellerStatus = 'PENDING' | 'PARTIALLY_APPROVED' | 'APPROVED' | 'KYC_REQUIRED' | 'REJECTED';
+/** 토스페이먼츠 셀러 상태(settlement §3·§6, ADR-0369 결정 3). PARTIALLY_APPROVED는 KYC 예고 대상이고, 묶을 수 있는 상태는 PARTIALLY_APPROVED·APPROVED다. */
+export type TossSellerStatus = 'PENDING' | 'APPROVAL_REQUIRED' | 'PARTIALLY_APPROVED' | 'APPROVED' | 'KYC_REQUIRED' | 'REJECTED';
+export const TOSS_SELLER_STATUSES: readonly TossSellerStatus[] = ['PENDING', 'APPROVAL_REQUIRED', 'PARTIALLY_APPROVED', 'APPROVED', 'KYC_REQUIRED', 'REJECTED'];
+/** 지급 건 FAILED의 갈래(settlement §12) */
+export type PayoutFailureClass = 'ACCOUNT' | 'TRANSIENT' | 'LIMIT_KYC' | 'UNKNOWN';
+/** 지급 쪽 CS 건 요청 종류(payment 0029 settlement_case_request, ADR-0369 결정 10) */
+export type SettlementCaseKind = 'PAYOUT_ERROR' | 'PAYOUT_FAILED' | 'PAYOUT_DELAYED' | 'SELLER_KYC_REQUIRED' | 'PG_BALANCE_MISMATCH';
 export type GuaranteeKind = 'DEPOSIT' | 'PERFORMANCE_BOND';
 export type PayoutBatchStatus = 'PREPARED' | 'PENDING_APPROVAL' | 'APPROVED' | 'SUBMITTED' | 'COMPLETED' | 'PARTIAL_FAILED';
 export type PayoutStatus = 'REQUESTED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'CANCELED';
@@ -186,6 +191,12 @@ export interface PayoutBatchRecord {
   pgBalanceObservedBy: string | null;
   pgBalanceLedgerKrw: number | null;
   status: PayoutBatchStatus;
+  /** 토스 전송 시도 수·다음 전송 시각·자동 전송 마감·마지막 전송 결과 이름표·날짜 오류 한 번 재요청을 썼는지(payment 0029, ADR-0369 결정 7) */
+  submitAttempts: number;
+  nextSubmitAt: Date | null;
+  submitDeadlineAt: Date | null;
+  lastSubmitError: string | null;
+  dateRetryUsed: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -203,8 +214,70 @@ export interface PayoutRecord {
   pgTransferId: string | null;
   transferCheck: 'MATCHED' | 'MISMATCH' | 'MISSING' | null;
   transferCheckedAt: Date | null;
+  /** 이 지급 건을 예약한 지급일·실패 갈래·대신한 실패 지급 건·같은 줄기의 자동 재요청 수(payment 0029, ADR-0369 결정 8) */
+  payoutDate: string;
+  failureClass: PayoutFailureClass | null;
+  retryOfPayoutId: string | null;
+  autoRetryCount: number;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** 파트너·결제 상점의 토스 셀러 한 행(payment 0029 toss_seller, ADR-0369 결정 3). 계좌번호는 두지 않는다 */
+export interface TossSellerRecord {
+  promoterId: string;
+  pgStore: PgStore;
+  tossSellerId: string;
+  refSellerId: string;
+  status: TossSellerStatus;
+  businessType: 'INDIVIDUAL_BUSINESS' | 'CORPORATE';
+  registeredAt: Date;
+  statusCheckedAt: Date;
+  updatedAt: Date;
+}
+
+/** 지급 쪽 CS 처리함 건 요청(payment 0029 settlement_case_request). 원인 쓰기와 같은 트랜잭션에 넣고, 정산 일꾼이 보낸 뒤 requestedAt을 채운다 */
+export interface SettlementCaseRequestRecord {
+  eventKey: string;
+  kind: SettlementCaseKind;
+  sourceId: string;
+  createdAt: Date;
+  requestedAt: Date | null;
+}
+
+/** 지급 건 재요청 기록(payment 0029 payout_retry_audit, 덧붙이기만) */
+export interface PayoutRetryAuditRecord {
+  auditId: string;
+  payoutId: string;
+  newPayoutId: string;
+  oldSeq: number;
+  newSeq: number;
+  actor: string;
+  reason: PayoutFailureClass | 'DATE_ERROR';
+  createdAt: Date;
+}
+
+/** 결제사 잔액 대사 한 번(payment 0029 pg_balance_reconciliation, settlement §5.5, ADR-0369 결정 11) */
+export interface PgBalanceReconciliationRecord {
+  reconciliationId: string;
+  pg: Pg;
+  pgStore: PgStore;
+  kind: 'MONTHLY' | 'BATCH';
+  /** MONTHLY만. 그 달 1일('YYYY-MM-01') */
+  periodMonth: string | null;
+  /** BATCH만 */
+  batchId: string | null;
+  cutoffAt: Date;
+  approvedAmount: number;
+  refundedAmount: number;
+  pgFeeAmount: number;
+  paidOutAmount: number;
+  peaketWithdrawnAmount: number;
+  expectedAmount: number;
+  observedAmount: number;
+  diffAmount: number;
+  severity: 'NONE' | 'CASE' | 'SEV3';
+  createdAt: Date;
 }
 
 /** 보증 충당 한 건(payment 0026). 멱등 키가 유일하고, 같은 키 재요청은 이 행을 그대로 돌려준다. */
@@ -319,6 +392,9 @@ export const payoutBatchView = (b: PayoutBatchRecord) => ({
   statementCount: b.statementCount,
   status: b.status,
   createdAt: b.createdAt.toISOString(),
+  lastSubmitError: b.lastSubmitError ?? null,
+  nextSubmitAt: b.nextSubmitAt?.toISOString() ?? null,
+  submitDeadlineAt: b.submitDeadlineAt?.toISOString() ?? null,
   ...(b.approvalId ? { approvalId: b.approvalId } : {}),
   ...(b.portoneBulkPayoutId ? { portoneBulkPayoutId: b.portoneBulkPayoutId } : {}),
 });
@@ -527,7 +603,20 @@ export const RENOTIFY_WINDOW_BUSINESS_DAYS = 1;
 
 export const TRADE_SETTLEMENTS_TOPIC = 'trade.settlements';
 
-export type SettlementEventType = 'STATEMENT_NOTIFIED' | 'STATEMENT_DISPUTED' | 'STATEMENT_CONFIRMED' | 'STATEMENT_CARRIED_OVER' | 'RECEIVABLE_OPENED';
+export type SettlementEventType =
+  | 'STATEMENT_NOTIFIED'
+  | 'STATEMENT_DISPUTED'
+  | 'STATEMENT_CONFIRMED'
+  | 'STATEMENT_CARRIED_OVER'
+  | 'RECEIVABLE_OPENED'
+  | 'RECEIVABLE_CLOSED'
+  | 'PAYOUT_SCHEDULED'
+  | 'PAYOUT_COMPLETED'
+  | 'PAYOUT_FAILED'
+  | 'PAYOUT_HELD';
+
+/** 지급 사건 종류(03 §2.12 T7·T9·T11·T12·T13, ADR-0369 결정 6). 금액 칸(amount)을 싣는다 */
+export type PayoutEventType = 'PAYOUT_SCHEDULED' | 'PAYOUT_COMPLETED' | 'PAYOUT_FAILED' | 'PAYOUT_HELD';
 
 /** asyncapi SettlementEvent의 칸(이 결정이 쓰는 종류만). 조건부 칸은 그 조건일 때만 싣는다 */
 export interface SettlementEventValue {
@@ -563,7 +652,7 @@ export function hashUuid(material: string): string {
 export const settlementEventKey = (statementId: string, type: SettlementEventType, auditId: string): string => hashUuid(`${statementId}:${type}:${auditId}`);
 
 /** 정산서 상태 사건 한 건. STATEMENT_NOTIFIED는 판매 대금·환급·중개수수료·판본·옛 판을 싣는다 */
-export function statementEvent(s: StatementRecord, type: Exclude<SettlementEventType, 'RECEIVABLE_OPENED'>, at: Date, auditId: string): SettlementEventValue {
+export function statementEvent(s: StatementRecord, type: Exclude<SettlementEventType, 'RECEIVABLE_OPENED' | 'RECEIVABLE_CLOSED' | PayoutEventType>, at: Date, auditId: string): SettlementEventValue {
   return {
     promoterId: s.promoterId,
     statementId: s.statementId,
@@ -593,6 +682,42 @@ export function receivableOpenedEvent(s: StatementRecord, amount: number, at: Da
     type: 'RECEIVABLE_OPENED',
     occurredAt: at.toISOString(),
     eventKey: settlementEventKey(s.statementId, 'RECEIVABLE_OPENED', auditId),
+  };
+}
+
+/**
+ * 지급 사건 한 건(PAYOUT_SCHEDULED·PAYOUT_COMPLETED·PAYOUT_FAILED·PAYOUT_HELD). 사건 키 재료는 전이 감사 ID(접수·보류)나 지급 건 ID(결과)다
+ * (sha256('<정산서 ID>:<종류>:<재료>'), F-07-5 I-01과 같은 규칙)
+ */
+export function payoutEvent(s: StatementRecord, type: PayoutEventType, amount: number, at: Date, material: string): SettlementEventValue {
+  return {
+    promoterId: s.promoterId,
+    statementId: s.statementId,
+    kind: s.kind,
+    ...(s.kind === 'EVENT' ? { eventId: s.eventId } : {}),
+    pg: s.pg,
+    ...(s.pg === 'TOSS' ? { pgStore: s.pgStore } : {}),
+    ...(s.kind === 'PRODUCT' && s.periodStart !== null && s.periodEnd !== null ? { periodStart: s.periodStart, periodEnd: s.periodEnd } : {}),
+    amount,
+    type,
+    occurredAt: at.toISOString(),
+    eventKey: settlementEventKey(s.statementId, type, material),
+  };
+}
+
+/** 묶음 상계로 남은 금액이 0이 된 미수금 사건(RECEIVABLE_CLOSED, 금액 = 그 미수금 금액). 정산서는 그 미수금을 닫은 정산서다 */
+export function receivableClosedEvent(s: StatementRecord, receivable: Pick<ReceivableRecord, 'receivableId' | 'amount'>, at: Date): SettlementEventValue {
+  return {
+    promoterId: s.promoterId,
+    statementId: s.statementId,
+    kind: s.kind,
+    ...(s.kind === 'EVENT' ? { eventId: s.eventId } : {}),
+    pg: s.pg,
+    ...(s.pg === 'TOSS' ? { pgStore: s.pgStore } : {}),
+    amount: receivable.amount,
+    type: 'RECEIVABLE_CLOSED',
+    occurredAt: at.toISOString(),
+    eventKey: settlementEventKey(s.statementId, 'RECEIVABLE_CLOSED', receivable.receivableId),
   };
 }
 

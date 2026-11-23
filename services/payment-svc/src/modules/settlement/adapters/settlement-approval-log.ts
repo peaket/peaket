@@ -55,5 +55,49 @@ export function settlementApprovalLog(logger: Pick<PlatformLogger, 'info' | 'war
         // 기록 실패는 이의 접수를 바꾸지 않는다
       }
     },
+    payoutCaseNoticeFailed(o) {
+      try {
+        logger.warn({ event: 'settlement_payout_case_deferred', eventKey: o.eventKey, kind: o.kind, at: o.at.toISOString() }, '지급 쪽 CS 처리함 건을 열지 못해 다음 점검에서 다시 보낸다');
+      } catch {
+        // 기록 실패는 건 요청 행을 바꾸지 않는다
+      }
+    },
+    // 정산 웹훅 보안 이벤트(ASVS 16.3.3, F-07-6 ADR-0369 결정 5): 전송 ID·시각만 싣는다. 보안 키·서명·본문은 싣지 않는다
+    webhookSignatureInvalid(o) {
+      try {
+        logger.warn({ event: 'settlement_webhook_signature_invalid', transmissionId: o.transmissionId, at: o.at.toISOString() }, '서명이 맞지 않는 정산 웹훅을 거절했다');
+      } catch {
+        // 기록 실패는 400 응답을 바꾸지 않는다
+      }
+    },
+    webhookLate(o) {
+      try {
+        logger.warn({ event: 'settlement_webhook_late', transmissionId: o.transmissionId, sentAt: o.sentAt, at: o.at.toISOString() }, '늦은 정산 웹훅이다. 본문을 쓰지 않고 단건 조회로만 확정한다');
+      } catch {
+        // 기록 실패는 처리를 바꾸지 않는다
+      }
+    },
+    webhookUnconfigured(o) {
+      try {
+        logger.warn({ event: 'settlement_webhook_unconfigured', at: o.at.toISOString() }, '토스 지급대행 설정이 없어 정산 웹훅을 받지 않았다');
+      } catch {
+        // 기록 실패는 400 응답을 바꾸지 않는다
+      }
+    },
+    tossJweInvalid(o) {
+      // 보안 사건(ASVS 16.3.4): 상점만 싣는다. 보안 키·JWE 원문은 싣지 않는다
+      try {
+        logger.warn({ event: 'settlement_toss_jwe_invalid', pgStore: o.pgStore, at: o.at.toISOString() }, '토스페이먼츠 응답 JWE를 쓰지 않았다(다른 alg·enc 또는 복호 실패)');
+      } catch {
+        // 기록 실패는 응답 없음 처리를 바꾸지 않는다
+      }
+    },
+    payoutJobFailed(o) {
+      try {
+        logger.warn({ event: 'settlement_payout_job_failed', job: o.job, ...(o.batchId ? { batchId: o.batchId } : {}), ...(o.pgStore ? { pgStore: o.pgStore } : {}), reason: o.reason, at: o.at.toISOString() }, '토스 지급의 자동 일을 하지 못해 다음 점검에서 다시 본다');
+      } catch {
+        // 기록 실패는 일꾼을 멈추지 않는다
+      }
+    },
   };
 }

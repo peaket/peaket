@@ -1,8 +1,20 @@
 // 정산·지급·KYC Drizzle 저장소(docs/data.md settlement_statement…payout).
 // 정산서 상태 전이는 조건부 갱신(지금 상태가 출발 상태일 때만)이고, 상태·감사·딸린 행·trade.settlements Outbox를 한 트랜잭션에 쓴다(ADR-0368 결정 2·3).
 import { and, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
+import { nextBankBusinessDay } from '../../domain/payout-failure.js';
 import { type Clock, type Database, type DbTransaction, systemClock, writeOutbox } from '@peaket/platform';
-import type { AdjustmentInsertResult, GuaranteeCollectionAtomicInput, PayoutBatchAtomicInput, StatementFilter, StatementNotification, StatementPage, SettlementStore, StatementTransition } from '../../domain/ports.js';
+import type {
+  AdjustmentInsertResult,
+  GuaranteeCollectionAtomicInput,
+  PayoutBatchAtomicInput,
+  PayoutWrite,
+  PayoutWriteResult,
+  StatementFilter,
+  StatementNotification,
+  StatementPage,
+  SettlementStore,
+  StatementTransition,
+} from '../../domain/ports.js';
 import type { AdjustmentRecord } from '../../domain/adjustment.js';
 import {
   SettlementProblem,
@@ -15,7 +27,11 @@ import {
   type PayoutBatchRecord,
   type PayoutRecord,
   type Pg,
+  type PgBalanceReconciliationRecord,
   type PgStore,
+  type SettlementCaseRequestRecord,
+  type TossSellerRecord,
+  type TossSellerStatus,
   type ReceivableMoveRecord,
   type ReceivableRecord,
   type SettlementEventValue,
@@ -30,13 +46,17 @@ import {
   payoutAccount,
   payoutBatch,
   payoutBatchAudit,
+  payoutRetryAudit,
+  pgBalanceReconciliation,
   sellerKyc,
+  settlementCaseRequest,
   settlementStatement,
   settlementStatementAudit,
   settlementWebhookReceipt,
   statementAdjustment,
   statementDispute,
   statementSource,
+  tossSeller,
 } from './schema.js';
 // 표 이름 바꾸기 확장 단계라 옛 이름(뷰)으로 읽고 쓴다(receivable-move-compat.ts 머리 주석)
 import { receivableMoveCompat } from './receivable-move-compat.js';
@@ -141,9 +161,117 @@ const batchRecord = (r: typeof payoutBatch.$inferSelect): PayoutBatchRecord => (
   pgBalanceObservedBy: r.pgBalanceObservedBy,
   pgBalanceLedgerKrw: r.pgBalanceLedgerKrw,
   status: r.status as PayoutBatchRecord['status'],
+  submitAttempts: r.submitAttempts,
+  nextSubmitAt: r.nextSubmitAt,
+  submitDeadlineAt: r.submitDeadlineAt,
+  lastSubmitError: r.lastSubmitError,
+  dateRetryUsed: r.dateRetryUsed,
   createdAt: r.createdAt,
   updatedAt: r.updatedAt,
 });
+
+/** 묶음 행 값(넣기) */
+const batchValues = (record: PayoutBatchRecord) => ({
+  id: record.batchId,
+  pg: record.pg,
+  pgStore: record.pgStore,
+  payoutDate: record.payoutDate,
+  totalAmount: record.totalAmount,
+  statementCount: record.statementCount,
+  approvalId: record.approvalId,
+  portoneBulkPayoutId: record.portoneBulkPayoutId,
+  pgBalanceKrw: record.pgBalanceKrw,
+  pgBalanceSource: record.pgBalanceSource,
+  pgBalanceObservedAt: record.pgBalanceObservedAt,
+  pgBalanceObservedBy: record.pgBalanceObservedBy,
+  pgBalanceLedgerKrw: record.pgBalanceLedgerKrw,
+  status: record.status,
+  submitAttempts: record.submitAttempts ?? 0,
+  nextSubmitAt: record.nextSubmitAt ?? null,
+  submitDeadlineAt: record.submitDeadlineAt ?? null,
+  lastSubmitError: record.lastSubmitError ?? null,
+  dateRetryUsed: record.dateRetryUsed ?? false,
+  createdAt: record.createdAt,
+  updatedAt: record.updatedAt,
+});
+
+const payoutValues = (r: PayoutRecord) => ({
+  id: r.payoutId,
+  batchId: r.batchId,
+  statementId: r.statementId,
+  seq: r.seq,
+  amount: r.amount,
+  refPayoutId: r.refPayoutId,
+  pgPayoutId: r.pgPayoutId,
+  status: r.status,
+  errorCode: r.errorCode,
+  pgTransferId: r.pgTransferId,
+  transferCheck: r.transferCheck,
+  transferCheckedAt: r.transferCheckedAt,
+  payoutDate: r.payoutDate,
+  failureClass: r.failureClass ?? null,
+  retryOfPayoutId: r.retryOfPayoutId ?? null,
+  autoRetryCount: r.autoRetryCount ?? 0,
+  createdAt: r.createdAt,
+  updatedAt: r.updatedAt,
+});
+
+const tossSellerRecord = (r: typeof tossSeller.$inferSelect): TossSellerRecord => ({
+  promoterId: r.promoterId,
+  pgStore: r.pgStore as PgStore,
+  tossSellerId: r.tossSellerId,
+  refSellerId: r.refSellerId,
+  status: r.status as TossSellerStatus,
+  businessType: r.businessType as TossSellerRecord['businessType'],
+  registeredAt: r.registeredAt,
+  statusCheckedAt: r.statusCheckedAt,
+  updatedAt: r.updatedAt,
+});
+
+const caseRequestRecord = (r: typeof settlementCaseRequest.$inferSelect): SettlementCaseRequestRecord => ({
+  eventKey: r.eventKey,
+  kind: r.kind as SettlementCaseRequestRecord['kind'],
+  sourceId: r.sourceId,
+  createdAt: r.createdAt,
+  requestedAt: r.requestedAt,
+});
+
+const reconciliationRecord = (r: typeof pgBalanceReconciliation.$inferSelect): PgBalanceReconciliationRecord => ({
+  reconciliationId: r.id,
+  pg: r.pg as Pg,
+  pgStore: r.pgStore as PgStore,
+  kind: r.kind as PgBalanceReconciliationRecord['kind'],
+  periodMonth: r.periodMonth,
+  batchId: r.batchId,
+  cutoffAt: r.cutoffAt,
+  approvedAmount: r.approvedAmount,
+  refundedAmount: r.refundedAmount,
+  pgFeeAmount: r.pgFeeAmount,
+  paidOutAmount: r.paidOutAmount,
+  peaketWithdrawnAmount: r.peaketWithdrawnAmount,
+  expectedAmount: r.expectedAmount,
+  observedAmount: r.observedAmount,
+  diffAmount: r.diffAmount,
+  severity: r.severity as PgBalanceReconciliationRecord['severity'],
+  createdAt: r.createdAt,
+});
+
+/** 지급 쓰기 묶음의 조건이 맞지 않았다(롤백한 뒤 ok=false로 바꾼다) */
+class WriteRejected extends Error {
+  constructor() {
+    super('지급 쓰기 조건이 맞지 않는다');
+    this.name = 'WriteRejected';
+  }
+}
+/** 결과 반영의 지급 건 조건부 갱신이 0행이었다 */
+class FactNotApplied extends Error {
+  constructor() {
+    super('지급 결과를 반영하지 않았다');
+    this.name = 'FactNotApplied';
+  }
+}
+const UNFINISHED_PAYOUT = ['REQUESTED', 'IN_PROGRESS'] as const;
+const KST_OFFSET_MS = 9 * 60 * 60 * 1_000;
 
 const payoutRecord = (r: typeof payout.$inferSelect): PayoutRecord => ({
   payoutId: r.id,
@@ -158,6 +286,10 @@ const payoutRecord = (r: typeof payout.$inferSelect): PayoutRecord => ({
   pgTransferId: r.pgTransferId,
   transferCheck: r.transferCheck as PayoutRecord['transferCheck'],
   transferCheckedAt: r.transferCheckedAt,
+  payoutDate: r.payoutDate,
+  failureClass: r.failureClass as PayoutRecord['failureClass'],
+  retryOfPayoutId: r.retryOfPayoutId,
+  autoRetryCount: r.autoRetryCount,
   createdAt: r.createdAt,
   updatedAt: r.updatedAt,
 });
@@ -266,15 +398,20 @@ export class DrizzleSettlementStore implements SettlementStore {
     if (t.expect?.adjustmentAmount !== undefined) conditions.push(eq(settlementStatement.adjustmentAmount, t.expect.adjustmentAmount));
     if (t.expect?.offsetAmount !== undefined) conditions.push(eq(settlementStatement.offsetAmount, t.expect.offsetAmount));
     if (t.expect?.unbatched) conditions.push(isNull(settlementStatement.payoutBatchId));
+    if (t.expect?.payoutBatchId !== undefined) conditions.push(eq(settlementStatement.payoutBatchId, t.expect.payoutBatchId));
     const set: Partial<typeof settlementStatement.$inferInsert> = { status: t.to, updatedAt: t.updatedAt };
     if (t.set?.holdReason !== undefined) set.holdReason = t.set.holdReason;
     if (t.set?.disputeDueAt !== undefined) set.disputeDueAt = t.set.disputeDueAt;
     if (t.set?.adjustmentAmount !== undefined) set.adjustmentAmount = t.set.adjustmentAmount;
     if (t.set?.payoutAmount !== undefined) set.payoutAmount = t.set.payoutAmount;
     if (t.set?.offsetAmount !== undefined) set.offsetAmount = t.set.offsetAmount;
-    // 조건부 갱신이 정산서 행을 잠근다. 0행이면 다른 전이가 먼저 썼다
+    if (t.set?.payoutDate !== undefined) set.payoutDate = t.set.payoutDate;
+    // 조건부 갱신이 정산서 행을 잠근다. 0행이면 다른 전이가 먼저 썼다(optional이면 이 전이만 건너뛴다)
     const updated = await tx.update(settlementStatement).set(set).where(and(...conditions)).returning({ id: settlementStatement.id });
-    if (updated.length === 0) throw new TransitionRejected();
+    if (updated.length === 0) {
+      if (t.optional) return [];
+      throw new TransitionRejected();
+    }
     if (t.insertDispute) {
       const d = t.insertDispute;
       await tx.insert(statementDispute).values({ id: d.disputeId, statementId: d.statementId, reasonCode: d.reasonCode, detail: d.detail, submittedBy: d.submittedBy, submittedAt: d.submittedAt, result: null, resolvedAt: null });
@@ -470,67 +607,36 @@ export class DrizzleSettlementStore implements SettlementStore {
   }
 
   async insertPayoutBatch(record: PayoutBatchRecord): Promise<void> {
-    await this.db.db.insert(payoutBatch).values({
-      id: record.batchId,
-      pg: record.pg,
-      pgStore: record.pgStore,
-      payoutDate: record.payoutDate,
-      totalAmount: record.totalAmount,
-      statementCount: record.statementCount,
-      approvalId: record.approvalId,
-      portoneBulkPayoutId: record.portoneBulkPayoutId,
-      pgBalanceKrw: record.pgBalanceKrw,
-      pgBalanceSource: record.pgBalanceSource,
-      pgBalanceObservedAt: record.pgBalanceObservedAt,
-      pgBalanceObservedBy: record.pgBalanceObservedBy,
-      pgBalanceLedgerKrw: record.pgBalanceLedgerKrw,
-      status: record.status,
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt,
-    });
+    await this.db.db.insert(payoutBatch).values(batchValues(record));
   }
 
   async createPayoutBatchWithStatements(record: PayoutBatchRecord, statementIds: readonly string[]): Promise<void> {
-    try {
-      await this.db.transaction(async (tx) => {
-        await tx.insert(payoutBatch).values({
-          id: record.batchId,
-          pg: record.pg,
-          pgStore: record.pgStore,
-          payoutDate: record.payoutDate,
-          totalAmount: record.totalAmount,
-          statementCount: record.statementCount,
-          approvalId: record.approvalId,
-          portoneBulkPayoutId: record.portoneBulkPayoutId,
-          pgBalanceKrw: record.pgBalanceKrw,
-          pgBalanceSource: record.pgBalanceSource,
-          pgBalanceObservedAt: record.pgBalanceObservedAt,
-          pgBalanceObservedBy: record.pgBalanceObservedBy,
-          pgBalanceLedgerKrw: record.pgBalanceLedgerKrw,
-          status: record.status,
-          createdAt: record.createdAt,
-          updatedAt: record.updatedAt,
-        });
-        if (statementIds.length > 0) {
-          const updated = await tx
-            .update(settlementStatement)
-            .set({ payoutBatchId: record.batchId, status: 'SCHEDULED', updatedAt: record.updatedAt })
-            .where(and(inArray(settlementStatement.id, [...statementIds]), eq(settlementStatement.status, 'CONFIRMED'), isNull(settlementStatement.payoutBatchId)))
-            .returning({ id: settlementStatement.id });
-          if (updated.length !== statementIds.length) throw new SettlementProblem('payout-batch-statement-conflict', 409, '확정 정산서가 아닌 건이 지급 묶음에 섞였습니다');
-        }
-      });
-    } catch (e) {
-      if (e instanceof SettlementProblem) throw e;
-      if (uniqueViolation(e)) throw new SettlementProblem('payout-batch-exists', 409, '이미 지급 묶음이 있습니다');
-      throw e;
-    }
+    await this.createPayoutBatchAtomically({ batch: record, statementIds, statementUpdates: [], receivableUpdates: [], receivableMoves: [] });
   }
 
   async createPayoutBatchAtomically(input: PayoutBatchAtomicInput): Promise<void> {
     const { batch: record } = input;
     try {
       await this.db.transaction(async (tx) => {
+        // 09시 PREPARED 묶음은 트랜잭션 첫 문장으로 그 행이 아직 PREPARED일 때만 바꾼다. 겹친 둘째 요청은 이 행에서 줄을 선 뒤 0행이라 409다(ADR-0369 결정 13)
+        if (input.promotePrepared) {
+          const promoted = await tx
+            .update(payoutBatch)
+            .set({
+              status: record.status,
+              totalAmount: record.totalAmount,
+              statementCount: record.statementCount,
+              pgBalanceKrw: record.pgBalanceKrw,
+              pgBalanceSource: record.pgBalanceSource,
+              pgBalanceObservedAt: record.pgBalanceObservedAt,
+              pgBalanceObservedBy: record.pgBalanceObservedBy,
+              pgBalanceLedgerKrw: record.pgBalanceLedgerKrw,
+              updatedAt: record.updatedAt,
+            })
+            .where(and(eq(payoutBatch.id, record.batchId), eq(payoutBatch.status, 'PREPARED')))
+            .returning({ id: payoutBatch.id });
+          if (promoted.length === 0) throw new SettlementProblem('payout-batch-exists', 409, '이미 지급 묶음이 있습니다');
+        }
         const events: SettlementEventValue[] = [];
         for (const u of input.statementUpdates) {
           // 보류·상계는 출발 상태(기본 CONFIRMED)이고 묶음에 붙지 않은 정산서만 바꾼다. 조정 적용 등 다른 전이가 먼저 썼으면 묶음 전체를 롤백한다(ADR-0368 결정 2, J-T36 ⑥)
@@ -562,32 +668,17 @@ export class DrizzleSettlementStore implements SettlementStore {
             })),
           );
         }
-        await tx.insert(payoutBatch).values({
-          id: record.batchId,
-          pg: record.pg,
-          pgStore: record.pgStore,
-          payoutDate: record.payoutDate,
-          totalAmount: record.totalAmount,
-          statementCount: record.statementCount,
-          approvalId: record.approvalId,
-          portoneBulkPayoutId: record.portoneBulkPayoutId,
-          pgBalanceKrw: record.pgBalanceKrw,
-          pgBalanceSource: record.pgBalanceSource,
-          pgBalanceObservedAt: record.pgBalanceObservedAt,
-          pgBalanceObservedBy: record.pgBalanceObservedBy,
-          pgBalanceLedgerKrw: record.pgBalanceLedgerKrw,
-          status: record.status,
-          createdAt: record.createdAt,
-          updatedAt: record.updatedAt,
-        });
+        if (!input.promotePrepared) await tx.insert(payoutBatch).values(batchValues(record));
         if (input.statementIds.length > 0) {
+          // 묶을 때는 payout_batch_id만 채우고 상태는 CONFIRMED 그대로다. SCHEDULED는 결제사 접수 때(T9, ADR-0369 결정 14 ①)
           const updated = await tx
             .update(settlementStatement)
-            .set({ payoutBatchId: record.batchId, status: 'SCHEDULED', updatedAt: record.updatedAt })
+            .set({ payoutBatchId: record.batchId, updatedAt: record.updatedAt })
             .where(and(inArray(settlementStatement.id, [...input.statementIds]), eq(settlementStatement.status, 'CONFIRMED'), isNull(settlementStatement.payoutBatchId)))
             .returning({ id: settlementStatement.id });
           if (updated.length !== input.statementIds.length) throw new SettlementProblem('payout-batch-statement-conflict', 409, '확정 정산서가 아닌 건이 지급 묶음에 섞였습니다');
         }
+        events.push(...(input.events ?? []));
         await writeOutbox(tx, this.clock, settlementOutbox(events));
       });
     } catch (e) {
@@ -604,7 +695,8 @@ export class DrizzleSettlementStore implements SettlementStore {
       if (status !== 'PENDING_APPROVAL' && status !== 'APPROVED') return false;
       const payouts = await tx.select({ id: payout.id }).from(payout).where(eq(payout.batchId, batchId)).limit(1);
       if (payouts.length > 0) return false;
-      await tx.update(settlementStatement).set({ payoutBatchId: null, status: 'CONFIRMED' }).where(and(eq(settlementStatement.payoutBatchId, batchId), eq(settlementStatement.status, 'SCHEDULED')));
+      // 묶음만 푼다. 정산서 상태는 그대로(CONFIRMED)다(ADR-0369 결정 14 ①)
+      await tx.update(settlementStatement).set({ payoutBatchId: null }).where(eq(settlementStatement.payoutBatchId, batchId));
       await tx.delete(payoutBatch).where(eq(payoutBatch.id, batchId));
       return true;
     });
@@ -686,6 +778,12 @@ export class DrizzleSettlementStore implements SettlementStore {
         pgBalanceObservedAt: record.pgBalanceObservedAt,
         pgBalanceObservedBy: record.pgBalanceObservedBy,
         pgBalanceLedgerKrw: record.pgBalanceLedgerKrw,
+        payoutDate: record.payoutDate,
+        submitAttempts: record.submitAttempts,
+        nextSubmitAt: record.nextSubmitAt,
+        submitDeadlineAt: record.submitDeadlineAt,
+        lastSubmitError: record.lastSubmitError,
+        dateRetryUsed: record.dateRetryUsed,
         updatedAt: record.updatedAt,
       })
       .where(eq(payoutBatch.id, record.batchId));
@@ -731,24 +829,7 @@ export class DrizzleSettlementStore implements SettlementStore {
 
   async insertPayouts(records: readonly PayoutRecord[]): Promise<void> {
     if (records.length === 0) return;
-    await this.db.db.insert(payout).values(
-      records.map((r) => ({
-        id: r.payoutId,
-        batchId: r.batchId,
-        statementId: r.statementId,
-        seq: r.seq,
-        amount: r.amount,
-        refPayoutId: r.refPayoutId,
-        pgPayoutId: r.pgPayoutId,
-        status: r.status,
-        errorCode: r.errorCode,
-        pgTransferId: r.pgTransferId,
-        transferCheck: r.transferCheck,
-        transferCheckedAt: r.transferCheckedAt,
-        createdAt: r.createdAt,
-        updatedAt: r.updatedAt,
-      })),
-    );
+    await this.db.db.insert(payout).values(records.map(payoutValues));
   }
 
   async listPayouts(batchId: string): Promise<PayoutRecord[]> {
@@ -776,6 +857,9 @@ export class DrizzleSettlementStore implements SettlementStore {
         pgTransferId: record.pgTransferId,
         transferCheck: record.transferCheck,
         transferCheckedAt: record.transferCheckedAt,
+        payoutDate: record.payoutDate,
+        failureClass: record.failureClass ?? null,
+        autoRetryCount: record.autoRetryCount ?? 0,
         updatedAt: record.updatedAt,
       })
       .where(eq(payout.id, record.payoutId));
@@ -783,26 +867,6 @@ export class DrizzleSettlementStore implements SettlementStore {
 
   async findKyc(promoterId: string): Promise<KycRecord | undefined> {
     const rows = await this.db.db.select().from(sellerKyc).where(eq(sellerKyc.promoterId, promoterId)).limit(1);
-    const r = rows[0];
-    return r
-      ? {
-          promoterId: r.promoterId,
-          status: r.status as KycRecord['status'],
-          businessVerified: r.businessVerified,
-          representativeVerified: r.representativeVerified,
-          legalName: r.legalName,
-          representative: r.representative,
-          verifiedAt: r.verifiedAt,
-          source: r.source,
-          updatedAt: r.updatedAt,
-          tossSellerId: r.tossSellerId,
-          tossSellerStatus: r.tossSellerStatus as KycRecord['tossSellerStatus'],
-        }
-      : undefined;
-  }
-
-  async findKycByTossSellerId(tossSellerId: string): Promise<KycRecord | undefined> {
-    const rows = await this.db.db.select().from(sellerKyc).where(eq(sellerKyc.tossSellerId, tossSellerId)).limit(1);
     const r = rows[0];
     return r
       ? {
@@ -1139,12 +1203,322 @@ export class DrizzleSettlementStore implements SettlementStore {
     });
   }
 
-  async hasSettlementWebhookReceipt(transmissionId: string): Promise<boolean> {
-    const rows = await this.db.db.select().from(settlementWebhookReceipt).where(eq(settlementWebhookReceipt.transmissionId, transmissionId)).limit(1);
+  async hasWebhookEvent(eventId: string): Promise<boolean> {
+    const rows = await this.db.db.select({ id: settlementWebhookReceipt.transmissionId }).from(settlementWebhookReceipt).where(eq(settlementWebhookReceipt.eventId, eventId)).limit(1);
     return rows.length > 0;
   }
 
-  async recordSettlementWebhookReceipt(transmissionId: string, receivedAt: Date): Promise<void> {
-    await this.db.db.insert(settlementWebhookReceipt).values({ transmissionId, receivedAt }).onConflictDoNothing();
+  async recordWebhookEvent(o: { eventId: string; transmissionId: string; receivedAt: Date }): Promise<void> {
+    // 같은 eventId는 한 행이다. 전송 ID(기본 키)가 겹치면(같은 전송 ID·새 eventId) 전송 ID 뒤에 eventId를 붙여 기록한다(J-T16, 시험 리뷰 남은 것 3)
+    const inserted = await this.db.db.insert(settlementWebhookReceipt).values({ transmissionId: o.transmissionId, eventId: o.eventId, receivedAt: o.receivedAt }).onConflictDoNothing().returning({ id: settlementWebhookReceipt.transmissionId });
+    if (inserted.length > 0 || (await this.hasWebhookEvent(o.eventId))) return;
+    await this.db.db.insert(settlementWebhookReceipt).values({ transmissionId: `${o.transmissionId}#${o.eventId}`.slice(0, 512), eventId: o.eventId, receivedAt: o.receivedAt }).onConflictDoNothing();
+  }
+
+  // ---- 토스 지급대행(payment 0029, F-07-6 ADR-0369) ----
+
+  async findTossSeller(promoterId: string, pgStore: PgStore): Promise<TossSellerRecord | undefined> {
+    const rows = await this.db.db.select().from(tossSeller).where(and(eq(tossSeller.promoterId, promoterId), eq(tossSeller.pgStore, pgStore))).limit(1);
+    return rows[0] ? tossSellerRecord(rows[0]) : undefined;
+  }
+
+  async findTossSellerById(tossSellerId: string): Promise<TossSellerRecord | undefined> {
+    const rows = await this.db.db.select().from(tossSeller).where(eq(tossSeller.tossSellerId, tossSellerId)).limit(1);
+    return rows[0] ? tossSellerRecord(rows[0]) : undefined;
+  }
+
+  async saveTossSeller(record: TossSellerRecord): Promise<void> {
+    const values = {
+      promoterId: record.promoterId,
+      pgStore: record.pgStore,
+      tossSellerId: record.tossSellerId,
+      refSellerId: record.refSellerId,
+      status: record.status,
+      businessType: record.businessType,
+      registeredAt: record.registeredAt,
+      statusCheckedAt: record.statusCheckedAt,
+      updatedAt: record.updatedAt,
+    };
+    await this.db.db
+      .insert(tossSeller)
+      .values(values)
+      .onConflictDoUpdate({ target: [tossSeller.promoterId, tossSeller.pgStore], set: { tossSellerId: values.tossSellerId, refSellerId: values.refSellerId, status: values.status, businessType: values.businessType, statusCheckedAt: values.statusCheckedAt, updatedAt: values.updatedAt } });
+  }
+
+  async countTossSellers(status: TossSellerStatus): Promise<number> {
+    const rows = await this.db.db.select({ n: sql<number>`count(*)::int` }).from(tossSeller).where(eq(tossSeller.status, status));
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  async listHeldStatementsOf(promoterId: string, pg: Pg, pgStore: PgStore): Promise<StatementRecord[]> {
+    const rows = await this.db.db
+      .select()
+      .from(settlementStatement)
+      .where(and(eq(settlementStatement.status, 'HELD'), eq(settlementStatement.promoterId, promoterId), eq(settlementStatement.pg, pg), eq(settlementStatement.pgStore, pgStore)))
+      .orderBy(settlementStatement.createdAt, settlementStatement.id);
+    return rows.map(statementRecord);
+  }
+
+  async listUnretriedFailedPayouts(o: { promoterId: string; pgStore: PgStore; failureClass: NonNullable<PayoutRecord['failureClass']> }): Promise<PayoutRecord[]> {
+    const rows = await this.db.db
+      .select({ p: payout })
+      .from(payout)
+      .innerJoin(settlementStatement, eq(settlementStatement.id, payout.statementId))
+      .where(
+        and(
+          eq(settlementStatement.promoterId, o.promoterId),
+          eq(settlementStatement.pg, 'TOSS'),
+          eq(settlementStatement.pgStore, o.pgStore),
+          eq(payout.status, 'FAILED'),
+          eq(payout.failureClass, o.failureClass),
+          sql`not exists (select 1 from payout q where q.retry_of_payout_id = ${payout.id})`,
+        ),
+      )
+      .orderBy(payout.createdAt, payout.seq);
+    return rows.map((r) => payoutRecord(r.p));
+  }
+
+  async writePayoutChanges(w: PayoutWrite): Promise<PayoutWriteResult> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        const { retried, events } = await this.#writeIn(tx, w);
+        await writeOutbox(tx, this.clock, settlementOutbox(events));
+        return { ok: true, retried };
+      });
+    } catch (e) {
+      if (e instanceof WriteRejected || e instanceof TransitionRejected) return { ok: false, retried: [] };
+      throw e;
+    }
+  }
+
+  async applyPayoutFact(o: Parameters<SettlementStore['applyPayoutFact']>[0]): Promise<PayoutWriteResult | undefined> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        // 지급 건 조건부 갱신이 그 행을 잠근다. 겹친 둘째 반영은 여기서 줄을 선 뒤 0행이다(J-T38 ②)
+        const changed = await tx
+          .update(payout)
+          .set({ status: o.set.status, errorCode: o.set.errorCode, failureClass: o.set.failureClass, updatedAt: o.set.updatedAt })
+          .where(and(eq(payout.id, o.payoutId), inArray(payout.status, [...o.from])))
+          .returning();
+        const row = changed[0];
+        if (!row) throw new FactNotApplied();
+        const updated = payoutRecord(row);
+        // 같은 정산서·묶음의 다른 반영과 줄을 세운다(지급 건 → 정산서 → 묶음 차례)
+        const statementRow = (await tx.select().from(settlementStatement).where(eq(settlementStatement.id, updated.statementId)).for('update'))[0];
+        const batchRow = (await tx.select().from(payoutBatch).where(eq(payoutBatch.id, updated.batchId)).for('update'))[0];
+        if (!statementRow || !batchRow) throw new FactNotApplied();
+        const statementPayouts = (await tx.select().from(payout).where(eq(payout.statementId, updated.statementId)).orderBy(payout.seq)).map(payoutRecord);
+        const batchPayouts = (await tx.select().from(payout).where(eq(payout.batchId, updated.batchId)).orderBy(payout.seq)).map(payoutRecord);
+        const write = o.decide({ payout: updated, statement: statementRecord(statementRow), statementPayouts, batch: batchRecord(batchRow), batchPayouts });
+        const { retried, events } = await this.#writeIn(tx, write);
+        await writeOutbox(tx, this.clock, settlementOutbox(events));
+        return { ok: true, retried };
+      });
+    } catch (e) {
+      if (e instanceof FactNotApplied || e instanceof WriteRejected || e instanceof TransitionRejected) return undefined;
+      throw e;
+    }
+  }
+
+  /** PayoutWrite 한 묶음을 열린 트랜잭션에 쓰고 Outbox에 쓸 사건을 돌려준다(차례: 지급 건 → 재요청 → 정산서 → 묶음 → CS 건 요청) */
+  async #writeIn(tx: DbTransaction, w: PayoutWrite): Promise<{ retried: PayoutRecord[]; events: SettlementEventValue[] }> {
+    for (const u of w.payoutUpdates ?? []) {
+      const set: Partial<typeof payout.$inferInsert> = { updatedAt: u.set.updatedAt };
+      if (u.set.pgPayoutId !== undefined) set.pgPayoutId = u.set.pgPayoutId;
+      if (u.set.status !== undefined) set.status = u.set.status;
+      if (u.set.errorCode !== undefined) set.errorCode = u.set.errorCode;
+      if (u.set.failureClass !== undefined) set.failureClass = u.set.failureClass;
+      if (u.set.payoutDate !== undefined) set.payoutDate = u.set.payoutDate;
+      const conditions = [eq(payout.id, u.payoutId)];
+      if (u.from) conditions.push(inArray(payout.status, [...u.from]));
+      const rows = await tx.update(payout).set(set).where(and(...conditions)).returning({ id: payout.id });
+      if (rows.length === 0) throw new WriteRejected();
+    }
+    const retried: PayoutRecord[] = [];
+    for (const r of w.retries ?? []) {
+      // 정산서 행을 잠근 채 그 정산서의 가장 큰 순번 + 1(ADR-0369 결정 8). 옛 건이 FAILED가 아니거나 이미 대신한 건이 있으면 전체 롤백
+      const oldRow = (await tx.select().from(payout).where(eq(payout.id, r.oldPayoutId)).for('update'))[0];
+      if (!oldRow || oldRow.status !== 'FAILED') throw new WriteRejected();
+      await tx.execute(sql`select id from settlement_statement where id = ${oldRow.statementId}::uuid for update`);
+      const replaced = await tx.select({ id: payout.id }).from(payout).where(eq(payout.retryOfPayoutId, r.oldPayoutId)).limit(1);
+      if (replaced.length > 0) throw new WriteRejected();
+      const max = await tx.select({ seq: sql<number>`coalesce(max(${payout.seq}), 0)::int` }).from(payout).where(eq(payout.statementId, oldRow.statementId));
+      const seq = Number(max[0]?.seq ?? 0) + 1;
+      const old = payoutRecord(oldRow);
+      const next: PayoutRecord = {
+        ...old,
+        payoutId: r.newPayoutId,
+        seq,
+        refPayoutId: `${old.statementId}-${seq}`,
+        pgPayoutId: null,
+        status: 'REQUESTED',
+        errorCode: null,
+        pgTransferId: null,
+        transferCheck: null,
+        transferCheckedAt: null,
+        payoutDate: r.payoutDate,
+        failureClass: null,
+        retryOfPayoutId: old.payoutId,
+        autoRetryCount: r.autoRetryCount,
+        createdAt: r.at,
+        updatedAt: r.at,
+      };
+      await tx.insert(payout).values(payoutValues(next));
+      await tx.insert(payoutRetryAudit).values({ id: r.auditId, payoutId: old.payoutId, newPayoutId: next.payoutId, oldSeq: old.seq, newSeq: seq, actor: r.actor, reason: r.reason, createdAt: r.at });
+      retried.push(next);
+    }
+    const events: SettlementEventValue[] = [];
+    for (const t of w.transitions ?? []) events.push(...(await this.#transitionIn(tx, t)));
+    if (w.batch) {
+      const set: Partial<typeof payoutBatch.$inferInsert> = { updatedAt: w.batch.set.updatedAt };
+      const b = w.batch.set;
+      if (b.status !== undefined) set.status = b.status;
+      if (b.payoutDate !== undefined) set.payoutDate = b.payoutDate;
+      if (b.submitAttempts !== undefined) set.submitAttempts = b.submitAttempts;
+      if (b.nextSubmitAt !== undefined) set.nextSubmitAt = b.nextSubmitAt;
+      if (b.submitDeadlineAt !== undefined) set.submitDeadlineAt = b.submitDeadlineAt;
+      if (b.lastSubmitError !== undefined) set.lastSubmitError = b.lastSubmitError;
+      if (b.dateRetryUsed !== undefined) set.dateRetryUsed = b.dateRetryUsed;
+      const conditions = [eq(payoutBatch.id, w.batch.batchId)];
+      if (w.batch.expectStatus) conditions.push(inArray(payoutBatch.status, [...w.batch.expectStatus]));
+      const rows = await tx.update(payoutBatch).set(set).where(and(...conditions)).returning({ id: payoutBatch.id });
+      if (rows.length === 0) throw new WriteRejected();
+    }
+    if (w.caseRequests && w.caseRequests.length > 0) {
+      await tx
+        .insert(settlementCaseRequest)
+        .values(w.caseRequests.map((c) => ({ eventKey: c.eventKey, kind: c.kind, sourceId: c.sourceId, createdAt: c.createdAt, requestedAt: c.requestedAt })))
+        .onConflictDoNothing();
+    }
+    return { retried, events };
+  }
+
+  async insertCaseRequests(records: readonly SettlementCaseRequestRecord[]): Promise<number> {
+    if (records.length === 0) return 0;
+    const rows = await this.db.db
+      .insert(settlementCaseRequest)
+      .values(records.map((c) => ({ eventKey: c.eventKey, kind: c.kind, sourceId: c.sourceId, createdAt: c.createdAt, requestedAt: c.requestedAt })))
+      .onConflictDoNothing()
+      .returning({ eventKey: settlementCaseRequest.eventKey });
+    return rows.length;
+  }
+
+  async listUnsentCaseRequests(limit: number): Promise<SettlementCaseRequestRecord[]> {
+    const rows = await this.db.db.select().from(settlementCaseRequest).where(isNull(settlementCaseRequest.requestedAt)).orderBy(settlementCaseRequest.createdAt, settlementCaseRequest.eventKey).limit(limit);
+    return rows.map(caseRequestRecord);
+  }
+
+  async markCaseRequestSent(eventKey: string, at: Date): Promise<void> {
+    await this.db.db.update(settlementCaseRequest).set({ requestedAt: at }).where(and(eq(settlementCaseRequest.eventKey, eventKey), isNull(settlementCaseRequest.requestedAt)));
+  }
+
+  async insertPgBalanceReconciliation(record: PgBalanceReconciliationRecord, caseRequest?: SettlementCaseRequestRecord): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      // 같은 달(MONTHLY)·같은 묶음(BATCH) 부분 유일에 걸리면 넣지 않는다. 겹친 둘째는 첫째가 끝날 때까지 줄을 선 뒤 0행이다(J-T25, TR-17)
+      const inserted = await tx
+        .insert(pgBalanceReconciliation)
+        .values({
+          id: record.reconciliationId,
+          pg: record.pg,
+          pgStore: record.pgStore,
+          kind: record.kind,
+          periodMonth: record.periodMonth,
+          batchId: record.batchId,
+          cutoffAt: record.cutoffAt,
+          approvedAmount: record.approvedAmount,
+          refundedAmount: record.refundedAmount,
+          pgFeeAmount: record.pgFeeAmount,
+          paidOutAmount: record.paidOutAmount,
+          peaketWithdrawnAmount: record.peaketWithdrawnAmount,
+          expectedAmount: record.expectedAmount,
+          observedAmount: record.observedAmount,
+          diffAmount: record.diffAmount,
+          severity: record.severity,
+          createdAt: record.createdAt,
+        })
+        .onConflictDoNothing()
+        .returning({ id: pgBalanceReconciliation.id });
+      if (inserted.length === 0) return false;
+      if (caseRequest) {
+        await tx
+          .insert(settlementCaseRequest)
+          .values({ eventKey: caseRequest.eventKey, kind: caseRequest.kind, sourceId: caseRequest.sourceId, createdAt: caseRequest.createdAt, requestedAt: caseRequest.requestedAt })
+          .onConflictDoNothing();
+      }
+      return true;
+    });
+  }
+
+  async lastPgBalanceReconciliation(pg: Pg, pgStore: PgStore): Promise<PgBalanceReconciliationRecord | undefined> {
+    const rows = await this.db.db
+      .select()
+      .from(pgBalanceReconciliation)
+      .where(and(eq(pgBalanceReconciliation.pg, pg), eq(pgBalanceReconciliation.pgStore, pgStore)))
+      .orderBy(desc(pgBalanceReconciliation.cutoffAt), desc(pgBalanceReconciliation.createdAt))
+      .limit(1);
+    return rows[0] ? reconciliationRecord(rows[0]) : undefined;
+  }
+
+  async listBatchesAwaitingReconciliation(since: Date, limit: number): Promise<PayoutBatchRecord[]> {
+    const rows = await this.db.db
+      .select()
+      .from(payoutBatch)
+      .where(
+        and(
+          eq(payoutBatch.pg, 'TOSS'),
+          gte(payoutBatch.createdAt, since),
+          sql`not exists (select 1 from pg_balance_reconciliation r where r.kind = 'BATCH' and r.batch_id = ${payoutBatch.id})`,
+        ),
+      )
+      .orderBy(payoutBatch.createdAt)
+      .limit(limit);
+    return rows.map(batchRecord);
+  }
+
+  async sumUnfinishedTossPayouts(pgStore: PgStore, excludeBatchId?: string): Promise<number> {
+    const conditions = [eq(payoutBatch.pg, 'TOSS'), eq(payoutBatch.pgStore, pgStore), inArray(payout.status, [...UNFINISHED_PAYOUT])];
+    if (excludeBatchId) conditions.push(ne(payout.batchId, excludeBatchId));
+    const rows = await this.db.db
+      .select({ amount: sql<string>`coalesce(sum(${payout.amount}), 0)` })
+      .from(payout)
+      .innerJoin(payoutBatch, eq(payoutBatch.id, payout.batchId))
+      .where(and(...conditions));
+    return Number(rows[0]?.amount ?? 0);
+  }
+
+  async claimBatchSubmit(batchId: string, expectedNextSubmitAt: Date | null, next: Date | null): Promise<boolean> {
+    // 읽은 next_submit_at 그대로일 때만 바꾼다. 겹친 둘째 파드는 이 행에서 줄을 선 뒤 0행이다(J-T5)
+    const rows = await this.db.db
+      .update(payoutBatch)
+      .set({ nextSubmitAt: next })
+      .where(and(eq(payoutBatch.id, batchId), expectedNextSubmitAt === null ? isNull(payoutBatch.nextSubmitAt) : eq(payoutBatch.nextSubmitAt, expectedNextSubmitAt)))
+      .returning({ id: payoutBatch.id });
+    return rows.length > 0;
+  }
+
+  async listDueSubmitBatches(now: Date, limit: number): Promise<PayoutBatchRecord[]> {
+    const rows = await this.db.db
+      .select()
+      .from(payoutBatch)
+      .where(and(eq(payoutBatch.pg, 'TOSS'), inArray(payoutBatch.status, ['APPROVED', 'SUBMITTED', 'PARTIAL_FAILED']), lte(payoutBatch.nextSubmitAt, now)))
+      .orderBy(payoutBatch.nextSubmitAt, payoutBatch.id)
+      .limit(limit);
+    return rows.map(batchRecord);
+  }
+
+  async listOverduePayouts(now: Date, limit: number): Promise<PayoutRecord[]> {
+    // 지급일 다음 은행 영업일 12:00 KST가 지났는지는 응용 규칙(주말만 뺀다)으로 거른다. 그날 KST 날짜 전의 지급일만 후보다
+    const today = new Date(now.getTime() + KST_OFFSET_MS).toISOString().slice(0, 10);
+    const rows = await this.db.db
+      .select({ p: payout })
+      .from(payout)
+      .innerJoin(payoutBatch, eq(payoutBatch.id, payout.batchId))
+      .where(and(eq(payoutBatch.pg, 'TOSS'), inArray(payout.status, [...UNFINISHED_PAYOUT]), sql`${payout.pgPayoutId} is not null`, lt(payout.payoutDate, today)))
+      .orderBy(payout.payoutDate, payout.id)
+      .limit(limit * 4);
+    return rows
+      .map((r) => payoutRecord(r.p))
+      .filter((p) => Date.parse(`${nextBankBusinessDay(p.payoutDate)}T12:00:00+09:00`) <= now.getTime())
+      .slice(0, limit);
   }
 }

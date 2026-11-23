@@ -26,7 +26,7 @@ export class MemoryReauthVerifier implements ReauthVerifier {
 export class ManualPortonePayoutGateway implements PayoutGateway {
   readonly pg = 'PORTONE' as const;
   async submit(): Promise<PayoutSubmitResult> {
-    return { status: 'SUBMITTED' };
+    return { status: 'SUBMITTED', groups: [] };
   }
 }
 

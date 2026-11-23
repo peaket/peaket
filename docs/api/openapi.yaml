@@ -264,6 +264,13 @@ x-peaket-problem-types:
     payout-dependency-unavailable: { status: 503, title: "지급 서비스에 연결하지 못했습니다" }
     payout-kyc-required: { status: 409, title: "KYC 확인이 끝나지 않아 지급할 수 없습니다" }
     payout-not-retryable: { status: 409, title: "실패한 지급 건만 다시 보낼 수 있습니다" }
+    payout-account-mismatch: { status: 409, title: "예금주가 확인되지 않은 정산 계좌라 지급할 수 없습니다" }
+    payout-batch-amount-mismatch: { status: 409, title: "승인한 지급 금액과 정산서 합계가 다릅니다" }
+    payout-batch-statement-conflict: { status: 409, title: "확정 정산서가 아닌 건이 지급 묶음에 섞였습니다" }
+    payout-retry-approval-required: { status: 409, title: "금액이나 셀러를 바꾼 재요청은 새 지급 묶음 승인이 필요합니다" }
+    payout-sale-suspended: { status: 409, title: "판매 중지된 공연의 정산서라 지급할 수 없습니다" }
+    settlement-state-conflict: { status: 409, title: "정산서 상태가 다른 처리와 겹쳤습니다" }
+    toss-seller-registration-failed: { status: 502, title: "결제사 셀러 등록에 실패했습니다" }
     settlement-adjustment-already-applied: { status: 409, title: "조정이 이미 적용되어 반려할 수 없습니다" }
     settlement-commission-rate-invalid: { status: 422, title: "수수료율이 맞지 않습니다" }
     settlement-dependency-unavailable: { status: 503, title: "정산 서비스에 연결하지 못했습니다" }
@@ -5620,8 +5627,8 @@ paths:
       tags: [webhooks]
       x-peaket-roles: [public]
       security: []
-      summary: 토스페이먼츠 웹훅 수신(PAYMENT_STATUS_CHANGED, DEPOSIT_CALLBACK, payout.changed, seller.changed). 본문 불신, 조회 API 재확인, transmission-id 중복 제거
-      description: "FR-041, FR-062, ADR-0015·0044·0047. 인증 없음(gw-partner), payment-svc가 검증. 결제 이벤트는 결제 기록의 결제사가 TOSS일 때만 반영. 지급대행 이벤트(payout.changed·seller.changed)는 tosspayments-webhook-signature를 보안 키 HMAC-SHA256으로 상수 시간 비교하고, 맞아도 단건 조회로 확정"
+      summary: 토스페이먼츠 웹훅 수신(PAYMENT_STATUS_CHANGED, DEPOSIT_CALLBACK, payout.changed, seller.changed). 본문 불신, 조회 API 재확인, 결제 이벤트는 transmission-id·지급대행 이벤트는 본문 eventId로 중복 제거
+      description: "FR-041, FR-062, ADR-0015·0044·0047. 인증 없음(gw-partner), payment-svc가 검증. 결제 이벤트는 결제 기록의 결제사가 TOSS일 때만 반영. 지급대행 이벤트(payout.changed·seller.changed)는 tosspayments-webhook-signature(원문 {본문}:{전송 시각})를 두 결제 상점의 지금·옛 보안 키 HMAC-SHA256으로 상수 시간 비교하고, 맞아도 단건 조회로 확정. 지급대행 이벤트의 중복 제거는 본문 eventId로 한다(전송 ID는 보낼 때마다 새로 나온다, ADR-0369 결정 14). 같은 eventId가 새 전송 ID로 다시 오면 처리하지 않고 200"
       parameters: [{ name: tosspayments-webhook-transmission-id, in: header, required: true, schema: { type: string } }, { name: tosspayments-webhook-transmission-time, in: header, required: true, description: "발송 시각(예 2024-09-05T12:19:21+09:00). 지급 웹훅은 지금과 5분 넘게 다르면 본문을 쓰지 않고 단건 조회만 한다(ADR-0053)", schema: { type: string } }, { name: tosspayments-webhook-transmission-retried-count, in: header, required: false, schema: { type: integer } }, { name: tosspayments-webhook-signature, in: header, required: false, description: "payout.changed·seller.changed에만. v1: 뒤 base64 값(키 재발급 중 최대 4개)", schema: { type: string } }]
       responses: { '200': { description: 수신 }, '400': { $ref: '#/components/responses/Problem', description: 본문이 JSON이 아님 }, '413': { $ref: '#/components/responses/Problem', description: "본문 64KB [가정] 초과. 해석하기 전에 막는다" }, '415': { $ref: '#/components/responses/Problem', description: JSON 밖의 형식 }, '503': { $ref: '#/components/responses/ServiceUnavailable', description: "수신 기록 저장 실패. 결제사가 다시 보낸다" } }
   /v1/webhooks/portone:
