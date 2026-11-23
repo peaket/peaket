@@ -427,7 +427,12 @@ test('V-T54 ① 주석과 심각도·종류 값이 빠지거나 목록 밖이면
 
 test('V-T54 ① severity none은 Alertmanager에 그 경보 이름 경로가 있을 때만 통과한다', (t) => {
   const none = (name) => ({ ...alert(name, 'vector(1)'), labels: { severity: 'none', kind: 'hygiene' } });
-  const watchdog = fixture(t);
+  // F-01-6이 더한 실제 rules/watchdog.yaml의 Watchdog과 겹치지 않게, 이 사례의 임시 저장소에서는 그 파일을 뺀다
+  const withoutRealWatchdog = (root) => {
+    rmSync(join(root, OBS, 'rules', 'watchdog.yaml'), { force: true });
+    return root;
+  };
+  const watchdog = withoutRealWatchdog(fixture(t));
   pushRule(watchdog, SLO28D, 'slo-28d', none('Watchdog'));
   assertPass(watchdog, '경로가 있는 Watchdog');
 
@@ -436,7 +441,7 @@ test('V-T54 ① severity none은 Alertmanager에 그 경보 이름 경로가 있
   assertBlocked(unrouted, SLO28D, { name: 'vt54_unrouted_none', only: true });
 
   // 경로를 지우면 같은 Watchdog도 막는다(이름이 아니라 경로로 판정한다)
-  const routeRemoved = fixture(t);
+  const routeRemoved = withoutRealWatchdog(fixture(t));
   pushRule(routeRemoved, SLO28D, 'slo-28d', none('Watchdog'));
   editYaml(routeRemoved, AM, (d) => (d.route.routes = d.route.routes.filter((r) => !r.matchers.includes('alertname="Watchdog"'))));
   assertBlocked(routeRemoved, SLO28D, { name: 'Watchdog', only: true });
