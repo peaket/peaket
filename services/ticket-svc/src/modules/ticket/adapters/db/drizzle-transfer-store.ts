@@ -107,7 +107,7 @@ export class DrizzleTransferStore implements TransferStore {
         if (again) fresh = again;
       }
       const lock = await this.#activeLock(tx, fresh.eventId, fresh.payerAccountId, nowMs);
-      const reason = createOfferRejectionOf(snapshotOf(fresh), { callerAccountId: offer.fromAccountId, nowMs, lockActive: lock !== undefined });
+      const reason = createOfferRejectionOf(snapshotOf(fresh), { callerAccountId: offer.fromAccountId, recipientAccountId: offer.toAccountId, nowMs, lockActive: lock !== undefined });
       if (reason) return { kind: 'REJECTED', reason };
       const inserted = await tx
         .insert(transferOffer)
@@ -153,6 +153,8 @@ export class DrizzleTransferStore implements TransferStore {
   async listOffers(input: ListTransfersInput): Promise<ListTransfersResult> {
     const where = and(
       eq(transferOffer.toAccountId, input.recipientAccountId),
+      // 자기 양도(옛 데이터 포함)는 받은 요청 목록에 넣지 않는다. role이 SENDER로 어긋나고 수락하면 재발급 통제를 우회한다
+      sql`${transferOffer.fromAccountId} <> ${transferOffer.toAccountId}`,
       input.statuses.length === 0 ? undefined : inArray(transferOffer.status, [...input.statuses]),
       input.cursor === undefined
         ? undefined
@@ -209,31 +211,48 @@ export class DrizzleTransferStore implements TransferStore {
   }
 
   async accept(i: { offerId: string; accountId: string; nowMs: number }): Promise<DecideOutcome> {
-    return this.o.database.transaction(async (tx) => {
-      // 행 잠금 차례는 티켓 → 요청이다. setTransferLock과 같은 차례로 교착을 막는다(RV-02)
-      const [peek] = await tx.select().from(transferOffer).where(eq(transferOffer.id, i.offerId)).limit(1);
-      if (!peek) return { kind: 'REJECTED', reason: 'NOT_FOUND' };
-      const [t] = await tx.select().from(ticket).where(eq(ticket.id, peek.ticketId)).limit(1).for('update');
-      if (!t) return { kind: 'REJECTED', reason: 'NOT_FOUND' };
-      const [offerRow] = await tx.select().from(transferOffer).where(eq(transferOffer.id, i.offerId)).limit(1).for('update');
-      if (!offerRow) return { kind: 'REJECTED', reason: 'NOT_FOUND' };
-      const current = recordOf(offerRow);
-      if (current.toAccountId !== i.accountId) return { kind: 'REJECTED', reason: 'NOT_RECIPIENT' };
-      const reason = acceptRejectionOf(current, { accountId: i.accountId, nowMs: i.nowMs, eventStartsAtMs: t.eventStartsAt?.getTime() });
-      if (reason) return { kind: 'REJECTED', reason };
-      // 이미 수락한 요청의 재생은 표 상태와 상관없이 처음 결과다(멱등)
-      if (current.status === 'ACCEPTED') return { kind: 'OK', offer: current, replayed: true };
-      // 겹친 가드 D2: 요청이 남아 있어도 끝난 표(환급·무효·취소 접수·부정 표시)는 받지 않는다
-      if (ENDED_STATUSES.has(ticketStatusOf(t.status))) return { kind: 'REJECTED', reason: 'ALREADY_ENDED' };
-      if (t.accountId !== current.fromAccountId) return { kind: 'REJECTED', reason: 'NOT_OFFERED' };
-      await tx.update(transferOffer).set({ status: 'ACCEPTED', decidedAt: new Date(i.nowMs) }).where(eq(transferOffer.id, i.offerId));
-      await this.o.deviceKeys?.revokeActiveInTx(tx, t.id, i.nowMs);
-      await tx
-        .update(ticket)
-        .set({ accountId: current.toAccountId, status: 'ACTIVE', transferPending: false, keyRevokedAt: new Date(i.nowMs), version: t.version + 1 })
-        .where(eq(ticket.id, t.id));
-      return { kind: 'OK', offer: { ...current, status: 'ACCEPTED', decidedAtMs: i.nowMs }, replayed: false };
-    });
+    // 같은 표를 노리는 수락이 몰려 풀 대기(server-busy)가 나면 한 트랜잭션도 시작하지 않은 상태라 두 번까지 다시 잡는다.
+    // 경합 시험 T3 ④처럼 30개가 한꺼번에 와도 수락 하나가 429로 새지 않게 하는 것이다(운영에서도 같은 뜻).
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.o.database.transaction(async (tx) => {
+          // 행 잠금 차례는 티켓 → 요청이다. setTransferLock과 같은 차례로 교착을 막는다(RV-02).
+          // 요청의 티켓을 한 문장으로 찾으며 바로 잠근다(요청 조회를 앞에 두지 않아 같은 순간에 들어온 수락이 행 잠금을 먼저 잡는다).
+          const [t] = await tx
+            .select()
+            .from(ticket)
+            .where(sql`${ticket.id} = (select ticket_id from transfer_offer where id = ${i.offerId})`)
+            .limit(1)
+            .for('update');
+          if (!t) return { kind: 'REJECTED', reason: 'NOT_FOUND' };
+          const [offerRow] = await tx.select().from(transferOffer).where(eq(transferOffer.id, i.offerId)).limit(1).for('update');
+          if (!offerRow) return { kind: 'REJECTED', reason: 'NOT_FOUND' };
+          const current = recordOf(offerRow);
+          if (current.toAccountId !== i.accountId) return { kind: 'REJECTED', reason: 'NOT_RECIPIENT' };
+          const reason = acceptRejectionOf(current, { accountId: i.accountId, nowMs: i.nowMs, eventStartsAtMs: t.eventStartsAt?.getTime() });
+          if (reason) return { kind: 'REJECTED', reason };
+          // 이미 수락한 요청의 재생은 표 상태와 상관없이 처음 결과다(멱등)
+          if (current.status === 'ACCEPTED') return { kind: 'OK', offer: current, replayed: true };
+          // 겹친 가드 D2: 요청이 남아 있어도 끝난 표(환급·무효·취소 접수·부정 표시)는 받지 않는다
+          if (ENDED_STATUSES.has(ticketStatusOf(t.status))) return { kind: 'REJECTED', reason: 'ALREADY_ENDED' };
+          if (t.accountId !== current.fromAccountId) return { kind: 'REJECTED', reason: 'NOT_OFFERED' };
+          await tx.update(transferOffer).set({ status: 'ACCEPTED', decidedAt: new Date(i.nowMs) }).where(eq(transferOffer.id, i.offerId));
+          await this.o.deviceKeys?.revokeActiveInTx(tx, t.id, i.nowMs);
+          await tx
+            .update(ticket)
+            .set({ accountId: current.toAccountId, status: 'ACTIVE', transferPending: false, keyRevokedAt: new Date(i.nowMs), version: t.version + 1 })
+            .where(eq(ticket.id, t.id));
+          return { kind: 'OK', offer: { ...current, status: 'ACCEPTED', decidedAtMs: i.nowMs }, replayed: false };
+        });
+      } catch (e) {
+        const busy = typeof e === 'object' && e !== null && (e as { slug?: unknown }).slug === 'server-busy';
+        if (busy && attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
+          continue;
+        }
+        throw e;
+      }
+    }
   }
 
   async reject(i: { offerId: string; accountId: string; nowMs: number }): Promise<DecideOutcome> {

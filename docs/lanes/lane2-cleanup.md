@@ -222,3 +222,12 @@
 - F-03-3 R-798 못 한 것: 원격 위젯 둘 머리 '자세히 보기'가 위젯 패키지의 목업 주소·noreferrer로 그려짐(apps/widgets 범위 밖), 상태 바 control `unknown`이 ds에 '받지 못함' 값이 없어 배지 없음, 경보 가상 스크롤이 줄 높이 고정이라 접힌 줄 많은 행이 잘릴 수 있음, 판정 POST 멱등 키 저장소 없음, 브라우저 확인·Helm 값·Redis ACL(마지막 날·구간 5)
 - F-03-3 R-798 422 권고 사유·core 5초 시간 초과는 원천 이름이 없어 시험하지 않음
 - F-05-2 소유자 확인 후보: 운영자 취소(`OperatorCancelTickets`)가 모두 부정 예매 때문은 아닌데 진행 중 양도 요청의 철회 사유가 `FRAUD_LOCK`(정본 transfer-refund §7.4 ①, ADR-0171)이라, 그 사유를 읽는 부정 예매 화면·알림으로 번질 수 있음
+- F-05-2 구현 리뷰 IR-05(중간): `expireOffers`는 요청 행을 잠그고 표 행을 고치는 반면 `eventCancel`·`operatorCancel`은 표 행을 잠그고 요청 행을 고친다. 같은 표에서 만료 고리와 회차·운영자 취소가 겹치면 잠금 차례가 반대라 교착으로 한쪽이 되돌아갈 수 있다. 만료도 표 → 요청 차례로 잠그거나 표를 먼저 잠근 뒤 요청을 다시 본다(data.md §5, architecture §8.7, ADR-0381 ③)
+- F-05-2 구현 리뷰 IR-06(중간): 목록 `transferLocked`는 `ticket.fraud_lock_case_id`만 보고 기한이 지나도·받은 사람 표에도 참이며, 목록 `pendingTransfer`도 기한 지난 `OFFERED`를 거르지 않는다. 상세는 `lockActive`·보유자 조건으로 §4.1대로 가른다. 목록 값을 화면이 아직 쓰지 않아 사용자 영향은 작다(계획 §1-3·T5)
+- F-05-2 구현 리뷰 IR-07(중간): SCR-041 수락 성공 뒤 위험 띠 '이미 처리된 요청입니다'와 성공 카드가 함께 뜬다. `offerStateOf`가 ACCEPTED를 '처리됨'으로 보내고 실행부가 `accepted`를 따로 켜기 때문이다. 받은 뒤에는 성공 카드만, 이미 받은 요청을 다시 열었을 때만 '처리됨' 띠를 보이게 가른다(d5 §5.23)
+- F-05-2 구현 리뷰 IR-08(낮음): 받은 요청 카드가 d5 §5.13의 '양도 요청이 왔습니다 · 공연명 · 수락 기한'과 다르고, SCR-041 받은 뒤의 [[ 이 휴대폰을 입장용으로 등록 ]]이 티켓 상세 링크로만 있다. 구현이 다르면 d5를 고치거나 화면을 맞춘다
+- F-05-2 구현 리뷰 IR-09(낮음): 모르는 `status`가 400이지만 type이 `invalid-query`가 아니라 `about:blank`다. `@ContractQuery`가 먼저 거절해 플랫폼 공통 400이 난다(계약·화면이 type을 보지 않아 지금은 문구 차이)
+- F-05-2 구현 리뷰 IR-10(낮음): 디버그 줄(`PEAKET_F052_DEBUG=1`일 때 DB 오류 `console.error`)은 이번 구현 커밋에서 지웠다. 남은 것은 없다
+- F-05-2 구현 리뷰 IR-11(낮음): 한도에 걸린 뒤에도 429마다 `LIMITED` 행을 하나씩 넣어 계정 하나가 표를 무한히 키울 수 있다. 보존 90일 정리도 구간 5로 미뤘다. 같은 계정의 짧은 창 `LIMITED`를 한 행으로 합치거나 상한을 둔다(ASVS 2.4.1)
+- F-05-2 구현 리뷰 IR-12(낮음): 메모리 기기 키 저장소는 돌려주기 뒤 `TRANSFER` 예외가 없다. Drizzle에만 예외가 있어 짝 가짜가 진짜와 같은 계약 시험을 통과하지 못한다. 메모리에도 같은 규칙(티켓 반환 기록)을 넣는다(계획 §10 '짝 가짜')
+- F-05-2 구현 리뷰 함께: `WalletLive` 돌려주기 응답 유실 뒤 새 키로 다시 보내면 409 `payer-holds`로 보이는 문구, `transfer-actions.ts` `receivedSnapshotOf` 미사용·`RETURN_CONFIRM_TEXT` 중복, `docs/security/asvs/transfer-refund.md`·d5 §5.14·§5.23·`docs/frontend.md` §4.2.4·`docs/BUILD_ORDER.md` GAT 줄의 남은 갱신

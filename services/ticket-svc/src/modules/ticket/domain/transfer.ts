@@ -133,11 +133,16 @@ export interface TransferCursor {
 export function transferCursorOf(c: TransferCursor): string {
   return Buffer.from(JSON.stringify([c.createdAtMs, c.offerId]), 'utf8').toString('base64url');
 }
+/** JavaScript Date가 담을 수 있는 최대 ms(8.64e15). 넘으면 new Date·PostgreSQL timestamptz가 던진다 */
+const MAX_DATE_MS = 8_640_000_000_000_000;
+const CURSOR_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function parseTransferCursor(raw: string | undefined): TransferCursor | undefined {
   if (raw === undefined || !/^[A-Za-z0-9_-]+$/.test(raw)) return undefined;
   try {
     const v: unknown = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
-    if (!Array.isArray(v) || v.length !== 2 || typeof v[0] !== 'number' || !Number.isSafeInteger(v[0]) || v[0] < 0 || typeof v[1] !== 'string') return undefined;
+    if (!Array.isArray(v) || v.length !== 2) return undefined;
+    if (typeof v[0] !== 'number' || !Number.isSafeInteger(v[0]) || v[0] < 0 || v[0] > MAX_DATE_MS) return undefined;
+    if (typeof v[1] !== 'string' || !CURSOR_UUID.test(v[1])) return undefined;
     return { createdAtMs: v[0], offerId: v[1].toLowerCase() };
   } catch {
     return undefined;
@@ -160,6 +165,7 @@ export const ENDED_STATUSES: ReadonlySet<TicketStatus> = new Set(['REFUNDED', 'V
 
 export type CreateOfferRejection =
   | 'NOT_HOLDER'
+  | 'SELF_TRANSFER'
   | 'REOFFER'
   | 'ENTRY_STARTED'
   | 'TRANSFER_CLOSED'
@@ -173,15 +179,18 @@ export type CreateOfferRejection =
  */
 export function createOfferRejectionOf(
   t: TransferTicketSnapshot,
-  o: { readonly callerAccountId: string; readonly nowMs: number; readonly lockActive: boolean },
+  o: { readonly callerAccountId: string; readonly recipientAccountId?: string; readonly nowMs: number; readonly lockActive: boolean },
 ): CreateOfferRejection | undefined {
+  // 자기 양도는 받는 사람 참조가 자기 계정이어도 막는다(수락이 자기 키를 폐기하고 ISSUE 첫 등록으로 재인증·24시간 통제를 우회하는 길)
+  if (o.recipientAccountId !== undefined && o.recipientAccountId === o.callerAccountId) return 'SELF_TRANSFER';
   if (t.accountId !== o.callerAccountId) return t.payerAccountId === o.callerAccountId ? 'REOFFER' : 'NOT_HOLDER';
   if (t.payerAccountId !== o.callerAccountId) return 'REOFFER';
   if (ENDED_STATUSES.has(t.status)) return 'ALREADY_ENDED';
   if (!beforeEntryStart(t.eventStartsAtMs, o.nowMs)) return 'ENTRY_STARTED';
   const close = marketCloseAtMs(t.eventStartsAtMs);
   if (close !== undefined && o.nowMs >= close) return 'TRANSFER_CLOSED';
-  if (o.lockActive || t.fraudLockCaseId !== undefined) return 'TRANSFER_LOCKED';
+  // 잠금 판정은 지금 유효한 잠금(기한·입장 시작 반영)만 본다. 기한이 지난 사건 ID가 칸에 남아 있어도 잠금이 아니다(§4.1)
+  if (o.lockActive) return 'TRANSFER_LOCKED';
   if (t.transferPending || t.status === 'TRANSFER_PENDING') return 'TRANSFER_PENDING';
   return undefined;
 }
@@ -193,6 +202,7 @@ export function acceptRejectionOf(
   offer: TransferOfferRecord,
   o: { readonly accountId: string; readonly nowMs: number; readonly eventStartsAtMs: number | undefined },
 ): AcceptRejection | undefined {
+  if (offer.fromAccountId === offer.toAccountId) return 'NOT_OFFERED';
   if (offer.toAccountId !== o.accountId) return 'NOT_RECIPIENT';
   if (offer.status === 'ACCEPTED') return undefined;
   if (offer.status === 'EXPIRED') return 'EXPIRED';

@@ -167,7 +167,10 @@ export async function startLocalFanGateway(o) {
   /** @param {import('node:http').IncomingMessage} req @param {number} port */
   async function handle(req, port) {
     const host = (req.headers.host ?? '').toLowerCase();
-    if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`) return problem(421, 'Misdirected Request');
+    // 루프백 주소만 받는다(DNS 리바인딩 방지). 시험의 끊는 중계처럼 앞에 리버스 프록시를 두면 Host의 포트가 대역 포트와
+    // 다를 수 있어, 포트까지 맞추지 않고 호스트 이름이 127.0.0.1·localhost인지만 본다(2026-11-23 F-05-2 연결 시험).
+    const hostname = host.split(':')[0];
+    if (hostname !== '127.0.0.1' && hostname !== 'localhost') return problem(421, 'Misdirected Request');
     const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
     const origin = req.headers.origin;
     const allowed = origin === webOrigin;
