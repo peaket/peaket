@@ -55,6 +55,13 @@ paths = ['''^packages/(?:shuffle/test/vectors\.json|platform/test/vectors/[\w.-]
 regexes = ['''^[0-9a-f]{64}$''']
 
 [[allowlists]]
+description = '''월렛 로그아웃 정리 시험(F-05-1 FE-T47, docs/frontend.md §3.12)이 지울 대상으로 늘어놓는 브라우저 저장소 키 이름(peaket.wallet.reauth·peaket.admission.<회차> 따위). 비밀이 아니라 frontend §3.12에 적힌 저장 자리 이름이다'''
+condition = 'AND'
+targetRules = ['generic-api-key']
+paths = ['''^apps/web/src/widgets/app-shell/model/session-wiring\.test\.mjs$''']
+regexes = ['''^peaket\.[a-z]+(?:\.[a-z0-9-]+)+$''']
+
+[[allowlists]]
 description = '''추첨 증명 화면의 표본 자료(예시 토큰 해시). 화면을 그려 보려는 값이고 어느 계정의 것도 아니다'''
 condition = 'AND'
 targetRules = ['generic-api-key']
