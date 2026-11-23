@@ -585,7 +585,7 @@ describe('미수금 이동 기록 표 이름 바꾸기(payment 0028, PRF180)', (
       (await db.pool.query('select column_name, data_type from information_schema.columns where table_schema = $1 and table_name = $2 order by ordinal_position', ['public', rel])).rows;
     const byName = (rows: { column_name: string; data_type: string }[]) => [...rows].sort((a, b) => a.column_name.localeCompare(b.column_name));
     expect(byName(await columns('receivable_move'))).toEqual(byName(await columns('receivable_movement')));
-    expect((await columns('receivable_move')).map((c) => c.column_name)).toEqual(['id', 'receivable_id', 'statement_id', 'amount', 'kind', 'moved_at']);
+    expect((await columns('receivable_move')).map((c) => c.column_name)).toEqual(['id', 'receivable_id', 'statement_id', 'amount', 'kind', 'moved_at', 'reverses_id']);
   });
 
   test('PRF180 M3 ⑧ 이전 판 앱처럼 옛 이름 뷰에 id·kind 없이 넣으면 밑 표 기본값(새 UUID·OFFSET)으로 receivable_movement에 들어가 옛 이름으로도 읽히고, 뷰로 넣어도 표의 CHECK·외래 키가 막는다', async () => {
