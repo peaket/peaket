@@ -248,6 +248,23 @@ describe('EntryCloseTick 돌아가며 보기(offline-gate §7.3 판단, 시험 �
   });
 });
 
+describe('EntryCloseTick 돌아가며 보기 — 커서 회차가 마감된 뒤(시험 리뷰 RV-17)', () => {
+  test('O-T29 ① 한 판단의 마지막(50번째) 회차가 그 판단에서 마감돼도 다음 판단은 그 회차 뒤부터 본다(앞 49개를 다시 묻지 않는다)', async () => {
+    const r = await rig(R);
+    const ids: string[] = [];
+    for (let n = 0; n < 51; n++) ids.push((await r.event(0, { startsAtMs: STARTS - 3_600_000 - (51 - n) * 1_000 })).eventId);
+    for (const id of ids.slice(0, 49)) r.policy.answers.delete(id); // 끝 시각 모름
+    expect(await r.tick.run()).toMatchObject({ closed: 1 });
+    expect(await r.h.store.closedAt(ids[49]!)).toBe(R);
+    expect(r.policy.asked).not.toContain(ids[50]);
+    r.clock.advance(60_000);
+    const asked = r.policy.asked.length;
+    expect(await r.tick.run()).toMatchObject({ closed: 1 });
+    expect(r.policy.asked.slice(asked)).toEqual([ids[50]]);
+    expect(await r.h.store.closedAt(ids[50]!)).toBe(R + 60_000);
+  });
+});
+
 describe('EntryCloseTick 장애·되돌림(O-T29 ⑥)', () => {
   test('O-T29 ⑥ core 내부 입구가 503을 두 번 주면 마감은 ticket-svc에 남고 다시 보내 세 번째에 알린 것으로 적는다(세 번 모두 같은 마감 시각)', async () => {
     const r = await rig(R);

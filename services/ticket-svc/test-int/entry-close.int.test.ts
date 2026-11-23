@@ -245,7 +245,10 @@ describe('회차 잠금의 차례(O-T29 ④, 시험 리뷰 RV-01)', () => {
   async function hold(key: number): Promise<() => Promise<void>> {
     const client = await database.pool.connect();
     await client.query('select pg_advisory_lock($1)', [key]);
+    let released = false;
     return async () => {
+      if (released) return;
+      released = true;
       await client.query('select pg_advisory_unlock($1)', [key]);
       client.release();
     };
@@ -284,19 +287,27 @@ describe('회차 잠금의 차례(O-T29 ④, 시험 리뷰 RV-01)', () => {
     const ticketId = await seedEvent(eventId, Date.now() - 5 * 3_600_000);
     await database.pool.query(`insert into f056_hold_target values ($1, 'entry_close', $2)`, [eventId, HOLD_CLOSE]);
     const release = await hold(HOLD_CLOSE);
-    const ends = Date.now() - ROLE_END_AFTER_ENDS_MS - 60_000;
-    const closing = new DrizzleEntryCloseStore(closeDb).close({ eventId, nowMs: Date.now(), endsAtMs: ends, clockNow: () => Date.now() });
-    // 마감이 entry_close 넣기에서 멈췄다(회차 잠금은 이미 쥐었다)
-    await expect.poll(() => waitingOnLock('f056-close'), { timeout: 10_000, interval: 50 }).toBe(1);
-    const uploading = new DrizzleScannerGateStore(uploadDb).acceptScans({ eventId, deviceId: randomUUID(), sessionId: SESSION, scans: [scanOf(eventId, ticketId, Date.now() - 120_000)], nowMs: Date.now() });
-    // 업로드는 회차 잠금(공유)을 기다린다. 잠금이 없으면 여기서 기다리지 않고 끝나 이 조건이 오지 않는다
-    await expect.poll(() => waitingOnLock('f056-upload'), { timeout: 10_000, interval: 50 }).toBe(1);
-    expect(await rowsOf('entry_close', eventId)).toBe(0);
-    await release();
-    expect((await closing).closed).toBe(true);
-    const res = await uploading;
-    expect(res.acceptedIds).toHaveLength(1);
-    expect(res.flags.map((f) => f.kind)).toContain('AFTER_CLOSE');
+    let closing: Promise<{ closed: boolean }> | undefined;
+    let uploading: ReturnType<DrizzleScannerGateStore['acceptScans']> | undefined;
+    // 단언이 떨어져도 권고 잠금을 풀고 멈춘 트랜잭션이 끝나게 한다(열린 자원 남기지 않기, 시험 리뷰 RV-16)
+    try {
+      const ends = Date.now() - ROLE_END_AFTER_ENDS_MS - 60_000;
+      closing = new DrizzleEntryCloseStore(closeDb).close({ eventId, nowMs: Date.now(), endsAtMs: ends, clockNow: () => Date.now() });
+      // 마감이 entry_close 넣기에서 멈췄다(회차 잠금은 이미 쥐었다)
+      await expect.poll(() => waitingOnLock('f056-close'), { timeout: 10_000, interval: 50 }).toBe(1);
+      uploading = new DrizzleScannerGateStore(uploadDb).acceptScans({ eventId, deviceId: randomUUID(), sessionId: SESSION, scans: [scanOf(eventId, ticketId, Date.now() - 120_000)], nowMs: Date.now() });
+      // 업로드는 회차 잠금(공유)을 기다린다. 잠금이 없으면 여기서 기다리지 않고 끝나 이 조건이 오지 않는다
+      await expect.poll(() => waitingOnLock('f056-upload'), { timeout: 10_000, interval: 50 }).toBe(1);
+      expect(await rowsOf('entry_close', eventId)).toBe(0);
+      await release();
+      expect((await closing).closed).toBe(true);
+      const res = await uploading;
+      expect(res.acceptedIds).toHaveLength(1);
+      expect(res.flags.map((f) => f.kind)).toContain('AFTER_CLOSE');
+    } finally {
+      await release();
+      await Promise.allSettled([closing, uploading]);
+    }
   });
 
   test('O-T29 ④ (나) 업로드가 회차 잠금을 쥔 동안 시작한 마감은 잠금을 기다리고, 업로드가 먼저 커밋돼 그 기록은 표시 없이 받은 시각 ≤ 마감 시각이다', async () => {
@@ -307,17 +318,25 @@ describe('회차 잠금의 차례(O-T29 ④, 시험 리뷰 RV-01)', () => {
     await database.pool.query(`insert into f056_hold_target values ($1, 'scan_event', $2)`, [eventId, HOLD_UPLOAD]);
     const release = await hold(HOLD_UPLOAD);
     const scan = scanOf(eventId, ticketId, Date.now() - 120_000);
-    const uploading = new DrizzleScannerGateStore(uploadDb).acceptScans({ eventId, deviceId: randomUUID(), sessionId: SESSION, scans: [scan], nowMs: Date.now() });
-    await expect.poll(() => waitingOnLock('f056-upload'), { timeout: 10_000, interval: 50 }).toBe(1);
-    const ends = Date.now() - ROLE_END_AFTER_ENDS_MS - 60_000;
-    const closing = new DrizzleEntryCloseStore(closeDb).close({ eventId, nowMs: Date.now(), endsAtMs: ends, clockNow: () => Date.now() });
-    // 마감은 회차 잠금(배타)을 기다린다. 잠금이 없으면 바로 마감해 버린다
-    await expect.poll(() => waitingOnLock('f056-close'), { timeout: 10_000, interval: 50 }).toBe(1);
-    expect(await rowsOf('entry_close', eventId)).toBe(0);
-    await release();
-    const res = await uploading;
-    expect(res.flags.map((f) => f.kind)).not.toContain('AFTER_CLOSE');
-    expect((await closing).closed).toBe(true);
+    let closing: Promise<{ closed: boolean }> | undefined;
+    let uploading: ReturnType<DrizzleScannerGateStore['acceptScans']> | undefined;
+    // 단언이 떨어져도 권고 잠금을 풀고 멈춘 트랜잭션이 끝나게 한다(시험 리뷰 RV-16)
+    try {
+      uploading = new DrizzleScannerGateStore(uploadDb).acceptScans({ eventId, deviceId: randomUUID(), sessionId: SESSION, scans: [scan], nowMs: Date.now() });
+      await expect.poll(() => waitingOnLock('f056-upload'), { timeout: 10_000, interval: 50 }).toBe(1);
+      const ends = Date.now() - ROLE_END_AFTER_ENDS_MS - 60_000;
+      closing = new DrizzleEntryCloseStore(closeDb).close({ eventId, nowMs: Date.now(), endsAtMs: ends, clockNow: () => Date.now() });
+      // 마감은 회차 잠금(배타)을 기다린다. 잠금이 없으면 바로 마감해 버린다
+      await expect.poll(() => waitingOnLock('f056-close'), { timeout: 10_000, interval: 50 }).toBe(1);
+      expect(await rowsOf('entry_close', eventId)).toBe(0);
+      await release();
+      const res = await uploading;
+      expect(res.flags.map((f) => f.kind)).not.toContain('AFTER_CLOSE');
+      expect((await closing).closed).toBe(true);
+    } finally {
+      await release();
+      await Promise.allSettled([closing, uploading]);
+    }
     const row = (await database.pool.query<{ received_at: Date; closed_at: Date }>('select s.received_at, c.closed_at from scan_event s join entry_close c on c.event_id = s.event_id where s.event_id = $1 and s.id = $2', [eventId, scan.id])).rows;
     expect(row).toHaveLength(1);
     expect(row[0]!.received_at.getTime()).toBeLessThanOrEqual(row[0]!.closed_at.getTime());
