@@ -23,7 +23,7 @@ let database: Database;
 let store: DrizzleScannerGateStore;
 let n = 0;
 
-const scan = (ticketId: string, atMs: number, result: 'PASS' | 'REJECT', reason?: ScanEventInput['reason']): ScanEventInput => ({
+const scan = (ticketId: string, atMs: number, result: 'PASS' | 'REJECT' | 'CHECK', reason?: ScanEventInput['reason']): ScanEventInput => ({
   id: randomUUID(),
   eventId: EVENT,
   ticketId,
@@ -119,6 +119,11 @@ describe('IR-05 Drizzle: 거부 기록은 통과 IN 중복 판정에 끼지 않�
       expect((await rows([reject.id]))[0], reason).toMatchObject({ result: 'REJECT', reason, flag: 'NONE' });
       expect((await rows([pass.id]))[0], reason).toMatchObject({ result: 'PASS' });
     }
+    // 앱이 실제로 보내는 재입장 확인(CHECK/NO_EXIT_RECORD)은 §7.1의 NO_EXIT 이상 표시를 만든다
+    const check = scan(D, T0 + 30_000, 'CHECK', 'NO_EXIT_RECORD');
+    const rc = await accept([check], { reentryAllowed: true });
+    expect(rc.flags.map((f) => f.kind)).toEqual(['NO_EXIT']);
+    expect((await rows([check.id]))[0]).toMatchObject({ result: 'CHECK', reason: 'NO_EXIT_RECORD', flag: 'NO_EXIT' });
     const second = scan(D, T0 + 40_000, 'PASS');
     expect((await accept([second], { reentryAllowed: true })).flags.map((f) => f.kind)).toEqual(['NO_EXIT']);
     expect((await rows([second.id]))[0]).toMatchObject({ result: 'CHECK', reason: 'NO_EXIT_RECORD' });

@@ -16,7 +16,7 @@ const D = '0190f3a1-7c2e-7a00-8000-0000000f5807';
 let store: MemoryScannerGateStore;
 let n = 0;
 
-const scan = (ticketId: string, atMs: number, result: 'PASS' | 'REJECT', reason?: ScanEventInput['reason']): ScanEventInput => ({
+const scan = (ticketId: string, atMs: number, result: 'PASS' | 'REJECT' | 'CHECK', reason?: ScanEventInput['reason']): ScanEventInput => ({
   id: `0190f3a1-7c2e-7f00-8000-${String(++n).padStart(12, '0')}`,
   eventId: EVENT,
   ticketId,
@@ -90,6 +90,11 @@ describe('IR-05 거부 기록은 통과 IN 중복 판정에 끼지 않는다', (
       expect(store.scans.get(reject.id), reason).toMatchObject({ result: 'REJECT', reason, flag: 'NONE' });
       expect(store.scans.get(pass.id), reason).toMatchObject({ result: 'PASS' });
     }
+    // 앱이 실제로 보내는 재입장 확인(CHECK/NO_EXIT_RECORD)은 §7.1의 NO_EXIT 이상 표시를 만든다
+    const check = scan(D, T0 + 30_000, 'CHECK', 'NO_EXIT_RECORD');
+    const rc = await accept([check], { reentryAllowed: true });
+    expect(rc.flags.map((f) => f.kind)).toEqual(['NO_EXIT']);
+    expect(store.scans.get(check.id)).toMatchObject({ result: 'CHECK', reason: 'NO_EXIT_RECORD', flag: 'NO_EXIT' });
     // 재입장 허용 회차의 PASS 다음 PASS는 지금처럼 확인 필요(퇴장 기록 없음)다
     const second = scan(D, T0 + 40_000, 'PASS');
     const r = await accept([second], { reentryAllowed: true });
