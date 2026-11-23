@@ -330,6 +330,8 @@ describe('GrpcPaymentResultReader와 가짜 payment-svc', () => {
     const srv = await fakePaymentServer(() => ({ error: status }));
     const c = new GrpcPaymentResultReader({ address: srv.address });
     try {
+      // 첫 호출의 채널 연결이 500ms를 넘기면 서버 상태 대신 DEADLINE_EXCEEDED가 와 시험이 흔들린다(CI 실행 45240606103)
+      await c.ready();
       const e = await callErrorOf(c.batchGet([ORDER_ID]));
       expect(e.code).toBe(code);
       expect(srv.requests).toHaveLength(1);

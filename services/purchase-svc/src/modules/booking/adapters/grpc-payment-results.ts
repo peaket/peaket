@@ -134,6 +134,16 @@ export class GrpcPaymentResultReader implements PaymentResultReader {
   close(): void {
     this.#client.close();
   }
+
+  /**
+   * 시험·시작 확인용: gRPC 채널이 준비될 때까지 기다린다(운영 호출 경로는 쓰지 않는다).
+   * 첫 호출의 채널 연결 시간이 500ms 데드라인을 넘겨 INVALID_ARGUMENT 대신 DEADLINE_EXCEEDED가 되는 시험 흔들림을 막는다.
+   */
+  ready(deadlineMs = 5_000): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.#client.waitForReady(Date.now() + deadlineMs, (e) => (e ? reject(e) : resolve()));
+    });
+  }
 }
 
 /**
