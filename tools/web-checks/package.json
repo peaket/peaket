@@ -25,7 +25,8 @@
     "purchase": "playwright test -c playwright.purchase.config.mjs",
     "console-csp": "playwright test -c playwright.console-csp.config.mjs",
     "console-remotes": "playwright test -c playwright.console-remotes.config.mjs",
-    "scanner-enroll": "playwright test -c playwright.scanner-enroll.config.mjs"
+    "scanner-enroll": "playwright test -c playwright.scanner-enroll.config.mjs",
+    "scanner-scan": "playwright test -c playwright.scanner-scan.config.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
