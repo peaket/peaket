@@ -56,6 +56,19 @@ export { HttpPurchaseSaleOpen, MemorySaleOpen, SALE_OPEN_TIMEOUT_MS, UnwiredSale
 export { SALE_OPEN, type SaleOpen, type SaleOpenInput, type SaleOpenResult } from './domain/sale-open-port.js';
 export { SALE_CONFIG_METRICS, SaleConfigMetrics, type SaleOpenMetricResult } from './application/sale-config-metrics.js';
 export { OpsSaleReviews, RequestSaleReview } from './application/request-sale-review.js';
+export { assemblePayoutRegistration, HttpPayoutRegistration, PAYOUT_REGISTRATION_TIMEOUT_MS, UnavailablePayoutRegistration } from './adapters/http-payout-registration.js';
+export {
+  missingPayoutConditions,
+  PAYOUT_REGISTRATION,
+  PAYOUT_REGISTRATION_OFF,
+  PAYOUT_REGISTRATION_UNWIRED,
+  type PayoutRegistrationCompany,
+  type PayoutRegistrationInput,
+  type PayoutRegistrationMissing,
+  type PayoutRegistrationPort,
+  type PayoutRegistrationView,
+  type PayoutTossSellerStatus,
+} from './domain/payout-registration-port.js';
 export { NoopSaleConfigFacts } from './adapters/noop-sale-config-facts.js';
 export { DrizzleSaleConfigReader, DrizzleSaleConfigStore } from './adapters/db/drizzle-sale-config-store.js';
 export { DrizzleSaleConfigMaintenanceStore } from './adapters/db/drizzle-sale-config-maintenance-store.js';

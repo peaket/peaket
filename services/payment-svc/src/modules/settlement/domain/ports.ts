@@ -7,6 +7,13 @@ import type {
   KycRecord,
   PaymentFact,
   PayoutAccountRecord,
+  PayoutAccountChangeRecord,
+  PortoneLedgerSyncName,
+  PortoneLedgerSyncRecord,
+  PortonePartnerRecord,
+  PortoneTransferRecord,
+  SettlementAlertRequestRecord,
+  OpsRefusal,
   PayoutRetryAuditRecord,
   PayoutStatus,
   PgBalanceReconciliationRecord,
@@ -149,8 +156,21 @@ export interface PayoutWrite {
   payoutUpdates?: readonly {
     payoutId: string;
     from?: readonly PayoutStatus[];
-    set: { pgPayoutId?: string | null; status?: PayoutStatus; errorCode?: string | null; failureClass?: PayoutRecord['failureClass']; payoutDate?: string; updatedAt: Date };
+    set: {
+      pgPayoutId?: string | null;
+      status?: PayoutStatus;
+      errorCode?: string | null;
+      failureClass?: PayoutRecord['failureClass'];
+      payoutDate?: string;
+      /** 포트원 출금 대사 결과(F-07-7 I-13) */
+      pgTransferId?: string | null;
+      transferCheck?: PayoutRecord['transferCheck'];
+      transferCheckedAt?: Date | null;
+      updatedAt: Date;
+    };
   }[];
+  /** 새 지급 건(포트원 수기 정산건 실행, F-07-7 I-07). 같은 정산서·순번이 있으면 쓰기 전체가 실패한다 */
+  insertPayouts?: readonly PayoutRecord[];
   retries?: readonly PayoutRetrySpec[];
   transitions?: readonly StatementTransition[];
   /** 묶음 갱신. expectStatus가 있으면 지금 상태가 그 안일 때만이고 0행이면 쓰기 전체가 실패한다 */
@@ -161,7 +181,23 @@ export interface PayoutWrite {
   };
   /** 같은 사건 키가 이미 있으면 넣지 않는다 */
   caseRequests?: readonly SettlementCaseRequestRecord[];
+  // ---- F-07-7(ADR-0370 결정 5·7·8): 같은 트랜잭션에 넣을 행 ----
+  /** 운영 경보 요청. 같은 사건 키가 이미 있으면 넣지 않는다 */
+  alertRequests?: readonly SettlementAlertRequestRecord[];
+  /** 포트원 이체 한 줄. 이미 있으면(겹친 대사) 아무것도 쓰지 않고 ok=false */
+  portoneTransfer?: PortoneTransferRecord;
+  /** 포트원 대사 진행 행(넣거나 바꿈) */
+  ledgerSync?: PortoneLedgerSyncRecord;
+  /** 포트원 파트너 행(넣거나 바꿈) */
+  portonePartner?: PortonePartnerRecord;
+  /** 정산 계좌 판 조건부 갱신(expectedVersion 0은 행이 없을 때만 넣음). 판이 다르면 쓰기 전체가 실패한다 */
+  payoutAccount?: { record: PayoutAccountRecord; expectedVersion: number };
+  /** 정산 계좌 변경 시도 행(덧붙이기). 같은 재인증 jti가 있으면 쓰기 전체가 실패한다 */
+  payoutAccountChange?: PayoutAccountChangeRecord;
 }
+
+/** ops 받기 거절을 세는 대상(행 종류) */
+export type OpsIntakeRow = 'case-request' | 'alert-request' | 'payout-account-change' | 'dispute';
 
 /** 쓰기 결과. ok=false면 아무것도 쓰지 않았다. retried는 만든 새 순번 지급 건 */
 export interface PayoutWriteResult {
@@ -247,6 +283,12 @@ export interface SettlementApprovalLog {
   tossJweInvalid?(o: { pgStore: PgStore; at: Date }): void;
   /** 토스 지급의 자동 일(전송·09시 묶음·미완료 점검·잔액 대사·셀러 조회)을 하지 못했다 */
   payoutJobFailed?(o: { job: string; batchId?: string; pgStore?: PgStore; reason: string; at: Date }): void;
+  /** 정산 계좌 변경의 재인증 거부(사건 payout_account_reauth_rejected, 파트너·사유 종류만, F-07-7 ASVS 16.3.3) */
+  payoutAccountReauthRejected?(o: { promoterId: string; reason: string; at: Date }): void;
+  /** 포트원 사후 대사 tick 실패(사건 portone_reconciliation_failed, 이름·까닭 종류만) */
+  portoneReconciliationFailed?(o: { name: string; kind: string; at: Date }): void;
+  /** ops 받기 거절 3번째의 영구 실패(사건 ops_intake_refused, 개인정보 없음) */
+  opsIntakeRefused?(o: { target: string; eventKey: string; kind: string; refusal: string; count: number; at: Date }): void;
 }
 
 /** 정산 지급 지표(ADR-0369 결정 12, settlement §11) */
@@ -256,7 +298,20 @@ export interface SettlementSignals {
   sellerKycRequired(pg: Pg, count: number): void;
   pgBalanceDiff(pg: Pg, pgStore: PgStore, diff: number): void;
   payoutOverdue(pg: Pg): void;
+  // ---- F-07-7(포트원 지급대행·계좌 변경·사후 대사·ops 받기 거절). 고정된 F-07-6 가짜를 깨지 않게 선택 메서드다 ----
+  payoutAccountChange?(result: 'ACCEPTED' | 'HOLDER_MISMATCH' | 'AGENCY_FAILED'): void;
+  agencySyncPending?(count: number): void;
+  portoneWithdrawalUnmatched?(): void;
+  portonePartnerAccountMismatch?(count: number): void;
+  portoneBalanceDiff?(diff: number): void;
+  portoneLedgerSyncAge?(sync: 'WITHDRAWAL' | 'PARTNER_ACCOUNT', seconds: number): void;
+  portoneExecutionPending?(count: number): void;
+  opsIntakeRefused?(target: OpsIntakeTarget): void;
+  opsIntakeFailed?(target: OpsIntakeTarget, count: number): void;
 }
+
+/** ops 받기 대상 셋(지표 이름표 target) */
+export type OpsIntakeTarget = 'cs-case' | 'ops-alert' | 'audit-record';
 
 /** ops-svc 승인 업무 SETTLEMENT_ADJUSTMENT 한 건에서 payment가 대조할 사실(ADR-0368 결정 8). 근거 메모·계좌는 싣지 않는다 */
 export interface VerifiedAdjustmentApproval {
@@ -280,8 +335,79 @@ export interface AdjustmentApprovalVerifier {
 /** ops-svc CS 처리함 '정산 이의' 건 열기(ADR-0368 결정 5). 열지 못하면 던진다(이의는 그대로 남고 정산 일꾼이 다시 보낸다) */
 export interface SettlementCaseNotice {
   openDispute(o: { disputeId: string; statementId: string; createdAt: Date }): Promise<void>;
-  /** 지급 쪽 다섯 종류(SELLER_KYC_REQUIRED·PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED·PG_BALANCE_MISMATCH, ADR-0369 결정 10). 받지 않으면 던진다 */
-  openCase(o: { eventKey: string; kind: string; sourceId: string; createdAt: Date }): Promise<void>;
+  /**
+   * 지급 쪽 종류(SELLER_KYC_REQUIRED·PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED·PG_BALANCE_MISMATCH, ADR-0369 결정 10, F-07-7의 PORTONE_PAYOUT_EXECUTION·PORTONE_LEDGER_MISMATCH).
+   * 받지 않으면 던진다. detail은 선택 칸(1~2,000자, F-07-7 계획 §5.1 (타) 결정 2)이고 있을 때만 ops 본문에 싣는다.
+   * ops가 거절하면(202 accepted:false·400·422) OpsIntakeRefused, 일시 실패면 SettlementProblem 503을 던진다
+   */
+  openCase(o: { eventKey: string; kind: string; sourceId: string; createdAt: Date; detail?: string }): Promise<void>;
+}
+
+/** 포트원 플랫폼 파트너의 사업자 정보(F-07-6 registerTossSellers의 company와 같은 칸) */
+export interface PayoutCompany {
+  name: string;
+  representativeName: string;
+  businessRegistrationNumber: string;
+  email: string;
+  phone: string;
+}
+
+/** 지급 계좌(결제사 요청에만 넘긴다. 저장·로그·오류 메시지에 넣지 않는다). bankCode는 PEAKET 두 자리 은행 코드 */
+export interface PayoutAccountInput {
+  bankCode: string;
+  accountNumber: string;
+  holderName: string;
+}
+
+/**
+ * 포트원 플랫폼 API 전송(F-07-7 계획 §5.1 (나), ADR-0370 결정 1·7·8).
+ * 응답 없음·5xx·모양 틀림은 PortoneTransportError(kind NO_RESPONSE·REJECTED·SHAPE)를 던진다. 오류 메시지·스팬에 계좌번호가 없다
+ */
+export interface PortonePlatformTransport {
+  /** 없는 계좌는 null */
+  lookupHolder(input: { bankCode: string; accountNumber: string }): Promise<{ holderName: string } | null>;
+  registerPartner(input: { partnerId: string; contractId: string; company: PayoutCompany; account: PayoutAccountInput }): Promise<{ partnerId: string }>;
+  updatePartnerAccount(partnerId: string, account: PayoutAccountInput): Promise<void>;
+  getPartner(partnerId: string): Promise<{ partnerId: string; bankCode: string; accountLast4: string; holderName: string; scheduled: { bankCode: string; accountLast4: string; holderName: string } | null }>;
+  /** transferId = 정산서 ID. 같은 아이디가 있으면 조회해 금액·정산일이 같을 때 created:false, 다르면 PortoneTransportError(REJECTED) */
+  createManualTransfer(input: { transferId: string; partnerId: string; amount: number; settlementDate: string }): Promise<{ transferId: string; created: boolean }>;
+  getManualTransfer(transferId: string): Promise<{ transferId: string; amount: number; settlementDate: string; status: string } | null>;
+  cancelManualTransfer(transferId: string): Promise<void>;
+  listPayouts(input: { bulkPayoutId: string }): Promise<readonly PortonePayoutItem[]>;
+  listAccountTransfers(input: { from: Date; to: Date }): Promise<readonly PortoneAccountTransfer[]>;
+  listPartnerSettlements(settlementDate: string): Promise<readonly { partnerId: string; transferId: string; amount: number }[]>;
+}
+
+export interface PortonePayoutItem {
+  payoutId: string;
+  transferId: string;
+  status: 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'STOPPED' | 'CANCELLED';
+  completedAt: Date | null;
+  failureCode: string | null;
+}
+
+/** 이체 원장 한 줄. bankCode는 PEAKET 두 자리 은행 코드(어댑터가 바꿈), 받는 계좌는 끝 4자리만 */
+export interface PortoneAccountTransfer {
+  transferId: string;
+  type: 'WITHDRAWAL' | 'DEPOSIT';
+  withdrawalType: string | null;
+  payoutId: string | null;
+  amount: number;
+  bankCode: string | null;
+  accountLast4: string | null;
+  holderName: string | null;
+  balance: number | null;
+  transferredAt: Date;
+}
+
+/** ops 감사 받기(POST /internal/v1/ops/audit-records, recordType PAYOUT_ACCOUNT_CHANGED). 거절은 OpsIntakeRefused, 일시 실패는 SettlementProblem 503 */
+export interface PayoutAccountAuditSink {
+  send(o: { eventKey: string; recordId: string; payload: Record<string, unknown>; occurredAt: Date }): Promise<void>;
+}
+
+/** ops 운영 경보 받기(POST /internal/v1/ops-alerts). 거절은 OpsIntakeRefused, 일시 실패는 SettlementProblem 503 */
+export interface SettlementAlertSink {
+  send(o: { eventKey: string; kind: string; severity: 'SEV2' | 'SEV3'; sourceId: string; reason: string; createdAt: Date }): Promise<void>;
 }
 
 export interface SettlementStore {
@@ -414,6 +540,37 @@ export interface SettlementStore {
   sumUnfinishedTossPayouts(pgStore: PgStore, excludeBatchId?: string): Promise<number>;
   /** 묶음 전송 잡기: next_submit_at이 읽은 값 그대로일 때만 next로 바꾼다. 이겼으면 true */
   claimBatchSubmit(batchId: string, expectedNextSubmitAt: Date | null, next: Date | null): Promise<boolean>;
+  // ---- F-07-7 포트원 지급대행·계좌 변경·사후 대사(payment 0030·0032, ADR-0370) ----
+  findPortonePartner(promoterId: string): Promise<PortonePartnerRecord | undefined>;
+  savePortonePartner(record: PortonePartnerRecord): Promise<void>;
+  listPortonePartners(limit: number): Promise<PortonePartnerRecord[]>;
+  /** 정산 계좌 변경 시도 행 하나(예금주 불일치처럼 다른 쓰기가 없을 때). 같은 jti면 false */
+  insertPayoutAccountChange(record: PayoutAccountChangeRecord): Promise<boolean>;
+  /** ops 감사로 보내지 않았고 영구 실패도 아닌 변경 행(오래된 차례) */
+  listUnsentPayoutAccountChanges(limit: number): Promise<PayoutAccountChangeRecord[]>;
+  markPayoutAccountChangeSent(id: string, at: Date): Promise<void>;
+  /** 수정 대기(agency_sync_pending)인 정산 계좌 수(지표) */
+  countAgencySyncPending(): Promise<number>;
+  findLedgerSync(name: PortoneLedgerSyncName): Promise<PortoneLedgerSyncRecord | undefined>;
+  saveLedgerSync(record: PortoneLedgerSyncRecord): Promise<void>;
+  /** 같은 사건 키는 넣지 않는다. 새로 넣은 수 */
+  insertAlertRequests(records: readonly SettlementAlertRequestRecord[]): Promise<number>;
+  /** 보내지 않았고 영구 실패도 아닌 경보 요청(오래된 차례) */
+  listUnsentAlertRequests(limit: number): Promise<SettlementAlertRequestRecord[]>;
+  markAlertRequestSent(eventKey: string, at: Date): Promise<void>;
+  findAlertRequest(eventKey: string): Promise<SettlementAlertRequestRecord | undefined>;
+  findCaseRequest(eventKey: string): Promise<SettlementCaseRequestRecord | undefined>;
+  /**
+   * ops 받기 거절 한 번을 센다(F-07-7 계획 §5.1 (파) (마)). 영구 실패가 아닌 행만, 읽은 거절 수 그대로일 때만 올려 겹친 두 tick이 두 번 세지 않는다.
+   * 거절 수가 limit에 닿으면 failed_at·last_refusal을 채운다. 행이 없거나 이미 영구 실패면 undefined
+   */
+  markRefused(row: OpsIntakeRow, key: string, refusal: OpsRefusal, at: Date, limit: number): Promise<{ refusedCount: number; failed: boolean } | undefined>;
+  /** 영구 실패로 남은 행 수(지표 settlement_ops_intake_failed) */
+  countIntakeFailed(row: OpsIntakeRow): Promise<number>;
+  /** 출금 대사 대상: 포트원 묶음의 지급 건 가운데 COMPLETED·IN_PROGRESS이고 transfer_check가 빈 것 */
+  listPortonePayoutsForTransferCheck(limit: number): Promise<PayoutRecord[]>;
+  /** 그 파트너·결제사의 정산서 가운데 그 상태인 것 */
+  listStatementsOfPromoter(promoterId: string, pg: Pg, statuses: readonly StatementStatus[]): Promise<StatementRecord[]>;
   /** next_submit_at이 지난 토스 묶음(APPROVED·SUBMITTED·PARTIAL_FAILED) */
   listDueSubmitBatches(now: Date, limit: number): Promise<PayoutBatchRecord[]>;
   /** 지급일 다음 은행 영업일 12:00 KST가 지난 끝나지 않은 토스 지급 건(결제사 지급 ID가 있는 것) */
@@ -486,8 +643,11 @@ export interface TossSellerRegistration {
 export interface TossPayoutTransport {
   requestPayouts(pgStore: PgStore, input: { payoutDate: string; idempotencyKey: string; items: readonly { refPayoutId: string; amount: number; tossSellerId: string }[] }): Promise<TossSendResult>;
   getPayout(pgStore: PgStore, pgPayoutId: string): Promise<{ pgPayoutId: string; status: PayoutStatus; errorCode?: string }>;
-  cancelPayout(pgStore: PgStore, pgPayoutId: string): Promise<{ pgPayoutId: string; status: PayoutStatus }>;
+  /** 예약지급 취소. 결과 본문은 쓰지 않는다(던지지 않으면 취소됨, F-07-7 I-06) */
+  cancelPayout(pgStore: PgStore, pgPayoutId: string): Promise<{ pgPayoutId: string; status: PayoutStatus } | void>;
   registerSeller(pgStore: PgStore, body: TossSellerRegistration): Promise<{ tossSellerId: string; status: TossSellerStatus }>;
+  /** 셀러 수정(POST /v2/sellers/{id}, JWE, F-07-7 계획 §5.1 (타) 결정 1). 선택 메서드: 없으면 계좌 변경은 503 payout-gateway-unavailable */
+  updateSeller?(pgStore: PgStore, tossSellerId: string, body: TossSellerRegistration): Promise<{ tossSellerId: string; status: TossSellerStatus }>;
   getSeller(pgStore: PgStore, tossSellerId: string): Promise<{ tossSellerId: string; status: TossSellerStatus }>;
   balance(pgStore: PgStore): Promise<{ availableAmount: number; pendingAmount: number }>;
   /** 그 기간(KST 날짜, 양끝 포함)의 정산 조회 수수료 합 */

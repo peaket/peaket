@@ -1,5 +1,5 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-partner.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
-# openapi info.version 1.0.0-draft · 계약 sha256 b69b59fa625c55095d1f14008fe94b6b26c35f2ccb5ef743ca3c1a899042a02e
+# openapi info.version 1.0.0-draft · 계약 sha256 73fd9e3ce9003e7ed04e40ec67c12ef9343bdd7c8166e0ca8fab8ff8f84e0d27
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -551,6 +551,10 @@ spec:
             type: RegularExpression
             value: /v1/partner/events/[^/]+/settlements
           method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/partner/payout-account
+          method: GET
         - path:
             type: Exact
             value: /v1/partner/payout-account

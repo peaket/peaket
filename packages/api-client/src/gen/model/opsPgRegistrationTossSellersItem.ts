@@ -9,16 +9,11 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { OpsPgRegistrationTossSellersItemPgStore } from './opsPgRegistrationTossSellersItemPgStore';
+import type { OpsPgRegistrationTossSellersItemStatus } from './opsPgRegistrationTossSellersItemStatus';
 
-/**
- * @nullable
- */
-export type OpsPromoterDetailPgRegistrationTossSellersItemStatus = typeof OpsPromoterDetailPgRegistrationTossSellersItemStatus[keyof typeof OpsPromoterDetailPgRegistrationTossSellersItemStatus] | null;
-
-
-export const OpsPromoterDetailPgRegistrationTossSellersItemStatus = {
-  APPROVAL_REQUIRED: 'APPROVAL_REQUIRED',
-  PARTIALLY_APPROVED: 'PARTIALLY_APPROVED',
-  KYC_REQUIRED: 'KYC_REQUIRED',
-  APPROVED: 'APPROVED',
-} as const;
+export type OpsPgRegistrationTossSellersItem = {
+  pgStore?: OpsPgRegistrationTossSellersItemPgStore;
+  /** @nullable */
+  status?: OpsPgRegistrationTossSellersItemStatus;
+};

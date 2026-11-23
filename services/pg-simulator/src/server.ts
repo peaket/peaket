@@ -1,10 +1,12 @@
-// 시뮬레이터 HTTP 경로. 토스페이먼츠 모양 API(승인·조회·주문 ID 조회·취소), 포트원 V2 모양 API(`/payments/...`, BUILD_ORDER HOT-140)와 시험용 제어 API(/sim/*).
+// 시뮬레이터 HTTP 경로. 토스페이먼츠 모양 API(승인·조회·주문 ID 조회·취소), 포트원 V2 모양 API(`/payments/...`, BUILD_ORDER HOT-140),
+// 포트원 플랫폼(파트너 정산) 모양 API(`/platform/...`, F-07-7 I-08 (b), portone-platform.ts)와 시험용 제어 API(/sim/*).
 // 토스 모양·제어 API는 시험 키 기본 인증(`Authorization: Basic base64(키 + ':')`), 포트원 모양은 `Authorization: PortOne 키`가 있어야 한다(ASVS v5.0.0-8.2.1). 요청 로그는 남기지 않는다(16.2.5).
 import { timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { OPS, PgSimulatorEngine, PORTONE_IDEMPOTENCY_RETENTION_MS, SIM_PAY_METHODS, type Fault, type SeedTransaction, type SimInstrument, type SimResponse } from './engine.js';
 import { parseLatencySpec, type LatencySpec } from './latency.js';
 import { defaultPortoneWebhookSecret, parsePortoneIdempotencyKey, portoneAuthenticateResponse, type PortoneChannelTable, portoneCancelResponse, portoneConfirmResponse, portoneQueryResponse, PORTONE_STORE_ID, portoneTransactionView, portoneWebhookEvents } from './portone-shape.js';
+import { PLATFORM_TEMPLATES, PortonePlatformSim, type PlatformAccountTransfer, type PlatformFaultMode, type PlatformPartnerSettlement, type PlatformPayout, type PlatformTemplate } from './portone-platform.js';
 import type { SimClock } from './time.js';
 
 export interface SimulatorAppOptions {
@@ -64,7 +66,8 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
   const portoneWebhookSecret = o.portoneWebhookSecret ?? defaultPortoneWebhookSecret(o.secretKey);
   let portoneChannels: PortoneChannelTable = new Map(Object.entries(o.portoneChannels ?? {}));
   const app = Fastify({ logger: false });
-  const isPortone = (req: FastifyRequest) => req.url.startsWith('/payments/') || req.url.startsWith('/payments-by-cursor');
+  const platform = new PortonePlatformSim();
+  const isPortone = (req: FastifyRequest) => req.url.startsWith('/payments/') || req.url.startsWith('/payments-by-cursor') || PortonePlatformSim.owns(req.url.split('?')[0] ?? '');
 
   app.addHook('onRequest', async (req, reply) => {
     const got = Buffer.from(req.headers.authorization ?? '');
@@ -227,7 +230,201 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
     },
   );
 
+  // ---- 포트원 플랫폼(파트너 정산) 모양 API(F-07-7 I-08 (b), ADR-0370 결정 1·7·8). 계좌번호를 남기지 않는다 ----
+  // 플랫폼 경로는 본문 없는 JSON 요청(DELETE 정산건 취소 등)을 빈 본문으로 받는다. 다른 경로는 Fastify 기본대로 빈 JSON 본문이 400이다
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+    const text = typeof body === 'string' ? body : body.toString('utf8');
+    if (text === '' && PortonePlatformSim.owns(req.url.split('?')[0] ?? '')) return done(null, undefined);
+    try {
+      done(null, JSON.parse(text));
+    } catch {
+      const e = new Error('본문이 JSON이 아닙니다') as Error & { statusCode: number };
+      e.statusCode = 400;
+      done(e, undefined);
+    }
+  });
+  app.route<{ Querystring: Record<string, string | undefined>; Body: unknown }>({
+    method: ['GET', 'POST', 'PATCH', 'DELETE'],
+    url: '/platform/*',
+    handler: async (req, reply) => {
+      const pathname = req.url.split('?')[0] ?? '';
+      const r = platform.handle(req.method, pathname, req.query ?? {}, req.body ?? null);
+      if ('drop' in r) {
+        reply.hijack();
+        req.raw.socket?.destroy();
+        return;
+      }
+      return reply.code(r.status).send(r.body);
+    },
+  });
+
   // ---- 시험용 제어 API ----
+  const PLATFORM_ACCOUNT = {
+    type: 'object',
+    required: ['bank', 'number', 'holder'],
+    additionalProperties: false,
+    properties: { bank: { type: 'string', minLength: 1, maxLength: 40 }, number: { type: 'string', pattern: '^[0-9]{1,20}$' }, holder: { type: 'string', minLength: 1, maxLength: 100 } },
+  } as const;
+  const NULLABLE_TEXT = { type: ['string', 'null'], maxLength: 200 } as const;
+  // 포트원 플랫폼 예금주 조회가 돌려줄 이름. bank는 플랫폼 경로의 {bank}와 같은 값(포트원 은행 열거값)이고, 없으면 bankCode를 그대로 쓴다
+  app.post<{ Body: { bank?: string; bankCode?: string; accountNumber: string; holderName: string } }>(
+    '/sim/portone/bank-account-holders',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['accountNumber', 'holderName'],
+          additionalProperties: false,
+          properties: {
+            bank: { type: 'string', minLength: 1, maxLength: 40 },
+            bankCode: { type: 'string', minLength: 1, maxLength: 40 },
+            accountNumber: { type: 'string', pattern: '^[0-9]{1,20}$' },
+            holderName: { type: 'string', minLength: 1, maxLength: 100 },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      const bank = req.body.bank ?? req.body.bankCode;
+      if (bank === undefined) return reply.code(400).send({ code: 'INVALID_REQUEST', message: '은행이 없습니다' });
+      platform.holder(bank, req.body.accountNumber, req.body.holderName);
+      return reply.code(204).send();
+    },
+  );
+  // 포트원 지급 내역(GET /platform/payouts가 돌려줌). 같은 id는 바꾼다
+  app.post<{ Body: { items: PlatformPayout[] } }>(
+    '/sim/portone/payouts',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['items'],
+          additionalProperties: false,
+          properties: {
+            items: {
+              type: 'array',
+              maxItems: 10_000,
+              items: {
+                type: 'object',
+                required: ['id', 'bulkPayoutId', 'transferId', 'status', 'completedAt', 'failureCode'],
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'string', minLength: 1, maxLength: 200 },
+                  bulkPayoutId: { type: 'string', minLength: 1, maxLength: 200 },
+                  transferId: { type: 'string', minLength: 1, maxLength: 200 },
+                  status: { type: 'string', enum: ['PENDING', 'SUCCEEDED', 'FAILED', 'STOPPED', 'CANCELLED'] },
+                  completedAt: NULLABLE_TEXT,
+                  failureCode: NULLABLE_TEXT,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      platform.addPayouts(req.body.items);
+      return reply.code(204).send();
+    },
+  );
+  // 지급대행 계좌의 이체 원장(GET /platform/account-transfers가 돌려줌). 같은 id는 한 번만
+  app.post<{ Body: { items: PlatformAccountTransfer[] } }>(
+    '/sim/portone/account-transfers',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['items'],
+          additionalProperties: false,
+          properties: {
+            items: {
+              type: 'array',
+              maxItems: 10_000,
+              items: {
+                type: 'object',
+                required: ['id', 'type', 'withdrawalType', 'payoutId', 'amount', 'bank', 'accountNumber', 'holderName', 'balance', 'tradedAt'],
+                additionalProperties: false,
+                properties: {
+                  id: { type: 'string', minLength: 1, maxLength: 200 },
+                  type: { type: 'string', enum: ['WITHDRAWAL', 'DEPOSIT'] },
+                  withdrawalType: NULLABLE_TEXT,
+                  payoutId: NULLABLE_TEXT,
+                  amount: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+                  bank: { type: ['string', 'null'], maxLength: 40 },
+                  accountNumber: { type: ['string', 'null'], pattern: '^[0-9]{1,20}$' },
+                  holderName: { type: ['string', 'null'], maxLength: 100 },
+                  balance: { type: ['integer', 'null'] },
+                  tradedAt: { type: 'string', minLength: 1, maxLength: 40 },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      platform.addAccountTransfers(req.body.items);
+      return reply.code(204).send();
+    },
+  );
+  // 파트너의 예약된 계좌 변경(GET /platform/partners/{id}/schedule이 돌려줌). account null이면 지운다. 없는 파트너는 404
+  app.post<{ Body: { partnerId: string; account: { bank: string; number: string; holder: string } | null } }>(
+    '/sim/portone/partner-schedules',
+    {
+      schema: {
+        body: { type: 'object', required: ['partnerId', 'account'], additionalProperties: false, properties: { partnerId: { type: 'string', minLength: 1, maxLength: 200 }, account: { anyOf: [PLATFORM_ACCOUNT, { type: 'null' }] } } },
+      },
+    },
+    async (req, reply) => reply.code(platform.schedule(req.body.partnerId, req.body.account) ? 204 : 404).send(),
+  );
+  // 정산일의 파트너 정산 내역(GET /platform/partner-settlements가 돌려줌)
+  app.post<{ Body: { settlementDate: string; items: PlatformPartnerSettlement[] } }>(
+    '/sim/portone/partner-settlements',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['settlementDate', 'items'],
+          additionalProperties: false,
+          properties: {
+            settlementDate: { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' },
+            items: {
+              type: 'array',
+              maxItems: 10_000,
+              items: {
+                type: 'object',
+                required: ['partnerId', 'transferId', 'settlementAmount'],
+                additionalProperties: false,
+                properties: { partnerId: { type: 'string', minLength: 1, maxLength: 200 }, transferId: { type: 'string', minLength: 1, maxLength: 200 }, settlementAmount: { type: 'integer' } },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      platform.setPartnerSettlements(req.body.settlementDate, req.body.items);
+      return reply.code(204).send();
+    },
+  );
+  // 플랫폼 경로 장애(path는 'GET /platform/payouts' 같은 경로 틀, times가 없으면 늘). /sim/reset이 지운다
+  app.post<{ Body: { path: PlatformTemplate; mode: PlatformFaultMode; times?: number } }>(
+    '/sim/portone/faults',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['path', 'mode'],
+          additionalProperties: false,
+          properties: { path: { type: 'string', enum: PLATFORM_TEMPLATES }, mode: { type: 'string', enum: ['timeout', '5xx', 'shape'] }, times: { type: 'integer', minimum: 1, maximum: 1_000 } },
+        },
+      },
+    },
+    async (req, reply) => {
+      platform.fault(req.body.path, req.body.mode, req.body.times);
+      return reply.code(204).send();
+    },
+  );
   app.post<{ Body: { items: SeedTransaction[] } }>(
     '/sim/transactions/seed',
     {
@@ -321,6 +518,7 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
   );
   app.post('/sim/reset', async (_req, reply) => {
     engine.reset();
+    platform.reset();
     return reply.code(204).send();
   });
 

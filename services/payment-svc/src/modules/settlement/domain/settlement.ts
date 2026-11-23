@@ -15,7 +15,13 @@ export const TOSS_SELLER_STATUSES: readonly TossSellerStatus[] = ['PENDING', 'AP
 /** 지급 건 FAILED의 갈래(settlement §12) */
 export type PayoutFailureClass = 'ACCOUNT' | 'TRANSIENT' | 'LIMIT_KYC' | 'UNKNOWN';
 /** 지급 쪽 CS 건 요청 종류(payment 0029 settlement_case_request, ADR-0369 결정 10) */
-export type SettlementCaseKind = 'PAYOUT_ERROR' | 'PAYOUT_FAILED' | 'PAYOUT_DELAYED' | 'SELLER_KYC_REQUIRED' | 'PG_BALANCE_MISMATCH';
+export type SettlementCaseKind = 'PAYOUT_ERROR' | 'PAYOUT_FAILED' | 'PAYOUT_DELAYED' | 'SELLER_KYC_REQUIRED' | 'PG_BALANCE_MISMATCH' | 'PORTONE_PAYOUT_EXECUTION' | 'PORTONE_LEDGER_MISMATCH';
+/** ops 받기의 거절 까닭(F-07-7 계획 §5.1 (파) (마)). 일시 실패(연결·401·429·5xx)는 세지 않는다 */
+export type OpsRefusal = 'NOT_ACCEPTED' | 'HTTP_400' | 'HTTP_422';
+/** 지급대행 결제사 셋(ADR-0370 결정 1) */
+export type PayoutAgency = 'PORTONE' | 'TOSS_STANDARD' | 'TOSS_ESCROW';
+export type PayoutAgencyOutcome = 'REGISTERED' | 'UPDATED' | 'SKIPPED' | 'FAILED';
+export type PayoutAgencyResults = Record<PayoutAgency, PayoutAgencyOutcome>;
 export type GuaranteeKind = 'DEPOSIT' | 'PERFORMANCE_BOND';
 export type PayoutBatchStatus = 'PREPARED' | 'PENDING_APPROVAL' | 'APPROVED' | 'SUBMITTED' | 'COMPLETED' | 'PARTIAL_FAILED';
 export type PayoutStatus = 'REQUESTED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'CANCELED';
@@ -106,6 +112,79 @@ export interface PayoutAccountRecord {
   changedAt: Date;
   holdUntil: Date;
   holderVerified: boolean;
+  /** 결제사 수정 대기(payment 0030, ADR-0370 결정 5). 없으면 false로 읽는다(옛 행·고정된 F-07-6 시험) */
+  agencySyncPending?: boolean;
+}
+
+/** 정산 계좌 변경 시도 한 번(payment 0030 payout_account_change, 덧붙이기만). 계좌번호·예금주명은 없다 */
+export interface PayoutAccountChangeRecord {
+  id: string;
+  promoterId: string;
+  actorAccountId: string;
+  reauthJti: string;
+  result: 'ACCEPTED' | 'HOLDER_MISMATCH' | 'AGENCY_FAILED';
+  bankCode: string;
+  accountLast4: string;
+  /** ACCEPTED·AGENCY_FAILED만 */
+  holdUntil: Date | null;
+  agencyResults: PayoutAgencyResults;
+  /** 재인증 토큰이 거친 요소(감사 본문 reauthFactors) */
+  reauthFactors?: readonly string[];
+  createdAt: Date;
+  auditSentAt: Date | null;
+  auditRefusedCount: number;
+  auditFailedAt: Date | null;
+}
+
+/** 포트원 파트너 등록(payment 0030 portone_partner). 계좌번호는 없다 */
+export interface PortonePartnerRecord {
+  promoterId: string;
+  portonePartnerId: string;
+  contractId: string;
+  registeredAt: Date;
+  accountUpdatedAt: Date;
+  lastAccountCheck: 'MATCHED' | 'MISMATCH' | null;
+  lastAccountCheckedAt: Date | null;
+  updatedAt: Date;
+}
+
+/** 포트원 이체 원장의 출금 하나(payment 0032 portone_transfer). 계좌번호 전체·예금주명은 없다 */
+export interface PortoneTransferRecord {
+  transferId: string;
+  withdrawalType: string | null;
+  payoutId: string | null;
+  amount: number;
+  bankCode: string | null;
+  accountLast4: string | null;
+  holderMatched: boolean | null;
+  checkResult: 'MATCHED' | 'MISMATCH' | 'UNLINKED';
+  transferredAt: Date;
+  checkedAt: Date;
+}
+
+export type PortoneLedgerSyncName = 'WITHDRAWAL' | 'PARTNER_ACCOUNT';
+
+/** 포트원 사후 대사 진행(payment 0032 portone_ledger_sync) */
+export interface PortoneLedgerSyncRecord {
+  name: PortoneLedgerSyncName;
+  lastSuccessAt: Date | null;
+  readThrough: Date | null;
+  /** 'YYYY-MM-DD'(KST) */
+  haltedOn: string | null;
+  updatedAt: Date;
+}
+
+/** 운영 경보 요청(payment 0032 settlement_alert_request). 원인 쓰기와 같은 트랜잭션에 넣고 정산 일꾼이 보낸 뒤 requestedAt을 채운다 */
+export interface SettlementAlertRequestRecord {
+  eventKey: string;
+  kind: string;
+  severity: 'SEV2' | 'SEV3';
+  sourceId: string;
+  createdAt: Date;
+  requestedAt: Date | null;
+  refusedCount: number;
+  failedAt: Date | null;
+  lastRefusal: OpsRefusal | null;
 }
 
 export interface StatementRecord {
@@ -163,6 +242,9 @@ export interface DisputeRecord {
   resolutionNote?: string | null;
   /** ops-svc CS 처리함 '정산 이의' 건을 연 시각(payment 0027). 비었으면 정산 일꾼이 다시 보낸다 */
   caseRequestedAt?: Date | null;
+  /** ops 거절 횟수·영구 실패 시각(payment 0030, F-07-7 계획 §5.1 (파) (마)) */
+  caseRefusedCount?: number;
+  caseFailedAt?: Date | null;
 }
 
 /** 정산서 상태 전이 감사(A1V-12). 돈이 나가는 전이의 사유·행위자·이전 상태를 남긴다. */
@@ -243,6 +325,11 @@ export interface SettlementCaseRequestRecord {
   sourceId: string;
   createdAt: Date;
   requestedAt: Date | null;
+  /** 건 본문 글(선택, 1~2,000자, payment 0030). 다시 보낼 때 같은 글을 싣는다 */
+  detail?: string | null;
+  refusedCount?: number;
+  failedAt?: Date | null;
+  lastRefusal?: OpsRefusal | null;
 }
 
 /** 지급 건 재요청 기록(payment 0029 payout_retry_audit, 덧붙이기만) */

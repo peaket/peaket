@@ -43,8 +43,15 @@ const PromoterDetailView = z
     pendingContractApprovalId: z.string().nullable(),
     seller: z.record(z.string(), z.unknown()).nullable(),
     verifiedAt: z.string().nullable(),
-    payoutAccount: z.null(),
-    pgRegistration: z.object({ tossSellers: z.array(z.unknown()), portonePartnerRegistered: z.boolean() }),
+    payoutAccount: z.object({ bankCode: z.string(), last4: z.string(), holdUntil: z.string().nullable(), holderVerified: z.boolean() }).strict().nullable(),
+    pgRegistration: z
+      .object({
+        tossEnabled: z.boolean(),
+        portoneEnabled: z.boolean(),
+        tossSellers: z.array(z.object({ pgStore: z.enum(['STANDARD', 'ESCROW']), status: z.string().nullable() }).strict()),
+        portonePartnerRegistered: z.boolean(),
+      })
+      .strict(),
   })
   .passthrough();
 const PromoterPageView = z
@@ -87,8 +94,8 @@ export class OpsPromoterController {
   @Header('Cache-Control', 'no-store')
   @Roles(['operator', 'commander', 'cs_agent', 'cs_lead'])
   @ContractRouteSchema({ params: PromoterParams, responses: { 200: PromoterDetailView } })
-  async detail(@ContractParams(PromoterParams) params: z.output<typeof PromoterParams>) {
-    return this.promoters.detail(params.promoterId);
+  async detail(@ContractParams(PromoterParams) params: z.output<typeof PromoterParams>, @CurrentPrincipal() me: Principal) {
+    return this.promoters.detail(params.promoterId, me.role);
   }
 
   @Get(':promoterId/contract-terms')

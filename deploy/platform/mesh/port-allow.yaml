@@ -168,7 +168,8 @@ workloads:
     ports:
       # purchase-svc는 회차 취소 일괄 환불 자동 정지의 결제사 서킷 상태를 GET /internal/v1/circuits로 읽는다
       # (docs/features/transfer-refund.md §5 '서킷 연결', ADR-0285 결정 9 표 보충 2026-11-22 W12-mesh)
-      rest: { port: 8080, callers: [ops-svc, purchase-svc] }
+      # core-svc는 판매 승인 요청·승인에서 지급대행 등록·등록 읽기·판매자 확인을 부른다(settlement §3, ADR-0370 결정 3·4, ADR-0285 결정 9 표 보충 2026-11-23 F-07-7)
+      rest: { port: 8080, callers: [core-svc, ops-svc, purchase-svc] }
       grpc:
         port: 50051
         services:

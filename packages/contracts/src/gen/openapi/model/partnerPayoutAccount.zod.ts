@@ -9,13 +9,16 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { OpsPromoterDetailPgRegistrationTossSellersItem } from './opsPromoterDetailPgRegistrationTossSellersItem';
+import * as zod from 'zod';
 
-/**
- * 결제사 지급대행 등록 상태. 2026-11-20 BAT-615는 연동 전이라 빈 목록과 false만 준다(가짜 상태 금지, ADR-0320 결정 7)
- */
-export type OpsPromoterDetailPgRegistration = {
-  /** 결제 상점마다 하나(일반·에스크로, settlement §3) */
-  tossSellers?: OpsPromoterDetailPgRegistrationTossSellersItem[];
-  portonePartnerRegistered?: boolean;
-};
+export const PartnerPayoutAccount = zod.object({
+  "bankCode": zod.string().nullable().describe('두 자리 은행 코드. 계좌가 없으면 null'),
+  "payoutAccountLast4": zod.string().nullable().describe('계좌 끝 4자리. 계좌가 없으면 null'),
+  "holderVerified": zod.boolean().describe('예금주가 판매자 상호·대표자와 같다고 확인됨'),
+  "holdUntil": zod.iso.datetime({"offset":true}).nullable().describe('변경 뒤 3영업일 지급 보류의 끝. 보류가 없으면 null'),
+  "agencySyncPending": zod.boolean().describe('결제사 수정 대기(한 곳 이상 반영 실패). 참이면 지급을 막는다'),
+  "version": zod.int().describe('판. 계좌가 없으면 0. ETag와 같다')
+}).describe('파트너의 지금 정산 계좌(SCR-020). 계좌번호 전체는 없다(ADR-0370 결정 5)')
+
+export type PartnerPayoutAccount = zod.input<typeof PartnerPayoutAccount>;
+export type PartnerPayoutAccountOutput = zod.output<typeof PartnerPayoutAccount>;

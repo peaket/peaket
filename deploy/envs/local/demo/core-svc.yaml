@@ -24,6 +24,8 @@ env:
   PEAKET_IDENTITY_JWKS_URL: http://identity-svc.core.svc.cluster.local:8080/internal/jwks/admin.json
   PEAKET_IDENTITY_ISSUER: https://identity.peaket.example
   PEAKET_PURCHASE_HTTP_URL: http://bundle.purchase.svc.cluster.local:8081
+  # 판매 승인의 지급대행 등록·등록 읽기·판매자 확인(F-07-7, ADR-0370 결정 3·4). 합본 안 payment-svc(8084)를 본다
+  PEAKET_PAYMENT_HTTP_URL: http://bundle.purchase.svc.cluster.local:8084
   PEAKET_WEBHOOK_WORKER: "off"
 
 service:

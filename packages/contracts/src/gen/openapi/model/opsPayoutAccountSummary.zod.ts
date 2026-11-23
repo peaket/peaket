@@ -9,11 +9,14 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { OpsPromoterDetailPgRegistrationTossSellersItemPgStore } from './opsPromoterDetailPgRegistrationTossSellersItemPgStore';
-import type { OpsPromoterDetailPgRegistrationTossSellersItemStatus } from './opsPromoterDetailPgRegistrationTossSellersItemStatus';
+import * as zod from 'zod';
 
-export type OpsPromoterDetailPgRegistrationTossSellersItem = {
-  pgStore?: OpsPromoterDetailPgRegistrationTossSellersItemPgStore;
-  /** @nullable */
-  status?: OpsPromoterDetailPgRegistrationTossSellersItemStatus;
-};
+export const OpsPayoutAccountSummary = zod.object({
+  "bankCode": zod.string().optional(),
+  "last4": zod.string().optional(),
+  "holdUntil": zod.iso.datetime({"offset":true}).nullish().describe('변경 뒤 3영업일 지급 보류의 끝'),
+  "holderVerified": zod.boolean().optional().describe('예금주가 판매자 상호·대표자와 같다고 확인됨')
+}).nullable().describe('정산 계좌의 은행과 끝 4자리만(payment 등록 읽기, ADR-0370 결정 4). cs_agent·cs_lead에게는 null(authz-matrix §4.1). 계좌가 없거나 등록 읽기가 실패하면 null')
+
+export type OpsPayoutAccountSummary = zod.input<typeof OpsPayoutAccountSummary>;
+export type OpsPayoutAccountSummaryOutput = zod.output<typeof OpsPayoutAccountSummary>;

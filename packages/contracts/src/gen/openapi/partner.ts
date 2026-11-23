@@ -763,12 +763,16 @@ export const GetPartnerEventCancellationResponse = zod.object({
 }).describe('파트너가 보는 회차 취소·연기 요청 상태(SCR-044 ④). 운영자용 EventCancellationRequest의 미리보기·결제사별 몫을 빼고, 파트너가 낸 값과 합계만 싣는다')
 
 /**
- * FR-052, POL-037, ADR-0045. 판매 승인은 공연 단위이고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 승인 뒤 회차를 더하거나 가격·회차·좌석 등급·좌석맵·판매 정책을 바꾸면 다시 승인 대기(마지막 승인 내용으로 공개·판매는 계속, 변경분은 승인 때 반영, docs/planning/03 §2.14, ADR-0062). 정산 계좌는 모양만 보고 저장하지 않는다(지급대행 연동 전, LCH-110). 지급대행 등록이 없어도 승인을 막지 않고 화면에 '연동 전'이라고 적는다(ADR-0327 결정 6). 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
+ * FR-052, POL-037, ADR-0045. 판매 승인은 공연 단위이고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 승인 뒤 회차를 더하거나 가격·회차·좌석 등급·좌석맵·판매 정책을 바꾸면 다시 승인 대기(마지막 승인 내용으로 공개·판매는 계속, 변경분은 승인 때 반영, docs/planning/03 §2.14, ADR-0062). 공연 상태를 바꾸기 전에 payment에 지급대행 등록(예금주 조회·이름 비교·포트원 파트너·토스 두 상점 셀러)을 부른다. 포트원 플랫폼이 꺼져 있으면 정산 계좌는 모양만 본다. 계좌번호 원문은 core에 저장하지 않는다(ADR-0370 결정 1·3). 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
  * @summary 판매 승인 요청(판매자 신원정보 포함). 승인 전에는 공개되지 않음
  */
 export const CreatePartnerProductionSaleReviewParams = zod.object({
   "productionId": zod.string().describe('공연(회차 묶음, ADR-0093)')
 })
+
+export const createPartnerProductionSaleReviewBodyPayoutAccountBankCodeRegExp = new RegExp('^[0-9]{2}$');
+export const createPartnerProductionSaleReviewBodyPayoutAccountAccountNumberRegExp = new RegExp('^[0-9]{6,20}$');
+export const createPartnerProductionSaleReviewBodyPayoutAccountHolderNameMax = 100;
 
 export const createPartnerProductionSaleReviewBodyAccessibleSeatingNoteMax = 500;
 
@@ -786,10 +790,10 @@ export const CreatePartnerProductionSaleReviewBody = zod.object({
   "exemptionBasis": zod.string().optional()
 }).strict().describe('SellerInfo의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SellerInfo)와 같고 응답은 SellerInfo(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).'),
   "payoutAccount": zod.object({
-  "bankCode": zod.string(),
-  "accountNumber": zod.string(),
-  "holderName": zod.string()
-}).strict().describe('정산 계좌 변경. 저장하지 않고 결제사 수정 요청에 바로 넘김(POL-039)'),
+  "bankCode": zod.string().regex(createPartnerProductionSaleReviewBodyPayoutAccountBankCodeRegExp).describe('두 자리 은행 코드. 받는 값의 목록은 packages/validation의 두 자리 은행 코드 표(REFUND_BANK_CODES)이고, 표 밖이면 400이다(ADR-0370, settlement §6)'),
+  "accountNumber": zod.string().regex(createPartnerProductionSaleReviewBodyPayoutAccountAccountNumberRegExp).describe('숫자 6~20자리(하이픈 없음)'),
+  "holderName": zod.string().min(1).max(createPartnerProductionSaleReviewBodyPayoutAccountHolderNameMax)
+}).strict().describe('정산 계좌 변경. 계좌번호는 저장하지 않고 예금주 조회와 결제사 등록·수정 요청에 바로 넘긴다(POL-039, ADR-0370 결정 1·5)'),
   "accessibleSeating": zod.object({
   "confirmed": zod.literal(true).describe('휠체어석의 수와 위치를 공연장 좌석 배치도와 대조함(FR-023)'),
   "shortfallReason": zod.enum(['RELAXED_STANDARD', 'RECOMMENDED_FACILITY', 'NOT_USED_THIS_SHOW', 'OTHER']).optional().describe('휠체어석 수가 기준 min(⌈전체 좌석÷100⌉, 20)보다 적을 때 필수'),
@@ -873,7 +877,8 @@ export const GetPartnerEventSettlementsResponseItem = zod.object({
   "disputeDueAt": zod.iso.datetime({"offset":true}).optional(),
   "payoutDate": zod.iso.date().optional(),
   "payoutBankCode": zod.string().optional().describe('정산 은행 코드(docs/data.md promoter.payout_bank_code). 화면은 은행 이름으로 바꿔 끝 4자리와 함께 보인다(ADR-0162 결정 5, 추천 적용 2026-10-30)'),
-  "payoutAccountLast4": zod.string().optional()
+  "payoutAccountLast4": zod.string().optional(),
+  "kycNotice": zod.boolean().optional().describe('토스페이먼츠 정산서의 지급일까지 판매자 KYC가 끝나지 않을 것으로 보여 지급이 보류될 수 있다는 예고(settlement §6, SCR-027). 파트너 응답만 싣고 관제 응답은 싣지 않는다. 포트원 정산서는 늘 false(ADR-0370 결정 9)')
 }).describe('정산서(회차 정산서는 회차·결제사, 상품 정산서는 파트너·결제사·결제 상점·주 단위, POL-039, ADR-0047, 상품 정산서는 추천 적용 2026-10-14, ADR-0062). 계좌는 끝 4자리만')
 export const GetPartnerEventSettlementsResponse = zod.array(GetPartnerEventSettlementsResponseItem)
 
@@ -916,7 +921,8 @@ export const ListPartnerProductSettlementsResponse = zod.object({
   "disputeDueAt": zod.iso.datetime({"offset":true}).optional(),
   "payoutDate": zod.iso.date().optional(),
   "payoutBankCode": zod.string().optional().describe('정산 은행 코드(docs/data.md promoter.payout_bank_code). 화면은 은행 이름으로 바꿔 끝 4자리와 함께 보인다(ADR-0162 결정 5, 추천 적용 2026-10-30)'),
-  "payoutAccountLast4": zod.string().optional()
+  "payoutAccountLast4": zod.string().optional(),
+  "kycNotice": zod.boolean().optional().describe('토스페이먼츠 정산서의 지급일까지 판매자 KYC가 끝나지 않을 것으로 보여 지급이 보류될 수 있다는 예고(settlement §6, SCR-027). 파트너 응답만 싣고 관제 응답은 싣지 않는다. 포트원 정산서는 늘 false(ADR-0370 결정 9)')
 }).describe('정산서(회차 정산서는 회차·결제사, 상품 정산서는 파트너·결제사·결제 상점·주 단위, POL-039, ADR-0047, 상품 정산서는 추천 적용 2026-10-14, ADR-0062). 계좌는 끝 4자리만')).optional(),
   "nextCursor": zod.string().nullish(),
   "awaitingSettlementAmount": zod.int().optional().describe('정산 기준일을 기다리는 금액 합계(\'정산 대기\', 여러 건을 모은 금액이라 int64, guidelines §1). 구매 확정이나 반품 기한이 지난 주문부터 다음 주 정산서에 들어간다')
@@ -979,7 +985,20 @@ export const CreatePartnerSettlementDisputeBody = zod.object({
 export const CreatePartnerSettlementDisputeResponse = zod.void()
 
 /**
- * FR-062, POL-039, ADR-0047. 재인증 토큰은 비밀번호·TOTP와 패스키를 거친 것이어야 한다(factors에 passkey, 없으면 403 reauth-required, POL-020, 기술 검토 중간-051). 계좌는 저장하지 않고 두 결제사 수정 요청에 바로 넘김. 변경 뒤 3영업일 지급 보류, 등록 이메일·전화로 알림. 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
+ * FR-062, POL-039, ADR-0370 결정 5. SCR-020 정산 계좌가 읽고, 응답의 ETag(판)를 PUT의 If-Match로 보낸다. 계좌가 아직 없으면 bankCode·payoutAccountLast4가 null이고 version은 0이다. 계좌번호 전체는 싣지 않는다. Cache-Control: no-store
+ * @summary 지금 정산 계좌(은행·끝 4자리·보류·판)
+ */
+export const GetPartnerPayoutAccountResponse = zod.object({
+  "bankCode": zod.string().nullable().describe('두 자리 은행 코드. 계좌가 없으면 null'),
+  "payoutAccountLast4": zod.string().nullable().describe('계좌 끝 4자리. 계좌가 없으면 null'),
+  "holderVerified": zod.boolean().describe('예금주가 판매자 상호·대표자와 같다고 확인됨'),
+  "holdUntil": zod.iso.datetime({"offset":true}).nullable().describe('변경 뒤 3영업일 지급 보류의 끝. 보류가 없으면 null'),
+  "agencySyncPending": zod.boolean().describe('결제사 수정 대기(한 곳 이상 반영 실패). 참이면 지급을 막는다'),
+  "version": zod.int().describe('판. 계좌가 없으면 0. ETag와 같다')
+}).describe('파트너의 지금 정산 계좌(SCR-020). 계좌번호 전체는 없다(ADR-0370 결정 5)')
+
+/**
+ * FR-062, POL-039, ADR-0047, ADR-0370 결정 5. 재인증 토큰은 비밀번호·TOTP와 패스키를 거친 것이어야 한다(factors에 passkey, 없으면 403 reauth-required, POL-020, 기술 검토 중간-051). 차례: 재인증 → If-Match → 본문 → 판매자 확인 → 포트원 예금주 조회와 이름 비교 → 포트원 파트너·토스 두 상점 셀러 수정. 계좌번호는 저장하지 않고 결제사 요청에 바로 넘긴다. 예금주가 다르면 아무것도 바꾸지 않고 422다. 변경 뒤 3영업일 지급 보류. 결제사 한 곳이라도 실패하면 바뀐 계좌를 저장하되 수정 대기(agencySyncPending)로 지급을 막고 502다. 시도마다 변경 기록을 남겨 관제 감사로 보낸다. 변경 알림 이메일·전화는 운영 전이다. 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
  * @summary 정산 계좌 변경(관리자 재인증, 예금주가 판매자와 같을 때만)
  */
 export const PutPartnerPayoutAccountHeader = zod.object({
@@ -987,18 +1006,25 @@ export const PutPartnerPayoutAccountHeader = zod.object({
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
+export const putPartnerPayoutAccountBodyBankCodeRegExp = new RegExp('^[0-9]{2}$');
+export const putPartnerPayoutAccountBodyAccountNumberRegExp = new RegExp('^[0-9]{6,20}$');
+export const putPartnerPayoutAccountBodyHolderNameMax = 100;
+
+
+
 export const PutPartnerPayoutAccountBody = zod.object({
-  "bankCode": zod.string(),
-  "accountNumber": zod.string(),
-  "holderName": zod.string()
-}).strict().describe('정산 계좌 변경. 저장하지 않고 결제사 수정 요청에 바로 넘김(POL-039)')
+  "bankCode": zod.string().regex(putPartnerPayoutAccountBodyBankCodeRegExp).describe('두 자리 은행 코드. 받는 값의 목록은 packages/validation의 두 자리 은행 코드 표(REFUND_BANK_CODES)이고, 표 밖이면 400이다(ADR-0370, settlement §6)'),
+  "accountNumber": zod.string().regex(putPartnerPayoutAccountBodyAccountNumberRegExp).describe('숫자 6~20자리(하이픈 없음)'),
+  "holderName": zod.string().min(1).max(putPartnerPayoutAccountBodyHolderNameMax)
+}).strict().describe('정산 계좌 변경. 계좌번호는 저장하지 않고 예금주 조회와 결제사 등록·수정 요청에 바로 넘긴다(POL-039, ADR-0370 결정 1·5)')
 
 export const PutPartnerPayoutAccountResponse = zod.object({
   "bankCode": zod.string(),
   "payoutAccountLast4": zod.string(),
   "holdUntil": zod.iso.datetime({"offset":true}),
   "version": zod.int(),
-  "holderVerified": zod.boolean().describe('예금주가 KYC 사업자 상호·대표자와 같으면 true. false면 지급 묶음이 HELD/ACCOUNT_MISMATCH로 막는다(A1-H7)')
+  "holderVerified": zod.boolean().describe('늘 true다. 예금주가 판매자 상호·대표자와 다르면 저장하지 않고 422로 끝난다(ADR-0370 결정 5)'),
+  "agencySyncPending": zod.boolean().optional().describe('결제사 수정 대기. 200이면 늘 false')
 })
 
 /**

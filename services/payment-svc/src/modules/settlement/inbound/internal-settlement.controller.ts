@@ -1,10 +1,10 @@
 // 받는 층: payment-svc 정산·지급·미수금 내부 경로(ops-svc·core-svc 원천이 부른다).
 // 같은 PEAKET_INTERNAL_TOKEN을 쓰고, 공개 경로가 아니다.
-import { Body, Controller, Get, HttpCode, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Put, Query, Res, UseGuards } from '@nestjs/common';
 import { ContractRouteSchema, InternalTokenGuard, ProblemError, Roles } from '@peaket/platform';
 import { z } from 'zod';
 import { Settlements } from '../application/settlements.js';
-import type { Pg, PgStore, ReceivableRecord, StatementKind } from '../domain/settlement.js';
+import { SettlementProblem, type Pg, type PgStore, type ReceivableRecord, type StatementKind } from '../domain/settlement.js';
 
 const PgBody = z.enum(['TOSS', 'PORTONE']);
 const StoreBody = z.enum(['STANDARD', 'ESCROW']);
@@ -85,6 +85,39 @@ const shaped = <T>(s: z.ZodType<T>, body: unknown, title: string): T => {
   return p.data as T;
 };
 type Reply = { header(name: string, value: string): unknown };
+
+// ---- F-07-7 지급대행 등록·등록 읽기·판매자 확인(부르는 쪽 core-svc, ADR-0370 결정 1·4) ----
+const AgencyResult = z.enum(['REGISTERED', 'UPDATED', 'SKIPPED', 'FAILED']);
+const Agencies = z.object({ PORTONE: AgencyResult, TOSS_STANDARD: AgencyResult, TOSS_ESCROW: AgencyResult });
+const PayoutRegistrationBody = z.strictObject({
+  promoterId: z.string().uuid(),
+  seller: z.strictObject({
+    legalName: z.string().min(1).max(100),
+    representative: z.string().min(1).max(100),
+    businessRegNo: z.string().regex(/^[0-9]{10}$/),
+    businessType: z.enum(['INDIVIDUAL_BUSINESS', 'CORPORATE']),
+    email: z.string().min(3).max(254),
+    phone: z.string().min(1).max(20),
+  }),
+  account: z.strictObject({ bankCode: z.string().regex(/^[0-9]{2}$/), accountNumber: z.string().regex(/^[0-9]{6,20}$/), holderName: z.string().min(1).max(100) }),
+});
+const PayoutRegistrationResponse = z.object({ bankCode: z.string(), accountLast4: z.string(), holderChecked: z.boolean(), agencies: Agencies });
+const PayoutRegistrationViewResponse = z.object({
+  payoutAccount: z.object({ bankCode: z.string(), last4: z.string(), holdUntil: z.string().nullable(), holderVerified: z.boolean() }).nullable(),
+  agencySyncPending: z.boolean(),
+  tossEnabled: z.boolean(),
+  portoneEnabled: z.boolean(),
+  tossSellers: z.array(z.object({ pgStore: z.enum(['STANDARD', 'ESCROW']), status: z.string() })),
+  portonePartnerRegistered: z.boolean(),
+});
+const SellerVerificationBody = z.strictObject({ legalName: z.string().min(1).max(100), representative: z.string().min(1).max(100), verifiedAt: z.iso.datetime() });
+const SellerVerificationResponse = z.object({ status: z.literal('VERIFIED') });
+const PromoterIdParam = z.string().uuid();
+// 내부 경로의 모양 틀림은 다른 내부 경로처럼 422 invalid-query(SettlementProblem)다
+const invalidQuery = (): ProblemError => {
+  const p = new SettlementProblem('invalid-query', 422, '요청 모양이 맞지 않습니다');
+  return new ProblemError({ type: p.type, status: p.status, title: p.title });
+};
 
 @Controller('internal/v1/settlements')
 @Roles(['public'])
@@ -257,6 +290,46 @@ export class InternalSettlementController {
    * 토스 셀러 등록(F-07-6 ADR-0369 결정 3, 부르는 쪽은 F-07-7 core-svc). 응답은 은행 코드·끝 4자리와 상점별 상태뿐이고 계좌번호를 돌려주지 않는다.
    * 모양 틀림 422, 한 상점이라도 실패 502 toss-seller-registration-failed(failedStores), 설정 없음 503
    */
+  /**
+   * 지급대행 등록(판매 승인 요청, F-07-7 ADR-0370 결정 1·3). 계좌번호는 결제사 요청에만 넘기고 응답은 은행·끝 4자리·결제사별 결과다.
+   * 모양 틀림 422 invalid-query, 불일치 422, 한 곳 실패 502(failedAgencies), 조회 실패·꺼진 등록 503
+   */
+  @Post('payout-registrations')
+  @HttpCode(200)
+  @ContractRouteSchema({ responses: { 200: PayoutRegistrationResponse } })
+  async registerPayoutAgencies(@Body() body: unknown, @Res({ passthrough: true }) reply: Reply) {
+    void reply.header('cache-control', 'no-store');
+    const parsed = PayoutRegistrationBody.safeParse(body);
+    if (!parsed.success) throw invalidQuery();
+    const { promoterId, seller, account } = parsed.data;
+    return this.settlements.registerPayoutAgencies({
+      promoterId,
+      businessType: seller.businessType,
+      company: { name: seller.legalName, representativeName: seller.representative, businessRegistrationNumber: seller.businessRegNo, email: seller.email, phone: seller.phone },
+      account,
+    });
+  }
+
+  /** 등록 읽기(판매 승인 조건·관제 상세, ADR-0370 결정 4). 셀러·파트너 ID 원문은 없다 */
+  @Get('promoters/:promoterId/payout-registration')
+  @ContractRouteSchema({ responses: { 200: PayoutRegistrationViewResponse } })
+  async payoutRegistration(@Param('promoterId') promoterId: string, @Res({ passthrough: true }) reply: Reply) {
+    void reply.header('cache-control', 'no-store');
+    if (!PromoterIdParam.safeParse(promoterId).success) throw invalidQuery();
+    return this.settlements.getPayoutRegistration(promoterId.toLowerCase());
+  }
+
+  /** 판매 승인 때 판매자 확인 쓰기(ADR-0370 결정 4). 같은 값이면 그대로 200 */
+  @Put('promoters/:promoterId/seller-verification')
+  @HttpCode(200)
+  @ContractRouteSchema({ responses: { 200: SellerVerificationResponse } })
+  async verifySeller(@Param('promoterId') promoterId: string, @Body() body: unknown, @Res({ passthrough: true }) reply: Reply) {
+    void reply.header('cache-control', 'no-store');
+    const parsed = SellerVerificationBody.safeParse(body);
+    if (!PromoterIdParam.safeParse(promoterId).success || !parsed.success) throw invalidQuery();
+    return this.settlements.verifySeller(promoterId.toLowerCase(), { legalName: parsed.data.legalName, representative: parsed.data.representative, verifiedAt: new Date(parsed.data.verifiedAt) });
+  }
+
   @Post('toss-sellers')
   @HttpCode(200)
   @ContractRouteSchema({ responses: { 200: TossSellersResponse } })

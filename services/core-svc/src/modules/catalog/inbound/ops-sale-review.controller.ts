@@ -4,7 +4,7 @@
 // 판매 승인은 공연 단위이고 그 공연의 회차를 모두 함께 판정한다(ADR-0093).
 import { Controller, Get, Header, HttpCode, Post } from '@nestjs/common';
 import { ListOpsSaleReviewsQueryParams } from '@peaket/contracts/openapi/ops';
-import { ContractBody, ContractParams, ContractQuery, ContractRouteSchema, Roles } from '@peaket/platform';
+import { ContractBody, ContractParams, ContractQuery, ContractRouteSchema, CurrentPrincipal, type Principal, Roles } from '@peaket/platform';
 import { z } from 'zod';
 import { ApproveSaleReview } from '../application/approve-sale-review.js';
 import { RejectSaleReview } from '../application/reject-sale-review.js';
@@ -58,6 +58,16 @@ const SaleReviewDetailView = z
     requestedPlace: z.boolean(),
     accessibleSeatingCheck: z.boolean().nullable(),
     suspensionApprovalPending: z.boolean(),
+    // 지급대행 등록 값(payment 등록 읽기, F-07-7 ADR-0370 결정 4). CS 두 역할에게 정산 계좌는 null이다
+    payoutAccount: z.object({ bankCode: z.string(), last4: z.string(), holdUntil: z.string().nullable(), holderVerified: z.boolean() }).strict().nullable(),
+    pgRegistration: z
+      .object({
+        tossEnabled: z.boolean(),
+        portoneEnabled: z.boolean(),
+        tossSellers: z.array(z.object({ pgStore: z.enum(['STANDARD', 'ESCROW']), status: z.string().nullable() }).strict()),
+        portonePartnerRegistered: z.boolean(),
+      })
+      .strict(),
   })
   .passthrough();
 
@@ -85,8 +95,8 @@ export class OpsSaleReviewController {
   @Header('Cache-Control', 'no-store')
   @Roles(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead'])
   @ContractRouteSchema({ params: ProductionParams, responses: { 200: SaleReviewDetailView } })
-  async detail(@ContractParams(ProductionParams) params: z.output<typeof ProductionParams>) {
-    return this.reviews.detail(params.productionId.toLowerCase());
+  async detail(@ContractParams(ProductionParams) params: z.output<typeof ProductionParams>, @CurrentPrincipal() me: Principal) {
+    return this.reviews.detail(params.productionId.toLowerCase(), me.role);
   }
 
   @Post(':productionId/approvals')

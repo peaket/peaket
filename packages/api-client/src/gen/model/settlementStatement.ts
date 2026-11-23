@@ -55,4 +55,6 @@ export interface SettlementStatement {
   /** 정산 은행 코드(docs/data.md promoter.payout_bank_code). 화면은 은행 이름으로 바꿔 끝 4자리와 함께 보인다(ADR-0162 결정 5, 추천 적용 2026-10-30) */
   payoutBankCode?: string;
   payoutAccountLast4?: string;
+  /** 토스페이먼츠 정산서의 지급일까지 판매자 KYC가 끝나지 않을 것으로 보여 지급이 보류될 수 있다는 예고(settlement §6, SCR-027). 파트너 응답만 싣고 관제 응답은 싣지 않는다. 포트원 정산서는 늘 false(ADR-0370 결정 9) */
+  kycNotice?: boolean;
 }

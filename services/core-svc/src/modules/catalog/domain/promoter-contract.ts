@@ -68,9 +68,9 @@ export interface PromoterDetail {
   pendingContractApprovalId: string | null;
   seller: SellerInfo | null;
   verifiedAt: Date | null;
-  /** 이 묶음은 지급대행 연동 전이라 늘 null이다(ADR-0320 결정 7) */
+  /** 저장소는 늘 null이다. 응답 값은 유스케이스가 payment 등록 읽기로 채운다(F-07-7, ADR-0370 결정 4) */
   payoutAccount: null;
-  /** 결제사 등록도 연동 전이다. 가짜 상태를 채우지 않는다 */
+  /** 저장소는 빈 값이다. 응답 값은 payment 등록 읽기에서 온다(가짜 상태를 채우지 않는다) */
   pgRegistration: { tossSellers: []; portonePartnerRegistered: false };
 }
 

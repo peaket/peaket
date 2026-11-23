@@ -3940,7 +3940,7 @@ export const CreateOpsEventCancellationResumptionResponse = zod.object({
 }).describe('회차 취소 요청(ADR-0046 결정 4)')
 
 /**
- * FR-052, POL-037. 공연 단위로 승인하고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). BAT-617 화면은 등록된 공연장을 확인하고 회차별 규모를 정해 승인한다. 아티스트·다른 이름 연결과 새 아티스트·공연장 만들기는 LCH-080 잔여이며 이 본문에 넣지 않는다(2026-11-22 BAT-617). 회차에 결제사 지정이 없으면 그때의 플랫폼 기본값을 지정으로 저장한다(POL-036). 회차마다 공연 규모를 정하고, LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격을 검사한다. 오픈 시각 검사는 다른 승인과 같은 잠금으로 직렬화한다(POL-030, 추천 적용 2026-10-14, ADR-0062). 확인 패널은 수요 예측(demand-forecast)의 예상 진입 인원과 제안 등급을 보이고 운영자가 정한다. 승인 뒤 규모 바꾸기는 scale-changes(올리기만, 추천 적용 2026-10-21, ADR-0078). 승인 커밋 뒤 비취소 회차마다 시작 시각 오름차순으로 purchase-svc 내부 판매 열기(POST /internal/v1/events/{eventId}/sale-open)를 부르고, 성공한 회차만 대기열 q:cfg·q:epoch를 쓴다. 열기나 사본 쓰기가 실패해도 승인은 200으로 남고 정비 일 sale-config-publish가 다시 시도한다(BAT-616, ADR-0327)
+ * FR-052, POL-037. 공연 단위로 승인하고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). BAT-617 화면은 등록된 공연장을 확인하고 회차별 규모를 정해 승인한다. 아티스트·다른 이름 연결과 새 아티스트·공연장 만들기는 LCH-080 잔여이며 이 본문에 넣지 않는다(2026-11-22 BAT-617). 회차에 결제사 지정이 없으면 그때의 플랫폼 기본값을 지정으로 저장한다(POL-036). 승인 쓰기 전에 payment 등록 읽기로 켜진 결제사의 조건을 보고, 참이면 payment에 판매자 확인을 쓴 뒤 승인한다(ADR-0370 결정 4). 회차마다 공연 규모를 정하고, LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격을 검사한다. 오픈 시각 검사는 다른 승인과 같은 잠금으로 직렬화한다(POL-030, 추천 적용 2026-10-14, ADR-0062). 확인 패널은 수요 예측(demand-forecast)의 예상 진입 인원과 제안 등급을 보이고 운영자가 정한다. 승인 뒤 규모 바꾸기는 scale-changes(올리기만, 추천 적용 2026-10-21, ADR-0078). 승인 커밋 뒤 비취소 회차마다 시작 시각 오름차순으로 purchase-svc 내부 판매 열기(POST /internal/v1/events/{eventId}/sale-open)를 부르고, 성공한 회차만 대기열 q:cfg·q:epoch를 쓴다. 열기나 사본 쓰기가 실패해도 승인은 200으로 남고 정비 일 sale-config-publish가 다시 시도한다(BAT-616, ADR-0327)
  * @summary 판매 승인(operator). 판매 조건은 고치지 않음
  */
 export const CreateOpsSaleReviewApprovalParams = zod.object({
@@ -4272,7 +4272,8 @@ export const ListOpsSettlementsResponse = zod.object({
   "disputeDueAt": zod.iso.datetime({"offset":true}).optional(),
   "payoutDate": zod.iso.date().optional(),
   "payoutBankCode": zod.string().optional().describe('정산 은행 코드(docs/data.md promoter.payout_bank_code). 화면은 은행 이름으로 바꿔 끝 4자리와 함께 보인다(ADR-0162 결정 5, 추천 적용 2026-10-30)'),
-  "payoutAccountLast4": zod.string().optional()
+  "payoutAccountLast4": zod.string().optional(),
+  "kycNotice": zod.boolean().optional().describe('토스페이먼츠 정산서의 지급일까지 판매자 KYC가 끝나지 않을 것으로 보여 지급이 보류될 수 있다는 예고(settlement §6, SCR-027). 파트너 응답만 싣고 관제 응답은 싣지 않는다. 포트원 정산서는 늘 false(ADR-0370 결정 9)')
 }).describe('정산서(회차 정산서는 회차·결제사, 상품 정산서는 파트너·결제사·결제 상점·주 단위, POL-039, ADR-0047, 상품 정산서는 추천 적용 2026-10-14, ADR-0062). 계좌는 끝 4자리만')).optional(),
   "nextCursor": zod.string().nullish()
 })
@@ -4537,7 +4538,8 @@ export const GetOpsPayoutBatchResponse = zod.object({
   "disputeDueAt": zod.iso.datetime({"offset":true}).optional(),
   "payoutDate": zod.iso.date().optional(),
   "payoutBankCode": zod.string().optional().describe('정산 은행 코드(docs/data.md promoter.payout_bank_code). 화면은 은행 이름으로 바꿔 끝 4자리와 함께 보인다(ADR-0162 결정 5, 추천 적용 2026-10-30)'),
-  "payoutAccountLast4": zod.string().optional()
+  "payoutAccountLast4": zod.string().optional(),
+  "kycNotice": zod.boolean().optional().describe('토스페이먼츠 정산서의 지급일까지 판매자 KYC가 끝나지 않을 것으로 보여 지급이 보류될 수 있다는 예고(settlement §6, SCR-027). 파트너 응답만 싣고 관제 응답은 싣지 않는다. 포트원 정산서는 늘 false(ADR-0370 결정 9)')
 }).describe('정산서(회차 정산서는 회차·결제사, 상품 정산서는 파트너·결제사·결제 상점·주 단위, POL-039, ADR-0047, 상품 정산서는 추천 적용 2026-10-14, ADR-0062). 계좌는 끝 4자리만')).optional(),
   "payouts": zod.array(zod.object({
   "payoutId": zod.string().optional(),
@@ -4573,7 +4575,8 @@ export const GetOpsPayoutBatchResponse = zod.object({
   "disputeDueAt": zod.iso.datetime({"offset":true}).optional(),
   "payoutDate": zod.iso.date().optional(),
   "payoutBankCode": zod.string().optional().describe('정산 은행 코드(docs/data.md promoter.payout_bank_code). 화면은 은행 이름으로 바꿔 끝 4자리와 함께 보인다(ADR-0162 결정 5, 추천 적용 2026-10-30)'),
-  "payoutAccountLast4": zod.string().optional()
+  "payoutAccountLast4": zod.string().optional(),
+  "kycNotice": zod.boolean().optional().describe('토스페이먼츠 정산서의 지급일까지 판매자 KYC가 끝나지 않을 것으로 보여 지급이 보류될 수 있다는 예고(settlement §6, SCR-027). 파트너 응답만 싣고 관제 응답은 싣지 않는다. 포트원 정산서는 늘 false(ADR-0370 결정 9)')
 }).describe('정산서(회차 정산서는 회차·결제사, 상품 정산서는 파트너·결제사·결제 상점·주 단위, POL-039, ADR-0047, 상품 정산서는 추천 적용 2026-10-14, ADR-0062). 계좌는 끝 4자리만')).optional().describe('같은 지급일·결제사·상점의 HELD 정산서(제외 목록). holdReason이 사유다'),
   "kycNotices": zod.array(zod.object({
   "promoterId": zod.string().optional(),
@@ -5605,8 +5608,23 @@ export const GetOpsSaleReviewResponse = zod.object({
   "scale": zod.union([zod.literal('LARGE'),zod.literal('MEDIUM'),zod.literal('SMALL'),zod.literal(null)]).nullish().describe('판매 승인 때 정한 규모. 승인 전이면 null'),
   "demandForecastPath": zod.string().optional().describe('GET /v1/ops/events/{eventId}/demand-forecast')
 }).describe('판매 승인 확인 패널의 회차 한 줄(SCR-048). 수요 예측은 링크로 가리킨다')).optional(),
-  "suspensionApprovalPending": zod.boolean().optional().describe('LCH-090 전에는 늘 false다')
-}).describe('관제 판매 승인 확인 패널(SCR-048, BAT-616). 계좌번호 전체·토스 셀러 ID·포트원 파트너 ID는 없다. 지급대행 등록은 LCH-110 전이라 화면이 \'연동 전\'이라고 적는다(ADR-0327 결정 6)')
+  "suspensionApprovalPending": zod.boolean().optional().describe('LCH-090 전에는 늘 false다'),
+  "payoutAccount": zod.object({
+  "bankCode": zod.string().optional(),
+  "last4": zod.string().optional(),
+  "holdUntil": zod.iso.datetime({"offset":true}).nullish().describe('변경 뒤 3영업일 지급 보류의 끝'),
+  "holderVerified": zod.boolean().optional().describe('예금주가 판매자 상호·대표자와 같다고 확인됨')
+}).nullish().describe('정산 계좌의 은행과 끝 4자리만(payment 등록 읽기, ADR-0370 결정 4). cs_agent·cs_lead에게는 null(authz-matrix §4.1). 계좌가 없거나 등록 읽기가 실패하면 null'),
+  "pgRegistration": zod.object({
+  "tossEnabled": zod.boolean().optional().describe('토스페이먼츠 지급대행이 켜졌는지'),
+  "portoneEnabled": zod.boolean().optional().describe('포트원 파트너 정산이 켜졌는지'),
+  "tossSellers": zod.array(zod.object({
+  "pgStore": zod.enum(['STANDARD', 'ESCROW']).optional(),
+  "status": zod.union([zod.literal('APPROVAL_REQUIRED'),zod.literal('PENDING'),zod.literal('PARTIALLY_APPROVED'),zod.literal('KYC_REQUIRED'),zod.literal('APPROVED'),zod.literal('REJECTED'),zod.literal(null)]).nullish()
+})).optional().describe('결제 상점마다 하나(일반·에스크로, settlement §3)'),
+  "portonePartnerRegistered": zod.boolean().optional()
+}).optional().describe('결제사 지급대행 등록 상태(payment 등록 읽기, ADR-0370 결정 4). 결제사의 셀러·파트너 ID 원문은 없다. 꺼진 결제사는 화면이 \'연동 전\'이라고 적는다. 등록 읽기가 실패하면 둘 다 꺼진 모양(빈 목록과 false)이다')
+}).describe('관제 판매 승인 확인 패널(SCR-048, BAT-616). 계좌번호 전체·토스 셀러 ID·포트원 파트너 ID는 없다. 지급대행 등록 값은 payment 등록 읽기에서 온다(ADR-0370 결정 4). 꺼진 결제사는 화면이 \'연동 전\'이라고 적는다')
 
 /**
  * SCR-065, docs/design/d5 §1.6 9번, docs/planning/03 §3 '파트너사·계약' 행(CS는 읽기, viewer는 쓰지 않는다). q는 상호를 찾는 검색어다. 정렬은 상호 가나다순 [가정]. Cache-Control: no-store
@@ -5686,15 +5704,18 @@ export const CreateOpsPromoterResponse = zod.object({
   "payoutAccount": zod.object({
   "bankCode": zod.string().optional(),
   "last4": zod.string().optional(),
-  "holdUntil": zod.iso.datetime({"offset":true}).nullish().describe('변경 뒤 3영업일 지급 보류의 끝')
-}).nullish().describe('은행과 끝 4자리만. cs_agent·cs_lead에게는 null(authz-matrix §4.1). 2026-11-20 BAT-615는 지급대행 연동 전이라 늘 null이다(ADR-0320 결정 7)'),
+  "holdUntil": zod.iso.datetime({"offset":true}).nullish().describe('변경 뒤 3영업일 지급 보류의 끝'),
+  "holderVerified": zod.boolean().optional().describe('예금주가 판매자 상호·대표자와 같다고 확인됨')
+}).nullish().describe('정산 계좌의 은행과 끝 4자리만(payment 등록 읽기, ADR-0370 결정 4). cs_agent·cs_lead에게는 null(authz-matrix §4.1). 계좌가 없거나 등록 읽기가 실패하면 null'),
   "pgRegistration": zod.object({
+  "tossEnabled": zod.boolean().optional().describe('토스페이먼츠 지급대행이 켜졌는지'),
+  "portoneEnabled": zod.boolean().optional().describe('포트원 파트너 정산이 켜졌는지'),
   "tossSellers": zod.array(zod.object({
   "pgStore": zod.enum(['STANDARD', 'ESCROW']).optional(),
-  "status": zod.union([zod.literal('APPROVAL_REQUIRED'),zod.literal('PARTIALLY_APPROVED'),zod.literal('KYC_REQUIRED'),zod.literal('APPROVED'),zod.literal(null)]).nullish()
+  "status": zod.union([zod.literal('APPROVAL_REQUIRED'),zod.literal('PENDING'),zod.literal('PARTIALLY_APPROVED'),zod.literal('KYC_REQUIRED'),zod.literal('APPROVED'),zod.literal('REJECTED'),zod.literal(null)]).nullish()
 })).optional().describe('결제 상점마다 하나(일반·에스크로, settlement §3)'),
   "portonePartnerRegistered": zod.boolean().optional()
-}).optional().describe('결제사 지급대행 등록 상태. 2026-11-20 BAT-615는 연동 전이라 빈 목록과 false만 준다(가짜 상태 금지, ADR-0320 결정 7)')
+}).optional().describe('결제사 지급대행 등록 상태(payment 등록 읽기, ADR-0370 결정 4). 결제사의 셀러·파트너 ID 원문은 없다. 꺼진 결제사는 화면이 \'연동 전\'이라고 적는다. 등록 읽기가 실패하면 둘 다 꺼진 모양(빈 목록과 false)이다')
 }).describe('파트너사 상세(SCR-065). 결제사의 셀러·파트너 ID 원문은 없다')
 
 /**
@@ -5731,15 +5752,18 @@ export const GetOpsPromoterResponse = zod.object({
   "payoutAccount": zod.object({
   "bankCode": zod.string().optional(),
   "last4": zod.string().optional(),
-  "holdUntil": zod.iso.datetime({"offset":true}).nullish().describe('변경 뒤 3영업일 지급 보류의 끝')
-}).nullish().describe('은행과 끝 4자리만. cs_agent·cs_lead에게는 null(authz-matrix §4.1). 2026-11-20 BAT-615는 지급대행 연동 전이라 늘 null이다(ADR-0320 결정 7)'),
+  "holdUntil": zod.iso.datetime({"offset":true}).nullish().describe('변경 뒤 3영업일 지급 보류의 끝'),
+  "holderVerified": zod.boolean().optional().describe('예금주가 판매자 상호·대표자와 같다고 확인됨')
+}).nullish().describe('정산 계좌의 은행과 끝 4자리만(payment 등록 읽기, ADR-0370 결정 4). cs_agent·cs_lead에게는 null(authz-matrix §4.1). 계좌가 없거나 등록 읽기가 실패하면 null'),
   "pgRegistration": zod.object({
+  "tossEnabled": zod.boolean().optional().describe('토스페이먼츠 지급대행이 켜졌는지'),
+  "portoneEnabled": zod.boolean().optional().describe('포트원 파트너 정산이 켜졌는지'),
   "tossSellers": zod.array(zod.object({
   "pgStore": zod.enum(['STANDARD', 'ESCROW']).optional(),
-  "status": zod.union([zod.literal('APPROVAL_REQUIRED'),zod.literal('PARTIALLY_APPROVED'),zod.literal('KYC_REQUIRED'),zod.literal('APPROVED'),zod.literal(null)]).nullish()
+  "status": zod.union([zod.literal('APPROVAL_REQUIRED'),zod.literal('PENDING'),zod.literal('PARTIALLY_APPROVED'),zod.literal('KYC_REQUIRED'),zod.literal('APPROVED'),zod.literal('REJECTED'),zod.literal(null)]).nullish()
 })).optional().describe('결제 상점마다 하나(일반·에스크로, settlement §3)'),
   "portonePartnerRegistered": zod.boolean().optional()
-}).optional().describe('결제사 지급대행 등록 상태. 2026-11-20 BAT-615는 연동 전이라 빈 목록과 false만 준다(가짜 상태 금지, ADR-0320 결정 7)')
+}).optional().describe('결제사 지급대행 등록 상태(payment 등록 읽기, ADR-0370 결정 4). 결제사의 셀러·파트너 ID 원문은 없다. 꺼진 결제사는 화면이 \'연동 전\'이라고 적는다. 등록 읽기가 실패하면 둘 다 꺼진 모양(빈 목록과 false)이다')
 }).describe('파트너사 상세(SCR-065). 결제사의 셀러·파트너 ID 원문은 없다')
 
 /**

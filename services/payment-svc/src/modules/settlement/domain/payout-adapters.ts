@@ -1,7 +1,8 @@
-// 지급대행 어댑터의 순수 부분(토스 지급 웹훅 서명·상점별 설정·이용료 설정, 포트원 출금 대사·잔액 원장).
+// 지급대행 어댑터의 순수 부분(토스 지급 웹훅 서명·상점별 설정·이용료 설정, 포트원 지급대행 설정, 잔액 원장).
 // 서명 원문·설정 모양은 settlement §8과 ADR-0369 결정 2·5, 대사 규칙은 settlement §5.3·§5.5다(J-T6·J-T20·J-T25·J-T37 ⑤).
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { PayoutFailureClass, PayoutRecord, PgStore } from './settlement.js';
+import { loadPortoneGatewayConfig } from '../../../config.js';
 
 /** 토스 지급 한 건의 상한(10억 원 미만). settlement §5.2·J-T4 */
 export const TOSS_PAYOUT_MAX_AMOUNT = 999_999_999;
@@ -174,89 +175,29 @@ export function tossPayoutTerms(env: Record<string, string | undefined>): TossPa
   };
 }
 
-export interface PortonePayoutFact {
-  payoutId: string;
-  statementId: string;
-  amount: number;
-  bankCode: string | null;
-  accountLast4: string | null;
-  status: 'REQUESTED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'CANCELED';
-}
-
-export interface PortoneTransferFact {
-  transferId: string;
-  withdrawalType: string;
-  payoutId: string | null;
-  amount: number;
-  bankCode: string | null;
-  accountLast4: string | null;
-  holderName: string | null;
-  transferredAt: Date;
-}
-
-export interface PortonePartnerAccountFact {
-  promoterId: string;
-  legalName: string;
-  representative: string;
-  bankCode: string;
-  accountLast4: string;
-}
-
-export type WithdrawalCheck = 'MATCHED' | 'MISMATCH' | 'MISSING' | 'UNLINKED';
-
-export interface WithdrawalReconciliation {
-  payoutId: string;
-  transferId: string | null;
-  check: WithdrawalCheck;
-  reasons: string[];
-}
-
-/** 예금주 표기 차이를 흡수한다(㈜·(주)·주식회사·공백·대소문자, J-T8). */
-export function normalizeHolderName(name: string): string {
-  return name
-    .toLowerCase()
-    .replaceAll(/\s+/g, '')
-    .replaceAll('(주)', '')
-    .replaceAll('㈜', '')
-    .replaceAll('주식회사', '')
-    .replaceAll('co.,ltd.', '')
-    .replaceAll('co.ltd.', '')
-    .replaceAll('ltd.', '')
-    .replaceAll(',', '');
-}
-
-/**
- * 포트원 출금 대사(settlement §5.3, J-T20). 지급 건마다 이체 ID·금액·계좌·예금주를 본다.
- * 지급 건과 이어지지 않는 출금은 UNLINKED, 완료인데 출금이 없으면 MISSING이다.
- */
-export function reconcilePortoneWithdrawals(input: {
-  payouts: readonly PortonePayoutFact[];
-  transfers: readonly PortoneTransferFact[];
-  accounts: ReadonlyMap<string, PortonePartnerAccountFact>;
-  promoterOfPayout: (payoutId: string) => string | undefined;
-}): WithdrawalReconciliation[] {
-  const used = new Set<string>();
-  const out: WithdrawalReconciliation[] = [];
-  for (const p of input.payouts) {
-    const promoterId = input.promoterOfPayout(p.payoutId);
-    const account = promoterId ? input.accounts.get(promoterId) : undefined;
-    const transfer = input.transfers.find((t) => !used.has(t.transferId) && (t.payoutId === p.payoutId || (t.amount === p.amount && t.bankCode === p.bankCode && t.accountLast4 === p.accountLast4)));
-    if (!transfer) {
-      if (p.status === 'COMPLETED') out.push({ payoutId: p.payoutId, transferId: null, check: 'MISSING', reasons: ['no-withdrawal'] });
-      continue;
-    }
-    used.add(transfer.transferId);
-    const reasons: string[] = [];
-    if (transfer.amount !== p.amount) reasons.push('amount');
-    if (transfer.bankCode !== p.bankCode || transfer.accountLast4 !== p.accountLast4) reasons.push('account');
-    if (account && transfer.holderName && normalizeHolderName(transfer.holderName) !== normalizeHolderName(account.legalName) && normalizeHolderName(transfer.holderName) !== normalizeHolderName(account.representative)) reasons.push('holder');
-    out.push({ payoutId: p.payoutId, transferId: transfer.transferId, check: reasons.length === 0 ? 'MATCHED' : 'MISMATCH', reasons });
-  }
-  for (const t of input.transfers) if (!used.has(t.transferId)) out.push({ payoutId: t.payoutId ?? '', transferId: t.transferId, check: 'UNLINKED', reasons: ['not-linked'] });
-  return out;
-}
+// 포트원 출금 대사의 사실 모양·함수는 domain/portone-reconciliation.ts로, 예금주 이름 비교는 domain/holder-name.ts로 옮겼다(F-07-7 계획 I-03·I-13).
 
 /** 지급대행 잔액 원장: 있어야 할 잔액 = 대사 완료 승인 − 취소·환불 − 결제사 수수료 − 완료 지급 − PEAKET 몫 인출(settlement §5.5). */
 export function ledgerBalance(input: { approvedAmount: number; refundedAmount: number; pgFees: number; paidOut: number; peaketWithdrawn: number }): number {
   return input.approvedAmount - input.refundedAmount - input.pgFees - input.paidOut - input.peaketWithdrawn;
+}
+
+/** 포트원 지급대행(파트너 정산) 설정(F-07-7 계획 §5.1 (가), ADR-0370 결정 3). 주소·시크릿은 결제 포트원 설정과 같다 */
+export interface PortonePayoutConfig {
+  baseUrl: string;
+  secret: string;
+  contractId: string;
+}
+
+/**
+ * PEAKET_PAYOUT_PORTONE_ENABLED가 true이고 PEAKET_PAYOUT_PORTONE_CONTRACT_ID와 결제 포트원 설정(loadPortoneGatewayConfig 규칙)이 함께 있을 때만 켠다.
+ * ENABLED가 없거나 true가 아니면 undefined. ENABLED=true인데 계약 ID나 결제 포트원 설정이 없으면 던진다(시작 실패, 메시지에 환경 이름만 있고 값은 없다).
+ */
+export function portonePayoutConfigured(env: Record<string, string | undefined>): PortonePayoutConfig | undefined {
+  if (env.PEAKET_PAYOUT_PORTONE_ENABLED?.trim() !== 'true') return undefined;
+  const contractId = env.PEAKET_PAYOUT_PORTONE_CONTRACT_ID?.trim() ?? '';
+  if (contractId === '') throw new Error('PEAKET_PAYOUT_PORTONE_ENABLED=true인데 PEAKET_PAYOUT_PORTONE_CONTRACT_ID가 없다');
+  const gateway = loadPortoneGatewayConfig(env);
+  if (!gateway) throw new Error('PEAKET_PAYOUT_PORTONE_ENABLED=true인데 결제 포트원 설정(PEAKET_PG_PORTONE_SECRET 등)이 없다');
+  return { baseUrl: gateway.baseUrl, secret: gateway.secret, contractId };
 }

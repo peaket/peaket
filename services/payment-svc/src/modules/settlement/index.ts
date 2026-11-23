@@ -140,3 +140,17 @@ export type {
   VerifiedPayoutApproval,
   VerifiedReauth,
 } from './domain/ports.js';
+// ---- F-07-7 포트원 지급대행·정산 계좌 변경·예약지급 취소·사후 대사(ADR-0370) ----
+export { HttpPortonePlatformTransport, PortoneTransportError } from './adapters/http-portone-platform-transport.js';
+export { portoneBankEnum } from './adapters/portone-platform-shapes.js';
+export { PortonePlatformPayoutGateway } from './adapters/portone-platform-payout-gateway.js';
+export { HttpOpsAlerts, UnavailableOpsAlerts } from './adapters/http-ops-alerts.js';
+export { HttpOpsAuditRecords, UnavailableOpsAuditRecords } from './adapters/http-ops-audit-records.js';
+export { OpsIntakeRefused } from './adapters/ops-intake-refused.js';
+export { buildCaseDetail } from './domain/case-detail.js';
+export { holderMatches, normalizeHolderName } from './domain/holder-name.js';
+export { reconcilePortoneWithdrawals } from './domain/portone-reconciliation.js';
+export { portonePayoutConfigured, type PortonePayoutConfig } from './domain/payout-adapters.js';
+export { PayoutAgencies, type PayoutAgencySyncInput, type PayoutAgencySyncResult } from './application/payout-agencies.js';
+export type { PayoutRegistrationView } from './application/settlements.js';
+export type { PayoutAccountAuditSink, PortonePlatformTransport, SettlementAlertSink } from './domain/ports.js';

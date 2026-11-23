@@ -1,8 +1,10 @@
 // 받는 층: 파트너 판매 승인 요청·변경 취소·현황(openapi POST/DELETE/GET /v1/partner/productions/{productionId}/sale-review, BAT-616 LCH-080, ADR-0327).
 // 요청·변경 취소는 partner_admin만 한다(partner_member 403, authz-matrix AZ-T3). 현황은 관리자·실무자 모두 읽는다.
-// 본문은 닫힌 객체이고(모르는 칸 400), 정산 계좌는 모양만 보고 저장하지 않는다(지급대행 연동 전, LCH-110). 응답은 no-store다.
+// 본문은 닫힌 객체이고(모르는 칸 400), 정산 계좌는 저장하지 않고 payment-svc 지급대행 등록에 바로 넘긴다(F-07-7, ADR-0370 결정 1·3). 응답은 no-store다.
+// 은행 코드는 두 자리 표(packages/validation REFUND_BANK_CODES) 하나이고 표 밖이면 400이다(계획 §5.1 (파) (라)).
 import { Controller, Delete, Get, Header, HttpCode, Post } from '@nestjs/common';
 import { ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, type Principal, Roles } from '@peaket/platform';
+import { REFUND_BANK_CODES } from '@peaket/validation/refund-account';
 import { z } from 'zod';
 import { RequestSaleReview } from '../application/request-sale-review.js';
 import { type SaleReviewRequestBody } from '../domain/sale-review.js';
@@ -23,7 +25,7 @@ const SellerInput = z
 
 const PayoutAccountInput = z
   .object({
-    bankCode: z.string().min(1).max(10),
+    bankCode: z.string().refine((code) => REFUND_BANK_CODES.has(code), { message: '은행 코드는 두 자리 은행 코드 표 안의 값이어야 합니다' }),
     accountNumber: z.string().min(1).max(30),
     holderName: z.string().min(1).max(60),
   })

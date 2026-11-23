@@ -286,6 +286,7 @@ export type OperationId =
   | 'getPartnerEventReport'
   | 'getPartnerEventSettlements'
   | 'getPartnerMerchOrderDelivery'
+  | 'getPartnerPayoutAccount'
   | 'getPartnerProduct'
   | 'getPartnerProduction'
   | 'getPartnerProductionSaleReview'
@@ -693,6 +694,7 @@ export const OPERATIONS = {
   getPartnerEventReport: {operationId: "getPartnerEventReport",method: "GET",path: "/v1/partner/events/{eventId}/report",host: "partner-api",kind: "read",cookie: true},
   getPartnerEventSettlements: {operationId: "getPartnerEventSettlements",method: "GET",path: "/v1/partner/events/{eventId}/settlements",host: "partner-api",kind: "read",cookie: true},
   getPartnerMerchOrderDelivery: {operationId: "getPartnerMerchOrderDelivery",method: "GET",path: "/v1/partner/merch-orders/{orderId}/delivery",host: "partner-api",kind: "read",cookie: true},
+  getPartnerPayoutAccount: {operationId: "getPartnerPayoutAccount",method: "GET",path: "/v1/partner/payout-account",host: "partner-api",kind: "read",cookie: true},
   getPartnerProduct: {operationId: "getPartnerProduct",method: "GET",path: "/v1/partner/products/{productId}",host: "partner-api",kind: "read",cookie: true},
   getPartnerProduction: {operationId: "getPartnerProduction",method: "GET",path: "/v1/partner/productions/{productionId}",host: "partner-api",kind: "read",cookie: true},
   getPartnerProductionSaleReview: {operationId: "getPartnerProductionSaleReview",method: "GET",path: "/v1/partner/productions/{productionId}/sale-review",host: "partner-api",kind: "read",cookie: true},

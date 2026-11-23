@@ -6,6 +6,7 @@ import {
   CreatePartnerSettlementDisputeParams,
   GetPartnerEventSettlementsParams,
   GetPartnerEventSettlementsResponse,
+  GetPartnerPayoutAccountResponse,
   ListPartnerProductSettlementsQueryParams,
   ListPartnerProductSettlementsResponse,
   PutPartnerPayoutAccountBody,
@@ -71,6 +72,17 @@ export class PartnerSettlementController {
     await this.settlements.dispute(tenantOf(me), me.accountId, params.statementId.toLowerCase(), body);
   }
 
+  /** 지금 정산 계좌(SCR-020, F-07-7 ADR-0370 결정 5). ETag = 판, PUT의 If-Match로 보낸다 */
+  @Get('payout-account')
+  @ContractRouteSchema({ responses: { 200: GetPartnerPayoutAccountResponse } })
+  @Roles(['partner_admin', 'partner_member'])
+  async getPayoutAccount(@CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: Reply) {
+    const out = await this.settlements.getPayoutAccount(tenantOf(me));
+    void reply.header('cache-control', 'no-store');
+    void reply.header('etag', `"${out.version}"`);
+    return out;
+  }
+
   @Put('payout-account')
   @HttpCode(200)
   @ContractRouteSchema({ responses: { 200: PutPartnerPayoutAccountResponse } })
@@ -83,6 +95,8 @@ export class PartnerSettlementController {
     @Res({ passthrough: true }) reply: Reply,
   ) {
     void reply.header('cache-control', 'no-store');
-    return this.settlements.putPayoutAccount(tenantOf(me), me.sessionId, body, ifMatch, reauthToken);
+    const out = await this.settlements.putPayoutAccount(tenantOf(me), me.sessionId, body, ifMatch, reauthToken);
+    void reply.header('etag', `"${out.version}"`);
+    return out;
   }
 }

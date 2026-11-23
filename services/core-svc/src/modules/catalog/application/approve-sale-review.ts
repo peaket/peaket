@@ -1,11 +1,15 @@
 // 유스케이스: 판매 승인 실행(openapi POST /v1/ops/sale-reviews/{productionId}/approvals, 판매 승인 LCH-080).
 // 공연 행 잠금 안에서 pending_revision의 규칙·회차 고침·더한 회차를 공개본으로 옮기고, 규모·결제사 칸을 정한다.
 // 커밋 뒤 회차 판매 설정 사본을 쓴다. 사본 쓰기가 실패해도 승인은 남고, 정비 일 sale-config-publish가 다시 쓴다.
+// 승인 쓰기 전에 payment 등록 읽기로 켜진 결제사의 지급대행 조건을 보고(모자라면 409 sale-review-payout-registration-incomplete·missing),
+// 참이면 payment에 판매자 확인을 쓴 뒤 승인한다. 읽기·쓰기가 실패하면 503 payout-dependency-unavailable이고 승인하지 않는다(fail-closed, F-07-7 ADR-0370 결정 4).
+// 판매자 확인은 같은 값이면 멱등이라, 그 뒤 승인 쓰기가 실패해 다시 승인해도 안전하다.
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger, ProblemError } from '@peaket/platform';
 import type { SaleApprovalInput, ShowScale } from '../domain/sale-approval.js';
 import { eligibleListKeys } from '../domain/event-sale-config.js';
 import { CDN_INVALIDATION, type CdnInvalidation } from '../domain/media-ports.js';
+import { missingPayoutConditions, PAYOUT_REGISTRATION, PAYOUT_REGISTRATION_UNWIRED, type PayoutRegistrationPort } from '../domain/payout-registration-port.js';
 import { OPS_SALE_STORE, type SaleStore } from '../domain/sale-ports.js';
 import { PublishSaleConfigs } from './publish-sale-configs.js';
 import { notFound, productionSuspended } from './problems.js';
@@ -25,11 +29,14 @@ export class ApproveSaleReview {
     @Inject(CLOCK) private readonly clock: Clock,
     @Optional() @Inject(CDN_INVALIDATION) private readonly cdn?: Pick<CdnInvalidation, 'invalidate'>,
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: Pick<PlatformLogger, 'info' | 'warn'>,
+    /** 없으면(직접 조립한 시험) 둘 다 꺼짐 */
+    @Optional() @Inject(PAYOUT_REGISTRATION) private readonly payout: PayoutRegistrationPort = PAYOUT_REGISTRATION_UNWIRED,
   ) {}
 
   async run(q: ApproveSaleReviewInput): Promise<{ applied: true; events: number }> {
     const tenantId = await this.store.promoterOf(q.productionId);
     if (!tenantId) throw notFound();
+    await this.checkPayout(q.productionId, tenantId);
     const input: SaleApprovalInput = { now: new Date(this.clock.now()), scales: q.scales, ...(q.placeId !== undefined ? { placeId: q.placeId } : {}), ...(q.accessibleSeatingCheck !== undefined ? { accessibleSeatingCheck: q.accessibleSeatingCheck } : {}) };
     const out = await this.store.withScaleChangeLock(tenantId, () =>
       this.store.withLockedProduction(q.productionId, tenantId, async (tx) => {
@@ -73,5 +80,37 @@ export class ApproveSaleReview {
     }
     this.logger?.info({ event: 'sale_review_approved', productionId: q.productionId, events: out.events.length }, '판매 승인을 적용했다');
     return { applied: true, events: out.events.length };
+  }
+
+  /** 지급대행 조건을 보고 판매자 확인을 쓴다. 실패면 던지고 승인 트랜잭션을 열지 않는다 */
+  private async checkPayout(productionId: string, tenantId: string): Promise<void> {
+    const unavailable = () => new ProblemError({ type: 'payout-dependency-unavailable', status: 503, title: '지급 서비스에 연결하지 못했습니다' });
+    let view;
+    try {
+      view = await this.payout.read(tenantId);
+    } catch (err) {
+      this.logger?.warn({ event: 'sale_review_payout_read_failed', productionId, err: err instanceof ProblemError ? err.slug : (err as Error).name }, '판매 승인 전에 지급대행 등록을 읽지 못해 승인하지 않았다');
+      throw unavailable();
+    }
+    const missing = missingPayoutConditions(view);
+    if (missing.length > 0) {
+      throw new ProblemError({ type: 'sale-review-payout-registration-incomplete', status: 409, title: '지급대행 등록이 끝나지 않아 승인할 수 없습니다', extensions: { missing } });
+    }
+    const detail = await this.store.opsReviewDetail(productionId);
+    if (!detail) throw notFound();
+    // 승인 대기·반려 공연만 승인한다. 그 밖은 아래 잠금 안의 상태 검사가 409로 닫으므로 판매자 확인을 쓰지 않는다
+    if (detail.status !== 'SUBMITTED' && detail.status !== 'REJECTED') return;
+    const representative = detail.seller?.representative;
+    if (!detail.seller || !representative) {
+      // 판매자 정보가 없으면 판매 승인 요청 전이다. 아래 상태 검사가 409로 닫는다
+      this.logger?.warn({ event: 'sale_review_seller_missing', productionId }, '판매자 정보가 없어 판매자 확인을 payment에 쓰지 않았다');
+      return;
+    }
+    try {
+      await this.payout.verifySeller(tenantId, { legalName: detail.seller.legalName, representative, verifiedAt: detail.verifiedAt ?? new Date(this.clock.now()) });
+    } catch (err) {
+      this.logger?.warn({ event: 'sale_review_seller_verify_failed', productionId, err: err instanceof ProblemError ? err.slug : (err as Error).name }, '판매자 확인을 payment에 쓰지 못해 승인하지 않았다');
+      throw unavailable();
+    }
   }
 }

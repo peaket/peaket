@@ -11,6 +11,10 @@
  */
 import * as zod from 'zod';
 
+export const createPartnerProductionSaleReviewBodyPayoutAccountBankCodeRegExp = new RegExp('^[0-9]{2}$');
+export const createPartnerProductionSaleReviewBodyPayoutAccountAccountNumberRegExp = new RegExp('^[0-9]{6,20}$');
+export const createPartnerProductionSaleReviewBodyPayoutAccountHolderNameMax = 100;
+
 export const createPartnerProductionSaleReviewBodyAccessibleSeatingNoteMax = 500;
 
 
@@ -26,10 +30,10 @@ export const CreatePartnerProductionSaleReviewBody = zod.object({
   "exemptionBasis": zod.string().optional()
 }).strict().describe('SellerInfo의 요청용(정의 밖 칸을 400으로 거절한다). 칸의 뜻은 원래 스키마(SellerInfo)와 같고 응답은 SellerInfo(열림)다(guidelines §1 \'요청은 닫고 응답은 연다\', BAS-040).'),
   "payoutAccount": zod.object({
-  "bankCode": zod.string(),
-  "accountNumber": zod.string(),
-  "holderName": zod.string()
-}).strict().describe('정산 계좌 변경. 저장하지 않고 결제사 수정 요청에 바로 넘김(POL-039)'),
+  "bankCode": zod.string().regex(createPartnerProductionSaleReviewBodyPayoutAccountBankCodeRegExp).describe('두 자리 은행 코드. 받는 값의 목록은 packages/validation의 두 자리 은행 코드 표(REFUND_BANK_CODES)이고, 표 밖이면 400이다(ADR-0370, settlement §6)'),
+  "accountNumber": zod.string().regex(createPartnerProductionSaleReviewBodyPayoutAccountAccountNumberRegExp).describe('숫자 6~20자리(하이픈 없음)'),
+  "holderName": zod.string().min(1).max(createPartnerProductionSaleReviewBodyPayoutAccountHolderNameMax)
+}).strict().describe('정산 계좌 변경. 계좌번호는 저장하지 않고 예금주 조회와 결제사 등록·수정 요청에 바로 넘긴다(POL-039, ADR-0370 결정 1·5)'),
   "accessibleSeating": zod.object({
   "confirmed": zod.literal(true).describe('휠체어석의 수와 위치를 공연장 좌석 배치도와 대조함(FR-023)'),
   "shortfallReason": zod.enum(['RELAXED_STANDARD', 'RECOMMENDED_FACILITY', 'NOT_USED_THIS_SHOW', 'OTHER']).optional().describe('휠체어석 수가 기준 min(⌈전체 좌석÷100⌉, 20)보다 적을 때 필수'),

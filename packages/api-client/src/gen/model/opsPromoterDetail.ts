@@ -9,8 +9,8 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
-import type { OpsPromoterDetailPayoutAccount } from './opsPromoterDetailPayoutAccount';
-import type { OpsPromoterDetailPgRegistration } from './opsPromoterDetailPgRegistration';
+import type { OpsPayoutAccountSummary } from './opsPayoutAccountSummary';
+import type { OpsPgRegistration } from './opsPgRegistration';
 import type { PromoterContractTerms } from './promoterContractTerms';
 import type { SellerInfo } from './sellerInfo';
 
@@ -33,11 +33,6 @@ export interface OpsPromoterDetail {
      * @nullable
      */
   verifiedAt?: string | null;
-  /**
-     * 은행과 끝 4자리만. cs_agent·cs_lead에게는 null(authz-matrix §4.1). 2026-11-20 BAT-615는 지급대행 연동 전이라 늘 null이다(ADR-0320 결정 7)
-     * @nullable
-     */
-  payoutAccount?: OpsPromoterDetailPayoutAccount;
-  /** 결제사 지급대행 등록 상태. 2026-11-20 BAT-615는 연동 전이라 빈 목록과 false만 준다(가짜 상태 금지, ADR-0320 결정 7) */
-  pgRegistration?: OpsPromoterDetailPgRegistration;
+  payoutAccount?: OpsPayoutAccountSummary | null;
+  pgRegistration?: OpsPgRegistration;
 }

@@ -40,6 +40,8 @@ import { RejectSaleReview } from './application/reject-sale-review.js';
 import { OpsSaleReviewController } from './inbound/ops-sale-review.controller.js';
 import { OPS_DATABASE, SALE_CONFIG_FACTS, SALE_CONFIG_READER, SALE_CONFIG_STORE, type SaleConfigStore } from './domain/sale-config-ports.js';
 import { SALE_OPEN, type SaleOpen } from './domain/sale-open-port.js';
+import { PAYOUT_REGISTRATION, type PayoutRegistrationPort } from './domain/payout-registration-port.js';
+import { UnavailablePayoutRegistration } from './adapters/http-payout-registration.js';
 import { MemorySaleOpen } from './adapters/http-purchase-sale-open.js';
 import { SALE_CONFIG_METRICS, SaleConfigMetrics } from './application/sale-config-metrics.js';
 import { OpsSaleReviews, RequestSaleReview } from './application/request-sale-review.js';
@@ -212,8 +214,10 @@ export class CatalogModule implements NestModule {
           saleOpen?: SaleOpen;
           /** 판매 승인 부수 효과 지표(BAT-616). main.ts가 등록한다 */
           saleConfigMetrics?: SaleConfigMetrics;
+          /** payment-svc 지급대행 등록(F-07-7). 없으면 둘 다 꺼짐(main.ts는 assemblePayoutRegistration으로 넘긴다) */
+          payoutRegistration?: PayoutRegistrationPort;
         }
-      | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring>; saleConfigs?: SaleConfigStore; opsApprovals?: OpsApprovalClient; saleOpen?: SaleOpen; saleConfigMetrics?: SaleConfigMetrics },
+      | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring>; saleConfigs?: SaleConfigStore; opsApprovals?: OpsApprovalClient; saleOpen?: SaleOpen; saleConfigMetrics?: SaleConfigMetrics; payoutRegistration?: PayoutRegistrationPort },
   ): DynamicModule {
     const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview, GetDemandForecast, ChangeEventScale, Promoters, ApplyContractApproval, RequestSaleReview, OpsSaleReviews];
     const controllers = [EventSummaryController, PartnerProductionController, PartnerSaleReviewController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, InternalSaleConfigController, OpsEventController, OpsPromoterController, InternalPromoterController];
@@ -243,6 +247,7 @@ export class CatalogModule implements NestModule {
           { provide: SALE_CONFIG_FACTS, useClass: NoopSaleConfigFacts },
           { provide: SALE_OPEN, useValue: o.saleOpen ?? new MemorySaleOpen() },
           { provide: SALE_CONFIG_METRICS, useValue: o.saleConfigMetrics ?? new SaleConfigMetrics() },
+          { provide: PAYOUT_REGISTRATION, useValue: o.payoutRegistration ?? new UnavailablePayoutRegistration() },
           { provide: SEARCH_DATABASE, useFactory: (db: Database) => o.searchDatabase ?? db, inject: [DATABASE] },
           // 0건 제안은 메모리 사전이 답한다(ADR-0271 결정 13). 사전이 아직 준비되지 않았으면 search_term으로 대신한다.
           // 한 글자 입력의 단계별 후보 읽기(결정 25)는 사전이 첫 통째로 읽기를 마친 뒤에만 쓴다(그 전에는 지금 질의)
@@ -276,6 +281,7 @@ export class CatalogModule implements NestModule {
         { provide: SALE_CONFIG_FACTS, useValue: new NoopSaleConfigFacts() },
         { provide: SALE_OPEN, useValue: o.saleOpen ?? new MemorySaleOpen() },
         { provide: SALE_CONFIG_METRICS, useValue: o.saleConfigMetrics ?? new SaleConfigMetrics() },
+        { provide: PAYOUT_REGISTRATION, useValue: o.payoutRegistration ?? new UnavailablePayoutRegistration() },
         { provide: SEARCH_INDEX, useFactory: (catalog: MemoryCatalogRepository, origin: string, clock: Clock) => new MemorySearchIndex(catalog, origin, clock), inject: [CATALOG_REPOSITORY, IMAGE_ORIGIN, CLOCK] },
         { provide: SEARCH_DICTIONARY_SOURCE, useFactory: (index: MemorySearchIndex) => new MemorySearchDictionarySource(index), inject: [SEARCH_INDEX] },
         { provide: SEARCH_DICTIONARY, useFactory: (source: SearchDictionarySource, clock: Clock) => new SuggestionDictionary(source, clock), inject: [SEARCH_DICTIONARY_SOURCE, CLOCK] },

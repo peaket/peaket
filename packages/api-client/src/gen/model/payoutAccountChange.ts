@@ -11,10 +11,22 @@
  */
 
 /**
- * 정산 계좌 변경. 저장하지 않고 결제사 수정 요청에 바로 넘김(POL-039)
+ * 정산 계좌 변경. 계좌번호는 저장하지 않고 예금주 조회와 결제사 등록·수정 요청에 바로 넘긴다(POL-039, ADR-0370 결정 1·5)
  */
 export interface PayoutAccountChange {
+  /**
+     * 두 자리 은행 코드. 받는 값의 목록은 packages/validation의 두 자리 은행 코드 표(REFUND_BANK_CODES)이고, 표 밖이면 400이다(ADR-0370, settlement §6)
+     * @pattern ^[0-9]{2}$
+     */
   bankCode: string;
+  /**
+     * 숫자 6~20자리(하이픈 없음)
+     * @pattern ^[0-9]{6,20}$
+     */
   accountNumber: string;
+  /**
+     * @minLength 1
+     * @maxLength 100
+     */
   holderName: string;
 }

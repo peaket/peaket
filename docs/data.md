@@ -1442,6 +1442,7 @@ erDiagram
         uuid promoter_id
         uuid actor_account_id "재인증한 파트너 관리자 계정"
         text reauth_jti UK "그 시도에 쓴 재인증 토큰 jti(한 번 쓰기의 증거)"
+        text_array reauth_factors "그 재인증 토큰이 거친 요소(password·totp·passkey). ops 감사 본문 reauthFactors에 싣는다(payment 0030, F-07-7)"
         text result "ACCEPTED|HOLDER_MISMATCH|AGENCY_FAILED"
         text bank_code
         text account_last4

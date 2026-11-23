@@ -44,8 +44,23 @@ export const OpsSaleReviewDetail = zod.object({
   "scale": zod.union([zod.literal('LARGE'),zod.literal('MEDIUM'),zod.literal('SMALL'),zod.literal(null)]).nullish().describe('판매 승인 때 정한 규모. 승인 전이면 null'),
   "demandForecastPath": zod.string().optional().describe('GET /v1/ops/events/{eventId}/demand-forecast')
 }).describe('판매 승인 확인 패널의 회차 한 줄(SCR-048). 수요 예측은 링크로 가리킨다')).optional(),
-  "suspensionApprovalPending": zod.boolean().optional().describe('LCH-090 전에는 늘 false다')
-}).describe('관제 판매 승인 확인 패널(SCR-048, BAT-616). 계좌번호 전체·토스 셀러 ID·포트원 파트너 ID는 없다. 지급대행 등록은 LCH-110 전이라 화면이 \'연동 전\'이라고 적는다(ADR-0327 결정 6)')
+  "suspensionApprovalPending": zod.boolean().optional().describe('LCH-090 전에는 늘 false다'),
+  "payoutAccount": zod.object({
+  "bankCode": zod.string().optional(),
+  "last4": zod.string().optional(),
+  "holdUntil": zod.iso.datetime({"offset":true}).nullish().describe('변경 뒤 3영업일 지급 보류의 끝'),
+  "holderVerified": zod.boolean().optional().describe('예금주가 판매자 상호·대표자와 같다고 확인됨')
+}).nullish().describe('정산 계좌의 은행과 끝 4자리만(payment 등록 읽기, ADR-0370 결정 4). cs_agent·cs_lead에게는 null(authz-matrix §4.1). 계좌가 없거나 등록 읽기가 실패하면 null'),
+  "pgRegistration": zod.object({
+  "tossEnabled": zod.boolean().optional().describe('토스페이먼츠 지급대행이 켜졌는지'),
+  "portoneEnabled": zod.boolean().optional().describe('포트원 파트너 정산이 켜졌는지'),
+  "tossSellers": zod.array(zod.object({
+  "pgStore": zod.enum(['STANDARD', 'ESCROW']).optional(),
+  "status": zod.union([zod.literal('APPROVAL_REQUIRED'),zod.literal('PENDING'),zod.literal('PARTIALLY_APPROVED'),zod.literal('KYC_REQUIRED'),zod.literal('APPROVED'),zod.literal('REJECTED'),zod.literal(null)]).nullish()
+})).optional().describe('결제 상점마다 하나(일반·에스크로, settlement §3)'),
+  "portonePartnerRegistered": zod.boolean().optional()
+}).optional().describe('결제사 지급대행 등록 상태(payment 등록 읽기, ADR-0370 결정 4). 결제사의 셀러·파트너 ID 원문은 없다. 꺼진 결제사는 화면이 \'연동 전\'이라고 적는다. 등록 읽기가 실패하면 둘 다 꺼진 모양(빈 목록과 false)이다')
+}).describe('관제 판매 승인 확인 패널(SCR-048, BAT-616). 계좌번호 전체·토스 셀러 ID·포트원 파트너 ID는 없다. 지급대행 등록 값은 payment 등록 읽기에서 온다(ADR-0370 결정 4). 꺼진 결제사는 화면이 \'연동 전\'이라고 적는다')
 
 export type OpsSaleReviewDetail = zod.input<typeof OpsSaleReviewDetail>;
 export type OpsSaleReviewDetailOutput = zod.output<typeof OpsSaleReviewDetail>;

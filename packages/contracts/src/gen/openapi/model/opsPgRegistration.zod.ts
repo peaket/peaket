@@ -9,11 +9,17 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import * as zod from 'zod';
 
-export type OpsPromoterDetailPgRegistrationTossSellersItemPgStore = typeof OpsPromoterDetailPgRegistrationTossSellersItemPgStore[keyof typeof OpsPromoterDetailPgRegistrationTossSellersItemPgStore];
+export const OpsPgRegistration = zod.object({
+  "tossEnabled": zod.boolean().optional().describe('토스페이먼츠 지급대행이 켜졌는지'),
+  "portoneEnabled": zod.boolean().optional().describe('포트원 파트너 정산이 켜졌는지'),
+  "tossSellers": zod.array(zod.object({
+  "pgStore": zod.enum(['STANDARD', 'ESCROW']).optional(),
+  "status": zod.union([zod.literal('APPROVAL_REQUIRED'),zod.literal('PENDING'),zod.literal('PARTIALLY_APPROVED'),zod.literal('KYC_REQUIRED'),zod.literal('APPROVED'),zod.literal('REJECTED'),zod.literal(null)]).nullish()
+})).optional().describe('결제 상점마다 하나(일반·에스크로, settlement §3)'),
+  "portonePartnerRegistered": zod.boolean().optional()
+}).describe('결제사 지급대행 등록 상태(payment 등록 읽기, ADR-0370 결정 4). 결제사의 셀러·파트너 ID 원문은 없다. 꺼진 결제사는 화면이 \'연동 전\'이라고 적는다. 등록 읽기가 실패하면 둘 다 꺼진 모양(빈 목록과 false)이다')
 
-
-export const OpsPromoterDetailPgRegistrationTossSellersItemPgStore = {
-  STANDARD: 'STANDARD',
-  ESCROW: 'ESCROW',
-} as const;
+export type OpsPgRegistration = zod.input<typeof OpsPgRegistration>;
+export type OpsPgRegistrationOutput = zod.output<typeof OpsPgRegistration>;

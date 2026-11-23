@@ -15,6 +15,8 @@ import {
   type PromoterDetail,
   type PromoterPage,
 } from '../domain/promoter-contract.js';
+import { PAYOUT_REGISTRATION, type PayoutRegistrationPort } from '../domain/payout-registration-port.js';
+import { payoutRegistrationOf } from './payout-registration-view.js';
 import { OPS_APPROVAL_CLIENT, PROMOTER_STORE, type OpsApprovalClient, type OpsPromoterActor, type PromoterCreateInput, type PromoterStore, type ReservedContractChange } from '../domain/promoter-ports.js';
 
 export interface PromoterListQuery {
@@ -85,16 +87,16 @@ const periodView = (p: PromoterContractPeriod) => ({
   approvalId: p.approvalId,
 });
 
-/** 상세 응답의 계약 기간을 문자열 시각으로 바꾼다(openapi date-time) */
-const detailView = (d: PromoterDetail) => ({
+/** 상세 응답의 계약 기간을 문자열 시각으로 바꾼다(openapi date-time). 지급대행 등록 값은 payment 등록 읽기에서 온다(F-07-7, ADR-0370 결정 4) */
+const detailView = (d: PromoterDetail, registration: Awaited<ReturnType<typeof payoutRegistrationOf>>) => ({
   promoterId: d.promoterId,
   legalName: d.legalName,
   contract: periodView(d.contract),
   pendingContractApprovalId: d.pendingContractApprovalId,
   seller: d.seller,
   verifiedAt: d.verifiedAt ? d.verifiedAt.toISOString() : null,
-  payoutAccount: d.payoutAccount,
-  pgRegistration: d.pgRegistration,
+  payoutAccount: registration.payoutAccount,
+  pgRegistration: registration.pgRegistration,
 });
 
 @Injectable()
@@ -103,6 +105,7 @@ export class Promoters {
     @Inject(PROMOTER_STORE) private readonly store: PromoterStore,
     @Inject(OPS_APPROVAL_CLIENT) private readonly approvals: OpsApprovalClient,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(PAYOUT_REGISTRATION) private readonly payout: PayoutRegistrationPort,
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: Pick<PlatformLogger, 'info' | 'warn'>,
   ) {}
 
@@ -120,14 +123,15 @@ export class Promoters {
       const now = new Date(this.clock.now());
       const detail = await this.store.create({ ...input, legalName: input.legalName.trim() }, actor, now, once);
       this.logger?.info({ event: 'ops_promoter_created', promoterId: detail.promoterId, commissionRateBp: detail.contract.commissionRateBp }, '파트너사를 등록했다');
-      return detailView(detail);
+      return detailView(detail, await payoutRegistrationOf(this.payout, detail.promoterId, actor.role, this.logger));
     });
   }
 
-  async detail(promoterId: string) {
+  /** role이 cs_agent·cs_lead면 정산 계좌는 null이다(authz-matrix §4.1) */
+  async detail(promoterId: string, role?: string) {
     const d = await this.store.detail(promoterId);
     if (!d) throw notFound();
-    return detailView(d);
+    return detailView(d, await payoutRegistrationOf(this.payout, d.promoterId, role, this.logger));
   }
 
   async terms(promoterId: string, q: { cursor?: string | undefined; limit?: number | undefined }): Promise<{ items: ReturnType<typeof periodView>[]; nextCursor: string | null }> {

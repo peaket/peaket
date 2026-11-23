@@ -31,7 +31,14 @@ import type {
   VerifiedAdjustmentApproval,
   VerifiedPayoutApproval,
 } from '../domain/ports.js';
-import { classifyTossFailure, DEFAULT_TOSS_PAYOUT_TERMS, ledgerBalance, normalizeHolderName, splitTossPayoutAmount, TOSS_PAYOUT_DATE_ERRORS, type TossPayoutTerms } from '../domain/payout-adapters.js';
+import type { OpsIntakeRow, OpsIntakeTarget, PayoutAccountAuditSink, PortonePlatformTransport, SettlementAlertSink, VerifiedReauth } from '../domain/ports.js';
+import { REFUND_BANK_CODES } from '@peaket/validation/refund-account';
+import { kstDateOf } from './portone-payouts.js';
+import { z } from 'zod';
+import { PayoutAgencies, type PayoutAgencySyncInput, type PayoutAgencySyncResult } from './payout-agencies.js';
+import { portoneLedgerBalance, PortonePayouts } from './portone-payouts.js';
+import type { PortonePayoutConfig } from '../domain/payout-adapters.js';
+import { classifyTossFailure, DEFAULT_TOSS_PAYOUT_TERMS, ledgerBalance, splitTossPayoutAmount, TOSS_PAYOUT_DATE_ERRORS, type TossPayoutTerms } from '../domain/payout-adapters.js';
 import { nextBankBusinessDay, payoutFailureAction, retryPayoutDate, submitBackoffMs, submitDeadlineFor } from '../domain/payout-failure.js';
 import { kstMonthOf, payoutUsageFee, pgBalanceSeverity } from '../domain/pg-balance-reconciliation.js';
 import { isBatchableTossSeller, parseTossSellerRegistration, TOSS_SELLER_STORES, tossRefSellerId, type TossSellerRegistrationInput } from '../domain/toss-seller.js';
@@ -63,7 +70,6 @@ import {
   statementEvent,
   statementView,
   validateDispute,
-  validatePayoutAccount,
   type DisputeRecord,
   type HoldReason,
   type GuaranteeCollectionRecord,
@@ -71,6 +77,11 @@ import {
   type KycNotice,
   type KycRecord,
   type KycStatus,
+  type OpsRefusal,
+  type PayoutAccountChangeRecord,
+  type PayoutAccountRecord,
+  type PayoutAgency,
+  type PayoutAgencyResults,
   payoutEvent,
   receivableClosedEvent,
   TOSS_SELLER_STATUSES,
@@ -129,6 +140,14 @@ export interface SettlementDeps {
   readonly tossTerms?: TossPayoutTerms;
   /** 결제사 잔액 대사의 장부 원천. 없으면 잔액 대사를 하지 않는다 */
   readonly pgLedger?: PgLedgerSource;
+  /** 포트원 플랫폼 전송(F-07-7 ADR-0370 결정 1·7·8). 없으면 포트원 지급대행 꺼짐(예금주 조회 불가, 콘솔 실행 기록만) */
+  readonly portone?: PortonePlatformTransport;
+  /** 포트원 지급대행 설정(계약 ID). portone과 함께 있다 */
+  readonly portoneConfig?: PortonePayoutConfig;
+  /** ops 감사 받기(PAYOUT_ACCOUNT_CHANGED). 없으면 변경 행은 남고 보낸 시각이 빈다 */
+  readonly payoutAccountAudit?: PayoutAccountAuditSink;
+  /** ops 운영 경보 받기. 없으면 경보 요청 행은 남고 보낸 시각이 빈다 */
+  readonly alerts?: SettlementAlertSink;
 }
 
 const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
@@ -219,6 +238,46 @@ const batchStatusOf = (current: PayoutBatchRecord['status'], live: readonly Payo
   if (live.some((p) => p.pgPayoutId === null && p.status === 'REQUESTED')) return current === 'APPROVED' ? 'APPROVED' : current;
   return current === 'APPROVED' || current === 'COMPLETED' || current === 'PARTIAL_FAILED' ? 'SUBMITTED' : current;
 };
+/** ops 받기 거절 몇 번째에 영구 실패로 둘지 [가정 3번, F-07-7 계획 §5.1 (파) (마)] */
+const OPS_REFUSAL_LIMIT = 3;
+const REFUSALS = new Set(['NOT_ACCEPTED', 'HTTP_400', 'HTTP_422']);
+/** ops 어댑터의 거절(OpsIntakeRefused: SettlementProblem 503에 refusal 칸)인지. 일시 실패면 undefined */
+const refusalOf = (e: unknown): OpsRefusal | undefined => {
+  const r = e instanceof SettlementProblem ? (e as SettlementProblem & { refusal?: unknown }).refusal : undefined;
+  return typeof r === 'string' && REFUSALS.has(r) ? (r as OpsRefusal) : undefined;
+};
+
+/** 정산 계좌 변경 본문(F-07-7, 계약 PayoutAccountChange). 은행 코드는 packages/validation 두 자리 표, 계좌번호 숫자 6~20자리 */
+const PayoutAccountChangeBody = z.strictObject({
+  bankCode: z.string().refine((v) => /^[0-9]{2}$/.test(v) && REFUND_BANK_CODES.has(v)),
+  accountNumber: z.string().regex(/^[0-9]{6,20}$/),
+  holderName: z.string().min(1).max(100),
+});
+const parsePayoutAccountChange = (body: unknown): void => {
+  if (!PayoutAccountChangeBody.safeParse(body).success) throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
+};
+
+const failedAgencies = (agencies: PayoutAgencyResults): PayoutAgency[] => (['TOSS_STANDARD', 'TOSS_ESCROW', 'PORTONE'] as const).filter((a) => agencies[a] === 'FAILED');
+
+const payoutAccountOut = (a: PayoutAccountRecord) => ({
+  bankCode: a.bankCode,
+  payoutAccountLast4: a.accountLast4,
+  holderVerified: a.holderVerified,
+  holdUntil: a.holdUntil.toISOString(),
+  agencySyncPending: a.agencySyncPending ?? false,
+  version: a.version,
+});
+
+/** 등록 읽기(core 내부, ADR-0370 결정 4) */
+export interface PayoutRegistrationView {
+  payoutAccount: { bankCode: string; last4: string; holdUntil: string | null; holderVerified: boolean } | null;
+  agencySyncPending: boolean;
+  tossEnabled: boolean;
+  portoneEnabled: boolean;
+  tossSellers: { pgStore: PgStore; status: TossSellerStatus }[];
+  portonePartnerRegistered: boolean;
+}
+
 const errorReason = (e: unknown): string => (e instanceof Error ? `${e.name}:${e.message}`.slice(0, 200) : 'unknown');
 
 export class Settlements {
@@ -236,7 +295,13 @@ export class Settlements {
     if (rows.length === 0 && accountId !== undefined && (await this.d.store.hasEventStatementOfOther(promoterId, eventId))) {
       this.d.log?.authzDenied?.({ partnerId: promoterId, accountId, statementId: null, eventId, action: 'list-event', at: this.#now() });
     }
-    return rows.map(statementView);
+    // 파트너 응답만 KYC 예고를 싣는다(토스만 계산, 포트원 false, F-07-7 I-08 (a))
+    return Promise.all(
+      rows.map(async (s) => ({
+        ...statementView(s),
+        kycNotice: s.pg === 'TOSS' && s.payoutDate !== null ? (await this.kycNotice(s.promoterId, s.payoutDate, s.pgStore)).notice : false,
+      })),
+    );
   }
 
   #now(): Date {
@@ -374,10 +439,10 @@ export class Settlements {
 
   /** CS 처리함 '정산 이의' 건을 연다. 열면 case_requested_at을 채우고, 못 열면 로그만 남긴다(정산 일꾼이 다시 보낸다) */
   async #openDisputeCase(d: DisputeRecord): Promise<boolean> {
-    if (!this.d.caseNotice) return false;
-    try {
-      await this.d.caseNotice.openDispute({ disputeId: d.disputeId, statementId: d.statementId, createdAt: d.submittedAt });
-    } catch {
+    const notice = this.d.caseNotice;
+    if (!notice) return false;
+    // ops 거절(202 accepted:false·400·422)은 세고 3번째에 영구 실패로 둔다(F-07-7 계획 §5.1 (파) (마)). 일시 실패는 세지 않는다
+    if (!(await this.#deliver('dispute', 'cs-case', d.disputeId, d.disputeId, 'STATEMENT_DISPUTE', () => notice.openDispute({ disputeId: d.disputeId, statementId: d.statementId, createdAt: d.submittedAt })))) {
       this.d.log?.caseNoticeFailed?.({ disputeId: d.disputeId, statementId: d.statementId, at: this.#now() });
       return false;
     }
@@ -645,11 +710,25 @@ export class Settlements {
         if (!(kyc?.status === 'VERIFIED' && kyc.businessVerified && kyc.representativeVerified)) throw new SettlementProblem('payout-kyc-required', 409, 'KYC 확인이 끝나지 않아 다시 확정할 수 없습니다');
       } else if (s.holdReason === 'ACCOUNT_CHANGE') {
         const account = await this.d.store.findPayoutAccount(s.promoterId);
-        if (account && account.holdUntil.getTime() > now.getTime()) throw new SettlementProblem('payout-account-change-hold', 409, '정산 계좌 변경 보류 중이라 다시 확정할 수 없습니다');
+        // 결제사 수정 대기가 남았으면 보류가 끝나도 풀지 않는다(F-07-7 ADR-0370 결정 5)
+        if (account && (account.holdUntil.getTime() > now.getTime() || account.agencySyncPending === true)) throw new SettlementProblem('payout-account-change-hold', 409, '정산 계좌 변경 보류 중이라 다시 확정할 수 없습니다');
       } else if (s.holdReason === 'ACCOUNT_MISMATCH') {
         const account = await this.d.store.findPayoutAccount(s.promoterId);
-        const reconciled = o.evidence?.accountReconciled === true || Boolean(account && account.holderVerified && account.holdUntil.getTime() <= now.getTime());
-        if (!reconciled) throw new SettlementProblem('payout-account-mismatch', 409, '계좌 대조가 확인되지 않아 다시 확정할 수 없습니다');
+        const partner = s.pg === 'PORTONE' ? await this.d.store.findPortonePartner(s.promoterId) : undefined;
+        if (partner) {
+          // 포트원 파트너 계좌 대조 불일치(F-07-7 I-14, ADR-0370 결정 8 ②): 증빙만으로는 풀지 않는다. 마지막 대조가 MATCHED이고 그 대조가 마지막 계좌 변경 뒤이며 보류가 끝났을 때만
+          const ok =
+            account !== undefined &&
+            partner.lastAccountCheck === 'MATCHED' &&
+            partner.lastAccountCheckedAt !== null &&
+            partner.lastAccountCheckedAt.getTime() >= account.changedAt.getTime() &&
+            account.holdUntil.getTime() <= now.getTime() &&
+            account.agencySyncPending !== true;
+          if (!ok) throw new SettlementProblem('payout-account-change-hold', 409, '포트원 파트너 계좌 대조가 맞고 계좌 변경 보류가 끝나야 다시 확정할 수 있습니다');
+        } else {
+          const reconciled = o.evidence?.accountReconciled === true || Boolean(account && account.holderVerified && account.holdUntil.getTime() <= now.getTime());
+          if (!reconciled) throw new SettlementProblem('payout-account-mismatch', 409, '계좌 대조가 확인되지 않아 다시 확정할 수 없습니다');
+        }
       } else if (s.holdReason === 'BALANCE') {
         if (o.evidence?.balanceConfirmed !== true) throw new SettlementProblem('payout-balance-unconfirmed', 409, '잔액 확인 증빙이 없어 다시 확정할 수 없습니다');
       } else if (s.holdReason === 'SALE_SUSPENDED') {
@@ -921,7 +1000,15 @@ export class Settlements {
       if (!row) return;
       const now = this.#now();
       await this.d.store.saveTossSeller({ ...row, status: fact.status, statusCheckedAt: fact.checkedAt, updatedAt: now });
-      if (fact.status === 'KYC_REQUIRED') await this.d.store.insertCaseRequests([caseOf('SELLER_KYC_REQUIRED', row.tossSellerId, `seller-kyc:${row.tossSellerId}:${fact.checkedAt.toISOString()}`, now)]);
+      if (fact.status === 'KYC_REQUIRED') {
+        await this.d.store.insertCaseRequests([caseOf('SELLER_KYC_REQUIRED', row.tossSellerId, `seller-kyc:${row.tossSellerId}:${fact.checkedAt.toISOString()}`, now)]);
+        // 지급 요청 뒤 KYC가 필요해지면 그 상점의 이미 접수된 예약지급을 취소한다(F-07-7 I-06, settlement §12). 실패해도 셀러 상태 반영은 그대로다
+        try {
+          await this.cancelScheduledTossPayouts({ promoterId: row.promoterId, pgStore: row.pgStore, reason: 'KYC' });
+        } catch (e) {
+          this.d.log?.payoutJobFailed?.({ job: 'scheduled-payout-cancel', pgStore: row.pgStore, reason: errorReason(e), at: now });
+        }
+      }
       this.d.signals?.sellerKycRequired('TOSS', await this.d.store.countTossSellers('KYC_REQUIRED'));
       if (fact.status === 'APPROVED') {
         await this.#releaseKycHolds(row, now);
@@ -1080,6 +1167,8 @@ export class Settlements {
         receivableMoves: ReceivableMoveRecord[];
         closedEvents: SettlementEventValue[];
         totalAmount: number;
+        /** 포트원 이체 원장으로 계산한 지급대행 계좌 잔액(F-07-7 I-15 (a)). 포트원 플랫폼이 꺼졌거나 원장이 비면 undefined */
+        portoneLedger?: number;
       }
     | undefined
   > {
@@ -1104,7 +1193,8 @@ export class Settlements {
       const sellerOk = input.pg === 'PORTONE' || isBatchableTossSeller((await this.d.store.findTossSeller(s.promoterId, input.pgStore))?.status);
       if (kyc?.status === 'VERIFIED' && kyc.businessVerified && kyc.representativeVerified && sellerOk) {
         const account = await this.d.store.findPayoutAccount(s.promoterId);
-        if (account && account.holdUntil.getTime() > now.getTime()) {
+        // 결제사 수정 대기(agency_sync_pending)는 보류가 끝나도 지급하지 않는다(F-07-7 ADR-0370 결정 5)
+        if (account && (account.holdUntil.getTime() > now.getTime() || account.agencySyncPending === true)) {
           heldAccount += 1;
           holdUpdates.push(this.#holdUpdate(s, 'ACCOUNT_CHANGE', now));
           continue;
@@ -1196,9 +1286,20 @@ export class Settlements {
         throw new SettlementProblem('pg-balance-unavailable', 503, '결제사 잔액을 확인할 수 없습니다');
       }
     }
+    // 포트원은 operator 입력값과 이체 원장 계산값 가운데 작은 값으로 판정한다(F-07-7 I-15 (a), ADR-0370 결정 8 ③). 원장을 읽지 못하면 묶음을 만들지 않는다
+    let portoneLedger: number | undefined;
+    if (input.pg === 'PORTONE' && this.d.portone) {
+      try {
+        portoneLedger = await portoneLedgerBalance(this.d.portone, now);
+      } catch {
+        throw new SettlementProblem('pg-balance-unavailable', 503, '결제사 잔액을 확인할 수 없습니다');
+      }
+    }
     // 토스는 결제사에 이미 예약된 끝나지 않은 지급을 더해 견준다(settlement §5.1·§6, ADR-0369 결정 7)
     const reserved = input.pg === 'TOSS' && tossBalance ? await this.d.store.sumUnfinishedTossPayouts(input.pgStore) : 0;
-    const available = input.pg === 'PORTONE' ? input.portoneBalance?.amount : tossBalance === undefined ? undefined : tossBalance.availableAmount - reserved;
+    const operatorBalance = input.portoneBalance?.amount;
+    const portoneAvailable = operatorBalance === undefined ? undefined : portoneLedger === undefined ? operatorBalance : Math.min(operatorBalance, portoneLedger);
+    const available = input.pg === 'PORTONE' ? portoneAvailable : tossBalance === undefined ? undefined : tossBalance.availableAmount - reserved;
     if (available !== undefined && available < totalAmount) {
       // 잔액이 모자라면 묶음을 만들지 않고 그 정산서를 HELD·BALANCE로 남긴다(settlement §6, J-T13). 상계는 아직 적용하지 않는다. 미수금은 다음 묶음에서 다시 본다.
       // 같은 요청에서 다른 사유로 빠진 정산서의 보류도 함께 저장한다(모두 보류된 묶음과 같은 규칙, ADR-0368 결정 11)
@@ -1207,7 +1308,7 @@ export class Settlements {
       if (mode === 'prepare') return undefined;
       throw new SettlementProblem('payout-balance-insufficient', 409, '결제사 잔액이 모자라 지급일을 미룹니다');
     }
-    return { included: includedAfterOffset, holdUpdates, offsetUpdates, receivableUpdates, receivableMoves, closedEvents, totalAmount };
+    return { included: includedAfterOffset, holdUpdates, offsetUpdates, receivableUpdates, receivableMoves, closedEvents, totalAmount, ...(portoneLedger === undefined ? {} : { portoneLedger }) };
   }
 
   #newBatch(input: { pg: Pg; pgStore: PgStore; payoutDate: string; portoneBalance?: { amount: number; observedAt: string } | undefined; actor: string }, o: { totalAmount: number; statementCount: number; status: PayoutBatchRecord['status'] }, now: Date): PayoutBatchRecord {
@@ -1248,7 +1349,7 @@ export class Settlements {
       const prepared = existing.find((b) => b.status === 'PREPARED');
       const j = await this.#judgeBatch(input, now, 'request');
       if (!j) throw new SettlementProblem('payout-batch-empty', 409, '지급할 확정 정산서가 없습니다');
-      const fresh = this.#newBatch(input, { totalAmount: j.totalAmount, statementCount: j.included.length, status: 'PENDING_APPROVAL' }, now);
+      const fresh: PayoutBatchRecord = { ...this.#newBatch(input, { totalAmount: j.totalAmount, statementCount: j.included.length, status: 'PENDING_APPROVAL' }, now), ...(j.portoneLedger === undefined ? {} : { pgBalanceLedgerKrw: j.portoneLedger }) };
       const batch: PayoutBatchRecord = prepared
         ? { ...fresh, batchId: prepared.batchId, createdAt: prepared.createdAt, submitAttempts: prepared.submitAttempts, nextSubmitAt: prepared.nextSubmitAt, submitDeadlineAt: prepared.submitDeadlineAt, lastSubmitError: prepared.lastSubmitError, dateRetryUsed: prepared.dateRetryUsed }
         : fresh;
@@ -1261,6 +1362,12 @@ export class Settlements {
         events: j.closedEvents,
         ...(prepared ? { promotePrepared: true } : {}),
       });
+      // operator 입력값과 원장 계산값이 다르면 CS PORTONE_LEDGER_MISMATCH(대상 = 묶음)와 차이 게이지(F-07-7 I-15 (a))
+      if (j.portoneLedger !== undefined && input.portoneBalance) {
+        const diff = input.portoneBalance.amount - j.portoneLedger;
+        this.d.signals?.portoneBalanceDiff?.(diff);
+        if (diff !== 0) await this.d.store.insertCaseRequests([caseOf('PORTONE_LEDGER_MISMATCH', batch.batchId, `portone-balance:${batch.batchId}`, now)]);
+      }
       return payoutBatchView(batch);
     });
   }
@@ -1470,6 +1577,8 @@ export class Settlements {
     const now = this.#now();
     const boundTotal = boundStatements.reduce((total, s) => total + s.payoutAmount, 0);
     if (boundTotal !== b.totalAmount) throw new SettlementProblem('payout-batch-amount-mismatch', 409, '승인한 지급 금액과 정산서 합계가 다릅니다');
+    // 포트원 플랫폼이 켜진 갈래(PortonePlatformPayoutGateway는 전송을 들고 있다, F-07-7 I-07)
+    if (b.pg === 'PORTONE' && this.d.portone && 'transport' in gateway) return this.#submitPortonePlatform(b, this.d.portone, boundStatements, now);
     let payouts = await this.d.store.listPayouts(b.batchId);
     if (payouts.length === 0) {
       const next: PayoutRecord[] = [];
@@ -1508,6 +1617,57 @@ export class Settlements {
     if (sum(live) !== b.totalAmount) throw new SettlementProblem('payout-batch-amount-mismatch', 409, '승인한 지급 금액과 정산서 합계가 다릅니다');
     if (b.pg !== 'TOSS') return this.#submitManual(b, await gateway.submit({ batch: b, payouts }), boundStatements, now);
     return this.#submitToss(b, gateway, live, boundStatements, now);
+  }
+
+  /**
+   * 포트원 플랫폼이 켜진 실행(F-07-7 I-07, ADR-0370 결정 7): 정산서마다 수기 정산건(아이디 = 정산서 ID)을 만들고, 지급 건 한 행({정산서 ID}-1, 결제사 지급 ID = 수기 정산건 ID)·
+   * T9(CONFIRMED → SCHEDULED)·PAYOUT_SCHEDULED를 한 쓰기에 둔다. 같은 아이디가 이미 있고 금액·정산일이 같으면 만들지 않고 이어 쓰며, 다르면 502로 멈춘다(그 정산서는 아무것도 쓰지 않음).
+   * 이미 지급 건이 있는 정산서는 건너뛴다(앞선 시도가 쓴 것). 모두 쓰면 묶음을 SUBMITTED로 둔다
+   */
+  async #submitPortonePlatform(b: PayoutBatchRecord, transport: PortonePlatformTransport, boundStatements: readonly StatementRecord[], now: Date): Promise<PayoutBatchRecord> {
+    const existing = new Set((await this.d.store.listPayouts(b.batchId)).map((p) => p.statementId));
+    for (const s of boundStatements) {
+      if (existing.has(s.statementId) || s.status !== 'CONFIRMED') continue;
+      const partner = await this.d.store.findPortonePartner(s.promoterId);
+      if (!partner) throw new SettlementProblem('payout-gateway-unavailable', 503, '포트원 파트너 등록이 없는 정산서가 있어 실행할 수 없습니다');
+      try {
+        await transport.createManualTransfer({ transferId: s.statementId, partnerId: partner.portonePartnerId, amount: s.payoutAmount, settlementDate: b.payoutDate });
+      } catch (e) {
+        const kind = typeof e === 'object' && e !== null && 'kind' in e ? (e as { kind: unknown }).kind : undefined;
+        if (kind === 'REJECTED') throw new SettlementProblem('portone-transfer-conflict', 502, '포트원 수기 정산건이 정산서와 맞지 않습니다');
+        throw new SettlementProblem('payout-gateway-unavailable', 503, '포트원 수기 정산건을 만들지 못했습니다');
+      }
+      const payout: PayoutRecord = {
+        payoutId: uuidv7(this.d.clock),
+        batchId: b.batchId,
+        statementId: s.statementId,
+        seq: 1,
+        amount: s.payoutAmount,
+        refPayoutId: `${s.statementId}-1`,
+        pgPayoutId: s.statementId,
+        status: 'REQUESTED',
+        errorCode: null,
+        pgTransferId: null,
+        transferCheck: null,
+        transferCheckedAt: null,
+        payoutDate: b.payoutDate,
+        failureClass: null,
+        retryOfPayoutId: null,
+        autoRetryCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const audit = this.#audit(s.statementId, s.status, 'SCHEDULED', 'portone-transfer-created', 'system', now);
+      const scheduled: StatementRecord = { ...s, status: 'SCHEDULED', updatedAt: now };
+      const out = await this.d.store.writePayoutChanges({
+        insertPayouts: [payout],
+        transitions: [{ statementId: s.statementId, from: ['CONFIRMED'], to: 'SCHEDULED', expect: { payoutBatchId: b.batchId }, updatedAt: now, audits: [audit], events: [payoutEvent(scheduled, 'PAYOUT_SCHEDULED', s.payoutAmount, now, audit.auditId)] }],
+      });
+      if (!out.ok) throw stateConflict();
+    }
+    const next: PayoutBatchRecord = { ...b, status: 'SUBMITTED', updatedAt: now };
+    await this.d.store.savePayoutBatch(next);
+    return next;
   }
 
   /** 포트원(콘솔 수기 실행): 실행 기록만 남기고 묶인 정산서를 SCHEDULED로 옮긴다(LCH-120 몫의 결과 반영은 F-07-7) */
@@ -1789,9 +1949,17 @@ export class Settlements {
     const rows = await this.d.store.listUnsentCaseRequests(limit);
     if (!this.d.caseNotice) return { sent: 0, pending: rows.length };
     let sent = 0;
+    const notice = this.d.caseNotice;
     for (const c of rows) {
+      // 건 본문 글이 있으면 같은 글을 다시 싣는다(F-07-7 계획 §5.1 (타) 결정 2). 거절은 세고 3번째에 영구 실패(§5.1 (파) (마))
+      const ok = await this.#deliver('case-request', 'cs-case', c.eventKey, c.eventKey, c.kind, () =>
+        notice.openCase({ eventKey: c.eventKey, kind: c.kind, sourceId: c.sourceId, createdAt: c.createdAt, ...(c.detail ? { detail: c.detail } : {}) }),
+      );
+      if (!ok) {
+        this.d.log?.payoutCaseNoticeFailed?.({ eventKey: c.eventKey, kind: c.kind, at: this.#now() });
+        continue;
+      }
       try {
-        await this.d.caseNotice.openCase({ eventKey: c.eventKey, kind: c.kind, sourceId: c.sourceId, createdAt: c.createdAt });
         await this.d.store.markCaseRequestSent(c.eventKey, this.#now());
         sent += 1;
       } catch {
@@ -1833,6 +2001,11 @@ export class Settlements {
   }
 
   /** 토스 지급대행 전송이 조립됐는가(09시 묶음·미완료 점검의 조건) */
+  /** 포트원 플랫폼 지급대행이 조립되었는가(F-07-7). 꺼지면 정산 일꾼이 포트원 실행·대사를 하지 않는다 */
+  portonePayoutEnabled(): boolean {
+    return this.d.portone !== undefined && this.d.portoneConfig !== undefined;
+  }
+
   tossPayoutEnabled(): boolean {
     return this.d.tossTransport !== undefined;
   }
@@ -1905,30 +2078,346 @@ export class Settlements {
     return done;
   }
 
-  async putPayoutAccount(promoterId: string, sessionId: string, body: { bankCode: string; accountNumber: string; holderName: string }, ifMatch: string | undefined, reauthToken: string | undefined): Promise<{ bankCode: string; payoutAccountLast4: string; holdUntil: string; version: number; holderVerified: boolean }> {
+  // ---- F-07-7 포트원 실행·동기화·사후 대사(application/portone-payouts.ts, ADR-0370 결정 7·8) ----
+
+  #portonePayouts(): PortonePayouts {
+    return new PortonePayouts(this.d, { applyPayoutFact: (fact) => this.applyPayoutFact(fact) });
+  }
+
+  /** 지급일 09:00 KST 실행 건(계획 I-07). 묶음마다 CS PORTONE_PAYOUT_EXECUTION 한 건, 보류 셋·계좌 대조 불일치는 수기 정산건 취소 뒤 HELD */
+  async preparePortoneExecution(payoutDate: string): Promise<{ cases: number; held: number; halted: boolean }> {
+    return guard(() => this.#portonePayouts().preparePortoneExecution(payoutDate));
+  }
+
+  /** 30분 지급 내역 동기화(계획 I-07). 일괄 지급 ID가 적힌 포트원 묶음의 지급 내역을 지급 건에 반영한 수 */
+  async syncPortonePayouts(limit?: number): Promise<{ applied: number }> {
+    return guard(() => this.#portonePayouts().syncPortonePayouts(limit));
+  }
+
+  /** 30분 출금 대사(계획 I-13, J-T20) */
+  async reconcilePortoneTransfers(): Promise<{ checked: number; mismatched: number; unlinked: number; missing: number }> {
+    return guard(() => this.#portonePayouts().reconcilePortoneTransfers());
+  }
+
+  /** 포트원 파트너 계좌 대조(계획 I-14, J-T21). 파트너를 고르지 않으면 전체 */
+  async checkPortonePartnerAccounts(input?: { promoterIds?: readonly string[]; settlementDate?: string }): Promise<{ checked: number; mismatched: number; excludedStatements: readonly string[] }> {
     return guard(async () => {
-      await this.d.reauth.verify(reauthToken, { sessionId, act: 'PAYOUT_ACCOUNT' });
-      validatePayoutAccount(body);
+      const r = await this.#portonePayouts().checkPortonePartnerAccounts(input);
+      return { checked: r.checked, mismatched: r.mismatched, excludedStatements: r.excludedStatements };
+    });
+  }
+
+  /** 08:00 KST 뒤 그날 첫 전체 계좌 대조(하루 한 번). 정산 일꾼이 tick마다 부른다. 이미 했거나 08:00 전이면 undefined */
+  async runDailyPortonePartnerCheck(): Promise<{ checked: number; mismatched: number } | undefined> {
+    return guard(() => this.#portonePayouts().runDailyPartnerCheck());
+  }
+
+  /** 포트원 결제분 잔액 대사(계획 I-15 (b)). 같은 달·같은 묶음이면 undefined */
+  async reconcilePortoneBalance(input: { kind: 'MONTHLY'; periodMonth: string } | { kind: 'BATCH'; batchId: string }): Promise<PgBalanceReconciliationRecord | undefined> {
+    return guard(() => this.#portonePayouts().reconcilePortoneBalance(input));
+  }
+
+  /** 대사 멈춤 점검(계획 I-15 (c)). 30분 tick 끝에 부른다 */
+  async checkPortoneLedgerStale(): Promise<{ stale: readonly ('WITHDRAWAL' | 'PARTNER_ACCOUNT')[] }> {
+    return guard(() => this.#portonePayouts().checkPortoneLedgerStale());
+  }
+
+  /** 지급일 15:00 KST 실행 기록 없음 점검(계획 I-15 (d)) */
+  async checkPortoneExecutionPending(payoutDate: string): Promise<{ pending: number }> {
+    return guard(() => this.#portonePayouts().checkPortoneExecutionPending(payoutDate));
+  }
+
+  /**
+   * 정산 계좌 변경(F-07-7 I-04, ADR-0370 결정 5, settlement §6). 차례: 재인증 → If-Match → 본문 → 판매자 확인 → 예금주 조회·이름 비교 → 세 곳 수정.
+   * 불일치는 계좌를 그대로 두고 HOLDER_MISMATCH 행과 422, 모두 성공(또는 꺼짐으로 건너뜀)이면 판 조건부 갱신·3영업일 보류·ACCEPTED 행과 200,
+   * 한 곳이라도 실패하면 같은 쓰기에 수정 대기(agency_sync_pending)·AGENCY_FAILED 행과 502다. 계좌번호는 결제사 요청에만 넘긴다.
+   * 받은 변경(ACCEPTED·AGENCY_FAILED)은 보류 끝 날짜까지의 토스 REQUESTED 예약지급을 취소한다(I-06).
+   */
+  async putPayoutAccount(
+    promoterId: string,
+    sessionId: string,
+    body: { bankCode: string; accountNumber: string; holderName: string },
+    ifMatch: string | undefined,
+    reauthToken: string | undefined,
+  ): Promise<{ bankCode: string; payoutAccountLast4: string; holderVerified: boolean; holdUntil: string; agencySyncPending: boolean; version: number }> {
+    return guard(async () => {
+      let reauth: VerifiedReauth;
+      try {
+        reauth = await this.d.reauth.verify(reauthToken, { sessionId, act: 'PAYOUT_ACCOUNT' });
+      } catch (e) {
+        // 보안 로그: 파트너와 사유 종류만(토큰·계좌 없음, ASVS 16.3.3)
+        this.d.log?.payoutAccountReauthRejected?.({ promoterId, reason: reauthToken === undefined ? 'missing' : 'invalid', at: this.#now() });
+        throw e;
+      }
       const expected = parseIfMatch(ifMatch);
       const current = await this.d.store.findPayoutAccount(promoterId);
       if ((current?.version ?? 0) !== expected) throw new ProblemError({ type: 'precondition-failed', status: 412, title: '다른 사람이 먼저 고쳤습니다' });
-      const now = new Date(this.d.clock.now());
-      // 예금주는 KYC 사업자 상호나 대표자 이름과 표기 차이를 흡수해 대조한다(J-T8, A1-H7).
+      parsePayoutAccountChange(body);
       const kyc = await this.d.store.findKyc(promoterId);
-      const holder = normalizeHolderName(body.holderName);
-      const holderVerified = Boolean(kyc && [kyc.legalName, kyc.representative].some((name) => name !== null && name !== undefined && normalizeHolderName(name) === holder));
-      const record = {
+      if (!kyc?.legalName) throw new SettlementProblem('payout-seller-unverified', 409, '판매자 확인이 끝나지 않아 정산 계좌를 받을 수 없습니다');
+      const result = await this.#agencies().sync({
         promoterId,
+        mode: 'CHANGE',
+        businessType: 'CORPORATE',
+        company: { name: kyc.legalName, representativeName: kyc.representative ?? kyc.legalName, businessRegistrationNumber: '', email: '', phone: '' },
+        account: body,
+      });
+      const now = this.#now();
+      const last4 = accountLast4(body.accountNumber);
+      const change = (r: PayoutAccountChangeRecord['result'], holdUntil: Date | null): PayoutAccountChangeRecord => ({
+        id: uuidv7(this.d.clock),
+        promoterId,
+        actorAccountId: reauth.accountId,
+        reauthJti: reauth.jti,
+        result: r,
         bankCode: body.bankCode,
-        accountLast4: accountLast4(body.accountNumber),
-        version: expected + 1,
-        changedAt: now,
-        holdUntil: addBusinessDays(now, 3),
-        holderVerified,
-      };
-      await this.d.store.savePayoutAccount(record);
-      return { bankCode: record.bankCode, payoutAccountLast4: record.accountLast4, holdUntil: record.holdUntil.toISOString(), version: record.version, holderVerified };
+        accountLast4: last4,
+        holdUntil,
+        agencyResults: result.agencies,
+        reauthFactors: [...reauth.factors],
+        createdAt: now,
+        auditSentAt: null,
+        auditRefusedCount: 0,
+        auditFailedAt: null,
+      });
+      if (!result.holderMatched) {
+        await this.d.store.insertPayoutAccountChange(change('HOLDER_MISMATCH', null));
+        this.d.signals?.payoutAccountChange?.('HOLDER_MISMATCH');
+        throw new SettlementProblem('payout-account-holder-mismatch', 422, '예금주가 판매자 상호나 대표자와 다릅니다');
+      }
+      const failed = failedAgencies(result.agencies);
+      const holdUntil = addBusinessDays(now, 3);
+      const record: PayoutAccountRecord = { promoterId, bankCode: body.bankCode, accountLast4: last4, version: expected + 1, changedAt: now, holdUntil, holderVerified: true, agencySyncPending: failed.length > 0 };
+      const outcome = failed.length > 0 ? 'AGENCY_FAILED' : 'ACCEPTED';
+      const written = await this.d.store.writePayoutChanges({ payoutAccount: { record, expectedVersion: expected }, payoutAccountChange: change(outcome, holdUntil) });
+      if (!written.ok) throw new ProblemError({ type: 'precondition-failed', status: 412, title: '다른 사람이 먼저 고쳤습니다' });
+      this.d.signals?.payoutAccountChange?.(outcome);
+      this.d.signals?.agencySyncPending?.(await this.d.store.countAgencySyncPending());
+      // 보류 기간에 지급일이 오는 토스 예약지급을 취소한다(실패해도 변경은 남고, 묶음 판정·09시가 보류로 막는다)
+      try {
+        await this.cancelScheduledTossPayouts({ promoterId, reason: 'ACCOUNT_CHANGE', payoutDateThrough: kstDateOf(holdUntil) });
+      } catch (e) {
+        this.d.log?.payoutJobFailed?.({ job: 'scheduled-payout-cancel', reason: errorReason(e), at: now });
+      }
+      if (failed.length > 0) throw new ProblemError({ type: 'payout-agency-update-failed', status: 502, title: '결제사에 정산 계좌를 반영하지 못했습니다', extensions: { failedAgencies: failed } });
+      return payoutAccountOut(record);
     });
+  }
+
+  /** 지금 정산 계좌(파트너 GET, ETag = 판). 계좌가 없으면 null 칸과 판 0 */
+  async getPayoutAccount(promoterId: string): Promise<{ bankCode: string | null; payoutAccountLast4: string | null; holderVerified: boolean; holdUntil: string | null; agencySyncPending: boolean; version: number }> {
+    const a = await this.d.store.findPayoutAccount(promoterId);
+    if (!a) return { bankCode: null, payoutAccountLast4: null, holderVerified: false, holdUntil: null, agencySyncPending: false, version: 0 };
+    return { ...payoutAccountOut(a), holdUntil: a.holdUntil.getTime() > this.d.clock.now() ? a.holdUntil.toISOString() : null };
+  }
+
+  #agencies(): PayoutAgencies {
+    return new PayoutAgencies({ store: this.d.store, portone: this.d.portone, portoneConfig: this.d.portoneConfig, toss: this.d.tossTransport, clock: this.d.clock });
+  }
+
+  /**
+   * 지급대행 등록(판매 승인 요청, core 내부 경로, ADR-0370 결정 1·3). 포트원 플랫폼이 꺼져 있으면 holderChecked false·모두 SKIPPED이고 아무것도 쓰지 않는다.
+   * 맞으면 은행·끝 4자리(보류 없음)·판매자 확인(PENDING, 상호·대표자)을 남기고, 한 곳이라도 실패하면 502(성공한 곳은 남는다).
+   */
+  async registerPayoutAgencies(input: Omit<PayoutAgencySyncInput, 'mode'>): Promise<{ bankCode: string; accountLast4: string; holderChecked: boolean; agencies: PayoutAgencySyncResult['agencies'] }> {
+    return guard(async () => {
+      const result = await this.#agencies().sync({ ...input, mode: 'REGISTER' });
+      const last4 = accountLast4(input.account.accountNumber);
+      if (!result.holderChecked) return { bankCode: input.account.bankCode, accountLast4: last4, holderChecked: false, agencies: result.agencies };
+      if (!result.holderMatched) throw new SettlementProblem('payout-account-holder-mismatch', 422, '예금주가 판매자 상호나 대표자와 다릅니다');
+      const now = this.#now();
+      const current = await this.d.store.findPayoutAccount(input.promoterId);
+      await this.d.store.savePayoutAccount({
+        promoterId: input.promoterId,
+        bankCode: input.account.bankCode,
+        accountLast4: last4,
+        version: (current?.version ?? 0) + 1,
+        changedAt: now,
+        holdUntil: now,
+        holderVerified: true,
+        agencySyncPending: current?.agencySyncPending ?? false,
+      });
+      const kyc = await this.d.store.findKyc(input.promoterId);
+      const sameSeller = kyc?.legalName === input.company.name && kyc?.representative === input.company.representativeName;
+      if (!(kyc?.status === 'VERIFIED' && sameSeller)) {
+        await this.d.store.saveKyc({
+          promoterId: input.promoterId,
+          status: 'PENDING',
+          businessVerified: false,
+          representativeVerified: false,
+          legalName: input.company.name,
+          representative: input.company.representativeName,
+          verifiedAt: null,
+          source: 'SALE_REVIEW',
+          updatedAt: now,
+        });
+      }
+      const failed = failedAgencies(result.agencies);
+      if (failed.length > 0) throw new ProblemError({ type: 'payout-agency-update-failed', status: 502, title: '결제사에 정산 계좌를 반영하지 못했습니다', extensions: { failedAgencies: failed } });
+      return { bankCode: input.account.bankCode, accountLast4: last4, holderChecked: true, agencies: result.agencies };
+    });
+  }
+
+  /** 등록 읽기(core 판매 승인 조건·관제 상세, ADR-0370 결정 4). 결제사의 셀러·파트너 ID 원문은 싣지 않는다 */
+  async getPayoutRegistration(promoterId: string): Promise<PayoutRegistrationView> {
+    const [account, partner] = await Promise.all([this.d.store.findPayoutAccount(promoterId), this.d.store.findPortonePartner(promoterId)]);
+    const tossSellers: PayoutRegistrationView['tossSellers'] = [];
+    for (const pgStore of TOSS_SELLER_STORES) {
+      const row = await this.d.store.findTossSeller(promoterId, pgStore);
+      if (row) tossSellers.push({ pgStore, status: row.status });
+    }
+    const now = this.d.clock.now();
+    return {
+      payoutAccount: account ? { bankCode: account.bankCode, last4: account.accountLast4, holdUntil: account.holdUntil.getTime() > now ? account.holdUntil.toISOString() : null, holderVerified: account.holderVerified } : null,
+      agencySyncPending: account?.agencySyncPending ?? false,
+      tossEnabled: this.d.tossTransport !== undefined,
+      portoneEnabled: this.d.portone !== undefined && this.d.portoneConfig !== undefined,
+      tossSellers,
+      portonePartnerRegistered: partner !== undefined,
+    };
+  }
+
+  /** 판매 승인 때 판매자 확인을 쓴다(core 내부 경로, ADR-0370 결정 4). 같은 값이면 행을 그대로 둔다(멱등) */
+  async verifySeller(promoterId: string, input: { legalName: string; representative: string; verifiedAt: Date }): Promise<{ status: 'VERIFIED' }> {
+    const kyc = await this.d.store.findKyc(promoterId);
+    const same =
+      kyc?.status === 'VERIFIED' && kyc.businessVerified && kyc.representativeVerified && kyc.legalName === input.legalName && kyc.representative === input.representative && kyc.verifiedAt?.getTime() === input.verifiedAt.getTime();
+    if (!same) {
+      await this.d.store.saveKyc({
+        source: 'SALE_REVIEW',
+        ...kyc,
+        promoterId,
+        status: 'VERIFIED',
+        businessVerified: true,
+        representativeVerified: true,
+        legalName: input.legalName,
+        representative: input.representative,
+        verifiedAt: input.verifiedAt,
+        updatedAt: this.#now(),
+      });
+    }
+    return { status: 'VERIFIED' };
+  }
+
+  /**
+   * 이미 접수된 토스 예약지급 취소(F-07-7 I-06, ADR-0370 결정 6, settlement §5.2·§12). 그 파트너(·상점)의 SCHEDULED 토스 정산서 가운데 지급일 ≤ payoutDateThrough이고
+   * 살아 있는 지급 건이 모두 REQUESTED인 것만 지급 건마다 취소를 부른다. 모두 취소되면 지급 건 CANCELED·T10 HELD·PAYOUT_HELD를 한 쓰기에,
+   * 일부만 취소되면 취소된 것만 CANCELED로 쓰고 정산서는 그대로 두며 CS PAYOUT_ERROR(사건 키 payout-cancel:{정산서 ID})다.
+   */
+  async cancelScheduledTossPayouts(input: { promoterId: string; pgStore?: PgStore; reason: 'KYC' | 'ACCOUNT_CHANGE'; payoutDateThrough?: string }): Promise<{ cancelled: number; waiting: number }> {
+    const toss = this.d.tossTransport;
+    const targets = (await this.d.store.listStatementsOfPromoter(input.promoterId, 'TOSS', ['SCHEDULED'])).filter(
+      (s) => (input.pgStore === undefined || s.pgStore === input.pgStore) && (input.payoutDateThrough === undefined || (s.payoutDate !== null && s.payoutDate <= input.payoutDateThrough)) && s.payoutBatchId !== null,
+    );
+    let cancelled = 0;
+    let waiting = 0;
+    for (const s of targets) {
+      const live = (await this.d.store.listPayouts(s.payoutBatchId!)).filter((p) => p.statementId === s.statementId && p.status !== 'CANCELED' && p.status !== 'FAILED');
+      if (live.length === 0) continue;
+      if (live.some((p) => p.status !== 'REQUESTED' || p.pgPayoutId === null)) {
+        waiting += 1;
+        continue;
+      }
+      if (!toss) continue;
+      const done: PayoutRecord[] = [];
+      for (const p of live) {
+        try {
+          await toss.cancelPayout(s.pgStore, p.pgPayoutId!);
+          done.push(p);
+        } catch (e) {
+          this.d.log?.payoutJobFailed?.({ job: 'scheduled-payout-cancel', pgStore: s.pgStore, reason: errorReason(e), at: this.#now() });
+        }
+      }
+      if (done.length === 0) continue;
+      const now = this.#now();
+      const payoutUpdates = done.map((p) => ({ payoutId: p.payoutId, from: ['REQUESTED'] as PayoutRecord['status'][], set: { status: 'CANCELED' as const, updatedAt: now } }));
+      if (done.length < live.length) {
+        await this.d.store.writePayoutChanges({ payoutUpdates, caseRequests: [caseOf('PAYOUT_ERROR', s.statementId, `payout-cancel:${s.statementId}`, now)] });
+        continue;
+      }
+      const audit = this.#audit(s.statementId, 'SCHEDULED', 'HELD', `scheduled-payout-cancelled:${input.reason}`, 'system', now);
+      const held: StatementRecord = { ...s, status: 'HELD', holdReason: input.reason, updatedAt: now };
+      const res = await this.d.store.writePayoutChanges({
+        payoutUpdates,
+        transitions: [{ statementId: s.statementId, from: ['SCHEDULED'], to: 'HELD', set: { holdReason: input.reason }, updatedAt: now, audits: [audit], events: [payoutEvent(held, 'PAYOUT_HELD', s.payoutAmount, now, audit.auditId)] }],
+      });
+      if (res.ok) cancelled += 1;
+    }
+    return { cancelled, waiting };
+  }
+
+  /** 보내지 않은 정산 계좌 변경 행을 ops 감사(PAYOUT_ACCOUNT_CHANGED)로 보낸다(정산 일꾼 30분마다, ADR-0370 결정 5) */
+  async retryPayoutAccountAudits(limit = CASE_RETRY_LIMIT): Promise<{ sent: number; pending: number }> {
+    const rows = await this.d.store.listUnsentPayoutAccountChanges(limit);
+    const sink = this.d.payoutAccountAudit;
+    if (!sink) return { sent: 0, pending: rows.length };
+    let sent = 0;
+    for (const r of rows) {
+      const eventKey = `payout-account-change:${r.id}`;
+      const ok = await this.#deliver('payout-account-change', 'audit-record', r.id, eventKey, 'PAYOUT_ACCOUNT_CHANGED', () =>
+        sink.send({
+          eventKey,
+          recordId: r.id,
+          occurredAt: r.createdAt,
+          payload: {
+            promoterId: r.promoterId,
+            actorAccountId: r.actorAccountId,
+            result: r.result,
+            reauthFactors: [...(r.reauthFactors ?? [])],
+            holderMatched: r.result !== 'HOLDER_MISMATCH',
+            bankCode: r.bankCode,
+            accountLast4: r.accountLast4,
+            holdUntil: r.holdUntil ? r.holdUntil.toISOString() : null,
+            agencies: r.agencyResults,
+          },
+        }),
+      );
+      if (ok) {
+        await this.d.store.markPayoutAccountChangeSent(r.id, this.#now());
+        sent += 1;
+      }
+    }
+    return { sent, pending: rows.length - sent };
+  }
+
+  /** 보내지 않은 운영 경보 요청을 ops 운영 경보 받기로 보낸다(정산 일꾼 30분마다, ADR-0370 결정 8) */
+  async retrySettlementAlerts(limit = CASE_RETRY_LIMIT): Promise<{ sent: number; pending: number }> {
+    const rows = await this.d.store.listUnsentAlertRequests(limit);
+    const sink = this.d.alerts;
+    if (!sink) return { sent: 0, pending: rows.length };
+    let sent = 0;
+    for (const a of rows) {
+      const ok = await this.#deliver('alert-request', 'ops-alert', a.eventKey, a.eventKey, a.kind, () =>
+        sink.send({ eventKey: a.eventKey, kind: a.kind, severity: a.severity, sourceId: a.sourceId, reason: a.kind, createdAt: a.createdAt }),
+      );
+      if (ok) {
+        await this.d.store.markAlertRequestSent(a.eventKey, this.#now());
+        sent += 1;
+      }
+    }
+    return { sent, pending: rows.length - sent };
+  }
+
+  /**
+   * ops 받기 한 번(F-07-7 계획 §5.1 (파) (마)). 거절(202 accepted:false·400·422)은 거절 수를 올리고 3번째에 영구 실패로 남기며 로그 ops_intake_refused,
+   * 일시 실패는 세지 않는다. 둘 다 보낸 것으로 보지 않는다(false)
+   */
+  async #deliver(row: OpsIntakeRow, target: OpsIntakeTarget, key: string, eventKey: string, kind: string, send: () => Promise<void>): Promise<boolean> {
+    try {
+      await send();
+      return true;
+    } catch (e) {
+      const refusal = refusalOf(e);
+      if (!refusal) return false;
+      const now = this.#now();
+      this.d.signals?.opsIntakeRefused?.(target);
+      const counted = await this.d.store.markRefused(row, key, refusal, now, OPS_REFUSAL_LIMIT);
+      if (counted?.failed) {
+        this.d.log?.opsIntakeRefused?.({ target, eventKey, kind, refusal, count: counted.refusedCount, at: now });
+        this.d.signals?.opsIntakeFailed?.(target, await this.d.store.countIntakeFailed(row));
+      }
+      return false;
+    }
   }
 
   /** 지급일 계산에 쓰는 기본값. 시험·운영이 같은 함수를 쓴다. */

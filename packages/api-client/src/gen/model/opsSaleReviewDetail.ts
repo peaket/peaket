@@ -9,13 +9,15 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { OpsPayoutAccountSummary } from './opsPayoutAccountSummary';
+import type { OpsPgRegistration } from './opsPgRegistration';
 import type { OpsSaleReviewDetailSalePolicyItem } from './opsSaleReviewDetailSalePolicyItem';
 import type { OpsSaleReviewDetailStatus } from './opsSaleReviewDetailStatus';
 import type { OpsSaleReviewEvent } from './opsSaleReviewEvent';
 import type { SellerInfo } from './sellerInfo';
 
 /**
- * 관제 판매 승인 확인 패널(SCR-048, BAT-616). 계좌번호 전체·토스 셀러 ID·포트원 파트너 ID는 없다. 지급대행 등록은 LCH-110 전이라 화면이 '연동 전'이라고 적는다(ADR-0327 결정 6)
+ * 관제 판매 승인 확인 패널(SCR-048, BAT-616). 계좌번호 전체·토스 셀러 ID·포트원 파트너 ID는 없다. 지급대행 등록 값은 payment 등록 읽기에서 온다(ADR-0370 결정 4). 꺼진 결제사는 화면이 '연동 전'이라고 적는다
  */
 export interface OpsSaleReviewDetail {
   productionId?: string;
@@ -58,4 +60,6 @@ export interface OpsSaleReviewDetail {
   events?: OpsSaleReviewEvent[];
   /** LCH-090 전에는 늘 false다 */
   suspensionApprovalPending?: boolean;
+  payoutAccount?: OpsPayoutAccountSummary | null;
+  pgRegistration?: OpsPgRegistration;
 }

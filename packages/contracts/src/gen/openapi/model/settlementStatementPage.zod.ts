@@ -34,7 +34,8 @@ export const SettlementStatementPage = zod.object({
   "disputeDueAt": zod.iso.datetime({"offset":true}).optional(),
   "payoutDate": zod.iso.date().optional(),
   "payoutBankCode": zod.string().optional().describe('정산 은행 코드(docs/data.md promoter.payout_bank_code). 화면은 은행 이름으로 바꿔 끝 4자리와 함께 보인다(ADR-0162 결정 5, 추천 적용 2026-10-30)'),
-  "payoutAccountLast4": zod.string().optional()
+  "payoutAccountLast4": zod.string().optional(),
+  "kycNotice": zod.boolean().optional().describe('토스페이먼츠 정산서의 지급일까지 판매자 KYC가 끝나지 않을 것으로 보여 지급이 보류될 수 있다는 예고(settlement §6, SCR-027). 파트너 응답만 싣고 관제 응답은 싣지 않는다. 포트원 정산서는 늘 false(ADR-0370 결정 9)')
 }).describe('정산서(회차 정산서는 회차·결제사, 상품 정산서는 파트너·결제사·결제 상점·주 단위, POL-039, ADR-0047, 상품 정산서는 추천 적용 2026-10-14, ADR-0062). 계좌는 끝 4자리만')).optional(),
   "nextCursor": zod.string().nullish()
 })

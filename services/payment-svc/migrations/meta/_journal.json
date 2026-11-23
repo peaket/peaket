@@ -211,6 +211,20 @@
       "when": 1795408021293,
       "tag": "0029_settlement_toss_payout_agency",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1795417851595,
+      "tag": "0030_settlement_payout_account_portone",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795417931529,
+      "tag": "0032_settlement_portone_reconciliation",
+      "breakpoints": true
     }
   ]
 }

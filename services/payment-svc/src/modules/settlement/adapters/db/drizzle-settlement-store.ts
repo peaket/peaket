@@ -1,11 +1,12 @@
 // 정산·지급·KYC Drizzle 저장소(docs/data.md settlement_statement…payout).
 // 정산서 상태 전이는 조건부 갱신(지금 상태가 출발 상태일 때만)이고, 상태·감사·딸린 행·trade.settlements Outbox를 한 트랜잭션에 쓴다(ADR-0368 결정 2·3).
-import { and, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { nextBankBusinessDay } from '../../domain/payout-failure.js';
 import { type Clock, type Database, type DbTransaction, systemClock, writeOutbox } from '@peaket/platform';
 import type {
   AdjustmentInsertResult,
   GuaranteeCollectionAtomicInput,
+  OpsIntakeRow,
   PayoutBatchAtomicInput,
   PayoutWrite,
   PayoutWriteResult,
@@ -22,7 +23,15 @@ import {
   type DisputeRecord,
   type GuaranteeCollectionRecord,
   type KycRecord,
+  type OpsRefusal,
+  type PayoutAccountChangeRecord,
   type PayoutAccountRecord,
+  type PortoneLedgerSyncName,
+  type PortoneLedgerSyncRecord,
+  type PortonePartnerRecord,
+  type PortoneTransferRecord,
+  type SettlementAlertRequestRecord,
+  type StatementStatus,
   type PayoutBatchAuditRecord,
   type PayoutBatchRecord,
   type PayoutRecord,
@@ -44,11 +53,16 @@ import {
   partnerReceivable,
   payout,
   payoutAccount,
+  payoutAccountChange,
   payoutBatch,
   payoutBatchAudit,
   payoutRetryAudit,
   pgBalanceReconciliation,
+  portoneLedgerSync,
+  portonePartner,
+  portoneTransfer,
   sellerKyc,
+  settlementAlertRequest,
   settlementCaseRequest,
   settlementStatement,
   settlementStatementAudit,
@@ -144,6 +158,8 @@ const disputeRecord = (r: typeof statementDispute.$inferSelect): DisputeRecord =
   resolvedBy: r.resolvedBy,
   resolutionNote: r.resolutionNote,
   caseRequestedAt: r.caseRequestedAt,
+  caseRefusedCount: r.caseRefusedCount,
+  caseFailedAt: r.caseFailedAt,
 });
 
 const batchRecord = (r: typeof payoutBatch.$inferSelect): PayoutBatchRecord => ({
@@ -234,6 +250,122 @@ const caseRequestRecord = (r: typeof settlementCaseRequest.$inferSelect): Settle
   sourceId: r.sourceId,
   createdAt: r.createdAt,
   requestedAt: r.requestedAt,
+  detail: r.detail,
+  refusedCount: r.refusedCount,
+  failedAt: r.failedAt,
+  lastRefusal: r.lastRefusal as OpsRefusal | null,
+});
+
+// ---- F-07-7 행 ↔ 레코드(payment 0030·0032). 계좌번호·예금주명 칸은 없다 ----
+const portonePartnerRecord = (r: typeof portonePartner.$inferSelect): PortonePartnerRecord => ({
+  promoterId: r.promoterId,
+  portonePartnerId: r.portonePartnerId,
+  contractId: r.contractId,
+  registeredAt: r.registeredAt,
+  accountUpdatedAt: r.accountUpdatedAt,
+  lastAccountCheck: r.lastAccountCheck as PortonePartnerRecord['lastAccountCheck'],
+  lastAccountCheckedAt: r.lastAccountCheckedAt,
+  updatedAt: r.updatedAt,
+});
+const portonePartnerSet = (r: PortonePartnerRecord) => ({
+  portonePartnerId: r.portonePartnerId,
+  contractId: r.contractId,
+  registeredAt: r.registeredAt,
+  accountUpdatedAt: r.accountUpdatedAt,
+  lastAccountCheck: r.lastAccountCheck ?? null,
+  lastAccountCheckedAt: r.lastAccountCheckedAt ?? null,
+  updatedAt: r.updatedAt,
+});
+const portonePartnerValues = (r: PortonePartnerRecord) => ({ promoterId: r.promoterId, ...portonePartnerSet(r) });
+
+const payoutAccountChangeRecord = (r: typeof payoutAccountChange.$inferSelect): PayoutAccountChangeRecord => ({
+  id: r.id,
+  promoterId: r.promoterId,
+  actorAccountId: r.actorAccountId,
+  reauthJti: r.reauthJti,
+  result: r.result as PayoutAccountChangeRecord['result'],
+  bankCode: r.bankCode,
+  accountLast4: r.accountLast4,
+  holdUntil: r.holdUntil,
+  agencyResults: r.agencyResults as PayoutAccountChangeRecord['agencyResults'],
+  reauthFactors: r.reauthFactors,
+  createdAt: r.createdAt,
+  auditSentAt: r.auditSentAt,
+  auditRefusedCount: r.auditRefusedCount,
+  auditFailedAt: r.auditFailedAt,
+});
+const payoutAccountChangeValues = (r: PayoutAccountChangeRecord) => ({
+  id: r.id,
+  promoterId: r.promoterId,
+  actorAccountId: r.actorAccountId,
+  reauthJti: r.reauthJti,
+  reauthFactors: [...(r.reauthFactors ?? [])],
+  result: r.result,
+  bankCode: r.bankCode,
+  accountLast4: r.accountLast4,
+  holdUntil: r.holdUntil,
+  agencyResults: r.agencyResults,
+  createdAt: r.createdAt,
+  auditSentAt: r.auditSentAt,
+  auditRefusedCount: r.auditRefusedCount ?? 0,
+  auditFailedAt: r.auditFailedAt ?? null,
+});
+
+const portoneTransferValues = (r: PortoneTransferRecord) => ({
+  transferId: r.transferId,
+  withdrawalType: r.withdrawalType,
+  payoutId: r.payoutId,
+  amount: r.amount,
+  bankCode: r.bankCode,
+  accountLast4: r.accountLast4,
+  holderMatched: r.holderMatched,
+  checkResult: r.checkResult,
+  transferredAt: r.transferredAt,
+  checkedAt: r.checkedAt,
+});
+
+const ledgerSyncRecord = (r: typeof portoneLedgerSync.$inferSelect): PortoneLedgerSyncRecord => ({
+  name: r.name as PortoneLedgerSyncName,
+  lastSuccessAt: r.lastSuccessAt,
+  readThrough: r.readThrough,
+  haltedOn: r.haltedOn,
+  updatedAt: r.updatedAt,
+});
+const ledgerSyncSet = (r: PortoneLedgerSyncRecord) => ({ lastSuccessAt: r.lastSuccessAt, readThrough: r.readThrough, haltedOn: r.haltedOn, updatedAt: r.updatedAt });
+const ledgerSyncValues = (r: PortoneLedgerSyncRecord) => ({ name: r.name, ...ledgerSyncSet(r) });
+
+const alertRequestRecord = (r: typeof settlementAlertRequest.$inferSelect): SettlementAlertRequestRecord => ({
+  eventKey: r.eventKey,
+  kind: r.kind,
+  severity: r.severity as SettlementAlertRequestRecord['severity'],
+  sourceId: r.sourceId,
+  createdAt: r.createdAt,
+  requestedAt: r.requestedAt,
+  refusedCount: r.refusedCount,
+  failedAt: r.failedAt,
+  lastRefusal: r.lastRefusal as OpsRefusal | null,
+});
+const alertRequestValues = (r: SettlementAlertRequestRecord) => ({
+  eventKey: r.eventKey,
+  kind: r.kind,
+  severity: r.severity,
+  sourceId: r.sourceId,
+  createdAt: r.createdAt,
+  requestedAt: r.requestedAt,
+  refusedCount: r.refusedCount ?? 0,
+  failedAt: r.failedAt ?? null,
+  lastRefusal: r.lastRefusal ?? null,
+});
+const caseRequestValues = (c: SettlementCaseRequestRecord) => ({
+  eventKey: c.eventKey,
+  kind: c.kind,
+  sourceId: c.sourceId,
+  createdAt: c.createdAt,
+  requestedAt: c.requestedAt,
+  detail: c.detail ?? null,
+  refusedCount: c.refusedCount ?? 0,
+  failedAt: c.failedAt ?? null,
+  lastRefusal: c.lastRefusal ?? null,
 });
 
 const reconciliationRecord = (r: typeof pgBalanceReconciliation.$inferSelect): PgBalanceReconciliationRecord => ({
@@ -540,7 +672,7 @@ export class DrizzleSettlementStore implements SettlementStore {
     const rows = await this.db.db
       .select()
       .from(statementDispute)
-      .where(and(isNull(statementDispute.caseRequestedAt), isNull(statementDispute.result)))
+      .where(and(isNull(statementDispute.caseRequestedAt), isNull(statementDispute.result), isNull(statementDispute.caseFailedAt)))
       .orderBy(statementDispute.submittedAt, statementDispute.id)
       .limit(limit);
     return rows.map(disputeRecord);
@@ -930,6 +1062,7 @@ export class DrizzleSettlementStore implements SettlementStore {
           changedAt: r.changedAt,
           holdUntil: r.holdUntil,
           holderVerified: r.holderVerified,
+          agencySyncPending: r.agencySyncPending,
         }
       : undefined;
   }
@@ -945,6 +1078,7 @@ export class DrizzleSettlementStore implements SettlementStore {
         changedAt: record.changedAt,
         holdUntil: record.holdUntil,
         holderVerified: record.holderVerified,
+        agencySyncPending: record.agencySyncPending ?? false,
       })
       .onConflictDoUpdate({
         target: payoutAccount.promoterId,
@@ -955,6 +1089,7 @@ export class DrizzleSettlementStore implements SettlementStore {
           changedAt: record.changedAt,
           holdUntil: record.holdUntil,
           holderVerified: record.holderVerified,
+          agencySyncPending: record.agencySyncPending ?? false,
         },
       });
   }
@@ -1322,6 +1457,38 @@ export class DrizzleSettlementStore implements SettlementStore {
 
   /** PayoutWrite 한 묶음을 열린 트랜잭션에 쓰고 Outbox에 쓸 사건을 돌려준다(차례: 지급 건 → 재요청 → 정산서 → 묶음 → CS 건 요청) */
   async #writeIn(tx: DbTransaction, w: PayoutWrite): Promise<{ retried: PayoutRecord[]; events: SettlementEventValue[] }> {
+    // 포트원 이체는 맨 앞에 넣는다: 두 연결이 같은 이체를 겹쳐 넣으면 둘째는 기본 키에서 첫째의 커밋을 기다린 뒤 0행이고 전체를 되돌린다(J-T20 ②, data.md §5)
+    if (w.portoneTransfer) {
+      const rows = await tx.insert(portoneTransfer).values(portoneTransferValues(w.portoneTransfer)).onConflictDoNothing().returning({ id: portoneTransfer.transferId });
+      if (rows.length === 0) throw new WriteRejected();
+    }
+    if (w.payoutAccount) {
+      const { record, expectedVersion } = w.payoutAccount;
+      const values = {
+        bankCode: record.bankCode,
+        accountLast4: record.accountLast4,
+        version: record.version,
+        changedAt: record.changedAt,
+        holdUntil: record.holdUntil,
+        holderVerified: record.holderVerified,
+        agencySyncPending: record.agencySyncPending ?? false,
+      };
+      // If-Match 판을 조건으로 한 갱신(WHERE version = 판). 판 0은 행이 없을 때만 넣는다(data.md §5 '정산 계좌 변경 두 번이 겹침')
+      const rows =
+        expectedVersion === 0
+          ? await tx.insert(payoutAccount).values({ promoterId: record.promoterId, ...values }).onConflictDoNothing().returning({ id: payoutAccount.promoterId })
+          : await tx
+              .update(payoutAccount)
+              .set(values)
+              .where(and(eq(payoutAccount.promoterId, record.promoterId), eq(payoutAccount.version, expectedVersion)))
+              .returning({ id: payoutAccount.promoterId });
+      if (rows.length === 0) throw new WriteRejected();
+    }
+    if (w.payoutAccountChange) {
+      // reauth_jti 유일 인덱스가 같은 재인증 토큰의 두 번째 시도를 막는다(한 번 쓰기 저장소와 두 겹)
+      const rows = await tx.insert(payoutAccountChange).values(payoutAccountChangeValues(w.payoutAccountChange)).onConflictDoNothing().returning({ id: payoutAccountChange.id });
+      if (rows.length === 0) throw new WriteRejected();
+    }
     for (const u of w.payoutUpdates ?? []) {
       const set: Partial<typeof payout.$inferInsert> = { updatedAt: u.set.updatedAt };
       if (u.set.pgPayoutId !== undefined) set.pgPayoutId = u.set.pgPayoutId;
@@ -1329,10 +1496,18 @@ export class DrizzleSettlementStore implements SettlementStore {
       if (u.set.errorCode !== undefined) set.errorCode = u.set.errorCode;
       if (u.set.failureClass !== undefined) set.failureClass = u.set.failureClass;
       if (u.set.payoutDate !== undefined) set.payoutDate = u.set.payoutDate;
+      if (u.set.pgTransferId !== undefined) set.pgTransferId = u.set.pgTransferId;
+      if (u.set.transferCheck !== undefined) set.transferCheck = u.set.transferCheck;
+      if (u.set.transferCheckedAt !== undefined) set.transferCheckedAt = u.set.transferCheckedAt;
       const conditions = [eq(payout.id, u.payoutId)];
       if (u.from) conditions.push(inArray(payout.status, [...u.from]));
       const rows = await tx.update(payout).set(set).where(and(...conditions)).returning({ id: payout.id });
       if (rows.length === 0) throw new WriteRejected();
+    }
+    if (w.insertPayouts && w.insertPayouts.length > 0) {
+      // 기본 키·payout_ref_key·(batch, statement, seq) 가운데 하나라도 겹치면 넣지 않은 행이 생기고 전체를 되돌린다
+      const rows = await tx.insert(payout).values(w.insertPayouts.map(payoutValues)).onConflictDoNothing().returning({ id: payout.id });
+      if (rows.length !== w.insertPayouts.length) throw new WriteRejected();
     }
     const retried: PayoutRecord[] = [];
     for (const r of w.retries ?? []) {
@@ -1385,10 +1560,16 @@ export class DrizzleSettlementStore implements SettlementStore {
       if (rows.length === 0) throw new WriteRejected();
     }
     if (w.caseRequests && w.caseRequests.length > 0) {
-      await tx
-        .insert(settlementCaseRequest)
-        .values(w.caseRequests.map((c) => ({ eventKey: c.eventKey, kind: c.kind, sourceId: c.sourceId, createdAt: c.createdAt, requestedAt: c.requestedAt })))
-        .onConflictDoNothing();
+      await tx.insert(settlementCaseRequest).values(w.caseRequests.map(caseRequestValues)).onConflictDoNothing();
+    }
+    if (w.alertRequests && w.alertRequests.length > 0) {
+      await tx.insert(settlementAlertRequest).values(w.alertRequests.map(alertRequestValues)).onConflictDoNothing();
+    }
+    if (w.ledgerSync) {
+      await tx.insert(portoneLedgerSync).values(ledgerSyncValues(w.ledgerSync)).onConflictDoUpdate({ target: portoneLedgerSync.name, set: ledgerSyncSet(w.ledgerSync) });
+    }
+    if (w.portonePartner) {
+      await tx.insert(portonePartner).values(portonePartnerValues(w.portonePartner)).onConflictDoUpdate({ target: portonePartner.promoterId, set: portonePartnerSet(w.portonePartner) });
     }
     return { retried, events };
   }
@@ -1397,14 +1578,14 @@ export class DrizzleSettlementStore implements SettlementStore {
     if (records.length === 0) return 0;
     const rows = await this.db.db
       .insert(settlementCaseRequest)
-      .values(records.map((c) => ({ eventKey: c.eventKey, kind: c.kind, sourceId: c.sourceId, createdAt: c.createdAt, requestedAt: c.requestedAt })))
+      .values(records.map(caseRequestValues))
       .onConflictDoNothing()
       .returning({ eventKey: settlementCaseRequest.eventKey });
     return rows.length;
   }
 
   async listUnsentCaseRequests(limit: number): Promise<SettlementCaseRequestRecord[]> {
-    const rows = await this.db.db.select().from(settlementCaseRequest).where(isNull(settlementCaseRequest.requestedAt)).orderBy(settlementCaseRequest.createdAt, settlementCaseRequest.eventKey).limit(limit);
+    const rows = await this.db.db.select().from(settlementCaseRequest).where(and(isNull(settlementCaseRequest.requestedAt), isNull(settlementCaseRequest.failedAt))).orderBy(settlementCaseRequest.createdAt, settlementCaseRequest.eventKey).limit(limit);
     return rows.map(caseRequestRecord);
   }
 
@@ -1520,5 +1701,170 @@ export class DrizzleSettlementStore implements SettlementStore {
       .map((r) => payoutRecord(r.p))
       .filter((p) => Date.parse(`${nextBankBusinessDay(p.payoutDate)}T12:00:00+09:00`) <= now.getTime())
       .slice(0, limit);
+  }
+
+  // ---- F-07-7 포트원 지급대행·계좌 변경·사후 대사(payment 0030·0032, ADR-0370) ----
+  async findPortonePartner(promoterId: string): Promise<PortonePartnerRecord | undefined> {
+    const rows = await this.db.db.select().from(portonePartner).where(eq(portonePartner.promoterId, promoterId)).limit(1);
+    return rows[0] ? portonePartnerRecord(rows[0]) : undefined;
+  }
+
+  async savePortonePartner(record: PortonePartnerRecord): Promise<void> {
+    await this.db.db.insert(portonePartner).values(portonePartnerValues(record)).onConflictDoUpdate({ target: portonePartner.promoterId, set: portonePartnerSet(record) });
+  }
+
+  async listPortonePartners(limit: number): Promise<PortonePartnerRecord[]> {
+    const rows = await this.db.db.select().from(portonePartner).orderBy(portonePartner.promoterId).limit(limit);
+    return rows.map(portonePartnerRecord);
+  }
+
+  async insertPayoutAccountChange(record: PayoutAccountChangeRecord): Promise<boolean> {
+    const rows = await this.db.db.insert(payoutAccountChange).values(payoutAccountChangeValues(record)).onConflictDoNothing().returning({ id: payoutAccountChange.id });
+    return rows.length > 0;
+  }
+
+  async listUnsentPayoutAccountChanges(limit: number): Promise<PayoutAccountChangeRecord[]> {
+    const rows = await this.db.db
+      .select()
+      .from(payoutAccountChange)
+      .where(and(isNull(payoutAccountChange.auditSentAt), isNull(payoutAccountChange.auditFailedAt)))
+      .orderBy(payoutAccountChange.createdAt, payoutAccountChange.id)
+      .limit(limit);
+    return rows.map(payoutAccountChangeRecord);
+  }
+
+  async markPayoutAccountChangeSent(id: string, at: Date): Promise<void> {
+    await this.db.db.update(payoutAccountChange).set({ auditSentAt: at }).where(and(eq(payoutAccountChange.id, id), isNull(payoutAccountChange.auditSentAt)));
+  }
+
+  async countAgencySyncPending(): Promise<number> {
+    const rows = await this.db.db.select({ n: sql<number>`count(*)::int` }).from(payoutAccount).where(eq(payoutAccount.agencySyncPending, true));
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  async findLedgerSync(name: PortoneLedgerSyncName): Promise<PortoneLedgerSyncRecord | undefined> {
+    const rows = await this.db.db.select().from(portoneLedgerSync).where(eq(portoneLedgerSync.name, name)).limit(1);
+    return rows[0] ? ledgerSyncRecord(rows[0]) : undefined;
+  }
+
+  async saveLedgerSync(record: PortoneLedgerSyncRecord): Promise<void> {
+    await this.db.db.insert(portoneLedgerSync).values(ledgerSyncValues(record)).onConflictDoUpdate({ target: portoneLedgerSync.name, set: ledgerSyncSet(record) });
+  }
+
+  async insertAlertRequests(records: readonly SettlementAlertRequestRecord[]): Promise<number> {
+    if (records.length === 0) return 0;
+    const rows = await this.db.db.insert(settlementAlertRequest).values(records.map(alertRequestValues)).onConflictDoNothing().returning({ eventKey: settlementAlertRequest.eventKey });
+    return rows.length;
+  }
+
+  async listUnsentAlertRequests(limit: number): Promise<SettlementAlertRequestRecord[]> {
+    const rows = await this.db.db
+      .select()
+      .from(settlementAlertRequest)
+      .where(and(isNull(settlementAlertRequest.requestedAt), isNull(settlementAlertRequest.failedAt)))
+      .orderBy(settlementAlertRequest.createdAt, settlementAlertRequest.eventKey)
+      .limit(limit);
+    return rows.map(alertRequestRecord);
+  }
+
+  async markAlertRequestSent(eventKey: string, at: Date): Promise<void> {
+    await this.db.db.update(settlementAlertRequest).set({ requestedAt: at }).where(and(eq(settlementAlertRequest.eventKey, eventKey), isNull(settlementAlertRequest.requestedAt)));
+  }
+
+  async findAlertRequest(eventKey: string): Promise<SettlementAlertRequestRecord | undefined> {
+    const rows = await this.db.db.select().from(settlementAlertRequest).where(eq(settlementAlertRequest.eventKey, eventKey)).limit(1);
+    return rows[0] ? alertRequestRecord(rows[0]) : undefined;
+  }
+
+  async findCaseRequest(eventKey: string): Promise<SettlementCaseRequestRecord | undefined> {
+    const rows = await this.db.db.select().from(settlementCaseRequest).where(eq(settlementCaseRequest.eventKey, eventKey)).limit(1);
+    return rows[0] ? caseRequestRecord(rows[0]) : undefined;
+  }
+
+  /**
+   * 거절 한 번(F-07-7 계획 §5.1 (파) (마)). 읽은 거절 수를 조건으로 올리므로(WHERE failed_at IS NULL AND refused_count = 읽은 값) 겹친 두 tick 가운데 하나만 센다.
+   * 졌거나 행이 없거나 이미 영구 실패면 undefined
+   */
+  async markRefused(row: OpsIntakeRow, key: string, refusal: OpsRefusal, at: Date, limit: number): Promise<{ refusedCount: number; failed: boolean } | undefined> {
+    const next = (read: number) => {
+      const refusedCount = read + 1;
+      return { refusedCount, failed: refusedCount >= limit };
+    };
+    if (row === 'case-request') {
+      const r = (await this.db.db.select().from(settlementCaseRequest).where(eq(settlementCaseRequest.eventKey, key)).limit(1))[0];
+      if (!r || r.requestedAt !== null || r.failedAt !== null) return undefined;
+      const out = next(r.refusedCount);
+      const done = await this.db.db
+        .update(settlementCaseRequest)
+        .set({ refusedCount: out.refusedCount, lastRefusal: refusal, failedAt: out.failed ? at : null })
+        .where(and(eq(settlementCaseRequest.eventKey, key), isNull(settlementCaseRequest.requestedAt), isNull(settlementCaseRequest.failedAt), eq(settlementCaseRequest.refusedCount, r.refusedCount)))
+        .returning({ k: settlementCaseRequest.eventKey });
+      return done.length > 0 ? out : undefined;
+    }
+    if (row === 'alert-request') {
+      const r = (await this.db.db.select().from(settlementAlertRequest).where(eq(settlementAlertRequest.eventKey, key)).limit(1))[0];
+      if (!r || r.requestedAt !== null || r.failedAt !== null) return undefined;
+      const out = next(r.refusedCount);
+      const done = await this.db.db
+        .update(settlementAlertRequest)
+        .set({ refusedCount: out.refusedCount, lastRefusal: refusal, failedAt: out.failed ? at : null })
+        .where(and(eq(settlementAlertRequest.eventKey, key), isNull(settlementAlertRequest.requestedAt), isNull(settlementAlertRequest.failedAt), eq(settlementAlertRequest.refusedCount, r.refusedCount)))
+        .returning({ k: settlementAlertRequest.eventKey });
+      return done.length > 0 ? out : undefined;
+    }
+    if (row === 'payout-account-change') {
+      const r = (await this.db.db.select().from(payoutAccountChange).where(eq(payoutAccountChange.id, key)).limit(1))[0];
+      if (!r || r.auditSentAt !== null || r.auditFailedAt !== null) return undefined;
+      const out = next(r.auditRefusedCount);
+      const done = await this.db.db
+        .update(payoutAccountChange)
+        .set({ auditRefusedCount: out.refusedCount, auditFailedAt: out.failed ? at : null })
+        .where(and(eq(payoutAccountChange.id, key), isNull(payoutAccountChange.auditSentAt), isNull(payoutAccountChange.auditFailedAt), eq(payoutAccountChange.auditRefusedCount, r.auditRefusedCount)))
+        .returning({ id: payoutAccountChange.id });
+      return done.length > 0 ? out : undefined;
+    }
+    const d = (await this.db.db.select().from(statementDispute).where(eq(statementDispute.id, key)).limit(1))[0];
+    if (!d || d.caseRequestedAt !== null || d.caseFailedAt !== null) return undefined;
+    const out = next(d.caseRefusedCount);
+    const done = await this.db.db
+      .update(statementDispute)
+      .set({ caseRefusedCount: out.refusedCount, caseFailedAt: out.failed ? at : null })
+      .where(and(eq(statementDispute.id, key), isNull(statementDispute.caseRequestedAt), isNull(statementDispute.caseFailedAt), eq(statementDispute.caseRefusedCount, d.caseRefusedCount)))
+      .returning({ id: statementDispute.id });
+    return done.length > 0 ? out : undefined;
+  }
+
+  async countIntakeFailed(row: OpsIntakeRow): Promise<number> {
+    const count = sql<number>`count(*)::int`;
+    const rows =
+      row === 'case-request'
+        ? await this.db.db.select({ n: count }).from(settlementCaseRequest).where(isNotNull(settlementCaseRequest.failedAt))
+        : row === 'alert-request'
+          ? await this.db.db.select({ n: count }).from(settlementAlertRequest).where(isNotNull(settlementAlertRequest.failedAt))
+          : row === 'payout-account-change'
+            ? await this.db.db.select({ n: count }).from(payoutAccountChange).where(isNotNull(payoutAccountChange.auditFailedAt))
+            : await this.db.db.select({ n: count }).from(statementDispute).where(isNotNull(statementDispute.caseFailedAt));
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  async listPortonePayoutsForTransferCheck(limit: number): Promise<PayoutRecord[]> {
+    const rows = await this.db.db
+      .select({ p: payout })
+      .from(payout)
+      .innerJoin(payoutBatch, eq(payoutBatch.id, payout.batchId))
+      .where(and(eq(payoutBatch.pg, 'PORTONE'), inArray(payout.status, ['COMPLETED', 'IN_PROGRESS']), isNull(payout.transferCheck)))
+      .orderBy(payout.createdAt, payout.id)
+      .limit(limit);
+    return rows.map((r) => payoutRecord(r.p));
+  }
+
+  async listStatementsOfPromoter(promoterId: string, pg: Pg, statuses: readonly StatementStatus[]): Promise<StatementRecord[]> {
+    if (statuses.length === 0) return [];
+    const rows = await this.db.db
+      .select()
+      .from(settlementStatement)
+      .where(and(eq(settlementStatement.promoterId, promoterId), eq(settlementStatement.pg, pg), inArray(settlementStatement.status, [...statuses])))
+      .orderBy(settlementStatement.createdAt, settlementStatement.id);
+    return rows.map(statementRecord);
   }
 }

@@ -161,11 +161,21 @@ export class HttpTossPayoutTransport implements TossPayoutTransport {
   }
 
   async registerSeller(pgStore: PgStore, body: TossSellerRegistration): Promise<{ tossSellerId: string; status: TossSellerStatus }> {
+    return this.#writeSeller(pgStore, body, '/v2/sellers');
+  }
+
+  /** 셀러 수정(POST /v2/sellers/{id}, 등록과 같은 JWE 본문·머리, F-07-7 계획 §5.1 (타) 결정 1). 없는 셀러(다른 상점 셀러 포함)는 TossTransportError */
+  async updateSeller(pgStore: PgStore, tossSellerId: string, body: TossSellerRegistration): Promise<{ tossSellerId: string; status: TossSellerStatus }> {
+    return this.#writeSeller(pgStore, body, '/v2/sellers/{id}', { id: tossSellerId });
+  }
+
+  async #writeSeller(pgStore: PgStore, body: TossSellerRegistration, path: string, params?: Record<string, string>): Promise<{ tossSellerId: string; status: TossSellerStatus }> {
     const s = this.#store(pgStore);
     const jwe = await sealTossJwe(body, s.securityKeys[0]!, this.#now());
     const res = await this.#send({
       method: 'POST',
-      path: '/v2/sellers',
+      path,
+      ...(params ? { params } : {}),
       headers: { authorization: this.#auth(s), 'content-type': 'text/plain', 'tosspayments-api-security-mode': 'ENCRYPTION' },
       body: jwe,
       timeoutCapMs: WRITE_TIMEOUT_MS,

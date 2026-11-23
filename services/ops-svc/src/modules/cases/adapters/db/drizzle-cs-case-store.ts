@@ -1,4 +1,4 @@
-// CS 처리함 건의 PostgreSQL 구현(ops 0000·0030, docs/data.md cs_case·cs_case_request).
+// CS 처리함 건의 PostgreSQL 구현(ops 0000·0030·0032, docs/data.md cs_case·cs_case_request).
 // 열린 (kind, target_ref) 하나는 부분 유일 인덱스 cs_case_open_key가, 같은 eventKey 한 번은 cs_case_request 기본 키가 지킨다(ADR-0364 결정 4).
 // next_due_at은 두 기한 중 이른 것의 생성 열('infinity' 포함)이라 앱은 읽지 않고 두 기한에서 다시 센다. 갱신은 판(version) 조건부이고 감사를 같은 트랜잭션에 쓴다.
 // 추가 검증 이의(F-06-7, ops 0031, docs/data.md verification_case·cs_case_dispatch·§5.1 'CS 처리함 보낼 호출' 행):
@@ -40,9 +40,10 @@ interface Row {
   updated_at: Date | string;
   due_soon_alerted_for: Date | string | null;
   overdue_alerted_for: Date | string | null;
+  detail: string | null;
 }
 
-const COLUMNS = sql`id, kind, target_ref, status, category, progress_due_at, result_due_at, assignee, version, result_note, resolved_at, created_at, updated_at, due_soon_alerted_for, overdue_alerted_for`;
+const COLUMNS = sql`id, kind, target_ref, status, category, progress_due_at, result_due_at, assignee, version, result_note, resolved_at, created_at, updated_at, due_soon_alerted_for, overdue_alerted_for, detail`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const msOf = (v: Date | string | null): number | null => (v === null ? null : new Date(v).getTime());
@@ -62,6 +63,7 @@ const toCase = (r: Row): CsCase => ({
   updatedAtMs: new Date(r.updated_at).getTime(),
   dueSoonAlertedForMs: msOf(r.due_soon_alerted_for),
   overdueAlertedForMs: msOf(r.overdue_alerted_for),
+  detail: r.detail ?? null,
 });
 const ts = (ms: number | null | undefined): SQL => (ms === null || ms === undefined ? sql`null` : sql`${new Date(ms)}::timestamptz`);
 const inList = (values: readonly string[]): SQL => sql.join(values.map((v) => sql`${v}`), sql`, `);
@@ -151,9 +153,9 @@ export class DrizzleCsCaseStore implements CsCaseStore, CsAppealStore {
   async #insertOpen(ex: Executor, input: CsCaseOpenInput): Promise<{ case: CsCase; created: boolean }> {
     const inserted = (
       await ex.execute(sql`
-        insert into cs_case (id, kind, target_ref, status, category, progress_due_at, result_due_at, created_at, updated_at)
+        insert into cs_case (id, kind, target_ref, status, category, progress_due_at, result_due_at, created_at, updated_at, detail)
         values (${input.caseId}::uuid, ${input.kind}, ${input.targetRef}, 'OPEN', ${input.category ?? ''}, ${ts(input.progressDueAtMs)}, ${ts(input.resultDueAtMs)},
-                ${new Date(input.nowMs)}::timestamptz, ${new Date(input.nowMs)}::timestamptz)
+                ${new Date(input.nowMs)}::timestamptz, ${new Date(input.nowMs)}::timestamptz, ${input.detail ?? null})
         on conflict (kind, target_ref) where status <> 'RESOLVED' do nothing
         returning ${COLUMNS}`)
     ).rows as unknown as Row[];

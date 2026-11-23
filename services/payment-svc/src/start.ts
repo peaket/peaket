@@ -138,6 +138,12 @@ import {
   type SettlementWebhookReceiver,
   type TossPayoutTransport,
 } from './modules/settlement/index.js';
+import { HttpOpsAlerts, UnavailableOpsAlerts } from './modules/settlement/adapters/http-ops-alerts.js';
+import { HttpOpsAuditRecords, UnavailableOpsAuditRecords } from './modules/settlement/adapters/http-ops-audit-records.js';
+import { HttpPortonePlatformTransport } from './modules/settlement/adapters/http-portone-platform-transport.js';
+import { PortonePlatformPayoutGateway } from './modules/settlement/adapters/portone-platform-payout-gateway.js';
+import { portonePayoutConfigured } from './modules/settlement/domain/payout-adapters.js';
+import type { PayoutAccountAuditSink, PortonePlatformTransport, SettlementAlertSink } from './modules/settlement/domain/ports.js';
 import { safeErrorCode } from './safe-error-code.js';
 import { shutdownInOrder } from './shutdown.js';
 
@@ -176,6 +182,32 @@ export function assembleTossPayout(
     createWebhook: (o) => new ReceiveSettlementWebhook({ config, transport, settlements: o.settlements, store: o.store, now, log: o.log, ...(o.signals ? { signals: o.signals } : {}) }),
   };
 }
+/**
+ * 포트원 지급대행(파트너 정산) 조립(F-07-7 계획 §5.1 (가), ADR-0370 결정 3·7). 설정(portonePayoutConfigured)이 있으면 플랫폼 HTTP 전송과 수기 정산건 갈래를,
+ * 없으면 전송 없음과 지금의 콘솔 실행 기록 갈래(ManualPortonePayoutGateway)를 준다. 설정이 반만 있으면 던진다(시작 실패, 메시지에 값 없음).
+ * baseUrl은 시험이 대역 서버 주소를 넘길 때만 쓴다(없으면 결제 포트원 주소).
+ */
+export function assemblePortonePlatform(
+  env: Record<string, string | undefined>,
+  deps: { baseUrl?: string; clock: Clock; log: Pick<PlatformLogger, 'info' | 'warn'> },
+): { transport: PortonePlatformTransport | undefined; gateway: PayoutGateway } {
+  const config = portonePayoutConfigured(env);
+  if (!config) return { transport: undefined, gateway: new ManualPortonePayoutGateway() };
+  const transport = new HttpPortonePlatformTransport(deps.baseUrl ? { ...config, baseUrl: deps.baseUrl } : config, { clock: deps.clock });
+  return { transport, gateway: new PortonePlatformPayoutGateway(transport) };
+}
+
+/**
+ * ops 받기 둘(정산 계좌 변경 감사·운영 경보) 조립(F-07-7 계획 §5.1 (가)). PEAKET_OPS_HTTP_URL이 있으면 HTTP 어댑터, 없으면 늘 503인 대역이다
+ * (행은 남고 보낸 시각이 빈 채로 다시 보내기를 기다린다). 내부 토큰은 PEAKET_INTERNAL_TOKEN.
+ */
+export function assembleOpsSettlementSinks(env: Record<string, string | undefined>, deps: { clock: Clock; log?: Pick<PlatformLogger, 'info' | 'warn'> }): { audit: PayoutAccountAuditSink; alerts: SettlementAlertSink } {
+  const url = env.PEAKET_OPS_HTTP_URL?.trim();
+  if (!url) return { audit: new UnavailableOpsAuditRecords(), alerts: new UnavailableOpsAlerts() };
+  const token = env.PEAKET_INTERNAL_TOKEN;
+  return { audit: new HttpOpsAuditRecords(url, token, { clock: deps.clock }), alerts: new HttpOpsAlerts(url, token, { clock: deps.clock }) };
+}
+
 export interface StartOptions {
   /** 이 서비스의 환경 값(시작 파일은 process.env, 합본은 공통 값과 이 서비스의 환경 파일을 합친 값) */
   env: Record<string, string | undefined>;
@@ -202,6 +234,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
   };
   const tossPayout = assembleTossPayout(env, { clock: systemClock, log: { info: () => undefined, warn: () => undefined }, approvalLog: lateTossLog });
   const tossTerms = tossPayoutTerms(env);
+  // 포트원 지급대행(F-07-7 ADR-0370 결정 3·7). 설정이 반만 있으면 여기서 시작 실패다. ops 감사·운영 경보 받기는 ops 주소가 없으면 늘 503인 대역이다
+  const portonePlatform = assemblePortonePlatform(env, { clock: systemClock, log: { info: () => undefined, warn: () => undefined } });
+  const portonePayoutConfig = portonePayoutConfigured(env);
+  const opsSinks = assembleOpsSettlementSinks(env, { clock: systemClock });
   const internalGrpcToken = internalGrpcTokenFromEnv(env);
   const reauthRedisUrl = env.PEAKET_REAUTH_REDIS_URL;
   const reauthRedis = reauthRedisUrl ? await createHotRedis({ url: reauthRedisUrl }) : undefined;
@@ -347,8 +383,11 @@ let circuitsRef: PgCircuits | undefined;
         // 토스 지급대행(F-07-6 ADR-0369): 설정이 있으면 JWE 전송·지급 어댑터·잔액 원천·셀러 등록·잔액 대사 장부를, 없으면 503 어댑터·잔액 확인 생략
         pgBalance: tossPayout.pgBalance ?? new HttpPgBalanceSource(undefined),
         log: lateApprovalLog,
-        gateways: [new ManualPortonePayoutGateway(), tossPayout.gateway],
+        gateways: [portonePlatform.gateway, tossPayout.gateway],
         ...(tossPayout.transport ? { tossTransport: tossPayout.transport } : {}),
+        ...(portonePlatform.transport && portonePayoutConfig ? { portone: portonePlatform.transport, portoneConfig: portonePayoutConfig } : {}),
+        payoutAccountAudit: opsSinks.audit,
+        alerts: opsSinks.alerts,
         signals: settlementSignals,
         tossTerms,
         pgLedger: new DrizzlePgLedgerSource(batchDatabase),

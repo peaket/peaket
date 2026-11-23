@@ -210,7 +210,9 @@ export type ProblemType =
   | 'payment-attempts-exceeded'
   | 'payment-not-accepted'
   | 'payout-account-change-hold'
+  | 'payout-account-holder-mismatch'
   | 'payout-account-mismatch'
+  | 'payout-agency-update-failed'
   | 'payout-approval-conflict'
   | 'payout-balance-insufficient'
   | 'payout-batch-amount-mismatch'
@@ -221,16 +223,19 @@ export type ProblemType =
   | 'payout-batch-statement-conflict'
   | 'payout-dependency-unavailable'
   | 'payout-gateway-unavailable'
+  | 'payout-holder-lookup-unavailable'
   | 'payout-kyc-required'
   | 'payout-not-retryable'
   | 'payout-retry-approval-required'
   | 'payout-sale-suspended'
+  | 'payout-seller-unverified'
   | 'pg-balance-unavailable'
   | 'pg-check-unavailable'
   | 'pg-fallback-same-provider'
   | 'pg-unavailable'
   | 'pickup-slot-unavailable'
   | 'place-exists'
+  | 'portone-transfer-conflict'
   | 'post-review-conflict'
   | 'post-review-invalid'
   | 'post-review-not-executor'
@@ -321,6 +326,7 @@ export type ProblemType =
   | 'sale-review-not-approved'
   | 'sale-review-not-cancellable'
   | 'sale-review-not-submitted'
+  | 'sale-review-payout-registration-incomplete'
   | 'sale-review-request-invalid'
   | 'sale-review-scales-missing'
   | 'sale-setting-locked'
@@ -608,7 +614,9 @@ export const PROBLEM_TYPES = {
   'payment-attempts-exceeded': { status: 409, title: "결제 시도 횟수를 넘었습니다" },
   'payment-not-accepted': { status: 409, title: "아직 결제를 접수하지 않은 주문입니다" },
   'payout-account-change-hold': { status: 409, title: "정산 계좌 변경 보류 중이라 지급할 수 없습니다" },
+  'payout-account-holder-mismatch': { status: 422, title: "예금주가 판매자 상호나 대표자와 다릅니다" },
   'payout-account-mismatch': { status: 409, title: "예금주가 확인되지 않은 정산 계좌라 지급할 수 없습니다" },
+  'payout-agency-update-failed': { status: 502, title: "결제사에 정산 계좌를 반영하지 못했습니다" },
   'payout-approval-conflict': { status: 409, title: "다른 사람이 먼저 처리했습니다" },
   'payout-balance-insufficient': { status: 409, title: "결제사 잔액이 모자라 지급일을 미룹니다" },
   'payout-batch-amount-mismatch': { status: 409, title: "승인한 지급 금액과 정산서 합계가 다릅니다" },
@@ -619,16 +627,19 @@ export const PROBLEM_TYPES = {
   'payout-batch-statement-conflict': { status: 409, title: "확정 정산서가 아닌 건이 지급 묶음에 섞였습니다" },
   'payout-dependency-unavailable': { status: 503, title: "지급 서비스에 연결하지 못했습니다" },
   'payout-gateway-unavailable': { status: 503, title: "지급대행을 아직 시작할 수 없습니다" },
+  'payout-holder-lookup-unavailable': { status: 503, title: "예금주를 확인할 수 없습니다" },
   'payout-kyc-required': { status: 409, title: "KYC 확인이 끝나지 않아 지급할 수 없습니다" },
   'payout-not-retryable': { status: 409, title: "실패한 지급 건만 다시 보낼 수 있습니다" },
   'payout-retry-approval-required': { status: 409, title: "금액이나 셀러를 바꾼 재요청은 새 지급 묶음 승인이 필요합니다" },
   'payout-sale-suspended': { status: 409, title: "판매 중지된 공연의 정산서라 지급할 수 없습니다" },
+  'payout-seller-unverified': { status: 409, title: "판매자 확인이 끝나지 않아 정산 계좌를 받을 수 없습니다" },
   'pg-balance-unavailable': { status: 503, title: "결제사 잔액을 확인할 수 없습니다" },
   'pg-check-unavailable': { status: 503, title: "결제사 지정을 지금 확인할 수 없습니다" },
   'pg-fallback-same-provider': { status: 422, title: "대체 결제사가 기본 결제사와 같은 하위 결제사를 거칩니다" },
   'pg-unavailable': { status: 503, title: "결제를 잠시 시작할 수 없습니다" },
   'pickup-slot-unavailable': { status: 422, title: "고를 수 없는 수령 시간대입니다" },
   'place-exists': { status: 409, title: "같은 공연장이 있습니다" },
+  'portone-transfer-conflict': { status: 502, title: "포트원 수기 정산건이 정산서와 맞지 않습니다" },
   'post-review-conflict': { status: 409, title: "지금 사후 검토 상태에서는 할 수 없습니다" },
   'post-review-invalid': { status: 422, title: "사후 검토 보고서 값이 올바르지 않습니다" },
   'post-review-not-executor': { status: 403, title: "명령을 실행한 commander만 제출할 수 있습니다" },
@@ -719,6 +730,7 @@ export const PROBLEM_TYPES = {
   'sale-review-not-approved': { status: 409, title: "판매 승인된 공연만 회차 설정을 쓸 수 있습니다" },
   'sale-review-not-cancellable': { status: 409, title: "거둘 판매 승인 변경 요청이 없습니다" },
   'sale-review-not-submitted': { status: 409, title: "판매 승인 대기 중인 공연이 아닙니다" },
+  'sale-review-payout-registration-incomplete': { status: 409, title: "지급대행 등록이 끝나지 않아 승인할 수 없습니다" },
   'sale-review-request-invalid': { status: 422, title: "판매 승인 요청을 받을 수 없습니다" },
   'sale-review-scales-missing': { status: 422, title: "모든 회차의 공연 규모를 정해 주세요" },
   'sale-setting-locked': { status: 409, title: "지금은 바꿀 수 없는 항목입니다" },

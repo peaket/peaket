@@ -99,5 +99,28 @@ export function settlementApprovalLog(logger: Pick<PlatformLogger, 'info' | 'war
         // 기록 실패는 일꾼을 멈추지 않는다
       }
     },
+    // F-07-7(계획 §5.1 (사)·(파) (마)): 보안·운영 사건. 계좌번호·예금주명·토큰·본문은 싣지 않는다
+    payoutAccountReauthRejected(o) {
+      // 보안 사건(ASVS 16.3.3): 파트너·사유 종류만
+      try {
+        logger.warn({ event: 'payout_account_reauth_rejected', promoterId: o.promoterId, reason: o.reason, at: o.at.toISOString() }, '정산 계좌 변경의 재인증을 받지 않았다');
+      } catch {
+        // 기록 실패는 403 응답을 바꾸지 않는다
+      }
+    },
+    portoneReconciliationFailed(o) {
+      try {
+        logger.warn({ event: 'portone_reconciliation_failed', name: o.name, kind: o.kind, at: o.at.toISOString() }, '포트원 사후 대사를 끝내지 못해 성공 시각을 옮기지 않았다');
+      } catch {
+        // 기록 실패는 일꾼을 멈추지 않는다
+      }
+    },
+    opsIntakeRefused(o) {
+      try {
+        logger.warn({ event: 'ops_intake_refused', target: o.target, eventKey: o.eventKey, kind: o.kind, refusal: o.refusal, count: o.count, at: o.at.toISOString() }, 'ops가 같은 요청을 거듭 거절해 더 보내지 않는다(사람이 본다)');
+      } catch {
+        // 기록 실패는 행의 영구 실패 표시를 바꾸지 않는다
+      }
+    },
   };
 }

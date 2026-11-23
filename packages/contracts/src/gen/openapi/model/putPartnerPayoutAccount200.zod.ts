@@ -16,7 +16,8 @@ export const PutPartnerPayoutAccount200 = zod.object({
   "payoutAccountLast4": zod.string(),
   "holdUntil": zod.iso.datetime({"offset":true}),
   "version": zod.int(),
-  "holderVerified": zod.boolean().describe('예금주가 KYC 사업자 상호·대표자와 같으면 true. false면 지급 묶음이 HELD/ACCOUNT_MISMATCH로 막는다(A1-H7)')
+  "holderVerified": zod.boolean().describe('늘 true다. 예금주가 판매자 상호·대표자와 다르면 저장하지 않고 422로 끝난다(ADR-0370 결정 5)'),
+  "agencySyncPending": zod.boolean().optional().describe('결제사 수정 대기. 200이면 늘 false')
 })
 
 export type PutPartnerPayoutAccount200 = zod.input<typeof PutPartnerPayoutAccount200>;

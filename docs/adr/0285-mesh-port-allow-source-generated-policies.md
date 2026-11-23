@@ -37,6 +37,7 @@
    | --- | --- | --- |
    | core-svc | identity-svc | 관리 공개키 묶음 `/internal/jwks/admin.json`(`PEAKET_IDENTITY_JWKS_URL`, 예매자 내보내기 재인증) |
    | core-svc | purchase-svc | 예매자 명단 `/internal/v1/events/{eventId}/attendees`(`PEAKET_PURCHASE_HTTP_URL`) |
+   | core-svc | payment-svc | 지급대행 등록 `POST /internal/v1/settlements/payout-registrations`·등록 읽기 `GET /internal/v1/settlements/promoters/{promoterId}/payout-registration`·판매자 확인 `PUT /internal/v1/settlements/promoters/{promoterId}/seller-verification`(`PEAKET_PAYMENT_HTTP_URL`, 판매 승인 요청·승인, ADR-0370 결정 3·4). 보충(2026-11-23, F-07-7) |
    | ops-svc | core-svc | 판매 설정 사본 `/internal/v1/events/{eventId}/sale-config`, 회차 규모 변경 `/v1/ops/events/{eventId}/scale-changes`, 회차 취소·연기의 core 회차 상태 반영 `/internal/v1/events/{eventId}/cancellation-status`(2026-11-19 더함, BUILD_ORDER GAT-110, docs/features/transfer-refund.md §5 'core 회차 상태 반영'), 온세일 윈도우가 끝난 회차 목록 `/internal/v1/events/onsale-closed`(감사 회차 마감 체크포인트, 보충(2026-11-22, BAT-360): 같은 쌍이라 원천 규칙은 그대로이고 구현 커밋이 원천 주석에 경로를 더한다, ADR-0348 결정 9)(`PEAKET_CORE_HTTP_URL`) |
    | ops-svc | identity-svc | 관리 공개키 묶음(`PEAKET_IDENTITY_JWKS_URL`) |
    | ops-svc | payment-svc | 정산·지급 `/internal/v1/settlements/*`, 결제사 차단기 상태 `/internal/v1/circuits`(`PEAKET_PAYMENT_HTTP_URL`) |
@@ -53,7 +54,7 @@
    | 팬 웹 앱 서버(web) | identity-svc | 팬 공개키 묶음 `/internal/jwks/fan.json`(`PEAKET_FAN_TOKEN_JWKS_URL`) |
    | identity-svc | core-svc | 판매 설정 사본 `/internal/v1/events/{eventId}/sale-config`(파트너 현장 스태프 초대의 회차 소유 확인, 2026-11-22 BAT-450B, ADR-0353) |
 
-   보충(2026-11-22, W12-mesh): purchase-svc → payment-svc 줄을 더해 표는 15쌍이다. 보충(2026-11-22, BAT-450B): identity-svc → core-svc 줄을 더해 16쌍이다(ADR-0353, `deploy/platform/mesh/port-allow.yaml`의 core-svc REST callers에도 identity-svc를 더했다). 근거는 docs/features/transfer-refund.md §5 '서킷 연결'과 docs/api/guidelines.md §8.1의 'purchase-svc 내부 서킷 상태 읽기' 줄이고(BAT-425 R-716), 원천에는 그때 이미 들어가 있었다. 시험의 정본 표만 따라오지 못했다(계획 docs/review/plans/W12-mesh.md). 보충(2026-11-22, BAT-625): payment-svc → ops-svc 줄을 더해 17쌍이다(ADR-0345, ops-svc REST callers에 payment-svc를 더했다). ops-svc REST 포트는 경로로 거르지 못하므로 payment-svc는 공유 토큰만 있으면 ops-svc의 다른 내부 HTTP에도 닿는다. 지급 승인은 payment-svc가 ops 기록을 대조하는 쪽으로 닫았고, 경로 단위 거르기는 아래 '되돌릴 조건'의 대안 2로 남긴다.
+   보충(2026-11-22, W12-mesh): purchase-svc → payment-svc 줄을 더해 표는 15쌍이다. 보충(2026-11-22, BAT-450B): identity-svc → core-svc 줄을 더해 16쌍이다(ADR-0353, `deploy/platform/mesh/port-allow.yaml`의 core-svc REST callers에도 identity-svc를 더했다). 근거는 docs/features/transfer-refund.md §5 '서킷 연결'과 docs/api/guidelines.md §8.1의 'purchase-svc 내부 서킷 상태 읽기' 줄이고(BAT-425 R-716), 원천에는 그때 이미 들어가 있었다. 시험의 정본 표만 따라오지 못했다(계획 docs/review/plans/W12-mesh.md). 보충(2026-11-22, BAT-625): payment-svc → ops-svc 줄을 더해 17쌍이다(ADR-0345, ops-svc REST callers에 payment-svc를 더했다). ops-svc REST 포트는 경로로 거르지 못하므로 payment-svc는 공유 토큰만 있으면 ops-svc의 다른 내부 HTTP에도 닿는다. 지급 승인은 payment-svc가 ops 기록을 대조하는 쪽으로 닫았고, 경로 단위 거르기는 아래 '되돌릴 조건'의 대안 2로 남긴다. 보충(2026-11-23, F-07-7): core-svc → payment-svc 줄을 더해 17쌍이다(ADR-0370, `deploy/platform/mesh/port-allow.yaml`의 payment-svc REST callers에도 core-svc를 더했다).
 
    trust-svc의 REST 포트는 gw-fan만 받는다(허니팟 기록 경로 하나, docs/architecture.md §5 '포트별 허용 표'). 이 경로의 라우트는 공개 경로를 설정으로 넣으므로 저장소의 라우트에 없다(docs/infra.md §4.1 '허니팟 경로의 첫 구현'). 그래서 원천에 예외 한 줄로 적는다.
 10. **메시 바탕 매니페스트(손으로 쓴다, `deploy/platform/mesh/`).**

@@ -56,6 +56,9 @@ export const ACCEPTED_KINDS: ReadonlySet<CsCaseKind> = new Set<CsCaseKind>([
   'PAYOUT_FAILED',
   'PAYOUT_DELAYED',
   'PG_BALANCE_MISMATCH',
+  // payment-svc 포트원 지급 쪽 건(F-07-7 ADR-0370 결정 7·8, settlement §5.3). 대상 = 묶음 ID(실행 건)·이체·파트너·정산서·묶음 ID(원장 불일치)
+  'PORTONE_PAYOUT_EXECUTION',
+  'PORTONE_LEDGER_MISMATCH',
 ]);
 
 /**
@@ -98,6 +101,8 @@ export type CsCaseStatus = (typeof CS_CASE_STATUSES)[number];
 export const RESULT_NOTE_MAX = 2_000;
 /** 건 요청 eventKey 글자 수 상한(cs_case_request.event_key CHECK) */
 export const EVENT_KEY_MAX = 200;
+/** 건 본문 글(detail) 글자 수 상한(코드 포인트, ops 0032 cs_case_detail_check, F-07-7 ADR-0370 결정 7) */
+export const CASE_DETAIL_MAX = 2_000;
 
 /** asyncapi support.cases-requested의 본문(개인정보·본문 없이 ID와 종류만) */
 export interface CaseRequested {
@@ -110,6 +115,8 @@ export interface CaseRequested {
   readonly createdAt: string;
   /** 기한을 세는 시작 시각(없으면 createdAt, ADR-0364 결정 2) */
   readonly dueBaseAt?: string | undefined;
+  /** 건 본문 글(선택, 1~2,000자, F-07-7). 뺀 정산서·사유 등 ID와 종류만 싣는다. 처음 연 건에만 남는다 */
+  readonly detail?: string | undefined;
 }
 
 export interface CsCase {
@@ -133,6 +140,8 @@ export interface CsCase {
   readonly dueSoonAlertedForMs: number | null;
   /** 기한 넘김 경보를 연 마지막 기한 값(data.md overdue_alerted_for) */
   readonly overdueAlertedForMs: number | null;
+  /** 처음 연 건 요청의 본문 글(ops 0032). 없으면 null */
+  readonly detail: string | null;
 }
 
 /** 이른 기한(data.md next_due_at). 기한이 없으면 null('infinity') */
@@ -150,6 +159,8 @@ export interface CsCaseOpenInput {
   readonly category?: string;
   readonly progressDueAtMs?: number | null;
   readonly resultDueAtMs?: number | null;
+  /** 건 본문 글(선택). 새 건을 열 때만 남고 열린 건이 있으면 버린다 */
+  readonly detail?: string | null;
 }
 
 /** 새 건 값(메모리·DB 저장소가 같은 기본값을 쓴다) */
@@ -170,6 +181,7 @@ export function newCsCase(i: CsCaseOpenInput): CsCase {
     updatedAtMs: i.nowMs,
     dueSoonAlertedForMs: null,
     overdueAlertedForMs: null,
+    detail: i.detail ?? null,
   };
 }
 

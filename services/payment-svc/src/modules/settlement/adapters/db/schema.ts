@@ -114,6 +114,9 @@ export const statementDispute = pgTable(
     resolvedBy: uuid('resolved_by'),
     resolutionNote: text('resolution_note'),
     caseRequestedAt: at('case_requested_at'),
+    // 0030: ops CS 건 받기 거절 수와 영구 실패 시각(거절 3번 [가정]째, F-07-7 계획 §5.1 (파) (마)). 일시 실패는 세지 않는다
+    caseRefusedCount: integer('case_refused_count').notNull().default(0),
+    caseFailedAt: at('case_failed_at'),
   },
   (t) => [
     check('statement_dispute_reason_check', sql`${t.reasonCode} in ('GROSS_AMOUNT', 'REFUND_AMOUNT', 'COMMISSION', 'OFFSET', 'OTHER')`),
@@ -301,8 +304,117 @@ export const payoutAccount = pgTable(
     changedAt: at('changed_at').notNull(),
     holdUntil: at('hold_until').notNull(),
     holderVerified: boolean('holder_verified').notNull().default(false),
+    /** 결제사 수정 대기(0030, ADR-0370 결정 5). 계좌 변경에서 한 곳이라도 실패하면 true이고 보류가 끝나도 지급하지 않는다 */
+    agencySyncPending: boolean('agency_sync_pending').notNull().default(false),
   },
   (t) => [check('payout_account_version_check', sql`${t.version} >= 1`)],
+);
+
+/** 정산 계좌 변경 시도 한 번(0030, ADR-0370 결정 5). 덧붙이기만 하고 계좌번호·예금주명은 없다 */
+export const payoutAccountChange = pgTable(
+  'payout_account_change',
+  {
+    id: uuid('id').primaryKey(),
+    promoterId: uuid('promoter_id').notNull(),
+    actorAccountId: uuid('actor_account_id').notNull(),
+    reauthJti: text('reauth_jti').notNull(),
+    /** 그 시도의 재인증 요소(ops 감사 본문 reauthFactors) */
+    reauthFactors: text('reauth_factors').array().notNull().default(sql`'{}'::text[]`),
+    result: text('result').notNull(),
+    bankCode: text('bank_code').notNull(),
+    accountLast4: text('account_last4').notNull(),
+    holdUntil: at('hold_until'),
+    agencyResults: jsonb('agency_results').notNull(),
+    createdAt: at('created_at').notNull(),
+    auditSentAt: at('audit_sent_at'),
+    auditRefusedCount: integer('audit_refused_count').notNull().default(0),
+    auditFailedAt: at('audit_failed_at'),
+  },
+  (t) => [
+    uniqueIndex('payout_account_change_reauth_jti_uidx').on(t.reauthJti),
+    check('payout_account_change_result_check', sql`${t.result} in ('ACCEPTED', 'HOLDER_MISMATCH', 'AGENCY_FAILED')`),
+    check('payout_account_change_account_last4_check', sql`${t.accountLast4} ~ '^[0-9]{4}$'`),
+    check('payout_account_change_audit_refused_count_check', sql`${t.auditRefusedCount} >= 0`),
+    index('payout_account_change_unsent_idx').on(t.createdAt).where(sql`${t.auditSentAt} is null and ${t.auditFailedAt} is null`),
+    index('payout_account_change_promoter_idx').on(t.promoterId, t.createdAt),
+  ],
+);
+
+/** 포트원 파트너 등록(0030, ADR-0370 결정 1). 계좌번호는 두지 않는다 */
+export const portonePartner = pgTable(
+  'portone_partner',
+  {
+    promoterId: uuid('promoter_id').primaryKey(),
+    portonePartnerId: text('portone_partner_id').notNull(),
+    contractId: text('contract_id').notNull(),
+    registeredAt: at('registered_at').notNull(),
+    accountUpdatedAt: at('account_updated_at').notNull(),
+    /** 마지막 파트너 계좌 대조(0032, ADR-0370 결정 8 ②) */
+    lastAccountCheck: text('last_account_check'),
+    lastAccountCheckedAt: at('last_account_checked_at'),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('portone_partner_portone_partner_id_uidx').on(t.portonePartnerId),
+    check('portone_partner_last_account_check_check', sql`${t.lastAccountCheck} is null or ${t.lastAccountCheck} in ('MATCHED', 'MISMATCH')`),
+  ],
+);
+
+/** 포트원 이체 원장의 출금 하나(0032, settlement §5.3, ADR-0370 결정 8 ①). 겹쳐 읽어도 한 행. 계좌번호 전체·예금주명은 없다 */
+export const portoneTransfer = pgTable(
+  'portone_transfer',
+  {
+    transferId: text('transfer_id').primaryKey(),
+    withdrawalType: text('withdrawal_type'),
+    payoutId: uuid('payout_id').references(() => payout.id),
+    amount: amount('amount').notNull(),
+    bankCode: text('bank_code'),
+    accountLast4: text('account_last4'),
+    holderMatched: boolean('holder_matched'),
+    checkResult: text('check_result').notNull(),
+    transferredAt: at('transferred_at').notNull(),
+    checkedAt: at('checked_at').notNull(),
+  },
+  (t) => [
+    check('portone_transfer_check_result_check', sql`${t.checkResult} in ('MATCHED', 'MISMATCH', 'UNLINKED')`),
+    check('portone_transfer_account_last4_check', sql`${t.accountLast4} is null or ${t.accountLast4} ~ '^[0-9]{4}$'`),
+    index('portone_transfer_payout_idx').on(t.payoutId).where(sql`${t.payoutId} is not null`),
+  ],
+);
+
+/** 포트원 사후 대사 진행(0032, ADR-0370 결정 8 ④) */
+export const portoneLedgerSync = pgTable(
+  'portone_ledger_sync',
+  {
+    name: text('name').primaryKey(),
+    lastSuccessAt: at('last_success_at'),
+    readThrough: at('read_through'),
+    haltedOn: date('halted_on', { mode: 'string' }),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [check('portone_ledger_sync_name_check', sql`${t.name} in ('WITHDRAWAL', 'PARTNER_ACCOUNT')`)],
+);
+
+/** 운영 경보 요청(0032, ADR-0370 결정 8). 원인 쓰기와 같은 트랜잭션에 넣고 정산 일꾼이 보낸 뒤 requested_at을 채운다 */
+export const settlementAlertRequest = pgTable(
+  'settlement_alert_request',
+  {
+    eventKey: text('event_key').primaryKey(),
+    kind: text('kind').notNull(),
+    severity: text('severity').notNull(),
+    sourceId: text('source_id').notNull(),
+    createdAt: at('created_at').notNull(),
+    requestedAt: at('requested_at'),
+    refusedCount: integer('refused_count').notNull().default(0),
+    failedAt: at('failed_at'),
+    lastRefusal: text('last_refusal'),
+  },
+  (t) => [
+    check('settlement_alert_request_severity_check', sql`${t.severity} in ('SEV2', 'SEV3')`),
+    check('settlement_alert_request_refused_count_check', sql`${t.refusedCount} >= 0`),
+    check('settlement_alert_request_last_refusal_check', sql`${t.lastRefusal} is null or ${t.lastRefusal} in ('NOT_ACCEPTED', 'HTTP_400', 'HTTP_422')`),
+    index('settlement_alert_request_unsent_idx').on(t.createdAt).where(sql`${t.requestedAt} is null and ${t.failedAt} is null`),
+  ],
 );
 
 export const partnerReceivable = pgTable(
@@ -446,10 +558,19 @@ export const settlementCaseRequest = pgTable(
     sourceId: text('source_id').notNull(),
     createdAt: at('created_at').notNull(),
     requestedAt: at('requested_at'),
+    /** 건 본문 글(선택, 1~2,000자, 0030). 다시 보낼 때 같은 글을 싣는다 */
+    detail: text('detail'),
+    /** ops 받기 거절 수·영구 실패 시각·마지막 거절 까닭(0030, F-07-7 계획 §5.1 (파) (마)) */
+    refusedCount: integer('refused_count').notNull().default(0),
+    failedAt: at('failed_at'),
+    lastRefusal: text('last_refusal'),
   },
   (t) => [
-    check('settlement_case_request_kind_check', sql`${t.kind} in ('PAYOUT_ERROR', 'PAYOUT_FAILED', 'PAYOUT_DELAYED', 'SELLER_KYC_REQUIRED', 'PG_BALANCE_MISMATCH')`),
-    index('settlement_case_request_unsent_idx').on(t.createdAt).where(sql`${t.requestedAt} is null`),
+    check('settlement_case_request_kind_check', sql`${t.kind} in ('PAYOUT_ERROR', 'PAYOUT_FAILED', 'PAYOUT_DELAYED', 'SELLER_KYC_REQUIRED', 'PG_BALANCE_MISMATCH', 'PORTONE_PAYOUT_EXECUTION', 'PORTONE_LEDGER_MISMATCH')`),
+    check('settlement_case_request_detail_check', sql`${t.detail} is null or char_length(${t.detail}) between 1 and 2000`),
+    check('settlement_case_request_refused_count_check', sql`${t.refusedCount} >= 0`),
+    check('settlement_case_request_last_refusal_check', sql`${t.lastRefusal} is null or ${t.lastRefusal} in ('NOT_ACCEPTED', 'HTTP_400', 'HTTP_422')`),
+    index('settlement_case_request_unsent_idx').on(t.createdAt).where(sql`${t.requestedAt} is null and ${t.failedAt} is null`),
   ],
 );
 

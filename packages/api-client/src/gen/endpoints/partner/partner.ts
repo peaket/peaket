@@ -109,6 +109,7 @@ import type {
   PartnerMerchReturnRejection,
   PartnerMerchShipmentImportResult,
   PartnerMerchShipmentInput,
+  PartnerPayoutAccount,
   PartnerProductCreate,
   PartnerProductDetail,
   PartnerProductPage,
@@ -2614,6 +2615,11 @@ export type createPartnerProductionSaleReviewResponse422 = {
   status: 422
 }
 
+export type createPartnerProductionSaleReviewResponse502 = {
+  data: ProblemResponse
+  status: 502
+}
+
 export type createPartnerProductionSaleReviewResponse503 = {
   data: ProblemResponse
   status: 503
@@ -2622,7 +2628,7 @@ export type createPartnerProductionSaleReviewResponse503 = {
 export type createPartnerProductionSaleReviewResponseSuccess = (createPartnerProductionSaleReviewResponse202) & {
   headers: Headers;
 };
-export type createPartnerProductionSaleReviewResponseError = (createPartnerProductionSaleReviewResponse400 | createPartnerProductionSaleReviewResponse403 | createPartnerProductionSaleReviewResponse404 | createPartnerProductionSaleReviewResponse409 | createPartnerProductionSaleReviewResponse422 | createPartnerProductionSaleReviewResponse503) & {
+export type createPartnerProductionSaleReviewResponseError = (createPartnerProductionSaleReviewResponse400 | createPartnerProductionSaleReviewResponse403 | createPartnerProductionSaleReviewResponse404 | createPartnerProductionSaleReviewResponse409 | createPartnerProductionSaleReviewResponse422 | createPartnerProductionSaleReviewResponse502 | createPartnerProductionSaleReviewResponse503) & {
   headers: Headers;
 };
 
@@ -2635,7 +2641,7 @@ export const getCreatePartnerProductionSaleReviewUrl = (productionId: string,) =
 }
 
 /**
- * FR-052, POL-037, ADR-0045. 판매 승인은 공연 단위이고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 승인 뒤 회차를 더하거나 가격·회차·좌석 등급·좌석맵·판매 정책을 바꾸면 다시 승인 대기(마지막 승인 내용으로 공개·판매는 계속, 변경분은 승인 때 반영, docs/planning/03 §2.14, ADR-0062). 정산 계좌는 모양만 보고 저장하지 않는다(지급대행 연동 전, LCH-110). 지급대행 등록이 없어도 승인을 막지 않고 화면에 '연동 전'이라고 적는다(ADR-0327 결정 6). 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
+ * FR-052, POL-037, ADR-0045. 판매 승인은 공연 단위이고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). 승인 뒤 회차를 더하거나 가격·회차·좌석 등급·좌석맵·판매 정책을 바꾸면 다시 승인 대기(마지막 승인 내용으로 공개·판매는 계속, 변경분은 승인 때 반영, docs/planning/03 §2.14, ADR-0062). 공연 상태를 바꾸기 전에 payment에 지급대행 등록(예금주 조회·이름 비교·포트원 파트너·토스 두 상점 셀러)을 부른다. 포트원 플랫폼이 꺼져 있으면 정산 계좌는 모양만 본다. 계좌번호 원문은 core에 저장하지 않는다(ADR-0370 결정 1·3). 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
  * @summary 판매 승인 요청(판매자 신원정보 포함). 승인 전에는 공개되지 않음
  */
 export const createPartnerProductionSaleReview = async (productionId: string,
@@ -3417,14 +3423,147 @@ export const useCreatePartnerSettlementDispute = <TError = ErrorType<ProblemResp
       > => {
       return useMutation(getCreatePartnerSettlementDisputeMutationOptions(options), queryClient);
     }
-    export type putPartnerPayoutAccountResponse200 = {
+    export type getPartnerPayoutAccountResponse200 = {
+  data: PartnerPayoutAccount
+  status: 200
+}
+
+export type getPartnerPayoutAccountResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getPartnerPayoutAccountResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
+export type getPartnerPayoutAccountResponseSuccess = (getPartnerPayoutAccountResponse200) & {
+  headers: Headers;
+};
+export type getPartnerPayoutAccountResponseError = (getPartnerPayoutAccountResponse401 | getPartnerPayoutAccountResponse503) & {
+  headers: Headers;
+};
+
+export const getGetPartnerPayoutAccountUrl = () => {
+
+
+
+
+  return `/v1/partner/payout-account`
+}
+
+/**
+ * FR-062, POL-039, ADR-0370 결정 5. SCR-020 정산 계좌가 읽고, 응답의 ETag(판)를 PUT의 If-Match로 보낸다. 계좌가 아직 없으면 bankCode·payoutAccountLast4가 null이고 version은 0이다. 계좌번호 전체는 싣지 않는다. Cache-Control: no-store
+ * @summary 지금 정산 계좌(은행·끝 4자리·보류·판)
+ */
+export const getPartnerPayoutAccount = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<getPartnerPayoutAccountResponseSuccess> => {
+
+  return orvalFetch<getPartnerPayoutAccountResponseSuccess>(getGetPartnerPayoutAccountUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPartnerPayoutAccountQueryKey = () => {
+    return [
+    `/v1/partner/payout-account`
+    ] as const;
+    }
+
+
+export const getGetPartnerPayoutAccountQueryOptions = <TData = Awaited<ReturnType<typeof getPartnerPayoutAccount>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerPayoutAccount>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPartnerPayoutAccountQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPartnerPayoutAccount>>> = ({ signal }) => getPartnerPayoutAccount({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPartnerPayoutAccount>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPartnerPayoutAccountQueryResult = NonNullable<Awaited<ReturnType<typeof getPartnerPayoutAccount>>>
+export type GetPartnerPayoutAccountQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetPartnerPayoutAccount<TData = Awaited<ReturnType<typeof getPartnerPayoutAccount>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerPayoutAccount>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerPayoutAccount>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerPayoutAccount>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerPayoutAccount<TData = Awaited<ReturnType<typeof getPartnerPayoutAccount>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerPayoutAccount>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerPayoutAccount>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerPayoutAccount>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerPayoutAccount<TData = Awaited<ReturnType<typeof getPartnerPayoutAccount>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerPayoutAccount>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 지금 정산 계좌(은행·끝 4자리·보류·판)
+ */
+
+export function useGetPartnerPayoutAccount<TData = Awaited<ReturnType<typeof getPartnerPayoutAccount>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerPayoutAccount>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPartnerPayoutAccountQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type putPartnerPayoutAccountResponse200 = {
   data: PutPartnerPayoutAccount200
   status: 200
+}
+
+export type putPartnerPayoutAccountResponse400 = {
+  data: ProblemResponse
+  status: 400
 }
 
 export type putPartnerPayoutAccountResponse403 = {
   data: ProblemResponse
   status: 403
+}
+
+export type putPartnerPayoutAccountResponse409 = {
+  data: ProblemResponse
+  status: 409
 }
 
 export type putPartnerPayoutAccountResponse412 = {
@@ -3442,10 +3581,20 @@ export type putPartnerPayoutAccountResponse428 = {
   status: 428
 }
 
+export type putPartnerPayoutAccountResponse502 = {
+  data: ProblemResponse
+  status: 502
+}
+
+export type putPartnerPayoutAccountResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
 export type putPartnerPayoutAccountResponseSuccess = (putPartnerPayoutAccountResponse200) & {
   headers: Headers;
 };
-export type putPartnerPayoutAccountResponseError = (putPartnerPayoutAccountResponse403 | putPartnerPayoutAccountResponse412 | putPartnerPayoutAccountResponse422 | putPartnerPayoutAccountResponse428) & {
+export type putPartnerPayoutAccountResponseError = (putPartnerPayoutAccountResponse400 | putPartnerPayoutAccountResponse403 | putPartnerPayoutAccountResponse409 | putPartnerPayoutAccountResponse412 | putPartnerPayoutAccountResponse422 | putPartnerPayoutAccountResponse428 | putPartnerPayoutAccountResponse502 | putPartnerPayoutAccountResponse503) & {
   headers: Headers;
 };
 
@@ -3458,7 +3607,7 @@ export const getPutPartnerPayoutAccountUrl = () => {
 }
 
 /**
- * FR-062, POL-039, ADR-0047. 재인증 토큰은 비밀번호·TOTP와 패스키를 거친 것이어야 한다(factors에 passkey, 없으면 403 reauth-required, POL-020, 기술 검토 중간-051). 계좌는 저장하지 않고 두 결제사 수정 요청에 바로 넘김. 변경 뒤 3영업일 지급 보류, 등록 이메일·전화로 알림. 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
+ * FR-062, POL-039, ADR-0047, ADR-0370 결정 5. 재인증 토큰은 비밀번호·TOTP와 패스키를 거친 것이어야 한다(factors에 passkey, 없으면 403 reauth-required, POL-020, 기술 검토 중간-051). 차례: 재인증 → If-Match → 본문 → 판매자 확인 → 포트원 예금주 조회와 이름 비교 → 포트원 파트너·토스 두 상점 셀러 수정. 계좌번호는 저장하지 않고 결제사 요청에 바로 넘긴다. 예금주가 다르면 아무것도 바꾸지 않고 422다. 변경 뒤 3영업일 지급 보류. 결제사 한 곳이라도 실패하면 바뀐 계좌를 저장하되 수정 대기(agencySyncPending)로 지급을 막고 502다. 시도마다 변경 기록을 남겨 관제 감사로 보낸다. 변경 알림 이메일·전화는 운영 전이다. 파트너 관리자(partner_admin)만 부른다. partner_member는 403(docs/planning/03 §3, 추천 적용 2026-10-14, ADR-0062)
  * @summary 정산 계좌 변경(관리자 재인증, 예금주가 판매자와 같을 때만)
  */
 export const putPartnerPayoutAccount = async (payoutAccountChange?: PayoutAccountChange, options?: Parameters<typeof orvalFetch>[1]): Promise<putPartnerPayoutAccountResponseSuccess> => {

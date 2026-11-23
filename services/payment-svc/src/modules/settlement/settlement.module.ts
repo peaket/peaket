@@ -6,8 +6,11 @@ import type {
   AdjustmentApprovalVerifier,
   DueEventSettlementSource,
   EventCommissionRateSource,
+  PayoutAccountAuditSink,
   PayoutApprovalVerifier,
   PayoutGateway,
+  PortonePlatformTransport,
+  SettlementAlertSink,
   PgBalanceSource,
   PgLedgerSource,
   ProductSettlementSource,
@@ -21,7 +24,7 @@ import type {
   SettlementStore,
   TossPayoutTransport,
 } from './domain/ports.js';
-import type { TossPayoutTerms } from './domain/payout-adapters.js';
+import type { PortonePayoutConfig, TossPayoutTerms } from './domain/payout-adapters.js';
 import {
   ADJUSTMENT_APPROVAL_VERIFIER,
   PAYOUT_APPROVAL_VERIFIER,
@@ -70,6 +73,12 @@ export interface SettlementModuleDeps {
   readonly tossTerms?: TossPayoutTerms;
   /** 결제사 잔액 대사의 장부 원천 */
   readonly pgLedger?: PgLedgerSource;
+  /** 포트원 플랫폼 전송·설정(F-07-7 ADR-0370). 없으면 포트원 지급대행 꺼짐 */
+  readonly portone?: PortonePlatformTransport;
+  readonly portoneConfig?: PortonePayoutConfig;
+  /** ops 감사 받기·운영 경보 받기(F-07-7) */
+  readonly payoutAccountAudit?: PayoutAccountAuditSink;
+  readonly alerts?: SettlementAlertSink;
 }
 
 @Module({})
@@ -134,6 +143,10 @@ export class SettlementModule {
             ...(deps.signals ? { signals: deps.signals } : {}),
             ...(deps.tossTerms ? { tossTerms: deps.tossTerms } : {}),
             ...(deps.pgLedger ? { pgLedger: deps.pgLedger } : {}),
+            ...(deps.portone ? { portone: deps.portone } : {}),
+            ...(deps.portoneConfig ? { portoneConfig: deps.portoneConfig } : {}),
+            ...(deps.payoutAccountAudit ? { payoutAccountAudit: deps.payoutAccountAudit } : {}),
+            ...(deps.alerts ? { alerts: deps.alerts } : {}),
           }),
         inject: [
           SETTLEMENT_STORE,

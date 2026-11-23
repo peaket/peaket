@@ -9,17 +9,17 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { OpsPgRegistrationTossSellersItem } from './opsPgRegistrationTossSellersItem';
 
 /**
- * 은행과 끝 4자리만. cs_agent·cs_lead에게는 null(authz-matrix §4.1). 2026-11-20 BAT-615는 지급대행 연동 전이라 늘 null이다(ADR-0320 결정 7)
- * @nullable
+ * 결제사 지급대행 등록 상태(payment 등록 읽기, ADR-0370 결정 4). 결제사의 셀러·파트너 ID 원문은 없다. 꺼진 결제사는 화면이 '연동 전'이라고 적는다. 등록 읽기가 실패하면 둘 다 꺼진 모양(빈 목록과 false)이다
  */
-export type OpsPromoterDetailPayoutAccount = {
-  bankCode?: string;
-  last4?: string;
-  /**
-     * 변경 뒤 3영업일 지급 보류의 끝
-     * @nullable
-     */
-  holdUntil?: string | null;
-} | null;
+export interface OpsPgRegistration {
+  /** 토스페이먼츠 지급대행이 켜졌는지 */
+  tossEnabled?: boolean;
+  /** 포트원 파트너 정산이 켜졌는지 */
+  portoneEnabled?: boolean;
+  /** 결제 상점마다 하나(일반·에스크로, settlement §3) */
+  tossSellers?: OpsPgRegistrationTossSellersItem[];
+  portonePartnerRegistered?: boolean;
+}

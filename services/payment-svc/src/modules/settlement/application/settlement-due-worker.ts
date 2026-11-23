@@ -6,6 +6,9 @@
 // - 토스 지급(F-07-6 ADR-0369 결정 10~13): 30분마다 보내지 못한 지급 쪽 CS 건 다시 보내기·대사 없는 최근 묶음의 BATCH 잔액 대사·지급일 다음 영업일 12시 미완료 점검,
 //   은행 영업일 09:00 KST 뒤 첫 tick에 다음 은행 영업일 지급분 토스 묶음(PREPARED) 미리 만들기(실패하면 다음 tick에 다시),
 //   매월 마지막 은행 영업일 22:00 KST 뒤 첫 tick에 두 상점 월 잔액 대사. 토스 지급대행 전송이 조립되지 않았으면 하지 않는다.
+// - 포트원 지급·사후 대사(F-07-7 ADR-0370 결정 7·8): 08:00 KST 뒤 하루 한 번 파트너 계좌 대조, 09:00 KST 뒤 첫 tick에 그날 실행 건,
+//   15:00 KST 뒤 첫 tick에 실행 기록 없음 점검, 30분마다 지급 내역 동기화·출금 대사·대사 멈춤 점검, 월말 22:00 뒤 포트원 월 잔액 대사.
+//   감사·경보·CS 건 다시 보내기는 원인을 만든 일 뒤에 같은 tick에서 돈다. 포트원 플랫폼이 조립되지 않았으면 포트원 몫은 하지 않는다.
 import { type Clock } from '@peaket/platform';
 import type { Settlements } from './settlements.js';
 import { nextBankBusinessDay } from '../domain/payout-failure.js';
@@ -60,6 +63,10 @@ export class SettlementDueWorker {
   #preparedDay: string | undefined;
   /** 월 잔액 대사를 마친 달('YYYY-MM') */
   #reconciledMonth: string | undefined;
+  /** 포트원 09시 실행 건·15시 점검·월 잔액 대사를 마친 날·달 */
+  #portoneExecutedDay: string | undefined;
+  #portonePendingDay: string | undefined;
+  #portoneReconciledMonth: string | undefined;
 
   constructor(private readonly deps: SettlementDueWorkerDeps) {}
 
@@ -109,8 +116,15 @@ export class SettlementDueWorker {
       } catch (e) {
         this.deps.log?.failed?.(e);
       }
-      // 토스 지급 쪽 30분 일(ADR-0369 결정 10·11·12). 하나의 실패가 나머지를 멈추지 않는다
-      for (const job of [() => this.deps.settlements.retryPayoutCases(), () => this.deps.settlements.reconcileRecentBatches(), () => this.deps.settlements.checkOverduePayouts()]) {
+      await this.#portone(today, hour, weekday);
+      // 토스 지급 쪽 30분 일(ADR-0369 결정 10·11·12)과 ops로 보낼 행 다시 보내기(F-07-7). 하나의 실패가 나머지를 멈추지 않는다
+      for (const job of [
+        () => this.deps.settlements.retryPayoutCases(),
+        () => this.deps.settlements.retrySettlementAlerts(),
+        () => this.deps.settlements.retryPayoutAccountAudits(),
+        () => this.deps.settlements.reconcileRecentBatches(),
+        () => this.deps.settlements.checkOverduePayouts(),
+      ]) {
         try {
           await job();
         } catch (e) {
@@ -180,6 +194,32 @@ export class SettlementDueWorker {
       }
     }
     if (ok) this.#reconciledMonth = month;
+  }
+
+  /** 포트원 지급·사후 대사(F-07-7). 시각 몫(08·09·15·월말 22시)을 먼저, 30분 몫을 뒤에 한다. 하나의 실패가 나머지를 멈추지 않는다 */
+  async #portone(today: string, hour: number, weekday: boolean): Promise<void> {
+    const s = this.deps.settlements;
+    if (!s.portonePayoutEnabled()) return;
+    const run = async (job: () => Promise<unknown>): Promise<boolean> => {
+      try {
+        await job();
+        return true;
+      } catch (e) {
+        this.deps.log?.failed?.(e);
+        return false;
+      }
+    };
+    // 08:00 KST 뒤 하루 한 번(그날 이미 성공했으면 스스로 건너뛴다)
+    await run(() => s.runDailyPortonePartnerCheck());
+    if (hour >= 9 && this.#portoneExecutedDay !== today && (await run(() => s.preparePortoneExecution(today)))) this.#portoneExecutedDay = today;
+    if (hour >= 15 && this.#portonePendingDay !== today && (await run(() => s.checkPortoneExecutionPending(today)))) this.#portonePendingDay = today;
+    const month = today.slice(0, 7);
+    if (weekday && hour >= 22 && this.#portoneReconciledMonth !== month && nextBankBusinessDay(today).slice(0, 7) !== month) {
+      if (await run(() => s.reconcilePortoneBalance({ kind: 'MONTHLY', periodMonth: `${month}-01` }))) this.#portoneReconciledMonth = month;
+    }
+    await run(() => s.syncPortonePayouts());
+    await run(() => s.reconcilePortoneTransfers());
+    await run(() => s.checkPortoneLedgerStale());
   }
 
   #schedule(): void {

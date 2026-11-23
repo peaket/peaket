@@ -5,7 +5,7 @@ import { Body, Controller, HttpCode, Inject, Post, UseGuards } from '@nestjs/com
 import { CLOCK, type Clock, ContractRouteSchema, InternalTokenGuard, Roles } from '@peaket/platform';
 import { z } from 'zod';
 import { ReceiveCaseRequested } from '../application/receive-case-requested.js';
-import { CS_CASE_KINDS, EVENT_KEY_MAX } from '../domain/cs-case.js';
+import { CASE_DETAIL_MAX, CS_CASE_KINDS, EVENT_KEY_MAX } from '../domain/cs-case.js';
 
 const CaseResponse = z.object({ accepted: z.boolean(), caseId: z.uuid().optional() });
 export const CaseRequestedBody = z
@@ -18,6 +18,14 @@ export const CaseRequestedBody = z
     hold: z.boolean().optional(),
     createdAt: z.iso.datetime({ offset: true }),
     dueBaseAt: z.iso.datetime({ offset: true }).optional(),
+    // 건 본문 글(선택, 1~2,000자 코드 포인트, F-07-7 ADR-0370 결정 7). 어긋나면 다른 칸처럼 accepted: false다(R-T48 ③)
+    detail: z
+      .string()
+      .refine((v) => {
+        const n = [...v].length;
+        return n >= 1 && n <= CASE_DETAIL_MAX;
+      })
+      .optional(),
   })
   .strict();
 
