@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { createDatabase, fakeClock, type Database } from '@peaket/platform';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { migratePurchase } from '../scripts/migrate.mjs';
-import { DrizzleEventRefundStore, DrizzleEventRefundTargets, EventRefundService } from '../src/modules/refund/index.js';
+import { DrizzleEventOpenOrders, DrizzleEventRefundStore, DrizzleEventRefundTargets, EventRefundService } from '../src/modules/refund/index.js';
 import type { EventRefundCanceller } from '../src/modules/refund/domain/event-refund-ports.js';
 import type { EventCancellationRequest } from '../src/modules/refund/domain/event-refund.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
@@ -209,5 +209,120 @@ describe('R-T46 ② 확정 배상 행 [실제 PostgreSQL]', () => {
     expect(idx?.indexdef).toContain('UNIQUE INDEX');
     expect(idx?.indexdef).toContain('event_cancellation_request_id');
     expect(idx?.indexdef).toContain('order_id');
+  });
+});
+
+// ---- F-07-8 시험 담당(2026-11-23): R-T46 ④ 확정 뒤에 결제가 끝난 주문의 배상 행(BAT-425 RV-18, transfer-refund §5 '확정 뒤에 결제가 끝난 주문의 배상 행') ----
+// 쓸어 담기가 늦게 끝난 주문을 항목에 더할 때 그 주문의 compensation 한 행(ACCOUNT_PENDING·4,750원)을 항목과 같은 트랜잭션에 쓴다.
+// 같은 트랜잭션은 배상 행 INSERT를 실패시키는 트리거로 본다: 실패하면 그 주문의 항목도 0행이어야 한다(배상 행만 따로 빠지지 않는다).
+describe('R-T46 ④ 쓸어 담기의 배상 행 [실제 PostgreSQL]', () => {
+  const ORDER_LATE = '0193c425-0000-7000-8000-0000000000f1';
+  const ACCOUNT_LATE = '0193c425-0000-7000-8000-000000000013';
+  /** 한 트랜잭션에서 SQL 몇 줄(주문 상태 이력 지연 제약 때문에 주문·이력을 함께 쓴다) */
+  const inTx = async (statements: readonly [string, unknown[]][]): Promise<void> => {
+    const client = await db.pool.connect();
+    try {
+      await client.query('begin');
+      for (const [text, values] of statements) await client.query(text, values);
+      await client.query('commit');
+    } catch (err) {
+      await client.query('rollback').catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
+  };
+  /** 확정 때 아직 끝나지 않은(RESERVED) 47,500원 표 하나인 주문. 표는 발권 전이다 */
+  const seedOpenLate = () =>
+    inTx([
+      [
+        `insert into purchase_order (id, account_id, event_id, status, amount, event_seq, idempotency_key, consent_version, seat_assignment, created_at, hold_id, purchase_session_id)
+         values ($1, $2, $3, 'RESERVED', 47500, 1, $4, 'v1', 'PICK', $5, $6, $7)`,
+        [ORDER_LATE, ACCOUNT_LATE, EVENT, `idem-${ORDER_LATE}`, new Date(NOW - 60_000), randomUUID(), randomUUID()],
+      ],
+      ["insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) values ($1, 1, null, 'RESERVED', 'T1', 'test', $2)", [ORDER_LATE, new Date(NOW - 60_000)]],
+      ["insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price, ticket_id) values ($1, 1, $2, 'R', 'A', 47500, null)", [ORDER_LATE, randomUUID()]],
+    ]);
+  /** 확정 뒤에 결제를 마치고 발권된 것처럼 바꾼다 */
+  const confirmLate = () =>
+    inTx([
+      ["update purchase_order set status = 'CONFIRMED', event_seq = 2 where id = $1", [ORDER_LATE]],
+      ["insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) values ($1, 2, 'RESERVED', 'CONFIRMED', 'T18', 'test', $2)", [ORDER_LATE, new Date(NOW - 30_000)]],
+      ['update order_item set ticket_id = $2 where order_id = $1', [ORDER_LATE, randomUUID()]],
+      ["insert into payment_attempt (id, order_id, pg, status, created_at) values ($1, $2, 'TOSS', 'ACCEPTED', $3)", [randomUUID(), ORDER_LATE, new Date(NOW - 30_000)]],
+    ]);
+  const sweeping = () => {
+    const store = new DrizzleEventRefundStore(db, clock);
+    return new EventRefundService({
+      store,
+      targets: new DrizzleEventRefundTargets(db, configs),
+      canceller: { cancel: async () => ({ status: 'REFUNDED' }) },
+      items: store,
+      openOrders: new DrizzleEventOpenOrders(db),
+      nowMs: () => NOW,
+      deadlineMs: () => NOW + 5_000,
+      concurrency: 2,
+    });
+  };
+  const lateItems = async (requestId: string) => count('event_refund_item', `where request_id = '${requestId}' and order_id = '${ORDER_LATE}'`);
+
+  test('R-T46 ④_확정_뒤_결제가_끝난_47,500원_주문을_쓸어_담으면_배상_행_한_행(ACCOUNT_PENDING·4,750원)이고_두_번째_쓸어_담기는_0행이다', async () => {
+    await seedOrder(ORDER_A, ACCOUNT_A, [33_333, 33_333]);
+    await seedOpenLate();
+    const svc = sweeping();
+    const requestId = randomUUID();
+    expect((await start(svc, requestId)).status).toBe('RUNNING');
+    expect((await compensationRows()).map((r) => [r.order_id, r.amount])).toEqual([[ORDER_A, 6_667]]);
+    await confirmLate();
+    await svc.runDue();
+    expect(await lateItems(requestId)).toBe(1);
+    const rows = await compensationRows();
+    expect(rows.map((r) => ({ orderId: r.order_id, baseAmount: r.base_amount, amount: r.amount, status: r.status, accountLast4: r.account_last4, receivableId: r.receivable_id }))).toEqual([
+      { orderId: ORDER_A, baseAmount: 66_666, amount: 6_667, status: 'ACCOUNT_PENDING', accountLast4: null, receivableId: null },
+      { orderId: ORDER_LATE, baseAmount: 47_500, amount: 4_750, status: 'ACCOUNT_PENDING', accountLast4: null, receivableId: null },
+    ]);
+    await svc.runDue();
+    expect(await count('compensation')).toBe(2);
+  });
+
+  test('R-T46 ④_FORCE_MAJEURE_요청의_쓸어_담기는_배상_행_0행이다', async () => {
+    await seedOrder(ORDER_A, ACCOUNT_A, [33_333]);
+    await seedOpenLate();
+    const svc = sweeping();
+    const requestId = randomUUID();
+    await svc.start({ eventId: EVENT, requestId, kind: 'CANCEL', fault: 'FORCE_MAJEURE', ruledBy: 'commander-1', confirmedBy: 'operator-2', fanNoticeReason: '공연 취소' });
+    await confirmLate();
+    await svc.runDue();
+    expect(await lateItems(requestId)).toBe(1);
+    expect(await count('compensation')).toBe(0);
+  });
+
+  test('R-T46 ④_쓸어_담기에서_배상_행_쓰기가_실패하면_그_주문의_항목도_0행이다 [ASVS v5.0.0-2.3.3]', async () => {
+    await seedOrder(ORDER_A, ACCOUNT_A, [33_333]);
+    await seedOpenLate();
+    const svc = sweeping();
+    const requestId = randomUUID();
+    await start(svc, requestId);
+    await confirmLate();
+    // 시퀀스는 트랜잭션과 무관하게 늘어나므로, 되돌려진 뒤에도 트리거가 실제로 불렸는지(끊는 자리에 닿았는지) 남는다
+    await db.pool.query('create sequence if not exists f078_late_compensation_hits');
+    await db.pool.query(
+      `create or replace function f078_fail_late_compensation() returns trigger language plpgsql as $f$ begin if new.order_id = '${ORDER_LATE}'::uuid then perform nextval('f078_late_compensation_hits'); raise exception 'f078 compensation insert failed'; end if; return new; end $f$`,
+    );
+    await db.pool.query('create trigger f078_fail_late_compensation before insert on compensation for each row execute function f078_fail_late_compensation()');
+    try {
+      await svc.runDue().catch(() => undefined);
+      expect(await lateItems(requestId)).toBe(0);
+      expect(await count('compensation', `where order_id = '${ORDER_LATE}'`)).toBe(0);
+    } finally {
+      await db.pool.query('drop trigger if exists f078_fail_late_compensation on compensation');
+      await db.pool.query('drop function if exists f078_fail_late_compensation()');
+    }
+    // 끊는 자리가 실제로 닿았다(쓸어 담기가 그 주문의 배상 행 쓰기를 시도했다)
+    expect((await db.pool.query<{ is_called: boolean }>('select is_called from f078_late_compensation_hits')).rows[0]!.is_called).toBe(true);
+    // 트리거를 걷은 뒤 다음 쓸어 담기가 항목·배상 행을 함께 만든다
+    await svc.runDue();
+    expect(await lateItems(requestId)).toBe(1);
+    expect(await count('compensation', `where order_id = '${ORDER_LATE}'`)).toBe(1);
   });
 });

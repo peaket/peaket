@@ -249,3 +249,77 @@ describe('J-T28 ② 계좌 미저장·유일', () => {
     }
   });
 });
+
+// ---- F-07-8 시험 담당(2026-11-23): R-T47 ③ REQUESTED 송금의 결과 확정(transfer-refund §6 '송금 결과 확정', 계획 I-06) ----
+// 조회 바퀴(refreshRequested)가 실제 compensation_transfer의 REQUESTED 행을 지급대행 포트로 다시 보고, PAID면 상태와 미수금 한 행을 한 트랜잭션에 쓴다.
+// 두 파드(연결 둘)가 겹쳐도 미수금은 한 행(조건부 갱신 + source_ref 부분 유일), 미수금 쓰기를 실패시키면 REQUESTED 그대로다(F-12).
+describe('R-T47 ③ 송금 결과 확정 [실제 PostgreSQL]', () => {
+  class RefreshPort implements CompensationTransferPort {
+    readonly results = new Map<string, 'PAID' | 'FAILED' | 'REQUESTED'>();
+    #seq = 0;
+    async request(i: CompensationTransferRequest): Promise<CompensationTransferRecord> {
+      this.#seq += 1;
+      return { transferId: `tr_f078_${this.#seq}_${i.compensationId.slice(0, 8)}`, compensationId: i.compensationId, orderId: i.orderId, accountId: i.accountId, amount: i.amount, status: 'REQUESTED', accountLast4: i.accountNumber.replace(/-/g, '').slice(-4) };
+    }
+    async get(transferId: string): Promise<CompensationTransferRecord | undefined> {
+      const status = this.results.get(transferId) ?? 'REQUESTED';
+      return { transferId, compensationId: '', orderId: '', accountId: '', amount: 0, status };
+    }
+  }
+  const advance = { recordCompensationAdvance: async (i: { compensationId: string; promoterId: string; eventId?: string; amount: number }) => ({ receivableId: (await settlements.recordCompensationAdvance(i)).receivableId }) };
+
+  test('R-T47 ③_REQUESTED를_두_파드가_겹쳐_확정해도_PAID_1번·미수금_1행·receivable_id이고_FAILED는_미수금_0행이다 [ASVS v5.0.0-2.3.4]', async () => {
+    const second = createDatabase({ url: pgc!.url, profile: 'general', max: 4, applicationName: 'compensation-transfer-it-2' });
+    try {
+      const refreshPort = new RefreshPort();
+      const a = new CompensationTransfers(refreshPort, new DrizzleCompensationTransfers({ database, clock }), advance);
+      const b = new CompensationTransfers(refreshPort, new DrizzleCompensationTransfers({ database: second, clock }), advance);
+      const paid = await a.request(input());
+      const failed = await a.request(input());
+      expect([paid.status, failed.status]).toEqual(['REQUESTED', 'REQUESTED']);
+      refreshPort.results.set(paid.transferId, 'PAID');
+      refreshPort.results.set(failed.transferId, 'FAILED');
+      const [ra, rb] = await Promise.all([a.refreshRequested(), b.refreshRequested()]);
+      expect(ra.paid + rb.paid).toBe(1);
+      expect(ra.failed + rb.failed).toBe(1);
+      const rows = await transferRows();
+      const paidRow = rows.find((r) => r.transfer_id === paid.transferId)!;
+      expect(paidRow.status).toBe('PAID');
+      expect(rows.find((r) => r.transfer_id === failed.transferId)).toMatchObject({ status: 'FAILED', receivable_id: null });
+      const receivables = await receivableRows();
+      expect(receivables).toEqual([expect.objectContaining({ id: paidRow.receivable_id, cause: 'COMPENSATION_ADVANCE', pg: null, amount: AMOUNT, remaining: AMOUNT, source_ref: `compensation:${paidRow.compensation_id}` })]);
+      // 다시 돌려도 1행
+      await a.refreshRequested();
+      expect(await receivableRows()).toHaveLength(1);
+    } finally {
+      await second.close();
+    }
+  });
+
+  test('R-T47 ③_미수금_쓰기를_실패시키면_송금은_REQUESTED_그대로이고_다음_바퀴가_PAID·미수금_1행으로_마저_한다 [ASVS v5.0.0-2.3.3]', async () => {
+    const refreshPort = new RefreshPort();
+    const svc = new CompensationTransfers(refreshPort, new DrizzleCompensationTransfers({ database, clock }), advance);
+    const sent = await svc.request(input());
+    refreshPort.results.set(sent.transferId, 'PAID');
+    await database.pool.query(`create or replace function f078_fail_advance() returns trigger language plpgsql as $f$ begin if new.cause = 'COMPENSATION_ADVANCE' then raise exception 'f078 receivable insert failed'; end if; return new; end $f$`);
+    await database.pool.query('create trigger f078_fail_advance before insert on partner_receivable for each row execute function f078_fail_advance()');
+    try {
+      await svc.refreshRequested().catch(() => undefined);
+      expect((await transferRows()).map((r) => [r.status, r.receivable_id])).toEqual([['REQUESTED', null]]);
+      expect(await receivableRows()).toEqual([]);
+    } finally {
+      await database.pool.query('drop trigger if exists f078_fail_advance on partner_receivable');
+      await database.pool.query('drop function if exists f078_fail_advance()');
+    }
+    await expect(svc.refreshRequested()).resolves.toMatchObject({ paid: 1 });
+    const rows = await transferRows();
+    expect(rows[0]).toMatchObject({ status: 'PAID' });
+    expect((await receivableRows()).map((r) => r.id)).toEqual([rows[0]!.receivable_id]);
+  });
+
+  test('R-T47 ③_REQUESTED_부분_인덱스가_있다', async () => {
+    const idx = (await database.pool.query<{ indexdef: string }>("select indexdef from pg_indexes where tablename = 'compensation_transfer' and indexdef ilike '%REQUESTED%'")).rows;
+    expect(idx).toHaveLength(1);
+    expect(idx[0]!.indexdef).toContain('status');
+  });
+});
