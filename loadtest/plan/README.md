@@ -40,6 +40,13 @@ node loadtest/plan/bat025-plan.mjs --plan loadtest/plan/f08-plan.json set x1hat 
 - `--plan <경로>`는 맨 앞에 준다. 없으면 BAT-025 계획(`bat025-plan.json`)이다. 없는 계획 파일·`state_file` 없는 계획은 오류로 끝난다.
 - `set <이름> <값>`은 상태 파일의 `vars`에 적고, 명령·조건·경로의 `{이름}`을 그 값으로 채운다(`{day}`·`{suffix}`와 같은 규칙). 정하지 않은 값이 남은 실행은 `next`·`show`가 알려 준다. MSR-020이 쓰는 이름: `x1hat`(어림 단계의 X), `x1`(1 vCPU 세 값의 중앙값), `podCpus`·`podTag`(고른 CPU 몫과 실행 ID 글자 `c1`·`c05`·`c025`), `x1hatPod`(x1 × 몫), `x1pod`(N=1 몫 세 값의 중앙값).
 - Docker 잠금은 두 자리 다(`lock.sh take docker-all lane4-F-08`, 끝나면 `drop docker-all lane4-F-08`).
+- 이 PC의 기본 `bash`는 WSL이라 `D:/ticketpass-locks/lock.sh`를 못 찾는다. 계획의 잠금 명령은 `C:/PROGRA~1/Git/bin/bash.exe`(전체 경로 `C:\Program Files\Git\bin\bash.exe`)를 쓴다. PowerShell에서 전체 경로를 쓸 때는 따옴표로 감싼다.
+- `pnpm`은 PowerShell 실행 정책이 `pnpm.ps1`을 막는다. 계획의 빌드 명령처럼 `corepack pnpm ...`으로 부른다.
+- 창 1을 시작하기 전에 08:30에 감독이 `D:/ticketpass-locks/pause`에 `allow: lane4-F-08`을 적고, `lock.sh who docker-all`로 두 자리가 빈 것을 확인한다. 한 자리라도 차 있으면 기다리고 남의 잠금을 지우지 않는다. 측정 창을 여는 것은 감독 몫이다.
+- kind 이름은 기본 `peaket`이다. 다른 갈래와 겹치지 않게 하려면 그 PowerShell 세션에서 `$env:PEAKET_CLUSTER='lane4-f08'`을 정하고 kubeconfig도 `.cache/peaket-tools/kubeconfig-lane4-f08`로 읽는다. `peaket`을 쓰면 감독이 다른 갈래의 `peaket`이 없는지 확인한다(`cluster.mjs down`은 그 이름의 클러스터를 지운다).
+- `cluster.mjs prometheus`는 포트 전달이라 같은 터미널을 막는다. 별도 PowerShell 창에서 띄우고, 그 창을 닫으면 `--prom-url`을 쓰는 기록 실행이 실패한다.
+- 데모(`demo.mjs up`, `lane4-demo`)도 kind 게이트웨이 포트 18441~18445를 잡는다. 데모 전에 `node tools/local/cluster.mjs down`으로 `peaket`을 내린다(창 1 끝). 데모를 창 2 끝으로 미루려면 `skip w1-demo-s1 --reason "1.3배"`로 건너뛰고, 창 2 `msr020-report` 뒤에 `retry w1-demo-s1`로 다시 세운다.
+- 리허설 기록(`w1-rehearsal-entry-rec`)이 만드는 `docs/perf-ledger/runs/<접두>-s1`은 확인 뒤 지운다(커밋하지 않는다).
 
 ## 판정에서 지키는 것
 
