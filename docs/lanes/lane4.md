@@ -14,15 +14,21 @@
 
 ## 창 1(11-26 09:00) 당일 절차 — 창은 감독이 연다
 
+- **감독 결정(2026-11-23)**: ① A/A는 (가) K2 첫 정밀 측정 앞 두 쌍, 창 1이 1.3배(19:58)를 넘길 것 같으면 그때만 (다) 3회 중앙값으로 대신하고 사유를 결과에 적는다.
+- **감독 결정(2026-11-23)**: ② kind 클러스터 이름은 `PEAKET_CLUSTER=lane4-f08`을 쓴다(다른 갈래의 `peaket`을 지우지 않게).
+- **감독 결정(2026-11-23)**: ③ 800/s가 512Mi에서 실패하고 10만 skip이 판정을 무효로 만들면 1GiB를 허용하고, 그 사실과 까닭을 결과·계획에 남기며 다음 창은 512Mi 기준을 다시 본다.
+- **감독 결정(2026-11-23)**: ④ 창 1이 1.3배를 넘으면 데모 S1을 창 2 끝(11-27 저녁)으로 미루고, 데모 전 `cluster.mjs down`으로 포트를 비운다.
+- **감독 결정(2026-11-23)**: ⑤ 창 2 `unblock WINDOW-2`는 감독이 11-27 08:30에 한다.
+- **감독 결정(2026-11-23)**: ⑥ 08:30 알림 → `allow: lane4-F-08` → docker-all 두 자리 확인 → 다른 갈래에 중단 알림 → 09:00 시작, 이 순서 그대로.
 - **원칙**: 측정 창을 여는 것은 감독 몫이다. 이 갈래는 08:30에 알리고, 감독이 `D:/ticketpass-locks/pause`에 `allow: lane4-F-08`을 적고 `docker-all` 두 자리를 비워 준 뒤에만 09:00에 시작한다. 그전에는 `next`도 실행하지 않는다(계획의 `start_gate`).
-- **08:30 알림(감독에게)**: ① 창 1 시작 확인 ② `allow: lane4-F-08` ③ 다른 갈래의 Docker 통합 시험·kind·이미지 빌드 멈춤 ④ `lock.sh who docker-all`로 두 자리 빔(차 있으면 09:00을 미루고 감독에게 알린다) ⑤ 다른 갈래의 `peaket` 클러스터가 없는지. 이 갈래는 `corepack pnpm install --frozen-lockfile`·`corepack pnpm --version`·`docker info`(32 CPU·24GiB)·`kind`/`kubectl`/`helm`/`python`을 확인해 둔다.
-- **08:50 잠금**: `C:/PROGRA~1/Git/bin/bash.exe D:/ticketpass-locks/lock.sh take docker-all lane4-F-08`. 실패하면 기다린다(남의 잠금을 지우지 않는다). 이 PowerShell 세션에서 `$env:PEAKET_CLUSTER='lane4-f08'`(또는 감독과 `peaket`을 쓰기로 확인)을 정한다. `node loadtest/plan/bat025-plan.mjs --plan loadtest/plan/f08-plan.json init --day 2026-11-26`은 처음 한 번만.
+- **08:30 알림(감독에게)**: ① 창 1 시작 확인 ② `allow: lane4-F-08` ③ `lock.sh who docker-all`로 두 자리 빔(차 있으면 09:00을 미루고 감독에게 알린다) ④ 다른 갈래의 Docker 통합 시험·kind·이미지 빌드 멈춤 ⑤ 다른 갈래의 `peaket` 클러스터가 없는지. 이 갈래는 `corepack pnpm install --frozen-lockfile`·`corepack pnpm --version`·`docker info`(32 CPU·24GiB)·`kind`/`kubectl`/`helm`/`python`을 확인해 둔다.
+- **08:50 잠금**: `C:/PROGRA~1/Git/bin/bash.exe D:/ticketpass-locks/lock.sh take docker-all lane4-F-08`. 실패하면 기다린다(남의 잠금을 지우지 않는다). 이 PowerShell 세션에서 `$env:PEAKET_CLUSTER='lane4-f08'`을 정한다(감독 결정). `node loadtest/plan/bat025-plan.mjs --plan loadtest/plan/f08-plan.json init --day 2026-11-26`은 처음 한 번만.
 - **09:00 시작**: `... --plan loadtest/plan/f08-plan.json next`가 `w1-stage`를 보인다. 명령은 F-08-2 계획 '검증 — 준비 점검(2026-11-23)'의 정정본을 따른다(Git bash 전체 경로·`corepack pnpm`·`kubectl --kubeconfig`). Prometheus는 별도 PowerShell 창에서 띄운다.
 - **~11:10 리허설 끝**: `w1-stage`·`w1-rehearsal-entry`·`w1-rehearsal-entry-rec`·`w1-stage-full` 약 130분. **30분 쉼**: `... drop docker-all lane4-F-08`로 놓고 시작·끝을 감독에게 알린다. 쉼 동안 단계 하나의 실제 시간으로 창 2 길이를 다시 센다.
-- **~11:40 다시 잠금**: `who`로 두 자리를 보고 `take docker-all`. F-08-8 K2 → K1 → K7 ① → K7 ②(약 277분+쉼). K7 ②는 회마다 새 클러스터. 1만이 지키면 2k·4k·6k는 `skip`, 10만이 두 번 연속 무효면 셋째 skip.
-- **끝(데모)**: 데모 전에 `node tools/local/cluster.mjs down`으로 `peaket`을 내린다(포트 18441~18445·메모리). `demo.mjs up → seed → play --scenarios S1`, 실패해도 `demo.mjs down`. 1.3배(19:58)를 넘으면 데모를 창 2 끝으로 미루고 `skip w1-demo-s1 --reason "1.3배"`.
-- **종료 보고**: `lock.sh drop docker-all lane4-F-08` 뒤 감독에게 통과/무효/실패 수, 실행 ID, 남은 시간, 창 2 준비를 한 줄로. `peaket`은 내려 둔다(창 2가 `w2-stage`에서 새로 올린다).
-- **창 2(11-27 09:00)**: 감독이 `... unblock WINDOW-2`를 해야 시작한다. 이 갈래가 임의로 풀지 않는다. 창 1과 같은 `$env:PEAKET_CLUSTER`·Git bash·`corepack pnpm`·`docker-all` 잠금 절차를 쓴다. MSR-020 분기·N=1 skip은 F-08-2 계획 준비 점검 11번에 있다.
+- **~11:40 다시 잠금**: `who`로 두 자리를 보고 `take docker-all`. A/A 두 쌍(감독 결정 ①) → F-08-8 K2 → K1 → K7 ① → K7 ②(약 277분+쉼). K7 ②는 회마다 새 클러스터. 1만이 지키면 2k·4k·6k는 `skip`, 10만이 두 번 연속 무효면 셋째 skip.
+- **끝(데모)**: 감독 결정 ④대로 1.3배(19:58)를 넘으면 데모를 창 2 끝으로 미루고 `skip w1-demo-s1 --reason "1.3배"`. 데모를 하면 먼저 `node tools/local/cluster.mjs down`으로 `peaket`(또는 `lane4-f08`)을 내려 18441~18445 포트를 비운다. `demo.mjs up → seed → play --scenarios S1`, 실패해도 `demo.mjs down`.
+- **종료 보고**: `lock.sh drop docker-all lane4-F-08` 뒤 감독에게 통과/무효/실패 수, 실행 ID, 남은 시간, 창 2 준비를 한 줄로. 클러스터는 내려 둔다(창 2가 `w2-stage`에서 새로 올린다).
+- **창 2(11-27 09:00)**: 감독이 11-27 08:30에 `... unblock WINDOW-2`를 해야 시작한다(감독 결정 ⑤). 이 갈래가 임의로 풀지 않는다. 창 1과 같은 `$env:PEAKET_CLUSTER`·Git bash·`corepack pnpm`·`docker-all` 잠금 절차를 쓴다. MSR-020 분기·N=1 skip은 F-08-2 계획 준비 점검 11번에 있다.
 
 ## 진행 로그
 - 2026-11-21 BAT-087(R-724): BAS-160의 무대 — 서비스·앱 이미지 10개(작업 공간 의존 빌드), 로컬 오버레이(18441~18445·CORS·SAN·nodeSelector·emptyDir), 상대 시각 기본 시드(계정 11·공연 4·회차 7·좌석 2,400·기기 7), 데모 인증(팬 gRPC·관리/파트너 API·TOTP·패스키), `bundle` 재사용. kind `demo-status` 15/15, e2e 6/6(최종 810.7초), 시드 두 번 0. BAT-086 선행 완료. ADR은 BAT-086 0325로 합침. 계획 `docs/review/plans/BAT-087.md`, 측정 `docs/review/measurements/BAT-087-demo-stage.md`.
