@@ -13,6 +13,20 @@ export const RECIPIENT_REF_TTL_MS = 10 * 60 * 1000;
 
 export type TransferStatus = 'OFFERED' | 'ACCEPTED' | 'REJECTED' | 'WITHDRAWN' | 'EXPIRED' | 'RECLAIMED';
 export type TransferWithdrawReason = 'SENDER' | 'ACCOUNT_DELETED' | 'DEPOSIT_ERROR' | 'EVENT_CANCELLED' | 'EVENT_POSTPONED' | 'FRAUD_LOCK';
+/** 받는 사람에게 보이는 철회 까닭(openapi TransferOffer.withdrawReason). 부정 예매·탈퇴·입금 오류는 OTHER로 가린다(transfer-refund §4.1) */
+export type PublicWithdrawReason = 'SENDER' | 'EVENT_CANCELLED' | 'EVENT_POSTPONED' | 'OTHER';
+export function publicWithdrawReasonOf(reason: TransferWithdrawReason | undefined): PublicWithdrawReason {
+  switch (reason) {
+    case 'SENDER':
+      return 'SENDER';
+    case 'EVENT_CANCELLED':
+      return 'EVENT_CANCELLED';
+    case 'EVENT_POSTPONED':
+      return 'EVENT_POSTPONED';
+    default:
+      return 'OTHER';
+  }
+}
 
 /** 양도 요청 한 줄(docs/data.md `transfer_offer`). `offerId`는 요청의 Idempotency-Key다 */
 export interface TransferOfferRecord {
@@ -38,11 +52,96 @@ export interface TransferTicketSnapshot {
   readonly eventStartsAtMs?: number;
   readonly fraudLockCaseId?: string;
   readonly fraudLockVersion?: number;
+  /** 월렛 목록과 상세가 같은 값을 싣도록 저장소가 넘긴다 */
+  readonly gateZone?: string;
+}
+
+/** 상세(GET /v1/tickets/{ticketId})가 싣는 칸(openapi Ticket). 좌석 이름·예매번호·주문 상세·판매자는 범위 밖이다 */
+export interface TicketDetailView {
+  readonly ticketId: string;
+  readonly eventId: string;
+  readonly status: TicketStatus;
+  readonly transferable: boolean;
+  readonly transferLocked: boolean;
+  readonly transferLockExpiresAt: string | null;
+  readonly transferDeadline?: string;
+  readonly cancelDeadline?: string;
+  readonly eventStartsAt?: string;
+  readonly gateZone?: string;
+  /** 받은 표의 보낸 분 닉네임. 원천이 없어 지금은 가린 값(뒤 몫 F-05-11) */
+  readonly receivedFromNickname: string | null;
+  readonly pendingTransfer: { readonly offerId: string; readonly expiresAt: string } | null;
+}
+
+/** 받은 표의 보낸 분 자리(닉네임 원천이 없다, 계획 §6-8) */
+export const RECEIVED_FROM_MASKED = '회*';
+
+/**
+ * 상세 한 장. 양도 가능은 상품 양도 가능(원천 없음 → 참)·결제자 보유·마감 전·입장 시작 전·진행 중 요청 없음·잠금 없음이다.
+ * 잠금·요청 칸은 보유자가 결제자일 때만 싣는다(받은 사람에게 결제자 사정을 보이지 않는다, transfer-refund §4.1).
+ */
+export function ticketDetailOf(
+  t: TransferTicketSnapshot,
+  o: {
+    readonly nowMs: number;
+    readonly openOffer?: { readonly offerId: string; readonly expiresAtMs: number };
+    readonly lockActive: boolean;
+    readonly lockExpiresAtMs?: number;
+  },
+): TicketDetailView {
+  const starts = t.eventStartsAtMs;
+  const close = marketCloseAtMs(starts);
+  const payerHolds = t.accountId === t.payerAccountId;
+  const ended = ENDED_STATUSES.has(t.status);
+  const beforeStart = beforeEntryStart(starts, o.nowMs);
+  const pendingOffer = payerHolds && o.openOffer !== undefined && o.openOffer.expiresAtMs > o.nowMs ? o.openOffer : undefined;
+  const transferable =
+    payerHolds &&
+    !ended &&
+    beforeStart &&
+    (close === undefined || o.nowMs < close) &&
+    !t.transferPending &&
+    t.status !== 'TRANSFER_PENDING' &&
+    !o.lockActive &&
+    pendingOffer === undefined;
+  const locked = payerHolds && o.lockActive;
+  return {
+    ticketId: t.ticketId,
+    eventId: t.eventId,
+    status: t.status,
+    transferable,
+    transferLocked: locked,
+    transferLockExpiresAt: locked && o.lockExpiresAtMs !== undefined ? new Date(o.lockExpiresAtMs).toISOString() : null,
+    ...(close === undefined ? {} : { transferDeadline: new Date(close).toISOString() }),
+    ...(starts === undefined ? {} : { cancelDeadline: new Date(starts).toISOString(), eventStartsAt: new Date(starts).toISOString() }),
+    ...(t.gateZone === undefined || t.gateZone.trim() === '' ? {} : { gateZone: t.gateZone }),
+    receivedFromNickname: payerHolds ? null : RECEIVED_FROM_MASKED,
+    pendingTransfer: pendingOffer === undefined ? null : { offerId: pendingOffer.offerId, expiresAt: new Date(pendingOffer.expiresAtMs).toISOString() },
+  };
 }
 
 /** 양도 마감 시각. 회차 시작 시각을 모르면 기한은 48시간만 본다 */
 export function marketCloseAtMs(eventStartsAtMs: number | undefined): number | undefined {
   return eventStartsAtMs === undefined ? undefined : eventStartsAtMs - TRANSFER_MARKET_CLOSE_MS;
+}
+
+/** 받은 요청 목록 커서(`[만든 ms, 요청 ID]` JSON의 base64url). guidelines §3 불투명 커서 */
+export interface TransferCursor {
+  readonly createdAtMs: number;
+  readonly offerId: string;
+}
+export function transferCursorOf(c: TransferCursor): string {
+  return Buffer.from(JSON.stringify([c.createdAtMs, c.offerId]), 'utf8').toString('base64url');
+}
+export function parseTransferCursor(raw: string | undefined): TransferCursor | undefined {
+  if (raw === undefined || !/^[A-Za-z0-9_-]+$/.test(raw)) return undefined;
+  try {
+    const v: unknown = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    if (!Array.isArray(v) || v.length !== 2 || typeof v[0] !== 'number' || !Number.isSafeInteger(v[0]) || v[0] < 0 || typeof v[1] !== 'string') return undefined;
+    return { createdAtMs: v[0], offerId: v[1].toLowerCase() };
+  } catch {
+    return undefined;
+  }
 }
 
 /** 요청 기한 = min(지금 + 48시간, 양도 마감). 마감이 없으면 48시간 */
@@ -57,7 +156,7 @@ export function beforeEntryStart(eventStartsAtMs: number | undefined, nowMs: num
 }
 
 /** 끝난 표(환급·무효·취소 접수·부정 표시). 양도·돌려주기 대상이 아니다 */
-const ENDED_STATUSES: ReadonlySet<TicketStatus> = new Set(['REFUNDED', 'VOIDED', 'CANCEL_REQUESTED', 'FLAGGED']);
+export const ENDED_STATUSES: ReadonlySet<TicketStatus> = new Set(['REFUNDED', 'VOIDED', 'CANCEL_REQUESTED', 'FLAGGED']);
 
 export type CreateOfferRejection =
   | 'NOT_HOLDER'

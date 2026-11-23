@@ -20,8 +20,12 @@ import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
 import { offerView } from '../model/view';
 import { AcceptButtons, RegisterDevice } from './OfferActions';
+import { TransferOfferLiveShell } from './TransferOfferLiveLoader';
 
 type Props = PageProps<{ offerId: string }>;
+
+/** UUID 요청만 실제 화면. 목업 ID·?state=는 지금처럼 서버가 그리는 미리보기다(계획 §1 한다 8~9) */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function load(offerId: string) {
   const offer = getTransferOffer(offerId);
@@ -35,6 +39,14 @@ function load(offerId: string) {
 
 export async function TransferOfferPage({ params, searchParams }: Props) {
   const { offerId } = await params;
+  // 실제 요청은 첫 응답에 요청 값을 싣지 않는다. 서버는 ticket-svc를 부르지 않고 실행부만 그린다(R-T21 ③)
+  if (UUID.test(offerId)) {
+    return (
+      <AppShell>
+        <TransferOfferLiveShell offerId={offerId} />
+      </AppShell>
+    );
+  }
   const d = load(offerId);
   if (!d) notFound();
   const { offer, perf, production, venue } = d;

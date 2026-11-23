@@ -31,7 +31,7 @@ import {
   walletCursorOf,
   walletTicketOf,
 } from '../../domain/ticket.js';
-import { ticket, ticketCancellation, ticketIssue, ticketIssueGuard, ticketOperatorCancellation, fraudTransferLock } from './schema.js';
+import { ticket, ticketCancellation, ticketIssue, ticketIssueGuard, ticketOperatorCancellation, fraudTransferLock, transferOffer } from './schema.js';
 
 /** 발권·취소와 같은 트랜잭션에 스캐너 변경 기록을 넣는 포트(offline-gate §6.3) */
 export interface ScannerChangeWriter {
@@ -340,16 +340,18 @@ export class DrizzleTicketStore implements TicketStore {
           continue;
         }
         const result = operatorCancelResultOf({ status: statusOf(row.status), accountId: row.accountId }, await this.#entryRecorded(tx, row.eventId, row.id), target.expectedHolderAccountId);
-        if (result === 'CANCELED') await this.#operatorCancelOne(tx, row, input.nowMs);
+        // 표를 끝내는 같은 트랜잭션에서 진행 중 양도 요청을 FRAUD_LOCK으로 거둔다(불변식 D1, 정본 §7.4 ①)
+        const withdrawnTransferOfferId = result === 'CANCELED' ? await this.#operatorCancelOne(tx, row, input.nowMs, 'FRAUD_LOCK') : undefined;
         await tx.insert(ticketOperatorCancellation).values({
           approvalId: input.approvalId,
           ticketId: row.id,
           orderId: row.orderId,
           fraudCaseId: input.fraudCaseId,
           result,
+          withdrawnTransferOfferId: withdrawnTransferOfferId ?? null,
           cancelledAt: new Date(input.nowMs),
         });
-        out.push({ ticketId: row.id, result, orderId: row.orderId });
+        out.push({ ticketId: row.id, result, orderId: row.orderId, ...(withdrawnTransferOfferId ? { withdrawnTransferOfferId } : {}) });
       }
       return out;
     });
@@ -361,9 +363,17 @@ export class DrizzleTicketStore implements TicketStore {
     return r.rows.length > 0;
   }
 
-  /** 행 잠금 안: 진행 중 양도 표시를 끄고, 키를 폐기하고, 환급 상태로 바꾼다(스캐너 변경분 TICKET_STATUS·KEY_REVOKED) */
-  async #operatorCancelOne(tx: DbTransaction, row: Row, nowMs: number): Promise<void> {
+  /**
+   * 행 잠금 안: 진행 중 양도 요청을 거두고(사유·결정 시각), 키를 폐기하고, 환급 상태로 바꾼다(스캐너 변경분 TICKET_STATUS·KEY_REVOKED).
+   * 거둔 요청 ID를 돌려준다(운영자 취소 기록의 withdrawn_transfer_offer_id, 회차 취소의 transferWithdrawn).
+   */
+  async #operatorCancelOne(tx: DbTransaction, row: Row, nowMs: number, withdrawReason: 'EVENT_CANCELLED' | 'FRAUD_LOCK'): Promise<string | undefined> {
     const status: TicketStatus = 'REFUNDED';
+    const withdrawn = await tx
+      .update(transferOffer)
+      .set({ status: 'WITHDRAWN', withdrawReason, decidedAt: new Date(nowMs) })
+      .where(and(eq(transferOffer.ticketId, row.id), eq(transferOffer.status, 'OFFERED')))
+      .returning({ id: transferOffer.id });
     const revokedKeyId = await this.o.deviceKeys?.revokeActiveInTx(tx, row.id, nowMs);
     await tx
       .update(ticket)
@@ -373,6 +383,7 @@ export class DrizzleTicketStore implements TicketStore {
       await this.o.changes.append(tx, row.eventId, 'TICKET_STATUS', { v: 1, ticketId: row.id, status, version: row.version + 1 });
       await this.o.changes.append(tx, row.eventId, 'KEY_REVOKED', { v: 1, ticketId: row.id, keyId: revokedKeyId ? Buffer.from(revokedKeyId).toString('base64url') : null });
     }
+    return withdrawn[0]?.id;
   }
 
   /**
@@ -414,10 +425,11 @@ export class DrizzleTicketStore implements TicketStore {
           out.push({ ...base, result: 'ALREADY_ENDED', transferWithdrawn: false });
           continue;
         }
-        const transferWithdrawn = row.transferPending || status === 'TRANSFER_PENDING';
-        await this.#operatorCancelOne(tx, row, input.nowMs);
+        // 회차 취소도 같은 트랜잭션에서 진행 중 요청을 EVENT_CANCELLED로 거둔다(불변식 D1, 정본 §5)
+        const withdrawn = await this.#operatorCancelOne(tx, row, input.nowMs, 'EVENT_CANCELLED');
         await tx.insert(ticketCancellation).values({ cancellationId: target.cancellationId, ticketId: row.id, orderId: row.orderId, result: EVENT_CANCELED, cancelledAt: new Date(input.nowMs) });
-        out.push({ ...base, result: 'CANCELED', transferWithdrawn });
+        // 옛 표시만 있고 요청 행이 없는 데이터도 '껐다'로 답한다(GAT-110 E2가 보는 지금 뜻 그대로)
+        out.push({ ...base, result: 'CANCELED', transferWithdrawn: withdrawn !== undefined || row.transferPending || status === 'TRANSFER_PENDING' });
       }
       return out;
     });
@@ -483,7 +495,22 @@ export class DrizzleTicketStore implements TicketStore {
     const page = rows.slice(0, input.limit);
     const last = page[page.length - 1];
     const nextCursor = rows.length > input.limit && last ? walletCursorOf({ issuedAtMs: last.createdAt.getTime(), ticketId: last.id }) : undefined;
-    return { tickets: page.map((r) => walletTicketOf(recordOf(r))), ...(nextCursor ? { nextCursor } : {}) };
+    // 목록 항목의 pendingTransfer: 이 쪽의 표들에 지금 OFFERED 요청이 있으면 한 번에 읽어 붙인다
+    const open =
+      page.length === 0
+        ? []
+        : await this.o.database.db
+            .select({ ticketId: transferOffer.ticketId, offerId: transferOffer.id, expiresAt: transferOffer.expiresAt })
+            .from(transferOffer)
+            .where(and(inArray(transferOffer.ticketId, page.map((r) => r.id)), eq(transferOffer.status, 'OFFERED')));
+    const openByTicket = new Map(open.map((o) => [o.ticketId, { offerId: o.offerId, expiresAtMs: o.expiresAt.getTime() }]));
+    return {
+      tickets: page.map((r) => {
+        const pendingOffer = openByTicket.get(r.id);
+        return walletTicketOf({ ...recordOf(r), ...(pendingOffer === undefined ? {} : { pendingOffer }) });
+      }),
+      ...(nextCursor ? { nextCursor } : {}),
+    };
   }
 }
 

@@ -4,23 +4,35 @@ import type { Clock } from '@peaket/platform';
 import {
   type CreateOfferRejection,
   offerExpiryMs,
+  parseTransferCursor,
+  publicWithdrawReasonOf,
+  type PublicWithdrawReason,
   type ReturnRejection,
   signRecipientRef,
-  verifyRecipientRef,
-  RECIPIENT_REF_TTL_MS,
+  ticketDetailOf,
+  type TicketDetailView,
+  transferCursorOf,
+  type TransferCursor,
   type TransferOfferRecord,
   type TransferStatus,
+  verifyRecipientRef,
+  RECIPIENT_REF_TTL_MS,
 } from '../domain/transfer.js';
 
 export type {
   CreateOfferOutcome,
   DecideOutcome,
+  ListTransfersInput,
+  ListTransfersResult,
   MemberCodeDirectory,
+  RecipientLookupClaim,
+  RecipientLookupResult,
   ReauthUnavailable,
   ReturnOutcome,
   SetTransferLockInput,
   TransferAct,
   TransferLockOutcome,
+  TransferOfferListRow,
   TransferOp,
   TransferReauthGate,
   TransferStore,
@@ -28,6 +40,7 @@ export type {
 import {
   type MemberCodeDirectory,
   ReauthUnavailable,
+  type RecipientLookupClaim,
   type SetTransferLockInput,
   type TransferAct,
   type TransferLockOutcome,
@@ -51,11 +64,18 @@ export type TransferErrorCode =
   | 'PAYER_HOLDS'
   | 'ENTRY_RECORDED'
   | 'INVALID_INPUT'
+  | 'INVALID_QUERY'
   | 'RECIPIENT_NOT_FOUND'
+  | 'TOO_MANY_REQUESTS'
+  | 'IDEMPOTENCY_KEY_REUSED'
   | 'UNAVAILABLE';
 
 export class TransferError extends Error {
-  constructor(readonly code: TransferErrorCode) {
+  constructor(
+    readonly code: TransferErrorCode,
+    /** 429의 Retry-After(초). 다른 오류는 없다 */
+    readonly retryAfterSeconds?: number,
+  ) {
     super(`양도 처리 오류: ${code}`);
     this.name = 'TransferError';
   }
@@ -68,7 +88,23 @@ export interface TransferOfferView {
   readonly status: TransferStatus;
   readonly expiresAt: string;
   readonly eventId: string;
+  /** WITHDRAWN일 때만. 받는 사람에게 사유를 가린 공개 값이다 */
+  readonly withdrawReason?: PublicWithdrawReason;
 }
+
+/** 받은 요청 목록 한 쪽 */
+export interface TransferOfferPageView {
+  readonly items: readonly TransferOfferView[];
+  readonly nextCursor: string | null;
+}
+
+/** 받는 사람 조회 한도(계정당 미끄러지는 60분 창에 10회 [가정], 계획 §1 한다 5·§6-3) */
+export const LOOKUP_WINDOW_MS = 60 * 60 * 1000;
+export const LOOKUP_LIMIT = 10;
+/** 받은 요청 목록 한 쪽 기본·최대(openapi listTransfers limit) */
+export const DEFAULT_TRANSFER_PAGE_LIMIT = 20;
+export const MAX_TRANSFER_PAGE_LIMIT = 100;
+const TRANSFER_STATUSES: ReadonlySet<string> = new Set(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED']);
 
 export interface TransfersDeps {
   readonly store: TransferStore;
@@ -101,18 +137,99 @@ export function maskNickname(nickname: string): string {
 export class Transfers {
   constructor(private readonly d: TransfersDeps) {}
 
-  /** 받는 사람 찾기(회원 코드만). 없으면 RECIPIENT_NOT_FOUND, identity를 못 부르면 UNAVAILABLE */
-  async lookupRecipient(i: { readonly memberCode?: string; readonly phoneNumber?: string; readonly nowMs?: number }): Promise<{ readonly recipientRef: string; readonly nicknameMasked: string }> {
-    if (i.phoneNumber !== undefined && i.phoneNumber.trim() !== '') throw new TransferError('RECIPIENT_NOT_FOUND');
+  /**
+   * 받는 사람 찾기(회원 코드만). 없으면 RECIPIENT_NOT_FOUND, identity를 못 부르면 UNAVAILABLE.
+   * 한도·기록(ASVS 2.4.1)은 저장소가 먼저 한 트랜잭션으로 세고 기록한다. 기록을 못 쓰면 identity를 부르지 않고 UNAVAILABLE(닫힌 쪽)이다.
+   * 휴대폰 번호는 아직 받지 않지만(뒤 몫 F-05-11) 시도는 한도에 센다.
+   */
+  async lookupRecipient(i: {
+    readonly accountId: string;
+    readonly memberCode?: string;
+    readonly phoneNumber?: string;
+    readonly nowMs?: number;
+  }): Promise<{ readonly recipientRef: string; readonly nicknameMasked: string }> {
+    const accountId = requireUuid('accountId', i.accountId);
     const code = i.memberCode === undefined ? '' : normalizeMemberCode(i.memberCode);
-    if (code === '') throw new TransferError('INVALID_INPUT');
-    const found = await this.d.directory.resolveMemberCode(code);
-    if (!found) throw new TransferError('RECIPIENT_NOT_FOUND');
+    const phone = i.phoneNumber?.trim() ?? '';
+    if (code === '' && phone === '') throw new TransferError('INVALID_INPUT');
     const nowMs = i.nowMs ?? this.d.clock.now();
+    let claim: RecipientLookupClaim;
+    try {
+      claim = await this.d.store.claimLookup({ accountId, nowMs, windowMs: LOOKUP_WINDOW_MS, limit: LOOKUP_LIMIT });
+    } catch {
+      // 기록 쓰기를 못 하면 조회하지 않는다(닫힌 쪽). identity 호출 0
+      throw new TransferError('UNAVAILABLE');
+    }
+    if (claim.kind === 'LIMITED') throw new TransferError('TOO_MANY_REQUESTS', claim.retryAfterSeconds);
+    if (phone !== '') {
+      await this.#finishLookup(claim.lookupId, 'NOT_FOUND');
+      throw new TransferError('RECIPIENT_NOT_FOUND');
+    }
+    let found: { readonly accountId: string; readonly nickname: string } | undefined;
+    try {
+      found = await this.d.directory.resolveMemberCode(code);
+    } catch {
+      await this.#finishLookup(claim.lookupId, 'UNAVAILABLE');
+      throw new TransferError('UNAVAILABLE');
+    }
+    if (!found) {
+      await this.#finishLookup(claim.lookupId, 'NOT_FOUND');
+      throw new TransferError('RECIPIENT_NOT_FOUND');
+    }
+    await this.#finishLookup(claim.lookupId, 'FOUND');
     return {
       recipientRef: signRecipientRef({ secret: this.d.recipientRefSecret, accountId: found.accountId, expiresAtMs: nowMs + RECIPIENT_REF_TTL_MS }),
       nicknameMasked: maskNickname(found.nickname),
     };
+  }
+
+  async #finishLookup(lookupId: string, result: 'FOUND' | 'NOT_FOUND' | 'UNAVAILABLE'): Promise<void> {
+    try {
+      await this.d.store.finishLookup(lookupId, result);
+    } catch {
+      // 결과를 적지 못하면 성공으로 답하지 않는다(기록 없는 조회를 만들지 않는다)
+      throw new TransferError('UNAVAILABLE');
+    }
+  }
+
+  /** 받은 요청 목록(받는 사람만, 최근 순, status 거르기·커서). 계정 값은 세션에서만 받는다 */
+  async list(i: {
+    readonly accountId: string;
+    readonly statuses?: readonly TransferStatus[];
+    readonly cursor?: string;
+    readonly limit?: number;
+  }): Promise<TransferOfferPageView> {
+    const accountId = requireUuid('accountId', i.accountId);
+    const statuses = i.statuses === undefined ? [] : [...new Set(i.statuses)];
+    if (statuses.some((s) => !TRANSFER_STATUSES.has(s))) throw new TransferError('INVALID_QUERY');
+    let cursor: TransferCursor | undefined;
+    if (i.cursor !== undefined && i.cursor !== '') {
+      cursor = parseTransferCursor(i.cursor);
+      if (!cursor) throw new TransferError('INVALID_QUERY');
+    }
+    const limit = Math.max(1, Math.min(MAX_TRANSFER_PAGE_LIMIT, Math.trunc(i.limit ?? DEFAULT_TRANSFER_PAGE_LIMIT) || DEFAULT_TRANSFER_PAGE_LIMIT));
+    const page = await this.d.store.listOffers({ recipientAccountId: accountId, statuses, limit, ...(cursor === undefined ? {} : { cursor }) });
+    return {
+      items: page.offers.map((o) => this.#view(o, accountId, o.eventId)),
+      nextCursor: page.nextCursor === undefined ? null : transferCursorOf(page.nextCursor),
+    };
+  }
+
+  /** 티켓 상세(지금 보유자만). 없는 표·남의 표·UUID 아님은 같은 NOT_FOUND(404)다 */
+  async detail(i: { readonly ticketId: string; readonly accountId: string }): Promise<TicketDetailView> {
+    const accountId = requireUuid('accountId', i.accountId);
+    if (!UUID.test((i.ticketId ?? '').trim().toLowerCase())) throw new TransferError('NOT_FOUND');
+    const ticketId = (i.ticketId ?? '').trim().toLowerCase();
+    const nowMs = this.d.clock.now();
+    const t = await this.d.store.ticket(ticketId);
+    if (!t || t.accountId !== accountId) throw new TransferError('NOT_FOUND');
+    const [open, lock] = await Promise.all([this.d.store.openOffer(ticketId), this.d.store.activeTransferLock(t.eventId, t.payerAccountId, nowMs)]);
+    return ticketDetailOf(t, {
+      nowMs,
+      lockActive: lock !== undefined,
+      ...(lock === undefined ? {} : { lockExpiresAtMs: lock.expiresAtMs }),
+      ...(open === undefined ? {} : { openOffer: { offerId: open.offerId, expiresAtMs: open.expiresAtMs } }),
+    });
   }
 
   /** 양도 요청. 재인증(FAN_HIGH_RISK/TRANSFER_REQUEST) → 받는 사람 참조 → 행 잠금 안 판정 */
@@ -145,7 +262,7 @@ export class Transfers {
     };
     const out = await this.d.store.createOffer(offer, nowMs);
     if (out.kind === 'REJECTED') throw new TransferError(errorOfCreate(out.reason));
-    return this.#view(out.offer, accountId);
+    return this.#view(out.offer, accountId, t.eventId);
   }
 
   async getOffer(i: { readonly offerId: string; readonly accountId: string }): Promise<TransferOfferView> {
@@ -153,7 +270,8 @@ export class Transfers {
     const accountId = requireUuid('accountId', i.accountId);
     const offer = await this.d.store.getOffer(offerId);
     if (!offer || (offer.fromAccountId !== accountId && offer.toAccountId !== accountId)) throw new TransferError('NOT_FOUND');
-    return this.#view(offer, accountId);
+    const t = await this.d.store.ticket(offer.ticketId);
+    return this.#view(offer, accountId, t?.eventId ?? '');
   }
 
   async accept(i: { readonly offerId: string; readonly accountId: string; readonly idempotencyKey?: string }): Promise<TransferOfferView> {
@@ -161,7 +279,8 @@ export class Transfers {
     const accountId = requireUuid('accountId', i.accountId);
     const out = await this.d.store.accept({ offerId, accountId, nowMs: this.d.clock.now() });
     if (out.kind === 'REJECTED') throw new TransferError(errorOfDecide(out.reason));
-    return this.#view(out.offer, accountId);
+    const t = await this.d.store.ticket(out.offer.ticketId);
+    return this.#view(out.offer, accountId, t?.eventId ?? '');
   }
 
   async reject(i: { readonly offerId: string; readonly accountId: string; readonly idempotencyKey?: string }): Promise<TransferOfferView> {
@@ -169,7 +288,8 @@ export class Transfers {
     const accountId = requireUuid('accountId', i.accountId);
     const out = await this.d.store.reject({ offerId, accountId, nowMs: this.d.clock.now() });
     if (out.kind === 'REJECTED') throw new TransferError(errorOfDecide(out.reason));
-    return this.#view(out.offer, accountId);
+    const t = await this.d.store.ticket(out.offer.ticketId);
+    return this.#view(out.offer, accountId, t?.eventId ?? '');
   }
 
   async withdraw(i: { readonly offerId: string; readonly accountId: string; readonly idempotencyKey?: string }): Promise<TransferOfferView> {
@@ -177,7 +297,8 @@ export class Transfers {
     const accountId = requireUuid('accountId', i.accountId);
     const out = await this.d.store.withdraw({ offerId, accountId, nowMs: this.d.clock.now() });
     if (out.kind === 'REJECTED') throw new TransferError(errorOfDecide(out.reason));
-    return this.#view(out.offer, accountId);
+    const t = await this.d.store.ticket(out.offer.ticketId);
+    return this.#view(out.offer, accountId, t?.eventId ?? '');
   }
 
   /** 돌려주기. 재인증(FAN_SENSITIVE/TICKET_RETURN) → 행 잠금 안 판정 */
@@ -229,15 +350,15 @@ export class Transfers {
     if (!ok) throw new TransferError('REAUTH_REQUIRED');
   }
 
-  #view(offer: TransferOfferRecord, accountId: string): TransferOfferView {
+  #view(offer: TransferOfferRecord, accountId: string, eventId: string): TransferOfferView {
     return {
       offerId: offer.offerId,
       ticketId: offer.ticketId,
       role: offer.fromAccountId === accountId ? 'SENDER' : 'RECIPIENT',
       status: offer.status,
       expiresAt: new Date(offer.expiresAtMs).toISOString(),
-      // 화면이 회차를 알 수 있게 ticket의 eventId를 싣는다(저장소가 채운 offer에는 없으므로 빈 값일 수 있다)
-      eventId: (offer as TransferOfferRecord & { eventId?: string }).eventId ?? '',
+      eventId,
+      ...(offer.status === 'WITHDRAWN' ? { withdrawReason: publicWithdrawReasonOf(offer.withdrawReason) } : {}),
     };
   }
 }
@@ -264,12 +385,13 @@ function errorOfCreate(r: CreateOfferRejection): TransferErrorCode {
   }
 }
 
-function errorOfDecide(r: 'NOT_FOUND' | 'NOT_RECIPIENT' | 'NOT_OFFERED' | 'EXPIRED' | 'ENTRY_STARTED' | 'NOT_SENDER'): TransferErrorCode {
+function errorOfDecide(r: 'NOT_FOUND' | 'NOT_RECIPIENT' | 'NOT_OFFERED' | 'EXPIRED' | 'ENTRY_STARTED' | 'NOT_SENDER' | 'ALREADY_ENDED'): TransferErrorCode {
   if (r === 'NOT_FOUND' || r === 'NOT_RECIPIENT' || r === 'NOT_SENDER') return 'NOT_FOUND';
   return r;
 }
 
-function errorOfReturn(r: ReturnRejection | 'NOT_FOUND'): TransferErrorCode {
+function errorOfReturn(r: ReturnRejection | 'NOT_FOUND' | 'IDEMPOTENCY_KEY_REUSED'): TransferErrorCode {
   if (r === 'NOT_HOLDER' || r === 'NOT_FOUND') return 'NOT_FOUND';
+  if (r === 'IDEMPOTENCY_KEY_REUSED') return 'IDEMPOTENCY_KEY_REUSED';
   return r;
 }

@@ -10,6 +10,7 @@
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { SellerInfo } from './sellerInfo';
+import type { TicketPendingTransfer } from './ticketPendingTransfer';
 import type { TicketStatus } from './ticketStatus';
 
 export interface Ticket {
@@ -51,6 +52,11 @@ export interface Ticket {
      * @nullable
      */
   bookingNumber?: string | null;
+  /**
+     * 지금 보유자가 결제자이고 OFFERED 양도 요청이 있을 때만 그 요청(요청 ID·기한). 받은 표·요청 없음은 null이다(감독 결정 2026-11-23, F-05-2)
+     * @nullable
+     */
+  pendingTransfer?: TicketPendingTransfer;
   /**
      * 입장 시각(ScannedIn). 입장 전이면 null
      * @nullable

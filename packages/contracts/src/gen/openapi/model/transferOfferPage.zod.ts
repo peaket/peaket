@@ -20,6 +20,7 @@ export const TransferOfferPage = zod.object({
   "status": zod.enum(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED']).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('48시간과 양도 마감 중 이른 때'),
   "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구'),
+  "withdrawReason": zod.enum(['SENDER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'OTHER']).optional().describe('status가 WITHDRAWN일 때만 싣는 철회 까닭(감독 결정 2026-11-23, F-05-2). 저장 값 FRAUD_LOCK·ACCOUNT_DELETED·DEPOSIT_ERROR는 받는 사람에게 사유를 드러내지 않도록 OTHER로 낸다'),
   "eventId": zod.string().optional(),
   "eventTitle": zod.string().optional().describe('공연명'),
   "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),

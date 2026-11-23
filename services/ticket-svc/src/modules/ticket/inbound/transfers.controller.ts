@@ -13,8 +13,10 @@ import {
   CreateTransferWithdrawalParams,
   GetTransferParams,
   GetTransferResponse,
+  ListTransfersQueryParams,
+  ListTransfersResponse,
 } from '@peaket/contracts/openapi/tickets';
-import { ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, IdempotencyRequest, type IdempotencyRequest as Idem, Idempotent, type Principal, ProblemError, Roles } from '@peaket/platform';
+import { ContractBody, ContractParams, ContractQuery, ContractRouteSchema, CurrentPrincipal, IdempotencyRequest, type IdempotencyRequest as Idem, Idempotent, type Principal, ProblemError, Roles } from '@peaket/platform';
 import { z } from 'zod';
 import { type TransferErrorCode, TransferError, Transfers } from '../application/transfers.js';
 
@@ -28,6 +30,8 @@ const OfferResponse = z.object({
   role: z.enum(['SENDER', 'RECIPIENT']),
   status: z.enum(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED']),
   expiresAt: z.iso.datetime({ offset: true }),
+  eventId: z.string(),
+  withdrawReason: z.enum(['SENDER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'OTHER']).optional(),
 });
 const ReturnResponse = z.object({ ticketId: z.string(), status: z.literal('RETURNED') });
 
@@ -64,6 +68,17 @@ function problem(e: unknown): never {
         throw new ProblemError({ type: 'entry-recorded', status: 409, title: '입장 기록이 있어 돌려줄 수 없습니다' });
       case 'UNAVAILABLE':
         throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '의존 서비스를 잠시 쓸 수 없습니다', retryAfterSeconds: 1 });
+      case 'TOO_MANY_REQUESTS':
+        throw new ProblemError({
+          type: 'too-many-requests',
+          status: 429,
+          title: '받는 사람 확인 횟수를 넘었습니다',
+          retryAfterSeconds: Math.max(1, Math.ceil(e.retryAfterSeconds ?? 1)),
+        });
+      case 'INVALID_QUERY':
+        throw new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다' });
+      case 'IDEMPOTENCY_KEY_REUSED':
+        throw new ProblemError({ type: 'idempotency-key-reused', status: 422, title: '같은 키로 다른 요청을 보냈습니다' });
       case 'INVALID_INPUT':
         throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
     }
@@ -86,9 +101,11 @@ export class TransfersController {
   })
   async lookup(
     @ContractBody(CreateTransferRecipientLookupBody) body: z.output<typeof CreateTransferRecipientLookupBody>,
+    @CurrentPrincipal() me: Principal,
   ): Promise<z.output<typeof CreateTransferRecipientLookupResponse>> {
     try {
       return await this.transfers.lookupRecipient({
+        accountId: me.accountId,
         ...(body.memberCode === undefined ? {} : { memberCode: body.memberCode }),
         ...(body.phoneNumber === undefined ? {} : { phoneNumber: body.phoneNumber }),
       });
@@ -124,7 +141,40 @@ export class TransfersController {
         idempotencyKey: idem.key,
         ...(reauthToken === undefined ? {} : { reauthToken }),
       });
-      return { offerId: v.offerId, ticketId: v.ticketId, role: v.role, status: v.status, expiresAt: v.expiresAt };
+      return { offerId: v.offerId, ticketId: v.ticketId, role: v.role, status: v.status, expiresAt: v.expiresAt, eventId: v.eventId, ...(v.withdrawReason ? { withdrawReason: v.withdrawReason } : {}) };
+    } catch (e) {
+      if (codeOnly(e)) problem(e);
+      throw e;
+    }
+  }
+
+  @Get('transfers')
+  @Roles(['fan'])
+  // 쿼리는 아래 @ContractQuery 파이프가 바꾸고 검사한다. @ContractRouteSchema에 query를 함께 두면 Fastify가 바꾼 배열을 파이프가 겹친 매개변수로 본다
+  @ContractRouteSchema({ responses: { 200: ListTransfersResponse } })
+  async list(
+    @ContractQuery(ListTransfersQueryParams) q: z.output<typeof ListTransfersQueryParams>,
+    @CurrentPrincipal() me: Principal,
+  ): Promise<z.output<typeof ListTransfersResponse>> {
+    try {
+      const page = await this.transfers.list({
+        accountId: me.accountId,
+        ...(q.status === undefined ? {} : { statuses: q.status }),
+        ...(q.cursor === undefined ? {} : { cursor: q.cursor }),
+        ...(q.limit === undefined ? {} : { limit: q.limit }),
+      });
+      return {
+        items: page.items.map((v) => ({
+          offerId: v.offerId,
+          ticketId: v.ticketId,
+          role: v.role,
+          status: v.status,
+          expiresAt: v.expiresAt,
+          eventId: v.eventId,
+          ...(v.withdrawReason === undefined ? {} : { withdrawReason: v.withdrawReason }),
+        })),
+        nextCursor: page.nextCursor,
+      };
     } catch (e) {
       if (codeOnly(e)) problem(e);
       throw e;
@@ -140,7 +190,7 @@ export class TransfersController {
   ): Promise<z.output<typeof GetTransferResponse>> {
     try {
       const v = await this.transfers.getOffer({ offerId: params.offerId, accountId: me.accountId });
-      return { offerId: v.offerId, ticketId: v.ticketId, role: v.role, status: v.status, expiresAt: v.expiresAt };
+      return { offerId: v.offerId, ticketId: v.ticketId, role: v.role, status: v.status, expiresAt: v.expiresAt, eventId: v.eventId, ...(v.withdrawReason ? { withdrawReason: v.withdrawReason } : {}) };
     } catch (e) {
       if (codeOnly(e)) problem(e);
       throw e;

@@ -1,18 +1,25 @@
 // 운영 양도 저장소(BUILD_ORDER GAT-050·GAT-055). 티켓·양도 요청 행을 FOR UPDATE 안에서 다시 보고,
 // 수락은 보유자 변경·보낸 사람 키 폐기·요청 상태를 한 트랜잭션으로 처리한다(docs/features/transfer-refund.md §3.1·§4).
 import type { Database, DbTransaction } from '@peaket/platform';
-import { and, asc, desc, eq, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, lte, or, sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import type {
   CreateOfferOutcome,
   DecideOutcome,
+  ListTransfersInput,
+  ListTransfersResult,
+  RecipientLookupClaim,
+  RecipientLookupResult,
   ReturnOutcome,
   SetTransferLockInput,
   TransferLockOutcome,
+  TransferOfferListRow,
   TransferStore,
 } from '../../domain/transfer-ports.js';
 import {
   acceptRejectionOf,
   createOfferRejectionOf,
+  ENDED_STATUSES,
   lockActiveAt,
   lockResultOf,
   rejectRejectionOf,
@@ -24,7 +31,7 @@ import {
 } from '../../domain/transfer.js';
 import { type TicketStatus } from '../../domain/ticket.js';
 import type { DeviceKeyRevoker } from './drizzle-ticket-store.js';
-import { fraudTransferLock, ticket, transferOffer } from './schema.js';
+import { fraudTransferLock, ticket, ticketReturn, transferOffer, transferRecipientLookup } from './schema.js';
 
 type TicketRow = typeof ticket.$inferSelect;
 type OfferRow = typeof transferOffer.$inferSelect;
@@ -39,6 +46,7 @@ const snapshotOf = (r: TicketRow): TransferTicketSnapshot => ({
   eventId: r.eventId,
   status: ticketStatusOf(r.status),
   transferPending: r.transferPending,
+  gateZone: r.gateZone,
   ...(r.eventStartsAt ? { eventStartsAtMs: r.eventStartsAt.getTime() } : {}),
   ...(r.fraudLockCaseId ? { fraudLockCaseId: r.fraudLockCaseId } : {}),
   fraudLockVersion: Number(r.fraudLockVersion),
@@ -133,6 +141,73 @@ export class DrizzleTransferStore implements TransferStore {
     return row ? recordOf(row) : undefined;
   }
 
+  async openOffer(ticketId: string): Promise<TransferOfferRecord | undefined> {
+    const [row] = await this.o.database.db
+      .select()
+      .from(transferOffer)
+      .where(and(eq(transferOffer.ticketId, ticketId), eq(transferOffer.status, 'OFFERED')))
+      .limit(1);
+    return row ? recordOf(row) : undefined;
+  }
+
+  async listOffers(input: ListTransfersInput): Promise<ListTransfersResult> {
+    const where = and(
+      eq(transferOffer.toAccountId, input.recipientAccountId),
+      input.statuses.length === 0 ? undefined : inArray(transferOffer.status, [...input.statuses]),
+      input.cursor === undefined
+        ? undefined
+        : or(
+            lt(transferOffer.createdAt, new Date(input.cursor.createdAtMs)),
+            and(eq(transferOffer.createdAt, new Date(input.cursor.createdAtMs)), lt(transferOffer.id, input.cursor.offerId)),
+          ),
+    );
+    const rows = await this.o.database.db
+      .select({ offer: transferOffer, eventId: ticket.eventId })
+      .from(transferOffer)
+      .innerJoin(ticket, eq(ticket.id, transferOffer.ticketId))
+      .where(where)
+      .orderBy(desc(transferOffer.createdAt), desc(transferOffer.id))
+      .limit(input.limit + 1);
+    const page = rows.slice(0, input.limit);
+    const last = page[page.length - 1];
+    return {
+      offers: page.map((r): TransferOfferListRow => ({ ...recordOf(r.offer), eventId: r.eventId })),
+      ...(rows.length > input.limit && last ? { nextCursor: { createdAtMs: last.offer.createdAt.getTime(), offerId: last.offer.id } } : {}),
+    };
+  }
+
+  async claimLookup(input: { accountId: string; nowMs: number; windowMs: number; limit: number }): Promise<RecipientLookupClaim> {
+    return this.o.database.transaction(async (tx) => {
+      // 같은 계정의 동시 조회를 한 차례로 만든다(동시 12건이 10·2로 갈리는 시험 T7 ③)
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.accountId}::text, 0))`);
+      const [counted] = await tx
+        .select({
+          n: sql<number>`count(*)::int`,
+          oldest: sql<Date | string | null>`min(${transferRecipientLookup.lookedUpAt})`,
+        })
+        .from(transferRecipientLookup)
+        .where(
+          and(
+            eq(transferRecipientLookup.accountId, input.accountId),
+            gt(transferRecipientLookup.lookedUpAt, new Date(input.nowMs - input.windowMs)),
+            sql`${transferRecipientLookup.result} <> 'LIMITED'`,
+          ),
+        );
+      if (Number(counted?.n ?? 0) >= input.limit) {
+        await tx.insert(transferRecipientLookup).values({ id: randomUUID(), accountId: input.accountId, lookedUpAt: new Date(input.nowMs), result: 'LIMITED' });
+        const oldest = counted?.oldest === null || counted?.oldest === undefined ? input.nowMs : new Date(counted.oldest).getTime();
+        return { kind: 'LIMITED', retryAfterSeconds: Math.max(1, Math.ceil((oldest + input.windowMs - input.nowMs) / 1000)) };
+      }
+      const id = randomUUID();
+      await tx.insert(transferRecipientLookup).values({ id, accountId: input.accountId, lookedUpAt: new Date(input.nowMs), result: 'UNAVAILABLE' });
+      return { kind: 'ALLOWED', lookupId: id };
+    });
+  }
+
+  async finishLookup(lookupId: string, result: RecipientLookupResult): Promise<void> {
+    await this.o.database.db.update(transferRecipientLookup).set({ result }).where(eq(transferRecipientLookup.id, lookupId));
+  }
+
   async accept(i: { offerId: string; accountId: string; nowMs: number }): Promise<DecideOutcome> {
     return this.o.database.transaction(async (tx) => {
       // 행 잠금 차례는 티켓 → 요청이다. setTransferLock과 같은 차례로 교착을 막는다(RV-02)
@@ -146,7 +221,10 @@ export class DrizzleTransferStore implements TransferStore {
       if (current.toAccountId !== i.accountId) return { kind: 'REJECTED', reason: 'NOT_RECIPIENT' };
       const reason = acceptRejectionOf(current, { accountId: i.accountId, nowMs: i.nowMs, eventStartsAtMs: t.eventStartsAt?.getTime() });
       if (reason) return { kind: 'REJECTED', reason };
+      // 이미 수락한 요청의 재생은 표 상태와 상관없이 처음 결과다(멱등)
       if (current.status === 'ACCEPTED') return { kind: 'OK', offer: current, replayed: true };
+      // 겹친 가드 D2: 요청이 남아 있어도 끝난 표(환급·무효·취소 접수·부정 표시)는 받지 않는다
+      if (ENDED_STATUSES.has(ticketStatusOf(t.status))) return { kind: 'REJECTED', reason: 'ALREADY_ENDED' };
       if (t.accountId !== current.fromAccountId) return { kind: 'REJECTED', reason: 'NOT_OFFERED' };
       await tx.update(transferOffer).set({ status: 'ACCEPTED', decidedAt: new Date(i.nowMs) }).where(eq(transferOffer.id, i.offerId));
       await this.o.deviceKeys?.revokeActiveInTx(tx, t.id, i.nowMs);
@@ -202,11 +280,33 @@ export class DrizzleTransferStore implements TransferStore {
 
   async returnToPayer(i: { ticketId: string; accountId: string; nowMs: number; idempotencyKey: string }): Promise<ReturnOutcome> {
     return this.o.database.transaction(async (tx) => {
+      // 표 행 잠금이 같은 표의 동시 돌려주기를 한 차례로 만든다. 재생은 판정보다 먼저 본다(같은 키·같은 표)
       const [t] = await tx.select().from(ticket).where(eq(ticket.id, i.ticketId)).limit(1).for('update');
       if (!t) return { kind: 'REJECTED', reason: 'NOT_FOUND' };
+      const [recorded] = await tx
+        .select({ ticketId: ticketReturn.ticketId })
+        .from(ticketReturn)
+        .where(and(eq(ticketReturn.accountId, i.accountId), eq(ticketReturn.idempotencyKey, i.idempotencyKey)))
+        .limit(1);
+      if (recorded) return recorded.ticketId === i.ticketId ? { kind: 'OK', ticketId: recorded.ticketId, replayed: true } : { kind: 'REJECTED', reason: 'IDEMPOTENCY_KEY_REUSED' };
       const entry = (await tx.execute(sql`select 1 from scan_event where event_id = ${t.eventId}::uuid and ticket_id = ${t.id}::uuid and direction = 'IN' and result = 'PASS' limit 1`)).rows.length > 0;
       const reason = returnRejectionOf(snapshotOf(t), { accountId: i.accountId, nowMs: i.nowMs, eventStartsAtMs: t.eventStartsAt?.getTime(), entryRecorded: entry });
       if (reason) return { kind: 'REJECTED', reason };
+      // 기록을 표 변경과 같은 트랜잭션에 쓴다. 쓰기가 실패하면 보유자·키·표시가 모두 되돌아간다(T8 ②)
+      const inserted = await tx
+        .insert(ticketReturn)
+        .values({ idempotencyKey: i.idempotencyKey, accountId: i.accountId, ticketId: t.id, returnedAt: new Date(i.nowMs) })
+        .onConflictDoNothing()
+        .returning({ ticketId: ticketReturn.ticketId });
+      if (inserted.length === 0) {
+        // 같은 키로 다른 표를 동시에 돌려준 경우(표 행이 달라 함께 들어왔다)
+        const [other] = await tx
+          .select({ ticketId: ticketReturn.ticketId })
+          .from(ticketReturn)
+          .where(and(eq(ticketReturn.accountId, i.accountId), eq(ticketReturn.idempotencyKey, i.idempotencyKey)))
+          .limit(1);
+        return other && other.ticketId !== i.ticketId ? { kind: 'REJECTED', reason: 'IDEMPOTENCY_KEY_REUSED' } : { kind: 'OK', ticketId: t.id, replayed: true };
+      }
       await this.o.deviceKeys?.revokeActiveInTx(tx, t.id, i.nowMs);
       await tx
         .update(ticket)

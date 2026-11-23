@@ -101,6 +101,38 @@ export const transferOffer = pgTable(
   ],
 );
 
+/**
+ * 받는 사람 조회 기록(0018, F-05-2, ASVS 2.4.1). 시도마다 한 행, 회원 코드·휴대폰 번호 원문·찾은 계정 ID는 남기지 않는다.
+ * result는 FOUND·NOT_FOUND·LIMITED·UNAVAILABLE이고 LIMITED는 한도 셈에서 뺀다(창 안 마지막 60분의 나머지 결과를 센다)
+ */
+export const transferRecipientLookup = pgTable(
+  'transfer_recipient_lookup',
+  {
+    id: uuid('id').primaryKey(),
+    accountId: uuid('account_id').notNull(),
+    lookedUpAt: at('looked_up_at').notNull(),
+    result: text('result').notNull(),
+  },
+  (t) => [
+    index('transfer_recipient_lookup_account_idx').on(t.accountId, t.lookedUpAt),
+    check('transfer_recipient_lookup_result_check', sql`${t.result} IN ('FOUND', 'NOT_FOUND', 'LIMITED', 'UNAVAILABLE')`),
+  ],
+);
+
+/** 돌려주기 멱등 기록(0018, F-05-2, guidelines §4). (account_id, idempotency_key)로 한 번만 처리하고 같은 표면 처음 200을 재생한다 */
+export const ticketReturn = pgTable(
+  'ticket_return',
+  {
+    idempotencyKey: uuid('idempotency_key').notNull(),
+    accountId: uuid('account_id').notNull(),
+    ticketId: uuid('ticket_id')
+      .notNull()
+      .references(() => ticket.id),
+    returnedAt: at('returned_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.idempotencyKey] })],
+);
+
 /** 계정 단위 부정 예매 양도 잠금(0010, docs/data.md `fraud_transfer_lock`, ADR-0171·0173) */
 export const fraudTransferLock = pgTable(
   'fraud_transfer_lock',

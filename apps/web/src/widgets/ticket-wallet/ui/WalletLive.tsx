@@ -6,13 +6,19 @@
 //   (빌드 때 그린 셸 하나를 모든 ID가 같이 쓰고, 요청 때 그리는 조각이 없어 캐시 화면의 인라인 스크립트 해시가 그대로 맞는다).
 // - 갱신 뒤에도 401이면 저장된 표를 그리지 않고 로그인 화면(SCR-004)으로 보낸다. QR 글자·쿠키는 console·주소창에 내지 않는다.
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { EmptyState } from '@peaket/ds/EmptyState';
 import { ErrorState } from '@peaket/ds/ErrorState';
+import { NoticeBanner } from '@peaket/ds/NoticeBanner';
+import { WebShellModal } from '@peaket/ds/WebShell';
 import { walletScreenOf, type WalletCard, type WalletSyncResult } from '@/features/wallet-sync';
 import type * as WalletSyncModule from '@/features/wallet-sync/sync';
 import { afterLoad } from '@/shared/lib/after-load';
 import { cx } from '@/shared/lib/cx';
+import { reauthFailureText } from '@/shared/lib/reauth-failure';
+import { pickupReauthToken, submitReauthForm } from '@/shared/lib/reauth-return';
+import { ORIGINS } from '@/shared/config/origins';
+import { canReturn, loadReceivedOffers, reauthProviderFor, receivedOfferCardsOf, returnFailureOf, returnReauthTarget, returnTicket } from '../model/transfer-actions';
 import { DeviceQrLazy, OfflineBannerLazy } from './WalletClient';
 
 export interface WalletLiveProps {
@@ -87,7 +93,79 @@ function TicketCard({ card, qrFallback }: { card: WalletCard; qrFallback: ReactN
       </div>
       {card.note ? <p className="t-sm">{card.note}</p> : null}
       {card.showQr ? <DeviceQrLazy ticketId={card.ticketId} label={card.qrLabel} fallback={qrFallback} /> : null}
+      {card.received &&
+      card.badge === '받은 티켓' &&
+      canReturn({ ticketId: card.ticketId, status: card.status, received: card.received, eventStartsAt: card.startsAt ?? undefined, entryOpensAt: card.entryOpensAt ?? undefined }, Date.now()) ? (
+        <ReturnAction ticketId={card.ticketId} />
+      ) : null}
+      {card.pendingOfferId ? (
+        <Link className="link-more" href={`/my/tickets/${encodeURIComponent(card.ticketId)}/transfer`}>
+          요청 보기
+          <i className="ic ic-chevron-right" aria-hidden="true" />
+        </Link>
+      ) : null}
     </article>
+  );
+}
+
+/** SCR-013 돌려주기: 확인 대화상자 → 재인증 왕복 → 돌아오면 WalletLive가 POST와 동기화를 마친다 */
+function ReturnAction({ ticketId }: { ticketId: string }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const descId = `${useId()}-desc`;
+  const start = async () => {
+    setBusy(true);
+    setNotice(null);
+    const origin = ORIGINS.api;
+    if (origin === '') {
+      setNotice('지금은 돌려줄 수 없습니다. 잠시 뒤 다시 시도해 주세요');
+      setBusy(false);
+      return;
+    }
+    try {
+      const r = await fetch(`${origin}/v1/identity/providers`, { credentials: 'include', headers: { accept: 'application/json' } });
+      const body = r.status === 200 ? ((await r.json()) as { providers?: { provider?: unknown }[] }) : { providers: [] };
+      const linked = (body.providers ?? []).map((p) => p.provider).filter((p): p is string => typeof p === 'string' && p.length > 0);
+      const provider = reauthProviderFor(linked);
+      if (provider === undefined) {
+        setNotice('다시 로그인할 수단을 찾지 못했습니다. 로그인 수단을 확인한 뒤 다시 시도해 주세요');
+        return;
+      }
+      const pending = { ticketId, key: crypto.randomUUID() };
+      sessionStorage.setItem('peaket.return.reauth', JSON.stringify(pending));
+      const target = returnReauthTarget(ticketId);
+      submitReauthForm(provider, target.returnTo, target.purpose);
+    } catch {
+      setNotice('연결을 확인한 뒤 다시 시도해 주세요');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <button className="btn btn-outline btn-sm" type="button" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+        결제자에게 돌려주기
+      </button>
+      <WebShellModal open={open} onClose={() => setOpen(false)} title="돌려주면 이 휴대폰의 입장 키가 지워집니다" describedBy={descId} icon={<i className="ic ic-undo" aria-hidden="true" />} iconTone="warning">
+        <p className="t-sm" id={descId}>
+          돌려주기 전에 다시 로그인하며, 입장이 시작되면 돌려줄 수 없습니다.
+        </p>
+        {notice ? (
+          <NoticeBanner tone="danger" role="alert">
+            {notice}
+          </NoticeBanner>
+        ) : null}
+        <div className="col gap-2 md:flex-row-reverse md:flex-wrap md:items-center md:justify-start">
+          <button className="btn btn-primary btn-lg btn-block md:inline-flex md:w-auto" type="button" disabled={busy} onClick={() => void start()}>
+            돌려주기
+          </button>
+          <button className="btn btn-ghost btn-block md:inline-flex md:w-auto" type="button" onClick={() => setOpen(false)}>
+            닫기
+          </button>
+        </div>
+      </WebShellModal>
+    </>
   );
 }
 
@@ -95,6 +173,8 @@ export function WalletLive({ loading, qrFallback, detail }: WalletLiveProps) {
   const [ticketId, setTicketId] = useState<string | null>(null);
   const [cards, setCards] = useState<WalletCard[] | null>(null);
   const [sync, setSync] = useState<'pending' | WalletSyncResult>('pending');
+  const [returnNotice, setReturnNotice] = useState<string | null>(null);
+  const [offers, setOffers] = useState<{ offerId: string; eventId: string; expiresAt: string; href: string }[]>([]);
   const syncModule = useRef<SyncModule | null>(null);
   /** 마지막으로 시작한 받기 번호. 늦게 끝난 앞 받기가 뒤 결과를 덮지 않게 한다 */
   const run = useRef(0);
@@ -110,6 +190,56 @@ export function WalletLive({ loading, qrFallback, detail }: WalletLiveProps) {
     setCards(next);
     setSync(result);
   }, []);
+
+  // 받은 요청 카드(SCR-013 ⑬): 기한 전 OFFERED만 SCR-041로 잇는다
+  useEffect(() => {
+    const origin = ORIGINS.api;
+    if (origin === '') return;
+    void loadReceivedOffers({ origin, fetch: globalThis.fetch }).then((r) => {
+      if (r.kind === 'ok') setOffers(receivedOfferCardsOf(r.body.items, Date.now()));
+    });
+  }, []);
+
+  // 돌려주기 재인증에서 돌아오면: 표시를 한 번 꺼내 토큰을 받고 POST한 뒤 동기화한다
+  useEffect(() => {
+    let raw: string | null = null;
+    try {
+      raw = sessionStorage.getItem('peaket.return.reauth');
+    } catch {
+      raw = null;
+    }
+    if (raw === null) return;
+    let pending: { ticketId?: unknown; key?: unknown };
+    try {
+      pending = JSON.parse(raw) as { ticketId?: unknown; key?: unknown };
+    } catch {
+      return;
+    }
+    try {
+      sessionStorage.removeItem('peaket.return.reauth');
+    } catch {
+      // 위와 같다
+    }
+    if (typeof pending.ticketId !== 'string' || typeof pending.key !== 'string') return;
+    if (ORIGINS.api === '') {
+      setReturnNotice('지금은 돌려줄 수 없습니다. 잠시 뒤 다시 시도해 주세요');
+      return;
+    }
+    void (async () => {
+      const r = await pickupReauthToken();
+      if (r.kind !== 'token') {
+        setReturnNotice(`다시 로그인하지 못했습니다: ${reauthFailureText(r.reason)}`);
+        return;
+      }
+      const out = await returnTicket({ ticketId: pending.ticketId as string, reauthToken: r.token, idempotencyKey: pending.key as string, origin: ORIGINS.api, fetch: globalThis.fetch });
+      if (out.kind === 'ok') {
+        setReturnNotice('결제한 분에게 돌려주었습니다');
+        await resync();
+      } else {
+        setReturnNotice(returnFailureOf(out).text);
+      }
+    })();
+  }, [resync]);
 
   useEffect(() => {
     if (detail) setTicketId(ticketIdOfPath(window.location.pathname));
@@ -213,6 +343,27 @@ export function WalletLive({ loading, qrFallback, detail }: WalletLiveProps) {
       <main className="page-main" id="main" tabIndex={-1}>
         <div className="col mx-auto w-full max-w-[1040px] gap-6 px-4 pt-5 pb-10 md:gap-7 md:px-6 md:pb-12 lg:gap-8 lg:px-8 lg:pt-8 lg:pb-16">
           <h1 className="t-xl lg:text-[32px] lg:leading-[42px]">{detail ? '티켓 상세' : '마이 티켓'}</h1>
+          {returnNotice ? (
+            <NoticeBanner tone={returnNotice.includes('돌려주었습니다') ? 'success' : 'danger'} role="status">
+              {returnNotice}
+            </NoticeBanner>
+          ) : null}
+          {offers.length > 0 ? (
+            <section className="col gap-3" aria-labelledby="h-offers">
+              <h2 className={H2} id="h-offers">
+                받은 양도 요청
+              </h2>
+              {offers.map((o) => (
+                <Link key={o.offerId} className="card-flat row between gap-3 px-4 py-3" href={o.href}>
+                  <span className="col gap-0.5">
+                    <span className="t-md fw-b">받은 양도 요청</span>
+                    <span className="t-xs muted">수락 기한 {new Date(o.expiresAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</span>
+                  </span>
+                  <i className="ic ic-chevron-right" aria-hidden="true" />
+                </Link>
+              ))}
+            </section>
+          ) : null}
           {body}
           {screen === 'list' && (!detail || found) ? (
             <div className="col items-center gap-1.5 md:flex-row md:gap-3">

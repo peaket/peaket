@@ -119,6 +119,8 @@ function snapshotOf(t: ListedTicket, order: number, answer: EventSummaryAnswer |
     ...(typeof t.eventStartsAt === 'string' ? { eventStartsAt: t.eventStartsAt } : {}),
     // 결제자가 보유한 표만 receivedFromNickname이 null이다(칸이 없거나 닉네임이 있으면 받은 표)
     received: t.receivedFromNickname !== null,
+    // 진행 중 요청은 ID만 저장한다(기한·상대 값은 저장하지 않는다, ASVS 14.3.3)
+    ...(t.receivedFromNickname !== null || t.pendingTransfer === undefined || t.pendingTransfer === null ? {} : { pendingTransfer: { offerId: t.pendingTransfer.offerId } }),
     ...(s
       ? {
           title: s.title,

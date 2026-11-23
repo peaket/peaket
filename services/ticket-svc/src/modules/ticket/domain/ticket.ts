@@ -358,6 +358,8 @@ export interface WalletTicket {
   readonly transferLocked: boolean;
   /** 지금 보유자가 결제자인지(받은 표가 아닌지) */
   readonly heldByPayer: boolean;
+  /** 진행 중인 양도 요청(보유자 = 결제자일 때만). 목록의 pendingTransfer가 쓴다 */
+  readonly pendingOffer?: { readonly offerId: string; readonly expiresAtMs: number };
 }
 
 /**
@@ -375,6 +377,8 @@ export interface WalletListItem {
   readonly cancelDeadline?: string;
   /** 결제자가 보유한 표만 null. 받은 표는 보낸 분 닉네임을 ticket 데이터가 모르므로 칸을 뺀다 */
   readonly receivedFromNickname?: null;
+  /** 진행 중인 양도 요청. 없거나 받은 표면 null(openapi Ticket.pendingTransfer, F-05-2) */
+  readonly pendingTransfer: { readonly offerId: string; readonly expiresAt: string } | null;
 }
 
 export function walletListItemOf(t: WalletTicket): WalletListItem {
@@ -387,6 +391,8 @@ export function walletListItemOf(t: WalletTicket): WalletListItem {
     ...(t.gateZone.trim() === '' ? {} : { gateZone: t.gateZone }),
     ...(startsAt === undefined ? {} : { eventStartsAt: startsAt, cancelDeadline: startsAt }),
     ...(t.heldByPayer ? { receivedFromNickname: null } : {}),
+    pendingTransfer:
+      t.heldByPayer && t.pendingOffer ? { offerId: t.pendingOffer.offerId, expiresAt: new Date(t.pendingOffer.expiresAtMs).toISOString() } : null,
   };
 }
 
@@ -553,8 +559,8 @@ export function replayOnlyResultOf(t: Pick<TicketRecord, 'orderId' | 'payerAccou
   return 'EVENT_STARTED';
 }
 
-/** 월렛 목록에 싣는 값만 고른다(키 원문·해시는 싣지 않는다). */
-export function walletTicketOf(t: TicketRecord): WalletTicket {
+/** 월렛 목록에 싣는 값만 고른다(키 원문·해시는 싣지 않는다). pendingOffer는 저장소가 붙인다 */
+export function walletTicketOf(t: TicketRecord & { readonly pendingOffer?: { readonly offerId: string; readonly expiresAtMs: number } }): WalletTicket {
   return {
     ticketId: t.ticketId,
     orderId: t.orderId,
@@ -567,5 +573,6 @@ export function walletTicketOf(t: TicketRecord): WalletTicket {
     ...(t.eventStartsAtMs === undefined ? {} : { eventStartsAtMs: t.eventStartsAtMs }),
     transferLocked: t.fraudLockCaseId !== undefined,
     heldByPayer: t.accountId === t.payerAccountId,
+    ...(t.pendingOffer === undefined ? {} : { pendingOffer: t.pendingOffer }),
   };
 }

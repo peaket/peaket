@@ -15,7 +15,7 @@ import {
   type DeviceKeyRegistrationResult,
   type DeviceKeyStore,
 } from '../../domain/ports.js';
-import { deviceKey, deviceKeyNotice } from './schema.js';
+import { deviceKey, deviceKeyNotice, ticketReturn } from './schema.js';
 
 export interface ScannerChangeWriter {
   append(tx: DbTransaction, eventId: string, kind: string, payload: Record<string, unknown>): Promise<number>;
@@ -59,8 +59,12 @@ export class DrizzleDeviceKeyStore implements DeviceKeyStore, DeviceKeyNoticeSto
         if (i.reason === 'REISSUE') return { kind: 'ENTRY_STARTED' };
         if (!i.reauthVerified) return { kind: 'ENTRY_STARTED' };
       }
-      // TRANSFER는 양도로 보유자가 바뀐 뒤에만 쓴다. 결제자 그대로면 양도 수락 전이므로 거절한다.
-      if (i.reason === 'TRANSFER' && ticket.account_id === ticket.payer_account_id) return { kind: 'TRANSFER_NOT_ALLOWED' };
+      // TRANSFER는 양도로 보유자가 바뀐 뒤에 쓴다. 결제자 그대로면 양도 수락 전이므로 거절하되,
+      // 돌려주기로 결제자에게 돌아온 표는 정본(offline-gate §4 '돌려주기')대로 reason=TRANSFER로 다시 등록한다(시험 리뷰 RV-01).
+      if (i.reason === 'TRANSFER' && ticket.account_id === ticket.payer_account_id) {
+        const returned = (await tx.select({ ticketId: ticketReturn.ticketId }).from(ticketReturn).where(and(eq(ticketReturn.ticketId, i.ticketId), eq(ticketReturn.accountId, ticket.payer_account_id))).limit(1)).length > 0;
+        if (!returned) return { kind: 'TRANSFER_NOT_ALLOWED' };
+      }
       // 입장 시작 전 재발급: 재인증 없는 REISSUE와, 이미 키가 있는 ISSUE(첫 등록이 아니다)는 재인증 뒤 다시 받는다
       if (reissueUnverified || (i.reason === 'ISSUE' && hasActive && !i.reauthVerified)) return { kind: 'REISSUE_REQUIRED' };
       if (i.reason === 'REISSUE' || (i.reason === 'ISSUE' && hasActive)) {

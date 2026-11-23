@@ -31,6 +31,14 @@ export interface WalletCard {
   showQr: boolean;
   /** QR·등록 버튼의 대체 글. 그 표의 티켓 ID를 싣는다(§3.7) */
   qrLabel: string;
+  /** 저장된 티켓 상태(돌려주기 버튼이 끝난 표를 가른다) */
+  status?: string;
+  /** 받은 표인가(SCR-013 돌려주기 버튼) */
+  received: boolean;
+  /** 입장 시작(공개 요약이 알면 그것, 없으면 null). 돌려주기 버튼 경계 */
+  entryOpensAt: string | null;
+  /** 진행 중인 양도 요청 ID(결제자 표). 있으면 SCR-014 ⑥로 잇는다 */
+  pendingOfferId?: string;
 }
 
 export type WalletScreen = 'loading' | 'empty' | 'error' | 'list' | 'login';
@@ -59,6 +67,10 @@ export function walletCardOf(snapshot: WalletTicketSnapshot, nowMs: number): Wal
     placeName: snapshot.placeName ?? null,
     startsAt: snapshot.startsAt ?? snapshot.eventStartsAt ?? null,
     qrLabel: walletQrLabel(snapshot.ticketId),
+    ...(snapshot.status === undefined ? {} : { status: snapshot.status }),
+    received: snapshot.received === true,
+    entryOpensAt: snapshot.entryOpensAt ?? null,
+    ...(snapshot.pendingTransfer === undefined ? {} : { pendingOfferId: snapshot.pendingTransfer.offerId }),
   };
   const status = snapshot.status;
   if (status === 'ISSUED' || status === 'ACTIVE' || status === undefined) {

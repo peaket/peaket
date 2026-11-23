@@ -27,7 +27,12 @@ const privateNoStore = (_req: unknown, res: { setHeader(name: string, value: str
 @Module({})
 export class TicketModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(privateNoStore).forRoutes({ path: 'v1/tickets', method: RequestMethod.GET });
+    consumer.apply(privateNoStore).forRoutes(
+      { path: 'v1/tickets', method: RequestMethod.GET },
+      { path: 'v1/tickets/:ticketId', method: RequestMethod.GET },
+      { path: 'v1/transfers', method: RequestMethod.GET },
+      { path: 'v1/transfers/:offerId', method: RequestMethod.GET },
+    );
   }
 
   static register(o: TicketWiring): DynamicModule {

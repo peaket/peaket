@@ -33,6 +33,8 @@ export type WalletKeyStatus =
 export interface SyncOptions {
   /** 화면이 오프라인으로 그리는 중(미리보기 offline 포함). 보내지 않고 '등록 확인 전'으로 둔다 */
   offline?: boolean;
+  /** 첫 등록의 이유. 양도로 받은 표는 TRANSFER, 그 밖은 ISSUE(offline-gate §4, ADR-0051 결정 10) */
+  firstReason?: 'ISSUE' | 'TRANSFER';
   /** 팬 API 출처·fetch(연결 시험). 없으면 ORIGINS.api·globalThis.fetch */
   origin?: string;
   fetch?: RegisterDeviceKeyInput['fetch'];
@@ -170,7 +172,7 @@ async function newLocalKey(ticketId: string, reason: StoredDeviceKey['reason']):
 export async function enrollDeviceKey(ticketId: string, o: SyncOptions = {}): Promise<WalletKeyStatus> {
   const existing = await loadDeviceKey(ticketId);
   if (existing) return syncDeviceKeyRegistration(ticketId, o);
-  const key = await newLocalKey(ticketId, 'ISSUE');
+  const key = await newLocalKey(ticketId, o.firstReason ?? 'ISSUE');
   return sendRegistration(key, o);
 }
 

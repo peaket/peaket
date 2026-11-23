@@ -11,6 +11,7 @@
  */
 import type { TransferOfferRole } from './transferOfferRole';
 import type { TransferOfferStatus } from './transferOfferStatus';
+import type { TransferOfferWithdrawReason } from './transferOfferWithdrawReason';
 
 /**
  * 양도 요청(POL-017, ADR-0046). 받는 사람에게는 결제 금액과 결제자 연락처를 싣지 않는다
@@ -25,6 +26,8 @@ export interface TransferOffer {
   expiresAt?: string;
   /** 결제자만 취소·환불 고지 문구 */
   payerOnlyNotice?: string;
+  /** status가 WITHDRAWN일 때만 싣는 철회 까닭(감독 결정 2026-11-23, F-05-2). 저장 값 FRAUD_LOCK·ACCOUNT_DELETED·DEPOSIT_ERROR는 받는 사람에게 사유를 드러내지 않도록 OTHER로 낸다 */
+  withdrawReason?: TransferOfferWithdrawReason;
   eventId?: string;
   /** 공연명 */
   eventTitle?: string;
