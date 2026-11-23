@@ -93,6 +93,7 @@
 | offline-gate:v5.0.0-16.2.5 | ID만 | 기록 줄에 티켓 키·QR 포인터 없음(O-T47 ⑧) |
 | V-T7 | 자동 시험 | S1이 SQL·목업 id 없이 HTTP 목록과 실제 QR로 본다(정적 시험 + 실제 재생) |
 
+- O-T47 ⑥ 고침(갈래 결정 2026-11-23): 처음 쓴 '팬이 아닌 신원은 403'이 authz-matrix §5.1('다른 대상의 토큰은 역할과 상관없이 401')·플랫폼 가드와 어긋나 오래된 정본을 따라 401로 고쳤다.
 - 등급: 장부 항목은 모두 B다. 감독 결정으로 A 절차(시험 리뷰 있음)로 한다.
 - offline-gate:v5.0.0-8.2.2는 이미 자동 시험이다. O-T47 ①⑦ 시험에 이 ID도 단다(돈 되는 회귀 지킴).
 
@@ -115,7 +116,7 @@
 | B4 | 끝난 표 | `REFUNDED`·`VOIDED`·`CANCEL_REQUESTED`·`FLAGGED`·`TRANSFER_PENDING`도 그 상태로 목록에 남음 | offline-gate §2 '어떤 표' |
 | B5 | 싣는 칸 | `ticketId`·`eventId`·`status`·`transferLocked` 늘. `gateZone`은 비지 않을 때. `eventStartsAt`=`cancelDeadline`=발권 때 회차 시작(있을 때). 결제자 보유 표 `receivedFromNickname` null, 받은 표는 칸 없음. 그 밖의 표시 칸 없음 | offline-gate §2 '무엇을 싣나', POL-032 |
 | B6 | 싣지 않는 값 | 주문·좌석·계정·결제자 ID, `PEAKET1:` 포인터, 티켓 키·해시, 판 번호, 사건 ID | 같은 곳, ASVS 15.3.1 |
-| B7 | 인증 | 세션 없음 401, 팬이 아닌 신원 403, 쿼리 `accountId`는 무시(계약 밖 칸) | authz-matrix §3 '티켓', offline-gate §2 |
+| B7 | 인증 | 세션 없음 401, 팬이 아닌 신원도 401(다른 대상의 신원은 역할과 상관없이 401, authz-matrix §5.1), 쿼리 `accountId`는 무시(계약 밖 칸) | authz-matrix §3 '티켓'·§5.1, offline-gate §2 |
 | B8 | 양도된 표 | 수락 뒤 B 목록에만 | offline-gate §2 '누구의 표' |
 | B9 | 캐시·기록 | 200·400 모두 `Cache-Control: private, no-store`. 기록 줄에 본문·티켓 키·포인터 없음 | offline-gate §2 '캐시와 기록', ASVS 14.3.2·16.2.5 |
 | B10 | 화면 받기 | `limit=100`, 앞 응답 커서 그대로, null까지. 같은 커서 반복이면 멈추고 실패 | frontend §4.2.4 '월렛 목록 세부' 받기 |
@@ -143,7 +144,7 @@
 ### 8.1 HTTP(ticket-svc)
 
 - `GET /v1/tickets?cursor=<불투명>&limit=<1~100>`. 응답 200 `application/json` `{ items: Ticket[], nextCursor: string | null }`(openapi `ListTicketsResponse` 그대로, `@peaket/contracts/openapi/tickets`의 `ListTicketsResponse`로 검사된다).
-- 신원: 게이트웨이 머리 `x-user-id`(계정 UUID)·`x-session-id`·`x-user-aud: fan`(지금 `test/device-keys-http.test.ts`가 쓰는 꼴). 없으면 401, `x-user-aud`가 `fan`이 아니면 403. 계정은 머리에서만 읽는다.
+- 신원: 게이트웨이 머리 `x-user-id`(계정 UUID)·`x-session-id`·`x-user-aud: fan`(지금 `test/device-keys-http.test.ts`가 쓰는 꼴). 없으면 401, `x-user-aud`가 `fan`이 아니어도 401(authz-matrix §5.1). 계정은 머리에서만 읽는다.
 - 항목 칸(B5·B6): `ticketId`, `eventId`, `status`, `transferLocked`(boolean)는 늘. `gateZone`(빈 값이면 칸 없음), `eventStartsAt`·`cancelDeadline`(ISO 8601, 같은 값, 발권 `event_starts_at`이 없으면 둘 다 칸 없음), `receivedFromNickname`(보유자 = 결제자면 `null`, 아니면 칸 없음). 이 밖의 칸은 없다.
 - 오류: `limit` 0·101·정수 아님·같은 쿼리 두 번 → 400(플랫폼 계약 검사, 문제 종류는 단언하지 않는다). 풀리지 않는 커서 → 400 문제 상세 `type` 끝이 `invalid-query`, `title` "목록 조건이 올바르지 않습니다". 커서 꼴은 지금 그대로(`[발권 ms, 티켓 UUID]` JSON의 base64url)이고 시험은 앞 응답의 `nextCursor`만 다시 쓴다. 'B의 표 자리 커서'는 B로 부른 목록의 `nextCursor`를 A 세션에 넣어 만든다.
 - 머리: 200·400 모두 `cache-control: private, no-store`.
@@ -189,7 +190,7 @@
 | O-T47 ②③ | `O-T47 ② limit 2로 5장을 2·2·1로 겹침 없이 받고 마지막만 nextCursor가 null이다`, `O-T47 ③ limit 0·101은 400, 풀리지 않는 커서는 400 invalid-query, B의 커서는 A의 표만` | 단위 `test/wallet-tickets-http.test.ts`(메모리 저장소) + 통합(같은 발권 시각 두 장으로 ID 내림차순 경계) |
 | O-T47 ④ | `O-T47 ④ 환급·무효 표가 그 상태로 목록에 남는다` | 통합(실제 `cancel`·`blockIssue`) |
 | O-T47 ⑤ | `O-T47 ⑤ 항목은 계약 칸만이고 주문·좌석·계정 ID·PEAKET1 포인터·티켓 키가 없다(ASVS v5.0.0-15.3.1)` | 단위: 항목 키 집합을 정확히 단언(허용 목록), `gateZone` 빈 값·있음 둘, 회차 시작 있음·없음 둘 |
-| O-T47 ⑥ | `O-T47 ⑥ 세션 없으면 401, 팬이 아니면 403, 쿼리 accountId는 무시한다` | 단위 |
+| O-T47 ⑥ | `O-T47 ⑥ 세션 없으면 401, 팬이 아닌 신원도 401, 쿼리 accountId는 무시한다` | 단위 |
 | O-T47 ⑧ | `O-T47 ⑧ 200·400 모두 private, no-store이고 기록 줄에 티켓 키·PEAKET1 값이 없다(ASVS v5.0.0-14.2.2, v5.0.0-14.3.2, v5.0.0-16.2.5)` | 단위(기록 흐름을 잡는다) |
 | O-T48 ①⑩ | `O-T48 ① 커서를 그대로 실어 세 쪽을 받고 모두 저장한다`, `O-T48 ⑩ 같은 커서가 다시 오면 멈추고 cursor-loop 실패다` | web node `src/features/wallet-sync/sync.test.mjs`(fake-indexeddb + `globalThis.fetch`) |
 | O-T48 ②③④⑤ | `O-T48 ② 0장이면 empty`, `③ 저장 없음+실패면 error`, `④ 저장 있음+실패면 list+offline`, `⑤ 갱신 뒤 401이면 login이고 저장된 표를 그리지 않는다` | 같은 파일(`walletScreenOf`와 `syncWallet` 결과) + 화면 Playwright(아래) |
