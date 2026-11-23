@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 94 | 102 | 0 | 0 | 0 | 10 | 0 | 19 | 62 | 287 |
-| 합계 | 94 | 102 | 0 | 0 | 0 | 10 | 0 | 19 | 62 | 287 |
+| B | 109 | 100 | 0 | 0 | 0 | 10 | 0 | 19 | 55 | 293 |
+| 합계 | 109 | 100 | 0 | 0 | 0 | 10 | 0 | 19 | 55 | 293 |
 
 ## docs/features/offline-gate.md
 
@@ -31,7 +31,9 @@
 | O-T18 | — | 양도 수락과 스캔 동시 경합 | 입장 시작 전에 받는 사람의 수락과 보낸 사람 QR의 온라인 스캔 수신이 겹치면, 행 잠금으로 하나만 성공한다. 스캔이 먼저면 수락은 409이고, 수락이 먼저면… | 빈칸 | B | — |
 | O-T19 | — | 돌려주기·양도 회수 키 교체 | 입장 시작 전에 돌려주기나 회수를 하면, 변경분이 반영된 뒤 받은 사람의 QR은 거부되고 결제자 기기의 새 키로 입장된다. | 빈칸 | B | — |
 | O-T20 | — | 스캐너 동기화 신선도 경보 | 입장 시간대에 스캐너 한 대의 네트워크를 3분 끊으면, 2분이 지난 뒤 관제에 SEV2와 현장 책임자 알림이 나온다. 그 스캐너는 오프라인 판정을 계속한다… | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-freshness.test.ts |
-| O-T21 | — | 해제 15분 뒤 토큰 재사용 | 파트너가 스태프를 해제하고 6초 [가정] 뒤와 16분 뒤에 그 토큰과 그 기기 키의 DPoP 증명으로 요청한다. 근무 준비·목록·변경분과 책임자 기능(기기… | 빈칸 | B | — |
+| O-T21 | ① | 해제 15분 뒤 토큰 재사용 | ① 근무 준비·목록·변경분과 책임자 기능(기기 배치·이상 표시·부스 허용)은 401(`invalid_token`)로 거부된다(서버 세션 상태 확인)… | 자동 시험 | B | 시험: packages/platform/test/scanner-auth-f055.test.ts, services/ticket-svc/test-int/scanner-f055.int.test.ts |
+| O-T21 | ② | 해제 15분 뒤 토큰 재사용 | ② 같은 묶음을 토큰 없이 기기 인증만으로 다시 보내면 모두 받고, 해제 뒤 시각의 기록은 '세션 밖 기록'으로 표시된다(ADR-0051 결정 9, O-T26과… | 자동 시험 | B | 시험: services/ticket-svc/test-int/scanner-f055.int.test.ts |
+| O-T21 | ③ | 해제 15분 뒤 토큰 재사용 | ③ 앱은 그 401(`invalid_token`)을 받으면 저장한 토큰을 지우고 같은 묶음을 기기 인증만으로 다시 보낸다(추천 적용 2026-10-28, 기술… | ID만 | B | 시험: packages/platform/test/scanner-auth-f055.test.ts, services/ticket-svc/test-int/scanner-f055.int.test.ts |
 | O-T22 | — | 입장 중 소유권 동결 | 입장 시작 뒤 돌려주기·양도 수락·양도 회수 요청은 409 `ENTRY_STARTED`로 거부되고, 키가 바뀌지 않는다. | 빈칸 | B | — |
 | O-T23 | — | 입장 상태 공유 | 같은 구역의 온라인 스캐너 A가 통과시킨 티켓을 2분 [가정] 뒤 스캐너 B로 찍으면 '이미 입장한 티켓'으로 거부된다. | 다른 단계 | B | GAT-180 · v0 모놀리스의 입장 시험(services/v0-monolith/test-int/gate.int.test.ts)만 있다. 목표 구조에서 온라인 스캐너 A 통과 뒤 B의 '이미 입장'은 입장 상태… |
 | O-T24 | — | 다른 기기의 퇴장·재입장 | 재입장을 허용하는 회차에서 기기 X(퇴장 모드)로 OUT한 뒤 기기 Y(입장 모드)로 IN하면 정상이고, 이상 표시가 없다. | 빈칸 | B | — |
@@ -45,20 +47,22 @@
 | O-T32 | — | 입장용 휴대폰 등록 | 데스크톱으로 보이는 브라우저에서 월렛을 열면 키를 만들지 않고 휴대폰 등록을 안내한다. 휴대폰에서 등록하면 QR이 나온다. | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/platform.test.mjs, tools/web-checks/reflow/wallet-enroll.spec.mjs |
 | O-T33 | — | QR v1 형식 | 지원하지 않는 형식 버전은 '유효하지 않은 QR', 폐기된 keyId는 '옛 QR', 서명이 맞지 않으면 '위조 의심'으로 사유가 나뉜다. | 다른 단계 | B | GAT-180·GAT-190 · BAT-350은 클라이언트 QR v1 형식·base45·서명·15초 재서명을 단위 시험했다(`qr-v1.test.mjs`). 스캐너가 '유효하지 않은 QR/옛 QR/위조 의심'… |
 | O-T34 | — | 예외 통과 | 책임자 세션만 예외 통과를 할 수 있다. 사유·메모·책임자 계정이 기록되고, CS 처리함의 사후 검토에 오른다. 대리 승인 세션에는 버튼이 없고, API로… | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-gate-http.test.ts |
-| O-T35 | ① | 기기 인증만 요구하는 쓰기 경로(기기 승인 요청·토큰·스캔 올리기)에… | ①는 403이다. 확인 코드가 만들어지지 않고 기록도 저장되지 않는다. | 빈칸 | B | — |
-| O-T35 | ② | 기기 인증만 요구하는 쓰기 경로(기기 승인 요청·토큰·스캔 올리기)에… | ②는 403이다. 확인 코드가 만들어지지 않고 기록도 저장되지 않는다. | 빈칸 | B | — |
-| O-T35 | ③ | 기기 인증만 요구하는 쓰기 경로(기기 승인 요청·토큰·스캔 올리기)에… | ③은 415다. | 빈칸 | B | — |
-| O-T35 | ④ | 기기 인증만 요구하는 쓰기 경로(기기 승인 요청·토큰·스캔 올리기)에… | ④는 정상 처리된다 | 빈칸 | B | — |
-| O-T35 | ⑤ | 기기 인증만 요구하는 쓰기 경로(기기 승인 요청·토큰·스캔 올리기)에… | ⑤는 정상 처리된다 | 빈칸 | B | — |
+| O-T35 | ① | 기기 인증만 요구하는 쓰기 경로(기기 승인 요청·토큰·스캔 올리기·기기… | ①는 403이다. 확인 코드가 만들어지지 않고 기록도 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth-f055.test.ts, services/identity-svc/test/scanner-authorization-http.test.ts 외 1곳 |
+| O-T35 | ② | 기기 인증만 요구하는 쓰기 경로(기기 승인 요청·토큰·스캔 올리기·기기… | ②는 403이다. 확인 코드가 만들어지지 않고 기록도 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth-f055.test.ts, services/identity-svc/test/scanner-authorization-http.test.ts 외 1곳 |
+| O-T35 | ③ | 기기 인증만 요구하는 쓰기 경로(기기 승인 요청·토큰·스캔 올리기·기기… | ③은 415다. | 자동 시험 | B | 시험: services/identity-svc/test/scanner-authorization-http.test.ts, services/ticket-svc/test/scanner-origin.test.ts |
+| O-T35 | ④ | 기기 인증만 요구하는 쓰기 경로(기기 승인 요청·토큰·스캔 올리기·기기… | ④는 정상 처리된다 | 자동 시험 | B | 시험: services/identity-svc/test/scanner-authorization-http.test.ts |
+| O-T35 | ⑤ | 기기 인증만 요구하는 쓰기 경로(기기 승인 요청·토큰·스캔 올리기·기기… | ⑤는 정상 처리된다 | 자동 시험 | B | 시험: packages/platform/test/scanner-auth-f055.test.ts, services/identity-svc/test/scanner-authorization-http.test.ts 외 2곳 |
 | O-T36 | — | mTLS 선택지의 교차 출처 인증서(선택 PoC 5.4.3):… | 사전 요청은 인증서 없이 통과하고, 본 요청에는 기기 인증서가 실려 통과하며 PWA가 응답을 읽는다. 인증서 없는 본 요청은 403이다. 하나라도 안 되면… | 빈칸 | B | — |
-| O-T37 | ① | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ①은 통과하고, 브라우저의 사전 요청은 자격 증명 없이 끝난다(`credentials: 'omit'`). | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-http.test.ts |
-| O-T37 | ② | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ②은 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
-| O-T37 | ③ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ③은 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
-| O-T37 | ④ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ④은 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
-| O-T37 | ⑤ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑤은 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
-| O-T37 | ⑥ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑥은 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
-| O-T37 | ⑦ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑦은 403(기기 폐기)이다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
-| O-T37 | ⑧ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑧은 같은 키로 만든 증명으로 모두 올라간다 | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-shift-http.test.ts |
+| O-T37 | ① | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ①은 통과하고, 브라우저의 사전 요청은 자격 증명 없이 끝난다(`credentials: 'omit'`). | 자동 시험 | B | 시험: apps/scanner/test/enrollment-link.test.ts, deploy/gateways/test/gateways.test.mjs 외 3곳 |
+| O-T37 | ② | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ②는 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth-f055.test.ts, packages/platform/test/scanner-auth.test.ts 외 1곳 |
+| O-T37 | ③ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ③는 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth-f055.test.ts, packages/platform/test/scanner-auth.test.ts 외 1곳 |
+| O-T37 | ④ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ④는 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth-f055.test.ts, packages/platform/test/scanner-auth.test.ts 외 1곳 |
+| O-T37 | ⑤ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑤는 401이고 기록이 저장되지 않는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth-f055.test.ts, packages/platform/test/scanner-auth.test.ts 외 1곳 |
+| O-T37 | ⑥ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑥은 403(`device-unregistered`, 미등록 기기)이고 기록이 저장되지 않는다(authz-matrix §5.2와 openapi 문제 이름에… | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts, services/ticket-svc/test-int/scanner-f055.int.test.ts |
+| O-T37 | ⑦ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑦은 403(기기 폐기)이다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts, services/ticket-svc/test-int/scanner-f055.int.test.ts |
+| O-T37 | ⑧ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑧은 같은 키로 만든 증명으로 모두 올라간다. | 자동 시험 | B | 시험: apps/scanner/test/enrollment-link.test.ts, services/ticket-svc/test-int/scanner-f055.int.test.ts 외 1곳 |
+| O-T37 | ⑨ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑨는 거절마다 지표 `scanner_auth_rejections_total`이 그 이유 이름표로 하나씩 오른다(§6.6). | 자동 시험 | B | 시험: packages/platform/test/scanner-auth-f055.test.ts, services/ticket-svc/test-int/scanner-f055.int.test.ts |
+| O-T37 | ⑩ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑩은 하나만 200이고 다른 하나는 401(`invalid_dpop_proof`, 이름표 `jti`)이며 기록은 한 묶음만 저장된다 | 자동 시험 | B | 시험: services/ticket-svc/test-int/scanner-f055.int.test.ts |
 | O-T38 | — | 목록 생성 중 커밋된 폐기(추천 적용 2026-10-28, 기술 검토… | 한 스냅샷 구현에서는 스캐너가 그 keyId를 폐기로 안다(빠짐 0건). 비교 대상에서는 빠짐이 재현된다. 같은 변경을 두 번 받아도 스캐너 상태가 같다 | 자동 시험 | B | 시험: services/ticket-svc/test-int/scanner-gate.int.test.ts, services/ticket-svc/test/scanner-gate.test.ts |
 | O-T39 | — | 스캔 큐 쓰기의 내구성(추천 적용 2026-10-28, 기술 검토… | 다시 켜면 통과 화면을 본 기록이 모두 스캔 큐에 있다(유실 0건). strict의 판정 지연 p95가 150ms 안이다. 넘으면 wbs 5.4.7에서 예산을… | 빈칸 | B | — |
 | O-T40 | — | 온라인 → 오프라인 전환 중 판정(추천 적용 2026-10-28, 기술… | 결과가 나오지 않거나 오류인 판정이 0건이고, 전환 앞뒤 1분 판정 지연의 최댓값이 평소 p95(150ms) 안 [가정]이다(판정이 멈춘 시간 0초). 끊긴… | 빈칸 | B | — |
@@ -67,6 +71,8 @@
 | O-T42 | ② | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ② 11번째부터 10분 동안 429 | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-shift-http.test.ts, services/ticket-svc/test/scanner-shift.test.ts |
 | O-T42 | ③ | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ③ 등록 201과 SEV3 경보 하나, 등록 경로는 닫히지 않는다 | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-shift.test.ts |
 | O-T42 | ④ | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ④ 410 | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-shift.test.ts |
+| O-T42 | ⑤ | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ⑤ 첫 요청은 503(`scanner-auth-unavailable`)이고 실패로 세지 않는다. 다시 등록하면 201이다. 되살린 코드의 만료 시각은 처음 발급… | 자동 시험 | B | 시험: services/ticket-svc/test-int/scanner-f055.int.test.ts, services/ticket-svc/test/enrollment-code-store-contract.ts 외… |
+| O-T42 | ⑥ | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ⑥ 하나는 201, 다른 하나는 410이고 기기에 묶인 키는 201을 받은 쪽 하나다. 진 쪽은 지금처럼 실패 1로 센다 | 자동 시험 | B | 시험: services/ticket-svc/test-int/scanner-f055.int.test.ts |
 | O-T43 | — | 잠금 걸린 티켓의 정상 입장(추천 적용 2026-10-31… | 세 티켓 모두 통과하고, 판정 사유와 지연이 잠금 없는 티켓과 같다. 회차 목록·변경분·스캐너 저장소에 잠금 칸·사건 ID가 0건이다. 입장 시작 뒤… | 빈칸 | B | — |
 | O-T44 | ① | 월렛 기기 키 서버 등록과 실패 처리(추천 적용 2026-11-21… | ① 키가 '등록됨'(`REGISTERED`)으로 저장되고 QR이 나온다. 보낸 본문의 `reason`은 `ISSUE`이고, 공개키 JWK에는 계약(openapi… | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/register.test.mjs |
 | O-T44 | ② | 월렛 기기 키 서버 등록과 실패 처리(추천 적용 2026-11-21… | ② '등록됨'으로 바꾸지 않고 QR을 보이지 않는다 | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/register.test.mjs |
@@ -151,8 +157,8 @@
 | v5.0.0-3.4.4 | — | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/v0-monolith/test-int/seat.int.test.ts 외 4곳 (영역: apps/scanner) |
 | v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | 자동 시험 | B | 시험: apps/web/src/shared/lib/staff-fragment.test.mjs, apps/web/src/widgets/app-shell/model/search-quality.test.mjs |
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | ID만 | B | 다른 곳 시험: apps/web/src/_app/security/page-headers.test.mjs, deploy/gateways/test/gateways.test.mjs 외 5곳 (영역:… |
-| v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | ID만 | B | 다른 곳 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs 외… |
-| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, apps/partner/src/_pages/seatmap-editor/model/save… |
+| v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: packages/platform/test/scanner-auth-f055.test.ts, services/identity-svc/test/scanner-authorization-http.test.ts 외 2곳 |
+| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 자동 시험 | B | 시험: services/identity-svc/test/scanner-authorization-http.test.ts, services/ticket-svc/test/scanner-origin.test.ts |
 | v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | ID만 | B | 다른 곳 시험: apps/console-host/src/pages/cancellation/ui/wiring.test.mjs, apps/partner/src/_pages/cancellation-request/ui/wi… |
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | ID만 | B | 다른 곳 시험: apps/web/src/features/wallet-device-key/pwa-config.test.mjs, apps/web/src/features/wallet-device-key/sw-rules.t… |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 다른 단계 | B | GAT-140 · 판정 Worker와 서비스 워커 메시지 경계가 아직 없다. Worker를 붙이는 단계에서 정해진 형식만 받는 시험을 더한다. |
@@ -176,7 +182,7 @@
 | v5.0.0-7.1.1 | — | L2 | 세션 유휴 만료와 절대 만료를 다른 통제와 함께 봐도 적절하게 정해 문서화하고, NIST SP 800-63B 재인증 기준과 다른 점의 근거를 적는다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-7.1.2 | — | L2 | 계정당 동시 세션 수와 한도 도달 때의 동작을 문서화한다. | ID만 | B | 다른 곳 시험: services/identity-svc/test/device-sessions.test.ts (영역: apps/scanner) |
 | v5.0.0-7.1.3 | — | L2 | SSO 같은 연합 인증 환경에서 사용자 세션을 만들고 관리하는 모든 시스템과, 세션 수명·종료·재인증 조건을 서로 맞추는 통제를 문서화한다. | 빈칸 | B | 영역: apps/scanner |
-| v5.0.0-7.2.1 | — | L1 | 세션 토큰 검증을 신뢰할 수 있는 백엔드에서 한다. | 빈칸 | B | 영역: packages/platform, services/identity-svc |
+| v5.0.0-7.2.1 | — | L1 | 세션 토큰 검증을 신뢰할 수 있는 백엔드에서 한다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth-f055.test.ts |
 | v5.0.0-7.2.2 | — | L1 | 세션은 동적으로 만든 토큰으로 관리하고 고정 API 키를 쓰지 않는다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-7.2.3 | — | L1 | 사용자 세션에 참조 토큰을 쓰면 CSPRNG로 만든 엔트로피 128비트 이상의 고유한 값으로 한다. | 빈칸 | B | 영역: apps/scanner |
 | v5.0.0-7.2.4 | — | L1 | 인증·재인증 때 새 세션 토큰을 만들고 이전 토큰을 끝낸다. | ID만 | B | 다른 곳 시험: services/identity-svc/test-int/admin-token-refresh.int.test.ts, services/identity-svc/test/admin-token-refresh-… |
@@ -291,7 +297,7 @@
 | v5.0.0-16.3.1 | — | L2 | 성공·실패를 포함한 모든 인증 작업을 기록하고, 인증 방식이나 쓴 인증 요소 같은 메타데이터도 남긴다. | ID만 | B | 다른 곳 시험: services/payment-svc/test-int/payment-webhook.int.test.ts, services/payment-svc/test/payment-webhook.test.ts 외… |
 | v5.0.0-16.3.2 | — | L2 | 실패한 인가 시도를 기록하고, L3는 민감 데이터 접근을 포함한 모든 인가 결정을 그 데이터는 빼고 기록한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.t… |
 | v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | ID만 | B | 다른 곳 시험: apps/console-host/src/shared/lib/remotes/remote-policy.test.mjs… |
-| v5.0.0-16.3.4 | — | L2 | 예상하지 못한 오류와 보안 통제 실패를 기록한다. | ID만 | B | 다른 곳 시험: packages/platform/test/control-codec.test.ts, packages/platform/test/redis.test.ts 외 57곳 (영역: apps/scanner) |
+| v5.0.0-16.3.4 | — | L2 | 예상하지 못한 오류와 보안 통제 실패를 기록한다. | 자동 시험 | B | 시험: packages/platform/test/control-codec.test.ts, packages/platform/test/redis.test.ts 외 3곳 |
 | v5.0.0-16.4.1 | — | L2 | 모든 로그 구성요소가 로그 주입을 막도록 데이터를 인코딩한다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-log.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts 외 1곳 (영역:… |
 | v5.0.0-16.4.2 | — | L2 | 로그를 권한 없는 접근과 수정에서 보호한다. | ID만 | B | 다른 곳 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts, tools/ci/observability-config.test.mjs (영역:… |
 | v5.0.0-16.4.3 | — | L2 | 로그를 분석·탐지·경보용으로 논리적으로 분리된 시스템에 안전하게 보낸다. | 빈칸 | B | 영역: apps/scanner |
@@ -300,6 +306,6 @@
 | v5.0.0-16.5.3 | — | L2 | 예외가 나도 안전하게 실패하고, 검증 오류가 있는데도 거래를 처리하는 fail-open을 막는다. | ID만 | B | 다른 곳 시험: packages/platform/test/circuit-breaker.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 71곳… |
 | v5.0.0-3.6.1 | — | L3 | 외부에 둔 클라이언트 자산은 정적이고 버전이 붙은 자원을 SRI로 검증할 때만 쓰고, 안 되면 자원마다 보안 결정으로 문서에 남긴다. | ID만 | B | 다른 곳 시험: tools/web-checks/csp/web.spec.mjs (영역: apps/scanner) |
 | v5.0.0-8.3.2 | — | L3 | 인가 판정의 근거 값이 바뀌면 바로 반영하고, 자체 완결형 토큰처럼 바로 반영할 수 없으면 완화 통제를 둔다. | 빈칸 | B | 영역: apps/scanner |
-| v5.0.0-10.3.5 | — | L3 | 자원 서버는 mTLS나 DPoP로 보낸 사람에 묶인 토큰만 받아 도난 토큰 사용을 막는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth.test.ts |
+| v5.0.0-10.3.5 | — | L3 | 자원 서버는 mTLS나 DPoP로 보낸 사람에 묶인 토큰만 받아 도난 토큰 사용을 막는다. | 자동 시험 | B | 시험: packages/platform/test/scanner-auth-f055.test.ts, packages/platform/test/scanner-auth.test.ts |
 | v5.0.0-10.4.14 | — | L3 | 인가 서버는 보낸 사람에 묶인 액세스 토큰만 발급한다. | 빈칸 | B | 영역: services/identity-svc |
 | v5.0.0-15.4.2 | — | L3 | 자원 상태 확인과 그 상태에 따른 동작을 원자적으로 해서 확인 시점과 사용 시점의 경합(TOCTOU)을 막는다. | ID만 | B | 다른 곳 시험: services/admission-ctrl/test-int/batch-store.int.test.ts, services/admission-ctrl/test-int/leader-store.int.tes… |

@@ -123,3 +123,7 @@
 - F-06-7 TR-22 낮음: 배경 작업 호출 데드라인 값이 정본에 없고 상세 데드라인 시험의 여유가 0.2~0.25초로 좁다
 - F-06-7 TR-23 낮음: 열린 건에 다른 eventKey가 오면 `duplicate`인지 `existing`인지 bot-defense §12 글이 모호하다
 - F-06-7 ops 단위 전체 실행이 부하에서 시간 초과 5건(단독 통과): `cs-inbox-screen-link`·`event-cancellation-*-main`·`verification-appeal-detail`
+- F-05-5 범위 밖: 기기 배정 바꾸기·회수 기기 재등록·퇴역 API가 없다(d5 §1.6 22번). 감사 C1-12·C1-23, mTLS 운영 PoC(O-T36)
+- F-05-5 Valkey 등록 코드 키 이름이 해시 태그 없이 시험에 박혀 두 키를 한 Lua로 묶지 못한다. 한 키 원자 동작의 차례로 지키며 꺼낸 만료 시각을 1초 앞당긴다(redis-enrollment-code-store.ts)
+- F-05-5 두 통합을 한 번에 돈 첫 실행에서 3 실패(200 대신 503, 장애 주입 첫 요청 500, ops 등록 INTERNAL). 단독·전체 재실행에서 다시 나지 않았지만 500은 원인 미확인
+- F-05-5 시험 리뷰 낮음 TR-14와 TR-15 게이트 조건(develop CI에서 scanner-enroll 잡이 9개를 실제로 돌렸는지 합친 뒤 확인)

@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 |
-| B | 325 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 57 | 442 |
-| 합계 | 335 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 57 | 452 |
+| B | 326 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 56 | 442 |
+| 합계 | 336 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 56 | 452 |
 
 ## docs/features/identity.md
 
@@ -347,8 +347,8 @@
 | v5.0.0-3.4.4 | — | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
 | v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | 자동 시험 | B | 시험: apps/web/src/shared/lib/staff-fragment.test.mjs, apps/web/src/widgets/app-shell/model/search-quality.test.mjs |
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
-| v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
-| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, apps/partner/src/_pages/seatmap-editor/model/save… |
+| v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs 외 1곳 |
+| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 자동 시험 | B | 시험: services/identity-svc/test/scanner-authorization-http.test.ts |
 | v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 자동 시험 | B | 시험: apps/console-host/src/pages/cancellation/ui/wiring.test.mjs, apps/partner/src/_pages/cancellation-request/ui/wiring… |
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 해당 없음 | B | 해당 없음: 로그인은 창을 열지 않고 리디렉션(브라우저를 다른 주소로 보내는 응답)으로 이동하므로 받는 창 메시지가 없다(docs/features/identity.md §2). 로그인에 팝업 창을 쓰게 되면 다시… |
@@ -395,7 +395,7 @@
 | v5.0.0-7.1.1 | — | L2 | 세션 유휴 만료와 절대 만료를 다른 통제와 함께 봐도 적절하게 정해 문서화하고, NIST SP 800-63B 재인증 기준과 다른 점의 근거를 적는다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web, services/identity-svc |
 | v5.0.0-7.1.2 | — | L2 | 계정당 동시 세션 수와 한도 도달 때의 동작을 문서화한다. | 자동 시험 | B | 시험: services/identity-svc/test/device-sessions.test.ts |
 | v5.0.0-7.1.3 | — | L2 | SSO 같은 연합 인증 환경에서 사용자 세션을 만들고 관리하는 모든 시스템과, 세션 수명·종료·재인증 조건을 서로 맞추는 통제를 문서화한다. | 빈칸 | B | 영역: services/identity-svc |
-| v5.0.0-7.2.1 | — | L1 | 세션 토큰 검증을 신뢰할 수 있는 백엔드에서 한다. | 빈칸 | B | 영역: apps/web |
+| v5.0.0-7.2.1 | — | L1 | 세션 토큰 검증을 신뢰할 수 있는 백엔드에서 한다. | ID만 | B | 다른 곳 시험: packages/platform/test/scanner-auth-f055.test.ts, services/ticket-svc/test-int/scanner-f055.int.test.ts (영역:… |
 | v5.0.0-7.2.2 | — | L1 | 세션은 동적으로 만든 토큰으로 관리하고 고정 API 키를 쓰지 않는다. | 빈칸 | B | 영역: services/identity-svc |
 | v5.0.0-7.2.3 | — | L1 | 사용자 세션에 참조 토큰을 쓰면 CSPRNG로 만든 엔트로피 128비트 이상의 고유한 값으로 한다. | 빈칸 | B | 영역: services/identity-svc |
 | v5.0.0-7.2.4 | — | L1 | 인증·재인증 때 새 세션 토큰을 만들고 이전 토큰을 끝낸다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-token-refresh.int.test.ts, services/identity-svc/test/admin-token-refresh-http… |
