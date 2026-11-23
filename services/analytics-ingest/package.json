@@ -1,0 +1,31 @@
+{
+  "name": "@peaket/analytics-ingest",
+  "private": true,
+  "version": "0.0.0",
+  "description": "분석 원본 적재 작업자. 거래·제어·텔레메트리 토픽 열을 읽어 회차별 가명·허용 목록·금지 칸 제거를 거쳐 ClickHouse 브론즈에 싣는다(docs/streaming.md §6, OPS-200·OPS-205)",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "migrate": "node dist/main.js migrate",
+    "backfill": "node dist/main.js backfill",
+    "coverage": "node dist/main.js coverage",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-kms": "3.1159.0",
+    "@peaket/contracts": "workspace:*",
+    "@peaket/platform": "workspace:*",
+    "@prometheus-io/client": "^0.16.1",
+    "fastify": "^5.12.7"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "avsc": "5.7.9",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
