@@ -158,6 +158,8 @@ export const deviceKey = pgTable(
     keyId: bytea('key_id').notNull(),
     /** 압축 P-256 공개키 33바이트 */
     publicKey: bytea('public_key').notNull(),
+    /** 키를 등록한 계정(F-05-2 0018. 양도 뒤 보유자와 다를 수 있어 등록 시점 값을 남긴다) */
+    accountId: uuid('account_id'),
     reason: text('reason').notNull(),
     registeredAt: at('registered_at').notNull(),
     revokedAt: at('revoked_at'),

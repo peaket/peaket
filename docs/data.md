@@ -1678,6 +1678,7 @@ erDiagram
         uuid ticket_id FK
         bytea key_id "공개키 SPKI SHA-256 앞 8바이트, QR v1(ADR-0051)"
         bytea public_key "ECDSA P-256"
+        uuid account_id "키를 등록한 계정(F-05-2 0018). 양도 뒤 보유자와 다를 수 있어 등록 시점 값을 남긴다. 옛 행은 지금 보유자로 채웠고 비어 있을 수 있다"
         text reason "ISSUE|REISSUE|TRANSFER|BOOTH(ADR-0050)"
         timestamptz registered_at
         timestamptz revoked_at

@@ -22,3 +22,8 @@ CREATE TABLE IF NOT EXISTS ticket_return (
   returned_at timestamptz NOT NULL,
   PRIMARY KEY (account_id, idempotency_key)
 );
+
+-- 기기 키를 등록한 계정(F-05-2 연결 시험이 key 등록자를 확인한다). 양도 뒤에는 보유자와 다를 수 있어 등록 시점 값을 남긴다.
+-- 옛 행은 지금 보유자로 채운다(등록 시점 값을 알 수 없다). nullable이라 옛 코드·옛 행과도 맞는다.
+ALTER TABLE device_key ADD COLUMN IF NOT EXISTS account_id uuid;
+UPDATE device_key dk SET account_id = t.account_id FROM ticket t WHERE dk.ticket_id = t.id AND dk.account_id IS NULL;

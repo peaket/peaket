@@ -52,6 +52,8 @@ function problem(e: unknown): never {
         throw new ProblemError({ type: 'entry-started', status: 409, title: '입장이 시작되어 할 수 없습니다' });
       case 'TRANSFER_CLOSED':
         throw new ProblemError({ type: 'transfer-closed', status: 409, title: '양도 마감(공연 시작 2시간 전)이 지났습니다' });
+      case 'SELF_TRANSFER':
+        throw new ProblemError({ type: 'self-transfer', status: 422, title: '자신에게는 양도할 수 없습니다' });
       case 'REOFFER':
         throw new ProblemError({ type: 'reoffer-not-allowed', status: 409, title: '받은 티켓은 다시 양도할 수 없습니다. 결제자에게 돌려주세요' });
       case 'TRANSFER_PENDING':

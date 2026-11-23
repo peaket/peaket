@@ -65,6 +65,7 @@ export type TransferErrorCode =
   | 'ENTRY_RECORDED'
   | 'INVALID_INPUT'
   | 'INVALID_QUERY'
+  | 'SELF_TRANSFER'
   | 'RECIPIENT_NOT_FOUND'
   | 'TOO_MANY_REQUESTS'
   | 'IDEMPOTENCY_KEY_REUSED'
@@ -370,6 +371,8 @@ function errorOfCreate(r: CreateOfferRejection): TransferErrorCode {
   switch (r) {
     case 'NOT_HOLDER':
       return 'NOT_FOUND';
+    case 'SELF_TRANSFER':
+      return 'SELF_TRANSFER';
     case 'REOFFER':
       return 'REOFFER';
     case 'ENTRY_STARTED':

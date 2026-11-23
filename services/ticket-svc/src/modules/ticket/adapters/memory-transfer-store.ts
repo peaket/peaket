@@ -95,7 +95,7 @@ export class MemoryTransferStore implements TransferStore {
     const t = this.o.tickets.tickets.get(offer.ticketId);
     if (!t) return { kind: 'REJECTED', reason: 'NOT_HOLDER' };
     const lock = this.#activeLockRow(t.eventId, t.payerAccountId, nowMs);
-    const reason = createOfferRejectionOf(snapshotOf(t), { callerAccountId: offer.fromAccountId, nowMs, lockActive: lock !== undefined });
+    const reason = createOfferRejectionOf(snapshotOf(t), { callerAccountId: offer.fromAccountId, recipientAccountId: offer.toAccountId, nowMs, lockActive: lock !== undefined });
     if (reason) return { kind: 'REJECTED', reason };
     this.offers.set(offer.offerId, offer);
     this.#put({ ...t, status: 'TRANSFER_PENDING', transferPending: true, version: t.version + 1 });
@@ -113,7 +113,7 @@ export class MemoryTransferStore implements TransferStore {
   async listOffers(input: ListTransfersInput): Promise<ListTransfersResult> {
     const wanted = input.statuses.length === 0 ? undefined : new Set<TransferStatus>(input.statuses);
     const rows = [...this.offers.values()]
-      .filter((o) => o.toAccountId === input.recipientAccountId && (wanted === undefined || wanted.has(o.status)))
+      .filter((o) => o.toAccountId === input.recipientAccountId && o.fromAccountId !== o.toAccountId && (wanted === undefined || wanted.has(o.status)))
       .sort((a, b) => b.createdAtMs - a.createdAtMs || b.offerId.localeCompare(a.offerId))
       .map((o): TransferOfferListRow => ({ ...o, eventId: this.o.tickets.tickets.get(o.ticketId)?.eventId ?? '' }))
       .filter((o) => o.eventId !== '');
