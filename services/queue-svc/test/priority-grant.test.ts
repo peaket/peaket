@@ -69,7 +69,7 @@ describe('우선 구매 권리 사본 [GAT-135]', () => {
       { ...i, accountId: '' },
       { ...i, eventId: 'x'.repeat(65) },
       { ...i, grantId: 'not-a-uuid' },
-      { ...i, state: 'USED' as unknown as 'OFFERED' },
+      { ...i, state: 'FAN' as unknown as 'OFFERED' },
       { ...i, expiresAtMs: 0 },
       { ...i, expiresAtMs: 1.5 },
       { ...i, version: -1 },
@@ -168,6 +168,36 @@ describe('우선 구매 입장 [GAT-135, Q-T62]', () => {
     await set.run(expiring);
     clock.advance(2_000);
     await expect(confirm(expiring.grantId)).rejects.toMatchObject({ code: 'PRIORITY_GRANT_NOT_FOUND' });
+  });
+
+  test('Q-T62 ⑤ USED 사본은 404이고, USED 권리의 주문 409는 create-order 시험이 본다', async () => {
+    const i = offered({ state: 'USED' });
+    expect(await set.run(i)).toEqual({ changed: true });
+    expect(await grants.get(i)).toMatchObject({ grantId: i.grantId, state: 'USED', version: 1 });
+    await expect(confirm(i.grantId)).rejects.toMatchObject({ code: 'PRIORITY_GRANT_NOT_FOUND' });
+  });
+
+  test('Q-T62 ⑥ EXPIRED 사본과 TTL 뒤 404', async () => {
+    const i = offered({ state: 'EXPIRED' });
+    expect(await set.run(i)).toEqual({ changed: true });
+    expect((await grants.get(i))?.state).toBe('EXPIRED');
+    await expect(confirm(i.grantId)).rejects.toMatchObject({ code: 'PRIORITY_GRANT_NOT_FOUND' });
+
+    const ttl = offered({ grantId: randomUUID() });
+    await set.run(ttl);
+    clock.advance(48 * HOUR);
+    await expect(confirm(ttl.grantId)).rejects.toMatchObject({ code: 'PRIORITY_GRANT_NOT_FOUND' });
+  });
+
+  test('Q-T62 ⑦ 낮은 판은 무시하고 USED를 지킨다', async () => {
+    const i = offered();
+    expect(await set.run(i)).toEqual({ changed: true });
+    expect(await set.run({ ...i, state: 'USED', version: 2 })).toEqual({ changed: true });
+    expect((await grants.get(i))?.state).toBe('USED');
+    // 늦게 도착한 낮은 판(대조 작업의 옛 호출)이 USED를 되돌리면 안 된다
+    expect(await set.run({ ...i, state: 'OFFERED', version: 1 })).toEqual({ changed: false });
+    expect((await grants.get(i))?.state).toBe('USED');
+    await expect(confirm(i.grantId)).rejects.toMatchObject({ code: 'PRIORITY_GRANT_NOT_FOUND' });
   });
 
   test('다른 권리 ID로 같은 계정·회차 사본을 부르면 404다', async () => {

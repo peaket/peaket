@@ -73,6 +73,17 @@ describe('PriorityGrantService [GAT-135]', () => {
     expect((await memory.get({ accountId: ACCOUNT, eventId: r.event_id, grantId: r.grant_id }))?.state).toBe('WITHDRAWN');
   });
 
+  test('Q-T62 ⑤⑥⑦ USED·EXPIRED 상태를 받고, 늦은 OFFERED 낮은 판은 USED를 되돌리지 않는다', async () => {
+    const r = request();
+    expect(await call(r)).toEqual({ changed: true });
+    expect(await call({ ...r, state: 'PRIORITY_GRANT_STATE_USED', version: 2 })).toEqual({ changed: true });
+    expect(await memory.get({ accountId: ACCOUNT, eventId: r.event_id, grantId: r.grant_id })).toMatchObject({ state: 'USED', version: 2 });
+    expect(await call({ ...r, state: 'PRIORITY_GRANT_STATE_OFFERED', version: 1 })).toEqual({ changed: false });
+    expect((await memory.get({ accountId: ACCOUNT, eventId: r.event_id, grantId: r.grant_id }))?.state).toBe('USED');
+    expect(await call({ ...r, state: 'PRIORITY_GRANT_STATE_EXPIRED', version: 3 })).toEqual({ changed: true });
+    expect((await memory.get({ accountId: ACCOUNT, eventId: r.event_id, grantId: r.grant_id }))?.state).toBe('EXPIRED');
+  });
+
   test('모르는 상태·틀린 권리 ID는 INVALID_ARGUMENT이고, 저장소 장애는 UNAVAILABLE이다', async () => {
     expect(await statusOf(call(request({ state: 'PRIORITY_GRANT_STATE_UNSPECIFIED' })))).toBe(grpc.status.INVALID_ARGUMENT);
     expect(await statusOf(call(request({ grant_id: 'not-a-uuid' })))).toBe(grpc.status.INVALID_ARGUMENT);

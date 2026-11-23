@@ -76,6 +76,28 @@ describe('우선 구매 입장 HTTP [GAT-135, Q-T62]', () => {
     expect((await admit(eventId, {})).statusCode).toBe(400);
   });
 
+  test('Q-T62 ⑤⑥ 내부 HTTP로 USED·EXPIRED 사본을 받고, 그 권리로 입장하면 404이며 낮은 판은 되돌리지 않는다', async () => {
+    const eventId = newEvent();
+    await schedules.set(eventId, openSchedule(NOW));
+    const grantId = crypto.randomUUID();
+    const exp = new Date(NOW + 48 * 3600_000).toISOString();
+    const send = (state: string, version: number) =>
+      svc.http.inject({
+        method: 'POST',
+        url: '/internal/v1/priority-grants',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({ accountId: ACCOUNT, eventId, grantId, state, expiresAt: exp, version }),
+      });
+    expect((await send('OFFERED', 1)).statusCode).toBe(200);
+    expect((await admit(eventId, { priorityGrantId: grantId })).statusCode).toBe(200);
+    expect((await send('USED', 2)).statusCode).toBe(200);
+    expect((await admit(eventId, { priorityGrantId: grantId })).statusCode).toBe(404);
+    expect(JSON.parse((await send('OFFERED', 1)).payload)).toEqual({ changed: false });
+    expect(await grants.get({ accountId: ACCOUNT, eventId, grantId })).toMatchObject({ state: 'USED', version: 2 });
+    expect((await send('EXPIRED', 3)).statusCode).toBe(200);
+    expect((await admit(eventId, { priorityGrantId: grantId })).statusCode).toBe(404);
+  });
+
   test('내부 HTTP POST /internal/v1/priority-grants는 SetPriorityGrant 사본을 판 번호·만료와 함께 쓴다', async () => {
     const eventId = crypto.randomUUID();
     await schedules.set(eventId, openSchedule(NOW));

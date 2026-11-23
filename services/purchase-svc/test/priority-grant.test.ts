@@ -3,7 +3,7 @@ import { fakeClock } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { MemorySeatMap } from '../src/modules/inventory/adapters/memory-seat-map.js';
 import { MemorySeatStore } from '../src/modules/inventory/adapters/memory-seat-store.js';
-import { GrantPriorityPurchase, MemoryPriorityGrantStore, SeatMapPriorityCandidates, WithdrawPriorityGrant } from '../src/modules/priority/index.js';
+import { GrantPriorityPurchase, MemoryPriorityGrantStore, priorityGrantUsable, SeatMapPriorityCandidates, WithdrawPriorityGrant, type PriorityGrant } from '../src/modules/priority/index.js';
 
 const NOW = Date.parse('2026-11-14T08:00:00.000Z');
 const DAY = 86_400_000;
@@ -291,5 +291,52 @@ describe('GrantPriorityPurchase', () => {
     const grant = new GrantPriorityPurchase({ grants: failing, cancelled: { find: async () => ({ eventId: EVENT, accountId: ACCOUNT, orderId: '01900000-0000-7000-8000-000000000005', seatId: 'A01', tierId: TIER, price: 110_000 }) }, seats, candidates: new SeatMapPriorityCandidates(f.map), seatMap: f.map, clock: f.clock, logger: { grantFailed: (i) => void failed.push(i.reason) } });
     await expect(grant.run(input())).rejects.toThrow('db down');
     expect(failed).toEqual(['release-failed:Error']);
+  });
+});
+
+describe('F-05-3 회수·만료 뒤 권리 상태 [GAT-135, S-T37]', () => {
+  test('S-T37 ⑬ 회수 DB 실패와 다시 보내기', async () => {
+    const f = fixture();
+    await f.store.openSale({ eventId: EVENT, seatCount: SEATS.length, keepUntilMs: NOW + 10 * DAY });
+    const r = await f.grant.run(input());
+    const grantId = r.grant!.grantId;
+    // 첫 회수는 보류를 푼 뒤 DB 쓰기에서 실패한다(권리는 OFFERED 그대로)
+    const real = f.grants.withdraw.bind(f.grants);
+    let fail = true;
+    f.grants.withdraw = async (id, actedBy, nowMs) => {
+      if (fail) {
+        fail = false;
+        throw new Error('db down');
+      }
+      return real(id, actedBy, nowMs);
+    };
+    await expect(f.withdraw.run(grantId, 'operator-9')).rejects.toThrow('db down');
+    expect((await f.grants.find(grantId))?.status).toBe('OFFERED');
+
+    // 다시 보내면 이미 풀린 PRIORITY 보류는 NOT_FOUND로 건너뛰고 DB를 WITHDRAWN으로 바꾼다
+    const w = await f.withdraw.run(grantId, 'operator-9');
+    expect(w).toMatchObject({ status: 'WITHDRAWN', withdrawnBy: 'operator-9' });
+  });
+
+  test('S-T37 ⑭ USED 권리와 기한이 지난 OFFERED 권리는 주문에 쓸 수 없다', () => {
+    const base: PriorityGrant = {
+      grantId: '01900000-0000-7000-8000-0000000000a1',
+      eventId: EVENT,
+      accountId: ACCOUNT,
+      fraudCaseId: CASE,
+      cancelledTicketId: TICKET,
+      grantKind: 'SAME_SEAT',
+      seatId: SEATS[0].seatId,
+      tierId: TIER,
+      price: 110_000,
+      status: 'OFFERED',
+      expiresAtMs: NOW + DAY,
+      version: 2,
+      createdAtMs: NOW - DAY,
+      updatedAtMs: NOW,
+    };
+    expect(priorityGrantUsable({ ...base, status: 'USED' }, NOW)).toBe(false);
+    expect(priorityGrantUsable({ ...base, status: 'OFFERED', expiresAtMs: NOW }, NOW)).toBe(false);
+    expect(priorityGrantUsable({ ...base, status: 'OFFERED', expiresAtMs: NOW + 1, activeOrderId: undefined }, NOW)).toBe(true);
   });
 });
