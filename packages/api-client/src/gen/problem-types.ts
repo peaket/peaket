@@ -19,6 +19,7 @@ export type ProblemType =
   | 'already-verified'
   | 'already-waiting'
   | 'anchor-unavailable'
+  | 'approval-conflict'
   | 'approval-reason-required'
   | 'approval-role-required'
   | 'approval-scope-invalid'
@@ -341,7 +342,9 @@ export type ProblemType =
   | 'seq-not-in-checkpoint'
   | 'server-busy'
   | 'session-not-found'
+  | 'settlement-adjustment-already-applied'
   | 'settlement-commission-rate-invalid'
+  | 'settlement-dependency-unavailable'
   | 'settlement-dispute-window-closed'
   | 'settlement-not-disputable'
   | 'signup-already-completed'
@@ -400,6 +403,7 @@ export const PROBLEM_TYPES = {
   'already-verified': { status: 409, title: "이미 본인확인을 마친 계정입니다" },
   'already-waiting': { status: 409, title: "이미 다른 곳에서 대기 중입니다" },
   'anchor-unavailable': { status: 503, title: "외부 앵커를 지금 쓸 수 없습니다" },
+  'approval-conflict': { status: 409, title: "다른 사람이 먼저 처리했습니다" },
   'approval-reason-required': { status: 422, title: "승인 사유를 적어 주세요" },
   'approval-role-required': { status: 403, title: "commander만 승인할 수 있습니다" },
   'approval-scope-invalid': { status: 422, title: "요청 범위 밖의 대상입니다" },
@@ -722,7 +726,9 @@ export const PROBLEM_TYPES = {
   'seq-not-in-checkpoint': { status: 422, title: "그 체크포인트가 덮지 않는 기록입니다" },
   'server-busy': { status: 429, title: "요청이 많아 잠시 처리하지 못했습니다" },
   'session-not-found': { status: 404, title: "로그인한 기기가 아니거나 이미 로그아웃했습니다" },
+  'settlement-adjustment-already-applied': { status: 409, title: "조정이 이미 적용되어 반려할 수 없습니다" },
   'settlement-commission-rate-invalid': { status: 422, title: "수수료율이 맞지 않습니다" },
+  'settlement-dependency-unavailable': { status: 503, title: "정산 서비스에 연결하지 못했습니다" },
   'settlement-dispute-window-closed': { status: 409, title: "이의 기간이 끝났습니다" },
   'settlement-not-disputable': { status: 409, title: "지금은 이의를 낼 수 없는 정산서입니다" },
   'signup-already-completed': { status: 409, title: "이미 가입을 마친 계정입니다" },
