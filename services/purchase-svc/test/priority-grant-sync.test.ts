@@ -135,7 +135,9 @@ describe('F-05-3 우선 구매 권리 대조 [GAT-135, S-T37]', () => {
     expect(copies.calls).toHaveLength(0);
 
     await sync.runOnce();
-    expect(copies.calls).toEqual([{ grantId: row.grantId, state: 'WITHDRAWN', version: 2, expiresAtMs: row.expiresAtMs }]);
+    expect(copies.calls).toEqual([
+      { accountId: row.accountId, eventId: row.eventId, grantId: row.grantId, state: 'WITHDRAWN', version: 2, expiresAtMs: row.expiresAtMs },
+    ]);
     expect(signals).toContain('sync:ok');
   });
 
