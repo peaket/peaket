@@ -1297,3 +1297,16 @@ test('O-T37 ① gw-scanner scanner-api CORS는 스캐너 PWA 출처 하나, Allo
     for (const h of ['date', 'www-authenticate']) assert.ok(expose.includes(h), `${r.metadata?.name}: Expose-Headers에 ${h}`);
   }
 });
+
+test('O-T29 ⑤ gw-scanner는 PUT /v1/scanner/queue-reports/{eventId}를 기기 인증 경로(이름표 optional, ticket-svc)로 보내고 토큰 경로로 보내지 않는다 [ASVS v5.0.0-3.5.1]', () => {
+  requireDefinitions();
+  // 정본 offline-gate §7.3 '큐 비움 보고': 기기 인증만으로도 된다(역할 유효 끝 뒤에는 스태프 토큰이 만료된다). 계획 docs/review/plans/F-05-6.md §5
+  const path = '/v1/scanner/queue-reports/0190f3a1-7c2e-7a00-8000-0000000f0691';
+  const hit = routeFor('gw-scanner', 'scanner-api.peaket.example', 'PUT', path);
+  assert.ok(hit, `PUT ${path}를 받는 라우트가 없다`);
+  assert.equal(hit.route.metadata?.labels?.['peaket.io/auth'], 'optional', `PUT ${path}: 이름표`);
+  assert.deepEqual(backendNames(hit.rule), ['ticket-svc'], `PUT ${path}: 백엔드`);
+  // 스캔 올리기와 같은 라우트다(같은 출처·JSON 확인을 받는 기기 인증 경로)
+  const scans = routeFor('gw-scanner', 'scanner-api.peaket.example', 'POST', '/v1/scanner/scans');
+  assert.equal(hit.route.metadata?.name, scans?.route.metadata?.name, '스캔 올리기와 같은 라우트');
+});
