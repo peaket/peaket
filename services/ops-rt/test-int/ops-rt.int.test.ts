@@ -207,7 +207,7 @@ test('F-04-1 ST-T3·ST-T4 늦은 사건은 제 1초 칸에 들어가고, ClickHo
   await new Promise((r) => setTimeout(r, 30_000));
   ch.unpause();
   await until(async () => (await cumulative())['funnel_first_hold'] === 500, '멈춘 동안 보낸 500건', 120_000);
-  expect((await cumulative())['funnel_first_hold:S']).toBe(500);
+  expect((await cumulative())['funnel_first_hold_tier:S']).toBe(500);
   await kill(w);
 }, 300_000);
 
