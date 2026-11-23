@@ -181,10 +181,12 @@ export function createOfferRejectionOf(
   t: TransferTicketSnapshot,
   o: { readonly callerAccountId: string; readonly recipientAccountId?: string; readonly nowMs: number; readonly lockActive: boolean },
 ): CreateOfferRejection | undefined {
-  // 자기 양도는 받는 사람 참조가 자기 계정이어도 막는다(수락이 자기 키를 폐기하고 ISSUE 첫 등록으로 재인증·24시간 통제를 우회하는 길)
-  if (o.recipientAccountId !== undefined && o.recipientAccountId === o.callerAccountId) return 'SELF_TRANSFER';
+  // 보유자·결제자 검사가 먼저다. 비보유자가 자기에게 보내는 요청도 남의 표를 남에게 보내는 요청과 같은 404여야
+  // 티켓 ID를 아는 사람이 422/404로 표 존재를 가르지 않는다(authz-matrix §4.1·§5.2).
   if (t.accountId !== o.callerAccountId) return t.payerAccountId === o.callerAccountId ? 'REOFFER' : 'NOT_HOLDER';
   if (t.payerAccountId !== o.callerAccountId) return 'REOFFER';
+  // 자기 양도는 받는 사람 참조가 자기 계정이어도 막는다(수락이 자기 키를 폐기하고 ISSUE 첫 등록으로 재인증·24시간 통제를 우회하는 길)
+  if (o.recipientAccountId !== undefined && o.recipientAccountId === o.callerAccountId) return 'SELF_TRANSFER';
   if (ENDED_STATUSES.has(t.status)) return 'ALREADY_ENDED';
   if (!beforeEntryStart(t.eventStartsAtMs, o.nowMs)) return 'ENTRY_STARTED';
   const close = marketCloseAtMs(t.eventStartsAtMs);
