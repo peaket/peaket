@@ -1273,7 +1273,7 @@ erDiagram
         text hold_reason "KYC|ACCOUNT_CHANGE|BALANCE|ACCOUNT_MISMATCH|SALE_SUSPENDED. ACCOUNT_MISMATCH는 포트원 파트너 정산 계좌가 PEAKET 기록과 다름(ADR-0108). SALE_SUSPENDED는 그 회차의 공연이 판매 중지됨(ADR-0123)"
         timestamptz dispute_due_at "통지 뒤 2영업일"
         date payout_date "회차 정산서는 회차 종료 뒤 5영업일, 상품 정산서는 계산일 뒤 4영업일"
-        uuid payout_batch_id FK "이 정산서를 지급하는 묶음(payout_batch.id, nullable). 승인 시점에 묶고 실행은 이 목록만 지급한다(0017)"
+        uuid payout_batch_id FK "이 정산서를 지급하는 묶음(payout_batch.id, nullable). 승인 시점에 묶고 실행은 이 목록만 지급한다(0017). 묶여도 상태는 CONFIRMED이고 SCHEDULED는 결제사 접수 때다. 묶였는지는 이 칸으로 가른다(2026-11-23, ADR-0369 결정 14)"
     }
     settlement_statement_audit {
         uuid id PK
@@ -1402,6 +1402,11 @@ erDiagram
         bigint diff_amount "observed − expected"
         text severity "NONE|CASE|SEV3(0이 아니면 CASE, 1만 원 [가정] 넘으면 SEV3)"
         timestamptz created_at
+    }
+    settlement_webhook_receipt {
+        text transmission_id PK "토스 전송 ID(payment 0026). 기록·로그용"
+        text event_id UK "본문 eventId. 중복 제거는 이 칸으로 한다(전송 ID는 보낼 때마다 새로 나온다, 토스 공개 문서 확인 2026-11-23, payment 0029, ADR-0369 결정 14)"
+        timestamptz received_at
     }
     seller_kyc {
         uuid promoter_id PK "payment-svc가 두는 판매자 KYC 상태(원천은 사업자·대표자 확인)"
