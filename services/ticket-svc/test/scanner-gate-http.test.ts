@@ -130,13 +130,15 @@ afterAll(async () => {
 const get = (path: string, session = SESSION) => headers('GET', path, session).then((h) => svc.http.inject({ method: 'GET', url: path, headers: h }));
 const post = async (path: string, body: unknown, session = SESSION) => {
   const h = await headers('POST', path, session);
-  return svc.http.inject({ method: 'POST', url: path, headers: { ...h, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+  // 스캔 올리기는 스캐너 PWA 출처만 받는다(offline-gate §6.1 GAT-170 마감 규칙, O-T35)
+  return svc.http.inject({ method: 'POST', url: path, headers: { ...h, origin: 'https://scanner.peaket.example', 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 };
 const postDeviceOnly = async (path: string, body: unknown) => {
   const h = {
     dpop: await proofOf('POST', path),
     'x-forwarded-proto': 'https',
     'x-forwarded-host': HOST,
+    origin: 'https://scanner.peaket.example',
     'content-type': 'application/json',
   };
   return svc.http.inject({ method: 'POST', url: path, headers: h, payload: JSON.stringify(body) });

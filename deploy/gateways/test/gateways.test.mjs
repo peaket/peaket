@@ -1279,3 +1279,21 @@ test('S-T28 ① R057-1 gw-fan-responses에 상태 403·응답 머리 Access-Cont
   assert.ok(lua.length > 0 && lua.every((x) => x.corsOrigin === WWW), 'gw-fan-buy corsOrigin');
   assert.deepEqual(named('SecurityPolicy', 'gw-fan-buy-security')?.spec?.cors?.allowOrigins, [WWW], 'gw-fan-buy-security cors.allowOrigins');
 });
+
+test('O-T37 ① gw-scanner scanner-api CORS는 스캐너 PWA 출처 하나, Allow-Credentials 없음, Authorization·DPoP·Content-Type 허용, Date·WWW-Authenticate 노출이다', () => {
+  requireDefinitions();
+  const routes = routesOnHost('gw-scanner', 'scanner-api.peaket.example');
+  assert.ok(routes.length > 0, 'scanner-api 호스트 라우트가 없다');
+  for (const r of routes) {
+    const cs = corsFor(r);
+    assert.equal(cs.length, 1, `${r.metadata?.name}: CORS 설정 하나`);
+    const c = cs[0];
+    assert.deepEqual((c.allowOrigins ?? []).map(matcherText), ['https://scanner.peaket.example'], `${r.metadata?.name}: allowOrigins`);
+    // 사전 요청과 본 요청 모두 자격 증명 없이 끝난다(credentials: 'omit', offline-gate §6.1 기기 키 + DPoP)
+    assert.notEqual(c.allowCredentials, true, `${r.metadata?.name}: 스캐너 API에 Allow-Credentials`);
+    const allow = (c.allowHeaders ?? []).map(lc);
+    for (const h of ['authorization', 'dpop', 'content-type']) assert.ok(allow.includes(h), `${r.metadata?.name}: Allow-Headers에 ${h}`);
+    const expose = (c.exposeHeaders ?? []).map(lc);
+    for (const h of ['date', 'www-authenticate']) assert.ok(expose.includes(h), `${r.metadata?.name}: Expose-Headers에 ${h}`);
+  }
+});

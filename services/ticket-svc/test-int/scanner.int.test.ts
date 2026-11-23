@@ -1,6 +1,7 @@
 // ticket-svc 스캐너 기기 원장 실제 PostgreSQL·Valkey 통합 시험(BUILD_ORDER GAT-170, R-537).
 // 0001_scanner_device.sql 적용·재적용, Drizzle 원장, 등록 코드 GETDEL, DPoP jti SET NX PX,
-// 공개 기기 등록(DPoP jkt), 관제 기기 경로, platform ScannerGuard + identity CheckScannerSession을 한 번에 본다.
+// 공개 기기 등록(DPoP jkt), 기기 원장 쓰임새, platform ScannerGuard + identity CheckScannerSession을 한 번에 본다.
+// 관제 기기 HTTP 경로는 ops-svc만 받는다(offline-gate §6.1 'GAT-170 마감 규칙', W7-WIR-02): 기기 만들기·목록·폐기는 응용 층(ScannerDevices)으로 한다.
 import 'reflect-metadata';
 import { Controller, Get, Module } from '@nestjs/common';
 import {
@@ -47,7 +48,6 @@ const TOKEN = 'staff-access-token';
 const ATH = athOf(TOKEN);
 
 const quiet = () => new Writable({ write: (_c, _e, cb) => cb() });
-const opsHeaders = { 'x-user-id': ADMIN, 'x-session-id': randomUUID(), 'x-user-aud': 'ops', 'x-user-scope': '' };
 
 @Controller('v1/scanner-test')
 class ScannerProbeController {
@@ -165,8 +165,6 @@ afterAll(async () => {
   pg?.stop();
 });
 
-const postOps = (url: string, body: unknown) => ticketSvc.http.inject({ method: 'POST', url, headers: { ...opsHeaders, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
-const getOps = (url: string) => ticketSvc.http.inject({ method: 'GET', url, headers: opsHeaders });
 const pttl = async (key: string) => Number(await redis.command(['PTTL', key], { key }));
 
 describe('스캐너 기기 원장 PostgreSQL·Valkey [GAT-170]', () => {
@@ -218,7 +216,11 @@ describe('스캐너 기기 원장 PostgreSQL·Valkey [GAT-170]', () => {
     const ttl = await pttl(key);
     expect(ttl).toBeGreaterThan(0);
     expect(ttl).toBeLessThanOrEqual(600_000);
-    expect(await codes.take(hash)).toBe(r.device.deviceId);
+    // take는 기기 ID와 처음 만료 시각(남은 수명으로 만든 값)을 준다(O-T42 ⑤, 계획 F-05-5 §5)
+    const took = await codes.take(hash);
+    expect(took?.deviceId).toBe(r.device.deviceId);
+    expect(took!.expiresAtMs - Date.now()).toBeGreaterThan(0);
+    expect(took!.expiresAtMs - Date.now()).toBeLessThanOrEqual(ttl);
     expect(await codes.take(hash)).toBeUndefined();
     expect(await pttl(key)).toBe(-2);
   });
@@ -234,10 +236,9 @@ describe('스캐너 기기 원장 PostgreSQL·Valkey [GAT-170]', () => {
     expect(ttl).toBeLessThanOrEqual(600_000);
   });
 
-  test('관제 등록 → 공개 DPoP 등록 → 목록 → 폐기 흐름이 실제 DB·Redis에 남고, 쓴 코드와 폐기 기기는 410이다', async () => {
-    const created = await postOps('/v1/ops/scanner-devices', { name: '동문-06', promoterId: PROMOTER });
-    expect(created.statusCode).toBe(201);
-    const body = JSON.parse(created.payload) as { deviceId: string; status: string; enrollmentCode: string; enrollmentCodeExpiresAt: string };
+  test('기기 만들기 → 공개 DPoP 등록 → 목록 → 폐기 흐름이 실제 DB·Redis에 남고, 쓴 코드와 폐기 기기는 410이다', async () => {
+    const reg = await devices.register({ name: '동문-06', promoterId: PROMOTER, enrolledBy: ADMIN });
+    const body = { ...reg.device, enrollmentCode: reg.enrollmentCode, enrollmentCodeExpiresAt: reg.enrollmentCodeExpiresAt };
     expect(body).toMatchObject({ status: 'ACTIVE', credentialType: 'DEVICE_KEY' });
     expect(Date.parse(body.enrollmentCodeExpiresAt) - NOW).toBe(600_000);
 
@@ -245,7 +246,7 @@ describe('스캐너 기기 원장 PostgreSQL·Valkey [GAT-170]', () => {
     const enroll = await ticketSvc.http.inject({
       method: 'POST',
       url: '/v1/scanner/device-enrollments',
-      headers: { 'content-type': 'application/json', dpop: await proofOf(key, { htm: 'POST', htu: 'https://scanner.peaket.example/v1/scanner/device-enrollments' }), 'x-forwarded-proto': 'https', 'x-forwarded-host': 'scanner.peaket.example' },
+      headers: { 'content-type': 'application/json', origin: 'https://scanner.peaket.example', dpop: await proofOf(key, { htm: 'POST', htu: 'https://scanner.peaket.example/v1/scanner/device-enrollments' }), 'x-forwarded-proto': 'https', 'x-forwarded-host': 'scanner.peaket.example' },
       payload: JSON.stringify({ code: body.enrollmentCode.toLowerCase().replace(/-/g, ' ') }),
     });
     expect(enroll.statusCode).toBe(201);
@@ -254,31 +255,29 @@ describe('스캐너 기기 원장 PostgreSQL·Valkey [GAT-170]', () => {
     expect(Buffer.from(row.credential_thumbprint).toString('base64url')).toBe(key.jkt);
     expect(row.status).toBe('ACTIVE');
 
-    const list = await getOps('/v1/ops/scanner-devices?limit=100');
-    expect(list.statusCode).toBe(200);
-    expect(JSON.parse(list.payload).items).toEqual(expect.arrayContaining([expect.objectContaining({ deviceId: body.deviceId, status: 'ACTIVE' })]));
+    const list = await devices.list({ limit: 100 });
+    expect(list.items).toEqual(expect.arrayContaining([expect.objectContaining({ deviceId: body.deviceId, status: 'ACTIVE' })]));
 
     const againKey = await keyOf();
     const again = await ticketSvc.http.inject({
       method: 'POST',
       url: '/v1/scanner/device-enrollments',
-      headers: { 'content-type': 'application/json', dpop: await proofOf(againKey, { htm: 'POST', htu: 'https://scanner.peaket.example/v1/scanner/device-enrollments' }), 'x-forwarded-proto': 'https', 'x-forwarded-host': 'scanner.peaket.example' },
+      headers: { 'content-type': 'application/json', origin: 'https://scanner.peaket.example', dpop: await proofOf(againKey, { htm: 'POST', htu: 'https://scanner.peaket.example/v1/scanner/device-enrollments' }), 'x-forwarded-proto': 'https', 'x-forwarded-host': 'scanner.peaket.example' },
       payload: JSON.stringify({ code: body.enrollmentCode }),
     });
     expect(again.statusCode).toBe(410);
 
-    const revoked = await postOps(`/v1/ops/scanner-devices/${body.deviceId}/revocation`, { reason: '분실' });
-    expect(revoked.statusCode).toBe(200);
-    expect(JSON.parse(revoked.payload)).toMatchObject({ deviceId: body.deviceId, status: 'REVOKED' });
+    const revoked = await devices.revoke({ deviceId: body.deviceId, reason: '분실' });
+    expect(revoked.device).toMatchObject({ deviceId: body.deviceId, status: 'REVOKED' });
 
-    const created2 = await postOps('/v1/ops/scanner-devices', { name: '동문-07', promoterId: PROMOTER });
-    const body2 = JSON.parse(created2.payload) as { deviceId: string; enrollmentCode: string };
-    await postOps(`/v1/ops/scanner-devices/${body2.deviceId}/revocation`, { reason: '수리' });
+    const reg2 = await devices.register({ name: '동문-07', promoterId: PROMOTER, enrolledBy: ADMIN });
+    const body2 = { deviceId: reg2.device.deviceId, enrollmentCode: reg2.enrollmentCode };
+    await devices.revoke({ deviceId: body2.deviceId, reason: '수리' });
     const thirdKey = await keyOf();
     const revokedEnroll = await ticketSvc.http.inject({
       method: 'POST',
       url: '/v1/scanner/device-enrollments',
-      headers: { 'content-type': 'application/json', dpop: await proofOf(thirdKey, { htm: 'POST', htu: 'https://scanner.peaket.example/v1/scanner/device-enrollments' }), 'x-forwarded-proto': 'https', 'x-forwarded-host': 'scanner.peaket.example' },
+      headers: { 'content-type': 'application/json', origin: 'https://scanner.peaket.example', dpop: await proofOf(thirdKey, { htm: 'POST', htu: 'https://scanner.peaket.example/v1/scanner/device-enrollments' }), 'x-forwarded-proto': 'https', 'x-forwarded-host': 'scanner.peaket.example' },
       payload: JSON.stringify({ code: body2.enrollmentCode }),
     });
     expect(revokedEnroll.statusCode).toBe(410);

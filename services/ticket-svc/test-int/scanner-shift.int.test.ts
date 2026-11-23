@@ -210,7 +210,7 @@ describe('근무 준비·배치·준비 보고 실제 PostgreSQL [GAT-170]', () 
       service.http.inject({
         method: 'POST',
         url: '/v1/scanner/device-enrollments',
-        headers: { dpop: await proofOf(key, { htm: 'POST', htu: 'https://scanner.peaket.example/v1/scanner/device-enrollments' }), 'x-forwarded-for': '10.7.7.7', 'x-forwarded-proto': 'https', 'x-forwarded-host': 'scanner.peaket.example', 'content-type': 'application/json' },
+        headers: { dpop: await proofOf(key, { htm: 'POST', htu: 'https://scanner.peaket.example/v1/scanner/device-enrollments' }), origin: 'https://scanner.peaket.example', 'x-forwarded-for': '10.7.7.7', 'x-forwarded-proto': 'https', 'x-forwarded-host': 'scanner.peaket.example', 'content-type': 'application/json' },
         payload: JSON.stringify({ code }),
       });
     for (let i = 0; i < 10; i++) expect((await enroll('BCDF-GHJK-LMNP')).statusCode).toBe(410);
@@ -228,7 +228,7 @@ describe('근무 준비·배치·준비 보고 실제 PostgreSQL [GAT-170]', () 
     const r = await service.http.inject({
       method: 'POST',
       url: path,
-      headers: { dpop: await proofOf(d.key, { htm: 'POST', htu: `https://scanner-api.peaket.example${path}` }), 'x-forwarded-proto': 'https', 'x-forwarded-host': 'scanner-api.peaket.example', 'content-type': 'application/json' },
+      headers: { dpop: await proofOf(d.key, { htm: 'POST', htu: `https://scanner-api.peaket.example${path}` }), origin: 'https://scanner.peaket.example', 'x-forwarded-proto': 'https', 'x-forwarded-host': 'scanner-api.peaket.example', 'content-type': 'application/json' },
       payload: JSON.stringify(body),
     });
     expect(r.statusCode).toBe(200);

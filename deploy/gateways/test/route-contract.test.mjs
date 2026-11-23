@@ -30,14 +30,16 @@ const METHODS = ['get', 'post', 'put', 'patch', 'delete'];
 const SERVICES = ['core-svc', 'identity-svc', 'ops-svc', 'payment-svc', 'purchase-svc', 'queue-svc', 'ticket-svc', 'trust-svc'];
 /**
  * 처리기가 두 서비스에 있어도 정본이 받는 쪽을 정한 작업(infra §4.1 '백엔드 대조'). 키는 '메서드 계약 경로'
- * `/v1/ops/scanner-devices*`: ops-svc가 권한·감사 기록 뒤 ticket-svc gRPC를 부른다(ADR-0148 결정 1). ticket-svc 옛 처리기를 지우면 이 줄도 지운다
+ * 지금은 비었다: `/v1/ops/scanner-devices*`의 ticket-svc 옛 처리기를 지워 ops-svc만 받는다(offline-gate §6.1 'GAT-170 마감 규칙', W7-WIR-02, F-05-5)
  */
-const BACKEND_EXCEPTIONS = new Map([
-  ['GET /v1/ops/scanner-devices', 'ops-svc'],
-  ['POST /v1/ops/scanner-devices', 'ops-svc'],
-  ['POST /v1/ops/scanner-devices/{deviceId}/revocation', 'ops-svc'],
-  ['POST /v1/ops/scanner-devices/{deviceId}/enrollment-code', 'ops-svc'],
-]);
+const BACKEND_EXCEPTIONS = new Map();
+/** 관제 스캐너 기기 경로 넷(ops-svc만 받는다, ADR-0148 결정 1) */
+const SCANNER_DEVICE_OPS = [
+  'GET /v1/ops/scanner-devices',
+  'POST /v1/ops/scanner-devices',
+  'POST /v1/ops/scanner-devices/{deviceId}/revocation',
+  'POST /v1/ops/scanner-devices/{deviceId}/enrollment-code',
+];
 const TITLES = { 403: 'Forbidden', 405: 'Method Not Allowed' };
 
 // ---- 읽기 ----
@@ -304,15 +306,17 @@ test("W7-WIR-01 W7-WIR-02 W7-WIR-03 infra §4.1 '백엔드 대조' 처리기가 
   assert.deepEqual(problems, [], '백엔드가 처리기의 서비스와 다르다');
 });
 
-test('W7-WIR-02 처리기가 두 서비스에 있는 작업은 예외 표에 없으면 백엔드 대조가 실패한다(예외 표에서 그 줄을 뺀 사본으로)', () => {
-  for (const key of BACKEND_EXCEPTIONS.keys()) {
-    assert.ok((HANDLER_SERVICES.get(`${key.split(' ')[0]} ${norm(key.split(' ')[1])}`)?.size ?? 0) > 1, `${key}: 예외 표에 있는데 처리기가 두 서비스에 있지 않다(그 줄을 지운다)`);
+test('W7-WIR-02 관제 스캐너 기기 경로 넷의 처리기는 ops-svc에만 있고, 예외 표 없이 생성 라우트 백엔드가 ops-svc다', () => {
+  assert.deepEqual([...BACKEND_EXCEPTIONS.keys()], [], '예외 표가 비어 있지 않다');
+  for (const key of SCANNER_DEVICE_OPS) {
+    const [method, path] = key.split(' ');
+    assert.deepEqual([...(HANDLER_SERVICES.get(`${method} ${norm(path)}`) ?? [])].sort(), ['ops-svc'], `${key}: 처리기가 ops-svc 하나에만 있지 않다`);
+    const hit = opRoute(opByKey(key));
+    assert.ok(hit, `${key}를 받는 라우트가 없다`);
+    assert.deepEqual((hit.rule.backendRefs ?? []).map((b) => b.name), ['ops-svc'], `${key}: 라우트 백엔드`);
   }
-  const without = new Map([...BACKEND_EXCEPTIONS].filter(([k]) => !k.includes('/scanner-devices')));
-  const { problems } = backendProblems(without);
-  for (const key of BACKEND_EXCEPTIONS.keys()) {
-    assert.ok(problems.some((p) => p.startsWith(`${key}:`) && p.includes('예외 표에 없다')), `${key}: 예외 줄을 빼도 대조가 실패하지 않는다 ${JSON.stringify(problems)}`);
-  }
+  const { problems } = backendProblems(BACKEND_EXCEPTIONS);
+  assert.deepEqual(problems.filter((p) => p.includes('/scanner-devices')), [], '관제 스캐너 기기 경로의 백엔드 대조가 실패한다');
 });
 
 test('BAT-045 GET /v1/ops/auth/sessions/me의 백엔드는 ops-svc이고 DELETE는 identity-svc다(라우트 원천 표류 0)', () => {

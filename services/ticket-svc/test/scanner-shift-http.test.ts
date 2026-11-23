@@ -12,6 +12,7 @@ import { MemoryEnrollmentCodeStore } from '../src/modules/scanner/adapters/memor
 import { MemoryScannerDeviceStore } from '../src/modules/scanner/adapters/memory-scanner-device-store.js';
 import { MemoryScannerGateStore } from '../src/modules/scanner/adapters/memory-scanner-gate-store.js';
 import { MemoryScannerShiftStore } from '../src/modules/scanner/adapters/memory-scanner-shift-store.js';
+import { ScannerDeviceInactive, ScannerDevices } from '../src/modules/scanner/application/scanner-devices.js';
 import type { ScannerEventPolicy } from '../src/modules/scanner/domain/ports.js';
 
 const NOW = Date.parse('2026-11-15T00:00:00Z');
@@ -29,6 +30,8 @@ const TICKET = '0190f3a1-7c2e-7a00-8000-00000000000a';
 const SCAN_SESSION = '0190f3a1-7c2e-7a00-8000-00000000000b';
 const TOKEN = 'staff-token';
 const HOST = 'scanner-api.peaket.example';
+/** 스캐너 PWA 출처. 기기 등록·스캔 올리기는 이 Origin만 받는다(offline-gate §6.1 GAT-170 마감 규칙, O-T35) */
+const PWA = 'https://scanner.peaket.example';
 
 class FakeIdentity implements AdminAuthzPort {
   readonly answers = new Map<string, AdminAuthz>();
@@ -80,8 +83,6 @@ async function staffHeaders(key: Key, method: string, path: string): Promise<Rec
     'content-type': 'application/json',
   };
 }
-
-const opsHeaders = { 'x-user-id': ADMIN, 'x-session-id': 'ops-session', 'x-user-aud': 'ops', 'x-user-scope': '', 'content-type': 'application/json' };
 
 beforeAll(async () => {
   identity.answers.set(`${ADMIN}/ops-session`, { valid: true, role: 'operator' });
@@ -170,7 +171,7 @@ describe('근무 준비와 준비 보고 [GAT-170]', () => {
     const r = await svc.http.inject({
       method: 'POST',
       url: path,
-      headers: { dpop: await proofOf(key, 'POST', path), 'x-forwarded-proto': 'https', 'x-forwarded-host': HOST, 'content-type': 'application/json' },
+      headers: { dpop: await proofOf(key, 'POST', path), origin: PWA, 'x-forwarded-proto': 'https', 'x-forwarded-host': HOST, 'content-type': 'application/json' },
       payload: JSON.stringify(body),
     });
     expect(r.statusCode).toBe(200);
@@ -187,7 +188,7 @@ describe('근무 준비와 준비 보고 [GAT-170]', () => {
     const r = await svc.http.inject({
       method: 'POST',
       url: path,
-      headers: { dpop: await proofOf(key, 'POST', path), 'x-forwarded-proto': 'https', 'x-forwarded-host': HOST, 'content-type': 'application/json' },
+      headers: { dpop: await proofOf(key, 'POST', path), origin: PWA, 'x-forwarded-proto': 'https', 'x-forwarded-host': HOST, 'content-type': 'application/json' },
       payload: JSON.stringify(body),
     });
     expect(r.statusCode).toBe(403);
@@ -237,15 +238,16 @@ describe('기기 배치 HTTP [GAT-170]', () => {
 });
 
 describe('등록 코드 재발급과 IP 실패 제한 [GAT-170]', () => {
-  test('operator가 새 코드를 만들고, 폐기 기기는 409다', async () => {
-    const created = await svc.http.inject({ method: 'POST', url: '/v1/ops/scanner-devices', headers: opsHeaders, payload: JSON.stringify({ name: '동문-09', promoterId: PROMOTER }) });
-    const { deviceId } = JSON.parse(created.payload) as { deviceId: string };
-    const r = await svc.http.inject({ method: 'POST', url: `/v1/ops/scanner-devices/${deviceId}/enrollment-code`, headers: { 'x-user-id': ADMIN, 'x-session-id': 'ops-session', 'x-user-aud': 'ops', 'x-user-scope': '' } });
-    expect(r.statusCode).toBe(201);
-    expect(JSON.parse(r.payload)).toMatchObject({ enrollmentCode: expect.stringMatching(/^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/) });
-    await svc.http.inject({ method: 'POST', url: `/v1/ops/scanner-devices/${deviceId}/revocation`, headers: opsHeaders, payload: JSON.stringify({ reason: '분실' }) });
-    const revoked = await svc.http.inject({ method: 'POST', url: `/v1/ops/scanner-devices/${deviceId}/enrollment-code`, headers: { 'x-user-id': ADMIN, 'x-session-id': 'ops-session', 'x-user-aud': 'ops', 'x-user-scope': '' } });
-    expect(revoked.statusCode).toBe(409);
+  test('새 코드를 만들면 옛 코드는 무효이고, 폐기 기기에는 코드를 만들지 않는다(ScannerDeviceInactive)', async () => {
+    // 관제 HTTP 경로는 ops-svc만 받는다(W7-WIR-02). ops-svc가 gRPC로 부르는 응용 층을 직접 부른다
+    const devices = svc.app.get(ScannerDevices);
+    const created = await devices.register({ name: '동문-09', promoterId: PROMOTER, enrolledBy: ADMIN });
+    const deviceId = created.device.deviceId;
+    const r = await devices.issueCode({ deviceId });
+    expect(r.enrollmentCode).toMatch(/^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/);
+    expect(r.enrollmentCode).not.toBe(created.enrollmentCode);
+    await devices.revoke({ deviceId, reason: '분실' });
+    await expect(devices.issueCode({ deviceId })).rejects.toBeInstanceOf(ScannerDeviceInactive);
   });
 
   test('O-T42 ② 같은 IP의 실패 10회 뒤 11번째는 429다', async () => {
@@ -258,7 +260,7 @@ describe('등록 코드 재발급과 IP 실패 제한 [GAT-170]', () => {
       return svc.http.inject({
         method: 'POST',
         url: '/v1/scanner/device-enrollments',
-        headers: { dpop: proof, 'x-forwarded-for': '10.9.9.9', 'x-forwarded-proto': 'https', 'x-forwarded-host': HOST, 'content-type': 'application/json' },
+        headers: { dpop: proof, origin: PWA, 'x-forwarded-for': '10.9.9.9', 'x-forwarded-proto': 'https', 'x-forwarded-host': HOST, 'content-type': 'application/json' },
         payload: JSON.stringify({ code }),
       });
     };
