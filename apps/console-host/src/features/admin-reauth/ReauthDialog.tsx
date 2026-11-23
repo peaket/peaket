@@ -1,19 +1,29 @@
 'use client';
-// SCR-047 확정 승인 직전의 관제 admin 재인증(CMP-064 admin 모양, d5 §7.8 ④, authz-matrix §6).
+// 관제 admin 재인증(CMP-064 admin 모양). SCR-047·정산 확정 승인(act APPROVAL, d5 §7.8 ④, authz-matrix §6)과
+// SCR-030 운영 명령 접수·승인·다시 시도·되돌리기(act OPS_COMMAND, control-tower §3, F-03-4)가 함께 쓴다. 글은 부르는 쪽이 넘긴다.
 // 비밀번호·TOTP를 확인하고, 서버가 요구하면 브라우저 패스키 창까지 마친 뒤 토큰을 부모에게 한 번 넘긴다.
 // 토큰·비밀번호·인증 코드는 저장하지 않고, 창을 닫거나 성공하면 화면 상태에서도 지운다.
 import { useState } from 'react';
 import { Button } from '@peaket/ds/Button';
 import { Overlay } from '@/shared/ui/Overlay';
-import { requestApprovalReauth, reauthErrorMessage } from './api';
+import { requestApprovalReauth, requestReauth, reauthErrorMessage, type ReauthAct } from './api';
+
+/** 회차 취소 확정 화면(SCR-047)의 기본 글. 다른 화면은 description을 넘긴다 */
+const APPROVAL_DESCRIPTION = '회차 취소 확정은 되돌릴 수 없습니다. 비밀번호와 인증 앱의 6자리 코드를 넣고, 이어서 뜨는 패스키 창에서 확인해 주세요.';
 
 export interface ReauthDialogProps {
   open: boolean;
+  /** 재인증 동작. 기본 APPROVAL(회차 취소·정산) */
+  act?: ReauthAct;
+  /** 제목. 기본 '다시 인증해 주세요' */
+  title?: string;
+  /** 무엇을 위해 다시 인증하는지(부르는 쪽 글) */
+  description?: string;
   onDone: (token: string) => void;
   onClose: () => void;
 }
 
-export function ReauthDialog({ open, onDone, onClose }: ReauthDialogProps) {
+export function ReauthDialog({ open, act = 'APPROVAL', title = '다시 인증해 주세요', description = APPROVAL_DESCRIPTION, onDone, onClose }: ReauthDialogProps) {
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -37,7 +47,7 @@ export function ReauthDialog({ open, onDone, onClose }: ReauthDialogProps) {
     setBusy(true);
     setError(null);
     try {
-      const token = await requestApprovalReauth({ password, code: code.trim() });
+      const token = act === 'APPROVAL' ? await requestApprovalReauth({ password, code: code.trim() }) : await requestReauth({ act, password, code: code.trim() });
       setPassword('');
       setCode('');
       onDone(token);
@@ -53,7 +63,7 @@ export function ReauthDialog({ open, onDone, onClose }: ReauthDialogProps) {
       <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="reauth-h" aria-describedby="reauth-d" style={{ maxWidth: 460 }}>
         <div className="row between" style={{ gap: 8 }}>
           <h2 className="dialog-title" id="reauth-h">
-            다시 인증해 주세요
+            {title}
           </h2>
           <span className="badge badge-primary">
             <i className="ic ic-shield" aria-hidden="true" />
@@ -61,7 +71,7 @@ export function ReauthDialog({ open, onDone, onClose }: ReauthDialogProps) {
           </span>
         </div>
         <p className="t-sm" id="reauth-d">
-          회차 취소 확정은 되돌릴 수 없습니다. 비밀번호와 인증 앱의 6자리 코드를 넣고, 이어서 뜨는 패스키 창에서 확인해 주세요.
+          {description}
         </p>
         <label className="field">
           <span className="label">비밀번호</span>

@@ -1,5 +1,5 @@
 // 관제 admin 재인증(openapi POST /v1/ops/auth/reauthentications, identity §6, ADR-0206, BAT-421).
-// 확정 승인은 비밀번호·TOTP 뒤 패스키까지 확인한 토큰(act APPROVAL, factors에 passkey)만 받는다.
+// 확정 승인(act APPROVAL)과 운영 명령(act OPS_COMMAND, F-03-4)은 비밀번호·TOTP 뒤 패스키까지 확인한 토큰(factors에 passkey)만 받는다.
 // 파트너 재인증(apps/partner/src/shared/api/reauth.ts)의 두 단계·base64url 변환을 그대로 옮겼다. 토큰은 메모리에만 두고 그 요청의 X-Reauth-Token에 한 번 쓴다.
 
 export interface ReauthPasskeyStep {
@@ -137,7 +137,7 @@ export function serializeAssertion(credential: Credential): ReauthCredentialJson
   };
 }
 
-/** APPROVAL 토큰은 factors에 passkey가 있어야 한다(commander 승인, authz-matrix §6) */
+/** 재인증 토큰은 factors에 passkey가 있어야 한다(APPROVAL: commander 승인 authz-matrix §6, OPS_COMMAND: control-tower §3) */
 export function hasPasskeyFactor(factors: readonly string[]): boolean {
   return factors.includes('passkey');
 }
@@ -169,13 +169,16 @@ async function post(body: unknown): Promise<ReauthResponse> {
   return r.data as ReauthResponse;
 }
 
+/** 재인증 동작(openapi OpsReauthPasswordStep act). 운영 명령은 OPS_COMMAND, 회차 취소·정산 확정 승인은 APPROVAL(control-tower §3, ADR-0206) */
+export type ReauthAct = 'OPS_COMMAND' | 'APPROVAL';
+
 /**
  * 비밀번호·TOTP를 확인하고, 서버가 패스키 단계를 주면 브라우저 패스키 창을 띄워 마친다.
  * 사용자가 창을 닫으면 NotAllowedError가 그대로 올라가고 화면은 '다시 인증하지 않았습니다'로 보인다.
- * factors에 passkey가 없는 토큰은 서버가 200으로 줘도 쓰지 않는다.
+ * factors에 passkey가 없는 토큰은 서버가 200으로 줘도 쓰지 않는다(OPS_COMMAND·APPROVAL 모두, control-tower §3 '위험 명령 재인증의 첫 구현').
  */
-export async function requestApprovalReauth(input: { password: string; code: string }): Promise<string> {
-  const first = await post({ act: 'APPROVAL', password: input.password, code: input.code, withPasskey: true });
+export async function requestReauth(input: { act: ReauthAct; password: string; code: string }): Promise<string> {
+  const first = await post({ act: input.act, password: input.password, code: input.code, withPasskey: true });
   if (first.next === 'DONE') {
     if (!hasPasskeyFactor(first.factors)) throw new Error('패스키 확인 없이 발급된 재인증 토큰은 쓸 수 없습니다');
     return first.reauthToken;
@@ -186,4 +189,9 @@ export async function requestApprovalReauth(input: { password: string; code: str
   const second = await post({ reauthStep: first.reauthStep, credential: serializeAssertion(credential) });
   if (second.next !== 'DONE' || !hasPasskeyFactor(second.factors)) throw new Error('패스키 확인 없이 발급된 재인증 토큰은 쓸 수 없습니다');
   return second.reauthToken;
+}
+
+/** 회차 취소·정산 확정 승인의 재인증(act APPROVAL). requestReauth의 얇은 감싸기 */
+export function requestApprovalReauth(input: { password: string; code: string }): Promise<string> {
+  return requestReauth({ act: 'APPROVAL', password: input.password, code: input.code });
 }
