@@ -1263,7 +1263,7 @@
       "title": "창 2 무대: 새 클러스터·관측·v1(TLS 켬, 복제 1·CPU 1·queue-svc만)",
       "estimate_min": 35,
       "stage": "v1-entry",
-      "conditions": "Docker 잠금 두 자리(lock.sh take docker-all lane4-F-08). 새 kind 클러스터, 관측 묶음, v1 무대를 진입 서버 1대·CPU 1·queue-svc만으로(F-08-2 2절 3·6.1). 진입 경로가 queue-svc만 부르는지는 리허설에서 확인했다(구현 메모).",
+      "conditions": "Docker 잠금 두 자리(lock.sh take docker-all lane4-F-08). 새 kind 클러스터, 관측 묶음, v1 무대를 진입 서버 1대·CPU 1·메모리 1GiB·queue-svc만으로(F-08-2 2절 3·6.1. 512Mi는 2026-11-23 리허설에서 queue-svc와 홀드 작업자 두 프로세스가 시작 중 OOM으로 죽었다). 진입 경로가 queue-svc만 부르는지는 리허설에서 확인했다(구현 메모).",
       "commands": [
         {
           "label": "Docker 잠금(두 자리)",
@@ -1311,6 +1311,8 @@
             "1",
             "--cpus",
             "1",
+            "--memory-mi",
+            "1024",
             "--services",
             "queue-svc"
           ]
@@ -1578,6 +1580,8 @@
             "1",
             "--cpus",
             "{podCpus}",
+            "--memory-mi",
+            "1024",
             "--services",
             "queue-svc"
           ]
@@ -1723,6 +1727,8 @@
             "2",
             "--cpus",
             "{podCpus}",
+            "--memory-mi",
+            "1024",
             "--services",
             "queue-svc"
           ]
@@ -1868,6 +1874,8 @@
             "3",
             "--cpus",
             "{podCpus}",
+            "--memory-mi",
+            "1024",
             "--services",
             "queue-svc"
           ]
@@ -2013,6 +2021,8 @@
             "4",
             "--cpus",
             "{podCpus}",
+            "--memory-mi",
+            "1024",
             "--services",
             "queue-svc"
           ]
@@ -2158,6 +2168,8 @@
             "6",
             "--cpus",
             "{podCpus}",
+            "--memory-mi",
+            "1024",
             "--services",
             "queue-svc"
           ]
@@ -2303,6 +2315,8 @@
             "8",
             "--cpus",
             "{podCpus}",
+            "--memory-mi",
+            "1024",
             "--services",
             "queue-svc"
           ]
