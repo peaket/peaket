@@ -1,4 +1,4 @@
-// 실제 월렛 화면(목록·펼침)의 상태를 운영 빌드에서 본다(FIX-wallet-tickets, docs/features/offline-gate.md §11 O-T48 ②③④⑤⑥⑦⑨,
+// 실제 월렛 화면(목록·펼침)의 상태를 운영 빌드에서 본다(FIX-wallet-tickets, docs/features/offline-gate.md §11 O-T52 ②③④⑤⑥⑦⑨,
 // docs/frontend.md §4.2.4 '월렛 목록 세부', docs/design/d5-screen-blueprint.md §5.13 상태 표, 계획 docs/review/plans/FIX-wallet-tickets.md §8.4).
 // 시험 담당(fwal-test-2e9a)이 구현 전에 썼다(ADR-0372). 실행은 ci-web reflow 잡(이 설정의 ' 기본 폭: ' 프로젝트)이다.
 // - 팬 API(https://api.peaket.example, 검사 빌드의 기본 출처)는 브라우저 문맥(context.route)에서 답한다. 화면 상태(빈 목록·오류·상태 섞인 목록·없는 표)를
@@ -113,7 +113,7 @@ test('BAT-177 T6 ⑥ 기본 폭: 실제 월렛 /my/tickets 첫 HTML은 불러오
   expect(html).not.toMatch(/tkt-lumen-/);
 });
 
-test('O-T48 ② 기본 폭: 표가 0장이면 "아직 티켓이 없습니다"와 ( 공연 둘러보기 › )다', async ({ page, context }) => {
+test('O-T52 ② 기본 폭: 표가 0장이면 "아직 티켓이 없습니다"와 ( 공연 둘러보기 › )다', async ({ page, context }) => {
   const calls = await fanApi(context, { tickets: [list([])] });
   await page.goto(`${WEB}/my/tickets`);
   await expect(page.getByText('아직 티켓이 없습니다')).toBeVisible();
@@ -122,7 +122,7 @@ test('O-T48 ② 기본 폭: 표가 0장이면 "아직 티켓이 없습니다"와
   await expect(page.getByRole('button', { name: /이 휴대폰을 입장용으로 등록/ })).toHaveCount(0);
 });
 
-test('O-T48 ③ 기본 폭: 저장된 표가 없고 목록이 503이면 "티켓을 불러오지 못했습니다"와 [ 다시 시도 ]이고 누르면 다시 부른다', async ({ page, context }) => {
+test('O-T52 ③ 기본 폭: 저장된 표가 없고 목록이 503이면 "티켓을 불러오지 못했습니다"와 [ 다시 시도 ]이고 누르면 다시 부른다', async ({ page, context }) => {
   const id = ticketIdV7();
   const calls = await fanApi(context, { tickets: [fail(503), list([item(id)])] });
   await page.goto(`${WEB}/my/tickets`);
@@ -133,7 +133,7 @@ test('O-T48 ③ 기본 폭: 저장된 표가 없고 목록이 503이면 "티켓�
   await expect(registerButton(page, id)).toBeVisible();
 });
 
-test('O-T48 ④ 기본 폭: 저장된 표가 있는데 목록 요청이 끊기면 저장된 표와 마지막 동기화 시각이 든 오프라인 배너를 보인다', async ({ page, context }) => {
+test('O-T52 ④ 기본 폭: 저장된 표가 있는데 목록 요청이 끊기면 저장된 표와 마지막 동기화 시각이 든 오프라인 배너를 보인다', async ({ page, context }) => {
   const id = ticketIdV7();
   await fanApi(context, { tickets: [list([item(id)]), 'abort'] });
   await page.goto(`${WEB}/my/tickets`);
@@ -144,7 +144,7 @@ test('O-T48 ④ 기본 폭: 저장된 표가 있는데 목록 요청이 끊기�
   await expect(page.getByText('티켓을 불러오지 못했습니다')).toHaveCount(0);
 });
 
-test('O-T48 ⑤ 기본 폭: 토큰을 갱신한 뒤에도 401이면 저장된 표를 그리지 않고 로그인 화면으로 간다', async ({ page, context }) => {
+test('O-T52 ⑤ 기본 폭: 토큰을 갱신한 뒤에도 401이면 저장된 표를 그리지 않고 로그인 화면으로 간다', async ({ page, context }) => {
   const id = ticketIdV7();
   const unauthorized = answer(401, { type: 'about:blank', title: 'Unauthorized', status: 401 });
   const calls = await fanApi(context, { tickets: [list([item(id)]), unauthorized], refresh: answer(204, {}) });
@@ -156,7 +156,7 @@ test('O-T48 ⑤ 기본 폭: 토큰을 갱신한 뒤에도 401이면 저장된 �
   await expect(registerButton(page, id)).toHaveCount(0);
 });
 
-test('O-T48 ⑥⑦ 기본 폭: 상태가 섞인 목록에서 ISSUED·ACTIVE 두 장만 입장용 등록 버튼이 있고 나머지는 배지·문장만이며 요약 실패 회차의 표도 보인다', async ({ page, context }) => {
+test('O-T52 ⑥⑦ 기본 폭: 상태가 섞인 목록에서 ISSUED·ACTIVE 두 장만 입장용 등록 버튼이 있고 나머지는 배지·문장만이며 요약 실패 회차의 표도 보인다', async ({ page, context }) => {
   const t = Object.fromEntries(['ISSUED', 'ACTIVE', 'TRANSFER_PENDING', 'CANCEL_REQUESTED', 'REFUNDED', 'FLAGGED', 'VOIDED'].map((s) => [s, ticketIdV7()]));
   const orphan = ticketIdV7();
   const calls = await fanApi(context, {
@@ -180,7 +180,7 @@ test('O-T48 ⑥⑦ 기본 폭: 상태가 섞인 목록에서 ISSUED·ACTIVE 두 
   expect(calls.events.filter((e) => e === LIVE)).toHaveLength(1);
 });
 
-test('O-T48 ⑨ 기본 폭: 펼침 주소의 티켓 ID가 목록에 없으면 "티켓을 찾을 수 없습니다"와 ( 마이 티켓 › )다', async ({ page, context }) => {
+test('O-T52 ⑨ 기본 폭: 펼침 주소의 티켓 ID가 목록에 없으면 "티켓을 찾을 수 없습니다"와 ( 마이 티켓 › )다', async ({ page, context }) => {
   const mine = ticketIdV7();
   await fanApi(context, { tickets: [list([item(mine)])] });
   const res = await page.goto(`${WEB}/my/tickets/${ticketIdV7()}`);
@@ -196,7 +196,7 @@ test('O-T48 ⑨ 기본 폭: 펼침 주소의 티켓 ID가 목록에 없으면 "�
   await expect(page.getByText('티켓을 찾을 수 없습니다')).toHaveCount(0);
 });
 
-test('O-T48 ⑥ 기본 폭: ISSUED 표의 [이 휴대폰을 입장용으로 등록] → 등록 201이면 그 티켓 ID가 대체 글에 든 회전 QR이 보인다(TR-04)', async ({ page, context }) => {
+test('O-T52 ⑥ 기본 폭: ISSUED 표의 [이 휴대폰을 입장용으로 등록] → 등록 201이면 그 티켓 ID가 대체 글에 든 회전 QR이 보인다(TR-04)', async ({ page, context }) => {
   const id = ticketIdV7();
   await fanApi(context, { tickets: [list([item(id, 'ISSUED')])] });
   const api = new URL(FAN_API_ORIGIN).origin;

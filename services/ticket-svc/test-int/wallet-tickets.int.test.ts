@@ -1,4 +1,4 @@
-// 월렛 목록 GET /v1/tickets 실제 PostgreSQL 통합 시험(FIX-wallet-tickets, docs/features/offline-gate.md §2 '월렛 목록 서버'·§11 O-T47).
+// 월렛 목록 GET /v1/tickets 실제 PostgreSQL 통합 시험(FIX-wallet-tickets, docs/features/offline-gate.md §2 '월렛 목록 서버'·§11 O-T51).
 // 시험 담당(fwal-test-2e9a)이 구현 전에 썼다(ADR-0372). 시험 조립이 아니라 시작 파일 start()를 실제 PostgreSQL 18로 띄우고(start.ts가 목록 처리기를
 // 싣는지까지 본다, 계획 13절 '시작 파일 조립') 그 HTTP 포트로 부른다. 표는 같은 DB에 붙은 DrizzleTicketStore·DrizzleTransferStore 쓰임새로 만든다.
 // - 실행마다 계정·회차를 새로 만든다(공유 DB에서 앞 시험의 표와 섞이지 않게, TA-V09).
@@ -122,8 +122,8 @@ async function transferTo(ticketId: string, from: string, to: string): Promise<v
   expect((await transfers.accept({ offerId, accountId: to, nowMs: clock.now() })).kind).toBe('OK');
 }
 
-describe('월렛 목록 PostgreSQL [O-T47]', () => {
-  test('O-T47 ① A 세션은 A가 보유한 표만 최신 발권순으로 받고 B의 표는 없다 [ASVS v5.0.0-8.2.2]', async () => {
+describe('월렛 목록 PostgreSQL [O-T51]', () => {
+  test('O-T51 ① A 세션은 A가 보유한 표만 최신 발권순으로 받고 B의 표는 없다 [ASVS v5.0.0-8.2.2]', async () => {
     const [a, b, event] = [randomUUID(), randomUUID(), randomUUID()];
     const a1 = await issue(a, event);
     const b1 = await issue(b, event);
@@ -137,7 +137,7 @@ describe('월렛 목록 PostgreSQL [O-T47]', () => {
     expect(ids(await list(b))).toEqual(orderIds(b1));
   });
 
-  test('O-T47 ② FWAL-ORDER ① limit 2로 5장(같은 발권 시각 두 장 포함)을 2·2·1로 겹침 없이 받고 마지막만 nextCursor가 null이다', async () => {
+  test('O-T51 ② FWAL-ORDER ① limit 2로 5장(같은 발권 시각 두 장 포함)을 2·2·1로 겹침 없이 받고 마지막만 nextCursor가 null이다', async () => {
     const [a, event] = [randomUUID(), randomUUID()];
     const first = await issue(a, event);
     const pair = await issue(a, event, 2);
@@ -156,7 +156,7 @@ describe('월렛 목록 PostgreSQL [O-T47]', () => {
     expect(pages.map((p) => p.body.nextCursor === null)).toEqual([false, false, true]);
   });
 
-  test('O-T47 ③ limit 0·101은 400, 풀리지 않는 커서는 400 invalid-query, B의 표 자리 커서는 A의 표만 준다', async () => {
+  test('O-T51 ③ limit 0·101은 400, 풀리지 않는 커서는 400 invalid-query, B의 표 자리 커서는 A의 표만 준다', async () => {
     const [a, b, event] = [randomUUID(), randomUUID(), randomUUID()];
     const a1 = await issue(a, event);
     await issue(b, event);
@@ -176,7 +176,7 @@ describe('월렛 목록 PostgreSQL [O-T47]', () => {
     expect(ids(p)).toEqual([...orderIds(a2), ...orderIds(a1)]);
   });
 
-  test('O-T47 ④ 예매 취소(환급)한 표와 발권 막기(무효)한 표가 그 상태로 목록에 남는다', async () => {
+  test('O-T51 ④ 예매 취소(환급)한 표와 발권 막기(무효)한 표가 그 상태로 목록에 남는다', async () => {
     const [a, event] = [randomUUID(), randomUUID()];
     const refunded = await issue(a, event);
     const voided = await issue(a, event);
@@ -192,7 +192,7 @@ describe('월렛 목록 PostgreSQL [O-T47]', () => {
     ]);
   });
 
-  test('O-T47 ⑤ 항목은 계약 칸만이고 구역·회차 시작은 ticket 데이터 값이다 [ASVS v5.0.0-15.3.1]', async () => {
+  test('O-T51 ⑤ 항목은 계약 칸만이고 구역·회차 시작은 ticket 데이터 값이다 [ASVS v5.0.0-15.3.1]', async () => {
     const [a, event] = [randomUUID(), randomUUID()];
     const plain = await issue(a, event);
     const zoned = await issue(a, event);
@@ -218,7 +218,7 @@ describe('월렛 목록 PostgreSQL [O-T47]', () => {
     expect(p.raw.includes('PEAKET1:')).toBe(false);
   });
 
-  test('O-T47 ⑦ 양도 수락 뒤 그 표는 B의 목록에만 있고 받은 표에는 receivedFromNickname 칸이 없다', async () => {
+  test('O-T51 ⑦ 양도 수락 뒤 그 표는 B의 목록에만 있고 받은 표에는 receivedFromNickname 칸이 없다', async () => {
     const [a, b, event] = [randomUUID(), randomUUID(), randomUUID()];
     const kept = await issue(a, event);
     const given = await issue(a, event);
@@ -230,7 +230,7 @@ describe('월렛 목록 PostgreSQL [O-T47]', () => {
     expect('receivedFromNickname' in pb.body.items![0]!).toBe(false);
   });
 
-  test('O-T47 ⑧ 실제 서버의 200·400 모두 private, no-store이고 기록 줄에 티켓 키·PEAKET1 값이 없다 [ASVS v5.0.0-14.2.2] [ASVS v5.0.0-14.3.2] [ASVS v5.0.0-16.2.5]', async () => {
+  test('O-T51 ⑧ 실제 서버의 200·400 모두 private, no-store이고 기록 줄에 티켓 키·PEAKET1 값이 없다 [ASVS v5.0.0-14.2.2] [ASVS v5.0.0-14.3.2] [ASVS v5.0.0-16.2.5]', async () => {
     const [a, event] = [randomUUID(), randomUUID()];
     const r = await issue(a, event, 2);
     const ok = await list(a, '?limit=1');

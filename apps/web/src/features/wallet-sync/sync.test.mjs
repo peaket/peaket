@@ -1,5 +1,5 @@
-// 월렛 목록 받기·저장 맞추기·화면 상태 시험(FIX-wallet-tickets, O-T48 ①~⑤·⑦·⑧·⑩).
-// 정본: docs/frontend.md §4.2.4 '월렛 목록 세부'(받기·표시 값·저장·화면 상태), docs/features/offline-gate.md §11 O-T48, docs/design/d5-screen-blueprint.md §5.13,
+// 월렛 목록 받기·저장 맞추기·화면 상태 시험(FIX-wallet-tickets, O-T52 ①~⑤·⑦·⑧·⑩).
+// 정본: docs/frontend.md §4.2.4 '월렛 목록 세부'(받기·표시 값·저장·화면 상태), docs/features/offline-gate.md §11 O-T52, docs/design/d5-screen-blueprint.md §5.13,
 // openapi listTickets·getEvent(EventPublicSummary). 계획 docs/review/plans/FIX-wallet-tickets.md §8.3 모양 그대로다. 시험 담당(fwal-test-2e9a)이 구현 전에 썼다.
 // - 바꿔 끼우는 것은 팬 API 경계(globalThis.fetch)와 IndexedDB(fake-indexeddb)뿐이다. 받기(sync.ts)·저장소(store.ts)·회차 요약 읽기(entities/event-summary)는 진짜다.
 // - 가짜 서버의 목록 응답은 계약 Zod(ListTicketsResponse)를 지나는 모양으로만 만든다(모양이 틀린 응답을 일부러 내는 시험만 예외).
@@ -126,7 +126,7 @@ async function seedStored() {
   return ids;
 }
 
-test('O-T48 ① 커서를 그대로 실어 limit 100으로 세 쪽을 받고 모두 저장한 뒤 lastSyncAt을 쓴다', async () => {
+test('O-T52 ① 커서를 그대로 실어 limit 100으로 세 쪽을 받고 모두 저장한 뒤 lastSyncAt을 쓴다', async () => {
   const ids = [nextTicket(), nextTicket(), nextTicket(), nextTicket()];
   const c1 = 'WzE3OTU2NTEyMDAwMDAsImEiXQ';
   const c2 = 'WzE3OTU2NTExMDAwMDAsImIiXQ';
@@ -157,7 +157,7 @@ test('O-T48 ① 커서를 그대로 실어 limit 100으로 세 쪽을 받고 모
   assert.equal(await loadLastSyncedAt(), NOW);
 });
 
-test('O-T48 ① 팬 API 주소가 없는 빌드는 부르지 않고 unavailable이며 저장된 표로 그린다', async () => {
+test('O-T52 ① 팬 API 주소가 없는 빌드는 부르지 않고 unavailable이며 저장된 표로 그린다', async () => {
   const ids = await seedStored();
   ORIGINS.api = '';
   const calls = fakeFanApi();
@@ -168,7 +168,7 @@ test('O-T48 ① 팬 API 주소가 없는 빌드는 부르지 않고 unavailable�
   assert.equal(walletScreenOf({ stored: 2, sync: r }).screen, 'list');
 });
 
-test('O-T48 ② 표가 0장이면 ok·0장이고 화면은 빈 화면이며 지난 동기화의 표도 지운다', async () => {
+test('O-T52 ② 표가 0장이면 ok·0장이고 화면은 빈 화면이며 지난 동기화의 표도 지운다', async () => {
   await seedStored();
   const calls = fakeFanApi({ tickets: [page([])] });
   const r = await syncWallet();
@@ -178,7 +178,7 @@ test('O-T48 ② 표가 0장이면 ok·0장이고 화면은 빈 화면이며 지�
   assert.deepEqual(walletScreenOf({ stored: 0, sync: r }), { screen: 'empty', offline: false });
 });
 
-test('O-T48 ③ 저장된 표가 없는데 끊김·시간 초과·5xx·정의 밖 상태·모양이 틀린 200이면 실패이고 화면은 불러오지 못함이다(ticket-svc 503 포함)', async () => {
+test('O-T52 ③ 저장된 표가 없는데 끊김·시간 초과·5xx·정의 밖 상태·모양이 틀린 200이면 실패이고 화면은 불러오지 못함이다(ticket-svc 503 포함)', async () => {
   for (const [label, r, reason] of [
     ['연결 끊김', reply.disconnect, 'network'],
     ['시간 초과', reply.timeout, 'network'],
@@ -205,7 +205,7 @@ test('O-T48 ③ 저장된 표가 없는데 끊김·시간 초과·5xx·정의 �
   }
 });
 
-test('O-T48 ③ [다시 시도]로 다시 부르면 새 요청을 보내고 성공하면 표가 생긴다', async () => {
+test('O-T52 ③ [다시 시도]로 다시 부르면 새 요청을 보내고 성공하면 표가 생긴다', async () => {
   const id = nextTicket();
   const calls = fakeFanApi({ tickets: [reply.status(503, 'dependency-unavailable'), page([item(id)])], events: okEvents(E1) });
   assert.deepEqual(await syncWallet(), { kind: 'failed', reason: 'server' });
@@ -216,7 +216,7 @@ test('O-T48 ③ [다시 시도]로 다시 부르면 새 요청을 보내고 성�
   assert.equal(walletScreenOf({ stored: 1, sync: again }).screen, 'list');
 });
 
-test('O-T48 ④ 저장된 표가 있는데 목록 요청이 끊기면 저장소를 그대로 두고 저장된 표와 오프라인 배너를 보인다', async () => {
+test('O-T52 ④ 저장된 표가 있는데 목록 요청이 끊기면 저장소를 그대로 두고 저장된 표와 오프라인 배너를 보인다', async () => {
   const ids = await seedStored();
   const before = await loadLastSyncedAt();
   mock.timers.setTime(NOW + 60_000);
@@ -236,7 +236,7 @@ test('O-T48 ④ 저장된 표가 있는데 목록 요청이 끊기면 저장소�
   }
 });
 
-test('O-T48 ④ 저장된 표가 있는데 첫 쪽은 200이고 둘째 쪽이 끊김·503·401이면 받은 만큼 맞추지 않고 저장소·lastSyncAt을 그대로 둔다(TR-03)', async () => {
+test('O-T52 ④ 저장된 표가 있는데 첫 쪽은 200이고 둘째 쪽이 끊김·503·401이면 받은 만큼 맞추지 않고 저장소·lastSyncAt을 그대로 둔다(TR-03)', async () => {
   const ids = await seedStored();
   const before = await loadLastSyncedAt();
   mock.timers.setTime(NOW + 90_000);
@@ -256,7 +256,7 @@ test('O-T48 ④ 저장된 표가 있는데 첫 쪽은 200이고 둘째 쪽이 �
   }
 });
 
-test('O-T48 ③ 시간 한도: 목록 응답이 오지 않으면 읽기 한도 10초 뒤 network 실패이고 그 전에는 끝나지 않는다(TR-07)', async () => {
+test('O-T52 ③ 시간 한도: 목록 응답이 오지 않으면 읽기 한도 10초 뒤 network 실패이고 그 전에는 끝나지 않는다(TR-07)', async () => {
   mock.timers.reset();
   mock.timers.enable({ apis: ['Date', 'setTimeout'], now: NOW });
   let asked = 0;
@@ -282,7 +282,7 @@ test('O-T48 ③ 시간 한도: 목록 응답이 오지 않으면 읽기 한도 1
   assert.deepEqual(await storedIds(), []);
 });
 
-test('O-T48 ⑤ 토큰을 한 번 갱신한 뒤에도 401이면 needs-login이고 화면은 저장된 표 대신 로그인이다', async () => {
+test('O-T52 ⑤ 토큰을 한 번 갱신한 뒤에도 401이면 needs-login이고 화면은 저장된 표 대신 로그인이다', async () => {
   const ids = await seedStored();
   for (const [label, refresh, tickets] of [
     ['갱신 성공 뒤 다시 401', [reply.refreshed], [reply.unauthorized, reply.unauthorized]],
@@ -299,7 +299,7 @@ test('O-T48 ⑤ 토큰을 한 번 갱신한 뒤에도 401이면 needs-login이�
   }
 });
 
-test('O-T48 ⑤ 대조: 401 → 토큰 갱신 성공 → 200이면 끝까지 받는다(첫 401만으로 로그인으로 보내지 않는다)', async () => {
+test('O-T52 ⑤ 대조: 401 → 토큰 갱신 성공 → 200이면 끝까지 받는다(첫 401만으로 로그인으로 보내지 않는다)', async () => {
   const id = nextTicket();
   const calls = fakeFanApi({ tickets: [reply.unauthorized, page([item(id)])], refresh: [reply.refreshed], events: okEvents(E1) });
   assert.deepEqual(await syncWallet(), { kind: 'ok', count: 1 });
@@ -308,7 +308,7 @@ test('O-T48 ⑤ 대조: 401 → 토큰 갱신 성공 → 200이면 끝까지 받
   assert.deepEqual(await storedIds(), [id]);
 });
 
-test('O-T48 ⑦ 회차 요약은 회차마다 한 번이고 404·410·실패 회차의 표도 남는다', async () => {
+test('O-T52 ⑦ 회차 요약은 회차마다 한 번이고 404·410·실패 회차의 표도 남는다', async () => {
   const t = { e1a: nextTicket(), e1b: nextTicket(), e2: nextTicket(), e3: nextTicket(), e4: nextTicket(), e1c: nextTicket() };
   const calls = fakeFanApi({
     tickets: [
@@ -344,7 +344,7 @@ test('O-T48 ⑦ 회차 요약은 회차마다 한 번이고 404·410·실패 회
   }
 });
 
-test('O-T48 ⑧ 목록에서 빠진 표의 표시 값은 지우고 그 표의 기기 키는 남긴다', async () => {
+test('O-T52 ⑧ 목록에서 빠진 표의 표시 값은 지우고 그 표의 기기 키는 남긴다', async () => {
   const [kept, gone] = await seedStored();
   const key = await generateDeviceKey();
   await saveDeviceKey({ ticketId: gone, keyId: key.keyIdText, privateKey: key.privateKey, publicKeyJwk: key.publicKeyJwk, createdAt: NOW, reason: 'ISSUE', registration: 'REGISTERED' });
@@ -363,7 +363,7 @@ test('O-T48 ⑧ 목록에서 빠진 표의 표시 값은 지우고 그 표의 �
   assert.equal(await loadLastSyncedAt(), NOW + 120_000);
 });
 
-test('O-T48 ⑩ 서버가 앞 쪽과 같은 커서를 다시 주면 더 부르지 않고 cursor-loop 실패이며 저장소를 바꾸지 않는다', async () => {
+test('O-T52 ⑩ 서버가 앞 쪽과 같은 커서를 다시 주면 더 부르지 않고 cursor-loop 실패이며 저장소를 바꾸지 않는다', async () => {
   // 저장된 표가 없을 때: 불러오지 못함
   const loop = 'WzE3OTU2NTEyMDAwMDAsImQiXQ';
   let calls = fakeFanApi({ tickets: [page([item(nextTicket())], loop), page([item(nextTicket())], loop), page([item(nextTicket())], null)], events: okEvents(E1) });
@@ -383,7 +383,7 @@ test('O-T48 ⑩ 서버가 앞 쪽과 같은 커서를 다시 주면 더 부르�
   assert.deepEqual(walletScreenOf({ stored: ids.length, sync: got }), { screen: 'list', offline: true });
 });
 
-test('O-T48 ②③④⑤ 화면 상태 표: 받는 중·0장·실패·저장 있음·401(walletScreenOf)', () => {
+test('O-T52 ②③④⑤ 화면 상태 표: 받는 중·0장·실패·저장 있음·401(walletScreenOf)', () => {
   const cases = [
     [{ stored: 0, sync: 'pending' }, { screen: 'loading', offline: false }],
     [{ stored: 3, sync: 'pending' }, { screen: 'list', offline: false }],

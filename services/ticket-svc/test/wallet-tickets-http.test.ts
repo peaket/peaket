@@ -1,4 +1,4 @@
-// 월렛 목록 HTTP 시험(FIX-wallet-tickets, docs/features/offline-gate.md §2 '월렛 목록 서버'·§11 O-T47, openapi listTickets, docs/api/guidelines.md §3).
+// 월렛 목록 HTTP 시험(FIX-wallet-tickets, docs/features/offline-gate.md §2 '월렛 목록 서버'·§11 O-T51, openapi listTickets, docs/api/guidelines.md §3).
 // 시험 담당(fwal-test-2e9a)이 구현 전에 썼다(ADR-0372). 계획 docs/review/plans/FIX-wallet-tickets.md §8.1·§8.2 모양 그대로다.
 // - 진짜: 처리기·TicketService·플랫폼 계약 검사. 바꿔 끼운 것은 저장소 포트(MemoryTicketStore·MemoryTransferStore, 포트를 implements한 짝 가짜)와 시계(fakeClock)뿐이다.
 //   같은 동작을 실제 PostgreSQL로 덮는 시험은 test-int/wallet-tickets.int.test.ts다.
@@ -171,8 +171,8 @@ async function allPages(get: (q?: string, w?: Who) => Promise<Page>, limit: numb
   throw new Error('nextCursor가 10쪽이 지나도 null이 되지 않았다');
 }
 
-describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
-  test('O-T47 ① A 세션은 A가 보유한 표만 최신 발권순으로 받고 B의 표는 없다 [ASVS v5.0.0-8.2.2]', async () => {
+describe('월렛 목록 GET /v1/tickets [O-T51]', () => {
+  test('O-T51 ① A 세션은 A가 보유한 표만 최신 발권순으로 받고 B의 표는 없다 [ASVS v5.0.0-8.2.2]', async () => {
     const h = await harness();
     const a1 = await h.issue(A);
     const b1 = await h.issue(B);
@@ -204,7 +204,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     expect(pages.map(idsOf)).toEqual(expected.map((id) => [id]));
   });
 
-  test('O-T47 ② limit 2로 5장을 2·2·1로 겹침 없이 받고 마지막만 nextCursor가 null이다', async () => {
+  test('O-T51 ② limit 2로 5장을 2·2·1로 겹침 없이 받고 마지막만 nextCursor가 null이다', async () => {
     const h = await harness();
     const issued: string[][] = [];
     for (let i = 0; i < 5; i += 1) issued.push(orderTicketIds(await h.issue(A)));
@@ -219,7 +219,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     for (const p of pages.slice(0, 2)) expect(String(p.body.nextCursor).length, '빈 글 커서').toBeGreaterThan(0);
   });
 
-  test('O-T47 ② 경계: 정확히 4장을 limit 2로 받으면 2·2이고 둘째 쪽에서 nextCursor가 null이다(빈 셋째 쪽 없음)', async () => {
+  test('O-T51 ② 경계: 정확히 4장을 limit 2로 받으면 2·2이고 둘째 쪽에서 nextCursor가 null이다(빈 셋째 쪽 없음)', async () => {
     const h = await harness();
     const expected: string[] = [];
     for (let i = 0; i < 4; i += 1) expected.unshift(...orderTicketIds(await h.issue(A)));
@@ -229,7 +229,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     expect(pages[1]!.body.nextCursor).toBeNull();
   });
 
-  test('O-T47 ② 경계: 표가 0장이면 빈 목록과 nextCursor null이다', async () => {
+  test('O-T51 ② 경계: 표가 0장이면 빈 목록과 nextCursor null이다', async () => {
     const h = await harness();
     await h.issue(B);
     const p = await h.get('?limit=100');
@@ -237,7 +237,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     expect(p.body).toEqual({ items: [], nextCursor: null });
   });
 
-  test('O-T47 ③ limit을 빼면 20장 [가정]까지, limit 1·100은 된다', async () => {
+  test('O-T51 ③ limit을 빼면 20장 [가정]까지, limit 1·100은 된다', async () => {
     const h = await harness();
     const expected: string[] = [];
     for (let i = 0; i < 21; i += 1) expected.unshift(...orderTicketIds(await h.issue(A)));
@@ -258,7 +258,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     expect(hundred.body.nextCursor).toBeNull();
   });
 
-  test('O-T47 ③ limit 0·101·정수 아님·같은 쿼리 두 번은 400이다(101을 100으로 잘라 받지 않는다)', async () => {
+  test('O-T51 ③ limit 0·101·정수 아님·같은 쿼리 두 번은 400이다(101을 100으로 잘라 받지 않는다)', async () => {
     const h = await harness();
     await h.issue(A);
     for (const q of ['?limit=0', '?limit=101', '?limit=-1', '?limit=2.5', '?limit=abc', '?limit=2&limit=3']) {
@@ -268,7 +268,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     }
   });
 
-  test('O-T47 ③ 풀리지 않는 커서는 처음 쪽으로 보지 않고 400 invalid-query다', async () => {
+  test('O-T51 ③ 풀리지 않는 커서는 처음 쪽으로 보지 않고 400 invalid-query다', async () => {
     const h = await harness();
     await h.issue(A);
     await h.issue(A);
@@ -289,7 +289,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     }
   });
 
-  test('O-T47 ③ B의 표 자리로 만든 커서를 A 세션에 넣으면 그 자리보다 오래된 A의 표만 온다 [ASVS v5.0.0-8.2.2]', async () => {
+  test('O-T51 ③ B의 표 자리로 만든 커서를 A 세션에 넣으면 그 자리보다 오래된 A의 표만 온다 [ASVS v5.0.0-8.2.2]', async () => {
     const h = await harness();
     const a1 = await h.issue(A);
     const b1 = await h.issue(B);
@@ -307,7 +307,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     for (const id of orderTicketIds(b1)) expect(p.raw.includes(id), `B의 표 ${id}가 A 목록에 있다`).toBe(false);
   });
 
-  test('O-T47 ④ 환급·무효 표가 그 상태로 목록에 남는다', async () => {
+  test('O-T51 ④ 환급·무효 표가 그 상태로 목록에 남는다', async () => {
     const h = await harness();
     const refunded = await h.issue(A);
     const voided = await h.issue(A);
@@ -331,7 +331,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     });
   });
 
-  test('O-T47 ④ 취소 접수·확인 중·양도 요청 중 표도 그 상태로 남는다(ISSUED·ACTIVE만 거르지 않는다)', async () => {
+  test('O-T51 ④ 취소 접수·확인 중·양도 요청 중 표도 그 상태로 남는다(ISSUED·ACTIVE만 거르지 않는다)', async () => {
     const h = await harness();
     const cancelReq = await h.issue(A);
     const flagged = await h.issue(A);
@@ -354,7 +354,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     expect(idsOf(await h.get('', { account: B }))).toEqual([]);
   });
 
-  test('O-T47 ⑤ 항목은 계약 칸만이고 주문·좌석·계정 ID·PEAKET1 포인터·티켓 키가 없다 [ASVS v5.0.0-15.3.1]', async () => {
+  test('O-T51 ⑤ 항목은 계약 칸만이고 주문·좌석·계정 ID·PEAKET1 포인터·티켓 키가 없다 [ASVS v5.0.0-15.3.1]', async () => {
     const h = await harness();
     const withStart = await h.issue(A);
     const noStart = await h.issue(A, { startsAtMs: null });
@@ -404,7 +404,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     }
   });
 
-  test('O-T47 ⑤ 받은 표는 receivedFromNickname 칸이 없고 부정 예매 양도 잠금이 걸린 표는 transferLocked가 true다', async () => {
+  test('O-T51 ⑤ 받은 표는 receivedFromNickname 칸이 없고 부정 예매 양도 잠금이 걸린 표는 transferLocked가 true다', async () => {
     const h = await harness();
     const given = await h.issue(A);
     const offerId = randomUUID();
@@ -432,9 +432,9 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     expect(mine[0]!.receivedFromNickname).toBeNull();
   });
 
-  // 팬이 아닌 신원의 상태 값: O-T47 ⑥ 판정 칸은 403이지만 docs/security/authz-matrix.md 200행('다른 대상의 토큰은 역할과 상관없이 401')과
+  // 팬이 아닌 신원의 상태 값: O-T51 ⑥ 판정 칸은 403이지만 docs/security/authz-matrix.md 200행('다른 대상의 토큰은 역할과 상관없이 401')과
   // 플랫폼 공용 가드(대상이 다르면 신원을 인정하지 않는다)는 401이다. 정본끼리 어긋나 이 시험은 authz-matrix를 따른다(계획 10절 '시험이 기댄 모양' 1)
-  test('O-T47 ⑥ 세션 없으면 401, 팬이 아닌 신원(partner·ops·scanner)도 표 없이 401, 쿼리 accountId는 무시한다', async () => {
+  test('O-T51 ⑥ 세션 없으면 401, 팬이 아닌 신원(partner·ops·scanner)도 표 없이 401, 쿼리 accountId는 무시한다', async () => {
     const h = await harness();
     const a = await h.issue(A);
     await h.issue(B);
@@ -452,7 +452,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     expect(idsOf(p)).toEqual(orderTicketIds(a));
   });
 
-  test('O-T47 ⑦ 양도 수락 뒤 그 표는 B의 목록에만 있다(결제자 칸이 아니라 보유자 칸으로 거른다)', async () => {
+  test('O-T51 ⑦ 양도 수락 뒤 그 표는 B의 목록에만 있다(결제자 칸이 아니라 보유자 칸으로 거른다)', async () => {
     const h = await harness();
     const kept = await h.issue(A);
     const given = await h.issue(A);
@@ -463,7 +463,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     expect(idsOf(await h.get('', { account: B }))).toEqual(orderTicketIds(given));
   });
 
-  test('O-T47 ⑧ 200·400 모두 private, no-store이고 기록 줄에 티켓 키·PEAKET1 값·응답 본문이 없다 [ASVS v5.0.0-14.2.2] [ASVS v5.0.0-14.3.2] [ASVS v5.0.0-16.2.5]', async () => {
+  test('O-T51 ⑧ 200·400 모두 private, no-store이고 기록 줄에 티켓 키·PEAKET1 값·응답 본문이 없다 [ASVS v5.0.0-14.2.2] [ASVS v5.0.0-14.3.2] [ASVS v5.0.0-16.2.5]', async () => {
     const h = await harness();
     const issued = [await h.issue(A, { seats: 2 }), await h.issue(A)];
     const ok = await h.get('?limit=2');
@@ -500,7 +500,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
   });
 
   // TR-08: 401은 처리기 앞 플랫폼 가드가 낸다. 처리기 쪽 머리(인터셉터)로는 달리지 않을 수 있어 따로 둔다(구현이 못 달면 '시험 이의', 계획 10절)
-  test('O-T47 ⑧ 오류 응답 401(세션 없음·팬이 아닌 신원)도 private, no-store다 [ASVS v5.0.0-14.3.2]', async () => {
+  test('O-T51 ⑧ 오류 응답 401(세션 없음·팬이 아닌 신원)도 private, no-store다 [ASVS v5.0.0-14.3.2]', async () => {
     const h = await harness();
     await h.issue(A);
     for (const who of [{ account: '', session: '', aud: '' }, { aud: 'partner' }] as const) {
@@ -510,7 +510,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     }
   });
 
-  test('O-T47 장애: 저장소 목록 읽기가 실패하면 500·private, no-store이고 내부 글·표를 싣지 않는다', async () => {
+  test('O-T51 장애: 저장소 목록 읽기가 실패하면 500·private, no-store이고 내부 글·표를 싣지 않는다', async () => {
     const h = await harness({ store: new BrokenListStore() });
     await h.issue(A);
     const p = await h.get('');
@@ -522,7 +522,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
   });
 });
 
-describe('월렛 목록 쓰임새 [O-T47]', () => {
+describe('월렛 목록 쓰임새 [O-T51]', () => {
   test('FWAL-GRPC ① 풀리지 않는 커서는 TicketService.list가 TicketInputError로 거절한다(gRPC ListTickets의 INVALID_ARGUMENT 자리)', async () => {
     const tickets = new TicketService({ store: new MemoryTicketStore(), clock: fakeClock({ now: NOW }) });
     await expect(tickets.list({ accountId: A, cursor: '%%%', limit: 10 })).rejects.toBeInstanceOf(TicketInputError);

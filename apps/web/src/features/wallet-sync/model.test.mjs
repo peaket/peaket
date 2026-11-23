@@ -1,5 +1,5 @@
-// 월렛 상태별 카드와 QR 자리 시험(FIX-wallet-tickets, O-T48 ⑥, B15·B16).
-// 정본: docs/frontend.md §4.2.4 '월렛 목록 세부' 상태별 카드, §3.7 QR v1, docs/planning/03-policies-glossary.md §2.5, docs/features/offline-gate.md §11 O-T48 ⑥.
+// 월렛 상태별 카드와 QR 자리 시험(FIX-wallet-tickets, O-T52 ⑥, B15·B16).
+// 정본: docs/frontend.md §4.2.4 '월렛 목록 세부' 상태별 카드, §3.7 QR v1, docs/planning/03-policies-glossary.md §2.5, docs/features/offline-gate.md §11 O-T52 ⑥.
 // 계획 docs/review/plans/FIX-wallet-tickets.md §8.3(WalletCard·WalletBadge·qrLabel) 모양 그대로다. 시험 담당(fwal-test-2e9a)이 구현 전에 썼다.
 // - 카드는 진짜 받기(syncWallet)가 저장한 스냅샷으로 만든다(스냅샷 칸 이름에 기대지 않는다). 바꿔 끼우는 것은 팬 API(globalThis.fetch)와 fake-indexeddb뿐이다.
 // - 회전 QR은 기기 키 등록(진짜 enrollment.ts)과 QR v1 프레임(진짜 frame.ts)으로 만들고, 시각은 Date 가짜 시계다.
@@ -90,7 +90,7 @@ afterEach(() => {
 
 const qrLabelHead = (ticketId) => `입장 QR, 티켓 ${ticketId}, 15초마다 바뀝니다`;
 
-test('O-T48 ⑥ ISSUED·ACTIVE만 QR 자리이고 나머지 다섯은 배지·문장만이다(받은 표·지난 공연 포함)', async () => {
+test('O-T52 ⑥ ISSUED·ACTIVE만 QR 자리이고 나머지 다섯은 배지·문장만이다(받은 표·지난 공연 포함)', async () => {
   const t = {
     issued: nextTicket(),
     active: nextTicket(),
@@ -147,7 +147,7 @@ test('O-T48 ⑥ ISSUED·ACTIVE만 QR 자리이고 나머지 다섯은 배지·�
   assert.equal(cards.filter((c) => c.showQr).length, 3);
 });
 
-test('O-T48 ⑥ 지난 공연 판정의 경계: 공연 종료 시각 직전은 사용 가능, 지나면 지난 공연이다', async () => {
+test('O-T52 ⑥ 지난 공연 판정의 경계: 공연 종료 시각 직전은 사용 가능, 지나면 지난 공연이다', async () => {
   const id = nextTicket();
   fakeFanApi([item(id, { status: 'ACTIVE', eventId: PAST, startsAtMs: NOW - 2 * DAY })]);
   assert.deepEqual(await syncWallet(), { kind: 'ok', count: 1 });
@@ -158,7 +158,7 @@ test('O-T48 ⑥ 지난 공연 판정의 경계: 공연 종료 시각 직전은 �
   assert.deepEqual({ badge: after.badge, showQr: after.showQr }, { badge: '지난 공연', showQr: false }, '종료 1ms 뒤');
 });
 
-test('O-T48 ⑥ walletCardOf는 저장된 스냅샷 하나를 같은 카드로 만든다(loadWalletCards와 같다)', async () => {
+test('O-T52 ⑥ walletCardOf는 저장된 스냅샷 하나를 같은 카드로 만든다(loadWalletCards와 같다)', async () => {
   const ids = [nextTicket(), nextTicket()];
   fakeFanApi([item(ids[0]), item(ids[1], { status: 'VOIDED' })]);
   assert.deepEqual(await syncWallet(), { kind: 'ok', count: 2 });
@@ -167,7 +167,7 @@ test('O-T48 ⑥ walletCardOf는 저장된 스냅샷 하나를 같은 카드로 �
   assert.deepEqual(snapshots.map((s) => walletCardOf(s, NOW)), await loadWalletCards(NOW));
 });
 
-test('O-T48 ⑥ 회전 QR: 등록된 키의 QR v1은 목록의 ticketId·이 기기 keyId를 싣고 15초 경계에서만 바뀐다', async () => {
+test('O-T52 ⑥ 회전 QR: 등록된 키의 QR v1은 목록의 ticketId·이 기기 keyId를 싣고 15초 경계에서만 바뀐다', async () => {
   const id = nextTicket();
   const calls = fakeFanApi([item(id, { status: 'ISSUED' })]);
   assert.deepEqual(await syncWallet(), { kind: 'ok', count: 1 });
