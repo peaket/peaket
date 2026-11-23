@@ -147,24 +147,23 @@ describe('V-T39 ① 서버 오류 수집 잠금', () => {
     // 가림 표시는 §7이 정한 것(`[REDACTED]`, 1차 가림 규칙)을 쓴다. 2차 마스킹의 정규식·표시는 정본에 아직 없다(wbs 4.1.4, 계획 '시험 결과' RV012-5)
     const recv = await receiver();
     const s = await start({ ...BASE, PEAKET_SENTRY_DSN: recv.dsn });
-    const res = await fanRequest(s, 'POST', '/v1/err/pii-crash');
+    // 본문 없이 보낸다(오류 글의 값만 본다)
+    const res = await fanRequest(s, 'POST', '/v1/err/pii-crash', '{}');
     expect(res.statusCode).toBe(500);
     await recv.waitFor(1);
     await s.svc.errorReporting.flush(5_000);
     const events = recv.events();
     expect(events).toHaveLength(1);
-    // 받은 바이트 어디에도(오류 글·원인 사슬·지문·스택) 원래 값이 없다
-    const everything = recv.envelopes.map((e) => e.raw.toString('utf8')).join('\n');
+    // 받은 바이트 어디에도(보낸 요청의 주소·머리, 오류 글·원인 사슬·지문·스택) 원래 값이 없다
+    const everything = recv.envelopes.map((e) => `${e.url}\n${JSON.stringify(e.headers)}\n${e.raw.toString('utf8')}`).join('\n');
     for (const [what, value] of [...Object.entries(app.PII_IN_MESSAGE).map(([k, v]) => [`글 ${k}`, v]), ...Object.entries(app.PII_IN_CAUSE).map(([k, v]) => [`원인 ${k}`, v])]) {
       expect(everything, what).not.toContain(value);
     }
     // 오류 글은 버려지지 않고 값만 가림 표시로 바뀐다(묶기·찾기에 쓰는 나머지 글은 남는다)
     const values = (events[0].exception as { values: { type: string; value: string }[] }).values;
     const main = values.find((v) => v.value.startsWith('프로필 저장 실패'));
-    expect(main?.value).toBe('프로필 저장 실패: [REDACTED] [REDACTED] 카드 [REDACTED]');
-    // 원인 사슬을 싣는다면 그 글도 같은 규칙으로 가린다
-    for (const v of values.filter((x) => x !== main)) expect(v.value).not.toMatch(/@example\.com|010-\d{4}-\d{4}|(?:\d{4}[- ]){3}\d{4}/);
-    for (const f of (events[0].fingerprint as string[] | undefined) ?? []) expect(f).not.toMatch(/@example\.com|010-\d{4}-\d{4}/);
+    expect(main?.value).toBe('프로필 저장 실패: [REDACTED] [REDACTED] 카드 [REDACTED]; invalid input syntax for type uuid: "[REDACTED]"; 국제 [REDACTED] 붙임 [REDACTED] 카드 [REDACTED]');
+    // 원인 사슬(cause)·지문(fingerprint)은 위 바이트 단언이 묶는다: 원인을 가리지 않고 실으면 PII_IN_CAUSE 값으로 실패한다(지금은 원인을 싣지 않는다)
   });
 
   test('V-T39 ① 4xx와 정상 분기 거절은 보내지 않는다', async () => {

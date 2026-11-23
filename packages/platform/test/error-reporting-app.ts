@@ -14,8 +14,20 @@ import { ProblemError, Roles, createExternalHttpClient, requestLog } from '../sr
 
 /** 로그인한 팬의 원문 계정 ID(사건에는 가명 accountRef만 가야 한다) */
 export const RAW_ACCOUNT_ID = 'acct-raw-5521';
-/** 오류 글에 넣는 값(이메일·휴대폰 번호·카드 번호 꼴. 카드는 결제사 시험 번호) */
-export const PII_IN_MESSAGE = { email: 'fan.secret@example.com', phone: '010-5555-0199', card: '4111-1111-1111-1111' };
+/**
+ * 오류 글(바깥 오류)에 넣는 값. 요청 본문 값과 겹치지 않게 고른다(본문이 새면 본문 시험이 잡는다).
+ * 이메일(맨 것·DB 오류처럼 따옴표 안), 휴대폰(국내 하이픈, 붙여 쓴 것, 국제 표기 E.164 `+82…`, docs/features/identity.md의 phone_e164),
+ * 카드(결제사 시험 번호: 하이픈, 구분자 없는 16자리)
+ */
+export const PII_IN_MESSAGE = {
+  email: 'msg.fan@example.org',
+  quotedEmail: 'quoted.fan@example.net',
+  phone: '010-4444-0188',
+  phoneCompact: '01022220166',
+  phoneE164: '+821033330177',
+  card: '4111-1111-1111-1111',
+  cardPlain: '5555555555554444',
+};
 /** 원인 오류(cause) 글에 넣는 값 */
 export const PII_IN_CAUSE = { email: 'other.fan@example.com', phone: '010-7777-0123', card: '4012 8888 8888 1881' };
 /** 바깥 호출 시험이 정하는 모의 외부 서버 주소 */
@@ -42,7 +54,8 @@ export class ErrController {
   @Post('pii-crash')
   piiCrash(@Body() _body: unknown) {
     requestLog().identify({ accountId: RAW_ACCOUNT_ID });
-    throw new Error(`프로필 저장 실패: ${PII_IN_MESSAGE.email} ${PII_IN_MESSAGE.phone} 카드 ${PII_IN_MESSAGE.card}`, {
+    const m = PII_IN_MESSAGE;
+    throw new Error(`프로필 저장 실패: ${m.email} ${m.phone} 카드 ${m.card}; invalid input syntax for type uuid: "${m.quotedEmail}"; 국제 ${m.phoneE164} 붙임 ${m.phoneCompact} 카드 ${m.cardPlain}`, {
       cause: new Error(`원인: 다른 연락처 ${PII_IN_CAUSE.email} ${PII_IN_CAUSE.phone} 카드 ${PII_IN_CAUSE.card}`),
     });
   }
