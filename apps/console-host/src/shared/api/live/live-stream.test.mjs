@@ -11,7 +11,7 @@ register('./live.test.resolve.mjs', import.meta.url);
 const { ManagedStream } = await import('./live-stream.ts');
 const { WidgetStreams, widgetStreamUrl } = await import('./widget-stream.ts');
 
-const CANON = { silenceMs: 35_000, retryMs: 10_000, jitterMs: 5_000, reopenAfterCloseMs: 1_000, debounceMs: 1_000 };
+const CANON = { silenceMs: 35_000, retryMs: 10_000, jitterMs: 5_000, reopenAfterCloseMs: 1_000, debounceMs: 1_000, graceMs: 10_000 };
 
 /** 일을 다 비운다(시간이 아니라 대기 중인 Promise·I/O 차례만 돌린다) */
 const drain = async () => {
@@ -306,13 +306,14 @@ test('F-03-1 T5 FE-T28 ⑤-1 보이는 위젯 목록이 바뀌면 1초 묶어 �
   await timers.advance(1);
   assert.equal(opened.length, 1);
   assert.equal(opened[0].url, `https://ops-api.test/v1/ops/events/${E}/live?widgets=${encodeURIComponent(Q)}`);
-  // 1초 안에 셋이 바뀌면(넣기·빼기·넣기) 마지막 바뀜부터 1초 뒤 한 번
+  // 1초 안에 넣기·빼기·넣기: 뺀 키는 10초 [가정] 동안 목록에 남으므로(F-03-2 OPS-360, frontend §4.4.5 '구독 수명', ADR-0091 결정 3)
+  // 빼기·다시 넣기는 목록을 바꾸지 않고, 첫 넣기부터 1초 뒤 한 번 연다(F-03-2 시험 담당이 정본대로 고침)
   const offP = ws.subscribe(P, () => undefined);
   await timers.advance(400);
   offP();
   await timers.advance(400);
   const offP2 = ws.subscribe(P, () => undefined);
-  await timers.advance(CANON.debounceMs - 1);
+  await timers.advance(CANON.debounceMs - 800 - 1);
   assert.equal(opened.length, 1);
   await timers.advance(1);
   assert.equal(opened.length, 2);
@@ -323,9 +324,11 @@ test('F-03-1 T5 FE-T28 ⑤-1 보이는 위젯 목록이 바뀌면 1초 묶어 �
   const offQ2 = ws.subscribe(Q, () => undefined);
   await timers.advance(CANON.debounceMs);
   assert.equal(opened.length, 2);
-  // 모두 떠나면 닫는다
+  // 모두 떠나면 10초 유예 뒤 목록에서 빼고 1초 묶어 닫는다(떠난 뒤 11초, frontend §4.4.5)
   for (const off of [offQ, offQ2, offP2]) off();
-  await timers.advance(CANON.debounceMs);
+  await timers.advance(CANON.graceMs + CANON.debounceMs - 1);
+  assert.equal(opened[1].stopped, 0, '유예 중에는 열어 둔다');
+  await timers.advance(1);
   assert.equal(opened.length, 2);
   assert.equal(opened[1].stopped, 1);
   assert.deepEqual(ws.openKeys, []);
