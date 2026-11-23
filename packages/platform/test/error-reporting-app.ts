@@ -14,6 +14,10 @@ import { ProblemError, Roles, createExternalHttpClient, requestLog } from '../sr
 
 /** 로그인한 팬의 원문 계정 ID(사건에는 가명 accountRef만 가야 한다) */
 export const RAW_ACCOUNT_ID = 'acct-raw-5521';
+/** 오류 글에 넣는 값(이메일·휴대폰 번호·카드 번호 꼴. 카드는 결제사 시험 번호) */
+export const PII_IN_MESSAGE = { email: 'fan.secret@example.com', phone: '010-5555-0199', card: '4111-1111-1111-1111' };
+/** 원인 오류(cause) 글에 넣는 값 */
+export const PII_IN_CAUSE = { email: 'other.fan@example.com', phone: '010-7777-0123', card: '4012 8888 8888 1881' };
 /** 바깥 호출 시험이 정하는 모의 외부 서버 주소 */
 export const outbound = { baseUrl: 'http://127.0.0.1:9' };
 
@@ -32,6 +36,15 @@ export class ErrController {
   crash(@Body() _body: unknown) {
     requestLog().identify({ accountId: RAW_ACCOUNT_ID });
     throw new Error('profile store exploded');
+  }
+
+  /** 글에 연락처·카드 번호가 든 이름 없는 5xx와 그 원인 사슬(RV012-5). 값은 PII_IN_MESSAGE·PII_IN_CAUSE */
+  @Post('pii-crash')
+  piiCrash(@Body() _body: unknown) {
+    requestLog().identify({ accountId: RAW_ACCOUNT_ID });
+    throw new Error(`프로필 저장 실패: ${PII_IN_MESSAGE.email} ${PII_IN_MESSAGE.phone} 카드 ${PII_IN_MESSAGE.card}`, {
+      cause: new Error(`원인: 다른 연락처 ${PII_IN_CAUSE.email} ${PII_IN_CAUSE.phone} 카드 ${PII_IN_CAUSE.card}`),
+    });
   }
 
   /** 정상 분기 거절(좌석 경합 409) */

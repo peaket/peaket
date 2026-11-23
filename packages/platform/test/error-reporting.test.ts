@@ -141,6 +141,32 @@ describe('V-T39 ① 서버 오류 수집 잠금', () => {
     expect(s.raw.join('')).not.toContain(recv.key);
   });
 
+  test('V-T39 ① [ASVS v5.0.0-14.2.3] 이름 없는 5xx 오류 글과 원인 사슬의 이메일·전화번호·카드 번호 꼴은 사건에 없고 가림 표시로 바뀐다(RV012-5)', async () => {
+    // 정본: beforeSend에서 로그와 같은 마스킹(docs/observability.md §11·§7). 로그는 칸 이름 가림(1차) 뒤 수집기의 정규식 2차 마스킹을 거치고
+    // (§7 '개인정보 2단계 마스킹 통제': 이름·전화번호·이메일 …), Sentry 사건은 그 수집기를 지나지 않으므로 SDK 안에서 같은 꼴을 가려야 한다.
+    // 가림 표시는 §7이 정한 것(`[REDACTED]`, 1차 가림 규칙)을 쓴다. 2차 마스킹의 정규식·표시는 정본에 아직 없다(wbs 4.1.4, 계획 '시험 결과' RV012-5)
+    const recv = await receiver();
+    const s = await start({ ...BASE, PEAKET_SENTRY_DSN: recv.dsn });
+    const res = await fanRequest(s, 'POST', '/v1/err/pii-crash');
+    expect(res.statusCode).toBe(500);
+    await recv.waitFor(1);
+    await s.svc.errorReporting.flush(5_000);
+    const events = recv.events();
+    expect(events).toHaveLength(1);
+    // 받은 바이트 어디에도(오류 글·원인 사슬·지문·스택) 원래 값이 없다
+    const everything = recv.envelopes.map((e) => e.raw.toString('utf8')).join('\n');
+    for (const [what, value] of [...Object.entries(app.PII_IN_MESSAGE).map(([k, v]) => [`글 ${k}`, v]), ...Object.entries(app.PII_IN_CAUSE).map(([k, v]) => [`원인 ${k}`, v])]) {
+      expect(everything, what).not.toContain(value);
+    }
+    // 오류 글은 버려지지 않고 값만 가림 표시로 바뀐다(묶기·찾기에 쓰는 나머지 글은 남는다)
+    const values = (events[0].exception as { values: { type: string; value: string }[] }).values;
+    const main = values.find((v) => v.value.startsWith('프로필 저장 실패'));
+    expect(main?.value).toBe('프로필 저장 실패: [REDACTED] [REDACTED] 카드 [REDACTED]');
+    // 원인 사슬을 싣는다면 그 글도 같은 규칙으로 가린다
+    for (const v of values.filter((x) => x !== main)) expect(v.value).not.toMatch(/@example\.com|010-\d{4}-\d{4}|(?:\d{4}[- ]){3}\d{4}/);
+    for (const f of (events[0].fingerprint as string[] | undefined) ?? []) expect(f).not.toMatch(/@example\.com|010-\d{4}-\d{4}/);
+  });
+
   test('V-T39 ① 4xx와 정상 분기 거절은 보내지 않는다', async () => {
     const recv = await receiver();
     const s = await start({ ...BASE, PEAKET_SENTRY_DSN: recv.dsn });
