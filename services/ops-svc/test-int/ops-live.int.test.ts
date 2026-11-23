@@ -495,7 +495,7 @@ describe('F-03-1 관제 늘 여는 흐름(실제 ops-svc·PostgreSQL)', () => {
 });
 
 describe('F-03-1 알림 행은 원래 기록과 같은 트랜잭션(실제 PostgreSQL 트리거)', () => {
-  test('F-03-1 T9 V-T9 명령 상태를 바꾼 트랜잭션을 되돌리면 알림 행이 없고, 커밋하면 정확한 행(kind·event_id·roles·본문)이 생긴다. 상태가 같으면(SET state = state 포함) 행이 없다', async () => {
+  test('F-03-1 T9 FE-T28 ①-5 명령 상태를 바꾼 트랜잭션을 되돌리면 알림 행이 없고, 커밋하면 정확한 행(kind·event_id·roles·본문)이 생긴다. 상태가 같으면(SET state = state 포함) 행이 없다', async () => {
     const id = randomUUID();
     const eventId = randomUUID();
     const insert = `insert into ops_command (id, type, state, reason, params, requested_by, requested_role, event_id, approval_expires_at, created_at, updated_at)
