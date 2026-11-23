@@ -1381,6 +1381,7 @@ erDiagram
         text event_key PK "CS 처리함 건 요청(payment 0029, ADR-0369 결정 10). 원인이 된 쓰기와 같은 트랜잭션에 넣는다"
         text kind "PAYOUT_ERROR|PAYOUT_FAILED|PAYOUT_DELAYED|SELLER_KYC_REQUIRED|PG_BALANCE_MISMATCH|PORTONE_PAYOUT_EXECUTION(payment 0030이 더함, ADR-0370 결정 7)|PORTONE_LEDGER_MISMATCH(payment 0032가 더함, ADR-0370 결정 8)"
         text source_id "대상(묶음 ID·지급 건 ID·토스 셀러 ID·TOSS:{상점})"
+        text detail "건 본문 글(선택, 1~2,000자, payment 0030, ADR-0370 결정 7·8). 뺀 정산서·사유·'commander 확인 필요'·'실행 멈춤'만 싣고 계좌번호·예금주명·결제사 원문 오류는 싣지 않는다. 다시 보낼 때 같은 글을 싣는다"
         timestamptz created_at
         timestamptz requested_at "ops-svc가 받은 시각. 비면 정산 일꾼이 30분 [가정]마다 다시 보낸다"
     }
