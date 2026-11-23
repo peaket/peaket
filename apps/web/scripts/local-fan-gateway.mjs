@@ -32,8 +32,11 @@ const STAFF_ROUTE = /^\/v1\/(?:staff-invitation-lookups|staff-invitation-accepta
 const QUEUE_ROUTE = /^\/v1\/queues\/[^/]+\//;
 const PURCHASE_ROUTE = /^\/v1\/(holds(\/|$)|orders(\/|$)|events\/[^/]+\/(holds|purchase-session|seatmap-snapshot)(\/|$))/;
 const LOCAL_ADMISSION = '/v1/local-dev/admission';
-/** 입장용 휴대폰 등록(ticket-svc, gw-fan /v1/tickets/{ticketId}/device-keys) */
-const TICKET_DEVICE_KEY_ROUTE = /^\/v1\/tickets\/[^/]+\/device-keys$/;
+/**
+ * ticket-svc 팬 경로(F-05-2): 월렛 목록·티켓 상세·기기 키·양도 요청·돌려주기, 받은 요청 목록, 받는 사람 조회.
+ * 취소(`/v1/tickets/{id}/cancellation`)는 purchase-svc 경로라 여기 넣지 않는다.
+ */
+const TICKET_ROUTE = /^\/v1\/(?:tickets(?:\/[^/]+\/(?:transfers|returns|device-keys)|\/?$|\/[^/]+$)|transfers(?:\/|$)|transfer-recipient-lookups(?:\/|$))/;
 /** 웹 푸시 구독 등록·해제(core-svc, gw-fan /v1/push-subscriptions) */
 const PUSH_SUBSCRIPTION_ROUTE = /^\/v1\/push-subscriptions(\/[^/]+)?$/;
 /** 로컬 스택은 좌석맵 파일도 그 판의 좌석 ID로 낸다 */
@@ -132,7 +135,7 @@ export async function startLocalFanGateway(o) {
           ? new URL(o.purchaseUrl)
           : o.queueUrl && QUEUE_ROUTE.test(pathname)
             ? new URL(o.queueUrl)
-            : o.ticketUrl && TICKET_DEVICE_KEY_ROUTE.test(pathname)
+            : o.ticketUrl && TICKET_ROUTE.test(pathname)
               ? new URL(o.ticketUrl)
               : o.coreUrl && PUSH_SUBSCRIPTION_ROUTE.test(pathname)
                 ? new URL(o.coreUrl)

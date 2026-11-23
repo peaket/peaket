@@ -46,6 +46,10 @@ export const ListTicketsResponse = zod.object({
   "entryOpensAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시작 시각'),
   "receivedFromNickname": zod.string().nullish().describe('받은 티켓의 보낸 분 닉네임. 받은 티켓이 아니면 null(authz-matrix §4.1 \'양도 요청\')'),
   "bookingNumber": zod.string().nullish().describe('예매번호. 결제자 본인 티켓에만 싣고 받은 티켓은 null이다 [가정](받는 사람에게 결제 정보를 주지 않는 규칙, POL-017)'),
+  "pendingTransfer": zod.object({
+  "offerId": zod.string(),
+  "expiresAt": zod.iso.datetime({"offset":true})
+}).nullish().describe('지금 보유자가 결제자이고 OFFERED 양도 요청이 있을 때만 그 요청(요청 ID·기한). 받은 표·요청 없음은 null이다(감독 결정 2026-11-23, F-05-2)'),
   "enteredAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시각(ScannedIn). 입장 전이면 null'),
   "seller": zod.object({
   "legalName": zod.string(),
@@ -136,6 +140,7 @@ export const CreateTicketTransferResponse = zod.object({
   "status": zod.enum(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED']).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('48시간과 양도 마감 중 이른 때'),
   "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구'),
+  "withdrawReason": zod.enum(['SENDER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'OTHER']).optional().describe('status가 WITHDRAWN일 때만 싣는 철회 까닭(감독 결정 2026-11-23, F-05-2). 저장 값 FRAUD_LOCK·ACCOUNT_DELETED·DEPOSIT_ERROR는 받는 사람에게 사유를 드러내지 않도록 OTHER로 낸다'),
   "eventId": zod.string().optional(),
   "eventTitle": zod.string().optional().describe('공연명'),
   "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
@@ -172,6 +177,7 @@ export const GetTransferResponse = zod.object({
   "status": zod.enum(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED']).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('48시간과 양도 마감 중 이른 때'),
   "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구'),
+  "withdrawReason": zod.enum(['SENDER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'OTHER']).optional().describe('status가 WITHDRAWN일 때만 싣는 철회 까닭(감독 결정 2026-11-23, F-05-2). 저장 값 FRAUD_LOCK·ACCOUNT_DELETED·DEPOSIT_ERROR는 받는 사람에게 사유를 드러내지 않도록 OTHER로 낸다'),
   "eventId": zod.string().optional(),
   "eventTitle": zod.string().optional().describe('공연명'),
   "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
@@ -450,6 +456,10 @@ export const GetTicketResponse = zod.object({
   "entryOpensAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시작 시각'),
   "receivedFromNickname": zod.string().nullish().describe('받은 티켓의 보낸 분 닉네임. 받은 티켓이 아니면 null(authz-matrix §4.1 \'양도 요청\')'),
   "bookingNumber": zod.string().nullish().describe('예매번호. 결제자 본인 티켓에만 싣고 받은 티켓은 null이다 [가정](받는 사람에게 결제 정보를 주지 않는 규칙, POL-017)'),
+  "pendingTransfer": zod.object({
+  "offerId": zod.string(),
+  "expiresAt": zod.iso.datetime({"offset":true})
+}).nullish().describe('지금 보유자가 결제자이고 OFFERED 양도 요청이 있을 때만 그 요청(요청 ID·기한). 받은 표·요청 없음은 null이다(감독 결정 2026-11-23, F-05-2)'),
   "enteredAt": zod.iso.datetime({"offset":true}).nullish().describe('입장 시각(ScannedIn). 입장 전이면 null'),
   "seller": zod.object({
   "legalName": zod.string(),
@@ -486,6 +496,7 @@ export const ListTransfersResponse = zod.object({
   "status": zod.enum(['OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN', 'EXPIRED', 'RECLAIMED']).optional(),
   "expiresAt": zod.iso.datetime({"offset":true}).optional().describe('48시간과 양도 마감 중 이른 때'),
   "payerOnlyNotice": zod.string().optional().describe('결제자만 취소·환불 고지 문구'),
+  "withdrawReason": zod.enum(['SENDER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'OTHER']).optional().describe('status가 WITHDRAWN일 때만 싣는 철회 까닭(감독 결정 2026-11-23, F-05-2). 저장 값 FRAUD_LOCK·ACCOUNT_DELETED·DEPOSIT_ERROR는 받는 사람에게 사유를 드러내지 않도록 OTHER로 낸다'),
   "eventId": zod.string().optional(),
   "eventTitle": zod.string().optional().describe('공연명'),
   "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),

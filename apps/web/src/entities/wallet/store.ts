@@ -55,6 +55,8 @@ export interface WalletTicketSnapshot {
   eventStartsAt?: string;
   /** 받은 티켓(보유자가 결제자가 아님, 목록 항목에 receivedFromNickname null이 없음) */
   received?: boolean;
+  /** 진행 중인 양도 요청. 브라우저 저장소에는 요청 ID만 둔다(ASVS 14.3.3) */
+  pendingTransfer?: { readonly offerId: string };
   /** 회차 공개 요약(GET /v1/events/{eventId})의 표시 값. 그 회차 요약을 못 읽었으면 없다 */
   title?: string;
   placeName?: string;
@@ -131,6 +133,11 @@ export async function saveTicketSnapshot(snapshot: WalletTicketSnapshot): Promis
 
 export async function loadTicketSnapshot(ticketId: string): Promise<WalletTicketSnapshot | undefined> {
   return walletDatabase()?.tickets.get(ticketId);
+}
+
+/** 돌려준 표처럼 지금 월렛에서 빠지는 표의 스냅샷을 지운다(다음 동기화를 기다리지 않는다) */
+export async function deleteTicketSnapshot(ticketId: string): Promise<void> {
+  await walletDatabase()?.tickets.delete(ticketId);
 }
 
 /** 월렛 목록으로 받은 표의 스냅샷(서버 목록 차례). 미리보기가 남긴 표시 글뿐인 스냅샷은 뺀다 */

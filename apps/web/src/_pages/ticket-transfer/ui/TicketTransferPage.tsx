@@ -23,8 +23,12 @@ import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
 import { RECEIVED_TICKET, RECIPIENT_INPUT_EXAMPLE, TRANSFER_SEAT, transferView } from '../model/view';
 import { SendSection, WithdrawButton } from './TransferClient';
+import { TicketTransferLiveShell } from './TicketTransferLiveLoader';
 
 type Props = PageProps<{ ticketId: string }>;
+
+/** UUID 티켓만 실제 화면. 목업 ID·?state=는 지금처럼 서버가 그리는 미리보기다(계획 §1 한다 8) */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** POL-024 라목 부정구매·부정판매 처벌 법정 고지(원문 그대로, 양도 화면) */
 const LEGAL_RESALE_NOTICE =
@@ -45,6 +49,13 @@ function load(ticketId: string) {
 
 export async function TicketTransferPage({ params, searchParams }: Props) {
   const { ticketId } = await params;
+  if (UUID.test(ticketId)) {
+    return (
+      <AppShell>
+        <TicketTransferLiveShell ticketId={ticketId} />
+      </AppShell>
+    );
+  }
   const d = load(ticketId);
   if (!d) notFound();
   const { perf, production, venue } = d;

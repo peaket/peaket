@@ -1552,6 +1552,18 @@ erDiagram
         timestamptz expires_at "48시간과 양도 마감 중 이른 때"
         timestamptz decided_at
     }
+    transfer_recipient_lookup {
+        uuid id PK
+        uuid account_id "조회한 계정. 회원 코드·휴대폰 번호 원문·찾은 계정 ID는 남기지 않는다"
+        timestamptz looked_up_at "인덱스 (account_id, looked_up_at DESC). 계정당 미끄러지는 60분 창에 10회 [가정]를 센다"
+        text result "FOUND|NOT_FOUND|LIMITED|UNAVAILABLE. LIMITED는 한도 셈에서 뺀다"
+    }
+    ticket_return {
+        uuid account_id PK "돌려준 받은 사람"
+        uuid idempotency_key PK "같은 계정·같은 키·같은 표면 처음 200을 재생하고, 다른 표면 422 idempotency-key-reused다(guidelines §4). 기본 키 (account_id, idempotency_key)"
+        uuid ticket_id FK
+        timestamptz returned_at
+    }
     ticket_operator_cancellation {
         uuid approval_id PK "ops 승인 업무 ID. 기본 키 (approval_id, ticket_id)가 OperatorCancelTickets의 멱등이다(추천 적용 2026-11-16, BUILD_ORDER GAT-080, docs/features/transfer-refund.md §7.4)"
         uuid ticket_id PK "FK ticket"

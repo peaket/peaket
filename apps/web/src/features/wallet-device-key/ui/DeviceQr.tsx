@@ -248,9 +248,9 @@ export function DeviceQr({ ticketId, label, maxWidth = 324, offline = false, sna
         // 등록할 때 영구 저장소를 요청한다(§5.4 '입장용 휴대폰 등록'). 기다리지 않는다: Firefox는 persist()가 사용자 답을 받을 때까지
         // 끝나지 않아(권한 묻기) 기다리면 등록이 멈춘다
         void requestPersistentStorage();
-        return enrollDeviceKey(ticketId, { offline });
+        return enrollDeviceKey(ticketId, { offline, firstReason: snapshot?.received === true ? 'TRANSFER' : 'ISSUE' });
       }, 'registering'),
-    [settle, ticketId, offline],
+    [settle, ticketId, offline, snapshot?.received],
   );
 
   /** '이 휴대폰을 입장용으로 등록': 인앱 브라우저면 SCR-058, iOS 탭·데스크톱이면 키를 만들기 전에 안내를 먼저 보인다 */

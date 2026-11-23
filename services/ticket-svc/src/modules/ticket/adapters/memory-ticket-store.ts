@@ -69,6 +69,12 @@ export class MemoryTicketStore implements TicketStore {
    */
   fraudLockLookup?: (eventId: string, payerAccountId: string, nowMs: number) => { readonly caseId: string; readonly version: number } | undefined;
 
+  /** 그 표의 지금 OFFERED 양도 요청(월렛 목록의 pendingTransfer). MemoryTransferStore가 꽂는다 */
+  openOfferLookup?: (ticketId: string) => { readonly offerId: string; readonly expiresAtMs: number } | undefined;
+
+  /** 표를 끝내는 같은 차례에 진행 중 양도 요청을 거둔다(불변식 D1). 거둔 요청 ID를 돌려준다 */
+  withdrawOpenOffer?: (ticketId: string, reason: 'EVENT_CANCELLED' | 'FRAUD_LOCK', nowMs: number) => string | undefined;
+
   async issue(input: IssueStoreInput, candidates: readonly TicketRecord[]): Promise<IssueTicketsResult> {
     // 발권 막기와 같은 주문 잠금(운영은 ticket_issue_guard 행). 막힌 주문이면 FAILED_PRECONDITION과 같은 오류다
     const held = this.guards.get(input.orderId);
@@ -182,8 +188,13 @@ export class MemoryTicketStore implements TicketStore {
       if (recorded) return recorded;
       const t = this.tickets.get(target.ticketId)!;
       const result = operatorCancelResultOf(t, this.entries.has(t.ticketId), target.expectedHolderAccountId);
-      if (result === 'CANCELED') this.#put({ ...t, status: 'REFUNDED', transferPending: false, keyRevokedAtMs: input.nowMs, version: t.version + 1 });
-      const outcome: OperatorCancelOutcome = { ticketId: t.ticketId, result, orderId: t.orderId };
+      let withdrawnTransferOfferId: string | undefined;
+      if (result === 'CANCELED') {
+        // 표를 끝내는 같은 차례에 진행 중 요청을 거둔다(불변식 D1, 정본 §7.4 ① FRAUD_LOCK)
+        withdrawnTransferOfferId = this.withdrawOpenOffer?.(t.ticketId, 'FRAUD_LOCK', input.nowMs);
+        this.#put({ ...t, status: 'REFUNDED', transferPending: false, keyRevokedAtMs: input.nowMs, version: t.version + 1 });
+      }
+      const outcome: OperatorCancelOutcome = { ticketId: t.ticketId, result, orderId: t.orderId, ...(withdrawnTransferOfferId ? { withdrawnTransferOfferId } : {}) };
       this.operatorCancellations.set(operatorKey(input.approvalId, target.ticketId), outcome);
       return outcome;
     });
@@ -203,7 +214,10 @@ export class MemoryTicketStore implements TicketStore {
       if (recorded) return recorded;
       const t = this.tickets.get(target.ticketId)!;
       if (EVENT_CANCEL_ENDED_STATUSES.has(t.status)) return { ticketId: t.ticketId, result: 'ALREADY_ENDED', orderId: t.orderId, holderAccountId: t.accountId, transferWithdrawn: false };
-      const transferWithdrawn = t.transferPending || t.status === 'TRANSFER_PENDING';
+      // 회차 취소도 같은 차례에 진행 중 요청을 거둔다(불변식 D1, 정본 §5 EVENT_CANCELLED)
+      const withdrawn = this.withdrawOpenOffer?.(t.ticketId, 'EVENT_CANCELLED', input.nowMs);
+      // 옛 표시만 있고 요청 행이 없는 데이터도 '껐다'로 답한다(GAT-110 E2가 보는 지금 뜻 그대로)
+      const transferWithdrawn = withdrawn !== undefined || t.transferPending || t.status === 'TRANSFER_PENDING';
       this.#put({ ...t, status: 'REFUNDED', transferPending: false, keyRevokedAtMs: input.nowMs, version: t.version + 1 });
       const outcome: EventCancelOutcome = { ticketId: t.ticketId, result: 'CANCELED', orderId: t.orderId, holderAccountId: t.accountId, transferWithdrawn };
       this.eventCancellations.set(cancelKey(target.cancellationId, target.ticketId), outcome);
@@ -254,7 +268,13 @@ export class MemoryTicketStore implements TicketStore {
     const page = after.slice(0, input.limit);
     const last = page[page.length - 1];
     const nextCursor = after.length > input.limit && last ? walletCursorOf({ issuedAtMs: last.issuedAtMs, ticketId: last.ticketId }) : undefined;
-    return { tickets: page.map(walletTicketOf), ...(nextCursor ? { nextCursor } : {}) };
+    return {
+      tickets: page.map((t) => {
+        const open = this.openOfferLookup?.(t.ticketId);
+        return walletTicketOf({ ...t, ...(open === undefined ? {} : { pendingOffer: open }) });
+      }),
+      ...(nextCursor ? { nextCursor } : {}),
+    };
   }
 }
 

@@ -1,22 +1,30 @@
 // 메모리 양도 저장소(BUILD_ORDER GAT-050·GAT-055 단위 시험). 운영은 adapters/db/drizzle-transfer-store.ts가 쓴다.
 // 티켓 상태·키 폐기·표시는 MemoryTicketStore를 그대로 고친다(운영의 행 잠금 자리를 대신한다).
+import { randomUUID } from 'node:crypto';
 import type {
   CreateOfferOutcome,
   DecideOutcome,
+  ListTransfersInput,
+  ListTransfersResult,
+  RecipientLookupClaim,
+  RecipientLookupResult,
   ReturnOutcome,
   SetTransferLockInput,
   TransferLockOutcome,
+  TransferOfferListRow,
   TransferStore,
 } from '../domain/transfer-ports.js';
 import type { TicketRecord } from '../domain/ticket.js';
 import {
   acceptRejectionOf,
   createOfferRejectionOf,
+  ENDED_STATUSES,
   lockActiveAt,
   lockResultOf,
   rejectRejectionOf,
   returnRejectionOf,
   type TransferOfferRecord,
+  type TransferStatus,
   type TransferTicketSnapshot,
   withdrawRejectionOf,
 } from '../domain/transfer.js';
@@ -38,6 +46,7 @@ const snapshotOf = (t: TicketRecord): TransferTicketSnapshot => ({
   eventId: t.eventId,
   status: t.status,
   transferPending: t.transferPending,
+  gateZone: t.gateZone,
   ...(t.eventStartsAtMs === undefined ? {} : { eventStartsAtMs: t.eventStartsAtMs }),
   ...(t.fraudLockCaseId === undefined ? {} : { fraudLockCaseId: t.fraudLockCaseId }),
   ...(t.fraudLockVersion === undefined ? {} : { fraudLockVersion: t.fraudLockVersion }),
@@ -48,6 +57,10 @@ export class MemoryTransferStore implements TransferStore {
   readonly offers = new Map<string, TransferOfferRecord>();
   /** (case_id, event_id, account_id) 잠금 행 */
   readonly locks = new Map<string, LockRow>();
+  /** 받는 사람 조회 기록(0018 transfer_recipient_lookup의 대역) */
+  readonly lookups: { id: string; accountId: string; lookedUpAtMs: number; result: RecipientLookupResult }[] = [];
+  /** 돌려주기 멱등 기록(`accountId:key` → ticketId). 0018 ticket_return의 대역 */
+  readonly returns = new Map<string, { ticketId: string; returnedAtMs: number }>();
 
   constructor(private readonly o: { readonly tickets: MemoryTicketStore; readonly revokeKey?: (ticketId: string, nowMs: number) => void }) {
     // 잠금 뒤에 발권한 표도 잠긴다(R-T31 ⑬). MemoryTicketStore가 발권 때 이 함수를 본다
@@ -55,6 +68,13 @@ export class MemoryTransferStore implements TransferStore {
       const lock = this.#activeLockRow(eventId, payerAccountId, nowMs);
       return lock ? { caseId: lock.caseId, version: lock.version } : undefined;
     };
+    // 월렛 목록의 pendingTransfer는 표 저장소가 이 요청을 읽어 싣는다
+    this.o.tickets.openOfferLookup = (ticketId) => {
+      const offer = this.#openOfferRecord(ticketId);
+      return offer ? { offerId: offer.offerId, expiresAtMs: offer.expiresAtMs } : undefined;
+    };
+    // 회차 취소·운영자 취소가 표를 끝내는 같은 트랜잭션(메모리라 같은 호출)에서 요청을 거둔다(불변식 D1)
+    this.o.tickets.withdrawOpenOffer = (ticketId, reason, nowMs) => this.#withdrawOpenOffer(ticketId, reason, nowMs);
   }
 
   async ticket(ticketId: string): Promise<TransferTicketSnapshot | undefined> {
@@ -86,6 +106,47 @@ export class MemoryTransferStore implements TransferStore {
     return this.offers.get(offerId);
   }
 
+  async openOffer(ticketId: string): Promise<TransferOfferRecord | undefined> {
+    return this.#openOfferRecord(ticketId);
+  }
+
+  async listOffers(input: ListTransfersInput): Promise<ListTransfersResult> {
+    const wanted = input.statuses.length === 0 ? undefined : new Set<TransferStatus>(input.statuses);
+    const rows = [...this.offers.values()]
+      .filter((o) => o.toAccountId === input.recipientAccountId && (wanted === undefined || wanted.has(o.status)))
+      .sort((a, b) => b.createdAtMs - a.createdAtMs || b.offerId.localeCompare(a.offerId))
+      .map((o): TransferOfferListRow => ({ ...o, eventId: this.o.tickets.tickets.get(o.ticketId)?.eventId ?? '' }))
+      .filter((o) => o.eventId !== '');
+    const after =
+      input.cursor === undefined
+        ? rows
+        : rows.filter((o) => o.createdAtMs < input.cursor!.createdAtMs || (o.createdAtMs === input.cursor!.createdAtMs && o.offerId < input.cursor!.offerId));
+    const page = after.slice(0, input.limit);
+    const last = page[page.length - 1];
+    return {
+      offers: page,
+      ...(after.length > input.limit && last ? { nextCursor: { createdAtMs: last.createdAtMs, offerId: last.offerId } } : {}),
+    };
+  }
+
+  async claimLookup(input: { accountId: string; nowMs: number; windowMs: number; limit: number }): Promise<RecipientLookupClaim> {
+    const inWindow = this.lookups.filter((r) => r.accountId === input.accountId && r.result !== 'LIMITED' && r.lookedUpAtMs > input.nowMs - input.windowMs);
+    if (inWindow.length >= input.limit) {
+      this.lookups.push({ id: randomUUID(), accountId: input.accountId, lookedUpAtMs: input.nowMs, result: 'LIMITED' });
+      const oldest = Math.min(...inWindow.map((r) => r.lookedUpAtMs));
+      const seconds = Math.max(1, Math.ceil((oldest + input.windowMs - input.nowMs) / 1000));
+      return { kind: 'LIMITED', retryAfterSeconds: seconds };
+    }
+    const id = randomUUID();
+    this.lookups.push({ id, accountId: input.accountId, lookedUpAtMs: input.nowMs, result: 'UNAVAILABLE' });
+    return { kind: 'ALLOWED', lookupId: id };
+  }
+
+  async finishLookup(lookupId: string, result: RecipientLookupResult): Promise<void> {
+    const row = this.lookups.find((r) => r.id === lookupId);
+    if (row) row.result = result;
+  }
+
   async accept(i: { offerId: string; accountId: string; nowMs: number }): Promise<DecideOutcome> {
     const offer = this.offers.get(i.offerId);
     if (!offer) return { kind: 'REJECTED', reason: 'NOT_FOUND' };
@@ -93,7 +154,10 @@ export class MemoryTransferStore implements TransferStore {
     if (!t) return { kind: 'REJECTED', reason: 'NOT_FOUND' };
     const reason = acceptRejectionOf(offer, { accountId: i.accountId, nowMs: i.nowMs, eventStartsAtMs: t.eventStartsAtMs });
     if (reason) return { kind: 'REJECTED', reason };
+    // 이미 수락한 요청의 재생은 표 상태와 상관없이 처음 결과다(멱등)
     if (offer.status === 'ACCEPTED') return { kind: 'OK', offer, replayed: true };
+    // 겹친 가드 D2: 요청이 남아 있어도 끝난 표는 받지 않는다(환급된 표가 되살아나지 않게)
+    if (ENDED_STATUSES.has(t.status)) return { kind: 'REJECTED', reason: 'ALREADY_ENDED' };
     const decided: TransferOfferRecord = { ...offer, status: 'ACCEPTED', decidedAtMs: i.nowMs };
     this.offers.set(offer.offerId, decided);
     this.o.revokeKey?.(t.ticketId, i.nowMs);
@@ -130,6 +194,8 @@ export class MemoryTransferStore implements TransferStore {
   }
 
   async returnToPayer(i: { ticketId: string; accountId: string; nowMs: number; idempotencyKey: string }): Promise<ReturnOutcome> {
+    const recorded = this.returns.get(`${i.accountId}:${i.idempotencyKey}`);
+    if (recorded) return recorded.ticketId === i.ticketId ? { kind: 'OK', ticketId: recorded.ticketId, replayed: true } : { kind: 'REJECTED', reason: 'IDEMPOTENCY_KEY_REUSED' };
     const t = this.o.tickets.tickets.get(i.ticketId);
     if (!t) return { kind: 'REJECTED', reason: 'NOT_FOUND' };
     const reason = returnRejectionOf(snapshotOf(t), {
@@ -141,6 +207,7 @@ export class MemoryTransferStore implements TransferStore {
     if (reason) return { kind: 'REJECTED', reason };
     this.o.revokeKey?.(t.ticketId, i.nowMs);
     this.#put({ ...t, accountId: t.payerAccountId, status: 'ACTIVE', transferPending: false, keyRevokedAtMs: i.nowMs, version: t.version + 1 });
+    this.returns.set(`${i.accountId}:${i.idempotencyKey}`, { ticketId: t.ticketId, returnedAtMs: i.nowMs });
     return { kind: 'OK', ticketId: t.ticketId, replayed: false };
   }
 
@@ -243,7 +310,20 @@ export class MemoryTransferStore implements TransferStore {
     if (!stillOpen) this.#release(t);
   }
 
-  #activeLockRow(eventId: string, payerAccountId: string, nowMs: number): LockRow | undefined {    const start = this.#eventStartsAt(eventId);
+  #openOfferRecord(ticketId: string): TransferOfferRecord | undefined {
+    for (const o of this.offers.values()) if (o.ticketId === ticketId && o.status === 'OFFERED') return o;
+    return undefined;
+  }
+
+  #withdrawOpenOffer(ticketId: string, reason: 'EVENT_CANCELLED' | 'FRAUD_LOCK', nowMs: number): string | undefined {
+    const offer = this.#openOfferRecord(ticketId);
+    if (!offer) return undefined;
+    this.offers.set(offer.offerId, { ...offer, status: 'WITHDRAWN', withdrawReason: reason, decidedAtMs: nowMs });
+    return offer.offerId;
+  }
+
+  #activeLockRow(eventId: string, payerAccountId: string, nowMs: number): LockRow | undefined {
+    const start = this.#eventStartsAt(eventId);
     for (const row of this.locks.values()) {
       if (row.eventId !== eventId || row.accountId !== payerAccountId) continue;
       if (lockActiveAt({ locked: row.locked, expiresAtMs: row.expiresAtMs, nowMs, eventStartsAtMs: start })) return row;
