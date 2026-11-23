@@ -82,7 +82,8 @@ const env = (pod: string) => ({
   PEAKET_ADMIN_PORT: '0',
 });
 const startWorker = (pod: string, args: string[] = []) => {
-  const c = fork(`${SVC}dist/main.js`, args, { env: env(pod), stdio: ['ignore', 'ignore', 'inherit', 'ipc'] });
+  // 시험 실행기의 실행 인자(개발 조건 등)를 물려받지 않게 빈 execArgv로 띄운다: 빌드한 dist가 계약 패키지도 dist로 읽어야 한다
+  const c = fork(`${SVC}dist/main.js`, args, { env: env(pod), execArgv: [], stdio: ['ignore', 'ignore', 'inherit', 'ipc'] });
   children.push(c);
   return c;
 };
