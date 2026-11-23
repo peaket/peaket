@@ -147,6 +147,25 @@ test('PRF-137 purchase-svc 배포 단위: PEAKET_SEATMAP_DIR은 서비스 파드
   assertNoSecrets(v, PURCHASE_SECRETS, 'purchase-svc');
 });
 
+test('F-05-3 IR-01 purchase-svc가 queue-svc 우선 구매 권리 gRPC를 부를 수 있고 업무 gRPC 주소가 mesh와 맞는다', () => {
+  const v = load('purchase-svc');
+  const env = envOf(v, 'purchase-svc');
+  assert.equal(env.PEAKET_QUEUE_GRPC_ADDR, 'queue-svc-grpc:50051', 'PEAKET_QUEUE_GRPC_ADDR');
+
+  const source = parse(readFileSync(join(REPO, 'deploy', 'platform', 'mesh', 'port-allow.yaml'), 'utf8'));
+  const callers = source.workloads['queue-svc'].ports.grpc.services['peaket.queue.v1.PriorityGrantService'];
+  assert.deepEqual(callers, ['ops-svc', 'purchase-svc'], 'PriorityGrantService 부르는 쪽');
+
+  const policies = yamlDocs('deploy', 'platform', 'mesh', 'policies.yaml');
+  const policy = policies.find((o) => o.kind === 'AuthorizationPolicy' && o.metadata?.name === 'queue-svc-waypoint-callers');
+  assert.ok(policy, 'AuthorizationPolicy queue-svc-waypoint-callers가 없다');
+  const rule = policy.spec.rules.find((r) => r.to?.some((t) => t.operation?.paths?.includes('/peaket.queue.v1.PriorityGrantService/*')));
+  assert.ok(rule, 'PriorityGrantService L7 ALLOW 규칙이 없다');
+  const principals = rule.from.flatMap((f) => f.source?.principals ?? []);
+  assert.ok(principals.includes('cluster.local/ns/purchase/sa/purchase-svc'), 'purchase-svc 주체가 없다');
+  assert.ok(principals.includes('cluster.local/ns/core/sa/ops-svc'), 'ops-svc 주체가 없다');
+});
+
 test('ADR-0288 결정 8 [ASVS v5.0.0-9.2.2] 입장 토큰 발급자 셋(queue-svc PEAKET_ADMISSION_TOKEN_ISSUER, purchase-svc PEAKET_ADMISSION_ISSUER, gw-fan admissionIssuer)이 같은 https 값 https://queue.peaket.example이다', () => {
   const q = envOf(load('queue-svc'), 'queue-svc').PEAKET_ADMISSION_TOKEN_ISSUER;
   const p = envOf(load('purchase-svc'), 'purchase-svc').PEAKET_ADMISSION_ISSUER;
