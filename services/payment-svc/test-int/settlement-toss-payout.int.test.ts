@@ -168,7 +168,8 @@ beforeAll(async () => {
   await migratePayment(pgc.url);
   db1 = createDatabase({ url: pgc.url, profile: 'general', max: 4, applicationName: 'f076-pod-a' });
   db2 = createDatabase({ url: pgc.url, profile: 'general', max: 4, applicationName: 'f076-pod-b' });
-  await ensureOutboxPartitions(db1, fakeClock({ now: BASE }), { daysAhead: 30 });
+  // 시험 시계는 BASE(2026-12-04)부터 2027-01-08까지 쓴다(J-T38 ⑨ 2027-01-06, J-T15 ② 2027-01-08, J-T25 2026-12-31). 그 날들의 Outbox 파티션을 덮는다(시험 이의 TO-05)
+  await ensureOutboxPartitions(db1, fakeClock({ now: BASE }), { daysAhead: 60 });
   locker = new pg.Client({ connectionString: pgc.url, application_name: 'f076-locker' });
   await locker.connect();
   fake = await startTossPayoutFake({ STANDARD: { secretKey: keys.STANDARD.secretKey, securityKey: keys.STANDARD.key }, ESCROW: { secretKey: keys.ESCROW.secretKey, securityKey: keys.ESCROW.key } });

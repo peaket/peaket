@@ -6,7 +6,7 @@ import 'reflect-metadata';
 import { createService } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, test } from 'vitest';
-import { ManualPortonePayoutGateway, MemoryReauthVerifier, SettlementModule, TossPayoutGateway, tossIdempotencyKey, type PayoutRecord } from '../src/modules/settlement/index.js';
+import { DenyAllAdminAuthz, ManualPortonePayoutGateway, MemoryReauthVerifier, SettlementModule, TossPayoutGateway, tossIdempotencyKey, type PayoutRecord } from '../src/modules/settlement/index.js';
 import { quiet } from './settlement-flow-support.js';
 import { noSaleSuspensions } from './settlement-support.js';
 import { kst, tossHarness, type TossHarness } from './support/toss-harness.js';
@@ -213,6 +213,8 @@ describe('J-T15 ③ 한도·KYC와 사람의 재요청', () => {
       env: { PEAKET_ENV: 'ci' },
       clock: x.clock,
       logDestination: quiet(),
+      // 정산 모듈은 파트너 경로를 늘 싣고 플랫폼이 관리 역할 판정 포트를 요구한다(AZ-T1). 이 시험은 내부 경로만 부른다(시험 이의 TO-04)
+      adminAuthz: new DenyAllAdminAuthz(),
     });
     try {
       const post = (body: unknown) => svc.http.inject({ method: 'POST', url: `/internal/v1/settlements/payouts/${p!.payoutId}/retries`, headers: { 'content-type': 'application/json' }, payload: JSON.stringify(body) });

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { ReceiveSettlementWebhook } from '../src/modules/settlement/application/receive-settlement-webhook.js';
 import { HttpTossPayoutTransport } from '../src/modules/settlement/adapters/http-toss-payout-transport.js';
 import {
+  DenyAllAdminAuthz,
   ManualPortonePayoutGateway,
   MemoryReauthVerifier,
   MemorySettlementPaymentSource,
@@ -180,6 +181,8 @@ describe('J-T37 ② 셀러 등록', () => {
       env: { PEAKET_ENV: 'ci' },
       clock: x.clock,
       logDestination: quiet(),
+      // 정산 모듈은 파트너 경로를 늘 싣고 플랫폼이 관리 역할 판정 포트를 요구한다(AZ-T1). 이 시험은 내부 경로만 부른다(시험 이의 TO-03)
+      adminAuthz: new DenyAllAdminAuthz(),
     });
     try {
       const post = (body: unknown) => svc.http.inject({ method: 'POST', url: '/internal/v1/settlements/toss-sellers', headers: { 'content-type': 'application/json' }, payload: JSON.stringify(body) });

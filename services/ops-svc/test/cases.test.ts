@@ -70,12 +70,32 @@ describe('CS 처리함 건 접수', () => {
   // F-07-5 시험 담당(lane5-f075-test, 2026-11-23): 정본 settlement §4.2 '이의 받기'(ADR-0368 결정 5)가 payment-svc의 정산 이의 건(STATEMENT_DISPUTE)을
   // 내부 HTTP로 받게 해 받는 종류에 더했다(정본 변경 반영). 그 밖 종류는 여전히 건을 만들지 않는다.
   // F-06-2 시험 이의 판단(시험 담당 lane3-f062-test, 2026-11-23): ADR-0364 결정 4(transfer-refund §11 R-T48 ①)의 아홉과 위 STATEMENT_DISPUTE를 합쳐 받는 종류는 열이다
-  test('GAT-090 A4 J-T35 ③ R-T48 ③ 받는 종류 열 밖은 종류마다 건을 만들지 않는다', async () => {
-    const accepted = new Set(['REFUND_FAILED', 'FLAGGED', 'JUDGEMENT_PENDING', 'REFUND_ACCOUNT_PENDING', 'COMPENSATION_PENDING', 'VERIFICATION_APPEAL', 'DISPUTE', 'SCANNER_UNREPORTED', 'APPROVAL_EXECUTION_FAILED', 'STATEMENT_DISPUTE']);
+  // F-07-6 시험 담당(lane5-f076-test, 2026-11-23, 시험 이의 TO-02): ADR-0369 결정 10이 지급 쪽 다섯(SELLER_KYC_REQUIRED·PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED·
+  // PG_BALANCE_MISMATCH)을 받게 해(J-T38 ⑥, cs-case-payout-kinds.test.ts) 받는 종류는 열다섯이다
+  test('GAT-090 A4 J-T35 ③ R-T48 ③ J-T38 ⑥ 받는 종류 열다섯 밖은 종류마다 건을 만들지 않는다', async () => {
+    const accepted = new Set([
+      'REFUND_FAILED',
+      'FLAGGED',
+      'JUDGEMENT_PENDING',
+      'REFUND_ACCOUNT_PENDING',
+      'COMPENSATION_PENDING',
+      'VERIFICATION_APPEAL',
+      'DISPUTE',
+      'SCANNER_UNREPORTED',
+      'APPROVAL_EXECUTION_FAILED',
+      'STATEMENT_DISPUTE',
+      'SELLER_KYC_REQUIRED',
+      'PAYOUT_ERROR',
+      'PAYOUT_FAILED',
+      'PAYOUT_DELAYED',
+      'PG_BALANCE_MISMATCH',
+    ]);
     const others = CS_CASE_KINDS.filter((k) => !accepted.has(k));
-    expect(others.length).toBe(CS_CASE_KINDS.length - 10);
+    expect(others.length).toBe(CS_CASE_KINDS.length - 15);
     expect(others).toEqual(expect.arrayContaining(['INQUIRY', 'CONTENT_REPORT', 'APPEAL', 'TICKET_NOT_ISSUED']));
     expect(others).not.toContain('STATEMENT_DISPUTE');
+    // 정산 운영 종류라도 지급 쪽 다섯 밖(포트원 실행·원장 불일치)은 여전히 받지 않는다
+    expect(others).toEqual(expect.arrayContaining(['PORTONE_PAYOUT_EXECUTION', 'PORTONE_LEDGER_MISMATCH']));
     for (const kind of others) {
       const store = new MemoryCsCaseStore();
       const r = await new ReceiveCaseRequested(store).handle({ ...payload, kind }, NOW);
