@@ -154,6 +154,7 @@ import type {
   NoticeTemplatePage,
   NoticeTemplateUpdate,
   OpsActor,
+  OpsAlertList,
   OpsBotReview,
   OpsBotReviewJudgement,
   OpsBotReviewJudgementCreate,
@@ -167,10 +168,13 @@ import type {
   OpsFanTransferPage,
   OpsFanUnmasking,
   OpsFanUnmaskingCreate,
+  OpsGoNoGoJudgement,
+  OpsGoNoGoJudgementRequest,
   OpsPayoutBatchDetail,
   OpsPromoterCreate,
   OpsPromoterDetail,
   OpsPromoterPage,
+  OpsReadiness,
   OpsReauthPasswordStep,
   OpsReviewDetail,
   OpsSaleReviewDetail,
@@ -471,6 +475,16 @@ export const getGetOpsAuditCheckpointVerificationResponseMock = (overrideRespons
 export const getGetOpsAuditAnchorResponseMock = (overrideResponse: Partial<Extract<AuditAnchor, object>> = {}): AuditAnchor => ({checkpointId: faker.helpers.arrayElement([faker.string.uuid(), undefined]), fromSeq: faker.helpers.arrayElement([faker.number.int(), undefined]), toSeq: faker.helpers.arrayElement([faker.number.int(), undefined]), rootHash: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), prevCheckpointHash: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), signature: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), keyId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), anchorRef: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), anchoredAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), algorithm: faker.helpers.arrayElement([faker.helpers.arrayElement(['Ed25519','ECDSA_P256_SHA256'] as const), undefined]), publicKey: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), no: faker.helpers.arrayElement([faker.number.int(), null]), kind: faker.helpers.arrayElement([faker.helpers.arrayElement(['DAILY','EVENT_CLOSE','MANUAL','EXECUTION'] as const), null]), leafCount: faker.helpers.arrayElement([faker.number.int(), null]), merkleRoot: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), checkpointHash: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), checkpointJson: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), signatureAlg: faker.helpers.arrayElement([faker.helpers.arrayElement(['ECDSA_P256_SHA256'] as const), null]), otsState: faker.helpers.arrayElement([faker.helpers.arrayElement(['PENDING','COMPLETE'] as const), null]), publishedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), legacy: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), ...overrideResponse})
 
 export const getGetOpsAuditAnchorVerificationResponseMock = (overrideResponse: Partial<Extract<AuditCheckpointVerification, object>> = {}): AuditCheckpointVerification => ({checkpointId: faker.helpers.arrayElement([faker.string.uuid(), undefined]), valid: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), rootValid: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), prevValid: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), signatureValid: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), anchorValid: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), fromSeq: faker.helpers.arrayElement([faker.number.int(), undefined]), toSeq: faker.helpers.arrayElement([faker.number.int(), undefined]), checkedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), no: faker.helpers.arrayElement([faker.number.int(), null]), kind: faker.helpers.arrayElement([faker.helpers.arrayElement(['DAILY','EVENT_CLOSE','MANUAL','EXECUTION'] as const), null]), legacy: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), signed: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), checkpointHash: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), otsState: faker.helpers.arrayElement([faker.helpers.arrayElement(['PENDING','COMPLETE'] as const), null]), publishedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), ...overrideResponse})
+
+export const getListOpsAlertsResponseMock = (overrideResponse: Partial<Extract<OpsAlertList, object>> = {}): OpsAlertList => ({items: Array.from({ length: faker.number.int({min: 1, max: 500}) }, (_, i) => i + 1).map(() => ({alertId: faker.string.alpha({length: {min: 10, max: 20}}), status: faker.helpers.arrayElement(['firing','resolved'] as const), startsAt: faker.date.past().toISOString().slice(0, 19) + 'Z', endsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), severity: faker.helpers.arrayElement(['SEV1','SEV2','SEV3'] as const), title: faker.string.alpha({length: {min: 10, max: 20}}), kind: faker.helpers.arrayElement(['slo','cause','invariant','control','hygiene','legal','field','change','security','flow'] as const), sourceKind: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.uuid(), undefined]), journey: faker.helpers.arrayElement([faker.helpers.arrayElement(['detail','queue_entry','queue_state','hold','seat_status','payment_accept','payment_confirm'] as const), undefined]), foldedUnder: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), runbookUrl: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), dashboardUrl: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), exploreUrl: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), dependency: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])})), seq: faker.number.int(), ...overrideResponse})
+
+export const getGetOpsEventReadinessResponseMock = (overrideResponse: Partial<Extract<OpsReadiness, object>> = {}): OpsReadiness => ({eventId: faker.string.uuid(), stage: faker.helpers.arrayElement(['t30','t0','live','after','entry','none'] as const), schedule: faker.helpers.arrayElement([{opensAt: faker.date.past().toISOString().slice(0, 19) + 'Z', saleEndsAt: faker.date.past().toISOString().slice(0, 19) + 'Z', entryOpensAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), entryClosedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])}, undefined]), items: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({key: faker.string.alpha({length: {min: 10, max: 20}}), group: faker.helpers.arrayElement(['required','recommended','display'] as const), status: faker.helpers.arrayElement(['pass','fail','unknown','not-in-env','deferred','display-only'] as const), value: faker.helpers.arrayElement([faker.number.float({fractionDigits: 2}), undefined]), unit: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), at: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), reason: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])})), preview: {verdict: faker.helpers.arrayElement(['go','no-go'] as const), failedRequired: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), failedRecommended: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}})))}, judgeableFrom: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), judgeableUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), lastJudgement: faker.helpers.arrayElement([{judgementId: faker.string.uuid(), verdict: faker.helpers.arrayElement(['go','no-go'] as const), failedRequired: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), failedRecommended: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), recommendedReasons: faker.helpers.arrayElement([{
+        [faker.string.alphanumeric(5)]: faker.string.alpha({length: {min: 10, max: 20}})
+      }, undefined]), judgedAt: faker.date.past().toISOString().slice(0, 19) + 'Z', sequence: faker.number.int()}, undefined]), ...overrideResponse})
+
+export const getCreateOpsGoNoGoJudgementResponseMock = (overrideResponse: Partial<Extract<OpsGoNoGoJudgement, object>> = {}): OpsGoNoGoJudgement => ({judgementId: faker.string.uuid(), eventId: faker.string.uuid(), verdict: faker.helpers.arrayElement(['go','no-go'] as const), failedRequired: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), failedRecommended: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), recommendedReasons: faker.helpers.arrayElement([{
+        [faker.string.alphanumeric(5)]: faker.string.alpha({length: {min: 10, max: 20}})
+      }, undefined]), items: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({key: faker.string.alpha({length: {min: 10, max: 20}}), group: faker.helpers.arrayElement(['required','recommended','display'] as const), status: faker.helpers.arrayElement(['pass','fail','unknown','not-in-env','deferred','display-only'] as const), value: faker.helpers.arrayElement([faker.number.float({fractionDigits: 2}), undefined]), unit: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), at: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), reason: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])})), judgedAt: faker.date.past().toISOString().slice(0, 19) + 'Z', sequence: faker.number.int(), ...overrideResponse})
 
 export const getGetOpsWidgetResponseMock = (overrideResponse: Partial<Extract<OpsWidgetValue, object>> = {}): OpsWidgetValue => ({widgetKey: faker.string.alpha({length: {min: 10, max: 20}}), source: faker.helpers.arrayElement(['prometheus','clickhouse'] as const), at: faker.date.past().toISOString().slice(0, 19) + 'Z', eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), error: faker.helpers.arrayElement([faker.helpers.arrayElement(['source-unavailable'] as const), undefined]), ...overrideResponse})
 
@@ -1969,6 +1983,42 @@ export const getGetOpsEventLiveMockHandler = (overrideResponse?: unknown | ((inf
   }, options)
 }
 
+export const getListOpsAlertsMockHandler = (overrideResponse?: OpsAlertList | ((info: Parameters<HttpResponseResolver>[0]) => Promise<OpsAlertList> | OpsAlertList), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/ops/alerts', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListOpsAlertsResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getGetOpsEventReadinessMockHandler = (overrideResponse?: OpsReadiness | ((info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => Promise<OpsReadiness> | OpsReadiness), options?: RequestHandlerOptions) => {
+  return http.get<{ eventId: string }>('*/v1/ops/events/:eventId/readiness', async (info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetOpsEventReadinessResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreateOpsGoNoGoJudgementMockHandler = (overrideResponse?: OpsGoNoGoJudgement | ((info: Parameters<HttpResponseResolver<{ eventId: string }, OpsGoNoGoJudgementRequest>>[0]) => Promise<OpsGoNoGoJudgement> | OpsGoNoGoJudgement), options?: RequestHandlerOptions) => {
+  return http.post<{ eventId: string }, OpsGoNoGoJudgementRequest>('*/v1/ops/events/:eventId/go-no-go-judgements', async (info: Parameters<HttpResponseResolver<{ eventId: string }, OpsGoNoGoJudgementRequest>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateOpsGoNoGoJudgementResponseMock(),
+      { status: 201
+      })
+  }, options)
+}
+
 export const getGetOpsWidgetMockHandler = (overrideResponse?: OpsWidgetValue | ((info: Parameters<HttpResponseResolver<{ widgetKey: string }>>[0]) => Promise<OpsWidgetValue> | OpsWidgetValue), options?: RequestHandlerOptions) => {
   return http.get<{ widgetKey: string }>('*/v1/ops/widgets/:widgetKey', async (info: Parameters<HttpResponseResolver<{ widgetKey: string }>>[0]) => {
 
@@ -2498,6 +2548,9 @@ export const getOpsMock = () => [
   getGetOpsAuditAnchorVerificationMockHandler(),
   getGetOpsLiveMockHandler(),
   getGetOpsEventLiveMockHandler(),
+  getListOpsAlertsMockHandler(),
+  getGetOpsEventReadinessMockHandler(),
+  getCreateOpsGoNoGoJudgementMockHandler(),
   getGetOpsWidgetMockHandler(),
   getGetOpsCommandMockHandler(),
   getGetOpsEventCancellationMockHandler(),

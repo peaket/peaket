@@ -147,6 +147,7 @@ import type {
   InquiryMessage,
   ListOpsAdminAccountPermissionChangesParams,
   ListOpsAdminAccountsParams,
+  ListOpsAlertsParams,
   ListOpsApprovalRequestsParams,
   ListOpsArtists200,
   ListOpsArtistsParams,
@@ -183,6 +184,7 @@ import type {
   NoticeTemplateCreate,
   NoticeTemplatePage,
   NoticeTemplateUpdate,
+  OpsAlertList,
   OpsBotReview,
   OpsBotReviewJudgement,
   OpsBotReviewJudgementCreate,
@@ -196,10 +198,13 @@ import type {
   OpsFanTransferPage,
   OpsFanUnmasking,
   OpsFanUnmaskingCreate,
+  OpsGoNoGoJudgement,
+  OpsGoNoGoJudgementRequest,
   OpsPayoutBatchDetail,
   OpsPromoterCreate,
   OpsPromoterDetail,
   OpsPromoterPage,
+  OpsReadiness,
   OpsReauthPasswordStep,
   OpsReviewDetail,
   OpsSaleReviewDetail,
@@ -14775,7 +14780,381 @@ export function useGetOpsEventLive<TData = Awaited<ReturnType<typeof getOpsEvent
 
 
 
-export type getOpsWidgetResponse200 = {
+export type listOpsAlertsResponse200 = {
+  data: OpsAlertList
+  status: 200
+}
+
+export type listOpsAlertsResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsAlertsResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsAlertsResponseSuccess = (listOpsAlertsResponse200) & {
+  headers: Headers;
+};
+export type listOpsAlertsResponseError = (listOpsAlertsResponse400 | listOpsAlertsResponse403) & {
+  headers: Headers;
+};
+
+export const getListOpsAlertsUrl = (params?: ListOpsAlertsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/alerts?${stringifiedParams}` : `/v1/ops/alerts`
+}
+
+/**
+ * FR-029, ADR-0100 결정 2, ADR-0371 결정 9(F-03-3 OPS-380). 걸린 경보 전부와 풀린 지 60분 [가정] 안의 경보를 500건 [가정]까지 준다(넘으면 풀린 것 가운데 오래된 것부터 뺀다, docs/frontend.md §3.10). 본문은 늘 여는 흐름 alert 사건과 같은 OpsAlert이고 받는 역할도 같다(cs_agent·cs_lead 403). seq 뒤 순번의 alert 사건만 화면이 목록 위에 다시 얹는다. eventId를 주면 그 회차 경보만. Cache-Control: no-store
+ * @summary 경보 목록(콘솔을 처음 열 때와 늘 여는 흐름 reset 뒤 경보 패널을 다시 채운다)
+ */
+export const listOpsAlerts = async (params?: ListOpsAlertsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsAlertsResponseSuccess> => {
+
+  return orvalFetch<listOpsAlertsResponseSuccess>(getListOpsAlertsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsAlertsQueryKey = (params?: ListOpsAlertsParams,) => {
+    return [
+    `/v1/ops/alerts`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsAlertsQueryOptions = <TData = Awaited<ReturnType<typeof listOpsAlerts>>, TError = ErrorType<ProblemResponse>>(params?: ListOpsAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsAlerts>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsAlertsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsAlerts>>> = ({ signal }) => listOpsAlerts(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsAlerts>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsAlertsQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsAlerts>>>
+export type ListOpsAlertsQueryError = ErrorType<ProblemResponse>
+
+
+export function useListOpsAlerts<TData = Awaited<ReturnType<typeof listOpsAlerts>>, TError = ErrorType<ProblemResponse>>(
+ params: undefined |  ListOpsAlertsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsAlerts>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsAlerts>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsAlerts>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsAlerts<TData = Awaited<ReturnType<typeof listOpsAlerts>>, TError = ErrorType<ProblemResponse>>(
+ params?: ListOpsAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsAlerts>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsAlerts>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsAlerts>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsAlerts<TData = Awaited<ReturnType<typeof listOpsAlerts>>, TError = ErrorType<ProblemResponse>>(
+ params?: ListOpsAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsAlerts>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 경보 목록(콘솔을 처음 열 때와 늘 여는 흐름 reset 뒤 경보 패널을 다시 채운다)
+ */
+
+export function useListOpsAlerts<TData = Awaited<ReturnType<typeof listOpsAlerts>>, TError = ErrorType<ProblemResponse>>(
+ params?: ListOpsAlertsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsAlerts>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsAlertsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getOpsEventReadinessResponse200 = {
+  data: OpsReadiness
+  status: 200
+}
+
+export type getOpsEventReadinessResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
+export type getOpsEventReadinessResponseSuccess = (getOpsEventReadinessResponse200) & {
+  headers: Headers;
+};
+export type getOpsEventReadinessResponseError = (getOpsEventReadinessResponse503) & {
+  headers: Headers;
+};
+
+export const getGetOpsEventReadinessUrl = (eventId: string,) => {
+
+
+
+
+  return `/v1/ops/events/${encodeURIComponent(String(eventId))}/readiness`
+}
+
+/**
+ * FR-029, NFR-008, ADR-0371(F-03-3 OPS-380). 단계는 core-svc 판매 설정(판매 시작·끝·입장 창)으로 서버가 정한다. 항목은 서버 고정 쿼리로 지표 창고(Prometheus)에서 읽고 화면이 쿼리를 보내지 못한다. 판매 설정이 없으면 stage none(200). core-svc를 읽지 못하면 503 readiness-source-unavailable. Cache-Control: no-store
+ * @summary 회차 단계와 T-30분 점검(항목별 결과·지금 판정 미리 보기·마지막 판정)
+ */
+export const getOpsEventReadiness = async (eventId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsEventReadinessResponseSuccess> => {
+
+  return orvalFetch<getOpsEventReadinessResponseSuccess>(getGetOpsEventReadinessUrl(eventId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsEventReadinessQueryKey = (eventId: string,) => {
+    return [
+    `/v1/ops/events/${eventId}/readiness`
+    ] as const;
+    }
+
+
+export const getGetOpsEventReadinessQueryOptions = <TData = Awaited<ReturnType<typeof getOpsEventReadiness>>, TError = ErrorType<ProblemResponse>>(eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventReadiness>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsEventReadinessQueryKey(eventId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsEventReadiness>>> = ({ signal }) => getOpsEventReadiness(eventId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: eventId !== null && eventId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsEventReadiness>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsEventReadinessQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsEventReadiness>>>
+export type GetOpsEventReadinessQueryError = ErrorType<ProblemResponse>
+
+
+export function useGetOpsEventReadiness<TData = Awaited<ReturnType<typeof getOpsEventReadiness>>, TError = ErrorType<ProblemResponse>>(
+ eventId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventReadiness>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsEventReadiness>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsEventReadiness>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsEventReadiness<TData = Awaited<ReturnType<typeof getOpsEventReadiness>>, TError = ErrorType<ProblemResponse>>(
+ eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventReadiness>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsEventReadiness>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsEventReadiness>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsEventReadiness<TData = Awaited<ReturnType<typeof getOpsEventReadiness>>, TError = ErrorType<ProblemResponse>>(
+ eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventReadiness>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 회차 단계와 T-30분 점검(항목별 결과·지금 판정 미리 보기·마지막 판정)
+ */
+
+export function useGetOpsEventReadiness<TData = Awaited<ReturnType<typeof getOpsEventReadiness>>, TError = ErrorType<ProblemResponse>>(
+ eventId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsEventReadiness>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsEventReadinessQueryOptions(eventId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsGoNoGoJudgementResponse201 = {
+  data: OpsGoNoGoJudgement
+  status: 201
+}
+
+export type createOpsGoNoGoJudgementResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsGoNoGoJudgementResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsGoNoGoJudgementResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsGoNoGoJudgementResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsGoNoGoJudgementResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
+export type createOpsGoNoGoJudgementResponseSuccess = (createOpsGoNoGoJudgementResponse201) & {
+  headers: Headers;
+};
+export type createOpsGoNoGoJudgementResponseError = (createOpsGoNoGoJudgementResponse403 | createOpsGoNoGoJudgementResponse404 | createOpsGoNoGoJudgementResponse409 | createOpsGoNoGoJudgementResponse422 | createOpsGoNoGoJudgementResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsGoNoGoJudgementUrl = (eventId: string,) => {
+
+
+
+
+  return `/v1/ops/events/${encodeURIComponent(String(eventId))}/go-no-go-judgements`
+}
+
+/**
+ * FR-029, control-tower §2 'Go/No-Go 판정', RB-02, ADR-0371 결정 3·4·5(F-03-3 OPS-380). 서버가 점검 항목을 다시 계산해 판정을 정하고(본문의 판정·항목은 받지 않는다), 판정·실패 항목·권고 실패 사유를 판정 기록 표와 같은 트랜잭션의 감사 체인(GO_NO_GO_JUDGED, 판정자 계정 ID 없음)에 남긴다. 판정 창은 판매 시작 30분 전부터 20분 전까지이고(재판정도 같다) 그 밖은 409. 같은 회차의 판정은 sequence가 1씩 는다
+ * @summary Go/No-Go 판정 기록(서버가 항목을 다시 계산한다)
+ */
+export const createOpsGoNoGoJudgement = async (eventId: string,
+    opsGoNoGoJudgementRequest?: OpsGoNoGoJudgementRequest, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsGoNoGoJudgementResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsGoNoGoJudgementResponseSuccess>(getCreateOpsGoNoGoJudgementUrl(eventId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(opsGoNoGoJudgementRequest)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsGoNoGoJudgementMutationKey = () => ['createOpsGoNoGoJudgement'] as const;
+
+export const getCreateOpsGoNoGoJudgementMutationOptions = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsGoNoGoJudgement>>, TError,CreateOpsGoNoGoJudgementMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsGoNoGoJudgement>>, TError,CreateOpsGoNoGoJudgementMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsGoNoGoJudgementMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsGoNoGoJudgement>>, CreateOpsGoNoGoJudgementMutationVariables> = (props) => {
+          const {eventId,data} = props ?? {};
+
+          return  createOpsGoNoGoJudgement(eventId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsGoNoGoJudgementMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsGoNoGoJudgement>>>
+    export type CreateOpsGoNoGoJudgementMutationBody = BodyType<OpsGoNoGoJudgementRequest> | undefined
+    export type CreateOpsGoNoGoJudgementMutationError = ErrorType<ProblemResponse>
+    export type CreateOpsGoNoGoJudgementMutationVariables = {eventId: string;data?: BodyType<OpsGoNoGoJudgementRequest>}
+
+    /**
+ * @summary Go/No-Go 판정 기록(서버가 항목을 다시 계산한다)
+ */
+export const useCreateOpsGoNoGoJudgement = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsGoNoGoJudgement>>, TError,CreateOpsGoNoGoJudgementMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsGoNoGoJudgement>>,
+        TError,
+        CreateOpsGoNoGoJudgementMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsGoNoGoJudgementMutationOptions(options), queryClient);
+    }
+    export type getOpsWidgetResponse200 = {
   data: OpsWidgetValue
   status: 200
 }
@@ -14814,7 +15193,7 @@ export const getGetOpsWidgetUrl = (widgetKey: string,
 }
 
 /**
- * FR-029, ADR-0100, ADR-0360. 위젯 키는 '위젯이름.대상'이고 지금 키는 queue-admission-rate.summary(대기열 팀 입장 비율·빈자리)·purchase-pg-status.summary(구매 팀 결제사)·rt-sales.summary(관제 실시간 표 판매 누적·구역별 잔여석, F-04-1) 셋이다. 응답은 OpsWidgetValue(공통 네 칸)이고 나머지 칸은 위젯 키마다 OpsWidgetQueueAdmissionRateSummary·OpsWidgetPurchasePgStatusSummary·OpsWidgetRtSalesSummary 모양이며, 원천(Prometheus·ClickHouse)을 읽지 못하면 OpsWidgetUnavailable(error source-unavailable, 200)이다. 모르는 키는 404다. from·to가 없으면 지금부터 15분 [가정] 앞까지이고 창은 1시간 [가정]을 넘지 않는다. 임의 쿼리를 받지 않는다. Cache-Control: no-store
+ * FR-029, ADR-0100, ADR-0360. 위젯 키는 '위젯이름.대상'이고 지금 키는 queue-admission-rate.summary(대기열 팀 입장 비율·빈자리)·purchase-pg-status.summary(구매 팀 결제사)·rt-sales.summary(관제 실시간 표 판매 누적·구역별 잔여석, F-04-1)와 관제 판단 위젯 넷 ops-readiness.checklist·ops-budget.journeys·ops-saturation.summary·ops-diagnostics.summary(F-03-3, 모양은 OpsWidgetOps* 스키마)다. 응답은 OpsWidgetValue(공통 네 칸)이고 나머지 칸은 위젯 키마다 OpsWidgetQueueAdmissionRateSummary·OpsWidgetPurchasePgStatusSummary·OpsWidgetRtSalesSummary 모양이며, 원천(Prometheus·ClickHouse)을 읽지 못하면 OpsWidgetUnavailable(error source-unavailable, 200)이다. 모르는 키는 404다. from·to가 없으면 지금부터 15분 [가정] 앞까지이고 창은 1시간 [가정]을 넘지 않는다. 임의 쿼리를 받지 않는다. Cache-Control: no-store
  * @summary 관제 위젯 조회(처음 그릴 때와 다시 보일 때의 지난 값, 그래프 최근 15분 창)
  */
 export const getOpsWidget = async (widgetKey: string,

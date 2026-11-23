@@ -5269,7 +5269,120 @@ export const GetOpsEventLiveQueryParams = zod.object({
 export const GetOpsEventLiveResponse = zod.unknown()
 
 /**
- * FR-029, ADR-0100, ADR-0360. 위젯 키는 '위젯이름.대상'이고 지금 키는 queue-admission-rate.summary(대기열 팀 입장 비율·빈자리)·purchase-pg-status.summary(구매 팀 결제사)·rt-sales.summary(관제 실시간 표 판매 누적·구역별 잔여석, F-04-1) 셋이다. 응답은 OpsWidgetValue(공통 네 칸)이고 나머지 칸은 위젯 키마다 OpsWidgetQueueAdmissionRateSummary·OpsWidgetPurchasePgStatusSummary·OpsWidgetRtSalesSummary 모양이며, 원천(Prometheus·ClickHouse)을 읽지 못하면 OpsWidgetUnavailable(error source-unavailable, 200)이다. 모르는 키는 404다. from·to가 없으면 지금부터 15분 [가정] 앞까지이고 창은 1시간 [가정]을 넘지 않는다. 임의 쿼리를 받지 않는다. Cache-Control: no-store
+ * FR-029, ADR-0100 결정 2, ADR-0371 결정 9(F-03-3 OPS-380). 걸린 경보 전부와 풀린 지 60분 [가정] 안의 경보를 500건 [가정]까지 준다(넘으면 풀린 것 가운데 오래된 것부터 뺀다, docs/frontend.md §3.10). 본문은 늘 여는 흐름 alert 사건과 같은 OpsAlert이고 받는 역할도 같다(cs_agent·cs_lead 403). seq 뒤 순번의 alert 사건만 화면이 목록 위에 다시 얹는다. eventId를 주면 그 회차 경보만. Cache-Control: no-store
+ * @summary 경보 목록(콘솔을 처음 열 때와 늘 여는 흐름 reset 뒤 경보 패널을 다시 채운다)
+ */
+export const ListOpsAlertsQueryParams = zod.object({
+  "eventId": zod.uuid().optional()
+})
+
+export const listOpsAlertsResponseItemsMax = 500;
+
+
+
+export const ListOpsAlertsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "alertId": zod.string(),
+  "status": zod.enum(['firing', 'resolved']),
+  "startsAt": zod.iso.datetime({"offset":true}),
+  "endsAt": zod.iso.datetime({"offset":true}).optional().describe('풀렸을 때'),
+  "severity": zod.enum(['SEV1', 'SEV2', 'SEV3']),
+  "title": zod.string(),
+  "kind": zod.enum(['slo', 'cause', 'invariant', 'control', 'hygiene', 'legal', 'field', 'change', 'security', 'flow']),
+  "sourceKind": zod.string().optional().describe('경보 기록 표의 내부 종류'),
+  "eventId": zod.uuid().optional().describe('회차 경보의 회차 ID'),
+  "journey": zod.enum(['detail', 'queue_entry', 'queue_state', 'hold', 'seat_status', 'payment_accept', 'payment_confirm']).optional(),
+  "foldedUnder": zod.string().optional().describe('억제되어 접힌 경보면 위 경보의 alertId'),
+  "runbookUrl": zod.string().optional(),
+  "dashboardUrl": zod.string().optional(),
+  "exploreUrl": zod.string().optional(),
+  "dependency": zod.string().optional()
+}).describe('경보 한 건(경보 목록 REST와 늘 여는 흐름 alert 사건이 같은 모양, asyncapi OpsAlert). ops DB 경보 기록 표의 행이 알림 표 트리거(마이그레이션 0028·0029)와 목록 처리기에서 같은 칸으로 바뀐다. kind는 계약 열거에 없는 내부 종류면 hygiene이고 내부 종류는 sourceKind다. journey·foldedUnder·runbookUrl·dashboardUrl·exploreUrl·dependency는 경보 기록의 detail에 그 이름의 글 칸이 있을 때만 싣는다(F-03-3, ADR-0371 결정 9)')).max(listOpsAlertsResponseItemsMax),
+  "seq": zod.int()
+}).describe('경보 목록(GET /v1/ops/alerts). seq는 응답을 만들기 직전의 알림 표 마지막 순번이라, 화면은 늘 여는 흐름에서 그 뒤 순번의 alert 사건만 목록 위에 다시 얹는다(ADR-0100 결정 2, ADR-0371 결정 9)')
+
+/**
+ * FR-029, NFR-008, ADR-0371(F-03-3 OPS-380). 단계는 core-svc 판매 설정(판매 시작·끝·입장 창)으로 서버가 정한다. 항목은 서버 고정 쿼리로 지표 창고(Prometheus)에서 읽고 화면이 쿼리를 보내지 못한다. 판매 설정이 없으면 stage none(200). core-svc를 읽지 못하면 503 readiness-source-unavailable. Cache-Control: no-store
+ * @summary 회차 단계와 T-30분 점검(항목별 결과·지금 판정 미리 보기·마지막 판정)
+ */
+export const GetOpsEventReadinessParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
+})
+
+export const GetOpsEventReadinessResponse = zod.object({
+  "eventId": zod.uuid(),
+  "stage": zod.enum(['t30', 't0', 'live', 'after', 'entry', 'none']),
+  "schedule": zod.object({
+  "opensAt": zod.iso.datetime({"offset":true}),
+  "saleEndsAt": zod.iso.datetime({"offset":true}),
+  "entryOpensAt": zod.iso.datetime({"offset":true}).optional(),
+  "entryClosedAt": zod.iso.datetime({"offset":true}).optional()
+}).optional(),
+  "items": zod.array(zod.object({
+  "key": zod.string().describe('항목 키(예 clock-offset)'),
+  "group": zod.enum(['required', 'recommended', 'display']),
+  "status": zod.enum(['pass', 'fail', 'unknown', 'not-in-env', 'deferred', 'display-only']),
+  "value": zod.number().optional().describe('잰 값(있을 때)'),
+  "unit": zod.string().optional().describe('값의 단위(ms·ratio·requests 등)'),
+  "at": zod.iso.datetime({"offset":true}).optional().describe('값을 읽은 시각'),
+  "reason": zod.string().optional().describe('확인할 수 없음의 까닭(source-unavailable·source-not-built·no-sample)')
+}).describe('T-30분 점검 항목 하나(F-03-3 OPS-380, ADR-0371 결정 2·3). key는 영문 소문자·-이고 화면 글자는 화면이 만든다. 기준 숫자는 싣지 않는다(정본 docs/features/control-tower.md §2를 따른 서버 상수). status: pass 통과, fail 실패, unknown 확인할 수 없음(원천을 못 읽음·빈 결과·NaN·5분 넘게 표본 없음, 필수면 실패로 센다), not-in-env 이 환경에 없음(local·ci·demo의 클라우드 전용 항목, 판정에서 뺀다), deferred 판정 보류(CDN 적중률의 요청 수 부족), display-only 표시만(판정에 들지 않는다)')),
+  "preview": zod.object({
+  "verdict": zod.enum(['go', 'no-go']),
+  "failedRequired": zod.array(zod.string()),
+  "failedRecommended": zod.array(zod.string())
+}).describe('지금 판정 미리 보기. 필수 중 fail·unknown은 failedRequired, 권고 중 fail은 failedRecommended, failedRequired가 있으면 no-go(ADR-0371 결정 3)'),
+  "judgeableFrom": zod.iso.datetime({"offset":true}).optional().describe('판정 창의 시작(판매 시작 30분 전)'),
+  "judgeableUntil": zod.iso.datetime({"offset":true}).optional().describe('판정 창의 끝(판매 시작 20분 전)'),
+  "lastJudgement": zod.object({
+  "judgementId": zod.uuid(),
+  "verdict": zod.enum(['go', 'no-go']),
+  "failedRequired": zod.array(zod.string()),
+  "failedRecommended": zod.array(zod.string()),
+  "recommendedReasons": zod.record(zod.string(), zod.string()).optional(),
+  "judgedAt": zod.iso.datetime({"offset":true}),
+  "sequence": zod.int().describe('같은 회차 안에서 1씩 느는 판정 순번(재판정은 다음 순번)')
+}).optional().describe('회차의 마지막 Go/No-Go 판정(판정자는 싣지 않는다)')
+}).describe('회차 단계와 T-30분 점검(F-03-3 OPS-380, ADR-0371). stage: t30 T-30분 점검(판매 시작 30분 전부터), t0 T=0 집중(시작부터 10분), live 판매 진행 중, after 온세일 종료 후, entry 공연 당일 입장, none 활성 회차 아님(판매 설정 없음 포함). judgeableUntil은 판정 창의 끝(판매 시작 20분 전)이고 그때까지 판정이 없으면 No-Go로 본다')
+
+/**
+ * FR-029, control-tower §2 'Go/No-Go 판정', RB-02, ADR-0371 결정 3·4·5(F-03-3 OPS-380). 서버가 점검 항목을 다시 계산해 판정을 정하고(본문의 판정·항목은 받지 않는다), 판정·실패 항목·권고 실패 사유를 판정 기록 표와 같은 트랜잭션의 감사 체인(GO_NO_GO_JUDGED, 판정자 계정 ID 없음)에 남긴다. 판정 창은 판매 시작 30분 전부터 20분 전까지이고(재판정도 같다) 그 밖은 409. 같은 회차의 판정은 sequence가 1씩 는다
+ * @summary Go/No-Go 판정 기록(서버가 항목을 다시 계산한다)
+ */
+export const CreateOpsGoNoGoJudgementParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
+})
+
+export const createOpsGoNoGoJudgementBodyRecommendedReasonsMaxOne = 500;
+
+
+
+export const CreateOpsGoNoGoJudgementBody = zod.object({
+  "recommendedReasons": zod.record(zod.string(), zod.string().max(createOpsGoNoGoJudgementBodyRecommendedReasonsMaxOne)).optional().describe('실패한 권고 항목 키 → 계속하는 사유(500자 이하)')
+}).describe('Go/No-Go 판정 요청. 서버가 항목을 다시 계산해 판정을 정하므로 받는 칸은 실패한 권고 항목의 사유뿐이다(항목 결과·판정 값을 보내도 쓰지 않는다, ASVS 8.2.3)')
+
+export const CreateOpsGoNoGoJudgementResponse = zod.object({
+  "judgementId": zod.uuid(),
+  "eventId": zod.uuid(),
+  "verdict": zod.enum(['go', 'no-go']),
+  "failedRequired": zod.array(zod.string()),
+  "failedRecommended": zod.array(zod.string()),
+  "recommendedReasons": zod.record(zod.string(), zod.string()).optional(),
+  "items": zod.array(zod.object({
+  "key": zod.string().describe('항목 키(예 clock-offset)'),
+  "group": zod.enum(['required', 'recommended', 'display']),
+  "status": zod.enum(['pass', 'fail', 'unknown', 'not-in-env', 'deferred', 'display-only']),
+  "value": zod.number().optional().describe('잰 값(있을 때)'),
+  "unit": zod.string().optional().describe('값의 단위(ms·ratio·requests 등)'),
+  "at": zod.iso.datetime({"offset":true}).optional().describe('값을 읽은 시각'),
+  "reason": zod.string().optional().describe('확인할 수 없음의 까닭(source-unavailable·source-not-built·no-sample)')
+}).describe('T-30분 점검 항목 하나(F-03-3 OPS-380, ADR-0371 결정 2·3). key는 영문 소문자·-이고 화면 글자는 화면이 만든다. 기준 숫자는 싣지 않는다(정본 docs/features/control-tower.md §2를 따른 서버 상수). status: pass 통과, fail 실패, unknown 확인할 수 없음(원천을 못 읽음·빈 결과·NaN·5분 넘게 표본 없음, 필수면 실패로 센다), not-in-env 이 환경에 없음(local·ci·demo의 클라우드 전용 항목, 판정에서 뺀다), deferred 판정 보류(CDN 적중률의 요청 수 부족), display-only 표시만(판정에 들지 않는다)')),
+  "judgedAt": zod.iso.datetime({"offset":true}),
+  "sequence": zod.int()
+}).describe('기록한 Go/No-Go 판정(같은 트랜잭션에서 감사 체인 GO_NO_GO_JUDGED에도 남는다)')
+
+/**
+ * FR-029, ADR-0100, ADR-0360. 위젯 키는 '위젯이름.대상'이고 지금 키는 queue-admission-rate.summary(대기열 팀 입장 비율·빈자리)·purchase-pg-status.summary(구매 팀 결제사)·rt-sales.summary(관제 실시간 표 판매 누적·구역별 잔여석, F-04-1)와 관제 판단 위젯 넷 ops-readiness.checklist·ops-budget.journeys·ops-saturation.summary·ops-diagnostics.summary(F-03-3, 모양은 OpsWidgetOps* 스키마)다. 응답은 OpsWidgetValue(공통 네 칸)이고 나머지 칸은 위젯 키마다 OpsWidgetQueueAdmissionRateSummary·OpsWidgetPurchasePgStatusSummary·OpsWidgetRtSalesSummary 모양이며, 원천(Prometheus·ClickHouse)을 읽지 못하면 OpsWidgetUnavailable(error source-unavailable, 200)이다. 모르는 키는 404다. from·to가 없으면 지금부터 15분 [가정] 앞까지이고 창은 1시간 [가정]을 넘지 않는다. 임의 쿼리를 받지 않는다. Cache-Control: no-store
  * @summary 관제 위젯 조회(처음 그릴 때와 다시 보일 때의 지난 값, 그래프 최근 15분 창)
  */
 export const GetOpsWidgetParams = zod.object({

@@ -17,4 +17,8 @@ export const OpsWidgetUnavailableWidgetKey = {
   'queue-admission-ratesummary': 'queue-admission-rate.summary',
   'purchase-pg-statussummary': 'purchase-pg-status.summary',
   'rt-salessummary': 'rt-sales.summary',
+  'ops-readinesschecklist': 'ops-readiness.checklist',
+  'ops-budgetjourneys': 'ops-budget.journeys',
+  'ops-saturationsummary': 'ops-saturation.summary',
+  'ops-diagnosticssummary': 'ops-diagnostics.summary',
 } as const;

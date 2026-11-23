@@ -12,7 +12,7 @@
 import * as zod from 'zod';
 
 export const OpsWidgetUnavailable = zod.object({
-  "widgetKey": zod.enum(['queue-admission-rate.summary', 'purchase-pg-status.summary', 'rt-sales.summary']),
+  "widgetKey": zod.enum(['queue-admission-rate.summary', 'purchase-pg-status.summary', 'rt-sales.summary', 'ops-readiness.checklist', 'ops-budget.journeys', 'ops-saturation.summary', 'ops-diagnostics.summary']),
   "source": zod.enum(['prometheus', 'clickhouse']),
   "at": zod.iso.datetime({"offset":true}),
   "eventId": zod.string().nullable(),

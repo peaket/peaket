@@ -21,6 +21,7 @@ export const OpsAlert = zod.object({
   "dependency": zod.string().optional().describe('원인 경보의 의존성(있으면). 외부 제공자(결제사·본인확인 등)와 내부 의존(outbox-relay, kafka-trade 같은 클러스터 이름 등)을 함께 쓴다. 같은 의존성의 원인 경보를 묶는다(docs/observability.md §5, ADR-0069, 추천 적용 2026-10-29, ADR-0145 결정 8)'),
   "exploreUrl": zod.string().optional().describe('같은 시간 창과 그 SLI의 실패 조건으로 미리 채운 조회 링크. SLO 경보는 필수(ADR-0069)'),
   "foldedUnder": zod.string().optional().describe('억제되어 접힌 경보면 위 경보의 alertId. 알림은 보내지 않았고 콘솔에 접힌 줄로 보인다(ADR-0069, 추천 적용 2026-10-20, ADR-0073)'),
+  "sourceKind": zod.string().optional().describe('ops DB 경보 기록 표의 내부 종류(kind가 계약 열거에 없으면 kind는 hygiene, F-03-1 마이그레이션 0028)'),
   "context": zod.object({
   "eventId": zod.string().optional(),
   "gateZone": zod.string().optional(),

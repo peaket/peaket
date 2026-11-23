@@ -6,8 +6,21 @@
  */
 import * as zod from 'zod';
 
-export const OpsControl = zod.looseObject({
-
+export const OpsControl = zod.object({
+  "eventId": zod.uuid(),
+  "kind": zod.enum(['ok', 'paused', 'raise-stopped', 'no-input', 'emergency-stop', 'unknown']),
+  "since": zod.iso.datetime({"offset":true}).optional().describe('입력 없음이 시작된 시각(inputStaleAt)'),
+  "inputStaleKinds": zod.array(zod.string()).optional().describe('없는 입력 이름(downstream_latency·downstream_errors·seat_store·budget_burn 등, admission-ctrl inputStaleKinds)'),
+  "targetNow": zod.int().optional().describe('지금 쓰는 동시 입장 목표'),
+  "budgetHoldAt": zod.iso.datetime({"offset":true}).optional().describe('버짓 연동 감축으로 자동 증액을 멈춘 시각'),
+  "lastDecrease": zod.object({
+  "reason": zod.string().optional(),
+  "journey": zod.string().optional(),
+  "from": zod.int().optional(),
+  "to": zod.int().optional(),
+  "exposureReduction": zod.boolean().optional()
+}).optional().describe('마지막 감축(사유·여정·전후 목표·노출 줄이기)'),
+  "updatedAt": zod.iso.datetime({"offset":true}).describe('값을 읽은 시각')
 })
 
 export type OpsControl = zod.input<typeof OpsControl>;

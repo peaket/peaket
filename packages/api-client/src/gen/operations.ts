@@ -99,6 +99,7 @@ export type OperationId =
   | 'createOpsFraudCaseAppealRequest'
   | 'createOpsFraudCaseEvidenceBundle'
   | 'createOpsFraudCaseIpReveal'
+  | 'createOpsGoNoGoJudgement'
   | 'createOpsHomeLayoutBannerImage'
   | 'createOpsNoticeTemplate'
   | 'createOpsNoticeTemplateApproval'
@@ -258,6 +259,7 @@ export type OperationId =
   | 'getOpsEventDemandForecast'
   | 'getOpsEventFraudOverview'
   | 'getOpsEventLive'
+  | 'getOpsEventReadiness'
   | 'getOpsEventReport'
   | 'getOpsEventReports'
   | 'getOpsEvidenceBundle'
@@ -317,6 +319,7 @@ export type OperationId =
   | 'listInquiries'
   | 'listOpsAdminAccountPermissionChanges'
   | 'listOpsAdminAccounts'
+  | 'listOpsAlerts'
   | 'listOpsApprovalRequests'
   | 'listOpsArtists'
   | 'listOpsAuditCheckpoints'
@@ -503,6 +506,7 @@ export const OPERATIONS = {
   createOpsFraudCaseAppealRequest: {operationId: "createOpsFraudCaseAppealRequest",method: "POST",path: "/v1/ops/fraud-cases/{caseId}/appeal-requests",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsFraudCaseEvidenceBundle: {operationId: "createOpsFraudCaseEvidenceBundle",method: "POST",path: "/v1/ops/fraud-cases/{caseId}/evidence-bundles",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsFraudCaseIpReveal: {operationId: "createOpsFraudCaseIpReveal",method: "POST",path: "/v1/ops/fraud-cases/{caseId}/ip-reveals",host: "ops-api",kind: "write",cookie: true},
+  createOpsGoNoGoJudgement: {operationId: "createOpsGoNoGoJudgement",method: "POST",path: "/v1/ops/events/{eventId}/go-no-go-judgements",host: "ops-api",kind: "write",cookie: true},
   createOpsHomeLayoutBannerImage: {operationId: "createOpsHomeLayoutBannerImage",method: "POST",path: "/v1/ops/home-layout/banner-images",host: "ops-api",kind: "upload",cookie: true},
   createOpsNoticeTemplate: {operationId: "createOpsNoticeTemplate",method: "POST",path: "/v1/ops/notice-templates",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsNoticeTemplateApproval: {operationId: "createOpsNoticeTemplateApproval",method: "POST",path: "/v1/ops/notice-templates/{templateId}/approvals",host: "ops-api",kind: "write",cookie: true,ifMatch: true},
@@ -662,6 +666,7 @@ export const OPERATIONS = {
   getOpsEventDemandForecast: {operationId: "getOpsEventDemandForecast",method: "GET",path: "/v1/ops/events/{eventId}/demand-forecast",host: "ops-api",kind: "read",cookie: true},
   getOpsEventFraudOverview: {operationId: "getOpsEventFraudOverview",method: "GET",path: "/v1/ops/events/{eventId}/fraud-overview",host: "ops-api",kind: "read",cookie: true},
   getOpsEventLive: {operationId: "getOpsEventLive",method: "GET",path: "/v1/ops/events/{eventId}/live",host: "ops-api",kind: "read",cookie: true,sse: true,query: ["widgets"]},
+  getOpsEventReadiness: {operationId: "getOpsEventReadiness",method: "GET",path: "/v1/ops/events/{eventId}/readiness",host: "ops-api",kind: "read",cookie: true},
   getOpsEventReport: {operationId: "getOpsEventReport",method: "GET",path: "/v1/ops/events/{eventId}/reports/{stage}",host: "ops-api",kind: "read",cookie: true},
   getOpsEventReports: {operationId: "getOpsEventReports",method: "GET",path: "/v1/ops/events/{eventId}/reports",host: "ops-api",kind: "read",cookie: true},
   getOpsEvidenceBundle: {operationId: "getOpsEvidenceBundle",method: "GET",path: "/v1/ops/evidence-bundles/{bundleId}",host: "ops-api",kind: "read",cookie: true},
@@ -721,6 +726,7 @@ export const OPERATIONS = {
   listInquiries: {operationId: "listInquiries",method: "GET",path: "/v1/inquiries",host: "api",kind: "read",cookie: true,query: ["limit","page","status"]},
   listOpsAdminAccountPermissionChanges: {operationId: "listOpsAdminAccountPermissionChanges",method: "GET",path: "/v1/ops/admin-accounts/{adminAccountId}/permission-changes",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit"]},
   listOpsAdminAccounts: {operationId: "listOpsAdminAccounts",method: "GET",path: "/v1/ops/admin-accounts",host: "ops-api",kind: "read",cookie: true,query: ["cursor","group","limit","promoterId","status"]},
+  listOpsAlerts: {operationId: "listOpsAlerts",method: "GET",path: "/v1/ops/alerts",host: "ops-api",kind: "read",cookie: true,query: ["eventId"]},
   listOpsApprovalRequests: {operationId: "listOpsApprovalRequests",method: "GET",path: "/v1/ops/approval-requests",host: "ops-api",kind: "read",cookie: true,query: ["awaitingMyApproval","cursor","kind","limit","requestedByMe","status"]},
   listOpsArtists: {operationId: "listOpsArtists",method: "GET",path: "/v1/ops/artists",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit","q"]},
   listOpsAuditCheckpoints: {operationId: "listOpsAuditCheckpoints",method: "GET",path: "/v1/ops/audit-checkpoints",host: "ops-api",kind: "read",cookie: true,query: ["limit"]},

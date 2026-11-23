@@ -153,6 +153,7 @@ export type ProblemType =
   | 'invitation-step-out-of-order'
   | 'judgement-not-allowed'
   | 'judgement-required'
+  | 'judgement-window-closed'
   | 'jwks-not-found'
   | 'last-login-method'
   | 'last-partner-admin'
@@ -276,11 +277,13 @@ export type ProblemType =
   | 'queue-ticket-expired'
   | 'queue-ticket-invalid'
   | 'queue-ticket-removed'
+  | 'readiness-source-unavailable'
   | 'reauth-code-invalid'
   | 'reauth-required'
   | 'reauth-step-invalid'
   | 'reauth-unavailable'
   | 'recipient-not-found'
+  | 'recommended-reason-required'
   | 'refresh-token-invalid'
   | 'refund-account-required'
   | 'refund-rejected'
@@ -548,6 +551,7 @@ export const PROBLEM_TYPES = {
   'invitation-step-out-of-order': { status: 409, title: "앞 단계를 먼저 마쳐 주세요" },
   'judgement-not-allowed': { status: 409, title: "지금은 판정할 수 없습니다" },
   'judgement-required': { status: 409, title: "판정 전에는 확정할 수 없습니다" },
+  'judgement-window-closed': { status: 409, title: "지금은 Go/No-Go 판정을 받지 않습니다" },
   'jwks-not-found': { status: 404, title: "없는 공개키 묶음입니다" },
   'last-login-method': { status: 409, title: "마지막 로그인 수단은 해제할 수 없습니다" },
   'last-partner-admin': { status: 409, title: "마지막 파트너 관리자는 바꿀 수 없습니다" },
@@ -671,11 +675,13 @@ export const PROBLEM_TYPES = {
   'queue-ticket-expired': { status: 410, title: "입장 시간이 지났습니다" },
   'queue-ticket-invalid': { status: 403, title: "대기표를 확인할 수 없습니다" },
   'queue-ticket-removed': { status: 410, title: "이 대기표는 더 쓸 수 없습니다" },
+  'readiness-source-unavailable': { status: 503, title: "점검 원천을 읽지 못했습니다" },
   'reauth-code-invalid': { status: 422, title: "인증 앱 코드가 맞지 않습니다" },
   'reauth-required': { status: 403, title: "다시 인증해 주세요" },
   'reauth-step-invalid': { status: 410, title: "처음부터 다시 인증해 주세요" },
   'reauth-unavailable': { status: 503, title: "재인증 검증기를 쓸 수 없습니다" },
   'recipient-not-found': { status: 404, title: "받을 수 있는 회원을 찾지 못했습니다" },
+  'recommended-reason-required': { status: 422, title: "실패한 권고 항목의 사유를 적어 주세요" },
   'refresh-token-invalid': { status: 401, title: "다시 로그인해 주세요" },
   'refund-account-required': { status: 422, title: "환불받을 계좌를 입력해 주세요" },
   'refund-rejected': { status: 422, title: "결제사가 환급을 거절했습니다. 고객센터가 이어 봅니다" },
