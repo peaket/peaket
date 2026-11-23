@@ -108,3 +108,16 @@ test('BAT-177 T6 ⑤ QR·오프라인 조각은 정적 import하지 않고 load 
   // 동적 import를 부르는 곳은 afterLoad 콜백 하나뿐이다(T6 ③과 겹쳐 확인)
   assert.equal(walletClient.match(/void load\(\)/g)?.length, 1);
 });
+
+// FIX-wallet-tickets(계획 §13 '화면 쪽', §14 3): 운영 빌드의 /my/tickets는 실제 화면(WalletLive)을 그린다. 같은 첫 JS 규칙(BAT-177 T6 ⑤)을 실제 화면에도 건다.
+// 첫 HTML의 불러오는 중 글·QR 뼈대는 tools/web-checks/reflow/wallet-live.spec.mjs 'BAT-177 T6 ⑥'이 운영 빌드에서 본다.
+test('BAT-177 T6 ⑦ 실제 월렛(WalletLive.tsx)도 QR·오프라인 조각과 목록 받기(sync)를 값으로 정적 import하지 않는다(FIX-wallet-tickets)', () => {
+  const livePath = join(here, 'WalletLive.tsx');
+  assert.ok(existsSync(livePath), 'widgets/ticket-wallet/ui/WalletLive.tsx(실제 월렛 화면)가 없다');
+  const live = read(livePath);
+  // 정적 import 가운데 QR·오프라인 조각, 목록 받기(wallet-sync/sync)는 type import만 허용한다(순수 함수 model은 된다)
+  const staticImports = [...live.matchAll(/^import\s+(.+?)\s+from\s+'([^']+)';$/gm)].filter(([, , path]) => /\/(?:DeviceQr|OfflineBanner)$|\/wallet-sync\/sync(?:\.ts)?$/.test(path));
+  for (const [, clause, path] of staticImports) assert.match(clause, /^type\b/, `${path}를 값으로 정적 import한다(첫 JS에 든다)`);
+  assert.doesNotMatch(live, /<DeviceQr[\s>]/, 'DeviceQr를 직접 그리지 않는다(DeviceQrLazy)');
+  assert.doesNotMatch(live, /<OfflineBanner[\s>]/, 'OfflineBanner를 직접 그리지 않는다(OfflineBannerLazy)');
+});

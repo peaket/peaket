@@ -960,6 +960,58 @@ test('V-T7 ④ 필수 화면 방문 실패는 시나리오 실패이고 ticket-q
   assert.match(s1, /addCheck\('ticket-qr',\s*[a-zA-Z]/, 'ticket-qr이 상수 true다');
 });
 
+// FIX-wallet-tickets(계획 docs/review/plans/FIX-wallet-tickets.md §8.5, 정본 d5 §10.6 S1 '013(입장용 휴대폰 등록 → 회전 QR)', offline-gate §2 '월렛 목록 서버' 운영 확인 표).
+// 시험 담당(fwal-test-2e9a)이 구현 전에 썼다. 실제 재생(play --scenarios S1)이 마지막 확인이고, 이 정적 시험은 S1 블록이 원장 SQL·목업 id로 돌아가지 않게 막는다.
+/** 팬 API 월렛 목록(GET /v1/tickets, 하위 경로 아님)을 부르는 최상위 함수 이름들 */
+function walletListHelpers(source) {
+  const names = [...source.matchAll(/^(?:async )?function (\w+)\(/gm)].map((m) => m[1]);
+  return names.filter((name) => /['`]\/v1\/tickets(?![\/\w-])/.test(functionBlock(source, `function ${name}(`)));
+}
+
+test('V-T7 ④ S1은 발권을 GET /v1/tickets로 확인하고 SQL·목업 티켓 id 없이 실제 ticketId 화면의 QR을 본다(FWAL-DEMO ①)', () => {
+  const source = readFileSync(RUNNER_MJS, 'utf8');
+  const s1 = runnerBlock(source, 'S1');
+  // 원장 직접 읽기·목업 티켓 id·미리보기 상태로 보지 않는다
+  assert.doesNotMatch(s1, /sqlRead\(/, 'S1이 아직 ticket 원장을 SQL로 읽는다');
+  assert.doesNotMatch(s1, /tkt-lumen/, 'S1이 목업 티켓 id를 연다');
+  assert.doesNotMatch(s1, /\?state=/, 'S1이 미리보기 상태(?state=)로 연다');
+  assert.doesNotMatch(s1, /waitForTimeout\(/, 'S1이 고정 대기를 쓴다');
+  // 구매 전·뒤 두 번 이상 월렛 목록을 부르고, 첫 부름은 결제 접수보다 앞이다(앞 시나리오가 남긴 표와 섞이지 않게)
+  const helpers = walletListHelpers(source);
+  const uses = [...s1.matchAll(/['`]\/v1\/tickets(?![\/\w-])/g)].map((m) => m.index);
+  for (const h of helpers) for (const m of s1.matchAll(new RegExp(`\\b${h}\\(`, 'g'))) uses.push(m.index);
+  assert.ok(uses.length >= 2, `S1이 GET /v1/tickets를 구매 전·뒤로 부르지 않는다(부름 ${uses.length}, 도우미 ${helpers.join(', ') || '없음'})`);
+  assert.ok(Math.min(...uses) < s1.indexOf('acceptPayment('), '구매 전 월렛 목록이 결제 접수보다 뒤에 있다');
+  assert.ok(Math.max(...uses) > s1.indexOf('acceptPayment('), '결제 뒤 월렛 목록을 다시 부르지 않는다');
+  // 새 확인 wallet-list는 상수가 아니다
+  assert.match(s1, /addCheck\('wallet-list',\s*[a-zA-Z]/, 'wallet-list가 없거나 상수다');
+  // SCR-013은 실제 ticketId 주소로 연다
+  assert.match(s1, /screen: 'SCR-013', path: '\/my\/tickets\/\{ticketId\}'/, 'SCR-013을 /my/tickets/{ticketId}로 열지 않는다');
+  // '이 휴대폰을 입장용으로 등록'을 누르고 POST /v1/tickets/{ticketId}/device-keys 응답을 기다린다(고정 대기 대신 응답 조건)
+  assert.match(source, /이 휴대폰을 입장용으로 등록/, '등록 버튼을 누르지 않는다');
+  assert.match(source, /waitForResponse\([\s\S]{0,400}device-keys/, '등록 응답(device-keys)을 기다리지 않는다');
+  // 안내 글도 지금 동작으로 바뀐다
+  assert.doesNotMatch(readFileSync(DEMO_MJS, 'utf8'), /목업 티켓만/, "demo.mjs 안내 글에 'S1 SCR-013은 목업 티켓만'이 남았다");
+});
+
+test('V-T7 ① S1 checks에 wallet-list가 있고 빼면 plan 검사가 막으며 steps가 wallet-before → pay → wallet → result → ticket이다(FWAL-DEMO ②)', () => {
+  const s1 = SCENARIOS.find((s) => s.id === 'S1');
+  assert.deepEqual(s1.checks, ['seat-hold-2', 'payment-approved', 'wallet-list', 'ticket-qr']);
+  assert.ok(REQUIRED_CHECKS.S1.includes('wallet-list'), 'REQUIRED_CHECKS.S1에 wallet-list가 없다');
+  const weak = validateScenarios(SCENARIOS.map((s) => (s.id === 'S1' ? { ...s, checks: s.checks.filter((c) => c !== 'wallet-list') } : s)));
+  assert.equal(weak.ok, false, 'S1에서 wallet-list를 빼도 통과했다');
+  assert.ok(weak.problems.some((p) => p.includes("'wallet-list'가 없다")), weak.problems.join('\n'));
+  const ids = s1.steps.map((s) => s.id);
+  assert.deepEqual(ids.slice(ids.indexOf('checkout')), ['checkout', 'wallet-before', 'pay', 'wallet', 'result', 'ticket']);
+  const step = (id) => s1.steps.find((s) => s.id === id);
+  assert.equal(step('wallet-before').kind, 'api');
+  assert.equal(step('wallet').kind, 'api');
+  assert.deepEqual({ kind: step('ticket').kind, screen: step('ticket').screen, path: step('ticket').path }, { kind: 'screen', screen: 'SCR-013', path: '/my/tickets/{ticketId}' });
+  const json = runDemo(['plan', '--json']);
+  assert.equal(json.status, 0, json.stderr);
+  assert.deepEqual(JSON.parse(json.stdout).scenarios.find((s) => s.id === 'S1').checks, ['seat-hold-2', 'payment-approved', 'wallet-list', 'ticket-qr']);
+});
+
 test('V-T7 ⑦ 0건 실행은 통과가 아니라 건너뜀이다(RV-10)', () => {
   assert.deepEqual(allResult({ seedOnly: true, cleanup: '남김(--seed-only)' }), { outcome: '건너뜀(시드만)', exit: 0 });
   assert.deepEqual(

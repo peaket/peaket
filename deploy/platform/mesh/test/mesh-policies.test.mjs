@@ -181,7 +181,8 @@ const GRPC = {
       GetEntryRecords: ['purchase-svc'],
       CheckReviewEligibility: ['core-svc'],
       ListHeldTickets: ['core-svc'],
-      ListTickets: ['web'],
+      // 월렛 목록은 ticket-svc HTTP가 받는다(offline-gate §2 '월렛 목록 서버', proto README §3 '(부르는 쪽 없음)', FIX-wallet-tickets)
+      ListTickets: [],
     },
     'peaket.ticket.v1.TransferLockService': ['ops-svc'],
   },
@@ -755,7 +756,7 @@ test('MS-08 proto 대조: ControlReceiver를 뺀 proto 서비스는 모두 정�
   for (const w of WORKLOADS) for (const m of control.methods) assert.equal(waypointAllowed(mesh, w, `/${CONTROL_SERVICE}/${m}`).size, 0, `${w} 웨이포인트에 ${CONTROL_SERVICE}/${m} 경로`);
 });
 
-test('MS-09 부르는 쪽 표 대조: proto 메서드마다 웨이포인트가 받는 주체가 정본 표(서비스·메서드 → 부르는 쪽)와 같다(TicketService/ListTickets는 web, IssueTickets에 web 없음, VoidTickets는 purchase-svc, 배상 송금은 RequestCompensationTransfer만 purchase-svc이고 GetCompensationTransfer는 아무도 없음)', () => {
+test('MS-09 부르는 쪽 표 대조: proto 메서드마다 웨이포인트가 받는 주체가 정본 표(서비스·메서드 → 부르는 쪽)와 같다(TicketService/ListTickets는 아무도 없음(FIX-wallet-tickets), IssueTickets에 web 없음, VoidTickets는 purchase-svc, 배상 송금은 RequestCompensationTransfer만 purchase-svc이고 GetCompensationTransfer는 아무도 없음)', () => {
   const mesh = meshObjects();
   const table = methodTable();
   assert.ok(table.size > 80, `정본 표가 너무 작다(${table.size})`);
@@ -766,7 +767,7 @@ test('MS-09 부르는 쪽 표 대조: proto 메서드마다 웨이포인트가 �
     for (const w of GRPC_RECEIVERS.filter((x) => x !== receiver)) assert.equal(waypointAllowed(mesh, w, path).size, 0, `${w} 웨이포인트가 ${path}를 받는다`);
   }
   const t = (m) => sorted(waypointAllowed(mesh, 'ticket-svc', `/peaket.ticket.v1.TicketService/${m}`));
-  assert.deepEqual(t('ListTickets'), [principalOf('web')]);
+  assert.deepEqual(t('ListTickets'), [], 'TicketService/ListTickets를 받는 주체가 있다(부르는 쪽 없음, 최소 권한)');
   assert.ok(!t('IssueTickets').includes(principalOf('web')), 'IssueTickets에 web이 있다(메서드 단위를 버렸다)');
   assert.deepEqual(t('VoidTickets'), [principalOf('purchase-svc')]);
   const pay = (m) => sorted(waypointAllowed(mesh, 'payment-svc', `/peaket.payment.v1.PaymentService/${m}`));

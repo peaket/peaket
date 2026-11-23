@@ -1,6 +1,6 @@
 # 기능 계획: FIX-wallet-tickets(발권 → 월렛 이음매 — 월렛 목록 HTTP 조회와 월렛 실제 데이터, 데모 S1)
 
-- **진행**: 계획 끝(2026-11-23). 다음은 시험(시험 담당).
+- **진행**: 계획 끝(2026-11-23). 시험 씀·실패 확인(2026-11-23, 10절). 다음은 시험 리뷰.
 - **무엇**: 감독 결정 2026-11-23(7일 완성 ADR-0373 결정 1 ①, 시험 먼저 ADR-0372)으로 갈래 4가 맡은 새 일 FIX-wallet-tickets의 작업 목록이다. BUILD_ORDER '기능 단위 계획' 표에 이 ID의 행은 없다(2절 1의 문안을 감독이 coord에 적는다). 검토 기록이고 규범이 아니다. 정본과 다르면 정본이 이긴다.
 - **쉬운 말**: 결제가 끝나면 티켓이 발권되지만, 팬이 '마이 티켓'(월렛)을 열어도 그 티켓을 볼 수 없었다. 월렛이 부르는 목록 주소(`GET /v1/tickets`)는 계약과 게이트웨이에는 있는데, 받아 줄 서버 처리기가 없었기 때문이다. 이 일은 ticket-svc에 그 처리기를 더하고, 월렛 화면이 가짜 그림 대신 그 목록으로 티켓과 회전 QR(15초마다 바뀌는 입장 QR)을 그리게 하고, 시연 시나리오 S1이 DB를 직접 읽는 대신 그 주소와 실제 QR로 '발권 → 월렛'을 확인하게 바꾼다.
 - **바탕**: `D:/ticketpass-lane4-wallet`, 가지 `feature/lane4-FIX-wallet-tickets`, 기준 `origin/develop` `1f3fa58d2`. 계획 담당은 제품·시험 코드를 쓰지 않았고 시험·Docker를 돌리지 않았다. 읽은 조사: 감독이 준 `fan-flow-survey.md` 2절 ①.
@@ -210,7 +210,35 @@
 - 시험 담당이 기준 커밋 `1f3fa58d2` + 이 계획 커밋 트리(구현 전)에서 새 동작의 시험이 실패하는 것을 본다(ADR-0372 결정 1). 명령·시험 수·실패 수·까닭 한 줄만 적는다.
 - 기대: ticket-svc 단위 HTTP 시험은 404(처리기 없음)로, web 시험은 모듈 없음으로, 데모 정적 시험은 S1 블록의 `sqlRead(`로, MS-09는 `web` 주체로 실패한다.
 
-(시험 담당이 채운다)
+시험 담당 fwal-test-2e9a, 2026-11-23, 트리 `cec434dd3`(구현 전) + 시험 파일. 모두 실패를 봤다(기대한 까닭으로만).
+
+| 시험 | 명령(저장소 뿌리 기준) | 시험 수 | 실패 | 까닭 |
+| --- | --- | --- | --- | --- |
+| ticket-svc 단위 `test/wallet-tickets-http.test.ts` | `cd services/ticket-svc && npx vitest run test/wallet-tickets-http.test.ts` | 18 | 18 | HTTP 17은 404 Not Found(처리기 없음). FWAL-GRPC ①은 풀리지 않는 커서가 `{ tickets: [] }`로 풀림(거절 안 함). 표 만들기(취소 REFUND_NOW·발권 막기·양도 CREATED·수락 OK·잠금 LOCKED)는 실패 전까지 지났다 |
+| ticket-svc 통합 `test-int/wallet-tickets.int.test.ts` | Docker 잠금 `lane4-wallet-test` 뒤 `cd services/ticket-svc && npx vitest run --config vitest.integration.config.mjs test-int/wallet-tickets.int.test.ts` | 8 | 미룸 | 통합은 Docker 엔진 꺼짐으로 미룸(2026-11-23 감독 알림, 잠금을 잡았다가 엔진이 없어 놓음). 엔진이 켜지고 감독이 잠금 멈춤을 풀면 시험 담당이 다시 돌려 이 칸을 채운다. 기대 까닭은 단위와 같은 404(start.ts에 처리기 없음)와 FWAL-GRPC ①의 OK(INVALID_ARGUMENT 아님) |
+| web `src/features/wallet-sync/sync.test.mjs`·`model.test.mjs` | `cd apps/web && node --test src/features/wallet-sync/sync.test.mjs src/features/wallet-sync/model.test.mjs` | 13 + 4 | 파일 2 실패 | `ERR_MODULE_NOT_FOUND` `./model.ts`·`./sync.ts`(모듈 없음). 이 작업 폴더는 `packages/contracts/dist`가 없어 먼저 `npx tsc -p tsconfig.build.json`(contracts)로 빌드했다 |
+| web `widgets/ticket-wallet/ui/wallet-first-screen.test.mjs` | `cd apps/web && node --test src/widgets/ticket-wallet/ui/wallet-first-screen.test.mjs` | 6 | 1(T6 ⑦) | `WalletLive.tsx` 없음. T6 ①~⑤는 그대로 통과(목업 화면은 `?state=` 미리보기로 남는다) |
+| 메시 `deploy/platform/mesh/test/mesh-policies.test.mjs` | `node --test deploy/platform/mesh/test/mesh-policies.test.mjs` | 24 | 3(MS-02·MS-09·MS-10) | 셋 다 생성물 `policies.yaml`에 남은 `web` 주체(`ticket-svc:50052의 부르는 쪽 +web`, `ListTickets [cluster.local/ns/web/sa/web]`). `port-allow.yaml`을 `[]`로 고치고 `--write`하면 풀린다 |
+| 데모 `tools/local/demo.test.mjs` 새 둘 | `node --test --test-name-pattern="FWAL-DEMO" tools/local/demo.test.mjs` | 2 | 2 | FWAL-DEMO ①은 S1 블록의 `sqlRead(`, ②는 S1 checks에 `wallet-list` 없음 |
+| 화면 `tools/web-checks/reflow/wallet-live.spec.mjs` | ci-web reflow 잡(`pnpm run reflow`, ' 기본 폭: ' 프로젝트) | 7 | 로컬 못 돌림 | 이 PC의 `tools/web-checks`에 설치(node_modules)·운영 빌드가 없다. 기준 트리에서는 첫 HTML에 '티켓을 불러오는 중입니다'가 없고(목업), 없는 표 펼침이 404라 실패할 자리다. 첫 실행은 구현 뒤 CI |
+
+- 시험이 스스로 깨지지 않았는지: 작업 폴더에 버릴 대역 구현(서버 처리기·커서 400·칸 고르기, 웹 sync·model·저장소 함수 둘)을 잠깐 넣어 단위 18/18, web 17/17이 통과하는 것을 보고 지웠다(커밋에 없음, `git status`로 확인). 구현 지시가 아니다.
+
+### 시험이 기댄 모양(계획 8절에 없거나 정본끼리 어긋난 것)
+
+1. **정본 어긋남(감독·계획 담당이 정한다)**: O-T47 ⑥ 판정 칸은 '팬이 아닌 신원 → 403'인데, `docs/security/authz-matrix.md` 200행('다른 대상의 토큰은 역할과 상관없이 401')과 플랫폼 공용 가드(대상이 다르면 신원을 인정하지 않음, purchase-svc 시험들도 401로 본다)는 401이다. 시험은 401(partner·ops·scanner, 표 없음)로 썼다. 403으로 바꾸려면 플랫폼을 고쳐야 한다. O-T47 ⑥ 문장을 '401·401'로 고치는 것을 추천한다.
+2. ticket-svc 단위: 쓰임새가 없는 상태(`CANCEL_REQUESTED`·`FLAGGED`)와 비지 않은 `gateZone`은 `MemoryTicketStore.tickets` 기록을 시험 씨앗으로 고친다(통합은 `update ticket set gate_zone`). 양도 요청 중·받은 표·잠긴 표는 `MemoryTransferStore`(`createOffer`·`accept`·`setTransferLock`)로 만든다. `transferLocked`는 잠금 직후(기한 14일 남음) true로 본다.
+3. 400 목록: `limit` 0·101·-1·2.5·abc·두 번, 풀리지 않는 커서 여섯 꼴(base64url 아님·JSON 아님·배열 아님·칸 수 다름·UUID 아님·시각이 수 아님). 문제 종류는 커서만 `invalid-query`와 제목 '목록 조건이 올바르지 않습니다'를 단언한다.
+4. 저장소 목록 읽기 장애는 500(플랫폼 about:blank)이고 내부 글을 싣지 않는다. 캐시 머리는 단언하지 않는다(정본 판정은 200·400).
+5. 기록 줄: `PEAKET_LOG_SAMPLE_ONE_IN=1`로 정상 줄도 남기고, JSON 줄의 `route` `/v1/tickets`·`status` 200·400이 있는지 본 뒤 티켓 키·키 해시·`PEAKET1:`·응답의 티켓 ID·커서 값이 없는지 본다.
+6. 통합은 `start()`를 `PEAKET_ENV=ci`·DB 주소만으로 띄운다(Redis·Kafka·identity 없이 뜨는 지금 동작). `FWAL-GRPC ①`은 `start()`의 gRPC 포트를 `ticketPackage().TicketService` 클라이언트(내부 토큰 없음)로 부른다.
+7. web 파일 나눔: `syncWallet`·`loadWalletCards`는 `features/wallet-sync/sync.ts`, `walletCardOf`·`walletScreenOf`는 `model.ts`(시험이 `.ts` 상대 경로로 읽는다). 저장소 함수 둘은 `wallet-device-key/store.ts`. Dexie 표 이름 `tickets`·`deviceKeys`·`meta`는 그대로다(시험이 매번 비운다).
+8. `syncWallet`: 성공 때 `lastSyncAt`은 `Date.now()` 값(시험은 Date만 가짜 시계)이고 실패 때 바꾸지 않는다. 목록 404 같은 정의 밖 상태는 `server`다. `bad-response`는 items가 배열 아님·nextCursor가 글·null 아님·목록 밖 상태 값·JSON 아닌 200이다(items 칸이 아예 없는 200은 계약 Zod가 받으므로 시험하지 않았다. 구현 리뷰 볼 점: 그때 저장소를 비우면 오프라인 QR이 사라진다). 회차 요약 요청은 쿠키를 싣지 않고(`credentials`가 `include`가 아님) 쪽이 달라도 회차마다 한 번이다. 계약 밖 칸(`qrPayload`·주문·좌석 ID)이 응답에 섞여도 저장하지 않고, 받는 동안 `console`에 아무것도 내지 않는다.
+9. `WalletCard`: 따옴표 문장이 정본에 없는 상태(ISSUED·ACTIVE·TRANSFER_PENDING·REFUNDED·받은 표)의 `note`는 null. 받은 ACTIVE 표는 <받은 티켓>이고 QR 자리가 있다. <지난 공연>은 회차 요약 `endsAt` < `nowMs`(종료 1ms 전은 <사용 가능>). 요약 200 회차의 `startsAt`은 요약 값. `loadWalletCards` 차례는 서버 목록 차례이고 `walletCardOf(스냅샷)`과 같다.
+10. `walletScreenOf`: `needs-login`은 저장 수와 무관하게 `login`, 저장 있음+`unavailable`은 `list`(offline false), `offline`은 저장 있음+`failed`일 때만 true.
+11. 화면 spec: 등록 버튼 이름 `^입장 QR, 티켓 <id>, 15초마다 바뀝니다 … 이 휴대폰을 입장용으로 등록$`, 오프라인 배너는 `role=status`의 '오프라인입니다'·'마지막 동기화', 없는 표 펼침은 HTTP 200, 첫 HTML(`/my/tickets`)에 '티켓을 불러오는 중입니다'·`wallet-qr-skeleton`·`data:image/png;base64,`가 있고 `tkt-lumen-`가 없다, 갱신 뒤 401이면 주소가 `/login`.
+12. T6 ⑦: 실제 화면 파일은 `widgets/ticket-wallet/ui/WalletLive.tsx`이고 `DeviceQr`·`OfflineBanner`·`wallet-sync/sync`를 값으로 정적 import하지 않으며 `<DeviceQr>`·`<OfflineBanner>`를 직접 그리지 않는다(늦게 받는 `DeviceQrLazy`·`OfflineBannerLazy`).
+13. 데모 정적 시험: S1 블록(또는 S1이 부르는 최상위 도우미)이 `'/v1/tickets'`(하위 경로 아님)를 결제 접수 앞·뒤로 부른다, `addCheck('wallet-list', <식>)`, `screen: 'SCR-013', path: '/my/tickets/{ticketId}'` 줄, runner 안에 '이 휴대폰을 입장용으로 등록'과 `waitForResponse(`…`device-keys`(400자 안), S1 checks는 정확히 `seat-hold-2, payment-approved, wallet-list, ticket-qr`, steps는 `checkout → wallet-before → pay → wallet → result → ticket`, `demo.mjs`에 '목업 티켓만'이 없다.
 
 ## 11. 시험이 잡아야 할 틀린 구현(시험 리뷰가 대조한다)
 
@@ -296,7 +324,7 @@
 | 역할 | 세션 | 모델 | 커밋 |
 | --- | --- | --- | --- |
 | 계획 | fwal-plan-4b1c | claude-opus-5-5 | 이 커밋 |
-| 시험 | | | |
+| 시험 | fwal-test-2e9a | claude-opus-5-5 | 이 시험 커밋 |
 | 시험 리뷰 | | | |
 | 구현 | | | |
 | 기록 | | | |
