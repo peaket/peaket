@@ -207,6 +207,31 @@ spec:
           name: ops-svc
           namespace: core
           port: 8080
+    # 회차 단계·T-30분 점검과 Go/No-Go 판정은 ops-svc다(openapi getOpsEventReadiness·createOpsGoNoGoJudgement, F-03-3 OPS-380).
+    - name: ops-event-readiness
+      matches:
+        - path:
+            type: PathPrefix
+            value: /v1/ops/events/{eventId}/go-no-go-judgements
+        - path:
+            type: PathPrefix
+            value: /v1/ops/events/{eventId}/readiness
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: x-peaket-app
+                value: console
+              - name: x-forwarded-for
+                value: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+            remove:
+              - x-peaket-browser-traceparent
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: ops-svc
+          namespace: core
+          port: 8080
     - matches:
         - path:
             type: PathPrefix
@@ -316,6 +341,9 @@ spec:
         - path:
             type: PathPrefix
             value: /v1/ops/admin-accounts
+        - path:
+            type: PathPrefix
+            value: /v1/ops/alerts
         - path:
             type: PathPrefix
             value: /v1/ops/approval-requests
