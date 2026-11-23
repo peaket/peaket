@@ -560,7 +560,7 @@ describe('F-05-2 T7 [ASVS v5.0.0-2.4.1] 받는 사람 조회 한도와 기록(Po
     clock.advance(5 * MIN);
     const limited = await lookup(me, w.codeB);
     expect(limited.status, limited.raw).toBe(429);
-    expect(String(limited.body.type)).toContain('too-many-requests');
+    expect(String(limited.body.type)).toContain('transfer-lookup-limited');
     expect(limited.headers['retry-after']).toBe('3000');
     clock.advance(t0 + 60 * MIN - 1 - clock.now());
     const edge = await lookup(me, w.codeB);

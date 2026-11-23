@@ -648,7 +648,7 @@ describe('F-05-2 T7 [ASVS v5.0.0-2.4.1] 받는 사람 조회 한도(계정당 �
     expect(calls).toBe(10);
     const limited = await lookup(h, A, CODE_B);
     expect(limited.status, limited.raw).toBe(429);
-    expect(String(limited.body.type)).toContain('too-many-requests');
+    expect(String(limited.body.type)).toContain('transfer-lookup-limited');
     expect(limited.headers['retry-after']).toBe(String((start + 60 * MIN - h.clock.now()) / 1000));
     expect(h.directory.calls.length).toBe(calls);
     // 다른 계정은 영향이 없다
