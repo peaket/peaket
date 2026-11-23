@@ -6,6 +6,7 @@
 //   (현장 오프라인에서 QR이 사라지지 않게). 저장소에는 목록의 계약 칸 가운데 화면이 쓰는 값만 두고, 계약 밖 값은 버린다.
 // - 표시 값은 회차 공개 요약(entities/event-summary, 쿠키 없음)으로 채운다. 한 번 받기에서 같은 회차는 한 번만 묻고, 실패한 회차도 표는 남는다.
 // - QR 재료·쿠키·응답 본문을 console·텔레메트리에 내지 않는다. 경로 별칭 없이 상대 경로로 가져온다(node 시험이 바로 읽는다).
+import '../../shared/lib/zod-jitless.ts';
 import { ListTicketsResponse } from '@peaket/contracts/openapi/tickets';
 import { createEventSummaryReader, readEventSummaries, type EventSummaryAnswer } from '../../entities/event-summary/index.ts';
 import { listTicketSnapshots, replaceTicketSnapshots, saveLastSyncedAt, walletDatabase, type WalletTicketSnapshot } from '../../entities/wallet/index.ts';
