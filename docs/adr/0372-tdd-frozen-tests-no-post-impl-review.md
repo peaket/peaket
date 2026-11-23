@@ -1,6 +1,6 @@
 # ADR-0372: 시험 먼저 쓰고 시험 리뷰로 고정한 뒤, 구현은 그 시험만 통과하면 합친다(2026-11-23)
 
-- **상태**: 채택(2026-11-23, 소유자 지시). [ADR-0270](0270-independent-agents-per-role-test-first.md)·[ADR-0281](0281-implementation-first-independent-tests.md)의 역할 다섯(계획·시험·구현·리뷰·검증)과 정방향 차례, [ADR-0331](0331-trim-per-batch-checks-defer-kind.md)의 기능마다 하는 리뷰·틀린 구현 검사를 이 결정이 바꾼다. 역할을 서로 다른 에이전트가 맡는 규칙(ADR-0270 결정 1)과 완성 장부(ADR-0256), 기능 단위(ADR-0354)는 그대로다.
+- **상태**: 채택(2026-11-23, 소유자 지시). [ADR-0270](0270-independent-agents-per-role-test-first.md)·[ADR-0281](0281-implementation-first-independent-tests.md)의 역할 다섯(계획·시험·구현·리뷰·검증)과 정방향 차례, [ADR-0331](0331-trim-per-batch-checks-defer-kind.md)의 기능마다 하는 리뷰·틀린 구현 검사를 이 결정이 바꾼다. 역할을 서로 다른 에이전트가 맡는 규칙(ADR-0270 결정 1)과 완성 장부(ADR-0256), 기능 단위(ADR-0354)는 그대로다. 결정 3의 '구현 뒤의 리뷰는 하지 않는다'는 A등급 코드 기능에 한해 [ADR-0381](0381-agrade-post-impl-review.md)이 바꾼다(2026-11-23, 소유자 결정). 검증 없앰은 그대로다.
 - **관련**: [docs/architecture.md](../architecture.md) §8.6, `tools/ci/roles-check.mjs`, 계획 `docs/review/plans/FIX-roles-tdd.md`
 - **관련 ID**: 없음(진행 절차만 바꾼다)
 

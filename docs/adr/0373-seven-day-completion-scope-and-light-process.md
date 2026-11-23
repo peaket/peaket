@@ -1,6 +1,6 @@
 # ADR-0373: 7일 안에 완성하려고 범위를 잘라 동결하고 절차를 가볍게 한다(2026-11-23)
 
-- **상태**: 채택(2026-11-23, 소유자 결정). 완성 기한은 2026-11-30이었고, 같은 날 소유자가 2026-12-03으로 늦췄다("12월 3일 까지는 괜찮아요. 그 안에 일괄 환불(F-07-8) 처리하도록 하세요"). [ADR-0354](0354-feature-vertical-slices-after-cutover.md)의 기능 표 상태 값에 `동결`을 더한다. [ADR-0372](0372-tdd-frozen-tests-no-post-impl-review.md)의 시험 리뷰는 A등급 기능에만 남긴다. [ADR-0171](0171-post-sale-forensics-in-launch-scope.md)의 사후 포렌식 플랫폼은 이번 완성 범위에서 뺀다.
+- **상태**: 채택(2026-11-23, 소유자 결정). 완성 기한은 2026-11-30이었고, 같은 날 소유자가 2026-12-03으로 늦췄다("12월 3일 까지는 괜찮아요. 그 안에 일괄 환불(F-07-8) 처리하도록 하세요"). [ADR-0354](0354-feature-vertical-slices-after-cutover.md)의 기능 표 상태 값에 `동결`을 더한다. [ADR-0372](0372-tdd-frozen-tests-no-post-impl-review.md)의 시험 리뷰는 A등급 기능에만 남긴다. [ADR-0171](0171-post-sale-forensics-in-launch-scope.md)의 사후 포렌식 플랫폼은 이번 완성 범위에서 뺀다. 결정 3의 A등급 줄에 구현 리뷰를 더한 것은 [ADR-0381](0381-agrade-post-impl-review.md)이다(2026-11-23).
 - **관련**: [docs/BUILD_ORDER.md](../BUILD_ORDER.md) '기능 단위 계획' 표, [docs/architecture.md](../architecture.md) §8.6, [docs/lanes/coord.md](../lanes/coord.md)
 - **관련 ID**: 없음(범위와 진행 절차만 바꾼다)
 
