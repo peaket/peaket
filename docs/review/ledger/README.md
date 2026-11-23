@@ -4,20 +4,20 @@
 
 ## 완성 판정
 
-- 항목 4216개: 시험 시나리오(세부 단위) 2175, 시나리오가 가리키지 않는 요구사항·정책 14, ASVS 추적 표의 행 2027
-- 빈칸 634, ID만 1005: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다. `--require`는 빈칸·ID만·미검증·다른 단계를 실패로 세고, 옛 묶음은 `--allow-unverified`로 미검증·다른 단계를 통과시킨다)
+- 항목 4238개: 시험 시나리오(세부 단위) 2197, 시나리오가 가리키지 않는 요구사항·정책 14, ASVS 추적 표의 행 2027
+- 빈칸 627, ID만 992: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다. `--require`는 빈칸·ID만·미검증·다른 단계를 실패로 세고, 옛 묶음은 `--allow-unverified`로 미검증·다른 단계를 통과시킨다)
 - ID만의 뜻: 시나리오는 이름에 ID만 있고 그 세부 번호가 없는 시험만 있다. ASVS는 다른 곳 시험만 있는 경우도 ID만이다(같은 ID의 태그가 그 행의 코드 영역 밖 시험 파일에만 있다)
 - 미검증 5(모두 사유가 있다): 완료로 세지 않고 따로 센다
-- 다시 볼 notes 12: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
+- 다시 볼 notes 13: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
 
 ## 등급별 상태
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 638 | 100 | 24 | 2 | 2 | 17 | 1 | 0 | 103 | 887 |
-| B | 1539 | 905 | 22 | 2 | 3 | 81 | 0 | 245 | 530 | 3327 |
+| A | 672 | 95 | 24 | 2 | 2 | 17 | 1 | 0 | 96 | 909 |
+| B | 1547 | 897 | 22 | 2 | 3 | 81 | 0 | 245 | 530 | 3327 |
 | C | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 2 |
-| 합계 | 2177 | 1005 | 46 | 5 | 5 | 98 | 1 | 245 | 634 | 4216 |
+| 합계 | 2219 | 992 | 46 | 5 | 5 | 98 | 1 | 245 | 627 | 4238 |
 
 ## 분야별 상태
 
@@ -25,8 +25,8 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | analytics | B | 6 | 120 | 0 | 0 | 0 | 1 | 0 | 29 | 37 | 193 |
 | bot-defense | B | 130 | 22 | 0 | 0 | 0 | 5 | 0 | 0 | 2 | 159 |
-| catalog-review | B | 71 | 21 | 0 | 0 | 0 | 0 | 0 | 16 | 8 | 116 |
-| control-tower | B | 95 | 100 | 0 | 0 | 0 | 12 | 0 | 24 | 106 | 337 |
+| catalog-review | B | 72 | 20 | 0 | 0 | 0 | 0 | 0 | 16 | 8 | 116 |
+| control-tower | B | 96 | 99 | 0 | 0 | 0 | 12 | 0 | 24 | 106 | 337 |
 | delivery | B | 52 | 18 | 0 | 0 | 0 | 2 | 0 | 3 | 2 | 77 |
 | devops | B | 80 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 42 | 126 |
 | forensic-replay | B | 23 | 107 | 0 | 0 | 0 | 3 | 0 | 19 | 39 | 191 |
@@ -46,17 +46,17 @@
 | seat-hold | A | 132 | 13 | 15 | 2 | 0 | 6 | 1 | 0 | 0 | 169 |
 | seat-hold | B | 111 | 20 | 0 | 0 | 0 | 3 | 0 | 15 | 7 | 156 |
 | security | B | 48 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 81 |
-| settlement | A | 103 | 5 | 0 | 0 | 0 | 0 | 0 | 0 | 12 | 120 |
-| settlement | B | 71 | 47 | 0 | 0 | 0 | 0 | 0 | 23 | 12 | 153 |
+| settlement | A | 137 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 5 | 142 |
+| settlement | B | 76 | 42 | 0 | 0 | 0 | 0 | 0 | 23 | 12 | 153 |
 | streaming | B | 13 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 13 | 27 |
 | support | B | 0 | 75 | 0 | 0 | 0 | 0 | 0 | 22 | 4 | 101 |
 | transfer-refund | A | 108 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 65 | 181 |
-| transfer-refund | B | 78 | 27 | 0 | 0 | 0 | 0 | 0 | 20 | 4 | 129 |
+| transfer-refund | B | 79 | 26 | 0 | 0 | 0 | 0 | 0 | 20 | 4 | 129 |
 | v0-baseline | B | 28 | 2 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 31 |
 | verification | A | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 3 |
 | verification | B | 49 | 3 | 9 | 0 | 1 | 1 | 0 | 0 | 50 | 113 |
 | verification-tools | B | 9 | 7 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 18 |
-| 합계 |  | 2177 | 1005 | 46 | 5 | 5 | 98 | 1 | 245 | 634 | 4216 |
+| 합계 |  | 2219 | 992 | 46 | 5 | 5 | 98 | 1 | 245 | 627 | 4238 |
 
 ## 다시 볼 notes
 
@@ -69,6 +69,7 @@
 | P-T39 ① | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/apply-payment-result.test.ts… |
 | P-T39 ② | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts… |
 | P-T39 ④ | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts… |
+| payment:v5.0.0-2.1.3 | 다른 단계 | services/payment-svc/test/settlement-payout-account.http.test.ts |
 | payment:v5.0.0-3.3.2 | 다른 단계 | apps/web/src/features/staff-approval/flow.test.mjs, apps/web/src/features/staff-invitation/flow.test.mjs |
 | payment:v5.0.0-3.4.5 | 다른 단계 | apps/web/src/shared/lib/staff-fragment.test.mjs, apps/web/src/widgets/app-shell/model/search-quality.test.mjs |
 | payment:v5.0.0-3.5.3 | 다른 단계 | apps/web/src/_pages/ticket-cancel/ui/live-wiring.test.mjs |

@@ -149,8 +149,8 @@
 | I-T52 | ③ | 파트너 로그인 경로(추천 적용 2026-10-28, ADR-0119):… | ③에 Auth.js 쿠키(`authjs.*`)가 없다. | 자동 시험 | B | 시험: apps/partner/src/_pages/partner-auth/no-authjs-cookies.test.mjs |
 | I-T52 | ④ | 파트너 로그인 경로(추천 적용 2026-10-28, ADR-0119):… | ④는 앱 서버가 받은 액세스 토큰으로 gw-partner를 불러 그린다 | ID만 | B | 시험: apps/partner/src/_pages/partner-auth/no-authjs-cookies.test.mjs, deploy/gateways/test/admin-auth.test.mjs 외 1곳 |
 | I-T53 | ① | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ①은 활성화되지 않는다. | 자동 시험 | B | 시험: apps/partner/src/_pages/settlement/model/roster-live.test.mjs |
-| I-T53 | ② | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ②는 403 `reauth-required`이고 실행되지 않는다. | 자동 시험 | B | 시험: services/core-svc/test/export.test.ts, services/identity-svc/test/passkey-cases.ts 외 1곳 |
-| I-T53 | ③ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ③은 통과하고 재인증 기록에 `factors` 셋이 남는다. | 자동 시험 | B | 시험: services/identity-svc/test/admin-passkey-http.test.ts, services/identity-svc/test/passkey-cases.ts 외 1곳 |
+| I-T53 | ② | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ②는 403 `reauth-required`이고 실행되지 않는다. | 자동 시험 | B | 시험: services/core-svc/test/export.test.ts, services/identity-svc/test/passkey-cases.ts 외 2곳 |
+| I-T53 | ③ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ③은 통과하고 재인증 기록에 `factors` 셋이 남는다. | 자동 시험 | B | 시험: services/identity-svc/test/admin-passkey-http.test.ts, services/identity-svc/test/passkey-cases.ts 외 2곳 |
 | I-T53 | ④ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ④는 RP ID가 맞지 않아 거부된다 | 자동 시험 | B | 시험: services/identity-svc/test/admin-passkey-http.test.ts, services/identity-svc/test/passkey-cases.ts |
 | I-T53 | ⑤ | 관리 계정 패스키 단계 인증(추천 적용 2026-10-28, 기술 검토… | ⑤는 403 `reauth-required`이고 실행되지 않는다. | 자동 시험 | B | 시험: apps/partner/src/_pages/settlement/model/roster-live.test.mjs, services/ops-svc/test/admin-command-reauth.test.ts 외… |
 | I-T54 | ① | 제공자별 재인증 강도(추천 적용 2026-10-28, 기술 검토… | ①은 '확인됨' 재인증 토큰이다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, apps/web/src/features/social-login/server/reauth-st… |
