@@ -374,3 +374,12 @@ F-01-3 계획(`docs/review/plans/F-01-3.md` §2)이 장부 범위를 OPS-060 몫
 | 항목 | 상태 | 등급 | 정할 곳 | 근거·사유 |
 | --- | --- | --- | --- | --- |
 | V-T30 ③ | 미검증 |  | INF-040 | gw-queue의 Envoy가 trace를 0.1%만 고르고(`samplingFraction`) 고르지 않은 요청의 queue-svc span이 내보내지지 않는지는 게이트웨이와 수집기를 kind에 올려야 본다(ADR-0331 결정 9, kind 보류). 수집기 설정과 꼬리 표본 정책은 V-T49가 Docker로 본다 |
+
+## F-01-4에서 뗀 몫(2026-11-23)
+
+F-01-4 계획(`docs/review/plans/F-01-4.md` §2)이 장부 범위를 OPS-080 앞 몫(V-T30 ④, V-T50 ①~⑦, delivery 16.2.4)으로 좁혔다. 아래 둘은 F-01-3(수집기 2단)의 설정·서비스 템플릿 고침 위에 쌓아야 해서 정할 곳을 따로 둔다.
+
+| 항목 | 상태 | 등급 | 정할 곳 | 근거·사유 |
+| --- | --- | --- | --- | --- |
+| V-T50 ⑧ | 다른 단계 |  | OPS-080 뒤 몫(새 기능 행 제안, F-01-4 계획 '감독에게' 1) | 서비스 템플릿이 남길 trace의 지연 점에만 exemplar를 다는 규칙은 F-01-3이 서버 span에 다는 `peaket.slo.exceeded`와 같은 파일(`packages/platform/src/http-hooks.ts`)에 기댄다. F-01-3을 합친 뒤 쌓는다 |
+| V-T50 ⑨ | 다른 단계 |  | OPS-080 뒤 몫(새 기능 행 제안, F-01-4 계획 '감독에게' 1) | Loki 라벨 넷을 다는 곳은 F-01-3이 만드는 게이트웨이 수집기 설정(`deploy/platform/observability/collector/gateway.yaml`)이다. Loki 쪽 허용 목록과 한도는 V-T50 ④·V-T30 ④가 Docker로 본다 |
