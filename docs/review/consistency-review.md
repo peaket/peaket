@@ -902,6 +902,7 @@
 | R-809 | F-05-4 스캐너 오프라인 판정·목록 저장·즉시 업로드·POLICY 변경분이 없었다 | apps/scanner, services/ticket-svc scanner(0013), packages/contracts·api-client, tools/web-checks/scanner-scan | 시험 먼저·시험 리뷰·고정 뒤 구현, 구현 리뷰 IR-03~07·14 고침, 단위 scanner 159·ticket 323, 통합 scanner-f054 10/10+pass-only 4/4 | 완료. IR-01·02 roles-check는 ADR-0373 비차단 기록 |
 | R-810 | F-05-2 양도 요청·수락·돌려주기·티켓 상세·받은 요청 목록·조회 한도가 없었다 | apps/web, services/ticket-svc(0018), packages/contracts·api-client, docs/api | 시험 먼저·시험 리뷰·고정 뒤 구현, 구현 리뷰 IR-01~04 고침, 단위 ticket 313·web 1,198, 통합 44/44 | 완료. IR-05~12 정리 목록 |
 | R-811 | F-05-6 입장 기록 마감·미보고 스캐너·앞 기록 번호·책임자 목록 구역이 없었다 | services/ticket-svc(scanner 0019), services/core-svc(0047), services/purchase-svc refund, packages/platform·contracts·api-client, deploy/gateways | 시험 먼저·시험 리뷰·고정 뒤 구현, 구현 리뷰 IR-01·IR-04 고침, 단위 ticket 413·purchase 4,444·게이트웨이 56·api-client 116, 통합 ticket 35·core 7·purchase 12 | 완료. IR-02·03·05~12 정리 목록 |
+| R-812 | F-05-3 우선 구매 권리 상태 대조·q:prio USED/EXPIRED가 없었다 | services/purchase-svc(priority), services/queue-svc(admission), docs/api/proto, deploy/workloads·mesh, docs/adr/0385 | 시험 먼저·시험 리뷰·고정 뒤 구현, 구현 리뷰 IR-01~03 고침, purchase 단위 4,434·통합 13, queue 단위 708·통합 66 | 완료. IR-04~10 정리 목록 |
 
 ## 4. 숫자 일치표
 
