@@ -11,7 +11,7 @@ import { CLOCK, type Clock } from '@peaket/platform';
 import { candidateEligibilityLists, type EventSchedules, keepUntilOf, type QueueTokens, QueueStoreUnavailable, REASONS, saleEndOf, seatmapLayoutPathOf } from '../../entry/index.js';
 import { ETA_MAX_AGE_MS, ETA_MAX_SEC, LOBBY_PENDING_RETRY_MS, TURN_GRACE_MS } from '../domain/admission.js';
 import { priorityGrantUsable } from '../domain/priority-grant.js';
-import { ADMISSION_POLICY, ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, BOOKING_RESTRICTIONS, PRIORITY_GRANTS, type AdmissionPolicy, type AdmissionSignals, type AdmissionStore, type AdmissionTokens, type BookingRestrictions, type PriorityGrantStore } from '../domain/ports.js';
+import { ADMISSION_COUNTS, ADMISSION_POLICY, ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, BOOKING_RESTRICTIONS, noAdmissionCounts, PRIORITY_GRANTS, type AdmissionCounts, type AdmissionPolicy, type AdmissionSignals, type AdmissionStore, type AdmissionTokens, type BookingRestrictions, type PriorityGrantStore } from '../domain/ports.js';
 import { bookingRestricted } from '../domain/booking-restriction.js';
 import { AdmissionError } from './admission-error.js';
 
@@ -54,6 +54,8 @@ export class ConfirmAdmission {
     @Optional() @Inject(PRIORITY_GRANTS) private readonly priorityGrants?: PriorityGrantStore,
     /** 예매 제한 사본(GAT-310). 없으면 제한 검사를 하지 않는다(시험 대역) */
     @Optional() @Inject(BOOKING_RESTRICTIONS) private readonly restrictions?: BookingRestrictions,
+    /** 관제 1초 대기 집계(F-04-20). 결과가 정해진 뒤 세기만 한다(동기, 던지지 않음). 없으면 세지 않는다 */
+    @Optional() @Inject(ADMISSION_COUNTS) private readonly counts: AdmissionCounts = noAdmissionCounts,
   ) {
     const g = policy?.turnGraceMs ?? TURN_GRACE_MS;
     if (!Number.isInteger(g) || g <= 0) throw new Error(`입장 확정 유예는 양의 정수(ms)여야 한다: ${g}`);
@@ -133,6 +135,7 @@ export class ConfirmAdmission {
           claimed = [];
           // 거절하는 이 대기표의 번호를 빠진 번호로 켜고 verify 칸(통과·추가 검증 중)을 지운다. 여기서 끊기면 503이고, 다시 오면 사람 슬롯이 또 DUP을 정한다
           await this.store.markRemoved({ eventId: i.eventId, seq: t.s, ticketHash: hash, expireAtMs: keepUntil });
+          this.counts.removed(i.eventId);
           throw new AdmissionError('DUPLICATE_ADMISSION', '같은 사람이 다른 대기표로 이미 입장했다');
         }
         if (claim.kind === 'NEW') claimed.push(pid);
@@ -160,6 +163,8 @@ export class ConfirmAdmission {
         if (t.s > r.serving) this.signals.admittedBeforeTurn();
         if (r.soonWaitMs !== undefined) this.signals.soonWait(r.soonWaitMs / 1000);
         if (r.firstSlot) this.#eta(b, pre.turnAtMs, now);
+        // 같은 대기표의 살아 있는 자리를 다시 준 것(again)은 세지 않는다(저장소의 입장 수와 같은 규칙)
+        if (!r.again) this.counts.admitted(i.eventId);
         const { token, expiresAtMs } = this.signer.sign({ jti: r.jti, accountId: i.accountId, sessionId: i.sessionId, eventId: i.eventId, jny: t.jny, nowMs: now, ...(r.issuedAtMs !== undefined ? { firstIssuedAtMs: r.issuedAtMs } : {}), ...(r.lists && r.lists.length > 0 ? { lists: r.lists } : {}) });
         const ecdh = this.signer.serverEcdhPublicKey();
         // 입장 토큰의 exp(구매 세션이 끝나는 가장 늦은 때)를 화면이 토큰을 읽지 않고 알게 싣는다(BAS-042, ADR-0214 결정 8)
@@ -169,7 +174,10 @@ export class ConfirmAdmission {
       }
       await this.#release(i, claimed, hash, fresh, saleEnd);
       claimed = [];
-      if (r.kind === 'SOON') return { status: 'SOON', retryAfterSeconds: r.retryAfterSeconds, serverTimeMs: now, verificationReason: null };
+      if (r.kind === 'SOON') {
+        this.counts.soon(i.eventId);
+        return { status: 'SOON', retryAfterSeconds: r.retryAfterSeconds, serverTimeMs: now, verificationReason: null };
+      }
       if (r.kind === 'EXPIRED') {
         // 같은 자리를 다시 줄 수 있지만 첫 발급 + 최대 체류가 지났다: exp < iat 토큰을 내지 않고 만료로 답한다(만료 410과 같은 꼴, HOT-010 리뷰)
         let admittedBefore = false;

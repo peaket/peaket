@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, HOT_PATH_METRICS, type HotPathMetrics, type HotPathOutcome, PLATFORM_LOGGER, type PlatformLogger, timeHotPath } from '@peaket/platform';
 import { drandRoundTimeMs } from '@peaket/shuffle';
-import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, type BatchedEntry, ELIGIBILITY_SIGNALS, type EligibilitySignals, ENTRY_STORE, EVENT_SCHEDULES, type EntryStore, type EventSchedules, noEligibilitySignals, type PreemptResult, QUEUE_TOKENS, type QueueTokens } from '../domain/ports.js';
+import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, type BatchedEntry, ELIGIBILITY_SIGNALS, type EligibilitySignals, ENTRY_STORE, EVENT_SCHEDULES, type EntryStore, type EventSchedules, noEligibilitySignals, noQueueCounts, type PreemptResult, QUEUE_COUNTS, type QueueCounts, QUEUE_TOKENS, type QueueTokens } from '../domain/ports.js';
 import {
   ARRIVAL_COOKIE_TTL_MS,
   ARRIVAL_FUTURE_MS,
@@ -123,6 +123,8 @@ export class EnterQueue {
     @Optional() private readonly eligibilityLog?: EligibilityLog,
     /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
     @Optional() @Inject(HOT_PATH_METRICS) private readonly hotPath?: HotPathMetrics,
+    /** 관제 1초 대기 집계(F-04-20). 새 번호를 받았을 때만 센다. 없으면 세지 않는다 */
+    @Optional() @Inject(QUEUE_COUNTS) private readonly counts: QueueCounts = noQueueCounts,
   ) {
     this.#numbers = new NumberBatcher(store, options.batchWindowMs ?? NUMBER_BATCH_WINDOW_MS, options.batchMax ?? NUMBER_BATCH_MAX);
   }
@@ -327,7 +329,7 @@ export class EnterQueue {
     const rec = await timeHotPath(this.hotPath, 'queue.entry.record', () =>
       this.store.record({ pid: c.pid, eventId: i.eventId, requestId, seq, gen, jny, ...(vr ? { vr } : {}), expireAtMs: saleEnd, ticketHash: this.tokens.hash(this.#ticket(c, seq, gen, jny, vr)) }),
     );
-    if (rec.kind === 'RECORDED') return this.#issue(c, seq, gen, jny, vr);
+    if (rec.kind === 'RECORDED') return this.#counted(c, await this.#issue(c, seq, gen, jny, vr));
     // 기록하지 못한 번호는 아무도 갖지 않으므로 빠진 번호로 돌린다
     await this.store.markRemoved({ eventId: i.eventId, seq, expireAtMs: keepUntil });
     if (rec.kind === 'SAME') return this.#issue(c, rec.seq, rec.gen, rec.jny, rec.vr);
@@ -347,7 +349,7 @@ export class EnterQueue {
     if (res.kind === 'REPAIRING') throw new EntryError('BATCHING', '묶음 결과를 다시 쓰는 중이다', BATCH_REPAIR_RETRY_SEC);
     if (res.kind === 'RESULT') {
       const conv = await this.store.convertBatch({ pid: c.pid, eventId: i.eventId, requestId, tokenHash: rec.tokenHash, seq: res.seq, gen: res.gen, expireAtMs: saleEnd, ticketHash: this.tokens.hash(this.#ticket(c, res.seq, res.gen, rec.jny, rec.vr)) });
-      if (conv.kind === 'RECORDED') return this.#issue(c, conv.seq, conv.gen, conv.jny, conv.vr);
+      if (conv.kind === 'RECORDED') return this.#counted(c, await this.#issue(c, conv.seq, conv.gen, conv.jny, conv.vr));
       throw new EntryError('ALREADY_WAITING', '묶음 기록이 바뀌었다');
     }
     await this.store.dropBatch({ pid: c.pid, eventId: i.eventId, requestId, tokenHash: rec.tokenHash });
@@ -417,6 +419,12 @@ export class EnterQueue {
     } catch (e) {
       if (!(e instanceof QueueStoreUnavailable)) throw e;
     }
+  }
+
+  /** 새 번호를 낸 결과를 1초 집계에 센다(F-04-20, 응답을 바꾸지 않는다) */
+  #counted(c: Ctx, r: EnterResult): EnterResult {
+    this.counts.entered(c.i.eventId);
+    return r;
   }
 
   async #batching(c: Ctx, tokenHash: string): Promise<BatchingResult> {

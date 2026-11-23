@@ -8,7 +8,7 @@ export { PromAdmissionSignals } from './adapters/prom-admission-signals.js';
 export { RedisPriorityGrantStore } from './adapters/redis-priority-grants.js';
 export { PurchaseSessionSlots, type SessionEnded, type SessionStarted } from './application/purchase-session-slots.js';
 export { PriorityGrantError, SetPriorityGrant, type PriorityGrantErrorCode, type SetPriorityGrantInput } from './application/set-priority-grant.js';
-export type { AdmissionJwk, AdmissionPolicy, AdmissionSignals, AdmissionStore, AdmissionTokens, BookingRestrictions, PriorityGrantStore } from './domain/ports.js';
+export type { AdmissionCounts, AdmissionJwk, AdmissionPolicy, AdmissionSignals, AdmissionStore, AdmissionTokens, BookingRestrictions, PriorityGrantStore } from './domain/ports.js';
 export { ADMISSION_JWKS_FILE, AdmissionJwksController } from './inbound/admission-jwks.controller.js';
 export { BOOKING_RESTRICTIONS } from './domain/ports.js';
 export { bookingRestricted, bookingRestrictionKeyOf, type BookingRestrictionApply, type BookingRestrictionCopy, type BookingRestrictionState } from './domain/booking-restriction.js';

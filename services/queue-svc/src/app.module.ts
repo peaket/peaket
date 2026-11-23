@@ -1,8 +1,8 @@
 // 뿌리 모듈: 컨텍스트 모듈을 모은다. 진입(사전 검증·진입), 대기 상태 파일, 입장 확정, 추가 검증(제출·이의, BOT-090)이 있다.
 import { type DynamicModule, Module } from '@nestjs/common';
 import type { ExternalHttpClient, HotPathMetrics, HotRedis } from '@peaket/platform';
-import { AdmissionModule, type AdmissionSignals, type AdmissionStore, type AdmissionTokens, type BookingRestrictions, type PriorityGrantStore } from './modules/admission/index.js';
-import { type ArrivalCookies, type ArrivalSignals, type DegradedLimits, EntryModule, type EligibilitySignals, type EventSchedules, type FirstVisitCookies, type FirstVisitSignals, type LeaveSignals, type LobbySignals, type QueueTokens, type RiskPort, type SeedSealer } from './modules/entry/index.js';
+import { type AdmissionCounts, AdmissionModule, type AdmissionSignals, type AdmissionStore, type AdmissionTokens, type BookingRestrictions, type PriorityGrantStore } from './modules/admission/index.js';
+import { type ArrivalCookies, type ArrivalSignals, type DegradedLimits, EntryModule, type EligibilitySignals, type EventSchedules, type FirstVisitCookies, type FirstVisitSignals, type LeaveSignals, type LobbySignals, type QueueCounts, type QueueTokens, type RiskPort, type SeedSealer } from './modules/entry/index.js';
 import { MemorySaleSuspensionCopies, RedisSaleSuspensionCopies, SaleSuspensionModule, type SaleSuspensionCopies } from './modules/sale/index.js';
 import { type ShuffleProofSource, StateModule, type StateSnapshots } from './modules/state/index.js';
 import { VerificationModule, type VerificationModuleOptions, type VerificationStore } from './modules/verification/index.js';
@@ -40,16 +40,18 @@ export class AppModule {
       saleSuspension?: SaleSuspensionCopies;
       /** 셔플 커밋 공시를 ops 감사 체인에 보낼 ops-svc 내부 HTTP(BAT-355). 없으면 지금의 정규 로그 줄만 남긴다 */
       opsAudit?: { ops: Pick<ExternalHttpClient, 'request'>; internalToken?: string };
+      /** 관제 1초 대기 집계(QueueAggregate, F-04-20). 없으면 세지 않는다 */
+      queueCounts?: QueueCounts & AdmissionCounts;
     },
   ): DynamicModule {
-    const entry = 'redis' in o ? EntryModule.register({ storage: 'redis', redis: o.redis, ...(o.waitRedis ? { waitRedis: o.waitRedis } : {}), tokens: o.tokens, risk: o.risk, ...(o.sealer ? { sealer: o.sealer } : {}), ...(o.lobbySignals ? { lobbySignals: o.lobbySignals } : {}), ...(o.leaveSignals ? { leaveSignals: o.leaveSignals } : {}), ...(o.eligibilitySignals ? { eligibilitySignals: o.eligibilitySignals } : {}), ...(o.arrivals ? { arrivals: o.arrivals } : {}), ...(o.arrivalSignals ? { arrivalSignals: o.arrivalSignals } : {}), ...(o.firstVisit ? { firstVisit: o.firstVisit } : {}), ...(o.firstVisitSignals ? { firstVisitSignals: o.firstVisitSignals } : {}), ...(o.degradedLimits ? { degradedLimits: o.degradedLimits } : {}), ...(o.hotPath ? { hotPath: o.hotPath } : {}), ...(o.opsAudit ? { opsAudit: o.opsAudit } : {}) }) : EntryModule.register({ storage: 'memory', schedules: o.schedules, tokens: o.tokens, risk: o.risk, ...(o.sealer ? { sealer: o.sealer } : {}), ...(o.lobbySignals ? { lobbySignals: o.lobbySignals } : {}), ...(o.leaveSignals ? { leaveSignals: o.leaveSignals } : {}), ...(o.eligibilitySignals ? { eligibilitySignals: o.eligibilitySignals } : {}), ...(o.arrivals ? { arrivals: o.arrivals } : {}), ...(o.arrivalSignals ? { arrivalSignals: o.arrivalSignals } : {}), ...(o.firstVisit ? { firstVisit: o.firstVisit } : {}), ...(o.firstVisitSignals ? { firstVisitSignals: o.firstVisitSignals } : {}), ...(o.degradedLimits ? { degradedLimits: o.degradedLimits } : {}), ...(o.hotPath ? { hotPath: o.hotPath } : {}), ...(o.opsAudit ? { opsAudit: o.opsAudit } : {}) });
+    const entry = 'redis' in o ? EntryModule.register({ storage: 'redis', redis: o.redis, ...(o.waitRedis ? { waitRedis: o.waitRedis } : {}), tokens: o.tokens, risk: o.risk, ...(o.sealer ? { sealer: o.sealer } : {}), ...(o.lobbySignals ? { lobbySignals: o.lobbySignals } : {}), ...(o.leaveSignals ? { leaveSignals: o.leaveSignals } : {}), ...(o.eligibilitySignals ? { eligibilitySignals: o.eligibilitySignals } : {}), ...(o.arrivals ? { arrivals: o.arrivals } : {}), ...(o.arrivalSignals ? { arrivalSignals: o.arrivalSignals } : {}), ...(o.firstVisit ? { firstVisit: o.firstVisit } : {}), ...(o.firstVisitSignals ? { firstVisitSignals: o.firstVisitSignals } : {}), ...(o.degradedLimits ? { degradedLimits: o.degradedLimits } : {}), ...(o.hotPath ? { hotPath: o.hotPath } : {}), ...(o.opsAudit ? { opsAudit: o.opsAudit } : {}), ...(o.queueCounts ? { counts: o.queueCounts } : {}) }) : EntryModule.register({ storage: 'memory', schedules: o.schedules, tokens: o.tokens, risk: o.risk, ...(o.sealer ? { sealer: o.sealer } : {}), ...(o.lobbySignals ? { lobbySignals: o.lobbySignals } : {}), ...(o.leaveSignals ? { leaveSignals: o.leaveSignals } : {}), ...(o.eligibilitySignals ? { eligibilitySignals: o.eligibilitySignals } : {}), ...(o.arrivals ? { arrivals: o.arrivals } : {}), ...(o.arrivalSignals ? { arrivalSignals: o.arrivalSignals } : {}), ...(o.firstVisit ? { firstVisit: o.firstVisit } : {}), ...(o.firstVisitSignals ? { firstVisitSignals: o.firstVisitSignals } : {}), ...(o.degradedLimits ? { degradedLimits: o.degradedLimits } : {}), ...(o.hotPath ? { hotPath: o.hotPath } : {}), ...(o.opsAudit ? { opsAudit: o.opsAudit } : {}), ...(o.queueCounts ? { counts: o.queueCounts } : {}) });
     const options = { ...(o.state?.webOrigin ? { webOrigin: o.state.webOrigin } : {}), ...(o.state?.autoTick !== undefined ? { autoTick: o.state.autoTick } : {}) };
     const resultDir = o.state?.resultDir ? { resultDir: o.state.resultDir } : {};
     const state = 'redis' in o ? StateModule.register({ storage: 'redis', redis: o.redis, options, ...resultDir }) : StateModule.register({ storage: 'memory', schedules: o.schedules, snapshots: o.snapshots, ...(o.state?.proofSource ? { proofSource: o.state.proofSource } : {}), options, ...resultDir });
     const a = o.admission ?? {};
     const admission =
       'redis' in o
-        ? AdmissionModule.register({ storage: 'redis', redis: o.redis, tokens: o.tokens, signer: requireSigner(a.signer), ...(a.signals ? { signals: a.signals } : {}) })
+        ? AdmissionModule.register({ storage: 'redis', redis: o.redis, tokens: o.tokens, signer: requireSigner(a.signer), ...(a.signals ? { signals: a.signals } : {}), ...(o.queueCounts ? { counts: o.queueCounts } : {}) })
         : AdmissionModule.register({
             storage: 'memory',
             schedules: o.schedules,
@@ -59,6 +61,7 @@ export class AppModule {
             ...(a.signals ? { signals: a.signals } : {}),
             ...(a.priorityGrants ? { priorityGrants: a.priorityGrants } : {}),
             ...(a.bookingRestrictions ? { bookingRestrictions: a.bookingRestrictions } : {}),
+            ...(o.queueCounts ? { counts: o.queueCounts } : {}),
           });
     const { store: verificationStore, ...v } = o.verification ?? {};
     const verification = 'redis' in o ? VerificationModule.register({ storage: 'redis', redis: o.redis, ...v }) : VerificationModule.register({ storage: 'memory', schedules: o.schedules, ...(verificationStore ? { store: verificationStore } : {}), ...v });

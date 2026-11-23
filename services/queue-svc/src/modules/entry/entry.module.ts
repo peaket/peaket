@@ -13,7 +13,7 @@ import { IssuePreverification } from './application/issue-preverification.js';
 import { JoinLobby } from './application/join-lobby.js';
 import { LeaveQueue } from './application/leave-queue.js';
 import { ShuffleCommits } from './application/shuffle-commits.js';
-import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, ELIGIBILITY_SIGNALS, type EligibilitySignals, ENTRY_STORE, EVENT_SCHEDULES, type EventSchedules, FIRST_VISIT_COOKIES, FIRST_VISIT_SIGNALS, type FirstVisitCookies, type FirstVisitSignals, LEAVE_SIGNALS, type LeaveSignals, DEGRADED_LIMITS, type DegradedLimits, LOBBY_SIGNALS, type LobbySignals, noSealer, QUEUE_TOKENS, type QueueTokens, RISK, type RiskPort, SEED_SEALER, type SeedSealer, SHUFFLE_COMMIT_STORE, SHUFFLE_DISCLOSURES, WITHDRAWN_KEYS } from './domain/ports.js';
+import { ARRIVAL_COOKIES, ARRIVAL_SIGNALS, type ArrivalCookies, type ArrivalSignals, ELIGIBILITY_SIGNALS, type EligibilitySignals, ENTRY_STORE, EVENT_SCHEDULES, type EventSchedules, FIRST_VISIT_COOKIES, FIRST_VISIT_SIGNALS, type FirstVisitCookies, type FirstVisitSignals, LEAVE_SIGNALS, type LeaveSignals, DEGRADED_LIMITS, type DegradedLimits, LOBBY_SIGNALS, type LobbySignals, noSealer, QUEUE_COUNTS, type QueueCounts, QUEUE_TOKENS, type QueueTokens, RISK, type RiskPort, SEED_SEALER, type SeedSealer, SHUFFLE_COMMIT_STORE, SHUFFLE_DISCLOSURES, WITHDRAWN_KEYS } from './domain/ports.js';
 import { EligibilityLog } from './application/eligibility-log.js';
 import { QueueController } from './inbound/queue.controller.js';
 
@@ -31,6 +31,8 @@ export type EntryModuleOptions = ({ storage: 'redis'; redis: HotRedis; waitRedis
   sealer?: SeedSealer;
   lobbySignals?: LobbySignals;
   leaveSignals?: LeaveSignals;
+  /** 관제 1초 대기 집계(F-04-20) */
+  counts?: QueueCounts;
   /** 위험 판정을 받지 못할 때의 파드 메모리 한도(운영 조립이 넣는다, docs/features/bot-defense.md §11.2) */
   degradedLimits?: DegradedLimits;
   /** 판매 자격 대조 지표(ADR-0265 결정 9). 없으면 세지 않는다 */
@@ -82,6 +84,7 @@ export class EntryModule {
         ...(o.lobbySignals ? [{ provide: LOBBY_SIGNALS, useValue: o.lobbySignals }] : []),
         ...(o.degradedLimits ? [{ provide: DEGRADED_LIMITS, useValue: o.degradedLimits }] : []),
         ...(o.leaveSignals ? [{ provide: LEAVE_SIGNALS, useValue: o.leaveSignals }] : []),
+        ...(o.counts ? [{ provide: QUEUE_COUNTS, useValue: o.counts }] : []),
         ...(o.eligibilitySignals ? [{ provide: ELIGIBILITY_SIGNALS, useValue: o.eligibilitySignals }] : []),
         ...(o.arrivals ? [{ provide: ARRIVAL_COOKIES, useValue: o.arrivals }] : []),
         ...(o.arrivalSignals ? [{ provide: ARRIVAL_SIGNALS, useValue: o.arrivalSignals }] : []),

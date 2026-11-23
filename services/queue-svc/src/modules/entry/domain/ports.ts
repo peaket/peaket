@@ -107,6 +107,19 @@ export interface LeaveSignals {
 }
 export const noLeaveSignals: LeaveSignals = { left: () => undefined };
 
+export const QUEUE_COUNTS = Symbol('queue.QueueCounts');
+/**
+ * 관제 1초 대기 집계(QueueAggregate, F-04-20)의 진입·빠진 번호 세기. 동기이고 던지지 않으며 I/O가 없다(관측은 업무 경로를 막지 않는다).
+ * 순번·판정·Lua·Redis 키와 상관없이 결과가 정해진 뒤 한 번 부른다
+ */
+export interface QueueCounts {
+  /** 새 번호를 받았다(이미 받은 번호를 다시 준 것은 세지 않는다) */
+  entered(eventId: string): void;
+  /** 번호가 빠졌다(대기 취소 등) */
+  removed(eventId: string): void;
+}
+export const noQueueCounts: QueueCounts = { entered: () => undefined, removed: () => undefined };
+
 /** 최초 방문 쿠키에서 읽은 칸(ADR-0249 결정 1) */
 export interface FirstVisitClaims {
   kid: string;

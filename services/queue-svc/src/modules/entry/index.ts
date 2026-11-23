@@ -11,7 +11,7 @@ export { guard, keys, QUEUE_REDIS } from './adapters/redis-entry-store.js';
 export { RedisEventSchedules } from './adapters/redis-event-schedules.js';
 export { candidateEligibilityLists, type EligibilityConfig, type EligibilityGate, eligibilityAt, type EventSchedule, keepUntilOf, PLATFORM_SCOPE, QueueStoreUnavailable, REASONS, saleEndOf, seatmapLayoutPathOf, SEGMENT_SIZE, segmentOf } from './domain/queue.js';
 export { unavailableRisk } from './adapters/unavailable-risk.js';
-export type { DegradedLimits, EventSchedules, LeaveSignals, LobbySignals, QueueTokens, RiskPort, SeedSealer } from './domain/ports.js';
+export type { DegradedLimits, EventSchedules, LeaveSignals, LobbySignals, QueueCounts, QueueTokens, RiskPort, SeedSealer } from './domain/ports.js';
 export { GrpcTrustRisk, PromRiskSignals, TRUST_BREAKER } from './adapters/grpc-trust-risk.js';
 export { MemoryDegradedLimits } from './adapters/memory-degraded-limits.js';
 export { ShuffleCommits, ShuffleCommitWorker } from './application/shuffle-commits.js';

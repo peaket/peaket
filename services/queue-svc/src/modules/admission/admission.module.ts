@@ -13,7 +13,7 @@ import { RedisPriorityGrantStore } from './adapters/redis-priority-grants.js';
 import { ADMISSION_SCHEDULES, ADMISSION_TICKETS, ConfirmAdmission } from './application/confirm-admission.js';
 import { PurchaseSessionSlots } from './application/purchase-session-slots.js';
 import { SetPriorityGrant } from './application/set-priority-grant.js';
-import { ADMISSION_POLICY, ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, BOOKING_RESTRICTIONS, PRIORITY_GRANTS, type AdmissionPolicy, type AdmissionSignals, type AdmissionStore, type AdmissionTokens, type BookingRestrictions, type PriorityGrantStore, noSignals } from './domain/ports.js';
+import { ADMISSION_COUNTS, ADMISSION_POLICY, ADMISSION_SIGNALS, ADMISSION_STORE, ADMISSION_TOKENS, BOOKING_RESTRICTIONS, PRIORITY_GRANTS, type AdmissionCounts, type AdmissionPolicy, type AdmissionSignals, type AdmissionStore, type AdmissionTokens, type BookingRestrictions, type PriorityGrantStore, noSignals } from './domain/ports.js';
 import { AdmissionController } from './inbound/admission.controller.js';
 import { AdmissionJwksController } from './inbound/admission-jwks.controller.js';
 import { PriorityGrantInternalController } from './inbound/priority-grant-internal.controller.js';
@@ -33,6 +33,8 @@ export type AdmissionModuleOptions = (
 ) & {
   tokens: QueueTokens;
   signals?: AdmissionSignals;
+  /** 관제 1초 대기 집계(F-04-20) */
+  counts?: AdmissionCounts;
   /** 입장 확정 규칙 값(유예 등). 넘기지 않으면 정본의 기본값이다 */
   policy?: AdmissionPolicy;
 };
@@ -72,6 +74,7 @@ export class AdmissionModule {
         { provide: ADMISSION_TICKETS, useValue: o.tokens },
         { provide: ADMISSION_TOKENS, useValue: o.signer ?? testSigner() },
         { provide: ADMISSION_SIGNALS, useValue: o.signals ?? noSignals },
+        ...(o.counts ? [{ provide: ADMISSION_COUNTS, useValue: o.counts }] : []),
         { provide: ADMISSION_POLICY, useValue: o.policy ?? {} },
         { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
         InternalTokenGuard,

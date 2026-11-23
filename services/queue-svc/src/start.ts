@@ -9,6 +9,7 @@ import { CircuitBreaker, Counter, createExternalHttpClient, createHotRedis, crea
 import { startServiceControlSync } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
+import { queueAggregateWiring } from './queue-aggregate-wiring.js';
 import { type QueueConsumers, startQueueConsumers } from './consumers/start.js';
 import { startGrpcServer } from './grpc-server.js';
 import { startQueueControlServer } from './control/control-server.js';
@@ -122,6 +123,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const opsAudit = opsHttpUrl
     ? { ops: createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsHttpUrl, timeoutCapMs: 2_000 }), ...(env.PEAKET_INTERNAL_TOKEN ? { internalToken: env.PEAKET_INTERNAL_TOKEN } : {}) }
     : undefined;
+  // 관제 1초 대기 집계(F-04-20): 세기 객체는 앱 모듈 전에, Kafka 버퍼는 서비스가 생긴 뒤 붙인다
+  const queueAggregate = queueAggregateWiring(SERVICE, env, (env.PEAKET_POD ?? env.HOSTNAME ?? 'local').slice(0, 64));
   const service = await createService({
     name: SERVICE,
     env,
@@ -147,8 +150,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
       // trust-svc 클라이언트 하나가 진입 판정과 추가 검증(VERIFICATION)을 함께 맡는다(같은 차단기: 서킷이 열리면 제출도 503, B-T6 ④)
       verification: { ...(reverification ? { reverification } : {}), ...(trustRisk ? { risk: trustRisk } : {}), ...(cases ? { cases } : {}), signals: verificationSignals },
       ...(opsAudit ? { opsAudit } : {}),
+      queueCounts: queueAggregate.counts,
     }),
   });
+  await queueAggregate.attach(service);
   arrivalSignals.register(service.metrics.registry);
   hotPath.register(service.metrics.registry);
   firstVisitSignals.register(service.metrics.registry);
@@ -315,6 +320,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
         .then(() => edgeSync?.stop())
         .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)'))
         .then(() => service.close())
+        .then(() => queueAggregate.close())
         .catch((err: unknown) => service.logger.error({ err }, 'queue-svc 종료 실패'))
         // 종료 세션 목록 소비는 처리 중인 요청이 끝난 뒤(서비스를 닫은 뒤) 끈다(ADR-0333 결정 2)
         .then(() => controlSync?.close())

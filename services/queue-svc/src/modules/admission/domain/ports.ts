@@ -131,6 +131,15 @@ export interface AdmissionSignals {
 }
 
 /** 지표를 버리는 구현(시험·지표를 달지 않은 조립) */
+export const ADMISSION_COUNTS = Symbol('queue.AdmissionCounts');
+/** 관제 1초 대기 집계(QueueAggregate, F-04-20)의 입장 확정·곧 입장 응답·빠진 번호 세기. 동기이고 던지지 않는다(관측은 업무 경로를 막지 않는다) */
+export interface AdmissionCounts {
+  admitted(eventId: string): void;
+  soon(eventId: string): void;
+  removed(eventId: string): void;
+}
+export const noAdmissionCounts: AdmissionCounts = { admitted: () => undefined, soon: () => undefined, removed: () => undefined };
+
 export const noSignals: AdmissionSignals = {
   admittedBeforeTurn: () => undefined,
   turnEntryFailed: () => undefined,

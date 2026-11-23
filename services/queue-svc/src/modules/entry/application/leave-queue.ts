@@ -3,7 +3,7 @@
 // 잡는 동안에는 그 사람이 다시 참가하지 못하므로 회차 슬롯의 일이 새 참가를 건드리지 않는다. 중간에 실패해도 취소 중 표지가 원래 기록을 품어 같은 취소를 다시 보내면 끝난다.
 // pid 키 전환 기간에는 옛 pid와 새 pid 두 키를 잡고, 서로 다른 기록을 한 번씩만 처리한다(§3 'pid 키 전환 기간'의 첫 구현). 이름은 명세 specs/queue.qnt의 leave다.
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { ENTRY_STORE, type EntryStore, EVENT_SCHEDULES, type EventSchedules, LEAVE_SIGNALS, type LeaveSignals, noLeaveSignals, type ShuffleGroup } from '../domain/ports.js';
+import { ENTRY_STORE, type EntryStore, EVENT_SCHEDULES, type EventSchedules, LEAVE_SIGNALS, type LeaveSignals, noLeaveSignals, noQueueCounts, QUEUE_COUNTS, type QueueCounts, type ShuffleGroup } from '../domain/ports.js';
 import { type EventSchedule, type HeldRecord, keepUntilOf, leavingOf, leftOf, saleEndOf } from '../domain/queue.js';
 import { EntryError } from './entry-error.js';
 
@@ -33,6 +33,8 @@ export class LeaveQueue {
     @Inject(ENTRY_STORE) private readonly store: EntryStore,
     @Inject(EVENT_SCHEDULES) private readonly schedules: EventSchedules,
     @Optional() @Inject(LEAVE_SIGNALS) private readonly signals: LeaveSignals = noLeaveSignals,
+    /** 관제 1초 대기 집계(F-04-20): 번호를 가진 대기를 끝내면 빠진 번호로 센다(로비 참가는 번호가 없어 세지 않는다) */
+    @Optional() @Inject(QUEUE_COUNTS) private readonly counts: QueueCounts = noQueueCounts,
   ) {}
 
   /** 로비 참가 취소: 목록을 고정하기 전에만 받는다(그 뒤는 대기 취소로, §3 '표시가 선 뒤에는') */
@@ -70,6 +72,7 @@ export class LeaveQueue {
     }
     await this.#finish(i.eventId, held);
     this.signals.left(ENTRY_ROUTE);
+    for (const id of seen) if (id.startsWith('N:')) this.counts.removed(i.eventId);
   }
 
   /**
