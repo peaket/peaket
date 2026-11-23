@@ -114,6 +114,8 @@
 
 - 2026-11-23 23:2x CI 안정화(F-07-8 합친 뒤): ops-svc 조정 제안 CS 건을 결제마다 따로 열고 중복은 event_key로 막았다(ops 0033, 8f562f80c). v0-monolith Dockerfile이 payment-svc의 `@peaket/validation`을 찾도록 contracts·validation을 복사·빌드한다(1a97b07ee). 계약 깨짐 예외 16줄을 이유와 함께 더했다(F-07-8 CS 종류·F-07-7 정산 계좌 모양, breaking-approved, ff18221ab). mesh MS-10·MS-19의 내부 HTTP 쌍 표에 ADR-0370 core-svc → payment-svc를 더했다(4ffd18454). queue 상태 파일 상한 시험 30초 시한·demo compat 복제본 새로 만들기(5515a92e4)·F-07-8 gitleaks 오탐(7118e67d8)도 함께 고쳤다.
 
+- 2026-11-24 00:2x F-04-6(R-805)을 develop 7529c2ea1로 합쳤다. 마감 실행기·동결·정산 대조, 실제 ClickHouse 통합 1/1·F-04-4·F-04-5 회귀 4/4. 다음은 F-04-7.
+
 ## SEG 때 정할 범위 늘어남(ADR-0283 결정 6)
 - 묶음 중에 더한 새 단계는 wbs.csv 일수에 바로 더하지 않고 여기 모아 구간 마무리 때 소유자가 한 번에 정한다(앞선 예: HOT-405 0.75일, 2026-11-18 OPEN[49]).
 - PRF-174(wbs 2.7.1 ③, 0.5일 [가정], BAT-013): 탈퇴 참여자의 결제한 미사용 티켓 취소·환급(BAT-010이 찾음, 돈 A 대상, R-685).
