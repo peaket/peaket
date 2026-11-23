@@ -1,6 +1,6 @@
 {
   "plan": "f08-windows",
-  "title": "F-08 측정 창: 창 1(11-26) F-08-8 K2·K1·K7 ①·K7 ②, 창 2(11-27) F-08-2 MSR-020",
+  "title": "F-08 측정 창: 창 1(11-26) 리허설 남은 몫 → F-08-8 K2·K1·K7 ①·K7 ② → 데모 S1, 창 2(11-27) F-08-2 MSR-020",
   "created": "2026-11-23",
   "basis": [
     "docs/review/plans/F-08-8.md 6.1~6.3·8절",
@@ -14,6 +14,7 @@
     "한 번에 한 run만 돈다. run 사이 2분 쉰다(앞 실행의 부하가 가라앉게).",
     "실패·무효·SKIPPED·찾지 못함은 통과가 아니다. done의 result는 pass·fail·invalid 가운데 하나이고 pass만 통과로 센다.",
     "측정 중에는 시험·빌드를 하지 않고, 측정 단계 커밋에서 node tools/ci/records.mjs를 돌리지 않는다.",
+    "창 1 맨 앞의 리허설 몫(w1-stage·w1-rehearsal-entry·w1-stage-full과 첫 K2 실행의 통계)에서 막히면 창 1을 고친 뒤 이어 간다(도구·계획 파일을 고쳐 Role: impl로 커밋). 1.3배를 넘게 밀리면 감독에게 알리고 데모 S1을 창 2 끝으로 옮긴다.",
     "Docker 잠금은 두 자리 다(\"C:\\Program Files\\Git\\bin\\bash.exe\" D:/ticketpass-locks/lock.sh take docker-all lane4-F-08). 창이 끝나면 drop docker-all lane4-F-08.",
     "측정 중에 정하는 값(x1hat·x1·podCpus·podTag·x1hatPod·x1pod)은 bat025-plan.mjs --plan loadtest/plan/f08-plan.json set <이름> <값>으로 적는다. 명령의 {이름} 자리가 그 값으로 채워진다."
   ],
@@ -36,11 +37,11 @@
       "gate": null,
       "key": "w1-stage",
       "window": 1,
-      "group": "무대",
-      "title": "창 1 무대: 새 클러스터·관측·v1(TLS 켬, 복제 3)·검사기·발생기 보정(512Mi)",
-      "estimate_min": 40,
-      "stage": "v1-tls-on",
-      "conditions": "Docker 잠금 두 자리를 다 잡은 뒤(lock.sh take docker-all lane4-F-08). Docker Desktop CPU 32·메모리 24GiB(소유자가 2026-11-23 올림)를 docker info로 확인한다. 새 kind 클러스터, 관측 묶음, v1 무대 TLS 켬·복제 3·CPU 1·메모리 512Mi(§3.8), 불변식 검사기 빌드. 나누기 기준을 800/s로 바꿨으므로 CPU 2·메모리 512Mi 발생기 보정을 400·800·1,000/s로 한 번 잰다(F-08-8 6.1).",
+      "group": "리허설",
+      "title": "창 1 앞 리허설 무대: 새 클러스터·관측·v1(복제 1·CPU 0.5·1GiB·queue-svc만)",
+      "estimate_min": 35,
+      "stage": "v1-entry-rehearsal",
+      "conditions": "Docker 잠금 두 자리를 다 잡은 뒤(lock.sh take docker-all lane4-F-08). Docker Desktop CPU 32·메모리 24GiB를 docker info로 확인한다. 새 kind 클러스터(2026-11-23 리허설 1차의 클러스터는 지웠다), 관측 묶음, 진입 비례 확인 무대(복제 1·CPU 0.5·메모리 1GiB·queue-svc만, 1차에서 512Mi는 OOM). 리허설 1차 실측: up 7.5분, 관측 2.6분, v1(이미지 빌드 포함) 약 15~20분. 리허설 몫에서 막히면 창 1을 멈추지 않고 도구·계획 파일을 고친 뒤(Role: impl 커밋) 이어 간다. 고친 시간만큼 뒤 실행이 밀리고, 1.3배를 넘게 밀리면 감독에게 알린다(F-08-8 6.3).",
       "commands": [
         {
           "label": "Docker 잠금(두 자리)",
@@ -94,7 +95,13 @@
             "--redis-tls",
             "on",
             "--replicas",
-            "3"
+            "1",
+            "--cpus",
+            "0.5",
+            "--memory-mi",
+            "1024",
+            "--services",
+            "queue-svc"
           ]
         },
         {
@@ -113,6 +120,174 @@
             "--filter",
             "@peaket/invariant-checker",
             "build"
+          ]
+        },
+        {
+          "label": "남은 실행 정리",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "cleanup"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 2절 3·6.1 리허설: cluster.mjs v1 끝 줄이 켠 서비스 queue-svc, 합본 로그 \"합본의 서비스를 모두 켰다\"의 services가 queue-svc 하나, 합본 파드가 OOMKilled 없이 Ready",
+        "Docker CPU 32·메모리 24GiB"
+      ],
+      "ledger": "성능 장부 실행이 아니다.",
+      "artifact": "cluster.mjs v1 출력, kubectl -n v1 logs deploy/bundle의 \"합본 서비스\" 줄",
+      "result_note": "무대가 15분 안에 준비되지 않으면 한 번만 다시 올린다. 리허설 몫에서 막히면 창 1을 멈추지 않고 도구·계획 파일을 고친 뒤(Role: impl 커밋) 이어 간다. 고친 시간만큼 뒤 실행이 밀리고, 1.3배를 넘게 밀리면 감독에게 알린다(F-08-8 6.3)."
+    },
+    {
+      "n": 2,
+      "gate": null,
+      "key": "w1-rehearsal-entry",
+      "window": 1,
+      "group": "리허설",
+      "title": "리허설: 진입 단계 올리기 작게(2단계)",
+      "estimate_min": 15,
+      "stage": "v1-entry-rehearsal",
+      "conditions": "진입 서버 1대·CPU 0.5, 100/s부터 100씩 2단계(장부 없음). 단계 하나의 실제 걸린 시간(준비·예열·본구간·쉼·발생기 띄우기)을 재 창 2 길이를 다시 센다. 리허설 몫에서 막히면 창 1을 멈추지 않고 도구·계획 파일을 고친 뒤(Role: impl 커밋) 이어 간다. 고친 시간만큼 뒤 실행이 밀리고, 1.3배를 넘게 밀리면 감독에게 알린다(F-08-8 6.3).",
+      "commands": [
+        {
+          "label": "진입 2단계",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "1",
+            "--pod-cpus",
+            "0.5",
+            "--start-rate",
+            "100",
+            "--step-rate",
+            "100",
+            "--max-steps",
+            "2",
+            "--out",
+            ".cache/peaket-f08/rehearsal/{day}-entry{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3 리허설: steps.json 단계 둘, step-1/host.json의 cpuUtil·procsRunning·kernel이 null이 아님(호스트 표본), notes의 \"토큰 없어 못 보냄 0건\"(k6가 준비 VU를 진입 시나리오에 이어 씀), 사전 검증 실패 0",
+        "단계 하나의 실제 시간을 구현 메모에 적는다"
+      ],
+      "ledger": "성능 장부 실행이 아니다.",
+      "artifact": ".cache/peaket-f08/rehearsal/{day}-entry{suffix}/steps.json, step-*/host.json",
+      "result_note": "토큰이 모자라 무효(entry_no_token > 0)면 k6가 VU를 이어 쓰지 않는 것이다. 시나리오를 고친다. 리허설 몫에서 막히면 창 1을 멈추지 않고 도구·계획 파일을 고친 뒤(Role: impl 커밋) 이어 간다. 고친 시간만큼 뒤 실행이 밀리고, 1.3배를 넘게 밀리면 감독에게 알린다(F-08-8 6.3)."
+    },
+    {
+      "n": 3,
+      "gate": null,
+      "key": "w1-rehearsal-entry-rec",
+      "window": 1,
+      "group": "리허설",
+      "title": "리허설: 진입 1단계 장부 기록과 점 계산",
+      "estimate_min": 10,
+      "stage": "v1-entry-rehearsal",
+      "conditions": "1단계를 --record로 남겨 collect.py --host가 manifest host 칸을 쓰는지 본다(장부 폴더는 리허설이라 커밋하지 않고 지운다). 앞 실행의 steps.json으로 entry-scale.mjs report를 돌린다. 리허설 몫에서 막히면 창 1을 멈추지 않고 도구·계획 파일을 고친 뒤(Role: impl 커밋) 이어 간다. 고친 시간만큼 뒤 실행이 밀리고, 1.3배를 넘게 밀리면 감독에게 알린다(F-08-8 6.3).",
+      "commands": [
+        {
+          "label": "진입 1단계 기록",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "1",
+            "--pod-cpus",
+            "0.5",
+            "--start-rate",
+            "100",
+            "--step-rate",
+            "100",
+            "--max-steps",
+            "1",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-rehearsal{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/rehearsal/{day}-entry-rec{suffix}"
+          ]
+        },
+        {
+          "label": "점 계산",
+          "argv": [
+            "node",
+            "loadtest/runner/entry-scale.mjs",
+            "report",
+            "--point",
+            "1=.cache/peaket-f08/rehearsal/{day}-entry{suffix}",
+            "--out",
+            ".cache/peaket-f08/rehearsal/{day}-report{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 7.2 리허설: 장부 실행 <접두>-s1의 manifest host 칸(cpu_util·procs_running·tags)이 있다",
+        "entry-scale.json이 써진다(점 하나라 비례 판정은 확인 못 함이 맞다)"
+      ],
+      "ledger": "리허설이라 장부 폴더를 커밋하지 않는다(docs/perf-ledger/runs 아래 {day}-msr020-rehearsal{suffix}-s1은 확인 뒤 지운다).",
+      "artifact": ".cache/peaket-f08/rehearsal/{day}-entry-rec{suffix}/steps.json, .cache/peaket-f08/rehearsal/{day}-report{suffix}/entry-scale.json",
+      "result_note": "리허설 몫에서 막히면 창 1을 멈추지 않고 도구·계획 파일을 고친 뒤(Role: impl 커밋) 이어 간다. 고친 시간만큼 뒤 실행이 밀리고, 1.3배를 넘게 밀리면 감독에게 알린다(F-08-8 6.3)."
+    },
+    {
+      "n": 4,
+      "gate": null,
+      "key": "w1-stage-full",
+      "window": 1,
+      "group": "무대",
+      "title": "창 1 무대: v1(TLS 켬, 복제 3)·리허설 e2e·새 DB·발생기 보정(512Mi)",
+      "estimate_min": 70,
+      "stage": "v1-tls-on",
+      "conditions": "같은 클러스터에서 v1 무대를 넷 다 켠 꼴(TLS 켬·복제 3·CPU 1·메모리 512Mi, §3.8)로 다시 올리고 v1 리허설 e2e를 한 번 돈다(F-08-8 8절, 합본 복제 2 이상). e2e가 DB에 남긴 것을 지우려고 무대를 한 번 더 올린다(무대 PostgreSQL은 다시 띄우면 처음부터다). 나누기 기준을 800/s로 바꿨으므로 CPU 2·메모리 512Mi 발생기 보정을 400·800·1,000/s로 한 번 잰다(F-08-8 6.1). DB·Valkey 통계 실읽기는 첫 K2 실행(--db-stats·--redis-stats)이 본다. 리허설 몫에서 막히면 창 1을 멈추지 않고 도구·계획 파일을 고친 뒤(Role: impl 커밋) 이어 간다. 고친 시간만큼 뒤 실행이 밀리고, 1.3배를 넘게 밀리면 감독에게 알린다(F-08-8 6.3).",
+      "commands": [
+        {
+          "label": "v1 무대(넷, 복제 3)",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "v1",
+            "--redis-tls",
+            "on",
+            "--replicas",
+            "3"
+          ]
+        },
+        {
+          "label": "불변식 검사기",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@peaket/invariant-checker",
+            "build"
+          ]
+        },
+        {
+          "label": "v1 리허설 e2e",
+          "argv": [
+            "node",
+            "--test",
+            "loadtest/e2e/v1-rehearsal.e2e.mjs"
+          ]
+        },
+        {
+          "label": "v1 무대 다시(새 DB)",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "v1",
+            "--redis-tls",
+            "on",
+            "--replicas",
+            "3"
           ]
         },
         {
@@ -141,15 +316,15 @@
         }
       ],
       "criteria": [
-        "F-08-8 6.1: Docker CPU 32·메모리 24GiB, v1 무대 준비됨(cluster.mjs v1 끝 줄)",
-        "보정: 800/s 단계가 놓침 없이 통과(dropped 0, 발생기 CPU 80% 이하)해야 K1 10만을 512Mi로 잰다. 놓치면 K1 10만 실행을 1GiB로 바꾸지 말고 감독에게 알린다(24GiB에서는 1GiB 12대가 들어가지만 계획 F-08-8 2절 5를 바꾸는 일이다)"
+        "F-08-8 6.1·8절: v1 무대 준비됨, v1 리허설 e2e 통과",
+        "보정: 800/s 단계가 놓침 없이 통과(dropped 0, 발생기 CPU 80% 이하)해야 K1 10만을 512Mi로 잰다. 놓치면 K1 10만 실행을 1GiB로 바꾸지 말고 감독에게 알린다(계획 F-08-8 2절 5를 바꾸는 일이다)"
       ],
-      "ledger": "성능 장부 실행이 아니다(보정은 --record 없이 .cache에 둔다).",
-      "artifact": ".cache/peaket-f08/calib/{day}-calib-512{suffix}/calibration.json",
-      "result_note": "무대가 15분 안에 준비되지 않으면 한 번만 다시 올리고, 또 안 되면 창을 멈추고 감독에게 알린다(F-08-8 2절 8)."
+      "ledger": "성능 장부 실행이 아니다(e2e·보정은 --record 없이 .cache에 둔다).",
+      "artifact": ".cache/peaket-f08/calib/{day}-calib-512{suffix}/calibration.json, e2e 출력",
+      "result_note": "e2e가 실패하면 그 까닭을 고친 뒤 이어 간다. 리허설 몫에서 막히면 창 1을 멈추지 않고 도구·계획 파일을 고친 뒤(Role: impl 커밋) 이어 간다. 고친 시간만큼 뒤 실행이 밀리고, 1.3배를 넘게 밀리면 감독에게 알린다(F-08-8 6.3)."
     },
     {
-      "n": 2,
+      "n": 5,
       "gate": null,
       "key": "k2-hot-tls-r1",
       "window": 1,
@@ -180,6 +355,7 @@
             "--generators",
             "3",
             "--db-stats",
+            "--redis-stats",
             "--record",
             "--run-id",
             "{day}-k2-v1-hot-tls-r1-f088{suffix}",
@@ -200,12 +376,12 @@
         "불변식 S1·S2·S4 PASS, SKIPPED는 §3.10 기대 목록(S3·P5)만",
         "generator.json judge.valid=true(통계를 못 읽어도 무효)"
       ],
-      "ledger": "kpi K2, redis_tls=true, paired_run, db-stats.json, notes에 hot 1·keep·발생기 3대(800/s 기준).",
+      "ledger": "kpi K2, redis_tls=true, paired_run, db-stats.json·redis-stats.json, notes에 hot 1·keep·발생기 3대(800/s 기준).",
       "artifact": ".cache/peaket-f08/k2/{day}-k2-hot-tls-r1{suffix}/summary.json, invariants.csv, generator.json, db-stats.json",
       "result_note": "3회 가운데 pass만 통과로 센다. 무효면 같은 조건으로 한 번만 더 잰다(F-08-8 6.1)."
     },
     {
-      "n": 3,
+      "n": 6,
       "gate": null,
       "key": "k2-hot-tls-r2",
       "window": 1,
@@ -261,7 +437,7 @@
       "result_note": "3회 가운데 pass만 통과로 센다. 무효면 같은 조건으로 한 번만 더 잰다(F-08-8 6.1)."
     },
     {
-      "n": 4,
+      "n": 7,
       "gate": null,
       "key": "k2-hot-tls-r3",
       "window": 1,
@@ -318,7 +494,7 @@
       "result_note": "3회 가운데 pass만 통과로 센다. 무효면 같은 조건으로 한 번만 더 잰다(F-08-8 6.1)."
     },
     {
-      "n": 5,
+      "n": 8,
       "gate": null,
       "key": "k2-spread-tls-r1",
       "window": 1,
@@ -372,7 +548,7 @@
       "result_note": "1회라 중앙값이 아니다. 보고서에 '1회(Before 3회)'로 적는다."
     },
     {
-      "n": 6,
+      "n": 9,
       "gate": null,
       "key": "k2-hot-notls-r1",
       "window": 1,
@@ -451,7 +627,7 @@
       "result_note": "끔 실행이 무효여도 켬 3회 판정을 막지 않는다."
     },
     {
-      "n": 7,
+      "n": 10,
       "gate": null,
       "key": "k1-1k-r1",
       "window": 1,
@@ -503,7 +679,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 8,
+      "n": 11,
       "gate": null,
       "key": "k1-1k-r2",
       "window": 1,
@@ -555,7 +731,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 9,
+      "n": 12,
       "gate": null,
       "key": "k1-1k-r3",
       "window": 1,
@@ -607,7 +783,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 10,
+      "n": 13,
       "gate": null,
       "key": "k1-10k-r1",
       "window": 1,
@@ -659,7 +835,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 11,
+      "n": 14,
       "gate": null,
       "key": "k1-10k-r2",
       "window": 1,
@@ -711,7 +887,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 12,
+      "n": 15,
       "gate": null,
       "key": "k1-10k-r3",
       "window": 1,
@@ -763,7 +939,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 13,
+      "n": 16,
       "gate": null,
       "key": "k1-2k-r1",
       "window": 1,
@@ -815,7 +991,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 14,
+      "n": 17,
       "gate": null,
       "key": "k1-4k-r1",
       "window": 1,
@@ -867,7 +1043,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 15,
+      "n": 18,
       "gate": null,
       "key": "k1-6k-r1",
       "window": 1,
@@ -919,7 +1095,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 16,
+      "n": 19,
       "gate": null,
       "key": "k1-100k-r1",
       "window": 1,
@@ -978,7 +1154,7 @@
       "result_note": "두 번 연속 무효면 셋째는 skip --reason \"10만 v1 무효(이 PC 발생기 한계)\". 그때 V-T4는 판정 못 함(F-08-2 6.2)."
     },
     {
-      "n": 17,
+      "n": 20,
       "gate": null,
       "key": "k1-100k-r2",
       "window": 1,
@@ -1037,7 +1213,7 @@
       "result_note": "두 번 연속 무효면 셋째는 skip --reason \"10만 v1 무효(이 PC 발생기 한계)\". 그때 V-T4는 판정 못 함(F-08-2 6.2)."
     },
     {
-      "n": 18,
+      "n": 21,
       "gate": null,
       "key": "k1-100k-r3",
       "window": 1,
@@ -1096,7 +1272,7 @@
       "result_note": "두 번 연속 무효면 셋째는 skip --reason \"10만 v1 무효(이 PC 발생기 한계)\". 그때 V-T4는 판정 못 함(F-08-2 6.2)."
     },
     {
-      "n": 19,
+      "n": 22,
       "gate": null,
       "key": "k7a-r1",
       "window": 1,
@@ -1149,7 +1325,7 @@
       "result_note": "장부 범위 밖(NFR-006 v1 쪽)이지만 F-08-2 부하 분해 표 '결제 접수' 줄이 쓴다."
     },
     {
-      "n": 20,
+      "n": 23,
       "gate": null,
       "key": "k7a-r2",
       "window": 1,
@@ -1202,7 +1378,7 @@
       "result_note": "장부 범위 밖(NFR-006 v1 쪽)이지만 F-08-2 부하 분해 표 '결제 접수' 줄이 쓴다."
     },
     {
-      "n": 21,
+      "n": 24,
       "gate": null,
       "key": "k7a-r3",
       "window": 1,
@@ -1255,7 +1431,7 @@
       "result_note": "장부 범위 밖(NFR-006 v1 쪽)이지만 F-08-2 부하 분해 표 '결제 접수' 줄이 쓴다."
     },
     {
-      "n": 22,
+      "n": 25,
       "gate": "WINDOW-2",
       "key": "w2-stage",
       "window": 2,
@@ -1352,7 +1528,7 @@
       "result_note": "무대가 올라가지 않으면 창을 멈추고 감독에게 알린다."
     },
     {
-      "n": 23,
+      "n": 26,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1394,7 +1570,7 @@
       "result_note": "x가 null이면 --start-rate 100 --step-rate 100으로 한 번 더 어림한다."
     },
     {
-      "n": 24,
+      "n": 27,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1437,7 +1613,7 @@
       "result_note": "세 번 가운데 찾지 못함이 있으면 X₁은 무효다. 감독에게 알린다."
     },
     {
-      "n": 25,
+      "n": 28,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1480,7 +1656,7 @@
       "result_note": "세 번 가운데 찾지 못함이 있으면 X₁은 무효다. 감독에게 알린다."
     },
     {
-      "n": 26,
+      "n": 29,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1523,7 +1699,7 @@
       "result_note": "세 번 가운데 찾지 못함이 있으면 X₁은 무효다. 감독에게 알린다."
     },
     {
-      "n": 27,
+      "n": 30,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1557,7 +1733,7 @@
       "result_note": "몫이 1이면 msr020-n1-*는 skip(msr020-x1-*이 N=1 점이다)."
     },
     {
-      "n": 28,
+      "n": 31,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1618,7 +1794,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 29,
+      "n": 32,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1661,7 +1837,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 30,
+      "n": 33,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1704,7 +1880,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 31,
+      "n": 34,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1765,7 +1941,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 32,
+      "n": 35,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1808,7 +1984,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 33,
+      "n": 36,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1851,7 +2027,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 34,
+      "n": 37,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1912,7 +2088,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 35,
+      "n": 38,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1955,7 +2131,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 36,
+      "n": 39,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1998,7 +2174,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 37,
+      "n": 40,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2059,7 +2235,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 38,
+      "n": 41,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2102,7 +2278,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 39,
+      "n": 42,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2145,7 +2321,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 40,
+      "n": 43,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2206,7 +2382,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 41,
+      "n": 44,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2249,7 +2425,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 42,
+      "n": 45,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2292,7 +2468,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 43,
+      "n": 46,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2353,7 +2529,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 44,
+      "n": 47,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2396,7 +2572,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 45,
+      "n": 48,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2439,7 +2615,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 46,
+      "n": 49,
       "gate": "WINDOW-2",
       "key": "msr020-report",
       "window": 2,
@@ -2532,7 +2708,7 @@
       "result_note": "점이 6개 미만이면 charts.py가 경고한다(장부에만 남긴다)."
     },
     {
-      "n": 47,
+      "n": 50,
       "gate": null,
       "key": "k7b-r1",
       "window": 1,
@@ -2654,7 +2830,7 @@
       "result_note": "새 클러스터가 15분 안에 준비되지 않으면 그 회를 실패로 적고 한 번만 다시 올린다(F-08-8 6.3). 무효면 새 클러스터에서 다시 잰다."
     },
     {
-      "n": 48,
+      "n": 51,
       "gate": null,
       "key": "k7b-r2",
       "window": 1,
@@ -2776,7 +2952,7 @@
       "result_note": "새 클러스터가 15분 안에 준비되지 않으면 그 회를 실패로 적고 한 번만 다시 올린다(F-08-8 6.3). 무효면 새 클러스터에서 다시 잰다."
     },
     {
-      "n": 49,
+      "n": 52,
       "gate": null,
       "key": "k7b-r3",
       "window": 1,
@@ -2885,6 +3061,62 @@
             "--out",
             ".cache/peaket-f08/k7/{day}-k7b-r3{suffix}"
           ]
+        }
+      ],
+      "criteria": [
+        "P-T1(docs/features/payment.md:894): 이중 결제 0, P6(승인인데 원장에 없음) 0, 좌석 누수 0, P3은 시작 시각(ADR-0266) 뒤 60초 기준",
+        "주입이 실제로 있었다: 버린 응답·늦춘 승인 수와 killed.json의 끝낸 파드가 있다(0건이면 무효)",
+        "SKIPPED는 S3·P5만, pause-transitions.json error=null, generator.json judge.valid=true",
+        "P-T1은 부분(ticket-svc·망 끊김·웹훅 중복·일일 대사는 측정 못 함, ADR-0373 동결 선행)"
+      ],
+      "ledger": "kpi K7, profile local-10k, redis_tls=true, db-stats.json, notes에 5%/0.5%·강제 종료 50초·P3 시작 시각·정지 기록·SKIPPED.",
+      "artifact": ".cache/peaket-f08/k7/{day}-k7b-r3{suffix}/summary.json, invariants.csv, pause-transitions.json, killed.json, db-stats.json",
+      "result_note": "새 클러스터가 15분 안에 준비되지 않으면 그 회를 실패로 적고 한 번만 다시 올린다(F-08-8 6.3). 무효면 새 클러스터에서 다시 잰다."
+    },
+    {
+      "n": 53,
+      "gate": null,
+      "key": "w1-demo-s1",
+      "window": 1,
+      "group": "데모",
+      "title": "데모 S1(팬 흐름 끝까지)·월렛 실제 목록과 QR 확인",
+      "estimate_min": 45,
+      "stage": "demo",
+      "conditions": "감독 결정 2026-11-23: 창 1 끝에 붙인다. 창 1이 계획보다 밀려 이 실행까지 1.3배를 넘으면 창 2 끝으로 옮긴다(감독에게 알린다). 데모 무대는 따로 kind 클러스터(lane4-demo)라 v1 측정 클러스터 peaket은 그대로 둔다. 둘이 함께 메모리를 쥐므로 docker stats로 여유가 4GiB 아래면 감독에게 묻고 peaket을 내린다. 이미지 다시 만들기 포함 약 45분.",
+      "commands": [
+        {
+          "label": "데모 무대(이미지 다시 만들기)",
+          "argv": [
+            "node",
+            "tools/local/demo.mjs",
+            "up"
+          ]
+        },
+        {
+          "label": "시드",
+          "argv": [
+            "node",
+            "tools/local/demo.mjs",
+            "seed"
+          ]
+        },
+        {
+          "label": "S1 재생",
+          "argv": [
+            "node",
+            "tools/local/demo.mjs",
+            "play",
+            "--scenarios",
+            "S1"
+          ]
+        },
+        {
+          "label": "데모 정리",
+          "argv": [
+            "node",
+            "tools/local/demo.mjs",
+            "down"
+          ]
         },
         {
           "label": "Docker 잠금 놓기(창 1 끝)",
@@ -2898,14 +3130,12 @@
         }
       ],
       "criteria": [
-        "P-T1(docs/features/payment.md:894): 이중 결제 0, P6(승인인데 원장에 없음) 0, 좌석 누수 0, P3은 시작 시각(ADR-0266) 뒤 60초 기준",
-        "주입이 실제로 있었다: 버린 응답·늦춘 승인 수와 killed.json의 끝낸 파드가 있다(0건이면 무효)",
-        "SKIPPED는 S3·P5만, pause-transitions.json error=null, generator.json judge.valid=true",
-        "P-T1은 부분(ticket-svc·망 끊김·웹훅 중복·일일 대사는 측정 못 함, ADR-0373 동결 선행)"
+        "데모 S1(docs/verification.md §7·V-T7): 팬 흐름이 끝까지 통과(play 끝 코드 0, 재생 결과 S1 통과)",
+        "월렛 실제 목록·QR 확인(wallet-list): 산 표가 월렛 목록에 실제로 있고 QR이 보인다"
       ],
-      "ledger": "kpi K7, profile local-10k, redis_tls=true, db-stats.json, notes에 5%/0.5%·강제 종료 50초·P3 시작 시각·정지 기록·SKIPPED.",
-      "artifact": ".cache/peaket-f08/k7/{day}-k7b-r3{suffix}/summary.json, invariants.csv, pause-transitions.json, killed.json, db-stats.json",
-      "result_note": "새 클러스터가 15분 안에 준비되지 않으면 그 회를 실패로 적고 한 번만 다시 올린다(F-08-8 6.3). 무효면 새 클러스터에서 다시 잰다."
+      "ledger": "성능 장부 실행이 아니다. 결과는 데모 측정 파일(demo.mjs 기본)에 남는다.",
+      "artifact": "demo.mjs play 출력, 측정 파일",
+      "result_note": "실패는 통과로 세지 않는다. 창 1 측정 결과와 따로 적는다."
     }
   ],
   "post": [
