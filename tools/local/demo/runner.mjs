@@ -272,9 +272,8 @@ async function failArtifact(ctx, step, page, e) {
 }
 
 /**
- * 티켓 화면의 QR 요소를 확인한다(리뷰 RV-05). 화면은 role="img"와 aria-label('입장 QR, 티켓 …')로 QR을 그리고,
- * 실제 무늬는 .qr 안의 검은 칸(i.on)이다. 화면은 목업 티켓만 그리므로 값은 원장 ticketId와 따로 적는다
- * (측정 파일 '남긴 것'의 데모 예외).
+ * 티켓 화면의 QR 요소를 확인한다(리뷰 RV-05). 화면은 role="img"와 aria-label('입장 QR, 티켓 <ticketId>, …')로 QR을 그리고,
+ * 실제 무늬는 .qr 안의 검은 칸(i.on)이다. 대체 글의 티켓 ID는 월렛 목록의 ticketId다(FIX-wallet-tickets, docs/frontend.md §4.2.4)
  */
 async function ticketQrOf(page) {
   const qr = page.locator('[role="img"][aria-label^="입장 QR"]').first();
@@ -302,6 +301,41 @@ async function api(ctx, account, o) {
     },
   });
   return res;
+}
+
+/**
+ * 팬 월렛 목록(GET /v1/tickets)을 nextCursor가 null이 될 때까지 받는다(FIX-wallet-tickets, docs/features/offline-gate.md §2 '월렛 목록 서버').
+ * 쪽이 20을 넘거나 같은 커서가 다시 오면 멈춘다. 목록 항목(티켓 ID·회차 ID·상태)만 돌려주고 응답 본문은 로그에 싣지 않는다
+ */
+async function walletTickets(ctx, account) {
+  const items = [];
+  const seen = new Set();
+  let cursor = null;
+  for (let page = 0; page < 20; page += 1) {
+    const res = await api(ctx, account, { method: 'GET', host: 'api', path: `/v1/tickets?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}` });
+    if (res.status !== 200 || !Array.isArray(res.json?.items)) throw new Error(`월렛 목록 → ${res.status} ${tail(res.text, 300)}`);
+    items.push(...res.json.items.map((t) => ({ ticketId: t.ticketId, eventId: t.eventId, status: t.status })));
+    const next = res.json.nextCursor ?? null;
+    if (next === null) return items;
+    if (seen.has(next)) throw new Error('월렛 목록이 같은 커서를 다시 줬다');
+    seen.add(next);
+    cursor = next;
+  }
+  throw new Error('월렛 목록이 20쪽 안에 끝나지 않았다');
+}
+
+/**
+ * 티켓 펼침 화면에서 '이 휴대폰을 입장용으로 등록'을 누르고 기기 공개키 등록(POST /v1/tickets/{ticketId}/device-keys) 응답을 기다린다.
+ * 고정 대기 없이 응답 조건으로 기다리고, 응답 상태 코드를 돌려준다(201이면 등록됨, 화면은 회전 QR로 바뀐다)
+ */
+async function registerWalletDevice(page, ticketId) {
+  const button = page.getByRole('button', { name: new RegExp(`티켓 ${ticketId}.*이 휴대폰을 입장용으로 등록$`) });
+  await button.waitFor({ state: 'visible', timeout: ACTION_TIMEOUT_MS });
+  const [res] = await Promise.all([
+    page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === `/v1/tickets/${ticketId}/device-keys`, { timeout: ACTION_TIMEOUT_MS }),
+    button.click(),
+  ]);
+  return res.status();
 }
 
 /** SQL 읽기(로컬 데모 전용 예외: 파트너 목록·상세 API가 없는 곳의 읽기만). 쓰기는 sqlDemoWrite 하나로 좁힌다 */
@@ -939,6 +973,8 @@ const FLOWS = {
     const hold = heldOf(await holdSeats(ctx, 'jimin', eventId, signer, { seatIds: [demoSeatId(eventId, 'R1-1-5'), demoSeatId(eventId, 'R1-1-6')] }), 'S1');
     ctx.vars.holdId = hold.holdId;
     ctx.addCheck('seat-hold-2', hold.seatIds.length === 2, `홀드 좌석 ${hold.seatIds.join(', ')}`);
+    // 구매 전 월렛 목록(앞 시나리오·앞 실행이 남긴 표와 이번 결제의 새 표를 가른다)
+    const walletBefore = new Set((await walletTickets(ctx, 'jimin')).map((t) => t.ticketId));
     const order = await createOrder(ctx, 'jimin', signer, hold.holdId);
     if (order.status !== 201 || !order.json?.orderId) throw new Error(`주문 생성 → ${order.status} ${tail(order.text, 800)}`);
     const orderId = order.json.orderId;
@@ -954,25 +990,29 @@ const FLOWS = {
     // 이 구현의 결제 성공 종착 상태는 CONFIRMED다(APPROVED는 승인 뒤 발권을 기다리는 중간 상태). 둘 다 결제 승인으로 본다
     const paid = await waitPayment(ctx, 'jimin', orderId, ['CONFIRMED', 'APPROVED']);
     ctx.addCheck('payment-approved', paid === 'CONFIRMED' || paid === 'APPROVED', `결제 상태 ${paid}`);
-    // 주문 상세 GET /v1/orders/{orderId}는 아직 제품에 없다. 발권은 ticket-svc 원장에 남으므로 그 원장에서 기다린다(로컬 데모 읽기 예외)
-    const ticketId = await waitUntil(
+    // 발권은 팬 월렛 목록(GET /v1/tickets)으로 본다: 구매 전에 없던 이 회차(E-1) ISSUED 표 2장이 나타날 때까지 1초 간격 60초
+    const issued = await waitUntil(
       ctx,
-      '결제 승인 뒤 발권 티켓',
+      '결제 승인 뒤 월렛 목록의 새 표',
       async () => {
-        const id = sqlRead(ctx, 'peaket_demo_ticket', `select id from ticket where order_id = '${orderId}' order by created_at, id limit 1`);
-        return { ok: /^[0-9a-f-]{36}$/.test(id), value: id, detail: id || '아직 없음' };
+        const fresh = (await walletTickets(ctx, 'jimin')).filter((t) => !walletBefore.has(t.ticketId) && t.eventId === eventId && t.status === 'ISSUED');
+        return { ok: fresh.length === 2, value: fresh, detail: `새 ISSUED 표 ${fresh.length}장` };
       },
       { timeoutMs: 60_000, intervalMs: 1_000 },
     );
+    const walletListed = issued.length === 2 && issued.every((t) => /^[0-9a-f-]{36}$/.test(t.ticketId));
+    ctx.addCheck('wallet-list', walletListed, `새 표 ${issued.map((t) => t.ticketId).join(', ')}`);
+    const ticketId = issued[0].ticketId;
     ctx.vars.ticketId = ticketId;
     await visit(ctx, { screen: 'SCR-010', path: '/booking/{eventId}/seats', account: 'jimin' });
     await visit(ctx, { screen: 'SCR-011', path: '/booking/{eventId}/checkout', account: 'jimin' });
     await visit(ctx, { screen: 'SCR-012', path: '/booking/{eventId}/result', account: 'jimin' });
-    // SCR-013은 제품 앱이 목업 티켓만 그린다(티켓 조회 API 없음). 화면은 QR이 있는 상태로 열어 요소·값을 확인하고,
-    // 판정의 ticketId는 실제 원장 값이다(측정 파일 '남긴 것'의 데모 예외)
-    const ticketPage = await visit(ctx, { screen: 'SCR-013', path: '/my/tickets/tkt-lumen-r1-0312?state=QR%2015%EC%B4%88%20%EC%A7%80%EB%82%A8', account: 'jimin', expect: ['티켓'] });
+    // SCR-013은 월렛 목록의 실제 ticketId 펼침으로 연다. 입장용 등록(201) 뒤 회전 QR의 대체 글에 그 ticketId가 있는지 본다
+    const ticketPage = await visit(ctx, { screen: 'SCR-013', path: '/my/tickets/{ticketId}', account: 'jimin', expect: ['티켓'] });
+    const registered = await registerWalletDevice(ticketPage, ticketId);
     const qr = await ticketQrOf(ticketPage);
-    ctx.addCheck('ticket-qr', qr.ok, `원장 ticketId ${ticketId} · 화면 QR ${qr.cells}칸 · ${qr.label.slice(0, 60)}`);
+    const qrOfListedTicket = registered === 201 && qr.ok && qr.label.includes(ticketId);
+    ctx.addCheck('ticket-qr', qrOfListedTicket, `등록 ${registered} · ticketId ${ticketId} · 화면 QR ${qr.cells}칸 · ${qr.label.slice(0, 80)}`);
     return ctx.checks;
   },
 

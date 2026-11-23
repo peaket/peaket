@@ -26,7 +26,7 @@ export const SCENARIOS = [
     accounts: ['jimin'],
     needs: ['E-1', 'demo-clock', 'queue-entry', 'pg-simulator'],
     evidenceOnlyScreens: ['SCR-001'],
-    checks: ['seat-hold-2', 'payment-approved', 'ticket-qr'],
+    checks: ['seat-hold-2', 'payment-approved', 'wallet-list', 'ticket-qr'],
     steps: [
       { id: 'home', kind: 'screen', screen: 'SCR-001', path: '/', as: 'jimin' },
       { id: 'event', kind: 'screen', screen: 'SCR-002', path: '/events/{eventId}', as: 'jimin' },
@@ -36,9 +36,11 @@ export const SCENARIOS = [
       { id: 'seats', kind: 'screen', screen: 'SCR-010', path: '/booking/{eventId}/seats', as: 'jimin' },
       { id: 'hold', kind: 'api', note: 'R구역 2석 홀드' },
       { id: 'checkout', kind: 'screen', screen: 'SCR-011', path: '/booking/{eventId}/checkout', as: 'jimin' },
+      { id: 'wallet-before', kind: 'api', note: '구매 전 월렛 목록(GET /v1/tickets)의 티켓 ID를 적어 둔다' },
       { id: 'pay', kind: 'api', note: '주문 → 결제 시도 → 시뮬레이터 승인 → 결제 승인' },
+      { id: 'wallet', kind: 'api', note: 'GET /v1/tickets를 1초 간격 60초까지 다시 불러 구매 전에 없던 E-1 ISSUED 표 2장을 찾는다' },
       { id: 'result', kind: 'screen', screen: 'SCR-012', path: '/booking/{eventId}/result', as: 'jimin' },
-      { id: 'ticket', kind: 'screen', screen: 'SCR-013', path: '/my/tickets/{ticketId}', as: 'jimin' },
+      { id: 'ticket', kind: 'screen', screen: 'SCR-013', path: '/my/tickets/{ticketId}', as: 'jimin', note: '이 휴대폰을 입장용으로 등록을 눌러 등록 201을 기다리고 회전 QR을 본다' },
     ],
   },
   {
@@ -225,7 +227,7 @@ export function readD5Scenarios(file = D5_DOC) {
 
 /** 시나리오마다 반드시 있어야 하는 결과 확인(계획 §6 V-T7 ①) */
 export const REQUIRED_CHECKS = {
-  S1: ['seat-hold-2', 'payment-approved', 'ticket-qr'],
+  S1: ['seat-hold-2', 'payment-approved', 'wallet-list', 'ticket-qr'],
   S3: ['unknown-result', 'seat-released'],
   S7: ['self-approval-403', 'second-approval-ok', 'audit-entry'],
   S8: ['verdict-pass', 'verdict-reject', 'verdict-needs-check', 'verdict-anomaly'],

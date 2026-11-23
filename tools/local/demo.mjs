@@ -358,7 +358,7 @@ function measurementOf(report, o, cleanup, outcome, probeTools = true) {
       'S8은 보존한 DPoP 기기 키로 기기 등록·승인 로그인·스캔 업로드를 하고, 판정 넷(통과·거부·확인 필요·이상 표시)을 티켓 원장에서 확인한다. 시드 티켓에 게이트 구역이 비어 있어 데모 전용 SQL로 기기 배치 구역을 티켓에 적는다.',
       'S9의 회차 취소 환불 반복은 합본의 purchase-relay 자식이 돈다(운영은 별도 outbox-relay Deployment).',
       'S1 홈(/v1/home)은 제품에 없어 500이고, 화면 증거로만 연다(판정 checks에는 넣지 않는다).',
-      'S1 SCR-013은 제품 앱이 목업 티켓만 그린다(티켓 조회 API 없음). 화면은 목업 티켓 id로 열어 QR 요소를 확인하고, ticket-qr은 실제 원장 ticketId와 화면 QR을 함께 본다.',
+      'S1은 발권을 팬 월렛 목록(GET /v1/tickets)으로 확인한다(wallet-list: 구매 전에 없던 E-1 ISSUED 표 2장). SCR-013은 그 ticketId 펼침으로 열어 입장용 등록(201) 뒤 회전 QR의 대체 글에 그 ticketId가 있는지 본다(ticket-qr).',
       '증거로만 여는 화면(evidenceOnlyScreens): S1 SCR-001, S5 SCR-014·SCR-041, S9 SCR-044·SCR-043. 나머지 화면 방문 실패는 시나리오 실패다.',
       `데모 동의 문안 판은 ${DEMO_CONSENT_VERSION}이다(서버 값과 다르면 422 consent-version-outdated).`,
     ],
