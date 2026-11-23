@@ -89,6 +89,8 @@ test('F-03-1 RV-04 원천이 있는 원격 둘의 자리와 퍼블리싱 화면�
 
 /** ADR-0360 결정 9의 원천 있는 위젯(원격 위젯 이름) */
 const SOURCED = ['queue-admission-rate', 'purchase-pg-status'];
+/** 호스트가 그리는 원천 있는 칸(F-04-1: 관제 실시간 표 rt-sales.summary를 RtSalesCell이 그린다, control-tower §12 '관제 실시간 표는 … 붙였고') */
+const HOST_SOURCED = ['구역별 잔여석'];
 /** 원격 자리의 제목: 보드 원본의 <RemoteWidget name=… title=…>에서 읽는다(서버 그리기에서는 그 제목의 스켈레톤 칸이 된다) */
 const remoteTitles = (() => {
   const src = readFileSync(new URL('./board-d.tsx', import.meta.url), 'utf8');
@@ -130,7 +132,7 @@ const nameOf = (c) => c.attrs['aria-labelledby'] ?? c.attrs['aria-label'] ?? c.a
 
 test("F-03-1 RV-04 ② 실제 값 화면의 모든 탭에서 원천 있는 원격 둘의 자리 밖 .widget 칸(보드가 직접 그리는 칸 포함)마다 data-source=\"pending\"과 '원천 연결 전' 배지가 있고, 원격 둘의 자리에는 없다", () => {
   assert.deepEqual([...remoteTitles.keys()].sort(), [...SOURCED].sort(), '보드의 원격 자리가 ADR-0360 결정 9의 원천 있는 위젯 둘과 다르다');
-  const sourcedTitles = new Set(remoteTitles.values());
+  const sourcedTitles = new Set([...remoteTitles.values(), ...HOST_SOURCED]);
   const missing = [];
   const seenSourced = new Set();
   let unsourced = 0;
@@ -156,4 +158,15 @@ test("F-03-1 RV-04 ② 실제 값 화면의 모든 탭에서 원천 있는 원�
   assert.deepEqual([...seenSourced].sort(), [...sourcedTitles].sort());
   assert.ok(unsourced >= 7, `원천 없는 칸이 ${unsourced}개뿐이다(팀 위젯 일곱보다 적다)`);
   assert.deepEqual(missing, [], `원천 연결 전 표지가 없는 칸 ${missing.length}개`);
+});
+
+test('F-04-1 C-T20 실제 값 화면의 구역별 잔여석 칸은 관제 실시간 표 원천(RtSalesCell)이 그리고, 퍼블리싱 화면은 고정 자료 그대로다', () => {
+  for (const state of ['T=0', '판매 중']) {
+    const live = render(state, true);
+    // 서버 그리기는 값을 받기 전이라 스켈레톤(aria-busy)이고, 고정 자료 숫자(R1 4석 등)를 그리지 않는다
+    assert.match(live, /aria-label="구역별 잔여석" aria-busy="true"/, `${state} 실제 값 화면에 실시간 표 칸 자리가 없다`);
+    assert.doesNotMatch(live, /R1 4석, R2 12석/, `${state} 실제 값 화면에 고정 자료 잔여석이 그려졌다`);
+    const pub = render(state, false);
+    assert.match(pub, /R1 4석, R2 12석/, `${state} 퍼블리싱 화면의 고정 자료가 없다`);
+  }
 });

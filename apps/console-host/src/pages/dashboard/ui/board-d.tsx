@@ -15,6 +15,7 @@ import { GRAFANA } from '@/entities/alert';
 import * as F from '../model/fixtures';
 import { WidgetSlot } from './WidgetSlot';
 import { RemoteWidget } from './RemoteWidget';
+import { RtSalesCell } from './RtSalesCell';
 import { RecentReleased } from './RecentReleased';
 
 const prevent = (e: FormEvent) => e.preventDefault();
@@ -594,6 +595,9 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
             <WidgetSlot ctx={ctx} remote="purchase" title="결제 확정·남은 허용 실패">
               <PaymentBudgetWidget data={F.PAY_BUDGET} pending={ctx.live} detailHref={GRAFANA} />
             </WidgetSlot>
+            {ctx.live ? (
+              <RtSalesCell id="w-heat" style={{ gridColumn: "span 2" }} />
+            ) : (
             <section className="widget" role="region" aria-labelledby="w-heat" style={{ gridColumn: "span 2" }}>
               <div className="widget-head">
                 <h2 className="t-sm fw-b" id="w-heat">구역별 잔여석</h2>
@@ -730,6 +734,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </>
               ) : null}
             </section>
+            )}
             <section className="widget" role="region" aria-labelledby="w-bot">
               <div className="widget-head wrap">
                 <h2 className="t-sm fw-b" id="w-bot">봇 차단</h2>
@@ -1255,6 +1260,9 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
             )}
             {v.notFold ? (
               <>
+                {ctx.live ? (
+                  <RtSalesCell id="w-lheat" style={{ gridColumn: "span 2" }} />
+                ) : (
                 <section className="widget" role="region" aria-labelledby="w-lheat" style={{ gridColumn: "span 2" }}>
                   <div className="widget-head">
                     <h2 className="t-sm fw-b" id="w-lheat">구역별 잔여석</h2>
@@ -1380,6 +1388,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                     </p>
                   </div>
                 </section>
+                )}
               </>
             ) : null}
             {' '}
