@@ -4,6 +4,7 @@
 // 경계: 보류 끝 날짜(수요일)의 지급일은 취소하고 그다음 날(목요일)은 그대로, 조각 하나라도 IN_PROGRESS면 취소 0번.
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
+import { SettlementDueWorker } from '../src/modules/settlement/index.js';
 import type { PayoutStatus, PgStore, StatementRecord } from '../src/modules/settlement/domain/settlement.js';
 import { OpsIntakeFake } from './support/ops-intake-fake.js';
 import { PortonePlatformFake } from './support/portone-platform-fake.js';
@@ -154,6 +155,70 @@ describe('J-T40 ⑤ 정산 계좌 변경의 예약지급 취소', () => {
     expect(statusOf(op.payoutId)).toBe('REQUESTED');
     expect(h.store.statements.get(os.statementId)?.status).toBe('SCHEDULED');
     expect(h.toss!.callsOf('cancelPayout').map((c) => (c as { pgPayoutId: string }).pgPayoutId)).toEqual([mine.pgPayoutIds[0]]);
+  });
+});
+
+describe('J-T40 ⑤ 계좌 변경 뒤 예약지급 취소 다시 시도(정리 목록 C-10, 계획 §5.1 (하) 3, 시험 이의 TO-10)', () => {
+  const worker = () => new SettlementDueWorker({ settlements: h.settlements, leader: { isLeader: () => true }, clock: h.clock });
+  const cancels = () => h.toss!.callsOf('cancelPayout').length;
+
+  test('J-T40 ⑤ 계좌 변경 때 취소 요청이 실패·응답 없음이면 지급 건·정산서가 그대로이고, 다음 30분 tick이 보류 기간 안의 REQUESTED 예약지급을 다시 취소한다', async () => {
+    const x = await scheduled('STANDARD', '2026-12-01', [{ amount: 4_321_000, status: 'REQUESTED' }]);
+    // 첫 취소는 연결이 끊긴다(응답 없음과 같은 꼴)
+    h.toss!.fail('cancelPayout', 'STANDARD', 1);
+    await changeAccount();
+    expect(cancels()).toBe(1);
+    expect(statusOf(x.payoutIds[0]!)).toBe('REQUESTED');
+    expect(h.store.statements.get(x.s.statementId)).toMatchObject({ status: 'SCHEDULED', holdReason: null });
+    expect(heldEvents(x.s.statementId)).toEqual([]);
+    // 30분 뒤 정산 일꾼 tick
+    h.clock.advance(30 * 60_000);
+    await worker().tick(false);
+    expect(h.toss!.callsOf('cancelPayout').map((c) => [c.pgStore, (c as { pgPayoutId: string }).pgPayoutId])).toEqual([
+      ['STANDARD', x.pgPayoutIds[0]],
+      ['STANDARD', x.pgPayoutIds[0]],
+    ]);
+    expect(statusOf(x.payoutIds[0]!)).toBe('CANCELED');
+    expect(h.store.statements.get(x.s.statementId)).toMatchObject({ status: 'HELD', holdReason: 'ACCOUNT_CHANGE' });
+    expect(heldEvents(x.s.statementId).map((e) => e.value.amount)).toEqual([4_321_000]);
+    // 이미 취소한 정산서는 다음 tick이 다시 부르지 않는다
+    h.clock.advance(30 * 60_000);
+    await worker().tick(false);
+    expect(cancels()).toBe(2);
+    expect(heldEvents(x.s.statementId)).toHaveLength(1);
+  });
+
+  test('J-T40 ⑤ retryAccountChangeCancellations는 보류 중인 파트너만 세고 그 취소 수를 돌려준다', async () => {
+    const x = await scheduled('ESCROW', '2026-11-30', [{ amount: 1_111_000, status: 'REQUESTED' }]);
+    h.toss!.fail('cancelPayout', 'ESCROW', 1);
+    await changeAccount();
+    h.clock.advance(30 * 60_000);
+    await expect(h.settlements.retryAccountChangeCancellations()).resolves.toEqual({ promoters: 1, cancelled: 1 });
+    expect(statusOf(x.payoutIds[0]!)).toBe('CANCELED');
+    // 다시 부르면 이미 HELD라 SCHEDULED 토스 정산서가 없어 파트너도 취소도 0이다
+    await expect(h.settlements.retryAccountChangeCancellations()).resolves.toEqual({ promoters: 0, cancelled: 0 });
+    expect(h.toss!.callsOf('cancelPayout')).toHaveLength(2);
+  });
+
+  test('J-T40 ⑤ 보류가 끝난 뒤(수요일 10:00 KST)에는 남은 예약지급의 취소를 다시 부르지 않는다', async () => {
+    const x = await scheduled('STANDARD', '2026-12-02', [{ amount: 2_222_000, status: 'REQUESTED' }]);
+    h.toss!.fail('cancelPayout', 'STANDARD');
+    await changeAccount();
+    expect(cancels()).toBe(1);
+    h.toss!.clearFailures();
+    // 보류 끝 1ms 전 tick은 다시 부른다
+    h.clock.advance(Date.parse('2026-12-02T01:00:00.000Z') - 1 - h.clock.now());
+    h.toss!.fail('cancelPayout', 'STANDARD');
+    await worker().tick(false);
+    expect(cancels()).toBe(2);
+    // 보류 끝(수요일 10:00 KST) 뒤 tick은 부르지 않는다
+    h.toss!.clearFailures();
+    h.clock.advance(1 + 30 * 60_000);
+    await worker().tick(false);
+    expect(cancels()).toBe(2);
+    expect(statusOf(x.payoutIds[0]!)).toBe('REQUESTED');
+    expect(h.store.statements.get(x.s.statementId)).toMatchObject({ status: 'SCHEDULED' });
+    await expect(h.settlements.retryAccountChangeCancellations()).resolves.toEqual({ promoters: 0, cancelled: 0 });
   });
 });
 

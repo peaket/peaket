@@ -104,8 +104,9 @@ beforeEach(async () => {
   toss.clearFailures();
   await db1.pool.query('delete from test_hooks.fail_key');
   clock = fakeClock({ now: FRIDAY_10_KST });
-  a = buildSettlements(new DrizzleSettlementStore(db1), new DrizzleSettlementPaymentSource(db1), { now: FRIDAY_10_KST, clock, portone: fake, toss, ops, reauth: new TokenAsJti() });
-  b = buildSettlements(new DrizzleSettlementStore(db2), new DrizzleSettlementPaymentSource(db2), { now: FRIDAY_10_KST, clock, portone: fake, toss, ops, reauth: new TokenAsJti() });
+  // 저장소에 같은 가짜 시계를 넘겨 Outbox 행 ID·시각이 미리 만든 파티션(가짜 시계 기준) 안에 들게 한다(settlement-toss-payout.int와 같음, 시험 이의 TO-11)
+  a = buildSettlements(new DrizzleSettlementStore(db1, clock), new DrizzleSettlementPaymentSource(db1), { now: FRIDAY_10_KST, clock, portone: fake, toss, ops, reauth: new TokenAsJti() });
+  b = buildSettlements(new DrizzleSettlementStore(db2, clock), new DrizzleSettlementPaymentSource(db2), { now: FRIDAY_10_KST, clock, portone: fake, toss, ops, reauth: new TokenAsJti() });
 });
 
 /** 지급 준비가 된 파트너(판매자 확인·옛 계좌 판 9·포트원 파트너·토스 두 상점 셀러), 포트원 쪽 파트너 계좌도 같다 */
@@ -240,7 +241,8 @@ describe('J-T40 계좌 변경의 경합과 한 트랜잭션', () => {
 
   test('J-T40 ⑤ 예약 취소 반영과 웹훅 결과 반영(COMPLETED)이 같은 지급 건에 겹치면 사건은 하나만 남고 상태가 서로 맞는다', async () => {
     const { P } = await partner();
-    const x = await scheduledToss(P, '2026-12-01');
+    // 앞 시험의 묶음(TOSS·STANDARD·12-01)과 부분 유일이 겹치지 않게 보류 기간 안의 다른 지급일(시험 이의 TO-12)
+    const x = await scheduledToss(P, '2026-11-30');
     await locker.query('begin');
     await locker.query('select id from payout where id = $1 for update', [x.payoutId]);
     const cancel = a.settlements.cancelScheduledTossPayouts({ promoterId: P, reason: 'ACCOUNT_CHANGE', payoutDateThrough: '2026-12-02' }).catch((e: unknown) => e);
@@ -283,16 +285,21 @@ describe('J-T41 ① 포트원 실행의 한 트랜잭션', () => {
 });
 
 describe('J-T20 ②·J-T21 대사의 겹침과 한 트랜잭션', () => {
+  /** 시험마다 다른 포트원 지급일(11-20부터 하루씩, 시험 이의 TO-12) */
+  let payoutDay = 19;
   async function paid(P: string, partnerId: string, amount: number): Promise<{ statementId: string; payoutId: string }> {
     const at = new Date(FRIDAY_10_KST - 2 * 86_400_000);
-    const bt = batch({ pg: 'PORTONE', payoutDate: '2026-11-27', totalAmount: amount, statementCount: 1, status: 'SUBMITTED', portoneBulkPayoutId: 'bulk-int', at });
+    // 같은 지급일의 SUBMITTED 묶음은 부분 유일이라 시험마다 다른 지급일을 쓴다(시험 이의 TO-12)
+    payoutDay += 1;
+    const payoutDate = `2026-11-${String(payoutDay).padStart(2, '0')}`;
+    const bt = batch({ pg: 'PORTONE', payoutDate, totalAmount: amount, statementCount: 1, status: 'SUBMITTED', portoneBulkPayoutId: `bulk-int-${payoutDay}`, at });
     await a.store.insertPayoutBatch(bt);
-    const s = statement({ promoterId: P, pg: 'PORTONE', payoutDate: '2026-11-27', status: 'SCHEDULED', payoutAmount: amount, payoutBatchId: bt.batchId, at });
+    const s = statement({ promoterId: P, pg: 'PORTONE', payoutDate, status: 'SCHEDULED', payoutAmount: amount, payoutBatchId: bt.batchId, at });
     await a.store.saveStatement(s);
-    const p = payout({ batchId: bt.batchId, statementId: s.statementId, amount, pgPayoutId: s.statementId, payoutDate: '2026-11-27', at });
+    const p = payout({ batchId: bt.batchId, statementId: s.statementId, amount, pgPayoutId: s.statementId, payoutDate, at });
     await a.store.insertPayouts([p]);
-    fake.transfers.set(s.statementId, { id: s.statementId, partnerId, settlementAmount: amount, settlementDate: '2026-11-27', status: 'SCHEDULED' });
-    fake.payouts.push({ id: `po-${s.statementId.slice(0, 8)}`, bulkPayoutId: 'bulk-int', transferId: s.statementId, status: 'SUCCEEDED', completedAt: new Date(FRIDAY_10_KST - 3_600_000).toISOString(), failureCode: null });
+    fake.transfers.set(s.statementId, { id: s.statementId, partnerId, settlementAmount: amount, settlementDate: payoutDate, status: 'SCHEDULED' });
+    fake.payouts.push({ id: `po-${s.statementId.slice(0, 8)}`, bulkPayoutId: `bulk-int-${payoutDay}`, transferId: s.statementId, status: 'SUCCEEDED', completedAt: new Date(FRIDAY_10_KST - 3_600_000).toISOString(), failureCode: null });
     await a.settlements.syncPortonePayouts();
     return { statementId: s.statementId, payoutId: p.payoutId };
   }

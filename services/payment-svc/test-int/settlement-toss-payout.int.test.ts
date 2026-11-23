@@ -279,7 +279,8 @@ describe('J-T37 ② payment 0029', () => {
         (e: { code?: string }) => e.code,
       );
     for (const k of ['PAYOUT_ERROR', 'PAYOUT_FAILED', 'PAYOUT_DELAYED', 'SELLER_KYC_REQUIRED', 'PG_BALANCE_MISMATCH']) expect([k, await kind(k)]).toEqual([k, 'ok']);
-    for (const k of ['STATEMENT_DISPUTE', 'PORTONE_LEDGER_MISMATCH']) expect([k, await kind(k)]).toEqual([k, '23514']);
+    // F-07-7(ADR-0370 결정 8, payment 0030·0032)이 PORTONE_PAYOUT_EXECUTION·PORTONE_LEDGER_MISMATCH를 더해 받으므로 목록 밖 예는 지어낸 종류로 둔다(F-07-7 시험 이의 TO-13)
+    for (const k of ['STATEMENT_DISPUTE', 'PORTONE_SOMETHING', 'payout_error']) expect([k, await kind(k)]).toEqual([k, '23514']);
   });
 });
 
