@@ -58,6 +58,11 @@ async function one(exec: Executor, q: SQL): Promise<PriorityGrant | undefined> {
   return row ? grantOf(row) : undefined;
 }
 
+async function many(exec: Executor, q: SQL): Promise<PriorityGrant[]> {
+  const r = await exec.execute(q);
+  return (r.rows as unknown as Row[]).map(grantOf);
+}
+
 export class DrizzlePriorityGrantStore implements PriorityGrantStore {
   constructor(private readonly database: Database) {}
 
@@ -130,5 +135,41 @@ export class DrizzlePriorityGrantStore implements PriorityGrantStore {
       update priority_grant set active_order_id = null, updated_at = ${new Date(nowMs)}::timestamptz
       where id = ${grantId}::uuid and status = 'OFFERED' and active_order_id = ${orderId}::uuid`);
     return (r.rowCount ?? 0) === 1;
+  }
+
+  /**
+   * 기한 지난 OFFERED를 한 문장으로 EXPIRED로 바꾼다(ADR-0385). 진행 중 주문(active_order_id)이 있는 행은 건드리지 않는다.
+   * `expires_at` 인덱스(0020)를 쓰고, 한 틱에 limit개까지만 처리한다.
+   */
+  async expireDue(nowMs: number, limit: number): Promise<readonly PriorityGrant[]> {
+    const n = Math.max(0, Math.min(Math.trunc(limit), 1_000));
+    if (n === 0) return [];
+    return many(
+      this.database.db,
+      sql`with due as (
+            select id from priority_grant
+            where status = 'OFFERED' and active_order_id is null and expires_at <= ${new Date(nowMs)}::timestamptz
+            order by expires_at, id
+            limit ${n}
+          )
+          update priority_grant p
+          set status = 'EXPIRED', active_order_id = null, version = version + 1, updated_at = ${new Date(nowMs)}::timestamptz
+          from due
+          where p.id = due.id
+          returning p.*`,
+    );
+  }
+
+  /** 만료 전 상태를 queue 사본에 다시 보낼 목록(ADR-0385). EXPIRED는 TTL이 사본을 지우므로 넣지 않는다 */
+  async listSyncable(nowMs: number, limit: number): Promise<readonly PriorityGrant[]> {
+    const n = Math.max(0, Math.min(Math.trunc(limit), 1_000));
+    if (n === 0) return [];
+    return many(
+      this.database.db,
+      sql`select ${COLUMNS} from priority_grant
+          where expires_at > ${new Date(nowMs)}::timestamptz and status in ('OFFERED', 'USED', 'WITHDRAWN')
+          order by updated_at, id
+          limit ${n}`,
+    );
   }
 }

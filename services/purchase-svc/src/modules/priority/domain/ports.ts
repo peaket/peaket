@@ -1,6 +1,35 @@
 // 우선 구매 모듈의 포트(도메인은 DB·Redis·HTTP를 모른다).
 import type { SeatRef } from '../../inventory/index.js';
-import type { CancelledTicketView, NewPriorityGrant, PriorityGrant } from './priority-grant.js';
+import type { CancelledTicketView, NewPriorityGrant, PriorityGrant, PriorityGrantStatus } from './priority-grant.js';
+
+/** queue-svc가 계약 밖 상태·모양을 거절했을 때(INVALID_ARGUMENT). 대조는 같은 값을 다시 보내지 않는다 */
+export class InvalidPriorityGrantState extends Error {
+  constructor(readonly detail: string) {
+    super(`우선 구매 권리 사본 요청이 계약과 다르다: ${detail}`);
+    this.name = 'InvalidPriorityGrantState';
+  }
+}
+
+export type PriorityGrantSyncResult = 'ok' | 'failed' | 'invalid';
+export type PriorityGrantExpireResult = 'ok' | 'failed';
+
+/** 대조 틱의 결과를 세는 포트(어댑터의 Prom 구현이 받는다). 어댑터가 유스케이스를 가져오지 않게 포트에 둔다 */
+export interface PriorityGrantSyncSignals {
+  sync(result: PriorityGrantSyncResult): void;
+  expire(result: PriorityGrantExpireResult): void;
+}
+
+/** queue-svc PriorityGrantService.SetPriorityGrant(ADR-0385). purchase-svc의 상태 대조가 쓴다 */
+export interface QueuePriorityGrants {
+  set(input: {
+    readonly accountId: string;
+    readonly eventId: string;
+    readonly grantId: string;
+    readonly state: PriorityGrantStatus;
+    readonly expiresAtMs: number;
+    readonly version: number;
+  }): Promise<{ readonly changed: boolean }>;
+}
 
 export interface PriorityGrantStore {
   /** 취소한 표 하나에 권리 하나(UNIQUE). 같은 표로 다시 오면 처음 결과를 돌려준다 */
@@ -17,6 +46,10 @@ export interface PriorityGrantStore {
   expire(grantId: string, nowMs: number): Promise<PriorityGrant | undefined>;
   /** 결제 실패로 진행 중 주문 표시를 비운다. OFFERED이고 active_order_id가 그 주문일 때만 */
   releaseOrder(grantId: string, orderId: string, nowMs: number): Promise<boolean>;
+  /** 기한 지난 OFFERED(진행 중 주문 없음)를 EXPIRED로 바꾸고 바뀐 행을 돌려준다(대조 틱, ADR-0385) */
+  expireDue(nowMs: number, limit: number): Promise<readonly PriorityGrant[]>;
+  /** expires_at > now이고 상태가 OFFERED·USED·WITHDRAWN인 행(대조 틱, ADR-0385) */
+  listSyncable(nowMs: number, limit: number): Promise<readonly PriorityGrant[]>;
 }
 
 /** 취소한 표의 좌석·등급·가격을 읽는 포트(purchase DB order_item·order_cancellation·event 일정) */

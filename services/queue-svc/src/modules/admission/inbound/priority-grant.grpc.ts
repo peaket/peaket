@@ -1,5 +1,5 @@
 // 받는 층: gRPC PriorityGrantService(queue.proto, docs/features/queue-admission.md §6 '우선 구매 입장', ADR-0171).
-// 부르는 쪽은 ops-svc만이고, 그 신원 확인은 메시 웨이포인트의 L7 허용 목록이 한다.
+// 부르는 쪽은 ops-svc(발급·회수)와 purchase-svc(상태 대조)이고, 그 신원 확인은 메시 웨이포인트의 L7 허용 목록이 한다(ADR-0385).
 // 요청 모양이 틀리면 INVALID_ARGUMENT(저장소를 읽지 않는다), 대기열 Redis에 닿지 못하면 UNAVAILABLE,
 // 예상하지 못한 오류는 INTERNAL이다. 오류 문구는 고정 글이고 받은 값을 싣지 않는다(docs/api/proto/README.md §2).
 import * as grpc from '@grpc/grpc-js';
@@ -26,6 +26,8 @@ function timestampMs(v: unknown): number {
 const STATE: Readonly<Record<string, PriorityGrantState>> = {
   PRIORITY_GRANT_STATE_OFFERED: 'OFFERED',
   PRIORITY_GRANT_STATE_WITHDRAWN: 'WITHDRAWN',
+  PRIORITY_GRANT_STATE_USED: 'USED',
+  PRIORITY_GRANT_STATE_EXPIRED: 'EXPIRED',
 };
 
 function failure(method: string, err: unknown, onError: (method: string, err: unknown) => void): Partial<grpc.StatusObject> {

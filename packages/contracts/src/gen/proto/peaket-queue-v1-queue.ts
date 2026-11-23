@@ -225,7 +225,9 @@ export const queueV1Queue: Record<string, unknown> = {
                   "values": {
                     "PRIORITY_GRANT_STATE_UNSPECIFIED": 0,
                     "PRIORITY_GRANT_STATE_OFFERED": 1,
-                    "PRIORITY_GRANT_STATE_WITHDRAWN": 2
+                    "PRIORITY_GRANT_STATE_WITHDRAWN": 2,
+                    "PRIORITY_GRANT_STATE_USED": 3,
+                    "PRIORITY_GRANT_STATE_EXPIRED": 4
                   }
                 },
                 "SetPriorityGrantRequest": {

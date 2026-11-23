@@ -231,3 +231,4 @@
 - F-05-2 구현 리뷰 IR-11(낮음): 한도에 걸린 뒤에도 429마다 `LIMITED` 행을 하나씩 넣어 계정 하나가 표를 무한히 키울 수 있다. 보존 90일 정리도 구간 5로 미뤘다. 같은 계정의 짧은 창 `LIMITED`를 한 행으로 합치거나 상한을 둔다(ASVS 2.4.1)
 - F-05-2 구현 리뷰 IR-12(낮음): 메모리 기기 키 저장소는 돌려주기 뒤 `TRANSFER` 예외가 없다. Drizzle에만 예외가 있어 짝 가짜가 진짜와 같은 계약 시험을 통과하지 못한다. 메모리에도 같은 규칙(티켓 반환 기록)을 넣는다(계획 §10 '짝 가짜')
 - F-05-2 구현 리뷰 함께: `WalletLive` 돌려주기 응답 유실 뒤 새 키로 다시 보내면 409 `payer-holds`로 보이는 문구, `transfer-actions.ts` `receivedSnapshotOf` 미사용·`RETURN_CONFIRM_TEXT` 중복, `docs/security/asvs/transfer-refund.md`·d5 §5.14·§5.23·`docs/frontend.md` §4.2.4·`docs/BUILD_ORDER.md` GAT 줄의 남은 갱신
+- F-05-3 화면 입구(동결 뒤 몫): SCR-042 [[ 우선 구매하기 ]] → queue-room `priorityGrantId` 왕복이 없다. 서버(Q-T62·S-T37)는 닫았고 화면은 `apps/web` 몫이라 이 기능에서 고치지 않는다. 새 행이 필요하면 감독이 기록 커밋에서 만든다

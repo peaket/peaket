@@ -9,6 +9,7 @@ import { SET_PRIORITY_GRANT_LUA } from './priority-grant-lua.js';
 
 const SET = redisScript(SET_PRIORITY_GRANT_LUA);
 const str = (v: unknown): string => (Buffer.isBuffer(v) ? v.toString('utf8') : String(v));
+const STATES: ReadonlySet<string> = new Set(['OFFERED', 'USED', 'EXPIRED', 'WITHDRAWN']);
 
 @Injectable()
 export class RedisPriorityGrantStore implements PriorityGrantStore {
@@ -30,7 +31,7 @@ export class RedisPriorityGrantStore implements PriorityGrantStore {
     const version = Number(str(r[3]));
     // 우리가 쓴 값이 망가졌으면 없는 것으로 본다(입장을 열지 않는다). 쓰기 쪽은 같은 망가짐을 PEAKET_CORRUPT_KEY로 드러낸다.
     if (!Number.isSafeInteger(exp) || exp <= 0 || !Number.isSafeInteger(version) || version < 0) return undefined;
-    if (state !== 'OFFERED' && state !== 'WITHDRAWN') return undefined;
+    if (!STATES.has(state)) return undefined;
     return { grantId: str(id), state: state as PriorityGrantState, expiresAtMs: exp, version };
   }
 }

@@ -81,4 +81,23 @@ export class MemoryPriorityGrantStore implements PriorityGrantStore {
     this.grants.set(grantId, { ...g, activeOrderId: undefined, updatedAtMs: nowMs });
     return true;
   }
+
+  async expireDue(nowMs: number, limit: number): Promise<readonly PriorityGrant[]> {
+    const due = [...this.grants.values()]
+      .filter((g) => g.status === 'OFFERED' && g.activeOrderId === undefined && g.expiresAtMs <= nowMs)
+      .sort((a, b) => a.expiresAtMs - b.expiresAtMs || a.grantId.localeCompare(b.grantId))
+      .slice(0, Math.max(0, Math.trunc(limit)));
+    return due.map((g) => {
+      const next: PriorityGrant = { ...g, status: 'EXPIRED', activeOrderId: undefined, version: g.version + 1, updatedAtMs: nowMs };
+      this.grants.set(g.grantId, next);
+      return next;
+    });
+  }
+
+  async listSyncable(nowMs: number, limit: number): Promise<readonly PriorityGrant[]> {
+    return [...this.grants.values()]
+      .filter((g) => g.expiresAtMs > nowMs && (g.status === 'OFFERED' || g.status === 'USED' || g.status === 'WITHDRAWN'))
+      .sort((a, b) => a.updatedAtMs - b.updatedAtMs || a.grantId.localeCompare(b.grantId))
+      .slice(0, Math.max(0, Math.trunc(limit)));
+  }
 }

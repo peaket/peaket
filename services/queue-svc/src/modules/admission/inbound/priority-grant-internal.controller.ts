@@ -1,5 +1,5 @@
 // 우선 구매 권리 사본 쓰기 내부 HTTP(GAT-135). 정본은 queue.proto PriorityGrantService이고, ops-svc가 purchase-svc로 권리를 만든 뒤
-// 같은 판 번호·만료를 이 경로로 queue-svc에 복사한다(클러스터 안에서만, InternalTokenGuard).
+// 같은 판 번호·만료를 이 경로로 queue-svc에 복사한다(클러스터 안에서만, InternalTokenGuard). purchase-svc의 상태 대조도 같은 계약을 쓴다(ADR-0385).
 import { Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ContractBody, ContractRouteSchema, InternalTokenGuard, ProblemError, Roles } from '@peaket/platform';
 import { z } from 'zod';
@@ -11,7 +11,7 @@ const SetBody = z
     accountId: z.uuid(),
     eventId: z.uuid(),
     grantId: z.uuid(),
-    state: z.enum(['OFFERED', 'WITHDRAWN']),
+    state: z.enum(['OFFERED', 'USED', 'EXPIRED', 'WITHDRAWN']),
     expiresAt: z.iso.datetime(),
     version: z.number().int().min(0),
   })

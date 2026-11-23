@@ -170,12 +170,13 @@ message SetBookingRestrictionResponse {
   bool changed = 1;
 }
 
-// 부르는 쪽: ops-svc만(우선 구매 권리를 만들거나 거둘 때, 작업 워커의 다시 보내기).
+// 부르는 쪽: ops-svc(우선 구매 권리를 만들거나 거둘 때, 작업 워커의 다시 보내기)와 purchase-svc(상태 대조, ADR-0385).
 // 초안(추천 적용 2026-10-31, ADR-0171, POL-046 ⑦), 정본은 docs/features/queue-admission.md §6 '우선 구매 입장'과 docs/features/transfer-refund.md §7.4.
 // queue-svc는 대기열 Redis q:prio:{account}:E에 사본을 둔다. 입장 확정 본문에 priorityGrantId가 오면 대기 번호·셔플·15분 만료 없이,
 // 판매 종료 뒤에도(판매 종료 규칙의 예외) 그 계정의 OFFERED 권리이고 만료 전일 때만 입장 토큰(클레임 prio = 권리 ID)을 준다. 입장 자리 수에는 세지 않는다.
 // 이때 새 여정 ID(jny)를 만든다(이 입장이 그 사람의 그 회차 첫 요청이 아니어도 새 여정이다, 추천 적용 2026-10-31).
-// 한 번만 사게 하는 것은 purchase-svc(priority_grant.status)가 지킨다. 판 번호가 저장한 판보다 클 때만 반영한다. 데드라인은 1초 [가정]이다.
+// 한 번만 사게 하는 것은 purchase-svc(priority_grant.status)가 지킨다. 입장 확정은 OFFERED·만료 전만 통과하고
+// USED·EXPIRED·WITHDRAWN은 같은 404 priority-grant-not-found다(ADR-0385). 판 번호가 저장한 판보다 클 때만 반영한다. 데드라인은 1초 [가정]이다.
 service PriorityGrantService {
   rpc SetPriorityGrant(SetPriorityGrantRequest) returns (SetPriorityGrantResponse);
 }
@@ -184,8 +185,12 @@ enum PriorityGrantState {
   PRIORITY_GRANT_STATE_UNSPECIFIED = 0;
   // 살 수 있다
   PRIORITY_GRANT_STATE_OFFERED = 1;
-  // 거뒀다(샀거나, 만료 전에 운영자가 거둠)
+  // 거뒀다(만료 전에 운영자가 거둠)
   PRIORITY_GRANT_STATE_WITHDRAWN = 2;
+  // 결제를 마쳤다(입장 확정은 404, ADR-0385)
+  PRIORITY_GRANT_STATE_USED = 3;
+  // 기한이 지났다(입장 확정은 404, ADR-0385)
+  PRIORITY_GRANT_STATE_EXPIRED = 4;
 }
 
 message SetPriorityGrantRequest {

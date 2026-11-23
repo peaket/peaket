@@ -1,6 +1,7 @@
-// 우선 구매 권리의 대기열 사본 값·키 규칙(queue.proto PriorityGrantService, docs/data.md `q:prio`, ADR-0171).
-// ops-svc가 보낸 판 번호가 저장한 판보다 클 때만 바꾼다. 수명은 권리 만료와 같고, WITHDRAWN도 만료 전까지 남겨 404 근거로 쓴다.
-export type PriorityGrantState = 'OFFERED' | 'WITHDRAWN';
+// 우선 구매 권리의 대기열 사본 값·키 규칙(queue.proto PriorityGrantService, docs/data.md `q:prio`, ADR-0171·0385).
+// purchase-svc와 ops-svc가 보낸 판 번호가 저장한 판보다 클 때만 바꾼다. 수명은 권리 만료와 같고,
+// USED·EXPIRED·WITHDRAWN은 만료 전까지 남겨 404 근거로 쓴다.
+export type PriorityGrantState = 'OFFERED' | 'USED' | 'EXPIRED' | 'WITHDRAWN';
 
 export interface PriorityGrantCopy {
   readonly grantId: string;

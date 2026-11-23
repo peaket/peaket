@@ -44,8 +44,11 @@ import {
   DrizzlePriorityGrantStore,
   DrizzlePrioritySeatSales,
   GrantPriorityPurchase,
+  GrpcQueuePriorityGrants,
   priorityPurchaseHandlers,
   priorityPurchasePackage,
+  PriorityGrantSync,
+  PromPriorityGrantSignals,
   SeatMapPriorityCandidates,
   WithdrawPriorityGrant,
   type PriorityModuleDeps,
@@ -729,6 +732,23 @@ export async function start(o: StartOptions): Promise<StartedService> {
   if (!database) service.logger.warn({ dep: 'postgres' }, 'PEAKET_DATABASE_URL이 없어 purchase DB 없이 떴다(판매 확정 저장소 SeatSales와 주문 생성 POST /v1/orders를 내놓지 않는다)');
   signals.register(service.metrics.registry);
   hotPath.register(service.metrics.registry);
+
+  // 우선 구매 권리 상태 대조(ADR-0385, GAT-135 A13·A14). purchase DB와 queue-svc 주소가 있을 때만 켠다.
+  // 주소가 없으면 local·ci·demo는 경고 한 줄로 끄고, 그 밖의 환경은 시작하지 않는다(사본이 조용히 어긋나는 것을 막는다).
+  const queueGrpcAddr = env.PEAKET_QUEUE_GRPC_ADDR;
+  let prioritySync: PriorityGrantSync | undefined;
+  let priorityCopies: GrpcQueuePriorityGrants | undefined;
+  if (priority) {
+    if (queueGrpcAddr) {
+      priorityCopies = new GrpcQueuePriorityGrants(queueGrpcAddr);
+      const prioritySignals = new PromPriorityGrantSignals().register(service.metrics.registry);
+      prioritySync = new PriorityGrantSync({ grants: priority.grants, copies: priorityCopies, clock: systemClock, logger: service.logger, signals: prioritySignals });
+    } else if (envName === 'local' || envName === 'ci' || envName === 'demo') {
+      service.logger.warn({ dep: 'queue-svc' }, 'PEAKET_QUEUE_GRPC_ADDR가 없어 우선 구매 권리 상태 대조를 끈다');
+    } else {
+      throw new Error('PEAKET_QUEUE_GRPC_ADDR가 없다(우선 구매 권리 상태 대조, 운영 필수)');
+    }
+  }
   csCaseSignals.register(service.metrics.registry);
   refundSignals.register(service.metrics.registry);
   // 첫 환급 판정 전에 서킷 상태를 한 번 읽는다(기다리지 않는다). 읽기 실패는 모든 몫을 거짓으로 두고 경고만 남긴다
@@ -1129,6 +1149,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
   }
   const sweeper = service.app.get(ExpirySweeper);
   sweeper.start();
+  // 우선 구매 권리 상태 대조(ADR-0385). 만료 반복과 따로 도는 30초 반복이다
+  prioritySync?.start();
   saleStateJudge?.start();
   sagaRunner?.start();
   ticketRunner?.start();
@@ -1168,7 +1190,10 @@ export async function start(o: StartOptions): Promise<StartedService> {
       // 제어 gRPC 서버는 새 제어를 받지 않고 돌던 호출을 기다린다(ADR-0102의 우아한 종료)
       (controlServer?.close() ?? Promise.resolve()).catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, '제어 gRPC 서버 닫기 실패')),
     ])
-      .then(() => Promise.all([admissionLoader?.stop(), saleReconciler?.stop(), sweeper.stop(), sessionSweeper.stop(), saleStateJudge?.stop(), sagaRunner?.stop(), ticketRunner?.stop(), ticketVoidRunner?.stop(), compensationRunner?.stop(), paymentStatusWaiters?.stop(), refundGrpc?.close()]))
+      .then(() => Promise.all([admissionLoader?.stop(), saleReconciler?.stop(), sweeper.stop(), sessionSweeper.stop(), prioritySync?.stop(), saleStateJudge?.stop(), sagaRunner?.stop(), ticketRunner?.stop(), ticketVoidRunner?.stop(), compensationRunner?.stop(), paymentStatusWaiters?.stop(), refundGrpc?.close()]))
+      .then(() => {
+        priorityCopies?.close();
+      })
       .then(() => service.close())
       .finally(closeTelemetry)
       .catch((err: unknown) => service.logger.error({ err: errorSummary(err) }, 'purchase-svc 종료 실패'))
