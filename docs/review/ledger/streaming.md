@@ -4,29 +4,29 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 5 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 20 | 27 |
-| 합계 | 5 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 20 | 27 |
+| B | 11 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 14 | 27 |
+| 합계 | 11 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 14 | 27 |
 
 ## docs/streaming.md
 
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
-| ST-T1 | — | 같은 거래 사건을 두 번 보내고(`eventKey`가 같다), 처리… | 판매 좌석·금액 누적이 정답과 같다(두 번 세지 않는다) | 빈칸 | B | — |
-| ST-T2 | — | 텔레메트리의 한 파티션에만 사건이 오고 나머지는 비어 있다(심장 박동… | 켬: 1초 칸이 끊기지 않고 신선도가 정상이다. 끔: 1초 칸은 그대로 나오지만 심장 박동이 없는 파티션 때문에 신선도가 나빠져 보이고, 3분 뒤… | 빈칸 | B | — |
-| ST-T3 | — | 사건을 5초·15초·10분 늦게 보낸다 | 셋 모두 제 1초 칸에 들어간다(버리지 않는다). 이미 그린 칸은 다음 조회에서 고쳐진다 | 빈칸 | B | — |
-| ST-T4 | — | ClickHouse를 30초 멈춘다 | 작업자는 묶음을 버리지 않고 그 파티션 소비를 멈췄다가, 돌아오면 이어 싣는다. 누락은 0이고 그동안 신선도가 나빠져 보인다. 원본 적재는 커버리지 대조에서 빈… | 빈칸 | B | — |
+| ST-T1 | — | 같은 거래 사건을 두 번 보내고(`eventKey`가 같다), 처리… | 판매 좌석·금액 누적이 정답과 같다(두 번 세지 않는다) | 자동 시험 | B | 시험: services/ops-rt/test-int/ops-rt.int.test.ts |
+| ST-T2 | — | 텔레메트리의 한 파티션에만 사건이 오고 나머지는 비어 있다(심장 박동… | 켬: 1초 칸이 끊기지 않고 신선도가 정상이다. 끔: 1초 칸은 그대로 나오지만 심장 박동이 없는 파티션 때문에 신선도가 나빠져 보이고, 3분 뒤… | 자동 시험 | B | 시험: services/ops-rt/test-int/ops-rt.int.test.ts, services/ops-rt/test/rows.test.ts 외 3곳 |
+| ST-T3 | — | 사건을 5초·15초·10분 늦게 보낸다 | 셋 모두 제 1초 칸에 들어간다(버리지 않는다). 이미 그린 칸은 다음 조회에서 고쳐진다 | 자동 시험 | B | 시험: services/ops-rt/test-int/ops-rt.int.test.ts, services/ops-svc/test/realtime-table.test.ts |
+| ST-T4 | — | ClickHouse를 30초 멈춘다 | 작업자는 묶음을 버리지 않고 그 파티션 소비를 멈췄다가, 돌아오면 이어 싣는다. 누락은 0이고 그동안 신선도가 나빠져 보인다. 원본 적재는 커버리지 대조에서 빈… | 자동 시험 | B | 시험: services/ops-rt/test-int/ops-rt.int.test.ts, services/ops-svc/test/realtime-table.test.ts |
 | ST-T5 | — | 한 기기 가명으로 pid 6명이 10분 안에 사전 검증한다. 모드는… | 후보 6건, `TrustVerdict` 그림자 6건, 격리 0건 | 빈칸 | B | — |
 | ST-T6 | — | 모드 적용, 격리 상한을 넘는 후보 | 상한까지만 격리되고 나머지는 그림자로 남는다. SEV3가 뜬다. 이미 입장한 사람은 격리되지 않는다 | 빈칸 | B | — |
-| ST-T7 | — | 원시 표를 비운 뒤(복원 사고) 다시 채우기를 돌린다. Kafka 7일… | 누적이 정답과 같다. 겹쳐 실린 행은 결과를 바꾸지 않는다 | 빈칸 | B | — |
+| ST-T7 | — | 원시 표를 비운 뒤(복원 사고) 다시 채우기를 돌린다. Kafka 7일… | 누적이 정답과 같다. 겹쳐 실린 행은 결과를 바꾸지 않는다 | 자동 시험 | B | 시험: services/ops-rt/test-int/ops-rt.int.test.ts |
 | ST-T8 | — | 다른 네임스페이스에서 작업자 파드의 지표 포트가 아닌 포트로 연결한다 | 연결이 막힌다. 작업자에는 관리 API가 없다 | 빈칸 | B | — |
 | ST-T9 | — | 같은 고정 사건 묶음(판매·반환·입금 되돌림과 다시 입금·부분 취소… | 판매 좌석(전체·등급·구역)·판매 금액·확정 주문·발권 티켓이 골드와 같다. 다시 확정된 주문은 퍼널에 한 번만 들어간다 | 빈칸 | B | — |
-| ST-T10 | — | 좌석 하나에 PENDING → SOLD → PENDING(입금 되돌림)… | 판매 좌석이 +1 → 0 → +1 → 0으로 바뀌고, 중복과 다시 보낸 옛 사건은 무시된다 | 빈칸 | B | — |
+| ST-T10 | — | 좌석 하나에 PENDING → SOLD → PENDING(입금 되돌림)… | 판매 좌석이 +1 → 0 → +1 → 0으로 바뀌고, 중복과 다시 보낸 옛 사건은 무시된다 | 자동 시험 | B | 시험: services/ops-rt/test-int/ops-rt.int.test.ts, services/ops-rt/test/rows.test.ts 외 1곳 |
 | ST-T11 | — | 사건을 계속 보내면서 작업자를 롤링으로 올린다 | 누적이 끊김 없이 정답과 같다. 새 파드는 커밋한 위치에서 이어 읽는다 | 빈칸 | B | — |
 | ST-T12 | — | 가명 키 요청(KMS)을 실패하게 함 | 원문을 쓰지 않고 그 파티션에서 멈춰 다시 시도하며, 소비 밀림 경보가 뜬다. KMS가 돌아오면 빠짐 없이 이어 간다 | 빈칸 | B | — |
 | ST-T13 | — | 재평가 문턱을 넘긴 메시지를 처리한 직후, 후보를 발행하기 전에… | 다시 뜬 뒤 그 메시지를 다시 읽어 문턱 때의 후보 전체를 다시 낸다. trust-svc는 같은 후보를 한 번만 처리한다 | 빈칸 | B | — |
 | ST-T14 | ① | MSK IAM 토큰 함수(기술 검토 높음-26). ① 로컬: 흉내 낸… | ① : 맡은 역할의 세션 이름이 늘 `<작업자>-<환경>`이다. 역할을 못 맡으면 기본 자격으로 넘어가지 않고 연결이 실패하며 소비 밀림 경보가 뜬다. | 자동 시험 | B | 시험: packages/platform/test/msk-iam.test.ts |
 | ST-T14 | ② | MSK IAM 토큰 함수(기술 검토 높음-26). ① 로컬: 흉내 낸… | ② : 재인증 실패('Cannot change principals during re-authentication')와 연결 끊김이 0건이고 소비 밀림이 늘지… | ID만 | B | 시험: packages/platform/test/msk-iam.test.ts |
-| ST-T15 | — | 모르는 열거 기호(기술 검토 중간-087): 작업자가 빌드된 계약 판에… | 레코드를 거절하지 않는다. `ops-rt`는 `UNRECOGNIZED`로 싣고 `stream_unrecognized_symbol_total`이 늘며 5분… | 자동 시험 | B | 시험: packages/platform/test-int/batch-worker.int.test.ts, packages/platform/test/avro-reader.test.ts 외 1곳 |
+| ST-T15 | — | 모르는 열거 기호(기술 검토 중간-087): 작업자가 빌드된 계약 판에… | 레코드를 거절하지 않는다. `ops-rt`는 `UNRECOGNIZED`로 싣고 `stream_unrecognized_symbol_total`이 늘며 5분… | 자동 시험 | B | 시험: packages/platform/test-int/batch-worker.int.test.ts, packages/platform/test/avro-reader.test.ts 외 2곳 |
 | ST-T17 | — | 인기 회차 한 파티션(추천 적용 2026-10-28, 기술 검토… | 그 파티션을 맡은 `ops-rt`·`analytics-ingest` 파드의 소비 밀림이 5초 [가정] 안에 머물고 신선도 p95가 NFR-009 안이다. 파드… | 빈칸 | B | — |
 | ST-T16 | ① | 레지스트리 정지(기술 검토 중간-088): 컨테이너 레지스트리를 멈춘… | ① : 새 파드는 처음 보는 ID에서 그 파티션 소비를 멈추고 다시 시도한다. 거절은 0건이고, 되살린 뒤 빠짐 없이 이어 읽는다. | 자동 시험 | B | 시험: packages/platform/test-int/batch-worker.int.test.ts, packages/platform/test-int/schema-registry.int.test.ts 외 2곳 |
 | ST-T16 | ② | 레지스트리 정지(기술 검토 중간-088): 컨테이너 레지스트리를 멈춘… | ② : 생산자는 설정의 스키마 ID로 Outbox 바이트를 만들어 주문이 성공하고, 시작 확인 실패 경보(SEV3)만 뜬다 | ID만 | B | 시험: packages/platform/test-int/batch-worker.int.test.ts, packages/platform/test-int/schema-registry.int.test.ts 외 2곳 |

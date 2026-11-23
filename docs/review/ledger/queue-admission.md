@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 115 | 46 | 3 | 0 | 0 | 2 | 0 | 0 | 30 | 196 |
-| B | 37 | 13 | 0 | 0 | 0 | 3 | 0 | 2 | 4 | 59 |
-| 합계 | 152 | 59 | 3 | 0 | 0 | 5 | 0 | 2 | 34 | 255 |
+| A | 115 | 50 | 3 | 0 | 0 | 2 | 0 | 0 | 26 | 196 |
+| B | 37 | 14 | 0 | 0 | 0 | 3 | 0 | 2 | 3 | 59 |
+| 합계 | 152 | 64 | 3 | 0 | 0 | 5 | 0 | 2 | 29 | 255 |
 
 ## docs/features/queue-admission.md
 
@@ -108,10 +108,10 @@
 | Q-T48 | ④ | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ④ 남은 두 키가 TTL로 사라진다. | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
 | Q-T48 | ⑤ | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ⑤ 차단 목록 신호가 붙은 기기가 0개다(틀린 '있다'가 없다) | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
 | Q-T49 | — | 에러 버짓 연동 감축의 대상 여정(추천 적용 2026-10-28… | 연동 여정 넷은 목표가 한 번만 2,500으로 줄고 자동 증액이 멈춘다(사유 `budget_alert`·`budget_50`, `journey` 라벨). 다른… | 자동 시험 | A | 시험: services/admission-ctrl/test/aimd.test.ts |
-| Q-T50 | ① | 외부 합성 점검용 회차(추천 적용 2026-10-28, 기술 검토… | ①은 대기열 순번 없이 입장 확정을 받는다. | 빈칸 | A | — |
-| Q-T50 | ② | 외부 합성 점검용 회차(추천 적용 2026-10-28, 기술 검토… | ②는 우회 없이 일반 대기열로 간다. | 빈칸 | A | — |
-| Q-T50 | ③ | 외부 합성 점검용 회차(추천 적용 2026-10-28, 기술 검토… | ③은 거절되고 보안 이벤트로 남는다. | 빈칸 | A | — |
-| Q-T50 | ④ | 외부 합성 점검용 회차(추천 적용 2026-10-28, 기술 검토… | ④에서 결제 승인 호출은 0건이고, 남은 결제 시도는 만료로 닫히며 홀드는 세션 종료로 풀린다. 점검 트래픽은 SLO 기록 규칙·퍼널 카운터·관제 실시간… | 빈칸 | A | — |
+| Q-T50 | ① | 외부 합성 점검용 회차(추천 적용 2026-10-28, 기술 검토… | ①은 대기열 순번 없이 입장 확정을 받는다. | ID만 | A | 시험: services/ops-rt/test/rows.test.ts |
+| Q-T50 | ② | 외부 합성 점검용 회차(추천 적용 2026-10-28, 기술 검토… | ②는 우회 없이 일반 대기열로 간다. | ID만 | A | 시험: services/ops-rt/test/rows.test.ts |
+| Q-T50 | ③ | 외부 합성 점검용 회차(추천 적용 2026-10-28, 기술 검토… | ③은 거절되고 보안 이벤트로 남는다. | ID만 | A | 시험: services/ops-rt/test/rows.test.ts |
+| Q-T50 | ④ | 외부 합성 점검용 회차(추천 적용 2026-10-28, 기술 검토… | ④에서 결제 승인 호출은 0건이고, 남은 결제 시도는 만료로 닫히며 홀드는 세션 종료로 풀린다. 점검 트래픽은 SLO 기록 규칙·퍼널 카운터·관제 실시간… | ID만 | A | 시험: services/ops-rt/test/rows.test.ts |
 | Q-T51 | ① | 일시 매진·매진·매진 풀림(추천 적용 2026-10-28… | ①가용 0이 5초 이어지면 파일이 ALL_HELD가 되고 serving 전진이 멈춘다(새 입장 0건). 대기는 끝나지 않고, 만료로 좌석이 돌아오면… | 자동 시험 | A | 시험: services/queue-svc/test/entry-cases.ts |
 | Q-T51 | ② | 일시 매진·매진·매진 풀림(추천 적용 2026-10-28… | ② 대기 참여가 SaleEnded로 끝나고(대기 기록의 빠진 사유 `SOLD_OUT`, 기술 검토 낮음-130) 진입·입장 확정이 410 `sold-out`이다 | 자동 시험 | A | 시험: services/queue-svc/test-int/sale-state.int.test.ts, services/queue-svc/test/entry-cases.ts 외 2곳 |
 | Q-T51 | ③ | 일시 매진·매진·매진 풀림(추천 적용 2026-10-28… | ③ 매진이 풀려 파일이 ON_SALE이 되고, 취소표 알림 신청자에게 알림이 한 번 가며, serving이 매진 때의 마지막 발급 번호로 옮겨져 새 진입자부터… | 자동 시험 | A | 시험: services/queue-svc/test/sale-state-cases.ts |
@@ -230,7 +230,7 @@
 | v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 자동 시험 | B | 시험: apps/web/src/_pages/ticket-cancel/ui/live-wiring.test.mjs, services/queue-svc/test/leave-http.test.ts 외 2곳 |
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/pwa-config.test.mjs, apps/web/src/features/wallet-device-key/sw-rules.test.m… |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs |
-| v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 빈칸 | B | 영역: apps/web, packages/shuffle, services/admission-ctrl, services/queue-svc, tools/edge |
+| v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | ID만 | B | 다른 곳 시험: tools/web-checks/console-csp/console.spec.mjs, tools/web-checks/console-csp/partner.spec.mjs (영역: apps/web… |
 | v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: apps/web/queue-room/test/verify-return.test.mjs, apps/web/src/_pages/login/model/state.test.mjs 외 5곳 |
 | v5.0.0-9.1.1 | — | L1 | 자체 완결형 토큰은 서명이나 MAC을 검증한 뒤에만 내용을 받아들인다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외… |
 | v5.0.0-9.1.2 | — | L1 | 자체 완결형 토큰의 생성·검증에는 맥락별 허용 목록의 알고리즘만 쓰고(`none` 제외, 되도록 대칭·비대칭 중 한쪽만), 둘 다 써야 하면 키 혼동을 막는… | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts |

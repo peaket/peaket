@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 101 | 47 | 8 | 2 | 0 | 2 | 0 | 22 | 31 | 213 |
-| 합계 | 101 | 47 | 8 | 2 | 0 | 2 | 0 | 22 | 31 | 213 |
+| B | 115 | 46 | 8 | 2 | 0 | 2 | 0 | 22 | 20 | 215 |
+| 합계 | 115 | 46 | 8 | 2 | 0 | 2 | 0 | 22 | 20 | 215 |
 
 ## docs/frontend.md
 
@@ -27,7 +27,7 @@
 | FE-T14 | — | 월렛 오프라인 | 오프라인 QR, 범위 밖 가로채기 0 | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/pwa-config.test.mjs, apps/web/src/features/wallet-device-key/sw-rules.test.m… |
 | FE-T15 | — | 미지원 기능 대체 | §1.5 표대로. `AbortSignal.any`가 없어도 호출이 예외 없이 나가고, 시간 초과는 `TimeoutError`, 화면 떠남은… | 자동 시험 | B | 시험: apps/web/queue-room/test/live-net-store.test.mjs, apps/web/scripts/mock-api/queue.test.mjs 외 3곳 |
 | FE-T16 | — | 헤더 값과 메서드 | §5.14.1과 같다. 앱 서버 경로와 `/_t/*`의 PUT·DELETE는 405, 정적 경로는 CloudFront가 거절하고, 어느 경로든 TRACE와 허용… | 빈칸 | B | — |
-| FE-T17 | — | 원격 위젯 | 그 칸만 대체 카드로 바뀐다 | 빈칸 | B | — |
+| FE-T17 | — | 원격 위젯 | 그 칸만 대체 카드로 바뀐다 | 자동 시험 | B | 시험: apps/console-host/src/shared/lib/remotes/remote-loader.test.mjs, tools/web-checks/console-remotes/preload.spec.mjs… |
 | FE-T18 | — | 접근성 | 위반 0, 완주 100%, 단축키가 꺼졌거나 입력 칸에 초점이 있을 때 동작 0, 다 가려진 초점 0, 비활성 버튼의 동작 0과 이유 글 연결 100% | 사람 확인 | B | BAT-580 · 화면 낭독기·키보드 완주는 사람이 본다. 이름을 단 자동 시험(axe·목록 구조)은 그 일부다. 3조합·3시나리오 확인 목록은… |
 | FE-T19 | — | 다국어 | 누락 0, 크기가 같다 | 빈칸 | B | — |
 | FE-T20 | — | 스캐너 판정 | p95 150ms, 표대로 | 빈칸 | B | — |
@@ -35,14 +35,16 @@
 | FE-T22 | — | 지표 묶음 | 규칙대로 | 자동 시험 | B | 시험: packages/telemetry/test/cleanup.test.ts, packages/telemetry/test/rum.test.ts |
 | FE-T23 | — | 관리 계정 유휴 | 갱신 0, 경고 시각 | 빈칸 | B | — |
 | FE-T24 | — | 결제 결과 기계 | §3.6 표대로, 기계의 모든 전이를 경로가 덮는다 | 자동 시험 | B | 시험: apps/web/src/_pages/booking-result/model/result-machine.test.mjs |
-| FE-T25 | — | 콘솔 덩어리 나눔 | 관제 화면 덩어리 80KB 이하 [가정], 첫 화면 묶음에 늦게 싣는 부분 0 | 빈칸 | B | — |
-| FE-T26 | — | 안 보이는 위젯 | 위젯 흐름의 위젯 목록에서 떠난 탭의 위젯은 10초 뒤, 숨긴 탭은 30초 뒤 0. 목록이 바뀔 때 위젯 흐름을 1초 묶어 한 번만 다시 연다. 접은 위젯은… | 빈칸 | B | — |
+| FE-T25 | — | 콘솔 덩어리 나눔 | 관제 화면 덩어리 80KB 이하 [가정], 첫 화면 묶음에 늦게 싣는 부분 0 | 자동 시험 | B | 시험: apps/console-host/src/shared/lib/preload.test.mjs, tools/web-checks/budgets/chunks.spec.mjs 외 1곳 |
+| FE-T26 | — | 안 보이는 위젯 | 위젯 흐름의 위젯 목록에서 떠난 탭의 위젯은 10초 뒤, 숨긴 탭은 30초 뒤 0. 목록이 바뀔 때 위젯 흐름을 1초 묶어 한 번만 다시 연다. 접은 위젯은… | 자동 시험 | B | 시험: apps/console-host/src/pages/dashboard/ui/remote-collapsed.test.mjs, apps/console-host/src/shared/api/live/connection… |
 | FE-T27 | — | 콘솔 장시간·스트림 부하 | 처음 30분 뒤 JS 힙(가비지 수거 뒤)의 시간당 증가 5% [가정] 이하, DOM 노드 수가 늘지 않음, 평상 구간 긴 작업 0, 탭 전환·명령 화면 열기… | 빈칸 | B | — |
-| FE-T28 | ① | 관제 SSE 흐름 계약 | ① 빠진 `command`·`alert`가 없다 | 빈칸 | B | — |
-| FE-T28 | ② | 관제 SSE 흐름 계약 | ② `reset` 뒤 명령·경보·승인 대기를 REST로 다시 읽는다 | 빈칸 | B | — |
-| FE-T28 | ③ | 관제 SSE 흐름 계약 | ③ 35초 뒤 다시 연다(10초 + 0~5초 무작위) | 빈칸 | B | — |
-| FE-T28 | ④ | 관제 SSE 흐름 계약 | ④ 토큰을 갱신한 뒤 다시 붙고, 갱신이 401이면 로그인으로 간다 | 빈칸 | B | — |
-| FE-T28 | ⑤ | 관제 SSE 흐름 계약 | ⑤ 위젯 흐름만 다시 열고 늘 여는 흐름은 그대로다. 콘솔 번들에 urql·graphql-ws·socket.io-client가 없다 | 빈칸 | B | — |
+| FE-T28 | ① | 관제 SSE 흐름 계약 | ① 빠진 `command`·`alert`가 없다 | 자동 시험 | B | 시험: apps/console-host/src/shared/api/live/live-stream.test.mjs, services/ops-svc/test-int/ops-live.int.test.ts 외 1곳 |
+| FE-T28 | ② | 관제 SSE 흐름 계약 | ② `reset` 뒤 명령·경보·승인 대기를 REST로 다시 읽는다(경보 몫은 경보 목록 REST와 함께 F-03-3에서 판정한다, F-03-1은 승인… | 자동 시험 | B | 시험: apps/console-host/src/shared/api/live/connection-reset.test.mjs, apps/console-host/src/shared/api/live/live-stream.t… |
+| FE-T28 | ③ | 관제 SSE 흐름 계약 | ③ 35초 뒤 다시 연다(10초 + 0~5초 무작위) | 자동 시험 | B | 시험: apps/console-host/src/shared/api/live/live-stream.test.mjs, services/ops-svc/test/ops-live.test.ts |
+| FE-T28 | ④ | 관제 SSE 흐름 계약 | ④ 토큰을 갱신한 뒤 다시 붙고, 갱신이 401이면 로그인으로 간다 | 자동 시험 | B | 시험: apps/console-host/src/shared/api/live/connection-close.test.mjs, apps/console-host/src/shared/api/live/live-stream.t… |
+| FE-T28 | ⑤ | 관제 SSE 흐름 계약 | ⑤ 위젯 흐름만 다시 열고 늘 여는 흐름은 그대로다. 콘솔 번들에 urql·graphql-ws·socket.io-client가 없다 | 자동 시험 | B | 시험: apps/console-host/src/shared/api/live/connection-widgets.test.mjs, apps/console-host/src/shared/api/live/live-stream… |
+| FE-T28 | ⑥ | 관제 SSE 흐름 계약 | ⑥ 두 사람 모두 `presence`에 보이고, 닫은 사람은 45초 [가정] 안에 빠진다 | 자동 시험 | B | 시험: services/ops-svc/test-int/ops-live.int.test.ts |
+| FE-T28 | ⑦ | 관제 SSE 흐름 계약 | ⑦ 위젯 키마다 흐름의 `value`와 조회 응답이 같은 모양이고, 모르는 위젯 키는 흐름 422·조회 404다 | 자동 시험 | B | 시험: services/ops-svc/test-int/ops-live.int.test.ts |
 | FE-T29 | ③ | 관제 Module Federation과 한 앱 기준선 | ③은 두 빌드 모두 셸·경보 패널과 다른 위젯이 그대로여야 한다 | 빈칸 | B | — |
 | FE-T30 | — | 서버가 그린 SEED 부품의 스타일과 CSP(ADR-0111) | 세 엔진 모두 계산된 스타일 차이 0, style 속성 위반 보고 0, nonce 없는 `<style>`·인라인 스크립트는 막힘 | 자동 시험 | B | 시험: tools/web-checks/csp/web.spec.mjs |
 | FE-T31 | — | 재배치·확대·글자 간격(WCAG 1.4.10·1.4.4·1.4.12… | 예외 영역 밖 가로 스크롤 0, 잘림·겹침 0, 모든 조작 요소에 닿는다 | 자동 시험 | B | 시험: tools/web-checks/reflow/reflow.spec.mjs, tools/web-checks/reflow/rules.test.mjs |
@@ -65,9 +67,9 @@
 | FE-T38 | ② | 좌석맵 에디터 가져오기·내보내기와 검사(추천 적용 2026-10-28… | ② SVG·CSV 가져오기도 같은 구역·좌석 수를 만든다 | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/export.test.mjs, apps/partner/src/_pages/seatmap-editor/model/golden.te… |
 | FE-T38 | ③ | 좌석맵 에디터 가져오기·내보내기와 검사(추천 적용 2026-10-28… | ③도형 밖 좌석과 겹침은 경고가 글자로 보이고 저장은 막지 않는다(ADR-0063·0066) | 자동 시험 | B | 시험: packages/validation/test/seatmap-checks.test.ts |
 | FE-T38 | ④ | 좌석맵 에디터 가져오기·내보내기와 검사(추천 적용 2026-10-28… | ④ 미리보기는 전체 → 확대 순서다. 연결: FR-023 | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/review.test.mjs, tools/web-checks/rich-text/seatmap-editor.spec.mjs |
-| FE-T39 | — | 관제 Trusted Types 보고 모드 시작 조건(추천 적용… | 덩어리·원격 적재에서 나온 Trusted Types 위반 보고 0, 만든 정책 이름이 모두 `trusted-types` 목록에 있고 이름이 겹치지 않는다… | 빈칸 | B | — |
+| FE-T39 | — | 관제 Trusted Types 보고 모드 시작 조건(추천 적용… | 덩어리·원격 적재에서 나온 Trusted Types 위반 보고 0, 만든 정책 이름이 모두 `trusted-types` 목록에 있고 이름이 겹치지 않는다… | 자동 시험 | B | 시험: apps/console-host/src/shared/lib/remotes/remote-loader.test.mjs, apps/console-host/src/shared/lib/remotes/remote-pol… |
 | FE-T40 | — | 시각 회귀(추천 적용 2026-10-28, 기술 검토 낮음-100) | 픽셀 차이 비율이 문턱 0.1% [가정] 이하. 대기실 셸과 React 대기 화면의 같은 상태 사이도 같은 문턱(§6.3) | 자동 시험 | B | 시험: packages/ds/src/components/QueuePanel/roll.test.mjs, tools/web-checks/visual/ds-stories.spec.mjs 외 2곳 |
-| FE-T41 | — | 서식 글 편집기 PoC(추천 적용 2026-10-28, 기술 검토… | CSP·Trusted Types 위반 보고 0(Tiptap은 기본으로 `<style>` 요소를 넣으므로 `injectCSS: false`나 nonce 설정으로… | 자동 시험 | B | 시험: tools/web-checks/rich-text/rich-text.spec.mjs |
+| FE-T41 | — | 서식 글 편집기 PoC(추천 적용 2026-10-28, 기술 검토… | CSP·Trusted Types 위반 보고 0(Tiptap은 기본으로 `<style>` 요소를 넣으므로 `injectCSS: false`나 nonce 설정으로… | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/security.test.mjs, tools/web-checks/console-csp/partner.spec.mjs 외 1곳 |
 | FE-T42 | — | 카운트다운 갱신과 낭독(추천 적용 2026-10-28, 기술 검토… | 보이는 동안 초당 깨어남 2회 이하, 표시 숫자는 늦게 깨어난 바로 다음 표시부터 보정 시계의 남은 초와 같다, 다시 보이면 첫 표시가 맞는 숫자다… | 자동 시험 | B | 시험: apps/web/queue-room/test/countdown.test.mjs |
 | FE-T43 | — | 웹 푸시 구독이 로그아웃과 월렛 정리를 넘어 남는지(추천 적용… | 서버 쪽 구독 해제 `DELETE`가 로그아웃 요청보다 먼저 나간다. `/push/` 범위의 서비스 워커 등록과 브라우저의 푸시 구독은 남고, 월렛 워커(범위… | 자동 시험 | B | 시험: tools/web-checks/reflow/web-push.spec.mjs |
 | FE-T44 | — | 토큰 대비 계산(추천 적용 2026-11-04… | 기준 미달 0, 표와 계산값의 차이 0 | 자동 시험 | B | 시험: packages/ds/test/token-rules.test.mjs, packages/ds/test/tokens-canon.test.mjs |
@@ -142,21 +144,21 @@
 | v5.0.0-3.3.4 | — | L2 | 스크립트가 읽을 필요 없는 쿠키(세션 토큰 등)는 `HttpOnly`이고 그 값은 `Set-Cookie`로만 보낸다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.4.1 | — | L1 | 모든 응답에 HSTS를 둔다(최대 기간 1년 이상, L2부터 하위 도메인 포함). | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/v0-monolith/test/gateway-http-rules.test.ts 외 3곳 (영역:… |
 | v5.0.0-3.4.2 | — | L1 | CORS `Access-Control-Allow-Origin`은 고정 값으로 두거나 요청의 `Origin`을 신뢰 출처 허용 목록과 대조해 정하고, `*`을… | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/queue-svc/test/state-http.test.ts 외 1곳 (영역:… |
-| v5.0.0-3.4.3 | — | L2 | HTTP 응답에 CSP를 둬 브라우저가 신뢰한 콘텐츠·자원만 싣고 실행하게 하고, 최소한 `object-src 'none'`·`base-uri 'none'`과… | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/security.test.mjs, apps/web/server/csp-hash-server.test.mjs 외 3곳 |
+| v5.0.0-3.4.3 | — | L2 | HTTP 응답에 CSP를 둬 브라우저가 신뢰한 콘텐츠·자원만 싣고 실행하게 하고, 최소한 `object-src 'none'`·`base-uri 'none'`과… | 자동 시험 | B | 시험: apps/console-host/test/console-csp.test.mjs, apps/partner/src/_pages/seatmap-editor/security.test.mjs 외 6곳 |
 | v5.0.0-3.4.4 | — | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | 다른 단계 | B | HOT-450 · 화면 앱은 `nosniff`를 보내지 않고 배포 응답 헤더 정책이 붙인다(docs/devops.md §6.6 '응답 보안 헤더 정책'… |
-| v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | 자동 시험 | B | 시험: apps/web/src/shared/lib/staff-fragment.test.mjs, apps/web/src/widgets/app-shell/model/search-quality.test.mjs 외 1곳 |
-| v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs |
+| v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | 자동 시험 | B | 시험: apps/web/src/shared/lib/staff-fragment.test.mjs, apps/web/src/widgets/app-shell/model/search-quality.test.mjs 외 3곳 |
+| v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | 자동 시험 | B | 시험: apps/web/src/_app/security/page-headers.test.mjs, tools/web-checks/console-csp/console.spec.mjs 외 1곳 |
 | v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: apps/web/scripts/local-fan-gateway.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, apps/partner/src/_pages/seatmap-editor/model/save-answ… |
 | v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 자동 시험 | B | 시험: apps/console-host/src/pages/cancellation/ui/wiring.test.mjs, apps/partner/src/_pages/cancellation-request/ui/wiring… |
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/pwa-config.test.mjs, apps/web/src/features/wallet-device-key/sw-rules.test.m… |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/security.test.mjs, apps/web/src/features/identity-verify/flow.test.mjs |
-| v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
+| v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 자동 시험 | B | 시험: tools/web-checks/console-csp/console.spec.mjs, tools/web-checks/console-csp/partner.spec.mjs |
 | v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: apps/web/queue-room/test/verify-return.test.mjs, apps/web/src/_pages/login/model/state.test.mjs 외 5곳 |
 | v5.0.0-3.1.1 | — | L3 | 앱이 쓰는 브라우저가 지원해야 할 보안 기능(HTTPS, HSTS, CSP 등)과, 없을 때 앱이 어떻게 동작해야 하는지(경고, 차단)를 문서에 적는다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
-| v5.0.0-3.2.3 | — | L3 | DOM clobbering을 피한다(명시적 변수 선언, 엄격한 타입 검사, document 객체에 전역 값을 두지 않음, 이름 공간 격리). | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
-| v5.0.0-3.4.7 | — | L3 | CSP가 위반 보고 위치를 정한다. | ID만 | B | 다른 곳 시험: packages/config/headers/headers.test.mjs (영역: apps/console-host, apps/forensics, apps/partner, apps/scanner… |
-| v5.0.0-3.4.8 | — | L3 | 문서를 그리는 응답에 COOP `same-origin`이나 `same-origin-allow-popups`를 둔다. | ID만 | B | 다른 곳 시험: packages/config/headers/headers.test.mjs (영역: apps/console-host, apps/forensics, apps/partner, apps/scanner… |
+| v5.0.0-3.2.3 | — | L3 | DOM clobbering을 피한다(명시적 변수 선언, 엄격한 타입 검사, document 객체에 전역 값을 두지 않음, 이름 공간 격리). | ID만 | B | 다른 곳 시험: apps/console-host/test/remote-widget-lint.test.mjs (영역: apps/widgets) |
+| v5.0.0-3.4.7 | — | L3 | CSP가 위반 보고 위치를 정한다. | 자동 시험 | B | 시험: tools/web-checks/console-csp/console.spec.mjs, tools/web-checks/console-csp/partner.spec.mjs |
+| v5.0.0-3.4.8 | — | L3 | 문서를 그리는 응답에 COOP `same-origin`이나 `same-origin-allow-popups`를 둔다. | 자동 시험 | B | 시험: tools/web-checks/console-csp/console.spec.mjs, tools/web-checks/console-csp/partner.spec.mjs |
 | v5.0.0-3.5.6 | — | L3 | JSONP 기능을 어디에서도 켜지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
 | v5.0.0-3.5.7 | — | L3 | 인가가 필요한 데이터를 JavaScript 파일 같은 스크립트 응답에 넣지 않는다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
 | v5.0.0-3.6.1 | — | L3 | 외부에 둔 클라이언트 자산은 정적이고 버전이 붙은 자원을 SRI로 검증할 때만 쓰고, 안 되면 자원마다 보안 결정으로 문서에 남긴다. | 자동 시험 | B | 시험: tools/web-checks/csp/web.spec.mjs |
@@ -221,11 +223,11 @@
 | v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | ID만 | B | 다른 곳 시험: loadtest/test/before090.test.mjs, loadtest/test/lib.test.mjs 외 88곳 (영역: apps/console-host, apps/forensics… |
 | v5.0.0-16.3.1 | — | L2 | 성공·실패를 포함한 모든 인증 작업을 기록하고, 인증 방식이나 쓴 인증 요소 같은 메타데이터도 남긴다. | 해당 없음 | B | 해당 없음: 인증 기록은 서버가 남긴다(docs/features/identity.md §9) |
 | v5.0.0-16.3.2 | — | L2 | 실패한 인가 시도를 기록하고, L3는 민감 데이터 접근을 포함한 모든 인가 결정을 그 데이터는 빼고 기록한다. | 해당 없음 | B | 해당 없음: 인가 판단과 기록은 서버가 한다 |
-| v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.t… |
+| v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | 자동 시험 | B | 시험: apps/console-host/src/shared/lib/remotes/remote-policy.test.mjs |
 | v5.0.0-16.3.4 | — | L2 | 예상하지 못한 오류와 보안 통제 실패를 기록한다. | ID만 | B | 다른 곳 시험: packages/platform/test/control-codec.test.ts, packages/platform/test/redis.test.ts 외 56곳 (영역:… |
 | v5.0.0-16.4.1 | — | L2 | 모든 로그 구성요소가 로그 주입을 막도록 데이터를 인코딩한다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-log.test.ts, services/core-svc/test-int/seatmap-import.int.test.ts 외 1곳 (영역:… |
 | v5.0.0-16.4.2 | — | L2 | 로그를 권한 없는 접근과 수정에서 보호한다. | 해당 없음 | B | 해당 없음: 저장한 뒤의 보호는 관측 스택(지표·로그·요청 기록으로 시스템 안을 들여다보는 도구 묶음)이 맡는다(delivery.md 같은 행) |
 | v5.0.0-16.4.3 | — | L2 | 로그를 분석·탐지·경보용으로 논리적으로 분리된 시스템에 안전하게 보낸다. | 빈칸 | B | 영역: apps/console-host, apps/forensics, apps/partner, apps/scanner, apps/web, apps/widgets, packages/api-client… |
 | v5.0.0-16.5.1 | — | L2 | 예상하지 못한 오류나 보안상 민감한 오류에는 일반 메시지를 돌려주고 내부 정보를 드러내지 않는다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/limits-errors.test.mjs, packages/platform/test/problem.test.ts 외 2곳 (영역:… |
-| v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: apps/web/queue-room/test/lobby.test.mjs, apps/web/src/_pages/event-detail/model/eligibility-store.test.mjs 외 1곳 |
+| v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/lobby.test.mjs, apps/web/src/_pages/event-detail/model/eligibility-store.test.mjs 외… |
 | v5.0.0-16.5.3 | — | L2 | 예외가 나도 안전하게 실패하고, 검증 오류가 있는데도 거래를 처리하는 fail-open을 막는다. | ID만 | B | 다른 곳 시험: packages/platform/test/circuit-breaker.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 71곳… |

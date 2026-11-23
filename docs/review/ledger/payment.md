@@ -77,7 +77,7 @@
 | P-T42 | ④ | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ④이전 주문이 Expired로 끝나고 재고를 돌린 뒤 새 주문이 생긴다 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-order.int.test.ts, services/core-svc/test-int/shop-redis-stock.int.test.ts |
 | P-T42 | ⑤ | 굿즈 재고 예약 만료(core-svc shop. 같은 결제 포트를 써서… | ⑤ 재고는 한 번만 돌아온다. 모든 경우에 초과 판매 0건 | 자동 시험 | A | 시험: services/core-svc/test-int/shop-expiry.int.test.ts, services/core-svc/test-int/shop-order.int.test.ts 외 1곳 |
 | P-T43 | ① | 새 결제 진입 정지와 다시 열기 | ① 시험 재개에서 정지로 돌아가고, 시험 결제의 과금은 0원이다 … , PromQL의 `path="direct"`를 본다. | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-entry-pause-judge.int.test.ts |
-| P-T43 | ② | 새 결제 진입 정지와 다시 열기 | ② 바로 모두 열리고, 감사 로그에 사유와 commander가 남는다. 실패가 이어지면 연 뒤의 표본으로 다시 멈춘다 … , PromQL의… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-entry-pause-judge.int.test.ts |
+| P-T43 | ② | 새 결제 진입 정지와 다시 열기 | ② 바로 모두 열리고, 감사 로그에 사유와 commander가 남는다. 실패가 이어지면 연 뒤의 표본으로 다시 멈춘다 … , PromQL의… | 자동 시험 | A | 시험: services/ops-svc/test-int/f022-pg-switch-e2e.int.test.ts, services/ops-svc/test/f022-pg-switch-command.test.ts 외 1곳 |
 | P-T43 | ③ | 새 결제 진입 정지와 다시 열기 | ③ 예상 대기가 10초 아래로 1분 이어지면 열리고, 확인 호출은 나가지 않는다 … , PromQL의 `path="direct"`를 본다. … 의 예상 대기를… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-channel-limit.int.test.ts, services/payment-svc/test-int/payment-entry-pause-j… |
 | P-T43 | ④ | 새 결제 진입 정지와 다시 열기 | ④ 옛 판정자의 늦은 쓰기는 판 번호로 거절된다. 재시도 큐 건의 긴 확정 소요는 시작·해제 판정에 들어가지 않고, NFR-006 Degraded 측정에는… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-entry-pause-judge.int.test.ts |
 | P-T44 | ① | 결제 결과 롱 폴링의 시간 초과 순서(추천 적용 2026-10-28… | ① 3초에 확정으로 답한다 | 자동 시험 | A | 시험: services/purchase-svc/test-int/payment-status-e2e.int.test.ts |
