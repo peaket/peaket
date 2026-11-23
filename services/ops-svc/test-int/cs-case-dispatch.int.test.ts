@@ -135,11 +135,13 @@ describe('B-T28 ② 결정 한 트랜잭션', () => {
     await run();
     const resolvesBefore = stubs.queue.count('ResolveVerificationAppeal');
     const key = randomUUID();
+    // 시험 리뷰 2 TR-20 반영: 함정 요청과 같은 키 다시 보내기는 같은 계정이어야 멱등 범위가 같다
+    const agent = identity.ops('cs_agent');
     // 시험만의 함정: 이 건의 QUEUE_RESOLVE 행을 넣으면 트랜잭션이 깨진다
     await admin.query(`create or replace function f067_break() returns trigger language plpgsql as $$ begin if new.case_id = '${caseId}'::uuid and new.call = 'QUEUE_RESOLVE' then raise exception 'f067 trap'; end if; return new; end $$`);
     await admin.query('create trigger f067_break before insert on cs_case_dispatch for each row execute function f067_break()');
     try {
-      const r = await decide(identity.ops('cs_agent'), caseId, { outcome: 'ACCEPTED', resultNote: NOTE }, { key });
+      const r = await decide(agent, caseId, { outcome: 'ACCEPTED', resultNote: NOTE }, { key });
       expect(r.status).toBeGreaterThanOrEqual(500);
       expect(await q('select status, version::text as version, result_note from cs_case where id = $1', [caseId])).toEqual([{ status: 'OPEN', version: '1', result_note: null }]);
       expect(await q('select status, appeal_result, decided_by from verification_case where case_id = $1', [caseId])).toEqual([{ status: 'PENDING', appeal_result: null, decided_by: null }]);
@@ -151,7 +153,7 @@ describe('B-T28 ② 결정 한 트랜잭션', () => {
       await admin.query('drop function f067_break()');
     }
     // 시험 리뷰 1 TR-04 반영: 함정을 치우면 **같은 키**로 다시 보내도 새 결정이 된다(멱등 기록도 함께 되돌려져 저장된 5xx·처리 중이 아니다)
-    const again = await decide(identity.ops('cs_agent'), caseId, { outcome: 'ACCEPTED', resultNote: NOTE }, { key });
+    const again = await decide(agent, caseId, { outcome: 'ACCEPTED', resultNote: NOTE }, { key });
     expect([again.status, again.body.status, again.body.version]).toEqual([202, 'RESOLVED', 2]);
   });
 
@@ -161,10 +163,12 @@ describe('B-T28 ② 결정 한 트랜잭션', () => {
     await run();
     const before = [stubs.queue.count('ResolveVerificationAppeal'), stubs.trust.count('ApplyLabel'), stubs.identity.count('SetAccountHold')];
     const key = randomUUID();
+    // 시험 리뷰 2 TR-20 반영: 함정 요청과 같은 키 다시 보내기는 같은 계정이어야 멱등 범위가 같다
+    const agent = identity.ops('cs_agent');
     await admin.query(`create or replace function f067_commit_break() returns trigger language plpgsql as $$ begin if new.case_id = '${caseId}'::uuid then raise exception 'f067 commit trap'; end if; return new; end $$`);
     await admin.query('create constraint trigger f067_commit_break after insert on cs_case_dispatch deferrable initially deferred for each row execute function f067_commit_break()');
     try {
-      const r = await decide(identity.ops('cs_agent'), caseId, { outcome: 'ACCEPTED', resultNote: NOTE }, { key });
+      const r = await decide(agent, caseId, { outcome: 'ACCEPTED', resultNote: NOTE }, { key });
       expect(r.status).toBeGreaterThanOrEqual(500);
       // 보내 보기가 커밋 뒤라면 받는 쪽은 아무것도 받지 않았다
       expect([stubs.queue.count('ResolveVerificationAppeal'), stubs.trust.count('ApplyLabel'), stubs.identity.count('SetAccountHold')]).toEqual(before);
@@ -175,7 +179,7 @@ describe('B-T28 ② 결정 한 트랜잭션', () => {
       await admin.query('drop trigger f067_commit_break on cs_case_dispatch');
       await admin.query('drop function f067_commit_break()');
     }
-    const again = await decide(identity.ops('cs_agent'), caseId, { outcome: 'ACCEPTED', resultNote: NOTE }, { key });
+    const again = await decide(agent, caseId, { outcome: 'ACCEPTED', resultNote: NOTE }, { key });
     expect([again.status, again.body.status, again.body.version]).toEqual([202, 'RESOLVED', 2]);
   });
 
