@@ -11,7 +11,7 @@
 
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
-| ST-T1 | — | 같은 거래 사건을 두 번 보내고(`eventKey`가 같다), 처리… | 판매 좌석·금액 누적이 정답과 같다(두 번 세지 않는다) | 자동 시험 | B | 시험: services/ops-rt/test-int/ops-rt.int.test.ts |
+| ST-T1 | — | 같은 거래 사건을 두 번 보내고(`eventKey`가 같다), 처리… | 판매 좌석·금액 누적이 정답과 같다(두 번 세지 않는다) | 자동 시험 | B | 시험: services/ops-rt/test-int/ops-rt.int.test.ts, services/ops-svc/test/realtime-table-widget.test.ts |
 | ST-T2 | — | 텔레메트리의 한 파티션에만 사건이 오고 나머지는 비어 있다(심장 박동… | 켬: 1초 칸이 끊기지 않고 신선도가 정상이다. 끔: 1초 칸은 그대로 나오지만 심장 박동이 없는 파티션 때문에 신선도가 나빠져 보이고, 3분 뒤… | 자동 시험 | B | 시험: services/ops-rt/test-int/ops-rt.int.test.ts, services/ops-rt/test/rows.test.ts 외 3곳 |
 | ST-T3 | — | 사건을 5초·15초·10분 늦게 보낸다 | 셋 모두 제 1초 칸에 들어간다(버리지 않는다). 이미 그린 칸은 다음 조회에서 고쳐진다 | 자동 시험 | B | 시험: services/ops-rt/test-int/ops-rt.int.test.ts, services/ops-svc/test/realtime-table.test.ts |
 | ST-T4 | — | ClickHouse를 30초 멈춘다 | 작업자는 묶음을 버리지 않고 그 파티션 소비를 멈췄다가, 돌아오면 이어 싣는다. 누락은 0이고 그동안 신선도가 나빠져 보인다. 원본 적재는 커버리지 대조에서 빈… | 자동 시험 | B | 시험: services/ops-rt/test-int/ops-rt.int.test.ts, services/ops-svc/test/realtime-table.test.ts |

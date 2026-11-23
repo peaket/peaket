@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 115 | 50 | 3 | 0 | 0 | 2 | 0 | 0 | 26 | 196 |
+| A | 116 | 50 | 3 | 0 | 0 | 1 | 0 | 0 | 26 | 196 |
 | B | 37 | 14 | 0 | 0 | 0 | 3 | 0 | 2 | 3 | 59 |
-| 합계 | 152 | 64 | 3 | 0 | 0 | 5 | 0 | 2 | 29 | 255 |
+| 합계 | 153 | 64 | 3 | 0 | 0 | 4 | 0 | 2 | 29 | 255 |
 
 ## docs/features/queue-admission.md
 
@@ -103,7 +103,7 @@
 | Q-T46 | — | 도착 지연을 넣은 입장 제어 루프(추천 적용 2026-10-28… | 곧 입장 응답이 입장 확정 요청의 1% [가정] 이하, 곧 입장으로 기다린 시간 p99 5초 [가정] 이하, 바꾸기 전 식보다 입장 수 감소 2% [가정]… | 자동 시험 | A | 시험: services/admission-ctrl/test-sim/admission-loop.sim.test.ts |
 | Q-T47 | — | 입장 임박 구간 반영 지연(추천 적용 2026-10-28… | 차례 반영 지연(serving이 내 번호를 넘은 전진 시각 → 화면에 그린 시각) p99 2.8초 [가정] 이하다(3초에서 CDN 계층 몫 0.2초를 남긴다… | 자동 시험 | A | 시험: services/queue-svc/test-sim/nginx-expiry.sim.test.ts, services/queue-svc/test-sim/reflect.sim.test.ts |
 | Q-T48 | ① | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ① 세 기기 모두 '차단 목록에 있음' 신호가 붙는다. | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
-| Q-T48 | ② | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ② 그 기기의 키가 지워지고, 지운 기록(기기 가명·이의 건 ID·처리자·시각)이 CS 처리함 건과 판정 기록에 남는다. | 다른 단계 | A | F-06-7 · 지운 기록이 CS 처리함 건에 남는 것은 CS 처리함(SCR-045) 이의 심사의 몫이다. 2026-11-23 감독 결정으로 GAT-280의 처리 행동이고, 크기 때문에 F-06-2에서… |
+| Q-T48 | ② | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ② 그 기기의 키가 지워지고, 지운 기록이 CS 처리함 건(이의 건 ID·처리자·처리 시각·차단 목록 변화 `REMOVED`)과 trust-svc 보안 로그… | 자동 시험 | A | 시험: services/ops-svc/test-int/verification-appeal.int.test.ts, services/ops-svc/test/verification-appeal-decision.test.t… |
 | Q-T48 | ③ | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ③ 차단 목록 신호가 붙지 않는다. | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
 | Q-T48 | ④ | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ④ 남은 두 키가 TTL로 사라진다. | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |
 | Q-T48 | ⑤ | 차단 기기 키와 이의 인정(추천 적용 2026-10-28, 기술 검토… | ⑤ 차단 목록 신호가 붙은 기기가 0개다(틀린 '있다'가 없다) | 자동 시험 | A | 시험: services/trust-svc/test-int/apply-label.int.test.ts |

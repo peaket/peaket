@@ -38,7 +38,7 @@
 | C-T19 | ③ | 관리자 개인정보 접속기록 보존 | ③ 칸이 빠지거나 모양이 틀린 사건은 쓰지 않고 보류하며 다른 사건은 계속 처리한다 | 빈칸 | B | — |
 | C-T19 | ④ | 관리자 개인정보 접속기록 보존 | ④ 체인이 앞 기록과 이어지고, 행의 접속지를 DB에서 고치면 체인 검증이 찾는다 | 빈칸 | B | — |
 | C-T19 | ⑤ | 관리자 개인정보 접속기록 보존 | ⑤ 점검 읽기(FR-064)가 기간 [시작, 끝)의 파트너 명단 보기·내려받기 기록을 계정·회차·종류·건수·시각·접속지와 함께 읽는다 | 빈칸 | B | — |
-| C-T20 | — | 파트너 판매 현황 조회의 복구력(2026-10-28 SSE에서 바꿈… | 네트워크를 3분 끊었다 되살리면 다음 조회가 지금의 전체 상태(누적 판매 수가 관제 누적 뷰와 같음)를 받고, 끊긴 동안 연결 표시등이 경고였다가 돌아온다. 탭… | 자동 시험 | B | 시험: services/ops-svc/test-int/realtime-table.int.test.ts, services/ops-svc/test/realtime-table-http.test.ts 외 1곳 |
+| C-T20 | — | 파트너 판매 현황 조회의 복구력(2026-10-28 SSE에서 바꿈… | 네트워크를 3분 끊었다 되살리면 다음 조회가 지금의 전체 상태(누적 판매 수가 관제 누적 뷰와 같음)를 받고, 끊긴 동안 연결 표시등이 경고였다가 돌아온다. 탭… | 자동 시험 | B | 시험: apps/console-host/src/pages/dashboard/model/rt-sales-value.test.mjs, apps/console-host/src/pages/dashboard/ui/live-s… |
 | C-T21 | — | 비인가 IP 대역 접근 통제 | 허용 IP 대역 밖에서 관제 콘솔·`ops-api`에 접속하려 하면 관제 배포의 웹 ACL에서 막힌다. 원본 확인 머리가 없거나 시청자… | 빈칸 | B | — |
 | C-T22 | — | 같은 내용 게시물 자동 차단 | 명령 10으로 차단한 게시물과 공백·문장부호·전각 차이만 있는 본문으로 새 관람 후기를 저장하면 즉시 숨김 상태가 되고, 조치 결과서에 '같은 내용 차단'으로… | 자동 시험 | B | 시험: services/core-svc/test/review.http.test.ts |
 | C-T23 | — | 보안 사고 신고·통지 기한 | 인지 시각 10:00으로 침해사고를 등록하면 SEV1이 뜨고 다음 날 10:00 신고 기한이 생긴다. 22시간이 지난 때(다음 날 08:00) SEV2가 다시… | 빈칸 | B | — |
@@ -56,8 +56,8 @@
 | C-T33 | — | 명령 4·5 효과 줄 | 명령 4를 실행하고 시험용 사람 세션을 그 대역에서 보내면, 10분 안에 효과 줄에 차단 비율 상승과 추가 검증 통과율 하락이 보인다. 통과율이 10%p… | 빈칸 | B | — |
 | C-T34 | — | 인시던트 선언과 탐지 경로 | 명령 3을 실행하면 인시던트 선언 할 일과 포스트모템 초안이 생기고, 초안에 첫 경보 시각이 채워진다. 명령 1만 실행한 회차는 선언 대상이 아니다. 경보가… | 빈칸 | B | — |
 | C-T35 | — | 처리량 급감 표시 | 판매 중 회차에서 결제 시뮬레이터의 SDK 스크립트를 막아 결제 접수가 줄면, 서버 오류가 없어 SLO 경보는 울리지 않는다. 그 대신 6분 [가정] 안에 '이… | 빈칸 | B | — |
-| C-T36 | — | 실시간 표 신선도와 Degraded 전환 | 판매 중 회차에서 로컬 `ops-rt` 작업자의 삽입을 늦춰(ClickHouse 응답 지연 주입) 심장 박동 반영을 늦추면, 판매 중 탭 머리의 신선도가 5초를… | 자동 시험 | B | 시험: services/ops-svc/test/realtime-table.test.ts |
-| C-T37 | — | 거래 사건 끊김 표시 | 판매 중 회차에서 로컬 거래 토픽(`trade.*`) 생산을 60초 넘게 멈추면, 심장 박동 신선도는 정상인 채 판매 누적·잔여석 옆에 '거래 사건 끊김'이… | 자동 시험 | B | 시험: services/ops-svc/test/realtime-table.test.ts |
+| C-T36 | — | 실시간 표 신선도와 Degraded 전환 | 판매 중 회차에서 로컬 `ops-rt` 작업자의 삽입을 늦춰(ClickHouse 응답 지연 주입) 심장 박동 반영을 늦추면, 판매 중 탭 머리의 신선도가 5초를… | 자동 시험 | B | 시험: apps/console-host/src/pages/dashboard/model/rt-sales-value.test.mjs, services/ops-svc/test/realtime-table.test.ts |
+| C-T37 | — | 거래 사건 끊김 표시 | 판매 중 회차에서 로컬 거래 토픽(`trade.*`) 생산을 60초 넘게 멈추면, 심장 박동 신선도는 정상인 채 판매 누적·잔여석 옆에 '거래 사건 끊김'이… | 자동 시험 | B | 시험: apps/console-host/src/pages/dashboard/model/rt-sales-value.test.mjs, services/ops-svc/test/realtime-table-widget.tes… |
 | C-T38 | ① | 감사 체크포인트와 공개 타임스탬프 | ① 체크포인트(직전 해시·seq 범위·머클 루트), 서명, '대기' 증명이 감사 앵커 버킷과 공개 게시 버킷(AWS 흉내 서버 moto)에 생긴다. | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-public-anchor.int.test.ts, services/ops-svc/test/audit-anchor.test.ts |
 | C-T38 | ② | 감사 체크포인트와 공개 타임스탬프 | ② 실제 OpenTimestamps 캘린더로 찍은 증명은 몇 시간 뒤 `upgrade`로 '완료'가 된다. | 다른 단계 | B | 구간 5(인프라 구축, ADR-0332)·출시 전, BAT-365 넘김 · 실제 OpenTimestamps 캘린더로 찍고 몇 시간 뒤 비트코인 확정 증명으로 바꾸는 일은 밖으로 나가는 연결과 확정 시간이 있어야… |
 | C-T38 | ③ | 감사 체크포인트와 공개 타임스탬프 | ③ 검증 도구가 사슬·서명·루트를 통과시킨다 | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-public-anchor.int.test.ts, tools/audit-verify/audit-verify.test.mjs |

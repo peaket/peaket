@@ -116,3 +116,10 @@
 - F-05-1 RV-10 낮음: 로그아웃이 503으로 실패해 그 탭에 남으면 그 뒤 다른 탭의 로그아웃 알림을 무시한다
 - F-05-1 RV-11 낮음: 첫 JS `/`가 175.7kB로 한도에 꼭 맞고, 보낸 알림 행 지우기가 색인 없이 5초마다 돈다
 - F-05-1 월렛 목록 `GET /v1/tickets`를 받는 서비스가 없어 월렛 화면 티켓은 목업이다(계획 담당이 넘김)
+- F-06-7 데모 무대: 합본 Service가 queue gRPC 50052를 열지 않아 데모 값에 queue 주소가 없다. 결과 반영 호출이 계속 다시 보내기로 쌓인다(갈래 4 무대 몫, `deploy/envs/local/demo/ops-svc.yaml`)
+- F-06-7 TR-12 낮음: 통합 B-T28 ⑥의 trust `tr:lbl` 판 확인이 빠졌다(`test-int/verification-appeal.int.test.ts`)
+- F-06-7 TR-16 낮음: ops 통합 시험이 queue·trust·identity 원본을 의존 선언 밖 상대 경로로 읽는다. CI 빌드 범위와 CLAUDE.md 목록에 더한다
+- F-06-7 TR-21 낮음: 결정 처리기 시험이 `.trim() === ''` 같은 글자 꼴·들여쓰기에 묶여 있다(`wiring.test.mjs`)
+- F-06-7 TR-22 낮음: 배경 작업 호출 데드라인 값이 정본에 없고 상세 데드라인 시험의 여유가 0.2~0.25초로 좁다
+- F-06-7 TR-23 낮음: 열린 건에 다른 eventKey가 오면 `duplicate`인지 `existing`인지 bot-defense §12 글이 모호하다
+- F-06-7 ops 단위 전체 실행이 부하에서 시간 초과 5건(단독 통과): `cs-inbox-screen-link`·`event-cancellation-*-main`·`verification-appeal-detail`
