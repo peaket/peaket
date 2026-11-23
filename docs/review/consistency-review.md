@@ -896,6 +896,9 @@
 | R-803 | LCH-120 포트원 지급대행·계좌 변경·예약지급 취소·사후 대사·SCR-020/027 부재, ops 받기 거절이 조용히 사라짐 | services/payment-svc settlement, core-svc 판매 승인, ops-svc cases(0032), apps/partner, docs/api/openapi.yaml | 등록 한 길·계좌 변경 경계·취소 다시 시도·포트원 실행·대사·거절 영구 실패, ADR-0370 | 고침 |
 | R-804 | F-07-8 일괄 환불·회차 취소 정산 다시 계산·배상 송금 결과 확정·결제사 토큰 버킷이 없었다 | services/payment-svc settlement, services/purchase-svc refund·event-refund, services/ops-svc cases, docs/api, packages/api-client·contracts | 시험 먼저·시험 리뷰·고정 뒤 구현, develop e95f63a18 위로 다시 쌓기, payment 0033·purchase 0038·ops 0033, ADR-0380, 단위 payment 3,557·purchase 4,428, 통합 payment 22·purchase 25 | 고침 |
 | R-805 | F-04-6 마감 실행기·동결·정산 대조가 없었다 | data/(dbt_project·macros/close.sql·gold·tests_int), services/close-runner | 빠른 길(구현·시험 함께), 실제 ClickHouse 통합 1/1·F-04-4·F-04-5 회귀 4/4, 앞 판 복사 run_id 별칭 가림 수정 | 해결. F-04-7 마감 리포트가 이어 받음 |
+| R-808 | F-04-7 공연 리포트·결정 규칙·파트너 판매 요약 골드 뷰가 없었다 | data/models/metrics(mtr_event_report·partner_sales_gold), data/tests_int/test_report_views.py | 빠른 길(구현·시험 함께), 실제 ClickHouse 통합 1/1·F-04-4·F-04-5·F-04-6 회귀 4/4, 회차별 집계 CTE | 완료. ops 리포트 API·Markdown·decision_record는 후속 |
+| R-809 | F-05-4 스캐너 오프라인 판정·목록 저장·즉시 업로드·POLICY 변경분이 없었다 | apps/scanner, services/ticket-svc scanner(0013), packages/contracts·api-client, tools/web-checks/scanner-scan | 시험 먼저·시험 리뷰·고정 뒤 구현, 구현 리뷰 IR-03~07·14 고침, 단위 scanner 159·ticket 323, 통합 scanner-f054 10/10+pass-only 4/4 | 완료. IR-01·02 roles-check는 ADR-0373 비차단 기록 |
+| R-810 | F-05-2 양도 요청·수락·돌려주기·티켓 상세·받은 요청 목록·조회 한도가 없었다 | apps/web, services/ticket-svc(0018), packages/contracts·api-client, docs/api | 시험 먼저·시험 리뷰·고정 뒤 구현, 구현 리뷰 IR-01~04 고침, 단위 ticket 313·web 1,198, 통합 44/44 | 완료. IR-05~12 정리 목록 |
 
 ## 4. 숫자 일치표
 
