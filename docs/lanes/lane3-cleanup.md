@@ -127,3 +127,14 @@
 - F-05-5 Valkey 등록 코드 키 이름이 해시 태그 없이 시험에 박혀 두 키를 한 Lua로 묶지 못한다. 한 키 원자 동작의 차례로 지키며 꺼낸 만료 시각을 1초 앞당긴다(redis-enrollment-code-store.ts)
 - F-05-5 두 통합을 한 번에 돈 첫 실행에서 3 실패(200 대신 503, 장애 주입 첫 요청 500, ops 등록 INTERNAL). 단독·전체 재실행에서 다시 나지 않았지만 500은 원인 미확인
 - F-05-5 시험 리뷰 낮음 TR-14와 TR-15 게이트 조건(develop CI에서 scanner-enroll 잡이 9개를 실제로 돌렸는지 합친 뒤 확인)
+- F-05-6 IR-02 중간: 큐 비움 보고 upsert가 받은 시각 차례를 지키지 않아 늦게 커밋된 옛 보고가 새 보고를 덮어쓸 수 있다. ALL_REPORTED/TIMEOUT 판단과 미보고 건 수가 흔들린다(`services/ticket-svc/src/modules/scanner/adapters/db/drizzle-entry-close-store.ts`)
+- F-05-6 IR-03 중간: 입장 기록 마감 후보 고르기가 매분 `ticket` 표 전체를 `group by`+`not exists`로 훑는다. `event_starts_at`·`event_id` 색인이 없어 100만 장 규모에서 비싸다. `EXPLAIN`으로 재고 색인·회차 목록을 더한다(`drizzle-entry-close-store.ts`, ticket 0019, data.md §5.1)
+- F-05-6 IR-04 중간(시험 경합, 구현 결함 아님): `entry-close-start.int`의 TIMEOUT 시험이 이미 TIMEOUT 창을 지난 회차를 만들어 200ms 배경 판단이 HTTP 보고보다 먼저 마감하면 미보고 건이 2개가 된다. 시험 담당이 회차를 창 안에 두고 보고를 먼저 확정하게 고친다
+- F-05-6 IR-05 중간: 계획 §5에 없는 shared platform 스캐너 세션 캐시 재확인 분기가 시험 없이 들어갔다. '캐시 일치 → 확인 호출 0' 단언과 계획 파일 목록 보강(`packages/platform/src/auth.ts`·`scanner-auth.ts`)
+- F-05-6 IR-06 낮음: 메모리 스캐너 게이트 저장소가 옛 행(`state_seq` 없음)을 CONCURRENT가 아니라 지금 마지막 번호로 견줘 PG와 다르다(`memory-scanner-gate-store.ts`)
+- F-05-6 IR-07 낮음: `ScannerGateStore.listFlags`의 `gateZone`을 계획의 '필수'에서 optional로 낮춰, 구역을 모르는 호출이 거르지 않고 지나갈 수 있다(`domain/ports.ts`, `drizzle-scanner-gate-store.ts`)
+- F-05-6 IR-08 낮음: core·ops 재전송 100건을 한 판단에서 차례로 보내 의존 장애 시 마감 판단이 수 분으로 늘고, 영구 실패 100건이 뒤 알림을 굶긴다(`application/entry-close.ts`, `start.ts`)
+- F-05-6 IR-09 낮음: 판매 설정 발행이 마감 알림과 겹치면 사본 `entryClosedAtMs`를 지울 수 있다(다음 발행이 다시 채우지만 그 전까지 purchase가 `not_closed`)(core `drizzle-entry-closed-store.ts`·`drizzle-sale-config-store.ts`)
+- F-05-6 IR-10 낮음: `entryClose` 저장소가 없을 때 500인데 주석은 503이다(`scanner-gate.ts`·`scanner.module.ts`)
+- F-05-6 IR-11 낮음: 큐 보고 `pendingUploads`에 상한이 없어 2^31−1 초과 값이 DB `integer` 범위 오류로 500이 된다(`domain/entry-close.ts`, openapi)
+- F-05-6 IR-12 낮음: 메모리 스캐너 게이트가 마감 행 대역이 없으면 옛 `entryClosesAtMs`(보정 시각) 규칙으로 물러나 단위 조립이 운영과 다르게 통과한다(`memory-scanner-gate-store.ts`)
