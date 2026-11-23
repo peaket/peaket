@@ -1,0 +1,26 @@
+# 데드맨 스위치 규칙. 정본: docs/observability.md §5 '경보 보내는 길' 데드맨·§10 데드맨, docs/verification.md V-T53 ②.
+# Watchdog은 늘 울리는 경보(vector(1))다. Alertmanager 경로 1이 이것만 Healthchecks 핑으로 보내고,
+# 핑이 끊기면 Healthchecks가 바깥에서 울린다(경보 파이프라인 자체가 죽은 것을 본다).
+# 주석 셋은 F-01-7(alert-check)의 주석 검사가 요구하는 자리를 미리 둔 것이다.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: watchdog
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: peaket
+spec:
+  groups:
+    - name: watchdog
+      # docs/observability.md §4 '그 밖의 규칙 평가 간격'의 30초
+      interval: 30s
+      rules:
+        - alert: Watchdog
+          expr: vector(1)
+          labels:
+            severity: none
+            kind: control
+          annotations:
+            summary: '경보 파이프라인이 살아 있는지 보는 늘 우는 경보(Healthchecks 데드맨)'
+            runbook_url: 'https://runbooks.peaket.example/ops/watchdog'
+            dashboard_url: '/d/peaket-observability-pipeline'

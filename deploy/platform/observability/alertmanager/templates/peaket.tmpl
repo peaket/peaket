@@ -1,0 +1,13 @@
+{{- /* Slack 문구 틀. 정본: docs/observability.md §5 '경보 보내는 길' '문구에 싣는 것', ADR-0139 결정 4, V-T53 ⑤.
+       싣는 칸은 경보 이름과 라벨 severity·kind·event_id·journey·dependency, 주석 summary·runbook_url·dashboard_url·explore_url뿐이다.
+       그 밖의 라벨과 description 주석은 싣지 않는다(이용자 식별값이 온콜·협업 도구에 남지 않게). */ -}}
+{{ define "peaket.slack.title" }}[{{ .CommonLabels.severity }}] {{ .CommonLabels.alertname }}{{ end }}
+{{ define "peaket.slack.text" }}{{ range .Alerts }}*{{ .Labels.alertname }}* ({{ .Labels.severity }}{{ if .Labels.kind }}, {{ .Labels.kind }}{{ end }})
+{{ if .Annotations.summary }}{{ .Annotations.summary }}{{ end }}
+{{ if .Labels.event_id }}event_id: {{ .Labels.event_id }}{{ end }}
+{{ if .Labels.journey }}journey: {{ .Labels.journey }}{{ end }}
+{{ if .Labels.dependency }}dependency: {{ .Labels.dependency }}{{ end }}
+{{ if .Annotations.runbook_url }}runbook: {{ .Annotations.runbook_url }}{{ end }}
+{{ if .Annotations.dashboard_url }}dashboard: {{ .Annotations.dashboard_url }}{{ end }}
+{{ if .Annotations.explore_url }}explore: {{ .Annotations.explore_url }}{{ end }}
+{{ end }}{{ end }}

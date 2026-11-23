@@ -1,0 +1,26 @@
+{
+  "name": "@peaket/alert-issue-relay",
+  "private": true,
+  "version": "0.0.0",
+  "description": "alert-issue-relay. Alertmanager의 SEV3 경보를 받아 GitHub Issues 티켓을 열고 닫는다(기능 F-01-6, OPS-110, docs/observability.md §5 '경보 보내는 길' 티켓 중계).",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --import @peaket/platform/telemetry/register dist/main.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": "^12.3.2",
+    "@nestjs/core": "^12.3.2",
+    "@peaket/platform": "workspace:*",
+    "reflect-metadata": "^0.2.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

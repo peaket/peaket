@@ -146,6 +146,11 @@ spec:
       labels:
         app.kubernetes.io/part-of: peaket
         peaket.io/environment: demo
+      # 배포 기록(DORA): 데모 배포만 ArgoCD 알림의 GitHub Deployment를 남긴다(F-01-6, docs/devops.md §13)
+      annotations:
+        notifications.argoproj.io/subscribe.on-deployed.github: ''
+        notifications.argoproj.io/subscribe.on-sync-failed.github: ''
+        notifications.argoproj.io/subscribe.on-health-degraded.github: ''
     spec:
       project: peaket-platform
       source:
@@ -186,6 +191,11 @@ spec:
       labels:
         app.kubernetes.io/part-of: peaket
         peaket.io/environment: prod
+      # 배포 기록(DORA): 운영 배포만 ArgoCD 알림의 GitHub Deployment를 남긴다(F-01-6, docs/devops.md §13)
+      annotations:
+        notifications.argoproj.io/subscribe.on-deployed.github: ''
+        notifications.argoproj.io/subscribe.on-sync-failed.github: ''
+        notifications.argoproj.io/subscribe.on-health-degraded.github: ''
     spec:
       project: peaket-platform
       source:

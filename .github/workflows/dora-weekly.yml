@@ -1,0 +1,47 @@
+# DORA 5종 주간 보고(docs/devops.md §13 '산출의 첫 구현'·D-T53 ④, 기능 F-01-6, OPS-120).
+# 매주 월요일 09:00 KST(00:00 UTC)에 지난주(월요일 00:00 KST부터 7일)의 데모 배포 기록을 GitHub에서 읽어
+# Markdown을 작업 요약에 남기고 JSON·Markdown을 산출물로 올린다. 손으로도 workflow_dispatch로 돌린다.
+# 권한은 읽기뿐이다(저장소·배포·PR). 공개 저장소 Actions는 무료이고 GitHub 밖으로 나가지 않는다.
+name: dora-weekly
+
+on:
+  schedule:
+    # 매주 월요일 00:00 UTC = 09:00 KST [가정](러너 시작 지연 1시간 안)
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dora-weekly
+  cancel-in-progress: false
+
+jobs:
+  weekly:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      deployments: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: DORA 주간 보고 산출
+        run: |
+          set -eu
+          week=$(TZ=Asia/Seoul date -d 'last monday' +%F)
+          node tools/ci/dora.mjs --from-github --repo "${{ github.repository }}" --week "$week" --out dora
+          cat "dora/dora-$week.md" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dora-weekly
+          path: dora/
+          if-no-files-found: error

@@ -49,6 +49,8 @@ const RULES = [
   // 메시 포트별 허용 정책(D-T36, ADR-0285, BUILD_ORDER HOT-420): 원천·생성 파일·메시 바탕 매니페스트와 그 정적 시험은 tools-check(생성 대조 mesh-policies.mjs --check),
   // 메시 없는 NetworkPolicy를 올려 보는 시험(cluster.mjs mesh-netpol과 e2e)은 kind가 돈다. 생성기는 proto 서비스·메서드와 배포 단위 값(deploy/workloads/,
   // 위 deploy/ 규칙이 tools를 고른다)의 포트·업무 gRPC 주소도 읽는다
+  // 경보 보내는 길 설정·데드맨 규칙은 플랫폼 통합 시험(packages/platform/test-int/alertmanager*, V-T53 ①②⑤)이 실제 저장소 파일로 띄운다(F-01-6)
+  [/^deploy\/platform\/observability\/(alertmanager\/|rules\/watchdog\.yaml$)/, ['js']],
   [/^deploy\/platform\//, ['kind', 'tools']],
   [/^docs\/api\/proto\//, ['tools']],
   // v0 배포(docs/infra.md §3 'v0 배포', BUILD_ORDER BSL-050): v0 이미지에 드는 배포 단위와 로컬 환경 값, 이미지 빌드 단계의 바인딩 대조

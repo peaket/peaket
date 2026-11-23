@@ -14,6 +14,7 @@
 | `exporters/yace.yaml` | CloudWatch 내보내기 도구 YACE의 CloudFront 수집 작업 둘 | `observability-stores.mjs` |
 | `prometheus/remote-write.yaml` | 클러스터 Prometheus → Mimir 원격 쓰기 | `observability-config.mjs` |
 | `rules/`, `alerts/` | 기록 규칙과 경보 규칙 | `observability-config.mjs` |
+| `alertmanager/` | Alertmanager 받는 곳 다섯·경로·Slack 문구 틀, 데드맨 규칙의 받는 곳 | `tools/ci/alertmanager-config.test.mjs`, 플랫폼 통합 시험 |
 | `grafana/` | Grafana 조직·폴더, 데이터 소스(신호 연결 포함)·대시보드 공급자 | 둘 다 |
 
 검사는 저장소 뿌리에서 돌린다. 어긋나면 tools-check가 병합 전에 막는다.

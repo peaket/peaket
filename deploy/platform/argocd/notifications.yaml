@@ -1,0 +1,42 @@
+# ArgoCD 알림 설정: GitHub Deployment 상태로 배포 기록을 남긴다. 정본: docs/devops.md §13 '배포 기록'(DORA, :893~902),
+# docs/security/secrets-and-keys.md:93(ArgoCD 알림의 GitHub 앱), docs/verification.md D-T53 ④.
+# 서비스는 GitHub 하나뿐이다(Grafana 주석·Slack·이메일 없음). 값은 ArgoCD가 읽는 비밀 참조($)만 싣는다.
+# 환경 이름은 앱 라벨 peaket.io/environment와 앱 이름을 /로 잇는다(예 demo/purchase-svc). ref는 동기화한 커밋이다.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: peaket
+data:
+  service.github: |
+    appID: $peaket-github-app-id
+    installationID: $peaket-github-app-installation-id
+    privateKey: $peaket-github-app-private-key
+
+  template.peaket-deploy-success: |
+    message: '{{.app.metadata.name}} 배포 성공({{.app.status.operationState.syncResult.revision}})'
+    github:
+      deployment:
+        state: success
+        environment: '{{ index .app.metadata.labels "peaket.io/environment" }}/{{ .app.metadata.name }}'
+        reference: '{{ .app.status.operationState.syncResult.revision }}'
+
+  template.peaket-deploy-failure: |
+    message: '{{.app.metadata.name}} 배포 실패({{.app.status.operationState.syncResult.revision}})'
+    github:
+      deployment:
+        state: failure
+        environment: '{{ index .app.metadata.labels "peaket.io/environment" }}/{{ .app.metadata.name }}'
+        reference: '{{ .app.status.operationState.syncResult.revision }}'
+
+  trigger.on-deployed: |
+    - when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
+      send: [peaket-deploy-success]
+  trigger.on-sync-failed: |
+    - when: app.status.operationState.phase in ['Failed', 'Error']
+      send: [peaket-deploy-failure]
+  trigger.on-health-degraded: |
+    - when: app.status.health.status == 'Degraded'
+      send: [peaket-deploy-failure]
