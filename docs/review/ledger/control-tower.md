@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 79 | 101 | 0 | 0 | 0 | 10 | 0 | 24 | 112 | 326 |
-| 합계 | 79 | 101 | 0 | 0 | 0 | 10 | 0 | 24 | 112 | 326 |
+| B | 95 | 100 | 0 | 0 | 0 | 12 | 0 | 24 | 106 | 337 |
+| 합계 | 95 | 100 | 0 | 0 | 0 | 12 | 0 | 24 | 106 | 337 |
 
 ## docs/features/control-tower.md
 
@@ -14,13 +14,15 @@
 | C-T1 | — | 제어 명령 접수 SLO 검증 | 운영자 10명이 동시에 접속한 부하(SLO 계측 표준 조건)에서 접수 p95 ≤ 500ms(NFR-008·§4, 2026-11-01 정합 점검)와 성공률… | 빈칸 | B | — |
 | C-T2 | — | 명령 전파 신뢰성 검증 | 최종 승인이 끝난 때부터 받는 쪽의 ack(집행하는 모든 곳이 판 N 이상을 적용, ADR-0103)가 끝날 때까지 종단 p99 ≤ 3초와 성공률 99.9%를… | 빈칸 | B | — |
 | C-T3 | — | 시스템 안전 한계 강제 통제 | 허용 기준값을 벗어난 동시 입장 목표 수치를 설정하려 하면 422 Unprocessable Entity로 바로 거절되고, 시스템 반영이 0건임을 입증한다. | 자동 시험 | B | 시험: services/ops-svc/test-int/command-lifecycle.int.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
-| C-T4 | — | 2인 상호 승인 무결성 | 명령 요청자와 승인자가 같은 계정이면 승인이 거부되고, 10분 대기 시간 초과 시 자동으로 만료된다. | 자동 시험 | B | 시험: services/ops-svc/test-int/command-lifecycle.int.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
-| C-T5 | — | 위험 명령 재인증 강제 | 킬스위치 같은 중대 명령을 낼 때 5분 이내의 유효한 재인증 토큰이 없으면 403 Forbidden으로 차단된다. | 자동 시험 | B | 시험: services/ops-svc/test/command-lifecycle-http.test.ts |
+| C-T4 | — | 2인 상호 승인 무결성 | 명령 요청자와 승인자가 같은 계정이면 승인이 거부되고, 10분 대기 시간 초과 시 자동으로 만료된다. | 자동 시험 | B | 시험: apps/console-host/src/pages/commands/model/card-state.test.mjs, apps/console-host/src/pages/commands/model/command-a… |
+| C-T5 | — | 위험 명령 재인증 강제 | 킬스위치 같은 중대 명령을 낼 때 5분 이내의 유효한 재인증 토큰이 없으면 403 Forbidden으로 차단된다. | 자동 시험 | B | 시험: apps/console-host/src/features/admin-reauth/reauth-act.test.mjs, apps/console-host/src/pages/commands/model/command-… |
 | C-T6 | ① | 명령 사전 실행 모의(dry-run) | ① 명령 집행 전, 센 값은 같은 시각의 원천(대기열 Redis·purchase DB·게이트웨이 집계)에서 직접 센 값과 같고 | 다른 단계 | B | BAT-365 · dry-run 센 값이 같은 시각의 원천(대기열 Redis·purchase DB·게이트웨이 집계)에서 직접 센 값과 같은지는 받는 쪽이 센 값을 주는 읽기 전용… |
-| C-T6 | ② | 명령 사전 실행 모의(dry-run) | ② 예측 값은 식과 넣은 값·가정이 함께 표시된다. | 자동 시험 | B | 시험: services/ops-svc/test/command-dry-run.test.ts |
+| C-T6 | ② | 명령 사전 실행 모의(dry-run) | ② 예측 값은 식과 넣은 값·가정이 함께 표시된다. | 자동 시험 | B | 시험: apps/console-host/src/pages/commands/model/dry-run.test.mjs, apps/console-host/src/pages/commands/ui/connected/conne… |
 | C-T6 | ③ | 명령 사전 실행 모의(dry-run) | ③ 실행 5분 [가정] 뒤 예측과 실제 값이 명령 기록에 남는다(추천 적용 2026-10-28, 기술 검토 낮음-059, §4. 세부 번호는 추천 적용… | 자동 시험 | B | 시험: services/ops-svc/test-int/command-lifecycle.int.test.ts, services/ops-svc/test/command-dry-run.test.ts |
-| C-T7 | — | 파드 ack 시간 초과 예외 처리 | 대상 파드의 수신 확인이 시간 초과되면 FAILED 상태로 바뀌고, 수동 재시도([ 다시 시도 ])와 채운 런북 CLI 명령 한 줄 안내가 바로 나온다. | 빈칸 | B | — |
-| C-T8 | — | 제어 명령 긴급 원복(Revert) | 직전 정상 설정값을 복원했다는 ack를 정상으로 받고, 1차 명령과 롤백 명령이 감사 로그에 총 2건으로 무결하게 남는다. | 빈칸 | B | — |
+| C-T7 | ① | 파드 ack 시간 초과 예외 처리 | ① 대상 파드의 수신 확인이 시간 초과되면 FAILED 상태로 바뀌고, … 은 서버, | ID만 | B | 시험: apps/console-host/src/pages/commands/model/card-state.test.mjs, apps/console-host/src/pages/commands/model/command-a… |
+| C-T7 | ② | 파드 ack 시간 초과 예외 처리 | ② 수동 재시도([ 다시 시도 ]) 안내와 … 는 명령 화면, | 자동 시험 | B | 시험: apps/console-host/src/pages/commands/model/card-state.test.mjs, apps/console-host/src/pages/commands/model/command-a… |
+| C-T7 | ③ | 파드 ack 시간 초과 예외 처리 | ③ 채운 런북 CLI 명령 한 줄 안내가 바로 나온다. 세부 번호는 2026-11-23 F-03-4 계획이 나눴다( … 은 런북 CLI 몫) | ID만 | B | 시험: apps/console-host/src/pages/commands/model/card-state.test.mjs, apps/console-host/src/pages/commands/model/command-a… |
+| C-T8 | — | 제어 명령 긴급 원복(Revert) | 직전 정상 설정값을 복원했다는 ack를 정상으로 받고, 1차 명령과 롤백 명령이 감사 로그에 총 2건으로 무결하게 남는다. | 다른 단계 | B | F-03-7(동결) · 동결(ADR-0373), 맡는 기능 없음 |
 | C-T9 | — | 자동 제어와 수동 제어의 경합 | 운영자가 수동 명령으로 개입한 직후 15분간 AIMD 자동 조정이 멈추고, 만료 후 확인을 거쳐 자동 조정으로 돌아옴을 입증한다. 자동 조절 멈춤 중 지정 뒤… | 빈칸 | B | — |
 | C-T10 | ① | 자동화 제어 긴급 정지 스위치 | ① commander 1인이 긴급 정지를 실행하면 입장 제어 자동화(AIMD 조정·에러 버짓 연동 감축·Degraded 후보 추천)가 바로 멈추고… | ID만 | B | 시험: services/ops-svc/test/post-review.test.ts |
 | C-T10 | ② | 자동화 제어 긴급 정지 스위치 | ② 사후 검토 보고서 할 일(작성 48시간)이 생기고, 기한을 넘기면 SEV3가 나온다. 실행한 commander 자신의 검토 완료는 거부된다(1인 기간 제외). | 자동 시험 | B | 시험: services/ops-svc/test/post-review.test.ts |
@@ -43,16 +45,25 @@
 | C-T22 | — | 같은 내용 게시물 자동 차단 | 명령 10으로 차단한 게시물과 공백·문장부호·전각 차이만 있는 본문으로 새 관람 후기를 저장하면 즉시 숨김 상태가 되고, 조치 결과서에 '같은 내용 차단'으로… | 자동 시험 | B | 시험: services/core-svc/test/review.http.test.ts |
 | C-T23 | — | 보안 사고 신고·통지 기한 | 인지 시각 10:00으로 침해사고를 등록하면 SEV1이 뜨고 다음 날 10:00 신고 기한이 생긴다. 22시간이 지난 때(다음 날 08:00) SEV2가 다시… | 빈칸 | B | — |
 | C-T24 | — | 접속기록 점검 | 파트너 계정이 같은 명단을 24시간에 3회 내려받으면 다음 날 점검 목록에 '반복 다운로드'로 올라오고, 사유 확인과 사후조치를 기록할 때까지 미조치로 남는다… | 빈칸 | B | — |
-| C-T25 | — | Go/No-Go 필수 항목 실패 | 노드 시계 오프셋을 30ms로 만든 상태로 T-30분 점검을 하면 No-Go가 된다. 오픈 시각에는 입장 일시정지와 대기실 공지가 걸린 채로 로비 셔플은… | 빈칸 | B | — |
+| C-T25 | ① | Go/No-Go 필수 항목 실패 | ① 노드 시계 오프셋을 30ms로 만든 상태로 T-30분 점검을 하면 No-Go가 되고, 판정과 사유가 감사 로그에 남는다 … 은 점검·판정과 기록, | 자동 시험 | B | 시험: apps/console-host/src/pages/dashboard/ui/live/live-widgets.test.mjs, services/ops-svc/test-int/ops-readiness.int.tes… |
+| C-T25 | ② | Go/No-Go 필수 항목 실패 | ② 오픈 시각에는 입장 일시정지와 대기실 공지가 걸린 채로 로비 셔플은 예정대로 실행된다. 오프셋이 회복되면 입장이 재개되고, 그 판정과 사유도 감사 로그에… | ID만 | B | 시험: apps/console-host/src/pages/dashboard/ui/live/live-widgets.test.mjs, services/ops-svc/test-int/ops-readiness.int.tes… |
 | C-T26 | — | 진행 중 배포가 남은 T-30분 점검 | 대형 회차 T-100분에 시작해 표본 부족으로 판정 불가에 멈춘 카나리(devops §6.2)를 두고, 그 카나리의 `freeze-guard` 자동… | 빈칸 | B | — |
 | C-T27 | ① | 감사 기록 변조 탐지 | ① mac 불일치로 SEV2가 나오고 | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts |
 | C-T27 | ② | 감사 기록 변조 탐지 | ② 보안 사고 기록이 나온다. | ID만 | B | 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts |
 | C-T27 | ③ | 감사 기록 변조 탐지 | ③ 앵커 뒤 끝 기록의 삭제는 드러나지 않으므로 남는 한계(최대 5분)로 기록된다(세부 번호는 추천 적용 2026-11-21, BAT-355 계획) | 자동 시험 | B | 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts |
 | C-T28 | — | 런북 서명과 연결 신원 | 서명이 하나뿐인 묶음(명령 3 정지 묶음 제외), 같은 운영자가 두 번 서명한 묶음, 5분 지난 묶음, 이미 쓴 commandId의 묶음, operator 한… | 빈칸 | B | — |
 | C-T29 | — | 홈 구성 저장 | operator가 판매 승인 전 공연을 배너에 넣고, 대체 텍스트 없이 저장하고, 두 운영자가 같은 판으로 거의 동시에 저장하고, viewer가 저장을… | 빈칸 | B | — |
-| C-T30 | — | 판단 위젯 요약과 원인 분석 링크 | 판매 진행 중 탭에서 Redis 메모리를 주의 기준 [가정] 위로 올리면 포화도 요약이 '주의'로 바뀐다. 시험 서비스가 새 종류의 오류를 내면 1분 [가정]… | 빈칸 | B | — |
-| C-T31 | — | 제어 입력 없음 표시 | purchase-svc 지표 수집을 끊으면 30초 [가정] 안에 위 상태 바가 <입력 없음>이 되고, 경보 패널 '이 회차 판단'에 SEV2가… | 빈칸 | B | — |
-| C-T32 | — | 경보 묶기·억제와 패널 두 갈래 | 같은 회차·여정에 예산 SEV1과 SEV2를 함께 울리면 SEV2는 Slack·온콜로 가지 않고, 콘솔에서 SEV1 아래 접힌 줄로 보인다. 다른 회차의 경보와… | 빈칸 | B | — |
+| C-T30 | ① | 판단 위젯 요약과 원인 분석 링크 | ① 판매 진행 중 탭에서 Redis 메모리를 주의 기준 [가정] 위로 올리면 포화도 요약이 '주의'로 바뀐다 | 자동 시험 | B | 시험: apps/console-host/src/pages/dashboard/ui/live/live-widgets.test.mjs, services/ops-svc/test-int/ops-readiness.int.tes… |
+| C-T30 | ② | 판단 위젯 요약과 원인 분석 링크 | ② 시험 서비스가 새 종류의 오류를 내면 1분 [가정] 안에 '새로 생긴 오류 종류' 수가 1 늘고, 상위 오류 목록에 나온다 … 는 Sentry 연동 몫) | ID만 | B | 시험: apps/console-host/src/pages/dashboard/ui/board-links.test.mjs, apps/console-host/src/pages/dashboard/ui/live/live-wi… |
+| C-T30 | ③ | 판단 위젯 요약과 원인 분석 링크 | ③ 위젯의 '자세히 보기 ↗'는 같은 회차·같은 시간대의 Grafana(오류 위젯은 Sentry)를 새 탭으로 열고, 콘솔 응답에는 Grafana 프레임이 없다 | 자동 시험 | B | 시험: apps/console-host/src/pages/dashboard/ui/board-links.test.mjs, apps/console-host/src/shared/lib/links.test.mjs |
+| C-T30 | ④ | 판단 위젯 요약과 원인 분석 링크 | ④ Sentry로 보낸 시험 이벤트에는 IP·요청 본문·쿠키(브라우저가 사이트별로 저장했다가 요청마다 함께 보내는 작은 값) 값이 없다. 세부 번호는… | ID만 | B | 시험: apps/console-host/src/pages/dashboard/ui/board-links.test.mjs, apps/console-host/src/pages/dashboard/ui/live/live-wi… |
+| C-T31 | ① | 제어 입력 없음 표시 | ① purchase-svc 지표 수집을 끊으면 30초 [가정] 안에 위 상태 바가 <입력 없음>이 되고, 경보 패널 '이 회차 판단'에 SEV2가… | 자동 시험 | B | 시험: apps/console-host/src/pages/dashboard/ui/live/live-widgets.test.mjs, apps/console-host/src/shared/api/live/connectio… |
+| C-T31 | ② | 제어 입력 없음 표시 | ② 명령 1은 그대로 ack된다 … 은 명령 쪽) | ID만 | B | 시험: apps/console-host/src/pages/dashboard/ui/live/live-widgets.test.mjs, apps/console-host/src/shared/api/live/connectio… |
+| C-T31 | ③ | 제어 입력 없음 표시 | ③ 지표가 돌아오면 '자동 조절 복귀 확인' 대화상자가 뜨고, 확인 전에는 증액이 없다. 세부 번호는 2026-11-23 F-03-3 계획이 나눴다( … 은… | 다른 단계 | B | F-03-7(동결) · 동결(ADR-0373), 맡는 기능 없음. 입력 없음 뒤 '자동 조절 복귀 확인'을 받는 경로가 없다(F-03-4 계획 서버 빈칸) |
+| C-T32 | ① | 경보 묶기·억제와 패널 두 갈래 | ① SEV2는 Slack·온콜로 가지 않고 … 은 경보 받는 길·Alertmanager 몫) | ID만 | B | 시험: apps/console-host/src/pages/dashboard/model/alert-groups.test.mjs, apps/console-host/src/pages/dashboard/ui/live/liv… |
+| C-T32 | ② | 경보 묶기·억제와 패널 두 갈래 | ② 콘솔에서 SEV1 아래 접힌 줄로 보인다 | 자동 시험 | B | 시험: apps/console-host/src/pages/dashboard/model/alert-groups.test.mjs, apps/console-host/src/pages/dashboard/ui/live/liv… |
+| C-T32 | ③ | 경보 묶기·억제와 패널 두 갈래 | ③ 다른 회차의 경보와 위생 경보는 '플랫폼·위생·법정'에 들어간다 | 자동 시험 | B | 시험: apps/console-host/src/pages/dashboard/model/alert-groups.test.mjs, apps/console-host/src/pages/dashboard/ui/live/liv… |
+| C-T32 | ④ | 경보 묶기·억제와 패널 두 갈래 | ④ SLO 경보 줄의 '실패 사건 보기'는 같은 시간 창의 실패 조건으로 채운 조회를 새 탭으로 연다. 세부 번호는 2026-11-23 F-03-3 계획이… | 자동 시험 | B | 시험: apps/console-host/src/pages/dashboard/ui/live/live-widgets.test.mjs, apps/console-host/src/shared/lib/links.test.mjs |
 | C-T33 | — | 명령 4·5 효과 줄 | 명령 4를 실행하고 시험용 사람 세션을 그 대역에서 보내면, 10분 안에 효과 줄에 차단 비율 상승과 추가 검증 통과율 하락이 보인다. 통과율이 10%p… | 빈칸 | B | — |
 | C-T34 | — | 인시던트 선언과 탐지 경로 | 명령 3을 실행하면 인시던트 선언 할 일과 포스트모템 초안이 생기고, 초안에 첫 경보 시각이 채워진다. 명령 1만 실행한 회차는 선언 대상이 아니다. 경보가… | 빈칸 | B | — |
 | C-T35 | — | 처리량 급감 표시 | 판매 중 회차에서 결제 시뮬레이터의 SDK 스크립트를 막아 결제 접수가 줄면, 서버 오류가 없어 SLO 경보는 울리지 않는다. 그 대신 6분 [가정] 안에 '이… | 빈칸 | B | — |
@@ -77,10 +88,10 @@
 | C-T45 | ② | 운영 명령 주석과 서비스 지도 | ② 온세일 대시보드의 주석 조회는 같은 회차 그래프에 명령 번호와 단계를 표시한다. | ID만 | B | 시험: services/ops-svc/test/ops-event-log.test.ts |
 | C-T45 | ③ | 운영 명령 주석과 서비스 지도 | ③ 서비스 A → B 호출이 든 요청 기록을 넣으면 노드 그래프에 연결이 보인다. | ID만 | B | 시험: services/ops-svc/test/ops-event-log.test.ts |
 | C-T45 | ④ | 운영 명령 주석과 서비스 지도 | ④ 서비스 그래프 지표를 읽는 경보 규칙·자동 제어 입력이 없음은 규칙 검사로 확인한다 | ID만 | B | 시험: services/ops-svc/test/ops-event-log.test.ts |
-| C-T46 | ① | 판매 일시정지 1인 실행과 2인 재개 | ① commander 1인이 재인증 뒤 명령 3을 내면 승인 대기 없이 전파되어 ack p99 3초 안에 ACKED가 되고, | ID만 | B | 시험: services/ops-svc/test/post-review.test.ts |
+| C-T46 | ① | 판매 일시정지 1인 실행과 2인 재개 | ① commander 1인이 재인증 뒤 명령 3을 내면 승인 대기 없이 전파되어 ack p99 3초 안에 ACKED가 되고, | ID만 | B | 시험: apps/console-host/src/pages/commands/model/command-actions.test.mjs, apps/console-host/src/pages/commands/model/comm… |
 | C-T46 | ② | 판매 일시정지 1인 실행과 2인 재개 | ② 사후 검토 보고서 할 일(작성 48시간, 다른 commander 검토 7일)이 생긴다. | 자동 시험 | B | 시험: services/ops-svc/test/post-review.test.ts |
-| C-T46 | ③ | 판매 일시정지 1인 실행과 2인 재개 | ③ 재인증이 없거나 operator가 내면 403이다. | ID만 | B | 시험: services/ops-svc/test/post-review.test.ts |
-| C-T46 | ④ | 판매 일시정지 1인 실행과 2인 재개 | ④ 판매 재개는 REVERT_PENDING이 되고, 요청자가 아닌 operator 이상이 재인증하고 승인해야 REVERTED가 된다. 10분 안에 승인이 없으면… | ID만 | B | 시험: services/ops-svc/test/post-review.test.ts |
+| C-T46 | ③ | 판매 일시정지 1인 실행과 2인 재개 | ③ 재인증이 없거나 operator가 내면 403이다. | 자동 시험 | B | 시험: apps/console-host/src/pages/commands/model/command-actions.test.mjs, apps/console-host/src/pages/commands/model/comm… |
+| C-T46 | ④ | 판매 일시정지 1인 실행과 2인 재개 | ④ 판매 재개는 REVERT_PENDING이 되고, 요청자가 아닌 operator 이상이 재인증하고 승인해야 REVERTED가 된다. 10분 안에 승인이 없으면… | 자동 시험 | B | 시험: apps/console-host/src/pages/commands/model/command-actions.test.mjs, apps/console-host/src/pages/commands/ui/connect… |
 | C-T47 | ① | 2인 승인 시연(데모) | ① 데모 환경에서 2인 명령을 요청한 뒤 요청자 본인 계정으로 승인하면 403이고, 데모 승인자 계정이 재인증하고 승인하면 명령이 전파된다. 감사 로그에는 두… | 자동 시험 | B | 시험: services/ops-svc/test-int/demo-two-person-approval.int.test.ts |
 | C-T47 | ② | 2인 승인 시연(데모) | ② 데모 막대의 '요청자 본인으로 승인 시도'를 누르면 같은 403이 보이고, '데모 승인자로 승인'을 누르면 데모 도우미가 데모 승인자 계정으로 재인증하고… | ID만 | B | 시험: services/ops-svc/test-int/demo-two-person-approval.int.test.ts |
 | C-T47 | ③ | 2인 승인 시연(데모) | ③ 운영 묶음 검사(FE-T21)에서 데모 막대는 0건이다 | ID만 | B | 시험: services/ops-svc/test-int/demo-two-person-approval.int.test.ts |
@@ -183,8 +194,8 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | v5.0.0-1.1.1 | — | L2 | 입력은 그 형식으로 인코딩된 데이터가 기대될 때만 정규 형식으로 한 번만 디코딩(이스케이프 해제 포함)하고, 검증·정화 같은 다음 처리보다 먼저 한다. | 자동 시험 | B | 시험: services/ops-svc/test/post-review.test.ts |
 | v5.0.0-1.1.2 | — | L2 | 출력 인코딩·이스케이프는 그 값을 쓰는 해석기 바로 앞의 마지막 단계에서 하거나 해석기가 직접 한다. | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, tools/web-checks/rich-text/seatmap-editor.spec.mj… |
-| v5.0.0-1.2.1 | — | L1 | HTTP 응답·HTML·XML 출력은 문맥(HTML 요소·속성·주석, CSS, HTTP 헤더)에 맞게 인코딩해 메시지·문서 구조가 바뀌지 않게 한다. | ID만 | B | 다른 곳 시험: apps/partner/src/_pages/seatmap-editor/model/import-check.test.mjs… |
-| v5.0.0-1.2.2 | — | L1 | URL을 동적으로 만들 때 신뢰하지 않는 값을 문맥에 맞게 인코딩하고 안전한 프로토콜만 허용한다(`javascript:`·`data:` 금지). | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/preload.test.mjs, packages/api-client/test/policy.test.ts (영역: apps/console-host… |
+| v5.0.0-1.2.1 | — | L1 | HTTP 응답·HTML·XML 출력은 문맥(HTML 요소·속성·주석, CSS, HTTP 헤더)에 맞게 인코딩해 메시지·문서 구조가 바뀌지 않게 한다. | 자동 시험 | B | 시험: apps/console-host/src/pages/commands/ui/connected/connected.test.mjs |
+| v5.0.0-1.2.2 | — | L1 | URL을 동적으로 만들 때 신뢰하지 않는 값을 문맥에 맞게 인코딩하고 안전한 프로토콜만 허용한다(`javascript:`·`data:` 금지). | 자동 시험 | B | 시험: apps/console-host/src/shared/lib/links.test.mjs |
 | v5.0.0-1.2.3 | — | L1 | JavaScript·JSON을 동적으로 만들 때 인코딩·이스케이프해 구조가 바뀌지 않게 한다. | 자동 시험 | B | 시험: services/ops-svc/test/ops-live.test.ts |
 | v5.0.0-1.2.4 | — | L1 | 데이터 조회·DB 쿼리는 파라미터 쿼리, ORM 등으로 SQL 등 DB 주입을 막는다(저장 프로시저 포함). | 자동 시험 | B | 시험: services/ops-svc/test/ops-cases-http.test.ts |
 | v5.0.0-1.2.5 | — | L1 | OS 명령 주입을 막고 OS 호출은 파라미터화하거나 명령줄 인코딩을 쓴다. | 해당 없음 | B | 해당 없음(`ops-svc`는 OS 명령을 부르지 않는다. AWS·Kubernetes는 SDK로 부른다. 런북 Job은 서명을 확인한 고정 이미지의 CLI가 서명 묶음 파일만 읽는다) |
@@ -224,7 +235,7 @@
 | v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | ID만 | B | 다른 곳 시험: apps/web/src/features/social-login/server/login-routes.test.mjs… |
 | v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | ID만 | B | 다른 곳 시험: apps/web/src/features/staff-approval/flow.test.mjs, apps/web/src/features/staff-invitation/flow.test.mjs 외 1곳… |
 | v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | ID만 | B | 다른 곳 시험: apps/web/src/features/social-login/server/login-routes.test.mjs… |
-| v5.0.0-3.3.4 | — | L2 | 스크립트가 읽을 필요 없는 쿠키(세션 토큰 등)는 `HttpOnly`이고 그 값은 `Set-Cookie`로만 보낸다. | ID만 | B | 다른 곳 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, services/identity-svc/test/http.test.ts 외 2곳… |
+| v5.0.0-3.3.4 | — | L2 | 스크립트가 읽을 필요 없는 쿠키(세션 토큰 등)는 `HttpOnly`이고 그 값은 `Set-Cookie`로만 보낸다. | 자동 시험 | B | 시험: apps/console-host/src/pages/commands/model/command-actions.test.mjs |
 | v5.0.0-3.4.1 | — | L1 | 모든 응답에 HSTS를 둔다(최대 기간 1년 이상, L2부터 하위 도메인 포함). | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/v0-monolith/test/gateway-http-rules.test.ts 외 3곳 (영역:… |
 | v5.0.0-3.4.2 | — | L1 | CORS `Access-Control-Allow-Origin`은 고정 값으로 두거나 요청의 `Origin`을 신뢰 출처 허용 목록과 대조해 정하고, `*`을… | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/queue-svc/test/state-http.test.ts 외 1곳 (영역:… |
 | v5.0.0-3.4.3 | — | L2 | HTTP 응답에 CSP를 둬 브라우저가 신뢰한 콘텐츠·자원만 싣고 실행하게 하고, 최소한 `object-src 'none'`·`base-uri 'none'`과… | 자동 시험 | B | 시험: apps/console-host/test/console-csp.test.mjs |
@@ -237,7 +248,7 @@
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | ID만 | B | 다른 곳 시험: apps/web/src/features/wallet-device-key/pwa-config.test.mjs, apps/web/src/features/wallet-device-key/sw-rules.t… |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 해당 없음 | B | 해당 없음(관제 콘솔은 창 메시지를 받지 않는다. 원격 위젯과는 모듈 호출과 Zod로 검사한 사건으로만 주고받는다, asvs/frontend.md 1.5.2) |
 | v5.0.0-3.7.1 | — | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | ID만 | B | 다른 곳 시험: tools/web-checks/console-csp/console.spec.mjs, tools/web-checks/console-csp/partner.spec.mjs (영역:… |
-| v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/verify-return.test.mjs, apps/web/src/_pages/login/model/state.test.mjs 외 11곳 (영역:… |
+| v5.0.0-3.7.2 | — | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 자동 시험 | B | 시험: apps/console-host/src/pages/dashboard/ui/live/live-widgets.test.mjs |
 | v5.0.0-4.1.1 | — | L1 | 본문이 있는 모든 HTTP 응답에 실제 내용과 맞는 `Content-Type`을 두고, 텍스트·XML처럼 IANA 미디어 타입이 정하는 경우 안전한 문자… | ID만 | B | 다른 곳 시험: services/purchase-svc/test/http.test.ts, services/v0-monolith/test-int/queue.int.test.ts (영역:… |
 | v5.0.0-4.1.2 | — | L2 | 브라우저로 직접 여는 사용자 화면만 HTTP에서 HTTPS로 자동 리디렉션하고, 그 밖의 서비스·엔드포인트는 리디렉션하지 않는다. | 빈칸 | B | 영역: apps/console-host |
 | v5.0.0-4.1.3 | — | L2 | 로드밸런서·프록시·BFF 같은 중간 계층이 넣어 애플리케이션이 쓰는 헤더(`X-Real-IP`·`X-Forwarded-*`·`X-User-ID` 등)는 최종… | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts, services/v0-monolith/test/gateway-config.test.ts 외 5곳 (영역:… |
@@ -302,7 +313,7 @@
 | v5.0.0-13.4.5 | — | L2 | 내부 API 문서와 모니터링 엔드포인트는 의도한 경우가 아니면 노출하지 않는다. | ID만 | B | 다른 곳 시험: deploy/workloads/test/worker-chart.test.mjs, packages/platform/test/metrics.test.ts 외 4곳 (영역:… |
 | v5.0.0-14.1.1 | — | L2 | 애플리케이션이 만들고 처리하는 민감 데이터를 Base64·JWT 본문처럼 인코딩만 된 것까지 모두 찾아, 따라야 할 데이터 보호·개인정보 법규와 표준을 반영한… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/evidence-collector/test-int/collector.int.tes… |
 | v5.0.0-14.1.2 | — | L2 | 보호 등급마다 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, DB 수준 암호화, 개인정보 보호 기술 같은 보호 요구사항을… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/realtime-gw/test-int/stream.int.test.ts 외 1곳… |
-| v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/features/identity-verify/flow.test.mjs, apps/web/src/features/identity-verify/server/return-post.t… |
+| v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | 자동 시험 | B | 시험: apps/console-host/src/pages/commands/model/command-actions.test.mjs |
 | v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | ID만 | B | 다른 곳 시험: packages/platform/test/diagnose.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 4곳 (영역:… |
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs, packages/config/eslint/service-security.test.mjs… |
 | v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 22곳 (영역:… |
@@ -324,7 +335,7 @@
 | v5.0.0-15.3.7 | — | L2 | HTTP 파라미터 오염 공격을 막는다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-checks.test.ts, services/purchase-svc/test/read-seat-snapshot.test.ts 외 1곳 (영역:… |
 | v5.0.0-16.1.1 | — | L2 | 기술 스택의 계층마다 어떤 이벤트를 어떤 형식으로 기록하는지, 로그를 어디에 두고 어디에 쓰는지, 접근을 어떻게 통제하는지, 얼마나 보관하는지를 적은 로그… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/core-svc/test/search-removal.test.ts 외 1곳 (영역:… |
 | v5.0.0-16.2.1 | — | L2 | 로그 항목에 언제, 어디서, 누가, 무엇을 같은 조사용 메타데이터를 넣는다. | 자동 시험 | B | 시험: services/ops-svc/test-int/command-lifecycle.int.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
-| v5.0.0-16.2.2 | — | L2 | 로그 구성요소의 시각을 동기화하고 UTC 또는 시간대 오프셋을 쓴다. | ID만 | B | 다른 곳 시험: packages/platform/test/request-log.test.ts, services/realtime-gw/test-int/stream.int.test.ts (영역:… |
+| v5.0.0-16.2.2 | — | L2 | 로그 구성요소의 시각을 동기화하고 UTC 또는 시간대 오프셋을 쓴다. | 자동 시험 | B | 시험: services/ops-svc/test-int/ops-readiness.int.test.ts, services/ops-svc/test/readiness-http.test.ts |
 | v5.0.0-16.2.3 | — | L2 | 로그 목록에 적힌 파일과 서비스로만 로그를 저장·전송한다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts (영역: apps/console-host, apps/widgets) |
 | v5.0.0-16.2.4 | — | L2 | 쓰고 있는 로그 처리기가 로그를 읽고 서로 연관 지을 수 있게 하고, 되도록 공통 로그 형식을 쓴다. | 자동 시험 | B | 시험: services/ops-svc/test/ops-event-log.test.ts |
 | v5.0.0-16.2.5 | — | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | 자동 시험 | B | 시험: services/ops-svc/test/ops-event-log.test.ts |
