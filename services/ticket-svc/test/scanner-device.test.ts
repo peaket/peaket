@@ -7,6 +7,7 @@ import { RedisDpopReplayStore } from '../src/modules/scanner/adapters/redis-dpop
 import { RedisEnrollmentAttemptLimiter } from '../src/modules/scanner/adapters/redis-enrollment-attempt-limiter.js';
 import { RedisEnrollmentCodeStore } from '../src/modules/scanner/adapters/redis-enrollment-code-store.js';
 import { MemoryEnrollmentAttemptLimiter } from '../src/modules/scanner/adapters/memory-enrollment-attempt-limiter.js';
+import { enrollmentCodeStoreContract } from './enrollment-code-store-contract.js';
 import { EnrollmentCodeRejected, EnrollmentRateLimited, ScannerDeviceNotFound, ScannerDevices, ScannerEnrollmentUnavailable } from '../src/modules/scanner/application/scanner-devices.js';
 import {
   assertJkt,
@@ -64,14 +65,13 @@ describe('스캐너 등록 코드 [GAT-170]', () => {
 });
 
 describe('Redis 저장소 어댑터 [GAT-170]', () => {
-  test('DPoP jti는 SET NX PX로 처음만 true이고, 등록 코드는 GETDEL로 한 번만 꺼낸다', async () => {
+  test('DPoP jti는 SET NX PX로 처음만 true이고, 등록 코드는 SHA-256 키와 기기 키에 같은 TTL로 둔다', async () => {
     const calls: string[][] = [];
     const redis = {
       command: async (args: string[]) => {
         calls.push(args);
         if (args[0] === 'SET') return calls.filter((c) => c[0] === 'SET' && c[1] === args[1]).length === 1 ? 'OK' : null;
         if (args[0] === 'GETDEL') return '0190f3a1-7c2e-7a00-8000-000000000001';
-        if (args[0] === 'PTTL') return 600_000;
         return null;
       },
     } as unknown as HotRedis;
@@ -84,10 +84,7 @@ describe('Redis 저장소 어댑터 [GAT-170]', () => {
     await codes.put({ codeHash: 'abc', deviceId: 'dev-1', ttlMs: 600_000 });
     expect(calls).toContainEqual(['SET', 'scanner:enroll:abc', 'dev-1', 'PX', '600000']);
     expect(calls).toContainEqual(['SET', 'scanner:enroll-device:dev-1', 'abc', 'PX', '600000']);
-    // O-T42 ⑤: take는 기기 ID와 함께 남은 수명으로 만든 만료 시각을 준다(계획 F-05-5 §5). 만료 시각 값은 실제 Valkey 통합 시험이 본다
-    expect(await codes.take('abc')).toMatchObject({ deviceId: '0190f3a1-7c2e-7a00-8000-000000000001' });
-    expect(calls).toContainEqual(['GETDEL', 'scanner:enroll:abc']);
-    expect(calls).toContainEqual(['PTTL', 'scanner:enroll:abc']);
+    // take(한 번만·원자적, 꺼내는 명령은 구현이 고른다)와 restore의 계약은 실제 Valkey 통합 시험(enrollmentCodeStoreContract)이 본다(O-T42 ⑤, 시험 리뷰 1 TR-09)
   });
 
   test('등록 실패 제한은 IP 카운터 TTL을 쓰고 10회 뒤 막으며, 전체 101회에 경보를 낸다', async () => {
@@ -372,3 +369,13 @@ describe('O-T42 ⑤ 등록 코드 저장소 take·restore 계약(메모리, 계�
     expect(await codes.take('new')).toEqual({ deviceId: DEVICE, expiresAtMs: NOW + 600_000 });
   });
 });
+
+// 같은 계약 묶음을 실제 Valkey 어댑터에도 돌린다(test-int/scanner-f055.int.test.ts, 시험 리뷰 1 TR-02)
+enrollmentCodeStoreContract(
+  '메모리',
+  () => {
+    const clock = fakeClock({ now: NOW });
+    return { store: new MemoryEnrollmentCodeStore(clock), now: () => clock.now(), advance: (ms: number) => clock.advance(ms) };
+  },
+  { fakeClock: true },
+);

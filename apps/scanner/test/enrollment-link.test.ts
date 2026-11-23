@@ -1,13 +1,29 @@
-// F-05-5 스캐너 앱: 관제 콘솔 SCR-053 등록 QR(/enroll#code=…)을 받는 함수와 스캐너 API의 자격 증명·DPoP 증명 시험.
-// 정본: docs/features/offline-gate.md §6.1 'GAT-170 마감 규칙'(조각 code·주소창에서 지움·저장하지 않음)·O-T37 ①⑧,
-// 계획 docs/review/plans/F-05-5.md §5(enrollmentCodeFromHash·stripEnrollmentFragment의 모양). 실행: node --test(이 작업 공간 폴더 기준).
+// F-05-5 스캐너 앱: 관제 콘솔 SCR-053 등록 QR(/enroll#code=…)을 받는 함수와 화면 진입 판정, 스캐너 API의 자격 증명·DPoP 증명 시험.
+// 정본: docs/features/offline-gate.md §6.1 'GAT-170 마감 규칙'(조각 code·실제 연결 화면·주소창에서 지움·저장하지 않음)·O-T37 ①⑧,
+// 계획 docs/review/plans/F-05-5.md §3(이름·모양)·§10의 4(조각 해석 규칙). 실행: node --test(이 작업 공간 폴더 기준).
+// 화면이 이 진입 판정을 실제로 쓰는지(입력 칸·주소창·저장소·등록 요청·실패 뒤 값)는 tools/web-checks/scanner-enroll/enroll.spec.mjs가 본다.
+// 새 모듈은 동적 불러오기로 읽는다: 모듈이 없으면 각 시험이 '함수가 있다'는 단언에서 떨어진다(파일 전체가 불러오기에서 멈추지 않게, 시험 리뷰 1 TR-07).
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { enrollmentCodeFromHash, stripEnrollmentFragment } from '../src/api/enrollment-link.ts';
 import { enrollDevice } from '../src/api/device-login.ts';
 import { dpopProof, generateDpopKey, jktOf } from '../src/api/dpop.ts';
 
+type Link = {
+  enrollmentCodeFromHash(hash: string): string | undefined;
+  stripEnrollmentFragment(loc: { pathname: string; search: string; hash: string }, replace: (url: string) => void): void;
+  enrollScreenEntry(o: { live: boolean; hash: string }): { live: boolean; initialCode: string };
+};
+const MODULE = '../src/api/enrollment-link.ts';
+const loaded = (await import(MODULE).catch(() => ({}))) as Partial<Link>;
+function link(): Link {
+  for (const name of ['enrollmentCodeFromHash', 'stripEnrollmentFragment', 'enrollScreenEntry'] as const) {
+    assert.equal(typeof loaded[name], 'function', `${MODULE}의 ${name}가 없다`);
+  }
+  return loaded as Link;
+}
+
 const API = 'https://scanner-api.peaket.example';
+const partOf = (jwt: string, i: 0 | 1): Record<string, unknown> => JSON.parse(Buffer.from(jwt.split('.')[i]!, 'base64url').toString('utf8')) as Record<string, unknown>;
 
 function recordingFetch(status: number, body: unknown): { fetch: typeof fetch; calls: { url: string; init: RequestInit }[] } {
   const calls: { url: string; init: RequestInit }[] = [];
@@ -18,37 +34,68 @@ function recordingFetch(status: number, body: unknown): { fetch: typeof fetch; c
   return { fetch: fetchImpl, calls };
 }
 
-const partOf = (jwt: string, i: 0 | 1): Record<string, unknown> => JSON.parse(Buffer.from(jwt.split('.')[i]!, 'base64url').toString('utf8')) as Record<string, unknown>;
-
-test('O-T37 ① 등록 QR 조각 #code=에서 등록 코드를 꺼낸다(URL 인코딩은 푼다)', () => {
+test('O-T37 ① 등록 QR 조각 #code=에서 등록 코드를 꺼낸다(URL 인코딩은 푼다, 다른 칸과 섞여도 첫 code 칸만)', () => {
+  const { enrollmentCodeFromHash } = link();
   assert.equal(enrollmentCodeFromHash('#code=KDTW-BMQX-HLRP'), 'KDTW-BMQX-HLRP');
   assert.equal(enrollmentCodeFromHash('#code=KDTW%2DBMQX%2DHLRP'), 'KDTW-BMQX-HLRP');
   assert.equal(enrollmentCodeFromHash('#code=kdtw%20bmqx%20hlrp'), 'kdtw bmqx hlrp');
+  assert.equal(enrollmentCodeFromHash('#code=KDTW-BMQX-HLRP&x=1'), 'KDTW-BMQX-HLRP');
+  assert.equal(enrollmentCodeFromHash('#x=1&code=KDTW-BMQX-HLRP'), 'KDTW-BMQX-HLRP');
+  assert.equal(enrollmentCodeFromHash('#code=KDTW-BMQX-HLRP&code=BCDF-GHJK-LMNP'), 'KDTW-BMQX-HLRP');
 });
 
-test('O-T37 ① 조각에 code가 없거나 비었거나 64자를 넘으면 undefined다(64자는 받는다)', () => {
+test('O-T37 ① 조각에 code가 없거나 비었거나 풀린 값이 65자 이상이면 undefined다(64자는 받는다)', () => {
+  const { enrollmentCodeFromHash } = link();
   assert.equal(enrollmentCodeFromHash(''), undefined);
   assert.equal(enrollmentCodeFromHash('#'), undefined);
   assert.equal(enrollmentCodeFromHash('#code='), undefined);
   assert.equal(enrollmentCodeFromHash('#x=1'), undefined);
   assert.equal(enrollmentCodeFromHash(`#code=${'B'.repeat(64)}`), 'B'.repeat(64));
   assert.equal(enrollmentCodeFromHash(`#code=${'B'.repeat(65)}`), undefined);
+  // 인코딩된 글자 수가 65를 넘어도 풀린 값이 64자면 받는다(%42 = B)
+  assert.equal(enrollmentCodeFromHash(`#code=${'%42'.repeat(64)}`), 'B'.repeat(64));
 });
 
-test('O-T37 ① 조각에 code가 있으면 주소창을 경로+검색어로 한 번 바꿔 조각을 지운다', () => {
+test('O-T37 ① 깨진 퍼센트 인코딩은 던지지 않고 undefined다', () => {
+  const { enrollmentCodeFromHash } = link();
+  assert.doesNotThrow(() => enrollmentCodeFromHash('#code=%E0%A4%A'));
+  assert.equal(enrollmentCodeFromHash('#code=%E0%A4%A'), undefined);
+});
+
+test('O-T37 ① 조각에 code 칸이 있으면(값이 깨져도) 주소창을 경로+검색어로 한 번 바꿔 조각을 지운다', () => {
+  const { stripEnrollmentFragment } = link();
   const calls: string[] = [];
   stripEnrollmentFragment({ pathname: '/enroll', search: '', hash: '#code=KDTW-BMQX-HLRP' }, (u) => void calls.push(u));
   assert.deepEqual(calls, ['/enroll']);
   const withQuery: string[] = [];
   stripEnrollmentFragment({ pathname: '/enroll', search: '?lang=ko', hash: '#code=KDTW-BMQX-HLRP' }, (u) => void withQuery.push(u));
   assert.deepEqual(withQuery, ['/enroll?lang=ko']);
+  const broken: string[] = [];
+  stripEnrollmentFragment({ pathname: '/enroll', search: '', hash: '#code=%E0%A4%A' }, (u) => void broken.push(u));
+  assert.deepEqual(broken, ['/enroll']);
 });
 
-test('O-T37 ① 조각에 code가 없으면 주소창을 건드리지 않는다', () => {
+test('O-T37 ① 조각에 code 칸이 없으면 주소창을 건드리지 않는다', () => {
+  const { stripEnrollmentFragment } = link();
   const calls: string[] = [];
   stripEnrollmentFragment({ pathname: '/enroll', search: '', hash: '' }, (u) => void calls.push(u));
   stripEnrollmentFragment({ pathname: '/enroll', search: '?live=1', hash: '#x=1' }, (u) => void calls.push(u));
   assert.deepEqual(calls, []);
+});
+
+test('O-T37 ① 화면 진입: code 칸이 있으면 ?live=1 없이도 실제 연결이고 입력 칸 초깃값은 그 코드다', () => {
+  const { enrollScreenEntry } = link();
+  assert.deepEqual(enrollScreenEntry({ live: false, hash: '#code=KDTW-BMQX-HLRP' }), { live: true, initialCode: 'KDTW-BMQX-HLRP' });
+  assert.deepEqual(enrollScreenEntry({ live: true, hash: '#code=KDTW-BMQX-HLRP' }), { live: true, initialCode: 'KDTW-BMQX-HLRP' });
+  // 값이 깨진 code 칸도 실제 연결이고 칸은 빈다
+  assert.deepEqual(enrollScreenEntry({ live: false, hash: '#code=%E0%A4%A' }), { live: true, initialCode: '' });
+});
+
+test('O-T37 ① 화면 진입: code 칸이 없으면 live 값을 따르고 입력 칸은 비어 있다', () => {
+  const { enrollScreenEntry } = link();
+  assert.deepEqual(enrollScreenEntry({ live: false, hash: '' }), { live: false, initialCode: '' });
+  assert.deepEqual(enrollScreenEntry({ live: false, hash: '#x=1' }), { live: false, initialCode: '' });
+  assert.deepEqual(enrollScreenEntry({ live: true, hash: '' }), { live: true, initialCode: '' });
 });
 
 test('O-T37 ① 기기 등록 요청은 자격 증명 없이(credentials omit) JSON 본문과 DPoP 증명만 보낸다', async () => {
@@ -68,6 +115,7 @@ test('O-T37 ① 기기 등록 요청은 자격 증명 없이(credentials omit) J
 });
 
 // ScannerApi(client.ts)는 node --test의 형식 지우기만으로 읽히지 않아(매개변수 속성) 같은 증명 함수 dpopProof로 본다.
+// ScannerApi.uploadScans·credentials: 'omit'은 업로드 큐가 생기는 F-05-4에서 다시 본다(시험 리뷰 1 TR-14, 계획 정리 목록).
 // 업로드 경로의 실제 서버 통과(같은 키의 새 증명 셋이 모두 200)는 services/ticket-svc/test-int/scanner-f055.int.test.ts가 본다.
 test('O-T37 ⑧ 같은 기기 키로 만든 업로드 증명 두 개는 jti가 서로 다르고 헤더 jwk 지문이 그 기기 키다', async () => {
   const key = await generateDpopKey();

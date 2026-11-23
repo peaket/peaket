@@ -361,24 +361,27 @@ describe('DPoP 경계(offline-gate §6.1 iat ±5분·jti 10분, O-T37 ②③④�
   test('O-T37 ④ 서버 시각 − iat가 +300,000ms면 통과, +300,001ms면 401이고, −300,000ms면 통과, −300,001ms면 401이다', async () => {
     // 시계를 iat보다 300,001ms 앞(증명이 미래)에서 시작해 1ms씩 경계를 넘긴다
     const b = await boot({ now: T0 - 300_001 });
-    const at = async () => (await b.get(staffHeaders(await proofOf(b.key, { iat: IAT }), b.key.jkt))).statusCode;
-    b.rejections.length = 0;
-    expect(await at()).toBe(401); // −300,001ms
+    const at = async () => {
+      const r = await b.get(staffHeaders(await proofOf(b.key, { iat: IAT }), b.key.jkt));
+      return r.statusCode === 401 ? { status: 401, error: r.headers['www-authenticate'] } : { status: r.statusCode };
+    };
+    const rejected = { status: 401, error: 'DPoP error="invalid_dpop_proof"' };
+    expect(await at()).toEqual(rejected); // −300,001ms
     b.clock.advance(1);
-    expect(await at()).toBe(200); // −300,000ms
+    expect(await at()).toEqual({ status: 200 }); // −300,000ms
     b.clock.advance(600_000);
-    expect(await at()).toBe(200); // +300,000ms
-    b.rejections.length = 0;
+    expect(await at()).toEqual({ status: 200 }); // +300,000ms
     b.clock.advance(1);
-    expect(await at()).toBe(401); // +300,001ms
+    expect(await at()).toEqual(rejected); // +300,001ms
+    expect(b.rejections).toEqual(['iat', 'iat']);
   });
 
-  test('O-T37 ④ 6분 어긋난 증명은 앞뒤 모두 401이고 기기 원장을 찾지 않는다', async () => {
+  test('O-T37 ④ 6분 어긋난 증명은 앞뒤 모두 401이고 이름표는 iat다', async () => {
     const b = await boot();
     const past = await b.get(staffHeaders(await proofOf(b.key, { iat: IAT - 360 }), b.key.jkt));
     const future = await b.get(staffHeaders(await proofOf(b.key, { iat: IAT + 360 }), b.key.jkt));
     expect([past.statusCode, future.statusCode]).toEqual([401, 401]);
-    expect(b.devices.lookups).toBe(0);
+    expect(b.rejections).toEqual(['iat', 'iat']);
   });
 
   test('O-T37 ② 같은 증명을 299초 뒤 다시 보내면 iat 창 안이어도 jti로 401이고, jti는 10분(600,000ms)으로 맡긴다', async () => {
@@ -401,6 +404,7 @@ describe('DPoP 경계(offline-gate §6.1 iat ±5분·jti 10분, O-T37 ②③④�
     const wrongMethod = await b.get(staffHeaders(await proofOf(b.key, { htm: 'PUT' }), b.key.jkt));
     const wrongUrl = await b.get(staffHeaders(await proofOf(b.key, { htu: `https://${HOST}/v1/f055/lead` }), b.key.jkt));
     expect([wrongMethod.statusCode, wrongUrl.statusCode]).toEqual([401, 401]);
+    expect(b.rejections).toEqual(['htm', 'htu']);
   });
 
   test('O-T37 ⑤ 기기 A의 토큰(X-User-Jkt=A)을 기기 B 키 증명과 보내면 ath가 맞아도 401이다 [ASVS v5.0.0-10.3.5]', async () => {
@@ -410,7 +414,7 @@ describe('DPoP 경계(offline-gate §6.1 iat ±5분·jti 10분, O-T37 ②③④�
     const r = await b.get(staffHeaders(await proofOf(deviceB, { ath: ATH }), b.key.jkt));
     expect(r.statusCode).toBe(401);
     expect(r.headers['www-authenticate']).toBe('DPoP error="invalid_dpop_proof"');
-    expect(b.sessions.calls).toBe(0);
+    expect(b.rejections).toEqual(['cnf']);
   });
 });
 
@@ -481,13 +485,14 @@ describe('판정에 닿지 못하면 닫는다(offline-gate §6.6, 장애 주입
     expectUnavailable(await b.get(staffHeaders(await proofOf(b.key), b.key.jkt)));
     expect(b.devices.lookups).toBe(1);
     expect(b.sessions.calls).toBe(0);
+    expect(b.rejections).toEqual(['unavailable']);
   });
 
   test('O-T37 ⑨ jti 저장소가 던지면 503이고 통과하지 않는다', async () => {
     const b = await boot();
     b.replay.fail = true;
     expectUnavailable(await b.get(staffHeaders(await proofOf(b.key), b.key.jkt)));
-    expect(b.devices.lookups).toBe(0);
+    expect(b.rejections).toEqual(['unavailable']);
   });
 
   test('O-T37 ⑨ 마지막 연락 시각(touch)이 던져도 통과하고 이름표를 남기지 않는다', async () => {

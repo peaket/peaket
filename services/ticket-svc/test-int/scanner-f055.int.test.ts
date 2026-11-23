@@ -18,8 +18,10 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { GrpcTicketScannerDevices } from '../../ops-svc/src/modules/scanner-devices/adapters/grpc-ticket-scanner-devices.js';
 import { migrateTicket } from '../scripts/migrate.mjs';
 import { DrizzleScannerShiftStore } from '../src/modules/scanner/adapters/db/drizzle-scanner-shift-store.js';
+import { RedisEnrollmentCodeStore } from '../src/modules/scanner/adapters/redis-enrollment-code-store.js';
 import { enrollmentCodeHash } from '../src/modules/scanner/domain/scanner-device.js';
 import { start, type StartedService } from '../src/start.js';
+import { enrollmentCodeStoreContract } from '../test/enrollment-code-store-contract.js';
 import { startPostgres, type PostgresContainer } from './postgres.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
@@ -44,6 +46,8 @@ const identity = {
   checks: [] as { scanner_session_id: string; device_id: string }[],
   terminates: [] as { device_id: string; reason: string }[],
   terminateFails: false,
+  /** 이 세션 ID로 묻는 CheckScannerSession에는 답하지 않는다(콜백을 부르지 않음, 시험 리뷰 1 TR-03) */
+  hang: new Set<string>(),
   server: undefined as grpc.Server | undefined,
   port: 0,
 };
@@ -55,6 +59,7 @@ async function startIdentityStandIn(): Promise<void> {
   server.addService(pkg.ScannerSessionCheckService!.service, {
     CheckScannerSession: (call: grpc.ServerUnaryCall<{ scanner_session_id: string; device_id: string }, unknown>, cb: grpc.sendUnaryData<unknown>) => {
       identity.checks.push({ scanner_session_id: call.request.scanner_session_id, device_id: call.request.device_id });
+      if (identity.hang.has(call.request.scanner_session_id)) return; // 답하지 않는다
       cb(null, identity.answers.get(call.request.scanner_session_id) ?? { valid: false });
     },
     TerminateScannerSessions: (call: grpc.ServerUnaryCall<{ device_id: string; reason: string }, unknown>, cb: grpc.sendUnaryData<unknown>) => {
@@ -166,6 +171,16 @@ async function rejections(reason: string): Promise<number> {
   return 0;
 }
 
+/** 관리 포트 /metrics의 scanner_auth_rejections_total{service="ticket-svc"} 모든 이유 줄의 합(이중 셈을 잡는다, 시험 리뷰 1 TR-13) */
+async function rejectionsTotal(): Promise<number> {
+  const text = await (await fetch(`http://127.0.0.1:${managementPort}/metrics`)).text();
+  let sum = 0;
+  for (const line of text.split('\n')) {
+    if (line.startsWith('scanner_auth_rejections_total{') && line.includes('service="ticket-svc"')) sum += Number(line.slice(line.lastIndexOf(' ') + 1));
+  }
+  return sum;
+}
+
 /** 관제 등록(ops-svc gRPC) → 공개 등록(PWA 출처·DPoP). 기기 ID·키·등록 코드 */
 let ipSeq = 0;
 async function enrolledDevice(name: string, ip = `10.55.0.${++ipSeq}`): Promise<{ deviceId: string; key: Key }> {
@@ -258,11 +273,14 @@ beforeAll(async () => {
   // 시퀀스는 거래 되돌림과 상관없이 오르므로 '한 번만'이 지켜진다. 실패는 일반 DB 오류(키 겹침 23505가 아니다)다.
   await database.pool.query(`
     create table f055_fault_target (device_id uuid primary key);
+    create table f055_fault_cfg (delay_ms int not null);
+    insert into f055_fault_cfg values (0);
     create sequence f055_fault_seq;
     create function f055_fail_bind() returns trigger language plpgsql as $$
     begin
       if new.id in (select device_id from f055_fault_target) and new.credential_thumbprint is distinct from old.credential_thumbprint then
         if nextval('f055_fault_seq') <= 1 then
+          perform pg_sleep((select delay_ms from f055_fault_cfg) / 1000.0);
           raise exception 'f055 fault: connection terminated unexpectedly';
         end if;
       end if;
@@ -372,13 +390,15 @@ describe('F-05-5 실제 ticket-svc(start) 스캐너 기기 등록·증명·세�
     await place(deviceId);
     const s = session(randomUUID());
     const rows0 = await scanRows();
-    const [htm0, htu0] = [await rejections('htm'), await rejections('htu')];
+    const [htm0, htu0, total0] = [await rejections('htm'), await rejections('htu'), await rejectionsTotal()];
     const m = await uploadWithToken(key, s, { htm: 'PUT' });
     const u = await uploadWithToken(key, s, { htu: `https://${API_HOST}/v1/scanner/shift` });
     expect([m.status, u.status]).toEqual([401, 401]);
     expect([m.headers['www-authenticate'], u.headers['www-authenticate']]).toEqual(['DPoP error="invalid_dpop_proof"', 'DPoP error="invalid_dpop_proof"']);
     expect(await scanRows()).toBe(rows0);
     expect([await rejections('htm'), await rejections('htu')]).toEqual([htm0 + 1, htu0 + 1]);
+    // 거절 둘에 이름표 전체 합계도 정확히 2만 오른다(한 거절을 두 이유로 세지 않는다, O-T37 ⑨)
+    expect(await rejectionsTotal()).toBe(total0 + 2);
   });
 
   test('O-T37 ④ iat가 서버 시각과 6분 어긋난 증명(앞·뒤)의 업로드는 401이고 기록이 저장되지 않는다', async () => {
@@ -438,6 +458,22 @@ describe('F-05-5 실제 ticket-svc(start) 스캐너 기기 등록·증명·세�
     expect(await scanRows()).toBe(rows0 + 3);
   });
 
+  test('O-T37 ⑩ 같은 증명(같은 jti)으로 기기 인증 업로드 두 번을 동시에 보내면 하나만 200이고 하나는 401(이름표 jti)이며 기록은 한 묶음만 저장된다', async () => {
+    const { deviceId, key } = await enrolledDevice('동문-07B');
+    await place(deviceId);
+    const rows0 = await scanRows();
+    const jti0 = await rejections('jti');
+    const proof = await proofOf(key, { htm: 'POST', path: '/v1/scanner/scans' });
+    const batch = [scan(randomUUID()), scan(randomUUID())];
+    const [a, b] = await Promise.all([uploadDeviceOnly(key, batch, proof), uploadDeviceOnly(key, batch, proof)]);
+    expect([a.status, b.status].sort()).toEqual([200, 401]);
+    const lost = a.status === 401 ? a : b;
+    expect(lost.headers['www-authenticate']).toBe('DPoP error="invalid_dpop_proof"');
+    expect((a.status === 200 ? a : b).body.acceptedIds).toEqual(batch.map((x) => x.id));
+    expect(await scanRows()).toBe(rows0 + 2);
+    expect(await rejections('jti')).toBe(jti0 + 1);
+  });
+
   test('O-T21 ① 해제된 세션(identity가 무효로 답함)의 토큰은 근무 준비·목록·변경분·이상 표시·배치·업로드 모두 401 invalid_token이고 기록이 저장되지 않는다 [ASVS v5.0.0-7.2.1]', async () => {
     const { deviceId, key } = await enrolledDevice('동문-08');
     await place(deviceId);
@@ -483,6 +519,10 @@ describe('F-05-5 실제 ticket-svc(start) 스캐너 기기 등록·증명·세�
   test('O-T37 ⑦ ops-svc gRPC로 폐기하면 identity 세션 종료가 실패해도 그 기기의 다음 업로드는 403 device-revoked이고 기록이 저장되지 않는다', async () => {
     const { deviceId, key } = await enrolledDevice('동문-10');
     await place(deviceId);
+    // 폐기 직전: 같은 기기·세션으로 근무 준비와 기기 인증만 업로드가 통과한다(기기 조회를 잠깐 캐시하는 구현을 잡는다, 시험 리뷰 1 TR-05)
+    const s = session(randomUUID());
+    expect((await call('GET', '/v1/scanner/shift', await staffHeaders(key, 'GET', '/v1/scanner/shift', s))).status).toBe(200);
+    expect((await uploadDeviceOnly(key, [scan(randomUUID())])).status).toBe(200);
     identity.terminateFails = true;
     const calls0 = identity.terminates.length;
     try {
@@ -493,17 +533,20 @@ describe('F-05-5 실제 ticket-svc(start) 스캐너 기기 등록·증명·세�
     }
     // 장애 주입이 실제로 닿았다(대역이 종료 요청을 받고 실패로 답했다)
     expect(identity.terminates.slice(calls0)).toEqual([{ device_id: deviceId, reason: 'DEVICE_REVOKED' }]);
+    // 곧바로(세션 캐시 5초 안): 업로드·근무 준비·토큰 업로드가 모두 403 device-revoked다
     const rows0 = await scanRows();
     const n0 = await rejections('device_revoked');
     const r = await uploadDeviceOnly(key, [scan(randomUUID())]);
     expect(r.status).toBe(403);
     expect(problemType(r)).toBe('https://peaket.example/problems/device-revoked');
-    const s = session(randomUUID());
+    const shift = await call('GET', '/v1/scanner/shift', await staffHeaders(key, 'GET', '/v1/scanner/shift', s));
+    expect(shift.status).toBe(403);
+    expect(problemType(shift)).toBe('https://peaket.example/problems/device-revoked');
     const t = await uploadWithToken(key, s);
     expect(t.status).toBe(403);
     expect(problemType(t)).toBe('https://peaket.example/problems/device-revoked');
     expect(await scanRows()).toBe(rows0);
-    expect(await rejections('device_revoked')).toBe(n0 + 2);
+    expect(await rejections('device_revoked')).toBe(n0 + 3);
   });
 });
 
@@ -566,8 +609,83 @@ describe('O-T42 ⑤ 실제 ticket-svc(start): 키 묶기 저장의 일시 오류
   });
 });
 
+describe('O-T42 실제 ticket-svc(start): 동시 등록과 되살림 중 새 코드 발급(실제 PostgreSQL·Valkey)', () => {
+  test('O-T42 ⑥ 같은 코드로 서로 다른 기기 키 둘이 동시에 등록하면 하나는 201·하나는 410이고, 묶인 키는 201 쪽이며 진 쪽은 실패 1로 센다', async () => {
+    const reg = await ops.register({ requestId: randomUUID(), name: `동문-14-${RUN}`, promoterId: PROMOTER, actedBy: OPERATOR });
+    const ip = '10.79.0.1';
+    const [k1, k2] = [await keyOf(), await keyOf()];
+    const [a, b] = await Promise.all([enroll(k1, reg.enrollmentCode!, { ip }), enroll(k2, reg.enrollmentCode!, { ip })]);
+    expect([a.status, b.status].sort()).toEqual([201, 410]);
+    const winner = a.status === 201 ? k1 : k2;
+    const row = (await database.pool.query('select credential_thumbprint from scanner_device where id = $1', [reg.device.deviceId])).rows[0];
+    expect(Buffer.from(row.credential_thumbprint).toString('base64url')).toBe(winner.jkt);
+    // 진 쪽이 실패 1이므로 틀린 코드 9번까지 410, 그다음(실패 10번 뒤) 요청이 429다
+    const other = await keyOf();
+    for (let i = 0; i < 9; i++) expect((await enroll(other, 'BCDF-GHJK-LMNP', { ip })).status, `실패 ${i + 2}번째`).toBe(410);
+    expect((await enroll(other, 'BCDF-GHJK-LMNP', { ip })).status).toBe(429);
+  });
+
+  test('O-T42 ⑤ 코드를 꺼낸 뒤 묶기 저장이 실패하기 전에 운영자가 새 코드를 발급하면 옛 코드는 되살리지 않고(410) 새 코드만 201이다', async () => {
+    const reg = await ops.register({ requestId: randomUUID(), name: `동문-15-${RUN}`, promoterId: PROMOTER, actedBy: OPERATOR });
+    const codeKey = `scanner:enroll:${enrollmentCodeHash(reg.enrollmentCode!)}`;
+    // 묶기 UPDATE가 1.5초 붙잡혔다가 실패한다(그 사이 새 코드 발급이 끼어든다)
+    await database.pool.query('insert into f055_fault_target (device_id) values ($1) on conflict do nothing', [reg.device.deviceId]);
+    await database.pool.query('update f055_fault_cfg set delay_ms = 1500');
+    await database.pool.query('alter sequence f055_fault_seq restart with 1');
+    const ip = '10.80.0.1';
+    const key = await keyOf();
+    try {
+      let settled = false;
+      const pending = enroll(key, reg.enrollmentCode!, { ip }).finally(() => {
+        settled = true;
+      });
+      // 조건으로 기다린다: 코드 키가 꺼내져 사라질 때까지(고정 대기 아님)
+      await expect.poll(async () => Number(await redis.command(['EXISTS', codeKey], { key: codeKey })), { timeout: 5_000, interval: 20 }).toBe(0);
+      const fresh = await ops.reissue({ requestId: randomUUID(), deviceId: reg.device.deviceId, actedBy: OPERATOR });
+      // 새 코드 발급이 되살림보다 먼저 끝났다(등록 응답이 아직 오지 않았다): 차례가 겨룸 그대로다
+      expect(settled).toBe(false);
+      const first = await pending;
+      expect(first.status).toBe(503);
+      expect(problemType(first)).toBe('https://peaket.example/problems/scanner-auth-unavailable');
+      expect(Number((await database.pool.query('select last_value from f055_fault_seq')).rows[0].last_value)).toBe(1);
+      const old = await enroll(key, reg.enrollmentCode!, { ip });
+      expect(old.status).toBe(410);
+      expect(await redis.command(['EXISTS', codeKey], { key: codeKey })).toBe(0);
+      expect((await enroll(key, fresh.enrollmentCode!, { ip })).status).toBe(201);
+    } finally {
+      await database.pool.query('update f055_fault_cfg set delay_ms = 0');
+    }
+  });
+});
+
+// TR-02: 운영 Redis 어댑터에 메모리 어댑터와 같은 take·restore 계약 묶음을 돌린다(실제 Valkey, 실제 시계)
+enrollmentCodeStoreContract('실제 Valkey', () => ({ store: new RedisEnrollmentCodeStore(redis), now: () => Date.now() }), { fakeClock: false });
+
 describe('판정에 닿지 못하면 닫는다(offline-gate §6.6, identity-svc 멈춤 장애 주입)', () => {
-  test('O-T37 ⑨ identity 대역을 멈추면 캐시 없는 세션의 업로드는 1초 [가정] 한도 안에 503 scanner-auth-unavailable(Retry-After 1)이고 200이 없으며 기록이 저장되지 않는다 [ASVS v5.0.0-16.3.4]', async () => {
+  test('O-T37 ⑨ identity가 답하지 않으면 세션 확인 기한(1초 [가정]) 뒤 1,000ms 이상 1,400ms 미만에 503 scanner-auth-unavailable(Retry-After 1)이고 기록이 저장되지 않는다 [ASVS v5.0.0-7.2.1]', async () => {
+    const { deviceId, key } = await enrolledDevice('동문-16');
+    await place(deviceId);
+    const s = session(randomUUID());
+    identity.hang.add(s);
+    const unavailable0 = await rejections('unavailable');
+    const rows0 = await scanRows();
+    const checks0 = identity.checks.filter((c) => c.scanner_session_id === s).length;
+    // real-time: start()는 실제 시계와 실제 gRPC 기한을 쓴다. 기한을 재려면 실제 시간이 흘러야 한다 F-05-5
+    const t0 = performance.now();
+    const r = await uploadWithToken(key, s);
+    const elapsed = performance.now() - t0;
+    expect(r.status).toBe(503);
+    expect(problemType(r)).toBe('https://peaket.example/problems/scanner-auth-unavailable');
+    expect(r.headers['retry-after']).toBe('1');
+    expect(elapsed).toBeGreaterThanOrEqual(1_000);
+    expect(elapsed).toBeLessThan(1_400);
+    // 대역이 실제로 그 요청을 받았다(장애가 닿았다)
+    expect(identity.checks.filter((c) => c.scanner_session_id === s).length).toBeGreaterThan(checks0);
+    expect(await scanRows()).toBe(rows0);
+    expect(await rejections('unavailable')).toBe(unavailable0 + 1);
+  });
+
+  test('O-T37 ⑨ identity 대역을 멈추면(연결 거절) 캐시 없는 세션의 업로드는 1초 [가정] 한도 안에 503 scanner-auth-unavailable(Retry-After 1)이고 200이 없으며 기록이 저장되지 않는다 [ASVS v5.0.0-16.3.4]', async () => {
     const { deviceId, key } = await enrolledDevice('동문-13');
     await place(deviceId);
     const s = session(randomUUID());

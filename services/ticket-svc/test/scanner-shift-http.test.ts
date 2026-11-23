@@ -246,6 +246,8 @@ describe('등록 코드 재발급과 IP 실패 제한 [GAT-170]', () => {
     const r = await devices.issueCode({ deviceId });
     expect(r.enrollmentCode).toMatch(/^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/);
     expect(r.enrollmentCode).not.toBe(created.enrollmentCode);
+    // 옛 코드는 무효(410 USED)이고 새 코드는 쓸 수 있다(시험 리뷰 1 TR-10)
+    await expect(devices.enroll({ code: created.enrollmentCode, jkt: 'E'.repeat(43) })).rejects.toMatchObject({ reason: 'USED' });
     await devices.revoke({ deviceId, reason: '분실' });
     await expect(devices.issueCode({ deviceId })).rejects.toBeInstanceOf(ScannerDeviceInactive);
   });
