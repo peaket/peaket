@@ -883,6 +883,7 @@
 | R-791 | 관제 실시간 표(ops-rt)·심장 박동·rt 표와 뷰·ops-svc 0.5초 조회·파트너 판매 현황 1분 조회·KPI 패널이 코드에 없었고, gw-partner가 live-snapshot을 처리기 없는 core-svc로 보냈다 | services/ops-rt·rt-pulse, data/clickhouse/rt, services/ops-svc realtime-table·live 위젯 키, docs/api openapi, packages/contracts·api-client 생성물, deploy/gateways gw-partner, apps/console-host 대시보드, docs/features/control-tower.md, .github/workflows/ci-node.yml | 원시 적재와 조회 시점 중복 제거, 신선도·Degraded·끊김, 파트너 1분 값, 위젯 rt-sales.summary | 해결. 작업자 값 파일(RV220-8)·경보 규칙은 넘김 |
 | R-790 | OPS-310 명령 6 결제 갈래 | ops-svc·payment-svc 새 제어 모듈·admission-ctrl·control.proto·payment.proto·메시·ADR-0366 | F-02-2 역할 다섯 | 끝 |
 | R-792 | 분석 원본 적재 작업자와 브론즈 표가 코드에 없어 분석 저장소가 비어 있었다 | services/analytics-ingest, data/clickhouse/bronze, .github/workflows/ci-node.yml, tools/ci/brief.mjs | 회차 가명·허용 목록·조사 칸 버리기·쓰기 뒤 커밋·거절 위치·커버리지 대조·다시 적재 | 해결. inv 두 갈래 권한 분리는 포렌식 동결 |
+| R-793 | 추가 검증 이의가 CS 처리함 건으로 들어와도 인정·기각 행동과 queue·trust·identity 반영이 없었다 | docs/BUILD_ORDER.md, docs/review/plans/F-06-7.md, docs/adr/0364-cs-inbox-business-days-deadlines-and-assignment.md, docs/features/bot-defense.md, docs/data.md, docs/api/openapi.yaml, services/ops-svc, apps/console-host | 계획→시험(실패 확인 ops 82/84·console 15/15·통합 17/17)→시험 리뷰 1(높음 2·중간 7)→반영→리뷰 2(TR-20)→고정→구현, ops 단위·console 196·ops 통합 232/233(J-T36 ④ 흔들림), ledger --require 11 | 닫힘 |
 
 ## 4. 숫자 일치표
 
