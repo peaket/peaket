@@ -8,6 +8,7 @@
 - dbt 프로젝트(F-04-4, wbs 4.3.5): `dbt_project.yml`, `models/`(staging·silver·gold), `macros/`, `seeds/`(고정 차원), `tests/`(A-T21 등), `tests_int/`(실제 ClickHouse 통합 시험)
 - 지표 사전·결정 규칙(F-04-5, analytics §6·§7): `models/metrics/metrics.yml`(지표 사전)·`rules.yml`(결정 규칙), 판마다 쌓는 `metric_value`·`quality_check`·`fct_rule_check`(F12)와 현재 판만 읽는 지표 뷰 `mtr_*`. 마감 실행기가 바깥 품질 검사 실패를 `--vars '{quality_failed: [<지표 코드>]}'`로 넘긴다
 - 마감 실행기(F-04-6, analytics §3.2·§4·§7): `services/close-runner`가 R0~R3 예정을 찾아 `--vars`로 회차·판·단계를 넘기고, R3이면 정산서와 F15·F8을 대조한 뒤 현재 판을 바꾼다. `macros/close.sql`은 R2 판의 온세일 사실(`onsale_run`)과 앞 판의 오래된 날짜별 사실·차원(`carry_run`·`carry_before`)을 잇는다. 기준 자료 파일은 `ref-event/`·`ref-seat-map/`에서 실어 `bronze.brz_intake_log`에 남긴다
+- 공연 리포트·파트너 판매 요약(F-04-7, analytics §8): `models/metrics/mtr_event_report.sql`(현재 판의 지표 카드·결정 규칙 판정·품질)과 `models/metrics/partner_sales_gold.sql`(R3 현재 판의 판매량·매진 시각·등급별 판매·환불·판매 곡선, 작은 칸 합치기). ops-svc 리포트 생성기와 파트너 API가 읽는다
 
 ## dbt 실행
 
