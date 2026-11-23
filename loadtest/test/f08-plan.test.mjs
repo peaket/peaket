@@ -127,11 +127,19 @@ test('F088-1 ④ K2 TLS 끔 짝은 1회이고 판정에 쓰지 않는다고 적�
   assert.ok(x.after.some((a) => isCluster(a, 'v1') && a.join(' ').includes('--redis-tls on')), `${x.run.key}: TLS 켬으로 되돌리는 명령이 없다`);
 });
 
-test('F088-1 ⑤ MSR-020 단계 올리기는 K7 ① 뒤·K7 ② 앞에 있다(F-08-8 6.2 차례)', () => {
+/** 창 1 맨 앞의 리허설 실행(감독 결정, 키 `w1-` 또는 묶음 '리허설'). 본 측정이 아니라 MSR-020 자리 판정에서 뺀다(시험 이의 TO-1) */
+const isRehearsal = (run) => run.key.startsWith('w1-') || run.group === '리허설';
+
+test('F088-1 ⑤ MSR-020 단계 올리기(리허설 뺀 본 측정)는 K7 ① 뒤·K7 ② 앞에 있다(F-08-8 6.2 차례)', () => {
   const c = classify(readPlan());
   const lastK7a = Math.max(...c.k7a.map((x) => x.index));
   const firstK7b = Math.min(...c.k7b.map((x) => x.index));
-  for (const x of c.entry) assert.ok(x.index > lastK7a && x.index < firstK7b, `${x.run.key}(${x.index})가 K7 ①(${lastK7a})과 K7 ②(${firstK7b}) 사이가 아니다`);
+  const main = c.entry.filter((x) => !isRehearsal(x.run));
+  assert.ok(main.length > 0, '리허설을 빼면 MSR-020 본 측정 실행이 없다');
+  // 리허설은 창 맨 앞(K 측정보다 앞)에만 둔다
+  const firstK = Math.min(...[...c.k1, ...c.k2hot, ...c.k2spread, ...c.k7a].map((x) => x.index));
+  for (const x of c.entry.filter((y) => isRehearsal(y.run))) assert.ok(x.index < firstK, `리허설 ${x.run.key}(${x.index})가 첫 K 측정(${firstK})보다 뒤에 있다`);
+  for (const x of main) assert.ok(x.index > lastK7a && x.index < firstK7b, `${x.run.key}(${x.index})가 K7 ①(${lastK7a})과 K7 ②(${firstK7b}) 사이가 아니다`);
 });
 
 test('F088-1 ⑥ K1·K2·K7 실행은 모두 불변식 검사와 장부 기록을 하고 실행 ID 끝에 -f088 표시가 있다(F-08-8 6.1)', () => {
