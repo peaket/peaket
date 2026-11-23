@@ -60,3 +60,8 @@
 - E-02 [가정]으로 남은 셋: `iat` 꼴 다른 꼴 허용 여부, 공개 셀러 상태 넷과 PEAKET `PENDING`·`REJECTED`, HMAC 키 인코딩(문서에 없음).
 - 흔들림 후보(부하 중 단위·통합 시간 초과, 단독 통과): payment `settlement-business-calendar`·`settlement-notify-dispute`·`settlement-toss-seller`·`tenant-rate-limit-wiring`·`payment-checkout` P-T26·`payment-sub-provider` P-T46 ④·`payment-entry-pause-judge` P-T43·`payment-grpc` P-T53, ops `cs-inbox-screen-link` R-T51 ①·J-T35 ⑦.
 - 작업 폴더의 `apps/web/.next/types` 옛 빌드 산출물이 typecheck를 한 번 깨뜨렸다(gitignore된 것, 지우면 통과).
+
+## FIX-ops-adjust-race(2026-11-23)
+
+- 시험 리뷰 낮음: TR-01 `[200,409]` 길(approval-conflict·approval-not-pending)을 차례 고정한 시험이 없다. TR-02 갈고리 안 expect 실패가 5xx로 바뀌어 실패 까닭이 흐려진다. TR-03 `expectSettledOnce`의 approver_id 비교는 같은 행 값이라 늘 참(requester_id만 실제로 봄). TR-04 같은 EXECUTING 겹침을 결정 시험은 J-T36 ④, 단위는 J-T36 ⑨ ②로 부른다 — 정본 §13 J-T36 ⑨에 한 줄 더하고 번호를 맞춘다. TR-05 실패 확인 기록 없음(구현이 이미 RV-04대로).
+- 같은 꼴 `[200,409]` 단언이 있는 다른 모듈(ops approval-request·payout-approval·command-lifecycle·event-cancellations)은 까닭이 달라 그대로 두었다.
