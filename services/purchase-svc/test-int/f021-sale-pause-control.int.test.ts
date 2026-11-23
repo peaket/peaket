@@ -26,6 +26,9 @@ import { startValkey, type ValkeyContainer } from './valkey.js';
 
 const DAY = 86_400_000;
 const IDLE_MS = 5 * 60_000;
+/** purchase-svc 생산자 스키마 ID(시작할 때 PEAKET_SCHEMA_IDS_FILE이 필요하다, F-04-2·ADR-0357) */
+const SCHEMA_IDS = { 'trade.orders-peaket.trade.OrderEvent': 23, 'telemetry.behavior-peaket.telemetry.BehaviorSignal': 29 };
+const schemaIdsFile = () => join(seatDir, 'schema-ids.json');
 const ADMISSION = newKey('it-f021-adm');
 const ecdh = (() => {
   const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -98,6 +101,7 @@ async function startPod(name: string, databaseUrl: string): Promise<Pod> {
       PEAKET_ADMISSION_ISSUER: 'https://queue.peaket.example',
       PEAKET_PURCHASE_ECDH_KEY: JSON.stringify(ecdh.jwk),
       PEAKET_SEATMAP_DIR: seatDir,
+      PEAKET_SCHEMA_IDS_FILE: schemaIdsFile(),
       PEAKET_PAYMENT_GRPC_ADDR: '127.0.0.1:1',
       PEAKET_TICKET_GRPC_ADDR: '127.0.0.1:1',
       PEAKET_PURCHASE_CONTROL_GRPC_PORT: String(controlPort),
@@ -130,6 +134,7 @@ beforeAll(async () => {
   await migratePurchase(brokenUrl);
   redis = await createHotRedis({ url: valkey.url });
   seatDir = await mkdtemp(join(tmpdir(), 'peaket-f021-'));
+  await writeFile(schemaIdsFile(), JSON.stringify(SCHEMA_IDS));
   const seats = new RedisSeatStore(redis);
   for (const e of Object.values(E)) {
     await writeFile(join(seatDir, `${e}.json`), JSON.stringify(layoutFile()));
