@@ -97,4 +97,5 @@ templates:
   - /etc/alertmanager/templates/*.tmpl
 
 # 해제 알림이 다시 오지 않는 경보의 묶음을 정리하는 시간(Alertmanager 기본값과 같은 5분).
-resolve_timeout: 5m
+global:
+  resolve_timeout: 5m
