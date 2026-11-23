@@ -410,7 +410,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | 홀드 `Hold` | `POST …/holds` 201 | `holdId`, `seatIds`, `expiresAt`, `extendable`, `assignResult` | 예매 흐름 기계 | 메모리(새로고침 때 다시 읽는 경로는 계약에 없다, §6.2) |
 | 주문 `Order`, 결제 시도 `PaymentAttempt` | `POST /v1/orders`, `…/payments` | `orderId`, `amount`, `status` / `pg`, `switched`, `checkout` | 결제 흐름 기계 | 메모리, 주문 ID는 복귀 주소의 `order` 쿼리에 담는다 |
 | 결제 상태 `PaymentStatus` | `GET …/payment-status`(롱 폴링) | `status`(8가지), `virtualAccount`, `reason`, `pg` | 결제 결과 기계(§3.6) | 메모리 |
-| 티켓 `Ticket` | `GET /v1/tickets` | `ticketId`, `eventId`, `seatLabel`, `gateZone`, `status`, 기한들. 표시 값(공연명·장소·시각)은 계약에 없다(docs/design/d5 §1.6 25번) | 월렛 | IndexedDB(§3.7) |
+| 티켓 `Ticket` | `GET /v1/tickets` | `ticketId`, `eventId`, `gateZone`, `status`, 기한들. 표시 값(공연명·장소·시각) 칸은 계약에 있지만 ticket-svc는 채우지 않고, 화면이 회차 공개 요약 `GET /v1/events/{eventId}`로 채운다(docs/features/offline-gate.md §2 '월렛 목록 서버', 감독 결정 2026-11-23) | 월렛 | IndexedDB(§3.7) |
 | 양도 `TransferOffer`, 취소 견적 `CancellationQuote` | 양도·취소 경로 | 상태·기한·공제율·환급액 | 양도·취소 화면 | 메모리 |
 | 본인확인 `VerificationStart`·`VerificationResult` | 본인확인 경로 | `verificationId`, `window`, `status`, `next` | 본인확인 창 관리자 | sessionStorage(진행 표시만) |
 | 파트너 실시간 `LiveSnapshot` | REST 1분 주기 조회(§4.4.3. 2026-10-28 SSE에서 바꿈, 기술 검토 낮음-024) | 판매·잔여·대기·구역별 잔여·분당 판매(최근 180분 [가정]) | 판매 현황 화면 | 메모리(받을 때마다 통째로 바꾼다) |
@@ -742,6 +742,15 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
   - 다시 확인: 403 `reauth-required`면 키를 두고 '다시 확인 필요'를 보인다. 재인증 시트(CMP-064)로 이어 다시 보내는 것은 BUILD_ORDER GAT-020 몫이다. 403의 세 이름(`reauth-required`·`reissue-required`·`reissue-at-booth`)과 재인증 왕복·`reason`은 ADR-0363 결정 2·3이다(추천 적용 2026-11-23). 토큰 갱신 뒤에도 401이면 로그인 화면으로 보내고 키는 둔다.
   - 거절: 404·422·400과 그 밖의 403이면 이 기기의 키를 지우고 등록 전 상태로 돌아간다.
   - 등록된 키: '등록됨' 키는 이 화면에서 지우거나 새로 만들지 않는다. 다른 휴대폰으로 옮기기·다시 받기는 GAT-020 몫이다.
+- **월렛 목록 세부(감독 결정 2026-11-23, FIX-wallet-tickets)**: 판정 시험은 docs/features/offline-gate.md O-T48이고, 서버 쪽 규칙은 같은 문서 §2 '월렛 목록 서버'다.
+  - 받기: 팬 API 주소(`ORIGINS.api`)가 있으면 화면이 열릴 때, [ 지금 동기화 ]를 누를 때, `online` 사건이 올 때 `GET /v1/tickets?limit=100`을 쿠키와 함께 부르고, 응답의 `nextCursor`를 다음 요청에 그대로 실어 null이 될 때까지 받는다(ADR-0081). 앞 쪽과 같은 커서가 다시 오면 더 부르지 않고 실패로 본다. 401이면 토큰을 한 번 갱신하고 다시 보낸다(§4.1 '401'). 읽기 시간 한도는 §4.1 'api-client 밖의 호출'의 읽기 값이다.
+  - 표시 값: 공연명·장소·회차 시작·입장 시작은 회차 공개 요약(`GET /v1/events/{eventId}`, 인증 없음)으로 채운다. 한 번 동기화에서 같은 회차는 한 번만 묻는다. 요약이 404·410·실패면 그 표도 그대로 보이고 공연명 자리에 "공연 정보를 불러오지 못했습니다"를 쓴다. 좌석 이름은 ticket 데이터에 없어 이 판에서는 그리지 않는다.
+  - 저장: 목록을 다 받으면 `peaket-wallet` `tickets`를 그 목록과 같게 맞춘다(새 표는 넣고, 목록에 없는 표의 표시 값은 지운다. 기기 키(`keys`)는 지우지 않는다). 그다음 `meta.lastSyncAt`을 쓴다. 화면은 저장소 값으로 그린다(오프라인 우선).
+  - 화면 상태(docs/design/d5 §5.13): 저장된 표가 있으면 그것으로 바로 그린다. 저장된 표가 없고 받는 중이면 '불러오는 중', 다 받았는데 0장이면 빈 화면, 받지 못했으면(끊김·시간 초과·5xx·모양이 틀린 응답·커서 반복) "티켓을 불러오지 못했습니다"와 [ 다시 시도 ]다. 저장된 표가 있는데 받지 못하면 저장된 표와 오프라인 배너(마지막 동기화 시각)를 보인다. 갱신 뒤에도 401이면 저장된 표를 그리지 않고 로그인 화면(SCR-004)으로 보낸다.
+  - 상태별 카드: `ISSUED`·`ACTIVE`만 QR 자리(이 기기 키가 없으면 입장용 등록, '등록됨' 키가 있으면 회전 QR)를 둔다. 회전 QR의 티켓 ID는 목록의 `ticketId`이고 대체 글에 그 ID를 넣는다(§3.7 QR v1). `TRANSFER_PENDING`은 <양도 요청 중>(양도 마감이 입장 시작보다 앞이라 입장할 일이 없다), `CANCEL_REQUESTED`는 <취소 접수됨> "입장 기록 마감 뒤 환급됩니다", `REFUNDED`는 <환급됨>, `FLAGGED`는 <확인 중> "현장에서 입장 기록을 확인하고 있습니다", `VOIDED`는 <무효> "입금이 확인되지 않아 티켓이 무효가 되었습니다"이고 모두 QR 자리와 등록 버튼이 없다. `receivedFromNickname` 칸이 빠진 표(보유자가 결제자가 아님)는 <받은 티켓>이다. 회차 공개 요약의 공연 종료가 지났으면 <지난 공연> 회색이고 QR 자리가 없다.
+  - 펼침 `/my/tickets/{ticketId}`: 같은 저장소에서 그 표를 찾는다. 없으면 "티켓을 찾을 수 없습니다"( 마이 티켓 › )다. 남의 표와 없는 표를 가르지 않는다. 서버가 그리는 셸은 티켓 ID로 아무것도 읽지 않는다(캐시 화면에 개인 값이 섞이지 않게).
+  - 퍼블리싱 미리보기: 개발 서버에서 `?state=`를 주면 지금의 목업 그림을 본다(ADR-0224 결정 2와 같은 꼴). 운영 빌드에는 들지 않는다.
+  - 남는 한계: 한 기기를 여러 사람이 쓰면, 로그아웃 때 입장 키를 남긴 앞사람의 저장된 표가 다음 사람의 첫 동기화가 끝나기 전에 잠깐 보인다(로그아웃 기본값이 키·표를 남기기 때문이다, §5.14.4). 동기화가 끝나면 지금 계정의 목록으로 바뀐다.
 
 #### 4.2.5 파트너·관제·스캐너
 
