@@ -884,6 +884,7 @@
 | R-790 | OPS-310 명령 6 결제 갈래 | ops-svc·payment-svc 새 제어 모듈·admission-ctrl·control.proto·payment.proto·메시·ADR-0366 | F-02-2 역할 다섯 | 끝 |
 | R-792 | 분석 원본 적재 작업자와 브론즈 표가 코드에 없어 분석 저장소가 비어 있었다 | services/analytics-ingest, data/clickhouse/bronze, .github/workflows/ci-node.yml, tools/ci/brief.mjs | 회차 가명·허용 목록·조사 칸 버리기·쓰기 뒤 커밋·거절 위치·커버리지 대조·다시 적재 | 해결. inv 두 갈래 권한 분리는 포렌식 동결 |
 | R-793 | 추가 검증 이의가 CS 처리함 건으로 들어와도 인정·기각 행동과 queue·trust·identity 반영이 없었다 | docs/BUILD_ORDER.md, docs/review/plans/F-06-7.md, docs/adr/0364-cs-inbox-business-days-deadlines-and-assignment.md, docs/features/bot-defense.md, docs/data.md, docs/api/openapi.yaml, services/ops-svc, apps/console-host | 계획→시험(실패 확인 ops 82/84·console 15/15·통합 17/17)→시험 리뷰 1(높음 2·중간 7)→반영→리뷰 2(TR-20)→고정→구현, ops 단위·console 196·ops 통합 232/233(J-T36 ④ 흔들림), ledger --require 11 | 닫힘 |
+| R-794 | 발권 → 월렛 이음매 | ticket-svc GET /v1/tickets·apps/web 월렛·tools/local/demo S1·메시·offline-gate·frontend | FIX-wallet-tickets 역할 넷(시험 리뷰 포함) | 끝 |
 
 ## 4. 숫자 일치표
 
