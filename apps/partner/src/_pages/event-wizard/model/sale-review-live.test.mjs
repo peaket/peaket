@@ -29,7 +29,7 @@ const filled = () => {
     businessRegNo: '123-45-67890',
   };
   f.report = { kind: 'NUMBER', value: '2026-서울-1234' };
-  f.payout = { bankCode: '004', accountNumber: '1002-345-678901', holderName: '김대표' };
+  f.payout = { bankCode: '88', accountNumber: '1002-345-678901', holderName: '김대표' };
   f.wheelchair = { confirmed: true, shortfallReason: '', note: '' };
   return f;
 };

@@ -87,7 +87,7 @@ describe('판매 승인 계약과 생성물', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         seller: { legalName: '(주)피켓공연', representative: '김대표', address: '서울', phone: '02-1234-5678', email: 'seller@example.test', businessRegNo: '123-45-67890', mailOrderReportNo: '2026-서울-1234' },
-        payoutAccount: { bankCode: '004', accountNumber: '1002-345-678901', holderName: '김대표' },
+        payoutAccount: { bankCode: '88', accountNumber: '1002-345-678901', holderName: '김대표' },
         accessibleSeating: { confirmed: true },
       }),
     });

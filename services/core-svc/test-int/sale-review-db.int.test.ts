@@ -63,7 +63,7 @@ const opsViewer = () => identity.ops('viewer');
 const problem = (r: { payload: string }) => JSON.parse(r.payload) as { type: string; status: number; title: string };
 
 const request = (headers: Record<string, string>, productionId: string) =>
-  svc.http.inject({ method: 'POST', url: `/v1/partner/productions/${productionId}/sale-review`, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify({ seller: SELLER, payoutAccount: { bankCode: '004', accountNumber: '1002-345-678901', holderName: '홍길동' }, accessibleSeating: { confirmed: true } }) });
+  svc.http.inject({ method: 'POST', url: `/v1/partner/productions/${productionId}/sale-review`, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify({ seller: SELLER, payoutAccount: { bankCode: '88', accountNumber: '1002-345-678901', holderName: '홍길동' }, accessibleSeating: { confirmed: true } }) });
 const cancel = (headers: Record<string, string>, productionId: string) => svc.http.inject({ method: 'DELETE', url: `/v1/partner/productions/${productionId}/sale-review`, headers });
 const partnerStatus = (headers: Record<string, string>, productionId: string) => svc.http.inject({ method: 'GET', url: `/v1/partner/productions/${productionId}/sale-review`, headers });
 const list = (headers: Record<string, string>, q = '') => svc.http.inject({ method: 'GET', url: `/v1/ops/sale-reviews${q}`, headers });
