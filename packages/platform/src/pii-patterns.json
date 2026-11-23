@@ -1,0 +1,30 @@
+{
+  "mask": "[REDACTED]",
+  "patterns": [
+    {
+      "name": "email",
+      "pattern": "[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:[.][A-Za-z0-9-]+)*[.][A-Za-z]{2,}",
+      "replacement": "[REDACTED]"
+    },
+    {
+      "name": "card",
+      "pattern": "(^|[^0-9])[0-9]{4}(?:[- ]?[0-9]{4}){3}($|[^0-9])",
+      "replacement": "$1[REDACTED]$2"
+    },
+    {
+      "name": "phone-e164",
+      "pattern": "[+][1-9][0-9]{7,14}($|[^0-9])",
+      "replacement": "[REDACTED]$1"
+    },
+    {
+      "name": "phone-kr",
+      "pattern": "(^|[^0-9])01[016-9]-?[0-9]{3,4}-?[0-9]{4}($|[^0-9])",
+      "replacement": "$1[REDACTED]$2"
+    },
+    {
+      "name": "bank-account-path",
+      "pattern": "(/bank-accounts/[^/ ]+/)[^/ ]+(/holder)",
+      "replacement": "$1[REDACTED]$2"
+    }
+  ]
+}

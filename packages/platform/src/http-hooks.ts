@@ -1,6 +1,6 @@
 // Fastify 훅: 요청 맥락 열기, 남은 시간 받기, 네 신호 재기, 정규 로그 줄 쓰기
 // (openspec 변경 add-service-template 결정 2·4·5, add-service-logging 결정 2·3).
-import { trace } from '@opentelemetry/api';
+import { type Span, trace } from '@opentelemetry/api';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { clientFamily } from './client-family.js';
 import type { Clock } from './clock.js';
@@ -38,6 +38,8 @@ export interface RequestState {
   abortTimer?: ReturnType<typeof setTimeout>;
   policy: RouteLogPolicy;
   sample: LineInput['sample'];
+  /** 이 요청의 서버 span(OTel SDK가 만든 것, 기록 중일 때만). onSend에서 SLO 지연 초과를 단다 */
+  serverSpan?: Span;
   app?: string;
   client?: string;
   eventIdParam?: string;
@@ -128,7 +130,7 @@ export function installHttpHooks(
     // 머리 표본은 들어온 traceparent의 표본 표시로만 본다. 부모가 없을 때 SDK는 뿌리 span을 늘 '고름'으로 판정하므로
     // 서버 span의 표시를 쓰면 안 된다(코드 리뷰, 2026-11-01). SDK가 그 부모를 이었을 때(같은 trace-id)만 믿는다
     const sample = { oneIn, thresholdKeep: sampleKeep(at.traceId, oneIn), headSampled: policy.entry === true && incomingSampled(request, at.traceId) };
-    markServerSpan(method, route, sample);
+    const serverSpan = markServerSpan(method, route, sample);
     const ctx: RequestContext = {
       traceId: at.traceId,
       spanId: at.spanId,
@@ -151,6 +153,7 @@ export function installHttpHooks(
       abort: () => {},
       policy,
       sample,
+      serverSpan,
       ...requestSideFields(request),
       eventIdParam: typeof eventId === 'string' && EVENT_ID.test(eventId) ? eventId : undefined,
     };
@@ -227,6 +230,8 @@ export function installHttpHooks(
         const now = clock.monotonicMs();
         state.onSendMs = now;
         if (state.preHandlerMs !== undefined) hotPath?.observe('http.handler', Math.max(0, now - state.preHandlerMs) / 1000);
+        // 꼬리 표본 정책 ③(docs/observability.md §1): 서버 span이 아직 열려 있을 때, 그 경로의 SLO 지연을 넘었으면 단다(넘지 않으면 달지 않는다)
+        if (state.serverSpan && canonical.sloExceeded(state.policy, Math.max(0, now - state.startedMs))) state.serverSpan.setAttribute(SLO_EXCEEDED_ATTR, true);
       }
       state.sent = true;
       if (state.aborted) writeLine(state, reply, true);
@@ -241,13 +246,17 @@ export function installHttpHooks(
   });
 }
 
-/** 서버 span(OTel SDK가 만든 것): 실제 경로 대신 경로 틀, 정상 표본 결과를 꼬리 표본기에 넘긴다(ADR-0125 결정 3) */
-export function markServerSpan(method: string, route: string, sample: LineInput['sample']): void {
+/** 서버 span 속성: 응답을 보내기 직전에 그 경로의 SLO 지연을 넘었다(꼬리 표본 정책 ③, docs/observability.md §1 '설정 원천과 로컬 확인') */
+export const SLO_EXCEEDED_ATTR = 'peaket.slo.exceeded';
+
+/** 서버 span(OTel SDK가 만든 것): 실제 경로 대신 경로 틀, 정상 표본 결과를 꼬리 표본기에 넘긴다(ADR-0125 결정 3). 기록 중인 그 span을 돌려준다 */
+export function markServerSpan(method: string, route: string, sample: LineInput['sample']): Span | undefined {
   const span = trace.getActiveSpan();
-  if (!span?.isRecording()) return;
+  if (!span?.isRecording()) return undefined;
   span.updateName(`${method} ${route}`);
   span.setAttribute('http.route', route);
   span.setAttribute('url.path', route);
   span.setAttribute('peaket.sample.keep', sample.thresholdKeep);
   if (sample.headSampled) span.setAttribute('peaket.sample.mode', 'head');
+  return span;
 }

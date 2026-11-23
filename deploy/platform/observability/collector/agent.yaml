@@ -1,0 +1,107 @@
+# 에이전트 수집기(노드마다 하나, DaemonSet) 운영 판. docs/observability.md §1 '수집기 구성'·'설정 원천과 로컬 확인', ADR-0076.
+# 추적: 서비스 SDK의 OTLP(노드 안) → 메모리 상한 → 쿠버네티스 메타데이터 → 묶기 → trace ID 부하 분산(같은 trace는 게이트웨이 수집기의 같은 복제로).
+# 로그: 컨테이너 표준 출력(filelog, CRI 꼴 해석) → 메모리 상한 → 쿠버네티스 메타데이터 → 묶기 → 게이트웨이 수집기(OTLP).
+# 접근 로그 두 갈래와 조사 사본(§7)은 OPS-070 몫이라 이 판에 없다. 배포(DaemonSet·권한·NetworkPolicy)는 INF-020이 한다.
+# 검사: node tools/ci/collector-config.mjs --check. 로컬로 띄울 때는 local/agent.yaml을 뒤에 겹친다(README.md).
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  filelog:
+    include:
+      - /var/log/pods/*/*/*.log
+    # 수집기 자기 줄은 다시 읽지 않는다(되먹임을 막는다)
+    exclude:
+      - /var/log/pods/observability_otel-*/*/*.log
+    start_at: end
+    include_file_path: true
+    include_file_name: false
+    operators:
+      # CRI·docker 꼴을 풀고 경로에서 namespace·pod·container를 자원 속성으로 꺼낸다
+      - type: container
+        id: container-parser
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+  # 신호 연결의 자원 속성 다섯(docs/observability.md §2 '신호 연결'). 서비스 SDK가 이미 단 값은 덮지 않는다
+  k8s_attributes:
+    auth_type: serviceAccount
+    passthrough: false
+    # 이 노드의 파드만 지켜본다. 노드 이름은 DaemonSet이 Downward API로 준다(INF-020). 값이 없으면(로컬) 거르지 않는다
+    filter:
+      node: ${env:K8S_NODE_NAME}
+    extract:
+      metadata:
+        - k8s.namespace.name
+        - k8s.pod.name
+        - k8s.node.name
+      labels:
+        - tag_name: service.name
+          key: app.kubernetes.io/name
+          from: pod
+      annotations:
+        - tag_name: deployment.environment
+          key: peaket.io/environment
+          from: namespace
+    pod_association:
+      - sources:
+          - from: resource_attribute
+            name: k8s.pod.uid
+      - sources:
+          - from: resource_attribute
+            name: k8s.pod.ip
+      - sources:
+          - from: connection
+  batch:
+    send_batch_size: 2048
+    timeout: 1s
+
+exporters:
+  # 헤드리스 Service로 게이트웨이 복제를 찾는다(이름·네임스페이스는 INF-020 배포와 맞춘다)
+  load_balancing:
+    routing_key: traceID
+    protocol:
+      otlp:
+        # 노드 사이 암호화는 메시(ambient mTLS)가 맡는다(ADR-0076·docs/infra.md 메시)
+        tls:
+          insecure: true
+        timeout: 5s
+    resolver:
+      k8s:
+        service: otel-gateway-headless.observability
+        ports:
+          - 4317
+  otlp_grpc/gateway:
+    endpoint: otel-gateway.observability.svc:4317
+    tls:
+      insecure: true
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, k8s_attributes, batch]
+      exporters: [load_balancing]
+    logs:
+      receivers: [filelog]
+      processors: [memory_limiter, k8s_attributes, batch]
+      exporters: [otlp_grpc/gateway]

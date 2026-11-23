@@ -191,6 +191,14 @@ export class CanonicalLog {
     this.#oneIn = oneIn;
   }
 
+  /**
+   * 걸린 시간이 그 경로의 SLO 지연(@LogPolicy의 sloLatencyMs, 없으면 서비스 기본값)을 넘었는가. 정규 로그 줄의 지연 초과 전수와
+   * 서버 span의 peaket.slo.exceeded(꼬리 표본 정책 ③, docs/observability.md §1 '설정 원천과 로컬 확인')가 같은 문턱을 쓴다
+   */
+  sloExceeded(policy: RouteLogPolicy, durationMs: number): boolean {
+    return durationMs > (policy.sloLatencyMs ?? this.o.defaultSloLatencyMs);
+  }
+
   newState(): RequestLogState {
     return new RequestLogState(this.o.pseudonymizer);
   }
@@ -202,8 +210,7 @@ export class CanonicalLog {
   sampleRateOf(i: LineInput): number | undefined {
     const entryRejection = i.policy.entry === true && (i.status === 403 || i.status === 429);
     const errorStatus = i.status !== undefined && i.status >= 400 && !entryRejection;
-    const slo = i.policy.sloLatencyMs ?? this.o.defaultSloLatencyMs;
-    const slow = i.durationMs !== undefined && i.durationMs > slo;
+    const slow = i.durationMs !== undefined && this.sloExceeded(i.policy, i.durationMs);
     if (errorStatus || slow || i.state?.forceKeep) return 1;
     if (i.sample.thresholdKeep) return i.sample.oneIn;
     if (i.sample.headSampled) return 0;

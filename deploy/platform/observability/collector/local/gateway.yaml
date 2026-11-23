@@ -1,0 +1,21 @@
+# 게이트웨이 수집기 로컬 판: 운영 판과 생성 파일 뒤에 겹쳐 Docker로 띄운다(docs/observability.md §1 '설정 원천과 로컬 확인').
+#   --config gateway.yaml --config generated/tail-sampling.yaml --config generated/pii-masking.yaml --config local/gateway.yaml
+# 내보내기만 파일로 바꾼다(/var/lib/otelcol/out/traces.json·logs.json, JSON 줄). 처리기 목록은 운영 판 그대로 쓴다(겹쳐 읽을 때
+# 이 파일이 적지 않은 목록은 앞 파일의 것이 남는다). 그래서 로컬 시험이 운영 판의 꼬리 표본·2차 마스킹 차례를 그대로 지난다.
+# 환경 변수 없이 뜬다. 결과 폴더는 띄우는 쪽이 쓸 수 있는 빈 폴더로 붙인다.
+exporters:
+  file/traces:
+    path: /var/lib/otelcol/out/traces.json
+    format: json
+    flush_interval: 200ms
+  file/logs:
+    path: /var/lib/otelcol/out/logs.json
+    format: json
+    flush_interval: 200ms
+
+service:
+  pipelines:
+    traces:
+      exporters: [file/traces]
+    logs:
+      exporters: [file/logs]

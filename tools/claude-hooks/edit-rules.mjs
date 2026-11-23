@@ -11,6 +11,8 @@ const GENERATED = [
   [/^packages\/ds\/src\/gen\//, '원천 docs/design/tokens.json을 고치고 `pnpm --filter @peaket/ds tokens`'],
   // 대시보드는 주인 팀 폴더 아래에 있다(deploy/local/dashboards/<폴더>/<이름>.json, ADR-0356 결정 1)
   [/^deploy\/local\/dashboards\/.+\.json$/, '생성기 tools/local/dashboards.mjs를 고치고(대상은 docs/architecture.md §3.1, 폴더는 .github/CODEOWNERS) `node tools/local/dashboards.mjs`'],
+  // 수집기 꼬리 표본 정책·2차 마스킹 문장(docs/observability.md §1 '설정 원천과 로컬 확인', F-01-3)
+  [/^deploy\/platform\/observability\/collector\/generated\//, '원천 docs/api/openapi.yaml(x-peaket-trace-rare)·docs/observability.md §1 꼬리 표본 줄·packages/platform/src/pii-patterns.json을 고치고 `node tools/ci/collector-config.mjs --write`'],
 ];
 // 머리줄(#! 줄 다음 첫 줄)이 이 꼴이면 생성 파일이다. 게이트웨이 라우트·메시 정책·Kyverno 정책이 이 표시를 단다
 const MARKER = /^\s*(?:#|\/\/|\/\*)\s*생성 파일이다/;
@@ -54,7 +56,7 @@ export function preEdit(input) {
 
 // 고친 원천 → 알림 열쇠와 할 일
 const FOLLOW_UPS = [
-  [/^docs\/api\/openapi\.yaml$/, 'openapi', 'docs/api/openapi.yaml을 고쳤다. 커밋 전에 생성물을 함께 만든다(CLAUDE.md): `pnpm --filter @peaket/contracts gen`, `pnpm --filter @peaket/api-client gen`, 게이트웨이 라우트 `node tools/ci/gateway-routes.mjs --write`, 그 뒤 `node tools/ci/mesh-policies.mjs --check`'],
+  [/^docs\/api\/openapi\.yaml$/, 'openapi', 'docs/api/openapi.yaml을 고쳤다. 커밋 전에 생성물을 함께 만든다(CLAUDE.md): `pnpm --filter @peaket/contracts gen`, `pnpm --filter @peaket/api-client gen`, 게이트웨이 라우트 `node tools/ci/gateway-routes.mjs --write`, 수집기 드문 경로 정책 `node tools/ci/collector-config.mjs --write`, 그 뒤 `node tools/ci/mesh-policies.mjs --check`'],
   [/^docs\/api\/asyncapi\.yaml$/, 'asyncapi', 'docs/api/asyncapi.yaml을 고쳤다. 커밋 전에 `pnpm --filter @peaket/contracts gen`으로 생성물을 함께 만든다(CLAUDE.md)'],
   [/^docs\/api\/proto\//, 'proto', 'docs/api/proto를 고쳤다. 커밋 전에 `pnpm --filter @peaket/contracts gen`과 메시 정책 `node tools/ci/mesh-policies.mjs --write`를 돌린다(ADR-0285)'],
   [/^deploy\/gateways\/routes\//, 'gateway-routes', '게이트웨이 라우트 원천을 고쳤다. `node tools/ci/gateway-routes.mjs --write`로 deploy/gateways/*.routes.yaml을 다시 만들고 `node tools/ci/mesh-policies.mjs --check`를 본다'],
@@ -63,6 +65,7 @@ const FOLLOW_UPS = [
   [/^docs\/design\/tokens\.json$/, 'tokens', '디자인 토큰 원천을 고쳤다. `pnpm --filter @peaket/ds tokens`로 packages/ds/src/gen을 다시 만든다(CLAUDE.md)'],
   [/^(?:docs\/architecture\.md|\.github\/CODEOWNERS)$/, 'dashboards-source', '대시보드 대상(§3.1 서비스 맵)이나 주인 팀(CODEOWNERS)이 바뀌었을 수 있다. `node tools/local/dashboards.mjs`로 다시 만들고 `node tools/ci/observability-config.mjs --check`를 본다(ADR-0356 결정 1)'],
   [/^packages\/platform\/src\/metrics\.ts$/, 'dashboards','서비스 지표 목록을 고쳤다. 로컬 대시보드는 `node tools/local/dashboards.mjs`로 다시 만든다(CLAUDE.md)'],
+  [/^(?:packages\/platform\/src\/pii-patterns\.json|deploy\/platform\/observability\/collector\/(?:agent|gateway|cluster)\.yaml|docs\/observability\.md)$/, 'collector', '수집기 설정이나 그 원천(2차 마스킹 꼴·꼬리 표본 크기)을 고쳤을 수 있다. `node tools/ci/collector-config.mjs --write`로 생성 파일을 다시 만들고 `--check`를 본다(F-01-3)'],
   [/^packages\/platform\/src\//, 'platform', 'packages/platform을 고쳤다. 서비스는 빌드된 dist/를 읽으므로 서비스 쪽 타입 검사·시험 전에 `pnpm exec turbo run build --filter=@peaket/platform`을 돌린다(CLAUDE.md)'],
   [/^packages\/seatmap\/src\//, 'seatmap', 'packages/seatmap/src를 고쳤다. core-svc 통합 시험이 이 원본을 상대 경로로 읽으므로(--affected가 못 잡는다) `pnpm exec turbo run typecheck --filter=@peaket/core-svc`도 돌린다(CLAUDE.md)'],
   [/^services\/(payment-svc|pg-simulator)\/src\//, 'purchase-imports', 'payment-svc·pg-simulator 원본을 고쳤다. purchase-svc 시험이 이 원본을 상대 경로로 읽으므로(--affected가 못 잡는다) `pnpm exec turbo run typecheck --filter=@peaket/purchase-svc`도 돌린다(CLAUDE.md)'],

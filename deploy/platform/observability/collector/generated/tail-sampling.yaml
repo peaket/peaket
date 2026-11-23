@@ -1,0 +1,872 @@
+# 생성 파일이다. 손으로 고치지 않는다: 원천(docs/api/openapi.yaml의 x-peaket-trace-rare, docs/observability.md §1 꼬리 표본 줄)을 고치고 `node tools/ci/collector-config.mjs --write`
+# 겹쳐 읽는 차례와 규칙은 docs/observability.md §1 '설정 원천과 로컬 확인', 폴더 README.md
+# 본문 sha256: 429206df481a204f8268e8d5ac1d7ac39c32cf11f292e141a9e43febdb60a53c
+processors:
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 35000
+    expected_new_traces_per_sec: 1700
+    decision_cache:
+      sampled_cache_size: 350000
+    policies:
+      - name: head
+        type: string_attribute
+        string_attribute:
+          key: peaket.sample.mode
+          values:
+            - head
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes:
+            - ERROR
+      - name: slo-exceeded
+        type: boolean_attribute
+        boolean_attribute:
+          key: peaket.slo.exceeded
+          value: true
+      - name: rare/POST /v1/identity/merge-proposals/{proposalId}/confirmation
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/identity/merge-proposals/{proposalId}/confirmation
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/admin-accounts
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/admin-accounts
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/admin-accounts/{adminAccountId}/designations
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/admin-accounts/{adminAccountId}/designations
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/DELETE /v1/ops/admin-accounts/{adminAccountId}/designations/{kind}
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/admin-accounts/{adminAccountId}/designations/{kind}
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - DELETE
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/admin-accounts/{adminAccountId}/invitation
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/admin-accounts/{adminAccountId}/invitation
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/admin-accounts/{adminAccountId}/removal
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/admin-accounts/{adminAccountId}/removal
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/PUT /v1/ops/admin-accounts/{adminAccountId}/role
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/admin-accounts/{adminAccountId}/role
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - PUT
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/DELETE /v1/ops/admin-accounts/{adminAccountId}/sessions
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/admin-accounts/{adminAccountId}/sessions
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - DELETE
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/DELETE /v1/ops/admin-accounts/{adminAccountId}/sessions/{sessionId}
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/admin-accounts/{adminAccountId}/sessions/{sessionId}
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - DELETE
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/auth/invitation-completions
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/auth/invitation-completions
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/auth/invitation-passkeys
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/auth/invitation-passkeys
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/auth/invitation-passwords
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/auth/invitation-passwords
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/auth/invitation-totp-confirmations
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/auth/invitation-totp-confirmations
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/auth/passkeys
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/auth/passkeys
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/DELETE /v1/ops/auth/passkeys/{passkeyId}
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/auth/passkeys/{passkeyId}
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - DELETE
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/auth/password-changes
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/auth/password-changes
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/auth/unlocks
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/auth/unlocks
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/compliance/data-requests/{requestId}/approvals
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/compliance/data-requests/{requestId}/approvals
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/compliance/data-requests/{requestId}/documents
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/compliance/data-requests/{requestId}/documents
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/compliance/data-requests/{requestId}/extraction-requests
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/compliance/data-requests/{requestId}/extraction-requests
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/compliance/data-requests/{requestId}/rejections
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/compliance/data-requests/{requestId}/rejections
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/compliance/data-requests/{requestId}/submission
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/compliance/data-requests/{requestId}/submission
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/compliance/notices/{noticeId}/documents
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/compliance/notices/{noticeId}/documents
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/event-cancellations/{requestId}/approvals
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/event-cancellations/{requestId}/approvals
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/notice-templates
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/notice-templates
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/notice-templates/{templateId}/approvals
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/notice-templates/{templateId}/approvals
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/partner-notices
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/partner-notices
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/payout-batches
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/payout-batches
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/payout-batches/{batchId}/portone-execution
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/payout-batches/{batchId}/portone-execution
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/promoters
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/promoters
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/promoters/{promoterId}/contract-term-changes
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/promoters/{promoterId}/contract-term-changes
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/ops/receivables/{receivableId}/guarantee-collections
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/ops/receivables/{receivableId}/guarantee-collections
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/partner/auth/invitation-completions
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/partner/auth/invitation-completions
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/partner/auth/invitation-passkeys
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/partner/auth/invitation-passkeys
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/partner/auth/invitation-passwords
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/partner/auth/invitation-passwords
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/partner/auth/invitation-totp-confirmations
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/partner/auth/invitation-totp-confirmations
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/partner/auth/passkeys
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/partner/auth/passkeys
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/DELETE /v1/partner/auth/passkeys/{passkeyId}
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/partner/auth/passkeys/{passkeyId}
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - DELETE
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/partner/auth/password-changes
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/partner/auth/password-changes
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/partner/auth/unlocks
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/partner/auth/unlocks
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/tickets/{ticketId}/transfers
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/tickets/{ticketId}/transfers
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: rare/POST /v1/transfers/{offerId}/acceptance
+        type: and
+        and:
+          and_sub_policy:
+            - name: route
+              type: string_attribute
+              string_attribute:
+                key: http.route
+                values:
+                  - /v1/transfers/{offerId}/acceptance
+            - name: method
+              type: string_attribute
+              string_attribute:
+                key: http.request.method
+                values:
+                  - POST
+            - name: rate
+              type: rate_limiting
+              rate_limiting:
+                spans_per_second: 20
+      - name: normal-keep
+        type: boolean_attribute
+        boolean_attribute:
+          key: peaket.sample.keep
+          value: true

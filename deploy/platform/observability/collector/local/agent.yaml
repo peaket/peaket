@@ -1,0 +1,35 @@
+# 에이전트 수집기 로컬 판: 운영 판(agent.yaml) 뒤에 겹쳐 쿠버네티스 없이 Docker로 띄운다(docs/observability.md §1 '설정 원천과 로컬 확인').
+#   --config agent.yaml --config local/agent.yaml
+# 겹쳐 읽으면 표는 합쳐지고 목록은 통째로 바뀐다. 그래서 파이프라인의 처리기·내보내기 목록을 다시 적는다.
+# - 쿠버네티스 메타데이터(k8s_attributes)를 뺀다(물을 API 서버가 없다).
+# - 부하 분산은 고정 주소 목록(Docker 네트워크 별칭 peaket-gw-0·peaket-gw-1)으로, 로그는 peaket-gw-0으로 보낸다.
+# - 로컬 판은 OTLP로 받은 로그도 같은 길로 보낸다(시험이 에이전트에 바로 넣을 수 있게).
+# 환경 변수 없이 뜬다.
+exporters:
+  load_balancing/local:
+    routing_key: traceID
+    protocol:
+      otlp:
+        tls:
+          insecure: true
+        timeout: 5s
+    resolver:
+      static:
+        hostnames:
+          - peaket-gw-0:4317
+          - peaket-gw-1:4317
+  otlp_grpc/local-gateway:
+    endpoint: peaket-gw-0:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [load_balancing/local]
+    logs:
+      receivers: [otlp, filelog]
+      processors: [memory_limiter, batch]
+      exporters: [otlp_grpc/local-gateway]
