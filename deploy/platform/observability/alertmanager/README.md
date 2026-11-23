@@ -23,6 +23,14 @@
 
 `alert-issue-relay-url`은 `services/alert-issue-relay`의 Alertmanager 웹훅 받는 경로를 가리키고, 토큰은 그 서비스의 `PEAKET_ALERT_RELAY_TOKEN`과 같다. IRM·Slack·Healthchecks 계정과 GitHub 앱은 소유자 몫이다.
 
+## 묶기·억제·승인 대기
+
+- 경로마다 `group_by`를 둔다: SEV1·SEV2의 회차 경보는 `[event_id, journey, severity]`, 의존성 원인은 `[dependency, severity]`, 그 밖은 `[kind, severity]`. 경보 이름은 묶기 기준에 넣지 않는다(같은 회차·여정의 다른 경보를 한 알림으로 모은다).
+- `inhibit_rules` 하나: 예산 SEV1(`kind="slo"`, `event_id`·`journey`가 비어 있지 않음)이 같은 회차·여정의 SEV2를 누른다. 누르는 쪽의 `event_id`·`journey` 조건이 없으면 라벨 없는 SEV1이 라벨 없는 SEV2를 누르는 함정이 생긴다.
+- `OpsApprovalPending`은 `Watchdog` 바로 뒤에서 IRM으로만 간다(2인 승인 대기 알림). `Watchdog`은 데드맨으로만 간다.
+- Slack 문구 틀은 `runbook_url`이 빈 경보에 '런북 없음'을 적고 알림은 그대로 보낸다.
+
+
 ## 시험에 쓰는 이미지
 
 플랫폼 통합 시험(`packages/platform/test-int/alertmanager-routes.int.test.ts`·`alertmanager-deadman.int.test.ts`, V-T53 ①②⑤)이 아래 판을 Docker로 띄운다. 값의 원본은 도우미 `packages/platform/test-int/alertmanager.ts`의 `ALERTMANAGER_IMAGE`이고, 판을 올리면 그 상수와 이 줄을 함께 고친다.

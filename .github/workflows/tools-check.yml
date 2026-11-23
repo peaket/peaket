@@ -28,6 +28,9 @@ jobs:
           npm install --global "$pm"
       - run: pnpm install --frozen-lockfile
       - run: node --test "tools/ci/*.test.mjs"
+      # 경보 규칙 검사(F-01-7 OPS-130, V-T16·V-T20 ①~③·V-T54 ①②): 주석·이용자 식별값·간격·히스토그램 칸·
+      # Alertmanager 묶음 값을 실제 저장소에서 본다. A2 뒤 실제 alertmanager.yaml이 있어 0으로 끝난다.
+      - run: node tools/ci/alert-check.mjs
       # 로컬 클러스터 도구의 클러스터 없는 시험(도구 받기·Strimzi 설치 파일 고치기·공용 차트 렌더·데모 시드, docs/devops.md §3.1 tools-check 행).
       # 배포 구간까지 ci-kind를 미루면서 ci-kind.yml에서 옮겼다(소유자 결정 2026-11-21, ADR-0331 결정 9). 데모 시드 시험(DS-05·06·12)이
       # services/identity-svc/scripts/seed-demo.mjs를 띄우고 그 스크립트가 identity-svc dist를 읽으므로 의존 패키지와 함께 먼저 빌드한다
