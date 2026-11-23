@@ -77,3 +77,12 @@
 - ops 통합 `f021-e2e-control`이 `PEAKET_SCHEMA_IDS_FILE` 없음(PlatformConfigError, purchase-svc 시작 조립)으로 떠지 않는다 — F-07-7과 무관, develop에서도 같은지 확인 필요.
 - 흔들림 후보: core `fill-search-guard`·`internal-notify(-ticket)`·`tenant-rate-limit`·`shop-expiry`·`registration`·`search-bat166·167`·`seatmap-editor`·`sale-eligibility`·`seatmap-import`(부하 중 준비 시간 초과, 단독 통과), payment P-T46 ④.
 - payment 마이그레이션 0031은 갈래 3 몫으로 비어 있다(F-07-7이 0030 다음 0032). 갈래 3이 0031을 쓰지 않으면 번호가 빈 채 남는다.
+## F-07-8(2026-11-23, R-804)
+
+- C-01(낮음): 결제사별 토큰 버킷이 프로세스마다 따로라 API 파드와 릴레이 리더가 겹치면 잠깐 두 배까지 나간다. 결제사 한도가 정해지면 Redis 공용 버킷을 볼지 정한다.
+- C-03(낮음): 미수금이 생길 때의 사건이 asyncapi에 없다. 파트너 알림·SCR-027 상계 내역과 함께 본다.
+- C-04(낮음): 계산 뒤 환급 훑기는 결제 취소의 끝난 시각으로 읽는다. 끝난 시각이 늦게 채워지는 결제사 결과(웹훅 지연)는 다음 tick이 잡지만, `read_through`를 지금 −30분 [가정]으로 둔 겹침 폭이 맞는지 운영에서 본다.
+- C-05(낮음): 가짜 송금 어댑터의 결과 규칙(끝 4자리 `0000`)은 시험·데모용이다. 실제 어댑터가 오면 지운다.
+- 시험 리뷰 낮음: TR-12(포트원 쪽), TR-16(409 `recalculation-conflict`의 오류 이름), TR-17(나)(계좌 원문 로그 확인).
+- 흔들림 후보: purchase 단위 전체 실행에서 `grpc-payment-checkout.test.ts` PT26·PT27이 부하 때 실패하고 단독 56/56 통과(이 기능과 무관).
+- 운영 전: 실제 은행 이체 어댑터(계약 단계), 결제사 취소 한도가 승인 한도와 같은지(토큰 버킷 값, ADR-0069 결정 10 끝 줄).
