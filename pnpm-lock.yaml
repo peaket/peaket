@@ -1782,6 +1782,9 @@ importers:
       '@peaket/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@peaket/search-normalize':
+        specifier: workspace:*
+        version: link:../../packages/search-normalize
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2

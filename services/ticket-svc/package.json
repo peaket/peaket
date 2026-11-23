@@ -38,6 +38,7 @@
   },
   "devDependencies": {
     "@peaket/config": "workspace:*",
+    "@peaket/search-normalize": "workspace:*",
     "@types/node": "^24.19.2",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "0.31.11",
