@@ -1,7 +1,7 @@
 // ticket DB의 스캐너 기기 원장 스키마(BUILD_ORDER GAT-170, docs/data.md scanner_device).
 // 마이그레이션은 migrations/0001_scanner_device.sql이다. 등록 코드는 Redis에만 둔다.
 import { sql } from 'drizzle-orm';
-import { bigint, check, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => 'bytea' });
@@ -88,6 +88,19 @@ export const scannerReadiness = pgTable(
     check('scanner_readiness_package_seq_check', sql`${t.packageSeq} >= 0`),
     check('scanner_readiness_pending_uploads_check', sql`${t.pendingUploads} >= 0`),
   ],
+);
+
+/** 회차 입장 정책 사본(offline-gate §6.3, docs/data.md scanner_event_policy, 마이그레이션 0013). */
+export const scannerEventPolicy = pgTable(
+  'scanner_event_policy',
+  {
+    eventId: uuid('event_id').primaryKey(),
+    reentryAllowed: boolean('reentry_allowed').notNull(),
+    /** 마지막으로 적은 POLICY 변경 번호. 처음 만들 때 0 */
+    policySeq: bigint('policy_seq', { mode: 'number' }).notNull().default(0),
+    observedAt: at('observed_at').notNull(),
+  },
+  (t) => [check('scanner_event_policy_policy_seq_check', sql`${t.policySeq} >= 0`)],
 );
 
 /** 회차별 변경 일련번호 카운터(offline-gate §6.3, ADR-0086). 변경 트랜잭션 안에서 UPDATE … RETURNING으로 올린다. */

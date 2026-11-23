@@ -1206,13 +1206,18 @@ export const GetPartnerEventGateStatusParams = zod.object({
   "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
+export const getPartnerEventGateStatusResponseDevicesItemPlacementVersionMin = 0;
+
+
+
 export const GetPartnerEventGateStatusResponse = zod.object({
   "devices": zod.array(zod.object({
   "deviceId": zod.string().optional(),
   "name": zod.string().optional(),
   "placement": zod.object({
   "gateZone": zod.string(),
-  "mode": zod.enum(['IN', 'OUT']).describe('OUT은 재입장 허용 회차만(그 밖 422)')
+  "mode": zod.enum(['IN', 'OUT']).describe('OUT은 재입장 허용 회차만(그 밖 422)'),
+  "version": zod.int().min(getPartnerEventGateStatusResponseDevicesItemPlacementVersionMin).optional().describe('배치 행의 판(변경분 PLACEMENT의 version과 같은 값). 응답에만 싣는다(offline-gate §6.3, 추천 적용 2026-11-23, F-05-4)')
 }).optional(),
   "ready": zod.boolean().optional(),
   "packageSeq": zod.int().optional(),

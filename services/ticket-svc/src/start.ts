@@ -132,6 +132,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
     // 지표는 서비스를 만든 뒤 잇는다(registrationMetric·noticeMetric)
     let registrationMetric: DeviceKeysDeps['observe'];
     let noticeMetric: ((result: 'sent' | 'retry') => void) | undefined;
+    // 스캔 판정·POLICY 지표(offline-gate §10.2). 서비스 지표 묶음은 createService 뒤에 생기므로 그때 잇는다
+    let scanStored: ((result: 'PASS' | 'REJECT' | 'CHECK' | 'duplicate') => void) | undefined;
+    let policyChanged: ((i: { eventId: string; reentryAllowed: boolean; seq: number }) => void) | undefined;
     const { deviceKeys, notices } = assembleDeviceKeys({
       store: deviceKeyStore,
       reauth,
@@ -201,6 +204,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
           ...(opsAlertSink ? { opsAlert: opsAlertSink } : {}),
           maxOfflineMs: config.scannerMaxOfflineMs,
           scannerPwaOrigin: config.scannerPwaOrigin,
+          onScanStored: (result) => scanStored?.(result),
+          onPolicyChanged: (i) => policyChanged?.(i),
         },
         ticket: { deviceKeys, tickets: ticket, transfers },
       }),
@@ -246,6 +251,24 @@ export async function start(o: StartOptions): Promise<StartedService> {
     registrationMetric = ({ reason, result }) => {
       registrations.inc({ service: SERVICE, reason, result });
       if (result !== 'registered' && result !== 'unchanged') service!.logger.info({ kind: 'device-key.rejected', reason, result }, 'device-key.rejected');
+    };
+    // 스캔 판정·중복·POLICY 변경 지표(offline-gate §10.2). 티켓·기기·계정 ID는 이름표에 싣지 않는다
+    const scansReceived = new Counter({
+      name: 'scanner_scans_received_total',
+      help: '스캔 기록 수(result: 처음 저장한 PASS·REJECT·CHECK, duplicate는 이미 있던 클라이언트 ID, offline-gate §10.2)',
+      labelNames: ['service', 'result'],
+      registers: [service.metrics.registry],
+    });
+    scanStored = (result) => scansReceived.inc({ service: SERVICE, result });
+    const policyChanges = new Counter({
+      name: 'scanner_policy_changes_total',
+      help: '스캐너 입장 정책 사본이 바뀌어 POLICY 변경분을 적은 수(offline-gate §10.2)',
+      labelNames: ['service'],
+      registers: [service.metrics.registry],
+    });
+    policyChanged = ({ eventId, reentryAllowed, seq }) => {
+      policyChanges.inc({ service: SERVICE });
+      service!.logger.info({ kind: 'scanner.policy-changed', eventId, reentryAllowed, seq }, 'scanner.policy-changed');
     };
     // 입장 키 알림 보내기 반복(ADR-0363 결정 4). core-svc 주소가 없으면 돌지 않고 행만 쌓인다
     const noticeSent = new Counter({

@@ -86,6 +86,12 @@ export const DPOP_REPLAY_STORE = Symbol('ticket.DpopReplayStore');
 /** 스캐너 목록·변경분·스캔·이상 표시 저장소. 판정과 일련번호 매기기는 저장소 트랜잭션 안에서 끝낸다. */
 export interface ScannerGateStore {
   package(i: { eventId: string; nowMs: number }): Promise<ScannerPackageView>;
+  /**
+   * 회차 입장 정책 사본(scanner_event_policy)을 core 값과 견준다. 사본이 없으면 만들기만 하고,
+   * 다르면 조건부로 바꾸면서 POLICY 변경을 같은 트랜잭션에 적는다(offline-gate §6.3).
+   * DB 오류는 던지지 않고 사본 값 그대로 돌려준다. 사본도 없으면 빈 값이다.
+   */
+  syncPolicy(i: { eventId: string; coreReentryAllowed?: boolean; atMs: number }): Promise<{ reentryAllowed?: boolean; changedSeq?: number }>;
   /** 회차의 지금 버전 벡터(근무 준비 응답용, GAT-160). 변경 종류별 마지막 일련번호 */
   versionVector(eventId: string, nowMs: number): Promise<ScannerVersionVector>;
   changes(i: { eventId: string; after: number; limit: number; nowMs?: number }): Promise<ScannerChangesView>;

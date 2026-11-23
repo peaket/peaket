@@ -63,13 +63,18 @@ export const CreateScannerTokenResponse = zod.unknown()
  * FR-035, FR-046, ADR-0051. 기기 키 DPoP + 현장 스태프 토큰(mTLS 선택지는 인증서 + 토큰). 서버가 요청마다 세션·기기 상태 확인. 배치가 없으면 409 NO_PLACEMENT. 서버 시각을 실으므로 Cache-Control: no-store. 읽기라 GET이고 준비 완료 보고는 PUT /v1/scanner/shift/readiness로 나눴다(추천 적용 2026-10-21, ADR-0081)
  * @summary 근무 준비 정보(SCR-033). 서버 시각·입장 정책·기기 배치·목록 일련번호
  */
+export const getScannerShiftResponsePlacementVersionMin = 0;
+
+
+
 export const GetScannerShiftResponse = zod.object({
   "serverTime": zod.iso.datetime({"offset":true}),
   "eventId": zod.string(),
   "reentryAllowed": zod.boolean(),
   "placement": zod.object({
   "gateZone": zod.string(),
-  "mode": zod.enum(['IN', 'OUT']).describe('OUT은 재입장 허용 회차만(그 밖 422)')
+  "mode": zod.enum(['IN', 'OUT']).describe('OUT은 재입장 허용 회차만(그 밖 422)'),
+  "version": zod.int().min(getScannerShiftResponsePlacementVersionMin).optional().describe('배치 행의 판(변경분 PLACEMENT의 version과 같은 값). 응답에만 싣는다(offline-gate §6.3, 추천 적용 2026-11-23, F-05-4)')
 }),
   "packageSeq": zod.int(),
   "role": zod.enum(['gate_staff', 'gate_lead']),
@@ -245,7 +250,7 @@ export const CreateScannerScanBodyItem = zod.object({
   "gateZone": zod.string().optional(),
   "keyId": zod.string().optional(),
   "qrTimestamp": zod.iso.datetime({"offset":true}).optional(),
-  "scannedAtDevice": zod.iso.datetime({"offset":true}).describe('보정 시각'),
+  "scannedAtDevice": zod.iso.datetime({"offset":true}).describe('보정 시각(기기 시각 + clockOffsetMs). 서버는 clockOffsetMs를 다시 더하지 않는다(offline-gate §7.1, 추천 적용 2026-11-23, F-05-4)'),
   "clockOffsetMs": zod.int().optional(),
   "knownSeq": zod.int().describe('판정 때 반영한 서버 변경 일련번호(두 칸 버전 벡터의 첫 칸)'),
   "deviceSeq": zod.int().describe('기기 일련번호(두 번째 칸)'),
@@ -287,13 +292,18 @@ export const GetScannerEventDevicesParams = zod.object({
   "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
 })
 
+export const getScannerEventDevicesResponseDevicesItemPlacementVersionMin = 0;
+
+
+
 export const GetScannerEventDevicesResponse = zod.object({
   "devices": zod.array(zod.object({
   "deviceId": zod.string().optional(),
   "name": zod.string().optional(),
   "placement": zod.object({
   "gateZone": zod.string(),
-  "mode": zod.enum(['IN', 'OUT']).describe('OUT은 재입장 허용 회차만(그 밖 422)')
+  "mode": zod.enum(['IN', 'OUT']).describe('OUT은 재입장 허용 회차만(그 밖 422)'),
+  "version": zod.int().min(getScannerEventDevicesResponseDevicesItemPlacementVersionMin).optional().describe('배치 행의 판(변경분 PLACEMENT의 version과 같은 값). 응답에만 싣는다(offline-gate §6.3, 추천 적용 2026-11-23, F-05-4)')
 }).optional(),
   "ready": zod.boolean().optional(),
   "packageSeq": zod.int().optional(),

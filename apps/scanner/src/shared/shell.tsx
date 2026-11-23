@@ -2,6 +2,7 @@
 import { ScannerStatusStrip } from "@peaket/ds/ScannerShell";
 import type { CSSProperties, ReactNode } from "react";
 import { lead, placement, staff } from "../fixtures/scanner";
+import { liveRuntime } from "../app/live-runtime";
 import { Link, navigate, renderLink } from "../app/router";
 import type { ScannerLayout } from "../app/layout";
 
@@ -14,8 +15,8 @@ export const bottomStyle = (layout: ScannerLayout): CSSProperties | undefined =>
   layout === "t" ? { padding: "10px 24px 14px" } : undefined;
 
 export function logout() {
-  // 퍼블리싱 단계: 업로드 대기를 비우고 세션을 끝내는 일은 데이터 연결 단계에서 붙인다. 지금은 로그인 화면으로 간다.
-  navigate("/login");
+  // 온라인이면 큐를 10초까지 올린 뒤 토큰을 지우고 로그인 화면으로 간다(7.4.4). 런타임이 없으면 바로 이동한다.
+  void liveRuntime.logout().catch(() => navigate("/login"));
 }
 
 export interface StripProps {

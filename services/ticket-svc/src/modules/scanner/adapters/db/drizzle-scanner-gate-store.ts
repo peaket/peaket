@@ -19,7 +19,7 @@ import type {
   ScannerTicketStatus,
   ScannerVersionVector,
 } from '../../domain/scanner-gate.js';
-import { gateFlag, gateFlagScan, scanEvent, scannerChange, scannerSeq } from './schema.js';
+import { gateFlag, gateFlagScan, scanEvent, scannerChange, scannerEventPolicy, scannerSeq } from './schema.js';
 
 interface TicketRow {
   id: string;
@@ -46,9 +46,8 @@ interface PassScanRow {
   known_seq: string | number;
 }
 
-/** 보정 시각(기기 시각 + 시계 오차). 순서·취소·마감 판정의 기준이다(offline-gate §7.1) */
-const correctedOf = (r: { scanned_at_device: Date | string; clock_offset_ms: number | null }): number =>
-  (r.scanned_at_device instanceof Date ? r.scanned_at_device.getTime() : Date.parse(r.scanned_at_device)) + (r.clock_offset_ms ?? 0);
+/** 보정 시각 = scannedAtDevice(이미 기기 시계 오차를 더한 값). 서버는 clock_offset_ms를 다시 더하지 않는다(offline-gate §7.1) */
+const correctedOf = (r: { scanned_at_device: Date | string }): number => (r.scanned_at_device instanceof Date ? r.scanned_at_device.getTime() : Date.parse(r.scanned_at_device));
 /** 마지막 보정 뒤 ±2분 [가정] 넘게 어긋나면 시각 불확실(offline-gate §7.1) */
 const CLOCK_UNCERTAIN_MS = 2 * 60_000;
 
@@ -128,6 +127,54 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
     );
   }
 
+  /**
+   * 정책 사본을 조건부로 바꾸고(옛 값일 때만) POLICY를 같은 트랜잭션에 적는다.
+   * 두 요청이 겹치면 행 잠금이 차례로 처리해 한 줄만 적힌다. DB 오류는 사본 값 그대로 돌려준다(요청을 실패시키지 않는다).
+   */
+  async syncPolicy(i: { eventId: string; coreReentryAllowed?: boolean; atMs: number }): Promise<{ reentryAllowed?: boolean; changedSeq?: number }> {
+    try {
+      return await this.database.transaction(async (tx) => {
+        if (i.coreReentryAllowed !== undefined) {
+          const updated = (
+            await tx.execute(sql`
+              update scanner_event_policy
+              set reentry_allowed = ${i.coreReentryAllowed}, observed_at = ${new Date(i.atMs)}
+              where event_id = ${i.eventId} and reentry_allowed <> ${i.coreReentryAllowed}
+              returning reentry_allowed
+            `)
+          ).rows as { reentry_allowed: boolean }[];
+          if (updated.length > 0) {
+            const seq = await this.appendChange(tx, i.eventId, 'POLICY', { v: 1, reentryAllowed: i.coreReentryAllowed });
+            await tx.execute(sql`update scanner_event_policy set policy_seq = ${seq} where event_id = ${i.eventId}`);
+            return { reentryAllowed: i.coreReentryAllowed, changedSeq: seq };
+          }
+        }
+        const existing = (await tx.execute(sql`select reentry_allowed from scanner_event_policy where event_id = ${i.eventId}`)).rows as { reentry_allowed: boolean }[];
+        if (existing[0]) return { reentryAllowed: existing[0].reentry_allowed };
+        if (i.coreReentryAllowed === undefined) return {};
+        const inserted = (
+          await tx.execute(sql`
+            insert into scanner_event_policy (event_id, reentry_allowed, policy_seq, observed_at)
+            values (${i.eventId}, ${i.coreReentryAllowed}, 0, ${new Date(i.atMs)})
+            on conflict (event_id) do nothing
+            returning reentry_allowed
+          `)
+        ).rows as { reentry_allowed: boolean }[];
+        if (inserted[0]) return { reentryAllowed: inserted[0].reentry_allowed };
+        // 그 사이 다른 요청이 만들었다. 그 값을 쓴다
+        const again = (await tx.execute(sql`select reentry_allowed from scanner_event_policy where event_id = ${i.eventId}`)).rows as { reentry_allowed: boolean }[];
+        return again[0] ? { reentryAllowed: again[0].reentry_allowed } : {};
+      });
+    } catch {
+      try {
+        const copy = (await this.database.db.execute(sql`select reentry_allowed from scanner_event_policy where event_id = ${i.eventId}`)).rows as { reentry_allowed: boolean }[];
+        return copy[0] ? { reentryAllowed: copy[0].reentry_allowed } : {};
+      } catch {
+        return {};
+      }
+    }
+  }
+
   async package(i: { eventId: string; nowMs: number }): Promise<ScannerPackageView> {
     return this.database.transaction(
       async (tx) => {
@@ -141,7 +188,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
             from scan_event se
             left join scanner_device sd on sd.id = se.scanner_device_id
             where se.event_id = ${i.eventId} and se.result = 'PASS' and se.method <> 'VERIFY'
-            order by se.ticket_id, se.scanned_at_device + (coalesce(se.clock_offset_ms, 0) * interval '1 millisecond') desc, se.device_seq desc
+            order by se.ticket_id, se.scanned_at_device desc, se.device_seq desc
           `)
         ).rows as unknown as LatestScanRow[];
         const scanByTicket = new Map(scans.map((s) => [s.ticket_id, s]));
@@ -261,6 +308,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
   }): Promise<ScanBatchResult> {
     return this.database.transaction(async (tx) => {
       const acceptedIds: string[] = [];
+      const duplicateIds: string[] = [];
       const flags: GateFlagView[] = [];
       const stale = new Set(i.staleVersionIds ?? []);
       const makeFlag = async (ticket: TicketRow | undefined, ticketId: string, kind: GateFlagKind, knownSeq: number, scanId: string): Promise<void> => {
@@ -287,6 +335,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
         const existing = (await tx.execute(sql`select id from scan_event where event_id = ${i.eventId} and id = ${scan.id} limit 1`)).rows as { id: string }[];
         if (existing[0]) {
           acceptedIds.push(scan.id);
+          duplicateIds.push(scan.id);
           continue;
         }
         // 같은 티켓의 두 IN이 동시에 들어와도 한 트랜잭션씩 최신 PASS를 보게 한다.
@@ -303,7 +352,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
             select id, direction, scanned_at_device, clock_offset_ms, device_seq, known_seq
             from scan_event
             where event_id = ${i.eventId} and ticket_id = ${scan.ticketId} and result = 'PASS' and method <> 'VERIFY'
-            order by scanned_at_device + (coalesce(clock_offset_ms, 0) * interval '1 millisecond') asc, device_seq asc
+            order by scanned_at_device asc, device_seq asc
           `)
         ).rows as unknown as PassScanRow[];
         const latest = passRows.at(-1);
@@ -401,6 +450,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
           .returning({ id: scanEvent.id });
         if (!inserted[0]) {
           acceptedIds.push(scan.id);
+          duplicateIds.push(scan.id);
           continue;
         }
         acceptedIds.push(scan.id);
@@ -420,7 +470,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
           });
         }
       }
-      return { acceptedIds, flags, resyncRequired: stale.size > 0, staleIds: [...stale] };
+      return { acceptedIds, flags, resyncRequired: stale.size > 0, staleIds: [...stale], duplicateIds };
     });
   }
 

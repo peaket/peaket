@@ -36,9 +36,9 @@ interface StoredScan extends Omit<ScanEventInput, 'result' | 'reason'> {
   staffAccountId?: string;
 }
 
-/** 보정 시각(기기 시각 + 시계 오차). 순서·취소·마감 판정의 기준이다(offline-gate §7.1) */
-const correctedMs = (s: Pick<ScanEventInput, 'scannedAtDevice' | 'clockOffsetMs'>): number => Date.parse(s.scannedAtDevice) + (s.clockOffsetMs ?? 0);
-const orderOf = (a: Pick<ScanEventInput, 'scannedAtDevice' | 'clockOffsetMs' | 'deviceSeq'>, b: Pick<ScanEventInput, 'scannedAtDevice' | 'clockOffsetMs' | 'deviceSeq'>): number =>
+/** 보정 시각 = scannedAtDevice(이미 기기 시계 오차를 더한 값). 서버는 clockOffsetMs를 다시 더하지 않는다(offline-gate §7.1) */
+const correctedMs = (s: Pick<ScanEventInput, 'scannedAtDevice'>): number => Date.parse(s.scannedAtDevice);
+const orderOf = (a: Pick<ScanEventInput, 'scannedAtDevice' | 'deviceSeq'>, b: Pick<ScanEventInput, 'scannedAtDevice' | 'deviceSeq'>): number =>
   correctedMs(a) - correctedMs(b) || a.deviceSeq - b.deviceSeq;
 /** 마지막 보정 뒤 ±2분 [가정] 넘게 어긋나면 시각 불확실(offline-gate §7.1) */
 const CLOCK_UNCERTAIN_MS = 2 * 60_000;
@@ -79,6 +79,9 @@ export class MemoryScannerGateStore implements ScannerGateStore {
   readonly flags = new Map<string, StoredFlag>();
   readonly changeLog = new Map<string, StoredChange[]>();
   readonly seq = new Map<string, number>();
+  /** 회차 입장 정책 사본(scanner_event_policy). policySeq는 마지막 POLICY 변경 번호다 */
+  readonly policy = new Map<string, { reentryAllowed: boolean; policySeq: number }>();
+  readonly #policyChains = new Map<string, Promise<unknown>>();
 
   constructor(private readonly deviceKeys?: DeviceKeyStore) {}
 
@@ -122,6 +125,36 @@ export class MemoryScannerGateStore implements ScannerGateStore {
 
   async versionVector(eventId: string, nowMs: number): Promise<ScannerVersionVector> {
     return this.#versionVector(eventId, nowMs);
+  }
+
+  /** 정책 사본을 core 값과 견준다. 같은 바뀜이 겹쳐도 POLICY는 한 줄이다 */
+  syncPolicy(i: { eventId: string; coreReentryAllowed?: boolean; atMs: number }): Promise<{ reentryAllowed?: boolean; changedSeq?: number }> {
+    const prev = this.#policyChains.get(i.eventId) ?? Promise.resolve();
+    const next = prev.then(
+      () => this.#syncPolicy(i),
+      () => this.#syncPolicy(i),
+    );
+    this.#policyChains.set(
+      i.eventId,
+      next.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return next;
+  }
+
+  #syncPolicy(i: { eventId: string; coreReentryAllowed?: boolean }): { reentryAllowed?: boolean; changedSeq?: number } {
+    const copy = this.policy.get(i.eventId);
+    if (!copy) {
+      if (i.coreReentryAllowed === undefined) return {};
+      this.policy.set(i.eventId, { reentryAllowed: i.coreReentryAllowed, policySeq: 0 });
+      return { reentryAllowed: i.coreReentryAllowed };
+    }
+    if (i.coreReentryAllowed === undefined || i.coreReentryAllowed === copy.reentryAllowed) return { reentryAllowed: copy.reentryAllowed };
+    const seq = this.#appendChange(i.eventId, 'POLICY', { v: 1, reentryAllowed: i.coreReentryAllowed });
+    this.policy.set(i.eventId, { reentryAllowed: i.coreReentryAllowed, policySeq: seq });
+    return { reentryAllowed: i.coreReentryAllowed, changedSeq: seq };
   }
 
   async package(i: { eventId: string; nowMs: number }): Promise<ScannerPackageView> {
@@ -186,11 +219,13 @@ export class MemoryScannerGateStore implements ScannerGateStore {
     staleVersionIds?: readonly string[];
   }): Promise<ScanBatchResult> {
     const acceptedIds: string[] = [];
+    const duplicateIds: string[] = [];
     const createdFlags: GateFlagView[] = [];
     const stale = new Set(i.staleVersionIds ?? []);
     for (const scan of i.scans) {
       if (this.scans.has(scan.id)) {
         acceptedIds.push(scan.id);
+        duplicateIds.push(scan.id);
         continue;
       }
       const ticket = this.tickets.get(scan.ticketId);
@@ -293,7 +328,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
         });
       }
     }
-    return { acceptedIds, flags: createdFlags, resyncRequired: stale.size > 0, staleIds: [...stale] };
+    return { acceptedIds, flags: createdFlags, resyncRequired: stale.size > 0, staleIds: [...stale], duplicateIds };
   }
 
   async listFlags(i: { eventId: string; cursor?: string; limit: number }): Promise<GateFlagPage> {

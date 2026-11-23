@@ -137,6 +137,8 @@ export interface ScanBatchResult {
   resyncRequired: boolean;
   /** 낡은 버전 벡터로 판정한 기록 ID */
   staleIds: string[];
+  /** 이미 있던 클라이언트 ID(내부용, 지표 duplicate). 응답 본문에는 싣지 않는다 */
+  duplicateIds?: string[];
 }
 
 export class ScannerGateInputError extends Error {

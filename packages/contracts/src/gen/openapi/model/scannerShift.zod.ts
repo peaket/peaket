@@ -11,13 +11,17 @@
  */
 import * as zod from 'zod';
 
+export const scannerShiftPlacementVersionMin = 0;
+
+
 export const ScannerShift = zod.object({
   "serverTime": zod.iso.datetime({"offset":true}),
   "eventId": zod.string(),
   "reentryAllowed": zod.boolean(),
   "placement": zod.object({
   "gateZone": zod.string(),
-  "mode": zod.enum(['IN', 'OUT']).describe('OUT은 재입장 허용 회차만(그 밖 422)')
+  "mode": zod.enum(['IN', 'OUT']).describe('OUT은 재입장 허용 회차만(그 밖 422)'),
+  "version": zod.int().min(scannerShiftPlacementVersionMin).optional().describe('배치 행의 판(변경분 PLACEMENT의 version과 같은 값). 응답에만 싣는다(offline-gate §6.3, 추천 적용 2026-11-23, F-05-4)')
 }),
   "packageSeq": zod.int(),
   "role": zod.enum(['gate_staff', 'gate_lead']),

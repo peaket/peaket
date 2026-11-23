@@ -7,10 +7,15 @@
 import { CameraView } from "@peaket/ds/CameraView";
 import { ScannerShell } from "@peaket/ds/ScannerShell";
 import { ScanResult, type ScanTone } from "@peaket/ds/ScanResult";
-import { useCallback, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { liveRequested } from "../api/config";
 import type { ScannerLayout } from "../app/layout";
+import { liveRuntime } from "../app/live-runtime";
 import { PreviewSwitcher, usePreviewState } from "../app/preview";
+import { useScanLive, type ScanLive } from "../app/useScanLive";
 import { placement, recentScans, sync } from "../fixtures/scanner";
+import { messageOf, type JudgeOutcome } from "../judge/judge";
+import { createBarcodeDecoder, type BarcodeDecoder } from "../storage/decoder";
 import { bottomStyle, ManageLink, Strip, stripStyle } from "../shared/shell";
 import { OverrideDialog, OverrideInline } from "./OverrideForm";
 
@@ -80,8 +85,11 @@ function verdictFor(st: ScanState): Verdict | null {
 }
 
 export function ScanScreen() {
-  const { state, layout } = usePreviewState(SCAN_STATES, "통과");
+  const { state, layout, search } = usePreviewState(SCAN_STATES, "통과");
+  const live = useScanLive(search);
+  const liveOn = liveRequested(search) || live.mode !== "preview";
   // 상태가 바뀌면 화면 안의 켜고 끄는 값(확인 스캔 대기, 대화상자)을 처음으로 돌린다
+  if (liveOn) return <LiveScanBody live={live} layout={layout} />;
   return (
     <>
       <ScanBody key={state} st={state} layout={layout} />
@@ -350,6 +358,164 @@ function ScanBody({ st, layout }: { st: ScanState; layout: ScannerLayout }) {
       {dialog}
     </>
   );
+}
+
+function liveVerdict(o: JudgeOutcome): { tone: ScanTone; verdict: string; reason?: string; note?: string; icon?: string } {
+  if (o.result === "PASS") return { tone: "pass", verdict: "통과" };
+  if (o.result === "RETRY") return { tone: "check", verdict: "다시 찍어 주세요", icon: "refresh" };
+  if (o.result === "CHECK") return { tone: "check", verdict: "확인 필요", reason: messageOf(o), note: "현장 책임자 확인 전에는 들여보내지 마세요" };
+  return { tone: "reject", verdict: "거부", reason: messageOf(o) };
+}
+
+/** 실제 연결 판정 화면(SCR-034). 준비가 안 됐거나 카메라가 없으면 판정하지 않는다 */
+function LiveScanBody({ live, layout }: { live: ScanLive; layout: ScannerLayout }) {
+  const t = layout === "t";
+  const l = layout === "l";
+  const [decoder] = useState<BarcodeDecoder | undefined>(() => createBarcodeDecoder());
+  const detector = decoder !== undefined;
+  const videoRef = useQrLoop(live.ready && detector && live.verdict === undefined, decoder);
+  const mode = live.placement?.mode ?? "IN";
+  const zone = live.placement?.gateZone;
+  const strip = <Strip online={live.mode !== "error"} mode={mode === "OUT" ? "out" : "in"} queue={live.queue} />;
+  const v = live.verdict ? liveVerdict(live.verdict.outcome) : undefined;
+  const result = v ? (
+    <ScanResult
+      tone={v.tone}
+      verdict={v.verdict}
+      reason={v.reason}
+      note={v.note}
+      icon={v.icon}
+      next="2초 뒤 다음 스캔"
+      size={t ? "lg" : "md"}
+      layout={l ? "inline" : "stack"}
+      style={l ? { position: "absolute", inset: 0, zIndex: 5 } : t ? { minHeight: 600, flex: "none" } : { position: "absolute", left: 0, right: 0, bottom: 0, height: "50%", zIndex: 5 }}
+    />
+  ) : null;
+
+  const modeBar = (
+    <div
+      className={cx(mode === "OUT" ? "mode-out" : "mode-in", "row")}
+      style={{ justifyContent: "center", gap: 8, height: t ? 56 : l ? 44 : 48, fontSize: t ? 24 : 20, lineHeight: t ? "32px" : "27px", fontWeight: 800, flex: "none" }}
+    >
+      <i className={cx("ic", mode === "OUT" ? "ic-arrow-left" : "ic-arrow-right", t ? "ic-28" : "ic-24")} aria-hidden="true" />
+      {mode === "OUT" ? "퇴장 모드" : "입장 모드"}
+      {zone ? <span style={{ fontSize: 16, fontWeight: 700 }}>· {zone}</span> : null}
+    </div>
+  );
+
+  const notReady = (
+    <section className="card state" role="status" style={{ margin: 16, padding: "32px 20px" }} aria-labelledby="h-not-ready">
+      <span className="state-icon is-primary">
+        <i className="ic ic-refresh" aria-hidden="true" />
+      </span>
+      <h2 className={t ? "t-2xl" : "t-xl"} id="h-not-ready">
+        준비 안 됨
+      </h2>
+      <p className={t ? "t-lg fw-m" : "t-md"}>목록·시계 오차·기기 배치 가운데 하나가 없어 판정하지 않습니다. 근무 준비를 다시 마쳐 주세요.</p>
+    </section>
+  );
+
+  const cameraBroken = (
+    <section className="card state" role="alert" style={{ margin: 16, padding: "32px 20px" }} aria-labelledby="h-cam">
+      <span className="state-icon is-danger">
+        <i className="ic ic-alert" aria-hidden="true" />
+      </span>
+      <h2 className={t ? "t-2xl" : "t-xl"} id="h-cam">
+        예비 기기로 바꾸거나 현장 책임자를 부르세요
+      </h2>
+      <p className={t ? "t-lg fw-m" : "t-md"}>이 기기의 카메라를 쓸 수 없어 티켓을 판정할 수 없습니다.</p>
+    </section>
+  );
+
+  const viewfinder = (
+    <CameraView label="카메라 뷰파인더" frameWidth={t ? 150 : l ? 138 : 140} style={{ flex: 1, alignContent: "center", rowGap: 10 }}>
+      <p className={t ? "t-lg" : "t-md fw-b"}>QR을 네모 안에 맞춰 주세요</p>
+      {/* 실제 카메라 영상. BarcodeDetector가 이 요소를 읽는다(화면에는 보이지 않는다) */}
+      <video ref={videoRef} playsInline muted aria-hidden="true" style={{ width: 1, height: 1, opacity: 0, position: "absolute" }} />
+    </CameraView>
+  );
+
+  const body: ReactNode = !detector ? (
+    cameraBroken
+  ) : !live.ready ? (
+    notReady
+  ) : (
+    <>
+      {modeBar}
+      {viewfinder}
+    </>
+  );
+
+  if (l) {
+    return (
+      <ScannerShell strip={strip} stripStyle={stripStyle(layout)} bottomStyle={bottomStyle(layout)} mainStyle={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 400px" }}>
+        <div className="col" style={{ minWidth: 0 }}>
+          <h1 className="sr-only">티켓 스캔 및 판정</h1>
+          {body}
+        </div>
+        <div className="col" style={{ position: "relative", minWidth: 0, borderLeft: "1px solid var(--border)" }}>
+          <nav className="ss-bottom" aria-label="스캐너 메뉴" style={{ marginTop: "auto", padding: "6px 12px", justifyContent: "flex-end" }}>
+            <ManageLink />
+          </nav>
+          {result}
+        </div>
+      </ScannerShell>
+    );
+  }
+
+  return (
+    <ScannerShell strip={strip} stripStyle={stripStyle(layout)} bottom={<ManageLink />} bottomStyle={bottomStyle(layout)} mainClassName="col">
+      <h1 className="sr-only">티켓 스캔 및 판정</h1>
+      {body}
+      {result}
+    </ScannerShell>
+  );
+}
+
+/** BarcodeDetector로 150ms마다 한 번씩 읽는다. 같은 글자는 런타임이 3초 동안 버린다 */
+function useQrLoop(enabled: boolean, decoder: BarcodeDecoder | undefined) {
+  const ref = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => {
+    if (!enabled || !decoder) return;
+    let stopped = false;
+    let busy = false;
+    let stream: MediaStream | undefined;
+    const video = ref.current;
+    void (async () => {
+      try {
+        if (video && navigator.mediaDevices?.getUserMedia) {
+          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+          if (stopped) {
+            for (const track of stream.getTracks()) track.stop();
+            return;
+          }
+          video.srcObject = stream;
+          await video.play().catch(() => undefined);
+        }
+      } catch {
+        // 카메라가 없어도 BarcodeDetector 대역(시험)은 동작한다
+      }
+    })();
+    const timer = setInterval(() => {
+      if (stopped || busy || !video) return;
+      busy = true;
+      void decoder
+        .decode(video)
+        .then((raw) => {
+          if (raw && !stopped) void liveRuntime.scan(raw);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          busy = false;
+        });
+    }, 150);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      if (stream) for (const track of stream.getTracks()) track.stop();
+    };
+  }, [enabled, decoder]);
+  return ref;
 }
 
 function RecentScans() {

@@ -173,7 +173,7 @@ describe('ScannerGate 스캔 판정 [GAT-180]', () => {
     const first = await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, body: [s] });
     const second = await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, body: [s] });
     expect(first.acceptedIds).toEqual([s.id]);
-    expect(second).toEqual({ acceptedIds: [s.id], flags: [], resyncRequired: false, staleIds: [] });
+    expect(second).toEqual({ acceptedIds: [s.id], flags: [], resyncRequired: false, staleIds: [], duplicateIds: [s.id] });
     expect((await gate.changes(EVENT, 0, 5000, EVENT)).changes).toHaveLength(1);
   });
 

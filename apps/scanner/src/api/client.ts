@@ -1,14 +1,15 @@
-// 스캐너 API 클라이언트(SCR-033·SCR-035, offline-gate §6.1·§6.2).
-// - 스태프 토큰은 `Authorization: DPoP <토큰>`, 증명은 `DPoP` 헤더다(RFC 9449).
+// 스캐너 API 클라이언트(SCR-033·SCR-035, offline-gate §6.1·§6.2·§6.5).
+// - 스태프 토큰은 `Authorization: DPoP <토큰>`, 증명은 `DPoP` 헤더다(RFC 9449). 토큰이 없으면 기기 증명만 보낸다(ath 없음).
 // - 교차 출처라 자격 증명(쿠키·인증서)을 싣지 않는다(`credentials: 'omit'`, ADR-0065 결정 10).
-// - 서버 Problem(type·title)을 ScannerApiError로 옮겨 화면이 상태를 가른다.
-import { dpopProof, type DpopKey } from './dpop';
+// - 서버 Problem(type·title)을 ScannerApiError로 옮기고, 401의 WWW-Authenticate error를 authError로 싣는다.
+// - Node 시험(node --test)이 그대로 읽는 파일이다: 매개변수 속성 없이, 상대 가져오기는 .ts 확장자로 쓴다.
+import { dpopProof, type DpopKey } from './dpop.ts';
 
 export interface ScannerShiftResponse {
   serverTime: string;
   eventId: string;
   reentryAllowed: boolean;
-  placement: { gateZone: string; mode: 'IN' | 'OUT' };
+  placement: { gateZone: string; mode: 'IN' | 'OUT'; version?: number };
   packageSeq: number;
   role: 'gate_staff' | 'gate_lead';
   proxy: boolean;
@@ -72,21 +73,58 @@ export interface GateFlagView {
   createdAt: string;
 }
 
+/** openapi ScanEvent와 같은 모양(업로드 본문). 스캐너 앱이 큐에 싣는 값이다 */
+export interface ScanEventBody {
+  id: string;
+  eventId: string;
+  ticketId: string;
+  scannerSessionId: string;
+  direction: 'IN' | 'OUT';
+  method: 'QR' | 'OVERRIDE' | 'VERIFY';
+  result: 'PASS' | 'REJECT' | 'CHECK';
+  reason?: string;
+  overrideNote?: string;
+  gateZone?: string;
+  keyId?: string;
+  qrTimestamp?: string;
+  scannedAtDevice: string;
+  clockOffsetMs?: number;
+  knownSeq: number;
+  deviceSeq: number;
+  versionVector?: ScannerVersionVector;
+}
+
+export type ScannerAuthError = 'invalid_token' | 'invalid_dpop_proof';
+
 export class ScannerApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly type: string,
-    readonly title: string,
-  ) {
+  readonly status: number;
+  readonly type: string;
+  readonly title: string;
+  /** 401의 WWW-Authenticate(DPoP) error. 없으면 undefined */
+  readonly authError?: ScannerAuthError;
+
+  constructor(status: number, type: string, title: string, authError?: ScannerAuthError) {
     super(title || `스캐너 API 오류 ${status}`);
     this.name = 'ScannerApiError';
+    this.status = status;
+    this.type = type;
+    this.title = title;
+    if (authError !== undefined) this.authError = authError;
   }
+}
+
+function authErrorOf(header: string | null): ScannerAuthError | undefined {
+  if (!header) return undefined;
+  const m = /\berror="([^"]*)"/.exec(header);
+  if (!m) return undefined;
+  return m[1] === 'invalid_token' || m[1] === 'invalid_dpop_proof' ? m[1] : undefined;
 }
 
 export interface ScannerApiOptions {
   origin: string;
   key: DpopKey;
-  token: string;
+  /** 없으면 Authorization 머리를 싣지 않고 증명에 ath도 넣지 않는다(해제·만료 뒤 업로드) */
+  token?: string;
   fetch?: typeof fetch;
   now?: () => number;
 }
@@ -95,11 +133,15 @@ export class ScannerApi {
   readonly #origin: string;
   readonly #fetch: typeof fetch;
   readonly #now: () => number;
+  readonly #token: string | undefined;
+  readonly #key: DpopKey;
 
-  constructor(private readonly o: ScannerApiOptions) {
+  constructor(o: ScannerApiOptions) {
     this.#origin = o.origin.replace(/\/+$/, '');
     this.#fetch = o.fetch ?? globalThis.fetch.bind(globalThis);
     this.#now = o.now ?? Date.now;
+    this.#token = o.token;
+    this.#key = o.key;
   }
 
   shift(): Promise<ScannerShiftResponse> {
@@ -136,12 +178,13 @@ export class ScannerApi {
 
   async #send(method: string, path: string, body?: unknown): Promise<Response> {
     const url = `${this.#origin}${path}`;
-    const proof = await dpopProof({ key: this.o.key, method, url, token: this.o.token, nowMs: this.#now() });
+    const token = this.#token;
+    const proof = await dpopProof({ key: this.#key, method, url, ...(token !== undefined ? { token } : {}), nowMs: this.#now() });
     const headers: Record<string, string> = {
-      authorization: `DPoP ${this.o.token}`,
       dpop: proof,
       accept: 'application/json',
     };
+    if (token !== undefined) headers.authorization = `DPoP ${token}`;
     if (body !== undefined) headers['content-type'] = 'application/json';
     const res = await this.#fetch(url, {
       method,
@@ -159,6 +202,7 @@ export class ScannerApi {
     } catch {
       // 본문이 Problem이 아니면 상태만 남긴다
     }
-    throw new ScannerApiError(res.status, type, title);
+    const auth = authErrorOf(res.headers.get('www-authenticate'));
+    throw new ScannerApiError(res.status, type, title, auth);
   }
 }

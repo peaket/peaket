@@ -83,7 +83,7 @@ export class ScannerShift {
       serverTime: new Date(now).toISOString(),
       eventId,
       reentryAllowed: policy?.reentryAllowed ?? false,
-      placement: { gateZone: placement.gateZone, mode: placement.mode },
+      placement: { gateZone: placement.gateZone, mode: placement.mode, version: placement.version },
       packageSeq: vector.seq,
       role: ctx.role,
       proxy: ctx.proxy,

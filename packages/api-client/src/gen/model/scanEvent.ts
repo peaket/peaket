@@ -37,7 +37,7 @@ export interface ScanEvent {
   gateZone?: string;
   keyId?: string;
   qrTimestamp?: string;
-  /** 보정 시각 */
+  /** 보정 시각(기기 시각 + clockOffsetMs). 서버는 clockOffsetMs를 다시 더하지 않는다(offline-gate §7.1, 추천 적용 2026-11-23, F-05-4) */
   scannedAtDevice: string;
   clockOffsetMs?: number;
   /** 판정 때 반영한 서버 변경 일련번호(두 칸 버전 벡터의 첫 칸) */

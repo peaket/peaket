@@ -23,6 +23,8 @@ export interface ScannerPlacementRecord {
 export interface ScannerPlacementView {
   gateZone: string;
   mode: ScannerPlacementMode;
+  /** 배치 행의 판. 변경분 PLACEMENT의 version과 같은 값이고, 판이 없는 옛 응답은 0 */
+  version: number;
 }
 
 /** 기기의 마지막 근무 준비 보고 */

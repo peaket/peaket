@@ -283,14 +283,15 @@ export function SetupScreen() {
   ];
   const shown = reasons.filter((r) => r.on);
   const startScan = () => {
+    const target = live.mode === "live" ? "/scan?live=1" : "/scan";
     if (!liveShift) {
-      navigate("/scan");
+      navigate(target);
       return;
     }
     void live
       .reportReadiness()
-      .then(() => navigate("/scan"))
-      .catch(() => navigate("/scan"));
+      .then(() => navigate(target))
+      .catch(() => navigate(target));
   };
   const startArea: ReactNode = ready ? (
     <div className="col" style={{ gap: t ? 12 : 10, marginTop: "auto" }}>

@@ -27,7 +27,7 @@ export const ScanEvent = zod.object({
   "gateZone": zod.string().optional(),
   "keyId": zod.string().optional(),
   "qrTimestamp": zod.iso.datetime({"offset":true}).optional(),
-  "scannedAtDevice": zod.iso.datetime({"offset":true}).describe('보정 시각'),
+  "scannedAtDevice": zod.iso.datetime({"offset":true}).describe('보정 시각(기기 시각 + clockOffsetMs). 서버는 clockOffsetMs를 다시 더하지 않는다(offline-gate §7.1, 추천 적용 2026-11-23, F-05-4)'),
   "clockOffsetMs": zod.int().optional(),
   "knownSeq": zod.int().describe('판정 때 반영한 서버 변경 일련번호(두 칸 버전 벡터의 첫 칸)'),
   "deviceSeq": zod.int().describe('기기 일련번호(두 번째 칸)'),

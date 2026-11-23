@@ -11,9 +11,13 @@
  */
 import * as zod from 'zod';
 
+export const scannerPlacementVersionMin = 0;
+
+
 export const ScannerPlacement = zod.object({
   "gateZone": zod.string(),
-  "mode": zod.enum(['IN', 'OUT']).describe('OUT은 재입장 허용 회차만(그 밖 422)')
+  "mode": zod.enum(['IN', 'OUT']).describe('OUT은 재입장 허용 회차만(그 밖 422)'),
+  "version": zod.int().min(scannerPlacementVersionMin).optional().describe('배치 행의 판(변경분 PLACEMENT의 version과 같은 값). 응답에만 싣는다(offline-gate §6.3, 추천 적용 2026-11-23, F-05-4)')
 })
 
 export type ScannerPlacement = zod.input<typeof ScannerPlacement>;

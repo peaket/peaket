@@ -59,6 +59,10 @@ export interface ScannerWiring {
   mtlsSecret?: string;
   /** 스캐너 PWA 출처(config.scannerPwaOrigin). 없으면 운영 기본 출처다(O-T35) */
   scannerPwaOrigin?: string;
+  /** 스캔 기록 지표(scanner_scans_received_total). 없으면 세지 않는다 */
+  onScanStored?: (result: 'PASS' | 'REJECT' | 'CHECK' | 'duplicate') => void;
+  /** POLICY 변경 지표·로그(scanner_policy_changes_total, scanner.policy-changed) */
+  onPolicyChanged?: (i: { eventId: string; reentryAllowed: boolean; seq: number }) => void;
 }
 
 @Module({})
@@ -110,6 +114,8 @@ export class ScannerModule {
             ...(o.policy ? { policy: o.policy } : {}),
             ...(o.sessionLookup ? { sessions: o.sessionLookup } : {}),
             ...(o.maxOfflineMs !== undefined ? { maxOfflineMs: o.maxOfflineMs } : {}),
+            ...(o.onScanStored ? { onScanStored: o.onScanStored } : {}),
+            ...(o.onPolicyChanged ? { onPolicyChanged: o.onPolicyChanged } : {}),
           }),
         inject: [SCANNER_GATE_STORE, CLOCK, SCANNER_DEVICE_STORE],
       },

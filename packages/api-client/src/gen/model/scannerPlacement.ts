@@ -15,4 +15,9 @@ export interface ScannerPlacement {
   gateZone: string;
   /** OUT은 재입장 허용 회차만(그 밖 422) */
   mode: ScannerPlacementMode;
+  /**
+     * 배치 행의 판(변경분 PLACEMENT의 version과 같은 값). 응답에만 싣는다(offline-gate §6.3, 추천 적용 2026-11-23, F-05-4)
+     * @minimum 0
+     */
+  version?: number;
 }

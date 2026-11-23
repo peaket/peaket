@@ -57,6 +57,10 @@ export interface ScannerGateDeps {
   sessions?: Pick<ScannerSessionCheck, 'check'>;
   /** 오프라인 허용 최대 시간(ms). 없으면 24시간 [가정] */
   maxOfflineMs?: number;
+  /** 처음 저장한 기록의 판정·중복 지표(scanner_scans_received_total). 없으면 세지 않는다 */
+  onScanStored?: (result: 'PASS' | 'REJECT' | 'CHECK' | 'duplicate') => void;
+  /** POLICY 변경분을 적었을 때(로그 줄·지표, offline-gate §10.2) */
+  onPolicyChanged?: (i: { eventId: string; reentryAllowed: boolean; seq: number }) => void;
 }
 
 export class ScannerGate {
@@ -69,16 +73,22 @@ export class ScannerGate {
   async package(eventIdRaw: unknown, sessionEventId: string | undefined): Promise<ScannerPackageView> {
     const eventId = assertEventId(eventIdRaw);
     this.#sameEvent(eventId, sessionEventId);
-    const p = await this.d.store.package({ eventId, nowMs: this.d.clock.now() });
-    // 재입장 정책의 원본은 core-svc 회차다. 정책을 못 읽으면 닫힌 쪽(false)으로 둔다(C1-10).
-    const policy = await this.#policy(eventId);
-    return { ...p, reentryAllowed: policy?.reentryAllowed ?? false, versionVector: { ...p.versionVector, maxOfflineMs: this.#maxOfflineMs } };
+    const now = this.d.clock.now();
+    // 재입장 정책의 원본은 core-svc 회차다. 사본을 먼저 맞춘 뒤 목록을 읽어 POLICY 번호까지 함께 싣는다(C1-10, §6.3).
+    const core = await this.#policy(eventId);
+    const synced = await this.d.store.syncPolicy({ eventId, ...(core ? { coreReentryAllowed: core.reentryAllowed } : {}), atMs: now });
+    this.#policyChanged(eventId, synced);
+    const p = await this.d.store.package({ eventId, nowMs: now });
+    return { ...p, reentryAllowed: synced.reentryAllowed ?? false, versionVector: { ...p.versionVector, maxOfflineMs: this.#maxOfflineMs } };
   }
 
   async changes(eventIdRaw: unknown, afterRaw: unknown, limitRaw: unknown, sessionEventId: string | undefined, deviceId?: string): Promise<ScannerChangesView> {
     const eventId = assertEventId(eventIdRaw);
     this.#sameEvent(eventId, sessionEventId);
     const now = this.d.clock.now();
+    const core = await this.#policy(eventId);
+    const synced = await this.d.store.syncPolicy({ eventId, ...(core ? { coreReentryAllowed: core.reentryAllowed } : {}), atMs: now });
+    this.#policyChanged(eventId, synced);
     const c = await this.d.store.changes({ eventId, after: assertAfter(afterRaw), limit: assertChangesLimit(limitRaw), nowMs: now });
     // 신선도 경보(O-T20)의 기준은 '변경분을 실제로 받은 시각'이다. 실패해도 응답을 막지 않는다.
     if (deviceId !== undefined && this.d.devices) await this.d.devices.touchChanges(deviceId, now).catch(() => undefined);
@@ -138,19 +148,27 @@ export class ScannerGate {
         }
       }
     }
-    return this.d.store.acceptScans({
-      eventId,
-      deviceId: i.deviceId,
-      ...(i.staffAccountId !== undefined ? { staffAccountId: i.staffAccountId } : {}),
-      ...(i.sessionId !== undefined ? { sessionId: i.sessionId } : {}),
-      ...(placement ? { placement: { gateZone: placement.gateZone, mode: placement.mode } } : {}),
-      ...(policy ? { reentryAllowed: policy.reentryAllowed } : {}),
-      ...(policy?.entryClosesAtMs !== undefined ? { entryClosesAtMs: policy.entryClosesAtMs } : {}),
-      ...(Object.keys(sessions).length > 0 ? { sessions } : {}),
-      scans,
-      nowMs: now,
-      staleVersionIds: staleIds,
-    });
+    return this.d.store
+      .acceptScans({
+        eventId,
+        deviceId: i.deviceId,
+        ...(i.staffAccountId !== undefined ? { staffAccountId: i.staffAccountId } : {}),
+        ...(i.sessionId !== undefined ? { sessionId: i.sessionId } : {}),
+        ...(placement ? { placement: { gateZone: placement.gateZone, mode: placement.mode } } : {}),
+        ...(policy ? { reentryAllowed: policy.reentryAllowed } : {}),
+        ...(policy?.entryClosesAtMs !== undefined ? { entryClosesAtMs: policy.entryClosesAtMs } : {}),
+        ...(Object.keys(sessions).length > 0 ? { sessions } : {}),
+        scans,
+        nowMs: now,
+        staleVersionIds: staleIds,
+      })
+      .then((r) => {
+        if (this.d.onScanStored) {
+          const dup = new Set(r.duplicateIds ?? []);
+          for (const s of scans) this.d.onScanStored(dup.has(s.id) ? 'duplicate' : s.result);
+        }
+        return r;
+      });
   }
 
   async listFlags(i: { eventIdRaw: unknown; sessionEventId: string | undefined; cursor: unknown; limit: unknown }): Promise<GateFlagPage> {
@@ -186,6 +204,11 @@ export class ScannerGate {
     });
     if (!flag) throw new ScannerFlagNotFound();
     return flag;
+  }
+
+  #policyChanged(eventId: string, synced: { reentryAllowed?: boolean; changedSeq?: number }): void {
+    if (synced.changedSeq === undefined || synced.reentryAllowed === undefined) return;
+    this.d.onPolicyChanged?.({ eventId, reentryAllowed: synced.reentryAllowed, seq: synced.changedSeq });
   }
 
   async #policy(eventId: string) {

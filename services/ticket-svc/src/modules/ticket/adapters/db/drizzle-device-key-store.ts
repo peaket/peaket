@@ -83,7 +83,12 @@ export class DrizzleDeviceKeyStore implements DeviceKeyStore, DeviceKeyNoticeSto
         reason: i.reason,
         registeredAt: new Date(i.nowMs),
       });
-      await this.o.changes?.append(tx, ticket.event_id, 'KEY_REGISTERED', { v: 1, ticketId: i.ticketId, keyId: keyIdTextOf(i.keyId) });
+      await this.o.changes?.append(tx, ticket.event_id, 'KEY_REGISTERED', {
+        v: 1,
+        ticketId: i.ticketId,
+        keyId: keyIdTextOf(i.keyId),
+        publicKey: publicKeyTextOf(i.publicKey),
+      });
       // 입장 키 알림 행(ADR-0363 결정 4): 같은 트랜잭션에 한 행. 보내기 반복(application/device-key-notices.ts)이 core-svc로 보낸다
       const type = deviceKeyNoticeTypeOf({ reason: i.reason, hadActive: old !== undefined, started });
       const noticeId = type ? (i.noticeId ?? randomUUID()) : undefined;

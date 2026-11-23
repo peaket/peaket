@@ -226,9 +226,10 @@ describe('R-622 C1-02 서버 재판정: 배치·구역·모드·세션 창·마�
   test('C1-10 package.reentryAllowed는 core 정책을 따르고, 못 읽으면 닫힌 쪽(false)이다', async () => {
     const open = new ScannerGate({ store, clock: fakeClock({ now: NOW }), policy: { get: async () => ({ promoterId: ACCOUNT, reentryAllowed: true }) } });
     expect((await open.package(EVENT, EVENT)).reentryAllowed).toBe(true);
-    const broken = new ScannerGate({ store, clock: fakeClock({ now: NOW }), policy: { get: async () => Promise.reject(new Error('core down')) } });
+    // 사본이 없는 기기에서 core를 못 읽으면 닫힌 쪽이다(사본이 있으면 사본 값을 쓴다, F-05-4 §6.3)
+    const broken = new ScannerGate({ store: new MemoryScannerGateStore(), clock: fakeClock({ now: NOW }), policy: { get: async () => Promise.reject(new Error('core down')) } });
     expect((await broken.package(EVENT, EVENT)).reentryAllowed).toBe(false);
-    const absent = new ScannerGate({ store, clock: fakeClock({ now: NOW }) });
+    const absent = new ScannerGate({ store: new MemoryScannerGateStore(), clock: fakeClock({ now: NOW }) });
     expect((await absent.package(EVENT, EVENT)).reentryAllowed).toBe(false);
   });
 });
@@ -287,8 +288,8 @@ describe('R-622 C1-03 중복 IN은 보정 시각이 가장 이른 기록이 정�
   test('기기 시각+시계 오차가 더 이른 늦은 업로드가 정상이 되고, 먼저 통과한 기록은 DUPLICATE로 내린다', async () => {
     const later = scan({ ticketId: T.a, scannedAtDevice: new Date(NOW + 10_000).toISOString(), deviceSeq: 10 });
     expect((await upload([later])).flags).toEqual([]);
-    // 기기 시각은 더 늦지만 -15초 보정으로 실제 입장은 5초로 앞선다.
-    const earlier = scan({ ticketId: T.a, scannedAtDevice: new Date(NOW + 20_000).toISOString(), clockOffsetMs: -15_000, deviceSeq: 20 });
+    // scannedAtDevice가 이미 보정 시각이다(F-05-4 RV-02). 더 이른 보정 시각을 그대로 싣는다
+    const earlier = scan({ ticketId: T.a, scannedAtDevice: new Date(NOW + 5_000).toISOString(), clockOffsetMs: -15_000, deviceSeq: 20 });
     const r = await upload([earlier]);
     expect(r.flags).toEqual([expect.objectContaining({ ticketId: T.a, kind: 'DUPLICATE' })]);
     expect(store.scans.get(earlier.id)).toMatchObject({ result: 'PASS' });
@@ -320,13 +321,13 @@ describe('R-622 C1-03 중복 IN은 보정 시각이 가장 이른 기록이 정�
 
 describe('R-622 C1-04 AFTER_CANCEL은 취소 접수 시각과 비교한다', () => {
   test('취소 전 보정 시각의 입장은 PASS, 취소 뒤 입장만 TICKET_CANCELLED·AFTER_CANCEL이다', async () => {
-    // 기기 시각은 취소 뒤지만 -40초 보정으로 취소 10초 전 입장이다.
-    const before = scan({ ticketId: T.cancelled, scannedAtDevice: new Date(NOW + 90_000).toISOString(), clockOffsetMs: -40_000 });
+    // scannedAtDevice가 이미 보정 시각이다(F-05-4 RV-02). 취소 10초 전 보정 시각으로 입장한다.
+    const before = scan({ ticketId: T.cancelled, scannedAtDevice: new Date(NOW + 50_000).toISOString(), clockOffsetMs: -40_000 });
     expect((await upload([before])).flags).toEqual([]);
     expect(store.scans.get(before.id)).toMatchObject({ result: 'PASS' });
 
-    // 기기 시각은 취소 전이지만 +20초 보정으로 취소 10초 뒤 입장이다.
-    const after = scan({ ticketId: T.cancelled, scannedAtDevice: new Date(NOW + 50_000).toISOString(), clockOffsetMs: 20_000 });
+    // 취소 10초 뒤 보정 시각으로 입장한다.
+    const after = scan({ ticketId: T.cancelled, scannedAtDevice: new Date(NOW + 70_000).toISOString(), clockOffsetMs: 20_000 });
     const rejected = await upload([after]);
     expect(rejected.flags).toEqual([expect.objectContaining({ ticketId: T.cancelled, kind: 'AFTER_CANCEL' })]);
     expect(store.scans.get(after.id)).toMatchObject({ result: 'REJECT', reason: 'TICKET_CANCELLED' });

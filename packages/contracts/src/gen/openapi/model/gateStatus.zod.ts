@@ -11,13 +11,17 @@
  */
 import * as zod from 'zod';
 
+export const gateStatusDevicesItemPlacementVersionMin = 0;
+
+
 export const GateStatus = zod.object({
   "devices": zod.array(zod.object({
   "deviceId": zod.string().optional(),
   "name": zod.string().optional(),
   "placement": zod.object({
   "gateZone": zod.string(),
-  "mode": zod.enum(['IN', 'OUT']).describe('OUT은 재입장 허용 회차만(그 밖 422)')
+  "mode": zod.enum(['IN', 'OUT']).describe('OUT은 재입장 허용 회차만(그 밖 422)'),
+  "version": zod.int().min(gateStatusDevicesItemPlacementVersionMin).optional().describe('배치 행의 판(변경분 PLACEMENT의 version과 같은 값). 응답에만 싣는다(offline-gate §6.3, 추천 적용 2026-11-23, F-05-4)')
 }).optional(),
   "ready": zod.boolean().optional(),
   "packageSeq": zod.int().optional(),

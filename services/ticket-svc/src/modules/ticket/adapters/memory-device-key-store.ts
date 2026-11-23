@@ -48,6 +48,9 @@ export class MemoryDeviceKeyStore implements DeviceKeyStore, DeviceKeyNoticeStor
   /** 입장 키 알림 행(device_key_notice). 시험이 행 수·종류를 본다 */
   readonly notices: StoredNotice[] = [];
 
+  /** 변경 기록을 남길 곳(시험·로컬). 없으면 키만 바꾼다 */
+  constructor(private readonly changes?: (eventId: string, kind: string, payload: Record<string, unknown>) => void) {}
+
   seedTicket(t: MemoryDeviceKeyTicket): void {
     this.tickets.set(t.ticketId, { ...t });
   }
@@ -84,8 +87,10 @@ export class MemoryDeviceKeyStore implements DeviceKeyStore, DeviceKeyNoticeStor
       if (recentRotations > 0) return { kind: 'REISSUE_LIMIT' };
     }
     if (active) active.revokedAtMs = i.nowMs;
+    if (active) this.changes?.(ticket.eventId, 'KEY_REVOKED', { v: 1, ticketId: i.ticketId, keyId: keyIdTextOf(active.keyId) });
     list.push({ keyId: new Uint8Array(i.keyId), publicKey: new Uint8Array(i.publicKey), reason: i.reason, registeredAtMs: i.nowMs });
     this.keys.set(i.ticketId, list);
+    this.changes?.(ticket.eventId, 'KEY_REGISTERED', { v: 1, ticketId: i.ticketId, keyId: keyIdTextOf(i.keyId), publicKey: publicKeyTextOf(i.publicKey) });
     // 입장 키 알림 행(ADR-0363 결정 4): 등록과 같은 자리에서 한 행
     const type = deviceKeyNoticeTypeOf({ reason: i.reason, hadActive: active !== undefined, started });
     const noticeId = type ? (i.noticeId ?? randomUUID()) : undefined;
