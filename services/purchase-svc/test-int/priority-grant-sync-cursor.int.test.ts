@@ -2,7 +2,7 @@
 // 실제 PostgreSQL의 priority_grant 150행을 두고 PriorityGrantSync를 두 번 돌린다. 실패한 행은 다음 틱에 다시 온다.
 import { randomUUID } from 'node:crypto';
 import { createDatabase, type Database } from '@peaket/platform';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { migratePurchase } from '../scripts/migrate.mjs';
 import { PriorityGrantSync } from '../src/modules/priority/application/sync-priority-grants.js';
 import { DrizzlePriorityGrantStore } from '../src/modules/priority/adapters/db/drizzle-priority-grant-store.js';
@@ -59,6 +59,12 @@ beforeAll(async () => {
   database = createDatabase({ url: pg.url, profile: 'general', max: 8, applicationName: 'purchase-priority-cursor-int' });
   store = new DrizzlePriorityGrantStore(database);
 }, 180_000);
+
+// 앞 시험이 남긴 150행이 다음 시험의 목록 앞을 차지해 두 틱 안에 새 행이 오지 않는다(CI 실행 45250324076).
+// 시험마다 표를 비워 각 시험이 자기 행만 본다.
+beforeEach(async () => {
+  await database.pool.query('delete from priority_grant');
+});
 
 afterAll(async () => {
   await database?.close();
