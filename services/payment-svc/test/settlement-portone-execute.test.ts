@@ -206,6 +206,25 @@ describe('J-T41 ② 지급일 09:00 KST 실행 건', () => {
     expect(sent.map((c) => [c.kind, c.sourceId, c.detail])).toEqual([['PORTONE_PAYOUT_EXECUTION', x.batchId, request.detail]]);
   });
 
+  test('J-T41 ② 뺀 정산서 45건이면 실행 건 detail은 2,000자 이하·꼬리 외 M건이고 보류 45건은 모두 쓰인다(계획 §5.1 (파) (나), TR-09)', async () => {
+    const items = Array.from({ length: 46 }, (_v, i) => ({ P: partner(i === 0 ? {} : { agencySyncPending: true }).P, amount: 100_000 + i }));
+    const { batchId, ss } = await approvedBatch(items);
+    await execute(batchId);
+    at(NINE_KST);
+    await expect(h.settlements.preparePortoneExecution(PAYOUT_DATE)).resolves.toEqual({ cases: 1, held: 45, halted: false });
+    const held = ss.filter((s) => h.store.statements.get(s.statementId)?.status === 'HELD');
+    expect(held).toHaveLength(45);
+    expect(events('PAYOUT_HELD')).toHaveLength(45);
+    const request = [...h.store.caseRequests.values()].find((c) => c.eventKey === `portone-execution:${batchId}`)!;
+    const detail = request.detail ?? '';
+    expect([...detail].length).toBeLessThanOrEqual(2_000);
+    const m = / 외 (\d+)건\(전체는 SCR-049 묶음 상세\)$/u.exec(detail);
+    expect(m).not.toBeNull();
+    expect(detail.startsWith('뺀 정산서 45건: ')).toBe(true);
+    const shown = detail.slice('뺀 정산서 45건: '.length, m!.index).split(', ');
+    expect(shown.length + Number(m![1])).toBe(45);
+  });
+
   test('J-T41 ② 보류 끝이 지급일 09:00 KST와 같으면(이미 끝남) 빼지 않는다', async () => {
     const P = partner({ holdUntil: NINE_KST });
     const { batchId, ss } = await approvedBatch([{ P: P.P, amount: 5_000_000 }]);

@@ -10,11 +10,11 @@ import assert from 'node:assert/strict';
 import { payoutAccountView, payoutProblemMessage } from './payout-live.ts';
 
 // 은행 이름은 화면이 받은 목록에서 고른다. 시험 목록의 이름은 일부러 실제 목록과 다른 글을 섞는다(코드 상수를 옮겨 오지 않았는지 본다).
-const BANKS = { '004': 'KB국민은행', '088': '신한은행', '090': '카카오뱅크' };
+const BANKS = { '06': 'KB국민은행', '88': '신한은행', '90': '카카오뱅크' };
 const FULL = '98765432101234';
 
 const raw = (over = {}) => ({
-  bankCode: '088',
+  bankCode: '88',
   payoutAccountLast4: '1234',
   holderVerified: true,
   holdUntil: null,

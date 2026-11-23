@@ -163,7 +163,15 @@ describe('포트원 플랫폼 전송 요청 모양(계약 시험)', () => {
     ).resolves.toEqual({ partnerId });
     const reg = fake.calls('POST /platform/partners');
     expect(reg).toHaveLength(1);
-    expect(reg[0]!.body).toMatchObject({ id: partnerId, name: HOLDER, defaultContractId: PORTONE_CONTRACT_ID, account: { bank: BANK_ENUM, number: ACCOUNT, holder: HOLDER } });
+    // 본문은 값까지 본다(TR-06): 파트너 ID·상호·연락처·계좌(포트원 Bank 열거값·KRW)·기본 계약·사업자 정보
+    expect(reg[0]!.body).toEqual({
+      id: partnerId,
+      name: HOLDER,
+      contact: { name: '김대표', email: 'pay@peaket.test', phoneNumber: '0212345678' },
+      account: { bank: BANK_ENUM, currency: 'KRW', number: ACCOUNT, holder: HOLDER },
+      defaultContractId: PORTONE_CONTRACT_ID,
+      type: { business: { companyName: HOLDER, representativeName: '김대표', businessRegistrationNumber: '1234567890' } },
+    });
     await t.updatePartnerAccount(partnerId, { bankCode: '06', accountNumber: '06476543210987', holderName: HOLDER });
     expect(fake.calls('PATCH /platform/partners/{id}').map((c) => [c.path, c.body])).toEqual([[`/platform/partners/${partnerId}`, { account: expect.objectContaining({ bank: 'KOOKMIN', number: '06476543210987', holder: HOLDER }) }]]);
     const got = await t.getPartner(partnerId);

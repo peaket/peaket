@@ -134,7 +134,8 @@ test('J-T42 ② 실무자는 이의 제기가 비활성이다', () => {
 
 test('J-T42 ③ 정산서 탭 실제 판에는 목업 값이 0건이다(보드는 ?state= 미리보기에만)', () => {
   assert.ok(liveFiles.length > 0, '실제 판 파일이 없어 이 검사가 빈 글을 본다');
-  assert.doesNotMatch(live, /from '\.\.\/\.\.\/model\/settlement'|from '\.\.\/model\/settlement'|\bstatements\b\s*\.|settleTotals|PAYOUT_HOLDS/);
+  // 목업 원천 가져오기와 목업 값만 금지한다(실제 판의 지역 변수 statements.map 같은 바른 코드는 막지 않는다, 시험 리뷰 TR-19)
+  assert.doesNotMatch(live, /from '\.\.\/\.\.\/model\/settlement'|from '\.\.\/model\/settlement'|settleTotals|PAYOUT_HOLDS/);
   for (const mock of ['290,004,000', '251,105,800', '20,167,400', '10/30(금)', '10/28(수)', '10/25(일) 18:00 KST']) {
     assert.equal(live.includes(mock), false, `실제 판에 목업 값 ${mock}이 있다`);
   }

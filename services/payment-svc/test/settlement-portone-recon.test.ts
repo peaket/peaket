@@ -107,7 +107,7 @@ describe('J-T20 포트원 출금 대사', () => {
     ['② 금액이 다른 출금', (id: string) => withdrawal({ id: 'at-x', payoutId: id, amount: 12_192_999 })],
     ['③ 다른 계좌로 간 지급', (id: string) => withdrawal({ id: 'at-x', payoutId: id, amount: 12_193_000, bank: 'KOOKMIN', accountNumber: '06499999999999' })],
     ['③ 예금주가 다른 지급', (id: string) => withdrawal({ id: 'at-x', payoutId: id, amount: 12_193_000, holderName: '다른회사' })],
-  ])('J-T20 %s는 다음 30분 동기화에서 SEV2와 CS 건이 하나씩이고, 그다음 동기화에서 다시 생기지 않는다 [ASVS v5.0.0-2.2.3]', async (_name, make) => {
+  ])('J-T20 ②③ %s는 다음 30분 동기화에서 SEV2와 CS 건이 하나씩이고, 그다음 동기화에서 다시 생기지 않는다 [ASVS v5.0.0-2.2.3]', async (_name, make) => {
     const A = partner();
     const x = await paid(A.P, 12_193_000, 1);
     fake.accountTransfers.push(make(x.portonePayoutId));
@@ -165,17 +165,41 @@ describe('J-T20 포트원 출금 대사', () => {
     fake.accountTransfers.push(withdrawal({ id: 'at-rogue-2', payoutId: null, withdrawalType: 'TRANSFER', amount: 5_000_000, bank: 'WOORI', accountNumber: '10055555555555', holderName: '모르는사람' }));
     at(COMPLETED_AT + 30 * 60_000);
     await h.settlements.reconcilePortoneTransfers();
+    // 실행 멈춤 건: 종류 PORTONE_PAYOUT_EXECUTION, 사건 키 portone-execution-halt:{묶음 ID}:{날짜}, detail에 '실행 멈춤'과 그 이체 ID(계획 I-13, TR-08)
+    const haltKey = `portone-execution-halt:${b.batchId}:${PAYOUT_DATE}`;
+    const halt = h.store.caseRequests.get(haltKey);
+    expect(halt).toMatchObject({ eventKey: haltKey, kind: 'PORTONE_PAYOUT_EXECUTION', sourceId: b.batchId });
+    expect(halt!.detail).toContain('실행 멈춤');
+    expect(halt!.detail).toContain('at-rogue-2');
     const halted = [...h.store.caseRequests.values()].filter((c) => (c.detail ?? '').includes('실행 멈춤'));
-    expect(halted).toHaveLength(1);
-    expect(halted[0]!.eventKey).not.toBe(opened.eventKey);
-    expect(halted[0]!.sourceId === b.batchId || (halted[0]!.detail ?? '').includes(b.batchId)).toBe(true);
+    expect(halted.map((c) => c.eventKey)).toEqual([haltKey]);
+    await h.settlements.retryPayoutCases();
+    expect(ops.cases.filter((c) => c.eventKey === haltKey).map((c) => [c.kind, c.sourceId, c.detail])).toEqual([['PORTONE_PAYOUT_EXECUTION', b.batchId, halt!.detail]]);
     // 처음 연 건의 글은 바뀌지 않는다
     expect(h.store.caseRequests.get(opened.eventKey)?.detail).toBe(opened.detail);
-    expect(leaks(halted[0]!.detail ?? '', '10055555555555', '모르는사람')).toEqual([]);
+    expect(leaks(halt!.detail ?? '', '10055555555555', '모르는사람')).toEqual([]);
     // 다음 tick에 다시 만들지 않는다
     at(COMPLETED_AT + 60 * 60_000);
     await h.settlements.reconcilePortoneTransfers();
     expect([...h.store.caseRequests.values()].filter((c) => (c.detail ?? '').includes('실행 멈춤'))).toHaveLength(1);
+  });
+
+  test('J-T20 ② 운영 경보 받기가 503이면 경보 요청이 보낸 시각 없이 남고 다음 tick에 보낸다(F-19, TR-10)', async () => {
+    const A = partner();
+    const x = await paid(A.P, 12_193_000, 1);
+    fake.accountTransfers.push(withdrawal({ id: 'at-x', payoutId: x.portonePayoutId, amount: 1 }));
+    at(COMPLETED_AT + 30 * 60_000);
+    await h.settlements.reconcilePortoneTransfers();
+    ops.mode = '503';
+    await expect(h.settlements.retrySettlementAlerts()).resolves.toEqual({ sent: 0, pending: 1 });
+    expect(alerts()).toEqual([expect.objectContaining({ sourceId: 'at-x', requestedAt: null })]);
+    expect(ops.refused.get('/internal/v1/ops-alerts')).toBe(1);
+    expect(ops.alerts).toEqual([]);
+    ops.mode = 'up';
+    at(COMPLETED_AT + 60 * 60_000);
+    await expect(h.settlements.retrySettlementAlerts()).resolves.toEqual({ sent: 1, pending: 0 });
+    expect(alerts()).toEqual([expect.objectContaining({ sourceId: 'at-x', requestedAt: new Date(COMPLETED_AT + 60 * 60_000) })]);
+    expect(ops.alerts.map((a) => [a.kind, a.severity])).toEqual([['settlement_portone_withdrawal_unmatched', 'SEV2']]);
   });
 
   test('J-T20 ⑤ SUCCEEDED 뒤 59분 59.999초에는 MISSING이 없고 1시간에 MISSING과 건이 생기며, 로그·저장소·건·경보에 계좌번호 전체·예금주명이 0건이다 [ASVS v5.0.0-16.2.5]', async () => {
@@ -406,10 +430,31 @@ describe('J-T22 포트원 잔액 대조와 대사 멈춤', () => {
     expect(h.store.statements.get(s.statementId)).toMatchObject({ status: 'CONFIRMED', holdReason: null });
   });
 
-  test('J-T22 ② 출금 대사 성공 없이 3,599.999초에는 경보가 없고 3,600초에 SEV2 한 번이며, 그동안 연 실행 건에 commander 확인 필요가 붙는다', async () => {
+  test('J-T22 ① operator 입력값이 원장 계산값보다 1원 작고 지급 합계가 원장 계산값과 같으면 작은 쪽(operator)으로 판정해 HELD BALANCE·409이고 묶음이 없다(TR-02)', async () => {
+    ledger40m();
+    const { s } = await confirmedPortone(40_000_000);
+    await expect(create(39_999_999)).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-balance-insufficient') });
+    expect(h.store.statements.get(s.statementId)).toMatchObject({ status: 'HELD', holdReason: 'BALANCE' });
+    expect(h.store.batches.size).toBe(0);
+  });
+
+  test('J-T22 ① operator 입력값이 원장 계산값보다 1원 작아도 지급 합계 이상이면 묶음을 만들고 두 값과 차이 CS 건 하나(대상 = 묶음 ID)를 남긴다(TR-02)', async () => {
+    ledger40m();
+    await confirmedPortone(39_999_999);
+    const view = await create(39_999_999);
+    expect(h.store.batches.get(view.batchId)).toMatchObject({ pgBalanceKrw: 39_999_999, pgBalanceLedgerKrw: 40_000_000, pgBalanceSource: 'OPERATOR_CONSOLE' });
+    expect(ledgerCases()).toEqual([expect.objectContaining({ sourceId: view.batchId })]);
+  });
+
+  /** 그날 08:00 KST 계좌 대조 성공(2026-12-02 08:00 KST = 2026-12-01T23:00Z) */
+  const EIGHT_TODAY = Date.parse('2026-12-01T23:00:00.000Z');
+  const sync = (name: 'WITHDRAWAL' | 'PARTNER_ACCOUNT', lastSuccess: number) =>
+    h.store.ledgerSyncs.set(name, { name, lastSuccessAt: new Date(lastSuccess), readThrough: new Date(lastSuccess - 30 * 60_000), haltedOn: null, updatedAt: new Date(lastSuccess) });
+
+  test('J-T22 ② 출금 대사(WITHDRAWAL) 성공 없이 3,599.999초에는 경보가 없고 3,600초에 SEV2 한 번이며, 그날 08:00 계좌 대조 성공은 멈춤이 아니다(계획 §5.1 (파) (다))', async () => {
     const T = COMPLETED_AT;
-    h.store.ledgerSyncs.set('WITHDRAWAL', { name: 'WITHDRAWAL', lastSuccessAt: new Date(T), readThrough: new Date(T - 30 * 60_000), haltedOn: null, updatedAt: new Date(T) });
-    h.store.ledgerSyncs.set('PARTNER_ACCOUNT', { name: 'PARTNER_ACCOUNT', lastSuccessAt: new Date(T + 3_600_000), readThrough: null, haltedOn: null, updatedAt: new Date(T) });
+    sync('WITHDRAWAL', T);
+    sync('PARTNER_ACCOUNT', EIGHT_TODAY);
     fake.fault('GET /platform/account-transfers', '5xx');
     at(T + 3_600_000 - 1);
     // 원장 조회 실패: 끝까지 성공하지 못했으므로 성공 시각을 옮기지 않는다(던지든 실패 결과로 끝나든)
@@ -420,7 +465,10 @@ describe('J-T22 포트원 잔액 대조와 대사 멈춤', () => {
     at(T + 3_600_000);
     await expect(h.settlements.checkPortoneLedgerStale()).resolves.toEqual({ stale: ['WITHDRAWAL'] });
     expect(alerts()).toEqual([expect.objectContaining({ kind: 'settlement_portone_ledger_sync_stale', severity: 'SEV2', sourceId: 'WITHDRAWAL' })]);
-    expect(await h.registry.metrics()).toMatch(/settlement_portone_ledger_sync_age_seconds(\{[^}]*WITHDRAWAL[^}]*\})? 3600(?!\d)/m);
+    const text = await h.registry.metrics();
+    expect(text).toMatch(/^settlement_portone_ledger_sync_age_seconds\{sync="WITHDRAWAL"\} 3600$/m);
+    // 계좌 대조는 그날 08:00 성공 뒤 4시간 10분(15,000초) — 지표는 그 값이고 경보는 없다
+    expect(text).toMatch(/^settlement_portone_ledger_sync_age_seconds\{sync="PARTNER_ACCOUNT"\} 15000$/m);
     // 같은 멈춤 동안은 한 번
     at(T + 3_600_000 + 30 * 60_000);
     await h.settlements.checkPortoneLedgerStale();
@@ -429,14 +477,50 @@ describe('J-T22 포트원 잔액 대조와 대사 멈춤', () => {
     const A = partner();
     const b = batch({ pg: 'PORTONE', payoutDate: PAYOUT_DATE, totalAmount: 1_000_000, statementCount: 1, status: 'SUBMITTED', at: new Date(T) });
     await h.store.insertPayoutBatch(b);
-    await h.store.saveStatement(statement({ promoterId: A.P, pg: 'PORTONE', payoutDate: PAYOUT_DATE, status: 'SCHEDULED', payoutAmount: 1_000_000, payoutBatchId: b.batchId, at: new Date(T) }));
+    const s = statement({ promoterId: A.P, pg: 'PORTONE', payoutDate: PAYOUT_DATE, status: 'SCHEDULED', payoutAmount: 1_000_000, payoutBatchId: b.batchId, at: new Date(T) });
+    await h.store.saveStatement(s);
     fake.clearFaults();
-    fake.partnerSettlements.set(PAYOUT_DATE, []);
+    fake.partnerSettlements.set(PAYOUT_DATE, [{ partnerId: A.partnerId, transferId: s.statementId, settlementAmount: 1_000_000 }]);
     await h.settlements.preparePortoneExecution(PAYOUT_DATE);
     const request = [...h.store.caseRequests.values()].find((c) => c.eventKey === `portone-execution:${b.batchId}`)!;
     expect(request.detail).toContain('commander 확인 필요');
     await h.settlements.retryPayoutCases();
     expect(ops.cases.filter((c) => c.eventKey === `portone-execution:${b.batchId}`).map((c) => c.detail)).toEqual([request.detail]);
+  });
+
+  test('J-T22 ② 계좌 대조(PARTNER_ACCOUNT)는 마지막 성공 뒤 89,999.999초에는 경보가 없고 90,000초(25시간)에 SEV2 한 번이다(계획 §5.1 (파) (다), TR-11)', async () => {
+    const P0 = EIGHT_TODAY - 86_400_000; // 어제 08:00 KST
+    sync('PARTNER_ACCOUNT', P0);
+    at(P0 + 90_000_000 - 1);
+    sync('WITHDRAWAL', h.clock.now() - 60_000);
+    await expect(h.settlements.checkPortoneLedgerStale()).resolves.toEqual({ stale: [] });
+    expect(alerts()).toEqual([]);
+    at(P0 + 90_000_000);
+    await expect(h.settlements.checkPortoneLedgerStale()).resolves.toEqual({ stale: ['PARTNER_ACCOUNT'] });
+    expect(alerts()).toEqual([expect.objectContaining({ kind: 'settlement_portone_ledger_sync_stale', severity: 'SEV2', sourceId: 'PARTNER_ACCOUNT' })]);
+    expect(await h.registry.metrics()).toMatch(/^settlement_portone_ledger_sync_age_seconds\{sync="PARTNER_ACCOUNT"\} 90000$/m);
+    at(P0 + 90_000_000 + 30 * 60_000);
+    await h.settlements.checkPortoneLedgerStale();
+    expect(alerts()).toHaveLength(1);
+  });
+
+  test.each([
+    ['그날 08:00 계좌 대조가 성공하지 못함(마지막 성공이 어제 08:00 KST)', Date.parse('2026-11-30T23:00:00.000Z'), true],
+    ['그날 08:00 계좌 대조가 성공함', Date.parse('2026-12-01T23:00:00.000Z'), false],
+  ])('J-T22 ② 09:00 실행 건: %s → detail의 commander 확인 필요 %s(계획 §5.1 (파) (다))', async (_name, lastPartnerCheck, commander) => {
+    const nine = Date.parse('2026-12-02T00:00:00.000Z');
+    h = harness({ now: nine, portone: fake, toss: true, ops });
+    sync('PARTNER_ACCOUNT', lastPartnerCheck);
+    sync('WITHDRAWAL', nine - 60_000);
+    const A = partner();
+    const b = batch({ pg: 'PORTONE', payoutDate: PAYOUT_DATE, totalAmount: 1_000_000, statementCount: 1, status: 'SUBMITTED', at: new Date(nine - 86_400_000) });
+    await h.store.insertPayoutBatch(b);
+    const s = statement({ promoterId: A.P, pg: 'PORTONE', payoutDate: PAYOUT_DATE, status: 'SCHEDULED', payoutAmount: 1_000_000, payoutBatchId: b.batchId, at: new Date(nine - 86_400_000) });
+    await h.store.saveStatement(s);
+    fake.partnerSettlements.set(PAYOUT_DATE, [{ partnerId: A.partnerId, transferId: s.statementId, settlementAmount: 1_000_000 }]);
+    await h.settlements.preparePortoneExecution(PAYOUT_DATE);
+    const request = [...h.store.caseRequests.values()].find((c) => c.eventKey === `portone-execution:${b.batchId}`)!;
+    expect((request.detail ?? '').includes('commander 확인 필요')).toBe(commander);
   });
 
   test('J-T22 ② 지급일 15:00 KST: 14:59:59.999에는 내지 않고 15:00에 일괄 지급 ID 없는 묶음 수 게이지 1·SEV3 한 번이다(정산 일꾼 tick)', async () => {

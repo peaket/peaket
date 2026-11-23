@@ -172,6 +172,7 @@ export class PortonePlatformFake {
 
   async start(): Promise<void> {
     this.#server = createServer((req, res) => void this.#handle(req, res));
+    // real-time: 포트원 플랫폼 전송 어댑터의 실제 HTTP 경계(경로 틀·Authorization·본문)를 보려고 127.0.0.1에 포트를 연다 F-07-7
     await new Promise<void>((resolve) => this.#server!.listen(0, '127.0.0.1', resolve));
     const address = this.#server.address();
     if (!address || typeof address === 'string') throw new Error('대역 서버 주소를 읽지 못했다');
@@ -238,7 +239,27 @@ export class PortonePlatformFake {
       }
       case 'POST /platform/partners': {
         const b = body as { id?: unknown; name?: unknown; account?: { bank?: unknown; number?: unknown; holder?: unknown }; defaultContractId?: unknown } | null;
-        if (!b || !isText(b.id) || !isText(b.name) || !isText(b.defaultContractId) || !isText(b.account?.bank) || !isText(b.account?.number) || !isText(b.account?.holder)) return send(400, { type: 'INVALID_REQUEST' });
+        const contact = (body as { contact?: { name?: unknown; email?: unknown; phoneNumber?: unknown } } | null)?.contact;
+        const business = (body as { type?: { business?: { companyName?: unknown; representativeName?: unknown; businessRegistrationNumber?: unknown } } } | null)?.type?.business;
+        const acc = (body as { account?: { currency?: unknown } } | null)?.account;
+        if (
+          !b ||
+          !isText(b.id) ||
+          !isText(b.name) ||
+          !isText(b.defaultContractId) ||
+          !isText(b.account?.bank) ||
+          !isText(b.account?.number) ||
+          !isText(b.account?.holder) ||
+          acc?.currency !== 'KRW' ||
+          !isText(contact?.name) ||
+          !isText(contact?.email) ||
+          !isText(contact?.phoneNumber) ||
+          !isText(business?.companyName) ||
+          !isText(business?.representativeName) ||
+          typeof business?.businessRegistrationNumber !== 'string' ||
+          !/^\d{10}$/.test(business.businessRegistrationNumber)
+        )
+          return send(400, { type: 'INVALID_REQUEST' });
         if (this.partners.has(b.id)) return send(409, { type: 'PLATFORM_PARTNER_ID_ALREADY_EXISTS' });
         const partner: FakePartner = { id: b.id, name: b.name, account: { bank: b.account.bank, number: b.account.number, holder: b.account.holder }, defaultContractId: b.defaultContractId, scheduled: null };
         this.partners.set(partner.id, partner);

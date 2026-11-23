@@ -4,7 +4,8 @@
 // ops 쪽의 PAYOUT_ACCOUNT_CHANGED 칸 검사(목록 밖 칸 400)는 ops-svc 시험(audit-intake-payout-account.test.ts J-T40 ⑦)이 본다.
 import { createServer, type Server } from 'node:http';
 
-export type OpsFakeMode = 'up' | '503';
+/** up: 받음, 503: 일시 실패, refuse: 202 accepted:false(거절), 400·422: 거절(계획 §5.1 (파) (마)) */
+export type OpsFakeMode = 'up' | '503' | 'refuse' | '400' | '422';
 
 export interface OpsAuditRecord {
   eventKey: string;
@@ -26,6 +27,8 @@ export interface OpsAlert {
 
 const AUDIT_KEYS = ['eventKey', 'recordType', 'recordId', 'payload', 'occurredAt'];
 const ALERT_KEYS = ['eventKey', 'kind', 'severity', 'source', 'reason', 'detail', 'createdAt'];
+/** ops z.iso.datetime()처럼 UTC Z 꼴만 받는다(TR-16) */
+const ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
 const CASE_KEYS = ['eventKey', 'kind', 'sourceId', 'category', 'followUp', 'hold', 'createdAt', 'dueBaseAt', 'detail'];
 
 export class OpsIntakeFake {
@@ -34,7 +37,7 @@ export class OpsIntakeFake {
   readonly audits: OpsAuditRecord[] = [];
   readonly alerts: OpsAlert[] = [];
   readonly cases: Record<string, unknown>[] = [];
-  /** 503으로 답한 횟수(경로별) */
+  /** up이 아닌 모드로 답한 횟수(경로별) */
   readonly refused = new Map<string, number>();
   /** 모양이 틀려 400으로 답한 본문 */
   readonly malformed: unknown[] = [];
@@ -68,9 +71,12 @@ export class OpsIntakeFake {
           res.writeHead(status, { 'content-type': 'application/json' });
           res.end(JSON.stringify(value));
         };
-        if (this.mode === '503') {
+        if (this.mode !== 'up') {
           this.refused.set(path, (this.refused.get(path) ?? 0) + 1);
-          return send(503, { type: 'unavailable' });
+          if (this.mode === '503') return send(503, { type: 'unavailable' });
+          if (this.mode === '400') return send(400, { type: 'invalid-body' });
+          if (this.mode === '422') return send(422, { type: 'invalid-query' });
+          return send(202, path === '/internal/v1/ops/audit-records' ? { accepted: false, seq: 0 } : { accepted: false });
         }
         let body: Record<string, unknown>;
         try {
@@ -101,8 +107,13 @@ export class OpsIntakeFake {
             typeof body.kind === 'string' &&
             (body.severity === 'SEV1' || body.severity === 'SEV2' || body.severity === 'SEV3' || body.severity === 'SEV4') &&
             typeof body.source === 'string' &&
+            body.source !== '' &&
             typeof body.reason === 'string' &&
-            typeof body.createdAt === 'string';
+            body.reason !== '' &&
+            typeof body.eventKey === 'string' &&
+            body.eventKey !== '' &&
+            typeof body.createdAt === 'string' &&
+            ISO_Z.test(body.createdAt);
           if (!ok) {
             this.malformed.push(body);
             return send(202, { accepted: false });
@@ -111,7 +122,7 @@ export class OpsIntakeFake {
           return send(202, { accepted: true, alertId: '00000000-0000-4000-8000-000000000001' });
         }
         if (path === '/internal/v1/cs-cases') {
-          // ops-svc CaseRequestedBody(.strict)에 선택 칸 detail(1~2,000자)만 더한 닫힌 모양(F-07-7 계획 §5.1 (타) 결정 2)
+          // ops-svc CaseRequestedBody(.strict)에 선택 칸 detail(1~2,000자)만 더한 닫힌 모양(F-07-7 계획 §5.1 (타) 결정 2·(파) (가))
           const detailOk = body.detail === undefined || (typeof body.detail === 'string' && body.detail.length >= 1 && body.detail.length <= 2_000);
           const ok =
             Object.keys(body).every((k) => CASE_KEYS.includes(k)) &&
@@ -121,9 +132,10 @@ export class OpsIntakeFake {
             typeof body.category === 'string' &&
             typeof body.createdAt === 'string' &&
             detailOk;
+          // 진짜 ops처럼 어긋난 본문은 202 accepted:false(R-T48 ③, 계획 §5.1 (파) (가))
           if (!ok) {
             this.malformed.push(body);
-            return send(400, { type: 'invalid-body' });
+            return send(202, { accepted: false });
           }
           this.cases.push(body);
           return send(202, { accepted: true, caseId: `case-${this.cases.length}` });
@@ -131,6 +143,7 @@ export class OpsIntakeFake {
         return send(404, { type: 'not-found' });
       });
     });
+    // real-time: payment 어댑터(HttpSettlementCaseNotice·HttpOpsAlerts·HttpOpsAuditRecords)의 실제 HTTP 경계를 보려고 127.0.0.1에 포트를 연다 F-07-7
     await new Promise<void>((resolve) => this.#server!.listen(0, '127.0.0.1', resolve));
     const address = this.#server.address();
     if (!address || typeof address === 'string') throw new Error('대역 서버 주소를 읽지 못했다');

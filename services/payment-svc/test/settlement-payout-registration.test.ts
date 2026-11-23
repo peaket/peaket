@@ -3,7 +3,7 @@
 // 포트원 플랫폼은 대역 서버(공개 명세 모양 [가정]), 토스 지급대행은 F-07-6 전송 포트의 짝 대역이다. 결제사는 부르지 않는다.
 // core 쪽(판매 승인 요청이 이 경로를 부르고 승인 조건을 보는 것)은 services/core-svc/test/sale-approval-payout.test.ts·sale-review-request.http.test.ts가 본다.
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import { OpsIntakeFake } from './support/ops-intake-fake.js';
 import { PortonePlatformFake } from './support/portone-platform-fake.js';
 import { RecordingTossPayout, withoutUpdateSeller } from './support/settlement-payout-toss-double.js';
@@ -30,6 +30,9 @@ beforeEach(() => {
   fake.reset();
   ops.reset();
 });
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 const input = (promoterId: string, holderName = '(주)피켓엔터') => ({
   promoterId,
@@ -51,7 +54,8 @@ describe('J-T39 지급대행 등록(payment 몫)', () => {
   test('J-T39 ① 예금주 조회 → 포트원 파트너 등록 → 토스 두 상점 셀러 등록이 한 번씩 차례로 나가고, 은행·끝 4자리·portone_partner 한 행·toss_seller 두 행만 남는다 [ASVS v5.0.0-16.2.5]', async () => {
     const h = on();
     const P = randomUUID();
-    fake.holder(BANK_ENUM, ACCOUNT, '㈜피켓엔터');
+    // 조회가 돌려주는 이름과 파트너가 적은 이름을 같게 두어 결제사에 보내는 예금주 값을 하나로 단언한다(표기 차이 흡수는 J-T8·J-T39 ②가 본다)
+    fake.holder(BANK_ENUM, ACCOUNT, '(주)피켓엔터');
     const order: string[] = [];
     fake.onRequest = (r) => order.push(r.template);
     h.toss!.onCall = (c) => order.push(`toss.${c.method}:${c.pgStore}`);
@@ -59,15 +63,34 @@ describe('J-T39 지급대행 등록(payment 몫)', () => {
     expect(out).toEqual({ bankCode: BANK, accountLast4: '8901', holderChecked: true, agencies: { PORTONE: 'REGISTERED', TOSS_STANDARD: 'REGISTERED', TOSS_ESCROW: 'REGISTERED' } });
     expect(order).toEqual(['GET /platform/bank-accounts/{bank}/{accountNumber}/holder', 'POST /platform/partners', 'toss.registerSeller:STANDARD', 'toss.registerSeller:ESCROW']);
     // 포트원 파트너 등록 본문: PEAKET이 정한 파트너 ID·기본 계약·계좌(결제사에만 넘긴다)
-    const reg = fake.calls('POST /platform/partners')[0]!.body as { id: string; defaultContractId: string; account: { bank: string; number: string } };
-    expect(reg).toMatchObject({ defaultContractId: PORTONE_CONTRACT_ID, account: { bank: BANK_ENUM, number: ACCOUNT } });
+    const reg = fake.calls('POST /platform/partners')[0]!.body as { id: string };
+    // 본문은 값까지 본다(TR-06): 파트너 ID peaket-{promoterId}, 상호·연락처·계좌·기본 계약·사업자 정보(남의 상호·빠진 사업자 정보로 등록하지 않음)
+    expect(reg).toEqual({
+      id: `peaket-${P}`,
+      name: LEGAL,
+      contact: { name: '김대표', email: 'pay@peaket.test', phoneNumber: '0212345678' },
+      account: { bank: BANK_ENUM, currency: 'KRW', number: ACCOUNT, holder: '(주)피켓엔터' },
+      defaultContractId: PORTONE_CONTRACT_ID,
+      type: { business: { companyName: LEGAL, representativeName: '김대표', businessRegistrationNumber: '1234567890' } },
+    });
     expect([...h.store.portonePartners.values()]).toEqual([expect.objectContaining({ promoterId: P, portonePartnerId: reg.id, contractId: PORTONE_CONTRACT_ID, registeredAt: new Date(NOW) })]);
     expect([...h.store.tossSellers.values()].map((s) => [s.promoterId, s.pgStore, s.status]).sort()).toEqual([
       [P, 'ESCROW', 'PARTIALLY_APPROVED'],
       [P, 'STANDARD', 'PARTIALLY_APPROVED'],
     ]);
     // 토스 셀러 등록에는 계좌가 실렸다(결제사 요청에만)
-    for (const c of h.toss!.callsOf('registerSeller')) expect(JSON.stringify(c)).toContain(ACCOUNT);
+    // 토스 두 상점 등록 본문도 값까지(F-07-6 TossSellerRegistration: refSellerId·businessType·company·account)
+    expect(h.toss!.callsOf('registerSeller').map((c) => [c.pgStore, (c as { body: unknown }).body])).toEqual(
+      (['STANDARD', 'ESCROW'] as const).map((store) => [
+        store,
+        {
+          refSellerId: `${P}-${store}`,
+          businessType: 'CORPORATE',
+          company: { name: LEGAL, representativeName: '김대표', businessRegistrationNumber: '1234567890', email: 'pay@peaket.test', phone: '0212345678' },
+          account: { bankCode: BANK, accountNumber: ACCOUNT, holderName: '(주)피켓엔터' },
+        },
+      ]),
+    );
     const account = h.store.accounts.get(P)!;
     expect(account).toMatchObject({ promoterId: P, bankCode: BANK, accountLast4: '8901', holderVerified: true, agencySyncPending: false });
     expect(account.holdUntil.getTime()).toBeLessThanOrEqual(NOW);
@@ -244,6 +267,43 @@ describe('J-T39 지급대행 등록(payment 몫)', () => {
     expect(fake.calls('PATCH /platform/partners/{id}')).toHaveLength(0);
     expect(h.store.accounts.get(P)).toMatchObject({ bankCode: '06', accountLast4: '1234', version: 9, agencySyncPending: false });
     expect(h.store.payoutAccountChanges).toEqual([]);
+  });
+
+  test('J-T39 ⑦ 내부 경로 셋(등록·등록 읽기·판매자 확인)은 내부 토큰이 없거나 틀리면 403이고 결제사 호출·행 0, 맞는 토큰이면 받는다(TR-05) [ASVS v5.0.0-8.2.2]', async () => {
+    const token = `it-${randomUUID()}`;
+    vi.stubEnv('PEAKET_INTERNAL_TOKEN', token);
+    const h = on();
+    const P = randomUUID();
+    fake.holder(BANK_ENUM, ACCOUNT, '(주)피켓엔터');
+    h.store.kycs.set(P, kyc(P, new Date(NOW - 3_600_000), { status: 'PENDING', legalName: LEGAL, representative: '김대표' }));
+    const svc = await httpService(h);
+    try {
+      const routes = [
+        { method: 'POST' as const, url: '/internal/v1/settlements/payout-registrations', payload: JSON.stringify(httpBody(P)) },
+        { method: 'GET' as const, url: `/internal/v1/settlements/promoters/${P}/payout-registration` },
+        { method: 'PUT' as const, url: `/internal/v1/settlements/promoters/${P}/seller-verification`, payload: JSON.stringify({ legalName: LEGAL, representative: '김대표', verifiedAt: '2026-11-23T00:30:00.000Z' }) },
+      ];
+      for (const r of routes) {
+        for (const sent of [undefined, 'wrong-token']) {
+          const headers: Record<string, string> = { 'content-type': 'application/json', ...(sent ? { 'x-peaket-internal-token': sent } : {}) };
+          const res = await svc.http.inject({ method: r.method, url: r.url, headers, ...(r.payload ? { payload: r.payload } : {}) });
+          expect([r.url, sent ?? '-', res.statusCode]).toEqual([r.url, sent ?? '-', 403]);
+          expect(leaks(res.payload, ACCOUNT)).toEqual([]);
+        }
+      }
+      expect(fake.requests).toEqual([]);
+      expect(h.toss!.calls).toEqual([]);
+      expect([h.store.accounts.size, h.store.portonePartners.size, h.store.tossSellers.size]).toEqual([0, 0, 0]);
+      expect(h.store.kycs.get(P)?.status).toBe('PENDING');
+      // 맞는 토큰이면 받는다
+      for (const r of routes) {
+        const res = await svc.http.inject({ method: r.method, url: r.url, headers: { 'content-type': 'application/json', 'x-peaket-internal-token': token }, ...(r.payload ? { payload: r.payload } : {}) });
+        expect([r.url, res.statusCode]).toEqual([r.url, 200]);
+      }
+      expect(h.store.kycs.get(P)?.status).toBe('VERIFIED');
+    } finally {
+      await svc.close();
+    }
   });
 
   test('J-T39 ⑦ 판매자 확인 내부 경로: seller_kyc가 VERIFIED·상호·대표자·확인 시각으로 쓰이고, 같은 값을 두 번 불러도 행이 그대로다', async () => {

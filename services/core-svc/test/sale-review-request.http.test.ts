@@ -90,7 +90,8 @@ function body(over: Record<string, unknown> = {}) {
       businessRegNo: '123-45-67890',
       mailOrderReportNo: '2026-서울-0001',
     },
-    payoutAccount: { bankCode: '004', accountNumber: '1002-345-678901', holderName: '홍길동' },
+    // F-07-7 시험 담당(2026-11-23): 은행 코드는 토스 두 자리 표 하나다(계획 §5.1 (파) (라), 시험 리뷰 TR-12). 옛 값 '004'(금융결제원 세 자리)를 두 자리로 바꾼다
+    payoutAccount: { bankCode: '88', accountNumber: '1002-345-678901', holderName: '홍길동' },
     accessibleSeating: { confirmed: true },
     ...over,
   };
@@ -283,7 +284,8 @@ describe('J-T39 ② 판매 승인 요청의 지급대행 등록(F-07-7)', () => 
     expect(call.promoterId).toBe(T2);
     expect(call.company).toMatchObject({ name: '(주)피켓공연', representativeName: '대표자', email: 'seller@example.test' });
     expect(call.company.businessRegistrationNumber.replaceAll(/\D/g, '')).toBe('1234567890');
-    expect(call.account).toMatchObject({ bankCode: '004', holderName: '홍길동' });
+    // 받은 두 자리 값 그대로 payment에 넘긴다(포트원 열거값으로 바꾸는 일은 payment 어댑터 몫)
+    expect(call.account).toMatchObject({ bankCode: '88', holderName: '홍길동' });
     expect(call.account.accountNumber.replaceAll(/\D/g, '')).toBe('1002345678901');
     expect(['INDIVIDUAL_BUSINESS', 'CORPORATE']).toContain(call.businessType);
     // 응답·저장 행·서비스 로그 어디에도 계좌번호 원문(두 모양)·예금주명이 없다
@@ -339,5 +341,22 @@ describe('J-T39 ② 판매 승인 요청의 지급대행 등록(F-07-7)', () => 
     expect(invalid.statusCode).toBe(422);
     expect(payout.registers).toHaveLength(0);
     expect(repo2.productions.get(id)?.saleReview).toBe('DRAFT');
+  });
+
+  test.each(['004', '088', '99', '04', '8'])('J-T39 ② S-T41 ② 정산 계좌 은행 코드 %s(두 자리 표 밖)는 400이고 결제사 등록을 부르지 않으며 공연은 DRAFT 그대로다(계획 §5.1 (파) (라), TR-12)', async (bankCode) => {
+    payout.reset();
+    const id = production2();
+    const r = await request2(id, body({ payoutAccount: { bankCode, accountNumber: '1002-345-678901', holderName: '홍길동' } }));
+    expect(r.statusCode).toBe(400);
+    expect(payout.registers).toHaveLength(0);
+    expect(repo2.productions.get(id)?.saleReview).toBe('DRAFT');
+  });
+
+  test.each(['88', '06', '20', '90'])('J-T39 ② S-T41 ① 두 자리 표 안의 은행 코드 %s는 받는다', async (bankCode) => {
+    payout.reset();
+    const id = production2();
+    const r = await request2(id, body({ payoutAccount: { bankCode, accountNumber: '1002-345-678901', holderName: '홍길동' } }));
+    expect(r.statusCode).toBe(202);
+    expect(payout.registers.map((c) => c.account.bankCode)).toEqual([bankCode]);
   });
 });

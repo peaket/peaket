@@ -238,6 +238,15 @@ describe('J-T40 ②③④ 예금주 대조·세 곳 수정·결제사 수정 대
     expect(res.payload).not.toContain(OLD.accountLast4);
   });
 
+  test('J-T40 ④ agencySyncPending 칸이 없는 옛 계좌 행은 false로 읽힌다(선택 칸, 시험 리뷰 TR-04)', async () => {
+    ctx = await setup();
+    const at = new Date(FRIDAY_10_KST - 30 * 86_400_000);
+    // 고정된 F-07-6 시험처럼 그 칸 없이 저장한 행
+    await ctx.h.store.savePayoutAccount({ promoterId: ctx.P, bankCode: OLD.bankCode, accountLast4: OLD.accountLast4, version: OLD.version, changedAt: at, holdUntil: at, holderVerified: true });
+    const get = await ctx.svc.http.inject({ method: 'GET', url: '/v1/partner/payout-account', headers: ctx.admin.headers });
+    expect(JSON.parse(get.payload)).toMatchObject({ bankCode: OLD.bankCode, payoutAccountLast4: OLD.accountLast4, agencySyncPending: false, version: OLD.version });
+  });
+
   test('J-T40 ④ 한 결제사 수정만 실패하면 502이고 새 계좌·보류와 agencySyncPending true가 저장되며, 보류가 끝나도 묶음에서 HELD·ACCOUNT_CHANGE, 다음 변경이 모두 성공하면 지워진다', async () => {
     ctx = await setup();
     ctx.h.toss!.fail('updateSeller', 'STANDARD', 1);

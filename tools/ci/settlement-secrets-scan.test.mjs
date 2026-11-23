@@ -97,14 +97,16 @@ test('J-T14 정적 검사 6: 명령줄: 찾으면 끝 코드 1과 자리, 없으
   assert.match(String(err.stderr), /leak\.ts:2/);
   // 계좌번호 값 자체를 출력하지 않는다(이름과 자리만)
   writeFileSync(file, lines('export const a = 1;', "logger.info({ accountNumber: '98765432101234' });"));
+  let leaked;
   try {
     execFileSync(process.execPath, [TOOL, '--root', root], { stdio: 'pipe', encoding: 'utf8' });
-    assert.fail('끝 코드 0');
   } catch (e) {
-    assert.equal(e.status, 1);
-    assert.equal(String(e.stderr).includes('98765432101234'), false);
-    assert.equal(String(e.stdout).includes('98765432101234'), false);
+    leaked = e;
   }
+  assert.ok(leaked, '찾았는데 끝 코드 0이다');
+  assert.equal(leaked.status, 1);
+  assert.equal(String(leaked.stderr).includes('98765432101234'), false);
+  assert.equal(String(leaked.stdout).includes('98765432101234'), false);
   writeFileSync(file, lines('export const a = 1;', 'logger.info({ accountLast4 });'));
   execFileSync(process.execPath, [TOOL, '--root', root], { stdio: 'pipe', encoding: 'utf8' });
   assert.throws(() => execFileSync(process.execPath, [TOOL, '--bogus'], { stdio: 'pipe' }), (e) => e.status === 2);
