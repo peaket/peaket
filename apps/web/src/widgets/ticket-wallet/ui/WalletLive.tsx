@@ -138,12 +138,16 @@ export function WalletLive({ loading, qrFallback, detail }: WalletLiveProps) {
   useEffect(() => {
     const origin = ORIGINS.api;
     if (origin === '') return;
-    // 받은 요청이 없으면 돌려주기 코드가 필요 없다. 첫 화면 JS에서 빼고 여기서 늦게 가져온다(§5.8 예산)
-    void (async () => {
-      const { loadReceivedOffers } = await import('../model/transfer-actions');
-      const r = await loadReceivedOffers({ origin, fetch: globalThis.fetch });
-      if (r.kind === 'ok') setOffers(receivedOfferCardsOf(r.body.items, Date.now()));
-    })();
+    // 받은 요청이 없으면 돌려주기 코드가 필요 없다. 첫 화면 JS에서 빼고, 첫 화면이 다 그려진 뒤에 가져온다
+    // (docs/frontend.md §5.8 월렛 첫 JS·TBT 예산, CI 실행 45250236631에서 214.5ms > 200ms).
+    const cancel = afterLoad(() => {
+      void (async () => {
+        const { loadReceivedOffers } = await import('../model/transfer-actions');
+        const r = await loadReceivedOffers({ origin, fetch: globalThis.fetch });
+        if (r.kind === 'ok') setOffers(receivedOfferCardsOf(r.body.items, Date.now()));
+      })();
+    });
+    return cancel;
   }, []);
 
   // 돌려주기 재인증에서 돌아오면: 표시를 한 번 꺼내 토큰을 받고 POST한 뒤 동기화한다
