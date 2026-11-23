@@ -281,6 +281,13 @@
       "when": 1795315600000,
       "tag": "0046_fan_notify",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1795319200000,
+      "tag": "0047_entry_closed_grant",
+      "breakpoints": true
     }
   ]
 }

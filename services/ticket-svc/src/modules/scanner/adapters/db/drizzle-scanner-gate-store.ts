@@ -44,6 +44,7 @@ interface PassScanRow {
   clock_offset_ms: number | null;
   device_seq: string | number;
   known_seq: string | number;
+  state_seq: string | number | null;
 }
 
 /** 보정 시각 = scannedAtDevice(이미 기기 시계 오차를 더한 값). 서버는 clock_offset_ms를 다시 더하지 않는다(offline-gate §7.1) */
@@ -307,15 +308,24 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
     staleVersionIds?: readonly string[];
   }): Promise<ScanBatchResult> {
     return this.database.transaction(async (tx) => {
+      // 입장 기록 마감(배타)과 겹치지 않게 같은 회차 잠금을 공유로 잡는다(offline-gate §7.3 '한 번만, 업로드와 겹칠 때').
+      // 마감 커밋 전이면 마감 전 기록으로, 커밋 뒤면 받은 시각이 마감 시각보다 커 '마감 뒤 도착'으로 받는다
+      await tx.execute(sql`select pg_advisory_xact_lock_shared(hashtextextended('ticket-entry-close:' || ${i.eventId}, 0))`);
+      const closeRows = (await tx.execute(sql`select closed_at from entry_close where event_id = ${i.eventId} limit 1`)).rows as unknown as { closed_at: Date | string }[];
+      const closedAtMs = closeRows[0] ? (closeRows[0].closed_at instanceof Date ? closeRows[0].closed_at.getTime() : Date.parse(closeRows[0].closed_at)) : undefined;
       const acceptedIds: string[] = [];
       const duplicateIds: string[] = [];
       const flags: GateFlagView[] = [];
       const stale = new Set(i.staleVersionIds ?? []);
-      const makeFlag = async (ticket: TicketRow | undefined, ticketId: string, kind: GateFlagKind, knownSeq: number, scanId: string): Promise<void> => {
+      const makeFlag = async (ticket: TicketRow | undefined, ticketId: string, kind: GateFlagKind, knownSeq: number, scanId: string, awarenessBase?: number | null): Promise<void> => {
         const flagId = randomUUID();
+        // '몰랐음/알고도 통과'는 정상으로 남은 가장 이른 기록의 state_seq와 견준다(offline-gate §7.1).
+        // awarenessBase가 null이면 그 기록에 state_seq가 없는 옛 행이라 CONCURRENT다
+        const base = awarenessBase === null ? null : (awarenessBase ?? (await this.#lastSeq(tx, i.eventId)));
+        const awareness: GateFlagAwareness = base === null || knownSeq < base ? 'CONCURRENT' : 'KNOWN';
         const [flagRow] = await tx
           .insert(gateFlag)
-          .values({ id: flagId, eventId: i.eventId, ticketId, kind, awareness: knownSeq < (await this.#lastSeq(tx, i.eventId)) ? 'CONCURRENT' : 'KNOWN', status: 'OPEN', createdAt: new Date(i.nowMs) })
+          .values({ id: flagId, eventId: i.eventId, ticketId, kind, awareness, status: 'OPEN', createdAt: new Date(i.nowMs) })
           .returning();
         if (!flagRow) return;
         await tx.insert(gateFlagScan).values({ flagId, scanEventId: scanId });
@@ -349,7 +359,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
         )[0];
         const passRows = (
           await tx.execute(sql`
-            select id, direction, scanned_at_device, clock_offset_ms, device_seq, known_seq
+            select id, direction, scanned_at_device, clock_offset_ms, device_seq, known_seq, state_seq
             from scan_event
             where event_id = ${i.eventId} and ticket_id = ${scan.ticketId} and result = 'PASS' and method <> 'VERIFY'
             order by scanned_at_device asc, device_seq asc
@@ -360,6 +370,8 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
         const session = i.sessions?.[scan.scannerSessionId];
         const kinds: GateFlagKind[] = [];
         const demoted: PassScanRow[] = [];
+        /** 이 기록이 '중복 입장'일 때 견줄 정상 기록의 state_seq(null이면 옛 행) */
+        let duplicateBase: number | null | undefined;
         let result: ScanResult = scan.result;
         let reason: string | undefined = scan.reason;
         let keyBad: 'INVALID_QR' | 'KEY_REVOKED' | 'KEY_UNKNOWN' | undefined;
@@ -404,6 +416,8 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
             result = 'REJECT';
             reason = 'ALREADY_IN';
             kinds.push('DUPLICATE');
+            // 정상 기록의 state_seq와 견준다. 그 값이 없으면(옛 행) CONCURRENT다
+            duplicateBase = firstIn.state_seq === null ? null : Number(firstIn.state_seq);
           } else if (firstIn) {
             // 늦게 올라온 더 이른 기록이 정상이 된다. 먼저 통과했던 뒤 기록은 중복으로 내린다(C1-03).
             for (const old of passRows) if (old.direction === 'IN') demoted.push(old);
@@ -417,7 +431,8 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
         } else if (i.sessionId === undefined || scan.scannerSessionId !== i.sessionId) {
           kinds.push('OUT_OF_SESSION');
         }
-        if (i.entryClosesAtMs !== undefined && corrected > i.entryClosesAtMs) kinds.push('AFTER_CLOSE');
+        // '마감 뒤 도착'은 받은 시각이 ticket-svc 마감 행의 시각보다 뒤일 때다(core 사본 값이 아니다, offline-gate §7.3)
+        if (closedAtMs !== undefined && i.nowMs > closedAtMs) kinds.push('AFTER_CLOSE');
         if (scan.clockOffsetMs !== undefined && Math.abs(scan.clockOffsetMs) > CLOCK_UNCERTAIN_MS) kinds.push('TIME_UNCERTAIN');
         if (stale.has(scan.id)) kinds.push('STALE_VERSION');
         if (scan.method === 'OVERRIDE') kinds.push('OVERRIDE_REVIEW');
@@ -454,13 +469,10 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
           continue;
         }
         acceptedIds.push(scan.id);
-        for (const kind of kinds) await makeFlag(ticket, scan.ticketId, kind, scan.knownSeq, scan.id);
-        for (const old of demoted) {
-          await tx.execute(sql`update scan_event set result = 'REJECT', reason = 'ALREADY_IN', flag = 'DUPLICATE' where event_id = ${i.eventId} and id = ${old.id}`);
-          await makeFlag(ticket, scan.ticketId, 'DUPLICATE', Number(old.known_seq), old.id);
-        }
+        for (const kind of kinds) await makeFlag(ticket, scan.ticketId, kind, scan.knownSeq, scan.id, kind === 'DUPLICATE' ? duplicateBase : undefined);
+        let stateSeq: number | undefined;
         if (result === 'PASS' && scan.method !== 'VERIFY') {
-          await this.appendChange(tx, i.eventId, 'SCAN_STATE', {
+          stateSeq = await this.appendChange(tx, i.eventId, 'SCAN_STATE', {
             v: 1,
             ticketId: scan.ticketId,
             direction: scan.direction,
@@ -468,26 +480,38 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
             gateZone: scan.gateZone ?? ticket?.gate_zone ?? '',
             deviceId: i.deviceId,
           });
+          // 이 기록이 적은 SCAN_STATE 변경 번호. 나중 '중복 입장'의 갈림이 이 값과 견준다(C1-03)
+          await tx.execute(sql`update scan_event set state_seq = ${stateSeq} where event_id = ${i.eventId} and id = ${scan.id}`);
+        }
+        for (const old of demoted) {
+          await tx.execute(sql`update scan_event set result = 'REJECT', reason = 'ALREADY_IN', flag = 'DUPLICATE' where event_id = ${i.eventId} and id = ${old.id}`);
+          // 내려간 기록은 새로 정상이 된 기록의 state_seq와 견준다
+          await makeFlag(ticket, scan.ticketId, 'DUPLICATE', Number(old.known_seq), old.id, stateSeq ?? null);
         }
       }
       return { acceptedIds, flags, resyncRequired: stale.size > 0, staleIds: [...stale], duplicateIds };
     });
   }
 
-  async listFlags(i: { eventId: string; cursor?: string; limit: number }): Promise<GateFlagPage> {
+  async listFlags(i: { eventId: string; gateZone?: string; cursor?: string; limit: number }): Promise<GateFlagPage> {
     const cursor = i.cursor ? parseCursor(i.cursor) : undefined;
+    // 요청한 기기의 배치 구역과 티켓 구역이 같은 표시만. 사후 검토 표시(OVERRIDE_REVIEW)는 넣지 않는다(offline-gate §7.2, C1-16).
+    // 구역을 모르는 단위 조립은 예전처럼 거르지 않는다(HTTP 경로는 배치가 없으면 409라 늘 구역이 있다)
+    const zone = i.gateZone;
+    const filter = zone === undefined ? sql`` : sql`and f.kind <> 'OVERRIDE_REVIEW' and t.gate_zone = ${zone}`;
     const rows = (
       cursor
         ? await this.database.db.execute(sql`
             select f.id, f.ticket_id, t.seat_id, t.gate_zone, f.kind, f.awareness, f.status, f.created_at
             from gate_flag f left join ticket t on t.id = f.ticket_id
-            where f.event_id = ${i.eventId} and (f.created_at < ${new Date(cursor.atMs)} or (f.created_at = ${new Date(cursor.atMs)} and f.id < ${cursor.flagId}))
+            where f.event_id = ${i.eventId} ${filter}
+              and (f.created_at < ${new Date(cursor.atMs)} or (f.created_at = ${new Date(cursor.atMs)} and f.id < ${cursor.flagId}))
             order by f.created_at desc, f.id desc limit ${i.limit + 1}
           `)
         : await this.database.db.execute(sql`
             select f.id, f.ticket_id, t.seat_id, t.gate_zone, f.kind, f.awareness, f.status, f.created_at
             from gate_flag f left join ticket t on t.id = f.ticket_id
-            where f.event_id = ${i.eventId}
+            where f.event_id = ${i.eventId} ${filter}
             order by f.created_at desc, f.id desc limit ${i.limit + 1}
           `)
     ).rows as unknown as FlagRow[];

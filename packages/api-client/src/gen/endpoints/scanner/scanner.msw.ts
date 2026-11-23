@@ -35,6 +35,7 @@ import type {
   GateFlag,
   GateFlagPage,
   GateStatus,
+  PutScannerEventQueueReportBody,
   PutScannerShiftReadinessBody,
   ScanEvent,
   ScannerChanges,
@@ -159,6 +160,16 @@ export const getCreateScannerScanMockHandler = (overrideResponse?: CreateScanner
   }, options)
 }
 
+export const getPutScannerEventQueueReportMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ eventId: string }, PutScannerEventQueueReportBody>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+  return http.put<{ eventId: string }, PutScannerEventQueueReportBody>('*/v1/scanner/queue-reports/:eventId', async (info: Parameters<HttpResponseResolver<{ eventId: string }, PutScannerEventQueueReportBody>>[0]) => {
+  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+
+    return new HttpResponse(null,
+      { status: 204
+      })
+  }, options)
+}
+
 export const getGetScannerEventDevicesMockHandler = (overrideResponse?: GateStatus | ((info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => Promise<GateStatus> | GateStatus), options?: RequestHandlerOptions) => {
   return http.get<{ eventId: string }>('*/v1/scanner/events/:eventId/devices', async (info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => {
 
@@ -223,6 +234,7 @@ export const getScannerMock = () => [
   getGetScannerEventPackageMockHandler(),
   getGetScannerEventChangesMockHandler(),
   getCreateScannerScanMockHandler(),
+  getPutScannerEventQueueReportMockHandler(),
   getGetScannerEventDevicesMockHandler(),
   getPutScannerEventDevicePlacementMockHandler(),
   getListScannerEventFlagsMockHandler(),

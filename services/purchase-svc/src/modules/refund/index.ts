@@ -131,6 +131,20 @@ export { eventStartsAtOf, QuoteCancellation, type CancellationQuoteView, type Qu
 export { RefundAfterEntry, type RefundAfterEntryDeps, refundAfterEntryTask } from './application/refund-after-entry.js';
 export { REFUND_RETRY_TICK_MS, RefundRetryLoop, type RefundRetryLoopDeps, type RefundRetryTick } from './application/refund-retry-loop.js';
 export {
+  ENTRY_CLOSE_DUE_EVERY_MS,
+  ENTRY_CLOSE_DUE_LIMIT,
+  EntryCloseDueTick,
+  EntryCloseDueLoop,
+  type EntryCloseDueTickDeps,
+  type EntryCloseDueLoopDeps,
+  type EntryCloseDueStore,
+  type EntryCloseDueResult,
+  type EntryCloseDueMetrics,
+  type EntryCloseTimes,
+} from './application/entry-close-due.js';
+export { MemoryEntryCloseDueStore, type MemoryDueRow } from './adapters/memory-entry-close-due-store.js';
+export { HttpCoreEntryCloseTimes } from './adapters/http-core-entry-close-times.js';
+export {
   compensationAmount,
   compensationOrdersOf,
   eventRefundCancellationId,

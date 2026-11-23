@@ -90,6 +90,7 @@ export type ProblemType =
   | 'duplicate-admission'
   | 'enrollment-code-expired'
   | 'enrollment-rate-limited'
+  | 'entry-closed-too-early'
   | 'entry-recorded'
   | 'entry-started'
   | 'escrow-partial-not-allowed'
@@ -358,6 +359,7 @@ export type ProblemType =
   | 'seatmap-replace-required'
   | 'seatmap-worker-unavailable'
   | 'self-target-forbidden'
+  | 'self-transfer'
   | 'seq-not-in-checkpoint'
   | 'server-busy'
   | 'session-not-found'
@@ -497,6 +499,7 @@ export const PROBLEM_TYPES = {
   'duplicate-admission': { status: 409, title: "이미 다른 기기나 탭에서 입장했습니다" },
   'enrollment-code-expired': { status: 410, title: "등록 코드가 만료되었거나 이미 사용되었습니다" },
   'enrollment-rate-limited': { status: 429, title: "등록 시도가 너무 많습니다. 잠시 뒤 다시 시도해 주세요" },
+  'entry-closed-too-early': { status: 422, title: "역할 유효 끝보다 이른 마감 시각입니다" },
   'entry-recorded': { status: 409, title: "입장 기록이 있어 돌려줄 수 없습니다" },
   'entry-started': { status: 409, title: "입장이 시작되어 할 수 없습니다" },
   'escrow-partial-not-allowed': { status: 409, title: "구매를 확정한 뒤에 일부 상품을 취소·반품할 수 있습니다" },
@@ -765,6 +768,7 @@ export const PROBLEM_TYPES = {
   'seatmap-replace-required': { status: 409, title: "좌석이 있는 좌석맵은 바꾸기로만 가져올 수 있습니다" },
   'seatmap-worker-unavailable': { status: 503, title: "좌석맵 파일을 잠시 확인할 수 없습니다" },
   'self-target-forbidden': { status: 403, title: "자기 계정에는 할 수 없습니다" },
+  'self-transfer': { status: 422, title: "자신에게는 양도할 수 없습니다" },
   'seq-not-in-checkpoint': { status: 422, title: "그 체크포인트가 덮지 않는 기록입니다" },
   'server-busy': { status: 429, title: "요청이 많아 잠시 처리하지 못했습니다" },
   'session-not-found': { status: 404, title: "로그인한 기기가 아니거나 이미 로그아웃했습니다" },

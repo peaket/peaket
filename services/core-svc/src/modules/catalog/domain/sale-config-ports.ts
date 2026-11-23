@@ -67,3 +67,24 @@ export interface SaleConfigMaintenanceStore {
 }
 
 export const SALE_CONFIG_MAINTENANCE_STORE = Symbol('SALE_CONFIG_MAINTENANCE_STORE');
+
+// ---- 입장 기록 마감 알림(offline-gate §7.3 'core 알림', BUILD_ORDER GAT-180, F-05-6) ----
+
+/** 역할 유효 끝 = ends_at + 2시간 [가정]. 이보다 이른 마감 시각은 422다(offline-gate §7.3) */
+export const ENTRY_ROLE_END_AFTER_ENDS_MS = 7_200_000;
+
+export type EntryClosedResult =
+  | { status: 'not-found' }
+  | { status: 'too-early' }
+  | { status: 'stored' | 'unchanged'; entryClosedAtMs: number };
+
+/**
+ * ticket-svc 마감 알림의 core 쪽 쓰기. event 행을 잠그고 entry_closed_at이 비었을 때만 그 값과 판매 설정 사본
+ * (`event_sale_config.payload.entryClosedAtMs`)을 같은 트랜잭션에 쓴다. 사본의 rev는 올리지 않는다.
+ * 사본 행이 없으면 event 칸만 쓰고 200이다(사본은 판매 승인 때 생긴다).
+ */
+export interface EntryClosedStore {
+  markEntryClosed(eventId: string, closedAtMs: number): Promise<EntryClosedResult>;
+}
+
+export const ENTRY_CLOSED_STORE = Symbol('core.EntryClosedStore');

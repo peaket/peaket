@@ -649,6 +649,12 @@ export class ScannerGuard implements CanActivate {
       if (policy && !policy.roles.includes(role)) throw rejected('role', new ForbiddenException());
     } else {
       session = await scanner.sessionOf(principal!.sessionId, device.deviceId);
+      // 5초 캐시가 다른 회차의 세션 답을 들고 있으면(회차가 바뀐 뒤) 경로 회차와 견주기 전에 한 번 다시 확인한다.
+      // 그대로 쓰면 맞는 회차의 요청도 '회차 다름' 403이 된다. 캐시가 맞으면 부르지 않는다
+      const pathEventId = (request.params as Record<string, unknown> | undefined)?.eventId;
+      if (typeof pathEventId === 'string' && session.valid && session.eventId !== undefined && session.eventId !== pathEventId) {
+        session = await scanner.sessionOf(principal!.sessionId, device.deviceId, { refresh: true });
+      }
       if (!session.valid || !session.role) throw rejected('session', scannerUnauthorized(reply, 'invalid_token'));
       if (policy && !policy.roles.includes(session.role)) throw rejected('role', new ForbiddenException());
       role = session.role;

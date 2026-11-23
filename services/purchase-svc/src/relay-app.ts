@@ -9,6 +9,7 @@
 // - 주문 만료 안전망(OrderExpirySweep, PRF-172)과 하루 넘은 주문 정비 일(orderExpiryStaleTask, 2026-11-09 코드 리뷰)의 판정기 하나는 이 둘만 부른다(고리 줄을 쓰지 않아 따로 멈추지 않는다). 구매 세션은 RedisPurchaseSessionStore.read로 읽는다(이 프로세스에는 서버 ECDH 키가 없다)
 import {
   type Clock,
+  Counter,
   type Database,
   type DatabaseOptions,
   type HotRedis,
@@ -64,12 +65,15 @@ import {
   DrizzlePendingCancellationConversions,
   DrizzleSeatReturns,
   EVENT_REFUND_TICKET_DEADLINE_MS,
+  EntryCloseDueLoop,
+  EntryCloseDueTick,
   EventRefundCancellerRouter,
   EventRefundLoop,
   EventRefundService,
   EventTicketCanceller,
   GrpcPaymentCancellations,
   GrpcTicketCancellations,
+  HttpCoreEntryCloseTimes,
   HttpDeductionGapNotice,
   HttpEntryFlagNotice,
   HttpEventRefundAlert,
@@ -172,6 +176,8 @@ export interface PurchaseRelayOptions {
   refundRetryTickMs?: number;
   /** 회차 취소 일괄 환불 실행기 틱(기본 EVENT_REFUND_TICK_MS 10초, 시험이 줄인다. GAT-130) */
   eventRefundTickMs?: number;
+  /** 입장 기록 마감 환급 잇기 틱(기본 ENTRY_CLOSE_DUE_EVERY_MS 1분, 시험이 줄인다. GAT-180) */
+  entryCloseDueEveryMs?: number;
   /** 보상 세 걸음 실행기 틱(기본 COMPENSATION_LOOP_TICK_MS 1초, 시험이 줄인다. BAT-011) */
   compensationTickMs?: number;
   /** 주문 만료 안전망 틱(기본 ORDER_EXPIRY_SWEEP_INTERVAL_MS 10분 [가정], 시험이 줄인다. BUILD_ORDER PRF-172) */
@@ -439,6 +445,34 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
       });
       late = { logger: ctx.logger, store, orderExpiryStore, orderExpiry };
       for (const m of startupWarnings.splice(0)) ctx.logger.warn({ event: 'purchase-ops-internal-token-missing' }, m);
+      // 입장 기록 마감 환급 잇기(offline-gate §7.3 '환급 잇기'). core 주소가 없으면 local·ci에서 이 일을 켜지 않는다
+      const coreHttpUrl = o.env?.PEAKET_CORE_HTTP_URL;
+      const entryCloseDue = coreHttpUrl
+        ? (() => {
+            const counter = new Counter({
+              name: 'purchase_entry_close_due_total',
+              help: '입장 기록 마감 환급 잇기 결과 수(result: moved·not_closed·unavailable, offline-gate §7.4)',
+              labelNames: ['result'],
+              registers: [ctx.registry],
+            });
+            for (const result of ['moved', 'not_closed', 'unavailable'] as const) counter.inc({ result }, 0);
+            return new EntryCloseDueLoop({
+              tick: new EntryCloseDueTick({
+                store: refundWrites,
+                closes: new HttpCoreEntryCloseTimes({
+                  client: createExternalHttpClient({ provider: 'core-svc', baseUrl: coreHttpUrl, timeoutCapMs: 2_000, clock: ctx.clock }),
+                  ...(o.env?.PEAKET_INTERNAL_TOKEN ? { internalToken: o.env.PEAKET_INTERNAL_TOKEN } : {}),
+                }),
+                nowMs: () => ctx.clock.now(),
+                metrics: { inc: ({ result }) => counter.inc({ result }) },
+              }),
+              leader: ctx.leader,
+              logger: ctx.logger,
+              ...(o.entryCloseDueEveryMs !== undefined ? { tickMs: o.entryCloseDueEveryMs } : {}),
+            });
+          })()
+        : undefined;
+      if (!entryCloseDue) ctx.logger.warn({ kind: 'entry-close-due-off' }, 'PEAKET_CORE_HTTP_URL이 없어 입장 기록 마감 환급 잇기를 켜지 않는다(GAT-180)');
       return [
         new SeatStreamRelay({
           source: new RedisSeatStreamSource(o.redis),
@@ -489,6 +523,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
             ]
           : []),
         ...(compensationLoop ? [compensationLoop] : []),
+        ...(entryCloseDue ? [entryCloseDue] : []),
         new SeatEpochWatch({
           store,
           leader: ctx.leader,

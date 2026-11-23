@@ -299,9 +299,9 @@ export class ScannerAuthState {
   }
 
   /** 세션·기기 쌍마다 5초 [가정]. 유효·무효 답을 모두 캐시한다(해제 반영은 늦어도 5초) */
-  async sessionOf(scannerSessionId: string, deviceId: string): Promise<ScannerSessionAnswer> {
+  async sessionOf(scannerSessionId: string, deviceId: string, o: { refresh?: boolean } = {}): Promise<ScannerSessionAnswer> {
     const key = `${scannerSessionId}/${deviceId}`;
-    const hit = this.#sessions.get(key);
+    const hit = o.refresh === true ? undefined : this.#sessions.get(key);
     if (hit && this.clock.now() - hit.at < SCANNER_SESSION_CACHE_MS) return hit.answer;
     // 1초 [가정]와 남은 처리 시간 가운데 짧은 쪽에서 끊는다. 답이 없으면 통과시키지 않고 503으로 닫는다
     const remaining = requestContext()?.deadline.remainingMs() ?? SCANNER_SESSION_CHECK_TIMEOUT_MS;

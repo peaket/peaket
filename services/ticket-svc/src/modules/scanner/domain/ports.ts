@@ -9,6 +9,7 @@ import type {
   ScannerPackageView,
   ScannerVersionVector,
 } from './scanner-gate.js';
+import type { EntryCloseReason } from './entry-close.js';
 import type { ScannerDeviceRecord } from './scanner-device.js';
 import type { ScannerPlacementMode, ScannerPlacementRecord, ScannerReadinessRecord } from './scanner-shift.js';
 
@@ -114,7 +115,12 @@ export interface ScannerGateStore {
     /** 낡은 버전 벡터로 판정한 기록 ID(GAT-160). STALE_VERSION 이상 표시를 만든다 */
     staleVersionIds?: readonly string[];
   }): Promise<ScanBatchResult>;
-  listFlags(i: { eventId: string; cursor?: string; limit: number }): Promise<GateFlagPage>;
+  /**
+   * 이상 표시 목록(offline-gate §7.2 '책임자 이상 표시 목록 거르기'). gateZone은 요청한 기기의 그 회차 배치 구역이고,
+   * 그 구역과 티켓 구역이 같은 표시만 주고 사후 검토 표시(OVERRIDE_REVIEW)는 넣지 않는다. 처리 상태로는 거르지 않는다.
+   * gateZone이 없으면(배치를 모르는 단위 조립) 예전처럼 거르지 않는다. HTTP 경로는 배치가 없으면 409라 늘 값이 있다.
+   */
+  listFlags(i: { eventId: string; gateZone?: string; cursor?: string; limit: number }): Promise<GateFlagPage>;
   /** 이상 표시의 회차. 없으면 undefined. 다른 회차면 403으로 닫는 데 쓴다 */
   flagEventId(flagId: string): Promise<string | undefined>;
   resolveFlag(i: { eventId: string; flagId: string; status: GateFlagStatus; note?: string; resolvedBy: string; nowMs: number }): Promise<GateFlagView | undefined>;
@@ -140,6 +146,8 @@ export interface ScannerShiftStore {
     expectedVersion: number;
   }): Promise<ScannerPlacementRecord>;
   readinessOf(eventId: string, deviceId: string): Promise<ScannerReadinessRecord | undefined>;
+  /** 그 회차에 근무 준비를 보고한(로그인했던) 기기 ID. 마감 판단이 '로그인했던 기기'를 고를 때 쓴다(offline-gate §7.3) */
+  readinessDevices?(eventId: string): Promise<string[]>;
   reportReadiness(i: { eventId: string; deviceId: string; packageSeq: number; clockOffsetMs: number; pendingUploads: number; reportedBy: string; atMs: number }): Promise<ScannerReadinessRecord>;
   /** 회차의 지금 마지막 변경 일련번호(scanner_seq). 없으면 0 */
   lastSeq(eventId: string): Promise<number>;
@@ -223,4 +231,39 @@ export interface ScannerFreshnessResolution {
 export interface ScannerFreshnessAlertSink extends ScannerOpsAlertSink {
   open(alert: ScannerFreshnessAlert): Promise<void>;
   resolve(resolution: ScannerFreshnessResolution): Promise<void>;
+}
+
+// ---- 입장 기록 마감(offline-gate §7.3 'GAT-180 마감 규칙', BUILD_ORDER GAT-180) ----
+
+/** 마감 판단이 읽고 쓰는 저장소. 마감 행·미보고 건 행은 한 트랜잭션(회차 잠금) 안에서 쓴다 */
+export interface EntryCloseStore {
+  /** 배치가 없으면 'no_placement'(저장 안 함). 받은 시각은 nowMs. 기기·회차마다 마지막 보고 하나를 덮어쓴다 */
+  putQueueReport(i: { eventId: string; deviceId: string; pendingUploads: number; nowMs: number }): Promise<'stored' | 'no_placement'>;
+  /**
+   * 마감 행이 없고 ticket.event_starts_at ≤ nowMs인 회차를 (event_starts_at, 회차 ID) 차례로 limit개까지 준다.
+   * afterEventId가 있으면 그 회차 다음부터(돌아가며 보기, §7.3 '판단').
+   */
+  candidates(i: { nowMs: number; limit: number; afterEventId?: string }): Promise<string[]>;
+  /**
+   * 회차 잠금(배타) 안에서 기기·보고를 다시 읽어 decideEntryClose(경계는 nowMs) → 마감 행·미보고 건 행.
+   * 이미 마감했으면 closed false. 마감 시각은 잠금을 잡은 뒤 읽은 clockNow다.
+   */
+  close(i: { eventId: string; nowMs: number; endsAtMs: number; clockNow: () => number }): Promise<{ closed: boolean; reason?: EntryCloseReason; closedAtMs?: number; unreported: number }>;
+  closedAt(eventId: string): Promise<number | undefined>;
+  pendingCoreSync(limit: number): Promise<{ eventId: string; closedAtMs: number }[]>;
+  markCoreSynced(eventId: string, nowMs: number): Promise<void>;
+  pendingCases(limit: number): Promise<{ eventId: string; deviceId: string; eventKey: string; createdAtMs: number }[]>;
+  markCaseOpened(eventId: string, deviceId: string, nowMs: number): Promise<void>;
+}
+
+export const ENTRY_CLOSE_STORE = Symbol('ticket.EntryCloseStore');
+
+/** core-svc 내부 입구 PUT /internal/v1/events/{eventId}/entry-closed. 2xx면 ok */
+export interface EntryCloseCoreSink {
+  notify(eventId: string, closedAtMs: number): Promise<{ ok: true; storedAtMs: number } | { ok: false; status?: number }>;
+}
+
+/** ops-svc CS 처리함 POST /internal/v1/cs-cases. 2xx ∧ accepted true만 true */
+export interface ScannerCaseSink {
+  open(c: { eventKey: string; kind: 'SCANNER_UNREPORTED'; sourceId: string; category: string; createdAt: string; dueBaseAt: string }): Promise<boolean>;
 }

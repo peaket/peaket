@@ -32,6 +32,8 @@ interface StoredScan extends Omit<ScanEventInput, 'result' | 'reason'> {
   reason?: string;
   receivedAt: string;
   flag: GateFlagKind | 'NONE';
+  /** 그 기록으로 적은 SCAN_STATE 변경 번호(중복 입장의 갈림, offline-gate §7.1) */
+  stateSeq?: number;
   /** 서버가 scannerSessionId로 정한 스태프 계정(C1-11) */
   staffAccountId?: string;
 }
@@ -81,12 +83,22 @@ export class MemoryScannerGateStore implements ScannerGateStore {
   readonly seq = new Map<string, number>();
   /** 회차 입장 정책 사본(scanner_event_policy). policySeq는 마지막 POLICY 변경 번호다 */
   readonly policy = new Map<string, { reentryAllowed: boolean; policySeq: number }>();
+  /**
+   * 시험·로컬용 마감 행 대역(entry_close.closed_at). 운영은 DrizzleScannerGateStore가 표에서 읽는다.
+   * 비어 있으면 F-05-4 시험이 쓰는 entryClosesAtMs(보정 시각 기준)로 물러난다.
+   */
+  readonly entryCloses = new Map<string, number>();
   readonly #policyChains = new Map<string, Promise<unknown>>();
 
   constructor(private readonly deviceKeys?: DeviceKeyStore) {}
 
   seedTicket(t: ScannerGateTicketSeed): void {
     this.tickets.set(t.ticketId, { ...t });
+  }
+
+  /** 시험·로컬: 마감 행이 있다고 심는다(entry_close.closed_at 대역) */
+  seedEntryClose(eventId: string, closedAtMs: number): void {
+    this.entryCloses.set(eventId, closedAtMs);
   }
 
   #appendChange(eventId: string, kind: string, payload: Record<string, unknown>): number {
@@ -237,6 +249,8 @@ export class MemoryScannerGateStore implements ScannerGateStore {
       let reason: string | undefined = scan.reason;
       const kinds: GateFlagKind[] = [];
       const demoted: StoredScan[] = [];
+      /** 이 기록이 '중복 입장'일 때 견줄 정상 기록의 state_seq(undefined면 옛 행) */
+      let duplicateBase: number | null | undefined;
       let keyBad: 'INVALID_QR' | 'KEY_REVOKED' | 'KEY_UNKNOWN' | undefined;
       if (scan.keyId !== undefined) {
         const keyId = /^[A-Za-z0-9_-]{11}$/.test(scan.keyId) ? Buffer.from(scan.keyId, 'base64url') : undefined;
@@ -278,6 +292,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
           result = 'REJECT';
           reason = 'ALREADY_IN';
           kinds.push('DUPLICATE');
+          duplicateBase = firstIn.stateSeq;
         } else if (firstIn && orderOf(scan, firstIn) < 0) {
           // 늦게 올라온 더 이른 기록이 정상이 된다. 먼저 통과했던 뒤 기록은 중복으로 내린다(C1-03).
           for (const old of existing) if (old.direction === 'IN') demoted.push(old);
@@ -291,7 +306,12 @@ export class MemoryScannerGateStore implements ScannerGateStore {
       } else if (i.sessionId === undefined || scan.scannerSessionId !== i.sessionId) {
         kinds.push('OUT_OF_SESSION');
       }
-      if (i.entryClosesAtMs !== undefined && corrected > i.entryClosesAtMs) kinds.push('AFTER_CLOSE');
+      // '마감 뒤 도착'은 받은 시각이 마감 행의 시각보다 뒤일 때다(offline-gate §7.3). 마감 행이 없으면 옛 시험용
+      // entryClosesAtMs(보정 시각 기준)로 물러난다(Drizzle 어댑터는 마감 행만 본다)
+      const closedAtMs = this.entryCloses.get(i.eventId);
+      if (closedAtMs !== undefined) {
+        if (i.nowMs > closedAtMs) kinds.push('AFTER_CLOSE');
+      } else if (i.entryClosesAtMs !== undefined && corrected > i.entryClosesAtMs) kinds.push('AFTER_CLOSE');
       if (scan.clockOffsetMs !== undefined && Math.abs(scan.clockOffsetMs) > CLOCK_UNCERTAIN_MS) kinds.push('TIME_UNCERTAIN');
       if (stale.has(scan.id)) kinds.push('STALE_VERSION');
       if (scan.method === 'OVERRIDE') kinds.push('OVERRIDE_REVIEW');
@@ -306,19 +326,13 @@ export class MemoryScannerGateStore implements ScannerGateStore {
       this.scans.set(scan.id, stored);
       acceptedIds.push(scan.id);
       for (const kind of kinds) {
-        const flag = this.#createFlag(i.eventId, scan.ticketId, kind, scan.knownSeq, i.nowMs);
+        const flag = this.#createFlag(i.eventId, scan.ticketId, kind, scan.knownSeq, i.nowMs, kind === 'DUPLICATE' ? duplicateBase : undefined);
         createdFlags.push(this.#flagView(flag));
         this.#appendChange(i.eventId, 'FLAG', { v: 1, flagId: flag.flagId, ticketId: flag.ticketId, kind: flag.kind, status: flag.status });
       }
-      for (const old of demoted) {
-        const next: StoredScan = { ...old, result: 'REJECT', reason: 'ALREADY_IN', flag: 'DUPLICATE' };
-        this.scans.set(old.id, next);
-        const flag = this.#createFlag(i.eventId, old.ticketId, 'DUPLICATE', old.knownSeq, i.nowMs);
-        createdFlags.push(this.#flagView(flag));
-        this.#appendChange(i.eventId, 'FLAG', { v: 1, flagId: flag.flagId, ticketId: flag.ticketId, kind: flag.kind, status: flag.status });
-      }
+      let stateSeq: number | undefined;
       if (result === 'PASS' && scan.method !== 'VERIFY') {
-        this.#appendChange(i.eventId, 'SCAN_STATE', {
+        stateSeq = this.#appendChange(i.eventId, 'SCAN_STATE', {
           v: 1,
           ticketId: scan.ticketId,
           direction: scan.direction,
@@ -326,15 +340,28 @@ export class MemoryScannerGateStore implements ScannerGateStore {
           gateZone: scan.gateZone ?? '',
           deviceId: i.deviceId,
         });
+        // 이 기록이 적은 SCAN_STATE 변경 번호(중복 입장의 갈림이 이 값과 견준다, C1-03)
+        this.scans.set(scan.id, { ...stored, stateSeq });
+      }
+      for (const old of demoted) {
+        const next: StoredScan = { ...old, result: 'REJECT', reason: 'ALREADY_IN', flag: 'DUPLICATE' };
+        this.scans.set(old.id, next);
+        // 내려간 기록은 새로 정상이 된 기록의 state_seq와 견준다
+        const flag = this.#createFlag(i.eventId, old.ticketId, 'DUPLICATE', old.knownSeq, i.nowMs, stateSeq ?? null);
+        createdFlags.push(this.#flagView(flag));
+        this.#appendChange(i.eventId, 'FLAG', { v: 1, flagId: flag.flagId, ticketId: flag.ticketId, kind: flag.kind, status: flag.status });
       }
     }
     return { acceptedIds, flags: createdFlags, resyncRequired: stale.size > 0, staleIds: [...stale], duplicateIds };
   }
 
-  async listFlags(i: { eventId: string; cursor?: string; limit: number }): Promise<GateFlagPage> {
+  async listFlags(i: { eventId: string; gateZone?: string; cursor?: string; limit: number }): Promise<GateFlagPage> {
     const cursor = i.cursor ? parseCursor(i.cursor) : undefined;
+    // 요청한 기기의 배치 구역과 티켓 구역이 같은 표시만. 사후 검토 표시(OVERRIDE_REVIEW)는 넣지 않는다(offline-gate §7.2, C1-16).
+    // 구역을 모르는 단위 조립은 예전처럼 거르지 않는다(HTTP 경로는 배치가 없으면 409라 늘 구역이 있다)
     const all = [...this.flags.values()]
       .filter((f) => f.eventId === i.eventId)
+      .filter((f) => i.gateZone === undefined || (f.kind !== 'OVERRIDE_REVIEW' && this.tickets.get(f.ticketId)?.gateZone === i.gateZone))
       .sort((a, b) => (Date.parse(b.createdAt) - Date.parse(a.createdAt)) || b.flagId.localeCompare(a.flagId));
     const filtered = cursor ? all.filter((f) => Date.parse(f.createdAt) < cursor.atMs || (Date.parse(f.createdAt) === cursor.atMs && f.flagId < cursor.flagId)) : all;
     const page = filtered.slice(0, i.limit);
@@ -366,13 +393,15 @@ export class MemoryScannerGateStore implements ScannerGateStore {
     return this.#passScans(ticketId).at(-1);
   }
 
-  #createFlag(eventId: string, ticketId: string, kind: GateFlagKind, knownSeq: number, nowMs: number): StoredFlag {
+  #createFlag(eventId: string, ticketId: string, kind: GateFlagKind, knownSeq: number, nowMs: number, awarenessBase?: number | null): StoredFlag {
+    // '몰랐음/알고도 통과'는 정상 기록의 state_seq와 견준다. null이면 옛 행이라 CONCURRENT(offline-gate §7.1)
+    const base = awarenessBase === null ? null : (awarenessBase ?? (this.seq.get(eventId) ?? 0));
     const flag: StoredFlag = {
       flagId: randomUUID(),
       eventId,
       ticketId,
       kind,
-      awareness: knownSeq < (this.seq.get(eventId) ?? 0) ? 'CONCURRENT' : 'KNOWN',
+      awareness: base === null || knownSeq < base ? 'CONCURRENT' : 'KNOWN',
       status: 'OPEN',
       createdAt: new Date(nowMs).toISOString(),
     };

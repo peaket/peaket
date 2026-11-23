@@ -62,6 +62,13 @@ export class MemoryScannerShiftStore implements ScannerShiftStore {
     return r ? { ...r } : undefined;
   }
 
+  async readinessDevices(eventId: string): Promise<string[]> {
+    return [...this.readiness.values()]
+      .filter((r) => r.eventId === eventId)
+      .map((r) => r.deviceId)
+      .sort();
+  }
+
   async reportReadiness(i: {
     eventId: string;
     deviceId: string;

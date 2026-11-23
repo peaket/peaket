@@ -1,5 +1,5 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-scanner.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
-# openapi info.version 1.0.0-draft · 계약 sha256 dc88e060d192cd35638e8da1396e1eb7036a9726ca90f16585745223941f7e2e
+# openapi info.version 1.0.0-draft · 계약 sha256 4ac389c49a11e1fb765888e11146643780c27e505fb049ccfa5f31b5b16b68a0
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -35,6 +35,10 @@ spec:
         - path:
             type: RegularExpression
             value: /v1/scanner/flags(/.*)?
+          method: TRACE
+        - path:
+            type: RegularExpression
+            value: /v1/scanner/queue-reports(/.*)?
           method: TRACE
         - path:
             type: RegularExpression
@@ -168,6 +172,14 @@ spec:
     - scanner-api.peaket.example
   rules:
     - matches:
+        - path:
+            type: RegularExpression
+            value: /v1/scanner/queue-reports/[^/]+
+          method: PUT
+        - path:
+            type: RegularExpression
+            value: /v1/scanner/queue-reports/[^/]+
+          method: OPTIONS
         - path:
             type: Exact
             value: /v1/scanner/scans

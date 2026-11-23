@@ -8,6 +8,7 @@ import {
   DPOP_REPLAY_STORE,
   ENROLLMENT_ATTEMPT_LIMITER,
   ENROLLMENT_CODE_STORE,
+  ENTRY_CLOSE_STORE,
   SCANNER_DEVICE_COMMAND_STORE,
   SCANNER_DEVICE_STORE,
   SCANNER_EVENT_POLICY,
@@ -19,6 +20,7 @@ import {
   type DpopReplayStore,
   type EnrollmentAttemptLimiter,
   type EnrollmentCodeStore,
+  type EntryCloseStore,
   type ScannerDeviceCommandStore,
   type ScannerDeviceStore,
   type ScannerEventPolicyProvider,
@@ -63,6 +65,10 @@ export interface ScannerWiring {
   onScanStored?: (result: 'PASS' | 'REJECT' | 'CHECK' | 'duplicate') => void;
   /** POLICY 변경 지표·로그(scanner_policy_changes_total, scanner.policy-changed) */
   onPolicyChanged?: (i: { eventId: string; reentryAllowed: boolean; seq: number }) => void;
+  /** 입장 기록 마감 저장소(큐 비움 보고). 없으면 큐 보고 경로가 503이다 */
+  entryClose?: EntryCloseStore;
+  /** 큐 비움 보고 결과 지표(ticket_scanner_queue_reports_total{result}) */
+  onQueueReport?: (result: 'empty' | 'pending' | 'no_placement') => void;
 }
 
 @Module({})
@@ -75,6 +81,7 @@ export class ScannerModule {
       { provide: SCANNER_GATE_STORE, useValue: o.gate },
       { provide: SCANNER_SHIFT_STORE, useValue: o.shift },
       { provide: SCANNER_PWA_ORIGIN, useValue: o.scannerPwaOrigin ?? scannerPwaOriginFromEnv({}) },
+      ...(o.entryClose ? [{ provide: ENTRY_CLOSE_STORE, useValue: o.entryClose } satisfies Provider] : []),
       ...(o.mtlsSecret ? [{ provide: SCANNER_MTLS_SECRET, useValue: o.mtlsSecret } satisfies Provider] : []),
       ...(o.policy ? [{ provide: SCANNER_EVENT_POLICY, useValue: o.policy } satisfies Provider] : []),
       ...(o.limiter ? [{ provide: ENROLLMENT_ATTEMPT_LIMITER, useValue: o.limiter } satisfies Provider] : []),
@@ -116,6 +123,8 @@ export class ScannerModule {
             ...(o.maxOfflineMs !== undefined ? { maxOfflineMs: o.maxOfflineMs } : {}),
             ...(o.onScanStored ? { onScanStored: o.onScanStored } : {}),
             ...(o.onPolicyChanged ? { onPolicyChanged: o.onPolicyChanged } : {}),
+            ...(o.onQueueReport ? { onQueueReport: o.onQueueReport } : {}),
+            ...(o.entryClose ? { entryClose: o.entryClose } : {}),
           }),
         inject: [SCANNER_GATE_STORE, CLOCK, SCANNER_DEVICE_STORE],
       },
