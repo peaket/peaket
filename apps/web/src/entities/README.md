@@ -10,6 +10,7 @@ FSD 규칙상 entities 조각끼리는 서로 가져오지 않는다. 공연·�
 - `artist` — 아티스트(`ARTISTS`, `getArtist(id)`). LUMEN 등.
 - `seller` — 판매자 신원정보 7항목(`SELLERS`, `getSeller(id)`). (주)스텔라엔터테인먼트 `sel-stella`, 값은 '예시'.
 - `me` — 로그인한 팬 요약 목업(`ME` = 지민·카카오·본인확인 완료, `ME_HANEUL` = 하늘·현장 책임자, `GUEST` = null). 찜·오픈 알림 신청 공연 id를 가진다. 실제 로그인·본인확인 상태는 `useFanSession()`(GET /v1/identity/me를 페이지마다 한 번, `refreshFanSession()`)과 화면 값 함수 `shellUserOf`·`personalCta`(ADR-0202, HOT-321)다. 셸 머리는 이것을 쓰고, 목업 `ME`는 아직 데이터에 잇지 않은 화면의 내용만 그린다.
+- `wallet` — 목업이 아니라 월렛 IndexedDB 저장소 `peaket-wallet`(기기 키·티켓 스냅샷·마지막 동기화 시각, `listTicketSnapshots`·`replaceTicketSnapshots` 등). 기기 키 흐름(features/wallet-device-key)과 월렛 목록 받기(features/wallet-sync)가 함께 쓴다(FIX-wallet-tickets, docs/frontend.md §4.2.4).
 - `ticket` — 티켓 요약(`TICKETS`, `getTicket(id)`, `DEMO_TICKET_ID` = `tkt-lumen-r1-0312`). 상태는 d5 §10.3 표본 여덟 가지.
 - `order` — 주문 요약(`ORDERS`, `getOrder(id)`, `DEMO_ORDER_ID` = `ord-20261014-0001`). 상태는 d5 §10.3 표본 일곱 가지.
 - `account` — 계정 공용 목업(`BANKS` 은행 9곳 — 환불·배상 계좌 폼이 함께 씀, `SAMPLE_BANK_INPUT`, `maskedAccount(bank, account)`)과 SCR-055 예매·주문 내역(`ORDER_HISTORY` 19건, `getOrderHistory(id)`, `GOODS_READY_BADGE`, `ORDER_HISTORY_DEMO` = 예매 확인서 `ord-20261014-0001`·주문 확인서 `ord-20261018-0010`·입금 오류 `ord-20261020-0008`). 계좌는 끝 4자리만 보인다.

@@ -1,4 +1,4 @@
-// 회차 공개 요약 읽기(openapi GET /v1/events/{eventId} EventPublicSummary의 title·startsAt·sellerName, 인증 없음·CDN 캐시).
+// 회차 공개 요약 읽기(openapi GET /v1/events/{eventId} EventPublicSummary의 title·startsAt·sellerName과 선택 칸 placeName·entryOpensAt·endsAt, 인증 없음·CDN 캐시).
 // 현장 스태프 화면(초대 수락 SCR-050·스캐너 승인 SCR-051·내 현장 배정 SCR-061)이 배정의 eventId로 판매자 상호·공연명·회차 시작을 읽는다
 // (d5 §5.26·§5.27 '파트너 이름'·§5.35, open-items 78번, ADR-0362 결정 1). 404·410·연결 실패·모양이 틀린 본문은 모두 '못 읽음'이다.
 // 시간 한도는 docs/frontend.md §4.1 'api-client 밖의 호출'의 읽기 값(shared/lib/timed-fetch.ts). 읽은 요약은 이 읽기 도구의 메모리에만 둔다(화면이 닫히면 사라진다).
@@ -13,6 +13,12 @@ export interface EventSummary {
   startsAt: string;
   /** 판매자 상호(초대한 파트너·기기의 배정 파트너) */
   sellerName: string;
+  /** 장소(선택 칸. 없거나 빈 글이면 없다, 월렛 카드 docs/frontend.md §4.2.4 '표시 값') */
+  placeName?: string;
+  /** 입장 시작(ISO, 선택 칸) */
+  entryOpensAt?: string;
+  /** 공연 종료(ISO, 선택 칸). 월렛의 <지난 공연> 판정에 쓴다 */
+  endsAt?: string;
 }
 
 export type EventSummaryAnswer = { kind: 'ok'; summary: EventSummary } | { kind: 'unreadable' };
@@ -27,11 +33,21 @@ const UNREADABLE: EventSummaryAnswer = { kind: 'unreadable' };
 
 const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
 
-/** 200 본문 → 요약. 세 칸 가운데 하나라도 없거나 시각이 틀리면 null */
+const isoTime = (v: unknown): v is string => typeof v === 'string' && !Number.isNaN(Date.parse(v));
+
+/** 200 본문 → 요약. 필수 세 칸 가운데 하나라도 없거나 시각이 틀리면 null. 선택 칸(장소·입장 시작·종료)은 모양이 맞을 때만 싣는다 */
 export function eventSummaryOf(eventId: string, body: unknown): EventSummary | null {
-  const b = body as { title?: unknown; startsAt?: unknown; sellerName?: unknown } | null;
-  if (!b || typeof b !== 'object' || !nonEmpty(b.title) || !nonEmpty(b.sellerName) || typeof b.startsAt !== 'string' || Number.isNaN(Date.parse(b.startsAt))) return null;
-  return { eventId, title: b.title, startsAt: b.startsAt, sellerName: b.sellerName };
+  const b = body as { title?: unknown; startsAt?: unknown; sellerName?: unknown; placeName?: unknown; entryOpensAt?: unknown; endsAt?: unknown } | null;
+  if (!b || typeof b !== 'object' || !nonEmpty(b.title) || !nonEmpty(b.sellerName) || !isoTime(b.startsAt)) return null;
+  return {
+    eventId,
+    title: b.title,
+    startsAt: b.startsAt,
+    sellerName: b.sellerName,
+    ...(nonEmpty(b.placeName) ? { placeName: b.placeName } : {}),
+    ...(isoTime(b.entryOpensAt) ? { entryOpensAt: b.entryOpensAt } : {}),
+    ...(isoTime(b.endsAt) ? { endsAt: b.endsAt } : {}),
+  };
 }
 
 /** origin: API 출처(gw-fan). 성공한 요약만 기억한다(못 읽음은 [다시 불러오기]가 다시 묻게 기억하지 않는다) */
