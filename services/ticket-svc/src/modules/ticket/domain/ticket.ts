@@ -350,6 +350,44 @@ export interface WalletTicket {
   readonly status: TicketStatus;
   readonly qrPayload: string;
   readonly issuedAtMs: number;
+  /** 좌석 배치의 게이트 구역. 빈 값이면 아직 모른다 */
+  readonly gateZone: string;
+  /** 발권 때 받은 회차 시작(epoch ms). 없으면 모른다 */
+  readonly eventStartsAtMs?: number;
+  /** 부정 예매 양도 잠금이 이 표에 걸렸는지(POL-046 ③) */
+  readonly transferLocked: boolean;
+  /** 지금 보유자가 결제자인지(받은 표가 아닌지) */
+  readonly heldByPayer: boolean;
+}
+
+/**
+ * 월렛 목록 HTTP 응답의 항목 한 장(openapi `Ticket`의 칸 가운데 ticket 데이터로 채우는 것만, docs/features/offline-gate.md §2 '무엇을 싣나').
+ * 주문·좌석·계정 ID, QR 포인터, 티켓 키와 해시는 싣지 않는다(ASVS v5.0.0-15.3.1). 모르는 칸은 거짓 값을 채우지 않고 뺀다
+ */
+export interface WalletListItem {
+  readonly ticketId: string;
+  readonly eventId: string;
+  readonly status: TicketStatus;
+  readonly transferLocked: boolean;
+  readonly gateZone?: string;
+  readonly eventStartsAt?: string;
+  /** 취소 기한 = 회차 시작(POL-032) */
+  readonly cancelDeadline?: string;
+  /** 결제자가 보유한 표만 null. 받은 표는 보낸 분 닉네임을 ticket 데이터가 모르므로 칸을 뺀다 */
+  readonly receivedFromNickname?: null;
+}
+
+export function walletListItemOf(t: WalletTicket): WalletListItem {
+  const startsAt = t.eventStartsAtMs === undefined ? undefined : new Date(t.eventStartsAtMs).toISOString();
+  return {
+    ticketId: t.ticketId,
+    eventId: t.eventId,
+    status: t.status,
+    transferLocked: t.transferLocked,
+    ...(t.gateZone.trim() === '' ? {} : { gateZone: t.gateZone }),
+    ...(startsAt === undefined ? {} : { eventStartsAt: startsAt, cancelDeadline: startsAt }),
+    ...(t.heldByPayer ? { receivedFromNickname: null } : {}),
+  };
 }
 
 export interface ListTicketsResult {
@@ -362,6 +400,14 @@ export class TicketInputError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'TicketInputError';
+  }
+}
+
+/** 월렛 목록 커서가 풀리지 않는다(처음 쪽으로 보지 않는다). HTTP는 400 invalid-query, gRPC는 INVALID_ARGUMENT다 */
+export class WalletCursorError extends TicketInputError {
+  constructor() {
+    super('cursor가 올바르지 않다');
+    this.name = 'WalletCursorError';
   }
 }
 
@@ -444,22 +490,33 @@ export function walletCursorOf(c: WalletCursor): string {
   return Buffer.from(JSON.stringify([c.issuedAtMs, c.ticketId]), 'utf8').toString('base64url');
 }
 
+const BASE64URL = /^[A-Za-z0-9_-]+$/;
+
+/** 커서(`[발권 ms, 티켓 UUID]` JSON의 base64url)를 푼다. 풀리지 않으면 undefined */
 export function parseWalletCursor(raw: string | undefined): WalletCursor | undefined {
-  if (!raw) return undefined;
+  if (!raw || !BASE64URL.test(raw)) return undefined;
   try {
     const v: unknown = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
-    if (!Array.isArray(v) || v.length !== 2 || typeof v[0] !== 'number' || typeof v[1] !== 'string' || !isUuid(v[1])) return undefined;
-    return { issuedAtMs: v[0], ticketId: v[1].toLowerCase() };
+    if (!Array.isArray(v) || v.length !== 2 || typeof v[1] !== 'string' || !isUuid(v[1])) return undefined;
+    const at: unknown = v[0];
+    if (typeof at !== 'number' || !Number.isSafeInteger(at) || at < 0) return undefined;
+    return { issuedAtMs: at, ticketId: v[1].toLowerCase() };
   } catch {
     return undefined;
   }
 }
 
+/**
+ * 목록 입력을 검사한다. limit은 gRPC의 0(생략)을 기본값으로 보고 범위 안으로 맞춘다(HTTP는 계약 검사가 0·101을 먼저 400으로 낸다).
+ * @throws WalletCursorError 커서가 있는데 풀리지 않음(처음 쪽으로 보지 않는다, docs/features/offline-gate.md §2 '차례와 나누기')
+ */
 export function normalizeListInput(i: ListTicketsInput): ListTicketsInput {
   const accountId = requireUuid('accountId', i.accountId);
   const limit = Math.max(1, Math.min(MAX_WALLET_LIMIT, Math.trunc(i.limit) || DEFAULT_WALLET_LIMIT));
+  if (i.cursor === undefined) return { accountId, limit };
   const cursor = parseWalletCursor(i.cursor);
-  return { accountId, limit, ...(cursor ? { cursor: i.cursor } : {}) };
+  if (!cursor) throw new WalletCursorError();
+  return { accountId, limit, cursor: walletCursorOf(cursor) };
 }
 
 export function normalizeCancelInput(i: CancelTicketsInput): CancelTicketsInput {
@@ -498,5 +555,17 @@ export function replayOnlyResultOf(t: Pick<TicketRecord, 'orderId' | 'payerAccou
 
 /** 월렛 목록에 싣는 값만 고른다(키 원문·해시는 싣지 않는다). */
 export function walletTicketOf(t: TicketRecord): WalletTicket {
-  return { ticketId: t.ticketId, orderId: t.orderId, eventId: t.eventId, seatId: t.seatId, status: t.status, qrPayload: t.qrPayload, issuedAtMs: t.issuedAtMs };
+  return {
+    ticketId: t.ticketId,
+    orderId: t.orderId,
+    eventId: t.eventId,
+    seatId: t.seatId,
+    status: t.status,
+    qrPayload: t.qrPayload,
+    issuedAtMs: t.issuedAtMs,
+    gateZone: t.gateZone,
+    ...(t.eventStartsAtMs === undefined ? {} : { eventStartsAtMs: t.eventStartsAtMs }),
+    transferLocked: t.fraudLockCaseId !== undefined,
+    heldByPayer: t.accountId === t.payerAccountId,
+  };
 }

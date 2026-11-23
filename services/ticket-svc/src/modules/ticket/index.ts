@@ -28,5 +28,6 @@ export { TransferError, Transfers, type TransferReauthGate, type TransferStore, 
 export { TransfersController } from './inbound/transfers.controller.js';
 export { transferLockHandlers, type TransferLockUseCases } from './inbound/ticket.grpc.js';
 export { TicketDeviceKeysController } from './inbound/device-keys.controller.js';
+export { WalletTicketsController } from './inbound/wallet-tickets.controller.js';
 export { TicketModule, type TicketWiring } from './ticket.module.js';
 export { ticketPackage, ticketServiceHandlers, type TicketGrpcUseCases, type TicketPackage } from './inbound/ticket.grpc.js';

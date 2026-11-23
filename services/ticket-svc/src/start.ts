@@ -199,7 +199,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
           ...(opsAlertSink ? { opsAlert: opsAlertSink } : {}),
           maxOfflineMs: config.scannerMaxOfflineMs,
         },
-        ticket: { deviceKeys, transfers },
+        ticket: { deviceKeys, tickets: ticket, transfers },
       }),
       adminAuthz,
       scanner: {
