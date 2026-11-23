@@ -15,17 +15,22 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/config/package.json packages/config/
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/platform/package.json packages/platform/
+COPY packages/validation/package.json packages/validation/
 COPY services/invariant-checker/package.json services/invariant-checker/
 COPY services/pg-simulator/package.json services/pg-simulator/
 COPY services/payment-svc/package.json services/payment-svc/
 COPY services/v0-monolith/package.json services/v0-monolith/
-RUN pnpm install --frozen-lockfile --filter @peaket/v0-monolith --filter @peaket/payment-svc --filter @peaket/platform --filter @peaket/config
+RUN pnpm install --frozen-lockfile --filter @peaket/v0-monolith --filter @peaket/payment-svc --filter @peaket/platform --filter @peaket/validation --filter @peaket/contracts --filter @peaket/config
 COPY packages/config packages/config
+COPY packages/contracts packages/contracts
 COPY packages/platform packages/platform
+COPY packages/validation packages/validation
 COPY services/payment-svc services/payment-svc
 COPY services/v0-monolith services/v0-monolith
 COPY tools/ci/verify-native-binding.mjs tools/ci/
-RUN pnpm --filter @peaket/platform build \
+RUN pnpm --filter @peaket/contracts build \
+ && pnpm --filter @peaket/validation build \
+ && pnpm --filter @peaket/platform build \
  && pnpm --filter @peaket/payment-svc build:lib \
  && pnpm --filter @peaket/v0-monolith build \
  && pnpm --filter @peaket/v0-monolith deploy --prod --legacy /out \
