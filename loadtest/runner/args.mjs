@@ -7,6 +7,8 @@
 //   node loadtest/run.mjs v0 seat-deltas --users N --rate R --connections C [--listener-pods P] [--hold-size 2] [공통]
 //   node loadtest/run.mjs v0 gate --scanners S --rate R [--cut-at 60] [--cut-s 60] [공통, --main 기본 180]
 //   node loadtest/run.mjs v1 queue|seat-hold|payment …(v0와 같은 인자, docs/verification.md §3.9 'v1 경로'. --namespace·--settle·--hpa-timeline은 없다)
+//     v1만: [--db-stats](queue·seat-hold·payment, purchase·payment DB 통계와 WAL 바이트) [--redis-stats](대기열·좌석 Valkey INFO memory, 계획 F-08-8 7.1)
+//   node loadtest/run.mjs v1 entry-steps --replicas N --pod-cpus <몫> (--start-rate r --step-rate d | --x1-estimate X) […](진입 서버 비례 확인, 인자 규칙은 ./entry-scale.mjs parseEntryStepsArgs)
 //   node loadtest/run.mjs gw sweep|capacity|ip-limit|limits …(게이트웨이 차단 상한·검색 IP 한도, BAT-056·BAT-058. 인자 규칙은 ./gw.mjs parseGwArgs가 맡는다)
 //   공통: [--warm 30] [--main 60] [--cpus 4] [--memory-mi 4096] [--generators N] [--namespace v0|v0-base] [--settle] [--hpa-timeline]
 //         [--record --run-id <ID> [--profile <이름>] [--prom-url http://127.0.0.1:9090]] [--invariants] [--out <폴더>]
@@ -18,6 +20,8 @@ export class UsageError extends Error {
 
 // gw.mjs도 UsageError를 이 파일에서 가져온다(서로 가져오지만 모듈을 읽을 때 쓰지 않고 함수 안에서만 써서 순서 문제가 없다)
 import { parseGwArgs } from './gw.mjs';
+// entry-scale.mjs도 같은 꼴로 UsageError를 이 파일에서 가져온다(함수 안에서만 쓴다)
+import { parseEntryStepsArgs } from './entry-scale.mjs';
 
 /** 입구의 IP당 초당 요청 한도(deploy/envs/local/v0-gateway.yaml PEAKET_V0_RATE_PER_SECOND, 시험이 견준다) */
 export const GATEWAY_RATE_PER_IP = 10;
@@ -26,6 +30,8 @@ export const GATEWAY_RATE_PER_IP = 10;
 export const SCENARIOS = Object.freeze({ queue: 'v0-queue.js', 'seat-hold': 'v0-seat-hold.js', payment: 'v0-payment.js', 'seat-deltas': 'v0-seat-hold.js', gate: 'v0-gate.js' });
 /** v1 시나리오 이름 → 파일(§3.8 합본으로 보낸다, BUILD_ORDER PRF-215) */
 export const V1_SCENARIOS = Object.freeze({ queue: 'v1-queue.js', 'seat-hold': 'v1-seat-hold.js', payment: 'v1-payment.js' });
+/** v1 진입 비례 확인의 단계 하나(run.mjs v1 entry-steps가 단계마다 부른다. 사용자가 직접 고르는 시나리오가 아니라 V1_SCENARIOS에 넣지 않는다, MSR-020) */
+export const V1_ENTRY_SCENARIO = 'v1-entry.js';
 /** v1 입장 토큰의 최대 체류 45분 [가정](queue-svc MAX_STAY_MS). 준비부터 본구간 끝까지가 이 안이어야 구매 세션이 끝나지 않는다 */
 export const V1_ADMISSION_STAY_S = 45 * 60;
 /** v1 K2 좌석 홀드의 기본 예열(초, BAT-028 D). 발생기 준비가 끝난 뒤 모두 같은 시각에 시작하도록 60초를 둔다 */
@@ -75,7 +81,7 @@ const INTS = {
   '--cut-s': ['cutS', 1, 7200],
 };
 
-const BOOLS = { '--record': 'record', '--invariants': 'invariants', '--settle': 'settle', '--hpa-timeline': 'hpaTimeline', '--keep': 'keep', '--db-stats': 'dbStats' };
+const BOOLS = { '--record': 'record', '--invariants': 'invariants', '--settle': 'settle', '--hpa-timeline': 'hpaTimeline', '--keep': 'keep', '--db-stats': 'dbStats', '--redis-stats': 'redisStats' };
 
 /** 소수 한 자리까지 받는 비율(§3.9 'v1 경로' 비율 소수 한 자리, BUILD_ORDER PRF-215): 플래그 → [칸, 하한, 상한] */
 const DECIMALS = {
@@ -104,6 +110,9 @@ for (const k of ['queue', 'seat-hold', 'payment']) ALLOWED[`v1:${k}`] = ALLOWED[
 for (const k of ['queue', 'seat-hold', 'payment']) ALLOWED[`v1:${k}`].push('--target-cpus');
 // 좌석 Redis TLS 짝 실행(K2, docs/verification.md §3.5 7번)은 v1 좌석 홀드만 받는다(K1·K7 ②는 TLS 켬 하나, §3.10 'v1 합본 측정 규칙', 코드 리뷰 M9)
 ALLOWED['v1:seat-hold'].push('--paired-run');
+// v1 DB·Redis·통계(계획 F-08-8 7.1, docs/verification.md §4.1 'DB 쓰기 처리량'·'Redis 메모리'): 셋 모두 --db-stats·--redis-stats를 받는다. v0에는 --redis-stats가 없다
+ALLOWED['v1:queue'].push('--db-stats');
+for (const k of ['queue', 'seat-hold', 'payment']) ALLOWED[`v1:${k}`].push('--redis-stats');
 
 const REQUIRED = {
   queue: ['--users', '--entry-rate', '--admit-per-second'],
@@ -220,6 +229,7 @@ export function parseArgs(argv) {
     rest = rest0.slice(1);
   } else if (command === 'v1') {
     const scenario = rest0[0];
+    if (scenario === 'entry-steps') return parseEntryStepsArgs(rest0.slice(1));
     if (!Object.hasOwn(V1_SCENARIOS, scenario ?? '')) fail(`v1 시나리오는 ${Object.keys(V1_SCENARIOS).join('·')} 가운데 하나다: ${scenario ?? '(없음)'}`);
     kind = `v1:${scenario}`;
     rest = rest0.slice(1);
@@ -333,8 +343,10 @@ export function parseArgs(argv) {
     ...(o.promUrl !== undefined ? { promUrl: o.promUrl } : {}),
     ...(o.pairedRun !== undefined ? { pairedRun: o.pairedRun } : {}),
     ...(o.out !== undefined ? { out: o.out } : {}),
+    // v1 통계 칸은 v1에만 둔다(v0 돌려주는 꼴은 그대로)
+    ...(v1 ? { redisStats: o.redisStats ?? false } : {}),
   };
-  if (kind === 'queue') return { ...base, entryRate: o.entryRate, admitPerSecond: o.admitPerSecond };
+  if (kind === 'queue') return { ...base, entryRate: o.entryRate, admitPerSecond: o.admitPerSecond, ...(v1 ? { dbStats: o.dbStats ?? false } : {}) };
   if (kind === 'seat-deltas') {
     if (o.users + o.connections > 131072) fail(`가상 사용자(${o.users}) + 연결(${o.connections})이 131,072명을 넘는다`);
     const listenerPods = o.listenerPods ?? Math.ceil(o.connections / DEFAULTS.connectionsPerPod);
