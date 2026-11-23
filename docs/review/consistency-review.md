@@ -881,6 +881,7 @@
 | R-788 | 관제 콘솔이 GraphQL·Socket.IO 시절 목업 흐름으로만 떠서 실제 ops-svc의 REST·SSE 두 흐름(ADR-0100)·위젯 값·접속자를 쓰지 않았고, 콘솔·파트너 CSP·Trusted Types가 정본과 달랐다 | services/ops-svc live 모듈·0028, docs/api openapi·asyncapi, packages/contracts·api-client 생성물, deploy/gateways gw-ops, apps/console-host·widgets, apps/partner, docs/adr/0360, docs/frontend.md, docs/features/control-tower.md | 알림 표 순번 흐름(Last-Event-ID·reset·늦은 커밋 다시 보기), 위젯 흐름·조회(WidgetSource 포트), MF 원격 둘·fetch 스트림 흐름 관리, 콘솔 CSP·파트너 좁은 default 정책 | 해결. 경보 목록 다시 읽기는 F-03-3, 낮음 지적은 정리 목록 |
 | R-789 | 관제 원격 위젯이 무결성·계약 확인 없이 실리고 실패하면 화면 전체가 흔들릴 수 있었고, 켜 둔 동안 안 보이는 위젯도 흐름을 받았으며 대시보드 덩어리가 예산 80KB를 넘었다 | apps/console-host 원격 적재기·위젯 흐름·보드 나눔, packages/console-contract, packages/ds 그래프, .github/workflows build-remote·ci-web, docs/adr/0361, docs/frontend.md | sha384 한 파일 원격·대체 카드·실패 지표, 10초 유예·숨긴 탭 30초·250ms 묶기·900점 상한, 배치별 늦게 싣기 | 해결. WebKit 오류 본문 까닭·실행 미확인 몫은 정리 목록 |
 | R-791 | 관제 실시간 표(ops-rt)·심장 박동·rt 표와 뷰·ops-svc 0.5초 조회·파트너 판매 현황 1분 조회·KPI 패널이 코드에 없었고, gw-partner가 live-snapshot을 처리기 없는 core-svc로 보냈다 | services/ops-rt·rt-pulse, data/clickhouse/rt, services/ops-svc realtime-table·live 위젯 키, docs/api openapi, packages/contracts·api-client 생성물, deploy/gateways gw-partner, apps/console-host 대시보드, docs/features/control-tower.md, .github/workflows/ci-node.yml | 원시 적재와 조회 시점 중복 제거, 신선도·Degraded·끊김, 파트너 1분 값, 위젯 rt-sales.summary | 해결. 작업자 값 파일(RV220-8)·경보 규칙은 넘김 |
+| R-790 | OPS-310 명령 6 결제 갈래 | ops-svc·payment-svc 새 제어 모듈·admission-ctrl·control.proto·payment.proto·메시·ADR-0366 | F-02-2 역할 다섯 | 끝 |
 
 ## 4. 숫자 일치표
 
