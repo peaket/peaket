@@ -4,37 +4,37 @@
 
 ## 완성 판정
 
-- 항목 4252개: 시험 시나리오(세부 단위) 2211, 시나리오가 가리키지 않는 요구사항·정책 14, ASVS 추적 표의 행 2027
-- 빈칸 623, ID만 993: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다. `--require`는 빈칸·ID만·미검증·다른 단계를 실패로 세고, 옛 묶음은 `--allow-unverified`로 미검증·다른 단계를 통과시킨다)
+- 항목 4290개: 시험 시나리오(세부 단위) 2249, 시나리오가 가리키지 않는 요구사항·정책 14, ASVS 추적 표의 행 2027
+- 빈칸 596, ID만 989: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다. `--require`는 빈칸·ID만·미검증·다른 단계를 실패로 세고, 옛 묶음은 `--allow-unverified`로 미검증·다른 단계를 통과시킨다)
 - ID만의 뜻: 시나리오는 이름에 ID만 있고 그 세부 번호가 없는 시험만 있다. ASVS는 다른 곳 시험만 있는 경우도 ID만이다(같은 ID의 태그가 그 행의 코드 영역 밖 시험 파일에만 있다)
 - 미검증 6(모두 사유가 있다): 완료로 세지 않고 따로 센다
-- 다시 볼 notes 13: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
+- 다시 볼 notes 12: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
 
 ## 등급별 상태
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 672 | 95 | 24 | 2 | 2 | 17 | 1 | 0 | 96 | 909 |
-| B | 1561 | 898 | 22 | 2 | 4 | 83 | 0 | 245 | 526 | 3341 |
+| A | 685 | 94 | 24 | 2 | 2 | 17 | 1 | 0 | 89 | 914 |
+| B | 1625 | 895 | 22 | 2 | 4 | 75 | 0 | 245 | 506 | 3374 |
 | C | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 2 |
-| 합계 | 2233 | 993 | 46 | 5 | 6 | 100 | 1 | 245 | 623 | 4252 |
+| 합계 | 2310 | 989 | 46 | 5 | 6 | 92 | 1 | 245 | 596 | 4290 |
 
 ## 분야별 상태
 
 | 분야 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| analytics | B | 6 | 120 | 0 | 0 | 0 | 1 | 0 | 29 | 37 | 193 |
+| analytics | B | 8 | 120 | 0 | 0 | 0 | 1 | 0 | 29 | 35 | 193 |
 | bot-defense | B | 130 | 22 | 0 | 0 | 0 | 5 | 0 | 0 | 2 | 159 |
 | catalog-review | B | 72 | 20 | 0 | 0 | 0 | 0 | 0 | 16 | 8 | 116 |
 | control-tower | B | 96 | 99 | 0 | 0 | 0 | 12 | 0 | 24 | 106 | 337 |
 | delivery | B | 52 | 18 | 0 | 0 | 0 | 2 | 0 | 3 | 2 | 77 |
-| devops | B | 80 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 42 | 126 |
+| devops | B | 84 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 42 | 130 |
 | forensic-replay | B | 23 | 107 | 0 | 0 | 0 | 3 | 0 | 19 | 39 | 191 |
-| frontend | B | 115 | 46 | 8 | 2 | 0 | 2 | 0 | 22 | 20 | 215 |
+| frontend | B | 116 | 45 | 8 | 2 | 0 | 2 | 0 | 22 | 20 | 215 |
 | identity | A | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 |
-| identity | B | 326 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 56 | 442 |
+| identity | B | 328 | 46 | 0 | 0 | 0 | 6 | 0 | 7 | 55 | 442 |
 | notify | B | 10 | 121 | 0 | 0 | 0 | 0 | 0 | 21 | 35 | 187 |
-| offline-gate | B | 109 | 100 | 0 | 0 | 0 | 10 | 0 | 19 | 55 | 293 |
+| offline-gate | B | 137 | 100 | 0 | 0 | 0 | 2 | 0 | 19 | 44 | 302 |
 | payment | A | 165 | 24 | 6 | 0 | 2 | 10 | 0 | 0 | 0 | 207 |
 | payment | B | 58 | 0 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 89 |
 | queue-admission | A | 116 | 50 | 3 | 0 | 0 | 1 | 0 | 0 | 26 | 196 |
@@ -46,17 +46,17 @@
 | seat-hold | A | 132 | 13 | 15 | 2 | 0 | 6 | 1 | 0 | 0 | 169 |
 | seat-hold | B | 111 | 20 | 0 | 0 | 0 | 3 | 0 | 15 | 7 | 156 |
 | security | B | 48 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 81 |
-| settlement | A | 137 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 5 | 142 |
+| settlement | A | 141 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 142 |
 | settlement | B | 76 | 42 | 0 | 0 | 0 | 0 | 0 | 23 | 12 | 153 |
 | streaming | B | 13 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 13 | 27 |
 | support | B | 0 | 75 | 0 | 0 | 0 | 0 | 0 | 22 | 4 | 101 |
-| transfer-refund | A | 108 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 65 | 181 |
-| transfer-refund | B | 79 | 26 | 0 | 0 | 0 | 0 | 0 | 20 | 4 | 129 |
+| transfer-refund | A | 117 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 62 | 186 |
+| transfer-refund | B | 80 | 25 | 0 | 0 | 0 | 0 | 0 | 20 | 4 | 129 |
 | v0-baseline | B | 28 | 2 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 31 |
 | verification | A | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 3 |
-| verification | B | 63 | 4 | 9 | 0 | 2 | 3 | 0 | 0 | 46 | 127 |
+| verification | B | 89 | 4 | 9 | 0 | 2 | 3 | 0 | 0 | 40 | 147 |
 | verification-tools | B | 9 | 7 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 18 |
-| 합계 |  | 2233 | 993 | 46 | 5 | 6 | 100 | 1 | 245 | 623 | 4252 |
+| 합계 |  | 2310 | 989 | 46 | 5 | 6 | 92 | 1 | 245 | 596 | 4290 |
 
 ## 다시 볼 notes
 
@@ -65,12 +65,11 @@
 | D-T18 ② | 다른 단계 | tools/local/e2e/kyverno.e2e.mjs |
 | A-T26 ④ | 다른 단계 | services/queue-svc/test/queue-aggregate.test.ts, tools/local/v1-stage.test.mjs |
 | C-T43 | 다른 단계 | services/core-svc/test-int/ops-event.int.test.ts, services/core-svc/test/change-event-scale.test.ts… |
-| O-T23 | 다른 단계 | services/v0-monolith/test-int/gate.int.test.ts |
 | P-T39 ① | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/apply-payment-result.test.ts… |
 | P-T39 ② | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts… |
 | P-T39 ④ | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts… |
 | payment:v5.0.0-2.1.3 | 다른 단계 | services/payment-svc/test/settlement-payout-account.http.test.ts |
-| payment:v5.0.0-3.3.2 | 다른 단계 | apps/web/src/features/staff-approval/flow.test.mjs, apps/web/src/features/staff-invitation/flow.test.mjs |
+| payment:v5.0.0-3.3.2 | 다른 단계 | apps/web/src/_pages/transfer-offer/model/offer-flow.test.mjs, apps/web/src/_pages/transfer-offer/ui/live-wiring.test.mjs… |
 | payment:v5.0.0-3.4.5 | 다른 단계 | apps/web/src/shared/lib/staff-fragment.test.mjs, apps/web/src/widgets/app-shell/model/search-quality.test.mjs |
 | payment:v5.0.0-3.5.3 | 다른 단계 | apps/web/src/_pages/ticket-cancel/ui/live-wiring.test.mjs |
 | payment:v5.0.0-3.5.4 | 다른 단계 | apps/web/src/features/wallet-device-key/pwa-config.test.mjs, apps/web/src/features/wallet-device-key/sw-rules.test.mjs |
@@ -80,7 +79,12 @@
 
 - I-T51 ①: tools/poc/login-compare/login-compare.test.mjs
 - I-T51 ⑥: tools/poc/login-compare/login-compare.test.mjs
+- Q-T62 ⑤: services/queue-svc/test-int/priority-grant.int.test.ts, services/queue-svc/test/priority-grant-grpc.test.ts, services/queue-svc/test/priority-grant-http.test.ts 외 1곳
+- Q-T62 ⑥: services/queue-svc/test-int/priority-grant.int.test.ts, services/queue-svc/test/priority-grant-grpc.test.ts, services/queue-svc/test/priority-grant-http.test.ts 외 1곳
+- Q-T62 ⑦: services/queue-svc/test-int/priority-grant.int.test.ts, services/queue-svc/test/priority-grant-grpc.test.ts, services/queue-svc/test/priority-grant.test.ts
 - Q-T64 ⑤: services/queue-svc/test/admission-cases.ts
+- R-T25 ④: services/ticket-svc/test-int/transfer-f052.int.test.ts
+- R-T25 ⑤: services/ticket-svc/test-int/transfer-f052.int.test.ts
 - RF-T1: services/realtime-gw/test/degraded.test.ts
 - RF-T10: services/realtime-gw/test/degraded.test.ts
 - RF-T11: services/realtime-gw/test-int/stream.int.test.ts
@@ -99,6 +103,13 @@
 - S-T30 ②: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts
 - S-T30 ③: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts
 - S-T30 ④: services/purchase-svc/test/hold-seats.test.ts, services/purchase-svc/test/http.test.ts
+- S-T37 ⑩: services/purchase-svc/test-int/priority-grant-sync.int.test.ts, services/purchase-svc/test/priority-grant-sync.test.ts
+- S-T37 ⑪: services/purchase-svc/test-int/priority-grant-sync.int.test.ts, services/purchase-svc/test/priority-grant-sync.test.ts
+- S-T37 ⑫: services/purchase-svc/test-int/priority-grant-sync.int.test.ts, services/purchase-svc/test/priority-grant-sync.test.ts
+- S-T37 ⑬: services/purchase-svc/test/priority-grant.test.ts
+- S-T37 ⑭: services/purchase-svc/test/priority-grant.test.ts
+- S-T37 ⑮: services/purchase-svc/test-int/priority-grant-expire-race.int.test.ts
+- S-T37 ⑯: services/purchase-svc/test-int/priority-grant-sync-cursor.int.test.ts
 
 ## 표 읽기 경고
 
@@ -108,8 +119,8 @@
 - docs/features/payment.md:955: P-T74 시나리오 칸의 ⑦이 판정 칸에 없어 세부로 세지 않는다
 - docs/features/queue-admission.md:716: Q-T64 시나리오 칸의 ⑤이 판정 칸에 없어 세부로 세지 않는다
 - docs/features/seat-hold.md:595: S-T30 시나리오 칸의 ①②③④이 판정 칸에 없어 세부로 세지 않는다
-- docs/frontend.md:1668: FE-T29 시나리오 칸의 ①②④이 판정 칸에 없어 세부로 세지 않는다
-- docs/frontend.md:1673: FE-T34 시나리오 칸의 ②이 판정 칸에 없어 세부로 세지 않는다
+- docs/frontend.md:1669: FE-T29 시나리오 칸의 ①②④이 판정 칸에 없어 세부로 세지 않는다
+- docs/frontend.md:1674: FE-T34 시나리오 칸의 ②이 판정 칸에 없어 세부로 세지 않는다
 - docs/security/authz-matrix.md:367: AZ-T15 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
 - docs/security/authz-matrix.md:371: AZ-T18 ①가 docs/security/authz-matrix.md:370에도 있어 뒤의 것은 뺀다
 - docs/security/authz-matrix.md:371: AZ-T18 ②가 docs/security/authz-matrix.md:370에도 있어 뒤의 것은 뺀다
@@ -118,8 +129,8 @@
 - docs/security/authz-matrix.md:371: AZ-T18 ⑤가 docs/security/authz-matrix.md:370에도 있어 뒤의 것은 뺀다
 - docs/security/authz-matrix.md:371: AZ-T18 ⑥가 docs/security/authz-matrix.md:370에도 있어 뒤의 것은 뺀다
 - docs/security/authz-matrix.md:371: AZ-T18 ⑦가 docs/security/authz-matrix.md:370에도 있어 뒤의 것은 뺀다
-- docs/verification.md:661: V-T32 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
-- docs/verification.md:668: V-T48 시나리오 칸의 ③이 판정 칸에 없어 세부로 세지 않는다
+- docs/verification.md:663: V-T32 시나리오 칸의 ①이 판정 칸에 없어 세부로 세지 않는다
+- docs/verification.md:670: V-T48 시나리오 칸의 ③이 판정 칸에 없어 세부로 세지 않는다
 
 ## 이 도구의 한계
 

@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 3 |
-| B | 63 | 4 | 9 | 0 | 2 | 3 | 0 | 0 | 46 | 127 |
-| 합계 | 66 | 4 | 9 | 0 | 2 | 3 | 0 | 0 | 46 | 130 |
+| B | 89 | 4 | 9 | 0 | 2 | 3 | 0 | 0 | 40 | 147 |
+| 합계 | 92 | 4 | 9 | 0 | 2 | 3 | 0 | 0 | 40 | 150 |
 
 ## docs/verification.md
 
@@ -20,21 +20,35 @@
 | V-T6 | — | G-02 대체 장애(로컬 좌석 Redis 주 노드 강제 종료) | 그 회차 구매 요청이 503으로 미뤄지고, 이중 홀드와 오버셀은 0이다. 미룬 시간과 세대 오름이 성능 장부 시간선에 남는다(ADR-0121) | 측정 | B | 구간 측정 · G-02 대체 장애(로컬 좌석 Redis 주 노드 강제 종료) |
 | V-T7 | — | 빈 PC에서 데모 재현 스크립트 실행 | 한 명령으로 시연 흐름이 뜨고, 걸린 시간이 기록된다 | 자동 시험 | B | 시험: tools/local/demo-images.test.mjs, tools/local/demo-seed.test.mjs 외 1곳 |
 | V-T8 | — | 선택 보정 스택의 `ttl`이 지난다 | 다음 정리 실행 때 삭제된다. 실패하면 SEV2(docs/devops.md D-T16)로 다룬다 | 빈칸 | B | — |
-| V-T9 | — | 온세일 SEV1 규칙의 배수를 10에서 11로 바꾸고 promtool… | 10배 경계 사례가 실패해 `alert-check`가 PR을 막는다(ADR-0069) | 빈칸 | B | — |
+| V-T9 | — | 온세일 SEV1 규칙의 배수를 10에서 11로 바꾸고 promtool… | 10배 경계 사례가 실패해 `alert-check`가 PR을 막는다(ADR-0069) | 자동 시험 | B | 시험: deploy/platform/observability/test/slo-rules.test.mjs |
 | V-T10 | — | 요청마다 DB 연결 하나를 돌려주지 않는 판으로 purchase-svc… | DB 연결 수와 열린 FD의 기울기가 기준을 넘어 NFR-027 '불합격'이 장부에 남는다. 고친 판은 같은 조건에서 통과한다 | 빈칸 | B | — |
 | V-T11 | — | 처리량 급감 규칙에 첫 홀드 성공 → 결제 접수 비율을 기준선의… | 49%·101건인 경우만 울린다. 같은 여정의 예산 SEV1이 있으면 경로 시험에서 억제된다 | 빈칸 | B | — |
 | V-T12 | — | 로컬에서 초당 3만 건을 한 회차에 몰아 30분 돌린다(§3.7) | 심장 박동 신선도의 1분 p95가 5초 미만이고 누락률은 0.1% 미만이다. 결과가 '실측(PC)'으로 성능 장부에 남는다 | 빈칸 | B | — |
 | V-T13 | — | V-T12 중간에 `ops-rt` 파드를 강제 종료한다. 같은 거래… | 재시작 뒤 판매 좌석·금액 누적이 정답과 같다(두 번 세지 않는다, docs/streaming.md ST-T1) | 빈칸 | B | — |
 | V-T14 | — | 텔레메트리 토픽에서 파티션 하나에만 사건이 오고 나머지는 비어 있다… | 켬: 1초 칸이 계속 나오고 신선도가 정상이다. 끔: 1초 칸은 그대로 나오지만 심장 박동이 끊긴 파티션 때문에 신선도가 나빠져 보이고, 3분 뒤… | 빈칸 | B | — |
 | V-T15 | — | ClickHouse를 30초 멈춘다 | 작업자는 묶음을 버리지 않고 그 파티션 소비를 멈췄다가, 돌아오면 이어 싣는다. 누락은 0이고 그동안 신선도가 나빠져 보이며, 삽입 재시도가 이어지면 SEV3가… | 빈칸 | B | — |
-| V-T16 | — | 표준 칸 목록에서 0.2를 빼거나 Envoy 설정에만 다른 칸을 둔 PR | `alert-check`의 칸 검사가 PR을 막는다(ADR-0077) | 빈칸 | B | — |
+| V-T16 | — | 표준 칸 목록에서 0.2를 빼거나 Envoy 설정에만 다른 칸을 둔 PR | `alert-check`의 칸 검사가 PR을 막는다(ADR-0077) | 자동 시험 | B | 시험: tools/ci/alert-check.test.mjs |
 | V-T17 | — | 다른 프로세스로 호스트 CPU를 90%까지 채운 채 진입 서버 8대… | manifest에 '호스트 포화'가 남고, 비례 효율과 설계 식 계산에서 그 점이 빠진다. 장부 행은 지워지지 않는다 | 빈칸 | B | — |
 | V-T18 | — | 세 구성 비교(§3.8)의 실행을 수집한다 | 세 구성의 실행이 같은 실험 묶음으로 장부에 남는다. 구성 사이 차이가 3회 반복 편차 안이면 '차이 없음'으로 표시된다 | 빈칸 | B | — |
 | V-T19 | — | 관제 실시간 표의 한계 찾기(§3.7): 입력을 초당 3만 건부터… | 신선도 p95가 5초를 넘거나 ClickHouse가 포화되는 첫 지점(입력 건수, 조회 p95, CPU)이 '실측(PC)'으로 성능 장부에 남고… | 빈칸 | B | — |
-| V-T20 | ① | 긁기·평가 간격 설정 검사와 운영 간격 경보 시험(기술 검토… | ①은 `alert-check`가 PR을 막는다. | 빈칸 | B | — |
-| V-T20 | ② | 긁기·평가 간격 설정 검사와 운영 간격 경보 시험(기술 검토… | ②은 `alert-check`가 PR을 막는다. | 빈칸 | B | — |
-| V-T20 | ③ | 긁기·평가 간격 설정 검사와 운영 간격 경보 시험(기술 검토… | ③은 `alert-check`가 PR을 막는다. | 빈칸 | B | — |
-| V-T20 | ④ | 긁기·평가 간격 설정 검사와 운영 간격 경보 시험(기술 검토… | ④에서 20초 창 식이 빈 값을 내지 않고, 10배 바로 아래는 안 울리며 10배를 넘으면 울린다 | 빈칸 | B | — |
+| V-T20 | ① | 긁기·평가 간격 설정 검사와 운영 간격 경보 시험(기술 검토… | ①은 `alert-check`가 PR을 막는다. | 자동 시험 | B | 시험: tools/ci/alert-check.test.mjs |
+| V-T20 | ② | 긁기·평가 간격 설정 검사와 운영 간격 경보 시험(기술 검토… | ②은 `alert-check`가 PR을 막는다. | 자동 시험 | B | 시험: tools/ci/alert-check.test.mjs |
+| V-T20 | ③ | 긁기·평가 간격 설정 검사와 운영 간격 경보 시험(기술 검토… | ③은 `alert-check`가 PR을 막는다. | 자동 시험 | B | 시험: tools/ci/alert-check.test.mjs |
+| V-T20 | ④ | 긁기·평가 간격 설정 검사와 운영 간격 경보 시험(기술 검토… | ④에서 20초 창 식이 빈 값을 내지 않고, 10배 바로 아래는 안 울리며 10배를 넘으면 울린다 | 자동 시험 | B | 시험: deploy/platform/observability/test/slo-rules.test.mjs |
+| V-T51 | ① | SLO 기록 규칙과 번 레이트 경보(추천 적용 2026-11-23… | ① 두 창 모두 넘을 때만 SEV1이고 `event_id`·`journey`가 달린다 | 자동 시험 | B | 시험: deploy/platform/observability/test/slo-rules.test.mjs |
+| V-T51 | ② | SLO 기록 규칙과 번 레이트 경보(추천 적용 2026-11-23… | ② 두 창 모두 넘을 때만 SEV2이고, 결제 확정에는 3배 경보가 없다 | 자동 시험 | B | 시험: deploy/platform/observability/test/slo-rules.test.mjs |
+| V-T51 | ③ | SLO 기록 규칙과 번 레이트 경보(추천 적용 2026-11-23… | ③ 1.1%·서킷·오류·첫 호출 429는 그 결제사의 SEV2를 울리고 0.9%·재전송 429만으로는 울리지 않는다. 울리는 동안 `pg_cause` 상태가… | 자동 시험 | B | 시험: deploy/platform/observability/test/slo-rules.test.mjs |
+| V-T51 | ④ | SLO 기록 규칙과 번 레이트 경보(추천 적용 2026-11-23… | ④ p99·오류율이 넣은 값과 같고, 요청이 없으면 0, long polling만 느리면 p99가 그대로, 긁히지 않으면 값이 없다 | 자동 시험 | B | 시험: deploy/platform/observability/test/slo-rules.test.mjs |
+| V-T51 | ⑤ | SLO 기록 규칙과 번 레이트 경보(추천 적용 2026-11-23… | ⑤ 진행 중인 회차마다 여정별 0·1이 나오고, 요청이 없으면 0, 긁히지 않으면 값이 없으며, 진행하지 않는 회차에는 값이 없다. 0.49는 0, 0.51은… | 자동 시험 | B | 시험: deploy/platform/observability/test/slo-rules.test.mjs |
+| V-T51 | ⑥ | SLO 기록 규칙과 번 레이트 경보(추천 적용 2026-11-23… | ⑥ 바로 아래는 울리지 않고 두 창 모두 위면 울린다(1배는 SEV3) | 자동 시험 | B | 시험: deploy/platform/observability/test/slo-rules.test.mjs |
+| V-T51 | ⑦ | SLO 기록 규칙과 번 레이트 경보(추천 적용 2026-11-23… | ⑦ 남은 예산이 1 − (실패 합 ÷ 전체 합) ÷ (1 − 목표)와 같다 | 자동 시험 | B | 시험: deploy/platform/observability/test/slo-rules.test.mjs |
+| V-T51 | ⑧ | SLO 기록 규칙과 번 레이트 경보(추천 적용 2026-11-23… | ⑧ 온세일·상태 묶음은 5초, 28일 경보 묶음은 30초, `agg5m:` 묶음은 5분, `slo-fast`는 5초다 | 자동 시험 | B | 시험: deploy/platform/observability/test/slo-rules.test.mjs, tools/ci/prom-rules.test.mjs |
+| V-T54 | ① | 경보 규칙 검사와 Alertmanager 묶기·억제(추천 적용… | ① 실제 저장소는 통과하고 나머지는 모두 막으며, 막은 파일과 경보 이름을 찍는다 | 자동 시험 | B | 시험: tools/ci/alert-check.test.mjs |
+| V-T54 | ② | 경보 규칙 검사와 Alertmanager 묶기·억제(추천 적용… | ② `pod`·`event_id`만 읽는 판은 통과하고 나머지는 막는다 | 자동 시험 | B | 시험: tools/ci/alert-check.test.mjs |
+| V-T54 | ③ | 경보 규칙 검사와 Alertmanager 묶기·억제(추천 적용… | ③ 같은 회차·여정의 둘은 운영 채널에 한 알림(몸 하나에 경보 둘)으로, 다른 회차는 따로, 회차 라벨 없는 둘은 한 알림으로 온다. 묶음 값을 바꾼 설정은… | 자동 시험 | B | 시험: packages/platform/test-int/alertmanager-grouping.int.test.ts |
+| V-T54 | ④ | 경보 규칙 검사와 Alertmanager 묶기·억제(추천 적용… | ④ 같은 회차·여정의 SEV2만 눌려 운영 채널에 오지 않고, 경보 목록 API에서 그 SEV2의 `inhibitedBy`가 SEV1이며 목록에서 지워지지… | 자동 시험 | B | 시험: packages/platform/test-int/alertmanager-grouping.int.test.ts |
+| V-T54 | ⑤ | 경보 규칙 검사와 Alertmanager 묶기·억제(추천 적용… | ⑤ 둘 다 운영 채널에 오고, 주석이 빈 쪽의 문구에만 '런북 없음'이 있다 | 자동 시험 | B | 시험: packages/platform/test-int/alertmanager-grouping.int.test.ts |
+| V-T54 | ⑥ | 경보 규칙 검사와 Alertmanager 묶기·억제(추천 적용… | ⑥ 온콜 호출 받는 곳에만 가고 운영 채널·티켓·증거 수집기에는 가지 않는다 | 자동 시험 | B | 시험: packages/platform/test-int/alertmanager-grouping.int.test.ts |
 | V-T25 | ① | K6 사람 오탐의 사람 단위 확인(ADR-0112, 원천은 추천 적용… | ①은 판정하고 manifest `k6_plan`·`k6_eval`에 원천, 자료 이름·판·해시, 출처 표시 문구, 조정용·판정용을 나눈 씨앗값… | 자동 시험 | B | 시험: tools/perf-ledger/human-data.test.mjs |
 | V-T25 | ② | K6 사람 오탐의 사람 단위 확인(ADR-0112, 원천은 추천 적용… | ②은 판정하지 않고 실행을 거부한다(측정 폴더 없음, 종료 코드 1). | 자동 시험 | B | 시험: tools/perf-ledger/human-data.test.mjs |
 | V-T25 | ③ | K6 사람 오탐의 사람 단위 확인(ADR-0112, 원천은 추천 적용… | ③은 판정하지 않고 실행을 거부한다(측정 폴더 없음, 종료 코드 1). | 자동 시험 | B | 시험: tools/perf-ledger/human-data.test.mjs |
@@ -108,6 +122,12 @@
 | V-T50 | ⑦ | 관측 저장소·exporter·신호 연결 설정을 코드로 두기(추천 적용… | ⑦ platform 폴더 '관측 파이프라인' 대시보드에 증거 수집기 행(대상·결과별 수집, 경보 고른 결과, 거절 까닭), 수집기 행(판정 전 버림, 보내기… | 자동 시험 | B | 시험: tools/local/observability-dashboard.test.mjs |
 | V-T50 | ⑧ | 관측 저장소·exporter·신호 연결 설정을 코드로 두기(추천 적용… | ⑧ 남길 trace(정상 표본에 든 요청, 5xx, SLO 지연 초과)의 지연 히스토그램 점에만 exemplar `traceId`·`spanId`가 붙고… | 다른 단계 | B | OPS-080 뒤 몫(새 기능 행 제안, F-01-4 계획 '감독에게' 1) · 서비스 템플릿이 남길 trace의 지연 점에만 exemplar를 다는 규칙은 F-01-3이 서버 span에 다는… |
 | V-T50 | ⑨ | 관측 저장소·exporter·신호 연결 설정을 코드로 두기(추천 적용… | ⑨ Loki 라벨 넷의 값이 자원 속성(`k8s.namespace.name`·`service.name`·`deployment.environment`·클러스터… | 다른 단계 | B | OPS-080 뒤 몫(새 기능 행 제안, F-01-4 계획 '감독에게' 1) · Loki 라벨 넷을 다는 곳은 F-01-3이 만드는 게이트웨이 수집기… |
+| V-T53 | ① | 경보 보내는 길(추천 적용 2026-11-23, F-01-6 계획… | ① SEV1은 IRM·Slack에 하나씩, SEV2는 Slack에만, SEV3는 티켓 중계에만 가고, 심각도 없는 경보는 Slack에 간다. 증거 수집기에는… | 자동 시험 | B | 시험: packages/platform/test-int/alertmanager-routes.int.test.ts |
+| V-T53 | ② | 경보 보내는 길(추천 적용 2026-11-23, F-01-6 계획… | ② 데드맨 수신기에 `Watchdog`이 오고, 그 밖의 받는 곳에는 `Watchdog`이 가지 않는다. 데드맨 수신기에는 `Watchdog` 말고 다른 경보가… | 자동 시험 | B | 시험: packages/platform/test-int/alertmanager-deadman.int.test.ts, tools/ci/alertmanager-config.test.mjs |
+| V-T53 | ③ | 경보 보내는 길(추천 적용 2026-11-23, F-01-6 계획… | ③ 받는 곳의 주소·토큰이 모두 파일에서 읽히고 설정 파일에 주소·토큰 글이 없다. SEV1·SEV2·SEV3·`Watchdog`마다 경로가 있고 기본 받는… | 자동 시험 | B | 시험: tools/ci/alertmanager-config.test.mjs |
+| V-T53 | ④ | 경보 보내는 길(추천 적용 2026-11-23, F-01-6 계획… | ④ 티켓은 하나만 열리고 해제 때 닫힌다. GitHub가 실패하면 중계가 5xx로 답한다 | 자동 시험 | B | 시험: services/alert-issue-relay/test/relay.test.ts |
+| V-T53 | ⑤ | 경보 보내는 길(추천 적용 2026-11-23, F-01-6 계획… | ⑤ Slack 수신기와 가짜 GitHub가 받은 원문 바이트에 넣은 값이 하나도 없다 | 자동 시험 | B | 시험: packages/platform/test-int/alertmanager-routes.int.test.ts, services/alert-issue-relay/test/relay.test.ts 외 1곳 |
+| V-T53 | ⑥ | 경보 보내는 길(추천 적용 2026-11-23, F-01-6 계획… | ⑥ 둘 다 401이고 GitHub 호출이 없으며, 보안 사건 로그 줄과 거절 지표가 하나씩 오르고 로그 어디에도 보낸 토큰 값이 없다 | 자동 시험 | B | 시험: services/alert-issue-relay/test/relay.test.ts |
 | V-T33 | ① | Redis 클라이언트 비교 PoC(추천 적용 2026-10-28, 기술… | ①이 ±10% [가정] 안이면 node-redis로 확정하고, 결과와 판정을 새 ADR과 성능 장부에 남긴다. 2026-11-01… | 빈칸 | B | — |
 | V-T33 | ② | Redis 클라이언트 비교 PoC(추천 적용 2026-10-28, 기술… | ②는 명령 실패 없이 새 토폴로지로 간다. … 에서 ioredis와 같고 … 노드 죽이기에서 가장 낫고 … (`ASK` 오류 약 150건)· … (약 26%… | 빈칸 | B | — |
 | V-T33 | ③ | Redis 클라이언트 비교 PoC(추천 적용 2026-10-28, 기술… | ③은 스크립트를 다시 싣고 한 번에 성공한다. … 에서 ioredis와 같고 | 빈칸 | B | — |

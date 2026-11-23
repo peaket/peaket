@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 137 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 5 | 142 |
+| A | 141 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 142 |
 | B | 76 | 42 | 0 | 0 | 0 | 0 | 0 | 23 | 12 | 153 |
-| 합계 | 213 | 42 | 0 | 0 | 0 | 0 | 0 | 23 | 17 | 295 |
+| 합계 | 217 | 42 | 0 | 0 | 0 | 0 | 0 | 23 | 13 | 295 |
 
 ## docs/features/settlement.md
 
@@ -22,7 +22,7 @@
 | J-T8 | — | 정산 계좌 변경 | 예금주가 다르면 거부하고 계좌를 남기지 않는다. 같으면 두 결제사 정보를 수정하고, 등록 이메일·전화로 알리고, 3영업일 지급을 보류한다. 표기 차이(추천 적용… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-holder-name.test.ts |
 | J-T9 | — | 포트원 지급 | 수기 정산건 아이디 중복 생성이 없다. 지급일에 '포트원 일괄 지급 실행' 건이 생기고, 실행을 기록한 뒤 지급 내역 조회로 PAID가 된다 | 자동 시험 | A | 시험: services/ops-svc/test/payout-approval.test.ts, services/payment-svc/test/settlement-portone-execute.test.ts |
 | J-T10 | — | 테넌트 격리 | 파트너 A가 B의 정산서 ID로 이의하면 없는 정산서 ID와 같은 404이고, B의 회차 정산서 목록을 부르면 없는 회차와 같은 200 빈 목록이다. 둘 다… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-notify-dispute.test.ts |
-| J-T11 | — | 지급 뒤 환불 | J-T1의 정산서(수수료율 10%)를 지급한 뒤 토스페이먼츠 결제분 50만 원을 환불하면, 미수금은 50만 원 − 수수료 몫 5만 원 − 부가세 5천 원 =… | 빈칸 | A | — |
+| J-T11 | — | 지급 뒤 환불 | J-T1의 정산서(수수료율 10%)를 지급한 뒤 토스페이먼츠 결제분 50만 원을 환불하면, 미수금은 50만 원 − 수수료 몫 5만 원 − 부가세 5천 원 =… | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-recalculation.int.test.ts, services/payment-svc/test/settlement-refund-rece… |
 | J-T12 | — | 0 이하 정산서 | 지급액이 70만 원인 정산서에 감액 조정(`AGREED_DEDUCTION`) 100만 원을 승인하면 지급액이 −30만 원이 되어 CARRIED_OVER가 되고… | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-flow.int.test.ts, services/payment-svc/test/settlement-adjustment.test.ts |
 | J-T13 | ① | 잔액 부족 `HELD`(2026-11-22, BAT-630) | ① 토스페이먼츠 `availableAmount`가 묶음 합계보다 작으면 묶음을 만들지 않고 그 정산서를 `HELD`·`BALANCE`로 저장한 뒤 409… | 자동 시험 | A | 시험: services/payment-svc/test/settlement-balance-hold.test.ts |
 | J-T13 | ② | 잔액 부족 `HELD`(2026-11-22, BAT-630) | ② 포트원 운영자 입력값이 작아도 같다. | 자동 시험 | A | 시험: services/payment-svc/test/settlement-balance-hold.test.ts |
@@ -54,9 +54,9 @@
 | J-T26 | ④ | 정산 리포트·관람객 명단 내려받기(추천 적용 2026-10-28, 기술… | ④ 내려받기는 2,000건을 모두 싣고 원천이 `nextCursor` null을 줄 때만 멈춘다. 보기 응답의 `nextCursor`는 원천 값 그대로다(짧은… | 자동 시험 | A | 시험: services/core-svc/test/export-paging-limit.test.ts, services/core-svc/test/export.test.ts 외 1곳 |
 | J-T26 | ⑤ | 정산 리포트·관람객 명단 내려받기(추천 적용 2026-10-28, 기술… | ⑤ 보인 건수·행위자(계정 ID·역할)·파트너·회차·조건·접속지(요청의 클라이언트 IP)를 실은 `LIST` 사건 하나가 core Outbox(토픽… | 자동 시험 | A | 시험: services/core-svc/test-int/export-audit.int.test.ts, services/core-svc/test/export-audit.test.ts 외 1곳 |
 | J-T26 | ⑥ | 정산 리포트·관람객 명단 내려받기(추천 적용 2026-10-28, 기술… | ⑥ 파일을 주지 않고 내려받기 이력도 남지 않는다(이력과 `DOWNLOAD` 사건이 한 트랜잭션). 연결: FR-027 | 자동 시험 | A | 시험: services/core-svc/test-int/export-audit.int.test.ts, services/core-svc/test/export-audit.test.ts 외 1곳 |
-| J-T23 | ① | 다시 계산과 대사 미완 결제(추천 적용 2026-10-28, 기술 검토… | ① NOTIFIED·DISPUTED·CONFIRMED 정산서마다 회차 취소를 확정한다 … 판본 2인 새 판이 CALCULATED로 생기고 옛 판은 금액 그대로… | 빈칸 | A | — |
-| J-T23 | ② | 다시 계산과 대사 미완 결제(추천 적용 2026-10-28, 기술 검토… | ② 토스페이먼츠 예약지급이 REQUESTED인 정산서와 IN_PROGRESS인 정산서에서 회차 취소를 확정한다 … REQUESTED는 예약 취소 → HELD →… | 빈칸 | A | — |
-| J-T23 | ③ | 다시 계산과 대사 미완 결제(추천 적용 2026-10-28, 기술 검토… | ③ 대사 불일치 결제 1건이 남은 회차를 계산한 뒤, 지급 전과 지급 뒤에 각각 불일치를 푼다. 결과: … 그 결제만 빠진 정산서와 뺀 목록이 나오고, 풀린 뒤… | 빈칸 | A | — |
+| J-T23 | ① | 다시 계산과 대사 미완 결제(추천 적용 2026-10-28, 기술 검토… | ① NOTIFIED·DISPUTED·CONFIRMED 정산서마다 회차 취소를 확정한다 … 판본 2인 새 판이 CALCULATED로 생기고 옛 판은 금액 그대로… | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-recalculation.int.test.ts, services/payment-svc/test/settlement-recalculati… |
+| J-T23 | ② | 다시 계산과 대사 미완 결제(추천 적용 2026-10-28, 기술 검토… | ② 토스페이먼츠 예약지급이 REQUESTED인 정산서와 IN_PROGRESS인 정산서에서 회차 취소를 확정한다 … REQUESTED는 예약 취소 → HELD →… | 자동 시험 | A | 시험: services/payment-svc/test-int/settlement-recalculation.int.test.ts, services/payment-svc/test/settlement-recalculati… |
+| J-T23 | ③ | 다시 계산과 대사 미완 결제(추천 적용 2026-10-28, 기술 검토… | ③ 대사 불일치 결제 1건이 남은 회차를 계산한 뒤, 지급 전과 지급 뒤에 각각 불일치를 푼다. 결과: … 그 결제만 빠진 정산서와 뺀 목록이 나오고, 풀린 뒤… | 자동 시험 | A | 시험: services/ops-svc/test/cs-case-adjustment-suggested.test.ts, services/payment-svc/test/settlement-excluded-resolution… |
 | J-T24 | — | 미수금 이동 기록과 되돌림(추천 적용 2026-10-28, 기술 검토… | 미수금 100만 원을 정산서 A(30만 원)·B(70만 원)에서 나눠 상계하고, B의 지급을 실패시킨 뒤 다시 계산한다. 같은 미수금을 두 정산서가 동시에… | 자동 시험 | A | 시험: services/invariant-checker/test-int/invariants.int.test.ts, services/invariant-checker/test-int/payment-migrated.int… |
 | J-T25 | ① | 지급대행 잔액 대사(추천 적용 2026-10-28, 기술 검토… | ① 승인·취소·수수료·지급이 장부와 맞는 상점 … 은 차이 0이고 건이 없다 | 자동 시험 | A | 시험: services/payment-svc/test/settlement-pg-balance-recon.test.ts |
 | J-T25 | ② | 지급대행 잔액 대사(추천 적용 2026-10-28, 기술 검토… | ② 결제사 쪽 잔액만 3만 원 적은 상점 … CS 처리함 '결제사 잔액 대사 차이' 건과 SEV3가 생기고, 묶음은 멈추지 않는다 | 자동 시험 | A | 시험: services/payment-svc/test/settlement-pg-balance-recon.test.ts |
@@ -194,13 +194,13 @@
 | v5.0.0-2.2.3 | — | L2 | 관련 데이터 항목의 조합이 미리 정한 규칙에 맞는지 확인한다. | 자동 시험 | B | 시험: services/core-svc/test-int/catalog.int.test.ts, services/core-svc/test-int/production-image.int.test.ts 외 31곳 |
 | v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/core-svc/test/shop-order.http.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts 외 5곳 |
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts, services/payment-svc/test-int/payment-entry-pause-judg… |
-| v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 30곳 |
-| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 31곳 |
+| v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 34곳 |
+| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 35곳 |
 | v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | 자동 시험 | B | 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/review.http.test.ts 외 14곳 |
 | v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/ops-svc/test/bot-review-http.test.ts |
 | v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/console-host/src/pages/bot-review/ui/wiring.test.mjs, apps/console-host/src/pages/cancellation/model/live.test… |
 | v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | ID만 | B | 다른 곳 시험: apps/web/src/features/social-login/server/login-routes.test.mjs… |
-| v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | ID만 | B | 다른 곳 시험: apps/web/src/features/staff-approval/flow.test.mjs, apps/web/src/features/staff-invitation/flow.test.mjs 외 1곳… |
+| v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | ID만 | B | 다른 곳 시험: apps/web/src/_pages/transfer-offer/model/offer-flow.test.mjs, apps/web/src/_pages/transfer-offer/ui/live-wiring… |
 | v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | ID만 | B | 다른 곳 시험: apps/web/src/features/social-login/server/login-routes.test.mjs… |
 | v5.0.0-3.3.4 | — | L2 | 스크립트가 읽을 필요 없는 쿠키(세션 토큰 등)는 `HttpOnly`이고 그 값은 `Set-Cookie`로만 보낸다. | 자동 시험 | B | 시험: services/payment-svc/test/settlement-payout-account.http.test.ts |
 | v5.0.0-3.4.1 | — | L1 | 모든 응답에 HSTS를 둔다(최대 기간 1년 이상, L2부터 하위 도메인 포함). | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/v0-monolith/test/gateway-http-rules.test.ts 외 3곳 (영역:… |
@@ -233,7 +233,7 @@
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/notify-role.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 7곳 |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | 자동 시험 | B | 시험: services/core-svc/test/partner-bulkhead-auth.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/export-audit.int.test.ts, services/core-svc/test-int/idempotency-migration.int.test.ts 외… |
-| v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | ID만 | B | 다른 곳 시험: services/ticket-svc/test-int/transfer.int.test.ts (영역: services/core-svc, services/ops-svc… |
+| v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | ID만 | B | 다른 곳 시험: apps/web/src/widgets/ticket-wallet/model/transfer-actions.test.mjs… |
 | v5.0.0-11.1.2 | — | L2 | 애플리케이션이 쓰는 모든 암호 키·알고리즘·인증서의 암호 목록을 만들어 정기적으로 갱신하고, 키마다 쓸 수 있는 곳과 없는 곳, 보호할 수 있는 데이터와 없는… | 빈칸 | B | 영역: services/core-svc, services/ops-svc, services/payment-svc |
 | v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | 자동 시험 | B | 시험: services/payment-svc/test/payment-method-ref.test.ts, services/payment-svc/test/settlement-toss-transport.test.ts |
 | v5.0.0-11.2.2 | — | L2 | 난수·인증 암호화·MAC·해시 알고리즘, 키 길이, 라운드, 암호와 운용 모드를 언제든 바꿀 수 있고 키·비밀번호 교체와 데이터 재암호화도 할 수 있게… | 자동 시험 | B | 시험: services/ops-svc/test/audit-mac.test.ts |
@@ -277,7 +277,7 @@
 | v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | 자동 시험 | B | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/search-log.test.ts 외 5곳 |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/logout.test.mjs, apps/web/src/features/session-cleanup/routine.test.mjs 외 2곳 (영역:… |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: services/core-svc/test/fan-notify-http.test.ts |
-| v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs 외 2곳 (영역:… |
+| v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | ID만 | B | 다른 곳 시험: apps/scanner/test/package-store-contract.ts, apps/web/queue-room/test/autoassign.test.mjs 외 5곳 (영역:… |
 | v5.0.0-15.1.1 | — | L1 | 취약한 서드파티 구성요소와 라이브러리 갱신의 위험 기반 조치 기한을 문서에 정한다. | ID만 | B | 다른 곳 시험: tools/ci/vuln-deadline.test.mjs (영역: services/core-svc, services/ops-svc, services/payment-svc) |
 | v5.0.0-15.1.2 | — | L2 | 모든 서드파티 라이브러리의 목록(SBOM)을 유지하고, 미리 정한 믿을 수 있고 계속 관리되는 저장소에서 오는지 확인한다. | ID만 | B | 다른 곳 시험: tools/ci/sbom-find.test.mjs, tools/web-checks/static/assets.test.mjs (영역: services/core-svc, services/ops-svc… |
 | v5.0.0-15.1.3 | — | L2 | 시간이 오래 걸리거나 자원을 많이 쓰는 기능을 문서에 밝히고, 그 남용으로 가용성을 잃지 않는 방법과 응답 만들기가 호출자의 시간 초과보다 길어지지 않게 하는… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/ops-svc/test-int/f021-review-deadline.int.test.ts 외… |

@@ -4,16 +4,16 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 108 | 8 | 0 | 0 | 0 | 0 | 0 | 0 | 65 | 181 |
-| B | 79 | 26 | 0 | 0 | 0 | 0 | 0 | 20 | 4 | 129 |
-| 합계 | 187 | 34 | 0 | 0 | 0 | 0 | 0 | 20 | 69 | 310 |
+| A | 117 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 62 | 186 |
+| B | 80 | 25 | 0 | 0 | 0 | 0 | 0 | 20 | 4 | 129 |
+| 합계 | 197 | 32 | 0 | 0 | 0 | 0 | 0 | 20 | 66 | 315 |
 
 ## docs/features/transfer-refund.md
 
 | 항목 | 세부 | 제목 | 판정 기준 앞부분 | 상태 | 등급 | 근거 |
 | --- | --- | --- | --- | --- | --- | --- |
-| R-T1 | — | 양도 요청 뒤 48시간 경과 | 요청은 EXPIRED, 티켓은 보낸 사람에게, 받는 사람이 수락하면 409 | 자동 시험 | A | 시험: services/ticket-svc/test-int/transfer.int.test.ts, services/ticket-svc/test/transfer-domain.test.ts 외 1곳 |
-| R-T2 | — | 받은 사람이 다른 회원에게 양도 시도 | 409, 보안 이벤트 기록 | 자동 시험 | A | 시험: services/ticket-svc/test-int/transfer.int.test.ts, services/ticket-svc/test/transfer-domain.test.ts 외 2곳 |
+| R-T1 | — | 양도 요청 뒤 48시간 경과 | 요청은 EXPIRED, 티켓은 보낸 사람에게, 받는 사람이 수락하면 409 | 자동 시험 | A | 시험: apps/web/src/_pages/ticket-transfer/model/transfer-flow.test.mjs, apps/web/src/_pages/transfer-offer/model/offer-flo… |
+| R-T2 | — | 받은 사람이 다른 회원에게 양도 시도 | 409, 보안 이벤트 기록 | 자동 시험 | A | 시험: apps/web/src/_pages/ticket-transfer/model/transfer-flow.test.mjs, services/ticket-svc/test-int/transfer-wiring.int.t… |
 | R-T3 | — | 양도 요청 중 결제자 취소 | 409, 안내 문구 | 자동 시험 | A | 시험: services/purchase-svc/test-int/cancellation.int.test.ts, services/purchase-svc/test/cancel-ticket.test.ts 외 1곳 |
 | R-T4 | — | 돌려받은 뒤 결제자 취소 | 공제율대로 결제자가 처음 결제한 수단으로 환급 | 자동 시험 | A | 시험: services/purchase-svc/test-int/cancellation.int.test.ts, services/purchase-svc/test/cancel-ticket.test.ts |
 | R-T5 | — | 수락·스캔·취소 동시 경합 1,000회 | 각 시도에서 정확히 하나만 성공 | 빈칸 | A | — |
@@ -39,9 +39,9 @@
 | R-T23 | ⑤ | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ⑤ 409 `sale-not-suspended` | 자동 시험 | A | 시험: services/ops-svc/test-int/event-cancellations.int.test.ts, services/ops-svc/test/event-cancellation-request.test.ts… |
 | R-T23 | ⑥ | 판매 중지·재개·회차 취소 요청(추천 적용 2026-10-28… | ⑥ 요청이 생기고 판정·판정자 외 1인 확정·일괄 환불이 docs/planning/03 §2.11대로 이어진다 | 자동 시험 | A | 시험: services/ops-svc/test-int/event-cancellations.int.test.ts, services/ops-svc/test/event-cancellation-request.test.ts… |
 | R-T24 | — | 입장 시작 뒤 회차 취소(추천 적용 2026-10-28, 기술 검토… | 여섯 가지 모두 환급 대상이고, 입장 기록 마감을 기다리지 않고 일괄 환불이 시작된다. 보류 중이던 예매 취소는 공제 없이 전액으로 바뀌고, 양도 요청은 먼저… | 자동 시험 | A | 시험: services/purchase-svc/test-int/event-cancel-r-t24.int.test.ts, services/purchase-svc/test/event-ticket-canceller.tes… |
-| R-T25 | ① | 회차 취소·연기 때 진행 중인 양도 요청(추천 적용… | ① 양도 요청이 모두 WITHDRAWN(사유 `EVENT_CANCELLED`)이 되고, 같은 트랜잭션에서 결제자 환급이 걸려 3영업일 안에 끝난다. 받는 사람과… | 빈칸 | A | — |
-| R-T25 | ② | 회차 취소·연기 때 진행 중인 양도 요청(추천 적용… | ② 철회와 수락 가운데 하나만 성공하고, 어느 쪽이든 환급은 결제자에게 한 번만 간다 | 빈칸 | A | — |
-| R-T25 | ③ | 회차 취소·연기 때 진행 중인 양도 요청(추천 적용… | ③ 연기 확정 때 양도 요청이 WITHDRAWN(사유 `EVENT_POSTPONED`)이 되고, 회차 취소 요청은 REFUND_WINDOW에 머물다가 기간이… | 빈칸 | A | — |
+| R-T25 | ① | 회차 취소·연기 때 진행 중인 양도 요청(추천 적용… | ① 양도 요청이 모두 WITHDRAWN(사유 `EVENT_CANCELLED`)이 되고, 같은 트랜잭션에서 결제자 환급이 걸려 3영업일 안에 끝난다. 받는 사람과… | 자동 시험 | A | 시험: services/ticket-svc/test-int/transfer-f052.int.test.ts, services/ticket-svc/test/transfer-f052.test.ts |
+| R-T25 | ② | 회차 취소·연기 때 진행 중인 양도 요청(추천 적용… | ② 철회와 수락 가운데 하나만 성공하고, 어느 쪽이든 환급은 결제자에게 한 번만 간다 | 자동 시험 | A | 시험: services/ticket-svc/test-int/transfer-f052.int.test.ts, services/ticket-svc/test-int/transfer-wiring.int.test.ts 외… |
+| R-T25 | ③ | 회차 취소·연기 때 진행 중인 양도 요청(추천 적용… | ③ 연기 확정 때 양도 요청이 WITHDRAWN(사유 `EVENT_POSTPONED`)이 되고, 회차 취소 요청은 REFUND_WINDOW에 머물다가 기간이… | 자동 시험 | A | 시험: services/ticket-svc/test-int/transfer-f052.int.test.ts, services/ticket-svc/test-int/transfer-wiring.int.test.ts 외… |
 | R-T10 | — | 주최 측 귀책 판정, 할인 판매 표 포함 | 배상액이 실제 결제 금액의 10%이고(33,333원 결제는 원 미만 올림으로 3,334원, 기술 검토 낮음-095), PEAKET이 먼저 송금한 뒤 그 금액의… | 빈칸 | A | — |
 | R-T11 | — | 배상 계좌 입력 | DB·로그에 계좌번호가 없다(끝 4자리만) | 빈칸 | A | — |
 | R-T12 | — | 분쟁 접수 후 영업일 경과 | 3영업일·10영업일 기한 배지와 1영업일 전 알림 | 자동 시험 | A | 시험: services/ops-svc/test/cs-case-deadline-tick.test.ts, services/ops-svc/test/cs-case-deadlines.test.ts |
@@ -49,7 +49,7 @@
 | R-T14 | — | 판매 승인 전 공연 URL 직접 접근 | 404 또는 비공개 안내가 나오고, 대기열에 들어갈 수 없다 | 빈칸 | A | — |
 | R-T15 | — | 결제 직전 화면 | 판매자 이름과 중개자 고지 문장이 보이고, 글씨 크기 규칙을 통과한다 | 빈칸 | A | — |
 | R-T16 | — | 공연예술통합전산망 시뮬레이터 하루 장애 | 다음 날 누락분을 포함해 보내고, 원장 해시가 일치한다 | 빈칸 | A | — |
-| R-T17 | — | 입장 시작 뒤 수락·돌려주기·회수 | 모두 409 `ENTRY_STARTED`이고, 키와 보유자에 변화가 없다 | 자동 시험 | A | 시험: services/ticket-svc/test-int/transfer.int.test.ts, services/ticket-svc/test/transfer-domain.test.ts 외 2곳 |
+| R-T17 | — | 입장 시작 뒤 수락·돌려주기·회수 | 모두 409 `ENTRY_STARTED`이고, 키와 보유자에 변화가 없다 | 자동 시험 | A | 시험: apps/web/src/_pages/transfer-offer/model/offer-flow.test.mjs, apps/web/src/widgets/ticket-wallet/model/transfer-acti… |
 | R-T18 | — | 재승인 대기 중 공개와 판매: 판매 중인 공연의 가격을 바꾼 뒤 공연… | 재승인을 기다리는 동안 공개·판매는 마지막 승인 가격으로 계속된다. 재승인하면 새 가격이 반영되고 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것)가… | 빈칸 | A | — |
 | R-T19 | — | 판매 승인 때 결제사 지정 고정: 지정 없는 공연을 승인한 뒤 플랫폼… | 승인할 때 그 시점의 기본값이 그 공연의 회차마다 지정으로 저장되고(결제사 지정은 회차 칸, §2.1 확인 항목 4, 2026-11-01 정합 점검), 배포… | 빈칸 | A | — |
 | R-T20 | ① | CS 처리함 기한과 재발송: 추가 검증 이의·미보고 스캐너·환불 대기… | ① 기한 배지(10영업일·3영업일·3영업일)와 1영업일 전 알림이 맞다 | 자동 시험 | A | 시험: services/ops-svc/test/cs-case-deadline-tick.test.ts, services/ops-svc/test/cs-case-deadlines.test.ts |
@@ -57,7 +57,7 @@
 | R-T20 | ③ | CS 처리함 기한과 재발송: 추가 검증 이의·미보고 스캐너·환불 대기… | ③ 실패한 승인 업무는 승인자가 approve를 다시 부르면(재인증) 같은 대상·금액으로만 다시 실행된다. 실행이 실패할 때 '승인 업무 실행 실패' 건이 하나… | 자동 시험 | A | 시험: services/ops-svc/test/cs-approval-failure-cases.test.ts |
 | R-T21 | ① | 양도 거절·철회의 멱등키와 알림 링크로 들어오는 경우: ① 같은… | ① 두 번째도 처음 결과를 돌려주고 상태는 한 번만 바뀐다 | 자동 시험 | A | 시험: services/ticket-svc/test/transfer-domain.test.ts, services/ticket-svc/test/transfer-service.test.ts |
 | R-T21 | ② | 양도 거절·철회의 멱등키와 알림 링크로 들어오는 경우: ① 같은… | ② 400 `idempotency-key-invalid`로 거절된다(키 필수, guidelines §4) | 자동 시험 | A | 시험: services/ticket-svc/test/transfer-service.test.ts, services/ticket-svc/test/transfers-http.test.ts |
-| R-T21 | ③ | 양도 거절·철회의 멱등키와 알림 링크로 들어오는 경우: ① 같은… | ③ 링크의 첫 요청에는 팬 쿠키가 실리지 않고 응답은 정적 셸이다. 양도 요청 조회와 수락·거절은 화면 스크립트가 같은 사이트로 보내는 요청으로 간다 | ID만 | A | 시험: services/ticket-svc/test/transfer-domain.test.ts, services/ticket-svc/test/transfer-service.test.ts 외 1곳 |
+| R-T21 | ③ | 양도 거절·철회의 멱등키와 알림 링크로 들어오는 경우: ① 같은… | ③ 링크의 첫 요청에는 팬 쿠키가 실리지 않고 응답은 정적 셸이다. 양도 요청 조회와 수락·거절은 화면 스크립트가 같은 사이트로 보내는 요청으로 간다 | 자동 시험 | A | 시험: apps/web/src/_pages/transfer-offer/model/offer-flow.test.mjs, apps/web/src/_pages/transfer-offer/ui/live-wiring.test… |
 | R-T26 | ① | 예외 환불의 증빙과 미성년자 계약 취소(추천 적용 2026-10-28… | ① CS 책임자 1인 승인으로 3영업일 안에 환급된다. | 빈칸 | A | — |
 | R-T26 | ② | 예외 환불의 증빙과 미성년자 계약 취소(추천 적용 2026-10-28… | ② 확인 사실과 확인자만 기록되고 파일은 저장되지 않는다. | 빈칸 | A | — |
 | R-T26 | ③ | 예외 환불의 증빙과 미성년자 계약 취소(추천 적용 2026-10-28… | ③ 휴대폰 본인확인 대조 뒤 CS 책임자 1인이 승인하면 공제 없이 전액이 환급되고 좌석이 취소표로 돌아간다. 생년월일은 DB·로그에 0건이다 | 빈칸 | A | — |
@@ -170,8 +170,10 @@
 | R-T46 | ① | 배상 대상 기록과 목록(추천 적용, 2026-11-20… | ① 대상 주문마다 `compensation` 한 행이고 `ACCOUNT_PENDING`·`account_last4` 빔이다. 금액은 주문 단위 10%·원 미만… | 자동 시험 | A | 시험: services/purchase-svc/test/compensation-records.test.ts |
 | R-T46 | ② | 배상 대상 기록과 목록(추천 적용, 2026-11-20… | ② 행이 늘지 않고(유일) 저장한 금액이 그대로다. `StartEventRefund` 트랜잭션이 실패하면 배상 행도 0이다 | 자동 시험 | A | 시험: services/ops-svc/test/grpc-event-refunds.test.ts, services/purchase-svc/test-int/compensation-records.int.test.ts 외… |
 | R-T46 | ③ | 배상 대상 기록과 목록(추천 적용, 2026-11-20… | ③ 그 계정 건만 최근 순으로 오고, 남의 건·없는 건은 같은 404이며 응답에 `accountLast4`만 있고 계좌번호 원문은… | 자동 시험 | A | 시험: services/purchase-svc/test/compensations-http.test.ts |
+| R-T46 | ④ | 배상 대상 기록과 목록(추천 적용, 2026-11-20… | ④ 그 주문의 `compensation` 한 행(`ACCOUNT_PENDING`·4,750원)이 항목과 같은 트랜잭션에 생기고 두 번째 쓸어 담기는 0행이다… | 자동 시험 | A | 시험: services/purchase-svc/test-int/compensation-records.int.test.ts, services/purchase-svc/test/event-refund-sweep-compe… |
 | R-T47 | ① | 배상 계좌 입력과 송금(추천 적용, 2026-11-20… | ① 202 `Compensation`이고 `account_last4`는 끝 4자리다. `ACCOUNT_PENDING`이 아니면 409… | 자동 시험 | A | 시험: services/purchase-svc/test/compensations-http.test.ts |
 | R-T47 | ② | 배상 계좌 입력과 송금(추천 적용, 2026-11-20… | ② `REQUESTED`·`PAID`는 그 상태와 `transfer_id`(PAID는 `receivable_id`도)를 저장하고, `FAILED`는 422… | 자동 시험 | A | 시험: services/payment-svc/test-int/compensation-transfer.int.test.ts, services/payment-svc/test/compensation-transfer.tes… |
+| R-T47 | ③ | 배상 계좌 입력과 송금(추천 적용, 2026-11-20… | ③ `PAID`면 payment `compensation_transfer`가 `PAID`이고 `COMPENSATION_ADVANCE` 미수금 1행(두 바퀴… | 자동 시험 | A | 시험: services/payment-svc/test-int/compensation-transfer.int.test.ts, services/payment-svc/test/compensation-refresh-asse… |
 | R-T48 | ① | CS 처리함 자동 등록(추천 적용, 2026-11-23, 기능… | ① 종류마다 OPEN 건 하나이고 category와 두 기한이 위 표·d5 §7.6 표의 기한이다(시작은 `dueBaseAt`, 없으면 `createdAt`)… | 자동 시험 | A | 시험: services/ops-svc/test-int/cs-cases.int.test.ts, services/ops-svc/test/cs-case-deadlines.test.ts 외 1곳 |
 | R-T48 | ② | CS 처리함 자동 등록(추천 적용, 2026-11-23, 기능… | ② 앞의 둘은 같은 건 ID이고, 해결된 건의 같은 `eventKey`는 새 건 0이다 | 자동 시험 | A | 시험: services/ops-svc/test-int/cs-cases.int.test.ts, services/ops-svc/test-int/ops-command-audit.int.test.ts 외 1곳 |
 | R-T48 | ③ | CS 처리함 자동 등록(추천 적용, 2026-11-23, 기능… | ③ `accepted: false`이고 행 0, 지표 결과가 `ignored`다 | 자동 시험 | A | 시험: services/ops-svc/test-int/cs-cases.int.test.ts, services/ops-svc/test/cases.test.ts 외 2곳 |
@@ -196,6 +198,9 @@
 | R-T51 | ④ | SCR-045 CS 처리함 화면을 실제 서버에 잇는다(추천 적용… | ④ 둘 다 "없는 건입니다" | 자동 시험 | A | 시험: apps/console-host/src/pages/cs-inbox/model/live.test.mjs, apps/console-host/src/pages/cs-inbox/ui/wiring.test.mjs 외… |
 | R-T51 | ⑤ | SCR-045 CS 처리함 화면을 실제 서버에 잇는다(추천 적용… | ⑤ viewer는 d5 §7.6 viewer 안내, operator는 CS 건에 처리 버튼이 없다 | 자동 시험 | A | 시험: apps/console-host/src/pages/cs-inbox/model/live.test.mjs, apps/console-host/src/pages/cs-inbox/ui/wiring.test.mjs 외… |
 | R-T51 | ⑥ | SCR-045 CS 처리함 화면을 실제 서버에 잇는다(추천 적용… | ⑥ 서버 값으로 다시 그리고, 메모 초안은 브라우저 저장소에 0건이다. 서버 글은 글자 노드로만 그리고 모르는 칸은 버린다 | 자동 시험 | A | 시험: apps/console-host/src/pages/cs-inbox/ui/wiring.test.mjs |
+| R-T52 | ① | 일괄 환불의 결제사별 토큰 버킷(추천 적용, 2026-11-23, 기능… | ① 토스형 결제사 취소 호출의 시각 t초까지 누적이 300 + ⌊300 × t⌋건 [가정]을 넘지 않고(0초 300건, 3ms 300건, 4ms 301건, 1초… | 자동 시험 | A | 시험: services/purchase-svc/test/event-refund-token-bucket.test.ts, services/purchase-svc/test/pg-token-bucket.test.ts 외… |
+| R-T52 | ② | 일괄 환불의 결제사별 토큰 버킷(추천 적용, 2026-11-23, 기능… | ② 보내기 직전에 잡기를 늘리고, 늘리기가 0행이면 그 표를 보내지 않는다 | 자동 시험 | A | 시험: services/purchase-svc/test/event-refund-token-bucket.test.ts |
+| R-T52 | ③ | 일괄 환불의 결제사별 토큰 버킷(추천 적용, 2026-11-23, 기능… | ③ 멈춘 뒤 새 호출 0이다 | 자동 시험 | A | 시험: services/purchase-svc/test/event-refund-token-bucket.test.ts |
 
 ## docs/security/asvs/transfer-refund.md
 
@@ -237,22 +242,22 @@
 | v5.0.0-2.3.1 | — | L1 | 같은 사용자의 업무 흐름을 정해진 순서대로만 처리하고 단계를 건너뛰지 못하게 한다. | 자동 시험 | B | 시험: services/core-svc/test/shop-order.http.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts 외 33곳 |
 | v5.0.0-2.3.2 | — | L2 | 문서화된 업무 로직 한도를 구현해 악용을 막는다. | 자동 시험 | B | 시험: services/ops-svc/test-int/command-lifecycle.int.test.ts, services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-2.3.3 | — | L2 | 업무 로직 수준의 트랜잭션으로 작업이 전부 성공하거나 이전의 올바른 상태로 되돌아가게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 32곳 |
-| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 59곳 |
-| v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | 자동 시험 | B | 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/review.http.test.ts 외 14곳 |
+| v5.0.0-2.3.4 | — | L2 | 한정 수량 자원이 로직 조작으로 이중 예약되지 않도록 업무 수준 잠금을 쓴다. | 자동 시험 | B | 시험: services/core-svc/test-int/promoter-contract.int.test.ts, services/core-svc/test-int/shop-expiry.int.test.ts 외 64곳 |
+| v5.0.0-2.4.1 | — | L2 | 데이터 유출, 쓰레기 데이터, 할당량 소진, 레이트 리밋 위반, 서비스 거부, 비싼 자원 남용으로 이어지는 과도한 호출을 막는 자동화 방지 통제를 둔다. | 자동 시험 | B | 시험: services/core-svc/test-int/search-read-model.int.test.ts, services/core-svc/test/review.http.test.ts 외 16곳 |
 | v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | 자동 시험 | B | 시험: services/ops-svc/test/bot-review-http.test.ts, services/purchase-svc/test/snapshot-http.test.ts |
 | v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/console-host/src/pages/bot-review/ui/wiring.test.mjs, apps/console-host/src/pages/cancellation/model/live.test… |
 | v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | ID만 | B | 다른 곳 시험: apps/web/src/features/social-login/server/login-routes.test.mjs… |
-| v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | ID만 | B | 다른 곳 시험: apps/web/src/features/staff-approval/flow.test.mjs, apps/web/src/features/staff-invitation/flow.test.mjs 외 1곳… |
+| v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | 자동 시험 | B | 시험: apps/web/src/_pages/transfer-offer/model/offer-flow.test.mjs, apps/web/src/_pages/transfer-offer/ui/live-wiring.test… |
 | v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | ID만 | B | 다른 곳 시험: apps/web/src/features/social-login/server/login-routes.test.mjs… |
-| v5.0.0-3.3.4 | — | L2 | 스크립트가 읽을 필요 없는 쿠키(세션 토큰 등)는 `HttpOnly`이고 그 값은 `Set-Cookie`로만 보낸다. | 자동 시험 | B | 시험: services/payment-svc/test/settlement-payout-account.http.test.ts |
+| v5.0.0-3.3.4 | — | L2 | 스크립트가 읽을 필요 없는 쿠키(세션 토큰 등)는 `HttpOnly`이고 그 값은 `Set-Cookie`로만 보낸다. | 자동 시험 | B | 시험: apps/web/src/_pages/ticket-transfer/model/transfer-flow.test.mjs, apps/web/src/features/social-login/server/login-ro… |
 | v5.0.0-3.4.1 | — | L1 | 모든 응답에 HSTS를 둔다(최대 기간 1년 이상, L2부터 하위 도메인 포함). | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/v0-monolith/test/gateway-http-rules.test.ts 외 3곳 (영역:… |
 | v5.0.0-3.4.2 | — | L1 | CORS `Access-Control-Allow-Origin`은 고정 값으로 두거나 요청의 `Origin`을 신뢰 출처 허용 목록과 대조해 정하고, `*`을… | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/queue-svc/test/state-http.test.ts 외 1곳 (영역:… |
 | v5.0.0-3.4.3 | — | L2 | HTTP 응답에 CSP를 둬 브라우저가 신뢰한 콘텐츠·자원만 싣고 실행하게 하고, 최소한 `object-src 'none'`·`base-uri 'none'`과… | 자동 시험 | B | 시험: apps/web/server/csp-hash-server.test.mjs, apps/web/src/_app/security/page-headers.test.mjs 외 1곳 |
 | v5.0.0-3.4.4 | — | L2 | 모든 응답에 `X-Content-Type-Options: nosniff`를 둔다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/v0-monolith/test-int/seat.int.test.ts 외 4곳 (영역:… |
 | v5.0.0-3.4.5 | — | L2 | 리퍼러 정책을 둬 URL 경로·쿼리 같은 기술적 민감 데이터가 `Referer` 헤더로 제3자 서비스에 새지 않게 한다. | ID만 | B | 다른 곳 시험: apps/web/src/shared/lib/staff-fragment.test.mjs, apps/web/src/widgets/app-shell/model/search-quality.test.mjs… |
 | v5.0.0-3.4.6 | — | L2 | 모든 HTTP 응답에 CSP `frame-ancestors`를 둬 기본적으로 끼워 넣을 수 없게 하고, 필요한 자원만 끼워 넣기를… | ID만 | B | 다른 곳 시험: apps/web/src/_app/security/page-headers.test.mjs, deploy/gateways/test/gateways.test.mjs 외 5곳 (영역:… |
-| v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/ticket-svc/test-int/scanner-f055.int.test.ts 외 1곳 |
-| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 자동 시험 | B | 시험: services/core-svc/test/local-gateway.test.ts, services/ticket-svc/test/scanner-origin.test.ts |
+| v5.0.0-3.5.1 | — | L1 | CORS 사전 요청에 기대지 않는다면 민감 기능 요청이 애플리케이션에서 왔는지 확인한다(위조 방지 토큰, safelisted가 아닌 헤더 요구 등). | 자동 시험 | B | 시험: services/core-svc/test-int/production-image.int.test.ts, services/ticket-svc/test-int/scanner-f055.int.test.ts 외 2곳 |
+| v5.0.0-3.5.2 | — | L1 | CORS 사전 요청에 기댄다면 사전 요청을 일으키지 않는 요청으로 그 기능을 부를 수 없게 한다(`Origin`·`Content-Type` 확인 등). | 자동 시험 | B | 시험: services/core-svc/test/local-gateway.test.ts, services/ticket-svc/test/scanner-origin.test.ts 외 1곳 |
 | v5.0.0-3.5.3 | — | L1 | 민감 기능은 GET·HEAD·OPTIONS 같은 안전 메서드가 아닌 POST·PUT·PATCH·DELETE 같은 메서드로 부르거나, `Sec-Fetch-*`… | 자동 시험 | B | 시험: apps/console-host/src/pages/cancellation/ui/wiring.test.mjs, apps/partner/src/_pages/cancellation-request/ui/wiring… |
 | v5.0.0-3.5.4 | — | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | ID만 | B | 다른 곳 시험: apps/web/src/features/wallet-device-key/pwa-config.test.mjs, apps/web/src/features/wallet-device-key/sw-rules.t… |
 | v5.0.0-3.5.5 | — | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 해당 없음 | B | 해당 없음: 이 기능 화면은 창 메시지(`postMessage`)를 받지 않는다. 양도·취소 전 소셜 재인증 흐름은 auth.md가 판정한다 |
@@ -265,14 +270,14 @@
 | v5.0.0-8.2.3 | — | L2 | 필드 수준 접근을 그 필드에 명시적 권한이 있는 호출자로 제한해 BOPLA를 막는다. | 자동 시험 | B | 시험: services/core-svc/test-int/notify-role.int.test.ts, services/core-svc/test-int/rls.int.test.ts 외 11곳 |
 | v5.0.0-8.3.1 | — | L1 | 인가 규칙을 신뢰할 수 있는 서비스 계층에서 강제하고 클라이언트 쪽 제어에 기대지 않는다. | 자동 시험 | B | 시험: services/ops-svc/test/command-lifecycle-http.test.ts |
 | v5.0.0-8.4.1 | — | L2 | 다중 테넌트 애플리케이션은 테넌트 사이 통제로 호출자의 작업이 상호작용 권한이 없는 테넌트에 영향을 주지 않게 한다. | 자동 시험 | B | 시험: services/core-svc/test-int/export-audit.int.test.ts, services/core-svc/test-int/idempotency-migration.int.test.ts 외… |
-| v5.0.0-9.1.1 | — | L1 | 자체 완결형 토큰은 서명이나 MAC을 검증한 뒤에만 내용을 받아들인다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외 7곳 |
+| v5.0.0-9.1.1 | — | L1 | 자체 완결형 토큰은 서명이나 MAC을 검증한 뒤에만 내용을 받아들인다. | 자동 시험 | B | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외 8곳 |
 | v5.0.0-9.1.2 | — | L1 | 자체 완결형 토큰의 생성·검증에는 맥락별 허용 목록의 알고리즘만 쓰고(`none` 제외, 되도록 대칭·비대칭 중 한쪽만), 둘 다 써야 하면 키 혼동을 막는… | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts |
 | v5.0.0-9.1.3 | — | L1 | 검증 키는 미리 정한 신뢰 출처에서만 얻고 `jku`·`x5u`·`jwk` 헤더를 허용 목록으로 검증한다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, deploy/workloads/test/workloads.test.mjs 외 6곳 (영역:… |
 | v5.0.0-9.2.1 | — | L1 | 유효 기간이 있으면 검증 시각이 그 안일 때만 받는다(`nbf`·`exp`). | 자동 시험 | B | 시험: services/purchase-svc/test-int/purchase-session.int.test.ts, services/purchase-svc/test/admission-token.test.ts 외 6곳 |
 | v5.0.0-9.2.2 | — | L2 | 토큰 종류와 목적이 맞는지 확인한 뒤 받는다. | 자동 시험 | B | 시험: services/ops-svc/test/admin-command-reauth.test.ts, services/ops-svc/test/admin-reauth.test.ts 외 2곳 |
 | v5.0.0-9.2.3 | — | L2 | 그 서비스를 위한 토큰(`aud`)만 받는다. | 자동 시험 | B | 시험: services/purchase-svc/test/admission-token.test.ts, services/ticket-svc/test/transfer-reauth.test.ts |
 | v5.0.0-9.2.4 | — | L2 | 같은 개인 키로 여러 대상에 토큰을 발급하면 대상을 고유하게 나타내는 대상 제한을 넣고, 대상 식별자를 동적으로 정하면 발급자가 그 대상을 검증해 대상 사칭을… | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, packages/platform/test/token-verify.test.ts (영역: services/core-svc… |
-| v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | 자동 시험 | B | 시험: services/ticket-svc/test-int/transfer.int.test.ts |
+| v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | 자동 시험 | B | 시험: services/ticket-svc/test-int/transfer-f052.int.test.ts, services/ticket-svc/test-int/transfer.int.test.ts 외 1곳 |
 | v5.0.0-11.1.2 | — | L2 | 애플리케이션이 쓰는 모든 암호 키·알고리즘·인증서의 암호 목록을 만들어 정기적으로 갱신하고, 키마다 쓸 수 있는 곳과 없는 곳, 보호할 수 있는 데이터와 없는… | 빈칸 | B | 영역: services/core-svc, services/ops-svc, services/payment-svc, services/purchase-svc, services/ticket-svc |
 | v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | 자동 시험 | B | 시험: services/ops-svc/test/audit-checkpoint-bytes.test.ts, services/payment-svc/test/payment-method-ref.test.ts 외 1곳 |
 | v5.0.0-11.2.2 | — | L2 | 난수·인증 암호화·MAC·해시 알고리즘, 키 길이, 라운드, 암호와 운용 모드를 언제든 바꿀 수 있고 키·비밀번호 교체와 데이터 재암호화도 할 수 있게… | 자동 시험 | B | 시험: services/ops-svc/test/audit-mac.test.ts |
@@ -293,8 +298,8 @@
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | 자동 시험 | B | 시험: services/core-svc/test/search.http.test.ts, services/payment-svc/test/portone-gateway.test.ts 외 1곳 |
 | v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | 자동 시험 | B | 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/core-svc/test/search-log.test.ts 외 15곳 |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/logout.test.mjs, apps/web/src/features/session-cleanup/routine.test.mjs 외 2곳 (영역:… |
-| v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: services/core-svc/test/fan-notify-http.test.ts, services/purchase-svc/test/accept-http.test.ts 외 4곳 |
-| v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs 외 2곳 (영역:… |
+| v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: services/core-svc/test/fan-notify-http.test.ts, services/purchase-svc/test/accept-http.test.ts 외 5곳 |
+| v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | ID만 | B | 다른 곳 시험: apps/scanner/test/package-store-contract.ts, apps/web/queue-room/test/autoassign.test.mjs 외 5곳 (영역:… |
 | v5.0.0-15.1.1 | — | L1 | 취약한 서드파티 구성요소와 라이브러리 갱신의 위험 기반 조치 기한을 문서에 정한다. | ID만 | B | 다른 곳 시험: tools/ci/vuln-deadline.test.mjs (영역: services/core-svc, services/ops-svc, services/payment-svc… |
 | v5.0.0-15.1.2 | — | L2 | 모든 서드파티 라이브러리의 목록(SBOM)을 유지하고, 미리 정한 믿을 수 있고 계속 관리되는 저장소에서 오는지 확인한다. | ID만 | B | 다른 곳 시험: tools/ci/sbom-find.test.mjs, tools/web-checks/static/assets.test.mjs (영역: services/core-svc, services/ops-svc… |
 | v5.0.0-15.1.3 | — | L2 | 시간이 오래 걸리거나 자원을 많이 쓰는 기능을 문서에 밝히고, 그 남용으로 가용성을 잃지 않는 방법과 응답 만들기가 호출자의 시간 초과보다 길어지지 않게 하는… | 자동 시험 | B | 시험: services/core-svc/test-int/seatmap-import.int.test.ts, services/ops-svc/test-int/f021-review-deadline.int.test.ts 외… |

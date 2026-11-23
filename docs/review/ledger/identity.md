@@ -5,8 +5,8 @@
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 10 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10 |
-| B | 326 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 56 | 442 |
-| 합계 | 336 | 47 | 0 | 0 | 0 | 6 | 0 | 7 | 56 | 452 |
+| B | 328 | 46 | 0 | 0 | 0 | 6 | 0 | 7 | 55 | 442 |
+| 합계 | 338 | 46 | 0 | 0 | 0 | 6 | 0 | 7 | 55 | 452 |
 
 ## docs/features/identity.md
 
@@ -156,8 +156,8 @@
 | I-T54 | ① | 제공자별 재인증 강도(추천 적용 2026-10-28, 기술 검토… | ①은 '확인됨' 재인증 토큰이다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, apps/web/src/features/social-login/server/reauth-st… |
 | I-T54 | ② | 제공자별 재인증 강도(추천 적용 2026-10-28, 기술 검토… | ②는 거부되고 '제공자 계정에서 로그아웃한 뒤 다시 시도'를 안내한다. | 자동 시험 | B | 시험: apps/web/src/features/login-methods/flow.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs… |
 | I-T54 | ③ | 제공자별 재인증 강도(추천 적용 2026-10-28, 기술 검토… | ③은 '요청만 함'이다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs, apps/web/src/features/social-login/server/reauth-st… |
-| I-T54 | ④ | 제공자별 재인증 강도(추천 적용 2026-10-28, 기술 검토… | ④는 카카오 재인증으로 이끈다. | ID만 | B | 시험: apps/web/src/features/login-methods/flow.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs… |
-| I-T54 | ⑤ | 제공자별 재인증 강도(추천 적용 2026-10-28, 기술 검토… | ⑤는 '요청만 함'으로 받되 모든 공식 채널로 바로 알리고, 재인증 기록에 강도가 남는다 | ID만 | B | 시험: apps/web/src/features/login-methods/flow.test.mjs, apps/web/src/features/social-login/server/login-routes.test.mjs… |
+| I-T54 | ④ | 제공자별 재인증 강도(추천 적용 2026-10-28, 기술 검토… | ④는 카카오 재인증으로 이끈다. | 자동 시험 | B | 시험: apps/web/src/_pages/ticket-transfer/model/transfer-flow.test.mjs, apps/web/src/widgets/ticket-wallet/model/transfer-… |
+| I-T54 | ⑤ | 제공자별 재인증 강도(추천 적용 2026-10-28, 기술 검토… | ⑤는 '요청만 함'으로 받되 모든 공식 채널로 바로 알리고, 재인증 기록에 강도가 남는다 | ID만 | B | 시험: apps/web/src/_pages/ticket-transfer/model/transfer-flow.test.mjs, apps/web/src/features/login-methods/flow.test.mjs… |
 | I-T55 | ① | 로그인 판정이 CHALLENGE·UNKNOWN인 세션의 위험 작업(추천… | ①은 정해진 재인증만으로 재인증 토큰이 나온다. | 자동 시험 | B | 시험: services/identity-svc/test/login-verdict.test.ts |
 | I-T55 | ② | 로그인 판정이 CHALLENGE·UNKNOWN인 세션의 위험 작업(추천… | ②은 재인증 강도가 '요청만 함'이면 재인증 토큰을 주지 않고 재통과를 요구한다. 로그인 자체는 막히지 않았다. | 자동 시험 | B | 시험: services/identity-svc/test/login-verdict.test.ts |
 | I-T55 | ③ | 로그인 판정이 CHALLENGE·UNKNOWN인 세션의 위험 작업(추천… | ③은 재인증 강도가 '요청만 함'이면 재인증 토큰을 주지 않고 재통과를 요구한다. 로그인 자체는 막히지 않았다. | 자동 시험 | B | 시험: services/identity-svc/test/login-verdict.test.ts |
@@ -338,7 +338,7 @@
 | v5.0.0-3.2.1 | — | L1 | API 응답·사용자가 올린 파일 등이 잘못된 문맥(HTML 등)으로 그려지지 않게 한다(`Sec-Fetch-*`, CSP sandbox… | ID만 | B | 다른 곳 시험: services/admission-ctrl/test/result-files.test.ts, services/ops-svc/test/bot-review-http.test.ts 외 4곳 (영역:… |
 | v5.0.0-3.2.2 | — | L1 | HTML이 아니라 글로 보일 내용은 `textContent` 같은 안전한 렌더링 함수로 다룬다. | 자동 시험 | B | 시험: apps/console-host/src/pages/bot-review/ui/wiring.test.mjs, apps/console-host/src/pages/cancellation/model/live.test… |
 | v5.0.0-3.3.1 | — | L1 | 쿠키에 `Secure`를 두고, `__Host-`를 쓰지 않으면 이름에 `__Secure-` 접두사를 붙인다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
-| v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | 자동 시험 | B | 시험: apps/web/src/features/staff-approval/flow.test.mjs, apps/web/src/features/staff-invitation/flow.test.mjs |
+| v5.0.0-3.3.2 | — | L2 | 쿠키마다 목적에 맞는 `SameSite`를 둬 CSRF 같은 공격 노출을 줄인다. | 자동 시험 | B | 시험: apps/web/src/_pages/transfer-offer/model/offer-flow.test.mjs, apps/web/src/_pages/transfer-offer/ui/live-wiring.test… |
 | v5.0.0-3.3.3 | — | L2 | 다른 호스트와 공유하도록 설계한 쿠키가 아니면 이름에 `__Host-` 접두사를 쓴다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-3.3.4 | — | L2 | 스크립트가 읽을 필요 없는 쿠키(세션 토큰 등)는 `HttpOnly`이고 그 값은 `Set-Cookie`로만 보낸다. | 자동 시험 | B | 시험: services/identity-svc/test/http.test.ts |
 | v5.0.0-3.4.1 | — | L1 | 모든 응답에 HSTS를 둔다(최대 기간 1년 이상, L2부터 하위 도메인 포함). | 자동 시험 | B | 시험: deploy/gateways/test/gateways.test.mjs |
@@ -404,7 +404,7 @@
 | v5.0.0-7.4.1 | — | L1 | 로그아웃·만료로 세션이 끝나면 그 세션을 더 쓰지 못하게 하고, 참조 토큰·상태 저장 세션은 백엔드에서 무효화하며 자체 완결형 토큰은 종료 목록 등으로 거부한다. | 자동 시험 | B | 시험: packages/platform/test-int/control-sync.int.test.ts, packages/platform/test/auth-guard.test.ts 외 10곳 |
 | v5.0.0-7.4.2 | — | L1 | 계정이 정지·삭제되면 그 계정의 모든 활성 세션을 끝낸다. | 자동 시험 | B | 시험: services/identity-svc/test-int/main-withdrawal.int.test.ts, services/identity-svc/test-int/withdrawal-participant.in… |
 | v5.0.0-7.4.3 | — | L2 | 인증 요소를 바꾸거나 지운 뒤 다른 세션을 모두 끝낼 수 있게 한다. | 자동 시험 | B | 시험: services/identity-svc/test-int/device-sessions.int.test.ts, services/identity-svc/test-int/link-proposal.int.test.ts… |
-| v5.0.0-7.4.4 | — | L2 | 로그인이 필요한 모든 화면에서 로그아웃 기능이 잘 보이고 쉽게 닿게 한다. | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web |
+| v5.0.0-7.4.4 | — | L2 | 로그인이 필요한 모든 화면에서 로그아웃 기능이 잘 보이고 쉽게 닿게 한다. | ID만 | B | 다른 곳 시험: apps/scanner/test/uploader.test.ts, tools/web-checks/scanner-scan/scan.spec.mjs (영역: apps/console-host… |
 | v5.0.0-7.4.5 | — | L2 | 관리자가 사용자별·전체 활성 세션을 끝낼 수 있다. | 자동 시험 | B | 시험: services/identity-svc/test-int/admin-session-termination.int.test.ts… |
 | v5.0.0-7.5.1 | — | L2 | 인증에 영향을 주는 민감 계정 정보를 바꾸기 전에 전체 재인증을 요구한다. | 자동 시험 | B | 시험: services/identity-svc/test/passkey-cases.ts |
 | v5.0.0-7.5.2 | — | L2 | 사용자가 지금 활성인 세션을 보고, 인증 요소 하나 이상으로 다시 인증한 뒤 일부나 전부를 끝낼 수 있게 한다. | 자동 시험 | B | 시험: apps/web/src/_pages/settings/model/state.test.mjs, apps/web/src/features/device-sessions/flow.test.mjs 외 5곳 |
@@ -434,7 +434,7 @@
 | v5.0.0-10.5.4 | — | L2 | 수신된 ID 토큰의 `aud` 클레임이 사전에 발급받은 시스템의 `client_id`와 일치함을 검증한다. | 자동 시험 | B | 시험: apps/web/src/features/social-login/server/login-routes.test.mjs |
 | v5.0.0-10.5.5 | — | L2 | OIDC 백채널 로그아웃 토큰의 디지털 서명과 유효성을 검증한다. | 해당 없음 | B | 해당 없음: 백채널 로그아웃 미사용 (소셜 세션과 내부 서비스 세션의 독립 운영 원칙) |
 | v5.0.0-10.2.3 | — | L3 | 서비스 운영에 반드시 요구되는 최소한의 인가 스코프만을 선별하여 요청한다. | 빈칸 | B | 영역: apps/web |
-| v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | ID만 | B | 다른 곳 시험: services/ticket-svc/test-int/transfer.int.test.ts (영역: apps/console-host, apps/partner, apps/web… |
+| v5.0.0-11.1.1 | — | L2 | NIST SP 800-57 같은 키 관리 표준을 따르는 키 관리 정책과 키 수명 주기를 문서로 두고, 키를 필요 이상의 주체와 공유하지 않는다(공유 비밀은 두… | 자동 시험 | B | 시험: apps/web/src/widgets/ticket-wallet/model/transfer-actions.test.mjs |
 | v5.0.0-11.1.2 | — | L2 | 애플리케이션이 쓰는 모든 암호 키·알고리즘·인증서의 암호 목록을 만들어 정기적으로 갱신하고, 키마다 쓸 수 있는 곳과 없는 곳, 보호할 수 있는 데이터와 없는… | 빈칸 | B | 영역: apps/console-host, apps/partner, apps/web, services/identity-svc |
 | v5.0.0-11.2.1 | — | L2 | 업계에서 검증된 암호 구현(라이브러리, 하드웨어 가속 구현)을 쓴다. | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/admission-ctrl/test/quicknet-verifier.test.ts 외 4곳… |
 | v5.0.0-11.2.2 | — | L2 | 난수·인증 암호화·MAC·해시 알고리즘, 키 길이, 라운드, 암호와 운용 모드를 언제든 바꿀 수 있고 키·비밀번호 교체와 데이터 재암호화도 할 수 있게… | ID만 | B | 다른 곳 시험: packages/api-client/test/purchase-crypto.test.ts, services/ops-svc/test/audit-mac.test.ts (영역:… |
@@ -461,11 +461,11 @@
 | v5.0.0-13.3.2 | — | L2 | 비밀 자산 접근은 최소 권한 원칙을 따른다. | 다른 단계 | B | 운영 확인 · 구현 위치가 '(운영 설계만)'이다 |
 | v5.0.0-14.1.1 | — | L2 | 애플리케이션이 만들고 처리하는 민감 데이터를 Base64·JWT 본문처럼 인코딩만 된 것까지 모두 찾아, 따라야 할 데이터 보호·개인정보 법규와 표준을 반영한… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/evidence-collector/test-int/collector.int.tes… |
 | v5.0.0-14.1.2 | — | L2 | 보호 등급마다 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, DB 수준 암호화, 개인정보 보호 기술 같은 보호 요구사항을… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/realtime-gw/test-int/stream.int.test.ts 외 1곳… |
-| v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | 자동 시험 | B | 시험: apps/web/src/features/identity-verify/flow.test.mjs, apps/web/src/features/identity-verify/server/return-post.test.m… |
+| v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | 자동 시험 | B | 시험: apps/web/src/_pages/ticket-transfer/model/transfer-flow.test.mjs, apps/web/src/features/identity-verify/flow.test.mj… |
 | v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | ID만 | B | 다른 곳 시험: packages/platform/test/diagnose.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 4곳 (영역:… |
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs, packages/config/eslint/service-security.test.mjs… |
 | v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | 자동 시험 | B | 시험: services/identity-svc/test/staff-assignment-maintenance.test.ts |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 자동 시험 | B | 시험: apps/web/queue-room/test/logout.test.mjs, apps/web/src/features/session-cleanup/routine.test.mjs 외 2곳 |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 자동 시험 | B | 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/identity-svc/test-int/fan-account.int.test.ts 외… |
-| v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 자동 시험 | B | 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs 외 2곳 |
+| v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | 자동 시험 | B | 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs 외 3곳 |
 | v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: packages/platform/test-int/control-sync.int.test.ts, packages/platform/test-int/kafka.int.test.ts 외 9곳 |
