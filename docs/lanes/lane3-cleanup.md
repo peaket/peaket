@@ -104,3 +104,15 @@
 - F-06-2 RV-13 낮음: 0030 앞의 열린 건은 기한이 비어 경보가 나지 않고 목록 끝에 간다
 - F-06-2 RV-15 낮음: ops-svc 시험이 `apps/console-host`·`packages/api-client` 원본을 의존 선언 밖 상대 경로로 읽는다. CLAUDE.md 큰 그림의 목록에 더하거나 의존을 선언한다
 - F-06-2 검증 1: 어느 표본에도 실패하지 않은 시험 파일 `cs-case-deadlines.test.ts`·`cs-calendar-main-wiring.test.ts`·`cs-inbox-screen-link.test.ts`·콘솔 `model/live.test.mjs`
+- F-05-1 RV-01 중간: ticket-svc 알림 보내기 반복에 진행 중 표시가 없어 한 바퀴가 임대 60초를 넘기면 다음 바퀴가 같은 행을 다시 잡는다(시도 횟수만 부푼다, `start.ts`)
+- F-05-1 RV-02 중간: 24시간 1회 재발급을 티켓 행 FOR UPDATE 하나로 지키는데 REISSUE 두 건 동시 요청 시험이 없다
+- F-05-1 RV-03 중간: GAT-030 키 증명 PoC PC 측정(`docs/review/measurements/F-05-1-key-proof-poc.md`(예정))과 실기기 확인 목록이 없다(GAT-020을 막음)
+- F-05-1 RV-04 중간: 입장 키 알림 메일이 notify §4.7 끝 문장('내 티켓에서 확인하세요')으로 끝나지 않는다
+- F-05-1 RV-05 중간: ticket 시작 파일 조립 시험이 start()를 띄우지 않고 소스 글을 정규식으로 본다
+- F-05-1 RV-06 중간: 킬 스위치 시험이 보통 워커 활성 상태에서 킬 모드로 바꾸는 되돌리기 순서를 보지 않는다
+- F-05-1 RV-07 낮음: offline-gate §10.1 로그 줄 `wallet-sw.mode`가 없고 result 목록이 코드와 다르다
+- F-05-1 RV-08 낮음: 킬 모드에서 월렛을 열 때마다 워커 설치·해제가 되풀이된다(가로채기는 없다)
+- F-05-1 RV-09 낮음: local·ci 고정 VAPID 개인키를 저장소 고정 글에서 만들고 `PEAKET_ENV`가 비면 local로 본다
+- F-05-1 RV-10 낮음: 로그아웃이 503으로 실패해 그 탭에 남으면 그 뒤 다른 탭의 로그아웃 알림을 무시한다
+- F-05-1 RV-11 낮음: 첫 JS `/`가 175.7kB로 한도에 꼭 맞고, 보낸 알림 행 지우기가 색인 없이 5초마다 돈다
+- F-05-1 월렛 목록 `GET /v1/tickets`를 받는 서비스가 없어 월렛 화면 티켓은 목업이다(계획 담당이 넘김)

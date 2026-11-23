@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 46 | 22 | 0 | 0 | 0 | 2 | 0 | 3 | 4 | 77 |
-| 합계 | 46 | 22 | 0 | 0 | 0 | 2 | 0 | 3 | 4 | 77 |
+| B | 48 | 21 | 0 | 0 | 0 | 2 | 0 | 3 | 3 | 77 |
+| 합계 | 48 | 21 | 0 | 0 | 0 | 2 | 0 | 3 | 3 | 77 |
 
 ## docs/security/asvs/delivery.md
 
@@ -47,7 +47,7 @@
 | v5.0.0-14.1.2 | — | L2 | 보호 등급마다 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, DB 수준 암호화, 개인정보 보호 기술 같은 보호 요구사항을… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/realtime-gw/test-int/stream.int.test.ts (영역:… |
 | v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | 자동 시험 | B | 시험: packages/platform/test/diagnose.test.ts |
 | v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | 자동 시험 | B | 시험: packages/platform/test/diagnose.test.ts |
-| v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | 자동 시험 | B | 시험: packages/platform/test/telemetry.test.ts |
+| v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | 자동 시험 | B | 시험: packages/platform/test/error-reporting.test.ts, packages/platform/test/telemetry.test.ts |
 | v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | 자동 시험 | B | 시험: services/queue-svc/test-int/held-events.int.test.ts, services/queue-svc/test/held-events.test.ts |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | 해당 없음 | B | 해당 없음: 운영 진단 범위에 브라우저 화면이 없다. 화면별 판정은 기능 표가 한다 |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | 해당 없음 | B | 해당 없음: 14.3.1과 같다 |
@@ -55,7 +55,7 @@
 | v5.0.0-15.1.1 | — | L1 | 취약한 서드파티 구성요소와 라이브러리 갱신의 위험 기반 조치 기한을 문서에 정한다. | 자동 시험 | B | 시험: tools/ci/vuln-deadline.test.mjs |
 | v5.0.0-15.1.2 | — | L2 | 모든 서드파티 라이브러리의 목록(SBOM)을 유지하고, 미리 정한 믿을 수 있고 계속 관리되는 저장소에서 오는지 확인한다. | 자동 시험 | B | 시험: tools/ci/sbom-find.test.mjs |
 | v5.0.0-15.1.3 | — | L2 | 시간이 오래 걸리거나 자원을 많이 쓰는 기능을 문서에 밝히고, 그 남용으로 가용성을 잃지 않는 방법과 응답 만들기가 호출자의 시간 초과보다 길어지지 않게 하는… | 자동 시험 | B | 시험: packages/platform/test-int/timeouts.int.test.ts |
-| v5.0.0-15.2.1 | — | L1 | 문서에 정한 갱신·조치 기한을 넘긴 구성요소가 없다. | 빈칸 | B | 영역: apps/partner |
+| v5.0.0-15.2.1 | — | L1 | 문서에 정한 갱신·조치 기한을 넘긴 구성요소가 없다. | 자동 시험 | B | 시험: tools/ci/min-versions.test.mjs |
 | v5.0.0-15.2.2 | — | L2 | 시간이 오래 걸리거나 자원을 많이 쓰는 기능에 문서대로 가용성 방어를 구현한다. | 자동 시험 | B | 시험: packages/platform/test-int/maintenance.int.test.ts, packages/platform/test-int/timeouts.int.test.ts 외 4곳 |
 | v5.0.0-15.2.3 | — | L2 | 운영 환경에는 필요한 기능만 두고 시험 코드·예제·개발 기능을 노출하지 않는다. | 빈칸 | B | 영역: deploy, infra, tools/ci |
 | v5.0.0-15.3.1 | — | L1 | 데이터 객체에서 필요한 필드만 돌려준다. | 자동 시험 | B | 시험: packages/config/eslint/service-security.test.mjs |
@@ -76,7 +76,7 @@
 | v5.0.0-16.3.3 | — | L2 | 문서화한 보안 이벤트와 보안 통제를 우회하려는 시도를 기록한다. | ID만 | B | 다른 곳 시험: services/core-svc/test-int/production-image.int.test.ts, services/core-svc/test-int/sale-eligibility.int.test.t… |
 | v5.0.0-16.3.4 | — | L2 | 예상하지 못한 오류와 보안 통제 실패를 기록한다. | 자동 시험 | B | 시험: packages/platform/test/control-codec.test.ts, packages/platform/test/redis.test.ts 외 2곳 |
 | v5.0.0-16.4.1 | — | L2 | 모든 로그 구성요소가 로그 주입을 막도록 데이터를 인코딩한다. | 자동 시험 | B | 시험: packages/platform/test/request-log.test.ts |
-| v5.0.0-16.4.2 | — | L2 | 로그를 권한 없는 접근과 수정에서 보호한다. | ID만 | B | 다른 곳 시험: services/ops-svc/test-int/audit-chain-mac.int.test.ts (영역: deploy, infra, tools/ci) |
+| v5.0.0-16.4.2 | — | L2 | 로그를 권한 없는 접근과 수정에서 보호한다. | 자동 시험 | B | 시험: tools/ci/observability-config.test.mjs |
 | v5.0.0-16.4.3 | — | L2 | 로그를 분석·탐지·경보용으로 논리적으로 분리된 시스템에 안전하게 보낸다. | 빈칸 | B | 영역: deploy, infra, tools/ci |
 | v5.0.0-16.5.1 | — | L2 | 예상하지 못한 오류나 보안상 민감한 오류에는 일반 메시지를 돌려주고 내부 정보를 드러내지 않는다. | 자동 시험 | B | 시험: packages/platform/test/problem.test.ts |
 | v5.0.0-16.5.2 | — | L2 | 외부 자원 접근이 실패해도 안전하게 동작한다. | 자동 시험 | B | 시험: packages/platform/test-int/control-sync.int.test.ts, packages/platform/test-int/kafka.int.test.ts 외 9곳 |
