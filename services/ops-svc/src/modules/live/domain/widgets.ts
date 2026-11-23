@@ -3,8 +3,15 @@
 // 값은 숫자·상태만 싣고 화면 글자는 위젯이 만든다. 원천을 못 읽으면 같은 키에 error 'source-unavailable'을 싣는다(200).
 import { z } from 'zod';
 
-export const WIDGET_KEYS = ['queue-admission-rate.summary', 'purchase-pg-status.summary'] as const;
+export const WIDGET_KEYS = ['queue-admission-rate.summary', 'purchase-pg-status.summary', 'rt-sales.summary'] as const;
 export type WidgetKey = (typeof WIDGET_KEYS)[number];
+
+/** 키마다 값의 원천(openapi OpsWidgetValue.source). rt-sales.summary는 관제 실시간 표(ClickHouse rt 뷰, F-04-1) */
+export const WIDGET_SOURCE_OF = {
+  'queue-admission-rate.summary': 'prometheus',
+  'purchase-pg-status.summary': 'prometheus',
+  'rt-sales.summary': 'clickhouse',
+} as const satisfies Record<WidgetKey, 'prometheus' | 'clickhouse'>;
 
 /** 그래프 창 15분 [가정](frontend §3.10 '들고 있는 양의 상한') */
 export const WIDGET_RANGE_MS = 15 * 60_000;
@@ -24,7 +31,7 @@ const nullableNumber = z.number().nullable();
 /** 원천을 못 읽은 값(두 키 같은 모양) */
 export const WidgetUnavailable = z.object({
   widgetKey: z.enum(WIDGET_KEYS),
-  source: z.literal('prometheus'),
+  source: z.enum(['prometheus', 'clickhouse']),
   at: z.string(),
   eventId: z.string().nullable(),
   error: z.literal('source-unavailable'),
@@ -64,7 +71,26 @@ export const PurchasePgStatusSummary = z.object({
   series: z.array(z.object({ at: z.string(), pg: z.string(), limitRatio: z.number() })).optional(),
 });
 
-export const WidgetValue = z.union([QueueAdmissionRateSummary, PurchasePgStatusSummary, WidgetUnavailable]);
+/** 관제 실시간 표 '판매 누적·구역별 잔여석'(F-04-1, docs/streaming.md §4.1·§4.5). 실시간 잠정값이다 */
+export const RtSalesSummary = z.object({
+  widgetKey: z.literal('rt-sales.summary'),
+  source: z.literal('clickhouse'),
+  at: z.string(),
+  eventId: z.string().nullable(),
+  sold: z.number().int(),
+  remaining: z.number().int().nullable(),
+  salesAmount: z.number().int(),
+  ordersConfirmed: z.number().int(),
+  ticketsIssued: z.number().int(),
+  waiting: z.number().int(),
+  queueEntries: z.number().int(),
+  sections: z.array(z.object({ sectionId: z.string(), sold: z.number().int(), remaining: z.number().int().nullable() })),
+  freshnessSeconds: z.number(),
+  degraded: z.boolean(),
+  tradeGap: z.boolean(),
+});
+
+export const WidgetValue = z.union([QueueAdmissionRateSummary, PurchasePgStatusSummary, RtSalesSummary, WidgetUnavailable]);
 export type WidgetValue = z.output<typeof WidgetValue>;
 
 /** 쉼표로 이은 위젯 키 목록을 읽는다. 비었거나 모르는 키가 있으면 그 키 목록을 돌려준다(422) */

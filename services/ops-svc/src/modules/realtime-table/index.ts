@@ -2,6 +2,7 @@
 export { RealtimeTableModule, type RealtimeTableModuleDeps } from './realtime-table.module.js';
 export { RtBoard, type RtBoardDeps, type RtBoardHealth, type RtBoardOptions } from './application/rt-board.js';
 export { GetPartnerLiveSnapshot, LIVE_SNAPSHOT_RETRY_AFTER_SECONDS } from './application/get-partner-live-snapshot.js';
+export { RT_WIDGET_KEY, RtWidgetSource } from './application/rt-widget-source.js';
 export { ClickHouseRtSource, RT_CLICKHOUSE_READER, RT_HTTP_TIMEOUT_MS, RT_MAX_EXECUTION_SECONDS, dateTime64Param } from './adapters/clickhouse-rt-source.js';
 export { MemoryRtSource, type MemoryRtPart } from './adapters/memory-rt-source.js';
 export { UnavailableRtSource } from './adapters/unavailable-rt-source.js';

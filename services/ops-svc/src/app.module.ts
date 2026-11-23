@@ -23,13 +23,13 @@ import { CommandsModule, type CommandExecutor, type CommandsModuleExtras, type H
 import { DrizzleCommandStore, IdentityActiveCommanders, MemoryCommandStore } from './modules/commands/index.js';
 import { CasesModule, DrizzleCsCaseStore, IdentityCsAssigneeDirectory, MemoryCsCaseStore, csCaseKit, type BusinessCalendar, type CsCaseKit, type CsCaseSignals } from './modules/cases/index.js';
 import { AlertsModule, DrizzleOpsAlertStore, MemoryOpsAlertStore, type OpsAlertStore } from './modules/alerts/index.js';
-import { LiveModule, OpsLiveFeed } from './modules/live/index.js';
+import { LiveModule, OpsLiveFeed, widgetSourcesFromEnv, type LiveModuleExtras } from './modules/live/index.js';
 import { PriorityModule, type PriorityModuleDeps } from './modules/priority/index.js';
 import { ScannerDevicesModule, type TicketScannerDevices } from './modules/scanner-devices/index.js';
 import { PayoutsModule, UnavailableApprovalVerifier, type PayoutsModuleDeps } from './modules/payouts/index.js';
 import { ApprovalsModule, type ApprovalsModuleDeps } from './modules/approvals/index.js';
 import { BotReviewModule, type BotReviewSignals, type BotReviewSource, type TrustLabels } from './modules/bot-review/index.js';
-import { RealtimeTableModule, type RealtimeTableModuleDeps } from './modules/realtime-table/index.js';
+import { RealtimeTableModule, RtWidgetSource, type RealtimeTableModuleDeps } from './modules/realtime-table/index.js';
 import type { AdminIdentity, AdminReauth } from './modules/admin-accounts/domain/ports.js';
 import {
   CsCaseEventCancellationCases,
@@ -171,6 +171,11 @@ function caseKitOf(o: CommonWiring, store: import('./modules/cases/index.js').Cs
   return csCaseKit({ store, alerts, ...(o.calendar ? { calendar: o.calendar } : {}), ...(o.caseSignals ? { signals: o.caseSignals } : {}) });
 }
 
+/** 관제 위젯 원천: 환경 값의 Prometheus 원천에 관제 실시간 표(rt-sales.summary, F-04-1)를 더한다. 실시간 표가 없으면 LiveModule 기본 그대로 */
+function liveExtrasOf(o: { readonly realtimeTable?: RealtimeTableModuleDeps }): LiveModuleExtras {
+  return o.realtimeTable ? { widgetSources: [...widgetSourcesFromEnv(process.env), new RtWidgetSource(o.realtimeTable.board)] } : {};
+}
+
 @Module({})
 export class AppModule {
   /**
@@ -207,7 +212,7 @@ export class AppModule {
               ...(background?.audit ? { options: background.audit } : {}),
             },
           }),
-          LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints })),
+          LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints }), liveExtrasOf(o)),
           casesModule(o, cases, background),
           AlertsModule.register(alerts),
           ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
@@ -259,7 +264,7 @@ export class AppModule {
           postReviews: postReviewWiring(o, memoryAlerts),
         }),
         AuditModule.register(checkpoints, { intake: new MemoryAuditIntakeStore(chain), ...(o.auditSignals ? { signals: o.auditSignals } : {}) }),
-        LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints })),
+        LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints }), liveExtrasOf(o)),
         casesModule(o, cases, undefined),
         AlertsModule.register(memoryAlerts),
         ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),

@@ -36,10 +36,12 @@ export {
 export {
   PurchasePgStatusSummary,
   QueueAdmissionRateSummary,
+  RtSalesSummary,
   WIDGET_KEYS,
   WIDGET_KEYS_PER_STREAM,
   WIDGET_MAX_RANGE_MS,
   WIDGET_RANGE_MS,
+  WIDGET_SOURCE_OF,
   WIDGET_TICK_MS,
   WidgetUnavailable,
   WidgetValue,
@@ -51,7 +53,7 @@ export { WidgetSourceUnavailable, type PresenceEntry, type PresenceStore, type P
 export { DrizzlePushEvents, pushRowOf } from './adapters/db/drizzle-push-events.js';
 export { DrizzlePresence } from './adapters/db/drizzle-presence.js';
 export { MemoryPresence, MemoryPushEvents } from './adapters/memory-push-events.js';
-export { PROMETHEUS_RANGE_STEP_S, PROMETHEUS_TIMEOUT_MS, PrometheusWidgetSource, UnavailableWidgetSource, WIDGET_QUERIES } from './adapters/prometheus-widget-source.js';
+export { PROMETHEUS_RANGE_STEP_S, PROMETHEUS_TIMEOUT_MS, PROMETHEUS_WIDGET_KEYS, PrometheusWidgetSource, UnavailableWidgetSource, WIDGET_QUERIES } from './adapters/prometheus-widget-source.js';
 export { OpsLiveController, OpsLiveQuery } from './inbound/ops-live.controller.js';
 export { OpsEventLiveController } from './inbound/ops-event-live.controller.js';
 export { OpsWidgetsController } from './inbound/ops-widgets.controller.js';

@@ -4,7 +4,7 @@
 // 읽기 주기(타이머·첫 읽기)는 첫 구독을 한 SSE 요청의 맥락 밖에서 돈다: 그 요청의 남은 시간(서비스 상한 15초)을 물려받으면 15초 뒤
 // 모든 원천 호출이 보내기 전에 끝나 흐름이 늘 source-unavailable이 된다(F-03-1 B-01). 원천 읽기마다 원천 클라이언트가 자기 상한으로 남은 시간을 새로 잡는다.
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { WIDGET_MAX_RANGE_MS, WIDGET_RANGE_MS, WIDGET_TICK_MS, type WidgetKey, type WidgetValue } from '../domain/widgets.js';
+import { WIDGET_MAX_RANGE_MS, WIDGET_RANGE_MS, WIDGET_SOURCE_OF, WIDGET_TICK_MS, type WidgetKey, type WidgetValue } from '../domain/widgets.js';
 import type { WidgetReadQuery, WidgetSource } from '../domain/ports.js';
 
 export type WidgetListener = (v: { widgetKey: WidgetKey; atMs: number; value: WidgetValue }) => void;
@@ -25,7 +25,7 @@ export interface WidgetFeedOptions {
 
 /** 원천 실패 값 */
 export function unavailableValue(key: WidgetKey, eventId: string | null, atMs: number): WidgetValue {
-  return { widgetKey: key, source: 'prometheus', at: new Date(atMs).toISOString(), eventId, error: 'source-unavailable' };
+  return { widgetKey: key, source: WIDGET_SOURCE_OF[key], at: new Date(atMs).toISOString(), eventId, error: 'source-unavailable' };
 }
 
 export class WidgetFeed {

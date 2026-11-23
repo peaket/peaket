@@ -4,7 +4,7 @@
 // 원천이 답하지 않거나 모양이 틀리면 WidgetSourceUnavailable을 던진다(흐름·조회가 source-unavailable로 낸다).
 import { createExternalHttpClient, type ExternalHttpClient } from '@peaket/platform';
 import { WidgetSourceUnavailable, type WidgetReadQuery, type WidgetSource } from '../domain/ports.js';
-import { WIDGET_KEYS, type WidgetKey, type WidgetValue } from '../domain/widgets.js';
+import { WIDGET_KEYS, WIDGET_SOURCE_OF, type WidgetKey, type WidgetValue } from '../domain/widgets.js';
 
 /** 한 번 묻는 시간 상한 2초 [가정]: 위젯 주기(1초)보다 길게 걸리면 다음 주기가 건너뛴다 */
 export const PROMETHEUS_TIMEOUT_MS = 2_000;
@@ -51,8 +51,11 @@ const num = (v: string | undefined): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+/** Prometheus가 원천인 키(WIDGET_SOURCE_OF가 prometheus인 키). rt-sales.summary는 관제 실시간 표 원천이 맡는다(F-04-1) */
+export const PROMETHEUS_WIDGET_KEYS: readonly WidgetKey[] = WIDGET_KEYS.filter((k) => WIDGET_SOURCE_OF[k] === 'prometheus');
+
 export class PrometheusWidgetSource implements WidgetSource {
-  readonly keys: readonly WidgetKey[] = WIDGET_KEYS;
+  readonly keys: readonly WidgetKey[] = PROMETHEUS_WIDGET_KEYS;
 
   constructor(private readonly http: ExternalHttpClient) {}
 
@@ -101,6 +104,8 @@ export class PrometheusWidgetSource implements WidgetSource {
         ...(series ? { series: series.flatMap(([t, v]) => (num(v) === null ? [] : [{ at: new Date(t * 1000).toISOString(), ratio: num(v)! }])) } : {}),
       };
     }
+    // 이 원천이 맡지 않는 키(rt-sales.summary는 관제 실시간 표 원천, F-04-1)
+    if (key !== 'purchase-pg-status.summary') throw new WidgetSourceUnavailable(`이 원천의 키가 아니다: ${key}`);
     const p = WIDGET_QUERIES.pg;
     const [limitRatio, circuitOpen, inflight, saturated] = await Promise.all([p.limitRatio, p.circuitOpen, p.inflight, p.saturatedPerMin].map((x) => this.instant(x, q.nowMs)));
     const byPg = (s: PromSample[]) => new Map(s.map((x) => [x.metric.pg ?? '', num(x.value?.[1])] as const));
@@ -135,7 +140,7 @@ export class PrometheusWidgetSource implements WidgetSource {
 
 /** 원천 주소가 없을 때(local·시험): 늘 source-unavailable */
 export class UnavailableWidgetSource implements WidgetSource {
-  readonly keys: readonly WidgetKey[] = WIDGET_KEYS;
+  readonly keys: readonly WidgetKey[] = PROMETHEUS_WIDGET_KEYS;
   async read(): Promise<WidgetValue> {
     throw new WidgetSourceUnavailable('PEAKET_PROMETHEUS_URL이 없다');
   }
