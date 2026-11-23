@@ -163,7 +163,8 @@ test('PRF215_마이그레이션잡은_합본이미지로_패키지실제경로�
 
 test('PRF215_Kafka토픽은_무대가쓰는것만_없을때만만든다', () => {
   // F-07-5(정본 settlement §4.2, ADR-0368 결정 1·3): payment-svc Outbox가 trade.settlements에 정산서 사건을 쓰므로 무대 토픽에 더한다
-  assert.deepEqual([...V1_KAFKA_TOPICS].sort(), ['identity.accounts-withdrawn', 'telemetry.behavior', 'trade.orders', 'trade.payments', 'trade.purchase-sessions', 'trade.seats', 'trade.settlements']);
+  // FIX-queue-agg-values(F-04-20): queue-svc가 관제 1초 대기 집계를 telemetry.queue에 내므로 더한다
+  assert.deepEqual([...V1_KAFKA_TOPICS].sort(), ['identity.accounts-withdrawn', 'telemetry.behavior', 'telemetry.queue', 'trade.orders', 'trade.payments', 'trade.purchase-sessions', 'trade.seats', 'trade.settlements']);
   assert.ok(kafkaTopicArgs('trade.settlements').includes('trade.settlements'));
   const a = kafkaTopicArgs('trade.payments');
   assert.ok(a.includes('--if-not-exists'));
@@ -354,4 +355,14 @@ test('PRF215_코드리뷰_결제gRPC는_파드안127.0.0.1에만열고_합본Ser
 test('PRF215_코드리뷰_합본메모리는_리허설최대(약226Mi)의_두배를_올린512Mi다', () => {
   const c = find(renderValues('v1-bundle.yaml'), 'Deployment', 'bundle').spec.template.spec.containers[0];
   assert.deepEqual([c.resources.requests.memory, c.resources.limits.memory], ['512Mi', '512Mi']);
+});
+
+test('A-T26 ④ FIX-queue-agg-values queue-svc 환경 값에 텔레메트리 Kafka 주소가 있고(무대 Kafka 하나), Kafka가 없으면 넣지 않는다', () => {
+  const base = { keys: v1Keys(), queueRedisUrl: 'redis://q', seatRedisUrl: 'redis://s', purchaseDatabaseUrl: 'postgres://p', paymentDatabaseUrl: 'postgres://y', seatmapDir: '/s', batchResultDir: '/b' };
+  const on = v1EnvFiles({ ...base, kafkaBrokers: 'k:9092' });
+  assert.equal(on['queue-svc'].PEAKET_TELEMETRY_KAFKA_BROKERS, 'k:9092');
+  assert.equal(on['queue-svc'].PEAKET_KAFKA_BROKERS, 'k:9092');
+  // 스키마 ID 고정 파일은 합본이 공통 값으로 넘긴다(서비스 파일에 적지 않는다)
+  assert.equal(on['queue-svc'].PEAKET_SCHEMA_IDS_FILE, undefined);
+  assert.equal(v1EnvFiles(base)['queue-svc'].PEAKET_TELEMETRY_KAFKA_BROKERS, undefined);
 });

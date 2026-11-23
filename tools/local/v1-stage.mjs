@@ -125,6 +125,9 @@ export function v1EnvFiles(o) {
   const common = (svc) => ({ PORT: String(ports[svc].app), PEAKET_MANAGEMENT_PORT: String(ports[svc].management), ...(o.logLevel ? { PEAKET_LOG_LEVEL: o.logLevel } : {}) });
   /** @type {Record<string, string>} */
   const kafka = o.kafkaBrokers ? { PEAKET_KAFKA_BROKERS: o.kafkaBrokers } : {};
+  // 관제 1초 대기 집계(F-04-20, FIX-queue-agg-values): 로컬은 Kafka 하나가 텔레메트리 클러스터 자리도 맡는다. 스키마 ID 고정 파일은 합본이 넘긴다(ADR-0357 결정 4)
+  /** @type {Record<string, string>} */
+  const telemetry = o.kafkaBrokers ? { PEAKET_TELEMETRY_KAFKA_BROKERS: o.kafkaBrokers } : {};
   const payment = {
     ...common('payment-svc'),
     // 업무 gRPC는 같은 파드의 purchase-svc만 부른다(파드 밖에 열지 않는다, 코드 리뷰)
@@ -170,6 +173,7 @@ export function v1EnvFiles(o) {
     PEAKET_BATCH_RESULT_DIR: o.batchResultDir,
     PEAKET_TEST_BATCH_RANDOMNESS: k.batchRandomness,
     ...kafka,
+    ...telemetry,
   };
   return { 'payment-svc': payment, 'purchase-svc': purchase, 'admission-ctrl': admission, 'queue-svc': queue };
 }
