@@ -54,8 +54,11 @@ class FakeSessions implements ScannerSessionCheck {
 class TableDirectory implements MemberCodeDirectory {
   readonly codes = new Map<string, string>();
   readonly calls: string[] = [];
+  /** 참이면 gRPC 클라이언트처럼 던진다(GrpcMemberCodeDirectory와 같은 실패 모양, RV-10) */
+  fail = false;
   async resolveMemberCode(code: string): Promise<{ accountId: string; nickname: string } | undefined> {
     this.calls.push(code);
+    if (this.fail) throw new Error('14 UNAVAILABLE: identity-svc 연결 실패');
     const accountId = this.codes.get(code);
     return accountId === undefined ? undefined : { accountId, nickname: '회원' };
   }
@@ -396,6 +399,9 @@ describe('F-05-2 T3 R-T25 ② [ASVS v5.0.0-2.3.4] 환급된 표는 받아도 쓸
       expect(summary[0]).toEqual({ usable: 0, open: 0, refunded: N, offered: 0, cancels: N });
     }
     expect(cancelFirst + acceptFirst).toBe(ROUNDS * N);
+    // 경합이 실제로 양쪽 결과를 냈다(한쪽만 나오면 경합 없이 초록이 된다, RV-08)
+    expect(cancelFirst, '취소가 먼저인 표가 없다').toBeGreaterThan(0);
+    expect(acceptFirst, '수락이 먼저인 표가 없다').toBeGreaterThan(0);
   }, 240_000);
 });
 
@@ -517,6 +523,46 @@ describe('F-05-2 T7 [ASVS v5.0.0-2.4.1] 받는 사람 조회 한도와 기록(Po
     expect(statuses.filter((s) => s === 200 || s === 404)).toHaveLength(10);
     expect(statuses.filter((s) => s === 429)).toHaveLength(2);
   });
+
+  test('F-05-2 T7 ④ 경계(실제 DB, RV-03): Retry-After는 창에서 가장 오래된 조회가 빠질 때까지의 초이고, 첫 조회 + 60분 − 1ms는 429·Retry-After 1, + 60분은 200이다', async () => {
+    const w = world();
+    const me = randomUUID();
+    const t0 = clock.now();
+    expect((await lookup(me, w.codeB)).status).toBe(200);
+    clock.advance(5 * MIN);
+    for (let i = 0; i < 9; i++) expect((await lookup(me, w.codeB)).status).toBe(200);
+    clock.advance(5 * MIN);
+    const limited = await lookup(me, w.codeB);
+    expect(limited.status, limited.raw).toBe(429);
+    expect(String(limited.body.type)).toContain('too-many-requests');
+    expect(limited.headers['retry-after']).toBe('3000');
+    clock.advance(t0 + 60 * MIN - 1 - clock.now());
+    const edge = await lookup(me, w.codeB);
+    expect(edge.status).toBe(429);
+    expect(edge.headers['retry-after']).toBe('1');
+    clock.advance(1);
+    expect((await lookup(me, w.codeB)).status).toBe(200);
+    // 이제 창 안은 t0 + 5분의 아홉과 방금 하나: 다음은 429, 기다릴 초는 t0 + 65분까지
+    const next = await lookup(me, w.codeB);
+    expect(next.status).toBe(429);
+    expect(next.headers['retry-after']).toBe('300');
+  });
+
+  test('F-05-2 T7 ⑤ identity 찾기가 실패하면 503이고 조회 기록에 UNAVAILABLE 한 행을 남긴다(RV-10)', async () => {
+    const w = world();
+    const me = randomUUID();
+    directory.fail = true;
+    let r: Res;
+    try {
+      r = await lookup(me, w.codeB);
+    } finally {
+      directory.fail = false;
+    }
+    expect(r.status, r.raw).toBe(503);
+    expect(String(r.body.type)).toContain('dependency-unavailable');
+    const rows = await q<{ result: string }>('select result from transfer_recipient_lookup where account_id = $1', [me]);
+    expect(rows.map((x) => x.result)).toEqual(['UNAVAILABLE']);
+  });
 });
 
 describe('F-05-2 T8 [ASVS v5.0.0-11.1.1] 돌려주기 다시 보냄(PostgreSQL)', () => {
@@ -549,4 +595,110 @@ describe('F-05-2 T8 [ASVS v5.0.0-11.1.1] 돌려주기 다시 보냄(PostgreSQL)'
     expect(await ticketRow(t2!)).toEqual(before2);
     expect(await activeKeys(t2!)).toBe(1);
   });
+
+  /** 받은 표 하나(A → B 수락, B의 TRANSFER 키 등록까지) */
+  const givenTo = async (w: ReturnType<typeof world>): Promise<string> => {
+    const [t] = await issue(w.a, w.event);
+    const offerId = await offer(t!, w.a, w.codeB);
+    expect((await post(`/v1/transfers/${offerId}/acceptance`, w.b)).status).toBe(200);
+    await registerKey(t!, w.b, 'TRANSFER');
+    return t!;
+  };
+
+  test('F-05-2 T8 ② 되돌림(RV-04): 돌려주기 기록 쓰기가 실패하면 5xx이고 보유자·버전·키·양도 표시가 그대로이며, 고친 뒤 같은 키로 다시 보내면 처리된다', async () => {
+    const w = world();
+    const t = await givenTo(w);
+    const before = await ticketRow(t);
+    const key = randomUUID();
+    const failed = await withFailingTrigger({ table: 'ticket_return', when: `new.ticket_id = '${t}'::uuid`, ids: [t] }, () => post(`/v1/tickets/${t}/returns`, w.b, { key, reauth: 'token-1' }));
+    expect(failed.status, failed.raw).toBeGreaterThanOrEqual(500);
+    expect(failed.raw.includes('RETURNED')).toBe(false);
+    expect(await ticketRow(t)).toEqual(before);
+    expect(await activeKeys(t)).toBe(1);
+    const again = await post(`/v1/tickets/${t}/returns`, w.b, { key, reauth: 'token-2' });
+    expect(again.status, again.raw).toBe(200);
+    expect(again.body).toEqual({ ticketId: t, status: 'RETURNED' });
+    expect(await ticketRow(t)).toMatchObject({ account_id: w.a });
+    expect(Number((await ticketRow(t)).version)).toBe(Number(before.version) + 1);
+    expect(await activeKeys(t)).toBe(0);
+  });
+
+  test('F-05-2 T8 ③ 동시(RV-06): 같은 키 돌려주기 두 건이 함께 오면 둘 다 같은 200이거나 하나가 409 idempotency-request-in-progress이고 보유자 바꿈·키 폐기는 한 번이다', async () => {
+    const w = world();
+    const t = await givenTo(w);
+    const v0 = Number((await ticketRow(t)).version);
+    const revoked0 = await revokedKeys(t);
+    const key = randomUUID();
+    const rs = await Promise.all([post(`/v1/tickets/${t}/returns`, w.b, { key, reauth: 'token-a' }), post(`/v1/tickets/${t}/returns`, w.b, { key, reauth: 'token-b' })]);
+    for (const r of rs) {
+      expect([200, 409], r.raw).toContain(r.status);
+      if (r.status === 409) expect(String(r.body.type)).toContain('idempotency-request-in-progress');
+      if (r.status === 200) expect(r.body).toEqual({ ticketId: t, status: 'RETURNED' });
+    }
+    expect(rs.filter((r) => r.status === 200).length).toBeGreaterThanOrEqual(1);
+    expect(await ticketRow(t)).toMatchObject({ account_id: w.a });
+    expect(Number((await ticketRow(t)).version)).toBe(v0 + 1);
+    expect(await revokedKeys(t)).toBe(revoked0 + 1);
+  });
+});
+
+describe('F-05-2 T3 R-T25 ② 운영자 취소 ↔ 수락 경합(PostgreSQL, RV-07)', () => {
+  // 수락이 먼저인 표는 기대 보유자(결제자)가 아니어서 건너뛴다(transfer-refund §7.4 '결과 매핑' SKIPPED_HOLDER_CHANGED,
+  // 잠금이 풀린 뒤 넘어간 받은 사람의 표는 취소하지 않는다). 그래서 끝 불변식은 'OFFERED 0·환급된 표를 받는 사람이 갖지 않음'이다
+  test('F-05-2 T3 R-T25 ② ⑤ 요청이 있는 표 10장에 운영자 취소와 수락을 같은 순간에 넣기를 5번, 표마다 한쪽만 되고 환급된 표는 받는 사람이 쓸 수 없다', async () => {
+    const ROUNDS = 5;
+    const N = 10;
+    let cancelFirst = 0;
+    let acceptFirst = 0;
+    for (let round = 0; round < ROUNDS; round++) {
+      const w = world();
+      const ids = await issue(w.a, w.event, N);
+      const offers = new Map<string, string>();
+      for (const t of ids) offers.set(t, await offerDirect(t, w.a, w.b));
+      const now = clock.now();
+      const approvalId = randomUUID();
+      const accepts = ids.map((t) => () => transferStore.accept({ offerId: offers.get(t)!, accountId: w.b, nowMs: now }));
+      const half = Math.floor(N / 2);
+      const running = [
+        ...accepts.slice(0, half).map((f) => f()),
+        tickets.operatorCancel({ approvalId, fraudCaseId: randomUUID(), eventId: w.event, targets: ids.map((ticketId) => ({ ticketId, expectedHolderAccountId: w.a })), nowMs: now }),
+        ...accepts.slice(half).map((f) => f()),
+      ];
+      const settled = await Promise.allSettled(running);
+      expect(settled.every((x) => x.status === 'fulfilled')).toBe(true);
+      const outcomes = (settled[half] as PromiseFulfilledResult<Awaited<ReturnType<typeof tickets.operatorCancel>>>).value;
+      const recs = new Map(
+        (await q<{ ticket_id: string; withdrawn_transfer_offer_id: string | null }>('select ticket_id, withdrawn_transfer_offer_id from ticket_operator_cancellation where approval_id = $1', [approvalId])).map((r) => [r.ticket_id, r]),
+      );
+      for (const t of ids) {
+        const o = await offerRow(offers.get(t)!);
+        const out = outcomes.find((x) => x.ticketId === t)!;
+        const row = await ticketRow(t);
+        if (o.status === 'ACCEPTED') {
+          acceptFirst += 1;
+          expect(out.result).toBe('SKIPPED_HOLDER_CHANGED');
+          expect(out.withdrawnTransferOfferId).toBeUndefined();
+          expect(recs.get(t)?.withdrawn_transfer_offer_id).toBeNull();
+          expect(row).toMatchObject({ account_id: w.b, status: 'ACTIVE' });
+        } else {
+          cancelFirst += 1;
+          expect({ status: o.status, reason: o.withdraw_reason }).toEqual({ status: 'WITHDRAWN', reason: 'FRAUD_LOCK' });
+          expect(out).toMatchObject({ result: 'CANCELED', withdrawnTransferOfferId: offers.get(t) });
+          expect(recs.get(t)?.withdrawn_transfer_offer_id).toBe(offers.get(t));
+          expect(row).toMatchObject({ account_id: w.a, status: 'REFUNDED' });
+          expect(await activeKeys(t)).toBe(0);
+        }
+      }
+      const left = await q<{ offered: number; refunded_held_by_b: number }>(
+        `select
+           (select count(*)::int from transfer_offer o join ticket t on t.id = o.ticket_id where t.event_id = $1 and o.status = 'OFFERED') as offered,
+           (select count(*)::int from ticket where event_id = $1 and status = 'REFUNDED' and account_id = $2) as refunded_held_by_b`,
+        [w.event, w.b],
+      );
+      expect(left[0]).toEqual({ offered: 0, refunded_held_by_b: 0 });
+    }
+    expect(cancelFirst + acceptFirst).toBe(ROUNDS * N);
+    expect(cancelFirst, '취소가 먼저인 표가 없다').toBeGreaterThan(0);
+    expect(acceptFirst, '수락이 먼저인 표가 없다').toBeGreaterThan(0);
+  }, 180_000);
 });

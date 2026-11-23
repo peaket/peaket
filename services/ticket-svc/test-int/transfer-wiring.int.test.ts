@@ -6,8 +6,8 @@
 // - 실제가 아닌 것: 팬 공개키 묶음 서버(시험이 띄운 HTTP 서버, 시험 키로 재인증 토큰 서명), identity 회원 코드 찾기(포트 짝 가짜, gRPC 어댑터는 BAT-410 시험),
 //   알림(뒤 몫 F-05-11), 브라우저의 소셜 제공자 왕복, 브라우저 IndexedDB(fake-indexeddb).
 // - 정본: docs/features/transfer-refund.md §3.1·§4·§5·§11 R-T1·R-T2·R-T17·R-T25, docs/features/identity.md §7.1(재인증 토큰 클레임), docs/security/authz-matrix.md §6.
-// - 계획 §7 대본의 마지막 'A 기기 키 TRANSFER 201'은 지금 기기 키 규칙(결제자가 다시 보유자면 TRANSFER는 transfer-not-allowed, drizzle-device-key-store)과
-//   어긋나 ISSUE로 쓴다(이 시험 파일의 판단, '실패 확인' 절에 적었다).
+// - 돌려준 뒤 결제자의 다시 등록은 정본대로 reason=TRANSFER다(transfer-refund §4 '돌려주기', offline-gate §4. 시험 리뷰 RV-01·감독 결정 2026-11-23).
+//   지금 기기 키 저장소가 결제자 그대로면 TRANSFER를 transfer-not-allowed로 거절하면, 이 단언은 구현 결함으로 실패한 채 남는다.
 import 'reflect-metadata';
 import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import { createServer, request as httpRequest, type IncomingMessage, type Server } from 'node:http';
@@ -334,9 +334,13 @@ describe('F-05-2 T18 양도 실제 서버 연결 [GAT-050·GAT-055]', () => {
     expect(Number((await ticketRow(t)).version)).toBe(v1);
     expect(await activeKeyOwners(t)).toEqual([]);
     expect(await flow.loadDeviceKey(t)).toBeUndefined();
+    // 돌려준 표는 B의 월렛 목록에서 빠지고 A의 목록에 돌아온다(RV-09)
+    const listOf = async (who: Account) => ((await (await fanFetch(who)(`${relayUrl}/v1/tickets`, { method: 'GET' })).json()) as { items: { ticketId: string }[] }).items.map((i) => i.ticketId);
+    expect(await listOf(B)).not.toContain(t);
+    expect(await listOf(A)).toContain(t);
 
-    // A: 다시 입장용 등록(결제자가 다시 보유자라 ISSUE)
-    await enroll(A, t, 'ISSUE');
+    // A: 결제자가 '입장용으로 등록'으로 키를 다시 등록한다(reason=TRANSFER, transfer-refund §4·offline-gate §4, RV-01)
+    await enroll(A, t, 'TRANSFER');
     expect(await activeKeyOwners(t)).toEqual([A.id]);
   });
 
