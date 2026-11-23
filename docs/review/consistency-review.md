@@ -885,6 +885,9 @@
 | R-792 | 분석 원본 적재 작업자와 브론즈 표가 코드에 없어 분석 저장소가 비어 있었다 | services/analytics-ingest, data/clickhouse/bronze, .github/workflows/ci-node.yml, tools/ci/brief.mjs | 회차 가명·허용 목록·조사 칸 버리기·쓰기 뒤 커밋·거절 위치·커버리지 대조·다시 적재 | 해결. inv 두 갈래 권한 분리는 포렌식 동결 |
 | R-793 | 추가 검증 이의가 CS 처리함 건으로 들어와도 인정·기각 행동과 queue·trust·identity 반영이 없었다 | docs/BUILD_ORDER.md, docs/review/plans/F-06-7.md, docs/adr/0364-cs-inbox-business-days-deadlines-and-assignment.md, docs/features/bot-defense.md, docs/data.md, docs/api/openapi.yaml, services/ops-svc, apps/console-host | 계획→시험(실패 확인 ops 82/84·console 15/15·통합 17/17)→시험 리뷰 1(높음 2·중간 7)→반영→리뷰 2(TR-20)→고정→구현, ops 단위·console 196·ops 통합 232/233(J-T36 ④ 흔들림), ledger --require 11 | 닫힘 |
 | R-794 | 발권 → 월렛 이음매 | ticket-svc GET /v1/tickets·apps/web 월렛·tools/local/demo S1·메시·offline-gate·frontend | FIX-wallet-tickets 역할 넷(시험 리뷰 포함) | 끝 |
+| R-795 | ADR-0372가 구현 뒤 리뷰·검증을 모두 없애, 시험이 덮지 않는 A등급(돈·좌석·대기 순번) 결함이 구간 마무리까지 남는다 | docs/adr/0381-agrade-post-impl-review.md, docs/architecture.md §8.6·§11, ADR-0372·0373 상태 줄 | A등급만 구현 리뷰(Batch-Grade: A, Review-Of: impl, 계획 파일 구현 리뷰 절), roles-check 자동 검사 전까지 감독 손 확인 | 적용 |
+| R-796 | LCH-110 토스 지급대행 실연동 부재(셀러 등록 JWE·전송 조립·결과 전이·자동 재시도·잔액 대사) | services/payment-svc/src/modules/settlement, start.ts, migrations/0029, ops-svc cases 받는 종류, docs/api/openapi.yaml | 전송 어댑터·셀러·결과 전이·재요청·대사·09시 묶음, ADR-0369 | 고침 |
+| R-797 | 파트너 실시간 판매 현황의 '지금 대기'와 관제 '지금 대기'가 읽는 1초 대기 집계를 queue-svc가 내지 않아 0으로 떴다 | services/queue-svc(queue-aggregate·wiring·start·app.module·진입·입장 확정·대기 취소 세는 줄) | 관측이 업무 경로를 막지 않는 세기와 1초 내기 | 해결. QueueEntryRecord는 F-04-7 범위 때 |
 
 ## 4. 숫자 일치표
 
