@@ -15,7 +15,7 @@
 | 자리 | 무엇 |
 | --- | --- |
 | ★ `docs/features/offline-gate.md` §2 '월렛 목록 서버' | 처리 위치(ticket-svc HTTP, 게이트웨이 그대로), 누구의 표·어떤 표·차례·나누기·싣는 칸·뺄 칸·캐시·기록, 운영 확인 표 |
-| ★ `docs/features/offline-gate.md` §11 O-T47(①~⑧)·O-T48(①~⑩) | 서버·화면 판정 시험(장부 18항목이 새로 생겼다) |
+| ★ `docs/features/offline-gate.md` §11 O-T51(①~⑧)·O-T52(①~⑩) | 서버·화면 판정 시험(장부 18항목이 새로 생겼다) |
 | ★ `docs/frontend.md` §4.2.4 '월렛 목록 세부', §3 표 '티켓 `Ticket`' 줄 | 받기·표시 값(회차 공개 요약)·저장 맞추기·화면 상태·상태별 카드·펼침·미리보기·남는 한계 |
 | ★ `docs/design/d5-screen-blueprint.md` §5.13 상태 표 '불러오지 못함'·'찾을 수 없음' | 화면 상태 둘(정본에 없던 것) |
 | ★ `docs/api/proto/README.md` §3 `ListTickets` 줄 | '팬 웹 앱 서버 →'를 '(부르는 쪽 없음) →'로. 정본끼리 어긋남을 감독 결정 (가)대로 풀었다 |
@@ -32,7 +32,7 @@
 
 1. **coord에 적을 행 문안**(BUILD_ORDER에는 더하지 않았다. `ledger.mjs --batch`를 쓰려면 이 행이 BUILD_ORDER 표에 있어야 한다):
 
-   `| FIX-wallet-tickets | 현장 입장(팬 흐름) | A | - | 1.75 | O-T47, O-T48, offline-gate:v5.0.0-14.2.2, offline-gate:v5.0.0-14.3.2, offline-gate:v5.0.0-15.3.1, offline-gate:v5.0.0-16.2.5, V-T7 | 월렛 목록 GET /v1/tickets를 ticket-svc HTTP가 답하고, 월렛이 실제 목록·회전 QR을 그리며, 데모 S1이 HTTP 목록과 실제 QR로 발권 → 월렛을 확인한다 판정: O-T47, O-T48, V-T7 | F-02-1 | 진행 | 감독 결정 2026-11-23(ADR-0373 결정 1 ①의 발권 → 월렛 이음매, 조사 fan-flow-survey 2절 ①). 계획 docs/review/plans/FIX-wallet-tickets.md. 좌석 이름·예매번호·입장 시각·상세 경로(getTicket)는 범위 늘어남 후보(계획 3.2) |`
+   `| FIX-wallet-tickets | 현장 입장(팬 흐름) | A | - | 1.75 | O-T51, O-T52, offline-gate:v5.0.0-14.2.2, offline-gate:v5.0.0-14.3.2, offline-gate:v5.0.0-15.3.1, offline-gate:v5.0.0-16.2.5, V-T7 | 월렛 목록 GET /v1/tickets를 ticket-svc HTTP가 답하고, 월렛이 실제 목록·회전 QR을 그리며, 데모 S1이 HTTP 목록과 실제 QR로 발권 → 월렛을 확인한다 판정: O-T51, O-T52, V-T7 | F-02-1 | 진행 | 감독 결정 2026-11-23(ADR-0373 결정 1 ①의 발권 → 월렛 이음매, 조사 fan-flow-survey 2절 ①). 계획 docs/review/plans/FIX-wallet-tickets.md. 좌석 이름·예매번호·입장 시각·상세 경로(getTicket)는 범위 늘어남 후보(계획 3.2) |`
 
 2. **크기**: 약 1.75일 [가정]. 서버 0.6(처리기·칸 고르기·커서 400·메시 0.05 포함, 시험 쓰기 0.3 포함), 화면 1.0(목록 받기·저장·카드·상태·쪽 둘, 시험 쓰기 0.4 포함), 데모 S1 0.35(고침 0.25 + 정적 시험 0.1). 데모 실제 재생은 Docker 잠금·이미지 빌드로 대기가 0.5일쯤 [가정] 더 든다(대부분 기다림).
 3. **ADR 없음**: 감독 결정 (가)를 정본 문장(1절 ★)으로 적었다. 0366·0367은 비워 둔 그대로다. ADR-0285 결정 맥락(12행)의 'ListTickets는 팬 웹 앱 서버가'는 그때의 예시라 고치지 않는다.
@@ -80,28 +80,29 @@
 
 ## 5. 장부 범위
 
-`node tools/ci/ledger.mjs --batch FIX-wallet-tickets`(감독 승인으로 BUILD_ORDER 표에 행을 더한 뒤, 2026-11-23): **항목 23개, 자동 시험 1(V-T7)·ID만 4·빈칸 18**, 등급 B 23(기능 등급 A). `node tools/ci/ledger.mjs --check`는 이 커밋에서 통과한다(정본에 O-T47·O-T48을 더해 장부를 다시 썼다: 항목 4127개, 빈칸 743).
+`node tools/ci/ledger.mjs --batch FIX-wallet-tickets`(감독 승인으로 BUILD_ORDER 표에 행을 더한 뒤, 2026-11-23): **항목 23개, 자동 시험 1(V-T7)·ID만 4·빈칸 18**, 등급 B 23(기능 등급 A). `node tools/ci/ledger.mjs --check`는 이 커밋에서 통과한다(정본에 O-T51·O-T52을 더해 장부를 다시 썼다: 항목 4127개, 빈칸 743).
 
 ### 5.1 남긴 항목
 
 | 항목 | 지금 | 채우는 것 |
 | --- | --- | --- |
-| O-T47 ①~⑧(새) | 빈칸 8 | 서버 목록 판정(B1~B9) |
-| O-T48 ①~⑩(새) | 빈칸 10 | 화면 판정(B10~B17) |
-| offline-gate:v5.0.0-14.2.2·14.3.2 | ID만 | 목록 200·400 응답 `Cache-Control: private, no-store`(O-T47 ⑧) |
-| offline-gate:v5.0.0-15.3.1 | ID만 | 계약 칸만·QR 재료 없음(O-T47 ⑤) |
-| offline-gate:v5.0.0-16.2.5 | ID만 | 기록 줄에 티켓 키·QR 포인터 없음(O-T47 ⑧) |
+| O-T51 ①~⑧(새) | 빈칸 8 | 서버 목록 판정(B1~B9) |
+| O-T52 ①~⑩(새) | 빈칸 10 | 화면 판정(B10~B17) |
+| offline-gate:v5.0.0-14.2.2·14.3.2 | ID만 | 목록 200·400 응답 `Cache-Control: private, no-store`(O-T51 ⑧) |
+| offline-gate:v5.0.0-15.3.1 | ID만 | 계약 칸만·QR 재료 없음(O-T51 ⑤) |
+| offline-gate:v5.0.0-16.2.5 | ID만 | 기록 줄에 티켓 키·QR 포인터 없음(O-T51 ⑧) |
 | V-T7 | 자동 시험 | S1이 SQL·목업 id 없이 HTTP 목록과 실제 QR로 본다(정적 시험 + 실제 재생) |
 
-- O-T47 ⑥ 고침(갈래 결정 2026-11-23): 처음 쓴 '팬이 아닌 신원은 403'이 authz-matrix §5.1('다른 대상의 토큰은 역할과 상관없이 401')·플랫폼 가드와 어긋나 오래된 정본을 따라 401로 고쳤다.
+- O-T51 ⑥ 고침(갈래 결정 2026-11-23): 처음 쓴 '팬이 아닌 신원은 403'이 authz-matrix §5.1('다른 대상의 토큰은 역할과 상관없이 401')·플랫폼 가드와 어긋나 오래된 정본을 따라 401로 고쳤다.
+- 시험 ID 옮김(감독 결정 2026-11-23): develop의 갈래 3 F-05-1(ADR-0363)이 offline-gate §11에 O-T47~O-T50을 먼저 넣어, 이 기능의 O-T47 → O-T51, O-T48 → O-T52로 옮겼다(세부 번호 그대로).
 - 등급: 장부 항목은 모두 B다. 감독 결정으로 A 절차(시험 리뷰 있음)로 한다.
-- offline-gate:v5.0.0-8.2.2는 이미 자동 시험이다. O-T47 ①⑦ 시험에 이 ID도 단다(돈 되는 회귀 지킴).
+- offline-gate:v5.0.0-8.2.2는 이미 자동 시험이다. O-T51 ①⑦ 시험에 이 ID도 단다(돈 되는 회귀 지킴).
 
 ### 5.2 뺀 항목의 정할 곳 후보
 
 | 뺀 항목 | 후보 |
 | --- | --- |
-| AZ-T6(팬 A로 팬 B의 주문·티켓·양도·문의·본인확인·세션) | 그 자원들의 기능. 이 일의 티켓 목록 몫은 O-T47 ①⑦로 판정한다. AZ-T6 이름을 달면 다른 자원이 남았는데 '자동 시험'으로 세지므로 달지 않는다 |
+| AZ-T6(팬 A로 팬 B의 주문·티켓·양도·문의·본인확인·세션) | 그 자원들의 기능. 이 일의 티켓 목록 몫은 O-T51 ①⑦로 판정한다. AZ-T6 이름을 달면 다른 자원이 남았는데 '자동 시험'으로 세지므로 달지 않는다 |
 | O-T32(데스크톱 안내) | GAT-020(다른 단계 그대로) |
 | O-T13·FE-T14(오프라인 QR 회전·워커 범위) | 이미 있는 시험. 이 일은 QR 자리를 실제 ticketId로 잇기만 한다 |
 | O-T44·O-T45(기기 키 등록) | 이미 자동 시험. 데모 S1이 실제 서버로 한 번 더 지난다 |
@@ -186,19 +187,19 @@
 
 | 항목 | 시험 이름 예 | 층·파일(새) |
 | --- | --- | --- |
-| O-T47 ①⑦ | `O-T47 ① A 세션은 A가 보유한 표만 최신 발권순으로 받고 B의 표는 없다(ASVS v5.0.0-8.2.2)`, `O-T47 ⑦ 양도 수락 뒤 그 표는 B의 목록에만 있다` | ticket-svc 통합(PostgreSQL) `test-int/wallet-tickets.int.test.ts`. ①은 단위에도 |
-| O-T47 ②③ | `O-T47 ② limit 2로 5장을 2·2·1로 겹침 없이 받고 마지막만 nextCursor가 null이다`, `O-T47 ③ limit 0·101은 400, 풀리지 않는 커서는 400 invalid-query, B의 커서는 A의 표만` | 단위 `test/wallet-tickets-http.test.ts`(메모리 저장소) + 통합(같은 발권 시각 두 장으로 ID 내림차순 경계) |
-| O-T47 ④ | `O-T47 ④ 환급·무효 표가 그 상태로 목록에 남는다` | 통합(실제 `cancel`·`blockIssue`) |
-| O-T47 ⑤ | `O-T47 ⑤ 항목은 계약 칸만이고 주문·좌석·계정 ID·PEAKET1 포인터·티켓 키가 없다(ASVS v5.0.0-15.3.1)` | 단위: 항목 키 집합을 정확히 단언(허용 목록), `gateZone` 빈 값·있음 둘, 회차 시작 있음·없음 둘 |
-| O-T47 ⑥ | `O-T47 ⑥ 세션 없으면 401, 팬이 아닌 신원도 401, 쿼리 accountId는 무시한다` | 단위 |
-| O-T47 ⑧ | `O-T47 ⑧ 200·400 모두 private, no-store이고 기록 줄에 티켓 키·PEAKET1 값이 없다(ASVS v5.0.0-14.2.2, v5.0.0-14.3.2, v5.0.0-16.2.5)` | 단위(기록 흐름을 잡는다) |
-| O-T48 ①⑩ | `O-T48 ① 커서를 그대로 실어 세 쪽을 받고 모두 저장한다`, `O-T48 ⑩ 같은 커서가 다시 오면 멈추고 cursor-loop 실패다` | web node `src/features/wallet-sync/sync.test.mjs`(fake-indexeddb + `globalThis.fetch`) |
-| O-T48 ②③④⑤ | `O-T48 ② 0장이면 empty`, `③ 저장 없음+실패면 error`, `④ 저장 있음+실패면 list+offline`, `⑤ 갱신 뒤 401이면 login이고 저장된 표를 그리지 않는다` | 같은 파일(`walletScreenOf`와 `syncWallet` 결과) + 화면 Playwright(아래) |
-| O-T48 ⑥ | `O-T48 ⑥ ISSUED·ACTIVE만 showQr이고 나머지 다섯은 배지·문장만`(상태 일곱 모두, 받은 표·지난 공연 포함) | web node `src/features/wallet-sync/model.test.mjs` |
-| O-T48 ⑦ | `O-T48 ⑦ 회차 요약은 회차마다 한 번이고 404·410·실패 회차의 표도 남는다` | sync.test.mjs(요청 수 단언) |
-| O-T48 ⑧ | `O-T48 ⑧ 목록에서 빠진 표의 표시 값은 지우고 기기 키는 남긴다` | sync.test.mjs(`loadTicketSnapshot`·`loadDeviceKey`) |
-| O-T48 ⑨ | `O-T48 ⑨ 펼침 주소의 표가 없으면 찾을 수 없음` | 화면 Playwright |
-| 화면 | `O-T48 ②③⑥⑨ 화면` — 가짜 API(경로 가로채기)로 빈 화면·불러오지 못함·상태 섞인 목록(QR 자리 수)·펼침 없음 | `tools/web-checks` 운영 빌드 위 새 spec(예 `reflow/wallet-live.spec.mjs`). 로컬에 Playwright가 없으면 초안 PR CI web 잡으로 |
+| O-T51 ①⑦ | `O-T51 ① A 세션은 A가 보유한 표만 최신 발권순으로 받고 B의 표는 없다(ASVS v5.0.0-8.2.2)`, `O-T51 ⑦ 양도 수락 뒤 그 표는 B의 목록에만 있다` | ticket-svc 통합(PostgreSQL) `test-int/wallet-tickets.int.test.ts`. ①은 단위에도 |
+| O-T51 ②③ | `O-T51 ② limit 2로 5장을 2·2·1로 겹침 없이 받고 마지막만 nextCursor가 null이다`, `O-T51 ③ limit 0·101은 400, 풀리지 않는 커서는 400 invalid-query, B의 커서는 A의 표만` | 단위 `test/wallet-tickets-http.test.ts`(메모리 저장소) + 통합(같은 발권 시각 두 장으로 ID 내림차순 경계) |
+| O-T51 ④ | `O-T51 ④ 환급·무효 표가 그 상태로 목록에 남는다` | 통합(실제 `cancel`·`blockIssue`) |
+| O-T51 ⑤ | `O-T51 ⑤ 항목은 계약 칸만이고 주문·좌석·계정 ID·PEAKET1 포인터·티켓 키가 없다(ASVS v5.0.0-15.3.1)` | 단위: 항목 키 집합을 정확히 단언(허용 목록), `gateZone` 빈 값·있음 둘, 회차 시작 있음·없음 둘 |
+| O-T51 ⑥ | `O-T51 ⑥ 세션 없으면 401, 팬이 아닌 신원도 401, 쿼리 accountId는 무시한다` | 단위 |
+| O-T51 ⑧ | `O-T51 ⑧ 200·400 모두 private, no-store이고 기록 줄에 티켓 키·PEAKET1 값이 없다(ASVS v5.0.0-14.2.2, v5.0.0-14.3.2, v5.0.0-16.2.5)` | 단위(기록 흐름을 잡는다) |
+| O-T52 ①⑩ | `O-T52 ① 커서를 그대로 실어 세 쪽을 받고 모두 저장한다`, `O-T52 ⑩ 같은 커서가 다시 오면 멈추고 cursor-loop 실패다` | web node `src/features/wallet-sync/sync.test.mjs`(fake-indexeddb + `globalThis.fetch`) |
+| O-T52 ②③④⑤ | `O-T52 ② 0장이면 empty`, `③ 저장 없음+실패면 error`, `④ 저장 있음+실패면 list+offline`, `⑤ 갱신 뒤 401이면 login이고 저장된 표를 그리지 않는다` | 같은 파일(`walletScreenOf`와 `syncWallet` 결과) + 화면 Playwright(아래) |
+| O-T52 ⑥ | `O-T52 ⑥ ISSUED·ACTIVE만 showQr이고 나머지 다섯은 배지·문장만`(상태 일곱 모두, 받은 표·지난 공연 포함) | web node `src/features/wallet-sync/model.test.mjs` |
+| O-T52 ⑦ | `O-T52 ⑦ 회차 요약은 회차마다 한 번이고 404·410·실패 회차의 표도 남는다` | sync.test.mjs(요청 수 단언) |
+| O-T52 ⑧ | `O-T52 ⑧ 목록에서 빠진 표의 표시 값은 지우고 기기 키는 남긴다` | sync.test.mjs(`loadTicketSnapshot`·`loadDeviceKey`) |
+| O-T52 ⑨ | `O-T52 ⑨ 펼침 주소의 표가 없으면 찾을 수 없음` | 화면 Playwright |
+| 화면 | `O-T52 ②③⑥⑨ 화면` — 가짜 API(경로 가로채기)로 빈 화면·불러오지 못함·상태 섞인 목록(QR 자리 수)·펼침 없음 | `tools/web-checks` 운영 빌드 위 새 spec(예 `reflow/wallet-live.spec.mjs`). 로컬에 Playwright가 없으면 초안 PR CI web 잡으로 |
 | V-T7 | `V-T7 ④ S1은 발권을 GET /v1/tickets로 확인하고 SQL·목업 티켓 id 없이 실제 ticketId 화면의 QR을 본다(FWAL-DEMO ①)`, `V-T7 ① plan --check가 S1 checks에 wallet-list를 낸다(FWAL-DEMO ②)` | `tools/local/demo.test.mjs`(정적 시험, 지금 ④·① 시험 옆) |
 | 실제 서버 | `node tools/local/demo.mjs play --scenarios S1`(또는 `all --scenarios S1`)이 `wallet-list`·`ticket-qr` 통과 | 데모 무대(kind, Docker 잠금). 12절 |
 | 메시 | `MS-09 … TicketService/ListTickets는 아무도 없음 …`(지금 시험의 단언·이름 고침) | `deploy/platform/mesh/test/mesh-policies.test.mjs` |
@@ -232,11 +233,11 @@
   - TR-05: 받은 표(`cancelDeadline, eventId, eventStartsAt, status, ticketId, transferLocked`)·잠긴 표(여기에 `receivedFromNickname`) 칸 집합을 정확히, B 목록 원문에 A의 계정 ID 없음.
   - TR-06: `wallet-list`·`ticket-qr` 판정 식이 `true`·`false`·`null`·`undefined`가 아니어야 하고, `ticket-qr` 판정 식(상세 글이 아닌 첫 인자, 이름이면 그 `const` 정의)이 `ticketId`와 QR 대체 글(`.label`·`includes(`)을 함께 본다. 등록 버튼·`waitForResponse … device-keys`는 S1과 S1이 부르는 최상위 함수 안에서만 찾는다.
   - TR-07: 목록·요약 요청마다 `init.signal`이 `AbortSignal`, 답하지 않는 망(신호만 따르는 가짜)에서 9,999ms까지 끝나지 않고 10,000ms에 `network` 실패(가짜 시계 `setTimeout`).
-  - TR-08: 저장소 장애 500에 `private, no-store`, 401(세션 없음·partner)은 따로 `O-T47 ⑧ 오류 응답 401 …`으로.
+  - TR-08: 저장소 장애 500에 `private, no-store`, 401(세션 없음·partner)은 따로 `O-T51 ⑧ 오류 응답 401 …`으로.
 
 ### 시험이 기댄 모양(계획 8절에 없거나 정본끼리 어긋난 것)
 
-1. **정본 어긋남(감독·계획 담당이 정한다)**: O-T47 ⑥ 판정 칸은 '팬이 아닌 신원 → 403'인데, `docs/security/authz-matrix.md` 200행('다른 대상의 토큰은 역할과 상관없이 401')과 플랫폼 공용 가드(대상이 다르면 신원을 인정하지 않음, purchase-svc 시험들도 401로 본다)는 401이다. 시험은 401(partner·ops·scanner, 표 없음)로 썼다. 403으로 바꾸려면 플랫폼을 고쳐야 한다. O-T47 ⑥ 문장을 '401·401'로 고치는 것을 추천한다.
+1. **정본 어긋남(감독·계획 담당이 정한다)**: O-T51 ⑥ 판정 칸은 '팬이 아닌 신원 → 403'인데, `docs/security/authz-matrix.md` 200행('다른 대상의 토큰은 역할과 상관없이 401')과 플랫폼 공용 가드(대상이 다르면 신원을 인정하지 않음, purchase-svc 시험들도 401로 본다)는 401이다. 시험은 401(partner·ops·scanner, 표 없음)로 썼다. 403으로 바꾸려면 플랫폼을 고쳐야 한다. O-T51 ⑥ 문장을 '401·401'로 고치는 것을 추천한다.
 2. ticket-svc 단위: 쓰임새가 없는 상태(`CANCEL_REQUESTED`·`FLAGGED`)와 비지 않은 `gateZone`은 `MemoryTicketStore.tickets` 기록을 시험 씨앗으로 고친다(통합은 `update ticket set gate_zone`). 양도 요청 중·받은 표·잠긴 표는 `MemoryTransferStore`(`createOffer`·`accept`·`setTransferLock`)로 만든다. `transferLocked`는 잠금 직후(기한 14일 남음) true로 본다.
 3. 400 목록: `limit` 0·101·-1·2.5·abc·두 번, 풀리지 않는 커서 여섯 꼴(base64url 아님·JSON 아님·배열 아님·칸 수 다름·UUID 아님·시각이 수 아님). 문제 종류는 커서만 `invalid-query`와 제목 '목록 조건이 올바르지 않습니다'를 단언한다.
 4. 저장소 목록 읽기 장애는 500(플랫폼 about:blank)이고 내부 글을 싣지 않는다. 캐시 머리는 단언하지 않는다(정본 판정은 200·400).
@@ -254,22 +255,22 @@
 
 | # | 틀린 구현 | 잡아야 할 시험 |
 | --- | --- | --- |
-| M1 | 쿼리나 커서 안의 계정으로 거른다(머리의 계정을 안 씀) | O-T47 ①③⑥ |
-| M2 | 결제자(`payer_account_id`)로 거른다 | O-T47 ⑦ |
-| M3 | 끝난 표를 거른다(`ISSUED`·`ACTIVE`만) | O-T47 ④ |
-| M4 | 기록을 통째로 내보낸다(`orderId`·`seatId`·`qrPayload`가 섞임) | O-T47 ⑤ |
-| M5 | 없는 칸에 빈 글·지금 시각·seatId를 채운다 | O-T47 ⑤ |
-| M6 | 풀리지 않는 커서를 첫 쪽으로 본다 | O-T47 ③ |
-| M7 | `limit` 101을 100으로 잘라 받는다 | O-T47 ③ |
-| M8 | 마지막 쪽에 빈 글 `nextCursor`, 또는 `limit`과 같은 수가 남을 때 null을 놓침(정확히 4장·`limit` 2) | O-T47 ② |
-| M9 | `no-store`를 200에만 단다 | O-T47 ⑧ |
-| M10 | 화면이 첫 쪽만 받는다 | O-T48 ① |
-| M11 | 같은 커서에 무한히 부른다 | O-T48 ⑩ |
-| M12 | 실패하면 저장소를 비운다(오프라인에서 QR이 사라짐) | O-T48 ④ |
-| M13 | 401에서도 저장된 표를 그린다 | O-T48 ⑤ |
-| M14 | 환급·무효 표에도 QR 자리 | O-T48 ⑥ |
-| M15 | 요약 실패 회차의 표를 빼 버린다 / 회차마다 표 수만큼 묻는다 | O-T48 ⑦ |
-| M16 | 빠진 표의 기기 키까지 지운다 / 표시 값을 남긴다 | O-T48 ⑧ |
+| M1 | 쿼리나 커서 안의 계정으로 거른다(머리의 계정을 안 씀) | O-T51 ①③⑥ |
+| M2 | 결제자(`payer_account_id`)로 거른다 | O-T51 ⑦ |
+| M3 | 끝난 표를 거른다(`ISSUED`·`ACTIVE`만) | O-T51 ④ |
+| M4 | 기록을 통째로 내보낸다(`orderId`·`seatId`·`qrPayload`가 섞임) | O-T51 ⑤ |
+| M5 | 없는 칸에 빈 글·지금 시각·seatId를 채운다 | O-T51 ⑤ |
+| M6 | 풀리지 않는 커서를 첫 쪽으로 본다 | O-T51 ③ |
+| M7 | `limit` 101을 100으로 잘라 받는다 | O-T51 ③ |
+| M8 | 마지막 쪽에 빈 글 `nextCursor`, 또는 `limit`과 같은 수가 남을 때 null을 놓침(정확히 4장·`limit` 2) | O-T51 ② |
+| M9 | `no-store`를 200에만 단다 | O-T51 ⑧ |
+| M10 | 화면이 첫 쪽만 받는다 | O-T52 ① |
+| M11 | 같은 커서에 무한히 부른다 | O-T52 ⑩ |
+| M12 | 실패하면 저장소를 비운다(오프라인에서 QR이 사라짐) | O-T52 ④ |
+| M13 | 401에서도 저장된 표를 그린다 | O-T52 ⑤ |
+| M14 | 환급·무효 표에도 QR 자리 | O-T52 ⑥ |
+| M15 | 요약 실패 회차의 표를 빼 버린다 / 회차마다 표 수만큼 묻는다 | O-T52 ⑦ |
+| M16 | 빠진 표의 기기 키까지 지운다 / 표시 값을 남긴다 | O-T52 ⑧ |
 | M17 | 데모가 여전히 SQL·목업 id로 본다 | V-T7 ④ |
 
 ## 12. 게이트
@@ -285,7 +286,7 @@
 | 게이트웨이(안 바뀜 확인) | `node tools/ci/gateway-routes.mjs --check` |
 | 계약(안 바뀜 확인) | `pnpm --filter @peaket/contracts gen:check` |
 | 린트·문서 | `pnpm lint`, `python -I -X utf8 tools/doc-check/check_all.py`(오류 0) |
-| 대조·장부·역할 | `node tools/ci/trace-check.mjs --ids "O-T47,O-T48,V-T7,ASVS v5.0.0-14.2.2,ASVS v5.0.0-14.3.2,ASVS v5.0.0-15.3.1,ASVS v5.0.0-16.2.5" --report <작업 폴더 밖 보고서>`, `node tools/ci/ledger.mjs --check`(행이 BUILD_ORDER에 생기면 `--batch FIX-wallet-tickets --require`), `node tools/ci/roles-check.mjs --base origin/develop --head HEAD`, 기록 커밋에서 `node tools/ci/ledger.mjs` |
+| 대조·장부·역할 | `node tools/ci/trace-check.mjs --ids "O-T51,O-T52,V-T7,ASVS v5.0.0-14.2.2,ASVS v5.0.0-14.3.2,ASVS v5.0.0-15.3.1,ASVS v5.0.0-16.2.5" --report <작업 폴더 밖 보고서>`, `node tools/ci/ledger.mjs --check`(행이 BUILD_ORDER에 생기면 `--batch FIX-wallet-tickets --require`), `node tools/ci/roles-check.mjs --base origin/develop --head HEAD`, 기록 커밋에서 `node tools/ci/ledger.mjs` |
 
 - 화면이 바뀌므로 브라우저 확인 대상이다. ADR-0373 결정 3대로 마지막 날 한 번에 한다(감독 몫).
 
@@ -340,10 +341,10 @@
 
 | ID | 시험 | 까닭 | 확인 | 제안 |
 | --- | --- | --- | --- | --- |
-| TO-1 | `wallet-live.spec.mjs` 'O-T48 ⑨' 177행 `page.getByRole('link', { name: /마이 티켓/ })` | 셸 머리(ds WebShell, 기본 폭 lg)에 이미 `마이 티켓` 링크가 있어 펼침 '찾을 수 없음'의 ( 마이 티켓 › )와 둘이 잡힌다(Playwright strict mode violation, 2 elements). 정본 d5 §5.13·frontend §4.2.4가 둘 다 요구하므로 화면을 바꿀 수 없다 | 임시 사본에서 `page.getByRole('main').getByRole('link', …)`로만 바꿔 돌리면 통과(사본은 지웠다) | 본문(`main`) 안으로 좁힌다 |
-| TO-2 | 같은 파일 'O-T48 ⑥ … 회전 QR(TR-04)'(185행)의 `randomUUID()` 티켓 ID | `randomUUID()`는 UUIDv4다. QR v1은 티켓 ID를 UUIDv7로만 싣는다(docs/frontend.md §3.7, `features/wallet-device-key/qr-v1.ts` 'QR v1 티켓 ID는 UUIDv7이어야 합니다'). 등록 201 뒤 화면은 회전 QR 대신 'QR을 만들지 못했습니다'를 그려 `role=img` 대체 글을 찾지 못한다. ticket-svc가 발권하는 티켓 ID는 UUIDv7이다 | 임시 사본에서 시험 ID만 UUIDv7로 만들면 TR-04 포함 8/8 통과 | 시험 값을 UUIDv7 꼴로 만든다(sync·model 시험의 `nextTicket()`처럼) |
+| TO-1 | `wallet-live.spec.mjs` 'O-T52 ⑨' 177행 `page.getByRole('link', { name: /마이 티켓/ })` | 셸 머리(ds WebShell, 기본 폭 lg)에 이미 `마이 티켓` 링크가 있어 펼침 '찾을 수 없음'의 ( 마이 티켓 › )와 둘이 잡힌다(Playwright strict mode violation, 2 elements). 정본 d5 §5.13·frontend §4.2.4가 둘 다 요구하므로 화면을 바꿀 수 없다 | 임시 사본에서 `page.getByRole('main').getByRole('link', …)`로만 바꿔 돌리면 통과(사본은 지웠다) | 본문(`main`) 안으로 좁힌다 |
+| TO-2 | 같은 파일 'O-T52 ⑥ … 회전 QR(TR-04)'(185행)의 `randomUUID()` 티켓 ID | `randomUUID()`는 UUIDv4다. QR v1은 티켓 ID를 UUIDv7로만 싣는다(docs/frontend.md §3.7, `features/wallet-device-key/qr-v1.ts` 'QR v1 티켓 ID는 UUIDv7이어야 합니다'). 등록 201 뒤 화면은 회전 QR 대신 'QR을 만들지 못했습니다'를 그려 `role=img` 대체 글을 찾지 못한다. ticket-svc가 발권하는 티켓 ID는 UUIDv7이다 | 임시 사본에서 시험 ID만 UUIDv7로 만들면 TR-04 포함 8/8 통과 | 시험 값을 UUIDv7 꼴로 만든다(sync·model 시험의 `nextTicket()`처럼) |
 
-- O-T47 ⑧ 401의 `private, no-store`는 시험 이의 없이 풀었다(구현 메모 2).
+- O-T51 ⑧ 401의 `private, no-store`는 시험 이의 없이 풀었다(구현 메모 2).
 
 ## 구현 메모
 
@@ -366,16 +367,16 @@
 - 시험도 구현도 맡지 않은 리뷰 담당이 시험의 바뀐 부분·이 계획·정본·장부만 보고 적는다(ADR-0372 결정 2). 볼 것: 판정 기준과 단언 대조(이름만 단 시험 없음), 11절 틀린 구현 열일곱을 시험이 잡는지, 13절, 시험 안티패턴(초록인데 검증 없음, 고정 대기, 내부 업무 로직 모킹, 짝 없는 가짜).
 - 지적은 시험 담당이 고친다(`Role: review-fix`, `Fix-By: test`). 리뷰 담당이 반영을 확인해 이 절에 적으면 시험이 고정된다.
 
-리뷰 담당 fwal-trev-7c4e(claude-opus-5-5), 2026-11-23, 시험 커밋 `8d06644e6`·계획 고침 `e3a505e76` 기준. 본 것: `git diff cec434dd3..HEAD -- services apps tools deploy`, 이 계획 1~14절, offline-gate §2 '월렛 목록 서버'·§11 O-T47·O-T48, frontend §4.2.4 '월렛 목록 세부'·§4.1 '시간 초과'·'api-client 밖의 호출', openapi `listTickets`·`Ticket`, authz-matrix §5.1, `docs/security/asvs/offline-gate.md` 해당 행, `ledger --batch FIX-wallet-tickets`(자동 시험 19, ID만 4, 빈칸 0). 시험을 돌리지는 않았다(읽기 리뷰).
+리뷰 담당 fwal-trev-7c4e(claude-opus-5-5), 2026-11-23, 시험 커밋 `8d06644e6`·계획 고침 `e3a505e76` 기준. 본 것: `git diff cec434dd3..HEAD -- services apps tools deploy`, 이 계획 1~14절, offline-gate §2 '월렛 목록 서버'·§11 O-T51·O-T52, frontend §4.2.4 '월렛 목록 세부'·§4.1 '시간 초과'·'api-client 밖의 호출', openapi `listTickets`·`Ticket`, authz-matrix §5.1, `docs/security/asvs/offline-gate.md` 해당 행, `ledger --batch FIX-wallet-tickets`(자동 시험 19, ID만 4, 빈칸 0). 시험을 돌리지는 않았다(읽기 리뷰).
 
-**전체 판단**: O-T47 ①~⑧·O-T48 ①~⑩의 판정 문장마다 정본 값으로 정확히 단언하는 시험이 있고, 11절 틀린 구현 M1~M17은 모두 잡힌다. 가짜는 경계(저장소 포트의 `memory-*` 짝 가짜, `globalThis.fetch`, fake-indexeddb, 시계)뿐이고 업무 로직 모킹·고정 대기·타입 탈출은 없다. 실제 서버 연결은 통합 시험(`start()`)과 데모 S1이 맡는다. 다만 A 등급 실패 상황 둘(아래 TR-01·TR-04: 현장 오프라인 QR이 사라지는 길)이 열려 있고, 장부 ID만 넷이 게이트 `--require`에서 막힌다(TR-02). 구현 뒤 리뷰가 없으므로 10절 8의 '구현 리뷰 볼 점'은 지금 시험으로 못 박아야 한다.
+**전체 판단**: O-T51 ①~⑧·O-T52 ①~⑩의 판정 문장마다 정본 값으로 정확히 단언하는 시험이 있고, 11절 틀린 구현 M1~M17은 모두 잡힌다. 가짜는 경계(저장소 포트의 `memory-*` 짝 가짜, `globalThis.fetch`, fake-indexeddb, 시계)뿐이고 업무 로직 모킹·고정 대기·타입 탈출은 없다. 실제 서버 연결은 통합 시험(`start()`)과 데모 S1이 맡는다. 다만 A 등급 실패 상황 둘(아래 TR-01·TR-04: 현장 오프라인 QR이 사라지는 길)이 열려 있고, 장부 ID만 넷이 게이트 `--require`에서 막힌다(TR-02). 구현 뒤 리뷰가 없으므로 10절 8의 '구현 리뷰 볼 점'은 지금 시험으로 못 박아야 한다.
 
 | ID | 심각도 | 분류 | 자리 | 정본 근거 | 고칠 것 |
 | --- | --- | --- | --- | --- | --- |
 | TR-01 | 높음 | 장애 주입·빈칸(A 등급) | `apps/web/src/features/wallet-sync/sync.test.mjs:188-191`(bad-response 목록), 10절 8 | frontend §4.2.4 '저장'(목록을 **다 받으면** 맞춘다)·'화면 상태'(모양이 틀린 응답은 받지 못함), openapi `listTickets` 200의 `items`는 필수 칸이 아니다 | `items` 칸이 없는 200(`{ nextCursor: null }`, `{}`)은 계약 Zod를 지나므로, 구현이 `items ?? []`로 읽으면 저장소를 비워 오프라인 QR이 사라진다. 저장된 표가 있는 상태에서 이 두 응답을 주고 `{ kind: 'failed', reason: 'bad-response' }`, 저장소·`lastSyncAt` 그대로, 화면 `list`+`offline`을 단언하는 시험을 더한다. 8.3 `bad-response` 정의에 'items 칸 없음'을 적는다(정본 문장 보강이 필요하면 감독 판단) |
 | TR-02 | 높음 | 장부·태그 | `services/ticket-svc/test/wallet-tickets-http.test.ts:175·292·357·459`, `test-int/wallet-tickets.int.test.ts:126·195·233` | `tools/ci/asvs-report.mjs` 15행(정본 꼴 `[ASVS v5.0.0-x.y.z]`), ledger `codeArea`(구현 위치가 가리키는 영역 안 시험만 센다) | ① 이름 `(ASVS v5.0.0-14.2.2, v5.0.0-14.3.2, v5.0.0-16.2.5)`는 첫 ID만 태그로 읽히고(꼴 다름 경고) 14.3.2·16.2.5는 태그가 아니다. ID마다 `[ASVS v5.0.0-14.2.2] [ASVS v5.0.0-14.3.2] [ASVS v5.0.0-16.2.5]`, `[ASVS v5.0.0-15.3.1]`, `[ASVS v5.0.0-8.2.2]` 꼴로 고친다(시험 담당). ② 네 행의 코드 영역이 `apps/scanner`(기본값)라 ticket-svc 시험이 세지지 않아 `ledger --batch FIX-wallet-tickets`가 'ID만 4'다. `docs/security/asvs/offline-gate.md` 14.2.2·14.3.2·15.3.1·16.2.5 행 구현 위치 칸에 `ticket-svc`(월렛 목록 `GET /v1/tickets`)를 적어야 자동 시험이 된다(정본이라 감독·계획 담당 몫, 게이트 `--require` 전) |
-| TR-03 | 높음 | 장애 주입·되돌림(A 등급) | `sync.test.mjs:215-230`(O-T48 ④), `:313-331`(⑩) | plan 8.3 '실패면 저장소를 바꾸지 않는다', frontend §4.2.4 '저장'(다 받은 뒤 맞춤), O-T48 ④ | 지금 실패는 모두 **첫 쪽**에서 난다(⑩만 둘째 쪽). 저장된 표 2장이 있는 상태에서 첫 쪽 200(새 표 1장, 커서 있음) → 둘째 쪽 끊김·503·401(갱신 뒤도)인 경우를 더해 `failed`(401은 `needs-login`), 저장소가 앞 동기화 값 그대로(새 표 없음, 옛 표 그대로), `lastSyncAt` 그대로를 단언한다. 받은 만큼만 맞추는 구현(옛 표 지움 → 오프라인 QR 사라짐)을 잡는다. ④는 `got.kind`만 보지 말고 `reason`(`network`·`server`)까지 단언한다 |
-| TR-04 | 중간 | 판정 단언 약함(TA-C10·C04) | `apps/web/src/features/wallet-sync/model.test.mjs:170-208`, `tools/web-checks/reflow/wallet-live.spec.mjs:140-162` | O-T48 ⑥ '등록된 키가 있으면 회전 QR이고 그 대체 글에 그 티켓 ID', frontend §3.7 | model 시험의 회전 QR은 시험이 직접 `createQrFrame(signer, card.ticketId, …)`을 불러 `decoded.ticketId === id`를 보므로, 실제 화면(`WalletLive`)이 `DeviceQr`에 다른 ID를 넘겨도 통과한다. spec ⑥에 '등록 버튼 누름 → `POST /v1/tickets/<id>/device-keys`를 경로 가로채기로 201(받은 JWK의 keyId, model 시험의 `keyIdOfJwk` 꼴) → `getByRole('img', { name: /^입장 QR, 티켓 <id>, 15초마다 바뀝니다/ })` 보임, 요청 경로의 ID = 목록 `ticketId`'를 더한다. model 시험의 15초 경계는 코드 함수(`msUntilNextQrFrame`)로 경계를 구하지 말고 정본 값(15초, 예 `03:00:14.999Z`·`03:00:15.000Z`)으로 둔다(TA-C02) |
+| TR-03 | 높음 | 장애 주입·되돌림(A 등급) | `sync.test.mjs:215-230`(O-T52 ④), `:313-331`(⑩) | plan 8.3 '실패면 저장소를 바꾸지 않는다', frontend §4.2.4 '저장'(다 받은 뒤 맞춤), O-T52 ④ | 지금 실패는 모두 **첫 쪽**에서 난다(⑩만 둘째 쪽). 저장된 표 2장이 있는 상태에서 첫 쪽 200(새 표 1장, 커서 있음) → 둘째 쪽 끊김·503·401(갱신 뒤도)인 경우를 더해 `failed`(401은 `needs-login`), 저장소가 앞 동기화 값 그대로(새 표 없음, 옛 표 그대로), `lastSyncAt` 그대로를 단언한다. 받은 만큼만 맞추는 구현(옛 표 지움 → 오프라인 QR 사라짐)을 잡는다. ④는 `got.kind`만 보지 말고 `reason`(`network`·`server`)까지 단언한다 |
+| TR-04 | 중간 | 판정 단언 약함(TA-C10·C04) | `apps/web/src/features/wallet-sync/model.test.mjs:170-208`, `tools/web-checks/reflow/wallet-live.spec.mjs:140-162` | O-T52 ⑥ '등록된 키가 있으면 회전 QR이고 그 대체 글에 그 티켓 ID', frontend §3.7 | model 시험의 회전 QR은 시험이 직접 `createQrFrame(signer, card.ticketId, …)`을 불러 `decoded.ticketId === id`를 보므로, 실제 화면(`WalletLive`)이 `DeviceQr`에 다른 ID를 넘겨도 통과한다. spec ⑥에 '등록 버튼 누름 → `POST /v1/tickets/<id>/device-keys`를 경로 가로채기로 201(받은 JWK의 keyId, model 시험의 `keyIdOfJwk` 꼴) → `getByRole('img', { name: /^입장 QR, 티켓 <id>, 15초마다 바뀝니다/ })` 보임, 요청 경로의 ID = 목록 `ticketId`'를 더한다. model 시험의 15초 경계는 코드 함수(`msUntilNextQrFrame`)로 경계를 구하지 말고 정본 값(15초, 예 `03:00:14.999Z`·`03:00:15.000Z`)으로 둔다(TA-C02) |
 | TR-05 | 중간 | 칸 단언(M5) | `services/ticket-svc/test/wallet-tickets-http.test.ts:407-426` | offline-gate §2 '무엇을 싣나'(받은 표의 `receivedFromNickname`, **잠긴 표의 `transferLockExpiresAt`**은 칸을 뺀다) | 받은 표·잠긴 표는 `'receivedFromNickname' in`과 `transferLocked`만 본다. 잠금 기한은 양도 저장소에 있어 구현이 `transferLockExpiresAt`을 채우기 쉽다. 두 항목 모두 키 집합을 정확히 단언한다(받은 표 `cancelDeadline, eventId, eventStartsAt, status, ticketId, transferLocked`, 잠긴 표는 여기에 `receivedFromNickname`). B 목록 원문에 결제자 A의 계정 ID가 없는지도 본다 |
 | TR-06 | 중간 | 데모 정적 시험 빈틈(TA-C01) | `tools/local/demo.test.mjs:987`(새), `:960`(기존 같은 꼴) | 계획 8.5 확인 이름, 정본 d5 §10.6 S1 | `/addCheck\('wallet-list',\s*[a-zA-Z]/`는 `addCheck('wallet-list', true)`를 받는다(직접 확인). `true`·`false` 글자를 부정 앞보기로 막는 꼴(식 자리가 이름이나 호출이어야 한다)로 고치고, 같은 꼴인 960행 ticket-qr 단언도 함께 고친다. `ticket-qr` 식이 `wallet-list`로 찾은 ticketId와 QR 대체 글을 견주는지(`ticketQrOf` 결과와 그 ID를 함께 쓰는지)도 S1 블록에서 본다. '이 휴대폰을 입장용으로 등록'·`waitForResponse … device-keys` 단언은 `source` 전체가 아니라 S1 블록과 S1이 부르는 도우미로 좁힌다(다른 시나리오가 더하면 저절로 통과) |
 | TR-07 | 낮음 | 경계·장애(시간 한도) | `sync.test.mjs:73-96`(가짜 API가 `init.signal`을 기록하지 않음), `:182` | frontend §4.2.4 '받기'(읽기 시간 한도는 §4.1 'api-client 밖의 호출'의 읽기 값 10초) | 시간 초과는 가짜가 `TimeoutError`를 던질 뿐이라 시간 한도가 없는 구현(답 없는 망에서 '불러오는 중'에 영원히 머묾)도 통과한다. 목록·요약 요청마다 `init.signal`이 `AbortSignal`인지 단언하거나, 신호를 따르는 멈춘 응답으로 10초 뒤 `network` 실패를 본다 |
