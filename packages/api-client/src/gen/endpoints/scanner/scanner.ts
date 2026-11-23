@@ -44,6 +44,7 @@ import type {
   ListScannerEventFlagsParams,
   OAuthError,
   ProblemResponse,
+  PutScannerEventQueueReportBody,
   PutScannerShiftReadinessBody,
   ScanEvent,
   ScannerChanges,
@@ -1050,6 +1051,127 @@ export const useCreateScannerScan = <TError = ErrorType<UnauthorizedResponse | P
       > => {
       return useMutation(getCreateScannerScanMutationOptions(options), queryClient);
     }
+    export type putScannerEventQueueReportResponse204 = {
+  data: void
+  status: 204
+}
+
+export type putScannerEventQueueReportResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type putScannerEventQueueReportResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type putScannerEventQueueReportResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type putScannerEventQueueReportResponse415 = {
+  data: ProblemResponse
+  status: 415
+}
+
+export type putScannerEventQueueReportResponseSuccess = (putScannerEventQueueReportResponse204) & {
+  headers: Headers;
+};
+export type putScannerEventQueueReportResponseError = (putScannerEventQueueReportResponse401 | putScannerEventQueueReportResponse403 | putScannerEventQueueReportResponse409 | putScannerEventQueueReportResponse415) & {
+  headers: Headers;
+};
+
+export const getPutScannerEventQueueReportUrl = (eventId: string,) => {
+
+
+
+
+  return `/v1/scanner/queue-reports/${encodeURIComponent(String(eventId))}`
+}
+
+/**
+ * FR-067, ADR-0051 결정 13. 기기·회차마다 마지막 보고를 덮어쓴다(같은 보고를 다시 보내도 결과가 같다). 역할 유효 끝 이후에 받은 pendingUploads 0 보고만 '비웠다'로 센다(docs/features/offline-gate.md §7.3 'GAT-180 마감 규칙', 추천 적용 2026-11-23, F-05-6). 기기 인증만으로도 되는 쓰기라 Content-Type: application/json만 받고(그 밖 415) Origin이 스캐너 PWA 출처가 아니거나 없으면 거절한다(스캔 올리기와 같은 규칙). 스태프 토큰을 붙였으면 경로 회차가 토큰 회차와 같아야 한다
+ * @summary 입장 큐 비움 보고(올리지 못한 기록 수). 입장 기록 마감 판단이 쓴다. 기기 인증만으로도 된다
+ */
+export const putScannerEventQueueReport = async (eventId: string,
+    putScannerEventQueueReportBody: PutScannerEventQueueReportBody, options?: Parameters<typeof orvalFetch>[1]): Promise<putScannerEventQueueReportResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<putScannerEventQueueReportResponseSuccess>(getPutScannerEventQueueReportUrl(eventId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(putScannerEventQueueReportBody)
+  }
+);}
+
+
+
+
+
+export const getPutScannerEventQueueReportMutationKey = () => ['putScannerEventQueueReport'] as const;
+
+export const getPutScannerEventQueueReportMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putScannerEventQueueReport>>, TError,PutScannerEventQueueReportMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof putScannerEventQueueReport>>, TError,PutScannerEventQueueReportMutationVariables, TContext> => {
+
+const mutationKey = getPutScannerEventQueueReportMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putScannerEventQueueReport>>, PutScannerEventQueueReportMutationVariables> = (props) => {
+          const {eventId,data} = props ?? {};
+
+          return  putScannerEventQueueReport(eventId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PutScannerEventQueueReportMutationResult = NonNullable<Awaited<ReturnType<typeof putScannerEventQueueReport>>>
+    export type PutScannerEventQueueReportMutationBody = BodyType<PutScannerEventQueueReportBody>
+    export type PutScannerEventQueueReportMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type PutScannerEventQueueReportMutationVariables = {eventId: string;data: BodyType<PutScannerEventQueueReportBody>}
+
+    /**
+ * @summary 입장 큐 비움 보고(올리지 못한 기록 수). 입장 기록 마감 판단이 쓴다. 기기 인증만으로도 된다
+ */
+export const usePutScannerEventQueueReport = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putScannerEventQueueReport>>, TError,PutScannerEventQueueReportMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof putScannerEventQueueReport>>,
+        TError,
+        PutScannerEventQueueReportMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPutScannerEventQueueReportMutationOptions(options), queryClient);
+    }
     export type getScannerEventDevicesResponse200 = {
   data: GateStatus
   status: 200
@@ -1296,10 +1418,17 @@ export const usePutScannerEventDevicePlacement = <TError = ErrorType<ProblemResp
   status: 200
 }
 
+export type listScannerEventFlagsResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
 export type listScannerEventFlagsResponseSuccess = (listScannerEventFlagsResponse200) & {
   headers: Headers;
 };
-;
+export type listScannerEventFlagsResponseError = (listScannerEventFlagsResponse409) & {
+  headers: Headers;
+};
 
 export const getListScannerEventFlagsUrl = (eventId: string,
     params?: ListScannerEventFlagsParams,) => {
@@ -1318,8 +1447,8 @@ export const getListScannerEventFlagsUrl = (eventId: string,
 }
 
 /**
- * FR-066, FR-067. 목록은 커서로 나눈다(파트너 목록과 같은 GateFlagPage, 추천 적용 2026-10-21, ADR-0081)
- * @summary 이상 표시 목록(현장 책임자, 기기 배치 구역 우선)
+ * FR-066, FR-067. 목록은 커서로 나눈다(파트너 목록과 같은 GateFlagPage, 추천 적용 2026-10-21, ADR-0081). 요청한 기기의 그 회차 배치 구역과 티켓 구역이 같은 표시만 주고 사후 검토 표시(OVERRIDE_REVIEW)는 넣지 않는다. 배치가 없으면 409 no-placement(docs/features/offline-gate.md §7.2, 추천 적용 2026-11-23, F-05-6, 감사 C1-16)
+ * @summary 이상 표시 목록(현장 책임자, 기기 배치 구역의 것만)
  */
 export const listScannerEventFlags = async (eventId: string,
     params?: ListScannerEventFlagsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listScannerEventFlagsResponseSuccess> => {
@@ -1345,7 +1474,7 @@ export const getListScannerEventFlagsQueryKey = (eventId: string,
     }
 
 
-export const getListScannerEventFlagsQueryOptions = <TData = Awaited<ReturnType<typeof listScannerEventFlags>>, TError = ErrorType<unknown>>(eventId: string,
+export const getListScannerEventFlagsQueryOptions = <TData = Awaited<ReturnType<typeof listScannerEventFlags>>, TError = ErrorType<ProblemResponse>>(eventId: string,
     params?: ListScannerEventFlagsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listScannerEventFlags>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
 ) => {
 
@@ -1365,10 +1494,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListScannerEventFlagsQueryResult = NonNullable<Awaited<ReturnType<typeof listScannerEventFlags>>>
-export type ListScannerEventFlagsQueryError = ErrorType<unknown>
+export type ListScannerEventFlagsQueryError = ErrorType<ProblemResponse>
 
 
-export function useListScannerEventFlags<TData = Awaited<ReturnType<typeof listScannerEventFlags>>, TError = ErrorType<unknown>>(
+export function useListScannerEventFlags<TData = Awaited<ReturnType<typeof listScannerEventFlags>>, TError = ErrorType<ProblemResponse>>(
  eventId: string,
     params: undefined |  ListScannerEventFlagsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listScannerEventFlags>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
@@ -1379,7 +1508,7 @@ export function useListScannerEventFlags<TData = Awaited<ReturnType<typeof listS
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListScannerEventFlags<TData = Awaited<ReturnType<typeof listScannerEventFlags>>, TError = ErrorType<unknown>>(
+export function useListScannerEventFlags<TData = Awaited<ReturnType<typeof listScannerEventFlags>>, TError = ErrorType<ProblemResponse>>(
  eventId: string,
     params?: ListScannerEventFlagsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listScannerEventFlags>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
@@ -1390,16 +1519,16 @@ export function useListScannerEventFlags<TData = Awaited<ReturnType<typeof listS
       >, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListScannerEventFlags<TData = Awaited<ReturnType<typeof listScannerEventFlags>>, TError = ErrorType<unknown>>(
+export function useListScannerEventFlags<TData = Awaited<ReturnType<typeof listScannerEventFlags>>, TError = ErrorType<ProblemResponse>>(
  eventId: string,
     params?: ListScannerEventFlagsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listScannerEventFlags>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary 이상 표시 목록(현장 책임자, 기기 배치 구역 우선)
+ * @summary 이상 표시 목록(현장 책임자, 기기 배치 구역의 것만)
  */
 
-export function useListScannerEventFlags<TData = Awaited<ReturnType<typeof listScannerEventFlags>>, TError = ErrorType<unknown>>(
+export function useListScannerEventFlags<TData = Awaited<ReturnType<typeof listScannerEventFlags>>, TError = ErrorType<ProblemResponse>>(
  eventId: string,
     params?: ListScannerEventFlagsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listScannerEventFlags>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient

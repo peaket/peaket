@@ -519,6 +519,56 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
       .returning({ id: orderCancellation.id });
     return updated.length > 0;
   }
+
+  /**
+   * 마감을 기다리는 보류 취소가 있는 회차를 (가장 이른 refund_due_at, 회차 ID) 차례로(offline-gate §7.3 '환급 잇기').
+   * after는 앞 틱이 마지막으로 본 (dueAtMs, 회차 ID) 쌍이다. 그 회차가 당겨져 기다리는 행이 없어져도 자리를 잃지 않는다(RV-17).
+   */
+  async waitingEvents(nowMs: number, limit: number, after?: { dueAtMs: number; eventId: string }): Promise<{ eventId: string; dueAtMs: number }[]> {
+    const now = new Date(nowMs);
+    const afterFilter =
+      after === undefined
+        ? sql`true`
+        : sql`(w.due_at > ${new Date(after.dueAtMs)} or (w.due_at = ${new Date(after.dueAtMs)} and w.event_id::text > ${after.eventId}))`;
+    const rows = (
+      await this.database.db.execute(sql`
+        select w.event_id::text as event_id, w.due_at
+        from (
+          select po.event_id as event_id, min(oc.refund_due_at) as due_at
+          from order_cancellation oc
+          join purchase_order po on po.id = oc.order_id
+          where oc.status = 'REQUESTED'
+            and oc.entry_recorded_at is null
+            and oc.event_cancellation_request_id is null
+            and oc.refund_due_at > ${now}
+          group by po.event_id
+        ) w
+        where ${afterFilter}
+        order by w.due_at asc, w.event_id::text asc
+        limit ${limit}
+      `)
+    ).rows as unknown as { event_id: string; due_at: Date | string }[];
+    return rows.map((r) => ({ eventId: r.event_id, dueAtMs: r.due_at instanceof Date ? r.due_at.getTime() : Date.parse(r.due_at) }));
+  }
+
+  /**
+   * 그 회차의 REQUESTED∧입장 기록 없음∧회차 취소 아님∧refund_due_at > 마감인 행만 마감 시각으로 당긴다.
+   * 같은 값이거나 더 이른 행은 건드리지 않고, 상태는 바꾸지 않는다(환급 자체는 지금의 환급 실행기 몫).
+   */
+  async pullDue(eventId: string, closedAtMs: number): Promise<number> {
+    const res = await this.database.db.execute(sql`
+      update order_cancellation oc
+      set refund_due_at = ${new Date(closedAtMs)}
+      from purchase_order po
+      where po.id = oc.order_id
+        and po.event_id = ${eventId}
+        and oc.status = 'REQUESTED'
+        and oc.entry_recorded_at is null
+        and oc.event_cancellation_request_id is null
+        and oc.refund_due_at > ${new Date(closedAtMs)}
+    `);
+    return res.rowCount ?? res.rows.length;
+  }
 }
 
 /** 그 취소의 회차에 풀리지 않고 기한 안인 환급 미룸이 있는가(BAT-420 몫 D, event_refund_hold) */

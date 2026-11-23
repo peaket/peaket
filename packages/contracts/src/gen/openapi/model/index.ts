@@ -707,6 +707,7 @@ export * from './putPartnerSalePolicyBody.zod.js';
 export * from './putPartnerSalePolicyHeaders.zod.js';
 export * from './putScannerEventDevicePlacementBody.zod.js';
 export * from './putScannerEventDevicePlacementHeaders.zod.js';
+export * from './putScannerEventQueueReportBody.zod.js';
 export * from './putScannerShiftReadinessBody.zod.js';
 export * from './queueEntryRequest.zod.js';
 export * from './queueResultFile.zod.js';

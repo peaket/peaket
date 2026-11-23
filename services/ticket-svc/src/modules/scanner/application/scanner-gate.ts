@@ -1,7 +1,9 @@
 // 스캐너 목록·변경분·스캔·이상 표시 쓰임새(BUILD_ORDER GAT-180·GAT-190, offline-gate §6.3~§7.2).
 // 회차는 스태프 세션의 회차와 같아야 한다. 다른 회차를 경로로 부르면 403으로 닫는다.
 import type { Clock, ScannerSessionCheck } from '@peaket/platform';
-import type { ScannerDeviceStore, ScannerEventPolicyProvider, ScannerGateStore, ScannerShiftStore } from '../domain/ports.js';
+import { assertQueueReport } from '../domain/entry-close.js';
+import type { EntryCloseStore, ScannerDeviceStore, ScannerEventPolicyProvider, ScannerGateStore, ScannerShiftStore } from '../domain/ports.js';
+import { ScannerPlacementMissing } from '../domain/scanner-shift.js';
 import {
   assertAfter,
   assertChangesLimit,
@@ -61,6 +63,10 @@ export interface ScannerGateDeps {
   onScanStored?: (result: 'PASS' | 'REJECT' | 'CHECK' | 'duplicate') => void;
   /** POLICY 변경분을 적었을 때(로그 줄·지표, offline-gate §10.2) */
   onPolicyChanged?: (i: { eventId: string; reentryAllowed: boolean; seq: number }) => void;
+  /** 큐 비움 보고 결과(ticket_scanner_queue_reports_total{result}: empty·pending·no_placement, §7.4) */
+  onQueueReport?: (result: 'empty' | 'pending' | 'no_placement') => void;
+  /** 입장 기록 마감 저장소(큐 비움 보고). 없으면 보고 경로가 503이다 */
+  entryClose?: Pick<EntryCloseStore, 'putQueueReport'>;
 }
 
 export class ScannerGate {
@@ -171,11 +177,38 @@ export class ScannerGate {
       });
   }
 
-  async listFlags(i: { eventIdRaw: unknown; sessionEventId: string | undefined; cursor: unknown; limit: unknown }): Promise<GateFlagPage> {
+  async listFlags(i: { eventIdRaw: unknown; sessionEventId: string | undefined; deviceId?: string; cursor: unknown; limit: unknown }): Promise<GateFlagPage> {
     const eventId = assertEventId(i.eventIdRaw);
     this.#sameEvent(eventId, i.sessionEventId);
+    // 그 회차 배치가 없는 기기는 409 no-placement다(offline-gate §7.2). 배치가 있으면 그 구역만 본다
+    const placement = this.d.shifts ? await this.d.shifts.placementOf(eventId, i.deviceId ?? '') : undefined;
+    if (this.d.shifts && !placement) throw new ScannerPlacementMissing();
     const cursor = assertFlagCursor(i.cursor);
-    return this.d.store.listFlags({ eventId, ...(cursor !== undefined ? { cursor } : {}), limit: assertFlagLimit(i.limit) });
+    return this.d.store.listFlags({
+      eventId,
+      ...(placement ? { gateZone: placement.gateZone } : {}),
+      ...(cursor !== undefined ? { cursor } : {}),
+      limit: assertFlagLimit(i.limit),
+    });
+  }
+
+  /** 큐 비움 보고(offline-gate §7.3). 기기 인증만으로도 되고, 배치가 없으면 저장하지 않고 409다 */
+  async queueReport(i: { eventIdRaw: unknown; sessionEventId: string | undefined; deviceId: string; body: unknown }): Promise<void> {
+    const eventId = assertEventId(i.eventIdRaw);
+    this.#sameEvent(eventId, i.sessionEventId);
+    const { pendingUploads } = assertQueueReport(i.body);
+    const placement = this.d.shifts ? await this.d.shifts.placementOf(eventId, i.deviceId) : undefined;
+    if (this.d.shifts && !placement) {
+      this.d.onQueueReport?.('no_placement');
+      throw new ScannerPlacementMissing();
+    }
+    if (!this.d.entryClose) throw new Error('입장 기록 마감 저장소가 조립되지 않았다');
+    const stored = await this.d.entryClose.putQueueReport({ eventId, deviceId: i.deviceId, pendingUploads, nowMs: this.d.clock.now() });
+    if (stored === 'no_placement') {
+      this.d.onQueueReport?.('no_placement');
+      throw new ScannerPlacementMissing();
+    }
+    this.d.onQueueReport?.(pendingUploads === 0 ? 'empty' : 'pending');
   }
 
   async resolveFlag(i: {

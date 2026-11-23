@@ -38,7 +38,7 @@ import { ChangeSaleSuspension } from './application/change-sale-suspension.js';
 import { PublishSaleConfigs } from './application/publish-sale-configs.js';
 import { RejectSaleReview } from './application/reject-sale-review.js';
 import { OpsSaleReviewController } from './inbound/ops-sale-review.controller.js';
-import { OPS_DATABASE, SALE_CONFIG_FACTS, SALE_CONFIG_READER, SALE_CONFIG_STORE, type SaleConfigStore } from './domain/sale-config-ports.js';
+import { OPS_DATABASE, SALE_CONFIG_FACTS, SALE_CONFIG_READER, SALE_CONFIG_STORE, ENTRY_CLOSED_STORE, type SaleConfigStore } from './domain/sale-config-ports.js';
 import { SALE_OPEN, type SaleOpen } from './domain/sale-open-port.js';
 import { PAYOUT_REGISTRATION, type PayoutRegistrationPort } from './domain/payout-registration-port.js';
 import { UnavailablePayoutRegistration } from './adapters/http-payout-registration.js';
@@ -47,6 +47,8 @@ import { SALE_CONFIG_METRICS, SaleConfigMetrics } from './application/sale-confi
 import { OpsSaleReviews, RequestSaleReview } from './application/request-sale-review.js';
 import { PartnerSaleReviewController } from './inbound/partner-sale-review.controller.js';
 import { DrizzleSaleConfigReader, DrizzleSaleConfigStore } from './adapters/db/drizzle-sale-config-store.js';
+import { DrizzleEntryClosedStore } from './adapters/db/drizzle-entry-closed-store.js';
+import { MemoryEntryClosedStore } from './adapters/memory-entry-closed-store.js';
 import { MemorySaleConfigStore } from './adapters/memory-sale-config-store.js';
 import { NoopSaleConfigFacts } from './adapters/noop-sale-config-facts.js';
 import { SeatmapLayouts } from './application/seatmap-layouts.js';
@@ -84,6 +86,7 @@ import { InternalPromoterController } from './inbound/internal-promoter.controll
 import { PUBLIC_FILE_STORE, type PublicFileStore, PUBLISH_LIMITS, type PublishLimits, SEATMAP_LAYOUT_STORE } from './domain/seatmap-ports.js';
 import { EventSummaryController } from './inbound/event-summary.controller.js';
 import { InternalSaleConfigController } from './inbound/internal-sale-config.controller.js';
+import { InternalEntryClosedController } from './inbound/internal-entry-closed.controller.js';
 import { InternalEventStatusController } from './inbound/internal-event-status.controller.js';
 import { ApplyEventCancellationStatus } from './application/apply-event-cancellation-status.js';
 import { DrizzleEventStatusStore } from './adapters/db/drizzle-event-status-store.js';
@@ -220,7 +223,7 @@ export class CatalogModule implements NestModule {
       | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring>; saleConfigs?: SaleConfigStore; opsApprovals?: OpsApprovalClient; saleOpen?: SaleOpen; saleConfigMetrics?: SaleConfigMetrics; payoutRegistration?: PayoutRegistrationPort },
   ): DynamicModule {
     const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview, GetDemandForecast, ChangeEventScale, Promoters, ApplyContractApproval, RequestSaleReview, OpsSaleReviews];
-    const controllers = [EventSummaryController, PartnerProductionController, PartnerSaleReviewController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, InternalSaleConfigController, OpsEventController, OpsPromoterController, InternalPromoterController];
+    const controllers = [EventSummaryController, PartnerProductionController, PartnerSaleReviewController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, InternalSaleConfigController, InternalEntryClosedController, OpsEventController, OpsPromoterController, InternalPromoterController];
     if (o.storage === 'database') {
       return {
         module: CatalogModule,
@@ -244,6 +247,7 @@ export class CatalogModule implements NestModule {
           { provide: OPS_APPROVAL_CLIENT, useValue: o.opsApprovals ?? new UnavailableOpsApprovals() },
           ...(o.saleConfigStore ? [{ provide: SALE_CONFIG_STORE, useValue: o.saleConfigStore }] : [{ provide: SALE_CONFIG_STORE, useClass: DrizzleSaleConfigStore }]),
           { provide: SALE_CONFIG_READER, useClass: DrizzleSaleConfigReader },
+          { provide: ENTRY_CLOSED_STORE, useClass: DrizzleEntryClosedStore },
           { provide: SALE_CONFIG_FACTS, useClass: NoopSaleConfigFacts },
           { provide: SALE_OPEN, useValue: o.saleOpen ?? new MemorySaleOpen() },
           { provide: SALE_CONFIG_METRICS, useValue: o.saleConfigMetrics ?? new SaleConfigMetrics() },
@@ -278,6 +282,11 @@ export class CatalogModule implements NestModule {
         { provide: OPS_APPROVAL_CLIENT, useValue: o.opsApprovals ?? new MemoryOpsApprovals() },
         { provide: SALE_CONFIG_STORE, useValue: o.saleConfigs ?? new MemorySaleConfigStore() },
         { provide: SALE_CONFIG_READER, useExisting: SALE_CONFIG_STORE },
+        {
+          provide: ENTRY_CLOSED_STORE,
+          useFactory: (repo: MemoryCatalogRepository, configs: SaleConfigStore) => new MemoryEntryClosedStore(repo, configs),
+          inject: [CATALOG_REPOSITORY, SALE_CONFIG_STORE],
+        },
         { provide: SALE_CONFIG_FACTS, useValue: new NoopSaleConfigFacts() },
         { provide: SALE_OPEN, useValue: o.saleOpen ?? new MemorySaleOpen() },
         { provide: SALE_CONFIG_METRICS, useValue: o.saleConfigMetrics ?? new SaleConfigMetrics() },

@@ -142,7 +142,7 @@ export interface ScanBatchResult {
 }
 
 export class ScannerGateInputError extends Error {
-  constructor(readonly code: 'EVENT' | 'TICKET' | 'SCAN' | 'AFTER' | 'LIMIT' | 'FLAG' | 'STATUS' | 'NOTE' | 'CURSOR') {
+  constructor(readonly code: 'EVENT' | 'TICKET' | 'SCAN' | 'AFTER' | 'LIMIT' | 'FLAG' | 'STATUS' | 'NOTE' | 'CURSOR' | 'QUEUE') {
     super(`스캐너 게이트 입력 오류: ${code}`);
     this.name = 'ScannerGateInputError';
   }

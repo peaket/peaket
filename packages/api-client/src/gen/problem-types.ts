@@ -90,6 +90,7 @@ export type ProblemType =
   | 'duplicate-admission'
   | 'enrollment-code-expired'
   | 'enrollment-rate-limited'
+  | 'entry-closed-too-early'
   | 'entry-recorded'
   | 'entry-started'
   | 'escrow-partial-not-allowed'
@@ -499,6 +500,7 @@ export const PROBLEM_TYPES = {
   'duplicate-admission': { status: 409, title: "이미 다른 기기나 탭에서 입장했습니다" },
   'enrollment-code-expired': { status: 410, title: "등록 코드가 만료되었거나 이미 사용되었습니다" },
   'enrollment-rate-limited': { status: 429, title: "등록 시도가 너무 많습니다. 잠시 뒤 다시 시도해 주세요" },
+  'entry-closed-too-early': { status: 422, title: "역할 유효 끝보다 이른 마감 시각입니다" },
   'entry-recorded': { status: 409, title: "입장 기록이 있어 돌려줄 수 없습니다" },
   'entry-started': { status: 409, title: "입장이 시작되어 할 수 없습니다" },
   'escrow-partial-not-allowed': { status: 409, title: "구매를 확정한 뒤에 일부 상품을 취소·반품할 수 있습니다" },

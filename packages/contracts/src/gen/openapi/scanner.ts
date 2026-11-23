@@ -285,6 +285,24 @@ export const CreateScannerScanResponse = zod.object({
 })
 
 /**
+ * FR-067, ADR-0051 결정 13. 기기·회차마다 마지막 보고를 덮어쓴다(같은 보고를 다시 보내도 결과가 같다). 역할 유효 끝 이후에 받은 pendingUploads 0 보고만 '비웠다'로 센다(docs/features/offline-gate.md §7.3 'GAT-180 마감 규칙', 추천 적용 2026-11-23, F-05-6). 기기 인증만으로도 되는 쓰기라 Content-Type: application/json만 받고(그 밖 415) Origin이 스캐너 PWA 출처가 아니거나 없으면 거절한다(스캔 올리기와 같은 규칙). 스태프 토큰을 붙였으면 경로 회차가 토큰 회차와 같아야 한다
+ * @summary 입장 큐 비움 보고(올리지 못한 기록 수). 입장 기록 마감 판단이 쓴다. 기기 인증만으로도 된다
+ */
+export const PutScannerEventQueueReportParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
+})
+
+export const putScannerEventQueueReportBodyPendingUploadsMin = 0;
+
+
+
+export const PutScannerEventQueueReportBody = zod.object({
+  "pendingUploads": zod.int().min(putScannerEventQueueReportBodyPendingUploadsMin).describe('기기 스캔 큐에 남은(올리지 못한) 기록 수')
+}).strict()
+
+export const PutScannerEventQueueReportResponse = zod.void()
+
+/**
  * FR-066, SCR-052
  * @summary 이 회차 같은 파트너 기기 목록과 준비 상태(현장 책임자)
  */
@@ -340,8 +358,8 @@ export const PutScannerEventDevicePlacementBody = zod.object({
 export const PutScannerEventDevicePlacementResponse = zod.unknown()
 
 /**
- * FR-066, FR-067. 목록은 커서로 나눈다(파트너 목록과 같은 GateFlagPage, 추천 적용 2026-10-21, ADR-0081)
- * @summary 이상 표시 목록(현장 책임자, 기기 배치 구역 우선)
+ * FR-066, FR-067. 목록은 커서로 나눈다(파트너 목록과 같은 GateFlagPage, 추천 적용 2026-10-21, ADR-0081). 요청한 기기의 그 회차 배치 구역과 티켓 구역이 같은 표시만 주고 사후 검토 표시(OVERRIDE_REVIEW)는 넣지 않는다. 배치가 없으면 409 no-placement(docs/features/offline-gate.md §7.2, 추천 적용 2026-11-23, F-05-6, 감사 C1-16)
+ * @summary 이상 표시 목록(현장 책임자, 기기 배치 구역의 것만)
  */
 export const ListScannerEventFlagsParams = zod.object({
   "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')

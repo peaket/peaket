@@ -394,6 +394,7 @@ export type OperationId =
   | 'putPartnerSalePolicy'
   | 'putProductionWish'
   | 'putScannerEventDevicePlacement'
+  | 'putScannerEventQueueReport'
   | 'putScannerShiftReadiness'
   | 'receivePortoneWebhook'
   | 'receiveTossWebhook'
@@ -802,6 +803,7 @@ export const OPERATIONS = {
   putPartnerSalePolicy: {operationId: "putPartnerSalePolicy",method: "PUT",path: "/v1/partner/productions/{productionId}/sale-policy",host: "partner-api",kind: "write",cookie: true,ifMatch: true},
   putProductionWish: {operationId: "putProductionWish",method: "PUT",path: "/v1/productions/{productionId}/wish",host: "api",kind: "write",cookie: true},
   putScannerEventDevicePlacement: {operationId: "putScannerEventDevicePlacement",method: "PUT",path: "/v1/scanner/events/{eventId}/device-placements/{deviceId}",host: "scanner-api",kind: "write",cookie: false,ifMatch: true},
+  putScannerEventQueueReport: {operationId: "putScannerEventQueueReport",method: "PUT",path: "/v1/scanner/queue-reports/{eventId}",host: "scanner-api",kind: "write",cookie: false},
   putScannerShiftReadiness: {operationId: "putScannerShiftReadiness",method: "PUT",path: "/v1/scanner/shift/readiness",host: "scanner-api",kind: "write",cookie: false},
   receivePortoneWebhook: {operationId: "receivePortoneWebhook",method: "POST",path: "/v1/webhooks/portone",host: "partner-api",kind: "write",cookie: false},
   receiveTossWebhook: {operationId: "receiveTossWebhook",method: "POST",path: "/v1/webhooks/toss",host: "partner-api",kind: "write",cookie: false},

@@ -87,6 +87,9 @@ spec:
         - path:
             type: PathPrefix
             value: /v1/scanner/scans
+        - path:
+            type: PathPrefix
+            value: /v1/scanner/queue-reports
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:

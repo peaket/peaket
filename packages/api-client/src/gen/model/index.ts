@@ -1079,6 +1079,7 @@ export * from './putPartnerPayoutAccount200';
 export * from './putPartnerProductionSeatmap422';
 export * from './putPartnerSalePolicy422';
 export * from './putPartnerSalePolicy422ErrorsItem';
+export * from './putScannerEventQueueReportBody';
 export * from './putScannerShiftReadinessBody';
 export * from './queueEntryRequest';
 export * from './queueResultFile';

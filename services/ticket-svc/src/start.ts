@@ -23,13 +23,18 @@ import { ticketPackage, ticketServiceHandlers, transferLockHandlers } from './mo
 import { scannerDeviceHandlers } from './modules/scanner/inbound/scanner-device.grpc.js';
 import { scannerDeviceLookupHandlers } from './modules/scanner/inbound/scanner-device-lookup.grpc.js';
 import {
+  DrizzleEntryCloseStore,
   DrizzleScannerDeviceCommandStore,
   DrizzleScannerDeviceStore,
   DrizzleScannerGateStore,
   DrizzleScannerShiftStore,
+  EntryCloseTick,
+  ENTRY_CLOSE_EVERY_MS,
   GrpcScannerSessionCheck,
+  HttpCoreEntryClose,
   HttpCoreEventPolicy,
   HttpOpsAlertSink,
+  HttpOpsCaseSink,
   MemoryEnrollmentAttemptLimiter,
   MemoryEnrollmentCodeStore,
   RedisDpopReplayStore,
@@ -87,6 +92,8 @@ export function assembleDeviceKeys(o: DeviceKeyAssemblyOptions): { deviceKeys: D
 export interface StartOptions {
   env: Record<string, string | undefined>;
   logDestination?: Writable;
+  /** 입장 기록 마감 판단 주기(기본 ENTRY_CLOSE_EVERY_MS). 시험이 줄인다 */
+  entryCloseEveryMs?: number;
 }
 
 export interface StartedService {
@@ -109,12 +116,14 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let freshnessTimer: ReturnType<typeof setInterval> | undefined;
   let expireTimer: ReturnType<typeof setInterval> | undefined;
   let noticeTimer: ReturnType<typeof setInterval> | undefined;
+  let entryCloseTimer: ReturnType<typeof setInterval> | undefined;
   let controlSync: { close(): Promise<void> } | undefined;
   // 스캐너 가드 거절 이유 지표(O-T37 ⑨). 서비스 지표 묶음은 createService 뒤에 생기므로 그때 잇는다
   let scannerRejections: Counter<'service' | 'reason'> | undefined;
   try {
     const gateStore = new DrizzleScannerGateStore(database);
     const shiftStore = new DrizzleScannerShiftStore(database);
+    const entryCloseStore = new DrizzleEntryCloseStore(database);
     const deviceKeyStore = new DrizzleDeviceKeyStore({ database, changes: gateStore });
     const store = new DrizzleTicketStore({ database, changes: gateStore, deviceKeys: deviceKeyStore });
     const ticket = new TicketService({ store, clock: systemClock });
@@ -135,6 +144,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     // 스캔 판정·POLICY 지표(offline-gate §10.2). 서비스 지표 묶음은 createService 뒤에 생기므로 그때 잇는다
     let scanStored: ((result: 'PASS' | 'REJECT' | 'CHECK' | 'duplicate') => void) | undefined;
     let policyChanged: ((i: { eventId: string; reentryAllowed: boolean; seq: number }) => void) | undefined;
+    let queueReported: ((result: 'empty' | 'pending' | 'no_placement') => void) | undefined;
     const { deviceKeys, notices } = assembleDeviceKeys({
       store: deviceKeyStore,
       reauth,
@@ -206,6 +216,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
           scannerPwaOrigin: config.scannerPwaOrigin,
           onScanStored: (result) => scanStored?.(result),
           onPolicyChanged: (i) => policyChanged?.(i),
+          onQueueReport: (result) => queueReported?.(result),
+          entryClose: entryCloseStore,
         },
         ticket: { deviceKeys, tickets: ticket, transfers },
       }),
@@ -270,6 +282,81 @@ export async function start(o: StartOptions): Promise<StartedService> {
       policyChanges.inc({ service: SERVICE });
       service!.logger.info({ kind: 'scanner.policy-changed', eventId, reentryAllowed, seq }, 'scanner.policy-changed');
     };
+    // 큐 비움 보고·입장 기록 마감 지표(offline-gate §7.4). 회차·기기 ID는 이름표에 싣지 않는다
+    const queueReports = new Counter({
+      name: 'ticket_scanner_queue_reports_total',
+      help: '스캐너 큐 비움 보고 수(result: empty·pending·no_placement, offline-gate §7.4)',
+      labelNames: ['service', 'result'],
+      registers: [service.metrics.registry],
+    });
+    queueReported = (result) => queueReports.inc({ service: SERVICE, result });
+    const entryCloses = new Counter({
+      name: 'ticket_entry_closes_total',
+      help: '입장 기록 마감 수(reason: ALL_REPORTED·TIMEOUT, offline-gate §7.4)',
+      labelNames: ['service', 'reason'],
+      registers: [service.metrics.registry],
+    });
+    const coreSyncFailures = new Counter({
+      name: 'ticket_entry_close_core_sync_failures_total',
+      help: 'core-svc에 마감 시각을 알리지 못한 수(offline-gate §7.4)',
+      labelNames: ['service'],
+      registers: [service.metrics.registry],
+    });
+    const unreportedTotal = new Counter({
+      name: 'ticket_scanner_unreported_total',
+      help: 'TIMEOUT 마감에서 만든 미보고 스캐너 건 수(offline-gate §7.4)',
+      labelNames: ['service'],
+      registers: [service.metrics.registry],
+    });
+    const caseSendFailures = new Counter({
+      name: 'ticket_cs_case_send_failures_total',
+      help: 'ops-svc CS 처리함에 보내지 못한 수(kind: SCANNER_UNREPORTED, offline-gate §7.4)',
+      labelNames: ['service', 'kind'],
+      registers: [service.metrics.registry],
+    });
+    const entryCloseSkipped = new Counter({
+      name: 'ticket_entry_close_skipped_total',
+      help: '마감 판단에서 건너뛴 회차 수(reason: ends_unknown, offline-gate §7.4)',
+      labelNames: ['service', 'reason'],
+      registers: [service.metrics.registry],
+    });
+    if (config.coreHttpUrl && policy) {
+      const coreClient = createExternalHttpClient({ provider: 'core-svc', baseUrl: config.coreHttpUrl, timeoutCapMs: 2_000, clock: systemClock });
+      const opsClient = config.opsHttpUrl ? createExternalHttpClient({ provider: 'ops-svc', baseUrl: config.opsHttpUrl, timeoutCapMs: 2_000, clock: systemClock }) : undefined;
+      const closeTick = new EntryCloseTick({
+        store: entryCloseStore,
+        policy,
+        core: new HttpCoreEntryClose(coreClient, config.internalToken),
+        // ops 주소가 없으면 건 행을 보내지 않고 남긴다(주소가 생기면 다음 판단이 보낸다)
+        ...(opsClient ? { cases: new HttpOpsCaseSink(opsClient, config.internalToken) } : {}),
+        clock: systemClock,
+        log: service.logger,
+        metrics: {
+          closed: (reason) => entryCloses.inc({ service: SERVICE, reason }),
+          coreSyncFailure: () => coreSyncFailures.inc({ service: SERVICE }),
+          unreported: (count) => unreportedTotal.inc({ service: SERVICE }, count),
+          caseSendFailure: (kind) => caseSendFailures.inc({ service: SERVICE, kind }),
+          skipped: (reason) => entryCloseSkipped.inc({ service: SERVICE, reason }),
+        },
+      });
+      let closeRunning = false;
+      const runClose = (): void => {
+        if (closeRunning) return;
+        closeRunning = true;
+        void closeTick
+          .run()
+          .catch((err: unknown) => service!.logger.warn({ err: err instanceof Error ? err.message : String(err) }, '입장 기록 마감 판단이 실패했다(다음 틱에 다시 한다)'))
+          .finally(() => {
+            closeRunning = false;
+          });
+      };
+      entryCloseTimer = setInterval(runClose, o.entryCloseEveryMs ?? ENTRY_CLOSE_EVERY_MS);
+      entryCloseTimer.unref?.();
+      runClose();
+      service.logger.info({ everyMs: o.entryCloseEveryMs ?? ENTRY_CLOSE_EVERY_MS }, '입장 기록 마감 판단을 켰다(GAT-180)');
+    } else {
+      service.logger.warn({}, 'PEAKET_CORE_HTTP_URL이 없어 입장 기록 마감 판단을 켜지 않는다');
+    }
     // 입장 키 알림 보내기 반복(ADR-0363 결정 4). core-svc 주소가 없으면 돌지 않고 행만 쌓인다
     const noticeSent = new Counter({
       name: 'ticket_device_key_notice_sent_total',
@@ -399,6 +486,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       if (freshnessTimer) clearInterval(freshnessTimer);
       if (expireTimer) clearInterval(expireTimer);
       if (noticeTimer) clearInterval(noticeTimer);
+      if (entryCloseTimer) clearInterval(entryCloseTimer);
       return (closing ??= (async () => {
         try {
           await startedGrpc.close();
@@ -419,6 +507,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     if (freshnessTimer) clearInterval(freshnessTimer);
     if (expireTimer) clearInterval(expireTimer);
     if (noticeTimer) clearInterval(noticeTimer);
+    if (entryCloseTimer) clearInterval(entryCloseTimer);
     await grpc?.close().catch(() => {});
     await service?.close().catch(() => {});
     await controlSync?.close();

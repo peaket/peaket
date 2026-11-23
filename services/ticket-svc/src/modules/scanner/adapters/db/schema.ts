@@ -152,6 +152,8 @@ export const scanEvent = pgTable(
     clockOffsetMs: integer('clock_offset_ms'),
     knownSeq: bigint('known_seq', { mode: 'number' }).notNull(),
     deviceSeq: bigint('device_seq', { mode: 'number' }).notNull(),
+    /** 그 기록으로 적은 SCAN_STATE 변경의 일련번호(중복 입장의 몰랐음/알고도 통과를 가른다, offline-gate §7.1). 옛 행은 NULL */
+    stateSeq: bigint('state_seq', { mode: 'number' }),
     receivedAt: at('received_at').notNull(),
     flag: text('flag').notNull().default('NONE'),
   },
@@ -197,4 +199,45 @@ export const gateFlagScan = pgTable(
     scanEventId: uuid('scan_event_id').notNull(),
   },
   (t) => [primaryKey({ columns: [t.flagId, t.scanEventId] })],
+);
+
+/** 기기·회차마다 마지막 큐 비움 보고 하나(offline-gate §7.3, 마이그레이션 0019). */
+export const scannerQueueReport = pgTable(
+  'scanner_queue_report',
+  {
+    eventId: uuid('event_id').notNull(),
+    scannerDeviceId: uuid('scanner_device_id').notNull(),
+    pendingUploads: integer('pending_uploads').notNull(),
+    reportedAt: at('reported_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.eventId, t.scannerDeviceId] }),
+    check('scanner_queue_report_pending_uploads_check', sql`${t.pendingUploads} >= 0`),
+  ],
+);
+
+/** 회차마다 마감 행 하나(offline-gate §7.3 '한 번만'). core_synced_at이 비면 다음 판단마다 다시 알린다. */
+export const entryClose = pgTable(
+  'entry_close',
+  {
+    eventId: uuid('event_id').primaryKey(),
+    closedAt: at('closed_at').notNull(),
+    reason: text('reason').notNull(),
+    roleEndsAt: at('role_ends_at').notNull(),
+    coreSyncedAt: at('core_synced_at'),
+  },
+  (t) => [check('entry_close_reason_check', sql`${t.reason} IN ('ALL_REPORTED', 'TIMEOUT')`)],
+);
+
+/** TIMEOUT 마감 때 보고가 없는 기기마다 한 행(offline-gate §7.3 '미보고 스캐너 건'). */
+export const scannerUnreportedCase = pgTable(
+  'scanner_unreported_case',
+  {
+    eventId: uuid('event_id').notNull(),
+    scannerDeviceId: uuid('scanner_device_id').notNull(),
+    eventKey: uuid('event_key').notNull(),
+    createdAt: at('created_at').notNull(),
+    openedAt: at('opened_at'),
+  },
+  (t) => [primaryKey({ columns: [t.eventId, t.scannerDeviceId] })],
 );
