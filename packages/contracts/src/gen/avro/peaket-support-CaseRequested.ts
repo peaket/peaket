@@ -15,7 +15,7 @@ export const supportCaseRequested: Readonly<Record<string, unknown>> = {
     },
     {
       "name": "kind",
-      "doc": "CsCase 종류(data.md cs_case). VERIFICATION_APPEAL은 queue-svc가 내는 봇 판정 이의 제기(설명 요구·재검토 신청)다(추천 적용 2026-10-30, docs/features/bot-defense.md §12). APPEAL은 core-svc support 모듈이 내는 소명(예매 제한·양도 회수 대상 팬의 사정 설명, openapi POST /v1/appeals)이다(추천 적용 2026-10-30, docs/features/transfer-refund.md §7.1)",
+      "doc": "CsCase 종류(data.md cs_case). VERIFICATION_APPEAL은 queue-svc가 내는 봇 판정 이의 제기(설명 요구·재검토 신청)다(추천 적용 2026-10-30, docs/features/bot-defense.md §12). APPEAL은 core-svc support 모듈이 내는 소명(예매 제한·양도 회수 대상 팬의 사정 설명, openapi POST /v1/appeals)이다(추천 적용 2026-10-30, docs/features/transfer-refund.md §7.1). REFUND_FAILED·FLAGGED·REFUND_ACCOUNT_PENDING·COMPENSATION_PENDING·SCANNER_UNREPORTED는 asyncapi 열거와 맞추려 끝에 더했다(추천 적용 2026-11-23, ADR-0364 결정 4)",
       "type": {
         "type": "enum",
         "name": "CaseRequestedKind",
@@ -28,7 +28,12 @@ export const supportCaseRequested: Readonly<Record<string, unknown>> = {
           "CONTENT_REPORT",
           "RIGHTS_REQUEST",
           "VERIFICATION_APPEAL",
-          "APPEAL"
+          "APPEAL",
+          "REFUND_FAILED",
+          "FLAGGED",
+          "REFUND_ACCOUNT_PENDING",
+          "COMPENSATION_PENDING",
+          "SCANNER_UNREPORTED"
         ]
       }
     },
@@ -60,6 +65,18 @@ export const supportCaseRequested: Readonly<Record<string, unknown>> = {
         "type": "long",
         "logicalType": "timestamp-millis"
       }
+    },
+    {
+      "name": "dueBaseAt",
+      "doc": "기한을 세는 시작 시각. 없으면 createdAt. '회차 취소 확정 뒤'로 세는 건(일괄 환불 실패·배상 대기)은 확정 시각을 싣는다(추천 적용 2026-11-23, ADR-0364 결정 2)",
+      "type": [
+        "null",
+        {
+          "type": "long",
+          "logicalType": "timestamp-millis"
+        }
+      ],
+      "default": null
     }
   ]
 };
