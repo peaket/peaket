@@ -157,6 +157,12 @@ jobs:
       - run: pnpm --filter @peaket/ops-rt test:integration
         env:
           PEAKET_TEST_REPORT: test-report-int.json
+      # analytics-ingest(분석 원본 적재)를 실제 Kafka·ClickHouse 24.12로 본다(F-04-3, A-T21 브론즈 몫·ST-T22·커버리지·다시 적재).
+      # 레지스트리 없이 고정 스키마 ID로 내고 읽는다(local·ci 무대, ADR-0357 결정 4). 의존 패키지 dist를 먼저 빌드한다
+      - run: pnpm exec turbo run build --filter=@peaket/analytics-ingest^...
+      - run: pnpm --filter @peaket/analytics-ingest test:integration
+        env:
+          PEAKET_TEST_REPORT: test-report-int.json
       # ticket-svc의 발권·스캐너 기기 원장을 실제 PostgreSQL 18로 본다(F-06-2 리뷰 RV-05, 위와 같은 까닭). 의존 패키지 dist를 먼저 빌드한다
       - run: pnpm exec turbo run build --filter=@peaket/ticket-svc^...
       - run: pnpm --filter @peaket/ticket-svc test:integration
