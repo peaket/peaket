@@ -76,8 +76,9 @@ function insertScript(r: ScriptRequest, allowed: ReadonlySet<string>): { remove(
 }
 
 /**
- * 스크립트 오류의 까닭: 같은 출처 자원 시간 기록에 응답(2xx 상태 또는 받은 바이트)이 있으면 무결성, 없거나 2xx가 아니면 네트워크로 본다.
- * 브라우저가 오류 사건에 까닭을 싣지 않아 고른 추정이다(자원 시간 기록이 가득 차면 네트워크로 센다, ADR-0361 '남는 한계')
+ * 스크립트 오류의 까닭: 같은 출처 자원 시간 기록에 응답(2xx 상태, 상태를 모르는 브라우저는 받은 본문 바이트)이 있으면 무결성, 없거나 2xx가 아니면 네트워크로 본다.
+ * 상태 칸(responseStatus)이 없는 브라우저(WebKit)는 transferSize가 머리 바이트만으로도 0보다 커서(본문 없는 404) 본문 크기(encodedBodySize)만 본다.
+ * 브라우저가 오류 사건에 까닭을 싣지 않아 고른 추정이다(자원 시간 기록이 가득 차면 네트워크로 센다, ADR-0361 결정 5·'남는 한계')
  */
 function classifyError(src: string): 'integrity' | 'network' {
   try {
@@ -85,7 +86,7 @@ function classifyError(src: string): 'integrity' | 'network' {
     const e = performance.getEntriesByName(abs, 'resource').at(-1) as (PerformanceResourceTiming & { responseStatus?: number }) | undefined;
     if (!e) return 'network';
     if (typeof e.responseStatus === 'number' && e.responseStatus > 0) return e.responseStatus >= 200 && e.responseStatus < 300 ? 'integrity' : 'network';
-    return e.encodedBodySize > 0 || e.transferSize > 0 ? 'integrity' : 'network';
+    return e.encodedBodySize > 0 ? 'integrity' : 'network';
   } catch {
     return 'network';
   }

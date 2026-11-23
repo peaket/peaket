@@ -287,7 +287,7 @@ export const JOBS = {
   'web / queue-room': { file: 'ci-web.yml', what: '대기실 T=0 세 엔진(FE-T3·FE-T15·FE-T4·FE-T6)' },
   'web / purchase': { file: 'ci-web.yml', what: '구매 세션 서명기 세 엔진(FE-T7)' },
   'web / rich-text': { file: 'ci-web.yml', what: '공연 설명 편집기(FE-T41, 파트너 콘솔 빌드)' },
-  'web / console-csp': { file: 'ci-web.yml', what: '관제·파트너 콘솔 보안 헤더와 Trusted Types 위반 0(F-03-1 T10~T12, 관제 운영 빌드·파트너 빌드)' },
+  'web / console-csp': { file: 'ci-web.yml', what: '관제·파트너 콘솔 보안 헤더와 Trusted Types 위반 0(F-03-1 T10~T12, 관제 운영 빌드·파트너 빌드), 관제 원격 무결성·대체 카드·미리 받기 화면 검사 console-remotes 세 엔진(F-03-2)' },
   'web / ds': { file: 'ci-web.yml', what: 'ds 부품 axe·동작(FE-T18)' },
   'web / seed-css': { file: 'ci-web.yml', what: 'SEED CSS 층(FE-T36, 앱 다섯 PoC 빌드)' },
   'web / budgets': { file: 'ci-web.yml', what: '운영 빌드의 경로별 첫 JS 예산·Lighthouse·대기실 FE-T1·CSP(FE-T35·FE-T30)·정적 자산, @peaket/config 정본 대조' },

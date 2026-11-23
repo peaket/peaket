@@ -140,11 +140,11 @@ export class WidgetStreams {
       s.delete(next);
       if (s.size > 0) return;
       this.#listeners.delete(key);
-      // 마지막 구독자가 떠났다: 10초 [가정] 뒤에 목록에서 뺀다
-      const before2 = this.wanted();
+      // 마지막 구독자가 떠났다: 10초 [가정] 뒤에 목록에서 뺀다. 바뀌기 전 목록은 유예가 끝나 키를 빼기 직전에 잡는다
       this.#lingering.set(
         key,
         this.deps.timers.setTimeout(() => {
+          const before2 = this.wanted();
           this.#lingering.delete(key);
           this.changed(before2);
         }, this.deps.graceMs ?? WIDGET_GRACE_MS),
