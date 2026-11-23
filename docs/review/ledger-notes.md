@@ -366,3 +366,11 @@ F-04-2 계획(`docs/review/plans/F-04-2.md` §2)이 장부 범위를 A-T26 ①�
 | 항목 | 상태 | 등급 | 정할 곳 | 근거·사유 |
 | --- | --- | --- | --- | --- |
 | A-T26 ④ | 다른 단계 |  | 미정 | queue-svc의 사람별 대기 기록 `QueueEntryRecord`·1초 집계 `QueueAggregate` 발행(BUILD_ORDER OPS-190 줄의 PRF-080·HOT-060이 넘긴 것)은 queue-svc에 Kafka 생산자·사람별 칸 저장·판매 종료 정리가 새로 필요해 F-04-2의 5일 상한 밖이다. 감독이 맡을 기능을 정한다(계획 '감독에게' 1) |
+
+## F-01-3에서 뗀 몫(2026-11-23)
+
+F-01-3 계획(`docs/review/plans/F-01-3.md` §2)이 장부 범위를 OPS-060 몫(V-T30 ①②, V-T49 ①~⑤, delivery 16.2.5)으로 좁혔다. 아래 하나는 kind 클러스터가 있어야 보므로 정할 곳을 따로 둔다.
+
+| 항목 | 상태 | 등급 | 정할 곳 | 근거·사유 |
+| --- | --- | --- | --- | --- |
+| V-T30 ③ | 미검증 |  | INF-040 | gw-queue의 Envoy가 trace를 0.1%만 고르고(`samplingFraction`) 고르지 않은 요청의 queue-svc span이 내보내지지 않는지는 게이트웨이와 수집기를 kind에 올려야 본다(ADR-0331 결정 9, kind 보류). 수집기 설정과 꼬리 표본 정책은 V-T49가 Docker로 본다 |
