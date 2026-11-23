@@ -3,7 +3,11 @@
 // STALE은 서명이 맞고 전송 시각이 5분 넘게 다를 때만이다(서명이 틀리면 늦어도 SIGNATURE_MISMATCH). 설정 시험은 settlement-toss-assembly.test.ts J-T37 ⑤로 옮겼다.
 import { createHmac } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
-import { ledgerBalance, normalizeHolderName, reconcilePortoneWithdrawals, verifyTossPayoutSignature } from '../src/modules/settlement/domain/payout-adapters.js';
+import { ledgerBalance, verifyTossPayoutSignature } from '../src/modules/settlement/domain/payout-adapters.js';
+// F-07-7 시험 담당(2026-11-23): 정본 settlement §3 비교 규칙(ADR-0370 결정 2)으로 예금주 정규화가 domain/holder-name.ts로, 출금 대사 함수가
+// domain/portone-reconciliation.ts로 옮긴다(F-07-7 계획 I-03·I-13). 시험 이름은 그대로 두고 가져오는 곳만 바꾼다. 규칙 전체는 settlement-holder-name.test.ts가 본다.
+import { normalizeHolderName } from '../src/modules/settlement/domain/holder-name.js';
+import { reconcilePortoneWithdrawals } from '../src/modules/settlement/domain/portone-reconciliation.js';
 
 const NOW = new Date('2026-11-15T00:00:00.000Z');
 const BODY = JSON.stringify({ eventType: 'payout.changed', data: { payoutId: 'p1' } });
@@ -67,7 +71,8 @@ describe('J-T20 포트원 출금 대사', () => {
   test('완료인데 출금이 없으면 MISSING, 이어지지 않는 출금은 UNLINKED다', () => {
     expect(reconcilePortoneWithdrawals({ payouts: [payout()], transfers: [], accounts, promoterOfPayout: () => 'prom1' })).toEqual([{ payoutId: 'p1', transferId: null, check: 'MISSING', reasons: ['no-withdrawal'] }]);
     const unlinked = reconcilePortoneWithdrawals({ payouts: [payout()], transfers: [transfer({ payoutId: 'other', amount: 50_000 })], accounts, promoterOfPayout: () => 'prom1' });
-    expect(unlinked.map((r) => r.check)).toContain('UNLINKED');
+    // F-07-7 계획 I-13: UNLINKED는 지급 건이 아니라 이체 쪽 결과다(옛 함수는 payoutId에 이체의 값이나 ''를 넣었다). 이어진 PEAKET 지급 건이 없으므로 null이다
+    expect(unlinked.filter((r) => r.check === 'UNLINKED')).toEqual([{ payoutId: null, transferId: 't1', check: 'UNLINKED', reasons: ['not-linked'] }]);
   });
 
   test('예금주 표기 차이(㈜·(주)·공백)는 같게 본다', () => {

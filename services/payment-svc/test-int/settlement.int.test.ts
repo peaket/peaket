@@ -187,17 +187,17 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     expect((await store.listPayouts(batch.batchId)).map((p) => p.refPayoutId)).toEqual([`${s.statementId}-1`, `${s.statementId}-2`]);
   });
 
-  test('정산 계좌는 끝 4자리만 저장하고 3영업일 보류·If-Match·재인증을 건다', async () => {
-    const body = { bankCode: '004', accountNumber: '98765432101234', holderName: '주식회사 에이' };
+  // F-07-7 시험 담당(2026-11-23): 정본 settlement §6·ADR-0370 결정 3·5로 기대를 고친다. 포트원 플랫폼이 꺼진 이 조립은 예금주를 조회할 수 없어
+  // 정산 계좌 변경이 503이고 행을 남기지 않는다(옛 기대: 200·3영업일 보류 저장). 실제 DB의 성공·412 경합은 settlement-portone.int.test.ts(J-T40 ①③)가 본다.
+  test('J-T40 ① 정산 계좌 변경은 재인증이 없으면 403, 포트원 플랫폼이 꺼지면 503이고 payout_account 행·계좌 원문이 없다', async () => {
+    const body = { bankCode: '88', accountNumber: '98765432101234', holderName: '주식회사 에이' };
     await expect(settlements.putPayoutAccount(A, 'sid', body, '"0"', undefined)).rejects.toMatchObject({ status: 403 });
-    const saved = await settlements.putPayoutAccount(A, 'sid', body, '"0"', 'test-reauth');
-    expect(saved).toMatchObject({ bankCode: '004', payoutAccountLast4: '1234', version: 1 });
-    expect(saved.holdUntil).toBe('2026-11-18T00:00:00.000Z');
-    const row = await db.pool.query('select bank_code, account_last4, holder_verified from payout_account where promoter_id = $1', [A]);
-    expect(row.rows[0]).toEqual({ bank_code: '004', account_last4: '1234', holder_verified: true });
-    const all = await db.pool.query('select * from payout_account where promoter_id = $1', [A]);
-    expect(JSON.stringify(all.rows[0])).not.toContain('98765432101234');
-    await expect(settlements.putPayoutAccount(A, 'sid', body, '"0"', 'test-reauth')).rejects.toMatchObject({ status: 412 });
+    await settlements.recordKyc(A, 'VERIFIED', { legalName: '주식회사 에이', representative: '김대표' });
+    await expect(settlements.putPayoutAccount(A, 'sid', body, '"0"', 'test-reauth')).rejects.toMatchObject({ status: 503, type: expect.stringContaining('payout-holder-lookup-unavailable') });
+    const row = await db.pool.query('select * from payout_account where promoter_id = $1', [A]);
+    expect(row.rows).toEqual([]);
+    const changes = await db.pool.query('select * from payout_account_change where promoter_id = $1', [A]);
+    expect(JSON.stringify(changes.rows)).not.toContain('98765432101234');
   });
 
   // FIX-invariant-m3: 0028이 이동 기록 표를 정본 이름 receivable_movement로 바꾸고 옛 이름은 뷰로 남긴다(docs/data.md §4 '미수금 이동 기록 표 이름 맞추기').

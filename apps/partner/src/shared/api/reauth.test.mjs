@@ -46,3 +46,24 @@ test('I-T53 BOOKER_EXPORT 재인증은 withPasskey와 패스키 단계를 거친
   assert.match(src, /navigator\.credentials\.get/);
   assert.match(src, /reauthStep: first\.reauthStep/);
 });
+
+// ---- F-07-7 J-T42 ① 정산 계좌 변경 재인증(계획 §5.1(자): requestReauth(act, input), 패스키 등록 변환은 만들지 않음·내 계정 동결) ----
+test('J-T42 ① requestReauth는 PAYOUT_ACCOUNT·BOOKER_EXPORT 작업 묶음만 받고 받은 act를 그대로 보낸다', () => {
+  assert.match(src, /export async function requestReauth\(\s*act: 'PAYOUT_ACCOUNT' \| 'BOOKER_EXPORT'|export async function requestReauth\(\s*act: 'BOOKER_EXPORT' \| 'PAYOUT_ACCOUNT'/);
+  const at = src.indexOf('export async function requestReauth(');
+  const body = src.slice(at, src.indexOf('\nexport ', at + 1));
+  assert.match(body, /post\(\{ act,|act: act/);
+  assert.match(body, /withPasskey: true/);
+  assert.match(body, /navigator\.credentials\.get/);
+  assert.match(body, /hasPasskeyFactor/);
+});
+
+test('J-T42 ① 명단 내려받기 재인증은 같은 함수를 BOOKER_EXPORT로 부른다', () => {
+  const at = src.indexOf('export async function requestBookerExportReauth(');
+  assert.ok(at >= 0);
+  assert.match(src.slice(at, at + 400), /requestReauth\('BOOKER_EXPORT', input\)/);
+});
+
+test('J-T42 ① 패스키 등록 변환(내 계정 줄, 동결)은 만들지 않는다', () => {
+  assert.doesNotMatch(src, /toCreationOptions|serializeAttestation|navigator\.credentials\.create/);
+});

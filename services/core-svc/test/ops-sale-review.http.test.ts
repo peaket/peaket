@@ -8,6 +8,7 @@ import { AppModule } from '../src/app.module.js';
 import { MemoryCdnInvalidation, MemoryCatalogRepository, MemorySaleConfigStore, OpsSaleReviews } from '../src/modules/catalog/index.js';
 import type { CdnInvalidation } from '../src/modules/catalog/domain/media-ports.js';
 import { FakeIdentity, NOW_MS, quiet } from './support.js';
+import { problem as payoutProblem, readyView, RecordingPayoutRegistration } from './payout-registration-double.js';
 
 let svc: Awaited<ReturnType<typeof createService>>;
 const repo = new MemoryCatalogRepository();
@@ -300,5 +301,92 @@ describe('관제 판매 승인 목록·상세·반려·CDN(S-T41 ④⑤⑩)', ()
       failCdn = false;
     }
     expect(repo.productions.get(p3.id)?.saleReview).toBe('APPROVED');
+  });
+});
+
+// F-07-7 시험 담당(2026-11-23): 관제 판매 승인 상세의 지급대행 등록 값은 payment 등록 읽기와 같다(J-T39 ⑧, ADR-0370 결정 4).
+// 화면 표시(SCR-048 확인 패널)는 동결이지만 응답 값은 남는다. 결제사의 셀러 ID·파트너 ID 원문은 싣지 않고, CS 두 역할에게 정산 계좌는 null이다.
+describe('J-T39 ⑧ 판매 승인 상세의 지급대행 등록 값(F-07-7)', () => {
+  const payout = new RecordingPayoutRegistration();
+  const repo2 = new MemoryCatalogRepository();
+  const T2 = randomUUID();
+  let svc2: Awaited<ReturnType<typeof createService>>;
+  // 결제사 원문 ID 모양(읽기 응답에는 없지만, 구현이 다른 곳에서 섞어 넣는지 본다)
+  const RAW_IDS = ['toss-seller-', 'peaket-', 'tossSellerId', 'portonePartnerId'];
+
+  beforeAll(async () => {
+    repo2.places.add(PLACE);
+    repo2.placeNames.push({ id: PLACE, name: '피켓홀', address: '서울 어딘가 1', aliases: [] });
+    repo2.promoters.set(T2, sellerRow(T2, '(주)스텔라엔터'));
+    svc2 = await createService({
+      name: 'core-svc',
+      module: AppModule.register({ memory: true, catalog: repo2, payoutRegistration: payout }),
+      env: { PEAKET_ENV: 'ci' },
+      clock: fakeClock({ now: NOW_MS }),
+      logDestination: quiet(),
+      adminAuthz: identity,
+    });
+  });
+
+  afterAll(async () => {
+    await svc2?.close();
+  });
+
+  const submitted2 = () => {
+    const id = randomUUID();
+    repo2.productions.set(id, { id, promoterId: T2, placeId: PLACE, title: `공연-${id.slice(0, 8)}`, genre: '콘서트', saleReview: 'SUBMITTED', saleApprovedAt: null, saleSubmittedAt: new Date(NOW_MS), rejectionReason: null });
+    const eventId = randomUUID();
+    repo2.events.set(eventId, { id: eventId, productionId: id, venueId: null, openAt: new Date(NOW_MS + 3_600_000), startsAt: new Date(NOW_MS + 86_400_000), status: 'SCHEDULED' });
+    return id;
+  };
+  const detail2 = (role: Parameters<typeof ops>[0], id: string) => svc2.http.inject({ method: 'GET', url: `/v1/ops/sale-reviews/${id}`, headers: identity.ops(role) });
+
+  test('J-T39 ⑧ 상세의 payoutAccount·pgRegistration이 payment 등록 읽기와 같고 셀러·파트너 ID 원문이 없다 [ASVS v5.0.0-8.2.2] [ASVS v5.0.0-14.2.6]', async () => {
+    payout.reset();
+    payout.views.set(T2, readyView({ standard: 'KYC_REQUIRED', escrow: 'PENDING', payoutAccount: { bankCode: '88', last4: '4321', holdUntil: '2026-11-11T01:00:00.000Z', holderVerified: true } }));
+    const id = submitted2();
+    for (const role of ['operator', 'commander', 'viewer'] as const) {
+      const r = await detail2(role, id);
+      expect(r.statusCode, role).toBe(200);
+      expect(r.headers['cache-control'], role).toBe('no-store');
+      const out = JSON.parse(r.payload) as { payoutAccount: unknown; pgRegistration: unknown };
+      expect(out.payoutAccount, role).toEqual({ bankCode: '88', last4: '4321', holdUntil: '2026-11-11T01:00:00.000Z', holderVerified: true });
+      expect(out.pgRegistration, role).toEqual({
+        tossEnabled: true,
+        portoneEnabled: true,
+        tossSellers: [
+          { pgStore: 'STANDARD', status: 'KYC_REQUIRED' },
+          { pgStore: 'ESCROW', status: 'PENDING' },
+        ],
+        portonePartnerRegistered: true,
+      });
+      expect(RAW_IDS.filter((needle) => r.payload.includes(needle)), role).toEqual([]);
+    }
+    expect(payout.reads).toContain(T2);
+  });
+
+  test('J-T39 ⑧ cs_agent·cs_lead에게 payoutAccount는 null이고 pgRegistration은 그대로다 [ASVS v5.0.0-8.2.2] [ASVS v5.0.0-14.2.6]', async () => {
+    payout.reset();
+    payout.views.set(T2, readyView());
+    const id = submitted2();
+    for (const role of ['cs_agent', 'cs_lead'] as const) {
+      const r = await detail2(role, id);
+      expect(r.statusCode, role).toBe(200);
+      const out = JSON.parse(r.payload) as { payoutAccount: unknown; pgRegistration: { tossEnabled: boolean; portonePartnerRegistered: boolean } };
+      expect(out.payoutAccount, role).toBeNull();
+      expect(out.pgRegistration, role).toMatchObject({ tossEnabled: true, portoneEnabled: true, portonePartnerRegistered: true });
+      expect(r.payload, role).not.toContain('4321');
+    }
+  });
+
+  test('J-T39 ⑧ 등록 읽기가 실패해도 상세는 200이고 payoutAccount null·pgRegistration은 둘 다 꺼진 모양이다', async () => {
+    payout.reset();
+    payout.readError = payoutProblem('payout-dependency-unavailable', 503);
+    const id = submitted2();
+    const r = await detail2('operator', id);
+    expect(r.statusCode).toBe(200);
+    const out = JSON.parse(r.payload) as { payoutAccount: unknown; pgRegistration: unknown };
+    expect(out.payoutAccount).toBeNull();
+    expect(out.pgRegistration).toEqual({ tossEnabled: false, portoneEnabled: false, tossSellers: [], portonePartnerRegistered: false });
   });
 });

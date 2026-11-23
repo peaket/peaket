@@ -6,7 +6,8 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { MemoryCatalogRepository } from '../src/modules/catalog/index.js';
-import { FakeIdentity, NOW_MS, quiet } from './support.js';
+import { FakeIdentity, logSinkUnit, NOW_MS, quiet } from './support.js';
+import { problem as payoutProblem, RecordingPayoutRegistration } from './payout-registration-double.js';
 
 let svc: Awaited<ReturnType<typeof createService>>;
 const repo = new MemoryCatalogRepository();
@@ -223,5 +224,120 @@ describe('파트너 판매 승인 요청·변경 취소(S-T41 ①~③)', () => {
     // 취소는 partner_admin만 한다(partner_member 403, 다른 테넌트 404)
     expect((await cancel(identity.partner(TENANT, 'partner_member'), noHistory.id)).statusCode).toBe(403);
     expect((await cancel(identity.partner(OTHER), noHistory.id)).statusCode).toBe(404);
+  });
+});
+
+// F-07-7 시험 담당(2026-11-23): 판매 승인 요청이 payment-svc 지급대행 등록을 부른다(settlement §3, ADR-0370 결정 1·3, J-T39 ②).
+// 등록 포트는 짝 대역(test/payout-registration-double.ts)이고, payment가 돌려준 오류는 같은 이름·상태로 파트너에게 간다.
+// 대역이 '꺼짐'(holderChecked false)이면 지금(S-T41 ①)처럼 모양만 보고 202다.
+describe('J-T39 ② 판매 승인 요청의 지급대행 등록(F-07-7)', () => {
+  const payout = new RecordingPayoutRegistration();
+  const sink = logSinkUnit();
+  const repo2 = new MemoryCatalogRepository();
+  const T2 = randomUUID();
+  let svc2: Awaited<ReturnType<typeof createService>>;
+  // 계좌번호 원문 두 모양(하이픈 있음·없음)과 예금주. 어디에도 남지 않아야 한다
+  const RAW = ['1002-345-678901', '1002345678901'];
+
+  beforeAll(async () => {
+    repo2.places.add(PLACE);
+    // 저장된 판매자 정보를 요청 본문과 다르게 두어, 실패한 요청이 promoter 행을 쓰지 않았는지 본다
+    repo2.promoters.set(T2, { ...sellerRow(T2, '(주)옛상호'), representative: '옛대표', email: 'old@example.test' });
+    svc2 = await createService({
+      name: 'core-svc',
+      module: AppModule.register({ memory: true, catalog: repo2, payoutRegistration: payout }),
+      env: { PEAKET_ENV: 'ci' },
+      clock: fakeClock({ now: NOW_MS }),
+      logDestination: sink.stream,
+      adminAuthz: identity,
+    });
+  });
+
+  afterAll(async () => {
+    await svc2?.close();
+  });
+
+  const production2 = () => {
+    const id = randomUUID();
+    repo2.productions.set(id, { id, promoterId: T2, placeId: PLACE, title: `공연-${id.slice(0, 8)}`, genre: '콘서트', saleReview: 'DRAFT', saleApprovedAt: null, saleSubmittedAt: null, rejectionReason: null });
+    const eventId = randomUUID();
+    repo2.events.set(eventId, { id: eventId, productionId: id, venueId: null, openAt: new Date('2026-11-20T11:00:00Z'), startsAt: new Date('2026-12-02T10:00:00Z'), status: 'SCHEDULED' });
+    return id;
+  };
+  const request2 = (productionId: string, payload: unknown = body()) =>
+    svc2.http.inject({ method: 'POST', url: `/v1/partner/productions/${productionId}/sale-review`, headers: { ...identity.partner(T2, 'partner_admin'), 'content-type': 'application/json' }, payload: JSON.stringify(payload) });
+  const leaks = (text: string) => [...RAW, '홍길동'].filter((needle) => text.includes(needle));
+
+  test('J-T39 ② 등록이 422 payout-account-holder-mismatch면 같은 422를 주고 공연은 SUBMITTED가 되지 않으며 판매자 정보·계좌 원문이 어디에도 남지 않는다 [ASVS v5.0.0-16.5.3] [ASVS v5.0.0-16.2.5]', async () => {
+    payout.reset();
+    payout.registerAnswer = payoutProblem('payout-account-holder-mismatch', 422, '예금주가 판매자 상호나 대표자와 다릅니다');
+    const id = production2();
+    const r = await request2(id);
+    expect(r.statusCode).toBe(422);
+    expect(JSON.parse(r.payload)).toMatchObject({ type: `${P}payout-account-holder-mismatch`, status: 422 });
+    expect(repo2.productions.get(id)).toMatchObject({ saleReview: 'DRAFT', saleSubmittedAt: null });
+    expect(repo2.promoters.get(T2)).toMatchObject({ legalName: '(주)옛상호', representative: '옛대표', email: 'old@example.test' });
+    // 등록은 한 번, 그 파트너·판매자·계좌로 불렸다(계좌는 이 요청 안에서만 payment로 넘긴다)
+    expect(payout.registers).toHaveLength(1);
+    const call = payout.registers[0]!;
+    expect(call.promoterId).toBe(T2);
+    expect(call.company).toMatchObject({ name: '(주)피켓공연', representativeName: '대표자', email: 'seller@example.test' });
+    expect(call.company.businessRegistrationNumber.replaceAll(/\D/g, '')).toBe('1234567890');
+    expect(call.account).toMatchObject({ bankCode: '004', holderName: '홍길동' });
+    expect(call.account.accountNumber.replaceAll(/\D/g, '')).toBe('1002345678901');
+    expect(['INDIVIDUAL_BUSINESS', 'CORPORATE']).toContain(call.businessType);
+    // 응답·저장 행·서비스 로그 어디에도 계좌번호 원문(두 모양)·예금주명이 없다
+    expect(leaks(r.payload)).toEqual([]);
+    expect(leaks(JSON.stringify([...repo2.promoters.values(), ...repo2.productions.values()]))).toEqual([]);
+    expect(leaks(sink.text())).toEqual([]);
+  });
+
+  test('J-T39 ② 등록이 502 payout-agency-update-failed·503 payout-holder-lookup-unavailable·503 payout-gateway-unavailable이면 같은 상태·이름을 주고 공연은 DRAFT 그대로다 [ASVS v5.0.0-16.5.3]', async () => {
+    const cases = [
+      { type: 'payout-agency-update-failed', status: 502 },
+      { type: 'payout-holder-lookup-unavailable', status: 503 },
+      { type: 'payout-gateway-unavailable', status: 503 },
+      { type: 'payout-dependency-unavailable', status: 503 },
+    ];
+    for (const c of cases) {
+      payout.reset();
+      payout.registerAnswer = payoutProblem(c.type, c.status);
+      const id = production2();
+      const r = await request2(id);
+      expect(r.statusCode, c.type).toBe(c.status);
+      expect(JSON.parse(r.payload).type, c.type).toBe(`${P}${c.type}`);
+      expect(repo2.productions.get(id), c.type).toMatchObject({ saleReview: 'DRAFT', saleSubmittedAt: null });
+      expect(payout.registers, c.type).toHaveLength(1);
+      expect(leaks(r.payload), c.type).toEqual([]);
+    }
+    expect(repo2.promoters.get(T2)).toMatchObject({ legalName: '(주)옛상호', representative: '옛대표' });
+    expect(leaks(sink.text())).toEqual([]);
+  });
+
+  test('J-T39 ② S-T41 ① 등록이 성공(holderChecked true)하거나 포트원 플랫폼이 꺼져 모양만 본 답(holderChecked false)이면 202 SUBMITTED이고 판매자 정보가 서며 계좌 원문은 없다', async () => {
+    for (const holderChecked of [true, false]) {
+      payout.reset();
+      payout.registerAnswer = { holderChecked };
+      const id = production2();
+      const r = await request2(id);
+      expect(r.statusCode, String(holderChecked)).toBe(202);
+      expect(JSON.parse(r.payload)).toEqual({ status: 'SUBMITTED' });
+      expect(repo2.productions.get(id)).toMatchObject({ saleReview: 'SUBMITTED', saleSubmittedAt: new Date(NOW_MS) });
+      expect(payout.registers).toHaveLength(1);
+      expect(leaks(r.payload + JSON.stringify([...repo2.promoters.values()]))).toEqual([]);
+    }
+    expect(repo2.promoters.get(T2)).toMatchObject({ legalName: '(주)피켓공연', representative: '대표자' });
+    expect(leaks(sink.text())).toEqual([]);
+  });
+
+  test('J-T39 ② 본문 모양이 틀리면(400·422) 결제사 등록을 부르지 않는다', async () => {
+    payout.reset();
+    const id = production2();
+    const shape = await request2(id, body({ payoutAccount: { accountNumber: '1002-345-678901', holderName: '홍길동' } }));
+    expect(shape.statusCode).toBe(400);
+    const invalid = await request2(id, body({ seller: { ...body().seller, mailOrderReportNo: undefined } }));
+    expect(invalid.statusCode).toBe(422);
+    expect(payout.registers).toHaveLength(0);
+    expect(repo2.productions.get(id)?.saleReview).toBe('DRAFT');
   });
 });

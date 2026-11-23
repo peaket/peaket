@@ -230,24 +230,23 @@ describe('정산 HTTP·유스케이스', () => {
     expect(other.statusCode).toBe(404);
   });
 
-  test('정산 계좌 변경은 If-Match·패스키 재인증이 필요하고 계좌 원문을 저장하지 않는다', async () => {
-    const body = { bankCode: '004', accountNumber: '98765432101234', holderName: '주식회사 에이' };
+  // F-07-7 시험 담당(2026-11-23): 정본 settlement §6·ADR-0370 결정 3·5로 바뀐 기대로 고친다. 본문 모양 틀림은 400(옛 422), 판매자 확인(seller_kyc 상호)이 없으면 409,
+  // 포트원 플랫폼이 꺼진 이 조립은 예금주를 조회할 수 없어 503이고 계좌를 남기지 않는다(옛 기대: 200·끝 4자리 저장·3영업일 보류). 성공·보류 경로는 settlement-payout-account.http.test.ts(J-T40 ③④)가 본다.
+  test('J-T40 ① 정산 계좌 변경은 패스키 재인증이 필요하고, 판매자 확인이 없으면 409, 포트원 플랫폼이 꺼진 조립은 503이며 계좌를 남기지 않는다', async () => {
+    const body = { bankCode: '88', accountNumber: '98765432101234', holderName: '주식회사 에이' };
     const invalid = await svc.http.inject({ method: 'PUT', url: '/v1/partner/payout-account', headers: { ...headers(), 'if-match': '"0"', 'x-reauth-token': 'test-reauth' }, payload: JSON.stringify({ ...body, accountNumber: '123' }) });
-    expect(invalid.statusCode).toBe(422);
+    expect(invalid.statusCode).toBe(400);
     const missing = await svc.http.inject({ method: 'PUT', url: '/v1/partner/payout-account', headers: { ...headers(), 'if-match': '"0"' }, payload: JSON.stringify(body) });
     expect(missing.statusCode).toBe(403);
-    const ok = await svc.http.inject({ method: 'PUT', url: '/v1/partner/payout-account', headers: { ...headers(), 'if-match': '"0"', 'x-reauth-token': 'test-reauth' }, payload: JSON.stringify(body) });
-    expect(ok.statusCode).toBe(200);
-    expect(JSON.parse(ok.payload)).toMatchObject({ bankCode: '004', payoutAccountLast4: '1234', version: 1 });
-    expect(JSON.parse(ok.payload).holdUntil).toBe('2026-11-18T00:00:00.000Z');
-    const stale = await svc.http.inject({ method: 'PUT', url: '/v1/partner/payout-account', headers: { ...headers(), 'if-match': '"0"', 'x-reauth-token': 'test-reauth' }, payload: JSON.stringify(body) });
-    expect(stale.statusCode).toBe(412);
-    const hs = await settlements.calculateEvent({ promoterId: A, eventId: HOLD_EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
-    await store.saveStatement({ ...(await store.findStatementById(hs.statementId))!, status: 'CONFIRMED' });
-    await expect(settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: hs.payoutDate!, actor: randomUUID() })).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-account-change-hold') });
-    const stored = store.accounts.get(A)!;
-    expect(stored.accountLast4).toBe('1234');
-    expect(JSON.stringify(stored)).not.toContain('98765432101234');
+    const unverified = await svc.http.inject({ method: 'PUT', url: '/v1/partner/payout-account', headers: { ...headers(), 'if-match': '"0"', 'x-reauth-token': 'test-reauth' }, payload: JSON.stringify(body) });
+    expect(unverified.statusCode).toBe(409);
+    expect(JSON.parse(unverified.payload).type).toContain('payout-seller-unverified');
+    await settlements.recordKyc(A, 'VERIFIED', { legalName: '주식회사 에이', representative: '김대표' });
+    const off = await svc.http.inject({ method: 'PUT', url: '/v1/partner/payout-account', headers: { ...headers(), 'if-match': '"0"', 'x-reauth-token': 'test-reauth' }, payload: JSON.stringify(body) });
+    expect(off.statusCode).toBe(503);
+    expect(JSON.parse(off.payload).type).toContain('payout-holder-lookup-unavailable');
+    expect(store.accounts.get(A)).toBeUndefined();
+    expect(JSON.stringify([invalid.payload, missing.payload, unverified.payload, off.payload])).not.toContain('98765432101234');
   });
 
   test('J-T18 지급 묶음은 KYC·잔액을 보고, 포트원은 수기 실행으로 SUBMITTED가 된다', async () => {
@@ -381,17 +380,16 @@ describe('정산 HTTP·유스케이스', () => {
     expect((await store.findStatementById(disputed.statementId))?.status).toBe('SCHEDULED');
   });
 
-  test('A1-H7 예금주를 KYC 상호·대표자와 대조하고 미확인 계좌는 지급을 막는다', async () => {
+  // F-07-7 시험 담당(2026-11-23): 정본 settlement §3·§6(ADR-0370 결정 5)으로 불일치 계좌는 저장하지 않는다(옛 기대: 200·holderVerified false 저장).
+  // 불일치 거부는 settlement-payout-account.http.test.ts(J-T40 ②)가 본다. 여기서는 옛 holderVerified=false 행이 남아 있으면 지급 묶음이 그 정산서를 ACCOUNT_MISMATCH로 막는지만 본다(data.md payout_account.holder_verified).
+  test('A1-H7 옛 예금주 미확인(holderVerified false) 계좌 행이 남아 있으면 지급을 막는다', async () => {
     await settlements.recordKyc(A, 'VERIFIED', { legalName: '주식회사 에이', representative: '김대표' });
-    const saved = await settlements.putPayoutAccount(A, 'sid', { bankCode: '004', accountNumber: '98765432101234', holderName: '㈜에이' }, '"0"', 'test-reauth');
-    expect(saved.holderVerified).toBe(true);
-    const mismatch = await settlements.putPayoutAccount(A, 'sid', { bankCode: '004', accountNumber: '98765432101234', holderName: '다른회사' }, '"1"', 'test-reauth');
-    expect(mismatch.holderVerified).toBe(false);
-
-    const s = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'TOSS', pgStore: 'STANDARD' });
+    // 포트원 결제분으로 본다(토스 결제분은 F-07-6부터 상점 셀러 상태도 보므로 이 시험의 관심 밖이다)
+    const s = await settlements.calculateEvent({ promoterId: A, eventId: EVENT, pg: 'PORTONE', pgStore: 'STANDARD' });
     await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, status: 'CONFIRMED' });
-    await store.savePayoutAccount({ ...(await store.findPayoutAccount(A))!, holdUntil: new Date(NOW.getTime() - 1), holderVerified: false });
-    await expect(settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: s.payoutDate!, actor: randomUUID() })).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-account-mismatch') });
+    await store.savePayoutAccount({ promoterId: A, bankCode: '88', accountLast4: '1234', version: 1, changedAt: NOW, holdUntil: new Date(NOW.getTime() - 1), holderVerified: false, agencySyncPending: false });
+    await expect(settlements.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: s.payoutDate!, portoneBalance: { amount: s.payoutAmount, observedAt: NOW.toISOString() }, actor: randomUUID() })).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-account-mismatch') });
+    expect(store.statements.get(s.statementId)).toMatchObject({ status: 'HELD', holdReason: 'ACCOUNT_MISMATCH' });
   });
 
   test('A1-H10 회차 수수료율이 없으면 임의 10% 대신 503으로 닫는다', async () => {
