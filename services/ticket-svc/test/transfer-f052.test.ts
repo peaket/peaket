@@ -26,7 +26,7 @@ import { DeviceKeys } from '../src/modules/ticket/application/device-keys.js';
 import { TicketService } from '../src/modules/ticket/application/ticket-service.js';
 import { Transfers } from '../src/modules/ticket/application/transfers.js';
 import type { TicketStatus } from '../src/modules/ticket/domain/ticket.js';
-import type { MemberCodeDirectory } from '../src/modules/ticket/domain/transfer-ports.js';
+import type { MemberCodeDirectory, TransferReauthGate } from '../src/modules/ticket/domain/transfer-ports.js';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -72,6 +72,16 @@ class RecordingDirectory implements MemberCodeDirectory {
   }
 }
 
+/** 재인증 확인 포트의 짝 가짜: 이 토큰만 거절한다(JwksFanReauthGate가 만료·재사용 토큰에 false를 주는 자리). 받은 작업을 적는다 */
+const REJECTED_TOKEN = 'rejected-reauth-token';
+class SwitchReauth implements TransferReauthGate {
+  readonly calls: string[] = [];
+  async verify(token: string | undefined, q: { readonly op: string }): Promise<boolean> {
+    this.calls.push(q.op);
+    return token !== undefined && token !== REJECTED_TOKEN;
+  }
+}
+
 interface Res {
   readonly status: number;
   readonly headers: Record<string, string | string[] | number | undefined>;
@@ -92,7 +102,8 @@ async function harness() {
   const store = new MemoryTransferStore({ tickets, revokeKey: (ticketId) => void revoked.push(ticketId) });
   const service = new TicketService({ store: tickets, clock });
   const directory = new RecordingDirectory();
-  const transfers = new Transfers({ store, reauth: { verify: async () => true }, recipientRefSecret: SECRET, clock, directory });
+  const reauth = new SwitchReauth();
+  const transfers = new Transfers({ store, reauth, recipientRefSecret: SECRET, clock, directory });
   const logs: string[] = [];
   const sink = new Writable({
     write: (chunk: Buffer | string, _enc, cb) => {
@@ -151,7 +162,7 @@ async function harness() {
   };
   const ticketRow = (ticketId: string) => tickets.tickets.get(ticketId)!;
 
-  return { svc, clock, tickets, store, service, transfers, directory, revoked, logs, send, get, post, issue, offer, ticketRow };
+  return { svc, clock, tickets, store, service, transfers, directory, reauth, revoked, logs, send, get, post, issue, offer, ticketRow };
 }
 
 type H = Awaited<ReturnType<typeof harness>>;
@@ -306,7 +317,8 @@ describe('F-05-2 T3 R-T25 ② [ASVS v5.0.0-2.3.4] 환급된 표는 받아도 쓸
     });
   }
 
-  for (const status of ['ACTIVE', 'TRANSFER_PENDING'] as const) {
+  // ISSUED도 받는다: 거절은 끝난 넷만이다(계획 §1 한다 2, RV-11)
+  for (const status of ['ISSUED', 'ACTIVE', 'TRANSFER_PENDING'] as const) {
     test(`F-05-2 T3 R-T25 ② ③ 경계 반대쪽: 표가 ${status}이면 받는다(200, 보유자 = 받는 사람, 보낸 사람 키 폐기 한 번)`, async () => {
       const h = await harness();
       const t = await h.issue();
@@ -622,6 +634,25 @@ describe('F-05-2 T8 [ASVS v5.0.0-11.1.1] 돌려주기 다시 보냄(같은 Idemp
     expect(again.raw).toBe(first.raw);
     expect(h.ticketRow(t)).toMatchObject({ accountId: A, version: v0 + 1 });
     expect(h.revoked.length).toBe(revoked0 + 1);
+  });
+
+  test('F-05-2 T8 ③ [ASVS v5.0.0-9.1.1] 같은 키 재생은 재인증 확인 뒤에 온다: 통과하지 못하는 토큰이면 403 reauth-required이고 RETURNED를 읽지 못한다(RV-05)', async () => {
+    const h = await harness();
+    const t = await given(h);
+    const key = randomUUID();
+    const first = await h.post(`/v1/tickets/${t}/returns`, B, { key, reauth: 'token-1' });
+    expect(first.status, first.raw).toBe(200);
+    const v = h.ticketRow(t).version;
+    const denied = await h.post(`/v1/tickets/${t}/returns`, B, { key, reauth: REJECTED_TOKEN });
+    expect(denied.status, denied.raw).toBe(403);
+    expect(String(denied.body.type)).toContain('reauth-required');
+    expect(denied.raw.includes('RETURNED')).toBe(false);
+    // 토큰이 아예 없어도 같다
+    const none = await h.send('POST', `/v1/tickets/${t}/returns`, B, { key });
+    expect(none.status, none.raw).toBe(403);
+    expect(none.raw.includes('RETURNED')).toBe(false);
+    expect(h.ticketRow(t).version).toBe(v);
+    expect(h.reauth.calls.filter((op) => op === 'TICKET_RETURN')).toHaveLength(3);
   });
 
   test('F-05-2 T8 ② 같은 키로 다른 표를 돌려주면 422 idempotency-key-reused(guidelines §4 다른 본문)이고 그 표는 그대로다, 다른 키면 지금처럼 404', async () => {

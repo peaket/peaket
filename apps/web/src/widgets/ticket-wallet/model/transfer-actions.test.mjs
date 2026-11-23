@@ -8,7 +8,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateDeviceKey } from '../../../features/wallet-device-key/device-key.ts';
-import { loadDeviceKey, saveDeviceKey, walletDatabase } from '../../../entities/wallet/index.ts';
+import { loadDeviceKey, loadTicketSnapshot, saveDeviceKey, saveTicketSnapshot, walletDatabase } from '../../../entities/wallet/index.ts';
 import {
   RETURN_CONFIRM_TEXT,
   canReturn,
@@ -49,6 +49,9 @@ beforeEach(async () => {
   await db.meta.clear();
 });
 
+/** 동기화가 남긴 받은 표 스냅샷(entities/wallet WalletTicketSnapshot) */
+const seedSnapshot = (ticketId) => saveTicketSnapshot({ ticketId, updatedAt: NOW, order: 0, eventId: '0193f2c0-0000-7000-8000-00000052e001', status: 'ACTIVE', transferLocked: false, received: true });
+
 async function seedKey(ticketId) {
   const key = await generateDeviceKey();
   await saveDeviceKey({ ticketId, keyId: key.keyIdText, privateKey: key.privateKey, publicKeyJwk: key.publicKeyJwk, createdAt: NOW, reason: 'TRANSFER', registration: 'REGISTERED' });
@@ -75,15 +78,20 @@ test('F-05-2 T14 I-T54 ④ 돌려주기 재인증도 카카오 먼저이고 purp
   assert.deepEqual(returnReauthTarget(TICKET), { purpose: 'ticket-return', returnTo: `/my/tickets/${TICKET}` });
 });
 
-test('F-05-2 T17 ② [ASVS v5.0.0-11.1.1] transfer-refund:v5.0.0-11.1.1 돌려주기 200이면 이 기기의 그 표 입장 키를 지우고 다른 표 키는 둔다', async () => {
+test('F-05-2 T17 ② [ASVS v5.0.0-11.1.1] transfer-refund:v5.0.0-11.1.1 돌려주기 200이면 이 기기의 그 표 입장 키와 월렛 항목을 지우고 다른 표는 둔다(RV-09)', async () => {
   const other = '0190f3a1-7c2e-7a00-8000-000000052099';
   await seedKey(TICKET);
   const otherKey = await seedKey(other);
+  await seedSnapshot(TICKET);
+  await seedSnapshot(other);
   const api = fakeApi(() => json(200, { ticketId: TICKET, status: 'RETURNED' }));
   const r = await returnTicket({ ticketId: TICKET, reauthToken: TOKEN, idempotencyKey: KEY, origin: API, fetch: api.fetch });
   assert.deepEqual(r, { kind: 'ok', body: { ticketId: TICKET, status: 'RETURNED' } });
   assert.equal(await loadDeviceKey(TICKET), undefined, '돌려준 표의 입장 키가 남았다');
   assert.equal((await loadDeviceKey(other))?.keyId, otherKey);
+  // 지우는 연산은 건드린 것 전부: 다음 동기화를 기다리지 않고 그 표의 월렛 항목도 지운다(계획 §10)
+  assert.equal(await loadTicketSnapshot(TICKET), undefined, '돌려준 표가 월렛에 남았다');
+  assert.equal((await loadTicketSnapshot(other))?.ticketId, other);
   const [call] = api.calls;
   assert.deepEqual([call.method, call.url, call.credentials], ['POST', `${API}/v1/tickets/${TICKET}/returns`, 'include']);
   assert.equal(call.headers['idempotency-key'], KEY);
@@ -105,6 +113,7 @@ test('F-05-2 T13 [ASVS v5.0.0-3.3.4] 돌려주기의 재인증 토큰은 X-Reaut
 
 test('F-05-2 T11 R-T17 ② 돌려주기가 실패하면 입장 키를 지우지 않고 d5 문구를 고른다: 409 입장 시작, 403 다시 로그인, 끊김은 network', async () => {
   const keyId = await seedKey(TICKET);
+  await seedSnapshot(TICKET);
   const api = fakeApi(
     () => problem(409, 'entry-started'),
     () => problem(403, 'reauth-required'),
@@ -120,6 +129,7 @@ test('F-05-2 T11 R-T17 ② 돌려주기가 실패하면 입장 키를 지우지 
   assert.match(returnFailureOf(reauth).text, /다시 로그인해 주세요$/);
   assert.deepEqual(await returnTicket(o), { kind: 'network' });
   assert.equal((await loadDeviceKey(TICKET))?.keyId, keyId, '실패했는데 입장 키를 지웠다');
+  assert.equal((await loadTicketSnapshot(TICKET))?.ticketId, TICKET, '실패했는데 월렛 항목을 지웠다');
   // 서버 title은 문구에 섞이지 않는다
   assert.equal(returnFailureOf(entry).text.includes('서버 제목'), false);
 });
