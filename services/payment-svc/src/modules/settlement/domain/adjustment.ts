@@ -49,8 +49,10 @@ export interface AdjustmentRequest {
 export const isDisputeAdjustmentCode = (code: string): code is DisputeReasonCode => (DISPUTE_ADJUSTMENT_CODES as readonly string[]).includes(code);
 
 /** 정산서 상태가 조정을 받는가. 아니면 409 settlement-adjustment-not-allowed(요청·적용이 같다) */
-export function assertAdjustable(status: StatementStatus): void {
+export function assertAdjustable(status: StatementStatus, payoutBatchId: string | null = null): void {
   if (!ADJUSTABLE_STATUSES.includes(status)) throw new SettlementProblem('settlement-adjustment-not-allowed', 409, '지금 상태의 정산서는 조정할 수 없습니다');
+  // 지급 묶음에 붙은(지급을 요청한) 정산서는 상태가 CONFIRMED여도 조정하지 않는다(묶을 때 상태를 바꾸지 않는다, ADR-0369 결정 14 ①)
+  if (payoutBatchId !== null) throw new SettlementProblem('settlement-adjustment-not-allowed', 409, '지금 상태의 정산서는 조정할 수 없습니다');
 }
 
 /**
@@ -65,7 +67,7 @@ export function validateAdjustment(req: AdjustmentRequest, statement: StatementR
   if (note !== undefined && note.length > EVIDENCE_NOTE_MAX) throw new SettlementProblem('invalid-query', 422, '근거 메모는 2,000자까지입니다');
   const needsNote = req.reasonCode === 'OTHER' || !isDisputeAdjustmentCode(req.reasonCode);
   if (needsNote && (note === undefined || note.trim() === '')) throw new SettlementProblem('invalid-query', 422, '이 사유 코드는 근거 메모가 필요합니다');
-  assertAdjustable(statement.status);
+  assertAdjustable(statement.status, statement.payoutBatchId);
   if (isDisputeAdjustmentCode(req.reasonCode)) {
     if (!req.disputeId) throw new SettlementProblem('settlement-adjustment-dispute-mismatch', 422, '이의 인정 조정에는 이의 ID가 필요합니다');
     if (statement.status !== 'DISPUTED') throw new SettlementProblem('settlement-adjustment-dispute-mismatch', 422, '이의 중인 정산서가 아닙니다');

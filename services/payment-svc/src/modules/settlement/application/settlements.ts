@@ -772,7 +772,7 @@ export class Settlements {
       if (!s) throw notFound();
       if (a.status === 'APPLIED') return { adjustment: adjustmentView(a), statement: statementView(s) };
       if (a.status === 'VOID') throw new SettlementProblem('settlement-adjustment-void', 409, '반려·만료된 조정입니다');
-      assertAdjustable(s.status);
+      assertAdjustable(s.status, s.payoutBatchId);
       const dispute = a.disputeId !== null ? (await this.d.store.listDisputes(s.statementId)).find((d) => d.disputeId === a.disputeId) : undefined;
       if (a.disputeId !== null && (s.status !== 'DISPUTED' || !dispute || dispute.result !== null)) throw new SettlementProblem('settlement-adjustment-dispute-mismatch', 409, '그 이의가 이미 닫혔거나 정산서가 이의 중이 아닙니다');
       // 이의 없는 조정은 이의 중(DISPUTED) 정산서에 적용하지 않는다(§4.3 '검사', J-T36 ②, 리뷰 RV-07). 아무것도 쓰지 않는다
