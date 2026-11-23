@@ -124,12 +124,6 @@ jobs:
       - run: pnpm --filter @peaket/purchase-svc test:integration
         env:
           PEAKET_TEST_REPORT: test-report-int.json
-      # ops-svc의 명령 원장·감사 체인·사후 검토와 제어 gRPC 판 원장·ack 기록(control_version·command_delivery, 이어 보내기)을 실제 PostgreSQL 18로 본다
-      # (BAT-355 이후 CI에서 돌지 않던 단계를 F-02-1 OPS-300이 더한다, 감독 결정 2026-11-23). 범위를 고른 실행(--affected)에서는 의존 패키지의 dist가 없을 수 있어 먼저 빌드한다
-      - run: pnpm exec turbo run build --filter=@peaket/ops-svc^...
-      - run: pnpm --filter @peaket/ops-svc test:integration
-        env:
-          PEAKET_TEST_REPORT: test-report-int.json
       # realtime-gw의 좌석 델타 WebSocket을 실제 Valkey로: 핸드셰이크 거절, 샤드 Pub/Sub 구독·묶음, Valkey를 멈췄다 다시 띄움, 구독 명령만 허용한 사용자,
       # SIGTERM 1012, 시작 파일(dist/main.js)(BUILD_ORDER HOT-090, S-T31·S-T42). 시작 파일 시험이 dist를 쓰므로 의존 패키지와 함께 먼저 빌드한다
       - run: pnpm exec turbo run build --filter=@peaket/realtime-gw...
@@ -149,7 +143,7 @@ jobs:
         env:
           PEAKET_TEST_REPORT: test-report-int.json
           PEAKET_START_FILES_PREBUILT: '1'
-      # ops-svc의 명령 접수·2인 승인·감사 체인·회차 취소·CS 처리함(마이그레이션·건 요청·기한 경보)을 실제 PostgreSQL 18로, 명령 사건·CS 건 요청 소비자를 실제 Kafka로 본다
+      # ops-svc의 명령 접수·2인 승인·감사 체인·회차 취소·CS 처리함(마이그레이션·건 요청·기한 경보)과 제어 gRPC 판 원장·ack 기록·이어 보내기(F-02-1 OPS-300)를 실제 PostgreSQL 18로, 명령 사건·CS 건 요청 소비자를 실제 Kafka로 본다
       # (GAT-110·GAT-280 등). test:integration이 있는 작업 공간은 모두 이 잡에서 돈다(F-06-2 리뷰 RV-05). 범위를 고른 실행(--affected)에서는 의존 패키지 dist가 없을 수 있어 먼저 빌드한다
       - run: pnpm exec turbo run build --filter=@peaket/ops-svc^...
       - run: pnpm --filter @peaket/ops-svc test:integration
