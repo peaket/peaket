@@ -358,6 +358,7 @@ export type ProblemType =
   | 'seatmap-replace-required'
   | 'seatmap-worker-unavailable'
   | 'self-target-forbidden'
+  | 'self-transfer'
   | 'seq-not-in-checkpoint'
   | 'server-busy'
   | 'session-not-found'
@@ -385,6 +386,7 @@ export type ProblemType =
   | 'transfer-closed'
   | 'transfer-expired'
   | 'transfer-locked'
+  | 'transfer-lookup-limited'
   | 'transfer-not-allowed'
   | 'transfer-not-offered'
   | 'transfer-pending'
@@ -765,6 +767,7 @@ export const PROBLEM_TYPES = {
   'seatmap-replace-required': { status: 409, title: "좌석이 있는 좌석맵은 바꾸기로만 가져올 수 있습니다" },
   'seatmap-worker-unavailable': { status: 503, title: "좌석맵 파일을 잠시 확인할 수 없습니다" },
   'self-target-forbidden': { status: 403, title: "자기 계정에는 할 수 없습니다" },
+  'self-transfer': { status: 422, title: "자신에게는 양도할 수 없습니다" },
   'seq-not-in-checkpoint': { status: 422, title: "그 체크포인트가 덮지 않는 기록입니다" },
   'server-busy': { status: 429, title: "요청이 많아 잠시 처리하지 못했습니다" },
   'session-not-found': { status: 404, title: "로그인한 기기가 아니거나 이미 로그아웃했습니다" },
@@ -792,6 +795,7 @@ export const PROBLEM_TYPES = {
   'transfer-closed': { status: 409, title: "양도 마감(공연 시작 2시간 전)이 지났습니다" },
   'transfer-expired': { status: 409, title: "양도 요청 기한이 지났습니다" },
   'transfer-locked': { status: 409, title: "지금은 양도할 수 없는 티켓입니다" },
+  'transfer-lookup-limited': { status: 429, title: "받는 사람 확인 횟수를 넘었습니다" },
   'transfer-not-allowed': { status: 403, title: "양도로 보유자가 바뀐 티켓만 새 기기를 등록할 수 있습니다" },
   'transfer-not-offered': { status: 409, title: "진행 중인 양도 요청이 아닙니다" },
   'transfer-pending': { status: 409, title: "양도 요청을 철회한 뒤 취소할 수 있습니다" },

@@ -72,7 +72,7 @@ function problem(e: unknown): never {
         throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '의존 서비스를 잠시 쓸 수 없습니다', retryAfterSeconds: 1 });
       case 'TOO_MANY_REQUESTS':
         throw new ProblemError({
-          type: 'too-many-requests',
+          type: 'transfer-lookup-limited',
           status: 429,
           title: '받는 사람 확인 횟수를 넘었습니다',
           retryAfterSeconds: Math.max(1, Math.ceil(e.retryAfterSeconds ?? 1)),
@@ -80,7 +80,7 @@ function problem(e: unknown): never {
       case 'INVALID_QUERY':
         throw new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다' });
       case 'IDEMPOTENCY_KEY_REUSED':
-        throw new ProblemError({ type: 'idempotency-key-reused', status: 422, title: '같은 키로 다른 요청을 보냈습니다' });
+        throw new ProblemError({ type: 'idempotency-key-reused', status: 422, title: '같은 멱등 키를 다른 요청에 썼습니다' });
       case 'INVALID_INPUT':
         throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
     }
