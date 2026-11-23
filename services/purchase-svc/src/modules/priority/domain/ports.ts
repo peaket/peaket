@@ -13,6 +13,12 @@ export class InvalidPriorityGrantState extends Error {
 export type PriorityGrantSyncResult = 'ok' | 'failed' | 'invalid';
 export type PriorityGrantExpireResult = 'ok' | 'failed';
 
+/** 대조 목록의 이어 읽기 위치(`(updated_at, id)` 키셋, ADR-0385) */
+export interface PriorityGrantCursor {
+  readonly updatedAtMs: number;
+  readonly grantId: string;
+}
+
 /** 대조 틱의 결과를 세는 포트(어댑터의 Prom 구현이 받는다). 어댑터가 유스케이스를 가져오지 않게 포트에 둔다 */
 export interface PriorityGrantSyncSignals {
   sync(result: PriorityGrantSyncResult): void;
@@ -48,8 +54,8 @@ export interface PriorityGrantStore {
   releaseOrder(grantId: string, orderId: string, nowMs: number): Promise<boolean>;
   /** 기한 지난 OFFERED(진행 중 주문 없음)를 EXPIRED로 바꾸고 바뀐 행을 돌려준다(대조 틱, ADR-0385) */
   expireDue(nowMs: number, limit: number): Promise<readonly PriorityGrant[]>;
-  /** expires_at > now이고 상태가 OFFERED·USED·WITHDRAWN인 행(대조 틱, ADR-0385) */
-  listSyncable(nowMs: number, limit: number): Promise<readonly PriorityGrant[]>;
+  /** expires_at > now이고 상태가 OFFERED·USED·WITHDRAWN인 행(대조 틱, ADR-0385). after가 있으면 그 키 뒤부터 읽는다 */
+  listSyncable(nowMs: number, limit: number, after?: PriorityGrantCursor): Promise<readonly PriorityGrant[]>;
 }
 
 /** 취소한 표의 좌석·등급·가격을 읽는 포트(purchase DB order_item·order_cancellation·event 일정) */

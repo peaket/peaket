@@ -1,6 +1,6 @@
 // 시험용 우선 구매 권리 저장소. 같은 취소 표에는 한 번만 만든다.
 import { PrioritySeatConflict, type NewPriorityGrant, type PriorityGrant } from '../domain/priority-grant.js';
-import type { PriorityGrantStore } from '../domain/ports.js';
+import type { PriorityGrantCursor, PriorityGrantStore } from '../domain/ports.js';
 
 export class MemoryPriorityGrantStore implements PriorityGrantStore {
   readonly grants = new Map<string, PriorityGrant>();
@@ -94,10 +94,12 @@ export class MemoryPriorityGrantStore implements PriorityGrantStore {
     });
   }
 
-  async listSyncable(nowMs: number, limit: number): Promise<readonly PriorityGrant[]> {
+  async listSyncable(nowMs: number, limit: number, after?: PriorityGrantCursor): Promise<readonly PriorityGrant[]> {
+    const cmpId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
     return [...this.grants.values()]
       .filter((g) => g.expiresAtMs > nowMs && (g.status === 'OFFERED' || g.status === 'USED' || g.status === 'WITHDRAWN'))
-      .sort((a, b) => a.updatedAtMs - b.updatedAtMs || a.grantId.localeCompare(b.grantId))
+      .filter((g) => after === undefined || g.updatedAtMs > after.updatedAtMs || (g.updatedAtMs === after.updatedAtMs && cmpId(g.grantId, after.grantId) > 0))
+      .sort((a, b) => a.updatedAtMs - b.updatedAtMs || cmpId(a.grantId, b.grantId))
       .slice(0, Math.max(0, Math.trunc(limit)));
   }
 }

@@ -1031,6 +1031,7 @@ spec:
         - source:
             principals:
               - cluster.local/ns/core/sa/ops-svc
+              - cluster.local/ns/purchase/sa/purchase-svc
       to:
         - operation:
             paths:

@@ -27,6 +27,9 @@ service:
     # BAT-425 GAT-120: 회차 취소 일괄 환불의 자동 정지가 읽는 payment-svc 내부 `GET /internal/v1/circuits`의 뿌리 주소.
     # 없으면 local·ci는 늘 닫힌 대역이고 그 밖 환경은 시작하지 않는다(서킷이 늘 닫힌 채 조용히 도는 것을 막는다)
     PEAKET_PAYMENT_HTTP_URL: http://payment-svc.purchase.svc.cluster.local:8080
+    # F-05-3 IR-01: 우선 구매 권리 상태 대조가 부르는 queue-svc 업무 gRPC(웨이포인트 Service queue-svc-grpc, ADR-0285 결정 5, ADR-0385).
+    # 값이 없으면 local·ci·demo는 대조를 끄고 그 밖의 환경은 시작하지 않는다.
+    PEAKET_QUEUE_GRPC_ADDR: queue-svc-grpc:50051
   volumes:
     - name: seatmaps
       configMap:
