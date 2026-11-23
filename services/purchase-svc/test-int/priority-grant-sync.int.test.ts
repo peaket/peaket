@@ -78,6 +78,23 @@ describe('F-05-3 우선 구매 권리 대조 [GAT-135, S-T37]', () => {
     expect(syncable.map((g) => g.grantId)).not.toContain(stale.grantId);
   });
 
+  test('S-T37 ⑫b 만료 DB 실패(트리거) 뒤 대조가 실제 DB에서 고친다', async () => {
+    const g = await createGrant({ expiresAtMs: NOW - 1 });
+    await database.pool.query(`create or replace function f053_fail() returns trigger language plpgsql as $$ begin raise exception 'f053 failure'; end $$`);
+    await database.pool.query(
+      `create trigger f053_fail before update on priority_grant for each row when (old.id = '${g.grantId}'::uuid) execute function f053_fail()`,
+    );
+    try {
+      await expect(store.expire(g.grantId, NOW)).rejects.toThrow();
+    } finally {
+      await database.pool.query('drop trigger if exists f053_fail on priority_grant');
+    }
+    expect(await store.find(g.grantId)).toMatchObject({ status: 'OFFERED', version: 1 });
+
+    await store.expireDue(NOW, 100);
+    expect(await store.find(g.grantId)).toMatchObject({ status: 'EXPIRED', version: 2 });
+  });
+
   test('S-T37 ⑩⑪ 실제 gRPC로 OFFERED·USED·WITHDRAWN을 보내고, UNAVAILABLE이면 다음 틱에 다시 보낸다', async () => {
     const { PriorityGrantSync, GrpcQueuePriorityGrants } = await loadModules();
     const memory = new MemoryPriorityGrantStore();
