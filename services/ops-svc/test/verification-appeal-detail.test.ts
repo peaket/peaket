@@ -107,19 +107,27 @@ describe('B-T28 ① 근거가 없거나 읽지 못할 때', () => {
     expect([va.content, va.text, va.entryState]).toEqual(['AVAILABLE', fx.text, 'VERIFYING']);
   });
 
-  test('B-T28 ① 근거 읽기 데드라인(정본 1초 [가정]): 0.6초 늦은 답은 FOUND, 1.6초 늦은 답은 200·UNAVAILABLE이다', async () => {
-    const { caseId } = await h.openAppeal();
+  // 시험 리뷰 1 TR-10 반영: 경계를 0.8초·1.3초로 좁히고 queue 쪽 1초도 본다
+  test('B-T28 ① 상세 읽기 데드라인(정본 호출마다 1초 [가정]): trust·queue 모두 0.8초 늦은 답은 받고 1.3초 늦은 답은 끊어 200·그 칸만 비운다', async () => {
+    const { caseId, fx } = await h.openAppeal();
     await h.runDispatch();
-    // real-time: gRPC 데드라인은 실제 시계로 잰다(가짜 시계로 옮길 수 없다). 경계 양쪽에 0.4·0.6초 여유를 둔다 F-06-7
-    const late = (ms: number) => () => new Promise<{ value: Record<string, unknown> }>((r) => setTimeout(() => r({ value: evidenceAnswer() }), ms));
-    h.stubs.trust.set('GetVerdictEvidence', late(600));
+    // real-time: gRPC 데드라인은 실제 시계로 잰다(가짜 시계로 옮길 수 없다). 경계 양쪽에 0.2·0.3초 여유를 둔다 F-06-7
+    const late = <T,>(ms: number, v: T) => () => new Promise<T>((r) => setTimeout(() => r(v), ms));
+    h.stubs.trust.set('GetVerdictEvidence', late(800, { value: evidenceAnswer() }));
     expect((await h.appealOf(caseId)).evidence).toEqual(FOUND);
-    h.stubs.trust.set('GetVerdictEvidence', late(1_600));
+    h.stubs.trust.set('GetVerdictEvidence', late(1_300, { value: evidenceAnswer() }));
     const started = performance.now();
+    expect((await h.appealOf(caseId)).evidence).toEqual(EMPTY_EVIDENCE('UNAVAILABLE'));
+    expect(performance.now() - started).toBeLessThan(1_250);
+    h.stubs.trust.restore();
+    const appealAnswer = { value: { appeal_id: fx.appealId, event_id: fx.eventId, account_id: fx.accountId, pid: fx.pid, text: fx.text, reason_category: fx.reasonCategory, received_at: { seconds: Math.floor(Date.parse(fx.receivedAtIso) / 1000), nanos: 0 }, entry_state: 'APPEAL_ENTRY_STATE_PASSED' } };
+    h.stubs.queue.set('GetVerificationAppeal', late(800, appealAnswer));
+    expect((await h.appealOf(caseId)).entryState).toBe('PASSED');
+    h.stubs.queue.set('GetVerificationAppeal', late(1_300, appealAnswer));
+    const q0 = performance.now();
     const va = await h.appealOf(caseId);
-    expect(va.evidence).toEqual(EMPTY_EVIDENCE('UNAVAILABLE'));
-    // 1초에서 끊었다(1.6초 답을 다 기다리지 않았다)
-    expect(performance.now() - started).toBeLessThan(1_550);
+    expect([va.entryState, va.content, va.evidence]).toEqual([null, 'AVAILABLE', FOUND]);
+    expect(performance.now() - q0).toBeLessThan(1_250);
   });
 
   test('B-T28 ① 내용을 옮긴 뒤 queue-svc가 멈추면 상세는 200이고 entryState만 null이다(글·근거는 보인다)', async () => {
@@ -178,5 +186,38 @@ describe('B-T28 ① 근거가 없거나 읽지 못할 때', () => {
     await h.runDispatch();
     for (const role of ['operator', 'commander'] as const) expect((await h.appealOf(caseId, role)).content, role).toBe('AVAILABLE');
     expect((await h.get(h.as('viewer'), caseId)).status).toBe(403);
+  });
+});
+
+// 시험 리뷰 1 TR-06 반영(시험 담당 lane3-f067-test): 확정 신호 셋·판정 출처 둘·사유 범주 여섯을 값마다 대역 답 → 상세 값으로 본다.
+// 정본: openapi CsCaseDetail.verificationAppeal.evidence.hardSignal(NONE·BLOCK_LIST·HONEYPOT)·source(REALTIME·REASSESS)·reasonCategory(여섯), trust.proto HardSignal·EvidenceSource·ReasonCategory.
+describe('B-T28 ① 근거·사유 범주 값마다', () => {
+  test('B-T28 ① 확정 신호 셋과 판정 출처 둘을 각각 그 값으로 옮긴다', async () => {
+    for (const [hard, view] of [
+      ['HARD_SIGNAL_NONE', 'NONE'],
+      ['HARD_SIGNAL_BLOCK_LIST', 'BLOCK_LIST'],
+      ['HARD_SIGNAL_HONEYPOT', 'HONEYPOT'],
+    ] as const) {
+      for (const [src, srcView] of [
+        ['EVIDENCE_SOURCE_REALTIME', 'REALTIME'],
+        ['EVIDENCE_SOURCE_REASSESS', 'REASSESS'],
+      ] as const) {
+        const fx = appealFixture();
+        h.stubs.evidence.set(fx.pid, evidenceAnswer({ hardSignal: hard, source: src }));
+        const { caseId } = await h.openAppeal(fx);
+        await h.runDispatch();
+        const e = (await h.appealOf(caseId)).evidence as Record<string, unknown>;
+        expect([hard, src, e.state, e.hardSignal, e.source]).toEqual([hard, src, 'FOUND', view, srcView]);
+      }
+    }
+  });
+
+  test('B-T28 ① 사유 범주 여섯을 내용(queue)과 건 category(내용 없음) 두 길 모두 각각 그 값으로 옮긴다', async () => {
+    for (const reason of ['RAPID_REQUESTS', 'DEVICE_HISTORY', 'NETWORK', 'INTERACTION', 'HUMAN_CHECK', 'SHARED_PATTERN']) {
+      const withContent = await h.openAppeal(appealFixture({ reasonCategory: `REASON_CATEGORY_${reason}` }));
+      const gone = await h.openAppeal(appealFixture({ reasonCategory: `REASON_CATEGORY_${reason}` }), { content: false });
+      await h.runDispatch();
+      expect([reason, (await h.appealOf(withContent.caseId)).reasonCategory, (await h.appealOf(gone.caseId)).reasonCategory]).toEqual([reason, reason, reason]);
+    }
   });
 });

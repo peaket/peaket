@@ -337,7 +337,6 @@ describe('B-T10 ④ 기각 끝에서 끝', () => {
   test('B-T10 ④ B-T28 ④ 기각하면 queue BLOCKED로 끝나고 trust 라벨 기록(tr:lbl)이 없으며 identity CLOSED다', async () => {
     const a = await appealOf({ blocked: true });
     await runDispatch();
-    const labelsReached = trustSrv.reached.get('ApplyLabel') ?? 0;
     expect((await decide(adminIdentity.ops('cs_agent'), a.caseId, 'REJECTED')).status).toBe(202);
     await untilApplied(a.caseId, ['QUEUE_RESOLVE', 'ACCOUNT_HOLD_CLOSE']);
     clock.advance(3_600_000);
@@ -346,7 +345,7 @@ describe('B-T10 ④ 기각 끝에서 끝', () => {
     expect(await w.keysLike(`tr:lbl:{${a.caseId}}*`)).toEqual([]);
     expect(await w.cmd(['EXISTS', trustKeys.block(a.deviceRef!)])).toBe(1);
     expect(await hold(a.caseId)).toEqual([{ state: 'CLOSED', source_version: '2', kind: 'VERIFICATION_APPEAL', account_id: a.accountId }]);
-    expect(trustSrv.reached.get('ApplyLabel') ?? 0).toBe(labelsReached);
+    // 시험 리뷰 1 TR-12 반영: 공유 서버의 전체 호출 수를 견주지 않는다. 이 건의 라벨 기록(tr:lbl:{건 ID})이 없는 것으로 본다(위 줄)
     expect((await q<{ status: string; appeal_result: string; block_list_change: string | null }>('select status, appeal_result, block_list_change from verification_case where case_id = $1', [a.caseId]))[0]).toEqual({
       status: 'PASSED',
       appeal_result: 'REJECTED',

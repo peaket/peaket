@@ -204,11 +204,16 @@ export async function startAppealStubs(): Promise<AppealStubs> {
     },
     ResolveVerificationAppeal: () => ({ value: { result: 'RESOLVE_APPEAL_RESULT_APPLIED' } }),
   });
+  // 받는 쪽 검사와 같은 답(시험 리뷰 1 TR-02): trust ApplyLabel·GetVerdictEvidence는 회차·pid가 비면 INVALID_ARGUMENT
+  // (trust-svc apply-label.ts·evidence.ts의 '영문·숫자·_·- 1~64자'), identity SetAccountHold는 계정·건이 UUID가 아니면 INVALID_ARGUMENT(set-account-hold.ts)
+  const filled = (v: unknown) => typeof v === 'string' && v.length > 0;
+  const uuid = (v: unknown) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
   const trust = new StubService({
-    ApplyLabel: (req) => ({ value: { changed: true, block_list: blockList.get(String(req.pid)) ?? 'BLOCK_LIST_CHANGE_REMOVED' } }),
-    GetVerdictEvidence: (req) => ({ value: evidence.get(String(req.pid)) ?? evidenceAnswer() }),
+    ApplyLabel: (req) =>
+      !filled(req.pid) || !filled(req.event_id) ? { code: grpc.status.INVALID_ARGUMENT } : { value: { changed: true, block_list: blockList.get(String(req.pid)) ?? 'BLOCK_LIST_CHANGE_REMOVED' } },
+    GetVerdictEvidence: (req) => (!filled(req.pid) || !filled(req.event_id) ? { code: grpc.status.INVALID_ARGUMENT } : { value: evidence.get(String(req.pid)) ?? evidenceAnswer() }),
   });
-  const identity = new StubService({ SetAccountHold: () => ({ value: { changed: true } }) });
+  const identity = new StubService({ SetAccountHold: (req) => (!uuid(req.account_id) || !uuid(req.source_ref) ? { code: grpc.status.INVALID_ARGUMENT } : { value: { changed: true } }) });
   const servers: StartedGrpcServer[] = [];
   const start = async (services: Array<{ definition: grpc.ServiceDefinition; handlers: grpc.UntypedServiceImplementation }>) => {
     const s = await startGrpcServer({ host: '127.0.0.1', port: 0, profile: 'service', drainMs: 0, services });
@@ -299,7 +304,7 @@ export interface AppealHarness extends CsHarness {
   dispatchMetric(call: string, result: string): Promise<number>;
 }
 
-export async function appealHarness(o: { nowIso?: string; env?: AppealEnvOptions } = {}): Promise<AppealHarness> {
+export async function appealHarness(o: { nowIso?: string; env?: AppealEnvOptions; background?: { csCaseDispatchMs?: number } } = {}): Promise<AppealHarness> {
   const stubs = await startAppealStubs();
   const env = appealEnv(stubs, o.env);
   const wiring = await loadWiring();
@@ -319,6 +324,7 @@ export async function appealHarness(o: { nowIso?: string; env?: AppealEnvOptions
     ...(o.nowIso ? { nowIso: o.nowIso } : {}),
     ...(csAppeals ? { csAppeals } : {}),
     ...(signals ? { registerSignals: (r) => signals.register(r) } : {}),
+    ...(o.background ? { background: o.background } : {}),
   });
   const alerts = h.svc.app.get<MemoryOpsAlertStore>(OPS_ALERT_STORE);
   const parse = (payload: string): Record<string, unknown> => (payload ? (JSON.parse(payload) as Record<string, unknown>) : {});

@@ -40,25 +40,22 @@ describe('B-T28 ⑤ 열 때 OPEN, 해결할 때 더 큰 판의 CLOSED', () => {
     ]);
   });
 
-  test('B-T28 ⑤ 되돌림 순서: OPEN이 못 간 채 결정하고 CLOSED가 먼저 닿아도 판은 OPEN 1·CLOSED 2이고 둘 다 반영된다', async () => {
+  // 시험 리뷰 1 TR-07 반영: 대역이 만든 차례를 단언하지 않는다. 판(OPEN 1·CLOSED 2)과 두 호출의 끝 상태만 본다(늦은 OPEN을 버리는 것은 identity 몫, 통합 시험이 본다).
+  // 정본 결정(계획 §11 ③): 결정 직후 보내기는 그 건의 밀린 OPEN도 함께, OPEN → CLOSE 차례로 보낸다.
+  test('B-T28 ⑤ OPEN이 못 간 채 결정하면 결정 직후 보내기가 밀린 OPEN(판 1)과 CLOSED(판 2)를 함께 보내고, 실패한 것은 다시 보내 둘 다 반영된다', async () => {
     const { caseId } = await h.openAppeal();
     h.stubs.identity.fail(grpc.status.UNAVAILABLE);
     await h.runDispatch();
-    expect(await h.dispatchOf(caseId, 'ACCOUNT_HOLD_OPEN')).toMatchObject({ state: 'PENDING', lastError: 'UNAVAILABLE' });
-    expect((await h.decide(h.as('cs_agent'), caseId, { outcome: 'ACCEPTED', resultNote: NOTE }, { ifMatch: '"1"' })).status).toBe(202);
-    await untilAttempted(h, caseId, ['ACCOUNT_HOLD_CLOSE']);
-    // identity가 돌아오되 OPEN은 한 번 더 실패: CLOSED(판 2)가 먼저 반영된다
+    expect(await h.dispatchOf(caseId, 'ACCOUNT_HOLD_OPEN')).toMatchObject({ state: 'PENDING', attempts: 1, lastError: 'UNAVAILABLE' });
     h.stubs.identity.restore();
-    h.stubs.identity.set('SetAccountHold', (req) => (req.state === 'ACCOUNT_HOLD_STATE_OPEN' && h.stubs.identity.of('SetAccountHold').filter((r) => r.state === 'ACCOUNT_HOLD_STATE_OPEN').length < 3 ? { code: grpc.status.UNAVAILABLE } : { value: { changed: true } }));
-    for (let i = 0; i < 4; i++) await h.advanceAndRun(600_000);
+    // 결정 직후 보내기의 OPEN은 한 번 더 실패하고 CLOSE는 반영된다(답은 next로 정한다)
+    h.stubs.identity.next('SetAccountHold', (req) => (req.state === 'ACCOUNT_HOLD_STATE_OPEN' ? { code: grpc.status.UNAVAILABLE } : { value: { changed: true } }));
+    expect((await h.decide(h.as('cs_agent'), caseId, { outcome: 'ACCEPTED', resultNote: NOTE }, { ifMatch: '"1"' })).status).toBe(202);
+    await untilAttempted(h, caseId, ['ACCOUNT_HOLD_OPEN'], 2);
+    for (let i = 0; i < 3; i++) await h.advanceAndRun(600_000);
     const sent = h.stubs.identity.of('SetAccountHold');
-    // 반영된 뒤에는 다시 보내지 않으므로 호출마다 마지막 줄이 반영된 줄이다: CLOSED가 OPEN보다 먼저 반영됐다
-    const states = sent.map((r) => r.state);
-    const closedApplied = states.lastIndexOf('ACCOUNT_HOLD_STATE_CLOSED');
-    const openApplied = states.lastIndexOf('ACCOUNT_HOLD_STATE_OPEN');
-    expect(closedApplied).toBeGreaterThanOrEqual(0);
-    expect(openApplied).toBeGreaterThan(closedApplied);
     for (const r of sent) expect([r.state, r.source_version]).toEqual(r.state === 'ACCOUNT_HOLD_STATE_OPEN' ? ['ACCOUNT_HOLD_STATE_OPEN', 1] : ['ACCOUNT_HOLD_STATE_CLOSED', 2]);
+    expect(sent.some((r) => r.state === 'ACCOUNT_HOLD_STATE_CLOSED')).toBe(true);
     expect(await h.dispatchOf(caseId, 'ACCOUNT_HOLD_OPEN')).toMatchObject({ state: 'APPLIED' });
     expect(await h.dispatchOf(caseId, 'ACCOUNT_HOLD_CLOSE')).toMatchObject({ state: 'APPLIED' });
   });
@@ -90,6 +87,20 @@ describe('B-T10 ⑥ B-T28 ⑤ 처리함에 건이 하나', () => {
     expect(h.stubs.queue.count('GetVerificationAppeal')).toBe(1);
     expect(holds()).toEqual([['ACCOUNT_HOLD_STATE_OPEN', 1, a.caseId, fx.accountId, 'ACCOUNT_HOLD_KIND_VERIFICATION_APPEAL']]);
     expect(((await h.appealOf(a.caseId)).dispatch as Array<{ call: string }>).map((d) => d.call)).toEqual(['APPEAL_COPY', 'ACCOUNT_HOLD_OPEN']);
+  });
+
+  // 시험 리뷰 1 TR-15 반영: 정본 결정(계획 §11 ⑤, bot-defense §12 '같은 이의의 다른 건 요청', data.md cs_case_request.event_key)
+  test('B-T10 ⑥ 해결된 이의 건 뒤에 같은 이의 ID로 다른 eventKey 건 요청이 와도 새 건을 열지 않고 그 건을 돌려주며 보낼 호출을 더하지 않는다', async () => {
+    const { caseId, fx } = await h.openAppeal();
+    await h.runDispatch();
+    expect((await h.decide(h.as('cs_agent'), caseId, { outcome: 'REJECTED', resultNote: NOTE }, { ifMatch: '"1"' })).status).toBe(202);
+    await untilAttempted(h, caseId, ['QUEUE_RESOLVE', 'ACCOUNT_HOLD_CLOSE']);
+    const again = await h.intake(caseRequest('VERIFICATION_APPEAL', { sourceId: fx.appealId, category: fx.reasonCategory }));
+    expect([again.status, again.body.caseId]).toEqual([202, caseId]);
+    expect(await h.requests('VERIFICATION_APPEAL', 'duplicate')).toBe(1);
+    await h.advanceAndRun(600_000);
+    expect(((await h.appealOf(caseId)).dispatch as Array<{ call: string }>).map((d) => d.call)).toEqual(['APPEAL_COPY', 'ACCOUNT_HOLD_OPEN', 'QUEUE_RESOLVE', 'ACCOUNT_HOLD_CLOSE']);
+    expect(holds()).toHaveLength(2);
   });
 
   test('B-T10 ⑥ 다른 종류의 건(분쟁)을 열면 보낼 호출이 없고 받는 쪽을 부르지 않는다', async () => {

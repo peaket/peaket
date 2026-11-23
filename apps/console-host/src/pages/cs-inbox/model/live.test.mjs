@@ -4,7 +4,7 @@
 // 서버가 실제로 준 응답을 이 해석으로 읽는 시험은 services/ops-svc/test/cs-inbox-screen-link.test.ts·test-int/cs-cases.int.test.ts다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FILTER_KINDS, canActOn, casePageOf, caseViewOf, dueBadge, dueText, errorOf, hasUrgent, ifMatchOf, kindLabel, statusLabel, versionOfEtag } from './live.ts';
+import { FILTER_KINDS, canActOn, casePageOf, caseViewOf, dueBadge, dueText, errorOf, hasUrgent, ifMatchOf, kindLabel, kstText, statusLabel, versionOfEtag } from './live.ts';
 // F-06-7: 새 내보냄(이의 심사 패널 값)은 구현 전에 없으므로 이름공간으로 가져와 시험 몸 안에서 쓴다(없으면 그 시험만 실패)
 import * as live from './live.ts';
 
@@ -209,12 +209,126 @@ test('B-T28 ⑦ 확정 신호·대기 참여·차단 목록 변화·호출·반�
   for (const [i, n] of names.entries()) assert.ok(n.length > 0 && n !== reasons[i], reasons[i]);
 });
 
-test('B-T28 ⑦ errorOf는 409 case-action-not-applicable을 not-applicable로, case-already-resolved와 그 밖의 409는 resolved로 읽는다', () => {
+// 시험 리뷰 1 TR-14 반영: 정본 결정(계획 §11 ⑥, d5 §7.6 '이의 결정 처리 중')으로 in-progress는 '이미 해결한 건'이 아니다
+test('B-T28 ⑦ errorOf: 409 case-action-not-applicable은 not-applicable, idempotency-request-in-progress는 in-progress(d5 글), case-already-resolved와 그 밖 409는 resolved', () => {
   const P = 'https://problems.peaket.example/';
   const na = errorOf({ status: 409, type: `${P}case-action-not-applicable` });
   assert.equal(na.kind, 'not-applicable');
   assert.ok(na.text.length > 0);
   assert.notEqual(na.text, errorOf({ status: 409, type: 'case-already-resolved' }).text);
   assert.equal(errorOf({ status: 409, type: 'case-already-resolved' }).kind, 'resolved');
-  assert.equal(errorOf({ status: 409, type: 'idempotency-request-in-progress' }).kind, 'resolved');
+  assert.deepEqual(errorOf({ status: 409, type: `${P}idempotency-request-in-progress` }), { kind: 'in-progress', text: '앞서 보낸 결정을 아직 처리하는 중입니다. 잠시 뒤 다시 불러와 주세요' });
+  assert.equal(errorOf({ status: 409, type: 'something-else' }).kind, 'resolved');
+});
+
+// 시험 리뷰 1 TR-01·TR-18 반영(시험 담당 lane3-f067-test): 패널이 그릴 값은 appealPanelOf가 만들고(계획 §4 끝, §11 ⑦), 결정 키는 decisionKeyAfter가 정한다.
+// 정본: d5 §7.6 '추가 검증 이의 상세'(요청 종류·사유 범주·확정 신호·판정 출처·판정 시각·보냄·통과·실패·대기 참여 상태, 근거·내용 안내 글)·'이의 반영 중·반영됨'·'이의 반영 실패'(두 글)·'이의 결정 처리 중',
+// bot-defense §12 '다시 보내기'(다시 보내지 않는 상태 다섯: INVALID_ARGUMENT·ALREADY_EXISTS·NOT_FOUND·FAILED_PRECONDITION·PERMISSION_DENIED).
+test('B-T28 ⑦ decisionKeyAfter: 네트워크 실패(0)·503·409 in-progress면 같은 키, 202와 그 밖 4xx는 null(새 키)이다', () => {
+  const after = need('decisionKeyAfter');
+  const k = '0194f067-0000-4000-8000-0000000000a9';
+  assert.equal(after(k, { status: 0 }), k);
+  assert.equal(after(k, { status: 503, type: 'case-dispatch-unavailable' }), k);
+  assert.equal(after(k, { status: 409, type: 'idempotency-request-in-progress' }), k);
+  for (const r of [
+    { status: 202 },
+    { status: 400, type: 'invalid-body' },
+    { status: 403, type: 'case-update-not-allowed' },
+    { status: 404, type: 'not-found' },
+    { status: 409, type: 'case-already-resolved' },
+    { status: 409, type: 'case-action-not-applicable' },
+    { status: 412, type: 'precondition-failed' },
+    { status: 422, type: 'case-result-note-required' },
+    { status: 428, type: 'precondition-required' },
+  ]) {
+    assert.equal(after(k, r), null, JSON.stringify(r));
+  }
+});
+
+test('B-T28 ⑦ 판정 출처·요청 종류 이름과 NONE 배지(d5 §7.6)', () => {
+  assert.deepEqual(['REALTIME', 'REASSESS'].map(need('evidenceSourceLabel')), ['실시간', '재평가']);
+  assert.deepEqual(['EXPLANATION', 'REVIEW'].map(need('appealRequestLabel')), ['설명 요구', '재검토 신청']);
+  const badge = need('reflectBadge');
+  const none = badge('NONE');
+  assert.ok(typeof none.label === 'string' && none.label.length > 0);
+  assert.equal(new Set(['NONE', 'PENDING', 'APPLIED', 'FAILED'].map((s) => badge(s).label)).size, 4);
+});
+
+const panelOf = (va, role = 'cs_agent', status = 'OPEN') => need('appealPanelOf')(need('verificationAppealOf')({ ...CASE, kind: 'VERIFICATION_APPEAL', status, verificationAppeal: va }), role, status);
+
+test('B-T28 ⑦ appealPanelOf: 판단 칸 아홉의 값이 d5 차례이고, 이의 글은 글 그대로, 결정 버튼은 CS 담당자이면서 해결 전일 때만이다', () => {
+  const p = panelOf({ ...VA, decision: null, reflectState: 'APPLIED' });
+  assert.equal(p.fields.length, 9);
+  assert.deepEqual(p.fields.map((f) => f.value), ['재검토 신청', need('appealReasonLabel')('DEVICE_HISTORY'), '차단 기기 목록', '실시간', kstText(VA.evidence.decidedAt), '11', '3', '7', '추가 검증 중']);
+  for (const f of p.fields) assert.ok(f.label.length > 0);
+  assert.equal(new Set(p.fields.map((f) => f.label)).size, 9);
+  assert.equal(p.text, VA.text);
+  assert.deepEqual([p.contentNotice, p.evidenceNotice, p.decision, p.banner], [null, null, null, null]);
+  assert.equal(p.canDecide, true);
+  assert.equal(panelOf(VA, 'cs_lead', 'IN_PROGRESS').canDecide, true);
+  assert.equal(panelOf(VA, 'cs_agent', 'RESOLVED').canDecide, false);
+  for (const role of ['operator', 'commander', 'viewer']) assert.equal(panelOf(VA, role, 'OPEN').canDecide, false, role);
+  // 값마다(허니팟·재평가·설명 요구·끝남·없음)
+  const q = panelOf({ ...VA, request: 'EXPLANATION', text: '', entryState: 'ENDED', evidence: { ...VA.evidence, hardSignal: 'HONEYPOT', source: 'REASSESS' } });
+  assert.deepEqual([q.fields[0].value, q.fields[2].value, q.fields[3].value, q.fields[8].value, q.text], ['설명 요구', '허니팟', '재평가', '끝남', '']);
+  const r = panelOf({ ...VA, entryState: 'PASSED', evidence: { ...VA.evidence, hardSignal: 'NONE' } });
+  assert.deepEqual([r.fields[2].value, r.fields[8].value], ['없음', '통과']);
+});
+
+test('B-T28 ⑦ appealPanelOf: 내용·근거 안내 글은 d5 §7.6 글이다', () => {
+  assert.equal(panelOf({ ...VA, content: 'PENDING', text: null, request: null, receivedAt: null }).contentNotice, '이의 내용을 아직 불러오지 못했습니다');
+  assert.equal(panelOf({ ...VA, content: 'GONE', text: null, request: null, receivedAt: null }).contentNotice, '이의 내용이 보관 기간이 지나 없습니다');
+  const empty = { hardSignal: null, source: null, decidedAt: null, deviceChallenges: null };
+  const nf = panelOf({ ...VA, evidence: { state: 'NOT_FOUND', ...empty } });
+  assert.equal(nf.evidenceNotice, '판정 근거가 남아 있지 않아 사유 범주로만 판단합니다');
+  assert.doesNotMatch(JSON.stringify(nf.fields), /차단 기기 목록|실시간/);
+  assert.equal(panelOf({ ...VA, evidence: { state: 'UNAVAILABLE', ...empty } }).evidenceNotice, '판정 근거를 불러오지 못했습니다');
+});
+
+test('B-T28 ⑦ appealPanelOf: 결정 뒤 결과·처리자·차단 목록 변화와 호출마다 배지를 그리고 인정·기각이 다르게 보인다', () => {
+  const at = VA.receivedAt;
+  const rows = [
+    { call: 'APPEAL_COPY', state: 'APPLIED', attempts: 1, lastError: null, updatedAt: at },
+    { call: 'ACCOUNT_HOLD_OPEN', state: 'APPLIED', attempts: 1, lastError: null, updatedAt: at },
+    { call: 'QUEUE_RESOLVE', state: 'APPLIED', attempts: 1, lastError: null, updatedAt: at },
+    { call: 'TRUST_LABEL', state: 'PENDING', attempts: 2, lastError: 'UNAVAILABLE', updatedAt: at },
+    { call: 'ACCOUNT_HOLD_CLOSE', state: 'APPLIED', attempts: 1, lastError: null, updatedAt: at },
+  ];
+  const p = panelOf({ ...VA, reflectState: 'PENDING', dispatch: rows }, 'cs_agent', 'RESOLVED');
+  assert.equal(p.decision.decidedBy, VA.decision.decidedBy);
+  assert.ok([VA.decision.decidedAt, kstText(VA.decision.decidedAt)].includes(p.decision.decidedAt), p.decision.decidedAt);
+  assert.equal(p.decision.blockList, '지움');
+  const rejected = panelOf({ ...VA, decision: { ...VA.decision, outcome: 'REJECTED', blockListChange: null }, dispatch: rows }, 'cs_agent', 'RESOLVED');
+  assert.equal(rejected.decision.blockList, null);
+  assert.notEqual(rejected.decision.outcome, p.decision.outcome);
+  assert.deepEqual(
+    p.rows.map((r) => [r.call, r.label, r.badge.label]),
+    [
+      ['APPEAL_COPY', '이의 내용 옮기기', '반영됨'],
+      ['ACCOUNT_HOLD_OPEN', '계정 병합 막기', '반영됨'],
+      ['QUEUE_RESOLVE', '대기 참여 반영', '반영됨'],
+      ['TRUST_LABEL', '봇 라벨·차단 목록 반영', '보내는 중'],
+      ['ACCOUNT_HOLD_CLOSE', '계정 병합 막기 풀기', '반영됨'],
+    ],
+  );
+  assert.equal(p.banner, null);
+  assert.equal(panelOf({ ...VA, decision: { ...VA.decision, blockListChange: 'DEVICE_NOT_FOUND' } }, 'cs_agent', 'RESOLVED').decision.blockList, '기기를 찾지 못해 바꾸지 못함');
+  assert.equal(panelOf({ ...VA, decision: { ...VA.decision, blockListChange: 'NONE' } }, 'cs_agent', 'RESOLVED').decision.blockList, '바뀐 것 없음');
+});
+
+test('B-T28 ⑦ appealPanelOf: 반영 실패 배너는 마지막 오류로 두 글을 가른다(다시 보냄·멈춤, 값마다)', () => {
+  const at = VA.receivedAt;
+  const failed = (lastError) =>
+    panelOf(
+      { ...VA, reflectState: 'FAILED', dispatch: [{ call: 'APPEAL_COPY', state: 'APPLIED', attempts: 1, lastError: null, updatedAt: at }, { call: 'QUEUE_RESOLVE', state: 'FAILED', attempts: 8, lastError, updatedAt: at }] },
+      'cs_agent',
+      'RESOLVED',
+    );
+  for (const e of ['UNAVAILABLE', 'DEADLINE_EXCEEDED', 'INTERNAL', 'UNAUTHENTICATED', 'RESOURCE_EXHAUSTED', 'NOT_CONFIGURED']) {
+    assert.deepEqual(failed(e).banner, { kind: 'retrying', text: '반영 실패: 대기 참여 반영을 보내지 못했습니다. 배경 작업이 다시 보냅니다(관제 경보 SEV3)' }, e);
+  }
+  for (const e of ['INVALID_ARGUMENT', 'ALREADY_EXISTS', 'NOT_FOUND', 'FAILED_PRECONDITION', 'PERMISSION_DENIED']) {
+    assert.deepEqual(failed(e).banner, { kind: 'stopped', text: '다시 보내도 같은 답이라 멈췄습니다. 관제에 알려 주세요' }, e);
+  }
+  assert.deepEqual([failed('UNAVAILABLE').rows[1].badge.label, failed('UNAVAILABLE').rows[1].badge.tone], ['반영 실패', 'danger']);
 });

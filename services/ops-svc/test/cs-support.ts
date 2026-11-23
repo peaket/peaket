@@ -66,7 +66,12 @@ export interface CsHarness {
 /** 추가 검증 이의 포트(F-06-7 계획 §4 AppModule.register의 csAppeals). 이 시험 묶음은 cs-appeal-support.ts가 실제 gRPC 클라이언트로 채운다 */
 type CsAppealsWiring = NonNullable<Parameters<typeof AppModule.register>[0]['csAppeals']>;
 
-export async function csHarness(o: { nowIso?: string; csAppeals?: CsAppealsWiring; registerSignals?: (registry: Awaited<ReturnType<typeof createService>>['metrics']['registry']) => void } = {}): Promise<CsHarness> {
+/** 배경 작업 조립(F-06-7 계획 §4 background.csCaseDispatchMs, 메모리 조립도 받는다) */
+type BackgroundWiring = Exclude<NonNullable<Parameters<typeof AppModule.register>[0]['background']>, false>;
+
+export async function csHarness(
+  o: { nowIso?: string; csAppeals?: CsAppealsWiring; registerSignals?: (registry: Awaited<ReturnType<typeof createService>>['metrics']['registry']) => void; background?: BackgroundWiring } = {},
+): Promise<CsHarness> {
   const clock = fakeClock({ now: Date.parse(o.nowIso ?? BASE_ISO) });
   const identity = new FakeIdentity();
   const admins = new FakeAdminIdentity();
@@ -75,7 +80,7 @@ export async function csHarness(o: { nowIso?: string; csAppeals?: CsAppealsWirin
   const signals = new PromCsCaseSignals();
   const svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ memory: true, auditChain: audit, calendar: testCalendar(), caseSignals: signals, adminAccounts: { identity: admins }, ...(o.csAppeals ? { csAppeals: o.csAppeals } : {}) }),
+    module: AppModule.register({ memory: true, auditChain: audit, calendar: testCalendar(), caseSignals: signals, adminAccounts: { identity: admins }, ...(o.csAppeals ? { csAppeals: o.csAppeals } : {}), ...(o.background ? { background: o.background } : {}) }),
     env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: logs.stream,

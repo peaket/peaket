@@ -5,6 +5,9 @@
 // 정본: docs/features/bot-defense.md §12 'CS 처리 첫 구현' '다시 보내기' 끝(주소 PEAKET_QUEUE_GRPC_URL·PEAKET_TRUST_GRPC_URL·PEAKET_IDENTITY_GRPC_URL,
 // staging·prod의 ops-svc는 앞의 둘이 없으면 시작하지 않는다, local·ci·demo는 없으면 NOT_CONFIGURED로 쌓아 둔다).
 // 모듈 가짜(vi.mock)는 파일 전체에 걸리므로 main.ts를 띄우는 시험은 이 파일에만 둔다(cs-calendar-main-wiring.test.ts와 같은 방법).
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import * as grpc from '@grpc/grpc-js';
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 import { appealEnv, appealFixture, loadWiring, startAppealStubs, type AppealStubs } from './cs-appeal-support.js';
@@ -19,7 +22,10 @@ vi.mock('@peaket/platform', async (importOriginal) => {
   return {
     ...actual,
     assertInternalGrpcToken: () => undefined,
-    createDatabase: () => ({ db: {}, pool: {}, transaction: async () => undefined, close: async () => undefined }),
+    // 파트너 풀 역할 확인(staging, assertOpsPartnerRole)이 맞는 답을 받게 한다
+    createDatabase: () => ({ db: { execute: async () => ({ rows: [{ member: true, other: false, privileged: false, owner: false }] }) }, pool: {}, transaction: async () => undefined, close: async () => undefined }),
+    // staging 시작 시험(TR-05)이 Redis에 붙지 않게 한다(바깥 연결만 가짜)
+    createHotRedis: async () => ({ command: async () => null, close: async () => undefined }),
     createService: async () => {
       seen.order.push('createService');
       return {
@@ -183,5 +189,33 @@ describe('B-T28 ⑥ main.ts 조립', () => {
     expect(seen.order).toEqual(['createService', 'listen']);
     const a = (seen.register?.csAppeals ?? {}) as Record<string, Record<string, unknown> | undefined>;
     expect([a.appeals, a.labels, a.evidence, typeof a.holds?.set]).toEqual([undefined, undefined, undefined, 'function']);
+  });
+});
+
+// 시험 리뷰 1 TR-05 반영: staging에서 queue 주소가 없으면 main.ts가 실제로 시작을 멈춘다(csAppealPortsFromEnv가 던지는 것만 보지 않는다).
+// 그 밖의 staging 필수 값(달력 파일·재인증·테넌트 Redis·core 주소·로그 가명 키·내부 토큰)은 채워, 구현 전 트리에서는 listen까지 가서 이 시험이 실패한다.
+describe('B-T28 ⑥ main.ts staging 시작 거부', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'f067-holidays-'));
+  const holidays = join(dir, 'holidays.json');
+  writeFileSync(holidays, JSON.stringify({ holidays: ['2026-11-25'] }), 'utf8');
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const staging = () => ({
+    PEAKET_ENV: 'staging',
+    PEAKET_HOLIDAY_CALENDAR_FILE: holidays,
+    PEAKET_IDENTITY_JWKS_URL: 'https://identity.internal/jwks.json',
+    PEAKET_REAUTH_REDIS_URL: 'redis://127.0.0.1:1',
+    PEAKET_TENANT_REDIS_URL: 'redis://127.0.0.1:2',
+    PEAKET_CORE_HTTP_URL: 'http://core.internal:8080',
+    PEAKET_PARTNER_DATABASE_URL: 'postgres://ops_partner@db.internal:5432/ops',
+    PEAKET_LOG_PSEUDONYM_KEY: Buffer.alloc(32, 5).toString('base64'),
+    PEAKET_INTERNAL_TOKEN: 'f067-internal-http-token-000000000000',
+    PEAKET_INTERNAL_GRPC_TOKEN: 'f067-internal-grpc-token-000000000000',
+    PEAKET_IDENTITY_GRPC_URL: stubs.addresses.identity,
+    PEAKET_TRUST_GRPC_URL: stubs.addresses.trust,
+  });
+
+  test('B-T28 ⑥ staging에서 PEAKET_QUEUE_GRPC_URL이 없으면 main.ts가 그 이름을 말하며 던지고 listen하지 않는다', { timeout: BOOT_TEST_TIMEOUT_MS }, async () => {
+    await expect(bootMain(staging())).rejects.toThrow(/PEAKET_QUEUE_GRPC_URL/);
+    expect(seen.order).not.toContain('listen');
   });
 });

@@ -8,7 +8,7 @@
 //   - 답이 오면(APPLIED·UNCHANGED·NOT_ISOLATED, changed 참·거짓 모두) APPLIED이고 열린 경보를 푼다. 라벨·병합 막기는 내용(APPEAL_COPY)을 옮긴 뒤에만, 내용이 없으면 APPEAL_CONTENT_MISSING
 // §15 '이의 결과가 한 번씩 반영된다' 행(ops_cs_case_dispatch_total{call,result} applied·retry·failed), openapi CsCaseDetail.verificationAppeal.dispatch·reflectState.
 import * as grpc from '@grpc/grpc-js';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { NOTE, RETRY, appealFixture, appealHarness, closedAddress, untilAttempted, waitAfterFailure, type AppealHarness, type StubService } from './cs-appeal-support.js';
 
 let h: AppealHarness | undefined;
@@ -96,6 +96,8 @@ describe('B-T28 ⑥ 간격 경계·8번 뒤 반영 실패·경보', () => {
     expect(sends()).toBe(9);
     expect(h.dispatchAlerts(caseId).map((a) => [a.severity, a.open])).toEqual([['SEV3', true]]);
     expect(await h.dispatchOf(caseId, 'QUEUE_RESOLVE')).toMatchObject({ state: 'FAILED', attempts: 9 });
+    // 시험 리뷰 1 TR-19 반영: 'failed'는 반영 실패로 바뀌는 때 한 번, 그 뒤 실패는 'retry'(bot-defense §12 '지표')
+    expect([await h.dispatchMetric('QUEUE_RESOLVE', 'retry'), await h.dispatchMetric('QUEUE_RESOLVE', 'failed')]).toEqual([8, 1]);
   });
 
   test('B-T28 ⑥ 반영 실패 뒤 10분에 다시 보내 성공하면 APPLIED·경보 풀림·reflectState APPLIED이고 지표 applied가 오른다', async () => {
@@ -187,6 +189,24 @@ describe('B-T28 ⑥ 다시 보내지 않는 상태와 다시 보내는 상태(�
     await h.advanceAndRun(RETRY.firstMs);
     expect(await h.dispatchOf(caseId, 'ACCOUNT_HOLD_OPEN')).toMatchObject({ state: 'PENDING', attempts: 2, lastError: 'NOT_CONFIGURED' });
     expect(h.dispatchAlerts(caseId)).toEqual([]);
+    // 시험 리뷰 1 TR-13 반영: 7번째까지 경보 0, 8번째에 FAILED·경보 하나(다른 다시 보내는 상태와 같다)
+    for (let n = 2; n < RETRY.failAfter; n++) {
+      await h.advanceAndRun(waitAfterFailure(n));
+      const row = await h.dispatchOf(caseId, 'ACCOUNT_HOLD_OPEN');
+      if (n + 1 < RETRY.failAfter) expect([n + 1, row?.state, h.dispatchAlerts(caseId).length]).toEqual([n + 1, 'PENDING', 0]);
+    }
+    expect(await h.dispatchOf(caseId, 'ACCOUNT_HOLD_OPEN')).toMatchObject({ state: 'FAILED', attempts: 8, lastError: 'NOT_CONFIGURED' });
+    expect(h.dispatchAlerts(caseId).map((a) => [a.severity, a.open])).toEqual([['SEV3', true]]);
+  });
+
+  // 시험 리뷰 1 TR-11 반영: 라벨 호출의 다시 보내지 않는 실패도 바로 FAILED(queue만 보지 않는다)
+  test('B-T28 ⑥ TRUST_LABEL이 FAILED_PRECONDITION이면 바로 FAILED·경보 하나이고 다시 보내지 않는다', async () => {
+    const { h, caseId } = await decidedWithDown((x) => x.stubs.trust, 'ApplyLabel', grpc.status.FAILED_PRECONDITION);
+    await untilAttempted(h, caseId, ['TRUST_LABEL']);
+    expect(await h.dispatchOf(caseId, 'TRUST_LABEL')).toMatchObject({ state: 'FAILED', attempts: 1, lastError: 'FAILED_PRECONDITION' });
+    for (let i = 0; i < 2; i++) await h.advanceAndRun(3_600_000);
+    expect(h.stubs.trust.count('ApplyLabel')).toBe(1);
+    expect(h.dispatchAlerts(caseId).map((a) => [a.severity, a.open])).toEqual([['SEV3', true]]);
   });
 });
 
@@ -297,5 +317,79 @@ describe('B-T28 ⑥ 지표', () => {
       closeRetry: await h.dispatchMetric('ACCOUNT_HOLD_CLOSE', 'retry'),
     };
     expect(got).toEqual({ copy: 1, openApplied: 1, queueRetry: 1, queueApplied: 1, label: 1, closeFailed: 1, closeRetry: 0 });
+  });
+});
+
+// 시험 리뷰 1 TR-02 반영(시험 담당 lane3-f067-test): 이의 내용(APPEAL_COPY)을 옮기기 전에 내린 결정.
+// 정본: bot-defense §12 '기다림과 이어 보내기'(내용이 없으면 OPEN·TRUST_LABEL·CLOSE는 보내지 않고 시도 0, QUEUE_RESOLVE는 이의 ID만 써서 바로 간다,
+// 내용을 옮긴 그 바퀴에 기다리던 호출을 이어 보낸다), '호출 모양'(ApplyLabel은 회차·pid, SetAccountHold는 계정). 대역은 빈 pid·회차·계정을 INVALID_ARGUMENT로 거절한다.
+describe('B-T28 ⑥ B-T10 ⑥ 내용을 옮기기 전의 결정', () => {
+  for (const outcome of ['ACCEPTED', 'REJECTED'] as const) {
+    test(`B-T28 ⑥ ${outcome}: QUEUE_RESOLVE는 바로 가고 라벨·병합 막기는 시도 0으로 기다리다가, 내용을 옮긴 바퀴에 옮긴 회차·pid·계정으로 한 번씩 간다`, async () => {
+      h = await appealHarness();
+      h.stubs.queue.fail(grpc.status.UNAVAILABLE, 'GetVerificationAppeal');
+      const { caseId, fx } = await h.openAppeal();
+      await h.runDispatch();
+      expect((await h.decide(h.as('cs_agent'), caseId, { outcome, resultNote: NOTE }, { ifMatch: '"1"' })).status).toBe(202);
+      await untilAttempted(h, caseId, ['QUEUE_RESOLVE']);
+      const waiting = outcome === 'ACCEPTED' ? ['ACCOUNT_HOLD_OPEN', 'TRUST_LABEL', 'ACCOUNT_HOLD_CLOSE'] : ['ACCOUNT_HOLD_OPEN', 'ACCOUNT_HOLD_CLOSE'];
+      expect(await h.dispatchOf(caseId, 'QUEUE_RESOLVE')).toMatchObject({ state: 'APPLIED', attempts: 1 });
+      for (const call of waiting) expect(await h.dispatchOf(caseId, call), call).toMatchObject({ state: 'PENDING', attempts: 0, lastError: null });
+      expect([h.stubs.trust.count('ApplyLabel'), h.stubs.identity.count('SetAccountHold')]).toEqual([0, 0]);
+      h.stubs.queue.restore();
+      await h.advanceAndRun(RETRY.capMs);
+      const labels = h.stubs.trust.of('ApplyLabel');
+      expect(labels.map((r) => [r.event_id, r.pid, r.source_version])).toEqual(outcome === 'ACCEPTED' ? [[fx.eventId, fx.pid, 2]] : []);
+      expect(h.stubs.identity.of('SetAccountHold').map((r) => [r.state, r.account_id, r.source_version]).sort()).toEqual([
+        ['ACCOUNT_HOLD_STATE_CLOSED', fx.accountId, 2],
+        ['ACCOUNT_HOLD_STATE_OPEN', fx.accountId, 1],
+      ]);
+      for (const call of waiting) expect(await h.dispatchOf(caseId, call), call).toMatchObject({ state: 'APPLIED', attempts: 1, lastError: null });
+      expect((await h.appealOf(caseId)).reflectState).toBe('APPLIED');
+      await h.advanceAndRun(3_600_000);
+      expect([h.stubs.trust.count('ApplyLabel'), h.stubs.identity.count('SetAccountHold')]).toEqual([outcome === 'ACCEPTED' ? 1 : 0, 2]);
+    });
+  }
+});
+
+// 시험 리뷰 1 TR-03 반영: 답하지 않는 받는 쪽. 정본 bot-defense §12 '결정'(커밋 뒤 호출마다 2초 [가정], 결과와 상관없이 202), 계획 §4(호출마다 데드라인).
+describe('B-T28 ⑥ 데드라인', () => {
+  test('B-T28 ⑥ identity가 답하지 않아도 결정은 2초 데드라인 안에 202이고 그 호출은 DEADLINE_EXCEEDED로 PENDING이며, 배경 작업 한 바퀴도 묶이지 않는다', async () => {
+    h = await appealHarness();
+    const { caseId } = await h.openAppeal();
+    await h.runDispatch();
+    // real-time: gRPC 데드라인은 실제 시계로 잰다. 받는 쪽은 6초 뒤에야 답한다(정본 2초 + 여유 1.5초 안에 끊겨야 한다) F-06-7
+    h.stubs.identity.set('SetAccountHold', () => new Promise((r) => setTimeout(() => r({ value: { changed: true } }), 6_000)));
+    const started = performance.now();
+    const r = await h.decide(h.as('cs_agent'), caseId, { outcome: 'ACCEPTED', resultNote: NOTE }, { ifMatch: '"1"' });
+    expect(r.status).toBe(202);
+    expect(performance.now() - started).toBeLessThan(3_500);
+    await untilAttempted(h, caseId, ['ACCOUNT_HOLD_CLOSE']);
+    await expect.poll(async () => (await h!.dispatchOf(caseId, 'ACCOUNT_HOLD_CLOSE'))?.lastError, { timeout: 5_000 }).toBe('DEADLINE_EXCEEDED');
+    expect(await h.dispatchOf(caseId, 'ACCOUNT_HOLD_CLOSE')).toMatchObject({ state: 'PENDING', attempts: 1 });
+    h.clock.advance(RETRY.firstMs);
+    const round = performance.now();
+    await h.runDispatch();
+    expect(performance.now() - round).toBeLessThan(3_500);
+    expect(await h.dispatchOf(caseId, 'ACCOUNT_HOLD_CLOSE')).toMatchObject({ state: 'PENDING', attempts: 2, lastError: 'DEADLINE_EXCEEDED' });
+  }, 30_000);
+});
+
+// 시험 리뷰 1 TR-05 반영: 배경 작업이 손으로 부르지 않아도 도는지(타이머). 정본 bot-defense §12 '다시 보내기'(배경 작업이 10초 [가정]마다),
+// 계획 §4(background.csCaseDispatchMs, 메모리·DB 두 조립). 타이머만 가짜로 두고(gRPC·Fastify의 setTimeout은 실제) 앱 시계는 가짜 시계로 함께 옮긴다.
+describe('B-T28 ⑥ 배경 작업 타이머', () => {
+  test('B-T28 ⑥ background를 켜면 runOnce를 부르지 않아도 10초 − 1ms엔 돌지 않고 10초에 한 바퀴 돌아 이의 내용을 옮긴다', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      h = await appealHarness({ background: {} });
+      const { fx } = await h.openAppeal();
+      h.clock.advance(RETRY.firstMs);
+      await vi.advanceTimersByTimeAsync(RETRY.firstMs - 1);
+      expect(h.stubs.queue.count('GetVerificationAppeal')).toBe(0);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect.poll(() => h!.stubs.queue.of('GetVerificationAppeal'), { timeout: 5_000 }).toEqual([{ appeal_id: fx.appealId }]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -128,6 +128,17 @@ describe('B-T28 ⑦ 이의 심사 패널 ↔ ops-svc', () => {
     await untilAttempted(ah, caseId, ['QUEUE_RESOLVE', 'TRUST_LABEL', 'ACCOUNT_HOLD_CLOSE']);
     const after = appealOfView((await screen.getOpsCase(caseId)).data);
     expect(after).toMatchObject({ decision: { outcome: 'ACCEPTED', decidedBy: who['x-user-id'], blockListChange: 'REMOVED' }, reflectState: 'APPLIED' });
+    // 시험 리뷰 1 TR-01 반영: 패널이 결과로 바뀐다(실제 서버 응답 → 화면 패널 값, 계획 §4 appealPanelOf)
+    if (typeof live.appealPanelOf !== 'function') throw new Error('live.ts에 appealPanelOf가 없다(계획 §4 화면)');
+    const panel = live.appealPanelOf(after as Parameters<typeof live.appealPanelOf>[0], 'cs_agent', 'RESOLVED') as { canDecide: boolean; decision: { blockList: string | null } | null; rows: Array<{ call: string; badge: { label: string } }>; banner: unknown };
+    expect([panel.canDecide, panel.decision?.blockList, panel.banner]).toEqual([false, '지움', null]);
+    expect(panel.rows.map((r) => [r.call, r.badge.label])).toEqual([
+      ['APPEAL_COPY', '반영됨'],
+      ['ACCOUNT_HOLD_OPEN', '반영됨'],
+      ['QUEUE_RESOLVE', '반영됨'],
+      ['TRUST_LABEL', '반영됨'],
+      ['ACCOUNT_HOLD_CLOSE', '반영됨'],
+    ]);
     expect(ah.stubs.queue.count('ResolveVerificationAppeal')).toBe(1);
   });
 
