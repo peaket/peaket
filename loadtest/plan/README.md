@@ -26,6 +26,21 @@ node loadtest/plan/bat025-plan.mjs aa                       # A/A 네 실행의 
 - `done`은 `--result pass|fail|invalid`가 꼭 필요하고, fail·invalid는 `--note`로 까닭을 적는다. 게이트가 막힌 실행은 `done`할 수 없다.
 - 실행 전에 `loadtest/README.md`의 공통 준비(새 클러스터·Prometheus·불변식 검사기)를 따른다. K7 ②는 회마다 새 클러스터다.
 
+## F-08 측정 창(`f08-plan.json`, `--plan`)
+
+F-08-8(K1·K2·K7 After)과 F-08-2(MSR-020)의 실행 목록이다(계획 docs/review/plans/F-08-8.md 6.2·7.1, docs/review/plans/F-08-2.md 6.3). 상태는 `.cache/peaket-f08/state.json`이다. 창은 둘이다(감독 결정 2026-11-23): 창 1(`window: 1`)은 무대 → K2 → K1 → K7 ① → K7 ②(회마다 새 클러스터), 창 2(`window: 2`, 게이트 `WINDOW-2`)는 새 무대 → X₁ → CPU 몫 → N = 1·2·3·4·6·8 → 계산이다. 파일 차례는 F-08-8 6.2대로 MSR-020이 K7 ①과 K7 ② 사이이고, 게이트가 막혀 있는 동안 `next`는 MSR-020을 건너뛰어 창 1이 K7 ②로 끝난다.
+
+```bash
+node loadtest/plan/bat025-plan.mjs --plan loadtest/plan/f08-plan.json init --day 2026-11-26
+node loadtest/plan/bat025-plan.mjs --plan loadtest/plan/f08-plan.json next
+node loadtest/plan/bat025-plan.mjs --plan loadtest/plan/f08-plan.json unblock WINDOW-2       # 창 2 시작(감독)
+node loadtest/plan/bat025-plan.mjs --plan loadtest/plan/f08-plan.json set x1hat 1600         # 측정 중에 정한 값 → 명령의 {x1hat}
+```
+
+- `--plan <경로>`는 맨 앞에 준다. 없으면 BAT-025 계획(`bat025-plan.json`)이다. 없는 계획 파일·`state_file` 없는 계획은 오류로 끝난다.
+- `set <이름> <값>`은 상태 파일의 `vars`에 적고, 명령·조건·경로의 `{이름}`을 그 값으로 채운다(`{day}`·`{suffix}`와 같은 규칙). 정하지 않은 값이 남은 실행은 `next`·`show`가 알려 준다. MSR-020이 쓰는 이름: `x1hat`(어림 단계의 X), `x1`(1 vCPU 세 값의 중앙값), `podCpus`·`podTag`(고른 CPU 몫과 실행 ID 글자 `c1`·`c05`·`c025`), `x1hatPod`(x1 × 몫), `x1pod`(N=1 몫 세 값의 중앙값).
+- Docker 잠금은 두 자리 다(`lock.sh take docker-all lane4-F-08`, 끝나면 `drop docker-all lane4-F-08`).
+
 ## 판정에서 지키는 것
 
 - 실패·무효·SKIPPED는 통과가 아니다. SKIPPED가 정본 기대 목록(S3·P5·M1~M5)과 다르면 그 실행은 invalid다.

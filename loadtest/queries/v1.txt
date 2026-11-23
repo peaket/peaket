@@ -9,3 +9,7 @@ event_loop_lag_ms=max(nodejs_eventloop_lag_p99_seconds{namespace="v1",app="bundl
 app_cpu_cores=sum(rate(process_cpu_seconds_total{namespace="v1",app="bundle"}[20s]))
 hold_p99_ms=histogram_quantile(0.99, sum(rate(http_server_request_duration_seconds_bucket{namespace="v1",app="bundle",service="purchase-svc",route="/v1/events/{eventId}/holds"}[20s])) by (le)) * 1000
 payment_new_paused_rps=sum(rate(purchase_payment_attempts_total{namespace="v1",app="bundle",outcome="new_payment_paused"}[20s]))
+# 합본 파드 메모리(계획 F-08-8 7.1, docs/verification.md §4.1 '파드 동시 처리와 메모리'). split 합본은 파드 하나에 프로세스가 넷(admission-ctrl·queue-svc 한 프로세스, payment-svc·purchase-svc·홀드 작업자 자식)이고
+# 합본 관리 포트가 서비스마다 service 꼬리표를 단다. 같은 프로세스의 admission-ctrl은 queue-svc와 값이 같아 빼고 파드마다 더한 뒤 가장 큰 파드를 쓴다(MiB). 합본 파드 = 서비스 넷의 합이다
+rss_mb=max(sum by (pod) (max by (pod, service) (process_resident_memory_bytes{namespace="v1",app="bundle",service!="admission-ctrl"}))) / 1048576
+heap_used_mb=max(sum by (pod) (max by (pod, service) (nodejs_heap_size_used_bytes{namespace="v1",app="bundle",service!="admission-ctrl"}))) / 1048576

@@ -1,0 +1,2907 @@
+{
+  "plan": "f08-windows",
+  "title": "F-08 측정 창: 창 1(11-26) F-08-8 K2·K1·K7 ①·K7 ②, 창 2(11-27) F-08-2 MSR-020",
+  "created": "2026-11-23",
+  "basis": [
+    "docs/review/plans/F-08-8.md 6.1~6.3·8절",
+    "docs/review/plans/F-08-2.md 6.1~6.4·8절",
+    "docs/verification.md §3.3·§3.5·§3.9·§3.10",
+    "감독 결정 2026-11-23: 창을 둘로 나눈다(창 1 약 6시간, 창 2 약 5시간), Docker 메모리 24GiB"
+  ],
+  "state_file": ".cache/peaket-f08/state.json",
+  "start_gate": "감독이 '측정 시작'을 보낼 때까지 어떤 run도 시작하지 않는다. 창 2(MSR-020)는 게이트 WINDOW-2를 감독이 풀 때(unblock WINDOW-2) 시작한다.",
+  "rules": [
+    "한 번에 한 run만 돈다. run 사이 2분 쉰다(앞 실행의 부하가 가라앉게).",
+    "실패·무효·SKIPPED·찾지 못함은 통과가 아니다. done의 result는 pass·fail·invalid 가운데 하나이고 pass만 통과로 센다.",
+    "측정 중에는 시험·빌드를 하지 않고, 측정 단계 커밋에서 node tools/ci/records.mjs를 돌리지 않는다.",
+    "Docker 잠금은 두 자리 다(\"C:\\Program Files\\Git\\bin\\bash.exe\" D:/ticketpass-locks/lock.sh take docker-all lane4-F-08). 창이 끝나면 drop docker-all lane4-F-08.",
+    "측정 중에 정하는 값(x1hat·x1·podCpus·podTag·x1hatPod·x1pod)은 bat025-plan.mjs --plan loadtest/plan/f08-plan.json set <이름> <값>으로 적는다. 명령의 {이름} 자리가 그 값으로 채워진다."
+  ],
+  "environment": {
+    "stage": "창 1: kind peaket 하나, v1 --redis-tls on --replicas 3(K7 ②는 회마다 down/up). 창 2: 새 클러스터, v1 --redis-tls on --replicas N --cpus <몫> --services queue-svc.",
+    "prometheus": "node tools/local/cluster.mjs prometheus (127.0.0.1:9090, 따로 띄워 둔다)",
+    "generator": "k6 1.4.2 클러스터 안 파드. 나누기 800/s(F-08-8 2절 4): 실행마다 --generators ⌈최고 도착률 ÷ 800⌉. 나눈 발생기 CPU 2·1GiB, K1 10만만 512Mi.",
+    "pc": "Docker Desktop CPU 32, 메모리 24GiB(소유자가 2026-11-23 올림). C:·D: 여유를 측정 전에 확인한다."
+  },
+  "gates": {
+    "WINDOW-2": {
+      "title": "창 2(MSR-020) 시작",
+      "reason": "감독 결정 2026-11-23: 측정 창을 둘로 나눈다. 창 1(F-08-8)은 K7 ②로 끝나고 창 2는 다음 날 새 클러스터로 시작한다.",
+      "cleared_when": "감독이 창 2 시작을 알릴 때"
+    }
+  },
+  "runs": [
+    {
+      "n": 1,
+      "gate": null,
+      "key": "w1-stage",
+      "window": 1,
+      "group": "무대",
+      "title": "창 1 무대: 새 클러스터·관측·v1(TLS 켬, 복제 3)·검사기·발생기 보정(512Mi)",
+      "estimate_min": 40,
+      "stage": "v1-tls-on",
+      "conditions": "Docker 잠금 두 자리를 다 잡은 뒤(lock.sh take docker-all lane4-F-08). Docker Desktop CPU 32·메모리 24GiB(소유자가 2026-11-23 올림)를 docker info로 확인한다. 새 kind 클러스터, 관측 묶음, v1 무대 TLS 켬·복제 3·CPU 1·메모리 512Mi(§3.8), 불변식 검사기 빌드. 나누기 기준을 800/s로 바꿨으므로 CPU 2·메모리 512Mi 발생기 보정을 400·800·1,000/s로 한 번 잰다(F-08-8 6.1).",
+      "commands": [
+        {
+          "label": "Docker 잠금(두 자리)",
+          "argv": [
+            "bash",
+            "D:/ticketpass-locks/lock.sh",
+            "take",
+            "docker-all",
+            "lane4-F-08"
+          ]
+        },
+        {
+          "label": "Docker 사양 확인",
+          "argv": [
+            "docker",
+            "info",
+            "--format",
+            "CPU {{.NCPU}}, 메모리 {{.MemTotal}}"
+          ]
+        },
+        {
+          "label": "cluster.mjs down",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "down"
+          ]
+        },
+        {
+          "label": "cluster.mjs up",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "up"
+          ]
+        },
+        {
+          "label": "cluster.mjs observability",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "observability"
+          ]
+        },
+        {
+          "label": "v1 무대",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "v1",
+            "--redis-tls",
+            "on",
+            "--replicas",
+            "3"
+          ]
+        },
+        {
+          "label": "Prometheus(따로 띄움)",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "prometheus"
+          ],
+          "background": true
+        },
+        {
+          "label": "불변식 검사기",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@peaket/invariant-checker",
+            "build"
+          ]
+        },
+        {
+          "label": "남은 실행 정리",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "cleanup"
+          ]
+        },
+        {
+          "label": "발생기 보정(512Mi)",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "calibrate",
+            "--cpus",
+            "2",
+            "--memory-mi",
+            "512",
+            "--rates",
+            "400,800,1000",
+            "--out",
+            ".cache/peaket-f08/calib/{day}-calib-512{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-8 6.1: Docker CPU 32·메모리 24GiB, v1 무대 준비됨(cluster.mjs v1 끝 줄)",
+        "보정: 800/s 단계가 놓침 없이 통과(dropped 0, 발생기 CPU 80% 이하)해야 K1 10만을 512Mi로 잰다. 놓치면 K1 10만 실행을 1GiB로 바꾸지 말고 감독에게 알린다(24GiB에서는 1GiB 12대가 들어가지만 계획 F-08-8 2절 5를 바꾸는 일이다)"
+      ],
+      "ledger": "성능 장부 실행이 아니다(보정은 --record 없이 .cache에 둔다).",
+      "artifact": ".cache/peaket-f08/calib/{day}-calib-512{suffix}/calibration.json",
+      "result_note": "무대가 15분 안에 준비되지 않으면 한 번만 다시 올리고, 또 안 되면 창을 멈추고 감독에게 알린다(F-08-8 2절 8)."
+    },
+    {
+      "n": 2,
+      "gate": null,
+      "key": "k2-hot-tls-r1",
+      "window": 1,
+      "group": "K2",
+      "title": "K2 인기 좌석 TLS 켬 1",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 인기 좌석 하나(hot 1), 1,000명, 2,000/s, 예열 60초(v1 기본)·본구간 60초, 잡은 홀드는 놓지 않음. 발생기 ⌈2,000 ÷ 800⌉ = 3대.",
+      "commands": [
+        {
+          "label": "K2 인기 좌석 TLS 켬 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "seat-hold",
+            "--users",
+            "1000",
+            "--rate",
+            "2000",
+            "--mode",
+            "hot",
+            "--hot-count",
+            "1",
+            "--keep",
+            "--main",
+            "60",
+            "--generators",
+            "3",
+            "--db-stats",
+            "--record",
+            "--run-id",
+            "{day}-k2-v1-hot-tls-r1-f088{suffix}",
+            "--profile",
+            "local-1k",
+            "--paired-run",
+            "{day}-k2-v1-hot-notls-r1-f088{suffix}",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k2/{day}-k2-hot-tls-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "S-T1(docs/features/seat-hold.md:566): 홀드 201=1건, 나머지 409, 홀드 p99 ≤ 50ms·p99.9 ≤ 150ms",
+        "불변식 S1·S2·S4 PASS, SKIPPED는 §3.10 기대 목록(S3·P5)만",
+        "generator.json judge.valid=true(통계를 못 읽어도 무효)"
+      ],
+      "ledger": "kpi K2, redis_tls=true, paired_run, db-stats.json, notes에 hot 1·keep·발생기 3대(800/s 기준).",
+      "artifact": ".cache/peaket-f08/k2/{day}-k2-hot-tls-r1{suffix}/summary.json, invariants.csv, generator.json, db-stats.json",
+      "result_note": "3회 가운데 pass만 통과로 센다. 무효면 같은 조건으로 한 번만 더 잰다(F-08-8 6.1)."
+    },
+    {
+      "n": 3,
+      "gate": null,
+      "key": "k2-hot-tls-r2",
+      "window": 1,
+      "group": "K2",
+      "title": "K2 인기 좌석 TLS 켬 2",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 인기 좌석 하나(hot 1), 1,000명, 2,000/s, 예열 60초(v1 기본)·본구간 60초, 잡은 홀드는 놓지 않음. 발생기 ⌈2,000 ÷ 800⌉ = 3대.",
+      "commands": [
+        {
+          "label": "K2 인기 좌석 TLS 켬 2",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "seat-hold",
+            "--users",
+            "1000",
+            "--rate",
+            "2000",
+            "--mode",
+            "hot",
+            "--hot-count",
+            "1",
+            "--keep",
+            "--main",
+            "60",
+            "--generators",
+            "3",
+            "--db-stats",
+            "--record",
+            "--run-id",
+            "{day}-k2-v1-hot-tls-r2-f088{suffix}",
+            "--profile",
+            "local-1k",
+            "--paired-run",
+            "{day}-k2-v1-hot-notls-r1-f088{suffix}",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k2/{day}-k2-hot-tls-r2{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "S-T1(docs/features/seat-hold.md:566): 홀드 201=1건, 나머지 409, 홀드 p99 ≤ 50ms·p99.9 ≤ 150ms",
+        "불변식 S1·S2·S4 PASS, SKIPPED는 §3.10 기대 목록(S3·P5)만",
+        "generator.json judge.valid=true(통계를 못 읽어도 무효)"
+      ],
+      "ledger": "kpi K2, redis_tls=true, paired_run, db-stats.json, notes에 hot 1·keep·발생기 3대(800/s 기준).",
+      "artifact": ".cache/peaket-f08/k2/{day}-k2-hot-tls-r2{suffix}/summary.json, invariants.csv, generator.json, db-stats.json",
+      "result_note": "3회 가운데 pass만 통과로 센다. 무효면 같은 조건으로 한 번만 더 잰다(F-08-8 6.1)."
+    },
+    {
+      "n": 4,
+      "gate": null,
+      "key": "k2-hot-tls-r3",
+      "window": 1,
+      "group": "K2",
+      "title": "K2 인기 좌석 TLS 켬 3",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 인기 좌석 하나(hot 1), 1,000명, 2,000/s, 예열 60초(v1 기본)·본구간 60초, 잡은 홀드는 놓지 않음. 발생기 ⌈2,000 ÷ 800⌉ = 3대.",
+      "commands": [
+        {
+          "label": "K2 인기 좌석 TLS 켬 3",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "seat-hold",
+            "--users",
+            "1000",
+            "--rate",
+            "2000",
+            "--mode",
+            "hot",
+            "--hot-count",
+            "1",
+            "--keep",
+            "--main",
+            "60",
+            "--generators",
+            "3",
+            "--db-stats",
+            "--redis-stats",
+            "--record",
+            "--run-id",
+            "{day}-k2-v1-hot-tls-r3-f088{suffix}",
+            "--profile",
+            "local-1k",
+            "--paired-run",
+            "{day}-k2-v1-hot-notls-r1-f088{suffix}",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k2/{day}-k2-hot-tls-r3{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "S-T1(docs/features/seat-hold.md:566): 홀드 201=1건, 나머지 409, 홀드 p99 ≤ 50ms·p99.9 ≤ 150ms",
+        "불변식 S1·S2·S4 PASS, SKIPPED는 §3.10 기대 목록(S3·P5)만",
+        "generator.json judge.valid=true(통계를 못 읽어도 무효)"
+      ],
+      "ledger": "kpi K2, redis_tls=true, paired_run, db-stats.json·redis-stats.json, notes에 hot 1·keep·발생기 3대(800/s 기준).",
+      "artifact": ".cache/peaket-f08/k2/{day}-k2-hot-tls-r3{suffix}/summary.json, invariants.csv, generator.json, db-stats.json",
+      "result_note": "3회 가운데 pass만 통과로 센다. 무효면 같은 조건으로 한 번만 더 잰다(F-08-8 6.1)."
+    },
+    {
+      "n": 5,
+      "gate": null,
+      "key": "k2-spread-tls-r1",
+      "window": 1,
+      "group": "K2",
+      "title": "K2 흩음 TLS 켬 1",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 흩음(spread) 2석, 1,000명, 2,000/s, 잡자마자 놓음(홀드 + 해제라 최고 도착률 4,000/s → 발생기 5대). 1회(F-08-8 13절 줄일 곳 ①). 끝에 Valkey 메모리를 읽는다.",
+      "commands": [
+        {
+          "label": "K2 흩음 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "seat-hold",
+            "--users",
+            "1000",
+            "--rate",
+            "2000",
+            "--mode",
+            "spread",
+            "--hold-size",
+            "2",
+            "--main",
+            "60",
+            "--generators",
+            "5",
+            "--db-stats",
+            "--redis-stats",
+            "--record",
+            "--run-id",
+            "{day}-k2-v1-spread-tls-r1-f088{suffix}",
+            "--profile",
+            "local-1k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k2/{day}-k2-spread-tls-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "S-T1(docs/features/seat-hold.md:566) 흩음: 홀드 p99 ≤ 50ms·p99.9 ≤ 150ms",
+        "불변식 S1·S2·S4 PASS, SKIPPED는 S3·P5만",
+        "generator.json judge.valid=true"
+      ],
+      "ledger": "kpi K2, redis_tls=true, db-stats.json·redis-stats.json, notes에 흩음 1회(Before는 3회).",
+      "artifact": ".cache/peaket-f08/k2/{day}-k2-spread-tls-r1{suffix}/summary.json, db-stats.json, redis-stats.json",
+      "result_note": "1회라 중앙값이 아니다. 보고서에 '1회(Before 3회)'로 적는다."
+    },
+    {
+      "n": 6,
+      "gate": null,
+      "key": "k2-hot-notls-r1",
+      "window": 1,
+      "group": "K2",
+      "title": "K2 인기 좌석 TLS 끔 1",
+      "estimate_min": 8,
+      "stage": "v1-tls-off",
+      "conditions": "v1 합본 TLS 끔, 복제 3. 인기 좌석 하나(hot 1), 1,000명, 2,000/s, 예열 60초(v1 기본)·본구간 60초, 잡은 홀드는 놓지 않음. 발생기 ⌈2,000 ÷ 800⌉ = 3대. TLS 짝으로만 쓰고 판정에 쓰지 않는다(§3.5 7번). 끝나면 무대를 TLS 켬으로 되돌린다.",
+      "commands": [
+        {
+          "label": "무대 TLS 끔",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "v1",
+            "--redis-tls",
+            "off",
+            "--replicas",
+            "3"
+          ]
+        },
+        {
+          "label": "K2 인기 좌석 TLS 끔 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "seat-hold",
+            "--users",
+            "1000",
+            "--rate",
+            "2000",
+            "--mode",
+            "hot",
+            "--hot-count",
+            "1",
+            "--keep",
+            "--main",
+            "60",
+            "--generators",
+            "3",
+            "--db-stats",
+            "--record",
+            "--run-id",
+            "{day}-k2-v1-hot-notls-r1-f088{suffix}",
+            "--profile",
+            "local-1k",
+            "--paired-run",
+            "{day}-k2-v1-hot-tls-r1-f088{suffix}",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k2/{day}-k2-hot-notls-r1{suffix}"
+          ]
+        },
+        {
+          "label": "무대 TLS 켬으로 되돌리기",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "v1",
+            "--redis-tls",
+            "on",
+            "--replicas",
+            "3"
+          ]
+        }
+      ],
+      "criteria": [
+        "S-T1 TLS 짝(§3.5 7번): 판정에 쓰지 않는다. TLS 켬 3회가 판정이다",
+        "짝 기록이 남는다(collect.py 경고 없음)"
+      ],
+      "ledger": "kpi K2, redis_tls=false, paired_run, db-stats.json, notes에 hot 1·keep·발생기 3대(800/s 기준).",
+      "artifact": ".cache/peaket-f08/k2/{day}-k2-hot-notls-r1{suffix}/summary.json, invariants.csv, generator.json, db-stats.json",
+      "result_note": "끔 실행이 무효여도 켬 3회 판정을 막지 않는다."
+    },
+    {
+      "n": 7,
+      "gate": null,
+      "key": "k1-1k-r1",
+      "window": 1,
+      "group": "K1",
+      "title": "K1 대기열 1,000명 1회",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 로비 없이 오픈 뒤 진입. 사용자 1,000명, 진입 1,000/s, 입장 28/s, 예열 30초·본구간 120초(§3.10 K1 행), 발생기 3대(최고 도착률 ÷ 800).",
+      "commands": [
+        {
+          "label": "K1 1k 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "queue",
+            "--users",
+            "1000",
+            "--entry-rate",
+            "1000",
+            "--admit-per-second",
+            "28",
+            "--generators",
+            "3",
+            "--warm",
+            "30",
+            "--main",
+            "120",
+            "--record",
+            "--run-id",
+            "{day}-k1-v1-local-1k-r1-f088{suffix}",
+            "--profile",
+            "local-1k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k1/{day}-k1-1k-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "Q-T2(docs/features/queue-admission.md:654): 진입·대기 상태·입장 확정 p99 < 200ms, 오류율 < 0.1%",
+        "진입 시행 수 = 1,000, 불변식 Q1·Q2 PASS, SKIPPED는 S3·P5만",
+        "generator.json judge.valid=true. 실패·무효·SKIPPED를 pass로 세지 않는다"
+      ],
+      "ledger": "kpi K1, profile local-1k, redis_tls=true, notes에 발생기 3대(800/s 기준). F-08-2 extrapolate.py origin의 입력이다.",
+      "artifact": ".cache/peaket-f08/k1/{day}-k1-1k-r1{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
+    },
+    {
+      "n": 8,
+      "gate": null,
+      "key": "k1-1k-r2",
+      "window": 1,
+      "group": "K1",
+      "title": "K1 대기열 1,000명 2회",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 로비 없이 오픈 뒤 진입. 사용자 1,000명, 진입 1,000/s, 입장 28/s, 예열 30초·본구간 120초(§3.10 K1 행), 발생기 3대(최고 도착률 ÷ 800).",
+      "commands": [
+        {
+          "label": "K1 1k 2",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "queue",
+            "--users",
+            "1000",
+            "--entry-rate",
+            "1000",
+            "--admit-per-second",
+            "28",
+            "--generators",
+            "3",
+            "--warm",
+            "30",
+            "--main",
+            "120",
+            "--record",
+            "--run-id",
+            "{day}-k1-v1-local-1k-r2-f088{suffix}",
+            "--profile",
+            "local-1k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k1/{day}-k1-1k-r2{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "Q-T2(docs/features/queue-admission.md:654): 진입·대기 상태·입장 확정 p99 < 200ms, 오류율 < 0.1%",
+        "진입 시행 수 = 1,000, 불변식 Q1·Q2 PASS, SKIPPED는 S3·P5만",
+        "generator.json judge.valid=true. 실패·무효·SKIPPED를 pass로 세지 않는다"
+      ],
+      "ledger": "kpi K1, profile local-1k, redis_tls=true, notes에 발생기 3대(800/s 기준). F-08-2 extrapolate.py origin의 입력이다.",
+      "artifact": ".cache/peaket-f08/k1/{day}-k1-1k-r2{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
+    },
+    {
+      "n": 9,
+      "gate": null,
+      "key": "k1-1k-r3",
+      "window": 1,
+      "group": "K1",
+      "title": "K1 대기열 1,000명 3회",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 로비 없이 오픈 뒤 진입. 사용자 1,000명, 진입 1,000/s, 입장 28/s, 예열 30초·본구간 120초(§3.10 K1 행), 발생기 3대(최고 도착률 ÷ 800).",
+      "commands": [
+        {
+          "label": "K1 1k 3",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "queue",
+            "--users",
+            "1000",
+            "--entry-rate",
+            "1000",
+            "--admit-per-second",
+            "28",
+            "--generators",
+            "3",
+            "--warm",
+            "30",
+            "--main",
+            "120",
+            "--record",
+            "--run-id",
+            "{day}-k1-v1-local-1k-r3-f088{suffix}",
+            "--profile",
+            "local-1k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k1/{day}-k1-1k-r3{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "Q-T2(docs/features/queue-admission.md:654): 진입·대기 상태·입장 확정 p99 < 200ms, 오류율 < 0.1%",
+        "진입 시행 수 = 1,000, 불변식 Q1·Q2 PASS, SKIPPED는 S3·P5만",
+        "generator.json judge.valid=true. 실패·무효·SKIPPED를 pass로 세지 않는다"
+      ],
+      "ledger": "kpi K1, profile local-1k, redis_tls=true, notes에 발생기 3대(800/s 기준). F-08-2 extrapolate.py origin의 입력이다.",
+      "artifact": ".cache/peaket-f08/k1/{day}-k1-1k-r3{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
+    },
+    {
+      "n": 10,
+      "gate": null,
+      "key": "k1-10k-r1",
+      "window": 1,
+      "group": "K1",
+      "title": "K1 대기열 10,000명 1회",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 로비 없이 오픈 뒤 진입. 사용자 10,000명, 진입 1,000/s, 입장 28/s, 예열 30초·본구간 120초(§3.10 K1 행), 발생기 7대(최고 도착률 ÷ 800).",
+      "commands": [
+        {
+          "label": "K1 10k 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "queue",
+            "--users",
+            "10000",
+            "--entry-rate",
+            "1000",
+            "--admit-per-second",
+            "28",
+            "--generators",
+            "7",
+            "--warm",
+            "30",
+            "--main",
+            "120",
+            "--record",
+            "--run-id",
+            "{day}-k1-v1-local-10k-r1-f088{suffix}",
+            "--profile",
+            "local-10k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k1/{day}-k1-10k-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "Q-T2(docs/features/queue-admission.md:654): 진입·대기 상태·입장 확정 p99 < 200ms, 오류율 < 0.1%",
+        "진입 시행 수 = 10,000, 불변식 Q1·Q2 PASS, SKIPPED는 S3·P5만",
+        "generator.json judge.valid=true. 실패·무효·SKIPPED를 pass로 세지 않는다"
+      ],
+      "ledger": "kpi K1, profile local-10k, redis_tls=true, notes에 발생기 7대(800/s 기준). F-08-2 extrapolate.py origin의 입력이다.",
+      "artifact": ".cache/peaket-f08/k1/{day}-k1-10k-r1{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
+    },
+    {
+      "n": 11,
+      "gate": null,
+      "key": "k1-10k-r2",
+      "window": 1,
+      "group": "K1",
+      "title": "K1 대기열 10,000명 2회",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 로비 없이 오픈 뒤 진입. 사용자 10,000명, 진입 1,000/s, 입장 28/s, 예열 30초·본구간 120초(§3.10 K1 행), 발생기 7대(최고 도착률 ÷ 800).",
+      "commands": [
+        {
+          "label": "K1 10k 2",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "queue",
+            "--users",
+            "10000",
+            "--entry-rate",
+            "1000",
+            "--admit-per-second",
+            "28",
+            "--generators",
+            "7",
+            "--warm",
+            "30",
+            "--main",
+            "120",
+            "--record",
+            "--run-id",
+            "{day}-k1-v1-local-10k-r2-f088{suffix}",
+            "--profile",
+            "local-10k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k1/{day}-k1-10k-r2{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "Q-T2(docs/features/queue-admission.md:654): 진입·대기 상태·입장 확정 p99 < 200ms, 오류율 < 0.1%",
+        "진입 시행 수 = 10,000, 불변식 Q1·Q2 PASS, SKIPPED는 S3·P5만",
+        "generator.json judge.valid=true. 실패·무효·SKIPPED를 pass로 세지 않는다"
+      ],
+      "ledger": "kpi K1, profile local-10k, redis_tls=true, notes에 발생기 7대(800/s 기준). F-08-2 extrapolate.py origin의 입력이다.",
+      "artifact": ".cache/peaket-f08/k1/{day}-k1-10k-r2{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
+    },
+    {
+      "n": 12,
+      "gate": null,
+      "key": "k1-10k-r3",
+      "window": 1,
+      "group": "K1",
+      "title": "K1 대기열 10,000명 3회",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 로비 없이 오픈 뒤 진입. 사용자 10,000명, 진입 1,000/s, 입장 28/s, 예열 30초·본구간 120초(§3.10 K1 행), 발생기 7대(최고 도착률 ÷ 800).",
+      "commands": [
+        {
+          "label": "K1 10k 3",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "queue",
+            "--users",
+            "10000",
+            "--entry-rate",
+            "1000",
+            "--admit-per-second",
+            "28",
+            "--generators",
+            "7",
+            "--warm",
+            "30",
+            "--main",
+            "120",
+            "--record",
+            "--run-id",
+            "{day}-k1-v1-local-10k-r3-f088{suffix}",
+            "--profile",
+            "local-10k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k1/{day}-k1-10k-r3{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "Q-T2(docs/features/queue-admission.md:654): 진입·대기 상태·입장 확정 p99 < 200ms, 오류율 < 0.1%",
+        "진입 시행 수 = 10,000, 불변식 Q1·Q2 PASS, SKIPPED는 S3·P5만",
+        "generator.json judge.valid=true. 실패·무효·SKIPPED를 pass로 세지 않는다"
+      ],
+      "ledger": "kpi K1, profile local-10k, redis_tls=true, notes에 발생기 7대(800/s 기준). F-08-2 extrapolate.py origin의 입력이다.",
+      "artifact": ".cache/peaket-f08/k1/{day}-k1-10k-r3{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
+    },
+    {
+      "n": 13,
+      "gate": null,
+      "key": "k1-2k-r1",
+      "window": 1,
+      "group": "K1",
+      "title": "K1 대기열 2,000명 1회(한계점 좁히기)",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 로비 없이 오픈 뒤 진입. 사용자 2,000명, 진입 1,000/s, 입장 28/s, 예열 30초·본구간 120초(§3.10 K1 행), 발생기 5대(최고 도착률 ÷ 800). k1-1k·k1-10k에서 못 지킨 가장 작은 규모와 그 아래 사이를 좁힌다(§3.10 K1 행). 1만이 지키면 skip한다.",
+      "commands": [
+        {
+          "label": "K1 2k 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "queue",
+            "--users",
+            "2000",
+            "--entry-rate",
+            "1000",
+            "--admit-per-second",
+            "28",
+            "--generators",
+            "5",
+            "--warm",
+            "30",
+            "--main",
+            "120",
+            "--record",
+            "--run-id",
+            "{day}-k1-v1-local-10k-2k-r1-f088{suffix}",
+            "--profile",
+            "local-10k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k1/{day}-k1-2k-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "Q-T2(docs/features/queue-admission.md:654): 진입·대기 상태·입장 확정 p99 < 200ms, 오류율 < 0.1%",
+        "진입 시행 수 = 2,000, 불변식 Q1·Q2 PASS, SKIPPED는 S3·P5만",
+        "generator.json judge.valid=true. 실패·무효·SKIPPED를 pass로 세지 않는다"
+      ],
+      "ledger": "kpi K1, profile local-10k, redis_tls=true, notes에 발생기 5대(800/s 기준). F-08-2 extrapolate.py origin의 입력이다.",
+      "artifact": ".cache/peaket-f08/k1/{day}-k1-2k-r1{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
+    },
+    {
+      "n": 14,
+      "gate": null,
+      "key": "k1-4k-r1",
+      "window": 1,
+      "group": "K1",
+      "title": "K1 대기열 4,000명 1회(한계점 좁히기)",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 로비 없이 오픈 뒤 진입. 사용자 4,000명, 진입 1,000/s, 입장 28/s, 예열 30초·본구간 120초(§3.10 K1 행), 발생기 6대(최고 도착률 ÷ 800). k1-1k·k1-10k에서 못 지킨 가장 작은 규모와 그 아래 사이를 좁힌다(§3.10 K1 행). 1만이 지키면 skip한다.",
+      "commands": [
+        {
+          "label": "K1 4k 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "queue",
+            "--users",
+            "4000",
+            "--entry-rate",
+            "1000",
+            "--admit-per-second",
+            "28",
+            "--generators",
+            "6",
+            "--warm",
+            "30",
+            "--main",
+            "120",
+            "--record",
+            "--run-id",
+            "{day}-k1-v1-local-10k-4k-r1-f088{suffix}",
+            "--profile",
+            "local-10k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k1/{day}-k1-4k-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "Q-T2(docs/features/queue-admission.md:654): 진입·대기 상태·입장 확정 p99 < 200ms, 오류율 < 0.1%",
+        "진입 시행 수 = 4,000, 불변식 Q1·Q2 PASS, SKIPPED는 S3·P5만",
+        "generator.json judge.valid=true. 실패·무효·SKIPPED를 pass로 세지 않는다"
+      ],
+      "ledger": "kpi K1, profile local-10k, redis_tls=true, notes에 발생기 6대(800/s 기준). F-08-2 extrapolate.py origin의 입력이다.",
+      "artifact": ".cache/peaket-f08/k1/{day}-k1-4k-r1{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
+    },
+    {
+      "n": 15,
+      "gate": null,
+      "key": "k1-6k-r1",
+      "window": 1,
+      "group": "K1",
+      "title": "K1 대기열 6,000명 1회(한계점 좁히기)",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 로비 없이 오픈 뒤 진입. 사용자 6,000명, 진입 1,000/s, 입장 28/s, 예열 30초·본구간 120초(§3.10 K1 행), 발생기 6대(최고 도착률 ÷ 800). k1-1k·k1-10k에서 못 지킨 가장 작은 규모와 그 아래 사이를 좁힌다(§3.10 K1 행). 1만이 지키면 skip한다.",
+      "commands": [
+        {
+          "label": "K1 6k 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "queue",
+            "--users",
+            "6000",
+            "--entry-rate",
+            "1000",
+            "--admit-per-second",
+            "28",
+            "--generators",
+            "6",
+            "--warm",
+            "30",
+            "--main",
+            "120",
+            "--record",
+            "--run-id",
+            "{day}-k1-v1-local-10k-6k-r1-f088{suffix}",
+            "--profile",
+            "local-10k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k1/{day}-k1-6k-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "Q-T2(docs/features/queue-admission.md:654): 진입·대기 상태·입장 확정 p99 < 200ms, 오류율 < 0.1%",
+        "진입 시행 수 = 6,000, 불변식 Q1·Q2 PASS, SKIPPED는 S3·P5만",
+        "generator.json judge.valid=true. 실패·무효·SKIPPED를 pass로 세지 않는다"
+      ],
+      "ledger": "kpi K1, profile local-10k, redis_tls=true, notes에 발생기 6대(800/s 기준). F-08-2 extrapolate.py origin의 입력이다.",
+      "artifact": ".cache/peaket-f08/k1/{day}-k1-6k-r1{suffix}/summary.json, invariants.csv, generator.json",
+      "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
+    },
+    {
+      "n": 16,
+      "gate": null,
+      "key": "k1-100k-r1",
+      "window": 1,
+      "group": "K1",
+      "title": "K1 대기열 100,000명 1회",
+      "estimate_min": 15,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 로비 없이 오픈 뒤 진입. 사용자 100,000명, 진입 1,000/s, 입장 28/s, 예열 30초·본구간 120초(§3.10 K1 행), 발생기 12대(최고 도착률 ÷ 800). 발생기 CPU 2·메모리 512Mi(F-08-8 2절 5, 24GiB 무대에서도 이 값). 발생기 파드가 Pending으로 5분 넘게 자리를 못 잡거나 두 번 연속 무효면 셋째를 돌지 않는다(F-08-8 6.3).",
+      "commands": [
+        {
+          "label": "K1 100k 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "queue",
+            "--users",
+            "100000",
+            "--entry-rate",
+            "1000",
+            "--admit-per-second",
+            "28",
+            "--generators",
+            "12",
+            "--cpus",
+            "2",
+            "--memory-mi",
+            "512",
+            "--db-stats",
+            "--redis-stats",
+            "--warm",
+            "30",
+            "--main",
+            "120",
+            "--record",
+            "--run-id",
+            "{day}-k1-v1-local-100k-r1-f088{suffix}",
+            "--profile",
+            "local-100k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k1/{day}-k1-100k-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "Q-T2(docs/features/queue-admission.md:654): 진입·대기 상태·입장 확정 p99 < 200ms, 오류율 < 0.1%",
+        "진입 시행 수 = 100,000, 불변식 Q1·Q2 PASS, SKIPPED는 S3·P5만",
+        "generator.json judge.valid=true. 실패·무효·SKIPPED를 pass로 세지 않는다",
+        "MSR-010 V-T4: 이 실행이 무효(발생기 한계)로 끝나면 10만 v1 점이 없어 V-T4는 '판정 못 함'으로 적는다(통과로 세지 않는다)"
+      ],
+      "ledger": "kpi K1, profile local-100k, redis_tls=true, notes에 발생기 12대(800/s 기준)·512Mi·db-stats·redis-stats. F-08-2 extrapolate.py origin의 입력이다.",
+      "artifact": ".cache/peaket-f08/k1/{day}-k1-100k-r1{suffix}/summary.json, invariants.csv, generator.json, db-stats.json, redis-stats.json",
+      "result_note": "두 번 연속 무효면 셋째는 skip --reason \"10만 v1 무효(이 PC 발생기 한계)\". 그때 V-T4는 판정 못 함(F-08-2 6.2)."
+    },
+    {
+      "n": 17,
+      "gate": null,
+      "key": "k1-100k-r2",
+      "window": 1,
+      "group": "K1",
+      "title": "K1 대기열 100,000명 2회",
+      "estimate_min": 15,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 로비 없이 오픈 뒤 진입. 사용자 100,000명, 진입 1,000/s, 입장 28/s, 예열 30초·본구간 120초(§3.10 K1 행), 발생기 12대(최고 도착률 ÷ 800). 발생기 CPU 2·메모리 512Mi(F-08-8 2절 5, 24GiB 무대에서도 이 값). 발생기 파드가 Pending으로 5분 넘게 자리를 못 잡거나 두 번 연속 무효면 셋째를 돌지 않는다(F-08-8 6.3).",
+      "commands": [
+        {
+          "label": "K1 100k 2",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "queue",
+            "--users",
+            "100000",
+            "--entry-rate",
+            "1000",
+            "--admit-per-second",
+            "28",
+            "--generators",
+            "12",
+            "--cpus",
+            "2",
+            "--memory-mi",
+            "512",
+            "--db-stats",
+            "--redis-stats",
+            "--warm",
+            "30",
+            "--main",
+            "120",
+            "--record",
+            "--run-id",
+            "{day}-k1-v1-local-100k-r2-f088{suffix}",
+            "--profile",
+            "local-100k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k1/{day}-k1-100k-r2{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "Q-T2(docs/features/queue-admission.md:654): 진입·대기 상태·입장 확정 p99 < 200ms, 오류율 < 0.1%",
+        "진입 시행 수 = 100,000, 불변식 Q1·Q2 PASS, SKIPPED는 S3·P5만",
+        "generator.json judge.valid=true. 실패·무효·SKIPPED를 pass로 세지 않는다",
+        "MSR-010 V-T4: 이 실행이 무효(발생기 한계)로 끝나면 10만 v1 점이 없어 V-T4는 '판정 못 함'으로 적는다(통과로 세지 않는다)"
+      ],
+      "ledger": "kpi K1, profile local-100k, redis_tls=true, notes에 발생기 12대(800/s 기준)·512Mi·db-stats·redis-stats. F-08-2 extrapolate.py origin의 입력이다.",
+      "artifact": ".cache/peaket-f08/k1/{day}-k1-100k-r2{suffix}/summary.json, invariants.csv, generator.json, db-stats.json, redis-stats.json",
+      "result_note": "두 번 연속 무효면 셋째는 skip --reason \"10만 v1 무효(이 PC 발생기 한계)\". 그때 V-T4는 판정 못 함(F-08-2 6.2)."
+    },
+    {
+      "n": 18,
+      "gate": null,
+      "key": "k1-100k-r3",
+      "window": 1,
+      "group": "K1",
+      "title": "K1 대기열 100,000명 3회",
+      "estimate_min": 15,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 로비 없이 오픈 뒤 진입. 사용자 100,000명, 진입 1,000/s, 입장 28/s, 예열 30초·본구간 120초(§3.10 K1 행), 발생기 12대(최고 도착률 ÷ 800). 발생기 CPU 2·메모리 512Mi(F-08-8 2절 5, 24GiB 무대에서도 이 값). 발생기 파드가 Pending으로 5분 넘게 자리를 못 잡거나 두 번 연속 무효면 셋째를 돌지 않는다(F-08-8 6.3).",
+      "commands": [
+        {
+          "label": "K1 100k 3",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "queue",
+            "--users",
+            "100000",
+            "--entry-rate",
+            "1000",
+            "--admit-per-second",
+            "28",
+            "--generators",
+            "12",
+            "--cpus",
+            "2",
+            "--memory-mi",
+            "512",
+            "--db-stats",
+            "--redis-stats",
+            "--warm",
+            "30",
+            "--main",
+            "120",
+            "--record",
+            "--run-id",
+            "{day}-k1-v1-local-100k-r3-f088{suffix}",
+            "--profile",
+            "local-100k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k1/{day}-k1-100k-r3{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "Q-T2(docs/features/queue-admission.md:654): 진입·대기 상태·입장 확정 p99 < 200ms, 오류율 < 0.1%",
+        "진입 시행 수 = 100,000, 불변식 Q1·Q2 PASS, SKIPPED는 S3·P5만",
+        "generator.json judge.valid=true. 실패·무효·SKIPPED를 pass로 세지 않는다",
+        "MSR-010 V-T4: 이 실행이 무효(발생기 한계)로 끝나면 10만 v1 점이 없어 V-T4는 '판정 못 함'으로 적는다(통과로 세지 않는다)"
+      ],
+      "ledger": "kpi K1, profile local-100k, redis_tls=true, notes에 발생기 12대(800/s 기준)·512Mi·db-stats·redis-stats. F-08-2 extrapolate.py origin의 입력이다.",
+      "artifact": ".cache/peaket-f08/k1/{day}-k1-100k-r3{suffix}/summary.json, invariants.csv, generator.json, db-stats.json, redis-stats.json",
+      "result_note": "두 번 연속 무효면 셋째는 skip --reason \"10만 v1 무효(이 PC 발생기 한계)\". 그때 V-T4는 판정 못 함(F-08-2 6.2)."
+    },
+    {
+      "n": 19,
+      "gate": null,
+      "key": "k7a-r1",
+      "window": 1,
+      "group": "K7 ①",
+      "title": "K7 ① 결제 300/s 1회",
+      "estimate_min": 12,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 300/s(피크), 예열 10초·본구간 50초, 2석, 장애 없음(§3.10 K7 ① 행). 가상 사용자 18,002명(300 × 60 + 2). 같은 DB를 이어 쓰므로 2·3회차 불변식 수는 앞 회차를 뺀 값이다(F-08-8 6.2).",
+      "commands": [
+        {
+          "label": "K7 ① 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "payment",
+            "--users",
+            "18002",
+            "--rate",
+            "300",
+            "--seats-per-order",
+            "2",
+            "--warm",
+            "10",
+            "--main",
+            "50",
+            "--generators",
+            "1",
+            "--db-stats",
+            "--record",
+            "--run-id",
+            "{day}-k7-v1-peak-r1-f088{suffix}",
+            "--profile",
+            "local-100k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k7/{day}-k7a-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "NFR-006(§3.10 K7 ① 행): 결제 확정 p99 3초, 불변식 S1·S4·P1~P6 위반 0",
+        "SKIPPED는 S3·P5만, generator.json judge.valid=true",
+        "db-stats.json: §4.1 'DB 쓰기 처리량'(커밋·행 쓰기·WAL)과 ComputeContactRef 상한 후보(주문 생성 피크)의 재료"
+      ],
+      "ledger": "kpi K7, redis_tls=true, db-stats.json, notes에 300/s·장애 없음·앞 회차 DB 이어 씀.",
+      "artifact": ".cache/peaket-f08/k7/{day}-k7a-r1{suffix}/summary.json, invariants.csv, db-stats.json",
+      "result_note": "장부 범위 밖(NFR-006 v1 쪽)이지만 F-08-2 부하 분해 표 '결제 접수' 줄이 쓴다."
+    },
+    {
+      "n": 20,
+      "gate": null,
+      "key": "k7a-r2",
+      "window": 1,
+      "group": "K7 ①",
+      "title": "K7 ① 결제 300/s 2회",
+      "estimate_min": 12,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 300/s(피크), 예열 10초·본구간 50초, 2석, 장애 없음(§3.10 K7 ① 행). 가상 사용자 18,002명(300 × 60 + 2). 같은 DB를 이어 쓰므로 2·3회차 불변식 수는 앞 회차를 뺀 값이다(F-08-8 6.2).",
+      "commands": [
+        {
+          "label": "K7 ① 2",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "payment",
+            "--users",
+            "18002",
+            "--rate",
+            "300",
+            "--seats-per-order",
+            "2",
+            "--warm",
+            "10",
+            "--main",
+            "50",
+            "--generators",
+            "1",
+            "--db-stats",
+            "--record",
+            "--run-id",
+            "{day}-k7-v1-peak-r2-f088{suffix}",
+            "--profile",
+            "local-100k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k7/{day}-k7a-r2{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "NFR-006(§3.10 K7 ① 행): 결제 확정 p99 3초, 불변식 S1·S4·P1~P6 위반 0",
+        "SKIPPED는 S3·P5만, generator.json judge.valid=true",
+        "db-stats.json: §4.1 'DB 쓰기 처리량'(커밋·행 쓰기·WAL)과 ComputeContactRef 상한 후보(주문 생성 피크)의 재료"
+      ],
+      "ledger": "kpi K7, redis_tls=true, db-stats.json, notes에 300/s·장애 없음·앞 회차 DB 이어 씀.",
+      "artifact": ".cache/peaket-f08/k7/{day}-k7a-r2{suffix}/summary.json, invariants.csv, db-stats.json",
+      "result_note": "장부 범위 밖(NFR-006 v1 쪽)이지만 F-08-2 부하 분해 표 '결제 접수' 줄이 쓴다."
+    },
+    {
+      "n": 21,
+      "gate": null,
+      "key": "k7a-r3",
+      "window": 1,
+      "group": "K7 ①",
+      "title": "K7 ① 결제 300/s 3회",
+      "estimate_min": 12,
+      "stage": "v1-tls-on",
+      "conditions": "v1 합본 TLS 켬, 복제 3. 300/s(피크), 예열 10초·본구간 50초, 2석, 장애 없음(§3.10 K7 ① 행). 가상 사용자 18,002명(300 × 60 + 2). 같은 DB를 이어 쓰므로 2·3회차 불변식 수는 앞 회차를 뺀 값이다(F-08-8 6.2).",
+      "commands": [
+        {
+          "label": "K7 ① 3",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "payment",
+            "--users",
+            "18002",
+            "--rate",
+            "300",
+            "--seats-per-order",
+            "2",
+            "--warm",
+            "10",
+            "--main",
+            "50",
+            "--generators",
+            "1",
+            "--db-stats",
+            "--record",
+            "--run-id",
+            "{day}-k7-v1-peak-r3-f088{suffix}",
+            "--profile",
+            "local-100k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k7/{day}-k7a-r3{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "NFR-006(§3.10 K7 ① 행): 결제 확정 p99 3초, 불변식 S1·S4·P1~P6 위반 0",
+        "SKIPPED는 S3·P5만, generator.json judge.valid=true",
+        "db-stats.json: §4.1 'DB 쓰기 처리량'(커밋·행 쓰기·WAL)과 ComputeContactRef 상한 후보(주문 생성 피크)의 재료"
+      ],
+      "ledger": "kpi K7, redis_tls=true, db-stats.json, notes에 300/s·장애 없음·앞 회차 DB 이어 씀.",
+      "artifact": ".cache/peaket-f08/k7/{day}-k7a-r3{suffix}/summary.json, invariants.csv, db-stats.json",
+      "result_note": "장부 범위 밖(NFR-006 v1 쪽)이지만 F-08-2 부하 분해 표 '결제 접수' 줄이 쓴다."
+    },
+    {
+      "n": 22,
+      "gate": "WINDOW-2",
+      "key": "w2-stage",
+      "window": 2,
+      "group": "무대",
+      "title": "창 2 무대: 새 클러스터·관측·v1(TLS 켬, 복제 1·CPU 1·queue-svc만)",
+      "estimate_min": 35,
+      "stage": "v1-entry",
+      "conditions": "Docker 잠금 두 자리(lock.sh take docker-all lane4-F-08). 새 kind 클러스터, 관측 묶음, v1 무대를 진입 서버 1대·CPU 1·queue-svc만으로(F-08-2 2절 3·6.1). 진입 경로가 queue-svc만 부르는지는 리허설에서 확인했다(구현 메모).",
+      "commands": [
+        {
+          "label": "Docker 잠금(두 자리)",
+          "argv": [
+            "bash",
+            "D:/ticketpass-locks/lock.sh",
+            "take",
+            "docker-all",
+            "lane4-F-08"
+          ]
+        },
+        {
+          "label": "cluster.mjs down",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "down"
+          ]
+        },
+        {
+          "label": "cluster.mjs up",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "up"
+          ]
+        },
+        {
+          "label": "cluster.mjs observability",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "observability"
+          ]
+        },
+        {
+          "label": "v1 무대",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "v1",
+            "--redis-tls",
+            "on",
+            "--replicas",
+            "1",
+            "--cpus",
+            "1",
+            "--services",
+            "queue-svc"
+          ]
+        },
+        {
+          "label": "Prometheus(따로 띄움)",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "prometheus"
+          ],
+          "background": true
+        },
+        {
+          "label": "불변식 검사기",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@peaket/invariant-checker",
+            "build"
+          ]
+        },
+        {
+          "label": "남은 실행 정리",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "cleanup"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.1: v1 무대 준비됨(켠 서비스 queue-svc), Docker CPU 32·메모리 24GiB"
+      ],
+      "ledger": "성능 장부 실행이 아니다.",
+      "artifact": "-",
+      "result_note": "무대가 올라가지 않으면 창을 멈추고 감독에게 알린다."
+    },
+    {
+      "n": 23,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-probe",
+      "title": "MSR-020 X₁ 어림(1 vCPU, 시험 단계 올리기 1번)",
+      "conditions": "진입 서버 1대·CPU 1. 400/s부터 400씩 최대 8단계(400~3,200/s). 이 X가 X̂₁이다(F-08-2 6.3 '첫 단계'). 장부에 남기지 않는다.",
+      "commands": [
+        {
+          "label": "X₁ 어림",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "1",
+            "--pod-cpus",
+            "1",
+            "--start-rate",
+            "400",
+            "--step-rate",
+            "400",
+            "--max-steps",
+            "8",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-probe{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "끝나면 set x1hat <steps.json x>. 3,200/s까지 다 지키면(topReached) --start-rate 3200 --step-rate 800으로 한 번 더 어림한다"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-probe{suffix}/steps.json",
+      "result_note": "x가 null이면 --start-rate 100 --step-rate 100으로 한 번 더 어림한다."
+    },
+    {
+      "n": 24,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-x1-r1",
+      "title": "MSR-020 X₁(1 vCPU) 1회",
+      "conditions": "진입 서버 1대·CPU 1. 첫 단계 0.5 × X̂₁, 0.1 × X̂₁씩 최대 8단계, 예열 10초·본구간 30초·쉼 20초(F-08-2 6.3). 이 세 값의 중앙값이 설계 식의 X₁이다(§3.3).",
+      "commands": [
+        {
+          "label": "X₁ 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "1",
+            "--pod-cpus",
+            "1",
+            "--x1-estimate",
+            "{x1hat}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n1-c1-r1-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n1-c1-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "셋 뒤: node loadtest/runner/entry-scale.mjs report --point 1=<세 폴더> --out .cache/peaket-f08/msr020/x1로 중앙값을 내고 set x1 <중앙값>"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n1-c1-r1{suffix}/steps.json, step-*/host.json",
+      "result_note": "세 번 가운데 찾지 못함이 있으면 X₁은 무효다. 감독에게 알린다."
+    },
+    {
+      "n": 25,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-x1-r2",
+      "title": "MSR-020 X₁(1 vCPU) 2회",
+      "conditions": "진입 서버 1대·CPU 1. 첫 단계 0.5 × X̂₁, 0.1 × X̂₁씩 최대 8단계, 예열 10초·본구간 30초·쉼 20초(F-08-2 6.3). 이 세 값의 중앙값이 설계 식의 X₁이다(§3.3).",
+      "commands": [
+        {
+          "label": "X₁ 2",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "1",
+            "--pod-cpus",
+            "1",
+            "--x1-estimate",
+            "{x1hat}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n1-c1-r2-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n1-c1-r2{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "셋 뒤: node loadtest/runner/entry-scale.mjs report --point 1=<세 폴더> --out .cache/peaket-f08/msr020/x1로 중앙값을 내고 set x1 <중앙값>"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n1-c1-r2{suffix}/steps.json, step-*/host.json",
+      "result_note": "세 번 가운데 찾지 못함이 있으면 X₁은 무효다. 감독에게 알린다."
+    },
+    {
+      "n": 26,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-x1-r3",
+      "title": "MSR-020 X₁(1 vCPU) 3회",
+      "conditions": "진입 서버 1대·CPU 1. 첫 단계 0.5 × X̂₁, 0.1 × X̂₁씩 최대 8단계, 예열 10초·본구간 30초·쉼 20초(F-08-2 6.3). 이 세 값의 중앙값이 설계 식의 X₁이다(§3.3).",
+      "commands": [
+        {
+          "label": "X₁ 3",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "1",
+            "--pod-cpus",
+            "1",
+            "--x1-estimate",
+            "{x1hat}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n1-c1-r3-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n1-c1-r3{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "셋 뒤: node loadtest/runner/entry-scale.mjs report --point 1=<세 폴더> --out .cache/peaket-f08/msr020/x1로 중앙값을 내고 set x1 <중앙값>"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n1-c1-r3{suffix}/steps.json, step-*/host.json",
+      "result_note": "세 번 가운데 찾지 못함이 있으면 X₁은 무효다. 감독에게 알린다."
+    },
+    {
+      "n": 27,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 2,
+      "ledger": "성능 장부 실행이 아니다. 고른 몫과 계산 줄(rows)을 보고서에 적는다.",
+      "key": "msr020-choose",
+      "title": "MSR-020 CPU 몫 고르기(1 → 0.5 → 0.25)",
+      "conditions": "F-08-2 6.4: 8대 점의 최고 도착률 8 × X₁ × 몫, 발생기 ⌈그 값 ÷ 800⌉대, 필요 CPU = 8 × 몫 + 2 × 발생기 + Valkey 2 + 무대 나머지 4가 Docker CPU 32의 85% 미만인 가장 큰 몫. 고른 뒤 바꾸지 않는다.",
+      "commands": [
+        {
+          "label": "CPU 몫",
+          "argv": [
+            "node",
+            "loadtest/runner/entry-scale.mjs",
+            "choose",
+            "--x1",
+            "{x1}",
+            "--docker-cpus",
+            "32",
+            "--generator-rate",
+            "800"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.4: podCpus가 null이면 (나)로 간다(1 vCPU로 재고 들어가지 않는 N은 호스트 포화로 뺀다)",
+        "끝나면 set podCpus <몫>, set podTag <c1|c05|c025>, set x1hatPod <x1 × 몫>(몫이 1이면 set x1pod <x1>)"
+      ],
+      "artifact": "출력 JSON(보고서에 옮긴다)",
+      "result_note": "몫이 1이면 msr020-n1-*는 skip(msr020-x1-*이 N=1 점이다)."
+    },
+    {
+      "n": 28,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 20,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n1-r1",
+      "title": "MSR-020 N=1(고른 몫) 1회",
+      "conditions": "진입 서버 1대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 1 × X̂₁(몫), 0.1 × 1 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1hatPod(X₁ × 몫 어림)이고 셋의 중앙값이 E(N)의 분모 X₁(몫)이다(set x1pod). 첫 회 앞에 무대를 그 N으로 다시 올린다(합본을 먼저 0개로 줄이는 기존 동작).",
+      "commands": [
+        {
+          "label": "무대 N=1",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "v1",
+            "--redis-tls",
+            "on",
+            "--replicas",
+            "1",
+            "--cpus",
+            "{podCpus}",
+            "--services",
+            "queue-svc"
+          ]
+        },
+        {
+          "label": "N=1 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "1",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1hatPod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n1-{podTag}-r1-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n1-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n1-r1{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 29,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n1-r2",
+      "title": "MSR-020 N=1(고른 몫) 2회",
+      "conditions": "진입 서버 1대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 1 × X̂₁(몫), 0.1 × 1 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1hatPod(X₁ × 몫 어림)이고 셋의 중앙값이 E(N)의 분모 X₁(몫)이다(set x1pod).",
+      "commands": [
+        {
+          "label": "N=1 2",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "1",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1hatPod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n1-{podTag}-r2-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n1-r2{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n1-r2{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 30,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n1-r3",
+      "title": "MSR-020 N=1(고른 몫) 3회",
+      "conditions": "진입 서버 1대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 1 × X̂₁(몫), 0.1 × 1 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1hatPod(X₁ × 몫 어림)이고 셋의 중앙값이 E(N)의 분모 X₁(몫)이다(set x1pod).",
+      "commands": [
+        {
+          "label": "N=1 3",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "1",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1hatPod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n1-{podTag}-r3-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n1-r3{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n1-r3{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 31,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 20,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n2-r1",
+      "title": "MSR-020 N=2(고른 몫) 1회",
+      "conditions": "진입 서버 2대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 2 × X̂₁(몫), 0.1 × 2 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1pod(N=1 몫 중앙값)다. 첫 회 앞에 무대를 그 N으로 다시 올린다(합본을 먼저 0개로 줄이는 기존 동작).",
+      "commands": [
+        {
+          "label": "무대 N=2",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "v1",
+            "--redis-tls",
+            "on",
+            "--replicas",
+            "2",
+            "--cpus",
+            "{podCpus}",
+            "--services",
+            "queue-svc"
+          ]
+        },
+        {
+          "label": "N=2 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "2",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1pod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n2-{podTag}-r1-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n2-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n2-r1{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 32,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n2-r2",
+      "title": "MSR-020 N=2(고른 몫) 2회",
+      "conditions": "진입 서버 2대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 2 × X̂₁(몫), 0.1 × 2 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1pod(N=1 몫 중앙값)다.",
+      "commands": [
+        {
+          "label": "N=2 2",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "2",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1pod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n2-{podTag}-r2-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n2-r2{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n2-r2{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 33,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n2-r3",
+      "title": "MSR-020 N=2(고른 몫) 3회",
+      "conditions": "진입 서버 2대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 2 × X̂₁(몫), 0.1 × 2 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1pod(N=1 몫 중앙값)다.",
+      "commands": [
+        {
+          "label": "N=2 3",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "2",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1pod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n2-{podTag}-r3-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n2-r3{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n2-r3{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 34,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 20,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n3-r1",
+      "title": "MSR-020 N=3(고른 몫) 1회",
+      "conditions": "진입 서버 3대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 3 × X̂₁(몫), 0.1 × 3 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1pod(N=1 몫 중앙값)다. 첫 회 앞에 무대를 그 N으로 다시 올린다(합본을 먼저 0개로 줄이는 기존 동작).",
+      "commands": [
+        {
+          "label": "무대 N=3",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "v1",
+            "--redis-tls",
+            "on",
+            "--replicas",
+            "3",
+            "--cpus",
+            "{podCpus}",
+            "--services",
+            "queue-svc"
+          ]
+        },
+        {
+          "label": "N=3 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "3",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1pod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n3-{podTag}-r1-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n3-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n3-r1{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 35,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n3-r2",
+      "title": "MSR-020 N=3(고른 몫) 2회",
+      "conditions": "진입 서버 3대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 3 × X̂₁(몫), 0.1 × 3 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1pod(N=1 몫 중앙값)다.",
+      "commands": [
+        {
+          "label": "N=3 2",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "3",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1pod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n3-{podTag}-r2-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n3-r2{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n3-r2{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 36,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n3-r3",
+      "title": "MSR-020 N=3(고른 몫) 3회",
+      "conditions": "진입 서버 3대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 3 × X̂₁(몫), 0.1 × 3 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1pod(N=1 몫 중앙값)다.",
+      "commands": [
+        {
+          "label": "N=3 3",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "3",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1pod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n3-{podTag}-r3-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n3-r3{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n3-r3{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 37,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 20,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n4-r1",
+      "title": "MSR-020 N=4(고른 몫) 1회",
+      "conditions": "진입 서버 4대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 4 × X̂₁(몫), 0.1 × 4 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1pod(N=1 몫 중앙값)다. 첫 회 앞에 무대를 그 N으로 다시 올린다(합본을 먼저 0개로 줄이는 기존 동작).",
+      "commands": [
+        {
+          "label": "무대 N=4",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "v1",
+            "--redis-tls",
+            "on",
+            "--replicas",
+            "4",
+            "--cpus",
+            "{podCpus}",
+            "--services",
+            "queue-svc"
+          ]
+        },
+        {
+          "label": "N=4 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "4",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1pod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n4-{podTag}-r1-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n4-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n4-r1{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 38,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n4-r2",
+      "title": "MSR-020 N=4(고른 몫) 2회",
+      "conditions": "진입 서버 4대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 4 × X̂₁(몫), 0.1 × 4 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1pod(N=1 몫 중앙값)다.",
+      "commands": [
+        {
+          "label": "N=4 2",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "4",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1pod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n4-{podTag}-r2-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n4-r2{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n4-r2{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 39,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n4-r3",
+      "title": "MSR-020 N=4(고른 몫) 3회",
+      "conditions": "진입 서버 4대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 4 × X̂₁(몫), 0.1 × 4 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1pod(N=1 몫 중앙값)다.",
+      "commands": [
+        {
+          "label": "N=4 3",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "4",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1pod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n4-{podTag}-r3-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n4-r3{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n4-r3{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 40,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 20,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n6-r1",
+      "title": "MSR-020 N=6(고른 몫) 1회",
+      "conditions": "진입 서버 6대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 6 × X̂₁(몫), 0.1 × 6 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1pod(N=1 몫 중앙값)다. 첫 회 앞에 무대를 그 N으로 다시 올린다(합본을 먼저 0개로 줄이는 기존 동작).",
+      "commands": [
+        {
+          "label": "무대 N=6",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "v1",
+            "--redis-tls",
+            "on",
+            "--replicas",
+            "6",
+            "--cpus",
+            "{podCpus}",
+            "--services",
+            "queue-svc"
+          ]
+        },
+        {
+          "label": "N=6 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "6",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1pod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n6-{podTag}-r1-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n6-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n6-r1{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 41,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n6-r2",
+      "title": "MSR-020 N=6(고른 몫) 2회",
+      "conditions": "진입 서버 6대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 6 × X̂₁(몫), 0.1 × 6 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1pod(N=1 몫 중앙값)다.",
+      "commands": [
+        {
+          "label": "N=6 2",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "6",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1pod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n6-{podTag}-r2-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n6-r2{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n6-r2{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 42,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n6-r3",
+      "title": "MSR-020 N=6(고른 몫) 3회",
+      "conditions": "진입 서버 6대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 6 × X̂₁(몫), 0.1 × 6 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1pod(N=1 몫 중앙값)다.",
+      "commands": [
+        {
+          "label": "N=6 3",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "6",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1pod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n6-{podTag}-r3-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n6-r3{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n6-r3{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 43,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 20,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n8-r1",
+      "title": "MSR-020 N=8(고른 몫) 1회",
+      "conditions": "진입 서버 8대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 8 × X̂₁(몫), 0.1 × 8 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1pod(N=1 몫 중앙값)다. 첫 회 앞에 무대를 그 N으로 다시 올린다(합본을 먼저 0개로 줄이는 기존 동작). 큰 N부터 포화하므로 8대를 마지막에 둔다.",
+      "commands": [
+        {
+          "label": "무대 N=8",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "v1",
+            "--redis-tls",
+            "on",
+            "--replicas",
+            "8",
+            "--cpus",
+            "{podCpus}",
+            "--services",
+            "queue-svc"
+          ]
+        },
+        {
+          "label": "N=8 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "8",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1pod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n8-{podTag}-r1-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n8-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n8-r1{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 44,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n8-r2",
+      "title": "MSR-020 N=8(고른 몫) 2회",
+      "conditions": "진입 서버 8대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 8 × X̂₁(몫), 0.1 × 8 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1pod(N=1 몫 중앙값)다. 큰 N부터 포화하므로 8대를 마지막에 둔다.",
+      "commands": [
+        {
+          "label": "N=8 2",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "8",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1pod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n8-{podTag}-r2-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n8-r2{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n8-r2{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 45,
+      "gate": "WINDOW-2",
+      "window": 2,
+      "group": "MSR-020",
+      "stage": "v1-entry",
+      "estimate_min": 15,
+      "ledger": "kpi NFR-001, 단계마다 장부 실행 하나(<접두>-s<단계>), host 칸(collect.py --host)과 호스트 포화 표시. 포화 점도 장부 행은 남긴다(V-T17).",
+      "key": "msr020-n8-r3",
+      "title": "MSR-020 N=8(고른 몫) 3회",
+      "conditions": "진입 서버 8대 × 고른 CPU 몫 {podCpus}, queue-svc만. 첫 단계 0.5 × 8 × X̂₁(몫), 0.1 × 8 × X̂₁(몫)씩(F-08-2 6.3). X̂₁(몫)은 x1pod(N=1 몫 중앙값)다. 큰 N부터 포화하므로 8대를 마지막에 둔다.",
+      "commands": [
+        {
+          "label": "N=8 3",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "entry-steps",
+            "--replicas",
+            "8",
+            "--pod-cpus",
+            "{podCpus}",
+            "--x1-estimate",
+            "{x1pod}",
+            "--record",
+            "--run-id-prefix",
+            "{day}-msr020-n8-{podTag}-r3-f082{suffix}",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/msr020/{day}-n8-r3{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3(MSR-020): 단계마다 진입 p99 ≤ 200ms·오류율 < 0.1%(NFR-001)·발생기 유효·커널 카운터 늘지 않음·호스트 포화 아님이면 지킴, X(N) = 이어서 지킨 가장 높은 도착률",
+        "steps.json x가 null(찾지 못함)이면 통과가 아니다. 3회 가운데 하나라도 null이면 그 N은 무효(F-08-2 6.3 '반복')",
+        "호스트 포화로 멈춘 회(steps.json saturated)는 그 N 점을 호스트 포화로 적고 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다, V-T17)"
+      ],
+      "artifact": ".cache/peaket-f08/msr020/{day}-n8-r3{suffix}/steps.json, step-*/host.json",
+      "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
+    },
+    {
+      "n": 46,
+      "gate": "WINDOW-2",
+      "key": "msr020-report",
+      "window": 2,
+      "group": "MSR-020",
+      "title": "MSR-020 계산: entry-scale.json·usl.csv·USL 그래프·진입 설계 식",
+      "estimate_min": 10,
+      "stage": "none",
+      "conditions": "측정이 아니다(Docker 잠금을 놓은 뒤 해도 된다). N마다 세 폴더로 점을 만들고(중앙값·편차·포화 표시), 포화 점을 뺀 E(N)·비례 판정·USL·진입 설계 식을 낸다(F-08-2 6.3 '계산'). R은 §3.3의 2026-11-01 실측 49만 800.",
+      "commands": [
+        {
+          "label": "Docker 잠금 놓기",
+          "argv": [
+            "bash",
+            "D:/ticketpass-locks/lock.sh",
+            "drop",
+            "docker-all",
+            "lane4-F-08"
+          ]
+        },
+        {
+          "label": "점과 비례 판정",
+          "argv": [
+            "node",
+            "loadtest/runner/entry-scale.mjs",
+            "report",
+            "--design",
+            ".cache/peaket-f08/msr020/{day}-n1-c1-r1{suffix},.cache/peaket-f08/msr020/{day}-n1-c1-r2{suffix},.cache/peaket-f08/msr020/{day}-n1-c1-r3{suffix}",
+            "--point",
+            "1=.cache/peaket-f08/msr020/{day}-n1-r1{suffix},.cache/peaket-f08/msr020/{day}-n1-r2{suffix},.cache/peaket-f08/msr020/{day}-n1-r3{suffix}",
+            "--point",
+            "2=.cache/peaket-f08/msr020/{day}-n2-r1{suffix},.cache/peaket-f08/msr020/{day}-n2-r2{suffix},.cache/peaket-f08/msr020/{day}-n2-r3{suffix}",
+            "--point",
+            "3=.cache/peaket-f08/msr020/{day}-n3-r1{suffix},.cache/peaket-f08/msr020/{day}-n3-r2{suffix},.cache/peaket-f08/msr020/{day}-n3-r3{suffix}",
+            "--point",
+            "4=.cache/peaket-f08/msr020/{day}-n4-r1{suffix},.cache/peaket-f08/msr020/{day}-n4-r2{suffix},.cache/peaket-f08/msr020/{day}-n4-r3{suffix}",
+            "--point",
+            "6=.cache/peaket-f08/msr020/{day}-n6-r1{suffix},.cache/peaket-f08/msr020/{day}-n6-r2{suffix},.cache/peaket-f08/msr020/{day}-n6-r3{suffix}",
+            "--point",
+            "8=.cache/peaket-f08/msr020/{day}-n8-r1{suffix},.cache/peaket-f08/msr020/{day}-n8-r2{suffix},.cache/peaket-f08/msr020/{day}-n8-r3{suffix}",
+            "--out",
+            ".cache/peaket-f08/msr020/report"
+          ]
+        },
+        {
+          "label": "USL",
+          "argv": [
+            "python",
+            "-I",
+            "-X",
+            "utf8",
+            "tools/perf-ledger/charts.py",
+            "usl",
+            "--points",
+            ".cache/peaket-f08/msr020/report/usl.csv",
+            "--target",
+            "200000",
+            "--out",
+            "docs/perf-ledger/charts/k1-entry-usl.svg"
+          ]
+        },
+        {
+          "label": "진입 설계 식",
+          "argv": [
+            "python",
+            "-I",
+            "-X",
+            "utf8",
+            "tools/perf-ledger/extrapolate.py",
+            "entry",
+            "--scale",
+            ".cache/peaket-f08/msr020/report/entry-scale.json",
+            "--redis-r",
+            "490800",
+            "--target",
+            "200000",
+            "--out",
+            ".cache/peaket-f08/msr020/report/entry.json",
+            "--md",
+            ".cache/peaket-f08/msr020/report/entry.md"
+          ]
+        }
+      ],
+      "criteria": [
+        "F-08-2 6.3 '계산'·§3.3: 가장 큰 포화 안 된 N의 E(N) ≥ 0.9면 '비례 전제는 N대까지 확인', 남은 점 3개 미만이면 '비례 전제 확인 못 함'",
+        "V-T17: 뺀 점과 까닭이 entry-scale.json proportionality.excluded·usl.json excluded에 있다",
+        "몫이 1이면 --point 1=…을 msr020-x1-* 폴더로 바꾼다"
+      ],
+      "ledger": "장부 실행이 아니다. 결과는 보고서 커밋의 MSR-020 보고서(계획 F-08-2 9절).",
+      "artifact": ".cache/peaket-f08/msr020/report/entry-scale.json, usl.csv, entry.json, docs/perf-ledger/charts/k1-entry-usl.svg·.json",
+      "result_note": "점이 6개 미만이면 charts.py가 경고한다(장부에만 남긴다)."
+    },
+    {
+      "n": 47,
+      "gate": null,
+      "key": "k7b-r1",
+      "window": 1,
+      "group": "K7 ②",
+      "title": "K7 ② 결제 장애 주입 1만 건 1회(새 클러스터)",
+      "estimate_min": 28,
+      "stage": "v1-fresh-tls-on",
+      "conditions": "회마다 새 클러스터(v1 TLS 켬, 복제 3). 10,000 결제(100/s × 본구간 100초), 예열 10초, 가상 사용자 11,002명, 응답 버림 5%, 승인 늦춤 0.5%(v1 합본의 K7 ② 조건), 본구간 50초에 합본 파드 하나를 강제로 끝냄, 드레인 20초(ADR-0269), P3 시작 시각은 ADR-0266. 창 1의 맨 끝이다(WINDOW-2 게이트가 막혀 있으면 next가 MSR-020을 건너뛰고 이것을 보인다).",
+      "commands": [
+        {
+          "label": "cluster.mjs down",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "down"
+          ]
+        },
+        {
+          "label": "cluster.mjs up",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "up"
+          ]
+        },
+        {
+          "label": "cluster.mjs observability",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "observability"
+          ]
+        },
+        {
+          "label": "v1 무대",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "v1",
+            "--redis-tls",
+            "on",
+            "--replicas",
+            "3"
+          ]
+        },
+        {
+          "label": "Prometheus(따로 띄움)",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "prometheus"
+          ],
+          "background": true
+        },
+        {
+          "label": "불변식 검사기",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@peaket/invariant-checker",
+            "build"
+          ]
+        },
+        {
+          "label": "남은 실행 정리",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "cleanup"
+          ]
+        },
+        {
+          "label": "K7 ② 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "payment",
+            "--users",
+            "11002",
+            "--rate",
+            "100",
+            "--seats-per-order",
+            "2",
+            "--warm",
+            "10",
+            "--main",
+            "100",
+            "--fault-drop-pct",
+            "5",
+            "--fault-delay-pct",
+            "0.5",
+            "--kill-app-at",
+            "50",
+            "--generators",
+            "1",
+            "--db-stats",
+            "--record",
+            "--run-id",
+            "{day}-k7-v1-fault-r1-f088{suffix}",
+            "--profile",
+            "local-10k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k7/{day}-k7b-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "P-T1(docs/features/payment.md:894): 이중 결제 0, P6(승인인데 원장에 없음) 0, 좌석 누수 0, P3은 시작 시각(ADR-0266) 뒤 60초 기준",
+        "주입이 실제로 있었다: 버린 응답·늦춘 승인 수와 killed.json의 끝낸 파드가 있다(0건이면 무효)",
+        "SKIPPED는 S3·P5만, pause-transitions.json error=null, generator.json judge.valid=true",
+        "P-T1은 부분(ticket-svc·망 끊김·웹훅 중복·일일 대사는 측정 못 함, ADR-0373 동결 선행)"
+      ],
+      "ledger": "kpi K7, profile local-10k, redis_tls=true, db-stats.json, notes에 5%/0.5%·강제 종료 50초·P3 시작 시각·정지 기록·SKIPPED.",
+      "artifact": ".cache/peaket-f08/k7/{day}-k7b-r1{suffix}/summary.json, invariants.csv, pause-transitions.json, killed.json, db-stats.json",
+      "result_note": "새 클러스터가 15분 안에 준비되지 않으면 그 회를 실패로 적고 한 번만 다시 올린다(F-08-8 6.3). 무효면 새 클러스터에서 다시 잰다."
+    },
+    {
+      "n": 48,
+      "gate": null,
+      "key": "k7b-r2",
+      "window": 1,
+      "group": "K7 ②",
+      "title": "K7 ② 결제 장애 주입 1만 건 2회(새 클러스터)",
+      "estimate_min": 28,
+      "stage": "v1-fresh-tls-on",
+      "conditions": "회마다 새 클러스터(v1 TLS 켬, 복제 3). 10,000 결제(100/s × 본구간 100초), 예열 10초, 가상 사용자 11,002명, 응답 버림 5%, 승인 늦춤 0.5%(v1 합본의 K7 ② 조건), 본구간 50초에 합본 파드 하나를 강제로 끝냄, 드레인 20초(ADR-0269), P3 시작 시각은 ADR-0266. 창 1의 맨 끝이다(WINDOW-2 게이트가 막혀 있으면 next가 MSR-020을 건너뛰고 이것을 보인다).",
+      "commands": [
+        {
+          "label": "cluster.mjs down",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "down"
+          ]
+        },
+        {
+          "label": "cluster.mjs up",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "up"
+          ]
+        },
+        {
+          "label": "cluster.mjs observability",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "observability"
+          ]
+        },
+        {
+          "label": "v1 무대",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "v1",
+            "--redis-tls",
+            "on",
+            "--replicas",
+            "3"
+          ]
+        },
+        {
+          "label": "Prometheus(따로 띄움)",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "prometheus"
+          ],
+          "background": true
+        },
+        {
+          "label": "불변식 검사기",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@peaket/invariant-checker",
+            "build"
+          ]
+        },
+        {
+          "label": "남은 실행 정리",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "cleanup"
+          ]
+        },
+        {
+          "label": "K7 ② 2",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "payment",
+            "--users",
+            "11002",
+            "--rate",
+            "100",
+            "--seats-per-order",
+            "2",
+            "--warm",
+            "10",
+            "--main",
+            "100",
+            "--fault-drop-pct",
+            "5",
+            "--fault-delay-pct",
+            "0.5",
+            "--kill-app-at",
+            "50",
+            "--generators",
+            "1",
+            "--db-stats",
+            "--record",
+            "--run-id",
+            "{day}-k7-v1-fault-r2-f088{suffix}",
+            "--profile",
+            "local-10k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k7/{day}-k7b-r2{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "P-T1(docs/features/payment.md:894): 이중 결제 0, P6(승인인데 원장에 없음) 0, 좌석 누수 0, P3은 시작 시각(ADR-0266) 뒤 60초 기준",
+        "주입이 실제로 있었다: 버린 응답·늦춘 승인 수와 killed.json의 끝낸 파드가 있다(0건이면 무효)",
+        "SKIPPED는 S3·P5만, pause-transitions.json error=null, generator.json judge.valid=true",
+        "P-T1은 부분(ticket-svc·망 끊김·웹훅 중복·일일 대사는 측정 못 함, ADR-0373 동결 선행)"
+      ],
+      "ledger": "kpi K7, profile local-10k, redis_tls=true, db-stats.json, notes에 5%/0.5%·강제 종료 50초·P3 시작 시각·정지 기록·SKIPPED.",
+      "artifact": ".cache/peaket-f08/k7/{day}-k7b-r2{suffix}/summary.json, invariants.csv, pause-transitions.json, killed.json, db-stats.json",
+      "result_note": "새 클러스터가 15분 안에 준비되지 않으면 그 회를 실패로 적고 한 번만 다시 올린다(F-08-8 6.3). 무효면 새 클러스터에서 다시 잰다."
+    },
+    {
+      "n": 49,
+      "gate": null,
+      "key": "k7b-r3",
+      "window": 1,
+      "group": "K7 ②",
+      "title": "K7 ② 결제 장애 주입 1만 건 3회(새 클러스터)",
+      "estimate_min": 28,
+      "stage": "v1-fresh-tls-on",
+      "conditions": "회마다 새 클러스터(v1 TLS 켬, 복제 3). 10,000 결제(100/s × 본구간 100초), 예열 10초, 가상 사용자 11,002명, 응답 버림 5%, 승인 늦춤 0.5%(v1 합본의 K7 ② 조건), 본구간 50초에 합본 파드 하나를 강제로 끝냄, 드레인 20초(ADR-0269), P3 시작 시각은 ADR-0266. 창 1의 맨 끝이다(WINDOW-2 게이트가 막혀 있으면 next가 MSR-020을 건너뛰고 이것을 보인다).",
+      "commands": [
+        {
+          "label": "cluster.mjs down",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "down"
+          ]
+        },
+        {
+          "label": "cluster.mjs up",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "up"
+          ]
+        },
+        {
+          "label": "cluster.mjs observability",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "observability"
+          ]
+        },
+        {
+          "label": "v1 무대",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "v1",
+            "--redis-tls",
+            "on",
+            "--replicas",
+            "3"
+          ]
+        },
+        {
+          "label": "Prometheus(따로 띄움)",
+          "argv": [
+            "node",
+            "tools/local/cluster.mjs",
+            "prometheus"
+          ],
+          "background": true
+        },
+        {
+          "label": "불변식 검사기",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@peaket/invariant-checker",
+            "build"
+          ]
+        },
+        {
+          "label": "남은 실행 정리",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "cleanup"
+          ]
+        },
+        {
+          "label": "K7 ② 3",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "payment",
+            "--users",
+            "11002",
+            "--rate",
+            "100",
+            "--seats-per-order",
+            "2",
+            "--warm",
+            "10",
+            "--main",
+            "100",
+            "--fault-drop-pct",
+            "5",
+            "--fault-delay-pct",
+            "0.5",
+            "--kill-app-at",
+            "50",
+            "--generators",
+            "1",
+            "--db-stats",
+            "--record",
+            "--run-id",
+            "{day}-k7-v1-fault-r3-f088{suffix}",
+            "--profile",
+            "local-10k",
+            "--invariants",
+            "--prom-url",
+            "http://127.0.0.1:9090",
+            "--out",
+            ".cache/peaket-f08/k7/{day}-k7b-r3{suffix}"
+          ]
+        },
+        {
+          "label": "Docker 잠금 놓기(창 1 끝)",
+          "argv": [
+            "bash",
+            "D:/ticketpass-locks/lock.sh",
+            "drop",
+            "docker-all",
+            "lane4-F-08"
+          ]
+        }
+      ],
+      "criteria": [
+        "P-T1(docs/features/payment.md:894): 이중 결제 0, P6(승인인데 원장에 없음) 0, 좌석 누수 0, P3은 시작 시각(ADR-0266) 뒤 60초 기준",
+        "주입이 실제로 있었다: 버린 응답·늦춘 승인 수와 killed.json의 끝낸 파드가 있다(0건이면 무효)",
+        "SKIPPED는 S3·P5만, pause-transitions.json error=null, generator.json judge.valid=true",
+        "P-T1은 부분(ticket-svc·망 끊김·웹훅 중복·일일 대사는 측정 못 함, ADR-0373 동결 선행)"
+      ],
+      "ledger": "kpi K7, profile local-10k, redis_tls=true, db-stats.json, notes에 5%/0.5%·강제 종료 50초·P3 시작 시각·정지 기록·SKIPPED.",
+      "artifact": ".cache/peaket-f08/k7/{day}-k7b-r3{suffix}/summary.json, invariants.csv, pause-transitions.json, killed.json, db-stats.json",
+      "result_note": "새 클러스터가 15분 안에 준비되지 않으면 그 회를 실패로 적고 한 번만 다시 올린다(F-08-8 6.3). 무효면 새 클러스터에서 다시 잰다."
+    }
+  ],
+  "post": [
+    "창 1 끝: K1 세 규모로 python -I -X utf8 tools/perf-ledger/extrapolate.py origin --runs <K1 v1 실행 ID…> --version v1 --out .cache/peaket-f08/msr010/origin-v1.json --md …(F-08-2 MSR-010). 10만이 무효면 판정하지 않음이 나온다(V-T4 판정 못 함).",
+    "charts.py before-after로 K1·K2·K7 p99·오류율(F-08-8 9절)",
+    "python tools/perf-ledger/index.py"
+  ],
+  "not_included": [
+    "K3·K4·K5·P-T31·P-T34 측정 몫(감독 결정 2026-11-23, ADR-0373 동결 선행)",
+    "P-T22(감독 결정: 넣지 않음)",
+    "v0 다시 재기(F-08-2 2절 4)"
+  ]
+}
