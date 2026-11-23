@@ -280,9 +280,13 @@ describe('F-05-6 실제 ticket-svc(start) 입장 기록 마감', () => {
     const unreportedBefore = await metric('ticket_scanner_unreported_total');
     const timeoutBefore = await metric('ticket_entry_closes_total', ['reason="TIMEOUT"']);
     const ends = Date.now() - ROLE_END_AFTER_ENDS_MS - UNREPORTED_WAIT_MS - 60_000;
-    const e = await eventOf({ endsAtMs: ends, devices: 2 });
+    // IR-04(시험 경합 고침): 이미 TIMEOUT 창을 지난 회차라 200ms 배경 판단이 보고 커밋 전에 돌면 두 기기 모두
+    // 미보고로 마감해 건이 둘이 된다. 판매 설정을 503으로 두어 배경 판단이 ends_unknown으로 건너뛰게 하고,
+    // 한 대의 보고가 커밋된(204) 뒤 되살려 TIMEOUT 마감을 기다린다. 단언의 뜻은 그대로다
+    const e = await eventOf({ endsAtMs: ends, devices: 2, sale: { kind: '503' } });
     // 한 대는 비웠다고 보고하고 한 대는 보고하지 않는다
     expect((await deviceCall(e.devices[0]!.key, 'PUT', `/v1/scanner/queue-reports/${e.eventId}`, { pendingUploads: 0 })).status).toBe(204);
+    standIn.sale.set(e.eventId, { kind: 'ok', endsAtMs: ends });
     const silent = e.devices[1]!.deviceId;
     await expect.poll(async () => Number((await database.pool.query('select count(*)::int as n from scanner_unreported_case where event_id = $1 and opened_at is not null', [e.eventId])).rows[0].n), POLL).toBe(1);
     const row = (await closeRow(e.eventId))!;
