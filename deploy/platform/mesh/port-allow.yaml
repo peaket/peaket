@@ -260,7 +260,8 @@ workloads:
               GetEntryRecords: [purchase-svc]
               IssueTickets: [purchase-svc]
               ListHeldTickets: [core-svc]
-              ListTickets: [web]
+              # 월렛 목록은 팬이 gw-fan → ticket-svc HTTP(GET /v1/tickets)로 받는다. gRPC 목록은 부르는 쪽이 없다(FIX-wallet-tickets, docs/api/proto/README.md §3)
+              ListTickets: []
               OperatorCancelTickets: [purchase-svc]
               # 입금 오류 되돌림의 티켓 무효(docs/features/payment.md §6 '티켓 무효·재발권', 구현 메모 4)
               VoidTickets: [purchase-svc]

@@ -839,13 +839,6 @@ spec:
             matchLabels:
               app.kubernetes.io/name: purchase-svc
               app.kubernetes.io/component: service
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: web
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: web
-              app.kubernetes.io/component: service
       ports:
         - protocol: TCP
           port: 50052
