@@ -888,6 +888,7 @@
 | R-795 | ADR-0372가 구현 뒤 리뷰·검증을 모두 없애, 시험이 덮지 않는 A등급(돈·좌석·대기 순번) 결함이 구간 마무리까지 남는다 | docs/adr/0381-agrade-post-impl-review.md, docs/architecture.md §8.6·§11, ADR-0372·0373 상태 줄 | A등급만 구현 리뷰(Batch-Grade: A, Review-Of: impl, 계획 파일 구현 리뷰 절), roles-check 자동 검사 전까지 감독 손 확인 | 적용 |
 | R-796 | LCH-110 토스 지급대행 실연동 부재(셀러 등록 JWE·전송 조립·결과 전이·자동 재시도·잔액 대사) | services/payment-svc/src/modules/settlement, start.ts, migrations/0029, ops-svc cases 받는 종류, docs/api/openapi.yaml | 전송 어댑터·셀러·결과 전이·재요청·대사·09시 묶음, ADR-0369 | 고침 |
 | R-797 | 파트너 실시간 판매 현황의 '지금 대기'와 관제 '지금 대기'가 읽는 1초 대기 집계를 queue-svc가 내지 않아 0으로 떴다 | services/queue-svc(queue-aggregate·wiring·start·app.module·진입·입장 확정·대기 취소 세는 줄) | 관측이 업무 경로를 막지 않는 세기와 1초 내기 | 해결. QueueEntryRecord는 F-04-7 범위 때 |
+| R-798 | 관제 대시보드의 단계·T-30분 점검·Go/No-Go·남은 허용 실패·제어 입력 없음·경보가 목업 숫자뿐이었고, reset 뒤 경보를 다시 읽을 REST가 없었다 | services/ops-svc readiness·live·alerts 읽기·0029, docs/api openapi·asyncapi, packages/contracts·api-client 생성물, apps/console-host 대시보드, docs/adr/0371, docs/features/control-tower.md, docs/BUILD_ORDER.md | readiness 컨텍스트·판정 기록, 제어 감시, 판단 위젯 넷, 경보 목록 REST·다시 읽기, 실제 값 대시보드 | 해결. OPS-370은 F-03-6(동결), 못 한 몫은 정리 목록 |
 
 ## 4. 숫자 일치표
 
