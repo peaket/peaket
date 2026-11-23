@@ -1,6 +1,6 @@
 # 기능 계획: FIX-wallet-tickets(발권 → 월렛 이음매 — 월렛 목록 HTTP 조회와 월렛 실제 데이터, 데모 S1)
 
-- **진행**: 계획 끝(2026-11-23). 시험 씀·실패 확인(2026-11-23, 10절). 다음은 시험 리뷰.
+- **진행**: 계획 끝(2026-11-23). 시험 씀·실패 확인(2026-11-23, 10절). 시험 리뷰 끝(2026-11-23, 15절 TR-01~08). 다음은 지적 반영(시험 담당).
 - **무엇**: 감독 결정 2026-11-23(7일 완성 ADR-0373 결정 1 ①, 시험 먼저 ADR-0372)으로 갈래 4가 맡은 새 일 FIX-wallet-tickets의 작업 목록이다. BUILD_ORDER '기능 단위 계획' 표에 이 ID의 행은 없다(2절 1의 문안을 감독이 coord에 적는다). 검토 기록이고 규범이 아니다. 정본과 다르면 정본이 이긴다.
 - **쉬운 말**: 결제가 끝나면 티켓이 발권되지만, 팬이 '마이 티켓'(월렛)을 열어도 그 티켓을 볼 수 없었다. 월렛이 부르는 목록 주소(`GET /v1/tickets`)는 계약과 게이트웨이에는 있는데, 받아 줄 서버 처리기가 없었기 때문이다. 이 일은 ticket-svc에 그 처리기를 더하고, 월렛 화면이 가짜 그림 대신 그 목록으로 티켓과 회전 QR(15초마다 바뀌는 입장 QR)을 그리게 하고, 시연 시나리오 S1이 DB를 직접 읽는 대신 그 주소와 실제 QR로 '발권 → 월렛'을 확인하게 바꾼다.
 - **바탕**: `D:/ticketpass-lane4-wallet`, 가지 `feature/lane4-FIX-wallet-tickets`, 기준 `origin/develop` `1f3fa58d2`. 계획 담당은 제품·시험 코드를 쓰지 않았고 시험·Docker를 돌리지 않았다. 읽은 조사: 감독이 준 `fan-flow-survey.md` 2절 ①.
@@ -314,7 +314,23 @@
 - 시험도 구현도 맡지 않은 리뷰 담당이 시험의 바뀐 부분·이 계획·정본·장부만 보고 적는다(ADR-0372 결정 2). 볼 것: 판정 기준과 단언 대조(이름만 단 시험 없음), 11절 틀린 구현 열일곱을 시험이 잡는지, 13절, 시험 안티패턴(초록인데 검증 없음, 고정 대기, 내부 업무 로직 모킹, 짝 없는 가짜).
 - 지적은 시험 담당이 고친다(`Role: review-fix`, `Fix-By: test`). 리뷰 담당이 반영을 확인해 이 절에 적으면 시험이 고정된다.
 
-(리뷰 담당이 채운다)
+리뷰 담당 fwal-trev-7c4e(claude-opus-5-5), 2026-11-23, 시험 커밋 `8d06644e6`·계획 고침 `e3a505e76` 기준. 본 것: `git diff cec434dd3..HEAD -- services apps tools deploy`, 이 계획 1~14절, offline-gate §2 '월렛 목록 서버'·§11 O-T47·O-T48, frontend §4.2.4 '월렛 목록 세부'·§4.1 '시간 초과'·'api-client 밖의 호출', openapi `listTickets`·`Ticket`, authz-matrix §5.1, `docs/security/asvs/offline-gate.md` 해당 행, `ledger --batch FIX-wallet-tickets`(자동 시험 19, ID만 4, 빈칸 0). 시험을 돌리지는 않았다(읽기 리뷰).
+
+**전체 판단**: O-T47 ①~⑧·O-T48 ①~⑩의 판정 문장마다 정본 값으로 정확히 단언하는 시험이 있고, 11절 틀린 구현 M1~M17은 모두 잡힌다. 가짜는 경계(저장소 포트의 `memory-*` 짝 가짜, `globalThis.fetch`, fake-indexeddb, 시계)뿐이고 업무 로직 모킹·고정 대기·타입 탈출은 없다. 실제 서버 연결은 통합 시험(`start()`)과 데모 S1이 맡는다. 다만 A 등급 실패 상황 둘(아래 TR-01·TR-04: 현장 오프라인 QR이 사라지는 길)이 열려 있고, 장부 ID만 넷이 게이트 `--require`에서 막힌다(TR-02). 구현 뒤 리뷰가 없으므로 10절 8의 '구현 리뷰 볼 점'은 지금 시험으로 못 박아야 한다.
+
+| ID | 심각도 | 분류 | 자리 | 정본 근거 | 고칠 것 |
+| --- | --- | --- | --- | --- | --- |
+| TR-01 | 높음 | 장애 주입·빈칸(A 등급) | `apps/web/src/features/wallet-sync/sync.test.mjs:188-191`(bad-response 목록), 10절 8 | frontend §4.2.4 '저장'(목록을 **다 받으면** 맞춘다)·'화면 상태'(모양이 틀린 응답은 받지 못함), openapi `listTickets` 200의 `items`는 필수 칸이 아니다 | `items` 칸이 없는 200(`{ nextCursor: null }`, `{}`)은 계약 Zod를 지나므로, 구현이 `items ?? []`로 읽으면 저장소를 비워 오프라인 QR이 사라진다. 저장된 표가 있는 상태에서 이 두 응답을 주고 `{ kind: 'failed', reason: 'bad-response' }`, 저장소·`lastSyncAt` 그대로, 화면 `list`+`offline`을 단언하는 시험을 더한다. 8.3 `bad-response` 정의에 'items 칸 없음'을 적는다(정본 문장 보강이 필요하면 감독 판단) |
+| TR-02 | 높음 | 장부·태그 | `services/ticket-svc/test/wallet-tickets-http.test.ts:175·292·357·459`, `test-int/wallet-tickets.int.test.ts:126·195·233` | `tools/ci/asvs-report.mjs` 15행(정본 꼴 `[ASVS v5.0.0-x.y.z]`), ledger `codeArea`(구현 위치가 가리키는 영역 안 시험만 센다) | ① 이름 `(ASVS v5.0.0-14.2.2, v5.0.0-14.3.2, v5.0.0-16.2.5)`는 첫 ID만 태그로 읽히고(꼴 다름 경고) 14.3.2·16.2.5는 태그가 아니다. ID마다 `[ASVS v5.0.0-14.2.2] [ASVS v5.0.0-14.3.2] [ASVS v5.0.0-16.2.5]`, `[ASVS v5.0.0-15.3.1]`, `[ASVS v5.0.0-8.2.2]` 꼴로 고친다(시험 담당). ② 네 행의 코드 영역이 `apps/scanner`(기본값)라 ticket-svc 시험이 세지지 않아 `ledger --batch FIX-wallet-tickets`가 'ID만 4'다. `docs/security/asvs/offline-gate.md` 14.2.2·14.3.2·15.3.1·16.2.5 행 구현 위치 칸에 `ticket-svc`(월렛 목록 `GET /v1/tickets`)를 적어야 자동 시험이 된다(정본이라 감독·계획 담당 몫, 게이트 `--require` 전) |
+| TR-03 | 높음 | 장애 주입·되돌림(A 등급) | `sync.test.mjs:215-230`(O-T48 ④), `:313-331`(⑩) | plan 8.3 '실패면 저장소를 바꾸지 않는다', frontend §4.2.4 '저장'(다 받은 뒤 맞춤), O-T48 ④ | 지금 실패는 모두 **첫 쪽**에서 난다(⑩만 둘째 쪽). 저장된 표 2장이 있는 상태에서 첫 쪽 200(새 표 1장, 커서 있음) → 둘째 쪽 끊김·503·401(갱신 뒤도)인 경우를 더해 `failed`(401은 `needs-login`), 저장소가 앞 동기화 값 그대로(새 표 없음, 옛 표 그대로), `lastSyncAt` 그대로를 단언한다. 받은 만큼만 맞추는 구현(옛 표 지움 → 오프라인 QR 사라짐)을 잡는다. ④는 `got.kind`만 보지 말고 `reason`(`network`·`server`)까지 단언한다 |
+| TR-04 | 중간 | 판정 단언 약함(TA-C10·C04) | `apps/web/src/features/wallet-sync/model.test.mjs:170-208`, `tools/web-checks/reflow/wallet-live.spec.mjs:140-162` | O-T48 ⑥ '등록된 키가 있으면 회전 QR이고 그 대체 글에 그 티켓 ID', frontend §3.7 | model 시험의 회전 QR은 시험이 직접 `createQrFrame(signer, card.ticketId, …)`을 불러 `decoded.ticketId === id`를 보므로, 실제 화면(`WalletLive`)이 `DeviceQr`에 다른 ID를 넘겨도 통과한다. spec ⑥에 '등록 버튼 누름 → `POST /v1/tickets/<id>/device-keys`를 경로 가로채기로 201(받은 JWK의 keyId, model 시험의 `keyIdOfJwk` 꼴) → `getByRole('img', { name: /^입장 QR, 티켓 <id>, 15초마다 바뀝니다/ })` 보임, 요청 경로의 ID = 목록 `ticketId`'를 더한다. model 시험의 15초 경계는 코드 함수(`msUntilNextQrFrame`)로 경계를 구하지 말고 정본 값(15초, 예 `03:00:14.999Z`·`03:00:15.000Z`)으로 둔다(TA-C02) |
+| TR-05 | 중간 | 칸 단언(M5) | `services/ticket-svc/test/wallet-tickets-http.test.ts:407-426` | offline-gate §2 '무엇을 싣나'(받은 표의 `receivedFromNickname`, **잠긴 표의 `transferLockExpiresAt`**은 칸을 뺀다) | 받은 표·잠긴 표는 `'receivedFromNickname' in`과 `transferLocked`만 본다. 잠금 기한은 양도 저장소에 있어 구현이 `transferLockExpiresAt`을 채우기 쉽다. 두 항목 모두 키 집합을 정확히 단언한다(받은 표 `cancelDeadline, eventId, eventStartsAt, status, ticketId, transferLocked`, 잠긴 표는 여기에 `receivedFromNickname`). B 목록 원문에 결제자 A의 계정 ID가 없는지도 본다 |
+| TR-06 | 중간 | 데모 정적 시험 빈틈(TA-C01) | `tools/local/demo.test.mjs:987`(새), `:960`(기존 같은 꼴) | 계획 8.5 확인 이름, 정본 d5 §10.6 S1 | `/addCheck\('wallet-list',\s*[a-zA-Z]/`는 `addCheck('wallet-list', true)`를 받는다(직접 확인). `true`·`false` 글자를 부정 앞보기로 막는 꼴(식 자리가 이름이나 호출이어야 한다)로 고치고, 같은 꼴인 960행 ticket-qr 단언도 함께 고친다. `ticket-qr` 식이 `wallet-list`로 찾은 ticketId와 QR 대체 글을 견주는지(`ticketQrOf` 결과와 그 ID를 함께 쓰는지)도 S1 블록에서 본다. '이 휴대폰을 입장용으로 등록'·`waitForResponse … device-keys` 단언은 `source` 전체가 아니라 S1 블록과 S1이 부르는 도우미로 좁힌다(다른 시나리오가 더하면 저절로 통과) |
+| TR-07 | 낮음 | 경계·장애(시간 한도) | `sync.test.mjs:73-96`(가짜 API가 `init.signal`을 기록하지 않음), `:182` | frontend §4.2.4 '받기'(읽기 시간 한도는 §4.1 'api-client 밖의 호출'의 읽기 값 10초) | 시간 초과는 가짜가 `TimeoutError`를 던질 뿐이라 시간 한도가 없는 구현(답 없는 망에서 '불러오는 중'에 영원히 머묾)도 통과한다. 목록·요약 요청마다 `init.signal`이 `AbortSignal`인지 단언하거나, 신호를 따르는 멈춘 응답으로 10초 뒤 `network` 실패를 본다 |
+| TR-08 | 낮음 | 캐시 머리 | `wallet-tickets-http.test.ts:459-470` | offline-gate §2 '캐시와 기록'(`private, no-store`, **오류 응답도**) | 판정 ⑧은 200·400이지만 정본 문장은 오류 응답 전부다. 401(세션 없음)·500(저장소 장애, 495행 시험)에도 `cache-control: private, no-store`를 단언한다. 플랫폼 가드가 401에 달지 못하면 시험 이의로 알린다 |
+
+- 확인했고 지적하지 않은 것: 남의 표(①③⑦, 커서 바꿔 끼우기·쿼리 `accountId`·결제자/보유자), 다른 대상 신원 401(⑥, partner·ops·scanner = 다른 테넌트 몫), 금지 칸·값(⑤, 원문 문자열까지), 기록 줄(⑧, 빈 기록 통과 막음), 페이지 경계(4장·`limit` 2, 0장, 1·100, 같은 발권 시각), 풀리지 않는 커서 여섯 꼴, gRPC `INVALID_ARGUMENT`, 시작 파일 조립(통합이 `start()`), 통합 시험 CI 잡(`ci-node.yml` 154행), MS-09 `ListTickets: []`, 화면 상태 다섯·배지·문장(정본 글 그대로), 회차 요약 요청 수·쿠키 없음, 빠진 표의 기기 키 남김, QR 글자가 저장소·`console`에 없음, spec 0개 실행(제목 ' 기본 폭: ' 일곱 모두).
+- **시험 고정**: TR-01~TR-06을 반영하면(TR-02 ②는 정본 고침이라 감독·계획 담당이 게이트 전에) 고정해도 된다. TR-07·TR-08은 반영을 권하지만 고정을 막지 않는다. 반영 확인은 이 리뷰 담당이 이 절에 적는다.
 
 ## 16. 검증
 
@@ -326,6 +342,6 @@
 | --- | --- | --- | --- |
 | 계획 | fwal-plan-4b1c | claude-opus-5-5 | 이 커밋 |
 | 시험 | fwal-test-2e9a | claude-opus-5-5 | 이 시험 커밋 |
-| 시험 리뷰 | | | |
+| 시험 리뷰 | fwal-trev-7c4e | claude-opus-5-5 | 이 리뷰 커밋(지적 TR-01~08) |
 | 구현 | | | |
 | 기록 | | | |
