@@ -440,7 +440,7 @@ sequenceDiagram
     | 확인할 동작 | 사건·필드 | SLI | 대시보드 패널 | 경보(종류·심각도) | 배포 뒤 확인 방법 |
     | --- | --- | --- | --- | --- | --- |
     | 연결을 받고 지킨다 | `realtime_gw_connections`, `realtime_gw_closes_total{code}`, `ws_closed` | 없음 | 좌석 실시간 '연결 수와 닫힘 코드' | 4403·4429 닫힘이 5분 동안 0보다 크다(경고. 정상 화면은 0, docs/frontend.md §4.4.1) | 카나리에서 닫힘 코드가 1000·1006·1012 밖으로 늘지 않는지 본다 |
-    | 묶음 대기 | `realtime_gw_batch_wait_ms`, `realtime_gw_batches_total` | NFR-004의 SLI `seat_delta_e2e_ms`(화면 쪽)의 서버 몫 | '묶음 대기 p99와 초당 묶음' | p99가 150ms [가정]를 5분 넘는다(경고) | S-T12 측정 값과 견준다 |
+    | 묶음 대기 | `realtime_gw_batch_wait_ms`, `realtime_gw_batches_total` | NFR-004의 SLI `seat_delta_e2e_ms`(화면 쪽)의 서버 몫 | '묶음 대기 p99와 초당 묶음' | p99가 150ms [가정]를 5분 넘는다(경고. 경보 라벨은 SEV3 `sev3`이고 티켓으로 간다, 추천 적용 2026-11-23, F-01-7 계획, docs/observability.md §5 '경보 규칙 검사') | S-T12 측정 값과 견준다 |
     | 좌석 Redis 구독 | `realtime_gw_redis_up`, `realtime_gw_pubsub_messages_total{result}` | 없음 | '좌석 채널 구독과 메시지' | `realtime_gw_redis_up` 0이 1분(심각), `result="bad"`가 0보다 크다(경고) | 배포 직후 `result="ok"`가 홀드 수와 함께 오르는지 본다 |
     | 핸드셰이크 거절 | `realtime_gw_handshake_rejects_total{status}`, `ws_rejected` | 없음 | '핸드셰이크 거절' | 401 비율이 배포 전의 두 배 [가정]를 넘는다(경고) | 배포 전후 거절 비율을 견준다 |
     | 전파 Degraded 자동 전환(ADR-0298) | `realtime_gw_degraded`, `realtime_gw_buffer_slow_connections`, 로그 `realtime_gw_degraded` | §9 '좌석 실시간 전파 과부하'의 완화 SLO p99 1.5초 | '전파 Degraded와 1초 간격 연결' | `realtime_gw_degraded`가 1(SEV2, 바로. docs/observability.md §5 '핵심 사용자 여정의 Degraded Mode 진입'). 그동안 '묶음 대기' 경보는 이 경보로 갈음한다. `realtime_gw_buffer_slow_connections` ÷ `realtime_gw_connections`가 5% [가정] 이상으로 30초(SEV2, G-06을 60초 안에 잡는다, K8) | 카나리에서 0인지 보고, Game Day G-06에서 버퍼 1초 연결 경보가 60초 안에 울리는지 본다 |
