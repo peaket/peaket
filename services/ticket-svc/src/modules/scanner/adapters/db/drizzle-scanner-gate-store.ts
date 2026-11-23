@@ -356,7 +356,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
           `)
         ).rows as unknown as PassScanRow[];
         const latest = passRows.at(-1);
-        const corrected = Date.parse(scan.scannedAtDevice) + (scan.clockOffsetMs ?? 0);
+        const corrected = Date.parse(scan.scannedAtDevice);
         const session = i.sessions?.[scan.scannerSessionId];
         const kinds: GateFlagKind[] = [];
         const demoted: PassScanRow[] = [];
