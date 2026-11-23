@@ -203,12 +203,12 @@ describe('월렛 목록 PostgreSQL [O-T51]', () => {
     expect(p.status, p.raw).toBe(200);
     const byId = new Map((p.body.items ?? []).map((i) => [String(i.ticketId), i]));
     const z = byId.get(zoned.tickets[0]!.ticketId)!;
-    expect(Object.keys(z).sort()).toEqual(['cancelDeadline', 'eventId', 'eventStartsAt', 'gateZone', 'receivedFromNickname', 'status', 'ticketId', 'transferLocked']);
+    expect(Object.keys(z).sort()).toEqual(['cancelDeadline', 'eventId', 'eventStartsAt', 'gateZone', 'pendingTransfer', 'receivedFromNickname', 'status', 'ticketId', 'transferLocked']);
     expect(z).toMatchObject({ eventId: event, status: 'ISSUED', gateZone: 'C', transferLocked: false, receivedFromNickname: null });
     expect(Date.parse(String(z.eventStartsAt))).toBe(STARTS);
     expect(z.cancelDeadline).toBe(z.eventStartsAt);
-    expect(Object.keys(byId.get(plain.tickets[0]!.ticketId)!).sort()).toEqual(['cancelDeadline', 'eventId', 'eventStartsAt', 'receivedFromNickname', 'status', 'ticketId', 'transferLocked']);
-    expect(Object.keys(byId.get(noStart.tickets[0]!.ticketId)!).sort()).toEqual(['eventId', 'receivedFromNickname', 'status', 'ticketId', 'transferLocked']);
+    expect(Object.keys(byId.get(plain.tickets[0]!.ticketId)!).sort()).toEqual(['cancelDeadline', 'eventId', 'eventStartsAt', 'pendingTransfer', 'receivedFromNickname', 'status', 'ticketId', 'transferLocked']);
+    expect(Object.keys(byId.get(noStart.tickets[0]!.ticketId)!).sort()).toEqual(['eventId', 'pendingTransfer', 'receivedFromNickname', 'status', 'ticketId', 'transferLocked']);
     for (const r of [plain, zoned, noStart]) {
       for (const t of r.tickets) {
         for (const v of [t.orderId, t.seatId, t.keyHash, String(t.ticketKey), t.qrPayload]) expect(p.raw.includes(v), `응답에 계약 밖 값 ${v.slice(0, 12)}…`).toBe(false);
