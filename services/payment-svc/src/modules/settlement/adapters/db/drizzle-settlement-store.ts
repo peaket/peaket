@@ -636,6 +636,39 @@ export class DrizzleSettlementStore implements SettlementStore {
   }
 
   async saveStatement(record: StatementRecord): Promise<void> {
+    // 메모리 저장소와 같은 뜻: 행이 없으면 넣고(원본 목록·감사·사건 없이), 있으면 아래 칸을 덮어쓴다. 시험 자료 맞추기 전용(F-07-7 통합 시험)
+    await this.db.db
+      .insert(settlementStatement)
+      .values({
+        id: record.statementId,
+        promoterId: record.promoterId,
+        kind: record.kind,
+        eventId: record.eventId,
+        pg: record.pg,
+        pgStore: record.pgStore,
+        periodStart: record.periodStart,
+        periodEnd: record.periodEnd,
+        grossAmount: record.grossAmount,
+        refundAmount: record.refundAmount,
+        commissionAmount: record.commissionAmount,
+        commissionVat: record.commissionVat,
+        offsetAmount: record.offsetAmount,
+        payoutAmount: record.payoutAmount,
+        revision: record.revision,
+        supersedesId: record.supersedesId,
+        excludedPayments: record.excludedPayments,
+        status: record.status,
+        holdReason: record.holdReason,
+        disputeDueAt: record.disputeDueAt,
+        payoutDate: record.payoutDate,
+        payoutBankCode: record.payoutBankCode,
+        payoutAccountLast4: record.payoutAccountLast4,
+        payoutBatchId: record.payoutBatchId,
+        adjustmentAmount: record.adjustmentAmount ?? 0,
+        createdAt: record.createdAt,
+        updatedAt: record.updatedAt,
+      })
+      .onConflictDoNothing();
     await this.db.db
       .update(settlementStatement)
       .set({

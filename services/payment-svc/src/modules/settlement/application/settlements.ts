@@ -2248,7 +2248,7 @@ export class Settlements {
           legalName: input.company.name,
           representative: input.company.representativeName,
           verifiedAt: null,
-          source: 'SALE_REVIEW',
+          source: 'MANUAL',
           updatedAt: now,
         });
       }
@@ -2284,7 +2284,7 @@ export class Settlements {
       kyc?.status === 'VERIFIED' && kyc.businessVerified && kyc.representativeVerified && kyc.legalName === input.legalName && kyc.representative === input.representative && kyc.verifiedAt?.getTime() === input.verifiedAt.getTime();
     if (!same) {
       await this.d.store.saveKyc({
-        source: 'SALE_REVIEW',
+        source: 'MANUAL',
         ...kyc,
         promoterId,
         status: 'VERIFIED',
