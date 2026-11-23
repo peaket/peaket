@@ -12,7 +12,7 @@
 - 계약 원본은 `docs/api/`(openapi·asyncapi·proto·avro)다. `packages/contracts`(Zod 스키마·타입)와 `packages/api-client`(화면 클라이언트·MSW 처리기)는 그 생성물이다.
 - `apps/`: 팬 웹·파트너 콘솔(Next), 관제 콘솔 호스트(webpack)와 원격 위젯(`apps/widgets/*`), 스캐너·대기실(`apps/web/queue-room`)·포렌식(Vite). 화면 공용은 `ds`(디자인 토큰·부품), `seatmap`, `telemetry`, `validation`, `console-contract`.
 - `deploy/`(Helm 차트·환경 값·Kyverno 정책, Argo CD가 `develop`에서 읽음), `infra/`(Terraform), `loadtest/`(k6·카오스), `tools/local/`(로컬·CI kind 클러스터), `tools/ci/`(CI 검사 스크립트, 각자 `*.test.mjs`), `tools/claude-hooks/`(에이전트 훅: 남의 변경을 섞거나 날리는 git 명령·강제 푸시·생성 파일 편집을 막는다, ADR-0330. 막히면 그 까닭대로 고친다).
-- 의존 선언 밖 상대 경로 가져오기가 있다: purchase-svc 시험은 payment-svc·pg-simulator 원본을, core-svc 통합 시험은 `packages/seatmap/src`를 읽는다. 그쪽을 고치면 가져오는 서비스도 타입 검사한다(`--affected`가 못 잡는다).
+- 의존 선언 밖 상대 경로 가져오기가 있다: purchase-svc 시험은 payment-svc·pg-simulator 원본을, core-svc 통합 시험은 `packages/seatmap/src`를, ops-svc 통합 시험은 admission-ctrl·purchase-svc·queue-svc·trust-svc·ops-rt 원본을(F-02-1 제어 E2E는 세 서비스를 실제로 띄운다) 읽는다. 그쪽을 고치면 가져오는 서비스도 타입 검사하고, ops-svc는 통합 시험까지 돌린다(`--affected`가 못 잡는다).
 
 ## 자주 쓰는 명령
 
