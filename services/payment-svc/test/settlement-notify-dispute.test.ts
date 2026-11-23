@@ -13,6 +13,7 @@ import {
   type StatementStatus,
 } from '../src/modules/settlement/index.js';
 import { CountingProducts, fact, FlakyMarkStore, productItem, settlementFlow, UUID_RE, type SettlementFlow } from './settlement-flow-support.js';
+import { seedTossSellers } from './settlement-support.js';
 
 const HOUR = 60 * 60 * 1_000;
 /** 2026-11-18(수) 10:00 KST */
@@ -40,6 +41,7 @@ const notified = async (f: SettlementFlow, o: { promoterId?: string; eventId?: s
   const eventId = o.eventId ?? randomUUID();
   const pg = o.pg ?? 'TOSS';
   await f.settlements.recordKyc(promoterId, o.kyc ?? 'VERIFIED');
+  await seedTossSellers(f.store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
   f.payments.set(eventId, pg, [fact({ amount: 30_000_000, cancelledAmount: 2_000_000, status: 'PARTIAL_CANCELED' })]);
   const s = await f.settlements.calculateEvent({ promoterId, eventId, pg, pgStore: 'STANDARD' });
   return { ...s, promoterId, eventId };
@@ -94,6 +96,7 @@ describe('J-T35 ① 계산과 통지는 한 트랜잭션', () => {
     const zeroPromoter = randomUUID();
     const zeroEvent = randomUUID();
     await f.settlements.recordKyc(zeroPromoter, 'VERIFIED');
+    await seedTossSellers(f.store, zeroPromoter); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     f.payments.set(zeroEvent, 'TOSS', [fact({ amount: 50_000, cancelledAmount: 50_000, status: 'CANCELED' })]);
     const zero = await f.settlements.calculateEvent({ promoterId: zeroPromoter, eventId: zeroEvent, pg: 'TOSS', pgStore: 'STANDARD' });
     expect(await f.store.findStatementById(zero.statementId)).toMatchObject({ status: 'NOTIFIED', payoutAmount: 0, holdReason: null });
@@ -115,6 +118,7 @@ describe('J-T35 ① 계산과 통지는 한 트랜잭션', () => {
     const eventId = randomUUID();
     const f = await open({ now: NOTIFY_AT, events: { listDue: async () => [{ promoterId, eventId, endsAt: '2026-11-15T12:00:00.000Z' }] } });
     await f.settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(f.store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     f.payments.set(eventId, 'TOSS', [fact({ amount: 5_000_000 })], 'ESCROW');
     const out = await f.settlements.calculateDueEvents('2026-11-17');
     expect(out.calculated).toBe(1);
@@ -443,6 +447,7 @@ describe('J-T35 ⑤ 자동 확정', () => {
     const promoterId = randomUUID();
     const eventId = randomUUID();
     await f.settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(f.store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     f.payments.set(eventId, 'TOSS', [fact({ amount: 80_000, cancelledAmount: 80_000, status: 'CANCELED' })]);
     const s = await f.settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
     f.at(DUE_AT);

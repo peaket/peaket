@@ -50,10 +50,16 @@ export class FakeIdentity implements AdminAuthzPort {
 /** ops-svc CS 처리함 경계의 짝 가짜(포트 SettlementCaseNotice). 진짜 어댑터 HttpSettlementCaseNotice는 같은 파일 시험이 따로 본다 */
 export class RecordingCaseNotice implements SettlementCaseNotice {
   readonly opened: { disputeId: string; statementId: string; createdAt: Date }[] = [];
+  /** 지급 쪽 CS 건(F-07-6 ADR-0369 결정 10, openCase). ops는 같은 사건 키를 한 건으로 받는다 */
+  readonly cases: { eventKey: string; kind: string; sourceId: string; createdAt: Date }[] = [];
   failing = false;
   async openDispute(o: { disputeId: string; statementId: string; createdAt: Date }): Promise<void> {
     if (this.failing) throw new SettlementProblem('dependency-unavailable', 503, 'ops-svc가 503이다');
     this.opened.push({ ...o });
+  }
+  async openCase(o: { eventKey: string; kind: string; sourceId: string; createdAt: Date }): Promise<void> {
+    if (this.failing) throw new SettlementProblem('dependency-unavailable', 503, 'ops-svc가 503이다');
+    this.cases.push({ ...o });
   }
 }
 

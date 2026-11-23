@@ -13,6 +13,7 @@ import {
   UnavailableTossPayoutGateway,
 } from '../src/modules/settlement/index.js';
 import { HttpPayoutApprovalVerifier } from '../src/modules/settlement/adapters/http-payout-approval-verifier.js';
+import { seedTossSellers } from './settlement-support.js';
 
 const NOW = new Date('2026-11-14T00:00:00.000Z');
 const PROMOTER = randomUUID();
@@ -89,6 +90,7 @@ beforeEach(async () => {
   log.approvedLogs.length = 0;
   log.rejectedLogs.length = 0;
   await settlements.recordKyc(PROMOTER, 'VERIFIED');
+  await seedTossSellers(store, PROMOTER); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
   payments.set(EVENT, 'TOSS', [fact()], 'STANDARD');
   payments.set(EVENT, 'TOSS', [fact()], 'ESCROW');
 });

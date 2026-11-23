@@ -6,6 +6,7 @@ import { Settlements } from '../src/modules/settlement/application/settlements.j
 import type { StatementRecord } from '../src/modules/settlement/domain/settlement.js';
 import type { PgBalanceSource, PayoutApprovalVerifier, SaleSuspensionSource } from '../src/modules/settlement/domain/ports.js';
 import { MemoryReauthVerifier, MemorySettlementPaymentSource, MemorySettlementStore, UnavailableTossPayoutGateway } from '../src/modules/settlement/index.js';
+import { seedTossSellers } from './settlement-support.js';
 
 const NOW = new Date('2026-11-22T00:00:00.000Z');
 const PROMOTER = randomUUID();
@@ -81,6 +82,7 @@ const statement = (over: Partial<StatementRecord> = {}): StatementRecord => ({
 
 const seed = async (): Promise<StatementRecord[]> => {
   await settlements.recordKyc(PROMOTER, 'VERIFIED');
+  await seedTossSellers(store, PROMOTER); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
   const first = statement();
   const second = statement({ eventId: randomUUID(), payoutAmount: 12_000_000 });
   await store.insertStatement(first, []);

@@ -8,6 +8,7 @@ import { SettlementProblem, payoutBatchView, type PaymentFact } from '../src/mod
 import type { PayoutApprovalVerifier, PayoutGateway, SaleSuspensionSource, VerifiedPayoutApproval } from '../src/modules/settlement/domain/ports.js';
 import { MemoryReauthVerifier, MemorySettlementPaymentSource, MemorySettlementStore } from '../src/modules/settlement/index.js';
 import { HttpSaleSuspensionSource } from '../src/modules/settlement/adapters/http-sale-suspension-source.js';
+import { seedTossSellers } from './settlement-support.js';
 
 const NOW = new Date('2026-11-14T00:00:00.000Z');
 const PROMOTER = randomUUID();
@@ -61,6 +62,7 @@ beforeEach(async () => {
   suspensions.fail = false;
   approvals.rows.clear();
   await settlements.recordKyc(PROMOTER, 'VERIFIED');
+  await seedTossSellers(store, PROMOTER); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
   payments.set(SUSPENDED_EVENT, 'TOSS', [fact(10_000_000)], 'STANDARD');
   payments.set(OPEN_EVENT, 'TOSS', [fact(20_000_000)], 'STANDARD');
 });
@@ -132,6 +134,7 @@ describe('R-T23 ② 판매 중지된 회차의 정산 지급 보류', () => {
       const promoterId = randomUUID();
       const eventId = randomUUID();
       await settlements.recordKyc(promoterId, 'VERIFIED');
+      await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
       payments.set(eventId, 'TOSS', [fact(3_000_000)], 'STANDARD');
       const s = await settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
       await store.saveStatement({ ...(await store.findStatementById(s.statementId))!, status: 'CONFIRMED' });

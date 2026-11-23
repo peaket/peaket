@@ -25,7 +25,7 @@ import {
   type SettlementDueTimer,
   type StatementStatus,
 } from '../src/modules/settlement/index.js';
-import { noApprovals, noSaleSuspensions } from './settlement-support.js';
+import { noApprovals, noSaleSuspensions, seedTossSellers } from './settlement-support.js';
 
 const NOW = new Date('2026-11-14T00:00:00.000Z');
 const quiet = () => new Writable({ write(_c, _e, cb) { cb(); } });
@@ -100,6 +100,7 @@ describe('A1V-01 한 지급 묶음의 미수금 상계', () => {
     const promoterId = randomUUID();
     const store = new MemorySettlementStore();
     store.kycs.set(promoterId, kyc(promoterId));
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     const first = await insertEventStatement(store, { promoterId, amount: 100_000, status: 'CONFIRMED' });
     const second = await insertEventStatement(store, { promoterId, amount: 100_000, status: 'CONFIRMED' });
     expect(first.record.payoutAmount).toBe(89_000);
@@ -128,6 +129,7 @@ describe('A1V-02 회차 종료 다음 영업일 계산과 종료일 +5영업일 
     const eventId = randomUUID();
     const store = new MemorySettlementStore();
     store.kycs.set(promoterId, kyc(promoterId));
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     const payments = new MemorySettlementPaymentSource();
     payments.set(eventId, 'TOSS', [fact({ amount: 10_000_000 })]);
     const seen: string[] = [];
@@ -163,6 +165,7 @@ describe('A1V-02 회차 종료 다음 영업일 계산과 종료일 +5영업일 
     const eventId = randomUUID();
     const store = new MemorySettlementStore();
     store.kycs.set(promoterId, kyc(promoterId));
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     const payments = new MemorySettlementPaymentSource();
     payments.set(eventId, 'TOSS', [fact({ amount: 10_000_000 })]);
     const seen: string[] = [];
@@ -253,6 +256,7 @@ describe('A1V-03 이의 결과 없는 재확정과 새 이의 기간', () => {
     const promoterId = randomUUID();
     const eventId = randomUUID();
     store.kycs.set(promoterId, kyc(promoterId));
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     payments.set(eventId, 'TOSS', [fact({ amount: 100_000 })]);
     const calculated = await settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
     await settlements.dispute(promoterId, randomUUID(), calculated.statementId, { reasonCode: 'GROSS_AMOUNT' });
@@ -298,6 +302,7 @@ describe('A1V-04 HELD 사유별 증빙', () => {
     for (const c of cases) {
       const promoterId = randomUUID();
       store.kycs.set(promoterId, kyc(promoterId));
+      await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
       const held = await insertEventStatement(store, { promoterId, status: 'HELD', holdReason: c.reason });
       await expect(settlements.reconfirmStatement(held.record.statementId)).rejects.toMatchObject({ status: 409, type: expect.stringContaining(c.type) });
       expect((await store.findStatementById(held.record.statementId))?.status).toBe('HELD');
@@ -451,6 +456,7 @@ describe('A1V-12 정산서 상태 전이 감사', () => {
     const settlements = settlementsFor(store);
     const promoterId = randomUUID();
     store.kycs.set(promoterId, kyc(promoterId));
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
 
     const held = await insertEventStatement(store, { promoterId, status: 'HELD', holdReason: 'KYC' });
     await settlements.reconfirmStatement(held.record.statementId, { actor: 'ops-a1v', reason: 'kyc-cleared' });

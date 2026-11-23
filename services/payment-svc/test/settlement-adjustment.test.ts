@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, test } from 'vitest';
 import { HttpAdjustmentApprovalVerifier, type StatementRecord, type StatementStatus, type VerifiedAdjustmentApproval } from '../src/modules/settlement/index.js';
 import { approvedFacts, fact, settlementFlow, UUID_RE, type SettlementFlow } from './settlement-flow-support.js';
+import { seedTossSellers } from './settlement-support.js';
 
 /** 2026-11-18(수) 10:00 KST */
 const NOTIFY_AT = Date.parse('2026-11-18T01:00:00.000Z');
@@ -26,6 +27,7 @@ const notified = async (f: SettlementFlow, gross = 30_000_000, refund = 2_000_00
   const promoterId = randomUUID();
   const eventId = randomUUID();
   await f.settlements.recordKyc(promoterId, 'VERIFIED');
+  await seedTossSellers(f.store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
   f.payments.set(eventId, 'TOSS', [fact({ amount: gross, cancelledAmount: refund, status: refund > 0 ? 'PARTIAL_CANCELED' : 'APPROVED' })]);
   return { ...(await f.settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' })), promoterId, eventId };
 };
@@ -327,6 +329,7 @@ describe('J-T36 ⑧ 지급액 식 하나(리뷰 RV-02)', () => {
     const promoterId = randomUUID();
     const eventId = randomUUID();
     await f.settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(f.store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     f.payments.set(eventId, 'TOSS', [fact({ amount: 1_000_000, status: 'APPROVED' }), fact({ amount: 2_000_000, cancelledAmount: 2_000_000, status: 'CANCELED' })]);
     const s = await f.settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
     // 정본 §4.1: 판매 300만 − 환급 200만 → 수수료 10만·부가세 1만·지급 89만

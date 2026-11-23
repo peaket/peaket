@@ -18,6 +18,7 @@ import {
 } from '../src/modules/settlement/index.js';
 import type { PayoutApprovalVerifier, SaleSuspensionSource, VerifiedPayoutApproval } from '../src/modules/settlement/domain/ports.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
+import { seedTossSellers } from '../test/settlement-support.js';
 
 const NOW = new Date('2026-11-14T00:00:00.000Z');
 const A = randomUUID();
@@ -107,6 +108,7 @@ beforeAll(async () => {
     clock,
   });
   await settlements.recordKyc(A, 'VERIFIED', { legalName: '주식회사 에이', representative: '김대표' });
+  await seedTossSellers(store, A); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
   await paymentRow({ id: randomUUID(), amount: 30_000_000, cancelled: 0, status: 'APPROVED' });
   await paymentRow({ id: randomUUID(), amount: 10_000_000, cancelled: 2_000_000, status: 'PARTIAL_CANCELED' });
   await paymentRow({ id: randomUUID(), amount: 5_000_000, cancelled: 5_000_000, status: 'CANCELED' });
@@ -250,7 +252,9 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     const p1 = randomUUID();
     const p2 = randomUUID();
     await settlements.recordKyc(p1, 'VERIFIED');
+    await seedTossSellers(store, p1); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     await settlements.recordKyc(p2, 'VERIFIED');
+    await seedTossSellers(store, p2); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     const s1 = await statementRow({ promoterId: p1, eventId: randomUUID(), pg: 'PORTONE', payoutDate: '2026-11-24', payoutAmount: 100_000 });
     const batch = await settlements.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: '2026-11-24', portoneBalance: { amount: 100_000, observedAt: NOW.toISOString() }, actor: ACCOUNT });
     expect(batch).toMatchObject({ totalAmount: 100_000, statementCount: 1 });
@@ -269,6 +273,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
   test('CONS-02 묶인 정산서 합계가 승인 금액과 다르면 실행을 409 payout-batch-amount-mismatch로 멈춘다', async () => {
     const promoterId = randomUUID();
     await settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     const statementId = await statementRow({ promoterId, eventId: randomUUID(), pg: 'PORTONE', payoutDate: '2026-11-25', payoutAmount: 200_000 });
     const batch = await settlements.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: '2026-11-25', portoneBalance: { amount: 200_000, observedAt: NOW.toISOString() }, actor: ACCOUNT });
     await settlements.approveBatch(batch.batchId, approveFor(batch));
@@ -281,7 +286,9 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     const p1 = randomUUID();
     const p2 = randomUUID();
     await settlements.recordKyc(p1, 'VERIFIED');
+    await seedTossSellers(store, p1); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     await settlements.recordKyc(p2, 'VERIFIED');
+    await seedTossSellers(store, p2); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     await statementRow({ promoterId: p1, eventId: randomUUID(), pg: 'PORTONE', payoutDate: '2026-11-26', payoutAmount: 100_000 });
     await statementRow({ promoterId: p2, eventId: randomUUID(), pg: 'PORTONE', payoutDate: '2026-11-26', payoutAmount: 200_000 });
     const input = { pg: 'PORTONE' as const, pgStore: 'STANDARD' as const, payoutDate: '2026-11-26', portoneBalance: { amount: 300_000, observedAt: NOW.toISOString() }, actor: ACCOUNT };
@@ -297,6 +304,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
   test('M1-F1 배치 저장이 실패하면 상계·보류·정산서 갱신이 모두 롤백된다', async () => {
     const promoterId = randomUUID();
     await settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     const statementId = await statementRow({ promoterId, eventId: randomUUID(), payoutDate: '2026-11-27', payoutAmount: 100_000 });
     const receivable = await settlements.recordReceivable({ promoterId, pg: 'TOSS', cause: 'REFUND_AFTER_PAYOUT', amount: 50_000 });
     const batchId = randomUUID();
@@ -307,7 +315,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     );
     await expect(
       store.createPayoutBatchAtomically({
-        batch: { batchId, pg: 'TOSS', pgStore: 'STANDARD', payoutDate: '2026-11-27', totalAmount: 50_000, statementCount: 1, approvalId: null, portoneBulkPayoutId: null, pgBalanceKrw: null, pgBalanceSource: null, pgBalanceObservedAt: null, pgBalanceObservedBy: null, pgBalanceLedgerKrw: null, status: 'PENDING_APPROVAL', createdAt: NOW, updatedAt: NOW },
+        batch: { batchId, pg: 'TOSS', pgStore: 'STANDARD', payoutDate: '2026-11-27', totalAmount: 50_000, statementCount: 1, approvalId: null, portoneBulkPayoutId: null, pgBalanceKrw: null, pgBalanceSource: null, pgBalanceObservedAt: null, pgBalanceObservedBy: null, pgBalanceLedgerKrw: null, status: 'PENDING_APPROVAL', submitAttempts: 0, nextSubmitAt: null, submitDeadlineAt: null, lastSubmitError: null, dateRetryUsed: false, createdAt: NOW, updatedAt: NOW },
         statementIds: [statementId],
         statementUpdates: [{ statementId, status: 'CONFIRMED', holdReason: null, offsetAmount: 50_000, payoutAmount: 50_000, updatedAt: NOW }],
         receivableUpdates: [{ receivableId: receivable.receivableId, remaining: 0, status: 'CLOSED', updatedAt: NOW }],
@@ -325,6 +333,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
   test('J-T28 ① TOSS 배상금 미리 지급 미수금은 PORTONE 묶음에서도 상계되고 다른 결제사 환불 미수금은 남는다', async () => {
     const promoterId = randomUUID();
     await settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     await statementRow({ promoterId, eventId: randomUUID(), pg: 'PORTONE', payoutDate: '2026-11-28', payoutAmount: 100_000 });
     const compensation = await settlements.recordReceivable({ promoterId, pg: 'TOSS', cause: 'COMPENSATION_ADVANCE', amount: 40_000 });
     const refund = await settlements.recordReceivable({ promoterId, pg: 'TOSS', cause: 'REFUND_AFTER_PAYOUT', amount: 30_000 });
@@ -353,6 +362,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     const promoterId = randomUUID();
     const eventId = randomUUID();
     await settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     await paymentRow({ id: randomUUID(), amount: 10_000_000, cancelled: 0, status: 'APPROVED', eventId, pgStore: 'STANDARD' });
     await paymentRow({ id: randomUUID(), amount: 7_000_000, cancelled: 0, status: 'APPROVED', eventId, pgStore: 'ESCROW' });
     const standard = await settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
@@ -366,6 +376,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     const promoterId = randomUUID();
     const eventId = randomUUID();
     await settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     await paymentRow({ id: randomUUID(), amount: 10_000, cancelled: 0, status: 'CANCELED', eventId });
     const s = await settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
     expect(s).toMatchObject({ grossAmount: 10_000, refundAmount: 10_000, commissionAmount: 0, commissionVat: 0, payoutAmount: 0, status: 'NOTIFIED' });
@@ -376,6 +387,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     const eventId = randomUUID();
     const neverApproved = randomUUID();
     await settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     await paymentRow({ id: randomUUID(), amount: 2_000_000, cancelled: 0, status: 'APPROVED', eventId });
     await paymentRow({ id: neverApproved, amount: 10_000, cancelled: 0, status: 'CANCELED', eventId, approvedAt: null });
     const s = await settlements.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
@@ -387,6 +399,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     const promoterId = randomUUID();
     const eventId = randomUUID();
     await settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     await paymentRow({ id: randomUUID(), amount: 20_000_000, cancelled: 0, status: 'APPROVED', eventId });
     await paymentRow({ id: randomUUID(), amount: 8_000_000, cancelled: 0, status: 'APPROVED', eventId });
     await paymentRow({ id: randomUUID(), amount: 1_200_000, cancelled: 1_200_000, status: 'CANCELED', eventId });
@@ -406,6 +419,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     const eventId = randomUUID();
     const paymentId = randomUUID();
     await settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     await paymentRow({ id: paymentId, amount: 10_000, cancelled: 0, status: 'APPROVED', eventId });
     const runId = randomUUID();
     await db.pool.query(
@@ -465,6 +479,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
   test('J-T31 승인 감사 행과 payout_batch.approval_id 부분 유일 인덱스가 재사용을 막는다', async () => {
     const promoterId = randomUUID();
     await settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     const statementId = await statementRow({ promoterId, eventId: randomUUID(), pg: 'TOSS', payoutDate: '2026-11-30', payoutAmount: 100_000 });
     const batch = await settlements.createPayoutBatch({ pg: 'TOSS', pgStore: 'STANDARD', payoutDate: '2026-11-30', actor: ACCOUNT });
     const approvalId = approveFor(batch);
@@ -495,6 +510,7 @@ describe('정산·지급·KYC PostgreSQL [R-574]', () => {
     const promoterId = randomUUID();
     const eventId = randomUUID();
     await settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     const statementId = randomUUID();
     await db.pool.query(
       `insert into settlement_statement (id, promoter_id, kind, event_id, pg, pg_store, gross_amount, refund_amount, commission_amount, commission_vat, payout_amount, status, payout_date, created_at, updated_at)
@@ -596,6 +612,7 @@ describe('미수금 이동 기록 표 이름 바꾸기(payment 0028, PRF180)', (
     const promoterId = randomUUID();
     const eventId = randomUUID();
     await settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     // 보증 한도의 근거 정산서(판매 대금 1억 원 × 계약 보증 비율 10% = 1,000만 원)
     const basisId = randomUUID();
     await db.pool.query(

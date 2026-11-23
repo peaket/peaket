@@ -19,7 +19,7 @@ import {
 } from '../src/modules/settlement/index.js';
 import { payoutBatchView } from '../src/modules/settlement/index.js';
 import type { PayoutApprovalVerifier, SaleSuspensionSource, VerifiedPayoutApproval } from '../src/modules/settlement/domain/ports.js';
-import { noApprovals, noSaleSuspensions } from './settlement-support.js';
+import { noApprovals, noSaleSuspensions, seedTossSellers } from './settlement-support.js';
 
 const NOW = new Date('2026-11-14T00:00:00.000Z');
 const A = randomUUID();
@@ -189,6 +189,9 @@ describe('정산 HTTP·유스케이스', () => {
     settlements = svc.app.get(Settlements);
     await settlements.recordKyc(A, 'VERIFIED');
     await settlements.recordKyc(B, 'PENDING');
+    // F-07-6(ADR-0369 결정 4): 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다
+    await seedTossSellers(store, A);
+    await seedTossSellers(store, B);
     payments.set(EVENT, 'TOSS', [fact({ amount: 30_000_000, cancelledAmount: 2_000_000, status: 'PARTIAL_CANCELED' })]);
     payments.set(EVENT, 'PORTONE', [fact({ amount: 30_000_000, cancelledAmount: 2_000_000, status: 'PARTIAL_CANCELED' })]);
     payments.set(HOLD_EVENT, 'TOSS', [fact({ amount: 10_000_000, cancelledAmount: 0, status: 'APPROVED' })]);
@@ -492,13 +495,15 @@ describe('상품 정산·미수금 상계', () => {
     ...o,
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     store.statements.clear();
     store.sources.clear();
     store.receivables.clear();
     store.receivableMoves.length = 0;
     products.rows = [];
     store.kycs.set(A, kyc(A, 'VERIFIED'));
+    // F-07-6(ADR-0369 결정 4): 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다
+    await seedTossSellers(store, A);
   });
 
   test('J-T18 상품 정산서는 항목별 수수료율로 계산하고 지급일이 4영업일 뒤다', async () => {

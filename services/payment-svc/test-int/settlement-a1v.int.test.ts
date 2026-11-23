@@ -13,7 +13,7 @@ import {
   Settlements,
   UnavailableTossPayoutGateway,
 } from '../src/modules/settlement/index.js';
-import { noApprovals, noSaleSuspensions } from '../test/settlement-support.js';
+import { noApprovals, noSaleSuspensions, seedTossSellers } from '../test/settlement-support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
 const NOW = new Date('2026-11-14T00:00:00.000Z');
@@ -72,6 +72,7 @@ describe('A1V-01 PostgreSQL 지급 묶음 미수금 상계', () => {
     const promoterId = randomUUID();
     const payoutDate = '2026-11-20';
     await settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     const first = await statementRow({ promoterId, eventId: randomUUID(), payoutDate, payoutAmount: 89_000 });
     const second = await statementRow({ promoterId, eventId: randomUUID(), payoutDate, payoutAmount: 89_000 });
     const receivable = await settlements.recordReceivable({ promoterId, pg: 'TOSS', cause: 'REFUND_AFTER_PAYOUT', amount: 50_000 });
@@ -95,6 +96,7 @@ describe('A1V-12 PostgreSQL 정산서 상태 전이 감사', () => {
   test('재확정·이의 해소·자동 확정이 settlement_statement_audit에 이전/이후 상태·사유·행위자를 남긴다', async () => {
     const promoterId = randomUUID();
     await settlements.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
 
     const heldId = await statementRow({ promoterId, eventId: randomUUID(), payoutDate: '2026-11-20', payoutAmount: 89_000, status: 'HELD', holdReason: 'KYC' });
     await settlements.reconfirmStatement(heldId, { actor: 'ops-a1v', reason: 'kyc-cleared' });

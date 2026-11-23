@@ -23,6 +23,7 @@ import {
 } from '../src/modules/settlement/index.js';
 import type { SaleSuspensionSource } from '../src/modules/settlement/domain/ports.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
+import { seedTossSellers } from '../test/settlement-support.js';
 
 /** 2026-11-18(수) 10:00 KST. 정본 §4.2: 이의 기한 = + 2영업일 = 2026-11-20(금) 10:00 KST */
 const NOTIFY_AT = Date.parse('2026-11-18T01:00:00.000Z');
@@ -50,6 +51,8 @@ class Cases implements SettlementCaseNotice {
   async openDispute(o: { disputeId: string }) {
     this.opened.push(o.disputeId);
   }
+  // F-07-6(ADR-0369 결정 10): 지급 쪽 CS 건도 같은 포트로 보낸다
+  async openCase() {}
 }
 
 // 리뷰 RV-01: 결제 원장 사실에 승인 시각을 싣는다(정본 §4.1, 펼침이라 칸이 생기기 전·후 모두 타입이 맞는다)
@@ -91,6 +94,7 @@ const notified = async (p: Pods, o: { promoterId?: string; gross?: number; refun
   const promoterId = o.promoterId ?? randomUUID();
   const eventId = randomUUID();
   await p.a.recordKyc(promoterId, o.kyc ?? 'VERIFIED');
+  await seedTossSellers(p.store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
   p.payments.set(eventId, 'TOSS', [fact({ amount: o.gross ?? 30_000_000, cancelledAmount: o.refund ?? 2_000_000, status: (o.refund ?? 2_000_000) > 0 ? 'PARTIAL_CANCELED' : 'APPROVED' })]);
   return { ...(await p.a.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD', ...(o.eventEndsAt ? { eventEndsAt: o.eventEndsAt } : {}) })), promoterId, eventId };
 };
@@ -199,6 +203,7 @@ describe('J-T35 ① 계산·통지·Outbox 한 트랜잭션', () => {
     const promoterId = randomUUID();
     const eventId = randomUUID();
     await p.a.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(p.store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     p.payments.set(eventId, 'TOSS', [fact()]);
     await db1.pool.query('insert into test_hooks.fail_outbox_key values ($1)', [promoterId]);
     await expect(p.a.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' })).rejects.toThrow();
@@ -430,6 +435,7 @@ describe('J-T36 수기 조정(실제 DB)', () => {
     const promoterId = randomUUID();
     const eventId = randomUUID();
     await p.a.recordKyc(promoterId, 'VERIFIED');
+    await seedTossSellers(p.store, promoterId); // F-07-6: 토스 정산서는 그 상점 토스 셀러가 PARTIALLY_APPROVED 이상이어야 묶인다(ADR-0369 결정 4)
     p.payments.set(eventId, 'TOSS', [fact({ amount: 1_000_000, cancelledAmount: 0, status: 'APPROVED' }), fact({ amount: 2_000_000, cancelledAmount: 2_000_000, status: 'CANCELED' })]);
     const s = await p.a.calculateEvent({ promoterId, eventId, pg: 'TOSS', pgStore: 'STANDARD' });
     // 정본 §4.1: 판매 300만 − 환급 200만 → 수수료 10만·부가세 1만·지급 89만
