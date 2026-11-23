@@ -141,9 +141,9 @@ describe('J-T23 ① NOTIFIED·DISPUTED·CONFIRMED 정산서의 보류와 다시 
     // 일괄 환불: 결제마다 400만 원 환급. 그사이 회차 수수료율 원천이 바뀌어도 새 판은 옛 판의 고정 수수료율(850bp)을 쓴다
     h.rate.value = 1200;
     h.at(FRIDAY - 60_000);
-    h.payments.set(w.eventId, 'TOSS', [{ ...w.payT, cancelledAmount: 4_000_000, status: 'PARTIAL_CANCELED', refundedAt: new Date(FRIDAY - 120_000) }], 'STANDARD');
-    h.payments.set(w.eventId, 'TOSS', [{ ...w.payE, cancelledAmount: 4_000_000, status: 'PARTIAL_CANCELED', refundedAt: new Date(FRIDAY - 120_000) }], 'ESCROW');
-    h.payments.set(w.eventId, 'PORTONE', [{ ...w.payP, cancelledAmount: 4_000_000, status: 'PARTIAL_CANCELED', refundedAt: new Date(FRIDAY - 120_000) }], 'STANDARD');
+    h.payments.set(w.eventId, 'TOSS', [fact({ ...w.payT, cancelledAmount: 4_000_000, status: 'PARTIAL_CANCELED', refundedAt: new Date(FRIDAY - 120_000) })], 'STANDARD');
+    h.payments.set(w.eventId, 'TOSS', [fact({ ...w.payE, cancelledAmount: 4_000_000, status: 'PARTIAL_CANCELED', refundedAt: new Date(FRIDAY - 120_000) })], 'ESCROW');
+    h.payments.set(w.eventId, 'PORTONE', [fact({ ...w.payP, cancelledAmount: 4_000_000, status: 'PARTIAL_CANCELED', refundedAt: new Date(FRIDAY - 120_000) })], 'STANDARD');
 
     h.at(FRIDAY);
     const done = await h.settlements.completeEventRecalculation(requestId, { completedAt: new Date(FRIDAY) });
@@ -380,7 +380,7 @@ describe('J-T23 ① CARRIED_OVER 음수 옛 판의 NEGATIVE_STATEMENT 미수금(
     const requestId = randomUUID();
     await open(h, { requestId, eventId: n.eventId });
     h.at(FRIDAY - 60_000);
-    h.payments.set(n.eventId, 'TOSS', [{ ...n.pay, cancelledAmount: 50_000, status: 'PARTIAL_CANCELED', refundedAt: new Date(FRIDAY - 120_000) }]);
+    h.payments.set(n.eventId, 'TOSS', [fact({ ...n.pay, cancelledAmount: 50_000, status: 'PARTIAL_CANCELED', refundedAt: new Date(FRIDAY - 120_000) })]);
     h.at(FRIDAY);
     const done = await h.settlements.completeEventRecalculation(requestId, { completedAt: new Date(FRIDAY) });
     const newId = done.recalculated[0]!.newStatementId;
@@ -487,7 +487,7 @@ describe('J-T23 ② 지급을 요청한 뒤의 회차 취소', () => {
     expect(h.store.statements.get(x.s.statementId)).toMatchObject({ status: 'SCHEDULED', holdReason: null });
     expect(eventsOf(h.store, x.s.statementId, 'PAYOUT_HELD')).toEqual([]);
     h.at(FRIDAY - 60_000);
-    h.payments.set(eventId, 'TOSS', [{ ...pay, cancelledAmount: 10_000_000, status: 'CANCELED', refundedAt: new Date(FRIDAY - 120_000) }]);
+    h.payments.set(eventId, 'TOSS', [fact({ ...pay, cancelledAmount: 10_000_000, status: 'CANCELED', refundedAt: new Date(FRIDAY - 120_000) })]);
     await h.settlements.recordRefundsAfterCalculation();
     h.at(FRIDAY);
     const done = await h.settlements.completeEventRecalculation(requestId, { completedAt: new Date(FRIDAY) });

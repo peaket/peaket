@@ -1,7 +1,7 @@
 // F-07-8(GAT-120·GAT-130) 정산 다시 계산·계산 뒤 환급 미수금·대사 미완 결제 풀림 시험의 공용 조립.
 // 진짜 Settlements·MemorySettlementStore·MemorySettlementPaymentSource에 경계(시계·토스 전송·포트원 플랫폼 전송·회차 수수료율 원천)만 짝 대역으로 끼운다
-// (mock-policy: 업무 로직은 진짜). 모양은 F-07-8 계획 §5.1과 F-07-6·F-07-7 계획 §5.1(Settlements 의존 `toss`·`tossConfig`·`portone`·`portoneConfig`)을 따른다.
-// 기준 트리(F-07-6·F-07-7·F-07-8 구현 전)에서는 그 의존·레코드 칸이 없어 타입 검사가 실패하고, 새 메서드가 없어 시험이 실패한다(계획 §7).
+// (mock-policy: 업무 로직은 진짜). 의존 칸 이름은 F-07-6 구현(`tossTransport`)과 F-07-7 계획 §5.1 (타) 결정 3(`portone`·`portoneConfig`)을 따른다.
+// 기준 트리(F-07-6 구현·F-07-7 시험만, F-07-7·F-07-8 구현 전)에서는 포트원 의존·새 레코드 칸이 없어 타입 검사가 실패하고, 새 메서드가 없어 시험이 실패한다(계획 §7).
 import { fakeClock, type FakeClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import {
@@ -13,7 +13,7 @@ import {
   UnavailableTossPayoutGateway,
   type PaymentFact,
 } from '../../src/modules/settlement/index.js';
-import type { PortonePayoutConfig, TossPayoutConfig } from '../../src/modules/settlement/domain/payout-adapters.js';
+import type { PortonePayoutConfig } from '../../src/modules/settlement/domain/payout-adapters.js';
 import type { KycRecord, PayoutBatchRecord, PayoutRecord, Pg, PgStore, ReceivableRecord, StatementRecord } from '../../src/modules/settlement/domain/settlement.js';
 import { noApprovals, noSaleSuspensions } from '../settlement-support.js';
 import { RecalcPortonePlatform } from './recalc-portone-double.js';
@@ -29,13 +29,6 @@ export const APPROVED_AT = new Date('2026-11-01T00:00:00.000Z');
 export type FactPlus = PaymentFact & { approvedAt?: Date | null; peaketBorneRefund?: number; refundedAt?: Date | null };
 export const fact = (o: Partial<FactPlus> = {}): FactPlus => ({ paymentId: randomUUID(), amount: 30_000_000, cancelledAmount: 0, status: 'APPROVED', failureCategory: null, approvedAt: APPROVED_AT, ...o });
 
-/** 토스 지급대행 두 상점 설정(F-07-6 계획 §5.1(가) 모양. 시험 값) */
-export const TOSS_CONFIG: TossPayoutConfig = {
-  stores: {
-    STANDARD: { secretKey: 'test_sk_f078_standard', securityKeys: [Buffer.from('33'.repeat(32), 'hex')] },
-    ESCROW: { secretKey: 'test_sk_f078_escrow', securityKeys: [Buffer.from('44'.repeat(32), 'hex')] },
-  },
-};
 /** 포트원 지급대행 설정(F-07-7 계획 §5.1(가) 모양. 대역 주소라 실제로 부르지 않는다) */
 export const PORTONE_CONFIG: PortonePayoutConfig = { baseUrl: 'http://127.0.0.1:9', secret: 'sim_sk_f078', contractId: 'contract-f078' };
 
@@ -68,7 +61,7 @@ export function recalcHarness(o: RecalcHarnessOptions) {
     reauth: new MemoryReauthVerifier(),
     clock,
     ...(o.holidays ? { holidays: o.holidays } : {}),
-    ...(toss ? { toss, tossConfig: TOSS_CONFIG } : {}),
+    ...(toss ? { tossTransport: toss } : {}),
     ...(portone ? { portone, portoneConfig: PORTONE_CONFIG } : {}),
   });
   const at = (t: number): void => clock.advance(t - clock.now());
