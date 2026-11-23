@@ -7,6 +7,7 @@
 # ds 부품(2026-11-04 BAS-180): Storybook 정적 빌드의 모든 이야기를 시각 회귀(FE-T40, visual 잡)와 axe·동작 검사(FE-T18, ds 잡)로 본다.
 # 재배치·초점 가림(2026-11-19 BAT-171 HOT-381): reflow 잡이 web·partner·console 운영 빌드를 세 엔진에서 본다(FE-T31·FE-T18 자동 몫·SCR-058·HOT-390).
 # 콘솔 보안 헤더(2026-11-23 F-03-1 OPS-340): console-csp 잡이 관제 운영 빌드(원격 둘 포함)·파트너 운영 빌드의 헤더와 Trusted Types 위반 0을 Chromium으로 본다.
+# 같은 잡이 관제 원격 위젯 화면 검사(console-remotes, F-03-2: 무결성·대체 카드·미리 받기, 세 엔진)도 돈다.
 # 원격 위젯(2026-11-23 F-03-2 OPS-350): remotes 잡이 원격 둘을 공용 원격 빌드(build-remote.yml: 원격 폴더 린트·한 파일 빌드·크기·sha384·목록 조각)로 만든다.
 # 좌석 실시간(2026-11-20 BAT-182 HOT-357): seats 잡이 @peaket/seatmap·@peaket/web 단위·typecheck와 5만 석 화면 시나리오(S-T13·S-T21·S-T31 ⑥)를 Chromium에서 본다.
 name: ci-web
@@ -211,6 +212,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
         working-directory: tools/web-checks
       - run: pnpm run console-csp
+        working-directory: tools/web-checks
+        env:
+          HOME: /root
+      # 관제 원격 위젯 화면 검사(F-03-2 OPS-350·OPS-360, FE-T17·FE-T39·FE-T25 미리 받기): 같은 관제 운영 빌드로 무결성·시간 초과·계약 판 → 그 칸만
+      # 대체 카드·[다시 시도]·Trusted Types·미리 받기·원격 산출물을 본다. 원격 위조·시간 초과·판 불일치는 세 엔진(Chromium·Firefox·WebKit)
+      - run: pnpm run console-remotes
         working-directory: tools/web-checks
         env:
           HOME: /root
