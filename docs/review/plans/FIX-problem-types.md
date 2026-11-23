@@ -112,7 +112,22 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 
 ## 시험 결과
 
-(시험 담당이 채운다)
+시험 담당(`lane5-fixpt-test`)이 2026-11-23 09:08~09:15에 계획의 확인 명령대로 돌렸다. 시험 파일은 새로 쓰지 않았다(PRF192 시험이 이미 있고, 고칠 곳 3은 `--dry=json` 대조로 본다는 것이 계획의 요구다).
+
+| # | 검사 | 트리 | 결과 |
+| --- | --- | --- | --- |
+| ① | `pnpm --filter @peaket/platform test test/problem-types.test.ts` | 바탕 `b20bdd44f`(작업 트리를 건드리지 않게 `git worktree add --detach D:/l5ptpre b20bdd44f` 뒤 `corepack pnpm install --frozen-lockfile`) | **1 실패·1 통과**. PRF192 `missing`이 정확히 `ops-svc approval-conflict`·`ops-svc settlement-adjustment-already-applied`·`ops-svc settlement-dependency-unavailable` 셋(`problem-types.test.ts:180`, `expect(missing).toEqual([])`). 바탕과 구현 트리는 PRF192가 읽는 파일 중 `docs/api/openapi.yaml`만 다르다(`git diff --stat b20bdd44f 43117aeac`) |
+| ② | 같은 명령 | 구현 `43117aeac` | 2 통과 |
+| ② | `pnpm --filter @peaket/platform test`(전체) | 구현 | 65 파일·773 시험 통과, 실패 0 |
+| ② | `pnpm --filter @peaket/contracts gen:check` | 구현 | '생성물이 계약과 같다' |
+| ② | `pnpm --filter @peaket/api-client gen:check` | 구현 | '생성물이 계약과 같다' |
+| ② | `pnpm --filter @peaket/api-client test` | 구현 | 9 파일·116 시험 통과 |
+| ③ | `pnpm exec turbo run test --filter=@peaket/platform --dry=json`의 `@peaket/platform#test` `hash`, `services/ops-svc/src/modules/payouts/adapters/payment-http.ts` 끝에 주석 한 줄을 더하기 전·후(복사본으로 되돌림, `git status` 깨끗함) | 구현 | `53573b99dd6947aa` → `ea786cbff6e8da30` **바뀜**. 입력 목록에 `../../services/ops-svc/src/**` 파일이 들어 있다 |
+| ③ | 같은 대조 | 바탕(`packages/platform/turbo.json` 없음) | `c50a5f3fff1544c0` → `c50a5f3fff1544c0` **그대로**. 입력 목록에 서비스 원본이 없다 |
+| ③ | 같은 대조, `docs/api/openapi.yaml` 끝에 주석 한 줄(뿌리 입력을 물려받는지, 표본 S6) | 구현 | `53573b99dd6947aa` → `e79e2715a13e2bf9` 바뀜 |
+
+- 판정: 바탕에서 세 이름으로 실패하고 구현 뒤 통과한다. 고칠 곳 3 뒤 서비스 원본만 바꿔도 platform 시험의 캐시 열쇠가 바뀌고, 고치기 전에는 그대로다. `$TURBO_EXTENDS$`로 뿌리 입력도 남아 있다.
+- 임시 작업 폴더는 `git worktree remove --force`로 등록을 지웠다. `D:/l5ptpre` 폴더에 설치 찌꺼기(`node_modules` 등)가 남았는데 지우는 명령이 안전 검사에 막혔다. 소유자가 손으로 지운다.
 
 ## 리뷰
 
@@ -128,6 +143,6 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 | --- | --- | --- | --- | --- |
 | plan | lane5-fixpt-plan | claude-opus-5-5 | 2026-11-23T08:40:00+09:00 | 2026-11-23T09:10:00+09:00 |
 | impl | | | | |
-| test | | | | |
+| test | lane5-fixpt-test | claude-opus-5-5 | 2026-11-23T09:08:00+09:00 | 2026-11-23T09:16:00+09:00 |
 | review | | | | |
 | verify | | | | |
