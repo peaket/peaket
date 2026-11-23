@@ -7,7 +7,7 @@
 // 명령 7(LOBBY_BANNER)은 ops 명령 params 꼴이 정본에 없어 이 파일에서 보내지 않는다(받는 쪽은 queue-svc f021-queue-notice-control이 본다, 계획 10.1의 빈칸).
 import 'reflect-metadata';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
@@ -65,6 +65,8 @@ beforeAll(async () => {
   await purchaseAdmin.connect();
   seatDir = await mkdtemp(join(tmpdir(), 'peaket-f021-e2e-seat-'));
   resultDir = await mkdtemp(join(tmpdir(), 'peaket-f021-e2e-batch-'));
+  // purchase-svc 생산자 스키마 ID(시작할 때 PEAKET_SCHEMA_IDS_FILE이 필요하다, F-04-2·ADR-0357)
+  await writeFile(join(seatDir, 'schema-ids.json'), JSON.stringify({ 'trade.orders-peaket.trade.OrderEvent': 23, 'telemetry.behavior-peaket.telemetry.BehaviorSignal': 29 }));
 
   const common = async (pod: string) => ({
     PEAKET_ENV: 'ci',
@@ -99,6 +101,7 @@ beforeAll(async () => {
           PEAKET_ADMISSION_ISSUER: 'https://queue.peaket.example',
           PEAKET_PURCHASE_ECDH_KEY: JSON.stringify(ecdhJwk),
           PEAKET_SEATMAP_DIR: seatDir,
+          PEAKET_SCHEMA_IDS_FILE: join(seatDir, 'schema-ids.json'),
           PEAKET_PAYMENT_GRPC_ADDR: '127.0.0.1:1',
           PEAKET_TICKET_GRPC_ADDR: '127.0.0.1:1',
           PEAKET_GRPC_PORT: String(await freePort()),
