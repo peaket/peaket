@@ -112,6 +112,8 @@
 
 - 2026-11-23 22:0x OpenCode 감독 이어 받기(사용자 지시 "클로드코드에서 하던 것 이어서, 갈래 1~6 병렬"): develop CI 빨강 둘을 고쳤다 — ① gitleaks가 F-01-1 시험이 쓴 가짜 웹훅 토큰·죽은 로컬 DB 암호를 generic-api-key로 막던 오탐(102567373), ② F-01-1·F-01-4가 더한 `packages/platform/test-int`의 `docker logs` 두 곳에 DT-13이 요구하는 시한이 없던 것(e95f63a18). F-07-8을 develop `b28584439`로 합쳤다(R-804, payment 0033·purchase 0038). 오래된 Claude 갈래 셸이 쥔 `lane1-FIX-f021` Docker 잠금은 컨테이너·프로세스가 없어 감독이 놓고, 대기 셸은 정리했다. 갈래 1~6은 OpenCode 병렬 에이전트로 다시 띄웠다(1: F-01-6 → F-01-7 A2/A3, 2: F-05-2, 3: F-05-4 → F-05-6, 4: F-08-2 준비, 5: F-07-8 끝 → F-08-7, 6: F-04-6). F-01-7은 B등급으로 확인(첫 계획 커밋에 `Batch-Grade: A` 없음), A1만 끝나 A2/A3는 F-01-6 뒤로 남는다.
 
+- 2026-11-23 23:2x CI 안정화(F-07-8 합친 뒤): ops-svc 조정 제안 CS 건을 결제마다 따로 열고 중복은 event_key로 막았다(ops 0033, 8f562f80c). v0-monolith Dockerfile이 payment-svc의 `@peaket/validation`을 찾도록 contracts·validation을 복사·빌드한다(1a97b07ee). 계약 깨짐 예외 16줄을 이유와 함께 더했다(F-07-8 CS 종류·F-07-7 정산 계좌 모양, breaking-approved, ff18221ab). mesh MS-10·MS-19의 내부 HTTP 쌍 표에 ADR-0370 core-svc → payment-svc를 더했다(4ffd18454). queue 상태 파일 상한 시험 30초 시한·demo compat 복제본 새로 만들기(5515a92e4)·F-07-8 gitleaks 오탐(7118e67d8)도 함께 고쳤다.
+
 ## SEG 때 정할 범위 늘어남(ADR-0283 결정 6)
 - 묶음 중에 더한 새 단계는 wbs.csv 일수에 바로 더하지 않고 여기 모아 구간 마무리 때 소유자가 한 번에 정한다(앞선 예: HOT-405 0.75일, 2026-11-18 OPEN[49]).
 - PRF-174(wbs 2.7.1 ③, 0.5일 [가정], BAT-013): 탈퇴 참여자의 결제한 미사용 티켓 취소·환급(BAT-010이 찾음, 돈 A 대상, R-685).
