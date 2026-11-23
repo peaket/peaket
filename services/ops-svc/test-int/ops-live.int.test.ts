@@ -42,6 +42,8 @@ let admin: pg.Client;
 let late: pg.Client | undefined;
 /** 진행 중 트랜잭션이 있을 때 새로 뜨는 파드(RV-01 ②) */
 let extra: Awaited<ReturnType<typeof createService>> | undefined;
+/** 실제 시계로 뜨는 위젯 흐름 파드(B-01) */
+let realClock: Awaited<ReturnType<typeof createService>> | undefined;
 
 // ---------- 로그(닫힌 까닭) ----------
 class LogLines extends Writable {
@@ -300,7 +302,7 @@ afterAll(async () => {
   // 시험이 실패하거나 닫기가 던지고 멈춰도 컨테이너는 반드시 지운다(검증 때 실패한 실행마다 PostgreSQL·Prometheus가 남았다, F-03-1 검증 '남은 위험' 2)
   const bounded = (p: Promise<unknown> | undefined) => Promise.race([Promise.resolve(p), new Promise((r) => setTimeout(r, 15_000).unref())]);
   try {
-    await Promise.allSettled([bounded(full?.close()), bounded(fast?.close()), bounded(extra?.close())]);
+    await Promise.allSettled([bounded(full?.close()), bounded(fast?.close()), bounded(extra?.close()), bounded(realClock?.close())]);
     await Promise.allSettled([bounded(new Promise<void>((r) => (stub ? stub.close(() => r()) : r()))), bounded(late?.end()), bounded(admin?.end()), bounded(db?.close())]);
   } finally {
     if (prometheusId) {
@@ -785,4 +787,57 @@ describe('F-03-1 리뷰 반영: 파드의 알림 표 읽기(실제 ops-svc·Post
     live.close();
     back.close();
   });
+});
+
+describe('F-03-1 브라우저 확인 결함: 위젯 흐름(실제 시계·실제 Prometheus)', () => {
+  /** 채운 지표의 시각으로 묻는 감싸개: 실제 PrometheusWidgetSource(실제 HTTP)는 그대로 쓰고 질의 시각만 지표가 있는 때로 둔다(남은 시간은 실제 시계로 흐른다) */
+  class AtFilledMetrics implements WidgetSource {
+    readonly keys: readonly WidgetKey[] = WIDGET_KEYS;
+    constructor(private readonly target: WidgetSource) {}
+    read(key: WidgetKey, q: WidgetReadQuery): Promise<WidgetValue> {
+      return this.target.read(key, { ...q, nowMs: NOW_FAST });
+    }
+  }
+
+  test('F-03-1 B-01 ② 위젯 흐름을 서비스 상한 15초보다 길게 열어 두어도 15초 뒤의 widget 사건이 원천 값이다(source-unavailable 0, ADR-0100 결정 4 1초마다 전체 값)', async () => {
+    @Module({})
+    class RealClockLiveRoot {}
+    realClock = await createService({
+      name: 'ops-svc',
+      module: {
+        module: RealClockLiveRoot,
+        imports: [
+          databaseModule(db),
+          LiveModule.register(new OpsLiveFeed({ commands: new DrizzleCommandStore(db), checkpoints: new AuditCheckpointService(new MemoryAuditCheckpointStore(), new MemoryAuditChain(), () => Date.now()) }), {
+            widgetSources: [new AtFilledMetrics(PrometheusWidgetSource.fromUrl(prometheusUrl))],
+            retention: false,
+          }),
+        ],
+      },
+      env: { PEAKET_ENV: 'ci' },
+      logDestination: new LogLines(),
+      adminAuthz: identity,
+    });
+    await realClock.http.listen({ host: '127.0.0.1', port: 0 });
+    const port = (realClock.http.server.address() as AddressInfo).port;
+    const openedAt = Date.now();
+    const s = await Sse.open(port, `/v1/ops/events/${E7}/live?widgets=${encodeURIComponent(Q)}`, identity.ops('viewer'));
+    expect(s.status).toBe(200);
+    // 위젯 사건의 id는 그 값을 계산한 시각(ms)이다. 15초 상한을 넘긴 뒤의 사건이 셋 올 때까지 사건을 기다린다(고정 대기 아님)
+    const late = () => s.of('widget').filter((f) => Number(f.id) - openedAt > 16_000);
+    try {
+      await vi.waitFor(() => expect(late().length).toBeGreaterThanOrEqual(3), { timeout: 40_000, interval: 250 });
+      const early = s.of('widget').filter((f) => Number(f.id) - openedAt < 10_000);
+      expect(early.length, '처음 10초의 사건').toBeGreaterThan(0);
+      expect(early.map((f) => (f.data as { value: { error?: string } }).value.error ?? null)).toEqual(early.map(() => null));
+      const values = late().map((f) => (f.data as { value: unknown }).value);
+      expect(
+        values.filter((v) => (v as { error?: string }).error !== undefined),
+        `15초 뒤 source-unavailable 사건(열고 난 뒤 ms: ${late().map((f) => Number(f.id) - openedAt).join(', ')})`,
+      ).toEqual([]);
+      for (const v of values) expect(OpsWidgetQueueAdmissionRateSummary.parse(v)).toMatchObject({ widgetKey: Q, source: 'prometheus', eventId: E7, ratio: METRICS.ratio, target: METRICS.target });
+    } finally {
+      s.close();
+    }
+  }, 90_000);
 });
