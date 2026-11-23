@@ -31,6 +31,8 @@ export const CS_CASE_KINDS = [
   'PG_BALANCE_MISMATCH',
   'APPEAL',
   'FRAUD_OBJECTION_COMPENSATION',
+  // payment-svc 대사 미완 결제가 풀린 뒤의 조정 제안(F-07-8 I-05, ADR-0380 결정 7). 대상 = 정산서 ID. 조정 자체는 SETTLEMENT_ADJUSTMENT 2인 승인으로만 적용한다
+  'SETTLEMENT_ADJUSTMENT_SUGGESTED',
 ] as const;
 export type CsCaseKind = (typeof CS_CASE_KINDS)[number];
 
@@ -59,6 +61,8 @@ export const ACCEPTED_KINDS: ReadonlySet<CsCaseKind> = new Set<CsCaseKind>([
   // payment-svc 포트원 지급 쪽 건(F-07-7 ADR-0370 결정 7·8, settlement §5.3). 대상 = 묶음 ID(실행 건)·이체·파트너·정산서·묶음 ID(원장 불일치)
   'PORTONE_PAYOUT_EXECUTION',
   'PORTONE_LEDGER_MISMATCH',
+  // payment-svc 대사 미완 결제 풀림의 조정 제안(F-07-8 I-05, ADR-0380 결정 7). 사건 키 reconciliation-resolved:{정산서 ID}:{결제 ID}, 대상 = 정산서 ID
+  'SETTLEMENT_ADJUSTMENT_SUGGESTED',
 ]);
 
 /**

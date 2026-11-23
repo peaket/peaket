@@ -5,7 +5,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Database } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
 import type { CompensationPage, CompensationRecord, CompensationStatus, CompensationView } from '../../domain/compensation.js';
-import type { CompensationStore } from '../../domain/ports.js';
+import type { CompensationRefreshStore, CompensationStore } from '../../domain/ports.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -70,7 +70,7 @@ const viewOf = (r: Row): CompensationView => ({
 });
 
 @Injectable()
-export class DrizzleCompensations implements CompensationStore {
+export class DrizzleCompensations implements CompensationStore, CompensationRefreshStore {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
 
   async list(accountId: string, q: { readonly cursor?: string; readonly limit?: number } = {}): Promise<CompensationPage> {
@@ -123,6 +123,29 @@ export class DrizzleCompensations implements CompensationStore {
        returning *`);
     const row = (updated.rows[0] as unknown as Row | undefined) ?? (await this.database.db.execute(sql`select * from compensation where id = ${q.compensationId}::uuid`)).rows[0];
     return row === undefined ? undefined : recordOf(row as unknown as Row);
+  }
+
+  /** 송금 결과 확정 바퀴(F-07-8 I-06): REQUESTED이고 송금 ID가 있는 행(오래된 차례, 부분 인덱스 compensation_requested_idx) */
+  async listRequested(limit: number): Promise<readonly CompensationRecord[]> {
+    const rows = await this.database.db.execute(sql`
+      select c.*, null as fault from compensation c
+       where c.status = 'REQUESTED' and c.transfer_id is not null
+       order by c.updated_at, c.id
+       limit ${Math.max(1, Math.floor(limit))}`);
+    return (rows.rows as unknown as Row[]).map(recordOf);
+  }
+
+  /** REQUESTED 행만 PAID·FAILED로 쓴다(조건부 갱신). 겹친 두 바퀴·늦게 온 계좌 입력 답은 한 쪽만 쓴다 */
+  async settleRequested(compensationId: string, q: { readonly status: 'PAID' | 'FAILED'; readonly receivableId?: string; readonly failureReason?: string; readonly nowMs: number }): Promise<boolean> {
+    const updated = await this.database.db.execute(sql`
+      update compensation
+         set status = ${q.status},
+             receivable_id = ${q.status === 'PAID' ? (q.receivableId ?? null) : null}::uuid,
+             failure_reason = ${q.status === 'FAILED' ? (q.failureReason ?? null) : null},
+             updated_at = ${new Date(q.nowMs)}::timestamptz
+       where id = ${compensationId}::uuid and status = 'REQUESTED'
+       returning id`);
+    return updated.rows.length > 0;
   }
 
   async #find(accountId: string, compensationId: string): Promise<Row | undefined> {

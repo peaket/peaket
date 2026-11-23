@@ -239,6 +239,13 @@
       "when": 1795368257199,
       "tag": "0033_sale_control_pause_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1795425979723,
+      "tag": "0038_event_refund_settlement_notice",
+      "breakpoints": true
     }
   ]
 }

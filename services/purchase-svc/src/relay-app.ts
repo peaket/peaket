@@ -74,6 +74,14 @@ import {
   HttpEntryFlagNotice,
   HttpEventRefundAlert,
   HttpPgCircuits,
+  DrizzleCompensations,
+  eventRefundPgRateOf,
+  GrpcCompensationTransfer,
+  HttpCompensationCaseNotice,
+  HttpSettlementRecalculation,
+  PgTokenBuckets,
+  RefreshCompensationTransfers,
+  unsentSettlementRecalculation,
   HttpRefundAccountNotice,
   HttpRefundFailureNotice,
   OutboxEventRefundFanNotifier,
@@ -249,6 +257,15 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
   if (!paymentHttpUrl && o.env?.PEAKET_ENV !== 'local' && o.env?.PEAKET_ENV !== 'ci' && o.env?.PEAKET_ENV !== 'demo') {
     throw new Error('PEAKET_PAYMENT_HTTP_URL이 없다(회차 취소 서킷 읽기, 운영 필수)');
   }
+  // F-07-8(ADR-0380 결정 2): 정산 다시 계산 알리기(payment-svc 내부 HTTP, 한도 3초 [가정]). 주소가 없으면 local·ci·test·demo만 '보내지 않음' 대역이고 그 밖은 시작 실패다
+  const settlementRecalculation = paymentHttpUrl
+    ? new HttpSettlementRecalculation(createExternalHttpClient({ provider: 'payment-svc', baseUrl: paymentHttpUrl, timeoutCapMs: 3_000 }), o.env?.PEAKET_INTERNAL_TOKEN)
+    : unsentSettlementRecalculation(o.env?.PEAKET_ENV, (obj, msg) => bound().logger.warn(obj, msg));
+  // F-07-8 I-07(R-T52): 결제사 몫마다 토큰 버킷(초당·최대 PEAKET_EVENT_REFUND_PG_RATE, 기본 300 [가정]). 버킷은 이 프로세스 것이다(C-01)
+  const eventRefundPgRate = eventRefundPgRateOf(o.env?.PEAKET_EVENT_REFUND_PG_RATE);
+  const eventRefundBuckets = new PgTokenBuckets({ ratePerSecond: eventRefundPgRate, burst: eventRefundPgRate, clock });
+  // F-07-8 I-06(R-T47 ③): 틱 끝의 배상 송금 결과 확정. payment-svc 배상 송금 gRPC(GetCompensationTransfer)가 있을 때만 만든다
+  const compensationLookup = paymentCancelAddress ? new GrpcCompensationTransfer({ address: paymentCancelAddress }) : undefined;
   // 입장 기록이 나온 취소의 CS '이상 표시'. ops-svc 주소가 없으면 로그 대역이다
   const entryFlagNotice = opsClient
     ? new HttpEntryFlagNotice(opsClient, o.env?.PEAKET_INTERNAL_TOKEN)
@@ -296,7 +313,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
   // API 파드의 Start가 첫 묶음만 처리하고, 나머지와 재시도·신청 창 닫기·확정 뒤 끝난 주문 쓸어 담기를 이 릴레이 리더가 이어 간다.
   // 회차 취소(CANCEL)는 전용 취소기(견적·좌석 되돌림 없음, 보류 취소 전환), 연기(POSTPONE) 신청 환급은 예매 취소 Saga로 간다(ADR-0280 결정 3).
   const eventRefund =
-    refundTicketCancels && paymentCancels
+    refundTicketCancels && paymentCancels && compensationLookup
       ? new EventRefundService({
           store: new DrizzleEventRefundStore(o.serviceDatabase, clock),
           targets: new DrizzleEventRefundTargets(o.serviceDatabase, new SeatMapSaleConfigs(o.seatMap)),
@@ -343,6 +360,16 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
           batchSize: 200,
           // 발권 대기(APPROVED) 주문은 보상 세 걸음으로 끝낸다(BAT-011, PRF-173). 보상이 끝날 때까지 요청은 RUNNING이다
           ...(compensationFence && compensationPayment ? { compensation: compensationQueue } : {}),
+          // F-07-8: 정산 알리기 다시 하기·결제사별 토큰 버킷·틱 끝 배상 송금 결과 확정
+          settlement: settlementRecalculation,
+          buckets: eventRefundBuckets,
+          compensationRefresh: new RefreshCompensationTransfers({
+            store: new DrizzleCompensations(o.serviceDatabase),
+            transfer: compensationLookup,
+            ...(opsClient ? { cases: new HttpCompensationCaseNotice(opsClient, o.env?.PEAKET_INTERNAL_TOKEN) } : {}),
+            clock,
+            log: { warn: (obj: object, msg: string) => bound().logger.warn(obj, msg) },
+          }),
         })
       : undefined;
   const relay = await startOutboxRelayProcess({
@@ -497,6 +524,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
       refundTicketCancels?.close();
       compensationFence?.close();
       compensationPayment?.close();
+      compensationLookup?.close();
       return relay.stop();
     },
   };

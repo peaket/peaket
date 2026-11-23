@@ -7,6 +7,8 @@
 // 다시 보기 2 N1·N2(transfer-refund §3.1 ⑥): 일괄 환불 실패 건(failure_case_at)과 공제 차액 대상(deduction_gap_at)은 확정·항목 끝내기 트랜잭션에서 표시만 하고,
 // 다시 열기 포트(csOutbox)가 꽂힌 조립에서는 처리 중에 ops-svc를 부르지 않는다. 건은 runDue 틱 끝 한 곳에서 일괄 환불 실패 → 차액 차례로,
 // 5초 [가정] 예산과 잇따른 무응답 멈춤 안에서 행마다 연다(cs-case-reopen.ts, 실패해도 항목 상태는 그대로). 포트가 없는 옛 조립만 처리 중에 한 번 연다.
+// F-07-8(ADR-0380, transfer-refund §5·§6): 확정 커밋 뒤 payment-svc 정산 보류 열기, COMPLETED(또는 확정 + 3영업일 [가정]) 뒤 완료 알리기(실패는 틱이 1분 → 5분 → 15분 [가정] 다시),
+// 결제사로 보내기 직전의 결제사별 토큰 버킷(R-T52), 쓸어 담기의 늦은 주문 배상 행(R-T46 ④), 틱 끝의 배상 송금 결과 확정(R-T47 ③)을 더했다.
 import { randomUUID } from 'node:crypto';
 import {
   EventRefundActiveConflict,
@@ -43,6 +45,30 @@ import {
   type EventRefundStartInput,
 } from '../domain/event-refund-ports.js';
 import { parseEventRefundHold, type EventRefundHoldInput, type EventRefundHoldState } from '../domain/event-refund-hold.js';
+import type { EventRefundSettlementNotice } from '../domain/event-refund-ports.js';
+
+/** 정산 알리기 다시 부르기 간격 1분 → 5분 → 15분, 그 뒤 15분마다 [가정](ADR-0380 결정 2) */
+const SETTLEMENT_NOTICE_RETRY_MS = [60_000, 5 * 60_000, 15 * 60_000] as const;
+/** 확정 + 이 영업일이 지나도 COMPLETED가 아니면 그때까지의 환급으로 부분 완료를 알린다 3영업일 [가정](ADR-0380 결정 3) */
+export const SETTLEMENT_PARTIAL_BUSINESS_DAYS = 3;
+/** 틱 하나가 정산 알리기를 보는 요청 수 [가정] */
+const SETTLEMENT_NOTICE_BATCH = 20;
+/** 틱 끝 배상 송금 결과 확정의 한 번 상한 50건 [가정](계획 §3 I-06) */
+const COMPENSATION_REFRESH_LIMIT = 50;
+const KST_OFFSET_MS = 9 * 60 * 60_000;
+const DAY_MS = 24 * 60 * 60_000;
+
+/** KST 달력으로 주말을 건너뛴 영업일 더하기(같은 시각). 공휴일 달력은 쓰지 않는다 [가정] */
+export function addKstWeekdays(fromMs: number, days: number): number {
+  let at = fromMs;
+  let left = days;
+  while (left > 0) {
+    at += DAY_MS;
+    const wd = new Date(at + KST_OFFSET_MS).getUTCDay();
+    if (wd !== 0 && wd !== 6) left -= 1;
+  }
+  return at;
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -242,9 +268,99 @@ export class EventRefundService {
       if (!this.o.csOutbox) for (const row of gapRows) await this.#openGapNow(request.requestId, row, nowMs);
       // 발권 대기(APPROVED) 주문의 보상 세 걸음을 큐에 넣는다(BAT-011, PRF-173). 보상이 끝날 때까지 요청은 RUNNING이다
       await this.#queueCompensation(created);
+      // 정산 보류 열기는 요청을 커밋한 뒤 처리 전에 한 번 부른다(ADR-0380 결정 1). 실패는 확정·환급을 막지 않는다
+      await this.#settlementNotice(created, 'hold-only');
       await this.#run(created, targets, this.o.firstBatch ?? 200);
     }
+    // 연기는 보류 열기만, 취소는 처리 뒤 COMPLETED면 완료도 같은 자리에서 알린다
+    await this.#settlementNotice(await this.get(i.requestId));
     return this.get(i.requestId);
+  }
+
+  /**
+   * 정산 다시 계산 알리기 한 걸음(ADR-0380 결정 1~3). 보류 열기를 아직 받지 않았으면 열고, 열었고 요청이 COMPLETED(또는 확정 + 3영업일 [가정])면 완료를 한 번 알린다.
+   * 다시 부를 시각 전이면 아무것도 하지 않는다. 실패는 던지지 않고 다시 부를 시각(1분 → 5분 → 15분, 그 뒤 15분마다 [가정])과 경고(요청 ID만)를 남긴다
+   */
+  async #settlementNotice(request: EventCancellationRequest, mode: 'full' | 'hold-only' = 'full'): Promise<void> {
+    const port = this.o.settlement;
+    if (!port || request.status === 'REJECTED') return;
+    const nowMs = this.o.nowMs();
+    let state: EventRefundSettlementNotice = (await this.o.store.settlementNotice?.(request.requestId)) ?? { failures: 0 };
+    if (state.completionSentAtMs !== undefined) return;
+    if (state.nextAtMs !== undefined && state.nextAtMs > nowMs) return;
+    if (state.holdSentAtMs === undefined) {
+      try {
+        await port.open({ requestId: request.requestId, eventId: request.eventId, kind: request.kind, confirmedAt: new Date(request.createdAtMs) });
+      } catch (err) {
+        await this.#settlementNoticeFailed(request.requestId, state, 'open', err, nowMs);
+        return;
+      }
+      state = { holdSentAtMs: nowMs, failures: 0 };
+      await this.o.store.markSettlementNotice?.(request.requestId, state);
+    }
+    if (mode === 'hold-only') return;
+    const completed = request.status === 'COMPLETED';
+    const partial = !completed && nowMs >= addKstWeekdays(request.createdAtMs, SETTLEMENT_PARTIAL_BUSINESS_DAYS);
+    if (!completed && !partial) return;
+    try {
+      await port.complete(request.requestId, { completedAt: new Date(nowMs), partial });
+    } catch (err) {
+      await this.#settlementNoticeFailed(request.requestId, state, 'complete', err, nowMs);
+      return;
+    }
+    await this.o.store.markSettlementNotice?.(request.requestId, { ...(state.holdSentAtMs !== undefined ? { holdSentAtMs: state.holdSentAtMs } : {}), completionSentAtMs: nowMs, failures: 0 });
+    if (partial) {
+      this.o.log?.warn(
+        { event: 'event-refund-settlement-partial', requestId: request.requestId },
+        'event-refund-settlement-partial: 확정 뒤 3영업일이 지나도 일괄 환불이 끝나지 않아 그때까지의 환급으로 정산 완료를 알렸다(남은 환급은 계산 뒤 환급 미수금이 된다)',
+      );
+    }
+  }
+
+  async #settlementNoticeFailed(requestId: string, state: EventRefundSettlementNotice, stage: 'open' | 'complete', err: unknown, nowMs: number): Promise<void> {
+    const failures = state.failures + 1;
+    const gap = SETTLEMENT_NOTICE_RETRY_MS[Math.min(failures, SETTLEMENT_NOTICE_RETRY_MS.length) - 1]!;
+    // 회차 ID·주소·원래 오류 글은 싣지 않는다(요청 ID와 단계, 오류 이름만)
+    this.o.log?.warn(
+      { event: 'event-refund-settlement-notice-failed', requestId, stage, err: err instanceof Error ? err.name : 'unknown' },
+      'event-refund-settlement-notice-failed: 정산 알리기를 payment-svc가 받지 않아 실행기 틱이 다시 부른다(환급은 계속한다)',
+    );
+    try {
+      await this.o.store.markSettlementNotice?.(requestId, { ...state, nextAtMs: nowMs + gap, failures });
+    } catch (markErr) {
+      this.o.log?.warn({ event: 'event-refund-settlement-notice-failed', requestId, stage: 'mark', err: markErr instanceof Error ? markErr.name : 'unknown' }, 'event-refund-settlement-notice-failed: 다시 부를 시각을 쓰지 못했다');
+    }
+  }
+
+  /** 틱 끝의 정산 알리기 다시 하기. 한 요청의 실패가 다른 요청을 막지 않는다 */
+  async #settlementNotices(): Promise<void> {
+    const store = this.o.store;
+    if (!this.o.settlement || !store.settlementNoticesDue) return;
+    let rows: readonly EventCancellationRequest[];
+    try {
+      rows = await store.settlementNoticesDue(this.o.nowMs(), SETTLEMENT_NOTICE_BATCH);
+    } catch (err) {
+      this.o.log?.warn({ event: 'event-refund-settlement-notice-failed', stage: 'list', err: err instanceof Error ? err.name : 'unknown' }, 'event-refund-settlement-notice-failed: 다시 알릴 요청을 읽지 못했다');
+      return;
+    }
+    for (const request of rows) {
+      try {
+        await this.#settlementNotice(request);
+      } catch (err) {
+        this.o.log?.warn({ event: 'event-refund-settlement-notice-failed', requestId: request.requestId, stage: 'tick', err: err instanceof Error ? err.name : 'unknown' }, 'event-refund-settlement-notice-failed');
+      }
+    }
+  }
+
+  /** 틱 끝의 배상 송금 결과 확정(R-T47 ③). 실패는 그 틱의 환급 결과를 바꾸지 않고 경고만 남긴다 */
+  async #refreshCompensations(): Promise<void> {
+    const refresh = this.o.compensationRefresh;
+    if (!refresh) return;
+    try {
+      await refresh.run(COMPENSATION_REFRESH_LIMIT);
+    } catch (err) {
+      this.o.log?.warn({ event: 'compensation-transfer-refresh-failed', err: err instanceof Error ? err.name : 'unknown' }, 'compensation-transfer-refresh-failed: 배상 송금 결과를 확정하지 못했다(다음 틱에 다시 본다)');
+    }
   }
 
   /**
@@ -449,6 +565,8 @@ export class EventRefundService {
       return await this.#runDueRefunds();
     } finally {
       await this.#reopenCases();
+      await this.#settlementNotices();
+      await this.#refreshCompensations();
     }
   }
 
@@ -505,10 +623,16 @@ export class EventRefundService {
     const knownOrders = new Set(existing.map((i) => i.orderId));
     const newOrderTargets = fresh.filter((t) => !knownOrders.has(t.orderId));
     const outbox = newOrderTargets.length > 0 ? (this.o.fanNotifier?.confirmed(request, newOrderTargets, nowMs) ?? []) : [];
+    // 확정 뒤에 결제가 끝난 새 주문의 배상 행(F-07-8 RV-18, R-T46 ④): 확정 때와 같은 함수로 주문마다 한 행을 항목과 같은 트랜잭션에. 불가항력·0원 주문은 0행이고 아는 주문은 고치지 않는다
+    const compensations =
+      request.fault !== undefined && newOrderTargets.length > 0
+        ? compensationRowsOf({ requestId: request.requestId, eventId: request.eventId, fault: request.fault, targets: newOrderTargets, nowMs, idOf: () => randomUUID() })
+        : [];
     await this.o.items.addItems(
       request.requestId,
       fresh.map((t) => itemOf(request.requestId, t, 'CANCEL', nowMs)),
       outbox,
+      ...(compensations.length > 0 ? [{ compensations }] : []),
     );
   }
 
@@ -590,6 +714,17 @@ export class EventRefundService {
       }
       const target = byTicket.get(item.ticketId);
       if (!target) return this.#finishItem(request, item, 'FAILED', 'target-not-found', undefined, { claimToken });
+      // 결제사별 토큰 버킷(R-T52): 보내기 직전에 그 결제사 몫의 토큰을 기다린다. 기다림은 시도 기록·자동 정지에 들지 않는다.
+      // 기다린 뒤 멈춤을 다시 보고(멈췄으면 보내지 않는다), 잡기 늘리기는 기다림 뒤에 본다
+      if (this.o.buckets) {
+        await this.o.buckets.take(item.pg);
+        const after = await this.o.store.find(request.requestId);
+        if (after) {
+          for (const p of pausedOf(after)) paused.set(p.pg, p.reason);
+          if (after.status === 'PAUSED' && !paused.has(item.pg)) paused.set(item.pg, 'MANUAL');
+        }
+        if (paused.has(item.pg)) return false;
+      }
       if (claim && !(await this.#keepClaim(request, item, claim))) return false;
       let result: Awaited<ReturnType<EventRefundServiceDeps['canceller']['cancel']>>;
       try {

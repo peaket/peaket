@@ -89,6 +89,10 @@ import {
   HttpDeductionGapNotice,
   HttpEventRefundAlert,
   HttpPgCircuits,
+  eventRefundPgRateOf,
+  HttpSettlementRecalculation,
+  PgTokenBuckets,
+  unsentSettlementRecalculation,
   HttpRefundFailureNotice,
   OutboxEventRefundFanNotifier,
   parseHolidayCalendar,
@@ -446,6 +450,16 @@ export async function start(o: StartOptions): Promise<StartedService> {
   if (database && !paymentHttpUrl && envName !== 'local' && envName !== 'ci' && envName !== 'demo') {
     throw new Error('PEAKET_PAYMENT_HTTP_URL이 없다(회차 취소 서킷 읽기, 운영 필수)');
   }
+  // F-07-8(ADR-0380 결정 1·2): Start 커밋 뒤 정산 보류 열기(payment-svc 내부 HTTP, 한도 3초 [가정]). 다시 하기·완료는 릴레이 리더 틱이 이어 간다.
+  // 주소가 없으면 local·ci·test·demo만 '보내지 않음' 대역이고 그 밖은 시작 실패다
+  const settlementRecalculation = paymentHttpUrl
+    ? new HttpSettlementRecalculation(createExternalHttpClient({ provider: 'payment-svc', baseUrl: paymentHttpUrl, timeoutCapMs: 3_000 }), env.PEAKET_INTERNAL_TOKEN)
+    : database
+      ? unsentSettlementRecalculation(envName, (o: object, msg: string) => log?.warn(o, msg))
+      : undefined;
+  // F-07-8 I-07(R-T52): Start 첫 묶음·재개·신청도 결제사 몫마다 토큰 버킷 안에서 보낸다(PEAKET_EVENT_REFUND_PG_RATE, 기본 300 [가정]). 버킷은 이 파드 것이다(C-01)
+  const eventRefundPgRate = eventRefundPgRateOf(env.PEAKET_EVENT_REFUND_PG_RATE);
+  const eventRefundBuckets = new PgTokenBuckets({ ratePerSecond: eventRefundPgRate, burst: eventRefundPgRate, clock: systemClock });
   // 회차 취소 일괄 환불(BAT-425 GAT-120·GAT-130). 기존 예매 취소 Saga를 티켓마다 부르고, 진행률·부분 실패·수동 일시정지·재개,
   // 자동 정지(실패율·실패 금액·연속 실패·거절률), 연기 신청 창, 백그라운드 실행기, 팬 알림 Outbox를 남긴다.
   // CS 처리함·경보 연결은 ops-svc 내부 HTTP다. 주소가 없으면 로그 대역이다.
@@ -519,6 +533,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
       concurrency: 8,
       // 발권 대기(APPROVED) 주문은 보상 세 걸음으로 끝낸다(BAT-011, PRF-173). 실제 큐는 booking 조립이 채운다
       compensation: compensationQueueLate,
+      ...(settlementRecalculation ? { settlement: settlementRecalculation } : {}),
+      buckets: eventRefundBuckets,
     });
     refund.eventRefund = eventRefundService;
   }

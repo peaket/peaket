@@ -2,6 +2,7 @@
 import type { EventRefundHoldInput, EventRefundHoldState } from './event-refund-hold.js';
 import type { CompensationRow } from './compensation.js';
 import type { CancellationConfigs } from './ports.js';
+import type { PgTokenBuckets } from './pg-token-bucket.js';
 import type {
   CompensationOrder,
   EventCancellationRequest,
@@ -73,6 +74,15 @@ export interface EventRefundStore {
   markNotApplied(requestId: string, ticketId: string): Promise<boolean>;
   /** 아직 끝나지 않은 요청(실행·멈춤·신청 창)을 오래된 순서로 준다. 백그라운드 실행기가 쓴다(멈춘 요청은 쓸어 담기만 한다, BAT-420) */
   activeRequests(limit: number): Promise<readonly EventCancellationRequest[]>;
+  /**
+   * F-07-8(ADR-0380 결정 2): 정산 알리기 상태(보류 열기·완료를 받은 시각, 다시 부를 시각, 잇따른 실패 수). 행이 없으면 undefined.
+   * 선택 메서드다(없는 대역은 정산 알리기를 Start 안에서 한 번만 하고 다시 하지 않는다)
+   */
+  settlementNotice?(requestId: string): Promise<EventRefundSettlementNotice | undefined>;
+  /** 정산 알리기 상태를 통째로 쓴다(요청 행의 settlement_* 칸만, 진행률·updated_at은 건드리지 않는다) */
+  markSettlementNotice?(requestId: string, state: EventRefundSettlementNotice): Promise<void>;
+  /** 정산 완료를 아직 보내지 않았고(REJECTED 빼고) 다시 부를 시각이 지났거나 빈 요청(오래된 차례) */
+  settlementNoticesDue?(nowMs: number, limit: number): Promise<readonly EventCancellationRequest[]>;
   /** 그 요청에서 지금 처리할 수 있는 항목(신청됨·PENDING/UNKNOWN·next_attempt_at <= now)을 준다 */
   dueItems(requestId: string, nowMs: number, limit: number): Promise<readonly EventRefundItem[]>;
   /** 연기 신청 창이 닫힌 요청을 찾는다 */
@@ -209,6 +219,34 @@ export interface EventRefundServiceDeps {
    * 없으면 넣지 않는다(옛 조립·단위 시험). 큐는 그 회차에서 새로 만든 보상 행 수를 준다
    */
   readonly compensation?: { queue(eventId: string): Promise<number> };
+  /**
+   * F-07-8(ADR-0380 결정 1~3): payment-svc 정산 다시 계산 알리기. Start 커밋 뒤 보류 열기를 한 번, 요청이 COMPLETED가 된 뒤(또는 확정 + 3영업일 [가정]) 완료를 한 번 부른다.
+   * 실패는 확정·환급을 막지 않고 실행기 틱이 1분 → 5분 → 15분, 그 뒤 15분마다 [가정] 다시 부른다. 없으면 알리지 않는다
+   */
+  readonly settlement?: SettlementRecalculationPort;
+  /** F-07-8 I-07(R-T52): 결제사 몫마다 토큰 버킷. 결제사로 보내기 직전에 토큰을 기다린다. 없으면 기다리지 않는다 */
+  readonly buckets?: PgTokenBuckets;
+  /** F-07-8 I-06(R-T47 ③): 틱 끝의 배상 송금 결과 확정(RefreshCompensationTransfers). 없으면 하지 않는다 */
+  readonly compensationRefresh?: { run(limit?: number): Promise<{ paid: number; failed: number; pending: number }> };
+}
+
+// ---- F-07-8: 정산 다시 계산 알리기(ADR-0380 결정 2, transfer-refund §5 '정산 다시 계산 알리기') ----
+
+/**
+ * payment-svc 정산 내부 HTTP 두 경로(PUT …/event-recalculations/{requestId}, POST …/{requestId}/completion). 같은 요청 ID는 멱등이다.
+ * 실패는 던진다(SettlementNoticeError, 메시지에 요청 ID만)
+ */
+export interface SettlementRecalculationPort {
+  open(input: { requestId: string; eventId: string; kind: 'CANCEL' | 'POSTPONE'; confirmedAt: Date }): Promise<void>;
+  complete(requestId: string, input: { completedAt: Date; partial: boolean }): Promise<void>;
+}
+
+/** 정산 알리기 상태(event_cancellation_request.settlement_*). 시각은 ms, 없으면 아직이다 */
+export interface EventRefundSettlementNotice {
+  readonly holdSentAtMs?: number;
+  readonly completionSentAtMs?: number;
+  readonly nextAtMs?: number;
+  readonly failures: number;
 }
 
 // ---- 웨이브 끝 리뷰 K2·C2·S1: 일괄 환불 항목의 주인과 겹침 막기, CS 건 다시 열기 ----
@@ -351,7 +389,11 @@ export interface PendingCancellationConversions {
 
 /** 없는 (요청, 표)만 PENDING으로 더한다(cancellation_id 유일). 더한 항목을 돌려준다 */
 export interface EventRefundItemAdder {
-  addItems(requestId: string, items: readonly EventRefundItem[], outbox?: readonly EventRefundOutboxMessage[]): Promise<readonly EventRefundItem[]>;
+  /**
+   * F-07-8 RV-18(R-T46 ④): extra.compensations는 확정 뒤 결제가 끝난 새 주문의 배상 행이다. 항목·Outbox와 같은 트랜잭션에 넣고, 같은 요청·주문은 유일 인덱스가 한 행으로 막는다.
+   * 배상 행 쓰기가 실패하면 항목도 남지 않는다
+   */
+  addItems(requestId: string, items: readonly EventRefundItem[], outbox?: readonly EventRefundOutboxMessage[], extra?: { readonly compensations?: readonly CompensationRow[] }): Promise<readonly EventRefundItem[]>;
 }
 
 /** 그 회차의 끝나지 않은 주문 수(CREATED·AUTHENTICATED·ACCEPTED·RESERVED·AWAITING_DEPOSIT·APPROVED·UNKNOWN) */

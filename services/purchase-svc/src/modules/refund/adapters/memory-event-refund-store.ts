@@ -1,6 +1,6 @@
 // 회차 취소 일괄 환불의 메모리 저장소(단위 시험·로컬 대역).
 import { EventRefundActiveConflict, type EventCancellationRequest, type EventRefundAttempt, type EventRefundItem, type EventRefundWindowStats, type RefundPgProvider } from '../domain/event-refund.js';
-import type { EventRefundAttemptStore, EventRefundItemAdder, EventRefundOutboxMessage, EventRefundStore } from '../domain/event-refund-ports.js';
+import type { EventRefundAttemptStore, EventRefundItemAdder, EventRefundOutboxMessage, EventRefundSettlementNotice, EventRefundStore } from '../domain/event-refund-ports.js';
 import type { CompensationRow } from '../domain/compensation.js';
 
 export class MemoryEventRefundStore implements EventRefundStore, EventRefundItemAdder {
@@ -15,6 +15,8 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
   readonly failureCases = new Set<string>();
   /** 확정 때 만든 배상 행(BAT-425, ADR-0317). (요청, 주문) 하나만 둔다 */
   readonly compensations: CompensationRow[] = [];
+  /** 정산 알리기 상태(F-07-8, 요청 ID → settlement_* 칸) */
+  readonly settlementNotices = new Map<string, EventRefundSettlementNotice>();
 
   async find(requestId: string): Promise<EventCancellationRequest | undefined> {
     return this.requests.get(requestId);
@@ -72,14 +74,41 @@ export class MemoryEventRefundStore implements EventRefundStore, EventRefundItem
   }
 
   /** 확정 뒤 끝난 주문의 표 더하기(BAT-420 GAT-110 H). 없는 (요청, 표)만 더하고, 더한 것이 있을 때만 Outbox를 남긴다 */
-  async addItems(requestId: string, items: readonly EventRefundItem[], outbox: readonly EventRefundOutboxMessage[] = []): Promise<readonly EventRefundItem[]> {
+  async addItems(
+    requestId: string,
+    items: readonly EventRefundItem[],
+    outbox: readonly EventRefundOutboxMessage[] = [],
+    extra: { readonly compensations?: readonly CompensationRow[] } = {},
+  ): Promise<readonly EventRefundItem[]> {
     const existing = this.byRequest.get(requestId);
     if (!existing) throw new Error(`회차 취소 요청이 없다: ${requestId}`);
     const cancellationIds = new Set([...existing.values()].map((i) => i.cancellationId));
     const added = items.filter((i) => !existing.has(i.ticketId) && !cancellationIds.has(i.cancellationId));
     for (const i of added) existing.set(i.ticketId, i);
     if (added.length > 0) this.outbox.push(...outbox);
+    // 확정 뒤 결제가 끝난 새 주문의 배상 행(F-07-8 RV-18). 같은 요청·주문은 한 행이다
+    for (const c of extra.compensations ?? []) {
+      if (!this.compensations.some((x) => x.eventCancellationRequestId === c.eventCancellationRequestId && x.orderId === c.orderId)) this.compensations.push(c);
+    }
     return added;
+  }
+
+  async settlementNotice(requestId: string): Promise<EventRefundSettlementNotice | undefined> {
+    return this.requests.has(requestId) ? (this.settlementNotices.get(requestId) ?? { failures: 0 }) : undefined;
+  }
+
+  async markSettlementNotice(requestId: string, state: EventRefundSettlementNotice): Promise<void> {
+    if (this.requests.has(requestId)) this.settlementNotices.set(requestId, { ...state });
+  }
+
+  async settlementNoticesDue(nowMs: number, limit: number): Promise<readonly EventCancellationRequest[]> {
+    return [...this.requests.values()]
+      .filter((r) => {
+        const n = this.settlementNotices.get(r.requestId);
+        return r.status !== 'REJECTED' && n?.completionSentAtMs === undefined && (n?.nextAtMs === undefined || n.nextAtMs <= nowMs);
+      })
+      .sort((a, b) => a.createdAtMs - b.createdAtMs)
+      .slice(0, limit);
   }
 
   /**

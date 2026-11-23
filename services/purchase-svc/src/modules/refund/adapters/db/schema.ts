@@ -25,6 +25,14 @@ export const eventCancellationRequest = pgTable(
     progress: jsonb('progress').notNull().default(sql`'{}'::jsonb`),
     createdAt: at('created_at').notNull(),
     updatedAt: at('updated_at').notNull(),
+    /** 정산 보류 열기(payment-svc 다시 계산 PUT)를 받은 시각(F-07-8, ADR-0380 결정 2). 비면 실행기 틱이 다시 부른다 */
+    settlementHoldSentAt: at('settlement_hold_sent_at'),
+    /** 정산 완료 알리기(다시 계산 POST …/completion)를 받은 시각. 보류 열기가 먼저 성공했을 때만 쓴다 */
+    settlementCompletionSentAt: at('settlement_completion_sent_at'),
+    /** 정산 알리기 다시 부를 시각(실패 뒤 1분 → 5분 → 15분, 그 뒤 15분마다 [가정]) */
+    settlementNextAt: at('settlement_next_at'),
+    /** 정산 알리기가 잇따라 실패한 수(다시 부를 간격을 고른다). 성공하면 0으로 돌린다 */
+    settlementNoticeFailures: integer('settlement_notice_failures').notNull().default(0),
   },
   (t) => [
     uniqueIndex('event_cancellation_active_key')
@@ -39,6 +47,9 @@ export const eventCancellationRequest = pgTable(
     check('event_cancellation_amounts_check', sql`${t.targetOrders} >= 0 and ${t.refundTotal} >= 0 and ${t.compensationTargets} >= 0 and ${t.compensationTotal} >= 0`),
     check('event_cancellation_people_check', sql`${t.ruledBy} is null or ${t.confirmedBy} is null or ${t.ruledBy} <> ${t.confirmedBy}`),
     check('event_cancellation_window_check', sql`${t.refundWindowClosesAt} is null or ${t.postponedTo} is null or ${t.refundWindowClosesAt} <= ${t.postponedTo}`),
+    check('event_cancellation_settlement_failures_check', sql`${t.settlementNoticeFailures} >= 0`),
+    // 정산 알리기를 다 보내지 않은 요청만 실행기 틱이 본다(F-07-8)
+    index('event_cancellation_settlement_due_idx').on(t.settlementNextAt).where(sql`${t.settlementCompletionSentAt} is null`),
   ],
 );
 
@@ -212,5 +223,7 @@ export const compensation = pgTable(
     // ACCOUNT_PENDING에는 송금 ID가 없다(계좌를 넣은 뒤 REQUESTED·PAID·FAILED에 쓴다)
     check('compensation_transfer_check', sql`${t.status} <> 'ACCOUNT_PENDING' or ${t.transferId} is null`),
     check('compensation_receivable_check', sql`${t.receivableId} is null or ${t.status} = 'PAID'`),
+    // 송금 결과 확정 바퀴가 REQUESTED만 읽는다(F-07-8 I-06, transfer-refund §6 '송금 결과 확정')
+    index('compensation_requested_idx').on(t.status).where(sql`${t.status} = 'REQUESTED'`),
   ],
 );

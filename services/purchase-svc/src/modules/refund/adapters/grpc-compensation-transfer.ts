@@ -7,7 +7,7 @@ import * as protoLoader from '@grpc/proto-loader';
 import { paymentV1Payment } from '@peaket/contracts/proto';
 import { createGrpcClient, type GrpcLbProfile } from '@peaket/platform';
 import { CompensationTransferRejected, CompensationTransferUnavailable } from '../domain/compensation.js';
-import type { CompensationTransfer, CompensationTransferResult } from '../domain/ports.js';
+import type { CompensationTransferLookup, CompensationTransferResult } from '../domain/ports.js';
 
 const OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
 type Unary = (req: object, md: grpc.Metadata, opts: grpc.CallOptions, cb: (e: grpc.ServiceError | null, v?: Record<string, unknown>) => void) => grpc.ClientUnaryCall;
@@ -37,8 +37,8 @@ export interface GrpcCompensationTransferOptions {
   requestedBy?: string;
 }
 
-export class GrpcCompensationTransfer implements CompensationTransfer {
-  readonly #client: grpc.Client & { RequestCompensationTransfer: Unary };
+export class GrpcCompensationTransfer implements CompensationTransferLookup {
+  readonly #client: grpc.Client & { RequestCompensationTransfer: Unary; GetCompensationTransfer: Unary };
   readonly #requestedBy: string;
 
   constructor(o: GrpcCompensationTransferOptions) {
@@ -51,11 +51,11 @@ export class GrpcCompensationTransfer implements CompensationTransfer {
       profile: o.profile ?? 'service',
       dependency: 'payment-svc',
       timeoutCapMs: DEADLINE_MS,
-    }) as unknown as grpc.Client & { RequestCompensationTransfer: Unary };
+    }) as unknown as grpc.Client & { RequestCompensationTransfer: Unary; GetCompensationTransfer: Unary };
     this.#requestedBy = o.requestedBy ?? 'purchase-svc';
   }
 
-  async request(q: Parameters<CompensationTransfer['request']>[0]): Promise<CompensationTransferResult> {
+  async request(q: Parameters<CompensationTransferLookup['request']>[0]): Promise<CompensationTransferResult> {
     const answer = await new Promise<Record<string, unknown>>((resolve, reject) => {
       this.#client.RequestCompensationTransfer(
         {
@@ -90,6 +90,30 @@ export class GrpcCompensationTransfer implements CompensationTransfer {
       status,
       ...(text(answer.receivable_id) !== '' ? { receivableId: text(answer.receivable_id) } : {}),
       ...(text(answer.account_last4) !== '' ? { accountLast4: text(answer.account_last4) } : {}),
+      ...(text(answer.failure_reason) !== '' ? { failureReason: text(answer.failure_reason) } : {}),
+    };
+  }
+
+  /**
+   * 송금 결과 다시 보기(F-07-8 I-06, GetCompensationTransfer). NOT_FOUND면 undefined, 그 밖 실패는 던진다(부른 쪽이 다음 바퀴에 다시 본다).
+   * 응답에 receivable_id 칸이 없어(payment.proto GetCompensationTransferResponse) PAID의 미수금 ID는 싣지 않는다
+   */
+  async get(transferId: string): Promise<CompensationTransferResult | undefined> {
+    let answer: Record<string, unknown>;
+    try {
+      answer = await new Promise<Record<string, unknown>>((resolve, reject) => {
+        this.#client.GetCompensationTransfer({ transfer_id: transferId }, new grpc.Metadata(), { deadline: new Date(Date.now() + DEADLINE_MS) }, (e, v) => (e ? reject(e) : resolve(v ?? {})));
+      });
+    } catch (err) {
+      const code = typeof err === 'object' && err !== null && typeof (err as { code?: unknown }).code === 'number' ? (err as { code: number }).code : undefined;
+      if (code === grpc.status.NOT_FOUND) return undefined;
+      throw new CompensationTransferUnavailable('배상 송금 결과를 조회하지 못했습니다', { cause: err });
+    }
+    const status = STATUS[text(answer.status)];
+    if (status === undefined) return undefined;
+    return {
+      transferId: text(answer.transfer_id) || transferId,
+      status,
       ...(text(answer.failure_reason) !== '' ? { failureReason: text(answer.failure_reason) } : {}),
     };
   }

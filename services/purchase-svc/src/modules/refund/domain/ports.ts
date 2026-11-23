@@ -303,6 +303,22 @@ export interface CompensationTransfer {
   }): Promise<CompensationTransferResult>;
 }
 
+/**
+ * F-07-8 I-06(R-T47 ③, transfer-refund §6 '송금 결과 확정'): payment-svc GetCompensationTransfer로 송금 결과를 다시 본다.
+ * 모르는 송금 ID는 undefined, 조회 실패는 던진다
+ */
+export interface CompensationTransferLookup extends CompensationTransfer {
+  get(transferId: string): Promise<CompensationTransferResult | undefined>;
+}
+
+/** 송금 결과 확정 바퀴의 저장소(운영은 purchase DB compensation, DrizzleCompensations) */
+export interface CompensationRefreshStore {
+  /** REQUESTED이고 송금 ID가 있는 배상(오래된 차례) */
+  listRequested(limit: number): Promise<readonly CompensationRecord[]>;
+  /** status = 'REQUESTED'인 행만 결과를 쓴다(조건부 갱신). 썼으면 true, 그사이 다른 쪽이 썼으면 false */
+  settleRequested(compensationId: string, q: { readonly status: 'PAID' | 'FAILED'; readonly receivableId?: string; readonly failureReason?: string; readonly nowMs: number }): Promise<boolean>;
+}
+
 /** 송금이 FAILED일 때 CS 처리함 '배상 대기'(COMPENSATION_PENDING) 한 건을 여는 포트. eventKey = compensation:{id} */
 export interface CompensationCaseNotice {
   open(q: { readonly compensationId: string; readonly orderId: string; readonly nowMs: number }): Promise<void>;

@@ -41,8 +41,10 @@ export type {
   CancellationConfigs,
   CancellationOrders,
   CompensationCaseNotice,
+  CompensationRefreshStore,
   CompensationStore,
   CompensationTransfer,
+  CompensationTransferLookup,
   CompensationTransferResult,
   EventCancellationLookup,
   CancellationWrites,
@@ -90,6 +92,9 @@ export { GrpcTicketCancellations, type GrpcTicketCancellationsOptions } from './
 export { GrpcPaymentCancellations, type GrpcPaymentCancellationsOptions } from './adapters/grpc-payment-cancellations.js';
 export { GrpcCompensationTransfer, type GrpcCompensationTransferOptions } from './adapters/grpc-compensation-transfer.js';
 export { HttpPgCircuits, PG_CIRCUIT_CACHE_MS, type HttpPgCircuitsOptions } from './adapters/http-pg-circuits.js';
+export { HttpSettlementRecalculation, SettlementNoticeError, SETTLEMENT_NOTICE_TIMEOUT_MS, unsentSettlementRecalculation } from './adapters/http-settlement-recalculation.js';
+export { EVENT_REFUND_PG_RATE_DEFAULT, eventRefundPgRateOf, PgTokenBuckets, type PgTokenBucketsOptions } from './domain/pg-token-bucket.js';
+export { COMPENSATION_REFRESH_DEFAULT_LIMIT, RefreshCompensationTransfers, type RefreshCompensationTransfersDeps } from './application/refresh-compensation-transfers.js';
 export { HttpCompensationCaseNotice, compensationCaseEventKey } from './adapters/http-compensation-case-notice.js';
 export { DrizzleCompensations } from './adapters/db/drizzle-compensations.js';
 export {
@@ -172,9 +177,11 @@ export type {
   EventRefundPreviewInput,
   EventRefundResumeInput,
   EventRefundServiceDeps,
+  EventRefundSettlementNotice,
   EventRefundStartInput,
   EventRefundStore,
   EventRefundTargets,
+  SettlementRecalculationPort,
 } from './domain/event-refund-ports.js';
 export { EventRefundError, EventRefundService, type EventRefundErrorCode } from './application/event-refund-service.js';
 export { MemoryEventRefundAttemptStore, MemoryEventRefundStore } from './adapters/memory-event-refund-store.js';

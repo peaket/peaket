@@ -14,7 +14,7 @@ import {
   type EventRefundStatus,
   type RefundPgProvider,
 } from '../../domain/event-refund.js';
-import type { EventRefundItemAdder, EventRefundOutboxMessage, EventRefundStore } from '../../domain/event-refund-ports.js';
+import type { EventRefundItemAdder, EventRefundOutboxMessage, EventRefundSettlementNotice, EventRefundStore } from '../../domain/event-refund-ports.js';
 import type { CompensationRow } from '../../domain/compensation.js';
 
 interface RequestRow {
@@ -157,14 +157,7 @@ export class DrizzleEventRefundStore implements EventRefundStore, EventRefundIte
       // 확정 때 찾은 공제 차액 대상을 요청 행과 같은 트랜잭션에서 표시한다(웨이브 끝 리뷰 C2·S1). CS 건은 일괄 환불 실행기 틱이 연다
       await markDeductionGaps(tx, extra.deductionGaps ?? [], request.requestId, this.clock.now());
       // 배상 행(BAT-425, ADR-0317): 요청·항목과 같은 트랜잭션이다. 같은 요청·주문의 다시 확정은 유일 인덱스가 한 행으로 막는다
-      for (const c of extra.compensations ?? []) {
-        await tx.execute(sql`
-          insert into compensation (id, event_cancellation_request_id, order_id, event_id, account_id, promoter_id, base_amount, amount, status, account_last4, transfer_id, receivable_id, failure_reason, created_at, updated_at)
-          values (${c.id}::uuid, ${c.eventCancellationRequestId}::uuid, ${c.orderId}::uuid, ${c.eventId}::uuid, ${c.accountId}::uuid, ${c.promoterId ?? null}::uuid,
-                  ${c.baseAmount}, ${c.amount}, 'ACCOUNT_PENDING', null, null, null, null,
-                  ${new Date(c.createdAtMs)}::timestamptz, ${new Date(c.updatedAtMs)}::timestamptz)
-          on conflict (event_cancellation_request_id, order_id) do nothing`);
-      }
+      await insertCompensations(tx, extra.compensations ?? []);
       return toRequest(inserted.rows[0] as unknown as RequestRow);
     });
   }
@@ -201,7 +194,12 @@ export class DrizzleEventRefundStore implements EventRefundStore, EventRefundIte
    * 확정 뒤 끝난 주문의 표 더하기(BAT-420 GAT-110 H, ADR-0280 결정 4). 없는 (요청, 표)만 PENDING으로 더한다((request_id, ticket_id)·cancellation_id 유일).
    * 팬 확정 알림 Outbox는 같은 트랜잭션에, 실제로 더한 항목이 있을 때만 남긴다. 더한 항목을 돌려준다
    */
-  async addItems(requestId: string, items: readonly EventRefundItem[], outbox: readonly EventRefundOutboxMessage[] = []): Promise<readonly EventRefundItem[]> {
+  async addItems(
+    requestId: string,
+    items: readonly EventRefundItem[],
+    outbox: readonly EventRefundOutboxMessage[] = [],
+    extra: { readonly compensations?: readonly CompensationRow[] } = {},
+  ): Promise<readonly EventRefundItem[]> {
     return this.database.transaction(async (tx) => {
       const added: EventRefundItem[] = [];
       const nowMs = this.clock.now();
@@ -216,9 +214,44 @@ export class DrizzleEventRefundStore implements EventRefundStore, EventRefundIte
           returning ticket_id`);
         if (r.rows.length > 0) added.push({ ...item, requestId });
       }
+      // 확정 뒤 결제가 끝난 새 주문의 배상 행(F-07-8 RV-18, R-T46 ④). 항목과 같은 트랜잭션이라 배상 행 쓰기가 실패하면 항목도 남지 않는다
+      await insertCompensations(tx, extra.compensations ?? []);
       if (added.length > 0 && outbox.length > 0) await writeOutbox(tx, this.clock, outbox.map((m) => ({ topic: m.topic, key: m.key, payload: m.payload })));
       return added;
     });
+  }
+
+  /** 정산 알리기 상태(F-07-8, purchase 0038 settlement_* 칸). 요청이 없으면 undefined */
+  async settlementNotice(requestId: string): Promise<EventRefundSettlementNotice | undefined> {
+    const r = await this.database.db.execute(sql`
+      select settlement_hold_sent_at, settlement_completion_sent_at, settlement_next_at, settlement_notice_failures
+        from event_cancellation_request where id = ${requestId}::uuid`);
+    const row = r.rows[0] as unknown as NoticeRow | undefined;
+    return row === undefined ? undefined : noticeOf(row);
+  }
+
+  /** 정산 알리기 칸만 쓴다(진행률·updated_at은 그대로) */
+  async markSettlementNotice(requestId: string, state: EventRefundSettlementNotice): Promise<void> {
+    const at = (ms: number | undefined) => (ms === undefined ? null : new Date(ms));
+    await this.database.db.execute(sql`
+      update event_cancellation_request
+         set settlement_hold_sent_at = ${at(state.holdSentAtMs)}::timestamptz,
+             settlement_completion_sent_at = ${at(state.completionSentAtMs)}::timestamptz,
+             settlement_next_at = ${at(state.nextAtMs)}::timestamptz,
+             settlement_notice_failures = ${state.failures}
+       where id = ${requestId}::uuid`);
+  }
+
+  /** 정산 완료를 아직 보내지 않았고 다시 부를 시각이 지났거나 빈 요청(REJECTED 빼고, 확정 차례) */
+  async settlementNoticesDue(nowMs: number, limit: number): Promise<readonly EventCancellationRequest[]> {
+    const r = await this.database.db.execute(sql`
+      select * from event_cancellation_request
+       where settlement_completion_sent_at is null
+         and status <> 'REJECTED'
+         and (settlement_next_at is null or settlement_next_at <= ${new Date(nowMs)}::timestamptz)
+       order by created_at, id
+       limit ${limit}`);
+    return (r.rows as unknown as RequestRow[]).map(toRequest);
   }
 
   async items(requestId: string): Promise<readonly EventRefundItem[]> {
@@ -325,6 +358,32 @@ export class DrizzleEventRefundStore implements EventRefundStore, EventRefundIte
        order by refund_window_closes_at, id
        limit ${limit}`);
     return (r.rows as unknown as RequestRow[]).map(toRequest);
+  }
+}
+
+interface NoticeRow {
+  settlement_hold_sent_at: Date | string | null;
+  settlement_completion_sent_at: Date | string | null;
+  settlement_next_at: Date | string | null;
+  settlement_notice_failures: number | string;
+}
+
+const noticeOf = (r: NoticeRow): EventRefundSettlementNotice => ({
+  ...(r.settlement_hold_sent_at !== null ? { holdSentAtMs: new Date(r.settlement_hold_sent_at).getTime() } : {}),
+  ...(r.settlement_completion_sent_at !== null ? { completionSentAtMs: new Date(r.settlement_completion_sent_at).getTime() } : {}),
+  ...(r.settlement_next_at !== null ? { nextAtMs: new Date(r.settlement_next_at).getTime() } : {}),
+  failures: Number(r.settlement_notice_failures),
+});
+
+/** 배상 행 넣기(확정·쓸어 담기 공용, ACCOUNT_PENDING). 같은 요청·주문은 유일 인덱스가 한 행으로 막는다 */
+async function insertCompensations(tx: DbTransaction, rows: readonly CompensationRow[]): Promise<void> {
+  for (const c of rows) {
+    await tx.execute(sql`
+      insert into compensation (id, event_cancellation_request_id, order_id, event_id, account_id, promoter_id, base_amount, amount, status, account_last4, transfer_id, receivable_id, failure_reason, created_at, updated_at)
+      values (${c.id}::uuid, ${c.eventCancellationRequestId}::uuid, ${c.orderId}::uuid, ${c.eventId}::uuid, ${c.accountId}::uuid, ${c.promoterId ?? null}::uuid,
+              ${c.baseAmount}, ${c.amount}, 'ACCOUNT_PENDING', null, null, null, null,
+              ${new Date(c.createdAtMs)}::timestamptz, ${new Date(c.updatedAtMs)}::timestamptz)
+      on conflict (event_cancellation_request_id, order_id) do nothing`);
   }
 }
 
