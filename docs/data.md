@@ -1548,7 +1548,7 @@ erDiagram
         uuid from_account_id "보낸 사람(결제자)"
         uuid to_account_id "받는 사람(본인확인 회원)"
         text status "OFFERED|ACCEPTED|REJECTED|WITHDRAWN|EXPIRED|RECLAIMED"
-        text withdraw_reason "SENDER|ACCOUNT_DELETED|DEPOSIT_ERROR|EVENT_CANCELLED|EVENT_POSTPONED|FRAUD_LOCK. SENDER 말고 다섯은 시스템 철회(기술 검토 중간-044. FRAUD_LOCK도 시스템이 철회한다, docs/features/transfer-refund.md §4.1, 2026-11-02 정합 점검). FRAUD_LOCK은 부정 예매 양도 잠금을 걸 때의 철회(추천 적용 2026-10-31, ADR-0171)"
+        text withdraw_reason "SENDER|ACCOUNT_DELETED|DEPOSIT_ERROR|EVENT_CANCELLED|EVENT_POSTPONED|FRAUD_LOCK|OPERATOR_CANCELLED. SENDER 말고 다섯은 시스템 철회(기술 검토 중간-044. FRAUD_LOCK도 시스템이 철회한다, docs/features/transfer-refund.md §4.1, 2026-11-02 정합 점검). FRAUD_LOCK은 부정 예매 양도 잠금을 걸 때의 철회(추천 적용 2026-10-31, ADR-0171). OPERATOR_CANCELLED는 운영자 취소(부정 예매 조치의 표 취소, ticket-svc OperatorCancelTickets)가 표를 끝내며 거둔 철회다. 잠금 때 거두는 FRAUD_LOCK과 달리 표가 남지 않는다. EVENT_CANCELLED는 일괄 환불뿐 아니라 ticket-svc 회차 취소 표 끝내기(EventCancelTickets)도 같은 트랜잭션에서 쓴다(추천 적용, 2026-11-23, F-05-2)"
         timestamptz expires_at "48시간과 양도 마감 중 이른 때"
         timestamptz decided_at
     }
