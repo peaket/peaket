@@ -1303,6 +1303,8 @@ erDiagram
         uuid resolved_by "기각한 cs_lead, 조정을 승인한 commander(payment 0027)"
         text resolution_note "기각 사유 2,000자(payment 0027)"
         timestamptz case_requested_at "CS 처리함 정산 이의 건을 연 시각. 비면 정산 일꾼이 다시 보낸다(payment 0027, ADR-0368)"
+        int case_refused_count "ops CS 건 받기가 거절한 횟수(202 accepted false·400·422, payment 0030, F-07-7 계획 §5.1 (파) 마). 일시 실패는 세지 않는다"
+        timestamptz case_failed_at "거절 3번 [가정]째의 영구 실패 시각. 있으면 정산 일꾼이 다시 보내지 않는다"
     }
     statement_adjustment {
         uuid id PK
@@ -1384,6 +1386,9 @@ erDiagram
         text detail "건 본문 글(선택, 1~2,000자, payment 0030, ADR-0370 결정 7·8). 뺀 정산서·사유·'commander 확인 필요'·'실행 멈춤'만 싣고 계좌번호·예금주명·결제사 원문 오류는 싣지 않는다. 다시 보낼 때 같은 글을 싣는다"
         timestamptz created_at
         timestamptz requested_at "ops-svc가 받은 시각. 비면 정산 일꾼이 30분 [가정]마다 다시 보낸다"
+        int refused_count "ops 받기가 거절한 횟수(202 accepted false·400·422, payment 0030, F-07-7 계획 §5.1 (파) 마). 일시 실패는 세지 않는다"
+        timestamptz failed_at "거절 3번 [가정]째의 영구 실패 시각. 있으면 다시 보내지 않는다"
+        text last_refusal "NOT_ACCEPTED|HTTP_400|HTTP_422"
     }
     pg_balance_reconciliation {
         uuid id PK "결제사 잔액 대사 한 번(payment 0029, settlement §5.5, ADR-0369 결정 11)"
@@ -1444,6 +1449,8 @@ erDiagram
         text agency_results "결제사별 결과 JSON(TOSS_STANDARD·TOSS_ESCROW·PORTONE마다 UPDATED|REGISTERED|SKIPPED|FAILED, 원문 오류 없음)"
         timestamptz created_at
         timestamptz audit_sent_at "ops-svc 감사 받기(PAYOUT_ACCOUNT_CHANGED)가 받은 시각. 비면 정산 일꾼이 30분 [가정]마다 다시 보낸다"
+        int audit_refused_count "ops 감사 받기가 거절한 횟수(400·422, payment 0030, F-07-7 계획 §5.1 (파) 마)"
+        timestamptz audit_failed_at "거절 3번 [가정]째의 영구 실패 시각"
     }
     portone_partner {
         uuid promoter_id PK "포트원 파트너 등록(payment 0030, ADR-0370 결정 1). 계좌번호는 두지 않는다"
@@ -1474,6 +1481,9 @@ erDiagram
         text source_id "대상(이체 ID·파트너 ID·묶음 ID·동기화 이름)"
         timestamptz created_at
         timestamptz requested_at "ops-svc 운영 경보 받기가 받은 시각. 비면 정산 일꾼이 30분 [가정]마다 다시 보낸다"
+        int refused_count "ops 받기가 거절한 횟수(202 accepted false·400·422, payment 0032, F-07-7 계획 §5.1 (파) 마). 일시 실패는 세지 않는다"
+        timestamptz failed_at "거절 3번 [가정]째의 영구 실패 시각. 있으면 다시 보내지 않는다"
+        text last_refusal "NOT_ACCEPTED|HTTP_400|HTTP_422"
     }
     portone_ledger_sync {
         text name PK "WITHDRAWAL|PARTNER_ACCOUNT(payment 0032, ADR-0370 결정 8 ④)"
