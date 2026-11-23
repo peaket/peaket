@@ -122,6 +122,11 @@
 - 2026-11-24 02:0x 합친 뒤 CI 빨강 둘을 고쳤다: web console-remotes T18의 원격 전용 표지를 위젯 키에서 원천 필드(`saturatedPerMin`·`soonWaiting`)로 바꾸고(fc2d8e08b), F-05-2 통합 시험의 가짜 서명 비밀 gitleaks 오탐을 허용했다(edc90c659). R-808~R-810 기록을 8d1cbc2c9로 올렸다. 이어 F-05-2가 남긴 platform PRF192 제목 충돌을 받는 사람 조회 한도 전용 429 `transfer-lookup-limited`로 나누고(5fab68d66), 그 유형에 맞춰 T5 단언을 고쳤다(3c7613cf9). R-806·R-807 기록도 최신 develop 위로 다시 쌓아 f0f972bd0에 올렸다(표는 R-805 뒤 R-808 앞).
 - 2026-11-24 03:0x F-05-6 구현(600453793)과 F-05-3 구현(a4cfd9e46)이 끝나 각각 새 세션 구현 리뷰(ADR-0381)를 띄웠다. F-05-6은 EntryCloseTick·0019·core 0047·purchase 마감 큐, F-05-3은 PriorityGrantSync·USED/EXPIRED 사본·ADR-0385를 담았다. 두 리뷰가 끝나면 지적 반영·게이트·기록(R-811·R-812 예정) 뒤 합친다.
 
+- 2026-11-24 04:0x F-05-6을 develop `14daac8d5`로 합쳤다(R-811). 구현 리뷰 IR-01(게이트웨이 생성물 머리 줄)과 IR-04(TIMEOUT 시험 경합)를 고쳤고, 합친 뒤 `gateway-routes --write`로 scanner 큐 보고 경로와 계약 해시를 다시 만들었다. 단위 ticket 413·purchase 4,444·게이트웨이 56, 통합 ticket 35·core 7·purchase 12. 중간·낮음 IR-02·03·05~12는 lane3-cleanup.
+- 2026-11-24 04:1x F-05-3을 develop `ea47db173`로 합쳤다(R-812). 구현 리뷰 IR-01(배포 값·메시 L7·시작 조립)·IR-02(expireDue 덮어쓰기)·IR-03(대조 커서)를 닫았고, ADR-0385. purchase 단위 4,434·통합 13, queue 단위 708·통합 66. 남은 중간·낮음 IR-04~10은 lane2-cleanup.
+- 2026-11-24 04:2x CI 빨강 둘을 고쳤다: ① `payment-pull-adapters`가 부하에서 첫 gRPC 채널 연결이 500ms를 넘겨 DEADLINE_EXCEEDED를 받던 시험 흔들림 — `GrpcPaymentResultReader.ready()`로 채널 준비를 기다린 뒤 호출(6f36c2939). ② `web /my/tickets` 첫 JS 195.9kB > 161.6kB — F-05-2가 정적으로 들인 Dexie(30.9kB)·WebShell·돌려주기 코드를 늦게 싣고, 161.1kB로 재어 기준선을 다시 적었다(7b81ddb84). 같은 빌드에서 `web` typecheck·lint·월렛 시험 12/12.
+- 2026-11-24 04:3x R-811·R-812 기록을 올렸다(`fe089ca0c`, `e627662e6`). 다음 R은 R-813. 최신 develop CI는 `e627662e6` 실행 45250580028. 갈래 4 측정 창 1은 11-26 09:00, 갈래 5 F-08-7은 12-02~03 그대로다.
+
 ## SEG 때 정할 범위 늘어남(ADR-0283 결정 6)
 - 묶음 중에 더한 새 단계는 wbs.csv 일수에 바로 더하지 않고 여기 모아 구간 마무리 때 소유자가 한 번에 정한다(앞선 예: HOT-405 0.75일, 2026-11-18 OPEN[49]).
 - PRF-174(wbs 2.7.1 ③, 0.5일 [가정], BAT-013): 탈퇴 참여자의 결제한 미사용 티켓 취소·환급(BAT-010이 찾음, 돈 A 대상, R-685).
