@@ -88,9 +88,19 @@ export type createScannerDeviceEnrollmentResponse400 = {
   status: 400
 }
 
+export type createScannerDeviceEnrollmentResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
 export type createScannerDeviceEnrollmentResponse410 = {
   data: ProblemResponse
   status: 410
+}
+
+export type createScannerDeviceEnrollmentResponse415 = {
+  data: ProblemResponse
+  status: 415
 }
 
 export type createScannerDeviceEnrollmentResponse429 = {
@@ -98,10 +108,15 @@ export type createScannerDeviceEnrollmentResponse429 = {
   status: 429
 }
 
+export type createScannerDeviceEnrollmentResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
 export type createScannerDeviceEnrollmentResponseSuccess = (createScannerDeviceEnrollmentResponse201) & {
   headers: Headers;
 };
-export type createScannerDeviceEnrollmentResponseError = (createScannerDeviceEnrollmentResponse400 | createScannerDeviceEnrollmentResponse410 | createScannerDeviceEnrollmentResponse429) & {
+export type createScannerDeviceEnrollmentResponseError = (createScannerDeviceEnrollmentResponse400 | createScannerDeviceEnrollmentResponse403 | createScannerDeviceEnrollmentResponse410 | createScannerDeviceEnrollmentResponse415 | createScannerDeviceEnrollmentResponse429 | createScannerDeviceEnrollmentResponse503) & {
   headers: Headers;
 };
 
@@ -148,7 +163,7 @@ return orvalFetch<createScannerDeviceEnrollmentResponseSuccess>(getCreateScanner
 
 export const getCreateScannerDeviceEnrollmentMutationKey = () => ['createScannerDeviceEnrollment'] as const;
 
-export const getCreateScannerDeviceEnrollmentMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse>,
+export const getCreateScannerDeviceEnrollmentMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createScannerDeviceEnrollment>>, TError,CreateScannerDeviceEnrollmentMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createScannerDeviceEnrollment>>, TError,CreateScannerDeviceEnrollmentMutationVariables, TContext> => {
 
@@ -177,13 +192,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateScannerDeviceEnrollmentMutationResult = NonNullable<Awaited<ReturnType<typeof createScannerDeviceEnrollment>>>
     export type CreateScannerDeviceEnrollmentMutationBody = BodyType<CreateScannerDeviceEnrollmentBody>
-    export type CreateScannerDeviceEnrollmentMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse>
+    export type CreateScannerDeviceEnrollmentMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
     export type CreateScannerDeviceEnrollmentMutationVariables = {data: BodyType<CreateScannerDeviceEnrollmentBody>}
 
     /**
  * @summary 스캐너 기기 등록. 등록 코드와 DPoP 증명으로 기기 안에서 만든 키를 기기 기록에 묶는다
  */
-export const useCreateScannerDeviceEnrollment = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse>,
+export const useCreateScannerDeviceEnrollment = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createScannerDeviceEnrollment>>, TError,CreateScannerDeviceEnrollmentMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createScannerDeviceEnrollment>>,

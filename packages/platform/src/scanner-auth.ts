@@ -7,6 +7,7 @@ import { SetMetadata } from '@nestjs/common';
 import { calculateJwkThumbprint, decodeProtectedHeader, errors, importJWK, jwtVerify } from 'jose';
 import { createHash } from 'node:crypto';
 import type { Clock } from './clock.js';
+import { requestContext } from './context.js';
 import { ProblemError } from './problem.js';
 
 /** 처리기(또는 컨트롤러)에 스캐너 기기 증명이 필요하다고 적는 표지 */
@@ -17,6 +18,8 @@ export const SCANNER_DPOP_IAT_WINDOW_MS = 5 * 60_000;
 export const SCANNER_DPOP_JTI_TTL_MS = 10 * 60_000;
 /** 스캐너 세션 판정 캐시 [가정](ADR-0051 결정 4) */
 export const SCANNER_SESSION_CACHE_MS = 5_000;
+/** CheckScannerSession 호출 기한 [가정]. 남은 처리 시간이 더 짧으면 그쪽이다(offline-gate §6.2 '스캐너 세션 확인') */
+export const SCANNER_SESSION_CHECK_TIMEOUT_MS = 1_000;
 
 export type ScannerStaffRole = 'gate_staff' | 'gate_lead';
 export type ScannerDeviceStatus = 'ACTIVE' | 'REVOKED' | 'RETIRED';
@@ -54,7 +57,8 @@ export interface ScannerSessionAnswer {
 
 /** 스캐너 세션의 지금 유효성(identity-svc ScannerSessionCheckService) */
 export interface ScannerSessionCheck {
-  check(q: { scannerSessionId: string; deviceId: string }): Promise<ScannerSessionAnswer>;
+  /** opts.timeoutMs는 이 호출에 쓸 수 있는 시간(gRPC 기한으로 넘긴다), signal은 그 시간이 지나면 끊긴다 */
+  check(q: { scannerSessionId: string; deviceId: string }, opts?: { timeoutMs: number; signal: AbortSignal }): Promise<ScannerSessionAnswer>;
 }
 
 /** 한 번 쓴 DPoP jti를 기억한다(Redis `scanner:dpop:{jti}`, offline-gate §6.1). true면 처음 쓴 것이다 */
@@ -88,6 +92,12 @@ export interface ScannerAuthWiring {
   mtls?: ScannerMtlsOptions;
   /** 게이트웨이 공개 출처(PEAKET_PUBLIC_ORIGIN). 있으면 DPoP htu를 이 값으로 만들고 forwarded 머리를 보지 않는다(C2-09) */
   publicOrigin?: string;
+  /**
+   * 가드가 거절(401·403)하거나 판정에 닿지 못해(503) 닫을 때마다 그 이유로 한 번 부른다. 통과는 부르지 않는다.
+   * 서비스는 여기에 `scanner_auth_rejections_total{service, reason}`을 잇는다(offline-gate §6.1 'GAT-170 마감 규칙', O-T37 ⑨).
+   * 던져도 응답은 바뀌지 않는다.
+   */
+  onRejected?: (reason: ScannerAuthRejection) => void;
 }
 
 /** 이번 배치는 스태프 토큰이 붙은 스캐너 경로만 다룬다(기기 등록·업로드의 기기 인증만 경로는 ticket-svc 단계) */
@@ -109,6 +119,43 @@ export function ScannerAuth(options: ScannerAuthOptions = { token: 'required', d
 }
 
 export type DpopRejectReason = 'format' | 'typ' | 'alg' | 'jwk' | 'signature' | 'htm' | 'htu' | 'iat' | 'ath' | 'jti' | 'cnf';
+
+/** 스캐너 가드의 거절 이유 이름표(offline-gate §6.1 'GAT-170 마감 규칙'). 지표 `scanner_auth_rejections_total`의 reason 값이다 */
+export type ScannerAuthRejection =
+  | DpopRejectReason
+  | 'proof_missing'
+  | 'token'
+  | 'session'
+  | 'role'
+  | 'device_unregistered'
+  | 'device_revoked'
+  | 'unavailable';
+
+/** 이름표 전부(정본 차례). 지표를 0으로 미리 만들 때 쓴다 */
+export const SCANNER_AUTH_REJECTIONS: readonly ScannerAuthRejection[] = Object.freeze([
+  'format', 'typ', 'alg', 'jwk', 'signature', 'htm', 'htu', 'iat', 'ath', 'jti', 'cnf',
+  'proof_missing', 'token', 'session', 'role', 'device_unregistered', 'device_revoked', 'unavailable',
+] as const);
+
+/** 스캐너 PWA 출처를 주는 환경 변수(offline-gate §6.1 'GAT-170 마감 규칙', ADR-0065 결정 10) */
+export const SCANNER_PWA_ORIGIN_ENV = 'PEAKET_SCANNER_PWA_ORIGIN';
+const DEFAULT_SCANNER_PWA_ORIGIN = 'https://scanner.peaket.example';
+
+/** 허용 출처. 없거나 빈 값이면 운영 기본 출처다 */
+export function scannerPwaOriginFromEnv(env: Record<string, string | undefined> = process.env): string {
+  const v = env[SCANNER_PWA_ORIGIN_ENV];
+  return v === undefined || v === '' ? DEFAULT_SCANNER_PWA_ORIGIN : v;
+}
+
+/**
+ * 스캐너 쓰기 경로(기기 등록·승인·업로드)의 `Origin` 확인(O-T35). 기대 출처와 정확히 같은 문자열만 통과한다
+ * (끝 슬래시·대소문자·기본 포트 표기도 다르면 거절). 아니면 403 `scanner-origin-forbidden`.
+ */
+export function assertScannerOrigin(origin: unknown, expected: string): void {
+  if (typeof origin !== 'string' || origin === '' || origin !== expected) {
+    throw new ProblemError({ type: 'scanner-origin-forbidden', status: 403, title: '스캐너 앱 출처가 아닙니다' });
+  }
+}
 
 /** 증명이 틀렸다. 가드는 이 이유를 응답에 싣지 않고 `invalid_dpop_proof` 하나로 답한다(offline-gate O-T37) */
 export class DpopRejected extends Error {
@@ -234,7 +281,7 @@ export class MemoryDpopReplayStore implements DpopReplayStore {
   }
 }
 
-/** 스캐너 인증 상태: 포트 호출과 5초 세션 캐시를 한곳에 모은다 */
+/** 스캐너 인증 상태: 포트 호출과 5초 세션 캐시를 한곳에 모은다. 기기 상태는 캐시하지 않는다(폐기는 다음 요청부터 403, offline-gate §6.2) */
 export class ScannerAuthState {
   readonly #sessions = new Map<string, { answer: ScannerSessionAnswer; at: number }>();
 
@@ -256,11 +303,24 @@ export class ScannerAuthState {
     const key = `${scannerSessionId}/${deviceId}`;
     const hit = this.#sessions.get(key);
     if (hit && this.clock.now() - hit.at < SCANNER_SESSION_CACHE_MS) return hit.answer;
+    // 1초 [가정]와 남은 처리 시간 가운데 짧은 쪽에서 끊는다. 답이 없으면 통과시키지 않고 503으로 닫는다
+    const remaining = requestContext()?.deadline.remainingMs() ?? SCANNER_SESSION_CHECK_TIMEOUT_MS;
+    const timeoutMs = Math.max(0, Math.min(SCANNER_SESSION_CHECK_TIMEOUT_MS, remaining));
+    const abort = new AbortController();
+    let timer: NodeJS.Timeout | undefined;
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        abort.abort();
+        reject(new Error(`스캐너 세션 확인이 ${timeoutMs}ms 안에 끝나지 않았다`));
+      }, timeoutMs);
+    });
     let answer: ScannerSessionAnswer;
     try {
-      answer = await this.wiring.sessions.check({ scannerSessionId, deviceId });
+      answer = await Promise.race([this.wiring.sessions.check({ scannerSessionId, deviceId }, { timeoutMs, signal: abort.signal }), expired]);
     } catch (e) {
       throw scannerAuthUnavailable(e);
+    } finally {
+      clearTimeout(timer);
     }
     this.#sessions.set(key, { answer, at: this.clock.now() });
     if (this.#sessions.size > 10_000) this.sweep();

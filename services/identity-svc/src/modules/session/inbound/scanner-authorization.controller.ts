@@ -2,7 +2,19 @@
 // 기기 키 DPoP 증명만 요구한다(사람 토큰 없음). Origin이 스캐너 PWA 출처가 아니면 거절한다(ADR-0065 결정 10).
 import { Controller, Headers, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
 import { CreateScannerDeviceAuthorizationBody, CreateScannerDeviceAuthorizationResponse, CreateScannerTokenBody } from '@peaket/contracts/openapi/scanner';
-import { CLOCK, type Clock, ContractBody, ContractRouteSchema, DpopRejected, type DpopReplayStore, ProblemError, Roles, verifyDpopProof } from '@peaket/platform';
+import {
+  assertScannerOrigin as assertOrigin,
+  CLOCK,
+  type Clock,
+  ContractBody,
+  ContractRouteSchema,
+  DpopRejected,
+  type DpopReplayStore,
+  ProblemError,
+  Roles,
+  scannerPwaOriginFromEnv,
+  verifyDpopProof,
+} from '@peaket/platform';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { DeviceAuthorizationError, StartDeviceAuthorization } from '../application/start-device-authorization.js';
@@ -10,14 +22,11 @@ import { PollScannerToken, ScannerTokenError } from '../application/poll-scanner
 import { SCANNER_DPOP_REPLAY } from '../domain/ports.js';
 import { requestUrlOf } from './request-url.js';
 
-export const SCANNER_PWA_ORIGIN_ENV = 'PEAKET_SCANNER_PWA_ORIGIN';
-const DEFAULT_PWA_ORIGIN = 'https://scanner.peaket.example';
+// 허용 출처 규칙은 platform 것 하나다(offline-gate §6.1 'GAT-170 마감 규칙'). 예전 이름은 호환으로 다시 내보낸다
+export { SCANNER_PWA_ORIGIN_ENV } from '@peaket/platform';
 
 function assertScannerOrigin(origin: unknown): void {
-  const expected = process.env[SCANNER_PWA_ORIGIN_ENV] ?? DEFAULT_PWA_ORIGIN;
-  if (typeof origin !== 'string' || origin !== expected) {
-    throw new ProblemError({ type: 'scanner-origin-forbidden', status: 403, title: '스캐너 앱 출처가 아닙니다' });
-  }
+  assertOrigin(origin, scannerPwaOriginFromEnv(process.env));
 }
 
 const ScannerTokenResponse = z.object({ access_token: z.string(), token_type: z.literal('DPoP'), expires_in: z.int().min(0) });

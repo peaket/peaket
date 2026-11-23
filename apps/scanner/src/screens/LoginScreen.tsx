@@ -8,6 +8,7 @@ import { ScannerShell, ScannerStatusStrip } from "@peaket/ds/ScannerShell";
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { liveRequested, SCANNER_API_ORIGIN } from "../api/config";
 import { DeviceLoginError, enrollDevice } from "../api/device-login";
+import { enrollScreenEntry, stripEnrollmentFragment } from "../api/enrollment-link";
 import { clearStaffToken, enrollWithNewDeviceKey } from "../api/key-store";
 import { useScannerLayout, type ScannerLayout } from "../app/layout";
 import { PreviewSwitcher, usePreviewState } from "../app/preview";
@@ -48,7 +49,14 @@ export function LoginScreen({ enroll = false }: { enroll?: boolean }) {
   const states: readonly LoginState[] = enroll ? ENROLL_STATES : LOGIN_STATES;
   // 훅 순서를 지키려고 미리보기 상태도 늘 부른다(주소가 live로 바뀌어도 순서가 같다)
   const preview = usePreviewState(states, enroll ? "기기 등록" : "승인 대기");
-  if (live && enroll) return <LiveEnrollScreen />;
+  // 등록 QR(/enroll#code=…)로 열리면 ?live=1 없이도 실제 연결 등록 화면이고 코드는 입력 칸에만 넣는다(offline-gate §6.1 'GAT-170 마감 규칙').
+  // 진입 때 한 번 읽고, 그다음 주소창에서 조각을 지운다(새로고침하면 일반 화면이고 코드는 어디에도 남지 않는다)
+  const [enrollEntry] = useState(() => (enroll && typeof window !== "undefined" ? enrollScreenEntry({ live, hash: window.location.hash }) : undefined));
+  useEffect(() => {
+    if (!enroll) return;
+    stripEnrollmentFragment(window.location, (url) => window.history.replaceState(window.history.state, "", url));
+  }, [enroll]);
+  if (enroll && (live || enrollEntry?.live)) return <LiveEnrollScreen initialCode={enrollEntry?.initialCode ?? ""} />;
   if (live) return <LiveLoginScreen view={login} search={search} />;
   const { state: st, layout } = preview;
 
@@ -765,11 +773,11 @@ function LiveLoginScreen({ view, search }: { view: DeviceLoginView; search: stri
   );
 }
 
-function LiveEnrollScreen() {
+function LiveEnrollScreen({ initialCode }: { initialCode: string }) {
   const { search } = useLocation();
   const layout = useScannerLayout(search);
   const t = layout === "t";
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(initialCode);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 

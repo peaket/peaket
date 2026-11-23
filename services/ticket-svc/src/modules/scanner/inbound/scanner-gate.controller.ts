@@ -1,7 +1,7 @@
 // 받는 층: 스캐너 회차 목록·변경분·스캔 업로드·이상 표시(openapi /v1/scanner/events/{eventId}/package·changes·flags,
 // /v1/scanner/scans, /v1/scanner/flags/{flagId}/resolution, BUILD_ORDER GAT-180·GAT-190).
 // 회차는 스태프 세션의 회차와 같아야 하고, 기기·세션 판정은 platform ScannerGuard가 먼저 한다.
-import { Body, Controller, Get, HttpCode, Param, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Query, Res } from '@nestjs/common';
 import {
   CreateScannerFlagResolutionBody,
   CreateScannerFlagResolutionParams,
@@ -17,10 +17,11 @@ import {
   ListScannerEventFlagsQueryParams,
   ListScannerEventFlagsResponse,
 } from '@peaket/contracts/openapi/scanner';
-import { ContractBody, ContractParams, ContractQuery, ContractRouteSchema, CurrentPrincipal, ProblemError, RequestValidationError, Roles, ScannerAuth, type Principal } from '@peaket/platform';
+import { assertScannerOrigin, ContractBody, ContractParams, ContractQuery, ContractRouteSchema, CurrentPrincipal, ProblemError, RequestValidationError, Roles, ScannerAuth, type Principal } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { ScannerFlagNotFound, ScannerGate, ScannerGateForbidden, ScannerGateOverrideForbidden } from '../application/scanner-gate.js';
+import { SCANNER_PWA_ORIGIN } from '../domain/ports.js';
 import { ScannerGateInputError, type GateFlagPage, type GateFlagView, type ScanBatchResult, type ScannerChangesView, type ScannerPackageView } from '../domain/scanner-gate.js';
 
 function reject(e: unknown): never {
@@ -33,7 +34,10 @@ function reject(e: unknown): never {
 
 @Controller('v1/scanner')
 export class ScannerGateController {
-  constructor(private readonly gate: ScannerGate) {}
+  constructor(
+    private readonly gate: ScannerGate,
+    @Inject(SCANNER_PWA_ORIGIN) private readonly pwaOrigin: string,
+  ) {}
 
   @Get('events/:eventId/package')
   @ContractRouteSchema({ params: GetScannerEventPackageParams, responses: { 200: GetScannerEventPackageResponse } })
@@ -76,10 +80,13 @@ export class ScannerGateController {
   @Roles(['scanner_device', 'gate_staff', 'gate_lead'])
   @ScannerAuth({ token: 'optional', device: 'registered' })
   async scans(
+    @Headers('origin') origin: unknown,
     @ContractBody(CreateScannerScanBody) body: z.output<typeof CreateScannerScanBody>,
     @CurrentPrincipal() me: Principal,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<ScanBatchResult> {
+    // 스캐너 PWA 출처가 아니면 기록을 받지 않는다(offline-gate §6.1 'GAT-170 마감 규칙', O-T35)
+    assertScannerOrigin(origin, this.pwaOrigin);
     void reply.header('cache-control', 'no-store');
     try {
       // 기기 인증만으로 올라온 묶음은 본문의 회차를 쓴다(로그아웃·해제·만료 뒤 남은 기록, O-T21·O-T26).

@@ -17,6 +17,8 @@ env:
   PEAKET_OPS_HTTP_URL: http://ops-svc.core.svc.cluster.local:8080
   # DPoP htu를 만들 게이트웨이 공개 출처(C2-09). forwarded 머리를 보지 않는다
   PEAKET_PUBLIC_ORIGIN: https://scanner-api.peaket.example:18445
+  # 기기 등록·스캔 올리기의 Origin 확인(O-T35). identity-svc 값과 같아야 한다
+  PEAKET_SCANNER_PWA_ORIGIN: https://scanner.peaket.example:18445
 
 service:
   replicas: 1

@@ -36,12 +36,13 @@ export class GrpcScannerSessionCheck implements ScannerSessionCheck, ScannerSess
     }) as unknown as grpc.Client & { CheckScannerSession: Unary; TerminateScannerSessions: Unary };
   }
 
-  check(q: { scannerSessionId: string; deviceId: string }): Promise<ScannerSessionAnswer> {
+  /** 기한은 가드가 준 시간(1초 [가정]와 남은 처리 시간 가운데 짧은 쪽, offline-gate §6.2)이고, 없으면 1초다 */
+  check(q: { scannerSessionId: string; deviceId: string }, opts?: { timeoutMs: number; signal: AbortSignal }): Promise<ScannerSessionAnswer> {
     return new Promise((res, rej) => {
-      this.#client.CheckScannerSession(
+      const call = this.#client.CheckScannerSession(
         { scanner_session_id: q.scannerSessionId, device_id: q.deviceId },
         new grpc.Metadata(),
-        { deadline: Date.now() + DEADLINE_CAP_MS },
+        { deadline: Date.now() + Math.min(DEADLINE_CAP_MS, opts?.timeoutMs ?? DEADLINE_CAP_MS) },
         (e, v) => {
           if (e) return rej(e);
           const role = roleOf(v?.role);
@@ -63,6 +64,7 @@ export class GrpcScannerSessionCheck implements ScannerSessionCheck, ScannerSess
           });
         },
       );
+      opts?.signal.addEventListener('abort', () => call.cancel(), { once: true });
     });
   }
 

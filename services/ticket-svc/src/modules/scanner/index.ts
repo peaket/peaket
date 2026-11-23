@@ -2,7 +2,7 @@
 export * from './domain/scanner-device.js';
 export * from './domain/scanner-shift.js';
 export * from './domain/ports.js';
-export { ScannerDevices, ScannerDeviceNotFound, ScannerDeviceInactive, EnrollmentCodeRejected, EnrollmentRateLimited, type ScannerDevicesDeps } from './application/scanner-devices.js';
+export { ScannerDevices, ScannerDeviceNotFound, ScannerDeviceInactive, EnrollmentCodeRejected, EnrollmentRateLimited, ScannerEnrollmentUnavailable, type ScannerDevicesDeps } from './application/scanner-devices.js';
 export { ScannerGate, ScannerGateForbidden, ScannerFlagNotFound, type ScannerGateDeps } from './application/scanner-gate.js';
 export { ScannerShift, ScannerPlacements, ScannerPlacementForbidden, ScannerPlacementPolicyUnavailable, type ScannerSessionContext, type ScannerShiftDeps, type ScannerPlacementsDeps } from './application/scanner-shift.js';
 export { ScannerFreshness, SCANNER_FRESHNESS_ALERT_MS, inEntryWindow, freshnessAlertKind, type ScannerFreshnessAlertSink, type ScannerFreshnessReport } from './application/scanner-freshness.js';
@@ -21,7 +21,6 @@ export { GrpcScannerSessionCheck } from './adapters/grpc-scanner-session-check.j
 export { HttpCoreEventPolicy } from './adapters/http-core-event-policy.js';
 export { HttpOpsAlertSink } from './adapters/http-ops-alert-sink.js';
 export { ScannerModule, type ScannerWiring } from './scanner.module.js';
-export { OpsScannerDevicesController } from './inbound/ops-scanner-devices.controller.js';
 export { ScannerEnrollmentController } from './inbound/scanner-enrollment.controller.js';
 export { ScannerGateController } from './inbound/scanner-gate.controller.js';
 export { ScannerShiftController } from './inbound/scanner-shift.controller.js';

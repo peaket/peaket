@@ -58,11 +58,21 @@ export const SCANNER_DEVICE_COMMAND_STORE = Symbol('ticket.ScannerDeviceCommandS
 export interface EnrollmentCodeStore {
   /** 새 코드 해시를 기기에 묶는다. 같은 기기의 옛 코드는 무효가 된다 */
   put(i: { codeHash: string; deviceId: string; ttlMs: number }): Promise<void>;
-  /** 코드 해시를 한 번만 꺼낸다. 없으면 undefined(만료·사용됨) */
-  take(codeHash: string): Promise<string | undefined>;
+  /**
+   * 코드 해시를 한 번만 꺼낸다(원자적). 기기 ID와 처음 만료 시각(발급 + 10분을 넘지 않음)을 준다.
+   * 없으면 undefined(만료·사용됨·그 기기의 지금 코드가 아님)
+   */
+  take(codeHash: string): Promise<{ deviceId: string; expiresAtMs: number } | undefined>;
+  /**
+   * 꺼낸 코드를 처음 만료 시각 그대로 되살린다(기기 키 저장의 일시 오류 뒤, O-T42 ⑤).
+   * 만료됐거나(남은 시간 1ms 미만) 그 기기의 지금 코드가 다른 코드면 되살리지 않고 false
+   */
+  restore(i: { codeHash: string; deviceId: string; expiresAtMs: number }): Promise<boolean>;
 }
 
 export const ENROLLMENT_CODE_STORE = Symbol('ticket.EnrollmentCodeStore');
+/** 스캐너 PWA 출처(PEAKET_SCANNER_PWA_ORIGIN). 기기 등록·스캔 올리기의 Origin과 정확히 같아야 한다(O-T35) */
+export const SCANNER_PWA_ORIGIN = Symbol('ticket.ScannerPwaOrigin');
 /** 게이트웨이 mTLS 신뢰 머리 비밀 값(없으면 인증서 등록 경로를 열지 않는다) */
 export const SCANNER_MTLS_SECRET = Symbol.for('peaket.ticket.scanner-mtls-secret');
 

@@ -60,6 +60,14 @@ export class EnrollmentCodeRejected extends Error {
   }
 }
 
+/** 기기 키 묶기 저장이 일시 오류로 끝났다. 등록 코드는 되살렸고 실패로 세지 않는다(503 scanner-auth-unavailable, O-T42 ⑤) */
+export class ScannerEnrollmentUnavailable extends Error {
+  constructor(cause?: unknown) {
+    super('스캐너 기기 키를 지금 저장하지 못했다', cause === undefined ? undefined : { cause });
+    this.name = 'ScannerEnrollmentUnavailable';
+  }
+}
+
 export interface ScannerDevicesDeps {
   store: ScannerDeviceStore;
   codes: EnrollmentCodeStore;
@@ -214,21 +222,30 @@ export class ScannerDevices {
     const code = normalizeEnrollmentCode(q.code);
     if (!code) return fail('INVALID');
     const jkt = assertJkt(q.jkt);
-    const deviceId = await this.d.codes.take(enrollmentCodeHash(code));
-    if (!deviceId) return fail('USED');
+    const codeHash = enrollmentCodeHash(code);
+    const taken = await this.d.codes.take(codeHash);
+    if (!taken) return fail('USED');
+    let device: Awaited<ReturnType<ScannerDeviceStore['bindCredential']>>;
     try {
-      const device = await this.d.store.bindCredential({
-        deviceId,
+      device = await this.d.store.bindCredential({
+        deviceId: taken.deviceId,
         jkt,
         atMs: this.d.clock.now(),
         ...(q.credentialType ? { credentialType: q.credentialType } : {}),
         ...(q.thumbprint ? { thumbprint: q.thumbprint } : {}),
       });
-      if (!device) return fail('DEVICE');
-      return { deviceId: device.deviceId };
     } catch (e) {
       if (e instanceof ScannerDeviceKeyConflict) return fail('KEY_IN_USE');
-      throw e;
+      // 일시 오류(DB 끊김 등): 코드를 처음 만료 시각 그대로 되살리고 실패로 세지 않는다(offline-gate §6.1 'GAT-170 마감 규칙', O-T42 ⑤, 감사 C1-19).
+      // 그 사이 같은 기기의 새 코드가 나왔거나 만료됐으면 저장소가 되살리지 않는다.
+      try {
+        await this.d.codes.restore({ codeHash, deviceId: taken.deviceId, expiresAtMs: taken.expiresAtMs });
+      } catch (restoreError) {
+        this.d.alert?.('스캐너 등록 코드를 되살리지 못했다', { deviceId: taken.deviceId, err: restoreError instanceof Error ? restoreError.message : String(restoreError) });
+      }
+      throw new ScannerEnrollmentUnavailable(e);
     }
+    if (!device) return fail('DEVICE');
+    return { deviceId: device.deviceId };
   }
 }

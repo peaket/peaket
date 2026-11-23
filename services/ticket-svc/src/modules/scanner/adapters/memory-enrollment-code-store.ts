@@ -1,5 +1,5 @@
 // 시험·로컬용 등록 코드 저장소. 운영은 RedisEnrollmentCodeStore다.
-// 기기마다 지금 코드 하나만 유효하다(재발급은 옛 코드를 지운다).
+// 기기마다 지금 코드 하나만 유효하다(재발급은 옛 코드를 지운다). 꺼낸 코드는 일시 오류 뒤 처음 만료 시각 그대로 되살릴 수 있다(O-T42 ⑤).
 import type { Clock } from '@peaket/platform';
 import type { EnrollmentCodeStore } from '../domain/ports.js';
 
@@ -16,11 +16,21 @@ export class MemoryEnrollmentCodeStore implements EnrollmentCodeStore {
     this.#codes.set(i.codeHash, { deviceId: i.deviceId, untilMs: this.clock.now() + i.ttlMs });
   }
 
-  async take(codeHash: string): Promise<string | undefined> {
+  async take(codeHash: string): Promise<{ deviceId: string; expiresAtMs: number } | undefined> {
     const hit = this.#codes.get(codeHash);
     if (!hit) return undefined;
     this.#codes.delete(codeHash);
-    if (this.#current.get(hit.deviceId) === codeHash) this.#current.delete(hit.deviceId);
-    return hit.untilMs > this.clock.now() ? hit.deviceId : undefined;
+    if (this.#current.get(hit.deviceId) !== codeHash) return undefined;
+    this.#current.delete(hit.deviceId);
+    return hit.untilMs > this.clock.now() ? { deviceId: hit.deviceId, expiresAtMs: hit.untilMs } : undefined;
+  }
+
+  async restore(i: { codeHash: string; deviceId: string; expiresAtMs: number }): Promise<boolean> {
+    if (i.expiresAtMs - this.clock.now() < 1) return false;
+    const current = this.#current.get(i.deviceId);
+    if (current !== undefined && current !== i.codeHash) return false;
+    this.#current.set(i.deviceId, i.codeHash);
+    this.#codes.set(i.codeHash, { deviceId: i.deviceId, untilMs: i.expiresAtMs });
+    return true;
   }
 }

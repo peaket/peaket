@@ -40,6 +40,7 @@ import {
   SCANNER_MTLS_CERT_HEADER,
   SCANNER_MTLS_CNF_HEADER,
   type ScannerAuthOptions,
+  type ScannerAuthRejection,
   ScannerAuthState,
   type ScannerSessionAnswer,
   type ScannerStaffRole,
@@ -500,6 +501,23 @@ const scannerUnauthorized = (reply: FastifyReply, error: 'invalid_token' | 'inva
   return new UnauthorizedException();
 };
 
+/** 가드가 던진 거절에 붙인 이유 이름표(O-T37 ⑨) */
+const rejectionReasons = new WeakMap<object, ScannerAuthRejection>();
+
+const rejected = <E extends Error>(reason: ScannerAuthRejection, error: E): E => {
+  rejectionReasons.set(error, reason);
+  return error;
+};
+
+/** 거절이면 그 이름표, 판정에 닿지 못한 503이면 unavailable, 그 밖(예상 못 한 오류)은 없음 */
+const rejectionOf = (e: unknown): ScannerAuthRejection | undefined => {
+  if (typeof e !== 'object' || e === null) return undefined;
+  const tagged = rejectionReasons.get(e);
+  if (tagged !== undefined) return tagged;
+  if (e instanceof ProblemError && e.slug === 'scanner-auth-unavailable') return 'unavailable';
+  return undefined;
+};
+
 /**
  * 스캐너 경로의 기기 증명·세션 판정(GAT-170, offline-gate §6.1). AuthGuard가 스태프 토큰의 신원을 판정한 뒤에 돈다.
  * - `@ScannerAuth()`가 없는 처리기는 그대로 통과한다.
@@ -520,6 +538,23 @@ export class ScannerGuard implements CanActivate {
     const scanner = this.state.scanner;
     // 시작 확인이 막으므로 오지 않는다. 와도 닫는다
     if (!scanner) throw new Error('스캐너 인증 포트가 없다(createService의 scanner)');
+    try {
+      return await this.judge(ctx, options, scanner);
+    } catch (e) {
+      // 거절·판정 불가마다 이유 이름표 하나(O-T37 ⑨). 기록이 던져도 응답은 그대로다
+      const reason = rejectionOf(e);
+      if (reason !== undefined) {
+        try {
+          scanner.wiring.onRejected?.(reason);
+        } catch {
+          // ignore
+        }
+      }
+      throw e;
+    }
+  }
+
+  private async judge(ctx: ExecutionContext, options: ScannerAuthOptions, scanner: ScannerAuthState): Promise<boolean> {
     const http = ctx.switchToHttp();
     const request = http.getRequest<FastifyRequest>();
     const reply = http.getResponse<FastifyReply>();
@@ -532,11 +567,11 @@ export class ScannerGuard implements CanActivate {
     const deviceOnly = options.token === 'none' || (options.token === 'optional' && !tokenAttached);
 
     if (!deviceOnly) {
-      if (!principal || principal.aud !== 'scanner') throw scannerUnauthorized(reply, 'invalid_token');
-      if (!token) throw scannerUnauthorized(reply, 'invalid_token');
+      if (!principal || principal.aud !== 'scanner') throw rejected('token', scannerUnauthorized(reply, 'invalid_token'));
+      if (!token) throw rejected('token', scannerUnauthorized(reply, 'invalid_token'));
     } else if (tokenAttached) {
       // 기기만 증명하는 경로에 사용자 토큰을 붙이면 대체 경로로 쓰지 못하게 거절한다.
-      throw scannerUnauthorized(reply, 'invalid_token');
+      throw rejected('token', scannerUnauthorized(reply, 'invalid_token'));
     }
 
     // mTLS 선택지(PoC): 게이트웨이가 TLS 계층에서 인증서를 검증하고, 클라이언트가 보낸 같은 이름의
@@ -547,12 +582,12 @@ export class ScannerGuard implements CanActivate {
     const mtlsHeader = mtls ? singleHeader(request.headers[mtlsHeaderName]) : undefined;
     let mtlsThumbprint: string | undefined;
     if (mtls && mtlsHeader !== undefined) {
-      if (mtlsHeader !== mtls.secret) throw scannerUnauthorized(reply, 'invalid_token');
+      if (mtlsHeader !== mtls.secret) throw rejected('token', scannerUnauthorized(reply, 'invalid_token'));
       const cert = singleHeader(request.headers[mtls.certThumbprintHeader ?? SCANNER_MTLS_CERT_HEADER]);
       const cnf = singleHeader(request.headers[mtls.tokenConfirmationHeader ?? SCANNER_MTLS_CNF_HEADER]);
       // 기기 인증만 하는 경로는 스태프 토큰이 없어 cnf가 없다. 토큰이 붙는 경로만 cert와 cnf를 대조한다.
-      if (!cert) throw scannerUnauthorized(reply, 'invalid_token');
-      if (!deviceOnly && (!cnf || cert !== cnf)) throw scannerUnauthorized(reply, 'invalid_token');
+      if (!cert) throw rejected('token', scannerUnauthorized(reply, 'invalid_token'));
+      if (!deviceOnly && (!cnf || cert !== cnf)) throw rejected('token', scannerUnauthorized(reply, 'invalid_token'));
       mtlsThumbprint = cert;
     }
 
@@ -561,10 +596,10 @@ export class ScannerGuard implements CanActivate {
     const computedAth = token === undefined ? undefined : athOf(token);
     if (mtlsThumbprint === undefined) {
       if (!deviceOnly) {
-        if (!expectedJkt) throw scannerUnauthorized(reply, 'invalid_token');
-        if (forwardedAth !== undefined && forwardedAth !== computedAth) throw scannerUnauthorized(reply, 'invalid_token');
+        if (!expectedJkt) throw rejected('token', scannerUnauthorized(reply, 'invalid_token'));
+        if (forwardedAth !== undefined && forwardedAth !== computedAth) throw rejected('token', scannerUnauthorized(reply, 'invalid_token'));
       } else if (expectedJkt !== undefined || forwardedAth !== undefined) {
-        throw scannerUnauthorized(reply, 'invalid_token');
+        throw rejected('token', scannerUnauthorized(reply, 'invalid_token'));
       }
     }
 
@@ -573,7 +608,7 @@ export class ScannerGuard implements CanActivate {
       verified = { jkt: mtlsThumbprint, jti: 'mtls' };
     } else {
       const proof = singleHeader(request.headers.dpop);
-      if (!proof) throw scannerUnauthorized(reply, 'invalid_dpop_proof');
+      if (!proof) throw rejected('proof_missing', scannerUnauthorized(reply, 'invalid_dpop_proof'));
       try {
         verified = await verifyDpopProof({
           proof,
@@ -586,18 +621,18 @@ export class ScannerGuard implements CanActivate {
           replay: scanner.wiring.replay,
         });
       } catch (e) {
-        if (e instanceof DpopRejected) throw scannerUnauthorized(reply, 'invalid_dpop_proof');
+        if (e instanceof DpopRejected) throw rejected(e.reason, scannerUnauthorized(reply, 'invalid_dpop_proof'));
         throw e;
       }
     }
 
     const device = await scanner.deviceByThumbprint(verified.jkt);
-    if (!device) throw new ProblemError({ type: 'device-unregistered', status: 403, title: '등록되지 않은 스캐너 기기입니다' });
+    if (!device) throw rejected('device_unregistered', new ProblemError({ type: 'device-unregistered', status: 403, title: '등록되지 않은 스캐너 기기입니다' }));
     // 인증서 지문으로 찾은 기기는 MTLS_CERT, DPoP 키 지문으로 찾은 기기는 DEVICE_KEY여야 한다(다른 지문·다른 종류 거절).
     if (device.credentialType !== undefined && device.credentialType !== (mtlsThumbprint !== undefined ? 'MTLS_CERT' : 'DEVICE_KEY')) {
-      throw scannerUnauthorized(reply, 'invalid_token');
+      throw rejected('token', scannerUnauthorized(reply, 'invalid_token'));
     }
-    if (device.status !== 'ACTIVE') throw new ProblemError({ type: 'device-revoked', status: 403, title: '폐기된 스캐너 기기입니다' });
+    if (device.status !== 'ACTIVE') throw rejected('device_revoked', new ProblemError({ type: 'device-revoked', status: 403, title: '폐기된 스캐너 기기입니다' }));
     // 마지막 연락 시각은 관측용이라 실패해도 요청을 막지 않는다.
     try {
       await scanner.wiring.devices.touch?.(device.deviceId, this.state.clock.now());
@@ -611,11 +646,11 @@ export class ScannerGuard implements CanActivate {
     let session: ScannerSessionAnswer | undefined;
     if (deviceOnly) {
       role = 'scanner_device';
-      if (policy && !policy.roles.includes(role)) throw new ForbiddenException();
+      if (policy && !policy.roles.includes(role)) throw rejected('role', new ForbiddenException());
     } else {
       session = await scanner.sessionOf(principal!.sessionId, device.deviceId);
-      if (!session.valid || !session.role) throw scannerUnauthorized(reply, 'invalid_token');
-      if (policy && !policy.roles.includes(session.role)) throw new ForbiddenException();
+      if (!session.valid || !session.role) throw rejected('session', scannerUnauthorized(reply, 'invalid_token'));
+      if (policy && !policy.roles.includes(session.role)) throw rejected('role', new ForbiddenException());
       role = session.role;
       eventId = session.eventId;
     }

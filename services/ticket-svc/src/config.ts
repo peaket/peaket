@@ -1,5 +1,5 @@
 // ticket-svc 설정(BUILD_ORDER HOT-160). 값은 환경에서만 받는다.
-import { publicOriginFromEnv } from '@peaket/platform';
+import { publicOriginFromEnv, scannerPwaOriginFromEnv } from '@peaket/platform';
 
 export const DEFAULT_TICKET_GRPC_PORT = 50052;
 export const TICKET_DB_POOL_MAX = 16;
@@ -24,6 +24,8 @@ export interface TicketServiceConfig {
   readonly scannerMtlsSecret?: string;
   /** 게이트웨이 공개 출처(PEAKET_PUBLIC_ORIGIN). 있으면 DPoP htu를 이 값으로 만든다(C2-09) */
   readonly publicOrigin?: string;
+  /** 스캐너 PWA 출처(PEAKET_SCANNER_PWA_ORIGIN). 기기 등록·스캔 올리기의 Origin과 정확히 같아야 한다(O-T35). 없거나 비면 운영 기본 출처 */
+  readonly scannerPwaOrigin: string;
   /** 받는 사람 참조(recipientRef) HMAC 비밀. local·ci는 기본값, 그 밖은 필수다 */
   readonly transferRefSecret: string;
   /** 팬 재인증 토큰 공개키 묶음 주소. 없으면 local·ci는 닫힌 대역(늘 403), 그 밖은 시작하지 않는다 */
@@ -62,6 +64,7 @@ export function loadTicketServiceConfig(env: Record<string, string | undefined>)
     ...(env.PEAKET_INTERNAL_TOKEN ? { internalToken: env.PEAKET_INTERNAL_TOKEN } : {}),
     ...(env.PEAKET_SCANNER_MTLS_SECRET ? { scannerMtlsSecret: env.PEAKET_SCANNER_MTLS_SECRET } : {}),
     ...(publicOrigin ? { publicOrigin } : {}),
+    scannerPwaOrigin: scannerPwaOriginFromEnv(env),
     transferRefSecret: test ? (transferRefSecret?.trim() || DEFAULT_LOCAL_TRANSFER_SECRET) : transferRefSecret!.trim(),
     ...(hasJwks ? { identityFanJwksUrl: identityFanJwksUrl.trim() } : {}),
     ...(hasIssuer ? { identityIssuer: identityIssuer.trim() } : {}),

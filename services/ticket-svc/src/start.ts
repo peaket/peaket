@@ -3,7 +3,7 @@
 // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고, 서비스를 닫은 뒤 끈다.
 import 'reflect-metadata';
 import type { Writable } from 'node:stream';
-import { type AdminAuthzPort, type Clock, Counter, createDatabase, createExternalHttpClient, createHotRedis, createService, Gauge, internalGrpcTokenFromEnv, loadPlatformConfig, MemoryDpopReplayStore, reauthJtiStoreFromEnv, type ScannerSessionCheck, systemClock } from '@peaket/platform';
+import { type AdminAuthzPort, type Clock, Counter, createDatabase, SCANNER_AUTH_REJECTIONS, type ScannerAuthRejection, createExternalHttpClient, createHotRedis, createService, Gauge, internalGrpcTokenFromEnv, loadPlatformConfig, MemoryDpopReplayStore, reauthJtiStoreFromEnv, type ScannerSessionCheck, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { loadTicketServiceConfig, TICKET_DB_POOL_MAX } from './config.js';
@@ -110,6 +110,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let expireTimer: ReturnType<typeof setInterval> | undefined;
   let noticeTimer: ReturnType<typeof setInterval> | undefined;
   let controlSync: { close(): Promise<void> } | undefined;
+  // 스캐너 가드 거절 이유 지표(O-T37 ⑨). 서비스 지표 묶음은 createService 뒤에 생기므로 그때 잇는다
+  let scannerRejections: Counter<'service' | 'reason'> | undefined;
   try {
     const gateStore = new DrizzleScannerGateStore(database);
     const shiftStore = new DrizzleScannerShiftStore(database);
@@ -198,6 +200,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
           alert: (message, fields) => alert?.(message, fields),
           ...(opsAlertSink ? { opsAlert: opsAlertSink } : {}),
           maxOfflineMs: config.scannerMaxOfflineMs,
+          scannerPwaOrigin: config.scannerPwaOrigin,
         },
         ticket: { deviceKeys, tickets: ticket, transfers },
       }),
@@ -208,9 +211,17 @@ export async function start(o: StartOptions): Promise<StartedService> {
         replay,
         ...(config.scannerMtlsSecret ? { mtls: { secret: config.scannerMtlsSecret } } : {}),
         ...(config.publicOrigin ? { publicOrigin: config.publicOrigin } : {}),
+        onRejected: (reason: ScannerAuthRejection) => scannerRejections?.inc({ service: SERVICE, reason }),
       },
       ...(o.logDestination ? { logDestination: o.logDestination } : {}),
     });
+    scannerRejections = new Counter({
+      name: 'scanner_auth_rejections_total',
+      help: '스캐너 기기 증명·세션 판정에서 거절하거나 닫은 요청 수(O-T37 ⑨, reason은 offline-gate §6.1 이름표)',
+      labelNames: ['service', 'reason'],
+      registers: [service.metrics.registry],
+    });
+    for (const reason of SCANNER_AUTH_REJECTIONS) scannerRejections.inc({ service: SERVICE, reason }, 0);
     alert = (message, fields) => service!.logger.warn(fields, message);
     // 양도 요청 만료 정비(RV-01): 1분 [가정]마다 기한 지난 OFFERED를 EXPIRED로 바꾸고 표시를 푼다.
     // 새 요청을 만들 때도 저장소가 먼저 만료시키므로 이 고리가 늦어도 막히지 않는다. 파드가 여럿이면 행 잠금으로 겹쳐도 한 번만 바뀐다

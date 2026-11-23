@@ -1,6 +1,6 @@
 // 스캐너 기기 모듈 조립(BUILD_ORDER GAT-170). 저장소·등록 코드·DPoP jti·배치·준비 보고 포트를 고른다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
-import { CLOCK, type Clock, type ScannerSessionCheck } from '@peaket/platform';
+import { CLOCK, type Clock, type ScannerSessionCheck, scannerPwaOriginFromEnv } from '@peaket/platform';
 import { ScannerDevices } from './application/scanner-devices.js';
 import { ScannerGate } from './application/scanner-gate.js';
 import { ScannerPlacements, ScannerShift } from './application/scanner-shift.js';
@@ -13,6 +13,7 @@ import {
   SCANNER_EVENT_POLICY,
   SCANNER_GATE_STORE,
   SCANNER_MTLS_SECRET,
+  SCANNER_PWA_ORIGIN,
   SCANNER_SESSION_TERMINATOR,
   SCANNER_SHIFT_STORE,
   type DpopReplayStore,
@@ -26,7 +27,6 @@ import {
   type ScannerSessionTerminator,
   type ScannerShiftStore,
 } from './domain/ports.js';
-import { OpsScannerDevicesController } from './inbound/ops-scanner-devices.controller.js';
 import { PartnerScannerPlacementController } from './inbound/partner-scanner-placement.controller.js';
 import { ScannerEnrollmentController } from './inbound/scanner-enrollment.controller.js';
 import { ScannerGateController } from './inbound/scanner-gate.controller.js';
@@ -57,6 +57,8 @@ export interface ScannerWiring {
   maxOfflineMs?: number;
   /** 게이트웨이 mTLS 신뢰 머리 비밀 값. 없으면 인증서 지문 등록을 받지 않는다 */
   mtlsSecret?: string;
+  /** 스캐너 PWA 출처(config.scannerPwaOrigin). 없으면 운영 기본 출처다(O-T35) */
+  scannerPwaOrigin?: string;
 }
 
 @Module({})
@@ -68,6 +70,7 @@ export class ScannerModule {
       { provide: DPOP_REPLAY_STORE, useValue: o.replay },
       { provide: SCANNER_GATE_STORE, useValue: o.gate },
       { provide: SCANNER_SHIFT_STORE, useValue: o.shift },
+      { provide: SCANNER_PWA_ORIGIN, useValue: o.scannerPwaOrigin ?? scannerPwaOriginFromEnv({}) },
       ...(o.mtlsSecret ? [{ provide: SCANNER_MTLS_SECRET, useValue: o.mtlsSecret } satisfies Provider] : []),
       ...(o.policy ? [{ provide: SCANNER_EVENT_POLICY, useValue: o.policy } satisfies Provider] : []),
       ...(o.limiter ? [{ provide: ENROLLMENT_ATTEMPT_LIMITER, useValue: o.limiter } satisfies Provider] : []),
@@ -125,8 +128,8 @@ export class ScannerModule {
     ];
     return {
       module: ScannerModule,
+      // 관제 기기 경로(/v1/ops/scanner-devices*)는 ops-svc만 받는다. ticket-svc는 gRPC ScannerDeviceService로만 등록·폐기·재발급한다(W7-WIR-02)
       controllers: [
-        OpsScannerDevicesController,
         ScannerEnrollmentController,
         ScannerGateController,
         ScannerShiftController,
