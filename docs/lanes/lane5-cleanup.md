@@ -65,3 +65,15 @@
 
 - 시험 리뷰 낮음: TR-01 `[200,409]` 길(approval-conflict·approval-not-pending)을 차례 고정한 시험이 없다. TR-02 갈고리 안 expect 실패가 5xx로 바뀌어 실패 까닭이 흐려진다. TR-03 `expectSettledOnce`의 approver_id 비교는 같은 행 값이라 늘 참(requester_id만 실제로 봄). TR-04 같은 EXECUTING 겹침을 결정 시험은 J-T36 ④, 단위는 J-T36 ⑨ ②로 부른다 — 정본 §13 J-T36 ⑨에 한 줄 더하고 번호를 맞춘다. TR-05 실패 확인 기록 없음(구현이 이미 RV-04대로).
 - 같은 꼴 `[200,409]` 단언이 있는 다른 모듈(ops approval-request·payout-approval·command-lifecycle·event-cancellations)은 까닭이 달라 그대로 두었다.
+
+## F-07-7(2026-11-23, R-803)
+
+- C-08 [가정]: 포트원 이체 원장 `balance`의 뜻·콘솔 출금 `withdrawalType`·포트원 수수료 셈법(잔액 대사 수수료 0 [가정])은 공개 명세를 읽은 [가정] — 시험 환경에서 먼저 확인. U-03 포트원 수기 정산건이 PEAKET이 정한 `id`를 받는지(실행 멱등이 기댐) 계약 전 첫 확인 항목.
+- C-11(낮음): 은행 대응표가 `packages/validation`과 `portone-platform-shapes.ts` 두 곳에 있다 — 한 파일로.
+- C-12(낮음): core가 사업자 형태를 사업자등록번호 가운데 두 자리로 추정 [가정] — 계약 때 맞춤.
+- 시험 리뷰 낮음: TR-13~15·TR-20~22, 거절 지표 이름표 `target` 값 미정, TO-01 반대쪽(앞날) 한 줄, TO-10 보류 끝 정각(10:00:00.000) 경계 한 줄.
+- 내부 경로 셋의 모양 틀림 422 `invalid-query`가 문제 목록의 400과 다르다(기존 payment 내부 경로 꼴).
+- 환경 몫: core-svc 환경별 값은 로컬 데모 파일 하나에만 `PEAKET_PAYMENT_HTTP_URL`이 있다(다른 환경 파일 없음).
+- ops 통합 `f021-e2e-control`이 `PEAKET_SCHEMA_IDS_FILE` 없음(PlatformConfigError, purchase-svc 시작 조립)으로 떠지 않는다 — F-07-7과 무관, develop에서도 같은지 확인 필요.
+- 흔들림 후보: core `fill-search-guard`·`internal-notify(-ticket)`·`tenant-rate-limit`·`shop-expiry`·`registration`·`search-bat166·167`·`seatmap-editor`·`sale-eligibility`·`seatmap-import`(부하 중 준비 시간 초과, 단독 통과), payment P-T46 ④.
+- payment 마이그레이션 0031은 갈래 3 몫으로 비어 있다(F-07-7이 0030 다음 0032). 갈래 3이 0031을 쓰지 않으면 번호가 빈 채 남는다.
