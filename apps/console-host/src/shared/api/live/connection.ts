@@ -1,15 +1,17 @@
 // 탭 하나의 관제 실시간 연결(docs/frontend.md §4.4.4·§4.4.5, ADR-0100, ADR-0360). 탭마다 늘 여는 흐름 하나와 위젯 흐름 하나만 연다.
 // - 늘 여는 흐름 GET /v1/ops/live?eventId=&screen=: 사건을 호스트 저장소(alerts·presence·commands)에 넣고 live.on 구독자에게 나눠 준다.
-//   reset을 받으면 resync 번호를 올려 화면이 명령·경보·승인 대기를 REST로 다시 읽게 한다
+//   reset을 받으면 resync 번호를 올려 화면이 명령·승인 대기를 REST로 다시 읽게 하고, 경보는 경보 목록 REST(GET /v1/ops/alerts)로 갈아 끼운다.
+//   처음 열 때도 경보 목록을 한 번 읽는다(콘솔을 열기 전부터 울리던 경보, F-03-3 OPS-380, ADR-0100 결정 2). 읽는 동안 온 alert 사건은 순번과 함께 모아
+//   두었다가 목록 응답 seq 뒤의 것만 목록 위에 다시 얹는다
 // - 위젯 흐름 GET /v1/ops/events/{eventId}/live?widgets=: WidgetStreams가 보이는 키를 모아 1초 묶어 다시 연다. 떠난 키는 10초 유예,
 //   브라우저 탭을 30초 넘게 숨기면 위젯 흐름만 닫고 다시 보이면 다시 열며 키마다 위젯 조회(최근 15분)로 채운다(ADR-0361 결정 9). 늘 여는 흐름은 숨겨도 그대로다
 // 닫힘 뒤 토큰 갱신(POST /v1/ops/auth/access-tokens)이 401이면 로그인 화면으로 간다.
-import type { HostAlert, HostOperator, HostView, Unsubscribe } from '@peaket/console-contract';
+import type { HostOperator, HostView, Unsubscribe } from '@peaket/console-contract';
 import { ManagedStream, frameData, type RefreshResult, type SseFrame, type StreamFetch } from './live-stream';
 import { WidgetStreams } from './widget-stream';
 import { createSlotServices, type SlotServices } from './console-services';
 import { ensureConsoleApi } from '../index';
-import { hostActions, hostStore, type LiveHostState } from '@/shared/model/live-host';
+import { hostActions, hostStore, type LiveAlert, type LiveControl, type LiveHostState } from '@/shared/model/live-host';
 
 type LiveEvent = 'alert' | 'command' | 'presence' | 'approval' | 'reset' | 'control' | 'autoAction';
 
@@ -55,6 +57,34 @@ async function resyncApprovals(): Promise<void> {
     );
   } catch {
     // 다시 읽기 실패: 다음 approval·command 사건이 슬라이스를 고친다
+  }
+}
+
+/** 경보 목록을 읽는 동안 늘 여는 흐름으로 온 alert 사건(순번은 SSE id) */
+let alertResync: { buffered: { seq: number | undefined; alert: LiveAlert }[] } | undefined;
+let alertsLoaded = false;
+
+const isAlert = (a: unknown): a is LiveAlert =>
+  typeof a === 'object' && a !== null && typeof (a as { alertId?: unknown }).alertId === 'string' && typeof (a as { status?: unknown }).status === 'string';
+
+/** 경보 목록 REST로 경보 슬라이스를 갈아 끼운다(처음 열 때·reset 뒤). 고른 회차와 상관없이 모든 경보를 받는다(플랫폼 묶음도 그린다) */
+async function resyncAlerts(): Promise<void> {
+  if (!ensureConsoleApi()) return;
+  const pending: NonNullable<typeof alertResync> = { buffered: [] };
+  alertResync = pending;
+  try {
+    const { listOpsAlerts } = await import('@peaket/api-client/endpoints/ops');
+    const r = await listOpsAlerts();
+    if (alertResync !== pending) return; // 더 새로 읽기 시작했다
+    const data = (r.data ?? {}) as { items?: unknown[]; seq?: unknown };
+    const items = (Array.isArray(data.items) ? data.items : []).filter(isAlert);
+    const seq = typeof data.seq === 'number' ? data.seq : 0;
+    const after = pending.buffered.filter((b) => b.seq === undefined || b.seq > seq).map((b) => b.alert);
+    hostActions.replaceAlerts(items, after);
+  } catch {
+    // 다시 읽기 실패: 슬라이스는 그대로 두고 다음 사건이 고친다
+  } finally {
+    if (alertResync === pending) alertResync = undefined;
   }
 }
 
@@ -117,7 +147,13 @@ function onLiveFrame(f: SseFrame): void {
       emit('approval', data);
       break;
     case 'alert':
-      if (typeof d.alertId === 'string') hostActions.alert(data as HostAlert);
+      if (isAlert(data)) {
+        hostActions.alert(data);
+        if (alertResync) {
+          const seq = f.lastEventId !== undefined && /^\d+$/.test(f.lastEventId) ? Number(f.lastEventId) : undefined;
+          alertResync.buffered.push({ seq, alert: data });
+        }
+      }
       emit('alert', data);
       break;
     case 'presence':
@@ -125,17 +161,19 @@ function onLiveFrame(f: SseFrame): void {
       emit('presence', data);
       break;
     case 'control':
-      if (typeof d.kind === 'string') hostActions.control(d.kind as LiveHostState['control']['kind'], typeof d.updatedAt === 'string' ? d.updatedAt : undefined);
+      // 본문 그대로(asyncapi OpsControl: 회차·종류·입력 없음 시작·없는 입력·지금 목표·감축, F-03-3)
+      if (typeof d.kind === 'string') hostActions.control(data as LiveControl);
       emit('control', data);
       break;
     case 'autoAction':
       emit('autoAction', data);
       break;
     case 'reset':
-      // 알림 표 밖의 번호로 다시 붙었다(ADR-0100 결정 2): 호스트는 승인 대기를 명령 REST로 다시 읽고, 화면은 resync 번호·reset 구독으로 자기 목록을 다시 읽는다.
-      // 경보는 계약에 목록 REST가 없어 다시 읽지 않는다(경보 패널 F-03-3이 목록 REST와 함께 더한다)
+      // 알림 표 밖의 번호로 다시 붙었다(ADR-0100 결정 2): 호스트는 승인 대기를 명령 REST로, 경보를 경보 목록 REST로 다시 읽고,
+      // 화면은 resync 번호·reset 구독으로 자기 목록을 다시 읽는다
       hostActions.resync();
       void resyncApprovals();
+      void resyncAlerts();
       emit('reset', data);
       break;
     default:
@@ -174,6 +212,10 @@ export function startLive(o: { origin: string; screen?: string; onUnauthorized?:
   if (o.onUnauthorized) goLogin = o.onUnauthorized;
   liveStream ??= newStream(liveUrl, onLiveFrame, true);
   liveStream.start();
+  if (!alertsLoaded) {
+    alertsLoaded = true;
+    void resyncAlerts();
+  }
   widgets ??= new WidgetStreams({ origin, timers, createStream: (url, onFrame) => newStream(url, onFrame, false), refill: refillWidget });
   widgets.setEvent(hostStore.getState().scope.eventId);
   watchVisibility();

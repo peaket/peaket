@@ -10,4 +10,8 @@ export interface DashCtx {
   recentReleased: boolean;
   /** 실제 값 화면(?state= 없음, 관제 API 주소 있음): 원천이 있는 위젯 둘(입장 비율·결제사)을 원격으로 싣는다(ADR-0360) */
   live: boolean;
+  /** 실제 값 화면의 고른 회차(?event=, UUID일 때만). 자세히 보기 주소 틀에 넣는다(F-03-3) */
+  eventId?: string | null;
+  /** 실제 값 화면에서 판정 버튼을 보일 역할(F-03-3) */
+  role?: string | null;
 }

@@ -1,6 +1,7 @@
 // SCR-029 중앙 관제 대시보드(/dashboard?event=&tab=, d5 §7.2). 보드 SCR-029-d(데스크톱 xl 4열)·lg(1280~1439 3열)·t(태블릿 2열)·m(휴대폰 접힌 목록)을 배치마다 옮겼다.
 // 데스크톱의 T=0·판매 중 탭 위젯 일부는 원격 위젯 패키지(@peaket/widget-queue·purchase)로 그리고, 경보 패널은 ds AlertPanel이다.
-// 위 상태 바(단계·자동 제어·자동 조치·SEV·시계·역할)는 보드의 머리 분기대로 상태마다 호스트 값을 덮어쓴다.
+// 위 상태 바(단계·자동 제어·자동 조치·SEV·시계·역할)는 퍼블리싱 화면에서 보드의 머리 분기대로 상태마다 호스트 값을 덮어쓴다. 실제 값 화면은 자동 제어·SEV 수·시계를
+// 덮지 않고(늘 여는 흐름 값), ?tab=이 없으면 서버가 정한 회차 단계(GET /v1/ops/events/{eventId}/readiness)의 탭을 연다. 판매 설정이 없는 회차는 '대상 없음'(F-03-3 OPS-380).
 // 보드 그림 셋(board-d·t·m)은 배치에 맞는 것만 늦게 싣는다(화면 덩어리 80KB [가정] 안, FE-T25, ADR-0361 결정 10). 상태 값(vals-*)만 바로 가져온다.
 import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useLocation, useSearchParams } from 'react-router';
@@ -11,10 +12,34 @@ import { useIsXl } from '@/shared/lib/layout';
 import { usePreviewKeep } from '@/shared/lib/preview';
 import { useHost, usePreviewHost, type HostPatch } from '@/features/preview-host';
 import { useMainStyle } from '@/shared/model/shell';
-import { opsApiAvailable } from '@/shared/api';
+import { ensureConsoleApi, opsApiAvailable } from '@/shared/api';
 import { setLiveEvent } from '@/shared/api/live';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { DEFAULT, STATES, TAB_STATE, type State } from '../states';
+
+/** 서버 단계(readiness stage) → 그 탭의 대표 상태 */
+const STAGE_STATE: Record<string, State> = { t30: TAB_STATE.t30, t0: TAB_STATE.t0, live: TAB_STATE.live, after: TAB_STATE.after, entry: TAB_STATE.entry, none: '대상 없음' };
+
+/** 실제 값 화면에서 고른 회차의 서버 단계(받기 전·실패면 undefined) */
+function useServerStage(enabled: boolean, eventId: string | null): State | undefined {
+  const [stage, setStage] = useState<State | undefined>(undefined);
+  useEffect(() => {
+    setStage(undefined);
+    if (!enabled || !eventId || !ensureConsoleApi()) return undefined;
+    let alive = true;
+    void import('@peaket/api-client/endpoints/ops')
+      .then(({ getOpsEventReadiness }) => getOpsEventReadiness(eventId))
+      .then((r) => {
+        const s = (r.data as { stage?: string }).stage;
+        if (alive && s && STAGE_STATE[s]) setStage(STAGE_STATE[s]);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [enabled, eventId]);
+  return stage;
+}
 import { valsD } from './vals-d';
 import { valsM } from './vals-m';
 import { valsT } from './vals-t';
@@ -95,7 +120,12 @@ export function Page() {
   const { pathname, hash } = useLocation();
   // ?state=가 없으면 ?tab=의 대표 상태, 위 상태 바 '자동 조치 n'(#w-auto)로 왔으면 걸린 자동 조치 상태(목업)
   const tab = params.get('tab') as TabKey | null;
-  const fallback: State = hash === '#w-auto' ? '자동 조치 걸림' : tab && TAB_STATE[tab] ? TAB_STATE[tab] : DEFAULT;
+  // 실제 값 화면: ?state= 미리보기가 아니고 관제 API 주소가 있으면 위젯을 원격·실제 값으로 싣고 고른 회차(?event=)를 흐름 둘에 알린다(ADR-0360)
+  const live = !(__PREVIEW__ && params.get('state')) && opsApiAvailable();
+  const eventParam = params.get('event');
+  const liveEvent = eventParam && UUID.test(eventParam) ? eventParam.toLowerCase() : null;
+  const serverStage = useServerStage(live && !(tab && TAB_STATE[tab]), liveEvent);
+  const fallback: State = hash === '#w-auto' ? '자동 조치 걸림' : tab && TAB_STATE[tab] ? TAB_STATE[tab] : (serverStage ?? DEFAULT);
   const { state, layout } = useBoardPage('중앙 관제 대시보드', STATES, fallback);
   // 보드가 열린 채로 그린 대화상자(T-30분 점검의 Go/No-Go 판정, 버짓 100% 소진의 Degraded 후보)는 닫으면 그 상태의 탭 내용만 남긴다
   const [dismissed, setDismissed] = useState<string | null>(null);
@@ -113,13 +143,16 @@ export function Page() {
   const recentReleased = state === '자동 조치 최근 풀림';
   // 휴대폰 '메뉴 열림'은 T=0 탭 위에 서랍을 연 그림이라 셸 값은 T=0 것을 쓴다
   const flagsD = valsD(base === '메뉴 열림' ? 'T=0' : base);
-  usePreviewHost(shellPatch(flagsD), [state]);
+  // 실제 값 화면은 자동 제어·SEV 수·시계를 덮지 않는다(늘 여는 흐름 값)
+  const patch = shellPatch(flagsD);
+  if (live) {
+    delete patch.control;
+    delete patch.alerts;
+    delete patch.clock;
+  }
+  usePreviewHost(patch, [state, live]);
   useMainStyle(layout === 'phone' ? undefined : { gap: 12 }, `dashboard-${layout}`);
 
-  // 실제 값 화면: ?state= 미리보기가 아니고 관제 API 주소가 있으면 위젯 둘을 원격으로 싣고 고른 회차(?event=)를 흐름 둘에 알린다(ADR-0360)
-  const live = !(__PREVIEW__ && params.get('state')) && opsApiAvailable();
-  const eventParam = params.get('event');
-  const liveEvent = eventParam && UUID.test(eventParam) ? eventParam.toLowerCase() : null;
   useEffect(() => {
     if (live) setLiveEvent(liveEvent, 'dashboard');
   }, [live, liveEvent]);
@@ -130,8 +163,10 @@ export function Page() {
       slot: state === '위젯 로딩' ? 'loading' : state === '위젯 오류' ? 'error' : state === '원격 위젯 적재 실패' ? 'remote-fail' : 'normal',
       recentReleased,
       live,
+      eventId: liveEvent,
+      role: host.session.role,
     }),
-    [pathname, keepKey, state, recentReleased, live],
+    [pathname, keepKey, state, recentReleased, live, liveEvent, host.session.role],
   );
 
   // ?role=viewer로 볼 때도 판정·명령·결정 기록 버튼을 숨긴다(보드 notViewer 분기)
@@ -142,7 +177,7 @@ export function Page() {
       {layout === 'desktop' ? (
         <div style={{ display: 'contents', ['--dash-cols' as string]: isXl ? 4 : 3 } as CSSProperties}>
           <MainD v={asViewer(flagsD)} close={close} ctx={ctx} />
-          {showOverlays && !roleViewer ? <OverlaysD v={flagsD} close={close} /> : null}
+          {showOverlays && !roleViewer && !live ? <OverlaysD v={flagsD} close={close} /> : null}
         </div>
       ) : null}
       {layout === 'tablet' ? (

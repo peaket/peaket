@@ -165,6 +165,10 @@ export default (_env, argv) => {
         __OPS_API_ORIGIN__: JSON.stringify(opsApi),
         __SCANNER_ORIGIN__: JSON.stringify(process.env.PEAKET_SCANNER_ORIGIN || (dev ? 'http://localhost:3003' : 'https://scanner.peaket.example')),
         __CONSOLE_BUILD__: JSON.stringify(single ? 'single' : 'mf'),
+        // 콘솔 밖 도구 링크(F-03-3): 주소 틀 둘과 허용 호스트(쉼표). 비면 화면이 목업 주소를 쓰고 경보 링크는 글자로만 보인다
+        __CONSOLE_GRAFANA_URL__: JSON.stringify(process.env.PEAKET_CONSOLE_GRAFANA_URL || ''),
+        __CONSOLE_SENTRY_URL__: JSON.stringify(process.env.PEAKET_CONSOLE_SENTRY_URL || ''),
+        __CONSOLE_LINK_HOSTS__: JSON.stringify(process.env.PEAKET_CONSOLE_LINK_HOSTS || ''),
       }),
       ...(single
         ? []

@@ -17,6 +17,8 @@ import { WidgetSlot } from './WidgetSlot';
 import { RemoteWidget } from './RemoteWidget';
 import { RtSalesCell } from './RtSalesCell';
 import { RecentReleased } from './RecentReleased';
+import { boardDetail } from './board-detail';
+import { LiveAlertSlot, LiveBudgetSlot, LiveControlBanner, LiveControlCard, LiveDiagnosticsSlot, LivePending, LiveReadinessPanel, LiveSaturationSlot } from './live/LiveSlots';
 
 const prevent = (e: FormEvent) => e.preventDefault();
 void Fragment;
@@ -93,7 +95,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
         </a>
       </div>
     </div>
-    {v.isNoInput ? (
+    {!ctx.live && v.isNoInput ? (
       <>
         <div className="banner banner-danger" role="alert">
           <i className="ic ic-pulse" aria-hidden="true" />
@@ -115,6 +117,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
       </>
     ) : null}
     {' '}
+    {ctx.live ? <LiveControlBanner /> : null}
     {v.isViewer ? (
       <>
         <div className="banner banner-info" role="status">
@@ -127,7 +130,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
       </>
     ) : null}
     {' '}
-    {v.isSupp ? (
+    {!ctx.live && v.isSupp ? (
       <>
         <div className="banner banner-danger" role="alert">
           <i className="ic ic-alert-circle" aria-hidden="true" />
@@ -149,7 +152,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
       </>
     ) : null}
     {' '}
-    {v.isB50 ? (
+    {!ctx.live && v.isB50 ? (
       <>
         <div className="banner banner-warning" role="status">
           <i className="ic ic-alert" aria-hidden="true" />
@@ -171,7 +174,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
       </>
     ) : null}
     {' '}
-    {v.isB100 ? (
+    {!ctx.live && v.isB100 ? (
       <>
         <div className="banner banner-danger" role="alert">
           <i className="ic ic-alert-circle" aria-hidden="true" />
@@ -193,7 +196,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
       </>
     ) : null}
     {' '}
-    {v.seatBan ? (
+    {!ctx.live && v.seatBan ? (
       <>
         <div className="banner banner-warning" role="status">
           <i className="ic ic-alert" aria-hidden="true" />
@@ -229,7 +232,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
       </>
     ) : null}
     {' '}
-    {v.isDown ? (
+    {!ctx.live && v.isDown ? (
       <>
         <div className="banner banner-warning" role="status">
           <i className="ic ic-pulse" aria-hidden="true" />
@@ -241,7 +244,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
       </>
     ) : null}
     {' '}
-    {v.isT30 ? (
+    {!ctx.live && v.isT30 ? (
       <>
         <div className="banner banner-warning" role="status">
           <i className="ic ic-alert" aria-hidden="true" />
@@ -263,7 +266,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
       </>
     ) : null}
     {' '}
-    {v.isEntry ? (
+    {!ctx.live && v.isEntry ? (
       <>
         <div className="col" style={{ gap: "8px" }}>
           <div className="banner banner-warning" role="status">
@@ -388,7 +391,10 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
       <>
         <div className="col" role="tabpanel" id="panel-t0" aria-labelledby="tab-t0" style={{ gap: "12px" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(var(--dash-cols, 4),minmax(0,1fr))", gap: "12px", alignItems: "stretch" }}>
-            <AlertPanel {...alertPanelFor('t0', v)} renderLink={renderRouterLink} style={{ gridColumn: 'span 2' }} footer={<p className="t-xs muted">{DECISION_ORDER}</p>} />
+            {ctx.live ? <LiveAlertSlot style={{ gridColumn: 'span 2' }} /> : <AlertPanel {...alertPanelFor('t0', v)} renderLink={renderRouterLink} style={{ gridColumn: 'span 2' }} footer={<p className="t-xs muted">{DECISION_ORDER}</p>} />}
+            {ctx.live ? (
+              <LiveControlCard eventId={ctx.eventId ?? null} />
+            ) : (
             <section className="widget" role="region" aria-labelledby="w-ctl">
               <div className="widget-head wrap">
                 <h2 className="t-sm fw-b" id="w-ctl">자동 제어</h2>
@@ -403,7 +409,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                       <span className="slo slo-breached">입력 없음 · 20:04:08부터</span>
                     </>
                   ) : null}
-                  <a href="https://grafana.ops.peaket.example/d/onsale" target="_blank" rel="noreferrer" className="link-more" aria-label="자동 제어 자세히 보기, Grafana 새 탭">
+                  <a {...boardDetail(ctx, '자동 제어')} className="link-more" aria-label="자동 제어 자세히 보기, Grafana 새 탭">
                     자세히 보기
                     <i className="ic ic-external" aria-hidden="true" />
                   </a>
@@ -528,11 +534,15 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </>
               ) : null}
             </section>
+            )}
+            {ctx.live ? (
+              <LiveBudgetSlot id="w-burn" eventId={ctx.eventId ?? null} />
+            ) : (
             <section className="widget" role="region" aria-labelledby="w-burn">
               <div className="widget-head wrap">
                 <h2 className="t-sm fw-b" id="w-burn">여정별 오류율·버짓 소진</h2>
                 <div className="actions">
-                  <a href="https://grafana.ops.peaket.example/d/onsale" target="_blank" rel="noreferrer" className="link-more" aria-label="여정별 오류율·버짓 소진 자세히 보기, Grafana 새 탭">
+                  <a {...boardDetail(ctx, '여정별 오류율·버짓 소진')} className="link-more" aria-label="여정별 오류율·버짓 소진 자세히 보기, Grafana 새 탭">
                     자세히 보기
                     <i className="ic ic-external" aria-hidden="true" />
                   </a>
@@ -580,21 +590,42 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </p>
               </div>
             </section>
+            )}
+            {ctx.live ? (
+              <LivePending id="w-entry" title="대기열 진입·입장 처리량" origin="대기열 팀 원천(진입 RPS·p99·serving)" eventId={ctx.eventId ?? null} style={{ gridColumn: 'span 2' }} />
+            ) : (
             <WidgetSlot ctx={ctx} remote="queue" title="대기열 진입·입장 처리량" style={{ gridColumn: 'span 2' }}>
               <EntryThroughputWidget data={F.ENTRY} pending={ctx.live} detailHref={GRAFANA} style={{ gridColumn: 'span 2' }} />
             </WidgetSlot>
+            )}
+            {ctx.live ? (
+              <LivePending id="w-file" title="대기 상태 파일 신선도·셔플 게시" origin="대기열 팀 원천(셔플·결과 파일 게시)" eventId={ctx.eventId ?? null} />
+            ) : (
             <WidgetSlot ctx={ctx} remote="queue" title="대기 상태 파일 신선도·셔플 게시">
               <QueueFileWidget data={F.QUEUE_FILE} pending={ctx.live} detailHref={GRAFANA} />
             </WidgetSlot>
+            )}
+            {ctx.live ? (
+              <LivePending id="w-cdn" title="상태 조회량·CDN·엣지" origin="대기열 팀 원천(상태 조회량·CDN)" eventId={ctx.eventId ?? null} />
+            ) : (
             <WidgetSlot ctx={ctx} remote="queue" title="상태 조회량·CDN·엣지">
               <CdnEdgeWidget data={F.CDN} pending={ctx.live} detailHref={GRAFANA} />
             </WidgetSlot>
+            )}
+            {ctx.live ? (
+              <LivePending id="w-hold" title="좌석 홀드 p99" origin="구매 팀 원천(좌석 홀드)" eventId={ctx.eventId ?? null} />
+            ) : (
             <WidgetSlot ctx={ctx} remote="purchase" title="좌석 홀드 p99">
               <SeatHoldWidget data={F.SEAT_HOLD} pending={ctx.live} detailHref={GRAFANA} />
             </WidgetSlot>
+            )}
+            {ctx.live ? (
+              <LivePending id="w-pay" title="결제 확정·남은 허용 실패" origin="구매 팀 원천(결제 확정)" eventId={ctx.eventId ?? null} />
+            ) : (
             <WidgetSlot ctx={ctx} remote="purchase" title="결제 확정·남은 허용 실패">
               <PaymentBudgetWidget data={F.PAY_BUDGET} pending={ctx.live} detailHref={GRAFANA} />
             </WidgetSlot>
+            )}
             {ctx.live ? (
               <RtSalesCell id="w-heat" style={{ gridColumn: "span 2" }} />
             ) : (
@@ -612,7 +643,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                     <i className="ic ic-list" aria-hidden="true" />
                     표로 보기
                   </button>
-                  <a href="https://grafana.ops.peaket.example/d/onsale" target="_blank" rel="noreferrer" className="link-more" aria-label="구역별 잔여석 자세히 보기, Grafana 새 탭">
+                  <a {...boardDetail(ctx, '구역별 잔여석')} className="link-more" aria-label="구역별 잔여석 자세히 보기, Grafana 새 탭">
                     자세히 보기
                     <i className="ic ic-external" aria-hidden="true" />
                   </a>
@@ -735,12 +766,15 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
               ) : null}
             </section>
             )}
+            {ctx.live ? (
+              <LivePending id="w-bot" title="봇 차단" origin="봇 방어 지표" eventId={ctx.eventId ?? null} />
+            ) : (
             <section className="widget" role="region" aria-labelledby="w-bot">
               <div className="widget-head wrap">
                 <h2 className="t-sm fw-b" id="w-bot">봇 차단</h2>
                 <div className="actions" style={{ gap: "12px" }}>
                   <span className="slo slo-ok">정상</span>
-                  <a href="https://grafana.ops.peaket.example/d/onsale" target="_blank" rel="noreferrer" className="link-more" aria-label="봇 차단 자세히 보기, Grafana 새 탭">
+                  <a {...boardDetail(ctx, '봇 차단')} className="link-more" aria-label="봇 차단 자세히 보기, Grafana 새 탭">
                     자세히 보기
                     <i className="ic ic-external" aria-hidden="true" />
                   </a>
@@ -772,12 +806,16 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </p>
               </div>
             </section>
+            )}
+            {ctx.live ? (
+              <LivePending id="w-verify" title="추가 검증 유입·통과율·이의 결과" origin="추가 검증 지표" eventId={ctx.eventId ?? null} />
+            ) : (
             <section className="widget is-error" role="region" aria-labelledby="w-verify">
               <div className="widget-head wrap">
                 <h2 className="t-sm fw-b" id="w-verify">추가 검증 유입·통과율·이의 결과</h2>
                 <div className="actions" style={{ gap: "12px" }}>
                   <span className="slo slo-stale">받지 못함</span>
-                  <a href="https://grafana.ops.peaket.example/d/onsale" target="_blank" rel="noreferrer" className="link-more" aria-label="추가 검증 유입·통과율·이의 결과 자세히 보기, Grafana 새 탭">
+                  <a {...boardDetail(ctx, '추가 검증 유입·통과율·이의 결과')} className="link-more" aria-label="추가 검증 유입·통과율·이의 결과 자세히 보기, Grafana 새 탭">
                     자세히 보기
                     <i className="ic ic-external" aria-hidden="true" />
                   </a>
@@ -802,12 +840,16 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </p>
               </div>
             </section>
+            )}
+            {ctx.live ? (
+              <LivePending id="w-prov" title="제공자 성공률·p99" origin="제공자 지표" eventId={ctx.eventId ?? null} style={{ gridColumn: "span 2" }} />
+            ) : (
             <section className="widget" role="region" aria-labelledby="w-prov" style={{ gridColumn: "span 2" }}>
               <div className="widget-head">
                 <h2 className="t-sm fw-b" id="w-prov">제공자 성공률·p99</h2>
                 <div className="actions" style={{ gap: "12px" }}>
                   <span className="slo slo-ok">정상</span>
-                  <a href="https://grafana.ops.peaket.example/d/onsale" target="_blank" rel="noreferrer" className="link-more" aria-label="제공자 성공률·p99 자세히 보기, Grafana 새 탭">
+                  <a {...boardDetail(ctx, '제공자 성공률·p99')} className="link-more" aria-label="제공자 성공률·p99 자세히 보기, Grafana 새 탭">
                     자세히 보기
                     <i className="ic ic-external" aria-hidden="true" />
                   </a>
@@ -859,7 +901,11 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </p>
               </div>
             </section>
+            )}
           </div>
+          {ctx.live ? (
+            <LivePending id="w-biz" title="비즈니스 지표" origin="실시간 표(OPS-160)" eventId={ctx.eventId ?? null} />
+          ) : (
           <section className="widget" role="region" aria-labelledby="w-biz">
             <div className="widget-head">
               <h2 className="t-sm fw-b" id="w-biz">비즈니스 지표</h2>
@@ -874,7 +920,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                   <i className="ic ic-list" aria-hidden="true" />
                   표로 보기
                 </button>
-                <a href="https://grafana.ops.peaket.example/d/onsale" target="_blank" rel="noreferrer" className="link-more" aria-label="비즈니스 지표 자세히 보기, Grafana 새 탭">
+                <a {...boardDetail(ctx, '비즈니스 지표')} className="link-more" aria-label="비즈니스 지표 자세히 보기, Grafana 새 탭">
                   자세히 보기
                   <i className="ic ic-external" aria-hidden="true" />
                 </a>
@@ -973,6 +1019,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
               </>
             ) : null}
           </section>
+          )}
         </div>
       </>
     ) : null}
@@ -1069,7 +1116,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                                 명령 6 열기
                                 <i className="ic ic-chevron-right" aria-hidden="true" />
                               </Link>
-                              <a href="https://grafana.ops.peaket.example/d/onsale" target="_blank" rel="noreferrer" className="link-more" aria-label="결제 신규 진입 정지 자세히 보기, Grafana 새 탭">
+                              <a {...boardDetail(ctx, '결제 신규 진입 정지')} className="link-more" aria-label="결제 신규 진입 정지 자세히 보기, Grafana 새 탭">
                                 자세히 보기
                                 <i className="ic ic-external" aria-hidden="true" />
                               </a>
@@ -1112,7 +1159,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                                 RB-11
                                 <i className="ic ic-chevron-right" aria-hidden="true" />
                               </a>
-                              <a href="https://grafana.ops.peaket.example/d/onsale" target="_blank" rel="noreferrer" className="link-more" aria-label="보류 사건 자세히 보기, Grafana 새 탭">
+                              <a {...boardDetail(ctx, '보류 사건')} className="link-more" aria-label="보류 사건 자세히 보기, Grafana 새 탭">
                                 자세히 보기
                                 <i className="ic ic-external" aria-hidden="true" />
                               </a>
@@ -1247,10 +1294,14 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </section>
               </>
             ) : null}
-            <AlertPanel {...alertPanelFor('live', v)} renderLink={renderRouterLink} style={{ gridColumn: 'span 2' }} footer={<p className="t-xs muted">{DECISION_ORDER}</p>} />
+            {ctx.live ? <LiveAlertSlot style={{ gridColumn: 'span 2' }} /> : <AlertPanel {...alertPanelFor('live', v)} renderLink={renderRouterLink} style={{ gridColumn: 'span 2' }} footer={<p className="t-xs muted">{DECISION_ORDER}</p>} />}
+            {ctx.live ? (
+              <LivePending id="w-lfun" title="퍼널(F3)" origin="퍼널 지표(처리량 급감 경보와 같은 원천)" eventId={ctx.eventId ?? null} style={{ gridColumn: 'span 2' }} />
+            ) : (
             <WidgetSlot ctx={ctx} remote="purchase" title="퍼널(F3)" style={{ gridColumn: 'span 2' }}>
               <FunnelWidget data={F.FUNNEL} pending={ctx.live} detailHref={GRAFANA} freshness={v.isBack ? F.BACK_FRESHNESS : null} style={{ gridColumn: 'span 2' }} />
             </WidgetSlot>
+            )}
             {ctx.live ? (
               <RemoteWidget remote="queue" name="queue-admission-rate" title="입장 비율·빈자리" />
             ) : (
@@ -1287,7 +1338,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                         <i className="ic ic-list" aria-hidden="true" />
                         표로 보기
                       </button>
-                      <a href="https://grafana.ops.peaket.example/d/onsale" target="_blank" rel="noreferrer" className="link-more" aria-label="구역별 잔여석 자세히 보기, Grafana 새 탭">
+                      <a {...boardDetail(ctx, '구역별 잔여석')} className="link-more" aria-label="구역별 잔여석 자세히 보기, Grafana 새 탭">
                         자세히 보기
                         <i className="ic ic-external" aria-hidden="true" />
                       </a>
@@ -1413,6 +1464,9 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 <PgStatusWidget data={v.isAuto ? F.PG_AUTO : F.PG} detailHref={GRAFANA} freshness={v.isBack ? F.BACK_FRESHNESS : null} />
               </WidgetSlot>
             )}
+            {ctx.live ? (
+              <LiveBudgetSlot id="w-lbud" eventId={ctx.eventId ?? null} />
+            ) : (
             <section className="widget" role="region" aria-labelledby="w-lbud">
               <div className="widget-head">
                 <h2 className="t-sm fw-b" id="w-lbud">여정별 남은 허용 실패</h2>
@@ -1422,7 +1476,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                   </>
                 ) : null}
                 <div className="actions">
-                  <a href="https://grafana.ops.peaket.example/d/onsale" target="_blank" rel="noreferrer" className="link-more" aria-label="여정별 남은 허용 실패 자세히 보기, Grafana 새 탭">
+                  <a {...boardDetail(ctx, '여정별 남은 허용 실패')} className="link-more" aria-label="여정별 남은 허용 실패 자세히 보기, Grafana 새 탭">
                     자세히 보기
                     <i className="ic ic-external" aria-hidden="true" />
                   </a>
@@ -1545,9 +1599,17 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </p>
               </div>
             </section>
+            )}
+            {ctx.live ? (
+              <LivePending id="w-lord" title="대기 순서" origin="대기열 팀 원천(대기 순서)" eventId={ctx.eventId ?? null} />
+            ) : (
             <WidgetSlot ctx={ctx} remote="queue" title="대기 순서">
               <QueueOrderWidget data={F.ORDER} pending={ctx.live} detailHref={GRAFANA} freshness={v.isBack ? F.BACK_FRESHNESS : null} />
             </WidgetSlot>
+            )}
+            {ctx.live ? (
+              <LiveSaturationSlot id="w-lsat" eventId={ctx.eventId ?? null} />
+            ) : (
             <section className="widget" role="region" aria-labelledby="w-lsat">
               <div className="widget-head">
                 <h2 className="t-sm fw-b" id="w-lsat">포화도 요약</h2>
@@ -1558,7 +1620,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 ) : null}
                 <div className="actions" style={{ gap: "12px" }}>
                   <span className="slo slo-burning">주의</span>
-                  <a href="https://grafana.ops.peaket.example/d/onsale" target="_blank" rel="noreferrer" className="link-more" aria-label="포화도 요약 자세히 보기, Grafana 새 탭">
+                  <a {...boardDetail(ctx, '포화도 요약')} className="link-more" aria-label="포화도 요약 자세히 보기, Grafana 새 탭">
                     자세히 보기
                     <i className="ic ic-external" aria-hidden="true" />
                   </a>
@@ -1609,8 +1671,12 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                 </p>
               </div>
             </section>
+            )}
             {v.notFold ? (
               <>
+                {ctx.live ? (
+                  <LivePending id="w-lerr" title="오류(Sentry)" origin="Sentry 연동(OPS-050)" kind="sentry" eventId={ctx.eventId ?? null} />
+                ) : (
                 <section className="widget" role="region" aria-labelledby="w-lerr">
                   <div className="widget-head">
                     <h2 className="t-sm fw-b" id="w-lerr">오류(Sentry)</h2>
@@ -1620,7 +1686,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                       </>
                     ) : null}
                     <div className="actions">
-                      <a href="https://grafana.ops.peaket.example/d/onsale" target="_blank" rel="noreferrer" className="link-more" aria-label="오류 자세히 보기, Sentry 새 탭">
+                      <a {...boardDetail(ctx, '오류', 'sentry')} className="link-more" aria-label="오류 자세히 보기, Sentry 새 탭">
                         자세히 보기
                         <i className="ic ic-external" aria-hidden="true" />
                       </a>
@@ -1663,6 +1729,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                     </p>
                   </div>
                 </section>
+                )}
               </>
             ) : null}
             {' '}
@@ -1683,6 +1750,9 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
             {' '}
             {v.notFold ? (
               <>
+                {ctx.live ? (
+                  <LiveDiagnosticsSlot id="w-ldiag" eventId={ctx.eventId ?? null} />
+                ) : (
                 <section className="widget" role="region" aria-labelledby="w-ldiag" style={{ gridColumn: "1 / -1" }}>
                   <div className="widget-head">
                     <h2 className="t-sm fw-b" id="w-ldiag">진단 힌트</h2>
@@ -1693,7 +1763,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                     ) : null}
                     <span className="t-xs muted">운영 명령 없음 · 엔지니어가 원인을 볼 때 씁니다</span>
                     <div className="actions">
-                      <a href="https://grafana.ops.peaket.example/d/onsale" target="_blank" rel="noreferrer" className="link-more" aria-label="진단 힌트 자세히 보기, Grafana 새 탭">
+                      <a {...boardDetail(ctx, '진단 힌트')} className="link-more" aria-label="진단 힌트 자세히 보기, Grafana 새 탭">
                         자세히 보기
                         <i className="ic ic-external" aria-hidden="true" />
                       </a>
@@ -1797,6 +1867,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
                     </p>
                   </div>
                 </section>
+                )}
               </>
             ) : null}
             {' '}
@@ -1822,6 +1893,9 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
     {v.isT30 ? (
       <>
         <div role="tabpanel" id="panel-t30" aria-labelledby="tab-t30" style={{ display: "grid", gridTemplateColumns: "repeat(var(--dash-cols, 4),minmax(0,1fr))", gap: "12px", alignItems: "start" }}>
+          {ctx.live ? (
+            <LiveReadinessPanel eventId={ctx.eventId ?? null} role={ctx.role ?? null} />
+          ) : (
           <section className="widget" role="region" aria-labelledby="w-pf" style={{ gridColumn: "span 3" }}>
             <div className="widget-head">
               <h2 className="t-sm fw-b" id="w-pf">T-30분 점검 · 필수 13 · 권고 2</h2>
@@ -1967,6 +2041,10 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
               </ul>
             </div>
           </section>
+          )}
+          {ctx.live ? (
+            null
+          ) : (
           <aside className="widget" role="region" aria-labelledby="w-gng">
             <div className="widget-head"><h2 className="t-sm fw-b" id="w-gng">Go/No-Go 판정</h2></div>
             <div className="widget-body">
@@ -1983,6 +2061,7 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
               <p className="t-sm muted">이 회차의 판정이 아직 없습니다. 판정과 사유는 감사 로그에 남습니다.</p>
             </div>
           </aside>
+          )}
         </div>
       </>
     ) : null}
