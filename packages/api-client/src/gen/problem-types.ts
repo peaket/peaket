@@ -13,6 +13,7 @@ export type ProblemType =
   | 'admin-login-unavailable'
   | 'admin-role-not-allowed'
   | 'admission-token-invalid'
+  | 'alert-issue-relay-unavailable'
   | 'already-admitted'
   | 'already-approved'
   | 'already-reported'
@@ -419,6 +420,7 @@ export const PROBLEM_TYPES = {
   'admin-login-unavailable': { status: 503, title: "잠시 뒤 다시 시도해 주세요" },
   'admin-role-not-allowed': { status: 403, title: "이 역할로는 초대할 수 없습니다" },
   'admission-token-invalid': { status: 401, title: "입장 확인이 끝났습니다" },
+  'alert-issue-relay-unavailable': { status: 502, title: "경보 티켓을 만들지 못했습니다" },
   'already-admitted': { status: 409, title: "이 회차에 이미 입장했습니다" },
   'already-approved': { status: 409, title: "이미 확정된 요청입니다" },
   'already-reported': { status: 409, title: "이미 신고한 후기입니다" },
