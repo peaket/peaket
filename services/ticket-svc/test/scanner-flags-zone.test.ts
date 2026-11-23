@@ -30,6 +30,10 @@ const T_EAST_1 = '0190f3a1-7c2e-7a00-8000-0000000f0641';
 const T_EAST_2 = '0190f3a1-7c2e-7a00-8000-0000000f0642';
 const T_EAST_OVERRIDE = '0190f3a1-7c2e-7a00-8000-0000000f0643';
 const T_WEST = '0190f3a1-7c2e-7a00-8000-0000000f0644';
+/** 처리 시험이 따로 쓰는 서문 티켓(다른 시험의 표시를 바꾸지 않는다, 시험 리뷰 RV-10) */
+const T_WEST_RESOLVE = '0190f3a1-7c2e-7a00-8000-0000000f0645';
+/** 배치 없는 책임자 기기가 배치된 다른 회차(어느 회차든 배치가 있으면 통과하는 틀린 구현을 잡는다) */
+const OTHER_EVENT = '0190f3a1-7c2e-7a00-8000-0000000f0646';
 const TOKEN = 'f056-lead-token';
 const ATH = athOf(TOKEN);
 const HOST = 'scanner-api.peaket.example';
@@ -88,6 +92,7 @@ beforeAll(async () => {
   gate.seedTicket({ ticketId: T_EAST_2, eventId: EVENT, seatId: 'E-2', gateZone: '동문', status: 'ACTIVE' });
   gate.seedTicket({ ticketId: T_EAST_OVERRIDE, eventId: EVENT, seatId: 'E-3', gateZone: '동문', status: 'ACTIVE' });
   gate.seedTicket({ ticketId: T_WEST, eventId: EVENT, seatId: 'W-1', gateZone: '서문', status: 'ACTIVE' });
+  gate.seedTicket({ ticketId: T_WEST_RESOLVE, eventId: EVENT, seatId: 'W-2', gateZone: '서문', status: 'ACTIVE' });
   const shift = new MemoryScannerShiftStore(gate);
   for (const [deviceId, name] of [[EAST_LEAD, '동문-책임'], [WEST_LEAD, '서문-책임'], [NO_PLACEMENT, '미배치-책임']] as const) {
     const k = await keyOf();
@@ -97,6 +102,7 @@ beforeAll(async () => {
   }
   await shift.putPlacement({ eventId: EVENT, deviceId: EAST_LEAD, gateZone: '동문', mode: 'IN', setBy: ADMIN, atMs: NOW - 3_600_000, expectedVersion: 0 });
   await shift.putPlacement({ eventId: EVENT, deviceId: WEST_LEAD, gateZone: '서문', mode: 'IN', setBy: ADMIN, atMs: NOW - 3_600_000, expectedVersion: 0 });
+  await shift.putPlacement({ eventId: OTHER_EVENT, deviceId: NO_PLACEMENT, gateZone: '동문', mode: 'IN', setBy: ADMIN, atMs: NOW - 3_600_000, expectedVersion: 0 });
   flagIds.east1 = await flagOf(T_EAST_1, '동문', 'DUPLICATE');
   flagIds.east2 = await flagOf(T_EAST_2, '동문', 'DUPLICATE');
   flagIds.override = await flagOf(T_EAST_OVERRIDE, '동문', 'OVERRIDE_REVIEW');
@@ -170,7 +176,7 @@ describe('책임자 이상 표시 목록 거르기(O-T53, offline-gate §7.2)', 
   });
 
   test('O-T53 ① 서문 책임자 기기는 서문 표시 하나만 받는다', async () => {
-    expect(summary(await allPages(WEST_LEAD, 50))).toEqual([{ flagId: flagIds.west, ticketId: T_WEST, gateZone: '서문', kind: 'DUPLICATE', status: 'OPEN' }]);
+    expect(summary((await allPages(WEST_LEAD, 50)).filter((f) => f.ticketId !== T_WEST_RESOLVE))).toEqual([{ flagId: flagIds.west, ticketId: T_WEST, gateZone: '서문', kind: 'DUPLICATE', status: 'OPEN' }]);
   });
 
   test('O-T53 ② 같은 구역의 예외 통과 사후 검토 표시(OVERRIDE_REVIEW)는 목록에 없다', async () => {
@@ -179,16 +185,17 @@ describe('책임자 이상 표시 목록 거르기(O-T53, offline-gate §7.2)', 
     expect(items.map((f) => f.flagId)).not.toContain(flagIds.override);
   });
 
-  test('O-T53 ③ 그 회차 배치가 없는 책임자 기기는 409 no-placement다', async () => {
+  test('O-T53 ③ 그 회차 배치가 없는 책임자 기기는 다른 회차에 배치가 있어도 409 no-placement다', async () => {
     const r = await call(NO_PLACEMENT, 'GET', `/v1/scanner/events/${EVENT}/flags`);
     expect(r.statusCode).toBe(409);
     expect((JSON.parse(r.payload) as { type?: string }).type).toBe('https://peaket.example/problems/no-placement');
   });
 
   test('O-T53 ③ 동문 책임자가 서문 표시를 ID로 처리하면 받는다(200, 상태가 바뀐다)', async () => {
-    const r = await call(EAST_LEAD, 'POST', `/v1/scanner/flags/${flagIds.west}/resolution`, { status: 'SUSPECT', note: '옆 구역 대신 확인' });
+    const own = await flagOf(T_WEST_RESOLVE, '서문', 'DUPLICATE');
+    const r = await call(EAST_LEAD, 'POST', `/v1/scanner/flags/${own}/resolution`, { status: 'SUSPECT', note: '옆 구역 대신 확인' });
     expect(r.statusCode).toBe(200);
-    expect(JSON.parse(r.payload)).toMatchObject({ flagId: flagIds.west, ticketId: T_WEST, status: 'SUSPECT' });
-    expect(summary(await allPages(WEST_LEAD, 50))).toEqual([{ flagId: flagIds.west, ticketId: T_WEST, gateZone: '서문', kind: 'DUPLICATE', status: 'SUSPECT' }]);
+    expect(JSON.parse(r.payload)).toMatchObject({ flagId: own, ticketId: T_WEST_RESOLVE, status: 'SUSPECT' });
+    expect(summary((await allPages(WEST_LEAD, 50)).filter((f) => f.ticketId === T_WEST_RESOLVE))).toEqual([{ flagId: own, ticketId: T_WEST_RESOLVE, gateZone: '서문', kind: 'DUPLICATE', status: 'SUSPECT' }]);
   });
 });

@@ -278,6 +278,7 @@ describe('F-05-6 실제 ticket-svc(start) 입장 기록 마감', () => {
 
   test('O-T29 ② 한 대가 보고하지 않은 회차는 대기 끝 뒤 TIMEOUT으로 마감되고, ops에 그 기기의 미보고 건 하나를 내부 토큰과 함께 보낸다', async () => {
     const unreportedBefore = await metric('ticket_scanner_unreported_total');
+    const timeoutBefore = await metric('ticket_entry_closes_total', ['reason="TIMEOUT"']);
     const ends = Date.now() - ROLE_END_AFTER_ENDS_MS - UNREPORTED_WAIT_MS - 60_000;
     const e = await eventOf({ endsAtMs: ends, devices: 2 });
     // 한 대는 비웠다고 보고하고 한 대는 보고하지 않는다
@@ -300,6 +301,7 @@ describe('F-05-6 실제 ticket-svc(start) 입장 기록 마감', () => {
       });
     }
     expect(await metric('ticket_scanner_unreported_total')).toBe(unreportedBefore + 1);
+    expect(await metric('ticket_entry_closes_total', ['reason="TIMEOUT"'])).toBe(timeoutBefore + 1);
   });
 
   test('O-T29 ⑥ core 내부 입구가 503이면 마감 행은 남고 알린 시각이 비며 실패 지표가 오른다. 되살리면 다시 보내 채워지고 보낸 마감 시각은 늘 같다', async () => {
@@ -327,7 +329,7 @@ describe('F-05-6 실제 ticket-svc(start) 입장 기록 마감', () => {
   });
 
   test('O-T29 ⑥ ops가 503·accepted false로 답하면 건 행이 열리지 않은 채 남아 다시 보내고, 받은 뒤 연 시각이 채워진다(같은 eventKey 하나, 그 뒤로는 보내지 않음)', async () => {
-    const sendFailuresBefore = await metric('ticket_cs_case_send_failures_total');
+    const sendFailuresBefore = await metric('ticket_cs_case_send_failures_total', ['kind="SCANNER_UNREPORTED"']);
     const ends = Date.now() - ROLE_END_AFTER_ENDS_MS - UNREPORTED_WAIT_MS - 120_000;
     // 답 차례를 기기 ID(sourceId)에 걸어야 하므로, 판매 설정을 503으로 두어 차례를 걸 때까지 마감되지 않게 한다
     const made = await eventOf({ endsAtMs: ends, devices: 1, sale: { kind: '503' } });
@@ -341,7 +343,7 @@ describe('F-05-6 실제 ticket-svc(start) 입장 기록 마감', () => {
     // 503 한 번, accepted false 한 번, 받음 한 번(판단이 겹치면 받음이 한 번 더 갈 수 있다)
     expect(sent().length).toBeGreaterThanOrEqual(3);
     expect(new Set(sent().map((c) => c.body.eventKey))).toEqual(new Set([unreportedKey(made.eventId, made.devices[0]!.deviceId)]));
-    expect(await metric('ticket_cs_case_send_failures_total')).toBeGreaterThanOrEqual(sendFailuresBefore + 2);
+    expect(await metric('ticket_cs_case_send_failures_total', ['kind="SCANNER_UNREPORTED"'])).toBeGreaterThanOrEqual(sendFailuresBefore + 2);
     expect(logLines.some((l) => l.includes('scanner-unreported.case-failed') && l.includes(made.eventId))).toBe(true);
     // 받은 뒤에는 더 보내지 않는다: 마감되지 않는 보초 회차로 판단이 두 번 돈 뒤 센 값과, 다시 두 번 돈 뒤 센 값이 같다
     const sentinel = await eventOf({ endsAtMs: ends, devices: 0, sale: { kind: '503' } });
@@ -354,14 +356,19 @@ describe('F-05-6 실제 ticket-svc(start) 입장 기록 마감', () => {
   });
 
   test('O-T29 ⑥ core 판매 설정이 503이거나 답하지 않는 회차는 판단마다 물어도 마감하지 않고, 같은 때 다른 회차는 마감한다. 되살리면 마감한다', async () => {
+    const skippedBefore = await metric('ticket_entry_close_skipped_total', ['reason="ends_unknown"']);
     const ends = Date.now() - ROLE_END_AFTER_ENDS_MS - 60_000;
-    const down = await eventOf({ endsAtMs: ends, devices: 0, sale: { kind: '503' } });
-    const hang = await eventOf({ endsAtMs: ends, devices: 0, sale: { kind: 'hang' } });
+    // 답 없는 회차와 503 회차가 더 오래된 시작이라 정상 회차보다 먼저 묻는다(답 없는 호출이 판단 전체를 막으면 정상 회차가 마감되지 않는다, 시험 리뷰 RV-11)
+    const hang = await eventOf({ endsAtMs: ends - 2_000, devices: 0, sale: { kind: 'hang' } });
+    const down = await eventOf({ endsAtMs: ends - 1_000, devices: 0, sale: { kind: '503' } });
     const ok = await eventOf({ endsAtMs: ends, devices: 0 });
     await expect.poll(async () => (await closeRow(ok.eventId)) !== undefined, POLL).toBe(true);
     await expect.poll(() => Math.min(standIn.saleAsked.get(down.eventId) ?? 0, standIn.saleAsked.get(hang.eventId) ?? 0), POLL).toBeGreaterThanOrEqual(2);
     expect(await closeRow(down.eventId)).toBeUndefined();
     expect(await closeRow(hang.eventId)).toBeUndefined();
+    // 끝 시각을 모른 회차는 판단마다 건너뜀 지표를 올리고 로그 줄을 남긴다(정본 §7.4)
+    expect(await metric('ticket_entry_close_skipped_total', ['reason="ends_unknown"'])).toBeGreaterThanOrEqual(skippedBefore + 4);
+    expect(logLines.some((l) => l.includes('entry-close.ends-unknown') && l.includes(down.eventId))).toBe(true);
     standIn.sale.set(down.eventId, { kind: 'ok', endsAtMs: ends });
     standIn.sale.set(hang.eventId, { kind: 'ok', endsAtMs: ends });
     await expect.poll(async () => (await closeRow(down.eventId)) !== undefined && (await closeRow(hang.eventId)) !== undefined, POLL).toBe(true);

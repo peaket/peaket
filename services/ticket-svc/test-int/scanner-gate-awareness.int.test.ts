@@ -104,18 +104,37 @@ describe('state_seq와 갈림(O-T2 ①, 실제 PostgreSQL)', () => {
     expect(res.flags.map((f) => ({ kind: f.kind, awareness: f.awareness }))).toEqual([{ kind: 'DUPLICATE', awareness: 'CONCURRENT' }]);
   });
 
-  test('O-T2 ① 늦은 기록을 먼저 올린 뒤 이른 기록이 오면 정상이 바뀌고, 내려간 기록의 갈림은 새 정상의 state_seq로 본다(knownSeq 0 → CONCURRENT)', async () => {
+  /** 내림 장면 하나(메모리 짝 시험과 같은 차례): 늦은 기록(knownSeq k) → bump → 이른 기록. 회차마다 번호가 1부터라 같은 장면이면 번호가 같다 */
+  async function demotion(k: number) {
     const eventId = randomUUID();
     const [ticketId] = (await seed(eventId, 1)) as [string];
-    const late = scanOf(eventId, ticketId, T0 + 60_000, 0);
+    const late = scanOf(eventId, ticketId, T0 + 60_000, k);
     await upload(eventId, DEVICE_B, [late]);
+    const sLate = (await stateSeqOf(eventId, late.id))!;
     await bump(eventId);
+    const L = (await store.changes({ eventId, after: 0, limit: 1000 })).lastSeq;
     const early = scanOf(eventId, ticketId, T0, 0);
     const res = await upload(eventId, DEVICE_A, [early]);
-    expect(await stateSeqOf(eventId, early.id)).toBeGreaterThan(0);
-    expect(res.flags.map((f) => ({ kind: f.kind, awareness: f.awareness }))).toEqual([{ kind: 'DUPLICATE', awareness: 'CONCURRENT' }]);
-    const rows = (await database.pool.query<{ id: string; result: string; flag: string }>('select id, result, flag from scan_event where event_id = $1 and ticket_id = $2', [eventId, ticketId])).rows;
-    expect(Object.fromEntries(rows.map((r) => [r.id, `${r.result}/${r.flag}`]))).toEqual({ [early.id]: 'PASS/NONE', [late.id]: 'REJECT/DUPLICATE' });
+    const sEarly = (await stateSeqOf(eventId, early.id))!;
+    return { eventId, ticketId, late, early, res, sLate, L, sEarly };
+  }
+
+  test('O-T2 ① 늦은 기록을 먼저 올린 뒤 이른 기록이 오면 정상이 바뀌고, 내려간 기록은 새 정상의 state_seq로 견준다: s_late ≤ knownSeq < s_early면 CONCURRENT, = s_early면 KNOWN(시험 리뷰 RV-02)', async () => {
+    const probe = await demotion(0);
+    expect(probe.L).toBeGreaterThan(probe.sLate);
+    expect(probe.sEarly).toBeGreaterThan(probe.L);
+    const gap = probe.sEarly - probe.L;
+    for (const [k, awareness] of [
+      [probe.L + gap - 1, 'CONCURRENT'],
+      [probe.L + gap, 'KNOWN'],
+    ] as const) {
+      const d = await demotion(k);
+      expect({ L: d.L, sEarly: d.sEarly, sLate: d.sLate }, `k=${k}`).toEqual({ L: probe.L, sEarly: probe.sEarly, sLate: probe.sLate });
+      expect(k, `k=${k}`).toBeGreaterThanOrEqual(d.sLate);
+      expect(d.res.flags.map((f) => ({ kind: f.kind, awareness: f.awareness })), `k=${k}`).toEqual([{ kind: 'DUPLICATE', awareness }]);
+      const rows = (await database.pool.query<{ id: string; result: string; flag: string }>('select id, result, flag from scan_event where event_id = $1 and ticket_id = $2', [d.eventId, d.ticketId])).rows;
+      expect(Object.fromEntries(rows.map((r) => [r.id, `${r.result}/${r.flag}`])), `k=${k}`).toEqual({ [d.early.id]: 'PASS/NONE', [d.late.id]: 'REJECT/DUPLICATE' });
+    }
   });
 
   test('O-T2 ① 시차 1~120초·올리는 차례를 바꾼 중복 3,000건은 표시 3,000개(모두 CONCURRENT)이고 정상은 모두 보정 시각이 가장 이른 기록이다', async () => {
