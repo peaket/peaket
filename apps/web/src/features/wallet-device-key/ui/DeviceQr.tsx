@@ -45,6 +45,11 @@ export interface DeviceQrProps {
   offline?: boolean;
   /** 오프라인 진입용 티켓 스냅샷. 있으면 IndexedDB에 저장한다 */
   snapshot?: DeviceQrSnapshot;
+  /**
+   * 데스크톱 안내 자리(d5 §5.13 보드 d, offline-gate §2): 키가 없으면 큰 등록 버튼 대신 ( 그래도 이 기기에 등록 › ) 하나만 그리고,
+   * 누르면 안내 없이 바로 등록한다(사용자가 데스크톱 등록을 골랐다, ADR-0363 결정 10). 값은 그 버튼의 접근 이름이다
+   */
+  desktopProceedLabel?: string;
 }
 
 function errorText(error: unknown): string {
@@ -87,7 +92,7 @@ async function linkedProvider(): Promise<string | undefined> {
   return (r.data.providers ?? []).map((p) => p.provider).find((p): p is string => typeof p === 'string' && p.length > 0);
 }
 
-export function DeviceQr({ ticketId, label, maxWidth = 324, offline = false, snapshot }: DeviceQrProps) {
+export function DeviceQr({ ticketId, label, maxWidth = 324, offline = false, snapshot, desktopProceedLabel }: DeviceQrProps) {
   const [phase, setPhase] = useState<Phase>('loading');
   const [status, setStatus] = useState<WalletKeyStatus | null>(null);
   const [frame, setFrame] = useState<QrFrame | null>(null);
@@ -239,9 +244,10 @@ export function DeviceQr({ ticketId, label, maxWidth = 324, offline = false, sna
 
   const enroll = useCallback(
     () =>
-      settle(async () => {
-        // 등록할 때 영구 저장소를 요청한다(§5.4 '입장용 휴대폰 등록')
-        await requestPersistentStorage();
+      settle(() => {
+        // 등록할 때 영구 저장소를 요청한다(§5.4 '입장용 휴대폰 등록'). 기다리지 않는다: Firefox는 persist()가 사용자 답을 받을 때까지
+        // 끝나지 않아(권한 묻기) 기다리면 등록이 멈춘다
+        void requestPersistentStorage();
         return enrollDeviceKey(ticketId, { offline });
       }, 'registering'),
     [settle, ticketId, offline],
@@ -315,6 +321,9 @@ export function DeviceQr({ ticketId, label, maxWidth = 324, offline = false, sna
         : REAUTH_UNAVAILABLE
       : null);
 
+  // 데스크톱 안내 카드 안에서는 읽는 동안 자리를 비워 둔다(안내 글이 이미 있다)
+  if (desktopProceedLabel && phase === 'loading') return null;
+
   if (phase === 'loading') {
     return (
       <div className={CARD} style={{ minHeight: 400 }} aria-busy="true">
@@ -340,6 +349,32 @@ export function DeviceQr({ ticketId, label, maxWidth = 324, offline = false, sna
           </button>
         ) : null}
       </div>
+    );
+  }
+
+  if (desktopProceedLabel && phase === 'status' && status?.phase === 'no-key') {
+    // 데스크톱 안내 카드의 ( 그래도 이 기기에 등록 › ): 안내는 카드가 이미 보였으므로 누르면 바로 키를 만들어 등록한다
+    const disabled = !online || offline;
+    return (
+      <>
+        {status.notice === 'rejected' ? (
+          <p className="t-sm fw-b" role="alert">
+            등록하지 못했습니다. 다시 등록해 주세요
+          </p>
+        ) : null}
+        <button
+          className="btn btn-text"
+          type="button"
+          aria-label={desktopProceedLabel}
+          aria-disabled={disabled ? true : undefined}
+          onClick={() => {
+            if (!disabled) void enroll();
+          }}
+        >
+          그래도 이 기기에 등록
+          <i className="ic ic-chevron-right" aria-hidden="true" />
+        </button>
+      </>
     );
   }
 

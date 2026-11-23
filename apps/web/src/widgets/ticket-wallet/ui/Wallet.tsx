@@ -463,10 +463,14 @@ function FirstTicket({ v, go, path }: { v: WalletView; go: Go; path: string }) {
               <p className="t-sm muted" id="d-why">
                 이 컴퓨터에 등록하면 공연 당일 휴대폰에서는 티켓을 다시 받아야 합니다. 다시 받기는 티켓당 24시간에 1번만 할 수 있습니다.
               </p>
-              <ToastButton className="btn btn-text" label={`${T1.seat}, 그래도 이 기기에 등록`} message="이 기기를 입장용으로 등록했습니다">
-                그래도 이 기기에 등록
-                <i className="ic ic-chevron-right" aria-hidden="true" />
-              </ToastButton>
+              {/* ( 그래도 이 기기에 등록 › ): 실제 등록 부품(늦게 싣는다)이 그린다. 누르면 이 기기에 키를 만들어 등록한다(ADR-0363 결정 10) */}
+              <DeviceQrLazy
+                ticketId={T1.qrUuid}
+                label={`입장 QR, 티켓 ${T1.qrTicketId}, ${T1.seat}, 15초마다 바뀝니다`}
+                offline={v.offline}
+                snapshot={T1_SNAPSHOT}
+                desktopProceedLabel={`${T1.seat}, 그래도 이 기기에 등록`}
+              />
             </div>
           ) : null}
 
