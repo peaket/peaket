@@ -153,7 +153,38 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 
 ## 검증
 
-(검증 담당이 채운다)
+### 틀린 구현 표본
+
+검증 담당(`lane5-fixpt-verify`)이 2026-11-23 09:22~09:31에 리뷰 커밋 `364570684` 트리에 계획의 표본 S1~S6을 하나씩 넣고 검사를 돌린 뒤 손으로 되돌렸다(넣기 전 파일을 임시 폴더에 복사해 두고 다시 덮음, 끝에 `git diff` 빔). **6개 넣어 6개 잡혔다.**
+
+| # | 넣은 것 | 검사 | 결과 |
+| --- | --- | --- | --- |
+| S1 | `docs/api/openapi.yaml`에서 `settlement-dependency-unavailable` 줄 삭제 | PRF192, api-client `gen:check` | **잡힘**. PRF192 × `missing`에 `"ops-svc settlement-dependency-unavailable"`(`problem-types.test.ts:180`), `gen:check` '다름: problem-types.ts' |
+| S2 | `approval-conflict` 상태 409 → 422 | PRF192 | **잡힘**. `[ 'ops-svc approval-conflict 409≠422' ]`(`:181`) |
+| S3 | `settlement-adjustment-already-applied` 제목 '반려할' → '반려힐' | PRF192 | **잡힘**. `titles`에 코드 제목 '조정이 이미 적용되어 반려할 수 없습니다'가 목록과 다름(`:182`) |
+| S4 | `packages/api-client/src/gen/problem-types.ts`에서 `'settlement-adjustment-already-applied'` 값 줄 삭제 | api-client `gen:check` | **잡힘**. '다름: problem-types.ts' |
+| S5 | `packages/platform/turbo.json` 입력에서 `$TURBO_ROOT$/services/*/src/**` 삭제 | `--dry=json`의 `@peaket/platform#test` `hash`, `payment-http.ts` 끝 주석 한 줄 전·후 | **잡힘**. `53cf2c408bab3093` → `53cf2c408bab3093` 그대로(고친 트리는 바뀜, 시험 결과 ③) |
+| S6 | 같은 파일에서 `$TURBO_EXTENDS$` 삭제 | 같은 대조, `docs/api/openapi.yaml` 끝 주석 한 줄 전·후 | **잡힘**. `201c9f2a83aa88b8` → `201c9f2a83aa88b8` 그대로. 풀린 입력이 1680개 → 1417개로 줄고 `docs/api` 파일이 0개가 된다(뿌리 입력과 패키지 자기 `src/`·`test/`가 함께 빠짐) |
+
+- 되돌린 뒤 `@peaket/platform#test` `hash`는 `53573b99dd6947aa`로 시험 결과 ③·리뷰와 같다.
+
+### 게이트
+
+| 검사 | 결과 |
+| --- | --- |
+| `pnpm --filter @peaket/platform test` | 65 파일·773 시험 통과. 처음 한 번은 전체 typecheck와 겹쳐 돌려 4 실패(기계가 몰린 시간 초과)였고, 따로 다시 돌려 실패 0 |
+| `pnpm --filter @peaket/contracts gen:check` | '생성물이 계약과 같다' |
+| `pnpm --filter @peaket/api-client gen:check` | '생성물이 계약과 같다' |
+| `pnpm --filter @peaket/api-client test` | 9 파일·116 시험 통과 |
+| `pnpm lint` | 0 |
+| `pnpm exec turbo run typecheck`(전체) | 43 작업 성공(캐시 18) |
+| `python -I -X utf8 tools/doc-check/check_all.py` | 오류 0·경고 4(이 묶음과 무관한 holds 응답 설명 둘·mermaid 건너뜀 등) → 통과 |
+| `node tools/ci/roles-check.mjs --base origin/develop --head HEAD`(이 커밋 뒤) | 아래 '판정' |
+
+### 판정
+
+- 표본 6개 모두 계획이 적은 검사에 잡혔다. 오류 목록 세 줄(이름·상태·제목)은 PRF192가, 생성물은 `gen:check`가, `packages/platform/turbo.json`의 두 입력(서비스 원본 더하기·뿌리 입력 물려받기)은 `--dry=json` 열쇠 대조가 지킨다. 다만 S5·S6은 상시 시험이 아니라 손 대조로만 잡힌다(시험 파일 없음, 계획이 정한 방식).
+- 게이트 통과. `roles-check`의 담당 표 impl 줄(세션 ID `lane5-fixpt-impl`)이 비어 실패로 남으면 **기록 담당 몫**으로 넘긴다(검증 담당은 이 줄을 쓰지 않는다).
 
 ## 담당 표
 
@@ -163,4 +194,4 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 | impl | | | | |
 | test | lane5-fixpt-test | claude-opus-5-5 | 2026-11-23T09:08:00+09:00 | 2026-11-23T09:16:00+09:00 |
 | review | lane5-fixpt-review | claude-opus-5-5 | 2026-11-23T09:17:00+09:00 | 2026-11-23T09:25:00+09:00 |
-| verify | | | | |
+| verify | lane5-fixpt-verify | claude-opus-5-5 | 2026-11-23T09:22:00+09:00 | 2026-11-23T09:33:00+09:00 |
