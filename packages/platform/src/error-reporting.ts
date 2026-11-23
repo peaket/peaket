@@ -22,6 +22,7 @@ import {
 import { ServerRuntimeClient, nodeStackLineParser } from '@sentry/core/server';
 import { DrizzleQueryError } from 'drizzle-orm';
 import { redactDeep } from './log.js';
+import { maskPiiText } from './pii-text.js';
 import { queryErrorInfo } from './request-log.js';
 import { withoutTracePropagation } from './trace-boundary.js';
 
@@ -85,7 +86,27 @@ const KEPT_EVENT_KEYS = new Set([
   'exception', 'tags', 'user', 'contexts', 'sdk', 'fingerprint', 'transaction', 'modules', 'message', 'type',
 ]);
 
-/** beforeSend: 칸 거름 → 사용자는 id(accountRef)만 → 로그와 같은 가림(redactDeep, observability §7) → 받는 곳이 IP를 짐작하지 않게 */
+/**
+ * 사건의 글(오류 글 exception value·연결된 원인 오류의 글, message, 지문, transaction, 이동 기록 글) 속 이메일·전화번호·카드 번호 꼴을 가린다
+ * (오류 수집 가림 꼴, pii-text.ts, observability §7, 리뷰 RV012-5). redactDeep이 만든 사본을 바꾼다
+ */
+function maskEventText(e: Record<string, unknown>): void {
+  const exception = e.exception as { values?: { value?: unknown }[] } | undefined;
+  for (const v of exception?.values ?? []) if (v && typeof v === 'object') v.value = maskPiiText(v.value);
+  if (typeof e.message === 'string') e.message = maskPiiText(e.message);
+  else if (e.message && typeof e.message === 'object') {
+    const m = e.message as Record<string, unknown>;
+    for (const k of ['message', 'formatted']) m[k] = maskPiiText(m[k]);
+    if (Array.isArray(m.params)) m.params = m.params.map((p) => maskPiiText(p));
+  }
+  if (Array.isArray(e.fingerprint)) e.fingerprint = e.fingerprint.map((f) => maskPiiText(f));
+  e.transaction = maskPiiText(e.transaction);
+  // 이동 기록은 위 칸 거름에서 지우지만, 칸 목록이 바뀌어도 글이 그대로 나가지 않게 같이 가린다
+  if (Array.isArray(e.breadcrumbs)) for (const b of e.breadcrumbs) if (b && typeof b === 'object') (b as Record<string, unknown>).message = maskPiiText((b as Record<string, unknown>).message);
+  if (e.transaction === undefined) delete e.transaction;
+}
+
+/** beforeSend: 칸 거름 → 사용자는 id(accountRef)만 → 로그와 같은 가림(redactDeep, observability §7)과 글 속 개인정보 꼴 가림 → 받는 곳이 IP를 짐작하지 않게 */
 export function lockEvent(event: ErrorEvent): ErrorEvent {
   const kept: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(event)) if (KEPT_EVENT_KEYS.has(k)) kept[k] = v;
@@ -96,6 +117,7 @@ export function lockEvent(event: ErrorEvent): ErrorEvent {
   const contexts = (event.contexts ?? {}) as Record<string, unknown>;
   kept.contexts = Object.fromEntries(Object.entries(contexts).filter(([k]) => k === 'runtime' || k === 'os' || k === 'trace'));
   const masked = redactDeep(kept) as Record<string, unknown>;
+  maskEventText(masked);
   const sdk = (masked.sdk ?? {}) as Record<string, unknown>;
   masked.sdk = { ...sdk, settings: { infer_ip: 'never' } };
   return masked as unknown as ErrorEvent;
