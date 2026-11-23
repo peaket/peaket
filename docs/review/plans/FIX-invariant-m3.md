@@ -226,7 +226,45 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 
 ## 검증
 
-(검증 담당)
+검증 담당 `lane5-fixm3-verify`, 계획 고침 커밋 `8ae3ca39d` 위(바탕 `f0c0206da`). 계획·시험·구현·리뷰에 관여하지 않았다. 코드·시험은 고치지 않았고, 틀린 구현은 손으로 넣고 원본 사본으로 되돌렸다(끝에 `git diff` 빔).
+
+### 결과
+
+- **(가) 뷰 `receivable_move`를 거친 앱의 쓰기·읽기 — 통과.** PRF180 M3 ⑨(저장소의 지급 묶음 상계·보증 충당·이동 기록 넣기가 뷰를 거쳐 `receivable_movement`에 쓰이고 저장소 읽기 셋이 표의 행·이동 ID 그대로)와 settlement 통합 27개 전부가 PostgreSQL 18에서 통과했다. 뷰를 뺀 0028(S1)에서는 ⑨와 기존 상계·보증 충당 시험 다섯, `settlement-a1v` J-T28 ②가 진다. 그러니 이 시험들이 뷰 길을 실제로 밟는다. RV-05(여러 줄 넣기)도 손으로 확인했다(아래).
+- **(나) 실제 payment DB에서 M3가 SKIPPED 없이 세어지는가 — 통과.** J-T24 ①②⑤(`migratePayment`로 마이그레이션 0000~0028을 모두 적용한 DB)가 통과했다. 따로 손으로도 돌렸다: 빈 PostgreSQL 18.6에 `migratePayment`를 돌리고 뷰로 이동 기록 다섯 줄을 넣은 뒤 `node dist/cli.js`를 `INVARIANT_PAYMENT_DB_URL`만 주어 부르니 `M3 FAIL violations=3`(남은 금액을 맞추지 않은 미수금 셋, `moved=1011`·`2022`·`3000`으로 뷰로 넣은 행의 합 그대로)이고 끝 코드 1, M1·M2·M4·M5·P1은 PASS, SKIPPED 11개는 모두 '시험 기록 없음'이나 '원본 없음'이고 '원본에 표 없음'은 없었다. 이름을 `receivable_movements`로 바꾼 0028(S4)에서는 ①②⑤가 모두 진다.
+
+| # | 넣은 틀린 것 | 진 시험 | 판정 |
+| --- | --- | --- | --- |
+| S1 | 0028에서 `CREATE VIEW` 줄을 지움 | 단위 PRF180 M3 ⑥. 통합 settlement 8(⑦⑧⑨, 0016 표 목록, 상계·롤백·보증 충당·J-T28 ①), `settlement-a1v` J-T28 ② 1 | 잡힘 |
+| S2 | 0028을 drizzle-kit 꼴로 바꿈(제약 넷 `DROP`·`ADD CONSTRAINT`, `DROP INDEX`·`CREATE INDEX`, 뷰 없음) | 단위 ⑥ | 잡힘 |
+| S3 | 0028에 표 이름 바꾸기와 뷰만 남김(인덱스·제약 이름은 옛 머리) | 단위 ⑥, 통합 ⑦·⑧(⑧은 제약 이름 `receivable_movement_amount_check` 단언) | 잡힘 |
+| S4 | ㈀ 0028이 `receivable_movements`로 바꿈 ㈁ `tables.ts`를 `receivable_move`로 되돌림 | ㈀ 검사기 J-T24 ①②⑤(셋) 5, payment `payment-grpc` PRF180 표 목록 1 ㈁ 검사기 통합 40(①과 M3 SQL이 읽는 임시 표가 없어 대부분) | 잡힘 |
+| S5 | 뷰를 `security_invoker` 없이 만듦 | 단위 ⑥, 통합 ⑦ | 잡힘 |
+| S6 | ㈀ `skipWarnings`가 `skip`이 있는 모든 결과를 냄 ㈁ `summaryLine`의 꼬리를 늘 `SKIPPED 없음`으로 | ㈀ 단위 J-T24 ④(경고), 통합 J-T24 ③·⑤ 셋 ㈁ 단위 J-T24 ④(요약) | 잡힘 |
+| S7 | ㈀ `runCli`가 SKIPPED가 있으면 1 ㈁ 경고를 표준 출력에 냄 | ㈀ J-T24 ⑤ 둘(payment만·표 없는 DB) ㈁ J-T24 ⑤ 표 없는 DB | 잡힘 |
+| S8 | M3 SQL의 `REVERSAL`을 빼기 대신 더하기(`sum(r.amount)`) | J-T24 ②·⑤(payment만), 기존 J-T25 셋(시험 데이터·DateStyle·'M3 되돌림을 빼지 않은 남은 금액') | 잡힘 |
+| S9 | `V1_EXPECTED_SKIPPED`를 `['M3','P5','S3']`로 | `loadtest/test/v1.test.mjs` PRF215 코드리뷰 H2·재확인1 | 잡힘 |
+
+- 표본 9개(변형 포함 13번)를 넣어 9개 모두 잡혔다. 넣을 때마다 닿는 단위·통합 파일만 돌렸다.
+
+### 리뷰 지적의 손 확인(시험은 쓰지 않음)
+
+- **RV-05(뷰를 거친 여러 줄 넣기의 `DEFAULT`) — 문제 없음.** PostgreSQL 18.6 컨테이너에 `migratePayment`를 돌리고 ㈀ 날 SQL 한 문장 `insert into receivable_move (id, …, kind, …) values ($1,…,'OFFSET',…), (DEFAULT,…,'GUARANTEE',…), (DEFAULT,…,DEFAULT,…)`가 3줄을 넣었다. 이동 ID를 준 행은 그 ID, `DEFAULT` 행은 새 UUID v4, `kind` `DEFAULT`는 `OFFSET`이다. ㈁ 저장소와 같은 정의 `receivableMoveCompat`(빌드된 `dist`)로 drizzle 여러 줄 `values`(이동 ID 있는 행·없는 행)를 넣으니 SQL이 `values ($1, …), (default, $7, …)`였고 2줄이 들어갔다. 다섯 줄 모두 ID가 서로 다르고, 뷰로 읽은 행과 표로 읽은 행이 같았다.
+- **RV-06(`runCli` 끝 코드 2) — 그대로.** 빌드된 `runCli`를 바로 불렀다. `--out` 없음, 모르는 인자 `--bogus`, `--out` 값 없음, `INVARIANT_CHECK_DB_URL` 없음, 닿지 않는 DB(`127.0.0.1:1`, 비밀번호를 넣은 주소), JSON이 아닌 기록 파일 여섯 경우 모두 끝 코드 2였고, 표준 출력은 비었으며, 표준 오류는 `peaket-invariants:`로 시작하는 한 줄이었다(예 `check DB에 붙지 못했다(ECONNREFUSED)`, `시험 기록 1번째 줄: JSON으로 읽을 수 없다`). 주소·비밀번호는 실리지 않았고 결과 폴더도 만들지 않았다. `node dist/cli.js`(인자 없음·`--out x`만)도 프로세스 끝 코드가 2였다.
+
+### 돌린 것
+
+- Docker 잠금 `lane5-FIX-invariant-m3-verify`를 09:15~09:28에 잡았다(그 전에는 lane4가 잡고 있어 30초 간격으로 다시 시도했다). 의존 패키지 build 뒤:
+  - invariant-checker 통합 2파일 41 통과.
+  - payment-svc 통합 28파일 613 통과·2 건너뜀(원래 있던 것)·1 실패. 진 것은 `payment-confirm-runner.int.test.ts` P-T40 리뷰 고침 H1(실행 계획에 `payment_event` Seq Scan이 나옴)이다. 이 묶음이 닿지 않는 표이고, 그때 RV-05 컨테이너를 함께 띄워 부하가 있었다. 그 파일만 두 번 다시 돌려 57·57 통과했다. 알려진 흔들림 목록에 없는 파일이라 적어 둔다.
+  - 시험 컨테이너(검사기·payment 시험 것과 RV-05용) 남은 것 없음을 확인하고 잠금을 놓았다.
+- 게이트(원래 트리): `pnpm exec turbo run typecheck` 전체 43 작업 성공. `pnpm lint` 0. payment-svc 단위 66파일 3,228 통과(첫 실행에 `drizzle-payment-store.test.ts` P-T54 리뷰 고침 M4가 249ms < 250ms로 한 번 졌고, 그 파일 다시 두 번 9·9 통과, 전체 다시 3,228 통과. 이 묶음이 닿지 않는 시간 단언). invariant-checker 단위 25 통과. `node --test "loadtest/test/*.test.mjs"` 538 통과. `python -I -X utf8 tools/doc-check/check_all.py` 오류 0·경고 4(이 묶음과 상관없는 openapi 셋과 mermaid 건너뜀).
+- `node tools/ci/roles-check.mjs --base origin/develop --head HEAD`(이 커밋 전): '코드(정방향)'로 센다. 실패 둘은 'verify 커밋 없음'(이 커밋이 채운다)과 '역할 impl·세션 `lane5-fixm3-impl`가 담당 표에 없다'(RV-04, 기록 몫)다.
+- 돌리지 않은 것: '확인 명령'의 `db:generate`와 bundle 통합 시험(감독 지시 범위 밖. `db:generate`는 리뷰가 '바뀐 것 없음'을 확인했다), v1 리허설(kind 무대).
+
+### 남는 것(막지 않음)
+
+- `loadtest/test/v1.test.mjs` H2 시험 이름이 아직 '정본의 기대 목록(S3·P5·M1~M5)'이라 고친 기대값(`['P5','S3']`)과 글이 다르다. 계획은 기존 시험 이름을 바꾸지 않기로 했으니 단언은 맞다. 이름을 고칠지는 기록 담당이나 다음 묶음이 정한다.
 
 ## 담당 표
 
@@ -235,3 +273,4 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 | plan | lane5-fixm3-plan | claude-opus-5-5 | 2026-11-23T06:40:00+09:00 | 2026-11-23T07:20:00+09:00 |
 | test | lane5-fixm3-test | claude-opus-5-5 | 2026-11-23T07:33:00+09:00 | 2026-11-23T08:22:00+09:00 |
 | review | lane5-fixm3-review | claude-opus-5-5 | 2026-11-23T08:23:00+09:00 | 2026-11-23T08:40:00+09:00 |
+| verify | lane5-fixm3-verify | claude-opus-5-5 | 2026-11-23T08:40:00+09:00 | 2026-11-23T09:35:00+09:00 |
