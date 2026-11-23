@@ -86,6 +86,6 @@ export { OpsEventLiveController } from './inbound/ops-event-live.controller.js';
 export { OpsWidgetsController } from './inbound/ops-widgets.controller.js';
 export { OPS_LIVE_ACCESS_TOKEN_TTL_MS, SseConnection, tokenDeadlineOf, type SseConnectionOptions, type TerminatedSessionsView } from './inbound/sse-connection.js';
 export { PushRetentionJob } from './jobs/push-retention.js';
-export { CORE_HTTP_URL_ENV, LIVE_OPEN_ENVS, PROMETHEUS_URL_ENV, QUEUE_REDIS_CLUSTER_URLS_ENV, QUEUE_REDIS_URL_ENV, judgePseudonymizerOf, liveWiringOf, widgetSourcesFromEnv, type LiveWiring } from './live-wiring.js';
+export { CORE_HTTP_URL_ENV, LIVE_OPEN_ENVS, PROMETHEUS_URL_ENV, QUEUE_REDIS_CLUSTER_URLS_ENV, QUEUE_REDIS_URL_ENV, judgeAccountRefOf, liveWiringOf, widgetSourcesFromEnv, type LiveWiring } from './live-wiring.js';
 export { LiveModule, type LiveModuleExtras } from './live.module.js';
 export { CONTROL_READER, LIVE_ALERT_STORE, LIVE_RETENTION_ENABLED, LIVE_WIRING, PRESENCE_STORE, PUSH_EVENT_SOURCE, TERMINATED_SESSIONS, WIDGET_SOURCES } from './tokens.js';

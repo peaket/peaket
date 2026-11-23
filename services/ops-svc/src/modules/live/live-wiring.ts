@@ -62,9 +62,18 @@ export function liveWiringOf(env: Record<string, string | undefined>, platformLo
   };
 }
 
-/** 판정자 가명(로그 가명 키, ADR-0053 결정 1). 환경 이름은 위에서 고른 값을 쓴다 */
-export function judgePseudonymizerOf(env: Record<string, string | undefined>, w: LiveWiring): LogPseudonymizer {
-  return loadLogPseudonymizer({ ...env, PEAKET_ENV: w.envName }).pseudonymizer;
+/**
+ * 판정자 가명 함수(로그 가명 키, ADR-0053 결정 1·ADR-0371 결정 5). 환경 이름은 위에서 고른 값을 쓴다.
+ * 키는 판정을 기록할 때 처음 읽고 그 뒤로는 같은 함수를 쓴다. 모듈을 만들 때 읽으면 키 없이 뜨는 조립(데모·시험)이 판정과 관계없이 깨진다.
+ * 운영 쪽 환경(demo·staging·prod)에서 키가 없거나 틀리면 그 판정 기록이 PlatformConfigError로 실패한다(가명 없이 남기지 않는다).
+ * 시작 때의 닫힘 실패는 platform createService가 같은 키로 이미 맡는다
+ */
+export function judgeAccountRefOf(env: Record<string, string | undefined>, w: LiveWiring): (accountId: string) => string {
+  let pseudonymizer: LogPseudonymizer | undefined;
+  return (accountId) => {
+    pseudonymizer ??= loadLogPseudonymizer({ ...env, PEAKET_ENV: w.envName }).pseudonymizer;
+    return pseudonymizer.ref(accountId);
+  };
 }
 
 /** 환경 값으로 원격 위젯 둘의 원천을 고른다 */

@@ -45,7 +45,7 @@ import { OpsWidgetsController } from './inbound/ops-widgets.controller.js';
 import type { TerminatedSessionsView } from './inbound/sse-connection.js';
 import { ControlWatchJob } from './jobs/control-watch.job.js';
 import { PushRetentionJob } from './jobs/push-retention.js';
-import { judgePseudonymizerOf, liveWiringOf, widgetSourcesFromEnv, type LiveWiring } from './live-wiring.js';
+import { judgeAccountRefOf, liveWiringOf, widgetSourcesFromEnv, type LiveWiring } from './live-wiring.js';
 import { CONTROL_READER, LIVE_ALERT_STORE, LIVE_RETENTION_ENABLED, LIVE_WIRING, PRESENCE_STORE, PUSH_EVENT_SOURCE, TERMINATED_SESSIONS, WIDGET_SOURCES } from './tokens.js';
 
 /** platform 인증 상태의 전역 주입 이름(platform AUTH_STATE와 같은 Symbol.for 값) */
@@ -83,7 +83,6 @@ export class LiveModule {
       inject: [optionalDb, CLOCK, optionalLocal],
       useFactory: ((db: Database | undefined, clock: Clock, internalTokenRequired: boolean | undefined): ReadinessServiceDeps => {
         const w = wiringOf(internalTokenRequired);
-        const pseudonymizer = judgePseudonymizerOf(env, w);
         const now = () => clock.now();
         return {
           schedules: extras.readiness?.schedules ?? (w.coreUrl ? HttpCoreSaleSchedule.fromUrl(w.coreUrl, now, w.internalToken) : new UnavailableSaleSchedule()),
@@ -91,7 +90,8 @@ export class LiveModule {
           // 메모리 조립의 감사 체인은 이 저장소만의 것이다(시험·local, DB 조립은 audit_chain에 같은 트랜잭션으로 남긴다)
           judgements: extras.readiness?.judgements ?? (db ? new DrizzleJudgementStore(db) : new MemoryJudgementStore(new MemoryAuditChain())),
           now,
-          accountRef: (accountId: string) => pseudonymizer.ref(accountId),
+          // 가명 키는 판정을 기록할 때 읽는다(키 없이 뜨는 데모·시험 조립을 깨지 않는다)
+          accountRef: judgeAccountRefOf(env, w),
         };
       }) as (...args: never[]) => ReadinessServiceDeps,
     });
