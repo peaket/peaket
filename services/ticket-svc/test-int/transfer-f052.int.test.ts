@@ -435,6 +435,22 @@ describe('F-05-2 T4·T5 [ASVS v5.0.0-8.2.2] 티켓 상세와 월렛 목록 짝(P
     expect({ locked: after.body.transferLocked, expires: after.body.transferLockExpiresAt }).toEqual({ locked: false, expires: null });
   });
 
+  test('F-05-2 IR-04 잠금 기한 − 1ms는 요청 409, 기한 0ms부터는 201이다(상세와 같은 판정)', async () => {
+    const w = world();
+    const [t] = await issue(w.a, w.event);
+    const expiresAtMs = clock.now() + 3 * HOUR + 41 * MIN;
+    await transferStore.setTransferLock({ caseId: randomUUID(), version: 1, locked: true, eventId: w.event, accountIds: [w.a], expiresAtMs, nowMs: clock.now() });
+    clock.advance(expiresAtMs - 1 - clock.now());
+    const found = await post('/v1/transfer-recipient-lookups', w.a, { body: { memberCode: w.codeB } });
+    expect(found.status, found.raw).toBe(200);
+    const before = await post(`/v1/tickets/${t}/transfers`, w.a, { body: { recipientRef: found.body.recipientRef }, reauth: 'r' });
+    expect(before.status, before.raw).toBe(409);
+    expect(String(before.body.type)).toContain('transfer-locked');
+    clock.advance(1);
+    const after = await post(`/v1/tickets/${t}/transfers`, w.a, { body: { recipientRef: found.body.recipientRef }, reauth: 'r' });
+    expect(after.status, after.raw).toBe(201);
+  });
+
   test('F-05-2 T5 ① 목록 항목의 칸은 모두 상세에 같은 값으로 있고, pendingTransfer는 요청 뒤 그 요청·철회 뒤 null이다', async () => {
     const w = world();
     const [t] = await issue(w.a, w.event);
@@ -481,6 +497,16 @@ describe('F-05-2 T6 [ASVS v5.0.0-8.2.2] 받은 요청 목록(PostgreSQL)', () =>
     expect(seen).toEqual(want);
     expect((await get('/v1/transfers', w.a)).body.items).toEqual([]);
     expect(all.raw.includes(w.a)).toBe(false);
+  });
+
+  test('F-05-2 IR-03 모양만 맞는 커서(날짜 상한 밖·UUID 아닌 요청 ID)는 400 invalid-query이고 500이 아니다', async () => {
+    const w = world();
+    const cursor = (v: unknown) => Buffer.from(JSON.stringify(v), 'utf8').toString('base64url');
+    for (const c of [cursor([9e15, randomUUID()]), cursor([Date.now(), 'not-a-uuid']), cursor(['x', randomUUID()])]) {
+      const r = await get(`/v1/transfers?cursor=${encodeURIComponent(c)}`, w.b);
+      expect(r.status, `${c} ${r.raw}`).toBe(400);
+      expect(String(r.body.type)).toContain('invalid-query');
+    }
   });
 });
 
@@ -604,6 +630,16 @@ describe('F-05-2 T8 [ASVS v5.0.0-11.1.1] 돌려주기 다시 보냄(PostgreSQL)'
     await registerKey(t!, w.b, 'TRANSFER');
     return t!;
   };
+
+  test('F-05-2 IR-01 돌려주기 뒤 결제자는 reason=TRANSFER로 기기 키를 다시 등록한다(받은 사람 기록과 견주지 않는다)', async () => {
+    const w = world();
+    const t = await givenTo(w);
+    const key = randomUUID();
+    const returned = await post(`/v1/tickets/${t}/returns`, w.b, { key, reauth: 'token-1' });
+    expect(returned.status, returned.raw).toBe(200);
+    await registerKey(t, w.a, 'TRANSFER');
+    expect(await activeKeys(t)).toBe(1);
+  });
 
   test('F-05-2 T8 ② 되돌림(RV-04): 돌려주기 기록 쓰기가 실패하면 5xx이고 보유자·버전·키·양도 표시가 그대로이며, 고친 뒤 같은 키로 다시 보내면 처리된다', async () => {
     const w = world();

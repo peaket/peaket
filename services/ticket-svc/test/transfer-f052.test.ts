@@ -47,6 +47,8 @@ const SECRET = 'f052-unit-secret';
 const CODE_B = 'QZ7-4K2M';
 /** 상관없는 계정 C의 회원 코드 */
 const CODE_C = 'HN3-8WQP';
+/** 요청 계정 A 자신의 회원 코드(자기 양도 재현, IR-02) */
+const CODE_A = 'AB3-9XYZ';
 
 class FakeAdmin implements AdminAuthzPort {
   async getAdminAuthz(): Promise<{ valid: boolean; role: string }> {
@@ -66,6 +68,7 @@ class RecordingDirectory implements MemberCodeDirectory {
   async resolveMemberCode(code: string): Promise<{ accountId: string; nickname: string } | undefined> {
     this.calls.push(code);
     if (this.fail) throw new Error('14 UNAVAILABLE: identity-svc 연결 실패');
+    if (code === CODE_A) return { accountId: A, nickname: '회원' };
     if (code === CODE_B) return { accountId: B, nickname: '회원' };
     if (code === CODE_C) return { accountId: C, nickname: '회원' };
     return undefined;
@@ -482,6 +485,26 @@ describe('F-05-2 T5 월렛 목록과 상세 짝', () => {
   });
 });
 
+describe('F-05-2 IR-04 잠금 기한이 지난 뒤 양도 요청(구현 리뷰 중간·통과 기준)', () => {
+  test('F-05-2 IR-04 잠금 기한 − 1ms는 409 transfer-locked, 기한 0ms부터는 요청이 201이다', async () => {
+    const h = await harness();
+    const t = await h.issue();
+    const expiresAtMs = h.clock.now() + 5 * HOUR + 17 * MIN;
+    await h.transfers.setTransferLock({ caseId: randomUUID(), version: 1, locked: true, eventId: EVENT, accountIds: [A], expiresAtMs, nowMs: h.clock.now() });
+    h.clock.advance(expiresAtMs - 1 - h.clock.now());
+    // 받는 사람 참조는 10분짜리라 기한 경계에서 새로 찾는다
+    const found = await h.post('/v1/transfer-recipient-lookups', A, { body: { memberCode: CODE_B } });
+    expect(found.status, found.raw).toBe(200);
+    const before = await h.post(`/v1/tickets/${t}/transfers`, A, { body: { recipientRef: found.body.recipientRef }, reauth: 'r' });
+    expect(before.status, before.raw).toBe(409);
+    expect(String(before.body.type)).toContain('transfer-locked');
+    h.clock.advance(1);
+    const after = await h.post(`/v1/tickets/${t}/transfers`, A, { body: { recipientRef: found.body.recipientRef }, reauth: 'r' });
+    expect(after.status, after.raw).toBe(201);
+    expect(String(after.body.offerId)).toHaveLength(36);
+  });
+});
+
 describe('F-05-2 T6 [ASVS v5.0.0-8.2.2] 받은 요청 목록 GET /v1/transfers', () => {
   test('F-05-2 T6 ① 받는 사람으로 지정된 요청만 최근 순, status 거르기, 커서로 끝까지 겹침·빠짐 0', async () => {
     const h = await harness();
@@ -541,6 +564,34 @@ describe('F-05-2 T6 [ASVS v5.0.0-8.2.2] 받은 요청 목록 GET /v1/transfers',
     expect([bad.status, badCursor.status, anon.status]).toEqual([400, 400, 401]);
     expect(String(badCursor.body.type)).toContain('invalid-query');
     for (const r of [bad, badCursor, anon]) expect(r.headers['cache-control']).toBe('private, no-store');
+  });
+});
+
+describe('F-05-2 IR-03 목록 커서 검증(구현 리뷰 중간·통과 기준)', () => {
+  const cursor = (v: unknown) => Buffer.from(JSON.stringify(v), 'utf8').toString('base64url');
+  test('F-05-2 IR-03 모양만 맞는 커서(날짜 상한 밖·UUID 아닌 요청 ID)는 400 invalid-query이고 500이 아니다', async () => {
+    const h = await harness();
+    for (const c of [cursor([9e15, randomUUID()]), cursor([Date.now(), 'not-a-uuid']), cursor(['x', randomUUID()])]) {
+      const r = await h.get(`/v1/transfers?cursor=${encodeURIComponent(c)}`, B);
+      expect(r.status, `${c} ${r.raw}`).toBe(400);
+      expect(String(r.body.type)).toContain('invalid-query');
+    }
+  });
+});
+
+describe('F-05-2 IR-02 자기 양도 막기(구현 리뷰 높음·보안)', () => {
+  test('F-05-2 IR-02 자기 자신에게 양도 요청은 422 self-transfer이고 표·요청이 그대로이며 목록에도 없다', async () => {
+    const h = await harness();
+    const t = await h.issue();
+    const found = await h.post('/v1/transfer-recipient-lookups', A, { body: { memberCode: CODE_A } });
+    expect(found.status, found.raw).toBe(200);
+    const before = { ...h.ticketRow(t) };
+    const r = await h.post(`/v1/tickets/${t}/transfers`, A, { body: { recipientRef: found.body.recipientRef }, reauth: 'r' });
+    expect(r.status, r.raw).toBe(422);
+    expect(String(r.body.type)).toContain('self-transfer');
+    expect(h.ticketRow(t)).toEqual(before);
+    expect([...h.store.offers.values()].filter((o) => o.ticketId === t)).toHaveLength(0);
+    expect((await h.get('/v1/transfers', A)).body.items).toEqual([]);
   });
 });
 
