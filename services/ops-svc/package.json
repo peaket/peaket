@@ -36,6 +36,9 @@
   },
   "devDependencies": {
     "@peaket/config": "workspace:*",
+    "@peaket/pg-simulator": "workspace:*",
+    "@peaket/shuffle": "workspace:*",
+    "@peaket/validation": "workspace:*",
     "@types/node": "^24.19.2",
     "@types/pg": "^8.23.1",
     "typescript": "^7.0.2",

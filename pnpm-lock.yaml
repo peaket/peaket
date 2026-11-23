@@ -1330,6 +1330,15 @@ importers:
       '@peaket/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@peaket/pg-simulator':
+        specifier: workspace:*
+        version: link:../pg-simulator
+      '@peaket/shuffle':
+        specifier: workspace:*
+        version: link:../../packages/shuffle
+      '@peaket/validation':
+        specifier: workspace:*
+        version: link:../../packages/validation
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
