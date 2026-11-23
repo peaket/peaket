@@ -893,6 +893,7 @@
 | R-801 | 관제 공연 리포트·파트너 판매 요약이 읽을 골드 사실·차원이 없었다 | data/(dbt_project·macros·models staging·silver·gold·seeds·tests·tests_int, uv.lock) | 브론즈 → 실버 → 골드 변환과 판 바꾸기 | 해결. 지표 뷰·F12는 F-04-5, 마감 실행기는 F-04-6 |
 | R-800 | 스캐너 인증 가드가 출처·세션 확인 기한·거절 지표 없이 RolesGuard 막음을 풀지 못했고 등록 코드가 저장 일시 실패에 죽었다 | docs/BUILD_ORDER.md, docs/review/plans/F-05-5.md, docs/features/offline-gate.md, docs/security/authz-matrix.md, docs/api/openapi.yaml, packages/platform, services/ticket-svc, services/identity-svc, apps/scanner, .github/workflows/ci-web.yml | 계획→시험(실패 확인 단위·화면·통합 21/30)→시험 리뷰 1(높음 2·중간 5)→반영→리뷰 2 고정→구현, platform 776·ticket 305·identity 750·scanner 55·화면 9·ticket 통합 135, ledger --require 28 | 닫힘 |
 | R-802 | 관제 공연 리포트가 읽을 지표 뷰·규칙 판정·품질 결과가 없었다 | data/models/metrics(metrics.yml·rules.yml·metric_value·quality_check·fct_rule_check·mtr_* 여섯), data/macros/metrics.sql, F2·F3 칸, 참조·열거 시험 | 지표 사전과 결정 규칙을 dbt가 판마다 판정 | 해결. 마감 실행기는 F-04-6, 리포트는 F-04-7 |
+| R-803 | LCH-120 포트원 지급대행·계좌 변경·예약지급 취소·사후 대사·SCR-020/027 부재, ops 받기 거절이 조용히 사라짐 | services/payment-svc settlement, core-svc 판매 승인, ops-svc cases(0032), apps/partner, docs/api/openapi.yaml | 등록 한 길·계좌 변경 경계·취소 다시 시도·포트원 실행·대사·거절 영구 실패, ADR-0370 | 고침 |
 
 ## 4. 숫자 일치표
 
