@@ -131,7 +131,25 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 
 ## 리뷰
 
-(리뷰 담당이 채운다)
+리뷰 담당(`lane5-fixpt-review`)이 2026-11-23 09:17~09:25에 `git diff b20bdd44f..f74ea124a`와 정본을 대조했다. 코드·시험은 고치지 않았다. **높음·중간 지적은 없다.**
+
+### 지적
+
+| # | 등급 | 자리 | 내용 | 제안 |
+| --- | --- | --- | --- | --- |
+| RV-01 | 낮음 | 계획 `be0ac7ab5`·구현 `43117aeac` 커밋 제목 끝 괄호, 이 문서 '고칠 곳' 셋째 줄 아래 문장 | 끝 괄호 ID가 `PRF192`(붙임표 없음)다. 시험 `f74ea124a`와 이 리뷰 커밋은 `PRF-192`라 한 가지 안에서 꼴이 갈린다. 장부·대조 스크립트는 요구사항 ID 꼴(`PRF-192`)로 찾고, `PRF192`는 시험 이름 머리(`PRF192_…`)다 | 이미 쌓인 커밋은 고치지 않는다(강제 푸시 금지). 검증·기록 커밋과 변경 요약 줄은 `PRF-192`로 적는다 |
+| RV-02 | 정보 | `packages/platform/turbo.json` | 새 파일이 `@peaket/platform#build`의 입력(`turbo.json`, `--dry=json`으로 확인)이 되어 이 커밋 뒤 첫 실행에서 platform build와 그에 기대는 모든 작업 공간의 캐시가 한 번 빗나간다. 또 `services/*/src/**`라 v0-monolith·bundle을 포함한 어느 서비스 원본이 바뀌어도 platform 시험 전체가 실제로 돈다 | 한 번뿐이고 의도한 값이라 고칠 것 없다. 덤으로 서비스 원본을 읽는 `metric-rules.test.ts`·`grpc-server.test.ts`의 같은 캐시 틈도 함께 막혔다 |
+| RV-03 | 정보 | `services/ops-svc/src/modules/payouts/adapters/payment-http.ts` 9줄 | `settlement-dependency-unavailable` 503은 `Retry-After`를 싣지 않는다. guidelines §2의 `Retry-After` 필수는 차단기가 열렸거나 게이트웨이 과부하일 때라 이 5xx·시간 초과 전달에는 걸리지 않고, 같은 클라이언트의 `payout-dependency-unavailable`도 같다 | 이 묶음 밖. '넘기는 것'의 `FIX-problem-ctor` 묶음이 의존성 503을 정리할 때 함께 본다 |
+
+### 확인한 것
+
+- **세 이름의 status·title이 던지는 자리 모두와 같다.** `grep -rnE "(approval-conflict|settlement-adjustment-already-applied|settlement-dependency-unavailable)['\"]"`(services·apps·packages·docs, 생성물·dist 뺌)로 원본 자리 넷: `approval-conflict` 409 `settlement-adjustment-approvals.ts:67`, `settlement-adjustment-already-applied` 409 같은 파일 210, `settlement-dependency-unavailable` 503 `payment-http.ts:9`·`payout-approvals.ts:275`(자리 인자 꼴, PRF192는 못 읽지만 값은 같다). ops-svc 시험의 가짜 오류 다섯 자리(`settlement-adjustment-approval.test.ts`·`settlement-dispute-dismissal.test.ts`·`settlement-flow-support.ts`)도 같은 값이다. 화면 코드는 셋 중 어느 이름도 아직 쓰지 않는다.
+- **이름 꼴이 이웃과 같다.** `approval-conflict`는 공통 승인 경로 이름(`approval-reason-required` 등)과 같은 `approval-` 머리이고 종류별 짝(`contract-`·`payout-`·`device-approval-conflict`)과 상태·제목이 같다. `settlement-dependency-unavailable`은 `payout-dependency-unavailable`과 같은 '<의존성>-dependency-unavailable' 꼴이고 제목도 같은 틀이다. `settlement-adjustment-already-applied`는 payment의 `settlement-adjustment-applied`와 뜻이 달라(반려가 거절됨) 이름을 나눈 것이 guidelines §2 '한 type은 한 상태·한 제목'에 맞다. 목록 넣은 자리는 알파벳 차례를 지킨다(`approval-conflict` < `approval-reason-required`, `settlement-adjustment-already-applied` < `settlement-commission-rate-invalid` < `settlement-dependency-unavailable` < `settlement-dispute-window-closed`).
+- **정본과 어긋나지 않는다.** guidelines §8.1 'payment-svc 정산 이의 기각·수기 조정 등록·적용' 줄(ops가 503, payment 4xx는 그대로)과 §2 '더 알맞은 오류가 있으면 그것으로 바꾼다'에 맞고, settlement §4.3 '승인'의 이미 적용된 조정 반려 409와 같다.
+- **생성물은 생성기로만 바뀌었다.** `pnpm --filter @peaket/api-client gen:check` = '생성물이 계약과 같다'. 차이는 `ProblemType` 합 세 줄과 `PROBLEM_TYPES` 세 줄뿐이고 값이 openapi와 같다.
+- **`packages/platform/turbo.json`은 뿌리 입력을 지우지 않고 더하기만 한다.** `--dry=json`의 `@peaket/platform#test` 풀린 입력이 뿌리의 일곱 경로 + `../../services/*/src/**`이고 패키지 자기 파일(`src/` 76·`test/` 68)도 그대로 들어 있다(`$TURBO_DEFAULT$` 물려받음). `outputs`·`env`·`dependsOn`도 뿌리 값 그대로다. 해시 `53573b99dd6947aa`가 시험 결과 ③과 같다. 모양은 앞 사례 `services/purchase-svc/turbo.json`과 같다.
+- **다른 패키지 test 캐시의 정의는 바뀌지 않는다.** 패키지 `turbo.json`은 그 패키지 작업에만 붙는다(위 RV-02의 한 번 빗나감 말고는 영향 없음). `contract-sweep.test.ts`가 읽는 `packages/contracts/src/gen/`는 platform의 의존 선언(`@peaket/contracts`)으로 해시가 따라가 틈이 없다.
+- **구현 커밋은 시험 파일을 건드리지 않았다.** `43117aeac`은 `packages/api-client/src/gen/problem-types.ts`·`packages/platform/turbo.json` 둘뿐이고, 시험 커밋 `f74ea124a`은 이 문서만 고쳤다. 서비스·화면 코드 변경은 없다.
 
 ## 검증
 
@@ -144,5 +162,5 @@ node tools/ci/roles-check.mjs --base origin/develop --head HEAD
 | plan | lane5-fixpt-plan | claude-opus-5-5 | 2026-11-23T08:40:00+09:00 | 2026-11-23T09:10:00+09:00 |
 | impl | | | | |
 | test | lane5-fixpt-test | claude-opus-5-5 | 2026-11-23T09:08:00+09:00 | 2026-11-23T09:16:00+09:00 |
-| review | | | | |
+| review | lane5-fixpt-review | claude-opus-5-5 | 2026-11-23T09:17:00+09:00 | 2026-11-23T09:25:00+09:00 |
 | verify | | | | |
