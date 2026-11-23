@@ -1,4 +1,4 @@
-// 월렛 목록 받기와 저장 맞추기(FIX-wallet-tickets, docs/frontend.md §4.2.4 '월렛 목록 세부' 받기·표시 값·저장, openapi listTickets·getEvent, O-T48 ①③④⑤⑦⑧⑩).
+// 월렛 목록 받기와 저장 맞추기(FIX-wallet-tickets, docs/frontend.md §4.2.4 '월렛 목록 세부' 받기·표시 값·저장, openapi listTickets·getEvent, O-T52 ①③④⑤⑦⑧⑩).
 // - 팬 API 주소(ORIGINS.api)가 있으면 `GET /v1/tickets?limit=100`을 쿠키와 함께 부르고 `nextCursor`를 그대로 실어 null까지 받는다(ADR-0081).
 //   앞에서 받은 커서가 다시 오면 더 부르지 않고 실패(cursor-loop)다. 401이면 창끼리 하나씩(Web Locks `peaket.refresh`) 토큰을 한 번 갱신하고 다시 보낸다(§4.1 '401').
 // - api-client를 거치지 않는 손 호출이다(§4.1 'api-client 밖의 호출'): 요청마다 읽기 시간 한도 10초를 본문을 다 읽을 때까지 둔다(shared/lib/timed-fetch).

@@ -1,4 +1,4 @@
-// 월렛 카드·화면 상태의 순수 규칙(FIX-wallet-tickets, docs/frontend.md §4.2.4 '월렛 목록 세부' 상태별 카드·화면 상태, d5 §5.13, O-T48 ②~⑥).
+// 월렛 카드·화면 상태의 순수 규칙(FIX-wallet-tickets, docs/frontend.md §4.2.4 '월렛 목록 세부' 상태별 카드·화면 상태, d5 §5.13, O-T52 ②~⑥).
 // 저장된 스냅샷(entities/wallet) 하나를 카드 하나로, 저장 수와 받기 결과를 화면 하나로 바꾼다. 저장소·네트워크를 부르지 않아 첫 화면 묶음에 넣어도 가볍다.
 // 경로 별칭 없이 읽힌다(node 시험이 바로 읽는다).
 import type { WalletTicketSnapshot } from '../../entities/wallet/index.ts';

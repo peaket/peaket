@@ -1,5 +1,5 @@
 'use client';
-// SCR-013 마이 티켓(월렛)의 실제 화면(FIX-wallet-tickets, docs/frontend.md §4.2.4 '월렛 목록 세부', d5 §5.13 상태 표, O-T48).
+// SCR-013 마이 티켓(월렛)의 실제 화면(FIX-wallet-tickets, docs/frontend.md §4.2.4 '월렛 목록 세부', d5 §5.13 상태 표, O-T52).
 // - 목록(/my/tickets)과 펼침(/my/tickets/{ticketId})이 함께 쓴다. 화면은 저장소(peaket-wallet)의 표로 그리고(오프라인 우선), 열릴 때·[ 지금 동기화 ]·`online`에
 //   목록을 다시 받는다. 받기(features/wallet-sync/sync)·QR·오프라인 배너 조각은 첫 화면이 다 그려진(load) 뒤에 받는다(BAT-177 T6 ⑦).
 // - 첫 HTML은 서버가 그린 '불러오는 중'(loading)과 QR 뼈대(qrFallback)다. 서버 셸은 티켓 ID로 아무것도 읽지 않는다: 펼침의 ID는 붙은 뒤 주소창에서 읽는다
