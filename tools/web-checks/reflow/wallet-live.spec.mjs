@@ -5,7 +5,7 @@
 //   만드는 덧붙인 시험이다. 같은 흐름의 실제 서버 연결 시험은 데모 S1(`node tools/local/demo.mjs play --scenarios S1`의 wallet-list·ticket-qr)이다
 //   (정본 §8.6 4의 4 '가짜 API로 끝내지 않는다', 스킬 mock-policy 3절).
 // - 기다림은 조건 단언(expect(locator)·expect.poll)뿐이고 고정 대기가 없다.
-import { createHash, createPublicKey, randomUUID } from 'node:crypto';
+import { createHash, createPublicKey, randomBytes } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { FAN_API_ORIGIN, stubFanApi } from '../csp/pages.mjs';
 import { APPS, HOST, portOf } from '../seed-css/apps.mjs';
@@ -15,6 +15,19 @@ const CORS = { 'access-control-allow-origin': WEB, 'access-control-allow-credent
 const DAY = 24 * 3_600_000;
 const LIVE = '0193f2c0-0000-7000-8000-0000000fe201';
 const MISSING = '0193f2c0-0000-7000-8000-0000000fe202';
+
+/**
+ * 시험 티켓 ID(UUIDv7 꼴: 앞 48비트 유닉스 ms, 판 7, 변형 10). ticket-svc가 발권하는 티켓 ID이고 QR v1은 이 꼴만 싣는다
+ * (docs/features/offline-gate.md §3 페이로드 스키마 '티켓 ID(UUIDv7, 16바이트)', 시험 이의 TO-2)
+ */
+function ticketIdV7() {
+  const b = randomBytes(16);
+  b.writeUIntBE(Date.now(), 0, 6);
+  b[6] = (b[6] & 0x0f) | 0x70;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = b.toString('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
 
 /** 목록 항목(정본 offline-gate §2 '무엇을 싣나'의 칸) */
 function item(ticketId, status = 'ISSUED', eventId = LIVE) {
@@ -110,7 +123,7 @@ test('O-T48 ② 기본 폭: 표가 0장이면 "아직 티켓이 없습니다"와
 });
 
 test('O-T48 ③ 기본 폭: 저장된 표가 없고 목록이 503이면 "티켓을 불러오지 못했습니다"와 [ 다시 시도 ]이고 누르면 다시 부른다', async ({ page, context }) => {
-  const id = randomUUID();
+  const id = ticketIdV7();
   const calls = await fanApi(context, { tickets: [fail(503), list([item(id)])] });
   await page.goto(`${WEB}/my/tickets`);
   await expect(page.getByText('티켓을 불러오지 못했습니다')).toBeVisible();
@@ -121,7 +134,7 @@ test('O-T48 ③ 기본 폭: 저장된 표가 없고 목록이 503이면 "티켓�
 });
 
 test('O-T48 ④ 기본 폭: 저장된 표가 있는데 목록 요청이 끊기면 저장된 표와 마지막 동기화 시각이 든 오프라인 배너를 보인다', async ({ page, context }) => {
-  const id = randomUUID();
+  const id = ticketIdV7();
   await fanApi(context, { tickets: [list([item(id)]), 'abort'] });
   await page.goto(`${WEB}/my/tickets`);
   await expect(registerButton(page, id)).toBeVisible();
@@ -132,7 +145,7 @@ test('O-T48 ④ 기본 폭: 저장된 표가 있는데 목록 요청이 끊기�
 });
 
 test('O-T48 ⑤ 기본 폭: 토큰을 갱신한 뒤에도 401이면 저장된 표를 그리지 않고 로그인 화면으로 간다', async ({ page, context }) => {
-  const id = randomUUID();
+  const id = ticketIdV7();
   const unauthorized = answer(401, { type: 'about:blank', title: 'Unauthorized', status: 401 });
   const calls = await fanApi(context, { tickets: [list([item(id)]), unauthorized], refresh: answer(204, {}) });
   await page.goto(`${WEB}/my/tickets`);
@@ -144,8 +157,8 @@ test('O-T48 ⑤ 기본 폭: 토큰을 갱신한 뒤에도 401이면 저장된 �
 });
 
 test('O-T48 ⑥⑦ 기본 폭: 상태가 섞인 목록에서 ISSUED·ACTIVE 두 장만 입장용 등록 버튼이 있고 나머지는 배지·문장만이며 요약 실패 회차의 표도 보인다', async ({ page, context }) => {
-  const t = Object.fromEntries(['ISSUED', 'ACTIVE', 'TRANSFER_PENDING', 'CANCEL_REQUESTED', 'REFUNDED', 'FLAGGED', 'VOIDED'].map((s) => [s, randomUUID()]));
-  const orphan = randomUUID();
+  const t = Object.fromEntries(['ISSUED', 'ACTIVE', 'TRANSFER_PENDING', 'CANCEL_REQUESTED', 'REFUNDED', 'FLAGGED', 'VOIDED'].map((s) => [s, ticketIdV7()]));
+  const orphan = ticketIdV7();
   const calls = await fanApi(context, {
     tickets: [list([...Object.entries(t).map(([s, id]) => item(id, s)), item(orphan, 'ISSUED', MISSING)])],
     events: { [LIVE]: answer(200, summary(LIVE, 'LUMEN 콘서트 2026 서울')), [MISSING]: fail(404) },
@@ -168,13 +181,14 @@ test('O-T48 ⑥⑦ 기본 폭: 상태가 섞인 목록에서 ISSUED·ACTIVE 두 
 });
 
 test('O-T48 ⑨ 기본 폭: 펼침 주소의 티켓 ID가 목록에 없으면 "티켓을 찾을 수 없습니다"와 ( 마이 티켓 › )다', async ({ page, context }) => {
-  const mine = randomUUID();
+  const mine = ticketIdV7();
   await fanApi(context, { tickets: [list([item(mine)])] });
-  const res = await page.goto(`${WEB}/my/tickets/${randomUUID()}`);
+  const res = await page.goto(`${WEB}/my/tickets/${ticketIdV7()}`);
   // 서버 셸은 티켓 ID로 아무것도 읽지 않으므로 없는 표도 404가 아니다(남의 표와 없는 표를 가르지 않는다)
   expect(res?.status()).toBe(200);
   await expect(page.getByText('티켓을 찾을 수 없습니다')).toBeVisible();
-  await expect(page.getByRole('link', { name: /마이 티켓/ })).toBeVisible();
+  // 셸 머리에도 '마이 티켓' 링크가 있어 본문(main) 안의 ( 마이 티켓 › )만 찾는다(시험 이의 TO-1)
+  await expect(page.getByRole('main').getByRole('link', { name: /마이 티켓/ })).toBeVisible();
   await expect(registerButton(page, mine)).toHaveCount(0);
   // 대조: 목록에 있는 표의 펼침은 그 표를 그린다
   await page.goto(`${WEB}/my/tickets/${mine}`);
@@ -183,7 +197,7 @@ test('O-T48 ⑨ 기본 폭: 펼침 주소의 티켓 ID가 목록에 없으면 "�
 });
 
 test('O-T48 ⑥ 기본 폭: ISSUED 표의 [이 휴대폰을 입장용으로 등록] → 등록 201이면 그 티켓 ID가 대체 글에 든 회전 QR이 보인다(TR-04)', async ({ page, context }) => {
-  const id = randomUUID();
+  const id = ticketIdV7();
   await fanApi(context, { tickets: [list([item(id, 'ISSUED')])] });
   const api = new URL(FAN_API_ORIGIN).origin;
   const registered = [];
