@@ -4,6 +4,7 @@
   python tools/perf-ledger/charts.py before-after --pairs K1=RUN_V0:RUN_V1 ... --metric p99|error_rate --out FILE
   python tools/perf-ledger/charts.py timeline --run RUN --series origin_rps,p99_ms,error_rate --out FILE
   python tools/perf-ledger/charts.py usl --points usl.csv --target 200000 --out perf-ledger/charts/usl.svg
+    (usl.csv 열 n,throughput[,run_id][,saturated]. saturated가 true인 줄은 호스트 포화 점이라 맞춤에서 빼고 .json excluded에 남긴다, docs/verification.md §3.5 6번)
 """
 import argparse
 import csv
@@ -123,10 +124,18 @@ def usl_required_n(target, gamma, alpha, beta):
 def chart_usl(points_file, target, out):
     """진입 서버 대수별 처리량에 USL을 맞추고 목표 처리량에 필요한 대수를 계산한다."""
     pts = []
+    excluded = []
     with io.open(points_file, encoding='utf-8', newline='') as fh:
         for r in csv.DictReader(fh):
             if (r.get('n') or '').strip() and (r.get('throughput') or '').strip():
-                pts.append((float(r['n']), float(r['throughput'])))
+                n, x = float(r['n']), float(r['throughput'])
+                # 호스트 포화 점(saturated 열이 true)은 맞춤에서 뺀다. entry-scale.mjs uslCsv도 따로 빼지만 손으로 만든 표도 같은 규칙을 지킨다
+                if (r.get('saturated') or '').strip().lower() in ('true', '1', 'yes'):
+                    excluded.append({'n': n, 'throughput': x, 'reason': '호스트 포화'})
+                else:
+                    pts.append((n, x))
+    if excluded:
+        print(f'호스트 포화 점 {len(excluded)}개를 맞춤에서 뺐다: ' + ', '.join(f'N={e["n"]:g}' for e in excluded))
     if len({n for n, _ in pts}) < 6:
         print('경고: 서로 다른 N이 6개보다 적습니다(Gunther는 6점 이상을 권한다).')
     gamma, alpha, beta = usl_fit(pts)
@@ -142,7 +151,7 @@ def chart_usl(points_file, target, out):
     res = {'gamma': gamma, 'alpha': alpha, 'beta': beta, 'r2': r2, 'n_measured_max': n_meas,
            'n_peak': n_peak, 'x_peak': usl_x(n_peak, gamma, alpha, beta) if n_peak else None,
            'target': target, 'n_required': n_req, 'n_required_ceil': math.ceil(n_req) if n_req else None,
-           'extrapolation_factor': factor, 'points': [{'n': n, 'throughput': x} for n, x in pts]}
+           'extrapolation_factor': factor, 'points': [{'n': n, 'throughput': x} for n, x in pts], 'excluded': excluded}
     print(f'USL: X(1)={gamma:g}, alpha={alpha:.5f}, beta={beta:.6f}, R2={r2 if r2 is None else round(r2, 4)}')
     if n_peak:
         print(f'정점: N={n_peak:.1f}, X={res["x_peak"]:.0f}')
@@ -186,7 +195,7 @@ def main():
     s1 = sub.add_parser('scale'); s1.add_argument('--runs', nargs='+', required=True); s1.add_argument('--out', required=True)
     s2 = sub.add_parser('before-after'); s2.add_argument('--pairs', nargs='+', required=True, help='KPI=RUN_V0:RUN_V1'); s2.add_argument('--metric', choices=['p99', 'error_rate'], default='p99'); s2.add_argument('--out', required=True)
     s3 = sub.add_parser('timeline'); s3.add_argument('--run', required=True); s3.add_argument('--series', default='origin_rps,p99_ms,error_rate'); s3.add_argument('--out', required=True)
-    s4 = sub.add_parser('usl'); s4.add_argument('--points', required=True, help='열: n,throughput[,run_id]'); s4.add_argument('--target', type=float); s4.add_argument('--out', required=True)
+    s4 = sub.add_parser('usl'); s4.add_argument('--points', required=True, help='열: n,throughput[,run_id][,saturated]'); s4.add_argument('--target', type=float); s4.add_argument('--out', required=True)
     a = p.parse_args()
     if a.cmd == 'usl':
         chart_usl(a.points, a.target, a.out)

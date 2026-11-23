@@ -54,6 +54,22 @@ node loadtest/k5/seatmap-lab.mjs --reps 20
 | `v1 queue`·`v1 seat-hold`·`v1 payment` | K1·K2·K7의 v1 쪽(docs/verification.md §3.9 'v1 경로', BUILD_ORDER PRF-215): 한 프로세스 합본(`node tools/local/cluster.mjs v1`)으로 보낸다. 게이트웨이가 없어 신원 머리를 넣고 구매 요청은 서명한다(`lib/purchase-auth.mjs`). K1은 입장 속도를 시험 회차의 결제사 승인 상한으로 시드하고, K7 ②는 반복 안에서 입장한 뒤 결제한다 | v0와 같다. `--namespace`·`--settle`·`--hpa-timeline`은 없다 |
 | 공통 | — | `--warm 30` `--main 60` `--cpus 4` `--memory-mi 4096` `--generators`(최고 도착률 ÷ 1,000, 나누면 CPU 2·메모리 1GiB씩) `--namespace v0` `--settle` `--hpa-timeline` `--record --run-id` `--profile`(사용자 수로 local-1k·10k·100k) `--prom-url` `--invariants` `--out` |
 | seat-hold·payment만 | — | seat-hold `--keep`(놓지 않기), `--db-stats`(교착·HOT 통계), payment `--fault-drop-pct` `--fault-delay-pct` `--kill-app-at` |
+| v1만(F-08-8) | docs/verification.md §4.1 'DB 쓰기 처리량'·'Redis 메모리' | queue·seat-hold·payment `--db-stats`(purchase·payment DB의 `pg_stat_database` 차이와 무대 PostgreSQL 전체의 `pg_stat_wal` WAL 바이트 → `db-stats.json`), `--redis-stats`(끝에 대기열·좌석 Valkey `INFO memory` → `redis-stats.json`). 못 읽으면 값은 null이고 그 실행은 무효(통과로 세지 않는다). `--record`면 장부 원본에 붙는다. v0는 `--redis-stats`를 받지 않는다 |
+| `v1 entry-steps` | MSR-020 진입 서버 비례 확인(docs/verification.md §3.3, 계획 docs/review/plans/F-08-2.md 6.3): 도착률 단계 올리기 한 번. 단계마다 새 회차, 준비 구간에 사전 검증을 마치고 진입(`route:entry`)만 정한 도착률로 보낸다(`scenarios/v1-entry.js`). 단계가 SLO(p99 200ms·오류율 0.1% 미만)·발생기·커널 카운터·호스트 포화 가운데 하나라도 어기면 다음 단계를 보내지 않는다. 첫 단계부터 어기면 첫 단계를 절반으로 낮춰 한 번만 다시 돈다 | `--replicas N` `--pod-cpus <0.25·0.5·1~16>`(무대와 같아야 한다) 그리고 `--start-rate r --step-rate d` 또는 `--x1-estimate X̂₁`(첫 단계 0.5 × N × X̂₁, 0.1 × N × X̂₁씩), `--max-steps 8` `--warm 10` `--main 30` `--rest 20` `--generators`(기본 최고 도착률 ÷ 800) `--cpus 2` `--memory-mi 1024`(발생기) `--record --run-id-prefix <ID 앞>`(단계마다 `<앞>-s<단계>`) `--prom-url` `--out`. 결과: `steps.json`(`{ n, podCpus, steps: [{ rate, kept, reasons, entryP99Ms, entryOverRatio, errorRate, sent, dropped, kernel, host }], x, saturated, limitedBy }`)·`step-<번호>/`(요약·`host.json`). 종료 코드는 X를 찾으면 0, 찾지 못하면 1, 인자 오류 2 |
+
+### 진입 서버 비례 확인(MSR-020)
+
+무대는 진입 서버 수·CPU 몫·켤 서비스를 정해 올립니다: `node tools/local/cluster.mjs v1 --redis-tls on --replicas N --cpus <몫> --services queue-svc`(넷을 다 켜지 않으면 합본은 single 모드로 뜬다). 단계 올리기 뒤 계산은 `node loadtest/runner/entry-scale.mjs choose|report`입니다.
+
+```bash
+node loadtest/run.mjs v1 entry-steps --replicas 1 --pod-cpus 1 --start-rate 400 --step-rate 400 --out .cache/peaket-f08/msr020/probe
+node loadtest/run.mjs v1 entry-steps --replicas 4 --pod-cpus 0.5 --x1-estimate 900 --record --run-id-prefix 2026-11-27-msr020-n4-c05-r1-f082 --prom-url http://127.0.0.1:9090
+node loadtest/runner/entry-scale.mjs choose --x1 1800 --docker-cpus 32             # CPU 몫 1 → 0.5 → 0.25(계획 6.4)
+node loadtest/runner/entry-scale.mjs report --design <1 vCPU 세 폴더> --point 1=<세 폴더> --point 2=<세 폴더> … --out <폴더>   # entry-scale.json·usl.csv
+```
+
+- 호스트 지표(docs/verification.md §3.5 6·8번): 본구간 시작·끝 표시를 보고 kind 노드 `/proc/stat`, 합본·대기열 Valkey·발생기 파드의 cgroup `cpu.stat`, 합본 파드 `/proc/net/netstat`을 읽어 `host.json`(CPU 사용률 %, `procs_running`, 논리 프로세서, 스로틀, 준 CPU 합, 커널 카운터 증가, 표시)을 남긴다. '호스트 포화'·'호스트 지표 없음'인 단계는 지킴으로 세지 않고, X(N)을 정한 단계가 그렇다면 그 점은 E(N)·설계 식·USL에서 뺀다(장부 행은 남긴다).
+- 발생기를 나누면 합친 p99는 발생기별 p99의 위 한계라, 단계 판정은 200ms를 넘은 진입의 비율(≤ 1%)로 한다(`entryOverRatio`).
 
 ## 게이트웨이 차단 상한·검색 IP 한도(`gw`, V-T43·SR-T13 ②)
 
