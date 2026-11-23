@@ -54,14 +54,14 @@ test('O-T50 ② iOS 홈 화면 앱(display-mode: standalone, 옛 navigator.stand
   assert.equal(enrollPlatformOf({ userAgent: UA.ipadAsMac, displayStandalone: false, maxTouchPoints: 5 }), 'ios-tab');
 });
 
-test('O-T50 ③ ( 그래도 이 브라우저에 등록 › )을 누르면 등록하고 persist()를 한 번 부른다', () => {
-  // 화면: enroll은 영속 저장소 요청을 기다린 뒤 키를 만든다
+// 정본 O-T50 ③ '등록하고 persist()를 한 번 부른다', docs/frontend.md §5.4 '등록할 때 persist()를 요청'. 결과를 기다리라는 말은 없다(F-05-1 시험 이의:
+// Firefox는 persist()가 사용자 답까지 끝나지 않아 기다리면 등록이 멈춘다, 커밋 ac64c6780). 부르는 횟수와 '답이 없어도 등록이 끝난다'는
+// 운영 빌드에서 persist()를 끝나지 않게 바꿔 실제로 누르는 tools/web-checks/reflow/wallet-enroll.spec.mjs O-T50 ③이 본다. 여기서는 화면이 등록마다 한 번 부르는지만 본다
+test('O-T50 ③ ( 그래도 이 브라우저에 등록 › )을 누르면 등록하고 persist()를 한 번 부른다(화면 배선)', () => {
   const c = code(DEVICE_QR);
   const enroll = c.slice(c.indexOf('const enroll = useCallback('), c.indexOf('const register = useCallback('));
-  const persistAt = enroll.indexOf('await requestPersistentStorage()');
-  const enrollAt = enroll.indexOf('enrollDeviceKey(ticketId');
-  assert.ok(persistAt > 0 && enrollAt > persistAt, '등록 전에 persist()를 부르지 않는다');
-  assert.equal([...enroll.matchAll(/requestPersistentStorage\(\)/g)].length, 1);
+  assert.equal([...enroll.matchAll(/requestPersistentStorage\(\)/g)].length, 1, '등록 한 번에 persist()를 한 번 부르지 않는다');
+  assert.ok(enroll.indexOf('requestPersistentStorage()') < enroll.indexOf('enrollDeviceKey(ticketId'), '등록 흐름보다 먼저 부르지 않는다');
   // 안내의 '그래도 …' 버튼이 enroll 쪽으로 이어진다(안내를 닫고 다시 묻지 않는다)
   assert.match(c, /needsEnrollGuide\(platform\) && guide === null/);
 });

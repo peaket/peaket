@@ -118,3 +118,49 @@ test('O-T32 기본 폭: 데스크톱 ( 그래도 이 기기에 등록 › )은 �
   await page.getByRole('button', { name: `${SEAT}, 그래도 이 기기에 등록` }).click();
   await expect.poll(() => calls, { timeout: 15_000, message: '그래도 이 기기에 등록을 눌렀는데 등록 요청이 없다' }).toEqual(['POST']);
 });
+
+// 정본 O-T50 ③ '등록하고 persist()를 한 번 부른다'(docs/frontend.md §5.4 '등록할 때 persist()를 요청'). 결과를 기다리라는 말은 없고,
+// Firefox는 persist()가 사용자 답까지 끝나지 않는다(F-05-1 시험 이의, 커밋 ac64c6780). 브라우저의 persist()를 끝나지 않는 약속으로 바꿔(바깥 경계 대역)
+// 누를 때 한 번 부르는지와, 그 답 없이도 등록이 끝나는지(이 기기에 키)를 본다
+/** persist()를 세고 끝나지 않게 바꾼다(엔진마다 자리가 달라 프로토타입에 두고, 없으면 navigator.storage째 둔다) */
+const hangingPersist = (context) =>
+  context.addInitScript(() => {
+    window.__f051PersistCalls = 0;
+    const persist = () => ((window.__f051PersistCalls += 1), new Promise(() => {}));
+    if (typeof StorageManager !== 'undefined') Object.defineProperty(StorageManager.prototype, 'persist', { configurable: true, value: persist });
+    if (!navigator.storage?.persist) Object.defineProperty(navigator, 'storage', { configurable: true, value: { ...(navigator.storage ?? {}), persist } });
+  });
+const persistCalls = (page) => page.evaluate(() => window.__f051PersistCalls);
+
+test.describe(() => {
+  test.use({ userAgent: IPHONE_SAFARI, viewport: { width: 393, height: 852 }, hasTouch: true });
+  test('O-T50 ③ 기본 폭: ( 그래도 이 브라우저에 등록 › )을 누르면 persist()를 한 번 부르고 그 답을 기다리지 않고 키를 만든다', async ({ page, context, browserName }) => {
+    // skip-until: 2027-06-30 Playwright Firefox는 휴대폰 문맥을 주지 않는다. Firefox의 '답 없는 persist'는 아래 데스크톱 시험이 본다(F-05-1)
+    test.skip(browserName === 'firefox', 'Firefox는 휴대폰 문맥을 흉내 내지 못한다');
+    await hangingPersist(context);
+    await fanApi(context);
+    expect((await page.goto(`${WEB}${TICKET}`))?.status()).toBe(200);
+    await page.getByRole('button', { name: new RegExp(`^입장 QR, 티켓 [^,]+, ${SEAT},.*이 휴대폰을 입장용으로 등록$`) }).click();
+    const goOn = page.getByRole('button', { name: '그래도 이 브라우저에 등록' });
+    await expect(goOn).toBeVisible();
+    // 월렛을 열 때 부른 몫(O-T50 ⑤)은 이미 지났다. 누른 뒤의 몫만 센다
+    const before = await persistCalls(page);
+    expect(before, '월렛을 열 때 persist()를 부르지 않았다(O-T50 ⑤)').toBeGreaterThanOrEqual(1);
+    await goOn.click();
+    await expect.poll(() => storedKeys(page), { timeout: 15_000, message: 'persist()의 답을 기다리느라 등록이 끝나지 않았다' }).toBe(1);
+    expect((await persistCalls(page)) - before).toBe(1);
+  });
+});
+
+test.describe(() => {
+  test.use({ userAgent: WINDOWS_CHROME });
+  test('O-T50 ③ 기본 폭: persist()가 답하지 않아도(데스크톱 ( 그래도 이 기기에 등록 › )) 등록이 끝나 이 기기에 키가 생긴다', async ({ page, context }) => {
+    await hangingPersist(context);
+    await fanApi(context);
+    expect((await page.goto(`${WEB}${TICKET}`))?.status()).toBe(200);
+    await expect(page.getByRole('button', { name: '지금 동기화' })).toBeVisible();
+    await page.getByRole('button', { name: `${SEAT}, 그래도 이 기기에 등록` }).click();
+    await expect.poll(() => storedKeys(page), { timeout: 15_000, message: 'persist()의 답을 기다리느라 등록이 끝나지 않았다' }).toBe(1);
+    expect(await persistCalls(page), '등록에서 persist()를 부르지 않았다').toBeGreaterThanOrEqual(1);
+  });
+});
