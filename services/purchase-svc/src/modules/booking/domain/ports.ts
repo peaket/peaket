@@ -81,6 +81,8 @@ export interface TransitionInput {
   readonly actor: string;
   /** 결제 결과 반영 전이(T9~T17·T21, PAYMENT_RESULT_TRANSITIONS)에만 준다. 양의 정수(payment_event.seq). T11은 없어도 된다(Saga의 승인 기한 넘김, PRF-165) */
   readonly paymentEventSeq?: number;
+  /** 도착이 REFUNDED인 전이(T23·T24·T26)에만 준다: 그 전이를 일으킨 취소·예외 환불에서 돌려주는 금액(원). 사건의 refundAmount가 된다(F-04-2) */
+  readonly refundAmount?: number;
 }
 
 export type TransitionResult =

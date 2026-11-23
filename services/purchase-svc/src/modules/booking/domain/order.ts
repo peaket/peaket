@@ -212,6 +212,11 @@ export interface BuildOrderEventInput {
   readonly reachedBefore: boolean;
   /** T1(CREATED)에만 준다 */
   readonly created?: CreatedExtras;
+  /**
+   * 도착이 REFUNDED인 전이(T23·T24·T26)에만 준다: 그 전이를 일으킨 취소·예외 환불에서 돌려주는 금액(원, 0 이상 정수, order_cancellation.refund_amount).
+   * 계약 OrderEvent.refundAmount(x-present-when type REFUNDED)에 싣는다. 없으면 칸을 비우고, 계약 판 인코더가 그 사건을 거절한다(F-04-2)
+   */
+  readonly refundAmount?: number;
 }
 
 /**
@@ -226,6 +231,9 @@ export function buildOrderEvent(input: BuildOrderEventInput): OrderEventMessage 
   if (isCreate && created === undefined) throw new RangeError('T1(주문 생성) 사건에는 created 칸이 있어야 한다');
   if (!isCreate && created !== undefined) throw new RangeError(`created 칸은 T1에만 준다: ${transition.id}`);
   if (items.length === 0) throw new RangeError('주문 항목이 비었다');
+  const { refundAmount } = input;
+  if (refundAmount !== undefined && transition.to !== 'REFUNDED') throw new RangeError(`refundAmount 칸은 도착이 REFUNDED인 전이에만 준다: ${transition.id}`);
+  if (refundAmount !== undefined && (!Number.isSafeInteger(refundAmount) || refundAmount < 0)) throw new RangeError('refundAmount는 0 이상 정수다');
   const type = orderEventType(transition);
   if (type === undefined) return undefined;
   // 칸 차례는 계약(asyncapi OrderEvent)과 같게 둔다(JSON 대역의 바이트가 늘 같은 모양이 되게)
@@ -235,6 +243,8 @@ export function buildOrderEvent(input: BuildOrderEventInput): OrderEventMessage 
     accountId: order.accountId,
     type,
     amount: order.amount,
+    // 그 전이의 환급액(REFUNDED에만, asyncapi OrderEvent.refundAmount)
+    ...(refundAmount !== undefined ? { refundAmount } : {}),
     seatIds: items.map((i) => i.seatId),
     // CREATED에만 싣는 칸은 값이 있을 때만 넣는다. refMissing은 늘 넣는다(CREATED 밖은 false)
     ...(created?.purchaseSessionId !== undefined ? { purchaseSessionId: created.purchaseSessionId } : {}),

@@ -270,7 +270,7 @@ export class DrizzleOrderStore {
     if (orderEventType(t) === undefined) return { status: 'APPLIED', seq, order };
     const reachedBefore = FIRST_IN_STAGE_STATUSES.has(t.to) ? await reachedBeforeOf(tx, order.id, t.to, seq) : false;
     const items = await itemsOf(tx, order.id);
-    const message = buildOrderEvent({ order, items, transition: t, seq, occurredAtMs: now, reachedBefore });
+    const message = buildOrderEvent({ order, items, transition: t, seq, occurredAtMs: now, reachedBefore, ...(input.refundAmount !== undefined ? { refundAmount: input.refundAmount } : {}) });
     if (!message) throw new Error(`사건 종류가 있는 전이인데 사건이 없다: ${t.id}`);
     // ③ 마지막 문장
     const [outboxId] = await writeOutbox(tx, this.o.clock, [{ topic: TRADE_ORDERS_TOPIC, key: order.eventId, payload: this.codec.encode(message) }]);

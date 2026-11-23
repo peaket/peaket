@@ -143,7 +143,8 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
       const refunded = Number((counts.rows[0] as { refunded: number | string }).refunded);
       const transition = orderTransitionAfterCancel(order.status, total, cancelled, refunded);
       if (transition !== undefined) {
-        const applied = await this.orders.transition(tx, { orderId: q.orderId, transition, actor: q.actor });
+        // 주문을 REFUNDED로 끝내는 전이(T23·T24)는 그 취소의 환급액을 사건에 싣는다(OrderEvent.refundAmount, F-04-2)
+        const applied = await this.orders.transition(tx, { orderId: q.orderId, transition, actor: q.actor, ...(endsRefunded(transition) ? { refundAmount: q.refundAmount } : {}) });
         if (applied.status !== 'APPLIED') throw new Error(`주문 상태 전이에 실패했다: ${transition} ${applied.reason}`);
       }
       return { status: 'CREATED' } as const;
@@ -153,7 +154,7 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
   async updateStatus(q: { readonly cancellationId: string; readonly status: 'REQUESTED' | 'REFUND_PENDING' | 'REFUNDED' | 'VOIDED'; readonly nowMs: number; readonly answer?: { readonly idempotencyKey: string; readonly answer: RefundAccountAnswer } }): Promise<boolean> {
     return this.database.transaction(async (tx) => {
       const [row] = await tx
-        .select({ orderId: orderCancellation.orderId })
+        .select({ orderId: orderCancellation.orderId, refundAmount: orderCancellation.refundAmount })
         .from(orderCancellation)
         .where(eq(orderCancellation.id, q.cancellationId))
         .limit(1);
@@ -192,7 +193,8 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
       const refunded = Number((counts.rows[0] as { refunded: number | string }).refunded);
       const transition = orderTransitionAfterCancel(order.status, total, cancelled, refunded);
       if (transition !== undefined) {
-        const applied = await this.orders.transition(tx, { orderId: row.orderId, transition, actor: 'system:cancellation-refund' });
+        // 이 환급 완료가 주문을 REFUNDED로 끝내면 그 취소의 환급액을 사건에 싣는다(OrderEvent.refundAmount, F-04-2)
+        const applied = await this.orders.transition(tx, { orderId: row.orderId, transition, actor: 'system:cancellation-refund', ...(endsRefunded(transition) ? { refundAmount: row.refundAmount } : {}) });
         if (applied.status !== 'APPLIED') throw new Error(`주문 상태 전이에 실패했다: ${transition} ${applied.reason}`);
       }
       return true;
@@ -532,6 +534,9 @@ function eventRefundRunning() {
     select 1 from purchase_order ro join event_cancellation_request r on r.event_id = ro.event_id
      where ro.id = ${orderCancellation.orderId} and r.kind = 'CANCEL' and r.status in ('RUNNING', 'PAUSED'))`;
 }
+
+/** 도착이 REFUNDED인 취소 뒤 전이(T23·T24) */
+const endsRefunded = (t: string): boolean => t === 'T23' || t === 'T24';
 
 /** 취소 뒤 주문 상태 전이. 모든 항목이 취소됐으면 REFUNDED, 아니면 PARTIALLY_REFUNDED */
 export function orderTransitionAfterCancel(status: string, total: number, cancelled: number, refunded = 0): 'T22' | 'T23' | 'T24' | 'T25' | undefined {
