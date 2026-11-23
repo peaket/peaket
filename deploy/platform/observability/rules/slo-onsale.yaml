@@ -1,0 +1,650 @@
+# 온세일 SLO 기록 규칙과 번 레이트 경보(F-01-5, OPS-090, 시험 V-T51 ①~⑤·⑧·V-T9·V-T20 ④).
+# 정본: docs/observability.md §4 'SLO 기록 규칙과 원천'(세 층·임시 원천 표·결제 확정 원인 넷)·'긁기·평가·알림 간격'·'다중 윈도우 멀티 번 레이트 알림 규칙',
+# ADR-0382(임시 원천·회차 붙이기·지난 70분), ADR-0226 결정 5(자동 감축이 읽는 이름, services/admission-ctrl/.../prometheus-control-inputs.ts).
+# 평가 5초 묶음 하나다. 기록 규칙과 그것을 읽는 경보를 같은 묶음에 두어 같은 평가 시각에 차례로 돈다(목표 상수 → 1층 → 2층 → 3층 차례를 지킨다).
+# 배수는 식 안에 '<배수> * peaket:slo_error_budget:ratio' 꼴로 쓴다(V-T9가 10을 11로 바꿔 시험이 실패하는지 본다).
+# 1층은 회차 라벨이 없어 여정마다 규칙 하나다. 2층·온세일 경보는 여정마다 규칙 하나로 진행 중인 회차(admission_target)를 곱해 붙인다
+# (PromQL에는 두 벡터의 곱집합 연산이 없어서다). 원천이 바뀌면 1층만 고친다(ADR-0382 결정 4).
+# 시험: node --test "deploy/platform/observability/test/*.test.mjs", node tools/ci/prom-rules.mjs check·test
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: slo-onsale
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: peaket
+spec:
+  groups:
+    - name: slo-onsale
+      interval: 5s
+      rules:
+        # 목표 상수: 허용 실패 비율 = 1 − 목표(docs/observability.md §4 임시 원천 표). 원천이 없는 detail·queue_state는 두지 않는다
+        - record: peaket:slo_error_budget:ratio
+          expr: vector(1 - 0.9995)
+          labels:
+            journey: hold
+        - record: peaket:slo_error_budget:ratio
+          expr: vector(1 - 0.9995)
+          labels:
+            journey: payment_accept
+        - record: peaket:slo_error_budget:ratio
+          expr: vector(1 - 0.9995)
+          labels:
+            journey: payment_confirm
+        - record: peaket:slo_error_budget:ratio
+          expr: vector(1 - 0.99)
+          labels:
+            journey: seat_status
+        - record: peaket:slo_error_budget:ratio
+          expr: vector(1 - 0.999)
+          labels:
+            journey: queue_entry
+        # 1층: 여정별 실패 비율(창 20s·25s·2m·5m·70m). 요청이 없으면 0(분모 0을 vector(0)으로 채움), 원천 서비스가 긁히지 않으면 값 없음(ADR-0069 결정 1)
+        # 창 20s
+        - record: peaket:slo_error_ratio:rate20s
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}[20s]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST"}[20s])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: hold
+        - record: peaket:slo_error_ratio:rate20s
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST",status_class="5xx"}[20s]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST"}[20s])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: payment_accept
+        - record: peaket:slo_error_ratio:rate20s
+          expr: |
+            (
+                (sum(rate(payment_confirm_resolution_seconds_count[20s])) - sum(rate(payment_confirm_resolution_seconds_bucket{le="3"}[20s])))
+              / (sum(rate(payment_confirm_resolution_seconds_count[20s])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="payment-svc"}) == 1)
+          labels:
+            journey: payment_confirm
+        - record: peaket:slo_error_ratio:rate20s
+          expr: |
+            (
+                (sum(rate(realtime_gw_batch_wait_ms_count[20s])) - sum(rate(realtime_gw_batch_wait_ms_bucket{le="300"}[20s])))
+              / (sum(rate(realtime_gw_batch_wait_ms_count[20s])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="realtime-gw"}) == 1)
+          labels:
+            journey: seat_status
+        - record: peaket:slo_error_ratio:rate20s
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="5xx"}[20s]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST"}[20s])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="queue-svc"}) == 1)
+          labels:
+            journey: queue_entry
+        # 창 25s
+        - record: peaket:slo_error_ratio:rate25s
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}[25s]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST"}[25s])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: hold
+        - record: peaket:slo_error_ratio:rate25s
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST",status_class="5xx"}[25s]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST"}[25s])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: payment_accept
+        - record: peaket:slo_error_ratio:rate25s
+          expr: |
+            (
+                (sum(rate(payment_confirm_resolution_seconds_count[25s])) - sum(rate(payment_confirm_resolution_seconds_bucket{le="3"}[25s])))
+              / (sum(rate(payment_confirm_resolution_seconds_count[25s])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="payment-svc"}) == 1)
+          labels:
+            journey: payment_confirm
+        - record: peaket:slo_error_ratio:rate25s
+          expr: |
+            (
+                (sum(rate(realtime_gw_batch_wait_ms_count[25s])) - sum(rate(realtime_gw_batch_wait_ms_bucket{le="300"}[25s])))
+              / (sum(rate(realtime_gw_batch_wait_ms_count[25s])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="realtime-gw"}) == 1)
+          labels:
+            journey: seat_status
+        - record: peaket:slo_error_ratio:rate25s
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="5xx"}[25s]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST"}[25s])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="queue-svc"}) == 1)
+          labels:
+            journey: queue_entry
+        # 창 2m
+        - record: peaket:slo_error_ratio:rate2m
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}[2m]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST"}[2m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: hold
+        - record: peaket:slo_error_ratio:rate2m
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST",status_class="5xx"}[2m]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST"}[2m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: payment_accept
+        - record: peaket:slo_error_ratio:rate2m
+          expr: |
+            (
+                (sum(rate(payment_confirm_resolution_seconds_count[2m])) - sum(rate(payment_confirm_resolution_seconds_bucket{le="3"}[2m])))
+              / (sum(rate(payment_confirm_resolution_seconds_count[2m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="payment-svc"}) == 1)
+          labels:
+            journey: payment_confirm
+        - record: peaket:slo_error_ratio:rate2m
+          expr: |
+            (
+                (sum(rate(realtime_gw_batch_wait_ms_count[2m])) - sum(rate(realtime_gw_batch_wait_ms_bucket{le="300"}[2m])))
+              / (sum(rate(realtime_gw_batch_wait_ms_count[2m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="realtime-gw"}) == 1)
+          labels:
+            journey: seat_status
+        - record: peaket:slo_error_ratio:rate2m
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="5xx"}[2m]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST"}[2m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="queue-svc"}) == 1)
+          labels:
+            journey: queue_entry
+        # 창 5m
+        - record: peaket:slo_error_ratio:rate5m
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}[5m]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST"}[5m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: hold
+        - record: peaket:slo_error_ratio:rate5m
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST",status_class="5xx"}[5m]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST"}[5m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: payment_accept
+        - record: peaket:slo_error_ratio:rate5m
+          expr: |
+            (
+                (sum(rate(payment_confirm_resolution_seconds_count[5m])) - sum(rate(payment_confirm_resolution_seconds_bucket{le="3"}[5m])))
+              / (sum(rate(payment_confirm_resolution_seconds_count[5m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="payment-svc"}) == 1)
+          labels:
+            journey: payment_confirm
+        - record: peaket:slo_error_ratio:rate5m
+          expr: |
+            (
+                (sum(rate(realtime_gw_batch_wait_ms_count[5m])) - sum(rate(realtime_gw_batch_wait_ms_bucket{le="300"}[5m])))
+              / (sum(rate(realtime_gw_batch_wait_ms_count[5m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="realtime-gw"}) == 1)
+          labels:
+            journey: seat_status
+        - record: peaket:slo_error_ratio:rate5m
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="5xx"}[5m]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST"}[5m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="queue-svc"}) == 1)
+          labels:
+            journey: queue_entry
+        # 창 70m
+        - record: peaket:slo_error_ratio:rate70m
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}[70m]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST"}[70m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: hold
+        - record: peaket:slo_error_ratio:rate70m
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST",status_class="5xx"}[70m]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST"}[70m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: payment_accept
+        - record: peaket:slo_error_ratio:rate70m
+          expr: |
+            (
+                (sum(rate(payment_confirm_resolution_seconds_count[70m])) - sum(rate(payment_confirm_resolution_seconds_bucket{le="3"}[70m])))
+              / (sum(rate(payment_confirm_resolution_seconds_count[70m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="payment-svc"}) == 1)
+          labels:
+            journey: payment_confirm
+        - record: peaket:slo_error_ratio:rate70m
+          expr: |
+            (
+                (sum(rate(realtime_gw_batch_wait_ms_count[70m])) - sum(rate(realtime_gw_batch_wait_ms_bucket{le="300"}[70m])))
+              / (sum(rate(realtime_gw_batch_wait_ms_count[70m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="realtime-gw"}) == 1)
+          labels:
+            journey: seat_status
+        - record: peaket:slo_error_ratio:rate70m
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="5xx"}[70m]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST"}[70m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="queue-svc"}) == 1)
+          labels:
+            journey: queue_entry
+        # 2층: 회차 상태(0·1). 진행 중인 회차(admission_target이 있는 회차)마다 같은 값을 붙인다(ADR-0382 결정 2). 라벨은 event_id·journey뿐
+        # 10배 소진: 2분·20초 두 창이 모두 허용의 10배를 넘으면 1
+        - record: peaket:slo:budget_alert10x:state
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+                (peaket:slo_error_ratio:rate2m{journey="hold"} > bool 10 * peaket:slo_error_budget:ratio{journey="hold"})
+              * (peaket:slo_error_ratio:rate20s{journey="hold"} > bool 10 * peaket:slo_error_budget:ratio{journey="hold"})
+            )
+          labels:
+            journey: hold
+        - record: peaket:slo:budget_alert10x:state
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+                (peaket:slo_error_ratio:rate2m{journey="payment_accept"} > bool 10 * peaket:slo_error_budget:ratio{journey="payment_accept"})
+              * (peaket:slo_error_ratio:rate20s{journey="payment_accept"} > bool 10 * peaket:slo_error_budget:ratio{journey="payment_accept"})
+            )
+          labels:
+            journey: payment_accept
+        - record: peaket:slo:budget_alert10x:state
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+                (peaket:slo_error_ratio:rate2m{journey="payment_confirm"} > bool 10 * peaket:slo_error_budget:ratio{journey="payment_confirm"})
+              * (peaket:slo_error_ratio:rate20s{journey="payment_confirm"} > bool 10 * peaket:slo_error_budget:ratio{journey="payment_confirm"})
+            )
+          labels:
+            journey: payment_confirm
+        - record: peaket:slo:budget_alert10x:state
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+                (peaket:slo_error_ratio:rate2m{journey="seat_status"} > bool 10 * peaket:slo_error_budget:ratio{journey="seat_status"})
+              * (peaket:slo_error_ratio:rate20s{journey="seat_status"} > bool 10 * peaket:slo_error_budget:ratio{journey="seat_status"})
+            )
+          labels:
+            journey: seat_status
+        - record: peaket:slo:budget_alert10x:state
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+                (peaket:slo_error_ratio:rate2m{journey="queue_entry"} > bool 10 * peaket:slo_error_budget:ratio{journey="queue_entry"})
+              * (peaket:slo_error_ratio:rate20s{journey="queue_entry"} > bool 10 * peaket:slo_error_budget:ratio{journey="queue_entry"})
+            )
+          labels:
+            journey: queue_entry
+        # 50% 소진선: 지난 70분 실패 비율 ÷ 허용 ≥ 0.5이면 1(ADR-0382 결정 3)
+        - record: peaket:slo:budget_burn50:state
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+              peaket:slo_error_ratio:rate70m{journey="hold"} / peaket:slo_error_budget:ratio{journey="hold"} >= bool 0.5
+            )
+          labels:
+            journey: hold
+        - record: peaket:slo:budget_burn50:state
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+              peaket:slo_error_ratio:rate70m{journey="payment_accept"} / peaket:slo_error_budget:ratio{journey="payment_accept"} >= bool 0.5
+            )
+          labels:
+            journey: payment_accept
+        - record: peaket:slo:budget_burn50:state
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+              peaket:slo_error_ratio:rate70m{journey="payment_confirm"} / peaket:slo_error_budget:ratio{journey="payment_confirm"} >= bool 0.5
+            )
+          labels:
+            journey: payment_confirm
+        - record: peaket:slo:budget_burn50:state
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+              peaket:slo_error_ratio:rate70m{journey="seat_status"} / peaket:slo_error_budget:ratio{journey="seat_status"} >= bool 0.5
+            )
+          labels:
+            journey: seat_status
+        - record: peaket:slo:budget_burn50:state
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+              peaket:slo_error_ratio:rate70m{journey="queue_entry"} / peaket:slo_error_budget:ratio{journey="queue_entry"} >= bool 0.5
+            )
+          labels:
+            journey: queue_entry
+        # 결제 확정 원인 넷(결제사마다): ① 1분 창 승인 호출의 1% 이상이 2초 넘김 ② 서킷이 열린 파드가 있음 ③ 1분 창 결제사 오류(PG_ERROR)가 승인 호출의 1% 이상
+        # ④ 1분 안에 첫 승인 호출의 429(first="true")가 있음. 결제사 하나라도 원인이면 진행 중인 모든 회차가 1(ADR-0382 결정 2)
+        - record: peaket:payment:pg_cause:state
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+              (
+                group(
+                  (
+                    (
+                        sum by (pg) (rate(payment_confirm_seconds_count[1m]))
+                      - sum by (pg) (rate(payment_confirm_seconds_bucket{le="2"}[1m]))
+                    ) / sum by (pg) (rate(payment_confirm_seconds_count[1m])) >= 0.01
+                  )
+                  or
+                  (
+                    max by (pg) (payment_pg_circuit_open) == 1
+                  )
+                  or
+                  (
+                    sum by (pg) (rate(payment_confirm_declined_total{category="PG_ERROR"}[1m])) / sum by (pg) (rate(payment_confirm_seconds_count[1m])) >= 0.01
+                  )
+                  or
+                  (
+                    sum by (pg) (increase(pg_throttled_total{first="true"}[1m])) > 0
+                  )
+                )
+                or vector(0)
+              )
+              and on() (max(up{app="payment-svc"}) == 1)
+            )
+        # 입장 제어 입력(라벨 없음, docs/features/queue-admission.md §5): 다운스트림 purchase-svc HTTP의 30초 p99와 5xx 비율. 결제 결과 long polling(payment-status, 최대 25초)은 뺀다
+        # 요청이 없으면 0, purchase-svc가 긁히지 않으면 값 없음. 혼잡 기준(100ms·1%)은 admission-ctrl이 갖는다
+        - record: peaket:admission:downstream_p99_seconds:30s
+          expr: |
+            (
+                histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{service="purchase-svc",route!="/v1/orders/{orderId}/payment-status"}[30s])))
+                and on() (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route!="/v1/orders/{orderId}/payment-status"}[30s])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+        - record: peaket:admission:downstream_error_ratio:30s
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route!="/v1/orders/{orderId}/payment-status",status_class="5xx"}[30s]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route!="/v1/orders/{orderId}/payment-status"}[30s])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+        # 3층: 온세일 경보(for 없음, docs/observability.md §4 간격 표). SEV1 10배: 2분·20초 두 창
+        - alert: slo_onsale_fast_burn
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+              (peaket:slo_error_ratio:rate2m{journey="hold"} > 10 * peaket:slo_error_budget:ratio{journey="hold"})
+              and
+              (peaket:slo_error_ratio:rate20s{journey="hold"} > 10 * peaket:slo_error_budget:ratio{journey="hold"})
+            )
+          labels:
+            severity: sev1
+            kind: slo
+            journey: hold
+          annotations:
+            summary: '좌석 홀드(hold) 실패가 온세일 예산을 10배 속도로 쓴다(회차 {{ $labels.event_id }})'
+            description: '2m 창과 20s 창의 실패 비율이 모두 허용 실패 비율(1 − 목표 0.9995)의 10배를 넘는다. 임시 원천(ADR-0382 결정 1): purchase-svc POST /v1/events/{eventId}/holds, 실패는 5xx. 1층에 회차 라벨이 없어 진행 중인 회차마다 같은 값으로 낸다(ADR-0382 결정 2). 배포 직후면 RB-23, 결제사 원인이면 RB-07.'
+            runbook_url: 'https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목차-예정-runbooks-작성-대상'
+            dashboard_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22peaket%3Aslo_error_ratio%3Arate2m%7Bjourney%3D%5C%22hold%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22hold%5C%22%7D%20or%20peaket%3Aslo_error_ratio%3Arate20s%7Bjourney%3D%5C%22hold%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22hold%5C%22%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+            explore_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22sum%20by%20(route%2C%20status_class)%20(rate(http_server_request_duration_seconds_count%7Bservice%3D%5C%22purchase-svc%5C%22%2Croute%3D%5C%22%2Fv1%2Fevents%2F%7BeventId%7D%2Fholds%5C%22%2Cmethod%3D%5C%22POST%5C%22%2Cstatus_class%3D%5C%225xx%5C%22%7D%5B1m%5D))%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+        - alert: slo_onsale_fast_burn
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+              (peaket:slo_error_ratio:rate2m{journey="payment_accept"} > 10 * peaket:slo_error_budget:ratio{journey="payment_accept"})
+              and
+              (peaket:slo_error_ratio:rate20s{journey="payment_accept"} > 10 * peaket:slo_error_budget:ratio{journey="payment_accept"})
+            )
+          labels:
+            severity: sev1
+            kind: slo
+            journey: payment_accept
+          annotations:
+            summary: '결제 접수(payment_accept) 실패가 온세일 예산을 10배 속도로 쓴다(회차 {{ $labels.event_id }})'
+            description: '2m 창과 20s 창의 실패 비율이 모두 허용 실패 비율(1 − 목표 0.9995)의 10배를 넘는다. 임시 원천(ADR-0382 결정 1): purchase-svc POST /v1/orders/{orderId}/payment-acceptance, 실패는 5xx. 1층에 회차 라벨이 없어 진행 중인 회차마다 같은 값으로 낸다(ADR-0382 결정 2). 배포 직후면 RB-23, 결제사 원인이면 RB-07.'
+            runbook_url: 'https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목차-예정-runbooks-작성-대상'
+            dashboard_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22peaket%3Aslo_error_ratio%3Arate2m%7Bjourney%3D%5C%22payment_accept%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22payment_accept%5C%22%7D%20or%20peaket%3Aslo_error_ratio%3Arate20s%7Bjourney%3D%5C%22payment_accept%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22payment_accept%5C%22%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+            explore_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22sum%20by%20(route%2C%20status_class)%20(rate(http_server_request_duration_seconds_count%7Bservice%3D%5C%22purchase-svc%5C%22%2Croute%3D%5C%22%2Fv1%2Forders%2F%7BorderId%7D%2Fpayment-acceptance%5C%22%2Cmethod%3D%5C%22POST%5C%22%2Cstatus_class%3D%5C%225xx%5C%22%7D%5B1m%5D))%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+        - alert: slo_onsale_fast_burn
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+              (peaket:slo_error_ratio:rate2m{journey="payment_confirm"} > 10 * peaket:slo_error_budget:ratio{journey="payment_confirm"})
+              and
+              (peaket:slo_error_ratio:rate20s{journey="payment_confirm"} > 10 * peaket:slo_error_budget:ratio{journey="payment_confirm"})
+            )
+          labels:
+            severity: sev1
+            kind: slo
+            journey: payment_confirm
+          annotations:
+            summary: '결제 확정(payment_confirm) 실패가 온세일 예산을 10배 속도로 쓴다(회차 {{ $labels.event_id }})'
+            description: '2m 창과 20s 창의 실패 비율이 모두 허용 실패 비율(1 − 목표 0.9995)의 10배를 넘는다. 임시 원천(ADR-0382 결정 1): payment-svc payment_confirm_resolution_seconds, 실패는 3초 넘김. 1층에 회차 라벨이 없어 진행 중인 회차마다 같은 값으로 낸다(ADR-0382 결정 2). 배포 직후면 RB-23, 결제사 원인이면 RB-07.'
+            runbook_url: 'https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목차-예정-runbooks-작성-대상'
+            dashboard_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22peaket%3Aslo_error_ratio%3Arate2m%7Bjourney%3D%5C%22payment_confirm%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22payment_confirm%5C%22%7D%20or%20peaket%3Aslo_error_ratio%3Arate20s%7Bjourney%3D%5C%22payment_confirm%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22payment_confirm%5C%22%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+            explore_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22sum(rate(payment_confirm_resolution_seconds_count%5B1m%5D))%20-%20sum(rate(payment_confirm_resolution_seconds_bucket%7Ble%3D%5C%223%5C%22%7D%5B1m%5D))%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+        - alert: slo_onsale_fast_burn
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+              (peaket:slo_error_ratio:rate2m{journey="seat_status"} > 10 * peaket:slo_error_budget:ratio{journey="seat_status"})
+              and
+              (peaket:slo_error_ratio:rate20s{journey="seat_status"} > 10 * peaket:slo_error_budget:ratio{journey="seat_status"})
+            )
+          labels:
+            severity: sev1
+            kind: slo
+            journey: seat_status
+          annotations:
+            summary: '좌석 상태 전파(seat_status) 실패가 온세일 예산을 10배 속도로 쓴다(회차 {{ $labels.event_id }})'
+            description: '2m 창과 20s 창의 실패 비율이 모두 허용 실패 비율(1 − 목표 0.99)의 10배를 넘는다. 임시 원천(ADR-0382 결정 1): realtime-gw realtime_gw_batch_wait_ms, 실패는 300ms 넘김. 1층에 회차 라벨이 없어 진행 중인 회차마다 같은 값으로 낸다(ADR-0382 결정 2). 배포 직후면 RB-23, 결제사 원인이면 RB-07.'
+            runbook_url: 'https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목차-예정-runbooks-작성-대상'
+            dashboard_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22peaket%3Aslo_error_ratio%3Arate2m%7Bjourney%3D%5C%22seat_status%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22seat_status%5C%22%7D%20or%20peaket%3Aslo_error_ratio%3Arate20s%7Bjourney%3D%5C%22seat_status%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22seat_status%5C%22%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+            explore_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22sum(rate(realtime_gw_batch_wait_ms_count%5B1m%5D))%20-%20sum(rate(realtime_gw_batch_wait_ms_bucket%7Ble%3D%5C%22300%5C%22%7D%5B1m%5D))%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+        - alert: slo_onsale_fast_burn
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+              (peaket:slo_error_ratio:rate2m{journey="queue_entry"} > 10 * peaket:slo_error_budget:ratio{journey="queue_entry"})
+              and
+              (peaket:slo_error_ratio:rate20s{journey="queue_entry"} > 10 * peaket:slo_error_budget:ratio{journey="queue_entry"})
+            )
+          labels:
+            severity: sev1
+            kind: slo
+            journey: queue_entry
+          annotations:
+            summary: '대기열 진입(queue_entry) 실패가 온세일 예산을 10배 속도로 쓴다(회차 {{ $labels.event_id }})'
+            description: '2m 창과 20s 창의 실패 비율이 모두 허용 실패 비율(1 − 목표 0.999)의 10배를 넘는다. 임시 원천(ADR-0382 결정 1): queue-svc POST /v1/queues/{eventId}/entries, 실패는 5xx. 1층에 회차 라벨이 없어 진행 중인 회차마다 같은 값으로 낸다(ADR-0382 결정 2). 배포 직후면 RB-23, 결제사 원인이면 RB-07.'
+            runbook_url: 'https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목차-예정-runbooks-작성-대상'
+            dashboard_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22peaket%3Aslo_error_ratio%3Arate2m%7Bjourney%3D%5C%22queue_entry%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22queue_entry%5C%22%7D%20or%20peaket%3Aslo_error_ratio%3Arate20s%7Bjourney%3D%5C%22queue_entry%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22queue_entry%5C%22%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+            explore_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22sum%20by%20(route%2C%20status_class)%20(rate(http_server_request_duration_seconds_count%7Bservice%3D%5C%22queue-svc%5C%22%2Croute%3D%5C%22%2Fv1%2Fqueues%2F%7BeventId%7D%2Fentries%5C%22%2Cmethod%3D%5C%22POST%5C%22%2Cstatus_class%3D%5C%225xx%5C%22%7D%5B1m%5D))%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+        # SEV2 3배: 5분·25초 두 창. 결제 확정은 허용 실패가 적어 원인 경보(payment_confirm_pg_cause)로 갈음한다
+        - alert: slo_onsale_slow_burn
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+              (peaket:slo_error_ratio:rate5m{journey="hold"} > 3 * peaket:slo_error_budget:ratio{journey="hold"})
+              and
+              (peaket:slo_error_ratio:rate25s{journey="hold"} > 3 * peaket:slo_error_budget:ratio{journey="hold"})
+            )
+          labels:
+            severity: sev2
+            kind: slo
+            journey: hold
+          annotations:
+            summary: '좌석 홀드(hold) 실패가 온세일 예산을 3배 속도로 쓴다(회차 {{ $labels.event_id }})'
+            description: '5m 창과 25s 창의 실패 비율이 모두 허용 실패 비율(1 − 목표 0.9995)의 3배를 넘는다. 임시 원천(ADR-0382 결정 1): purchase-svc POST /v1/events/{eventId}/holds, 실패는 5xx. 1층에 회차 라벨이 없어 진행 중인 회차마다 같은 값으로 낸다(ADR-0382 결정 2). 배포 직후면 RB-23, 결제사 원인이면 RB-07.'
+            runbook_url: 'https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목차-예정-runbooks-작성-대상'
+            dashboard_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22peaket%3Aslo_error_ratio%3Arate5m%7Bjourney%3D%5C%22hold%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22hold%5C%22%7D%20or%20peaket%3Aslo_error_ratio%3Arate25s%7Bjourney%3D%5C%22hold%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22hold%5C%22%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+            explore_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22sum%20by%20(route%2C%20status_class)%20(rate(http_server_request_duration_seconds_count%7Bservice%3D%5C%22purchase-svc%5C%22%2Croute%3D%5C%22%2Fv1%2Fevents%2F%7BeventId%7D%2Fholds%5C%22%2Cmethod%3D%5C%22POST%5C%22%2Cstatus_class%3D%5C%225xx%5C%22%7D%5B1m%5D))%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+        - alert: slo_onsale_slow_burn
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+              (peaket:slo_error_ratio:rate5m{journey="payment_accept"} > 3 * peaket:slo_error_budget:ratio{journey="payment_accept"})
+              and
+              (peaket:slo_error_ratio:rate25s{journey="payment_accept"} > 3 * peaket:slo_error_budget:ratio{journey="payment_accept"})
+            )
+          labels:
+            severity: sev2
+            kind: slo
+            journey: payment_accept
+          annotations:
+            summary: '결제 접수(payment_accept) 실패가 온세일 예산을 3배 속도로 쓴다(회차 {{ $labels.event_id }})'
+            description: '5m 창과 25s 창의 실패 비율이 모두 허용 실패 비율(1 − 목표 0.9995)의 3배를 넘는다. 임시 원천(ADR-0382 결정 1): purchase-svc POST /v1/orders/{orderId}/payment-acceptance, 실패는 5xx. 1층에 회차 라벨이 없어 진행 중인 회차마다 같은 값으로 낸다(ADR-0382 결정 2). 배포 직후면 RB-23, 결제사 원인이면 RB-07.'
+            runbook_url: 'https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목차-예정-runbooks-작성-대상'
+            dashboard_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22peaket%3Aslo_error_ratio%3Arate5m%7Bjourney%3D%5C%22payment_accept%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22payment_accept%5C%22%7D%20or%20peaket%3Aslo_error_ratio%3Arate25s%7Bjourney%3D%5C%22payment_accept%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22payment_accept%5C%22%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+            explore_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22sum%20by%20(route%2C%20status_class)%20(rate(http_server_request_duration_seconds_count%7Bservice%3D%5C%22purchase-svc%5C%22%2Croute%3D%5C%22%2Fv1%2Forders%2F%7BorderId%7D%2Fpayment-acceptance%5C%22%2Cmethod%3D%5C%22POST%5C%22%2Cstatus_class%3D%5C%225xx%5C%22%7D%5B1m%5D))%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+        - alert: slo_onsale_slow_burn
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+              (peaket:slo_error_ratio:rate5m{journey="seat_status"} > 3 * peaket:slo_error_budget:ratio{journey="seat_status"})
+              and
+              (peaket:slo_error_ratio:rate25s{journey="seat_status"} > 3 * peaket:slo_error_budget:ratio{journey="seat_status"})
+            )
+          labels:
+            severity: sev2
+            kind: slo
+            journey: seat_status
+          annotations:
+            summary: '좌석 상태 전파(seat_status) 실패가 온세일 예산을 3배 속도로 쓴다(회차 {{ $labels.event_id }})'
+            description: '5m 창과 25s 창의 실패 비율이 모두 허용 실패 비율(1 − 목표 0.99)의 3배를 넘는다. 임시 원천(ADR-0382 결정 1): realtime-gw realtime_gw_batch_wait_ms, 실패는 300ms 넘김. 1층에 회차 라벨이 없어 진행 중인 회차마다 같은 값으로 낸다(ADR-0382 결정 2). 배포 직후면 RB-23, 결제사 원인이면 RB-07.'
+            runbook_url: 'https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목차-예정-runbooks-작성-대상'
+            dashboard_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22peaket%3Aslo_error_ratio%3Arate5m%7Bjourney%3D%5C%22seat_status%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22seat_status%5C%22%7D%20or%20peaket%3Aslo_error_ratio%3Arate25s%7Bjourney%3D%5C%22seat_status%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22seat_status%5C%22%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+            explore_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22sum(rate(realtime_gw_batch_wait_ms_count%5B1m%5D))%20-%20sum(rate(realtime_gw_batch_wait_ms_bucket%7Ble%3D%5C%22300%5C%22%7D%5B1m%5D))%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+        - alert: slo_onsale_slow_burn
+          expr: |
+            group by (event_id) (admission_target)
+            * on() group_left()
+            (
+              (peaket:slo_error_ratio:rate5m{journey="queue_entry"} > 3 * peaket:slo_error_budget:ratio{journey="queue_entry"})
+              and
+              (peaket:slo_error_ratio:rate25s{journey="queue_entry"} > 3 * peaket:slo_error_budget:ratio{journey="queue_entry"})
+            )
+          labels:
+            severity: sev2
+            kind: slo
+            journey: queue_entry
+          annotations:
+            summary: '대기열 진입(queue_entry) 실패가 온세일 예산을 3배 속도로 쓴다(회차 {{ $labels.event_id }})'
+            description: '5m 창과 25s 창의 실패 비율이 모두 허용 실패 비율(1 − 목표 0.999)의 3배를 넘는다. 임시 원천(ADR-0382 결정 1): queue-svc POST /v1/queues/{eventId}/entries, 실패는 5xx. 1층에 회차 라벨이 없어 진행 중인 회차마다 같은 값으로 낸다(ADR-0382 결정 2). 배포 직후면 RB-23, 결제사 원인이면 RB-07.'
+            runbook_url: 'https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목차-예정-runbooks-작성-대상'
+            dashboard_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22peaket%3Aslo_error_ratio%3Arate5m%7Bjourney%3D%5C%22queue_entry%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22queue_entry%5C%22%7D%20or%20peaket%3Aslo_error_ratio%3Arate25s%7Bjourney%3D%5C%22queue_entry%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22queue_entry%5C%22%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+            explore_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22sum%20by%20(route%2C%20status_class)%20(rate(http_server_request_duration_seconds_count%7Bservice%3D%5C%22queue-svc%5C%22%2Croute%3D%5C%22%2Fv1%2Fqueues%2F%7BeventId%7D%2Fentries%5C%22%2Cmethod%3D%5C%22POST%5C%22%2Cstatus_class%3D%5C%225xx%5C%22%7D%5B1m%5D))%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+        # SEV2 결제 확정 원인(결제사마다, 회차와 상관없이 낸다)
+        - alert: payment_confirm_pg_cause
+          expr: |
+            group by (pg) (
+              (
+                (
+                    sum by (pg) (rate(payment_confirm_seconds_count[1m]))
+                  - sum by (pg) (rate(payment_confirm_seconds_bucket{le="2"}[1m]))
+                ) / sum by (pg) (rate(payment_confirm_seconds_count[1m])) >= 0.01
+              )
+              or
+              (
+                max by (pg) (payment_pg_circuit_open) == 1
+              )
+              or
+              (
+                sum by (pg) (rate(payment_confirm_declined_total{category="PG_ERROR"}[1m])) / sum by (pg) (rate(payment_confirm_seconds_count[1m])) >= 0.01
+              )
+              or
+              (
+                sum by (pg) (increase(pg_throttled_total{first="true"}[1m])) > 0
+              )
+            )
+          labels:
+            severity: sev2
+            kind: cause
+            dependency: payment-gateway
+          annotations:
+            summary: '결제사 {{ $labels.pg }} 쪽에 결제 확정을 늦추는 원인이 있다'
+            description: '1분 창에서 승인 호출의 1% 이상이 2초를 넘었거나, 서킷이 열린 파드가 있거나, 결제사 오류(PG_ERROR)가 승인 호출의 1% 이상이거나, 첫 승인 호출이 한도 초과(429)를 받았다(docs/observability.md §4 결제 확정 원인 넷). 전환 검토는 RB-07(확정 소요 p99 5초 또는 서킷 열림).'
+            runbook_url: 'https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목차-예정-runbooks-작성-대상'
+            dashboard_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22max%20by%20(pg)%20(payment_pg_circuit_open)%20or%20sum%20by%20(pg)%20(rate(payment_confirm_declined_total%7Bcategory%3D%5C%22PG_ERROR%5C%22%7D%5B1m%5D))%20%2F%20sum%20by%20(pg)%20(rate(payment_confirm_seconds_count%5B1m%5D))%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'

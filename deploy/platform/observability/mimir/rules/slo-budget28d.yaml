@@ -1,0 +1,40 @@
+# Mimir 규칙 평가기의 28일 남은 예산 규칙(F-01-5, OPS-090, 시험 V-T51 ⑦·⑧).
+# 정본: docs/observability.md §4 'SLO 기록 규칙과 원천'의 '28일 남은 예산'과 §4 POL-022 표 '일상 28일 에러 버짓 전량 소진'(Mimir raw에서 계산한 값 하나로 판정), §8 지표 출처 표.
+# Prometheus 규칙 파일 꼴이다(PrometheusRule CRD가 아니다). Mimir 규칙 평가기가 raw 테넌트에서 5분마다 돈다.
+# 입력은 클러스터 Prometheus의 5분 묶음(rules/agg5m.yaml, agg5m-slo-budget)이 남긴 5분 증가량이다.
+# 목표 상수를 이 파일에 다시 둔다. 규칙 평가기는 클러스터 Prometheus의 기록 규칙을 평가하지 않고, 같은 이름(peaket:slo_error_budget:ratio)을 쓰면
+# 원격 쓰기로 들어온 시계열과 겹치므로 이름을 slo:error_budget:ratio로 따로 둔다. 값은 rules/slo-onsale.yaml의 목표 상수와 같아야 한다(정본 §4 임시 원천 표).
+# 엣지 502·504 몫은 OPS-100(F-01-10)이 더한다. 15분보다 낡은 값의 처리는 이 값을 읽는 배포 게이트 쪽 몫이다.
+# 규칙 평가기 켜기와 이 파일 올리기는 INF-020이다. 시험: node tools/ci/prom-rules.mjs check·test
+groups:
+  - name: slo-budget28d
+    interval: 5m
+    rules:
+      # 허용 실패 비율 = 1 − 목표(여정 다섯)
+      - record: slo:error_budget:ratio
+        expr: vector(1 - 0.9995)
+        labels:
+          journey: hold
+      - record: slo:error_budget:ratio
+        expr: vector(1 - 0.9995)
+        labels:
+          journey: payment_accept
+      - record: slo:error_budget:ratio
+        expr: vector(1 - 0.9995)
+        labels:
+          journey: payment_confirm
+      - record: slo:error_budget:ratio
+        expr: vector(1 - 0.99)
+        labels:
+          journey: seat_status
+      - record: slo:error_budget:ratio
+        expr: vector(1 - 0.999)
+        labels:
+          journey: queue_entry
+      # 1 − (28일 실패 합 ÷ 28일 전체 합) ÷ (1 − 목표). 0 아래면 예산을 다 썼다
+      - record: slo:error_budget_remaining:ratio28d
+        expr: |
+          1 - (
+              sum by (journey) (sum_over_time(agg5m:slo_errors:increase5m[28d]))
+            / sum by (journey) (sum_over_time(agg5m:slo_requests:increase5m[28d]))
+          ) / on(journey) slo:error_budget:ratio

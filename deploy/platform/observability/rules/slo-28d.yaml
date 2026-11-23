@@ -1,0 +1,265 @@
+# 28일 SLO 기록 규칙(긴 창)과 28일 다중 창 번 레이트 경보(F-01-5, OPS-090, 시험 V-T51 ⑥·⑧).
+# 정본: docs/observability.md §4 'SLO 기록 규칙과 원천'·다중 창 표 '일상 상시 운영(28일 기준)' 줄(14.4배 1시간/5분·6배 6시간/30분 SEV1, 1배 3일/6시간 SEV3), ADR-0382.
+# 평가 30초 묶음(그 밖의 규칙 평가 간격). 목표 상수(peaket:slo_error_budget:ratio)와 짧은 창 5m은 rules/slo-onsale.yaml에 있다.
+# 엣지 502·504 몫은 OPS-100(F-01-10)이 더한다. 28일 남은 예산은 rules/agg5m.yaml(5분 증가량)과 mimir/rules/slo-budget28d.yaml이 낸다.
+# 시험: node --test "deploy/platform/observability/test/*.test.mjs", node tools/ci/prom-rules.mjs check·test
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: slo-28d
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: peaket
+spec:
+  groups:
+    - name: slo-28d
+      interval: 30s
+      rules:
+        # 1층의 긴 창(30m·1h·6h·3d). 식은 slo-onsale 묶음의 1층과 같고 창만 다르다
+        # 창 30m
+        - record: peaket:slo_error_ratio:rate30m
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}[30m]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST"}[30m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: hold
+        - record: peaket:slo_error_ratio:rate30m
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST",status_class="5xx"}[30m]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST"}[30m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: payment_accept
+        - record: peaket:slo_error_ratio:rate30m
+          expr: |
+            (
+                (sum(rate(payment_confirm_resolution_seconds_count[30m])) - sum(rate(payment_confirm_resolution_seconds_bucket{le="3"}[30m])))
+              / (sum(rate(payment_confirm_resolution_seconds_count[30m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="payment-svc"}) == 1)
+          labels:
+            journey: payment_confirm
+        - record: peaket:slo_error_ratio:rate30m
+          expr: |
+            (
+                (sum(rate(realtime_gw_batch_wait_ms_count[30m])) - sum(rate(realtime_gw_batch_wait_ms_bucket{le="300"}[30m])))
+              / (sum(rate(realtime_gw_batch_wait_ms_count[30m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="realtime-gw"}) == 1)
+          labels:
+            journey: seat_status
+        - record: peaket:slo_error_ratio:rate30m
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="5xx"}[30m]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST"}[30m])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="queue-svc"}) == 1)
+          labels:
+            journey: queue_entry
+        # 창 1h
+        - record: peaket:slo_error_ratio:rate1h
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}[1h]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST"}[1h])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: hold
+        - record: peaket:slo_error_ratio:rate1h
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST",status_class="5xx"}[1h]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST"}[1h])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: payment_accept
+        - record: peaket:slo_error_ratio:rate1h
+          expr: |
+            (
+                (sum(rate(payment_confirm_resolution_seconds_count[1h])) - sum(rate(payment_confirm_resolution_seconds_bucket{le="3"}[1h])))
+              / (sum(rate(payment_confirm_resolution_seconds_count[1h])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="payment-svc"}) == 1)
+          labels:
+            journey: payment_confirm
+        - record: peaket:slo_error_ratio:rate1h
+          expr: |
+            (
+                (sum(rate(realtime_gw_batch_wait_ms_count[1h])) - sum(rate(realtime_gw_batch_wait_ms_bucket{le="300"}[1h])))
+              / (sum(rate(realtime_gw_batch_wait_ms_count[1h])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="realtime-gw"}) == 1)
+          labels:
+            journey: seat_status
+        - record: peaket:slo_error_ratio:rate1h
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="5xx"}[1h]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST"}[1h])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="queue-svc"}) == 1)
+          labels:
+            journey: queue_entry
+        # 창 6h
+        - record: peaket:slo_error_ratio:rate6h
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}[6h]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST"}[6h])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: hold
+        - record: peaket:slo_error_ratio:rate6h
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST",status_class="5xx"}[6h]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST"}[6h])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: payment_accept
+        - record: peaket:slo_error_ratio:rate6h
+          expr: |
+            (
+                (sum(rate(payment_confirm_resolution_seconds_count[6h])) - sum(rate(payment_confirm_resolution_seconds_bucket{le="3"}[6h])))
+              / (sum(rate(payment_confirm_resolution_seconds_count[6h])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="payment-svc"}) == 1)
+          labels:
+            journey: payment_confirm
+        - record: peaket:slo_error_ratio:rate6h
+          expr: |
+            (
+                (sum(rate(realtime_gw_batch_wait_ms_count[6h])) - sum(rate(realtime_gw_batch_wait_ms_bucket{le="300"}[6h])))
+              / (sum(rate(realtime_gw_batch_wait_ms_count[6h])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="realtime-gw"}) == 1)
+          labels:
+            journey: seat_status
+        - record: peaket:slo_error_ratio:rate6h
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="5xx"}[6h]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST"}[6h])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="queue-svc"}) == 1)
+          labels:
+            journey: queue_entry
+        # 창 3d
+        - record: peaket:slo_error_ratio:rate3d
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}[3d]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST"}[3d])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: hold
+        - record: peaket:slo_error_ratio:rate3d
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST",status_class="5xx"}[3d]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST"}[3d])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="purchase-svc"}) == 1)
+          labels:
+            journey: payment_accept
+        - record: peaket:slo_error_ratio:rate3d
+          expr: |
+            (
+                (sum(rate(payment_confirm_resolution_seconds_count[3d])) - sum(rate(payment_confirm_resolution_seconds_bucket{le="3"}[3d])))
+              / (sum(rate(payment_confirm_resolution_seconds_count[3d])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="payment-svc"}) == 1)
+          labels:
+            journey: payment_confirm
+        - record: peaket:slo_error_ratio:rate3d
+          expr: |
+            (
+                (sum(rate(realtime_gw_batch_wait_ms_count[3d])) - sum(rate(realtime_gw_batch_wait_ms_bucket{le="300"}[3d])))
+              / (sum(rate(realtime_gw_batch_wait_ms_count[3d])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="realtime-gw"}) == 1)
+          labels:
+            journey: seat_status
+        - record: peaket:slo_error_ratio:rate3d
+          expr: |
+            (
+                sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="5xx"}[3d]))
+              / (sum(rate(http_server_request_duration_seconds_count{service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST"}[3d])) > 0)
+              or vector(0)
+            )
+            and on() (max(up{app="queue-svc"}) == 1)
+          labels:
+            journey: queue_entry
+        # 28일 경보(SRE Workbook 표 5-8 세 단계). 회차와 상관없어 event_id를 달지 않는다. 짧은 창 5m은 slo-onsale 묶음의 1층을 읽는다
+        - alert: slo_28d_burn_1h
+          expr: |
+            (peaket:slo_error_ratio:rate1h > 14.4 * peaket:slo_error_budget:ratio)
+            and
+            (peaket:slo_error_ratio:rate5m > 14.4 * peaket:slo_error_budget:ratio)
+          labels:
+            severity: sev1
+            kind: slo
+          annotations:
+            summary: '{{ $labels.journey }} 실패가 28일 예산을 14.4배 속도로 쓴다(1시간에 약 2%)'
+            description: '1h 창과 5m 창의 실패 비율이 모두 28일 허용 소진 속도의 14.4배를 넘는다(docs/observability.md §4 다중 창 표 ''일상 상시 운영''). 원천은 ADR-0382 결정 1의 임시 원천이다. 배포 뒤면 RB-23.'
+            runbook_url: 'https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목차-예정-runbooks-작성-대상'
+            dashboard_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22peaket%3Aslo_error_ratio%3Arate1h%7Bjourney%3D%5C%22{{ $labels.journey }}%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22{{ $labels.journey }}%5C%22%7D%20or%20peaket%3Aslo_error_ratio%3Arate5m%7Bjourney%3D%5C%22{{ $labels.journey }}%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22{{ $labels.journey }}%5C%22%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+            explore_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22peaket%3Aslo_error_ratio%3Arate5m%7Bjourney%3D%5C%22{{ $labels.journey }}%5C%22%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+        - alert: slo_28d_burn_6h
+          expr: |
+            (peaket:slo_error_ratio:rate6h > 6 * peaket:slo_error_budget:ratio)
+            and
+            (peaket:slo_error_ratio:rate30m > 6 * peaket:slo_error_budget:ratio)
+          labels:
+            severity: sev1
+            kind: slo
+          annotations:
+            summary: '{{ $labels.journey }} 실패가 28일 예산을 6배 속도로 쓴다(6시간에 약 5%)'
+            description: '6h 창과 30m 창의 실패 비율이 모두 28일 허용 소진 속도의 6배를 넘는다(docs/observability.md §4 다중 창 표 ''일상 상시 운영''). 원천은 ADR-0382 결정 1의 임시 원천이다. 배포 뒤면 RB-23.'
+            runbook_url: 'https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목차-예정-runbooks-작성-대상'
+            dashboard_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22peaket%3Aslo_error_ratio%3Arate6h%7Bjourney%3D%5C%22{{ $labels.journey }}%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22{{ $labels.journey }}%5C%22%7D%20or%20peaket%3Aslo_error_ratio%3Arate30m%7Bjourney%3D%5C%22{{ $labels.journey }}%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22{{ $labels.journey }}%5C%22%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+            explore_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22peaket%3Aslo_error_ratio%3Arate30m%7Bjourney%3D%5C%22{{ $labels.journey }}%5C%22%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+        - alert: slo_28d_burn_3d
+          expr: |
+            (peaket:slo_error_ratio:rate3d > 1 * peaket:slo_error_budget:ratio)
+            and
+            (peaket:slo_error_ratio:rate6h > 1 * peaket:slo_error_budget:ratio)
+          labels:
+            severity: sev3
+            kind: slo
+          annotations:
+            summary: '{{ $labels.journey }} 실패가 28일 예산을 1배 속도로 쓴다(3일에 약 11%)'
+            description: '3d 창과 6h 창의 실패 비율이 모두 28일 허용 소진 속도의 1배를 넘는다(docs/observability.md §4 다중 창 표 ''일상 상시 운영''). 원천은 ADR-0382 결정 1의 임시 원천이다. 배포 뒤면 RB-23.'
+            runbook_url: 'https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목차-예정-runbooks-작성-대상'
+            dashboard_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22peaket%3Aslo_error_ratio%3Arate3d%7Bjourney%3D%5C%22{{ $labels.journey }}%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22{{ $labels.journey }}%5C%22%7D%20or%20peaket%3Aslo_error_ratio%3Arate6h%7Bjourney%3D%5C%22{{ $labels.journey }}%5C%22%7D%20%2F%20peaket%3Aslo_error_budget%3Aratio%7Bjourney%3D%5C%22{{ $labels.journey }}%5C%22%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'
+            explore_url: '/explore?orgId=1&left=%7B%22datasource%22%3A%22prometheus%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22expr%22%3A%22peaket%3Aslo_error_ratio%3Arate6h%7Bjourney%3D%5C%22{{ $labels.journey }}%5C%22%7D%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D'

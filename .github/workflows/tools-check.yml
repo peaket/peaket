@@ -84,3 +84,25 @@ jobs:
       - run: node tools/ci/check-docker-timeouts.mjs
       # 설정이 기대는 최소 판(V-T39 ③, ADR-0356 결정 5): 판은 docs/devops.md §4.4 줄에서 읽는다. 잠금 파일의 @sentry SDK가 낮거나 서로 다르면 실패
       - run: node tools/ci/min-versions.mjs
+
+  # SLO 기록 규칙·번 레이트 경보의 합성 시계열 시험(V-T51 ①~⑧·V-T9·V-T20 ④, 기능 F-01-5). promtool은 deploy/local/observability.yaml의 고정 이미지를
+  # Docker로 띄운다(tools/ci/prom-rules.mjs). 참조 구현으로 약 8분이라(28일 묶음 약 3분, 계획 docs/review/plans/F-01-5.md '시험 결과' 7)
+  # tools 잡(약 3분, 한도 15분)에 붙이지 않고 따로 나란히 돈다. 실행기 명령줄 시험(tools/ci/prom-rules.test.mjs)은 tools 잡의 tools/ci 시험에 든다
+  slo-rules:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # 시험이 뿌리 개발 의존성 yaml을 쓴다. 설치는 잠금 파일대로만 한다(§4.4)
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile
+      - run: node tools/ci/prom-rules.mjs check
+      - run: node --test "deploy/platform/observability/test/*.test.mjs"
