@@ -64,7 +64,7 @@
 
 - **좋은 점**: 계약·키가 생기면 설정만 넣어 실제 지급이 돈다. 지급 결과가 정산서 상태와 파트너 사건으로 이어지고, 실패가 갈래마다 자동 재요청이나 CS 건으로 끝난다. KYC 보류가 그 결제사·상점에만 걸린다. 결제사에 남은 돈이 장부와 맞는지 달마다 본다.
 - **남는 한계**: 결제사 원문 오류 코드 표·날짜 오류 코드·서명 머리 구분자·셀러 등록 본문 모양은 공개 안내를 읽은 [가정]이고 계약 때 원문으로 확인한다. 바뀐 지급일을 파트너에게 알리는 사건 칸과 받는 쪽은 GAT-270 몫이다. 15시 미승인 만료가 남는다(F-06-3). 이미 만든 예약지급 취소와 포트원 잔액 대사는 F-07-7이다. 은행 영업일은 아직 주말만 뺀다(F-07-5 C-04).
-- **배포**: payment 0029(`toss_seller`, `payout`·`payout_batch` 칸, `payout_retry_audit`, `settlement_case_request`, `pg_balance_reconciliation`, `seller_kyc` 토스 칸 옮기기). 설정 이름이 바뀌므로 비밀 값을 넣을 때 새 이름을 쓴다(지금은 비어 있다). 같은 출시에 미수금 이동 표 이름 바꾸기 ②(앱이 `receivable_movement`를 쓰고 옛 이름 호환 경로를 없앰, 마이그레이션 없음)가 든다. 0029는 더하기만 해서 옛 이름 뷰로 도는 앞 판 앱과도 맞는다(docs/devops.md §7.1).
+- **배포**: payment 0029(`toss_seller`, `payout`·`payout_batch` 칸, `payout_retry_audit`, `settlement_case_request`, `pg_balance_reconciliation`, `seller_kyc` 토스 칸 옮기기). 설정 이름이 바뀌므로 비밀 값을 넣을 때 새 이름을 쓴다(지금은 비어 있다). 0029는 더하기만 해서 앞 판 앱과도 맞는다(docs/devops.md §7.1). 미수금 이동은 지금처럼 옛 이름 호환 경로(`receivable-move-compat.ts`)로 쓴다. 새 오류 이름 둘(`payout-retry-approval-required`·`toss-seller-registration-failed`)은 openapi `x-peaket-problem-types`에 함께 올린다.
 
 ## 되돌릴 조건
 
