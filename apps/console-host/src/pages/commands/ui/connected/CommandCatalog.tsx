@@ -1,5 +1,6 @@
 // 명령 카탈로그(d5 §7.3 '좌 4열'). 실제 화면에는 이 콘솔이 낼 수 있는 명령 1·3·6(대체 결제사 전환) 카드만 두고,
 // 나머지 명령은 카드 없이 한 줄 안내로 둔다(계획 6-1: 열두 카드를 그려 두고 막으면 '낼 수 있는데 막힌 것'으로 읽힌다).
+// 명령 6 카드 아래에는 해제 갈래(새 결제 진입 정지 열기, commander만)의 작은 단추를 둔다(계획 1-6). 막히면 aria-disabled이고 고르지 않는다.
 // 휴대폰은 작성 카드를 그리지 않는다(control-tower §12). props만으로 그린다.
 import { COMMAND_NAMES, PHONE_BLOCKED, commandAvailability, type CommandKind, type ConsoleLayoutKind, type ConsoleRole } from '../../model/command-form';
 
@@ -16,6 +17,33 @@ const CARDS: readonly { kind: CommandKind; no: string; summary: string }[] = [
   { kind: 'KILL_SWITCH', no: '명령 3', summary: '이 회차나 전체 회차의 판매를 바로 멈춥니다' },
   { kind: 'PG_FALLBACK', no: '명령 6', summary: '새 결제를 다른 결제사로 보냅니다' },
 ];
+
+/** 명령 6 해제 갈래 단추(결제사 장애로 payment-svc가 스스로 건 새 결제 진입 정지를 연다) */
+function ReleaseButton({ role, layout, picked, onPick }: { role: ConsoleRole; layout: ConsoleLayoutKind; picked: boolean; onPick: (kind: CommandKind) => void }) {
+  const a = commandAvailability({ role, layout, kind: 'PG_ENTRY_RELEASE' });
+  const blockId = 'catalog-block-PG_ENTRY_RELEASE';
+  return (
+    <div style={{ margin: '6px 12px 0' }}>
+      <button
+        type="button"
+        className={picked ? 'btn btn-outline btn-sm' : 'btn btn-ghost btn-sm'}
+        aria-pressed={picked}
+        aria-disabled={a.canRequest ? undefined : 'true'}
+        aria-describedby={a.canRequest ? undefined : blockId}
+        onClick={() => {
+          if (a.canRequest) onPick('PG_ENTRY_RELEASE');
+        }}
+      >
+        {COMMAND_NAMES.PG_ENTRY_RELEASE}
+      </button>
+      {a.canRequest ? null : (
+        <p className="t-xs" id={blockId} style={{ margin: '4px 0 0' }}>
+          {a.reason}
+        </p>
+      )}
+    </div>
+  );
+}
 
 export function CommandCatalog({ role, layout, onPick, picked = null }: CommandCatalogProps) {
   if (layout === 'phone') {
@@ -59,6 +87,7 @@ export function CommandCatalog({ role, layout, onPick, picked = null }: CommandC
                   {a.reason}
                 </p>
               )}
+              {c.kind === 'PG_FALLBACK' ? <ReleaseButton role={role} layout={layout} picked={picked === 'PG_ENTRY_RELEASE'} onPick={onPick} /> : null}
             </li>
           );
         })}

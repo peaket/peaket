@@ -39,6 +39,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DRY_RUN_DEBOUNCE_MS = 500;
 /** 재인증 대화상자 글(d5 §7.3 명령 3 ④ 재인증 칸) */
 const REAUTH_LINE = '실행 직전에 비밀번호와 인증 앱 코드로 다시 인증하고, 등록한 패스키로 한 번 더 확인합니다(5분 재인증 토큰).';
+/** 해제 갈래의 결제사 흉내 서버(SIMULATOR)는 local·ci만 받는다(openapi Command.params 설명). 루프백 관제 API에 붙은 빌드에서만 고르게 한다(서버가 다시 막는다) */
+const SIMULATOR_ALLOWED = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\/?$/.test(__OPS_API_ORIGIN__);
 /** 남은 시간·전파 지연을 다시 그리는 화면 시계(요청을 보내지 않는다) */
 const CLOCK_MS = 1_000;
 
@@ -46,11 +48,14 @@ function draftOf(kind: CommandKind, eventId: string | null): CommandDraft {
   const ev = eventId ?? '';
   if (kind === 'ADMISSION_TARGET') return { kind, eventId: ev, target: Number.NaN, reason: '' };
   if (kind === 'KILL_SWITCH') return { kind, scope: 'EVENT', ...(eventId ? { eventId } : {}), reason: '' };
+  if (kind === 'PG_ENTRY_RELEASE') return { kind, reason: '' };
   return { kind, scope: 'EVENT', ...(eventId ? { eventId } : {}), reason: '' };
 }
 
 function withEvent(d: CommandDraft, eventId: string | null): CommandDraft {
   if (d.kind === 'ADMISSION_TARGET') return { ...d, eventId: eventId ?? '' };
+  // 해제 갈래는 회차 범위가 없다(결제사 하나)
+  if (d.kind === 'PG_ENTRY_RELEASE') return d;
   const ev = eventId ? { eventId } : {};
   if (d.kind === 'KILL_SWITCH') return { kind: 'KILL_SWITCH', scope: d.scope, reason: d.reason, ...ev };
   return { kind: 'PG_FALLBACK', scope: d.scope, reason: d.reason, ...ev, ...(d.toPg ? { toPg: d.toPg } : {}) };
@@ -428,7 +433,7 @@ export function ConnectedPage() {
               <section className="widget" aria-labelledby="h-form">
                 <div className="widget-head">
                   <h2 className="t-sm fw-b" id="h-form">
-                    {draft.kind === 'ADMISSION_TARGET' ? '동시 입장 목표 조정' : draft.kind === 'KILL_SWITCH' ? '판매 일시정지' : '대체 결제사 전환'}
+                    {draft.kind === 'ADMISSION_TARGET' ? '동시 입장 목표 조정' : draft.kind === 'KILL_SWITCH' ? '판매 일시정지' : draft.kind === 'PG_ENTRY_RELEASE' ? '새 결제 진입 정지 열기' : '대체 결제사 전환'}
                   </h2>
                   <button className="btn btn-ghost" type="button" onClick={() => setDraft(null)}>
                     닫기
@@ -441,6 +446,7 @@ export function ConnectedPage() {
                   availability={availability}
                   busy={busy}
                   ready={commandBodyOf(draft) !== null}
+                  allowSimulator={SIMULATOR_ALLOWED}
                   onSubmit={() => (draft.kind === 'KILL_SWITCH' ? setKillOpen(true) : void send(draft))}
                 />
                 {formError ? (

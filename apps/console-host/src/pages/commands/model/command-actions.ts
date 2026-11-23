@@ -36,9 +36,15 @@ const RISKY = new Set(['KILL_SWITCH', 'DEGRADED_MODE', 'AUTOMATION_STOP']);
 
 const canOperate = (role: ConsoleRole) => role === 'operator' || role === 'commander';
 
+/** 되돌리지 않는 명령인가: 명령 6 해제 갈래(PAYMENT_ENTRY_RELEASE)는 되돌리기가 409 command-not-revertible이다(openapi Command.params 설명, ADR-0366 결정 8) */
+export function isNotRevertible(o: { type: string | undefined; params?: Record<string, unknown> | null | undefined }): boolean {
+  return o.type === 'DEGRADED_MODE' && o.params?.mode === 'PAYMENT_ENTRY_RELEASE';
+}
+
 /** 되돌리기 화면 막힘(카드의 되돌리기 단추도 이 함수로 정한다) */
-export function revertAvailability(o: { role: ConsoleRole; layout: ConsoleLayoutKind; type: string | undefined }): { canRequest: boolean; reason?: string; reauth: boolean } {
+export function revertAvailability(o: { role: ConsoleRole; layout: ConsoleLayoutKind; type: string | undefined; params?: Record<string, unknown> | null }): { canRequest: boolean; reason?: string; reauth: boolean } {
   const reauth = COMMANDER_REVERT.has(o.type ?? '');
+  if (isNotRevertible(o)) return { canRequest: false, reason: '새 결제 진입 정지를 연 명령은 되돌리지 않습니다', reauth };
   if (o.layout === 'phone') return { canRequest: false, reason: PHONE_BLOCKED, reauth };
   if (!canOperate(o.role)) return { canRequest: false, reason: VIEWER_BLOCKED, reauth };
   if (reauth && o.role !== 'commander') {
@@ -186,7 +192,7 @@ export function createCommandActions(o: { role: ConsoleRole; layout: ConsoleLayo
 
     /** 되돌리기(POST …/reversions). 명령 3·6은 commander·재인증(명령 3은 202 REVERT_PENDING), 명령 1은 재인증 없음 */
     async revert(detail: CommandDetail, reason: string): Promise<ActionResult> {
-      const a = revertAvailability({ role: o.role, layout: o.layout, type: detail.type });
+      const a = revertAvailability({ role: o.role, layout: o.layout, type: detail.type, params: detail.params ?? null });
       if (!a.canRequest) return { kind: 'blocked', reason: a.reason ?? VIEWER_BLOCKED };
       const id = detail.commandId;
       const r = reason.trim();

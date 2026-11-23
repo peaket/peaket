@@ -27,9 +27,11 @@ export function formatRemaining(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-/** 카드 이름: 명령 6의 결제 갈래는 '대체 결제사 전환' */
+/** 카드 이름: 명령 6의 결제 갈래는 '대체 결제사 전환', 해제 갈래는 '새 결제 진입 정지 열기' */
 export function cardTitle(d: Pick<CommandDetail, 'type' | 'params'>): string {
-  if (d.type === 'DEGRADED_MODE' && (d.params as { mode?: unknown } | undefined)?.mode === 'PAYMENT_PG_FALLBACK') return '대체 결제사 전환';
+  const mode = (d.params as { mode?: unknown } | undefined)?.mode;
+  if (d.type === 'DEGRADED_MODE' && mode === 'PAYMENT_PG_FALLBACK') return '대체 결제사 전환';
+  if (d.type === 'DEGRADED_MODE' && mode === 'PAYMENT_ENTRY_RELEASE') return '새 결제 진입 정지 열기';
   return typeLabel(d.type ?? '');
 }
 
@@ -45,7 +47,7 @@ const ack = (s: CardState) => (typeof s.acked === 'number' && typeof s.target ==
 export function CommandCard({ detail, state, role, layout = 'desktop', busy = false, onApprove, onReject, onRetry, onRevert }: CommandCardProps) {
   const canOperate = role === 'operator' || role === 'commander';
   const progress = ack(state);
-  const revert = revertAvailability({ role, layout, type: detail.type });
+  const revert = revertAvailability({ role, layout, type: detail.type, params: detail.params ?? null });
   const view = detail.dryRun ? dryRunView(detail.dryRun) : null;
   const unacked = state.unacked && state.unacked.length > 0 ? state.unacked : null;
 

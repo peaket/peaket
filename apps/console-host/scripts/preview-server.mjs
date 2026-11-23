@@ -1,6 +1,6 @@
 // 관제 콘솔 미리보기 서버(local·ci 전용, ADR-0360 결정 6·12). 운영 빌드(dist/, 원격 dist/remotes/ 포함)를 그대로 내고,
 // 운영 배포 응답 헤더 정책과 같은 헤더(staticAppHeaders('console'): 묶음 C CSP를 막는 모드, Trusted Types는 보고 모드)를 붙인다.
-// 화면 경로는 index.html로 돌린다(앱 안 라우터). PEAKET_OPS_PROXY_TARGET을 주면 /v1/ops/를 실제 ops-svc로 넘긴다(scripts/ops-proxy.mjs).
+// 화면 경로는 index.html로 돌린다(앱 안 라우터). PEAKET_OPS_PROXY_TARGET을 주면 /v1/ops/를 실제 ops-svc로, PEAKET_IDENTITY_PROXY_TARGET도 주면 /v1/ops/auth/*를 identity-svc로 넘긴다(scripts/ops-proxy.mjs).
 // 캐시: 화면 HTML과 원격 목록(remotes.json)은 매번 확인(no-cache), 원격 진입 파일은 경로에 sha가 있어 해시 붙은 자산처럼 오래 캐시한다(ADR-0361 결정 3).
 // 실행: pnpm --filter @peaket/console-host build && PEAKET_OPS_API_ORIGIN=http://localhost:4173 PEAKET_OPS_PROXY_TARGET=http://127.0.0.1:3000 \
 //       pnpm --filter @peaket/console-host preview [포트, 기본 4173]

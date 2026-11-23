@@ -187,7 +187,7 @@ export default (_env, argv) => {
       hot: true,
       client: { overlay: { warnings: false, errors: true } },
       headers: devHeaders(opsApi),
-      // 실제 ops-svc(로컬)에 붙이기: PEAKET_OPS_PROXY_TARGET을 주면 /v1/ops/를 그리로 넘긴다(local·ci 전용, apps/README.md)
+      // 실제 ops-svc(로컬)에 붙이기: PEAKET_OPS_PROXY_TARGET을 주면 /v1/ops/를 그리로, PEAKET_IDENTITY_PROXY_TARGET도 주면 /v1/ops/auth/*를 identity-svc로 넘긴다(local·ci 전용, apps/README.md)
       setupMiddlewares: (middlewares, server) => {
         const proxy = opsProxyMiddleware(process.env);
         if (proxy) middlewares.unshift({ name: 'peaket-ops-proxy', path: '/v1/ops', middleware: proxy });

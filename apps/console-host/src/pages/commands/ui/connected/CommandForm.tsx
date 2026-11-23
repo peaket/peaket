@@ -1,7 +1,8 @@
 // 명령 1·3·6(결제 갈래) 작성 칸(F-03-4, d5 §7.3 '중앙 작성 폼'). props만으로 그린다.
+// 명령 6 해제(새 결제 진입 정지 열기)는 결제사 하나를 고르고 사유를 적어 commander가 재인증 뒤 바로 보낸다(승인 대기 없음).
 // 막히면 단추는 aria-disabled(초점은 받음, disabled 없음)이고 카드 안에 이유 글이 늘 보이며 aria-describedby로 잇는다(d5 CMP-036 disabled).
 // 막힌 단추를 눌러도 onSubmit을 부르지 않는다(요청 0). 명령 3은 단추를 누르면 위험 확인 대화상자가 사유를 다시 받는다(여기 적은 사유를 채워 둔다).
-import type { Availability, CommandDraft, CommandScope, PgName } from '../../model/command-form';
+import type { Availability, CommandDraft, CommandScope, PgName, ReleasePg } from '../../model/command-form';
 
 export interface CommandFormProps {
   draft: CommandDraft;
@@ -13,6 +14,8 @@ export interface CommandFormProps {
   busy?: boolean;
   /** 본문을 만들 수 있는가(칸이 다 찼는가). 명령 3은 사유를 대화상자에서 받으므로 보지 않는다 */
   ready?: boolean;
+  /** 해제 갈래에서 결제사 흉내 서버(SIMULATOR)를 고를 수 있는가(local·ci 서버에 붙었을 때만, openapi Command.params 설명) */
+  allowSimulator?: boolean;
 }
 
 const BLOCK_ID = 'cmd-form-block-reason';
@@ -45,7 +48,7 @@ function ReasonField({ value, onChange }: { value: string; onChange: (v: string)
   );
 }
 
-export function CommandForm({ draft, onChange, availability, onSubmit, busy = false, ready = true }: CommandFormProps) {
+export function CommandForm({ draft, onChange, availability, onSubmit, busy = false, ready = true, allowSimulator = false }: CommandFormProps) {
   const blocked = !availability.canRequest;
   const reasonLine = blocked && availability.reason ? (
     <p className="t-xs" id={BLOCK_ID} style={{ color: 'var(--danger)' }}>
@@ -94,6 +97,26 @@ export function CommandForm({ draft, onChange, availability, onSubmit, busy = fa
           />
           {draft.fromTarget !== undefined ? <span className="t-xs muted">지금 목표 {draft.fromTarget.toLocaleString('ko-KR')}명</span> : null}
         </label>
+      ) : draft.kind === 'PG_ENTRY_RELEASE' ? (
+        <>
+          <label className="field">
+            <span className="label">새 결제를 다시 열 결제사</span>
+            <select
+              className="input"
+              value={draft.pg ?? ''}
+              onChange={(e) => {
+                const v = e.currentTarget.value as ReleasePg | '';
+                onChange(v ? { kind: 'PG_ENTRY_RELEASE', pg: v, reason: draft.reason } : { kind: 'PG_ENTRY_RELEASE', reason: draft.reason });
+              }}
+            >
+              <option value="">결제사를 고르세요</option>
+              <option value="TOSS">토스페이먼츠</option>
+              <option value="PORTONE">포트원</option>
+              {allowSimulator ? <option value="SIMULATOR">결제사 흉내 서버(로컬·CI)</option> : null}
+            </select>
+          </label>
+          <p className="t-xs muted">결제사 장애로 결제 서버가 스스로 멈춘 새 결제 진입을 엽니다. 승인 대기 없이 다시 인증한 뒤 바로 보내고, 되돌리지 않습니다.</p>
+        </>
       ) : (
         <>
           <ScopeChoice name="pg-scope" scope={draft.scope} onPick={(scope) => onChange({ ...draft, scope })} />
@@ -126,7 +149,7 @@ export function CommandForm({ draft, onChange, availability, onSubmit, busy = fa
           if (canSend) press();
         }}
       >
-        {draft.kind === 'ADMISSION_TARGET' ? '보내기' : '전환 요청'}
+        {draft.kind === 'ADMISSION_TARGET' ? '보내기' : draft.kind === 'PG_ENTRY_RELEASE' ? '다시 인증하고 열기' : '전환 요청'}
       </button>
       {reasonLine}
     </div>

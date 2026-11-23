@@ -1,18 +1,22 @@
 // SCR-030 명령 1·3·6(결제 갈래) 작성 값 → 접수 본문, 화면 막힘, 멱등 키 묶음(F-03-4, OPS-390).
 // 본문 칸은 openapi Command.params 설명(ADMISSION_TARGET {eventId, target, fromTarget}, KILL_SWITCH {scope, eventIds},
-// DEGRADED_MODE 결제 갈래 {mode: PAYMENT_PG_FALLBACK, scope, eventIds, toPg})만 싣는다. 길이·범위·정규화 검사의 정본은 서버다(ADR-0340 결정 10).
+// DEGRADED_MODE 결제 갈래 {mode: PAYMENT_PG_FALLBACK, scope, eventIds, toPg}, 해제 갈래 {mode: PAYMENT_ENTRY_RELEASE, pg})만 싣는다. 길이·범위·정규화 검사의 정본은 서버다(ADR-0340 결정 10).
 // 막힘 글은 d5 §7.3 CMP-036 disabled 꼴, 휴대폰 막힘은 control-tower §12 '휴대폰·태블릿'. 화면 막힘은 편의이고 권한은 서버가 막는다(ASVS 8.3.1).
 
 export type ConsoleRole = 'viewer' | 'operator' | 'commander' | (string & {});
 export type ConsoleLayoutKind = 'phone' | 'tablet' | 'desktop';
-export type CommandKind = 'ADMISSION_TARGET' | 'KILL_SWITCH' | 'PG_FALLBACK';
+export type CommandKind = 'ADMISSION_TARGET' | 'KILL_SWITCH' | 'PG_FALLBACK' | 'PG_ENTRY_RELEASE';
 export type CommandScope = 'EVENT' | 'PLATFORM';
 export type PgName = 'TOSS' | 'PORTONE';
+/** 해제 갈래의 결제사. SIMULATOR(결제사 흉내 서버)는 local·ci만(openapi Command.params 설명) */
+export type ReleasePg = PgName | 'SIMULATOR';
 
 export type CommandDraft =
   | { kind: 'ADMISSION_TARGET'; eventId: string; target: number; fromTarget?: number; reason: string }
   | { kind: 'KILL_SWITCH'; scope: CommandScope; eventId?: string; reason: string }
-  | { kind: 'PG_FALLBACK'; scope: CommandScope; eventId?: string; toPg?: PgName; reason: string };
+  | { kind: 'PG_FALLBACK'; scope: CommandScope; eventId?: string; toPg?: PgName; reason: string }
+  /** 명령 6 해제: 결제사 장애로 payment-svc가 스스로 건 새 결제 진입 정지를 연다(commander 1인·재인증, ADR-0366 결정 8) */
+  | { kind: 'PG_ENTRY_RELEASE'; pg?: ReleasePg; reason: string };
 
 /** openapi Command(접수·dry-run 본문) */
 export interface CommandBody {
@@ -31,6 +35,7 @@ export const COMMAND_NAMES: Record<CommandKind, string> = {
   ADMISSION_TARGET: '동시 입장 목표',
   KILL_SWITCH: '판매 일시정지',
   PG_FALLBACK: '대체 결제사 전환',
+  PG_ENTRY_RELEASE: '새 결제 진입 정지 열기',
 };
 
 export const PHONE_BLOCKED = '명령 요청과 실행은 태블릿이나 데스크톱에서 합니다';
@@ -64,19 +69,21 @@ export function commandBodyOf(draft: CommandDraft): CommandBody | null {
       if (!scope) return null;
       return { type: 'DEGRADED_MODE', reason, params: { mode: 'PAYMENT_PG_FALLBACK', ...scope, ...(draft.toPg ? { toPg: draft.toPg } : {}) } };
     }
+    case 'PG_ENTRY_RELEASE':
+      return draft.pg ? { type: 'DEGRADED_MODE', reason, params: { mode: 'PAYMENT_ENTRY_RELEASE', pg: draft.pg } } : null;
   }
 }
 
-/** 명령 요청 화면 막힘: 명령 1은 operator 이상, 명령 3·6은 commander만(control-tower §3 표), 휴대폰은 모두 막는다(§12) */
+/** 명령 요청 화면 막힘: 명령 1은 operator 이상, 명령 3·6(전환·해제)은 commander만(control-tower §3 표), 휴대폰은 모두 막는다(§12) */
 export function commandAvailability(o: { role: ConsoleRole; layout: ConsoleLayoutKind; kind: CommandKind }): Availability {
   if (o.layout === 'phone') return { canRequest: false, reason: PHONE_BLOCKED };
   if (o.kind === 'ADMISSION_TARGET') {
     return o.role === 'operator' || o.role === 'commander' ? { canRequest: true } : { canRequest: false, reason: '동시 입장 목표 조정은 operator 이상만 요청할 수 있습니다' };
   }
   if (o.role === 'commander') return { canRequest: true };
-  return o.kind === 'KILL_SWITCH'
-    ? { canRequest: false, reason: '판매 일시정지는 commander만 실행할 수 있습니다' }
-    : { canRequest: false, reason: '대체 결제사 전환은 commander만 요청할 수 있습니다' };
+  if (o.kind === 'KILL_SWITCH') return { canRequest: false, reason: '판매 일시정지는 commander만 실행할 수 있습니다' };
+  if (o.kind === 'PG_ENTRY_RELEASE') return { canRequest: false, reason: '새 결제 진입 정지 열기는 commander만 실행할 수 있습니다' };
+  return { canRequest: false, reason: '대체 결제사 전환은 commander만 요청할 수 있습니다' };
 }
 
 /**
