@@ -9,7 +9,7 @@ import { JwksReauthVerifier, SettlementDueWorker } from '../src/modules/settleme
 import { adminKey, ISS, JWKS_URL, jwksFetch, reauthClaims, signReauth } from './support/admin-reauth.js';
 import { OpsIntakeFake } from './support/ops-intake-fake.js';
 import { PortonePlatformFake } from './support/portone-platform-fake.js';
-import { dumpStore, harness, httpService, kyc, leaks, PartnerSessions, PORTONE_SECRET, portonePartner, statement, TOSS_CONFIG, tossSeller, type Harness } from './support/settlement-portone-harness.js';
+import { dumpStore, harness, httpService, kyc, leaks, PartnerSessions, PORTONE_SECRET, portonePartner, statement, tossSeller, type Harness } from './support/settlement-portone-harness.js';
 
 /** 금요일 10:00 KST(2026-11-27 01:00 UTC) */
 const FRIDAY_10_KST = Date.parse('2026-11-27T01:00:00.000Z');
@@ -400,7 +400,7 @@ describe('J-T14 정산 계좌 변경 로그 표본', () => {
       expect(leaks(logs, n)).toEqual([]);
       expect(leaks(responses.join('\n'), n)).toEqual([]);
     }
-    for (const store of Object.values(TOSS_CONFIG.stores)) for (const k of store!.securityKeys) expect(logs).not.toContain(k.toString('hex'));
+    // 토스 보안 키가 로그·응답에 없는지는 실제 HttpTossPayoutTransport를 쓰는 F-07-6 시험(J-T37)이 본다(여기 토스는 전송 포트 짝 대역)
     // JWE compact(다섯 조각 base64url)와 재인증 토큰(JWS 세 조각)도 로그에 없다
     expect(logs).not.toMatch(/[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/);
     expect(logs).not.toMatch(/eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/);

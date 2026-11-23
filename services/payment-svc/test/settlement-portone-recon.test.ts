@@ -5,7 +5,8 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { SettlementDueWorker } from '../src/modules/settlement/index.js';
-import type { StatementRecord } from '../src/modules/settlement/domain/settlement.js';
+import type { PgLedgerSource } from '../src/modules/settlement/domain/ports.js';
+import type { Pg, PgStore, StatementRecord } from '../src/modules/settlement/domain/settlement.js';
 import { OpsIntakeFake } from './support/ops-intake-fake.js';
 import { PortonePlatformFake, type FakeAccountTransfer } from './support/portone-platform-fake.js';
 import { batch, dumpStore, harness, kyc, leaks, payout, PORTONE_SECRET, portonePartner, statement, tossSeller, type Harness } from './support/settlement-portone-harness.js';
@@ -16,6 +17,16 @@ const ACCOUNT = '11012345678901';
 const PAYOUT_DATE = '2026-12-02';
 /** 지급 완료(포트원 SUCCEEDED) 시각 = 지급일 11:10 KST */
 const COMPLETED_AT = Date.parse('2026-12-02T02:10:00.000Z');
+
+/** 장부 원천의 짝 가짜(F-07-6 포트 PgLedgerSource, settlement-pg-balance-recon.test.ts의 FakeLedger와 같은 모양). 키는 `${pg}:${pgStore}` */
+class FakeLedger implements PgLedgerSource {
+  readonly calls: { pg: Pg; pgStore: PgStore; cutoffAt: Date }[] = [];
+  readonly rows = new Map<string, { approvedAmount: number; refundedAmount: number; paidOutAmount: number; payoutCountByMonth: Record<string, number>; firstPaymentAt: Date | null }>();
+  async ledger(input: { pg: Pg; pgStore: PgStore; cutoffAt: Date }) {
+    this.calls.push(input);
+    return this.rows.get(`${input.pg}:${input.pgStore}`) ?? { approvedAmount: 0, refundedAmount: 0, paidOutAmount: 0, payoutCountByMonth: {}, firstPaymentAt: null };
+  }
+}
 
 const fake = new PortonePlatformFake(PORTONE_SECRET);
 const ops = new OpsIntakeFake();
@@ -435,12 +446,18 @@ describe('J-T22 포트원 잔액 대조와 대사 멈춤', () => {
     expect(h.log.lines.some((l) => l.includes('portone_reconciliation_failed') || l.includes('portoneReconciliationFailed'))).toBe(true);
   });
 
-  test('J-T22 ③ 포트원 결제분 월말 잔액 대사가 pg_balance_reconciliation에 PORTONE·STANDARD·MONTHLY 한 행이고, 같은 달 두 번째는 undefined·행 그대로다', async () => {
+  test('J-T22 ③ 포트원 결제분 월말 잔액 대사가 pg_balance_reconciliation에 PORTONE·STANDARD·MONTHLY 한 행이고 보이는 잔액은 이체 원장 계산값이며, 같은 달 두 번째는 undefined·행 그대로다', async () => {
+    const ledger = new FakeLedger();
+    h = harness({ now: Date.parse('2026-11-30T13:00:00.000Z'), portone: fake, toss: true, ops, pgLedger: ledger });
+    ledger.rows.set('PORTONE:STANDARD', { approvedAmount: 90_000_000, refundedAmount: 0, paidOutAmount: 50_000_000, payoutCountByMonth: {}, firstPaymentAt: new Date('2026-11-02T03:00:00.000Z') });
     ledger40m();
-    const first = await h.settlements.reconcilePortoneBalance({ kind: 'MONTHLY', periodMonth: '2026-11' });
-    expect(first).toMatchObject({ pg: 'PORTONE', pgStore: 'STANDARD', kind: 'MONTHLY', periodMonth: '2026-11' });
+    // 월 표기는 F-07-6 reconcileTossBalance와 같은 꼴('YYYY-MM-01')
+    const first = await h.settlements.reconcilePortoneBalance({ kind: 'MONTHLY', periodMonth: '2026-11-01' });
+    expect(first).toMatchObject({ pg: 'PORTONE', pgStore: 'STANDARD', kind: 'MONTHLY', periodMonth: '2026-11-01', observedAmount: 40_000_000, approvedAmount: 90_000_000, paidOutAmount: 50_000_000 });
+    expect(ledger.calls.map((c) => [c.pg, c.pgStore])).toEqual([['PORTONE', 'STANDARD']]);
     expect(h.store.pgBalanceReconciliations.filter((r) => r.pg === 'PORTONE')).toHaveLength(1);
-    await expect(h.settlements.reconcilePortoneBalance({ kind: 'MONTHLY', periodMonth: '2026-11' })).resolves.toBeUndefined();
+    expect(h.store.pgBalanceReconciliations.filter((r) => r.pg === 'TOSS')).toEqual([]);
+    await expect(h.settlements.reconcilePortoneBalance({ kind: 'MONTHLY', periodMonth: '2026-11-01' })).resolves.toBeUndefined();
     expect(h.store.pgBalanceReconciliations.filter((r) => r.pg === 'PORTONE')).toHaveLength(1);
   });
 });

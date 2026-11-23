@@ -1,6 +1,5 @@
 // F-07-7 시험의 설정 값과 로그·원문 검사 도구(제품 코드를 읽지 않는다. 트레이스 시험이 SDK를 띄우기 전에 가져와도 된다).
 import { Writable } from 'node:stream';
-import type { TossPayoutConfig } from '../../src/modules/settlement/domain/payout-adapters.js';
 
 export const PORTONE_SECRET = 'sim_sk_f077_portone_platform';
 /** 포트원 파트너 정산 기본 계약 ID(시험 값, 코드 상수와 다르게) */
@@ -22,13 +21,6 @@ export function portoneEnv(url: string, over: Record<string, string | undefined>
   };
 }
 
-/** 토스 지급대행 두 상점 설정(F-07-6 계획 §5.1(가) 모양. 보안 키는 64자 hex에서 온 32바이트) */
-export const TOSS_CONFIG: TossPayoutConfig = {
-  stores: {
-    STANDARD: { secretKey: 'test_sk_f077_standard', securityKeys: [Buffer.from('11'.repeat(32), 'hex')] },
-    ESCROW: { secretKey: 'test_sk_f077_escrow', securityKeys: [Buffer.from('22'.repeat(32), 'hex')] },
-  },
-};
 
 /** 로그 줄을 모으는 목적지(계좌번호·예금주명 0건 단언용) */
 export function logSink(): { stream: Writable; lines: string[]; text: () => string } {

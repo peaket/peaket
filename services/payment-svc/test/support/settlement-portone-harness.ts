@@ -1,6 +1,6 @@
 // F-07-7 정산 시험의 공용 조립(포트원 플랫폼·토스 지급대행·ops 받기 대역을 끼운 Settlements, 시험 자료 만들기).
-// 계획 §5.1과 F-07-6 계획 §5.1의 이름만 쓴다. 두 계획이 정하지 않은 자리(Settlements·SettlementModule에 새 의존을 넣는 칸 이름,
-// assembleOpsSettlementSinks의 둘째 인자, 지표 기록기를 넣는 칸)는 이 파일 한 곳에만 두었다(계획 '실패 확인' 절의 '인터페이스 빈칸').
+// 계획 §5.1과 F-07-6 계획 §5.1·§7 보충(고정된 F-07-6 시험 4659b6623의 test/support/toss-harness.ts와 같은 칸)의 이름만 쓴다. 두 계획이 정하지 않은 자리(포트원 플랫폼·ops 받기를 Settlements에 넣는 칸 이름,
+// assembleOpsSettlementSinks의 둘째 인자)는 이 파일 한 곳에만 두었다(계획 '실패 확인' 절의 '인터페이스 빈칸').
 // 이름이 바뀌면 이 파일만 고친다.
 import 'reflect-metadata';
 import { Module } from '@nestjs/common';
@@ -8,7 +8,7 @@ import { type AdminAuthz, type AdminAuthzPort, createPlatformLogger, createServi
 import type { Writable } from 'node:stream';
 import { randomUUID } from 'node:crypto';
 import { HttpSettlementCaseNotice, ManualPortonePayoutGateway, MemoryReauthVerifier, MemorySettlementPaymentSource, MemorySettlementStore, settlementApprovalLog, SettlementModule, Settlements, UnavailableTossPayoutGateway } from '../../src/modules/settlement/index.js';
-import type { PayoutApprovalVerifier, PayoutGateway, ReauthVerifier, SaleSuspensionSource, SettlementPaymentSource, SettlementStore, VerifiedPayoutApproval } from '../../src/modules/settlement/domain/ports.js';
+import type { PayoutApprovalVerifier, PayoutGateway, PgLedgerSource, ReauthVerifier, SaleSuspensionSource, SettlementPaymentSource, SettlementStore, VerifiedPayoutApproval } from '../../src/modules/settlement/domain/ports.js';
 import { portonePayoutConfigured, type PortonePayoutConfig } from '../../src/modules/settlement/domain/payout-adapters.js';
 import { PromSettlementSignals } from '../../src/modules/settlement/adapters/prom-settlement-signals.js';
 import { assembleOpsSettlementSinks, assemblePortonePlatform } from '../../src/start.js';
@@ -17,8 +17,8 @@ import { RecordingTossPayout } from './settlement-payout-toss-double.js';
 import type { PortonePlatformFake } from './portone-platform-fake.js';
 import type { OpsIntakeFake } from './ops-intake-fake.js';
 
-export { INTERNAL_TOKEN, leaks, logSink, PORTONE_CONTRACT_ID, PORTONE_SECRET, portoneEnv, TOSS_CONFIG } from './settlement-portone-env.js';
-import { INTERNAL_TOKEN, logSink, PORTONE_CONTRACT_ID, portoneEnv, TOSS_CONFIG } from './settlement-portone-env.js';
+export { INTERNAL_TOKEN, leaks, logSink, PORTONE_CONTRACT_ID, PORTONE_SECRET, portoneEnv } from './settlement-portone-env.js';
+import { INTERNAL_TOKEN, logSink, PORTONE_CONTRACT_ID, portoneEnv } from './settlement-portone-env.js';
 
 export const noApprovals: PayoutApprovalVerifier = { verify: async () => undefined };
 export const noSaleSuspensions: SaleSuspensionSource = { listSuspended: async () => new Set() };
@@ -74,6 +74,8 @@ export interface HarnessOptions {
   saleSuspensions?: SaleSuspensionSource;
   /** 시험이 주는 지급 게이트웨이(기본: assemblePortonePlatform의 포트원 갈래 + 토스 꺼짐) */
   gateways?: readonly PayoutGateway[];
+  /** 결제사 잔액 대사의 장부 원천(F-07-6 PgLedgerSource) */
+  pgLedger?: PgLedgerSource;
 }
 
 export interface BuiltSettlements<S extends SettlementStore> {
@@ -116,10 +118,12 @@ export function buildSettlements<S extends SettlementStore>(store: S, payments: 
     clock,
     log: settlementApprovalLog(logger),
     ...(o.ops ? { caseNotice: new HttpSettlementCaseNotice(o.ops.url, INTERNAL_TOKEN) } : {}),
-    // ↓ 인터페이스 빈칸(계획 §5.1에 칸 이름이 없음): PayoutAgencies 생성자와 같은 이름을 Settlements 의존에도 쓴다고 가정
+    // 토스 전송·지표·장부 원천은 F-07-6 계획 §7 보충의 칸 이름(tossTransport·signals·pgLedger, test/support/toss-harness.ts와 같음)
+    ...(toss ? { tossTransport: toss } : {}),
+    ...(o.pgLedger ? { pgLedger: o.pgLedger } : {}),
+    // ↓ 인터페이스 빈칸(계획 §5.1에 칸 이름이 없음): 포트원 플랫폼은 PayoutAgencies 생성자와 같은 이름을 Settlements 의존에도 쓴다고 가정
     ...(platform.transport ? { portone: platform.transport } : {}),
     ...(portoneConfig ? { portoneConfig } : {}),
-    ...(toss ? { toss, tossConfig: TOSS_CONFIG } : {}),
     payoutAccountAudit: sinks.audit,
     alerts: sinks.alerts,
     signals,
