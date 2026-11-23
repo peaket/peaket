@@ -22,13 +22,14 @@ const methodOf = (name) => {
   return /\bmethod: '([A-Z]+)'/.exec(ops.slice(at, at + 2_000))?.[1];
 };
 
-test('R-T51 ② 화면은 생성 호출 셋(목록·상세·갱신)과 세션 읽기만 쓰고 fetch를 만들지 않는다', () => {
+// F-06-7 GAT-280(시험 담당 lane3-f067-test): 이의 심사 패널이 넷째 생성 호출(createOpsCaseVerificationAppealDecision)을 더한다(계획 §4 화면, B-T28 ⑦)
+test('R-T51 ② B-T28 ⑦ 화면은 생성 호출 넷(목록·상세·갱신·이의 결정)과 세션 읽기만 쓰고 fetch를 만들지 않는다', () => {
   assert.equal(methodOf('listOpsCases'), 'GET');
   assert.equal(methodOf('getOpsCase'), 'GET');
   assert.equal(methodOf('updateOpsCase'), 'PATCH');
   assert.match(operations, /updateOpsCase: \{[^}]*method: "PATCH",path: "\/v1\/ops\/cases\/\{caseId\}"[^}]*ifMatch: true/);
   const used = [...connected.matchAll(/const \{ (\w+) \} = await ops\(\)/g)].map((m) => m[1]).sort();
-  assert.deepEqual(used, ['getMyOpsAuthSession', 'getOpsCase', 'listOpsCases', 'updateOpsCase']);
+  assert.deepEqual(used, ['createOpsCaseVerificationAppealDecision', 'getMyOpsAuthSession', 'getOpsCase', 'listOpsCases', 'updateOpsCase']);
   assert.match(connected, /const ops = \(\) => import\('@peaket\/api-client\/endpoints\/ops'\)/);
   assert.doesNotMatch(connected, /\bfetch\s*\(/);
   assert.doesNotMatch(connected, /XMLHttpRequest|EventSource|WebSocket/);
@@ -110,4 +111,44 @@ test('R-T51 ② 미리보기 빌드의 ?state=만 보드이고 그 밖은 실제
 test('R-T49 ⑦ 화면의 [배정 풀기]는 assignee: null을 보내고 assignee에 빈 글을 보내지 않는다', () => {
   assert.match(connected, /p\.onPatch\(\{ assignee: null \}, '배정을 풀었습니다'\)/);
   assert.doesNotMatch(connected, /assignee: ''/);
+});
+
+// F-06-7 GAT-280 B-T28 ⑦(시험 담당 lane3-f067-test): SCR-045 이의 심사 패널의 배선. 서버와 실제로 주고받는 흐름은 services/ops-svc/test/cs-inbox-screen-link.test.ts가 본다.
+// 정본: openapi createOpsCaseVerificationAppealDecision(POST, If-Match·Idempotency-Key), docs/design/d5-screen-blueprint.md §7.6 '추가 검증 이의 상세'·'이의 결정 확인'·'이의 반영 실패' 글,
+// 계획 docs/review/plans/F-06-7.md §4 화면(생성 호출 한 곳, 대화상자 role="dialog"·aria-modal·처음 초점 [취소]·Esc 취소, 키는 대화상자를 열 때 crypto.randomUUID()).
+test('B-T28 ⑦ 이의 결정은 생성 함수 하나(POST …/verification-appeal-decision, 멱등·If-Match)로 한 곳에서만 보내고 If-Match·Idempotency-Key를 싣는다', () => {
+  assert.equal(methodOf('createOpsCaseVerificationAppealDecision'), 'POST');
+  assert.match(operations, /createOpsCaseVerificationAppealDecision: \{[^}]*method: "POST",path: "\/v1\/ops\/cases\/\{caseId\}\/verification-appeal-decision"[^}]*idempotent: true[^}]*ifMatch: true/);
+  assert.equal(count(connected, /createOpsCaseVerificationAppealDecision\(/g), 1);
+  const at = connected.indexOf('createOpsCaseVerificationAppealDecision(');
+  const call = connected.slice(at, at + 400);
+  assert.match(call, /'If-Match': ifMatchOf\(/);
+  assert.match(call, /'Idempotency-Key': /);
+  assert.match(connected, /crypto\.randomUUID\(\)/);
+  assert.doesNotMatch(connected, /fetch\s*\(/);
+});
+
+test('B-T28 ⑦ 이의 건 패널은 d5 §7.6 상태 글을 쓰고, 결정 확인은 대화상자(role="dialog", aria-modal)다', () => {
+  for (const text of [
+    '판정 근거가 남아 있지 않아 사유 범주로만 판단합니다',
+    '판정 근거를 불러오지 못했습니다',
+    '이의 내용을 아직 불러오지 못했습니다',
+    '이의 내용이 보관 기간이 지나 없습니다',
+    '이의 인정',
+    '이의 기각',
+    '이의를 인정할까요? 대기 순번이 돌아가고 사람 라벨이 남습니다. 판정 근거가 차단 기기 목록이면 그 기기를 목록에서 지웁니다',
+    '이의를 기각할까요? 이 대기 참여가 끝납니다. 계정 제재는 아닙니다',
+    '을 보내지 못했습니다. 배경 작업이 다시 보냅니다(관제 경보 SEV3)',
+    '다시 보내도 같은 답이라 멈췄습니다. 관제에 알려 주세요',
+  ]) assert.ok(connected.includes(text), text);
+  assert.match(connected, /role="dialog"/);
+  assert.match(connected, /aria-modal/);
+  assert.match(connected, /'Escape'/);
+  assert.match(connected, /VERIFICATION_APPEAL/);
+  assert.match(connected, /canDecideAppeal\(/);
+  assert.match(connected, /verificationAppealOf\(/);
+});
+
+test('B-T28 ⑦ 메모가 비면 결정을 보내지 않고 오류 요약으로 간다(대화상자를 열지 않는다)', () => {
+  assert.ok(count(connected, /showNoteError\('결과 메모를 적어 주세요'\)/g) >= 2, '해결로 닫기와 이의 결정 둘 다 빈 메모를 먼저 본다');
 });

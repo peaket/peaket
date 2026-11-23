@@ -20,8 +20,10 @@ export interface ScreenApi {
   listOpsCases(params?: Record<string, unknown>): Promise<ScreenResponse>;
   getOpsCase(caseId: string): Promise<ScreenResponse>;
   updateOpsCase(caseId: string, body: Record<string, unknown>, options?: { headers?: Record<string, string> }): Promise<ScreenResponse>;
-  /** fetch로 나간 요청(메서드·경로·If-Match) */
-  readonly sent: Array<{ method: string; path: string; ifMatch: string | null }>;
+  /** 추가 검증 이의 인정·기각(F-06-7, openapi createOpsCaseVerificationAppealDecision). 생성물이 없으면(구현 전) 부르면 던진다 */
+  createOpsCaseVerificationAppealDecision(caseId: string, body: Record<string, unknown>, options?: { headers?: Record<string, string> }): Promise<ScreenResponse>;
+  /** fetch로 나간 요청(메서드·경로·If-Match·Idempotency-Key) */
+  readonly sent: Array<{ method: string; path: string; ifMatch: string | null; idempotencyKey: string | null }>;
 }
 
 const API_CLIENT = new URL('../../../packages/api-client/src/index.ts', import.meta.url).href;
@@ -41,7 +43,7 @@ export async function screenApi(svc: Svc, session: () => Record<string, string>)
     const url = new URL(u);
     const headers: Record<string, string> = {};
     new Headers(init.headers).forEach((v, k) => (headers[k] = v));
-    sent.push({ method: init.method ?? 'GET', path: `${url.pathname}${url.search}`, ifMatch: headers['if-match'] ?? null });
+    sent.push({ method: init.method ?? 'GET', path: `${url.pathname}${url.search}`, ifMatch: headers['if-match'] ?? null, idempotencyKey: headers['idempotency-key'] ?? null });
     const r = await svc.http.inject({
       method: (init.method ?? 'GET') as 'GET',
       url: `${url.pathname}${url.search}`,
@@ -53,7 +55,11 @@ export async function screenApi(svc: Svc, session: () => Record<string, string>)
     return new Response(r.statusCode === 204 ? null : r.payload, { status: r.statusCode, headers: out });
   };
   client.setOrvalClient(client.createApiClient({ baseUrls: { 'ops-api': 'https://ops-api.peaket.test' }, fetch: viaGateway, maxRetries: 0 }));
-  return { listOpsCases: ops.listOpsCases, getOpsCase: ops.getOpsCase, updateOpsCase: ops.updateOpsCase, sent };
+  const decide: ScreenApi['createOpsCaseVerificationAppealDecision'] = (caseId, body, options) => {
+    if (typeof ops.createOpsCaseVerificationAppealDecision !== 'function') throw new TypeError('createOpsCaseVerificationAppealDecision 생성 함수가 없다(packages/api-client gen)');
+    return ops.createOpsCaseVerificationAppealDecision(caseId, body, options);
+  };
+  return { listOpsCases: ops.listOpsCases, getOpsCase: ops.getOpsCase, updateOpsCase: ops.updateOpsCase, createOpsCaseVerificationAppealDecision: decide, sent };
 }
 
 /** 생성 함수가 던진 오류(ApiError)를 화면의 errorOf가 읽는 모양으로 */

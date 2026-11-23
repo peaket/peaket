@@ -63,7 +63,10 @@ export interface CsHarness {
   close(): Promise<void>;
 }
 
-export async function csHarness(o: { nowIso?: string } = {}): Promise<CsHarness> {
+/** 추가 검증 이의 포트(F-06-7 계획 §4 AppModule.register의 csAppeals). 이 시험 묶음은 cs-appeal-support.ts가 실제 gRPC 클라이언트로 채운다 */
+type CsAppealsWiring = NonNullable<Parameters<typeof AppModule.register>[0]['csAppeals']>;
+
+export async function csHarness(o: { nowIso?: string; csAppeals?: CsAppealsWiring; registerSignals?: (registry: Awaited<ReturnType<typeof createService>>['metrics']['registry']) => void } = {}): Promise<CsHarness> {
   const clock = fakeClock({ now: Date.parse(o.nowIso ?? BASE_ISO) });
   const identity = new FakeIdentity();
   const admins = new FakeAdminIdentity();
@@ -72,13 +75,14 @@ export async function csHarness(o: { nowIso?: string } = {}): Promise<CsHarness>
   const signals = new PromCsCaseSignals();
   const svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ memory: true, auditChain: audit, calendar: testCalendar(), caseSignals: signals, adminAccounts: { identity: admins } }),
+    module: AppModule.register({ memory: true, auditChain: audit, calendar: testCalendar(), caseSignals: signals, adminAccounts: { identity: admins }, ...(o.csAppeals ? { csAppeals: o.csAppeals } : {}) }),
     env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: logs.stream,
     adminAuthz: identity,
   });
   signals.register(svc.metrics.registry);
+  o.registerSignals?.(svc.metrics.registry);
   const kit = svc.app.get<CsCaseKit>(Symbol.for('peaket.ops.cs-case-kit'));
   const parse = (payload: string): Record<string, unknown> => (payload ? (JSON.parse(payload) as Record<string, unknown>) : {});
   const etagOf = (h: Record<string, unknown>): string | undefined => (typeof h.etag === 'string' ? h.etag : undefined);
