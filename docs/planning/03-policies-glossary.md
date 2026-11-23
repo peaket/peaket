@@ -833,6 +833,7 @@ stateDiagram-v2
     Confirmed --> Calculated: T16 다시 계산
     Held --> Calculated: T17 다시 계산
     Confirmed --> Notified: T18 이의 없는 수기 조정 뒤 재알림
+    CarriedOver --> Calculated: T19 다시 계산
     Paid --> [*]
     CarriedOver --> [*]
 ```
@@ -859,8 +860,9 @@ stateDiagram-v2
 | T16 | Confirmed | Calculated | 같은 사유로 다시 계산 |
 | T17 | Held | Calculated | 같은 사유로 다시 계산 |
 | T18 | Confirmed | Notified | 이의 없는 수기 조정(승인 업무)을 적용한 뒤 바뀐 금액을 다시 알림(이의 기간 1영업일, 추천 적용 2026-11-23, ADR-0368) |
+| T19 | CarriedOver | Calculated | 회차 취소·연기 환급으로 다시 계산. 옛 판의 음수 미수금은 되돌리고 새 판에서 다시 잡는다(2026-11-23, ADR-0380 결정 8) |
 
-- 다시 계산하면 판본을 1 올린 새 판이 Calculated로 시작하고, 옛 판은 금액을 고치지 않은 채 Superseded로 끝난다. 그래서 위 '→ Calculated'는 옛 판이 Superseded가 되고 새 판이 생긴다는 뜻이다. 지급 건이 진행 중이거나 끝난 정산서는 다시 계산하지 않고, 그 뒤의 환불은 미수금으로 잡는다(docs/features/settlement.md §4.1·§4.4·§12, 추천 적용 2026-10-28, 기술 검토 중간-043).
+- 다시 계산하면 판본을 1 올린 새 판이 Calculated로 시작하고, 옛 판은 금액을 고치지 않은 채 Superseded로 끝난다. 그래서 위 '→ Calculated'는 옛 판이 Superseded가 되고 새 판이 생긴다는 뜻이다. 지급 건이 진행 중이거나 끝난 정산서는 다시 계산하지 않고, 그 뒤의 환불은 미수금으로 잡는다(docs/features/settlement.md §4.1·§4.4·§12, 추천 적용 2026-10-28, 기술 검토 중간-043). 회차 취소·연기 환급의 다시 계산은 확정 때 지급을 막고(T10·Held, 사유 '다시 계산 대기') 일괄 환불이 끝난 뒤 한 번 한다(2026-11-23, ADR-0380).
 - 대사가 끝나지 않은 결제는 그 결제만 빼고 계산하고, 풀리면 지급 전이면 조정 행, 지급 뒤면 다음 정산서의 조정이나 미수금으로 넣는다.
 - 지급일 미룸(응답 없음·잔액 모자람으로 마감을 넘김)은 전이가 아니다. 묶음에 붙은 `CONFIRMED` 정산서는 상태 그대로 지급일만 바뀌고, 같은 상태의 감사 한 줄(사유 `payout-postponed`)과 `PAYOUT_HELD`를 묶음 갱신과 한 트랜잭션에 쓴다(추천 적용 2026-11-23, ADR-0369 결정 14).
 - 모든 전이는 출발 상태가 표와 같을 때만 저장하고(조건부 갱신), 상태·감사·`trade.settlements` 사건을 한 트랜잭션에 쓴다. 겹친 두 전이(예: 이의와 자동 확정)는 먼저 쓴 쪽만 남는다(docs/features/settlement.md §4.2, 추천 적용 2026-11-23, ADR-0368).

@@ -1232,6 +1232,7 @@ erDiagram
         text status "REQUESTED|CANCEL_PENDING|CANCELED|FAILED. REQUESTED·CANCEL_PENDING이 진행 중이다. CANCELED는 반영으로, FAILED는 거절로 끝난 건이다. 새 계좌 시도 전 앞 행이 반영이면 그 행을 CANCELED로, 반영이 아니면 FAILED(SUPERSEDED)로 닫는다. 앞 행의 반영으로 이미 끝난 새 시도 행은 원장에 더하지 않는 CANCELED 표시다(같은 시도 재시도가 다시 보내지 않게, BAT-425)"
         timestamptz created_at "첫 전송 직전에 행을 만든 시각"
         timestamptz canceled_at "결제사 취소 완료 시각(ADR-0086)"
+        text settlement_burden "PARTNER|PEAKET, 기본 PARTNER. PEAKET은 재량 면제분·시스템 잘못 환불(POL-038 ①②)이라 정산의 환급·미수금에 넣지 않는다(2026-11-23, ADR-0380 결정 5, settlement §7). PEAKET으로 쓰는 쪽은 CS 승인 업무 몫이다"
         text fail_reason "FAILED의 개인정보 없는 까닭. 계좌 거절(은행·계좌번호·예금주 확인 실패)이면 REFUND_ACCOUNT_INVALID, 앞 시도를 닫았으면 SUPERSEDED이고 그 밖 업무 거절은 비운다(CHECK: FAILED에만). 같은 취소 ID·같은 시도의 다시 부름은 이 값으로 첫 답(REFUND_ACCOUNT_REQUIRED·REJECTED)을 그대로 준다(payment 0023·0024, BAT-425)"
     }
     compensation_transfer {
@@ -1249,6 +1250,23 @@ erDiagram
         uuid receivable_id "PAID일 때 만든 partner_receivable.id. REQUESTED·FAILED·UNAVAILABLE이면 null"
         timestamptz created_at
         timestamptz updated_at
+    }
+    settlement_recalculation {
+        uuid request_id PK "회차 취소 요청 ID(purchase event_cancellation_request). 같은 ID는 멱등이다(2026-11-23, ADR-0380)"
+        uuid event_id "그 회차. PENDING은 회차마다 하나를 본다"
+        text kind "CANCEL|POSTPONE"
+        text state "PENDING|DONE. PENDING 동안 그 회차 정산서는 지급 묶음에서 HELD(RECALCULATION)이고 계산 뒤 환급 미수금을 만들지 않는다"
+        timestamptz confirmed_at
+        timestamptz opened_at
+        timestamptz completed_at
+        bool partial "확정 + 3영업일 [가정]이 지나 그때까지의 환급으로 다시 계산했는가"
+        jsonb skipped_statement_ids "지급 건이 진행 중이거나 끝나 다시 계산하지 않은 정산서(환급은 미수금)"
+        jsonb retry_statement_ids "결제사 예약 취소가 실패해 30분 tick이 다시 할 정산서"
+        jsonb result "완료 답(옛 판·새 판·판본 목록)"
+    }
+    settlement_refund_scan {
+        text name PK "EVENT_REFUND. 계산 뒤 환급 미수금 훑기의 읽은 자리(2026-11-23, ADR-0380 결정 5)"
+        timestamptz read_through "여기까지 끝난 결제 취소를 보았다"
     }
     settlement_statement {
         uuid id PK
@@ -1298,7 +1316,7 @@ erDiagram
         text detail "2,000자"
         uuid submitted_by
         timestamptz submitted_at
-        text result "ADJUSTED|DISMISSED(ADJUSTED는 이 이의에 붙은 조정을 적용할 때만)"
+        text result "ADJUSTED|DISMISSED|SUPERSEDED(ADJUSTED는 이 이의에 붙은 조정을 적용할 때만. SUPERSEDED는 다시 계산으로 옛 판의 열린 이의를 닫음, ADR-0380 결정 6)"
         timestamptz resolved_at
         uuid resolved_by "기각한 cs_lead, 조정을 승인한 commander(payment 0027)"
         text resolution_note "기각 사유 2,000자(payment 0027)"
@@ -1514,7 +1532,7 @@ erDiagram
         uuid id PK
         uuid receivable_id
         uuid statement_id "상계한 정산서(상계·되돌림만)"
-        text kind "OFFSET|GUARANTEE|COLLECTED|WRITE_OFF|REVERSAL"
+        text kind "OFFSET|GUARANTEE|COLLECTED|WRITE_OFF|REVERSAL|SUPERSEDED. SUPERSEDED는 다시 계산으로 옛 판의 NEGATIVE_STATEMENT 미수금을 남은 금액만큼 닫음(2026-11-23, ADR-0380 결정 8)"
         bigint amount "양수. REVERSAL은 되돌린 금액"
         uuid reverses_id "되돌린 이동 기록(REVERSAL만)"
         timestamptz created_at "덧붙이기만 하고 고치거나 지우지 않는다(추천 적용 2026-10-28, 기술 검토 중간-043)"
