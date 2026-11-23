@@ -51,8 +51,8 @@ spec:
           expr: (1 - sum(rate(realtime_gw_batch_wait_ms_bucket{le="150"}[5m])) / sum(rate(realtime_gw_batch_wait_ms_count[5m]))) > 0.01 and on() (sum(realtime_gw_degraded) == 0)
           for: 5m
           labels:
-            # docs/features/seat-hold.md §7 443행: 이 경보는 경고다(SEV2는 Degraded·버퍼 두 경보)
-            severity: warning
+            # docs/features/seat-hold.md §7 443행: 이 경보는 경고이고 SEV3 sev3(티켓)다(SEV2는 Degraded·버퍼 두 경보, docs/observability.md §5 심각도 표)
+            severity: sev3
             kind: cause
             dependency: realtime-gw
           annotations:
