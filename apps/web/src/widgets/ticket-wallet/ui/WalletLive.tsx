@@ -6,20 +6,24 @@
 //   (빌드 때 그린 셸 하나를 모든 ID가 같이 쓰고, 요청 때 그리는 조각이 없어 캐시 화면의 인라인 스크립트 해시가 그대로 맞는다).
 // - 갱신 뒤에도 401이면 저장된 표를 그리지 않고 로그인 화면(SCR-004)으로 보낸다. QR 글자·쿠키는 console·주소창에 내지 않는다.
 import Link from 'next/link';
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import dynamic from 'next/dynamic';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { EmptyState } from '@peaket/ds/EmptyState';
 import { ErrorState } from '@peaket/ds/ErrorState';
 import { NoticeBanner } from '@peaket/ds/NoticeBanner';
-import { WebShellModal } from '@peaket/ds/WebShell';
 import { walletScreenOf, type WalletCard, type WalletSyncResult } from '@/features/wallet-sync';
 import type * as WalletSyncModule from '@/features/wallet-sync/sync';
 import { afterLoad } from '@/shared/lib/after-load';
 import { cx } from '@/shared/lib/cx';
 import { reauthFailureText } from '@/shared/lib/reauth-failure';
-import { pickupReauthToken, submitReauthForm } from '@/shared/lib/reauth-return';
+import { pickupReauthToken } from '@/shared/lib/reauth-return';
 import { ORIGINS } from '@/shared/config/origins';
-import { canReturn, loadReceivedOffers, reauthProviderFor, receivedOfferCardsOf, returnFailureOf, returnReauthTarget, returnTicket } from '../model/transfer-actions';
-import { DeviceQrLazy, OfflineBannerLazy } from './WalletClient';
+import { canReturn, receivedOfferCardsOf, returnFailureOf } from '../model/transfer-rules';
+import { DeviceQrLazy, OfflineBannerLazy } from './wallet-lazy';
+
+// 받은 티켓 카드의 돌려주기 확인 대화상자·WebShell은 누를 때만 필요하다. 첫 화면 JS에서 빼고 늦게 싣는다
+// (docs/frontend.md §5.8 월렛 첫 JS 예산, CI 실행 45240606103에서 195.9kB > 한도 161.6kB).
+const ReturnAction = dynamic(() => import('./return-action').then((m) => m.ReturnAction), { ssr: false });
 
 export interface WalletLiveProps {
   /** 서버가 그린 '불러오는 중'(첫 HTML의 글과 QR 뼈대) */
@@ -108,67 +112,6 @@ function TicketCard({ card, qrFallback }: { card: WalletCard; qrFallback: ReactN
   );
 }
 
-/** SCR-013 돌려주기: 확인 대화상자 → 재인증 왕복 → 돌아오면 WalletLive가 POST와 동기화를 마친다 */
-function ReturnAction({ ticketId }: { ticketId: string }) {
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const descId = `${useId()}-desc`;
-  const start = async () => {
-    setBusy(true);
-    setNotice(null);
-    const origin = ORIGINS.api;
-    if (origin === '') {
-      setNotice('지금은 돌려줄 수 없습니다. 잠시 뒤 다시 시도해 주세요');
-      setBusy(false);
-      return;
-    }
-    try {
-      const r = await fetch(`${origin}/v1/identity/providers`, { credentials: 'include', headers: { accept: 'application/json' } });
-      const body = r.status === 200 ? ((await r.json()) as { providers?: { provider?: unknown }[] }) : { providers: [] };
-      const linked = (body.providers ?? []).map((p) => p.provider).filter((p): p is string => typeof p === 'string' && p.length > 0);
-      const provider = reauthProviderFor(linked);
-      if (provider === undefined) {
-        setNotice('다시 로그인할 수단을 찾지 못했습니다. 로그인 수단을 확인한 뒤 다시 시도해 주세요');
-        return;
-      }
-      const pending = { ticketId, key: crypto.randomUUID() };
-      sessionStorage.setItem('peaket.return.reauth', JSON.stringify(pending));
-      const target = returnReauthTarget(ticketId);
-      submitReauthForm(provider, target.returnTo, target.purpose);
-    } catch {
-      setNotice('연결을 확인한 뒤 다시 시도해 주세요');
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <>
-      <button className="btn btn-outline btn-sm" type="button" aria-haspopup="dialog" onClick={() => setOpen(true)}>
-        결제자에게 돌려주기
-      </button>
-      <WebShellModal open={open} onClose={() => setOpen(false)} title="돌려주면 이 휴대폰의 입장 키가 지워집니다" describedBy={descId} icon={<i className="ic ic-undo" aria-hidden="true" />} iconTone="warning">
-        <p className="t-sm" id={descId}>
-          돌려주기 전에 다시 로그인하며, 입장이 시작되면 돌려줄 수 없습니다.
-        </p>
-        {notice ? (
-          <NoticeBanner tone="danger" role="alert">
-            {notice}
-          </NoticeBanner>
-        ) : null}
-        <div className="col gap-2 md:flex-row-reverse md:flex-wrap md:items-center md:justify-start">
-          <button className="btn btn-primary btn-lg btn-block md:inline-flex md:w-auto" type="button" disabled={busy} onClick={() => void start()}>
-            돌려주기
-          </button>
-          <button className="btn btn-ghost btn-block md:inline-flex md:w-auto" type="button" onClick={() => setOpen(false)}>
-            닫기
-          </button>
-        </div>
-      </WebShellModal>
-    </>
-  );
-}
-
 export function WalletLive({ loading, qrFallback, detail }: WalletLiveProps) {
   const [ticketId, setTicketId] = useState<string | null>(null);
   const [cards, setCards] = useState<WalletCard[] | null>(null);
@@ -195,9 +138,12 @@ export function WalletLive({ loading, qrFallback, detail }: WalletLiveProps) {
   useEffect(() => {
     const origin = ORIGINS.api;
     if (origin === '') return;
-    void loadReceivedOffers({ origin, fetch: globalThis.fetch }).then((r) => {
+    // 받은 요청이 없으면 돌려주기 코드가 필요 없다. 첫 화면 JS에서 빼고 여기서 늦게 가져온다(§5.8 예산)
+    void (async () => {
+      const { loadReceivedOffers } = await import('../model/transfer-actions');
+      const r = await loadReceivedOffers({ origin, fetch: globalThis.fetch });
       if (r.kind === 'ok') setOffers(receivedOfferCardsOf(r.body.items, Date.now()));
-    });
+    })();
   }, []);
 
   // 돌려주기 재인증에서 돌아오면: 표시를 한 번 꺼내 토큰을 받고 POST한 뒤 동기화한다
@@ -231,6 +177,7 @@ export function WalletLive({ loading, qrFallback, detail }: WalletLiveProps) {
         setReturnNotice(`다시 로그인하지 못했습니다: ${reauthFailureText(r.reason)}`);
         return;
       }
+      const { returnTicket } = await import('../model/transfer-actions');
       const out = await returnTicket({ ticketId: pending.ticketId as string, reauthToken: r.token, idempotencyKey: pending.key as string, origin: ORIGINS.api, fetch: globalThis.fetch });
       if (out.kind === 'ok') {
         setReturnNotice('결제한 분에게 돌려주었습니다');
