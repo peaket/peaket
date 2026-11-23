@@ -3,6 +3,7 @@
 // 한 항목의 실패는 던지지 않고 지표·로그로 남긴 뒤 다음 틱에 다시 한다. 사본 보내기 실패가 주문·결제 경로를 막지 않는다.
 import {
   InvalidPriorityGrantState,
+  type PriorityGrantCursor,
   type PriorityGrantExpireResult,
   type PriorityGrantStore,
   type PriorityGrantSyncResult,
@@ -38,6 +39,8 @@ const codeOf = (e: unknown): string =>
 export class PriorityGrantSync {
   #timer: NodeJS.Timeout | undefined;
   #running: Promise<void> | undefined;
+  /** 이어 읽기 위치(`(updated_at, id)` 키셋). 페이지가 끝나면 처음으로 되돌린다(ADR-0385) */
+  #cursor: PriorityGrantCursor | undefined;
 
   constructor(private readonly deps: PriorityGrantSyncDeps) {}
 
@@ -54,12 +57,13 @@ export class PriorityGrantSync {
 
     let rows;
     try {
-      rows = await this.deps.grants.listSyncable(now, PRIORITY_GRANT_SYNC_LIMIT);
+      rows = await this.deps.grants.listSyncable(now, PRIORITY_GRANT_SYNC_LIMIT, this.#cursor);
     } catch (err) {
       this.#log('warn', { step: 'list', code: codeOf(err) }, '우선 구매 권리 대조 목록 읽기 실패(다음 틱에 다시 한다)');
       return;
     }
 
+    let failed = false;
     for (const g of rows) {
       try {
         await this.deps.copies.set({
@@ -70,6 +74,7 @@ export class PriorityGrantSync {
           expiresAtMs: g.expiresAtMs,
           version: g.version,
         });
+        this.#cursor = { updatedAtMs: g.updatedAtMs, grantId: g.grantId };
         this.deps.signals?.sync('ok');
       } catch (err) {
         const invalid = err instanceof InvalidPriorityGrantState;
@@ -80,8 +85,18 @@ export class PriorityGrantSync {
           { step: 'copy', grantId: g.grantId, eventId: g.eventId, code: codeOf(err) },
           invalid ? '우선 구매 권리 사본이 계약과 다르다' : '우선 구매 권리 사본 보내기 실패(다음 틱에 다시 한다)',
         );
+        if (invalid) {
+          // 계약·데이터 결함 행은 다시 보내지 않고 커서를 넘긴다(IR-04)
+          this.#cursor = { updatedAtMs: g.updatedAtMs, grantId: g.grantId };
+          continue;
+        }
+        // 일시 실패 행은 커서를 그 앞에 두어 다음 틱에 그 행부터 다시 보낸다
+        failed = true;
+        break;
       }
     }
+    // 마지막 페이지를 다 보냈으면 처음으로 되돌린다. 실패가 있으면 커서를 그 앞에 두어 다음 틱에 이어 간다
+    if (!failed && rows.length < PRIORITY_GRANT_SYNC_LIMIT) this.#cursor = undefined;
   }
 
   /** 반복을 켠다. 켜자마자 한 번 돌려 재시작 직후에도 사본을 맞춘다 */

@@ -17,6 +17,7 @@
 
 - purchase-svc에 30초 [가정] 주기의 작은 대조를 둔다. 한 틱은 ① `expireDue`로 `priority_grant`의 `status='OFFERED' AND active_order_id IS NULL AND expires_at <= now` 행을 `EXPIRED`(version+1)로 바꾸고 ② `listSyncable`로 `expires_at > now`인 `OFFERED`·`USED`·`WITHDRAWN` 행을 읽어 queue-svc `SetPriorityGrant`로 다시 보낸다.
 - `EXPIRED` 사본은 보내지 않는다. 사본의 TTL이 권리 만료와 같아 그때 키가 사라지기 때문이다. 다만 queue-svc 계약은 `EXPIRED`를 받아 두어 조기 만료·계약 대칭을 맞춘다.
+- 목록은 `(updated_at, id)` 키셋 커서로 이어 읽는다. 한 틱에 100개 [가정]을 보내고, 페이지가 100개보다 작으면 커서를 처음으로 되돌린다. 일시 실패한 행에서는 커서를 그 앞에 두어 다음 틱에 그 행부터 다시 보내고, 계약·데이터 결함(INVALID_ARGUMENT) 행은 커서를 넘겨 다시 보내지 않는다. 새 표·칸은 만들지 않는다(마이그레이션 없음).
 - 보내기 실패(`UNAVAILABLE`·`DEADLINE_EXCEEDED` 등)는 `failed`로 세고 다음 틱에 다시 한다. `INVALID_ARGUMENT`는 계약·데이터 결함이라 `invalid`로 따로 세고 같은 값을 다시 보내지 않는다. DB 오류는 `expire` 지표로 남기고 다음 틱에 다시 한다.
 - 대조는 주문·결제 트랜잭션 안에서 네트워크를 부르지 않는다. `markUsed`는 주문 트랜잭션 안에서 이미 `USED`이므로 대조가 늦어도 주문은 purchase-svc가 막는다. 대조 주기 30초 [가정] 동안 `q:prio`가 `OFFERED`일 수 있는 창은 purchase-svc의 409가 받친다.
 

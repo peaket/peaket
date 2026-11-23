@@ -2,7 +2,7 @@
 import { type Database, type DbTransaction } from '@peaket/platform';
 import { sql, type SQL } from 'drizzle-orm';
 import { PrioritySeatConflict, type NewPriorityGrant, type PriorityGrant, type PriorityGrantStatus } from '../../domain/priority-grant.js';
-import type { PriorityGrantStore } from '../../domain/ports.js';
+import type { PriorityGrantCursor, PriorityGrantStore } from '../../domain/ports.js';
 
 type Executor = Pick<DbTransaction, 'execute'>;
 
@@ -155,19 +155,23 @@ export class DrizzlePriorityGrantStore implements PriorityGrantStore {
           update priority_grant p
           set status = 'EXPIRED', active_order_id = null, version = version + 1, updated_at = ${new Date(nowMs)}::timestamptz
           from due
-          where p.id = due.id
+          where p.id = due.id and p.status = 'OFFERED' and p.active_order_id is null
           returning p.*`,
     );
   }
 
   /** 만료 전 상태를 queue 사본에 다시 보낼 목록(ADR-0385). EXPIRED는 TTL이 사본을 지우므로 넣지 않는다 */
-  async listSyncable(nowMs: number, limit: number): Promise<readonly PriorityGrant[]> {
+  async listSyncable(nowMs: number, limit: number, after?: PriorityGrantCursor): Promise<readonly PriorityGrant[]> {
     const n = Math.max(0, Math.min(Math.trunc(limit), 1_000));
     if (n === 0) return [];
+    const afterCond =
+      after === undefined
+        ? sql``
+        : sql`and (updated_at, id) > (${new Date(after.updatedAtMs)}::timestamptz, ${after.grantId}::uuid)`;
     return many(
       this.database.db,
       sql`select ${COLUMNS} from priority_grant
-          where expires_at > ${new Date(nowMs)}::timestamptz and status in ('OFFERED', 'USED', 'WITHDRAWN')
+          where expires_at > ${new Date(nowMs)}::timestamptz and status in ('OFFERED', 'USED', 'WITHDRAWN') ${afterCond}
           order by updated_at, id
           limit ${n}`,
     );

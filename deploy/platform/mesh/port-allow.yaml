@@ -224,7 +224,7 @@ workloads:
         port: 50051
         services:
           peaket.queue.v1.BookingRestrictionService: [ops-svc]
-          peaket.queue.v1.PriorityGrantService: [ops-svc]
+          peaket.queue.v1.PriorityGrantService: [ops-svc, purchase-svc]
           peaket.queue.v1.QueueService: [trust-svc]
           peaket.queue.v1.VerificationAppealService: [ops-svc]
       control: { port: 50061, callers: [ops-svc, ops-breakglass] }
