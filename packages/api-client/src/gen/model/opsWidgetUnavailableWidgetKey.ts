@@ -16,4 +16,5 @@ export type OpsWidgetUnavailableWidgetKey = typeof OpsWidgetUnavailableWidgetKey
 export const OpsWidgetUnavailableWidgetKey = {
   'queue-admission-ratesummary': 'queue-admission-rate.summary',
   'purchase-pg-statussummary': 'purchase-pg-status.summary',
+  'rt-salessummary': 'rt-sales.summary',
 } as const;

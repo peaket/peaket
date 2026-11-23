@@ -14672,7 +14672,7 @@ export const getGetOpsWidgetUrl = (widgetKey: string,
 }
 
 /**
- * FR-029, ADR-0100, ADR-0360. 위젯 키는 '위젯이름.대상'이고 지금 키는 queue-admission-rate.summary(대기열 팀 입장 비율·빈자리)·purchase-pg-status.summary(구매 팀 결제사) 둘이다. 응답은 OpsWidgetValue(공통 네 칸)이고 나머지 칸은 위젯 키마다 OpsWidgetQueueAdmissionRateSummary·OpsWidgetPurchasePgStatusSummary 모양이며, 원천(Prometheus)을 읽지 못하면 OpsWidgetUnavailable(error source-unavailable, 200)이다. 모르는 키는 404다. from·to가 없으면 지금부터 15분 [가정] 앞까지이고 창은 1시간 [가정]을 넘지 않는다. 임의 쿼리를 받지 않는다. Cache-Control: no-store
+ * FR-029, ADR-0100, ADR-0360. 위젯 키는 '위젯이름.대상'이고 지금 키는 queue-admission-rate.summary(대기열 팀 입장 비율·빈자리)·purchase-pg-status.summary(구매 팀 결제사)·rt-sales.summary(관제 실시간 표 판매 누적·구역별 잔여석, F-04-1) 셋이다. 응답은 OpsWidgetValue(공통 네 칸)이고 나머지 칸은 위젯 키마다 OpsWidgetQueueAdmissionRateSummary·OpsWidgetPurchasePgStatusSummary·OpsWidgetRtSalesSummary 모양이며, 원천(Prometheus·ClickHouse)을 읽지 못하면 OpsWidgetUnavailable(error source-unavailable, 200)이다. 모르는 키는 404다. from·to가 없으면 지금부터 15분 [가정] 앞까지이고 창은 1시간 [가정]을 넘지 않는다. 임의 쿼리를 받지 않는다. Cache-Control: no-store
  * @summary 관제 위젯 조회(처음 그릴 때와 다시 보일 때의 지난 값, 그래프 최근 15분 창)
  */
 export const getOpsWidget = async (widgetKey: string,

@@ -13,11 +13,12 @@ import type { OpsWidgetValueError } from './opsWidgetValueError';
 import type { OpsWidgetValueSource } from './opsWidgetValueSource';
 
 /**
- * 관제 위젯 값(위젯 조회 응답이자 위젯 흐름 widget 사건의 value, ADR-0100 결정 1·4, ADR-0360 결정 9). 네 칸(widgetKey·source·at·eventId)은 모든 키에 있고, 나머지 칸은 위젯 키마다 다르다: queue-admission-rate.summary는 OpsWidgetQueueAdmissionRateSummary, purchase-pg-status.summary는 OpsWidgetPurchasePgStatusSummary, 원천을 읽지 못하면 OpsWidgetUnavailable(error source-unavailable)이다. 숫자·상태만 싣고 화면 글자는 위젯이 만든다. series는 위젯 조회만 싣는다. 2026-11-23 응답을 type object로 두었던 계약을 깨지 않으려고 oneOf로 묶지 않고 키별 모양은 이름으로 가리킨다(ADR-0360 결정 10)
+ * 관제 위젯 값(위젯 조회 응답이자 위젯 흐름 widget 사건의 value, ADR-0100 결정 1·4, ADR-0360 결정 9). 네 칸(widgetKey·source·at·eventId)은 모든 키에 있고, 나머지 칸은 위젯 키마다 다르다: queue-admission-rate.summary는 OpsWidgetQueueAdmissionRateSummary, purchase-pg-status.summary는 OpsWidgetPurchasePgStatusSummary, rt-sales.summary는 OpsWidgetRtSalesSummary(관제 실시간 표, 2026-11-23 F-04-1), 원천을 읽지 못하면 OpsWidgetUnavailable(error source-unavailable)이다. 숫자·상태만 싣고 화면 글자는 위젯이 만든다. series는 위젯 조회만 싣는다. 2026-11-23 응답을 type object로 두었던 계약을 깨지 않으려고 oneOf로 묶지 않고 키별 모양은 이름으로 가리킨다(ADR-0360 결정 10)
  */
 export interface OpsWidgetValue {
-  /** 위젯 키(queue-admission-rate.summary·purchase-pg-status.summary) */
+  /** 위젯 키(queue-admission-rate.summary·purchase-pg-status.summary·rt-sales.summary) */
   widgetKey: string;
+  /** 값의 원천. clickhouse는 관제 실시간 표(rt 뷰, 잠정값) */
   source: OpsWidgetValueSource;
   /** 값을 계산한 시각 */
   at: string;

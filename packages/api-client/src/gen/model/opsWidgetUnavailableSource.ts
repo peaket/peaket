@@ -15,4 +15,5 @@ export type OpsWidgetUnavailableSource = typeof OpsWidgetUnavailableSource[keyof
 
 export const OpsWidgetUnavailableSource = {
   prometheus: 'prometheus',
+  clickhouse: 'clickhouse',
 } as const;

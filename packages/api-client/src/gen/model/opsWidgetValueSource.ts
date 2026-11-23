@@ -10,9 +10,13 @@
  * OpenAPI spec version: 1.0.0-draft
  */
 
+/**
+ * 값의 원천. clickhouse는 관제 실시간 표(rt 뷰, 잠정값)
+ */
 export type OpsWidgetValueSource = typeof OpsWidgetValueSource[keyof typeof OpsWidgetValueSource];
 
 
 export const OpsWidgetValueSource = {
   prometheus: 'prometheus',
+  clickhouse: 'clickhouse',
 } as const;

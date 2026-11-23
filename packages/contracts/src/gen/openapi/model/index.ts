@@ -585,6 +585,7 @@ export * from './opsSaleReviewItem.zod.js';
 export * from './opsSaleReviewPage.zod.js';
 export * from './opsWidgetPurchasePgStatusSummary.zod.js';
 export * from './opsWidgetQueueAdmissionRateSummary.zod.js';
+export * from './opsWidgetRtSalesSummary.zod.js';
 export * from './opsWidgetUnavailable.zod.js';
 export * from './opsWidgetValue.zod.js';
 export * from './order.zod.js';

@@ -1939,12 +1939,12 @@ components:
         publishedAt: { type: [string, "null"], format: date-time }
     OpsWidgetValue:
       type: object
-      description: "관제 위젯 값(위젯 조회 응답이자 위젯 흐름 widget 사건의 value, ADR-0100 결정 1·4, ADR-0360 결정 9). 네 칸(widgetKey·source·at·eventId)은 모든 키에 있고, 나머지 칸은 위젯 키마다 다르다: queue-admission-rate.summary는 OpsWidgetQueueAdmissionRateSummary, purchase-pg-status.summary는 OpsWidgetPurchasePgStatusSummary, 원천을 읽지 못하면 OpsWidgetUnavailable(error source-unavailable)이다. 숫자·상태만 싣고 화면 글자는 위젯이 만든다. series는 위젯 조회만 싣는다. 2026-11-23 응답을 type object로 두었던 계약을 깨지 않으려고 oneOf로 묶지 않고 키별 모양은 이름으로 가리킨다(ADR-0360 결정 10)"
+      description: "관제 위젯 값(위젯 조회 응답이자 위젯 흐름 widget 사건의 value, ADR-0100 결정 1·4, ADR-0360 결정 9). 네 칸(widgetKey·source·at·eventId)은 모든 키에 있고, 나머지 칸은 위젯 키마다 다르다: queue-admission-rate.summary는 OpsWidgetQueueAdmissionRateSummary, purchase-pg-status.summary는 OpsWidgetPurchasePgStatusSummary, rt-sales.summary는 OpsWidgetRtSalesSummary(관제 실시간 표, 2026-11-23 F-04-1), 원천을 읽지 못하면 OpsWidgetUnavailable(error source-unavailable)이다. 숫자·상태만 싣고 화면 글자는 위젯이 만든다. series는 위젯 조회만 싣는다. 2026-11-23 응답을 type object로 두었던 계약을 깨지 않으려고 oneOf로 묶지 않고 키별 모양은 이름으로 가리킨다(ADR-0360 결정 10)"
       required: [widgetKey, source, at, eventId]
       additionalProperties: true
       properties:
-        widgetKey: { type: string, description: "위젯 키(queue-admission-rate.summary·purchase-pg-status.summary)" }
-        source: { type: string, enum: [prometheus] }
+        widgetKey: { type: string, description: "위젯 키(queue-admission-rate.summary·purchase-pg-status.summary·rt-sales.summary)" }
+        source: { type: string, enum: [prometheus, clickhouse], description: "값의 원천. clickhouse는 관제 실시간 표(rt 뷰, 잠정값)" }
         at: { type: string, format: date-time, description: 값을 계산한 시각 }
         eventId: { type: [string, 'null'] }
         error: { type: string, enum: [source-unavailable], description: 원천을 읽지 못했을 때만 }
@@ -1984,13 +1984,36 @@ components:
               inflight: { type: [number, 'null'], description: 돌고 있는 승인 호출 수 }
               saturatedPerMin: { type: [number, 'null'], description: 호출 상한에 막힌 분당 횟수 }
         series: { type: array, description: "위젯 조회만. 창 안의 결제사별 한도 사용률 점", items: { type: object, required: [at, pg, limitRatio], properties: { at: { type: string, format: date-time }, pg: { type: string }, limitRatio: { type: number } } } }
+    OpsWidgetRtSalesSummary:
+      type: object
+      description: "rt-sales.summary(관제 실시간 표, SCR-029 판매 중 탭 '구역별 잔여석'·판매 누적과 머리 신선도, docs/streaming.md §4.1·§4.5, F-04-1). 원천은 ClickHouse rt 뷰이고 ops-svc가 회차마다 0.5초 [가정]에 한 번 읽어 나눠 준다. 실시간 잠정값이라 확정 숫자(골드)와 섞지 않는다. 판단·제어 숫자(입장 속도·퍼널 다섯 단계)는 이 키가 아니라 Prometheus 키다(ADR-0071 결정 4). 회차가 없으면 source-unavailable이다. 값을 모르는 칸은 null"
+      required: [widgetKey, source, at, eventId, sold, remaining, salesAmount, ordersConfirmed, ticketsIssued, waiting, queueEntries, sections, freshnessSeconds, degraded, tradeGap]
+      properties:
+        widgetKey: { type: string, enum: [rt-sales.summary] }
+        source: { type: string, enum: [clickhouse] }
+        at: { type: string, format: date-time, description: "누적을 마지막으로 읽은 시각" }
+        eventId: { type: [string, 'null'] }
+        sold: { type: integer, description: "판매 좌석(지금 SOLD인 좌석 수, 반환은 빠짐, ADR-0072)" }
+        remaining: { type: [integer, 'null'], description: "잔여석(판매 대상 − 판매 좌석, 홀드·결제 중 좌석도 남은 좌석에 센다). 회차 기준 자료가 없으면 null" }
+        salesAmount: { type: integer, description: "판매 금액(원, 승인 − 입금 되돌림, 지표 사전 26번)" }
+        ordersConfirmed: { type: integer, description: "확정 주문(지금 확정인 주문 수)" }
+        ticketsIssued: { type: integer, description: "발권 티켓(지금 유효한 수)" }
+        waiting: { type: integer, description: "지금 대기 인원(진입 − 입장 − 빠진 번호)" }
+        queueEntries: { type: integer, description: "대기열 진입 누적" }
+        sections:
+          type: array
+          description: "구역별 판매 좌석·잔여석(히트맵). 잔여석을 모르면 remaining null"
+          items: { type: object, required: [sectionId, sold, remaining], properties: { sectionId: { type: string }, sold: { type: integer }, remaining: { type: [integer, 'null'] } } }
+        freshnessSeconds: { type: number, description: "이 값의 신선도(초, 누적·1초 칸 두 길 가운데 큰 값, NFR-009 판정은 p95 5초 미만). 모르면 3600" }
+        degraded: { type: boolean, description: "신선도 p95가 5초를 넘은 상태가 3분 넘게 이어져 실시간 표 패널을 Prometheus 대체 표시로 바꿀 때(5분 정상이면 되돌림, ADR-0078 결정 2)" }
+        tradeGap: { type: boolean, description: "이 회차 거래 사건이 60초 [가정] 넘게 끊김(심장 박동 신선도와 따로, C-T37). 판매 누적·잔여석 옆에 '거래 사건 끊김'을 띄운다" }
     OpsWidgetUnavailable:
       type: object
       description: "원천을 읽지 못한 위젯 값(200). 화면은 '받지 못함'을 그린다"
       required: [widgetKey, source, at, eventId, error]
       properties:
-        widgetKey: { type: string, enum: [queue-admission-rate.summary, purchase-pg-status.summary] }
-        source: { type: string, enum: [prometheus] }
+        widgetKey: { type: string, enum: [queue-admission-rate.summary, purchase-pg-status.summary, rt-sales.summary] }
+        source: { type: string, enum: [prometheus, clickhouse] }
         at: { type: string, format: date-time }
         eventId: { type: [string, 'null'] }
         error: { type: string, enum: [source-unavailable] }
@@ -6137,7 +6160,7 @@ paths:
   /v1/ops/events/{eventId}/live:
     get: { operationId: getOpsEventLive, tags: [ops], x-peaket-roles: [viewer, operator, commander, cs_agent, cs_lead], summary: "관제 위젯 SSE 흐름(보이는 위젯의 값)", description: "FR-029, NFR-009, ADR-0100, ADR-0360. text/event-stream. 첫 덩이는 retry: 10000이다. event widget(OpsWidgetValue, 위젯 키마다 전체 값, value는 위젯 조회 응답과 같은 모양), id는 계산 시각(밀리초). 파드마다 (회차, 위젯 키)별로 1초 [가정]에 한 번 계산해 나눠 준다. 보이는 위젯 목록이 바뀌면 브라우저가 1초 [가정] 묶어 새 widgets로 다시 연다. 다시 붙으면 지금 값부터 보낸다. 하트비트(: hb)·닫힘(토큰 만료·세션 종료·쌓임 상한)은 늘 여는 흐름과 같다. gw-ops 경로 시간 초과를 끈다. 계약은 asyncapi sse.ops-event-live", security: [{ opsCookie: [] }], parameters: [{ $ref: '#/components/parameters/EventId' }, { name: widgets, in: query, required: true, description: "쉼표로 이은 위젯 키 목록(16개 이하). 키는 위젯 조회 /v1/ops/widgets/{widgetKey}의 키와 같다", schema: { type: string } }], responses: { '200': { description: SSE 스트림, content: { text/event-stream: {} } }, '401': { $ref: '#/components/responses/Problem', description: 세션 없음·만료 }, '422': { $ref: '#/components/responses/Problem', description: "unknown-widget-key: 모르는 위젯 키·빈 목록·16개 넘음(흐름을 열지 않는다)" } } }
   /v1/ops/widgets/{widgetKey}:
-    get: { operationId: getOpsWidget, tags: [ops], x-peaket-roles: [viewer, operator, commander, cs_agent, cs_lead], summary: "관제 위젯 조회(처음 그릴 때와 다시 보일 때의 지난 값, 그래프 최근 15분 창)", description: "FR-029, ADR-0100, ADR-0360. 위젯 키는 '위젯이름.대상'이고 지금 키는 queue-admission-rate.summary(대기열 팀 입장 비율·빈자리)·purchase-pg-status.summary(구매 팀 결제사) 둘이다. 응답은 OpsWidgetValue(공통 네 칸)이고 나머지 칸은 위젯 키마다 OpsWidgetQueueAdmissionRateSummary·OpsWidgetPurchasePgStatusSummary 모양이며, 원천(Prometheus)을 읽지 못하면 OpsWidgetUnavailable(error source-unavailable, 200)이다. 모르는 키는 404다. from·to가 없으면 지금부터 15분 [가정] 앞까지이고 창은 1시간 [가정]을 넘지 않는다. 임의 쿼리를 받지 않는다. Cache-Control: no-store", security: [{ opsCookie: [] }], parameters: [{ name: widgetKey, in: path, required: true, schema: { type: string } }, { name: eventId, in: query, required: false, schema: { type: string } }, { name: from, in: query, required: false, schema: { type: string, format: date-time } }, { name: to, in: query, required: false, schema: { type: string, format: date-time } }], responses: { '200': { description: 위젯 값, content: { application/json: { schema: { $ref: '#/components/schemas/OpsWidgetValue' } } } }, '400': { $ref: '#/components/responses/Problem', description: "invalid-query: from·to 범위가 틀림(from ≥ to, 1시간 넘음)" }, '404': { $ref: '#/components/responses/Problem', description: 없는 위젯 키 } } }
+    get: { operationId: getOpsWidget, tags: [ops], x-peaket-roles: [viewer, operator, commander, cs_agent, cs_lead], summary: "관제 위젯 조회(처음 그릴 때와 다시 보일 때의 지난 값, 그래프 최근 15분 창)", description: "FR-029, ADR-0100, ADR-0360. 위젯 키는 '위젯이름.대상'이고 지금 키는 queue-admission-rate.summary(대기열 팀 입장 비율·빈자리)·purchase-pg-status.summary(구매 팀 결제사)·rt-sales.summary(관제 실시간 표 판매 누적·구역별 잔여석, F-04-1) 셋이다. 응답은 OpsWidgetValue(공통 네 칸)이고 나머지 칸은 위젯 키마다 OpsWidgetQueueAdmissionRateSummary·OpsWidgetPurchasePgStatusSummary·OpsWidgetRtSalesSummary 모양이며, 원천(Prometheus·ClickHouse)을 읽지 못하면 OpsWidgetUnavailable(error source-unavailable, 200)이다. 모르는 키는 404다. from·to가 없으면 지금부터 15분 [가정] 앞까지이고 창은 1시간 [가정]을 넘지 않는다. 임의 쿼리를 받지 않는다. Cache-Control: no-store", security: [{ opsCookie: [] }], parameters: [{ name: widgetKey, in: path, required: true, schema: { type: string } }, { name: eventId, in: query, required: false, schema: { type: string } }, { name: from, in: query, required: false, schema: { type: string, format: date-time } }, { name: to, in: query, required: false, schema: { type: string, format: date-time } }], responses: { '200': { description: 위젯 값, content: { application/json: { schema: { $ref: '#/components/schemas/OpsWidgetValue' } } } }, '400': { $ref: '#/components/responses/Problem', description: "invalid-query: from·to 범위가 틀림(from ≥ to, 1시간 넘음)" }, '404': { $ref: '#/components/responses/Problem', description: 없는 위젯 키 } } }
   /v1/scanner/device-enrollments:
     post: { operationId: createScannerDeviceEnrollment, tags: [scanner], x-peaket-roles: [public], security: [], summary: "스캐너 기기 등록. 등록 코드와 DPoP 증명으로 기기 안에서 만든 키를 기기 기록에 묶는다", description: "FR-065, ADR-0051, RFC 9449, 추천 적용 2026-10-14, ADR-0062. 기기 자격 전이라 인증 없음. 스캐너 PWA가 ECDSA P-256 키(extractable=false)를 만들고 DPoP 증명(헤더 jwk에 공개키)과 함께 보낸다. 서버는 코드 해시와 DPoP 서명을 확인하고 공개키의 JWK SHA-256 지문(RFC 7638, jkt)을 scanner_device.credential_thumbprint(credential_type=DEVICE_KEY)에 넣는다. 코드 입력은 대소문자·하이픈·공백을 무시한다. 코드별로 실패를 셀 수 없어 출발지 IP당 실패 10분 10회 [가정]로 막는다(성공한 등록은 세지 않는다). 전체 실패가 10분 100회 [가정]를 넘어도 등록 경로는 닫지 않고 SEV3로 알린다(추천 적용 2026-10-28, 기술 검토 낮음-157)", parameters: [{ name: DPoP, in: header, required: true, description: "DPoP 증명(RFC 9449)", schema: { type: string } }], requestBody: { required: true, content: { application/json: { schema: { additionalProperties: false, type: object, required: [code], properties: { code: { type: string } } } } } }, responses: { '201': { description: "등록됨(기기 ID)", content: { application/json: { schema: { type: object, required: [deviceId], properties: { deviceId: { type: string } } } } } }, '400': { $ref: '#/components/responses/Problem', description: "코드 형식 오류·DPoP 증명 오류" }, '410': { $ref: '#/components/responses/Problem', description: "코드 만료·사용됨" }, '429': { $ref: '#/components/responses/TooManyRequests', description: "그 출발지 IP의 실패 시도 초과" } } }
   /v1/scanner/device-authorizations:
