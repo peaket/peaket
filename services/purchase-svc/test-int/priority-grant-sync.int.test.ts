@@ -147,11 +147,14 @@ describe('F-05-3 우선 구매 권리 대조 [GAT-135, S-T37]', () => {
       expect(signals).toContain('sync:ok');
 
       for (const g of [offered, used, withdrawn]) {
+        // markUsed·withdraw는 새 객체를 돌려주므로, 사본과 견줄 값은 지금 DB 행에서 다시 읽는다
+        const latest = await store.find(g.grantId);
+        expect(latest).toBeDefined();
         expect(await memory.get({ accountId: g.accountId, eventId: g.eventId, grantId: g.grantId })).toMatchObject({
           grantId: g.grantId,
-          state: g.status,
-          version: g.version,
-          expiresAtMs: g.expiresAtMs,
+          state: latest!.status,
+          version: latest!.version,
+          expiresAtMs: latest!.expiresAtMs,
         });
       }
     } finally {
