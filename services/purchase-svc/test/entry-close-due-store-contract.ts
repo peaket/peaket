@@ -2,7 +2,7 @@
 // 정본: docs/features/offline-gate.md §7.3 'GAT-180 마감 규칙'의 '환급 잇기'(마감을 기다리는 보류 취소 = order_cancellation이 REQUESTED이고
 // entry_recorded_at·event_cancellation_request_id가 비고 refund_due_at이 지금보다 뒤. 그 회차를 오래된 차례로 20개 [가정]까지 고른다.
 // 마감 시각이 있으면 그 회차의 그런 행에 refund_due_at을 그 값으로 조건부 갱신한다(refund_due_at이 그 값보다 뒤일 때만)),
-// docs/data.md order_cancellation.refund_due_at, 계획 docs/review/plans/F-05-6.md §4(waitingEvents(nowMs, limit) → 회차 ID, pullDue(eventId, closedAtMs) → 바꾼 행 수).
+// docs/data.md order_cancellation.refund_due_at, 계획 docs/review/plans/F-05-6.md §4(waitingEvents(nowMs, limit, after?: { dueAtMs, eventId }) → { eventId, dueAtMs }[], pullDue(eventId, closedAtMs) → 바꾼 행 수, RV-17).
 // 같은 묶음을 메모리 짝(단위, test/entry-close-due.test.ts)과 실제 PostgreSQL 어댑터(통합, test-int/entry-close-due.int.test.ts)에 돌린다(짝 가짜의 행동 짝).
 // '지우거나 옮기는 연산은 건드린 행을 모두 확인한다'(architecture §8.6 자주 놓친 결함): pullDue 뒤 심은 행 모두의 refund_due_at·상태를 단언한다.
 // 시험 파일이 아니라 두 시험 파일이 부르는 모듈이다.
@@ -71,7 +71,8 @@ export function entryCloseDueStoreContract(name: string, make: () => Promise<Ent
         row(others.voided, { status: 'VOIDED', refundDueAtMs: CAP }),
       ]);
       const got = await w.store.waitingEvents(NOW, 20);
-      expect([...got].sort()).toEqual([waiting, edgeIn].sort());
+      const byId = (a: { eventId: string }, b: { eventId: string }) => a.eventId.localeCompare(b.eventId);
+      expect([...got].sort(byId)).toEqual([{ eventId: waiting, dueAtMs: CAP }, { eventId: edgeIn, dueAtMs: NOW + 1 }].sort(byId));
     });
 
     test(`O-T29 ③ waitingEvents는 회차를 오래된 차례로 limit개까지 주고 한 회차를 한 번만 준다(21개 중 20개, 가장 새 회차가 빠진다)(${name})`, async () => {
@@ -85,9 +86,10 @@ export function entryCloseDueStoreContract(name: string, make: () => Promise<Ent
       });
       // 심는 차례를 섞는다(넣은 차례에 기대지 않게)
       await w.seed([...rows].reverse());
-      const got = await w.store.waitingEvents(NOW, 20);
-      expect(got).toEqual(events.slice(0, 20));
-      expect(await w.store.waitingEvents(NOW, 21)).toEqual(events);
+      // dueAtMs는 그 회차 기다리는 행 가운데 가장 이른 refund_due_at이다(두 행 가운데 앞 행)
+      const want = events.map((eventId, i) => ({ eventId, dueAtMs: CAP + i * 60_000 }));
+      expect(await w.store.waitingEvents(NOW, 20)).toEqual(want.slice(0, 20));
+      expect(await w.store.waitingEvents(NOW, 21)).toEqual(want);
     });
 
     test(`O-T29 ③ waitingEvents 차례는 회차의 기다리는 행 가운데 가장 이른 refund_due_at 차례이고(접수 차례가 아니다), 같으면 회차 ID 차례다(정본 §7.3 환급 잇기, 시험 리뷰 정본 빈칸 1)(${name})`, async () => {
@@ -105,17 +107,37 @@ export function entryCloseDueStoreContract(name: string, make: () => Promise<Ent
         // 기다리는 행이 아닌 이른 값은 차례에 넣지 않는다(입장 기록 있는 행)
         row(a, { refundDueAtMs: CAP - 60_000, entryRecordedAtMs: STARTS_AT + 60_000 }, STARTS_AT),
       ]);
-      expect(await w.store.waitingEvents(NOW, 20)).toEqual([d, b, c, a]);
+      expect(await w.store.waitingEvents(NOW, 20)).toEqual([
+        { eventId: d, dueAtMs: CAP + 1 },
+        { eventId: b!, dueAtMs: CAP + 60_000 },
+        { eventId: c!, dueAtMs: CAP + 60_000 },
+        { eventId: a, dueAtMs: CAP + 3 * 60_000 },
+      ]);
     });
 
     test(`O-T29 ③ 돌아가며 보기: afterEventId를 주면 같은 차례에서 그 회차 다음부터 limit개를 준다(끝 다음은 빈 목록, 시험 리뷰 RV-06)(${name})`, async () => {
       const w = await make();
       const events = Array.from({ length: 5 }, () => randomUUID());
       await w.seed(events.map((eventId, i) => row(eventId, { refundDueAtMs: CAP + i * 60_000 }, STARTS_AT + i * 1_000)));
-      expect(await w.store.waitingEvents(NOW, 2)).toEqual(events.slice(0, 2));
-      expect(await w.store.waitingEvents(NOW, 2, events[1])).toEqual(events.slice(2, 4));
-      expect(await w.store.waitingEvents(NOW, 2, events[3])).toEqual(events.slice(4));
-      expect(await w.store.waitingEvents(NOW, 2, events[4])).toEqual([]);
+      const want = events.map((eventId, i) => ({ eventId, dueAtMs: CAP + i * 60_000 }));
+      expect(await w.store.waitingEvents(NOW, 2)).toEqual(want.slice(0, 2));
+      expect(await w.store.waitingEvents(NOW, 2, want[1])).toEqual(want.slice(2, 4));
+      expect(await w.store.waitingEvents(NOW, 2, want[3])).toEqual(want.slice(4));
+      expect(await w.store.waitingEvents(NOW, 2, want[4])).toEqual([]);
+    });
+
+    test(`O-T29 ③ 돌아가며 보기: 한 판단의 마지막 회차가 그 판단에서 당겨져 기다리는 행이 없어져도, 그 (dueAtMs, eventId) 쌍 뒤의 회차부터 준다(시험 리뷰 RV-17)(${name})`, async () => {
+      const w = await make();
+      const events = Array.from({ length: 4 }, () => randomUUID());
+      await w.seed(events.map((eventId, i) => row(eventId, { refundDueAtMs: CAP + i * 60_000 }, STARTS_AT + i * 1_000)));
+      const first = await w.store.waitingEvents(NOW, 2);
+      expect(first.map((x) => x.eventId)).toEqual(events.slice(0, 2));
+      // 마지막 회차(events[1])가 당겨져 기다리는 행이 없어진다
+      expect(await w.store.pullDue(events[1]!, CLOSED_AT)).toBe(1);
+      expect(await w.store.waitingEvents(NOW, 2, first[1])).toEqual([
+        { eventId: events[2], dueAtMs: CAP + 2 * 60_000 },
+        { eventId: events[3], dueAtMs: CAP + 3 * 60_000 },
+      ]);
     });
 
     test(`O-T29 ③ pullDue는 그 회차의 REQUESTED∧입장 기록 없음∧회차 취소 아님∧refund_due_at > 마감인 행만 마감 시각으로 당기고 바꾼 행 수를 준다(건드린 행 모두 단언)(${name})`, async () => {
@@ -154,7 +176,7 @@ export function entryCloseDueStoreContract(name: string, make: () => Promise<Ent
       // 다시 불러도 결과가 같다(0행)
       expect(await w.store.pullDue(eventId, CLOSED_AT)).toBe(0);
       // 당긴 회차는 더 기다리지 않는다(refund_due_at이 지금보다 앞), 다른 회차는 그대로 기다린다
-      expect(await w.store.waitingEvents(NOW, 20)).toEqual([otherEvent]);
+      expect(await w.store.waitingEvents(NOW, 20)).toEqual([{ eventId: otherEvent, dueAtMs: CAP }]);
     });
 
     test(`O-T29 ③ pullDue는 더 늦은 마감 시각으로는 이미 당긴 행을 늦추지 않는다(${name})`, async () => {

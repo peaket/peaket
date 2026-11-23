@@ -153,6 +153,24 @@ describe('환급 잇기 배경 작업 EntryCloseDueTick(O-T29 ③)', () => {
     expect(new Set(t.asked.slice(asked2))).toEqual(new Set(blocked));
   });
 
+  test('O-T29 ③ 한 틱의 마지막 회차가 그 틱에서 당겨져도 다음 틱은 그 뒤 회차부터 본다(앞 회차를 다시 묻지 않는다, 시험 리뷰 RV-17)', async () => {
+    const { EntryCloseDueTick } = await load();
+    const w = await world();
+    const events = Array.from({ length: 21 }, () => randomUUID());
+    const rows = events.map((eventId, i) => row(eventId, { refundDueAtMs: CAP + i * 1_000 }, STARTS_AT + i));
+    await w.seed(rows);
+    // 앞 19개는 아직 마감 전, 20번째(그 틱의 마지막)와 21번째는 마감됨
+    const t = times({ ...Object.fromEntries(events.slice(0, 19).map((e) => [e, null])), [events[19]!]: CLOSED_AT, [events[20]!]: CLOSED_AT });
+    const tick = new EntryCloseDueTick({ store: w.store, closes: t.closes, nowMs: () => NOW });
+    await expect(tick.run()).resolves.toEqual({ moved: 1 });
+    expect(new Set(t.asked)).toEqual(new Set(events.slice(0, 20)));
+    expect((await w.rowOf(rows[19]!.cancellationId)).refundDueAtMs).toBe(CLOSED_AT);
+    const asked = t.asked.length;
+    await expect(tick.run()).resolves.toEqual({ moved: 1 });
+    expect(t.asked.slice(asked)).toEqual([events[20]]);
+    expect((await w.rowOf(rows[20]!.cancellationId)).refundDueAtMs).toBe(CLOSED_AT);
+  });
+
   test('O-T29 ③ 마감 시각을 읽었는데 당길 행이 0이어도(마감 시각이 refund_due_at보다 늦음) 그 회차 결과는 moved 하나이고 행은 그대로다(정본 §7.3 환급 잇기)', async () => {
     const { EntryCloseDueTick } = await load();
     const w = await world();

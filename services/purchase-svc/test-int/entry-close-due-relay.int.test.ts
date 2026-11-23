@@ -43,11 +43,40 @@ async function startCoreStandIn(): Promise<void> {
     const token = req.headers['x-peaket-internal-token'];
     core.asked.push({ eventId, token: typeof token === 'string' ? token : undefined });
     if (!core.closed.has(eventId)) return void res.writeHead(404, { 'content-type': 'application/json' }).end('{}');
-    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ eventId, promoterId: randomUUID(), reentryAllowed: false, entryClosedAtMs: core.closed.get(eventId) }));
+    res.writeHead(200, { 'content-type': 'application/json' }).end(saleConfigBody(eventId, core.closed.get(eventId) ?? null));
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   core.server = server;
   core.url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+/**
+ * 진짜 core 판매 설정 응답과 같은 칸(core EventSaleConfig, internal-sale-config 경로, entry-close-due.int.test.ts의 coreBody와 같은 모양).
+ * 엄격하게 읽는 구현이 모양 틀림으로 보지 않게 칸을 모두 싣는다(시험 리뷰 RV-18)
+ */
+function saleConfigBody(eventId: string, entryClosedAtMs: number | null): string {
+  const startsAtMs = Date.now() - 5 * 3_600_000;
+  return JSON.stringify({
+    eventId,
+    productionId: randomUUID(),
+    promoterId: randomUUID(),
+    rev: 4,
+    opensAtMs: startsAtMs - 30 * 86_400_000,
+    startsAtMs,
+    lobbyMinutes: 10,
+    lobbyShuffle: true,
+    openBatch: true,
+    perPersonLimit: 4,
+    saleEndsAtMs: startsAtMs - 86_400_000,
+    reentryAllowed: false,
+    entryOpensAtMs: startsAtMs - 3_600_000,
+    endsAtMs: startsAtMs + 2 * 3_600_000 + 13 * 60_000 + 7_411,
+    entryClosedAtMs,
+    layoutVersion: 3,
+    salePolicy: [],
+    eligGates: [],
+    eligLists: [],
+  });
 }
 
 /** 주문(CONFIRMED, 항목 하나)과 그 첫 이력을 한 트랜잭션에 쓴다(지연 제약 order_status_has_event) */
