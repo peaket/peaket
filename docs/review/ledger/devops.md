@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 72 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 42 | 118 |
-| 합계 | 72 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 42 | 118 |
+| B | 80 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 42 | 126 |
+| 합계 | 80 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 42 | 126 |
 
 ## docs/devops.md
 
@@ -129,3 +129,11 @@
 | D-T49 | ④ | 작업 가지 수 경고와 `develop` 병합 방식 주간 점검(추천 적용… | ④는 주간 점검이 그 커밋을 경고하고 | 자동 시험 | B | 시험: tools/ci/branch-watch-cli.test.mjs, tools/ci/branch-watch.test.mjs |
 | D-T49 | ⑤ | 작업 가지 수 경고와 `develop` 병합 방식 주간 점검(추천 적용… | ⑤는 경고하지 않는다. | 자동 시험 | B | 시험: tools/ci/branch-watch-cli.test.mjs, tools/ci/branch-watch.test.mjs |
 | D-T49 | ⑥ | 작업 가지 수 경고와 `develop` 병합 방식 주간 점검(추천 적용… | ⑥은 읽지 못했다는 경고만 남기고 PR 검사도 주간 잡도 실패하지 않는다 | 자동 시험 | B | 시험: tools/ci/branch-watch-cli.test.mjs, tools/ci/branch-watch.test.mjs |
+| D-T51 | ① | 증거 수집기(추천 적용 2026-11-23, F-01-1 계획… | ① 202로 바로 답하고, 그 대상 이름 아래 한 수집 시각 폴더에 PostgreSQL은 세션 목록(기다리는 세션 포함, 클라이언트 주소 칸 없음, 수집기 자기… | 자동 시험 | B | 시험: services/evidence-collector/test-int/collector.int.test.ts |
+| D-T51 | ② | 증거 수집기(추천 적용 2026-11-23, F-01-1 계획… | ② 10분 안의 것은 `throttled`이고 객체가 늘지 않는다. 10분 뒤의 것은 새로 뜬다. 동시 둘은 수집 한 번이다 | 자동 시험 | B | 시험: services/evidence-collector/test/collector.test.ts |
+| D-T51 | ③ | 증거 수집기(추천 적용 2026-11-23, F-01-1 계획… | ③ 앞의 셋은 뜨지 않고(`ignored`), 넷째는 `unknown_dependency`, 다섯째·여섯째는 모든 대상을 뜬다 | 자동 시험 | B | 시험: services/evidence-collector/test/collector.test.ts |
+| D-T51 | ④ | 증거 수집기(추천 적용 2026-11-23, F-01-1 계획… | ④ 둘 다 401이고 수집이 없으며, 보안 사건 로그 줄(`event` evidence_webhook_rejected, `reason`… | 자동 시험 | B | 시험: services/evidence-collector/test/collector.test.ts |
+| D-T51 | ⑤ | 증거 수집기(추천 적용 2026-11-23, F-01-1 계획… | ⑤ 객체 이름은 `evidence-collector/<대상>/<UTC 밀리초 시각>/<파일>` 꼴뿐이고, `manifest.json`에 경보 설명 글이 없다… | 자동 시험 | B | 시험: services/evidence-collector/test-int/collector.int.test.ts |
+| D-T51 | ⑥ | 증거 수집기(추천 적용 2026-11-23, F-01-1 계획… | ⑥ 접속할 수 없는 대상은 `failed`이고 `manifest.json`만 올라가며 다른 대상은 그대로 올라간다. 환경 값이 하나라도 없으면 듣기 전에 시작이… | 자동 시험 | B | 시험: services/evidence-collector/test-int/collector.int.test.ts, services/evidence-collector/test/collector.test.ts |
+| D-T52 | ① | 진단 증거 보존 규칙(추천 적용 2026-11-23, F-01-1… | ① 실제 저장소는 0으로 끝난다. `standard`·`hold` 태그 규칙의 지우는 날, 이전 판·남은 조각 지우기 날이 §9 행의 값과 다르거나, 규칙이… | 자동 시험 | B | 시험: tools/ci/evidence-retention.test.mjs |
+| D-T52 | ② | 진단 증거 보존 규칙(추천 적용 2026-11-23, F-01-1… | ② 두 요청 모두 보존 태그 `peaket-retention=standard`를 싣고, 바이트 요청의 본문은 넘긴 바이트와 같으며 주소에 객체 이름 밖의 값이… | 자동 시험 | B | 시험: packages/platform/test/evidence-store.test.ts |

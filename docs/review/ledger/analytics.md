@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 4 | 120 | 0 | 0 | 0 | 1 | 0 | 29 | 39 | 193 |
-| 합계 | 4 | 120 | 0 | 0 | 0 | 1 | 0 | 29 | 39 | 193 |
+| B | 6 | 120 | 0 | 0 | 0 | 1 | 0 | 29 | 37 | 193 |
+| 합계 | 6 | 120 | 0 | 0 | 0 | 1 | 0 | 29 | 37 | 193 |
 
 ## docs/features/analytics.md
 
@@ -33,8 +33,8 @@
 | A-T20 | ① | 데모 시계로 ① 온세일 윈도우가 끝나고 30분 [가정]이 지난다 ②… | ① R0 잠정 리포트가 생기고 결제·봇 지표에 '잠정'이 붙는다. | 빈칸 | B | — |
 | A-T20 | ② | 데모 시계로 ① 온세일 윈도우가 끝나고 30분 [가정]이 지난다 ②… | ② R1 리포트의 판매 좌석·판매 금액이 실시간 집계와 차이 0이고 결정 규칙 판정이 보인다. | 빈칸 | B | — |
 | A-T20 | ③ | 데모 시계로 ① 온세일 윈도우가 끝나고 30분 [가정]이 지난다 ②… | ③ 그 지표의 규칙은 '판정 보류'이고, 그 지표를 계기로 한 결정 기록은 저장되지 않는다 | 빈칸 | B | — |
-| A-T21 | — | 조사 칸이 모두 채워진 `QueueEntryRecord`·Purchas… | 브론즈·실버에 `journeyId`·`deviceRef`·`contactRef`·`paymentMethodRef`·`cardBin` 값이 0건이고 스키마 위반… | 빈칸 | B | — |
-| A-T22 | — | `analytics-ingest`의 소비자 그룹으로… | 토픽 읽기는 ACL로 거절된다. `inv` 조회와 실버 조회는 모두 권한 거절이고 보안 이벤트로 기록된다. 적재 설정에 그 토픽이 없다 | 빈칸 | B | — |
+| A-T21 | — | 조사 칸이 모두 채워진 `QueueEntryRecord`·Purchas… | 브론즈·실버에 `journeyId`·`deviceRef`·`contactRef`·`paymentMethodRef`·`cardBin` 값이 0건이고 스키마 위반… | 자동 시험 | B | 시험: services/analytics-ingest/test-int/analytics-ingest.int.test.ts, services/analytics-ingest/test/ingest.test.ts |
+| A-T22 | — | `analytics-ingest`의 소비자 그룹으로… | 토픽 읽기는 ACL로 거절된다. `inv` 조회와 실버 조회는 모두 권한 거절이고 보안 이벤트로 기록된다. 적재 설정에 그 토픽이 없다 | 자동 시험 | B | 시험: services/analytics-ingest/test/ingest.test.ts |
 | A-T23 | — | 가명정보 취급자 지정이 있는 commander가 POST… | 지정이 있는 계정만 받고, 파일에 조사 칸과 원문 IP가 없다. 다른 둘은 403 `pseudonym-handler-required`이고 감사 기록과 가명정보… | 빈칸 | B | — |
 | A-T24 | — | 한 회차에서 부정 예매 사건 셋을 만들어 하나는 조치(취소), 하나는… | 실버 `slv_trust_label`에 그 세 출처의 라벨 행이 0건이다. `brz_ops_fraud_summary`에는 회차 × 사유 범주의 수만 있고 계정… | 빈칸 | B | — |
 | A-T25 | — | 같은 좌석을 두 세션이 거의 같은 때 직접 선택으로 잡게 한다(하나는… | 실버에서 두 시도의 `seatIds`가 같고, 진 시도에도 좌석 번호가 남는다. F4 경합 패배율은 바뀌지 않고, 좌석 단위 경합을 좌석 번호로 셀 수 있다 | 빈칸 | B | — |
@@ -167,12 +167,12 @@
 | v5.0.0-13.4.3 | — | L2 | 의도한 경우가 아니면 웹 서버가 디렉터리 목록을 보여 주지 않는다. | ID만 | B | 다른 곳 시험: services/realtime-gw/test-int/stream.int.test.ts (영역: 아직 코드가 없다) |
 | v5.0.0-13.4.4 | — | L2 | 운영 환경에서 HTTP TRACE 메서드를 지원하지 않는다. | ID만 | B | 다른 곳 시험: deploy/gateways/test/gateways.test.mjs, services/realtime-gw/test-int/stream.int.test.ts 외 1곳 (영역: 아직 코드가 없다) |
 | v5.0.0-13.4.5 | — | L2 | 내부 API 문서와 모니터링 엔드포인트는 의도한 경우가 아니면 노출하지 않는다. | ID만 | B | 다른 곳 시험: deploy/workloads/test/worker-chart.test.mjs, packages/platform/test/metrics.test.ts 외 4곳 (영역: 아직 코드가 없다) |
-| v5.0.0-14.1.1 | — | L2 | 애플리케이션이 만들고 처리하는 민감 데이터를 Base64·JWT 본문처럼 인코딩만 된 것까지 모두 찾아, 따라야 할 데이터 보호·개인정보 법규와 표준을 반영한… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/v0-monolith/test-int/gate.int.test.ts 외 4곳… |
-| v5.0.0-14.1.2 | — | L2 | 보호 등급마다 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, DB 수준 암호화, 개인정보 보호 기술 같은 보호 요구사항을… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/realtime-gw/test-int/stream.int.test.ts (영역:… |
+| v5.0.0-14.1.1 | — | L2 | 애플리케이션이 만들고 처리하는 민감 데이터를 Base64·JWT 본문처럼 인코딩만 된 것까지 모두 찾아, 따라야 할 데이터 보호·개인정보 법규와 표준을 반영한… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/evidence-collector/test-int/collector.int.tes… |
+| v5.0.0-14.1.2 | — | L2 | 보호 등급마다 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, DB 수준 암호화, 개인정보 보호 기술 같은 보호 요구사항을… | ID만 | B | 다른 곳 시험: services/core-svc/test-int/sale-eligibility.int.test.ts, services/realtime-gw/test-int/stream.int.test.ts 외 1곳… |
 | v5.0.0-14.2.1 | — | L1 | 민감 데이터는 HTTP 본문이나 헤더로만 서버에 보내고 URL·쿼리 문자열에 넣지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/features/identity-verify/flow.test.mjs, apps/web/src/features/identity-verify/server/return-post.t… |
-| v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | ID만 | B | 다른 곳 시험: packages/platform/test/diagnose.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 3곳 (영역: 아직 코드가… |
+| v5.0.0-14.2.2 | — | L2 | 민감 데이터가 로드밸런서·애플리케이션 캐시 같은 서버 구성요소에 캐시되지 않게 하거나 사용 뒤 안전하게 지운다. | ID만 | B | 다른 곳 시험: packages/platform/test/diagnose.test.ts, services/core-svc/test-int/seatmap-save.int.test.ts 외 4곳 (영역: 아직 코드가… |
 | v5.0.0-14.2.3 | — | L2 | 정의된 민감 데이터를 신뢰하지 않는 제3자(사용자 추적 도구 등)에게 보내지 않는다. | ID만 | B | 다른 곳 시험: apps/web/src/widgets/app-shell/model/search-quality.test.mjs, packages/config/eslint/service-security.test.mjs… |
-| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 20곳 (영역: 아직 코드가 없다) |
+| v5.0.0-14.2.4 | — | L2 | 보호 등급 문서에 정한 대로 암호화, 무결성 검증, 보존, 로그 기록 방식과 로그 속 민감 데이터 접근 통제, 개인정보 보호 기술을 구현한다. | ID만 | B | 다른 곳 시험: loadtest/e2e/v0-rehearsal.e2e.mjs, packages/platform/test-int/held-events.int.test.ts 외 22곳 (영역: 아직 코드가 없다) |
 | v5.0.0-14.3.1 | — | L1 | 클라이언트나 세션이 끝나면 브라우저 DOM 같은 클라이언트 저장소에서 인증 뒤 받은 데이터를 지우고, 서버에 연결되지 않을 때도 클라이언트가 스스로 지울 수… | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/logout.test.mjs, apps/web/src/features/session-cleanup/routine.test.mjs 외 2곳 (영역: 아직… |
 | v5.0.0-14.3.2 | — | L2 | 민감 데이터가 브라우저에 캐시되지 않게 `Cache-Control: no-store` 등 캐시 방지 헤더를 둔다. | ID만 | B | 다른 곳 시험: apps/web/src/features/wallet-device-key/sw-rules.test.mjs, services/core-svc/test/fan-notify-http.test.ts 외… |
 | v5.0.0-14.3.3 | — | L2 | 브라우저 저장소(localStorage, sessionStorage, IndexedDB, 쿠키)에 세션 토큰 말고는 민감 데이터를 두지 않는다. | ID만 | B | 다른 곳 시험: apps/web/queue-room/test/autoassign.test.mjs, apps/web/src/_pages/seats/model/storage.test.mjs 외 2곳 (영역: 아직… |

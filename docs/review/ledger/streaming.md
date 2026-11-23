@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 12 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 14 | 27 |
-| 합계 | 12 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 14 | 27 |
+| B | 13 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 13 | 27 |
+| 합계 | 13 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 13 | 27 |
 
 ## docs/streaming.md
 
@@ -35,6 +35,6 @@
 | ST-T20 | ② | 소비자 설정 기본값과 직접 넣은 값(로컬, 2026-10-30 실행):… | ②는 `cooperative-sticky`, 첫째가 3개만 내놓음, 회복 44.7초. 둘 다 그룹 종류 Classic. 통과 기준: … 에서 첫째가 옮길… | 빈칸 | B | — |
 | ST-T19 | — | 보류 사건(추천 적용 2026-10-29, ADR-0142): 한… | 독 사건은 5회 [가정] 실패한 뒤 `held_event`로 옮겨지고, 주문 A의 뒤 사건 둘도 함께 보류된다. 다른 주문의 처리는 멈추지 않는다. 결제 토픽… | 자동 시험 | B | 시험: services/queue-svc/test-int/consumers.int.test.ts, services/queue-svc/test-int/held-events.int.test.ts 외 2곳 |
 | ST-T21 | — | 조사 적재 대응(추천 적용 2026-10-31, ADR-0171): 한… | `inv_step`에 단계 열이 순서대로 하나씩 남고(다시 보낸 묶음은 늘지 않는다), 홀드 시도 행에 좌석과 잡은 시각이, 결제 행에 결제 수단… | 빈칸 | B | — |
-| ST-T22 | — | 두 갈래 나눔(추천 적용 2026-10-31, ADR-0171 결정… | 브론즈·실버에 `journeyId`·`deviceRef`·`contactRef`·`paymentMethodRef`·`cardBin` 열이 없다. 토픽 읽기는… | 빈칸 | B | — |
+| ST-T22 | — | 두 갈래 나눔(추천 적용 2026-10-31, ADR-0171 결정… | 브론즈·실버에 `journeyId`·`deviceRef`·`contactRef`·`paymentMethodRef`·`cardBin` 열이 없다. 토픽 읽기는… | 자동 시험 | B | 시험: services/analytics-ingest/test-int/analytics-ingest.int.test.ts, services/analytics-ingest/test/ingest.test.ts |
 | ST-T23 | — | 기록 고정(추천 적용 2026-10-31, ADR-0171 결정 6):… | 10분: 고정이 기다렸다가 빠짐없이 고정한다. 40분: 30분 뒤 '늦은 적재'로 고정되고 SEV3가 뜨며, 늦은 사건은 다음 판에 들어간다. 같은 입력의 두… | 빈칸 | B | — |
 | ST-T24 | — | 조사 저장소 보존(추천 적용 2026-10-31, ADR-0171 결정… | 지난 회차의 파티션이 표마다 지워지고 `ops_event` `INV_PARTITION_PURGE`(회차·표마다 지운 행 수·결과)가 남으며 그 회차 사건은 증거… | 빈칸 | B | — |
