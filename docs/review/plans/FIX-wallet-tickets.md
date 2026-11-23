@@ -80,7 +80,7 @@
 
 ## 5. 장부 범위
 
-BUILD_ORDER 행이 없어 `--batch`는 못 쓴다. `node tools/ci/ledger.mjs --check`는 이 커밋에서 통과한다(정본에 O-T47·O-T48을 더해 장부를 다시 썼다: 항목 4127개, 빈칸 743).
+`node tools/ci/ledger.mjs --batch FIX-wallet-tickets`(감독 승인으로 BUILD_ORDER 표에 행을 더한 뒤, 2026-11-23): **항목 23개, 자동 시험 1(V-T7)·ID만 4·빈칸 18**, 등급 B 23(기능 등급 A). `node tools/ci/ledger.mjs --check`는 이 커밋에서 통과한다(정본에 O-T47·O-T48을 더해 장부를 다시 썼다: 항목 4127개, 빈칸 743).
 
 ### 5.1 남긴 항목
 
