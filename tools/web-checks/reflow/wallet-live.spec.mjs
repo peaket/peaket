@@ -5,7 +5,7 @@
 //   만드는 덧붙인 시험이다. 같은 흐름의 실제 서버 연결 시험은 데모 S1(`node tools/local/demo.mjs play --scenarios S1`의 wallet-list·ticket-qr)이다
 //   (정본 §8.6 4의 4 '가짜 API로 끝내지 않는다', 스킬 mock-policy 3절).
 // - 기다림은 조건 단언(expect(locator)·expect.poll)뿐이고 고정 대기가 없다.
-import { randomUUID } from 'node:crypto';
+import { createHash, createPublicKey, randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { FAN_API_ORIGIN, stubFanApi } from '../csp/pages.mjs';
 import { APPS, HOST, portOf } from '../seed-css/apps.mjs';
@@ -79,6 +79,12 @@ async function fanApi(context, { tickets = [list([])], events = {}, refresh = fa
     },
   );
   return calls;
+}
+
+/** 정본의 keyId 식: 공개키 SPKI DER의 SHA-256 앞 8바이트(base64url 11자, offline-gate §2·§3). 서버(ticket-svc)가 내는 값과 같은 식 */
+function keyIdOfJwk(jwk) {
+  const spki = createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y }, format: 'jwk' }).export({ type: 'spki', format: 'der' });
+  return createHash('sha256').update(spki).digest().subarray(0, 8).toString('base64url');
 }
 
 const registerButton = (page, ticketId) => page.getByRole('button', { name: new RegExp(`^입장 QR, 티켓 ${ticketId}, 15초마다 바뀝니다.*이 휴대폰을 입장용으로 등록$`) });
@@ -174,4 +180,29 @@ test('O-T48 ⑨ 기본 폭: 펼침 주소의 티켓 ID가 목록에 없으면 "�
   await page.goto(`${WEB}/my/tickets/${mine}`);
   await expect(registerButton(page, mine)).toBeVisible();
   await expect(page.getByText('티켓을 찾을 수 없습니다')).toHaveCount(0);
+});
+
+test('O-T48 ⑥ 기본 폭: ISSUED 표의 [이 휴대폰을 입장용으로 등록] → 등록 201이면 그 티켓 ID가 대체 글에 든 회전 QR이 보인다(TR-04)', async ({ page, context }) => {
+  const id = randomUUID();
+  await fanApi(context, { tickets: [list([item(id, 'ISSUED')])] });
+  const api = new URL(FAN_API_ORIGIN).origin;
+  const registered = [];
+  await context.route(
+    (url) => url.origin === api && /^\/v1\/tickets\/[^/]+\/device-keys$/.test(url.pathname),
+    (route) => {
+      if (route.request().method() === 'OPTIONS') {
+        return route.fulfill({ status: 204, headers: { ...CORS, 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'accept, content-type, x-reauth-token' } });
+      }
+      const body = route.request().postDataJSON();
+      registered.push({ path: new URL(route.request().url()).pathname, reason: body.reason });
+      return route.fulfill(answer(201, { keyId: keyIdOfJwk(body.publicKeyJwk) }));
+    },
+  );
+  await page.goto(`${WEB}/my/tickets`);
+  await registerButton(page, id).click();
+  // 회전 QR(role=img)의 대체 글이 그 표의 티켓 ID로 시작한다
+  await expect(page.getByRole('img', { name: new RegExp(`^입장 QR, 티켓 ${id}, 15초마다 바뀝니다`) })).toBeVisible();
+  // 등록 요청 경로의 티켓 ID = 목록의 ticketId(다른 ID를 DeviceQr에 넘기면 여기서 걸린다)
+  expect(registered).toEqual([{ path: `/v1/tickets/${id}/device-keys`, reason: 'ISSUE' }]);
+  await expect(registerButton(page, id)).toHaveCount(0);
 });

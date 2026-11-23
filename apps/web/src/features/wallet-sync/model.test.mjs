@@ -10,7 +10,7 @@ import { afterEach, beforeEach, mock, test } from 'node:test';
 import { CreateTicketDeviceKeyResponse, ListTicketsResponse } from '@peaket/contracts/openapi/tickets';
 import { ORIGINS } from '../../shared/config/origins.ts';
 import { enrollDeviceKey } from '../wallet-device-key/enrollment.ts';
-import { createQrFrame, msUntilNextQrFrame, qrFrameIndex, qrTimeSeconds } from '../wallet-device-key/frame.ts';
+import { createQrFrame, qrFrameIndex, qrTimeSeconds } from '../wallet-device-key/frame.ts';
 import { decodeQrV1, keyIdFromBase64Url, keyIdToBase64Url } from '../wallet-device-key/qr-v1.ts';
 import { listTicketSnapshots, loadDeviceKey, walletDatabase } from '../wallet-device-key/store.ts';
 import { walletCardOf } from './model.ts';
@@ -189,13 +189,13 @@ test('O-T48 ⑥ 회전 QR: 등록된 키의 QR v1은 목록의 ticketId·이 기
   assert.equal(keyIdToBase64Url(decoded.keyId), key.keyId, 'QR의 keyId가 이 기기 등록 키가 아니다');
   assert.ok(card.qrLabel.includes(id), '대체 글에 티켓 ID가 없다');
 
-  // 15초 프레임: 경계 1ms 전까지 같은 프레임, 경계에서 다음 프레임(가짜 시계로 시간을 민다)
+  // 15초 프레임(POL-018, offline-gate §3): 03:00:07은 03:00:00~03:00:15 프레임이다. 경계 값은 정본의 15초로 적는다(코드 함수로 구하지 않는다, TR-04)
   const index = qrFrameIndex(Date.now());
-  const toNext = msUntilNextQrFrame(Date.now());
-  mock.timers.setTime(NOW + toNext - 1);
-  assert.equal(qrFrameIndex(Date.now()), index);
-  mock.timers.setTime(NOW + toNext);
-  assert.equal(qrFrameIndex(Date.now()), index + 1);
+  mock.timers.setTime(Date.parse('2026-11-23T03:00:14.999Z'));
+  assert.equal(qrFrameIndex(Date.now()), index, '경계 1ms 전인데 프레임이 바뀌었다');
+  assert.equal(qrTimeSeconds(Date.now()) - qrTimeSeconds(NOW), 7);
+  mock.timers.setTime(Date.parse('2026-11-23T03:00:15.000Z'));
+  assert.equal(qrFrameIndex(Date.now()), index + 1, '15초 경계에서 다음 프레임이 아니다');
   const next = await createQrFrame(signer, card.ticketId, qrTimeSeconds(Date.now()));
   assert.notEqual(next.text, frame.text);
   assert.equal(decodeQrV1(next.bytes).ticketId, id);

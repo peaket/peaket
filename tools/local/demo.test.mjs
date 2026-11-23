@@ -957,11 +957,50 @@ test('V-T7 ④ 필수 화면 방문 실패는 시나리오 실패이고 ticket-q
   const qr = functionBlock(source, 'async function ticketQrOf(page) {');
   assert.match(qr, /role="img"|aria-label/, 'ticketQrOf가 화면의 QR 요소를 보지 않는다');
   assert.match(s1, /ticketQrOf\(ticketPage\)/, 'S1이 티켓 화면의 QR을 확인하지 않는다');
-  assert.match(s1, /addCheck\('ticket-qr',\s*[a-zA-Z]/, 'ticket-qr이 상수 true다');
+  assert.match(s1, /addCheck\('ticket-qr',\s*(?!(?:true|false|null|undefined)\b)[A-Za-z_$]/, 'ticket-qr이 상수(true·false)다');
 });
 
 // FIX-wallet-tickets(계획 docs/review/plans/FIX-wallet-tickets.md §8.5, 정본 d5 §10.6 S1 '013(입장용 휴대폰 등록 → 회전 QR)', offline-gate §2 '월렛 목록 서버' 운영 확인 표).
 // 시험 담당(fwal-test-2e9a)이 구현 전에 썼다. 실제 재생(play --scenarios S1)이 마지막 확인이고, 이 정적 시험은 S1 블록이 원장 SQL·목업 id로 돌아가지 않게 막는다.
+/**
+ * addCheck('<이름>', <식>, …)의 첫 식(판정 식). 식이 이름 하나면 그 이름을 정한 `const <이름> = …;` 문장을 붙인다.
+ * 상세 글(셋째 인자)에 든 글자로 판정 단언이 통과하지 않게 첫 식만 꺼낸다(TR-06)
+ */
+function checkExpr(block, name) {
+  const head = `addCheck('${name}',`;
+  const at = block.indexOf(head);
+  assert.ok(at >= 0, `addCheck('${name}', …)가 없다`);
+  let depth = 0;
+  let quote = '';
+  let i = at + head.length;
+  for (; i < block.length; i += 1) {
+    const c = block[i];
+    if (quote) {
+      if (c === '\\') i += 1;
+      else if (c === quote) quote = '';
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') quote = c;
+    else if ('([{'.includes(c)) depth += 1;
+    else if (')]}'.includes(c)) {
+      if (depth === 0) break;
+      depth -= 1;
+    } else if (c === ',' && depth === 0) break;
+  }
+  const expr = block.slice(at + head.length, i).trim();
+  const ident = /^[A-Za-z_$][\w$]*$/.test(expr) ? expr : '';
+  if (!ident) return expr;
+  const def = new RegExp(`(?:const|let)\\s+${ident}\\s*=([\\s\\S]*?);\\n`).exec(block);
+  return `${expr} = ${def ? def[1] : ''}`;
+}
+
+/** S1 블록과 S1이 부르는 최상위 함수 본문(등록·응답 기다림을 S1 경로 안에서만 찾는다) */
+function s1WithHelpers(source, s1) {
+  const names = [...source.matchAll(/^(?:async )?function (\w+)\(/gm)].map((m) => m[1]);
+  const called = names.filter((n) => new RegExp(`\\b${n}\\(`).test(s1));
+  return [s1, ...called.map((n) => functionBlock(source, `function ${n}(`))].join('\n');
+}
+
 /** 팬 API 월렛 목록(GET /v1/tickets, 하위 경로 아님)을 부르는 최상위 함수 이름들 */
 function walletListHelpers(source) {
   const names = [...source.matchAll(/^(?:async )?function (\w+)\(/gm)].map((m) => m[1]);
@@ -984,12 +1023,18 @@ test('V-T7 ④ S1은 발권을 GET /v1/tickets로 확인하고 SQL·목업 티�
   assert.ok(Math.min(...uses) < s1.indexOf('acceptPayment('), '구매 전 월렛 목록이 결제 접수보다 뒤에 있다');
   assert.ok(Math.max(...uses) > s1.indexOf('acceptPayment('), '결제 뒤 월렛 목록을 다시 부르지 않는다');
   // 새 확인 wallet-list는 상수가 아니다
-  assert.match(s1, /addCheck\('wallet-list',\s*[a-zA-Z]/, 'wallet-list가 없거나 상수다');
+  assert.match(s1, /addCheck\('wallet-list',\s*(?!(?:true|false|null|undefined)\b)[A-Za-z_$]/, 'wallet-list가 없거나 상수(true·false)다');
+  // ticket-qr 판정 식은 화면 QR의 대체 글(label)과 월렛 목록에서 찾은 ticketId를 견준다(상세 글이 아니라 판정 식에서, TR-06)
+  const qrExpr = checkExpr(s1, 'ticket-qr');
+  assert.match(qrExpr, /ticketId/, `ticket-qr 판정 식이 월렛 목록의 ticketId를 보지 않는다: ${qrExpr}`);
+  assert.match(qrExpr, /\.label\b|includes\(/, `ticket-qr 판정 식이 QR 대체 글을 보지 않는다: ${qrExpr}`);
   // SCR-013은 실제 ticketId 주소로 연다
   assert.match(s1, /screen: 'SCR-013', path: '\/my\/tickets\/\{ticketId\}'/, 'SCR-013을 /my/tickets/{ticketId}로 열지 않는다');
   // '이 휴대폰을 입장용으로 등록'을 누르고 POST /v1/tickets/{ticketId}/device-keys 응답을 기다린다(고정 대기 대신 응답 조건)
-  assert.match(source, /이 휴대폰을 입장용으로 등록/, '등록 버튼을 누르지 않는다');
-  assert.match(source, /waitForResponse\([\s\S]{0,400}device-keys/, '등록 응답(device-keys)을 기다리지 않는다');
+  // S1과 S1이 부르는 도우미 안에서만 찾는다(다른 시나리오가 같은 글을 더해 저절로 통과하지 않게, TR-06)
+  const s1Path = s1WithHelpers(source, s1);
+  assert.match(s1Path, /이 휴대폰을 입장용으로 등록/, 'S1이 등록 버튼을 누르지 않는다');
+  assert.match(s1Path, /waitForResponse\([\s\S]{0,400}device-keys/, 'S1이 등록 응답(device-keys)을 기다리지 않는다');
   // 안내 글도 지금 동작으로 바뀐다
   assert.doesNotMatch(readFileSync(DEMO_MJS, 'utf8'), /목업 티켓만/, "demo.mjs 안내 글에 'S1 SCR-013은 목업 티켓만'이 남았다");
 });

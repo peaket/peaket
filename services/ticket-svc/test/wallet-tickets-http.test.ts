@@ -172,7 +172,7 @@ async function allPages(get: (q?: string, w?: Who) => Promise<Page>, limit: numb
 }
 
 describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
-  test('O-T47 ① A 세션은 A가 보유한 표만 최신 발권순으로 받고 B의 표는 없다(ASVS v5.0.0-8.2.2)', async () => {
+  test('O-T47 ① A 세션은 A가 보유한 표만 최신 발권순으로 받고 B의 표는 없다 [ASVS v5.0.0-8.2.2]', async () => {
     const h = await harness();
     const a1 = await h.issue(A);
     const b1 = await h.issue(B);
@@ -289,7 +289,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     }
   });
 
-  test('O-T47 ③ B의 표 자리로 만든 커서를 A 세션에 넣으면 그 자리보다 오래된 A의 표만 온다(ASVS v5.0.0-8.2.2)', async () => {
+  test('O-T47 ③ B의 표 자리로 만든 커서를 A 세션에 넣으면 그 자리보다 오래된 A의 표만 온다 [ASVS v5.0.0-8.2.2]', async () => {
     const h = await harness();
     const a1 = await h.issue(A);
     const b1 = await h.issue(B);
@@ -354,7 +354,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     expect(idsOf(await h.get('', { account: B }))).toEqual([]);
   });
 
-  test('O-T47 ⑤ 항목은 계약 칸만이고 주문·좌석·계정 ID·PEAKET1 포인터·티켓 키가 없다(ASVS v5.0.0-15.3.1)', async () => {
+  test('O-T47 ⑤ 항목은 계약 칸만이고 주문·좌석·계정 ID·PEAKET1 포인터·티켓 키가 없다 [ASVS v5.0.0-15.3.1]', async () => {
     const h = await harness();
     const withStart = await h.issue(A);
     const noStart = await h.issue(A, { startsAtMs: null });
@@ -414,14 +414,21 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     const lockOut = await h.transfers.setTransferLock({ caseId: randomUUID(), version: 1, locked: true, eventId: OTHER_EVENT, accountIds: [A], expiresAtMs: h.clock.now() + 14 * DAY, nowMs: h.clock.now() });
     expect(lockOut.map((x) => x.result)).toEqual(['LOCKED']);
 
-    const received = (await h.get('', { account: B })).body.items ?? [];
+    const bPage = await h.get('', { account: B });
+    const received = bPage.body.items ?? [];
     expect(received.map((i) => i.ticketId)).toEqual([given.tickets[0]!.ticketId]);
+    // 받은 표: 칸 집합이 정확히 이것이다(receivedFromNickname·transferLockExpiresAt 칸 없음, TR-05)
+    expect(Object.keys(received[0]!).sort()).toEqual(['cancelDeadline', 'eventId', 'eventStartsAt', 'status', 'ticketId', 'transferLocked']);
+    // B 목록 원문에 결제자 A의 계정 ID가 없다
+    expect(bPage.raw.includes(A), 'B 목록에 결제자 계정 ID가 있다').toBe(false);
     expect('receivedFromNickname' in received[0]!, '받은 표에 receivedFromNickname 칸이 있다(받은 표의 닉네임은 ticket 데이터에 없다)').toBe(false);
     expect(received[0]!.status).toBe('ACTIVE');
     expect(received[0]!.transferLocked).toBe(false);
 
     const mine = (await h.get('')).body.items ?? [];
     expect(mine.map((i) => [i.ticketId, i.transferLocked])).toEqual([[locked.tickets[0]!.ticketId, true]]);
+    // 잠긴 표: 잠금 기한(transferLockExpiresAt)은 ticket 데이터에 없어 칸을 뺀다(TR-05)
+    expect(Object.keys(mine[0]!).sort()).toEqual(['cancelDeadline', 'eventId', 'eventStartsAt', 'receivedFromNickname', 'status', 'ticketId', 'transferLocked']);
     expect(mine[0]!.receivedFromNickname).toBeNull();
   });
 
@@ -456,7 +463,7 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     expect(idsOf(await h.get('', { account: B }))).toEqual(orderTicketIds(given));
   });
 
-  test('O-T47 ⑧ 200·400 모두 private, no-store이고 기록 줄에 티켓 키·PEAKET1 값·응답 본문이 없다(ASVS v5.0.0-14.2.2, v5.0.0-14.3.2, v5.0.0-16.2.5)', async () => {
+  test('O-T47 ⑧ 200·400 모두 private, no-store이고 기록 줄에 티켓 키·PEAKET1 값·응답 본문이 없다 [ASVS v5.0.0-14.2.2] [ASVS v5.0.0-14.3.2] [ASVS v5.0.0-16.2.5]', async () => {
     const h = await harness();
     const issued = [await h.issue(A, { seats: 2 }), await h.issue(A)];
     const ok = await h.get('?limit=2');
@@ -492,11 +499,23 @@ describe('월렛 목록 GET /v1/tickets [O-T47]', () => {
     expect(all.includes(String(ok.body.nextCursor)), '기록에 커서 값').toBe(false);
   });
 
-  test('O-T47 장애: 저장소 목록 읽기가 실패하면 500이고 내부 글·표를 싣지 않는다', async () => {
+  // TR-08: 401은 처리기 앞 플랫폼 가드가 낸다. 처리기 쪽 머리(인터셉터)로는 달리지 않을 수 있어 따로 둔다(구현이 못 달면 '시험 이의', 계획 10절)
+  test('O-T47 ⑧ 오류 응답 401(세션 없음·팬이 아닌 신원)도 private, no-store다 [ASVS v5.0.0-14.3.2]', async () => {
+    const h = await harness();
+    await h.issue(A);
+    for (const who of [{ account: '', session: '', aud: '' }, { aud: 'partner' }] as const) {
+      const p = await h.get('', who);
+      expect(p.status, JSON.stringify(who)).toBe(401);
+      expect(p.headers['cache-control'], JSON.stringify(who)).toBe('private, no-store');
+    }
+  });
+
+  test('O-T47 장애: 저장소 목록 읽기가 실패하면 500·private, no-store이고 내부 글·표를 싣지 않는다', async () => {
     const h = await harness({ store: new BrokenListStore() });
     await h.issue(A);
     const p = await h.get('');
     expect(p.status, p.raw).toBe(500);
+    expect(p.headers['cache-control'], '오류 응답에도 private, no-store(TR-08)').toBe('private, no-store');
     expect(p.body.items).toBeUndefined();
     expect(p.raw.includes('ECONNREFUSED')).toBe(false);
     expect(p.raw.includes('10.0.0.9')).toBe(false);

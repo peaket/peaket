@@ -123,7 +123,7 @@ async function transferTo(ticketId: string, from: string, to: string): Promise<v
 }
 
 describe('월렛 목록 PostgreSQL [O-T47]', () => {
-  test('O-T47 ① A 세션은 A가 보유한 표만 최신 발권순으로 받고 B의 표는 없다(ASVS v5.0.0-8.2.2)', async () => {
+  test('O-T47 ① A 세션은 A가 보유한 표만 최신 발권순으로 받고 B의 표는 없다 [ASVS v5.0.0-8.2.2]', async () => {
     const [a, b, event] = [randomUUID(), randomUUID(), randomUUID()];
     const a1 = await issue(a, event);
     const b1 = await issue(b, event);
@@ -192,7 +192,7 @@ describe('월렛 목록 PostgreSQL [O-T47]', () => {
     ]);
   });
 
-  test('O-T47 ⑤ 항목은 계약 칸만이고 구역·회차 시작은 ticket 데이터 값이다(ASVS v5.0.0-15.3.1)', async () => {
+  test('O-T47 ⑤ 항목은 계약 칸만이고 구역·회차 시작은 ticket 데이터 값이다 [ASVS v5.0.0-15.3.1]', async () => {
     const [a, event] = [randomUUID(), randomUUID()];
     const plain = await issue(a, event);
     const zoned = await issue(a, event);
@@ -230,7 +230,7 @@ describe('월렛 목록 PostgreSQL [O-T47]', () => {
     expect('receivedFromNickname' in pb.body.items![0]!).toBe(false);
   });
 
-  test('O-T47 ⑧ 실제 서버의 200·400 모두 private, no-store이고 기록 줄에 티켓 키·PEAKET1 값이 없다(ASVS v5.0.0-14.2.2, v5.0.0-14.3.2, v5.0.0-16.2.5)', async () => {
+  test('O-T47 ⑧ 실제 서버의 200·400 모두 private, no-store이고 기록 줄에 티켓 키·PEAKET1 값이 없다 [ASVS v5.0.0-14.2.2] [ASVS v5.0.0-14.3.2] [ASVS v5.0.0-16.2.5]', async () => {
     const [a, event] = [randomUUID(), randomUUID()];
     const r = await issue(a, event, 2);
     const ok = await list(a, '?limit=1');

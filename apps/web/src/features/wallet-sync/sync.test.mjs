@@ -74,7 +74,7 @@ function fakeFanApi({ tickets = [], refresh = [], events = {} } = {}) {
   const calls = { tickets: [], refresh: [], events: [], unexpected: [] };
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
-    const call = { url: String(input), path: url.pathname, query: [...url.searchParams.entries()], method: init.method ?? 'GET', credentials: init.credentials };
+    const call = { url: String(input), path: url.pathname, query: [...url.searchParams.entries()], method: init.method ?? 'GET', credentials: init.credentials, signal: init.signal };
     if (url.origin === API && url.pathname === '/v1/tickets') {
       calls.tickets.push(call);
       const r = tickets[calls.tickets.length - 1];
@@ -149,6 +149,8 @@ test('O-T48 ① 커서를 그대로 실어 limit 100으로 세 쪽을 받고 모
       [`${API}/v1/tickets`, 'GET', 'include', { limit: '100', cursor: c2 }],
     ],
   );
+  // 손 호출마다 시간 한도 신호를 싣는다(docs/frontend.md §4.1 'api-client 밖의 호출', TR-07)
+  for (const c of [...calls.tickets, ...calls.events]) assert.ok(c.signal instanceof AbortSignal, `${c.path}에 시간 한도 신호가 없다`);
   for (const c of calls.tickets) assert.equal(c.query.length, Object.keys(Object.fromEntries(c.query)).length, `같은 쿼리 이름이 겹쳤다 ${c.url}`);
   // 받은 표를 서버 차례 그대로 모두 저장했다
   assert.deepEqual(await storedIds(), ids);
@@ -185,6 +187,8 @@ test('O-T48 ③ 저장된 표가 없는데 끊김·시간 초과·5xx·정의 �
     ['503 ticket-svc 장애', reply.status(503, 'dependency-unavailable'), 'server'],
     ['504', reply.status(504), 'server'],
     ['404 정의 밖', reply.status(404, 'not-found'), 'server'],
+    ['items 칸 없음 {}', () => json(200, {}), 'bad-response'],
+    ['items 칸 없음 nextCursor만', () => json(200, { nextCursor: null }), 'bad-response'],
     ['items가 배열 아님', () => json(200, { items: { ticketId: 'x' }, nextCursor: null }), 'bad-response'],
     ['nextCursor가 글·null 아님', () => json(200, { items: [], nextCursor: 7 }), 'bad-response'],
     ['목록 밖 상태 값', () => json(200, { items: [{ ...item(nextTicket()), status: 'LOST' }], nextCursor: null }), 'bad-response'],
@@ -216,17 +220,66 @@ test('O-T48 ④ 저장된 표가 있는데 목록 요청이 끊기면 저장소�
   const ids = await seedStored();
   const before = await loadLastSyncedAt();
   mock.timers.setTime(NOW + 60_000);
-  for (const [label, r] of [
-    ['끊김', reply.disconnect],
-    ['503', reply.status(503, 'dependency-unavailable')],
+  for (const [label, r, reason] of [
+    ['끊김', reply.disconnect, 'network'],
+    ['503', reply.status(503, 'dependency-unavailable'), 'server'],
+    // TR-01: items 칸이 없는 200은 빈 목록이 아니라 모양이 틀린 응답이다(계약 Zod를 지나도)
+    ['items 칸 없음 {}', () => json(200, {}), 'bad-response'],
+    ['items 칸 없음 nextCursor만', () => json(200, { nextCursor: null }), 'bad-response'],
   ]) {
     fakeFanApi({ tickets: [r] });
     const got = await syncWallet();
-    assert.equal(got.kind, 'failed', label);
+    assert.deepEqual(got, { kind: 'failed', reason }, label);
     assert.deepEqual(await storedIds(), ids, `${label}: 실패에 저장소를 비웠다(현장 오프라인에서 QR이 사라진다)`);
     assert.equal(await loadLastSyncedAt(), before, `${label}: 실패인데 lastSyncAt이 바뀌었다`);
     assert.deepEqual(walletScreenOf({ stored: ids.length, sync: got }), { screen: 'list', offline: true }, label);
   }
+});
+
+test('O-T48 ④ 저장된 표가 있는데 첫 쪽은 200이고 둘째 쪽이 끊김·503·401이면 받은 만큼 맞추지 않고 저장소·lastSyncAt을 그대로 둔다(TR-03)', async () => {
+  const ids = await seedStored();
+  const before = await loadLastSyncedAt();
+  mock.timers.setTime(NOW + 90_000);
+  for (const [label, second, want, refresh] of [
+    ['둘째 쪽 끊김', [reply.disconnect], { kind: 'failed', reason: 'network' }, []],
+    ['둘째 쪽 503', [reply.status(503, 'dependency-unavailable')], { kind: 'failed', reason: 'server' }, []],
+    ['둘째 쪽 401 → 갱신 → 401', [reply.unauthorized, reply.unauthorized], { kind: 'needs-login' }, [reply.refreshed]],
+  ]) {
+    const fresh = nextTicket();
+    const calls = fakeFanApi({ tickets: [page([item(fresh)], 'WzE3OTU2NTEyMDAwMDAsImUiXQ'), ...second], refresh, events: okEvents(E1) });
+    const got = await syncWallet();
+    assert.deepEqual(got, want, label);
+    assert.equal(calls.tickets.length, 1 + second.length, label);
+    assert.deepEqual(await storedIds(), ids, `${label}: 다 받지 못했는데 저장소를 맞췄다(옛 표가 지워지면 오프라인 QR이 사라진다)`);
+    assert.equal(await loadTicketSnapshot(fresh), undefined, `${label}: 다 받지 못한 목록의 새 표를 저장했다`);
+    assert.equal(await loadLastSyncedAt(), before, `${label}: lastSyncAt이 바뀌었다`);
+  }
+});
+
+test('O-T48 ③ 시간 한도: 목록 응답이 오지 않으면 읽기 한도 10초 뒤 network 실패이고 그 전에는 끝나지 않는다(TR-07)', async () => {
+  mock.timers.reset();
+  mock.timers.enable({ apis: ['Date', 'setTimeout'], now: NOW });
+  let asked = 0;
+  // 답하지 않는 망: 요청의 시간 한도 신호가 끊을 때만 거절한다
+  globalThis.fetch = (input, init = {}) => {
+    asked += 1;
+    return new Promise((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+    });
+  };
+  let settled = false;
+  const p = syncWallet().then((r) => {
+    settled = true;
+    return r;
+  });
+  for (let i = 0; i < 50 && asked === 0; i += 1) await new Promise((r) => setImmediate(r));
+  assert.equal(asked, 1, '목록을 부르지 않았다');
+  mock.timers.tick(9_999);
+  for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r));
+  assert.equal(settled, false, '10초 전에 끝났다');
+  mock.timers.tick(1);
+  assert.deepEqual(await p, { kind: 'failed', reason: 'network' });
+  assert.deepEqual(await storedIds(), []);
 });
 
 test('O-T48 ⑤ 토큰을 한 번 갱신한 뒤에도 401이면 needs-login이고 화면은 저장된 표 대신 로그인이다', async () => {
