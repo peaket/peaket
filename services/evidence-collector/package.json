@@ -1,0 +1,30 @@
+{
+  "name": "@peaket/evidence-collector",
+  "private": true,
+  "version": "0.0.0",
+  "description": "evidence-collector. Alertmanager 웹훅(SEV1·의존성 원인 SEV2·인시던트 선언)을 받아 그 의존성(PostgreSQL·Redis)의 순간 상태를 떠 진단 증거 저장소에 올린다(ADR-0070 결정 1, docs/observability.md §5 '진단 증거', 기능 F-01-1).",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --import @peaket/platform/telemetry/register dist/main.js",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": "^12.3.2",
+    "@nestjs/core": "^12.3.2",
+    "@peaket/platform": "workspace:*",
+    "pg": "^8.23.1",
+    "redis": "6.3.0",
+    "reflect-metadata": "^0.2.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

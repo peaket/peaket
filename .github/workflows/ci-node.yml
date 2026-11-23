@@ -162,6 +162,13 @@ jobs:
       - run: pnpm --filter @peaket/ticket-svc test:integration
         env:
           PEAKET_TEST_REPORT: test-report-int.json
+      # 증거 수집기를 실제 PostgreSQL 18(pg_monitor 사용자, 행 잠금 대기·복제 슬롯)·Valkey 8.1(세 명령만 허용한 사용자)로: 원인 SEV2 웹훅 하나로
+      # 세션·막는 쪽·슬롯과 INFO·SLOWLOG·CLIENT LIST가 올라가고, 뜬 내용이 로그·지표에 없으며, 접속할 수 없는 대상은 manifest만 남는다(기능 F-01-1, D-T51 ①⑤⑥, TA-V15).
+      # 의존 패키지 dist를 먼저 빌드한다
+      - run: pnpm exec turbo run build --filter=@peaket/evidence-collector^...
+      - run: pnpm --filter @peaket/evidence-collector test:integration
+        env:
+          PEAKET_TEST_REPORT: test-report-int.json
       # 소비자 웹 공유 캐시 처리기를 실제 Valkey 클러스터로: 처리기 인스턴스 둘(다른 파드처럼)이 같은 클러스터를 나눠 쓰고 태그 무효화를 서로 보는지,
       # 쓴 키마다 TTL이 있는지, 멈춤·장애 조치·끊김에서 회복하는지(BUILD_ORDER HOT-390, docs/frontend.md §5.18, BAT-170 T14·W7L2-K1·K2).
       # 이 단계는 Valkey만 쓰는 *.int.test.mjs만 돈다. 운영 빌드가 필요한 *.build.test.mjs는 ci-web reflow 잡이, 둘 다 필요한 *.heavy.test.mjs는
