@@ -1,0 +1,229 @@
+# SLO 28일 다중 창 경보의 합성 시계열 시험(F-01-5, OPS-090, 시험 V-T51 ⑥).
+# 정본: docs/observability.md §4 다중 윈도우 표 '일상 상시 운영(28일 기준)' 줄(14.4배 1시간/5분, 6배 6시간/30분은 SEV1, 1배 3일/6시간은 SEV3)과 'SLO 기록 규칙과 원천' 3층.
+# 입력 간격 5초(slo-fast 긁기, 1배 묶음만 30초: 그 묶음 머리 주석), 평가 30초(그 밖의 규칙 평가 간격). 목표 상수는 slo-onsale 규칙 파일에 있어 함께 싣는다.
+# 배수 경계는 같은 값을 피해 0.95배·1.05배 근처로 둔다. 기대 비율 = 창 안의 실패 증가 합 ÷ 전체 증가 합(같은 긁기 시각이라 외삽이 맞비긴다).
+# 정수가 아닌 기대값은 abs(값 − 기대) ≤ 기대 × 1e-9로 본다(promtool은 부동소수를 끝자리까지 견주어, 1 − 0.9995처럼 계산한 0.0005도 다르다고 본다).
+# 그 앞의 (식) * 0 시험이 결과 라벨 집합을 그대로 대조한다(숫자가 아닌 값이면 0이 되지 않아 실패한다). 이 파일은 일회용 생성기로 만들었고 손으로 고쳐도 된다.
+rule_files:
+  - deploy/platform/observability/rules/slo-onsale.yaml
+  - deploy/platform/observability/rules/slo-28d.yaml
+evaluation_interval: 30s
+tests:
+  # V-T51 ⑥(docs/observability.md §4 다중 창 표 '일상 상시 운영' 줄, 3층 경보). queue_entry 허용 0.001, 5초마다 100,000건(1배 = 100건).
+  # 0~6h 5.7배, 6~12h 6.3배, 12h~12h30m 4배. 진행 회차 E1이 있어도 28일 경보에는 event_id가 없다.
+  # 28일 묶음은 3일 창도 매번 평가하므로, 5초 입력 묶음은 promtool 표본 상한(시계열 하나에 10,000개, 5초면 약 13시간 50분) 안의 길이로 둔다.
+  - name: 'V-T51 ⑥ 28일 6배 경보는 6시간·30분 창이 모두 넘을 때만 SEV1이다'
+    interval: 5s
+    input_series:
+      - series: 'up{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x9000'
+      - series: 'up{app="payment-svc",pod="payment-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x9000'
+      - series: 'up{app="queue-svc",pod="queue-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x9000'
+      - series: 'up{app="realtime-gw",pod="realtime-gw-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x9000'
+      - series: 'admission_target{app="admission-ctrl",pod="admission-ctrl-0",namespace="peaket",event_id="E1"}'
+        values: '5000x9000'
+      - series: 'http_server_request_duration_seconds_count{app="queue-svc",pod="queue-svc-0",namespace="peaket",service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="2xx"}'
+        values: '1000000000 1000099430+99430x4319 1429636970+99370x4319 1858915600+99600x359'
+      - series: 'http_server_request_duration_seconds_count{app="queue-svc",pod="queue-svc-0",namespace="peaket",service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="5xx"}'
+        values: '1000000000 1000000570+570x4319 1002463030+630x4319 1005184400+400x359'
+      - series: 'http_server_errors_total{app="queue-svc",pod="queue-svc-0",namespace="peaket",service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="5xx"}'
+        values: '1000000000 1000000570+570x4319 1002463030+630x4319 1005184400+400x359'
+    promql_expr_test:
+      # 6h: 6시간·30분 창 5.7배 → 없음
+      - expr: 'ALERTS{alertname="slo_28d_burn_6h"}'
+        eval_time: 6h
+        exp_samples: []
+      - expr: '(peaket:slo_error_ratio:rate6h{journey="queue_entry"}) * 0'
+        eval_time: 6h
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate6h{journey="queue_entry"}) - 0.0057) <= bool 5.700e-12'
+        eval_time: 6h
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 1
+      # 12h: 두 창 6.3배 → SEV1, 회차 라벨 없음
+      - expr: 'ALERTS{alertname="slo_28d_burn_6h"}'
+        eval_time: 12h
+        exp_samples:
+          - labels: 'ALERTS{alertname="slo_28d_burn_6h",alertstate="firing",severity="sev1",kind="slo",journey="queue_entry"}'
+            value: 1
+      - expr: '(peaket:slo_error_ratio:rate30m{journey="queue_entry"}) * 0'
+        eval_time: 12h
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate30m{journey="queue_entry"}) - 0.0063) <= bool 6.300e-12'
+        eval_time: 12h
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 1
+      # 12h30m: 6시간 창만 넘음(6.11배, 30분 창 4배) → 없음
+      - expr: 'ALERTS{alertname="slo_28d_burn_6h"}'
+        eval_time: 12h30m
+        exp_samples: []
+      - expr: '(peaket:slo_error_ratio:rate6h{journey="queue_entry"}) * 0'
+        eval_time: 12h30m
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate6h{journey="queue_entry"}) - 0.0061082889557768) <= bool 6.108e-12'
+        eval_time: 12h30m
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 1
+      - expr: '(peaket:slo_error_ratio:rate30m{journey="queue_entry"}) * 0'
+        eval_time: 12h30m
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate30m{journey="queue_entry"}) - 0.004) <= bool 4.000e-12'
+        eval_time: 12h30m
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 1
+  # V-T51 ⑥ 14.4배 단계. 0~1h 13.68배, 1h~2h 15.12배, 2h~2h5m 8배.
+  - name: 'V-T51 ⑥ 28일 14.4배 경보는 1시간·5분 창이 모두 넘을 때만 SEV1이다'
+    interval: 5s
+    input_series:
+      - series: 'up{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x1500'
+      - series: 'up{app="payment-svc",pod="payment-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x1500'
+      - series: 'up{app="queue-svc",pod="queue-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x1500'
+      - series: 'up{app="realtime-gw",pod="realtime-gw-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x1500'
+      - series: 'admission_target{app="admission-ctrl",pod="admission-ctrl-0",namespace="peaket",event_id="E1"}'
+        values: '5000x1500'
+      - series: 'http_server_request_duration_seconds_count{app="queue-svc",pod="queue-svc-0",namespace="peaket",service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="2xx"}'
+        values: '1000000000 1000098632+98632x719 1071113528+98488x719 1142025600+99200x59'
+      - series: 'http_server_request_duration_seconds_count{app="queue-svc",pod="queue-svc-0",namespace="peaket",service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="5xx"}'
+        values: '1000000000 1000001368+1368x719 1000986472+1512x719 1002074400+800x59'
+      - series: 'http_server_errors_total{app="queue-svc",pod="queue-svc-0",namespace="peaket",service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="5xx"}'
+        values: '1000000000 1000001368+1368x719 1000986472+1512x719 1002074400+800x59'
+    promql_expr_test:
+      # 1h: 1시간·5분 창 13.68배 → 없음
+      - expr: 'ALERTS{alertname="slo_28d_burn_1h"}'
+        eval_time: 1h
+        exp_samples: []
+      - expr: '(peaket:slo_error_ratio:rate1h{journey="queue_entry"}) * 0'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate1h{journey="queue_entry"}) - 0.01368) <= bool 1.368e-11'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 1
+      # 2h: 두 창 15.12배 → SEV1, 회차 라벨 없음
+      - expr: 'ALERTS{alertname="slo_28d_burn_1h"}'
+        eval_time: 2h
+        exp_samples:
+          - labels: 'ALERTS{alertname="slo_28d_burn_1h",alertstate="firing",severity="sev1",kind="slo",journey="queue_entry"}'
+            value: 1
+      - expr: '(peaket:slo_error_ratio:rate5m{journey="queue_entry"}) * 0'
+        eval_time: 2h
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate5m{journey="queue_entry"}) - 0.01512) <= bool 1.512e-11'
+        eval_time: 2h
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 1
+      # 2h5m: 1시간 창만 넘음(14.53배, 5분 창 8배) → 없음
+      - expr: 'ALERTS{alertname="slo_28d_burn_1h"}'
+        eval_time: 2h5m
+        exp_samples: []
+      - expr: '(peaket:slo_error_ratio:rate1h{journey="queue_entry"}) * 0'
+        eval_time: 2h5m
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate1h{journey="queue_entry"}) - 0.014525841446453408) <= bool 1.453e-11'
+        eval_time: 2h5m
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 1
+      - expr: '(peaket:slo_error_ratio:rate5m{journey="queue_entry"}) * 0'
+        eval_time: 2h5m
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate5m{journey="queue_entry"}) - 0.008) <= bool 8.000e-12'
+        eval_time: 2h5m
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 1
+  # V-T51 ⑥ 1배 단계. 30초마다 600,000건(1배 = 600건). 0~72h 0.95배, 72~78h 2배, 78~84h 0.95배. 3일 창은 72시간 뒤에야 가득 찬다.
+  # 이 묶음만 입력 간격 30초다: promtool은 한 조회가 시계열 하나에서 읽는 표본을 10,000개로 막아(바꾸는 옵션이 없다) 5초·15초 입력의 3일 창(51,840·17,280개)을 돌리지 못한다. 짧은 창 6시간에도 표본 720개라 비율 판정은 같다.
+  - name: 'V-T51 ⑥ 28일 1배(3일·6시간) 경보는 두 창이 모두 넘을 때만 SEV3이다'
+    interval: 30s
+    input_series:
+      - series: 'up{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x10080'
+      - series: 'up{app="payment-svc",pod="payment-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x10080'
+      - series: 'up{app="queue-svc",pod="queue-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x10080'
+      - series: 'up{app="realtime-gw",pod="realtime-gw-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x10080'
+      - series: 'admission_target{app="admission-ctrl",pod="admission-ctrl-0",namespace="peaket",event_id="E1"}'
+        values: '5000x10080'
+      - series: 'http_server_request_duration_seconds_count{app="queue-svc",pod="queue-svc-0",namespace="peaket",service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="2xx"}'
+        values: '1000000000 1000599430+599430x8639 6179674000+598800x719 6610810630+599430x719'
+      - series: 'http_server_request_duration_seconds_count{app="queue-svc",pod="queue-svc-0",namespace="peaket",service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="5xx"}'
+        values: '1000000000 1000000570+570x8639 1004926000+1200x719 1005789370+570x719'
+      - series: 'http_server_errors_total{app="queue-svc",pod="queue-svc-0",namespace="peaket",service="queue-svc",route="/v1/queues/{eventId}/entries",method="POST",status_class="5xx"}'
+        values: '1000000000 1000000570+570x8639 1004926000+1200x719 1005789370+570x719'
+    promql_expr_test:
+      # 72h: 3일·6시간 창 0.95배 → 없음
+      - expr: 'ALERTS{alertname="slo_28d_burn_3d"}'
+        eval_time: 72h
+        exp_samples: []
+      - expr: '(peaket:slo_error_ratio:rate3d{journey="queue_entry"}) * 0'
+        eval_time: 72h
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate3d{journey="queue_entry"}) - 0.00095) <= bool 9.500e-13'
+        eval_time: 72h
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 1
+      # 78h: 3일 창 1.04배·6시간 창 2배 → SEV3
+      - expr: 'ALERTS{alertname="slo_28d_burn_3d"}'
+        eval_time: 78h
+        exp_samples:
+          - labels: 'ALERTS{alertname="slo_28d_burn_3d",alertstate="firing",severity="sev3",kind="slo",journey="queue_entry"}'
+            value: 1
+      - expr: '(peaket:slo_error_ratio:rate3d{journey="queue_entry"}) * 0'
+        eval_time: 78h
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate3d{journey="queue_entry"}) - 0.0010375101284870933) <= bool 1.038e-12'
+        eval_time: 78h
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 1
+      # 84h: 3일 창만 넘음(1.04배, 6시간 창 0.95배) → 없음
+      - expr: 'ALERTS{alertname="slo_28d_burn_3d"}'
+        eval_time: 84h
+        exp_samples: []
+      - expr: '(peaket:slo_error_ratio:rate6h{journey="queue_entry"}) * 0'
+        eval_time: 84h
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate6h{journey="queue_entry"}) - 0.00095) <= bool 9.500e-13'
+        eval_time: 84h
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 1

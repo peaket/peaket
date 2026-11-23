@@ -1,0 +1,64 @@
+# Mimir 규칙 평가기의 28일 남은 예산 규칙 시험(F-01-5, OPS-090, 시험 V-T51 ⑦).
+# 정본: docs/observability.md §4 '28일 남은 예산'(1 − (28일 실패 합 ÷ 28일 전체 합) ÷ (1 − 목표)), §8 지표 출처 표(Mimir raw, 5분마다).
+# 입력은 Prometheus 5분 묶음이 남긴 5분 증가량(5분 간격), 평가 5분. 28일 창 밖(29일째에 본 첫날)의 실패는 합에 들지 않는다.
+# 정수가 아닌 기대값은 abs(값 − 기대) ≤ 기대 × 1e-9로 본다(promtool은 부동소수를 끝자리까지 견주어, 1 − 0.9995처럼 계산한 0.0005도 다르다고 본다).
+# 그 앞의 (식) * 0 시험이 결과 라벨 집합을 그대로 대조한다(숫자가 아닌 값이면 0이 되지 않아 실패한다). 이 파일은 일회용 생성기로 만들었고 손으로 고쳐도 된다.
+rule_files:
+  - deploy/platform/observability/mimir/rules/slo-budget28d.yaml
+evaluation_interval: 5m
+tests:
+  # V-T51 ⑦. 5분마다 요청 10,000건. 보통 날 hold 실패 2.5건(0.00025), queue_entry 7.5건(0.00075). 첫날(0~1일)만 hold 20건·queue_entry 30건.
+  - name: 'V-T51 ⑦ 28일 남은 예산은 1 − (실패 합 ÷ 전체 합) ÷ (1 − 목표)다'
+    interval: 5m
+    input_series:
+      - series: 'agg5m:slo_requests:increase5m{journey="hold"}'
+        values: '10000x8352'
+      - series: 'agg5m:slo_errors:increase5m{journey="hold"}'
+        values: '20x288 2.5x8063'
+      - series: 'agg5m:slo_requests:increase5m{journey="queue_entry"}'
+        values: '10000x8352'
+      - series: 'agg5m:slo_errors:increase5m{journey="queue_entry"}'
+        values: '30x288 7.5x8063'
+    promql_expr_test:
+      # 29일: 창(1일, 29일]은 보통 날만 → hold 1 − 0.00025 ÷ 0.0005 = 0.5, queue_entry 1 − 0.00075 ÷ 0.001 = 0.25
+      - expr: '(slo:error_budget_remaining:ratio28d{journey="hold"}) * 0'
+        eval_time: 29d
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+      - expr: 'abs((slo:error_budget_remaining:ratio28d{journey="hold"}) - 0.5) <= bool 5.000e-10'
+        eval_time: 29d
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      - expr: '(slo:error_budget_remaining:ratio28d{journey="queue_entry"}) * 0'
+        eval_time: 29d
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 0
+      - expr: 'abs((slo:error_budget_remaining:ratio28d{journey="queue_entry"}) - 0.25) <= bool 2.500e-10'
+        eval_time: 29d
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 1
+      # 28일: 창(0, 28일]에 첫날 표본 288개가 든다 → hold 실패 합 25,200 ÷ 80,640,000
+      - expr: '(slo:error_budget_remaining:ratio28d{journey="hold"}) * 0'
+        eval_time: 28d
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+      - expr: 'abs((slo:error_budget_remaining:ratio28d{journey="hold"}) - 0.375) <= bool 3.750e-10'
+        eval_time: 28d
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      - expr: '(slo:error_budget_remaining:ratio28d{journey="queue_entry"}) * 0'
+        eval_time: 28d
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 0
+      - expr: 'abs((slo:error_budget_remaining:ratio28d{journey="queue_entry"}) - 0.1696428571428571) <= bool 1.696e-10'
+        eval_time: 28d
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 1

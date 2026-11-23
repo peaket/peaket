@@ -1,0 +1,873 @@
+# SLO 온세일 기록 규칙·경보의 합성 시계열 시험(F-01-5, OPS-090, 시험 V-T51 ①~⑤·V-T20 ④).
+# 정본: docs/observability.md §4 'SLO 기록 규칙과 원천'·'다중 윈도우 멀티 번 레이트 알림 규칙'·'긁기·평가·알림 간격', docs/verification.md §2.7·V-T20·V-T51.
+# 값은 정본에서 적는다(목표 표, 배수 10·3, 창 2분·20초·5분·25초·70분·30초, 2초·1%, 0.5). 입력 간격 5초·평가 5초는 운영(slo-fast 긁기, 온세일 묶음 평가)과 같다.
+# 경보는 ALERTS 시계열로 본다(이름·상태·라벨 집합을 그대로 대조하고, 주석은 slo-rules.test.mjs가 본다).
+# rule_files는 저장소 뿌리 기준이다. 실행: node tools/ci/prom-rules.mjs test(규칙 CRD에서 spec을 꺼내 promtool test rules에 넘긴다).
+# 정수가 아닌 기대값은 abs(값 − 기대) ≤ 기대 × 1e-9로 본다(promtool은 부동소수를 끝자리까지 견주어, 1 − 0.9995처럼 계산한 0.0005도 다르다고 본다).
+# 그 앞의 (식) * 0 시험이 결과 라벨 집합을 그대로 대조한다(숫자가 아닌 값이면 0이 되지 않아 실패한다). 이 파일은 일회용 생성기로 만들었고 손으로 고쳐도 된다.
+rule_files:
+  - deploy/platform/observability/rules/slo-onsale.yaml
+evaluation_interval: 5s
+tests:
+  # V-T51 ①(docs/verification.md V-T51, docs/observability.md §4 'SLO 기록 규칙과 원천'·다중 창 표 SEV1 줄).
+  # 허용 실패 비율 0.0005(99.95%). 5초마다 4,000건이라 10배 = 5초에 20건. 9.5배 19건, 10.5배 21건(배수를 11로 바꾸면 10.5배가 울리지 않아 V-T9가 이 시험으로 실패한다).
+  # hold: 0~3분 19건, 3~6분 21건, 6분~ 16건. 409(4xx)는 정상이라 분모에만 든다. payment_confirm: 0~4분 30초 19건, ~7분 30초 21건, 그 뒤 16건(direct·retry_queue 두 경로 합).
+  - name: 'V-T51 ① 온세일 10배 경보는 2분·20초 두 창이 모두 넘을 때만 SEV1이다'
+    interval: 5s
+    input_series:
+      - series: 'up{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x96'
+      - series: 'up{app="payment-svc",pod="payment-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x96'
+      - series: 'up{app="queue-svc",pod="queue-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x96'
+      - series: 'up{app="realtime-gw",pod="realtime-gw-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x96'
+      - series: 'admission_target{app="admission-ctrl",pod="admission-ctrl-0",namespace="peaket",event_id="E1"}'
+        values: '5000x96'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="2xx"}'
+        values: '1000000000 1000002981+2981x35 1000110295+2979x35 1000217544+2984x23'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="4xx"}'
+        values: '1000000000 1000001000+1000x95'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}'
+        values: '1000000000 1000000019+19x35 1000000705+21x35 1000001456+16x23'
+      - series: 'http_server_errors_total{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}'
+        values: '1000000000 1000000019+19x35 1000000705+21x35 1000001456+16x23'
+      - series: 'payment_confirm_resolution_seconds_bucket{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",path="direct",le="3"}'
+        values: '1000000000 1000003585+3585x53 1000197173+3583x35 1000326166+3588x5'
+      - series: 'payment_confirm_resolution_seconds_bucket{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",path="direct",le="+Inf"}'
+        values: '1000000000 1000003600+3600x95'
+      - series: 'payment_confirm_resolution_seconds_count{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",path="direct"}'
+        values: '1000000000 1000003600+3600x95'
+      - series: 'payment_confirm_resolution_seconds_bucket{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",path="retry_queue",le="3"}'
+        values: '1000000000 1000000396+396x95'
+      - series: 'payment_confirm_resolution_seconds_bucket{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",path="retry_queue",le="+Inf"}'
+        values: '1000000000 1000000400+400x95'
+      - series: 'payment_confirm_resolution_seconds_count{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",path="retry_queue"}'
+        values: '1000000000 1000000400+400x95'
+    promql_expr_test:
+      # 목표 상수(docs/observability.md §4 여정 표): 허용 실패 비율 = 1 − 목표, 다섯 여정만
+      - expr: '(peaket:slo_error_budget:ratio) * 0'
+        eval_time: 0s
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+          - labels: '{journey="payment_accept"}'
+            value: 0
+          - labels: '{journey="payment_confirm"}'
+            value: 0
+          - labels: '{journey="queue_entry"}'
+            value: 0
+          - labels: '{journey="seat_status"}'
+            value: 0
+      - expr: 'abs(peaket:slo_error_budget:ratio{journey="hold"} - 0.0005) <= bool 5.000e-13'
+        eval_time: 0s
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      - expr: 'abs(peaket:slo_error_budget:ratio{journey="payment_accept"} - 0.0005) <= bool 5.000e-13'
+        eval_time: 0s
+        exp_samples:
+          - labels: '{journey="payment_accept"}'
+            value: 1
+      - expr: 'abs(peaket:slo_error_budget:ratio{journey="payment_confirm"} - 0.0005) <= bool 5.000e-13'
+        eval_time: 0s
+        exp_samples:
+          - labels: '{journey="payment_confirm"}'
+            value: 1
+      - expr: 'abs(peaket:slo_error_budget:ratio{journey="queue_entry"} - 0.001) <= bool 1.000e-12'
+        eval_time: 0s
+        exp_samples:
+          - labels: '{journey="queue_entry"}'
+            value: 1
+      - expr: 'abs(peaket:slo_error_budget:ratio{journey="seat_status"} - 0.01) <= bool 1.000e-11'
+        eval_time: 0s
+        exp_samples:
+          - labels: '{journey="seat_status"}'
+            value: 1
+      # 3분: 두 여정 모두 두 창 9.5배 → 경보 없음
+      - expr: 'ALERTS{alertname="slo_onsale_fast_burn"}'
+        eval_time: 3m
+        exp_samples: []
+      - expr: 'peaket:slo:budget_alert10x:state{journey=~"hold|payment_confirm"}'
+        eval_time: 3m
+        exp_samples:
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="hold"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="payment_confirm"}'
+            value: 0
+      - expr: '(peaket:slo_error_ratio:rate2m{journey="hold"}) * 0'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate2m{journey="hold"}) - 0.00475) <= bool 4.750e-12'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      - expr: '(peaket:slo_error_ratio:rate20s{journey="hold"}) * 0'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate20s{journey="hold"}) - 0.00475) <= bool 4.750e-12'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      # 5분: hold 두 창 10.5배 → SEV1. payment_confirm은 20초 창만 10.5배(2분 창 9.76배) → 없음
+      - expr: 'ALERTS{alertname="slo_onsale_fast_burn"}'
+        eval_time: 5m
+        exp_samples:
+          - labels: 'ALERTS{alertname="slo_onsale_fast_burn",alertstate="firing",severity="sev1",kind="slo",event_id="E1",journey="hold"}'
+            value: 1
+      - expr: 'peaket:slo:budget_alert10x:state{journey=~"hold|payment_confirm"}'
+        eval_time: 5m
+        exp_samples:
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="hold"}'
+            value: 1
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="payment_confirm"}'
+            value: 0
+      - expr: '(peaket:slo_error_ratio:rate2m{journey="payment_confirm"}) * 0'
+        eval_time: 5m
+        exp_samples:
+          - labels: '{journey="payment_confirm"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate2m{journey="payment_confirm"}) - 0.004880434782608695) <= bool 4.880e-12'
+        eval_time: 5m
+        exp_samples:
+          - labels: '{journey="payment_confirm"}'
+            value: 1
+      # 6분: 두 여정 모두 두 창 10배 넘음(hold 10.5배, payment_confirm 2분 10.28배·20초 10.5배)
+      - expr: 'ALERTS{alertname="slo_onsale_fast_burn"}'
+        eval_time: 6m
+        exp_samples:
+          - labels: 'ALERTS{alertname="slo_onsale_fast_burn",alertstate="firing",severity="sev1",kind="slo",event_id="E1",journey="hold"}'
+            value: 1
+          - labels: 'ALERTS{alertname="slo_onsale_fast_burn",alertstate="firing",severity="sev1",kind="slo",event_id="E1",journey="payment_confirm"}'
+            value: 1
+      - expr: 'peaket:slo:budget_alert10x:state{journey=~"hold|payment_confirm"}'
+        eval_time: 6m
+        exp_samples:
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="hold"}'
+            value: 1
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="payment_confirm"}'
+            value: 1
+      # 6분 15초: hold는 2분 창만 넘음(10.17배, 20초 창 8배) → 없음
+      - expr: 'ALERTS{alertname="slo_onsale_fast_burn"}'
+        eval_time: 6m15s
+        exp_samples:
+          - labels: 'ALERTS{alertname="slo_onsale_fast_burn",alertstate="firing",severity="sev1",kind="slo",event_id="E1",journey="payment_confirm"}'
+            value: 1
+      - expr: 'peaket:slo:budget_alert10x:state{journey=~"hold|payment_confirm"}'
+        eval_time: 6m15s
+        exp_samples:
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="hold"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="payment_confirm"}'
+            value: 1
+      - expr: '(peaket:slo_error_ratio:rate2m{journey="hold"}) * 0'
+        eval_time: 6m15s
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate2m{journey="hold"}) - 0.005086956521739131) <= bool 5.087e-12'
+        eval_time: 6m15s
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      - expr: '(peaket:slo_error_ratio:rate20s{journey="hold"}) * 0'
+        eval_time: 6m15s
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate20s{journey="hold"}) - 0.004) <= bool 4.000e-12'
+        eval_time: 6m15s
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      # 7분 45초: payment_confirm도 2분 창만 넘음 → 없음
+      - expr: 'ALERTS{alertname="slo_onsale_fast_burn"}'
+        eval_time: 7m45s
+        exp_samples: []
+      - expr: 'peaket:slo:budget_alert10x:state{journey=~"hold|payment_confirm"}'
+        eval_time: 7m45s
+        exp_samples:
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="hold"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="payment_confirm"}'
+            value: 0
+  # V-T51 ②(다중 창 표 SEV2 결제 확정을 뺀 여정 줄). 허용 0.0005, 5초마다 20,000건이라 3배 = 30건.
+  # hold: 0~6분 29건(2.9배), 6~12분 31건(3.1배), 12분~ 20건(2배). payment_confirm: 내내 50건(5배, 10배 아래).
+  - name: 'V-T51 ② 3배 경보는 5분·25초 두 창이 모두 넘을 때만 SEV2이고 결제 확정에는 없다'
+    interval: 5s
+    input_series:
+      - series: 'up{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x148'
+      - series: 'up{app="payment-svc",pod="payment-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x148'
+      - series: 'up{app="queue-svc",pod="queue-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x148'
+      - series: 'up{app="realtime-gw",pod="realtime-gw-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x148'
+      - series: 'admission_target{app="admission-ctrl",pod="admission-ctrl-0",namespace="peaket",event_id="E1"}'
+        values: '5000x148'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="2xx"}'
+        values: '1000000000 1000014971+14971x71 1001092881+14969x71 1002170660+14980x3'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="4xx"}'
+        values: '1000000000 1000005000+5000x147'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}'
+        values: '1000000000 1000000029+29x71 1000002119+31x71 1000004340+20x3'
+      - series: 'http_server_errors_total{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}'
+        values: '1000000000 1000000029+29x71 1000002119+31x71 1000004340+20x3'
+      - series: 'payment_confirm_resolution_seconds_bucket{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",path="direct",le="3"}'
+        values: '1000000000 1000017955+17955x147'
+      - series: 'payment_confirm_resolution_seconds_bucket{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",path="direct",le="+Inf"}'
+        values: '1000000000 1000018000+18000x147'
+      - series: 'payment_confirm_resolution_seconds_count{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",path="direct"}'
+        values: '1000000000 1000018000+18000x147'
+      - series: 'payment_confirm_resolution_seconds_bucket{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",path="retry_queue",le="3"}'
+        values: '1000000000 1000001995+1995x147'
+      - series: 'payment_confirm_resolution_seconds_bucket{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",path="retry_queue",le="+Inf"}'
+        values: '1000000000 1000002000+2000x147'
+      - series: 'payment_confirm_resolution_seconds_count{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",path="retry_queue"}'
+        values: '1000000000 1000002000+2000x147'
+    promql_expr_test:
+      # 6분: hold 두 창 2.9배 → 없음. payment_confirm은 두 창 5배지만 3배 경보가 없다
+      - expr: 'ALERTS{alertname="slo_onsale_slow_burn"}'
+        eval_time: 6m
+        exp_samples: []
+      - expr: '(peaket:slo_error_ratio:rate5m{journey=~"hold|payment_confirm"}) * 0'
+        eval_time: 6m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+          - labels: '{journey="payment_confirm"}'
+            value: 0
+      - expr: 'abs(peaket:slo_error_ratio:rate5m{journey="hold"} - 0.00145) <= bool 1.450e-12'
+        eval_time: 6m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      - expr: 'abs(peaket:slo_error_ratio:rate5m{journey="payment_confirm"} - 0.0025) <= bool 2.500e-12'
+        eval_time: 6m
+        exp_samples:
+          - labels: '{journey="payment_confirm"}'
+            value: 1
+      # 12분: hold 두 창 3.1배 → SEV2 hold 하나. payment_confirm(5배)은 없다
+      - expr: 'ALERTS{alertname="slo_onsale_slow_burn"}'
+        eval_time: 12m
+        exp_samples:
+          - labels: 'ALERTS{alertname="slo_onsale_slow_burn",alertstate="firing",severity="sev2",kind="slo",event_id="E1",journey="hold"}'
+            value: 1
+      - expr: '(peaket:slo_error_ratio:rate25s{journey=~"hold|payment_confirm"}) * 0'
+        eval_time: 12m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+          - labels: '{journey="payment_confirm"}'
+            value: 0
+      - expr: 'abs(peaket:slo_error_ratio:rate25s{journey="hold"} - 0.00155) <= bool 1.550e-12'
+        eval_time: 12m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      - expr: 'abs(peaket:slo_error_ratio:rate25s{journey="payment_confirm"} - 0.0025) <= bool 2.500e-12'
+        eval_time: 12m
+        exp_samples:
+          - labels: '{journey="payment_confirm"}'
+            value: 1
+      # 12분 20초: hold는 5분 창만 넘음(3.03배, 25초 창 2배) → 없음
+      - expr: 'ALERTS{alertname="slo_onsale_slow_burn"}'
+        eval_time: 12m20s
+        exp_samples: []
+      - expr: '(peaket:slo_error_ratio:rate5m{journey="hold"}) * 0'
+        eval_time: 12m20s
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate5m{journey="hold"}) - 0.0015127118644067796) <= bool 1.513e-12'
+        eval_time: 12m20s
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      - expr: '(peaket:slo_error_ratio:rate25s{journey="hold"}) * 0'
+        eval_time: 12m20s
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate25s{journey="hold"}) - 0.001) <= bool 1.000e-12'
+        eval_time: 12m20s
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+  # V-T51 ③(docs/observability.md §4 '결제 확정 원인 넷', 다중 창 표 SEV2 결제 확정 줄). 결제사 TOSS·PORTONE, 승인 호출 5초마다 1,000건씩.
+  # 경계 1%는 같은 값을 피해 0.9%·1.1%로 둔다(결제사 오류 ③도 같다). 원인 ③의 분모는 payment_confirm_seconds_count, CARD_DECLINED는 원인이 아니다.
+  # TOSS 2초 넘김 11건: 구간 끝 2분 5초~4분. PORTONE 파드 1 서킷 열림: 5분 30초~6분 30초. TOSS PG_ERROR 11건: 8분 5초~10분. 429: TOSS first="false" 1분, PORTONE first="true" 10분 30초.
+  - name: 'V-T51 ③ 결제 확정 원인 넷은 결제사마다 SEV2를 울리고 진행 회차마다 pg_cause 1이다'
+    interval: 5s
+    input_series:
+      - series: 'up{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x144'
+      - series: 'up{app="payment-svc",pod="payment-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x144'
+      - series: 'up{app="queue-svc",pod="queue-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x144'
+      - series: 'up{app="realtime-gw",pod="realtime-gw-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x144'
+      - series: 'admission_target{app="admission-ctrl",pod="admission-ctrl-0",namespace="peaket",event_id="E1"}'
+        values: '5000x144'
+      - series: 'admission_target{app="admission-ctrl",pod="admission-ctrl-0",namespace="peaket",event_id="E2"}'
+        values: '5000x144'
+      - series: 'payment_confirm_seconds_bucket{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",le="2"}'
+        values: '1000000000 1000000991+991x23 1000024773+989x23 1000048511+991x95'
+      - series: 'payment_confirm_seconds_bucket{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",le="+Inf"}'
+        values: '1000000000 1000001000+1000x143'
+      - series: 'payment_confirm_seconds_count{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS"}'
+        values: '1000000000 1000001000+1000x143'
+      - series: 'payment_confirm_declined_total{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",category="PG_ERROR"}'
+        values: '1000000000 1000000009+9x95 1000000875+11x23 1000001137+9x23'
+      - series: 'payment_confirm_declined_total{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",category="CARD_DECLINED"}'
+        values: '1000000000 1000000050+50x143'
+      - series: 'payment_pg_circuit_open{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS"}'
+        values: '0x144'
+      - series: 'payment_pg_circuit_open{app="payment-svc",pod="payment-svc-1",namespace="peaket",pg="TOSS"}'
+        values: '0x144'
+      - series: 'pg_throttled_total{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",first="true"}'
+        values: '0 0x143'
+      - series: 'pg_throttled_total{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="TOSS",first="false"}'
+        values: '0 0x10 1 1x131'
+      - series: 'payment_confirm_seconds_bucket{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="PORTONE",le="2"}'
+        values: '1000000000 1000001000+1000x143'
+      - series: 'payment_confirm_seconds_bucket{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="PORTONE",le="+Inf"}'
+        values: '1000000000 1000001000+1000x143'
+      - series: 'payment_confirm_seconds_count{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="PORTONE"}'
+        values: '1000000000 1000001000+1000x143'
+      - series: 'payment_confirm_declined_total{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="PORTONE",category="PG_ERROR"}'
+        values: '1000000000 1000000000x143'
+      - series: 'payment_confirm_declined_total{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="PORTONE",category="CARD_DECLINED"}'
+        values: '1000000000 1000000050+50x143'
+      - series: 'payment_pg_circuit_open{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="PORTONE"}'
+        values: '0x144'
+      - series: 'payment_pg_circuit_open{app="payment-svc",pod="payment-svc-1",namespace="peaket",pg="PORTONE"}'
+        values: '0x65 1x12 0x65'
+      - series: 'pg_throttled_total{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="PORTONE",first="true"}'
+        values: '0 0x124 1 1x17'
+      - series: 'pg_throttled_total{app="payment-svc",pod="payment-svc-0",namespace="peaket",pg="PORTONE",first="false"}'
+        values: '0 0x143'
+    promql_expr_test:
+      # 1분 30초: TOSS 2초 넘김 0.9%·결제사 오류 0.9%, 재전송 429(first="false") 1건, CARD_DECLINED 5% → 없음
+      - expr: 'ALERTS{alertname="payment_confirm_pg_cause"}'
+        eval_time: 1m30s
+        exp_samples: []
+      - expr: 'peaket:payment:pg_cause:state'
+        eval_time: 1m30s
+        exp_samples:
+          - labels: 'peaket:payment:pg_cause:state{event_id="E1"}'
+            value: 0
+          - labels: 'peaket:payment:pg_cause:state{event_id="E2"}'
+            value: 0
+      # 3분 30초: TOSS 2초 넘김 1.1% → TOSS만
+      - expr: 'ALERTS{alertname="payment_confirm_pg_cause"}'
+        eval_time: 3m30s
+        exp_samples:
+          - labels: 'ALERTS{alertname="payment_confirm_pg_cause",alertstate="firing",severity="sev2",kind="cause",dependency="payment-gateway",pg="TOSS"}'
+            value: 1
+      - expr: 'peaket:payment:pg_cause:state'
+        eval_time: 3m30s
+        exp_samples:
+          - labels: 'peaket:payment:pg_cause:state{event_id="E1"}'
+            value: 1
+          - labels: 'peaket:payment:pg_cause:state{event_id="E2"}'
+            value: 1
+      # 5분 10초: 다시 0.9% → 없음
+      - expr: 'ALERTS{alertname="payment_confirm_pg_cause"}'
+        eval_time: 5m10s
+        exp_samples: []
+      - expr: 'peaket:payment:pg_cause:state'
+        eval_time: 5m10s
+        exp_samples:
+          - labels: 'peaket:payment:pg_cause:state{event_id="E1"}'
+            value: 0
+          - labels: 'peaket:payment:pg_cause:state{event_id="E2"}'
+            value: 0
+      # 6분: PORTONE 파드 둘 가운데 하나의 서킷 열림 → PORTONE만
+      - expr: 'ALERTS{alertname="payment_confirm_pg_cause"}'
+        eval_time: 6m
+        exp_samples:
+          - labels: 'ALERTS{alertname="payment_confirm_pg_cause",alertstate="firing",severity="sev2",kind="cause",dependency="payment-gateway",pg="PORTONE"}'
+            value: 1
+      - expr: 'peaket:payment:pg_cause:state'
+        eval_time: 6m
+        exp_samples:
+          - labels: 'peaket:payment:pg_cause:state{event_id="E1"}'
+            value: 1
+          - labels: 'peaket:payment:pg_cause:state{event_id="E2"}'
+            value: 1
+      # 7분 35초: 서킷 닫힘(6분 30초) → 없음
+      - expr: 'ALERTS{alertname="payment_confirm_pg_cause"}'
+        eval_time: 7m35s
+        exp_samples: []
+      - expr: 'peaket:payment:pg_cause:state'
+        eval_time: 7m35s
+        exp_samples:
+          - labels: 'peaket:payment:pg_cause:state{event_id="E1"}'
+            value: 0
+          - labels: 'peaket:payment:pg_cause:state{event_id="E2"}'
+            value: 0
+      # 9분 30초: TOSS 결제사 오류(PG_ERROR) 1.1% → TOSS만
+      - expr: 'ALERTS{alertname="payment_confirm_pg_cause"}'
+        eval_time: 9m30s
+        exp_samples:
+          - labels: 'ALERTS{alertname="payment_confirm_pg_cause",alertstate="firing",severity="sev2",kind="cause",dependency="payment-gateway",pg="TOSS"}'
+            value: 1
+      - expr: 'peaket:payment:pg_cause:state'
+        eval_time: 9m30s
+        exp_samples:
+          - labels: 'peaket:payment:pg_cause:state{event_id="E1"}'
+            value: 1
+          - labels: 'peaket:payment:pg_cause:state{event_id="E2"}'
+            value: 1
+      # 11분: PORTONE 첫 승인 호출 429 1건(10분 30초) → PORTONE만
+      - expr: 'ALERTS{alertname="payment_confirm_pg_cause"}'
+        eval_time: 11m
+        exp_samples:
+          - labels: 'ALERTS{alertname="payment_confirm_pg_cause",alertstate="firing",severity="sev2",kind="cause",dependency="payment-gateway",pg="PORTONE"}'
+            value: 1
+      - expr: 'peaket:payment:pg_cause:state'
+        eval_time: 11m
+        exp_samples:
+          - labels: 'peaket:payment:pg_cause:state{event_id="E1"}'
+            value: 1
+          - labels: 'peaket:payment:pg_cause:state{event_id="E2"}'
+            value: 1
+      # 12분: 그 429가 1분 창 밖 → 없음
+      - expr: 'ALERTS{alertname="payment_confirm_pg_cause"}'
+        eval_time: 12m
+        exp_samples: []
+      - expr: 'peaket:payment:pg_cause:state'
+        eval_time: 12m
+        exp_samples:
+          - labels: 'peaket:payment:pg_cause:state{event_id="E1"}'
+            value: 0
+          - labels: 'peaket:payment:pg_cause:state{event_id="E2"}'
+            value: 0
+  # V-T51 ④(docs/observability.md §4 2층 입장 제어 입력, docs/features/queue-admission.md §5 다운스트림·30초 창).
+  # 0~2분 요청, 2~3분 요청 증가 0, 3분부터 purchase-svc up 0이고 시계열이 끊긴다. 칸은 표준 목록(§8)의 0.05·0.1·0.15·10·30.
+  - name: 'V-T51 ④ 입장 제어 입력은 purchase-svc의 30초 p99·5xx 비율을 내고 요청이 없으면 0이다'
+    interval: 5s
+    input_series:
+      - series: 'up{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x36 0x11'
+      - series: 'up{app="payment-svc",pod="payment-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x48'
+      - series: 'up{app="queue-svc",pod="queue-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x48'
+      - series: 'up{app="realtime-gw",pod="realtime-gw-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x48'
+      - series: 'admission_target{app="admission-ctrl",pod="admission-ctrl-0",namespace="peaket",event_id="E1"}'
+        values: '5000x48'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="2xx",le="0.05"}'
+        values: '1000000000 1000000000x35 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="2xx",le="0.1"}'
+        values: '1000000000 1000004851+4851x23 1000116424x11 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="2xx",le="0.15"}'
+        values: '1000000000 1000004900+4900x23 1000117600x11 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="2xx",le="10"}'
+        values: '1000000000 1000004900+4900x23 1000117600x11 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="2xx",le="30"}'
+        values: '1000000000 1000004900+4900x23 1000117600x11 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="2xx",le="+Inf"}'
+        values: '1000000000 1000004900+4900x23 1000117600x11 stale'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="2xx"}'
+        values: '1000000000 1000004900+4900x23 1000117600x11 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx",le="0.05"}'
+        values: '1000000000 1000000000x35 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx",le="0.1"}'
+        values: '1000000000 1000000099+99x23 1000002376x11 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx",le="0.15"}'
+        values: '1000000000 1000000100+100x23 1000002400x11 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx",le="10"}'
+        values: '1000000000 1000000100+100x23 1000002400x11 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx",le="30"}'
+        values: '1000000000 1000000100+100x23 1000002400x11 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx",le="+Inf"}'
+        values: '1000000000 1000000100+100x23 1000002400x11 stale'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}'
+        values: '1000000000 1000000100+100x23 1000002400x11 stale'
+      - series: 'http_server_errors_total{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}'
+        values: '1000000000 1000000100+100x23 1000002400x11 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/orders/{orderId}/payment-status",method="GET",status_class="2xx",le="0.05"}'
+        values: '1000000000 1000000000x35 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/orders/{orderId}/payment-status",method="GET",status_class="2xx",le="0.1"}'
+        values: '1000000000 1000000000x35 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/orders/{orderId}/payment-status",method="GET",status_class="2xx",le="0.15"}'
+        values: '1000000000 1000000000x35 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/orders/{orderId}/payment-status",method="GET",status_class="2xx",le="10"}'
+        values: '1000000000 1000000000x35 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/orders/{orderId}/payment-status",method="GET",status_class="2xx",le="30"}'
+        values: '1000000000 1000000500+500x23 1000012000x11 stale'
+      - series: 'http_server_request_duration_seconds_bucket{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/orders/{orderId}/payment-status",method="GET",status_class="2xx",le="+Inf"}'
+        values: '1000000000 1000000500+500x23 1000012000x11 stale'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/orders/{orderId}/payment-status",method="GET",status_class="2xx"}'
+        values: '1000000000 1000000500+500x23 1000012000x11 stale'
+    promql_expr_test:
+      # 1분 30초: p99는 넣은 칸 경계 0.1초, 5xx 2%(long polling 25초 요청은 빠진다)
+      - expr: '(peaket:admission:downstream_p99_seconds:30s) * 0'
+        eval_time: 1m30s
+        exp_samples:
+          - labels: '{}'
+            value: 0
+      - expr: 'abs((peaket:admission:downstream_p99_seconds:30s) - 0.1) <= bool 1.000e-10'
+        eval_time: 1m30s
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      - expr: '(peaket:admission:downstream_error_ratio:30s) * 0'
+        eval_time: 1m30s
+        exp_samples:
+          - labels: '{}'
+            value: 0
+      - expr: 'abs((peaket:admission:downstream_error_ratio:30s) - 0.02) <= bool 2.000e-11'
+        eval_time: 1m30s
+        exp_samples:
+          - labels: '{}'
+            value: 1
+      # 2분 45초: 30초 창에 요청 증가 0 → 둘 다 0(숫자가 아닌 값이 아니다)
+      - expr: 'peaket:admission:downstream_p99_seconds:30s'
+        eval_time: 2m45s
+        exp_samples:
+          - labels: 'peaket:admission:downstream_p99_seconds:30s{}'
+            value: 0
+      - expr: 'peaket:admission:downstream_error_ratio:30s'
+        eval_time: 2m45s
+        exp_samples:
+          - labels: 'peaket:admission:downstream_error_ratio:30s{}'
+            value: 0
+      # 3분 45초: purchase-svc가 긁히지 않음(up 0, 시계열 끊김) → 두 이름 모두 값 없음
+      - expr: 'peaket:admission:downstream_p99_seconds:30s'
+        eval_time: 3m45s
+        exp_samples: []
+      - expr: 'peaket:admission:downstream_error_ratio:30s'
+        eval_time: 3m45s
+        exp_samples: []
+  # V-T51 ⑤(docs/observability.md §4 2층 회차 상태, 1층 '요청이 없으면 0, 긁히지 않으면 값 없음'). 진행 회차 = admission_target이 있는 회차.
+  # E1·E2는 내내, E3는 10분까지. hold 5xx 0.000245(0.0005 × 0.49), payment_accept 0.000255(× 0.51). payment_confirm·queue_entry는 원천이 긁히지만 요청 시계열이 없다.
+  # seat_status는 묶음 시계열이 있지만 증가 0이고, 75분부터 realtime-gw up 0·시계열 끊김. 결과 라벨은 이름과 event_id·journey뿐이다(파드·앱 라벨 없음).
+  - name: 'V-T51 ⑤ 회차 상태는 진행 회차마다 여정별 0·1이고 원천이 없으면 값이 없다'
+    interval: 5s
+    input_series:
+      - series: 'up{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x972'
+      - series: 'up{app="payment-svc",pod="payment-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x972'
+      - series: 'up{app="queue-svc",pod="queue-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x972'
+      - series: 'up{app="realtime-gw",pod="realtime-gw-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1x900 0x71'
+      - series: 'admission_target{app="admission-ctrl",pod="admission-ctrl-0",namespace="peaket",event_id="E1"}'
+        values: '5000x972'
+      - series: 'admission_target{app="admission-ctrl",pod="admission-ctrl-0",namespace="peaket",event_id="E2"}'
+        values: '5000x972'
+      - series: 'admission_target{app="admission-ctrl",pod="admission-ctrl-0",namespace="peaket",event_id="E3"}'
+        values: '5000x120 stale'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="2xx"}'
+        values: '1000000000 1000199951+199951x971'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}'
+        values: '1000000000 1000000049+49x971'
+      - series: 'http_server_errors_total{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}'
+        values: '1000000000 1000000049+49x971'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST",status_class="2xx"}'
+        values: '1000000000 1000199949+199949x971'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST",status_class="5xx"}'
+        values: '1000000000 1000000051+51x971'
+      - series: 'http_server_errors_total{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/orders/{orderId}/payment-acceptance",method="POST",status_class="5xx"}'
+        values: '1000000000 1000000051+51x971'
+      - series: 'realtime_gw_batch_wait_ms_bucket{app="realtime-gw",pod="realtime-gw-0",namespace="peaket",le="300"}'
+        values: '500000x900 stale'
+      - series: 'realtime_gw_batch_wait_ms_bucket{app="realtime-gw",pod="realtime-gw-0",namespace="peaket",le="+Inf"}'
+        values: '500000x900 stale'
+      - series: 'realtime_gw_batch_wait_ms_count{app="realtime-gw",pod="realtime-gw-0",namespace="peaket"}'
+        values: '500000x900 stale'
+    promql_expr_test:
+      # 5분: 진행 회차 셋(E1·E2·E3), 다섯 여정 모두 값이 있다
+      - expr: 'peaket:slo:budget_alert10x:state{event_id="E3"}'
+        eval_time: 5m
+        exp_samples:
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E3",journey="hold"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E3",journey="payment_accept"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E3",journey="payment_confirm"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E3",journey="queue_entry"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E3",journey="seat_status"}'
+            value: 0
+      # 71분: E3는 10분에 끝남(admission_target 끊김) → 값 없음. E1·E2는 다섯 여정 0
+      - expr: 'peaket:slo:budget_alert10x:state'
+        eval_time: 71m
+        exp_samples:
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="hold"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="payment_accept"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="payment_confirm"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="queue_entry"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="seat_status"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E2",journey="hold"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E2",journey="payment_accept"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E2",journey="payment_confirm"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E2",journey="queue_entry"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E2",journey="seat_status"}'
+            value: 0
+      # 71분: 70분 예산 몫 hold 0.49 → 0, payment_accept 0.51 → 1. 요청 없는 payment_confirm·queue_entry·seat_status는 0
+      - expr: 'peaket:slo:budget_burn50:state'
+        eval_time: 71m
+        exp_samples:
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E1",journey="hold"}'
+            value: 0
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E1",journey="payment_accept"}'
+            value: 1
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E1",journey="payment_confirm"}'
+            value: 0
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E1",journey="queue_entry"}'
+            value: 0
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E1",journey="seat_status"}'
+            value: 0
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E2",journey="hold"}'
+            value: 0
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E2",journey="payment_accept"}'
+            value: 1
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E2",journey="payment_confirm"}'
+            value: 0
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E2",journey="queue_entry"}'
+            value: 0
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E2",journey="seat_status"}'
+            value: 0
+      - expr: '(peaket:slo_error_ratio:rate70m) * 0'
+        eval_time: 71m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+          - labels: '{journey="payment_accept"}'
+            value: 0
+          - labels: '{journey="payment_confirm"}'
+            value: 0
+          - labels: '{journey="queue_entry"}'
+            value: 0
+          - labels: '{journey="seat_status"}'
+            value: 0
+      - expr: 'abs(peaket:slo_error_ratio:rate70m{journey="hold"} - 0.000245) <= bool 2.450e-13'
+        eval_time: 71m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      - expr: 'abs(peaket:slo_error_ratio:rate70m{journey="payment_accept"} - 0.000255) <= bool 2.550e-13'
+        eval_time: 71m
+        exp_samples:
+          - labels: '{journey="payment_accept"}'
+            value: 1
+      - expr: 'peaket:slo_error_ratio:rate70m{journey="payment_confirm"}'
+        eval_time: 71m
+        exp_samples:
+          - labels: 'peaket:slo_error_ratio:rate70m{journey="payment_confirm"}'
+            value: 0
+      - expr: 'peaket:slo_error_ratio:rate70m{journey="queue_entry"}'
+        eval_time: 71m
+        exp_samples:
+          - labels: 'peaket:slo_error_ratio:rate70m{journey="queue_entry"}'
+            value: 0
+      - expr: 'peaket:slo_error_ratio:rate70m{journey="seat_status"}'
+        eval_time: 71m
+        exp_samples:
+          - labels: 'peaket:slo_error_ratio:rate70m{journey="seat_status"}'
+            value: 0
+      # 81분: realtime-gw가 75분부터 긁히지 않음 → seat_status만 값 없음, 다른 여정은 그대로
+      - expr: 'peaket:slo:budget_alert10x:state'
+        eval_time: 81m
+        exp_samples:
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="hold"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="payment_accept"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="payment_confirm"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E1",journey="queue_entry"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E2",journey="hold"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E2",journey="payment_accept"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E2",journey="payment_confirm"}'
+            value: 0
+          - labels: 'peaket:slo:budget_alert10x:state{event_id="E2",journey="queue_entry"}'
+            value: 0
+      - expr: 'peaket:slo:budget_burn50:state'
+        eval_time: 81m
+        exp_samples:
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E1",journey="hold"}'
+            value: 0
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E1",journey="payment_accept"}'
+            value: 1
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E1",journey="payment_confirm"}'
+            value: 0
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E1",journey="queue_entry"}'
+            value: 0
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E2",journey="hold"}'
+            value: 0
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E2",journey="payment_accept"}'
+            value: 1
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E2",journey="payment_confirm"}'
+            value: 0
+          - labels: 'peaket:slo:budget_burn50:state{event_id="E2",journey="queue_entry"}'
+            value: 0
+      - expr: '(peaket:slo_error_ratio:rate70m) * 0'
+        eval_time: 81m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+          - labels: '{journey="payment_accept"}'
+            value: 0
+          - labels: '{journey="payment_confirm"}'
+            value: 0
+          - labels: '{journey="queue_entry"}'
+            value: 0
+      - expr: 'abs(peaket:slo_error_ratio:rate70m{journey="hold"} - 0.000245) <= bool 2.450e-13'
+        eval_time: 81m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      - expr: 'abs(peaket:slo_error_ratio:rate70m{journey="payment_accept"} - 0.000255) <= bool 2.550e-13'
+        eval_time: 81m
+        exp_samples:
+          - labels: '{journey="payment_accept"}'
+            value: 1
+      - expr: 'peaket:slo_error_ratio:rate70m{journey="payment_confirm"}'
+        eval_time: 81m
+        exp_samples:
+          - labels: 'peaket:slo_error_ratio:rate70m{journey="payment_confirm"}'
+            value: 0
+      - expr: 'peaket:slo_error_ratio:rate70m{journey="queue_entry"}'
+        eval_time: 81m
+        exp_samples:
+          - labels: 'peaket:slo_error_ratio:rate70m{journey="queue_entry"}'
+            value: 0
+      - expr: 'peaket:slo_error_ratio:rate20s{journey="seat_status"}'
+        eval_time: 81m
+        exp_samples: []
+  # V-T20 ④(docs/verification.md V-T20, §2.7 '시험 입력의 간격'). 운영 긁기 5초를 1초 칸에 ±1초 흔들어 놓고(0,+1,−1,+1,0,−1,−1,+1 차례), 2분 30초·5분 표본을 뺀다.
+  # 이 묶음만 interval 1초다: 1초 칸은 흔들림을 놓을 자리이고 표본은 5초 ±1초마다 하나다(V-T20 ③의 간격 검사는 이 묶음을 운영 간격으로 본다, F-01-7에 알림).
+  # hold 5초마다 4,000건(409 1,000건), 5xx 3분까지 19건(9.5배) 뒤 21건(10.5배). 평가 5초.
+  - name: 'V-T20 ④ 긁기 흔들림과 빠진 표본이 있어도 20초 창이 비지 않고 10배 경계를 지킨다'
+    interval: 1s
+    input_series:
+      - series: 'up{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x11 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x7 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1'
+      - series: 'up{app="payment-svc",pod="payment-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x11 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x7 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1'
+      - series: 'up{app="queue-svc",pod="queue-svc-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x11 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x7 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1'
+      - series: 'up{app="realtime-gw",pod="realtime-gw-0",namespace="peaket",job="kubernetes-pods"}'
+        values: '1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x11 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x7 1 _x4 1 _x6 1 _x3 1 _x5 1 _x2 1 _x6 1 _x3 1 _x3 1 _x4 1 _x6 1 _x3 1'
+      - series: 'admission_target{app="admission-ctrl",pod="admission-ctrl-0",namespace="peaket",event_id="E1"}'
+        values: '5000 _x5 5000 _x2 5000 _x6 5000 _x3 5000 _x3 5000 _x4 5000 _x6 5000 _x3 5000 _x5 5000 _x2 5000 _x6 5000 _x3 5000 _x3 5000 _x4 5000 _x6 5000 _x3 5000 _x5 5000 _x2 5000 _x6 5000 _x3 5000 _x3 5000 _x4 5000 _x6 5000 _x3 5000 _x5 5000 _x2 5000 _x6 5000 _x3 5000 _x3 5000 _x11 5000 _x3 5000 _x5 5000 _x2 5000 _x6 5000 _x3 5000 _x3 5000 _x4 5000 _x6 5000 _x3 5000 _x5 5000 _x2 5000 _x6 5000 _x3 5000 _x3 5000 _x4 5000 _x6 5000 _x3 5000 _x5 5000 _x2 5000 _x6 5000 _x3 5000 _x3 5000 _x4 5000 _x6 5000 _x3 5000 _x5 5000 _x2 5000 _x6 5000 _x7 5000 _x4 5000 _x6 5000 _x3 5000 _x5 5000 _x2 5000 _x6 5000 _x3 5000 _x3 5000 _x4 5000 _x6 5000 _x3 5000'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="2xx"}'
+        values: '1000000000 _x5 1000002981 _x2 1000005962 _x6 1000008943 _x3 1000011924 _x3 1000014905 _x4 1000017886 _x6 1000020867 _x3 1000023848 _x5 1000026829 _x2 1000029810 _x6 1000032791 _x3 1000035772 _x3 1000038753 _x4 1000041734 _x6 1000044715 _x3 1000047696 _x5 1000050677 _x2 1000053658 _x6 1000056639 _x3 1000059620 _x3 1000062601 _x4 1000065582 _x6 1000068563 _x3 1000071544 _x5 1000074525 _x2 1000077506 _x6 1000080487 _x3 1000083468 _x3 1000086449 _x11 1000092411 _x3 1000095392 _x5 1000098373 _x2 1000101354 _x6 1000104335 _x3 1000107316 _x3 1000110295 _x4 1000113274 _x6 1000116253 _x3 1000119232 _x5 1000122211 _x2 1000125190 _x6 1000128169 _x3 1000131148 _x3 1000134127 _x4 1000137106 _x6 1000140085 _x3 1000143064 _x5 1000146043 _x2 1000149022 _x6 1000152001 _x3 1000154980 _x3 1000157959 _x4 1000160938 _x6 1000163917 _x3 1000166896 _x5 1000169875 _x2 1000172854 _x6 1000175833 _x7 1000181791 _x4 1000184770 _x6 1000187749 _x3 1000190728 _x5 1000193707 _x2 1000196686 _x6 1000199665 _x3 1000202644 _x3 1000205623 _x4 1000208602 _x6 1000211581 _x3 1000214560'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="4xx"}'
+        values: '1000000000 _x5 1000001000 _x2 1000002000 _x6 1000003000 _x3 1000004000 _x3 1000005000 _x4 1000006000 _x6 1000007000 _x3 1000008000 _x5 1000009000 _x2 1000010000 _x6 1000011000 _x3 1000012000 _x3 1000013000 _x4 1000014000 _x6 1000015000 _x3 1000016000 _x5 1000017000 _x2 1000018000 _x6 1000019000 _x3 1000020000 _x3 1000021000 _x4 1000022000 _x6 1000023000 _x3 1000024000 _x5 1000025000 _x2 1000026000 _x6 1000027000 _x3 1000028000 _x3 1000029000 _x11 1000031000 _x3 1000032000 _x5 1000033000 _x2 1000034000 _x6 1000035000 _x3 1000036000 _x3 1000037000 _x4 1000038000 _x6 1000039000 _x3 1000040000 _x5 1000041000 _x2 1000042000 _x6 1000043000 _x3 1000044000 _x3 1000045000 _x4 1000046000 _x6 1000047000 _x3 1000048000 _x5 1000049000 _x2 1000050000 _x6 1000051000 _x3 1000052000 _x3 1000053000 _x4 1000054000 _x6 1000055000 _x3 1000056000 _x5 1000057000 _x2 1000058000 _x6 1000059000 _x7 1000061000 _x4 1000062000 _x6 1000063000 _x3 1000064000 _x5 1000065000 _x2 1000066000 _x6 1000067000 _x3 1000068000 _x3 1000069000 _x4 1000070000 _x6 1000071000 _x3 1000072000'
+      - series: 'http_server_request_duration_seconds_count{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}'
+        values: '1000000000 _x5 1000000019 _x2 1000000038 _x6 1000000057 _x3 1000000076 _x3 1000000095 _x4 1000000114 _x6 1000000133 _x3 1000000152 _x5 1000000171 _x2 1000000190 _x6 1000000209 _x3 1000000228 _x3 1000000247 _x4 1000000266 _x6 1000000285 _x3 1000000304 _x5 1000000323 _x2 1000000342 _x6 1000000361 _x3 1000000380 _x3 1000000399 _x4 1000000418 _x6 1000000437 _x3 1000000456 _x5 1000000475 _x2 1000000494 _x6 1000000513 _x3 1000000532 _x3 1000000551 _x11 1000000589 _x3 1000000608 _x5 1000000627 _x2 1000000646 _x6 1000000665 _x3 1000000684 _x3 1000000705 _x4 1000000726 _x6 1000000747 _x3 1000000768 _x5 1000000789 _x2 1000000810 _x6 1000000831 _x3 1000000852 _x3 1000000873 _x4 1000000894 _x6 1000000915 _x3 1000000936 _x5 1000000957 _x2 1000000978 _x6 1000000999 _x3 1000001020 _x3 1000001041 _x4 1000001062 _x6 1000001083 _x3 1000001104 _x5 1000001125 _x2 1000001146 _x6 1000001167 _x7 1000001209 _x4 1000001230 _x6 1000001251 _x3 1000001272 _x5 1000001293 _x2 1000001314 _x6 1000001335 _x3 1000001356 _x3 1000001377 _x4 1000001398 _x6 1000001419 _x3 1000001440'
+      - series: 'http_server_errors_total{app="purchase-svc",pod="purchase-svc-0",namespace="peaket",service="purchase-svc",route="/v1/events/{eventId}/holds",method="POST",status_class="5xx"}'
+        values: '1000000000 _x5 1000000019 _x2 1000000038 _x6 1000000057 _x3 1000000076 _x3 1000000095 _x4 1000000114 _x6 1000000133 _x3 1000000152 _x5 1000000171 _x2 1000000190 _x6 1000000209 _x3 1000000228 _x3 1000000247 _x4 1000000266 _x6 1000000285 _x3 1000000304 _x5 1000000323 _x2 1000000342 _x6 1000000361 _x3 1000000380 _x3 1000000399 _x4 1000000418 _x6 1000000437 _x3 1000000456 _x5 1000000475 _x2 1000000494 _x6 1000000513 _x3 1000000532 _x3 1000000551 _x11 1000000589 _x3 1000000608 _x5 1000000627 _x2 1000000646 _x6 1000000665 _x3 1000000684 _x3 1000000705 _x4 1000000726 _x6 1000000747 _x3 1000000768 _x5 1000000789 _x2 1000000810 _x6 1000000831 _x3 1000000852 _x3 1000000873 _x4 1000000894 _x6 1000000915 _x3 1000000936 _x5 1000000957 _x2 1000000978 _x6 1000000999 _x3 1000001020 _x3 1000001041 _x4 1000001062 _x6 1000001083 _x3 1000001104 _x5 1000001125 _x2 1000001146 _x6 1000001167 _x7 1000001209 _x4 1000001230 _x6 1000001251 _x3 1000001272 _x5 1000001293 _x2 1000001314 _x6 1000001335 _x3 1000001356 _x3 1000001377 _x4 1000001398 _x6 1000001419 _x3 1000001440'
+    promql_expr_test:
+      # 3분: 9.5배 → 없음
+      - expr: 'ALERTS{alertname="slo_onsale_fast_burn"}'
+        eval_time: 3m
+        exp_samples: []
+      - expr: '(peaket:slo_error_ratio:rate20s{journey="hold"}) * 0'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate20s{journey="hold"}) - 0.00475) <= bool 4.750e-12'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      # 1분~3분의 평가 24번 모두 20초 창 값이 있고, 그 값이 매번 9.5배(0을 채운 빈 창이 아니다)다(빠진 표본 2분 30초 포함)
+      - expr: 'count_over_time(peaket:slo_error_ratio:rate20s{journey="hold"}[2m])'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 24
+      - expr: '(min_over_time(peaket:slo_error_ratio:rate20s{journey="hold"}[2m])) * 0'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+      - expr: 'abs((min_over_time(peaket:slo_error_ratio:rate20s{journey="hold"}[2m])) - 0.00475) <= bool 4.750e-12'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      - expr: '(max_over_time(peaket:slo_error_ratio:rate20s{journey="hold"}[2m])) * 0'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+      - expr: 'abs((max_over_time(peaket:slo_error_ratio:rate20s{journey="hold"}[2m])) - 0.00475) <= bool 4.750e-12'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      - expr: 'max_over_time(peaket:slo:budget_alert10x:state{journey="hold"}[2m])'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{event_id="E1",journey="hold"}'
+            value: 0
+      # 5분 30초: 10.5배 → SEV1
+      - expr: 'ALERTS{alertname="slo_onsale_fast_burn"}'
+        eval_time: 5m30s
+        exp_samples:
+          - labels: 'ALERTS{alertname="slo_onsale_fast_burn",alertstate="firing",severity="sev1",kind="slo",event_id="E1",journey="hold"}'
+            value: 1
+      # 4분~6분의 평가 24번 모두 값이 있고 매번 10.5배이며 상태가 매번 1이다(빠진 표본 5분 포함)
+      - expr: 'count_over_time(peaket:slo_error_ratio:rate20s{journey="hold"}[2m])'
+        eval_time: 6m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 24
+      - expr: '(min_over_time(peaket:slo_error_ratio:rate20s{journey="hold"}[2m])) * 0'
+        eval_time: 6m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+      - expr: 'abs((min_over_time(peaket:slo_error_ratio:rate20s{journey="hold"}[2m])) - 0.00525) <= bool 5.250e-12'
+        eval_time: 6m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
+      - expr: 'min_over_time(peaket:slo:budget_alert10x:state{journey="hold"}[2m])'
+        eval_time: 6m
+        exp_samples:
+          - labels: '{event_id="E1",journey="hold"}'
+            value: 1
+      - expr: '(peaket:slo_error_ratio:rate20s{journey="hold"}) * 0'
+        eval_time: 6m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 0
+      - expr: 'abs((peaket:slo_error_ratio:rate20s{journey="hold"}) - 0.00525) <= bool 5.250e-12'
+        eval_time: 6m
+        exp_samples:
+          - labels: '{journey="hold"}'
+            value: 1
