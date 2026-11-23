@@ -11,6 +11,7 @@ const SESSION = '0190f3a1-7c2e-7a00-8000-0000000f5803';
 const A = '0190f3a1-7c2e-7a00-8000-0000000f5804';
 const B = '0190f3a1-7c2e-7a00-8000-0000000f5805';
 const C = '0190f3a1-7c2e-7a00-8000-0000000f5806';
+const D = '0190f3a1-7c2e-7a00-8000-0000000f5807';
 
 let store: MemoryScannerGateStore;
 let n = 0;
@@ -29,12 +30,13 @@ const scan = (ticketId: string, atMs: number, result: 'PASS' | 'REJECT', reason?
   knownSeq: 0,
   deviceSeq: n,
 });
-const accept = (scans: ScanEventInput[]) =>
+const accept = (scans: ScanEventInput[], o: { reentryAllowed?: boolean } = {}) =>
   store.acceptScans({
     eventId: EVENT,
     deviceId: DEVICE,
     sessionId: SESSION,
     sessions: { [SESSION]: { accountId: 'acc', validFromMs: T0 - 3_600_000, validUntilMs: T0 + 3_600_000 } },
+    ...(o.reentryAllowed === true ? { reentryAllowed: true } : {}),
     scans,
     nowMs: T0 + 3_600_000,
   });
@@ -42,7 +44,7 @@ const duplicates = () => [...store.flags.values()].filter((f) => f.kind === 'DUP
 
 beforeEach(() => {
   store = new MemoryScannerGateStore();
-  for (const id of [A, B, C]) store.seedTicket({ ticketId: id, eventId: EVENT, seatId: 'A-1', gateZone: '동문', status: 'ACTIVE' });
+  for (const id of [A, B, C, D]) store.seedTicket({ ticketId: id, eventId: EVENT, seatId: 'A-1', gateZone: '동문', status: 'ACTIVE' });
   n = 0;
 });
 
@@ -76,5 +78,22 @@ describe('IR-05 거부 기록은 통과 IN 중복 판정에 끼지 않는다', (
     expect(r.flags.map((f) => f.kind)).toEqual(['DUPLICATE']);
     expect(store.scans.get(second.id)).toMatchObject({ result: 'REJECT', reason: 'ALREADY_IN' });
     expect(store.scans.get(first.id)).toMatchObject({ result: 'PASS' });
+  });
+
+  test('재입장 허용 회차에서도 거부 기록은 REJECT/사유 그대로이고 NO_EXIT를 만들지 않는다', async () => {
+    const pass = scan(D, T0 + 10_000, 'PASS');
+    expect((await accept([pass], { reentryAllowed: true })).flags).toEqual([]);
+    for (const reason of ['BAD_SIGNATURE', 'QR_EXPIRED', 'KEY_UNKNOWN'] as const) {
+      const reject = scan(D, T0 + 20_000, 'REJECT', reason);
+      const r = await accept([reject], { reentryAllowed: true });
+      expect(r.flags, reason).toEqual([]);
+      expect(store.scans.get(reject.id), reason).toMatchObject({ result: 'REJECT', reason, flag: 'NONE' });
+      expect(store.scans.get(pass.id), reason).toMatchObject({ result: 'PASS' });
+    }
+    // 재입장 허용 회차의 PASS 다음 PASS는 지금처럼 확인 필요(퇴장 기록 없음)다
+    const second = scan(D, T0 + 40_000, 'PASS');
+    const r = await accept([second], { reentryAllowed: true });
+    expect(r.flags.map((f) => f.kind)).toEqual(['NO_EXIT']);
+    expect(store.scans.get(second.id)).toMatchObject({ result: 'CHECK', reason: 'NO_EXIT_RECORD' });
   });
 });

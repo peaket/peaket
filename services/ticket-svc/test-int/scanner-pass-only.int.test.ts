@@ -16,6 +16,7 @@ const ACCOUNT = '0190f3a1-7c2e-7a00-8000-0000000f5904';
 const A = '0190f3a1-7c2e-7a00-8000-0000000f5905';
 const B = '0190f3a1-7c2e-7a00-8000-0000000f5906';
 const C = '0190f3a1-7c2e-7a00-8000-0000000f5907';
+const D = '0190f3a1-7c2e-7a00-8000-0000000f5908';
 
 let pg: PostgresContainer;
 let database: Database;
@@ -36,12 +37,13 @@ const scan = (ticketId: string, atMs: number, result: 'PASS' | 'REJECT', reason?
   knownSeq: 0,
   deviceSeq: ++n,
 });
-const accept = (scans: ScanEventInput[]) =>
+const accept = (scans: ScanEventInput[], o: { reentryAllowed?: boolean } = {}) =>
   store.acceptScans({
     eventId: EVENT,
     deviceId: DEVICE,
     sessionId: SESSION,
     sessions: { [SESSION]: { accountId: ACCOUNT, validFromMs: T0 - 3_600_000, validUntilMs: T0 + 3_600_000 } },
+    ...(o.reentryAllowed === true ? { reentryAllowed: true } : {}),
     scans,
     nowMs: T0 + 3_600_000,
   });
@@ -60,7 +62,7 @@ beforeAll(async () => {
   await migrateTicket(pg.url);
   database = createDatabase({ url: pg.url, applicationName: 'ticket-svc-f054-ir05', max: 4 });
   store = new DrizzleScannerGateStore(database);
-  for (const ticketId of [A, B, C]) {
+  for (const ticketId of [A, B, C, D]) {
     await database.pool.query(
       `insert into ticket (id, account_id, payer_account_id, order_id, event_id, seat_id, gate_zone, status, issue_generation, qr_payload, key_hash, created_at)
        values ($1, $2, $2, $3, $4, $5, '동문', 'ACTIVE', 1, 'qr', 'hash', now())`,
@@ -105,5 +107,20 @@ describe('IR-05 Drizzle: 거부 기록은 통과 IN 중복 판정에 끼지 않�
     expect((await accept([second])).flags.map((f) => f.kind)).toEqual(['DUPLICATE']);
     expect((await rows([second.id]))[0]).toMatchObject({ result: 'REJECT', reason: 'ALREADY_IN' });
     expect(await duplicates(C)).toBe(1);
+  });
+
+  test('재입장 허용 회차에서도 거부 기록은 REJECT/사유 그대로이고 NO_EXIT를 만들지 않는다', async () => {
+    const pass = scan(D, T0 + 10_000, 'PASS');
+    expect((await accept([pass], { reentryAllowed: true })).flags).toEqual([]);
+    for (const reason of ['BAD_SIGNATURE', 'QR_EXPIRED', 'KEY_UNKNOWN'] as const) {
+      const reject = scan(D, T0 + 20_000, 'REJECT', reason);
+      const r = await accept([reject], { reentryAllowed: true });
+      expect(r.flags, reason).toEqual([]);
+      expect((await rows([reject.id]))[0], reason).toMatchObject({ result: 'REJECT', reason, flag: 'NONE' });
+      expect((await rows([pass.id]))[0], reason).toMatchObject({ result: 'PASS' });
+    }
+    const second = scan(D, T0 + 40_000, 'PASS');
+    expect((await accept([second], { reentryAllowed: true })).flags.map((f) => f.kind)).toEqual(['NO_EXIT']);
+    expect((await rows([second.id]))[0]).toMatchObject({ result: 'CHECK', reason: 'NO_EXIT_RECORD' });
   });
 });

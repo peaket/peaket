@@ -287,6 +287,42 @@ test('IR-04 로그아웃 뒤 재로그인한 스태프의 스캔은 새 세션 I
   await expect.poll(() => api.scans.at(-1)?.body?.[0]?.scannerSessionId).toBe(SESSION_B);
 });
 
+test('IR-04 업로드 401 invalid_token 뒤 새 토큰으로 로그인하면 새 세션 ID로 올리고 변경분 타이머도 새로 선다', async ({ page }) => {
+  const wallet = await walletKey();
+  await fakeDetector(page);
+  const api = await scannerApi(page, wallet, {
+    scanReply: (n) => (n === 1 ? { status: 401, type: 'unauthorized', headers: { 'www-authenticate': 'DPoP error="invalid_token"' } } : { status: 200 }),
+  });
+  await signedIn(page, tokenFor(SESSION_A));
+  await page.clock.install();
+  await startShift(page);
+  await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())));
+  await expect(verdict(page, '통과')).toBeVisible();
+  await goInApp(page, '/sync?live=1');
+  await page.getByRole('button', { name: '지금 동기화' }).click();
+  await expect(page).toHaveURL(/\/login(\?|$)/);
+  // 401로 런타임이 멈췄으면 60초가 지나도 옛 세션의 변경분 요청이 없어야 한다
+  const stoppedAt = api.changes;
+  await page.clock.fastForward(60_000);
+  expect(api.changes).toBe(stoppedAt);
+  // 새 스태프로 로그인해 SPA로 근무 준비에 간다(새로고침 없이)
+  await setStaffToken(page, tokenFor(SESSION_B));
+  await goInApp(page, '/setup?live=1');
+  const start = page.getByRole('button', { name: '스캔 시작' });
+  await expect(start).toBeEnabled({ timeout: 15_000 });
+  await start.click();
+  await expect(page).toHaveURL(/\/scan(\?|$)/);
+  await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())));
+  await expect(page.getByRole('alert')).toBeVisible();
+  await goInApp(page, '/sync?live=1');
+  await page.getByRole('button', { name: '지금 동기화' }).click();
+  await expect.poll(() => api.scans.at(-1)?.body?.[0]?.scannerSessionId).toBe(SESSION_B);
+  // 새 세션의 변경분 타이머가 다시 선다
+  const restartedAt = api.changes;
+  await page.clock.fastForward(60_000);
+  await expect.poll(() => api.changes).toBeGreaterThan(restartedAt);
+});
+
 test('IR-06 online·visibilitychange는 업로드뿐 아니라 변경분도 바로 받는다', async ({ page }) => {
   const wallet = await walletKey();
   await fakeDetector(page);
