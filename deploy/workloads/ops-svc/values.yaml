@@ -38,6 +38,9 @@ service:
     PEAKET_CORE_HTTP_URL: http://core-svc:8080
     # 봇 판정 표본 검토(BAT-197 BOT-080): 표본 판정 HUMAN·BOT을 trust-svc ApplyLabel로 반영한다(없으면 그 판정만 503)
     PEAKET_TRUST_GRPC_URL: trust-svc-grpc:50051
+    # 추가 검증 이의 결과 반영(F-06-7): queue-svc VerificationAppealService(이의 내용 읽기·대기 참여 반영). 같은 trust 주소로 라벨·판정 근거를 쓴다.
+    # staging·prod의 ops-svc는 queue·trust 주소가 없으면 시작하지 않는다(docs/features/bot-defense.md §12 'CS 처리 첫 구현')
+    PEAKET_QUEUE_GRPC_URL: queue-svc-grpc:50051
     # 표본 후보 원장은 분석 저장소 ClickHouse bot_sample_review다. 적재는 OPS-220 몫이라 아직 운영 표가 없다.
     # OPS-220 배포 때 Service 이름을 확인한다. 사용자는 읽기 전용 an_ops_reader이고 비밀은 Secret(ops-svc-secrets)에서 온다.
     PEAKET_BOT_REVIEW_SOURCE: clickhouse

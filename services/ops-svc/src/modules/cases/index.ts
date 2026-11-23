@@ -35,10 +35,33 @@ export { ReceiveCaseRequested, type CaseRequestResult } from './application/rece
 export { CsCases, type CsCaseView, type CsCaseUpdateBody } from './application/cs-cases.js';
 export { CS_CASE_DEADLINE_TICK_MS, CS_CASE_DUE_SOON_ALERT, CS_CASE_OVERDUE_ALERT, CsCaseDeadlineTick, csCaseAlertKey } from './application/cs-case-deadline-tick.js';
 export { CsApprovalFailureCases } from './application/approval-failure-cases.js';
+export {
+  APPEAL_CONTENT_MISSING,
+  CS_CASE_DISPATCH_FAILED_ALERT,
+  CS_CASE_DISPATCH_TICK_MS,
+  CsDispatchCallError,
+  NOT_CONFIGURED,
+  type AccountHolds,
+  type AppealContent,
+  type AppealLabels,
+  type AppealOutcome,
+  type CsAppealPorts,
+  type CsAppealStore,
+  type CsDispatchSignals,
+  type DispatchCall,
+  type DispatchState,
+  type VerdictEvidence,
+  type VerificationAppeals,
+} from './domain/verification-appeal.js';
+export { CsCaseDispatch, csCaseDispatchAlertKey } from './application/cs-case-dispatch.js';
+export { DECIDE_VERIFICATION_APPEAL, VerificationAppealDecision } from './application/verification-appeal-decision.js';
+export { VerificationAppealDetail } from './application/verification-appeal-detail.js';
+export { GrpcAccountHolds, GrpcAppealLabels, GrpcVerdictEvidence, GrpcVerificationAppeals } from './adapters/grpc-appeal-ports.js';
+export { PromCsDispatchSignals } from './adapters/prom-cs-dispatch-signals.js';
 export { MemoryCsCaseStore } from './adapters/memory-cs-case-store.js';
 export { DrizzleCsCaseStore } from './adapters/db/drizzle-cs-case-store.js';
 export { IdentityCsAssigneeDirectory } from './adapters/cs-assignee-directory.js';
 export { PromCsCaseSignals } from './adapters/prom-cs-case-signals.js';
-export { CasesModule, CsCaseDeadlineJob, csCaseKit, type CasesModuleOptions, type CsCaseKit, type CsCaseKitOptions } from './cases.module.js';
+export { CasesModule, CsCaseDeadlineJob, CsCaseDispatchJob, csCaseKit, type CasesModuleOptions, type CsCaseKit, type CsCaseKitOptions } from './cases.module.js';
 export { CaseRequestedBody, CasesController } from './inbound/cases.controller.js';
 export { OpsCasesController } from './inbound/ops-cases.controller.js';

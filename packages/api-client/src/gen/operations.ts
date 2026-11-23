@@ -53,6 +53,7 @@ export type OperationId =
   | 'createOpsAuthUnlockLink'
   | 'createOpsBotReviewSampleJudgement'
   | 'createOpsCaseReply'
+  | 'createOpsCaseVerificationAppealDecision'
   | 'createOpsCommand'
   | 'createOpsCommandApproval'
   | 'createOpsCommandDryRun'
@@ -456,6 +457,7 @@ export const OPERATIONS = {
   createOpsAuthUnlockLink: {operationId: "createOpsAuthUnlockLink",method: "POST",path: "/v1/ops/auth/unlock-links",host: "ops-api",kind: "write",cookie: false},
   createOpsBotReviewSampleJudgement: {operationId: "createOpsBotReviewSampleJudgement",method: "POST",path: "/v1/ops/bot-review-samples/{sampleId}/judgement",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsCaseReply: {operationId: "createOpsCaseReply",method: "POST",path: "/v1/ops/cases/{caseId}/replies",host: "ops-api",kind: "write",idempotent: true,cookie: true},
+  createOpsCaseVerificationAppealDecision: {operationId: "createOpsCaseVerificationAppealDecision",method: "POST",path: "/v1/ops/cases/{caseId}/verification-appeal-decision",host: "ops-api",kind: "write",idempotent: true,cookie: true,ifMatch: true},
   createOpsCommand: {operationId: "createOpsCommand",method: "POST",path: "/v1/ops/commands",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsCommandApproval: {operationId: "createOpsCommandApproval",method: "POST",path: "/v1/ops/commands/{commandId}/approvals",host: "ops-api",kind: "write",cookie: true},
   createOpsCommandDryRun: {operationId: "createOpsCommandDryRun",method: "POST",path: "/v1/ops/command-dry-runs",host: "ops-api",kind: "write",cookie: true},

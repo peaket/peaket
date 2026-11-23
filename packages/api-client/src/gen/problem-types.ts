@@ -44,6 +44,7 @@ export type ProblemType =
   | 'cancel-deadline-passed'
   | 'cancellation-conflict'
   | 'cancellation-not-account-pending'
+  | 'case-action-not-applicable'
   | 'case-already-resolved'
   | 'case-assignee-invalid'
   | 'case-not-actioned'
@@ -431,6 +432,7 @@ export const PROBLEM_TYPES = {
   'cancel-deadline-passed': { status: 409, title: "취소할 수 있는 시각이 지났습니다" },
   'cancellation-conflict': { status: 409, title: "지금은 취소할 수 없습니다" },
   'cancellation-not-account-pending': { status: 409, title: "환급 계좌를 기다리는 취소가 아닙니다" },
+  'case-action-not-applicable': { status: 409, title: "이 건 종류에는 이 처리가 없습니다" },
   'case-already-resolved': { status: 409, title: "이미 해결한 건입니다" },
   'case-assignee-invalid': { status: 422, title: "맡길 수 없는 계정입니다" },
   'case-not-actioned': { status: 409, title: "조치하지 않은 사건입니다" },

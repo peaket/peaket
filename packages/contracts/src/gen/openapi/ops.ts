@@ -2793,6 +2793,40 @@ export const GetOpsCaseResponse = zod.object({
   "height": zod.int().optional()
 }).describe('후기에 붙은 사진(ADR-0066). 메타데이터를 지운 파생본 2종만 있고 원본은 없다. 이름은 서버가 만든 ID')).optional()
 }).nullish().describe('신고 대상 후기(본문·별점·사진 파생본)'),
+  "verificationAppeal": zod.object({
+  "appealId": zod.uuid().describe('이의 ID(건의 targetRef와 같다)'),
+  "content": zod.enum(['AVAILABLE', 'PENDING', 'GONE']).describe('AVAILABLE 이의 내용을 ops DB(verification_case)에 옮김. PENDING 아직 옮기지 못함(queue-svc에 닿지 못함). GONE 옮기기 전에 queue-svc 보관 기간이 지나 내용이 없음(docs/data.md q:appeal \'남는 한계\')'),
+  "text": zod.string().nullish().describe('이의 글(평문, NFC 정규화 뒤 0~1,000자). 빈 글이면 설명 요구만이다. content가 AVAILABLE이 아니면 null. 화면은 글자 노드로만 그린다'),
+  "request": zod.union([zod.literal('EXPLANATION'),zod.literal('REVIEW'),zod.literal(null)]).nullish().describe('EXPLANATION 설명 요구(글이 빔), REVIEW 설명과 재검토 신청(글이 있음). content가 AVAILABLE이 아니면 null'),
+  "reasonCategory": zod.union([zod.literal('RAPID_REQUESTS'),zod.literal('DEVICE_HISTORY'),zod.literal('NETWORK'),zod.literal('INTERACTION'),zod.literal('HUMAN_CHECK'),zod.literal('SHARED_PATTERN'),zod.literal(null)]).nullish().describe('격리 때 이용자에게 보인 사유 범주(QueueVerificationState.verificationReason과 같은 값). 내용이 없으면 건의 category에서 읽고, 모르는 값이면 null'),
+  "receivedAt": zod.iso.datetime({"offset":true}).nullish().describe('이의 접수 시각. content가 AVAILABLE이 아니면 null'),
+  "entryState": zod.union([zod.literal('VERIFYING'),zod.literal('PASSED'),zod.literal('ENDED'),zod.literal(null)]).nullable().describe('그 대기 참여의 지금 상태(상세를 열 때 queue-svc GetVerificationAppeal의 entry_state를 읽는다). 읽지 못하면 null'),
+  "evidence": zod.object({
+  "state": zod.enum(['FOUND', 'NOT_FOUND', 'UNAVAILABLE']).describe('FOUND 근거 키가 있음. NOT_FOUND 근거 키가 없음(30일 [가정]이 지났거나 키를 잃음, found false). UNAVAILABLE trust-svc에 닿지 못했거나 이의 내용(회차·pid)을 아직 옮기지 못함'),
+  "hardSignal": zod.union([zod.literal('NONE'),zod.literal('BLOCK_LIST'),zod.literal('HONEYPOT'),zod.literal(null)]).nullish().describe('판정을 앞에서 끝낸 확정 신호(trust.proto HardSignal)'),
+  "source": zod.union([zod.literal('REALTIME'),zod.literal('REASSESS'),zod.literal(null)]).nullish().describe('판정 출처(실시간·재평가)'),
+  "decidedAt": zod.iso.datetime({"offset":true}).nullish().describe('판정 시각'),
+  "deviceChallenges": zod.object({
+  "sent": zod.int().optional(),
+  "passed": zod.int().optional(),
+  "failed": zod.int().optional()
+}).nullish().describe('그 기기의 지난 30일 추가 검증 보냄·통과·실패 수(이번 시도 포함, 기기 식별값 없이 수만)')
+}).describe('판정 근거(상세를 열 때 trust-svc GetVerdictEvidence를 읽는다). FOUND가 아니면 나머지 칸은 null이고 CS는 사유 범주로만 판단한다'),
+  "decision": zod.object({
+  "outcome": zod.enum(['ACCEPTED', 'REJECTED']).optional(),
+  "decidedBy": zod.string().optional().describe('결정한 관리 계정 ID(이름은 싣지 않는다)'),
+  "decidedAt": zod.iso.datetime({"offset":true}).optional(),
+  "blockListChange": zod.union([zod.literal('NONE'),zod.literal('REMOVED'),zod.literal('DEVICE_NOT_FOUND'),zod.literal(null)]).nullish().describe('인정의 라벨 반영(trust-svc ApplyLabel) 응답의 차단 목록 변화(Q-T48 ②). 기각이거나 아직 반영하지 못했으면 null')
+}).nullable().describe('결정했으면 그 값, 아니면 null'),
+  "reflectState": zod.enum(['NONE', 'PENDING', 'APPLIED', 'FAILED']).describe('보낼 호출의 요약. NONE 보낼 호출 없음. PENDING 보내는 중(다시 보내기 포함). APPLIED 모두 반영. FAILED 하나라도 반영 실패(화면 \'반영 실패\', SEV3 경보 CS_CASE_DISPATCH_FAILED. 다시 보낼 수 있는 실패면 배경 작업이 계속 보낸다)'),
+  "dispatch": zod.array(zod.object({
+  "call": zod.enum(['APPEAL_COPY', 'ACCOUNT_HOLD_OPEN', 'QUEUE_RESOLVE', 'TRUST_LABEL', 'ACCOUNT_HOLD_CLOSE']),
+  "state": zod.enum(['PENDING', 'APPLIED', 'FAILED']),
+  "attempts": zod.int().describe('보낸 횟수'),
+  "lastError": zod.string().nullable().describe('마지막 실패의 gRPC 상태 이름(UNAVAILABLE 등)이나 APPEAL_CONTENT_MISSING·NOT_CONFIGURED. 받은 값·오류 원문은 싣지 않는다'),
+  "updatedAt": zod.iso.datetime({"offset":true})
+})).describe('보낼 호출마다 한 줄(docs/data.md cs_case_dispatch). 차례는 APPEAL_COPY, ACCOUNT_HOLD_OPEN, QUEUE_RESOLVE, TRUST_LABEL, ACCOUNT_HOLD_CLOSE이고 없는 호출은 빠진다')
+}).nullish().describe('VERIFICATION_APPEAL만(그 밖 종류에는 칸이 없다). 이의 글·사유 범주·판정 근거의 범주 값·대기 참여 상태·결정·반영 상태다. pid·계정 ID·기기 가명·점수 원값·가중치·기준값·프로필 판은 싣지 않는다(docs/features/bot-defense.md §12 \'판정에 쓰는 자료\'·\'CS 처리 첫 구현\', 추천 적용 2026-11-23, 기능 F-06-7, ADR-0364 결정 9, B-T28 ①)'),
   "statementDispute": zod.object({
   "statementId": zod.string().optional(),
   "kind": zod.enum(['EVENT', 'PRODUCT']).optional(),
@@ -2814,7 +2848,7 @@ export const GetOpsCaseResponse = zod.object({
 })).describe('CS 처리함 건 상세(GET /v1/ops/cases/{caseId}, 추천 적용 2026-10-19, ADR-0066). 신고한 계정은 싣지 않는다')
 
 /**
- * FR-057, POL-038. 정책 밖 돈·소유권 처리는 이 경로가 아니라 승인 업무(approval-requests)로 한다. 누가 갱신하는가: CS 담당자(cs_agent·cs_lead)는 CS 담당자 목록에 나오는 건을, operator·commander는 지급·대사·KYC 건(SELLER_KYC_REQUIRED, PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED, PORTONE_PAYOUT_EXECUTION, PORTONE_LEDGER_MISMATCH, PG_BALANCE_MISMATCH)을 갱신한다(docs/design/d5 §7.6 '정산 건의 나눔'의 처리 버튼, docs/features/settlement.md §9). 서버가 건 종류와 역할로 다시 판정하고, 맞지 않으면 403이다(추천 적용 2026-10-30). 배정은 cs_agent가 자기에게 맡거나 자기 배정을 풀 때만, cs_lead는 활성 CS 담당자 누구에게나 한다. 상태는 OPEN → IN_PROGRESS → RESOLVED, OPEN → RESOLVED이고 RESOLVED에는 resultNote(1~2,000자)가 필요하다. 200 응답은 ETag(판 번호)를 싣고, 갱신마다 감사 체인에 행위자·이전·다음 상태·배정을 남긴다(메모 본문은 남기지 않는다, 추천 적용 2026-11-23, ADR-0364 결정 5, 시험 R-T49)
+ * FR-057, POL-038. 정책 밖 돈·소유권 처리는 이 경로가 아니라 승인 업무(approval-requests)로 한다. 누가 갱신하는가: CS 담당자(cs_agent·cs_lead)는 CS 담당자 목록에 나오는 건을, operator·commander는 지급·대사·KYC 건(SELLER_KYC_REQUIRED, PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED, PORTONE_PAYOUT_EXECUTION, PORTONE_LEDGER_MISMATCH, PG_BALANCE_MISMATCH)을 갱신한다(docs/design/d5 §7.6 '정산 건의 나눔'의 처리 버튼, docs/features/settlement.md §9). 서버가 건 종류와 역할로 다시 판정하고, 맞지 않으면 403이다(추천 적용 2026-10-30). 배정은 cs_agent가 자기에게 맡거나 자기 배정을 풀 때만, cs_lead는 활성 CS 담당자 누구에게나 한다. 상태는 OPEN → IN_PROGRESS → RESOLVED, OPEN → RESOLVED이고 RESOLVED에는 resultNote(1~2,000자)가 필요하다. 200 응답은 ETag(판 번호)를 싣고, 갱신마다 감사 체인에 행위자·이전·다음 상태·배정을 남긴다(메모 본문은 남기지 않는다, 추천 적용 2026-11-23, ADR-0364 결정 5, 시험 R-T49). 추가 검증 이의(VERIFICATION_APPEAL) 건은 이 경로로 해결하지 않는다: status RESOLVED면 409 case-action-not-applicable이고 배정·진행 중은 받는다. 인정·기각은 POST /v1/ops/cases/{caseId}/verification-appeal-decision이다(추천 적용 2026-11-23, 기능 F-06-7, ADR-0364 결정 9)
  * @summary CS 처리함 건 갱신(담당 배정, 상태, 결과 통지 기록)
  */
 export const UpdateOpsCaseParams = zod.object({
@@ -2854,6 +2888,52 @@ export const UpdateOpsCaseResponse = zod.object({
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "resolvedAt": zod.iso.datetime({"offset":true}).nullish(),
   "resultNote": zod.string().max(updateOpsCaseResponseResultNoteMax).nullish().describe('해결 메모(평문). 해결할 때 필수'),
+  "reportSummary": zod.object({
+  "total": zod.int().optional(),
+  "byCategory": zod.record(zod.string(), zod.int()).optional()
+}).optional().describe('CONTENT_REPORT·RIGHTS_REQUEST만. 신고 수와 사유별 수. 신고자는 싣지 않는다(ADR-0066)')
+}).describe('CS 처리함 건(POL-038)')
+
+/**
+ * FR-020, FR-057, POL-006, 시험 B-T28, 추천 적용 2026-11-23, 기능 F-06-7, ADR-0364 결정 8·9. 동작의 정본은 docs/features/bot-defense.md §12 'CS 처리 첫 구현'이다. VERIFICATION_APPEAL 건만 받는다(그 밖 종류는 409 case-action-not-applicable). 결정은 CS 담당자(cs_agent·cs_lead)만 하고 operator·commander는 403 case-update-not-allowed다(경로 역할에 넷을 둔 것은 그 오류 이름을 주려는 것이다. viewer는 경로 역할에서 403). 맡은 사람이 아니어도 CS 담당자면 결정하고 배정은 바꾸지 않는다. 결정·건 해결(판 +1, 결과 메모)·보낼 호출 기록(docs/data.md cs_case_dispatch)·감사 기록을 ops DB 한 트랜잭션에 쓰고, 그 건의 보낼 호출을 한 번씩 바로 보내 본 뒤 결과와 상관없이 202로 답한다. 실패한 호출은 배경 작업이 같은 건 ID·판으로 다시 보낸다. 응답은 해결된 건이고 ETag(새 판)를 싣는다. 반영 상태는 GET /v1/ops/cases/{caseId}의 verificationAppeal로 본다. 확인 차례는 idempotency-key-invalid 400 → 본문 400 → 404 → 403 → 409 case-action-not-applicable → 428·412 → 409 case-already-resolved → 메모 400·422다. 메모 2,000자는 받는 층 본문 검사(모양·4,000자 상한, PATCH와 같다)가 아니라 이 차례의 끝에서 코드 포인트로 센다. 본문의 maxLength는 계약 표시다(시험 리뷰 1 뒤 정함, 추천 적용 2026-11-23)
+ * @summary 추가 검증 이의 인정·기각(SCR-045 이의 심사, CS 담당자만)
+ */
+export const CreateOpsCaseVerificationAppealDecisionParams = zod.object({
+  "caseId": zod.string()
+})
+
+export const CreateOpsCaseVerificationAppealDecisionHeader = zod.object({
+  "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)'),
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
+})
+
+export const createOpsCaseVerificationAppealDecisionBodyResultNoteMax = 2000;
+
+
+
+export const CreateOpsCaseVerificationAppealDecisionBody = zod.object({
+  "outcome": zod.enum(['ACCEPTED', 'REJECTED']).describe('ACCEPTED 인정(대기표 복귀와 사람 라벨, 근거가 차단 기기 목록이면 그 키를 지움), REJECTED 기각(이 대기 참여만 끝남, 계정 제재가 아니다)'),
+  "resultNote": zod.string().max(createOpsCaseVerificationAppealDecisionBodyResultNoteMax).optional().describe('결과 메모(1~2,000자, 평문). 없거나 공백만이면 422 case-result-note-required, 2,001자 이상은 400 invalid-body')
+}).strict()
+
+export const createOpsCaseVerificationAppealDecisionResponseResultNoteMax = 2000;
+
+
+
+export const CreateOpsCaseVerificationAppealDecisionResponse = zod.object({
+  "caseId": zod.string().optional(),
+  "kind": zod.enum(['UNKNOWN_PAYMENT', 'REFUND_FAILED', 'FLAGGED', 'REFUND_ACCOUNT_PENDING', 'COMPENSATION_PENDING', 'ABUSE_FLAG', 'DISPUTE', 'JUDGEMENT_PENDING', 'STATEMENT_DISPUTE', 'SELLER_KYC_REQUIRED', 'PAYOUT_ERROR', 'PAYOUT_FAILED', 'PAYOUT_DELAYED', 'PORTONE_PAYOUT_EXECUTION', 'SCANNER_UNREPORTED', 'KOPIS_REPORT_FAILED', 'VERIFICATION_APPEAL', 'APPROVAL_EXECUTION_FAILED', 'RETURN_DELAYED', 'MINOR_CONTRACT_CANCEL', 'INQUIRY', 'CONTENT_REPORT', 'RIGHTS_REQUEST', 'PORTONE_LEDGER_MISMATCH', 'TICKET_NOT_ISSUED', 'PG_BALANCE_MISMATCH', 'APPEAL', 'FRAUD_OBJECTION_COMPENSATION']).optional().describe('APPEAL은 소명(예매 제한·양도 회수 대상 팬의 사정 설명, POST /v1/appeals). core-svc support 모듈이 받아 건을 요청하고, 건은 그 대상(예매 제한, 양도 회수 승인 업무)에 이어진다. 결과 기한은 예매 제한 소명이 3영업일 [가정], 양도 회수 소명이 그 승인 업무의 기한(입장 시작 전)이다(추천 적용 2026-10-30, docs/features/transfer-refund.md §7.1). PG_BALANCE_MISMATCH는 결제사 잔액 대사 차이(결제사·상점별 지급대행 잔액이 PEAKET 원장과 다름. 차이가 0이 아니면 건을 만들고 1만 원 [가정]을 넘으면 SEV3, 지급 묶음은 멈추지 않는다, settlement §5.5, 추천 적용 2026-10-28, 기술 검토 중간-043). TICKET_NOT_ISSUED는 결제 뒤 미발권(승인 뒤 발권 기한 30분 [가정]을 넘겼거나 다시 보내도 같은 오류로 자동 재시도를 멈춘 주문. 확인 4시간 [가정], 발권 다시 실행 또는 \'시스템 잘못이 확인된 환불\', 추천 적용 2026-10-28, ADR-0106). PORTONE_LEDGER_MISMATCH는 포트원 원장 불일치(PEAKET 지급과 이어지지 않거나 금액·받는 계좌가 다른 출금, 콘솔에서 바뀐 파트너 정산 계좌, 이체 원장과 다른 잔액 입력). targetRef는 포트원 이체 ID·파트너 ID·지급 묶음 ID이고, 열린 건에서 (kind, targetRef)가 하나다(settlement §5.3, 추천 적용 2026-10-28, ADR-0108). RETURN_DELAYED는 굿즈 반품 요청 뒤 7일 [가정] 동안 판매자 도착 확인이 없는 건(transfer-refund §7.1). MINOR_CONTRACT_CANCEL은 미성년자 계약 취소 요청(확인 결과 안내 3영업일, 승인 뒤 환급 3영업일, POL-038 ⑧). 추천 적용 2026-10-14, ADR-0062. INQUIRY는 고객 문의(답변 3영업일 [가정], 문의 유형 \'공연(판매자) 관련 분쟁\'은 DISPUTE, \'미성년자 계약 취소\'는 MINOR_CONTRACT_CANCEL로 온다), CONTENT_REPORT는 게시물 신고(같은 후기의 신고는 한 건, 결과 3영업일 [가정]), RIGHTS_REQUEST는 권리 침해 삭제 요청(정보통신망법 §44의2, 1영업일 [가정]). 추천 적용 2026-10-19, ADR-0066'),
+  "targetRef": zod.string().optional().describe('문의 건은 inquiryId, 신고 건은 신고된 reviewId, 소명 건은 appealId, 포트원 원장 불일치는 포트원 이체 ID·파트너 ID·지급 묶음 ID'),
+  "progressDueAt": zod.iso.datetime({"offset":true}).optional(),
+  "resultDueAt": zod.iso.datetime({"offset":true}).optional(),
+  "status": zod.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED']).optional(),
+  "category": zod.string().optional().describe('건 요청의 category(문의 유형·신고 사유·소명 대상 종류·DEDUCTION_GAP·ENTRY_AFTER_CANCEL, 승인 업무 실행 실패면 승인 종류). 없으면 빈 글(추천 적용 2026-11-23, ADR-0364)'),
+  "assignee": zod.string().nullish().describe('담당 관리 계정 ID. 이름은 싣지 않는다. cs_agent는 자기만 맡고 풀며, cs_lead는 활성 CS 담당자 누구에게나 맡긴다(ADR-0364 결정 5)'),
+  "version": zod.int().optional().describe('판 번호(data.md cs_case.version). 단건 응답의 ETag와 같은 값이고 PATCH의 If-Match에 쓴다'),
+  "dueState": zod.enum(['ON_TRACK', 'DUE_SOON', 'OVERDUE', 'NONE']).optional().describe('서버가 영업일 달력으로 센 기한 상태. DUE_SOON은 이른 기한의 1영업일 전이 지남, OVERDUE는 기한이 지남, NONE은 기한 없음이나 해결(추천 적용 2026-11-23, ADR-0364 결정 1·3). 화면은 이 값으로 배지와 위 배너를 그린다(공휴일 달력을 화면이 갖지 않는다)'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "resolvedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "resultNote": zod.string().max(createOpsCaseVerificationAppealDecisionResponseResultNoteMax).nullish().describe('해결 메모(평문). 해결할 때 필수'),
   "reportSummary": zod.object({
   "total": zod.int().optional(),
   "byCategory": zod.record(zod.string(), zod.int()).optional()

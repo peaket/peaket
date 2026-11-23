@@ -13,6 +13,7 @@ import type { CsCase } from './csCase';
 import type { CsCaseDetailReportsItem } from './csCaseDetailReportsItem';
 import type { CsCaseDetailReview } from './csCaseDetailReview';
 import type { CsCaseDetailStatementDispute } from './csCaseDetailStatementDispute';
+import type { CsCaseDetailVerificationAppeal } from './csCaseDetailVerificationAppeal';
 import type { InquiryMessage } from './inquiryMessage';
 
 /**
@@ -28,6 +29,11 @@ export type CsCaseDetail = CsCase & {
      * @nullable
      */
   review?: CsCaseDetailReview;
+  /**
+     * VERIFICATION_APPEAL만(그 밖 종류에는 칸이 없다). 이의 글·사유 범주·판정 근거의 범주 값·대기 참여 상태·결정·반영 상태다. pid·계정 ID·기기 가명·점수 원값·가중치·기준값·프로필 판은 싣지 않는다(docs/features/bot-defense.md §12 '판정에 쓰는 자료'·'CS 처리 첫 구현', 추천 적용 2026-11-23, 기능 F-06-7, ADR-0364 결정 9, B-T28 ①)
+     * @nullable
+     */
+  verificationAppeal?: CsCaseDetailVerificationAppeal;
   /**
      * STATEMENT_DISPUTE만. 그 정산서 하나의 금액 항목·상태·이의 내용이다. 결제사(pg·결제 상점), 결제사 내부 ID, 결제사 오류 원문, 정산 계좌는 싣지 않는다(SettlementStatement와 다른 모양이다). cs_lead는 이 건에서 이의 기각(POST /v1/ops/settlements/{statementId}/dispute-dismissal)이나 이의를 인정한 수기 조정 요청(POST /v1/ops/settlements/{statementId}/adjustments)을 부른다(소유자 결정 2026-10-30, open-items 72번, 칸은 추천 적용 2026-10-30, docs/features/settlement.md §9, docs/design/d5 §7.6)
      * @nullable

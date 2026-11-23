@@ -89,6 +89,7 @@ import type {
   CreateOpsApprovalRequestWithdrawalBody,
   CreateOpsArtistBody,
   CreateOpsAuditCheckpointBody,
+  CreateOpsCaseVerificationAppealDecisionBody,
   CreateOpsCommandExtensionBody,
   CreateOpsCommandPostReviewBody,
   CreateOpsCommandPostReviewConfirmationBody,
@@ -7809,7 +7810,7 @@ export const getUpdateOpsCaseUrl = (caseId: string,) => {
 }
 
 /**
- * FR-057, POL-038. 정책 밖 돈·소유권 처리는 이 경로가 아니라 승인 업무(approval-requests)로 한다. 누가 갱신하는가: CS 담당자(cs_agent·cs_lead)는 CS 담당자 목록에 나오는 건을, operator·commander는 지급·대사·KYC 건(SELLER_KYC_REQUIRED, PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED, PORTONE_PAYOUT_EXECUTION, PORTONE_LEDGER_MISMATCH, PG_BALANCE_MISMATCH)을 갱신한다(docs/design/d5 §7.6 '정산 건의 나눔'의 처리 버튼, docs/features/settlement.md §9). 서버가 건 종류와 역할로 다시 판정하고, 맞지 않으면 403이다(추천 적용 2026-10-30). 배정은 cs_agent가 자기에게 맡거나 자기 배정을 풀 때만, cs_lead는 활성 CS 담당자 누구에게나 한다. 상태는 OPEN → IN_PROGRESS → RESOLVED, OPEN → RESOLVED이고 RESOLVED에는 resultNote(1~2,000자)가 필요하다. 200 응답은 ETag(판 번호)를 싣고, 갱신마다 감사 체인에 행위자·이전·다음 상태·배정을 남긴다(메모 본문은 남기지 않는다, 추천 적용 2026-11-23, ADR-0364 결정 5, 시험 R-T49)
+ * FR-057, POL-038. 정책 밖 돈·소유권 처리는 이 경로가 아니라 승인 업무(approval-requests)로 한다. 누가 갱신하는가: CS 담당자(cs_agent·cs_lead)는 CS 담당자 목록에 나오는 건을, operator·commander는 지급·대사·KYC 건(SELLER_KYC_REQUIRED, PAYOUT_ERROR·PAYOUT_FAILED·PAYOUT_DELAYED, PORTONE_PAYOUT_EXECUTION, PORTONE_LEDGER_MISMATCH, PG_BALANCE_MISMATCH)을 갱신한다(docs/design/d5 §7.6 '정산 건의 나눔'의 처리 버튼, docs/features/settlement.md §9). 서버가 건 종류와 역할로 다시 판정하고, 맞지 않으면 403이다(추천 적용 2026-10-30). 배정은 cs_agent가 자기에게 맡거나 자기 배정을 풀 때만, cs_lead는 활성 CS 담당자 누구에게나 한다. 상태는 OPEN → IN_PROGRESS → RESOLVED, OPEN → RESOLVED이고 RESOLVED에는 resultNote(1~2,000자)가 필요하다. 200 응답은 ETag(판 번호)를 싣고, 갱신마다 감사 체인에 행위자·이전·다음 상태·배정을 남긴다(메모 본문은 남기지 않는다, 추천 적용 2026-11-23, ADR-0364 결정 5, 시험 R-T49). 추가 검증 이의(VERIFICATION_APPEAL) 건은 이 경로로 해결하지 않는다: status RESOLVED면 409 case-action-not-applicable이고 배정·진행 중은 받는다. 인정·기각은 POST /v1/ops/cases/{caseId}/verification-appeal-decision이다(추천 적용 2026-11-23, 기능 F-06-7, ADR-0364 결정 9)
  * @summary CS 처리함 건 갱신(담당 배정, 상태, 결과 통지 기록)
  */
 export const updateOpsCase = async (caseId: string,
@@ -7888,6 +7889,147 @@ export const useUpdateOpsCase = <TError = ErrorType<ProblemResponse>,
         TContext
       > => {
       return useMutation(getUpdateOpsCaseMutationOptions(options), queryClient);
+    }
+    export type createOpsCaseVerificationAppealDecisionResponse202 = {
+  data: CsCase
+  status: 202
+}
+
+export type createOpsCaseVerificationAppealDecisionResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsCaseVerificationAppealDecisionResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsCaseVerificationAppealDecisionResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsCaseVerificationAppealDecisionResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsCaseVerificationAppealDecisionResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsCaseVerificationAppealDecisionResponse412 = {
+  data: ProblemResponse
+  status: 412
+}
+
+export type createOpsCaseVerificationAppealDecisionResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsCaseVerificationAppealDecisionResponse428 = {
+  data: ProblemResponse
+  status: 428
+}
+
+export type createOpsCaseVerificationAppealDecisionResponseSuccess = (createOpsCaseVerificationAppealDecisionResponse202) & {
+  headers: Headers;
+};
+export type createOpsCaseVerificationAppealDecisionResponseError = (createOpsCaseVerificationAppealDecisionResponse400 | createOpsCaseVerificationAppealDecisionResponse401 | createOpsCaseVerificationAppealDecisionResponse403 | createOpsCaseVerificationAppealDecisionResponse404 | createOpsCaseVerificationAppealDecisionResponse409 | createOpsCaseVerificationAppealDecisionResponse412 | createOpsCaseVerificationAppealDecisionResponse422 | createOpsCaseVerificationAppealDecisionResponse428) & {
+  headers: Headers;
+};
+
+export const getCreateOpsCaseVerificationAppealDecisionUrl = (caseId: string,) => {
+
+
+
+
+  return `/v1/ops/cases/${encodeURIComponent(String(caseId))}/verification-appeal-decision`
+}
+
+/**
+ * FR-020, FR-057, POL-006, 시험 B-T28, 추천 적용 2026-11-23, 기능 F-06-7, ADR-0364 결정 8·9. 동작의 정본은 docs/features/bot-defense.md §12 'CS 처리 첫 구현'이다. VERIFICATION_APPEAL 건만 받는다(그 밖 종류는 409 case-action-not-applicable). 결정은 CS 담당자(cs_agent·cs_lead)만 하고 operator·commander는 403 case-update-not-allowed다(경로 역할에 넷을 둔 것은 그 오류 이름을 주려는 것이다. viewer는 경로 역할에서 403). 맡은 사람이 아니어도 CS 담당자면 결정하고 배정은 바꾸지 않는다. 결정·건 해결(판 +1, 결과 메모)·보낼 호출 기록(docs/data.md cs_case_dispatch)·감사 기록을 ops DB 한 트랜잭션에 쓰고, 그 건의 보낼 호출을 한 번씩 바로 보내 본 뒤 결과와 상관없이 202로 답한다. 실패한 호출은 배경 작업이 같은 건 ID·판으로 다시 보낸다. 응답은 해결된 건이고 ETag(새 판)를 싣는다. 반영 상태는 GET /v1/ops/cases/{caseId}의 verificationAppeal로 본다. 확인 차례는 idempotency-key-invalid 400 → 본문 400 → 404 → 403 → 409 case-action-not-applicable → 428·412 → 409 case-already-resolved → 메모 400·422다. 메모 2,000자는 받는 층 본문 검사(모양·4,000자 상한, PATCH와 같다)가 아니라 이 차례의 끝에서 코드 포인트로 센다. 본문의 maxLength는 계약 표시다(시험 리뷰 1 뒤 정함, 추천 적용 2026-11-23)
+ * @summary 추가 검증 이의 인정·기각(SCR-045 이의 심사, CS 담당자만)
+ */
+export const createOpsCaseVerificationAppealDecision = async (caseId: string,
+    createOpsCaseVerificationAppealDecisionBody: CreateOpsCaseVerificationAppealDecisionBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsCaseVerificationAppealDecisionResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsCaseVerificationAppealDecisionResponseSuccess>(getCreateOpsCaseVerificationAppealDecisionUrl(caseId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createOpsCaseVerificationAppealDecisionBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsCaseVerificationAppealDecisionMutationKey = () => ['createOpsCaseVerificationAppealDecision'] as const;
+
+export const getCreateOpsCaseVerificationAppealDecisionMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsCaseVerificationAppealDecision>>, TError,CreateOpsCaseVerificationAppealDecisionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsCaseVerificationAppealDecision>>, TError,CreateOpsCaseVerificationAppealDecisionMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsCaseVerificationAppealDecisionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsCaseVerificationAppealDecision>>, CreateOpsCaseVerificationAppealDecisionMutationVariables> = (props) => {
+          const {caseId,data} = props ?? {};
+
+          return  createOpsCaseVerificationAppealDecision(caseId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsCaseVerificationAppealDecisionMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsCaseVerificationAppealDecision>>>
+    export type CreateOpsCaseVerificationAppealDecisionMutationBody = BodyType<CreateOpsCaseVerificationAppealDecisionBody>
+    export type CreateOpsCaseVerificationAppealDecisionMutationError = ErrorType<ProblemResponse | UnauthorizedResponse>
+    export type CreateOpsCaseVerificationAppealDecisionMutationVariables = {caseId: string;data: BodyType<CreateOpsCaseVerificationAppealDecisionBody>}
+
+    /**
+ * @summary 추가 검증 이의 인정·기각(SCR-045 이의 심사, CS 담당자만)
+ */
+export const useCreateOpsCaseVerificationAppealDecision = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsCaseVerificationAppealDecision>>, TError,CreateOpsCaseVerificationAppealDecisionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsCaseVerificationAppealDecision>>,
+        TError,
+        CreateOpsCaseVerificationAppealDecisionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsCaseVerificationAppealDecisionMutationOptions(options), queryClient);
     }
     export type createOpsCaseReplyResponse201 = {
   data: InquiryMessage

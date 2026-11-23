@@ -21,7 +21,7 @@ import {
 } from './modules/audit/index.js';
 import { CommandsModule, type CommandExecutor, type CommandsModuleExtras, type HandleCommandEvent } from './modules/commands/index.js';
 import { DrizzleCommandStore, IdentityActiveCommanders, MemoryCommandStore } from './modules/commands/index.js';
-import { CasesModule, DrizzleCsCaseStore, IdentityCsAssigneeDirectory, MemoryCsCaseStore, csCaseKit, type BusinessCalendar, type CsCaseKit, type CsCaseSignals } from './modules/cases/index.js';
+import { CasesModule, DrizzleCsCaseStore, IdentityCsAssigneeDirectory, MemoryCsCaseStore, csCaseKit, type BusinessCalendar, type CsAppealPorts, type CsAppealStore, type CsCaseKit, type CsCaseSignals } from './modules/cases/index.js';
 import { AlertsModule, DrizzleOpsAlertStore, MemoryOpsAlertStore, type OpsAlertStore } from './modules/alerts/index.js';
 import { LiveModule, OpsLiveFeed, widgetSourcesFromEnv, type LiveModuleExtras } from './modules/live/index.js';
 import { PriorityModule, type PriorityModuleDeps } from './modules/priority/index.js';
@@ -57,7 +57,13 @@ interface CommonWiring {
    * 감사 체인 작업자·빈 행 경보·5분 앵커와 명령 정비 작업의 타이머(BAT-355, ADR-0340·0341). DB 조립은 기본으로 켠다.
    * false면 타이머를 켜지 않는다(감사 체인 키·앵커 설정 검사는 한다). 시험은 간격을 바꿔 넣을 수 있다
    */
-  readonly background?: false | { readonly audit?: Partial<Omit<AuditBackgroundOptions, 'enabled'>>; readonly maintenanceMs?: number; readonly csCaseDeadlineMs?: number };
+  readonly background?: false | { readonly audit?: Partial<Omit<AuditBackgroundOptions, 'enabled'>>; readonly maintenanceMs?: number; readonly csCaseDeadlineMs?: number; readonly csCaseDispatchMs?: number };
+  /**
+   * 추가 검증 이의 처리 포트(F-06-7): queue-svc VerificationAppealService·trust-svc ApplyLabel·GetVerdictEvidence·identity-svc SetAccountHold 클라이언트와 지표.
+   * 시작 조립(cs-appeal-wiring.ts)이 주소마다 채운다. 없는 칸은 보낼 호출이 NOT_CONFIGURED로 쌓인다.
+   * 보낼 호출 배경 작업(10초 [가정])은 DB 조립에서 background가 켜지면 돌고, 메모리 조립은 background를 주었을 때만 돈다(시험)
+   */
+  readonly csAppeals?: CsAppealPorts;
   /** CS 처리함 영업일 달력(F-06-2 ADR-0364 결정 1). 시작 조립이 공휴일 파일로 만든다. 없으면 주말만 뺀다 */
   readonly calendar?: BusinessCalendar;
   /** CS 처리함 건 지표(main.ts가 서비스 레지스트리에 붙인다) */
@@ -158,17 +164,21 @@ function eventCancellationDeps(
   };
 }
 
-/** CS 처리함 모듈 조립(F-06-2): cs_lead 배정 대상은 관리 계정 identity로 확인하고, 기한 알림은 배경 작업이 켜진 조립에서만 돈다 */
-function casesModule(o: CommonWiring, kit: CsCaseKit, background: { csCaseDeadlineMs?: number } | undefined) {
+/**
+ * CS 처리함 모듈 조립(F-06-2): cs_lead 배정 대상은 관리 계정 identity로 확인하고, 기한 알림은 배경 작업이 켜진 조립에서만 돈다.
+ * 보낼 호출 배경 작업(F-06-7)은 dispatch가 있을 때만 돈다
+ */
+function casesModule(o: CommonWiring, kit: CsCaseKit, background: { csCaseDeadlineMs?: number } | undefined, dispatch: { csCaseDispatchMs?: number } | undefined) {
   return CasesModule.register(kit, {
     ...(o.adminAccounts ? { assignees: new IdentityCsAssigneeDirectory(o.adminAccounts.identity) } : {}),
     background: { enabled: background !== undefined, ...(background?.csCaseDeadlineMs !== undefined ? { intervalMs: background.csCaseDeadlineMs } : {}) },
+    dispatchBackground: { enabled: dispatch !== undefined, ...(dispatch?.csCaseDispatchMs !== undefined ? { intervalMs: dispatch.csCaseDispatchMs } : {}) },
   });
 }
 
-/** CS 처리함 부품 한 벌(건 요청 처리기·기한 알림·실패한 승인 업무의 건) */
-function caseKitOf(o: CommonWiring, store: import('./modules/cases/index.js').CsCaseStore, alerts: OpsAlertStore): CsCaseKit {
-  return csCaseKit({ store, alerts, ...(o.calendar ? { calendar: o.calendar } : {}), ...(o.caseSignals ? { signals: o.caseSignals } : {}) });
+/** CS 처리함 부품 한 벌(건 요청 처리기·기한 알림·실패한 승인 업무의 건·이의 보낼 호출) */
+function caseKitOf(o: CommonWiring, store: import('./modules/cases/index.js').CsCaseStore & CsAppealStore, alerts: OpsAlertStore): CsCaseKit {
+  return csCaseKit({ store, alerts, ...(o.calendar ? { calendar: o.calendar } : {}), ...(o.caseSignals ? { signals: o.caseSignals } : {}), ...(o.csAppeals ? { appeals: o.csAppeals } : {}) });
 }
 
 /** 관제 위젯 원천: 환경 값의 Prometheus 원천에 관제 실시간 표(rt-sales.summary, F-04-1)를 더한다. 실시간 표가 없으면 LiveModule 기본 그대로 */
@@ -213,7 +223,7 @@ export class AppModule {
             },
           }),
           LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints }), liveExtrasOf(o)),
-          casesModule(o, cases, background),
+          casesModule(o, cases, background, background),
           AlertsModule.register(alerts),
           ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
           ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
@@ -265,7 +275,7 @@ export class AppModule {
         }),
         AuditModule.register(checkpoints, { intake: new MemoryAuditIntakeStore(chain), ...(o.auditSignals ? { signals: o.auditSignals } : {}) }),
         LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints }), liveExtrasOf(o)),
-        casesModule(o, cases, undefined),
+        casesModule(o, cases, undefined, o.background === false ? undefined : o.background),
         AlertsModule.register(memoryAlerts),
         ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
         ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),

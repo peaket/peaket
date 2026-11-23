@@ -65,6 +65,40 @@ export const CsCaseDetail = zod.object({
   "height": zod.int().optional()
 }).describe('후기에 붙은 사진(ADR-0066). 메타데이터를 지운 파생본 2종만 있고 원본은 없다. 이름은 서버가 만든 ID')).optional()
 }).nullish().describe('신고 대상 후기(본문·별점·사진 파생본)'),
+  "verificationAppeal": zod.object({
+  "appealId": zod.uuid().describe('이의 ID(건의 targetRef와 같다)'),
+  "content": zod.enum(['AVAILABLE', 'PENDING', 'GONE']).describe('AVAILABLE 이의 내용을 ops DB(verification_case)에 옮김. PENDING 아직 옮기지 못함(queue-svc에 닿지 못함). GONE 옮기기 전에 queue-svc 보관 기간이 지나 내용이 없음(docs/data.md q:appeal \'남는 한계\')'),
+  "text": zod.string().nullish().describe('이의 글(평문, NFC 정규화 뒤 0~1,000자). 빈 글이면 설명 요구만이다. content가 AVAILABLE이 아니면 null. 화면은 글자 노드로만 그린다'),
+  "request": zod.union([zod.literal('EXPLANATION'),zod.literal('REVIEW'),zod.literal(null)]).nullish().describe('EXPLANATION 설명 요구(글이 빔), REVIEW 설명과 재검토 신청(글이 있음). content가 AVAILABLE이 아니면 null'),
+  "reasonCategory": zod.union([zod.literal('RAPID_REQUESTS'),zod.literal('DEVICE_HISTORY'),zod.literal('NETWORK'),zod.literal('INTERACTION'),zod.literal('HUMAN_CHECK'),zod.literal('SHARED_PATTERN'),zod.literal(null)]).nullish().describe('격리 때 이용자에게 보인 사유 범주(QueueVerificationState.verificationReason과 같은 값). 내용이 없으면 건의 category에서 읽고, 모르는 값이면 null'),
+  "receivedAt": zod.iso.datetime({"offset":true}).nullish().describe('이의 접수 시각. content가 AVAILABLE이 아니면 null'),
+  "entryState": zod.union([zod.literal('VERIFYING'),zod.literal('PASSED'),zod.literal('ENDED'),zod.literal(null)]).nullable().describe('그 대기 참여의 지금 상태(상세를 열 때 queue-svc GetVerificationAppeal의 entry_state를 읽는다). 읽지 못하면 null'),
+  "evidence": zod.object({
+  "state": zod.enum(['FOUND', 'NOT_FOUND', 'UNAVAILABLE']).describe('FOUND 근거 키가 있음. NOT_FOUND 근거 키가 없음(30일 [가정]이 지났거나 키를 잃음, found false). UNAVAILABLE trust-svc에 닿지 못했거나 이의 내용(회차·pid)을 아직 옮기지 못함'),
+  "hardSignal": zod.union([zod.literal('NONE'),zod.literal('BLOCK_LIST'),zod.literal('HONEYPOT'),zod.literal(null)]).nullish().describe('판정을 앞에서 끝낸 확정 신호(trust.proto HardSignal)'),
+  "source": zod.union([zod.literal('REALTIME'),zod.literal('REASSESS'),zod.literal(null)]).nullish().describe('판정 출처(실시간·재평가)'),
+  "decidedAt": zod.iso.datetime({"offset":true}).nullish().describe('판정 시각'),
+  "deviceChallenges": zod.object({
+  "sent": zod.int().optional(),
+  "passed": zod.int().optional(),
+  "failed": zod.int().optional()
+}).nullish().describe('그 기기의 지난 30일 추가 검증 보냄·통과·실패 수(이번 시도 포함, 기기 식별값 없이 수만)')
+}).describe('판정 근거(상세를 열 때 trust-svc GetVerdictEvidence를 읽는다). FOUND가 아니면 나머지 칸은 null이고 CS는 사유 범주로만 판단한다'),
+  "decision": zod.object({
+  "outcome": zod.enum(['ACCEPTED', 'REJECTED']).optional(),
+  "decidedBy": zod.string().optional().describe('결정한 관리 계정 ID(이름은 싣지 않는다)'),
+  "decidedAt": zod.iso.datetime({"offset":true}).optional(),
+  "blockListChange": zod.union([zod.literal('NONE'),zod.literal('REMOVED'),zod.literal('DEVICE_NOT_FOUND'),zod.literal(null)]).nullish().describe('인정의 라벨 반영(trust-svc ApplyLabel) 응답의 차단 목록 변화(Q-T48 ②). 기각이거나 아직 반영하지 못했으면 null')
+}).nullable().describe('결정했으면 그 값, 아니면 null'),
+  "reflectState": zod.enum(['NONE', 'PENDING', 'APPLIED', 'FAILED']).describe('보낼 호출의 요약. NONE 보낼 호출 없음. PENDING 보내는 중(다시 보내기 포함). APPLIED 모두 반영. FAILED 하나라도 반영 실패(화면 \'반영 실패\', SEV3 경보 CS_CASE_DISPATCH_FAILED. 다시 보낼 수 있는 실패면 배경 작업이 계속 보낸다)'),
+  "dispatch": zod.array(zod.object({
+  "call": zod.enum(['APPEAL_COPY', 'ACCOUNT_HOLD_OPEN', 'QUEUE_RESOLVE', 'TRUST_LABEL', 'ACCOUNT_HOLD_CLOSE']),
+  "state": zod.enum(['PENDING', 'APPLIED', 'FAILED']),
+  "attempts": zod.int().describe('보낸 횟수'),
+  "lastError": zod.string().nullable().describe('마지막 실패의 gRPC 상태 이름(UNAVAILABLE 등)이나 APPEAL_CONTENT_MISSING·NOT_CONFIGURED. 받은 값·오류 원문은 싣지 않는다'),
+  "updatedAt": zod.iso.datetime({"offset":true})
+})).describe('보낼 호출마다 한 줄(docs/data.md cs_case_dispatch). 차례는 APPEAL_COPY, ACCOUNT_HOLD_OPEN, QUEUE_RESOLVE, TRUST_LABEL, ACCOUNT_HOLD_CLOSE이고 없는 호출은 빠진다')
+}).nullish().describe('VERIFICATION_APPEAL만(그 밖 종류에는 칸이 없다). 이의 글·사유 범주·판정 근거의 범주 값·대기 참여 상태·결정·반영 상태다. pid·계정 ID·기기 가명·점수 원값·가중치·기준값·프로필 판은 싣지 않는다(docs/features/bot-defense.md §12 \'판정에 쓰는 자료\'·\'CS 처리 첫 구현\', 추천 적용 2026-11-23, 기능 F-06-7, ADR-0364 결정 9, B-T28 ①)'),
   "statementDispute": zod.object({
   "statementId": zod.string().optional(),
   "kind": zod.enum(['EVENT', 'PRODUCT']).optional(),

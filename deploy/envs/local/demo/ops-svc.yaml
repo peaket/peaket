@@ -28,6 +28,10 @@ service:
     PEAKET_IDENTITY_GRPC_URL: identity-svc.core.svc.cluster.local:50051
     PEAKET_PURCHASE_HTTP_URL: http://bundle.purchase.svc.cluster.local:8081
     PEAKET_CORE_HTTP_URL: http://core-svc.core.svc.cluster.local:8080
+    # 추가 검증 이의 라벨·판정 근거(F-06-7)와 표본 판정(BAT-197)의 trust-svc gRPC. 기본 값(trust-svc-grpc)은 메시 없는 로컬에서 풀리지 않아 같은 칸에 덮는다.
+    # queue-svc 업무 gRPC(합본 50052, VerificationAppealService)는 합본 Service에 아직 열지 않았다(파드 안 127.0.0.1). 무대에서 이의 한 건을
+    # 돌릴 때 합본 포트와 함께 이 칸에 PEAKET_QUEUE_GRPC_URL을 덮는다. 그 전에는 local이라 이의 결과 반영이 UNAVAILABLE로 쌓여 다시 보낸다
+    PEAKET_TRUST_GRPC_URL: trust-svc.trust.svc.cluster.local:50051
   # 단일 노드 kind에는 관제 전용 노드 풀이 없다. null로 차트 기본값을 지운다
   # (빈 {}는 Helm 병합에서 기본값을 지우지 못한다)
   priorityClassName: ""

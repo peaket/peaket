@@ -7,6 +7,8 @@
 // 상태 차례 밖은 422 case-status-transition-invalid, 2,000자를 넘는 메모는 400 invalid-body다(R-T49 ⑨).
 // 상태: OPEN → IN_PROGRESS → RESOLVED, OPEN → RESOLVED. 해결은 끝이고(다시 고치면 409), 해결에는 결과 메모(1~2,000자)가 같은 요청에 있어야 한다.
 // 갱신은 If-Match 판(없으면 428, 다르면 412)이고 판이 1 오르며, 감사 체인에 행위자·이전·다음 상태·배정을 한 줄 남긴다(메모 본문은 남기지 않는다).
+// 추가 검증 이의(VERIFICATION_APPEAL) 건은 이 갱신으로 해결하지 못한다(409 case-action-not-applicable, F-06-7 ADR-0364 결정 9). 배정·진행 중은 받는다.
+// 인정·기각은 verification-appeal-decision.ts가 이 파일의 보기·판 읽기·감사 모양을 함께 쓴다.
 import { ProblemError } from '@peaket/platform';
 import type { AuditRecord } from '../../audit/index.js';
 import { addBusinessDays, weekendOnlyCalendar, type BusinessCalendar } from '../domain/business-calendar.js';
@@ -80,7 +82,7 @@ const notAllowed = (title = '이 건을 고칠 수 있는 역할이 아닙니다
 const codePoints = (s: string): number => [...s].length;
 const iso = (ms: number): string => new Date(ms).toISOString();
 
-const isCsRole = (role: string): boolean => CS_ROLES.has(role);
+export const isCsRole = (role: string): boolean => CS_ROLES.has(role);
 /** 그 역할이 이 건을 볼 수 있는가(CS 담당자에게 지급·대사·KYC 건은 없다) */
 const canSee = (actor: CsActor, c: Pick<CsCase, 'kind' | 'category'>): boolean => LIST_ROLES.has(actor.role) && !(isCsRole(actor.role) && isOpsSideCase(c));
 /** 그 역할이 이 건을 고칠 수 있는가 */
@@ -91,7 +93,7 @@ const canUpdate = (actor: CsActor, c: Pick<CsCase, 'kind' | 'category'>): boolea
 };
 
 /** If-Match 판 읽기(admin-accounts parseIfMatch와 같은 꼴: "7" 또는 W/"7") */
-function parseIfMatch(raw: string | undefined): number | null {
+export function parseIfMatch(raw: string | undefined): number | null {
   if (typeof raw !== 'string') return null;
   const m = /^(?:W\/)?"(\d{1,15})"$/.exec(raw.trim());
   if (!m) return null;
@@ -166,22 +168,25 @@ export class CsCases {
     return { items: page.map((c) => this.view(c, nowMs)), nextCursor: rows.length > limit ? encodeCursor(page[page.length - 1]!) : null };
   }
 
-  async #visible(actor: CsActor, caseId: string): Promise<CsCase> {
+  /** 그 역할이 볼 수 있는 건(없거나 볼 수 없으면 404) */
+  async visible(actor: CsActor, caseId: string): Promise<CsCase> {
     const c = UUID.test(caseId) ? await this.d.store.find(caseId.toLowerCase()) : undefined;
     if (!c || !canSee(actor, c)) throw notFound();
     return c;
   }
 
   async get(actor: CsActor, caseId: string): Promise<{ view: CsCaseView & Record<string, unknown>; version: number }> {
-    const c = await this.#visible(actor, caseId);
+    const c = await this.visible(actor, caseId);
     const reader = this.d.detailReaders?.get(c.kind);
     const extra = reader ? await reader.read(c, actor) : {};
     return { view: { ...extra, ...this.view(c, this.d.clock.now()) }, version: c.version };
   }
 
   async update(actor: CsActor, caseId: string, ifMatch: string | undefined, body: CsCaseUpdateBody): Promise<{ view: CsCaseView; version: number }> {
-    const c = await this.#visible(actor, caseId);
+    const c = await this.visible(actor, caseId);
     if (!canUpdate(actor, c)) throw notAllowed();
+    // 이의 건을 호출 없이 닫으면 대기표·라벨·병합 막기가 남는다(인정·기각은 결정 경로, bot-defense §12 '결정')
+    if (c.kind === 'VERIFICATION_APPEAL' && body.status === 'RESOLVED') throw problem('case-action-not-applicable', 409, '이 건 종류에는 이 처리가 없습니다');
     const version = parseIfMatch(ifMatch);
     if (version === null) throw problem('precondition-required', 428, '고칠 판(If-Match)을 보내 주세요');
     if (version !== c.version) throw problem('precondition-failed', 412, '다른 곳에서 이 건을 먼저 고쳤습니다');
@@ -203,8 +208,8 @@ export class CsCases {
       version: c.version + 1,
       updatedAtMs: nowMs,
     };
-    if (!(await this.d.store.update(next, c.version, this.#audit(c, next, actor, nowMs)))) throw problem('precondition-failed', 412, '다른 곳에서 이 건을 먼저 고쳤습니다');
-    if (next.status === 'RESOLVED') await this.#releaseAlerts(next, nowMs);
+    if (!(await this.d.store.update(next, c.version, caseUpdateAudit(c, next, actor, nowMs)))) throw problem('precondition-failed', 412, '다른 곳에서 이 건을 먼저 고쳤습니다');
+    if (next.status === 'RESOLVED') await this.releaseAlerts(next, nowMs);
     return { view: this.view(next, nowMs), version: next.version };
   }
 
@@ -217,8 +222,8 @@ export class CsCases {
       const c = await this.d.store.find(caseId);
       if (!c || c.status === 'RESOLVED') return undefined;
       const next: CsCase = { ...c, status: 'RESOLVED', resultNote, resolvedAtMs: nowMs, version: c.version + 1, updatedAtMs: nowMs };
-      if (await this.d.store.update(next, c.version, this.#audit(c, next, { accountId: actorRef, role: 'system' }, nowMs))) {
-        await this.#releaseAlerts(next, nowMs);
+      if (await this.d.store.update(next, c.version, caseUpdateAudit(c, next, { accountId: actorRef, role: 'system' }, nowMs))) {
+        await this.releaseAlerts(next, nowMs);
         return next;
       }
     }
@@ -251,28 +256,8 @@ export class CsCases {
     throw notAllowed(current !== null && current !== self ? '맡은 사람이 있는 건은 CS 책임자(cs_lead)가 바꿉니다' : '자기에게 맡기거나 자기 배정을 풀 때만 고칠 수 있습니다');
   }
 
-  #audit(prev: CsCase, next: CsCase, actor: CsActor, nowMs: number): AuditRecord {
-    return {
-      recordType: 'CS_CASE_UPDATED',
-      recordId: next.caseId,
-      payload: {
-        caseId: next.caseId,
-        kind: next.kind,
-        actorAdminAccountId: actor.accountId,
-        actorRole: actor.role,
-        fromStatus: prev.status,
-        toStatus: next.status,
-        fromAssignee: prev.assignee,
-        toAssignee: next.assignee,
-        version: next.version,
-        // 메모 본문은 남기지 않고 바뀌었는지만 적는다(ADR-0364 결정 5)
-        resultNoteChanged: prev.resultNote !== next.resultNote,
-      },
-      nowMs,
-    };
-  }
-
-  async #releaseAlerts(c: CsCase, nowMs: number): Promise<void> {
+  /** 해결한 건의 기한 경보를 푼다(실패해도 갱신은 그대로이고 배경 작업이 다시 푼다) */
+  async releaseAlerts(c: CsCase, nowMs: number): Promise<void> {
     if (!this.d.alerts || (c.dueSoonAlertedForMs === null && c.overdueAlertedForMs === null)) return;
     try {
       await this.d.alerts.release(c, nowMs);
@@ -280,4 +265,29 @@ export class CsCases {
       this.d.log?.warn({ event: 'cs-case-alert-release-failed', caseId: c.caseId, err: err instanceof Error ? err.name : 'unknown' }, '해결한 건의 기한 경보를 풀지 못했다(배경 작업이 다시 푼다)');
     }
   }
+}
+
+/**
+ * 갱신 감사 한 줄(CS_CASE_UPDATED). 메모 본문은 남기지 않고 바뀌었는지만 적는다(ADR-0364 결정 5).
+ * extra는 이의 결정의 appealOutcome처럼 종류별 값이다(메모·이의 글·pid는 넣지 않는다, ADR-0364 결정 9)
+ */
+export function caseUpdateAudit(prev: CsCase, next: CsCase, actor: CsActor, nowMs: number, extra: Readonly<Record<string, string>> = {}): AuditRecord {
+  return {
+    recordType: 'CS_CASE_UPDATED',
+    recordId: next.caseId,
+    payload: {
+      caseId: next.caseId,
+      kind: next.kind,
+      actorAdminAccountId: actor.accountId,
+      actorRole: actor.role,
+      fromStatus: prev.status,
+      toStatus: next.status,
+      fromAssignee: prev.assignee,
+      toAssignee: next.assignee,
+      version: next.version,
+      resultNoteChanged: prev.resultNote !== next.resultNote,
+      ...extra,
+    },
+    nowMs,
+  };
 }

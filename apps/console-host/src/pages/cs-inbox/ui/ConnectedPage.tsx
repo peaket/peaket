@@ -2,16 +2,21 @@
 // 목록(종류·상태·기한 걸러 보기, 커서) · 상세 · 배정(나에게 배정·배정 풀기, cs_lead는 다른 담당자) · 진행 중 · 결과 메모로 해결.
 // 갱신은 생성 호출(updateOpsCase)에 If-Match(판)를 싣고, 412면 다른 곳에서 먼저 고쳤다는 안내와 [다시 불러오기]를 보인다.
 // 쓰던 메모는 화면 상태에만 두고 브라우저 저장소에 두지 않는다. 서버 글은 글자 노드로만 그린다. 데스크톱 배치이고 태블릿·휴대폰 배치는 GAT-340(F-05-8)이다.
-import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
+// 추가 검증 이의(F-06-7 GAT-280, B-T28 ⑦, d5 §7.6): 이의 건은 '이의 심사' 패널(appealPanelOf 값)과 [이의 인정]·[이의 기각] → 확인 대화상자 →
+// 이의 결정 생성 호출(If-Match·Idempotency-Key를 싣는다)이고 [해결로 닫기]가 없다. 요청 키는 대화상자를 열 때 하나 만들고,
+// 네트워크 실패·503·처리 중 뒤 다시 누르면 같은 키, 성공·그 밖 4xx 뒤에는 버린다(decisionKeyAfter). 202 뒤 상세를 다시 읽는다.
+import { type KeyboardEvent, type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ensureConsoleApi, opsApiAvailable } from '@/shared/api';
 import {
   FILTER_KINDS,
   RESULT_NOTE_MAX,
+  appealPanelOf,
   canActOn,
   canActOnCategory,
   caseViewOf,
   casePageOf,
+  decisionKeyAfter,
   dueBadge,
   dueText,
   errorOf,
@@ -21,8 +26,12 @@ import {
   kstText,
   noteLength,
   statusLabel,
+  verificationAppealOf,
   versionOfEtag,
+  type AppealPanel,
   type CaseView,
+  type ProblemLike,
+  type VerificationAppealView,
 } from '../model/live';
 import { ViewerNotice } from './ViewerNotice';
 
@@ -34,7 +43,10 @@ interface Me {
   role: string;
 }
 type ListLoad = { kind: 'loading' } | { kind: 'ready'; items: CaseView[]; nextCursor: string | null } | { kind: 'error'; text: string };
-type DetailLoad = { kind: 'none' } | { kind: 'loading' } | { kind: 'ready'; c: CaseView; version: number } | { kind: 'missing' } | { kind: 'error'; text: string };
+type DetailLoad = { kind: 'none' } | { kind: 'loading' } | { kind: 'ready'; c: CaseView; version: number; appeal: VerificationAppealView | null } | { kind: 'missing' } | { kind: 'error'; text: string };
+type AppealOutcome = 'ACCEPTED' | 'REJECTED';
+/** 이의 결정 확인 대화상자(처리 중 안내가 있으면 그 글) */
+type DecisionDialog = { outcome: AppealOutcome; pending: string | null };
 interface Filter {
   kind: string;
   status: string;
@@ -62,8 +74,11 @@ export function ConnectedPage() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
   const [noteError, setNoteError] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<DecisionDialog | null>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
+  /** 이의 결정 요청 키(대화상자를 열 때 만든다. 다시 보낼 실패 뒤에는 그대로 둔다) */
+  const decisionKey = useRef<string | null>(null);
 
   const loadList = useCallback(async (f: Filter, cursor?: string) => {
     if (!ensureConsoleApi() || !opsApiAvailable()) {
@@ -103,7 +118,7 @@ export function ConnectedPage() {
       const c = caseViewOf(r.data);
       const version = versionOfEtag(r.headers.get('etag')) ?? c?.version ?? null;
       if (!c || version === null) setDetail({ kind: 'error', text: '건을 읽지 못했습니다. 다시 불러와 주세요' });
-      else setDetail({ kind: 'ready', c, version });
+      else setDetail({ kind: 'ready', c, version, appeal: c.kind === 'VERIFICATION_APPEAL' ? verificationAppealOf(r.data) : null });
     } catch (e) {
       const mapped = errorOf(e as never);
       if (mapped.kind === 'not-found') setDetail({ kind: 'missing' });
@@ -139,6 +154,8 @@ export function ConnectedPage() {
     setNote('');
     setAssignTo('');
     setNotice(null);
+    setDialog(null);
+    decisionKey.current = null;
   }, [caseId, loadDetail]);
 
   /** 갱신 하나. 성공하면 상세·목록을 서버 값으로 다시 그린다 */
@@ -150,7 +167,7 @@ export function ConnectedPage() {
       const r = await updateOpsCase(c.caseId, body, { headers: { 'If-Match': ifMatchOf(version) } });
       const next = caseViewOf(r.data);
       const nextVersion = versionOfEtag(r.headers.get('etag')) ?? next?.version ?? null;
-      if (next && nextVersion !== null) setDetail({ kind: 'ready', c: next, version: nextVersion });
+      if (next && nextVersion !== null) setDetail((prev) => ({ kind: 'ready', c: next, version: nextVersion, appeal: prev.kind === 'ready' ? prev.appeal : null }));
       else await loadDetail(c.caseId);
       if (body.status === 'RESOLVED') setNote('');
       setNotice({ tone: 'ok', text: done });
@@ -183,6 +200,58 @@ export function ConnectedPage() {
     }
     setNoteError(null);
     void patch(c, version, { status: 'RESOLVED', resultNote: note }, '해결로 닫았습니다');
+  };
+
+  /** [이의 인정]·[이의 기각]: 메모가 없으면 대화상자를 열지 않고 오류 요약으로 간다(d5 §7.6 '이의 결정 확인') */
+  const openDecision = (outcome: AppealOutcome) => {
+    if (note.trim() === '') {
+      showNoteError('결과 메모를 적어 주세요');
+      return;
+    }
+    if (noteLength(note) > RESULT_NOTE_MAX) {
+      showNoteError('결과 메모는 2,000자까지입니다');
+      return;
+    }
+    setNoteError(null);
+    if (decisionKey.current === null) decisionKey.current = crypto.randomUUID();
+    setDialog({ outcome, pending: null });
+  };
+
+  /** 이의 결정 하나. 202 뒤 상세·목록을 다시 읽어 패널을 결과로 바꾼다 */
+  const decide = async (c: CaseView, version: number, outcome: AppealOutcome) => {
+    if (note.trim() === '') {
+      setDialog(null);
+      showNoteError('결과 메모를 적어 주세요');
+      return;
+    }
+    const key = decisionKey.current ?? crypto.randomUUID();
+    decisionKey.current = key;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const { createOpsCaseVerificationAppealDecision } = await ops();
+      await createOpsCaseVerificationAppealDecision(c.caseId, { outcome, resultNote: note }, { headers: { 'If-Match': ifMatchOf(version), 'Idempotency-Key': key } });
+      decisionKey.current = decisionKeyAfter(key, { status: 202 });
+      setDialog(null);
+      setNotice({ tone: 'ok', text: outcome === 'ACCEPTED' ? '이의를 인정했습니다. 반영 상태는 아래에서 봅니다' : '이의를 기각했습니다. 반영 상태는 아래에서 봅니다' });
+      await loadDetail(c.caseId);
+      await loadList(filter);
+    } catch (e) {
+      const problemOf = e as ProblemLike | null | undefined;
+      const status = typeof problemOf?.status === 'number' ? problemOf.status : 0;
+      decisionKey.current = decisionKeyAfter(key, { status, ...(typeof problemOf?.type === 'string' ? { type: problemOf.type } : {}) });
+      const mapped = errorOf(e as never);
+      // 처리 중: 대화상자 안 안내와 [다시 불러오기]이고 같은 키를 지킨다(d5 §7.6 '이의 결정 처리 중')
+      if (mapped.kind === 'in-progress') setDialog({ outcome, pending: mapped.text });
+      else {
+        setDialog(null);
+        if (mapped.kind === 'stale' || mapped.kind === 'precondition-required') setStale(true);
+        else if (mapped.kind === 'note-required') showNoteError(mapped.text);
+        else setNotice({ tone: 'bad', text: mapped.text });
+      }
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (!config) {
@@ -348,6 +417,7 @@ export function ConnectedPage() {
             {selected ? (
               <CaseDetail
                 c={selected.c}
+                appeal={selected.appeal}
                 role={role}
                 myId={myId}
                 busy={busy}
@@ -363,6 +433,19 @@ export function ConnectedPage() {
                 onReload={() => void loadDetail(selected.c.caseId)}
                 onPatch={(body, done) => void patch(selected.c, selected.version, body, done)}
                 onResolve={() => resolve(selected.c, selected.version)}
+                onOpenDecision={openDecision}
+              />
+            ) : null}
+            {selected && dialog ? (
+              <DecisionConfirm
+                dialog={dialog}
+                busy={busy}
+                onConfirm={() => void decide(selected.c, selected.version, dialog.outcome)}
+                onCancel={() => setDialog(null)}
+                onReload={() => {
+                  setDialog(null);
+                  void loadDetail(selected.c.caseId);
+                }}
               />
             ) : null}
           </div>
@@ -374,6 +457,7 @@ export function ConnectedPage() {
 
 interface CaseDetailProps {
   c: CaseView;
+  appeal: VerificationAppealView | null;
   role: string;
   myId: string;
   busy: boolean;
@@ -389,11 +473,14 @@ interface CaseDetailProps {
   onReload(): void;
   onPatch(body: { assignee?: string | null; status?: 'IN_PROGRESS' | 'RESOLVED' }, done: string): void;
   onResolve(): void;
+  onOpenDecision(outcome: AppealOutcome): void;
 }
 
 function CaseDetail(p: CaseDetailProps) {
   const { c } = p;
   const badge = dueBadge(c.dueState);
+  // 추가 검증 이의 건은 이의 심사 패널이고 [해결로 닫기] 대신 [이의 인정]·[이의 기각]이다(CS 담당자만)
+  const panel = c.kind === 'VERIFICATION_APPEAL' && p.appeal ? appealPanelOf(p.appeal, p.role, c.status) : null;
   const act = canActOn(p.role, c.kind) && c.status !== 'RESOLVED' && canActOnCategory(p.role, c.kind, c.category);
   // 맡은 사람이 있는 건을 바꾸는 것은 cs_lead다(cs_agent는 아무도 맡지 않은 건만 자기에게 맡고 자기 배정만 푼다, ADR-0364 결정 5)
   const lead = p.role === 'cs_lead';
@@ -445,6 +532,8 @@ function CaseDetail(p: CaseDetailProps) {
           </>
         ) : null}
       </dl>
+
+      {panel ? <AppealReview panel={panel} /> : null}
 
       {!act && c.status !== 'RESOLVED' ? (
         <p className="t-sm muted" role="note">
@@ -510,12 +599,139 @@ function CaseDetail(p: CaseDetailProps) {
             />
           </label>
           <div className="row" style={{ gap: 8 }}>
-            <button className="btn btn-primary" type="button" disabled={p.busy} onClick={p.onResolve}>
-              해결로 닫기
-            </button>
+            {c.kind === 'VERIFICATION_APPEAL' ? (
+              panel?.canDecide ? (
+                <>
+                  <button className="btn btn-primary" type="button" disabled={p.busy} onClick={() => p.onOpenDecision('ACCEPTED')}>
+                    이의 인정
+                  </button>
+                  <button className="btn btn-outline" type="button" disabled={p.busy} onClick={() => p.onOpenDecision('REJECTED')}>
+                    이의 기각
+                  </button>
+                </>
+              ) : null
+            ) : (
+              <button className="btn btn-primary" type="button" disabled={p.busy} onClick={p.onResolve}>
+                해결로 닫기
+              </button>
+            )}
           </div>
         </>
       ) : null}
     </>
+  );
+}
+
+/** 이의 심사 패널(d5 §7.6 '추가 검증 이의 상세'·'이의 반영 중·반영됨'·'이의 반영 실패'). 값과 글은 appealPanelOf가 만들고 여기서는 글자 노드로만 그린다 */
+function AppealReview({ panel }: { panel: AppealPanel }) {
+  return (
+    <section aria-labelledby="h-appeal" className="col" style={{ gap: 8 }}>
+      <h3 className="t-sm fw-b" id="h-appeal">
+        이의 심사
+      </h3>
+      {panel.banner ? (
+        <div className="banner banner-danger" role="alert">
+          <div className="banner-body">{panel.banner.text}</div>
+        </div>
+      ) : null}
+      {panel.contentNotice ? (
+        <p className="t-sm muted" role="status">
+          {panel.contentNotice}
+        </p>
+      ) : null}
+      {panel.text ? <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{panel.text}</p> : null}
+      {panel.evidenceNotice ? (
+        <p className="t-sm muted" role="status">
+          {panel.evidenceNotice}
+        </p>
+      ) : null}
+      <dl className="kv">
+        {panel.fields.map((f) => (
+          <div key={f.label} style={{ display: 'contents' }}>
+            <dt>{f.label}</dt>
+            <dd>{f.value}</dd>
+          </div>
+        ))}
+      </dl>
+      {panel.decision ? (
+        <dl className="kv">
+          <dt>결과</dt>
+          <dd>{panel.decision.outcome}</dd>
+          <dt>처리자</dt>
+          <dd className="mono t-xs">{panel.decision.decidedBy}</dd>
+          <dt>처리 시각</dt>
+          <dd>{panel.decision.decidedAt}</dd>
+          {panel.decision.blockList ? (
+            <>
+              <dt>차단 목록 변화</dt>
+              <dd>{panel.decision.blockList}</dd>
+            </>
+          ) : null}
+        </dl>
+      ) : null}
+      {panel.rows.length > 0 ? (
+        <ul className="col" style={{ gap: 4, listStyle: 'none', padding: 0, margin: 0 }} aria-label="결과 반영 호출">
+          {panel.rows.map((r) => (
+            <li key={r.call} className="row" style={{ gap: 8, justifyContent: 'space-between' }}>
+              <span className="t-sm">{r.label}</span>
+              <span className={`badge badge-${r.badge.tone}`}>{r.badge.label}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
+interface DecisionConfirmProps {
+  dialog: DecisionDialog;
+  busy: boolean;
+  onConfirm(): void;
+  onCancel(): void;
+  onReload(): void;
+}
+
+/** 이의 결정 확인 대화상자(d5 §7.6 '이의 결정 확인'). 처음 초점은 [취소], Esc는 취소다 */
+function DecisionConfirm(p: DecisionConfirmProps) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    cancelRef.current?.focus();
+  }, []);
+  const accept = p.dialog.outcome === 'ACCEPTED';
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      p.onCancel();
+    }
+  };
+  return (
+    <div className="widget" role="dialog" aria-modal="true" aria-labelledby="h-decision" aria-describedby="d-decision" onKeyDown={onKeyDown}>
+      <div className="widget-body col" style={{ gap: 10 }}>
+        <h3 className="t-sm fw-b" id="h-decision">
+          {accept ? '이의 인정' : '이의 기각'}
+        </h3>
+        <p className="t-sm" id="d-decision">
+          {accept ? '이의를 인정할까요? 대기 순번이 돌아가고 사람 라벨이 남습니다. 판정 근거가 차단 기기 목록이면 그 기기를 목록에서 지웁니다' : '이의를 기각할까요? 이 대기 참여가 끝납니다. 계정 제재는 아닙니다'}
+        </p>
+        {p.dialog.pending ? (
+          <div className="banner banner-warning" role="alert">
+            <div className="banner-body">
+              {p.dialog.pending}{' '}
+              <button className="btn btn-outline btn-sm" type="button" onClick={p.onReload}>
+                다시 불러오기
+              </button>
+            </div>
+          </div>
+        ) : null}
+        <div className="row" style={{ gap: 8 }}>
+          <button className="btn btn-primary" type="button" disabled={p.busy} onClick={p.onConfirm}>
+            {accept ? '인정' : '기각'}
+          </button>
+          <button className="btn btn-outline" type="button" ref={cancelRef} onClick={p.onCancel}>
+            취소
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
