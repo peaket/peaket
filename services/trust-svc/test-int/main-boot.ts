@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ServiceControlSyncOptions, startServiceControlSync } from '@peaket/platform/stream-worker';
 import { vi } from 'vitest';
+import { TELEMETRY_SCHEMA_IDS } from '../test/avro-telemetry.js';
 import { SYNTHETIC_RULES_JSON } from '../test/support.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
@@ -39,6 +40,9 @@ export async function bootMain(extraEnv: Record<string, string>, o: { realContro
   const dir = mkdtempSync(join(tmpdir(), 'trust-main-'));
   const rulesFile = join(dir, 'rules.json');
   writeFileSync(rulesFile, SYNTHETIC_RULES_JSON);
+  // 텔레메트리 Kafka를 켜면 생산자 스키마 ID 설정 파일을 시작할 때 읽는다(없으면 시작하지 않는다, ADR-0357 결정 4, F-04-2). 시험 값은 test/avro-telemetry.ts와 같다
+  const schemaIdsFile = join(dir, 'schema-ids.json');
+  writeFileSync(schemaIdsFile, JSON.stringify(TELEMETRY_SCHEMA_IDS));
   const managementPort = await freePort();
   const grpcPort = await freePort();
   delete process.env.PEAKET_TELEMETRY_KAFKA_BROKERS;
@@ -53,6 +57,7 @@ export async function bootMain(extraEnv: Record<string, string>, o: { realContro
     PEAKET_TURNSTILE_SECRET: 'test-secret-value',
     PEAKET_LOG_PSEUDONYM_KEY: Buffer.alloc(32, 7).toString('base64'),
     PEAKET_LOG_LEVEL: 'fatal',
+    PEAKET_SCHEMA_IDS_FILE: schemaIdsFile,
     ...extraEnv,
   };
   // R-608: prod/staging 기동은 내부 gRPC 토큰을 요구한다. ci/local 시험은 토큰 없이 부른다.

@@ -1,10 +1,11 @@
 // 그림자 판(docs/features/bot-defense.md §10.1·§10.4)과 출시 첫 판 설정(B-T21). 규칙 값은 시험만을 위한 합성 값이다(POL-006).
 import { TrustVerdict } from '@peaket/contracts/asyncapi';
 import { describe, expect, test } from 'vitest';
-import { JsonTelemetryRecorder } from '../src/modules/scoring/adapters/json-telemetry-recorder.js';
+import { AvroTelemetryRecorder } from '../src/modules/scoring/adapters/avro-telemetry-recorder.js';
 import { LogVerdictRecorder } from '../src/modules/scoring/adapters/prom-trust-signals.js';
 import { parseRuleSet, type RuleSet } from '../src/modules/scoring/domain/rules.js';
 import { SCORER_LIST, type Scorer } from '../src/modules/scoring/domain/scorers.js';
+import { asyncapiTelemetry, telemetryEncoder } from './avro-telemetry.js';
 import { DEVICE_REF, LAUNCH_RULES, launchRulesJson, PID, request, SYNTHETIC_RULES_JSON, world } from './support.js';
 
 const parseError = (json: string): string => {
@@ -72,7 +73,8 @@ describe('B-T21 출시 첫 판 설정', () => {
     expect(w.features.history(DEVICE_REF, w.clock.now())).toEqual({ sent: 0, passed: 0, failed: 0 });
     // 판정 기록은 두 건: 적용(shadow false)과 그림자(shadow true, action NONE)
     const offered: Record<string, unknown>[] = [];
-    new JsonTelemetryRecorder({ offer: (_r, _t, m) => void offered.push(JSON.parse(m.value.toString('utf8')) as Record<string, unknown>) }).record(rec);
+    // 값은 공용 Avro 인코더의 바이트다(F-04-2). 계약 판으로 풀어 asyncapi 모양으로 되돌린다(test/avro-telemetry.ts)
+    new AvroTelemetryRecorder({ offer: (r, _t, m) => void offered.push(asyncapiTelemetry(r, m.value)) }, telemetryEncoder()).record(rec);
     expect(offered).toEqual([
       expect.objectContaining({ category: 'PASS', action: 'ALLOW', source: 'REALTIME', shadow: false, eventKey: rec.eventKey }),
       expect.objectContaining({ category: 'CHALLENGED', action: 'NONE', source: 'REALTIME', shadow: true, eventKey: rec.shadow!.eventKey, pairedEventKey: rec.eventKey, journeyId: rec.journeyId, deviceRef: rec.deviceRef }),

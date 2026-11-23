@@ -1,5 +1,5 @@
 // 라벨 반영·키 회전 이음·그림자 판 통합 시험의 공용 준비: 실제 Valkey와 실제 gRPC 서버(TrustService·TrustLabelService)로 trust-svc 한 조각을 띄운다.
-// 사람 확인은 대역(결과를 시험이 정한다), 판정 기록·라벨은 계약 모양 그대로(JsonTelemetryRecorder) 받아 둔다. 시험 코드가 직접 부르는 명령은 긴 마감을 준다.
+// 사람 확인은 대역(결과를 시험이 정한다), 판정 기록·라벨은 계약 모양 그대로(AvroTelemetryRecorder의 Avro 바이트를 test/avro-telemetry.ts로 풀어 asyncapi 모양으로) 받아 둔다. 시험 코드가 직접 부르는 명령은 긴 마감을 준다.
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { trustV1Trust } from '@peaket/contracts/proto';
@@ -7,7 +7,8 @@ import { createHash } from 'node:crypto';
 import { type Clock, createHotRedis, type HotRedis, LogPseudonymizer, systemClock } from '@peaket/platform';
 import { startGrpcServer } from '../src/grpc-server.js';
 import { deviceRefsFromEnv } from '../src/modules/scoring/adapters/device-refs.js';
-import { JsonTelemetryRecorder } from '../src/modules/scoring/adapters/json-telemetry-recorder.js';
+import { AvroTelemetryRecorder } from '../src/modules/scoring/adapters/avro-telemetry-recorder.js';
+import { asyncapiTelemetry, telemetryEncoder } from '../test/avro-telemetry.js';
 import { LogBlockListChange, LogVerdictRecorder } from '../src/modules/scoring/adapters/prom-trust-signals.js';
 import { RedisFeatureStore } from '../src/modules/scoring/adapters/redis-feature-store.js';
 import { RedisLabelStore } from '../src/modules/scoring/adapters/redis-label-store.js';
@@ -72,7 +73,7 @@ export async function labelWorld(url: string, o: LabelWorldOptions = {}) {
   const human = recordingHuman();
   const signals = o.signals ?? recordingSignals();
   const offered: Offered[] = [];
-  const telemetry = new JsonTelemetryRecorder({ offer: (_record, topic, m) => offered.push({ topic, key: m.key, value: JSON.parse(m.value.toString('utf8')) as Record<string, unknown> }) });
+  const telemetry = new AvroTelemetryRecorder({ offer: (record, topic, m) => offered.push({ topic, key: m.key, value: asyncapiTelemetry(record, m.value) }) }, telemetryEncoder());
   const logLines: Record<string, unknown>[] = [];
   const warnLines: Record<string, unknown>[] = [];
   const securityLog = new LogBlockListChange(o.securityLogger ?? { info: (fields) => void logLines.push(fields), warn: (fields) => void warnLines.push(fields) }, PSEUDONYMS);

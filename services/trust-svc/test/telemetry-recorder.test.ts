@@ -1,10 +1,12 @@
 // 판정 기록·행동 신호를 계약 모양으로 내보낸다(docs/features/bot-defense.md §4.1 ⑤, asyncapi TrustVerdict·BehaviorSignal, ADR-0171·0249).
+// 값은 공용 Avro 인코더로 만든 Confluent 형식 바이트다(ADR-0357, F-04-2). 받은 바이트는 test/avro-telemetry.ts가 계약 판 .avsc로 풀어 asyncapi 모양으로 되돌린다.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { BehaviorSignal, TrustVerdict } from '@peaket/contracts/asyncapi';
 import { describe, expect, test } from 'vitest';
-import { JsonTelemetryRecorder } from '../src/modules/scoring/adapters/json-telemetry-recorder.js';
+import { AvroTelemetryRecorder } from '../src/modules/scoring/adapters/avro-telemetry-recorder.js';
 import type { BehaviorRecord, VerdictRecord } from '../src/modules/scoring/domain/ports.js';
+import { asyncapiTelemetry, telemetryEncoder } from './avro-telemetry.js';
 import { DEVICE_REF, EVENT, JOURNEY, PID } from './support.js';
 
 interface Offered {
@@ -18,9 +20,12 @@ function recorder() {
   const offered: Offered[] = [];
   return {
     offered,
-    rec: new JsonTelemetryRecorder({
-      offer: (record, topic, m) => offered.push({ record, topic, key: m.key, value: JSON.parse(m.value.toString('utf8')) as Record<string, unknown> }),
-    }),
+    rec: new AvroTelemetryRecorder(
+      {
+        offer: (record, topic, m) => offered.push({ record, topic, key: m.key, value: asyncapiTelemetry(record, m.value) }),
+      },
+      telemetryEncoder(),
+    ),
   };
 }
 
@@ -119,7 +124,7 @@ describe('판정 기록(telemetry.trust-verdicts)', () => {
   test('로비·사전검증인데_여정ID가틀리면_계약을어기므로내지않고_버린수를센다', () => {
     const drops: string[] = [];
     const offered: Offered[] = [];
-    const rec = new JsonTelemetryRecorder({ offer: (record, topic, m) => offered.push({ record, topic, key: m.key, value: {} }), dropped: (record) => drops.push(record) });
+    const rec = new AvroTelemetryRecorder({ offer: (record, topic, m) => offered.push({ record, topic, key: m.key, value: {} }), dropped: (record) => drops.push(record) }, telemetryEncoder());
     rec.record(verdict({ journeyId: '' }));
     rec.record(verdict({ journeyId: 'not-a-uuid' }));
     expect(offered).toEqual([]);
@@ -215,7 +220,7 @@ describe('그림자 판정과 라벨(telemetry.trust-verdicts)', () => {
 
   test('그림자판정도여정ID가틀리면내지않고_버린수를둘다센다', () => {
     const drops: string[] = [];
-    const rec = new JsonTelemetryRecorder({ offer: () => undefined, dropped: (r) => drops.push(r) });
+    const rec = new AvroTelemetryRecorder({ offer: () => undefined, dropped: (r) => drops.push(r) }, telemetryEncoder());
     rec.record(verdict({ journeyId: '', shadow: { eventKey: KEY, verdict: 'ALLOW', profileVersion: 8 } }));
     expect(drops).toEqual(['TrustVerdict', 'TrustVerdict']);
   });

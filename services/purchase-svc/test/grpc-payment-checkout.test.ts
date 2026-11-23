@@ -4,7 +4,10 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { paymentV1Payment } from '@peaket/contracts/proto';
 import { CircuitBreaker, dependencyUnavailable, fakeClock, ProblemError } from '@peaket/platform';
+import { avroSchemas } from '@peaket/contracts/avro';
+import { createAvroEncoder } from '@peaket/platform/avro';
 import { describe, expect, test } from 'vitest';
+import { decodeProduced } from '../../../packages/platform/test/produced-avro.js';
 import {
   checkoutAnswerOf,
   checkoutFailureOf,
@@ -390,18 +393,33 @@ describe('local·ci 대역과 시작 조건', () => {
 describe('행동 신호 어댑터', () => {
   const message = { pid: PID, refMissing: false as const, eventId: EVENT, journeyId: JOURNEY, screen: 'PAYMENT' as const, features: BEHAVIOR, ts: '2026-11-09T03:00:00.000Z', eventKey: 'k' };
 
-  test('PT51_①KafkaBehaviorSignals는 telemetry.behavior에 키 pid, JSON 값으로 낸다', async () => {
+  // 값은 공용 Avro 인코더로 만든 Confluent 형식 바이트다(ADR-0357 결정 3·9, F-04-2). 시험 도구(produced-avro.ts)가 계약 판 .avsc로 푼다. 스키마 ID는 33
+  const SUBJECT = 'telemetry.behavior-peaket.telemetry.BehaviorSignal';
+  const encoder = () => createAvroEncoder({ schemaIds: { [SUBJECT]: 33 }, schemas: avroSchemas, produces: [{ topic: 'telemetry.behavior', record: 'peaket.telemetry.BehaviorSignal' }] });
+
+  test('PT51_①KafkaBehaviorSignals는 telemetry.behavior에 키 pid, 계약 판 Avro 값으로 낸다', async () => {
     const sent: { topic: string; messages: { key: string; value: Buffer }[] }[] = [];
-    await new KafkaBehaviorSignals({ send: async (r) => void sent.push(r) }).publish(message);
+    await new KafkaBehaviorSignals({ send: async (r) => void sent.push(r) }, encoder()).publish(message);
     expect(TELEMETRY_BEHAVIOR_TOPIC).toBe('telemetry.behavior');
     expect(sent).toHaveLength(1);
     expect(sent[0]!.topic).toBe('telemetry.behavior');
     expect(sent[0]!.messages[0]!.key).toBe(PID);
-    expect(JSON.parse(sent[0]!.messages[0]!.value.toString('utf8'))).toEqual(message);
+    const p = decodeProduced(sent[0]!.messages[0]!.value, 'peaket.telemetry.BehaviorSignal');
+    expect(p.schemaId).toBe(33);
+    expect(p.violations).toEqual([]);
+    // 보낸 사건 그대로(ts는 밀리초, 싣지 않은 선택 칸은 null)
+    expect(p.value).toEqual({
+      ...message,
+      ts: Date.parse(message.ts),
+      deviceRef: null,
+      netClass: null,
+      asn: null,
+      features: { v: 1, windowMs: 12_000, pointerMoves: 40, pointerEntropy: 1.25, inputIntervalMeanMs: null, inputIntervalStdMs: null, scrollEvents: null, scrollDistancePx: null },
+    });
   });
 
   test('PT51_④전송 실패는 던진다(쓰임새가 센다)', async () => {
-    await expect(new KafkaBehaviorSignals({ send: async () => Promise.reject(new Error('down')) }).publish(message)).rejects.toThrow('down');
+    await expect(new KafkaBehaviorSignals({ send: async () => Promise.reject(new Error('down')) }, encoder()).publish(message)).rejects.toThrow('down');
   });
 
   test('PT51_버리는 대역은 조용히 끝난다', async () => {

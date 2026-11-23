@@ -9,7 +9,9 @@ const src = readFileSync(fileURLToPath(new URL('../src/start.ts', import.meta.ur
 test('텔레메트리설정이없으면_경고하고_낼기록은버린수로세며_시작을막지않는다', () => {
   expect(src).toMatch(/service\.logger\.warn\(\{ dep: 'telemetry-kafka' \}, warning\)/);
   expect(src).toMatch(/telemetryOff\(telemetryKafka\.warning\)/);
-  expect(src).toMatch(/offer: \(record\) => telemetryDropped\(record, 1\)/);
+  // 꺼져 있으면 좌석 행동 요약·홀드 시도 둘 다 내지 않고 버린 수만 센다(F-04-2, ADR-0357 결정 8)
+  expect(src).toMatch(/behaviorSignals = \{ record: \(\) => telemetryDropped\('BehaviorSignal', 1\) \}/);
+  expect(src).toMatch(/holdAttempts = \{ record: \(\) => telemetryDropped\('HoldAttempt', 1\) \}/);
   expect(src).not.toMatch(/throw[^\n]*telemetryKafka/);
 });
 

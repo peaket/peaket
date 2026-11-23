@@ -2,7 +2,8 @@
 // 적용 판정이 두 번 모두 같고, 그림자 판의 shadow true 기록 수가 판정 수와 같으며, 사람 확인 호출 수와 Redis 명령 수(INFO commandstats)가 늘지 않는지 본다.
 import { createHotRedis, fakeClock, type HotRedis } from '@peaket/platform';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { JsonTelemetryRecorder } from '../src/modules/scoring/adapters/json-telemetry-recorder.js';
+import { AvroTelemetryRecorder } from '../src/modules/scoring/adapters/avro-telemetry-recorder.js';
+import { asyncapiTelemetry, telemetryEncoder } from '../test/avro-telemetry.js';
 import { keys, RedisFeatureStore } from '../src/modules/scoring/adapters/redis-feature-store.js';
 import { ScoreRisk } from '../src/modules/scoring/application/score-risk.js';
 import type { HumanCheckPort } from '../src/modules/scoring/domain/ports.js';
@@ -109,17 +110,17 @@ async function run(rules: RuleSet, sessions: number) {
     invRefMigration: noop,
     blockListChange: noop,
   };
-  const telemetry = new JsonTelemetryRecorder({
-    offer: (_r, _t, m) => {
+  const telemetry = new AvroTelemetryRecorder({
+    offer: (r, _t, m) => {
       count.records += 1;
-      const v = JSON.parse(m.value.toString('utf8')) as { shadow: boolean; eventKey: string; pairedEventKey?: string };
+      const v = asyncapiTelemetry(r, m.value) as { shadow: boolean; eventKey: string; pairedEventKey?: string };
       if (v.shadow) {
         count.shadowRecords += 1;
         if (v.pairedEventKey) pairedKeys.add(v.pairedEventKey);
         else count.unpaired += 1;
       } else activeKeys.add(v.eventKey);
     },
-  });
+  }, telemetryEncoder());
   const pending: Promise<unknown>[] = [];
   const score = new ScoreRisk({
     rules: { current: () => rules, intensity: () => 'BASE' },

@@ -12,6 +12,7 @@ import { ensurePurchaseOutboxPartitions, ensureSeatHoldPartitions, migratePurcha
 import { migratePayment } from '../../payment-svc/scripts/migrate.mjs';
 import { createDatabase, ensureOutboxPartitions, systemClock } from '@peaket/platform';
 import { envFileText, v1EnvFiles, v1Keys } from '../../../tools/local/v1-stage.mjs';
+import { LOCAL_SCHEMA_IDS_FILE } from '../../../tools/local/v1-objects.mjs';
 import { build, freePort, logLines, type Postgres, type Running, SERVICES_DIR, sigterm, spawnMain, startPostgres, startValkey, type Container, waitReady } from './support.js';
 import { processAccountWithdrawal, quoteAccountWithdrawal } from '../../purchase-svc/test-int/withdrawal-grpc-client.js';
 
@@ -71,7 +72,10 @@ async function ports() {
 function envFiles(p: Awaited<ReturnType<typeof ports>>, tag: string): Record<Svc, Record<string, string>> {
   const seatmapDir = join(work, `seatmaps-${tag}`);
   const batchResultDir = join(work, `batch-${tag}`);
-  return v1EnvFiles({ keys, queueRedisUrl: queueRedis.url, seatRedisUrl: seatRedis.url, purchaseDatabaseUrl: purchaseDb, paymentDatabaseUrl: paymentDb, seatmapDir, batchResultDir, ports: p, logLevel: 'info' });
+  const files = v1EnvFiles({ keys, queueRedisUrl: queueRedis.url, seatRedisUrl: seatRedis.url, purchaseDatabaseUrl: purchaseDb, paymentDatabaseUrl: paymentDb, seatmapDir, batchResultDir, ports: p, logLevel: 'info' });
+  // purchase-svc를 홀로 띄우면 주문 사건을 Avro로 내므로 생산자 스키마 ID 설정 파일이 있어야 한다(ADR-0357 결정 4, F-04-2). 무대는 합본이 고정 번호 파일을 쓰고
+  // Outbox 릴레이에는 ConfigMap schema-ids를 붙이므로(tools/local/v1-objects.mjs v1SchemaIdsConfigMap), 이 시험도 같은 고정 번호 파일을 준다
+  return { ...files, 'purchase-svc': { ...files['purchase-svc'], PEAKET_SCHEMA_IDS_FILE: LOCAL_SCHEMA_IDS_FILE } };
 }
 
 /** 앱 포트에 닿는지 본다(서비스마다 신원 없이 부를 수 있는 길의 정해진 답) */

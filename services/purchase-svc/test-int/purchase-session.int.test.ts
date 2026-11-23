@@ -18,6 +18,7 @@ import {
   slotOf,
   toPurchaseSessionStarted,
 } from '../src/modules/inventory/index.js';
+import { COUNT_HOLD_ATTEMPT_LUA } from '../src/modules/inventory/adapters/purchase-session-lua.js';
 import { CLIENT_KEY, newJti, openInput, purchaseSessionStoreCases, type SessionHarness } from '../test/purchase-session-cases.js';
 import { startValkey, type ValkeyContainer } from './valkey.js';
 
@@ -588,5 +589,47 @@ describe('종료·정리 Lua: 망가진 칸과 경계(PRF-138 시험 검토)', (
     const live = SWEEP_SESSION_LUA.indexOf("if h[5] == '1' or ARGV[2] == '1' then");
     expect(live).toBeGreaterThan(-1);
     expect(SWEEP_SESSION_LUA.indexOf('if now >= max then')).toBeLessThan(live);
+  });
+});
+
+describe('RedisPurchaseSessionStore.countHoldAttempt (홀드 시도 세기 hn, 실제 Valkey 8.1, F-04-2)', () => {
+  // 정본: ADR-0357 결정 7(retryNo = 그 시도 앞에 낸 시도의 수, '키가 있을 때만 1 올리는' Lua 한 번), docs/data.md §3 s:session:{jti}의 hn
+  test('A-T26 ② 시도 세기는 세션 키가 있을 때만 올리고 키를 만들지 않는다', async () => {
+    const store = new RedisPurchaseSessionStore(redis);
+    const clock = { now: () => Date.now() + offsetMs };
+    const jti = newJti();
+    const other = newJti();
+    await store.open(openInput(clock, jti));
+    await store.open(openInput(clock, other));
+    const key = sessionKeys.session(jti);
+    const before = hash(await redis.command(['HGETALL', key], { key }));
+    const life = await pexpireTime(redis, key);
+    expect(Object.keys(before)).not.toContain('hn');
+    // 있는 세션: 올린 값 − 1(첫 시도 0)
+    expect(await store.countHoldAttempt(jti)).toBe(0);
+    expect(await store.countHoldAttempt(jti)).toBe(1);
+    expect(await store.countHoldAttempt(jti)).toBe(2);
+    // 다른 구매 세션은 따로 센다
+    expect(await store.countHoldAttempt(other)).toBe(0);
+    // 칸 hn 하나만 더해지고 다른 칸·키 수명은 그대로다
+    expect(hash(await redis.command(['HGETALL', key], { key }))).toEqual({ ...before, hn: '3' });
+    expect(await pexpireTime(redis, key)).toBe(life);
+    // 끝낸 세션: null이고 세션 키를 다시 만들지 않는다
+    await redis.command(['DEL', key], { key });
+    expect(await store.countHoldAttempt(jti)).toBeNull();
+    expect(Number(await redis.command(['EXISTS', key], { key }))).toBe(0);
+    // 연 적이 없는 jti도 키(세션·표지)를 만들지 않는다
+    const ghost = newJti();
+    expect(await store.countHoldAttempt(ghost)).toBeNull();
+    for (const k of [sessionKeys.session(ghost), sessionKeys.marker(ghost)]) expect(Number(await redis.command(['EXISTS', k], { key: k })), k).toBe(0);
+  });
+
+  test('A-T26 ② 시도 세기 Lua는 #!lua로 시작하고 세션 키 하나만 쓴다: 노드 하나짜리 클러스터 모드에서도 돈다', async () => {
+    expect(COUNT_HOLD_ATTEMPT_LUA.startsWith('#!lua\n')).toBe(true);
+    const store = new RedisPurchaseSessionStore(clusterRedis);
+    const jti = newJti();
+    await store.open(openInput({ now: () => Date.now() + offsetMs }, jti));
+    expect(await store.countHoldAttempt(jti)).toBe(0);
+    expect(await store.countHoldAttempt(jti)).toBe(1);
   });
 });

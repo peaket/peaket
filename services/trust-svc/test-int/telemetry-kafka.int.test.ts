@@ -1,12 +1,14 @@
 // 통합 시험: 실제 Kafka(KRaft 한 대)로 판정 기록·행동 신호를 보내고 읽는다(docs/features/bot-defense.md §4.1 ⑤, ADR-0249 결정 4, B-T17).
-// 브로커가 멈춰도 판정은 끝나고, 보내지 못한 기록은 버리고 센다(§18, NFR-001). 값은 asyncapi 모양의 JSON 바이트다(Avro는 BAS-030).
+// 브로커가 멈춰도 판정은 끝나고, 보내지 못한 기록은 버리고 센다(§18, NFR-001). 값은 공용 Avro 인코더의 Confluent 형식 바이트다(ADR-0357, F-04-2).
+// 읽은 바이트는 test/avro-telemetry.ts가 계약 판 .avsc로 풀어(머리 ID·공통 판정 포함) asyncapi 모양으로 되돌린다.
 import { BehaviorSignal, TrustVerdict } from '@peaket/contracts/asyncapi';
 import { fakeClock, kafkaTelemetrySend, TelemetrySink } from '@peaket/platform';
 import { createKafkaProducer } from '@peaket/platform/stream-worker';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { JsonTelemetryRecorder } from '../src/modules/scoring/adapters/json-telemetry-recorder.js';
+import { AvroTelemetryRecorder } from '../src/modules/scoring/adapters/avro-telemetry-recorder.js';
 import { MemoryFeatureStore } from '../src/modules/scoring/adapters/memory-feature-store.js';
 import { ScoreRisk } from '../src/modules/scoring/application/score-risk.js';
+import { asyncapiTelemetry, telemetryEncoder } from '../test/avro-telemetry.js';
 import { EVENT, JOURNEY, recordingHuman, recordingSignals, request, SYNTHETIC_RULES } from '../test/support.js';
 import { collectTopics, type KafkaContainer, startKafka, type TopicCollector } from './kafka.js';
 
@@ -32,7 +34,7 @@ let producers = 0;
 function assemble(dropped: string[] = [], o: Parameters<typeof kafkaTelemetrySend>[1] = {}) {
   const send = kafkaTelemetrySend(() => createKafkaProducer({ kind: 'default', brokers: kafka.brokers, clientId: `it-telemetry-${++producers}` }), o);
   const sink = new TelemetrySink({ send, lingerMs: 5, onDropped: (record, n) => dropped.push(`${record}:${n}`) });
-  const telemetry = new JsonTelemetryRecorder({ offer: (record, topic, m) => sink.offer(record, topic, m) });
+  const telemetry = new AvroTelemetryRecorder({ offer: (record, topic, m) => sink.offer(record, topic, m) }, telemetryEncoder());
   const score = new ScoreRisk({
     rules: { current: () => SYNTHETIC_RULES, intensity: () => 'BASE' },
     human: recordingHuman(),
@@ -59,11 +61,11 @@ describe('판정 기록·행동 신호를 실제 Kafka로 보낸다', () => {
     const verdicts = await collector.waitFor((r) => r.topic === VERDICTS, 2);
     const signals = await collector.waitFor((r) => r.topic === BEHAVIOR, 2);
     for (const r of verdicts) {
-      const v = TrustVerdict.parse(JSON.parse(r.value!));
+      const v = TrustVerdict.parse(asyncapiTelemetry('TrustVerdict', r.bytes!));
       expect(v).toMatchObject({ eventId: EVENT, journeyId: JOURNEY, source: 'REALTIME', shadow: false });
       expect(r.key).toBeNull();
     }
-    const screens = signals.map((r) => BehaviorSignal.parse(JSON.parse(r.value!)));
+    const screens = signals.map((r) => BehaviorSignal.parse(asyncapiTelemetry('BehaviorSignal', r.bytes!)));
     expect(screens.map((s) => s.screen).sort()).toEqual(['EVENT_DETAIL', 'LOBBY']);
     for (const s of screens) expect(s).toMatchObject({ journeyId: JOURNEY, netClass: 'OTHER', deviceRef: 'k1.ref' });
     for (const r of signals) expect(r.key).not.toBeNull();

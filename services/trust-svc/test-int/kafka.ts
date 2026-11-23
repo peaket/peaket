@@ -140,8 +140,10 @@ export interface TopicRecord {
   partition: number;
   offset: number;
   key: string | null;
-  /** 값 바이트를 UTF-8 글로(JSON 대역이라 글이다) */
+  /** 값 바이트를 UTF-8 글로(JSON 대역 토픽용) */
   value: string | null;
+  /** 값 바이트 그대로(Avro 토픽은 이것을 푼다, F-04-2) */
+  bytes: Buffer | null;
   headers: Record<string, string>;
 }
 
@@ -174,6 +176,7 @@ export async function collectTopics(brokers: string[], topics: string[], group: 
         offset: Number(message.offset),
         key: message.key ? message.key.toString('utf8') : null,
         value: message.value ? message.value.toString('utf8') : null,
+        bytes: message.value ? Buffer.from(message.value) : null,
         headers,
       });
     },
