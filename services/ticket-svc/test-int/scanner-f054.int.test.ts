@@ -717,6 +717,8 @@ describe('F-05-4 실제 ticket-svc(start)와 스캐너 앱 모듈', () => {
 
   test('O-T15 core에 닿지 못하면 목록의 reentryAllowed는 사본 값(허용)이고 변경분이 없다', async () => {
     const d = await device(E5);
+    // device()가 넣은 첫 배치(PLACEMENT)가 이미 scanner_seq를 올린다. package가 변경분을 더하지 않는지만 본다
+    const seq0 = await lastSeqOf(E5);
     const token = tokenFor(d, session(E5));
     await database.pool.query('insert into scanner_event_policy (event_id, reentry_allowed, policy_seq, observed_at) values ($1, true, 0, now())', [E5]);
     core.policy.set(E5, 'down');
@@ -724,6 +726,6 @@ describe('F-05-4 실제 ticket-svc(start)와 스캐너 앱 모듈', () => {
     expect((core.calls.get(E5) ?? 0) > 0, 'core 대역에 실제로 물었다').toBe(true);
     expect(pkg.reentryAllowed).toBe(true);
     expect(await policyRows(E5)).toEqual([]);
-    expect(await lastSeqOf(E5)).toBe(0);
+    expect(await lastSeqOf(E5)).toBe(seq0);
   });
 });
