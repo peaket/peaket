@@ -20,57 +20,36 @@
 
 ### 관제탑 및 제어 평면 종합 아키텍처
 
-```mermaid
-flowchart TD
-    subgraph OpsConsole["중앙 관제 콘솔 (ops-web / gw-ops)"]
-        Operator["운영자 (Operator)"]
-        Commander["관제 지휘관 (Commander)"]
-        Dashboard["실시간 대시보드 (p95 5s 메트릭)"]
-        CmdUI["명령 12종 카탈로그<br/>(dry-run, 사후 검토, 2인 승인)"]
-        
-        Operator --> CmdUI
-        Commander --> CmdUI
-    end
-
-    subgraph ControlPlane["독립 제어 평면 (ops-svc 전용 인프라)"]
-        OpsSvc["ops-svc (독립 노드 풀)"]
-        OpsDB[("ops 전용 Aurora DB<br/>(감사 로그, 명령 수명주기)")]
-        CmdUI --> OpsSvc
-        OpsSvc --> OpsDB
-    end
-
-    subgraph DirectChannel["Kafka 우회 직결 제어 채널 (p99 3초 이내 전파)"]
-        gRPC["단항 gRPC 제어 호출<br/>peaket.control.v1.ControlReceiver"]
-        OpsSvc -->|"1. 제어 gRPC 호출 (데드라인 1초)"| gRPC
-    end
-
-    subgraph DataPlaneServices["데이터 평면 대상 마이크로서비스"]
-        subgraph QueueNode["queue-svc"]
-            QMem["Redis 제어 상태 키<br/>s:event:E:fence"]
-            QPod["queue-svc 파드"]
-        end
-        subgraph SeatNode["seat-svc"]
-            SMem["Redis 제어 상태 키<br/>s:event:E:sweep"]
-            SPod["seat-svc 파드"]
-        end
-        subgraph PayNode["payment-svc"]
-            PDB[("payment DB<br/>pg_switch 테이블")]
-            PPod["payment-svc 파드"]
-        end
-        
-        gRPC --> QPod
-        gRPC --> SPod
-        gRPC --> PPod
-        
-        QPod -->|"2. 저장소 상태 영구 기록"| QMem
-        SPod -->|"2. 저장소 상태 영구 기록"| SMem
-        PPod -->|"2. DB 판번호 기록"| PDB
-        
-        QPod -->|"3. Ack 응답"| OpsSvc
-        SPod -->|"3. Ack 응답"| OpsSvc
-        PPod -->|"3. Ack 응답"| OpsSvc
-    end
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [중앙 관제 콘솔 (ops-web / gw-ops)]                                    │
+│ • Operator (운영자) ──┐                                                │
+│ • Commander (지휘관) ─┴──▶ 12대 명령 카탈로그 (dry-run, 2인 승인 모달) │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [ops-svc 제어 평면]                                                    │
+│ • 1인 긴급 정지: 판매 일시정지, 봇 탐지 강도 상향 (즉시 반영)          │
+│ • 2인 상호 승인: 판매 재개, 수동 환불, 정산 지급 (Dual-Control 필수)   │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+    ┌───────────────────────────────┴───────────────────────────────┐
+    │ direct gRPC 제어 신호 (< 1초 직달)                            │ Kafka control.*
+    ▼                                                               ▼
+┌─────────────────────────────────────────┐  ┌───────────────────────────┐
+│ [핫패스 서비스 파드군]                  │  │ [감사 및 영구 기록]       │
+│ • admission-ctrl: AIMD 목표 강제 축소   │  │ • ClickHouse 불변 원장    │
+│ • purchase-svc: 신규 선점 서킷 오픈     │  │ • Merkle 감사 로그 영구적재│
+│ • gw-fan: 비상 503 유지 헤더 반환      │  └───────────────────────────┘
+└─────────────────────────────────────────┘
+```
+
+| 제어 구분 | 대상 명령 | 권한 및 승인 요건 |
+| :--- | :--- | :--- |
+| **긴급 킬스위치** | 판매 일시 정지(명령 3), 자동화 중단(명령 11) | Commander 1인 단독 2차 인증 후 즉시 집행 (48시간 내 사후 보고) |
+| **2인 상호 승인** | 판매 재개(Reopen), 정산 지급 집행 | Operator 제안 $\rightarrow$ 타 Commander 최종 승인 (사고 재발 방지) |
+| **제어 전파 SLA** | 전 서버 제어 신호 직달 | gRPC direct 제어로 3초 이내에 10대 마이크로서비스 전역 전파 |
 
 ### 핵심 3대 서브시스템
 

@@ -38,39 +38,27 @@
 
 PEAKET은 불필요한 분산 복잡도를 원천 배제하고, **단일 쓰기 노드 스케일업(Scale-Up)**과 **장애 격리 목적의 5대 독립 클러스터 토폴로지**를 채택한다.
 
-```mermaid
-flowchart TD
-    subgraph MultiAZ["AWS 서울 리전 3대 AZ (가용 영역)"]
-        direction TB
-        
-        subgraph AZ_A["AZ-A (Active Primary)"]
-            PG_PUR_W[("purchase DB (Writer)<br/>db.r7g.xlarge")]
-            PG_PAY_W[("payment DB (Writer)<br/>db.r7g.large")]
-            PGB_A["PgBouncer 풀러 1"]
-        end
-
-        subgraph AZ_B["AZ-B (Active Primary & Sync Standby)"]
-            PG_TKT_W[("ticket DB (Writer)<br/>db.r7g.large")]
-            PG_OPS_W[("ops DB (Writer)<br/>db.r7g.large")]
-            PG_PUR_R[("purchase DB (Reader)")]
-            PGB_B["PgBouncer 풀러 2"]
-        end
-
-        subgraph AZ_C["AZ-C (Shared Cluster & Sync Standby)"]
-            PG_SHR_W[("shared DB (Writer)<br/>identity / core 논리 DB")]
-            PG_PAY_R[("payment DB (Reader)")]
-            PG_TKT_R[("ticket DB (Reader)")]
-            PGB_C["PgBouncer 풀러 3"]
-        end
-    end
-
-    subgraph DR_Tokyo["도쿄 보조 리전 (Disaster Recovery)"]
-        PG_TKT_TOKYO[("ticket DB (Global Replica)<br/>RPO 약 1초 티켓 원장 보존")]
-    end
-
-    PG_TKT_W -.->|"Aurora 글로벌 복제 (비동기)"| PG_TKT_TOKYO
-    PGB_A --- PGB_B --- PGB_C
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [AWS 서울 리전 3대 AZ (가용 영역) 고가용성 구성]                       │
+│                                                                        │
+│   [AZ-A (Active Primary)]                                              │
+│   • purchase DB (Writer) ──▶ db.r7g.xlarge (동기 복제본 AZ-B/C 복제)   │
+│   • payment DB (Writer)                                                │
+│                                                                        │
+│   [AZ-B (Sync Standby)]                                                │
+│   • Hot Standby 복제본 (장애 시 30초 내 무중단 자동 페일오버)          │
+│                                                                        │
+│   [AZ-C (ReadOnly Replica)]                                            │
+│   • 분석/CS 조회 트래픽 오프로딩                                       │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 인프라 계층 | 가용 영역 구성 | 무중단 페일오버 SLA |
+| :--- | :--- | :--- |
+| **Writer 인스턴스** | AZ-A 전담 쓰기 | 단일 쓰기 인스턴스로 분산 트랜잭션 오버헤드 0 |
+| **Sync Standby** | AZ-B 동기 복제 | Aurora Multi-AZ 자동 장애 조치 (RPO 0초, RTO 30초 이내) |
+| **ReadOnly Replica**| AZ-C 읽기 전용 | 운영자 관제 및 CS 이력 조회를 분리하여 트랜잭션 코어 보호 |
 
 ### 3.1 비샤딩(No-Sharding)의 정량적 근거 (ADR-0028)
 
@@ -90,27 +78,27 @@ flowchart TD
 
 PEAKET은 무분별한 파티셔닝을 금지하고, [ADR-0114](../../adr/0114-no-monthly-partitions-for-order-payment-ticket-batched-retention-delete.md)에 따라 테이블 성격별로 파티셔닝 여부를 엄격히 이원화한다.
 
-```mermaid
-flowchart TD
-    subgraph NonPartitioned["단일 테이블 유지 (비파티셔닝)"]
-        direction TB
-        NP1["purchase_order (주문 원장 1,700만 행)"]
-        NP2["payment (결제 원장 1,800만 행)"]
-        NP3["ticket (티켓 소유권 원장 3,500만 행)"]
-        NP_R["이유: 글로벌 유니크 인덱스 유지,<br/>단건 점 조회 O(1) 성능 수호,<br/>5년 누적 용량 80GB 미만"]
-        NP1 --- NP2 --- NP3 --- NP_R
-    end
-
-    subgraph Partitioned["시계열 파티셔닝 적용 (DROP PARTITION 단위 명확)"]
-        direction TB
-        P1["outbox (트랜잭셔널 아웃박스) ──> 일 단위 파티션 (ID 범위)"]
-        P2["scan_event (게이트 입장 스캔 로그) ──> 회차별 월 단위 파티션"]
-        P3["seat_hold (홀드 만료 원장) ──> 회차별 월 단위 파티션"]
-        P4["notification_delivery (알림 발송 로그) ──> 발송일 월 단위 파티션"]
-        P_R["이유: 전송 완료 후 테이블 통째로 DROP,<br/>VACUUM 오버헤드 0건 달성"]
-        P1 --- P2 --- P3 --- P4 --- P_R
-    end
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [단일 테이블 유지 (비파티셔닝 전략: ADR-0028)]                         │
+│ • purchase_order (주문 원장 1,700만 행)                                │
+│ • payment (결제 원장 1,800만 행)                                       │
+│ • ticket (티켓 소유권 원장 3,500만 행)                                 │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ (비파티셔닝 선정 근거)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ • 글로벌 유니크 인덱스(`UQ`)의 물리적 무결성을 단일 B-Tree로 완벽 보장 │
+│ • 파티셔닝 도입 시 파티션 키(회차 ID) 없는 단건 조회에서 2단계 커밋    │
+│   및 전체 파티션 프루닝(Pruning) 실패로 인한 성능 저하 원천 방지       │
+│ • 5년 누적 3,500만 행은 단일 인스턴스 메모리(18GB)에서 100% 처리 가능  │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 설계 방식 | 파티셔닝 적용 시 문제점 | 비파티셔닝 채택 이점 |
+| :--- | :--- | :--- |
+| **유니크 제약** | 파티션 간 글로벌 유니크 인덱스 생성 불가 | `seat_sale` 단일 테이블에서 오버셀 0건 수학적 강제 |
+| **쿼리 성능** | 파티션 프루닝 누락 시 풀 테이블 스캔 | 단일 B-Tree 인덱스 탐색(깊이 3~4)으로 p99 2ms 유지 |
 
 #### 1) 주문·결제·티켓 원장을 단일 테이블로 유지하는 이유
 - **글로벌 유니크 제약 보존**: `payment (order_id) UNIQUE` 제약조건과 주문 멱등키는 테이블 전체에서 유일해야 한다. 파티셔닝 시 파티션 키가 유니크 인덱스에 강제 포함되어야 하므로 '주문당 1회 결제' 불변식이 깨질 위험이 있다.
@@ -136,20 +124,27 @@ flowchart TD
 #### 2) PgBouncer 트랜잭션 풀링 구성 및 대체 계층
 PostgreSQL은 연결당 단일 프로세스를 할당하므로 커넥션 수가 수천 개로 늘어나면 컨텍스트 스위칭으로 CPU가 고갈된다.
 
-```mermaid
-flowchart LR
-    APPS["애플리케이션 파드 (수백 개)"] --> PGB["PgBouncer 풀러 (트랜잭션 풀링)<br/>K8s Deployment 3개 복제 (AZ별 1개)"]
-    PGB -->|"안정적인 소수 연결 (약 200~400개)"| PG_CORE[("Aurora PostgreSQL")]
-
-    subgraph FallbackHierarchy["PgBouncer 장애 시 대체 계층 순위 (ADR-0180)"]
-        direction TB
-        F1["1순위: 앱 자체 커넥션 풀 엄격 제한 (파드수 × 풀크기 <= DB상한 80%)"]
-        F2["2순위: AWS RDS Proxy (세션 고정 리스크 검증 후 도입)"]
-        F3["3순위: 멀티스레드 풀러 (PgCat, Odyssey)"]
-        F4["4순위: DB 인스턴스 스케일업 (메모리 증설)"]
-        F1 --> F2 --> F3 --> F4
-    end
 ```
+┌─────────────────────────────────┐
+│ [애플리케이션 파드군 (수백 개)] │
+└────────────────┬────────────────┘
+                 │ 수천 개 단기 연결
+                 ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [PgBouncer 풀러 (트랜잭션 풀링, K8s Deployment AZ별 복제)]             │
+│ • 클라이언트 연결은 수천 개 수용하되, DB 연결은 200~400개로 고정 압축  │
+└────────────────┬───────────────────────────────────────────────────────┘
+                 │ 안정적인 소수 연결 풀 (커넥션 풀 고갈 0건)
+                 ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [Aurora PostgreSQL 단일 Writer]                                        │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 구성 요소 | 풀링 방식 | 커넥션 안정성 |
+| :--- | :--- | :--- |
+| **PgBouncer** | `pool_mode = transaction` | 트랜잭션 수행 순간에만 DB 연결을 대여하여 DB 프로세스 급증 방지 |
+| **배포 격리** | AZ별 3개 복제본 배포 | PgBouncer 파드 장애 시에도 타 AZ 풀러로 즉각 페일오버 |
 
 - **트랜잭션 풀링(Transaction Pooling)**: 쿼리 트랜잭션이 지속되는 동안에만 물리 DB 연결을 대여하고, 트랜잭션 커밋 즉시 풀로 반환하여 수백 개 파드의 연결을 수백 개 물리 연결로 압축.
 - **주의 사항**: 세션 레벨 `SET` 사용이 불가하므로 모든 세션 타임아웃은 DB Role 기본값으로 지정하고, 트랜잭션별 타임아웃은 `SET LOCAL`을 적용한다.

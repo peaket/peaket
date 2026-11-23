@@ -49,45 +49,22 @@
 
 ## 3. 고른 이유와 상세 아키텍처 다이어그램
 
-```mermaid
-flowchart TD
-    subgraph RouteDispatch ["1. CloudFront Edge & 경로 디스패처"]
-        CDN["CloudFront Edge Routing"]
-        R1["GET /events/:id"]
-        R2["GET /queue"]
-        R3["GET /seats"]
-        R4["GET /payment"]
-        CDN --> R1 & R2 & R3 & R4
-    end
-
-    subgraph ISRLayer ["2. 공연 상세: On-Demand ISR"]
-        EventEdge["CloudFront Edge Cache (s-maxage=300)"]
-        NextServer["Next.js App Server"]
-        Revalidate["On-Demand Tag Invalidation<br/>revalidateTag('event-101')"]
-        R1 --> EventEdge
-        EventEdge -.->|Cache Miss / Stale| NextServer
-        Revalidate -.->|파트너 수정 시 퍼지| EventEdge
-    end
-
-    subgraph VanillaQueue ["3. 대기실: Zero-Framework 정적 셸"]
-        QueueS3["S3 Static Bucket (gzip 2.73KB)"]
-        VanillaJS["Vanilla JS State Machine<br/>- textContent 갱신<br/>- Adaptive Polling (0.5s~5s)"]
-        R2 --> QueueS3 --> VanillaJS
-    end
-
-    subgraph CanvasSeats ["4. 좌석 선택: CSR Canvas + Web Worker"]
-        SeatShell["Seat Page Static Shell"]
-        Worker["Web Worker (Binary FlatBuffers Parser)"]
-        Canvas["OffscreenCanvas 2D Renderer (50,000석 60fps)"]
-        R3 --> SeatShell --> Worker --> Canvas
-    end
-
-    subgraph NoncePayment ["5. 결제/마이: Nonce CSP 격리"]
-        PayServer["Next.js SSR Server (private, no-store)"]
-        NonceCSP["CSP: script-src 'nonce-RANDOM'<br/>Strict SameSite Cookie"]
-        R4 --> PayServer --> NonceCSP
-    end
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [CloudFront Edge 경로 디스패처 (Route Dispatcher)]                     │
+│                                                                        │
+│   • GET /events/:id ──▶ [정적 셸 (SSG / ISR 300초)] (CDN 엣지 99% 캐시)│
+│   • GET /queue      ──▶ [바닐라 정적 셸 (CSR, 23KB)] (React 배제)      │
+│   • GET /seats      ──▶ [CSR + Web Worker] (5만 석 비트맵 캔버스 렌더) │
+│   • GET /admin      ──▶ [SSR + Nonce CSP] (사내망 전용 실시간 렌더링) │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 경로 | 렌더링 전략 | 선정 이유 및 성능 효과 |
+| :--- | :--- | :--- |
+| **공연 상세** | ISR (300초) | 정적 HTML 배포로 오픈 순간 조회 트래픽 엣지 완벽 흡수 |
+| **대기실** | 순수 바닐라 JS 셸 | React 런타임을 걷어내어 15KB 번들로 모바일 크래시 0건 |
+| **좌석맵** | CSR + Web Worker | 5만 석 렌더링을 메인 스레드와 분리하여 터치 반응 60fps 유지 |
 
 ### 핵심 매커니즘 4가지
 

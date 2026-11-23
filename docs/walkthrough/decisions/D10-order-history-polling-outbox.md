@@ -43,42 +43,32 @@
 
 PEAKET은 **"도메인 원장은 상태와 이력을 분리해 ACID로 묶고, Outbox 릴레이는 외부 의존성 없는 단순한 100ms 폴링으로 운영한다"**는 설계를 확립했다.
 
-```mermaid
-flowchart TD
-    subgraph OrderService["purchase-svc (주문 처리 파드)"]
-        TRANS["단일 ACID 트랜잭션 (Single DB Transaction)"]
-        PO["1. purchase_order UPDATE\n(status = 'CONFIRMED', event_seq = N+1)"]
-        OE["2. order_event INSERT (Append-Only)\n(order_id, seq=N+1, payload jsonb)"]
-        OB["3. outbox INSERT\n(topic='trade.orders', payload, created_at)"]
-    end
-
-    subgraph AuroraDB["Aurora PostgreSQL (Core Ledger)"]
-        T_PO[("purchase_order 테이블\n[최신 상태 원본]")]
-        T_OE[("order_event 테이블\n[불변 감사 이력 원본]")]
-        T_OB[("outbox 테이블\n[미발행 이벤트 큐]")]
-    end
-
-    subgraph OutboxRelay["purchase-outbox-relay (전용 파드, K8s Lease 리더)"]
-        LEADER["K8s Lease 단일 활성 리더 워커\n(100ms 주기 폴링 루프)"]
-        SELECT_POLL["SELECT * FROM outbox\nWHERE processed_at IS NULL\nORDER BY seq ASC\nLIMIT 500 FOR UPDATE"]
-        ACK_UPDATE["UPDATE outbox\nSET processed_at = NOW()\nWHERE seq IN (...)"]
-    end
-
-    subgraph KafkaBroker["MSK Kafka Cluster (trade-cluster)"]
-        TOPIC[("trade.orders 토픽\n(Key = order_id)")]
-    end
-
-    TRANS --> PO & OE & OB
-    PO --> T_PO
-    OE --> T_OE
-    OB --> T_OB
-
-    LEADER --> SELECT_POLL
-    SELECT_POLL <-->|"100ms 배치 조회"| T_OB
-    SELECT_POLL -->|"순서 보장 발행"| TOPIC
-    TOPIC -->|"발행 성공 확인"| ACK_UPDATE
-    ACK_UPDATE --> T_OB
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [purchase-svc (주문 처리 파드)]                                        │
+│ • 단일 ACID 트랜잭션 (Single DB Transaction):                          │
+│   1. purchase_order 상태 UPDATE (CONFIRMED)                            │
+│   2. order_event 이력 INSERT (결제 완료 사유)                          │
+│   3. purchase_outbox 이벤트 행 INSERT (topic='trade.purchase-orders')   │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ (단 1회의 COMMIT 문으로 원자적 기록)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [PostgreSQL purchase DB 원장]                                          │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼ (100ms 폴링 주기 워커)
+┌────────────────────────────────────────────────────────────────────────┐
+│ [Outbox 릴레이 워커 (단일 리더 파드)]                                  │
+│ • SELECT ... FOR UPDATE SKIP LOCKED로 발행 대상 조회                   │
+│ • Kafka trade.purchase-orders 발행 성공 (acks=all) ──▶ outbox 행 삭제  │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 구성 요소 | 기술 방식 | 신뢰성 및 운영 이점 |
+| :--- | :--- | :--- |
+| **Transactional Outbox**| 주문 커밋 시 Outbox 동시 기록 | DB 커밋과 메시지 발행 간 불일치 2PC 분산 트랜잭션 배제 |
+| **100ms 폴링 릴레이** | `SKIP LOCKED` 배치 조회 | Debezium CDC 대비 운영 복잡성 및 복제 슬롯 누수 장애 원천 제거 |
 
 ### 핵심 매커니즘 4가지
 

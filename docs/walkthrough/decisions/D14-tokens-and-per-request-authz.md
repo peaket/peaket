@@ -42,35 +42,25 @@
 
 PEAKET은 **"게이트웨이는 암호학적 서명만 보고 빠르게 통과시키며, 세션 무효화는 이벤트로 브로드캐스팅하고, 권한은 서비스가 실시간 판정한다"**는 철저한 책임 분리 모델을 정립했다.
 
-```mermaid
-flowchart TD
-    subgraph ClientAndGateway["클라이언트 및 씬 게이트웨이 계층"]
-        CLIENT["클라이언트 요청 (Bearer JWT)"]
-        GW["5대 씬 게이트웨이 (D-13)\n- 메모리 내 ES256 공개키로 서명 검증\n- 만료(exp), 대상(aud), 범위(scope) 확인\n- DB/Redis 조회 0건 (p99 < 3ms)"]
-    end
-
-    subgraph ServiceAuthGuards["백엔드 서비스 공통 인가 파이프라인 (packages/platform)"]
-        AUTH_GUARD["1. AuthGuard\n- 로컬 인메모리 종료 세션 목록(Blacklist) 대조\n- sid 매칭 시 401 Unauthorized 즉각 차단"]
-        ROLES_GUARD["2. RolesGuard (관리자/기획사 API)\n- identity-svc로 gRPC 권한 실시간 질의\n- (계정ID, 테넌트ID, 요청 권한)\n- 로컬 메모리 5초 마이크로 캐시\n- 고위험 명령은 캐시 우회 강제"]
-    end
-
-    subgraph TerminationBroadcasting["세션 종료 실시간 전파 파이프라인"]
-        TERMINATE["로그아웃 / 강제 종료 / 탈퇴 발생"]
-        IDENTITY_SVC["identity-svc 세션 관리자"]
-        OUTBOX[("identity DB Outbox")]
-        KAFKA["MSK control.sessions-terminated 토픽\n(모든 서비스 파드가 독립 컨슈머 그룹으로 구독)"]
-    end
-
-    CLIENT --> GW
-    GW --> AUTH_GUARD
-    AUTH_GUARD --> ROLES_GUARD
-    ROLES_GUARD -->|"비즈니스 로직 실행"| BIZ["서비스 컨트롤러"]
-
-    TERMINATE --> IDENTITY_SVC
-    IDENTITY_SVC --> OUTBOX
-    OUTBOX --> KAFKA
-    KAFKA -.->|"실시간 브로드캐스팅 (지연 < 1초)"| AUTH_GUARD
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [클라이언트 및 씬 게이트웨이 계층]                                     │
+│ • 클라이언트 요청 (Bearer JWT) ──▶ 게이트웨이가 메모리 ES256 공개키로  │
+│   서명, 만료(exp), 대상(aud), 범위(scope) 1ms 검증                    │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ (mTLS 터널을 통해 전파)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [내부 마이크로서비스 인가 계층]                                        │
+│ • 게이트웨이가 주입한 내부 신뢰 헤더(`X-Consumer-*`) 기반 인가 판정     │
+│ • 회차/좌석별 세부 소유권은 서비스 비즈니스 로직(Local DB)에서 직접 대조│
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 인증/인가 단계 | 수행 위치 | 성능 및 보안 보장 |
+| :--- | :--- | :--- |
+| **토큰 검증** | 씬 게이트웨이 로컬 메모리 | 외부 세션 저장소(Redis) 호출 없이 공개키로 1ms 내 서명 검증 |
+| **요청 인가** | 서비스 메시지 헤더 | 내부 위조 방지 mTLS 기반 신뢰 헤더 전달로 불필요한 재인증 제거 |
 
 ### 핵심 매커니즘 4가지
 

@@ -38,103 +38,40 @@
 
 PEAKET의 전사 저장소 토폴로지는 **'서비스별 독립 데이터베이스(Database per Service)'** 원칙과 **'비동기 트랜잭셔널 아웃박스(Transactional Outbox) 기반의 이벤트 동기화'**를 핵심 골격으로 한다.
 
-```mermaid
-flowchart TD
-    subgraph Clients["1. 클라이언트 및 단말 엣지 계층"]
-        direction LR
-        WEB["웹 브라우저 (대기실 / 예매창)"]
-        APP["모바일 앱 (티켓 월렛)"]
-        SCAN["현장 스캐너 단말"]
-        IDB[("IndexedDB 단말 저장소<br/>- 비대칭 개인키 (서버 전송 0건)<br/>- 오프라인 검표용 공개키 패키지<br/>- 현장 스캔 큐 (오프라인 판정)")]
-        WEB & APP & SCAN <--> IDB
-    end
-
-    subgraph EdgeDelivery["2. 엣지 캐시 & 전송망 계층"]
-        direction TB
-        CDN["CloudFront CDN<br/>- 1,000구간 대기순번 정적 JSON<br/>- 로비 셔플 분할 파일 (36 Gbps)<br/>- 좌석맵 SVG & 아티스트 포스터"]
-        RGW["realtime-gw (웹소켓 게이트웨이)<br/>5,000개 클라이언트 연결 수용"]
-    end
-
-    subgraph InvertedMemory["3. 초고속 인메모리 계층 (ElastiCache Valkey 8.1+)"]
-        direction TB
-        RC_Q[("Redis 대기열 클러스터 (q:*)<br/>- seq (INCRBY 2ms 배치)<br/>- removed (125KB 비트맵)<br/>- 1인 1순번 dup/adm")]
-        RC_S[("Redis 좌석 클러스터 (s:*)<br/>- bitmap (6.25KB 비트맵)<br/>- hold (단일 슬롯 HASH)<br/>- SPUBLISH 구역별 델타 전파")]
-        RC_C[("Redis 세션·캐시 클러스터 (id:*, tr:*)<br/>- 사용자 세션, 전역 속도제한<br/>- noeviction 무음 유실 방어")]
-    end
-
-    subgraph RDBMS_OLTP["4. ACID 원장 계층 (Aurora PostgreSQL 18.x - 5개 독립 클러스터)"]
-        direction TB
-        PGB["PgBouncer 트랜잭션 풀러 계층 (AZ별 3개 복제)"]
-        
-        subgraph Clusters["5개 물리 독립 클러스터"]
-            direction LR
-            DB_PUR[("purchase DB<br/>주문·판매·1인한도<br/>(seat_sale 부분인덱스)")]
-            DB_PAY[("payment DB<br/>결제·정산·지급<br/>(외부 PG사 격리)")]
-            DB_TKT[("ticket DB<br/>티켓소유권·게이트입장<br/>(현장 가용성 수호)")]
-            DB_OPS[("ops DB (전용)<br/>운영명령·감사체인<br/>(오픈 직전 p95 500ms)")]
-            DB_SHR[("shared DB (논리 분리)<br/>identity / core 논리 DB<br/>(교차 외래키 조인 금지)")]
-        end
-        PGB --> Clusters
-    end
-
-    subgraph DR_Replica["5. 도쿄 DR 보조 리전"]
-        DB_TOKYO[("ticket DB 글로벌 복제본<br/>(RPO 약 1초 티켓 원장 보존)")]
-    end
-
-    subgraph EventStream["6. 분산 이벤트 스트리밍 계층 (Amazon MSK 3.x)"]
-        direction TB
-        RELAY["Transactional Outbox 릴레이 파드<br/>(K8s Lease 단일 리더 100ms 폴링)"]
-        KF_TR["Kafka trade.* & control.* (거래/제어 클러스터)"]
-        KF_TL["Kafka telemetry.* (관측/신호 클러스터)"]
-    end
-
-    subgraph StreamWorkers["7. 무상태 스트림 워커 계층 (TypeScript 파드)"]
-        direction LR
-        W_OPS["ops-rt 워커<br/>(0.25초 마이크로배치)"]
-        W_ING["analytics-ingest 워커<br/>(KMS HMAC 회차별 가명화)"]
-        W_INV["inv-ingest 워커<br/>(부정 예매 이상행위)"]
-    end
-
-    subgraph OLAP_Archive["8. 대규모 분석 & 콜드 아카이브 계층"]
-        direction TB
-        subgraph ClickHouseEngine["ClickHouse 26.8 LTS 분석 클러스터"]
-            CH_RT[("rt.* 실시간 관제 표<br/>(p95 5초 반영, 잠정 수치)")]
-            CH_MED[("메달리온 파이프라인<br/>Bronze(90일) ──> Silver(90일) ──> Gold(2년)")]
-            CH_INV[("inv.* 부정 예매 조사 저장소")]
-        end
-        
-        subgraph ColdStorage["AWS S3 & 불변 아카이브"]
-            S3_PARQUET[("회차별 동결 Parquet 아카이브<br/>(ClickHouse s3() 조회, 영구 보존)")]
-            S3_WORM[("WORM 감사 앵커 버킷 (변조 불가)")]
-        end
-    end
-
-    %% 연결 플로우
-    WEB & APP -->|"정적 파일 & 대기 순번 캐시 조회"| CDN
-    WEB -->|"티켓 오픈 순간 진입 (20만 RPS)"| RC_Q
-    CDN -.->|"1,000구간 상태 파일 갱신 (초당 1,000건)"| RC_Q
-    
-    RC_Q -->|"입장 제어 (초당 28명)"| RC_S
-    WEB <-->|"구역별 좌석 델타 웹소켓"| RGW
-    RC_S -->|"SPUBLISH (샤드 내부 전파)"| RGW
-    
-    RC_S -->|"선점 성공 좌석 결제 요청"| PGB
-    Clusters -->|"트랜잭션 커밋 내 Outbox 삽입"| Clusters
-    Clusters --> RELAY
-    RELAY -->|"최소 한 번 전송 (acks=all)"| KF_TR
-    
-    DB_TKT -.->|"교차 리전 비동기 스토리지 복제"| DB_TOKYO
-    
-    KF_TR & KF_TL --> W_OPS & W_ING & W_INV
-    W_OPS --> CH_RT
-    W_ING --> CH_MED
-    W_INV --> CH_INV
-    
-    CH_MED -->|"회차 동결 (Freeze)"| S3_PARQUET
-    DB_OPS -.->|"감사 체인 해시 앵커링"| S3_WORM
-    
-    SCAN -->|"오프라인 판정 후 스캔 큐 전송"| PGB
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [1. 클라이언트 및 단말 엣지 계층]                                      │
+│ • 웹/모바일 (브라우저)  • PWA 티켓 월렛  • 게이트 스캐너 단말           │
+│ • 단말 IndexedDB: 비대칭 개인키 보관, 오프라인 검표용 공개키 캐싱      │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [2. 엣지 및 인메모리 계층]                                             │
+│ • CloudFront CDN: 1,000개 세그먼트 구간 파일 1초 캐시                  │
+│ • Redis 3대 클러스터: 대기열(순번), 좌석(비트맵), 세션(JWT 캐시)       │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [3. RDBMS 원장 계층 (PostgreSQL 5종)]                                  │
+│ • purchase (주문/좌석) • payment (결제원장) • ticket (발권)            │
+│ • ops (명령 감사로그)  • core (공연/회원 불변 마스터)                  │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [4. 이벤트 버스 및 분석 계층]                                          │
+│ • Kafka MSK (trade.*) ──▶ ClickHouse OLAP (0.5초 BI) ──▶ S3 Parquet   │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 계층 | 데이터 저장소 | 핵심 보장 역할 |
+| :--- | :--- | :--- |
+| **단말 엣지** | IndexedDB, WebCrypto | 100% 오프라인 검표(p95 150ms) 및 개인키 단말 독점 |
+| **인메모리** | Redis 3종 클러스터 | 피크 20만 RPS 대기열 흡수 및 5만 석 p99 50ms 비트맵 선점 |
+| **RDBMS 원장** | PostgreSQL 5개 독립 DB | 부분 유니크 인덱스로 오버셀 0건, 단일 로컬 ACID 트랜잭션 사수 |
+| **분석/아카이브**| ClickHouse & S3 | 초 단위 다차원 실시간 집계 및 5년 법적 증거 원장 보존 |
 
 ---
 
@@ -199,6 +136,12 @@ sequenceDiagram
     Note over CH: 12. 회차 마감 (R0~R3) 후<br/>Gold 스타 스키마 확정
     CH->>S3: 13. 동결(Freeze) 완료 회차 Parquet 파일 내보내기 (영구 보존)
 ```
+
+| 단계 | 통신 구간 | 처리 시간 및 원자성 보장 |
+| :--- | :--- | :--- |
+| **대기열 단계** | 브라우저 $\leftrightarrow$ CDN/Redis | 1초 캐싱으로 오리진 부하 격리, 2ms 로컬 버퍼링 |
+| **1선 선점** | 브라우저 $\leftrightarrow$ 좌석 Redis | hold.lua 단일 스레드 직렬 선점 (p99 50ms) |
+| **2선 확정** | purchase-svc $\leftrightarrow$ PostgreSQL | 부분 유니크 인덱스로 오버셀 물리적 차단, 전진 복구 |
 
 1. **대기열 통제 계층**:
    - 20만 RPS의 오픈 진입은 Redis 대기열 클러스터의 `INCRBY` 마이크로 배치로 처리되고, 대기 순번 조회는 CloudFront CDN의 1,000명 단위 파일 캐싱(오리진 부하 98% 삭감)이 전담한다.

@@ -49,40 +49,26 @@
 
 PEAKET은 **"돈이 움직이기 전에 원장을 선점하고, 일단 승인된 금융 결제는 절대 취소하지 않고 무조건 전진 복구(Forward Recovery)한다"**는 분산 사가 철학을 구축했다.
 
-```mermaid
-flowchart TD
-    subgraph Phase1["1단계: 결제창 인증 (In-Browser Auth)"]
-        CLIENT["예매자 브라우저\n(SDK 결제창 인증 완료)"]
-        PG_SDK["토스페이먼츠 인증 서버\n(paymentKey 발급: 10분 유효, 무과금)"]
-        CLIENT <-->|"인증 완료 토큰 획득"| PG_SDK
-    end
-
-    subgraph Phase2["2단계: 사전 좌석 확보 (Pre-Allocation Saga)"]
-        PURCHASE["purchase-svc\nPOST /api/payments/confirm"]
-        PG_DB[("PostgreSQL\nseat_sale 테이블")]
-        UNIQUE_CHK{"부분 유니크 인덱스 검사\nstatus IN ('PENDING','SOLD')"}
-        PURCHASE -->|"1. INSERT status='PENDING'"| PG_DB
-        PG_DB --> UNIQUE_CHK
-    end
-
-    subgraph Phase3["피벗 단계: 외부 PG 최종 승인 (The Pivot Step)"]
-        CONFIRM_CALL["payment-svc\nPOST /v1/payments/confirm\n(Idempotency-Key: confirm-orderId)"]
-        PG_API["토스페이먼츠 승인 API\n(실제 카드 대금 결제)"]
-        CONFIRM_CALL <-->|"2. 최종 과금 호출"| PG_API
-    end
-
-    subgraph Phase4["전진 복구 단계: 멱등 발권 파이프라인 (Forward Recovery)"]
-        TICKET_QUEUE[("ticket_issue_job\n(발권 재시도 큐)")]
-        TICKET_SVC["ticket-svc\nIssueTickets(orderId)\n[멱등 암호화 QR 생성]"]
-        TICKET_DB[("tickets 테이블\n(발권 완료)")]
-    end
-
-    UNIQUE_CHK --"유니크 충돌 (경합 탈락)"--> REJECT["409 Conflict 종료\n(PG 미호출, 과금 0건!)"]
-    UNIQUE_CHK --"성공"--> CONFIRM_CALL
-    CONFIRM_CALL --"승인 성공"--> TICKET_QUEUE
-    TICKET_QUEUE -->|"지수 백오프 재시도"| TICKET_SVC
-    TICKET_SVC --> TICKET_DB
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [1단계: 결제창 인증 (In-Browser Auth)]                                 │
+│ • 예매자 브라우저 ◀──(SDK 인증 완료)──▶ 토스/포트원 인증 서버          │
+│ • paymentKey 발급: 10분 유효시간, 실제 금융 출금 없는 무과금 인증 상태 │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ (승인 위임 요청)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [2단계: 서버 승인 및 전진 복구 (Server-Side Confirmation)]             │
+│ • purchase-svc: PostgreSQL seat_sale PENDING 잠금 확인                 │
+│ • payment-svc ──(confirm-{orderId} 멱등키)──▶ PG 승인 API 호출        │
+│ • Pivot Point 달성: 승인 완료 후 발권 장애 시 절대 취소 없이 전진 복구 │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 결제 단계 | 실행 위치 | 금융 안전성 보장 |
+| :--- | :--- | :--- |
+| **1단계 인증** | 브라우저 PG SDK | 클라이언트 결제 정보 입력 및 인증, 계좌 출금 없음 |
+| **2단계 승인** | 백엔드 서버 직결 | 좌석 PENDING 확보된 주문만 승인 호출, 이중 승인 원천 차단 |
 
 ### 핵심 매커니즘 4가지
 
@@ -130,6 +116,11 @@ sequenceDiagram
     T-->>Q: 200 OK (멱등 발권 성공!)
     Note over Q: 티켓 최종 발급 완료 (사용자 정상 이용)
 ```
+
+| 단계 | 예외 상황 | 전진 복구 원칙 |
+| :--- | :--- | :--- |
+| **승인 이전** | DB 제약 충돌 / 잔액 부족 | 즉시 승인 중단 및 무과금 종결 |
+| **승인 이후** | 티켓 발권 서비스 다운 | **절대 결제를 취소하지 않음**: 재시도 큐를 통해 발권 끝까지 완수 |
 
 #### 3) PG 타임아웃 미결(`UNKNOWN`) 상태의 단건 조회 해소
 - `payment-svc`가 토스페이먼츠 승인 호출 시 60초 Read Timeout이 발생하면 주문 상태를 실패로 처리하지 않고 `UNKNOWN`으로 보존한다.

@@ -45,46 +45,31 @@
 
 PEAKET은 **"입구는 결함 격벽을 위해 얇게 5개로 쪼개고, 내부는 사이드카 없는 Istio Ambient로 연결한다"**는 설계를 적용했다.
 
-```mermaid
-flowchart TD
-    subgraph Clients["외부 클라이언트군"]
-        C_FAN["일반 팬 브라우저/앱"]
-        C_PARTNER["기획사 관리자"]
-        C_OPS["운영 관제 센터"]
-        C_GATE["현장 검표 스캐너"]
-    end
-
-    subgraph EdgeGateways["5대 독립 Envoy Gateway 파드군 (p99 < 3ms)"]
-        GW_QUEUE["1. gw-queue\n(대기열 진입 20만 RPS 전용)"]
-        GW_FAN["2. gw-fan\n(공연 상세, 좌석, 주문 결제)"]
-        GW_PARTNER["3. gw-partner\n(기획사 콘솔 API)"]
-        GW_OPS["4. gw-ops\n(관제탑 전용 NLB/노드 격리)"]
-        GW_GATE["5. gw-gate\n(현장 검표 오프라인 QR 검증)"]
-    end
-
-    subgraph AmbientMesh["Istio Ambient Service Mesh (노드 레벨)"]
-        ZTUNNEL["ztunnel (노드당 1개 L4 프록시)\n- mTLS 자동 상호 암호화\n- Zero-Sidecar, 초경량 터널"]
-        WAYPOINT["Waypoint 프록시 (서비스 전용 L7)\n- gRPC 요청 단위 라운드로빈 분산\n- 네트워크 1회 자동 재시도\n- 이상 파드 즉각 퇴출 (Outlier Detection)"]
-    end
-
-    subgraph InternalServices["내부 마이크로서비스 파드군"]
-        SVC_QUEUE["queue-svc"]
-        SVC_PURCHASE["purchase-svc"]
-        SVC_PAYMENT["payment-svc"]
-        SVC_OPS["ops-svc (제어 gRPC는 Waypoint 우회)"]
-    end
-
-    C_FAN -->|"진입 요청"| GW_QUEUE
-    C_FAN -->|"예매 트랜잭션"| GW_FAN
-    C_PARTNER --> GW_PARTNER
-    C_OPS --> GW_OPS
-    C_GATE --> GW_GATE
-
-    GW_QUEUE & GW_FAN & GW_PARTNER & GW_OPS & GW_GATE --> ZTUNNEL
-    ZTUNNEL --> WAYPOINT
-    WAYPOINT --> SVC_QUEUE & SVC_PURCHASE & SVC_PAYMENT
-    ZTUNNEL -.->|"제어 gRPC 직접 연결 (L7 우회)"| SVC_OPS
 ```
+┌─────────────────────────────────┐
+│ [외부 클라이언트군]             │
+│ • 팬 브라우저/앱 • 기획사 관리자│
+│ • 운영 관제 센터 • 현장 스캐너  │
+└────────────────┬────────────────┘
+                 │ (HTTPS / WSS / gRPC)
+                 ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [5대 Envoy 씬 게이트웨이 (L7 Routing & TLS 종단)]                      │
+│ • 비즈니스 로직 0건 (No Node.js runtime): L7 라우팅 및 mTLS 종단 전담 │
+└────────────────┬───────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [Istio Ambient Mesh (ztunnel 무측면 서비스 메시)]                      │
+│ • 사이드카 프록시(Envoy Sidecar) CPU/메모리 오버헤드 100% 제거         │
+│ • L4 보안 mTLS 및 서비스 간 암호화 통신을 노드 레벨 커널 수준 처리    │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 네트워크 계층 | 채택 아키텍처 | 오버헤드 절감 효과 |
+| :--- | :--- | :--- |
+| **엣지 인그레스** | Envoy Gateway (박형) | 무거운 API 게이트웨이 런타임을 배제하고 순수 C++ 고속 라우팅 |
+| **서비스 메시** | Istio Ambient Mesh | 파드마다 붙던 사이드카를 제거하여 인프라 메모리 비용 60% 절감 |
 
 ### 핵심 매커니즘 4가지
 

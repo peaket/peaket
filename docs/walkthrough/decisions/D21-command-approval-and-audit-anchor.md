@@ -40,36 +40,24 @@
 
 PEAKET은 **"중단은 1인 즉시 실행하되 재개는 2인 승인으로 묶고, 감사 기록은 솔트 머클 트리로 요약해 비트코인 블록에 무료로 고정한다"**는 거버넌스를 수립했다.
 
-```mermaid
-flowchart TD
-    subgraph ApprovalGovernance["비대칭 승인 거버넌스 (ADR-0095)"]
-        PAUSE_REQ["비상 판매 일시정지 (명령 3)\n- Commander 1인 재인증 (TOTP)\n- 승인 대기 없이 즉각 집행 (p99 < 3s)\n- 48시간 내 사후 보고서 제출 의무"]
-        RESUME_REQ["판매 재개 (명령 4)\n- Commander 요청\n- 타 Operator 1인 상호 교차 승인 필수\n- 10분 미승인 시 정지 상태 자동 유지"]
-    end
-
-    subgraph AuditPipeline["감사 로그 및 머클 체크포인트 파이프라인 (ADR-0075)"]
-        LOGS["운영 명령 로그 레코드\n(시간, 명령, 파라미터, 실행자 가명ID)"]
-        SALT_HASH["RFC 9162 솔트 머클 트리 생성\nLeaf = SHA-256(Record ‖ 32B_Salt)"]
-        MERKLE_ROOT["머클 루트 (Merkle Root) 산출\n+ 이전 체크포인트 해시 체이닝"]
-        KMS_SIGN["AWS KMS 비대칭 키 서명\n(Signed Checkpoint)"]
-    end
-
-    subgraph PublicAnchor["외부 공개 타임스탬프 공증 (무료 퍼블릭 인프라)"]
-        OTS["OpenTimestamps 캘린더 서버\n(서명된 체크포인트 해시 1개 제출)"]
-        BTC[("비트코인 블록체인\n(글로벌 분산 불변 앵커링)")]
-        PUBLIC_S3["공개 S3 버킷 / GitHub 게시\n(체크포인트 사슬 + OTS 증명 파일)"]
-    end
-
-    subgraph Verification["제3자 무결성 검증 (누구나 실행 가능)"]
-        VERIFY_CLI["오픈소스 audit-verify CLI\n- 머클 포함 증명 (Inclusion Proof) 검증\n- 비트코인 타임스탬프 확인\n- 회사 내부 조작 시 즉각 적발"]
-    end
-
-    PAUSE_REQ & RESUME_REQ --> LOGS
-    LOGS --> SALT_HASH --> MERKLE_ROOT --> KMS_SIGN
-    KMS_SIGN --> OTS --> BTC
-    KMS_SIGN --> PUBLIC_S3
-    PUBLIC_S3 --> VERIFY_CLI
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [비대칭 승인 거버넌스 (ADR-0095)]                                      │
+│                                                                        │
+│   [비상 판매 일시정지 (명령 3)]                                        │
+│   • Commander 1인 재인증 (TOTP)                                        │
+│   • 승인 대기 없이 즉각 집행 (p99 < 3초 반영, 48시간 내 사후 보고 의무)│
+│                                                                        │
+│   [판매 재개 승인 (명령 4)]                                            │
+│   • Operator 제안 ──▶ 타 Commander 2차 승인 (2인 상호 승인 필수)       │
+│   • 성급한 재오픈으로 인한 2차 인프라 붕괴 방지                        │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 제어 동작 | 승인 요건 | 설계 철학 |
+| :--- | :--- | :--- |
+| **정지 (Stop)** | 1인 단독 즉각 집행 | 피해 확산 방지가 최우선이므로 결재 대기 시간 0초 |
+| **재개 (Resume)** | 2인 상호 승인 필수 | 시스템 안정화가 확인되지 않은 상태에서의 성급한 재오픈 사고 차단 |
 
 ### 핵심 매커니즘 4가지
 

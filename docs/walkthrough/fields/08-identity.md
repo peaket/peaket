@@ -20,48 +20,33 @@ PEAKET의 신원 및 인증 아키텍처는 **"반복적인 사용자 인증(Aut
 
 ### 인증 및 본인확인 아키텍처 종합 흐름도
 
-```mermaid
-flowchart TD
-    subgraph FanAuth["1. 팬 소셜 로그인 (OIDC Single Factor)"]
-        FAN_BROWSER["팬 브라우저"]
-        WEB_SERVER["소비자 웹 서버<br/>(OIDC 클라이언트)"]
-        SOCIAL_IDP["소셜 공급자<br/>(카카오 / 네이버 / 애플)"]
-        ID_SVC["identity-svc<br/>(세션 발급 & pid 관리)"]
-    end
-
-    subgraph KYC["2. 구매자 휴대폰 본인확인 (KYC)"]
-        KYC_POPUP["본인확인기관 팝업<br/>(KCB / NICE 평가정보)"]
-        CI_HASH["연계정보(CI) 원문 파기<br/>단방향 솔트 해시 pid 생성"]
-    end
-
-    subgraph StatelessHotpath["3. 무상태 핫패스 게이트웨이 (Hotpath)"]
-        GW_QUEUE["gw-queue / gw-fan<br/>(게이트웨이 무상태 검증)"]
-        JWT_TOKEN["15분 ES256 액세스 토큰<br/>(sub: userId, pid: 사람식별값)"]
-        QUEUE_SVC["queue-svc / purchase-svc<br/>(identity-svc 미호출, 1인 1순번 보장)"]
-    end
-
-    subgraph RevocationBus["4. 세션 무효화 전파 버스"]
-        KAFKA_BUS["Kafka 토픽<br/>control.sessions-terminated"]
-        DENY_LIST["모든 파드 인메모리 거부 목록<br/>(TTL 15분 보관)"]
-    end
-
-    FAN_BROWSER -->|"로그인 클릭"| WEB_SERVER
-    WEB_SERVER <-->|"인가 코드 $\leftrightarrow$ ID 토큰 교환"| SOCIAL_IDP
-    WEB_SERVER -->|"gRPC CreateSession"| ID_SVC
-    ID_SVC -->|"HttpOnly JWT 쿠키 발급"| FAN_BROWSER
-
-    FAN_BROWSER -->|"예매 전 1회 본인확인"| KYC_POPUP
-    KYC_POPUP -->|"CI 반환"| ID_SVC
-    ID_SVC --> CI_HASH --> ID_SVC
-
-    FAN_BROWSER -->|"대기열 진입 / 좌석 홀드 (JWT)"| GW_QUEUE
-    GW_QUEUE -->|"공개키 ES256 서명만 검증"| JWT_TOKEN
-    JWT_TOKEN -->|"pid 슬롯 확인"| QUEUE_SVC
-
-    ID_SVC -.->|"로그아웃 / 탈퇴 시"| KAFKA_BUS
-    KAFKA_BUS -->|"100ms 릴레이 브로드캐스트"| DENY_LIST
-    DENY_LIST -.->|"무효 토큰 즉시 차단"| GW_QUEUE
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [1. 팬 소셜 로그인 (OIDC / OAuth2 간편 인증)]                          │
+│ • 카카오, 네이버, 구글 OIDC 로그인 ──▶ 1차 식별자 획득                 │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [2. 휴대폰 본인확인 (KCB / 다날)]                                      │
+│ • 주민번호 대체 불변 연계정보(CI) 발급 (1인 1계정 거버넌스: POL-001)   │
+│ • 플랫폼 내부에서는 HMAC-SHA256 암호화 해시(blind_ci)로만 저장        │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [3. 내부 인증 토큰 발급]                                               │
+│ • identity-svc: 15분 만료 Access Token (RS256) & HttpOnly Refresh 쿠키 │
+│ • 핫패스 게이트웨이는 비대칭 공개키 캐싱으로 원격 DB 조회 없이 검증    │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 인증 단계 | 제공 기술 | 프라이버시 및 보안 보장 |
+| :--- | :--- | :--- |
+| **소셜 OIDC** | 카카오/네이버/구글 OAuth2 | 비밀번호 직접 보관 위험 제거, 간편한 모바일 원클릭 로그인 |
+| **본인확인 CI**| KCB/다날 이동통신사 인증 | 1인 1계정 보장, 주민등록번호 수집 금지 법령 완벽 준수 |
+| **Blind CI** | HMAC-SHA256 (KMS 회전 키) | DB 유출 시에도 원본 CI 역산 불가 (개인정보보호법 안전성 조치) |
+| **Access Token**| RS256 비대칭 서명 JWT | 게이트웨이가 로컬 메모리 공개키로 1ms 내 서명 검증 (DB 무부하) |
 
 ---
 
@@ -107,34 +92,32 @@ flowchart TD
 
 ### 3.2 휴대폰 본인확인 및 1인 1순번 `pid` 바인딩 (POL-001, POL-002)
 
-```mermaid
-flowchart TD
-    subgraph KYC_Agency["본인확인기관 (KCB / NICE)"]
-        AUTH_START["관객 휴대폰 SMS / PASS 인증"]
-        RAW_CI["연계정보 (CI: 88바이트 고유 식별값) 생성"]
-    end
-
-    subgraph IdentityService["identity-svc 보안 격리 계층"]
-        HMAC_KEY["KMS 단방향 솔트 키 (ci_salt_key)"]
-        CI_HMAC["ci_hmac = HMAC-SHA256(CI, ci_salt_key)<br/>(DB 저장, 1인 1계정 유일성 검증)"]
-        PID_KEY["KMS 셔플 솔트 키 (pid_salt_key)"]
-        PID_GEN["pid = HMAC-SHA256(CI, pid_salt_key).hex()[:32]<br/>(사람 식별값, 역산 불가능)"]
-        PURGE["CI 원문 메모리 즉시 파기 (0바이트)"]
-    end
-
-    subgraph HotpathIngress["무상태 핫패스 (gw-queue / queue-svc)"]
-        JWT_ISSUE["ES256 액세스 토큰 발급 (클레임에 pid 수록)"]
-        SLOT_LOCK["Redis 1인 1순번 슬롯 선점<br/>Key: q:{eventId}:slot_of:{pid}"]
-    end
-
-    AUTH_START --> RAW_CI --> IdentityService
-    RAW_CI --> CI_HMAC & PID_GEN
-    HMAC_KEY -.-> CI_HMAC
-    PID_KEY -.-> PID_GEN
-    PID_GEN --> PURGE
-    CI_HMAC -->|"중복 CI 가입 차단"| IdentityService
-    PID_GEN --> JWT_ISSUE --> SLOT_LOCK
 ```
+┌─────────────────────────────────┐
+│ [본인확인기관 (KCB / NICE / 다날│
+│ • 관객 휴대폰 SMS / PASS 인증   │
+└────────────────┬────────────────┘
+                 │ 통신사 서명 CI (Connect Information, 88바이트)
+                 ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [identity-svc 보안 격벽]                                               │
+│ • 원시 CI는 복호화 불가 단방향 솔트 해시: blind_ci = HMAC_SHA256(CI)  │
+│ • 암호화된 CI는 AES-256-GCM으로 별도 분리 테이블에 안전 격리 저장     │
+└────────────────┬───────────────────────────────────────────────────────┘
+                 │
+                 ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [전사 서비스 (대기열 · 좌석 · 주문)]                                    │
+│ • 사용자 식별자로 blind_ci만 참조하여 1인 4매 한도 및 동일인 검증     │
+│ • 주민번호, 실명, 휴대폰 번호는 결제 완료 시까지 조회 불가 (격리)     │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+| 데이터 항목 | 암호화 방식 | 보관 목적 및 보안 격벽 |
+| :--- | :--- | :--- |
+| **원시 CI** | AES-256-GCM (KMS 마스터 키) | 법적 분쟁 및 명의 도용 소명 시 사후 대조용으로만 복호화 |
+| **Blind CI** | HMAC-SHA256 단방향 해시 | 전사 마이크로서비스 간 1인 1계정 및 4매 한도 검증 키로 활용 |
+| **개인정보 격리**| 물리적 분리 DB | 결제·티켓 발권 단계 전까지 개인 식별 정보의 불필요한 노출 차단 |
 
 1. **원문 CI 비보존 원칙**:
    - 주민등록번호와 1:1 대응되는 연계정보(CI) 원문은 개인정보보호법상 엄격한 관리 대상이므로, `ci_hmac`과 `pid`를 생성한 직후 메모리에서 영구 삭제한다.

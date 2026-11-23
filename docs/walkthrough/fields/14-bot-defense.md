@@ -20,44 +20,35 @@
 
 ### 봇 방어 종합 파이프라인
 
-```mermaid
-flowchart TD
-    subgraph PreSale["1단계: 사전 검증 (T-10분 로비 & 공연 상세)"]
-        Req["팬/봇 접속 요청"]
-        WAF["L1: CloudFront / AWS WAF<br/>(악성 IP 대역 거르기)"]
-        Turnstile["L2: Cloudflare Turnstile<br/>(브라우저 PoW 사람 확인)"]
-        Req --> WAF --> Turnstile
-    end
-
-    subgraph TrustCore["2단계: trust-svc 6대 점수기 종합 판정"]
-        ScoreEngines["L3: 6대 점수기 동시 병렬 평가<br/>• HumanCheck • DeviceHistory<br/>• BehaviorScore • NetworkScore<br/>• IdentityScore • ClientConsistency"]
-        Honeypot{"확정 신호 대조<br/>(허니팟 / 차단 기기)"}
-        WeightSum["가중합 계산 (Weighted Risk Score)<br/>Profile × Mode (완화/기본/강화)"]
-        
-        Turnstile --> ScoreEngines
-        ScoreEngines --> Honeypot
-        Honeypot --> WeightSum
-    end
-
-    subgraph AdmissionQueue["3단계: queue-svc 대기열 분기 및 재평가"]
-        VerdictCheck{"판정 결과"}
-        NormalQ["정상 대기열 (ALLOW)<br/>정상 순번 대기 및 입장"]
-        ChallengeQ["추가 검증 큐 (CHALLENGE)<br/>순번 유지 격리, 재인증 대기"]
-        Reassess["L4: trust-reassess 스트리밍<br/>대기 중 5인 이상 기기 공유 재평가"]
-        
-        WeightSum --> VerdictCheck
-        VerdictCheck -->|"위험 점수 < 기준값"| NormalQ
-        VerdictCheck -->|"위험 점수 >= 기준값"| ChallengeQ
-        NormalQ -.->|"대기 중 의심 패턴 감지"| Reassess
-        Reassess -.->|"격리 상한 0.5% 이내"| ChallengeQ
-    end
-
-    subgraph Recovery["4단계: 본인확인 재인증 및 복귀"]
-        PassVerify["사람 확인 + 휴대폰 본인확인 재통과"]
-        ChallengeQ --> PassVerify
-        PassVerify -->|"통과 완료 (PASSED)"| NormalQ
-    end
 ```
+┌────────────────────────────────────────────────────────────────────────┐
+│ [1단계: 사전 검증 (T-10분 로비 & 공연 상세)]                           │
+│ • L1: CloudFront / AWS WAF (악성 IP 대역 및 레이트 리밋 차단)          │
+│ • L2: Cloudflare Turnstile (브라우저 PoW 사람 확인 토큰 검증)          │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ (사람 확인 통과 요청)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ [2단계: trust-svc 6대 봇 점수기 (종합 위험도 score 0.0~1.0 산출)]       │
+│ • S1: Turnstile 검증 결과 (0.35)  • S2: IP 평판 및 데이터센터 ASN (0.20)│
+│ • S3: 디바이스 핑거프린트 (0.15)  • S4: 행동 타이밍 분산 (0.10)        │
+│ • S5: 본인확인 CI 명의 일치 (0.10) • S6: 네트워크 지터 분석 (0.10)     │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+    ┌───────────────────────────────┼───────────────────────────────┐
+    │ (score < 0.3) 정상            │ (0.3 <= score <= 0.7) 의심    │ (score > 0.7) 봇
+    ▼                               ▼                               ▼
+┌──────────────┐            ┌──────────────┐                ┌──────────────┐
+│  정상 대기열 │            │  추가 검증 큐│                │  즉각 차단   │
+│  (메인 셔플) │            │  (CAPTCHA/CI)│                │  (HTTP 403)  │
+└──────────────┘            └──────────────┘                └──────────────┘
+```
+
+| 검증 단계 | 판정 도구 및 메커니즘 | 방어 효과 및 처리 정책 |
+| :--- | :--- | :--- |
+| **1단계 사전** | AWS WAF + Cloudflare Turnstile | 대규모 DDoS 및 헤드리스 브라우저 스크립트 1선 차단 |
+| **2단계 분석** | trust-svc 6대 가중치 점수제 | 단일 지표 오탐을 방지하고 정밀한 위험도(0.0~1.0) 산출 |
+| **3단계 제어** | 점수 구간별 분기 (정상/검증/차단)| 사람 오탐률 0.5% 이하 유지, 고위험 봇 매크로 95% 이상 격리 |
 
 ### 핵심 3대 서브시스템
 
