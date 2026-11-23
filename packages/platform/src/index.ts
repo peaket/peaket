@@ -171,7 +171,7 @@ export {
   type DiagnoseResult,
   type StartDiagnoseOptions,
 } from './diagnose.js';
-export { EVIDENCE_S3_RETRY, s3EvidenceStore, type EvidenceStore, type S3EvidenceStoreOptions } from './evidence-store.js';
+export { EVIDENCE_RETENTION_TAG, EVIDENCE_S3_RETRY, s3EvidenceStore, type EvidenceBytesStore, type EvidenceStore, type S3EvidenceStoreOptions } from './evidence-store.js';
 export {
   CONTROL_SYNC_DEFAULTS,
   ControlState,

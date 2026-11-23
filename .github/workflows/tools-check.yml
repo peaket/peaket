@@ -47,6 +47,8 @@ jobs:
       - run: node tools/local/dashboards.mjs --check
       # 관측 설정 정적 검사(V-T47 ④⑤, ADR-0356 결정 2·3): Grafana 조직·데이터 소스 배치·공급자, Mimir 보존, 원격 쓰기 거름, 5분 집계 규칙
       - run: node tools/ci/observability-config.mjs --check
+      # 진단 증거 보존 규칙 정적 검사(D-T52 ①, 기능 F-01-1): 수명 주기 원천 infra/modules/evidence-bucket/lifecycle.json이 docs/observability.md §9 '진단 증거' 행과 다르면 실패
+      - run: node tools/ci/evidence-retention.mjs --check
       # 배포 단위 값의 정적 시험(queue-svc·purchase-svc 포트·시작 명령·비밀은 secretEnvFrom·입장 토큰 발급자 셋이 같음, BUILD_ORDER PRF-050·PRF-137, 묶음 BAT-057, ADR-0288 결정 8)
       - run: node --test "deploy/workloads/test/*.test.mjs"
       # Kyverno CEL 정책의 정적 시험과 생성 대조(docs/devops.md §4.3, D-T11·D-T18 ②·D-T33, BUILD_ORDER BAS-150·BAT-085, ADR-0318).
@@ -62,6 +64,8 @@ jobs:
       # 성능 장부 도구: 명령줄 시험(점검 판정·지연 대조·증거 수준·야간 비교 D-T40)과 자체 시험(docs/perf-ledger.md)
       - run: node --test "tools/perf-ledger/*.test.mjs"
       - run: python3 -I -X utf8 tools/perf-ledger/collect.py --selftest
+      # 직접 운영 시간 기록 검사(V-T48 ①, 기능 F-01-1): docs/perf-ledger/ops-hours.csv의 줄이 docs/perf-ledger.md §11.5의 열·값 범위를 따르는지
+      - run: python3 -I -X utf8 tools/perf-ledger/ops_hours.py check
       # 감사 공개 검증 도구 시험(ADR-0348 결정 7, BUILD_ORDER BAT-360 OPS-280): 시험이 python3(3.11 이상)·시스템 openssl로 도구를 띄운다(ubuntu-24.04에 둘 다 있다)
       - run: node --test "tools/audit-verify/*.test.mjs"
       - run: node tools/ci/check-workflows.mjs

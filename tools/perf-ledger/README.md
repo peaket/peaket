@@ -127,3 +127,13 @@ python tools/perf-ledger/human_data.py verify --registration <저장소 밖>/reg
 - `registration.json`은 소금과 비공개 값이 든 파일이라 저장소 밖에 두고 덮어쓰지 않는다. 뒤에 고치면 등록 해시가 공개 등록 파일과 달라져 실행이 거부된다.
 - 자료 목록(ADR-0174 결정 7): Aalto 136M Keystrokes. Dhakal, V., Feit, A. M., Kristensson, P. O., Oulasvirta, A. Observations on Typing from 136 Million Keystrokes. CHI 2018. doi:10.1145/3173574.3174220, https://userinterfaces.aalto.fi/136Mkeystrokes/ (연구·비상업 목적, 저자 표시). 같은 출처 표시가 `conversion-report.json`과 manifest `dataset.attribution`에도 남는다. 측정 보고서에도 적는다.
 - 모의 사람 생성기는 저장소 밖 로컬 저장소 `D:\peaket-bots`의 `mock-human/generate.py`다(ADR-0174 결정 4). 고정 씨앗값으로 행동 요약 기록만 만든다.
+
+## 9. 직접 운영 시간 기록(`ops_hours.py`, ADR-0067 결정 5 ③)
+
+```bash
+python -I -X utf8 tools/perf-ledger/ops_hours.py check     # docs/perf-ledger/ops-hours.csv의 머리 줄과 줄마다 값 범위. 틀린 줄은 '<파일>:<줄 번호>: <까닭>'으로 모두 찍고 1
+python -I -X utf8 tools/perf-ledger/ops_hours.py summary   # 부품·활동별 1회 평균 시간과 합계 시간 × 시간 단가(0.5·1·1.5배)를 JSON 하나로
+```
+
+- 관측 부품을 설치·판 올림·용량 조정·장애 대응·점검할 때마다 그 일을 한 사람이 `docs/perf-ledger/ops-hours.csv`에 한 줄을 같은 커밋으로 더한다. 열·값 범위·시간 단가는 docs/perf-ledger.md §11.5에 있고 도구는 그 글귀를 읽는다(도구에 적지 않는다). `--file`·`--doc`로 다른 파일을 줄 수 있다.
+- 기록이 없으면 요약은 `{"status": "기록 없음", …}`이고 비용을 0원으로 내지 않는다. 끝 코드는 0 통과, 1 틀린 줄, 2 파일 없음·문서에서 규칙을 읽지 못함이다. 1년 값으로 늘리는 계산과 R2 판정은 4.8.2에서 한다.
