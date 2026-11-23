@@ -272,7 +272,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
           reason = 'NO_EXIT_RECORD';
           kinds.push('NO_EXIT');
         }
-      } else if (scan.direction === 'IN') {
+      } else if (scan.direction === 'IN' && result === 'PASS') {
         const firstIn = existing.find((s) => s.direction === 'IN');
         if (firstIn && orderOf(scan, firstIn) > 0) {
           result = 'REJECT';

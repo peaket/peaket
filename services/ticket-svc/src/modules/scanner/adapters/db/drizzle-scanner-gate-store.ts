@@ -398,7 +398,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
             reason = 'NO_EXIT_RECORD';
             kinds.push('NO_EXIT');
           }
-        } else if (scan.direction === 'IN') {
+        } else if (scan.direction === 'IN' && result === 'PASS') {
           const firstIn = passRows.find((s) => s.direction === 'IN');
           if (firstIn && (corrected > correctedOf(firstIn) || (corrected === correctedOf(firstIn) && scan.deviceSeq > Number(firstIn.device_seq)))) {
             result = 'REJECT';
