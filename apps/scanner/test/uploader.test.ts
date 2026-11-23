@@ -39,7 +39,16 @@ type UploaderModule = {
     onResync(): void;
     onSignedOut(): void;
   }) => Uploader;
-  logoutAfterFlush(d: { uploader: Uploader; online: boolean; queue: ScanQueue; clearToken(): Promise<void>; now(): number; timeoutMs?: number }): Promise<{ remaining: number }>;
+  logoutAfterFlush(d: {
+    uploader: Uploader;
+    online: boolean;
+    queue: ScanQueue;
+    clearToken(): Promise<void>;
+    now(): number;
+    timeoutMs?: number;
+    setTimer?(fn: () => void, ms: number): unknown;
+    clearTimer?(h: unknown): void;
+  }): Promise<{ remaining: number }>;
 };
 const CLIENT = '../src/api/client.ts';
 // client.ts도 동적으로 읽는다: Node 형식 벗기기로 읽지 못하는 문법(매개변수 속성 등)이면 이 단언에서 떨어진다
@@ -114,7 +123,18 @@ function harness(port: UploadPort, o: { token?: boolean } = {}) {
   const timers = new Map<number, { at: number; fn: () => void }>();
   const log = { states: [] as UploadState[], resync: 0, signedOut: 0, cleared: 0, order: [] as string[] };
   const queue = new MemoryScanQueue();
+  const timerApi = {
+    setTimer: (fn: () => void, ms: number): unknown => {
+      const h = ++seq;
+      timers.set(h, { at: now + ms, fn });
+      return h;
+    },
+    clearTimer: (h: unknown): void => {
+      timers.delete(h as number);
+    },
+  };
   const uploader = new (up().ScanUploader)({
+    ...timerApi,
     queue,
     port,
     hasToken: async () => token,
@@ -124,14 +144,6 @@ function harness(port: UploadPort, o: { token?: boolean } = {}) {
       token = false;
     },
     now: () => now,
-    setTimer: (fn, ms) => {
-      const h = ++seq;
-      timers.set(h, { at: now + ms, fn });
-      return h;
-    },
-    clearTimer: (h) => {
-      timers.delete(h as number);
-    },
     onState: (s) => log.states.push(s),
     onResync: () => log.resync++,
     onSignedOut: () => log.signedOut++,
@@ -141,7 +153,12 @@ function harness(port: UploadPort, o: { token?: boolean } = {}) {
     queue,
     uploader,
     log,
+    timerApi,
     now: () => now,
+    /** queued()를 부르지 않고 큐에만 쓴다(flushNow 범위를 보려고) */
+    async putOnly(count: number) {
+      for (let i = 0; i < count; i++) await queue.put(record(++n, now - 1_000_000 + n));
+    },
     /** 기록 하나를 큐에 쓰고 queued()를 부른다 */
     async add(count = 1) {
       for (let i = 0; i < count; i++) {
@@ -418,22 +435,22 @@ test('GAT-140 7.4.4 온라인 로그아웃은 큐를 올린 뒤 토큰을 지우
       order.push('clearToken');
     },
     now: h.now,
+    ...h.timerApi,
   });
   assert.deepEqual(r, { remaining: 0 });
   assert.equal(cleared, 1);
   assert.deepEqual(order, ['upload', 'clearToken']);
 });
 
-test('GAT-140 7.4.4 서버가 9,999ms에 답하면 남은 0이고, 답하지 않으면 10,000ms에 토큰을 지우고 남은 수를 준다 [ASVS v5.0.0-7.4.4]', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+test('GAT-140 7.4.4 서버가 9,999ms에 답하면 남은 0이고, 답하지 않으면 10,000ms에 토큰을 지우고 남은 수를 준다(주입한 타이머) [ASVS v5.0.0-7.4.4]', async () => {
   // 9,999ms에 답한다
   const answer = deferred();
   const h = harness(new ScriptedPort([{ hang: answer.promise }]));
-  await h.add(2);
+  await h.putOnly(2);
   let cleared = 0;
-  const p = up().logoutAfterFlush({ uploader: h.uploader, online: true, queue: h.queue, clearToken: async () => void cleared++, now: h.now });
+  const p = up().logoutAfterFlush({ uploader: h.uploader, online: true, queue: h.queue, clearToken: async () => void cleared++, now: h.now, ...h.timerApi });
   await settle();
-  t.mock.timers.tick(9_999);
+  await h.advance(9_999);
   answer.resolve();
   assert.deepEqual(await p, { remaining: 0 });
   assert.equal(cleared, 1);
@@ -441,22 +458,73 @@ test('GAT-140 7.4.4 서버가 9,999ms에 답하면 남은 0이고, 답하지 않
   // 답하지 않는다
   const never = new Promise<unknown>(() => {});
   const h2 = harness(new ScriptedPort([{ hang: never }]));
-  await h2.add(2);
+  await h2.putOnly(2);
   let cleared2 = 0;
   let done: { remaining: number } | undefined;
-  const p2 = up()
-    .logoutAfterFlush({ uploader: h2.uploader, online: true, queue: h2.queue, clearToken: async () => void cleared2++, now: h2.now })
+  void up()
+    .logoutAfterFlush({ uploader: h2.uploader, online: true, queue: h2.queue, clearToken: async () => void cleared2++, now: h2.now, ...h2.timerApi })
     .then((r) => (done = r));
   await settle();
-  t.mock.timers.tick(9_999);
-  await settle();
+  await h2.advance(9_999);
   assert.equal(done, undefined, '9,999ms에는 아직 기다린다');
   assert.equal(cleared2, 0);
-  t.mock.timers.tick(1);
-  await settle();
-  await p2;
-  assert.deepEqual(done, { remaining: 2 });
+  await h2.advance(1);
+  assert.deepEqual(done, { remaining: 2 }, '10,000ms에 끝난다');
   assert.equal(cleared2, 1);
+});
+
+test('GAT-140 7.4.4 로그아웃은 501건을 10초 안에 묶음 둘(500·1)로 모두 올리고 남은 0을 준다 [ASVS v5.0.0-7.4.4]', async () => {
+  const port = new ScriptedPort();
+  const h = harness(port);
+  await h.putOnly(501);
+  let cleared = 0;
+  const r = await up().logoutAfterFlush({ uploader: h.uploader, online: true, queue: h.queue, clearToken: async () => void cleared++, now: h.now, ...h.timerApi });
+  assert.deepEqual(r, { remaining: 0 });
+  assert.deepEqual(port.calls.map((c) => c.ids.length), [500, 1]);
+  assert.equal(cleared, 1);
+});
+
+test('GAT-140 flushNow 한 번은 그때 큐에 있는 501건을 500건씩 차례로(500·1) 모두 보낸다', async () => {
+  const port = new ScriptedPort();
+  const h = harness(port);
+  await h.putOnly(501);
+  const r = await h.uploader.flushNow();
+  assert.deepEqual(r, { sent: 501, accepted: 501, deferred: 0, tokenCleared: false });
+  assert.deepEqual(port.calls.map((c) => c.ids.length), [500, 1]);
+  assert.equal(port.calls[1]!.ids[0], record(501, 0).id, '가장 늦은 기록이 둘째 묶음');
+  assert.equal(await h.queue.count(), 0);
+});
+
+test('GAT-140 flushNow에서 한 묶음이 실패하면 거기서 멈추고 둘째 묶음을 보내지 않는다(남은 기록은 시도 수 그대로)', async () => {
+  const port = new ScriptedPort([{ throws: new TypeError('fetch failed') }]);
+  const h = harness(port);
+  await h.putOnly(501);
+  const r = await h.uploader.flushNow();
+  assert.equal(port.calls.length, 1);
+  assert.deepEqual(r, { sent: 500, accepted: 0, deferred: 500, tokenCleared: false });
+  const rows = await rowsOf(h.queue);
+  assert.equal(rows.length, 501);
+  assert.equal(rows.filter((x) => x.attempts === 1).length, 500);
+  assert.equal(rows.find((x) => x.id === record(501, 0).id)!.attempts, 0, '보내지 않은 기록');
+});
+
+test('GAT-140 겹친 flushNow 둘·5초 타이머는 진행 중인 보내기를 기다리고 같은 기록을 두 번 보내지 않는다', async () => {
+  const hold = deferred();
+  const port = new ScriptedPort([{ hang: hold.promise }]);
+  const h = harness(port);
+  await h.add(3);
+  const p1 = h.uploader.flushNow();
+  await settle();
+  const p2 = h.uploader.flushNow();
+  await h.advance(5_000); // 첫 기록의 5초 타이머도 이 사이에 돈다
+  assert.equal(port.calls.length, 1, '보내는 중에는 다시 보내지 않는다');
+  hold.resolve();
+  await Promise.all([p1, p2]);
+  await settle();
+  const sentIds = port.calls.flatMap((c) => c.ids);
+  assert.equal(sentIds.length, new Set(sentIds).size, `같은 ID를 두 번 보냈다: ${sentIds.join(',')}`);
+  assert.equal(sentIds.length, 3);
+  assert.equal(await h.queue.count(), 0);
 });
 
 test('GAT-140 7.4.4 오프라인 로그아웃은 보내지 않고 바로 토큰을 지우며 큐를 그대로 둔다 [ASVS v5.0.0-7.4.4]', async () => {
@@ -464,7 +532,7 @@ test('GAT-140 7.4.4 오프라인 로그아웃은 보내지 않고 바로 토큰�
   const h = harness(port);
   await h.add(3);
   let cleared = 0;
-  const r = await up().logoutAfterFlush({ uploader: h.uploader, online: false, queue: h.queue, clearToken: async () => void cleared++, now: h.now });
+  const r = await up().logoutAfterFlush({ uploader: h.uploader, online: false, queue: h.queue, clearToken: async () => void cleared++, now: h.now, ...h.timerApi });
   assert.deepEqual(r, { remaining: 3 });
   assert.equal(cleared, 1);
   assert.equal(port.calls.length, 0);

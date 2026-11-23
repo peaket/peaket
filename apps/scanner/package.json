@@ -8,7 +8,7 @@
     "dev": "vite --port 3003",
     "build": "vite build",
     "preview": "vite preview --port 3003",
-    "test": "node --test test/scan-queue.test.ts test/decoder.test.ts test/version-vector.test.ts test/live.test.ts test/dpop.test.ts test/device-login.test.ts test/key-store.test.ts test/audit-r622.test.ts test/audit-r622-contract.test.ts test/enrollment-link.test.ts test/qr-v1.test.ts test/judge.test.ts test/package-state.test.ts test/package-store.test.ts test/scan-flow.test.ts test/uploader.test.ts test/client.test.ts test/scan-live.test.ts",
+    "test": "node --test test/scan-queue.test.ts test/decoder.test.ts test/version-vector.test.ts test/live.test.ts test/dpop.test.ts test/device-login.test.ts test/key-store.test.ts test/audit-r622.test.ts test/audit-r622-contract.test.ts test/enrollment-link.test.ts test/qr-v1.test.ts test/judge.test.ts test/package-state.test.ts test/package-store.test.ts test/package-store-idb.test.ts test/scan-flow.test.ts test/uploader.test.ts test/client.test.ts test/scan-live.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

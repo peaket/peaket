@@ -25,7 +25,7 @@ type FlowModule = {
     clockOffsetMs: number;
     scannerSessionId: string;
     id?: () => string;
-  }): Promise<{ outcome: Outcome; state: PackageState; recorded: boolean }>;
+  }): Promise<{ outcome: Outcome; state: PackageState; recorded: boolean; persisted: boolean }>;
   createSameQrFilter(windowMs?: number): (raw: string, nowMs: number) => boolean;
 };
 type StoreModule = { MemoryPackageStore: new () => PackageStore };
@@ -61,14 +61,14 @@ const payloads = async (q: ScanQueue) => (await q.due(Number.MAX_SAFE_INTEGER, 1
 let idn = 0;
 const ids = () => `0190f3a1-7c2e-7f00-8000-${String(++idn).padStart(12, '0')}`;
 
-function baseState(over: { placement?: Placement; reentryAllowed?: boolean; entries?: [string, EntryState][]; lastSeq?: number; status?: string } = {}): PackageState {
+function baseState(over: { placement?: Placement; reentryAllowed?: boolean; entries?: [string, EntryState][]; lastSeq?: number; vectorSeq?: number; status?: string } = {}): PackageState {
   return stateOf({
     tickets: [ticketOf(T, key, over.status ? { status: over.status } : {})],
     ...(over.placement ? { placement: over.placement } : {}),
     ...(over.reentryAllowed !== undefined ? { reentryAllowed: over.reentryAllowed } : {}),
     ...(over.entries ? { entries: over.entries } : {}),
     lastSeq: over.lastSeq ?? 40,
-    versionVector: vectorOf({ seq: over.lastSeq ?? 40 }),
+    versionVector: vectorOf({ seq: over.vectorSeq ?? over.lastSeq ?? 40 }),
   });
 }
 
@@ -142,13 +142,15 @@ test('GAT-140 scannerSessionIdOf는 토큰 내용의 sid를 읽고(서명은 보
   assert.equal(scannerSessionIdOf(`${part({ alg: 'ES256' })}.${part({ sid: 42 })}.c2ln`), undefined);
 });
 
-test('GAT-140 통과는 큐 기록(openapi ScanEvent 칸, method QR)을 쓴 뒤 이 기기 입장 상태(LOCAL, 보정 시각)를 바꾸고 저장소에도 남긴다', async () => {
-  const state = baseState();
+test('GAT-140 통과는 큐 기록(openapi ScanEvent 칸, method QR)을 쓴 뒤 이 기기 입장 상태(LOCAL, 보정 시각)를 바꾸고 저장소에도 남긴다(knownSeq는 lastSeq, versionVector는 저장 벡터 그대로)', async () => {
+  // 마지막 반영 번호(40)와 저장 벡터의 seq(47)를 다르게 골라 두 칸을 따로 본다(RV-05)
+  const state = baseState({ lastSeq: 40, vectorSeq: 47 });
   const store = await newStore(state);
   const queue = new MemoryScanQueue();
   const now = QR_MS + 2_000;
   const r = await flow().runScan({ raw, state, store, queue, nowMs: now, clockOffsetMs: 400, scannerSessionId: SESSION, id: () => 'id-pass-1' });
   assert.equal(r.recorded, true);
+  assert.equal(r.persisted, true);
   assert.equal(r.outcome.result, 'PASS');
   const rows = await queue.due(Number.MAX_SAFE_INTEGER, 10);
   assert.equal(rows.length, 1);
@@ -169,7 +171,7 @@ test('GAT-140 통과는 큐 기록(openapi ScanEvent 칸, method QR)을 쓴 뒤 
     clockOffsetMs: 400,
     knownSeq: 40,
     deviceSeq: 1,
-    versionVector: vectorOf({ seq: 40 }),
+    versionVector: vectorOf({ seq: 47 }),
   });
   const entry = { lastDirection: 'IN', lastAtMs: now + 400, gateZone: '동문', source: 'LOCAL' };
   assert.deepEqual(r.state.entries.get(T), entry);
@@ -259,6 +261,98 @@ test('O-T5 기기 시계 +60,000ms에 오차 −60,000ms면 통과(보정 시각
     { result: 'REJECT', reason: 'QR_EXPIRED', clockOffsetMs: 0, scannedAtDevice: iso(QR_MS + 60_000), qrTimestamp: iso(QR_MS), ticketId: T },
   );
   assert.equal(bad.state.entries.has(T), false);
+});
+
+/** 기기 저장소 장애 주입: MemoryPackageStore를 감싸 nextDeviceSeq·save를 정한 만큼 실패시킨다(PackageStore 포트 그대로) */
+class FaultyStore implements PackageStore {
+  readonly inner: PackageStore;
+  failSeq = 0;
+  failSave = 0;
+  saves = 0;
+  constructor(inner: PackageStore) {
+    this.inner = inner;
+  }
+  load() {
+    return this.inner.load();
+  }
+  async save(s: PackageState) {
+    this.saves++;
+    if (this.failSave > 0) {
+      this.failSave--;
+      throw new Error('시험이 넣은 기기 저장소 저장 실패');
+    }
+    return this.inner.save(s);
+  }
+  async nextDeviceSeq() {
+    if (this.failSeq > 0) {
+      this.failSeq--;
+      throw new Error('시험이 넣은 deviceSeq 저장 실패');
+    }
+    return this.inner.nextDeviceSeq();
+  }
+  meta() {
+    return this.inner.meta();
+  }
+  setMeta(p: Parameters<PackageStore['setMeta']>[0]) {
+    return this.inner.setMeta(p);
+  }
+  clear() {
+    return this.inner.clear();
+  }
+}
+
+test('GAT-140 1단계 거부(풀리지 않는 글·지원하지 않는 형식 버전)는 판정 화면만 보이고 큐에 쓰지 않는다', async () => {
+  const state = baseState();
+  const store = await newStore(state);
+  const queue = new MemoryScanQueue();
+  const v2 = await qrText(key, { ticketId: T, timestampSec: QR_SEC, version: 2 });
+  for (const [input, reason] of [
+    ['not#base45', 'INVALID_QR'],
+    [v2, 'UNSUPPORTED_VERSION'],
+  ] as const) {
+    const r = await flow().runScan({ raw: input, state, store, queue, nowMs: QR_MS, clockOffsetMs: 0, scannerSessionId: SESSION, id: ids });
+    assert.deepEqual([r.outcome.result, r.outcome.reason, r.recorded], ['REJECT', reason, false], reason);
+    assert.deepEqual(r.state, state, reason);
+  }
+  assert.equal(await queue.count(), 0);
+  // 2단계 이후 거부는 기록한다(예외는 1단계뿐)
+  const unknown = await flow().runScan({ raw: await qrText(key, { ticketId: '0190f3a1-7c2e-7a00-8b2a-6c1d5e73ffff', timestampSec: QR_SEC }), state, store, queue, nowMs: QR_MS, clockOffsetMs: 0, scannerSessionId: SESSION, id: ids });
+  assert.deepEqual([unknown.outcome.reason, unknown.recorded], ['UNKNOWN_TICKET', true]);
+  assert.equal(await queue.count(), 1);
+});
+
+test('GAT-140 기기 저장소 장애: deviceSeq를 올리지 못하면 다시 찍기(RETRY)·큐 0건·입장 상태 그대로다', async () => {
+  const state = baseState();
+  const store = new FaultyStore(await newStore(state));
+  store.failSeq = 1;
+  const queue = new MemoryScanQueue();
+  const r = await flow().runScan({ raw, state, store, queue, nowMs: QR_MS, clockOffsetMs: 0, scannerSessionId: SESSION, id: ids });
+  assert.deepEqual(r.outcome, { result: 'RETRY' });
+  assert.equal(r.recorded, false);
+  assert.equal(await queue.count(), 0);
+  assert.deepEqual(r.state, state);
+  assert.equal((await store.load())!.entries.has(T), false);
+});
+
+test('GAT-140 기기 저장소 장애: 큐 쓰기 뒤 저장이 실패하면 통과·기록 참·persisted 거짓이고, 돌려준 상태의 입장 상태가 다음 저장에 함께 들어간다', async () => {
+  const T2 = '0190f3a1-7c2e-7a00-8b2a-6c1d5e730002';
+  const state = stateOf({ tickets: [ticketOf(T, key), ticketOf(T2, key)], lastSeq: 40, versionVector: vectorOf({ seq: 40 }) });
+  const store = new FaultyStore(await newStore(state));
+  store.failSave = 1;
+  const queue = new MemoryScanQueue();
+  let first: Awaited<ReturnType<FlowModule['runScan']>> | undefined;
+  await assert.doesNotReject(async () => {
+    first = await flow().runScan({ raw, state, store, queue, nowMs: QR_MS, clockOffsetMs: 0, scannerSessionId: SESSION, id: ids });
+  }, 'runScan은 던지지 않는다');
+  assert.deepEqual([first!.outcome.result, first!.recorded, first!.persisted], ['PASS', true, false]);
+  assert.ok(store.saves >= 1, '저장을 실제로 시도했다(장애가 닿았다)');
+  assert.equal(await queue.count(), 1);
+  assert.equal(first!.state.entries.get(T)!.source, 'LOCAL', '돌려준 상태에는 입장 상태가 있다');
+  assert.equal((await store.load())!.entries.has(T), false, '저장소에는 아직 없다');
+  const second = await flow().runScan({ raw: await qrText(key, { ticketId: T2, timestampSec: QR_SEC }), state: first!.state, store, queue, nowMs: QR_MS + 1_000, clockOffsetMs: 0, scannerSessionId: SESSION, id: ids });
+  assert.deepEqual([second.outcome.result, second.persisted], ['PASS', true]);
+  const saved = await store.load();
+  assert.deepEqual([saved!.entries.get(T)?.lastDirection, saved!.entries.get(T2)?.lastDirection], ['IN', 'IN']);
 });
 
 test('GAT-140 scanEventOf의 구역은 기기 배치 구역이고 거부 사유를 싣는다(다른 게이트 티켓)', () => {

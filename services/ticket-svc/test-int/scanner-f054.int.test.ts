@@ -64,6 +64,7 @@ interface PackageStore {
 }
 type PackageState = { lastSeq: number; entries: ReadonlyMap<string, unknown> } & Record<string, unknown>;
 interface Api {
+  shift(): Promise<Body & { placement: { gateZone: string; mode: string; version?: number } }>;
   package(eventId: string): Promise<Body & { lastSeq: number; tickets: { ticketId: string; keys: { keyId: string; publicKey: string }[] }[]; reentryAllowed: boolean }>;
   changes(eventId: string, after: number, limit?: number): Promise<{ changes: { seq: number; kind: string; payload: Body }[]; lastSeq: number; hasMore: boolean; versionVector: Body }>;
   uploadScans(scans: readonly Body[]): Promise<{ acceptedIds: string[]; resyncRequired: boolean }>;
@@ -457,7 +458,7 @@ describe('F-05-4 실제 ticket-svc(start)와 스캐너 앱 모듈', () => {
     expect(await received('PASS')).toBe(pass0 + 3);
   });
 
-  test('O-T26 O-T21 ③ 해제 전후 판정 12건(해제 뒤 시각 5건)을 해제된 토큰으로 올리면 401 뒤 토큰을 지우고 기기 인증으로 12건 모두 받으며 세션 밖 기록이 5건이다', async () => {
+  test('O-T26 O-T21 ③ 해제 전후 판정 12건(해제 뒤 시각 5건, 기기 시계 +60초·오차 −60,000ms)을 해제된 토큰으로 올리면 401 뒤 토큰을 지우고 기기 인증으로 12건 모두 받으며 세션 밖 기록이 5건이다', async () => {
     const s = scanner();
     const d = await device(E1);
     const tickets = await Promise.all(Array.from({ length: 12 }, () => ticket(E1)));
@@ -473,7 +474,8 @@ describe('F-05-4 실제 ticket-svc(start)와 스캐너 앱 모듈', () => {
     for (const [i, t] of tickets.entries()) {
       // 앞 7건은 해제 전(해제 90초~60초 전), 뒤 5건은 해제 뒤(해제 30초~70초 뒤)
       const at = i < 7 ? releasedAt - 90_000 + i * 5_000 : releasedAt + 30_000 + (i - 7) * 10_000;
-      const r = await s.runScan({ raw: await qrOf(t.wallet, t.ticketId, at), state, store, queue, nowMs: at, clockOffsetMs: 0, scannerSessionId: released });
+      // 기기 시계가 60초 빠르다(오차 −60,000ms). 보정 시각 = at. 서버가 오차를 한 번 더 빼면 해제 뒤 5건 가운데 4건이 세션 안으로 들어와 수가 달라진다(RV-02)
+      const r = await s.runScan({ raw: await qrOf(t.wallet, t.ticketId, at), state, store, queue, nowMs: at + 60_000, clockOffsetMs: -60_000, scannerSessionId: released });
       expect(r.outcome.result, `판정 ${i}`).toBe('PASS');
       state = r.state;
     }
@@ -596,9 +598,34 @@ describe('F-05-4 실제 ticket-svc(start)와 스캐너 앱 모듈', () => {
     // 사본은 불허(처음 만들 때 policy_seq 0, docs/data.md). core는 이미 허용이다
     await database.pool.query('insert into scanner_event_policy (event_id, reentry_allowed, policy_seq, observed_at) values ($1, false, 0, now())', [E3]);
     core.policy.set(E3, true);
+    // 겹침을 실제로 만든다(RV-07): POLICY 넣기를 1.5초 붙잡아 첫 트랜잭션이 잠금을 쥔 동안 둘째 요청이 같은 행을 기다리게 한다
+    await database.pool.query(`
+      create sequence f054_slow_policy_seq;
+      create function f054_slow_policy() returns trigger language plpgsql as $$
+      begin
+        if new.kind = 'POLICY' and new.event_id = '${E3}' then
+          perform nextval('f054_slow_policy_seq');
+          perform pg_sleep(1.5);
+        end if;
+        return new;
+      end $$;
+      create trigger f054_slow_policy before insert on scanner_change for each row execute function f054_slow_policy();
+    `);
     const metric0 = await metric('scanner_policy_changes_total', { service: 'ticket-svc' });
     const logs0 = logLines.length;
-    const [a, b] = await Promise.all([apiFor(d, t1).changes(E3, 0), apiFor(d, t2).changes(E3, 0)]);
+    const lockWaits = async () =>
+      Number((await database.pool.query("select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'")).rows[0].n);
+    let a: Awaited<ReturnType<Api['changes']>>;
+    let b: Awaited<ReturnType<Api['changes']>>;
+    try {
+      const both = Promise.all([apiFor(d, t1).changes(E3, 0), apiFor(d, t2).changes(E3, 0)]);
+      await expect.poll(lockWaits, { timeout: 5_000, message: '둘째 요청이 첫 트랜잭션의 잠금을 기다렸다(겹침이 실제로 났다)' }).toBeGreaterThan(0);
+      [a, b] = await both;
+      const seqRow = (await database.pool.query('select last_value::int as n, is_called from f054_slow_policy_seq')).rows[0] as { n: number; is_called: boolean };
+      expect(seqRow.is_called ? seqRow.n : 0, 'POLICY 넣기는 한 번만 시도됐다').toBe(1);
+    } finally {
+      await database.pool.query('drop trigger f054_slow_policy on scanner_change; drop function f054_slow_policy();');
+    }
     const rows = await policyRows(E3);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.payload).toEqual({ v: 1, reentryAllowed: true });
@@ -632,9 +659,9 @@ describe('F-05-4 실제 ticket-svc(start)와 스캐너 앱 모듈', () => {
     core.policy.set(E4, true);
     const seq0 = await lastSeqOf(E4);
     try {
-      await apiFor(d, token)
-        .changes(E4, 0)
-        .catch((e: unknown) => e);
+      // DB 오류여도 그 요청은 실패하지 않는다: 사본 값 그대로 200, 변경분 0(offline-gate §6.3, RV-17)
+      const faulted = await apiFor(d, token).changes(E4, 0);
+      expect(faulted.changes.filter((c) => c.kind === 'POLICY')).toEqual([]);
       const seqRow = (await database.pool.query('select last_value::int as n, is_called from f054_policy_fault_seq')).rows[0] as { n: number; is_called: boolean };
       const fired = seqRow.is_called ? seqRow.n : 0;
       expect(fired, '장애 트리거가 실제로 던졌다').toBe(1);
@@ -649,6 +676,43 @@ describe('F-05-4 실제 ticket-svc(start)와 스캐너 앱 모듈', () => {
     expect(rows).toHaveLength(1);
     expect(ok.changes.filter((c) => c.kind === 'POLICY')).toEqual([{ seq: rows[0]!.seq, kind: 'POLICY', payload: { v: 1, reentryAllowed: true } }]);
     expect(await policyCopy(E4)).toEqual([{ reentry_allowed: true, policy_seq: rows[0]!.seq }]);
+  });
+
+  test('GAT-160 Drizzle 저장소도 보정 시각을 scannedAtDevice 그대로 쓴다(세션 밖·중복 순서, 오차 ±60,000ms)', async () => {
+    const gate = new DrizzleScannerGateStore(database);
+    const sid = randomUUID();
+    const until = Date.now() - 600_000;
+    const [t1, t2, t3] = [await ticket(E1), await ticket(E1), await ticket(E1)];
+    const body = (ticketId: string, atMs: number, clockOffsetMs: number, deviceSeq: number) => ({
+      id: randomUUID(), eventId: E1, ticketId, scannerSessionId: sid, direction: 'IN' as const, method: 'QR' as const, result: 'PASS' as const,
+      gateZone: '동문', scannedAtDevice: new Date(atMs).toISOString(), clockOffsetMs, knownSeq: 0, deviceSeq,
+    });
+    const accept = (scans: ReturnType<typeof body>[]) =>
+      gate.acceptScans({ eventId: E1, deviceId: randomUUID(), sessions: { [sid]: { accountId: ACCOUNT, validFromMs: until - 3_600_000, validUntilMs: until } }, scans, nowMs: Date.now() });
+    const inside = body(t1.ticketId, until - 30_000, 60_000, 1);
+    const outside = body(t2.ticketId, until + 30_000, -60_000, 2);
+    await accept([inside, outside]);
+    const later = body(t3.ticketId, until - 50_000, 0, 3);
+    await accept([later]);
+    const earlier = body(t3.ticketId, until - 55_000, 60_000, 4);
+    await accept([earlier]);
+    const flags = Object.fromEntries((await rowsFor([inside.id, outside.id, later.id, earlier.id])).map((r) => [r.id, [r.result, r.flag]]));
+    expect(flags).toEqual({
+      [inside.id]: ['PASS', 'NONE'],
+      [outside.id]: ['PASS', 'OUT_OF_SESSION'],
+      [earlier.id]: ['PASS', 'NONE'],
+      [later.id]: ['REJECT', 'DUPLICATE'],
+    });
+  });
+
+  test('GAT-140 근무 준비 응답의 배치에 판(placement.version)이 실리고 그 기기의 PLACEMENT 변경분 version과 같다', async () => {
+    const d = await device(E1);
+    const token = tokenFor(d, session(E1));
+    const shift = await apiFor(d, token).shift();
+    const placed = (await apiFor(d, token).changes(E1, 0)).changes.filter((c) => c.kind === 'PLACEMENT' && c.payload.deviceId === d.deviceId);
+    expect(placed).toHaveLength(1);
+    expect(shift.placement).toMatchObject({ gateZone: '동문', mode: 'IN' });
+    expect(shift.placement.version).toBe(placed[0]!.payload.version);
   });
 
   test('O-T15 core에 닿지 못하면 목록의 reentryAllowed는 사본 값(허용)이고 변경분이 없다', async () => {

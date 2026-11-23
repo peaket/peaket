@@ -1,6 +1,6 @@
-// F-05-4 판정 화면 상태 이름·판정 화면 유지 시간·변경분 배지 경계 시험(계획 docs/review/plans/F-05-4.md §4 'ScanScreen.tsx(실제 연결), app/useScanLive.ts(새 훅)').
+// F-05-4 판정 화면 상태 이름·판정 화면 유지 시간·변경분 배지 경계 시험(계획 docs/review/plans/F-05-4.md §3 `app/scan-live-state.ts`, 시험 리뷰 RV-11).
 // 정본: docs/features/offline-gate.md §6.4 '스캐너 앱 판정 첫 구현'(판정 화면 2초 [가정]), docs/design/d5-screen-blueprint.md §8.3(상태)·§8.4('변경분 2분 넘게 못 받음').
-// 화면 연결은 tools/web-checks/scanner-scan이 본다. 이 시험은 그 값을 정한 모듈(app/useScanLive.ts)을 동적으로 불러온다(없으면 각 시험이 단언에서 떨어진다).
+// 화면 연결은 tools/web-checks/scanner-scan이 본다. 이 시험은 그 값을 정한 순수 모듈(app/scan-live-state.ts, 화면 훅 useScanLive.ts가 가져다 쓴다)을 동적으로 불러온다(없으면 각 시험이 단언에서 떨어진다).
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
@@ -9,7 +9,7 @@ type LiveModule = {
   RESULT_HOLD_MS: number;
   changesBadgeOf(lastChangesAtMs: number | undefined, nowMs: number): string | undefined;
 };
-const MODULE = '../src/app/useScanLive.ts';
+const MODULE = '../src/app/scan-live-state.ts';
 const loaded = (await import(MODULE).catch(() => ({}))) as Partial<LiveModule>;
 function live(): LiveModule {
   assert.equal(typeof loaded.changesBadgeOf, 'function', `${MODULE}의 changesBadgeOf가 없다`);
@@ -32,4 +32,6 @@ test('GAT-140 변경분 배지: 마지막 변경분 뒤 120,000ms는 배지 없�
   assert.equal(changesBadgeOf(at, at + 120_000), undefined);
   assert.equal(changesBadgeOf(at, at + 120_001), '변경분 2분 넘게 못 받음');
   assert.equal(changesBadgeOf(at, at + 600_000), '변경분 2분 넘게 못 받음');
+  // 변경분을 받은 적이 없으면(근무 준비 전) 배지가 없다(계획 §3)
+  assert.equal(changesBadgeOf(undefined, at + 600_000), undefined);
 });

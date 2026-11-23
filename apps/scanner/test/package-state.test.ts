@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ScannerChangesResponse, ScannerPackageResponse } from '../src/api/client.ts';
 import type { EntryState, PackageState, Placement } from '../src/storage/package-state.ts';
-import { DEVICE, OTHER_DEVICE, QR_MS, QR_SEC, packageOf, pageOf, qrText, walletKey } from './scanner-fixture.ts';
+import { DEVICE, OTHER_DEVICE, QR_MS, QR_SEC, packageOf, pageOf, qrText, vectorOf, walletKey } from './scanner-fixture.ts';
 
 type StateModule = {
   packageStateOf(pkg: ScannerPackageResponse, placement: Placement, keepLocal?: ReadonlyMap<string, EntryState>): PackageState;
@@ -67,6 +67,7 @@ test('GAT-140 목록 응답을 상태로 옮긴다: 티켓·유효 키·폐기 k
   assert.equal(s.reentryAllowed, false);
   assert.deepEqual(s.gateZones, ['동문', '서문']);
   assert.deepEqual([...s.tickets.keys()].sort(), [T, T2, T3]);
+  // type-escape: StoredTicket을 칸 고르기 도우미(Record)에 넘기려고 넓힌다(값은 그대로) F-05-4 RV-16
   assert.deepEqual(pick(s.tickets.get(T)! as unknown as Record<string, unknown>, ['ticketId', 'gateZone', 'seatLabel', 'status', 'keys']), {
     ticketId: T,
     gateZone: '동문',
@@ -236,4 +237,56 @@ test('GAT-140 FLAG·SESSION_TERMINATED 반영은 티켓·입장 상태·정책·
     { seq: 42, kind: 'SESSION_TERMINATED', payload: { v: 1, deviceId: OTHER_DEVICE, reason: 'DEVICE_REVOKED' } },
   ]), DEVICE);
   for (const k of ['tickets', 'revoked', 'entries', 'reentryAllowed', 'placement'] as const) assert.deepEqual(after[k], s[k], k);
+});
+
+test('GAT-160 쪽을 반영하면 저장 벡터와 마지막 번호는 그 쪽 응답의 versionVector·lastSeq가 된다(lastSeq와 벡터 seq가 달라도 따로)', () => {
+  const s = m().packageStateOf(pkg(), IN_PLACEMENT);
+  // 서버가 더 가진 변경이 있어(hasMore) 쪽 끝 번호(43)와 벡터의 seq(50)가 다르다
+  const vv = vectorOf({ seq: 50, keySeq: 41, policySeq: 42, placementSeq: 30, ticketSeq: 43 });
+  const page = { changes: [
+    { seq: 41, kind: 'KEY_REGISTERED', payload: { v: 1, ticketId: T3, keyId: lateKey.keyId, publicKey: lateKey.publicKey } },
+    { seq: 42, kind: 'POLICY', payload: { v: 1, reentryAllowed: true } },
+    { seq: 43, kind: 'TICKET_STATUS', payload: { v: 1, ticketId: T, status: 'FLAGGED', version: 2 } },
+  ], lastSeq: 43, hasMore: true, versionVector: vv };
+  const after = m().applyChangePage(s, page, DEVICE);
+  assert.equal(after.lastSeq, 43);
+  assert.deepEqual(after.versionVector, vv);
+  assert.notDeepEqual(s.versionVector, vv, '시험 값이 처음 벡터와 다르다');
+  // 모르는 종류만 든 쪽도 벡터는 쪽 값이 된다
+  const vv2 = vectorOf({ seq: 60 });
+  const skipped = m().applyChangePage(after, { changes: [{ seq: 44, kind: 'BRAND_NEW_KIND', payload: { v: 1 } }], lastSeq: 44, hasMore: false, versionVector: vv2 }, DEVICE);
+  assert.deepEqual([skipped.lastSeq, skipped.versionVector], [44, vv2]);
+});
+
+test('O-T23 이 기기(LOCAL) 통과보다 이른 다른 기기 SCAN_STATE는 입장 상태를 바꾸지 않는다', () => {
+  const local: EntryState = { lastDirection: 'IN', lastAtMs: Date.parse('2026-11-23T09:59:00.000Z'), gateZone: '동문', source: 'LOCAL' };
+  const s = m().withLocalEntry(m().packageStateOf(pkg(), IN_PLACEMENT), T, local);
+  const after = m().applyChangePage(s, pageOf([scanState(41, T, 'OUT', '2026-11-23T09:58:59.999Z')]), DEVICE);
+  assert.deepEqual(after.entries.get(T), local);
+});
+
+test('O-T25 읽히지 않는 publicKey의 KEY_REGISTERED는 그 키를 모름으로 두어 KEY_UNKNOWN이고 다시 받기 표시가 선다', async () => {
+  const raw = await qrText(lateKey, { ticketId: T3, timestampSec: QR_SEC });
+  const s = m().packageStateOf(pkg(), { gateZone: '서문', mode: 'IN', version: 5 });
+  const bad = m().applyChangePage(s, pageOf([{ seq: 41, kind: 'KEY_REGISTERED', payload: { v: 1, ticketId: T3, keyId: lateKey.keyId, publicKey: 'AAAA' } }]), DEVICE);
+  assert.deepEqual(pick(await judgeScan(raw, bad), ['result', 'reason']), { result: 'REJECT', reason: 'KEY_UNKNOWN' });
+  assert.equal(bad.resyncRequired, true);
+});
+
+test('GAT-140 판 번호·변경 번호는 수로 견준다(PLACEMENT 판 9 → 10, 변경 번호 99 → 100)', () => {
+  const p = packageOf({ tickets: pkg().tickets, lastSeq: 99, versionVector: vectorOf({ seq: 99 }) });
+  const s = m().packageStateOf(p, { gateZone: '동문', mode: 'IN', version: 9 });
+  const after = m().applyChangePage(s, pageOf([{ seq: 100, kind: 'PLACEMENT', payload: { v: 1, deviceId: DEVICE, gateZone: '동문', mode: 'OUT', version: 10 } }], 99), DEVICE);
+  assert.deepEqual(after.placement, { gateZone: '동문', mode: 'OUT', version: 10 });
+  assert.equal(after.lastSeq, 100);
+  // 100 다음에 오는 99 이하는 버린다
+  const stale = m().applyChangePage(after, pageOf([{ seq: 99, kind: 'POLICY', payload: { v: 1, reentryAllowed: true } }], 98), DEVICE);
+  assert.equal(stale.reentryAllowed, after.reentryAllowed);
+});
+
+test('GAT-140 목록을 다시 받을 때 이 기기 입장 상태가 목록 값과 같은 시각이면 목록 값이 된다(늦은 것만 남긴다)', () => {
+  const same: EntryState = { lastDirection: 'OUT', lastAtMs: Date.parse('2026-11-23T09:50:00.000Z'), gateZone: '동문', source: 'LOCAL' };
+  const local = m().withLocalEntry(m().packageStateOf(pkg(), IN_PLACEMENT), T2, same);
+  const reloaded = m().packageStateOf(pkg(), IN_PLACEMENT, local.entries);
+  assert.deepEqual(reloaded.entries.get(T2), { lastDirection: 'IN', lastAtMs: Date.parse('2026-11-23T09:50:00.000Z'), gateZone: '동문', source: 'PACKAGE' });
 });
