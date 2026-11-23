@@ -1,7 +1,7 @@
 // 시험·개발용 정산 어댑터. 실제 결제 원장·KYC·지급대행은 Drizzle/외부 어댑터가 맡는다.
 import type { PayoutGateway, PayoutSubmitResult, ReauthVerifier, SettlementPaymentSource, VerifiedReauth } from '../domain/ports.js';
-import type { PaymentFact, Pg, PgStore } from '../domain/settlement.js';
-import { SettlementProblem } from '../domain/settlement.js';
+import type { PaymentFact, Pg, PgStore, RefundFact } from '../domain/settlement.js';
+import { partnerRefundOf, SettlementProblem } from '../domain/settlement.js';
 
 export class MemorySettlementPaymentSource implements SettlementPaymentSource {
   readonly rows = new Map<string, PaymentFact[]>();
@@ -10,6 +10,21 @@ export class MemorySettlementPaymentSource implements SettlementPaymentSource {
   }
   async listEventPayments(eventId: string, pg: Pg, pgStore: PgStore): Promise<PaymentFact[]> {
     return this.rows.get(`${eventId}:${pg}:${pgStore}`) ?? [];
+  }
+  /** 끝난 취소가 있는 결제(refundedAt)를 (시각, 결제 ID) 차례로 열쇠 뒤부터(F-07-8 계산 뒤 환급 훑기) */
+  async listRefundsAfter(after: { at: Date; paymentId: string }, limit: number): Promise<RefundFact[]> {
+    const out: RefundFact[] = [];
+    for (const [key, facts] of this.rows) {
+      const [eventId, pg, pgStore] = key.split(':') as [string, Pg, PgStore];
+      for (const p of facts) {
+        const at = p.refundedAt;
+        if (!at) continue;
+        const t = at.getTime();
+        if (t < after.at.getTime() || (t === after.at.getTime() && p.paymentId <= after.paymentId)) continue;
+        out.push({ paymentId: p.paymentId, eventId, pg, pgStore, partnerRefund: partnerRefundOf(p), refundedAt: at });
+      }
+    }
+    return out.sort((a, b) => a.refundedAt.getTime() - b.refundedAt.getTime() || a.paymentId.localeCompare(b.paymentId)).slice(0, limit);
   }
 }
 

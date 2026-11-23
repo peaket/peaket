@@ -225,6 +225,13 @@
       "when": 1795417931529,
       "tag": "0032_settlement_portone_reconciliation",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795428197449,
+      "tag": "0033_settlement_event_recalculation",
+      "breakpoints": true
     }
   ]
 }

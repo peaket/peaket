@@ -66,7 +66,15 @@ export interface CompensationTransferStore {
   settle(compensationId: string, record: CompensationTransferRecord & { readonly accountLast4: string; readonly promoterId: string; readonly eventId?: string }): Promise<CompensationTransferRecord>;
   /** PAID 뒤 미수금 ID를 한 번만 적는다(이미 있으면 그대로). 바뀐 행을 돌려준다 */
   attachReceivable(compensationId: string, receivableId: string): Promise<CompensationTransferRecord>;
+  // ---- F-07-8 송금 결과 확정(transfer-refund §6 '송금 결과 확정', R-T47 ③) ----
+  /** 지급대행이 접수한(선점 행이 아닌) REQUESTED 송금. 오래된 차례. 상계할 파트너·회차를 함께 준다 */
+  listRequested(limit: number): Promise<RequestedCompensationTransfer[]>;
+  /** REQUESTED일 때만 결과(PAID는 미수금 ID와 함께)를 쓴다. 0행(이미 확정됨)이면 false */
+  settleRequested(compensationId: string, input: { status: 'PAID' | 'FAILED'; failureReason?: string; receivableId?: string }): Promise<boolean>;
 }
+
+/** 결과 확정을 기다리는 송금 한 건 */
+export type RequestedCompensationTransfer = CompensationTransferRecord & { readonly promoterId: string; readonly eventId?: string };
 
 /** 배상 미수금 만들기(정산 모듈의 recordReceivable을 좁혀 잇는다). PAID일 때만 부른다 */
 export interface CompensationReceivables {

@@ -22,6 +22,9 @@ export class PromSettlementSignals implements SettlementSignals {
   readonly #ledgerSyncAge = new Gauge({ name: 'settlement_portone_ledger_sync_age_seconds', help: '포트원 사후 대사의 마지막 성공 뒤 지난 초(대사 종류)', labelNames: ['sync'] as const, registers: [] });
   readonly #executionPending = new Gauge({ name: 'settlement_portone_execution_pending', help: '지급일 15시에 일괄 지급 ID가 없는 그날 포트원 지급 묶음 수', registers: [] });
   readonly #opsRefused = new Counter({ name: 'settlement_ops_intake_refused_total', help: 'ops 받기가 거절한 수(202 accepted false·400·422, 대상)', labelNames: ['target'] as const, registers: [] });
+  // F-07-8(ADR-0380): 계산 뒤 환급 미수금 수와 다시 계산 대기 요청 수
+  readonly #refundReceivable = new Counter({ name: 'settlement_refund_receivable_total', help: '새로 만든 계산 뒤 환급 미수금 수', registers: [] });
+  readonly #recalculationPending = new Gauge({ name: 'settlement_recalculation_pending', help: '다시 계산을 기다리는 회차 취소·연기 요청 수', registers: [] });
   readonly #opsFailed = new Gauge({ name: 'settlement_ops_intake_failed', help: '거절 3번으로 영구 실패한 채 남은 행 수(대상)', labelNames: ['target'] as const, registers: [] });
 
   constructor() {
@@ -31,6 +34,8 @@ export class PromSettlementSignals implements SettlementSignals {
     this.#overdue.inc({ pg: 'TOSS' }, 0);
     for (const result of CHANGE_RESULTS) this.#accountChange.inc({ result }, 0);
     this.#withdrawalUnmatched.inc(0);
+    this.#refundReceivable.inc(0);
+    this.#recalculationPending.set(0);
     for (const target of OPS_TARGETS) {
       this.#opsRefused.inc({ target }, 0);
       this.#opsFailed.set({ target }, 0);
@@ -54,6 +59,8 @@ export class PromSettlementSignals implements SettlementSignals {
       this.#executionPending,
       this.#opsRefused,
       this.#opsFailed,
+      this.#refundReceivable,
+      this.#recalculationPending,
     ])
       registry.registerMetric(m);
     return this;
@@ -113,5 +120,13 @@ export class PromSettlementSignals implements SettlementSignals {
 
   opsIntakeFailed(target: OpsIntakeTarget, count: number): void {
     this.#opsFailed.set({ target }, count);
+  }
+
+  refundReceivableCreated(count: number): void {
+    this.#refundReceivable.inc(count);
+  }
+
+  recalculationPending(count: number): void {
+    this.#recalculationPending.set(count);
   }
 }

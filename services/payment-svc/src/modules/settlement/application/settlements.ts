@@ -36,6 +36,9 @@ import { REFUND_BANK_CODES } from '@peaket/validation/refund-account';
 import { kstDateOf } from './portone-payouts.js';
 import { z } from 'zod';
 import { PayoutAgencies, type PayoutAgencySyncInput, type PayoutAgencySyncResult } from './payout-agencies.js';
+import { EventRecalculations } from './event-recalculation.js';
+import { ExcludedPaymentResolution } from './excluded-payment-resolution.js';
+import { RefundsAfterCalculation } from './refunds-after-calculation.js';
 import { portoneLedgerBalance, PortonePayouts } from './portone-payouts.js';
 import type { PortonePayoutConfig } from '../domain/payout-adapters.js';
 import { classifyTossFailure, DEFAULT_TOSS_PAYOUT_TERMS, ledgerBalance, splitTossPayoutAmount, TOSS_PAYOUT_DATE_ERRORS, type TossPayoutTerms } from '../domain/payout-adapters.js';
@@ -84,6 +87,7 @@ import {
   type PayoutAgencyResults,
   payoutEvent,
   receivableClosedEvent,
+  ReceivableBalanceConflict,
   TOSS_SELLER_STATUSES,
   type PayoutBatchAuditRecord,
   type PgBalanceReconciliationRecord,
@@ -105,6 +109,8 @@ import {
   type StatementStatus,
   type StatementView,
   type TossSellerStatus,
+  type EventRecalculationView,
+  type RecalculationKind,
 } from '../domain/settlement.js';
 
 export interface SettlementDeps {
@@ -278,13 +284,80 @@ export interface PayoutRegistrationView {
   portonePartnerRegistered: boolean;
 }
 
+/** 지급 묶음이 미수금 남은 금액 겹침으로 다시 판정하는 최대 횟수 [가정] */
+const BATCH_RECEIVABLE_RETRIES = 3;
+
 const errorReason = (e: unknown): string => (e instanceof Error ? `${e.name}:${e.message}`.slice(0, 200) : 'unknown');
 
 export class Settlements {
   /** 09시 토스 묶음의 상점·지급일별 503 실패 수(셋째에 CS PAYOUT_DELAYED, ADR-0369 결정 13). 리더 파드 메모리다 */
   readonly #prepareFailures = new Map<string, number>();
 
+  #refundsUseCase: RefundsAfterCalculation | undefined;
+  #recalcUseCase: EventRecalculations | undefined;
+  #excludedUseCase: ExcludedPaymentResolution | undefined;
+
   constructor(private readonly d: SettlementDeps) {}
+
+  // ---- F-07-8 계산 뒤 환급 미수금·회차 취소 다시 계산·대사 미완 결제 풀림(ADR-0380). 새 파일의 유스케이스에 넘긴다 ----
+
+  #refunds(): RefundsAfterCalculation {
+    return (this.#refundsUseCase ??= new RefundsAfterCalculation({
+      store: this.d.store,
+      payments: this.d.payments,
+      clock: this.d.clock,
+      eventCommission: this.d.eventCommission,
+      commissionRateBp: this.d.commissionRateBp,
+      signals: this.d.signals,
+    }));
+  }
+
+  #recalculations(): EventRecalculations {
+    return (this.#recalcUseCase ??= new EventRecalculations({
+      store: this.d.store,
+      payments: this.d.payments,
+      clock: this.d.clock,
+      holidays: this.#holidays(),
+      refunds: this.#refunds(),
+      tossTransport: this.d.tossTransport,
+      portone: this.d.portone,
+      log: this.d.log,
+      eventCommission: this.d.eventCommission,
+      commissionRateBp: this.d.commissionRateBp,
+      onCancelFailed: (o) => this.d.log?.payoutJobFailed?.({ job: 'settlement_recalculation_cancel_failed', reason: `${o.statementId}:${o.pg}:${o.reason}`, at: this.#now() }),
+    }));
+  }
+
+  #excluded(): ExcludedPaymentResolution {
+    return (this.#excludedUseCase ??= new ExcludedPaymentResolution({ store: this.d.store, payments: this.d.payments, clock: this.d.clock, commissionRateBp: this.d.commissionRateBp }));
+  }
+
+  /** 회차 취소·연기 확정 직후 그 회차 정산서의 지급을 막는다(PUT /internal/v1/settlements/event-recalculations/{requestId}, ADR-0380 결정 1·4) */
+  async openEventRecalculation(input: { requestId: string; eventId: string; kind: RecalculationKind; confirmedAt: Date }): Promise<EventRecalculationView> {
+    return this.#recalculations().open(input);
+  }
+
+  /** 일괄 환불이 끝난 뒤 그 회차 정산서를 새 판으로 다시 계산한다(POST …/{requestId}/completion, ADR-0380 결정 3·6·8). 없는 요청은 404 SettlementProblem */
+  async completeEventRecalculation(requestId: string, input: { completedAt: Date; partial?: boolean }): Promise<EventRecalculationView> {
+    return this.#recalculations().complete(requestId, input);
+  }
+
+  /** 정산 일꾼 30분 tick: 결제사 취소가 실패한 정산서를 다시 하고, 완료를 받은 요청은 남은 다시 계산을 마친다 */
+  async retryEventRecalculations(limit?: number): Promise<{ retried: number; pending: number }> {
+    const out = await this.#recalculations().retry(limit);
+    this.d.signals?.recalculationPending?.(out.pending);
+    return out;
+  }
+
+  /** 정산 일꾼 30분 tick: 계산 뒤(지급 뒤) 환급의 미수금(J-T11, ADR-0197 결정 2) */
+  async recordRefundsAfterCalculation(limit?: number): Promise<{ created: number; skipped: number }> {
+    return this.#refunds().run(limit);
+  }
+
+  /** 정산 일꾼 30분 tick: 대사 불일치로 뺀 결제가 풀리면 조정 제안 CS 건(J-T23 ③, ADR-0380 결정 7) */
+  async resolveExcludedPayments(limit?: number): Promise<{ suggested: number; waiting: number }> {
+    return this.#excluded().run(limit);
+  }
 
   /**
    * 파트너 회차 정산서 목록. 다른 파트너의 회차면 없는 회차와 같은 빈 목록이고(존재를 알리지 않는다),
@@ -699,6 +772,11 @@ export class Settlements {
     statementId: string,
     o: { actor?: string; reason?: string; evidence?: { balanceConfirmed?: boolean; saleResumed?: boolean; accountReconciled?: boolean } } = {},
   ): Promise<StatementView> {
+    // 다시 계산 대기 보류는 풀지 않는다(새 판으로 대신한다, ADR-0380 결정 4). 이름 그대로의 SettlementProblem 409이고 내부 경로가 같은 이름의 Problem으로 바꾼다
+    const pre = await this.d.store.findStatementById(statementId);
+    if (pre?.status === 'HELD' && pre.holdReason === 'RECALCULATION' && (await this.#recalculations().pendingFor(pre))) {
+      throw new SettlementProblem('statement-recalculation-pending', 409, '회차 취소 다시 계산을 기다리는 정산서입니다');
+    }
     return guard(async () => {
       const s = await this.d.store.findStatementById(statementId);
       if (!s) throw notFound();
@@ -729,6 +807,9 @@ export class Settlements {
           const reconciled = o.evidence?.accountReconciled === true || Boolean(account && account.holderVerified && account.holdUntil.getTime() <= now.getTime());
           if (!reconciled) throw new SettlementProblem('payout-account-mismatch', 409, '계좌 대조가 확인되지 않아 다시 확정할 수 없습니다');
         }
+      } else if (s.holdReason === 'RECALCULATION') {
+        // 다시 계산 대기 중에는 풀지 않는다(새 판으로 대신한다, ADR-0380 결정 4). 대기가 끝났으면(겹친 완료가 먼저 끝냄) 다른 보류처럼 다시 확정한다
+        if (await this.#recalculations().pendingFor(s)) throw new SettlementProblem('statement-recalculation-pending', 409, '회차 취소 다시 계산을 기다리는 정산서입니다');
       } else if (s.holdReason === 'BALANCE') {
         if (o.evidence?.balanceConfirmed !== true) throw new SettlementProblem('payout-balance-unconfirmed', 409, '잔액 확인 증빙이 없어 다시 확정할 수 없습니다');
       } else if (s.holdReason === 'SALE_SUSPENDED') {
@@ -1182,7 +1263,14 @@ export class Settlements {
     let heldAccount = 0;
     let heldMismatch = 0;
     let heldSuspended = 0;
+    let heldRecalculation = 0;
     for (const s of confirmed) {
+      // 회차 취소·연기 다시 계산 대기(PENDING) 회차의 확정 정산서는 묶지 않고 HELD(RECALCULATION)로 둔다(ADR-0380 결정 4)
+      if (await this.#recalculations().pendingFor(s)) {
+        heldRecalculation += 1;
+        holdUpdates.push(this.#holdUpdate(s, 'RECALCULATION', now));
+        continue;
+      }
       if (s.eventId !== null && suspended.has(s.eventId)) {
         heldSuspended += 1;
         holdUpdates.push(this.#holdUpdate(s, 'SALE_SUSPENDED', now));
@@ -1214,6 +1302,7 @@ export class Settlements {
       // 모두 보류됐어도 보류를 조건부로 저장한 뒤 409다(BAT-625 RV-04, ADR-0368 결정 11). 다른 전이가 먼저 썼으면 409 settlement-state-conflict
       if (holdUpdates.length > 0 && !(await this.d.store.transitionStatements(holdUpdates.map((u) => Settlements.#holdTransition(u))))) throw stateConflict();
       if (mode === 'prepare') return undefined;
+      if (heldRecalculation > 0 && heldRecalculation === holdUpdates.length) throw new SettlementProblem('statement-recalculation-pending', 409, '회차 취소 다시 계산을 기다리는 정산서입니다');
       if (heldSuspended > 0) throw new SettlementProblem('payout-sale-suspended', 409, '판매 중지된 공연의 정산서라 지급할 수 없습니다');
       if (heldKyc > 0) throw new SettlementProblem('payout-kyc-required', 409, 'KYC 확인이 끝나지 않아 지급할 수 없습니다');
       if (heldAccount > 0) throw new SettlementProblem('payout-account-change-hold', 409, '정산 계좌 변경 보류 중이라 지급할 수 없습니다');
@@ -1239,7 +1328,8 @@ export class Settlements {
         if (take <= 0) continue;
         const nextRemaining = available - take;
         receivableRemaining.set(r.receivableId, { remaining: nextRemaining, status: nextRemaining === 0 ? 'CLOSED' : 'OPEN', amount: r.amount, ...(nextRemaining === 0 ? { closedBy: s } : {}) });
-        receivableMoves.push({ receivableId: r.receivableId, statementId: s.statementId, amount: take, movedAt: now });
+        // 이동 ID를 정해 넣는다(다시 계산의 상계 되돌림이 이 ID를 가리킨다, F-07-8)
+        receivableMoves.push({ moveId: uuidv7(this.d.clock), receivableId: r.receivableId, statementId: s.statementId, amount: take, kind: 'OFFSET', movedAt: now });
         offset += take;
         remaining -= take;
       }
@@ -1342,7 +1432,18 @@ export class Settlements {
    * 그때의 확정 정산서를 다시 판정해 묶은 뒤 PENDING_APPROVAL로 바꾼다(겹친 두 요청은 하나만 이긴다). 묶을 때 정산서는 CONFIRMED 그대로다(결정 14 ①).
    */
   async createPayoutBatch(input: { pg: Pg; pgStore: PgStore; payoutDate: string; portoneBalance?: { amount: number; observedAt: string } | undefined; actor: string }): Promise<ReturnType<typeof payoutBatchView>> {
-    return guard(async () => {
+    // 같은 미수금을 겹친 다른 묶음·다시 계산이 먼저 썼으면(남은 금액이 읽은 값과 다름) 아무것도 쓰지 않았으므로 다시 판정한다(F-07-8 F-20·F-25, 세 번 [가정])
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.#createPayoutBatchOnce(input);
+      } catch (e) {
+        if (!(e instanceof ReceivableBalanceConflict) || attempt >= BATCH_RECEIVABLE_RETRIES) throw e instanceof SettlementProblem ? new ProblemError({ type: e.type, status: e.status, title: e.title }) : e;
+      }
+    }
+  }
+
+  async #createPayoutBatchOnce(input: { pg: Pg; pgStore: PgStore; payoutDate: string; portoneBalance?: { amount: number; observedAt: string } | undefined; actor: string }): Promise<ReturnType<typeof payoutBatchView>> {
+    {
       const now = this.#now();
       const existing = await this.d.store.listPayoutBatches({ pg: input.pg, pgStore: input.pgStore, payoutDate: input.payoutDate, status: [...LIVE_BATCH_STATUSES], limit: 2 });
       if (existing.some((b) => b.status !== 'PREPARED')) throw new SettlementProblem('payout-batch-exists', 409, '이미 지급 묶음이 있습니다');
@@ -1369,7 +1470,7 @@ export class Settlements {
         if (diff !== 0) await this.d.store.insertCaseRequests([caseOf('PORTONE_LEDGER_MISMATCH', batch.batchId, `portone-balance:${batch.batchId}`, now)]);
       }
       return payoutBatchView(batch);
-    });
+    }
   }
 
   /**
@@ -2304,10 +2405,22 @@ export class Settlements {
    * 살아 있는 지급 건이 모두 REQUESTED인 것만 지급 건마다 취소를 부른다. 모두 취소되면 지급 건 CANCELED·T10 HELD·PAYOUT_HELD를 한 쓰기에,
    * 일부만 취소되면 취소된 것만 CANCELED로 쓰고 정산서는 그대로 두며 CS PAYOUT_ERROR(사건 키 payout-cancel:{정산서 ID})다.
    */
-  async cancelScheduledTossPayouts(input: { promoterId: string; pgStore?: PgStore; reason: 'KYC' | 'ACCOUNT_CHANGE'; payoutDateThrough?: string }): Promise<{ cancelled: number; waiting: number }> {
+  async cancelScheduledTossPayouts(input: {
+    promoterId: string;
+    pgStore?: PgStore;
+    /** RECALCULATION: 회차 취소·연기 다시 계산(F-07-8, T10의 보류 사유도 RECALCULATION) */
+    reason: 'KYC' | 'ACCOUNT_CHANGE' | 'RECALCULATION';
+    payoutDateThrough?: string;
+    /** 주면 그 정산서만(F-07-8) */
+    statementIds?: readonly string[];
+  }): Promise<{ cancelled: number; waiting: number }> {
     const toss = this.d.tossTransport;
     const targets = (await this.d.store.listStatementsOfPromoter(input.promoterId, 'TOSS', ['SCHEDULED'])).filter(
-      (s) => (input.pgStore === undefined || s.pgStore === input.pgStore) && (input.payoutDateThrough === undefined || (s.payoutDate !== null && s.payoutDate <= input.payoutDateThrough)) && s.payoutBatchId !== null,
+      (s) =>
+        (input.pgStore === undefined || s.pgStore === input.pgStore) &&
+        (input.payoutDateThrough === undefined || (s.payoutDate !== null && s.payoutDate <= input.payoutDateThrough)) &&
+        (input.statementIds === undefined || input.statementIds.includes(s.statementId)) &&
+        s.payoutBatchId !== null,
     );
     let cancelled = 0;
     let waiting = 0;

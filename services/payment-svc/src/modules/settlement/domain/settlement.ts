@@ -6,7 +6,8 @@ export type Pg = 'TOSS' | 'PORTONE';
 export type PgStore = 'STANDARD' | 'ESCROW';
 export type StatementKind = 'EVENT' | 'PRODUCT';
 export type StatementStatus = 'CALCULATED' | 'NOTIFIED' | 'DISPUTED' | 'CONFIRMED' | 'HELD' | 'SCHEDULED' | 'FAILED' | 'PAID' | 'CARRIED_OVER' | 'SUPERSEDED';
-export type HoldReason = 'KYC' | 'ACCOUNT_CHANGE' | 'BALANCE' | 'ACCOUNT_MISMATCH' | 'SALE_SUSPENDED';
+/** RECALCULATION: 회차 취소·연기 환급의 다시 계산 대기(settlement §4.4 HELD, ADR-0380 결정 4) */
+export type HoldReason = 'KYC' | 'ACCOUNT_CHANGE' | 'BALANCE' | 'ACCOUNT_MISMATCH' | 'SALE_SUSPENDED' | 'RECALCULATION';
 export type DisputeReasonCode = 'GROSS_AMOUNT' | 'REFUND_AMOUNT' | 'COMMISSION' | 'OFFSET' | 'OTHER';
 export type KycStatus = 'PENDING' | 'VERIFIED' | 'REJECTED';
 /** 토스페이먼츠 셀러 상태(settlement §3·§6, ADR-0369 결정 3). PARTIALLY_APPROVED는 KYC 예고 대상이고, 묶을 수 있는 상태는 PARTIALLY_APPROVED·APPROVED다. */
@@ -15,7 +16,16 @@ export const TOSS_SELLER_STATUSES: readonly TossSellerStatus[] = ['PENDING', 'AP
 /** 지급 건 FAILED의 갈래(settlement §12) */
 export type PayoutFailureClass = 'ACCOUNT' | 'TRANSIENT' | 'LIMIT_KYC' | 'UNKNOWN';
 /** 지급 쪽 CS 건 요청 종류(payment 0029 settlement_case_request, ADR-0369 결정 10) */
-export type SettlementCaseKind = 'PAYOUT_ERROR' | 'PAYOUT_FAILED' | 'PAYOUT_DELAYED' | 'SELLER_KYC_REQUIRED' | 'PG_BALANCE_MISMATCH' | 'PORTONE_PAYOUT_EXECUTION' | 'PORTONE_LEDGER_MISMATCH';
+export type SettlementCaseKind =
+  | 'PAYOUT_ERROR'
+  | 'PAYOUT_FAILED'
+  | 'PAYOUT_DELAYED'
+  | 'SELLER_KYC_REQUIRED'
+  | 'PG_BALANCE_MISMATCH'
+  | 'PORTONE_PAYOUT_EXECUTION'
+  | 'PORTONE_LEDGER_MISMATCH'
+  /** 대사 불일치로 뺀 결제가 풀린 뒤의 조정 제안(F-07-8 I-05, ADR-0380 결정 7) */
+  | 'SETTLEMENT_ADJUSTMENT_SUGGESTED';
 /** ops 받기의 거절 까닭(F-07-7 계획 §5.1 (파) (마)). 일시 실패(연결·401·429·5xx)는 세지 않는다 */
 export type OpsRefusal = 'NOT_ACCEPTED' | 'HTTP_400' | 'HTTP_422';
 /** 지급대행 결제사 셋(ADR-0370 결정 1) */
@@ -43,6 +53,17 @@ export interface ReceivableRecord {
   status: ReceivableStatus;
   createdAt: Date;
   updatedAt: Date;
+  // ---- 계산 뒤 환급의 미수금(payment 0033, F-07-8 I-02, docs/data.md partner_receivable). 다른 원인은 비운다 ----
+  /** 원래 정산서 */
+  statementId?: string | null;
+  /** 원래 회차의 고정 수수료율(만분율) */
+  commissionRateBp?: number | null;
+  /** 환불액 */
+  refundAmount?: number | null;
+  /** 뺀 수수료 몫(원 미만 버림) */
+  commissionShare?: number | null;
+  /** 뺀 수수료 몫의 부가세(원 미만 버림). amount = refundAmount − commissionShare − commissionVatShare */
+  commissionVatShare?: number | null;
 }
 
 export interface ReceivableMoveRecord {
@@ -51,7 +72,10 @@ export interface ReceivableMoveRecord {
   receivableId: string;
   statementId: string;
   amount: number;
-  kind?: 'OFFSET' | 'GUARANTEE' | 'COLLECTED' | 'WRITE_OFF' | 'REVERSAL';
+  /** SUPERSEDED: 다시 계산으로 옛 판의 NEGATIVE_STATEMENT 미수금을 남은 금액만큼 닫음(ADR-0380 결정 8) */
+  kind?: 'OFFSET' | 'GUARANTEE' | 'COLLECTED' | 'WRITE_OFF' | 'REVERSAL' | 'SUPERSEDED';
+  /** REVERSAL이 되돌린 이동 기록(payment 0033, 외래 키 없음) */
+  reversesId?: string | null;
   movedAt: Date;
 }
 
@@ -63,6 +87,17 @@ export class SettlementProblem extends Error {
   ) {
     super(title);
     this.name = 'SettlementProblem';
+  }
+}
+
+/**
+ * 지급 묶음의 상계가 읽은 미수금 남은 금액이 트랜잭션 안에서 달라졌다(겹친 다른 묶음·다시 계산이 먼저 썼다). 묶음은 아무것도 쓰지 않았고
+ * 응용 층이 다시 판정한다(F-07-8 F-20·F-25: 같은 미수금을 겹쳐 상계해도 합계가 미수금을 넘지 않고 두 묶음 모두 만들어진다)
+ */
+export class ReceivableBalanceConflict extends SettlementProblem {
+  constructor() {
+    super('payout-batch-statement-conflict', 409, '미수금 잔액이 다른 지급 묶음과 겹쳤습니다');
+    this.name = 'ReceivableBalanceConflict';
   }
 }
 
@@ -79,6 +114,10 @@ export interface PaymentFact {
    * (settlement §4.1 '전액 취소된 결제', F-07-5 리뷰 RV-01, A1-H3의 원래 경우).
    */
   approvedAt?: Date | null;
+  /** 누적 취소 가운데 PEAKET 부담분(payment_cancel.settlement_burden = PEAKET, POL-038 ①②). 정산 환급·미수금에 넣지 않는다(F-07-8 I-02). 없으면 0 */
+  peaketBorneRefund?: number;
+  /** 마지막으로 끝난 결제 취소의 시각(계산 뒤 환급 훑기, F-07-8 I-02). 없으면 null */
+  refundedAt?: Date | null;
 }
 
 /**
@@ -215,6 +254,8 @@ export interface StatementRecord {
   payoutBatchId: string | null;
   /** 적용한 수기 조정의 합계(payment 0027, settlement §4.3). 없으면 0이다. 지급액 = 판매 대금 − 환급 − 수수료 − 부가세 − 상계 + 조정 합계 */
   adjustmentAmount?: number;
+  /** 계산 때 쓴 고정 수수료율(만분율, payment 0033). 0033 이전 행은 비었다. 다시 계산·계산 뒤 환급 미수금이 이 값을 쓴다(F-07-8) */
+  commissionRateBp?: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -234,7 +275,8 @@ export interface DisputeRecord {
   detail: string;
   submittedBy: string;
   submittedAt: Date;
-  result: 'ADJUSTED' | 'DISMISSED' | null;
+  /** SUPERSEDED: 다시 계산으로 옛 판이 바뀌어 닫힘(새 판에 다시 낸다, ADR-0380 결정 6) */
+  result: 'ADJUSTED' | 'DISMISSED' | 'SUPERSEDED' | null;
   resolvedAt: Date | null;
   /** 기각·인정한 사람(관리 계정 ID, payment 0027) */
   resolvedBy?: string | null;
@@ -527,7 +569,34 @@ export interface EventCalculationInput {
   /** 회차 종료 시각. 있으면 지급일은 종료일 +5영업일이다(정본 §4.1·§5.1, A1V-02). */
   eventEndsAt?: string;
   statementId: string;
+  /** 다시 계산의 새 판(F-07-8 I-03, ADR-0380 결정 6). 판(기본 1)·대신한 옛 판·옮겨 올 조정 합·지급일 */
+  revision?: number;
+  supersedesId?: string | null;
+  adjustmentAmount?: number;
+  payoutDate?: string;
 }
+
+/** 결제 하나의 정산 환급(취소된 금액, 승인 뒤 전액 취소는 원금 전액)에서 PEAKET 부담분을 뺀 몫(settlement §4.1·§7, F-07-8 I-02) */
+export function partnerRefundOf(p: PaymentFact): number {
+  const refund = p.status === 'CANCELED' ? p.amount : Math.min(Math.max(0, p.cancelledAmount), p.amount);
+  return Math.max(0, refund - Math.max(0, p.peaketBorneRefund ?? 0));
+}
+
+/**
+ * 계산 뒤 환급의 미수금(settlement §7 '환불 미수금에서 수수료 몫을 뺀다', ADR-0197 결정 2, J-T11).
+ * 수수료 몫 = ⌊환급액 × 수수료율 ÷ 10,000⌋, 부가세 = ⌊수수료 몫 × 10%⌋, 미수금 = 환급액 − 둘(계산과 같은 버림).
+ */
+export function refundReceivableOf(input: { refundAmount: number; commissionRateBp: number }): { commissionShare: number; commissionVatShare: number; amount: number } {
+  const { refundAmount, commissionRateBp } = input;
+  if (!Number.isSafeInteger(refundAmount) || refundAmount < 0) throw new SettlementProblem('invalid-body', 400, '요청 본문이 올바르지 않습니다');
+  if (!Number.isSafeInteger(commissionRateBp) || commissionRateBp < 0 || commissionRateBp > 10_000) throw new SettlementProblem('invalid-body', 400, '요청 본문이 올바르지 않습니다');
+  const commissionShare = Math.floor((refundAmount * commissionRateBp) / 10_000);
+  const commissionVatShare = Math.floor(commissionShare / 10);
+  return { commissionShare, commissionVatShare, amount: refundAmount - commissionShare - commissionVatShare };
+}
+
+/** 계산 뒤 환급 미수금의 근거(부분 유일 partner_receivable_source_ref_uidx로 한 행): refund:{정산서 ID}:{결제 ID}:{누적 환급액} */
+export const refundSourceRef = (statementId: string, paymentId: string, cumulative: number): string => `refund:${statementId}:${paymentId}:${cumulative}`;
 
 /** 회차 정산서 한 판. 판매 대금은 승인 결제의 원금, 환급은 취소된 금액이다(settlement §4.1). */
 export function calculateEventStatement(input: EventCalculationInput): { record: StatementRecord; sources: StatementSource[] } {
@@ -541,13 +610,15 @@ export function calculateEventStatement(input: EventCalculationInput): { record:
   // 판매 대금은 승인된 결제의 원금이고 취소·환불은 빼지 않는다. 환급은 따로 센다: 승인 뒤 전액 취소(CANCELED)는 원금 전액,
   // 그 밖은 취소 금액(원금을 넘지 않음). 같은 돈을 판매 대금과 환급에서 두 번 빼지 않는다(settlement §4.1, F-07-5 리뷰 RV-01)
   const grossOf = (p: PaymentFact): number => p.amount;
-  const refundOf = (p: PaymentFact): number => (p.status === 'CANCELED' ? p.amount : Math.min(Math.max(0, p.cancelledAmount), p.amount));
+  // PEAKET 부담 환급(재량 면제분·시스템 잘못 환불, POL-038 ①②)은 정산 환급에 넣지 않는다(F-07-8 I-02)
+  const refundOf = partnerRefundOf;
   const grossAmount = included.reduce((s, p) => s + grossOf(p), 0);
   const refundAmount = included.reduce((s, p) => s + refundOf(p), 0);
   const commissionAmount = Math.floor((Math.max(0, grossAmount - refundAmount) * input.commissionRateBp) / 10_000);
   const commissionVat = Math.floor(commissionAmount / 10);
   const offsetAmount = 0;
-  const payoutAmount = payoutAmountOf({ grossAmount, refundAmount, commissionAmount, commissionVat, offsetAmount });
+  const adjustmentAmount = input.adjustmentAmount ?? 0;
+  const payoutAmount = payoutAmountOf({ grossAmount, refundAmount, commissionAmount, commissionVat, offsetAmount, adjustmentAmount });
   // 계산 때는 KYC·계좌로 보류하지 않고 지급액 0도 통지한다. 보류는 지급 묶음 때(T7), CARRIED_OVER는 확정 때(T6) 한다(ADR-0368 결정 1·10).
   const status: StatementStatus = 'CALCULATED';
   const holdReason: HoldReason | null = null;
@@ -572,17 +643,19 @@ export function calculateEventStatement(input: EventCalculationInput): { record:
       commissionVat,
       offsetAmount,
       payoutAmount,
-      revision: 1,
-      supersedesId: null,
+      revision: input.revision ?? 1,
+      supersedesId: input.supersedesId ?? null,
       excludedPayments,
       status,
       holdReason,
       // 이의 기한은 통지(같은 트랜잭션) 때 KST 공휴일 달력으로 정한다(business-calendar.ts)
       disputeDueAt: null,
-      payoutDate: dateOnly(addBusinessDays(input.eventEndsAt ? new Date(input.eventEndsAt) : input.now, 5)),
+      payoutDate: input.payoutDate ?? dateOnly(addBusinessDays(input.eventEndsAt ? new Date(input.eventEndsAt) : input.now, 5)),
       payoutBankCode: input.account?.bankCode ?? null,
       payoutAccountLast4: input.account?.accountLast4 ?? null,
       payoutBatchId: null,
+      ...(input.adjustmentAmount !== undefined ? { adjustmentAmount } : {}),
+      commissionRateBp: input.commissionRateBp,
       createdAt: input.now,
       updatedAt: input.now,
     },
@@ -810,3 +883,86 @@ export function receivableClosedEvent(s: StatementRecord, receivable: Pick<Recei
 
 /** 확정 때의 0 이하 미수금 근거(부분 유일 partner_receivable_source_ref_uidx로 한 행) */
 export const negativeStatementSourceRef = (statementId: string): string => `negative-statement:${statementId}`;
+
+// ---- 회차 취소·연기 환급의 정산 다시 계산(F-07-8 I-03, ADR-0380, payment 0033 settlement_recalculation·settlement_refund_scan) ----
+
+export type RecalculationKind = 'CANCEL' | 'POSTPONE';
+
+/** 다시 계산 한 건의 새 판(옛 판 NEGATIVE_STATEMENT 미수금을 닫았으면 그 닫은 금액·돌려받은 금액) */
+export interface RecalculatedStatement {
+  oldStatementId: string;
+  newStatementId: string;
+  revision: number;
+  negativeClosed: { receivableId: string; closedAmount: number; recoveredCredit: number } | null;
+}
+
+/** 보류 열기·완료의 답(내부 HTTP 본문 그대로) */
+export interface EventRecalculationView {
+  requestId: string;
+  eventId: string;
+  kind: RecalculationKind;
+  state: 'PENDING' | 'DONE';
+  held: readonly string[];
+  skipped: readonly string[];
+  retrying: readonly string[];
+  recalculated: readonly RecalculatedStatement[];
+}
+
+/**
+ * 회차 취소 요청 하나의 다시 계산 진행(payment 0033 settlement_recalculation). PENDING 동안 그 회차 정산서는 지급 묶음에서 보류되고 계산 뒤 환급 미수금을 만들지 않는다.
+ * completedAt이 있으면 완료를 받았고, state가 PENDING이면 예약 취소를 다시 할 정산서(retryStatementIds)가 남았다(ADR-0380 결정 4)
+ */
+export interface SettlementRecalculationRecord {
+  requestId: string;
+  eventId: string;
+  kind: RecalculationKind;
+  state: 'PENDING' | 'DONE';
+  confirmedAt: Date;
+  openedAt: Date;
+  completedAt: Date | null;
+  partial: boolean;
+  /** 보류 열기·다시 하기가 HELD(RECALCULATION)로 둔 정산서 */
+  heldStatementIds: string[];
+  /** 지급 건이 진행 중·끝나 다시 계산하지 않은 정산서(환급은 계산 뒤 환급 미수금) */
+  skippedStatementIds: string[];
+  /** 결제사 예약 취소가 실패해 다시 할 정산서 */
+  retryStatementIds: string[];
+  /** 완료 답(DONE일 때) */
+  result: EventRecalculationView | null;
+  updatedAt: Date;
+}
+
+/** 계산 뒤 환급 미수금 훑기의 읽은 자리(payment 0033 settlement_refund_scan). 결제 취소 끝난 시각·결제 ID 차례의 열쇠다 */
+export interface RefundScanRecord {
+  name: 'EVENT_REFUND';
+  readThrough: Date;
+  /** 같은 시각의 결제를 나눠 읽을 때 마지막으로 본 결제 ID(빈 글은 그 시각 처음부터) */
+  readThroughPaymentId?: string;
+  updatedAt?: Date;
+}
+
+/** 계산 뒤 환급 훑기가 읽는 결제 한 건(그 결제의 지금 정산 환급 = PEAKET 부담을 뺀 누적 환급) */
+export interface RefundFact {
+  paymentId: string;
+  eventId: string;
+  pg: Pg;
+  pgStore: PgStore;
+  /** 지금 정산 환급(partnerRefundOf와 같은 식) */
+  partnerRefund: number;
+  refundedAt: Date;
+}
+
+/** 다시 계산이 만든 판인가(그 요청이 열린 뒤 만든 새 판). 보류·다시 계산 대상에서 뺀다 */
+export const isRecalculatedBy = (rec: Pick<SettlementRecalculationRecord, 'openedAt'>, s: Pick<StatementRecord, 'supersedesId' | 'createdAt'>): boolean =>
+  s.supersedesId !== null && s.createdAt.getTime() >= rec.openedAt.getTime();
+
+export const recalculationView = (r: SettlementRecalculationRecord, recalculated: readonly RecalculatedStatement[] = []): EventRecalculationView => ({
+  requestId: r.requestId,
+  eventId: r.eventId,
+  kind: r.kind,
+  state: r.state,
+  held: [...r.heldStatementIds],
+  skipped: [...r.skippedStatementIds],
+  retrying: [...r.retryStatementIds],
+  recalculated: [...recalculated],
+});

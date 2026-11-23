@@ -9,6 +9,7 @@
 // - 포트원 지급·사후 대사(F-07-7 ADR-0370 결정 7·8): 08:00 KST 뒤 하루 한 번 파트너 계좌 대조, 09:00 KST 뒤 첫 tick에 그날 실행 건,
 //   15:00 KST 뒤 첫 tick에 실행 기록 없음 점검, 30분마다 지급 내역 동기화·출금 대사·대사 멈춤 점검, 월말 22:00 뒤 포트원 월 잔액 대사.
 //   감사·경보·CS 건 다시 보내기는 원인을 만든 일 뒤에 같은 tick에서 돈다. 포트원 플랫폼이 조립되지 않았으면 포트원 몫은 하지 않는다.
+// - 회차 취소 정산(F-07-8 ADR-0380): 30분마다 다시 계산 다시 하기·계산 뒤 환급 미수금·대사 미완 결제 풀림의 조정 제안.
 import { type Clock } from '@peaket/platform';
 import type { Settlements } from './settlements.js';
 import { nextBankBusinessDay } from '../domain/payout-failure.js';
@@ -126,6 +127,11 @@ export class SettlementDueWorker {
         () => this.deps.settlements.retryAccountChangeCancellations(),
         () => this.deps.settlements.reconcileRecentBatches(),
         () => this.deps.settlements.checkOverduePayouts(),
+        // F-07-8(ADR-0380): 회차 취소 다시 계산의 다시 하기, 계산 뒤 환급 미수금, 대사 불일치로 뺀 결제가 풀린 뒤의 조정 제안.
+        // 결과는 ticked 본문에 싣지 않는다(지표·저장소로 본다). 의존(결제 원천의 훑기 메서드 등)이 없으면 스스로 건너뛴다
+        () => this.deps.settlements.retryEventRecalculations(),
+        () => this.deps.settlements.recordRefundsAfterCalculation(),
+        () => this.deps.settlements.resolveExcludedPayments(),
       ]) {
         try {
           await job();

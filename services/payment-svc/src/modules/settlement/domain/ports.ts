@@ -12,6 +12,9 @@ import type {
   PortoneLedgerSyncRecord,
   PortonePartnerRecord,
   PortoneTransferRecord,
+  RefundFact,
+  RefundScanRecord,
+  SettlementRecalculationRecord,
   SettlementAlertRequestRecord,
   OpsRefusal,
   PayoutRetryAuditRecord,
@@ -106,6 +109,46 @@ export interface StatementTransition {
   applyAdjustment?: { approvalId: string; appliedAt: Date };
   /** 같은 트랜잭션에 넣을 미수금(근거 부분 유일에 걸리면 넣지 않고 그 미수금 사건도 쓰지 않는다) */
   insertReceivable?: ReceivableRecord;
+  // ---- F-07-8(ADR-0380 결정 4·8): 다시 계산 보류의 같은 트랜잭션 행 ----
+  /** 정산서를 그 묶음에서 뺀다(payout_batch_id 비움, 묶음 합계에서 amount를 빼고 건수 −1). expect.payoutBatchId와 함께 쓴다 */
+  unbatch?: { batchId: string; amount: number };
+  /** 이 정산서의 상계(OFFSET)마다 되돌림(REVERSAL) 한 줄·미수금 남은 금액 되살림·OPEN. 이미 되돌린 이동이면 전이 전체가 실패한다 */
+  reverseOffsets?: readonly ReverseOffset[];
+}
+
+/** 상계 되돌림 한 줄(receivable_movement REVERSAL, reverses_id = 되돌린 OFFSET) */
+export interface ReverseOffset {
+  reversalId: string;
+  /** 되돌린 OFFSET 이동 ID */
+  moveId: string;
+  receivableId: string;
+  amount: number;
+  at: Date;
+}
+
+/**
+ * 다시 계산 한 건(ADR-0380 결정 6·8)을 한 트랜잭션에: 옛 판 조건부 전이(SUPERSEDED, 상계 되돌림 포함) → 옛 판 NEGATIVE_STATEMENT 미수금 행 잠금 →
+ * decide가 잠근 값으로 정한 새 판(원본 목록·통지·감사·사건)과 음수 미수금 닫기 → 옛 판의 열린 이의 SUPERSEDED·적용 전 조정 VOID.
+ * 옛 판 전이가 맞지 않으면(다른 완료가 먼저 썼다) 아무것도 쓰지 않고 false다. 하나라도 실패하면 모두 없다
+ */
+export interface StatementSupersede {
+  old: StatementTransition;
+  /** 옛 판의 음수 미수금 근거(negative-statement:{옛 판 ID}). 있으면 행 잠금으로 읽는다 */
+  negativeSourceRef?: string;
+  /** 열린 이의를 닫고 적용 전 조정을 무효로 하는 시각 */
+  closedAt: Date;
+  decide(snap: { negative?: { receivableId: string; amount: number; remaining: number } }): SupersedePlan;
+}
+
+export interface SupersedePlan {
+  /** CALCULATED로 넣을 새 판 */
+  record: StatementRecord;
+  sources: readonly StatementSource[];
+  notify: StatementNotification;
+  /** 새 판에 더 남길 감사(negative-recovered 근거) */
+  audits: readonly StatementAuditRecord[];
+  /** 옛 판 음수 미수금을 남은 금액만큼 닫는다(이동 SUPERSEDED 한 줄·남은 0·CLOSED). amount 0이면 이동 없이 그대로 */
+  closeNegative?: { receivableId: string; amount: number; moveId: string; at: Date };
 }
 
 /** 계산 = 통지(ADR-0368 결정 1): CALCULATED로 넣은 행을 같은 트랜잭션에서 NOTIFIED로 바꾸고 감사·사건을 쓴다 */
@@ -308,6 +351,11 @@ export interface SettlementSignals {
   portoneExecutionPending?(count: number): void;
   opsIntakeRefused?(target: OpsIntakeTarget): void;
   opsIntakeFailed?(target: OpsIntakeTarget, count: number): void;
+  // ---- F-07-8(계산 뒤 환급 미수금·다시 계산 대기). 선택 메서드다 ----
+  /** settlement_refund_receivable_total(카운터): 새로 만든 계산 뒤 환급 미수금 수 */
+  refundReceivableCreated?(count: number): void;
+  /** settlement_recalculation_pending(게이지): PENDING 다시 계산 요청 수 */
+  recalculationPending?(count: number): void;
 }
 
 /** ops 받기 대상 셋(지표 이름표 target) */
@@ -573,6 +621,31 @@ export interface SettlementStore {
   listStatementsOfPromoter(promoterId: string, pg: Pg, statuses: readonly StatementStatus[]): Promise<StatementRecord[]>;
   /** next_submit_at이 지난 토스 묶음(APPROVED·SUBMITTED·PARTIAL_FAILED) */
   listDueSubmitBatches(now: Date, limit: number): Promise<PayoutBatchRecord[]>;
+  // ---- F-07-8 회차 취소 다시 계산·계산 뒤 환급·대사 미완 결제 풀림(payment 0033, ADR-0380) ----
+  /** 같은 요청 ID가 있으면 넣지 않고 그 행(created=false) */
+  insertRecalculation(record: SettlementRecalculationRecord): Promise<{ created: boolean; record: SettlementRecalculationRecord }>;
+  findRecalculation(requestId: string): Promise<SettlementRecalculationRecord | undefined>;
+  /** 그 회차의 PENDING 다시 계산(가장 먼저 연 것) */
+  findPendingRecalculation(eventId: string): Promise<SettlementRecalculationRecord | undefined>;
+  listPendingRecalculations(limit: number): Promise<SettlementRecalculationRecord[]>;
+  /** 지금 행이 PENDING일 때만 바꾼다(DONE은 덮지 않는다). 바꿨으면 true */
+  saveRecalculation(record: SettlementRecalculationRecord): Promise<boolean>;
+  /** 그 회차의 SUPERSEDED가 아닌 회차 정산서(모든 결제사·상점·파트너) */
+  listLiveEventStatements(eventId: string): Promise<StatementRecord[]>;
+  /** 그 정산서의 상계(OFFSET) 이동 가운데 아직 되돌리지 않은 것 */
+  listOffsetMovements(statementId: string): Promise<ReceivableMoveRecord[]>;
+  /** 그 판의 계산 원본 목록 */
+  listStatementSources(statementId: string): Promise<StatementSource[]>;
+  /** 다시 계산 한 건(StatementSupersede). 옛 판 전이가 맞지 않으면 false */
+  supersedeStatement(s: StatementSupersede): Promise<boolean>;
+  findRefundScan(name: RefundScanRecord['name']): Promise<RefundScanRecord | undefined>;
+  saveRefundScan(record: RefundScanRecord): Promise<void>;
+  /** 그 정산서·결제로 이미 만든 계산 뒤 환급 미수금의 환급액 합 */
+  sumRefundReceivables(statementId: string, paymentId: string): Promise<number>;
+  /** 대사 불일치로 뺀 결제가 아직 풀림 처리되지 않은 살아 있는 회차 정산서 */
+  listStatementsWithOpenExclusions(limit: number): Promise<StatementRecord[]>;
+  /** 뺀 결제 항목에 풀림 표시를 더하고(지금 그 항목이 있을 때만) 조정 제안 CS 건 요청을 한 트랜잭션에 쓴다. 표시를 바꿨으면 true */
+  resolveExcludedPayment(o: { statementId: string; entry: string; resolvedEntry: string; caseRequest: SettlementCaseRequestRecord; at: Date }): Promise<boolean>;
   /** 지급일 다음 은행 영업일 12:00 KST가 지난 끝나지 않은 토스 지급 건(결제사 지급 ID가 있는 것) */
   listOverduePayouts(now: Date, limit: number): Promise<PayoutRecord[]>;
 }
@@ -606,6 +679,11 @@ export interface EventCommissionRateSource {
 export interface SettlementPaymentSource {
   /** 회차·결제사·결제 상점 결제 원장. 입금 오류 되돌림(FAILED·DEPOSIT_CANCELED)은 뺀다. */
   listEventPayments(eventId: string, pg: Pg, pgStore: PgStore): Promise<PaymentFact[]>;
+  /**
+   * 끝난 결제 취소가 있는 결제를 (마지막 취소 끝난 시각, 결제 ID) 차례로 그 열쇠 뒤부터(F-07-8 I-02 계산 뒤 환급 훑기).
+   * 선택 메서드: 없으면 계산 뒤 환급 미수금을 만들지 않는다
+   */
+  listRefundsAfter?(after: { at: Date; paymentId: string }, limit: number): Promise<RefundFact[]>;
 }
 
 export interface PayoutSubmitInput {

@@ -6,7 +6,8 @@ import { type AnyPgColumn, bigint, boolean, check, date, index, integer, jsonb, 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 const amount = (name: string) => bigint(name, { mode: 'number' });
 const STATEMENT_STATUS = sql.raw("'CALCULATED', 'NOTIFIED', 'DISPUTED', 'CONFIRMED', 'HELD', 'SCHEDULED', 'FAILED', 'PAID', 'CARRIED_OVER', 'SUPERSEDED'");
-const HOLD_REASON = sql.raw("'KYC', 'ACCOUNT_CHANGE', 'BALANCE', 'ACCOUNT_MISMATCH', 'SALE_SUSPENDED'");
+// RECALCULATION: 회차 취소·연기 환급의 다시 계산 대기(0033, ADR-0380 결정 4)
+const HOLD_REASON = sql.raw("'KYC', 'ACCOUNT_CHANGE', 'BALANCE', 'ACCOUNT_MISMATCH', 'SALE_SUSPENDED', 'RECALCULATION'");
 const PG = sql.raw("'TOSS', 'PORTONE'");
 const PG_STORE = sql.raw("'STANDARD', 'ESCROW'");
 
@@ -39,10 +40,13 @@ export const settlementStatement = pgTable(
     payoutBatchId: uuid('payout_batch_id').references(() => payoutBatch.id),
     // 적용한 수기 조정의 합계(0027, settlement §4.3). 지급액 = 판매 대금 − 환급 − 수수료 − 부가세 − 상계 + 조정 합계
     adjustmentAmount: amount('adjustment_amount').notNull().default(0),
+    // 계산 때 쓴 고정 수수료율(만분율, 0033). 0033 이전 행은 null. 다시 계산·계산 뒤 환급 미수금이 쓴다(F-07-8, ADR-0380 결정 5·6)
+    commissionRateBp: integer('commission_rate_bp'),
     createdAt: at('created_at').notNull(),
     updatedAt: at('updated_at').notNull(),
   },
   (t) => [
+    check('settlement_statement_commission_rate_check', sql`${t.commissionRateBp} is null or ${t.commissionRateBp} between 0 and 10000`),
     check('settlement_statement_kind_check', sql`${t.kind} in ('EVENT', 'PRODUCT')`),
     check('settlement_statement_pg_check', sql`${t.pg} in (${PG})`),
     check('settlement_statement_pg_store_check', sql`${t.pgStore} in (${PG_STORE})`),
@@ -120,7 +124,8 @@ export const statementDispute = pgTable(
   },
   (t) => [
     check('statement_dispute_reason_check', sql`${t.reasonCode} in ('GROSS_AMOUNT', 'REFUND_AMOUNT', 'COMMISSION', 'OFFSET', 'OTHER')`),
-    check('statement_dispute_result_check', sql`${t.result} is null or ${t.result} in ('ADJUSTED', 'DISMISSED')`),
+    // SUPERSEDED: 다시 계산으로 옛 판이 바뀌어 닫힘(0033, ADR-0380 결정 6)
+    check('statement_dispute_result_check', sql`${t.result} is null or ${t.result} in ('ADJUSTED', 'DISMISSED', 'SUPERSEDED')`),
     check('statement_dispute_resolution_note_check', sql`${t.resolutionNote} is null or char_length(${t.resolutionNote}) between 1 and 2000`),
     index('statement_dispute_statement_idx').on(t.statementId, t.submittedAt),
     index('statement_dispute_case_pending_idx').on(t.submittedAt).where(sql`${t.caseRequestedAt} is null and ${t.result} is null`),
@@ -459,11 +464,14 @@ export const receivableMovement = pgTable(
     amount: amount('amount').notNull(),
     kind: text('kind').notNull().default('OFFSET'),
     movedAt: at('moved_at').notNull(),
+    // REVERSAL이 되돌린 이동 기록(0033, docs/data.md receivable_movement). 외래 키는 걸지 않는다(F-07-8 U-R5)
+    reversesId: uuid('reverses_id'),
   },
   (t) => [
     index('receivable_movement_receivable_idx').on(t.receivableId, t.movedAt),
     check('receivable_movement_amount_check', sql`${t.amount} > 0`),
-    check('receivable_movement_kind_check', sql`${t.kind} in ('OFFSET', 'GUARANTEE', 'COLLECTED', 'WRITE_OFF', 'REVERSAL')`),
+    // SUPERSEDED: 다시 계산으로 옛 판의 NEGATIVE_STATEMENT 미수금을 남은 금액만큼 닫음(0033, ADR-0380 결정 8). 제약 이름은 그대로다(PRF180 M3 ⑦)
+    check('receivable_movement_kind_check', sql`${t.kind} in ('OFFSET', 'GUARANTEE', 'COLLECTED', 'WRITE_OFF', 'REVERSAL', 'SUPERSEDED')`),
   ],
 );
 
@@ -566,7 +574,11 @@ export const settlementCaseRequest = pgTable(
     lastRefusal: text('last_refusal'),
   },
   (t) => [
-    check('settlement_case_request_kind_check', sql`${t.kind} in ('PAYOUT_ERROR', 'PAYOUT_FAILED', 'PAYOUT_DELAYED', 'SELLER_KYC_REQUIRED', 'PG_BALANCE_MISMATCH', 'PORTONE_PAYOUT_EXECUTION', 'PORTONE_LEDGER_MISMATCH')`),
+    // SETTLEMENT_ADJUSTMENT_SUGGESTED: 대사 불일치로 뺀 결제가 풀린 뒤의 조정 제안(0033, ADR-0380 결정 7)
+    check(
+      'settlement_case_request_kind_check',
+      sql`${t.kind} in ('PAYOUT_ERROR', 'PAYOUT_FAILED', 'PAYOUT_DELAYED', 'SELLER_KYC_REQUIRED', 'PG_BALANCE_MISMATCH', 'PORTONE_PAYOUT_EXECUTION', 'PORTONE_LEDGER_MISMATCH', 'SETTLEMENT_ADJUSTMENT_SUGGESTED')`,
+    ),
     check('settlement_case_request_detail_check', sql`${t.detail} is null or char_length(${t.detail}) between 1 and 2000`),
     check('settlement_case_request_refused_count_check', sql`${t.refusedCount} >= 0`),
     check('settlement_case_request_last_refusal_check', sql`${t.lastRefusal} is null or ${t.lastRefusal} in ('NOT_ACCEPTED', 'HTTP_400', 'HTTP_422')`),
@@ -605,4 +617,46 @@ export const pgBalanceReconciliation = pgTable(
     uniqueIndex('pg_balance_reconciliation_batch_uidx').on(t.batchId).where(sql`${t.kind} = 'BATCH'`),
     index('pg_balance_reconciliation_last_idx').on(t.pg, t.pgStore, t.cutoffAt),
   ],
+);
+
+/**
+ * 회차 취소·연기 환급의 다시 계산 진행(0033, docs/data.md settlement_recalculation, ADR-0380). 요청 ID가 멱등 키다.
+ * PENDING 동안 그 회차 정산서는 지급 묶음에서 HELD(RECALCULATION)이고 계산 뒤 환급 미수금을 만들지 않는다
+ */
+export const settlementRecalculation = pgTable(
+  'settlement_recalculation',
+  {
+    requestId: uuid('request_id').primaryKey(),
+    eventId: uuid('event_id').notNull(),
+    kind: text('kind').notNull(),
+    state: text('state').notNull(),
+    confirmedAt: at('confirmed_at').notNull(),
+    openedAt: at('opened_at').notNull(),
+    completedAt: at('completed_at'),
+    partial: boolean('partial').notNull().default(false),
+    // 보류 열기·다시 하기가 HELD(RECALCULATION)로 둔 정산서(같은 요청 ID를 다시 열 때 같은 답을 주려고 남긴다)
+    heldStatementIds: jsonb('held_statement_ids').$type<string[]>().notNull().default([]),
+    skippedStatementIds: jsonb('skipped_statement_ids').$type<string[]>().notNull().default([]),
+    retryStatementIds: jsonb('retry_statement_ids').$type<string[]>().notNull().default([]),
+    result: jsonb('result'),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [
+    check('settlement_recalculation_kind_check', sql`${t.kind} in ('CANCEL', 'POSTPONE')`),
+    check('settlement_recalculation_state_check', sql`${t.state} in ('PENDING', 'DONE')`),
+    index('settlement_recalculation_pending_idx').on(t.eventId).where(sql`${t.state} = 'PENDING'`),
+  ],
+);
+
+/** 계산 뒤 환급 미수금 훑기의 읽은 자리(0033, docs/data.md settlement_refund_scan, ADR-0380 결정 5). (끝난 시각, 결제 ID) 열쇠다 */
+export const settlementRefundScan = pgTable(
+  'settlement_refund_scan',
+  {
+    name: text('name').primaryKey(),
+    readThrough: at('read_through').notNull(),
+    // 같은 시각의 결제를 나눠 읽을 때 마지막으로 본 결제 ID(빈 글은 그 시각 처음부터)
+    readThroughPaymentId: text('read_through_payment_id').notNull().default(''),
+    updatedAt: at('updated_at').notNull(),
+  },
+  (t) => [check('settlement_refund_scan_name_check', sql`${t.name} in ('EVENT_REFUND')`)],
 );

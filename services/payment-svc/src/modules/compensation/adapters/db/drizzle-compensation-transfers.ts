@@ -4,7 +4,7 @@
 // 한 쪽만 선점하고 포트를 부른다. 포트가 오래 걸려 죽은 선점(포트 호출 전에 프로세스가 죽음)은 30초 [가정] 뒤 넘겨받는다.
 import { and, eq, isNull, lt, sql } from 'drizzle-orm';
 import { type Clock, type Database, uuidv7 } from '@peaket/platform';
-import type { CompensationTransferRecord, CompensationTransferStatus, CompensationTransferStore } from '../../domain/ports.js';
+import type { CompensationTransferRecord, CompensationTransferStatus, CompensationTransferStore, RequestedCompensationTransfer } from '../../domain/ports.js';
 import { compensationTransfer } from './schema.js';
 
 export const COMPENSATION_TRANSFER_STATEMENT_TIMEOUT_MS = 400;
@@ -141,6 +141,32 @@ export class DrizzleCompensationTransfers implements CompensationTransferStore {
       .set({ receivableId, updatedAt: new Date(this.o.clock.now()) })
       .where(and(eq(compensationTransfer.compensationId, compensationId), isNull(compensationTransfer.receivableId)));
     return this.#required(compensationId);
+  }
+
+  /** 지급대행이 접수한 REQUESTED 송금(선점 행·빈 ID 뺌). 0033의 부분 인덱스(status = REQUESTED)를 쓴다 */
+  async listRequested(limit: number): Promise<RequestedCompensationTransfer[]> {
+    const rows = await this.o.database.db
+      .select()
+      .from(compensationTransfer)
+      .where(and(sql`${compensationTransfer.status} = 'REQUESTED'`, sql`${compensationTransfer.transferId} not like ${`${CLAIM_PREFIX}%`}`, sql`${compensationTransfer.transferId} <> ''`))
+      .orderBy(compensationTransfer.createdAt, compensationTransfer.id)
+      .limit(limit);
+    return rows.map((r) => ({ ...recordOf(r), promoterId: r.promoterId, ...(r.eventId === null ? {} : { eventId: r.eventId }) }));
+  }
+
+  /** REQUESTED일 때만 결과를 쓴다(조건부 갱신, 겹친 두 파드는 하나만 이긴다) */
+  async settleRequested(compensationId: string, input: { status: 'PAID' | 'FAILED'; failureReason?: string; receivableId?: string }): Promise<boolean> {
+    const rows = await this.o.database.db
+      .update(compensationTransfer)
+      .set({
+        status: input.status,
+        ...(input.failureReason === undefined ? {} : { failureReason: input.failureReason }),
+        ...(input.receivableId === undefined ? {} : { receivableId: input.receivableId }),
+        updatedAt: new Date(this.o.clock.now()),
+      })
+      .where(and(eq(compensationTransfer.compensationId, compensationId), eq(compensationTransfer.status, 'REQUESTED'), sql`${compensationTransfer.transferId} not like ${`${CLAIM_PREFIX}%`}`))
+      .returning({ id: compensationTransfer.id });
+    return rows.length > 0;
   }
 
   async #required(compensationId: string): Promise<CompensationTransferRecord> {

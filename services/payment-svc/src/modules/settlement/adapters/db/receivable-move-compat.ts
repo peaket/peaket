@@ -11,4 +11,6 @@ export const receivableMoveCompat = pgTable('receivable_move', {
   amount: bigint('amount', { mode: 'number' }).notNull(),
   kind: text('kind').notNull().default('OFFSET'),
   movedAt: timestamp('moved_at', { withTimezone: true, mode: 'date' }).notNull(),
+  // 0033이 뷰 끝에 더한 칸(REVERSAL이 되돌린 이동 기록)
+  reversesId: uuid('reverses_id'),
 });

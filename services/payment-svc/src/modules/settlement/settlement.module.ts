@@ -44,6 +44,7 @@ import {
 } from './domain/ports.js';
 import { PartnerSettlementController } from './inbound/partner-settlement.controller.js';
 import { InternalSettlementController } from './inbound/internal-settlement.controller.js';
+import { InternalRecalculationController } from './inbound/internal-recalculation.controller.js';
 
 export interface SettlementModuleDeps {
   readonly store: SettlementStore;
@@ -168,6 +169,6 @@ export class SettlementModule {
         ],
       },
     ];
-    return { module: SettlementModule, controllers: [PartnerSettlementController, InternalSettlementController], providers };
+    return { module: SettlementModule, controllers: [PartnerSettlementController, InternalSettlementController, InternalRecalculationController], providers };
   }
 }

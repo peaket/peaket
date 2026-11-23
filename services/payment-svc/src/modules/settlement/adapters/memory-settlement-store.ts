@@ -12,11 +12,13 @@ import type {
   StatementNotification,
   StatementPage,
   SettlementStore,
+  StatementSupersede,
   StatementTransition,
 } from '../domain/ports.js';
 import type { AdjustmentRecord } from '../domain/adjustment.js';
 import { nextBankBusinessDay } from '../domain/payout-failure.js';
 import {
+  ReceivableBalanceConflict,
   SettlementProblem,
   TRADE_SETTLEMENTS_TOPIC,
   type DisputeRecord,
@@ -41,6 +43,8 @@ import {
   type PgStore,
   type ReceivableMoveRecord,
   type ReceivableRecord,
+  type RefundScanRecord,
+  type SettlementRecalculationRecord,
   type SettlementCaseRequestRecord,
   type SettlementEventValue,
   type StatementAuditRecord,
@@ -61,6 +65,10 @@ interface TransitionPlan {
   receivables: ReceivableRecord[];
   audits: StatementAuditRecord[];
   events: SettlementEventValue[];
+  /** F-07-8: 묶음 빼기·상계 되돌림이 바꾼 묶음·미수금과 덧붙일 이동 */
+  batches: Map<string, PayoutBatchRecord>;
+  receivableUpdates: Map<string, ReceivableRecord>;
+  moves: ReceivableMoveRecord[];
 }
 
 const cursorOf = (s: StatementRecord): string => Buffer.from(`${s.createdAt.getTime()}:${s.statementId}`).toString('base64url');
@@ -118,6 +126,11 @@ export class MemorySettlementStore implements SettlementStore {
   readonly ledgerSyncs = new Map<string, PortoneLedgerSyncRecord>();
   /** settlement_alert_request(키 사건 키) */
   readonly alertRequests = new Map<string, SettlementAlertRequestRecord>();
+  // ---- F-07-8(payment 0033, ADR-0380) ----
+  /** settlement_recalculation(키 요청 ID) */
+  readonly recalculations = new Map<string, SettlementRecalculationRecord>();
+  /** settlement_refund_scan(키 이름) */
+  readonly refundScans = new Map<string, RefundScanRecord>();
 
   #emit(events: readonly SettlementEventValue[]): void {
     for (const e of events) this.outbox.push({ topic: TRADE_SETTLEMENTS_TOPIC, key: e.promoterId, value: e });
@@ -131,6 +144,9 @@ export class MemorySettlementStore implements SettlementStore {
     const receivables: ReceivableRecord[] = [];
     const audits: StatementAuditRecord[] = [];
     const events: SettlementEventValue[] = [];
+    const batches = new Map<string, PayoutBatchRecord>();
+    const receivableUpdates = new Map<string, ReceivableRecord>();
+    const moves: ReceivableMoveRecord[] = [];
     for (const t of ts) {
       const s = statements.get(t.statementId) ?? this.statements.get(t.statementId);
       const e = t.expect;
@@ -142,7 +158,8 @@ export class MemorySettlementStore implements SettlementStore {
         !(e?.adjustmentAmount !== undefined && (s.adjustmentAmount ?? 0) !== e.adjustmentAmount) &&
         !(e?.offsetAmount !== undefined && s.offsetAmount !== e.offsetAmount) &&
         !(e?.unbatched && s.payoutBatchId !== null) &&
-        !(e?.payoutBatchId !== undefined && s.payoutBatchId !== e.payoutBatchId);
+        !(e?.payoutBatchId !== undefined && s.payoutBatchId !== e.payoutBatchId) &&
+        !(t.unbatch && s.payoutBatchId !== t.unbatch.batchId);
       if (!matches || s === undefined) {
         if (t.optional) continue;
         return undefined;
@@ -154,6 +171,24 @@ export class MemorySettlementStore implements SettlementStore {
       if (t.set?.payoutAmount !== undefined) next.payoutAmount = t.set.payoutAmount;
       if (t.set?.offsetAmount !== undefined) next.offsetAmount = t.set.offsetAmount;
       if (t.set?.payoutDate !== undefined) next.payoutDate = t.set.payoutDate;
+      if (t.unbatch) {
+        // 묶음 빼기(F-07-8): 정산서 묶음 칸을 비우고 묶음 합계·건수에서 뺀다
+        next.payoutBatchId = null;
+        const b = batches.get(t.unbatch.batchId) ?? this.batches.get(t.unbatch.batchId);
+        if (!b) return undefined;
+        batches.set(b.batchId, { ...b, totalAmount: b.totalAmount - t.unbatch.amount, statementCount: b.statementCount - 1, updatedAt: t.updatedAt });
+      }
+      for (const r of t.reverseOffsets ?? []) {
+        // 상계 되돌림(F-07-8): 되돌리지 않은 그 정산서의 OFFSET이어야 하고, 미수금 남은 금액을 되살린다
+        const all = [...this.receivableMoves, ...moves];
+        const offset = all.find((m) => m.moveId === r.moveId);
+        if (!offset || (offset.kind ?? 'OFFSET') !== 'OFFSET' || offset.statementId !== t.statementId || offset.receivableId !== r.receivableId || offset.amount !== r.amount) return undefined;
+        if (all.some((m) => m.kind === 'REVERSAL' && m.reversesId === r.moveId)) return undefined;
+        const current = receivableUpdates.get(r.receivableId) ?? this.receivables.get(r.receivableId);
+        if (!current || current.remaining + r.amount > current.amount) return undefined;
+        receivableUpdates.set(r.receivableId, { ...current, remaining: current.remaining + r.amount, status: 'OPEN', updatedAt: r.at });
+        moves.push({ moveId: r.reversalId, receivableId: r.receivableId, statementId: t.statementId, amount: r.amount, kind: 'REVERSAL', reversesId: r.moveId, movedAt: r.at });
+      }
       statements.set(t.statementId, next);
       if (t.insertDispute) disputes.set(t.insertDispute.disputeId, { ...t.insertDispute, result: null, resolvedAt: null });
       if (t.resolveDispute) {
@@ -176,7 +211,7 @@ export class MemorySettlementStore implements SettlementStore {
       audits.push(...t.audits);
       events.push(...t.events.filter((ev) => receivableOpened || ev.type !== 'RECEIVABLE_OPENED'));
     }
-    return { statements, disputes, adjustments, receivables, audits, events };
+    return { statements, disputes, adjustments, receivables, audits, events, batches, receivableUpdates, moves };
   }
 
   #commitTransitions(plan: TransitionPlan): void {
@@ -184,6 +219,9 @@ export class MemorySettlementStore implements SettlementStore {
     for (const [id, d] of plan.disputes) this.disputes.set(id, d);
     for (const [id, a] of plan.adjustments) this.adjustments.set(id, a);
     for (const r of plan.receivables) this.receivables.set(r.receivableId, r);
+    for (const [id, b] of plan.batches) this.batches.set(id, b);
+    for (const [id, r] of plan.receivableUpdates) this.receivables.set(id, r);
+    this.receivableMoves.push(...plan.moves);
     this.statementAudits.push(...plan.audits);
     this.#emit(plan.events);
   }
@@ -430,7 +468,7 @@ export class MemorySettlementStore implements SettlementStore {
       const r = this.receivables.get(u.receivableId);
       const moved = input.receivableMoves.filter((m) => m.receivableId === u.receivableId).reduce((sum, m) => sum + m.amount, 0);
       if (!r) throw new SettlementProblem('payout-batch-statement-conflict', 409, '미수금을 찾지 못했습니다');
-      if (r.remaining !== u.remaining + moved) throw new SettlementProblem('payout-batch-statement-conflict', 409, '미수금 잔액이 다른 지급 묶음과 겹쳤습니다');
+      if (r.remaining !== u.remaining + moved) throw new ReceivableBalanceConflict();
     }
     const updated = new Map(input.statementUpdates.map((u) => [u.statementId, u]));
     for (const id of input.statementIds) {
@@ -564,6 +602,116 @@ export class MemorySettlementStore implements SettlementStore {
   }
   async findReceivableBySourceRef(sourceRef: string) {
     return [...this.receivables.values()].find((r) => r.sourceRef === sourceRef);
+  }
+
+  // ---- F-07-8 회차 취소 다시 계산·계산 뒤 환급·대사 미완 결제 풀림(payment 0033, ADR-0380). Drizzle과 같은 뜻 ----
+
+  /** 새 판이 같은 회차·결제사·상점·파트너의 살아 있는 판과 겹치는가(회차 부분 유일과 같은 답). except는 이 트랜잭션에서 SUPERSEDED가 될 옛 판 */
+  #liveEventConflict(record: StatementRecord, except: string): boolean {
+    return [...this.statements.values()].some(
+      (s) =>
+        s.statementId === record.statementId ||
+        (s.statementId !== except && s.status !== 'SUPERSEDED' && s.kind === 'EVENT' && record.kind === 'EVENT' && s.promoterId === record.promoterId && s.eventId === record.eventId && s.pg === record.pg && s.pgStore === record.pgStore),
+    );
+  }
+
+  async supersedeStatement(x: StatementSupersede): Promise<boolean> {
+    // 모두 본 뒤 한꺼번에 쓴다(중간에 await가 없어 겹친 완료가 끼어들지 않는다, Drizzle 트랜잭션과 같은 답)
+    const plan = this.#planTransitions([x.old]);
+    if (!plan) return false;
+    let negative: { receivableId: string; amount: number; remaining: number } | undefined;
+    if (x.negativeSourceRef) {
+      const r = [...this.receivables.values()].find((v) => v.sourceRef === x.negativeSourceRef);
+      const cur = r ? (plan.receivableUpdates.get(r.receivableId) ?? r) : undefined;
+      if (cur) negative = { receivableId: cur.receivableId, amount: cur.amount, remaining: cur.remaining };
+    }
+    const d = x.decide(negative ? { negative } : {});
+    if (this.#liveEventConflict(d.record, x.old.statementId)) return false;
+    const close = d.closeNegative;
+    if (close && close.amount > 0) {
+      const cur = plan.receivableUpdates.get(close.receivableId) ?? this.receivables.get(close.receivableId);
+      if (!cur || cur.remaining !== close.amount) return false;
+    }
+    this.#commitTransitions(plan);
+    for (const [id, disp] of this.disputes) if (disp.statementId === x.old.statementId && disp.result === null) this.disputes.set(id, { ...disp, result: 'SUPERSEDED', resolvedAt: x.closedAt });
+    for (const [id, a] of this.adjustments) if (a.statementId === x.old.statementId && a.status === 'PENDING') this.adjustments.set(id, { ...a, status: 'VOID' });
+    this.statements.set(d.record.statementId, {
+      ...d.record,
+      status: 'NOTIFIED',
+      disputeDueAt: d.notify.disputeDueAt,
+      updatedAt: d.notify.audit.createdAt,
+      adjustmentAmount: d.record.adjustmentAmount ?? 0,
+      excludedPayments: [...d.record.excludedPayments],
+    });
+    this.sources.set(d.record.statementId, d.sources.map((v) => ({ ...v })));
+    this.statementAudits.push(d.notify.audit, ...d.audits);
+    if (close && close.amount > 0) {
+      const cur = this.receivables.get(close.receivableId)!;
+      this.receivableMoves.push({ moveId: close.moveId, receivableId: close.receivableId, statementId: x.old.statementId, amount: close.amount, kind: 'SUPERSEDED', movedAt: close.at });
+      this.receivables.set(close.receivableId, { ...cur, remaining: 0, status: 'CLOSED', updatedAt: close.at });
+    }
+    this.#emit([d.notify.event]);
+    return true;
+  }
+
+  async insertRecalculation(record: SettlementRecalculationRecord) {
+    const existing = this.recalculations.get(record.requestId);
+    if (existing) return { created: false, record: existing };
+    this.recalculations.set(record.requestId, { ...record });
+    return { created: true, record };
+  }
+  async findRecalculation(requestId: string) {
+    return this.recalculations.get(requestId);
+  }
+  async findPendingRecalculation(eventId: string) {
+    return [...this.recalculations.values()].filter((r) => r.eventId === eventId && r.state === 'PENDING').sort((a, b) => a.openedAt.getTime() - b.openedAt.getTime())[0];
+  }
+  async listPendingRecalculations(limit: number) {
+    return [...this.recalculations.values()]
+      .filter((r) => r.state === 'PENDING')
+      .sort((a, b) => a.openedAt.getTime() - b.openedAt.getTime() || a.requestId.localeCompare(b.requestId))
+      .slice(0, limit);
+  }
+  async saveRecalculation(record: SettlementRecalculationRecord) {
+    const current = this.recalculations.get(record.requestId);
+    if (!current || current.state !== 'PENDING') return false;
+    this.recalculations.set(record.requestId, { ...record, heldStatementIds: [...record.heldStatementIds], skippedStatementIds: [...record.skippedStatementIds], retryStatementIds: [...record.retryStatementIds] });
+    return true;
+  }
+  async listLiveEventStatements(eventId: string) {
+    return [...this.statements.values()].filter((s) => s.kind === 'EVENT' && s.eventId === eventId && s.status !== 'SUPERSEDED').sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.statementId.localeCompare(b.statementId));
+  }
+  async listOffsetMovements(statementId: string) {
+    const reversed = new Set(this.receivableMoves.filter((m) => m.kind === 'REVERSAL' && m.reversesId).map((m) => m.reversesId!));
+    return this.receivableMoves.filter((m) => m.statementId === statementId && (m.kind ?? 'OFFSET') === 'OFFSET' && m.moveId !== undefined && !reversed.has(m.moveId));
+  }
+  async listStatementSources(statementId: string) {
+    return (this.sources.get(statementId) ?? []).map((v) => ({ ...v }));
+  }
+  async findRefundScan(name: RefundScanRecord['name']) {
+    return this.refundScans.get(name);
+  }
+  async saveRefundScan(record: RefundScanRecord) {
+    this.refundScans.set(record.name, { ...record });
+  }
+  async sumRefundReceivables(statementId: string, paymentId: string) {
+    const prefix = `refund:${statementId}:${paymentId}:`;
+    return [...this.receivables.values()]
+      .filter((r) => r.cause === 'REFUND_AFTER_PAYOUT' && r.statementId === statementId && (r.sourceRef ?? '').startsWith(prefix))
+      .reduce((n, r) => n + (r.refundAmount ?? 0), 0);
+  }
+  async listStatementsWithOpenExclusions(limit: number) {
+    return [...this.statements.values()]
+      .filter((s) => s.kind === 'EVENT' && s.status !== 'SUPERSEDED' && s.excludedPayments.some((e) => e.endsWith(':RECONCILIATION_OPEN')))
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.statementId.localeCompare(b.statementId))
+      .slice(0, limit);
+  }
+  async resolveExcludedPayment(o: { statementId: string; entry: string; resolvedEntry: string; caseRequest: SettlementCaseRequestRecord; at: Date }) {
+    const s = this.statements.get(o.statementId);
+    if (!s || !s.excludedPayments.includes(o.entry)) return false;
+    this.statements.set(o.statementId, { ...s, excludedPayments: s.excludedPayments.map((e) => (e === o.entry ? o.resolvedEntry : e)) });
+    if (!this.caseRequests.has(o.caseRequest.eventKey)) this.caseRequests.set(o.caseRequest.eventKey, { ...o.caseRequest } as StoredCaseRequest);
+    return true;
   }
   async saveReceivable(record: ReceivableRecord) {
     this.receivables.set(record.receivableId, record);

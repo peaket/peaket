@@ -17,7 +17,7 @@ import { assertPgAdapters, checkoutAdapterWarnings, loadCheckoutConfig, loadEntr
 import { startGrpcServer } from './grpc-server.js';
 import { paymentControlPlane } from './control/payment-control.js';
 import { SimulatorPaymentGateway } from './modules/payment/adapters/pg/simulator-gateway.js';
-import { CompensationTransfers, DrizzleCompensationTransfers, FakeCompensationTransfer, compensationTransferHandlers, compensationTransferPackage } from './modules/compensation/index.js';
+import { CompensationRefreshLoop, CompensationTransfers, DrizzleCompensationTransfers, FakeCompensationTransfer, compensationTransferHandlers, compensationTransferPackage } from './modules/compensation/index.js';
 import {
   AcceptPaymentCommand,
   AssignEventPg,
@@ -457,6 +457,8 @@ let circuitsRef: PgCircuits | undefined;
     new FakeCompensationTransfer(env),
     new DrizzleCompensationTransfers({ database: batchDatabase, clock: systemClock }),
     { recordCompensationAdvance: (i) => service.app.get(Settlements).recordCompensationAdvance(i) },
+    // 송금 결과 확정 실패(compensation_transfer_refresh_failed): 송금 ID와 까닭 종류만. 계좌·예금주는 싣지 않는다
+    { refreshFailed: ({ transferId, reason }) => service.logger.warn({ kind: 'compensation_transfer_refresh_failed', transferId, reason }, '배상 송금 결과를 확정하지 못했다(다음 바퀴가 다시 본다)') },
   );
   // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 두 제어 토픽을 읽기 시작한다(다 읽어야 /ready 200). 브로커가 없으면 local·ci만 경고로 끄고 그 밖은 여기서 시작에 실패한다.
   // Kafka 클라이언트(네이티브 모듈)는 이 시작 함수를 부를 때 싣는다(시작 파일을 읽기만 하는 곳은 싣지 않는다)
@@ -561,9 +563,16 @@ let circuitsRef: PgCircuits | undefined;
         onError: (err) => service.logger.error({ kind: 'settlement-payout-submit-failed', code: safeErrorCode(err) }, '토스 지급 전송 일꾼 실패'),
       })
     : undefined;
-  if (settlementDueWorker || payoutSubmitWorker) settlementDueElector.start();
+  // 배상 송금 결과 확정 바퀴(F-07-8 I-06, transfer-refund §6 '송금 결과 확정'): 같은 리더가 1분 [가정]마다 REQUESTED 송금을 PAID·FAILED로 확정한다
+  const compensationRefreshLoop = new CompensationRefreshLoop({
+    transfers: compensationTransfers,
+    leader: settlementDueElector,
+    onError: (err) => service.logger.error({ kind: 'compensation_transfer_refresh_failed', code: safeErrorCode(err) }, '배상 송금 결과 확정 바퀴 실패'),
+  });
+  settlementDueElector.start();
   settlementDueWorker?.start();
   payoutSubmitWorker?.start();
+  compensationRefreshLoop.start();
 
   let closing: Promise<void> | undefined;
   const shutdown = (): Promise<void> => {
@@ -577,7 +586,7 @@ let circuitsRef: PgCircuits | undefined;
         confirmRunner.stop(),
         unknownResolver.stop(),
         entryPauseJudge.stop().then(() => entryPauseElector.stop()),
-        Promise.all([settlementDueWorker?.stop() ?? Promise.resolve(), payoutSubmitWorker?.stop() ?? Promise.resolve()]).then(() => settlementDueElector.stop()),
+        Promise.all([settlementDueWorker?.stop() ?? Promise.resolve(), payoutSubmitWorker?.stop() ?? Promise.resolve(), compensationRefreshLoop.stop()]).then(() => settlementDueElector.stop()),
       ],
       drain: () => [limitSync!.stop(), channelObserver?.whenIdle() ?? Promise.resolve(), pgAssignmentSettings.stop()],
       closeService: () => service.close(),

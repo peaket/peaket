@@ -154,3 +154,23 @@ export { portonePayoutConfigured, type PortonePayoutConfig } from './domain/payo
 export { PayoutAgencies, type PayoutAgencySyncInput, type PayoutAgencySyncResult } from './application/payout-agencies.js';
 export type { PayoutRegistrationView } from './application/settlements.js';
 export type { PayoutAccountAuditSink, PortonePlatformTransport, SettlementAlertSink } from './domain/ports.js';
+// ---- F-07-8 회차 취소·연기 환급의 정산 다시 계산·계산 뒤 환급 미수금·대사 미완 결제 풀림(ADR-0380) ----
+export {
+  isRecalculatedBy,
+  partnerRefundOf,
+  recalculationView,
+  refundReceivableOf,
+  refundSourceRef,
+  type EventRecalculationView,
+  type RecalculatedStatement,
+  type RecalculationKind,
+  type RefundFact,
+  type RefundScanRecord,
+  type SettlementRecalculationRecord,
+} from './domain/settlement.js';
+export { recalculationActionOf, type RecalculationAction } from './domain/recalculation.js';
+export { EventRecalculations, RECALCULATION_RETRY_LIMIT, type EventRecalculationDeps } from './application/event-recalculation.js';
+export { RefundsAfterCalculation, REFUND_SCAN_LIMIT, type RefundsAfterCalculationDeps } from './application/refunds-after-calculation.js';
+export { ExcludedPaymentResolution, EXCLUDED_RESOLUTION_LIMIT, type ExcludedPaymentResolutionDeps } from './application/excluded-payment-resolution.js';
+export { InternalRecalculationController, InternalToken401Guard } from './inbound/internal-recalculation.controller.js';
+export type { ReverseOffset, StatementSupersede, SupersedePlan } from './domain/ports.js';

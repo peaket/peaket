@@ -147,7 +147,13 @@ export class InternalSettlementController {
   async reconfirm(@Param('statementId') statementId: string, @Body() body: unknown) {
     const b = ReconfirmBody.safeParse(body);
     if (!b.success) bad('재확정 본문이 맞지 않습니다');
-    return this.settlements.reconfirmStatement(statementId, b.data ?? {});
+    try {
+      return await this.settlements.reconfirmStatement(statementId, b.data ?? {});
+    } catch (e) {
+      // 다시 계산 대기(statement-recalculation-pending)는 유스케이스가 이름 그대로 던진다(F-07-8)
+      if (e instanceof SettlementProblem) throw new ProblemError({ type: e.type, status: e.status, title: e.title });
+      throw e;
+    }
   }
 
   // 옛 이의 결과 경로(…/disputes/{disputeId}/resolution)는 없앴다. 이의 인정(ADJUSTED)은 수기 조정 적용으로만 된다(ADR-0368 결정 6)

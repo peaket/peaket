@@ -10,7 +10,9 @@ import type {
   PayoutBatchAtomicInput,
   PayoutWrite,
   PayoutWriteResult,
+  ReverseOffset,
   StatementFilter,
+  StatementSupersede,
   StatementNotification,
   StatementPage,
   SettlementStore,
@@ -18,6 +20,7 @@ import type {
 } from '../../domain/ports.js';
 import type { AdjustmentRecord } from '../../domain/adjustment.js';
 import {
+  ReceivableBalanceConflict,
   SettlementProblem,
   TRADE_SETTLEMENTS_TOPIC,
   type DisputeRecord,
@@ -43,6 +46,9 @@ import {
   type TossSellerStatus,
   type ReceivableMoveRecord,
   type ReceivableRecord,
+  type RefundScanRecord,
+  type SettlementRecalculationRecord,
+  type EventRecalculationView,
   type SettlementEventValue,
   type StatementAuditRecord,
   type StatementRecord,
@@ -64,6 +70,8 @@ import {
   sellerKyc,
   settlementAlertRequest,
   settlementCaseRequest,
+  settlementRecalculation,
+  settlementRefundScan,
   settlementStatement,
   settlementStatementAudit,
   settlementWebhookReceipt,
@@ -74,6 +82,8 @@ import {
 } from './schema.js';
 // 표 이름 바꾸기 확장 단계라 옛 이름(뷰)으로 읽고 쓴다(receivable-move-compat.ts 머리 주석)
 import { receivableMoveCompat } from './receivable-move-compat.js';
+// 0033의 손으로 쓴 미수금 칸(receivable-refund-columns.ts 머리 주석)
+import { partnerReceivableFull } from './receivable-refund-columns.js';
 
 /** 조건이 맞지 않은 전이를 트랜잭션 밖으로 알리는 표시(롤백한 뒤 false로 바꾼다) */
 class TransitionRejected extends Error {
@@ -102,7 +112,7 @@ const adjustmentRecord = (r: typeof statementAdjustment.$inferSelect): Adjustmen
   appliedAt: r.appliedAt,
 });
 
-const receivableRecord = (r: typeof partnerReceivable.$inferSelect): ReceivableRecord => ({
+const receivableRecord = (r: typeof partnerReceivableFull.$inferSelect): ReceivableRecord => ({
   receivableId: r.id,
   promoterId: r.promoterId,
   pg: r.pg as Pg | null,
@@ -113,6 +123,64 @@ const receivableRecord = (r: typeof partnerReceivable.$inferSelect): ReceivableR
   remaining: r.remaining,
   status: r.status as ReceivableRecord['status'],
   createdAt: r.createdAt,
+  updatedAt: r.updatedAt,
+  // 계산 뒤 환급 미수금의 칸(0033). 다른 원인은 비어 있어 싣지 않는다(옛 답 모양 그대로)
+  ...(r.statementId === null ? {} : { statementId: r.statementId }),
+  ...(r.commissionRateBp === null ? {} : { commissionRateBp: r.commissionRateBp }),
+  ...(r.refundAmount === null ? {} : { refundAmount: r.refundAmount }),
+  ...(r.commissionShare === null ? {} : { commissionShare: r.commissionShare }),
+  ...(r.commissionVatShare === null ? {} : { commissionVatShare: r.commissionVatShare }),
+});
+
+/** 미수금 한 행의 넣을 값(0033 칸 포함) */
+const receivableValues = (r: ReceivableRecord) => ({
+  id: r.receivableId,
+  promoterId: r.promoterId,
+  pg: r.pg,
+  cause: r.cause,
+  eventId: r.eventId ?? null,
+  sourceRef: r.sourceRef ?? null,
+  amount: r.amount,
+  remaining: r.remaining,
+  status: r.status,
+  createdAt: r.createdAt,
+  updatedAt: r.updatedAt,
+  statementId: r.statementId ?? null,
+  commissionRateBp: r.commissionRateBp ?? null,
+  refundAmount: r.refundAmount ?? null,
+  commissionShare: r.commissionShare ?? null,
+  commissionVatShare: r.commissionVatShare ?? null,
+});
+
+const recalculationRecord = (r: typeof settlementRecalculation.$inferSelect): SettlementRecalculationRecord => ({
+  requestId: r.requestId,
+  eventId: r.eventId,
+  kind: r.kind as SettlementRecalculationRecord['kind'],
+  state: r.state as SettlementRecalculationRecord['state'],
+  confirmedAt: r.confirmedAt,
+  openedAt: r.openedAt,
+  completedAt: r.completedAt,
+  partial: r.partial,
+  heldStatementIds: r.heldStatementIds ?? [],
+  skippedStatementIds: r.skippedStatementIds ?? [],
+  retryStatementIds: r.retryStatementIds ?? [],
+  result: (r.result as EventRecalculationView | null) ?? null,
+  updatedAt: r.updatedAt,
+});
+
+const recalculationValues = (r: SettlementRecalculationRecord) => ({
+  requestId: r.requestId,
+  eventId: r.eventId,
+  kind: r.kind,
+  state: r.state,
+  confirmedAt: r.confirmedAt,
+  openedAt: r.openedAt,
+  completedAt: r.completedAt,
+  partial: r.partial,
+  heldStatementIds: [...r.heldStatementIds],
+  skippedStatementIds: [...r.skippedStatementIds],
+  retryStatementIds: [...r.retryStatementIds],
+  result: r.result,
   updatedAt: r.updatedAt,
 });
 
@@ -142,8 +210,52 @@ const statementRecord = (r: typeof settlementStatement.$inferSelect): StatementR
   payoutAccountLast4: r.payoutAccountLast4,
   payoutBatchId: r.payoutBatchId,
   adjustmentAmount: r.adjustmentAmount,
+  ...(r.commissionRateBp === null ? {} : { commissionRateBp: r.commissionRateBp }),
   createdAt: r.createdAt,
   updatedAt: r.updatedAt,
+});
+
+/** 정산서 한 행의 넣을 값 */
+const statementValues = (record: StatementRecord) => ({
+  id: record.statementId,
+  promoterId: record.promoterId,
+  kind: record.kind,
+  eventId: record.eventId,
+  pg: record.pg,
+  pgStore: record.pgStore,
+  periodStart: record.periodStart,
+  periodEnd: record.periodEnd,
+  grossAmount: record.grossAmount,
+  refundAmount: record.refundAmount,
+  commissionAmount: record.commissionAmount,
+  commissionVat: record.commissionVat,
+  offsetAmount: record.offsetAmount,
+  payoutAmount: record.payoutAmount,
+  revision: record.revision,
+  supersedesId: record.supersedesId,
+  excludedPayments: record.excludedPayments,
+  status: record.status,
+  holdReason: record.holdReason,
+  disputeDueAt: record.disputeDueAt,
+  payoutDate: record.payoutDate,
+  payoutBankCode: record.payoutBankCode,
+  payoutAccountLast4: record.payoutAccountLast4,
+  payoutBatchId: record.payoutBatchId,
+  adjustmentAmount: record.adjustmentAmount ?? 0,
+  commissionRateBp: record.commissionRateBp ?? null,
+  createdAt: record.createdAt,
+  updatedAt: record.updatedAt,
+});
+
+/** 이동 기록 한 줄(되돌림이면 되돌린 이동 ID까지) */
+const moveRecord = (r: typeof receivableMoveCompat.$inferSelect): ReceivableMoveRecord => ({
+  moveId: r.id,
+  receivableId: r.receivableId,
+  statementId: r.statementId,
+  amount: r.amount,
+  kind: r.kind as ReceivableMoveRecord['kind'],
+  movedAt: r.movedAt,
+  ...(r.reversesId === null ? {} : { reversesId: r.reversesId }),
 });
 
 const disputeRecord = (r: typeof statementDispute.$inferSelect): DisputeRecord => ({
@@ -451,55 +563,30 @@ export class DrizzleSettlementStore implements SettlementStore {
 
   async insertStatement(record: StatementRecord, sources: readonly StatementSource[], notify?: StatementNotification): Promise<boolean> {
     return this.db.transaction(async (tx) => {
-      const inserted = await tx
-        .insert(settlementStatement)
-        .values({
-          id: record.statementId,
-          promoterId: record.promoterId,
-          kind: record.kind,
-          eventId: record.eventId,
-          pg: record.pg,
-          pgStore: record.pgStore,
-          periodStart: record.periodStart,
-          periodEnd: record.periodEnd,
-          grossAmount: record.grossAmount,
-          refundAmount: record.refundAmount,
-          commissionAmount: record.commissionAmount,
-          commissionVat: record.commissionVat,
-          offsetAmount: record.offsetAmount,
-          payoutAmount: record.payoutAmount,
-          revision: record.revision,
-          supersedesId: record.supersedesId,
-          excludedPayments: record.excludedPayments,
-          status: record.status,
-          holdReason: record.holdReason,
-          disputeDueAt: record.disputeDueAt,
-          payoutDate: record.payoutDate,
-          payoutBankCode: record.payoutBankCode,
-          payoutAccountLast4: record.payoutAccountLast4,
-          payoutBatchId: record.payoutBatchId,
-          adjustmentAmount: record.adjustmentAmount ?? 0,
-          createdAt: record.createdAt,
-          updatedAt: record.updatedAt,
-        })
-        .onConflictDoNothing()
-        .returning({ id: settlementStatement.id });
-      if (inserted.length === 0) return false;
-      if (sources.length > 0)
-        await tx.insert(statementSource).values(sources.map((s) => ({ statementId: s.statementId, sourceId: s.sourceId, kind: s.kind, paymentId: s.paymentId, amount: s.amount })));
-      if (notify) {
-        // 계산 = 통지(ADR-0368 결정 1): 같은 트랜잭션에서 CALCULATED → NOTIFIED, 감사 한 줄, 사건은 마지막 문장
-        const notified = await tx
-          .update(settlementStatement)
-          .set({ status: 'NOTIFIED', disputeDueAt: notify.disputeDueAt, updatedAt: notify.audit.createdAt })
-          .where(and(eq(settlementStatement.id, record.statementId), eq(settlementStatement.status, 'CALCULATED')))
-          .returning({ id: settlementStatement.id });
-        if (notified.length === 0) throw new Error('계산한 정산서를 통지 상태로 바꾸지 못했다');
-        await tx.insert(settlementStatementAudit).values(auditValues(notify.audit));
-        await writeOutbox(tx, this.clock, settlementOutbox([notify.event]));
-      }
+      const inserted = await this.#insertStatementIn(tx, record, sources, notify);
+      if (!inserted) return false;
+      if (notify) await writeOutbox(tx, this.clock, settlementOutbox([notify.event]));
       return true;
     });
+  }
+
+  /** 정산서 한 판·원본 목록·(있으면) CALCULATED → NOTIFIED 통지와 감사를 열린 트랜잭션에 쓴다. 부분 유일에 걸리면 false(사건은 부르는 쪽이 쓴다) */
+  async #insertStatementIn(tx: DbTransaction, record: StatementRecord, sources: readonly StatementSource[], notify?: StatementNotification): Promise<boolean> {
+    const inserted = await tx.insert(settlementStatement).values(statementValues(record)).onConflictDoNothing().returning({ id: settlementStatement.id });
+    if (inserted.length === 0) return false;
+    if (sources.length > 0)
+      await tx.insert(statementSource).values(sources.map((x) => ({ statementId: x.statementId, sourceId: x.sourceId, kind: x.kind, paymentId: x.paymentId, amount: x.amount })));
+    if (notify) {
+      // 계산 = 통지(ADR-0368 결정 1): 같은 트랜잭션에서 CALCULATED → NOTIFIED, 감사 한 줄, 사건은 마지막 문장
+      const notified = await tx
+        .update(settlementStatement)
+        .set({ status: 'NOTIFIED', disputeDueAt: notify.disputeDueAt, updatedAt: notify.audit.createdAt })
+        .where(and(eq(settlementStatement.id, record.statementId), eq(settlementStatement.status, 'CALCULATED')))
+        .returning({ id: settlementStatement.id });
+      if (notified.length === 0) throw new Error('계산한 정산서를 통지 상태로 바꾸지 못했다');
+      await tx.insert(settlementStatementAudit).values(auditValues(notify.audit));
+    }
+    return true;
   }
 
   async transitionStatement(t: StatementTransition): Promise<boolean> {
@@ -538,12 +625,27 @@ export class DrizzleSettlementStore implements SettlementStore {
     if (t.set?.payoutAmount !== undefined) set.payoutAmount = t.set.payoutAmount;
     if (t.set?.offsetAmount !== undefined) set.offsetAmount = t.set.offsetAmount;
     if (t.set?.payoutDate !== undefined) set.payoutDate = t.set.payoutDate;
+    // 묶음 빼기(F-07-8 ADR-0380 결정 4): 그 묶음에 붙어 있을 때만 비운다
+    if (t.unbatch) {
+      conditions.push(eq(settlementStatement.payoutBatchId, t.unbatch.batchId));
+      set.payoutBatchId = null;
+    }
     // 조건부 갱신이 정산서 행을 잠근다. 0행이면 다른 전이가 먼저 썼다(optional이면 이 전이만 건너뛴다)
     const updated = await tx.update(settlementStatement).set(set).where(and(...conditions)).returning({ id: settlementStatement.id });
     if (updated.length === 0) {
       if (t.optional) return [];
       throw new TransitionRejected();
     }
+    if (t.unbatch) {
+      const u = t.unbatch;
+      const batched = await tx
+        .update(payoutBatch)
+        .set({ totalAmount: sql`${payoutBatch.totalAmount} - ${u.amount}`, statementCount: sql`${payoutBatch.statementCount} - 1`, updatedAt: t.updatedAt })
+        .where(eq(payoutBatch.id, u.batchId))
+        .returning({ id: payoutBatch.id });
+      if (batched.length === 0) throw new TransitionRejected();
+    }
+    for (const r of t.reverseOffsets ?? []) await this.#reverseOffsetIn(tx, t.statementId, r);
     if (t.insertDispute) {
       const d = t.insertDispute;
       await tx.insert(statementDispute).values({ id: d.disputeId, statementId: d.statementId, reasonCode: d.reasonCode, detail: d.detail, submittedBy: d.submittedBy, submittedAt: d.submittedAt, result: null, resolvedAt: null });
@@ -818,7 +920,7 @@ export class DrizzleSettlementStore implements SettlementStore {
           const moved = input.receivableMoves.filter((m) => m.receivableId === u.receivableId).reduce((sum, m) => sum + m.amount, 0);
           const locked = await tx.execute(sql`select remaining from partner_receivable where id = ${u.receivableId}::uuid for update`);
           const current = Number((locked.rows[0] as { remaining: number | string } | undefined)?.remaining);
-          if (!Number.isSafeInteger(current) || current !== u.remaining + moved) throw new SettlementProblem('payout-batch-statement-conflict', 409, '미수금 잔액이 다른 지급 묶음과 겹쳤습니다');
+          if (!Number.isSafeInteger(current) || current !== u.remaining + moved) throw new ReceivableBalanceConflict();
           await tx.update(partnerReceivable).set({ remaining: u.remaining, status: u.status, updatedAt: u.updatedAt }).where(eq(partnerReceivable.id, u.receivableId));
         }
         if (input.receivableMoves.length > 0) {
@@ -1185,50 +1287,26 @@ export class DrizzleSettlementStore implements SettlementStore {
   }
 
   async insertReceivable(record: ReceivableRecord): Promise<void> {
-    await this.db.db.insert(partnerReceivable).values({
-      id: record.receivableId,
-      promoterId: record.promoterId,
-      pg: record.pg,
-      cause: record.cause,
-      eventId: record.eventId ?? null,
-      sourceRef: record.sourceRef ?? null,
-      amount: record.amount,
-      remaining: record.remaining,
-      status: record.status,
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt,
-    });
+    await this.db.db.insert(partnerReceivableFull).values(receivableValues(record));
   }
 
   async insertReceivableIfAbsent(record: ReceivableRecord): Promise<boolean> {
     const rows = await this.db.db
-      .insert(partnerReceivable)
-      .values({
-        id: record.receivableId,
-        promoterId: record.promoterId,
-        pg: record.pg,
-        cause: record.cause,
-        eventId: record.eventId ?? null,
-        sourceRef: record.sourceRef ?? null,
-        amount: record.amount,
-        remaining: record.remaining,
-        status: record.status,
-        createdAt: record.createdAt,
-        updatedAt: record.updatedAt,
-      })
+      .insert(partnerReceivableFull)
+      .values(receivableValues(record))
       // source_ref 부분 유일(또는 기본 키)에 걸리면 아무것도 쓰지 않는다(0024)
       .onConflictDoNothing()
-      .returning({ id: partnerReceivable.id });
+      .returning({ id: partnerReceivableFull.id });
     return rows.length > 0;
   }
 
   async findReceivableBySourceRef(sourceRef: string): Promise<ReceivableRecord | undefined> {
-    const rows = await this.db.db.select().from(partnerReceivable).where(eq(partnerReceivable.sourceRef, sourceRef)).limit(1);
+    const rows = await this.db.db.select().from(partnerReceivableFull).where(eq(partnerReceivableFull.sourceRef, sourceRef)).limit(1);
     return rows[0] === undefined ? undefined : receivableRecord(rows[0]);
   }
 
   async findReceivable(receivableId: string): Promise<ReceivableRecord | undefined> {
-    const rows = await this.db.db.select().from(partnerReceivable).where(eq(partnerReceivable.id, receivableId)).limit(1);
+    const rows = await this.db.db.select().from(partnerReceivableFull).where(eq(partnerReceivableFull.id, receivableId)).limit(1);
     return rows[0] ? receivableRecord(rows[0]) : undefined;
   }
 
@@ -1302,17 +1380,18 @@ export class DrizzleSettlementStore implements SettlementStore {
       amount: record.amount,
       kind: record.kind ?? 'OFFSET',
       movedAt: record.movedAt,
+      ...(record.reversesId ? { reversesId: record.reversesId } : {}),
     });
   }
 
   async listReceivableMoves(statementId: string): Promise<ReceivableMoveRecord[]> {
     const rows = await this.db.db.select().from(receivableMoveCompat).where(eq(receivableMoveCompat.statementId, statementId));
-    return rows.map((r) => ({ moveId: r.id, receivableId: r.receivableId, statementId: r.statementId, amount: r.amount, kind: r.kind as ReceivableMoveRecord['kind'], movedAt: r.movedAt }));
+    return rows.map(moveRecord);
   }
 
   async listReceivableMovesForReceivable(receivableId: string): Promise<ReceivableMoveRecord[]> {
     const rows = await this.db.db.select().from(receivableMoveCompat).where(eq(receivableMoveCompat.receivableId, receivableId));
-    return rows.map((r) => ({ moveId: r.id, receivableId: r.receivableId, statementId: r.statementId, amount: r.amount, kind: r.kind as ReceivableMoveRecord['kind'], movedAt: r.movedAt }));
+    return rows.map(moveRecord);
   }
 
   async findGuaranteeCollection(idempotencyKey: string): Promise<GuaranteeCollectionRecord | undefined> {
@@ -1899,5 +1978,205 @@ export class DrizzleSettlementStore implements SettlementStore {
       .where(and(eq(settlementStatement.promoterId, promoterId), eq(settlementStatement.pg, pg), inArray(settlementStatement.status, [...statuses])))
       .orderBy(settlementStatement.createdAt, settlementStatement.id);
     return rows.map(statementRecord);
+  }
+
+  // ---- F-07-8 회차 취소 다시 계산·계산 뒤 환급·대사 미완 결제 풀림(payment 0033, ADR-0380) ----
+
+  /**
+   * 상계 되돌림 한 줄(ADR-0380 결정 4·8). 이미 되돌린 OFFSET이면 전이 전체를 롤백한다. 미수금 행을 잠근 채 남은 금액을 되살린다(상계와 같은 잠금 차례:
+   * 정산서 행 → 미수금 행). 정산서 행을 먼저 조건부로 바꿨으므로 같은 정산서를 겹쳐 되돌리는 두 트랜잭션은 줄을 서고 뒤의 것은 조건에서 진다
+   */
+  async #reverseOffsetIn(tx: DbTransaction, statementId: string, r: ReverseOffset): Promise<void> {
+    const done = await tx.execute(sql`select 1 from receivable_move where kind = 'REVERSAL' and reverses_id = ${r.moveId}::uuid limit 1`);
+    if (done.rows.length > 0) throw new TransitionRejected();
+    const offset = await tx.execute(sql`select 1 from receivable_move where id = ${r.moveId}::uuid and kind = 'OFFSET' and statement_id = ${statementId}::uuid and receivable_id = ${r.receivableId}::uuid and amount = ${r.amount}`);
+    if (offset.rows.length === 0) throw new TransitionRejected();
+    const locked = await tx.execute(sql`select amount, remaining from partner_receivable where id = ${r.receivableId}::uuid for update`);
+    const row = locked.rows[0] as { amount: number | string; remaining: number | string } | undefined;
+    if (!row || Number(row.remaining) + r.amount > Number(row.amount)) throw new TransitionRejected();
+    await tx.insert(receivableMoveCompat).values({ id: r.reversalId, receivableId: r.receivableId, statementId, amount: r.amount, kind: 'REVERSAL', movedAt: r.at, reversesId: r.moveId });
+    await tx
+      .update(partnerReceivable)
+      .set({ remaining: sql`${partnerReceivable.remaining} + ${r.amount}`, status: 'OPEN', updatedAt: r.at })
+      .where(eq(partnerReceivable.id, r.receivableId));
+  }
+
+  async supersedeStatement(x: StatementSupersede): Promise<boolean> {
+    try {
+      await this.db.transaction(async (tx) => {
+        // ① 옛 판 조건부 전이가 정산서 행을 잠근다. 겹친 다른 완료는 여기서 줄을 선 뒤 0행이라 진다
+        const events = await this.#transitionIn(tx, x.old);
+        // ② 옛 판 음수 미수금을 행 잠금으로 읽는다(상계 묶음과 같은 잠금. 묶음이 먼저 상계했으면 그 남은 금액을 본다)
+        let negative: { receivableId: string; amount: number; remaining: number } | undefined;
+        if (x.negativeSourceRef) {
+          const locked = await tx.execute(sql`select id, amount, remaining from partner_receivable where source_ref = ${x.negativeSourceRef} for update`);
+          const row = locked.rows[0] as { id: string; amount: number | string; remaining: number | string } | undefined;
+          if (row) negative = { receivableId: row.id, amount: Number(row.amount), remaining: Number(row.remaining) };
+        }
+        const plan = x.decide(negative ? { negative } : {});
+        // ③ 옛 판의 열린 이의는 SUPERSEDED, 적용 전 조정은 VOID(ADR-0380 결정 6)
+        await tx
+          .update(statementDispute)
+          .set({ result: 'SUPERSEDED', resolvedAt: x.closedAt })
+          .where(and(eq(statementDispute.statementId, x.old.statementId), isNull(statementDispute.result)));
+        await tx
+          .update(statementAdjustment)
+          .set({ status: 'VOID' })
+          .where(and(eq(statementAdjustment.statementId, x.old.statementId), eq(statementAdjustment.status, 'PENDING')));
+        // ④ 새 판·원본 목록·통지·감사(옛 판이 SUPERSEDED라 회차 부분 유일에 걸리지 않는다)
+        if (!(await this.#insertStatementIn(tx, plan.record, plan.sources, plan.notify))) throw new TransitionRejected();
+        if (plan.audits.length > 0) await tx.insert(settlementStatementAudit).values(plan.audits.map(auditValues));
+        // ⑤ 옛 판 음수 미수금을 남은 금액만큼 닫는다(이동 SUPERSEDED 한 줄·남은 0·CLOSED)
+        const close = plan.closeNegative;
+        if (close && close.amount > 0) {
+          await tx.insert(receivableMoveCompat).values({ id: close.moveId, receivableId: close.receivableId, statementId: x.old.statementId, amount: close.amount, kind: 'SUPERSEDED', movedAt: close.at });
+          const closed = await tx
+            .update(partnerReceivable)
+            .set({ remaining: 0, status: 'CLOSED', updatedAt: close.at })
+            .where(and(eq(partnerReceivable.id, close.receivableId), eq(partnerReceivable.remaining, close.amount)))
+            .returning({ id: partnerReceivable.id });
+          if (closed.length === 0) throw new TransitionRejected();
+        }
+        // 사건은 트랜잭션의 마지막 문장
+        await writeOutbox(tx, this.clock, settlementOutbox([...events, plan.notify.event]));
+      });
+      return true;
+    } catch (e) {
+      if (e instanceof TransitionRejected) return false;
+      throw e;
+    }
+  }
+
+  async insertRecalculation(record: SettlementRecalculationRecord): Promise<{ created: boolean; record: SettlementRecalculationRecord }> {
+    const rows = await this.db.db.insert(settlementRecalculation).values(recalculationValues(record)).onConflictDoNothing().returning({ requestId: settlementRecalculation.requestId });
+    if (rows.length > 0) return { created: true, record };
+    const existing = await this.findRecalculation(record.requestId);
+    if (!existing) throw new Error('다시 계산 요청을 쓰지 못했다');
+    return { created: false, record: existing };
+  }
+
+  async findRecalculation(requestId: string): Promise<SettlementRecalculationRecord | undefined> {
+    const rows = await this.db.db.select().from(settlementRecalculation).where(eq(settlementRecalculation.requestId, requestId)).limit(1);
+    return rows[0] ? recalculationRecord(rows[0]) : undefined;
+  }
+
+  async findPendingRecalculation(eventId: string): Promise<SettlementRecalculationRecord | undefined> {
+    const rows = await this.db.db
+      .select()
+      .from(settlementRecalculation)
+      .where(and(eq(settlementRecalculation.eventId, eventId), eq(settlementRecalculation.state, 'PENDING')))
+      .orderBy(settlementRecalculation.openedAt, settlementRecalculation.requestId)
+      .limit(1);
+    return rows[0] ? recalculationRecord(rows[0]) : undefined;
+  }
+
+  async listPendingRecalculations(limit: number): Promise<SettlementRecalculationRecord[]> {
+    const rows = await this.db.db
+      .select()
+      .from(settlementRecalculation)
+      .where(eq(settlementRecalculation.state, 'PENDING'))
+      .orderBy(settlementRecalculation.openedAt, settlementRecalculation.requestId)
+      .limit(limit);
+    return rows.map(recalculationRecord);
+  }
+
+  async saveRecalculation(record: SettlementRecalculationRecord): Promise<boolean> {
+    const { requestId: _id, ...values } = recalculationValues(record);
+    void _id;
+    const rows = await this.db.db
+      .update(settlementRecalculation)
+      .set(values)
+      .where(and(eq(settlementRecalculation.requestId, record.requestId), eq(settlementRecalculation.state, 'PENDING')))
+      .returning({ requestId: settlementRecalculation.requestId });
+    return rows.length > 0;
+  }
+
+  async listLiveEventStatements(eventId: string): Promise<StatementRecord[]> {
+    const rows = await this.db.db
+      .select()
+      .from(settlementStatement)
+      .where(and(eq(settlementStatement.kind, 'EVENT'), eq(settlementStatement.eventId, eventId), ne(settlementStatement.status, 'SUPERSEDED')))
+      .orderBy(settlementStatement.createdAt, settlementStatement.id);
+    return rows.map(statementRecord);
+  }
+
+  async listOffsetMovements(statementId: string): Promise<ReceivableMoveRecord[]> {
+    const rows = await this.db.db
+      .select()
+      .from(receivableMoveCompat)
+      .where(
+        and(
+          eq(receivableMoveCompat.statementId, statementId),
+          eq(receivableMoveCompat.kind, 'OFFSET'),
+          sql`not exists (select 1 from receivable_move r where r.kind = 'REVERSAL' and r.reverses_id = ${receivableMoveCompat.id})`,
+        ),
+      )
+      .orderBy(receivableMoveCompat.movedAt, receivableMoveCompat.id);
+    return rows.map(moveRecord);
+  }
+
+  async listStatementSources(statementId: string): Promise<StatementSource[]> {
+    const rows = await this.db.db.select().from(statementSource).where(eq(statementSource.statementId, statementId));
+    return rows.map((r) => ({ statementId: r.statementId, sourceId: r.sourceId, kind: r.kind as StatementSource['kind'], paymentId: r.paymentId, amount: r.amount }));
+  }
+
+  async findRefundScan(name: RefundScanRecord['name']): Promise<RefundScanRecord | undefined> {
+    const rows = await this.db.db.select().from(settlementRefundScan).where(eq(settlementRefundScan.name, name)).limit(1);
+    const r = rows[0];
+    return r ? { name: r.name as RefundScanRecord['name'], readThrough: r.readThrough, readThroughPaymentId: r.readThroughPaymentId, updatedAt: r.updatedAt } : undefined;
+  }
+
+  async saveRefundScan(record: RefundScanRecord): Promise<void> {
+    const values = { readThrough: record.readThrough, readThroughPaymentId: record.readThroughPaymentId ?? '', updatedAt: record.updatedAt ?? record.readThrough };
+    await this.db.db
+      .insert(settlementRefundScan)
+      .values({ name: record.name, ...values })
+      .onConflictDoUpdate({ target: settlementRefundScan.name, set: values });
+  }
+
+  async sumRefundReceivables(statementId: string, paymentId: string): Promise<number> {
+    const rows = await this.db.db
+      .select({ total: sql<string | null>`coalesce(sum(${partnerReceivableFull.refundAmount}), 0)` })
+      .from(partnerReceivableFull)
+      .where(
+        and(
+          eq(partnerReceivableFull.cause, 'REFUND_AFTER_PAYOUT'),
+          eq(partnerReceivableFull.statementId, statementId),
+          sql`${partnerReceivableFull.sourceRef} like ${`refund:${statementId}:${paymentId}:%`}`,
+        ),
+      );
+    return Number(rows[0]?.total ?? 0);
+  }
+
+  async listStatementsWithOpenExclusions(limit: number): Promise<StatementRecord[]> {
+    const rows = await this.db.db
+      .select()
+      .from(settlementStatement)
+      .where(
+        and(
+          eq(settlementStatement.kind, 'EVENT'),
+          ne(settlementStatement.status, 'SUPERSEDED'),
+          sql`exists (select 1 from jsonb_array_elements_text(${settlementStatement.excludedPayments}) e where e like '%:RECONCILIATION_OPEN')`,
+        ),
+      )
+      .orderBy(settlementStatement.createdAt, settlementStatement.id)
+      .limit(limit);
+    return rows.map(statementRecord);
+  }
+
+  async resolveExcludedPayment(o: { statementId: string; entry: string; resolvedEntry: string; caseRequest: SettlementCaseRequestRecord; at: Date }): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      // 그 항목이 아직 있을 때만 풀림 표시로 바꾼다(겹친 두 tick은 하나만 이긴다)
+      const updated = await tx
+        .update(settlementStatement)
+        .set({
+          excludedPayments: sql`(select coalesce(jsonb_agg(case when e = ${o.entry} then ${o.resolvedEntry} else e end), '[]'::jsonb) from jsonb_array_elements_text(${settlementStatement.excludedPayments}) e)`,
+        })
+        .where(and(eq(settlementStatement.id, o.statementId), sql`${settlementStatement.excludedPayments} @> ${JSON.stringify([o.entry])}::jsonb`))
+        .returning({ id: settlementStatement.id });
+      if (updated.length === 0) return false;
+      await tx.insert(settlementCaseRequest).values(caseRequestValues(o.caseRequest)).onConflictDoNothing();
+      return true;
+    });
   }
 }

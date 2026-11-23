@@ -5,7 +5,7 @@
 // 선점은 DB 유일 인덱스라 같은 저장소를 보는 두 파드가 겹쳐도 포트를 부르는 쪽은 하나다(RV-23). 진 쪽은 그 행의 답을 기다린다.
 // 계좌 원문은 저장·응답에 싣지 않는다(POL-014).
 import { randomUUID } from 'node:crypto';
-import type { CompensationReceivables, CompensationTransferPort, CompensationTransferRecord, CompensationTransferRequest, CompensationTransferStore } from '../domain/ports.js';
+import type { CompensationReceivables, CompensationTransferPort, CompensationTransferRecord, CompensationTransferRequest, CompensationTransferStore, RequestedCompensationTransfer } from '../domain/ports.js';
 
 export class CompensationTransferProblem extends Error {
   constructor(
@@ -36,6 +36,8 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 class MemoryCompensationTransferStore implements CompensationTransferStore {
   readonly #rows = new Map<string, CompensationTransferRecord>();
   readonly #byCompensation = new Map<string, string>();
+  /** compensation_id → 상계할 파트너·회차(Drizzle 행의 promoter_id·event_id) */
+  readonly #owners = new Map<string, { promoterId: string; eventId?: string }>();
 
   async findByCompensationId(compensationId: string): Promise<CompensationTransferRecord | undefined> {
     const transferId = this.#byCompensation.get(compensationId);
@@ -62,6 +64,7 @@ class MemoryCompensationTransferStore implements CompensationTransferStore {
     };
     this.#rows.set(row.transferId, row);
     this.#byCompensation.set(record.compensationId, row.transferId);
+    this.#owners.set(record.compensationId, { promoterId: record.promoterId, ...(record.eventId === undefined ? {} : { eventId: record.eventId }) });
     return { record: row, claimed: true };
   }
 
@@ -95,6 +98,40 @@ class MemoryCompensationTransferStore implements CompensationTransferStore {
     this.#rows.set(next.transferId, next);
     return next;
   }
+
+  async listRequested(limit: number): Promise<RequestedCompensationTransfer[]> {
+    return [...this.#rows.values()]
+      .filter((r) => r.status === 'REQUESTED' && !isPendingClaim(r) && r.transferId !== '')
+      .slice(0, limit)
+      .map((r) => ({ ...r, ...(this.#owners.get(r.compensationId) ?? { promoterId: UNKNOWN_PROMOTER }) }));
+  }
+
+  async settleRequested(compensationId: string, input: { status: 'PAID' | 'FAILED'; failureReason?: string; receivableId?: string }): Promise<boolean> {
+    // 확인과 쓰기 사이에 await가 없어 겹친 두 바퀴 가운데 하나만 바꾼다(운영은 조건부 갱신)
+    const existing = this.#rowOf(compensationId);
+    if (existing === undefined || existing.status !== 'REQUESTED' || isPendingClaim(existing)) return false;
+    const next: CompensationTransferRecord = {
+      ...existing,
+      status: input.status,
+      ...(input.failureReason === undefined ? {} : { failureReason: input.failureReason }),
+      ...(input.receivableId === undefined ? {} : { receivableId: input.receivableId }),
+    };
+    this.#rows.set(next.transferId, next);
+    return true;
+  }
+
+  #rowOf(compensationId: string): CompensationTransferRecord | undefined {
+    const transferId = this.#byCompensation.get(compensationId);
+    return transferId === undefined ? undefined : this.#rows.get(transferId);
+  }
+}
+
+/** 송금 결과 확정 바퀴의 한 번 상한 50건 [가정] */
+export const COMPENSATION_REFRESH_LIMIT = 50;
+
+/** 송금 결과 확정 실패의 구조화 로그(compensation_transfer_refresh_failed, 송금 ID만. 계좌·예금주는 싣지 않는다) */
+export interface CompensationRefreshLog {
+  refreshFailed?(o: { transferId: string; reason: string }): void;
 }
 
 export class CompensationTransfers {
@@ -102,7 +139,49 @@ export class CompensationTransfers {
     private readonly port: CompensationTransferPort,
     private readonly store: CompensationTransferStore = new MemoryCompensationTransferStore(),
     private readonly receivables?: CompensationReceivables,
+    private readonly log?: CompensationRefreshLog,
   ) {}
+
+  /**
+   * 송금 결과 확정(F-07-8 I-06, transfer-refund §6 '송금 결과 확정', R-T47 ③). 지급대행이 접수한 REQUESTED 송금마다 포트로 다시 보고,
+   * PAID면 COMPENSATION_ADVANCE 미수금(근거 compensation:{id} 부분 유일이라 몇 번 불러도 한 행)을 만든 뒤 REQUESTED일 때만 PAID·receivable_id를 쓴다.
+   * 미수금 쓰기가 실패하면 상태는 REQUESTED 그대로이고 다음 바퀴가 마저 한다. FAILED면 상태만 쓰고 미수금은 없다.
+   * 조회 실패·여전히 REQUESTED는 그대로 둔다(pending). 같은 행을 두 바퀴·두 파드가 겹쳐 봐도 상태 쓰기는 조건부 갱신이라 하나, 미수금은 한 행이다
+   */
+  async refreshRequested(limit = COMPENSATION_REFRESH_LIMIT): Promise<{ paid: number; failed: number; pending: number }> {
+    let paid = 0;
+    let failed = 0;
+    let pending = 0;
+    for (const row of await this.store.listRequested(limit)) {
+      try {
+        const fact = await this.port.get(row.transferId);
+        if (fact === undefined || (fact.status !== 'PAID' && fact.status !== 'FAILED')) {
+          pending += 1;
+          continue;
+        }
+        if (fact.status === 'FAILED') {
+          if (await this.store.settleRequested(row.compensationId, { status: 'FAILED', ...(fact.failureReason ? { failureReason: fact.failureReason } : {}) })) failed += 1;
+          continue;
+        }
+        if (this.receivables === undefined || row.promoterId === UNKNOWN_PROMOTER) {
+          pending += 1;
+          continue;
+        }
+        const receivable = await this.receivables.recordCompensationAdvance({
+          compensationId: row.compensationId,
+          promoterId: row.promoterId,
+          ...(row.eventId === undefined ? {} : { eventId: row.eventId }),
+          amount: row.amount,
+        });
+        if (await this.store.settleRequested(row.compensationId, { status: 'PAID', receivableId: receivable.receivableId })) paid += 1;
+      } catch (e) {
+        // 한 송금의 실패가 다른 송금을 막지 않는다. 상태는 그대로이고 다음 바퀴가 다시 본다
+        pending += 1;
+        this.log?.refreshFailed?.({ transferId: row.transferId, reason: e instanceof Error ? e.name.slice(0, 60) : 'unknown' });
+      }
+    }
+    return { paid, failed, pending };
+  }
 
   async request(input: CompensationTransferRequest): Promise<CompensationTransferRecord> {
     if (!UUID.test(input.compensationId) || !UUID.test(input.orderId) || !UUID.test(input.accountId)) throw new CompensationTransferProblem('INVALID', 'ID 모양이 올바르지 않습니다');

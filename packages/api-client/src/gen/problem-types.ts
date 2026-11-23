@@ -287,6 +287,7 @@ export type ProblemType =
   | 'reauth-required'
   | 'reauth-step-invalid'
   | 'reauth-unavailable'
+  | 'recalculation-conflict'
   | 'recipient-not-found'
   | 'recommended-reason-required'
   | 'refresh-token-invalid'
@@ -375,6 +376,7 @@ export type ProblemType =
   | 'staff-invitation-email-mismatch'
   | 'staff-invitation-email-unverified'
   | 'staff-invite-mail-unavailable'
+  | 'statement-recalculation-pending'
   | 'subscription-limit'
   | 'ticket-ended'
   | 'too-many-requests'
@@ -691,6 +693,7 @@ export const PROBLEM_TYPES = {
   'reauth-required': { status: 403, title: "다시 인증해 주세요" },
   'reauth-step-invalid': { status: 410, title: "처음부터 다시 인증해 주세요" },
   'reauth-unavailable': { status: 503, title: "재인증 검증기를 쓸 수 없습니다" },
+  'recalculation-conflict': { status: 409, title: "같은 요청 ID로 다른 회차·종류의 다시 계산이 있습니다" },
   'recipient-not-found': { status: 404, title: "받을 수 있는 회원을 찾지 못했습니다" },
   'recommended-reason-required': { status: 422, title: "실패한 권고 항목의 사유를 적어 주세요" },
   'refresh-token-invalid': { status: 401, title: "다시 로그인해 주세요" },
@@ -779,6 +782,7 @@ export const PROBLEM_TYPES = {
   'staff-invitation-email-mismatch': { status: 403, title: "초대 이메일과 검증된 계정 이메일이 다릅니다" },
   'staff-invitation-email-unverified': { status: 403, title: "계정에 검증된 이메일이 없습니다" },
   'staff-invite-mail-unavailable': { status: 503, title: "지금은 초대 메일을 보낼 수 없습니다" },
+  'statement-recalculation-pending': { status: 409, title: "회차 취소 다시 계산을 기다리는 정산서입니다" },
   'subscription-limit': { status: 422, title: "알림 신청 수를 넘었습니다" },
   'ticket-ended': { status: 409, title: "이미 끝난 티켓입니다" },
   'too-many-requests': { status: 429, title: "24시간 안에 이미 다시 받았습니다" },
