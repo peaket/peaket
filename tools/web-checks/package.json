@@ -23,7 +23,8 @@
     "queue-room:build": "node queue-room/build.mjs",
     "queue-room": "playwright test -c playwright.queue-room.config.mjs",
     "purchase": "playwright test -c playwright.purchase.config.mjs",
-    "console-csp": "playwright test -c playwright.console-csp.config.mjs"
+    "console-csp": "playwright test -c playwright.console-csp.config.mjs",
+    "console-remotes": "playwright test -c playwright.console-remotes.config.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
