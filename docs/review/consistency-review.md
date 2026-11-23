@@ -892,6 +892,7 @@
 | R-799 | 콘솔 명령 화면이 목업이라 명령 승인에 OPS_COMMAND 재인증 토큰을 싣지 않아 실제 서버에서 2인 승인이 막혔고, 명령 6 해제·identity 넘김이 없었다 | apps/console-host 명령 화면·admin-reauth·ops-proxy, docs/api/openapi.yaml(…/retries), packages/contracts·api-client·deploy/gateways 생성물, docs/BUILD_ORDER.md, docs/review/ledger-notes.md | 명령 1·3·6·해제 보내기, 재인증 토큰, ack 3초 다시 읽기, identity 갈래 | 일부 해결. 실서버 화면 시험·브라우저 확인 남음, F-03-7 동결 |
 | R-801 | 관제 공연 리포트·파트너 판매 요약이 읽을 골드 사실·차원이 없었다 | data/(dbt_project·macros·models staging·silver·gold·seeds·tests·tests_int, uv.lock) | 브론즈 → 실버 → 골드 변환과 판 바꾸기 | 해결. 지표 뷰·F12는 F-04-5, 마감 실행기는 F-04-6 |
 | R-800 | 스캐너 인증 가드가 출처·세션 확인 기한·거절 지표 없이 RolesGuard 막음을 풀지 못했고 등록 코드가 저장 일시 실패에 죽었다 | docs/BUILD_ORDER.md, docs/review/plans/F-05-5.md, docs/features/offline-gate.md, docs/security/authz-matrix.md, docs/api/openapi.yaml, packages/platform, services/ticket-svc, services/identity-svc, apps/scanner, .github/workflows/ci-web.yml | 계획→시험(실패 확인 단위·화면·통합 21/30)→시험 리뷰 1(높음 2·중간 5)→반영→리뷰 2 고정→구현, platform 776·ticket 305·identity 750·scanner 55·화면 9·ticket 통합 135, ledger --require 28 | 닫힘 |
+| R-802 | 관제 공연 리포트가 읽을 지표 뷰·규칙 판정·품질 결과가 없었다 | data/models/metrics(metrics.yml·rules.yml·metric_value·quality_check·fct_rule_check·mtr_* 여섯), data/macros/metrics.sql, F2·F3 칸, 참조·열거 시험 | 지표 사전과 결정 규칙을 dbt가 판마다 판정 | 해결. 마감 실행기는 F-04-6, 리포트는 F-04-7 |
 
 ## 4. 숫자 일치표
 
