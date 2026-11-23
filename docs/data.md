@@ -2023,6 +2023,8 @@ erDiagram
     admin_account ||--o{ approval_request : "요청자·승인자"
     cs_case |o--o{ approval_request : "건에서 생성"
     cs_case ||--o{ cs_case_request : "받은 건 요청(eventKey 한 번)"
+    cs_case ||--o| verification_case : "추가 검증 이의 건의 내용·결정(F-06-7)"
+    cs_case ||--o{ cs_case_dispatch : "보낼 호출(F-06-7)"
     account ||--o{ booking_restriction : "예매 제한"
     event ||--o{ decision_record : "결정 기록(ADR-0052)"
     admin_account ||--o{ decision_record : "결정자"
@@ -2256,11 +2258,21 @@ erDiagram
         timestamptz retain_until "occurred_at + 2년(UTC 달력, 2월 29일이면 3월 1일)"
     }
     verification_case {
-        uuid id PK
-        uuid account_id
-        text reason_category
-        text status "PENDING|RUNNING|PASSED|FAILED|SKIPPED(소유자 결정 2026-11-11, open-items 101번)"
-        text appeal_result
+        uuid id PK "이의 ID(queue-svc가 접수 때 만든 UUID, CaseRequested.sourceId = cs_case.target_ref)"
+        uuid case_id "그 VERIFICATION_APPEAL 건(cs_case, 같은 논리 DB, 외래키, UNIQUE). 건을 처음 열 때 같은 트랜잭션에 내용 없이 넣는다(추천 적용 2026-11-23, 기능 F-06-7, ADR-0364 결정 9, ops 0031)"
+        uuid event_id "이의를 낸 회차. 내용을 옮기기 전에는 NULL"
+        uuid account_id "이의를 낸 계정(identity SetAccountHold에 싣는다). 내용을 옮기기 전에는 NULL"
+        text pid "사람 식별값(trust ApplyLabel에 싣는다). queue-svc 보관(판매 종료 + 7일)이 끝난 뒤에도 라벨 반영을 다시 보내려고 둔다. API 응답·운영 로그·감사 기록에 싣지 않는다(로그는 pidRef, 추천 적용 2026-11-23, F-06-7)"
+        text appeal_text "이의 글(NFC 정규화 뒤 0~1,000자, 평문). 빈 글은 설명 요구만이다. 내용을 옮기기 전에는 NULL"
+        text reason_category "격리 때 이용자에게 보인 사유 범주(trust.proto ReasonCategory 이름에서 REASON_CATEGORY_를 뺀 값)"
+        timestamptz received_at "이의 접수 시각"
+        text status "PENDING|RUNNING|PASSED|FAILED|SKIPPED(소유자 결정 2026-11-11, open-items 101번). 읽는 법(추천 적용 2026-11-23, F-06-7): PENDING 결정 전, RUNNING 결정 뒤 보낼 호출이 남음, PASSED 보낼 호출이 모두 반영됨, FAILED 반영 실패가 하나라도 있음, SKIPPED 옮기기 전에 queue-svc 보관이 끝나 내용이 없음(결정 전에만)"
+        text appeal_result "NULL|ACCEPTED|REJECTED(결정 결과)"
+        uuid decided_by "결정한 관리 계정 ID(cs_agent·cs_lead)"
+        timestamptz decided_at "결정 시각"
+        text block_list_change "NULL|NONE|REMOVED|DEVICE_NOT_FOUND. 인정의 ApplyLabel 응답 block_list(Q-T48 ②). 기기 가명은 ops-svc에 오지 않아 두지 않는다"
+        timestamptz created_at
+        timestamptz updated_at
     }
     approval_request {
         uuid id PK
@@ -2316,6 +2328,20 @@ erDiagram
         timestamptz resolved_at "해결한 시각"
         timestamptz due_soon_alerted_for "기한 1영업일 전 경보(CS_CASE_DUE_SOON)를 연 기한 값. next_due_at과 같으면 다시 열지 않는다(ADR-0364 결정 3)"
         timestamptz overdue_alerted_for "기한 넘김 경보(CS_CASE_OVERDUE)를 연 기한 값"
+    }
+    cs_case_dispatch {
+        uuid case_id PK "보낼 호출의 건(cs_case, 외래키). 기본 키 (case_id, call)"
+        text call PK "APPEAL_COPY|ACCOUNT_HOLD_OPEN|QUEUE_RESOLVE|TRUST_LABEL|ACCOUNT_HOLD_CLOSE. 앞 둘은 VERIFICATION_APPEAL 건을 처음 열 때, 뒤 셋(기각은 TRUST_LABEL 없이 둘)은 결정할 때 건 갱신과 같은 트랜잭션에 넣는다(추천 적용 2026-11-23, 기능 F-06-7, ADR-0364 결정 9, docs/features/bot-defense.md §12 'CS 처리 첫 구현', ops 0031)"
+        bigint source_version "보낼 판 번호(cs_case.version). ACCOUNT_HOLD_OPEN·APPEAL_COPY는 연 때의 판, 결정 셋은 해결한 새 판. 다시 보내도 같은 값이다"
+        text state "PENDING|APPLIED|FAILED. FAILED도 다시 보낼 수 있는 실패면 배경 작업이 계속 보낸다"
+        int attempts "보낸 횟수(0 이상)"
+        timestamptz next_attempt_at "다음에 보낼 시각. APPLIED면 NULL"
+        timestamptz claimed_until "보내는 쪽이 잡아 둔 끝 시각(겹쳐 보내지 않게, 30초 [가정]). 지나면 다른 쪽이 다시 잡는다"
+        text last_error "마지막 실패의 gRPC 상태 이름이나 APPEAL_CONTENT_MISSING·NOT_CONFIGURED. 받은 값·오류 원문은 두지 않는다"
+        text result "반영했을 때의 답(QUEUE_RESOLVE: APPLIED|UNCHANGED|NOT_ISOLATED, TRUST_LABEL·ACCOUNT_HOLD_*: CHANGED|UNCHANGED, APPEAL_COPY: COPIED)"
+        timestamptz failed_alerted_at "반영 실패 경보 CS_CASE_DISPATCH_FAILED를 연 시각. 반영되면 경보를 풀고 지운다"
+        timestamptz created_at
+        timestamptz updated_at
     }
     cs_case_request {
         text event_key PK "건 요청(support.cases-requested·내부 HTTP)의 eventKey(계약은 UUID, 내부 HTTP의 옛 호출자는 글). 한 번만 적어 해결된 건의 사건이 다시 와도 새 건을 열지 않는다(추천 적용 2026-11-23, ADR-0364 결정 4)"
@@ -3174,6 +3200,7 @@ erDiagram
 | 정산 합계(payment) | 회차·결제사별 승인 금액 합, 취소 금액 합 | 새로 `payment (event_id, pg) INCLUDE (amount, status, approved_at)`, `payment_cancel (payment_id) INCLUDE (amount, status)` | `GroupAggregate → Index Only Scan` | 배치 역할 상한 60초 대비 시간, Heap Fetches |
 | 미수금 상계(payment) | `WHERE promoter_id = $1 AND status = 'OPEN' AND (pg = $2 OR pg IS NULL) ORDER BY id FOR UPDATE`(결제사에서 빠진 돈의 미수금은 같은 결제사 정산서에서만, 기술 검토 중간-043) | 새로 `partner_receivable (promoter_id, id) WHERE status = 'OPEN'` | `LockRows → Index Scan`(파트너 한 명의 열린 미수금은 적어 결제사 조건은 거르기로 충분하다) | 잠금 대기 |
 | CS 처리함(ops) | `WHERE status <> 'RESOLVED' AND next_due_at < … AND (next_due_at, id) > ($1, $2) ORDER BY next_due_at, id LIMIT 50`(종류 필터는 문장을 따로 만든다). `next_due_at`은 `NOT NULL DEFAULT 'infinity'`라 기한이 없는 건도 목록 끝에 든다(소유자 결정 2026-11-11, open-items 93번) | 새로 `cs_case (next_due_at, id) WHERE status <> 'RESOLVED'`, 다형 참조 유일(§2) | `Limit → Index Scan`, 종류는 Filter | `Rows Removed by Filter`가 결과의 10배를 넘으면 `(kind, next_due_at, id)`를 더한다 |
+| CS 처리함 보낼 호출(ops, 추천 적용 2026-11-23, 기능 F-06-7) | `WHERE state <> 'APPLIED' AND next_attempt_at <= now() AND (claimed_until IS NULL OR claimed_until < now()) ORDER BY next_attempt_at LIMIT 50 FOR UPDATE SKIP LOCKED` 뒤 `claimed_until` 갱신. 다시 보내지 않는 실패(FAILED, `next_attempt_at` NULL)는 빠진다 | 새로 `cs_case_dispatch (next_attempt_at) WHERE state <> 'APPLIED'` | `Limit → LockRows → Index Scan` | 남은 행이 1만 [가정]을 넘으면 경보 원인(받는 서비스 장애)을 먼저 본다 |
 | 후기 목록·요약(core) | 회차의 후기 커서 목록, 평균 별점·후기 수 | 새로 `review (event_id, created_at, id) WHERE status <> 'DELETED'`, `review (event_id) INCLUDE (rating) WHERE status = 'VISIBLE'` | 목록은 `Limit → Index Scan Backward`, 요약은 `Aggregate → Index Only Scan`. 별점 순은 정렬을 받아들인다 | Heap Fetches, CDN 캐시 적중률 |
 | 탈퇴 파기(core, 추천 적용 2026-11-16, W7-audit 리뷰 K2. 익명화에서 파기로 바꿈: 소유자 결정 2026-11-16 OPEN[42]·[44], ADR-0278) | 탈퇴 사건마다 한 번, 그리고 다시 정리 예약마다 한 번 `UPDATE review SET <§2 '후기 파기'의 칸> WHERE account_id = $1 RETURNING id`. 다시 정리 반복은 `SELECT account_id FROM review_withdrawal_recheck WHERE due_at <= $1 ORDER BY due_at LIMIT 100 FOR UPDATE SKIP LOCKED` | `review (account_id)`(0022. 운영 전이라 트랜잭션 안에서 만든다. 운영 뒤라면 `CONCURRENTLY` 파일로 따로 만든다), 새로 `review_withdrawal_recheck (due_at)` | `Update → Index Scan using review_account_idx`(계정당 후기 몇 건). 예약은 `Limit → LockRows → Index Scan`. 색인이 없으면 사건마다 후기 표 전체를 읽는다 | 실행 시간, core 소비자 처리 지연, 밀린 예약 시간 |
 | 내 문의(core) | `WHERE account_id = $1 ORDER BY created_at DESC LIMIT 20 OFFSET $2` | 새로 `inquiry (account_id, created_at)` | `Limit → Index Scan Backward`(계정당 행이 적어 OFFSET 비용이 작다) | 실행 시간 |

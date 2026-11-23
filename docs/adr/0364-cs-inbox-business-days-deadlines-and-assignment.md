@@ -24,9 +24,16 @@
 8. **추가 검증 이의의 처리 행동(2026-11-23 감독 결정, 기능 F-06-7로 나눔)**: 이의 인정·기각은 GAT-280의 CS 행동이다(bot-defense §12 '결과 반영', B-T10). 처리함·기한(F-06-2)과 합치면 5일을 넘어 기능을 나눈다. 세부는 추천이고 F-06-7 계획이 구현 전에 정본에 적는다.
    - **결정 경로**: `POST /v1/ops/cases/{caseId}/verification-appeal-decision`(새 경로, `cs_agent`·`cs_lead`, `If-Match`·`Idempotency-Key`, 본문 `outcome` ACCEPTED·REJECTED와 결과 메모). 결정·건 해결·보낼 호출 기록을 ops DB 한 트랜잭션에 쓰고 202로 답한다. 상세(`CsCaseDetail.verificationAppeal`)는 queue-svc `GetVerificationAppeal`의 글·사유 범주·대기 참여 상태와 trust-svc `GetVerdictEvidence`의 범주 값만 싣는다(pid·계정 ID·점수 원값·기기 가명 없음).
    - **호출**: 인정은 queue-svc `ResolveVerificationAppeal`(ACCEPTED)과 trust-svc `ApplyLabel`(`LABEL_SOURCE_APPEAL_ACCEPTED`), 기각은 `ResolveVerificationAppeal`(REJECTED)만이다. 셋 다 건 ID·판 번호로 멱등하다(이미 있는 계약). 건이 열릴 때와 해결될 때 identity-svc `SetAccountHold`(`VERIFICATION_APPEAL`)를 OPEN·CLOSED로 보낸다. 실패한 호출은 ops-svc 배경 작업이 같은 건 ID·판으로 다시 보낸다(B-T10 ⑥). 보낼 호출 기록은 ops 마이그레이션 0031의 새 표다.
+9. **추가 검증 이의 처리의 세부(F-06-7 계획이 구현 전에 정함, 추천 적용 2026-11-23)**: 결정 8을 아래처럼 채운다. 동작의 정본은 [bot-defense §12](../features/bot-defense.md) 'CS 처리 첫 구현', 계약은 openapi `createOpsCaseVerificationAppealDecision`·`CsCaseDetail.verificationAppeal`·오류 `case-action-not-applicable`, 표는 data.md `verification_case`·`cs_case_dispatch`(ops 0031), 화면 상태는 d5 §7.6, 운영 확인은 bot-defense §15 '이의 결과가 한 번씩 반영된다' 행이다. 방향은 결정 8 그대로다.
+   - 결정은 CS 담당자 둘만 한다. 경로 역할에는 넷을 두어 operator·commander가 `case-update-not-allowed`를 받게 한다(B-T28 ②). 맡은 사람이 아니어도 결정한다.
+   - 이 건은 처리함 갱신(`PATCH`)으로 해결하지 못한다(새 오류 `case-action-not-applicable` 409). 다른 종류의 건에 결정 경로를 부를 때도 같은 오류다.
+   - 이의 내용(회차·계정·pid·글·사유 범주)은 건을 열 때 `verification_case`로 옮긴다. pid는 라벨 반영 다시 보내기에만 쓰고 응답·로그·감사에 싣지 않는다. 판정 근거와 대기 참여 상태는 상세를 열 때마다 읽고 저장하지 않는다.
+   - 결정 뒤 그 건의 호출을 한 번 바로 보내 보고 결과와 상관없이 202다. 다시 보내기 간격·상한·다시 보내지 않는 gRPC 상태와 '반영 실패' 경보 `CS_CASE_DISPATCH_FAILED`(SEV3)는 bot-defense §12의 값이다.
+   - `verification_case.status`의 다섯 값(소유자 결정 2026-11-11, open-items 101번)은 바꾸지 않고 이 쓰임의 뜻을 붙인다(data.md).
+   - Q-T48 ②와 queue-admission §7의 '지운 기록에 기기 가명'을 bot-defense §9 '기록'(2026-11-10 정합: 운영 로그에 기기 가명을 쓰지 않음, `ApplyLabel` 응답에 기기 가명이 없음)에 맞춰 고쳤다.
 
 ## 결과
 
 - 정본: transfer-refund §7.1 '첫 구현', §11 R-T20 세부 번호와 R-T48~R-T51, §12 '영업일 달력', §13 CS 기한 행. data.md `cs_case` 칸과 `cs_case_request`. openapi `CsCase`·목록 매개변수. asyncapi·avro `CaseRequested` 종류와 `dueBaseAt`. payment §4.1·§6의 재발송 단계 이름.
-- 마이그레이션은 ops-svc 0030(필요하면 0031)이다. 생성물(packages/contracts·api-client)은 구현 담당이 `gen`으로 만든다.
+- 마이그레이션은 ops-svc 0030(F-06-2)과 0031(F-06-7, `verification_case`·`cs_case_dispatch`)이다. 생성물(packages/contracts·api-client)은 구현 담당이 `gen`으로 만든다.
 - 남는 한계: 공휴일 파일 갱신은 사람 몫이다(해마다 12월 [가정]). purchase-svc는 파일이 없어도 시작하고, ops-svc의 관리 역할 변경 승인 기한은 UTC 주말 계산 그대로다(정리 목록).
