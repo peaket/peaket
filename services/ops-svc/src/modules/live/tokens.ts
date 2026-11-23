@@ -9,3 +9,9 @@ export const WIDGET_SOURCES = Symbol.for('peaket.ops.live.widgetSources');
 export const TERMINATED_SESSIONS = Symbol.for('peaket.ops.live.terminatedSessions');
 /** 정비 반복을 켤지(DB 조립만) */
 export const LIVE_RETENTION_ENABLED = Symbol.for('peaket.ops.live.retentionEnabled');
+/** 경보 기록 표의 쓰기·목록 읽기(OpsAlertStore & OpsAlertList, F-03-3): DB 조립은 DrizzleOpsAlertStore, 메모리 조립은 MemoryOpsAlertStore */
+export const LIVE_ALERT_STORE = Symbol.for('peaket.ops.live.alertStore');
+/** 대기열 Redis 제어 상태 읽기(ControlReader, 없으면 undefined) */
+export const CONTROL_READER = Symbol.for('peaket.ops.live.controlReader');
+/** 시작 조립 값(LiveWiring, 환경 값으로 고른 원천 주소·환경 이름) */
+export const LIVE_WIRING = Symbol.for('peaket.ops.live.wiring');

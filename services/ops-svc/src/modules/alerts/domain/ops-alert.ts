@@ -23,3 +23,21 @@ export interface OpsAlertStore {
   /** 열린 경보를 푼다. 없으면 undefined. 이미 풀렸으면 그대로 둔다 */
   resolve(input: { eventKey: string; kind: string; reason: string; nowMs: number }): Promise<OpsAlert | undefined>;
 }
+
+/**
+ * 경보 목록 읽기(F-03-3 OPS-380, 관제 경보 목록 REST·늘 여는 흐름 reset 뒤 다시 읽기, ADR-0371 결정 9). 쓰기·멱등 규칙은 OpsAlertStore 그대로다.
+ * 걸린 경보는 언제 열렸든 모두, 풀린 경보는 resolvedSinceMs 이후에 풀린 것만, eventKey를 주면 그 키만 돌려준다.
+ * 차례는 걸린 경보 먼저(최근에 열린 것부터), 그다음 최근에 풀린 것부터이고 limit을 넘지 않는다(넘치면 오래 전에 풀린 것부터 빠진다)
+ */
+export interface OpsAlertList {
+  list(q: { eventKey?: string; resolvedSinceMs: number; limit: number }): Promise<readonly OpsAlert[]>;
+}
+
+/** 목록 차례: 걸린 경보(최근에 열린 것부터) → 풀린 경보(최근에 풀린 것부터) */
+export function compareAlertsForList(a: OpsAlert, b: OpsAlert): number {
+  const af = a.resolvedAtMs === undefined;
+  const bf = b.resolvedAtMs === undefined;
+  if (af !== bf) return af ? -1 : 1;
+  if (af) return b.createdAtMs - a.createdAtMs;
+  return b.resolvedAtMs! - a.resolvedAtMs!;
+}

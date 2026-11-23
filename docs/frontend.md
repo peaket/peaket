@@ -579,9 +579,9 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | --- | --- | --- |
 | `session` | 계정·역할·유휴 시각·재인증 상태 | REST |
 | `scope` | 고른 회차, 단계 탭, 시간대 | 주소 |
-| `control` | 자동 제어의 5가지 값(정상·일시정지·자동 증액 멈춤·입력 없음·긴급 정지)과 우선순위(docs/design/d5 §3.3) | SSE 늘 여는 흐름 `control` |
+| `control` | 자동 제어의 5가지 값(정상·일시정지·자동 증액 멈춤·입력 없음·긴급 정지)과 우선순위(docs/design/d5 §3.3). 칸은 `control` 사건 본문 그대로(`eventId`·`kind`·`since`·`inputStaleKinds`·`targetNow`·`budgetHoldAt`·`lastDecrease`·`updatedAt`, 모르면 `kind` unknown, 추천 적용 2026-11-23, ADR-0371 결정 6) | SSE 늘 여는 흐름 `control` |
 | `autoActions` | 걸려 있는 자동 조치(이름·대상·묶음·상태·시작 시각·왜·풀림 조건·지금 값·조건을 채운 시간), 최근 10분 [가정] 사이에 풀린 조치, 상태 바의 수(docs/design/d5 §3.3·§7.2, ADR-0078 결정 2) | SSE 늘 여는 흐름 `autoAction` |
-| `alerts` | 경보 목록, 접힌 경보, SEV별 수 | SSE 늘 여는 흐름 `alert` |
+| `alerts` | 경보 목록, 접힌 경보, SEV별 수(위 상태 바 SEV 수는 펼친 걸린 경보만 센다) | 처음 열 때와 `reset` 뒤 경보 목록 REST `GET /v1/ops/alerts`, 그 뒤 SSE 늘 여는 흐름 `alert`(ADR-0371 결정 9) |
 | `commands` | 명령 상태, 내 승인 대기, 잠금 | REST + SSE 늘 여는 흐름 `command`·`approval` |
 | `presence` | 접속한 운영자 | SSE 늘 여는 흐름 `presence` |
 | (원격 위젯 상태) | 호스트 저장소에 넣지 않는다. 원격마다 자기 Zustand 저장소(이름은 `widgets/<원격 이름>`)를 위젯 자리마다 하나 만들고, 자리가 없어지면 버린다 | 원격 안 |
@@ -884,7 +884,7 @@ data: {"commandId":"…","state":"ACKED","appliedVersion":7,"ackedAt":"2026-10-2
 | 연결 | `GET https://ops-api.peaket.example/v1/ops/live?eventId={eventId}&screen={화면}`을 자격 증명 포함(쿠키) fetch 스트림으로 열고 text/event-stream을 표준 규칙대로 읽는다. 고른 회차가 없으면 `eventId`를 뺀다. EventSource는 주석 줄을 알려 주지 않아 35초 감시를 못 하고 다시 열 때 무작위·`Last-Event-ID` 머리를 넣지 못해 쓰지 않는다(2026-11-23 OPS-340, ADR-0360 결정 11). 탭마다 이 흐름 하나와 위젯 흐름 하나다 |
 | 인증 | 운영자 쿠키와 gw-ops의 `Origin`(`https://console.peaket.example`) 확인. EventSource는 요청 헤더를 붙일 수 없어 재인증 토큰 같은 헤더를 쓰지 않는다(명령은 REST다) |
 | 사건(`event:`) | `command`(명령 상태가 바뀔 때, `CommandState`의 요약과 ack), `approval`(내 승인 대기), `alert`(`OpsAlert`), `control`(자동 제어 다섯 값), `autoAction`(걸린 자동 조치와 풀림), `presence`(`{eventId, operators: [{accountRef, role, screen}]}`), `reset`(아래) |
-| `id`와 다시 붙기 | `id`는 ops DB 알림 표 `ops_push_event`의 순번이다. 다시 붙을 때 브라우저가 보내는 `Last-Event-ID` 뒤의 사건을 서버가 다시 보낸다. 표에 남은 1시간 [가정]보다 오래된 번호면 `reset`을 보내고, 화면은 명령·경보·승인 대기를 REST로 다시 읽는다 |
+| `id`와 다시 붙기 | `id`는 ops DB 알림 표 `ops_push_event`의 순번이다. 다시 붙을 때 브라우저가 보내는 `Last-Event-ID` 뒤의 사건을 서버가 다시 보낸다. 표에 남은 1시간 [가정]보다 오래된 번호면 `reset`을 보내고, 화면은 명령·경보·승인 대기를 REST로 다시 읽는다. 경보는 처음 열 때와 `reset` 때 `GET /v1/ops/alerts`(`{ items, seq }`)를 한 번 불러 슬라이스를 갈아 끼우고, 부르는 동안 들어온 `alert` 사건 가운데 `id`가 `seq`보다 큰 것만 다시 얹는다(겹침·빠짐 없음, 추천 적용 2026-11-23, ADR-0371 결정 9). `control`은 알림 표 순번이 없는 지금 값이라 `id` 줄이 없고 붙을 때 한 번과 바뀔 때마다 온다 |
 | 하트비트 | 서버는 15초 [가정]마다 주석 줄(`: hb`)을 보낸다. 35초 [가정] 동안 아무것도 오지 않으면 끊고 다시 연다. `retry` 10초에 0~5초 [가정] 무작위를 더한다 |
 | 닫힘 | 서버는 액세스 토큰의 만료 시각(gw-ops가 넣는 `X-User-Token-Exp`, 없으면 연 뒤 15분)과 세션 종료(종료 세션 목록, 5초 [가정]마다 본다)에 흐름을 닫는다. 읽지 않아 쌓인 양이 1MiB [가정]를 넘어도 닫는다. 서버 로그의 닫힌 까닭은 `token-expired`·`session-ended`·`backpressure`·`client`다. 브라우저는 토큰을 갱신한 뒤 다시 붙는다. 갱신이 401이면 로그인 화면으로 간다(ADR-0360 결정 5) |
 | 명령 확인 | 명령 확인의 정본은 REST의 명령 상태다. 흐름은 빨리 알리는 길이고, 다시 붙은 뒤 빠진 것은 `Last-Event-ID`로 받는다 |

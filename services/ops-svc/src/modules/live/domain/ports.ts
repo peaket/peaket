@@ -13,6 +13,11 @@ export interface PushEventSource {
   afterOrAt?(seq: number, seqs: readonly number[], limit: number): Promise<readonly PushEventRow[]>;
   /** 시퀀스의 마지막 값(쓴 적 없으면 0). 아직 커밋 전인 번호를 포함할 수 있다 */
   latest(): Promise<number>;
+  /**
+   * 지금 보이는(커밋된) 행 가운데 가장 큰 seq(없으면 0). 경보 목록 REST의 seq다(F-03-3): 그 뒤에 커밋되는 행만 화면이 목록 위에 다시 얹는다.
+   * 없으면 latest를 쓴다(메모리 대역)
+   */
+  committedMax?(): Promise<number>;
   /** 창(windowMs) 안 행 가운데 가장 작은 seq(없으면 undefined) */
   oldestWithin(windowMs: number): Promise<number | undefined>;
   /** 창 밖 행을 지운다. 지운 수 */
@@ -56,4 +61,14 @@ export class WidgetSourceUnavailable extends Error {
 export interface WidgetSource {
   readonly keys: readonly WidgetKey[];
   read(key: WidgetKey, q: WidgetReadQuery): Promise<WidgetValue>;
+}
+
+/** 대기열 Redis 자동 제어 상태 읽기 포트(F-03-3, 시험이 바꿔 끼운다). 읽기만 한다 */
+export interface ControlReader {
+  /** 진행 중 회차 목록(점수 = 키 수명, 지금보다 큰 것) */
+  activeEvents(nowMs: number): Promise<string[]>;
+  /** 해시 하나. 키가 없으면 undefined */
+  hash(key: string): Promise<Record<string, string> | undefined>;
+  /** 연결을 닫는다(모듈이 내려갈 때) */
+  close?(): Promise<void>;
 }

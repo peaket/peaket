@@ -13,6 +13,9 @@ export const PROMETHEUS_RANGE_STEP_S = 15;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** 이 원천이 맡는 키: 원격 위젯 둘(관제 판단 위젯 넷은 F-03-3 원천들이 맡는다) */
+export const REMOTE_WIDGET_KEYS: readonly WidgetKey[] = ['queue-admission-rate.summary', 'purchase-pg-status.summary'];
+
 interface PromSample {
   metric: Record<string, string>;
   value?: [number, string];
@@ -51,11 +54,11 @@ const num = (v: string | undefined): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-/** Prometheus가 원천인 키(WIDGET_SOURCE_OF가 prometheus인 키). rt-sales.summary는 관제 실시간 표 원천이 맡는다(F-04-1) */
+/** Prometheus가 원천인 키(WIDGET_SOURCE_OF가 prometheus인 키, 관제 판단 위젯 넷 포함). rt-sales.summary는 관제 실시간 표 원천이 맡는다(F-04-1). 이 파일의 원천이 맡는 키는 REMOTE_WIDGET_KEYS다 */
 export const PROMETHEUS_WIDGET_KEYS: readonly WidgetKey[] = WIDGET_KEYS.filter((k) => WIDGET_SOURCE_OF[k] === 'prometheus');
 
 export class PrometheusWidgetSource implements WidgetSource {
-  readonly keys: readonly WidgetKey[] = PROMETHEUS_WIDGET_KEYS;
+  readonly keys: readonly WidgetKey[] = REMOTE_WIDGET_KEYS;
 
   constructor(private readonly http: ExternalHttpClient) {}
 
@@ -140,7 +143,7 @@ export class PrometheusWidgetSource implements WidgetSource {
 
 /** 원천 주소가 없을 때(local·시험): 늘 source-unavailable */
 export class UnavailableWidgetSource implements WidgetSource {
-  readonly keys: readonly WidgetKey[] = PROMETHEUS_WIDGET_KEYS;
+  readonly keys: readonly WidgetKey[] = REMOTE_WIDGET_KEYS;
   async read(): Promise<WidgetValue> {
     throw new WidgetSourceUnavailable('PEAKET_PROMETHEUS_URL이 없다');
   }

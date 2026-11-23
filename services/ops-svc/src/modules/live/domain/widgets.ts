@@ -1,9 +1,18 @@
 // 관제 위젯 키와 값 모양(openapi /v1/ops/widgets/{widgetKey}·/v1/ops/events/{eventId}/live, docs/frontend.md §4.4.5·§4.6, ADR-0360 결정 9).
-// 키 이름은 '위젯이름.대상'이다. 원천이 지금 있는 둘만 실제 값으로 잇고(대기열 팀 입장 비율, 구매 팀 결제사), 나머지 위젯은 원천 기능이 키를 더한다.
+// 키 이름은 '위젯이름.대상'이다. 원격 위젯 둘(대기열 팀 입장 비율, 구매 팀 결제사), 관제 실시간 표(rt-sales.summary, F-04-1)와 호스트 판단 위젯 넷(F-03-3)을 실제 값으로 잇고, 나머지 위젯은 원천 기능이 키를 더한다.
 // 값은 숫자·상태만 싣고 화면 글자는 위젯이 만든다. 원천을 못 읽으면 같은 키에 error 'source-unavailable'을 싣는다(200).
 import { z } from 'zod';
 
-export const WIDGET_KEYS = ['queue-admission-rate.summary', 'purchase-pg-status.summary', 'rt-sales.summary'] as const;
+export const WIDGET_KEYS = [
+  'queue-admission-rate.summary',
+  'purchase-pg-status.summary',
+  'rt-sales.summary',
+  // 관제 판단 위젯 넷(F-03-3 OPS-380, ADR-0371 결정 8): T-30분 점검 실시간 항목, 여정별 남은 허용 실패, 포화도 요약, 진단 힌트
+  'ops-readiness.checklist',
+  'ops-budget.journeys',
+  'ops-saturation.summary',
+  'ops-diagnostics.summary',
+] as const;
 export type WidgetKey = (typeof WIDGET_KEYS)[number];
 
 /** 키마다 값의 원천(openapi OpsWidgetValue.source). rt-sales.summary는 관제 실시간 표(ClickHouse rt 뷰, F-04-1) */
@@ -11,6 +20,10 @@ export const WIDGET_SOURCE_OF = {
   'queue-admission-rate.summary': 'prometheus',
   'purchase-pg-status.summary': 'prometheus',
   'rt-sales.summary': 'clickhouse',
+  'ops-readiness.checklist': 'prometheus',
+  'ops-budget.journeys': 'prometheus',
+  'ops-saturation.summary': 'prometheus',
+  'ops-diagnostics.summary': 'prometheus',
 } as const satisfies Record<WidgetKey, 'prometheus' | 'clickhouse'>;
 
 /** 그래프 창 15분 [가정](frontend §3.10 '들고 있는 양의 상한') */
@@ -90,7 +103,88 @@ export const RtSalesSummary = z.object({
   tradeGap: z.boolean(),
 });
 
-export const WidgetValue = z.union([QueueAdmissionRateSummary, PurchasePgStatusSummary, RtSalesSummary, WidgetUnavailable]);
+const ReadinessItemValue = z.object({
+  key: z.string(),
+  group: z.enum(['required', 'recommended', 'display']),
+  status: z.enum(['pass', 'fail', 'unknown', 'not-in-env', 'deferred', 'display-only']),
+  value: z.number().optional(),
+  unit: z.string().optional(),
+  at: z.string().optional(),
+  reason: z.string().optional(),
+});
+
+/** T-30분 점검 탭의 실시간 항목(readiness 컨텍스트의 점검 계산, GET /v1/ops/events/{eventId}/readiness의 items·preview와 같다) */
+export const OpsReadinessChecklist = z.object({
+  widgetKey: z.literal('ops-readiness.checklist'),
+  source: z.literal('prometheus'),
+  at: z.string(),
+  eventId: z.string().nullable(),
+  items: z.array(ReadinessItemValue),
+  preview: z.object({ verdict: z.enum(['go', 'no-go']), failedRequired: z.array(z.string()), failedRecommended: z.array(z.string()) }),
+});
+
+/** 여정 일곱(asyncapi OpsAlert.journey)과 동시 입장 목표에 묶인 네 여정(control-tower §6의 3, ADR-0126) */
+export const BUDGET_JOURNEYS = ['detail', 'queue_entry', 'queue_state', 'hold', 'seat_status', 'payment_accept', 'payment_confirm'] as const;
+export const LINKED_JOURNEYS: readonly (typeof BUDGET_JOURNEYS)[number][] = ['hold', 'seat_status', 'payment_accept', 'payment_confirm'];
+
+/** 여정별 남은 허용 실패(기록 규칙 peaket:slo:onsale_*{event_id,journey}, docs/observability.md §8). 시계열이 없는 여정은 null과 까닭 */
+export const OpsBudgetJourneys = z.object({
+  widgetKey: z.literal('ops-budget.journeys'),
+  source: z.literal('prometheus'),
+  at: z.string(),
+  eventId: z.string().nullable(),
+  journeys: z.array(
+    z.object({
+      journey: z.enum(BUDGET_JOURNEYS),
+      linked: z.boolean(),
+      allowed: nullableNumber,
+      used: nullableNumber,
+      remaining: nullableNumber,
+      burnShort: nullableNumber.optional(),
+      burnLong: nullableNumber.optional(),
+      reason: z.string().optional(),
+    }),
+  ),
+});
+
+export const SATURATION_LEVELS = ['ok', 'warn', 'danger', 'unknown'] as const;
+const SaturationField = z.object({ value: nullableNumber, level: z.enum(SATURATION_LEVELS) });
+
+/** 포화도 요약(CPU·Redis 메모리 비율·Kafka 밀림·이벤트 루프 p99). 요약 level은 가장 나쁜 칸, 값이 없는 칸이 있으면 ok가 아니다 */
+export const OpsSaturationSummary = z.object({
+  widgetKey: z.literal('ops-saturation.summary'),
+  source: z.literal('prometheus'),
+  at: z.string(),
+  eventId: z.string().nullable(),
+  level: z.enum(SATURATION_LEVELS),
+  cpu: SaturationField,
+  redisMemory: SaturationField,
+  kafkaLag: SaturationField,
+  eventLoop: SaturationField,
+});
+
+/** 진단 힌트(RUM·느린 쿼리·네트워크, 운영 명령 없음). 원천이 아직 없어 지금은 늘 원천 실패 값이다 */
+export const OpsDiagnosticsSummary = z.object({
+  widgetKey: z.literal('ops-diagnostics.summary'),
+  source: z.literal('prometheus'),
+  at: z.string(),
+  eventId: z.string().nullable(),
+  rumInpP75Ms: nullableNumber,
+  rumLcpP75Ms: nullableNumber,
+  slowQueries: z.array(z.object({ queryId: z.string(), db: z.string(), calls: z.number(), meanMs: z.number(), maxMs: z.number() })),
+  network: z.enum(['ok', 'warn', 'unknown']),
+});
+
+export const WidgetValue = z.union([
+  QueueAdmissionRateSummary,
+  PurchasePgStatusSummary,
+  RtSalesSummary,
+  OpsReadinessChecklist,
+  OpsBudgetJourneys,
+  OpsSaturationSummary,
+  OpsDiagnosticsSummary,
+  WidgetUnavailable,
+]);
 export type WidgetValue = z.output<typeof WidgetValue>;
 
 /** 쉼표로 이은 위젯 키 목록을 읽는다. 비었거나 모르는 키가 있으면 그 키 목록을 돌려준다(422) */

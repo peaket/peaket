@@ -112,7 +112,7 @@
 | v5.0.0-3.5.4 | L2 | 서로 다른 애플리케이션을 다른 호스트 이름에 둬 동일 출처 정책의 제한을 쓴다. | 적용 | 관제 콘솔(`console`), 관제 API(`ops-api`), 소비자 웹(`www`), 파트너 콘솔(`partner`)은 호스트가 다르다(ADR-0065 결정 1). Grafana·ArgoCD·Alertmanager는 VPN으로만 닿는 내부 로드 밸런서 뒤에 따로 있다(control-tower §10) | 미실행 | — |
 | v5.0.0-3.5.5 | L2 | `postMessage`로 받은 메시지는 출처를 믿을 수 없거나 형식이 틀리면 버린다. | 미적용 | — | — | 해당 없음(관제 콘솔은 창 메시지를 받지 않는다. 원격 위젯과는 모듈 호출과 Zod로 검사한 사건으로만 주고받는다, asvs/frontend.md 1.5.2) |
 | v5.0.0-3.7.1 | L2 | 지원이 끝났거나 안전하지 않은 클라이언트 기술(플러그인, Flash 등)을 쓰지 않는다. | 적용 | 브라우저 표준 기능(fetch, EventSource, Canvas)만 쓴다(NFR-019) | 미실행 | — |
-| v5.0.0-3.7.2 | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 적용 | 콘솔은 다른 호스트로 자동 이동시키지 않는다. 위젯·경보 링크는 사람이 누르는 새 탭이고, 정한 호스트만 링크가 된다(1.2.2) | 미실행 | — |
+| v5.0.0-3.7.2 | L2 | 애플리케이션이 통제하지 않는 다른 호스트로 자동 이동시킬 때는 허용 목록에 있는 곳으로만 보낸다. | 적용 | 콘솔은 다른 호스트로 자동 이동시키지 않는다. 위젯·경보 링크는 사람이 누르는 새 탭이고, 정한 호스트만 링크가 된다(1.2.2). 구현(2026-11-23, F-03-3): `apps/console-host/src/shared/lib/links.ts`(`safeAlertHref`)와 `apps/console-host/src/pages/dashboard/ui/live/` 부품 | 미실행 | — |
 
 ## V4 API와 웹 서비스(V4.1 일반 웹 서비스, V4.2 HTTP 메시지 구조, V4.3 GraphQL, V4.4 WebSocket)
 
@@ -248,7 +248,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | v5.0.0-16.1.1 | L2 | 기술 스택의 계층마다 어떤 이벤트를 어떤 형식으로 기록하는지, 로그를 어디에 두고 어디에 쓰는지, 접근을 어떻게 통제하는지, 얼마나 보관하는지를 적은 로그 목록을 둔다. | 적용 | ops 감사 저장소의 `command_event`·`command_approval`·`command_actor`·`audit_chain`, `takedown_notice`, `data_request`·`data_request_approval`·`provision_ledger`, `security_incident`·`incident_filing`, `access_review`·`access_finding`, 경보 기록 표(13개월 [가정]), 명령 단계마다 남기는 정규 로그 줄 `ops_event`(C-T45), 런북 Job이 감사 앵커 버킷에 쓰는 묶음과 결과(control-tower §7·§13). 보존은 data-classification과 docs/observability.md §9다 | 미실행 | — |
 | v5.0.0-16.2.1 | L2 | 로그 항목에 언제, 어디서, 누가, 무엇을 같은 조사용 메타데이터를 넣는다. | 적용 | 명령 기록은 누가(가명 참조와 역할), 언제, 무엇을, 사유, 승인자, dry-run 결과, 전달 경로, ack 시각을 담는다(control-tower §7). 법정 업무 기록은 기관·방법·시각·내용 요약을 담는다 서버 구현: `services/ops-svc`(명령 수명주기·감사 체인, BAT-355 계획 2026-11-21). | 미실행 | — |
-| v5.0.0-16.2.2 | L2 | 로그 구성요소의 시각을 동기화하고 UTC 또는 시간대 오프셋을 쓴다. | 적용 | 저장은 UTC, 콘솔과 법정 기한은 KST로 보인다. 노드 시계 오프셋 20ms 이하가 Go/No-Go 필수 항목이다(control-tower §2) | 미실행 | — |
+| v5.0.0-16.2.2 | L2 | 로그 구성요소의 시각을 동기화하고 UTC 또는 시간대 오프셋을 쓴다. | 적용 | 저장은 UTC, 콘솔과 법정 기한은 KST로 보인다. 노드 시계 오프셋 20ms 이하가 Go/No-Go 필수 항목이다(control-tower §2). 구현(2026-11-23, F-03-3, ADR-0371 결정 2·3): `services/ops-svc/src/modules/readiness/adapters/prometheus-readiness-probe.ts`가 가장 크게 어긋난 노드의 오프셋을 절댓값으로 판정하고, 시계열이 없거나 NaN이면 확인할 수 없음(필수라 No-Go)이다 | 미실행 | — |
 | v5.0.0-16.2.3 | L2 | 로그 목록에 적힌 파일과 서비스로만 로그를 저장·전송한다. | 적용 | 공통 | 미실행 | — |
 | v5.0.0-16.2.4 | L2 | 쓰고 있는 로그 처리기가 로그를 읽고 서로 연관 지을 수 있게 하고, 되도록 공통 로그 형식을 쓴다. | 적용 | 공통 JSON 형식. 명령 ID·회차 ID로 감사 기록·`ops_event` 줄·Grafana 주석을 잇는다 서버 구현: `services/ops-svc`(`ops_event` 줄의 명령 ID, 2026-11-22 BAT-360 계획) | 미실행 | — |
 | v5.0.0-16.2.5 | L2 | 민감 데이터는 보호 등급에 따라 로그에 남긴다(자격 증명·결제 정보는 남기지 않고, 일부는 해시·마스킹). | 적용 | `ops_event` 줄에는 사람 이름과 계정이 없다(C-T45). 보안 사고·신고 기록은 개인정보 원문 없이 대상 수와 요약만 남긴다(openapi `filings`). 재인증 토큰과 서명 값은 남기지 않는다 서버 구현: `services/ops-svc`(`ops_event` 줄, 2026-11-22 BAT-360 계획) | 미실행 | — |

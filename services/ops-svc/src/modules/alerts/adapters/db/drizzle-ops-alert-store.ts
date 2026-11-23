@@ -3,7 +3,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Database } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
-import type { OpsAlert, OpsAlertSeverity, OpsAlertStore } from '../../domain/ops-alert.js';
+import type { OpsAlert, OpsAlertList, OpsAlertSeverity, OpsAlertStore } from '../../domain/ops-alert.js';
 
 interface Row {
   id: string;
@@ -32,7 +32,7 @@ const toAlert = (r: Row): OpsAlert => ({
 });
 
 @Injectable()
-export class DrizzleOpsAlertStore implements OpsAlertStore {
+export class DrizzleOpsAlertStore implements OpsAlertStore, OpsAlertList {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
 
   async open(input: Parameters<OpsAlertStore['open']>[0]): Promise<OpsAlert> {
@@ -60,5 +60,18 @@ export class DrizzleOpsAlertStore implements OpsAlertStore {
         returning *`)
     ).rows as unknown as Row[];
     return rows[0] ? toAlert(rows[0]) : undefined;
+  }
+
+  /** 걸린 경보 전부와 resolvedSinceMs 이후에 풀린 경보(F-03-3). 차례는 compareAlertsForList와 같다 */
+  async list(q: Parameters<OpsAlertList['list']>[0]): Promise<readonly OpsAlert[]> {
+    const rows = (
+      await this.database.db.execute(sql`
+        select * from ops_alert
+        where (${q.eventKey ?? null}::text is null or event_key = ${q.eventKey ?? null}::text)
+          and (resolved_at is null or resolved_at >= ${new Date(q.resolvedSinceMs)}::timestamptz)
+        order by (resolved_at is null) desc, resolved_at desc, created_at desc
+        limit ${Math.max(0, Math.floor(q.limit))}`)
+    ).rows as unknown as Row[];
+    return rows.map(toAlert);
   }
 }

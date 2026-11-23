@@ -63,6 +63,11 @@ export class DrizzlePushEvents implements PushEventSource {
     return r && r.is_called ? Number(r.last_value) : 0;
   }
 
+  async committedMax(): Promise<number> {
+    const rows = (await this.database.db.execute(sql`select coalesce(max(seq), 0) as seq from ops_push_event`)).rows as unknown as { seq: string | number }[];
+    return Number(rows[0]?.seq ?? 0);
+  }
+
   async oldestWithin(windowMs: number): Promise<number | undefined> {
     const rows = (await this.database.db.execute(sql`select min(seq) as seq from ops_push_event where created_at >= now() - make_interval(secs => ${windowMs / 1000})`)).rows as unknown as { seq: string | number | null }[];
     const v = rows[0]?.seq;

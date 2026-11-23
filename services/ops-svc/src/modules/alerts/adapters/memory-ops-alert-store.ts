@@ -1,7 +1,7 @@
 // 운영 경보의 메모리 저장소(단위 시험).
-import type { OpsAlert, OpsAlertStore } from '../domain/ops-alert.js';
+import { compareAlertsForList, type OpsAlert, type OpsAlertList, type OpsAlertStore } from '../domain/ops-alert.js';
 
-export class MemoryOpsAlertStore implements OpsAlertStore {
+export class MemoryOpsAlertStore implements OpsAlertStore, OpsAlertList {
   readonly alerts: OpsAlert[] = [];
 
   async open(input: Parameters<OpsAlertStore['open']>[0]): Promise<OpsAlert> {
@@ -43,5 +43,12 @@ export class MemoryOpsAlertStore implements OpsAlertStore {
     const next: OpsAlert = { ...existing, resolvedAtMs: input.nowMs, resolvedReason: input.reason };
     this.alerts[this.alerts.indexOf(existing)] = next;
     return next;
+  }
+
+  async list(q: Parameters<OpsAlertList['list']>[0]): Promise<readonly OpsAlert[]> {
+    return this.alerts
+      .filter((a) => (q.eventKey === undefined || a.eventKey === q.eventKey) && (a.resolvedAtMs === undefined || a.resolvedAtMs >= q.resolvedSinceMs))
+      .sort(compareAlertsForList)
+      .slice(0, Math.max(0, q.limit));
   }
 }

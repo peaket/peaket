@@ -3,6 +3,7 @@
 // - Last-Event-ID가 없으면 지금 정한 번호부터(첫 덩이에 id만 둔다). 있으면 그 뒤를 표에서 다시 보낸다(늦게 커밋된 행을 놓쳤을 수 있으면 그 앞부터)
 // - 1시간 [가정] 밖·지운 번호면 reset(too-old), 숫자가 아니거나 만든 적 없는 번호면 reset(invalid). reset의 id는 지금 번호라 다시 reset되지 않는다
 // - eventId를 주면 그 회차의 접속자(presence)를 보내고 이 연결을 접속자 표에 15초 [가정]마다 적는다
+// - eventId를 주면 그 회차의 자동 제어 상태(control, 알림 표 순번 없는 지금 값)를 붙을 때 한 번과 바뀔 때마다 보낸다(F-03-3, ADR-0371 결정 6)
 // gw-ops는 이 경로의 시간 초과를 끈다(timeouts.request 0s).
 import { Controller, Get, Inject, Optional, Req, Res } from '@nestjs/common';
 import { CLOCK, type Clock, ContractRouteSchema, CurrentPrincipal, PLATFORM_LOGGER, type PlatformLogger, type Principal, Roles } from '@peaket/platform';
@@ -10,6 +11,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { OPS_LIVE_REPLAY_WINDOW_MS, lastEventIdOf, resumeVerdictOf, type OpsLiveEvent } from '../domain/live.js';
 import type { PushEventSource } from '../domain/ports.js';
+import { ControlWatch } from '../application/control-watch.js';
 import { OpsLiveFeed } from '../application/ops-live-feed.js';
 import { PresenceHub } from '../application/presence.js';
 import { PushHub, type HubDelivery } from '../application/push-hub.js';
@@ -31,6 +33,7 @@ export class OpsLiveController {
     private readonly feed: OpsLiveFeed,
     private readonly hub: PushHub,
     private readonly presence: PresenceHub,
+    private readonly control: ControlWatch,
     @Inject(PUSH_EVENT_SOURCE) private readonly source: PushEventSource,
     @Inject(CLOCK) private readonly clock: Clock,
     @Optional() @Inject(TERMINATED_SESSIONS) private readonly terminated?: TerminatedSessionsView,
@@ -121,6 +124,11 @@ export class OpsLiveController {
     }
     replaying = false;
     deliver(held.splice(0));
+
+    if (query.eventId) {
+      const stopControl = this.control.watch(query.eventId.toLowerCase(), (v) => conn.send({ event: 'control', data: v }));
+      conn.onClose(stopControl);
+    }
 
     if (query.eventId && me?.accountId && UUID.test(me.accountId) && me.role) {
       const stop = this.presence.watch(query.eventId, { accountRef: me.accountId, role: me.role, screen: query.screen ?? 'console' }, (s) => conn.send({ event: 'presence', data: s }));
