@@ -43,6 +43,6 @@ export function useScannerLive(search: string): ScannerLive {
     queue: view.queue,
     reportReadiness: () => liveRuntime.reportReadiness(),
     syncNow: () => liveRuntime.syncNow(),
-    reload: () => undefined,
+    reload: () => liveRuntime.restart(),
   };
 }

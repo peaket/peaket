@@ -79,6 +79,7 @@ class LiveRuntime {
   #lastChangesAtMs: number | undefined;
   #needsResync = false;
   #flags: GateFlagView[] = [];
+  #bound = false;
 
   subscribe = (fn: () => void): (() => void) => {
     this.#listeners.add(fn);
@@ -96,9 +97,13 @@ class LiveRuntime {
     if (this.#started) return;
     this.#started = true;
     this.#set({ mode: 'loading' });
-    this.#starting = this.#start().catch((e: unknown) => {
-      this.#errorOf(e);
-    });
+    this.#starting = this.#start()
+      .catch((e: unknown) => {
+        this.#errorOf(e);
+      })
+      .finally(() => {
+        this.#starting = undefined;
+      });
   }
 
   async #start(): Promise<void> {
@@ -201,7 +206,8 @@ class LiveRuntime {
   }
 
   #bindBrowserEvents(): void {
-    if (typeof window === 'undefined') return;
+    if (this.#bound || typeof window === 'undefined') return;
+    this.#bound = true;
     window.addEventListener('online', () => void this.flushNow());
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) void this.flushNow();
@@ -411,6 +417,24 @@ class LiveRuntime {
     }
     navigate('/login?live=1');
     return remaining;
+  }
+
+  /** 근무 준비를 다시 뜬다(배치 다시 확인·목록 다시 받기). 화면 구독은 그대로 둔다 */
+  restart(): void {
+    if (this.#starting) return;
+    if (this.#changesTimer !== undefined) clearInterval(this.#changesTimer);
+    this.#changesTimer = undefined;
+    if (this.#verdictTimer !== undefined) clearTimeout(this.#verdictTimer);
+    this.#verdictTimer = undefined;
+    this.#uploader?.stop();
+    this.#started = true;
+    this.#view = { ...this.#view, mode: 'loading', verdict: undefined };
+    this.#publish();
+    this.#starting = this.#start()
+      .catch((e: unknown) => this.#errorOf(e))
+      .finally(() => {
+        this.#starting = undefined;
+      });
   }
 
   /** 시험·개발용: 이 문서의 실제 연결을 버린다 */
