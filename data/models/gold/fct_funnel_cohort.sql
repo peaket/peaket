@@ -1,4 +1,6 @@
 {{ config(order_by='(event_id, run_id, cohort_minute, assignment, bot_class)', partition_by='toYYYYMM(open_date)', ttl='open_date + INTERVAL 2 YEAR') }}
+-- R2 동결(analytics §4.3, F-04-6): 마감 실행기가 onsale_run(R2 판)을 넘기면 다시 세지 않고 그 판의 행을 옮긴다(macros/close.sql)
+{% set body %}
 -- F3 퍼널 코호트(analytics §5.2): 회차 × 입장 분(구매 세션 시작) × 배정 방식 × 봇 범주. 단계 도달 수와 단계 사이 소요 시간 합.
 -- 봇 범주는 구매 세션과 판정 기록을 잇는 대기 기록(QueueEntryRecord)이 아직 없어 '모름'이다. 작은 칸 합치기(5 [가정])
 with o as ({{ open_of() }}),
@@ -22,3 +24,5 @@ select event_id, cohort_minute, ifNull(assignment, '') as assignment, 'UNKNOWN' 
        {{ gold_cols() }}
 from s
 group by event_id, cohort_minute, assignment
+{% endset %}
+{{ onsale_or(body) }}

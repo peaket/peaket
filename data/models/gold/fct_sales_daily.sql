@@ -1,4 +1,6 @@
 {{ config(order_by='(event_id, run_id, day, tier_id, pg)', partition_by='toYYYYMM(open_date)', ttl='open_date + INTERVAL 2 YEAR') }}
+-- 날짜별 사실 잇기(analytics §4.3, F-04-6): carry_run이 있으면 carry_before 앞의 날은 앞 판에서 옮긴다(실버 90일 지움 뒤에도 R3 합이 맞게, macros/close.sql)
+{% set body %}
 -- F15 판매(날짜별, analytics §5.2·§4.3, A-T18): 날짜 × 회차 × 등급 × 결제사. 판매 좌석·주문·판매 금액(확정 주문 좌석 줄의 가격),
 -- 되돌림(입금 되돌림 DEPOSIT_REVERSED의 좌석·금액), 반환 좌석(좌석 사건 RETURNED). R3 판매 대금 = 판매 금액 합 − 되돌림 금액 합
 with o as ({{ open_of() }}),
@@ -36,3 +38,5 @@ select u.event_id as event_id, u.day as day, u.tier_id as tier_id, u.pg as pg,
        {{ gold_cols() }}
 from u left join o on o.event_id = u.event_id
 group by event_id, day, tier_id, pg
+{% endset %}
+{{ with_carry(body, 'day') }}

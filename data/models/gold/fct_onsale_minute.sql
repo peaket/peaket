@@ -1,4 +1,6 @@
 {{ config(order_by='(event_id, run_id, open_minute)', partition_by='toYYYYMM(open_date)', ttl='open_date + INTERVAL 2 YEAR') }}
+-- R2 동결(analytics §4.3, F-04-6): 마감 실행기가 onsale_run(R2 판)을 넘기면 다시 세지 않고 그 판의 행을 옮긴다(macros/close.sql)
+{% set body %}
 -- F1 온세일 분 스냅샷(analytics §5.2): 회차 × 오픈 기준 분. 진입·입장·차례 도달·차례 뒤 미입장(대기 기록), 봇 차단·추가 검증(판정 기록),
 -- 주문 생성·결제 접수·승인·실패·발권(주문·결제·티켓). 대기 기록(QueueEntryRecord)은 queue-svc가 아직 내지 않아 그 칸은 0이다(F-04-7 범위 때)
 with o as ({{ open_of() }}),
@@ -28,3 +30,5 @@ select q.event_id as event_id,
 from q left join o on o.event_id = q.event_id
 where q.at is not null
 group by event_id, open_minute
+{% endset %}
+{{ onsale_or(body) }}

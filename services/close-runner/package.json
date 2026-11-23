@@ -1,0 +1,28 @@
+{
+  "name": "@peaket/close-runner",
+  "private": true,
+  "version": "0.0.0",
+  "description": "분석 마감 실행기. 10분마다 회차별 마감 단계(R0~R3)와 매일 쌓기를 찾아 dbt로 다시 만들고, R3 정산 대조 뒤 현재 판을 바꾼다(docs/features/analytics.md §4, OPS-240)",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/runner.d.ts",
+      "default": "./dist/runner.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@peaket/platform": "workspace:*"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

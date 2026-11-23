@@ -1,4 +1,6 @@
 {{ config(order_by='(event_id, run_id, open_minute, pg, pay_method, result, failure_category)', partition_by='toYYYYMM(open_date)', ttl='open_date + INTERVAL 2 YEAR') }}
+-- R2 동결(analytics §4.3, F-04-6): 마감 실행기가 onsale_run(R2 판)을 넘기면 다시 세지 않고 그 판의 행을 옮긴다(macros/close.sql)
+{% set body %}
 -- F5 결제 시도(analytics §5.2): 회차 × 결제사 × 결제 수단 범주 × 결과 × 실패 범주 × 분. 시도 수, 금액, 응답 시간 버킷(ms)
 with o as ({{ open_of() }})
 select p.event_id as event_id,
@@ -14,3 +16,5 @@ select p.event_id as event_id,
 from {{ ref('slv_payment_attempt') }} as p left join o on o.event_id = p.event_id
 where {{ event_filter('p.event_id') }} and p.type in ('APPROVED', 'FAILED', 'UNKNOWN', 'AWAITING_DEPOSIT')
 group by event_id, open_minute, pg, pay_method, result, failure_category
+{% endset %}
+{{ onsale_or(body) }}

@@ -1,4 +1,6 @@
 {{ config(order_by='(event_id, run_id, day, tier_id, route)', partition_by='toYYYYMM(open_date)', ttl='open_date + INTERVAL 2 YEAR') }}
+-- 날짜별 사실 잇기(analytics §4.3, F-04-6): carry_run이 있으면 carry_before 앞의 날은 앞 판에서 옮긴다(실버 90일 지움 뒤에도 R3 합이 맞게, macros/close.sql)
+{% set body %}
 -- F8 환불(날짜별, analytics §5.2): 날짜 × 회차 × 등급 × 경로(셀프·회차 취소·예외). 금액은 refundAmount. 경로: 고객 취소 REFUNDED·PARTIALLY_REFUNDED는 셀프,
 -- 회차 취소 확정 EVENT_CANCELLATION_CONFIRMED는 회차 취소, COMPENSATION_PAID는 예외(추천 적용 2026-11-23, F-04-4 계획)
 with o as ({{ open_of() }}),
@@ -16,3 +18,5 @@ select r.event_id as event_id, r.day as day, r.tier_id as tier_id, r.route as ro
        {{ gold_cols() }}
 from r left join o on o.event_id = r.event_id
 group by event_id, day, tier_id, route
+{% endset %}
+{{ with_carry(body, 'day') }}

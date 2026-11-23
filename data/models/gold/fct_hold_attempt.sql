@@ -1,4 +1,6 @@
 {{ config(order_by='(event_id, run_id, open_minute, tier_id, section_id, assignment, result, retry_no)', partition_by='toYYYYMM(open_date)', ttl='open_date + INTERVAL 2 YEAR') }}
+-- R2 동결(analytics §4.3, F-04-6): 마감 실행기가 onsale_run(R2 판)을 넘기면 다시 세지 않고 그 판의 행을 옮긴다(macros/close.sql)
+{% set body %}
 -- F4 홀드 시도(analytics §5.2): 회차 × 등급 × 구역 × 분 × 배정 방식 × 결과 × 재시도 순번. 시도 수, 세션 첫 시도 수, 지연 버킷(ms, 100·250·500·1000·2000 넘음)
 with o as ({{ open_of() }})
 select h.event_id as event_id,
@@ -16,3 +18,5 @@ select h.event_id as event_id,
 from {{ ref('slv_hold_attempt') }} as h left join o on o.event_id = h.event_id
 where {{ event_filter('h.event_id') }}
 group by event_id, open_minute, tier_id, section_id, assignment, result, retry_no
+{% endset %}
+{{ onsale_or(body) }}

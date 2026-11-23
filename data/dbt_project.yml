@@ -31,6 +31,12 @@ vars:
   small_cell_min: 5
   # 마감 실행기(F-04-6)가 넘기는 바깥 품질 검사 실패(커버리지·실시간 대비·정확성, analytics §7): 걸린 지표 코드 목록. 그 지표의 규칙은 '판정 보류(데이터 품질 실패)'
   quality_failed: []
+  # 판 잇기(마감 실행기 F-04-6, macros/close.sql): R2 판 ID(온세일 동결), 앞 현재 판 ID와 그보다 앞선 날을 옮길 기준 날짜
+  onsale_run: null
+  carry_run: null
+  carry_before: null
+  # KST 공휴일(마감 실행기가 PEAKET_HOLIDAY_CALENDAR_FILE에서 읽어 넘긴다). dim_date의 영업일·공휴일 칸에 쓴다
+  holidays: []
 
 models:
   analytics:

@@ -1,4 +1,6 @@
 {{ config(order_by='(event_id, run_id, open_minute, tier_id, section_id, pg)', partition_by='toYYYYMM(open_date)', ttl='open_date + INTERVAL 2 YEAR') }}
+-- R2 동결(analytics §4.3, F-04-6): 마감 실행기가 onsale_run(R2 판)을 넘기면 다시 세지 않고 그 판의 행을 옮긴다(macros/close.sql)
+{% set body %}
 -- F2 판매(analytics §5.2): 회차 × 등급 × 구역 × 결제사 × 오픈 기준 분. 판매 좌석·주문·판매 금액은 확정(CONFIRMED) 주문의 좌석 줄,
 -- 결제사는 같은 주문 가명의 승인 결제, 다시 나온 좌석(만료·반환)은 좌석 사건(결제사 없음 '')이다(추천 적용 2026-11-23, F-04-4 계획)
 with o as ({{ open_of() }}),
@@ -37,3 +39,5 @@ select u.event_id as event_id,
        {{ gold_cols() }}
 from u left join o on o.event_id = u.event_id
 group by event_id, open_minute, tier_id, section_id, pg
+{% endset %}
+{{ onsale_or(body) }}
