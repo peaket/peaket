@@ -118,7 +118,10 @@ export function kindLabel(kind: string): string {
   return KIND_LABELS[kind] ?? '기타 건';
 }
 
-/** 화면의 종류 필터(이 기능이 받는 아홉 종류, ADR-0364 결정 4) */
+/**
+ * 화면의 종류 필터: ops-svc가 받는 종류(ADR-0364 결정 4의 아홉과 F-07-5 ADR-0368 결정 5의 정산 이의). 넷 역할 모두의 목록에 나오는 종류다
+ * (정산 이의는 CS 담당자에게 보이는 유일한 정산 건이고 operator·commander도 본다, d5 §7.6 '정산 건의 나눔', authz-matrix 정산서 행)
+ */
 export const FILTER_KINDS: readonly string[] = [
   'JUDGEMENT_PENDING',
   'DISPUTE',
@@ -129,6 +132,7 @@ export const FILTER_KINDS: readonly string[] = [
   'VERIFICATION_APPEAL',
   'SCANNER_UNREPORTED',
   'APPROVAL_EXECUTION_FAILED',
+  'STATEMENT_DISPUTE',
 ];
 
 /** 지급·대사·KYC 건(operator·commander만 처리, open-items 72번) */
