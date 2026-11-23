@@ -890,6 +890,7 @@
 | R-797 | 파트너 실시간 판매 현황의 '지금 대기'와 관제 '지금 대기'가 읽는 1초 대기 집계를 queue-svc가 내지 않아 0으로 떴다 | services/queue-svc(queue-aggregate·wiring·start·app.module·진입·입장 확정·대기 취소 세는 줄) | 관측이 업무 경로를 막지 않는 세기와 1초 내기 | 해결. QueueEntryRecord는 F-04-7 범위 때 |
 | R-798 | 관제 대시보드의 단계·T-30분 점검·Go/No-Go·남은 허용 실패·제어 입력 없음·경보가 목업 숫자뿐이었고, reset 뒤 경보를 다시 읽을 REST가 없었다 | services/ops-svc readiness·live·alerts 읽기·0029, docs/api openapi·asyncapi, packages/contracts·api-client 생성물, apps/console-host 대시보드, docs/adr/0371, docs/features/control-tower.md, docs/BUILD_ORDER.md | readiness 컨텍스트·판정 기록, 제어 감시, 판단 위젯 넷, 경보 목록 REST·다시 읽기, 실제 값 대시보드 | 해결. OPS-370은 F-03-6(동결), 못 한 몫은 정리 목록 |
 | R-799 | 콘솔 명령 화면이 목업이라 명령 승인에 OPS_COMMAND 재인증 토큰을 싣지 않아 실제 서버에서 2인 승인이 막혔고, 명령 6 해제·identity 넘김이 없었다 | apps/console-host 명령 화면·admin-reauth·ops-proxy, docs/api/openapi.yaml(…/retries), packages/contracts·api-client·deploy/gateways 생성물, docs/BUILD_ORDER.md, docs/review/ledger-notes.md | 명령 1·3·6·해제 보내기, 재인증 토큰, ack 3초 다시 읽기, identity 갈래 | 일부 해결. 실서버 화면 시험·브라우저 확인 남음, F-03-7 동결 |
+| R-801 | 관제 공연 리포트·파트너 판매 요약이 읽을 골드 사실·차원이 없었다 | data/(dbt_project·macros·models staging·silver·gold·seeds·tests·tests_int, uv.lock) | 브론즈 → 실버 → 골드 변환과 판 바꾸기 | 해결. 지표 뷰·F12는 F-04-5, 마감 실행기는 F-04-6 |
 
 ## 4. 숫자 일치표
 
