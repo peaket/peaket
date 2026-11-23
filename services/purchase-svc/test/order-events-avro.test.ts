@@ -109,16 +109,30 @@ describe('A-T26 ① 주문 사건(trade.orders)', () => {
     expect(judged(c.encode(delayed))).toMatchObject({ type: 'ISSUE_DELAYED', orderId: ORDER, occurredAt: AT, eventKey: uuid8Of(`OrderEvent:${ORDER}:ISSUE_DELAYED:2`) });
   });
 
-  test('A-T26 ① 고객 취소로 끝난 주문의 REFUNDED(T23·T24·T26)도 공통 판정을 만족한다(refundAmount, x-present-when type REFUNDED)', () => {
+  test('A-T26 ① 고객 취소로 끝난 주문의 REFUNDED(T23·T24·T26)는 그 취소의 환급액을 refundAmount로 싣고 공통 판정을 만족한다', () => {
     const c = codec();
+    // 그 전이를 일으킨 취소의 환급액(order_cancellation.refund_amount, 공제 뒤). 주문 금액(154,000)·단가(99,000·55,000)와 다른 값으로 고른다
+    // (예: 99,000원 표에 공제 10%를 빼면 89,100원. 구현이 주문 금액·단가 합을 지어 넣으면 이 단언이 실패한다)
+    const REFUND = 89_100;
     for (const id of ['T23', 'T24', 'T26']) {
       const t = T(id);
       expect(orderEventType(t), id).toBe('REFUNDED');
-      const m = buildOrderEvent({ order: row(t), items, transition: t, seq: 7, occurredAtMs: AT, reachedBefore: false })!;
+      const m = buildOrderEvent({ order: row(t), items, transition: t, seq: 7, occurredAtMs: AT, reachedBefore: false, refundAmount: REFUND })!;
       const v = judged(c.encode(m));
-      expect(v, id).toMatchObject({ type: 'REFUNDED', eventKey: uuid8Of(`OrderEvent:${ORDER}:7`) });
-      expect(typeof v.refundAmount, id).toBe('number');
+      expect(v, id).toMatchObject({ type: 'REFUNDED', amount: 154_000, refundAmount: REFUND, eventKey: uuid8Of(`OrderEvent:${ORDER}:7`) });
+      // 환급액 없이 만든 REFUNDED는 계약(x-present-when type REFUNDED)을 채우지 못해 인코딩 오류다(지어 넣지 않는다)
+      const bare = buildOrderEvent({ order: row(t), items, transition: t, seq: 7, occurredAtMs: AT, reachedBefore: false })!;
+      let e: unknown;
+      try {
+        c.encode(bare);
+      } catch (x) {
+        e = x;
+      }
+      expect(e, id).toBeInstanceOf(AvroEncodeError);
+      expect((e as AvroEncodeError).fields, id).toEqual(['refundAmount']);
     }
+    // 전액 환급 0원(공제가 전부)도 싣는다
+    expect(judged(c.encode(buildOrderEvent({ order: row(T('T24')), items, transition: T('T24'), seq: 8, occurredAtMs: AT, reachedBefore: false, refundAmount: 0 })!))).toMatchObject({ type: 'REFUNDED', refundAmount: 0 });
   });
 
   test('A-T26 ⑤ 필수 칸을 비운 주문 사건은 코덱이 AvroEncodeError로 던진다(삼키지 않고 JSON으로 내지 않는다)', () => {
