@@ -993,7 +993,7 @@ erDiagram
         uuid refund_account_idem_key "마지막 지연 환급 계좌 다시 받기 요청의 Idempotency-Key. 계좌 원문이 아니다(purchase 0031, BAT-425 RV-03)"
         text refund_account_answer "그 키의 첫 답(REFUNDED|REFUND_PENDING|REFUND_ACCOUNT_REQUIRED|REJECTED). 같은 키의 다시 부름은 이 답을 그대로 준다. 키 없이 쓰지 않는다(CHECK, purchase 0031, BAT-425 RV-03)"
         text status "REQUESTED|REFUND_PENDING|REFUNDED|VOIDED"
-        timestamptz refund_due_at "입장 기록 마감 뒤 환급할 시각(REQUESTED만). 없으면 지금 환급 대상이다. core event.entry_closed_at 연결 전에는 공연 시작 + 50시간(공연 24 + 역할 유효 끝 2 + 미보고 24)의 보수적 상한이다(추천 적용 2026-11-13, R-540)"
+        timestamptz refund_due_at "입장 기록 마감 뒤 환급할 시각(REQUESTED만). 없으면 지금 환급 대상이다. 취소 때는 공연 시작 + 50시간(공연 24 + 역할 유효 끝 2 + 미보고 24)의 보수적 상한이다(추천 적용 2026-11-13, R-540). core event.entry_closed_at이 생기면 purchase-svc 배경 작업이 이 값을 마감 시각으로 당긴다(offline-gate §7.3 'GAT-180 마감 규칙', 추천 적용 2026-11-23, F-05-6)"
         int refund_attempts "결제사 취소를 다시 시도한 횟수(REFUND_PENDING). 기본 0. 5회 [가정]를 넘으면 refund_failed_at을 남긴다(추천 적용 2026-11-13, R-547)"
         timestamptz next_refund_at "다음 재시도 시각(REFUND_PENDING). 없으면 곧 시도한다. 1분→5분→15분→1시간→6시간 [가정](R-547)"
         timestamptz refund_failed_at "재시도를 다 썼거나 결제사 업무 거절로 CS 처리함 '환급 실패'에 넘길 시각. 있으면 실행기가 건너뛴다(R-547)"
@@ -1712,6 +1712,7 @@ erDiagram
         int clock_offset_ms
         bigint known_seq "판정 때 반영한 서버 변경 일련번호"
         bigint device_seq "기기 일련번호"
+        bigint state_seq "이 기록으로 적은 입장 상태 변경(SCAN_STATE)의 일련번호. 없으면 NULL. 중복 입장의 몰랐음/알고도 통과를 가른다(추천 적용 2026-11-23, F-05-6, 감사 C1-03, offline-gate §7.1)"
         timestamptz received_at
         text flag "NONE|DUPLICATE|NO_EXIT|AFTER_CANCEL|OUT_OF_SESSION|AFTER_CLOSE|TIME_UNCERTAIN"
     }
@@ -1753,6 +1754,26 @@ erDiagram
         int pending_uploads "올리지 못한 기록 수"
         uuid reported_by
         timestamptz reported_at
+    }
+    scanner_queue_report {
+        uuid event_id PK
+        uuid scanner_device_id PK
+        int pending_uploads "올리지 못한 기록 수(0 이상). 기기·회차마다 마지막 보고 하나(추천 적용 2026-11-23, F-05-6, offline-gate §7.3)"
+        timestamptz reported_at "받은 서버 시각. 역할 유효 끝 이상이고 pending_uploads = 0일 때만 마감 판단에서 '비웠다'로 센다"
+    }
+    entry_close {
+        uuid event_id PK "회차마다 한 행. 회차 단위 잠금 안에서 쓴다"
+        timestamptz closed_at "입장 기록 마감 시각(판단 시각)"
+        text reason "ALL_REPORTED|TIMEOUT"
+        timestamptz role_ends_at "판단 때 쓴 역할 유효 끝(ends_at + 2시간)"
+        timestamptz core_synced_at "core-svc event.entry_closed_at에 알린 시각. 비면 다음 판단마다 다시 보낸다"
+    }
+    scanner_unreported_case {
+        uuid event_id PK
+        uuid scanner_device_id PK
+        uuid event_key "CaseRequested eventKey(scanner-unreported:{회차}:{기기}의 SHA-256 앞 16바이트)"
+        timestamptz created_at "마감 시각"
+        timestamptz opened_at "ops-svc가 accepted true로 받은 시각. 비면 다시 보낸다"
     }
     scanner_change {
         uuid event_id
