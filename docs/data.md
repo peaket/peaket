@@ -1429,10 +1429,10 @@ erDiagram
         timestamptz changed_at
         timestamptz hold_until "변경 뒤 3영업일 지급 보류"
         bool holder_verified "예금주 확인. 2026-11-23 F-07-7(ADR-0370 결정 5)부터 불일치는 저장하지 않으므로 새 행은 늘 true다. 옛 false 행은 지급 묶음에서 ACCOUNT_MISMATCH 보류로 남는다"
-        bool agency_sync_pending "결제사 수정 대기(payment 0029). 계좌 변경에서 세 곳 가운데 한 곳이라도 실패하면 true이고, 보류가 끝나도 지급하지 않는다. 다음 변경이 모두 성공하면 false"
+        bool agency_sync_pending "결제사 수정 대기(payment 0030). 계좌 변경에서 세 곳 가운데 한 곳이라도 실패하면 true이고, 보류가 끝나도 지급하지 않는다. 다음 변경이 모두 성공하면 false"
     }
     payout_account_change {
-        uuid id PK "정산 계좌 변경 시도 한 번(payment 0029, ADR-0370 결정 5). 덧붙이기만 한다. 계좌번호·예금주명은 없다"
+        uuid id PK "정산 계좌 변경 시도 한 번(payment 0030, ADR-0370 결정 5). 덧붙이기만 한다. 계좌번호·예금주명은 없다"
         uuid promoter_id
         uuid actor_account_id "재인증한 파트너 관리자 계정"
         text reauth_jti UK "그 시도에 쓴 재인증 토큰 jti(한 번 쓰기의 증거)"
@@ -1445,17 +1445,17 @@ erDiagram
         timestamptz audit_sent_at "ops-svc 감사 받기(PAYOUT_ACCOUNT_CHANGED)가 받은 시각. 비면 정산 일꾼이 30분 [가정]마다 다시 보낸다"
     }
     portone_partner {
-        uuid promoter_id PK "포트원 파트너 등록(payment 0029, ADR-0370 결정 1). 계좌번호는 두지 않는다"
+        uuid promoter_id PK "포트원 파트너 등록(payment 0030, ADR-0370 결정 1). 계좌번호는 두지 않는다"
         text portone_partner_id UK "PEAKET이 정해 등록한 포트원 파트너 ID"
         text contract_id "등록에 쓴 기본 계약 ID(중개수수료 0, settlement §5.4)"
         timestamptz registered_at
         timestamptz account_updated_at "마지막 정산 계좌 수정 시각"
-        text last_account_check "MATCHED|MISMATCH(마지막 파트너 계좌 대조, payment 0030, ADR-0370 결정 8 ②)"
+        text last_account_check "MATCHED|MISMATCH(마지막 파트너 계좌 대조, payment 0032, ADR-0370 결정 8 ②)"
         timestamptz last_account_checked_at
         timestamptz updated_at
     }
     portone_transfer {
-        text transfer_id PK "포트원 이체 원장의 출금 하나(payment 0030, settlement §5.3, ADR-0370 결정 8 ①). 겹쳐 읽어도 한 행"
+        text transfer_id PK "포트원 이체 원장의 출금 하나(payment 0032, settlement §5.3, ADR-0370 결정 8 ①). 겹쳐 읽어도 한 행"
         text withdrawal_type "출금 유형(원문 값). 유형과 상관없이 모두 본다"
         uuid payout_id FK "이어진 지급 건. UNLINKED면 null"
         bigint amount
@@ -1467,7 +1467,7 @@ erDiagram
         timestamptz checked_at
     }
     settlement_alert_request {
-        text event_key PK "운영 경보 요청(payment 0030, ADR-0370 결정 8). 원인이 된 쓰기와 같은 트랜잭션에 넣는다"
+        text event_key PK "운영 경보 요청(payment 0032, ADR-0370 결정 8). 원인이 된 쓰기와 같은 트랜잭션에 넣는다"
         text kind "경보 종류(settlement_portone_withdrawal_unmatched·_partner_account_mismatch·_ledger_sync_stale·_execution_pending [가정 이름])"
         text severity "SEV2|SEV3"
         text source_id "대상(이체 ID·파트너 ID·묶음 ID·동기화 이름)"
@@ -1475,7 +1475,7 @@ erDiagram
         timestamptz requested_at "ops-svc 운영 경보 받기가 받은 시각. 비면 정산 일꾼이 30분 [가정]마다 다시 보낸다"
     }
     portone_ledger_sync {
-        text name PK "WITHDRAWAL|PARTNER_ACCOUNT(payment 0030, ADR-0370 결정 8 ④)"
+        text name PK "WITHDRAWAL|PARTNER_ACCOUNT(payment 0032, ADR-0370 결정 8 ④)"
         timestamptz last_success_at "마지막으로 끝까지 성공한 시각. 3,600초 [가정] 넘게 지나면 SEV2"
         timestamptz read_through "다음 출금 대사가 읽기 시작할 기준(지난 성공 − 30분 [가정])"
         date halted_on "지급과 이어지지 않는 출금이 나온 날. 그날 남은 포트원 실행 건을 만들지 않는다"
