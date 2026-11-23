@@ -163,7 +163,7 @@ const GRPC = {
   },
   'queue-svc': {
     'peaket.queue.v1.BookingRestrictionService': ['ops-svc'],
-    'peaket.queue.v1.PriorityGrantService': ['ops-svc'],
+    'peaket.queue.v1.PriorityGrantService': ['ops-svc', 'purchase-svc'],
     'peaket.queue.v1.QueueService': ['trust-svc'],
     'peaket.queue.v1.VerificationAppealService': ['ops-svc'],
   },
@@ -1142,13 +1142,18 @@ test('MS-19 내부 HTTP 부르는 쪽: ADR-0285 결정 9 표의 17쌍(2026-11-22
 
 // ===================== BAT-057 S7(계획 §6): purchase-svc → queue-svc 입장 토큰 공개키 묶음 =====================
 
-test('PRF-050 PRF-137 ADR-0288 결정 8 생성 정책이 purchase-svc의 queue-svc 앱 포트(8080) 호출을 메시·메시 없는 둘 다 허용하고, 업무 gRPC·제어·지표 포트는 허용하지 않는다', () => {
+test('PRF-050 PRF-137 ADR-0288 결정 8·ADR-0385 생성 정책이 purchase-svc의 queue-svc 앱 포트(8080)와 우선 구매 권리 업무 gRPC만 허용하고, 다른 업무 gRPC 메서드·제어·지표 포트는 허용하지 않는다', () => {
   const mesh = meshObjects();
   const meshless = meshlessObjects();
   const allow = meshNodeAllow(mesh, 'queue-svc');
   assert.ok(allowedOn(allow, REST_PORT('queue-svc')).has(principalOf('purchase-svc')), 'policies.yaml queue-svc REST에 purchase-svc가 없다');
   assert.equal(meshlessAllows(meshless, 'queue-svc', REST_PORT('queue-svc'), IDENTITY['purchase-svc']), true, 'meshless queue-svc REST에 purchase-svc가 닿지 못한다');
-  for (const port of [GRPC_PORT('queue-svc'), CONTROL_PORT, METRICS_PORT]) {
+  // F-05-3(ADR-0385): purchase-svc가 q:prio 사본을 맞추는 PriorityGrantService만 업무 gRPC로 부른다
+  assert.ok(waypointAllowed(mesh, 'queue-svc', '/peaket.queue.v1.PriorityGrantService/SetPriorityGrant').has(principalOf('purchase-svc')), 'queue-svc PriorityGrantService/SetPriorityGrant에 purchase-svc가 없다');
+  assert.ok(!waypointAllowed(mesh, 'queue-svc', '/peaket.queue.v1.QueueService/IsolateWaiting').has(principalOf('purchase-svc')), 'queue-svc QueueService/IsolateWaiting에 purchase-svc가 있다');
+  // meshless NetworkPolicy는 포트 단위라 업무 gRPC를 열되, 메시 L7 정책이 위 메서드 하나로 좁힌다
+  assert.equal(meshlessAllows(meshless, 'queue-svc', GRPC_PORT('queue-svc'), IDENTITY['purchase-svc']), true, 'meshless queue-svc 업무 gRPC에 purchase-svc가 닿지 못한다(대조 경로)');
+  for (const port of [CONTROL_PORT, METRICS_PORT]) {
     assert.ok(!allowedOn(allow, port).has(principalOf('purchase-svc')), `policies.yaml queue-svc ${port}에 purchase-svc가 닿는다`);
     assert.equal(meshlessAllows(meshless, 'queue-svc', port, IDENTITY['purchase-svc']), false, `meshless queue-svc ${port}에 purchase-svc가 닿는다`);
   }
