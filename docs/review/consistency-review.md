@@ -876,6 +876,7 @@
 | R-784 | F-07-5가 들인 ops 오류 이름 셋이 오류 유형 목록에 없어 PRF-192 실패, platform 시험 캐시 입력에 서비스 원본 없음 | docs/api/openapi.yaml, packages/api-client/src/gen/problem-types.ts, packages/platform/turbo.json | 목록에 세 줄·생성물 재생성·test 입력 더함 | 고침 |
 | R-785 | payment 표 receivable_move가 정본 receivable_movement와 달라 검사기 M3가 실제 DB에서 건너뜀 | services/payment-svc/migrations/0028, src/modules/settlement/adapters/db, services/invariant-checker, loadtest/runner/v1.mjs | 이름 바꾸기 + 옛 이름 뷰(확장·축소 ①), 검사기 건너뜀 드러내기 | 고침 |
 | R-779 | OPS-300 제어 gRPC 앞 몫 | ops-svc·admission-ctrl·purchase-svc·queue-svc·ci-node·ADR-0365·ASVS 네 행 | F-02-1 역할 다섯 | 끝 |
+| R-786 | 관측 대시보드·Grafana 권한·보존이 손설정이었고, 서버 오류 수집이 없어 5xx를 모으지 못했다. 오류 글 속 개인정보와 운영의 평문 DSN을 막는 장치가 없었다 | packages/platform(error-reporting·pii-text·service), tools/local(dashboards·grafana-access), tools/ci(observability-config·min-versions·changes), deploy/platform/observability, deploy/local/dashboards, docs/observability.md·devops.md·verification.md·api/guidelines.md, ADR-0356, docs/BUILD_ORDER.md | 대시보드·권한·보존을 코드와 정적 검사로 두고, 오류 수집을 잠근 설정과 글 가림으로 켰다 | 수정 완료 |
 
 ## 4. 숫자 일치표
 
