@@ -1,0 +1,29 @@
+{
+  "name": "@peaket/rt-pulse",
+  "private": true,
+  "version": "0.0.0",
+  "description": "관제 실시간 표의 심장 박동. 1초마다 텔레메트리 토픽 셋의 모든 파티션에 PipelinePulse를 쓴다(docs/streaming.md §1·§3, OPS-160)",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/pulse.d.ts",
+      "default": "./dist/pulse.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@peaket/platform": "workspace:*",
+    "avsc": "5.7.9"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

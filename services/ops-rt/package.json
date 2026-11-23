@@ -1,0 +1,28 @@
+{
+  "name": "@peaket/ops-rt",
+  "private": true,
+  "version": "0.0.0",
+  "description": "관제 실시간 표 원시 적재 작업자. 거래·텔레메트리 토픽 일곱을 읽어 ClickHouse rt 원시 표 다섯에 싣는다(집계하지 않음, docs/streaming.md §4, OPS-160)",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "migrate": "node dist/main.js migrate",
+    "backfill": "node dist/main.js backfill",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@peaket/platform": "workspace:*",
+    "@prometheus-io/client": "^0.16.1",
+    "fastify": "^5.12.7"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "avsc": "5.7.9",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
