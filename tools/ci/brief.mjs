@@ -285,6 +285,7 @@ export const JOBS = {
   'web / tokens': { file: 'ci-web.yml', what: '토큰 생성물 차이·형식 FE-T45·대비표 FE-T44(@peaket/ds test)' },
   'web / visual': { file: 'ci-web.yml', what: '시각 비교 FE-T40(대기실 셸·ds Storybook)과 tools/web-checks 시험' },
   'web / queue-room': { file: 'ci-web.yml', what: '대기실 T=0 세 엔진(FE-T3·FE-T15·FE-T4·FE-T6)' },
+  'web / scanner-enroll': { file: 'ci-web.yml', what: '스캐너 기기 등록 화면(SCR-036 /enroll) 세 엔진(O-T37 ①, F-05-5)' },
   'web / purchase': { file: 'ci-web.yml', what: '구매 세션 서명기 세 엔진(FE-T7)' },
   'web / rich-text': { file: 'ci-web.yml', what: '공연 설명 편집기(FE-T41, 파트너 콘솔 빌드)' },
   'web / console-csp': { file: 'ci-web.yml', what: '관제·파트너 콘솔 보안 헤더와 Trusted Types 위반 0(F-03-1 T10~T12, 관제 운영 빌드·파트너 빌드), 관제 원격 무결성·대체 카드·미리 받기 화면 검사 console-remotes 세 엔진(F-03-2)' },
@@ -319,7 +320,8 @@ export const CI_AREAS = [
   [/^apps\/partner\//, top2, ['web / rich-text', 'web / console-csp', 'web / budgets', 'web / seed-css', 'web / reflow', 'node / node']],
   [/^apps\/console-host\//, top2, ['web / console-csp', 'web / remotes', 'web / budgets', 'web / seed-css', 'web / reflow', 'node / node']],
   [/^apps\/widgets\//, top2, ['web / remotes', 'web / console-csp', 'node / node']],
-  [/^apps\/(scanner|forensics)\//, top2, ['web / budgets', 'web / seed-css', 'node / node']],
+  [/^apps\/scanner\//, top2, ['web / budgets', 'web / seed-css', 'web / scanner-enroll', 'node / node']],
+  [/^apps\/forensics\//, top2, ['web / budgets', 'web / seed-css', 'node / node']],
   [/^apps\//, top2, ['node / node']],
   [/^packages\/ds\//, top2, ['web / tokens', 'web / visual', 'web / ds', 'node / node']],
   [/^packages\/seatmap\//, top2, ['web / seatmap-pkg', 'node / node']],
@@ -336,6 +338,7 @@ export const CI_AREAS = [
   [/^tools\/local\//, top2, ['kind / kind', 'tools-check / tools']],
   [/^tools\/doc-check\//, top2, ['docs-check / docs']],
   [/^tools\/web-checks\/seats\//, top2, ['web / seats', 'web / visual', 'web / reflow']],
+  [/^tools\/web-checks\/scanner-enroll\//, top2, ['web / scanner-enroll', 'web / visual', 'web / reflow']],
   [/^tools\/web-checks\//, top2, ['web / visual', 'web / reflow']],
   [/^tools\/storybook\//, top2, ['web / visual']],
   [/^tools\//, top2, ['tools-check / tools']],
@@ -384,7 +387,7 @@ export function ciJobs(paths, specAdrs = new Set()) {
     .map((r) => ({ area: r.area, code: r.code, files: r.files, docs: r.docs, jobs: r.jobs, extra: [...r.extra].join('; ') }));
   const notes = [];
   if (paths.some((p) => WEB_SCOPE.test(p.path))) {
-    notes.push('web 범위(tools/ci/changes.mjs의 web 규칙)에 드는 곳이 있어 그곳을 고치면 ci-web.yml의 잡 열셋(tokens·visual·queue-room·purchase·rich-text·console-csp·remotes·ds·seed-css·budgets·seatmap-pkg·reflow·seats)이 모두 돈다. 표의 web 잡은 그 영역을 직접 빌드·검사하는 잡이다');
+    notes.push('web 범위(tools/ci/changes.mjs의 web 규칙)에 드는 곳이 있어 그곳을 고치면 ci-web.yml의 잡 열넷(tokens·visual·queue-room·scanner-enroll·purchase·rich-text·console-csp·remotes·ds·seed-css·budgets·seatmap-pkg·reflow·seats)이 모두 돈다. 표의 web 잡은 그 영역을 직접 빌드·검사하는 잡이다');
   }
   if (paths.some((p) => WIDEN_JS.test(p.path))) notes.push('node / node는 넓게 쓰이는 것(packages/platform·contracts·config, docs/api)을 고치면 바뀐 패키지만이 아니라 전체를 돈다(changes.mjs의 WIDEN_JS)');
   const used = new Set(out.flatMap((r) => r.jobs));
