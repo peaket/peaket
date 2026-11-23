@@ -1,0 +1,61 @@
+# 지표 사전(docs/features/analytics.md §6.2·§6.3, F-04-5). 기준값·적용 조건의 정본은 docs/planning/01 §3.2 결정 규칙 표다(옮긴 판정 규칙은 rules.yml).
+# 지표마다 정의(분자·분모·칸), 확정 단계, 원천 사실을 둔다. dbt가 metric_value(판마다)와 지표 뷰 mtr_event_metric(현재 판)을 만든다.
+# source: none인 지표는 원천(F13 CS·F14 비용·F11의 SLO·한도·체감 성능 칸 등)이 아직 없어 값 NULL·source_ok 0으로 낸다.
+# 32번 부정 예매 소명 인정 비율은 포렌식이라 동결이다(감독 지시 2026-11-23). 9번 자동 배정 결과 분포는 F4에 자동 배정 결과 칸이 없어 원천 없음이다.
+version: 2
+
+models:
+  - name: metric_value
+    description: 이번 판의 회차 × 지표 × 칸 값(분자·분모·표본 수). 지표 뷰와 규칙 판정이 읽는다
+    config:
+      meta:
+        metrics:
+          - { num: 1, name: entries, label: 진입 인원, source: F1, close_stage: R0, numerator: fct_onsale_minute.entries, rule: 관측 }
+          - { num: 2, name: admissions, label: 입장 인원, source: F1, close_stage: R0, numerator: fct_onsale_minute.admissions, rule: 관측 }
+          - { num: 3, name: admission_to_purchase_rate, label: 입장 → 구매 전환율, source: F3, close_stage: R1, numerator: fct_funnel_cohort.approved, denominator: fct_funnel_cohort.admitted, dimensions: [event, seat_assignment, admit_cohort_minute], target: ">= 0.83", rule: "docs/planning/01 §3.2 '입장 → 구매 전환율'", applies_when: "sold_out and admitted >= 1000", judge: wilson_95, display: 단계별 막대(분자·분모 표기) + 같은 규모 기준선, owner: 데이터 담당 }
+          - { num: 4, name: stage_conversion, label: 단계별 전환, source: F3, close_stage: R1, dims: [first_hold, payment_accepted, approved, issued], numerator: "첫 홀드 성공·결제 접수·승인·발권", denominator: "입장·첫 홀드·접수·승인", rule: 나눠 보는 용도 }
+          - { num: 5, name: sold_out_minutes, label: 매진 소요 시간(분), source: F11, close_stage: R1, provisional_stage: R0, definition: "오픈부터 회차 판매 상태가 처음 SOLD_OUT이 된 때까지. 매진 풀림 횟수는 sold_out_releases", target: "<= 22", rule: "docs/planning/01 §3.2 '매진 소요 시간'" }
+          - { num: 5, name: sold_out_releases, label: 매진 풀림 횟수, source: F11, close_stage: R1, rule: 관측 }
+          - { num: 6, name: tier_sold_out_gap, label: 등급별 매진 시각 차이, source: F2, close_stage: R1, definition: "등급마다의 매진 시각은 mtr_tier_sold_out. 값은 최상위 등급이 매진된 분에 아래 등급들의 미판매 비율 최댓값", target: "< 0.3", rule: "docs/planning/01 §3.2 '등급별 매진 시각 차이'" }
+          - { num: 7, name: sale_rate_60m, label: 비매진 회차 판매율(오픈 60분 뒤), source: F2, close_stage: R1, numerator: fct_sales_minute.sold_seats(오픈 기준 분 ≤ 60), denominator: dim_event.seat_count, target: ">= 0.5", rule: "docs/planning/01 §3.2 '비매진 회차 판매율'" }
+          - { num: 7, name: sale_rate_eve, label: 비매진 회차 판매율(공연 전날), source: F15, close_stage: R3, numerator: "공연 전날까지 F15 판매 − 되돌림 − 반환 좌석", denominator: dim_event.seat_count, rule: 관측 }
+          - { num: 8, name: hold_conflict_rate, label: 홀드 경합 패배율, source: F4, close_stage: R0, dims: ["", first, PICK], numerator: CONFLICT 시도, denominator: 홀드 시도, target: "<= 0.5", rule: "docs/planning/01 §3.2 '홀드 경합 패배율'" }
+          - { num: 9, name: auto_assignment_share, label: 자동 배정 결과 분포, source: none, close_stage: R0, rule: 관측 }
+          - { num: 10, name: hold_expiry_rate, label: 홀드 만료율, source: F2, close_stage: R1, numerator: fct_sales_minute.expired_seats, denominator: fct_sales_minute.held_seats, target: "<= 0.3", rule: "docs/planning/01 §3.2 '홀드 만료율'" }
+          - { num: 11, name: payment_failure_share, label: 결제 실패 사유 분포, source: F5, close_stage: R1, dims: [failure_category], numerator: 범주별 실패 수, denominator: 전체 실패 수, target: "CARD_DECLINED <= 0.5", rule: "docs/planning/01 §3.2 '결제 실패 사유'" }
+          - { num: 12, name: pg_approval_rate, label: 결제사별 승인율, source: F5, close_stage: R1, dims: [pg], numerator: 승인, denominator: "승인 + 실패 + 결과 모름", rule: 관측 }
+          - { num: 12, name: pg_latency_p99_ms, label: 결제사별 응답 p99(ms), source: F5, close_stage: R1, dims: [pg], definition: "응답 시간 버킷의 위 끝. 5초 버킷 밖이면 NULL", rule: 관측 }
+          - { num: 13, name: bot_order_share_low, label: 봇 점유율 하한(주문·좌석), source: none, close_stage: R2, definition: "대기 기록(QueueEntryRecord)이 없어 F6에 주문·좌석 수가 없다", target: "<= 0.05", rule: "docs/planning/01 §3.2 '봇 점유율(하한)'" }
+          - { num: 14, name: bot_traffic_rate, label: 봇 트래픽 비율, source: F1, close_stage: R0, numerator: "봇 차단 + 추가 검증", denominator: "진입 + 봇 차단", rule: 관측 }
+          - { num: 15, name: speed_bot_success_rate, label: 정렬 방식별 속도형 봇 성공률, source: none, close_stage: R2, rule: "docs/planning/01 §3.2 '선착순 공연의 속도형 봇 성공률'" }
+          - { num: 16, name: appeal_upheld_rate, label: 이의 제기 인용률, source: none, close_stage: R2, definition: "원천 F13(CS) 파일 적재는 F-04-6", target: "<= 0.2", rule: "docs/planning/01 §3.2 '추가 검증 이의 제기 인용률'" }
+          - { num: 17, name: limit_exhaust_rate, label: 1인 한도 소진 비율, source: none, close_stage: R1, definition: "F3에 한도까지 산 계정 수 칸이 아직 없다", rule: "docs/planning/01 §3.2 '1인 한도 소진 비율'" }
+          - { num: 18, name: wait_error_p90, label: 예상 대기 오차 p90, source: F7, close_stage: R0, definition: "실제/예상 비율 구간에서 p90이 든 구간의 위 끝(마지막 구간은 아래 끝 2)", target: "<= 1.5", rule: "docs/planning/01 §3.2 '예상 대기 시간 오차'" }
+          - { num: 19, name: turn_no_confirm_rate, label: 차례 뒤 미입장 비율, source: F1, close_stage: R0, numerator: fct_onsale_minute.no_confirms, denominator: fct_onsale_minute.turns, target: "<= 0.2", rule: "docs/planning/01 §3.2 '차례 뒤 미입장 비율'" }
+          - { num: 20, name: cs_count, label: CS 건수, source: none, close_stage: R2, target: "<= 2600", rule: "docs/planning/01 §3.2 '예상 CS 건수'" }
+          - { num: 21, name: web_vitals_p75, label: 체감 성능, source: none, close_stage: R0, rule: 공인 숫자(Core Web Vitals) }
+          - { num: 22, name: slo_good_rate, label: 여정 SLO, source: F11, close_stage: R0, numerator: fct_event_summary.slo_good, denominator: fct_event_summary.slo_total, rule: 자체 숫자(NFR) }
+          - { num: 22, name: error_budget_used, label: 에러 버짓 사용, source: none, close_stage: R0, target: "< 0.5", rule: "docs/planning/01 §3.2 '에러 버짓(사후)'" }
+          - { num: 23, name: invariant_violations, label: 불변식 위반, source: F11, close_stage: R0, target: "= 0", rule: 0건 }
+          - { num: 24, name: ops_commands, label: 운영 명령·경보, source: none, close_stage: R0, rule: 관측 }
+          - { num: 25, name: pg_limit_responses, label: 결제사 한도 초과 응답, source: none, close_stage: R0, target: "= 0", rule: "docs/planning/01 §3.2 '결제사 한도'" }
+          - { num: 26, name: sales_amount, label: 판매 금액(원), source: "F11(R1), F15(R3)", close_stage: R1, definition: "승인 금액 합 − 입금 되돌림. R3는 F15 판매 금액 합 − 되돌림 금액 합", rule: 정산서와 0원 차이 }
+          - { num: 27, name: refunds, label: 환불·취소(경로별 금액·건수), source: F8, close_stage: R3, dims: [route], rule: 관측 }
+          - { num: 28, name: cost_per_1000, label: 1회·1,000장당 비용, source: none, close_stage: R1, rule: "docs/planning/01 §3.2 '온세일 1회 비용·티켓 1,000장당 비용'" }
+          - { num: 29, name: fee_to_cost, label: 1,000장당 비용 대비 수수료, source: none, close_stage: R3, rule: "docs/planning/01 §3.2 '1,000장당 비용 대비 수수료'" }
+          - { num: 30, name: onsite_entry_rate, label: 현장 입장률, source: "F10·F11", close_stage: R3, numerator: fct_entry_10min.entries, denominator: fct_event_summary.tickets_issued, rule: 관측 }
+          - { num: 31, name: demand_forecast_error, label: 수요 예측 오차, source: none, close_stage: R1, definition: "dim_event에 T-30분 예측이 아직 없다", rule: 관측 }
+          # 실시간 표와 같은 이름으로 쓰는 기본 누적(지표 번호 없음, §6.3 끝 표)
+          - { num: 0, name: sold_seats, label: 판매 좌석, source: F11, close_stage: R1 }
+          - { num: 0, name: tickets_issued, label: 발권 티켓, source: F11, close_stage: R1 }
+          - { num: 0, name: funnel, label: 퍼널 단계 누적, source: F3, close_stage: R1, dims: [admitted, first_hold, payment_accepted, approved, issued] }
+          - { num: 0, name: queue, label: 대기열 누적, source: F1, close_stage: R0, dims: [entries, admissions] }
+          # 규칙 적용 조건에 쓰는 표본 수
+          - { num: 0, name: orders, label: 주문 수(승인 결제), source: F5, close_stage: R1 }
+          - { num: 0, name: payment_failures, label: 결제 실패 수, source: F5, close_stage: R1 }
+    columns:
+      - name: metric
+        data_tests: [not_null]
+      - name: source_ok
+        data_tests:
+          - accepted_values: { arguments: { values: [0, 1] } }

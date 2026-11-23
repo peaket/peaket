@@ -4,13 +4,22 @@ models:
   - name: slv_order
     columns: [{ name: event_key, data_tests: [unique, not_null] }, { name: event_id, data_tests: [not_null] }]
   - name: slv_payment_attempt
-    columns: [{ name: event_key, data_tests: [unique, not_null] }]
+    columns:
+      - { name: event_key, data_tests: [unique, not_null] }
+      # 열거값(analytics §7, F-04-5): 정해 둔 값 밖이면 경고(빌드는 막지 않는다). 계약 판의 모르는 기호는 적재가 원래 기호 그대로 남긴다
+      - name: type
+        data_tests: [{ accepted_values: { arguments: { values: [AWAITING_DEPOSIT, APPROVED, DEPOSIT_REVERSED, FAILED, UNKNOWN, RESOLVED, PARTIAL_CANCELED, CANCELED] }, config: { severity: warn } } }]
+      - name: failure_category
+        data_tests: [{ accepted_values: { arguments: { values: ['', CARD_DECLINED, USER_ABORTED, VALIDATION, EXPIRED, PG_ERROR, THROTTLED, DEPOSIT_CANCELED] }, config: { severity: warn } } }]
   - name: slv_seat_change
     columns: [{ name: event_key, data_tests: [unique, not_null] }]
   - name: slv_ticket
     columns: [{ name: event_key, data_tests: [unique, not_null] }]
   - name: slv_hold_attempt
-    columns: [{ name: event_key, data_tests: [unique, not_null] }]
+    columns:
+      - { name: event_key, data_tests: [unique, not_null] }
+      - name: result
+        data_tests: [{ accepted_values: { arguments: { values: [HELD, CONFLICT, LIMIT, ERROR, RECENTLY_RELEASED] }, config: { severity: warn } } }]
   - name: slv_trust_label
     columns: [{ name: event_key, data_tests: [unique, not_null] }]
   - name: slv_queue_entry

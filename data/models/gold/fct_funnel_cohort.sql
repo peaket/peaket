@@ -7,7 +7,8 @@ s as (
     select s.*, {{ open_minute('ifNull(s.started_at, ifNull(s.ended_at, s.source_loaded_at))', or_event_time('o.ev_open_at', 'ifNull(s.started_at, ifNull(s.ended_at, s.source_loaded_at))')) }} as cohort_minute,
            if(o.event_id = '', toDate(ifNull(s.started_at, ifNull(s.ended_at, s.source_loaded_at))), o.open_day) as od
     from {{ ref('slv_purchase_session') }} as s left join o on o.event_id = s.event_id
-    where {{ event_filter('s.event_id') }}
+    -- 시각 순서가 어긋난 세션은 격리한다(analytics §7, F-04-5). 그 수는 quality_check의 time_order 줄에 남는다
+    where {{ event_filter('s.event_id') }} and {{ time_order_ok('s') }}
 )
 select event_id, cohort_minute, ifNull(assignment, '') as assignment, 'UNKNOWN' as bot_class,
        toUInt64(count()) as admitted,

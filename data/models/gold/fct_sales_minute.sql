@@ -15,13 +15,14 @@ sold as (
     where {{ event_filter('c.event_id') }} and c.type = 'CONFIRMED'
 ),
 released as (
-    select event_id, occurred_at as at, tier_id, section_id, '' as pg, 1 as seats
-    from {{ ref('slv_seat_change') }} where {{ event_filter() }} and type in ('RETURNED', 'EXPIRED')
+    -- 홀드 만료율(지표 10, F-04-5)을 내려고 만료(EXPIRED)와 홀드 성공(HELD) 좌석 수를 따로 둔다. released_seats는 만료 + 반환 그대로다
+    select event_id, occurred_at as at, tier_id, section_id, '' as pg, type
+    from {{ ref('slv_seat_change') }} where {{ event_filter() }} and type in ('RETURNED', 'EXPIRED', 'HELD')
 ),
 u as (
-    select event_id, at, tier_id, section_id, pg, seats as sold_seats, amount as sales_amount, order_ref, 0 as released_seats from sold
+    select event_id, at, tier_id, section_id, pg, seats as sold_seats, amount as sales_amount, order_ref, 0 as released_seats, 0 as expired_seats, 0 as held_seats from sold
     union all
-    select event_id, at, tier_id, section_id, pg, 0, 0, '', seats from released
+    select event_id, at, tier_id, section_id, pg, 0, 0, '', toUInt8(type != 'HELD'), toUInt8(type = 'EXPIRED'), toUInt8(type = 'HELD') from released
 )
 select u.event_id as event_id,
        {{ open_minute('u.at', or_event_time('o.ev_open_at', 'u.at')) }} as open_minute,
@@ -30,6 +31,8 @@ select u.event_id as event_id,
        toUInt64(uniqExactIf(u.order_ref, u.order_ref != '')) as orders,
        toInt64(sum(u.sales_amount)) as sales_amount,
        toUInt64(sum(u.released_seats)) as released_seats,
+       toUInt64(sum(u.expired_seats)) as expired_seats,
+       toUInt64(sum(u.held_seats)) as held_seats,
        any(if(o.event_id = '', toDate(u.at), o.open_day)) as open_date,
        {{ gold_cols() }}
 from u left join o on o.event_id = u.event_id

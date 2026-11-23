@@ -18,12 +18,19 @@ seed-paths: ["seeds"]
 target-path: target
 clean-targets: [target, dbt_packages]
 
+# 지표 뷰(mtr_*)가 읽는 현재 판 표와 골드 데이터베이스가 먼저 있어야 뷰를 만들 수 있다(F-04-5)
+on-run-start:
+  - "CREATE DATABASE IF NOT EXISTS gold"
+  - "{{ ensure_current_run() }}"
+
 vars:
   event_id: null
   run_id: null
   stage: R0
   # 작은 칸 합치기 기준(analytics §5.2 끝 줄, §11) [가정]
   small_cell_min: 5
+  # 마감 실행기(F-04-6)가 넘기는 바깥 품질 검사 실패(커버리지·실시간 대비·정확성, analytics §7): 걸린 지표 코드 목록. 그 지표의 규칙은 '판정 보류(데이터 품질 실패)'
+  quality_failed: []
 
 models:
   analytics:
@@ -36,6 +43,11 @@ models:
       +incremental_strategy: delete+insert
       +unique_key: event_id
     gold:
+      +schema: gold
+      +materialized: incremental
+      +incremental_strategy: append
+    # 지표 사전·규칙 판정(analytics §6, F-04-5): 판마다 쌓는 표(metric_value·quality_check·fct_rule_check)와 현재 판만 읽는 지표 뷰(mtr_*)
+    metrics:
       +schema: gold
       +materialized: incremental
       +incremental_strategy: append

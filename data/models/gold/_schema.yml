@@ -1,0 +1,22 @@
+version: 2
+# 골드 참조 무결성(analytics §7 '사실 표의 회차·등급·구역 키가 차원 표에 있다', F-04-5): 어기면 빌드 실패.
+# 좌석 사건에서 온 줄(결제사 '')도 등급·구역이 있다. 등급·구역이 빈 줄(자동 배정의 배정 전 시도 등)은 검사에서 뺀다
+models:
+  - name: fct_sales_minute
+    columns:
+      - name: tier_id
+        data_tests: [{ relationships: { arguments: { to: "ref('dim_tier')", field: tier_id }, config: { where: "tier_id != ''" } } }]
+      - name: section_id
+        data_tests: [{ relationships: { arguments: { to: "ref('dim_section')", field: section_id }, config: { where: "section_id != ''" } } }]
+  - name: fct_sales_daily
+    columns:
+      - name: tier_id
+        data_tests: [{ relationships: { arguments: { to: "ref('dim_tier')", field: tier_id }, config: { where: "tier_id != ''" } } }]
+  - name: fct_hold_attempt
+    columns:
+      - name: tier_id
+        data_tests: [{ relationships: { arguments: { to: "ref('dim_tier')", field: tier_id }, config: { where: "tier_id != ''" } } }]
+  - name: fct_refund_daily
+    columns:
+      - name: route
+        data_tests: [{ accepted_values: { arguments: { values: [SELF, EVENT_CANCELLATION, EXCEPTION] } } }]

@@ -6,6 +6,7 @@
 - `clickhouse/rt/`: 관제 실시간 표(F-04-1, `services/ops-rt`가 이전 실행기로 만든다)
 - `clickhouse/bronze/`: 분석 브론즈(F-04-3, `services/analytics-ingest`가 이전 실행기로 만든다)
 - dbt 프로젝트(F-04-4, wbs 4.3.5): `dbt_project.yml`, `models/`(staging·silver·gold), `macros/`, `seeds/`(고정 차원), `tests/`(A-T21 등), `tests_int/`(실제 ClickHouse 통합 시험)
+- 지표 사전·결정 규칙(F-04-5, analytics §6·§7): `models/metrics/metrics.yml`(지표 사전)·`rules.yml`(결정 규칙), 판마다 쌓는 `metric_value`·`quality_check`·`fct_rule_check`(F12)와 현재 판만 읽는 지표 뷰 `mtr_*`. 마감 실행기가 바깥 품질 검사 실패를 `--vars '{quality_failed: [<지표 코드>]}'`로 넘긴다
 
 ## dbt 실행
 
@@ -18,7 +19,7 @@ uv sync --locked
 PYTHONUTF8=1 .venv/Scripts/dbt build --profiles-dir . --vars '{event_id: <회차 UUID>, run_id: <판 UUID>, stage: R0}'
 PYTHONUTF8=1 .venv/Scripts/dbt run-operation swap_current_run --profiles-dir . --args '{event_id: <회차>, run_id: <판>}'
 # 통합 시험(Docker 잠금을 잡은 뒤)
-PYTHONUTF8=1 .venv/Scripts/python -m unittest tests_int.test_dbt_models -v
+PYTHONUTF8=1 .venv/Scripts/python -m unittest tests_int.test_dbt_models tests_int.test_metrics_rules -v
 ```
 
 Windows는 `PYTHONUTF8=1`이 있어야 한글이 든 파일을 읽는다. 리눅스는 `.venv/bin/dbt`다.

@@ -1,0 +1,40 @@
+# 결정 규칙(docs/features/analytics.md §6.4, F-04-5). docs/planning/01 §3.2 '결정 규칙 표' 18행을 옮긴 것이고, 기준값·적용 조건은 그 표가 정본이다.
+# fct_rule_check(F12)가 회차·마감 단계마다 판정한다: HIT 걸림, BORDER 경계, CLEAR 안 걸림, HOLD 판정 보류.
+# 보류 사유: NOT_FINAL 미확정(그 단계에서 아직 잠정), QUALITY_FAILED 데이터 품질 실패(원천 없음 포함), SAMPLE_SHORT 표본 부족(적용 조건 미달), NO_BASELINE 기준선 없음.
+#   metric·dim: metric_value의 지표 코드와 칸. op·threshold: 걸리는 쪽(값 op 기준). judge: wilson_95(비율, 95% 구간), value(값 그대로),
+#   baseline_median(같은 규모 중앙값 × factor 초과, 회차 3개 이상), baseline_q3(같은 규모 3사분위 초과, 회차 10개 이상), peer(비교 회차와 견줌).
+#   applies_when: 적용 조건(회차 맥락 칸: sold_out·admitted·orders·pick_attempts·pay_failures·entries·turns·held·tiers·top_sold_out·appeals·fee_defined·hybrid_peers)
+version: 2
+
+models:
+  - name: fct_rule_check
+    description: F12 규칙 판정(analytics §5.2). 회차 × 규칙 × 마감 단계
+    config:
+      meta:
+        rules:
+          - { id: admission_to_purchase_rate, metric: admission_to_purchase_rate, op: "<", threshold: 0.83, judge: wilson_95, applies_when: "sold_out = 1 and admitted >= 1000", close_stage: R1 }
+          - { id: sold_out_minutes, metric: sold_out_minutes, op: ">", threshold: 22, judge: value, applies_when: "sold_out = 1", close_stage: R1, provisional_stage: R0 }
+          - { id: bot_order_share_low, metric: bot_order_share_low, op: ">", threshold: 0.05, judge: wilson_95, applies_when: "orders >= 1000", close_stage: R2 }
+          - { id: speed_bot_success_rate, metric: speed_bot_success_rate, op: ">", threshold: 0, judge: peer, applies_when: "hybrid_peers >= 1", close_stage: R2 }
+          - { id: hold_conflict_rate, metric: hold_conflict_rate, dim: PICK, op: ">", threshold: 0.5, judge: wilson_95, applies_when: "pick_attempts >= 1000", close_stage: R0 }
+          - { id: tier_sold_out_gap, metric: tier_sold_out_gap, op: ">=", threshold: 0.3, judge: value, applies_when: "tiers >= 2 and top_sold_out = 1", close_stage: R1 }
+          - { id: payment_card_declined, metric: payment_failure_share, dim: CARD_DECLINED, op: ">", threshold: 0.5, judge: wilson_95, applies_when: "pay_failures >= 100", close_stage: R1 }
+          - { id: appeal_upheld_rate, metric: appeal_upheld_rate, op: ">", threshold: 0.2, judge: wilson_95, applies_when: "appeals >= 30", close_stage: R2 }
+          - { id: cs_count, metric: cs_count, op: ">", threshold: 2600, judge: value, applies_when: "1 = 1", close_stage: R2 }
+          - { id: cost_per_1000, metric: cost_per_1000, op: ">", threshold: 1.3, judge: baseline_median, applies_when: "1 = 1", close_stage: R1 }
+          - { id: error_budget_used, metric: error_budget_used, op: ">=", threshold: 0.5, judge: value, applies_when: "1 = 1", close_stage: R0 }
+          - { id: pg_limit_responses, metric: pg_limit_responses, op: ">=", threshold: 1, judge: value, applies_when: "1 = 1", close_stage: R0 }
+          - { id: wait_error_p90, metric: wait_error_p90, op: ">", threshold: 1.5, judge: value, applies_when: "entries >= 10000", close_stage: R0 }
+          - { id: turn_no_confirm_rate, metric: turn_no_confirm_rate, op: ">", threshold: 0.2, judge: wilson_95, applies_when: "turns >= 1000", close_stage: R0 }
+          - { id: hold_expiry_rate, metric: hold_expiry_rate, op: ">", threshold: 0.3, judge: wilson_95, applies_when: "held >= 1000", close_stage: R1 }
+          - { id: limit_exhaust_rate, metric: limit_exhaust_rate, op: ">", threshold: 0, judge: baseline_q3, applies_when: "1 = 1", close_stage: R1 }
+          - { id: sale_rate_60m, metric: sale_rate_60m, op: "<", threshold: 0.5, judge: value, applies_when: "sold_out = 0", close_stage: R1 }
+          - { id: fee_to_cost, metric: fee_to_cost, op: "<", threshold: 1, judge: value, applies_when: "fee_defined = 1", close_stage: R3 }
+    columns:
+      - name: verdict
+        data_tests:
+          - not_null
+          - accepted_values: { arguments: { values: [HIT, BORDER, CLEAR, HOLD] } }
+      - name: hold_reason
+        data_tests:
+          - accepted_values: { arguments: { values: ['', NOT_FINAL, QUALITY_FAILED, SAMPLE_SHORT, NO_BASELINE] } }
