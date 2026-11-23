@@ -232,3 +232,10 @@
 - F-05-2 구현 리뷰 IR-12(낮음): 메모리 기기 키 저장소는 돌려주기 뒤 `TRANSFER` 예외가 없다. Drizzle에만 예외가 있어 짝 가짜가 진짜와 같은 계약 시험을 통과하지 못한다. 메모리에도 같은 규칙(티켓 반환 기록)을 넣는다(계획 §10 '짝 가짜')
 - F-05-2 구현 리뷰 함께: `WalletLive` 돌려주기 응답 유실 뒤 새 키로 다시 보내면 409 `payer-holds`로 보이는 문구, `transfer-actions.ts` `receivedSnapshotOf` 미사용·`RETURN_CONFIRM_TEXT` 중복, `docs/security/asvs/transfer-refund.md`·d5 §5.14·§5.23·`docs/frontend.md` §4.2.4·`docs/BUILD_ORDER.md` GAT 줄의 남은 갱신
 - F-05-3 화면 입구(동결 뒤 몫): SCR-042 [[ 우선 구매하기 ]] → queue-room `priorityGrantId` 왕복이 없다. 서버(Q-T62·S-T37)는 닫았고 화면은 `apps/web` 몫이라 이 기능에서 고치지 않는다. 새 행이 필요하면 감독이 기록 커밋에서 만든다
+- F-05-3 구현 리뷰 IR-04(중간): 대조가 `INVALID_ARGUMENT` 행을 다음 틱에도 다시 보낸다. 같은 값은 다시 보내지 않도록 `grantId`+판 표시를 두고, 계약이 고쳐지면 다시 본다(ADR-0385 §1, 계획 D4)
+- F-05-3 구현 리뷰 IR-05(중간): 회수 DB 실패에 전용 지표·로그 한 줄이 없다. 일반 500과 `purchase_priority_grant_*` 밖에 남는다. A14의 회수 쪽 표시를 더한다(계획 §1 A14, S-T37 ⑬)
+- F-05-3 구현 리뷰 IR-06(중간): 정본·관측 문서의 빈칸 — `seat-hold.md` §5 대조 주기·묶음·`active_order_id` 제외, `data.md` `priority_grant.version`의 USED/EXPIRED 증가, `observability.md` §5 새 지표 이름(계획 D1·D2·D5·D6)
+- F-05-3 구현 리뷰 IR-07(낮음): ADR-0385 §4·계획 D7은 local·ci만 대조를 끄는데 구현은 demo도 끈다. demo 합본에서 대조가 조용히 꺼진다. 허용 목록을 ADR과 맞춘다
+- F-05-3 구현 리뷰 IR-08(낮음): `queue-svc/test-int/priority-grant.int.test.ts`의 TTL 시험이 실제 시계 150ms 여유를 쓴다. 부하가 크면 `changed: true`가 흔들린다. 가짜 시계나 더 큰 여유로 바꾼다. 구현 담당이 본 1ms 흔들림은 제품 결함이 아니라 이 시험 흔들림으로 본다
+- F-05-3 구현 리뷰 IR-09(낮음): `purchase_priority_grant_sync_total`을 틱이 아니라 행마다 센다. 계획 D5의 '틱의 결과'와 뜻이 다르고 `changed`도 쓰지 않는다. 지표 뜻을 문서에 맞추거나 틱 단위로 바꾼다
+- F-05-3 구현 리뷰 IR-10(낮음): 대조 한 틱이 100개를 차례로 2초 데드라인으로 보내 최악 200초까지 늘어난다. 한 틱 시간 한도나 병렬 상한을 두고, `queue.proto`의 1초 주석과 클라이언트 2초도 맞춘다
