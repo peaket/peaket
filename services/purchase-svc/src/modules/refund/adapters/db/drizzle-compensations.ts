@@ -35,10 +35,13 @@ interface Row {
   readonly transfer_id: string | null;
   readonly receivable_id: string | null;
   readonly failure_reason: string | null;
-  readonly created_at: Date;
-  readonly updated_at: Date;
+  readonly created_at: Date | string;
+  readonly updated_at: Date | string;
   readonly fault: string | null;
 }
+
+/** 원시 SQL(`select c.*`)은 드라이버에 따라 timestamptz를 글로 준다. Drizzle 열 매핑과 같은 Date로 맞춘다 */
+const atOf = (v: Date | string): Date => (v instanceof Date ? v : new Date(v));
 
 const recordOf = (r: Row): CompensationRecord => ({
   compensationId: r.id,
@@ -54,8 +57,8 @@ const recordOf = (r: Row): CompensationRecord => ({
   ...(r.transfer_id !== null ? { transferId: r.transfer_id } : {}),
   ...(r.receivable_id !== null ? { receivableId: r.receivable_id } : {}),
   ...(r.failure_reason !== null ? { failureReason: r.failure_reason } : {}),
-  createdAtMs: r.created_at.getTime(),
-  updatedAtMs: r.updated_at.getTime(),
+  createdAtMs: atOf(r.created_at).getTime(),
+  updatedAtMs: atOf(r.updated_at).getTime(),
 });
 
 const viewOf = (r: Row): CompensationView => ({
@@ -66,7 +69,7 @@ const viewOf = (r: Row): CompensationView => ({
   ...(r.account_last4 !== null ? { accountLast4: r.account_last4 } : {}),
   eventId: r.event_id,
   ...(r.fault === 'ORGANIZER' || r.fault === 'CONTENT_CHANGE' ? { reason: r.fault } : {}),
-  createdAt: r.created_at.toISOString(),
+  createdAt: atOf(r.created_at).toISOString(),
 });
 
 @Injectable()
@@ -89,7 +92,7 @@ export class DrizzleCompensations implements CompensationStore, CompensationRefr
     const all = rows.rows as unknown as Row[];
     const page = all.slice(0, limit);
     const last = page.at(-1);
-    return { items: page.map(viewOf), nextCursor: all.length > limit && last ? cursorOf(last.created_at.getTime(), last.id) : null };
+    return { items: page.map(viewOf), nextCursor: all.length > limit && last ? cursorOf(atOf(last.created_at).getTime(), last.id) : null };
   }
 
   async get(accountId: string, compensationId: string): Promise<CompensationView | undefined> {

@@ -24,7 +24,7 @@ import {
 } from '../src/modules/settlement/index.js';
 import { recalculationActionOf } from '../src/modules/settlement/domain/recalculation.js';
 import type { PayoutStatus, StatementStatus } from '../src/modules/settlement/domain/settlement.js';
-import { quiet } from './settlement-flow-support.js';
+import { FakeIdentity, quiet } from './settlement-flow-support.js';
 import { noApprovals, noSaleSuspensions } from './settlement-support.js';
 import {
   approvedTossSeller,
@@ -866,6 +866,10 @@ describe('J-T23 ① 내부 HTTP 두 경로', () => {
       env: { PEAKET_ENV: 'ci' },
       clock,
       logDestination: quiet(),
+      // develop에서 F-07-7의 PartnerSettlementController가 같은 SettlementModule에 들어왔다.
+      // 이 시험은 내부 경로만 보지만 createService의 AZ-T1 확인은 모듈의 모든 처리기를 보므로
+      // 관리 역할 판정 포트(identity GetAdminAuthz)의 짝 대역을 넘긴다(단언은 그대로).
+      adminAuthz: new FakeIdentity(),
     });
     return { svc, store, clock };
   }

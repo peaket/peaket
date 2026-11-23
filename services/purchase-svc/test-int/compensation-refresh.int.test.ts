@@ -69,15 +69,37 @@ beforeEach(async () => {
   await db1.pool.query('truncate compensation');
 });
 
+/** findForAccount가 주문의 account_id를 보므로 주문과 이력을 한 트랜잭션에 심는다(order_status_has_event 지연 제약) */
+async function seedOrder(orderId: string, accountId: string, eventId: string): Promise<void> {
+  const client = await db1.pool.connect();
+  try {
+    await client.query('begin');
+    await client.query(
+      `insert into purchase_order (id, account_id, event_id, status, amount, event_seq, idempotency_key, consent_version, seat_assignment, created_at, hold_id, purchase_session_id)
+       values ($1, $2, $3, 'CONFIRMED', 4750, 1, $4, 'v1', 'PICK', $5, $6, $7)`,
+      [orderId, accountId, eventId, `idem-${orderId}`, new Date(NOW - 3_600_000), randomUUID(), randomUUID()],
+    );
+    await client.query("insert into order_event (order_id, seq, from_status, to_status, cause, actor, occurred_at) values ($1, 1, null, 'CONFIRMED', 'T1', 'test', $2)", [orderId, new Date(NOW - 3_600_000)]);
+    await client.query('commit');
+  } catch (err) {
+    await client.query('rollback').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 /** compensation 한 행. 계좌 입력 뒤 REQUESTED(송금 ID 있음)이거나 계좌 대기다 */
 async function seed(o: { status: 'REQUESTED' | 'ACCOUNT_PENDING'; transferId?: string }) {
   const id = randomUUID();
   const orderId = randomUUID();
   const accountId = randomUUID();
+  const eventId = randomUUID();
+  await seedOrder(orderId, accountId, eventId);
   await db1.pool.query(
     `insert into compensation (id, event_cancellation_request_id, order_id, event_id, account_id, promoter_id, base_amount, amount, status, account_last4, transfer_id, created_at, updated_at)
      values ($1, $2, $3, $4, $5, $6, 47500, 4750, $7, $8, $9, $10, $10)`,
-    [id, randomUUID(), orderId, randomUUID(), accountId, randomUUID(), o.status, o.status === 'REQUESTED' ? '4321' : null, o.transferId ?? null, new Date(NOW - 3_600_000)],
+    [id, randomUUID(), orderId, eventId, accountId, randomUUID(), o.status, o.status === 'REQUESTED' ? '4321' : null, o.transferId ?? null, new Date(NOW - 3_600_000)],
   );
   return { id, orderId, accountId };
 }
@@ -115,7 +137,7 @@ describe('R-T47 ③ 배상 송금 결과 확정(purchase) [실제 PostgreSQL]', 
     failing.requestAnswer = { status: 'FAILED', transferId: 'tr-f078-entry-failed' };
     const other = await seed({ status: 'ACCOUNT_PENDING' });
     await new RequestCompensationAccount({ store: new DrizzleCompensations(db1), transfer: failing, notice: entryFailCases, nowMs: () => NOW })
-      .run({ accountId: other.accountId, compensationId: other.id, account: { bankCode: '088', accountNumber: ACCOUNT_NO, holderName: '김배상' }, reauthToken: undefined, idempotencyKey: randomUUID() })
+      .run({ accountId: other.accountId, compensationId: other.id, account: { bankCode: '88', accountNumber: ACCOUNT_NO, holderName: '김배상' }, reauthToken: undefined, idempotencyKey: randomUUID() })
       .catch(() => undefined);
     expect(entryFailCases.opened.map((o) => compensationCaseEventKey(o.compensationId))).toEqual([compensationCaseEventKey(other.id)]);
     expect(compensationCaseEventKey(cases.opened[0]!.compensationId)).toBe(compensationCaseEventKey(c.id));
@@ -164,7 +186,7 @@ describe('R-T47 ③ 배상 송금 결과 확정(purchase) [실제 PostgreSQL]', 
     const cases = new RecordingCases();
     const store = new DrizzleCompensations(db1);
     const entry = new RequestCompensationAccount({ store, transfer, notice: cases, nowMs: () => NOW });
-    const account = { bankCode: '088', accountNumber: ACCOUNT_NO, holderName: '김배상' };
+    const account = { bankCode: '88', accountNumber: ACCOUNT_NO, holderName: '김배상' };
     await entry.run({ accountId: c.accountId, compensationId: c.id, account, reauthToken: undefined, idempotencyKey: randomUUID() });
     expect(await row(c.id)).toMatchObject({ status: 'REQUESTED', transfer_id: 'tr-f078-entry', account_last4: '4321' });
     const receivableId = randomUUID();

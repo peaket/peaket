@@ -74,7 +74,7 @@ async function paymentRow(o: { eventId: string; amount: number; cancelled?: numb
 
 /** 끝난 결제 취소 한 행과 결제의 누적 취소액. burden을 주면 settlement_burden 칸을 쓴다(0033) */
 async function cancelRow(paymentId: string, o: { amount: number; canceledAt: number; burden?: 'PARTNER' | 'PEAKET' }): Promise<void> {
-  const before = (await q<{ amount: number; cancelled_amount: number }>('select amount, cancelled_amount from payment where id = $1', [paymentId]))[0]!;
+  const before = (await q<{ amount: number; cancelled_amount: number }>('select amount::int as amount, cancelled_amount::int as cancelled_amount from payment where id = $1', [paymentId]))[0]!;
   const id = randomUUID();
   await db1.pool.query(
     `insert into payment_cancel (id, payment_id, idempotency_key, attempt, amount, reason, full_cancel, expected_balance, status, created_at, canceled_at${o.burden ? ', settlement_burden' : ''})
@@ -86,7 +86,7 @@ async function cancelRow(paymentId: string, o: { amount: number; canceledAt: num
 
 const refundReceivables = (statementId: string) =>
   q<{ id: string; pg: string | null; cause: string; statement_id: string; commission_rate_bp: number; refund_amount: number; commission_share: number; commission_vat_share: number; amount: number; remaining: number; source_ref: string }>(
-    "select id, pg, cause, statement_id, commission_rate_bp, refund_amount, commission_share, commission_vat_share, amount, remaining, source_ref from partner_receivable where cause = 'REFUND_AFTER_PAYOUT' and statement_id = $1",
+    "select id, pg, cause, statement_id, commission_rate_bp, refund_amount::int as refund_amount, commission_share::int as commission_share, commission_vat_share::int as commission_vat_share, amount::int as amount, remaining::int as remaining, source_ref from partner_receivable where cause = 'REFUND_AFTER_PAYOUT' and statement_id = $1",
     [statementId],
   );
 
@@ -183,7 +183,7 @@ describe('J-T23 ① 새 판·옛 판·원본 목록이 한 트랜잭션 [실제 
     expect(rows.filter((r) => r.status === 'SUPERSEDED').map((r) => r.id).sort()).toEqual([...olds].sort());
     expect(rows.filter((r) => r.revision === 2).map((r) => r.supersedes_id).sort()).toEqual([...olds].sort());
     const newToss = rows.find((r) => r.revision === 2 && r.supersedes_id === w.sT.statementId)!;
-    expect((await q<{ kind: string; amount: number }>('select kind, amount from statement_source where statement_id = $1 order by kind', [newToss.id])).map((r) => [r.kind, r.amount])).toEqual([
+    expect((await q<{ kind: string; amount: number }>('select kind, amount::int as amount from statement_source where statement_id = $1 order by kind', [newToss.id])).map((r) => [r.kind, r.amount])).toEqual([
       ['GROSS', 10_000_000],
       ['REFUND', 4_000_000],
     ]);
@@ -240,10 +240,10 @@ describe('J-T23 ② 묶음 빼기·되돌림·보류가 한 트랜잭션 [실제
     return { promoterId, batchId, statementId, receivableId, moveId };
   }
   const snapshot = async (x: { batchId: string; statementId: string; receivableId: string }) => ({
-    statement: (await q('select status, hold_reason, payout_batch_id, offset_amount, payout_amount from settlement_statement where id = $1', [x.statementId]))[0],
-    batch: (await q('select total_amount, statement_count from payout_batch where id = $1', [x.batchId]))[0],
-    receivable: (await q('select remaining, status from partner_receivable where id = $1', [x.receivableId]))[0],
-    moves: await q('select kind, amount from receivable_movement where receivable_id = $1 order by moved_at, kind', [x.receivableId]),
+    statement: (await q('select status, hold_reason, payout_batch_id, offset_amount::int as offset_amount, payout_amount::int as payout_amount from settlement_statement where id = $1', [x.statementId]))[0],
+    batch: (await q('select total_amount::int as total_amount, statement_count from payout_batch where id = $1', [x.batchId]))[0],
+    receivable: (await q('select remaining::int as remaining, status from partner_receivable where id = $1', [x.receivableId]))[0],
+    moves: await q('select kind, amount::int as amount from receivable_movement where receivable_id = $1 order by moved_at, kind', [x.receivableId]),
     held: Number((await q<{ n: string }>(`select count(*) as n from outbox where convert_from(payload, 'UTF8') like '%PAYOUT_HELD%' and convert_from(payload, 'UTF8') like '%${x.statementId}%'`))[0]!.n),
   });
 
@@ -300,8 +300,8 @@ describe('J-T23 ② 묶음 빼기·되돌림·보류가 한 트랜잭션 [실제
     ]);
     await p.a.retryEventRecalculations();
     expect((await q('select status, hold_reason, payout_batch_id from settlement_statement where id = $1', [statementId]))[0]).toEqual({ status: 'HELD', hold_reason: 'RECALCULATION', payout_batch_id: null });
-    const r = (await q<{ amount: number; remaining: number }>('select amount, remaining from partner_receivable where id = $1', [receivableId]))[0]!;
-    const moves = await q<{ kind: string; amount: number }>('select kind, amount from receivable_movement where receivable_id = $1', [receivableId]);
+    const r = (await q<{ amount: number; remaining: number }>('select amount::int as amount, remaining::int as remaining from partner_receivable where id = $1', [receivableId]))[0]!;
+    const moves = await q<{ kind: string; amount: number }>('select kind, amount::int as amount from receivable_movement where receivable_id = $1', [receivableId]);
     const out = moves.filter((m) => m.kind !== 'REVERSAL').reduce((n, m) => n + m.amount, 0);
     const back = moves.filter((m) => m.kind === 'REVERSAL').reduce((n, m) => n + m.amount, 0);
     expect(r.remaining).toBe(r.amount - out + back);
@@ -345,12 +345,12 @@ describe('J-T23 ① 음수 옛 판 미수금 닫기와 상계 겹침 [실제 Pos
     // 겹침이 실제로 일어났다(TR-14 (가)): 묶음은 만들어졌고 다른 정산서가 그 묶음에 묶였다
     expect(batch.status).toBe('fulfilled');
     expect((await q<{ payout_batch_id: string | null }>('select payout_batch_id from settlement_statement where id = $1', [otherId]))[0]!.payout_batch_id).not.toBeNull();
-    const moves = await q<{ kind: string; amount: number }>('select kind, amount from receivable_movement where receivable_id = $1', [negativeId]);
+    const moves = await q<{ kind: string; amount: number }>('select kind, amount::int as amount from receivable_movement where receivable_id = $1', [negativeId]);
     const offset = moves.filter((m) => m.kind === 'OFFSET').reduce((n, m) => n + m.amount, 0);
     const closed = moves.filter((m) => m.kind === 'SUPERSEDED').reduce((n, m) => n + m.amount, 0);
     expect(offset + closed).toBe(300_000);
-    expect((await q('select remaining, status from partner_receivable where id = $1', [negativeId]))[0]).toEqual({ remaining: 0, status: 'CLOSED' });
-    const fresh = (await q<{ adjustment_amount: number; payout_amount: number }>("select adjustment_amount, payout_amount from settlement_statement where supersedes_id = $1 and status <> 'SUPERSEDED'", [oldId]))[0]!;
+    expect((await q('select remaining::int as remaining, status from partner_receivable where id = $1', [negativeId]))[0]).toEqual({ remaining: 0, status: 'CLOSED' });
+    const fresh = (await q<{ adjustment_amount: number; payout_amount: number }>("select adjustment_amount::int as adjustment_amount, payout_amount::int as payout_amount from settlement_statement where supersedes_id = $1 and status <> 'SUPERSEDED'", [oldId]))[0]!;
     expect(fresh.adjustment_amount).toBe(-1_300_000 + offset);
     expect(fresh.payout_amount).toBe(-300_000 + offset);
     // 열린 음수 미수금은 옛 판 것이 없다(새 판 확정 전)
@@ -403,7 +403,7 @@ describe('J-T23 ① 음수 미수금이 있는 회차의 다시 계산은 한 �
     const w = await negativeWorld(p);
     p.at(FRIDAY);
     const untouched = async () => {
-      expect((await q('select remaining, status from partner_receivable where id = $1', [w.negativeId]))[0]).toEqual({ remaining: 180_000, status: 'OPEN' });
+      expect((await q('select remaining::int as remaining, status from partner_receivable where id = $1', [w.negativeId]))[0]).toEqual({ remaining: 180_000, status: 'OPEN' });
       expect(await q("select id from receivable_movement where receivable_id = $1 and kind = 'SUPERSEDED'", [w.negativeId])).toEqual([]);
       expect((await q<{ status: string }>('select status from settlement_statement where id = $1', [w.oldId]))[0]!.status).toBe('CARRIED_OVER');
       expect(await q('select id from settlement_statement where supersedes_id = $1', [w.oldId])).toEqual([]);
@@ -427,9 +427,9 @@ describe('J-T23 ① 음수 미수금이 있는 회차의 다시 계산은 한 �
     }
     const done = await p.a.completeEventRecalculation(w.requestId, { completedAt: new Date(FRIDAY) });
     expect(done.state).toBe('DONE');
-    expect((await q<{ amount: number }>("select amount from receivable_movement where receivable_id = $1 and kind = 'SUPERSEDED'", [w.negativeId])).map((r) => Number(r.amount))).toEqual([180_000]);
-    expect((await q('select remaining, status from partner_receivable where id = $1', [w.negativeId]))[0]).toEqual({ remaining: 0, status: 'CLOSED' });
-    const fresh = await q<{ adjustment_amount: number; payout_amount: number; revision: number }>('select adjustment_amount, payout_amount, revision from settlement_statement where supersedes_id = $1', [w.oldId]);
+    expect((await q<{ amount: number }>("select amount::int as amount from receivable_movement where receivable_id = $1 and kind = 'SUPERSEDED'", [w.negativeId])).map((r) => Number(r.amount))).toEqual([180_000]);
+    expect((await q('select remaining::int as remaining, status from partner_receivable where id = $1', [w.negativeId]))[0]).toEqual({ remaining: 0, status: 'CLOSED' });
+    const fresh = await q<{ adjustment_amount: number; payout_amount: number; revision: number }>('select adjustment_amount::int as adjustment_amount, payout_amount::int as payout_amount, revision from settlement_statement where supersedes_id = $1', [w.oldId]);
     expect(fresh.map((r) => [Number(r.adjustment_amount), Number(r.payout_amount), r.revision])).toEqual([[-1_180_000, -180_000, 2]]);
   });
 });
@@ -462,10 +462,10 @@ describe('J-T23 ② 같은 배상 미수금을 결제사가 다른 두 새 판�
       p.b.createPayoutBatch({ pg: 'PORTONE', pgStore: 'STANDARD', payoutDate: '2026-12-16', portoneBalance: { amount: 100_000_000_000, observedAt: new Date(NOW).toISOString() }, actor: randomUUID() }),
     ]);
     expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
-    const offsets = await q<{ amount: number }>("select amount from receivable_movement where receivable_id = $1 and kind = 'OFFSET'", [receivableId]);
+    const offsets = await q<{ amount: number }>("select amount::int as amount from receivable_movement where receivable_id = $1 and kind = 'OFFSET'", [receivableId]);
     expect(offsets.reduce((n, m) => n + Number(m.amount), 0)).toBe(500_000);
-    expect((await q('select remaining, status from partner_receivable where id = $1', [receivableId]))[0]).toEqual({ remaining: 0, status: 'CLOSED' });
-    const statementOffsets = await q<{ offset_amount: number }>('select offset_amount from settlement_statement where id = any($1::uuid[])', [[tossId, portoneId]]);
+    expect((await q('select remaining::int as remaining, status from partner_receivable where id = $1', [receivableId]))[0]).toEqual({ remaining: 0, status: 'CLOSED' });
+    const statementOffsets = await q<{ offset_amount: number }>('select offset_amount::int as offset_amount from settlement_statement where id = any($1::uuid[])', [[tossId, portoneId]]);
     expect(statementOffsets.reduce((n, r) => n + Number(r.offset_amount), 0)).toBe(500_000);
   });
 });
@@ -499,7 +499,7 @@ describe('J-T23 ① 이의·조정이 있는 정산서의 다시 계산 [실제 
     const olds = await q<{ id: string; status: string }>('select id, status from settlement_statement where id = any($1::uuid[]) order by id', [[disputed.statementId, notified.statementId, held.statementId]]);
     expect(olds.every((r) => r.status === 'SUPERSEDED')).toBe(true);
     const fresh = await q<{ supersedes_id: string; adjustment_amount: number; dispute_due_at: Date; status: string; revision: number }>(
-      'select supersedes_id, adjustment_amount, dispute_due_at, status, revision from settlement_statement where supersedes_id = any($1::uuid[])',
+      'select supersedes_id, adjustment_amount::int as adjustment_amount, dispute_due_at, status, revision from settlement_statement where supersedes_id = any($1::uuid[])',
       [[disputed.statementId, notified.statementId, held.statementId]],
     );
     expect(fresh).toHaveLength(3);

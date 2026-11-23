@@ -487,10 +487,12 @@ describe('마이그레이션 기록(migrations/meta)', () => {
       [27, expect.stringMatching(HOLD_LIMIT_TAG)],
       ...journal.entries.slice(28).map((e): [number, string] => [e.idx, e.tag]),
     ]);
-    // 앞의 고정 목록 뒤에 더한 기록도 idx는 차례이고 tag는 네 자리 idx로 시작한다(새 마이그레이션마다 목록을 고치지 않게, W9-fix2 시험 이의 4)
+    // 앞의 고정 목록 뒤에 더한 기록도 idx는 엄격히 커지고 tag는 자기 네 자리 idx로 시작한다
+    // (새 마이그레이션마다 목록을 고치지 않게, W9-fix2 시험 이의 4). 다른 갈래가 번호를 미리 받아
+    // 비워 둔 자리(예 0034~0037)가 있으면 idx에 구멍이 생기므로 연속을 강제하지 않는다(2026-11-23 F-07-8 다시 쌓기).
     journal.entries.forEach((e, i) => {
-      expect(e.idx, e.tag).toBe(i);
-      expect(e.tag, e.tag).toMatch(new RegExp(`^${String(i).padStart(4, '0')}_[a-z0-9_]+$`));
+      if (i > 0) expect(e.idx, e.tag).toBeGreaterThan(journal.entries[i - 1]!.idx);
+      expect(e.tag, e.tag).toMatch(new RegExp(`^${String(e.idx).padStart(4, '0')}_[a-z0-9_]+$`));
     });
     // 마이그레이터는 마지막으로 적용한 when보다 큰 것만 돌린다(작으면 새 마이그레이션을 건너뛴다)
     for (let i = 1; i < journal.entries.length; i++) expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(journal.entries[i - 1]!.when);
