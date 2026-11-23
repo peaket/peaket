@@ -57,7 +57,7 @@ export default async function SettlementPage({ params, searchParams }: RouteProp
         <SubTabs
           initial={tab}
           panels={{
-            settle: <SettleTab v={settleV} isMember={isMember} rounds={rounds} />,
+            settle: <SettleTab v={settleV} isMember={isMember} rounds={rounds} {...(live ? { liveRounds } : {})} />,
             summary: <SummaryTab pending={s === '판매 요약 확정 전'} rounds={rounds} eventId={id} />,
             roster: live ? <LiveRosterPanel eventName={production.name} rounds={liveRounds} isMember={isMember} /> : <RosterTab v={rosterV} rounds={rounds} />,
             log: live ? <LiveExportLogPanel eventName={production.name} rounds={liveRounds} isMember={isMember} /> : <LogTab v={logV} productionName={production.name} />,

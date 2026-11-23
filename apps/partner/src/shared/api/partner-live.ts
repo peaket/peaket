@@ -181,6 +181,25 @@ export interface SettlementStatement {
   payoutDate?: string;
   payoutBankCode?: string;
   payoutAccountLast4?: string;
+  /** 토스페이먼츠 정산서의 KYC 예고(파트너 응답만, 포트원은 늘 false, ADR-0370 결정 9) */
+  kycNotice?: boolean;
+}
+
+/** GET /v1/partner/payout-account 200(계좌번호 전체는 없다, ADR-0370 결정 5) */
+export interface PartnerPayoutAccount {
+  bankCode: string | null;
+  payoutAccountLast4: string | null;
+  holderVerified: boolean;
+  holdUntil: string | null;
+  agencySyncPending: boolean;
+  version: number;
+}
+
+/** PUT /v1/partner/payout-account 본문(계좌번호는 저장하지 않고 결제사 요청에 바로 넘긴다) */
+export interface PayoutAccountChangeBody {
+  bankCode: string;
+  accountNumber: string;
+  holderName: string;
 }
 
 export interface ProductSettlementPage {
@@ -451,6 +470,32 @@ export async function createSettlementDispute(
     body,
     idempotencyKey: newIdempotencyKey(),
   });
+}
+
+/* ---------- 정산 계좌(SCR-020)·회차 정산서(SCR-027) ---------- */
+
+export async function getPayoutAccount(signal?: AbortSignal): Promise<PartnerPayoutAccount> {
+  const { partnerApi, OPERATIONS } = await load();
+  return partnerApi().request<PartnerPayoutAccount>(OPERATIONS.getPartnerPayoutAccount, { signal });
+}
+
+/** If-Match는 GET 응답의 판, 재인증 토큰은 X-Reauth-Token 머리로만 보낸다(본문·주소에 싣지 않음). */
+export async function putPayoutAccount(
+  body: PayoutAccountChangeBody,
+  opts: { ifMatch: string; reauthToken: string },
+): Promise<PartnerPayoutAccount> {
+  const { partnerApi, OPERATIONS } = await load();
+  return partnerApi().request<PartnerPayoutAccount>(OPERATIONS.putPartnerPayoutAccount, {
+    body,
+    ifMatch: opts.ifMatch,
+    headers: { 'X-Reauth-Token': opts.reauthToken },
+    timeoutMs: 30_000,
+  });
+}
+
+export async function listEventSettlements(eventId: string, signal?: AbortSignal): Promise<SettlementStatement[]> {
+  const { partnerApi, OPERATIONS } = await load();
+  return partnerApi().request<SettlementStatement[]>(OPERATIONS.getPartnerEventSettlements, { params: { eventId }, signal });
 }
 
 /* ---------- 예매자 명단·다운로드 이력 ---------- */

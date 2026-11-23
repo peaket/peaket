@@ -1,5 +1,5 @@
 // 파트너 관리자 재인증(openapi POST /v1/partner/auth/reauthentications, identity §6, I-T53, ADR-0206).
-// 명단 내려받기는 비밀번호·TOTP 뒤 패스키까지 확인한 토큰(act BOOKER_EXPORT, factors에 passkey)만 받는다.
+// 명단 내려받기(act: 'BOOKER_EXPORT')와 정산 계좌 변경(act: 'PAYOUT_ACCOUNT', ADR-0370 결정 9)은 비밀번호·TOTP 뒤 패스키까지 확인한 토큰(factors에 passkey)만 받는다.
 // 토큰은 서버가 한 번만 쓰고(jti), 화면은 받은 토큰을 그 요청의 X-Reauth-Token에만 넣는다.
 
 export interface ReauthPasskeyStep {
@@ -146,9 +146,10 @@ async function post(body: unknown): Promise<ReauthResponse> {
 /**
  * 비밀번호·TOTP를 확인하고, 서버가 패스키 단계를 주면 브라우저 패스키 창을 띄워 마친다.
  * 사용자가 창을 닫으면 NotAllowedError가 그대로 올라가고 화면은 '다시 인증하지 않았습니다'로 보인다.
+ * 받은 act를 그대로 보내고, factors에 passkey가 없는 토큰은 쓰지 않는다(I-T53 ②③).
  */
-export async function requestBookerExportReauth(input: { password: string; code: string }): Promise<string> {
-  const first = await post({ act: 'BOOKER_EXPORT', password: input.password, code: input.code, withPasskey: true });
+export async function requestReauth(act: 'PAYOUT_ACCOUNT' | 'BOOKER_EXPORT', input: { password: string; code: string }): Promise<string> {
+  const first = await post({ act, password: input.password, code: input.code, withPasskey: true });
   if (first.next === 'DONE') {
     if (!hasPasskeyFactor(first.factors)) throw new Error('패스키 확인 없이 발급된 재인증 토큰은 쓸 수 없습니다');
     return first.reauthToken;
@@ -159,4 +160,9 @@ export async function requestBookerExportReauth(input: { password: string; code:
   const second = await post({ reauthStep: first.reauthStep, credential: serializeAssertion(credential) });
   if (second.next !== 'DONE' || !hasPasskeyFactor(second.factors)) throw new Error('패스키 확인 없이 발급된 재인증 토큰은 쓸 수 없습니다');
   return second.reauthToken;
+}
+
+/** 명단 내려받기 재인증(act BOOKER_EXPORT). */
+export async function requestBookerExportReauth(input: { password: string; code: string }): Promise<string> {
+  return requestReauth('BOOKER_EXPORT', input);
 }

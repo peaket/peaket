@@ -1,18 +1,31 @@
 // SCR-020 설정 › 정산 계좌(/settings/payout, d5 §6.1 ⑥, 보드 SCR-020 isPayout 구역).
 // [계좌 바꾸기](파트너 관리자) → 재인증(비밀번호·인증 앱 코드) → 패스키 확인 → '정산 계좌 바꾸기'(CMP-062 payout) → 완료.
 // 휴대폰은 안내 카드(d5 §3.9 범위 밖)라 대화상자를 열지 않는다.
+// ?state=가 없으면 실제 API 판(live/PayoutLive, F-07-7 ADR-0370 결정 9)을 그리고, 보드 그림은 ?state= 미리보기에만 쓴다.
 import { stellaOrg } from '@/entities/partner-org';
 import { routes } from '@/shared/config/routes';
 import { PAYOUT_STATES } from '@/shared/config/states/scr020-settings';
-import { readPreview, type RouteProps } from '@/shared/lib/preview';
+import { readParam, readPreview, type RouteProps } from '@/shared/lib/preview';
 import { BigScreenNotice } from '@/shared/ui/BigScreenNotice';
 import { PreviewStateSwitcher } from '@/shared/ui/PreviewStateSwitcher';
 import { payoutHoldUntil } from '../model/settings';
 import { PasskeyDialog, PayoutChangeDialog, ReauthDialog } from './dialogs';
+import { PayoutLive } from './live/PayoutLive';
 import { SettingsFrame, withKeep } from './SettingsFrame';
 
 export default async function PayoutPage({ searchParams }: RouteProps) {
-  const pv = readPreview(await searchParams, PAYOUT_STATES, '정산 계좌');
+  const sp = await searchParams;
+  const pv = readPreview(sp, PAYOUT_STATES, '정산 계좌');
+  if (readParam(sp, 'state') === undefined) {
+    return (
+      <>
+        <SettingsFrame current="payout" isMember={pv.isMember} keep={pv.keep}>
+          <PayoutLive isMember={pv.isMember} />
+        </SettingsFrame>
+        <PreviewStateSwitcher path={routes.settingsPayout()} states={PAYOUT_STATES} current={pv.state} keep={pv.keep} />
+      </>
+    );
+  }
   const st = pv.state;
   const done = st === '정산 계좌 변경 완료';
   const mismatch = st === '포트원 계좌 불일치';

@@ -1,11 +1,13 @@
 // [정산서] 탭(보드 상태 정산·KYC 예고·이의 제기 대화상자·이의 기간 끝·재통지(조정)·재통지(기각), d5 §6.10).
 // 휴대폰: 결제사 카드 · 이의 제기는 아래 시트 / 태블릿: 지급액을 앞으로 당긴 가로 스크롤 표 / 데스크톱: 8칸 표 + 지급 안내 7·배상 5열.
 // 이의 제기는 파트너 관리자만 한다(상품 정산서와 같은 규칙, SCR-023). 실무자에게는 AdminOnly로 이유 글을 보인다.
+// ?state=가 없으면(liveRounds가 오면) 실제 API 판(live/SettleLive, F-07-7 ADR-0370 결정 9)을 그리고, 아래 보드 그림은 ?state= 미리보기에만 쓴다.
 import { formatWon } from '@/entities/production';
 import { AdminOnly } from '@/features/admin-only';
 import { Modal } from '@/shared/ui/Modal';
 import { DISPUTE_CODES, PAYOUT_HOLDS, settleTotals, statements, type Statement } from '../model/settlement';
 import { CountedTextarea, DownloadMenu } from './client';
+import { LiveSettlePanel, type LiveSettleRound } from './live/SettleLive';
 import { RoundSelect, SHEET_ACTIONS, SHEET_PRIMARY } from './parts';
 
 export type SettleVariant = '정산' | 'KYC 예고' | '이의 제기 대화상자' | '이의 기간 끝' | '재통지(조정)' | '재통지(기각)';
@@ -289,7 +291,19 @@ function DisputeDialog({ s, open, round }: { s: Statement; open: boolean; round:
   );
 }
 
-export function SettleTab({ v, isMember, rounds }: { v: SettleVariant; isMember: boolean; rounds: readonly string[] }) {
+export function SettleTab({
+  v,
+  isMember,
+  rounds,
+  liveRounds,
+}: {
+  v: SettleVariant;
+  isMember: boolean;
+  rounds: readonly string[];
+  /** 실제 판의 회차(?state= 없을 때만) */
+  liveRounds?: readonly LiveSettleRound[];
+}) {
+  if (liveRounds) return <LiveSettlePanel rounds={liveRounds} isMember={isMember} />;
   const round = rounds[0] ?? '';
   const ctx: Ctx = { v, isMember, round };
   const stats = [
