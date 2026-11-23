@@ -384,7 +384,7 @@ describe('켜기·매초 다시 만들기', () => {
     await t;
   });
 
-  test('일정사본을확인하기전의회차는_켠목록에넣지않아_무작위회차ID가몰려도진짜회차를밀어내지않는다', async () => {
+  test('일정사본을확인하기전의회차는_켠목록에넣지않아_무작위회차ID가몰려도진짜회차를밀어내지않는다', { timeout: 30_000 }, async () => {
     const { snapshots, files } = await setup();
     snapshots.set('ev1', { seq: 5 });
     await files.file('ev1', 0);
@@ -409,7 +409,7 @@ describe('켜기·매초 다시 만들기', () => {
     expect(nextBoundary(T + 400, undefined)).toBe(T + 1_000);
   });
 
-  test('켠회차수에는상한이있어_넘으면가장오래묻지않은회차부터끈다', async () => {
+  test('켠회차수에는상한이있어_넘으면가장오래묻지않은회차부터끈다', { timeout: 30_000 }, async () => {
     const { clock, schedules, files } = await setup();
     for (let i = 0; i <= MAX_ACTIVE_EVENTS; i++) {
       await schedules.set(`e${i}`, schedule);

@@ -775,22 +775,24 @@ test('DM-08 같은 커밋끼리는 compat가 통과하고, 임시 복제본 밖 
 
 test('DM-09 마지막 출시 태그와 견주면 필드 삭제를 잡고, 도구 오류를 통과로 세지 않는다', async () => {
   const { dir } = makeGitRepo();
-  const work = join(tempDir('peaket-bat086-compat-work-'), 'demo-compat');
+  // 복제본 폴더는 검사마다 새로 만든다. 같은 폴더를 다시 쓰면 git clone이 "이미 있다"로 실패해
+  // 검사하려던 도구 오류가 아니라 준비 오류를 보게 된다.
+  const workFor = () => join(tempDir('peaket-bat086-compat-work-'), 'demo-compat');
   // M8 틀린 구현: HEAD와 HEAD를 견주어 항상 통과
   const alwaysPass = async () => {
-    const r = await runCompat({ repo: dir, work, run: () => ({ status: 0, out: '통과' }), docker: () => true });
+    const r = await runCompat({ repo: dir, work: workFor(), run: () => ({ status: 0, out: '통과' }), docker: () => true });
     assert.equal(r.ok, false, '항상 통과하는 compat를 통과로 읽었다');
     assert.equal(r.code, 1);
     assert.match(r.reason, /마지막 출시 태그.*통과했다|깨짐을 못 봤다/);
   };
   await alwaysPass();
   // M9 틀린 구현: 도구 오류(exit 2)를 통과로 읽음
-  const toolError = await runCompat({ repo: dir, work, run: () => ({ status: 2, out: 'docker: 이미지 없음' }), docker: () => true });
+  const toolError = await runCompat({ repo: dir, work: workFor(), run: () => ({ status: 2, out: 'docker: 이미지 없음' }), docker: () => true });
   assert.equal(toolError.ok, false, '도구 오류(exit 2)를 통과로 셌다');
   assert.equal(toolError.code, 1);
   assert.match(toolError.reason, /같은 커밋끼리의 검사가 통과하지 못했다/);
   // Docker가 없으면 exit 2(오류)이고 검사를 시작하지 않는다
-  const noDocker = await runCompat({ repo: dir, work, run: () => ({ status: 0, out: '' }), docker: () => false });
+  const noDocker = await runCompat({ repo: dir, work: workFor(), run: () => ({ status: 0, out: '' }), docker: () => false });
   assert.equal(noDocker.ok, false);
   assert.equal(noDocker.code, 2);
   assert.deepEqual(noDocker.steps, []);
