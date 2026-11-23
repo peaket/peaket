@@ -1351,7 +1351,7 @@ def check_artifacts(texts, rep):
 
 # ---------- 6의1의2. 공개 문서에 실제 운영 값이 없음(ADR-0153, docs/devops.md §2.1) ----------
 PUBLIC_ARN = re.compile(r'arn:aws[a-z-]*:[a-z0-9-]*:[a-z0-9-]*:\d{12}:')
-PUBLIC_ACCOUNT = re.compile(r'(?<![\d,.])\d{12}(?![\d,.])')
+PUBLIC_ACCOUNT = re.compile(r'(?<![0-9A-Za-z,.])\d{12}(?![0-9A-Za-z,.])')
 PUBLIC_DOMAIN = re.compile(r'\bpeaket\.(?:co\.kr|com|net|org|io|kr|app|dev|ai|co|me)\b', re.I)
 PUBLIC_CIDR = re.compile(r'(?<![\d.])((?:\d{1,3}\.){3}\d{1,3})/(\d{1,2})(?!\d)')
 # 문서에 적어도 되는 대역: 사설·공유(CGNAT)·링크 로컬·루프백·문서용(RFC 5737)·성능 측정용(RFC 2544, 부하 시험의 가상 사용자 IP,
