@@ -1,6 +1,9 @@
 // 위젯 값(ADR-0100 결정 4, docs/frontend.md §4.4.5, ADR-0360 결정 9). 파드마다 (회차, 위젯 키)별로 1초 [가정]에 한 번만 원천을 읽어
 // 그 파드의 연결에 나눠 준다(같은 위젯 키를 연결 여럿이 봐도 원천 읽기는 하나다). 마지막 구독이 떠나면 그 (회차, 키)의 읽기를 멈춘다.
 // 원천이 실패하면 같은 키에 error 'source-unavailable' 값을 낸다(화면은 '받지 못함'을 그린다).
+// 읽기 주기(타이머·첫 읽기)는 첫 구독을 한 SSE 요청의 맥락 밖에서 돈다: 그 요청의 남은 시간(서비스 상한 15초)을 물려받으면 15초 뒤
+// 모든 원천 호출이 보내기 전에 끝나 흐름이 늘 source-unavailable이 된다(F-03-1 B-01). 원천 읽기마다 원천 클라이언트가 자기 상한으로 남은 시간을 새로 잡는다.
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { WIDGET_MAX_RANGE_MS, WIDGET_RANGE_MS, WIDGET_TICK_MS, type WidgetKey, type WidgetValue } from '../domain/widgets.js';
 import type { WidgetReadQuery, WidgetSource } from '../domain/ports.js';
 
@@ -28,6 +31,8 @@ export function unavailableValue(key: WidgetKey, eventId: string | null, atMs: n
 export class WidgetFeed {
   readonly #sources = new Map<WidgetKey, WidgetSource>();
   readonly #slots = new Map<string, Slot>();
+  /** 만든 때(모듈 조립, 요청 밖)의 비동기 맥락에서 함수를 부른다. 읽기 주기가 첫 구독 요청의 맥락(남은 시간·trace)을 물려받지 않게 한다 */
+  readonly #detached = AsyncLocalStorage.snapshot();
 
   constructor(
     sources: readonly WidgetSource[],
@@ -74,11 +79,14 @@ export class WidgetFeed {
     const id = `${eventId ?? ''}|${key}`;
     let slot = this.#slots.get(id);
     if (!slot) {
-      const created: Slot = { eventId, key, listeners: new Set(), reading: false, timer: setInterval(() => void this.tick(created), this.options.tickMs ?? WIDGET_TICK_MS) };
-      created.timer.unref();
+      const created = this.#detached(() => {
+        const c: Slot = { eventId, key, listeners: new Set(), reading: false, timer: setInterval(() => void this.tick(c), this.options.tickMs ?? WIDGET_TICK_MS) };
+        c.timer.unref();
+        void this.tick(c);
+        return c;
+      });
       this.#slots.set(id, created);
       slot = created;
-      void this.tick(created);
     } else if (slot.last) {
       listener({ widgetKey: key, ...slot.last });
     }
