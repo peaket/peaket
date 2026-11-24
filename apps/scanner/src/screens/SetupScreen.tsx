@@ -8,7 +8,7 @@ import { PreviewSwitcher, usePreviewState } from "../app/preview";
 import { Link, navigate } from "../app/router";
 import { useScannerLive } from "../app/useScannerLive";
 import { device, placement, prep } from "../fixtures/scanner";
-import { bottomStyle, ManageLink, Strip, stripStyle } from "../shared/shell";
+import { bottomStyle, ManageLink, Strip, stripStyle, withLive } from "../shared/shell";
 
 export const SETUP_STATES = [
   "준비 중",
@@ -178,7 +178,7 @@ export function SetupScreen() {
               다시 로그인하거나 책임자에게 알리세요.
             </div>
           </div>
-          <Link className="btn btn-outline btn-lg btn-block" href="/login">
+          <Link className="btn btn-outline btn-lg btn-block" href={withLive("/login", search)}>
             <i className="ic ic-logout" aria-hidden="true" />
             다시 로그인하기
           </Link>
@@ -341,7 +341,7 @@ export function SetupScreen() {
       <p className={t ? "t-lg fw-m" : "t-md"}>기기 키가 없거나 폐기된 기기입니다. 이 기기로는 근무를 준비할 수 없습니다.</p>
       <Link
         className={t ? "btn btn-outline btn-lg" : "btn btn-outline btn-lg btn-block"}
-        href="/login"
+        href={withLive("/login", search)}
         style={t ? { minWidth: 360, maxWidth: "100%" } : undefined}
       >
         로그인 화면으로 돌아가기

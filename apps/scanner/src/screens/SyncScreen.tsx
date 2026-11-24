@@ -8,7 +8,7 @@ import { PreviewSwitcher, usePreviewState } from "../app/preview";
 import { Link } from "../app/router";
 import { useScannerLive } from "../app/useScannerLive";
 import { deviceFlags, prep, sync } from "../fixtures/scanner";
-import { bottomStyle, ManageLink, Strip, stripStyle } from "../shared/shell";
+import { bottomStyle, ManageLink, Strip, stripStyle, withLive } from "../shared/shell";
 
 export const SYNC_STATES = ["정상", "변경분 지연", "업로드 실패"] as const;
 
@@ -34,7 +34,7 @@ export function SyncScreen() {
 
   const title = (
     <div className="row" style={{ gap: 4, marginLeft: -10 }}>
-      <Link className="icon-btn" href="/scan" aria-label="스캔 화면으로 돌아가기">
+      <Link className="icon-btn" href={withLive("/scan", search)} aria-label="스캔 화면으로 돌아가기">
         <i className="ic ic-arrow-left" aria-hidden="true" />
       </Link>
       <h1 className={t ? "t-2xl" : "t-xl"} id={l ? "h-st" : undefined}>
