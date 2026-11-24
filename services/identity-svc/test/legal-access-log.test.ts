@@ -14,7 +14,7 @@ function harness() {
 }
 
 describe('F-01-8 identity 법정 접속기록 줄', () => {
-  test('16.3.1 로그인·재인증·로그아웃·토큰 갱신의 성공은 결과·요소·seq를 싣는다', () => {
+  test('16.3.1 [ASVS v5.0.0-16.3.1] 로그인·재인증·로그아웃·토큰 갱신의 성공은 결과·요소·seq를 싣는다', () => {
     const t = harness();
     t.log.record({ event: 'LOGIN', result: 'SUCCESS', provider: 'kakao', clientIp: '203.0.113.7', userAgent: 'Chrome/130', requestId: 'req-1', accountId: 'acc-1' });
     t.log.record({ event: 'REAUTH', result: 'SUCCESS', factors: ['password', 'totp', 'passkey'], act: 'OPS_COMMAND', clientIp: '203.0.113.7', requestId: 'req-2', accountId: 'acc-2' });
@@ -32,7 +32,7 @@ describe('F-01-8 identity 법정 접속기록 줄', () => {
     expect(t.parsed().every((l) => Number.isInteger(l.seq) && (l.seq as number) > 0)).toBe(true);
   });
 
-  test('16.3.2 실패한 인증 시도는 실패 종류를 싣고 성공과 같은 seq를 쓴다', () => {
+  test('16.3.2 [ASVS v5.0.0-16.3.2] 실패한 인증 시도는 실패 종류를 싣고 성공과 같은 seq를 쓴다', () => {
     const t = harness();
     for (const failure of ['password', 'totp', 'passkey', 'locked', 'session'] as const)
       t.log.record({ event: 'REAUTH', result: 'FAILED', failure, act: 'APPROVAL', accountId: 'acc-1' });
@@ -47,7 +47,7 @@ describe('F-01-8 identity 법정 접속기록 줄', () => {
     expect(() => t.log.record({ event: 'LOGIN', result: 'MAYBE' as never })).toThrow();
   });
 
-  test('16.3.1 비밀번호·토큰·쿠키·본문은 줄에 싣지 않고 User-Agent는 512자로 끊는다', () => {
+  test('16.3.1 [ASVS v5.0.0-16.3.1] 비밀번호·토큰·쿠키·본문은 줄에 싣지 않고 User-Agent는 512자로 끊는다', () => {
     const t = harness();
     // 실수로 넘긴 값도 줄에 새지 않는다(칸을 골라 쓴다)
     t.log.record({
@@ -71,7 +71,7 @@ describe('F-01-8 identity 법정 접속기록 줄', () => {
     expect(t.lines[0]!.includes('secret')).toBe(false);
   });
 
-  test('16.3.1 로그인 성공은 identity 표준 출력에 접속기록 줄 하나를 쓴다', async () => {
+  test('16.3.1 [ASVS v5.0.0-16.3.1] 로그인 성공은 identity 표준 출력에 접속기록 줄 하나를 쓴다', async () => {
     const store = new MemorySessionStore();
     const k = await kit(store);
     const chunks: string[] = [];

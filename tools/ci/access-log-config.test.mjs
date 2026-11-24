@@ -103,7 +103,7 @@ test('V-T21 법정 갈래는 읽은 위치·처음부터 읽기·회전 파일·
   expectBlocked((r) => set(r, 'deploy/platform/observability/collector/access-log.yaml', 'processors: [memory_limiter, filter/legal-only, transform/strip-investigation, batch]', 'processors: [memory_limiter, filter/legal-only, probabilistic_sampler, transform/strip-investigation, batch]'), 'probabilistic_sampler');
 });
 
-test('V-T22 법정·조사 갈래는 file_storage를 따로 쓰고 identity 줄의 빈 seq를 경보로 센다', () => {
+test('V-T22 [ASVS v5.0.0-16.3.1] [ASVS v5.0.0-16.3.2] 법정·조사 갈래는 file_storage를 따로 쓰고 identity 줄의 빈 seq를 경보로 센다', () => {
   expectBlocked((r) => set(r, 'deploy/platform/observability/collector/access-log.yaml', 'directory: /var/lib/otelcol/access-investigation', 'directory: /var/lib/otelcol/access-legal'), 'file_storage');
   expectBlocked((r) => set(r, 'deploy/platform/observability/alerts/access-log.yaml', 'access_log_seq_gaps_total', 'access_log_seq_gap'), 'access_log_seq_gaps_total');
   expectBlocked((r) => set(r, 'services/identity-svc/src/modules/session/legal-access-log.ts', 'seq', 'sequence'), 'seq');
@@ -130,7 +130,7 @@ test('V-T23 하루 사본은 03:30 앵커·04:00 내보내기·06:00 지연·Par
   expectBlocked((r) => set(r, users, 'GRANT SELECT ON access_log.access_log TO al_investigation;', ''), 'al_investigation');
 });
 
-test('V-T21·16.4.3 정본 값(0.1%·5분·15분)을 바꾸면 설정과 어긋나 막는다', () => {
+test('V-T21·[ASVS v5.0.0-16.4.3] 정본 값(0.1%·5분·15분)을 바꾸면 설정과 어긋나 막는다', () => {
   expectBlocked((r) => set(r, 'docs/observability.md', '모자란 비율이 0.1%를 넘으면', '모자란 비율이 0.2%를 넘으면'), 'shortfallThreshold');
   expectBlocked((r) => set(r, 'docs/observability.md', '대조 잡이 5분마다 15분 전의 5분 칸을 본다', '대조 잡이 10분마다 15분 전의 5분 칸을 본다'), 'window');
   expectBlocked((r) => set(r, 'docs/observability.md', '다음 날 03:30에는', '다음 날 03:00에는'), 'anchor');
@@ -139,7 +139,7 @@ test('V-T21·16.4.3 정본 값(0.1%·5분·15분)을 바꾸면 설정과 어긋�
   expectBlocked((r) => set(r, 'docs/observability.md', '06:00까지 없다', '07:00까지 없다'), 'missingBy');
 });
 
-test('Q-T61 ①~③ 조사 사본은 조사 경로만 Kafka로 보내고 조사 칸을 법정·일반 줄에서 지운다', () => {
+test('Q-T61 ① 조사 사본은 조사 경로 줄만 Kafka로 보내고 원문 IP·ASN·JA4·계정·pid를 싣는다', () => {
   const cfg = 'deploy/platform/observability/collector/access-log.yaml';
   expectBlocked((r) => set(r, cfg, 'topic: investigation.requests', 'topic: investigation.copy'), 'investigation.requests');
   expectBlocked((r) => set(r, cfg, 'compression: zstd', 'compression: gzip'), 'zstd');
@@ -147,10 +147,17 @@ test('Q-T61 ①~③ 조사 사본은 조사 경로만 Kafka로 보내고 조사 
   expectBlocked((r) => set(r, cfg, 'max_elapsed_time: 10m', 'max_elapsed_time: 1h'), '10m');
   // 조사 수신기는 법정과 다른 storage를 쓴다(읽은 위치를 따로 둔다)
   expectBlocked((r) => set(r, cfg, 'storage: file_storage/access-investigation', 'storage: file_storage/access-legal'), 'storage');
-  // 상태 조회·결과 파일은 조사 줄이 아니다
-  expectBlocked((r) => set(r, cfg, 'and not IsMatch(attributes["path"], "^/v1/queues/[^/]+/(status|files)(/|$)")', 'and true'), 'status');
   // asyncapi의 routeKind 목록을 하나라도 빠뜨리면 막는다
   expectBlocked((r) => set(r, cfg, 'set(attributes["routeKind"], "TRANSFER") where IsMatch(attributes["path"], "^/v1/tickets/[^/]+/transfers$")', ''), 'TRANSFER');
+});
+
+test('Q-T61 ② 상태 조회·셔플 결과 파일은 조사 사본에 넣지 않는다', () => {
+  const cfg = 'deploy/platform/observability/collector/access-log.yaml';
+  expectBlocked((r) => set(r, cfg, 'and not IsMatch(attributes["path"], "^/v1/queues/[^/]+/(status|files)(/|$)")', 'and true'), 'status');
+});
+
+test('Q-T61 ③ 원본 확인 없는 위조 끝단 머리 값은 조사·법정·일반 줄에 남기지 않는다', () => {
+  const cfg = 'deploy/platform/observability/collector/access-log.yaml';
   // 법정·일반 사본에서 조사 칸을 지운다
   expectBlocked((r) => set(r, cfg, 'delete_key(attributes, "ja4")', 'delete_key(attributes, "ja4_missing")'), 'ja4');
   expectBlocked((r) => set(r, cfg, 'delete_key(attributes, "edge_bot_labels")', ''), 'edge_bot_labels');
