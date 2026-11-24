@@ -43,7 +43,7 @@ test('V-T19 ① 신선도 p95는 5초 경계의 아래만 통과하고 1분 창�
   assert.ok(ok.p95 < FRESHNESS_LIMIT_MS);
 
   // 95번째 값이 정확히 5,000ms면 엄격 미만이 아니므로 실패다
-  const boundary = [...Array.from({ length: 119 }, () => 4_000), 5_000];
+  const boundary = [...Array.from({ length: 18 }, () => 4_000), 5_000, 5_000];
   const atLimit = judgeFreshness(boundary);
   assert.equal(atLimit.valid, true);
   assert.equal(atLimit.pass, false);
@@ -157,7 +157,8 @@ test('V-T19 계획은 3만 건/초를 100칸 비율로 정확히 나누고 기�
   assert.equal(plan.byRecord.queue, 36_000);
   assert.equal(plan.expected.holdHelped, 288_000);
   assert.equal(plan.expected.holdConflict, 72_000);
-  assert.equal(plan.expected.orderAmount, 2_700_000_000);
+  assert.equal(plan.expected.orderAmount, 270_000 * 10_000 + 1_000 * 809_994);
+  assert.equal(plan.expected.paymentAmount, 180_000 * 30_000 + 1_000 * 360_000);
 
   // 100칸 비율을 정확히 나누지 못하는 수는 largest remainder로 합이 정확히 total이 되게 한다
   const counts = allocCounts(101, MIX);
