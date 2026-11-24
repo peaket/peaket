@@ -142,6 +142,7 @@
 
 - 2026-11-24 12:3x v1 릴리스 범위 계약을 세웠다(REL-010, ADR-0386). `docs/release/v1-scope.md`·`v1-scope.json`에 105개를 release 32·gate 6·frozen-local 67로 나누고 `tools/ci/release-scope.mjs --check`를 tools-check에 걸었다. CI 45319475883 성공. Argo CD 소스를 develop에서 release 태그/main으로 바꾸는 일, release/1.0.0 가지·v1.0.0 태그 생성은 소유자 확인 전에는 하지 않는다.
 - 2026-11-24 12:4x 동결 로컬 개발을 시작했다: F-01-8(freeze/lane1-F-01-8), F-02-3(freeze/lane2-F-02-3), F-05-8(freeze/lane3-F-05-8), F-07-2(freeze/lane5-F-07-2). freeze 가지만 올리고 develop·release에는 합치지 않는다(v1 release 뒤에 합친다). F-04-9는 F-04-8 측정 창(11-28~30) 뒤, F-08-1·F-08-3~6은 측정·출시 뒤로 둔다.
+- 2026-11-24 16:3x F-03-4 출시 gate를 닫았다. T13~T16 실제 서버 5/5(c1e372255·a5ef8b251), 브라우저 확인 OPS-390 통과(320px 넘침 고침 포함, ce291b990), ops Outbox 일 파티션 누락 고침(05137b903). release-scope를 release 33·gate 5로 옮겼다. T15 ② 예측 값 줄은 BAT-365(OPS-300·310)로 미룬다. F-05-1은 PC 측정 완료(af63e511b), 소유자 실기기 확인 대기. F-08 창 1은 11-25 08:30에 당길지 판단한다.
 ## SEG 때 정할 범위 늘어남(ADR-0283 결정 6)
 - 묶음 중에 더한 새 단계는 wbs.csv 일수에 바로 더하지 않고 여기 모아 구간 마무리 때 소유자가 한 번에 정한다(앞선 예: HOT-405 0.75일, 2026-11-18 OPEN[49]).
 - PRF-174(wbs 2.7.1 ③, 0.5일 [가정], BAT-013): 탈퇴 참여자의 결제한 미사용 티켓 취소·환급(BAT-010이 찾음, 돈 A 대상, R-685).

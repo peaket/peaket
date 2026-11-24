@@ -82,8 +82,8 @@
       "reason": "R-798, fdb210c44, ADR-0371, 계획 docs/review/plans/F-03-3.md"
     },
     "F-03-4": {
-      "class": "gate",
-      "reason": "R-799, 3bfeeaa9c·5a6a92240, 계획 docs/review/plans/F-03-4.md. 게이트: 실제 서버 화면 시험 T13~T16 + 브라우저 확인"
+      "class": "release",
+      "reason": "R-799, 3bfeeaa9c·5a6a92240, 계획 docs/review/plans/F-03-4.md. gate 통과: T13~T16 5/5(c1e372255·a5ef8b251), 브라우저 확인 OPS-390(ce291b990), ops Outbox 일 파티션 고침(05137b903)"
     },
     "F-03-5": {
       "class": "frozen-local",
@@ -423,7 +423,6 @@
     }
   },
   "gates": [
-    "F-03-4",
     "F-04-8",
     "F-05-1",
     "F-08-2",
