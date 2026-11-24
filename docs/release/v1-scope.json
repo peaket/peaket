@@ -1,0 +1,502 @@
+{
+  "version": "v1",
+  "features": {
+    "F-01-1": {
+      "class": "release",
+      "reason": "기록 9b0cb8900, 계획 docs/review/plans/F-01-1.md"
+    },
+    "F-01-2": {
+      "class": "release",
+      "reason": "R-786, fbfa9cd49, 계획 docs/review/plans/F-01-2.md"
+    },
+    "F-01-3": {
+      "class": "release",
+      "reason": "기록 1814fb236, 계획 docs/review/plans/F-01-3.md"
+    },
+    "F-01-4": {
+      "class": "release",
+      "reason": "기록 da2a69564, 계획 docs/review/plans/F-01-4.md"
+    },
+    "F-01-5": {
+      "class": "release",
+      "reason": "기록 bd537ea58, ADR-0382, 계획 docs/review/plans/F-01-5.md"
+    },
+    "F-01-6": {
+      "class": "release",
+      "reason": "R-806, a03e64747, 기록 c62578dec. BUILD_ORDER는 진행이나 develop에 합쳐짐"
+    },
+    "F-01-7": {
+      "class": "release",
+      "reason": "R-807, a5471bf23, 기록 c62578dec. BUILD_ORDER는 진행이나 develop에 합쳐짐"
+    },
+    "F-01-8": {
+      "class": "frozen-local",
+      "reason": "v1 제외(법정): 법정 접속기록 전용 저장소·보존. ADR-0373 동결."
+    },
+    "F-01-9": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-01-10": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-02-1": {
+      "class": "release",
+      "reason": "R-779, 76f31ce6c, 계획 docs/review/plans/F-02-1.md"
+    },
+    "F-02-2": {
+      "class": "release",
+      "reason": "R-790, 5a06f93c2, 계획 docs/review/plans/F-02-2.md"
+    },
+    "F-02-3": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-02-4": {
+      "class": "frozen-local",
+      "reason": "v1 제외(법정): 접속기록 전용 저장소·보존 만료 파기. ADR-0373 동결."
+    },
+    "F-02-5": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-02-6": {
+      "class": "frozen-local",
+      "reason": "v1 제외(외부 계정): AWS WAF·S3 실제 연결. 포트·가짜만 로컬 트랙."
+    },
+    "F-02-7": {
+      "class": "frozen-local",
+      "reason": "v1 제외(외부 계정): KMS 2인 서명 런북 CLI."
+    },
+    "F-03-1": {
+      "class": "release",
+      "reason": "R-788, 52d465c5b, 계획 docs/review/plans/F-03-1.md. BUILD_ORDER는 진행이나 합쳐짐"
+    },
+    "F-03-2": {
+      "class": "release",
+      "reason": "R-789, 0e7bd6360, 계획 docs/review/plans/F-03-2.md. BUILD_ORDER는 진행이나 합쳐짐"
+    },
+    "F-03-3": {
+      "class": "release",
+      "reason": "R-798, fdb210c44, ADR-0371, 계획 docs/review/plans/F-03-3.md"
+    },
+    "F-03-4": {
+      "class": "gate",
+      "reason": "R-799, 3bfeeaa9c·5a6a92240, 계획 docs/review/plans/F-03-4.md. 게이트: 실제 서버 화면 시험 T13~T16 + 브라우저 확인"
+    },
+    "F-03-5": {
+      "class": "frozen-local",
+      "reason": "동결(범위): F-03-4 gate 뒤 공지·홈 구성."
+    },
+    "F-03-6": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-03-7": {
+      "class": "frozen-local",
+      "reason": "v1 제외(법정): 감사·리플레이·법정 조치 화면. F-03-4 gate 뒤."
+    },
+    "F-04-1": {
+      "class": "release",
+      "reason": "R-791, 3f29786e7, 계획 docs/review/plans/F-04-1.md"
+    },
+    "F-04-2": {
+      "class": "release",
+      "reason": "기록 16f5e13a6, ADR-0357, 계획 docs/review/plans/F-04-2.md"
+    },
+    "F-04-3": {
+      "class": "release",
+      "reason": "R-792, 511160d18, 계획 docs/review/plans/F-04-3.md"
+    },
+    "F-04-4": {
+      "class": "release",
+      "reason": "R-801, abcde71c1, 계획 docs/review/plans/F-04-4.md"
+    },
+    "F-04-5": {
+      "class": "release",
+      "reason": "R-802, 4e612257e, 계획 docs/review/plans/F-04-5.md"
+    },
+    "F-04-6": {
+      "class": "release",
+      "reason": "R-805, 2551627bd, 계획 docs/review/plans/F-04-6.md"
+    },
+    "F-04-7": {
+      "class": "release",
+      "reason": "R-808, 994c1ab2d, 계획 docs/review/plans/F-04-7.md"
+    },
+    "F-04-8": {
+      "class": "gate",
+      "reason": "진행, 계획 docs/review/plans/F-04-8.md §6·§10. 게이트: 3만 건/초·1분 창·V-T19·ops-svc 신선도 측정"
+    },
+    "F-04-9": {
+      "class": "frozen-local",
+      "reason": "v1 제외(포렌식): 소유자가 포렌식 플랫폼을 v1에서 뺐다(ADR-0373). 로컬 트랙."
+    },
+    "F-04-10": {
+      "class": "frozen-local",
+      "reason": "v1 제외(포렌식): 소유자가 포렌식 플랫폼을 v1에서 뺐다(ADR-0373). 로컬 트랙."
+    },
+    "F-04-11": {
+      "class": "frozen-local",
+      "reason": "v1 제외(포렌식): 소유자가 포렌식 플랫폼을 v1에서 뺐다(ADR-0373). 로컬 트랙."
+    },
+    "F-04-12": {
+      "class": "frozen-local",
+      "reason": "v1 제외(포렌식): 소유자가 포렌식 플랫폼을 v1에서 뺐다(ADR-0373). 로컬 트랙."
+    },
+    "F-04-13": {
+      "class": "frozen-local",
+      "reason": "v1 제외(포렌식): 소유자가 포렌식 플랫폼을 v1에서 뺐다(ADR-0373). 로컬 트랙."
+    },
+    "F-04-14": {
+      "class": "frozen-local",
+      "reason": "v1 제외(포렌식): 소유자가 포렌식 플랫폼을 v1에서 뺐다(ADR-0373). 로컬 트랙."
+    },
+    "F-04-15": {
+      "class": "frozen-local",
+      "reason": "v1 제외(포렌식): 소유자가 포렌식 플랫폼을 v1에서 뺐다(ADR-0373). 로컬 트랙."
+    },
+    "F-04-16": {
+      "class": "frozen-local",
+      "reason": "v1 제외(포렌식): 소유자가 포렌식 플랫폼을 v1에서 뺐다(ADR-0373). 로컬 트랙."
+    },
+    "F-04-17": {
+      "class": "frozen-local",
+      "reason": "v1 제외(포렌식): 소유자가 포렌식 플랫폼을 v1에서 뺐다(ADR-0373). 로컬 트랙."
+    },
+    "F-04-18": {
+      "class": "frozen-local",
+      "reason": "v1 제외(포렌식): 소유자가 포렌식 플랫폼을 v1에서 뺐다(ADR-0373). 로컬 트랙."
+    },
+    "F-04-19": {
+      "class": "frozen-local",
+      "reason": "v1 제외(포렌식): 소유자가 포렌식 플랫폼을 v1에서 뺐다(ADR-0373). 로컬 트랙."
+    },
+    "F-04-20": {
+      "class": "release",
+      "reason": "R-797, 8d0b58848, 계획 docs/review/plans/F-04-20.md"
+    },
+    "F-05-1": {
+      "class": "gate",
+      "reason": "R-787, GAT-040 끝·GAT-020 대기, 계획 docs/review/plans/F-05-1.md. 게이트: GAT-030 키 증명 PoC + 소유자 실기기 확인"
+    },
+    "F-05-2": {
+      "class": "release",
+      "reason": "R-810, ba4c523da, reflow c3175c7b5(닫힘), ADR-0383, 계획 docs/review/plans/F-05-2.md"
+    },
+    "F-05-3": {
+      "class": "release",
+      "reason": "R-812, 9440db38d, ADR-0385, 계획 docs/review/plans/F-05-3.md"
+    },
+    "F-05-4": {
+      "class": "release",
+      "reason": "R-809, 994c1ab2d, 계획 docs/review/plans/F-05-4.md. BUILD_ORDER는 진행이나 합쳐짐"
+    },
+    "F-05-5": {
+      "class": "release",
+      "reason": "R-800, 55d562471, 계획 docs/review/plans/F-05-5.md"
+    },
+    "F-05-6": {
+      "class": "release",
+      "reason": "R-811, a752f1456, 계획 docs/review/plans/F-05-6.md"
+    },
+    "F-05-7": {
+      "class": "release",
+      "reason": "R-782, b20bdd44f, 계획 docs/review/plans/F-05-7.md"
+    },
+    "F-05-8": {
+      "class": "frozen-local",
+      "reason": "동결(범위): 찜 목록·CS 모바일·당일 입장 탭. F-05-7 뒤."
+    },
+    "F-05-9": {
+      "class": "frozen-local",
+      "reason": "동결(범위): K10 측정·블로그. 측정 창 밖."
+    },
+    "F-05-11": {
+      "class": "frozen-local",
+      "reason": "v1 제외(동결 선행): F-05-2 뒤 양도 거절·알림, F-06-1 동결에 종속."
+    },
+    "F-05-12": {
+      "class": "frozen-local",
+      "reason": "동결(범위): F-05-6·F-05-4 뒤 부스 재발급·SCR-052."
+    },
+    "F-05-10": {
+      "class": "frozen-local",
+      "reason": "동결(범위): 스캐너 워커·앱 판. F-05-4 계획에서 분리."
+    },
+    "F-06-1": {
+      "class": "frozen-local",
+      "reason": "v1 제외(CS·법정): 알림 발송은 대행사 계약·VAPID 운영 키가 필요(F-06-6)."
+    },
+    "F-06-2": {
+      "class": "release",
+      "reason": "R-783, d2c11542e, ADR-0364, 계획 docs/review/plans/F-06-2.md"
+    },
+    "F-06-3": {
+      "class": "frozen-local",
+      "reason": "v1 제외(CS·법정): 1/2인 승인·예외 환불·미성년자 취소."
+    },
+    "F-06-4": {
+      "class": "frozen-local",
+      "reason": "v1 제외(CS·법정): 예매 제한·FRAUD_CASE 소명."
+    },
+    "F-06-5": {
+      "class": "frozen-local",
+      "reason": "v1 제외(CS·법정): 팬 조회·문의·계좌번호 탐지."
+    },
+    "F-06-7": {
+      "class": "release",
+      "reason": "R-793, c8dcd468d, ADR-0364, 계획 docs/review/plans/F-06-7.md"
+    },
+    "F-06-6": {
+      "class": "frozen-local",
+      "reason": "v1 제외(외부 계정): 운영 메일·문자 대행사·VAPID 운영 키. 소유자 몫(막힘)."
+    },
+    "F-07-2": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-07-3": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-07-4": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-07-5": {
+      "class": "release",
+      "reason": "R-781, f0c0206da, ADR-0368, 계획 docs/review/plans/F-07-5.md"
+    },
+    "F-07-6": {
+      "class": "release",
+      "reason": "R-796, 5b97be5d6, ADR-0369, 계획 docs/review/plans/F-07-6.md"
+    },
+    "F-07-7": {
+      "class": "release",
+      "reason": "R-803, 8254a83fc, ADR-0370, 계획 docs/review/plans/F-07-7.md"
+    },
+    "F-07-8": {
+      "class": "release",
+      "reason": "R-804, 82ba112c8, ADR-0380, 계획 docs/review/plans/F-07-8.md"
+    },
+    "F-07-9": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-07-10": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-07-11": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-07-12": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-07-13": {
+      "class": "frozen-local",
+      "reason": "v1 제외(동결 선행): F-09-6 관리 TOTP·세션 동결에 종속."
+    },
+    "F-07-15": {
+      "class": "frozen-local",
+      "reason": "동결(범위): F-07-8 뒤 화면·문구. F-08-7 데모에 필요하면 그 행만."
+    },
+    "F-08-1": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-08-2": {
+      "class": "gate",
+      "reason": "진행, 계획 docs/review/plans/F-08-2.md. 게이트: 100만 외삽·진입 서버 비례·외부 한도 측정"
+    },
+    "F-08-3": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-08-4": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-08-5": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-08-6": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-08-7": {
+      "class": "gate",
+      "reason": "대기, 계획 docs/review/plans/F-08-7.md. 게이트: 데모 영상·안내·RFC·블로그 목차"
+    },
+    "F-08-8": {
+      "class": "gate",
+      "reason": "대기, 계획 docs/review/plans/F-08-8.md. 게이트: K1·K2·K7 After(장애 주입 1만 건) 측정"
+    },
+    "F-08-9": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-08-10": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-08-11": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-08-12": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-08-13": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-08-14": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-08-15": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-09-1": {
+      "class": "frozen-local",
+      "reason": "v1 제외(외부 계정): 클라우드 스테이징 Terraform·providers lock 소유자 결정(막힘)."
+    },
+    "F-09-2": {
+      "class": "frozen-local",
+      "reason": "v1 제외(외부 계정): 마이그레이션 도구·릴리스 플래그는 배포 환경이 있어야 한다."
+    },
+    "F-09-3": {
+      "class": "frozen-local",
+      "reason": "v1 제외(외부 계정): Aurora·MSK·Redis 관리형 설정."
+    },
+    "F-09-4": {
+      "class": "frozen-local",
+      "reason": "v1 제외(외부 계정): TLS·KMS·CloudFront·WAF 실제 연결."
+    },
+    "F-09-6": {
+      "class": "frozen-local",
+      "reason": "v1 제외(외부 계정): gw-ops IP/VPN·DAST·관리 계정."
+    },
+    "F-09-8": {
+      "class": "frozen-local",
+      "reason": "동결(범위): 구간 5 인프라. 측정에 kind가 필요하면 클러스터 재가동 몫만."
+    },
+    "F-09-9": {
+      "class": "frozen-local",
+      "reason": "v1 제외(외부 계정): 엣지 KVS·KMS 키·WS PoC(막힘, ADR-0234)."
+    },
+    "F-09-10": {
+      "class": "frozen-local",
+      "reason": "v1 제외(외부 계정): KEDA·Karpenter·Argo Rollouts 클러스터 설정."
+    },
+    "F-09-11": {
+      "class": "frozen-local",
+      "reason": "v1 제외(외부 계정): 카나리 분석·그림자 계산 클러스터 설정."
+    },
+    "F-10-1": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-10-2": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-11-1": {
+      "class": "frozen-local",
+      "reason": "v1 제외(외부 계정): 봇 시뮬레이터 소유자 결정 대기(OPEN[23], 막힘)."
+    },
+    "F-11-2": {
+      "class": "frozen-local",
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+    },
+    "F-11-3": {
+      "class": "frozen-local",
+      "reason": "v1 제외(외부 계정): 봇 시뮬레이터 12칸 소유자 결정 대기(OPEN[23], 막힘)."
+    }
+  },
+  "gates": [
+    "F-03-4",
+    "F-04-8",
+    "F-05-1",
+    "F-08-2",
+    "F-08-7",
+    "F-08-8"
+  ],
+  "frozen": [
+    "F-01-8",
+    "F-01-9",
+    "F-01-10",
+    "F-02-3",
+    "F-02-4",
+    "F-02-5",
+    "F-02-6",
+    "F-02-7",
+    "F-03-5",
+    "F-03-6",
+    "F-03-7",
+    "F-04-9",
+    "F-04-10",
+    "F-04-11",
+    "F-04-12",
+    "F-04-13",
+    "F-04-14",
+    "F-04-15",
+    "F-04-16",
+    "F-04-17",
+    "F-04-18",
+    "F-04-19",
+    "F-05-8",
+    "F-05-9",
+    "F-05-11",
+    "F-05-12",
+    "F-05-10",
+    "F-06-1",
+    "F-06-3",
+    "F-06-4",
+    "F-06-5",
+    "F-06-6",
+    "F-07-2",
+    "F-07-3",
+    "F-07-4",
+    "F-07-9",
+    "F-07-10",
+    "F-07-11",
+    "F-07-12",
+    "F-07-13",
+    "F-07-15",
+    "F-08-1",
+    "F-08-3",
+    "F-08-4",
+    "F-08-5",
+    "F-08-6",
+    "F-08-9",
+    "F-08-10",
+    "F-08-11",
+    "F-08-12",
+    "F-08-13",
+    "F-08-14",
+    "F-08-15",
+    "F-09-1",
+    "F-09-2",
+    "F-09-3",
+    "F-09-4",
+    "F-09-6",
+    "F-09-8",
+    "F-09-9",
+    "F-09-10",
+    "F-09-11",
+    "F-10-1",
+    "F-10-2",
+    "F-11-1",
+    "F-11-2",
+    "F-11-3"
+  ]
+}

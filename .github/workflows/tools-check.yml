@@ -78,6 +78,8 @@ jobs:
       - run: node --test "tools/audit-verify/*.test.mjs"
       - run: node tools/ci/check-workflows.mjs
       - run: node tools/ci/check-codeowners.mjs
+      # v1 릴리스 범위(ADR-0386, REL-010): 분류 표·manifest·BUILD_ORDER가 같은 기능을 같은 분류로 적는지 본다.
+      - run: node tools/ci/release-scope.mjs --check
       - run: node tools/ci/check-workspace-protocol.mjs
       # 신뢰 정책 예외는 이름@정확한 판만, devops §4.4 예외 표에 적은 것만(ADR-0191)
       - run: node tools/ci/check-trust-exceptions.mjs
