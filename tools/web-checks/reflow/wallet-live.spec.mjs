@@ -55,6 +55,8 @@ const answer = (status, body) => ({
 });
 const list = (items, nextCursor = null) => answer(200, { items, nextCursor });
 const fail = (status) => answer(status, { type: 'about:blank', title: '오류', status });
+/** 본문 없는 204(토큰 갱신). 204에 본문을 실으면 안 된다(openapi refresh는 본문 없음) */
+const noContent = () => ({ status: 204, headers: { ...CORS, 'cache-control': 'no-store' } });
 
 /**
  * 팬 API 대역: 나머지 경로는 일시 장애(503, csp/pages.mjs stubFanApi)이고, 목록·회차 요약·토큰 갱신만 준 답을 낸다.
@@ -144,16 +146,21 @@ test('O-T52 ④ 기본 폭: 저장된 표가 있는데 목록 요청이 끊기�
   await expect(page.getByText('티켓을 불러오지 못했습니다')).toHaveCount(0);
 });
 
-test('O-T52 ⑤ 기본 폭: 토큰을 갱신한 뒤에도 401이면 저장된 표를 그리지 않고 로그인 화면으로 간다', async ({ page, context }) => {
-  const id = ticketIdV7();
-  const unauthorized = answer(401, { type: 'about:blank', title: 'Unauthorized', status: 401 });
-  const calls = await fanApi(context, { tickets: [list([item(id)]), unauthorized], refresh: answer(204, {}) });
-  await page.goto(`${WEB}/my/tickets`);
-  await expect(registerButton(page, id)).toBeVisible();
-  await page.reload();
-  await expect(page).toHaveURL(/\/login(?:[/?#]|$)/);
-  expect(calls.refresh).toBeGreaterThanOrEqual(1);
-  await expect(registerButton(page, id)).toHaveCount(0);
+test.describe(() => {
+  // WebKit은 서비스 워커가 맡은 요청에 context.route 대역을 적용하지 못해(실제 DNS로 나가 실패) 401 갱신 차례를 볼 수 없다.
+  // 이 시험은 401 → 갱신 → 다시 401 → 로그인 화면 차례만 보므로 워커를 끄고 대역이 모든 요청을 받게 한다
+  test.use({ serviceWorkers: 'block' });
+  test('O-T52 ⑤ 기본 폭: 토큰을 갱신한 뒤에도 401이면 저장된 표를 그리지 않고 로그인 화면으로 간다', async ({ page, context }) => {
+    const id = ticketIdV7();
+    const unauthorized = answer(401, { type: 'about:blank', title: 'Unauthorized', status: 401 });
+    const calls = await fanApi(context, { tickets: [list([item(id)]), unauthorized], refresh: noContent() });
+    await page.goto(`${WEB}/my/tickets`);
+    await expect(registerButton(page, id)).toBeVisible();
+    await page.reload();
+    await expect(page).toHaveURL(/\/login(?:[/?#]|$)/);
+    expect(calls.refresh).toBeGreaterThanOrEqual(1);
+    await expect(registerButton(page, id)).toHaveCount(0);
+  });
 });
 
 test('O-T52 ⑥⑦ 기본 폭: 상태가 섞인 목록에서 ISSUED·ACTIVE 두 장만 입장용 등록 버튼이 있고 나머지는 배지·문장만이며 요약 실패 회차의 표도 보인다', async ({ page, context }) => {
@@ -196,27 +203,38 @@ test('O-T52 ⑨ 기본 폭: 펼침 주소의 티켓 ID가 목록에 없으면 "�
   await expect(page.getByText('티켓을 찾을 수 없습니다')).toHaveCount(0);
 });
 
-test('O-T52 ⑥ 기본 폭: ISSUED 표의 [이 휴대폰을 입장용으로 등록] → 등록 201이면 그 티켓 ID가 대체 글에 든 회전 QR이 보인다(TR-04)', async ({ page, context }) => {
-  const id = ticketIdV7();
-  await fanApi(context, { tickets: [list([item(id, 'ISSUED')])] });
-  const api = new URL(FAN_API_ORIGIN).origin;
-  const registered = [];
-  await context.route(
-    (url) => url.origin === api && /^\/v1\/tickets\/[^/]+\/device-keys$/.test(url.pathname),
-    (route) => {
-      if (route.request().method() === 'OPTIONS') {
-        return route.fulfill({ status: 204, headers: { ...CORS, 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'accept, content-type, x-reauth-token' } });
-      }
-      const body = route.request().postDataJSON();
-      registered.push({ path: new URL(route.request().url()).pathname, reason: body.reason });
-      return route.fulfill(answer(201, { keyId: keyIdOfJwk(body.publicKeyJwk) }));
-    },
-  );
-  await page.goto(`${WEB}/my/tickets`);
-  await registerButton(page, id).click();
-  // 회전 QR(role=img)의 대체 글이 그 표의 티켓 ID로 시작한다
-  await expect(page.getByRole('img', { name: new RegExp(`^입장 QR, 티켓 ${id}, 15초마다 바뀝니다`) })).toBeVisible();
-  // 등록 요청 경로의 티켓 ID = 목록의 ticketId(다른 ID를 DeviceQr에 넘기면 여기서 걸린다)
-  expect(registered).toEqual([{ path: `/v1/tickets/${id}/device-keys`, reason: 'ISSUE' }]);
-  await expect(registerButton(page, id)).toHaveCount(0);
+test.describe(() => {
+  // WebKit은 서비스 워커가 맡은 교차 출처 POST에 context.route 대역을 적용하지 못한다(실제 DNS로 나가 실패).
+  // 이 시험은 등록 201 → 회전 QR 차례를 보므로 워커를 끄고 대역이 등록 요청을 받게 한다(워커 자체는 reflow/wallet-sw.spec.mjs가 본다)
+  test.use({ serviceWorkers: 'block' });
+  test('O-T52 ⑥ 기본 폭: ISSUED 표의 [이 휴대폰을 입장용으로 등록] → 등록 201이면 그 티켓 ID가 대체 글에 든 회전 QR이 보인다(TR-04)', async ({ page, context }) => {
+    const id = ticketIdV7();
+    await fanApi(context, { tickets: [list([item(id, 'ISSUED')])] });
+    const api = new URL(FAN_API_ORIGIN).origin;
+    const registered = [];
+    await context.route(
+      (url) => url.origin === api && /^\/v1\/tickets\/[^/]+\/device-keys$/.test(url.pathname),
+      (route) => {
+        if (route.request().method() === 'OPTIONS') {
+          return route.fulfill({ status: 204, headers: { ...CORS, 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'accept, content-type, x-reauth-token' } });
+        }
+        const body = route.request().postDataJSON();
+        registered.push({ path: new URL(route.request().url()).pathname, reason: body.reason });
+        return route.fulfill(answer(201, { keyId: keyIdOfJwk(body.publicKeyJwk) }));
+      },
+    );
+    await page.goto(`${WEB}/my/tickets`);
+    await registerButton(page, id).click();
+    // 기본 폭(데스크톱으로 보이는 브라우저)은 키를 만들기 전에 안내가 먼저다(d5 §5.13): ( 그래도 이 기기에 등록 › )을 한 번 더 누른다.
+    // 휴대폰 문맥이면 안내 없이 곧바로 QR로 간다
+    const qr = page.getByRole('img', { name: new RegExp(`^입장 QR, 티켓 ${id}, 15초마다 바뀝니다`) });
+    const proceed = page.getByRole('button', { name: '그래도 이 기기에 등록' });
+    await expect(proceed.or(qr)).toBeVisible();
+    if (await proceed.isVisible()) await proceed.click();
+    // 회전 QR(role=img)의 대체 글이 그 표의 티켓 ID로 시작한다
+    await expect(qr).toBeVisible();
+    // 등록 요청 경로의 티켓 ID = 목록의 ticketId(다른 ID를 DeviceQr에 넘기면 여기서 걸린다)
+    expect(registered).toEqual([{ path: `/v1/tickets/${id}/device-keys`, reason: 'ISSUE' }]);
+    await expect(registerButton(page, id)).toHaveCount(0);
+  });
 });
