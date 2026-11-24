@@ -46,5 +46,16 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     process.exit(2);
   }
   const applied = await migrateOps(url);
+  // 명령 6 대체 결제사 전환의 ACKED는 같은 트랜잭션에 표시용 설정 사건(control.settings)을 ops Outbox로 쓴다.
+  // Outbox는 일 파티션이 없으면 그 쓰기가 실패해 ACKED가 남지 않는다(F-03-4 T15가 실제로 드러냄, 2026-11-24).
+  // identity·payment·purchase의 migrate와 같은 자리에서 오늘부터 7일 파티션을 만든다.
+  const { createDatabase, ensureOutboxPartitions, systemClock } = await import('@peaket/platform');
+  const database = createDatabase({ url, applicationName: 'ops-svc-migrate', max: 1 });
+  try {
+    const { created } = await ensureOutboxPartitions(database, systemClock);
+    console.log(`Outbox 파티션 ${created.length}개를 만들었다`);
+  } finally {
+    await database.close();
+  }
   console.log(`ops 마이그레이션 끝(${applied.length}개 적용)`);
 }
