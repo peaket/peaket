@@ -301,7 +301,6 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
     sessionId?: string;
     placement?: { gateZone: string; mode: 'IN' | 'OUT' };
     reentryAllowed?: boolean;
-    entryClosesAtMs?: number;
     sessions?: Readonly<Record<string, { accountId?: string; validFromMs?: number; validUntilMs?: number }>>;
     scans: readonly ScanEventInput[];
     nowMs: number;

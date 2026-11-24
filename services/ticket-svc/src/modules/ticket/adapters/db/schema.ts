@@ -68,6 +68,8 @@ export const ticket = pgTable(
     uniqueIndex('ticket_order_generation_seat_key').on(t.orderId, t.issueGeneration, t.seatId),
     index('ticket_wallet_idx').on(t.accountId, t.createdAt, t.id),
     index('ticket_order_idx').on(t.orderId, t.issueGeneration),
+    /** 입장 기록 마감 후보의 exists 확인과 F-05-4 스캐너 패키지 질의(마이그레이션 0020, F-05-6 IR-03) */
+    index('ticket_event_idx').on(t.eventId),
     check('ticket_status_check', sql`${t.status} IN ('ISSUED', 'ACTIVE', 'TRANSFER_PENDING', 'CANCEL_REQUESTED', 'REFUNDED', 'FLAGGED', 'VOIDED')`),
   ],
 );

@@ -162,7 +162,6 @@ export class ScannerGate {
         ...(i.sessionId !== undefined ? { sessionId: i.sessionId } : {}),
         ...(placement ? { placement: { gateZone: placement.gateZone, mode: placement.mode } } : {}),
         ...(policy ? { reentryAllowed: policy.reentryAllowed } : {}),
-        ...(policy?.entryClosesAtMs !== undefined ? { entryClosesAtMs: policy.entryClosesAtMs } : {}),
         ...(Object.keys(sessions).length > 0 ? { sessions } : {}),
         scans,
         nowMs: now,
