@@ -4,6 +4,8 @@
 // §5.14.1 [C 관제 콘솔] 'Trusted Types' 이름 목록과 '붙인 곳'(peaket-remote는 읽은 remotes.json의 정식 주소만, 원격 webpack 정책은 한 파일이라 만들지 않는다),
 // §5.7 '원격 실패'·§5.16(remote_load_failed_total{remote, reason}을 같은 출처 /_t/rum counters로), §5.14.1 공통(report-to csp, Reporting-Endpoints csp="/_t/csp").
 // 목록 밖 진입 주소는 항목 검사(parseRemoteList)가 먼저 거절해 정책까지 가지 않는다(정책 판정 자체는 remote-policy.test.mjs T5 ②가 본다).
+// page.goto는 domcontentloaded까지만 기다린다. 실패한 원격이 load를 영원히 막아 CI WebKit에서 90초 타임아웃이 났다(45302978934).
+// 화면 상태는 아래 단언이 기다리므로 load를 기다리지 않아도 된다.
 import { test, expect } from '@playwright/test';
 import { cpSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -62,7 +64,7 @@ test('F-03-2 T5 FE-T39 ① 운영 빌드의 화면 덩어리와 remotes.json의 
   // 판매 중 탭: remotes.json의 정식 주소로 원격 둘을 싣는다(한 파일이라 위젯 덩어리를 따로 받지 않는다)
   const loads = s.list.map((e) => page.waitForResponse((x) => new URL(x.url()).pathname === e.entry && x.status() === 200));
   const req = countRequests(page, s.origin);
-  await page.goto(s.origin + DASH);
+  await page.goto(s.origin + DASH, { waitUntil: 'domcontentloaded' });
   await Promise.all(loads);
   await expect(page.locator('[data-remote="queue"]')).toHaveCount(1);
   await expect(page.locator('[data-remote="purchase"]')).toHaveCount(1);
@@ -95,7 +97,7 @@ test('F-03-2 T5 FE-T39 ② 원격 하나의 주소를 목록 정식 주소와 �
       const read = await trackPolicies(pg);
       const tries = await trackRemoteScripts(pg);
       const req = countRequests(pg, st.origin);
-      await pg.goto(st.origin + DASH);
+      await pg.goto(st.origin + DASH, { waitUntil: 'domcontentloaded' });
       const card = pg.getByRole('region', { name: '입장 비율·빈자리' }).filter({ hasText: '이 위젯만 불러오지 못했습니다' });
       await expect(card, variant).toHaveAttribute('data-remote-fail', 'list');
       await expect(pg.locator('[data-remote="purchase"]'), variant).toHaveCount(1);
@@ -118,7 +120,7 @@ test('F-03-2 T7 [ASVS v5.0.0-16.3.3] 무결성 실패는 같은 출처 /_t/rum c
     const u = new URL(r.url());
     if (r.method() === 'POST' && u.pathname === '/_t/rum') rum.push(r);
   });
-  const res = await page.goto(s.origin + DASH);
+  const res = await page.goto(s.origin + DASH, { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('region', { name: '입장 비율·빈자리' }).filter({ hasText: '이 위젯만 불러오지 못했습니다' })).toHaveAttribute('data-remote-fail', 'integrity');
   await expect.poll(() => rum.length).toBe(1);
   const r = rum[0];

@@ -5,6 +5,8 @@
 // 무대는 운영 빌드를 복사해 한 곳만 바꾼 관제 미리보기 서버다(forge.mjs). 위조 원격은 실제 원격 바이트의 한 바이트를 바꾼다.
 // 무결성 확인은 '값을 읽었다'가 아니라 위조 바이트가 실행되지 않음(전역 컨테이너가 생기지 않음)을 바깥에서 본다.
 // '한 번 다시'는 적재기가 진입 파일 스크립트 요소를 넣은 수로 센다(브라우저가 같은 주소를 캐시·진행 중 요청으로 채우면 네트워크 요청은 그보다 적다).
+// page.goto는 domcontentloaded까지만 기다린다. 일부러 응답을 붙잡는 원격(T2)이나 실패한 원격이 load를 영원히 막아 CI WebKit에서 90초 타임아웃이 났다(45302978934).
+// 화면 상태는 아래 단언이 기다리므로 load를 기다리지 않아도 된다.
 import { test, expect } from '@playwright/test';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { countRequests, entryFile, entryOf, flipOneByte, stage, trackRemoteScripts, useAltQueue, writeList } from './forge.mjs';
@@ -32,7 +34,7 @@ test('F-03-2 T1 FE-T17 원격 바이트 한 바이트를 바꾸면 그 칸만 �
   const p = entryOf(s.list, 'purchase');
   const req = countRequests(page, s.origin);
   const tries = await trackRemoteScripts(page);
-  await page.goto(s.origin + DASH);
+  await page.goto(s.origin + DASH, { waitUntil: 'domcontentloaded' });
   await expect(failCard(page, 'queue')).toBeVisible();
   await expect(failCard(page, 'queue')).toHaveAttribute('data-remote-fail', 'integrity');
   await expect(failCard(page, 'queue').getByRole('button', { name: '다시 시도' })).toBeVisible();
@@ -66,7 +68,7 @@ test('F-03-2 T2 FE-T17 진입 파일이 5초 안에 오지 않으면 5초 뒤 �
   // 시도 사이 간격의 아래 끝만 단언한다(page.clock은 React Suspense 타이머까지 멈추거나 실제 시간과 섞여 간격이 흐트러진다)
   const tries = await trackRemoteScripts(page);
   const times = async () => (await tries.all()).filter((x) => x.path === q.entry).map((x) => x.t);
-  await page.goto(s.origin + DASH);
+  await page.goto(s.origin + DASH, { waitUntil: 'domcontentloaded' });
   await expect(loaded(page, 'purchase')).toHaveCount(1);
   await expect.poll(() => tries.count(q.entry)).toBe(1);
   await expect(failCard(page, 'queue')).toHaveAttribute('data-remote-fail', 'timeout', { timeout: 4 * TIMEOUT_MS });
@@ -89,7 +91,7 @@ test('F-03-2 T3 FE-T17 목록의 contractMajor가 호스트와 다르면 그 원
   const q = entryOf(s.list, 'queue');
   const req = countRequests(page, s.origin);
   const tries = await trackRemoteScripts(page);
-  await page.goto(s.origin + DASH);
+  await page.goto(s.origin + DASH, { waitUntil: 'domcontentloaded' });
   await expect(failCard(page, 'queue')).toHaveAttribute('data-remote-fail', 'contract');
   await expect(loaded(page, 'purchase')).toHaveCount(1);
   expect(await tries.count(q.entry), '판이 다르면 받지 않는다').toBe(0);
@@ -108,7 +110,7 @@ test('F-03-2 T8 [ASVS v5.0.0-16.5.2] 원격 하나를 받지 못하면 그 칸�
   const p = entryOf(s.list, 'purchase');
   const req = countRequests(page, s.origin);
   const tries = await trackRemoteScripts(page);
-  await page.goto(s.origin + DASH);
+  await page.goto(s.origin + DASH, { waitUntil: 'domcontentloaded' });
   await expect(failCard(page, 'purchase')).toHaveAttribute('data-remote-fail', 'network');
   await expect(loaded(page, 'queue')).toHaveCount(1);
   await expect(failCard(page, 'queue')).toHaveCount(0);
@@ -132,7 +134,7 @@ test('F-03-2 T18 FE-T17 원격이 요구하는 계약 패키지 판(^2.0.0)이 �
   const q = entryOf(s.list, 'queue');
   expect(q.sha).toBe('c0ffee000002');
   const tries = await trackRemoteScripts(page);
-  await page.goto(s.origin + DASH);
+  await page.goto(s.origin + DASH, { waitUntil: 'domcontentloaded' });
   await expect(failCard(page, 'queue')).toHaveAttribute('data-remote-fail', 'contract');
   await expect(loaded(page, 'purchase')).toHaveCount(1);
   // 무결성은 맞아 진입 파일은 한 번 받아 실행하고(컨테이너는 생긴다), 판 불일치는 다시 받지 않는다
