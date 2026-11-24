@@ -1,0 +1,395 @@
+# 나머지 경보 규칙(OPS-100)의 합성 시계열 시험(F-01-10, 시험 V-T52 ①~⑩).
+# 정본: docs/observability.md §3·§5('OPS-100 규칙과 이름이 없던 지표' 포함), §4 '긁기·평가·알림 간격', docs/verification.md §2.7·V-T52.
+# 입력 간격 15초(§4 '그 밖의 긁기 작업'), 평가 30초(규칙 묶음 평가). 경보는 ALERTS 시계열로 보고, 주석·이름·라벨은 tools/ci/alert-rules.test.mjs(V-T52 ⑪)가 본다.
+# 경계는 정본 임계의 바로 아래·위와 for 지속을 넣는다. rule_files는 저장소 뿌리 기준이다.
+# 실행: node tools/ci/prom-rules.mjs test(규칙 CRD에서 spec.groups를 꺼내 promtool test rules에 넘긴다).
+rule_files:
+  - deploy/platform/observability/alerts/ops-100.yaml
+evaluation_interval: 30s
+tests:
+  # V-T52 ① 외부 의존 오류 비율 1%·5분(소셜 로그인 429·403 포함), 첫 승인 429, CloudFront 한도 80%.
+  - name: 'V-T52 ① 외부 의존 오류 비율은 1%를 5분 넘을 때만 SEV2이고 첫 429와 CDN 80%가 따로 울린다'
+    interval: 15s
+    input_series:
+      - series: 'dependency_requests_total{dependency="payment-gateway",outcome="ok"}'
+        values: '0+9000x48'
+      - series: 'dependency_requests_total{dependency="payment-gateway",outcome="error"}'
+        values: '0+100x48'
+      - series: 'dependency_requests_total{dependency="social-login",outcome="ok"}'
+        values: '0+9000x48'
+      - series: 'dependency_requests_total{dependency="social-login",outcome="timeout"}'
+        values: '0+100x48'
+      - series: 'dependency_requests_total{dependency="identity-provider",outcome="ok"}'
+        values: '0+9910x48'
+      - series: 'dependency_requests_total{dependency="identity-provider",outcome="error"}'
+        values: '0+90x48'
+      - series: 'pg_throttled_total{pg="TOSS",first="true"}'
+        values: '0x2 1x46'
+      - series: 'pg_throttled_total{pg="TOSS",first="false"}'
+        values: '0x2 1x46'
+      - series: 'cdn_quota_utilization_ratio{distribution="queue"}'
+        values: '0.81x48'
+      - series: 'cdn_quota_utilization_ratio{distribution="api"}'
+        values: '0.79x48'
+    promql_expr_test:
+      # 4분: 두 창이 5분을 채우지 않아 아직 발생(firing)이 아니다
+      - expr: 'ALERTS{alertname="external_dependency_error_ratio_high",alertstate="firing"}'
+        eval_time: 4m
+        exp_samples: []
+      # 6분: 1.1% 두 의존성만 SEV2, 0.9%는 아니다
+      - expr: 'ALERTS{alertname="external_dependency_error_ratio_high",alertstate="firing"}'
+        eval_time: 6m
+        exp_samples:
+          - labels: 'ALERTS{alertname="external_dependency_error_ratio_high",alertstate="firing",dependency="payment-gateway",kind="cause",severity="sev2"}'
+            value: 1
+          - labels: 'ALERTS{alertname="external_dependency_error_ratio_high",alertstate="firing",dependency="social-login",kind="cause",severity="sev2"}'
+            value: 1
+      # 첫 승인 호출의 429만: 재전송(first="false")은 세지 않는다
+      - expr: 'ALERTS{alertname="payment_pg_throttled_first",alertstate="firing"}'
+        eval_time: 1m
+        exp_samples:
+          - labels: 'ALERTS{alertname="payment_pg_throttled_first",alertstate="firing",dependency="payment-gateway",kind="cause",pg="TOSS",severity="sev2"}'
+            value: 1
+      # CDN 한도: 81%만 10분 넘게 울리고 79%는 울리지 않는다
+      - expr: 'ALERTS{alertname="cdn_quota_utilization_high",alertstate="firing"}'
+        eval_time: 11m
+        exp_samples:
+          - labels: 'ALERTS{alertname="cdn_quota_utilization_high",alertstate="firing",dependency="cloudfront",distribution="queue",kind="cause",severity="sev3"}'
+            value: 1
+
+  # V-T52 ② 노드 시계 20ms, 교차 리전·ClickHouse 백업 26시간, 인증서 갱신 예정과 남은 수명 절반.
+  - name: 'V-T52 ② 위생 신호는 시계 20ms·백업 26시간·인증서 수명 절반의 경계에서만 울린다'
+    interval: 15s
+    input_series:
+      - series: 'node_timex_offset_seconds{node="n1"}'
+        values: '0.019x48'
+      - series: 'node_timex_offset_seconds{node="n2"}'
+        values: '0.021x48'
+      # 25시간(9만 초) → 26시간 아래, 6분 뒤 27시간(9만 7,200초) → 넘음. promtool 시계는 시험 시작이 0이다
+      - series: 'backup_cross_region_last_success_timestamp_seconds'
+        values: '-90000x24 -97200x24'
+      - series: 'backup_last_success_timestamp_seconds{store="clickhouse"}'
+        values: '-90000x24 -97200x24'
+      - series: 'certificate_renewal_overdue{cert="ok"}'
+        values: '0x48'
+      - series: 'certificate_renewal_overdue{cert="overdue"}'
+        values: '1x48'
+      - series: 'certificate_renewal_overdue{cert="urgent"}'
+        values: '1x48'
+      - series: 'certificate_renewal_due_timestamp_seconds{cert="ok"}'
+        values: '-1000x48'
+      - series: 'certificate_renewal_due_timestamp_seconds{cert="overdue"}'
+        values: '-1000x48'
+      - series: 'certificate_renewal_due_timestamp_seconds{cert="urgent"}'
+        values: '-1000x48'
+      - series: 'certificate_expiry_timestamp_seconds{cert="ok"}'
+        values: '10000x48'
+      - series: 'certificate_expiry_timestamp_seconds{cert="overdue"}'
+        values: '10000x48'
+      - series: 'certificate_expiry_timestamp_seconds{cert="urgent"}'
+        values: '1000x48'
+    promql_expr_test:
+      # 4분: 백업이 아직 26시간 아래다
+      - expr: 'ALERTS{alertname=~"cross_region_backup_stale|clickhouse_backup_stale",alertstate="firing"}'
+        eval_time: 4m
+        exp_samples: []
+      # 6분: 시계 21ms만, 인증서는 갱신 예정을 넘긴 둘 가운데 절반 위가 SEV3, 절반 아래가 SEV2
+      - expr: 'ALERTS{alertname="node_clock_offset_high",alertstate="firing"}'
+        eval_time: 6m
+        exp_samples:
+          - labels: 'ALERTS{alertname="node_clock_offset_high",alertstate="firing",kind="hygiene",node="n2",severity="sev2"}'
+            value: 1
+      - expr: 'ALERTS{alertname="certificate_renewal_overdue",alertstate="firing"}'
+        eval_time: 6m
+        exp_samples:
+          - labels: 'ALERTS{alertname="certificate_renewal_overdue",alertstate="firing",cert="overdue",kind="hygiene",severity="sev3"}'
+            value: 1
+      - expr: 'ALERTS{alertname="certificate_expiry_urgent",alertstate="firing"}'
+        eval_time: 6m
+        exp_samples:
+          - labels: 'ALERTS{alertname="certificate_expiry_urgent",alertstate="firing",cert="urgent",kind="hygiene",severity="sev2"}'
+            value: 1
+      # 12분: 백업 둘이 26시간을 넘어 교차 리전은 SEV2, ClickHouse는 SEV3
+      - expr: 'ALERTS{alertname="cross_region_backup_stale",alertstate="firing"}'
+        eval_time: 12m
+        exp_samples:
+          - labels: 'ALERTS{alertname="cross_region_backup_stale",alertstate="firing",kind="hygiene",severity="sev2"}'
+            value: 1
+      - expr: 'ALERTS{alertname="clickhouse_backup_stale",alertstate="firing"}'
+        eval_time: 12m
+        exp_samples:
+          - labels: 'ALERTS{alertname="clickhouse_backup_stale",alertstate="firing",kind="hygiene",severity="sev3"}'
+            value: 1
+
+  # V-T52 ③ 스캐너 마지막 동기화 2분, 같은 회차 중복 입장 10분 10건.
+  - name: 'V-T52 ③ 현장 신호는 동기화 2분과 같은 회차 중복 10분 10건의 경계에서만 울린다'
+    interval: 15s
+    input_series:
+      # s1은 시각 0에서 마지막 동기화: 2분이 지나면 낡는다. s2는 미래 시각이라 낡지 않는다
+      - series: 'scanner_last_sync_timestamp_seconds{scanner="s1"}'
+        values: '0x48'
+      - series: 'scanner_last_sync_timestamp_seconds{scanner="s2"}'
+        values: '600x48'
+      # 5분부터 11건/9건이 쌓인다(10분 창 안)
+      - series: 'scanner_duplicate_entry_total{event_id="E1"}'
+        values: '0x20 0+1x11 11x16'
+      - series: 'scanner_duplicate_entry_total{event_id="E2"}'
+        values: '0x20 0+1x9 9x18'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="scanner_sync_stale",alertstate="firing"}'
+        eval_time: 1m
+        exp_samples: []
+      - expr: 'ALERTS{alertname="scanner_sync_stale",alertstate="firing"}'
+        eval_time: 4m
+        exp_samples:
+          - labels: 'ALERTS{alertname="scanner_sync_stale",alertstate="firing",kind="field",scanner="s1",severity="sev2"}'
+            value: 1
+      - expr: 'ALERTS{alertname="scanner_duplicate_entry_high",alertstate="firing"}'
+        eval_time: 11m
+        exp_samples:
+          - labels: 'ALERTS{alertname="scanner_duplicate_entry_high",alertstate="firing",event_id="E1",kind="field",severity="sev3"}'
+            value: 1
+
+  # V-T52 ④ 차례 전 입장 1건 SEV1, 예산 50% 감축 실행 SEV2.
+  - name: 'V-T52 ④ 차례 전 입장은 1건에 SEV1이고 예산 50% 감축 실행만 SEV2다'
+    interval: 15s
+    input_series:
+      - series: 'queue_admit_before_turn_total'
+        values: '0x4 1x44'
+      - series: 'admission_target_decrease_total{reason="budget_50",journey="hold"}'
+        values: '0x4 1x44'
+      - series: 'admission_target_decrease_total{reason="aimd",journey="hold"}'
+        values: '0x4 1x44'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="queue_admit_before_turn",alertstate="firing"}'
+        eval_time: 30s
+        exp_samples: []
+      - expr: 'ALERTS{alertname="queue_admit_before_turn",alertstate="firing"}'
+        eval_time: 2m
+        exp_samples:
+          - labels: 'ALERTS{alertname="queue_admit_before_turn",alertstate="firing",kind="invariant",severity="sev1"}'
+            value: 1
+      - expr: 'ALERTS{alertname="admission_budget_reduction_executed",alertstate="firing"}'
+        eval_time: 2m
+        exp_samples:
+          - labels: 'ALERTS{alertname="admission_budget_reduction_executed",alertstate="firing",kind="control",severity="sev2"}'
+            value: 1
+
+  # V-T52 ⑤ 보안 사고 24시간 의무 2시간·72시간 의무 12시간, 기한 초과.
+  - name: 'V-T52 ⑤ 보안 사고 법정 기한은 24시간 의무 2시간·72시간 의무 12시간 남음에서 울린다'
+    interval: 15s
+    input_series:
+      - series: 'security_incident_duty_due_seconds{duty="breach_report"}'
+        values: '7000x48'
+      - series: 'security_incident_duty_due_seconds{duty="additional_facts_report"}'
+        values: '8000x48'
+      - series: 'security_incident_duty_due_seconds{duty="leak_report"}'
+        values: '43000x48'
+      - series: 'security_incident_duty_due_seconds{duty="subject_notice"}'
+        values: '50000x48'
+      - series: 'security_incident_duty_due_seconds{duty="leak_possible_notice"}'
+        values: '43000x48'
+      - series: 'security_incident_duty_breached_total{duty="breach_report"}'
+        values: '0x2 1x46'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="security_incident_duty_due_soon",alertstate="firing"}'
+        eval_time: 2m
+        exp_samples:
+          - labels: 'ALERTS{alertname="security_incident_duty_due_soon",alertstate="firing",duty="breach_report",kind="legal",severity="sev2"}'
+            value: 1
+          - labels: 'ALERTS{alertname="security_incident_duty_due_soon",alertstate="firing",duty="leak_report",kind="legal",severity="sev2"}'
+            value: 1
+          - labels: 'ALERTS{alertname="security_incident_duty_due_soon",alertstate="firing",duty="leak_possible_notice",kind="legal",severity="sev2"}'
+            value: 1
+      - expr: 'ALERTS{alertname="security_incident_duty_breached",alertstate="firing"}'
+        eval_time: 1m
+        exp_samples:
+          - labels: 'ALERTS{alertname="security_incident_duty_breached",alertstate="firing",kind="legal",severity="sev2"}'
+            value: 1
+
+  # V-T52 ⑥ MSK 오프라인·최소 ISR·복제 부족·디스크.
+  - name: 'V-T52 ⑥ 브로커 신호는 오프라인 SEV1·최소 ISR·복제 부족·디스크 70%·85%를 가른다'
+    interval: 15s
+    input_series:
+      - series: 'aws_kafka_offline_partitions_count_average{cluster="trade"}'
+        values: '0x48'
+      - series: 'aws_kafka_offline_partitions_count_average{cluster="control"}'
+        values: '1x48'
+      - series: 'aws_kafka_offline_partitions_count_average{cluster="telemetry"}'
+        values: '1x48'
+      - series: 'aws_kafka_under_min_isr_partition_count_average{cluster="trade"}'
+        values: '0x48'
+      - series: 'aws_kafka_under_min_isr_partition_count_average{cluster="control"}'
+        values: '0x8 1x40'
+      - series: 'aws_kafka_under_min_isr_partition_count_average{cluster="telemetry"}'
+        values: '1x48'
+      - series: 'aws_kafka_under_replicated_partitions_average'
+        values: '1x48'
+      - series: 'aws_kafka_kafka_data_logs_disk_used_average{broker="b1"}'
+        values: '71x48'
+      - series: 'aws_kafka_kafka_data_logs_disk_used_average{broker="b2"}'
+        values: '86x48'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname=~"msk_offline_partitions_trade_control|msk_offline_partitions_telemetry",alertstate="firing"}'
+        eval_time: 2m
+        exp_samples:
+          - labels: 'ALERTS{alertname="msk_offline_partitions_trade_control",alertstate="firing",dependency="kafka-trade-control",kind="cause",severity="sev1"}'
+            value: 1
+          - labels: 'ALERTS{alertname="msk_offline_partitions_telemetry",alertstate="firing",dependency="kafka-telemetry",kind="cause",severity="sev2"}'
+            value: 1
+      - expr: 'ALERTS{alertname="msk_under_min_isr_telemetry",alertstate="firing"}'
+        eval_time: 2m
+        exp_samples:
+          - labels: 'ALERTS{alertname="msk_under_min_isr_telemetry",alertstate="firing",dependency="kafka-telemetry",kind="cause",severity="sev3"}'
+            value: 1
+      - expr: 'ALERTS{alertname="msk_under_min_isr_trade_control",alertstate="firing"}'
+        eval_time: 5m
+        exp_samples:
+          - labels: 'ALERTS{alertname="msk_under_min_isr_trade_control",alertstate="firing",dependency="kafka-trade-control",kind="cause",severity="sev2"}'
+            value: 1
+      - expr: 'ALERTS{alertname="msk_disk_used_high",alertstate="firing"}'
+        eval_time: 6m
+        exp_samples:
+          - labels: 'ALERTS{alertname="msk_disk_used_high",alertstate="firing",dependency="kafka",kind="cause",severity="sev2"}'
+            value: 1
+      - expr: 'ALERTS{alertname=~"msk_under_replicated_partitions|msk_disk_used_warning",alertstate="firing"}'
+        eval_time: 12m
+        exp_samples:
+          - labels: 'ALERTS{alertname="msk_disk_used_warning",alertstate="firing",dependency="kafka",kind="cause",severity="sev3"}'
+            value: 1
+          - labels: 'ALERTS{alertname="msk_under_replicated_partitions",alertstate="firing",dependency="kafka",kind="cause",severity="sev3"}'
+            value: 1
+
+  # V-T52 ⑦ 결제 결과 당기기·BatchGetPayments 실패·보류 사건.
+  - name: 'V-T52 ⑦ 당기기·조회 실패·보류 사건은 결제·주문 토픽만 SEV2다'
+    interval: 15s
+    input_series:
+      - series: 'payment_result_pulled_total{type="APPROVED"}'
+        values: '0x2 1+1x46'
+      - series: 'payment_result_pull_failures_total'
+        values: '0x2 1+1x46'
+      - series: 'consumer_held_events{service="purchase-svc",topic="trade.payments"}'
+        values: '1x48'
+      - series: 'consumer_held_events{service="ticket-svc",topic="ticket.issued"}'
+        values: '1x48'
+      - series: 'consumer_held_events{service="queue-svc",topic="trade.orders"}'
+        values: '0x48'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="payment_result_pull_used",alertstate="firing"}'
+        eval_time: 1m
+        exp_samples:
+          - labels: 'ALERTS{alertname="payment_result_pull_used",alertstate="firing",dependency="kafka-trade",kind="cause",severity="sev3"}'
+            value: 1
+      - expr: 'ALERTS{alertname="payment_result_pull_failed",alertstate="firing"}'
+        eval_time: 2m
+        exp_samples:
+          - labels: 'ALERTS{alertname="payment_result_pull_failed",alertstate="firing",dependency="payment-svc",kind="cause",severity="sev2"}'
+            value: 1
+      - expr: 'ALERTS{alertname="consumer_held_events_trade",alertstate="firing"}'
+        eval_time: 2m
+        exp_samples:
+          - labels: 'ALERTS{alertname="consumer_held_events_trade",alertstate="firing",dependency="kafka-trade",kind="cause",service="purchase-svc",severity="sev2"}'
+            value: 1
+      - expr: 'ALERTS{alertname="consumer_held_events_other",alertstate="firing"}'
+        eval_time: 2m
+        exp_samples:
+          - labels: 'ALERTS{alertname="consumer_held_events_other",alertstate="firing",dependency="kafka-telemetry",kind="cause",service="ticket-svc",severity="sev3"}'
+            value: 1
+
+  # V-T52 ⑧ 증거 수집 실패 한 시간 2회, 웹훅 거절 10분 5회.
+  - name: 'V-T52 ⑧ 증거 수집 실패는 한 시간 2회, 웹훅 거절은 10분 5회부터 울린다'
+    interval: 15s
+    input_series:
+      - series: 'evidence_collections_total{target="db",result="failed"}'
+        values: '0 1x3 2x44'
+      - series: 'evidence_webhook_rejected_total{reason="mismatch"}'
+        values: '0 4x2 5x45'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="evidence_collection_failed",alertstate="firing"}'
+        eval_time: 30s
+        exp_samples: []
+      - expr: 'ALERTS{alertname="evidence_collection_failed",alertstate="firing"}'
+        eval_time: 2m
+        exp_samples:
+          - labels: 'ALERTS{alertname="evidence_collection_failed",alertstate="firing",kind="hygiene",severity="sev3"}'
+            value: 1
+      - expr: 'ALERTS{alertname="evidence_webhook_rejected_high",alertstate="firing"}'
+        eval_time: 30s
+        exp_samples: []
+      - expr: 'ALERTS{alertname="evidence_webhook_rejected_high",alertstate="firing"}'
+        eval_time: 1m
+        exp_samples:
+          - labels: 'ALERTS{alertname="evidence_webhook_rejected_high",alertstate="firing",kind="security",severity="sev3"}'
+            value: 1
+
+  # V-T52 ⑨ 관제 실시간 표 신선도 Degraded와 거래 사건 끊김.
+  - name: 'V-T52 ⑨ 관제 실시간 표 신호는 Degraded 1과 거래 사건 끊김에서 SEV3이다'
+    interval: 15s
+    input_series:
+      - series: 'rt_degraded'
+        values: '0x4 1x44'
+      - series: 'rt_trade_gap_events'
+        values: '0x4 1x44'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname=~"rt_degraded|rt_trade_gap_events",alertstate="firing"}'
+        eval_time: 30s
+        exp_samples: []
+      - expr: 'ALERTS{alertname=~"rt_degraded|rt_trade_gap_events",alertstate="firing"}'
+        eval_time: 2m
+        exp_samples:
+          - labels: 'ALERTS{alertname="rt_degraded",alertstate="firing",kind="hygiene",severity="sev3"}'
+            value: 1
+          - labels: 'ALERTS{alertname="rt_trade_gap_events",alertstate="firing",kind="hygiene",severity="sev3"}'
+            value: 1
+
+  # V-T52 ⑩ 수집기 자체 신호 다섯.
+  - name: 'V-T52 ⑩ 수집기 자체 신호는 보내기·받기·큐·수집량·판정 전 버림을 5분 지속으로 본다'
+    interval: 15s
+    input_series:
+      - series: 'otelcol_exporter_send_failed_spans{exporter="otlp"}'
+        values: '0x20 0+1x28'
+      - series: 'otelcol_exporter_queue_size{exporter="otlp"}'
+        values: '81x48'
+      - series: 'otelcol_exporter_queue_capacity{exporter="otlp"}'
+        values: '100x48'
+      - series: 'otelcol_exporter_queue_size{exporter="debug"}'
+        values: '79x48'
+      - series: 'otelcol_exporter_queue_capacity{exporter="debug"}'
+        values: '100x48'
+      - series: 'otelcol_receiver_refused_log_records_total{receiver="otlp"}'
+        values: '0x20 0+1x28'
+      - series: 'tempo_distributor_bytes_received_total'
+        values: '0x48'
+      - series: 'loki_distributor_bytes_received_total'
+        values: '0+100x48'
+      - series: 'otelcol_processor_tail_sampling_sampling_trace_dropped_too_early{policy="errors"}'
+        values: '0x20 0+1x28'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="otelcol_exporter_send_failed",alertstate="firing"}'
+        eval_time: 9m
+        exp_samples: []
+      - expr: 'ALERTS{alertname="otelcol_exporter_send_failed",alertstate="firing"}'
+        eval_time: 11m
+        exp_samples:
+          - labels: 'ALERTS{alertname="otelcol_exporter_send_failed",alertstate="firing",kind="hygiene",severity="sev3"}'
+            value: 1
+      - expr: 'ALERTS{alertname="otelcol_exporter_queue_high",alertstate="firing"}'
+        eval_time: 6m
+        exp_samples:
+          - labels: 'ALERTS{alertname="otelcol_exporter_queue_high",alertstate="firing",kind="hygiene",severity="sev3"}'
+            value: 1
+      - expr: 'ALERTS{alertname="otelcol_intake_zero",alertstate="firing"}'
+        eval_time: 6m
+        exp_samples:
+          - labels: 'ALERTS{alertname="otelcol_intake_zero",alertstate="firing",kind="hygiene",severity="sev3"}'
+            value: 1
+      - expr: 'ALERTS{alertname="otelcol_receiver_refused",alertstate="firing"}'
+        eval_time: 11m
+        exp_samples:
+          - labels: 'ALERTS{alertname="otelcol_receiver_refused",alertstate="firing",kind="hygiene",severity="sev3"}'
+            value: 1
+      - expr: 'ALERTS{alertname="otelcol_tail_sampling_dropped_early",alertstate="firing"}'
+        eval_time: 11m
+        exp_samples:
+          - labels: 'ALERTS{alertname="otelcol_tail_sampling_dropped_early",alertstate="firing",kind="hygiene",severity="sev3"}'
+            value: 1
