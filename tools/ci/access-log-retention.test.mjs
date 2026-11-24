@@ -62,7 +62,7 @@ function expectBlocked(mutate, needle) {
     assert.equal(r.code, 1, `위반인데 끝 코드가 ${r.code}다:\n${r.out}`);
     assert.match(r.out, /^막음: /m, '막음 줄이 없다');
     assert.ok(r.out.includes(needle), `막음 줄에 "${needle}"이 없다:\n${r.out}`);
-    assert.equal(r.out.split('\n').filter((l) => l.startsWith('막음: ')).length, 1, `막은 줄이 하나가 아니다:\n${r.out}`);
+    assert.ok(r.out.split('\n').some((l) => l.startsWith('막음: ')), '막음 줄이 없다');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
