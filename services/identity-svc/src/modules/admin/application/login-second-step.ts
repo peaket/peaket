@@ -69,17 +69,32 @@ export class LoginSecondStep {
   async run(i: { aud: AdminAud; loginStep: string; code: string; ip: string; deviceId: string; userAgent?: string; requestId?: string }): Promise<SecondStepOutcome> {
     const step = await this.store.findLoginStep(createHash('sha256').update(i.loginStep).digest());
     const now0 = this.clock.now();
-    if (!step || step.usedAt !== null || step.expiresAt <= now0 || step.aud !== i.aud) return { kind: 'STEP_INVALID' };
+    if (!step || step.usedAt !== null || step.expiresAt <= now0 || step.aud !== i.aud) {
+      recordLegalAccess({ event: 'LOGIN', result: 'FAILED', failure: 'session', clientIp: i.ip, userAgent: i.userAgent, requestId: i.requestId, isAdmin: true });
+      return { kind: 'STEP_INVALID' };
+    }
     const lease = await this.counters.acquire(step.accountId, now0, BUSY_LEASE_MS);
     if (!lease) return { kind: 'BUSY' };
     try {
       // 임대를 쥔 뒤 단계를 다시 읽는다: 늦게 들어온 같은 단계가 코드를 먼저 쓰지 못하게(재리뷰 2026-11-05)
       const again = await this.store.findLoginStep(createHash('sha256').update(i.loginStep).digest());
-      if (!again || again.usedAt !== null || again.expiresAt <= this.clock.now()) return { kind: 'STEP_INVALID' };
-      return await this.#attempt(i, step.id, step.accountId, step.pairRef);
+      if (!again || again.usedAt !== null || again.expiresAt <= this.clock.now()) {
+        recordLegalAccess({ event: 'LOGIN', result: 'FAILED', failure: 'session', clientIp: i.ip, userAgent: i.userAgent, requestId: i.requestId, accountId: step.accountId, isAdmin: true });
+        return { kind: 'STEP_INVALID' };
+      }
+      return this.#legal(i, step.accountId, await this.#attempt(i, step.id, step.accountId, step.pairRef));
     } finally {
       await this.counters.release(step.accountId, lease).catch(() => undefined);
     }
+  }
+
+  /** 2단계 실패(틀린 코드·잠김·단계 무효)를 법정 접속기록에 남긴다. 성공 줄은 #attempt가 쓴다. */
+  #legal<T extends SecondStepOutcome>(i: { ip: string; userAgent?: string; requestId?: string }, accountId: string, o: T): T {
+    const common = { event: 'LOGIN' as const, result: 'FAILED' as const, clientIp: i.ip, userAgent: i.userAgent, requestId: i.requestId, accountId, isAdmin: true };
+    if (o.kind === 'CODE_INVALID') recordLegalAccess({ ...common, failure: 'totp' });
+    else if (o.kind === 'LOCKED') recordLegalAccess({ ...common, failure: 'locked' });
+    else if (o.kind === 'STEP_INVALID') recordLegalAccess({ ...common, failure: 'session' });
+    return o;
   }
 
   async #attempt(i: { aud: AdminAud; code: string; ip: string; userAgent?: string; requestId?: string }, stepId: string, accountId: string, pair: string): Promise<SecondStepOutcome> {

@@ -16,7 +16,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { parse } from 'yaml';
-import { dayAnchor, objectLockHeaders, retentionUntil, seqGaps, shortfallAlarm, shortfallRatio, windowOf } from '../ci/access-log-reconcile.mjs';
+import { dayAnchor, identityGaps, objectLockHeaders, retentionUntil, seqGaps, shortfallAlarm, shortfallRatio, windowOf } from '../ci/access-log-reconcile.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..', '..');
@@ -45,12 +45,14 @@ async function fetchOk(url, init) {
 }
 const chQuery = (base, sql) => `${base.replace(/\/$/, '')}/?query=${encodeURIComponent(sql)}`;
 
-/** ClickHouse HTTP에서 5분 칸/하루 행 수와 seq 목록을 읽는다. */
+/** ClickHouse HTTP에서 게이트웨이 원천 행 수와 identity 파드별 행·seq를 나눠 읽는다(IR-22). */
 async function clickhouseRows(base, where) {
-  const res = await fetchOk(chQuery(base, `SELECT count() AS n, groupArray(seq) AS seqs FROM access_log.access_log WHERE ${where} FORMAT JSON`));
-  const j = await res.json();
-  const row = j?.data?.[0] ?? {};
-  return { rows: Number(row.n ?? 0), seqs: Array.isArray(row.seqs) ? row.seqs.map((x) => (x === null ? null : Number(x))) : [] };
+  const gatewayRes = await fetchOk(chQuery(base, `SELECT count() AS n FROM access_log.access_log WHERE ${where} AND source='gateway' FORMAT JSON`));
+  const gateway = await gatewayRes.json();
+  const identityRes = await fetchOk(chQuery(base, `SELECT pod, count() AS n, groupArray(seq) AS seqs FROM access_log.access_log WHERE ${where} AND source='identity' GROUP BY pod ORDER BY pod FORMAT JSON`));
+  const identityJson = await identityRes.json();
+  const identity = (identityJson?.data ?? []).map((r) => ({ pod: String(r.pod ?? ''), rows: Number(r.n ?? 0), seqs: Array.isArray(r.seqs) ? r.seqs.map((x) => (x === null ? null : Number(x))) : [] }));
+  return { rows: Number(gateway?.data?.[0]?.n ?? 0), identity };
 }
 
 /** Prometheus HTTP에서 원천 요청 수(또는 하루 합계)를 읽는다. 결과가 없으면 null(확인 불가). */
@@ -93,21 +95,25 @@ async function reconcile(o, j) {
   let ingress = o.ingress === undefined ? undefined : int(o.ingress, 'ingress');
   let rows = o.rows === undefined ? undefined : int(o.rows, 'rows');
   let seqs = seqsOf(o.seq);
+  let identity = [];
   let window;
   if (o.clickhouse || o.envoy) {
     window = windowOf(Date.now(), { offsetMinutes: j.windowOffsetMinutes, sizeMinutes: j.windowMinutes });
     if (o.clickhouse) {
       const r = await clickhouseRows(o.clickhouse, `ts >= fromUnixTimestamp64Milli(${window.startMs}) and ts < fromUnixTimestamp64Milli(${window.endMs})`);
       rows = r.rows;
-      if (o.seq === undefined) seqs = r.seqs;
+      identity = identityGaps(r.identity);
+      if (o.seq === undefined && r.identity.length === 0) seqs = [];
     }
     if (o.envoy) ingress = await promNumber(o.envoy, o['envoy-query'] ?? 'sum(increase(envoy_http_downstream_rq_total[5m]))');
   }
   if (ingress === undefined || rows === undefined) throw new Error('--reconcile에는 (--ingress·--rows) 또는 (--clickhouse·--envoy)가 필요하다');
-  const ratio = shortfallRatio(ingress, rows);
+  // Prometheus 응답이 비면 확인 불가(종료 1)다. null을 shortfallRatio에 넘기지 않는다(IR-19).
+  const ratio = ingress === null || ingress === undefined ? null : shortfallRatio(ingress, rows);
   const alarm = ratio === null ? null : shortfallAlarm(ratio, j.threshold);
   const gaps = seqGaps(seqs);
-  return { kind: 'access-log-reconcile', window, ingress, rows, shortfall: ratio, threshold: j.threshold, verifiable: ratio !== null, alarm, seqMissing: gaps.missing, seqDuplicates: gaps.duplicates };
+  const identityMissing = identity.flatMap((p) => p.missing.map((n) => ({ pod: p.pod, n })));
+  return { kind: 'access-log-reconcile', window, ingress, rows, shortfall: ratio, threshold: j.threshold, verifiable: ratio !== null, alarm, seqMissing: gaps.missing, seqDuplicates: gaps.duplicates, identityMissing, identity };
 }
 
 async function anchor(o, j) {
@@ -116,11 +122,13 @@ async function anchor(o, j) {
   let seqs = seqsOf(o.seq);
   let sha256 = o.sha256;
   let fileRows = o.fileRows === undefined ? undefined : int(o.fileRows, 'fileRows');
+  let identity = [];
   if (o.clickhouse) {
     const where = `toYYYYMMDD(ts)=toYYYYMMDD(toDate('${o.date}'))`;
     const r = await clickhouseRows(o.clickhouse, where);
     rows = r.rows;
-    if (o.seq === undefined) seqs = r.seqs;
+    identity = identityGaps(r.identity);
+    if (o.seq === undefined && r.identity.length === 0) seqs = [];
   }
   if (o.envoy) source = await promNumber(o.envoy, o['envoy-query'] ?? 'sum(increase(envoy_http_downstream_rq_total[1d]))');
   if (o.bucket && sha256 === undefined) {
@@ -128,9 +136,12 @@ async function anchor(o, j) {
     sha256 = a.fileSha256;
     fileRows = a.fileRows;
   }
-  if (!o.date || source === undefined || rows === undefined || !sha256) throw new Error('--anchor에는 --date·--source(또는 --envoy)·--rows(또는 --clickhouse)·--sha256(또는 --bucket)이 필요하다');
+  if (!o.date || rows === undefined || !sha256) throw new Error('--anchor에는 --date·--source(또는 --envoy)·--rows(또는 --clickhouse)·--sha256(또는 --bucket)이 필요하다');
+  if (source === null || source === undefined) {
+    return { kind: 'access-log-anchor', date: o.date, sourceTotal: null, ingestedTotal: rows, shortfall: null, seqMissing: seqs.length ? seqGaps(seqs).missing : [], seqDuplicates: [], fileSha256: sha256, fileRows: fileRows ?? rows, matches: false, verifiable: false, retentionUntil: retentionUntil(o.date, j.months, j.days), identity };
+  }
   const r = dayAnchor({ date: o.date, sourceTotal: source, ingestedTotal: rows, seqs, fileSha256: sha256, fileRows: fileRows ?? rows });
-  return { kind: 'access-log-anchor', ...r, retentionUntil: retentionUntil(o.date, j.months, j.days) };
+  return { kind: 'access-log-anchor', ...r, verifiable: true, retentionUntil: retentionUntil(o.date, j.months, j.days), identity };
 }
 
 async function main(argv) {
@@ -174,7 +185,7 @@ async function main(argv) {
       const r = await reconcile(o, j);
       console.log(JSON.stringify(r));
       // 확인 불가(원천 0)와 빈 번호는 실패다. 중복은 정상 재전송이라 실패로 세지 않는다.
-      return r.verifiable === false || r.alarm === true || r.seqMissing.length > 0 ? 1 : 0;
+      return r.verifiable === false || r.alarm === true || r.seqMissing.length > 0 || r.identityMissing.length > 0 ? 1 : 0;
     }
     if (o.anchor) {
       const r = await anchor(o, j);

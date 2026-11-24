@@ -5,8 +5,8 @@
 // 요청 ID, 계정 ID, 관리 계정 표시, 파드, 파드마다 늘어나기만 하는 일련번호. 비밀 값·쿠키·본문은 싣지 않는다.
 // 일련번호는 파일에 이어 써서 프로세스가 다시 떠도 1로 돌아가지 않는다(IR-13).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { hostname, tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { hostname } from 'node:os';
+import { dirname } from 'node:path';
 
 export type LegalAccessEvent = 'LOGIN' | 'LOGOUT' | 'REAUTH' | 'REFRESH';
 export type LegalAccessResult = 'SUCCESS' | 'FAILED';
@@ -117,7 +117,7 @@ export function createLegalAccessLog(o: LegalAccessLogOptions): LegalAccessLog {
 }
 
 // 프로세스 하나에 하나. 파드가 다시 떠도 같은 파일을 이어 써서 일련번호가 중복되지 않는다.
-const statePath = process.env.PEAKET_LEGAL_ACCESS_SEQ_FILE ?? join(tmpdir(), 'peaket-legal-access-seq');
+const statePath = process.env.PEAKET_LEGAL_ACCESS_SEQ_FILE ?? '/var/lib/identity/legal-access-seq';
 const singleton = createLegalAccessLog({
   write: (line) => process.stdout.write(`${line}\n`),
   now: () => Date.now(),

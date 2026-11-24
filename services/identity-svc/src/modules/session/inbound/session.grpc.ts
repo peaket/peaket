@@ -113,9 +113,9 @@ function responseOf(o: LoginOutcome): object {
  */
 /** 유스케이스 호출을 단항 처리기로 감싼다. 업무 오류는 상태 코드, 닿지 못한 의존성은 UNAVAILABLE, 그 밖은 INTERNAL과 고정 문구 */
 function unaryOf(onError: (method: string, err: unknown) => void) {
-  return (method: string, fn: (r: Req) => Promise<object>): grpc.handleUnaryCall<Req, object> =>
+  return (method: string, fn: (r: Req, call: grpc.ServerUnaryCall<Req, object>) => Promise<object>): grpc.handleUnaryCall<Req, object> =>
     (call, cb) => {
-      fn(call.request).then(
+      fn(call.request, call).then(
         (v) => cb(null, v),
         (err: unknown) => {
           if (err instanceof SessionError) {
@@ -147,8 +147,14 @@ export function identityServiceHandlers(uc: { status: Pick<GetVerificationStatus
 
 export function sessionServiceHandlers(uc: UseCases, onError: (method: string, err: unknown) => void): grpc.UntypedServiceImplementation {
   const unary = unaryOf(onError);
+  /** 앱 서버가 넘긴 요청 ID. 없으면 멱등 키로 대신한다(법정 줄과 조사 사본 대조용) */
+  const requestIdOf = (call: grpc.ServerUnaryCall<Req, object>): string | undefined => {
+    const v = call.metadata.get('x-request-id');
+    const s = Array.isArray(v) ? v[0] : v;
+    return typeof s === 'string' && s !== '' ? s : undefined;
+  };
   return {
-    CreateSession: unary('CreateSession', async (r) => {
+    CreateSession: unary('CreateSession', async (r, call) => {
       const provider = providerOf(r.provider);
       // 연결 제안을 따라 온 로그인이면 제안 ID와 묶음 값을 함께 받는다(identity §2.1 '가입 때 연결 제안의 첫 구현')
       const proposalId = text(r.link_proposal_id);
@@ -164,7 +170,7 @@ export function sessionServiceHandlers(uc: UseCases, onError: (method: string, e
         userAgent: text(r.user_agent) || null,
         clientIp: text(r.client_ip),
         asn: typeof r.asn === 'number' ? r.asn : 0,
-        requestId: text(r.idempotency_key),
+        requestId: requestIdOf(call) ?? text(r.idempotency_key),
         ...(proposalId ? { link: { proposalId, binding: text(r.link_binding) } } : {}),
       });
       return responseOf(out);
@@ -190,7 +196,7 @@ export function sessionServiceHandlers(uc: UseCases, onError: (method: string, e
       const out = await uc.separate.run({ proposalId: text(r.link_proposal_id), binding: text(r.link_binding), idempotencyKey: text(r.idempotency_key), deviceId: text(r.device_id) || null, userAgent: text(r.user_agent) || null });
       return { session: sessionOf(out), new_account: out.newAccount, linked_provider: 'PROVIDER_UNSPECIFIED' };
     }),
-    EndSession: unary('EndSession', async (r) => uc.end.run({ sessionId: text(r.session_id), accountId: text(r.account_id), clientIp: text(r.client_ip) || undefined, userAgent: text(r.user_agent) || undefined })),
+    EndSession: unary('EndSession', async (r, call) => uc.end.run({ sessionId: text(r.session_id), accountId: text(r.account_id), clientIp: text(r.client_ip) || undefined, userAgent: text(r.user_agent) || undefined, requestId: requestIdOf(call) })),
     IssueReauthToken: unary('IssueReauthToken', async (r) => {
       const strength = STRENGTH[String(r.strength)];
       if (!strength) throw new SessionError('INVALID_ARGUMENT', 'strength가 없다');

@@ -103,10 +103,10 @@ export class ReauthenticateAdmin {
     const c: Ctx = { aud: i.aud, accountId: account.id, email: account.email, pair: session.pairRef, ipHash: shortHash(sourceAddressOf(i.ip)), act: i.act, ip: i.ip, userAgent: i.userAgent };
     // 잠김: 비밀번호를 보지 않고 거절하고 세지 않는다(보호 잠금이면 재인증 토큰을 주지 않는다, auth-controls §3.2)
     const lock = activeLock(account.state, now);
-    if (lock?.kind === 'PROTECT') return this.#locked(i.aud, { kind: 'LOCKED', lock: 'PROTECT' });
+    if (lock?.kind === 'PROTECT') return this.#locked(i.aud, { kind: 'LOCKED', lock: 'PROTECT' }, { clientIp: i.ip, userAgent: i.userAgent });
     const peek = await this.counters.peek({ subject: account.id, pair: c.pair, ipHash: c.ipHash, now });
     const until = Math.max(lock?.kind === 'TIMED' ? lock.until : 0, peek.pairLockedUntil !== null && peek.pairLockedUntil > now ? peek.pairLockedUntil : 0);
-    if (until > now) return this.#locked(i.aud, { kind: 'LOCKED', lock: 'TIMED', retryAfterSeconds: secondsUntil(until, now) });
+    if (until > now) return this.#locked(i.aud, { kind: 'LOCKED', lock: 'TIMED', retryAfterSeconds: secondsUntil(until, now) }, { clientIp: i.ip, userAgent: i.userAgent });
     // 패스키를 요청했는데 없으면 비밀번호를 보기 전에 답한다(인증 앱 코드도 쓰지 않는다)
     const passkeys = i.withPasskey ? await this.store.listPasskeys(account.id) : [];    if (i.withPasskey && passkeys.length === 0) {
       recordLegalAccess({ event: 'REAUTH', result: 'FAILED', failure: 'passkey', act: i.act, accountId: account.id, clientIp: i.ip, userAgent: i.userAgent, isAdmin: true });
@@ -157,20 +157,20 @@ export class ReauthenticateAdmin {
       recordLegalAccess({ event: 'REAUTH', result: 'FAILED', failure: 'session', act: c.act, accountId: i.accountId, clientIp: i.clientIp, userAgent: i.userAgent, isAdmin: true });
       return { kind: 'SESSION_INVALID' };
     }
-    if (activeLock(account.state, now)?.kind === 'PROTECT') return this.#locked(i.aud, { kind: 'LOCKED', lock: 'PROTECT' });
+    if (activeLock(account.state, now)?.kind === 'PROTECT') return this.#locked(i.aud, { kind: 'LOCKED', lock: 'PROTECT' }, { clientIp: i.clientIp, userAgent: i.userAgent });
     const rawId = typeof i.credential.rawId === 'string' && /^[A-Za-z0-9_-]{1,1366}$/.test(i.credential.rawId) ? Buffer.from(i.credential.rawId, 'base64url') : null;
     const passkey = rawId && (await this.store.findPasskeyByCredential(rawId));
     // 남의 자격, 단계를 만든 뒤 지운 패스키, 허용 목록 밖은 서명을 보지 않고 거절한다
-    if (!passkey || passkey.accountId !== account.id || !(c.allow ?? []).includes(passkey.id)) return this.#assertionFailed(i.aud, account.id);
+    if (!passkey || passkey.accountId !== account.id || !(c.allow ?? []).includes(passkey.id)) return this.#assertionFailed(i.aud, account.id, { clientIp: i.clientIp, userAgent: i.userAgent });
     const v = await this.webauthn.verifyRequest({ rp: this.rps[i.aud], challenge: c.challenge, response: i.credential, credential: { id: passkey.credentialId, publicKey: passkey.publicKey, transports: passkey.transports } });
-    if (!v) return this.#assertionFailed(i.aud, account.id);
+    if (!v) return this.#assertionFailed(i.aud, account.id, { clientIp: i.clientIp, userAgent: i.userAgent });
     // 서명이 맞은 뒤에 서명 횟수를 본다(위조한 응답으로 경보를 울리지 못하게, ADR-0206 결정 7)
     if (!signCountAccepted(passkey.signCount, v.signCount)) {
       this.signals.alert('passkey_counter_regression');
-      return this.#assertionFailed(i.aud, account.id);
+      return this.#assertionFailed(i.aud, account.id, { clientIp: i.clientIp, userAgent: i.userAgent });
     }
     // 읽은 값과 같을 때만 고친다: 같은 서명을 동시에 두 번 내도 하나만 통과한다
-    if (!(await this.store.recordPasskeyUse(passkey.id, passkey.signCount, v.signCount, v.backedUp, now))) return this.#assertionFailed(i.aud, account.id);
+    if (!(await this.store.recordPasskeyUse(passkey.id, passkey.signCount, v.signCount, v.backedUp, now))) return this.#assertionFailed(i.aud, account.id, { clientIp: i.clientIp, userAgent: i.userAgent });
     return this.#issue({ aud: i.aud, accountId: account.id, sessionId: i.sessionId, act: c.act }, [...c.factors, 'passkey'], passkey.id, now, { clientIp: i.clientIp, userAgent: i.userAgent });
   }
 
@@ -194,15 +194,15 @@ export class ReauthenticateAdmin {
     return { kind: 'DONE', reauthToken: t.token, factors, expiresInSeconds: ADMIN_REAUTH_TTL_MS / 1000 };
   }
 
-  #locked<T extends Locked>(aud: AdminAud, o: T): T {
+  #locked<T extends Locked>(aud: AdminAud, o: T, contact?: { clientIp?: string; userAgent?: string }): T {
     this.signals.failure(aud, 'locked');
-    recordLegalAccess({ event: 'REAUTH', result: 'FAILED', failure: 'locked', isAdmin: true });
+    recordLegalAccess({ event: 'REAUTH', result: 'FAILED', failure: 'locked', clientIp: contact?.clientIp, userAgent: contact?.userAgent, isAdmin: true });
     return o;
   }
 
-  #assertionFailed(aud: AdminAud, accountId?: string): { kind: 'ASSERTION_INVALID' } {
+  #assertionFailed(aud: AdminAud, accountId?: string, contact?: { clientIp?: string; userAgent?: string }): { kind: 'ASSERTION_INVALID' } {
     this.signals.failure(aud, 'passkey');
-    recordLegalAccess({ event: 'REAUTH', result: 'FAILED', failure: 'passkey', accountId, isAdmin: true });
+    recordLegalAccess({ event: 'REAUTH', result: 'FAILED', failure: 'passkey', accountId, clientIp: contact?.clientIp, userAgent: contact?.userAgent, isAdmin: true });
     return { kind: 'ASSERTION_INVALID' };
   }
 

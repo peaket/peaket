@@ -111,6 +111,11 @@ processors:
           - set(attributes["status"], Int(attributes["status"])) where attributes["status"] != nil
           - set(attributes["source"], "gateway") where attributes["kind"] == "envoy-access"
           - set(attributes["source"], "identity") where attributes["kind"] == "legal-access"
+          - set(attributes["account_id"], attributes["sub"]) where attributes["sub"] != nil and attributes["sub"] != ""
+          - set(attributes["is_admin"], 1) where IsMatch(attributes["path"], "^/v1/(ops|partner)/")
+          - set(attributes["eventId"], attributes["path"]) where (attributes["eventId"] == nil or attributes["eventId"] == "") and IsMatch(attributes["path"], "^/v1/events/")
+          - replace_pattern(attributes["eventId"], "^/v1/events/([^/]+)/.*$", "$$1") where attributes["eventId"] != nil
+          - set(attributes["factors"], Concat(attributes["factors"], ",")) where IsList(attributes["factors"])
           - set(attributes["is_admin"], Int(attributes["is_admin"])) where attributes["is_admin"] != nil
           - delete_key(attributes, "time")
           - delete_key(attributes, "clientIp")

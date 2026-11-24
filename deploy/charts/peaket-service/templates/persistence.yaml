@@ -1,0 +1,18 @@
+{{- if and .Values.service.enabled .Values.service.persistence.enabled }}
+{{- $name := include "peaket.name" . }}
+{{- $claim := .Values.service.persistence.claimName | default (printf "%s-data" $name) }}
+# 파드가 다시 떠도 남겨야 하는 작은 상태(법정 접속기록 일련번호)를 담는 영속 볼륨(IR-13). emptyDir이 아니다.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $claim }}
+  labels: {{- include "peaket.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.service.persistence.size | default "1Gi" }}
+  {{- with .Values.service.persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

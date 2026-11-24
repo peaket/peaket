@@ -10,7 +10,7 @@ import { recordLegalAccess } from '../../session/legal-access-log.js';
 import { ADMIN_SESSION_IDLE_MS } from './login-second-step.js';
 
 export type AdminRefreshResult =
-  | { result: 'OK'; sessionId: string; accessToken: string; refreshToken: string; absoluteExpiresAt: number }
+  | { result: 'OK'; accountId: string; sessionId: string; accessToken: string; refreshToken: string; absoluteExpiresAt: number }
   | { result: 'REUSED' }
   | { result: 'INVALID' };
 
@@ -63,7 +63,7 @@ export class RefreshAdminSession {
       // 재시도: 먼저 준(받지 못한) 토큰을 새 토큰으로 바꿔 폐기한다. 앞 토큰·회전 시각은 그대로라 유예가 늘지 않는다
       else await tx.setRefreshHash(s.id, nextHash);
       await tx.recordRefreshHash({ hash: nextHash, sessionId: s.id, refreshFamily: s.refreshFamily, issuedAt: now, expiresAt: s.absoluteExpiresAt });
-      return { kind: decision, sessionId: s.id, absoluteExpiresAt: s.absoluteExpiresAt, accessToken: at.token };
+      return { kind: decision, accountId: s.accountId, sessionId: s.id, absoluteExpiresAt: s.absoluteExpiresAt, accessToken: at.token };
     });
     if (r.kind === 'invalid') return this.#invalid(i);
     if (r.kind === 'reuse') {
@@ -72,8 +72,8 @@ export class RefreshAdminSession {
       return { result: 'REUSED' };
     }
     this.signals.refreshed?.(i.aud, r.kind === 'rotate' ? 'rotated' : 'retried');
-    recordLegalAccess({ event: 'REFRESH', result: 'SUCCESS', clientIp: i.clientIp, userAgent: i.userAgent, requestId: i.requestId, accountId: r.sessionId, isAdmin: true });
-    return { result: 'OK', sessionId: r.sessionId, accessToken: r.accessToken, refreshToken: nextToken, absoluteExpiresAt: r.absoluteExpiresAt };
+    recordLegalAccess({ event: 'REFRESH', result: 'SUCCESS', clientIp: i.clientIp, userAgent: i.userAgent, requestId: i.requestId, accountId: r.accountId, isAdmin: true });
+    return { result: 'OK', accountId: r.accountId, sessionId: r.sessionId, accessToken: r.accessToken, refreshToken: nextToken, absoluteExpiresAt: r.absoluteExpiresAt };
   }
 
   #invalid(i: { aud: AdminAud; clientIp?: string; userAgent?: string; requestId?: string }): AdminRefreshResult {

@@ -2,7 +2,8 @@
 # 정본: docs/observability.md §7 '법정 사본은 잃지 않는 갈래' ④⑤와 §5 '법정 접속기록 갈래 신호', docs/infra.md §6 'ClickHouse 접속기록 DB'.
 # 배포(CronJob·역할·버킷·KMS)는 INF-020이 한다. 로컬 실행기는 tools/local/access-log-jobs.mjs다.
 reconcile:
-  # 5분마다 15분 전의 5분 칸을 본다(§7 ④)
+  # 5분마다 15분 전의 5분 칸을 본다(§7 ④). CronJob 시간대는 KST다(IR-20).
+  timeZone: Asia/Seoul
   schedule: "*/5 * * * *"
   windowOffsetMinutes: 15
   windowMinutes: 5
@@ -11,11 +12,13 @@ reconcile:
   shortfallMetric: access_log_shortfall_ratio
   seqGapMetric: access_log_seq_gaps_total
 anchor:
-  # 다음 날 03:30에 전날 하루를 같은 방법으로 대조하고 일 해시 앵커를 남긴다
+  # 다음 날 03:30(KST)에 전날 하루를 같은 방법으로 대조하고 일 해시 앵커를 남긴다
+  timeZone: Asia/Seoul
   schedule: "30 3 * * *"
   format: JSON
 copy:
-  # 매일 04:00에 전날 파티션을 Parquet 파일 하나로 접속기록 사본 버킷에 둔다
+  # 매일 04:00(KST)에 전날 파티션을 Parquet 파일 하나로 접속기록 사본 버킷에 둔다
+  timeZone: Asia/Seoul
   schedule: "0 4 * * *"
   format: Parquet
   bucket: peaket-access-log-copy

@@ -373,8 +373,8 @@ startupProbe:
 {{- $kind := first $kinds -}}
 {{- if eq $kind "hostPath" -}}
 {{- if not (has $env (list "local" "ci")) -}}{{- fail (printf "%s: hostPath 볼륨 %v는 PEAKET_ENV local·ci에서만 쓴다(%s)" $where .name $env) -}}{{- end -}}
-{{- else if not (has $kind (list "secret" "configMap" "emptyDir")) -}}
-{{- fail (printf "%s: 볼륨 %v의 종류 %s는 받지 않는다(secret·configMap·emptyDir, local·ci의 hostPath만)" $where .name $kind) -}}
+{{- else if not (has $kind (list "secret" "configMap" "emptyDir" "persistentVolumeClaim")) -}}
+{{- fail (printf "%s: 볼륨 %v의 종류 %s는 받지 않는다(secret·configMap·emptyDir·persistentVolumeClaim, local·ci의 hostPath만)" $where .name $kind) -}}
 {{- end -}}
 {{- end -}}
 {{- toYaml .volumes -}}

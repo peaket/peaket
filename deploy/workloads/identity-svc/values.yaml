@@ -26,6 +26,16 @@ service:
     PEAKET_CORE_HTTP_URL: http://core-svc:8080
     # 도메인은 비밀이 아니다(쿠키가 붙을 상위 도메인). 값은 환경 값과 같다
     PEAKET_COOKIE_DOMAIN: peaket.example
+    # 법정 접속기록 일련번호 파일. 파드가 다시 떠도 이어 쓰도록 영속 볼륨에 둔다(IR-13, docs/features/identity.md §9)
+    PEAKET_LEGAL_ACCESS_SEQ_FILE: /var/lib/identity/legal-access-seq
+  volumeMounts:
+    - { name: legal-seq, mountPath: /var/lib/identity }
+  volumes:
+    - { name: legal-seq, persistentVolumeClaim: { claimName: identity-svc-legal-seq } }
+  persistence:
+    enabled: true
+    claimName: identity-svc-legal-seq
+    size: 1Gi
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 512Mi }

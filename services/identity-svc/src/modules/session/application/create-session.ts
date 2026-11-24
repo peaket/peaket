@@ -228,7 +228,7 @@ export class CreateSession {
 
   /** 로그인 실패 줄(16.3.2). 원문 IP·단말 정보는 법정 접속기록에만 싣는다 */
   #legalFailure(i: CreateSessionInput, failure: 'session' | 'password' | 'totp' | 'passkey' | 'locked'): void {
-    recordLegalAccess({ event: 'LOGIN', result: 'FAILED', failure, provider: i.provider, clientIp: i.clientIp, userAgent: i.userAgent });
+    recordLegalAccess({ event: 'LOGIN', result: 'FAILED', failure, provider: i.provider, clientIp: i.clientIp, userAgent: i.userAgent, requestId: i.requestId });
   }
 
   /**

@@ -62,6 +62,12 @@ export function seqGaps(seqs) {
   return { missing, duplicates };
 }
 
+/** 파드마다 1부터 다시 세는 identity 일련번호를 파드별로 나눠 센다. */
+export function identityGaps(pods) {
+  if (!Array.isArray(pods)) fail('파드 목록이 배열이 아니다');
+  return pods.map((p) => ({ pod: String(p?.pod ?? ''), ...seqGaps(p?.seqs ?? []) }));
+}
+
 const SHA256 = /^[0-9a-f]{64}$/i;
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 

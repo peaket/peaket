@@ -51,9 +51,9 @@ spec:
             summary: identity 접속기록 줄에 빈 일련번호가 있다
             runbook_url: https://runbooks.peaket.example/RB-38
             dashboard_url: /d/peaket-obs-pipeline
-        # 전날 사본이 06:00까지 없다. 마지막 성공이 오늘 것이면(04:00 뒤) 울리지 않고, 지표가 아예 없어도 울린다.
+        # 전날 사본이 06:00(KST)까지 없다. UTC 시각에 9시간을 더해 KST로 비교하고, 지표가 없어도 울린다.
         - alert: AccessLogDailyCopyLate
-          expr: absent(access_log_export_last_success_timestamp) or (hour() >= 6 and (year(access_log_export_last_success_timestamp) < year() or month(access_log_export_last_success_timestamp) < month() or day_of_month(access_log_export_last_success_timestamp) < day_of_month()))
+          expr: absent(access_log_export_last_success_timestamp) or (hour(vector(time()) + 9 * 3600) >= 6 and on() (year(access_log_export_last_success_timestamp + 9 * 3600) < scalar(year(vector(time()) + 9 * 3600)) or month(access_log_export_last_success_timestamp + 9 * 3600) < scalar(month(vector(time()) + 9 * 3600)) or day_of_month(access_log_export_last_success_timestamp + 9 * 3600) < scalar(day_of_month(vector(time()) + 9 * 3600))))
           labels:
             severity: sev2
             kind: legal
