@@ -367,6 +367,7 @@ spec:
       - X-Client-Ephemeral-Key
       - X-Purchase-Mac
       - X-Purchase-Seq
+      - X-Peaket-Event-Id
       - X-Requested-With
     exposeHeaders:
       - Date
@@ -437,6 +438,7 @@ spec:
       - X-Client-Ephemeral-Key
       - X-Purchase-Mac
       - X-Purchase-Seq
+      - X-Peaket-Event-Id
       - X-Requested-With
     exposeHeaders:
       - Date
@@ -480,6 +482,7 @@ spec:
       - X-Client-Ephemeral-Key
       - X-Purchase-Mac
       - X-Purchase-Seq
+      - X-Peaket-Event-Id
       - X-Requested-With
     exposeHeaders:
       - Date
@@ -555,6 +558,7 @@ spec:
       - X-Client-Ephemeral-Key
       - X-Purchase-Mac
       - X-Purchase-Seq
+      - X-Peaket-Event-Id
       - X-Requested-With
     exposeHeaders:
       - Date
@@ -667,6 +671,7 @@ spec:
       - X-Client-Ephemeral-Key
       - X-Purchase-Mac
       - X-Purchase-Seq
+      - X-Peaket-Event-Id
       - X-Requested-With
     exposeHeaders:
       - Date
@@ -784,6 +789,7 @@ spec:
       - X-Client-Ephemeral-Key
       - X-Purchase-Mac
       - X-Purchase-Seq
+      - X-Peaket-Event-Id
       - X-Requested-With
     exposeHeaders:
       - Date
@@ -957,6 +963,7 @@ spec:
       - X-Client-Ephemeral-Key
       - X-Purchase-Mac
       - X-Purchase-Seq
+      - X-Peaket-Event-Id
       - X-Requested-With
     exposeHeaders:
       - Date
@@ -1031,6 +1038,7 @@ spec:
       - X-Client-Ephemeral-Key
       - X-Purchase-Mac
       - X-Purchase-Seq
+      - X-Peaket-Event-Id
       - X-Requested-With
     exposeHeaders:
       - Date

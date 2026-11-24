@@ -59,6 +59,23 @@ test('IR-17 대기열 경로는 수집기가 eventId를 뽑고, 결제 회차는
   assert.match(read('deploy/gateways/00-common.yaml'), /eventId:\s*"%REQ\(x-peaket-event-id\)%"/);
 });
 
+test('IR-24 ORDER·TRANSFER·TICKET_RETURN은 경로에 회차가 없어 생산자가 보낸 eventId 머리를 수집기가 덮어쓰지 않는다', () => {
+  const collector = read('deploy/platform/observability/collector/access-log.yaml');
+  const gateway = read('deploy/gateways/00-common.yaml');
+  // 게이트웨이 로그가 웹이 보낸 머리를 eventId 칸으로 옮긴다
+  assert.match(gateway, /eventId:\s*"%REQ\(x-peaket-event-id\)%"/);
+  // 수집기의 eventId 경로 추출은 events·queues에만 있다. orders·tickets 경로에는 없어 머리 값을 덮지 않는다
+  const pathSets = [...collector.matchAll(/set\(attributes\["eventId"\], attributes\["path"\]\)[^\n]*IsMatch\(attributes\["path"\], "([^"]+)"\)/g)].map((m) => m[1]);
+  for (const path of ['/v1/orders', '/v1/orders/order-1/payments', '/v1/tickets/ticket-1/transfers', '/v1/tickets/ticket-1/returns']) {
+    assert.ok(!pathSets.some((re) => new RegExp(re).test(path)), `${path} 경로가 eventId를 경로에서 덮어쓴다`);
+  }
+  // 생산 경로의 보내기 코드가 회차 머리를 싣는다(실제 값은 앱 시험이 fake fetch로 확인한다)
+  assert.match(read('apps/web/src/shared/lib/event-id.ts'), /'x-peaket-event-id'/);
+  assert.match(read('apps/web/src/_pages/checkout/model/order-send.ts'), /eventIdHeaders\(/);
+  assert.match(read('apps/web/src/_pages/ticket-transfer/model/transfer-flow.ts'), /eventIdHeaders\(/);
+  assert.match(read('apps/web/src/widgets/ticket-wallet/model/transfer-actions.ts'), /eventIdHeaders\(/);
+});
+
 test('IR-22 --anchor도 identity 파드 하나의 빈 seq를 실패로 센다', async () => {
   const server = createServer((req, res) => {
     const query = new URL(req.url ?? '/', 'http://127.0.0.1').searchParams.get('query') ?? '';

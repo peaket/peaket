@@ -80,8 +80,8 @@ afterAll(async () => {
   await svc?.close();
 });
 
-const post = (path: string, body: object, ip = '203.0.113.10') =>
-  svc.http.inject({ method: 'POST', url: path, headers: { 'content-type': 'application/json', 'x-forwarded-for': ip }, payload: JSON.stringify(body) });
+const post = (path: string, body: object, ip = '203.0.113.10', extra: Record<string, string> = {}) =>
+  svc.http.inject({ method: 'POST', url: path, headers: { 'content-type': 'application/json', 'x-forwarded-for': ip, ...extra }, payload: JSON.stringify(body) });
 
 describe('REST 꼴(openapi AdminLoginPasswordStep·AdminLoginStep)', () => {
   test('맞으면200과loginStep·next·expiresInSeconds이고캐시하지않는다', async () => {
@@ -312,6 +312,32 @@ describe('로그인 2단계 REST(openapi AdminLoginSecondStep·AdminLoginDone, B
   test('두단계꼴을섞은본문은400이다', async () => {
     expect((await post('/v1/partner/auth/sessions', { email: 'minji.kim@haeoreum.example', password: PW, loginStep: 'A'.repeat(43), code: '123456' })).statusCode).toBe(400);
     expect((await post('/v1/partner/auth/sessions', { loginStep: 'short', code: '123456' })).statusCode).toBe(400);
+  });
+
+  test('IR-25 관리 로그인 1단계 실패 줄이 HTTP x-request-id를 request_id로 쓴다', async () => {
+    const chunks: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as never);
+    try {
+      const r = await post(
+        '/v1/partner/auth/sessions',
+        { email: 'ir25-nobody@haeoreum.example', password: '봄비내리는월요일아침의커피세잔' },
+        '198.51.100.25',
+        { 'x-request-id': 'admin-login-ir25' },
+      );
+      expect(r.statusCode).toBe(401);
+    } finally {
+      spy.mockRestore();
+    }
+    const line = chunks
+      .join('')
+      .split('\n')
+      .filter((l) => l.includes('"kind":"legal-access"'))
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((l) => l.event === 'LOGIN' && l.result === 'FAILED' && l.failure === 'password');
+    expect(line).toMatchObject({ failure: 'password', request_id: 'admin-login-ir25', client_ip: '198.51.100.25' });
   });
 });
 

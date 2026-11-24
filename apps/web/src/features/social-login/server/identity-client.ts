@@ -203,8 +203,8 @@ export class IdentityClient {
     }
   }
 
-  async endSession(i: { sessionId: string; accountId: string }): Promise<{ ended: boolean }> {
-    const r = await this.#call('EndSession', { session_id: i.sessionId, account_id: i.accountId });
+  async endSession(i: { sessionId: string; accountId: string }, requestId?: string): Promise<{ ended: boolean }> {
+    const r = await this.#call('EndSession', { session_id: i.sessionId, account_id: i.accountId }, requestId);
     return { ended: Boolean(r.ended) };
   }
 

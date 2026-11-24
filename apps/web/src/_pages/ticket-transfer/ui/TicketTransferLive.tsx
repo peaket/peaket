@@ -182,7 +182,7 @@ export function TicketTransferLive({ ticketId }: { ticketId: string }) {
     }
     setBusy(true);
     setFailure(null);
-    const r = await sendTransferRequest({ ticketId, recipientRef, reauthToken: token, idempotencyKey: keyRef.current ?? crypto.randomUUID(), ...n });
+    const r = await sendTransferRequest({ ticketId, eventId: ticket?.eventId ?? '', recipientRef, reauthToken: token, idempotencyKey: keyRef.current ?? crypto.randomUUID(), ...n });
     setBusy(false);
     if (r.kind === 'network') {
       setNotice('전송 결과를 확인하지 못했습니다. 다시 인증한 뒤 같은 요청으로 이어서 보냅니다');

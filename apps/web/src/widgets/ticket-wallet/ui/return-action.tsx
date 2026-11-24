@@ -9,7 +9,7 @@ import { submitReauthForm } from '@/shared/lib/reauth-return';
 import { reauthProviderFor, returnReauthTarget } from '../model/transfer-rules';
 
 /** SCR-013 돌려주기: 확인 대화상자 → 재인증 왕복 → 돌아오면 WalletLive가 POST와 동기화를 마친다 */
-export function ReturnAction({ ticketId }: { ticketId: string }) {
+export function ReturnAction({ ticketId, eventId }: { ticketId: string; eventId: string }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -32,7 +32,7 @@ export function ReturnAction({ ticketId }: { ticketId: string }) {
         setNotice('다시 로그인할 수단을 찾지 못했습니다. 로그인 수단을 확인한 뒤 다시 시도해 주세요');
         return;
       }
-      const pending = { ticketId, key: crypto.randomUUID() };
+      const pending = { ticketId, eventId, key: crypto.randomUUID() };
       sessionStorage.setItem('peaket.return.reauth', JSON.stringify(pending));
       const target = returnReauthTarget(ticketId);
       submitReauthForm(provider, target.returnTo, target.purpose);

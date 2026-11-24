@@ -114,7 +114,7 @@ export async function startIdentityStub() {
       cb(null, { session: await sessionOf(accountId, sessionId), new_account: newAccount, linked_provider: 'PROVIDER_UNSPECIFIED' });
     },
     EndSession(call, cb) {
-      calls.push({ method: 'EndSession', request: call.request });
+      calls.push({ method: 'EndSession', request: call.request, metadata: call.metadata.getMap() });
       if (mode.endFails) return fail(cb, 'UNAVAILABLE', '대역 장애');
       const s = sessions.get(call.request.session_id);
       if (!s) return fail(cb, 'NOT_FOUND', '없음');

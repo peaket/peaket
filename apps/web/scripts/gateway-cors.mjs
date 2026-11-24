@@ -5,7 +5,7 @@
 /** gw-fan api 호스트 라우트의 cors(모든 api 라우트가 같은 값이다) */
 export const GW_FAN_API_CORS = Object.freeze({
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-  allowHeaders: ['Content-Type', 'Idempotency-Key', 'If-Match', 'X-Reauth-Token', 'X-Admission-Token', 'X-Client-Ephemeral-Key', 'X-Purchase-Mac', 'X-Purchase-Seq', 'X-Requested-With'],
+  allowHeaders: ['Content-Type', 'Idempotency-Key', 'If-Match', 'X-Reauth-Token', 'X-Admission-Token', 'X-Client-Ephemeral-Key', 'X-Purchase-Mac', 'X-Purchase-Seq', 'X-Peaket-Event-Id', 'X-Requested-With'],
   exposeHeaders: ['Date', 'X-Trace-Id', 'ETag', 'Location', 'Retry-After', 'WWW-Authenticate'],
   maxAgeSeconds: 7200,
 });

@@ -1045,6 +1045,26 @@ test('W7-COR-01 API 호스트 라우트마다, openapi에서 그 라우트로 �
   assert.deepEqual([...new Set(missing)], [], '사전 요청에서 허용하지 않는 머리');
 });
 
+test('IR-23 gw-fan 결제·주문·양도·반환 preflight가 X-Peaket-Event-Id를 허용한다', () => {
+  requireDefinitions();
+  const preflight = (path) => {
+    const hit = routeFor('gw-fan', 'api.peaket.example', 'OPTIONS', path);
+    assert.ok(hit, `gw-fan OPTIONS ${path}를 받는 라우트가 없다`);
+    const cors = corsOf(hit.route);
+    const allow = new Set((cors.allowHeaders ?? []).map(lc));
+    // 브라우저가 Access-Control-Request-Headers로 요청한 머리를 모두 허용해야 한다
+    const requested = ['x-peaket-event-id'];
+    assert.deepEqual(
+      requested.filter((h) => !allow.has(h)),
+      [],
+      `${hit.route.metadata?.name} ${path}: Access-Control-Allow-Headers에 ${requested.join(', ')}가 없다`,
+    );
+    assert.ok((cors.allowHeaders ?? []).some((h) => lc(h) === 'x-peaket-event-id'), `${hit.route.metadata?.name}: allowHeaders`);
+    assert.equal(cors.allowCredentials, true, `${hit.route.metadata?.name}: allowCredentials`);
+  };
+  for (const path of ['/v1/orders', '/v1/orders/e2e-id-10/payments', '/v1/orders/e2e-id-10/payment-acceptance', '/v1/tickets/e2e-id-10/transfers', '/v1/tickets/e2e-id-10/returns']) preflight(path);
+});
+
 test('W7-COR-01 W7-WIR-09 api는 구매 경로 머리와 X-Requested-With를, ops-api는 X-Requested-With와 Last-Event-ID를 사전 요청에서 허용한다(guidelines §9)', () => {
   requireDefinitions();
   const allowAt = (gw, host, method, path) => {

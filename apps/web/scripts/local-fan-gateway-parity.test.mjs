@@ -110,6 +110,18 @@ test('CF2-05 W7-WIR-06 로컬 gw-fan 대역의 사전 요청 허용 머리·Max-
   }
 });
 
+test('IR-23 로컬 gw-fan 대역의 결제·주문·양도·반환 사전 요청이 X-Peaket-Event-Id를 허용한다', async () => {
+  for (const path of ['/v1/orders', '/v1/orders/e2e-id-10/payments', '/v1/orders/e2e-id-10/payment-acceptance', '/v1/tickets/e2e-id-10/transfers', '/v1/tickets/e2e-id-10/returns']) {
+    const r = await fetch(`${gw.url}${path}`, {
+      method: 'OPTIONS',
+      headers: { origin: WEB, 'access-control-request-method': 'POST', 'access-control-request-headers': 'x-peaket-event-id' },
+    });
+    assert.ok(r.status === 204 || r.status === 200, `${path}: 사전 요청 ${r.status}`);
+    const allow = set((r.headers.get('access-control-allow-headers') ?? '').split(',').map((s) => s.trim()).filter(Boolean));
+    assert.ok(allow.has('x-peaket-event-id'), `${path}: Access-Control-Allow-Headers`);
+  }
+});
+
 test('CF2-06 W7-WIR-06 로컬 gw-fan 대역의 노출 머리가 gw-fan.yaml·gw-fan.routes.yaml 정의의 그 라우트 정책 값과 같다', async () => {
   const at = await token('ticket:buy');
   for (const [method, path] of CASES) {

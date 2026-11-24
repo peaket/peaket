@@ -2,6 +2,7 @@
 // 화면 상태·오류 문구는 d5 §5.14·§9.2에서, 재인증 목적·제공자 규칙은 identity I-T54 ④에서 온다.
 // 팬 API 경계만 주입한다(origin·fetch). 시각은 인자로 받아 실제 시계를 기다리지 않는다.
 import type { Scr014State } from '../../../shared/config/screens.booking.ts';
+import { eventIdHeaders } from '../../../shared/lib/event-id.ts';
 
 export type TransferResult<T> =
   | { kind: 'ok'; body: T }
@@ -208,6 +209,7 @@ export function lookupRecipient(i: { readonly memberCode: string } & Net): Promi
 export function sendTransferRequest(
   i: {
     readonly ticketId: string;
+    readonly eventId: string;
     readonly recipientRef: string;
     readonly reauthToken: string;
     readonly idempotencyKey: string;
@@ -215,7 +217,7 @@ export function sendTransferRequest(
 ): Promise<TransferResult<TransferOfferBody>> {
   return send(i, 'POST', `/v1/tickets/${encodeURIComponent(i.ticketId)}/transfers`, {
     body: { recipientRef: i.recipientRef },
-    headers: { 'idempotency-key': i.idempotencyKey, 'x-reauth-token': i.reauthToken },
+    headers: { 'idempotency-key': i.idempotencyKey, 'x-reauth-token': i.reauthToken, ...eventIdHeaders(i.eventId) },
   });
 }
 

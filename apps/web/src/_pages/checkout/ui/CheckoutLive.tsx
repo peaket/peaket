@@ -10,6 +10,7 @@ import { AppShell } from '@/widgets/app-shell';
 import { buyerErrors, gradeLines, orderIdempotencyKey, orderOutcome, ORDER_CONSENT_VERSION, readCheckoutRefs, roundText, type OrderOutcome, type StoredAdmissionRef } from '../model/order';
 import type { PayMethod } from '../model/payment-attempt';
 import type { AttemptFlow, AttemptProblem, AttemptView } from '../model/attempt-flow';
+import { sendOrder } from '../model/order-send';
 import type { PayMode } from '../model/view';
 import { CheckoutConsentProvider, PayAction, useCheckoutConsent } from './CheckoutClient';
 import { CheckoutForm, type CheckoutFormData, type SellerView } from './CheckoutForm';
@@ -519,7 +520,7 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
       } catch (e) {
         return apply(e instanceof PurchaseKeyError && e.reason !== 'storage' ? { kind: 'ended' } : { kind: 'retry' });
       }
-      const send = () => client.send<{ orderId: string; amount: number }>(OPERATIONS.createOrder, { body, idempotencyKey: idem.current!.key, purchase: signer.current! });
+      const send = () => sendOrder<{ orderId: string; amount: number }>(client, { eventId, body, idempotencyKey: idem.current!.key, purchase: signer.current! });
       let refreshed = false;
       for (;;) {
         try {

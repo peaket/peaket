@@ -7,6 +7,7 @@
 // - 화면 문구는 d5에서 옮겨 단언하고 코드 상수를 가져오지 않는다. 시험 값은 정본 예와 다르게 고른다(회원 코드 QZ7-4K2M, 공연 시작 19:37).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   loadTransferTicket,
   lookupRecipient,
@@ -269,4 +270,14 @@ test('F-05-2 T15 ⑦ 조회 429는 problem과 Retry-After 초를 돌려주고, �
   const o = { origin: API, fetch: api.fetch };
   assert.deepEqual(await lookupRecipient({ memberCode: 'QZ7-4K2M', ...o }), { kind: 'problem', status: 429, type: 'too-many-requests', retryAfterSec: 1740 });
   assert.deepEqual(await lookupRecipient({ memberCode: 'QZ7-4K2M', ...o }), { kind: 'network' });
+});
+
+test('IR-24 티켓 양도 요청은 회차를 아는 화면이 넘긴 x-peaket-event-id를 싣는다', async () => {
+  const offerBody = { offerId: OFFER, ticketId: TICKET, role: 'SENDER', status: 'OFFERED', expiresAt: new Date(NOW + 48 * HOUR).toISOString() };
+  const api = fakeApi(() => json(201, offerBody));
+  const r = await sendTransferRequest({ ticketId: TICKET, eventId: payerTicket().eventId, recipientRef: REF, reauthToken: TOKEN, idempotencyKey: KEY, origin: API, fetch: api.fetch });
+  assert.deepEqual(r, { kind: 'ok', body: offerBody });
+  assert.equal(api.calls[0].headers['x-peaket-event-id'], payerTicket().eventId);
+  const live = readFileSync(new URL('../ui/TicketTransferLive.tsx', import.meta.url), 'utf8');
+  assert.match(live, /sendTransferRequest\(\{[\s\S]*?eventId/);
 });

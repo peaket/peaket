@@ -7,6 +7,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { generateDeviceKey } from '../../../features/wallet-device-key/device-key.ts';
 import { loadDeviceKey, loadTicketSnapshot, saveDeviceKey, saveTicketSnapshot, walletDatabase } from '../../../entities/wallet/index.ts';
 import {
@@ -158,4 +159,17 @@ test('F-05-2 T17 ③ 받은 요청 카드: GET /v1/transfers?status=OFFERED를 �
     throw new TypeError('fetch failed');
   });
   assert.deepEqual(await loadReceivedOffers({ origin: API, fetch: down.fetch }), { kind: 'network' });
+});
+
+test('IR-24 티켓 반환은 회차를 아는 월렛 카드가 넘긴 x-peaket-event-id를 싣는다', async () => {
+  await seedKey(TICKET);
+  const api = fakeApi(() => json(200, { ticketId: TICKET, status: 'RETURNED' }));
+  const r = await returnTicket({ ticketId: TICKET, eventId: 'event-return-1', reauthToken: TOKEN, idempotencyKey: KEY, origin: API, fetch: api.fetch });
+  assert.deepEqual(r, { kind: 'ok', body: { ticketId: TICKET, status: 'RETURNED' } });
+  assert.equal(api.calls[0].headers['x-peaket-event-id'], 'event-return-1');
+  const wallet = readFileSync(new URL('../ui/WalletLive.tsx', import.meta.url), 'utf8');
+  const action = readFileSync(new URL('../ui/return-action.tsx', import.meta.url), 'utf8');
+  assert.match(wallet, /<ReturnAction ticketId=\{card\.ticketId\} eventId=\{card\.eventId\}/);
+  assert.match(wallet, /returnTicket\(\{[\s\S]*?eventId: pending\.eventId/);
+  assert.match(action, /const pending = \{ ticketId, eventId, key:/);
 });

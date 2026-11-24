@@ -229,6 +229,15 @@ test('I-T71_⑤ 만료된 액세스 토큰으로도 로그아웃은 그 세션�
   assert.ok(identity.sessions.get(lastCall('EndSession').session_id).ended);
 });
 
+test('IR-25 로그아웃 HTTP x-request-id가 EndSession 메타데이터로 간다', async () => {
+  const b = new Browser();
+  await login(b);
+  const r = await b.go(`${web.url}/logout`, { method: 'POST', headers: { origin: web.url, 'x-request-id': 'logout-http-ir25' } });
+  assert.equal(r.trail[0].status, 303);
+  const call = identity.calls.filter((c) => c.method === 'EndSession').at(-1);
+  assert.equal(call.metadata['x-request-id'], 'logout-http-ir25');
+});
+
 test('I-T71_⑤ 서명이 맞지 않는 액세스 토큰으로는 identity를 부르지 않고 쿠키만 지운다', async () => {
   const b = new Browser();
   await login(b);

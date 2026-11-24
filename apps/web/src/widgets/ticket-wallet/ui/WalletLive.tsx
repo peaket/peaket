@@ -100,7 +100,7 @@ function TicketCard({ card, qrFallback }: { card: WalletCard; qrFallback: ReactN
       {card.received &&
       card.badge === '받은 티켓' &&
       canReturn({ ticketId: card.ticketId, status: card.status, received: card.received, eventStartsAt: card.startsAt ?? undefined, entryOpensAt: card.entryOpensAt ?? undefined }, Date.now()) ? (
-        <ReturnAction ticketId={card.ticketId} />
+        <ReturnAction ticketId={card.ticketId} eventId={card.eventId} />
       ) : null}
       {card.pendingOfferId ? (
         <Link className="link-more" href={`/my/tickets/${encodeURIComponent(card.ticketId)}/transfer`}>
@@ -159,9 +159,9 @@ export function WalletLive({ loading, qrFallback, detail }: WalletLiveProps) {
       raw = null;
     }
     if (raw === null) return;
-    let pending: { ticketId?: unknown; key?: unknown };
+    let pending: { ticketId?: unknown; eventId?: unknown; key?: unknown };
     try {
-      pending = JSON.parse(raw) as { ticketId?: unknown; key?: unknown };
+      pending = JSON.parse(raw) as { ticketId?: unknown; eventId?: unknown; key?: unknown };
     } catch {
       return;
     }
@@ -170,7 +170,7 @@ export function WalletLive({ loading, qrFallback, detail }: WalletLiveProps) {
     } catch {
       // 위와 같다
     }
-    if (typeof pending.ticketId !== 'string' || typeof pending.key !== 'string') return;
+    if (typeof pending.ticketId !== 'string' || typeof pending.eventId !== 'string' || typeof pending.key !== 'string') return;
     if (ORIGINS.api === '') {
       setReturnNotice('지금은 돌려줄 수 없습니다. 잠시 뒤 다시 시도해 주세요');
       return;
@@ -182,7 +182,7 @@ export function WalletLive({ loading, qrFallback, detail }: WalletLiveProps) {
         return;
       }
       const { returnTicket } = await import('../model/transfer-actions');
-      const out = await returnTicket({ ticketId: pending.ticketId as string, reauthToken: r.token, idempotencyKey: pending.key as string, origin: ORIGINS.api, fetch: globalThis.fetch });
+      const out = await returnTicket({ ticketId: pending.ticketId as string, eventId: pending.eventId as string, reauthToken: r.token, idempotencyKey: pending.key as string, origin: ORIGINS.api, fetch: globalThis.fetch });
       if (out.kind === 'ok') {
         setReturnNotice('결제한 분에게 돌려주었습니다');
         await resync();

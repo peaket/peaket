@@ -2,6 +2,7 @@
 // 화면이 첫 렌더에 쓰는 순수 규칙은 transfer-rules로 뺐다. WalletLive는 이 파일을 늦게 가져온다(docs/frontend.md §5.8).
 // 돌려주기 200이면 이 기기의 그 표 입장 키와 월렛 항목을 함께 지운다(계획 §10 '지우는 연산은 건드린 것 전부').
 import type { ReceivedOfferItem, WalletActionResult } from './transfer-rules.ts';
+import { eventIdHeaders } from '../../../shared/lib/event-id.ts';
 
 export type { ReceivedOfferItem, ReturnableTicket, WalletActionResult } from './transfer-rules.ts';
 export { RETURN_CONFIRM_TEXT, canReturn, reauthProviderFor, receivedOfferCardsOf, receivedSnapshotOf, returnFailureOf, returnReauthTarget } from './transfer-rules.ts';
@@ -31,7 +32,7 @@ export interface ReturnBody {
  * 결제자에게 돌려주기. 200이면 이 기기의 그 표 입장 키와 월렛 항목을 지운다.
  * 실패(403·409·422·5xx·끊김)에는 아무것도 지우지 않는다.
  */
-export async function returnTicket(i: { readonly ticketId: string; readonly reauthToken: string; readonly idempotencyKey: string } & Net): Promise<WalletActionResult<ReturnBody>> {
+export async function returnTicket(i: { readonly ticketId: string; readonly eventId: string; readonly reauthToken: string; readonly idempotencyKey: string } & Net): Promise<WalletActionResult<ReturnBody>> {
   let r: Response;
   try {
     r = await i.fetch(`${i.origin}/v1/tickets/${encodeURIComponent(i.ticketId)}/returns`, {
@@ -39,7 +40,7 @@ export async function returnTicket(i: { readonly ticketId: string; readonly reau
       credentials: 'include',
       cache: 'no-store',
       redirect: 'error',
-      headers: { accept: 'application/json', 'idempotency-key': i.idempotencyKey, 'x-reauth-token': i.reauthToken },
+      headers: { accept: 'application/json', 'idempotency-key': i.idempotencyKey, 'x-reauth-token': i.reauthToken, ...eventIdHeaders(i.eventId) },
     });
   } catch {
     return { kind: 'network' };

@@ -163,7 +163,7 @@ export class LoginPasswordStep {
   ) {}
 
   /** @throws LoginCountersUnavailable·PepperUnavailable(받는 층이 503으로) */
-  async run(i: { aud: AdminAud; email: string; password: string; ip: string; deviceId: string; humanCheckToken?: string; userAgent?: string }): Promise<LoginStepOutcome> {
+  async run(i: { aud: AdminAud; email: string; password: string; ip: string; deviceId: string; humanCheckToken?: string; userAgent?: string; requestId?: string }): Promise<LoginStepOutcome> {
     const email = emailKeyOf(i.email);
     const emailHash = shortHash(email);
     // 이 콘솔에서 로그인할 수 있는 계정만 진짜로 다룬다. 나머지는 없는 계정과 같다
@@ -198,8 +198,8 @@ export class LoginPasswordStep {
   }
 
   /** 관리 계정 로그인 1단계의 실패를 법정 접속기록에 남긴다(성공 세션 줄은 2단계가 쓴다) */
-  #legal<T extends LoginStepOutcome>(i: { ip: string; userAgent?: string }, accountId: string | undefined, o: T): T {
-    const common = { event: 'LOGIN' as const, result: 'FAILED' as const, clientIp: i.ip, userAgent: i.userAgent, accountId, isAdmin: true };
+  #legal<T extends LoginStepOutcome>(i: { ip: string; userAgent?: string; requestId?: string }, accountId: string | undefined, o: T): T {
+    const common = { event: 'LOGIN' as const, result: 'FAILED' as const, clientIp: i.ip, userAgent: i.userAgent, requestId: i.requestId, accountId, isAdmin: true };
     if (o.kind === 'FAILED') recordLegalAccess({ ...common, failure: 'password' });
     else if (o.kind === 'LOCKED') recordLegalAccess({ ...common, failure: 'locked' });
     else if (o.kind === 'HUMAN_CHECK_REQUIRED') recordLegalAccess({ ...common, failure: 'session' });

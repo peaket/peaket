@@ -103,6 +103,30 @@ describe('SessionService(gRPC)', () => {
     expect(lines.find((l) => l.event === 'LOGIN' && l.result === 'FAILED' && l.request_id === 'http-request-fail')).toBeTruthy();
   });
 
+  test('IR-25 EndSession의 x-request-id가 로그아웃 법정 줄 request_id가 된다', async () => {
+    const r = await create({ provider_user_id: 'grpc-logout-ir25', email: '' });
+    const chunks: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as never);
+    try {
+      const md = new grpc.Metadata();
+      md.set('x-request-id', 'logout-grpc-ir25');
+      await new Promise<Record<string, any>>((res, rej) =>
+        client.EndSession({ session_id: r.session.session_id, account_id: r.session.account_id }, md, { deadline: Date.now() + 5_000 }, (e, v) => (e ? rej(e) : res(v!))),
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    const line = chunks
+      .flatMap((c) => c.split('\n'))
+      .filter((l) => l.includes('"kind":"legal-access"'))
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((l) => l.event === 'LOGOUT' && l.result === 'SUCCESS' && l.request_id === 'logout-grpc-ir25');
+    expect(line).toBeTruthy();
+  });
+
   test('I-T50_①②_같은키다시보내기는같은세션_다른내용은ALREADY_EXISTS다', async () => {
     const key = newKey();
     const a = await create({ idempotency_key: key, provider_user_id: '4000077' });

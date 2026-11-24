@@ -139,7 +139,7 @@ export class AdminLoginController {
   async #first(aud: AdminAud, body: PasswordStepBody, req: FastifyRequest, reply: FastifyReply): Promise<object> {
     let o: LoginStepOutcome;
     try {
-      o = await this.step.run({ aud, email: body.email, password: body.password, ip: clientIpOf(req), deviceId: body.deviceId ?? '', userAgent: userAgentOf(req), ...(body.humanCheckToken ? { humanCheckToken: body.humanCheckToken } : {}) });
+      o = await this.step.run({ aud, email: body.email, password: body.password, ip: clientIpOf(req), deviceId: body.deviceId ?? '', userAgent: userAgentOf(req), requestId: requestIdOf(req), ...(body.humanCheckToken ? { humanCheckToken: body.humanCheckToken } : {}) });
     } catch (e) {
       if (e instanceof LoginCountersUnavailable || e instanceof PepperUnavailable) throw new ProblemError({ type: 'admin-login-unavailable', status: 503, title: '잠시 뒤 다시 시도해 주세요', retryAfterSeconds: RETRY_AFTER_S });
       throw e;

@@ -456,11 +456,12 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     if (cookieOf(req, REAUTH_COOKIE) !== undefined) cookies.push(clearReauthCookie());
     const raw = cookieOf(req, ACCESS_COOKIE);
     const fan = await fanTokens.verify(raw, now(), { allowExpired: true });
+    const requestId = requestIdOf(req);
     if (!raw) log('logout.without-session', {});
     else if (!fan) log('logout.failed', { reason: 'token' });
     if (fan) {
       try {
-        await identity.endSession(fan);
+        await identity.endSession(fan, requestId);
       } catch (e) {
         log('logout.failed', { reason: 'identity', code: codeOf(e) });
         return respond(503, '로그아웃을 마치지 못했습니다. 다시 시도해 주세요', cookies, LOGOUT_CLEAR_SITE_DATA);
