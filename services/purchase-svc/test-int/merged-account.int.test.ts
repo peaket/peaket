@@ -14,6 +14,13 @@ const PRIMARY = '0192f0aa-0002-7000-8000-000000000002';
 const ABSORBED = '0192f0aa-0003-7000-8000-000000000003';
 const OTHER = '0192f0aa-0004-7000-8000-000000000004';
 const MERGE_ID = '0192f0aa-0005-7000-8000-000000000005';
+/** 병합 사슬 시험(A→B, B→C)의 계정 셋. OUTSIDER는 묶음 밖이다 */
+const CHAIN_A = '0192f0aa-0006-7000-8000-000000000006';
+const CHAIN_B = '0192f0aa-0007-7000-8000-000000000007';
+const CHAIN_C = '0192f0aa-0008-7000-8000-000000000008';
+const OUTSIDER = '0192f0aa-0009-7000-8000-000000000009';
+const MERGE_AB = '0192f0aa-000a-7000-8000-00000000000a';
+const MERGE_BC = '0192f0aa-000b-7000-8000-00000000000b';
 const CONFIRMED_AT = new Date('2026-11-24T03:00:00.000Z');
 const BASE = Date.parse('2026-10-14T03:00:00.000Z');
 
@@ -109,6 +116,47 @@ describe('계정 묶음과 주문 내역(IR-02)', () => {
     expect((await history.find(primaryOrder, asAbsorbed))?.orderId).toBe(primaryOrder);
     // 묶음 밖 계정은 자기 주문 하나만 본다
     expect(ids(await history.list([OTHER], { limit: 10 }))).toEqual([outsiderOrder]);
+  });
+
+  test('AM-T9 병합 사슬(A→B→C)을 접어 C가 A·B·C 주문을 모두 보고, A 행의 대표가 C다(IR-12)', async () => {
+    const h = new AccountMergedHandler(merged);
+    const mergedEvent = (mergeId: string, primaryAccountId: string, mergedAccountId: string) => ({
+      topic: 'identity.accounts-merged',
+      partition: 0,
+      offset: 1n,
+      key: mergedAccountId,
+      value: Buffer.from(JSON.stringify({ mergeId, primaryAccountId, mergedAccountId, confirmedAt: CONFIRMED_AT.toISOString() }), 'utf8'),
+      headers: {},
+      timestamp: CONFIRMED_AT.getTime(),
+    });
+    // identity가 보내는 두 사건을 차례로 처리한다(A→B, 그다음 B→C). A→C 사건은 오지 않는다
+    for (const m of [mergedEvent(MERGE_AB, CHAIN_B, CHAIN_A), mergedEvent(MERGE_BC, CHAIN_C, CHAIN_B)]) {
+      const r = h.decode(m);
+      if (r.kind !== 'event') throw new Error('event가 아니다');
+      await h.handle(r, m);
+    }
+
+    // 표에는 A·B 두 행이 남고, 둘 다 최종 대표 C를 가리킨다(한 단계로 접힌다)
+    const rows = await database.db.execute(sql`select absorbed_account_id, representative_account_id from merged_account order by absorbed_account_id`);
+    expect(rows.rows).toEqual([
+      { absorbed_account_id: CHAIN_A, representative_account_id: CHAIN_C },
+      { absorbed_account_id: CHAIN_B, representative_account_id: CHAIN_C },
+    ]);
+    for (const id of [CHAIN_A, CHAIN_B, CHAIN_C]) {
+      expect([...(await merged.accountIdsOf(id))].sort()).toEqual([CHAIN_A, CHAIN_B, CHAIN_C]);
+    }
+
+    // C(최종 대표)와 A(가장 오래된 흡수 계정)가 모두 A·B·C 주문을 본다
+    const aOrder = await insertOrder({ accountId: CHAIN_A, createdAt: new Date(BASE + 60_000) });
+    const bOrder = await insertOrder({ accountId: CHAIN_B, createdAt: new Date(BASE + 120_000) });
+    const cOrder = await insertOrder({ accountId: CHAIN_C, createdAt: new Date(BASE + 180_000) });
+    await insertOrder({ accountId: OUTSIDER, createdAt: new Date(BASE + 240_000) });
+    for (const viewer of [CHAIN_C, CHAIN_A, CHAIN_B]) {
+      const bundle = await merged.accountIdsOf(viewer);
+      expect(ids(await history.list(bundle, { limit: 10 })), viewer).toEqual([cOrder, bOrder, aOrder]);
+      expect((await history.find(aOrder, bundle))?.orderId, viewer).toBe(aOrder);
+      expect((await history.find(cOrder, bundle))?.orderId, viewer).toBe(cOrder);
+    }
   });
 
   test('AM-T8 묶인 계정의 주문이 섞여도 키셋 커서·최신순이 맞고 겹치지 않는다', async () => {
