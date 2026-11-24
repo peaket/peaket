@@ -4,7 +4,7 @@
 // `/api/v1/query_exemplars`에 남긴 셋(정상 표본·5xx·SLO 지연 초과)의 traceId가 있고 표본 밖 traceId는 없는지 본다.
 // 가짜 없음: 실제 Prometheus 이미지다. Docker 네트워크는 만들지 않고 호스트를 host.docker.internal로 부른다(Alertmanager 도우미와 같은 꼴).
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { startTelemetry } from '../src/telemetry.js';
+import { startTelemetry, withoutTracePropagation } from '../src/telemetry.js';
 import { PROMETHEUS_IMAGE, startContainer, until, type Container } from './observability-stores.js';
 
 const telemetry = startTelemetry({ serviceName: 'exemplar-svc', env: 'ci', spanProcessors: [] });
@@ -23,7 +23,8 @@ const SPAN = '2222222222222222';
 const traceparent = (traceId: string) => `00-${traceId}-${SPAN}-01`;
 
 async function hit(path: string, traceId: string): Promise<void> {
-  const res = await fetch(`${base}${path}`, { headers: { traceparent: traceparent(traceId) } });
+  // 클라이언트 계측이 traceparent를 덮지 않게 전파를 끄고, 시험이 고른 trace ID를 그대로 보낸다
+  const res = await withoutTracePropagation(() => fetch(`${base}${path}`, { headers: { traceparent: traceparent(traceId) } }));
   await res.text();
 }
 

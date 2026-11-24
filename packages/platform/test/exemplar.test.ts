@@ -5,7 +5,7 @@
 // 서버 span이 있어야 spanId가 붙으므로 OTel SDK를 먼저 켜고 실제 소켓으로 부른다(inject는 자동 계측을 지나지 않는다).
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { startTelemetry } from '../src/telemetry.js';
+import { startTelemetry, withoutTracePropagation } from '../src/telemetry.js';
 
 const telemetry = startTelemetry({ serviceName: 'exemplar-svc', env: 'ci', spanProcessors: [] });
 
@@ -43,14 +43,17 @@ const pairs = (text: string): Record<string, string> =>
 function exemplars(text: string): Record_[] {
   const out: Record_[] = [];
   for (const line of text.split('\n')) {
-    const m = /^([A-Za-z_:][A-Za-z0-9_:]*)\{([^}]*)\}\s+\S+ # \{([^}]*)\}\s+\S+\s+\S+$/.exec(line);
-    if (m) out.push({ metric: m[1]!, labels: pairs(m[2]!), exemplar: pairs(m[3]!) });
+    // 라벨 값에 `}`가 들어갈 수 있어(경로 틀 `/v1/…/{itemId}`) 라벨 묶음은 탐욕적으로 읽고 값 앞 마지막 `}`에서 끊는다
+    const m = /^([A-Za-z_:][A-Za-z0-9_:]*)\{(.*)\}\s+\S+(?:\s+#\s+\{(.*)\}\s+\S+\s+\S+)?$/.exec(line);
+    if (!m || m[3] === undefined) continue;
+    out.push({ metric: m[1]!, labels: pairs(m[2]!), exemplar: pairs(m[3]) });
   }
   return out;
 }
 
 async function hit(path: string, traceId: string): Promise<void> {
-  const res = await fetch(`${base}${path}`, { headers: { traceparent: traceparent(traceId) } });
+  // 클라이언트 계측이 traceparent를 덮지 않게 전파를 끄고, 시험이 고른 trace ID를 그대로 보낸다
+  const res = await withoutTracePropagation(() => fetch(`${base}${path}`, { headers: { traceparent: traceparent(traceId) } }));
   await res.text();
 }
 

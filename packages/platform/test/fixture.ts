@@ -259,11 +259,11 @@ export async function start(env: Record<string, string> = { PEAKET_ENV: 'ci', PE
   };
 }
 
-/** Prometheus 글 형식에서 이름과 라벨이 맞는 줄의 값(없으면 undefined) */
+/** Prometheus·OpenMetrics 글 형식에서 이름과 라벨이 맞는 줄의 값(없으면 undefined). exemplar가 붙은 줄(`… 1 # {…}`)도 읽는다 */
 export function sample(text: string, name: string, labels: Record<string, string> = {}): number | undefined {
   for (const line of text.split('\n')) {
     if (!line.startsWith(`${name}{`) && !line.startsWith(`${name} `)) continue;
-    const m = /^([^{\s]+)(?:\{(.*)\})?\s+(\S+)$/.exec(line);
+    const m = /^([^{\s]+)(?:\{(.*)\})?\s+(\S+)(?:\s+#\s.*)?$/.exec(line);
     if (!m || m[1] !== name) continue;
     const got = Object.fromEntries([...(m[2] ?? '').matchAll(/(\w+)="((?:[^"\\]|\\.)*)"/g)].map((x) => [x[1], x[2]]));
     if (Object.entries(labels).every(([k, v]) => got[k] === v)) return Number(m[3]);
