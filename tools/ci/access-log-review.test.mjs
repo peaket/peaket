@@ -156,10 +156,10 @@ test('IR-09 법정 경보가 수집기의 exporter·receiver 라벨로 거른다
 test('IR-10 사본 지연 경보가 전날 날짜와 06:00을 보고 지표 없음도 울린다', () => {
   const a = alerts();
   assert.match(a, /absent\(access_log_export_last_success_timestamp\)/);
-  assert.match(a, /hour\(\)\s*>=\s*6/);
-  assert.match(a, /year\(access_log_export_last_success_timestamp\)/);
-  assert.match(a, /month\(access_log_export_last_success_timestamp\)/);
-  assert.match(a, /day_of_month\(access_log_export_last_success_timestamp\)/);
+  assert.match(a, /hour\(vector\(time\(\)\) \+ 9 \* 3600\)\s*>=\s*6/);
+  assert.match(a, /year\(access_log_export_last_success_timestamp \+ 9 \* 3600\)/);
+  assert.match(a, /month\(access_log_export_last_success_timestamp \+ 9 \* 3600\)/);
+  assert.match(a, /day_of_month\(access_log_export_last_success_timestamp \+ 9 \* 3600\)/);
   assert.doesNotMatch(a, /time\(\)\s*-\s*access_log_export_last_success_timestamp\s*>\s*6\s*\*\s*3600/);
 });
 

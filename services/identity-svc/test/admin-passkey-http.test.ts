@@ -3,7 +3,7 @@
 import 'reflect-metadata';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { type AdminAuthz, createService, fakeClock } from '@peaket/platform';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { JoseAdminReauthVerifier } from '../src/modules/admin/adapters/jose-admin-reauth-verifier.js';
 import { JoseAdminTokenSigner } from '../src/modules/admin/adapters/jose-admin-token-signer.js';
@@ -119,8 +119,25 @@ describe('관리 계정 재인증·패스키 REST(BOT-122)', () => {
     };
     const p1 = await step();
     expect(p1.next).toBe('PASSKEY');
-    const evil = await post('/v1/partner/auth/reauthentications', { reauthStep: p1.reauthStep, credential: authn.assert(p1.publicKey, { origin: 'https://partner.peaket-login.example' }) });
+    const chunks: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as never);
+    let evil: Awaited<ReturnType<typeof post>>;
+    try {
+      evil = await post('/v1/partner/auth/reauthentications', { reauthStep: p1.reauthStep, credential: authn.assert(p1.publicKey, { origin: 'https://partner.peaket-login.example' }) }, { 'x-forwarded-for': '203.0.113.31', 'user-agent': 'Chrome/130' });
+    } finally {
+      spy.mockRestore();
+    }
     expect(problemOf(evil)).toEqual({ status: 422, type: 'passkey-assertion-invalid' });
+    const line = chunks
+      .join('')
+      .split('\n')
+      .filter((l) => l.includes('"kind":"legal-access"'))
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((l) => l.event === 'REAUTH' && l.result === 'FAILED' && l.failure === 'passkey');
+    expect(line).toMatchObject({ failure: 'passkey', client_ip: '203.0.113.31', user_agent: 'Chrome/130' });
     expect(problemOf(await post('/v1/partner/auth/reauthentications', { reauthStep: p1.reauthStep, credential: authn.assert(p1.publicKey) }))).toEqual({ status: 410, type: 'reauth-step-invalid' });
     const p2 = await step();
     const ok = await post('/v1/partner/auth/reauthentications', { reauthStep: p2.reauthStep, credential: authn.assert(p2.publicKey) });

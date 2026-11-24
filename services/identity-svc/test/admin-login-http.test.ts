@@ -3,7 +3,7 @@
 import 'reflect-metadata';
 import { createServer } from 'node:http';
 import { type AdminAuthzPort, createCircuitBreaker, createService, fakeClock } from '@peaket/platform';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { JoseAdminTokenSigner } from '../src/modules/admin/adapters/jose-admin-token-signer.js';
 import { LocalPepper } from '../src/modules/admin/adapters/local-pepper.js';
@@ -282,9 +282,26 @@ describe('로그인 2단계 REST(openapi AdminLoginSecondStep·AdminLoginDone, B
     clock.advance(30_000);
     const r1 = await post('/v1/ops/auth/sessions', { email: 'ops.http@peaket.example', password: PW }, '198.51.100.141');
     const { loginStep } = JSON.parse(r1.payload) as { loginStep: string };
-    const bad = await post('/v1/ops/auth/sessions', { loginStep, code: totpAt(seeds[OPS]!, Math.floor(clock.now() / 30_000)) === '123456' ? '654321' : '123456' }, '198.51.100.141');
+    const chunks: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as never);
+    let bad: Awaited<ReturnType<typeof post>>;
+    try {
+      bad = await post('/v1/ops/auth/sessions', { loginStep, code: totpAt(seeds[OPS]!, Math.floor(clock.now() / 30_000)) === '123456' ? '654321' : '123456' }, '198.51.100.141');
+    } finally {
+      spy.mockRestore();
+    }
     expect(bad.statusCode).toBe(401);
     expect(JSON.parse(bad.payload)).toMatchObject({ type: 'https://peaket.example/problems/admin-login-code-invalid', remainingAttempts: 4 });
+    const line = chunks
+      .join('')
+      .split('\n')
+      .filter((l) => l.includes('"kind":"legal-access"'))
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((l) => l.event === 'LOGIN' && l.result === 'FAILED' && l.failure === 'totp');
+    expect(line).toMatchObject({ failure: 'totp', account_id: OPS, client_ip: '198.51.100.141' });
     const ok = await post('/v1/ops/auth/sessions', { loginStep, code: totpAt(seeds[OPS]!, Math.floor(clock.now() / 30_000)) }, '198.51.100.141');
     expect(ok.statusCode).toBe(200);
     const c = cookieMap(ok.headers['set-cookie']);

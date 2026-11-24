@@ -1,7 +1,7 @@
 // 관리 계정 토큰 갱신 유스케이스의 판정(docs/features/identity.md §6 '관리 계정 토큰 갱신과 로그아웃의 첫 구현', BUILD_ORDER BOT-130, I-T46). 메모리 저장소로 본다.
 import { createHash, randomBytes } from 'node:crypto';
 import { fakeClock } from '@peaket/platform';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { MemoryAdminAccountStore } from '../src/modules/admin/adapters/memory-admin-account-store.js';
 import { RefreshAdminSession } from '../src/modules/admin/application/refresh-admin-session.js';
 
@@ -51,7 +51,30 @@ test('I-T46⑥_재시도유예는회전뒤30초까지이고_30초를넘기면같
   expect(t.store.terminatedEvents()).toHaveLength(1);
 });
 
-test('정비는절대만료가지난발급해시만지운다', async () => {
+test('IR-08 관리 갱신 성공 줄의 account_id는 세션 ID가 아니라 관리 계정 ID다', async () => {
+  const t = harness();
+  const rt = await t.open('0190f3a1-7c2e-7a00-8000-000000000cb4');
+  const chunks: string[] = [];
+  const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+    chunks.push(String(chunk));
+    return true;
+  }) as never);
+  try {
+    expect((await t.uc.run({ aud: 'ops', refreshToken: rt })).result).toBe('OK');
+  } finally {
+    spy.mockRestore();
+  }
+  const line = chunks
+    .join('')
+    .split('\n')
+    .filter((l) => l.includes('"kind":"legal-access"'))
+    .map((l) => JSON.parse(l) as Record<string, unknown>)
+    .find((l) => l.event === 'REFRESH' && l.result === 'SUCCESS');
+  expect(line?.account_id).toBe(ACC);
+  expect(line?.account_id).not.toBe('0190f3a1-7c2e-7a00-8000-000000000cb4');
+});
+
+test('정비는 절대 만료가 지난 발급 해시만 지운다', async () => {
   const t = harness();
   await t.open('0190f3a1-7c2e-7a00-8000-000000000cb3');
   expect(await t.store.purgeRefreshHashes(t.clock.now() + 24 * 60 * M)).toBe(0);
