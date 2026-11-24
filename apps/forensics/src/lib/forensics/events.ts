@@ -41,6 +41,14 @@ export const NET_TYPE = {
   PROXY: 4,
 } as const;
 
+/** 열 값 허용 목록. 정본 §4.1·§4.2과 이 계획 §1.1·§7.13에서 온다. 시험은 같은 값을 따로 적어 대조한다. */
+export const ALLOWED_KINDS: readonly number[] = Object.values(EVENT_KIND);
+export const ALLOWED_RESULTS: readonly number[] = Object.values(RESULT);
+export const ALLOWED_NET_TYPES: readonly number[] = Object.values(NET_TYPE);
+export const MAX_BOT_TIER = 3;
+export const MAX_FLAG_VALUE = 1;
+export const SEATLESS_SECTION = 0;
+
 /** 체크포인트가 담는 좌석 상태. 경합 표시는 재생할 때 앞뒤 1초로 계산하고 저장하지 않는다(§3.4). */
 export const SEAT_STATE = {
   EMPTY: 0,
@@ -166,7 +174,16 @@ export interface Reject {
   message: string;
 }
 
-export type DropCode = 'HOLD_END_WITHOUT_HOLD' | 'SALE_WITHOUT_PAY';
+export type DropCode =
+  | 'KIND_NOT_ALLOWED'
+  | 'RESULT_NOT_ALLOWED'
+  | 'NET_TYPE_NOT_ALLOWED'
+  | 'BOT_TIER_NOT_ALLOWED'
+  | 'FLAG_NOT_BOOLEAN'
+  | 'SECTION_WITHOUT_SEAT'
+  | 'ASN_WITHOUT_HOSTING'
+  | 'HOLD_END_WITHOUT_HOLD'
+  | 'SALE_WITHOUT_PAY';
 
 export interface DropCount {
   code: DropCode;
@@ -269,10 +286,11 @@ export function validateMeta(meta: ForensicMeta): { ok: true } | Reject {
   }
   if (Number.isNaN(Date.parse(meta.saleStart))) return reject('meta', '판매 시작 시각이 ISO 8601이 아닙니다');
 
-  const from = meta.windowFromMs ?? 0;
-  const to = meta.windowToMs ?? MAX_WINDOW_MS;
+  const synthetic = meta.source === 'SYNTHETIC';
+  const from = meta.windowFromMs ?? (synthetic ? -LOBBY_MS : Number.NaN);
+  const to = meta.windowToMs ?? (synthetic ? MAX_WINDOW_MS : Number.NaN);
   if (!Number.isInteger(from) || !Number.isInteger(to) || from < -LOBBY_MS || from >= to || to > MAX_WINDOW_MS) {
-    return reject('meta', '시간창은 -10분부터 30분 안이어야 합니다');
+    return reject('meta', synthetic ? '시간창은 -10분부터 30분 안이어야 합니다' : '연구·조사 원천에는 시간창이 필요합니다');
   }
 
   if (meta.source === 'SYNTHETIC') {
@@ -321,12 +339,13 @@ export function validateColumns(meta: ForensicMeta, columns: EventColumns): Vali
   const countResult = validateEventCount(rowCount);
   if (!countResult.ok) return countResult;
 
+  const windowFrom = meta.windowFromMs ?? (meta.source === 'SYNTHETIC' ? -LOBBY_MS : 0);
   const windowTo = meta.windowToMs ?? MAX_WINDOW_MS;
   let previous = -LOBBY_MS;
   for (let i = 0; i < rowCount; i += 1) {
     const t = columns.t_ms[i];
     if (t < -LOBBY_MS) return reject('lobby', '로비 10분 앞보다 이른 사건이 있습니다');
-    if (t > windowTo) return reject('window', '시간창 밖 사건이 있습니다');
+    if (t < windowFrom || t > windowTo) return reject('window', '시간창 밖 사건이 있습니다');
     if (t < previous) return reject('time-order', '사건 시각이 오름차순이 아닙니다');
     previous = t;
 
@@ -336,7 +355,39 @@ export function validateColumns(meta: ForensicMeta, columns: EventColumns): Vali
 
     const entropy = columns.entropy[i];
     if (!Number.isNaN(entropy) && !Number.isFinite(entropy)) return reject('source-rule', '엔트로피가 유한수가 아닙니다');
+  }
 
+  const keep = new Uint8Array(rowCount).fill(1);
+  const dropCounts: Partial<Record<DropCode, number>> = {};
+  const addDrop = (code: DropCode): void => {
+    dropCounts[code] = (dropCounts[code] ?? 0) + 1;
+  };
+
+  for (let i = 0; i < rowCount; i += 1) {
+    const kind = columns.kind[i];
+    const result = columns.result[i];
+    const netType = columns.net_type[i];
+    const seat = columns.seat[i];
+    const section = columns.section[i];
+    const asn = columns.asn[i];
+    let code: DropCode | null = null;
+    if (!ALLOWED_KINDS.includes(kind)) code = 'KIND_NOT_ALLOWED';
+    else if (!ALLOWED_RESULTS.includes(result)) code = 'RESULT_NOT_ALLOWED';
+    else if (!ALLOWED_NET_TYPES.includes(netType)) code = 'NET_TYPE_NOT_ALLOWED';
+    else if (columns.bot_tier[i] > MAX_BOT_TIER) code = 'BOT_TIER_NOT_ALLOWED';
+    else if (columns.member[i] > MAX_FLAG_VALUE || columns.post_seat[i] > MAX_FLAG_VALUE) code = 'FLAG_NOT_BOOLEAN';
+    else if (seat === NO_SEAT && section !== SEATLESS_SECTION) code = 'SECTION_WITHOUT_SEAT';
+    else if (asn !== 0 && netType !== NET_TYPE.HOSTING && netType !== NET_TYPE.PROXY) code = 'ASN_WITHOUT_HOSTING';
+
+    if (code !== null) {
+      keep[i] = 0;
+      addDrop(code);
+    }
+  }
+
+  for (let i = 0; i < rowCount; i += 1) {
+    if (keep[i] === 0) continue;
+    const entropy = columns.entropy[i];
     if (meta.source === 'SYNTHETIC') {
       if (columns.member[i] !== 0 || columns.post_seat[i] !== 0) {
         return reject('source-rule', '합성 원천에 묶음 계정·게시물 좌석 표시가 있습니다');
@@ -367,56 +418,67 @@ export function validateColumns(meta: ForensicMeta, columns: EventColumns): Vali
     }
   }
 
-  const heldBySeat = new Int32Array(meta.seatCount).fill(-1);
-  const paidBySeat = new Int32Array(meta.seatCount).fill(-1);
-  const keep = new Uint8Array(rowCount).fill(1);
-  let dropped = 0;
-  let holdEndDrops = 0;
-  let saleDrops = 0;
-
+  // session은 uint32라 2^31 이상과 0xFFFFFFFF가 정상 값이다. 0을 '없음'으로 두고 session+1을 저장한다(Float64는 2^32까지 정확).
+  const heldBySeat = new Float64Array(meta.seatCount);
+  const paidBySeat = new Float64Array(meta.seatCount);
   for (let i = 0; i < rowCount; i += 1) {
+    if (keep[i] === 0) continue;
     const kind = columns.kind[i];
     const seat = columns.seat[i];
-    const session = columns.session[i];
     if (seat === NO_SEAT) continue;
+    const key = columns.session[i] + 1;
 
     if (kind === EVENT_KIND.HOLD_TRY && columns.result[i] === RESULT.HELD) {
-      heldBySeat[seat] = session;
+      heldBySeat[seat] = key;
       continue;
     }
     if (kind === EVENT_KIND.HOLD_END) {
-      if (heldBySeat[seat] !== session) {
+      if (heldBySeat[seat] !== key) {
         keep[i] = 0;
-        dropped += 1;
-        holdEndDrops += 1;
+        addDrop('HOLD_END_WITHOUT_HOLD');
       } else {
-        heldBySeat[seat] = -1;
+        heldBySeat[seat] = 0;
       }
       continue;
     }
     if (kind === EVENT_KIND.PAY_TRY) {
-      if (heldBySeat[seat] === session) heldBySeat[seat] = -1;
-      paidBySeat[seat] = session;
+      if (heldBySeat[seat] === key) heldBySeat[seat] = 0;
+      paidBySeat[seat] = key;
       continue;
     }
     if (kind === EVENT_KIND.SALE) {
-      if (paidBySeat[seat] !== session) {
+      if (paidBySeat[seat] !== key) {
         keep[i] = 0;
-        dropped += 1;
-        saleDrops += 1;
+        addDrop('SALE_WITHOUT_PAY');
       } else {
-        paidBySeat[seat] = -1;
+        paidBySeat[seat] = 0;
       }
       continue;
     }
-    if (kind === EVENT_KIND.PAY_FAIL && paidBySeat[seat] === session) {
-      paidBySeat[seat] = -1;
+    if (kind === EVENT_KIND.PAY_FAIL && paidBySeat[seat] === key) {
+      paidBySeat[seat] = 0;
     }
   }
 
+  let dropped = 0;
+  for (let i = 0; i < rowCount; i += 1) if (keep[i] === 0) dropped += 1;
+
+  const order: readonly DropCode[] = [
+    'KIND_NOT_ALLOWED',
+    'RESULT_NOT_ALLOWED',
+    'NET_TYPE_NOT_ALLOWED',
+    'BOT_TIER_NOT_ALLOWED',
+    'FLAG_NOT_BOOLEAN',
+    'SECTION_WITHOUT_SEAT',
+    'ASN_WITHOUT_HOSTING',
+    'HOLD_END_WITHOUT_HOLD',
+    'SALE_WITHOUT_PAY',
+  ];
   const droppedBy: DropCount[] = [];
-  if (holdEndDrops > 0) droppedBy.push({ code: 'HOLD_END_WITHOUT_HOLD', count: holdEndDrops });
-  if (saleDrops > 0) droppedBy.push({ code: 'SALE_WITHOUT_PAY', count: saleDrops });
+  for (const code of order) {
+    const count = dropCounts[code] ?? 0;
+    if (count > 0) droppedBy.push({ code, count });
+  }
 
   return {
     ok: true,

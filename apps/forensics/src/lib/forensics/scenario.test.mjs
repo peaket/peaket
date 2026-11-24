@@ -108,6 +108,15 @@ test('FX-T1 ③ 공유 주소는 시드와 매개변수만 싣고 왕복해도 �
   assert.equal(badPreset.code, 'preset');
 });
 
+test('FX-T1 ③ 공유 주소는 windowMs와 botRatio를 반올림 없이 그대로 왕복한다', () => {
+  const params = smallParams({ seed: 'decimal-share', windowMs: 120_500, botRatio: 0.335 });
+  const parsed = parseShareSearch(shareSearch(params));
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.params.windowMs, 120_500);
+  assert.equal(parsed.params.botRatio, 0.335);
+  assert.deepEqual(parsed.params, params);
+});
+
 test('FX-T1 ④ 생성기 코드에 금지 함수가 없다', () => {
   const files = ['prng.ts', 'cdf.ts', 'scenario.ts', 'checkpoint.ts', 'events.ts'];
   const forbidden =

@@ -3,6 +3,7 @@
 // 화면·Arrow 실물 없이 열 배열과 메타데이터 수준에서 거절·버리기를 본다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import * as eventsModule from './events.ts';
 import {
   COLUMN_SPECS,
   EVENT_KIND,
@@ -196,12 +197,12 @@ test('FX-T2 ④ 원천별 칸 규칙과 연 길이 다르면 거절한다', () =
     research.post_seat[i] = 0;
     research.bot_tier[i] = 1;
   }
-  assert.equal(validateFile(file({ meta: { source: 'RESEARCH', eventId: 'evt-lumen-2026-r1' }, columns: research })).ok, true);
+  assert.equal(validateFile(file({ meta: { source: 'RESEARCH', eventId: 'evt-lumen-2026-r1', windowFromMs: -600_000, windowToMs: MAX_WINDOW_MS }, columns: research })).ok, true);
 
   const researchEntropy = columnsFromRows(rows());
   for (let i = 0; i < researchEntropy.entropy.length; i += 1) researchEntropy.entropy[i] = Number.NaN;
   researchEntropy.entropy[2] = 1.2;
-  const researchEntropyResult = validateFile(file({ meta: { source: 'RESEARCH', eventId: 'evt-lumen-2026-r1' }, columns: researchEntropy }));
+  const researchEntropyResult = validateFile(file({ meta: { source: 'RESEARCH', eventId: 'evt-lumen-2026-r1', windowFromMs: -600_000, windowToMs: MAX_WINDOW_MS }, columns: researchEntropy }));
   assert.equal(researchEntropyResult.ok, false);
   assert.equal(researchEntropyResult.code, 'source-rule');
 
@@ -215,7 +216,7 @@ test('FX-T2 ④ 원천별 칸 규칙과 연 길이 다르면 거절한다', () =
     investigation.asn[i] = 0;
     investigation.device_group[i] = 0;
   }
-  const invMeta = { source: 'INVESTIGATION', eventId: 'evt-lumen-2026-r1', caseId: 'CASE-2610-0007', snapshotVersion: '1' };
+  const invMeta = { source: 'INVESTIGATION', eventId: 'evt-lumen-2026-r1', caseId: 'CASE-2610-0007', snapshotVersion: '1', windowFromMs: -600_000, windowToMs: MAX_WINDOW_MS };
   assert.equal(validateFile(file({ meta: invMeta, columns: investigation })).ok, true);
 
   const investigationMember = columnsFromRows(rows());
@@ -297,4 +298,103 @@ test('FX-T2 ⑥ 메타데이터의 좌석 수·구역 수·시간창·원천별 
 
   const investigationWithoutCase = validateFile(file({ meta: { source: 'INVESTIGATION', eventId: 'evt-1' } }));
   assert.equal(investigationWithoutCase.code, 'meta');
+});
+
+// [ASVS v5.0.0-2.2.1]
+test('FX-T2 ⑦ 열 값 허용 목록이 정본과 같고 잘못된 값은 그 사건만 버린다', () => {
+  assert.deepEqual(eventsModule.ALLOWED_KINDS, [1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(eventsModule.ALLOWED_RESULTS, [0, 1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(eventsModule.ALLOWED_NET_TYPES, [0, 1, 2, 3, 4]);
+  assert.equal(eventsModule.MAX_BOT_TIER, 3);
+  assert.equal(eventsModule.MAX_FLAG_VALUE, 1);
+  assert.equal(eventsModule.SEATLESS_SECTION, 0);
+
+  const cases = [
+    { name: 'kind=99', row: { t_ms: 0, kind: 99 }, code: 'KIND_NOT_ALLOWED' },
+    { name: 'result=250', row: { t_ms: 0, kind: EVENT_KIND.QUEUE_ENTER, session: 1, result: 250 }, code: 'RESULT_NOT_ALLOWED' },
+    { name: 'net_type=200', row: { t_ms: 0, kind: EVENT_KIND.QUEUE_ENTER, session: 1, net_type: 200 }, code: 'NET_TYPE_NOT_ALLOWED' },
+    { name: 'bot_tier=200', row: { t_ms: 0, kind: EVENT_KIND.QUEUE_ENTER, session: 1, bot_tier: 200 }, code: 'BOT_TIER_NOT_ALLOWED' },
+    { name: 'member=2', row: { t_ms: 0, kind: EVENT_KIND.QUEUE_ENTER, session: 1, member: 2 }, code: 'FLAG_NOT_BOOLEAN' },
+    { name: 'post_seat=2', row: { t_ms: 0, kind: EVENT_KIND.QUEUE_ENTER, session: 1, post_seat: 2 }, code: 'FLAG_NOT_BOOLEAN' },
+    { name: 'section=1+NO_SEAT', row: { t_ms: 0, kind: EVENT_KIND.QUEUE_ENTER, session: 1, section: 1 }, code: 'SECTION_WITHOUT_SEAT' },
+    { name: 'net_type=MOBILE+asn=5', row: { t_ms: 0, kind: EVENT_KIND.QUEUE_ENTER, session: 1, net_type: 1, asn: 5 }, code: 'ASN_WITHOUT_HOSTING' },
+  ];
+  for (const item of cases) {
+    const result = validateFile(file({ columns: columnsFromRows([item.row]) }));
+    assert.equal(result.ok, true, item.name);
+    assert.equal(result.kept, 0, item.name);
+    assert.equal(result.dropped, 1, item.name);
+    assert.ok(result.droppedBy.some((entry) => entry.code === item.code), `${item.name}: ${JSON.stringify(result.droppedBy)}`);
+  }
+
+  const investigation = validateFile(
+    file({
+      meta: {
+        source: 'INVESTIGATION',
+        eventId: 'evt-1',
+        caseId: 'CASE-1',
+        snapshotVersion: '1',
+        windowFromMs: -600_000,
+        windowToMs: MAX_WINDOW_MS,
+      },
+      columns: columnsFromRows([{ t_ms: 0, kind: EVENT_KIND.QUEUE_ENTER, session: 1, member: 2 }]),
+    }),
+  );
+  assert.equal(investigation.ok, true);
+  assert.equal(investigation.kept, 0);
+  assert.equal(investigation.dropped, 1);
+  assert.ok(investigation.droppedBy.some((entry) => entry.code === 'FLAG_NOT_BOOLEAN'));
+});
+
+// [ASVS v5.0.0-2.2.1]
+test('FX-T2 ⑧ RESEARCH·INVESTIGATION은 시간창 메타데이터가 필요하고 t_ms는 그 안이어야 한다', () => {
+  const researchNoWindow = validateFile(
+    file({ meta: { source: 'RESEARCH', eventId: 'evt-1', windowFromMs: undefined, windowToMs: undefined } }),
+  );
+  assert.equal(researchNoWindow.ok, false);
+  assert.equal(researchNoWindow.code, 'meta');
+
+  const investigationNoWindow = validateFile(
+    file({
+      meta: {
+        source: 'INVESTIGATION',
+        eventId: 'evt-1',
+        caseId: 'CASE-1',
+        snapshotVersion: '1',
+        windowFromMs: undefined,
+        windowToMs: undefined,
+      },
+    }),
+  );
+  assert.equal(investigationNoWindow.ok, false);
+  assert.equal(investigationNoWindow.code, 'meta');
+
+  const beforeWindow = columnsFromRows([{ t_ms: 0, kind: EVENT_KIND.ADMIT, session: 1 }]);
+  const beforeResult = validateFile(
+    file({ meta: { windowFromMs: 1_000, windowToMs: MAX_WINDOW_MS }, columns: beforeWindow }),
+  );
+  assert.equal(beforeResult.ok, false);
+  assert.equal(beforeResult.code, 'window');
+
+  const atWindowStart = columnsFromRows([{ t_ms: 1_000, kind: EVENT_KIND.ADMIT, session: 1 }]);
+  const atStartResult = validateFile(
+    file({ meta: { windowFromMs: 1_000, windowToMs: MAX_WINDOW_MS }, columns: atWindowStart }),
+  );
+  assert.equal(atStartResult.ok, true);
+});
+
+test('FX-T2 ⑨ uint32 세션 2^31 이상과 0xFFFFFFFF도 HELD→HOLD_END·PAY_TRY→SALE을 잇는다', () => {
+  for (const session of [2_147_483_648, 0xffffffff]) {
+    const columns = columnsFromRows([
+      { t_ms: 100, kind: EVENT_KIND.HOLD_TRY, seat: 5, section: 0, session, result: RESULT.HELD },
+      { t_ms: 200, kind: EVENT_KIND.HOLD_END, seat: 5, section: 0, session },
+      { t_ms: 300, kind: EVENT_KIND.PAY_TRY, seat: 5, section: 0, session },
+      { t_ms: 400, kind: EVENT_KIND.SALE, seat: 5, section: 0, session, result: RESULT.PAID },
+    ]);
+    const result = validateFile(file({ columns }));
+    assert.equal(result.ok, true, `session=${session}`);
+    assert.equal(result.kept, 4, `session=${session}`);
+    assert.equal(result.dropped, 0, `session=${session}`);
+    assert.deepEqual(result.droppedBy, [], `session=${session}`);
+  }
 });

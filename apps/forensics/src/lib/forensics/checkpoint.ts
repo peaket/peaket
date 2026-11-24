@@ -66,7 +66,7 @@ function firstAfter(times: Int32Array, target: number): number {
 
 export function buildCheckpoints(columns: EventColumns, target: CheckpointTarget): Checkpoints {
   const intervalMs = checkpointIntervalMs(target.windowMs, target.seatCount);
-  const count = Math.max(1, ceilPositive(target.windowMs / intervalMs));
+  const count = Math.max(1, Math.floor(target.windowMs / intervalMs));
   const times = new Int32Array(count);
   const data = new Uint8Array(count * target.seatCount);
   const state = new Uint8Array(target.seatCount);

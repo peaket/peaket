@@ -190,6 +190,7 @@ export const FORENSICS_GENERATOR_RULES = {
     ],
     'no-restricted-syntax': [
       'error',
+      MOCK_SYNTAX,
       { selector: `NewExpression[callee.name='Date']`, message: FORENSICS_DETERMINISM_MESSAGE },
       { selector: `CallExpression[callee.name='Date']`, message: FORENSICS_DETERMINISM_MESSAGE },
     ],

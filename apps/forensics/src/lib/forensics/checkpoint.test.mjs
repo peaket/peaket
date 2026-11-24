@@ -8,8 +8,8 @@ import {
   checkpointIntervalMs,
   reconstructAt,
 } from './checkpoint.ts';
-import { COLUMN_SPECS, EVENT_KIND, NO_SEAT, RESULT, SEAT_STATE, validateFile } from './events.ts';
-import { defaultParams, generateScenario, seatStateAt } from './scenario.ts';
+import { COLUMN_SPECS, EVENT_KIND, NO_SEAT, RESULT, SEAT_STATE, makeColumns, validateFile } from './events.ts';
+import { defaultParams, generateScenario, seatStateAt, validateParams } from './scenario.ts';
 import { Xoshiro128 } from './prng.ts';
 
 const PARAMS = {
@@ -132,4 +132,21 @@ test('FX-T3 ⑤ 마지막 시각의 상태가 생성기 정답과 같고 상태 
   for (const value of final) assert.ok(value >= 0 && value <= 3);
   assert.ok(final.includes(SEAT_STATE.SOLD));
   assert.ok(final.includes(SEAT_STATE.HELD) || final.includes(SEAT_STATE.PAYING));
+});
+
+test('FX-T3 ⑥ 671초·10만 석 허용 조합도 체크포인트 전체가 32MB를 넘지 않는다', () => {
+  const params = {
+    ...defaultParams('concert', 'checkpoint-boundary'),
+    seats: 100_000,
+    queueSize: 1_000,
+    windowMs: 671_000,
+  };
+  assert.equal(validateParams(params).ok, true);
+
+  const interval = checkpointIntervalMs(671_000, 100_000);
+  assert.equal(interval, 2_000);
+  const checkpoints = buildCheckpoints(makeColumns(0), { seatCount: 100_000, windowMs: 671_000 });
+  assert.equal(checkpoints.times.length, 335);
+  assert.equal(checkpoints.data.length, 33_500_000);
+  assert.ok(checkpoints.data.length <= CHECKPOINT_BUDGET_BYTES);
 });

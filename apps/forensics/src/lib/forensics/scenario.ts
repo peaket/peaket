@@ -536,8 +536,9 @@ export function shareSearch(params: ScenarioParams): string {
   query.set('seats', String(params.seats));
   query.set('sections', String(params.sectionCount));
   query.set('queue', String(params.queueSize));
-  query.set('window', String(roundPositive(params.windowMs / 1_000)));
-  query.set('bots', String(roundPositive(params.botRatio * 100)));
+  // window는 ms 정수, bots는 소수 문자열 그대로다(반올림하지 않는다, IR-04).
+  query.set('window', String(params.windowMs));
+  query.set('bots', String(params.botRatio));
   query.set('order', params.ordering);
   query.set('layout', params.layout);
   query.set('mimic', params.mimicBots ? '1' : '0');
@@ -573,9 +574,15 @@ export function parseShareSearch(search: string | URLSearchParams): ShareParse {
   const seats = readInt('seats', defaults.seats);
   const sections = readInt('sections', defaults.sectionCount);
   const queue = readInt('queue', defaults.queueSize);
-  const windowSeconds = readInt('window', roundPositive(defaults.windowMs / 1_000));
-  const bots = readInt('bots', roundPositive(defaults.botRatio * 100));
-  if (seats === null || sections === null || queue === null || windowSeconds === null || bots === null || bots < 0 || bots > 60) {
+  const windowMs = readInt('window', defaults.windowMs);
+  const botsRaw = query.get('bots');
+  let botRatio = defaults.botRatio;
+  if (botsRaw !== null) {
+    if (!/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(botsRaw)) return { ok: false, code: 'params', message: '봇 비율이 숫자가 아닙니다' };
+    botRatio = Number(botsRaw);
+    if (!Number.isFinite(botRatio)) return { ok: false, code: 'params', message: '봇 비율이 숫자가 아닙니다' };
+  }
+  if (seats === null || sections === null || queue === null || windowMs === null) {
     return { ok: false, code: 'params', message: '숫자 매개변수가 범위를 벗어났습니다' };
   }
 
@@ -594,8 +601,8 @@ export function parseShareSearch(search: string | URLSearchParams): ShareParse {
     seats,
     sectionCount: sections,
     queueSize: queue,
-    windowMs: windowSeconds * 1_000,
-    botRatio: bots / 100,
+    windowMs,
+    botRatio,
     ordering,
     layout,
     mimicBots: mimic,
