@@ -1,7 +1,7 @@
 # 에이전트 수집기(노드마다 하나, DaemonSet) 운영 판. docs/observability.md §1 '수집기 구성'·'설정 원천과 로컬 확인', ADR-0076.
 # 추적: 서비스 SDK의 OTLP(노드 안) → 메모리 상한 → 쿠버네티스 메타데이터 → 묶기 → trace ID 부하 분산(같은 trace는 게이트웨이 수집기의 같은 복제로).
 # 로그: 컨테이너 표준 출력(filelog, CRI 꼴 해석) → 메모리 상한 → 쿠버네티스 메타데이터 → 묶기 → 게이트웨이 수집기(OTLP).
-# 접근 로그 두 갈래와 조사 사본(§7)은 OPS-070 몫이라 이 판에 없다. 배포(DaemonSet·권한·NetworkPolicy)는 INF-020이 한다.
+# 접근 로그 두 갈래와 조사 사본(§7)은 access-log.yaml이 더한다(겹쳐 읽기). 배포(DaemonSet·권한·NetworkPolicy)는 INF-020이 한다.
 # 검사: node tools/ci/collector-config.mjs --check. 로컬로 띄울 때는 local/agent.yaml을 뒤에 겹친다(README.md).
 receivers:
   otlp:

@@ -1,0 +1,10 @@
+# 접근 로그 갈래 로컬 판(에이전트). access-log.yaml 뒤에 겹쳐 Docker로 띄운다.
+#   --config agent.yaml --config access-log.yaml --config local/agent.yaml --config local/access-log.yaml
+# 로컬에서는 ClickHouse·Kafka 주소만 바꾼다. 읽은 위치·큐 경로는 컨테이너 안 그대로다(시험은 볼륨을 붙인다).
+# 프로덕션 주소·인증은 INF-020이 정한다.
+exporters:
+  clickhouse/access-log:
+    endpoint: tcp://127.0.0.1:9000
+  kafka/investigation:
+    brokers:
+      - 127.0.0.1:9092

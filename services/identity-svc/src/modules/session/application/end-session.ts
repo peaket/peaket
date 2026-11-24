@@ -4,6 +4,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import { SESSION_SIGNALS, SESSION_STORE, type SessionSignals, type SessionStore } from '../domain/ports.js';
 import { SessionError } from './session-error.js';
+import { recordLegalAccess } from '../legal-access-log.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -31,7 +32,10 @@ export class EndSession {
       await tx.terminateSessions([s.id], 'LOGOUT', now);
       return true;
     });
-    if (ended) this.signals.terminated('LOGOUT', 1);
+    if (ended) {
+      this.signals.terminated('LOGOUT', 1);
+      recordLegalAccess({ event: 'LOGOUT', result: 'SUCCESS', requestId: i.sessionId, accountId: i.accountId });
+    }
     return { ended };
   }
 }

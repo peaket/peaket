@@ -10,6 +10,7 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
 import { deviceLabelOf } from './device-label.js';
 import { contactEmail } from '../domain/inv-ref.js';
+import { recordLegalAccess } from '../legal-access-log.js';
 import {
   ACCOUNT_CLAIMS,
   type AccountClaims,
@@ -199,18 +200,33 @@ export class CreateSession {
 
   /** 로그인 하나의 결과(gRPC CreateSession) */
   async outcome(i: CreateSessionInput): Promise<LoginOutcome> {
-    check(i);
-    if (i.link) return this.#viaLink(i, i.link);
-    return this.#login(i, true);
+    try {
+      check(i);
+      if (i.link) return await this.#viaLink(i, i.link);
+      return await this.#login(i, true);
+    } catch (e) {
+      if (e instanceof SessionError) this.#legalFailure(i, 'session');
+      throw e;
+    }
   }
 
   /** 연결하지 않고 새 계정 만들기(SeparateAccount)가 부른다: 제안을 다시 만들지 않는다 */
   async withoutProposal(i: CreateSessionInput): Promise<CreateSessionResult> {
-    check(i);
-    const o = await this.#login({ ...i, link: undefined }, false);
-    if (o.kind !== 'session') throw new SessionError('FAILED_PRECONDITION', `세션 대신 ${o.kind}`);
-    const { kind: _k, linkedProvider: _l, ...s } = o;
-    return s;
+    try {
+      check(i);
+      const o = await this.#login({ ...i, link: undefined }, false);
+      if (o.kind !== 'session') throw new SessionError('FAILED_PRECONDITION', `세션 대신 ${o.kind}`);
+      const { kind: _k, linkedProvider: _l, ...s } = o;
+      return s;
+    } catch (e) {
+      if (e instanceof SessionError) this.#legalFailure(i, 'session');
+      throw e;
+    }
+  }
+
+  /** 로그인 실패 줄(16.3.2). 원문 IP·단말 정보는 법정 접속기록에만 싣는다 */
+  #legalFailure(i: CreateSessionInput, failure: 'session' | 'password' | 'totp' | 'passkey' | 'locked'): void {
+    recordLegalAccess({ event: 'LOGIN', result: 'FAILED', failure, provider: i.provider, clientIp: i.clientIp, userAgent: i.userAgent });
   }
 
   /**
@@ -458,6 +474,7 @@ export class CreateSession {
     if (r.ended.length && r.endedReason === 'DEVICE_LIMIT') this.signals.terminated('DEVICE_LIMIT', r.ended.length);
     if (r.ended.length && r.endedReason === 'LOGIN_METHOD_CHANGED') this.signals.othersEnded('login_method_changed', r.ended.length);
     const access = await this.signer.access({ accountId: r.accountId, sessionId: r.sessionId, ...(await this.claims.of(r.accountId)) }, now);
+    recordLegalAccess({ event: 'LOGIN', result: 'SUCCESS', provider: i.provider, clientIp: i.clientIp, userAgent: i.userAgent, requestId: r.sessionId, accountId: r.accountId });
     return {
       kind: 'session',
       linkedProvider,

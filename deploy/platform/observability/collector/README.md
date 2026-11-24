@@ -9,9 +9,10 @@
 | `agent.yaml` | 에이전트(노드마다 하나) 운영 판: OTLP·컨테이너 표준 출력 → 쿠버네티스 메타데이터 → trace ID 부하 분산·게이트웨이 | 고친다 |
 | `gateway.yaml` | 게이트웨이 수집기 운영 판: 받기·메모리 상한·묶기·Tempo(관측 전용 Kafka)·Loki 내보내기와 파이프라인 차례 | 고친다 |
 | `cluster.yaml` | 클러스터 수집기 운영 판: 쿠버네티스 이벤트를 리더 하나만 받아 Loki로 | 고친다 |
+| `access-log.yaml` | 접근 로그 세 갈래(법정·일반·조사)와 법정 접속기록 DB·조사 Kafka 내보내기(BUILD_ORDER F-01-8, OPS-070) | 고친다 |
 | `generated/tail-sampling.yaml` | 꼬리 표본 처리기(크기 값과 정책 다섯, 드문 경로 정책은 openapi의 `x-peaket-trace-rare`에서) | **고치지 않는다** |
 | `generated/pii-masking.yaml` | 2차 마스킹 처리기(`packages/platform/src/pii-patterns.json`의 꼴, IP 속성 처리) | **고치지 않는다** |
-| `local/agent.yaml`·`local/gateway.yaml` | 운영 판 위에 겹치는 로컬 판(쿠버네티스 없이 Docker로) | 고친다 |
+| `local/agent.yaml`·`local/gateway.yaml`·`local/access-log.yaml` | 운영 판 위에 겹치는 로컬 판(쿠버네티스 없이 Docker로) | 고친다 |
 
 `generated/`는 원천(openapi, docs/observability.md §1 꼬리 표본 줄, `pii-patterns.json`)을 고친 뒤 `node tools/ci/collector-config.mjs --write`로만 만든다. `--check`가 생성 대조와 운영 판 셋의 규칙을 보고, tools-check가 돌린다.
 
@@ -20,7 +21,7 @@
 수집기는 `--config`를 거듭 받아 차례로 겹친다. 뒤 파일의 표가 앞 파일의 같은 표를 덮고, 목록(파이프라인의 처리기·내보내기 등)은 통째로 바뀐다.
 
 - 게이트웨이: `--config gateway.yaml --config generated/tail-sampling.yaml --config generated/pii-masking.yaml`(운영). 로컬은 끝에 `--config local/gateway.yaml`을 더한다(내보내기만 파일로 바뀌고 처리기 차례는 운영 판 그대로).
-- 에이전트: `--config agent.yaml`(운영). 로컬은 끝에 `--config local/agent.yaml`을 더한다(쿠버네티스 메타데이터를 빼고, 부하 분산은 Docker 네트워크 별칭 `peaket-gw-0`·`peaket-gw-1`, 로그는 `peaket-gw-0`으로).
+- 에이전트: `--config agent.yaml --config access-log.yaml`(운영). 로컬은 끝에 `--config local/agent.yaml --config local/access-log.yaml`을 더한다(쿠버네티스 메타데이터를 빼고, 부하 분산은 Docker 네트워크 별칭 `peaket-gw-0`·`peaket-gw-1`, 로그는 `peaket-gw-0`으로, 접속기록 DB·Kafka는 127.0.0.1로).
 - 클러스터: `--config cluster.yaml`(쿠버네티스가 있어야 떠서 로컬 판이 없다).
 
 ## 로컬로 띄우기
@@ -46,6 +47,7 @@ docker run --rm -p 4317:4317 -p 4318:4318 -p 8888:8888 \
 - 결과: `/var/lib/otelcol/out/traces.json`·`logs.json`(JSON 줄). 꼬리 표본이 판정을 기다리므로(§6 `decision_wait`) trace는 그만큼 늦게 나온다.
 - 설정만 확인: 위 명령의 `--config …` 앞에 `validate`를 넣는다.
 - 자동 시험: `pnpm --filter @peaket/platform test:integration test-int/collector-masking.int.test.ts`(V-T49 ③, 같은 꼴로 ④⑤와 V-T30 ②).
+- 접속기록 갈래만 띄우기(법정 접속기록 DB·Kafka가 있어야 한다): 위 에이전트 명령에 `--config /etc/otelcol/access-log.yaml --config /etc/otelcol/local/access-log.yaml`을 더한다. 정적 검사는 `node tools/ci/access-log-config.mjs`다.
 
 ## 운영 판의 가정
 

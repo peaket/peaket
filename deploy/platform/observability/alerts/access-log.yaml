@@ -1,0 +1,70 @@
+# 법정 접속기록 갈래 경보(SEV2 kind legal)와 조사 사본 버림(SEV3 kind hygiene).
+# 정본: docs/observability.md §5 '법정 접속기록 갈래 신호', docs/infra.md §10 RB-38, docs/verification.md V-T21~V-T23.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: peaket-access-log
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: peaket-access-log
+      interval: 1m
+      rules:
+        # 버린 조사 사본 줄. 노드 구분은 긁기 대상의 외부 라벨(node)이 붙인다(INF-020).
+        - record: inv_copy_dropped_total
+          expr: sum(increase(otelcol_exporter_enqueue_failed_log_records{pipeline="logs/investigation"}[5m]))
+        - alert: AccessLogIngestFailures
+          expr: increase(otelcol_exporter_enqueue_failed_log_records{pipeline="logs/legal"}[5m]) > 0 or increase(otelcol_receiver_refused_log_records{pipeline="logs/legal"}[5m]) > 0
+          labels:
+            severity: sev2
+            kind: legal
+          annotations:
+            summary: 법정 접속기록 갈래에서 줄을 잃었다(넣기 실패 또는 받기 거절)
+            runbook_url: https://runbooks.peaket.example/RB-38
+            dashboard_url: /d/peaket-obs-pipeline
+        - alert: AccessLogQueueHigh
+          expr: (otelcol_exporter_queue_size{pipeline="logs/legal"} / otelcol_exporter_queue_capacity{pipeline="logs/legal"}) > 0.5 or increase(otelcol_exporter_send_failed_log_records{pipeline="logs/legal"}[5m]) > 0
+          labels:
+            severity: sev2
+            kind: legal
+          annotations:
+            summary: 법정 접속기록 디스크 큐가 50%를 넘거나 보내기가 5분 넘게 실패한다
+            runbook_url: https://runbooks.peaket.example/RB-38
+            dashboard_url: /d/peaket-obs-pipeline
+        - alert: AccessLogShortfall
+          expr: access_log_shortfall_ratio > 0.001
+          labels:
+            severity: sev2
+            kind: legal
+          annotations:
+            summary: 5분 칸 대조에서 게이트웨이 접속기록이 원천 요청 수보다 0.1% 넘게 모자란다
+            runbook_url: https://runbooks.peaket.example/RB-38
+            dashboard_url: /d/peaket-obs-pipeline
+        - alert: AccessLogSeqGaps
+          expr: access_log_seq_gaps_total > 0
+          labels:
+            severity: sev2
+            kind: legal
+          annotations:
+            summary: identity 접속기록 줄에 빈 일련번호가 있다
+            runbook_url: https://runbooks.peaket.example/RB-38
+            dashboard_url: /d/peaket-obs-pipeline
+        - alert: AccessLogDailyCopyLate
+          expr: time() - access_log_export_last_success_timestamp > 6 * 3600
+          labels:
+            severity: sev2
+            kind: legal
+          annotations:
+            summary: 전날 하루 사본이 06:00까지 없다
+            runbook_url: https://runbooks.peaket.example/RB-38
+            dashboard_url: /d/peaket-obs-pipeline
+        - alert: InvCopyDropped
+          expr: inv_copy_dropped_total > 0
+          labels:
+            severity: sev3
+            kind: hygiene
+          annotations:
+            summary: 조사 사본 갈래가 큐가 차서 줄을 버렸다(법정 사본은 멈추지 않는다)
+            runbook_url: https://runbooks.peaket.example/RB-38
+            dashboard_url: /d/peaket-obs-pipeline

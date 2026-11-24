@@ -5,6 +5,7 @@ import { CLOCK, type Clock } from '@peaket/platform';
 import { ACCOUNT_CLAIMS, type AccountClaims, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, type SessionStore, TOKEN_SIGNER, type TokenSigner } from '../domain/ports.js';
 import { decideRefresh, fanEndedReason, SESSION_IDLE_MS, sessionAlive } from '../domain/session.js';
 import { newRefreshToken, refreshHash } from './create-session.js';
+import { recordLegalAccess } from '../legal-access-log.js';
 
 export type RefreshResult =
   | { result: 'OK'; accountId: string; sessionId: string; accessToken: string; accessTokenExpiresAt: number; refreshToken: string; refreshTokenExpiresAt: number }
@@ -69,13 +70,16 @@ export class RefreshSession {
     });
     if (r.kind === 'invalid') {
       this.signals.refreshed('fan', 'invalid');
+      recordLegalAccess({ event: 'REFRESH', result: 'FAILED', failure: 'session' });
       return r.ended ? { result: 'INVALID', ended: r.ended } : { result: 'INVALID' };
     }
     if (r.kind === 'reuse') {
       this.signals.refreshed('fan', 'reused');
+      recordLegalAccess({ event: 'REFRESH', result: 'FAILED', failure: 'session' });
       return { result: 'REUSED', ended: 'REFRESH_REUSE' };
     }
     this.signals.refreshed('fan', r.kind === 'rotate' ? 'rotated' : 'retried');
+    recordLegalAccess({ event: 'REFRESH', result: 'SUCCESS', requestId: r.sessionId, accountId: r.accountId });
     const { access } = r;
     return {
       result: 'OK',

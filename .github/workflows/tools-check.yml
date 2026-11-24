@@ -53,6 +53,7 @@ jobs:
       # 수집기 2단 설정 생성 대조·정적 검사(V-T49 ①②, docs/observability.md §1 '설정 원천과 로컬 확인', F-01-3): openapi의 드문 경로 표시·§1 크기 값·
       # 2차 마스킹 꼴 원천(packages/platform/src/pii-patterns.json)으로 다시 만든 generated/가 커밋된 파일과 다르거나, 운영 판 셋이 §1의 규칙을 깨면 실패
       - run: node tools/ci/collector-config.mjs --check
+      - run: node tools/ci/access-log-config.mjs
       # 진단 증거 보존 규칙 정적 검사(D-T52 ①, 기능 F-01-1): 수명 주기 원천 infra/modules/evidence-bucket/lifecycle.json이 docs/observability.md §9 '진단 증거' 행과 다르면 실패
       - run: node tools/ci/evidence-retention.mjs --check
       # 관측 저장소·exporter·신호 연결 설정 정적 검사(V-T50 ①②⑥, 기능 F-01-4): Mimir·Loki·Tempo 복제·보존·한도·라벨·쓰기 큐·원격 쓰기, 로컬 판 겹치기, exporter 인자, Grafana 연결

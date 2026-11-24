@@ -1,0 +1,224 @@
+# 접근 로그 세 갈래와 법정 접속기록 설정(에이전트 수집기). docs/observability.md §7 '게이트웨이 접근 로그 분기'·'법정 사본은 잃지 않는 갈래', §5 '법정 접속기록 갈래 신호', ADR-0076 결정 7, ADR-0127, ADR-0171.
+# agent.yaml 뒤에 겹쳐 읽는다: --config agent.yaml --config access-log.yaml [--config local/agent.yaml] [--config local/access-log.yaml]
+#   법정 사본: 게이트웨이 Envoy 접근 로그 + identity 접속기록 줄 → ClickHouse 전용 DB access_log. 표본 없음, 잃지 않는 갈래.
+#   일반 사본: 같은 Envoy 접근 로그에서 조사 칸을 지우고 IP 앞부분만 남겨 게이트웨이 수집기를 거쳐 Loki로.
+#   조사 사본: 같은 파일을 따로 읽어(자기 file_storage) 조사 경로만 Kafka investigation.requests로. 큐가 차면 버리고 센다.
+# 값(0.1%·5분·15분·10분·03:30·04:00·06:00)의 정본은 docs/observability.md §5·§7과 docs/infra.md §6이다.
+receivers:
+  # 법정 사본 — 게이트웨이 접근 로그. 처음 보는 파일도 처음부터 읽고, 회전 파일도 읽는다(§7 ①③)
+  filelog/envoy-legal:
+    include:
+      - /var/log/pods/*_envoy-gateway-system_*/envoy/*.log
+    exclude:
+      - /var/log/pods/observability_otel-*/*/*.log
+    start_at: beginning
+    include_file_path: true
+    include_file_name: false
+    storage: file_storage/access-legal
+    compression: auto
+    operators:
+      - type: container
+        id: container-parser
+      - type: json_parser
+        id: access-json
+        parse_from: body
+        parse_to: attributes
+        timestamp:
+          parse_from: attributes.ts
+          layout_type: gotime
+          layout: '2006-01-02T15:04:05.000000Z07:00'
+  # 법정 사본 — identity 접속기록 줄(로그인·로그아웃·재인증·갱신). 읽은 위치를 게이트웨이와 따로 둔다
+  filelog/identity-legal:
+    include:
+      - /var/log/pods/*_identity_*/identity-svc/*.log
+    start_at: beginning
+    include_file_path: true
+    include_file_name: false
+    storage: file_storage/access-legal-identity
+    compression: auto
+    operators:
+      - type: container
+        id: container-parser
+      - type: json_parser
+        id: identity-json
+        parse_from: body
+        parse_to: attributes
+  # 조사 사본 — 법정·일반과 다른 수신기·다른 읽은 위치(§7 '게이트웨이 접근 로그 분기')
+  filelog/envoy-investigation:
+    include:
+      - /var/log/pods/*_envoy-gateway-system_*/envoy/*.log
+    exclude:
+      - /var/log/pods/observability_otel-*/*/*.log
+    start_at: beginning
+    include_file_path: true
+    include_file_name: false
+    storage: file_storage/access-investigation
+    compression: auto
+    operators:
+      - type: container
+        id: container-parser
+      - type: json_parser
+        id: access-json
+        parse_from: body
+        parse_to: attributes
+        timestamp:
+          parse_from: attributes.ts
+          layout_type: gotime
+          layout: '2006-01-02T15:04:05.000000Z07:00'
+  # 일반 사본 — 조사 칸을 지우고 IP 앞부분만 남긴다
+  filelog/envoy-general:
+    include:
+      - /var/log/pods/*_envoy-gateway-system_*/envoy/*.log
+    exclude:
+      - /var/log/pods/observability_otel-*/*/*.log
+    start_at: beginning
+    include_file_path: true
+    include_file_name: false
+    storage: file_storage/access-general
+    compression: auto
+    operators:
+      - type: container
+        id: container-parser
+      - type: json_parser
+        id: access-json
+        parse_from: body
+        parse_to: attributes
+        timestamp:
+          parse_from: attributes.ts
+          layout_type: gotime
+          layout: '2006-01-02T15:04:05.000000Z07:00'
+
+processors:
+  # 법정 갈래에는 법정 줄만 남긴다(게이트웨이 접근 로그·identity 접속기록)
+  filter/legal-only:
+    error_mode: ignore
+    logs:
+      log_record:
+        - 'attributes["kind"] != "envoy-access" and attributes["kind"] != "legal-access"'
+  # 일반 로그 갈래로 새지 않게 identity 접속기록 줄과 접근 로그 줄을 뺀다
+  filter/drop-legal:
+    error_mode: ignore
+    logs:
+      log_record:
+        - 'attributes["kind"] == "legal-access"'
+  filter/drop-envoy-access:
+    error_mode: ignore
+    logs:
+      log_record:
+        - 'attributes["kind"] == "envoy-access"'
+  # 법정·일반 사본에서 조사 칸을 지운다(ADR-0171 결정 2·4). 법정 사본은 POL-025가 요구하는 칸만 남긴다.
+  # 법정 사본은 401·403 같은 status >= 400 거절 줄도 남긴다(16.3.3). 표본으로 줄이지 않는다.
+  transform/strip-investigation:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - delete_key(attributes, "ja4")
+          - delete_key(attributes, "asn")
+          - delete_key(attributes, "edge_bot_labels")
+          - delete_key(attributes, "sub")
+          - delete_key(attributes, "pid")
+          - delete_key(attributes, "jny")
+  # 조사 경로만 고른다(asyncapi InvestigationRequest.routeKind 목록). 상태 조회·셔플 결과 파일은 뺀다.
+  filter/investigation-routes:
+    error_mode: ignore
+    logs:
+      log_record:
+        - 'IsMatch(attributes["path"], "^(/v1/queues/[^/]+/(lobby-participants|pre-verifications|entries|admission|verification)|/v1/events/[^/]+/seatmap|/v1/holds(/|$)|/v1/holds/[^/]+/(release|extension)$|/v1/orders(/|$)|/v1/payments(/|$)|/v1/payments/[^/]+/acceptance$|/v1/tickets/[^/]+/(transfers|returns)$)") and not IsMatch(attributes["path"], "^/v1/queues/[^/]+/(status|files)(/|$)")'
+  # 조사 줄의 routeKind·gateway를 정한다. 값이 없는 칸은 지어내지 않는다(위조 끝단 머리는 게이트웨이가 지운다).
+  transform/investigation:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(attributes["gateway"], "GW_QUEUE") where IsMatch(attributes["path"], "^/v1/queues/")
+          - set(attributes["gateway"], "GW_FAN") where not IsMatch(attributes["path"], "^/v1/queues/")
+          - set(attributes["routeKind"], "LOBBY_ENTRY") where IsMatch(attributes["path"], "^/v1/queues/[^/]+/lobby-participants$")
+          - set(attributes["routeKind"], "PREVERIFY") where IsMatch(attributes["path"], "^/v1/queues/[^/]+/pre-verifications$")
+          - set(attributes["routeKind"], "QUEUE_ENTRY") where IsMatch(attributes["path"], "^/v1/queues/[^/]+/entries$")
+          - set(attributes["routeKind"], "ADMISSION") where IsMatch(attributes["path"], "^/v1/queues/[^/]+/admission$")
+          - set(attributes["routeKind"], "VERIFICATION") where IsMatch(attributes["path"], "^/v1/queues/[^/]+/verification$")
+          - set(attributes["routeKind"], "SEATMAP_SNAPSHOT") where IsMatch(attributes["path"], "^/v1/events/[^/]+/seatmap$")
+          - set(attributes["routeKind"], "HOLD") where IsMatch(attributes["path"], "^/v1/holds$")
+          - set(attributes["routeKind"], "HOLD_RELEASE") where IsMatch(attributes["path"], "^/v1/holds/[^/]+/release$")
+          - set(attributes["routeKind"], "HOLD_EXTENSION") where IsMatch(attributes["path"], "^/v1/holds/[^/]+/extension$")
+          - set(attributes["routeKind"], "ORDER") where IsMatch(attributes["path"], "^/v1/orders$")
+          - set(attributes["routeKind"], "PAYMENT_ATTEMPT") where IsMatch(attributes["path"], "^/v1/payments$")
+          - set(attributes["routeKind"], "PAYMENT_ACCEPTANCE") where IsMatch(attributes["path"], "^/v1/payments/[^/]+/acceptance$")
+          - set(attributes["routeKind"], "TRANSFER") where IsMatch(attributes["path"], "^/v1/tickets/[^/]+/transfers$")
+          - set(attributes["routeKind"], "TICKET_RETURN") where IsMatch(attributes["path"], "^/v1/tickets/[^/]+/returns$")
+  # 일반 사본: 조사 칸을 지우고 IP를 앞부분으로 바꾼다(§7, pseudonym.ts의 ipPrefix와 같은 꼴)
+  transform/access-general:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - delete_key(attributes, "ja4")
+          - delete_key(attributes, "asn")
+          - delete_key(attributes, "edge_bot_labels")
+          - delete_key(attributes, "sub")
+          - delete_key(attributes, "pid")
+          - delete_key(attributes, "jny")
+          - replace_pattern(attributes["client_ip"], "^([0-9]{1,3}[.][0-9]{1,3}[.][0-9]{1,3})[.][0-9]{1,3}$", "$$1.0/24")
+          - replace_pattern(attributes["client_ip"], "^([0-9a-fA-F]{1,4}(:[0-9a-fA-F]{1,4}){0,2})::.*$", "$$1::/48")
+
+exporters:
+  # 법정 사본: 접속기록 DB. 디스크 큐가 차면 읽기를 멈추고(버리지 않는다), 재시도는 그만두지 않는다(§7 ②)
+  clickhouse/access-log:
+    endpoint: tcp://clickhouse-access-log.observability.svc:9000
+    database: access_log
+    logs_table_name: access_log
+    create_schema: false
+    timeout: 10s
+    sending_queue:
+      storage: file_storage/access-legal
+      block_on_overflow: true
+      queue_size: 60000
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 0
+  # 조사 사본: Kafka investigation.requests. 큐가 차면 새 줄을 버리고(법정 갈래를 막지 않는다) 10분 뒤 그만둔다
+  kafka/investigation:
+    brokers:
+      - telemetry-kafka-bootstrap.observability.svc:9098
+    topic: investigation.requests
+    encoding: raw_json
+    compression: zstd
+    sending_queue:
+      storage: file_storage/access-investigation
+      block_on_overflow: false
+      queue_size: 50000
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 10m
+
+extensions:
+  file_storage/access-legal:
+    directory: /var/lib/otelcol/access-legal
+  file_storage/access-legal-identity:
+    directory: /var/lib/otelcol/access-legal-identity
+  file_storage/access-investigation:
+    directory: /var/lib/otelcol/access-investigation
+  file_storage/access-general:
+    directory: /var/lib/otelcol/access-general
+
+service:
+  extensions: [health_check, file_storage/access-legal, file_storage/access-legal-identity, file_storage/access-investigation, file_storage/access-general]
+  pipelines:
+    logs/legal:
+      receivers: [filelog/envoy-legal, filelog/identity-legal]
+      processors: [memory_limiter, filter/legal-only, transform/strip-investigation, batch]
+      exporters: [clickhouse/access-log]
+    logs/investigation:
+      receivers: [filelog/envoy-investigation]
+      processors: [memory_limiter, filter/investigation-routes, transform/investigation, batch]
+      exporters: [kafka/investigation]
+    logs/access-general:
+      receivers: [filelog/envoy-general]
+      processors: [memory_limiter, transform/access-general, probabilistic_sampler, batch]
+      exporters: [otlp_grpc/gateway]
+    # 일반 컨테이너 로그 갈래(agent.yaml)에서 법정 줄과 접근 로그 줄을 뺀다(두 번 보내지 않게)
+    logs:
+      receivers: [filelog]
+      processors: [memory_limiter, k8s_attributes, filter/drop-legal, filter/drop-envoy-access, batch]
+      exporters: [otlp_grpc/gateway]
