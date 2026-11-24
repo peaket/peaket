@@ -138,3 +138,13 @@
 - F-05-6 IR-10 낮음: `entryClose` 저장소가 없을 때 500인데 주석은 503이다(`scanner-gate.ts`·`scanner.module.ts`)
 - F-05-6 IR-11 낮음: 큐 보고 `pendingUploads`에 상한이 없어 2^31−1 초과 값이 DB `integer` 범위 오류로 500이 된다(`domain/entry-close.ts`, openapi)
 - F-05-6 IR-12 낮음: 메모리 스캐너 게이트가 마감 행 대역이 없으면 옛 `entryClosesAtMs`(보정 시각) 규칙으로 물러나 단위 조립이 운영과 다르게 통과한다(`memory-scanner-gate-store.ts`) — **닫힘 2026-11-24**: fallback과 쓰이지 않던 `acceptScans.entryClosesAtMs`를 없애고, 마감 행이 있으면 받은 시각만 견준다. 단위 조립 시험은 `seedEntryClose`로 마감 행을 심는다(`scanner-gate.test.ts`·`scanner-gate-regression.test.ts`·`scanner-corrected-time.test.ts`).
+- F-05-8 IR-01 중간: `GET /v1/wishes?productionIds=`에 UUID 형식 검사가 없어 운영 DB에서 uuid 캐스트 오류(22P02)로 500이 되고 메모리(200 빈 목록)와 다르다. 컨트롤러나 유스케이스에서 형식을 걸러 400으로(`wish.controller.ts`·`wish.ts`)
+- F-05-8 IR-02 중간: `wish-list.int`가 `searchDatabase`를 넘기지 않아 `SEARCH_INDEX`가 슈퍼유저 풀로 돌고 0048의 `core_search` 실행 권한·`core_app` 읽기 권한을 시험하지 않는다. `roles.ts`의 `loginFor`로 검색 풀을 넘긴다(`test-int/wish-list.int.test.ts`)
+- F-05-8 IR-03 중간: 합성 소비자가 두 찜 처리기를 다 받을 때만 두 토픽을 읽고 하나만 주면 조용히 탈퇴 토픽만 읽는다. `startCoreConsumers`가 `CORE_ALL_TOPICS`를 넘기는 시험과 main.ts 조립 단언을 더한다(`consumers/start.ts`·`test/core-consumers.test.ts`)
+- F-05-8 IR-04 낮음: `WishLifecycle.absorbedWishes`가 불리는 곳이 없다. core gRPC `AccountMergeCheckService` 서비스·조립을 다음 동결 몫에서 한다(포트 기동 포함, `main.ts`)
+- F-05-8 IR-05 낮음: `docs/streaming.md` §2.6 core-svc 소비자 절이 아직 탈퇴 토픽 하나라고 적는다. 병합 토픽·합성 처리기를 반영한다
+- F-05-8 IR-08 중간: 대기열 전송이 찜 목록 화면의 online·visibility에만 걸리고, 상세에서 오프라인으로 누른 동작은 찜 목록을 열고 사건을 만들기 전까지 안 간다. 화면 mount에서 한 번 보내고, 홈·상세도 같은 큐를 읽게 한다(`LikesLive.tsx`·`DetailPersonal.tsx`·`HomePersonal.tsx`)
+- F-05-8 IR-09 중간: 오프라인·원천 장애 때 보여 줄 '저장된 목록'이 없다. 마지막 성공 목록을 두는 길과 개인정보 저장 위치를 정한다(계획 §7, `LikesLive.tsx`)
+- F-05-8 IR-10 중간: `peaket.wishQueue`를 잠금 없이 통째로 덮어써 다른 탭이 동시에 다른 공연을 찜하면 한쪽이 사라진다. `peaket.refresh`처럼 Web Locks로 감싼다(`queue.ts`·`LikesLive.tsx`)
+- F-05-8 IR-11 중간: 계획 §6의 GAT-260 화면 시험 `apps/web/src/_pages/likes/model/live.test.mjs`가 없다. `serverLikeCards`·찜 해제 실패 되돌림을 단위로 본다
+- F-05-8 IR-12 낮음: 화면이 `limit:100` 한 쪽만 받아 101번째 찜부터 안 보이고, 안 쓰는 import·부품(`CoreAccountEventHandler`·`serverLikeCards`·`LikesClient.UnlikeButton`)과 `WISH_PAGE_DEFAULT`/`?? 20` 중복이 있다(`LikesLive.tsx`·`main.ts`·`LikesPage.tsx`·`wish.ts`)
