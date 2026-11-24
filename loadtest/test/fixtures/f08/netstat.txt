@@ -1,0 +1,6 @@
+TcpExt: SyncookiesSent SyncookiesRecv SyncookiesFailed EmbryonicRsts PruneCalled RcvPruned OfoPruned OutOfWindowIcmps LockDroppedIcmps ArpFilter TW TWRecycled TWKilled PAWSActive PAWSEstab DelayedACKs DelayedACKLocked DelayedACKLost ListenOverflows ListenDrops TCPHPHits TCPPureAcks TCPHPAcks TCPRenoRecovery
+TcpExt: 0 0 0 3 0 0 0 0 0 0 4521 0 0 0 0 10234 12 34 7 9 223344 5566 7788 0
+IpExt: InNoRoutes InTruncatedPkts InMcastPkts OutMcastPkts InBcastPkts OutBcastPkts InOctets OutOctets
+IpExt: 0 0 0 0 0 0 123456789 98765432
+MPTcpExt: MPCapableSYNRX MPCapableSYNTX
+MPTcpExt: 0 0

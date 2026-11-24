@@ -306,3 +306,190 @@ export function deltaJudge(o, cpuLimitPct = 80) {
   if (o.clientCpuPct > cpuLimitPct) reasons.push(`받는 파드 CPU ${o.clientCpuPct}%(${cpuLimitPct}% 초과)`);
   return reasons;
 }
+
+// ───────────── v1 DB·Redis 통계(--db-stats·--redis-stats, 계획 F-08-8 7.1, docs/verification.md §4.1 'DB 쓰기 처리량'·'Redis 메모리') ─────────────
+
+/** 정수 글(부호·소수점 없음) → 수. 아니면 null */
+const intOf = (v) => {
+  if (typeof v === 'number') return Number.isSafeInteger(v) && v >= 0 ? v : null;
+  if (typeof v !== 'string' || !/^\s*\d+\s*$/.test(v)) return null;
+  const n = Number(v.trim());
+  return Number.isSafeInteger(n) ? n : null;
+};
+
+/**
+ * pg_stat_wal의 wal_bytes 한 값. 입력은 수, 숫자 글, psql 출력(-At의 '123' 한 줄이나 머리 줄 wal_bytes가 있는 표), 또는 { wal_bytes }·{ walBytes }.
+ * 숫자가 아니거나 칸이 없으면 null(0이 아니다)
+ * @param {unknown} v
+ * @returns {number | null}
+ */
+export function walBytesOf(v) {
+  if (v !== null && typeof v === 'object' && !Array.isArray(v)) return intOf(v.wal_bytes ?? v.walBytes);
+  if (typeof v === 'number') return intOf(v);
+  if (typeof v !== 'string') return null;
+  const lines = v
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !/^-+(\+-+)*$/.test(l) && !/^\(\d+ rows?\)$/.test(l));
+  const head = lines.findIndex((l) => /(^|[\s|,\t])wal_bytes($|[\s|,\t])/.test(l));
+  if (head >= 0) {
+    const split = (l) => l.split(/\s*[|,\t]\s*|\s+/);
+    const i = split(lines[head]).indexOf('wal_bytes');
+    return intOf(split(lines[head + 1] ?? '')[i] ?? '');
+  }
+  return lines.length === 1 ? intOf(lines[0]) : null;
+}
+
+/**
+ * WAL 바이트 차이 = after − before(walBytesOf로 읽는다). 어느 하나라도 값이 없으면 null, after가 before보다 작으면(전후가 뒤바뀜·통계 초기화) RangeError
+ * @param {unknown} before @param {unknown} after
+ * @returns {number | null}
+ */
+export function walBytesDelta(before, after) {
+  const b = walBytesOf(before);
+  const a = walBytesOf(after);
+  if (b === null || a === null) return null;
+  if (a < b) throw new RangeError(`WAL 바이트가 줄었다(전 ${b} > 후 ${a}, 전후가 뒤바뀌었거나 통계를 초기화했다)`);
+  return a - b;
+}
+
+/**
+ * Valkey·Redis `INFO memory` 글 → { usedMemory, usedMemoryPeak, maxmemory }(바이트). 칸이 없거나 숫자가 아니면 그 값은 null이고 reason에 칸 이름을 적는다
+ * @param {string} text
+ * @returns {{ usedMemory: number | null, usedMemoryPeak: number | null, maxmemory: number | null, reason?: string }}
+ */
+export function parseRedisInfoMemory(text) {
+  const kv = new Map();
+  for (const raw of (typeof text === 'string' ? text : '').split(/\r?\n/)) {
+    const i = raw.indexOf(':');
+    if (i > 0 && !raw.startsWith('#')) kv.set(raw.slice(0, i).trim(), raw.slice(i + 1).trim());
+  }
+  const out = { usedMemory: intOf(kv.get('used_memory') ?? ''), usedMemoryPeak: intOf(kv.get('used_memory_peak') ?? ''), maxmemory: intOf(kv.get('maxmemory') ?? '') };
+  const missing = [
+    ['used_memory', out.usedMemory],
+    ['used_memory_peak', out.usedMemoryPeak],
+    ['maxmemory', out.maxmemory],
+  ]
+    .filter(([, v]) => v === null)
+    .map(([k]) => k);
+  return missing.length ? { ...out, reason: `INFO memory에 없는 칸: ${missing.join(', ')}` } : out;
+}
+
+/** v1 무대 DB 통계 질의(psql -At -F 탭): DB마다 한 줄, 'wal' 줄은 wal_bytes(무대 PostgreSQL 전체) */
+export const V1_DB_STATS_SQL =
+  "select datname, xact_commit, tup_inserted, tup_updated, tup_deleted, deadlocks from pg_stat_database where datname in ('v1_purchase', 'v1_payment') union all select 'wal', wal_bytes::bigint, 0, 0, 0, 0 from pg_stat_wal order by 1";
+const V1_DB_NAMES = Object.freeze({ v1_purchase: 'purchase', v1_payment: 'payment' });
+const DB_COLS = ['xactCommit', 'tupInserted', 'tupUpdated', 'tupDeleted', 'deadlocks'];
+
+/**
+ * V1_DB_STATS_SQL의 psql 출력(-At, 칸 나눔은 탭) → { atMs, purchase: {xactCommit, tupInserted, tupUpdated, tupDeleted, deadlocks}, payment: {…}, walBytes }.
+ * 없는 DB·칸은 null이다
+ * @param {string} text @param {number} atMs
+ */
+export function parseV1DbSnapshot(text, atMs) {
+  const out = { atMs, purchase: null, payment: null, walBytes: null };
+  for (const line of (typeof text === 'string' ? text : '').split(/\r?\n/)) {
+    const c = line.split('\t');
+    if (c[0] === 'wal') out.walBytes = intOf(c[1] ?? '');
+    else if (Object.hasOwn(V1_DB_NAMES, c[0])) out[V1_DB_NAMES[c[0]]] = Object.fromEntries(DB_COLS.map((k, i) => [k, intOf(c[i + 1] ?? '')]));
+  }
+  return out;
+}
+
+/**
+ * 실행 전후 DB 통계(parseV1DbSnapshot 둘) → db-stats.json { purchase: { xactCommit, tupInserted, tupUpdated, tupDeleted, deadlocks, walBytes, seconds }, payment: {…} }.
+ * 누적 칸은 후 − 전, seconds는 (후 atMs − 전 atMs) ÷ 1000(소수 첫째 자리). walBytes는 무대 PostgreSQL 전체의 WAL 바이트 차이다(pg_stat_wal에는 DB별 값이 없다.
+ * v1 무대 PostgreSQL은 이 두 DB만 쓰므로 두 칸에 같은 값을 적는다, 더하지 않는다). 칸이 없으면 null(0이 아니다). 누적 칸이 줄었으면 RangeError
+ * @param {ReturnType<typeof parseV1DbSnapshot>} before @param {ReturnType<typeof parseV1DbSnapshot>} after
+ */
+export function v1DbStatsDelta(before, after) {
+  if (!Number.isFinite(before?.atMs) || !Number.isFinite(after?.atMs) || after.atMs < before.atMs) throw new RangeError('DB 통계 전후 시각이 틀렸다');
+  const wal = walBytesDelta(before.walBytes, after.walBytes);
+  const seconds = Math.round((after.atMs - before.atMs) / 100) / 10;
+  const one = (name) => {
+    const b = before[name];
+    const a = after[name];
+    const row = {};
+    for (const k of DB_COLS) {
+      const x = b?.[k];
+      const y = a?.[k];
+      if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)) row[k] = null;
+      else if (y < x) throw new RangeError(`DB 통계 ${name}.${k}가 줄었다(통계 초기화?)`);
+      else row[k] = y - x;
+    }
+    return { ...row, walBytes: wal, seconds };
+  };
+  return { purchase: one('purchase'), payment: one('payment') };
+}
+
+/** 오류를 삼키지 않고 { ok, value } 또는 { ok: false, error }로 */
+async function attempt(fn) {
+  try {
+    return { ok: true, value: await fn() };
+  } catch (e) {
+    return { ok: false, error: String(e?.message ?? e).split('\n')[0].slice(0, 300) };
+  }
+}
+
+/**
+ * v1 통계 읽기(실행 함수 주입). deps = { dbText() → Promise<string>(V1_DB_STATS_SQL의 psql 출력), redisInfo(name) → Promise<string>(valkey-queue·valkey-seat의 INFO memory), now?() }.
+ * - before(a, deps): a.dbStats면 실행 전 DB 표본({ ok, value } 또는 { ok: false, error }), 아니면 null
+ * - after(a, deps, before): { db: db-stats.json 값 | null, redis: { queue, seat } | null, errors: [] }. 못 읽은 통계는 null이고 그 까닭을 errors에 적는다
+ */
+export const v1Stats = Object.freeze({
+  async before(a, deps) {
+    if (!a.dbStats) return null;
+    const now = deps.now ?? Date.now;
+    return attempt(async () => parseV1DbSnapshot(await deps.dbText(), now()));
+  },
+  async after(a, deps, before) {
+    const errors = [];
+    const now = deps.now ?? Date.now;
+    let db = null;
+    if (a.dbStats) {
+      const after = await attempt(async () => parseV1DbSnapshot(await deps.dbText(), now()));
+      if (!before?.ok) errors.push(`DB 통계(전)를 읽지 못했다: ${before?.error ?? '읽지 않음'}`);
+      if (!after.ok) errors.push(`DB 통계(후)를 읽지 못했다: ${after.error}`);
+      if (before?.ok && after.ok) {
+        const d = await attempt(async () => v1DbStatsDelta(before.value, after.value));
+        if (d.ok) {
+          db = d.value;
+          const nulls = ['purchase', 'payment'].flatMap((n) =>
+            Object.entries(db[n])
+              .filter(([, v]) => v === null)
+              .map(([k]) => `${n}.${k}`),
+          );
+          if (nulls.length) errors.push(`DB 통계에 없는 칸: ${nulls.join(', ')}`);
+        } else errors.push(`DB 통계 차이를 내지 못했다: ${d.error}`);
+      }
+    }
+    let redis = null;
+    if (a.redisStats) {
+      redis = {};
+      for (const [k, name] of [
+        ['queue', 'valkey-queue'],
+        ['seat', 'valkey-seat'],
+      ]) {
+        const r = await attempt(async () => parseRedisInfoMemory(await deps.redisInfo(name)));
+        if (!r.ok) {
+          redis[k] = null;
+          errors.push(`${name} INFO memory를 읽지 못했다: ${r.error}`);
+        } else {
+          const { reason, ...v } = r.value;
+          redis[k] = v;
+          if (reason) errors.push(`${name} ${reason}`);
+        }
+      }
+    }
+    return { db, redis, errors };
+  },
+});
+
+/**
+ * 통계를 달라고 했는데 못 읽었으면 장부 판정을 무효로 바꾼다(빈 통계가 통과로 남지 않게, 계획 F-08-8 11절). 달라고 하지 않았거나 다 읽었으면 그대로
+ * @param {{ valid: boolean, reasons: string[] }} judge @param {{ errors: string[] } | null} stats
+ */
+export function v1StatsJudge(judge, stats) {
+  if (!stats?.errors?.length) return judge;
+  return { ...judge, valid: false, reasons: [...judge.reasons, ...stats.errors.map((e) => `통계: ${e}`)] };
+}

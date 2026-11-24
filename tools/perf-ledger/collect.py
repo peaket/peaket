@@ -366,6 +366,39 @@ def evaluate_checks(a):
     return results, crosscheck, verdict, L.observed_notes(results)
 
 
+# 호스트 표시 기준(docs/verification.md §3.5 6번): CPU 85% 이상이거나 procs_running이 논리 프로세서 수를 넘으면 '호스트 포화',
+# 준 CPU 합이 고성능 코어 스레드 16개를 넘으면 '코어 혼합'. cpu_util은 백분율(0~100)이다(loadtest/runner/host-metrics.mjs cpuUtilBetween)
+HOST_CPU_SATURATED_PCT = 85
+HOST_PERFORMANCE_THREADS = 16
+HOST_SATURATED = '호스트 포화'
+HOST_MIXED = '코어 혼합'
+
+
+def host_record(path):
+    """--host 파일(loadtest/run.mjs v1 entry-steps의 host.json·steps.json host 꼴, 낙타 표기) → manifest host 칸(docs/perf-ledger.md §2.2).
+
+    표시는 파일의 tags에 이 도구가 정본 기준으로 다시 본 표시를 더한다(지우지 않는다). 커널 카운터(kernel.listenOverflows·listenDrops)가 늘었으면
+    무효 사유 '커널 연결 버림'을 함께 돌려준다(§3.5 8번). 돌려주는 값: (host, invalid_reason 또는 None)
+    """
+    h = L.load_json(path) or {}
+    num = lambda v: v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+    cpu, pr, lc, ca = num(h.get('cpuUtil')), num(h.get('procsRunning')), num(h.get('logicalCpus')), num(h.get('cpuAssigned'))
+    tags = [t for t in (h.get('tags') or []) if isinstance(t, str)]
+    add = lambda t: tags.append(t) if t not in tags else None
+    if (cpu is not None and cpu >= HOST_CPU_SATURATED_PCT) or (pr is not None and lc is not None and pr > lc):
+        add(HOST_SATURATED)
+    if ca is not None and ca > HOST_PERFORMANCE_THREADS:
+        add(HOST_MIXED)
+    kernel = h.get('kernel') if isinstance(h.get('kernel'), dict) else None
+    host = {'cpu_util': cpu, 'procs_running': pr, 'logical_cpus': lc, 'throttle': h.get('throttle') or {}, 'cpu_assigned': ca, 'tags': tags}
+    reason = None
+    if kernel is not None:
+        host['kernel'] = {'listen_overflows': num(kernel.get('listenOverflows')), 'listen_drops': num(kernel.get('listenDrops'))}
+        if any((v or 0) > 0 for v in host['kernel'].values()):
+            reason = f'커널 연결 버림(ListenOverflows +{host["kernel"]["listen_overflows"]}, ListenDrops +{host["kernel"]["listen_drops"]})'
+    return host, reason
+
+
 def collect(a, root):
     lines = []
     tls_arg = getattr(a, 'redis_tls', None)
@@ -487,7 +520,18 @@ def collect(a, root):
         log(lines, f'지연 대조: k6 p99 {crosscheck["k6_p99_ms"]}ms, 서버 p99 {crosscheck["server_p99_ms"]}ms, 차이 {crosscheck["diff_ms"]}ms'
                    + (', 측정 지점 의심' if crosscheck['suspect'] else ''))
 
+    host = None
+    host_reason = None
+    if getattr(a, 'host', None):
+        host, host_reason = host_record(a.host)
+        log(lines, f'호스트: CPU {host["cpu_util"]}%, procs_running {host["procs_running"]}/{host["logical_cpus"]}, 준 CPU {host["cpu_assigned"]}, 표시 {", ".join(host["tags"]) or "없음"}')
+        if HOST_SATURATED in host['tags']:
+            # 포화 점은 장부에서 지우지 않고 표시만 남긴다(계산에서 빼는 것은 entry-scale.mjs·charts.py usl, docs/verification.md §3.5 6번)
+            notes = '; '.join(x for x in [notes, f'{HOST_SATURATED}(docs/verification.md §3.5 6번: 계산에서 뺀다, 장부 행은 남긴다)'] if x)
+
     valid, reason = True, None
+    if host_reason:
+        valid, reason = False, host_reason
     if k6 and (k6['dropped_iterations'] or 0) > 0:
         valid, reason = False, f'발생기 병목: dropped_iterations={k6["dropped_iterations"]}'
     if bench and (bench['dropped'] or 0) > 0:
@@ -507,6 +551,7 @@ def collect(a, root):
         'raw_uri': raw_uri,
         'redis_tls': redis_tls,
         'paired_run': paired_run,
+        'host': host,
         'generator': {'description': a.generator, 'dropped_iterations': (k6 or {}).get('dropped_iterations', (bench or {}).get('dropped'))},
         'started_at': L.iso_utc(start) if start else None,
         'ended_at': L.iso_utc(end) if end else None,
@@ -1005,6 +1050,7 @@ def main():
     p.add_argument('--raw-outbox', metavar='DIR', help='S3 대신 큰 원본을 버킷과 같은 경로로 둘 보낼 폴더(--raw-bucket과 함께, docs/perf-ledger.md §2.1)')
     p.add_argument('--redis-tls', choices=['true', 'false'], help='대기열·좌석 Redis 연결의 TLS 켬·끔(docs/perf-ledger.md §2.2)')
     p.add_argument('--paired-run', help='같은 조건으로 TLS를 반대로 잰 짝 실행의 run_id')
+    p.add_argument('--host', help='호스트 지표 JSON(loadtest/run.mjs v1 entry-steps의 host.json, 낙타 표기). manifest host 칸과 호스트 포화·코어 혼합 표시(docs/perf-ledger.md §2.2)')
     p.add_argument('--commit'); p.add_argument('--generator'); p.add_argument('--region', default='local'); p.add_argument('--cost-krw', type=float); p.add_argument('--exchange-rate', type=float)
     p.add_argument('--checks', help='비율·백분위 점검 JSON(checks·crosscheck, docs/perf-ledger.md §2.2). 있으면 판정을 이 도구가 정한다')
     p.add_argument('--evidence', choices=['측정함', '구현함', '설계만', '계산만'], help='증거 수준(기본 측정함, docs/perf-ledger.md §2.2)')

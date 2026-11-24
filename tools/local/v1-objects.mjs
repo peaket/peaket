@@ -533,10 +533,32 @@ export function v1SimulatorObjects() {
 
 const RELEASES = Object.freeze({ 'v1-bundle': 'bundle', 'v1-purchase-relay': 'purchase-svc-relay', 'v1-payment-relay': 'payment-svc-relay' });
 
+/** 합본 CPU 몫: 1~16 정수, 또는 진입 서버 비례 확인의 작은 몫 0.25·0.5(계획 docs/review/plans/F-08-2.md 6.4) */
+const V1_CPU_SHARES = Object.freeze([0.25, 0.5]);
+const isBundleCpus = (c) => (Number.isInteger(c) && c >= 1 && c <= 16) || V1_CPU_SHARES.includes(c);
+
 /**
- * 공용 차트로 v1 릴리스 하나를 올리는 helm 인자(값은 deploy/envs/local/<값 파일>.yaml). 합본은 복제 수·CPU·메모리를 바꿀 수 있다
- * (리허설은 1, 측정은 값 파일의 3·CPU 1). `--cpus`·`--memory-mi`는 합본에만 준다.
- * @param {'v1-bundle'|'v1-purchase-relay'|'v1-payment-relay'} values @param {string} repo 저장소 뿌리 @param {{ replicas?: number, cpus?: number, memoryMi?: number }} [o]
+ * 합본에 켤 서비스 목록 검사(계획 F-08-2 2절 3 '합본에 queue-svc만 켜기'). V1_SERVICES 안의 이름이고 비지 않고 겹치지 않아야 한다(아니면 RangeError)
+ * @param {unknown} services
+ * @returns {string[]}
+ */
+export function checkBundleServices(services) {
+  if (!Array.isArray(services) || services.length === 0) throw new RangeError('켤 서비스 목록이 비었다');
+  const seen = new Set();
+  for (const s of services) {
+    if (typeof s !== 'string' || !V1_SERVICES.includes(s)) throw new RangeError(`합본에 없는 서비스: ${String(s)}(넣을 수 있는 것: ${V1_SERVICES.join(',')})`);
+    if (seen.has(s)) throw new RangeError(`같은 서비스를 두 번 줬다: ${s}`);
+    seen.add(s);
+  }
+  return [...services];
+}
+
+/**
+ * 공용 차트로 v1 릴리스 하나를 올리는 helm 인자(값은 deploy/envs/local/<값 파일>.yaml). 합본은 복제 수·CPU·메모리·켤 서비스를 바꿀 수 있다
+ * (리허설은 1, 측정은 값 파일의 3·CPU 1). `--cpus`·`--memory-mi`·`services`는 합본에만 준다.
+ * services를 주면 환경 값 PEAKET_BUNDLE_SERVICES(쉼표는 helm이 값 구분으로 읽어 \,로 막는다)를 덮고, 넷을 다 켜지 않으면 PEAKET_BUNDLE_MODE=single로 둔다
+ * (split 모드는 payment·purchase 자식을 늘 띄워 목록을 따르지 않는다, services/bundle/src/main.ts)
+ * @param {'v1-bundle'|'v1-purchase-relay'|'v1-payment-relay'} values @param {string} repo 저장소 뿌리 @param {{ replicas?: number, cpus?: number, memoryMi?: number, services?: string[] }} [o]
  */
 export function v1HelmArgs(values, repo, o = {}) {
   if (!Object.hasOwn(RELEASES, values)) throw new RangeError(`v1 값 파일은 ${Object.keys(RELEASES).join('·')}다: ${values}`);
@@ -546,21 +568,28 @@ export function v1HelmArgs(values, repo, o = {}) {
     args.push('--set', `service.replicas=${o.replicas}`);
   }
   if (o.cpus !== undefined) {
-    if (values !== 'v1-bundle' || !Number.isInteger(o.cpus) || o.cpus < 1 || o.cpus > 16) throw new RangeError('CPU 수는 합본에만 1~16으로 준다');
+    if (values !== 'v1-bundle' || !isBundleCpus(o.cpus)) throw new RangeError('CPU 수는 합본에만 1~16 정수나 0.25·0.5로 준다');
     args.push('--set', `service.resources.requests.cpu=${o.cpus}`, '--set', `service.resources.limits.cpu=${o.cpus}`);
   }
   if (o.memoryMi !== undefined) {
     if (values !== 'v1-bundle' || !Number.isInteger(o.memoryMi) || o.memoryMi < 256 || o.memoryMi > 32768) throw new RangeError('메모리는 합본에만 256~32768Mi로 준다');
     args.push('--set', `service.resources.requests.memory=${o.memoryMi}Mi`, '--set', `service.resources.limits.memory=${o.memoryMi}Mi`);
   }
+  if (o.services !== undefined) {
+    if (values !== 'v1-bundle') throw new RangeError('켤 서비스는 합본에만 준다');
+    const list = checkBundleServices(o.services);
+    args.push('--set-string', `service.env.PEAKET_BUNDLE_SERVICES=${list.join('\\,')}`);
+    if (list.length !== V1_SERVICES.length) args.push('--set-string', 'service.env.PEAKET_BUNDLE_MODE=single');
+  }
   return args;
 }
 
 /**
  * v1 명령의 인자: [--redis-tls on|off](기본 on, 운영과 같다) [--replicas N](기본 값 파일의 3)
- * [--cpus N](합본 CPU 요청·한도, 1~16) [--memory-mi N](합본 메모리 요청·한도, 256~32768). 모르는 인자는 Error
+ * [--cpus N](합본 CPU 요청·한도, 1~16 정수 또는 0.25·0.5) [--memory-mi N](합본 메모리 요청·한도, 256~32768)
+ * [--services <쉼표 목록>](합본에 켤 서비스, V1_SERVICES 안. 주지 않으면 값 파일의 넷이고 돌려주는 꼴에 services 칸이 없다). 모르는 인자는 Error
  * @param {string[]} argv
- * @returns {{ redisTls: boolean, replicas: number | undefined, cpus: number | undefined, memoryMi: number | undefined }}
+ * @returns {{ redisTls: boolean, replicas: number | undefined, cpus: number | undefined, memoryMi: number | undefined, services?: string[] }}
  */
 export function v1Plan(argv) {
   let redisTls = true;
@@ -570,6 +599,8 @@ export function v1Plan(argv) {
   let cpus;
   /** @type {number | undefined} */
   let memoryMi;
+  /** @type {string[] | undefined} */
+  let services;
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--redis-tls') {
@@ -582,13 +613,21 @@ export function v1Plan(argv) {
       replicas = Number(v);
     } else if (a === '--cpus') {
       const v = argv[++i] ?? '';
-      if (!/^(?:[1-9]|1[0-6])$/.test(v)) throw new Error('--cpus는 1~16이다');
+      if (!/^(?:[1-9]|1[0-6]|0\.5|0\.25)$/.test(v)) throw new Error('--cpus는 1~16 정수 또는 0.25·0.5다');
       cpus = Number(v);
     } else if (a === '--memory-mi') {
       const v = argv[++i] ?? '';
       if (!/^\d+$/.test(v) || Number(v) < 256 || Number(v) > 32768) throw new Error('--memory-mi는 256~32768이다');
       memoryMi = Number(v);
-    } else throw new Error(`v1의 모르는 인자: ${a}(쓰는 법: v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N])`);
+    } else if (a === '--services') {
+      const v = argv[++i];
+      if (v === undefined || v === '' || v.startsWith('--')) throw new Error('--services에 켤 서비스 목록이 없다');
+      try {
+        services = checkBundleServices(v.split(',').map((x) => x.trim()));
+      } catch (e) {
+        throw new Error(`--services: ${e.message}`);
+      }
+    } else throw new Error(`v1의 모르는 인자: ${a}(쓰는 법: v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N] [--services <목록>])`);
   }
-  return { redisTls, replicas, cpus, memoryMi };
+  return { redisTls, replicas, cpus, memoryMi, ...(services ? { services } : {}) };
 }

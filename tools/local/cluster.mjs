@@ -958,6 +958,8 @@ export async function v1(argv = []) {
     ...(plan.replicas !== undefined ? { replicas: plan.replicas } : {}),
     ...(plan.cpus !== undefined ? { cpus: plan.cpus } : {}),
     ...(plan.memoryMi !== undefined ? { memoryMi: plan.memoryMi } : {}),
+    // 진입 서버 비례 확인은 queue-svc만 켠다(계획 docs/review/plans/F-08-2.md 2절 3, --services queue-svc)
+    ...(plan.services !== undefined ? { services: plan.services } : {}),
   }));
   for (const r of /** @type {const} */ (['v1-purchase-relay', 'v1-payment-relay'])) await helm(v1HelmArgs(r, REPO));
   // 새 Secret 값(키·주소)과 새 이미지를 읽게 다시 띄운다
@@ -969,7 +971,7 @@ export async function v1(argv = []) {
   await kubectl(['-n', V1_NAMESPACE, 'rollout', 'restart', 'deploy/queue-state-cache']);
   await kubectl(['-n', V1_NAMESPACE, 'rollout', 'status', 'deploy/queue-state-cache', '--timeout=300s']);
   step('준비됨');
-  console.log(`v1 무대: 합본 ${layout.queueUrl}·${layout.purchaseUrl}, 대기 상태 캐시 ${layout.stateUrl}, Redis TLS ${plan.redisTls ? '켬' : '끔'}, 합본 복제 ${replicas}`);
+  console.log(`v1 무대: 합본 ${layout.queueUrl}·${layout.purchaseUrl}, 대기 상태 캐시 ${layout.stateUrl}, Redis TLS ${plan.redisTls ? '켬' : '끔'}, 합본 복제 ${replicas}${plan.cpus !== undefined ? `·CPU ${plan.cpus}` : ''}${plan.services ? `, 켠 서비스 ${plan.services.join('·')}` : ''}`);
   console.log("측정: node loadtest/run.mjs v1 queue|seat-hold|payment …(docs/verification.md §3.9 'v1 경로')");
 }
 
@@ -1660,7 +1662,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const cmd = process.argv[2];
   const cmds = { up, image, observability, grafana, prometheus, v0, 'v0-forward': v0Forward, v1, 'v1-down': v1Down, gateways, 'gateways-admission': gatewaysAdmission, 'mesh-netpol': meshNetpol, kyverno, 'realtime-gw': realtimeGw, demo, 'demo-seed': demoSeed, 'demo-status': demoStatus, 'demo-down': demoDown, down, status: async () => console.log(await kubectl(['get', 'pods', '-A', '-o', 'wide'])) };
   const usage = () => {
-    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N]|v1-down|gateways|gateways-admission restore|empty|remove|mesh-netpol|kyverno [--env demo|staging|prod]|realtime-gw [--image <이름:태그>]|demo [--skip-build] [--only <목록>]|demo-seed [--check|--apply]|demo-status|demo-down|status|down');
+    console.error('쓰는 법: node tools/local/cluster.mjs up [--v0-only]|image|observability|grafana|prometheus|v0|v0-forward|v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N] [--services <목록>]|v1-down|gateways|gateways-admission restore|empty|remove|mesh-netpol|kyverno [--env demo|staging|prod]|realtime-gw [--image <이름:태그>]|demo [--skip-build] [--only <목록>]|demo-seed [--check|--apply]|demo-status|demo-down|status|down');
     process.exit(2);
   };
   if (!cmds[cmd]) usage();
