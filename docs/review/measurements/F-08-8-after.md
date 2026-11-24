@@ -2,7 +2,7 @@
 
 - **무엇**: F-08-8(HOT-460·HOT-470 가운데 K1·K2·K7 After)의 창 1 측정 결과다. 계획은 `docs/review/plans/F-08-8.md`, 실행 목록은 `loadtest/plan/f08-plan.json`이다. 이 문서는 측정 기록이고 정본이 아니다. 정본과 다르면 정본이 이긴다.
 - **창 1 실제 시작**: 2026-11-24 17:43:51(+09:00), Docker 잠금 `docker-all lane4-F-08`을 잡은 시각이다. 계획의 09:00 창을 같은 날 밤으로 옮겨 돌았다. 끝은 2026-11-25 00:45경이다.
-- **한 줄 결론**: 무대는 2GiB로 올려야 떴고(계획 512Mi·1GiB는 OOMKilled), K1은 1천 1/3만 통과·2천~1만 미달·10만 무효, K2는 인기 r2·r3만 유효하지만 p99 253~263ms로 S-T1 미달, K7 ①은 유효 실행 0, K7 ②는 3회 모두 발생기 무효지만 불변식은 3회 모두 깨끗했다. 데모 S1은 `queue-room` Vite 빌드 실패로 못 했다.
+- **한 줄 결론**: 무대는 2GiB로 올려야 떴고(계획 512Mi·1GiB는 OOMKilled), K1은 1천 1/3만 통과·2천~1만 미달·10만 무효, K2는 인기 r2·r3만 유효하지만 p99 253~263ms로 S-T1 미달, K7 ①은 유효 실행 0, K7 ②는 3회 모두 발생기 무효지만 불변식은 3회 모두 깨끗했다. 데모 S1은 Docker 이미지 빌드를 고친 뒤(2026-11-25) 재시도했지만 SCR-001 HTTP 500·SCR-007 본문 없음으로 실패했다.
 
 ## 0. 계획과 다르게 간 것(먼저 읽을 것)
 
@@ -123,6 +123,20 @@
 
 - `node tools/local/demo.mjs up`이 `pnpm --filter @peaket/queue-room build`(Vite/rolldown)에서 exit 1로 실패했다(Dockerfile 21줄). `concat`·`demo.mjs down`으로 `lane4-demo` 클러스터를 지웠다.
 - S1 재생과 월렛 실제 목록·QR 확인은 하지 못했다. **통과로 세지 않는다.** 이 실패는 시간(1.3배)이 아니라 빌드 실패다.
+
+### 7.1 2026-11-25 재시도(Dockerfile 수정 뒤)
+
+- **Dockerfile 수정**: `apps/web/queue-room/Dockerfile`에 `COPY apps/web/src apps/web/src`를 더했다(커밋 `02be01e75`). 원인은 Docker 문맥에 `apps/web/src/features/session-cleanup/keys.ts`가 없어 Vite가 `UNRESOLVED_IMPORT`로 실패한 것이다. `docker build -f apps/web/queue-room/Dockerfile -t peaket/queue-room:demo-test .`가 성공했다(빌드 로그 마지막 `DONE`, 이미지 생성).
+- **demo up**: 성공. kind `lane4-demo`·게이트웨이 다섯·이미지 적재·준비 대기까지 끝났다.
+- **seed**: 1차 실패. `POST /v1/partner/productions/{id}/sale-review`가 core-svc `RequestValidationError` 400을 냈다. 원인은 시드의 `payoutAccount.bankCode: '000'`이 두 자리 은행 코드 표(`REFUND_BANK_CODES`) 밖인 것이다(계좌번호·나머지 칸은 모양 안). `'88'`(신한은행)로 고쳐(커밋 `a7e47a379`) 다시 적용했고 **통과**했다.
+- **Playwright**: `tools/web-checks`에 Playwright가 없어 첫 `play`가 설치 안내로 실패했다. `corepack pnpm --dir tools/web-checks install --frozen-lockfile`과 `corepack pnpm --dir tools/web-checks exec playwright install chromium` 뒤 다시 돌렸다.
+- **S1 재생**: **실패(0/1)**. 38초, 콜드 스타트 8초.
+  - SCR-001(홈)이 **HTTP 500**. 웹 파드 로그는 `ApiError: HTTP 404 about:blank`이다.
+  - SCR-007(대기실)은 화면 이동은 됐지만 `main, #main, [role="main"], form, h1`이 30초 안에 보이지 않아 실패했다.
+  - S1의 뒤 단계(좌석 선택·결제·월렛)와 **월렛 실제 목록·QR 확인은 하지 못했다**. 통과로 세지 않는다.
+- **산출물**: `.cache/peaket-tools/demo-artifacts/2026-11-24T23-42-57-855Z-b45e84d7/`(SCR-001·SCR-007 실패 그림 2장). 실행 기록 `docs/review/measurements/play/BAT-086-demo-2026-11-24T23-42-57-855Z-b45e84d7.md`.
+- **정리**: `node tools/local/demo.mjs down`으로 `lane4-demo`를 지웠고, `lock.sh drop docker-all lane4-F-08`·`pause` 삭제를 했다.
+- **남은 위험**: Docker 빌드·시드·Playwright는 이제 지나가지만, 웹 홈의 500(`ApiError HTTP 404 about:blank`)과 대기실 SCR-007 본문 없음은 **제품/화면 쪽 문제**다. S1을 닫으려면 이 둘을 먼저 고쳐야 한다. 데모 S1은 여전히 fail이다.
 
 ## 8. 1.3배 판단과 창 2
 
