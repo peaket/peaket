@@ -16,6 +16,7 @@ import { LoginSecondStep } from '../src/modules/admin/application/login-second-s
 import { SetAdminPassword } from '../src/modules/admin/application/set-admin-password.js';
 import { BeginTotpEnrollment, ConfirmTotpEnrollment } from '../src/modules/admin/application/totp-enrollment.js';
 import { DEFAULT_ADMIN_AUTH_CONFIG } from '../src/modules/admin/domain/auth-config.js';
+import { FRESH_LOGIN_STATE } from '../src/modules/admin/domain/login-rules.js';
 import { ADMIN_LOGIN_STORE } from '../src/modules/admin/domain/ports.js';
 import { base32Decode, totpAt } from '../src/modules/admin/domain/totp.js';
 import { JoseTokenSigner, TokenKeyRing } from '../src/modules/session/index.js';
@@ -172,5 +173,33 @@ describe('관리 계정 재인증·패스키 REST(BOT-122)', () => {
     expect(problemOf(limited)).toEqual({ status: 403, type: 'password-change-required' });
     // 관제 경로는 관제 역할 세션만
     expect((await svc.http.inject({ method: 'GET', url: '/v1/ops/auth/passkeys', headers: { ...headers(), 'x-user-aud': 'ops' } })).statusCode).toBe(403);
+  });
+
+  test('IR-13① 다른 시도가 잠근 재인증 실패 줄에도 IP·UA를 남긴다', async () => {
+    const locked = { ...FRESH_LOGIN_STATE, lockKind: 'TIMED' as const, lockedUntil: clock.now() + 60_000, lockReason: 'FAILED_ATTEMPTS' as const, lockedAt: clock.now() };
+    // 확인하는 사이 다른 시도가 잠근 상태를 updateLoginState가 돌려주는 상황을 만든다
+    const update = vi.spyOn(store, 'updateLoginState').mockResolvedValueOnce(locked);
+    const chunks: string[] = [];
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as never);
+    try {
+      const r = await post(
+        '/v1/partner/auth/reauthentications',
+        { act: 'ACCOUNT_SECURITY', password: '봄비내리는월요일아침의커피두잔', code: code() },
+        { 'x-forwarded-for': '203.0.113.88', 'user-agent': 'Chrome/IR13' },
+      );
+      expect(r.statusCode).toBe(423);
+    } finally {
+      write.mockRestore();
+      update.mockRestore();
+    }
+    const line = chunks
+      .flatMap((c) => c.split('\n'))
+      .filter((l) => l.includes('"kind":"legal-access"'))
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((l) => l.event === 'REAUTH' && l.result === 'FAILED' && l.failure === 'locked');
+    expect(line).toMatchObject({ failure: 'locked', client_ip: '203.0.113.88', user_agent: 'Chrome/IR13' });
   });
 });

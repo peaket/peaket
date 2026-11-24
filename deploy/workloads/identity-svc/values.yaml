@@ -14,7 +14,10 @@ secretEnvFrom: identity-svc-secrets
 
 service:
   enabled: true
-  replicas: 2
+  # 법정 접속기록 일련번호 파일의 단일 writer(IR-13, 2026-11-24). 플래그가 켜지면 차트가 복제 1·Recreate로 내린다.
+  replicas: 1
+  legalAccessSeq:
+    enabled: true
   port: 8080
   # 업무 gRPC 50051(메시 없는 실행의 NetworkPolicy 허용 목록은 생성 파일 meshless-networkpolicies.yaml이 지킨다, ADR-0285)
   extraPorts:

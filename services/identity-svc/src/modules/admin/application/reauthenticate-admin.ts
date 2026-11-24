@@ -216,7 +216,7 @@ export class ReauthenticateAdmin {
       return { next: box.d.next, notices: box.d.notices };
     });
     if (!written) return { kind: 'SESSION_INVALID' };
-    if (!box.d) return this.#lockedOf(c.aud, written, now);
+    if (!box.d) return this.#lockedOf(c.aud, written, now, { clientIp: c.ip, userAgent: c.userAgent });
     const lock = activeLock(box.d.next, now);
     const rec = await this.counters.recordFailure({
       subject: c.accountId,
@@ -245,7 +245,7 @@ export class ReauthenticateAdmin {
       return { next: box.d.next, notices: box.d.notices };
     });
     if (!written) return { kind: 'SESSION_INVALID' };
-    if (!box.d) return this.#lockedOf(c.aud, written, now);
+    if (!box.d) return this.#lockedOf(c.aud, written, now, { clientIp: c.ip, userAgent: c.userAgent });
     const lock = activeLock(box.d.next, now);
     const rec = await this.counters.recordFailure({
       subject: c.accountId,
@@ -275,9 +275,9 @@ export class ReauthenticateAdmin {
   }
 
   /** 확인하는 사이 다른 시도가 잠갔다: 세지 않고 지금 잠금으로 답한다 */
-  #lockedOf(aud: AdminAud, state: AdminLoginAccount['state'], now: number): ReauthStartOutcome {
+  #lockedOf(aud: AdminAud, state: AdminLoginAccount['state'], now: number, contact?: { clientIp?: string; userAgent?: string }): ReauthStartOutcome {
     const l = activeLock(state, now);
-    if (l?.kind === 'PROTECT') return this.#locked(aud, { kind: 'LOCKED', lock: 'PROTECT' });
-    return this.#locked(aud, { kind: 'LOCKED', lock: 'TIMED', retryAfterSeconds: secondsUntil(l?.kind === 'TIMED' ? l.until : now, now) });
+    if (l?.kind === 'PROTECT') return this.#locked(aud, { kind: 'LOCKED', lock: 'PROTECT' }, contact);
+    return this.#locked(aud, { kind: 'LOCKED', lock: 'TIMED', retryAfterSeconds: secondsUntil(l?.kind === 'TIMED' ? l.until : now, now) }, contact);
   }
 }

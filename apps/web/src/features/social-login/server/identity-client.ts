@@ -2,6 +2,7 @@
 // 앱 코드는 다시 보내지 않는다(남는 다시 보내기는 grpc-js 투명 재시도와 메시 재시도 예산, docs/api/proto/README.md §2 '재시도').
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
+import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import { identityV1Identity } from '@peaket/contracts/proto';
 import { PROTO_PROVIDER, type Provider } from './providers.ts';
@@ -70,6 +71,15 @@ export function clientIpOf(req: Request): string {
   return isIP(v) ? v : '';
 }
 
+/**
+ * 로그인 요청의 HTTP 요청 ID(법정 접속기록 줄과 조사 사본 `requestId`를 맞춘다, IR-13, asyncapi `InvestigationRequest.requestId`).
+ * 게이트웨이가 붙인 `x-request-id`를 쓰고, 없거나 비었거나 지나치게 길면 새 UUID를 만든다
+ */
+export function requestIdOf(req: Pick<Request, 'headers'>): string {
+  const v = req.headers.get('x-request-id');
+  return typeof v === 'string' && v !== '' && v.length <= 200 ? v : randomUUID();
+}
+
 export type ReauthIssue = { result: 'ISSUED'; token: string; expiresAt: number } | { result: 'ACCOUNT_MISMATCH' } | { result: 'REVERIFY_REQUIRED' };
 
 /**
@@ -113,9 +123,12 @@ export class IdentityClient {
     this.#client = new pkg.peaket.identity.v1.SessionService(address, grpc.credentials.createInsecure()) as unknown as SessionClient;
   }
 
-  #call(method: 'CreateSession' | 'EndSession' | 'IssueReauthToken' | 'GetLinkProposal' | 'SeparateAccount' | 'AddProvider', req: object): Promise<Record<string, any>> {
+  #call(method: 'CreateSession' | 'EndSession' | 'IssueReauthToken' | 'GetLinkProposal' | 'SeparateAccount' | 'AddProvider', req: object, requestId?: string): Promise<Record<string, any>> {
     return new Promise((res, rej) => {
-      this.#client[method](req, new grpc.Metadata(), { deadline: Date.now() + IDENTITY_DEADLINE_MS }, (e, v) => (e ? rej(e) : res(v ?? {})));
+      const metadata = new grpc.Metadata();
+      // identity session.grpc가 이 값을 로그인 성공·실패 법정 줄 requestId로 쓴다(IR-13③)
+      if (requestId) metadata.set('x-request-id', requestId);
+      this.#client[method](req, metadata, { deadline: Date.now() + IDENTITY_DEADLINE_MS }, (e, v) => (e ? rej(e) : res(v ?? {})));
     });
   }
 
@@ -130,6 +143,8 @@ export class IdentityClient {
     /** 게이트웨이가 쓴 클라이언트 IP 하나(clientIpOf). 모르면 '' */
     clientIp?: string;
     userAgent: string;
+    /** 이 로그인 HTTP 요청의 ID(requestIdOf). 없으면 identity가 멱등 키로 대신한다 */
+    requestId?: string;
     authMethods: string[];
     link?: { proposalId: string; binding: string };
   }): Promise<LoginResult> {
@@ -145,7 +160,7 @@ export class IdentityClient {
       user_agent: i.userAgent,
       auth_methods: i.authMethods,
       ...(i.link ? { link_proposal_id: i.link.proposalId, link_binding: i.link.binding } : {}),
-    });
+    }, i.requestId);
     if (r.outcome === 'link_proposal_id' && r.link_proposal_id && r.link_binding) return { kind: 'link-proposed', proposalId: r.link_proposal_id, binding: r.link_binding };
     if (r.outcome === 'link_mismatch') return { kind: 'link-mismatch', attemptsLeft: Number(r.link_mismatch?.attempts_left ?? 0) };
     if (r.outcome !== 'session' || !r.session) throw new Error(`CreateSession 결과를 모른다(${String(r.outcome)})`);

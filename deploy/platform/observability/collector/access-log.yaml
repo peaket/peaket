@@ -115,6 +115,9 @@ processors:
           - set(attributes["is_admin"], 1) where IsMatch(attributes["path"], "^/v1/(ops|partner)/")
           - set(attributes["eventId"], attributes["path"]) where (attributes["eventId"] == nil or attributes["eventId"] == "") and IsMatch(attributes["path"], "^/v1/events/")
           - replace_pattern(attributes["eventId"], "^/v1/events/([^/]+)/.*$", "$$1") where attributes["eventId"] != nil
+          # 대기열 경로도 회차를 담는다(/v1/queues/{eventId}/…). 결제 경로는 회차가 없어 웹이 보낸 x-peaket-event-id를 쓴다(IR-17)
+          - set(attributes["eventId"], attributes["path"]) where (attributes["eventId"] == nil or attributes["eventId"] == "") and IsMatch(attributes["path"], "^/v1/queues/")
+          - replace_pattern(attributes["eventId"], "^/v1/queues/([^/]+)/.*$", "$$1") where attributes["eventId"] != nil
           - set(attributes["factors"], Concat(attributes["factors"], ",")) where IsList(attributes["factors"])
           - set(attributes["is_admin"], Int(attributes["is_admin"])) where attributes["is_admin"] != nil
           - delete_key(attributes, "time")

@@ -3,7 +3,7 @@ import { attemptStorageKey } from '../../checkout/model/payment-attempt';
 // SCR-011 결제창 복귀(캐시 셸, 쿠키 없는 첫 요청, docs/frontend.md §5.3 '복귀 화면', ADR-0229). 스크립트가 주소의 결제 값을 읽고 바로 지운 뒤
 // 서명한 결제 접수를 보낸다. 접수를 보낸 사실과 멱등 키는 탭 저장소에 둬 새로고침하면 결과 확인으로 바로 간다. 결제사 값은 저장하지 않는다.
 import { useEffect, useRef, useState } from 'react';
-import { PaymentReturnCard } from '@/entities/payment';
+import { PaymentReturnCard, sendPaymentAcceptance } from '@/entities/payment';
 import { AppShell } from '@/widgets/app-shell';
 import { acceptOutcome, findAcceptRecord, parseReturn, writeAcceptRecord, type AcceptBody } from '../model/payment-return';
 
@@ -112,7 +112,7 @@ export function CheckoutReturnLive() {
 async function send(eventId: string, orderId: string, body: AcceptBody, key: string, setPhase: (p: Phase) => void): Promise<void> {
   const adm = readAdmission(eventId);
   if (!adm) return window.location.replace(seatsHref(eventId));
-  const [{ ApiError, OPERATIONS }, { PurchaseKeyError, openPurchaseSession }, api] = await Promise.all([import('@peaket/api-client'), import('@peaket/api-client/purchase'), import('@/shared/api')]);
+  const [{ ApiError }, { PurchaseKeyError, openPurchaseSession }, api] = await Promise.all([import('@peaket/api-client'), import('@peaket/api-client/purchase'), import('@/shared/api')]);
   const client = api.browserApiClient();
   if (!client) return setPhase('retry');
   let session: Awaited<ReturnType<typeof openPurchaseSession>> | undefined;
@@ -133,7 +133,7 @@ async function send(eventId: string, orderId: string, body: AcceptBody, key: str
     try {
       // 결제 시도 ID를 싣는다(대체된 시도의 늦은 접수를 서버가 409로 막는다, docs/features/payment.md §2 '활성 결제 시도 대조')
       const attemptId = sessionStorage.getItem(attemptStorageKey(orderId));
-      await client.send(OPERATIONS.createOrderPaymentAcceptance, { params: { orderId }, body: { ...body, ...(attemptId ? { attemptId } : {}) }, idempotencyKey: key, purchase: session });
+      await sendPaymentAcceptance(client, { eventId, orderId, body: { ...body, ...(attemptId ? { attemptId } : {}) }, idempotencyKey: key, purchase: session });
       sessionStorage.removeItem(attemptStorageKey(orderId));
       for (const k of Object.keys(sessionStorage)) if (k.startsWith('peaket.checkout.')) sessionStorage.removeItem(k);
       return window.location.replace(resultHref(eventId, orderId));

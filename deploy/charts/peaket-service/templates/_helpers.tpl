@@ -26,6 +26,10 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "peaket.servicePodTemplate" -}}
 {{- $name := include "peaket.name" . }}
 {{- $leases := include "peaket.leaderLeases" . | fromJsonArray }}
+{{- /* 법정 seq 단일 writer(IR-13): 자동 확장·카나리·영속 볼륨 없이는 한 파드만 쥐게 할 수 없다 */}}
+{{- if and .Values.service.legalAccessSeq.enabled .Values.service.autoscaling.enabled }}{{ fail "service.legalAccessSeq.enabled이면 service.autoscaling.enabled를 켤 수 없다(법정 seq 단일 writer, IR-13)" }}{{ end }}
+{{- if and .Values.service.legalAccessSeq.enabled .Values.service.rollout.enabled }}{{ fail "service.legalAccessSeq.enabled이면 service.rollout.enabled를 켤 수 없다(법정 seq 단일 writer, IR-13)" }}{{ end }}
+{{- if and .Values.service.legalAccessSeq.enabled (not .Values.service.persistence.enabled) }}{{ fail "service.legalAccessSeq.enabled이면 service.persistence.enabled가 필요하다(ReadWriteOnce PVC, IR-13)" }}{{ end }}
 metadata:
   labels:
     {{- include "peaket.labels" . | nindent 4 }}

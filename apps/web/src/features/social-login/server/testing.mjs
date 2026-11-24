@@ -46,7 +46,7 @@ export async function startIdentityStub() {
   server.addService(pkg.SessionService.service, {
     async CreateSession(call, cb) {
       const r = call.request;
-      calls.push({ method: 'CreateSession', request: r });
+      calls.push({ method: 'CreateSession', request: r, metadata: call.metadata.getMap() });
       if (mode.createFails) return fail(cb, 'UNAVAILABLE', '대역 장애');
       const seen = keys.get(r.idempotency_key);
       if (seen && (seen.provider !== r.provider || seen.sub !== r.provider_user_id)) return fail(cb, 'ALREADY_EXISTS', '다른 내용');

@@ -137,11 +137,13 @@ async function anchor(o, j) {
     fileRows = a.fileRows;
   }
   if (!o.date || rows === undefined || !sha256) throw new Error('--anchor에는 --date·--source(또는 --envoy)·--rows(또는 --clickhouse)·--sha256(또는 --bucket)이 필요하다');
+  const identityMissing = identity.flatMap((p) => p.missing.map((n) => ({ pod: p.pod, n })));
   if (source === null || source === undefined) {
-    return { kind: 'access-log-anchor', date: o.date, sourceTotal: null, ingestedTotal: rows, shortfall: null, seqMissing: seqs.length ? seqGaps(seqs).missing : [], seqDuplicates: [], fileSha256: sha256, fileRows: fileRows ?? rows, matches: false, verifiable: false, retentionUntil: retentionUntil(o.date, j.months, j.days), identity };
+    return { kind: 'access-log-anchor', date: o.date, sourceTotal: null, ingestedTotal: rows, shortfall: null, seqMissing: seqs.length ? seqGaps(seqs).missing : [], seqDuplicates: [], fileSha256: sha256, fileRows: fileRows ?? rows, matches: false, verifiable: false, retentionUntil: retentionUntil(o.date, j.months, j.days), identity, identityMissing };
   }
   const r = dayAnchor({ date: o.date, sourceTotal: source, ingestedTotal: rows, seqs, fileSha256: sha256, fileRows: fileRows ?? rows });
-  return { kind: 'access-log-anchor', ...r, verifiable: true, retentionUntil: retentionUntil(o.date, j.months, j.days), identity };
+  // 파드 하나의 빈 seq도 일 앵커 불일치다(--reconcile과 같은 기준, IR-22)
+  return { kind: 'access-log-anchor', ...r, matches: r.matches && identityMissing.length === 0, verifiable: true, retentionUntil: retentionUntil(o.date, j.months, j.days), identity, identityMissing };
 }
 
 async function main(argv) {
@@ -190,7 +192,8 @@ async function main(argv) {
     if (o.anchor) {
       const r = await anchor(o, j);
       console.log(JSON.stringify(r));
-      return r.matches ? 0 : 1;
+      // 일 앵커도 파드 하나의 빈 seq를 실패로 센다(--reconcile과 같은 기준, IR-22)
+      return r.matches && r.identityMissing.length === 0 ? 0 : 1;
     }
     if (o.copy || o.restore) {
       if (!o.date || !o.clickhouse || !o.bucket) throw new Error('--copy/--restore에는 --date·--clickhouse·--bucket이 필요하다');

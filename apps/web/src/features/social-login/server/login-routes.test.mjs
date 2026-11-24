@@ -938,6 +938,24 @@ test('HOT-400 PRF-020 x-forwarded-for가 여러 값·IP가 아닌 값·없음이
   }
 });
 
+/** 콜백 요청에 HTTP 요청 ID를 실어 CreateSession 호출을 돌려준다(IR-13③) */
+async function callbackWithRequestId(id) {
+  const b = new Browser();
+  const cb = await stopAtCallback(b);
+  const headers = { cookie: b.cookieHeader(web.url) };
+  if (id !== undefined) headers['x-request-id'] = id;
+  const res = await app.dispatch(new Request(cb, { headers }));
+  assert.equal(res.status, 303);
+  return identity.calls.filter((c) => c.method === 'CreateSession').at(-1);
+}
+
+test('IR-13③ HTTP x-request-id가 gRPC 메타데이터로 가고 없으면 새 요청 ID를 만든다', async () => {
+  const withId = await callbackWithRequestId('http-request-IR13');
+  assert.equal(withId.metadata['x-request-id'], 'http-request-IR13');
+  const generated = await callbackWithRequestId(undefined);
+  assert.match(String(generated.metadata['x-request-id']), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+});
+
 // ---- 재인증의 받는 쪽 작업(I-T85 ①, identity §7.1 ①③, ADR-0293 결정 3) ----
 // 값은 docs/security/authz-matrix.md §6 '받는 쪽 작업 op의 값' 표에서 옮겨 적는다(앱 서버의 REAUTH_PURPOSE_OPS를 가져오지 않는다).
 const PURPOSE_OPS = [

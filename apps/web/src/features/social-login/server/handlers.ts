@@ -24,7 +24,7 @@ import {
   sessionCookies,
 } from './cookies.ts';
 import { FanTokenVerifier } from './fan-token.ts';
-import { clientIpOf, IdentityClient, isReauthOp, type ReauthOp, reauthOpOf } from './identity-client.ts';
+import { clientIpOf, IdentityClient, isReauthOp, requestIdOf, type ReauthOp, reauthOpOf } from './identity-client.ts';
 import { deriveLoginKeys, idempotencyKeyOf, separateKeyOf } from './keys.ts';
 import { OidcProviders } from './oidc.ts';
 import { BUSY_RETRY_AFTER_SEC, createProviderGuard, ProviderBusyError, ProviderOpenError, tokenExchangeOnly, type ProviderGuardOptions } from './provider-guard.ts';
@@ -318,6 +318,7 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
     const sub = login.claims.sub;
     const userAgent = (req.headers.get('user-agent') ?? '').slice(0, 512);
     const clientIp = clientIpOf(req);
+    const requestId = requestIdOf(req);
     // acr·amr가 없으면 단일 요소로 본다(asvs 6.8.4). 있으면 그대로 넘긴다
     const authMethods = [login.claims.acr, ...(Array.isArray(login.claims.amr) ? login.claims.amr : [])].filter((v): v is string => typeof v === 'string');
 
@@ -410,6 +411,7 @@ export function createSocialLogin(config: SocialLoginConfig, deps: SocialLoginDe
         deviceId: prog.deviceId ?? null,
         clientIp,
         userAgent,
+        requestId,
         authMethods,
         ...(link ? { link: { proposalId: link.proposalId, binding: link.binding } } : {}),
       });

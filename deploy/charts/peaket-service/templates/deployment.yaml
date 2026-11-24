@@ -21,7 +21,12 @@ metadata:
     app.kubernetes.io/component: service
 spec:
   {{- /* HPA를 켜면 복제 수를 적지 않는다(HPA가 정한 수를 다시 올릴 때 되돌리지 않게, docs/infra.md §3 'v0 배포') */}}
-  {{- if not .Values.service.autoscaling.enabled }}
+  {{- if .Values.service.legalAccessSeq.enabled }}
+  {{- /* 법정 seq는 한 파드만 쥔다(IR-13). 값의 replicas와 무관하게 1이고, 롤링 중 두 파드가 같은 RWO PVC를 붙지 않게 Recreate다 */}}
+  replicas: 1
+  strategy:
+    type: Recreate
+  {{- else if not .Values.service.autoscaling.enabled }}
   replicas: {{ .Values.service.replicas }}
   {{- end }}
   selector:

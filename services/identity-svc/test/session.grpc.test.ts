@@ -2,7 +2,7 @@
 // 실제 grpc-js 서버를 루프백에 띄우고, 계약 설명자(@peaket/contracts/proto)로 만든 클라이언트로 부른다.
 import * as grpc from '@grpc/grpc-js';
 import { decodeJwt, decodeProtectedHeader } from 'jose';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 import { startGrpcServer } from '../src/grpc-server.js';
 import { MemoryLinkProposals } from '../src/modules/session/adapters/memory-link-proposals.js';
 import { MemorySessionStore } from '../src/modules/session/adapters/memory-session-store.js';
@@ -72,6 +72,35 @@ describe('SessionService(gRPC)', () => {
     expect(r.session).toMatchObject({ account_id: expect.any(String), session_id: expect.any(String), access_token: expect.any(String), refresh_token: expect.any(String) });
     expect(r.session.access_token_expires_at_ms).toBeGreaterThan(Date.parse('2026-11-03T03:00:00Z'));
     expect(typeof r.session.refresh_token_expires_at_ms).toBe('number');
+  });
+
+  test('IR-13③ gRPC x-request-id가 로그인 성공·실패 법정 줄의 request_id가 된다', async () => {
+    const chunks: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as never);
+    const key = newKey();
+    try {
+      const md = new grpc.Metadata();
+      md.set('x-request-id', 'http-request-ok');
+      const r = await new Promise<Record<string, any>>((res, rej) =>
+        client.CreateSession({ idempotency_key: key, provider: 'PROVIDER_KAKAO', provider_user_id: 'grpc-request-ok', email: '', email_verified: false }, md, { deadline: Date.now() + 5_000 }, (e, v) => (e ? rej(e) : res(v!))),
+      );
+      expect(r.outcome).toBe('session');
+      // 같은 멱등 키에 다른 제공자·사용자면 ALREADY_EXISTS이고 실패 줄이 남는다
+      const fail = new grpc.Metadata();
+      fail.set('x-request-id', 'http-request-fail');
+      await new Promise((res) => client.CreateSession({ idempotency_key: key, provider: 'PROVIDER_NAVER', provider_user_id: 'grpc-request-fail' }, fail, { deadline: Date.now() + 5_000 }, () => res(undefined)));
+    } finally {
+      spy.mockRestore();
+    }
+    const lines = chunks
+      .flatMap((c) => c.split('\n'))
+      .filter((l) => l.includes('"kind":"legal-access"'))
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(lines.find((l) => l.event === 'LOGIN' && l.result === 'SUCCESS' && l.request_id === 'http-request-ok')).toBeTruthy();
+    expect(lines.find((l) => l.event === 'LOGIN' && l.result === 'FAILED' && l.request_id === 'http-request-fail')).toBeTruthy();
   });
 
   test('I-T50_①②_같은키다시보내기는같은세션_다른내용은ALREADY_EXISTS다', async () => {

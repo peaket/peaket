@@ -3,7 +3,7 @@
 // 서버가 계산한 금액과 판매자 정보를 보인 뒤 서명한 POST /v1/orders로 주문을 만든다. 결제창(결제 시도·결제사 위젯)은 HOT-358이다.
 import type { PurchaseSigner } from '@peaket/api-client/purchase';
 import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { PaymentReturnCard } from '@/entities/payment';
+import { PaymentReturnCard, sendPaymentAttempt } from '@/entities/payment';
 import { formatWon } from '@/entities/production';
 import { holdClock } from '@/shared/lib/hold-clock';
 import { AppShell } from '@/widgets/app-shell';
@@ -410,7 +410,7 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
       afterRender: () => new Promise((resolve) => setTimeout(resolve, 30)),
       api: {
         async start(body, key) {
-          const [{ OPERATIONS }, { openPurchaseSession }, api] = await Promise.all([import('@peaket/api-client'), import('@peaket/api-client/purchase'), import('@/shared/api')]);
+          const [{ openPurchaseSession }, api] = await Promise.all([import('@peaket/api-client/purchase'), import('@/shared/api')]);
           const client = api.browserApiClient();
           if (!client) throw new Error('api client');
           signer.current ??= await openPurchaseSession({
@@ -418,7 +418,7 @@ function Ready({ eventId, hold, event, seatsHref, expired, setExpired, setPhase,
             ...(admission.serverEcdhPublicKey ? { serverEcdhPublicKey: admission.serverEcdhPublicKey } : {}),
             ...(admission.purchaseSessionExpiresAt ? { purchaseSessionExpiresAt: admission.purchaseSessionExpiresAt } : {}),
           });
-          const r = await client.send<unknown>(OPERATIONS.createOrderPayment, { params: { orderId }, body, idempotencyKey: key, purchase: signer.current });
+          const r = await sendPaymentAttempt<unknown>(client, { eventId, orderId, body, idempotencyKey: key, purchase: signer.current });
           return { data: r.data, date: r.headers.get('date') };
         },
         refresh: async () => (await import('@/shared/api')).refreshFanToken(),
