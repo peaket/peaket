@@ -167,6 +167,35 @@ export const REMOTE_WIDGET_RULES = {
 
 // 계약 생성물(packages/contracts/src/gen)만 뺀다. 화면이 묶는 생성물(packages/ds/src/gen 토큰, BAS-040의 packages/api-client/src/gen orval 호출 함수)은
 // 브라우저 지원 린트를 받는다(구간 1 끝 정리)
+/**
+ * 포렌식 합성 생성기의 금지 함수(FX-T1, docs/features/forensic-replay.md §5.3).
+ * 실행 중 로그·지수·거듭제곱·삼각 함수와 시계·난수를 쓰면 엔진마다 마지막 자리가 달라질 수 있다.
+ * 표를 만드는 빌드 스크립트(apps/forensics/scripts/build-inv-cdf.mjs)는 이 범위 밖이다.
+ */
+export const FORENSICS_GENERATOR_FILES = ['apps/forensics/src/lib/forensics/{prng,cdf,scenario,checkpoint,math}.ts'];
+const FORENSICS_DETERMINISM_MESSAGE = '포렌식 생성기는 결정적이어야 한다. 로그·지수·삼각 함수, Math.random, Date.now, performance.now를 쓰지 않는다(FX-T1)';
+const FORENSICS_FORBIDDEN_MATH = [
+  'random', 'log', 'log10', 'log2', 'log1p', 'exp', 'expm1', 'pow', 'round', 'ceil',
+  'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2',
+  'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh', 'cbrt', 'hypot',
+];
+export const FORENSICS_GENERATOR_RULES = {
+  files: FORENSICS_GENERATOR_FILES,
+  rules: {
+    'no-restricted-properties': [
+      'error',
+      ...FORENSICS_FORBIDDEN_MATH.map((property) => ({ object: 'Math', property, message: FORENSICS_DETERMINISM_MESSAGE })),
+      { object: 'Date', property: 'now', message: FORENSICS_DETERMINISM_MESSAGE },
+      { object: 'performance', property: 'now', message: FORENSICS_DETERMINISM_MESSAGE },
+    ],
+    'no-restricted-syntax': [
+      'error',
+      { selector: `NewExpression[callee.name='Date']`, message: FORENSICS_DETERMINISM_MESSAGE },
+      { selector: `CallExpression[callee.name='Date']`, message: FORENSICS_DETERMINISM_MESSAGE },
+    ],
+  },
+};
+
 export default [
   { ignores: ['**/node_modules/**', '**/dist/**', '**/dist-poc/**', '**/.next/**', '**/.next-*/**', '**/.turbo/**', 'packages/contracts/src/gen/**'] },
   ...serviceLayerConfigs(['services/*/src/modules', 'packages/platform/template/src/modules']),
@@ -181,5 +210,6 @@ export default [
   ...PROTOTYPE_EVERYWHERE,
   PARTNER_KONVA_OUTSIDE,
   REMOTE_WIDGET_RULES,
+  FORENSICS_GENERATOR_RULES,
   NO_DYNAMIC_CODE,
 ];
