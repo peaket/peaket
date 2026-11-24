@@ -321,7 +321,7 @@ export function main(argv) {
   let labels = [];
   let body = '';
   let nowMs = Date.now();
-  let baseRef = 'HEAD';
+  let baseRef;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--check') check = true;
@@ -397,7 +397,7 @@ export function main(argv) {
   if (process.env.PEAKET_CHANGED_FILES) changed = changed.concat(process.env.PEAKET_CHANGED_FILES.split(/[\r\n,]+/).map((x) => x.trim()).filter(Boolean));
   if (process.env.PEAKET_PR_LABELS) labels = labels.concat(process.env.PEAKET_PR_LABELS.split(',').map((x) => x.trim()).filter(Boolean));
   if (process.env.PEAKET_PR_BODY && !body) body = process.env.PEAKET_PR_BODY;
-  if (process.env.PEAKET_PR_BASE && baseRef === 'HEAD') baseRef = process.env.PEAKET_PR_BASE;
+  if (process.env.PEAKET_PR_BASE && baseRef === undefined) baseRef = process.env.PEAKET_PR_BASE;
   const lines = [];
   let failures = 0;
   let skips = 0;
@@ -448,11 +448,16 @@ export function main(argv) {
   else if (sig.skip.length === 0) ok('signature', '서명·출처 증명이 정본과 같다');
 
   const gate = gatePromotion({ root, env, nowMs, changedFiles: changed, labels, body, baseRef });
-  if (gate.decision === 'skip') skip('freeze-gate', gate.reasons.join(' / ') || '동결 게이트 대상 아님');
-  else if (gate.decision === 'block') fail('freeze-gate', gate.reasons);
-  else {
+  if (gate.decision === 'skip') {
+    skip('freeze-gate', gate.reasons.join(' / ') || '동결 게이트 대상 아님');
+    for (const n of gate.notes) console.log(`note freeze-gate: ${n}`);
+  } else if (gate.decision === 'block') {
+    fail('freeze-gate', gate.reasons);
+    for (const n of gate.notes) console.log(`note freeze-gate: ${n}`);
+  } else {
     ok('freeze-gate', gate.reasons.join(' / ') || '동결 창 밖 또는 긴급 변경');
     if (gate.audit) console.log(`audit ${JSON.stringify(gate.audit)}`);
+    for (const n of gate.notes) console.log(`note freeze-gate: ${n}`);
     for (const w of gate.warnings) console.log(`warn freeze-gate: ${w}`);
   }
 

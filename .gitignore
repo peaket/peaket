@@ -54,3 +54,7 @@ specs/results/.staging-*/
 .env
 .env.*
 *.env
+
+# freeze-calendar 로컬 실행 산출물. 운영 봇은 calendar/* 가지에서 필요하면 -f로 커밋한다(IR-01)
+deploy/calendar/freeze.json
+deploy/calendar/rendered/

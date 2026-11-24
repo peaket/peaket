@@ -18,6 +18,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # 되돌리기 판정이 두 판 전 다이제스트를 봐야 한다(IR-03). 얕은 복제면 정당한 긴급 변경이 막힌다.
+          fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
@@ -58,7 +60,7 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
-          git fetch --no-tags --depth=1 origin "$PR_BASE"
+          git fetch --no-tags origin "$PR_BASE"
           PEAKET_CHANGED_FILES="$(git diff --name-only "$PR_BASE" HEAD)" \
           PEAKET_PR_LABELS="$PR_LABELS" \
           PEAKET_PR_BODY="$PR_BODY" \

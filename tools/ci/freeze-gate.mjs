@@ -50,13 +50,42 @@ const readText = (root, rel) => {
   }
 };
 
-/** 달력 파일을 읽는다. 없음·깨짐은 게이트가 막을 수 있게 오류로 돌려준다 */
-export function readCalendar(root) {
-  const file = join(root, FREEZE_CALENDAR_FILE);
-  if (!existsSync(file)) return { error: 'calendar-missing' };
+/** git 개체에서 파일 본문을 읽는다. 없거나 git 오류면 undefined */
+function gitShow(root, ref, rel) {
+  try {
+    return execFileSync('git', ['show', `${ref}:${rel}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 달력 파일을 읽는다. 없음·깨짐은 게이트가 막을 수 있게 오류로 돌려준다.
+ * `baseRef`가 있으면 PR 작업 트리가 아니라 그 기준 가지의 신뢰된 사본에서 읽는다(IR-01).
+ * 기준 가지에 파일이 없으면 `calendar-missing`, ref를 읽지 못하면 `calendar-unreadable`이다(fail-closed).
+ */
+export function readCalendar(root, baseRef) {
+  let text;
+  if (baseRef) {
+    try {
+      execFileSync('git', ['rev-parse', '--verify', `${baseRef}^{commit}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch {
+      return { error: 'calendar-unreadable', detail: 'base-ref' };
+    }
+    text = gitShow(root, baseRef, FREEZE_CALENDAR_FILE);
+    if (text === undefined) return { error: 'calendar-missing', detail: 'base' };
+  } else {
+    const file = join(root, FREEZE_CALENDAR_FILE);
+    if (!existsSync(file)) return { error: 'calendar-missing' };
+    try {
+      text = readFileSync(file, 'utf8');
+    } catch {
+      return { error: 'calendar-unreadable', detail: 'read' };
+    }
+  }
   let doc;
   try {
-    doc = JSON.parse(readFileSync(file, 'utf8'));
+    doc = JSON.parse(text);
   } catch {
     return { error: 'calendar-unreadable', detail: 'JSON' };
   }
@@ -107,11 +136,39 @@ function flagOff(text) {
   return doc.enabled === false || doc.value === false || doc.enabled === 'off' || doc.defaultVariant === 'off';
 }
 
+const DIGEST_LINE = /^\s*digest\s*:/;
+const REPOSITORY = /^\s*repository:\s*["']?([^"'\s#]+)["']?\s*$/m;
+const FLAG_LINE = /^\s*(?:enabled|value|defaultVariant)\s*:/;
+const PAUSED_LINE = /^\s*autoscaling\.keda\.sh\/paused-replicas\s*:/;
+const PAUSED_ZERO = /^\s*autoscaling\.keda\.sh\/paused-replicas\s*:\s*["']?0["']?\s*$/m;
+
 function digestOf(text) {
   return DIGEST.exec(text)?.[1];
 }
 
-/** 대상 가지(baseRef)의 조상 이력에 그 다이제스트가 있었는가. 조회 실패는 거부(보수적) */
+const bodyLines = (text) => text.replace(/\r\n/g, '\n').replace(/\n$/, '').split('\n');
+const withoutLines = (text, re) => bodyLines(text).filter((line) => !re.test(line));
+const linesMatching = (text, re) => bodyLines(text).filter((line) => re.test(line));
+const sameLines = (a, b) => a.length === b.length && a.every((line, i) => line === b[i]);
+const changedLineCount = (a, b) => {
+  if (a.length !== b.length) return Math.max(a.length, b.length);
+  let changed = 0;
+  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) changed += 1;
+  return changed;
+};
+
+/**
+ * 긴급 변경 모양을 볼 기준 판(기준 가지, 없으면 HEAD, 그것도 없으면 작업 트리).
+ * production은 항상 `baseRef`가 있고, 시험·로컬의 비 git 폴더만 작업 트리로 떨어진다.
+ */
+function baseTextFor(root, rel, baseRef) {
+  if (baseRef) return { source: 'base', text: gitShow(root, baseRef, rel) };
+  const head = gitShow(root, 'HEAD', rel);
+  if (head !== undefined) return { source: 'head', text: head };
+  return { source: 'worktree', text: readText(root, rel) };
+}
+
+/** 기준 가지(baseRef)의 조상 이력에 그 다이제스트가 있었는가. 조회 실패는 거부(보수적) */
 function digestInHistory(root, rel, digest, baseRef) {
   try {
     const out = execFileSync('git', ['log', baseRef, '--format=%H', '--', rel], {
@@ -120,12 +177,8 @@ function digestInHistory(root, rel, digest, baseRef) {
       stdio: ['ignore', 'pipe', 'ignore'],
     });
     for (const sha of out.split(/\r?\n/).filter(Boolean)) {
-      try {
-        const text = execFileSync('git', ['show', `${sha}:${rel}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-        if (digestOf(text) === digest) return true;
-      } catch {
-        // 그 판에 파일이 없으면 건너뛴다
-      }
+      const text = gitShow(root, sha, rel);
+      if (text !== undefined && digestOf(text) === digest) return true;
     }
   } catch {
     return false;
@@ -134,7 +187,52 @@ function digestInHistory(root, rel, digest, baseRef) {
 }
 
 /**
+ * 이미지 다이제스트 한 줄만 바뀐 되돌리기(IR-02).
+ * 같은 워크로드의 `image.repository`가 같고, 다이제스트를 뺀 나머지 줄이 모두 같으며,
+ * 새 다이제스트가 기준 가지의 조상 이력에 있어야 한다.
+ */
+function rollbackFile(root, rel, baseRef) {
+  const base = baseTextFor(root, rel, baseRef);
+  const head = readText(root, rel);
+  if (!base.text || head === undefined) return false;
+  const baseRepo = REPOSITORY.exec(base.text)?.[1];
+  const headRepo = REPOSITORY.exec(head)?.[1];
+  if (!baseRepo || !headRepo || baseRepo !== headRepo) return false;
+  const baseDigest = digestOf(base.text);
+  const headDigest = digestOf(head);
+  if (!baseDigest || !headDigest || baseDigest === headDigest) return false;
+  if (changedLineCount(linesMatching(base.text, DIGEST_LINE), linesMatching(head, DIGEST_LINE)) !== 1) return false;
+  if (!sameLines(withoutLines(base.text, DIGEST_LINE), withoutLines(head, DIGEST_LINE))) return false;
+  const historyRef = baseRef ?? (base.source === 'head' ? 'HEAD' : undefined);
+  return historyRef !== undefined && digestInHistory(root, rel, headDigest, historyRef);
+}
+
+/** 플래그 값 한 줄만 꺼진 경우(IR-02). 다른 값 변경이 섞이면 거부한다 */
+function flagFileShape(root, rel, baseRef) {
+  const head = readText(root, rel);
+  if (head === undefined || !flagOff(head)) return false;
+  const base = baseTextFor(root, rel, baseRef);
+  if (base.source === 'worktree') return true; // 비 git 로컬 시험의 호환 경로
+  if (!base.text || base.text === head) return false;
+  if (!sameLines(withoutLines(base.text, FLAG_LINE), withoutLines(head, FLAG_LINE))) return false;
+  return changedLineCount(linesMatching(base.text, FLAG_LINE), linesMatching(head, FLAG_LINE)) === 1;
+}
+
+/** KEDA 정지 주석 한 줄만 더해진 경우(IR-02). 다이제스트 등 다른 변경이 섞이면 거부한다 */
+function autoscaleFileShape(root, rel, baseRef) {
+  const head = readText(root, rel);
+  const headPaused = head === undefined ? [] : linesMatching(head, PAUSED_LINE);
+  if (head === undefined || headPaused.length !== 1 || !PAUSED_ZERO.test(head)) return false;
+  const base = baseTextFor(root, rel, baseRef);
+  if (base.source === 'worktree') return true; // 비 git 로컬 시험의 호환 경로
+  if (!base.text || base.text === head) return false;
+  if (!sameLines(withoutLines(base.text, PAUSED_LINE), withoutLines(head, PAUSED_LINE))) return false;
+  return changedLineCount(linesMatching(base.text, PAUSED_LINE), headPaused) === 1;
+}
+
+/**
  * 긴급 변경 모양. 라벨·인시던트가 없거나 모양이 허용 밖이면 거부한다.
+ * 허용: 같은 이미지 저장소의 이전 다이제스트로만 바꾸기, 플래그 값 한 줄 끄기, KEDA 정지 주석 한 줄 더하기.
  * @returns {{ok:true, shape:'rollback'|'flag-off'|'autoscale-pause', incident:string} | {ok:false, reason:string}}
  */
 function emergencyOf(root, relevant, labels, body, baseRef) {
@@ -142,34 +240,11 @@ function emergencyOf(root, relevant, labels, body, baseRef) {
   const m = INCIDENT.exec(body ?? '');
   if (!m) return { ok: false, reason: 'emergency-incident-missing' };
   const incident = `INC-${m[1]}`;
+  if (relevant.length === 0) return { ok: false, reason: 'emergency-shape-not-allowed' };
 
-  // ① 이전에 쓰던 이미지 다이제스트로 되돌리기(대상 가지 조상 이력만)
-  if (relevant.every((p) => p.startsWith(PROD))) {
-    let rollback = true;
-    for (const p of relevant) {
-      const text = readText(root, p);
-      const digest = text === undefined ? undefined : digestOf(text);
-      if (!digest || !digestInHistory(root, p, digest, baseRef)) {
-        rollback = false;
-        break;
-      }
-    }
-    if (rollback && relevant.length > 0) return { ok: true, shape: 'rollback', incident };
-  }
-
-  // ② 릴리스 플래그 끄기
-  if (relevant.length > 0 && relevant.every((p) => p.startsWith(FLAGS))) {
-    if (relevant.every((p) => {
-      const text = readText(root, p);
-      return text !== undefined && flagOff(text);
-    })) return { ok: true, shape: 'flag-off', incident };
-  }
-
-  // ③ KEDA 오토스케일 정지 주석
-  if (relevant.length > 0 && relevant.every((p) => readText(root, p)?.includes('autoscaling.keda.sh/paused-replicas'))) {
-    return { ok: true, shape: 'autoscale-pause', incident };
-  }
-
+  if (relevant.every((p) => rollbackFile(root, p, baseRef))) return { ok: true, shape: 'rollback', incident };
+  if (relevant.every((p) => p.startsWith(FLAGS) && flagFileShape(root, p, baseRef))) return { ok: true, shape: 'flag-off', incident };
+  if (relevant.every((p) => autoscaleFileShape(root, p, baseRef))) return { ok: true, shape: 'autoscale-pause', incident };
   return { ok: false, reason: 'emergency-shape-not-allowed' };
 }
 
@@ -185,39 +260,44 @@ export function gatePromotion(o = {}) {
   const nowMs = o.nowMs ?? Date.now();
   const env = o.env ?? 'prod';
   const warnings = [];
-  const result = (decision, reasons, extra = {}) => ({ decision, reasons, warnings, ...extra });
+  const result = (decision, reasons, extra = {}) => ({ decision, reasons, warnings, notes: [], ...extra });
 
   if (!Number.isFinite(nowMs)) return result('block', ['now-invalid']);
   if (env !== 'prod') return result('skip', [`env-${env}-not-prod`]);
-  const relevant = relevantProdChanges(o.changedFiles ?? []);
-  if (relevant.length === 0) return result('skip', ['no-prod-change']);
+  const files = (o.changedFiles ?? []).map(toPosix);
+  const relevant = relevantProdChanges(files);
+  const calendarChanged = files.some((p) => p === FREEZE_CALENDAR_FILE || p.startsWith('deploy/calendar/'));
+  const notes = calendarChanged ? ['calendar-changed-in-pr'] : [];
+  if (relevant.length === 0) return result('skip', ['no-prod-change'], { notes });
 
-  const read = readCalendar(root);
-  if (read.error) return result('block', [read.error]);
+  // 달력은 PR 작업 트리가 아니라 기준 가지(baseRef)의 신뢰된 사본에서 읽는다(IR-01).
+  const read = readCalendar(root, o.baseRef);
+  if (read.error) return result('block', [read.error], { notes });
   const calendar = read.calendar;
   const age = nowMs - Date.parse(calendar.renderedAt);
   if (age > STALE_WARN_MS) warnings.push(`calendar-stale-warning:${Math.round(age / 60_000)}m`);
-  if (age > STALE_BLOCK_MS) return result('block', ['calendar-stale']);
+  if (age > STALE_BLOCK_MS) return result('block', ['calendar-stale'], { notes });
 
   const active = activeWindowsAt(calendar, nowMs);
   const blocked = active.filter(
     (w) => w.scope === 'all' || (w.scope === 'hotpath' && relevant.some((p) => isHotpathChange(p))),
   );
   if (blocked.length === 0) {
-    return result('allow', age > STALE_WARN_MS ? ['no-active-freeze-window-with-stale-calendar'] : ['no-active-freeze-window']);
+    return result('allow', age > STALE_WARN_MS ? ['no-active-freeze-window-with-stale-calendar'] : ['no-active-freeze-window'], { notes });
   }
 
   const reasons = blocked.map((w) => `freeze-window-active:${w.eventId}:${w.scope}`);
   const emergencyAttempt = (o.labels ?? []).includes(EMERGENCY_LABEL) || INCIDENT.test(o.body ?? '');
-  if (!emergencyAttempt) return result('block', reasons);
-  const emergency = emergencyOf(root, relevant, o.labels ?? [], o.body ?? '', o.baseRef ?? 'HEAD');
+  if (!emergencyAttempt) return result('block', reasons, { notes });
+  const emergency = emergencyOf(root, relevant, o.labels ?? [], o.body ?? '', o.baseRef);
   if (emergency.ok) {
     return result('allow', [`emergency-change:${emergency.shape}`], {
+      notes,
       override: { label: EMERGENCY_LABEL, incident: emergency.incident, shape: emergency.shape },
       audit: { kind: 'security', event: 'freeze_override', label: EMERGENCY_LABEL, incident: emergency.incident, shape: emergency.shape },
     });
   }
-  return result('block', [...reasons, emergency.reason]);
+  return result('block', [...reasons, emergency.reason], { notes });
 }
 
 const USAGE =
@@ -232,7 +312,7 @@ export function main(argv) {
   let changed = [];
   let labels = [];
   let body = '';
-  let baseRef = 'HEAD';
+  let baseRef;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--check') check = true;
@@ -273,19 +353,22 @@ export function main(argv) {
   if (process.env.PEAKET_CHANGED_FILES) changed = changed.concat(process.env.PEAKET_CHANGED_FILES.split(/[\r\n,]+/).map((x) => x.trim()).filter(Boolean));
   if (process.env.PEAKET_PR_LABELS) labels = labels.concat(process.env.PEAKET_PR_LABELS.split(',').map((x) => x.trim()).filter(Boolean));
   if (process.env.PEAKET_PR_BODY) body = body || process.env.PEAKET_PR_BODY;
-  if (process.env.PEAKET_PR_BASE) baseRef = baseRef === 'HEAD' ? process.env.PEAKET_PR_BASE : baseRef;
+  if (process.env.PEAKET_PR_BASE) baseRef = baseRef ?? process.env.PEAKET_PR_BASE;
 
   const g = gatePromotion({ root, env, nowMs, changedFiles: changed, labels, body, baseRef });
   if (g.decision === 'block') {
     console.log(`fail freeze-gate: ${g.reasons.join(' / ')}`);
+    for (const n of g.notes) console.log(`note freeze-gate: ${n}`);
     return 1;
   }
   if (g.decision === 'skip') {
     console.log(`skip freeze-gate: ${g.reasons.join(' / ')}`);
+    for (const n of g.notes) console.log(`note freeze-gate: ${n}`);
     return 0;
   }
   console.log(`ok freeze-gate: ${g.reasons.join(' / ')}`);
   if (g.audit) console.log(`audit ${JSON.stringify(g.audit)}`);
+  for (const n of g.notes) console.log(`note freeze-gate: ${n}`);
   for (const w of g.warnings) console.log(`warn freeze-gate: ${w}`);
   return 0;
 }
