@@ -198,6 +198,9 @@ message EndSessionRequest {
   string session_id = 1;
   // 로그아웃을 부른 계정. 세션의 계정과 다르면 FAILED_PRECONDITION이다.
   string account_id = 2;
+  // 법정 접속기록 줄에만 싣는 원문 IP·단말 정보(없으면 빈다, docs/observability.md §7).
+  string client_ip = 3;
+  string user_agent = 4;
 }
 
 message EndSessionResponse {

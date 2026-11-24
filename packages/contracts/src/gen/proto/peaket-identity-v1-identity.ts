@@ -325,6 +325,14 @@ export const identityV1Identity: Record<string, unknown> = {
                     "account_id": {
                       "type": "string",
                       "id": 2
+                    },
+                    "client_ip": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "user_agent": {
+                      "type": "string",
+                      "id": 4
                     }
                   }
                 },

@@ -190,7 +190,7 @@ export function sessionServiceHandlers(uc: UseCases, onError: (method: string, e
       const out = await uc.separate.run({ proposalId: text(r.link_proposal_id), binding: text(r.link_binding), idempotencyKey: text(r.idempotency_key), deviceId: text(r.device_id) || null, userAgent: text(r.user_agent) || null });
       return { session: sessionOf(out), new_account: out.newAccount, linked_provider: 'PROVIDER_UNSPECIFIED' };
     }),
-    EndSession: unary('EndSession', async (r) => uc.end.run({ sessionId: text(r.session_id), accountId: text(r.account_id) })),
+    EndSession: unary('EndSession', async (r) => uc.end.run({ sessionId: text(r.session_id), accountId: text(r.account_id), clientIp: text(r.client_ip) || undefined, userAgent: text(r.user_agent) || undefined })),
     IssueReauthToken: unary('IssueReauthToken', async (r) => {
       const strength = STRENGTH[String(r.strength)];
       if (!strength) throw new SessionError('INVALID_ARGUMENT', 'strength가 없다');
