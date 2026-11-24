@@ -43,7 +43,7 @@ export async function reauthenticate(page, account) {
   const dialog = reauthDialog(page);
   await expect(dialog).toBeVisible({ timeout: 20_000 });
   await expect(dialog).toContainText('admin');
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     // 앞 시도의 오류 글이 남아 있으면 submit이 지울 때까지 기다린다(다음 시도의 성공을 오류로 읽지 않게)
     if (attempt > 0) await dialog.locator('[role="alert"]').waitFor({ state: 'detached', timeout: 5_000 }).catch(() => undefined);
     await dialog.locator('input[type="password"]').fill(account.password);
@@ -57,7 +57,12 @@ export async function reauthenticate(page, account) {
     await expect(dialog.getByRole('button', { name: '확인하고 계속', exact: true })).toBeEnabled({ timeout: 10_000 });
     const message = await dialog.locator('[role="alert"]').innerText().catch(() => '');
     // 비밀번호·인증 앱 코드 오류는 다음 30초 칸에서 한 번만 다시 한다
-    if (attempt === 0 && message.includes('인증 앱 코드')) continue;
+    if (attempt < 2 && message.includes('인증 앱 코드')) continue;
+    // 같은 계정의 재인증이 30초 안에 겹치면 서버가 admin-login-busy(429)로 막는다. 잠시 뒤 한 번 더 한다
+    if (attempt < 2 && /다시 인증하지 못했습니다|잠시 뒤 다시/.test(message)) {
+      await page.waitForTimeout(31_000);
+      continue;
+    }
     throw new Error(`재인증하지 못했다: ${message}`);
   }
   throw new Error('재인증하지 못했다');

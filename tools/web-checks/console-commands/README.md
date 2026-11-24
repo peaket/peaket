@@ -32,6 +32,19 @@ pnpm run console-commands
 `playwright.console-commands.config.mjs`의 `webServer`가 무대를 띄운다. 로컬에서 무대를 손으로 띄워 두고 반복할 때는 그 무대를 재사용한다(`CI`가 있으면 늘 새로 띄운다).
 무대가 서지 않으면 표준 오류에 어느 단계에서 멈췄는지 남는다(비밀번호·TOTP 시드·패스키 개인키는 로그에 싣지 않는다).
 
+## 브라우저 확인(계획 §9, OPS-390)
+
+```bash
+# tools/web-checks
+pnpm run console-browser-check
+```
+
+`browser-check.spec.mjs`가 시스템 Chrome(Playwright, 새 시험 프로필)으로 역할·실제 API·Tab 초점·대화상자 상태·명령 3·6·1·320/768을 본다. 패스키는 CDP 가상 인증기가 답한다. 결과는 `docs/review/browser-check/OPS-390.md`에 적었다.
+
+연결된 Chrome에서 사람이 눌러 보는 확인은 무대의 자동 로그인 길을 쓴다(비밀번호·TOTP를 대화에 옮기지 않는다).
+`http://localhost:4281/stage/login?account=commander|operator&next=/commands?event=<회차>`가 identity-svc에 실제 로그인하고 쿠키를 브라우저에 넘긴 뒤 콘솔로 보낸다.
+같은 Chrome 프로필에서 계정을 바꾸면 이전 계정의 토큰 갱신과 `admin-login-busy`(30초)가 겹칠 수 있으므로, 두 계정이 동시에 필요한 확인은 Playwright 문맥 둘로 한다.
+
 ## 알려진 무대 한계
 
 - identity-svc의 로그인 셈·패스키 챌린지와 ops-svc의 재인증 jti는 이 프로세스 메모리에 둔다(`PEAKET_ENV=local`). 받는 쪽 넷이 쓰는 Valkey의 100ms 마감과 같은 Redis를 나눠 쓰면 로그인·재인증이 503으로 흔들린다(무대 확인 2026-11-24).

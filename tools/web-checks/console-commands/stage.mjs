@@ -9,7 +9,7 @@
 // - T16은 ops-svc의 받는 곳 목록에 닿지 않는 주소를 더해야 하므로 POST /stage/ops/restart로 ops-svc만 다시 띄운다.
 import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
+import { createHmac, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -180,6 +180,68 @@ function ecJwk(kid) {
 }
 
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+function base32Decode(value) {
+  let bits = 0;
+  let acc = 0;
+  const out = [];
+  for (const ch of value.toUpperCase().replace(/=+$/, '')) {
+    const i = B32.indexOf(ch);
+    if (i < 0) throw new Error('TOTP 시드가 base32가 아니다');
+    acc = (acc << 5) | i;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((acc >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return Uint8Array.from(out);
+}
+
+/** RFC 4226 HOTP 동적 자르기(identity-svc domain/totp.ts와 같은 규칙) */
+function totpAt(seed, step) {
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(step));
+  const mac = createHmac('sha1', base32Decode(seed)).update(counter).digest();
+  const off = mac[mac.length - 1] & 0x0f;
+  const bin = ((mac[off] & 0x7f) << 24) | (mac[off + 1] << 16) | (mac[off + 2] << 8) | mac[off + 3];
+  return String(bin % 1_000_000).padStart(6, '0');
+}
+
+const stageTotpLast = new Map();
+/** 그 계정이 아직 쓰지 않은 30초 칸의 코드. 칸 앞머리 1.5초 안에서만 쓴다(서버가 지금 칸만 받는다) */
+async function freshStageCode(key) {
+  for (;;) {
+    const now = Date.now();
+    const step = Math.floor(now / 30_000);
+    const into = now % 30_000;
+    if (step > (stageTotpLast.get(key) ?? -1) && into < 1_500) {
+      stageTotpLast.set(key, step);
+      return totpAt(accounts[key].totpSeed, step);
+    }
+    const wait = step > (stageTotpLast.get(key) ?? -1) ? (into < 1_500 ? 100 : 30_000 - into + 150) : 30_000 - into + 150;
+    await sleep(Math.max(100, wait));
+  }
+}
+
+/** 브라우저 확인용 자동 로그인: identity-svc에 실제 로그인하고 Set-Cookie를 그대로 브라우저에 넘긴다(비밀은 대화에 싣지 않는다) */
+async function loginAccount(key) {
+  const a = accounts[key];
+  const base = `http://127.0.0.1:${ID_PORTS.app}`;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const code = await freshStageCode(key);
+    const r1 = await fetch(`${base}/v1/ops/auth/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: a.email, password: a.password }) });
+    if (r1.status !== 200) throw new Error(`로그인 1단계 ${r1.status}`);
+    const j1 = await r1.json();
+    const r2 = await fetch(`${base}/v1/ops/auth/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ loginStep: j1.loginStep, code }) });
+    if (r2.status === 200) {
+      const cookies = r2.headers.getSetCookie?.() ?? [];
+      if (cookies.length === 0) throw new Error('로그인 쿠키가 없다');
+      return cookies;
+    }
+    if (r2.status !== 401 || attempt === 1) throw new Error(`로그인 2단계 ${r2.status}`);
+  }
+  throw new Error('로그인하지 못했다');
+}
 function base32(buf) {
   let bits = 0;
   let value = 0;
@@ -635,6 +697,16 @@ async function startController(urls) {
         if (body.eventId && /^[0-9a-f-]{36}$/i.test(String(body.eventId))) eventId = String(body.eventId).toLowerCase();
         await restartOps(urls, { admissionAddrs: admission });
         return sendJson(res, 200, { ok: true, ports: { app: opsState.port, management: opsState.managementPort } });
+      }
+      if (req.method === 'GET' && url.pathname === '/stage/login') {
+        const key = url.searchParams.get('account') ?? '';
+        const next = url.searchParams.get('next') ?? '/commands';
+        if (!accounts[key]) return sendJson(res, 400, { error: 'account는 commander·operator다' });
+        if (!next.startsWith('/') || next.startsWith('//')) return sendJson(res, 400, { error: 'next는 이 사이트의 경로다' });
+        const cookies = await loginAccount(key);
+        res.writeHead(302, { location: `${PREVIEW_ORIGIN}${next}`, 'set-cookie': cookies, 'cache-control': 'no-store' });
+        res.end();
+        return;
       }
       if (req.method === 'POST' && url.pathname === '/stage/event') {
         const body = await readJson(req);
