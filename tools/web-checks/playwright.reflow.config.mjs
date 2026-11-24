@@ -56,6 +56,7 @@ const BROWSERS = [
 const SIZES = [
   ['320', { width: 320, height: 256 }, / 320: /],
   ['640', { width: 640, height: 400 }, / 640(?: 글자 간격)?: /],
+  ['768', { width: 768, height: 1024 }, / 768: /],
   ['default', undefined, / 기본 폭: /],
 ];
 

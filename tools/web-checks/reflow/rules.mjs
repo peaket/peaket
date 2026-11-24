@@ -168,4 +168,10 @@ export const REFLOW_PAGES = [
   { app: 'web', locale: 'ko', path: '/search' },
   { app: 'partner', locale: 'ko', path: '/events' },
   { app: 'console', locale: 'ko', path: '/dashboard' },
+  // GAT-340(F-05-8): CS 처리함·승인 업무·회차 취소 판정·팬 조회의 휴대폰 1열·태블릿 2열 배치.
+  // 회차 취소는 목업 요청 ID(cr-lumen-r1)와 같은 실제 경로 꼴을 쓴다(운영은 없는 건이면 안내 화면).
+  { app: 'console', locale: 'ko', path: '/cs/inbox' },
+  { app: 'console', locale: 'ko', path: '/cs/approvals' },
+  { app: 'console', locale: 'ko', path: '/cancellations/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e02' },
+  { app: 'console', locale: 'ko', path: '/customers' },
 ];

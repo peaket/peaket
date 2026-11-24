@@ -15,8 +15,69 @@ const IGNORE = '.sr-only,[aria-hidden="true"],[inert],svg,canvas';
 /** 조작 요소(링크·버튼·입력 칸·선택 상자·tabindex 0 이상) */
 const CONTROLS = 'a[href],button,input:not([type="hidden"]),select,textarea,[tabindex]';
 
+/** GAT-340: CS 처리함·회차 취소 판정의 실제 화면(ConnectedPage)이 표·카드·2열 상자를 그리도록 최소 응답을 준다. 쓰기 동작은 부르지 않는다 */
+const OPS_CASE_ID = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01';
+const OPS_CANCEL_ID = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e02';
+async function stubOpsApi(page) {
+  const cors = {
+    'access-control-allow-origin': 'http://127.0.0.1:4103',
+    'access-control-allow-credentials': 'true',
+    'access-control-allow-methods': 'GET, PATCH, POST, OPTIONS',
+    'access-control-allow-headers': 'accept, content-type, if-match, idempotency-key, x-reauth-token',
+  };
+  await page.route('**/v1/ops/**', (route) => {
+    const req = route.request();
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
+    const p = new URL(req.url()).pathname;
+    const json = (body) => route.fulfill({ status: 200, contentType: 'application/json; charset=utf-8', headers: { ...cors, 'cache-control': 'no-store' }, body: JSON.stringify(body) });
+    if (p === '/v1/ops/auth/sessions/me') return json({ adminAccountId: OPS_CASE_ID, role: 'commander', designations: [] });
+    if (p === '/v1/ops/cases') return json({ items: [caseOf(OPS_CASE_ID)], nextCursor: null });
+    if (p === `/v1/ops/cases/${OPS_CASE_ID}`) return json(caseOf(OPS_CASE_ID));
+    if (p === '/v1/ops/event-cancellations') return json({ items: [{ requestId: OPS_CANCEL_ID, title: 'LUMEN 콘서트 2026 서울', status: 'REQUESTED', requestedAt: '2026-11-20T11:00:00.000Z' }] });
+    if (p === `/v1/ops/event-cancellations/${OPS_CANCEL_ID}`) {
+      return json({
+        requestId: OPS_CANCEL_ID,
+        eventId: OPS_CASE_ID,
+        title: 'LUMEN 콘서트 2026 서울',
+        kind: 'CANCEL',
+        status: 'REQUESTED',
+        fault: null,
+        fanNoticeReason: null,
+        partnerReason: '공연장 사정으로 취소합니다.',
+        faultOpinion: 'ORGANIZER',
+        evidenceRef: null,
+        newStartsAt: null,
+        requestedAt: '2026-11-20T11:00:00.000Z',
+        judgedBy: null,
+        judgedById: null,
+        dryRun: null,
+        progress: null,
+      });
+    }
+    return route.fulfill({ status: 404, contentType: 'application/problem+json', headers: cors, body: JSON.stringify({ type: 'about:blank', title: 'Not Found', status: 404 }) });
+  });
+}
+
+const caseOf = (caseId) => ({
+  caseId,
+  kind: 'INQUIRY',
+  targetRef: 'INQ-2026-11-0001',
+  category: '일반 문의',
+  status: 'OPEN',
+  progressDueAt: '2026-11-24T09:00:00.000Z',
+  resultDueAt: '2026-11-26T09:00:00.000Z',
+  dueState: 'DUE_SOON',
+  assignee: null,
+  version: 1,
+  createdAt: '2026-11-20T11:00:00.000Z',
+  resolvedAt: null,
+  resultNote: null,
+});
+
+
 test.beforeEach(async ({ page }) => {
   await stubFanApi(page);
+  await stubOpsApi(page);
 });
 
 // 화면 열기(탭 저장소 값, 좌석 화면의 응답 대역과 좌석맵 예외 상자 확인)는 open.mjs가 한다(BAT-171 시험 이의 1: 좌석 화면이 '불러오지 못함'에 머물렀다)
@@ -193,6 +254,29 @@ const applyTextSpacing = (page) =>
 
 test('FE-T31 화면 목록 320: 소비자 웹·파트너·관제마다 한 화면 이상', () => {
   for (const app of ['web', 'partner', 'console']) expect(REFLOW_PAGES.filter((p) => p.app === app).length, app).toBeGreaterThan(0);
+});
+
+/** GAT-340(F-05-8) CS 화면 넷: 태블릿 768에서 2열이고 문서 가로 스크롤이 없다(휴대폰 1열은 320 시험이 본다) */
+test('FE-T31 console CS 768: CS 처리함·승인 업무·회차 취소 판정·팬 조회가 2열이고 문서 가로 스크롤 0', async ({ page }) => {
+  const paths = ['/cs/inbox', '/cs/approvals', '/cancellations/0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e02', '/customers'];
+  for (const path of paths) {
+    const finalPath = await open(page, { app: 'console', locale: 'ko', path });
+    expect(finalPath, `${path} 도착 경로`).toBe(path);
+    const text = await measureText(page);
+    expect(hasPageOverflow(text), `${path} 문서 가로 스크롤 ${text.scrollWidth} > ${text.clientWidth}`).toBe(false);
+    const cols = await page.evaluate(() => {
+      for (const el of document.querySelectorAll('[data-cs-two-col]')) {
+        const r = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        if (!(r.width > 0 && r.height > 0) || cs.display === 'none' || cs.visibility === 'hidden') continue;
+        const tracks = cs.gridTemplateColumns.split(' ').filter(Boolean).length;
+        return { tracks, value: cs.gridTemplateColumns };
+      }
+      return null;
+    });
+    expect(cols, `${path} 2열 상자가 보이지 않는다`).not.toBeNull();
+    expect(cols.tracks, `${path} 열 수: ${cols.value}`).toBe(2);
+  }
 });
 
 for (const p of REFLOW_PAGES) {
