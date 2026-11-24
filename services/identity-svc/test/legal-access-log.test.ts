@@ -1,6 +1,9 @@
 // F-01-8 identity 법정 접속기록 줄 시험(docs/features/identity.md §9, ASVS v5.0.0-16.3.1·16.3.2).
 // 줄은 표준 출력 한 줄(JSON)이고, 법정 사본 갈래만 읽는다. 토큰·비밀번호·쿠키·본문은 싣지 않는다.
 import { describe, expect, test, vi } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { MemorySessionStore } from '../src/modules/session/adapters/memory-session-store.js';
 import { createLegalAccessLog, recordLegalAccess } from '../src/modules/session/legal-access-log.js';
 import { kit } from './support.js';
@@ -104,5 +107,35 @@ describe('F-01-8 identity 법정 접속기록 줄', () => {
       spy2.mockRestore();
     }
     expect(more.join('')).toContain('"kind":"legal-access"');
+  });
+
+  test('IR-08 관리 계정 줄은 is_admin 1을 싣고 일반 줄은 0이다', () => {
+    const t = harness();
+    t.log.record({ event: 'LOGIN', result: 'SUCCESS', provider: 'kakao', accountId: 'fan-1' });
+    t.log.record({ event: 'LOGIN', result: 'SUCCESS', provider: 'kakao', accountId: 'admin-1', isAdmin: true });
+    const [fan, admin] = t.parsed();
+    expect(fan.is_admin).toBe(0);
+    expect(admin.is_admin).toBe(1);
+  });
+
+  test('IR-13 일련번호는 같은 파일을 쓰는 새 기록기에서도 이어지고 1로 돌아가지 않는다', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'peaket-legal-seq-'));
+    const path = join(dir, 'seq');
+    try {
+      const a = createLegalAccessLog({ write: () => {}, now: () => NOW, pod: 'identity-0', statePath: path });
+      a.record({ event: 'LOGIN', result: 'SUCCESS', provider: 'kakao' });
+      a.record({ event: 'LOGOUT', result: 'SUCCESS' });
+      const lines: string[] = [];
+      const b = createLegalAccessLog({ write: (l) => lines.push(l), now: () => NOW, pod: 'identity-0', statePath: path });
+      b.record({ event: 'REFRESH', result: 'SUCCESS' });
+      expect(JSON.parse(lines[0]!).seq).toBe(3);
+      expect(readFileSync(path, 'utf8').trim()).toBe('3');
+      // 새 기록기는 파일의 마지막 값을 읽어 이어 간다(프로세스 재시작 흉내)
+      const restarted2 = createLegalAccessLog({ write: () => {}, now: () => NOW, pod: 'identity-0', statePath: path });
+      restarted2.record({ event: 'LOGOUT', result: 'SUCCESS' });
+      expect(readFileSync(path, 'utf8').trim()).toBe('4');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

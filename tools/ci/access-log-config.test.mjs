@@ -98,9 +98,9 @@ test('V-T21 법정 갈래는 읽은 위치·처음부터 읽기·회전 파일·
   expectBlocked((r) => set(r, 'deploy/platform/observability/collector/access-log.yaml', 'compression: auto', 'compression: gzip'), 'compression');
   expectBlocked((r) => set(r, 'deploy/platform/observability/collector/access-log.yaml', 'block_on_overflow: true', 'block_on_overflow: false'), 'block_on_overflow');
   expectBlocked((r) => set(r, 'deploy/platform/observability/collector/access-log.yaml', 'max_elapsed_time: 0', 'max_elapsed_time: 300s'), 'max_elapsed_time');
-  expectBlocked((r) => set(r, 'deploy/platform/observability/collector/access-log.yaml', 'logs_table_name: access_log', 'logs_table_name: access_log_copy'), 'access_log');
+  expectBlocked((r) => set(r, 'deploy/platform/observability/collector/access-log.yaml', 'logs_table_name: access_log_otel', 'logs_table_name: access_log_copy'), 'access_log');
   // 법정 갈래에는 표본 처리기를 두지 않는다
-  expectBlocked((r) => set(r, 'deploy/platform/observability/collector/access-log.yaml', 'processors: [memory_limiter, filter/legal-only, transform/strip-investigation, batch]', 'processors: [memory_limiter, filter/legal-only, probabilistic_sampler, transform/strip-investigation, batch]'), 'probabilistic_sampler');
+  expectBlocked((r) => set(r, 'deploy/platform/observability/collector/access-log.yaml', 'processors: [memory_limiter, transform/normalize-envoy, filter/legal-only, transform/strip-investigation, batch]', 'processors: [memory_limiter, transform/normalize-envoy, filter/legal-only, probabilistic_sampler, transform/strip-investigation, batch]'), 'probabilistic_sampler');
 });
 
 test('V-T22 [ASVS v5.0.0-16.3.1] [ASVS v5.0.0-16.3.2] 법정·조사 갈래는 file_storage를 따로 쓰고 identity 줄의 빈 seq를 경보로 센다', () => {
@@ -119,13 +119,13 @@ test('V-T23 하루 사본은 03:30 앵커·04:00 내보내기·06:00 지연·Par
   expectBlocked((r) => set(r, jobs, 'retention: P3M7D', 'retention: P3M'), 'P3M7D');
   // 표: 일 파티션·복제 엔진·원문 IP 색인·TTL 3개월 이상
   const ddl = 'data/clickhouse/access-log/001_access_log.sql';
-  expectBlocked((r) => set(r, ddl, 'ENGINE = ReplicatedMergeTree', 'ENGINE = MergeTree'), 'ReplicatedMergeTree');
+  expectBlocked((r) => set(r, ddl, "ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/access_log'", "ENGINE = MergeTree("), 'ReplicatedMergeTree');
   expectBlocked((r) => set(r, ddl, 'PARTITION BY toYYYYMMDD(ts)', 'PARTITION BY toYYYYMM(ts)'), 'toYYYYMMDD');
-  expectBlocked((r) => set(r, ddl, 'INTERVAL 3 MONTH', 'INTERVAL 2 MONTH'), '3개월');
+  expectBlocked((r) => set(r, ddl, 'TTL toDateTime(ts) + INTERVAL 3 MONTH', 'TTL toDateTime(ts) + INTERVAL 2 MONTH'), '3개월');
   expectBlocked((r) => set(r, ddl, 'TYPE bloom_filter', 'TYPE minmax'), 'bloom_filter');
   // 권한: 넣기만·관리 계정 줄만·수사 대응만, 사본 쓰기/읽기 역할 분리
   const users = 'data/clickhouse/access-log/002_users.sql';
-  expectBlocked((r) => set(r, users, 'GRANT INSERT ON access_log.access_log TO al_ingest;', 'GRANT INSERT ON access_log.access_log TO al_ingest;\nGRANT SELECT ON access_log.access_log TO al_ingest;'), 'al_ingest');
+  expectBlocked((r) => set(r, users, 'GRANT INSERT ON access_log.access_log_otel TO al_ingest;', 'GRANT INSERT ON access_log.access_log_otel TO al_ingest;\nGRANT SELECT ON access_log.access_log TO al_ingest;'), 'al_ingest');
   expectBlocked((r) => set(r, users, 'CREATE ROW POLICY IF NOT EXISTS admin_rows_only', 'CREATE ROW POLICY IF NOT EXISTS admin_rows_everyone'), 'admin_rows');
   expectBlocked((r) => set(r, users, 'GRANT SELECT ON access_log.access_log TO al_investigation;', ''), 'al_investigation');
 });

@@ -91,6 +91,8 @@ test('IR-05 일반 로그 갈래가 게이트웨이 원문을 Loki로 보내지 
   assert.match(c, /::\/48/);
   // 원문 IP 필드(clientIp)를 지우기만 하고 Loki로 보내지 않는다
   assert.match(c, /delete_key\(attributes, "clientIp"\)/);
+  // 본문(원래 JSON)에도 원문 IP·조사 칸이 남지 않게 본문을 비운다
+  assert.match(c, /transform\/access-general:[\s\S]*?set\(body, ""\)/);
 });
 
 test('IR-06 조사 경로가 openapi의 실제 경로·메서드와 맞는다', () => {
