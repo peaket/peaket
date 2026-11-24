@@ -6,6 +6,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, PASSWORD_CHANGE_SCOPE } from '@peaket/platform';
 import { decideRefresh, sessionAlive } from '../../session/index.js';
 import { ADMIN_LOGIN_SIGNALS, ADMIN_REFRESH_STORE, ADMIN_TOKEN_SIGNER, type AdminAud, type AdminLoginSignals, type AdminRefreshStore, type AdminTokenSigner, ROLES_OF_AUD } from '../domain/ports.js';
+import { recordLegalAccess } from '../../session/legal-access-log.js';
 import { ADMIN_SESSION_IDLE_MS } from './login-second-step.js';
 
 export type AdminRefreshResult =
@@ -26,8 +27,8 @@ export class RefreshAdminSession {
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
-  async run(i: { aud: AdminAud; refreshToken: string }): Promise<AdminRefreshResult> {
-    if (!SHAPE.test(i.refreshToken)) return this.#invalid(i.aud);
+  async run(i: { aud: AdminAud; refreshToken: string; clientIp?: string; userAgent?: string; requestId?: string }): Promise<AdminRefreshResult> {
+    if (!SHAPE.test(i.refreshToken)) return this.#invalid(i);
     const now = this.clock.now();
     const nextToken = randomBytes(32).toString('base64url');
     const nextHash = sha256(nextToken);
@@ -64,17 +65,20 @@ export class RefreshAdminSession {
       await tx.recordRefreshHash({ hash: nextHash, sessionId: s.id, refreshFamily: s.refreshFamily, issuedAt: now, expiresAt: s.absoluteExpiresAt });
       return { kind: decision, sessionId: s.id, absoluteExpiresAt: s.absoluteExpiresAt, accessToken: at.token };
     });
-    if (r.kind === 'invalid') return this.#invalid(i.aud);
+    if (r.kind === 'invalid') return this.#invalid(i);
     if (r.kind === 'reuse') {
       this.signals.refreshed?.(i.aud, 'reused');
+      recordLegalAccess({ event: 'REFRESH', result: 'FAILED', failure: 'session', clientIp: i.clientIp, userAgent: i.userAgent, requestId: i.requestId, isAdmin: true });
       return { result: 'REUSED' };
     }
     this.signals.refreshed?.(i.aud, r.kind === 'rotate' ? 'rotated' : 'retried');
+    recordLegalAccess({ event: 'REFRESH', result: 'SUCCESS', clientIp: i.clientIp, userAgent: i.userAgent, requestId: i.requestId, accountId: r.sessionId, isAdmin: true });
     return { result: 'OK', sessionId: r.sessionId, accessToken: r.accessToken, refreshToken: nextToken, absoluteExpiresAt: r.absoluteExpiresAt };
   }
 
-  #invalid(aud: AdminAud): AdminRefreshResult {
-    this.signals.refreshed?.(aud, 'invalid');
+  #invalid(i: { aud: AdminAud; clientIp?: string; userAgent?: string; requestId?: string }): AdminRefreshResult {
+    this.signals.refreshed?.(i.aud, 'invalid');
+    recordLegalAccess({ event: 'REFRESH', result: 'FAILED', failure: 'session', clientIp: i.clientIp, userAgent: i.userAgent, requestId: i.requestId, isAdmin: true });
     return { result: 'INVALID' };
   }
 }

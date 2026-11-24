@@ -1,5 +1,6 @@
 # 법정 접속기록 갈래 경보(SEV2 kind legal)와 조사 사본 버림(SEV3 kind hygiene).
 # 정본: docs/observability.md §5 '법정 접속기록 갈래 신호', docs/infra.md §10 RB-38, docs/verification.md V-T21~V-T23.
+# 수집기 자체 지표는 exporter·receiver 성분 라벨을 쓴다(pipeline 라벨은 없다).
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -13,9 +14,9 @@ spec:
       rules:
         # 버린 조사 사본 줄. 노드 구분은 긁기 대상의 외부 라벨(node)이 붙인다(INF-020).
         - record: inv_copy_dropped_total
-          expr: sum(increase(otelcol_exporter_enqueue_failed_log_records{pipeline="logs/investigation"}[5m]))
+          expr: sum(increase(otelcol_exporter_enqueue_failed_log_records{exporter="kafka/investigation"}[5m]))
         - alert: AccessLogIngestFailures
-          expr: increase(otelcol_exporter_enqueue_failed_log_records{pipeline="logs/legal"}[5m]) > 0 or increase(otelcol_receiver_refused_log_records{pipeline="logs/legal"}[5m]) > 0
+          expr: increase(otelcol_exporter_enqueue_failed_log_records{exporter="clickhouse/access-log"}[5m]) > 0 or increase(otelcol_receiver_refused_log_records{receiver="filelog/envoy-legal"}[5m]) > 0 or increase(otelcol_receiver_refused_log_records{receiver="filelog/identity-legal"}[5m]) > 0
           labels:
             severity: sev2
             kind: legal
@@ -24,7 +25,7 @@ spec:
             runbook_url: https://runbooks.peaket.example/RB-38
             dashboard_url: /d/peaket-obs-pipeline
         - alert: AccessLogQueueHigh
-          expr: (otelcol_exporter_queue_size{pipeline="logs/legal"} / otelcol_exporter_queue_capacity{pipeline="logs/legal"}) > 0.5 or increase(otelcol_exporter_send_failed_log_records{pipeline="logs/legal"}[5m]) > 0
+          expr: (otelcol_exporter_queue_size{exporter="clickhouse/access-log"} / otelcol_exporter_queue_capacity{exporter="clickhouse/access-log"}) > 0.5 or increase(otelcol_exporter_send_failed_log_records{exporter="clickhouse/access-log"}[5m]) > 0
           labels:
             severity: sev2
             kind: legal
@@ -50,13 +51,14 @@ spec:
             summary: identity 접속기록 줄에 빈 일련번호가 있다
             runbook_url: https://runbooks.peaket.example/RB-38
             dashboard_url: /d/peaket-obs-pipeline
+        # 전날 사본이 06:00까지 없다. 마지막 성공이 오늘 것이면(04:00 뒤) 울리지 않고, 지표가 아예 없어도 울린다.
         - alert: AccessLogDailyCopyLate
-          expr: time() - access_log_export_last_success_timestamp > 6 * 3600
+          expr: absent(access_log_export_last_success_timestamp) or (hour() >= 6 and (year(access_log_export_last_success_timestamp) < year() or month(access_log_export_last_success_timestamp) < month() or day_of_month(access_log_export_last_success_timestamp) < day_of_month()))
           labels:
             severity: sev2
             kind: legal
           annotations:
-            summary: 전날 하루 사본이 06:00까지 없다
+            summary: 전날 하루 사본이 06:00까지 없다(마지막 성공이 전날 이전이거나 지표가 없다)
             runbook_url: https://runbooks.peaket.example/RB-38
             dashboard_url: /d/peaket-obs-pipeline
         - alert: InvCopyDropped

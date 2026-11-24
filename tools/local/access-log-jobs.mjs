@@ -2,11 +2,13 @@
 // F-01-8 법정 접속기록 로컬 작업 실행기(대조·일 앵커·하루 사본 내보내기/복원).
 // 쓰는 법:
 //   node tools/local/access-log-jobs.mjs --reconcile --ingress <n> --rows <n> [--seq 1,2,3]
+//   node tools/local/access-log-jobs.mjs --reconcile --clickhouse <URL> --envoy <URL> [--envoy-query <PromQL>] [--seq ...]
 //   node tools/local/access-log-jobs.mjs --anchor --date <YYYY-MM-DD> --source <n> --rows <n> --sha256 <hex> [--seq ...]
+//   node tools/local/access-log-jobs.mjs --anchor --date <YYYY-MM-DD> --clickhouse <URL> [--envoy <URL>] [--bucket <URL>]
 //   node tools/local/access-log-jobs.mjs --copy --date <YYYY-MM-DD> --clickhouse <URL> --bucket <URL>
 //   node tools/local/access-log-jobs.mjs --restore --date <YYYY-MM-DD> --clickhouse <URL> --bucket <URL>
 // 값(0.1%·5분·15분·3개월+7일)은 deploy/platform/observability/access-log/jobs.yaml에서 읽는다.
-// Docker·ClickHouse·moto가 필요한 --copy/--restore는 로컬 시험 몫이다. 나머지는 순수 계산이다.
+// 원천 0(확인 불가)은 종료 1이다. seq 중복은 at-least-once 재전송이라 경보로 세지 않고, 빈 번호만 센다(IR-12).
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,7 +16,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { parse } from 'yaml';
-import { dayAnchor, objectLockHeaders, retentionUntil, seqGaps, shortfallAlarm, shortfallRatio } from '../ci/access-log-reconcile.mjs';
+import { dayAnchor, objectLockHeaders, retentionUntil, seqGaps, shortfallAlarm, shortfallRatio, windowOf } from '../ci/access-log-reconcile.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..', '..');
@@ -33,7 +35,7 @@ function jobsConfig() {
   const j = parse(readFileSync(JOBS, 'utf8'));
   const m = /^P(\d+)M(\d+)D$/.exec(String(j.copy?.retention ?? ''));
   if (!m) throw new Error(`copy.retention이 P<개월>M<일>D 꼴이 아니다: ${j.copy?.retention}`);
-  return { threshold: j.reconcile?.shortfallThreshold, months: Number(m[1]), days: Number(m[2]), bucket: j.copy?.bucket };
+  return { threshold: j.reconcile?.shortfallThreshold, windowOffsetMinutes: j.reconcile?.windowOffsetMinutes, windowMinutes: j.reconcile?.windowMinutes, months: Number(m[1]), days: Number(m[2]), bucket: j.copy?.bucket };
 }
 
 async function fetchOk(url, init) {
@@ -41,8 +43,23 @@ async function fetchOk(url, init) {
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status} ${await res.text()}`);
   return res;
 }
-
 const chQuery = (base, sql) => `${base.replace(/\/$/, '')}/?query=${encodeURIComponent(sql)}`;
+
+/** ClickHouse HTTP에서 5분 칸/하루 행 수와 seq 목록을 읽는다. */
+async function clickhouseRows(base, where) {
+  const res = await fetchOk(chQuery(base, `SELECT count() AS n, groupArray(seq) AS seqs FROM access_log.access_log WHERE ${where} FORMAT JSON`));
+  const j = await res.json();
+  const row = j?.data?.[0] ?? {};
+  return { rows: Number(row.n ?? 0), seqs: Array.isArray(row.seqs) ? row.seqs.map((x) => (x === null ? null : Number(x))) : [] };
+}
+
+/** Prometheus HTTP에서 원천 요청 수(또는 하루 합계)를 읽는다. 결과가 없으면 null(확인 불가). */
+async function promNumber(base, query) {
+  const res = await fetchOk(`${base.replace(/\/$/, '')}/api/v1/query?query=${encodeURIComponent(query)}`);
+  const j = await res.json();
+  const v = j?.data?.result?.[0]?.value?.[1];
+  return v === undefined ? null : Number(v);
+}
 
 async function copyDay(o, j) {
   const day = o.date;
@@ -72,7 +89,51 @@ async function restoreDay(o) {
   return { date: o.date, rows: after, sha256 };
 }
 
-function main(argv) {
+async function reconcile(o, j) {
+  let ingress = o.ingress === undefined ? undefined : int(o.ingress, 'ingress');
+  let rows = o.rows === undefined ? undefined : int(o.rows, 'rows');
+  let seqs = seqsOf(o.seq);
+  let window;
+  if (o.clickhouse || o.envoy) {
+    window = windowOf(Date.now(), { offsetMinutes: j.windowOffsetMinutes, sizeMinutes: j.windowMinutes });
+    if (o.clickhouse) {
+      const r = await clickhouseRows(o.clickhouse, `ts >= fromUnixTimestamp64Milli(${window.startMs}) and ts < fromUnixTimestamp64Milli(${window.endMs})`);
+      rows = r.rows;
+      if (o.seq === undefined) seqs = r.seqs;
+    }
+    if (o.envoy) ingress = await promNumber(o.envoy, o['envoy-query'] ?? 'sum(increase(envoy_http_downstream_rq_total[5m]))');
+  }
+  if (ingress === undefined || rows === undefined) throw new Error('--reconcile에는 (--ingress·--rows) 또는 (--clickhouse·--envoy)가 필요하다');
+  const ratio = shortfallRatio(ingress, rows);
+  const alarm = ratio === null ? null : shortfallAlarm(ratio, j.threshold);
+  const gaps = seqGaps(seqs);
+  return { kind: 'access-log-reconcile', window, ingress, rows, shortfall: ratio, threshold: j.threshold, verifiable: ratio !== null, alarm, seqMissing: gaps.missing, seqDuplicates: gaps.duplicates };
+}
+
+async function anchor(o, j) {
+  let source = o.source === undefined ? undefined : int(o.source, 'source');
+  let rows = o.rows === undefined ? undefined : int(o.rows, 'rows');
+  let seqs = seqsOf(o.seq);
+  let sha256 = o.sha256;
+  let fileRows = o.fileRows === undefined ? undefined : int(o.fileRows, 'fileRows');
+  if (o.clickhouse) {
+    const where = `toYYYYMMDD(ts)=toYYYYMMDD(toDate('${o.date}'))`;
+    const r = await clickhouseRows(o.clickhouse, where);
+    rows = r.rows;
+    if (o.seq === undefined) seqs = r.seqs;
+  }
+  if (o.envoy) source = await promNumber(o.envoy, o['envoy-query'] ?? 'sum(increase(envoy_http_downstream_rq_total[1d]))');
+  if (o.bucket && sha256 === undefined) {
+    const a = JSON.parse(await (await fetchOk(`${o.bucket.replace(/\/$/, '')}/access_log/${o.date}.anchor.json`)).text());
+    sha256 = a.fileSha256;
+    fileRows = a.fileRows;
+  }
+  if (!o.date || source === undefined || rows === undefined || !sha256) throw new Error('--anchor에는 --date·--source(또는 --envoy)·--rows(또는 --clickhouse)·--sha256(또는 --bucket)이 필요하다');
+  const r = dayAnchor({ date: o.date, sourceTotal: source, ingestedTotal: rows, seqs, fileSha256: sha256, fileRows: fileRows ?? rows });
+  return { kind: 'access-log-anchor', ...r, retentionUntil: retentionUntil(o.date, j.months, j.days) };
+}
+
+async function main(argv) {
   let a;
   try {
     a = parseArgs({
@@ -90,6 +151,8 @@ function main(argv) {
         sha256: { type: 'string' },
         seq: { type: 'string' },
         clickhouse: { type: 'string' },
+        envoy: { type: 'string' },
+        'envoy-query': { type: 'string' },
         bucket: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
       },
@@ -108,30 +171,21 @@ function main(argv) {
   try {
     const j = jobsConfig();
     if (o.reconcile) {
-      if (o.ingress === undefined || o.rows === undefined) throw new Error('--reconcile에는 --ingress·--rows가 필요하다');
-      const ratio = shortfallRatio(int(o.ingress, 'ingress'), int(o.rows, 'rows'));
-      const alarm = ratio === null ? null : shortfallAlarm(ratio, j.threshold);
-      const gaps = seqGaps(seqsOf(o.seq));
-      console.log(JSON.stringify({ kind: 'access-log-reconcile', ingress: Number(o.ingress), rows: Number(o.rows), shortfall: ratio, threshold: j.threshold, alarm, seqMissing: gaps.missing, seqDuplicates: gaps.duplicates }));
-      return alarm === true || gaps.missing.length > 0 || gaps.duplicates.length > 0 ? 1 : 0;
+      const r = await reconcile(o, j);
+      console.log(JSON.stringify(r));
+      // 확인 불가(원천 0)와 빈 번호는 실패다. 중복은 정상 재전송이라 실패로 세지 않는다.
+      return r.verifiable === false || r.alarm === true || r.seqMissing.length > 0 ? 1 : 0;
     }
     if (o.anchor) {
-      if (!o.date || o.source === undefined || o.rows === undefined || !o.sha256) throw new Error('--anchor에는 --date·--source·--rows·--sha256이 필요하다');
-      const fileRows = o.fileRows === undefined ? Number(o.rows) : int(o.fileRows, 'fileRows');
-      const r = dayAnchor({ date: o.date, sourceTotal: int(o.source, 'source'), ingestedTotal: int(o.rows, 'rows'), seqs: seqsOf(o.seq), fileSha256: o.sha256, fileRows });
-      console.log(JSON.stringify({ kind: 'access-log-anchor', ...r, retentionUntil: retentionUntil(o.date, j.months, j.days) }));
+      const r = await anchor(o, j);
+      console.log(JSON.stringify(r));
       return r.matches ? 0 : 1;
     }
     if (o.copy || o.restore) {
       if (!o.date || !o.clickhouse || !o.bucket) throw new Error('--copy/--restore에는 --date·--clickhouse·--bucket이 필요하다');
-      const run = o.copy ? copyDay(o, j) : restoreDay(o);
-      return run.then((r) => {
-        console.log(JSON.stringify({ kind: o.copy ? 'access-log-copy' : 'access-log-restore', ...r }));
-        return 0;
-      }).catch((e) => {
-        console.error(String(e));
-        return 2;
-      });
+      const r = o.copy ? await copyDay(o, j) : await restoreDay(o);
+      console.log(JSON.stringify({ kind: o.copy ? 'access-log-copy' : 'access-log-restore', ...r }));
+      return 0;
     }
     console.error(USAGE);
     return 2;
@@ -141,6 +195,4 @@ function main(argv) {
   }
 }
 
-const p = main(process.argv.slice(2));
-if (typeof p === 'number') process.exitCode = p;
-else process.exitCode = await p;
+process.exitCode = await main(process.argv.slice(2));

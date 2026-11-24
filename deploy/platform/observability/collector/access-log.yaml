@@ -4,11 +4,12 @@
 #   일반 사본: 같은 Envoy 접근 로그에서 조사 칸을 지우고 IP 앞부분만 남겨 게이트웨이 수집기를 거쳐 Loki로.
 #   조사 사본: 같은 파일을 따로 읽어(자기 file_storage) 조사 경로만 Kafka investigation.requests로. 큐가 차면 버리고 센다.
 # 값(0.1%·5분·15분·10분·03:30·04:00·06:00)의 정본은 docs/observability.md §5·§7과 docs/infra.md §6이다.
+# 게이트웨이 JSON은 deploy/gateways/00-common.yaml이 쓴다: kind=envoy-access, time·method·path·host·status·durationMs·clientIp·requestId·userAgent·app·ja4·asn·edgeBotLabels·sub·pid·traceId.
 receivers:
-  # 법정 사본 — 게이트웨이 접근 로그. 처음 보는 파일도 처음부터 읽고, 회전 파일도 읽는다(§7 ①③)
+  # 법정 사본 — 게이트웨이 접근 로그. kubelet 경로는 /var/log/pods/<namespace>_<pod>_<uid>/<container>/*.log다.
   filelog/envoy-legal:
     include:
-      - /var/log/pods/*_envoy-gateway-system_*/envoy/*.log
+      - /var/log/pods/envoy-gateway-system_*_*/envoy/*.log
     exclude:
       - /var/log/pods/observability_otel-*/*/*.log
     start_at: beginning
@@ -24,13 +25,13 @@ receivers:
         parse_from: body
         parse_to: attributes
         timestamp:
-          parse_from: attributes.ts
+          parse_from: attributes.time
           layout_type: gotime
-          layout: '2006-01-02T15:04:05.000000Z07:00'
+          layout: '2006-01-02T15:04:05.000Z07:00'
   # 법정 사본 — identity 접속기록 줄(로그인·로그아웃·재인증·갱신). 읽은 위치를 게이트웨이와 따로 둔다
   filelog/identity-legal:
     include:
-      - /var/log/pods/*_identity_*/identity-svc/*.log
+      - /var/log/pods/core_identity-svc-*_*/identity-svc/*.log
     start_at: beginning
     include_file_path: true
     include_file_name: false
@@ -43,10 +44,14 @@ receivers:
         id: identity-json
         parse_from: body
         parse_to: attributes
+        timestamp:
+          parse_from: attributes.ts
+          layout_type: gotime
+          layout: '2006-01-02T15:04:05.000Z07:00'
   # 조사 사본 — 법정·일반과 다른 수신기·다른 읽은 위치(§7 '게이트웨이 접근 로그 분기')
   filelog/envoy-investigation:
     include:
-      - /var/log/pods/*_envoy-gateway-system_*/envoy/*.log
+      - /var/log/pods/envoy-gateway-system_*_*/envoy/*.log
     exclude:
       - /var/log/pods/observability_otel-*/*/*.log
     start_at: beginning
@@ -62,13 +67,13 @@ receivers:
         parse_from: body
         parse_to: attributes
         timestamp:
-          parse_from: attributes.ts
+          parse_from: attributes.time
           layout_type: gotime
-          layout: '2006-01-02T15:04:05.000000Z07:00'
+          layout: '2006-01-02T15:04:05.000Z07:00'
   # 일반 사본 — 조사 칸을 지우고 IP 앞부분만 남긴다
   filelog/envoy-general:
     include:
-      - /var/log/pods/*_envoy-gateway-system_*/envoy/*.log
+      - /var/log/pods/envoy-gateway-system_*_*/envoy/*.log
     exclude:
       - /var/log/pods/observability_otel-*/*/*.log
     start_at: beginning
@@ -84,18 +89,42 @@ receivers:
         parse_from: body
         parse_to: attributes
         timestamp:
-          parse_from: attributes.ts
+          parse_from: attributes.time
           layout_type: gotime
-          layout: '2006-01-02T15:04:05.000000Z07:00'
+          layout: '2006-01-02T15:04:05.000Z07:00'
 
 processors:
+  # 게이트웨이 JSON(camelCase)을 법정 칸(snake_case)으로 옮긴다. identity 줄은 kind가 이미 있고 time이 없다.
+  transform/normalize-envoy:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(attributes["kind"], "envoy-access") where attributes["time"] != nil
+          - set(attributes["ts"], attributes["time"]) where attributes["time"] != nil
+          - set(attributes["client_ip"], attributes["clientIp"]) where attributes["clientIp"] != nil
+          - set(attributes["duration_ms"], attributes["durationMs"]) where attributes["durationMs"] != nil
+          - set(attributes["edge_bot_labels"], attributes["edgeBotLabels"]) where attributes["edgeBotLabels"] != nil
+          - set(attributes["request_id"], attributes["requestId"]) where attributes["requestId"] != nil and attributes["requestId"] != ""
+          - set(attributes["request_id"], attributes["traceId"]) where attributes["request_id"] == nil or attributes["request_id"] == ""
+          - set(attributes["user_agent"], attributes["userAgent"]) where attributes["userAgent"] != nil
+          - set(attributes["status"], Int(attributes["status"])) where attributes["status"] != nil
+          - set(attributes["source"], "gateway") where attributes["kind"] == "envoy-access"
+          - set(attributes["source"], "identity") where attributes["kind"] == "legal-access"
+          - set(attributes["is_admin"], Int(attributes["is_admin"])) where attributes["is_admin"] != nil
+          - delete_key(attributes, "time")
+          - delete_key(attributes, "clientIp")
+          - delete_key(attributes, "durationMs")
+          - delete_key(attributes, "edgeBotLabels")
+          - delete_key(attributes, "requestId")
+          - delete_key(attributes, "userAgent")
   # 법정 갈래에는 법정 줄만 남긴다(게이트웨이 접근 로그·identity 접속기록)
   filter/legal-only:
     error_mode: ignore
     logs:
       log_record:
-        - 'attributes["kind"] != "envoy-access" and attributes["kind"] != "legal-access"'
-  # 일반 로그 갈래로 새지 않게 identity 접속기록 줄과 접근 로그 줄을 뺀다(일반 filelog는 JSON을 풀지 않아 본문 글자로 본다)
+        - 'not (attributes["kind"] == "envoy-access" or attributes["kind"] == "legal-access")'
+  # 일반 로그 갈래로 새지 않게 identity 접속기록 줄과 게이트웨이 접근 로그 줄을 뺀다(일반 filelog는 JSON을 풀지 않아 본문 글자로 본다)
   filter/drop-legal:
     error_mode: ignore
     logs:
@@ -105,7 +134,7 @@ processors:
     error_mode: ignore
     logs:
       log_record:
-        - 'IsMatch(body, "\"kind\":\"envoy-access\"")'
+        - 'IsMatch(body, "\"kind\":\"envoy-access\"") or IsMatch(body, "\"clientIp\":")'
   # 법정·일반 사본에서 조사 칸을 지운다(ADR-0171 결정 2·4). 법정 사본은 POL-025가 요구하는 칸만 남긴다.
   # 법정 사본은 401·403 같은 status >= 400 거절 줄도 남긴다(16.3.3). 표본으로 줄이지 않는다.
   transform/strip-investigation:
@@ -116,16 +145,18 @@ processors:
           - delete_key(attributes, "ja4")
           - delete_key(attributes, "asn")
           - delete_key(attributes, "edge_bot_labels")
+          - delete_key(attributes, "edgeBotLabels")
           - delete_key(attributes, "sub")
           - delete_key(attributes, "pid")
           - delete_key(attributes, "jny")
+          - set(body, "")
   # 조사 경로만 고른다(asyncapi InvestigationRequest.routeKind 목록). 상태 조회·셔플 결과 파일은 뺀다.
   filter/investigation-routes:
     error_mode: ignore
     logs:
       log_record:
-        - 'IsMatch(attributes["path"], "^(/v1/queues/[^/]+/(lobby-participants|pre-verifications|entries|admission|verification)|/v1/events/[^/]+/seatmap|/v1/holds(/|$)|/v1/holds/[^/]+/(release|extension)$|/v1/orders(/|$)|/v1/payments(/|$)|/v1/payments/[^/]+/acceptance$|/v1/tickets/[^/]+/(transfers|returns)$)") and not IsMatch(attributes["path"], "^/v1/queues/[^/]+/(status|files)(/|$)")'
-  # 조사 줄의 routeKind·gateway를 정한다. 값이 없는 칸은 지어내지 않는다(위조 끝단 머리는 게이트웨이가 지운다).
+        - 'not (((IsMatch(attributes["path"], "^/v1/queues/[^/]+/(lobby-participants|pre-verifications|entries|admission|verification)$") and attributes["method"] == "POST") or (IsMatch(attributes["path"], "^/v1/events/[^/]+/holds$") and attributes["method"] == "POST") or (IsMatch(attributes["path"], "^/v1/holds/[^/]+$") and attributes["method"] == "DELETE") or (IsMatch(attributes["path"], "^/v1/holds/[^/]+/extension$") and attributes["method"] == "POST") or (IsMatch(attributes["path"], "^/v1/events/[^/]+/seatmap-snapshot$") and attributes["method"] == "GET") or (IsMatch(attributes["path"], "^/v1/orders$") and attributes["method"] == "POST") or (IsMatch(attributes["path"], "^/v1/orders/[^/]+/payments$") and attributes["method"] == "POST") or (IsMatch(attributes["path"], "^/v1/orders/[^/]+/payment-acceptance$") and attributes["method"] == "POST") or (IsMatch(attributes["path"], "^/v1/tickets/[^/]+/transfers$") and attributes["method"] == "POST") or (IsMatch(attributes["path"], "^/v1/tickets/[^/]+/returns$") and attributes["method"] == "POST")) and not IsMatch(attributes["path"], "^/v1/queues/[^/]+/(status|files)(/|$)"))'
+  # 조사 줄의 routeKind·gateway를 정하고, Kafka raw가 실을 body(계약 칸 map)를 만든다.
   transform/investigation:
     error_mode: ignore
     log_statements:
@@ -133,21 +164,29 @@ processors:
         statements:
           - set(attributes["gateway"], "GW_QUEUE") where IsMatch(attributes["path"], "^/v1/queues/")
           - set(attributes["gateway"], "GW_FAN") where not IsMatch(attributes["path"], "^/v1/queues/")
-          - set(attributes["routeKind"], "LOBBY_ENTRY") where IsMatch(attributes["path"], "^/v1/queues/[^/]+/lobby-participants$")
-          - set(attributes["routeKind"], "PREVERIFY") where IsMatch(attributes["path"], "^/v1/queues/[^/]+/pre-verifications$")
-          - set(attributes["routeKind"], "QUEUE_ENTRY") where IsMatch(attributes["path"], "^/v1/queues/[^/]+/entries$")
-          - set(attributes["routeKind"], "ADMISSION") where IsMatch(attributes["path"], "^/v1/queues/[^/]+/admission$")
-          - set(attributes["routeKind"], "VERIFICATION") where IsMatch(attributes["path"], "^/v1/queues/[^/]+/verification$")
-          - set(attributes["routeKind"], "SEATMAP_SNAPSHOT") where IsMatch(attributes["path"], "^/v1/events/[^/]+/seatmap$")
-          - set(attributes["routeKind"], "HOLD") where IsMatch(attributes["path"], "^/v1/holds$")
-          - set(attributes["routeKind"], "HOLD_RELEASE") where IsMatch(attributes["path"], "^/v1/holds/[^/]+/release$")
-          - set(attributes["routeKind"], "HOLD_EXTENSION") where IsMatch(attributes["path"], "^/v1/holds/[^/]+/extension$")
-          - set(attributes["routeKind"], "ORDER") where IsMatch(attributes["path"], "^/v1/orders$")
-          - set(attributes["routeKind"], "PAYMENT_ATTEMPT") where IsMatch(attributes["path"], "^/v1/payments$")
-          - set(attributes["routeKind"], "PAYMENT_ACCEPTANCE") where IsMatch(attributes["path"], "^/v1/payments/[^/]+/acceptance$")
-          - set(attributes["routeKind"], "TRANSFER") where IsMatch(attributes["path"], "^/v1/tickets/[^/]+/transfers$")
-          - set(attributes["routeKind"], "TICKET_RETURN") where IsMatch(attributes["path"], "^/v1/tickets/[^/]+/returns$")
-  # 일반 사본: 조사 칸을 지우고 IP를 앞부분으로 바꾼다(§7, pseudonym.ts의 ipPrefix와 같은 꼴)
+          - set(attributes["routeKind"], "LOBBY_ENTRY") where IsMatch(attributes["path"], "^/v1/queues/[^/]+/lobby-participants$") and attributes["method"] == "POST"
+          - set(attributes["routeKind"], "PREVERIFY") where IsMatch(attributes["path"], "^/v1/queues/[^/]+/pre-verifications$") and attributes["method"] == "POST"
+          - set(attributes["routeKind"], "QUEUE_ENTRY") where IsMatch(attributes["path"], "^/v1/queues/[^/]+/entries$") and attributes["method"] == "POST"
+          - set(attributes["routeKind"], "ADMISSION") where IsMatch(attributes["path"], "^/v1/queues/[^/]+/admission$") and attributes["method"] == "POST"
+          - set(attributes["routeKind"], "VERIFICATION") where IsMatch(attributes["path"], "^/v1/queues/[^/]+/verification$") and attributes["method"] == "POST"
+          - set(attributes["routeKind"], "SEATMAP_SNAPSHOT") where IsMatch(attributes["path"], "^/v1/events/[^/]+/seatmap-snapshot$") and attributes["method"] == "GET"
+          - set(attributes["routeKind"], "HOLD") where IsMatch(attributes["path"], "^/v1/events/[^/]+/holds$") and attributes["method"] == "POST"
+          - set(attributes["routeKind"], "HOLD_RELEASE") where IsMatch(attributes["path"], "^/v1/holds/[^/]+$") and attributes["method"] == "DELETE"
+          - set(attributes["routeKind"], "HOLD_EXTENSION") where IsMatch(attributes["path"], "^/v1/holds/[^/]+/extension$") and attributes["method"] == "POST"
+          - set(attributes["routeKind"], "ORDER") where IsMatch(attributes["path"], "^/v1/orders$") and attributes["method"] == "POST"
+          - set(attributes["routeKind"], "PAYMENT_ATTEMPT") where IsMatch(attributes["path"], "^/v1/orders/[^/]+/payments$") and attributes["method"] == "POST"
+          - set(attributes["routeKind"], "PAYMENT_ACCEPTANCE") where IsMatch(attributes["path"], "^/v1/orders/[^/]+/payment-acceptance$") and attributes["method"] == "POST"
+          - set(attributes["routeKind"], "TRANSFER") where IsMatch(attributes["path"], "^/v1/tickets/[^/]+/transfers$") and attributes["method"] == "POST"
+          - set(attributes["routeKind"], "TICKET_RETURN") where IsMatch(attributes["path"], "^/v1/tickets/[^/]+/returns$") and attributes["method"] == "POST"
+          - set(attributes["requestId"], attributes["request_id"])
+          - set(attributes["ip"], attributes["client_ip"])
+          - set(attributes["accountId"], attributes["account_id"]) where attributes["account_id"] != nil
+          - set(attributes["journeyId"], attributes["jny"]) where attributes["jny"] != nil
+          - set(attributes["edgeBotLabels"], Split(attributes["edge_bot_labels"], ",")) where attributes["edge_bot_labels"] != nil and attributes["edge_bot_labels"] != ""
+          - set(attributes["asn"], Int(attributes["asn"])) where attributes["asn"] != nil
+          - set(body, attributes)
+          - keep_keys(body, ["ts", "requestId", "gateway", "routeKind", "status", "ip", "eventId", "journeyId", "accountId", "pid", "asn", "ja4", "edgeBotLabels"])
+  # 일반 사본: 조사 칸과 단말 정보를 지우고 IP를 앞부분으로 바꾼다(§7, pseudonym.ts의 ipPrefix와 같은 꼴)
   transform/access-general:
     error_mode: ignore
     log_statements:
@@ -156,11 +195,19 @@ processors:
           - delete_key(attributes, "ja4")
           - delete_key(attributes, "asn")
           - delete_key(attributes, "edge_bot_labels")
+          - delete_key(attributes, "edgeBotLabels")
           - delete_key(attributes, "sub")
           - delete_key(attributes, "pid")
           - delete_key(attributes, "jny")
+          - set(attributes["user_agent"], "")
+          - delete_key(attributes, "userAgent")
+          - delete_key(attributes, "clientIp")
           - replace_pattern(attributes["client_ip"], "^([0-9]{1,3}[.][0-9]{1,3}[.][0-9]{1,3})[.][0-9]{1,3}$", "$$1.0/24")
-          - replace_pattern(attributes["client_ip"], "^([0-9a-fA-F]{1,4}(:[0-9a-fA-F]{1,4}){0,2})::.*$", "$$1::/48")
+          - replace_pattern(attributes["client_ip"], "^(([0-9a-fA-F]{1,4}:){2}[0-9a-fA-F]{1,4}):.*$", "$$1::/48")
+          - replace_pattern(attributes["client_ip"], "^([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4})::.*$", "$$1:0::/48")
+          - replace_pattern(attributes["client_ip"], "^([0-9a-fA-F]{1,4})::.*$", "$$1:0:0::/48")
+          - replace_pattern(attributes["client_ip"], "^::.*$", "::/48")
+          - set(body, "")
   # 5xx·SLO 초과는 전수로, 그 밖은 앱 로그와 같은 문턱(온세일 1%·평시 10% [가정])으로 고른다. 지금은 10%로 둔다.
   probabilistic_sampler:
     sampling_percentage: 10
@@ -176,11 +223,12 @@ connectors:
         pipelines: [logs/access-general-all]
 
 exporters:
-  # 법정 사본: 접속기록 DB. 디스크 큐가 차면 읽기를 멈추고(버리지 않는다), 재시도는 그만두지 않는다(§7 ②)
+  # 법정 사본: 접속기록 DB. exporter 로그 표(access_log_otel)에 넣고 materialized view가 access_log로 옮긴다.
+  # 디스크 큐가 차면 읽기를 멈추고(버리지 않는다), 재시도는 그만두지 않는다(§7 ②)
   clickhouse/access-log:
     endpoint: tcp://clickhouse-access-log.observability.svc:9000
     database: access_log
-    logs_table_name: access_log
+    logs_table_name: access_log_otel
     create_schema: false
     timeout: 10s
     sending_queue:
@@ -190,7 +238,8 @@ exporters:
     retry_on_failure:
       enabled: true
       max_elapsed_time: 0
-  # 조사 사본: Kafka investigation.requests. 큐가 차면 새 줄을 버리고(법정 갈래를 막지 않는다) 10분 뒤 그만둔다
+  # 조사 사본: Kafka investigation.requests. body를 계약 칸 map으로 만든 뒤 raw로 보낸다.
+  # 큐가 차면 새 줄을 버리고(법정 갈래를 막지 않는다) 10분 뒤 그만둔다
   kafka/investigation:
     brokers:
       - telemetry-kafka-bootstrap.observability.svc:9098
@@ -226,15 +275,15 @@ service:
   pipelines:
     logs/legal:
       receivers: [filelog/envoy-legal, filelog/identity-legal]
-      processors: [memory_limiter, filter/legal-only, transform/strip-investigation, batch]
+      processors: [memory_limiter, transform/normalize-envoy, filter/legal-only, transform/strip-investigation, batch]
       exporters: [clickhouse/access-log]
     logs/investigation:
       receivers: [filelog/envoy-investigation]
-      processors: [memory_limiter, filter/investigation-routes, transform/investigation, batch]
+      processors: [memory_limiter, transform/normalize-envoy, filter/investigation-routes, transform/investigation, batch]
       exporters: [kafka/investigation]
     logs/access-general:
       receivers: [filelog/envoy-general]
-      processors: [memory_limiter, transform/access-general]
+      processors: [memory_limiter, transform/normalize-envoy, transform/access-general]
       exporters: [routing/access-general]
     logs/access-general-all:
       receivers: [routing/access-general]

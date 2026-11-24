@@ -58,6 +58,8 @@ export interface CreateSessionInput {
   clientIp?: string;
   /** CloudFront-Viewer-ASN. 앱 서버가 원본 확인 헤더가 맞는 요청에서만 읽고 없으면 0이다(identity.proto) */
   asn?: number;
+  /** 게이트웨이가 받은 요청 ID(x-request-id). 없으면 세션 ID로 대신한다(법정 줄과 조사 사본 대조용) */
+  requestId?: string;
   /** 연결 제안을 따라 다시 로그인할 때만(identity §2.1) */
   link?: { proposalId: string; binding: string };
 }
@@ -474,7 +476,7 @@ export class CreateSession {
     if (r.ended.length && r.endedReason === 'DEVICE_LIMIT') this.signals.terminated('DEVICE_LIMIT', r.ended.length);
     if (r.ended.length && r.endedReason === 'LOGIN_METHOD_CHANGED') this.signals.othersEnded('login_method_changed', r.ended.length);
     const access = await this.signer.access({ accountId: r.accountId, sessionId: r.sessionId, ...(await this.claims.of(r.accountId)) }, now);
-    recordLegalAccess({ event: 'LOGIN', result: 'SUCCESS', provider: i.provider, clientIp: i.clientIp, userAgent: i.userAgent, requestId: r.sessionId, accountId: r.accountId });
+    recordLegalAccess({ event: 'LOGIN', result: 'SUCCESS', provider: i.provider, clientIp: i.clientIp, userAgent: i.userAgent, requestId: i.requestId ?? r.sessionId, accountId: r.accountId });
     return {
       kind: 'session',
       linkedProvider,

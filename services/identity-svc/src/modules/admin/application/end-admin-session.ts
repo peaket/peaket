@@ -3,6 +3,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import { ADMIN_REFRESH_STORE, type AdminRefreshStore } from '../domain/ports.js';
+import { recordLegalAccess } from '../../session/legal-access-log.js';
 
 @Injectable()
 export class EndAdminSession {
@@ -12,7 +13,9 @@ export class EndAdminSession {
   ) {}
 
   /** 끝냈으면 true(이미 끝났거나 그 계정의 세션이 아니면 false) */
-  run(i: { accountId: string; sessionId: string }): Promise<boolean> {
-    return this.store.endSession(i.accountId, i.sessionId, 'LOGOUT', this.clock.now());
+  async run(i: { accountId: string; sessionId: string; clientIp?: string; userAgent?: string; requestId?: string }): Promise<boolean> {
+    const ended = await this.store.endSession(i.accountId, i.sessionId, 'LOGOUT', this.clock.now());
+    if (ended) recordLegalAccess({ event: 'LOGOUT', result: 'SUCCESS', clientIp: i.clientIp, userAgent: i.userAgent, requestId: i.requestId, accountId: i.accountId, isAdmin: true });
+    return ended;
   }
 }

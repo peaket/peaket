@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { type FinishRegistrationOutcome, ManagePasskeys, type PasskeyView } from '../application/manage-passkeys.js';
 import { ReauthenticateAdmin, type ReauthFinishOutcome, type ReauthStartOutcome } from '../application/reauthenticate-admin.js';
 import { type AdminAud, LoginCountersUnavailable, PasskeyChallengesUnavailable, PepperUnavailable, ROLES_OF_AUD, TotpKeyUnavailable } from '../domain/ports.js';
-import { clientIpOf } from './admin-login.controller.js';
+import { clientIpOf, userAgentOf } from './admin-login.controller.js';
 
 const RETRY_AFTER_S = 5;
 const b64u = (max: number) => z.string().min(1).max(max).regex(/^[A-Za-z0-9_-]+$/);
@@ -184,7 +184,7 @@ export class AdminPasskeyController {
     if ('reauthStep' in body) {
       let o: ReauthFinishOutcome;
       try {
-        o = await this.reauth.finish({ aud, accountId: me.accountId, sessionId: me.sessionId, reauthStep: body.reauthStep, credential: body.credential });
+        o = await this.reauth.finish({ aud, accountId: me.accountId, sessionId: me.sessionId, reauthStep: body.reauthStep, credential: body.credential, clientIp: clientIpOf(req), userAgent: userAgentOf(req) });
       } catch (e) {
         return unavailable(e);
       }
@@ -203,7 +203,7 @@ export class AdminPasskeyController {
     }
     let o: ReauthStartOutcome;
     try {
-      o = await this.reauth.start({ aud, accountId: me.accountId, sessionId: me.sessionId, act: body.act, password: body.password, code: body.code, withPasskey: body.withPasskey ?? false, ip: clientIpOf(req) });
+      o = await this.reauth.start({ aud, accountId: me.accountId, sessionId: me.sessionId, act: body.act, password: body.password, code: body.code, withPasskey: body.withPasskey ?? false, ip: clientIpOf(req), userAgent: userAgentOf(req) });
     } catch (e) {
       return unavailable(e);
     }

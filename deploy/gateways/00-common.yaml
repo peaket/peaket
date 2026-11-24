@@ -88,12 +88,15 @@ spec:
             type: JSON
             json:
               time: "%START_TIME(%Y-%m-%dT%H:%M:%S.%3fZ)%"
+              kind: envoy-access
               method: "%REQ(:METHOD)%"
               path: "%REQ_WITHOUT_QUERY(:PATH)%"
               host: "%REQ(:AUTHORITY)%"
               status: "%RESPONSE_CODE%"
               durationMs: "%DURATION%"
               clientIp: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+              requestId: "%REQ(x-request-id)%"
+              userAgent: "%REQ(USER-AGENT)%"
               app: "%REQ(x-peaket-app)%"
               ja4: "%REQ(cloudfront-viewer-ja4-fingerprint)%"
               asn: "%REQ(cloudfront-viewer-asn)%"
@@ -164,12 +167,15 @@ spec:
             type: JSON
             json:
               time: "%START_TIME(%Y-%m-%dT%H:%M:%S.%3fZ)%"
+              kind: envoy-access
               method: "%REQ(:METHOD)%"
               path: "%REQ_WITHOUT_QUERY(:PATH)%"
               host: "%REQ(:AUTHORITY)%"
               status: "%RESPONSE_CODE%"
               durationMs: "%DURATION%"
               clientIp: "%DOWNSTREAM_REMOTE_ADDRESS_WITHOUT_PORT%"
+              requestId: "%REQ(x-request-id)%"
+              userAgent: "%REQ(USER-AGENT)%"
               app: "%REQ(x-peaket-app)%"
               ja4: "%REQ(cloudfront-viewer-ja4-fingerprint)%"
               asn: "%REQ(cloudfront-viewer-asn)%"

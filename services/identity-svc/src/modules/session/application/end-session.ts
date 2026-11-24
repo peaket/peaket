@@ -21,7 +21,7 @@ export class EndSession {
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
-  async run(i: { sessionId: string; accountId: string }): Promise<{ ended: boolean }> {
+  async run(i: { sessionId: string; accountId: string; clientIp?: string; userAgent?: string; requestId?: string }): Promise<{ ended: boolean }> {
     checkIds(i.sessionId, i.accountId);
     const now = this.clock.now();
     const ended = await this.store.transaction(async (tx) => {
@@ -34,7 +34,7 @@ export class EndSession {
     });
     if (ended) {
       this.signals.terminated('LOGOUT', 1);
-      recordLegalAccess({ event: 'LOGOUT', result: 'SUCCESS', requestId: i.sessionId, accountId: i.accountId });
+      recordLegalAccess({ event: 'LOGOUT', result: 'SUCCESS', clientIp: i.clientIp, userAgent: i.userAgent, requestId: i.requestId ?? i.sessionId, accountId: i.accountId });
     }
     return { ended };
   }

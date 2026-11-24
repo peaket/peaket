@@ -44,6 +44,19 @@ export function clientIpOf(req: Pick<FastifyRequest, 'headers' | 'socket'>): str
   return req.socket?.remoteAddress ?? '';
 }
 
+/** 단말 정보(법정 접속기록 줄에만 싣는다). 512자는 기록기가 끊는다 */
+export function userAgentOf(req: Pick<FastifyRequest, 'headers'>): string | undefined {
+  const h = req.headers['user-agent'];
+  return typeof h === 'string' && h !== '' ? h : undefined;
+}
+
+/** 요청 ID(x-request-id). 없으면 Fastify 요청 ID를 쓴다(법정 줄과 조사 사본 대조용) */
+export function requestIdOf(req: Pick<FastifyRequest, 'headers' | 'id'>): string | undefined {
+  const h = req.headers['x-request-id'];
+  if (typeof h === 'string' && h !== '') return h;
+  return typeof req.id === 'string' && req.id !== '' ? req.id : undefined;
+}
+
 function respond(o: LoginStepOutcome, reply: FastifyReply): object {
   switch (o.kind) {
     case 'PASSED':
@@ -109,7 +122,7 @@ export class AdminLoginController {
   async #second(aud: AdminAud, body: { loginStep: string; code: string }, req: FastifyRequest, reply: FastifyReply): Promise<object> {
     let o: SecondStepOutcome;
     try {
-      o = await this.second.run({ aud, loginStep: body.loginStep, code: body.code, ip: clientIpOf(req), deviceId: '' });
+      o = await this.second.run({ aud, loginStep: body.loginStep, code: body.code, ip: clientIpOf(req), deviceId: '', userAgent: userAgentOf(req), requestId: requestIdOf(req) });
     } catch (e) {
       if (e instanceof LoginCountersUnavailable || e instanceof PepperUnavailable || e instanceof TotpKeyUnavailable) throw new ProblemError({ type: 'admin-login-unavailable', status: 503, title: '잠시 뒤 다시 시도해 주세요', retryAfterSeconds: RETRY_AFTER_S });
       throw e;
@@ -126,7 +139,7 @@ export class AdminLoginController {
   async #first(aud: AdminAud, body: PasswordStepBody, req: FastifyRequest, reply: FastifyReply): Promise<object> {
     let o: LoginStepOutcome;
     try {
-      o = await this.step.run({ aud, email: body.email, password: body.password, ip: clientIpOf(req), deviceId: body.deviceId ?? '', ...(body.humanCheckToken ? { humanCheckToken: body.humanCheckToken } : {}) });
+      o = await this.step.run({ aud, email: body.email, password: body.password, ip: clientIpOf(req), deviceId: body.deviceId ?? '', userAgent: userAgentOf(req), ...(body.humanCheckToken ? { humanCheckToken: body.humanCheckToken } : {}) });
     } catch (e) {
       if (e instanceof LoginCountersUnavailable || e instanceof PepperUnavailable) throw new ProblemError({ type: 'admin-login-unavailable', status: 503, title: '잠시 뒤 다시 시도해 주세요', retryAfterSeconds: RETRY_AFTER_S });
       throw e;

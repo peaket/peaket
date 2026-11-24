@@ -24,7 +24,9 @@ export class TokenController {
   @HttpCode(204)
   async refreshTokens(@Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<void> {
     void reply.header('cache-control', 'no-store');
-    const r = await this.refresh.run({ refreshToken: cookieOf(req.headers.cookie, REFRESH_COOKIE) ?? '' });
+    const h = req.headers['user-agent'];
+    const x = req.headers['x-request-id'];
+    const r = await this.refresh.run({ refreshToken: cookieOf(req.headers.cookie, REFRESH_COOKIE) ?? '', clientIp: req.ip, userAgent: typeof h === 'string' && h !== '' ? h : undefined, requestId: typeof x === 'string' && x !== '' ? x : req.id });
     if (r.result !== 'OK') {
       void reply.header('www-authenticate', COOKIE_CHALLENGE).header('set-cookie', clearSessionCookies(this.cookieDomain));
       throw new ProblemError({ type: 'refresh-token-invalid', status: 401, title: '다시 로그인해 주세요', ...(r.ended ? { extensions: { ended: r.ended } } : {}) });

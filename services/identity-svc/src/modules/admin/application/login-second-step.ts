@@ -30,6 +30,7 @@ import {
 import { matchTotp, normalizeRecoveryCode } from '../domain/totp.js';
 import { emailKeyOf, shortHash, sourceAddressOf } from './login-password-step.js';
 import { RecordAdminLoginSuccess } from './record-login-success.js';
+import { recordLegalAccess } from '../../session/legal-access-log.js';
 import { ADMIN_AUTH_CONFIG } from './set-admin-password.js';
 
 /** 관리 세션: 최대 수명 24시간, 유휴 만료 1시간, 동시 2개(POL-019) */
@@ -65,7 +66,7 @@ export class LoginSecondStep {
   ) {}
 
   /** @throws LoginCountersUnavailable·PepperUnavailable·TotpKeyUnavailable(받는 층이 503으로) */
-  async run(i: { aud: AdminAud; loginStep: string; code: string; ip: string; deviceId: string }): Promise<SecondStepOutcome> {
+  async run(i: { aud: AdminAud; loginStep: string; code: string; ip: string; deviceId: string; userAgent?: string; requestId?: string }): Promise<SecondStepOutcome> {
     const step = await this.store.findLoginStep(createHash('sha256').update(i.loginStep).digest());
     const now0 = this.clock.now();
     if (!step || step.usedAt !== null || step.expiresAt <= now0 || step.aud !== i.aud) return { kind: 'STEP_INVALID' };
@@ -81,7 +82,7 @@ export class LoginSecondStep {
     }
   }
 
-  async #attempt(i: { aud: AdminAud; code: string; ip: string }, stepId: string, accountId: string, pair: string): Promise<SecondStepOutcome> {
+  async #attempt(i: { aud: AdminAud; code: string; ip: string; userAgent?: string; requestId?: string }, stepId: string, accountId: string, pair: string): Promise<SecondStepOutcome> {
     const now = this.clock.now();
     const account = await this.store.findLoginById(accountId);
     if (!account || account.status !== 'ACTIVE' || !ROLES_OF_AUD[i.aud].includes(account.role)) return { kind: 'STEP_INVALID' };
@@ -115,6 +116,7 @@ export class LoginSecondStep {
     await this.success.run({ accountId, pair });
     // 익숙한 출발지로 적는다(BOT-123)
     await this.store.touchKnownSource(accountId, pair, now);
+    recordLegalAccess({ event: 'LOGIN', result: 'SUCCESS', clientIp: i.ip, userAgent: i.userAgent, requestId: i.requestId ?? sessionId, accountId, isAdmin: true });
     return { kind: 'DONE', sessionId, accessToken: at.token, accessExpiresAt: at.expiresAt, refreshToken, absoluteExpiresAt };
   }
 

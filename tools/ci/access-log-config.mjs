@@ -149,7 +149,7 @@ export function checkAccessLogConfig(root) {
   const ch = exp['clickhouse/access-log'];
   if (!isObj(ch)) bad(FILES.cfg, '내보내기 clickhouse/access-log가 없다');
   else {
-    if (ch.database !== 'access_log' || ch.logs_table_name !== 'access_log') bad(FILES.cfg, `법정 접속기록은 access_log 데이터베이스·표로 보낸다(${ch.database ?? '없음'}.${ch.logs_table_name ?? '없음'})`);
+    if (ch.database !== 'access_log' || ch.logs_table_name !== 'access_log_otel') bad(FILES.cfg, `법정 접속기록은 access_log 데이터베이스의 exporter 원천 표 access_log_otel로 보낸다(${ch.database ?? '없음'}.${ch.logs_table_name ?? '없음'})`);
     if (ch.sending_queue?.storage !== 'file_storage/access-legal') bad(FILES.cfg, 'clickhouse/access-log의 sending_queue.storage가 file_storage/access-legal가 아니다(디스크 큐)');
     if (ch.sending_queue?.block_on_overflow !== true) bad(FILES.cfg, 'clickhouse/access-log의 block_on_overflow가 true가 아니다(큐가 차면 버리지 않고 읽기를 멈춘다)');
     if (ch.retry_on_failure?.max_elapsed_time !== 0) bad(FILES.cfg, `clickhouse/access-log의 retry_on_failure.max_elapsed_time이 0이 아니다(${ch.retry_on_failure?.max_elapsed_time ?? '없음'})`);
@@ -239,7 +239,10 @@ export function checkAccessLogConfig(root) {
 
   // --- 표·TTL·색인 ---
   if (!/CREATE TABLE IF NOT EXISTS access_log\.access_log/i.test(ddl)) bad(FILES.ddl, '표 access_log.access_log를 만들지 않는다');
-  if (!/ENGINE = ReplicatedMergeTree/.test(ddl)) bad(FILES.ddl, '표 엔진이 ReplicatedMergeTree가 아니다(복제 2)');
+  if (!/CREATE TABLE IF NOT EXISTS access_log\.access_log_otel/i.test(ddl)) bad(FILES.ddl, 'exporter 원천 표 access_log_otel을 만들지 않는다');
+  if (!/CREATE MATERIALIZED VIEW IF NOT EXISTS access_log\.access_log_from_otel/i.test(ddl)) bad(FILES.ddl, '원천 표를 계약 표로 옮기는 materialized view가 없다');
+  if (!/toIPv6OrNull\(LogAttributes\['client_ip'\]\)/.test(ddl)) bad(FILES.ddl, '원문 IP를 검증해 넣지 않는다(toIPv6OrNull)');
+  if (!/ENGINE = ReplicatedMergeTree\('\/clickhouse\/tables\/\{shard\}\/access_log'/i.test(ddl)) bad(FILES.ddl, '계약 표 엔진이 ReplicatedMergeTree가 아니다(복제 2)');
   if (!/PARTITION BY toYYYYMMDD\(ts\)/.test(ddl)) bad(FILES.ddl, '하루 파티션(PARTITION BY toYYYYMMDD(ts))이 아니다(일 해시 앵커·3개월 보존)');
   if (!/ORDER BY ts/.test(ddl)) bad(FILES.ddl, 'ORDER BY가 ts가 아니다');
   if (!/client_ip TYPE bloom_filter/.test(ddl)) bad(FILES.ddl, '원문 IP 조회용 bloom_filter 색인이 없다');
@@ -248,7 +251,7 @@ export function checkAccessLogConfig(root) {
   else if (Number(ttl[1]) < canon.retentionMonths) bad(FILES.ddl, `TTL ${ttl[1]}개월이 최소 보존 ${canon.retentionMonths}개월보다 짧다`);
 
   // --- 사용자·권한 ---
-  if (!/GRANT INSERT ON access_log\.access_log TO al_ingest;/.test(users)) bad(FILES.users, 'al_ingest에 INSERT를 주지 않는다');
+  if (!/GRANT INSERT ON access_log\.access_log_otel TO al_ingest;/.test(users)) bad(FILES.users, 'al_ingest에 원천 표 access_log_otel INSERT를 주지 않는다');
   const ingestGrants = users.split('\n').filter((l) => /^\s*GRANT .* TO al_ingest;/i.test(l));
   if (ingestGrants.length !== 1) bad(FILES.users, `al_ingest는 INSERT 하나만 받는다(${ingestGrants.join(' / ')})`);
   if (!/GRANT SELECT ON access_log\.access_log TO al_admin_reader;/.test(users)) bad(FILES.users, 'al_admin_reader에 SELECT를 주지 않는다');

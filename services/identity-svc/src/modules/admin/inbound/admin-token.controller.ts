@@ -10,6 +10,7 @@ import { EndAdminSession } from '../application/end-admin-session.js';
 import { RefreshAdminSession } from '../application/refresh-admin-session.js';
 import type { AdminAud } from '../domain/ports.js';
 import { ADMIN_COOKIE_DOMAIN, ADMIN_COOKIES, adminSessionCookies, clearAdminSessionCookies } from './admin-cookies.js';
+import { clientIpOf, requestIdOf, userAgentOf } from './admin-login.controller.js';
 
 @Controller()
 export class AdminTokenController {
@@ -38,20 +39,20 @@ export class AdminTokenController {
   @Delete('v1/partner/auth/sessions/me')
   @Roles(['partner_admin', 'partner_member'], { passwordChangeSession: true })
   @HttpCode(204)
-  partnerLogout(@CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: FastifyReply): Promise<void> {
-    return this.#logout('partner', me, reply);
+  partnerLogout(@CurrentPrincipal() me: Principal, @Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<void> {
+    return this.#logout('partner', me, req, reply);
   }
 
   @Delete('v1/ops/auth/sessions/me')
   @Roles(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead'], { passwordChangeSession: true })
   @HttpCode(204)
-  opsLogout(@CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: FastifyReply): Promise<void> {
-    return this.#logout('ops', me, reply);
+  opsLogout(@CurrentPrincipal() me: Principal, @Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<void> {
+    return this.#logout('ops', me, req, reply);
   }
 
   async #refresh(aud: AdminAud, req: FastifyRequest, reply: FastifyReply): Promise<void> {
     void reply.header('cache-control', 'no-store');
-    const r = await this.refresh.run({ aud, refreshToken: cookieOf(req.headers.cookie, ADMIN_COOKIES[aud].rt) ?? '' });
+    const r = await this.refresh.run({ aud, refreshToken: cookieOf(req.headers.cookie, ADMIN_COOKIES[aud].rt) ?? '', clientIp: clientIpOf(req), userAgent: userAgentOf(req), requestId: requestIdOf(req) });
     if (r.result !== 'OK') {
       void reply.header('www-authenticate', COOKIE_CHALLENGE).header('set-cookie', clearAdminSessionCookies(aud, this.cookieDomain));
       throw new ProblemError({ type: 'refresh-token-invalid', status: 401, title: '다시 로그인해 주세요' });
@@ -59,10 +60,10 @@ export class AdminTokenController {
     void reply.header('set-cookie', adminSessionCookies(aud, r, this.clock.now(), this.cookieDomain));
   }
 
-  async #logout(aud: AdminAud, me: Principal, reply: FastifyReply): Promise<void> {
+  async #logout(aud: AdminAud, me: Principal, req: FastifyRequest, reply: FastifyReply): Promise<void> {
     void reply.header('cache-control', 'no-store');
     // 이미 끝났으면(가드 판정과 겹친 드문 경우) 그대로 204다: 쿠키만 지운다
-    await this.end.run({ accountId: me.accountId, sessionId: me.sessionId });
+    await this.end.run({ accountId: me.accountId, sessionId: me.sessionId, clientIp: clientIpOf(req), userAgent: userAgentOf(req), requestId: requestIdOf(req) });
     void reply.header('set-cookie', clearAdminSessionCookies(aud, this.cookieDomain));
   }
 }

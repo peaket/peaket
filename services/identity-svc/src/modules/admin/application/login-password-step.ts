@@ -28,6 +28,7 @@ import {
   ROLES_OF_AUD,
 } from '../domain/ports.js';
 import { ADMIN_AUTH_CONFIG } from './set-admin-password.js';
+import { recordLegalAccess } from '../../session/legal-access-log.js';
 
 /** 로그인 단계 토큰 수명 [가정](identity §6) */
 export const LOGIN_STEP_TTL_MS = 5 * 60_000;
@@ -162,7 +163,7 @@ export class LoginPasswordStep {
   ) {}
 
   /** @throws LoginCountersUnavailable·PepperUnavailable(받는 층이 503으로) */
-  async run(i: { aud: AdminAud; email: string; password: string; ip: string; deviceId: string; humanCheckToken?: string }): Promise<LoginStepOutcome> {
+  async run(i: { aud: AdminAud; email: string; password: string; ip: string; deviceId: string; humanCheckToken?: string; userAgent?: string }): Promise<LoginStepOutcome> {
     const email = emailKeyOf(i.email);
     const emailHash = shortHash(email);
     // 이 콘솔에서 로그인할 수 있는 계정만 진짜로 다룬다. 나머지는 없는 계정과 같다
@@ -179,7 +180,7 @@ export class LoginPasswordStep {
     // ①② 사람 확인과 잠김은 임대 밖에서 먼저 본다: 검증을 기다리는 동안 임대를 쥐면 틀린 토큰을 이어 보내 주인을 막을 수 있다(재리뷰 2026-11-05)
     const human = { verified: false };
     const pre = await this.#gate(ctx, account, this.clock.now(), human, true);
-    if (pre) return pre;
+    if (pre) return this.#legal(i, account?.id, pre);
     // 한 대상에 한 번에 한 시도: 잠김 다시 보기 → 확인 → 셈이 다른 시도와 겹치지 않는다. 임대를 쥘 때마다 실패 하나로 세거나 통과한다
     const lease = await this.counters.acquire(subject, this.clock.now(), BUSY_LEASE_MS);
     if (!lease) return { kind: 'BUSY' };
@@ -189,11 +190,20 @@ export class LoginPasswordStep {
       const fresh = accountOf(await this.store.findForLogin(email));
       const current = account && fresh && fresh.id === account.id ? fresh : null;
       const again = await this.#gate(ctx, current, now, human, false);
-      if (again) return again;
-      return await this.#attempt(ctx, current, now);
+      if (again) return this.#legal(i, current?.id, again);
+      return this.#legal(i, current?.id, await this.#attempt(ctx, current, now));
     } finally {
       await this.counters.release(subject, lease).catch(() => undefined);
     }
+  }
+
+  /** 관리 계정 로그인 1단계의 실패를 법정 접속기록에 남긴다(성공 세션 줄은 2단계가 쓴다) */
+  #legal<T extends LoginStepOutcome>(i: { ip: string; userAgent?: string }, accountId: string | undefined, o: T): T {
+    const common = { event: 'LOGIN' as const, result: 'FAILED' as const, clientIp: i.ip, userAgent: i.userAgent, accountId, isAdmin: true };
+    if (o.kind === 'FAILED') recordLegalAccess({ ...common, failure: 'password' });
+    else if (o.kind === 'LOCKED') recordLegalAccess({ ...common, failure: 'locked' });
+    else if (o.kind === 'HUMAN_CHECK_REQUIRED') recordLegalAccess({ ...common, failure: 'session' });
+    return o;
   }
 
   /**

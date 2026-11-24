@@ -164,6 +164,7 @@ export function sessionServiceHandlers(uc: UseCases, onError: (method: string, e
         userAgent: text(r.user_agent) || null,
         clientIp: text(r.client_ip),
         asn: typeof r.asn === 'number' ? r.asn : 0,
+        requestId: text(r.idempotency_key),
         ...(proposalId ? { link: { proposalId, binding: text(r.link_binding) } } : {}),
       });
       return responseOf(out);

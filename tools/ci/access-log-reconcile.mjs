@@ -52,10 +52,12 @@ export function seqGaps(seqs) {
     seen.set(v, (seen.get(v) ?? 0) + 1);
     if (v > max) max = v;
   }
-  // 맨 끝의 빈 값도 '그 자리의 번호가 빠졌다'로 센다.
-  const effectiveMax = Math.max(max, seqs.length);
+  // 1~최댓값 사이의 빈 번호. 빈 값은 그 자리의 번호가 빠진 것으로 세되, 이미 빈 번호가 있으면 그 빈 번호를 채운 것으로 본다.
+  const effectiveMax = Math.max(max, 0);
   const missing = [];
   for (let n = 1; n <= effectiveMax; n++) if (!seen.has(n)) missing.push(n);
+  const blanks = seqs.filter((v) => v === null || v === undefined).length;
+  for (let i = 0; i < blanks && missing.length === 0; i++) missing.push(effectiveMax + 1 + i);
   const duplicates = [...seen.entries()].filter(([, n]) => n > 1).map(([n]) => n).sort((a, b) => a - b);
   return { missing, duplicates };
 }

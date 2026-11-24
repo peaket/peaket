@@ -26,7 +26,7 @@ export class RefreshSession {
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
-  async run(i: { refreshToken: string }): Promise<RefreshResult> {
+  async run(i: { refreshToken: string; clientIp?: string; userAgent?: string; requestId?: string }): Promise<RefreshResult> {
     if (!SHAPE.test(i.refreshToken)) {
       this.signals.refreshed('fan', 'invalid');
       return { result: 'INVALID' };
@@ -70,16 +70,16 @@ export class RefreshSession {
     });
     if (r.kind === 'invalid') {
       this.signals.refreshed('fan', 'invalid');
-      recordLegalAccess({ event: 'REFRESH', result: 'FAILED', failure: 'session' });
+      recordLegalAccess({ event: 'REFRESH', result: 'FAILED', failure: 'session', clientIp: i.clientIp, userAgent: i.userAgent, requestId: i.requestId });
       return r.ended ? { result: 'INVALID', ended: r.ended } : { result: 'INVALID' };
     }
     if (r.kind === 'reuse') {
       this.signals.refreshed('fan', 'reused');
-      recordLegalAccess({ event: 'REFRESH', result: 'FAILED', failure: 'session' });
+      recordLegalAccess({ event: 'REFRESH', result: 'FAILED', failure: 'session', clientIp: i.clientIp, userAgent: i.userAgent, requestId: i.requestId });
       return { result: 'REUSED', ended: 'REFRESH_REUSE' };
     }
     this.signals.refreshed('fan', r.kind === 'rotate' ? 'rotated' : 'retried');
-    recordLegalAccess({ event: 'REFRESH', result: 'SUCCESS', requestId: r.sessionId, accountId: r.accountId });
+    recordLegalAccess({ event: 'REFRESH', result: 'SUCCESS', clientIp: i.clientIp, userAgent: i.userAgent, requestId: i.requestId ?? r.sessionId, accountId: r.accountId });
     const { access } = r;
     return {
       result: 'OK',
