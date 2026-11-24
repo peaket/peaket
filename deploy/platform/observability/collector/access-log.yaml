@@ -161,6 +161,19 @@ processors:
           - delete_key(attributes, "jny")
           - replace_pattern(attributes["client_ip"], "^([0-9]{1,3}[.][0-9]{1,3}[.][0-9]{1,3})[.][0-9]{1,3}$", "$$1.0/24")
           - replace_pattern(attributes["client_ip"], "^([0-9a-fA-F]{1,4}(:[0-9a-fA-F]{1,4}){0,2})::.*$", "$$1::/48")
+  # 5xx·SLO 초과는 전수로, 그 밖은 앱 로그와 같은 문턱(온세일 1%·평시 10% [가정])으로 고른다. 지금은 10%로 둔다.
+  probabilistic_sampler:
+    sampling_percentage: 10
+
+connectors:
+  # 5xx는 표본에서 빼지 않는다(§7 '게이트웨이 접근 로그 분기')
+  routing/access-general:
+    default_pipelines: [logs/access-general-sampled]
+    error_mode: ignore
+    table:
+      - context: log
+        condition: 'attributes["status"] >= 500'
+        pipelines: [logs/access-general-all]
 
 exporters:
   # 법정 사본: 접속기록 DB. 디스크 큐가 차면 읽기를 멈추고(버리지 않는다), 재시도는 그만두지 않는다(§7 ②)
@@ -181,9 +194,11 @@ exporters:
   kafka/investigation:
     brokers:
       - telemetry-kafka-bootstrap.observability.svc:9098
-    topic: investigation.requests
-    encoding: raw_json
-    compression: zstd
+    logs:
+      topic: investigation.requests
+      encoding: raw
+    producer:
+      compression: zstd
     sending_queue:
       storage: file_storage/access-investigation
       block_on_overflow: false
@@ -195,12 +210,16 @@ exporters:
 extensions:
   file_storage/access-legal:
     directory: /var/lib/otelcol/access-legal
+    create_directory: true
   file_storage/access-legal-identity:
     directory: /var/lib/otelcol/access-legal-identity
+    create_directory: true
   file_storage/access-investigation:
     directory: /var/lib/otelcol/access-investigation
+    create_directory: true
   file_storage/access-general:
     directory: /var/lib/otelcol/access-general
+    create_directory: true
 
 service:
   extensions: [health_check, file_storage/access-legal, file_storage/access-legal-identity, file_storage/access-investigation, file_storage/access-general]
@@ -215,7 +234,15 @@ service:
       exporters: [kafka/investigation]
     logs/access-general:
       receivers: [filelog/envoy-general]
-      processors: [memory_limiter, transform/access-general, probabilistic_sampler, batch]
+      processors: [memory_limiter, transform/access-general]
+      exporters: [routing/access-general]
+    logs/access-general-all:
+      receivers: [routing/access-general]
+      processors: [batch]
+      exporters: [otlp_grpc/gateway]
+    logs/access-general-sampled:
+      receivers: [routing/access-general]
+      processors: [probabilistic_sampler, batch]
       exporters: [otlp_grpc/gateway]
     # 일반 컨테이너 로그 갈래(agent.yaml)에서 법정 줄과 접근 로그 줄을 뺀다(두 번 보내지 않게)
     logs:

@@ -159,9 +159,9 @@ export function checkAccessLogConfig(root) {
   const kafka = exp['kafka/investigation'];
   if (!isObj(kafka)) bad(FILES.cfg, '내보내기 kafka/investigation이 없다');
   else {
-    if (kafka.topic !== 'investigation.requests') bad(FILES.cfg, `kafka/investigation의 topic이 investigation.requests가 아니다(${kafka.topic ?? '없음'})`);
-    if (kafka.encoding !== 'raw_json') bad(FILES.cfg, `kafka/investigation의 encoding이 raw_json이 아니다(${kafka.encoding ?? '없음'})`);
-    if (kafka.compression !== 'zstd') bad(FILES.cfg, `kafka/investigation의 compression이 zstd가 아니다(${kafka.compression ?? '없음'})`);
+    if (kafka.logs?.topic !== 'investigation.requests') bad(FILES.cfg, `kafka/investigation의 logs.topic이 investigation.requests가 아니다(${kafka.logs?.topic ?? '없음'})`);
+    if (kafka.logs?.encoding !== 'raw') bad(FILES.cfg, `kafka/investigation의 logs.encoding이 raw가 아니다(로그 본문을 JSON으로 보낸다, ${kafka.logs?.encoding ?? '없음'})`);
+    if (kafka.producer?.compression !== 'zstd') bad(FILES.cfg, `kafka/investigation의 producer.compression이 zstd가 아니다(${kafka.producer?.compression ?? '없음'})`);
     if (kafka.sending_queue?.storage !== 'file_storage/access-investigation') bad(FILES.cfg, 'kafka/investigation의 sending_queue.storage가 file_storage/access-investigation이 아니다');
     if (kafka.sending_queue?.block_on_overflow !== false) bad(FILES.cfg, 'kafka/investigation의 block_on_overflow가 false가 아니다(큐가 차면 새 줄을 버린다)');
     if (kafka.retry_on_failure?.max_elapsed_time !== '10m') bad(FILES.cfg, `kafka/investigation의 retry_on_failure.max_elapsed_time이 10m이 아니다(${kafka.retry_on_failure?.max_elapsed_time ?? '없음'})`);
@@ -195,8 +195,14 @@ export function checkAccessLogConfig(root) {
   if (!isObj(general)) bad(FILES.cfg, '파이프라인 logs/access-general이 없다');
   else {
     if (!(general.processors ?? []).includes('transform/access-general')) bad(FILES.cfg, 'logs/access-general에 transform/access-general이 없다');
-    if (!(general.processors ?? []).some((p) => String(p).includes('sampler'))) bad(FILES.cfg, 'logs/access-general에 표본 처리기가 없다(5xx 우선·1%/10% [가정])');
-    if (JSON.stringify(general.exporters) !== JSON.stringify(['otlp_grpc/gateway'])) bad(FILES.cfg, `logs/access-general의 내보내기는 otlp_grpc/gateway 하나다(${JSON.stringify(general.exporters)})`);
+    if (JSON.stringify(general.exporters) !== JSON.stringify(['routing/access-general'])) bad(FILES.cfg, `logs/access-general의 내보내기는 routing/access-general이다(${JSON.stringify(general.exporters)})`);
+    const sampled = pipe['logs/access-general-sampled'];
+    if (!isObj(sampled) || !(sampled.processors ?? []).includes('probabilistic_sampler')) bad(FILES.cfg, 'logs/access-general-sampled에 표본 처리기(probabilistic_sampler)가 없다');
+    const all = pipe['logs/access-general-all'];
+    if (!isObj(all) || !(all.processors ?? []).includes('batch')) bad(FILES.cfg, 'logs/access-general-all(5xx 전수) 파이프라인이 없다');
+    const routing = cfg.connectors?.['routing/access-general'];
+    const cond = routing?.table?.[0]?.condition;
+    if (typeof cond !== 'string' || !/attributes\["status"\]\s*>=\s*500/.test(cond)) bad(FILES.cfg, 'routing/access-general이 5xx를 전수 파이프라인으로 보내지 않는다');
   }
   // 일반 컨테이너 로그 갈래에서 법정 줄·접근 로그 줄을 뺀다(두 번 보내지 않는다)
   const plain = pipe.logs;
