@@ -32,6 +32,8 @@ export function overlayOf(raw: unknown): EventSaleConfigOverlay {
   if (new Set(o.eligLists).size !== o.eligLists.length) throw new SaleConfigUnavailable('eligLists');
   if (o.layoutVersion !== undefined && (!isSafeInt(o.layoutVersion) || o.layoutVersion < 1 || o.layoutVersion > U32_MAX)) throw new SaleConfigUnavailable('layoutVersion');
   if (o.entryOpensAtMs !== undefined && o.entryOpensAtMs !== null && (!isSafeInt(o.entryOpensAtMs) || o.entryOpensAtMs <= 0)) throw new SaleConfigUnavailable('entryOpensAtMs');
+  if (o.title !== undefined && (typeof o.title !== 'string' || o.title.length === 0 || o.title.length > 300)) throw new SaleConfigUnavailable('title');
+  if (o.startsAtMs !== undefined && (!isSafeInt(o.startsAtMs) || o.startsAtMs <= 0)) throw new SaleConfigUnavailable('startsAtMs');
   return {
     rev: o.rev,
     perPersonLimit: o.perPersonLimit,
@@ -40,6 +42,8 @@ export function overlayOf(raw: unknown): EventSaleConfigOverlay {
     eligLists: o.eligLists as string[],
     ...(o.layoutVersion !== undefined ? { layoutVersion: o.layoutVersion } : {}),
     ...(typeof o.entryOpensAtMs === 'number' ? { entryOpensAtMs: o.entryOpensAtMs } : {}),
+    ...(typeof o.title === 'string' ? { title: o.title } : {}),
+    ...(typeof o.startsAtMs === 'number' ? { startsAtMs: o.startsAtMs } : {}),
   };
 }
 

@@ -6,7 +6,9 @@ import { CLOCK, type Clock, type HotPathMetrics, PLATFORM_LOGGER, type PlatformL
 import { LoggerOrderLog } from './adapters/order-log.js';
 import { AcceptPayment } from './application/accept-payment.js';
 import { CreateOrder } from './application/create-order.js';
+import { GetOrder } from './application/get-order.js';
 import { GetPaymentStatus } from './application/get-payment-status.js';
+import { ListOrders } from './application/list-orders.js';
 import { StartPayment } from './application/start-payment.js';
 import type {
   AcceptLog,
@@ -18,7 +20,9 @@ import type {
   OrderAcceptWrites,
   OrderHoldExpiries,
   OrderHoldMarks, OrderHolds,
+  OrderHistoryReads,
   OrderLog,
+  OrderSeatLabels,
   OrderSessions,
   OrderSignals,
   OrderWrites,
@@ -98,6 +102,11 @@ export interface BookingModuleDeps {
     /** 없으면 서비스 로거의 LoggerOrderLog */
     log?: StartPaymentLog;
   };
+  /**
+   * 주문 내역 목록·상세 GET /v1/orders·GET /v1/orders/{orderId}(F-07-2). 운영(start.ts)은 reads = DrizzleOrderHistory(purchase DB),
+   * seats = LayoutSeatMap.resolve를 잇는 얇은 어댑터, configs는 saleConfigs 그대로 넘긴다. 없으면 두 경로가 404다
+   */
+  orderHistory?: { reads: OrderHistoryReads; seats?: OrderSeatLabels; configs?: SaleConfigs };
   /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
   hotPath?: HotPathMetrics;
 }
@@ -117,7 +126,7 @@ export class BookingModule {
     if (typeof deps.consentVersion !== 'string' || !CONSENT_VERSION_PATTERN.test(deps.consentVersion)) {
       throw new Error(`동의 문안 판(${CONSENT_VERSION_ENV})은 1~32자의 영문·숫자·._-여야 한다`);
     }
-    const { log, acceptLog, clock, accepts, slots, onAccepted, paymentStatus, startPayment, hotPath, ...ports } = deps;
+    const { log, acceptLog, clock, accepts, slots, onAccepted, paymentStatus, startPayment, orderHistory, hotPath, ...ports } = deps;
     const createOrder: Provider = {
       provide: CreateOrder,
       useFactory: (platformClock: Clock, logger?: PlatformLogger) => {
@@ -178,7 +187,29 @@ export class BookingModule {
           },
         ]
       : [];
-    return { module: BookingModule, controllers: [OrdersController], providers: [createOrder, acceptPayment, ...getPaymentStatus, ...startPaymentProvider], exports: [] };
+    // 주문 내역(F-07-2). 넘긴 것이 있을 때만 조립한다(처리기는 @Optional로 받고, 없으면 404다)
+    const orderHistoryProviders: Provider[] = orderHistory
+      ? [
+          {
+            provide: ListOrders,
+            useFactory: (platformClock: Clock) =>
+              new ListOrders({ reads: orderHistory.reads, configs: orderHistory.configs ?? ports.saleConfigs, clock: clock ?? platformClock }),
+            inject: [CLOCK],
+          },
+          {
+            provide: GetOrder,
+            useFactory: (platformClock: Clock) =>
+              new GetOrder({
+                reads: orderHistory.reads,
+                configs: orderHistory.configs ?? ports.saleConfigs,
+                ...(orderHistory.seats ? { seats: orderHistory.seats } : {}),
+                clock: clock ?? platformClock,
+              }),
+            inject: [CLOCK],
+          },
+        ]
+      : [];
+    return { module: BookingModule, controllers: [OrdersController], providers: [createOrder, acceptPayment, ...getPaymentStatus, ...startPaymentProvider, ...orderHistoryProviders], exports: [] };
   }
 }
 

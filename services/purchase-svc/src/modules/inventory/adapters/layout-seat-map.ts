@@ -181,6 +181,8 @@ export class LayoutSeatMap implements SeatMap, SeatMapIndex, SeatMapSections, Se
       salePolicy: overlay.salePolicy,
       eligLists: overlay.eligLists,
       saleConfigRev: overlay.rev,
+      ...(overlay.title !== undefined ? { eventTitle: overlay.title } : {}),
+      ...(overlay.startsAtMs !== undefined ? { eventStartsAtMs: overlay.startsAtMs } : {}),
     };
   }
 

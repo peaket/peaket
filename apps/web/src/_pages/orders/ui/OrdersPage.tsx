@@ -9,8 +9,9 @@ import { cx } from '@/shared/lib/cx';
 import type { PageProps } from '@/shared/lib/page-props';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
-import { OrderHistoryTabs, ORDERS_GRID, ORDERS_WRAP, toRow } from '@/widgets/order-history';
+import { ORDERS_GRID, ORDERS_WRAP, toRow } from '@/widgets/order-history';
 import { ordersView } from '../model/state';
+import { LiveOrders } from './LiveOrders';
 
 export async function OrdersPage({ searchParams }: PageProps) {
   const sp = await searchParams;
@@ -26,7 +27,7 @@ export async function OrdersPage({ searchParams }: PageProps) {
           <h1 className="t-xl">예매·주문 내역</h1>
           <div className={ORDERS_GRID}>
             <div className={cx('col gap-5 lg:gap-4', v.empty ? 'lg:col-span-12' : 'lg:col-span-7')}>
-              <OrderHistoryTabs key={state} rows={rows} defaultTab={v.tab} view="cards" loading={v.loading} empty={v.empty} />
+              <LiveOrders key={state} fixtureRows={rows} fixtureTab={v.tab} fixtureLoading={v.loading} fixtureEmpty={v.empty} />
             </div>
             {v.empty ? null : (
               <div className="card state hidden lg:col-span-5 lg:flex">

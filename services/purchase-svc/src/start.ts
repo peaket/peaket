@@ -124,8 +124,10 @@ import {
   CompensationRunner,
   discardBehaviorSignals,
   DrizzleOrderAccepts,
+  DrizzleOrderHistory,
   DrizzleOrderStarts,
   DrizzleOrderExpiry,
+  LayoutOrderSeatLabels,
   DrizzleOrderStore,
   DrizzleOrderWrites,
   DrizzlePaymentPull,
@@ -651,6 +653,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
         },
         writes: new DrizzleOrderWrites({ database, store: orderStore, clock: systemClock }),
         accepts: new DrizzleOrderAccepts({ database, store: orderStore, clock: systemClock }),
+        // 주문 내역 GET /v1/orders·GET /v1/orders/{orderId}(F-07-2). 좌석 이름·등급 이름은 좌석맵 판에서 온다
+        orderHistory: {
+          reads: new DrizzleOrderHistory({ database }),
+          seats: new LayoutOrderSeatLabels(seatMap),
+          configs: new SeatMapSaleConfigs(seatMap),
+        },
         // 파드 메모리가 정지(명령 3 회차·전체, 판매 중지)라 하면 좌석 Redis를 부르지 않고 PAUSED(423 sale-paused)다(ADR-0365 결정 7)
         slots: pauseAwareSlots(new InventorySeatSlots(new RedisSeatSlots(redis)), saleMemory),
         holds: orderHolds,

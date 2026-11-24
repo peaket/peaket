@@ -4,8 +4,10 @@
 // 검사 차례(플랫폼 인증 가드): 신원 → 역할·스코프 → 멱등 키 형식(400 idempotency-key-invalid) → 구매 요청 서명(401) → 경로 스키마(400) → 처리기.
 // 좌석 홀드(inventory holds.controller.ts)와 같은 장식자 묶음이다. 경로 스키마(@ContractRouteSchema, 미리 만든 Ajv 검사기)로 보고 Zod 파이프를 함께 달지 않는다(ADR-0176 결정 4).
 import { Body, Controller, Get, HttpCode, Inject, Optional, Param, Post, Res } from '@nestjs/common';
+import { GetOrderParams, GetOrderResponse, ListOrdersQueryParams, ListOrdersResponse } from '@peaket/contracts/openapi/orders';
 import {
   Bulkhead,
+  ContractQuery,
   ContractRouteSchema,
   COOKIE_CHALLENGE,
   CurrentPrincipal,
@@ -25,7 +27,9 @@ import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { ACCEPT_PAYMENT_OPERATION, AcceptPayment, type AcceptPaymentRejection } from '../application/accept-payment.js';
 import { CREATE_ORDER_OPERATION, CreateOrder, type CreateOrderRejection } from '../application/create-order.js';
+import { GetOrder } from '../application/get-order.js';
 import { GetPaymentStatus } from '../application/get-payment-status.js';
+import { ListOrders } from '../application/list-orders.js';
 import { START_PAYMENT_OPERATION, type StartedPayment, StartPayment, type StartPaymentRejection } from '../application/start-payment.js';
 import { ORDER_STATUSES } from '../domain/order.js';
 import { START_PAY_METHODS } from '../domain/payment-attempt.js';
@@ -386,6 +390,11 @@ export function throwPaymentStatusProblem(reason: PaymentStatusRejection): never
   throw new ProblemError({ type: spec.type, status: spec.status, title: spec.title });
 }
 
+/** 주문 내역의 404(남의 주문·없는 주문·조립하지 않은 쓰임새를 같은 본문으로 답한다, F-07-2) */
+export function orderNotFound(): ProblemError {
+  return new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
+}
+
 /**
  * 이 경로의 정규 로그 SLO 26초 [가정](@LogPolicy sloLatencyMs, 리뷰 고침 M5). 서비스 기본 SLO로 재면 기다렸다 답한 응답이 모두 'SLO 초과'로 남는다.
  * 기다림 상한 25초 + 답 몫 1초다
@@ -423,7 +432,38 @@ export class OrdersController {
     @Optional() @Inject(GetPaymentStatus) private readonly getPaymentStatus?: GetPaymentStatus,
     /** 결제 시도 시작(PRF-191). BookingModuleDeps.startPayment가 없으면 조립하지 않아 undefined다 */
     @Optional() @Inject(StartPayment) private readonly startPayment?: StartPayment,
+    /** 주문 내역 목록·상세(F-07-2). BookingModuleDeps.orderHistory가 없으면 조립하지 않아 undefined다(404) */
+    @Optional() @Inject(ListOrders) private readonly listOrders?: ListOrders,
+    @Optional() @Inject(GetOrder) private readonly getOrder?: GetOrder,
   ) {}
+
+  /** 주문 내역 목록(200 OrderSummaryPage). 쓰임새가 없으면 404, 커서가 틀리면 400 invalid-query다 */
+  @Get()
+  @Roles(['fan'])
+  @ContractRouteSchema({ responses: { 200: ListOrdersResponse } })
+  async list(@ContractQuery(ListOrdersQueryParams) q: z.output<typeof ListOrdersQueryParams>, @CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: FastifyReply): Promise<z.output<typeof ListOrdersResponse>> {
+    void reply.header('cache-control', 'private, no-store');
+    if (!this.listOrders) throw orderNotFound();
+    const r = await this.listOrders.execute({
+      accountId: me.accountId,
+      limit: q.limit ?? 20,
+      ...(q.cursor !== undefined ? { cursor: q.cursor } : {}),
+    });
+    if (r.status === 400) throw new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다' });
+    return r.body;
+  }
+
+  /** 주문 상세(200 OrderDetail, 예매 확인서). 없거나 남의 주문이면 같은 404다 */
+  @Get(':orderId')
+  @Roles(['fan'])
+  @ContractRouteSchema({ params: GetOrderParams, responses: { 200: GetOrderResponse } })
+  async detail(@Param('orderId') orderId: string, @CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: FastifyReply): Promise<z.output<typeof GetOrderResponse>> {
+    void reply.header('cache-control', 'private, no-store');
+    if (!this.getOrder) throw orderNotFound();
+    const r = await this.getOrder.execute({ accountId: me.accountId, orderId });
+    if (r.status === 404) throw orderNotFound();
+    return r.body;
+  }
 
   /**
    * 결제 시도 시작(201 PaymentAttempt). 처리는 StartPayment.execute 하나다.

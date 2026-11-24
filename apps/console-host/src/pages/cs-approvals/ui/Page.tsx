@@ -12,6 +12,7 @@ import { usePreviewHost, useChosenRole } from '@/features/preview-host';
 import { BOARD_PEOPLE, NoAccess, ReadOnlyScope, type Access } from '@/features/screen-access';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { DEFAULT, STATES, fraudVariant, type FraudVariant, type State } from '../states';
+import { ContractApprovalCard } from './ContractApprovalCard';
 import { MainD, OverlaysD, valsD } from './board-d';
 import { MainM, OverlaysM, valsM } from './board-m';
 import { MainT, OverlaysT, valsT } from './board-t';
@@ -59,6 +60,8 @@ export function Page() {
       title="이 역할은 승인 업무를 요청만 합니다"
       who="승인 권한이 있는 역할(cs_lead 1인 승인 · commander 2인 승인)"
     >
+      {/* F-07-2: 실제 API가 있으면 계약 조건 변경 대기 요청만 그 위에 카드로 보인다. 없으면 아무것도 그리지 않는다 */}
+      <ContractApprovalCard />
       {layout === 'desktop' ? (
         <>
           <MainD v={vd} close={close} go={go} />

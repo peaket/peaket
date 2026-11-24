@@ -1,5 +1,6 @@
 // booking 모듈의 포트(바깥 저장소·지표와 닿는 면, BUILD_ORDER PRF-160·PRF-161).
 import type { OrderEventMessage, OrderItem, OrderStatus, OrderRow, CreatedExtras, SeatAssignment, TransitionId } from './order.js';
+import type { OrderHistoryOrder } from './order-history.js';
 import type { OrderExpiryNotYetReason, OrderExpiryStage, OrderExpiryTransition, OrderExpiryTrigger } from './order-expiry.js';
 import type { OrderPaymentState, PaymentLedgerStatus, PaymentPullFailureCode, PaymentPullIgnoreReason, PaymentPullRunStage } from './payment-pull.js';
 import type {
@@ -271,10 +272,16 @@ export interface SaleConfig {
   readonly saleEndsAtMs: number;
   /** 등급 ID → 가격(원, 0 이상 정수). 판 파일에 tierPrices가 없으면 빈 객체다(모든 등급의 가격이 없다) */
   readonly tierPrices: Readonly<Record<string, number>>;
+  /** 등급 ID → 화면 이름(판 파일의 tierNames, F-07-2 주문 내역 표시). 없으면 칸이 없다 */
+  readonly tierNames?: Readonly<Record<string, string>>;
   /** 주문명(판 파일의 선택 칸 orderName, 결제 시도가 쓴다, BUILD_ORDER PRF-191). 없으면 칸이 없다 */
   readonly orderName?: string;
   /** 입장 시작 시각(epoch ms, 판 파일의 선택 칸 entryOpensAt). 없으면 칸이 없다 */
   readonly entryOpensAtMs?: number;
+  /** 공연 제목(core event_sale_config.title, F-07-2 주문 내역 표시). 없으면 칸이 없다 */
+  readonly title?: string;
+  /** 회차 시작 시각(epoch ms, core event_sale_config.startsAtMs). 없으면 칸이 없다 */
+  readonly startsAtMs?: number;
   /** 가상계좌를 내도 되는가(판 파일의 선택 칸 virtualAccountAllowed). 없으면 칸이 없다(참으로 본다) */
   readonly virtualAccountAllowed?: boolean;
 }
@@ -387,6 +394,25 @@ export interface OrderWrites {
   create(once: OrderRequestOnce, order: NewOrder, o?: TransactionCallOptions): Promise<OrderCreateOutcome>;
   /** 그 홀드의 주문이 같은 계정·같은 구매 세션의 것이면 주문 ID(ADR-0255, purchase_order.hold_id 유일 인덱스 한 번). 없으면 undefined */
   findOwnOrderId?(q: { holdId: string; accountId: string; purchaseSessionId: string }): Promise<string | undefined>;
+}
+
+// ---- 주문 내역 GET /v1/orders·GET /v1/orders/{orderId}(openapi listOrders·getOrder, docs/frontend.md §5.29, F-07-2) ----
+// 읽기만 한다. 계정 대조는 쓰임새가 하고, 남의 주문과 없는 주문은 같은 404다. 어댑터는 계정의 주문만 주고 EXPIRED를 뺀다.
+
+/** 주문 내역 저장소 읽기(운영은 adapters/db/drizzle-order-history.ts) */
+export interface OrderHistoryReads {
+  /**
+   * 계정의 티켓 주문을 createdAt 내림차순·같으면 주문 ID 오름차순으로 limit개 준다(어댑터는 limit+1을 받는다).
+   * EXPIRED는 주지 않는다. before가 있으면 그 키 뒤의 줄만 준다(키셋 페이지네이션)
+   */
+  list(accountId: string, o: { limit: number; before?: { createdAt: Date; orderId: string } }): Promise<readonly OrderHistoryOrder[]>;
+  /** 주문 하나. 없거나 orderId가 소문자 UUID가 아니면 undefined(쓰임새가 계정과 함께 404로 가른다) */
+  find(orderId: string): Promise<OrderHistoryOrder | undefined>;
+}
+
+/** 좌석맵 판에서 온 좌석 이름·등급 이름(선택 포트). 없거나 읽지 못하면 저장 값으로 떨어진다 */
+export interface OrderSeatLabels {
+  resolve(eventId: string, seatIds: readonly string[]): Promise<readonly ({ label?: string; tierName?: string } | undefined)[]>;
 }
 
 /** 주문 생성의 보안·설정 로그(서비스 로그 한 줄씩. 번호 원문·토큰은 싣지 않는다). 던지지 않는다 */

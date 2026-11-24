@@ -342,6 +342,10 @@ export interface EventSeatConfig {
   eligLists?: readonly string[];
   /** 판매 설정 사본의 판(로그·진단용, core-svc event_sale_config.rev) */
   saleConfigRev?: number;
+  /** 공연 제목(core event_sale_config.title, F-07-2 주문 내역 표시). 없으면 칸도 없다 */
+  eventTitle?: string;
+  /** 회차 시작 시각(epoch ms, core event_sale_config.startsAtMs). 없으면 칸도 없다 */
+  eventStartsAtMs?: number;
 }
 
 export const SEAT_MAP = Symbol('purchase.SeatMap');

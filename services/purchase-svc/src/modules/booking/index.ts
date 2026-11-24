@@ -4,6 +4,33 @@ import { checkOrderHistory } from './adapters/db/drizzle-orders.js';
 import { orderHistoryCheckTask as historyTaskOf, type OrderHistoryTaskDeps } from './application/order-history-check.js';
 
 export { DrizzleOrderStore, checkOrderHistory, type DrizzleOrderStoreOptions } from './adapters/db/drizzle-orders.js';
+export { DrizzleOrderHistory, type DrizzleOrderHistoryOptions } from './adapters/db/drizzle-order-history.js';
+export { LayoutOrderSeatLabels, type OrderSeatMapSource } from './adapters/layout-order-seat-labels.js';
+export { GetOrder, type GetOrderCommand, type GetOrderDeps, type GetOrderResult } from './application/get-order.js';
+export { ListOrders, type ListOrdersCommand, type ListOrdersDeps, type ListOrdersResult } from './application/list-orders.js';
+export {
+  BOOKING_NUMBER_PATTERN,
+  bookingNumberOf,
+  decodeOrderHistoryCursor,
+  encodeOrderHistoryCursor,
+  HISTORY_ISSUE_DELAYED_MS,
+  HISTORY_LIMIT_DEFAULT,
+  HISTORY_LIMIT_MAX,
+  historyIssueDelayed,
+  historyVisible,
+  orderHistoryDetailOf,
+  orderHistoryPageOf,
+  orderHistorySummaryOf,
+  tiersOf,
+  type OrderHistoryCancellationRow,
+  type OrderHistoryContext,
+  type OrderHistoryDetail,
+  type OrderHistoryItemRow,
+  type OrderHistoryOrder,
+  type OrderHistoryPage,
+  type OrderHistorySummary,
+  type OrderHistorySummaryOptions,
+} from './domain/order-history.js';
 export { DrizzleOrderAccepts, type DrizzleOrderAcceptsOptions } from './adapters/db/drizzle-order-accepts.js';
 export { DrizzleOrderExpiry, orderExpiryDatabaseOptions, type DrizzleOrderExpiryOptions } from './adapters/db/drizzle-order-expiry.js';
 export { DrizzleSalePaying, type DrizzleSalePayingOptions } from './adapters/db/drizzle-sale-paying.js';
@@ -572,6 +599,7 @@ export type {
   OrderExpirySignals,
   OrderExpiryStore,
   OrderHistoryMismatch,
+  OrderHistoryReads,
   OrderHistoryReport,
   OrderHoldCheck,
   OrderHoldQuery,
@@ -582,6 +610,7 @@ export type {
   OrderReleaseInput,
   OrderReleaseResult,
   OrderRequestOnce,
+  OrderSeatLabels,
   OrderSeatPins,
   OrderSessions,
   OrderSessionView,

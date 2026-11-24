@@ -6,6 +6,10 @@ import type { SalePolicyRule } from '@peaket/validation/sale-policy';
 export interface EventSaleConfigOverlay {
   /** 판매 승인·설정 고치기의 판. queue-svc처럼 purchase-svc도 판이 클 때만 바꾼다 */
   rev: number;
+  /** 공연 제목(core event_sale_config의 title, 선택). 주문 내역 표시에만 쓴다(F-07-2) */
+  title?: string;
+  /** 회차 시작 시각(epoch ms, core event_sale_config의 startsAtMs, 선택). 주문 내역 표시에만 쓴다 */
+  startsAtMs?: number;
   /** 회차 1인 한도(규칙이 낮추기 전 값) */
   perPersonLimit: number;
   /** 판매 종료 시각(epoch ms) */
