@@ -1352,7 +1352,7 @@ async function runV1(a, runTag) {
     const vus = vuPlan(maxRate / nGen, gen.memoryMi, perReqS);
     // 진입 단계: 진입 VU는 처음부터 다 만든다(미리 = 최대). 준비 VU는 그보다 크게 두어 진입 VU가 모두 토큰을 쌓은 VU가 되게 한다(scenarios/v1-entry.js)
     const entryPlan = a.scenario === 'entry' ? entryVuPlan(a.users, vus.max * nGen, nGen) : undefined;
-    log(`발생기 ${nGen}대(CPU ${gen.cpus}·메모리 ${gen.memoryMi}Mi씩), 최고 도착률 ${Math.round(maxRate)}/s, 발생기마다 미리 ${vus.pre}·최대 ${vus.max} VU${entryPlan ? `, 진입 VU ${entryPlan.entryVus}·준비 VU ${entryPlan.prepVus}·VU마다 토큰 ${entryPlan.tokensPerVu}` : ''}`);
+    log(`발생기 ${nGen}대(CPU ${gen.cpus}·메모리 ${gen.memoryMi}Mi씩), 최고 도착률 ${Math.round(maxRate)}/s, 발생기마다 미리 ${vus.pre}·최대 ${vus.max} VU${entryPlan ? `, 진입 VU ${entryPlan.entryVus}·사전 검증 토큰은 측정 전에 파일로 만든다` : ''}`);
 
     step('실행 잠금과 남은 것 쓸어 내기');
     await acquireLock(runTag, Date.now() + (busyS * 2 + 900) * 1000);
@@ -1421,7 +1421,7 @@ async function runV1(a, runTag) {
       ...(a.scenario === 'queue' ? { ENTRY_RATE: a.entryRate, ADMIT_PER_SECOND: a.admitPerSecond } : {}),
       ...(a.scenario === 'seat-hold' ? { RATE: a.rate, MODE: a.mode, HOLD_SIZE: a.holdSize, HOT_COUNT: a.hotCount, PAIRS: a.pairs, RELEASE_MS: a.releaseMs, KEEP: a.keep ? 1 : 0, PREP_TIMEOUT_S: Math.max(300, prepS * 3) } : {}),
       ...(a.scenario === 'payment' ? { RATE: a.rate, SEATS_PER_ORDER: a.seatsPerOrder, SIM_URL: L.pgSimUrl, FAULT_DROP_PCT: String(a.faultDropPct), FAULT_DELAY_PCT: String(a.faultDelayPct), FAULT_DELAY_MS } : {}),
-      ...(entryPlan ? { RATE: a.rate, PREP_S: a.prepS, TOKENS_PER_VU: entryPlan.tokensPerVu, PREP_VUS: entryPlan.prepVus, ENTRY_VUS: entryPlan.entryVus } : {}),
+      ...(entryPlan ? { RATE: a.rate, ENTRY_VUS: entryPlan.entryVus } : {}),
     };
     const segments = executionSegments(nGen);
     for (const sg of segments) {
@@ -1436,6 +1436,13 @@ async function runV1(a, runTag) {
       await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment', deadlineS: Math.max(60, Math.min(11400, busyS * 2 + 600)), ...(split ? { index: sg.index } : {}) }));
     }
     for (const p of pods) await waitPodReady(p);
+
+    // 진입 단계의 사전 검증 토큰은 측정 전에 한 번 만든다(2026-11-24 리허설 고침: k6가 준비 시나리오 VU의 상태를 진입 시나리오 VU로 잇지 못했다)
+    let prep = null;
+    if (a.scenario === 'entry') {
+      step('사전 검증 토큰 파일(측정 전 한 번)');
+      prep = await prepareEntryTokens({ pod: pods[0], hostDir, envFile: split ? 'run-0.env' : 'run.env', a, outDir });
+    }
 
     // v1 DB 통계(실행 전, --db-stats, 계획 F-08-8 7.1)
     const statsDeps = v1StatsDeps(redisTls);
@@ -1593,7 +1600,7 @@ async function runV1(a, runTag) {
     const notes = [
       runNotesV1(a, { generator: g, merged, probes: probesOut, maxRate, nGen }),
       ...v1StageNotes(a, { redisTls, skipped: probesOut.skipped, pause: probesOut.pause, entry }),
-      ...(a.scenario === 'entry' ? [entryStageNote(a, { replicas, bundleMode, services: bundleServicesOf(bundle), entryPlan, merged, host: probesOut.host })] : []),
+      ...(a.scenario === 'entry' ? [entryStageNote(a, { replicas, bundleMode, services: bundleServicesOf(bundle), entryPlan, prep, merged, host: probesOut.host })] : []),
       ...(statsOut ? [statsNote(statsOut)] : []),
     ].join('; ');
     writeFileSync(join(outDir, 'notes.txt'), `${notes}\n`);
@@ -1689,14 +1696,17 @@ function bundleServicesOf(bundle) {
 /** 진입 단계의 notes 한 줄(무대 사실과 준비·호스트 지표) */
 function entryStageNote(a, o) {
   const m = o.merged.metrics;
-  const prepMs = m['prep_elapsed_ms']?.values?.max;
   const pvFailed = m['preverify_failed']?.values?.count ?? 0;
   const noToken = m['entry_no_token']?.values?.count ?? 0;
+  const prep = o.prep;
   const h = o.host;
   const pct = (x) => (typeof x === 'number' ? `${Math.round(x * 10) / 10}%` : '-');
+  const prepText = prep
+    ? `${Math.round(prep.elapsed_ms / 100) / 10}초, 요청 ${prep.requested}·만듦 ${prep.made}·실패 ${prep.failed}`
+    : `기록 없음(사전 검증 실패 ${pvFailed}건)`;
   return [
     `MSR-020 진입 단계: 진입 서버(합본 복제) ${o.replicas}대 × CPU ${a.podCpus}, 합본 서비스 ${o.services.join('·') || '-'}(모드 ${o.bundleMode}), 도착률 ${a.rate}/s, 사람마다 진입 한 번(가상 대기자 ${a.users}명)`,
-    `준비(사전 검증) ${a.prepS}초 안 실제 ${typeof prepMs === 'number' ? `${Math.round(prepMs / 100) / 10}초` : '-'}, 사전 검증 실패 ${pvFailed}건, 토큰 없어 못 보냄 ${noToken}건(VU ${o.entryPlan.entryVus}개 × 토큰 ${o.entryPlan.tokensPerVu})`,
+    `사전 검증 토큰 파일(측정 전 한 번) ${prepText}, 토큰 없어 못 보냄 ${noToken}건(진입 VU ${o.entryPlan.entryVus}개)`,
     h ? `호스트 CPU ${pct(h.cpuUtil)}, procs_running ${h.procsRunning ?? '-'}/논리 ${h.logicalCpus ?? '-'}, 준 CPU 합 ${h.cpuAssigned ?? '-'}, 커널 ListenOverflows +${h.kernel?.listenOverflows ?? '-'}·ListenDrops +${h.kernel?.listenDrops ?? '-'}, 표시 ${h.tags.join('·') || '없음'}${h.errors?.length ? `, 못 읽음 ${h.errors.length}건` : ''}` : '호스트 지표 없음',
   ].join(', ');
 }
@@ -1761,12 +1771,40 @@ async function hostPairAtMarks(o) {
   return { before, after };
 }
 
+/**
+ * 진입 단계의 사전 검증 토큰을 측정 전에 한 번 만들어 /work/out/prep.ndjson에 남긴다(v1-entry-tokens.js).
+ * k6 준비 시나리오와 진입 시나리오 사이에 VU 상태가 이어진다고 보장되지 않아(2026-11-24 리허설), 토큰을 파일로 떼어 냈다.
+ * 만든 토큰이 진입 시나리오가 쓰는 최대 번호보다 적으면 시작하지 않는다(부족한 채로 재면 그 단계가 조용히 무효가 된다).
+ */
+async function prepareEntryTokens({ pod, hostDir, envFile, a, outDir }) {
+  const timeout = Math.max(120_000, (a.prepS + 600) * 1000);
+  await kc(
+    ['-n', NS, 'exec', pod, '--', 'sh', '-c', `cd /work && set -a && . ./${envFile} && set +a && rm -f out/prep.ndjson out/prep-k6.log && k6 run --quiet --no-usage-report --log-format=raw --console-output=out/prep.ndjson loadtest/scenarios/v1-entry-tokens.js > out/prep-k6.log 2>&1`],
+    { timeout },
+  );
+  const last = onNode(['sh', '-c', `tail -n 1 ${hostDir}/out/prep.ndjson`]).trim();
+  let summary;
+  try {
+    summary = JSON.parse(last);
+  } catch {
+    summary = null;
+  }
+  if (!summary || summary.kind !== 'prep') throw new Error(`사전 검증 토큰 준비의 마지막 줄을 읽지 못했다: ${last.slice(0, 200)}`);
+  const need = a.rate * (a.warmS + a.mainS + 7) + 2;
+  const made = Number(summary.made);
+  if (!Number.isSafeInteger(made) || made < need) throw new Error(`사전 검증 토큰이 모자란다: ${made} < ${need}(실패 ${summary.failed})`);
+  const prep = { ...summary, need, path: '/work/out/prep.ndjson' };
+  writeFileSync(join(outDir, 'prep.json'), JSON.stringify(prep, null, 2));
+  return prep;
+}
+
 /** 단계 하나의 결과(runner/entry-scale.mjs runEntrySteps가 판정한다): 산출물 폴더의 summary.json·generator.json·host.json에서 */
 function entryStepResult(outDir, rate) {
   const read = (f) => (existsSync(join(outDir, f)) ? JSON.parse(readFileSync(join(outDir, f), 'utf8')) : null);
   const summary = read('summary.json');
   const gen = read('generator.json');
   const host = read('host.json');
+  const prep = read('prep.json');
   const m = summary?.metrics ?? {};
   const v = (k, stat) => (typeof m[k]?.values?.[stat] === 'number' ? m[k].values[stat] : null);
   const sent = v('http_reqs{phase:main,route:entry}', 'count');
@@ -1784,7 +1822,9 @@ function entryStepResult(outDir, rate) {
     dropped: Number.isSafeInteger(gen?.dropped) ? gen.dropped : null,
     kernel: host?.kernel ?? null,
     host: host ? { cpuUtil: host.cpuUtil, procsRunning: host.procsRunning, logicalCpus: host.logicalCpus, throttle: host.throttle, cpuAssigned: host.cpuAssigned, tags: host.tags ?? [] } : null,
-    prepElapsedS: typeof prepMs === 'number' ? prepMs / 1000 : null,
+    prepElapsedS: typeof prep?.elapsed_ms === 'number' ? prep.elapsed_ms / 1000 : typeof prepMs === 'number' ? prepMs / 1000 : null,
+    prepMade: Number.isSafeInteger(prep?.made) ? prep.made : null,
+    prepFailed: Number.isSafeInteger(prep?.failed) ? prep.failed : null,
     outDir,
   };
 }
