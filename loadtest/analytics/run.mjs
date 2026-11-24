@@ -491,10 +491,14 @@ function startSampler({ ch, admin, groups, start, eventId, out, samplePath, samp
     const phase = phaseOf(at);
     const sample = { at, phase, label: new Date(at).toISOString(), rtMs: null, bronzeMs: null, queryMs: null, hotLag: null, lag: null, hostCpu: hostCpu(), chCpu: null, error: null };
     try {
-      const rt = await ch.rows(`SELECT count() AS parts, if(count() = 0, NULL, toInt64(toUnixTimestamp64Milli(now64(3)) - toUnixTimestamp64Milli(min(last)))) AS ms FROM (SELECT topic, kafka_partition, max(produced_at) AS last FROM rt.pulse WHERE produced_at >= now64(3) - INTERVAL 1 HOUR GROUP BY topic, kafka_partition)`);
+      const rt = await ch.rows(`SELECT count() AS parts, if(count() = 0, NULL, toInt64(toUnixTimestamp64Milli(now64(3)) - toUnixTimestamp64Milli(min(last)))) AS ms, if(count() = 0, NULL, toInt64(toUnixTimestamp64Milli(now64(3)) - toUnixTimestamp64Milli(toStartOfSecond(min(last))))) AS bucket_ms FROM (SELECT topic, kafka_partition, max(produced_at) AS last FROM rt.pulse WHERE produced_at >= now64(3) - INTERVAL 1 HOUR GROUP BY topic, kafka_partition)`);
       sample.pulseParts = Number(rt[0]?.parts ?? 0);
       sample.expectedPulseParts = pulseParts;
-      sample.rtMs = sample.pulseParts >= pulseParts && rt[0]?.ms !== null && rt[0]?.ms !== undefined ? Number(rt[0].ms) : null;
+      const cum = rt[0]?.ms === null || rt[0]?.ms === undefined ? null : Number(rt[0].ms);
+      const bucket = rt[0]?.bucket_ms === null || rt[0]?.bucket_ms === undefined ? null : Number(rt[0].bucket_ms);
+      sample.rtMs = sample.pulseParts >= pulseParts ? cum : null;
+      sample.rtBucketMs = sample.pulseParts >= pulseParts ? bucket : null;
+      sample.rtHeadMs = sample.rtMs === null || sample.rtBucketMs === null ? null : Math.max(sample.rtMs, sample.rtBucketMs);
       if (sample.pulseParts < pulseParts) sample.error = `심장 박동 파티션 ${sample.pulseParts}/${pulseParts}`;
       const bronze = await ch.rows(`SELECT if(count() = 0, NULL, toInt64(toUnixTimestamp64Milli(now64(3)) - toUnixTimestamp64Milli(max(kafka_ts)))) AS ms FROM bronze.brz_order_event`);
       sample.bronzeMs = bronze[0]?.ms === null || bronze[0]?.ms === undefined ? null : Number(bronze[0].ms);

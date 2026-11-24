@@ -207,11 +207,14 @@ const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o[k]]));
 /** 샘플에서 판정용 값만 고른다. 회복 구간은 정확성 판정에만 넣고 신선도에서는 뺀다(계획 §7.1) */
 export function freshnessFromSamples(samples) {
   const use = (s) => s.phase === 'steady' || s.phase === 'drain';
-  const rt = samples.filter((s) => Number.isFinite(s.rtMs) && use(s)).map((s) => ({ at: s.at, ms: s.rtMs }));
+  // C-T14·NFR-009의 '두 길 가운데 큰 값'을 쓴다. rtHeadMs가 없으면 누적 길만 쓴다(옛 산출물 호환).
+  const head = (s) => (Number.isFinite(s.rtHeadMs) ? s.rtHeadMs : s.rtMs);
+  const rt = samples.filter((s) => Number.isFinite(head(s)) && use(s)).map((s) => ({ at: s.at, ms: head(s) }));
+  const bucket = samples.filter((s) => Number.isFinite(s.rtBucketMs) && use(s)).map((s) => s.rtBucketMs);
   const bronze = samples.filter((s) => Number.isFinite(s.bronzeMs) && use(s)).map((s) => s.bronzeMs);
   const query = samples.filter((s) => Number.isFinite(s.queryMs)).map((s) => s.queryMs);
   const hot = samples.filter((s) => Number.isFinite(s.hotLag) && use(s)).map((s) => s.hotLag);
-  return { rt, bronze, query, hot };
+  return { rt, bucket, bronze, query, hot };
 }
 
 /**
