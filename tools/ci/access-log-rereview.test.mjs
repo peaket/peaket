@@ -32,6 +32,9 @@ test('IR-13③ 로그인 성공·실패 줄이 같은 요청 ID를 쓰고 gRPC�
   assert.match(c, /recordLegalAccess\(\{ event: 'LOGIN', result: 'FAILED'[^}]*requestId: i\.requestId/);
   const g = read('services/identity-svc/src/modules/session/inbound/session.grpc.ts');
   assert.match(g, /metadata|get\('x-request-id'\)/);
+  // asyncapi의 InvestigationRequest.requestId는 x-request-id다. 같은 요청을 법정 줄과 조사 사본에서 맞춘다.
+  const a = read('docs/api/asyncapi.yaml');
+  assert.match(a, /requestId: \{ type: string, description: "x-request-id/);
   // seq 파일은 /tmp가 아니라 배포가 영속 볼륨으로 마운트하는 자리다
   const l = read('services/identity-svc/src/modules/session/legal-access-log.ts');
   assert.match(l, /\/var\/lib\/identity\/legal-access-seq/);
