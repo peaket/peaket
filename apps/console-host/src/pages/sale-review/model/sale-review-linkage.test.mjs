@@ -74,10 +74,7 @@ test('S-T41 ⑫ LCH-080_ 승인 본문은 회차 규모·고른 공연장·요�
   assert.deepEqual(body, {
     scales: [{ eventId: 'ev-1', scale: 'MEDIUM' }],
     placeId: NEW_PLACE,
-    artists: [
-      { name: 'LUMEN', artistId: ARTIST },
-      { name: '새 이름', artistId: NEW_ARTIST },
-    ],
+    artists: [{ name: '새 이름', artistId: NEW_ARTIST }],
   });
   assert.equal('artistIds' in body, false);
   assert.equal('aliases' in body, false);

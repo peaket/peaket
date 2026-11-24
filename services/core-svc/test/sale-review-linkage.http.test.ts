@@ -16,7 +16,7 @@ const repo = new MemoryCatalogRepository();
 const identity = new FakeIdentity();
 const saleConfigs = new MemorySaleConfigStore();
 const cdn = new MemoryCdnInvalidation();
-const payout = new RecordingPayoutRegistration(readyView());
+const payout = new RecordingPayoutRegistration();
 const TENANT = randomUUID();
 const PLACE = randomUUID();
 const OTHER_PLACE = randomUUID();
@@ -37,6 +37,7 @@ beforeAll(async () => {
   repo.artists.add(LUMEN);
   repo.artistNames.push({ id: LUMEN, name: 'LUMEN', aliases: ['루멘'] });
   repo.promoters.set(TENANT, sellerRow(TENANT, '(주)피켓공연'));
+  payout.views.set(TENANT, readyView());
   svc = await createService({
     name: 'core-svc',
     module: AppModule.register({ memory: true, catalog: repo, saleConfigs, media: { cdn }, payoutRegistration: payout }),

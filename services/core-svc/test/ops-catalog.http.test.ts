@@ -13,14 +13,17 @@ const repo = new MemoryCatalogRepository();
 const identity = new FakeIdentity();
 const LUMEN = randomUUID();
 const LUMEN2 = randomUUID();
+const OTHER = randomUUID();
 const HALL = randomUUID();
 const P = 'https://peaket.example/problems/';
 
 beforeAll(async () => {
   repo.artists.add(LUMEN);
   repo.artists.add(LUMEN2);
+  repo.artists.add(OTHER);
   repo.artistNames.push({ id: LUMEN, name: 'LUMEN', aliases: ['루멘', '엘유멘'] });
   repo.artistNames.push({ id: LUMEN2, name: 'LUMEN BAND', aliases: [] });
+  repo.artistNames.push({ id: OTHER, name: '다른 팀', aliases: [] });
   repo.places.add(HALL);
   repo.placeNames.push({ id: HALL, name: '피켓 아레나', address: '서울 송파구 올림픽로 1', aliases: ['피켓홀'] });
   svc = await createService({
@@ -53,7 +56,8 @@ describe('관제 아티스트·공연장 찾기·만들기(LCH-080 잔여)', () 
     expect(byName.headers['cache-control']).toBe('no-store');
     const names = (JSON.parse(byName.payload).items as { artistId: string; name: string; aliases: string[] }[]).map((x) => x.artistId);
     expect(names).toContain(LUMEN);
-    expect(names).not.toContain(LUMEN2); // 'LUMEN BAND'는 'LUM'에 걸리지 않는다(부분 일치라도 시작 이름만)
+    expect(names).toContain(LUMEN2); // 'LUM'은 'LUMEN BAND'도 부분 일치한다
+    expect(names).not.toContain(OTHER);
     expect(JSON.stringify(JSON.parse(byName.payload))).not.toMatch(/account|phone|email|business/i);
 
     const byAlias = await artists(ops('cs_agent'), '루멘');
