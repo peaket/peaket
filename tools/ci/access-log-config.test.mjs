@@ -135,13 +135,13 @@ test('V-T21·16.4.3 정본 값(0.1%·5분·15분)을 바꾸면 설정과 어긋�
   expectBlocked((r) => set(r, 'docs/observability.md', '대조 잡이 5분마다 15분 전의 5분 칸을 본다', '대조 잡이 10분마다 15분 전의 5분 칸을 본다'), 'window');
   expectBlocked((r) => set(r, 'docs/observability.md', '다음 날 03:30에는', '다음 날 03:00에는'), 'anchor');
   expectBlocked((r) => set(r, 'docs/infra.md', '매일 04:00 [가정]', '매일 05:00 [가정]'), 'copy');
-  expectBlocked((r) => set(r, 'docs/infra.md', '3개월 + 7일 [가정]', '3개월 + 8일 [가정]'), 'retention');
+  expectBlocked((r) => set(r, 'docs/infra.md', '3개월 보존이 끝난 뒤 7일 [가정]', '3개월 보존이 끝난 뒤 8일 [가정]'), 'retention');
   expectBlocked((r) => set(r, 'docs/observability.md', '06:00까지 없다', '07:00까지 없다'), 'missingBy');
 });
 
 test('Q-T61 ①~③ 조사 사본은 조사 경로만 Kafka로 보내고 조사 칸을 법정·일반 줄에서 지운다', () => {
   const cfg = 'deploy/platform/observability/collector/access-log.yaml';
-  expectBlocked((r) => set(r, cfg, 'path: investigation.requests', 'path: investigation.copy'), 'investigation.requests');
+  expectBlocked((r) => set(r, cfg, 'topic: investigation.requests', 'topic: investigation.copy'), 'investigation.requests');
   expectBlocked((r) => set(r, cfg, 'compression: zstd', 'compression: gzip'), 'zstd');
   expectBlocked((r) => set(r, cfg, 'block_on_overflow: false', 'block_on_overflow: true'), 'block_on_overflow');
   expectBlocked((r) => set(r, cfg, 'max_elapsed_time: 10m', 'max_elapsed_time: 1h'), '10m');

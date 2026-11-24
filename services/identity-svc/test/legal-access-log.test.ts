@@ -43,7 +43,7 @@ describe('F-01-8 identity 법정 접속기록 줄', () => {
     expect(lines.every((l) => l.factors === undefined)).toBe(true);
     // 모르는 실패 종류·이벤트·결과는 지어내지 않고 던진다
     expect(() => t.log.record({ event: 'REAUTH', result: 'FAILED', failure: 'other' as never })).toThrow();
-    expect(() => t.log.record({ event: 'LOGIN' as never, result: 'SUCCESS' })).toThrow();
+    expect(() => t.log.record({ event: 'SIGNUP' as never, result: 'SUCCESS' })).toThrow();
     expect(() => t.log.record({ event: 'LOGIN', result: 'MAYBE' as never })).toThrow();
   });
 

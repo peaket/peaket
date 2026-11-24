@@ -17,12 +17,13 @@ test('V-T21 5분 칸은 15분 전의 5분 경계로 내리고 경계 밖은 다�
   const b = windowOf(at(12, 10));
   assert.equal(new Date(b.startMs + KST).toISOString().slice(11, 16), '11:55');
   assert.equal(new Date(b.endMs + KST).toISOString().slice(11, 16), '12:00');
-  // 5분 경계에 딱 맞으면 그 칸을 쓴다
+  // 5분 경계에 딱 맞으면 그 칸을 쓴다(현재 칸의 15분 전)
   const c = windowOf(at(12, 5));
-  assert.equal(new Date(c.startMs + KST).toISOString().slice(11, 16), '11:45');
+  assert.equal(new Date(c.startMs + KST).toISOString().slice(11, 16), '11:50');
+  assert.equal(new Date(c.endMs + KST).toISOString().slice(11, 16), '11:55');
   assert.equal(c.endMs - c.startMs, 5 * 60 * 1000);
-  // 인자로 다른 칸을 고를 수 있다
-  const d = windowOf(at(12, 7), { offsetMinutes: 0, sizeMinutes: 1 });
+  // 인자로 다른 칸을 고를 수 있다(2분 전의 1분 칸)
+  const d = windowOf(at(12, 7), { offsetMinutes: 2, sizeMinutes: 1 });
   assert.equal(new Date(d.startMs + KST).toISOString().slice(11, 16), '12:05');
   assert.equal(new Date(d.endMs + KST).toISOString().slice(11, 16), '12:06');
 });
