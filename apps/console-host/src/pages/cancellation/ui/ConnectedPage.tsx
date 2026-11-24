@@ -327,7 +327,7 @@ export function ConnectedPage() {
             </div>
           </section>
 
-          <div className="grid-12" style={{ rowGap: 16, alignItems: 'start' }}>
+          <div className="grid-12 cs-cancel-layout" data-cs-two-col style={{ rowGap: 16, alignItems: 'start' }}>
             <section className="widget span-6" aria-labelledby="h-judge">
               <div className="widget-head">
                 <h2 className="t-sm fw-b" id="h-judge">

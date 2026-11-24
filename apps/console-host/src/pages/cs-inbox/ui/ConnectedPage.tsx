@@ -290,8 +290,8 @@ export function ConnectedPage() {
         </div>
       ) : null}
 
-      <div className="row" style={{ gap: 16, alignItems: 'flex-start' }}>
-        <section className="widget" aria-labelledby="h-filter" style={{ flex: '0 0 220px' }}>
+      <div className="cs-inbox-layout" data-cs-two-col>
+        <section className="widget cs-inbox-filter" aria-labelledby="h-filter">
           <div className="widget-head">
             <h2 className="t-sm fw-b" id="h-filter">
               걸러 보기
@@ -331,7 +331,7 @@ export function ConnectedPage() {
           </div>
         </section>
 
-        <section className="widget" aria-labelledby="h-list" style={{ flex: '1 1 0' }}>
+        <section className="widget cs-inbox-list" aria-labelledby="h-list">
           <div className="widget-head">
             <h2 className="t-sm fw-b" id="h-list">
               건 목록
@@ -350,38 +350,62 @@ export function ConnectedPage() {
               </div>
             ) : null}
             {items.length > 0 ? (
-              <div className="table-wrap">
-                <table className="table dense">
-                  <caption className="sr-only">CS 처리함 건. 기한이 이른 차례이고 기한 없는 건이 끝에 온다. 건을 누르면 상세가 열립니다</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">종류</th>
-                      <th scope="col">대상</th>
-                      <th scope="col">기한</th>
-                      <th scope="col">상태</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map((c) => {
-                      const badge = dueBadge(c.dueState);
-                      return (
-                        <tr key={c.caseId} aria-current={c.caseId === caseId ? 'true' : undefined}>
-                          <td>
-                            <button className="link fw-b" type="button" style={{ color: 'inherit' }} onClick={() => navigate(`/cs/inbox/${c.caseId}`)}>
-                              {kindLabel(c.kind)}
-                            </button>
-                          </td>
-                          <td className="mono t-xs">{c.targetRef}</td>
-                          <td>
-                            <span className={`badge badge-${badge.tone}`}>{badge.label}</span> <span className="t-xs muted">{dueText(c)}</span>
-                          </td>
-                          <td>{statusLabel(c.status)}</td>
+              <>
+                <ul className="cs-inbox-cards" aria-label="CS 처리함 건">
+                  {items.map((c) => {
+                    const badge = dueBadge(c.dueState);
+                    return (
+                      <li key={c.caseId} className="card" style={{ padding: 12 }}>
+                        <div className="col" style={{ gap: 6 }}>
+                          <button className="link fw-b" type="button" style={{ color: 'inherit', textAlign: 'left' }} onClick={() => navigate(`/cs/inbox/${c.caseId}`)} aria-current={c.caseId === caseId ? 'true' : undefined}>
+                            {kindLabel(c.kind)}
+                          </button>
+                          <span className="mono t-xs">{c.targetRef}</span>
+                          <div className="row wrap" style={{ gap: '4px 8px' }}>
+                            <span className={`badge badge-${badge.tone}`}>{badge.label}</span>
+                            <span className="t-xs muted">{dueText(c)}</span>
+                            <span className="badge">{statusLabel(c.status)}</span>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className="cs-inbox-table">
+                  <div className="table-wrap">
+                    <table className="table dense">
+                      <caption className="sr-only">CS 처리함 건. 기한이 이른 차례이고 기한 없는 건이 끝에 온다. 건을 누르면 상세가 열립니다</caption>
+                      <thead>
+                        <tr>
+                          <th scope="col">종류</th>
+                          <th scope="col">대상</th>
+                          <th scope="col">기한</th>
+                          <th scope="col">상태</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                      </thead>
+                      <tbody>
+                        {items.map((c) => {
+                          const badge = dueBadge(c.dueState);
+                          return (
+                            <tr key={c.caseId} aria-current={c.caseId === caseId ? 'true' : undefined}>
+                              <td>
+                                <button className="link fw-b" type="button" style={{ color: 'inherit' }} onClick={() => navigate(`/cs/inbox/${c.caseId}`)}>
+                                  {kindLabel(c.kind)}
+                                </button>
+                              </td>
+                              <td className="mono t-xs">{c.targetRef}</td>
+                              <td>
+                                <span className={`badge badge-${badge.tone}`}>{badge.label}</span> <span className="t-xs muted">{dueText(c)}</span>
+                              </td>
+                              <td>{statusLabel(c.status)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
             ) : null}
             {list.kind === 'ready' && list.nextCursor ? (
               <button className="btn btn-outline" type="button" onClick={() => void loadList(filter, list.nextCursor ?? undefined)} disabled={busy}>
@@ -391,7 +415,7 @@ export function ConnectedPage() {
           </div>
         </section>
 
-        <section className="widget" aria-labelledby="h-detail" style={{ flex: '0 0 360px' }}>
+        <section className="widget cs-inbox-detail" aria-labelledby="h-detail">
           <div className="widget-head">
             <h2 className="t-sm fw-b" id="h-detail">
               건 상세

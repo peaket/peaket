@@ -125,7 +125,7 @@ export function MainT({ v, close, go }: { v: V; close?: () => void; go?: (state:
             <span className="badge">{v.nReq}</span>
           </button>
         </div>
-        <ul style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "8px" }} aria-label="승인 요청">
+        <ul data-cs-two-col style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "8px" }} aria-label="승인 요청">
           <li>
             <Link onClick={(e) => { e.preventDefault(); go?.('승인 대기'); }} to="/cs/approvals" className={`card ${v.selA}`} aria-current={(v.curA) as AriaCurrent} style={{ display: "flex", flexDirection: "column", gap: "6px", height: "100%", padding: "12px 14px", color: "inherit" }}>
               <span className="row between" style={{ gap: "6px" }}>

@@ -5,3 +5,68 @@
 @source "../../../../packages/ds/src";
 @source "../../../widgets";
 @source "..";
+
+/* GAT-340(F-05-8): CS 처리함·승인 업무·회차 취소 판정·팬 조회의 휴대폰 1열·태블릿 2열 배치.
+   새 동작 없이 배치만 바꾼다. 표는 휴대폰에서 세로 카드로 바꾸고, 태블릿에서는 목록·상세를 2열로 둔다. */
+@layer components {
+  .cs-inbox-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+  .cs-inbox-filter,
+  .cs-inbox-list,
+  .cs-inbox-detail {
+    min-width: 0;
+  }
+  .cs-inbox-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .cs-inbox-table {
+    display: none;
+  }
+  .cs-cancel-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cs-cancel-layout > .span-6 {
+    grid-column: auto;
+  }
+
+  @media (min-width: 768px) {
+    .cs-inbox-layout {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .cs-inbox-filter {
+      grid-column: 1 / -1;
+    }
+    .cs-inbox-cards {
+      display: none;
+    }
+    .cs-inbox-table {
+      display: block;
+    }
+    .cs-cancel-layout {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .cs-cancel-layout > .span-6 {
+      grid-column: auto;
+    }
+  }
+
+  @media (min-width: 1280px) {
+    .cs-inbox-layout {
+      grid-template-columns: 220px minmax(0, 1fr) 360px;
+    }
+    .cs-inbox-filter,
+    .cs-inbox-list,
+    .cs-inbox-detail {
+      grid-column: auto;
+    }
+  }
+}

@@ -121,7 +121,7 @@ export function MainT({ v, close, go }: { v: V; close?: () => void; go?: (state:
           <section className="widget" aria-labelledby="h-acct">
             <div className="widget-head"><h2 className="t-sm fw-b" id="h-acct">계정 요약</h2></div>
             <div className="widget-body" style={{ padding: "16px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "16px 20px", alignItems: "start" }}>
+              <div data-cs-two-col style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "16px 20px", alignItems: "start" }}>
                 <dl style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "18px 20px" }}>
                   <div className="col" style={{ gap: "4px" }}>
                     <dt className="eyebrow">닉네임</dt>
