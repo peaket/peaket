@@ -191,7 +191,7 @@
     },
     "F-05-4": {
       "class": "release",
-      "reason": "R-809, 994c1ab2d, 계획 docs/review/plans/F-05-4.md. BUILD_ORDER는 진행이나 합쳐짐"
+      "reason": "R-809, 994c1ab2d, 계획 docs/review/plans/F-05-4.md. GAT-140 브라우저 확인(2026-11-24, f8dddf7be): ?live=1 결함 재현·고침, scanner-scan 20/20·scanner 159/159. 실제 카메라·휴대폰 QR·실서비스 조합은 남은 위험"
     },
     "F-05-5": {
       "class": "release",

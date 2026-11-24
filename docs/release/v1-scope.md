@@ -72,7 +72,7 @@
 | F-05-1 | 현장 입장 | 월렛·부스 재발급·홈 화면 추가·SW 정리 | 일부 완료 | gate | R-787, GAT-040 끝·GAT-020 대기, 계획 docs/review/plans/F-05-1.md. 게이트: GAT-030 키 증명 PoC + 소유자 실기기 확인 | ticket-svc, web, partner | 없음 | ticket 0012 | PC 측정 완료(af63e511b), 소유자 실기기 확인 대기 |
 | F-05-2 | 현장 입장 | 양도 요청·수락·결제자 돌려주기 | 일부 구현 있음 | release | R-810, ba4c523da, reflow c3175c7b5(닫힘), ADR-0383, 계획 docs/review/plans/F-05-2.md | ticket-svc, web | 없음 | ticket 0018 | 출시 몫 끝(거절 화면·알림은 F-05-11 동결) |
 | F-05-3 | 현장 입장 | 우선 구매 권리·PRIORITY 보류·만료 | 완료 | release | R-812, 9440db38d, ADR-0385, 계획 docs/review/plans/F-05-3.md | purchase-svc, queue-svc | 없음 | - | IR-04~10은 정리 목록 |
-| F-05-4 | 현장 입장 | 스캐너 오프라인 판정·즉시 업로드·재입장 | 진행 | release | R-809, 994c1ab2d, 계획 docs/review/plans/F-05-4.md. BUILD_ORDER는 진행이나 합쳐짐 | scanner, ticket-svc | 없음 | ticket 0013 | 브라우저 확인·남은 리뷰 한 곳 |
+| F-05-4 | 현장 입장 | 스캐너 오프라인 판정·즉시 업로드·재입장 | 완료 | release | R-809, 994c1ab2d, 계획 docs/review/plans/F-05-4.md. GAT-140 브라우저 확인(2026-11-24, f8dddf7be): ?live=1 결함 재현·고침, scanner-scan 20/20·scanner 159/159. 실제 카메라·휴대폰 QR·실서비스 조합은 남은 위험 | scanner, ticket-svc | 없음 | ticket 0013 | 없음(브라우저 확인 완료, 실제 카메라·휴대폰 QR은 남은 위험) |
 | F-05-5 | 현장 입장 | 기기 등록/배정/폐기·DPoP·세션 확인 | 완료 | release | R-800, 55d562471, 계획 docs/review/plans/F-05-5.md | scanner, ticket-svc, identity-svc, platform | 없음 | - | 없음 |
 | F-05-6 | 현장 입장 | 입장 기록 마감·미보고 스캐너 CS·중복 입장 | 완료 | release | R-811, a752f1456, 계획 docs/review/plans/F-05-6.md | ticket-svc, core-svc, purchase-svc, scanner | 없음 | ticket 0019·0020, core 0047 | IR-03·06·12는 정리 목록 |
 | F-05-7 | 현장 입장 | 초대 수락·스캐너 승인·스태프 세션 | 완료 | release | R-782, b20bdd44f, 계획 docs/review/plans/F-05-7.md | identity-svc, scanner, web | 없음 | identity 0038 | 없음 |
