@@ -155,15 +155,20 @@ async function runOne(o) {
   let admin;
   let sampler;
   const children = [];
+  const producerProcs = [];
   const specs = [];
   let localStopping = false;
 
   const stopWorkers = async () => {
     localStopping = true;
+    for (const p of producerProcs) {
+      try { p.kill('SIGTERM'); } catch { /* 이미 없다 */ }
+    }
     for (const c of children) {
       try { c.proc.kill('SIGTERM'); } catch { /* 이미 없다 */ }
     }
-    await Promise.all(children.map((c) => waitExit(c.proc, 15_000)));
+    await Promise.all([...producerProcs, ...children.map((c) => c.proc)].map((p) => waitExit(p, 15_000)));
+    producerProcs.length = 0;
     children.length = 0;
   };
 
@@ -326,7 +331,11 @@ async function runOne(o) {
     }
 
     // ── 발생기 실행 ──
-    const producers = producerSpecs.map((s) => ({ spec: s, proc: spawnLogged(s) }));
+    const producers = producerSpecs.map((s) => {
+      const proc = spawnLogged(s);
+      producerProcs.push(proc);
+      return { spec: s, proc };
+    });
     const codes = await Promise.all(producers.map((p) => waitExit(p.proc, durationMs + 180_000)));
     clearTimeout(killTimer);
     run.producerExit = codes;
