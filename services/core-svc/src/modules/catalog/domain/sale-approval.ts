@@ -9,8 +9,12 @@ export interface SaleApprovalInput {
   now: Date;
   /** 그 공연의 모든 회차(변경분의 더한 회차 포함)마다 규모 */
   scales: { eventId: string; scale: ShowScale }[];
-  /** 운영자가 확인한 공연장. 없으면 기존 값을 둔다 */
+  /** 운영자가 확인한 공연장. 새 공연장 요청이면 승인 전에 반드시 있어야 한다 */
   placeId?: string;
+  /** 파트너가 새 이름으로 요청한 아티스트를 잇는 값(요청 이름 → 아티스트 ID). 없으면 연결 없음 */
+  artists?: { name: string; artistId: string }[];
+  /** 유스케이스가 연결 검사로 정한 저장 값(요청 순서). 저장소만 읽는다 */
+  artistLinks?: { artistId: string; sortOrder: number }[];
   /** 휠체어석 확인(LCH-090). 지금은 승인 본문이 true만 받는다 */
   accessibleSeatingCheck?: boolean;
   /** 승인 트랜잭션 안에서 읽은 그 파트너의 지금 계약 수수료율(만분율). 계약이 없으면 없다 */

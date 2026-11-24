@@ -11,6 +11,7 @@ import { destroyTime, lockTime } from '../domain/sale-eligibility.js';
 import type { EventEditable, StoredList } from '../domain/sale-ports.js';
 import type { PromoterContractPeriod } from '../domain/promoter-contract.js';
 import type { LayoutDoc } from '../domain/seatmap-layout.js';
+import type { OpsArtistView, OpsPlaceView } from '../domain/ops-catalog.js';
 
 /** 공연 하나의 배치본(메모리, ADR-0260): 판 차례·행 판·대기 판·복제한 틀 */
 export interface MemoryLayout {
@@ -81,6 +82,10 @@ export class MemoryCatalogRepository implements CatalogRepository {
   placeNames: PlaceNameEntry[] = [];
   readonly places = new Set<string>();
   readonly artists = new Set<string>();
+  /** 공연 ID → 등록된 아티스트(보이는 순서). 승인 전 등록과 승인 때 연결을 함께 담는다(LCH-080 잔여) */
+  readonly productionArtists = new Map<string, { artistId: string; sortOrder: number }[]>();
+  /** 닫힌 공연장(시험이 넣는다). 목록에는 보이되 승인 연결에는 쓸 수 없다 */
+  readonly closedPlaces = new Set<string>();
   /** 등록으로 넣은 공연의 나머지 칸(시험이 들여다본다) */
   readonly registrations = new Map<string, NewProduction>();
   /** 회차 ID → 등록 입력(정렬 설정·1인 한도 등) */
@@ -126,6 +131,34 @@ export class MemoryCatalogRepository implements CatalogRepository {
 
   async listPlaceNames(): Promise<PlaceNameEntry[]> {
     return this.placeNames.map((a) => ({ ...a }));
+  }
+
+  /** 관제 아티스트 찾기(LCH-080 잔여). 이름·다른 이름을 그대로 준다 */
+  async allArtists(): Promise<OpsArtistView[]> {
+    return this.artistNames.map((a) => ({ artistId: a.id, name: a.name, aliases: [...a.aliases] }));
+  }
+
+  /** 관제 공연장 찾기. 메모리에는 지역 칸이 없어 빈 값으로 준다(시험은 이름·주소·상태를 본다) */
+  async allPlaces(): Promise<OpsPlaceView[]> {
+    return this.placeNames.map((p) => ({ placeId: p.id, name: p.name, address: p.address, region: '', status: this.closedPlaces.has(p.id) ? 'CLOSED' : 'ACTIVE', aliases: [...p.aliases] }));
+  }
+
+  async createArtist(input: { id: string; name: string; actorId: string }): Promise<void> {
+    this.artists.add(input.id);
+    this.artistNames.push({ id: input.id, name: input.name, aliases: [] });
+  }
+
+  async createPlace(input: { id: string; name: string; address: string; region: string; actorId: string }): Promise<void> {
+    this.places.add(input.id);
+    this.placeNames.push({ id: input.id, name: input.name, address: input.address, aliases: [] });
+  }
+
+  async existingArtistIds(ids: readonly string[]): Promise<string[]> {
+    return ids.filter((id) => this.artists.has(id));
+  }
+
+  async placeUsable(placeId: string): Promise<boolean> {
+    return this.places.has(placeId) && !this.closedPlaces.has(placeId);
   }
 
   async findEventSummary(eventId: string): Promise<EventSummaryRow | undefined> {
@@ -175,8 +208,9 @@ export class MemoryCatalogRepository implements CatalogRepository {
       insertProduction: async (p) => {
         if (!this.sellerNames.has(p.promoterId)) throw new Error(`판매자 행이 없다(외래키): ${p.promoterId}`);
         writes.push(() => {
-          this.productions.set(p.id, { id: p.id, promoterId: p.promoterId, placeId: p.placeId ?? null, title: p.title, genre: p.genre, saleReview: 'DRAFT', saleApprovedAt: null, createdAt: new Date() });
+          this.productions.set(p.id, { id: p.id, promoterId: p.promoterId, placeId: p.placeId ?? null, title: p.title, genre: p.genre, saleReview: 'DRAFT', saleApprovedAt: null, createdAt: new Date(), requestedPlace: p.requestedPlace ?? null, requestedArtists: p.requestedArtists.length > 0 ? p.requestedArtists : null });
           this.registrations.set(p.id, p);
+          if (p.artists.length > 0) this.productionArtists.set(p.id, p.artists.map((a) => ({ artistId: a.artistId, sortOrder: a.sortOrder })));
           for (const e of p.events) this.#putEvent(p.id, null, e);
         });
       },

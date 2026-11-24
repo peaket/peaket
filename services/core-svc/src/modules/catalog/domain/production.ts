@@ -24,6 +24,8 @@ export interface Production {
   rejectionReason?: string | null;
   /** 새 공연장 요청(승인 전). 등록 공연장과 함께 판매 승인 요청의 422 검사에 쓴다 */
   requestedPlace?: unknown | null;
+  /** 파트너가 새 이름으로 요청한 아티스트(승인 때 운영자가 잇는다, ADR-0198 결정 4) */
+  requestedArtists?: unknown[] | null;
   /** 등록 시각(목록 정렬 폴백, 메모리·DB를 같게, BAT-617 RV-06) */
   createdAt?: Date;
   /** 판매 승인 요청 때 파트너가 확인한 휠체어석(FR-023, BAT-616) */

@@ -56,6 +56,9 @@ export { HttpPurchaseSaleOpen, MemorySaleOpen, SALE_OPEN_TIMEOUT_MS, UnwiredSale
 export { SALE_OPEN, type SaleOpen, type SaleOpenInput, type SaleOpenResult } from './domain/sale-open-port.js';
 export { SALE_CONFIG_METRICS, SaleConfigMetrics, type SaleOpenMetricResult } from './application/sale-config-metrics.js';
 export { OpsSaleReviews, RequestSaleReview } from './application/request-sale-review.js';
+export { OpsCatalog } from './application/ops-catalog.js';
+export { OPS_CATALOG_STORE, type OpsCatalogStore } from './domain/ops-catalog-ports.js';
+export { DrizzleOpsCatalog } from './adapters/db/drizzle-ops-catalog.js';
 export { assemblePayoutRegistration, HttpPayoutRegistration, PAYOUT_REGISTRATION_TIMEOUT_MS, UnavailablePayoutRegistration } from './adapters/http-payout-registration.js';
 export {
   missingPayoutConditions,

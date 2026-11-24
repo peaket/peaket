@@ -18,6 +18,7 @@ export const SaleApprovalBody = z
   .object({
     scales: z.array(z.object({ eventId: z.uuid(), scale: Scale }).strict()).min(1),
     placeId: z.uuid().optional(),
+    artists: z.array(z.object({ name: z.string().min(1).max(100), artistId: z.uuid() }).strict()).max(20).optional(),
     accessibleSeatingCheck: z.boolean().optional(),
   })
   .strict();
@@ -56,6 +57,7 @@ const SaleReviewDetailView = z
     placeId: z.string().nullable(),
     placeName: z.string().nullable(),
     requestedPlace: z.boolean(),
+    artists: z.array(z.object({ artistId: z.string().nullable(), name: z.string() }).passthrough()),
     accessibleSeatingCheck: z.boolean().nullable(),
     suspensionApprovalPending: z.boolean(),
     // 지급대행 등록 값(payment 등록 읽기, F-07-7 ADR-0370 결정 4). CS 두 역할에게 정산 계좌는 null이다
@@ -108,6 +110,7 @@ export class OpsSaleReviewController {
       productionId: params.productionId.toLowerCase(),
       scales: body.scales,
       placeId: body.placeId,
+      ...(body.artists !== undefined ? { artists: body.artists } : {}),
       ...(body.accessibleSeatingCheck !== undefined ? { accessibleSeatingCheck: body.accessibleSeatingCheck } : {}),
     });
   }

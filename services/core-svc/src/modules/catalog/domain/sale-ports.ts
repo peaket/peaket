@@ -74,6 +74,12 @@ export interface SaleState {
     rejectionReason?: string | null;
     /** 등록 공연장이나 새 공연장 요청이 있는지(판매 승인 요청 422 검사). 손으로 만든 옛 상태에는 없을 수 있다 */
     hasPlace?: boolean;
+    /** 파트너가 새 이름으로 요청한 아티스트(승인 때 운영자가 잇는다, LCH-080 잔여). 없으면 없음 */
+    requestedArtists?: { name: string; sortOrder: number }[];
+    /** 등록된 아티스트(보이는 순서). 승인 전 등록 때 잇거나 승인 때 더한다 */
+    artists?: { artistId: string; name: string; sortOrder: number }[];
+    /** 새 공연장 요청(이름·주소). 승인 때 placeId로 잇고 비운다 */
+    requestedPlace?: { name: string; address: string } | null;
   };
   /** event 행(공개본) */
   events: SaleEventRow[];

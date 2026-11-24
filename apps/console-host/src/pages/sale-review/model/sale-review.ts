@@ -60,10 +60,34 @@ export interface SaleReviewDetail {
   placeId: string | null;
   placeName: string | null;
   requestedPlace: boolean;
+  /** 등록 아티스트와 파트너가 요청한 새 이름(artistId null)을 보이는 순서대로 합친 목록 */
+  artists: SaleReviewArtist[];
   accessibleSeatingCheck: boolean | null;
   salePolicy: unknown[];
   events: SaleReviewEvent[];
   suspensionApprovalPending: boolean;
+  /** F-07-7이 주는 지급대행 등록 읽기. CS 두 역할이면 서버가 계좌를 null로 준다 */
+  payoutAccount: PayoutAccountSummary | null;
+  pgRegistration: PgRegistration | null;
+}
+
+export interface SaleReviewArtist {
+  artistId: string | null;
+  name: string;
+}
+
+export interface PayoutAccountSummary {
+  bankCode: string;
+  last4: string;
+  holderVerified: boolean;
+  holdUntil: string | null;
+}
+
+export interface PgRegistration {
+  tossEnabled: boolean;
+  portoneEnabled: boolean;
+  tossSellers: { pgStore: 'STANDARD' | 'ESCROW'; status: string }[];
+  portonePartnerRegistered: boolean;
 }
 
 const S = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback);
@@ -85,6 +109,38 @@ export function mapSaleReviewList(page: { items?: unknown[]; nextCursor?: string
     };
   });
   return { items, nextCursor: typeof page.nextCursor === 'string' ? page.nextCursor : null };
+}
+
+/** 응답의 아티스트 목록을 화면 값으로. 새 이름 요청은 artistId null이다 */
+export function mapArtists(raw: unknown): SaleReviewArtist[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((x) => {
+    const r = x as Record<string, unknown>;
+    if (typeof r.name !== 'string') return [];
+    return [{ artistId: typeof r.artistId === 'string' ? r.artistId : null, name: r.name }];
+  });
+}
+
+/** 상세의 지급대행 등록 읽기(F-07-7). 없거나 모양이 다르면 null로 두고 화면이 '읽지 못함'을 적는다 */
+export function mapPayout(raw: Record<string, unknown>): Pick<SaleReviewDetail, 'payoutAccount' | 'pgRegistration'> {
+  const a = raw.payoutAccount as Record<string, unknown> | null | undefined;
+  const g = raw.pgRegistration as Record<string, unknown> | null | undefined;
+  const payoutAccount =
+    a && typeof a.bankCode === 'string' && typeof a.last4 === 'string'
+      ? { bankCode: a.bankCode, last4: a.last4, holderVerified: a.holderVerified === true, holdUntil: typeof a.holdUntil === 'string' ? a.holdUntil : null }
+      : null;
+  const sellers = Array.isArray(g?.tossSellers)
+    ? (g.tossSellers as unknown[]).flatMap((x) => {
+        const s = x as Record<string, unknown>;
+        if ((s.pgStore !== 'STANDARD' && s.pgStore !== 'ESCROW') || typeof s.status !== 'string') return [];
+        return [{ pgStore: s.pgStore, status: s.status }];
+      })
+    : [];
+  const pgRegistration =
+    g === null || g === undefined
+      ? null
+      : { tossEnabled: g.tossEnabled === true, portoneEnabled: g.portoneEnabled === true, tossSellers: sellers, portonePartnerRegistered: g.portonePartnerRegistered === true };
+  return { payoutAccount, pgRegistration };
 }
 
 export function mapSaleReviewDetail(raw: Record<string, unknown>): SaleReviewDetail {
@@ -114,7 +170,9 @@ export function mapSaleReviewDetail(raw: Record<string, unknown>): SaleReviewDet
     placeId: typeof raw.placeId === 'string' ? raw.placeId : null,
     placeName: typeof raw.placeName === 'string' ? raw.placeName : null,
     requestedPlace: raw.requestedPlace === true,
+    artists: mapArtists(raw.artists),
     accessibleSeatingCheck: typeof raw.accessibleSeatingCheck === 'boolean' ? raw.accessibleSeatingCheck : null,
+    ...mapPayout(raw),
     salePolicy: Array.isArray(raw.salePolicy) ? raw.salePolicy : [],
     events: (Array.isArray(raw.events) ? raw.events : []).map((e) => {
       const x = e as Record<string, unknown>;
@@ -166,6 +224,51 @@ export function approvalBody(detail: SaleReviewDetail, scales: Record<string, Sh
   };
 }
 
+/** 운영자가 고른 연결 값(요청 이름 → 아티스트 ID, 공연장 ID) */
+export interface ResolvedLinkage {
+  artists: Record<string, string>;
+  placeId: string | null;
+}
+
+/** 새 이름 요청과 새 공연장 요청이 모두 연결됐는지. 비어 있으면 승인할 수 있다 */
+export function validateLinkage(detail: SaleReviewDetail, resolved: ResolvedLinkage): string[] {
+  const issues: string[] = [];
+  const unresolved = detail.artists.filter((a) => a.artistId === null && (resolved.artists[a.name] === undefined || resolved.artists[a.name] === ''));
+  if (unresolved.length > 0) issues.push(`새 이름 아티스트마다 연결할 아티스트를 골라 주세요: ${unresolved.map((a) => a.name).join(', ')}`);
+  if (detail.requestedPlace && detail.placeId === null && (resolved.placeId === null || resolved.placeId === '')) {
+    issues.push('새 공연장 요청은 연결할 공연장을 골라 주세요');
+  }
+  return issues;
+}
+
+/** 승인 본문: 회차 규모·고른 공연장·요청 이름별 아티스트만 낸다(artistIds·aliases 없음) */
+export function linkageBody(detail: SaleReviewDetail, resolved: ResolvedLinkage, scales: Record<string, ShowScale | ''>) {
+  const artists = detail.artists
+    .filter((a) => a.artistId === null)
+    .flatMap((a) => {
+      const artistId = resolved.artists[a.name];
+      return artistId === undefined || artistId === '' ? [] : [{ name: a.name, artistId }];
+    });
+  const placeId = resolved.placeId ?? detail.placeId;
+  return {
+    scales: detail.events.flatMap((e) => {
+      const scale = scales[e.eventId];
+      return scale === 'LARGE' || scale === 'MEDIUM' || scale === 'SMALL' ? [{ eventId: e.eventId, scale }] : [];
+    }),
+    ...(placeId !== null && placeId !== '' ? { placeId } : {}),
+    ...(artists.length > 0 ? { artists } : {}),
+  };
+}
+
+/** 찾기 목록을 고르기 항목으로. 화면이 같은 모양을 쓴다 */
+export function artistOptions(items: readonly { artistId: string; name: string }[]): { value: string; label: string }[] {
+  return items.map((a) => ({ value: a.artistId, label: a.name }));
+}
+
+export function placeOptions(items: readonly { placeId: string; name: string; address: string }[]): { value: string; label: string }[] {
+  return items.map((p) => ({ value: p.placeId, label: `${p.name} · ${p.address}` }));
+}
+
 export function validateRejection(reason: string): string | null {
   const value = reason.trim();
   if (value === '') return '반려 사유를 적어 주세요';
@@ -182,14 +285,19 @@ export function saleReviewProblem(e: unknown): { kind: SaleReviewProblemKind; me
   if (p.status === 409) {
     if (p.type === 'open-interval-conflict') return { kind: 'conflict', message: '다른 대형 공연과 오픈 30분 안입니다. 파트너에게 반려해 주세요.', reload: true };
     if (p.type === 'sale-review-not-submitted') return { kind: 'conflict', message: '승인 대기 중인 공연이 아닙니다. 목록을 새로 고칩니다.', reload: true };
+    if (p.type === 'sale-review-payout-registration-incomplete') return { kind: 'conflict', message: '지급대행 등록이 끝나지 않아 승인할 수 없습니다. 결제사 설정을 확인해 주세요.', reload: true };
+    if (p.type === 'artist-exists' || p.type === 'place-exists') return { kind: 'conflict', message: '같은 이름이 이미 있습니다. 기존 항목을 골라 주세요.', reload: false };
     return { kind: 'conflict', message: '지금 상태에서는 승인하거나 반려할 수 없습니다. 목록을 새로 고칩니다.', reload: true };
   }
   if (p.status === 422) {
+    if (p.type === 'sale-review-artists-missing') return { kind: 'validation', message: '새 이름 아티스트마다 연결할 아티스트를 골라 주세요.', reload: false };
+    if (p.type === 'sale-review-place-missing') return { kind: 'validation', message: '새 공연장 요청은 연결할 공연장을 골라 주세요.', reload: false };
     if (p.type === 'sale-review-list-missing') return { kind: 'validation', message: '판매 정책이 쓰는 명단이 없습니다. 파트너에게 반려해 주세요.', reload: false };
     if (p.type === 'sale-review-scales-missing') return { kind: 'validation', message: '모든 회차의 규모를 골라 주세요.', reload: false };
     return { kind: 'validation', message: '승인 조건을 다시 확인해 주세요.', reload: false };
   }
   if (p.status === 400) return { kind: 'validation', message: '입력한 값을 다시 확인해 주세요.', reload: false };
+  if (p.status === 503) return { kind: 'server', message: '지급 서비스에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', reload: false };
   if (typeof p.status === 'number' && p.status >= 500) return { kind: 'server', message: '서버가 잠시 응답하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', reload: false };
   return { kind: 'unknown', message: '요청을 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.', reload: false };
 }

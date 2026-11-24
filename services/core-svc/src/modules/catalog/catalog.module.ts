@@ -7,6 +7,10 @@ import { ChangeEventScale } from './application/change-event-scale.js';
 import { GetDemandForecast } from './application/demand-forecast.js';
 import { DEMAND_FORECAST_SOURCE, type DemandForecastSource } from './domain/demand-ports.js';
 import { OpsEventController } from './inbound/ops-event.controller.js';
+import { OpsArtistController, OpsPlaceController } from './inbound/ops-catalog.controller.js';
+import { OpsCatalog } from './application/ops-catalog.js';
+import { OPS_CATALOG_STORE } from './domain/ops-catalog-ports.js';
+import { DrizzleOpsCatalog } from './adapters/db/drizzle-ops-catalog.js';
 import { LogCdnInvalidation, MemoryCdnInvalidation, unavailableImageProcessing, unavailableSeatmapParser } from './adapters/cdn-invalidation.js';
 import { DrizzleCatalogRepository, PARTNER_DATABASE } from './adapters/db/drizzle-catalog-repository.js';
 import { DrizzleProductionMedia } from './adapters/db/drizzle-production-media.js';
@@ -222,8 +226,8 @@ export class CatalogModule implements NestModule {
         }
       | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring>; saleConfigs?: SaleConfigStore; opsApprovals?: OpsApprovalClient; saleOpen?: SaleOpen; saleConfigMetrics?: SaleConfigMetrics; payoutRegistration?: PayoutRegistrationPort },
   ): DynamicModule {
-    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview, GetDemandForecast, ChangeEventScale, Promoters, ApplyContractApproval, RequestSaleReview, OpsSaleReviews];
-    const controllers = [EventSummaryController, PartnerProductionController, PartnerSaleReviewController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, InternalSaleConfigController, InternalEntryClosedController, OpsEventController, OpsPromoterController, InternalPromoterController];
+    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview, GetDemandForecast, ChangeEventScale, Promoters, ApplyContractApproval, RequestSaleReview, OpsSaleReviews, OpsCatalog];
+    const controllers = [EventSummaryController, PartnerProductionController, PartnerSaleReviewController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, OpsArtistController, OpsPlaceController, InternalSaleConfigController, InternalEntryClosedController, OpsEventController, OpsPromoterController, InternalPromoterController];
     if (o.storage === 'database') {
       return {
         module: CatalogModule,
@@ -238,6 +242,7 @@ export class CatalogModule implements NestModule {
           { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
           { provide: PARTNER_DATABASE, useValue: o.partnerDatabase },
           { provide: CATALOG_REPOSITORY, useClass: DrizzleCatalogRepository },
+          { provide: OPS_CATALOG_STORE, useFactory: (db: Database) => new DrizzleOpsCatalog(db), inject: [OPS_DATABASE] },
           { provide: PARTNER_PRODUCTION_MEDIA, useClass: DrizzleProductionMedia },
           { provide: SEATMAP_LAYOUT_STORE, useClass: DrizzleSeatmapLayoutStore },
           { provide: SALE_STORE, useClass: DrizzleSaleStore },
@@ -274,6 +279,7 @@ export class CatalogModule implements NestModule {
         ...shared,
         { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
         { provide: CATALOG_REPOSITORY, useValue: repo },
+        { provide: OPS_CATALOG_STORE, useExisting: CATALOG_REPOSITORY },
         { provide: PARTNER_PRODUCTION_MEDIA, useValue: new MemoryProductionMedia(repo) },
         { provide: SEATMAP_LAYOUT_STORE, useValue: new MemorySeatmapLayoutStore(repo) },
         { provide: SALE_STORE, useValue: new MemorySaleStore(repo) },

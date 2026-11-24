@@ -129,6 +129,8 @@ export interface OpsSaleReviewDetail {
   placeId: string | null;
   placeName: string | null;
   requestedPlace: boolean;
+  /** 등록된 아티스트와 파트너가 요청한 새 이름을 보이는 순서대로 합친 목록(LCH-080 잔여) */
+  artists: { artistId: string | null; name: string }[];
   /** 파트너가 휠체어석 확인을 했는지(BAT-617). 아직 요청 전이면 null */
   accessibleSeatingCheck: boolean | null;
   suspensionApprovalPending: boolean;

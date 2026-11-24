@@ -11,6 +11,9 @@ import { eligibleListKeys } from '../domain/event-sale-config.js';
 import { CDN_INVALIDATION, type CdnInvalidation } from '../domain/media-ports.js';
 import { missingPayoutConditions, PAYOUT_REGISTRATION, PAYOUT_REGISTRATION_UNWIRED, type PayoutRegistrationPort } from '../domain/payout-registration-port.js';
 import { OPS_SALE_STORE, type SaleStore } from '../domain/sale-ports.js';
+import type { SaleState } from '../domain/sale-ports.js';
+import { OPS_CATALOG_STORE, type OpsCatalogStore } from '../domain/ops-catalog-ports.js';
+import { checkLinkage, linkageProblemOf } from '../domain/sale-review-linkage.js';
 import { PublishSaleConfigs } from './publish-sale-configs.js';
 import { notFound, productionSuspended } from './problems.js';
 
@@ -18,6 +21,7 @@ export interface ApproveSaleReviewInput {
   productionId: string;
   scales: { eventId: string; scale: ShowScale }[];
   placeId?: string;
+  artists?: { name: string; artistId: string }[];
   accessibleSeatingCheck?: boolean;
 }
 
@@ -31,13 +35,21 @@ export class ApproveSaleReview {
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: Pick<PlatformLogger, 'info' | 'warn'>,
     /** 없으면(직접 조립한 시험) 둘 다 꺼짐 */
     @Optional() @Inject(PAYOUT_REGISTRATION) private readonly payout: PayoutRegistrationPort = PAYOUT_REGISTRATION_UNWIRED,
+    /** 없으면(직접 조립한 시험) 아티스트 존재·공연장 사용 가능 검사를 건너뛴다(이름·필수 검사는 그대로) */
+    @Optional() @Inject(OPS_CATALOG_STORE) private readonly catalog?: OpsCatalogStore,
   ) {}
 
   async run(q: ApproveSaleReviewInput): Promise<{ applied: true; events: number }> {
     const tenantId = await this.store.promoterOf(q.productionId);
     if (!tenantId) throw notFound();
+    // 연결 검사는 지급대행 읽기보다 먼저다. 빠진 아티스트·공연장을 422로 알리고 payment를 부르지 않는다
+    const before = await this.store.read(q.productionId, tenantId);
+    if (!before) throw notFound();
+    if (before.production.saleReview === 'SUBMITTED' || before.production.saleReview === 'REJECTED') {
+      await this.checkLinks(before, q, true);
+    }
     await this.checkPayout(q.productionId, tenantId);
-    const input: SaleApprovalInput = { now: new Date(this.clock.now()), scales: q.scales, ...(q.placeId !== undefined ? { placeId: q.placeId } : {}), ...(q.accessibleSeatingCheck !== undefined ? { accessibleSeatingCheck: q.accessibleSeatingCheck } : {}) };
+    const input: SaleApprovalInput = { now: new Date(this.clock.now()), scales: q.scales, ...(q.placeId !== undefined ? { placeId: q.placeId } : {}), ...(q.artists !== undefined ? { artists: q.artists } : {}), ...(q.accessibleSeatingCheck !== undefined ? { accessibleSeatingCheck: q.accessibleSeatingCheck } : {}) };
     const out = await this.store.withScaleChangeLock(tenantId, () =>
       this.store.withLockedProduction(q.productionId, tenantId, async (tx) => {
         const st = await tx.state();
@@ -45,10 +57,12 @@ export class ApproveSaleReview {
         if (st.production.saleReview !== 'SUBMITTED' && st.production.saleReview !== 'REJECTED') {
           throw new ProblemError({ type: 'sale-review-not-submitted', status: 409, title: '판매 승인 대기 중인 공연이 아닙니다' });
         }
+        // 잠금 뒤 다시 본다. 그 사이 파트너가 요청 이름·공연장을 바꿨으면 422로 멈춘다(존재 검사는 잠금 밖에서 이미 했다)
+        const artistLinks = await this.checkLinks(st, q, false);
         // 같은 잠금·같은 트랜잭션에서 지금 계약 수수료율을 읽어 회차에 고정한다(ADR-0060·0320).
         // 계약이 없으면 비워 두고, payment-svc 회차 정산이 503으로 닫는 쪽을 유지한다(임의 10% 금지).
         const commissionRateBp = await tx.currentCommissionRateBp(tenantId);
-        const withRate: SaleApprovalInput = { ...input, ...(commissionRateBp !== undefined ? { commissionRateBp } : {}) };
+        const withRate: SaleApprovalInput = { ...input, artistLinks, ...(commissionRateBp !== undefined ? { commissionRateBp } : {}) };
         const targets = new Set([...st.events.map((e) => e.eventId), ...st.addedEvents.map((e) => e.eventId)]);
         const given = new Set(q.scales.map((s) => s.eventId));
         if (given.size !== targets.size || [...targets].some((id) => !given.has(id))) {
@@ -80,6 +94,28 @@ export class ApproveSaleReview {
     }
     this.logger?.info({ event: 'sale_review_approved', productionId: q.productionId, events: out.events.length }, '판매 승인을 적용했다');
     return { applied: true, events: out.events.length };
+  }
+
+  /** 아티스트·공연장 연결 검사. support가 참이면 존재·사용 가능도 본다(잠금 밖 1차). 도메인 오류는 ProblemError로 바꾼다 */
+  private async checkLinks(st: SaleState, q: ApproveSaleReviewInput, withSupport: boolean): Promise<{ artistId: string; sortOrder: number }[]> {
+    try {
+      const support =
+        withSupport && this.catalog
+          ? await (async () => {
+              const ids = q.artists?.map((a) => a.artistId) ?? [];
+              const [existing, placeUsable] = await Promise.all([
+                this.catalog!.existingArtistIds(ids),
+                q.placeId === undefined ? Promise.resolve(true) : this.catalog!.placeUsable(q.placeId),
+              ]);
+              return { existingArtists: new Set(existing), placeUsable };
+            })()
+          : undefined;
+      return checkLinkage(st, q, support);
+    } catch (err) {
+      const p = linkageProblemOf(err);
+      if (p) throw new ProblemError(p);
+      throw err;
+    }
   }
 
   /** 지급대행 조건을 보고 판매자 확인을 쓴다. 실패면 던지고 승인 트랜잭션을 열지 않는다 */

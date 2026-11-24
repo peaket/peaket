@@ -19,7 +19,7 @@ import { layoutVenueId } from '../../domain/seatmap-layout.js';
 import { SEARCH_READ_MODEL_SYNC, type SearchReadModelSync } from '../../domain/search.js';
 import { PARTNER_DATABASE } from './drizzle-catalog-repository.js';
 import { pendingOf } from './layout-rows.js';
-import { event, eventContractState, priceTier, production, promoter, promoterContract, saleEligibilityDrop, saleEligibilityList, saleEligibilityMember, saleEligibilityUpload, venue } from './schema.js';
+import { artist, event, eventContractState, priceTier, production, productionArtist, promoter, promoterContract, saleEligibilityDrop, saleEligibilityList, saleEligibilityMember, saleEligibilityUpload, venue } from './schema.js';
 import { sellerInfoOf } from '../../domain/promoter-contract.js';
 import { decodeSaleReviewCursor, encodeSaleReviewCursor, type OpsSaleReviewDetail, type OpsSaleReviewPage, type OpsSaleReviewQuery, type PartnerSaleReviewView } from '../../domain/sale-review.js';
 
@@ -127,6 +127,12 @@ async function readState(tx: Tx, p: ProductionRow, tenantId: string): Promise<Sa
     .from(saleEligibilityList)
     .where(and(eq(saleEligibilityList.productionId, p.id), eq(saleEligibilityList.promoterId, tenantId)))
     .orderBy(asc(saleEligibilityList.key));
+  const artistRows = await tx
+    .select({ artistId: artist.id, name: artist.name, sortOrder: productionArtist.sortOrder })
+    .from(productionArtist)
+    .innerJoin(artist, eq(artist.id, productionArtist.artistId))
+    .where(eq(productionArtist.productionId, p.id))
+    .orderBy(asc(productionArtist.sortOrder), asc(artist.id));
   const rev = revisionOf(p);
   return {
     production: {
@@ -138,6 +144,9 @@ async function readState(tx: Tx, p: ProductionRow, tenantId: string): Promise<Sa
       saleSubmittedAt: p.saleSubmittedAt,
       rejectionReason: p.rejectionReason,
       hasPlace: p.placeId !== null || p.requestedPlace !== null,
+      requestedPlace: (p.requestedPlace as { name: string; address: string } | null | undefined) ?? null,
+      requestedArtists: Array.isArray(p.requestedArtists) ? (p.requestedArtists as { name: string; sortOrder: number }[]) : [],
+      artists: artistRows,
       rules: rulesOf(p.salePolicy),
       pendingRules: Array.isArray(rev.salePolicy) ? rev.salePolicy : undefined,
       salePolicyVersion: p.salePolicyVersion,
@@ -367,7 +376,7 @@ export class DrizzleSaleStore implements SaleStore {
     if (!UUID.test(productionId)) return undefined;
     const r = await this.db.db.execute(sql`
       select p.id, p.title, p.promoter_id, pr.legal_name as promoter_name, p.sale_review, p.sale_approved_at, p.sale_submitted_at, p.rejection_reason,
-             p.sale_policy, p.pending_revision, p.place_id, p.requested_place, p.accessible_seating_check, pl.name as place_name,
+             p.sale_policy, p.pending_revision, p.place_id, p.requested_place, p.requested_artists, p.accessible_seating_check, pl.name as place_name,
              pr.legal_name, pr.representative, pr.address, pr.phone, pr.email, pr.business_reg_no, pr.mail_order_report_no, pr.exemption_basis, pr.verified_at
         from production p
         join promoter pr on pr.id = p.promoter_id
@@ -387,6 +396,7 @@ export class DrizzleSaleStore implements SaleStore {
           pending_revision: unknown;
           place_id: string | null;
           requested_place: { name?: string } | null;
+          requested_artists: { name?: string; sortOrder?: number }[] | null;
           accessible_seating_check: boolean | null;
           place_name: string | null;
           legal_name: string;
@@ -406,6 +416,17 @@ export class DrizzleSaleStore implements SaleStore {
         from event
        where production_id = ${productionId}::uuid
        order by starts_at asc, id asc`);
+    const linked = await this.db.db
+      .select({ artistId: artist.id, name: artist.name, sortOrder: productionArtist.sortOrder })
+      .from(productionArtist)
+      .innerJoin(artist, eq(artist.id, productionArtist.artistId))
+      .where(eq(productionArtist.productionId, productionId))
+      .orderBy(asc(productionArtist.sortOrder), asc(artist.id));
+    const requested = (p.requested_artists ?? [])
+      .filter((a): a is { name: string; sortOrder?: number } => typeof a.name === 'string')
+      .map((a) => ({ artistId: null, name: a.name, sortOrder: typeof a.sortOrder === 'number' ? a.sortOrder : 0 }))
+      .sort((a, b) => a.sortOrder - b.sortOrder || (a.name < b.name ? -1 : 1))
+      .map(({ artistId, name }) => ({ artistId, name }));
     const pending = (p.pending_revision ?? {}) as { salePolicy?: SalePolicyRule[] };
     return {
       productionId: p.id,
@@ -431,6 +452,7 @@ export class DrizzleSaleStore implements SaleStore {
       placeId: p.place_id,
       placeName: p.place_name ?? (typeof p.requested_place?.name === 'string' ? p.requested_place.name : null),
       requestedPlace: p.place_id === null && p.requested_place !== null,
+      artists: [...linked.map((a) => ({ artistId: a.artistId, name: a.name })), ...requested],
       accessibleSeatingCheck: p.accessible_seating_check,
       events: (ev.rows as { id: string; open_at: Date | string; starts_at: Date | string; status: EventStatus; scale: 'LARGE' | 'MEDIUM' | 'SMALL' | null }[]).map((e) => ({
         eventId: e.id,
@@ -565,6 +587,9 @@ export class DrizzleSaleStore implements SaleStore {
             }
           }
         }
+        if (input.artistLinks !== undefined && input.artistLinks.length > 0) {
+          await tx.insert(productionArtist).values(input.artistLinks.map((a) => ({ productionId: p.id, artistId: a.artistId, sortOrder: a.sortOrder }))).onConflictDoNothing();
+        }
         await tx
           .update(production)
           .set({
@@ -574,7 +599,9 @@ export class DrizzleSaleStore implements SaleStore {
             rejectionReason: null,
             salePolicy: after.production.rules,
             pendingRevision: null,
-            ...(input.placeId !== undefined ? { placeId: input.placeId, requestedPlace: null } : {}),
+            placeId: input.placeId ?? p.placeId,
+            requestedPlace: null,
+            requestedArtists: null,
             ...(input.accessibleSeatingCheck !== undefined ? { accessibleSeatingCheck: input.accessibleSeatingCheck } : {}),
           })
           .where(mineProduction);

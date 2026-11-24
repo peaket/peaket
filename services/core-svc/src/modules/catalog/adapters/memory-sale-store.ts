@@ -118,8 +118,16 @@ export class MemorySaleStore implements SaleStore {
               saleApprovedAt: input.now,
               saleSubmittedAt: null,
               rejectionReason: null,
-              ...(input.placeId !== undefined ? { placeId: input.placeId } : {}),
+              placeId: input.placeId ?? p.placeId,
+              requestedPlace: null,
+              requestedArtists: null,
             });
+            if (input.artistLinks !== undefined && input.artistLinks.length > 0) {
+              const current = this.repo.productionArtists.get(productionId) ?? [];
+              const have = new Set(current.map((x) => x.artistId));
+              const added = input.artistLinks.filter((x) => !have.has(x.artistId)).map((x) => ({ artistId: x.artistId, sortOrder: x.sortOrder }));
+              this.repo.productionArtists.set(productionId, [...current, ...added].sort((a, b) => a.sortOrder - b.sortOrder || (a.artistId < b.artistId ? -1 : 1)));
+            }
             const policy = this.repo.salePolicies.get(productionId);
             if (policy) this.repo.salePolicies.set(productionId, { rules: policy.pending ?? policy.rules, version: policy.version });
             for (const e of after.events) {
@@ -314,6 +322,13 @@ export class MemorySaleStore implements SaleStore {
       placeId: p.placeId,
       placeName: p.placeId !== null ? (this.repo.placeNames.find((x) => x.id === p.placeId)?.name ?? null) : requestedName,
       requestedPlace: p.placeId === null && p.requestedPlace != null,
+      artists: [
+        ...this.#artists(productionId).map((a) => ({ artistId: a.artistId, name: a.name })),
+        ...(Array.isArray(p.requestedArtists) ? (p.requestedArtists as { name: string; sortOrder: number }[]) : [])
+          .slice()
+          .sort((a, b) => a.sortOrder - b.sortOrder || (a.name < b.name ? -1 : 1))
+          .map((a) => ({ artistId: null, name: a.name })),
+      ],
       accessibleSeatingCheck: p.accessibleSeatingCheck ?? null,
       events: events.map((e) => ({
         eventId: e.id,
@@ -325,6 +340,15 @@ export class MemorySaleStore implements SaleStore {
       })),
       suspensionApprovalPending: false,
     };
+  }
+
+  /** 등록된 아티스트(보이는 순서). 승인 전 등록과 승인 때 연결을 함께 읽는다 */
+  #artists(productionId: string): { artistId: string; name: string; sortOrder: number }[] {
+    const rows = this.repo.productionArtists.get(productionId) ?? [];
+    const names = new Map(this.repo.artistNames.map((a) => [a.id, a.name]));
+    return [...rows]
+      .sort((a, b) => a.sortOrder - b.sortOrder || (a.artistId < b.artistId ? -1 : 1))
+      .map((r) => ({ artistId: r.artistId, name: names.get(r.artistId) ?? r.artistId, sortOrder: r.sortOrder }));
   }
 
   #seller(promoterId: string): OpsSaleReviewDetail['seller'] {
@@ -391,6 +415,9 @@ export class MemorySaleStore implements SaleStore {
         saleSubmittedAt: p.saleSubmittedAt ?? null,
         rejectionReason: p.rejectionReason ?? null,
         hasPlace: p.placeId !== null || p.requestedPlace != null,
+        requestedPlace: (p.requestedPlace as { name: string; address: string } | null | undefined) ?? null,
+        requestedArtists: Array.isArray(p.requestedArtists) ? (p.requestedArtists as { name: string; sortOrder: number }[]) : [],
+        artists: this.#artists(productionId),
         rules: policy?.rules ?? [],
         pendingRules: policy?.pending,
         salePolicyVersion: policy?.version ?? 1,
