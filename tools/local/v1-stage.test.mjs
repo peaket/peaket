@@ -366,3 +366,43 @@ test('A-T26 ④ FIX-queue-agg-values queue-svc 환경 값에 텔레메트리 Kaf
   assert.equal(on['queue-svc'].PEAKET_SCHEMA_IDS_FILE, undefined);
   assert.equal(v1EnvFiles(base)['queue-svc'].PEAKET_TELEMETRY_KAFKA_BROKERS, undefined);
 });
+
+// ─────────────── F-08-2 MSR-020: 합본에 켤 서비스 고르기와 CPU 몫(계획 docs/review/plans/F-08-2.md 2절 3·6.1·7.2, F082-10) ───────────────
+
+/** helm --set 값에서 PEAKET_BUNDLE_SERVICES를 꺼낸다(helm은 쉼표를 값 구분으로 읽어 목록 속 쉼표는 \, 로 막아야 한다) */
+function bundleServicesSet(args) {
+  const hits = args.filter((a) => /PEAKET_BUNDLE_SERVICES=/.test(a));
+  assert.ok(hits.length <= 1, `PEAKET_BUNDLE_SERVICES를 두 번 준다: ${hits}`);
+  if (hits.length === 0) return undefined;
+  const raw = hits[0].slice(hits[0].indexOf('PEAKET_BUNDLE_SERVICES=') + 'PEAKET_BUNDLE_SERVICES='.length);
+  assert.doesNotMatch(raw, /(^|[^\\]),/, `막지 않은 쉼표가 있어 helm이 값을 자른다: ${raw}`);
+  return raw.replaceAll('\\,', ',');
+}
+
+test('F082-10 ① cluster.mjs v1 --services queue-svc는 합본 환경 값 PEAKET_BUNDLE_SERVICES=queue-svc를 만들고, 주지 않으면 값 파일의 넷 그대로다', () => {
+  assert.deepEqual(v1Plan(['--services', 'queue-svc']).services, ['queue-svc']);
+  assert.equal(v1Plan([]).services, undefined);
+  assert.equal(bundleServicesSet(v1HelmArgs('v1-bundle', '/repo', { services: ['queue-svc'] })), 'queue-svc');
+  assert.equal(bundleServicesSet(v1HelmArgs('v1-bundle', '/repo', {})), undefined);
+  // 둘 이상이면 helm --set에서 쉼표를 막아 넘긴다
+  assert.deepEqual(v1Plan(['--services', 'queue-svc,admission-ctrl']).services, ['queue-svc', 'admission-ctrl']);
+  assert.equal(bundleServicesSet(v1HelmArgs('v1-bundle', '/repo', { services: ['queue-svc', 'admission-ctrl'] })), 'queue-svc,admission-ctrl');
+});
+
+test('F082-10 ② cluster.mjs v1 --services는 모르는 서비스·빈 값·겹친 이름을 거부하고, 합본 밖 값 파일에는 줄 수 없다', () => {
+  for (const bad of [['--services', 'queue-svc,ticket-svc'], ['--services', 'bundle'], ['--services', ''], ['--services'], ['--services', 'queue-svc,queue-svc']]) assert.throws(() => v1Plan(bad), Error, bad.join(' '));
+  assert.throws(() => v1HelmArgs('v1-purchase-relay', '/repo', { services: ['queue-svc'] }), RangeError);
+  assert.throws(() => v1HelmArgs('v1-bundle', '/repo', { services: ['identity-svc'] }), RangeError);
+});
+
+test('F082-10 ③ cluster.mjs v1 --cpus는 계획 6.4의 몫 0.5·0.25를 받아 합본 CPU 요청·한도에 그대로 넣는다(가정: 소수 몫은 0.5·0.25만)', () => {
+  assert.equal(v1Plan(['--cpus', '0.5']).cpus, 0.5);
+  assert.equal(v1Plan(['--cpus', '0.25']).cpus, 0.25);
+  for (const [cpus, re] of [[0.5, /^(0\.5|500m)$/], [0.25, /^(0\.25|250m)$/]]) {
+    const args = v1HelmArgs('v1-bundle', '/repo', { cpus });
+    const val = (k) => args.find((a) => a.startsWith(`${k}=`))?.slice(k.length + 1);
+    assert.match(String(val('service.resources.requests.cpu')), re);
+    assert.match(String(val('service.resources.limits.cpu')), re);
+  }
+  for (const bad of [['--cpus', '0'], ['--cpus', '0.3'], ['--cpus', '-0.5']]) assert.throws(() => v1Plan(bad), Error, bad.join(' '));
+});

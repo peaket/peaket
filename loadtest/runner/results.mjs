@@ -244,6 +244,8 @@ export function collectArgs(o) {
     a.push('--redis-tls', String(o.redisTls));
   }
   if (o.pairedRun !== undefined) a.push('--paired-run', str('pairedRun', o.pairedRun));
+  // 호스트 지표(진입 비례 확인 단계, docs/perf-ledger.md §2.2 host, 계획 F-08-2 7.2)
+  if (o.host !== undefined) a.push('--host', str('host', o.host));
   return a;
 }
 

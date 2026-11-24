@@ -1,0 +1,2 @@
+IpExt: InNoRoutes InTruncatedPkts InMcastPkts OutMcastPkts InBcastPkts OutBcastPkts InOctets OutOctets
+IpExt: 0 0 0 0 0 0 123456789 98765432

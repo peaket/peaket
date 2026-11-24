@@ -76,11 +76,26 @@ python tools/perf-ledger/charts.py usl --points docs/perf-ledger/charts/k1-entry
 - `scale`: 각 측정의 `scale.users`를 가로축으로, `metrics/origin_rps.csv`의 평균(예열 제외)과 k6 p99를 세로축으로 그린다.
 - `before-after`: KPI별로 두 측정의 값(`p99` 또는 `error_rate`)을 막대로 그린다.
 - `timeline`: `metrics/<이름>.csv`를 시간축으로 겹쳐 그린다.
-- `usl`: 진입 서버 대수별 처리량 표(CSV 열 `n,throughput[,run_id]`, `throughput`은 SLO를 지킨 가장 높은 도착률)에 USL(Universal Scalability Law)을 맞춘다. N=1 점이 있어야 하고 서로 다른 N이 6개보다 적으면 경고한다. 경합 계수 α, 일관성 계수 β, 결정계수, 정점 N, `--target` 처리량에 필요한 N과 외삽 배수(필요한 N ÷ 측정 최대 N)를 출력하고 같은 이름의 `.json`에 남긴다. 측정 범위 밖 곡선은 점선이다. 절차와 판정 기준은 `docs/verification.md` §3.3이다(ADR-0057).
+- `usl`: 진입 서버 대수별 처리량 표(CSV 열 `n,throughput[,run_id][,saturated]`, `throughput`은 SLO를 지킨 가장 높은 도착률)에 USL(Universal Scalability Law)을 맞춘다. `saturated`가 `true`인 줄(호스트 포화 점, docs/verification.md §3.5 6번)은 맞춤에서 빼고 출력과 `.json`의 `excluded`에 남긴다(`loadtest/runner/entry-scale.mjs report`가 만드는 `usl.csv`는 이미 뺀 표다). N=1 점이 있어야 하고 서로 다른 N이 6개보다 적으면 경고한다. 경합 계수 α, 일관성 계수 β, 결정계수, 정점 N, `--target` 처리량에 필요한 N과 외삽 배수(필요한 N ÷ 측정 최대 N)를 출력하고 같은 이름의 `.json`에 남긴다. 측정 범위 밖 곡선은 점선이다. 절차와 판정 기준은 `docs/verification.md` §3.3이다(ADR-0057).
 
 원본을 S3 원본 버킷으로 옮긴 실행은 폴더에 `metrics/*.csv`가 없다. `scale`은 그때 `metrics-summary.json`의 `origin_rps` 평균(예열 뺌)을 쓴다. `timeline`은 시계열 전체가 필요하므로 `raw_uri`에서 `metrics/<이름>.csv.gz`를 받아 풀어 둔 뒤 그린다(없으면 받을 주소를 알려 준다).
 
 SVG는 의존성 없이 생성되며 브라우저와 GitHub에서 바로 보인다.
+
+### 4.1 100만 외삽 계산(`extrapolate.py`, MSR-010)
+
+```bash
+python -I -X utf8 tools/perf-ledger/extrapolate.py origin --runs <K1 v1 1천·1만·10만 실행 ID…> --version v1 --out origin-v1.json --md origin-v1.md
+python -I -X utf8 tools/perf-ledger/extrapolate.py origin --runs <K1 v0 실행 ID…> --version v0 --admit-per-second 28 --out origin-v0.json
+python -I -X utf8 tools/perf-ledger/extrapolate.py entry --scale <entry-scale.json> --redis-r 490800 --target 200000 --out entry.json --md entry.md
+```
+
+- `origin`: 실행마다 예상 원 서버 요청(v1: ⌈사용자 ÷ 1,000⌉ ÷ 캐시 수명 1초, v0: 1분 이내 입장 × 60명 ÷ 0.5초 + 1~5분 입장 × 240명 ÷ 5초 + 나머지 ÷ 20초)과 잰 `origin_rps`(예열 뺀 평균, `scale`과 같은 읽기)의 비를 낸다. 무효 실행은 계산에서 빼고 표에 남긴다. 유효한 세 규모가 모두 ±10% 안이면 100만 값을 '외삽(설계 식)'으로, 하나라도 밖이면 '설계 식 밖'으로, 규모가 셋에 모자라면 '판정하지 않음'으로 적는다(docs/verification.md §3.4). 맨 앞 `--root`로 저장소를 바꿀 수 있다.
+- `entry`: 진입 설계 식 min(N × X₁, R), 필요한 대수 ⌈목표 ÷ X₁⌉, 외삽 배수(필요한 대수 ÷ 잰 최대 대수)가 4를 넘으면 '외삽(측정 범위의 4배 초과)', R이 목표보다 작으면 'R이 상한'(§3.3). X₁은 `entry-scale.json`의 `x1Design`(1 vCPU), 없으면 `x1`이다.
+
+### 4.2 호스트 지표(`collect.py --host`)
+
+`--host <host.json>`(`loadtest/run.mjs v1 entry-steps`가 단계마다 쓰는 낙타 표기 파일)을 주면 manifest `host` 칸(`cpu_util`(%)·`procs_running`·`logical_cpus`·`throttle`·`cpu_assigned`·`tags`·`kernel`)을 쓴다. 표시는 파일의 `tags`에 정본 기준(CPU 85% 이상이거나 `procs_running` > 논리 프로세서면 '호스트 포화', 준 CPU 합 > 16이면 '코어 혼합')으로 다시 본 것을 더한다. 호스트 포화면 `notes`에 적고 장부 행은 지우지 않는다. 커널 카운터가 늘었으면 `valid: false`(사유 '커널 연결 버림')다.
 
 ## 5. 측정 전 점검(리허설)
 

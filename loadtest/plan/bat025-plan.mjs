@@ -2,6 +2,8 @@
 // BAT-025 측정 계획(loadtest/plan/bat025-plan.json)을 읽고, 실행 하나씩 끝난 것을 상태 파일에 적어 이어 돌게 하는 도구다.
 // 계획의 모양과 쓰는 법은 loadtest/plan/README.md, 정본은 docs/review/plans/BAT-025.md §2.3·§6.2다.
 // 이 도구는 명령을 실행하지 않는다. 다음 실행의 명령·조건·판정을 보여 주고, 사람이 끝낸 결과를 적는다(측정은 감독의 '측정 시작' 뒤에만).
+// --plan <경로>(맨 앞)를 주면 그 계획을 읽고 그 계획의 state_file을 쓴다(F-08 측정 창은 loadtest/plan/f08-plan.json, 계획 docs/review/plans/F-08-8.md 7.1).
+// 없으면 지금처럼 BAT-025 계획이다. set <이름> <값>은 측정 중에 정한 값(예: X̂₁·CPU 몫)을 상태 파일에 적고, 명령의 {이름} 자리를 그 값으로 채운다.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,8 +14,9 @@ const RESULTS = ['pass', 'fail', 'invalid'];
 const STATUSES = ['pending', 'running', 'done', 'failed', 'skipped'];
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
-/** 계획 파일을 읽고 모양을 확인한다. 틀리면 Error */
+/** 계획 파일을 읽고 모양을 확인한다. 틀리면 Error(없는 파일은 그 경로를 적는다) */
 export function loadPlan(path = PLAN_PATH) {
+  if (!existsSync(path)) throw new Error(`계획 파일이 없다: ${path}`);
   const p = JSON.parse(readFileSync(path, 'utf8'));
   validatePlan(p);
   return p;
@@ -42,9 +45,16 @@ export function validatePlan(p) {
   });
 }
 
-/** {day}·{suffix}를 상태 값으로 바꾼다. argv·경로·설명 모두 같은 규칙이다 */
+/** 측정 중에 정하는 값의 이름(set 명령, {이름} 자리): 영문 소문자로 시작하는 영문·숫자 1~24자 */
+const VAR = /^[a-z][A-Za-z0-9]{0,23}$/;
+
+/** {day}·{suffix}와 set으로 적은 {이름}(state.vars)을 상태 값으로 바꾼다. argv·경로·설명 모두 같은 규칙이다. 적지 않은 {이름}은 그대로 둔다 */
 export const fill = (value, state) => {
-  if (typeof value === 'string') return value.replaceAll('{day}', state.day).replaceAll('{suffix}', state.suffix ?? '');
+  if (typeof value === 'string') {
+    let out = value.replaceAll('{day}', state.day).replaceAll('{suffix}', state.suffix ?? '');
+    for (const [k, v] of Object.entries(state.vars ?? {})) if (VAR.test(k)) out = out.replaceAll(`{${k}}`, String(v));
+    return out;
+  }
   if (Array.isArray(value)) return value.map((v) => fill(v, state));
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, fill(v, state)]));
   return value;
@@ -96,6 +106,14 @@ export function readState(path) {
 }
 
 const statePathOf = (plan) => join(ROOT, plan.state_file);
+
+/** 맨 앞의 --plan <경로>를 떼어 낸다. 없으면 BAT-025 계획 */
+export function planArg(argv) {
+  if (argv[0] !== '--plan') return { planPath: PLAN_PATH, rest: argv };
+  const v = argv[1];
+  if (v === undefined || v.startsWith('--')) throw new Error('--plan 뒤에 계획 파일 경로가 없다');
+  return { planPath: resolve(v), rest: argv.slice(2) };
+}
 const argAfter = (argv, name) => {
   const i = argv.indexOf(name);
   if (i < 0) return undefined;
@@ -118,6 +136,8 @@ function printRun(run, state) {
   console.log(`  장부: ${x.ledger}`);
   console.log(`  산출물: ${x.artifact}`);
   console.log(`  기록: ${x.result_note}`);
+  const unfilled = [...new Set(JSON.stringify(x.commands).match(/\{[a-z][A-Za-z0-9]{0,23}\}/g) ?? [])];
+  if (unfilled.length) console.log(`  아직 정하지 않은 값: ${unfilled.join(' ')}(set <이름> <값>으로 적은 뒤 다시 본다)`);
 }
 
 function status(plan, state) {
@@ -139,6 +159,7 @@ function status(plan, state) {
   const count = (f) => plan.runs.filter(f).length;
   console.log(`통과 ${count((r) => isPass(state, r.key))} · 실패/무효 ${count((r) => state.runs[r.key]?.status === 'done' && ['fail', 'invalid'].includes(state.runs[r.key].result))} · 건너뜀 ${count((r) => state.runs[r.key]?.status === 'skipped')} · 남음 ${pending.length}`);
   console.log(`남은 예상 ${leftMin}분(전체 ${total}분). 막힌 실행 ${blocked.length}개${blocked.length ? `: ${blocked.map((r) => `${r.key}(${blockedBy(r, state)})`).join(', ')}` : ''}`);
+  if (Object.keys(state.vars ?? {}).length) console.log(`정한 값: ${Object.entries(state.vars).map(([k, v]) => `${k}=${v}`).join(', ')}`);
   if (pending.length) console.log('다음: node loadtest/plan/bat025-plan.mjs next');
 }
 
@@ -189,8 +210,9 @@ function aaSummary(plan, state) {
   console.log(`\n적었다: ${outPath}`);
 }
 
-function main(argv) {
-  const plan = loadPlan();
+function main(argv0) {
+  const { planPath, rest: argv } = planArg(argv0);
+  const plan = loadPlan(planPath);
   const path = statePathOf(plan);
   const cmd = argv[0];
   if (cmd === 'init') {
@@ -271,11 +293,21 @@ function main(argv) {
     console.log(`게이트 ${gate}를 풀었다.`);
     return 0;
   }
+  if (cmd === 'set') {
+    const [name, value] = [argv[1], argv[2]];
+    if (!VAR.test(name ?? '')) throw new Error(`set의 이름은 영문 소문자로 시작하는 영문·숫자 1~24자다: ${name ?? '(없음)'}`);
+    if (value === undefined || value === '' || /[\s{}]/.test(value)) throw new Error('set의 값은 빈칸·중괄호 없는 글이다');
+    state.vars = { ...(state.vars ?? {}), [name]: value, };
+    state.varsSetAt = { ...(state.varsSetAt ?? {}), [name]: new Date().toISOString() };
+    writeState(path, state);
+    console.log(`${name}=${value}를 적었다`);
+    return 0;
+  }
   if (cmd === 'aa') {
     aaSummary(plan, state);
     return 0;
   }
-  throw new Error('명령: init·status·next·show <key>·done <key> --result pass|fail|invalid [--note]·fail <key> --reason·skip <key> --reason·retry <key>·unblock <gate>·aa');
+  throw new Error('명령: [--plan <계획>] init·status·next·show <key>·done <key> --result pass|fail|invalid [--note]·fail <key> --reason·skip <key> --reason·retry <key>·unblock <gate>·set <이름> <값>·aa');
 }
 
 function isMain() {
