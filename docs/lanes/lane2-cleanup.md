@@ -240,4 +240,4 @@
 - F-05-3 구현 리뷰 IR-09(낮음): `purchase_priority_grant_sync_total`을 틱이 아니라 행마다 센다. 계획 D5의 '틱의 결과'와 뜻이 다르고 `changed`도 쓰지 않는다. 지표 뜻을 문서에 맞추거나 틱 단위로 바꾼다
 - F-05-3 구현 리뷰 IR-10(낮음): 대조 한 틱이 100개를 차례로 2초 데드라인으로 보내 최악 200초까지 늘어난다. 한 틱 시간 한도나 병렬 상한을 두고, `queue.proto`의 1초 주석과 클라이언트 2초도 맞춘다
 
-- F-05-2 뒤 web reflow wallet-enroll·wallet-live (CI 45267206465): wallet-enroll은 고정 tkt-lumen-r1-0312와 팬 API 503만 두어 실제 월렛이 오류 화면을 그린다(등록 버튼·QR이 없음). wallet-live O-T52 ⑥은 데스크톱 안내 뒤 [그래도 이 기기에 등록]을 누르지 않아 QR을 못 본다. live 월렛 화면에 맞게 시험 대역(티켓 목록)과 클릭 차례를 고친다. F-05-2 기능 시험·브라우저 확인은 이 두 파일이 남았다
+- ~~F-05-2 뒤 web reflow wallet-enroll·wallet-live (CI 45267206465)~~ — **닫힘(2026-11-24, 073dc18c3·c3175c7b5)**: wallet-enroll은 live 목록·회차 요약 대역과 UUIDv7 티켓으로 바꾸고, wallet-live O-T52 ⑥은 데스크톱 안내 뒤 [그래도 이 기기에 등록]을 누르게 고쳤다. `web / reflow`·`visual`·`console-csp` 모두 통과(9ebc100ec·c3175c7b5). 남은 것은 서비스 워커가 제어하는 페이지의 등록·갱신을 이 두 시험이 덮지 않는 점(wallet-sw가 따로 본다)
