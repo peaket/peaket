@@ -61,6 +61,44 @@ spec:
             summary: 전날 하루 사본이 06:00까지 없다(마지막 성공이 전날 이전이거나 지표가 없다)
             runbook_url: https://runbooks.peaket.example/RB-38
             dashboard_url: /d/peaket-obs-pipeline
+        # F-02-4 보존 만료 파기·관리 계정 2년 복사. 늦으면 개인정보를 보존 기간 넘게 두는 일이라 SEV2 kind legal이다.
+        - alert: AccessLogPurgeOverdue
+          expr: access_log_overdue_partitions > 0
+          for: 24h
+          labels:
+            severity: sev2
+            kind: legal
+          annotations:
+            summary: 3개월이 지난 접속기록 파티션이 24시간 넘게 남아 있다
+            runbook_url: https://runbooks.peaket.example/RB-38
+            dashboard_url: /d/peaket-obs-pipeline
+        - alert: AccessLogPurgeFailed
+          expr: absent(access_log_purge_last_success_timestamp) or time() - access_log_purge_last_success_timestamp > 36 * 3600
+          labels:
+            severity: sev2
+            kind: legal
+          annotations:
+            summary: 접속기록 보존 만료 파기 잡이 36시간 넘게 성공하지 못했다
+            runbook_url: https://runbooks.peaket.example/RB-38
+            dashboard_url: /d/peaket-obs-pipeline
+        - alert: AccessLogAdminCopyLate
+          expr: absent(access_log_admin_copy_last_success_timestamp) or (hour(vector(time()) + 9 * 3600) >= 6 and on() (year(access_log_admin_copy_last_success_timestamp + 9 * 3600) < scalar(year(vector(time()) + 9 * 3600)) or month(access_log_admin_copy_last_success_timestamp + 9 * 3600) < scalar(month(vector(time()) + 9 * 3600)) or day_of_month(access_log_admin_copy_last_success_timestamp + 9 * 3600) < scalar(day_of_month(vector(time()) + 9 * 3600)))) or increase(access_log_admin_copy_rows_total{result="failed"}[5m]) > 0
+          labels:
+            severity: sev2
+            kind: legal
+          annotations:
+            summary: 전날 관리 계정 접속기록의 2년 감사 저장소 복사가 06:00까지 없다
+            runbook_url: https://runbooks.peaket.example/RB-38
+            dashboard_url: /d/peaket-obs-pipeline
+        - alert: AccessLogPurgeAuditFailed
+          expr: increase(access_log_purge_audit_failures_total[5m]) > 0
+          labels:
+            severity: sev2
+            kind: legal
+          annotations:
+            summary: 접속기록 파기 기록을 남기지 못해 파기를 멈췄다(닫힘 실패)
+            runbook_url: https://runbooks.peaket.example/RB-38
+            dashboard_url: /d/peaket-obs-pipeline
         - alert: InvCopyDropped
           expr: inv_copy_dropped_total > 0
           labels:

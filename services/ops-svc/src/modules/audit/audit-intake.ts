@@ -26,6 +26,39 @@ export const AUDIT_INTAKE_PAYLOADS = {
       algorithm: z.string().min(1).max(32),
     })
     .strict(),
+  // 관리 계정 접속기록(F-02-4, docs/security/data-classification.md '관리자 시스템 접속기록').
+  // 접속기록 DB access_log의 is_admin=1 줄을 매일 복사해 2년 이상 감사 체인에 둔다. 다른 접수 종류와 달리
+  // 접속 일시·IP·User-Agent·관리 계정 ID를 싣는다(법정 접속기록이라 필요하다). 비밀번호·토큰·쿠키·본문 칸은 없다.
+  ADMIN_ACCESS_LOG: z
+    .object({
+      source: z.enum(['gateway', 'identity']),
+      accessTs: z.iso.datetime({ offset: true }),
+      requestId: z.string().max(200),
+      event: z.string().max(32),
+      result: z.string().max(32),
+      provider: z.string().max(64),
+      factors: z.array(z.enum(['password', 'totp', 'passkey'])).max(3),
+      failure: z.string().max(32),
+      clientIp: z.string().max(64).nullable(),
+      userAgent: z.string().max(512),
+      adminAccountId: z.uuid().nullable(),
+      pod: z.string().max(128),
+      seq: z.number().int().nonnegative().nullable(),
+      retainUntil: z.iso.datetime({ offset: true }),
+    })
+    .strict(),
+  // 접속기록 보존 만료 파기 기록(F-02-4, docs/security/data-classification.md '백업 보존 상한과 파기').
+  // 지우기 전 PLANNED, 지운 뒤 DROPPED, 실패 FAILED. 이미 없는 파티션은 DROPPED+reconciled=true다.
+  ACCESS_LOG_PARTITION_PURGE: z
+    .object({
+      day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      table: z.enum(['access_log', 'access_log_otel']),
+      state: z.enum(['PLANNED', 'DROPPED', 'FAILED']),
+      rows: z.number().int().nonnegative().nullable(),
+      reconciled: z.boolean(),
+      reason: z.string().max(200).nullable(),
+    })
+    .strict(),
   // 정산 계좌 변경 시도(payment-svc payout_account_change, F-07-7 ADR-0370 결정 5, settlement §8 '정산 계좌 변경' 행).
   // 파트너·행위자 ID, 결과 셋, 재인증 요소, 예금주 일치, 두 자리 은행 코드·끝 4자리, 보류 끝, 결제사별 결과만 받는다. 계좌번호·예금주명 칸은 없다(목록 밖이라 400)
   PAYOUT_ACCOUNT_CHANGED: z

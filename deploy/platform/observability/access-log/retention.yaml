@@ -1,0 +1,35 @@
+# F-02-4 접속기록 보존 만료 파기·관리 계정 2년 복사·백업 다시 적용 작업 설정(BUILD_ORDER OPS-330).
+# 정본: docs/data.md §1 '시스템 접속기록', docs/security/data-classification.md
+# '법정 접속기록'·'관리자 시스템 접속기록'·'백업 보존 상한과 파기', docs/observability.md §7·§9.
+# 보존 값(3개월·2년·7일·40일·P3M7D)은 정본에서 읽는다. 여기에는 일정·상한·기록 종류만 둔다.
+# 배포(CronJob·IAM·버킷·Object Lock 수명 주기·KMS)는 INF-020이 한다. 로컬 실행기는 tools/local/access-log-jobs.mjs다.
+purge:
+  # 하루 사본(04:00) 뒤, 사본 지연 경보(06:00) 전에 돈다. 시간대는 KST다.
+  timeZone: Asia/Seoul
+  schedule: "0 5 * * *"
+  retentionMonths: 3
+  # 컷오프와 같은 날짜는 남긴다(그날 늦은 줄이 아직 3개월이 안 됐을 수 있다).
+  graceDays: 0
+  maxDropPerRun: 40
+  auditRecordType: ACCESS_LOG_PARTITION_PURGE
+  auditStates: [PLANNED, DROPPED, FAILED]
+adminCopy:
+  # 관리 계정 줄을 3개월 파기 전에 2년 감사 저장소로 옮긴다.
+  timeZone: Asia/Seoul
+  schedule: "30 4 * * *"
+  lookbackDays: 1
+  retentionYears: 2
+  recordType: ADMIN_ACCESS_LOG
+  sourceUser: al_admin_reader
+  sourceFilter: "is_admin = 1"
+backup:
+  # ClickHouse 일 스냅샷은 7일만 둔다(ADR-0053 결정 10).
+  snapshotRetentionDays: 7
+  # 복원하면 스냅샷 시각 뒤에 실행된 파기 기록을 대상 ID 보존(40일) 안에서 다시 적용한다.
+  reapplyWindowDays: 40
+  objectLockRetention: P3M7D
+metrics:
+  overdue: access_log_overdue_partitions
+  lastSuccess: access_log_purge_last_success_timestamp
+  adminCopyLastSuccess: access_log_admin_copy_last_success_timestamp
+  adminCopyRows: access_log_admin_copy_rows_total

@@ -54,6 +54,9 @@ jobs:
       # 2차 마스킹 꼴 원천(packages/platform/src/pii-patterns.json)으로 다시 만든 generated/가 커밋된 파일과 다르거나, 운영 판 셋이 §1의 규칙을 깨면 실패
       - run: node tools/ci/collector-config.mjs --check
       - run: node tools/ci/access-log-config.mjs
+      # 접속기록 보존 만료 파기·관리 계정 2년 복사 정적 검사(OPS-330, F-02-4): 3개월·2년·7일·40일·P3M7D,
+      # 파기 사용자 al_purger 권한, 복원 다시 적용, 감사 접수 종류, 경보·지표가 정본과 어긋나면 실패
+      - run: node tools/ci/access-log-retention.mjs --check
       # 진단 증거 보존 규칙 정적 검사(D-T52 ①, 기능 F-01-1): 수명 주기 원천 infra/modules/evidence-bucket/lifecycle.json이 docs/observability.md §9 '진단 증거' 행과 다르면 실패
       - run: node tools/ci/evidence-retention.mjs --check
       # 관측 저장소·exporter·신호 연결 설정 정적 검사(V-T50 ①②⑥, 기능 F-01-4): Mimir·Loki·Tempo 복제·보존·한도·라벨·쓰기 큐·원격 쓰기, 로컬 판 겹치기, exporter 인자, Grafana 연결

@@ -8,6 +8,7 @@
 | --- | --- |
 | `001_access_log.sql` | exporter 원천 표 `access_log_otel`, 계약 표 `access_log`, 그 둘을 잇는 materialized view `access_log_from_otel` |
 | `002_users.sql` | 사용자 넷과 권한(넣기만·관리 계정 줄만·수사 대응만·마이그레이션만) |
+| `003_purge.sql` | 보존 만료 파기 사용자 `al_purger`(두 표의 `ALTER`와 `system.parts` 읽기만) |
 
 수집기(ClickHouse exporter)는 자기 고정 칸(`Timestamp`·`TraceId`·`LogAttributes` 등)을 가진 `access_log_otel`에 넣는다. `access_log`는 계약 칸(`ts`·`source`·`client_ip`… )을 가진 표이고, materialized view가 `LogAttributes`를 옮겨 적는다. 그래서 exporter의 `create_schema: false`와 표 칸이 어긋나지 않는다.
 
@@ -18,6 +19,8 @@
 - 사본 버킷은 Object Lock 준수 모드이고, 보존은 그 날짜의 3개월 + 7일 [가정]이다. 보존 기간 안의 삭제는 버킷이 거부한다.
 - 7일 백업 밖의 날짜는 하루 사본으로 되살린다(RB-38, V-T23). 다시 넣은 행 수와 SHA-256이 앵커와 같아야 한다.
 - 다음 날 03:30에 전날 하루를 대조하고, 전날 사본 성공 표시가 06:00까지 없으면 SEV2다.
+- 매일 05:00 [가정]에 3개월이 지난 하루 파티션을 `DROP PARTITION`으로 지운다. TTL은 보조이고, 지우기 전·뒤에 `ACCESS_LOG_PARTITION_PURGE`(PLANNED·DROPPED)를 남긴다. 기록을 남기지 못하면 지우지 않는다(F-02-4).
+- 관리 계정 줄은 매일 04:30 [가정]에 ops-svc 감사 접수 경로로 `ADMIN_ACCESS_LOG`로 복사해 최소 2년 둔다. 접속기록 원본의 3개월 보존과 별개다.
 
 ## 로컬로 적용하기
 
@@ -36,4 +39,5 @@ docker exec -i peaket-ch-access clickhouse-client --multiquery < data/clickhouse
 - `al_admin_reader`: `access_log`의 `SELECT` 중 `is_admin = 1` 줄만(행 정책 `admin_rows_only`). ops-svc가 관리 계정 줄을 감사 저장소로 옮길 때 쓴다.
 - `al_investigation`: `access_log`의 `SELECT`만. 적법한 영장을 확인한 수사 대응에만 쓴다(POL-025).
 - `al_migrator`: `ALTER`·`DROP`·`CREATE TABLE`만. TTL·표 변경에만 쓰고 평소 읽기·쓰기에는 쓰지 않는다.
+- `al_purger`: 두 표의 `ALTER`(DROP PARTITION)와 `system.parts` `SELECT`만. 접속기록 행은 읽지 못한다.
 - 사본 버킷은 쓰기 역할(`access-log-export`)과 복원 역할(`access-log-restore`)을 나눈다.

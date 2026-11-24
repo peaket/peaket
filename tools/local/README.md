@@ -100,7 +100,7 @@ node --test "tools/local/*.test.mjs"
 | `mesh-netpol-objects.mjs` | `mesh-netpol`의 배치(원천에서 워크로드·네임스페이스·포트), 받는 쪽 대역 객체, 시험 접속 정보(BUILD_ORDER HOT-420, ADR-0285 결정 13) |
 | `chart.test.mjs` | 공용 차트(`deploy/charts/peaket-service`) 렌더 시험 |
 | `dashboards.mjs` | 서비스마다 템플릿 대시보드 JSON을 만든다(첫 행 네 신호). `--check`는 커밋된 파일과 견준다 |
-| `access-log-jobs.mjs` | 법정 접속기록 5분 대조·일 해시 앵커·하루 사본 내보내기/복원(기능 F-01-8, V-T21~V-T23). `--reconcile`은 인자 대신 `--clickhouse`·`--envoy`로 실제 행 수와 원천 요청 수를 읽고, 원천 0은 종료 1, 빈 `seq`만 경보로 세며 중복은 세지 않는다. `--anchor`는 ClickHouse·앵커 파일을 읽어 원천·적재·파일 행 수·SHA-256을 견주고, `--copy`/`--restore`는 ClickHouse HTTP의 Parquet 결과를 S3 호환 서버(Object Lock)에 올리고 다시 넣는다 |
+| `access-log-jobs.mjs` | 법정 접속기록 5분 대조·일 해시 앵커·하루 사본 내보내기/복원(기능 F-01-8, V-T21~V-T23). `--reconcile`은 인자 대신 `--clickhouse`·`--envoy`로 실제 행 수와 원천 요청 수를 읽고, 원천 0은 종료 1, 빈 `seq`만 경보로 세며 중복은 세지 않는다. `--anchor`는 ClickHouse·앵커 파일을 읽어 원천·적재·파일 행 수·SHA-256을 견주고, `--copy`/`--restore`는 ClickHouse HTTP의 Parquet 결과를 S3 호환 서버(Object Lock)에 올리고 다시 넣는다. `--purge`는 3개월이 지난 하루 파티션을 `DROP PARTITION`으로 지우고 `ACCESS_LOG_PARTITION_PURGE`(PLANNED·DROPPED·FAILED)를, `--admin-copy`는 관리 계정 줄만 `ADMIN_ACCESS_LOG`로, `--reapply`는 스냅샷 뒤 파기 기록의 날짜를 다시 지운다(기능 F-02-4, OPS-330) |
 | `observability.test.mjs` | 대시보드 생성기, Prometheus·Grafana 매니페스트(다이제스트·권한·익명 보기·클러스터 안 주소), 차트의 수집 주석 시험 |
 | `e2e/observability.e2e.mjs` | 실제 kind에서 수집·대시보드 조회 식·Grafana 익명 보기를 봅니다 |
 | `v0-token.mjs` | v0 입구 시험 토큰. 시험 키 쌍을 이 PC에 만들어 개인키는 `.cache/peaket-tools/`에만 두고, 팬 액세스 토큰(ES256, `typ` at+jwt, `aud` fan)을 찍습니다 |
