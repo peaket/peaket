@@ -1,9 +1,10 @@
 // 운영 입장 기록 마감 저장소(Drizzle, offline-gate §7.3 'GAT-180 마감 규칙', 마이그레이션 0019).
 // 마감은 회차 단위 잠금(배타)을 잡은 트랜잭션에서 마감 행과 미보고 건 행을 함께 쓴다. 스캔 올리기·큐 보고는 같은 잠금을 공유로 잡는다
 // (DrizzleScannerGateStore·putQueueReport). 그래서 업로드는 마감 커밋 전이면 마감 전 기록으로, 커밋 뒤면 '마감 뒤 도착'으로 받는다.
-// 후보의 차례 열쇠는 마감해도 지워지지 않는 ticket.event_starts_at에서 읽는다(그 회차가 그 판단에서 마감돼도 다음 판단이 자리를 잇는다).
+// 후보의 차례 열쇠는 마감해도 지워지지 않는 회차 목록(ticket_event_start.starts_at)에서 읽는다. 그 회차가 그 판단에서
+// 마감돼도 다음 판단이 자리를 잇는다. 목록은 ticket 발권 트리거가 유지한다(마이그레이션 0020, IR-03).
 import type { Database } from '@peaket/platform';
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import { decideEntryClose, scannerUnreportedEventKey, type EntryCloseReason } from '../../domain/entry-close.js';
 import type { EntryCloseStore } from '../../domain/ports.js';
 import { entryClose, scannerQueueReport, scannerUnreportedCase } from './schema.js';
@@ -11,17 +12,40 @@ import { entryClose, scannerQueueReport, scannerUnreportedCase } from './schema.
 /** 회차 잠금 열쇠(스캔 올리기·큐 보고와 같은 키). 열쇠 글에는 다른 잠금과 섞이지 않게 접두사를 붙인다 */
 const lockKey = (eventId: string): string => `ticket-entry-close:${eventId}`;
 
-interface StartRow {
-  starts: Date | string;
-}
-
 interface ReportRow {
   scanner_device_id: string;
   pending_uploads: number;
   reported_at: Date | string;
 }
 
+interface StartsRow {
+  starts_at: Date | string;
+}
+
 const msOf = (v: Date | string): number => (v instanceof Date ? v.getTime() : Date.parse(v));
+
+/**
+ * 마감 후보 고르기 SQL(IR-03). 회차 목록(ticket_event_start)을 (시작, 회차 ID) 차례로 읽고,
+ * 마감 행이 없고 아직 시작 시각이 있는 티켓 행이 있는 회차만 준다. int 시험이 EXPLAIN으로 계획을 본다.
+ */
+export function entryCloseCandidatesQuery(i: { nowMs: number; limit: number; after?: { startsAtMs: number; eventId: string } }): SQL {
+  const now = new Date(i.nowMs);
+  const after = i.after;
+  return sql`
+    select s.event_id::text as event_id
+    from ticket_event_start s
+    where s.starts_at <= ${now}
+      and not exists (select 1 from entry_close c where c.event_id = s.event_id)
+      and exists (select 1 from ticket t where t.event_id = s.event_id and t.event_starts_at is not null)
+      ${
+        after !== undefined
+          ? sql`and (s.starts_at > ${new Date(after.startsAtMs)} or (s.starts_at = ${new Date(after.startsAtMs)} and s.event_id > ${after.eventId}))`
+          : sql``
+      }
+    order by s.starts_at asc, s.event_id asc
+    limit ${i.limit}
+  `;
+}
 
 export class DrizzleEntryCloseStore implements EntryCloseStore {
   constructor(private readonly database: Database) {}
@@ -44,31 +68,15 @@ export class DrizzleEntryCloseStore implements EntryCloseStore {
   }
 
   async candidates(i: { nowMs: number; limit: number; afterEventId?: string }): Promise<string[]> {
-    let afterStart: number | undefined;
+    let after: { startsAtMs: number; eventId: string } | undefined;
     if (i.afterEventId !== undefined) {
-      const rows = (await this.database.db.execute(sql`select min(event_starts_at) as starts from ticket where event_id = ${i.afterEventId}`)).rows as unknown as StartRow[];
-      const v = rows[0]?.starts;
-      if (v !== undefined && v !== null) afterStart = msOf(v);
+      const rows = (await this.database.db.execute(sql`select starts_at from ticket_event_start where event_id = ${i.afterEventId} limit 1`)).rows as unknown as StartsRow[];
+      const v = rows[0]?.starts_at;
+      if (v !== undefined && v !== null) after = { startsAtMs: msOf(v), eventId: i.afterEventId };
     }
-    const now = new Date(i.nowMs);
-    const after = i.afterEventId;
-    const rows = (
-      await this.database.db.execute(sql`
-        select t.event_id::text as event_id, min(t.event_starts_at) as starts
-        from ticket t
-        where t.event_starts_at is not null
-          and t.event_starts_at <= ${now}
-          and not exists (select 1 from entry_close c where c.event_id = t.event_id)
-        group by t.event_id
-        ${
-          afterStart !== undefined && after !== undefined
-            ? sql`having min(t.event_starts_at) > ${new Date(afterStart)} or (min(t.event_starts_at) = ${new Date(afterStart)} and t.event_id::text > ${after})`
-            : sql``
-        }
-        order by min(t.event_starts_at) asc, t.event_id::text asc
-        limit ${i.limit}
-      `)
-    ).rows as unknown as { event_id: string }[];
+    const rows = (await this.database.db.execute(entryCloseCandidatesQuery({ nowMs: i.nowMs, limit: i.limit, ...(after !== undefined ? { after } : {}) }))).rows as unknown as {
+      event_id: string;
+    }[];
     return rows.map((r) => r.event_id);
   }
 

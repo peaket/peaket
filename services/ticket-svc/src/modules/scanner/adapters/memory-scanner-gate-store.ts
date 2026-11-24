@@ -85,7 +85,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
   readonly policy = new Map<string, { reentryAllowed: boolean; policySeq: number }>();
   /**
    * 시험·로컬용 마감 행 대역(entry_close.closed_at). 운영은 DrizzleScannerGateStore가 표에서 읽는다.
-   * 비어 있으면 F-05-4 시험이 쓰는 entryClosesAtMs(보정 시각 기준)로 물러난다.
+   * 마감 행이 없으면 '마감 뒤 도착' 표시를 만들지 않는다(운영과 같은 규칙, IR-12).
    */
   readonly entryCloses = new Map<string, number>();
   readonly #policyChains = new Map<string, Promise<unknown>>();
@@ -224,7 +224,6 @@ export class MemoryScannerGateStore implements ScannerGateStore {
     sessionId?: string;
     placement?: { gateZone: string; mode: 'IN' | 'OUT' };
     reentryAllowed?: boolean;
-    entryClosesAtMs?: number;
     sessions?: Readonly<Record<string, { accountId?: string; validFromMs?: number; validUntilMs?: number }>>;
     scans: readonly ScanEventInput[];
     nowMs: number;
@@ -249,7 +248,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
       let reason: string | undefined = scan.reason;
       const kinds: GateFlagKind[] = [];
       const demoted: StoredScan[] = [];
-      /** 이 기록이 '중복 입장'일 때 견줄 정상 기록의 state_seq(undefined면 옛 행) */
+      /** 이 기록이 '중복 입장'일 때 견줄 정상 기록의 state_seq(null이면 옛 행) */
       let duplicateBase: number | null | undefined;
       let keyBad: 'INVALID_QR' | 'KEY_REVOKED' | 'KEY_UNKNOWN' | undefined;
       if (scan.keyId !== undefined) {
@@ -292,7 +291,8 @@ export class MemoryScannerGateStore implements ScannerGateStore {
           result = 'REJECT';
           reason = 'ALREADY_IN';
           kinds.push('DUPLICATE');
-          duplicateBase = firstIn.stateSeq;
+          // 옛 행(state_seq 없음)은 PG와 같이 null로 넘겨 CONCURRENT가 되게 한다(offline-gate §7.1, IR-06)
+          duplicateBase = firstIn.stateSeq ?? null;
         } else if (firstIn && orderOf(scan, firstIn) < 0) {
           // 늦게 올라온 더 이른 기록이 정상이 된다. 먼저 통과했던 뒤 기록은 중복으로 내린다(C1-03).
           for (const old of existing) if (old.direction === 'IN') demoted.push(old);
@@ -306,12 +306,10 @@ export class MemoryScannerGateStore implements ScannerGateStore {
       } else if (i.sessionId === undefined || scan.scannerSessionId !== i.sessionId) {
         kinds.push('OUT_OF_SESSION');
       }
-      // '마감 뒤 도착'은 받은 시각이 마감 행의 시각보다 뒤일 때다(offline-gate §7.3). 마감 행이 없으면 옛 시험용
-      // entryClosesAtMs(보정 시각 기준)로 물러난다(Drizzle 어댑터는 마감 행만 본다)
+      // '마감 뒤 도착'은 받은 시각이 마감 행의 시각보다 뒤일 때다(offline-gate §7.3). 마감 행이 없으면 표시하지 않는다.
+      // core 사본의 entryClosesAtMs나 보정 시각으로 물러나지 않는다(운영 Drizzle 어댑터와 같은 규칙, IR-12)
       const closedAtMs = this.entryCloses.get(i.eventId);
-      if (closedAtMs !== undefined) {
-        if (i.nowMs > closedAtMs) kinds.push('AFTER_CLOSE');
-      } else if (i.entryClosesAtMs !== undefined && corrected > i.entryClosesAtMs) kinds.push('AFTER_CLOSE');
+      if (closedAtMs !== undefined && i.nowMs > closedAtMs) kinds.push('AFTER_CLOSE');
       if (scan.clockOffsetMs !== undefined && Math.abs(scan.clockOffsetMs) > CLOCK_UNCERTAIN_MS) kinds.push('TIME_UNCERTAIN');
       if (stale.has(scan.id)) kinds.push('STALE_VERSION');
       if (scan.method === 'OVERRIDE') kinds.push('OVERRIDE_REVIEW');

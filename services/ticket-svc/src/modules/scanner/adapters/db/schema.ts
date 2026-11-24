@@ -229,6 +229,19 @@ export const entryClose = pgTable(
   (t) => [check('entry_close_reason_check', sql`${t.reason} IN ('ALL_REPORTED', 'TIMEOUT')`)],
 );
 
+/**
+ * 회차마다 가장 이른 ticket.event_starts_at 하나(마이그레이션 0020, F-05-6 IR-03).
+ * ticket INSERT·event_starts_at 고침 트리거가 유지하고, 입장 기록 마감 후보 고르기가 (starts_at, event_id) 차례로 읽는다.
+ */
+export const ticketEventStart = pgTable(
+  'ticket_event_start',
+  {
+    eventId: uuid('event_id').primaryKey(),
+    startsAt: at('starts_at').notNull(),
+  },
+  (t) => [index('ticket_event_start_order_idx').on(t.startsAt, t.eventId)],
+);
+
 /** TIMEOUT 마감 때 보고가 없는 기기마다 한 행(offline-gate §7.3 '미보고 스캐너 건'). */
 export const scannerUnreportedCase = pgTable(
   'scanner_unreported_case',

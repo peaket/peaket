@@ -1616,6 +1616,11 @@ erDiagram
         uuid fraud_lock_case_id "부정 예매 양도 잠금(POL-046 ③). 빈 값이면 잠금 없음. 소명을 요청한 사건 ID(ops 논리 DB라 외래키 없음)이고, 있으면 양도 요청을 409 transfer-locked로 막는다. 돌려주기와 입장은 막지 않는다(돌아온 표는 그 계정이 결제한 표라 잠긴 채로 남는다(추천 적용 2026-10-31, ADR-0173)). 잠금은 사건 계정이 그 회차에서 결제한 표 전부에 걸리고(fraud_transfer_lock), 잠금 뒤에 산 표도 발권 때 잠긴다. 풀리는 때는 그 계정에 대해 소명 인정, 사건 CLEARED, 조치 실행 끝(취소된 표 말고 남은 표), 조사관이 계정을 뺌, 입장 시작, 그 계정 대상 조치 요청의 반려·만료(다른 열린 조치 요청이 없을 때), 최대 기한(fraud_transfer_lock.expires_at) 가운데 먼저 오는 때다(입장 시작과 최대 기한은 ticket-svc가 스스로 푼다, 추천 적용 2026-10-31, ADR-0171 결정 3, ADR-0173 결정 3)"
         bigint fraud_lock_version "잠금을 바꾼 사건 상태의 판(SetTransferLock.version). 같은 case_id 안에서만 견주고, 그 사건의 저장한 판보다 클 때만 바꾼다. 다른 사건의 잠금이 걸린 표는 판을 견주지 않고 그대로 둔다"
         int version "바꿀 때마다 1 올림. 사람이 화면에서 읽고 나중에 저장하는 흐름(CS·관리 화면)의 본 판 비교용. 한 요청 안의 경합(양도·취소·회수·스캔)은 행 잠금이 맡는다(기술 검토 낮음-071)"
+        timestamptz event_starts_at "발권 때 받은 회차 시작(공연 시작). 취소가 입장 시작 전인지 가르고, 입장 기록 마감 후보의 차례 열쇠다(마이그레이션 0000, F-05-6 정리 IR-03)"
+    }
+    ticket_event_start {
+        uuid event_id PK "회차마다 한 행. ticket INSERT·event_starts_at 고침 트리거가 같은 트랜잭션에서 유지한다(마이그레이션 0020, F-05-6 정리 IR-03)"
+        timestamptz starts_at "그 회차 티켓의 가장 이른 ticket.event_starts_at. 입장 기록 마감 후보 고르기가 (starts_at, event_id) 차례로 읽는다"
     }
     ticket_addon {
         uuid id PK
@@ -3400,6 +3405,7 @@ erDiagram
 | 입금 secret 해시 지우기(payment, 추천 적용 2026-11-09, BUILD_ORDER HOT-153) | 정비 시간에 `update payment set deposit_secret_hash = null where id in (select id from payment where deposit_secret_hash is not null and approved_at <= $1 order by approved_at limit $2 for update skip locked)` | 부분 인덱스 `payment_deposit_hash_idx` | 플랫폼 `deleteInBatches` 규칙으로 나눠 비운다 | 정비 일 지표 |
 | 마이 티켓(ticket) | `WHERE account_id = $1 AND id < $2 ORDER BY id DESC LIMIT 50` | 새로 `ticket (account_id, id)` | `Limit → Index Scan Backward`(표를 나누지 않아 인덱스 하나만 찾는다, ADR-0114) | 실행 시간, 계획 시간 |
 | 스캐너 패키지(ticket) | 회차의 티켓 + 유효 기기 키 | 새로 `ticket (event_id) INCLUDE (seat_id, gate_zone, status, version)`, `device_key (ticket_id) INCLUDE (key_id, public_key) WHERE revoked_at IS NULL` | `Nested Loop Left Join`, 안쪽 Index Only Scan(loops ≈ 5만) | 안쪽 노드의 loops·Buffers(합계)·Heap Fetches, 맞춤 계획 강제(§5.2) |
+| 입장 기록 마감 후보(ticket, 추천 적용 2026-11-24, F-05-6 정리 IR-03) | 1분 [가정]마다 `select s.event_id from ticket_event_start s where s.starts_at <= $1 and not exists (select 1 from entry_close c where c.event_id = s.event_id) and exists (select 1 from ticket t where t.event_id = s.event_id and t.event_starts_at is not null) [and (s.starts_at, s.event_id) > ($2, $3)] order by s.starts_at, s.event_id limit 50`(돌아가며 보기 커서는 `ticket_event_start`의 (시작, 회차 ID)). 이전 질의는 `ticket` 표 전체를 `group by`+`not exists`로 매분 훑었다 | 새로 `ticket_event_start (starts_at, event_id)`(회차 수만큼의 작은 표), `ticket (event_id)`(후보의 exists 확인과 위 스캐너 패키지 질의가 함께 쓴다. 마이그레이션 0020). `entry_close`는 기본 키. `ticket_event_start`는 ticket INSERT·`event_starts_at` 고침 트리거가 유지한다 | `Limit → Nested Loop Anti Join`(바깥 `Index Scan using ticket_event_start_order_idx`, `entry_close`는 `Index Only Scan using entry_close_pkey`, `ticket` 확인은 `Index Scan using ticket_event_idx`) | 읽은 회차 목록 행 수(후보 50 + 마감·삭제로 걸러진 수), 실행 시간, `ticket_event_start` 행 수(회차 수와 함께) |
 | 변경분(ticket) | `WHERE event_id = $1 AND seq > $2 ORDER BY seq LIMIT 5000` | 새로 `scanner_change` 기본 키 `(event_id, seq)` | `Limit → Index Scan`(정렬 없음) | 실행 시간 |
 | 후기 자격(ticket) | 결제자의 그 회차 티켓 | 새로 `ticket (payer_account_id, event_id)` | Index Scan | 실행 시간 |
 | 회차 취소 일괄 환불(purchase) | `WHERE event_id = $1 AND status IN (<환급 대상 상태>) AND id > $2 ORDER BY id LIMIT 500` | 새로 `purchase_order (event_id, id) WHERE status IN (<환급 대상 상태>)`(상태 목록은 SQL과 글자까지 같게), `order_cancellation (event_cancellation_request_id, status)`, 취소 유일(§2) | `Limit → Index Only Scan`, 진행률은 `GroupAggregate` | 묶음 실행 시간, 재시작 때 유일 충돌 수, 맞춤 계획 강제 |

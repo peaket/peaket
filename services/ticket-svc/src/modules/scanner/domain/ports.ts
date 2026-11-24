@@ -106,8 +106,6 @@ export interface ScannerGateStore {
     placement?: { gateZone: string; mode: 'IN' | 'OUT' };
     /** 회차 입장 정책. 재입장 허용이면 IN 다음 IN을 NO_EXIT로 표시한다 */
     reentryAllowed?: boolean;
-    /** 입장 기록 마감 시각(event.entry_closed_at). 이 뒤 기록은 받고 AFTER_CLOSE 표시 */
-    entryClosesAtMs?: number;
     /** 스캔의 scannerSessionId로 찾은 세션 계정·유효 창(C1-11). 없으면 세션 ID만 대조한다 */
     sessions?: Readonly<Record<string, { accountId?: string; validFromMs?: number; validUntilMs?: number }>>;
     scans: readonly ScanEventInput[];
