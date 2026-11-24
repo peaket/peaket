@@ -1,0 +1,478 @@
+# 나머지 경보 규칙(OPS-100, 기능 F-01-10, 시험 V-T52).
+# 정본: docs/observability.md §3·§5('OPS-100 규칙과 이름이 없던 지표' 포함), §4 '긁기·평가·알림 간격', §8 허용 라벨.
+# 동결 로컬 범위다(ADR-0373 결정 2, ADR-0386). v1 배포에 넣지 않고 `freeze/lane1-F-01-10` 가지에만 둔다.
+# 평가 간격 30초(§4 '그 밖의 규칙 평가 간격'). 규칙 시험: deploy/platform/observability/test/ops-100.test.yaml, 정적 시험: tools/ci/alert-rules.test.mjs.
+# 이름이 없던 지표(scanner_*·security_incident_duty_*·backup_*·certificate_*)의 모양은 docs/observability.md §5에 적었다.
+# MSK 지표 이름은 YACE가 CloudWatch 지표를 snake_case로 내는 꼴이다 [가정, INF-020이 YACE를 세울 때 대조].
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ops-100
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: peaket
+spec:
+  groups:
+    - name: ops-100-dependencies
+      interval: 30s
+      rules:
+        - alert: external_dependency_error_ratio_high
+          # 제공자 오류(5xx·시간 초과, 소셜 로그인은 429·403도 error로 센다, ADR-0180) 비율이 1%를 넘은 채 5분
+          expr: |
+            sum by (dependency) (rate(dependency_requests_total{outcome=~"error|timeout"}[5m]))
+            /
+            sum by (dependency) (rate(dependency_requests_total[5m]))
+            > 0.01
+          for: 5m
+          labels:
+            severity: sev2
+            kind: cause
+          annotations:
+            summary: 외부 의존 {{ $labels.dependency }}의 오류 비율이 1%를 넘었다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-07
+            dashboard_url: /d/peaket-svc-payment-svc
+            description: '제공자 오류(5xx·시간 초과, 소셜 로그인 공급자는 429·403 포함) 비율이 5분 동안 1% [가정]를 넘었다. 결제사면 결제사 전환 검토(RB-07), 소셜 로그인이면 공급자 한도·차단 응답을 본다(ADR-0180).'
+        - alert: payment_pg_throttled_first
+          # 첫 승인 호출에서 받은 429 한 건이라도 있으면 SEV2(재전송·결과 모름 조회의 429는 세지 않는다)
+          expr: sum by (pg) (increase(pg_throttled_total{first="true"}[1m])) > 0
+          for: 0m
+          labels:
+            severity: sev2
+            kind: cause
+            dependency: payment-gateway
+          annotations:
+            summary: 결제사 {{ $labels.pg }}가 첫 승인 호출을 429로 거절했다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-07
+            dashboard_url: /d/peaket-svc-payment-svc
+            description: '결제사 한도 초과 응답을 첫 승인 호출에서 받았다. 채널 상한을 낮추는 판단은 첫 호출의 429로만 하고(기술 검토 높음-16), ADR-0036의 추정 상한을 다시 본다.'
+        - alert: cdn_quota_utilization_high
+          # CloudFront 배포별 한도 사용률이 80% [가정]를 넘은 채 10분
+          expr: cdn_quota_utilization_ratio > 0.8
+          for: 10m
+          labels:
+            severity: sev3
+            kind: cause
+            dependency: cloudfront
+          annotations:
+            summary: CloudFront 배포의 한도 사용률이 80%를 넘었다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-40
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '배포 요청 수 ÷ 승인 한도가 80% [가정]를 넘었다(ADR-0058). 온세일 피크의 사용률을 공연 리포트에 남겨 다음 한도 상향 요청의 근거로 쓴다.'
+    - name: ops-100-hygiene
+      interval: 30s
+      rules:
+        - alert: node_clock_offset_high
+          # 노드 시계가 표준시와 20ms(오픈 직후 묶음 창 2초의 1%, ADR-0041) 넘게 어긋난 채 5분
+          expr: abs(node_timex_offset_seconds) > 0.02
+          for: 5m
+          labels:
+            severity: sev2
+            kind: hygiene
+          annotations:
+            summary: 노드의 시계 오프셋이 20ms를 넘었다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목록-작성-중-runbooks-작성-예정
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '노드 시계가 표준시와 20ms [가정] 넘게 어긋났다. 오프셋은 오픈 30분 전 점검의 필수 항목이다(docs/features/control-tower.md §2).'
+        - alert: cross_region_backup_stale
+          # 교차 리전 스냅샷이 26시간(RPO 24시간 + 2시간) 넘게 없으면 SEV2
+          expr: time() - max(backup_cross_region_last_success_timestamp_seconds) > 26 * 3600
+          for: 5m
+          labels:
+            severity: sev2
+            kind: hygiene
+          annotations:
+            summary: 교차 리전 백업이 26시간 넘게 성공하지 않았다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목록-작성-중-runbooks-작성-예정
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '교차 리전 스냅샷의 마지막 성공이 26시간 [가정]을 넘었다. 잃어도 되는 데이터의 시간 폭(RPO) 24시간에 2시간을 더한 값이다.'
+        - alert: clickhouse_backup_stale
+          # ClickHouse 일 단위 백업이 26시간 넘게 없으면 SEV3
+          expr: time() - max(backup_last_success_timestamp_seconds{store="clickhouse"}) > 26 * 3600
+          for: 5m
+          labels:
+            severity: sev3
+            kind: hygiene
+          annotations:
+            summary: ClickHouse 일 단위 백업이 26시간 넘게 성공하지 않았다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목록-작성-중-runbooks-작성-예정
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '일 단위 백업 저장소가 26시간 [가정] 넘게 백업되지 않았다. 백업 작업 실패와 마지막 성공 시각을 함께 본다(docs/infra.md §6).'
+        - alert: certificate_renewal_overdue
+          # 갱신 예정 시각을 넘겼는데 새 인증서·키가 없고, 남은 수명이 그때의 절반 이상이면 SEV3
+          expr: |
+            (certificate_renewal_overdue == 1)
+            and
+            ((certificate_expiry_timestamp_seconds - time())
+              >= (certificate_expiry_timestamp_seconds - certificate_renewal_due_timestamp_seconds) / 2)
+          for: 5m
+          labels:
+            severity: sev3
+            kind: hygiene
+          annotations:
+            summary: 인증서의 갱신 예정 시각이 지났다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목록-작성-중-runbooks-작성-예정
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '갱신 예정 시각을 넘겼는데 새 인증서·키가 없거나 갱신이 실패했다. 고정 일수가 아니라 수명에 비례해 보고(기술 검토 중간-060), 남은 수명이 갱신 예정 시각 때의 절반 아래가 되면 SEV2로 올라간다.'
+        - alert: certificate_expiry_urgent
+          # 갱신 예정 시각을 넘긴 채 남은 수명이 그때의 절반 아래면 SEV2
+          expr: |
+            (certificate_renewal_overdue == 1)
+            and
+            ((certificate_expiry_timestamp_seconds - time())
+              < (certificate_expiry_timestamp_seconds - certificate_renewal_due_timestamp_seconds) / 2)
+          for: 5m
+          labels:
+            severity: sev2
+            kind: hygiene
+          annotations:
+            summary: 인증서의 남은 수명이 갱신 예정 시각 때의 절반 아래다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목록-작성-중-runbooks-작성-예정
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '갱신 예정 시각을 넘긴 채 남은 수명이 그때의 절반 아래다(남은 수명 1/3에 갱신하면 1/6) [가정]. 오프셋·인증서·교차 리전 백업은 오픈 30분 전 점검의 필수 항목이다.'
+    - name: ops-100-field
+      interval: 30s
+      rules:
+        - alert: scanner_sync_stale
+          # 입장 시간대에 마지막 동기화가 2분 [가정]을 넘은 스캐너
+          expr: time() - scanner_last_sync_timestamp_seconds > 120
+          for: 1m
+          labels:
+            severity: sev2
+            kind: field
+          annotations:
+            summary: 스캐너의 마지막 동기화가 2분을 넘었다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/features/offline-gate.md
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '입장 시간대에 마지막 동기화가 2분 [가정]을 넘었다. 양도·취소 뒤 옛 QR이 통하는 시간을 최대 1분으로 잡은 설계는 스캐너가 계속 동기화할 때만 성립한다(docs/features/offline-gate.md §5). 판정은 오프라인으로 계속한다.'
+        - alert: scanner_duplicate_entry_high
+          # 같은 회차의 중복 입장 이상 표시가 10분에 10건 [가정]을 넘으면 SEV3
+          expr: sum by (event_id) (increase(scanner_duplicate_entry_total[10m])) > 10
+          for: 0m
+          labels:
+            severity: sev3
+            kind: field
+          annotations:
+            summary: 회차 {{ $labels.event_id }}의 중복 입장 이상 표시가 10분에 10건을 넘었다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/features/offline-gate.md
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '같은 회차의 중복 입장 이상 표시가 10분에 10건 [가정]을 넘었다. 현장 대응은 현장 책임자가 하고 관제는 감시만 한다. 조사해 위조로 확인되면 불변식 위반으로 다룬다(RB-36, ADR-0051 결정 8).'
+    - name: ops-100-queue-budget
+      interval: 30s
+      rules:
+        - alert: queue_admit_before_turn
+          # 차례 전 입장(ADMITTED인데 번호가 serving보다 큰 경우) 1건이라도 있으면 SEV1
+          expr: sum(increase(queue_admit_before_turn_total[5m])) > 0
+          for: 0m
+          labels:
+            severity: sev1
+            kind: invariant
+          annotations:
+            summary: 차례 전 입장이 발생했다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-36
+            dashboard_url: /d/peaket-svc-admission-ctrl
+            description: '입장 Lua가 이미 막으므로 늘 0이어야 하는 값이다. 리더 펜싱 실패나 입장 토큰 위조처럼 많은 사람에게 번질 수 있는 결함의 신호다(POL-029, RB-36).'
+        - alert: admission_budget_reduction_executed
+          # 예산 50% 감축 실행(사용자 용량을 줄이는 자동 보호 조치) 1건 이상이면 SEV2
+          expr: sum(increase(admission_target_decrease_total{reason="budget_50"}[5m])) > 0
+          for: 0m
+          labels:
+            severity: sev2
+            kind: control
+          annotations:
+            summary: 예산 50% 감축이 실행됐다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-09
+            dashboard_url: /d/peaket-svc-admission-ctrl
+            description: '연동 여정의 예산이 50% 소진선에 닿아 동시 입장 목표를 줄였다(ADR-0077). 사용자 용량을 줄이는 자동 보호 조치라 SEV2다. 인시던트 선언 기준(온세일 예산 50% 이상 사용)과 함께 본다.'
+    - name: ops-100-legal
+      interval: 30s
+      rules:
+        - alert: security_incident_duty_due_soon
+          # 24시간 의무는 22시간 경과(2시간 남음), 72시간 의무는 60시간 경과(12시간 남음)에 SEV2
+          expr: |
+            (security_incident_duty_due_seconds{duty=~"breach_report|additional_facts_report"} < 7200)
+            or
+            (security_incident_duty_due_seconds{duty=~"personal_data_subject_notice|leak_report|leak_possible_notice"} < 43200)
+          for: 1m
+          labels:
+            severity: sev2
+            kind: legal
+          annotations:
+            summary: 보안 사고 법정 기한이 임박했다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목록-작성-중-runbooks-작성-예정
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '침해사고 신고·추가 사실 신고(24시간)는 2시간 남음, 정보주체 통지·유출 신고·유출 가능성 통지(72시간)는 12시간 남음에서 울린다(FR-063). 신고·통지 기한을 넘기면 법정 의무 위반이다.'
+        - alert: security_incident_duty_breached
+          # 기한 초과 카운터가 1건이라도 늘면 SEV2
+          expr: sum(increase(security_incident_duty_breached_total[5m])) > 0
+          for: 0m
+          labels:
+            severity: sev2
+            kind: legal
+          annotations:
+            summary: 보안 사고 법정 기한을 넘긴 의무가 있다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#10-런북-목록-작성-중-runbooks-작성-예정
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '신고·통지 기한을 넘긴 의무가 생겼다. 지휘관과 법무가 즉시 확인하고, 늦어진 까닭과 조치를 사후 분석에 남긴다.'
+    - name: ops-100-broker
+      interval: 30s
+      rules:
+        - alert: msk_offline_partitions_trade_control
+          # 거래·제어 클러스터의 오프라인 파티션 1개 이상이면 SEV1
+          expr: sum(aws_kafka_offline_partitions_count_average{cluster=~"trade|control"}) > 0
+          for: 1m
+          labels:
+            severity: sev1
+            kind: cause
+            dependency: kafka-trade-control
+          annotations:
+            summary: 거래·제어 Kafka에 오프라인 파티션이 있다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-11
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '대표 복제본이 없어 읽고 쓰지 못하는 파티션이 1개 이상이다(ADR-0141). 거래·제어는 SEV1, 텔레메트리는 SEV2다.'
+        - alert: msk_offline_partitions_telemetry
+          expr: sum(aws_kafka_offline_partitions_count_average{cluster="telemetry"}) > 0
+          for: 1m
+          labels:
+            severity: sev2
+            kind: cause
+            dependency: kafka-telemetry
+          annotations:
+            summary: 텔레메트리 Kafka에 오프라인 파티션이 있다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-11
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '텔레메트리 클러스터의 오프라인 파티션이다. 관측 신호가 끊기지만 호출과 자동 제어는 수집기를 거치지 않는다.'
+        - alert: msk_under_min_isr_trade_control
+          # 최소 동기 복제본 수를 채우지 못한 파티션이 1분 이어지면 SEV2(그 파티션의 쓰기가 곧 멈춘다)
+          expr: sum(aws_kafka_under_min_isr_partition_count_average{cluster=~"trade|control"}) > 0
+          for: 1m
+          labels:
+            severity: sev2
+            kind: cause
+            dependency: kafka-trade-control
+          annotations:
+            summary: 거래·제어 Kafka의 최소 동기 복제본이 모자란 파티션이 있다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-11
+            dashboard_url: /d/peaket-observability-pipeline
+            description: 'min.insync.replicas를 채우지 못한 파티션이 1분 이어졌다. 그 파티션의 쓰기가 곧 멈춘다.'
+        - alert: msk_under_min_isr_telemetry
+          expr: sum(aws_kafka_under_min_isr_partition_count_average{cluster="telemetry"}) > 0
+          for: 1m
+          labels:
+            severity: sev3
+            kind: cause
+            dependency: kafka-telemetry
+          annotations:
+            summary: 텔레메트리 Kafka의 최소 동기 복제본이 모자란 파티션이 있다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-11
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '텔레메트리 클러스터의 최소 동기 복제본 부족이다. 관측 신호만 영향을 받아 SEV3다.'
+        - alert: msk_under_replicated_partitions
+          # 복제본이 모자란 파티션이 10분 이어지면 SEV3
+          expr: sum(aws_kafka_under_replicated_partitions_average) > 0
+          for: 10m
+          labels:
+            severity: sev3
+            kind: cause
+            dependency: kafka
+          annotations:
+            summary: Kafka의 복제본이 모자란 파티션이 10분 이어졌다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-11
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '복제본이 모자란 파티션이 10분 이어졌다. AWS Health에 예정된 패치가 진행 중이면 30분으로 늘려 본다.'
+        - alert: msk_disk_used_warning
+          # 브로커 데이터 디스크 사용률 70% [가정] 초과가 10분 이어지면 SEV3
+          expr: max(aws_kafka_kafka_data_logs_disk_used_average) > 70
+          for: 10m
+          labels:
+            severity: sev3
+            kind: cause
+            dependency: kafka
+          annotations:
+            summary: Kafka 브로커 데이터 디스크 사용률이 70%를 넘었다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-11
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '브로커 데이터 디스크 사용률이 70% [가정]를 넘은 채 10분 이어졌다. 85%를 넘으면 SEV2로 올라간다.'
+        - alert: msk_disk_used_high
+          expr: max(aws_kafka_kafka_data_logs_disk_used_average) > 85
+          for: 5m
+          labels:
+            severity: sev2
+            kind: cause
+            dependency: kafka
+          annotations:
+            summary: Kafka 브로커 데이터 디스크 사용률이 85%를 넘었다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-11
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '브로커 데이터 디스크 사용률이 85% [가정]를 넘었다. 디스크가 차면 브로커가 로그를 지우며 복제가 밀린다.'
+    - name: ops-100-payment-consumers
+      interval: 30s
+      rules:
+        - alert: payment_result_pull_used
+          # 결과 사건이 늦어 당기기로 반영한 수가 1분 동안 0보다 크면 SEV3(사건 길이 늦다는 신호)
+          expr: sum(increase(payment_result_pulled_total[1m])) > 0
+          for: 0m
+          labels:
+            severity: sev3
+            kind: cause
+            dependency: kafka-trade
+          annotations:
+            summary: 결제 결과를 당기기로 반영했다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-39
+            dashboard_url: /d/peaket-svc-payment-svc
+            description: '결과 사건이 5초 [가정] 안에 오지 않아 purchase-svc가 payment-svc에 직접 물었다(ADR-0140). 평소에는 1초 안에 오므로 당기기는 거의 돌지 않는다. 사건 길은 RB-39·RB-11로 고친다.'
+        - alert: payment_result_pull_failed
+          # BatchGetPayments 실패가 1분 이어지면 SEV2
+          expr: sum(increase(payment_result_pull_failures_total[1m])) > 0
+          for: 1m
+          labels:
+            severity: sev2
+            kind: cause
+            dependency: payment-svc
+          annotations:
+            summary: 결제 결과 조회 BatchGetPayments가 1분 넘게 실패한다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-11
+            dashboard_url: /d/peaket-svc-payment-svc
+            description: '당기기 조회가 차단기 열림·마감 초과·gRPC 오류·모양 어긋남으로 실패한 채 1분 이어졌다. 결제 확정이 늦어진다.'
+        - alert: consumer_held_events_trade
+          # 결제·주문 토픽의 보류 사건이 1건 이상이면 SEV2
+          expr: max by (service) (consumer_held_events{topic=~"trade\\.payments|trade\\.orders"}) > 0
+          for: 1m
+          labels:
+            severity: sev2
+            kind: cause
+            dependency: kafka-trade
+          annotations:
+            summary: '{{ $labels.service }}의 결제·주문 토픽에 보류 사건이 있다'
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-11
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '처리하지 못해 서비스 DB의 보류 표로 옮긴 사건이 1건 이상이다(ADR-0142). 같은 업무 키의 뒤 사건도 함께 보류된다. RB-11로 다시 처리한다.'
+        - alert: consumer_held_events_other
+          # 그 밖의 토픽 보류 사건이 1건 이상이면 SEV3
+          expr: max by (service) (consumer_held_events{topic!~"trade\\.payments|trade\\.orders"}) > 0
+          for: 1m
+          labels:
+            severity: sev3
+            kind: cause
+            dependency: kafka-telemetry
+          annotations:
+            summary: '{{ $labels.service }}의 토픽에 보류 사건이 있다'
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-11
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '결제·주문 밖의 토픽에서 처리하지 못한 사건이 1건 이상이다(ADR-0142). 보류가 온세일 한 번에 10건 [가정]을 넘으면 재시도 횟수와 실패 분류를 다시 본다.'
+    - name: ops-100-transferred
+      interval: 30s
+      rules:
+        - alert: evidence_collection_failed
+          # 증거 수집 실패가 한 시간 안에 두 번 이상이면 SEV3(수집기가 진단 증거를 남기지 못했다)
+          expr: sum(increase(evidence_collections_total{result="failed"}[1h])) > 1
+          for: 0m
+          labels:
+            severity: sev3
+            kind: hygiene
+          annotations:
+            summary: 진단 증거 수집이 한 시간에 두 번 이상 실패했다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-31
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '큰 경보가 울렸는데 수집기가 의존성의 순간 상태를 올리지 못했다(F-01-1, D-T51). PostgreSQL·Valkey 접속과 대상 설정(PEAKET_EVIDENCE_TARGETS)을 확인한다.'
+        - alert: evidence_webhook_rejected_high
+          # 웹훅 거절이 10분에 5번 이상이면 SEV3(토큰 없음·다름, 보안 사건)
+          expr: sum(increase(evidence_webhook_rejected_total[10m])) >= 5
+          for: 0m
+          labels:
+            severity: sev3
+            kind: security
+          annotations:
+            summary: 증거 수집기 웹훅 거절이 10분에 5번 넘게 있었다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-31
+            dashboard_url: /d/peaket-observability-pipeline
+            description: 'Bearer 토큰이 없거나 다른 호출이 반복됐다. 토큰 값은 로그에 남기지 않는다. Alertmanager의 증거 수집기 받는 곳 토큰과 수집기 환경 값이 같은지 확인한다.'
+        - alert: rt_degraded
+          # 관제 실시간 표가 Degraded(1분 p95 5초 초과가 3분 이어짐)면 SEV3
+          expr: rt_degraded == 1
+          for: 0m
+          labels:
+            severity: sev3
+            kind: hygiene
+          annotations:
+            summary: 관제 실시간 표가 Degraded다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-34
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '신선도 1분 p95가 5초를 넘는 상태가 3분 넘게 이어져 패널이 Prometheus 대체 표시로 바뀌었다(ADR-0071). 작업자는 늦은 사건과 실패한 묶음을 버리지 않으므로 막힘은 신선도로 드러난다.'
+        - alert: rt_trade_gap_events
+          # 거래 사건이 60초 넘게 빈 관제 회차가 판매 중에 있으면 SEV3
+          expr: rt_trade_gap_events > 0
+          for: 0m
+          labels:
+            severity: sev3
+            kind: hygiene
+          annotations:
+            summary: 관제 실시간 표에서 거래 사건이 60초 넘게 끊긴 회차가 있다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-34
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '판매 중인 회차의 거래 사건이 60초 넘게 비었다(C-T37). 심장 박동은 텔레메트리 쪽이라 이 끊김을 보지 못한다. 작업자 복구는 RB-34를 따른다.'
+        - alert: otelcol_exporter_send_failed
+          # 보내기 실패가 5분 넘게 0보다 크면 SEV3
+          expr: |
+            sum(rate({__name__=~"otelcol_exporter_send_failed_spans(_total)?|otelcol_exporter_send_failed_log_records(_total)?|otelcol_exporter_send_failed_metric_points(_total)?"}[5m])) > 0
+          for: 5m
+          labels:
+            severity: sev3
+            kind: hygiene
+          annotations:
+            summary: 수집기가 신호를 내보내지 못하고 있다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-34
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '수집기(에이전트·게이트웨이·클러스터)의 내보내기 실패가 5분 넘게 이어졌다(ADR-0076). SLO 경보와 자동 제어 입력은 수집기를 거치지 않아 호출은 그대로다.'
+        - alert: otelcol_exporter_queue_high
+          # 큐 사용률이 80%를 넘은 채 5분
+          expr: max(otelcol_exporter_queue_size / otelcol_exporter_queue_capacity) > 0.8
+          for: 5m
+          labels:
+            severity: sev3
+            kind: hygiene
+          annotations:
+            summary: 수집기 내보내기 큐가 80%를 넘었다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-34
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '수집기 내보내기 큐 사용률이 80%를 넘은 채 5분 이어졌다. 받는 쪽(Tempo·Loki·Mimir)이 느리거나 막혔는지 본다.'
+        - alert: otelcol_receiver_refused
+          # 받기 거절이 5분 넘게 이어지면 SEV3
+          expr: |
+            sum(rate({__name__=~"otelcol_receiver_refused_spans(_total)?|otelcol_receiver_refused_log_records(_total)?|otelcol_receiver_refused_metric_points(_total)?"}[5m])) > 0
+          for: 5m
+          labels:
+            severity: sev3
+            kind: hygiene
+          annotations:
+            summary: 수집기가 받은 신호를 거절하고 있다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-34
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '수집기의 받기 거절이 5분 넘게 이어졌다. 보내는 쪽의 모양·한도와 수집기 큐를 함께 본다(ADR-0076).'
+        - alert: otelcol_intake_zero
+          # Tempo나 Loki의 수집량이 5분 동안 0이면 SEV3
+          expr: |
+            (sum(rate(tempo_distributor_bytes_received_total[5m])) == 0)
+            or
+            (sum(rate(loki_distributor_bytes_received_total[5m])) == 0)
+          for: 5m
+          labels:
+            severity: sev3
+            kind: hygiene
+          annotations:
+            summary: Tempo나 Loki가 5분 동안 아무것도 받지 않았다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-34
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '관측 저장소의 수집량이 5분 동안 0이다. 수집기 보내기 실패·큐·받기 거절과 함께 본다(ADR-0076). 트래픽이 없는 시간대에도 울릴 수 있는 SEV3다.'
+        - alert: otelcol_tail_sampling_dropped_early
+          # 판정 전에 버린 trace가 5분 넘게 0보다 크면 SEV3
+          expr: |
+            sum(rate({__name__=~"otelcol_processor_tail_sampling_sampling_trace_dropped_too_early(_total)?"}[5m])) > 0
+          for: 5m
+          labels:
+            severity: sev3
+            kind: hygiene
+          annotations:
+            summary: 꼬리 표본기가 판정 전에 trace를 버리고 있다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-34
+            dashboard_url: /d/peaket-observability-pipeline
+            description: '판정 전에 버린 trace에는 오류 trace도 든다(ADR-0125). num_traces·decision_wait·메모리와 초당 trace 수를 견주어 크기를 다시 잡는다.'
