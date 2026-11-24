@@ -75,6 +75,8 @@ interface StartOptions {
   ports: number[];
   env?: Record<string, string>;
   args?: string[];
+  /** docker run에 더할 플래그(예 --add-host=host.docker.internal:host-gateway). 이미지 앞에 온다 */
+  runArgs?: string[];
   /** 컨테이너 안 경로 → 넣을 글 */
   files?: Record<string, string>;
 }
@@ -83,7 +85,7 @@ export function startContainer(o: StartOptions): Container {
   const net = o.network ? ['--network', o.network.name, ...(o.alias ? ['--network-alias', o.alias] : [])] : [];
   const env = Object.entries(o.env ?? {}).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
   const ports = o.ports.flatMap((p) => ['-p', `127.0.0.1::${p}`]);
-  const id = docker(['create', ...net, ...env, ...ports, o.image, ...(o.args ?? [])]);
+  const id = docker(['create', ...net, ...env, ...(o.runArgs ?? []), ...ports, o.image, ...(o.args ?? [])]);
   const stop = () => quiet(['rm', '-f', '-v', id]);
   try {
     const dir = mkdtempSync(join(tmpdir(), 'peaket-obs-it-'));
@@ -139,9 +141,9 @@ export async function until<T>(what: string, ms: number, probe: () => Promise<T>
 const ready = (c: Container, port: number, path: string, what: string) =>
   until(`${what} 준비`, 120_000, async () => (await fetch(`${c.url(port)}${path}`)).status, (s) => s === 200, c);
 
-/** 로컬 판 Loki(HTTP 3100). configText는 --render loki 결과나 그것을 고친 글 */
-export async function startLoki(configText: string, network?: Network): Promise<Container> {
-  const c = startContainer({ image: LOKI_IMAGE, network, ports: [3100], files: { '/etc/peaket-loki.yaml': configText }, args: ['-config.file=/etc/peaket-loki.yaml'] });
+/** 로컬 판 Loki(HTTP 3100). configText는 --render loki 결과나 그것을 고친 글. alias를 주면 같은 네트워크의 다른 컨테이너가 그 이름으로 찾는다 */
+export async function startLoki(configText: string, network?: Network, alias?: string): Promise<Container> {
+  const c = startContainer({ image: LOKI_IMAGE, network, ...(alias ? { alias } : {}), ports: [3100], files: { '/etc/peaket-loki.yaml': configText }, args: ['-config.file=/etc/peaket-loki.yaml'] });
   try {
     await ready(c, 3100, '/ready', 'Loki');
   } catch (err) {

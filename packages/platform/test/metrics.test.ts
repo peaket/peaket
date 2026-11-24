@@ -125,7 +125,7 @@ describe('[ASVS v5.0.0-13.4.5] 지표·문서 경로', () => {
     expect((await s.inject({ method: 'GET', url: '/metrics' })).statusCode).toBe(404);
     const res = await s.svc.management.inject({ method: 'GET', url: '/metrics' });
     expect(res.statusCode).toBe(200);
-    expect(res.headers['content-type']).toMatch(/^text\/plain/);
+    expect(res.headers['content-type']).toMatch(/^application\/openmetrics-text/);
     expect((await s.svc.management.inject({ method: 'GET', url: '/api-json' })).statusCode).toBe(404);
   });
 

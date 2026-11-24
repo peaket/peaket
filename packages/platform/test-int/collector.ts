@@ -138,6 +138,10 @@ interface StartOptions {
   alias?: string;
   /** 에이전트만: /var/log/pods로 붙일 호스트 폴더 */
   podLogsDir?: string;
+  /** 마지막에 겹쳐 읽을 덧판(--config). 시험이 로컬 판의 내보내기를 Loki로 바꿀 때 쓴다 */
+  extraConfig?: string;
+  /** 컨테이너 환경 변수(예 PEAKET_CLUSTER) */
+  env?: Record<string, string>;
 }
 
 function configArgs(role: StartOptions['role']): string[] {
@@ -151,7 +155,13 @@ async function startCollector(o: StartOptions): Promise<CollectorContainer> {
   const outHost = mkdtempSync(join(tmpdir(), `peaket-otelcol-${o.role}-`));
   // 이미지는 루트가 아닌 사용자로 돈다. 리눅스에서 mkdtemp의 0700 폴더면 파일 내보내기가 쓰지 못한다(containers.ts의 Kafka 인증서와 같은 까닭). 시험용 빈 폴더다
   chmodSync(outHost, 0o777);
-  const args = ['run', '-d', '--memory', '1g', '-p', '127.0.0.1::4318', '-p', '127.0.0.1::8888', '-v', `${slash(COLLECTOR_DIR)}:${IN_CONTAINER}:ro`, '-v', `${slash(outHost)}:${OUT_DIR}`];
+  // 덧판은 결과 폴더(컨테이너에 붙인다)에 써서 마지막 --config로 읽게 한다
+  if (o.extraConfig !== undefined) {
+    writeFileSync(join(outHost, 'extra.yaml'), o.extraConfig);
+    config.push('--config', `${OUT_DIR}/extra.yaml`);
+  }
+  const env = Object.entries(o.env ?? {}).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
+  const args = ['run', '-d', '--memory', '1g', ...env, '-p', '127.0.0.1::4318', '-p', '127.0.0.1::8888', '-v', `${slash(COLLECTOR_DIR)}:${IN_CONTAINER}:ro`, '-v', `${slash(outHost)}:${OUT_DIR}`];
   if (o.podLogsDir) args.push('-v', `${slash(o.podLogsDir)}:/var/log/pods:ro`);
   if (o.network) args.push('--network', o.network);
   if (o.alias) args.push('--network-alias', o.alias);
@@ -223,7 +233,7 @@ async function startCollector(o: StartOptions): Promise<CollectorContainer> {
   }
 }
 
-export const startGateway = (o: { network?: string; alias?: string } = {}) => startCollector({ role: 'gateway', ...o });
+export const startGateway = (o: { network?: string; alias?: string; extraConfig?: string; env?: Record<string, string> } = {}) => startCollector({ role: 'gateway', ...o });
 export const startAgent = (o: { network: string; podLogsDir: string }) => startCollector({ role: 'agent', ...o });
 
 /** 시험마다 새 Docker 네트워크(별칭이 다른 시험과 섞이지 않게) */
