@@ -12,7 +12,7 @@
 // - queueUrl을 주면 대기열 API 출처의 /v1/queues/ 경로(진입·입장 확정·추가 검증 등, 로컬에서는 앱 포트가 내는 대기 상태 파일도)를 같은 신원 머리·
 //   같은 출처·Origin 규칙으로 queue-svc로 넘긴다(ADR-0259 결정 8). 화면은 대기열 출처 NEXT_PUBLIC_QUEUE_ORIGIN(대기실은 VITE_PEAKET_QUEUE_ORIGIN)에 이 대역 주소를 넣는다
 // - ticketUrl을 주면 입장용 휴대폰 등록 POST /v1/tickets/{ticketId}/device-keys를 ticket-svc로, coreUrl을 주면 웹 푸시 구독 /v1/push-subscriptions·
-//   /v1/push-subscriptions/{subscriptionKey}를 core-svc로 넘긴다(ADR-0363, F-05-1 연결 시험). gw-fan 라우트보다 넓히지 않는다(local-fan-gateway-parity.test.mjs)
+//   /v1/push-subscriptions/{subscriptionKey}와 찜 /v1/wishes·/v1/productions/{productionId}/wish를 core-svc로 넘긴다(ADR-0363, F-05-1·F-05-8 연결 시험). gw-fan 라우트보다 넓히지 않는다(local-fan-gateway-parity.test.mjs)
 // 실행: PEAKET_ENV=local PEAKET_IDENTITY_HTTP=http://127.0.0.1:<identity 앱 포트> PEAKET_WEB_ORIGIN=http://localhost:3000 \
 //       PEAKET_FAN_TOKEN_JWKS_URL=http://127.0.0.1:<identity 앱 포트>/internal/jwks/fan.json PEAKET_TOKEN_ISSUER=… node scripts/local-fan-gateway.mjs [포트]
 //       (대기열까지: PEAKET_QUEUE_HTTP=http://127.0.0.1:<queue-svc 앱 포트>)
@@ -39,6 +39,8 @@ const LOCAL_ADMISSION = '/v1/local-dev/admission';
 const TICKET_ROUTE = /^\/v1\/(?:tickets(?:\/[^/]+\/(?:transfers|returns|device-keys)|\/?$|\/[^/]+$)|transfers(?:\/|$)|transfer-recipient-lookups(?:\/|$))/;
 /** 웹 푸시 구독 등록·해제(core-svc, gw-fan /v1/push-subscriptions) */
 const PUSH_SUBSCRIPTION_ROUTE = /^\/v1\/push-subscriptions(\/[^/]+)?$/;
+/** 찜 목록·찜 저장·해제(core-svc, gw-fan /v1/wishes·/v1/productions/{id}/wish, F-05-8) */
+const CORE_WISH_ROUTE = /^\/v1\/(?:wishes|productions\/[^/]+\/wish)$/;
 /** 로컬 스택은 좌석맵 파일도 그 판의 좌석 ID로 낸다 */
 const LOCAL_LAYOUT = /^\/v1\/events\/[^/]+\/seatmap-layouts\//;
 /** 신원 머리: 바깥 요청에서 늘 지운다(앞단이 밑줄을 붙임표로 바꿀 수 있어 밑줄 이름도) */
@@ -137,7 +139,7 @@ export async function startLocalFanGateway(o) {
             ? new URL(o.queueUrl)
             : o.ticketUrl && TICKET_ROUTE.test(pathname)
               ? new URL(o.ticketUrl)
-              : o.coreUrl && PUSH_SUBSCRIPTION_ROUTE.test(pathname)
+              : o.coreUrl && (PUSH_SUBSCRIPTION_ROUTE.test(pathname) || CORE_WISH_ROUTE.test(pathname))
                 ? new URL(o.coreUrl)
                 : o.fallbackUrl
                   ? new URL(o.fallbackUrl)

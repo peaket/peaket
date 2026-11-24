@@ -14,6 +14,7 @@ export const openTooClose = (eventIndex: number, suggestedOpenAt?: Date) =>
 export const partnerAdminRequired = () => new ProblemError({ type: 'partner-admin-required', status: 403, title: '파트너 관리자만 할 수 있습니다' });
 export const productionSuspended = () => new ProblemError({ type: 'production-suspended', status: 409, title: '판매 중지 중에는 바꿀 수 없습니다' });
 export const wishLimit = () => new ProblemError({ type: 'wish-limit', status: 422, title: '찜 수를 넘었습니다' });
+export const invalidWishCursor = (detail: string) => new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다', detail });
 
 function suggestion(eventIndex: number, at?: Date): Record<string, unknown> {
   return at ? { eventIndex, suggestedOpenAt: at.toISOString() } : { eventIndex };

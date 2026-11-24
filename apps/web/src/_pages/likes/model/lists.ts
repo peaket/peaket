@@ -18,6 +18,74 @@ import { getPerformance } from '@/entities/performance';
 import { getProduction, productionHref, type PosterArt } from '@/entities/production';
 import { getVenue } from '@/entities/venue';
 
+/** 화면 카드(목업·실서버 공통). LikeCardList가 그린다 */
+export interface LiveCard {
+  id: string;
+  title: string;
+  href?: string;
+  posterUrl?: string;
+  posterAlt?: string;
+  art?: PosterArt;
+  posterShort?: string;
+  sub: string;
+  badgeText: string;
+  badgeCls: string;
+  pending?: boolean;
+}
+
+/** openapi listWishes의 ProductionCard 가운데 화면이 쓰는 칸 */
+export interface ServerWishCard {
+  productionId?: string;
+  eventId?: string;
+  title?: string;
+  posterUrl?: string;
+  posterAlt?: string;
+  placeName?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  nextOpenAt?: string | null;
+  saleStatus?: 'UPCOMING' | 'ON_SALE' | 'SOLD_OUT' | 'ENDED';
+}
+
+const SALE_BADGE: Record<NonNullable<ServerWishCard['saleStatus']>, { text: string; cls: string }> = {
+  UPCOMING: { text: '오픈 예정', cls: 'badge badge-primary' },
+  ON_SALE: { text: '판매 중', cls: 'badge badge-success' },
+  SOLD_OUT: { text: '매진', cls: 'badge badge-danger' },
+  ENDED: { text: '지난 공연', cls: 'badge' },
+};
+
+/** 날짜 글 '2026-12-24' → '2026.12.24'(화면 표기) */
+const dotDate = (s: string): string => s.replaceAll('-', '.');
+
+/**
+ * 실서버 찜 목록(openapi listWishes) → 화면 카드. productionId가 없는 줄은 버린다.
+ * pendingIds는 `peaket.wishQueue`에 남은 공연이다('저장 대기' 배지).
+ */
+export function serverLikeCards(items: readonly ServerWishCard[], pendingIds: readonly string[] = []): LiveCard[] {
+  return items.flatMap((c) => {
+    const id = c.productionId;
+    if (!id) return [];
+    const badge = SALE_BADGE[c.saleStatus ?? 'ON_SALE'];
+    const period = c.periodStart && c.periodEnd ? `${dotDate(c.periodStart)}~${dotDate(c.periodEnd)}` : undefined;
+    const sub = c.saleStatus === 'UPCOMING' && c.nextOpenAt ? `${new Date(c.nextOpenAt).toLocaleString('ko-KR')} 오픈` : [period, c.placeName].filter(Boolean).join(' · ');
+    return [
+      {
+        id,
+        title: c.title ?? '',
+        ...(c.eventId ? { href: `/events/${c.eventId}` } : {}),
+        ...(c.posterUrl ? { posterUrl: c.posterUrl } : {}),
+        ...(c.posterAlt ? { posterAlt: c.posterAlt } : {}),
+        posterShort: c.title ?? '',
+        sub,
+        badgeText: badge.text,
+        badgeCls: badge.cls,
+        pending: pendingIds.includes(id),
+      },
+    ];
+  });
+}
+
+
 export interface LikeCard {
   id: string;
   title: string;

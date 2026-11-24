@@ -2,7 +2,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { idempotencyKeyReused } from '@peaket/platform';
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
-import type { CatalogRepository, NameEntry, PlaceNameEntry, EventPublicFields, EventSummaryRow, LayoutFile, LayoutPreview, MemberList, NewProduction, ProductionForUpdate, ProductionPublicFields, RegistrationTx, RequestOnce, SaleEligibilityEvent } from '../domain/ports.js';
+import type { CatalogRepository, NameEntry, PlaceNameEntry, EventPublicFields, EventSummaryRow, LayoutFile, LayoutPreview, MemberList, NewProduction, ProductionForUpdate, ProductionPublicFields, RegistrationTx, RequestOnce, SaleEligibilityEvent, WishQuery, WishRow } from '../domain/ports.js';
 import { type CatalogEvent, type EventSaleState, isPublic, type Production } from '../domain/production.js';
 import type { PartnerProductionMedia, ProductionImageTx } from '../domain/media-ports.js';
 import type { ProductionImageRow } from '../domain/production-image.js';
@@ -285,6 +285,56 @@ export class MemoryCatalogRepository implements CatalogRepository {
 
   async deleteWish(accountId: string, productionId: string): Promise<void> {
     this.wishes.get(accountId)?.delete(productionId);
+  }
+
+  /** 내 찜 목록(최근 찜한 순). 공개 공연이고 취소되지 않은 회차가 있는 것만 */
+  async listWishRows(accountId: string, q: WishQuery): Promise<WishRow[]> {
+    const mine = this.wishes.get(accountId);
+    if (!mine) return [];
+    const visible = new Set(
+      [...this.events.values()]
+        .filter((e) => e.status !== 'CANCELLED')
+        .map((e) => e.productionId)
+        .filter((id) => {
+          const p = this.productions.get(id);
+          return p !== undefined && isPublic(p);
+        }),
+    );
+    const wanted = q.productionIds ? new Set(q.productionIds.map((id) => id.toLowerCase())) : undefined;
+    const after = q.after;
+    return [...mine.entries()]
+      .filter(([productionId]) => visible.has(productionId) && (wanted === undefined || wanted.has(productionId)))
+      .filter(([productionId, createdAt]) => {
+        if (!after) return true;
+        const t = createdAt.getTime();
+        return t < after.createdAt.getTime() || (t === after.createdAt.getTime() && productionId < after.productionId);
+      })
+      .sort(([aId, aAt], [bId, bAt]) => bAt.getTime() - aAt.getTime() || (aId < bId ? 1 : aId > bId ? -1 : 0))
+      .slice(0, q.limit)
+      .map(([productionId, createdAt]) => ({ productionId, createdAt }));
+  }
+
+  async purgeWishes(accountId: string): Promise<number> {
+    const mine = this.wishes.get(accountId);
+    if (!mine) return 0;
+    const n = mine.size;
+    this.wishes.delete(accountId);
+    return n;
+  }
+
+  async moveWishes(primaryAccountId: string, absorbedAccountId: string): Promise<number> {
+    if (primaryAccountId === absorbedAccountId) return 0;
+    const absorbed = this.wishes.get(absorbedAccountId);
+    if (!absorbed || absorbed.size === 0) return 0;
+    const primary = this.wishes.get(primaryAccountId) ?? new Map<string, Date>();
+    for (const [productionId, createdAt] of absorbed) if (!primary.has(productionId)) primary.set(productionId, createdAt);
+    this.wishes.set(primaryAccountId, primary);
+    this.wishes.delete(absorbedAccountId);
+    return absorbed.size;
+  }
+
+  async countWishes(accountId: string): Promise<number> {
+    return this.wishes.get(accountId)?.size ?? 0;
   }
 }
 

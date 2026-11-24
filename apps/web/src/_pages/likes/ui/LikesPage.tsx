@@ -4,14 +4,21 @@
 // 계정 설정의 '오픈·취소표 신청 목록' 링크(?tab=alerts)로 들어오면 알림 신청 탭을 먼저 연다(추천안).
 import Link from 'next/link';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
-import { ProductionPoster } from '@/entities/production';
 import { SCR054_STATES } from '@/shared/config/screens.account';
+import { ORIGINS } from '@/shared/config/origins';
 import { firstParam, type PageProps } from '@/shared/lib/page-props';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
-import { activeAlertCount, alertItems, likeCards, type AlertItem, type LikeCard } from '../model/lists';
+import { activeAlertCount, alertItems, likeCards, serverLikeCards, type AlertItem, type LiveCard } from '../model/lists';
 import { likesView } from '../model/state';
-import { AlertActionButton, LikesTabs, PermissionSettingsButton, UnlikeButton } from './LikesClient';
+import { AlertActionButton, LikesTabs, PermissionSettingsButton } from './LikesClient';
+import { LikeCardList } from './LikeCardList';
+import { LikesLive } from './LikesLive';
+
+/** 목업 카드 → 공통 카드(미리보기 화면 전용) */
+function previewCards(offline: boolean): LiveCard[] {
+  return likeCards(offline).map((c) => ({ ...c, badgeText: c.badge.text, badgeCls: c.badge.cls }));
+}
 
 export async function LikesPage({ searchParams }: PageProps) {
   const sp = await searchParams;
@@ -19,9 +26,18 @@ export async function LikesPage({ searchParams }: PageProps) {
   const state = fromSettings ? '알림 신청 탭' : resolvePreviewState(sp, SCR054_STATES, '관심 공연');
   const dark = resolvePreviewTheme(sp) === 'dark';
   const v = likesView(state);
-  const likes = v.empty ? [] : likeCards(v.offline);
+  // ?state=가 없으면 실서버 찜 목록(F-05-8). 있으면 디자인 보드 미리보기다.
+  const live = firstParam(sp, 'state') === undefined && ORIGINS.api !== '';
+  const likes = previewCards(v.offline);
   const alerts = v.empty ? [] : alertItems(v.endedSample);
   const pendingCount = likes.filter((c) => c.pending).length;
+  const likesPanel = live ? (
+    <LikesLive fallback={likes} initialOffline={v.offline} />
+  ) : likes.length === 0 ? (
+    <LikesEmpty />
+  ) : (
+    <LikeCardList cards={likes} offline={v.offline} pendingCount={pendingCount} />
+  );
 
   return (
     <AppShell dark={dark}>
@@ -35,68 +51,12 @@ export async function LikesPage({ searchParams }: PageProps) {
           initial={v.tab}
           likesBadge={v.empty ? undefined : likes.length}
           alertsBadge={v.empty ? undefined : activeAlertCount(alerts)}
-          likesPanel={likes.length === 0 ? <LikesEmpty /> : <LikesPanel cards={likes} offline={v.offline} pendingCount={pendingCount} />}
+          likesPanel={likesPanel}
           alertsPanel={alerts.length === 0 ? <AlertsEmpty /> : <AlertsPanel items={alerts} />}
         />
       </main>
       <PreviewSwitcher path="/my/likes" states={SCR054_STATES} current={state} keep={{ theme: dark ? 'dark' : undefined }} />
     </AppShell>
-  );
-}
-
-function LikesPanel({ cards, offline, pendingCount }: { cards: LikeCard[]; offline: boolean; pendingCount: number }) {
-  return (
-    <>
-      {offline ? (
-        <div className="banner banner-offline" role="status" style={{ marginBottom: 12 }}>
-          <i className="ic ic-wifi-off" aria-hidden="true" />
-          <div className="banner-body">
-            <span className="banner-title">인터넷 연결이 없습니다</span>
-            연결되면 저장됩니다(오프라인에서 누른 찜 {pendingCount}건)
-          </div>
-        </div>
-      ) : null}
-      <ul className="grid grid-cols-1 gap-3 md:grid-cols-2 md:gap-4 lg:grid-cols-3 lg:gap-6">
-        {cards.map((c) => (
-          <li key={c.id}>
-            <article className="card flex gap-3.5 p-3.5 md:h-full lg:gap-4 lg:p-4">
-              <ProductionPoster
-                art={c.art}
-                size="sm"
-                label={`${c.title} 포스터`}
-                title={c.posterShort}
-                className="w-[72px] md:w-[88px] lg:w-24"
-                style={{ alignSelf: 'flex-start' }}
-              />
-              <div className="col grow" style={{ gap: 6 }}>
-                <h2 className="t-md fw-b">
-                  {c.href ? (
-                    <Link href={c.href} style={{ color: 'inherit' }}>
-                      {c.title}
-                    </Link>
-                  ) : (
-                    c.title
-                  )}
-                </h2>
-                <p className="t-sm muted">{c.sub}</p>
-                <div className="row between" style={{ gap: 8, marginTop: 'auto' }}>
-                  <div className="row wrap" style={{ gap: 6 }}>
-                    <span className={c.badge.cls}>{c.badge.text}</span>
-                    {c.pending ? (
-                      <span className="badge badge-warning">
-                        <i className="ic ic-clock" aria-hidden="true" />
-                        저장 대기
-                      </span>
-                    ) : null}
-                  </div>
-                  <UnlikeButton title={c.title} />
-                </div>
-              </div>
-            </article>
-          </li>
-        ))}
-      </ul>
-    </>
   );
 }
 

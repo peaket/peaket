@@ -124,6 +124,11 @@ export interface SearchSuggestions {
 export interface SearchIndex {
   /** 한 번의 검색. 후보만 읽는다(ADR-0271 결정 4). 연결 묶음이 넘치거나 질의 시간 상한을 넘으면 SearchUnavailable을 던진다 */
   search(q: SearchQuery): Promise<SearchOutcome>;
+  /**
+   * 공연 ID들로 카드만 읽는다(찜 목록, F-05-8). 공개 공연이 아니면 결과에 없다.
+   * DB 어댑터는 search_document_source_at(지금 값)을 읽어 읽기 모델 동기화 지연 없이 답한다
+   */
+  cardsByIds(ids: readonly string[]): Promise<SearchCard[]>;
 }
 
 export const SEARCH_INDEX = Symbol('SEARCH_INDEX');

@@ -8,6 +8,7 @@ import { imageBaseUrl } from '../domain/production-image.js';
 import { isPublic, saleEndsAt, type EventSaleState } from '../domain/production.js';
 import {
   documentOf,
+  card,
   indexDocuments,
   searchDocuments,
   termRowsOf,
@@ -16,6 +17,7 @@ import {
   type SearchDictionarySource,
   type SearchDocument,
   type SearchIndex,
+  type SearchCard,
   type SearchOutcome,
   type SearchQuery,
   type SearchTermRow,
@@ -47,6 +49,14 @@ export class MemorySearchIndex implements SearchIndex {
   async search(q: SearchQuery): Promise<SearchOutcome> {
     const s = this.snapshot();
     return searchDocuments(s.docs, q, s.index);
+  }
+
+  /** 찜 목록(F-05-8): 지금 스냅숏 문서에서 ID로 고른다. 공개 공연이 아니면 결과에 없다 */
+  async cardsByIds(ids: readonly string[]): Promise<SearchCard[]> {
+    const wanted = new Set(ids);
+    return this.snapshot()
+      .docs.filter((d) => wanted.has(d.productionId))
+      .map(card);
   }
 
   async documents(): Promise<SearchDocument[]> {

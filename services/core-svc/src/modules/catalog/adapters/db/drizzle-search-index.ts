@@ -30,6 +30,7 @@ import {
   type RankedSearch,
   type RelatedSource,
   type SearchDocument,
+  type SearchCard,
   type SearchIndex,
   type SearchOutcome,
   type SearchQuery,
@@ -120,6 +121,13 @@ const DOCUMENT_COLUMNS = sql.raw(
 
 const hasFilters = (q: SearchQuery): boolean => q.genre !== undefined || q.placeId !== undefined || q.artistId !== undefined || q.dateFrom !== undefined || q.dateTo !== undefined || q.status !== undefined;
 
+const UUID_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** uuid[] 매개변수 글(드라이버가 배열을 그대로 못 받는 자리, drizzle-search-read-model과 같은 꼴) */
+const uuidArray = (ids: readonly string[]): string => {
+  for (const id of ids) if (!UUID_ID.test(id)) throw new RangeError('공연 ID가 UUID가 아니다');
+  return `{${ids.join(',')}}`;
+};
+
 /** 도메인 filterDocs와 같은 필터(검색어 없는 목록). 날짜는 KST 달력 날짜이고 기간이 없는 공연은 날짜 필터에서 빠진다 */
 function filters(q: Pick<SearchQuery, 'includePast'> & Partial<SearchQuery>): SQL {
   const parts: SQL[] = [sql`true`];
@@ -155,6 +163,18 @@ export class DrizzleSearchIndex implements SearchIndex {
   async search(q: SearchQuery): Promise<SearchOutcome> {
     const ranked = q.q.trim() === '' ? await this.#list(q) : await this.#query(q);
     return this.#finish(ranked, q);
+  }
+
+  /**
+   * 공연 ID들로 카드만 읽는다(찜 목록, F-05-8). search_document 표가 아니라 지금 값을 계산하는
+   * search_document_source_at을 읽어, 읽기 모델 동기화(1분) 지연 없이 판매 승인 취소·중지를 반영한다.
+   */
+  async cardsByIds(ids: readonly string[]): Promise<SearchCard[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.#read(async (tx) =>
+      rowsOf<DocumentRow>(await tx.execute(sql`select ${DOCUMENT_COLUMNS} from search_document_source_at(now(), ${uuidArray(ids)}::uuid[]) d`)),
+    );
+    return rows.map((r) => card(documentOfRow(r, this.origin)));
   }
 
   /** 검색 전용 연결로 짧은 읽기 트랜잭션 하나. 연결 묶음 포화·질의 시간 초과는 SearchUnavailable(503) */

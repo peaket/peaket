@@ -5,7 +5,7 @@
 import { fileURLToPath } from 'node:url';
 import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, errorSummary, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
-import { kafkaConsumersFromEnv } from './consumers/index.js';
+import { kafkaConsumersFromEnv, CoreAccountEventHandler } from './consumers/index.js';
 import type { CoreConsumers } from './consumers/start.js';
 import {
   CompositeSaleConfigStore,
@@ -16,7 +16,11 @@ import {
   UnwiredSaleOpen,
   assertDatabaseRole,
   DrizzleCommissionRate,
+  DrizzleCatalogRepository,
   DrizzleSearchReadModel,
+  WishLifecycle,
+  CatalogAccountWithdrawnHandler,
+  CatalogAccountMergedHandler,
   GrpcAdminAuthz,
   GrpcImageProcessing,
   GrpcMemberCodeDirectory,
@@ -290,6 +294,8 @@ else {
     auth: kafka.auth,
     database: consumerDatabase,
     handler: new ReviewAccountWithdrawnHandler(consumerReviews, undefined, { logger: service.logger }),
+    wishWithdrawn: new CatalogAccountWithdrawnHandler(new WishLifecycle(new DrizzleCatalogRepository(consumerDatabase, consumerDatabase, systemClock)), { logger: service.logger }),
+    wishMerged: new CatalogAccountMergedHandler(new WishLifecycle(new DrizzleCatalogRepository(consumerDatabase, consumerDatabase, systemClock)), { logger: service.logger }),
     recheck: consumerReviews,
     registry: service.metrics.registry,
     logger: service.logger,

@@ -3,10 +3,11 @@
 // 소비자와 함께 탈퇴 후기 다시 정리 반복(review-recheck.ts, 소유자 결정 2026-11-16 OPEN[44], ADR-0278)을 켜고, 멈출 때는 반복을 먼저 멈춘다.
 // 커밋이 없을 때는 가장 이른 곳부터 읽는다(플랫폼 기본, docs/streaming.md §2.6). 서비스 이름 core-svc로 소비자 지표(consumer_*)를 낸다.
 // 이 파일만 Kafka 클라이언트(네이티브 모듈, @peaket/platform/stream-worker)를 싣는다.
-import { type Clock, type Database, drizzleHeldEventStore, heldEventCounts, type KafkaAuth, type Registry, systemClock } from '@peaket/platform';
+import { type Clock, type Database, drizzleHeldEventStore, heldEventCounts, type KafkaAuth, type KeyedHandler, type Registry, systemClock } from '@peaket/platform';
 import { runKeyedConsumer } from '@peaket/platform/stream-worker';
+import { CORE_ALL_TOPICS, CORE_GROUP, CORE_TOPICS, CoreAccountEventHandler, pidFreeHeldEventStore } from './index.js';
+import type { CatalogAccountMergedHandler, CatalogAccountWithdrawnHandler } from '../modules/catalog/index.js';
 import type { ReviewAccountWithdrawnHandler } from '../modules/review/index.js';
-import { CORE_GROUP, CORE_TOPICS, pidFreeHeldEventStore } from './index.js';
 import { type ReviewRecheckLoopOptions, startReviewRecheckLoop } from './review-recheck.js';
 
 export interface CoreConsumersOptions {
@@ -17,7 +18,12 @@ export interface CoreConsumersOptions {
   auth?: KafkaAuth;
   /** 소비자 전용 core_app 풀(held_event 보류·보류 수 세기). API 경로의 풀과 따로 둔다(docs/streaming.md §2.6, 리뷰 K2) */
   database: Database;
+  /** 탈퇴 토픽을 읽는 후기 처리기(기존 조립·시험). 찜 처리기를 함께 주면 합성 처리기로 두 토픽을 읽는다 */
   handler: ReviewAccountWithdrawnHandler;
+  /** 탈퇴 토픽의 찜 처리기(F-05-8). wishMerged와 함께 줄 때만 합성 처리기를 쓴다 */
+  wishWithdrawn?: CatalogAccountWithdrawnHandler;
+  /** 계정 병합 토픽의 찜 처리기(F-05-8) */
+  wishMerged?: CatalogAccountMergedHandler;
   registry?: Registry;
   logger?: { warn(o: object, msg?: string): void; info?(o: object, msg?: string): void };
   clock?: Clock;
@@ -42,14 +48,17 @@ const CORE_CONSUMER_MAX_KEYS = 2;
 const CORE_CONSUMER_PARTITIONS = 1;
 
 export function startCoreConsumers(o: CoreConsumersOptions): CoreConsumers {
+  const composite = o.wishWithdrawn && o.wishMerged ? new CoreAccountEventHandler(o.handler, o.wishWithdrawn, o.wishMerged) : undefined;
+  const handler = (composite ?? o.handler) as KeyedHandler<unknown>;
+  const topics = composite ? [...CORE_ALL_TOPICS] : [...CORE_TOPICS];
   const run = runKeyedConsumer({
     service: 'core-svc',
     brokers: o.brokers,
     clientId: o.clientId,
     auth: o.auth,
     groupId: CORE_GROUP(o.env),
-    topics: [...CORE_TOPICS],
-    handler: o.handler,
+    topics,
+    handler,
     held: pidFreeHeldEventStore(drizzleHeldEventStore(o.database, o.clock ?? systemClock)),
     registry: o.registry,
     ...(o.registry ? { heldCounts: () => heldEventCounts(o.database) } : {}),

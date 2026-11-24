@@ -9,6 +9,7 @@
 // - 본인확인·예매 제한·선예매 같은 다른 개인 상태는 HOT-321·340·346이 얹는다. api-client는 늦게 가져온다(첫 화면 JS 예산, §5.8).
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { alertFailureText, OpenAlertProvider } from '@/features/open-alert';
+import { queueWish, readStoredWishQueue, writeStoredWishQueue } from '@/features/wish-queue';
 import { enableWebPush } from '@/widgets/app-shell';
 import { isRefreshUnavailableError, isUnauthorizedError as isUnauthorized } from '@/shared/api/refresh';
 import { ORIGINS } from '@/shared/config/origins';
@@ -90,7 +91,10 @@ export function DetailPersonalProvider({ eventId, productionId, loginHref, child
       .then(({ withFanRefresh, listWishes }) => withFanRefresh(() => listWishes({ productionIds: productionId })))
       .then((w) => {
         if (!live) return;
-        setWished((w.data.items ?? []).some((c) => c.productionId === productionId));
+        const fromServer = (w.data.items ?? []).some((c) => c.productionId === productionId);
+        // 아직 보내지 못한 오프라인 동작이 있으면 화면은 그 마지막 동작을 따른다(FE-T37)
+        const queued = readStoredWishQueue().find((x) => x.productionId === productionId);
+        setWished(queued ? queued.action === 'PUT' : fromServer);
         setWishKnown(true);
         setStatus('ready');
       })
@@ -132,6 +136,12 @@ export function DetailPersonalProvider({ eventId, productionId, loginHref, child
 
   const setWish = useCallback(
     async (on: boolean): Promise<true | string> => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        // 오프라인이면 화면만 바꾸고 마지막 동작을 대기열에 남긴다(연결되면 다시 보낸다, FE-T37)
+        writeStoredWishQueue(queueWish(readStoredWishQueue(), productionId, on ? 'PUT' : 'DELETE', browserClock().now()));
+        setWished(on);
+        return true;
+      }
       try {
         const { withFanRefresh, putProductionWish, deleteProductionWish } = await loadApi();
         await withFanRefresh<unknown>(() => (on ? putProductionWish(productionId) : deleteProductionWish(productionId)));

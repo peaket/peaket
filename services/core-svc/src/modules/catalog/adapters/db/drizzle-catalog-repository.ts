@@ -4,9 +4,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock, DATABASE, type Database, type DbTransaction, IdempotencyStore } from '@peaket/platform';
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
-import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, exists, gt, gte, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { DescriptionDoc } from '../../domain/description.js';
-import type { CatalogRepository, EventSummaryRow, LayoutPreview, MemberList, NewProduction, ProductionForUpdate, RegistrationTx, RequestOnce, NameEntry, PlaceNameEntry, SaleEligibilityEvent } from '../../domain/ports.js';
+import type { CatalogRepository, EventSummaryRow, LayoutPreview, MemberList, NewProduction, ProductionForUpdate, RegistrationTx, RequestOnce, NameEntry, PlaceNameEntry, SaleEligibilityEvent, WishQuery, WishRow } from '../../domain/ports.js';
 import { MAX_ARTISTS, MAX_PUBLIC_ROUNDS } from '../../domain/event-detail.js';
 import { type EventStatus, type Genre, isPublic, SALE_END_BEFORE_START_MS, type SaleReview } from '../../domain/production.js';
 import type { EventDraft, PendingEvent } from '../../domain/registration.js';
@@ -347,5 +347,67 @@ export class DrizzleCatalogRepository implements CatalogRepository {
   async deleteWish(accountId: string, productionId: string): Promise<void> {
     if (!UUID.test(productionId)) return;
     await this.db.db.delete(wish).where(and(eq(wish.accountId, accountId), eq(wish.productionId, productionId)));
+  }
+
+  /**
+   * 내 찜 목록(openapi listWishes, F-05-8): 최근 찜한 순, 같은 시각이면 공연 ID 내림차순.
+   * 공개 공연(판매 승인 뒤·판매 중지 아님)이고 취소되지 않은 회차가 있는 것만. 커서는 그 두 값을 함께 본다
+   */
+  async listWishRows(accountId: string, q: WishQuery): Promise<WishRow[]> {
+    const parts = [
+      eq(wish.accountId, accountId),
+      isNotNull(production.saleApprovedAt),
+      ne(production.saleReview, 'SUSPENDED'),
+      exists(this.db.db.select({ one: sql`1` }).from(event).where(and(eq(event.productionId, wish.productionId), ne(event.status, 'CANCELLED')))),
+    ];
+    if (q.productionIds) parts.push(inArray(wish.productionId, q.productionIds.map((id) => id.toLowerCase())));
+    if (q.after) {
+      parts.push(
+        or(
+          lt(wish.createdAt, q.after.createdAt),
+          and(eq(wish.createdAt, q.after.createdAt), lt(wish.productionId, q.after.productionId)),
+        )!,
+      );
+    }
+    const rows = await this.db.db
+      .select({ productionId: wish.productionId, createdAt: wish.createdAt })
+      .from(wish)
+      .innerJoin(production, eq(production.id, wish.productionId))
+      .where(and(...parts))
+      .orderBy(desc(wish.createdAt), desc(wish.productionId))
+      .limit(q.limit);
+    return rows.map((r) => ({ productionId: r.productionId, createdAt: r.createdAt }));
+  }
+
+  async purgeWishes(accountId: string): Promise<number> {
+    const r = await this.db.db.delete(wish).where(eq(wish.accountId, accountId));
+    return r.rowCount ?? 0;
+  }
+
+  /**
+   * 계정 병합 때 찜을 대표 계정으로 옮긴다(docs/data.md §4 경계 9, proto `absorbed_wishes`).
+   * 같은 찜이 대표 계정에 이미 있으면 흡수 계정 행만 지운다(하나만 남는다). 두 번 불러도 같다.
+   * 두 계정의 찜 잠금(putWish와 같은 종류)을 ID 차례로 잡아 동시 저장과 겹치지 않게 한다.
+   */
+  async moveWishes(primaryAccountId: string, absorbedAccountId: string): Promise<number> {
+    if (primaryAccountId === absorbedAccountId) return 0;
+    return this.db.transaction(async (tx) => {
+      for (const id of [primaryAccountId, absorbedAccountId].sort()) {
+        await tx.execute(sql`select pg_advisory_xact_lock(${WISH_LOCK_CLASS}, hashtext(${id}))`);
+      }
+      const [n] = await tx.select({ n: sql<number>`count(*)::int` }).from(wish).where(eq(wish.accountId, absorbedAccountId));
+      if (!n || n.n === 0) return 0;
+      await tx.execute(sql`
+        insert into wish (account_id, production_id, created_at)
+        select ${primaryAccountId}::uuid, production_id, created_at from wish where account_id = ${absorbedAccountId}::uuid
+        on conflict (account_id, production_id) do nothing`);
+      await tx.delete(wish).where(eq(wish.accountId, absorbedAccountId));
+      return n.n;
+    });
+  }
+
+  async countWishes(accountId: string): Promise<number> {
+    const [r] = await this.db.db.select({ n: sql<number>`count(*)::int` }).from(wish).where(eq(wish.accountId, accountId));
+    return r?.n ?? 0;
   }
 }

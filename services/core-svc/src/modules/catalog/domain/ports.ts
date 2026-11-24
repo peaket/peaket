@@ -148,6 +148,25 @@ export interface MemberList {
   destroyDueAt: Date;
 }
 
+/** 찜 목록 커서의 자리(찜한 시각, 공연 ID). 둘 다 내림차순이다(openapi listWishes, F-05-8) */
+export interface WishCursor {
+  createdAt: Date;
+  productionId: string;
+}
+
+/** 내 찜 한 줄(공연 카드는 검색 인덱스가 만든다) */
+export interface WishRow {
+  productionId: string;
+  createdAt: Date;
+}
+
+/** 찜 목록 읽기 조건. limit은 부르는 쪽이 limit+1로 넘겨 다음 쪽이 있는지 본다 */
+export interface WishQuery {
+  productionIds?: readonly string[];
+  after?: WishCursor | null;
+  limit: number;
+}
+
 /** 찾기 목록의 이름 하나(지우지 않은 다른 이름과 함께) */
 export interface NameEntry {
   id: string;
@@ -180,6 +199,14 @@ export interface CatalogRepository {
   /** 찜. 공개 공연이 아니면 'not-found', 상한을 넘으면 'limit'. 같은 찜은 처음 시각을 둔다. 계정 단위 잠금 안에서 센다 */
   putWish(accountId: string, productionId: string, now: Date, limit: number): Promise<'ok' | 'not-found' | 'limit'>;
   deleteWish(accountId: string, productionId: string): Promise<void>;
+  /** 내 찜 목록(최근 찜한 순, 같은 시각이면 공연 ID 내림차순). 판매 승인 취소·중지·취소 회차뿐인 공연은 뺀다 */
+  listWishRows(accountId: string, q: WishQuery): Promise<WishRow[]>;
+  /** 탈퇴 계정의 찜을 지운다(다시 불러도 같다). 지운 수를 돌려준다 */
+  purgeWishes(accountId: string): Promise<number>;
+  /** 흡수 계정의 찜을 대표 계정으로 옮긴다(대표 계정에 같은 찜이 있으면 하나만 남긴다). 옮긴 수를 돌려준다 */
+  moveWishes(primaryAccountId: string, absorbedAccountId: string): Promise<number>;
+  /** 계정의 찜 수(계정 병합 요약 `absorbed_wishes`, proto core CheckAccountMerge) */
+  countWishes(accountId: string): Promise<number>;
 }
 
 export const CATALOG_REPOSITORY = Symbol('CATALOG_REPOSITORY');
