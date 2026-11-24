@@ -14,6 +14,7 @@ type AriaCurrent = boolean | 'true' | 'false' | 'page' | 'step' | 'location' | '
 
 export { STATES_M, DEFAULT_M, valsM } from './vals-m';
 import { valsM } from './vals-m';
+import { EntryLive } from './live/EntryLive';
 
 type V = ReturnType<typeof valsM>;
 
@@ -3417,7 +3418,9 @@ export function MainM({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
       </>
     ) : null}
     {' '}
-    {v.isEntry ? (
+    {v.isEntry && ctx.live ? <EntryLive eventId={ctx.eventId ?? null} /> : null}
+    {' '}
+    {v.isEntry && !ctx.live ? (
       <>
         <div className="col" role="tabpanel" id="panel-entry" aria-labelledby="tab-entry" style={{ gap: "12px" }}>
           <p className="row t-sm muted" style={{ gap: "8px", alignItems: "flex-start" }}>

@@ -371,6 +371,10 @@ export class MemoryScannerGateStore implements ScannerGateStore {
     return this.flags.get(flagId)?.eventId;
   }
 
+  async countDuplicateFlags(i: { eventId: string; sinceMs: number }): Promise<number> {
+    return [...this.flags.values()].filter((f) => f.eventId === i.eventId && f.kind === 'DUPLICATE' && Date.parse(f.createdAt) >= i.sinceMs).length;
+  }
+
   async resolveFlag(i: { eventId: string; flagId: string; status: GateFlagStatus; note?: string; resolvedBy: string; nowMs: number }): Promise<GateFlagView | undefined> {
     const flag = this.flags.get(i.flagId);
     if (!flag || flag.eventId !== i.eventId) return undefined;

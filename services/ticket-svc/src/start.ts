@@ -43,6 +43,7 @@ import {
   ScannerDevices,
   ScannerFreshness,
   SCANNER_FRESHNESS_ALERT_MS,
+  DuplicateSurge,
 } from './modules/scanner/index.js';
 
 const SERVICE = 'ticket-svc';
@@ -413,11 +414,20 @@ export async function start(o: StartOptions): Promise<StartedService> {
         log: service.logger,
         metric: (result) => freshnessAlerts.inc({ service: SERVICE, result }),
       });
+      const surge = new DuplicateSurge({
+        gate: gateStore,
+        shifts: shiftStore,
+        ...(policy ? { policy } : {}),
+        sink: opsAlertSink!,
+        clock: systemClock,
+        log: service.logger,
+      });
       const tick = (): void => {
         void freshness
           .run()
+          .then(() => surge.run())
           .then(() => freshnessOpen.set({ service: SERVICE }, freshness.openAlerts()))
-          .catch((err: unknown) => service!.logger.warn({ err: err instanceof Error ? err.message : String(err) }, '스캐너 신선도 감시가 실패했다'));
+          .catch((err: unknown) => service!.logger.warn({ err: err instanceof Error ? err.message : String(err) }, '스캐너 신선도·중복 입장 감시가 실패했다'));
       };
       freshnessTimer = setInterval(tick, 30_000);
       freshnessTimer.unref?.();

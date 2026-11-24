@@ -18,6 +18,7 @@ import { RemoteWidget } from './RemoteWidget';
 import { RtSalesCell } from './RtSalesCell';
 import { RecentReleased } from './RecentReleased';
 import { boardDetail } from './board-detail';
+import { EntryLive } from './live/EntryLive';
 import { LiveAlertSlot, LiveBudgetSlot, LiveControlBanner, LiveControlCard, LiveDiagnosticsSlot, LivePending, LiveReadinessPanel, LiveSaturationSlot } from './live/LiveSlots';
 
 const prevent = (e: FormEvent) => e.preventDefault();
@@ -265,6 +266,8 @@ export function MainD({ v, close, ctx }: { v: V; close?: () => void; ctx: DashCt
         </div>
       </>
     ) : null}
+    {' '}
+    {v.isEntry && ctx.live ? <EntryLive eventId={ctx.eventId ?? null} /> : null}
     {' '}
     {!ctx.live && v.isEntry ? (
       <>

@@ -121,6 +121,8 @@ export interface ScannerGateStore {
   listFlags(i: { eventId: string; gateZone?: string; cursor?: string; limit: number }): Promise<GateFlagPage>;
   /** 이상 표시의 회차. 없으면 undefined. 다른 회차면 403으로 닫는 데 쓴다 */
   flagEventId(flagId: string): Promise<string | undefined>;
+  /** sinceMs 뒤에 만든 DUPLICATE 이상 표시 수(회차별 중복 입장 급증, GAT-360) */
+  countDuplicateFlags(i: { eventId: string; sinceMs: number }): Promise<number>;
   resolveFlag(i: { eventId: string; flagId: string; status: GateFlagStatus; note?: string; resolvedBy: string; nowMs: number }): Promise<GateFlagView | undefined>;
 }
 
@@ -216,6 +218,11 @@ export interface ScannerFreshnessAlert extends ScannerOpsAlert {
 
 export interface ScannerOpsAlertSink {
   open(alert: ScannerOpsAlert): Promise<void>;
+}
+
+/** 중복 입장 급증 경보(GAT-360). 신선도와 같은 internal ops-alert 경로를 쓰고 풀림도 보낸다 */
+export interface DuplicateSurgeSink extends ScannerOpsAlertSink {
+  resolve(resolution: ScannerFreshnessResolution): Promise<void>;
 }
 
 export interface ScannerFreshnessResolution {

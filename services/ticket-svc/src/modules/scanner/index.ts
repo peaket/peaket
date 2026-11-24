@@ -6,6 +6,7 @@ export { ScannerDevices, ScannerDeviceNotFound, ScannerDeviceInactive, Enrollmen
 export { ScannerGate, ScannerGateForbidden, ScannerFlagNotFound, type ScannerGateDeps } from './application/scanner-gate.js';
 export { ScannerShift, ScannerPlacements, ScannerPlacementForbidden, ScannerPlacementPolicyUnavailable, type ScannerSessionContext, type ScannerShiftDeps, type ScannerPlacementsDeps } from './application/scanner-shift.js';
 export { ScannerFreshness, SCANNER_FRESHNESS_ALERT_MS, inEntryWindow, freshnessAlertKind, type ScannerFreshnessAlertSink, type ScannerFreshnessReport } from './application/scanner-freshness.js';
+export { DuplicateSurge, DUPLICATE_SURGE_WINDOW_MS, DUPLICATE_SURGE_THRESHOLD, duplicateSurgeKind, type DuplicateSurgeReport } from './application/duplicate-surge.js';
 export { EntryCloseTick, ENTRY_CLOSE_EVERY_MS, ENTRY_CLOSE_CANDIDATE_LIMIT, ENTRY_CLOSE_RETRY_LIMIT, scannerUnreportedEventKey, type EntryCloseLogger, type EntryCloseMetrics, type EntryCloseTickDeps, type EntryCloseTickResult } from './application/entry-close.js';
 export { decideEntryClose, assertQueueReport, ROLE_END_AFTER_ENDS_MS, UNREPORTED_WAIT_MS, type EntryCloseDevice, type EntryCloseReason, type EntryCloseDecision } from './domain/entry-close.js';
 export { MemoryScannerDeviceStore, MemoryScannerDeviceCommandStore } from './adapters/memory-scanner-device-store.js';

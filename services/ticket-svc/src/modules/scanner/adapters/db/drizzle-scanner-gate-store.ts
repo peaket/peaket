@@ -2,7 +2,7 @@
 // 목록은 REPEATABLE READ 한 스냅샷에서 scanner_seq와 내용을 함께 읽고(offline-gate §6.3),
 // 스캔 판정·이상 표시·변경 기록은 한 트랜잭션에서 끝낸다. 티켓 표는 ticket 모듈 소유라 이름으로만 읽는다.
 import type { Database, DbTransaction } from '@peaket/platform';
-import { asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import type { ScannerGateStore } from '../../domain/ports.js';
 import type {
@@ -522,6 +522,14 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
   async flagEventId(flagId: string): Promise<string | undefined> {
     const [row] = await this.database.db.select({ eventId: gateFlag.eventId }).from(gateFlag).where(eq(gateFlag.id, flagId)).limit(1);
     return row?.eventId;
+  }
+
+  async countDuplicateFlags(i: { eventId: string; sinceMs: number }): Promise<number> {
+    const [row] = await this.database.db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(gateFlag)
+      .where(and(eq(gateFlag.eventId, i.eventId), eq(gateFlag.kind, 'DUPLICATE'), gte(gateFlag.createdAt, new Date(i.sinceMs))));
+    return row?.n ?? 0;
   }
 
   async resolveFlag(i: { eventId: string; flagId: string; status: GateFlagStatus; note?: string; resolvedBy: string; nowMs: number }): Promise<GateFlagView | undefined> {

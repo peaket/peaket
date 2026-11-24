@@ -2,6 +2,7 @@
 // 하위 탭 [스태프](초대·배정 명단·요약)와 [현장 운영](공연 당일 입장 현장). 휴대폰에서도 전부 한다(d5 §3.9 SCR-037 '전부').
 // 개인정보는 보이지 않는다: 스태프는 닉네임·역할·수락 여부·건수만(docs/security/data-classification.md).
 import { requireProduction } from '@/entities/production';
+import { PARTNER_API_ORIGIN } from '@/shared/config/origins';
 import { routes } from '@/shared/config/routes';
 import { STAFF_OPS_STATES, STAFF_STATES, type StaffState } from '@/shared/config/states/scr037';
 import { readPreview, type RouteProps } from '@/shared/lib/preview';
@@ -11,6 +12,7 @@ import { opsData, placements, staffRows, type OpsMode } from '../model/fixtures'
 import { PlacementDialog, RevokeDialog } from './Dialogs';
 import { OpsPanel } from './OpsPanel';
 import { StaffPanel } from './StaffPanel';
+import { LiveStaffPanel } from './LiveStaffPanel';
 import { SubTabs } from './SubTabs';
 
 function opsModeOf(state: StaffState): OpsMode {
@@ -33,7 +35,10 @@ const PREVIEW_REVOKE = 'gs-doyun';
 
 export default async function FieldStaffPage({ params, searchParams }: RouteProps<{ id: string }>) {
   const { id } = await params;
-  const pv = readPreview(await searchParams, STAFF_STATES, '스태프');
+  const sp = await searchParams;
+  const pv = readPreview(sp, STAFF_STATES, '스태프');
+  // ?state= 미리보기가 아니고 파트너 API 주소가 있으면 identity 명단·초대를 실제로 부른다(GAT-360).
+  const live = sp.state === undefined && PARTNER_API_ORIGIN !== '';
   const production = requireProduction(id);
   const isOps = STAFF_OPS_STATES.includes(pv.state);
   const mode = opsModeOf(pv.state);
@@ -76,7 +81,7 @@ export default async function FieldStaffPage({ params, searchParams }: RouteProp
         <SubTabs
           key={pv.state}
           initial={isOps ? 'ops' : 'staff'}
-          staff={<StaffPanel roundLabel={roundLabel} inviteFail={pv.state === '초대 실패'} empty={pv.state === '빈 화면'} />}
+          staff={live ? <LiveStaffPanel eventId={id} /> : <StaffPanel roundLabel={roundLabel} inviteFail={pv.state === '초대 실패'} empty={pv.state === '빈 화면'} />}
           ops={<OpsPanel mode={mode} data={data} />}
         />
       </section>
