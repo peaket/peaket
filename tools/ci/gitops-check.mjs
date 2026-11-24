@@ -15,6 +15,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, parseAllDocuments } from 'yaml';
 import { runIfMain } from './entry.mjs';
+import { gatePromotion } from './freeze-gate.mjs';
 import { digestProblem, imageReference, verifyImage } from './supply-chain-verify.mjs';
 
 export const WORKLOAD_VALUES_DIR = 'deploy/workloads';
@@ -307,7 +308,8 @@ export function parseImageArg(text) {
   return { name: name || m[1], repository: m[1], digest: m[2], reference: imageReference(m[1], m[2]) };
 }
 
-const USAGE = '쓰는 법: node tools/ci/gitops-check.mjs --check [--root <폴더>] [--env <demo|staging|prod|local|ci>] [--image <이름>=<저장소>@sha256:<64자리>]';
+const USAGE =
+  '쓰는 법: node tools/ci/gitops-check.mjs --check [--root <폴더>] [--env <demo|staging|prod|local|ci>] [--image <이름>=<저장소>@sha256:<64자리>] [--changed <파일,…>] [--labels <라벨,…>] [--body <본문 파일>] [--now <ISO>] [--base <git 기준>]';
 
 /** @param {string[]} argv */
 export function main(argv) {
@@ -315,6 +317,11 @@ export function main(argv) {
   let root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
   let env = 'prod';
   const images = [];
+  let changed = [];
+  let labels = [];
+  let body = '';
+  let nowMs = Date.now();
+  let baseRef = 'HEAD';
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--check') check = true;
@@ -341,6 +348,43 @@ export function main(argv) {
         return 2;
       }
       images.push(parsed);
+    } else if (a === '--changed') {
+      if (!argv[i + 1]) {
+        console.error(`gitops-check: --changed 뒤에 파일이 없다\n${USAGE}`);
+        return 2;
+      }
+      changed = changed.concat(argv[++i].split(',').map((x) => x.trim()).filter(Boolean));
+    } else if (a === '--labels') {
+      if (!argv[i + 1]) {
+        console.error(`gitops-check: --labels 뒤에 라벨이 없다\n${USAGE}`);
+        return 2;
+      }
+      labels = labels.concat(argv[++i].split(',').map((x) => x.trim()).filter(Boolean));
+    } else if (a === '--body') {
+      if (!argv[i + 1]) {
+        console.error(`gitops-check: --body 뒤에 파일이 없다\n${USAGE}`);
+        return 2;
+      }
+      try {
+        body = readFileSync(resolve(argv[++i]), 'utf8');
+      } catch {
+        console.error(`gitops-check: --body 파일을 읽지 못했다\n${USAGE}`);
+        return 2;
+      }
+    } else if (a === '--now') {
+      const text = argv[++i];
+      const ms = text ? Date.parse(text) : NaN;
+      if (!text || !Number.isFinite(ms)) {
+        console.error(`gitops-check: --now는 ISO 시각이어야 한다\n${USAGE}`);
+        return 2;
+      }
+      nowMs = ms;
+    } else if (a === '--base') {
+      if (!argv[i + 1]) {
+        console.error(`gitops-check: --base 뒤에 git 기준이 없다\n${USAGE}`);
+        return 2;
+      }
+      baseRef = argv[++i];
     } else {
       console.error(`gitops-check: 모르는 인자 ${a}\n${USAGE}`);
       return 2;
@@ -350,6 +394,10 @@ export function main(argv) {
     console.error(USAGE);
     return 2;
   }
+  if (process.env.PEAKET_CHANGED_FILES) changed = changed.concat(process.env.PEAKET_CHANGED_FILES.split(/[\r\n,]+/).map((x) => x.trim()).filter(Boolean));
+  if (process.env.PEAKET_PR_LABELS) labels = labels.concat(process.env.PEAKET_PR_LABELS.split(',').map((x) => x.trim()).filter(Boolean));
+  if (process.env.PEAKET_PR_BODY && !body) body = process.env.PEAKET_PR_BODY;
+  if (process.env.PEAKET_PR_BASE && baseRef === 'HEAD') baseRef = process.env.PEAKET_PR_BASE;
   const lines = [];
   let failures = 0;
   let skips = 0;
@@ -398,6 +446,15 @@ export function main(argv) {
   if (sig.problems.length) fail('signature', sig.problems);
   else if (sig.skip.length === 0 && overlay.envs.length === 0) skip('signature', `아직 승격 없음(${ENV_VALUES_DIR}/${env} 값 파일이 없다)`);
   else if (sig.skip.length === 0) ok('signature', '서명·출처 증명이 정본과 같다');
+
+  const gate = gatePromotion({ root, env, nowMs, changedFiles: changed, labels, body, baseRef });
+  if (gate.decision === 'skip') skip('freeze-gate', gate.reasons.join(' / ') || '동결 게이트 대상 아님');
+  else if (gate.decision === 'block') fail('freeze-gate', gate.reasons);
+  else {
+    ok('freeze-gate', gate.reasons.join(' / ') || '동결 창 밖 또는 긴급 변경');
+    if (gate.audit) console.log(`audit ${JSON.stringify(gate.audit)}`);
+    for (const w of gate.warnings) console.log(`warn freeze-gate: ${w}`);
+  }
 
   for (const line of lines) console.log(line);
   console.log(`요약: 통과 ${lines.filter((l) => l.startsWith('ok ')).length}, 건너뜀 ${skips}, 실패 ${failures}(환경 ${env})`);

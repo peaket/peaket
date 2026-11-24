@@ -49,12 +49,27 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: 오버레이·정책 검사
         run: node tools/ci/gitops-check.mjs --check
+      # 변경 동결 게이트(F-02-3, OPS-320): 운영 승격 PR을 동결 창에서 막는다. 바뀐 파일·라벨·본문은 PR 문맥에서 받는다
+      - name: 변경 동결 게이트
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$PR_BASE"
+          PEAKET_CHANGED_FILES="$(git diff --name-only "$PR_BASE" HEAD)" \
+          PEAKET_PR_LABELS="$PR_LABELS" \
+          PEAKET_PR_BODY="$PR_BODY" \
+          PEAKET_PR_BASE="$PR_BASE" \
+          node tools/ci/freeze-gate.mjs --check --env prod
       # 시험 파일은 시험 담당이 더한다. 있으면 돌리고, 없으면 생성기 대조만 한다
       - name: 검사 도구 시험
         run: |
           set -euo pipefail
           found=0
-          for f in tools/ci/gitops-check.test.mjs tools/ci/supply-chain-verify.test.mjs tools/ci/kyverno-policies.test.mjs; do
+          for f in tools/ci/gitops-check.test.mjs tools/ci/supply-chain-verify.test.mjs tools/ci/kyverno-policies.test.mjs tools/ci/freeze-gate.test.mjs; do
             if [ -f "$f" ]; then node --test "$f"; found=1; fi
           done
           [ "$found" -eq 1 ] || echo "검사 도구 시험 파일이 아직 없다(시험 담당 몫)"

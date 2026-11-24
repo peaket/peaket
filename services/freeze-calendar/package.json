@@ -1,0 +1,22 @@
+{
+  "name": "@peaket/freeze-calendar",
+  "private": true,
+  "version": "0.0.0",
+  "description": "freeze-calendar. 승인된 온세일 일정에서 규모별 변경 동결 창을 계산해 deploy/calendar/freeze.json과 ArgoCD 동기화 금지 창·Karpenter 중단 예산을 만들고, 승격 게이트와 자동 중단(freeze-guard)이 쓰는 달력을 낸다(기능 F-02-3, OPS-320, docs/devops.md §8).",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1159.0"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

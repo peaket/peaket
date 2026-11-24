@@ -682,6 +682,7 @@ flowchart LR
 - **배경 작업 미루기(ADR-0069)**: 배경 작업 일정기는 같은 온세일 일정 파일(`ops-calendar/upcoming-onsales.json`)로 대형·중형 온세일 윈도우(T-10분~T+60분)를 계산한다. 그 윈도우에는 일괄 환불의 새 묶음, 정산 지급 묶음 실행, 파트너 웹훅(일이 생기면 상대 서버의 주소를 불러 알려 주는 방식) 재시도, 광고성 알림 묶음, 공연예술통합전산망 재전송, 홈 랭킹 게시를 미룬다(POL-028). 일정을 읽지 못하면 마지막으로 읽은 일정을 쓰고 SEV3를 낸다 [가정].
 - **봇 쓰기 범위**: 달력 봇(GitHub 앱)은 `peaket`에 `calendar/*` 가지로 `develop`에 가는 PR만 열 수 있다(ADR-0169). 그 PR이 `deploy/calendar/` 밖을 바꾸면 `gitops-check`가 자동 병합하지 않는다.
 - **지표**: `freeze_calendar_last_render_timestamp`, `freeze_window_active{scope}`, `freeze_rollout_aborted_total`, `freeze_override_total`, `deployable_hours_next_7d{scope}`(scope는 hotpath·all).
+- **구현(2026-11-24, F-02-3 동결 범위 로컬 개발, 가지 `freeze/lane2-F-02-3`, v1 배포 범위 밖)**: 창 계산·렌더·닫힘 실패·자동 중단 판정은 `services/freeze-calendar`(`src/calendar.ts`·`src/guard.ts`, 명령 `calendar`·`guard`), 승격 게이트는 `tools/ci/freeze-gate.mjs`(`gitops-check`가 부름)가 맡는다. 산출물은 `deploy/calendar/freeze.json`과 `rendered/argocd-windows.json`·`rendered/karpenter-budgets.json`이고, T-30 기록 규칙·30분 SEV2 경보는 `deploy/platform/observability/rules/freeze.yaml`에 있다. 실제 S3·ArgoCD·Karpenter·Argo Rollouts 연결, CronJob·RBAC·이미지는 구간 5(INF-020)다. 시험은 `pnpm --filter @peaket/freeze-calendar test`와 `node --test tools/ci/freeze-gate.test.mjs`이고 장부 범위는 D-T1~D-T5·D-T26이다.
 
 ### 8.3 정비 시간과 관리형 유지보수
 

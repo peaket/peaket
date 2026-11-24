@@ -1,0 +1,40 @@
+# 변경 동결 달력의 T-30분 점검 기록 규칙과 장애 경보(F-02-3, OPS-320).
+# 정본: docs/devops.md §8.2 '닫힘 실패·T-30분 점검 연결·지표', docs/features/control-tower.md §2 T-30분 점검,
+# docs/observability.md §5 경보 규칙 검사, §8 T-30분 점검 원천. G-19(동결 창 위반·달력 장애), RB-28.
+# - freeze_window_active{scope}: 달력 봇이 활성 창이면 1, 아니면 0을 낸다(scope=all·hotpath).
+# - freeze_rollouts_in_progress: 가드가 창 안에서 센 진행 중 롤아웃 수.
+# - freeze_calendar_last_render_timestamp: 마지막 렌더 시각(초). 30분 넘게 낡으면 SEV2, 2시간이면 승격 게이트가 막는다.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: freeze
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: peaket
+spec:
+  groups:
+    - name: freeze-calendar
+      interval: 1m
+      rules:
+        # T-30분 점검의 '그 회차의 동결 창 적용'. 달력이 아직 지표를 내지 않으면 0(실패)으로 본다(fail-closed).
+        - record: peaket:readiness:freeze_window
+          expr: max(max_over_time(freeze_window_active{scope="all"}[10m])) or max(max_over_time(freeze_window_active{scope="hotpath"}[10m])) or vector(0)
+        # T-30분 점검의 '진행 중 배포 0건'. 가드가 지표를 내기 전에는 빈 값(확인할 수 없음)이다.
+        - record: peaket:readiness:deployments
+          expr: (max(freeze_rollouts_in_progress) == bool 0)
+    - name: freeze-calendar-stale
+      interval: 1m
+      rules:
+        - alert: FreezeCalendarStale
+          expr: time() - freeze_calendar_last_render_timestamp > 1800
+          for: 0m
+          labels:
+            severity: sev2
+            kind: cause
+            dependency: platform
+          annotations:
+            summary: 변경 동결 달력이 30분 넘게 갱신되지 않았다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-28-변경-동결-창-장애와-복구
+            dashboard_url: /d/peaket-platform
+            game_day: G-19
+            description: 'freeze-calendar가 30분 넘게 freeze.json을 다시 그리지 않았다. 이미 걸린 창은 그대로 두고, 2시간을 넘기면 gitops-check가 운영 승격을 막는다(docs/devops.md §8.2).'
