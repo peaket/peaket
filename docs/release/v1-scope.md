@@ -69,7 +69,7 @@
 | F-04-18 | 분석·포렌식 | CMP-079 봇 후보 산점도·2D 대체 | 동결 | frozen-local | v1 제외(포렌식): 소유자가 포렌식 플랫폼을 v1에서 뺐다(ADR-0373). 로컬 트랙. | - | - | - | 포렌식 재개 결정 뒤 |
 | F-04-19 | 분석·포렌식 | 연구 내보내기·fraud summary·용량 외삽 | 동결 | frozen-local | v1 제외(포렌식): 소유자가 포렌식 플랫폼을 v1에서 뺐다(ADR-0373). 로컬 트랙. | - | - | - | 포렌식 재개 결정 뒤 |
 | F-04-20 | 분석·포렌식 | queue-svc 1초 대기 집계 QueueAggregate | 완료 | release | R-797, 8d0b58848, 계획 docs/review/plans/F-04-20.md | queue-svc | 없음 | - | QueueEntryRecord 몫은 F-04-7 범위 |
-| F-05-1 | 현장 입장 | 월렛·부스 재발급·홈 화면 추가·SW 정리 | 일부 완료 | gate | R-787, GAT-040 끝·GAT-020 대기, 계획 docs/review/plans/F-05-1.md. 게이트: GAT-030 키 증명 PoC + 소유자 실기기 확인 | ticket-svc, web, partner | 없음 | ticket 0012 | GAT-030 키 증명 PoC + 소유자 실기기 확인 |
+| F-05-1 | 현장 입장 | 월렛·부스 재발급·홈 화면 추가·SW 정리 | 일부 완료 | gate | R-787, GAT-040 끝·GAT-020 대기, 계획 docs/review/plans/F-05-1.md. 게이트: GAT-030 키 증명 PoC + 소유자 실기기 확인 | ticket-svc, web, partner | 없음 | ticket 0012 | PC 측정 완료(af63e511b), 소유자 실기기 확인 대기 |
 | F-05-2 | 현장 입장 | 양도 요청·수락·결제자 돌려주기 | 일부 구현 있음 | release | R-810, ba4c523da, reflow c3175c7b5(닫힘), ADR-0383, 계획 docs/review/plans/F-05-2.md | ticket-svc, web | 없음 | ticket 0018 | 출시 몫 끝(거절 화면·알림은 F-05-11 동결) |
 | F-05-3 | 현장 입장 | 우선 구매 권리·PRIORITY 보류·만료 | 완료 | release | R-812, 9440db38d, ADR-0385, 계획 docs/review/plans/F-05-3.md | purchase-svc, queue-svc | 없음 | - | IR-04~10은 정리 목록 |
 | F-05-4 | 현장 입장 | 스캐너 오프라인 판정·즉시 업로드·재입장 | 진행 | release | R-809, 994c1ab2d, 계획 docs/review/plans/F-05-4.md. BUILD_ORDER는 진행이나 합쳐짐 | scanner, ticket-svc | 없음 | ticket 0013 | 브라우저 확인·남은 리뷰 한 곳 |
@@ -136,7 +136,7 @@
 | ID | 기능 | 지금 상태 | 통과 조건 | 결과를 남길 곳 | 막히면 |
 | --- | --- | --- | --- | --- | --- |
 | F-04-8 | 초당 3만 건 신선도·누락률 | 진행(하네스·스모크) | 3만 건/초·1분 창에서 신선도 p95·누락률·강제 종료 뒤 정확성, V-T19 사다리, ops-svc 신선도 | `docs/review/plans/F-04-8.md` | 수치를 측정 못 함으로 적고 v1 주장에서 뺀다 |
-| F-05-1 | 월렛·부스 재발급·홈 화면 추가 | 일부 완료(R-787) | GAT-030 키 증명 PoC와 소유자 실기기 확인, GAT-020 잔여 | `docs/review/plans/F-05-1.md` | 키 증명 없이 기존 재발급 경로만 남긴다 |
+| F-05-1 | 월렛·부스 재발급·홈 화면 추가 | 일부 완료(R-787), PC 측정 완료(af63e511b) | GAT-030 키 증명 PoC와 소유자 실기기 확인, GAT-020 잔여 | `docs/review/plans/F-05-1.md` | 키 증명 없이 기존 재발급 경로만 남긴다 |
 | F-08-2 | 100만 외삽·진입 서버 비례·외부 한도 | 진행 | 100만 외삽·진입 서버 비례·외부 한도 대조(V-T2·V-T4·V-T5·V-T17) | `docs/review/plans/F-08-2.md` | 외삽을 가정으로 표시하고 v1 수치 주장에서 뺀다 |
 | F-08-7 | 관제 데모 영상·안내·RFC·블로그 목차 | 대기 | 데모 영상·안내·RFC 정리·블로그 목차 | `docs/review/plans/F-08-7.md` | 데모 자료를 v1 산출물에서 뺀다 |
 | F-08-8 | K1·K2·K7 After·장애 주입 | 대기 | K1·K2·K7 After, K7 장애 주입 1만 건 | `docs/review/plans/F-08-8.md` | 해당 K 수치를 측정 못 함으로 적는다 |
