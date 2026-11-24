@@ -297,7 +297,7 @@ async function runOne(o) {
     const phaseOf = (at) => (at < startAt ? 'warmup' : at < recoveryUntil ? 'recovery' : at < startAt + durationMs ? 'steady' : 'drain');
     const samples = [];
     const samplePath = join(out, 'freshness.jsonl');
-    sampler = startSampler({ ch, admin, groups: run.groups, start: run.start, eventId, out, samplePath, samples, phaseOf, hotTopics: ['trade.seats', 'trade.orders'] });
+    sampler = startSampler({ ch, admin, groups: run.groups, start: run.start, eventId, out, samplePath, samples, phaseOf, hotTopics: ['trade.seats', 'trade.orders'], pulseParts: 3 * o.partitions });
 
     // ── 강제 종료 타이머 ──
     let killTimer;
@@ -451,7 +451,7 @@ function infraOf(runId, kafka, ch) {
 }
 
 /** 1초마다 신선도·조회 시간·소비 밀림·CPU를 남긴다 */
-function startSampler({ ch, admin, groups, start, eventId, out, samplePath, samples, phaseOf, hotTopics }) {
+function startSampler({ ch, admin, groups, start, eventId, out, samplePath, samples, phaseOf, hotTopics, pulseParts }) {
   let stopped = false;
   let busy = false;
   let prevCpu = cpus().map((c) => c.times);
@@ -482,8 +482,11 @@ function startSampler({ ch, admin, groups, start, eventId, out, samplePath, samp
     const phase = phaseOf(at);
     const sample = { at, phase, label: new Date(at).toISOString(), rtMs: null, bronzeMs: null, queryMs: null, hotLag: null, lag: null, hostCpu: hostCpu(), chCpu: null, error: null };
     try {
-      const rt = await ch.rows(`SELECT if(count() = 0, NULL, toInt64(toUnixTimestamp64Milli(now64(3)) - toUnixTimestamp64Milli(max(produced_at)))) AS ms FROM rt.pulse`);
-      sample.rtMs = rt[0]?.ms === null || rt[0]?.ms === undefined ? null : Number(rt[0].ms);
+      const rt = await ch.rows(`SELECT count() AS parts, if(count() = 0, NULL, toInt64(toUnixTimestamp64Milli(now64(3)) - toUnixTimestamp64Milli(min(last)))) AS ms FROM (SELECT topic, kafka_partition, max(produced_at) AS last FROM rt.pulse WHERE produced_at >= now64(3) - INTERVAL 1 HOUR GROUP BY topic, kafka_partition)`);
+      sample.pulseParts = Number(rt[0]?.parts ?? 0);
+      sample.expectedPulseParts = pulseParts;
+      sample.rtMs = sample.pulseParts >= pulseParts && rt[0]?.ms !== null && rt[0]?.ms !== undefined ? Number(rt[0].ms) : null;
+      if (sample.pulseParts < pulseParts) sample.error = `심장 박동 파티션 ${sample.pulseParts}/${pulseParts}`;
       const bronze = await ch.rows(`SELECT if(count() = 0, NULL, toInt64(toUnixTimestamp64Milli(now64(3)) - toUnixTimestamp64Milli(max(kafka_ts)))) AS ms FROM bronze.brz_order_event`);
       sample.bronzeMs = bronze[0]?.ms === null || bronze[0]?.ms === undefined ? null : Number(bronze[0].ms);
       const q0 = performance.now();
@@ -502,7 +505,7 @@ function startSampler({ ch, admin, groups, start, eventId, out, samplePath, samp
       }
       if (tick % 3 === 0) {
         // Docker 통계는 느리므로 3초에 한 번만 읽는다
-        const stats = ch.stats();
+        const stats = await ch.stats();
         sample.chCpu = stats?.cpuPct ?? null;
       }
     } catch (err) {

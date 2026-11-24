@@ -1,8 +1,11 @@
 // F-04-8 측정 하네스의 Docker·ClickHouse 도우미(docs/review/plans/F-04-8.md §5.1).
 // 통합 시험 도우미(packages/platform/test-int/containers.ts, services/*/test-int/clickhouse.ts)와 같은 이미지를 쓰되,
 // loadtest는 TypeScript를 빌드하지 않고 .mjs로 돈다. 컨테이너에는 `peaket.f048=1` 이름표를 붙여 cleanup이 남의 컨테이너를 지우지 않게 한다.
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createServer } from 'node:net';
+
+const execFileAsync = promisify(execFile);
 
 export const KAFKA_IMAGE = 'apache/kafka:3.9.2';
 export const CLICKHOUSE_IMAGE = 'clickhouse/clickhouse-server:24.12';
@@ -144,10 +147,10 @@ export async function startClickHouse(o = {}) {
     rows: ch.rows,
     pause: () => void docker(['pause', id]),
     unpause: () => void docker(['unpause', id]),
-    stats: () => {
+    stats: async () => {
       try {
-        const text = docker(['stats', '--no-stream', '--format', '{{.CPUPerc}} {{.MemUsage}}', id], 30_000);
-        const [cpu, mem] = text.split(/\s+/, 2);
+        const { stdout } = await execFileAsync('docker', ['stats', '--no-stream', '--format', '{{.CPUPerc}} {{.MemUsage}}', id], { timeout: 30_000 });
+        const [cpu, mem] = String(stdout).trim().split(/\s+/, 2);
         return { cpuPct: Number.parseFloat(cpu), mem: mem ?? null };
       } catch {
         return { cpuPct: null, mem: null };

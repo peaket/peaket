@@ -280,7 +280,9 @@ export function judgeFreshness(samples, o = {}) {
   const windows = [...byWindow.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([w, list]) => ({ index: w, from: t0 + w * windowMs, to: t0 + (w + 1) * windowMs, count: list.length, p95: percentile(list, 0.95) }));
-  const full = windows.filter((w) => w.count >= Math.min(60, Math.max(5, Math.round(windowMs / 1_000))));
+  // 1분 창은 '그 창이 끝날 때까지 샘플이 이어진' 창이다. 샘플이 5개 미만인 창은 판정하지 않는다(빈 창을 통과로 세지 않는다).
+  const lastAt = kept.length ? Math.max(...kept.map((s) => s.at)) : t0;
+  const full = windows.filter((w) => w.to - 1_000 <= lastAt && w.count >= 5);
   const badWindows = full.filter((w) => w.p95 !== null && w.p95 >= limitMs);
   if (valid && p95 >= limitMs) reasons.push(`전 구간 신선도 p95 ${Math.round(p95)}ms가 ${limitMs}ms 미만이 아니다`);
   for (const w of badWindows) reasons.push(`신선도 1분 창 ${w.index} p95 ${Math.round(w.p95)}ms가 ${limitMs}ms 미만이 아니다(${w.count}샘플)`);
