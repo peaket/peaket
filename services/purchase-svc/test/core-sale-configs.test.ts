@@ -11,6 +11,7 @@ const body = (over: Record<string, unknown> = {}) => ({
   eventId: EVENT,
   productionId: '0190f3a1-7c2e-7a00-8000-000000000201',
   promoterId: '0190f3a1-7c2e-7a00-8000-000000000301',
+  title: 'LUMEN 콘서트 2026 서울',
   rev: 7,
   opensAtMs: NOW,
   startsAtMs: NOW + 86_400_000,
@@ -50,6 +51,9 @@ describe('CoreSaleConfigs: core-svc 판매 설정 사본 읽기', () => {
       salePolicy: body().salePolicy,
       eligLists: ['lumen-fanclub-2026'],
       layoutVersion: 3,
+      // 주문 내역 표시용(F-07-2): 공연 제목·회차 시작
+      title: 'LUMEN 콘서트 2026 서울',
+      startsAtMs: NOW + 86_400_000,
     });
     expect(await h.adapter.get(EVENT)).toMatchObject({ rev: 7 });
     expect(h.calls).toHaveLength(1);
