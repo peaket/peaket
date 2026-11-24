@@ -595,3 +595,29 @@ test('GAT-140 판정 화면은 2초 안팎 유지된 뒤 판정 대기로 돌아
   await page.clock.runFor(1_200); // 판정 뒤 2,400~2,800ms
   await expect(verdict(page, '통과')).toHaveCount(0);
 });
+
+test('GAT-140 상태 띠의 대기 링크로 SCR-035에 가고 돌아와도 ?live=1과 실제 연결 상태를 잃지 않는다', async ({ page }) => {
+  const wallet = await walletKey();
+  await fakeDetector(page);
+  await scannerApi(page, wallet, { scanReply: () => ({ status: 503, type: 'scanner-auth-unavailable' }) });
+  await page.clock.install();
+  await signedIn(page);
+  await startShift(page);
+  await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())));
+  await expect(verdict(page, '통과')).toBeVisible();
+  await expect.poll(() => queueCount(page)).toBe(1);
+
+  // 대기 1 링크(상태 띠)는 실제 연결 화면으로 이어져야 한다. 링크가 ?live=1을 잃으면 퍼블리싱 값(대기 12건)이 보인다
+  await page.getByRole('link', { name: /업로드 대기 1건/ }).click();
+  await expect(page).toHaveURL(/\/sync\?live=1$/);
+  await expect(page.locator('main')).toContainText('업로드 대기');
+  await expect(page.locator('main')).toContainText('1건');
+  await expect(page.locator('main')).not.toContainText('12건');
+
+  // 돌아가기도 실제 연결 판정 화면으로 이어져야 한다
+  await page.getByRole('link', { name: '스캔 화면으로 돌아가기' }).click();
+  await expect(page).toHaveURL(/\/scan\?live=1$/);
+  await page.clock.fastForward(3_100); // 앞 판정 화면(2초)과 같은 QR 창(3초)이 지나게
+  await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())));
+  await expect(verdict(page, '거부')).toContainText(/이미 입장한 티켓입니다/);
+});
