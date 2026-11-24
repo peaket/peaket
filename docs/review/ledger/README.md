@@ -5,19 +5,19 @@
 ## 완성 판정
 
 - 항목 4290개: 시험 시나리오(세부 단위) 2249, 시나리오가 가리키지 않는 요구사항·정책 14, ASVS 추적 표의 행 2027
-- 빈칸 596, ID만 989: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다. `--require`는 빈칸·ID만·미검증·다른 단계를 실패로 세고, 옛 묶음은 `--allow-unverified`로 미검증·다른 단계를 통과시킨다)
+- 빈칸 594, ID만 989: 완성본은 둘 다 0이다(묶음은 `node tools/ci/ledger.mjs --batch <묶음> --require`로 그 범위만 본다. `--require`는 빈칸·ID만·미검증·다른 단계를 실패로 세고, 옛 묶음은 `--allow-unverified`로 미검증·다른 단계를 통과시킨다)
 - ID만의 뜻: 시나리오는 이름에 ID만 있고 그 세부 번호가 없는 시험만 있다. ASVS는 다른 곳 시험만 있는 경우도 ID만이다(같은 ID의 태그가 그 행의 코드 영역 밖 시험 파일에만 있다)
-- 미검증 6(모두 사유가 있다): 완료로 세지 않고 따로 센다
-- 다시 볼 notes 12: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
+- 미검증 12(모두 사유가 있다): 완료로 세지 않고 따로 센다
+- 다시 볼 notes 15: notes는 다른 단계·미검증인데 이름을 단 시험이 이미 있다
 
 ## 등급별 상태
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 685 | 94 | 24 | 2 | 2 | 17 | 1 | 0 | 89 | 914 |
-| B | 1625 | 895 | 22 | 2 | 4 | 75 | 0 | 245 | 506 | 3374 |
+| A | 685 | 94 | 18 | 2 | 8 | 17 | 1 | 0 | 89 | 914 |
+| B | 1627 | 895 | 22 | 2 | 4 | 75 | 0 | 245 | 504 | 3374 |
 | C | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 2 |
-| 합계 | 2310 | 989 | 46 | 5 | 6 | 92 | 1 | 245 | 596 | 4290 |
+| 합계 | 2312 | 989 | 40 | 5 | 12 | 92 | 1 | 245 | 594 | 4290 |
 
 ## 분야별 상태
 
@@ -35,7 +35,7 @@
 | identity | B | 328 | 46 | 0 | 0 | 0 | 6 | 0 | 7 | 55 | 442 |
 | notify | B | 10 | 121 | 0 | 0 | 0 | 0 | 0 | 21 | 35 | 187 |
 | offline-gate | B | 137 | 100 | 0 | 0 | 0 | 2 | 0 | 19 | 44 | 302 |
-| payment | A | 165 | 24 | 6 | 0 | 2 | 10 | 0 | 0 | 0 | 207 |
+| payment | A | 165 | 24 | 5 | 0 | 3 | 10 | 0 | 0 | 0 | 207 |
 | payment | B | 58 | 0 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 89 |
 | queue-admission | A | 116 | 50 | 3 | 0 | 0 | 1 | 0 | 0 | 26 | 196 |
 | queue-admission | B | 37 | 14 | 0 | 0 | 0 | 3 | 0 | 2 | 3 | 59 |
@@ -43,7 +43,7 @@
 | requirements | B | 1 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 9 | 11 |
 | requirements | C | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 1 | 2 |
 | search | B | 19 | 0 | 2 | 0 | 1 | 1 | 0 | 0 | 0 | 23 |
-| seat-hold | A | 132 | 13 | 15 | 2 | 0 | 6 | 1 | 0 | 0 | 169 |
+| seat-hold | A | 132 | 13 | 10 | 2 | 5 | 6 | 1 | 0 | 0 | 169 |
 | seat-hold | B | 111 | 20 | 0 | 0 | 0 | 3 | 0 | 15 | 7 | 156 |
 | security | B | 48 | 7 | 0 | 0 | 0 | 0 | 0 | 0 | 26 | 81 |
 | settlement | A | 141 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 142 |
@@ -54,9 +54,9 @@
 | transfer-refund | B | 80 | 25 | 0 | 0 | 0 | 0 | 0 | 20 | 4 | 129 |
 | v0-baseline | B | 28 | 2 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | 31 |
 | verification | A | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 3 |
-| verification | B | 89 | 4 | 9 | 0 | 2 | 3 | 0 | 0 | 40 | 147 |
+| verification | B | 91 | 4 | 9 | 0 | 2 | 3 | 0 | 0 | 38 | 147 |
 | verification-tools | B | 9 | 7 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 18 |
-| 합계 |  | 2310 | 989 | 46 | 5 | 6 | 92 | 1 | 245 | 596 | 4290 |
+| 합계 |  | 2312 | 989 | 40 | 5 | 12 | 92 | 1 | 245 | 594 | 4290 |
 
 ## 다시 볼 notes
 
@@ -68,6 +68,9 @@
 | P-T39 ① | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/apply-payment-result.test.ts… |
 | P-T39 ② | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts… |
 | P-T39 ④ | 다른 단계 | services/purchase-svc/test-int/ticket-issue.int.test.ts, services/purchase-svc/test/ticket-issue-adapters.test.ts… |
+| S-T10 | 미검증 | loadtest/e2e/before090.e2e.mjs, loadtest/e2e/v0-rehearsal.e2e.mjs, loadtest/test/args090.test.mjs… |
+| S-T11 | 미검증 | services/purchase-svc/test-int/seat-sales.int.test.ts |
+| S-T15 | 미검증 | loadtest/e2e/before090.e2e.mjs, loadtest/test/before090.test.mjs |
 | payment:v5.0.0-2.1.3 | 다른 단계 | services/payment-svc/test/settlement-payout-account.http.test.ts |
 | payment:v5.0.0-3.3.2 | 다른 단계 | apps/web/src/_pages/transfer-offer/model/offer-flow.test.mjs, apps/web/src/_pages/transfer-offer/ui/live-wiring.test.mjs… |
 | payment:v5.0.0-3.4.5 | 다른 단계 | apps/web/src/shared/lib/staff-fragment.test.mjs, apps/web/src/widgets/app-shell/model/search-quality.test.mjs |

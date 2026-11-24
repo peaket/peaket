@@ -4,9 +4,9 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| A | 165 | 24 | 6 | 0 | 2 | 10 | 0 | 0 | 0 | 207 |
+| A | 165 | 24 | 5 | 0 | 3 | 10 | 0 | 0 | 0 | 207 |
 | B | 58 | 0 | 0 | 0 | 0 | 31 | 0 | 0 | 0 | 89 |
-| 합계 | 223 | 24 | 6 | 0 | 2 | 41 | 0 | 0 | 0 | 296 |
+| 합계 | 223 | 24 | 5 | 0 | 3 | 41 | 0 | 0 | 0 | 296 |
 
 ## docs/features/payment.md
 
@@ -44,7 +44,7 @@
 | P-T28 | — | 결제 접수 계약 검증 | 앞의 넷은 400·409로 거절된다. 포트원 금액 불일치는 승인 API가 거절해, 과금 없는 실패로 끝난다. 새 API로 시작한 시도로 생성 → 시도 → 접수… | 자동 시험 | A | 시험: services/purchase-svc/test-int/accept-e2e.int.test.ts, services/purchase-svc/test-int/order-accepts.int.test.ts 외 7곳 |
 | P-T29 | — | 결제사 고정 | 그 주문의 모든 호출이 기록된 결제사로만 가고, 다른 결제사 호출은 0건이다. PRF-190은 승인·조회·입금 전 취소까지 본다(부분 환불은 취소 단계, 추천… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-checkout.int.test.ts, services/payment-svc/test/pg-selection.test.ts 외 1곳 |
 | P-T30 | — | 웹훅 결제사 확인 | 반영되지 않고, 보안 이벤트로 기록된다. | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-webhook.int.test.ts, services/payment-svc/test/payment-webhook.test.ts 외 1곳 |
-| P-T31 | — | 결제사 전환 훈련과 결제사별 동시 입장 목표 상한 | 전환 뒤 공연의 serving 전진 속도 상한이 초당 50번호로, 동시 입장 목표가 채널 상한 기준(4,500명 [가정])으로 바로 낮아지고, 포트원 승인… | 측정 | A | 구간 측정 · 결제사 전환 훈련과 결제사별 동시 입장 목표 상한 |
+| P-T31 | — | 결제사 전환 훈련과 결제사별 동시 입장 목표 상한 | 전환 뒤 공연의 serving 전진 속도 상한이 초당 50번호로, 동시 입장 목표가 채널 상한 기준(4,500명 [가정])으로 바로 낮아지고, 포트원 승인… | 미검증 | A | 구간 측정(완성 뒤) · 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). 결제사… |
 | P-T32 | — | 결제사별 대사 | 결제사별 대사가 모든 불일치를 찾아 UNKNOWN 해소 경로로 넘긴다. 대사 실행은 다시 시작해도 같은 불일치를 한 번만 기록하고(이어 하기), 원장을 임의로… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-reconciliation.int.test.ts, services/payment-svc/test/payment-reconciliation.t… |
 | P-T33 | — | 포트원 리디렉션 결제 토큰 | 리디렉션 쿼리에 `paymentId`·`txId`·`paymentToken`이 오고, 수동 승인이 성공한다. 오지 않으면 능력 플래그로 포트원을 고르지 않고… | 미검증 | A | 포트원 테스트 채널 · 실제 포트원 리디렉션 결제가 필요한데 포트원 테스트 채널 계정이 없다(HOT-145) |
 | P-T34 | — | 결제사 한도 초과 응답과 결제 확정 임박 원인 경고 | 첫 429에 SEV2가 나고, `pg_throttled_total`이 늘며, 채널 상한이 바로 낮아진다. 공연 리포트에 피크 한도 사용률과 429 건수가… | 자동 시험 | A | 시험: services/payment-svc/test-int/payment-call-guard.int.test.ts, services/payment-svc/test-int/payment-channel-limit.in… |
