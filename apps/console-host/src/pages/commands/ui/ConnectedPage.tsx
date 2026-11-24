@@ -401,7 +401,8 @@ export function ConnectedPage() {
 
   return (
     <>
-      <div className="row between" style={{ alignItems: 'flex-end', gap: 24 }}>
+      {/* 휴대폰(320px)에서는 제목과 오른쪽 단추를 세로로 쌓아 제목이 한 글자씩 줄바꿈되지 않게 한다(계획 §9·§10) */}
+      <div className={layout === 'phone' ? 'col' : 'row between'} style={{ alignItems: layout === 'phone' ? 'flex-start' : 'flex-end', gap: layout === 'phone' ? 8 : 24 }}>
         <div className="col" style={{ gap: 4 }}>
           <h1 className="t-xl">운영 명령</h1>
           <p className="t-sm muted">명령을 내고, 받는 서버들의 적용 확인과 감사 체크포인트를 봅니다. 2인 명령은 요청자와 다른 운영자만 승인할 수 있습니다.</p>
@@ -427,7 +428,7 @@ export function ConnectedPage() {
 
       {tab === 'commands' ? (
         <div className="grid-12" style={{ rowGap: 16, alignItems: 'start', marginTop: 16 }}>
-          <div className="span-4 col" style={{ gap: 16 }}>
+          <div className={`${layout === 'phone' ? 'span-12' : 'span-4'} col`} style={{ gap: 16 }}>
             {role ? <CommandCatalog role={viewRole} layout={layout} picked={draft?.kind ?? null} onPick={(kind) => setDraft(draftOf(kind, eventId))} /> : null}
             {draft && layout !== 'phone' ? (
               <section className="widget" aria-labelledby="h-form">
@@ -461,11 +462,11 @@ export function ConnectedPage() {
             ) : null}
           </div>
 
-          <div className="span-4 col" style={{ gap: 16 }}>
+          <div className={`${layout === 'phone' ? 'span-12' : 'span-4'} col`} style={{ gap: 16 }}>
             <section className="widget" aria-labelledby="h-cmd">
-              <div className="widget-head">
+              <div className="widget-head" style={{ flexWrap: 'wrap' }}>
                 <h2 className="t-sm fw-b" id="h-cmd">명령 {filtered.length}건</h2>
-                <div className="actions" style={{ gap: 8 }}>
+                <div className="actions" style={{ gap: 8, flexWrap: 'wrap' }}>
                   <select aria-label="상태" value={stateFilter} onChange={(e) => setStateFilter(e.currentTarget.value as CommandStateValue | 'ALL')}>
                     <option value="ALL">전체 상태</option>
                     {STATES.map((s) => <option key={s} value={s}>{stateLabel(s)}</option>)}
@@ -487,7 +488,8 @@ export function ConnectedPage() {
                     <button
                       type="button"
                       className={selectedId === c.commandId ? 'btn btn-outline' : 'btn btn-ghost'}
-                      style={{ width: '100%', textAlign: 'left', display: 'block', padding: 12 }}
+                      // .btn의 nowrap을 풀고 긴 사유·UUID가 줄바꿈되게 한다(320px 가로 스크롤 방지)
+                      style={{ width: '100%', textAlign: 'left', display: 'block', padding: 12, whiteSpace: 'normal', overflowWrap: 'anywhere' }}
                       onClick={() => setSelectedId(c.commandId)}
                     >
                       <span className="row between" style={{ gap: 8 }}>
@@ -506,7 +508,7 @@ export function ConnectedPage() {
             </section>
           </div>
 
-          <div className="span-4 col" style={{ gap: 16 }}>
+          <div className={`${layout === 'phone' ? 'span-12' : 'span-4'} col`} style={{ gap: 16 }}>
             <section className="widget" aria-labelledby="h-detail">
               <div className="widget-head">
                 <h2 className="t-sm fw-b" id="h-detail">명령 상세</h2>
@@ -552,7 +554,7 @@ export function ConnectedPage() {
         </div>
       ) : (
         <div className="grid-12" style={{ rowGap: 16, alignItems: 'start', marginTop: 16 }}>
-          <div className="span-7 col" style={{ gap: 16 }}>
+          <div className={`${layout === 'phone' ? 'span-12' : 'span-7'} col`} style={{ gap: 16 }}>
             <section className="widget" aria-labelledby="h-cp">
               <div className="widget-head">
                 <h2 className="t-sm fw-b" id="h-cp">감사 체크포인트 {checkpoints.length}건</h2>
@@ -582,7 +584,7 @@ export function ConnectedPage() {
               </table>
             </section>
           </div>
-          <div className="span-5 col" style={{ gap: 16 }}>
+          <div className={`${layout === 'phone' ? 'span-12' : 'span-5'} col`} style={{ gap: 16 }}>
             <section className="widget" aria-labelledby="h-cp-new">
               <div className="widget-head"><h2 className="t-sm fw-b" id="h-cp-new">체크포인트 만들기</h2></div>
               <p className="t-xs muted" style={{ marginTop: 8 }}>마지막 체크포인트 뒤부터 지금 감사 체인 머리까지를 SHA-256 루트로 묶습니다. commander만 만들 수 있습니다.</p>
@@ -609,7 +611,12 @@ export function ConnectedPage() {
       {revertOpen && detail ? <RevertDialog detail={detail} busy={busy} onClose={() => setRevertOpen(false)} onConfirm={(reason) => revert(reason)} /> : null}
       <ReauthDialog open={reauthOpen} act="OPS_COMMAND" title="명령을 보내기 전에 다시 인증해 주세요" description={REAUTH_LINE} onDone={(token) => finishReauth(token)} onClose={() => finishReauth(null)} />
 
-      {toast ? <div className="toast" role="status" style={{ position: 'fixed', right: 24, bottom: 24, zIndex: 20 }}>{toast}</div> : null}
+      {toast ? (
+        // 320px에서 긴 안내(승인 요청·재인증 실패)가 화면 밖으로 넘치지 않게 폭을 묶고 글자를 끊는다
+        <div className="toast" role="status" style={{ position: 'fixed', right: 24, bottom: 24, zIndex: 20, maxWidth: 'calc(100vw - 48px)', overflowWrap: 'anywhere' }}>
+          {toast}
+        </div>
+      ) : null}
     </>
   );
 }
