@@ -203,7 +203,7 @@ function aaSummary(plan, state) {
     verdict,
     runs: rows,
   };
-  const outPath = join(ROOT, '.cache', 'peaket-bat025', 'aa', 'aa-summary.json');
+  const outPath = join(ROOT, dirname(plan.state_file), 'aa', 'aa-summary.json');
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, JSON.stringify(out, null, 2) + '\n');
   console.log(JSON.stringify(out, null, 2));

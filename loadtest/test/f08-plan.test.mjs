@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,10 +34,14 @@ const cmds = (run) => fill(run, STATE).commands.map((c) => c.argv);
 const isRunMjs = (argv) => argv[0] === 'node' && argv[1] === 'loadtest/run.mjs';
 const isCluster = (argv, sub) => argv[0] === 'node' && argv[1] === 'tools/local/cluster.mjs' && (sub === undefined || argv[2] === sub);
 
-/** 측정 실행을 나눈다: K1·K2·K7 ①·K7 ②·MSR-020. 한 실행에 측정 명령은 하나라고 본다(둘이면 실패) */
+/** 측정 실행을 나눈다: K1·K2·K7 ①·K7 ②·MSR-020. 한 실행에 측정 명령은 하나라고 본다(둘이면 실패). A/A는 판정이 아니라 잡음 폭 확인이라 뺀다(BAT-025 계획과 같은 묶음) */
 function classify(plan) {
   const out = { k1: [], k2hot: [], k2spread: [], k7a: [], k7b: [], entry: [], other: [] };
   plan.runs.forEach((run, index) => {
+    if (run.group === 'A/A') {
+      out.other.push({ run, index });
+      return;
+    }
     const argvs = cmds(run);
     const meas = argvs.filter((a) => isRunMjs(a) && a[2] === 'v1');
     assert.ok(meas.length <= 1, `${run.key}: v1 측정 명령이 ${meas.length}개다`);
@@ -148,6 +152,21 @@ test('F088-1 ⑥ K1·K2·K7 실행은 모두 불변식 검사와 장부 기록�
     assert.equal(x.a.invariants, true, `${x.run.key}: --invariants 없음`);
     assert.equal(x.a.record, true, `${x.run.key}: --record 없음`);
     assert.match(x.a.runId, /-f088/, `${x.run.key}: 실행 ID ${x.a.runId}`);
+  }
+});
+
+test('F088-1 ⑦ A/A 네 실행은 BAT-025와 같은 조건으로 K2 앞에 있고 aa 요약이 읽는 키를 쓴다', () => {
+  const plan = readPlan();
+  const aa = plan.runs.filter((r) => r.group === 'A/A');
+  assert.deepEqual(aa.map((r) => r.key), ['aa-quiet-r1', 'aa-quiet-r2', 'aa-noisy-r1', 'aa-noisy-r2']);
+  const firstK2 = plan.runs.findIndex((r) => r.group === 'K2');
+  assert.ok(firstK2 > 0, 'K2 실행이 없다');
+  for (const r of aa) {
+    assert.ok(plan.runs.indexOf(r) < firstK2, `${r.key}가 K2 앞이 아니다`);
+    assert.ok(plan.runs.indexOf(r) > plan.runs.findIndex((x) => x.key === 'w1-stage-full'), `${r.key}가 리허설 무대보다 앞이다`);
+    const a = parseArgs(cmds(r)[0].slice(2));
+    assert.deepEqual([a.users, a.rate, a.mode, a.hotCount, a.keep, a.warmS, a.mainS], [1000, 2000, 'hot', 1, true, 30, 60], r.key);
+    assert.match(`${r.ledger} ${r.conditions}`, /장부에 넣지 않는다|없음/);
   }
 });
 
@@ -292,4 +311,61 @@ test('F088-4 ④ --plan이 없으면 BAT-025 계획을 읽는다(기본 동작 �
   const r = tool(['status']);
   assert.match(r.out, /bat025/);
   assert.equal(stamp(), before);
+});
+
+test('F088-4 ⑤ aa는 A/A 실행의 --out에서 p99와 generator.json을 읽어 그 계획의 .cache 아래에 요약을 쓴다', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'f088-aa-'));
+  const cacheDir = `.cache/peaket-f088-aa-${randomBytes(4).toString('hex')}`;
+  const cacheAbs = join(ROOT, cacheDir);
+  const outBase = `${cacheDir}/out`;
+  const mk = (n, key, p99) => ({
+    n,
+    key,
+    title: key,
+    group: 'A/A',
+    stage: 'none',
+    estimate_min: 1,
+    gate: null,
+    conditions: '-',
+    criteria: ['F088-4 시험'],
+    ledger: '-',
+    artifact: '-',
+    result_note: '-',
+    commands: [{ argv: ['node', '-e', '0', '--out', `${outBase}/${key}`] }],
+  });
+  const runs = [
+    ['aa-quiet-r1', 100],
+    ['aa-quiet-r2', 105],
+    ['aa-noisy-r1', 120],
+    ['aa-noisy-r2', 126],
+  ];
+  const plan = {
+    plan: `f088-aa-${randomBytes(3).toString('hex')}`,
+    state_file: `${cacheDir}/state.json`,
+    runs: runs.map(([key, p99], i) => mk(i + 1, key, p99)),
+  };
+  const path = join(dir, 'plan.json');
+  writeFileSync(path, JSON.stringify(plan));
+  try {
+    for (const [key, p99] of runs) {
+      const p = join(cacheAbs, 'out', key);
+      mkdirSync(p, { recursive: true });
+      writeFileSync(
+        join(p, 'summary.json'),
+        JSON.stringify({ metrics: { 'http_req_duration{phase:main,route:hold}': { values: { 'p(99)': p99, 'p(99.9)': 200 } } } }),
+      );
+      writeFileSync(join(p, 'generator.json'), JSON.stringify({ judge: { valid: true, reasons: [] } }));
+    }
+    assert.equal(tool(['--plan', path, 'init', '--day', '2026-11-24']).code, 0);
+    const r = tool(['--plan', path, 'aa']);
+    assert.equal(r.code, 0, r.out);
+    const written = JSON.parse(readFileSync(join(cacheAbs, 'aa', 'aa-summary.json'), 'utf8'));
+    assert.equal(written.quietRatio, 1.05);
+    assert.equal(written.noisyRatio, 1.05);
+    assert.match(written.verdict, /잡음 폭 안/);
+    assert.deepEqual(written.runs.map((x) => x.key), ['aa-quiet-r1', 'aa-quiet-r2', 'aa-noisy-r1', 'aa-noisy-r2']);
+  } finally {
+    rmSync(cacheAbs, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -330,6 +330,190 @@
     {
       "n": 5,
       "gate": null,
+      "key": "aa-quiet-r1",
+      "window": 1,
+      "group": "A/A",
+      "title": "A/A 조용한 쌍 1번째 (K2 인기 좌석 TLS 켬과 같은 조건)",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "창 1 무대(v1 TLS 켬, 복제 3). 다른 갈래 시험·빌드 없이 조용한 상태. 인기 좌석 하나, 1,000명, 2,000/s, 예열 30초·본구간 60초, 잡은 홀드는 놓지 않음. 발생기 수는 BAT-025와 같은 기본 나누기(1,000/s 기준 2대)를 쓴다. A/A는 판정이 아니라 잡음 폭을 재는 실행이라 장부에 넣지 않는다(감독 결정 2026-11-23 ①).",
+      "commands": [
+        {
+          "label": "A/A 조용 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "seat-hold",
+            "--users",
+            "1000",
+            "--rate",
+            "2000",
+            "--mode",
+            "hot",
+            "--hot-count",
+            "1",
+            "--keep",
+            "--warm",
+            "30",
+            "--main",
+            "60",
+            "--out",
+            ".cache/peaket-f08/aa/{day}-aa-quiet-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "generator.json의 judge.valid=true, dropped_iterations=0",
+        "본구간 hold 요청 수가 2,000 × 60 = 120,000건의 ±2% 안",
+        "홀드 201은 1건, 나머지는 업무상 기대한 409(오류율에 넣지 않음)",
+        "summary.json의 http_req_duration{phase:main,route:hold} p99·p99.9를 적는다"
+      ],
+      "ledger": "없음(A/A는 판정이 아니라 잡음 폭 확인). 결과는 .cache/peaket-f08/aa/aa-summary.json에 모은다.",
+      "artifact": ".cache/peaket-f08/aa/{day}-aa-quiet-r1{suffix}/summary.json, generator.json, run.json",
+      "result_note": "무효면 A/A에 쓰지 않고 같은 조건으로 다시 잰다."
+    },
+    {
+      "n": 6,
+      "gate": null,
+      "key": "aa-quiet-r2",
+      "window": 1,
+      "group": "A/A",
+      "title": "A/A 조용한 쌍 2번째",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "aa-quiet-r1과 같은 조건. run 사이에 앞 실행의 부하가 가라앉도록 2분 쉰다.",
+      "commands": [
+        {
+          "label": "A/A 조용 2",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "seat-hold",
+            "--users",
+            "1000",
+            "--rate",
+            "2000",
+            "--mode",
+            "hot",
+            "--hot-count",
+            "1",
+            "--keep",
+            "--warm",
+            "30",
+            "--main",
+            "60",
+            "--out",
+            ".cache/peaket-f08/aa/{day}-aa-quiet-r2{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "generator.json의 judge.valid=true, dropped_iterations=0",
+        "본구간 hold 요청 수가 2,000 × 60 = 120,000건의 ±2% 안",
+        "홀드 201은 1건, 나머지는 업무상 기대한 409(오류율에 넣지 않음)",
+        "두 실행의 p99 비율(r2÷r1)과 p99.9 비율을 낸다"
+      ],
+      "ledger": "없음(A/A는 판정이 아니라 잡음 폭 확인). 결과는 .cache/peaket-f08/aa/aa-summary.json에 모은다.",
+      "artifact": ".cache/peaket-f08/aa/{day}-aa-quiet-r2{suffix}/summary.json, generator.json, run.json",
+      "result_note": "무효면 A/A에 쓰지 않는다."
+    },
+    {
+      "n": 7,
+      "gate": null,
+      "key": "aa-noisy-r1",
+      "window": 1,
+      "group": "A/A",
+      "title": "A/A 잡음 있는 쌍 1번째 (무대 밖 CPU 프로세스와 함께)",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "aa-quiet-r1과 같은 조건이되, 무대 밖에서 CPU를 쓰는 프로세스 2~3개(예: corepack pnpm --filter @peaket/web build, node -e CPU burn)를 함께 돌린다. 어떤 프로세스를 언제부터 돌렸는지(이름·명령·시작 시각)를 적는다.",
+      "commands": [
+        {
+          "label": "A/A 잡음 1",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "seat-hold",
+            "--users",
+            "1000",
+            "--rate",
+            "2000",
+            "--mode",
+            "hot",
+            "--hot-count",
+            "1",
+            "--keep",
+            "--warm",
+            "30",
+            "--main",
+            "60",
+            "--out",
+            ".cache/peaket-f08/aa/{day}-aa-noisy-r1{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "generator.json의 judge.valid=true, dropped_iterations=0",
+        "본구간 hold 요청 수가 2,000 × 60 = 120,000건의 ±2% 안",
+        "홀드 201은 1건, 나머지는 업무상 기대한 409(오류율에 넣지 않음)",
+        "다른 프로세스 이름·시작 시각을 notes에 적는다"
+      ],
+      "ledger": "없음(A/A는 판정이 아니라 잡음 폭 확인). 결과는 .cache/peaket-f08/aa/aa-summary.json에 모은다.",
+      "artifact": ".cache/peaket-f08/aa/{day}-aa-noisy-r1{suffix}/summary.json, generator.json, run.json",
+      "result_note": "무효면 A/A에 쓰지 않는다."
+    },
+    {
+      "n": 8,
+      "gate": null,
+      "key": "aa-noisy-r2",
+      "window": 1,
+      "group": "A/A",
+      "title": "A/A 잡음 있는 쌍 2번째",
+      "estimate_min": 8,
+      "stage": "v1-tls-on",
+      "conditions": "aa-noisy-r1과 같은 조건·같은 다른 프로세스로 한 번 더 잰다. run 사이에 2분 쉰다.",
+      "commands": [
+        {
+          "label": "A/A 잡음 2",
+          "argv": [
+            "node",
+            "loadtest/run.mjs",
+            "v1",
+            "seat-hold",
+            "--users",
+            "1000",
+            "--rate",
+            "2000",
+            "--mode",
+            "hot",
+            "--hot-count",
+            "1",
+            "--keep",
+            "--warm",
+            "30",
+            "--main",
+            "60",
+            "--out",
+            ".cache/peaket-f08/aa/{day}-aa-noisy-r2{suffix}"
+          ]
+        }
+      ],
+      "criteria": [
+        "generator.json의 judge.valid=true, dropped_iterations=0",
+        "본구간 hold 요청 수가 2,000 × 60 = 120,000건의 ±2% 안",
+        "홀드 201은 1건, 나머지는 업무상 기대한 409(오류율에 넣지 않음)",
+        "quiet 쌍과 noisy 쌍의 p99 비율 차이를 낸다"
+      ],
+      "ledger": "없음(A/A는 판정이 아니라 잡음 폭 확인). 결과는 .cache/peaket-f08/aa/aa-summary.json에 모은다.",
+      "artifact": ".cache/peaket-f08/aa/{day}-aa-noisy-r2{suffix}/summary.json, generator.json, run.json",
+      "result_note": "aa-summary.json의 verdict가 '잡음 폭 안'이면 정밀 측정 동안 다른 프로세스를 멈춘다. '잡음 폭 밖'이면 정밀 측정은 조용할 때만 한다."
+    },
+    {
+      "n": 9,
+      "gate": null,
       "key": "k2-hot-tls-r1",
       "window": 1,
       "group": "K2",
@@ -385,7 +569,7 @@
       "result_note": "3회 가운데 pass만 통과로 센다. 무효면 같은 조건으로 한 번만 더 잰다(F-08-8 6.1)."
     },
     {
-      "n": 6,
+      "n": 10,
       "gate": null,
       "key": "k2-hot-tls-r2",
       "window": 1,
@@ -441,7 +625,7 @@
       "result_note": "3회 가운데 pass만 통과로 센다. 무효면 같은 조건으로 한 번만 더 잰다(F-08-8 6.1)."
     },
     {
-      "n": 7,
+      "n": 11,
       "gate": null,
       "key": "k2-hot-tls-r3",
       "window": 1,
@@ -498,7 +682,7 @@
       "result_note": "3회 가운데 pass만 통과로 센다. 무효면 같은 조건으로 한 번만 더 잰다(F-08-8 6.1)."
     },
     {
-      "n": 8,
+      "n": 12,
       "gate": null,
       "key": "k2-spread-tls-r1",
       "window": 1,
@@ -552,7 +736,7 @@
       "result_note": "1회라 중앙값이 아니다. 보고서에 '1회(Before 3회)'로 적는다."
     },
     {
-      "n": 9,
+      "n": 13,
       "gate": null,
       "key": "k2-hot-notls-r1",
       "window": 1,
@@ -631,7 +815,7 @@
       "result_note": "끔 실행이 무효여도 켬 3회 판정을 막지 않는다."
     },
     {
-      "n": 10,
+      "n": 14,
       "gate": null,
       "key": "k1-1k-r1",
       "window": 1,
@@ -683,7 +867,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 11,
+      "n": 15,
       "gate": null,
       "key": "k1-1k-r2",
       "window": 1,
@@ -735,7 +919,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 12,
+      "n": 16,
       "gate": null,
       "key": "k1-1k-r3",
       "window": 1,
@@ -787,7 +971,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 13,
+      "n": 17,
       "gate": null,
       "key": "k1-10k-r1",
       "window": 1,
@@ -839,7 +1023,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 14,
+      "n": 18,
       "gate": null,
       "key": "k1-10k-r2",
       "window": 1,
@@ -891,7 +1075,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 15,
+      "n": 19,
       "gate": null,
       "key": "k1-10k-r3",
       "window": 1,
@@ -943,7 +1127,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 16,
+      "n": 20,
       "gate": null,
       "key": "k1-2k-r1",
       "window": 1,
@@ -995,7 +1179,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 17,
+      "n": 21,
       "gate": null,
       "key": "k1-4k-r1",
       "window": 1,
@@ -1047,7 +1231,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 18,
+      "n": 22,
       "gate": null,
       "key": "k1-6k-r1",
       "window": 1,
@@ -1099,7 +1283,7 @@
       "result_note": "무효면 같은 조건으로 한 번만 더 잰다. 목표를 못 지키는 것 자체는 정직한 결과다(F-08-8 2절 6)."
     },
     {
-      "n": 19,
+      "n": 23,
       "gate": null,
       "key": "k1-100k-r1",
       "window": 1,
@@ -1158,7 +1342,7 @@
       "result_note": "두 번 연속 무효면 셋째는 skip --reason \"10만 v1 무효(이 PC 발생기 한계)\". 그때 V-T4는 판정 못 함(F-08-2 6.2)."
     },
     {
-      "n": 20,
+      "n": 24,
       "gate": null,
       "key": "k1-100k-r2",
       "window": 1,
@@ -1217,7 +1401,7 @@
       "result_note": "두 번 연속 무효면 셋째는 skip --reason \"10만 v1 무효(이 PC 발생기 한계)\". 그때 V-T4는 판정 못 함(F-08-2 6.2)."
     },
     {
-      "n": 21,
+      "n": 25,
       "gate": null,
       "key": "k1-100k-r3",
       "window": 1,
@@ -1276,7 +1460,7 @@
       "result_note": "두 번 연속 무효면 셋째는 skip --reason \"10만 v1 무효(이 PC 발생기 한계)\". 그때 V-T4는 판정 못 함(F-08-2 6.2)."
     },
     {
-      "n": 22,
+      "n": 26,
       "gate": null,
       "key": "k7a-r1",
       "window": 1,
@@ -1329,7 +1513,7 @@
       "result_note": "장부 범위 밖(NFR-006 v1 쪽)이지만 F-08-2 부하 분해 표 '결제 접수' 줄이 쓴다."
     },
     {
-      "n": 23,
+      "n": 27,
       "gate": null,
       "key": "k7a-r2",
       "window": 1,
@@ -1382,7 +1566,7 @@
       "result_note": "장부 범위 밖(NFR-006 v1 쪽)이지만 F-08-2 부하 분해 표 '결제 접수' 줄이 쓴다."
     },
     {
-      "n": 24,
+      "n": 28,
       "gate": null,
       "key": "k7a-r3",
       "window": 1,
@@ -1435,7 +1619,7 @@
       "result_note": "장부 범위 밖(NFR-006 v1 쪽)이지만 F-08-2 부하 분해 표 '결제 접수' 줄이 쓴다."
     },
     {
-      "n": 25,
+      "n": 29,
       "gate": "WINDOW-2",
       "key": "w2-stage",
       "window": 2,
@@ -1533,7 +1717,7 @@
       "result_note": "무대가 올라가지 않으면 창을 멈추고 감독에게 알린다."
     },
     {
-      "n": 26,
+      "n": 30,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1575,7 +1759,7 @@
       "result_note": "x가 null이면 --start-rate 100 --step-rate 100으로 한 번 더 어림한다."
     },
     {
-      "n": 27,
+      "n": 31,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1618,7 +1802,7 @@
       "result_note": "세 번 가운데 찾지 못함이 있으면 X₁은 무효다. 감독에게 알린다."
     },
     {
-      "n": 28,
+      "n": 32,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1661,7 +1845,7 @@
       "result_note": "세 번 가운데 찾지 못함이 있으면 X₁은 무효다. 감독에게 알린다."
     },
     {
-      "n": 29,
+      "n": 33,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1704,7 +1888,7 @@
       "result_note": "세 번 가운데 찾지 못함이 있으면 X₁은 무효다. 감독에게 알린다."
     },
     {
-      "n": 30,
+      "n": 34,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1738,7 +1922,7 @@
       "result_note": "몫이 1이면 msr020-n1-*는 skip(msr020-x1-*이 N=1 점이다). podCpus가 null((나))이면 set podCpus 1, set podTag c1, set x1hatPod {x1}, set x1pod {x1}로 두고, 8×X₁가 Docker CPU의 85%를 넘는 N은 skip한다."
     },
     {
-      "n": 31,
+      "n": 35,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1799,7 +1983,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 32,
+      "n": 36,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1842,7 +2026,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 33,
+      "n": 37,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1885,7 +2069,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 34,
+      "n": 38,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1946,7 +2130,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 35,
+      "n": 39,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -1989,7 +2173,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 36,
+      "n": 40,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2032,7 +2216,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 37,
+      "n": 41,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2093,7 +2277,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 38,
+      "n": 42,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2136,7 +2320,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 39,
+      "n": 43,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2179,7 +2363,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 40,
+      "n": 44,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2240,7 +2424,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 41,
+      "n": 45,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2283,7 +2467,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 42,
+      "n": 46,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2326,7 +2510,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 43,
+      "n": 47,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2387,7 +2571,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 44,
+      "n": 48,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2430,7 +2614,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 45,
+      "n": 49,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2473,7 +2657,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 46,
+      "n": 50,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2534,7 +2718,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 47,
+      "n": 51,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2577,7 +2761,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 48,
+      "n": 52,
       "gate": "WINDOW-2",
       "window": 2,
       "group": "MSR-020",
@@ -2620,7 +2804,7 @@
       "result_note": "실패·무효·찾지 못함은 통과가 아니다. 몫이 1이면 n1-*은 skip."
     },
     {
-      "n": 49,
+      "n": 53,
       "gate": "WINDOW-2",
       "key": "msr020-report",
       "window": 2,
@@ -2713,7 +2897,7 @@
       "result_note": "점이 6개 미만이면 charts.py가 경고한다(장부에만 남긴다)."
     },
     {
-      "n": 50,
+      "n": 54,
       "gate": null,
       "key": "k7b-r1",
       "window": 1,
@@ -2836,7 +3020,7 @@
       "result_note": "새 클러스터가 15분 안에 준비되지 않으면 그 회를 실패로 적고 한 번만 다시 올린다(F-08-8 6.3). 무효면 새 클러스터에서 다시 잰다."
     },
     {
-      "n": 51,
+      "n": 55,
       "gate": null,
       "key": "k7b-r2",
       "window": 1,
@@ -2959,7 +3143,7 @@
       "result_note": "새 클러스터가 15분 안에 준비되지 않으면 그 회를 실패로 적고 한 번만 다시 올린다(F-08-8 6.3). 무효면 새 클러스터에서 다시 잰다."
     },
     {
-      "n": 52,
+      "n": 56,
       "gate": null,
       "key": "k7b-r3",
       "window": 1,
@@ -3082,7 +3266,7 @@
       "result_note": "새 클러스터가 15분 안에 준비되지 않으면 그 회를 실패로 적고 한 번만 다시 올린다(F-08-8 6.3). 무효면 새 클러스터에서 다시 잰다."
     },
     {
-      "n": 53,
+      "n": 57,
       "gate": null,
       "key": "w1-demo-s1",
       "window": 1,
