@@ -34,6 +34,10 @@ const PII_SOURCE = 'packages/platform/src/pii-patterns.json';
 const OBS = 'docs/observability.md';
 const TAIL = 'tail_sampling';
 const PII = 'transform/pii';
+/** 게이트웨이가 자원 속성에서 복사하는 Loki 라벨(§1 Loki 줄·§7 라벨 허용 목록). 클러스터 이름만 환경 변수에서 온다 */
+const LOKI_LABELS = 'transform/loki-labels';
+const LOKI_LABEL_SOURCES = { namespace: 'k8s.namespace.name', service: 'service.name', env: 'deployment.environment' };
+const CLUSTER_ENV = 'PEAKET_CLUSTER';
 /** 서버 span이 싣는 HTTP 메서드 속성(지금 SDK의 이름, 계획 F-01-3 '시험 결과') */
 const METHOD_ATTR = 'http.request.method';
 /** 같은 문장을 몇 번 거는가(packages/platform/src/pii-text.ts의 PII_TEXT_PASSES와 같다. 붙은 두 값의 뒤쪽을 둘째 번에 잡는다) */
@@ -427,6 +431,35 @@ export function checkCollectorConfig(root) {
         }
       if (shape && (JSON.stringify(pr.slice(1, 1 + middle.length)) !== JSON.stringify(middle) || !isType(pr[pr.length - 1], 'batch')))
         bad(f, `파이프라인 ${p}의 처리기 차례는 memory_limiter → ${middle.join(' → ')} → … → batch다(${pr.join(', ')})`);
+    }
+  }
+  // --- 게이트웨이: Loki 라벨 넷(§1 Loki 줄, §7 라벨 허용 목록). 로그 파이프라인에서만 2차 마스킹 뒤·묶기 앞에 둔다 ---
+  const labelsFile = definedIn(['processors', LOKI_LABELS]);
+  const labelsProc = gateway.processors?.[LOKI_LABELS];
+  if (!isObj(labelsProc)) bad(labelsFile, `Loki 라벨 처리기 ${LOKI_LABELS}가 없다(namespace·service·env·cluster를 자원 속성에서 복사한다)`);
+  else {
+    const statements = (Array.isArray(labelsProc.log_statements) ? labelsProc.log_statements : [])
+      .flatMap((g) => (Array.isArray(g?.statements) ? g.statements : []))
+      .map(String);
+    const cluster = new RegExp(`set\\(resource\\.attributes\\["cluster"\\],\\s*"\\$\\{env:${CLUSTER_ENV}\\}"\\)`);
+    for (const [label, source] of [...Object.entries(LOKI_LABEL_SOURCES), ['cluster', undefined]]) {
+      const ok = statements.some((s) => (source === undefined ? cluster.test(s) : s.includes(`set(resource.attributes["${label}"], resource.attributes["${source}"])`)));
+      if (!ok) bad(labelsFile, `Loki 라벨 ${label}을 ${source ?? `환경 변수 ${CLUSTER_ENV}`}에서 복사하는 문장이 없다(§1·§7)`);
+    }
+    for (const s of statements) {
+      const name = /resource\.attributes\["([a-z]+)"\]/.exec(s)?.[1];
+      if (name !== undefined && name !== 'cluster' && !(name in LOKI_LABEL_SOURCES)) bad(labelsFile, `Loki 라벨 처리기가 허용 목록 밖 자원 속성 ${name}을(를) 만든다(§7)`);
+    }
+    for (const p of pipelinesOf(gateway, 'traces')) {
+      if ((gateway.service.pipelines[p]?.processors ?? []).includes(LOKI_LABELS)) bad(definedIn(['service', 'pipelines', p, 'processors']), `추적 파이프라인 ${p}에 Loki 라벨 처리기를 두지 않는다(로그만 색인한다)`);
+    }
+    for (const p of pipelinesOf(gateway, 'logs')) {
+      const pr = gateway.service.pipelines[p]?.processors ?? [];
+      const li = pr.indexOf(LOKI_LABELS);
+      const pi = pr.indexOf(PII);
+      const f = definedIn(['service', 'pipelines', p, 'processors']);
+      if (li < 0) bad(f, `로그 파이프라인 ${p}에 Loki 라벨 처리기 ${LOKI_LABELS}가 없다`);
+      else if (pi < 0 || li < pi || li > pr.length - 2) bad(f, `로그 파이프라인 ${p}의 Loki 라벨 처리기 차례가 2차 마스킹 뒤·묶기 앞이 아니다(${pr.join(', ')})`);
     }
   }
   common(gateway, (path) => definedIn(path));

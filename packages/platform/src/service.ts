@@ -21,7 +21,7 @@ import type { HotPathMetrics } from './hot-path.js';
 import { installHttpHooks, markServerSpan, requestSideFields } from './http-hooks.js';
 import { NestPinoLogger, PLATFORM_LOGGER, type PlatformLogger, createPlatformLogger } from './log.js';
 import { describeMetricViolations, validateMetricRegistry } from './metric-rules.js';
-import { PlatformMetrics, statusClass } from './metrics.js';
+import { PlatformMetrics, observeRequestDuration, statusClass } from './metrics.js';
 import { PROBLEM_CONTENT_TYPE } from './problem.js';
 import { ProblemFilter, frameworkErrorProblem } from './problem-filter.js';
 import { loadLogPseudonymizer, type LogPseudonymizer } from './pseudonym.js';
@@ -241,15 +241,16 @@ export async function createService(o: CreateServiceOptions): Promise<PlatformSe
     frameworkErrors: (error: Error, request: FastifyRequest, reply: FastifyReply) => {
       const { status, body } = frameworkErrorProblem(error, config.debugErrors);
       const labels = { service: o.name, route: 'unmatched', method: request.method, status_class: statusClass(status) };
-      metrics.requestDuration.observe(labels, 0);
-      if (status >= 500) {
-        metrics.errors.inc(labels);
-        errorReporting.capture(error, { traceId: String(body.traceId), route: 'unmatched' });
-      }
       // 라우터 앞에서 끝난 요청(잘못된 URL 등)도 정규 로그 줄 하나를 같은 traceId로 남긴다(ASVS v5.0.0-16.3.4).
       // 서버 span은 경로 틀 대신 unmatched로 두고 표본 속성을 단다. 라우팅 전에 끝나 지연은 0으로 본다(지표와 같다, 코드 리뷰 2026-11-01)
       const traceId = String(body.traceId);
       const at = activeTrace();
+      // 5xx는 남길 trace다(exemplar, V-T50 ⑧). 서버 span이 이 trace면 spanId도 싣는다
+      observeRequestDuration(metrics, labels, 0, status >= 500 ? { traceId, ...(at.traceId === traceId && at.spanId ? { spanId: at.spanId } : {}) } : undefined);
+      if (status >= 500) {
+        metrics.errors.inc(labels);
+        errorReporting.capture(error, { traceId, route: 'unmatched' });
+      }
       const sample = { oneIn: canonical.sampleOneIn, thresholdKeep: sampleKeep(traceId, canonical.sampleOneIn), headSampled: false };
       markServerSpan(request.method, 'unmatched', sample);
       canonical.write({

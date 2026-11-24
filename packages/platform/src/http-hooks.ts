@@ -7,7 +7,7 @@ import type { Clock } from './clock.js';
 import { type RequestContext, activeTrace, runInRequestContext } from './context.js';
 import { DEADLINE_HEADER, Deadline, routeDeadlineMaxOf } from './deadline.js';
 import type { HotPathMetrics } from './hot-path.js';
-import { type PlatformMetrics, routeLabel, statusClass } from './metrics.js';
+import { type PlatformMetrics, type RequestExemplar, observeRequestDuration, routeLabel, statusClass } from './metrics.js';
 import { type CanonicalLog, type ErrorInfo, type LineInput, type RouteLogPolicy, routePolicyOf } from './request-log.js';
 import { sampleKeep } from './sampling.js';
 
@@ -40,6 +40,8 @@ export interface RequestState {
   sample: LineInput['sample'];
   /** 이 요청의 서버 span(OTel SDK가 만든 것, 기록 중일 때만). onSend에서 SLO 지연 초과를 단다 */
   serverSpan?: Span;
+  /** onSend에서 그 경로의 SLO 지연을 넘었다(지연 점의 exemplar 조건, V-T50 ⑧) */
+  sloExceeded: boolean;
   app?: string;
   client?: string;
   eventIdParam?: string;
@@ -154,6 +156,7 @@ export function installHttpHooks(
       policy,
       sample,
       serverSpan,
+      sloExceeded: false,
       ...requestSideFields(request),
       eventIdParam: typeof eventId === 'string' && EVENT_ID.test(eventId) ? eventId : undefined,
     };
@@ -211,7 +214,12 @@ export function installHttpHooks(
     if (state) {
       const now = clock.monotonicMs();
       const labels = { service, route: state.ctx.route, method: state.ctx.method, status_class: statusClass(reply.statusCode) };
-      metrics.requestDuration.observe(labels, Math.max(0, now - state.startedMs) / 1000);
+      // exemplar는 남길 trace에만 단다(V-T50 ⑧): 정상 표본에 든 요청·5xx·SLO 지연 초과. 그 밖의 정상 요청에는 붙이지 않는다
+      const kept = state.sample.thresholdKeep || reply.statusCode >= 500 || state.sloExceeded;
+      const exemplar: RequestExemplar | undefined = kept
+        ? { traceId: state.ctx.traceId, ...(state.ctx.spanId ? { spanId: state.ctx.spanId } : {}) }
+        : undefined;
+      observeRequestDuration(metrics, labels, Math.max(0, now - state.startedMs) / 1000, exemplar);
       if (reply.statusCode >= 500) metrics.errors.inc(labels);
       else if (state.normalBranch) metrics.businessRejections.inc(labels);
       if (state.onSendMs !== undefined) hotPath?.observe('http.serialize', Math.max(0, now - state.onSendMs) / 1000);
@@ -231,7 +239,10 @@ export function installHttpHooks(
         state.onSendMs = now;
         if (state.preHandlerMs !== undefined) hotPath?.observe('http.handler', Math.max(0, now - state.preHandlerMs) / 1000);
         // 꼬리 표본 정책 ③(docs/observability.md §1): 서버 span이 아직 열려 있을 때, 그 경로의 SLO 지연을 넘었으면 단다(넘지 않으면 달지 않는다)
-        if (state.serverSpan && canonical.sloExceeded(state.policy, Math.max(0, now - state.startedMs))) state.serverSpan.setAttribute(SLO_EXCEEDED_ATTR, true);
+        if (state.serverSpan && canonical.sloExceeded(state.policy, Math.max(0, now - state.startedMs))) {
+          state.sloExceeded = true;
+          state.serverSpan.setAttribute(SLO_EXCEEDED_ATTR, true);
+        }
       }
       state.sent = true;
       if (state.aborted) writeLine(state, reply, true);

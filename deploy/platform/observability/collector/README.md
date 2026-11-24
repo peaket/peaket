@@ -7,7 +7,7 @@
 | 파일 | 무엇 | 손으로 고침 |
 | --- | --- | --- |
 | `agent.yaml` | 에이전트(노드마다 하나) 운영 판: OTLP·컨테이너 표준 출력 → 쿠버네티스 메타데이터 → trace ID 부하 분산·게이트웨이 | 고친다 |
-| `gateway.yaml` | 게이트웨이 수집기 운영 판: 받기·메모리 상한·묶기·Tempo(관측 전용 Kafka)·Loki 내보내기와 파이프라인 차례 | 고친다 |
+| `gateway.yaml` | 게이트웨이 수집기 운영 판: 받기·메모리 상한·꼬리 표본·2차 마스킹·Loki 라벨 넷(`transform/loki-labels`)·묶기·Tempo(관측 전용 Kafka)·Loki 내보내기와 파이프라인 차례 | 고친다 |
 | `cluster.yaml` | 클러스터 수집기 운영 판: 쿠버네티스 이벤트를 리더 하나만 받아 Loki로 | 고친다 |
 | `generated/tail-sampling.yaml` | 꼬리 표본 처리기(크기 값과 정책 다섯, 드문 경로 정책은 openapi의 `x-peaket-trace-rare`에서) | **고치지 않는다** |
 | `generated/pii-masking.yaml` | 2차 마스킹 처리기(`packages/platform/src/pii-patterns.json`의 꼴, IP 속성 처리) | **고치지 않는다** |
@@ -31,12 +31,12 @@
 otel/opentelemetry-collector-contrib:0.165.0@sha256:e40d61f10c9a617cca1ffd1be4d7e2b3a4b0f0001798ff07e58cabe82e618cea
 ```
 
-저장소 뿌리에서(Docker 엔진, 환경 변수 없음):
+저장소 뿌리에서(Docker 엔진, 게이트웨이의 Loki `cluster` 라벨은 `-e PEAKET_CLUSTER=…`로 준다):
 
 ```bash
 IMG=otel/opentelemetry-collector-contrib:0.165.0@sha256:e40d61f10c9a617cca1ffd1be4d7e2b3a4b0f0001798ff07e58cabe82e618cea
 mkdir -p /tmp/otelcol-out && chmod 777 /tmp/otelcol-out
-docker run --rm -p 4317:4317 -p 4318:4318 -p 8888:8888 \
+docker run --rm -p 4317:4317 -p 4318:4318 -p 8888:8888 -e PEAKET_CLUSTER=peaket-local \
   -v "$PWD/deploy/platform/observability/collector:/etc/otelcol:ro" -v /tmp/otelcol-out:/var/lib/otelcol/out \
   "$IMG" --config /etc/otelcol/gateway.yaml --config /etc/otelcol/generated/tail-sampling.yaml \
   --config /etc/otelcol/generated/pii-masking.yaml --config /etc/otelcol/local/gateway.yaml
@@ -49,5 +49,6 @@ docker run --rm -p 4317:4317 -p 4318:4318 -p 8888:8888 \
 
 ## 운영 판의 가정
 
+- 게이트웨이 수집기의 `cluster` 라벨 값은 환경 변수 `PEAKET_CLUSTER`에서 온다(배포가 넣는다). 나머지 셋(`namespace`·`service`·`env`)은 에이전트가 붙이는 자원 속성 `k8s.namespace.name`·`service.name`·`deployment.environment`를 복사한다(docs/observability.md §1 Loki 줄·§7). 이 처리기는 로그 파이프라인에만 두고 2차 마스킹 뒤·묶기 앞에 둔다.
 - 내보내기 주소(`obs-kafka-bootstrap.observability.svc:9098`, `loki-gateway.observability.svc:3100`)와 부하 분산이 찾는 헤드리스 Service(`otel-gateway-headless.observability`), 리더 임대 이름은 INF-020 배포가 정하는 이름에 맞춘다 [가정]. 노드 사이 암호화는 메시(ambient mTLS)가 맡아 수집기끼리는 평문 OTLP다.
 - 배포(DaemonSet·Deployment·헤드리스 Service·권한·NetworkPolicy), Prometheus가 `:8888`을 긁는 설정, 이미지 서명 확인은 INF-020 몫이다.

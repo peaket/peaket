@@ -10,7 +10,8 @@
 // - 로컬 판(loki/local.yaml·tempo/local.yaml): 겹친 결과가 운영 판의 한도·라벨·보존·처리기·원격 쓰기 테넌트를 덮지 않는지
 // - exporter(exporters/postgres-exporter.yaml·yace.yaml): 쿼리 통계 켬·쿼리 문장 끔·상위 N(§8 '쿼리 통계 예외'), YACE는 §8 지표 출처 표의 CloudFront 두 줄만
 // - Grafana 신호 연결(grafana/provisioning/datasources*.yaml): exemplar traceId → Tempo(§2), Tempo 서비스 지도 → Mimir raw·노드 그래프,
-//   Tempo → Pyroscope, 연결이 가리키는 데이터 소스가 있고 같은 조직(orgId)에 있는지
+//   Tempo → Pyroscope, Loki traceId 파생 필드 → Tempo, Tempo → Loki(같은 traceId), 연결이 가리키는 데이터 소스가 있고 같은 조직(orgId)에 있는지
+// - 게이트웨이 수집기의 자원 속성→Loki 라벨 넷은 collector-config.mjs --check가 본다(F-01-9)
 // 겹치기(--render): 운영 판 위에 로컬 판을 깊게 합친다. 표는 키마다 합치고, 목록과 값은 로컬 판이 통째로 바꾸며, 로컬 판의 값 null은 그 키를 지운다.
 // 쓰는 법(저장소 뿌리에서):
 //   node tools/ci/observability-stores.mjs --check [--root <저장소>]           끝 코드 0 통과, 1 위반('막음: <파일>: <까닭>'), 2 인자·읽기·YAML 오류
@@ -50,7 +51,7 @@ const RAW_TENANT = 'raw';
 /** §8 지표 출처 표의 '1분 합계'·'1분 평균'(YACE 지표 칸의 period·statistics) */
 const MINUTE = 60;
 const LOKI_LIMIT_KEYS = ['ingestion_rate_mb', 'ingestion_burst_size_mb', 'per_stream_rate_limit', 'per_stream_rate_limit_burst'];
-const DS_TYPES = { tempo: 'tempo', prometheus: 'prometheus', pyroscope: 'grafana-pyroscope-datasource' };
+const DS_TYPES = { tempo: 'tempo', prometheus: 'prometheus', pyroscope: 'grafana-pyroscope-datasource', loki: 'loki' };
 
 /** 읽기 실패(끝 코드 2) */
 class ReadError extends Error {}
@@ -372,6 +373,27 @@ export function checkObservabilityStores(root) {
     const prof = j.tracesToProfiles?.datasourceUid;
     if (!prof) bad(t.file, `${t.uid}에 프로파일 연결(tracesToProfiles.datasourceUid)이 없다`);
     else points(t, prof, DS_TYPES.pyroscope, '프로파일 연결');
+  }
+  // Loki의 traceId 파생 필드 → Tempo, Tempo → Loki(같은 traceId). §1 'Grafana 신호 연결'·§2 '신호 연결', V-T50 ⑨
+  const lokiDs = datasources.find((d) => d.uid === 'loki');
+  if (!lokiDs) bad(DATASOURCES_PLATFORM, 'Loki 데이터 소스가 없다(traceId 파생 필드를 둘 곳)');
+  else {
+    const fields = lokiDs.jsonData?.derivedFields;
+    if (!Array.isArray(fields) || fields.length !== 1) bad(lokiDs.file, `${lokiDs.uid}의 derivedFields가 하나가 아니다(traceId → Tempo, observability §1)`);
+    else {
+      const f = fields[0];
+      if (f?.name !== canon.exemplarName) bad(lokiDs.file, `${lokiDs.uid}의 파생 필드 이름 ${f?.name ?? '없음'}이 ${DOC} §2의 ${canon.exemplarName}과 다르다`);
+      if (typeof f?.matcherRegex !== 'string' || !f.matcherRegex.includes('traceId')) bad(lokiDs.file, `${lokiDs.uid}의 파생 필드 matcherRegex가 로그 줄의 traceId를 찾지 않는다`);
+      points(lokiDs, f?.datasourceUid, DS_TYPES.tempo, 'traceId 파생 필드');
+    }
+  }
+  for (const t of tempos) {
+    const logs = t.jsonData?.tracesToLogsV2;
+    if (!isMap(logs)) bad(t.file, `${t.uid}에 로그 연결(tracesToLogsV2)이 없다(같은 traceId의 로그를 Loki에서 찾는다, observability §1)`);
+    else {
+      if (logs.filterByTraceID !== true) bad(t.file, `${t.uid}의 tracesToLogsV2가 traceId로 거르지 않는다(filterByTraceID)`);
+      points(t, logs.datasourceUid, DS_TYPES.loki, '로그 연결');
+    }
   }
   // 그 밖의 연결(datasourceUid)도 있는 데이터 소스와 같은 조직을 가리킨다
   for (const d of datasources) {

@@ -2,7 +2,7 @@
 # 로컬에는 Mimir·Loki·Tempo·Pyroscope·ClickHouse가 없어 로컬 ConfigMap에 싣지 않는다(tools/local/cluster.mjs는 datasources.yaml만 읽는다).
 # 주소는 구간 5(INF-020·INF-040)에서 실제 배치에 맞춰 확정한다 [가정].
 # 데이터 소스 사이 연결(observability §1 '관측 저장소 설정 원천과 로컬 확인'의 Grafana 신호 연결, §2 '신호 연결'): Mimir 원본의 exemplar traceId → Tempo,
-# Tempo의 서비스 지도 → Mimir 원본과 노드 그래프, Tempo → Pyroscope. 로그 꼴에 기대는 연결(Loki traceId 파생 필드 → Tempo, Tempo → Loki)은 OPS-080 뒤 몫이다.
+# Tempo의 서비스 지도 → Mimir 원본과 노드 그래프, Tempo → Pyroscope, Loki의 traceId 파생 필드 → Tempo, Tempo의 tracesToLogsV2 → Loki(V-T50 ⑨).
 # 검사: node tools/ci/observability-config.mjs --check, node tools/ci/observability-stores.mjs --check(연결이 같은 조직의 데이터 소스를 가리키는지)
 apiVersion: 1
 datasources:
@@ -32,13 +32,18 @@ datasources:
     secureJsonData:
       httpHeaderValue1: agg5m
     editable: false
-  # Loki(정형 로그와 온세일 공용 대시보드의 주석, uid loki)
+  # Loki(정형 로그와 온세일 공용 대시보드의 주석, uid loki). 로그 줄의 traceId를 Tempo로 잇는다(§1 'Grafana 신호 연결', V-T50 ⑨)
   - name: Loki
     uid: loki
     orgId: 1
     type: loki
     access: proxy
     url: http://loki.observability.svc:3100
+    jsonData:
+      derivedFields:
+        - name: traceId
+          matcherRegex: '"traceId":"([0-9a-f]{32})"'
+          datasourceUid: tempo
     editable: false
   - name: Tempo
     uid: tempo
@@ -59,6 +64,15 @@ datasources:
           - key: service.name
             value: service_name
         profileTypeId: process_cpu:cpu:nanoseconds:cpu:nanoseconds
+      # 같은 traceId의 로그를 Loki에서 찾는다(§2 '신호 연결', V-T50 ⑨). 태그는 Loki 라벨 이름과 짝이다
+      tracesToLogsV2:
+        datasourceUid: loki
+        filterByTraceID: true
+        tags:
+          - key: service.name
+            value: service
+          - key: k8s.namespace.name
+            value: namespace
     editable: false
   - name: Pyroscope
     uid: pyroscope

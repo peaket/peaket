@@ -3,7 +3,7 @@
 #   --config gateway.yaml --config generated/tail-sampling.yaml --config generated/pii-masking.yaml [--config local/gateway.yaml]
 # 꼬리 표본 정책·크기(tail_sampling)와 2차 마스킹 문장(transform/pii)은 generated/에 있다. 손으로 쓰지 않고
 # node tools/ci/collector-config.mjs --write로 만든다(드문 경로는 openapi, 크기는 §1, 가림 꼴은 packages/platform/src/pii-patterns.json).
-# 처리기 차례: 추적은 메모리 상한 → 꼬리 표본 → 2차 마스킹 → 묶기, 로그는 메모리 상한 → 2차 마스킹 → 묶기.
+# 처리기 차례: 추적은 메모리 상한 → 꼬리 표본 → 2차 마스킹 → 묶기, 로그는 메모리 상한 → 2차 마스킹 → Loki 라벨 넷 → 묶기.
 # 내보내기: 추적은 관측 전용 Kafka를 지나 Tempo로(§1 '관측 저장소 쓰기 경로'), 로그는 Loki로. 주소·인증 값은 INF-020 배포가 맞춘다 [가정].
 # 브라우저 수집 경로(§11)는 OPS-070 몫이라 이 판에 없다.
 receivers:
@@ -23,6 +23,16 @@ processors:
   batch:
     send_batch_size: 8192
     timeout: 1s
+  # Loki가 색인하는 자원 속성 넷(docs/observability.md §1 Loki 줄, §7 'Loki 라벨 허용 목록'). 2차 마스킹이 끝난 값을 복사한다.
+  # 셋은 에이전트가 붙이는 자원 속성에서, 클러스터 이름은 배포가 넣는 환경 변수 PEAKET_CLUSTER에서 온다(INF-020)
+  transform/loki-labels:
+    error_mode: ignore
+    log_statements:
+      - statements:
+          - set(resource.attributes["namespace"], resource.attributes["k8s.namespace.name"])
+          - set(resource.attributes["service"], resource.attributes["service.name"])
+          - set(resource.attributes["env"], resource.attributes["deployment.environment"])
+          - set(resource.attributes["cluster"], "${env:PEAKET_CLUSTER}")
 
 exporters:
   kafka/tempo:
@@ -61,5 +71,5 @@ service:
       exporters: [kafka/tempo]
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, transform/pii, batch]
+      processors: [memory_limiter, transform/pii, transform/loki-labels, batch]
       exporters: [otlp_http/loki]
