@@ -95,17 +95,17 @@ processors:
     logs:
       log_record:
         - 'attributes["kind"] != "envoy-access" and attributes["kind"] != "legal-access"'
-  # 일반 로그 갈래로 새지 않게 identity 접속기록 줄과 접근 로그 줄을 뺀다
+  # 일반 로그 갈래로 새지 않게 identity 접속기록 줄과 접근 로그 줄을 뺀다(일반 filelog는 JSON을 풀지 않아 본문 글자로 본다)
   filter/drop-legal:
     error_mode: ignore
     logs:
       log_record:
-        - 'attributes["kind"] == "legal-access"'
+        - 'IsMatch(body, "\"kind\":\"legal-access\"")'
   filter/drop-envoy-access:
     error_mode: ignore
     logs:
       log_record:
-        - 'attributes["kind"] == "envoy-access"'
+        - 'IsMatch(body, "\"kind\":\"envoy-access\"")'
   # 법정·일반 사본에서 조사 칸을 지운다(ADR-0171 결정 2·4). 법정 사본은 POL-025가 요구하는 칸만 남긴다.
   # 법정 사본은 401·403 같은 status >= 400 거절 줄도 남긴다(16.3.3). 표본으로 줄이지 않는다.
   transform/strip-investigation:

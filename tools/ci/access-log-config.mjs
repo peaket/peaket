@@ -211,6 +211,8 @@ export function checkAccessLogConfig(root) {
     for (const f of ['filter/drop-legal', 'filter/drop-envoy-access']) if (!(plain.processors ?? []).includes(f)) bad(FILES.cfg, `일반 로그 파이프라인에 ${f}가 없다`);
     if (!(plain.processors ?? []).includes('k8s_attributes')) bad(FILES.cfg, '일반 로그 파이프라인의 쿠버네티스 메타데이터(k8s_attributes)를 잃었다');
   }
+  if (!JSON.stringify(cfg.processors?.['filter/drop-legal'] ?? {}).includes('legal-access')) bad(FILES.cfg, 'filter/drop-legal이 본문의 legal-access 줄을 거르지 않는다(일반 Loki 갈래로 새지 않게)');
+  if (!JSON.stringify(cfg.processors?.['filter/drop-envoy-access'] ?? {}).includes('envoy-access')) bad(FILES.cfg, 'filter/drop-envoy-access가 본문의 envoy-access 줄을 거르지 않는다(두 갈래로 두 번 가지 않게)');
 
   // --- 처리기 문장: 조사 칸 지우기·조사 경로·routeKind ---
   const statements = (name) => ((cfg.processors ?? {})[name]?.log_statements ?? []).flatMap((s) => s?.statements ?? []).map(String);
