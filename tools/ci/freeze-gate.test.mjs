@@ -61,11 +61,12 @@ test('D-T2 ① 대형 창 안의 운영 승격 PR은 막고 코드 병합·태�
 
 test('D-T2 ② 소형 창 안에서 핫패스 값 파일은 막고 일반 값 파일은 통과시킨다', () => {
   const root = rootWithCalendar([windowOf('small', E_SMALL)]);
-  const hot = gate(root, { changedFiles: ['deploy/envs/prod/queue-svc.yaml'] });
+  const now = Date.parse('2026-11-24T10:20:00Z'); // 소형 창(10:10Z~12:00Z) 안
+  const hot = gate(root, { nowMs: now, changedFiles: ['deploy/envs/prod/queue-svc.yaml'] });
   assert.equal(hot.decision, 'block');
-  const hotGateway = gate(root, { changedFiles: ['deploy/gateways/routes/fan.yaml'] });
+  const hotGateway = gate(root, { nowMs: now, changedFiles: ['deploy/gateways/routes/fan.yaml'] });
   assert.equal(hotGateway.decision, 'block');
-  const normal = gate(root, { changedFiles: ['deploy/envs/prod/ticket-svc.yaml'] });
+  const normal = gate(root, { nowMs: now, changedFiles: ['deploy/envs/prod/ticket-svc.yaml'] });
   assert.equal(normal.decision, 'allow');
 });
 
@@ -173,7 +174,7 @@ test('D-T5 ③ 플래그 끄기와 KEDA 오토스케일 정지는 통과하고 �
 
   const keduRel = 'deploy/envs/prod/queue-svc.yaml';
   mkdirSync(join(root, 'deploy', 'envs', 'prod'), { recursive: true });
-  writeFileSync(join(keduRel), 'service:\n  annotations:\n    autoscaling.keda.sh/paused-replicas: "0"\n');
+  writeFileSync(join(root, keduRel), 'service:\n  annotations:\n    autoscaling.keda.sh/paused-replicas: "0"\n');
   const keda = gate(root, { changedFiles: [keduRel], labels: ['emergency-change'], body: 'INC-8' });
   assert.equal(keda.decision, 'allow');
   assert.equal(keda.override?.shape, 'autoscale-pause');
@@ -183,7 +184,8 @@ test('D-T5 ③ 플래그 끄기와 KEDA 오토스케일 정지는 통과하고 �
 });
 
 test('D-T26 ① 대형 창 안에서도 main 병합·태그는 되고 운영 승격만 창이 끝난 뒤 통과한다', () => {
-  const root = rootWithCalendar([windowOf('large')]);
+  // 달력은 10분마다 갱신된다. 창이 끝난 시각에도 달력은 최신이라고 본다
+  const root = rootWithCalendar([windowOf('large')], '2026-11-24T11:55:00.000Z');
   assert.equal(gate(root, { changedFiles: ['deploy/envs/prod/queue-svc.yaml'] }).decision, 'block');
   assert.equal(gate(root, { nowMs: Date.parse('2026-11-24T12:00:00Z'), changedFiles: ['deploy/envs/prod/queue-svc.yaml'] }).decision, 'allow');
   // main 병합·태그는 코드·문서 파일만 바뀐 PR이라 게이트가 보지 않는다
@@ -191,7 +193,7 @@ test('D-T26 ① 대형 창 안에서도 main 병합·태그는 되고 운영 승
 });
 
 test('D-T26 ② 창 밖·데모 승격·코드 파일만 바뀐 PR은 건너뛴다', () => {
-  const root = rootWithCalendar([windowOf('large')]);
+  const root = rootWithCalendar([windowOf('large')], '2026-11-24T12:55:00.000Z');
   assert.equal(gate(root, { nowMs: Date.parse('2026-11-24T13:00:00Z'), changedFiles: ['deploy/envs/prod/queue-svc.yaml'] }).decision, 'allow');
   assert.equal(gate(root, { env: 'demo', changedFiles: ['deploy/envs/demo/queue-svc.yaml'] }).decision, 'skip');
   assert.equal(gate(root, { env: 'local', changedFiles: ['deploy/envs/local/queue-svc.yaml'] }).decision, 'skip');
@@ -200,7 +202,7 @@ test('D-T26 ② 창 밖·데모 승격·코드 파일만 바뀐 PR은 건너뛴�
 
 test('F023-GATE 여러 창 겹침·깨진 JSON·모르는 환경·플래그는 보수적으로 판정한다', () => {
   const root = rootWithCalendar([windowOf('large'), windowOf('small', E_SMALL)]);
-  const both = gate(root, { changedFiles: ['deploy/envs/prod/queue-svc.yaml'] });
+  const both = gate(root, { nowMs: Date.parse('2026-11-24T10:20:00Z'), changedFiles: ['deploy/envs/prod/queue-svc.yaml'] });
   assert.equal(both.decision, 'block');
   assert.ok(both.reasons.some((r) => r.includes(E_LARGE)), JSON.stringify(both));
   assert.ok(both.reasons.some((r) => r.includes(E_SMALL)), JSON.stringify(both));

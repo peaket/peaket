@@ -88,7 +88,7 @@ describe('F-02-3 freeze-guard — 실행·장애', () => {
       log: (line) => void logs.push(line),
     });
     expect(run.result).toBe('aborted');
-    expect(run.aborted.sort()).toEqual(['a', 'b']);
+    expect([...run.aborted].sort()).toEqual(['a', 'b']);
     expect(calls.sort()).toEqual(['a', 'b']);
     expect(logs.filter((l) => l.event === 'freeze_rollout_aborted')).toHaveLength(2);
   });
@@ -98,7 +98,12 @@ describe('F-02-3 freeze-guard — 실행·장애', () => {
     const run = await runGuardOnce({
       now: () => Date.parse('2026-11-24T13:00:00Z'),
       calendar: { read: async () => calendarOf('large') },
-      rollouts: { list: async () => void (listed += 1) },
+      rollouts: {
+        list: async () => {
+          listed += 1;
+          return [];
+        },
+      },
       aborter: { abort: async () => {} },
     });
     expect(run.result).toBe('no-window');
