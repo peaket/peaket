@@ -1,0 +1,12 @@
+{
+  "queue": {
+    "usedMemory": 4771240,
+    "usedMemoryPeak": 4921176,
+    "maxmemory": 0
+  },
+  "seat": {
+    "usedMemory": 4574352,
+    "usedMemoryPeak": 5338048,
+    "maxmemory": 0
+  }
+}

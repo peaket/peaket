@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 96 | 99 | 0 | 0 | 0 | 12 | 0 | 24 | 106 | 337 |
-| 합계 | 96 | 99 | 0 | 0 | 0 | 12 | 0 | 24 | 106 | 337 |
+| B | 97 | 98 | 0 | 0 | 0 | 12 | 0 | 24 | 106 | 337 |
+| 합계 | 97 | 98 | 0 | 0 | 0 | 12 | 0 | 24 | 106 | 337 |
 
 ## docs/features/control-tower.md
 
@@ -88,7 +88,7 @@
 | C-T45 | ② | 운영 명령 주석과 서비스 지도 | ② 온세일 대시보드의 주석 조회는 같은 회차 그래프에 명령 번호와 단계를 표시한다. | ID만 | B | 시험: services/ops-svc/test/ops-event-log.test.ts |
 | C-T45 | ③ | 운영 명령 주석과 서비스 지도 | ③ 서비스 A → B 호출이 든 요청 기록을 넣으면 노드 그래프에 연결이 보인다. | ID만 | B | 시험: services/ops-svc/test/ops-event-log.test.ts |
 | C-T45 | ④ | 운영 명령 주석과 서비스 지도 | ④ 서비스 그래프 지표를 읽는 경보 규칙·자동 제어 입력이 없음은 규칙 검사로 확인한다 | ID만 | B | 시험: services/ops-svc/test/ops-event-log.test.ts |
-| C-T46 | ① | 판매 일시정지 1인 실행과 2인 재개 | ① commander 1인이 재인증 뒤 명령 3을 내면 승인 대기 없이 전파되어 ack p99 3초 안에 ACKED가 되고, | ID만 | B | 시험: apps/console-host/src/pages/commands/model/command-actions.test.mjs, apps/console-host/src/pages/commands/model/comm… |
+| C-T46 | ① | 판매 일시정지 1인 실행과 2인 재개 | ① commander 1인이 재인증 뒤 명령 3을 내면 승인 대기 없이 전파되어 ack p99 3초 안에 ACKED가 되고, | 자동 시험 | B | 시험: tools/web-checks/console-commands/commands.spec.mjs |
 | C-T46 | ② | 판매 일시정지 1인 실행과 2인 재개 | ② 사후 검토 보고서 할 일(작성 48시간, 다른 commander 검토 7일)이 생긴다. | 자동 시험 | B | 시험: services/ops-svc/test/post-review.test.ts |
 | C-T46 | ③ | 판매 일시정지 1인 실행과 2인 재개 | ③ 재인증이 없거나 operator가 내면 403이다. | 자동 시험 | B | 시험: apps/console-host/src/pages/commands/model/command-actions.test.mjs, apps/console-host/src/pages/commands/model/comm… |
 | C-T46 | ④ | 판매 일시정지 1인 실행과 2인 재개 | ④ 판매 재개는 REVERT_PENDING이 되고, 요청자가 아닌 operator 이상이 재인증하고 승인해야 REVERTED가 된다. 10분 안에 승인이 없으면… | 자동 시험 | B | 시험: apps/console-host/src/pages/commands/model/command-actions.test.mjs, apps/console-host/src/pages/commands/ui/connect… |

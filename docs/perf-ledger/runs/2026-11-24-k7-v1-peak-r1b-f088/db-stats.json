@@ -1,0 +1,20 @@
+{
+  "purchase": {
+    "xactCommit": 50051,
+    "tupInserted": 49844,
+    "tupUpdated": 32727,
+    "tupDeleted": 2214,
+    "deadlocks": 0,
+    "walBytes": 45494051,
+    "seconds": 88
+  },
+  "payment": {
+    "xactCommit": 18978,
+    "tupInserted": 6541,
+    "tupUpdated": 3357,
+    "tupDeleted": 1106,
+    "deadlocks": 0,
+    "walBytes": 45494051,
+    "seconds": 88
+  }
+}

@@ -1,0 +1,1473 @@
+{
+  "generated_at": "2026-11-24T14:35:26.839Z",
+  "metrics": {
+    "payment_outcomes{phase:main,status:AWAITING_DEPOSIT}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_drain_unfinished{phase:main}": {
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter"
+    },
+    "http_req_failed{phase:main,route:sim_auth}": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "rate": 0,
+        "passes": 0,
+        "fails": 1374
+      },
+      "thresholds": {
+        "rate>=0": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_waiting": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(90)": 660.7174477999998,
+        "p(95)": 1113.5617658999986,
+        "p(99)": 4683.655738900007,
+        "p(99.9)": 12231.591998228132,
+        "avg": 262.0409565119311,
+        "min": 0,
+        "med": 1.062333,
+        "max": 18401.960946
+      }
+    },
+    "http_req_duration{phase:main,route:payment_status}": {
+      "thresholds": {
+        "max>=0": {
+          "ok": true
+        }
+      },
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(99.9)": 13779.098904900316,
+        "avg": 3574.4854896562097,
+        "min": 269.707913,
+        "med": 3122.325587,
+        "max": 18401.978707,
+        "p(90)": 6168.596882,
+        "p(95)": 7133.4700716,
+        "p(99)": 11272.60875992003
+      }
+    },
+    "data_sent": {
+      "contains": "data",
+      "values": {
+        "count": 73349192,
+        "rate": 896729.7339940969
+      },
+      "type": "counter"
+    },
+    "payment_accept_status{phase:main,status:429}": {
+      "values": {
+        "rate": 2.665156584284025,
+        "count": 218
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter",
+      "contains": "default"
+    },
+    "payment_pending_last_call_ms{phase:main}": {
+      "thresholds": {
+        "max>=0": {
+          "ok": true
+        }
+      },
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "min": 0,
+        "med": 4470,
+        "max": 18403,
+        "p(90)": 10734,
+        "p(95)": 13065.499999999993,
+        "p(99)": 17335.499999999996,
+        "p(99.9)": 18296.250000000004,
+        "avg": 5471.8
+      }
+    },
+    "payment_accept_status{phase:main,status:202}": {
+      "contains": "default",
+      "values": {
+        "count": 855,
+        "rate": 10.45279302551762
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter"
+    },
+    "payment_started{phase:main}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 855,
+        "rate": 10.45279302551762
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_confirm_ms{phase:main}": {
+      "values": {
+        "avg": 4534.4269005847955,
+        "min": 1789,
+        "med": 3818,
+        "max": 20000,
+        "p(90)": 7403.2,
+        "p(95)": 8416.4,
+        "p(99)": 13007.600000000013,
+        "p(99.9)": 15120.24400000041
+      },
+      "thresholds": {
+        "max>=0": {
+          "ok": true
+        }
+      },
+      "type": "trend",
+      "contains": "time"
+    },
+    "dropped_iterations{scenario:mark_start}": {
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "rate": 0,
+        "count": 0
+      }
+    },
+    "payment_pending_before_3s{phase:main}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_duration": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "avg": 694.9779682518825,
+        "min": 0.074462,
+        "med": 381.8695295,
+        "max": 18401.978707,
+        "p(90)": 1668.0833105000002,
+        "p(95)": 2683.0473425,
+        "p(99)": 5222.242318449999,
+        "p(99.9)": 10724.515953925136
+      },
+      "thresholds": {
+        "max>=0": {
+          "ok": true
+        }
+      }
+    },
+    "http_reqs{phase:main,route:pay_start}": {
+      "values": {
+        "count": 2146,
+        "rate": 26.23589921960329
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter",
+      "contains": "default"
+    },
+    "http_req_failed{phase:main,route:payment_status}": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "fails": 840,
+        "rate": 0.0593505039193729,
+        "passes": 53
+      },
+      "thresholds": {
+        "rate>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_confirm_ms": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "min": 1789,
+        "med": 4403,
+        "max": 20000,
+        "p(90)": 7596,
+        "p(95)": 8800.7,
+        "p(99)": 13550.760000000018,
+        "p(99.9)": 16569.212000000076,
+        "avg": 4842.269549218031
+      }
+    },
+    "http_reqs{phase:main,route:hold}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 3457,
+        "rate": 42.26351519206364
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_accept_status{phase:main,status:0}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "iteration_duration": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "max": 35105.290237,
+        "p(90)": 13368.880673400012,
+        "p(95)": 18025.4338276,
+        "p(99)": 26987.6521964,
+        "p(99.9)": 33319.653845012,
+        "avg": 4619.054734091835,
+        "min": 0.109922,
+        "med": 1747.508731
+      }
+    },
+    "dropped_iterations{scenario:warm}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 634,
+        "rate": 7.750959974477394
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_failed{phase:main,route:hold}": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "fails": 3445,
+        "rate": 0.0034712178189181373,
+        "passes": 12
+      },
+      "thresholds": {
+        "rate>=0": {
+          "ok": true
+        }
+      }
+    },
+    "dropped_iterations": {
+      "values": {
+        "count": 3844,
+        "rate": 46.99477940361372
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter",
+      "contains": "default"
+    },
+    "http_reqs": {
+      "contains": "default",
+      "values": {
+        "count": 12486,
+        "rate": 249.72
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter"
+    },
+    "http_req_connecting": {
+      "values": {
+        "min": 0,
+        "med": 0,
+        "max": 147.092394,
+        "p(90)": 0,
+        "p(95)": 0.11991379999999993,
+        "p(99)": 1.425278180000001,
+        "p(99.9)": 25.719415812004332,
+        "avg": 0.1324144890211777
+      },
+      "type": "trend",
+      "contains": "time"
+    },
+    "http_req_failed{phase:main}": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "rate": 0.19637994553900368,
+        "passes": 2452,
+        "fails": 10034
+      },
+      "thresholds": {
+        "rate>=0": {
+          "ok": true
+        }
+      }
+    },
+    "over_target{phase:main,route:hold,le:50}": {
+      "values": {
+        "count": 1503,
+        "rate": 18.374909844857292
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter",
+      "contains": "default"
+    },
+    "http_req_duration{phase:main,route:hold}": {
+      "contains": "time",
+      "values": {
+        "max": 423.264923,
+        "p(90)": 134.70881700000004,
+        "p(95)": 175.86677559999995,
+        "p(99)": 256.81419572000016,
+        "p(99.9)": 418.6738513280004,
+        "avg": 56.39360038501599,
+        "min": 2.504428,
+        "med": 41.041141
+      },
+      "thresholds": {
+        "max>=0": {
+          "ok": true
+        }
+      },
+      "type": "trend"
+    },
+    "dropped_iterations{scenario:mark_end}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "rate": 0,
+        "count": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_drain_finished_pending{phase:main}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_outcomes{phase:main,status:CONFIRMED}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 840,
+        "rate": 10.26941069173661
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "iterations": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 13493,
+        "rate": 164.95852198047865
+      }
+    },
+    "http_reqs{phase:main,route:sim_auth}": {
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 1374,
+        "rate": 16.797821774340598
+      }
+    },
+    "payment_outcomes{phase:main,status:COMPENSATED}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "rate": 0,
+        "count": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_tls_handshaking": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(99)": 0,
+        "p(99.9)": 0,
+        "avg": 0,
+        "min": 0,
+        "med": 0,
+        "max": 0,
+        "p(90)": 0,
+        "p(95)": 0
+      }
+    },
+    "payment_accept_status{phase:main,status:423}": {
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter",
+      "contains": "default"
+    },
+    "scenario_errors": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 8386,
+        "rate": 102.52295007250382
+      }
+    },
+    "payment_pending_last_call_ms": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "avg": 5004.36,
+        "min": 0,
+        "med": 4106,
+        "max": 18403,
+        "p(90)": 9162.000000000005,
+        "p(95)": 10756,
+        "p(99)": 16572.999999999985,
+        "p(99.9)": 18220.000000000022
+      }
+    },
+    "http_req_receiving": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(90)": 0.10771659999999998,
+        "p(95)": 0.19666109999999995,
+        "p(99)": 1.117374500000002,
+        "p(99.9)": 10.215678574000732,
+        "avg": 0.10206187751094678,
+        "min": 0,
+        "med": 0.031862,
+        "max": 89.333462
+      }
+    },
+    "payment_status_call_ms{phase:main}": {
+      "thresholds": {
+        "max>=0": {
+          "ok": true
+        }
+      },
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "med": 3122,
+        "max": 18403,
+        "p(90)": 6169,
+        "p(95)": 7133.799999999999,
+        "p(99)": 11273.56000000003,
+        "p(99.9)": 13779.764000000316,
+        "avg": 3574.791713325868,
+        "min": 270
+      }
+    },
+    "payment_pending_ms{phase:main}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(99)": 18920.739999999994,
+        "p(99.9)": 19892.074000000004,
+        "avg": 6790.6,
+        "min": 3026,
+        "med": 6003,
+        "max": 20000,
+        "p(90)": 12045.4,
+        "p(95)": 14603.699999999992
+      },
+      "thresholds": {
+        "max>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_accept_status": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 1581,
+        "rate": 19.32849798051855
+      }
+    },
+    "http_req_blocked": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "max": 193.600477,
+        "p(90)": 0.009958399999999994,
+        "p(95)": 0.17559109999999942,
+        "p(99)": 1.9163838800000064,
+        "p(99.9)": 26.994275902003583,
+        "avg": 0.1569330114852971,
+        "min": 0,
+        "med": 0.004671
+      }
+    },
+    "payment_pending_after_3s{phase:main}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 15,
+        "rate": 0.18338233378101088
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "vus_max": {
+      "type": "gauge",
+      "contains": "default",
+      "values": {
+        "min": 1254,
+        "max": 2457,
+        "value": 2457
+      }
+    },
+    "http_req_duration{phase:main}": {
+      "thresholds": {
+        "max>=0": {
+          "ok": true
+        }
+      },
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(90)": 1668.0833105000002,
+        "p(95)": 2683.0473425,
+        "p(99)": 5222.242318449999,
+        "p(99.9)": 10724.515953925136,
+        "avg": 694.9779682518825,
+        "min": 0.074462,
+        "med": 381.8695295,
+        "max": 18401.978707
+      }
+    },
+    "payment_accept_status{phase:main,status:504}": {
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter",
+      "contains": "default"
+    },
+    "vus": {
+      "values": {
+        "value": 614,
+        "min": 0,
+        "max": 1652
+      },
+      "type": "gauge",
+      "contains": "default"
+    },
+    "dropped_iterations{scenario:main}": {
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 3210,
+        "rate": 39.24381942913633
+      }
+    },
+    "payment_drain_finished_terminal": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 81,
+        "rate": 0.9902646024174587
+      }
+    },
+    "http_reqs{phase:main,route:payment_status}": {
+      "contains": "default",
+      "values": {
+        "count": 893,
+        "rate": 10.917361604429514
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter"
+    },
+    "payment_outcomes{phase:main,status:FAILED}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_pending_last_status": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 25,
+        "rate": 0.3056372229683515
+      }
+    },
+    "http_req_duration{phase:main,route:sim_auth}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(90)": 3.8380580000000024,
+        "p(95)": 10.562650949999993,
+        "p(99)": 33.94199591999998,
+        "p(99.9)": 74.80963945700076,
+        "avg": 2.443589588064046,
+        "min": 0.074462,
+        "med": 0.780123,
+        "max": 79.557366
+      },
+      "thresholds": {
+        "max>=0": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_duration{phase:main,route:sim_fault}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(95)": 0,
+        "p(99)": 0,
+        "p(99.9)": 0,
+        "avg": 0,
+        "min": 0,
+        "med": 0,
+        "max": 0,
+        "p(90)": 0
+      },
+      "thresholds": {
+        "max>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_drain_finished_terminal{phase:main}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 81,
+        "rate": 0.9902646024174587
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_pending_after_3s": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 25,
+        "rate": 0.3056372229683515
+      }
+    },
+    "payment_drain_finished{phase:main}": {
+      "contains": "default",
+      "values": {
+        "rate": 0.9902646024174587,
+        "count": 81
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter"
+    },
+    "http_req_duration{phase:main,route:payment}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(95)": 1733.452123,
+        "p(99)": 2111.322016399999,
+        "p(99.9)": 2974.5092325600126,
+        "avg": 748.4796997651571,
+        "min": 35.843489,
+        "med": 606.383025,
+        "max": 3025.195006,
+        "p(90)": 1497.340017
+      },
+      "thresholds": {
+        "max>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_accept_status{phase:main,status:503}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 98,
+        "rate": 1.1980979140359378
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_accept_status{phase:main,status:404}": {
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      }
+    },
+    "over_target{phase:main,route:payment,le:3000}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 994,
+        "rate": 12.152135985221655
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_failed{phase:main,route:pay_start}": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "rate": 0.3597390493942218,
+        "passes": 772,
+        "fails": 1374
+      },
+      "thresholds": {
+        "rate>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_drain_finished": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 81,
+        "rate": 0.9902646024174587
+      }
+    },
+    "payment_accept_status{phase:main,status:500}": {
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter",
+      "contains": "default"
+    },
+    "http_req_duration{expected_response:true}": {
+      "contains": "time",
+      "values": {
+        "p(90)": 344.61715050000004,
+        "p(95)": 850.4397083999982,
+        "p(99)": 4843.569655450096,
+        "p(99.9)": 12136.05318294982,
+        "avg": 207.93057668733402,
+        "min": 0.054589,
+        "med": 1.04568,
+        "max": 15491.785842
+      },
+      "type": "trend"
+    },
+    "payment_accept_status{phase:main,status:422}": {
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter"
+    },
+    "data_received": {
+      "type": "counter",
+      "contains": "data",
+      "values": {
+        "count": 197022298,
+        "rate": 2408693.92094252
+      }
+    },
+    "http_req_failed{phase:main,route:order}": {
+      "values": {
+        "rate": 0.3770682148040639,
+        "passes": 1299,
+        "fails": 2146
+      },
+      "thresholds": {
+        "rate>=0": {
+          "ok": true
+        }
+      },
+      "type": "rate",
+      "contains": "default"
+    },
+    "payment_pending_last_status{phase:main,status:APPROVED}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "over_target": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 22222,
+        "rate": 271.67481475210826
+      }
+    },
+    "http_reqs{phase:main,route:order}": {
+      "values": {
+        "count": 3445,
+        "rate": 42.11680932503884
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter",
+      "contains": "default"
+    },
+    "payment_drain_unfinished": {
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "type": "counter"
+    },
+    "payment_pending_last_status{phase:main,status:undefined}": {
+      "contains": "default",
+      "values": {
+        "count": 15,
+        "rate": 0.18338233378101088
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter"
+    },
+    "payment_pending_last_status{phase:main,status:RESERVED}": {
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      }
+    },
+    "payment_outcomes": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 1087,
+        "rate": 13.289106454663923
+      }
+    },
+    "payment_accept_status{phase:main,status:400}": {
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter",
+      "contains": "default"
+    },
+    "http_reqs{phase:main,route:payment}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 1171,
+        "rate": 14.316047523837582
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "checks": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "fails": 12226,
+        "rate": 0.9307704939383129,
+        "passes": 164375
+      }
+    },
+    "payment_status_calls": {
+      "values": {
+        "p(99)": 2,
+        "p(99.9)": 3,
+        "avg": 1.0662373505059797,
+        "min": 0,
+        "med": 1,
+        "max": 3,
+        "p(90)": 1,
+        "p(95)": 2
+      },
+      "type": "trend",
+      "contains": "time"
+    },
+    "http_reqs{phase:main}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 12486,
+        "rate": 152.64745463931345
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_accept_status{phase:main,status:409}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "rate": 0,
+        "count": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_failed{phase:main,route:payment}": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "fails": 855,
+        "rate": 0.2698548249359522,
+        "passes": 316
+      },
+      "thresholds": {
+        "rate>=0": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_failed": {
+      "values": {
+        "rate": 0.19637994553900368,
+        "passes": 2452,
+        "fails": 10034
+      },
+      "thresholds": {
+        "rate>=0": {
+          "ok": true
+        }
+      },
+      "type": "rate",
+      "contains": "default"
+    },
+    "payment_pending_last_status{phase:main,status:UNKNOWN}": {
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      }
+    },
+    "payment_finished{phase:main}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 855,
+        "rate": 10.45279302551762
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_pending_last_status{phase:main,status:ACCEPTED}": {
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter"
+    },
+    "payment_started": {
+      "values": {
+        "count": 1087,
+        "rate": 13.289106454663923
+      },
+      "type": "counter",
+      "contains": "default"
+    },
+    "payment_status_calls{phase:main}": {
+      "thresholds": {
+        "max>=0": {
+          "ok": true
+        }
+      },
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "avg": 1.0444444444444445,
+        "min": 0,
+        "med": 1,
+        "max": 3,
+        "p(90)": 1,
+        "p(95)": 1,
+        "p(99)": 2,
+        "p(99.9)": 3
+      }
+    },
+    "http_req_sending": {
+      "contains": "time",
+      "values": {
+        "max": 90.212064,
+        "p(90)": 0.32555039999999996,
+        "p(95)": 0.8998446999999979,
+        "p(99)": 5.58441766,
+        "p(99.9)": 26.16586925400677,
+        "avg": 0.2797560802152662,
+        "min": 0.003227,
+        "med": 0.01625
+      },
+      "type": "trend"
+    },
+    "payment_accept_status{phase:main,status:401}": {
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      },
+      "type": "counter"
+    },
+    "payment_pending_ms": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "max": 20000,
+        "p(90)": 10496.200000000004,
+        "p(95)": 12168.199999999999,
+        "p(99)": 18149.839999999986,
+        "p(99.9)": 19814.98400000002,
+        "avg": 6364.16,
+        "min": 3026,
+        "med": 5887
+      }
+    },
+    "payment_finished": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 1087,
+        "rate": 13.289106454663923
+      }
+    },
+    "payment_drain_finished_pending": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "rate": 0,
+        "count": 0
+      }
+    },
+    "payment_pending_before_3s": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      }
+    },
+    "over_target{phase:main,route:hold,le:150}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 295,
+        "rate": 3.6065192310265473
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "payment_status_call_ms": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "avg": 3692.339085418464,
+        "min": 270,
+        "med": 3285,
+        "max": 18403,
+        "p(90)": 6227.6,
+        "p(95)": 7501.599999999999,
+        "p(99)": 12069.500000000005,
+        "p(99.9)": 14928.676000000058
+      }
+    },
+    "payment_outcomes{phase:main,status:PENDING}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 15,
+        "rate": 0.18338233378101088
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_failed{phase:main,route:sim_fault}": {
+      "contains": "default",
+      "values": {
+        "rate": 0,
+        "passes": 0,
+        "fails": 0
+      },
+      "thresholds": {
+        "rate>=0": {
+          "ok": true
+        }
+      },
+      "type": "rate"
+    },
+    "http_req_duration{phase:main,route:order}": {
+      "thresholds": {
+        "max>=0": {
+          "ok": true
+        }
+      },
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(90)": 1463.5811727999999,
+        "p(95)": 1643.1995393999998,
+        "p(99)": 2102.7440513599995,
+        "p(99.9)": 2393.054726032,
+        "avg": 760.577040736431,
+        "min": 1.589435,
+        "med": 708.487928,
+        "max": 2896.390795
+      }
+    },
+    "http_reqs{phase:main,route:sim_fault}": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 0,
+        "rate": 0
+      },
+      "thresholds": {
+        "count>=0": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_duration{phase:main,route:pay_start}": {
+      "thresholds": {
+        "max>=0": {
+          "ok": true
+        }
+      },
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "max": 2898.132789,
+        "p(90)": 1595.148674,
+        "p(95)": 1792.3872485,
+        "p(99)": 2204.395855450006,
+        "p(99.9)": 2856.3659992300054,
+        "avg": 834.3483536547054,
+        "min": 7.637001,
+        "med": 721.9205704999999
+      }
+    },
+    "http_req_duration_all": {
+      "values": {
+        "p(90)": 661.0631905999999,
+        "p(95)": 1113.9825069999977,
+        "p(99)": 4687.225167100004,
+        "p(99.9)": 12231.737180276132,
+        "avg": 262.4227744696522,
+        "min": 0.054589,
+        "med": 1.349433,
+        "max": 18401.978707
+      },
+      "type": "trend",
+      "contains": "time"
+    },
+    "http_reqs_all": {
+      "values": {
+        "count": 192507,
+        "rate": 2353.4921952787377
+      },
+      "type": "counter",
+      "contains": "default"
+    },
+    "http_req_failed_all": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "rate": 0.09847434119278779,
+        "passes": 18957,
+        "fails": 173550
+      }
+    }
+  },
+  "root_group": {
+    "checks": [
+      {
+        "name": "사전 검증 201",
+        "path": "::사전 검증 201",
+        "id": "9d28a7721ad2764be7fa0872e3be3fc6",
+        "passes": 13208,
+        "fails": 949
+      },
+      {
+        "name": "진입 201",
+        "path": "::진입 201",
+        "id": "6677c2aad4f5c91023106996a15e4963",
+        "passes": 6644,
+        "fails": 6564
+      },
+      {
+        "name": "대기 상태 200",
+        "path": "::대기 상태 200",
+        "id": "fe5d84ec1134df9484f07cae95fa0d4e",
+        "passes": 125579,
+        "fails": 0
+      },
+      {
+        "name": "구매 세션 열기 200",
+        "path": "::구매 세션 열기 200",
+        "id": "e2ff74ee7176d0297d26d8fb57017387",
+        "passes": 5105,
+        "fails": 873
+      },
+      {
+        "name": "홀드 201",
+        "path": "::홀드 201",
+        "id": "fb61525ef26ef956bdd0dae931d4abc3",
+        "passes": 5087,
+        "fails": 18
+      },
+      {
+        "name": "주문 201",
+        "path": "::주문 201",
+        "id": "58dc7da6f90e2e176bdb97d6f81584d3",
+        "passes": 3035,
+        "fails": 2052
+      },
+      {
+        "id": "776bfbeefe05e605bcc55c8f9673a4df",
+        "passes": 1784,
+        "fails": 1251,
+        "name": "결제 시도 시작 201",
+        "path": "::결제 시도 시작 201"
+      },
+      {
+        "name": "결제창 인증 200",
+        "path": "::결제창 인증 200",
+        "id": "a3894aec8397264f52b065e4d5113798",
+        "passes": 1784,
+        "fails": 0
+      },
+      {
+        "name": "결제 접수 202",
+        "path": "::결제 접수 202",
+        "id": "514651b586d8be58176ac1adae750e21",
+        "passes": 1087,
+        "fails": 494
+      },
+      {
+        "name": "결제 확정 CONFIRMED",
+        "path": "::결제 확정 CONFIRMED",
+        "id": "d4632f6d108301ac8cda2ff19d7e65a4",
+        "passes": 1062,
+        "fails": 25
+      }
+    ],
+    "name": "",
+    "path": "",
+    "id": "d41d8cd98f00b204e9800998ecf8427e",
+    "groups": []
+  },
+  "options": {
+    "summaryTrendStats": [
+      "avg",
+      "min",
+      "med",
+      "max",
+      "p(90)",
+      "p(95)",
+      "p(99)",
+      "p(99.9)"
+    ],
+    "summaryTimeUnit": "",
+    "noColor": false
+  },
+  "state": {
+    "isStdOutTTY": false,
+    "isStdErrTTY": false,
+    "testRunDurationMs": 81796.319693
+  }
+}
