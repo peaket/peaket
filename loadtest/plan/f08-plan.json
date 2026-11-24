@@ -19,7 +19,8 @@
     "측정 중에 정하는 값(x1hat·x1·podCpus·podTag·x1hatPod·x1pod)은 bat025-plan.mjs --plan loadtest/plan/f08-plan.json set <이름> <값>으로 적는다. 명령의 {이름} 자리가 그 값으로 채워진다.",
     "잠금 명령의 C:/PROGRA~1/Git/bin/bash.exe는 이 PC의 Git bash다. 기본 bash는 WSL이라 D:/ticketpass-locks/lock.sh를 못 찾는다. PowerShell에서 전체 경로를 쓸 때는 따옴표로 감싼다.",
     "pnpm은 corepack pnpm으로 부른다(PowerShell 실행 정책이 pnpm.ps1을 막는다).",
-    "창 2(MSR-020)의 합본 메모리는 2GiB로 잰다. 창 1에서 512Mi·1GiB는 합본 3복제가 OOMKilled였고, 2GiB에서만 Ready였다(2026-11-24~25). 512Mi 과거 실행과 직접 비교하지 않는다."
+    "창 2(MSR-020)의 합본 메모리는 2GiB로 잰다. 창 1에서 512Mi·1GiB는 합본 3복제가 OOMKilled였고, 2GiB에서만 Ready였다(2026-11-24~25). 512Mi 과거 실행과 직접 비교하지 않는다.",
+    "N=8(msr020-n8-*)만 합본 메모리를 1GiB로 잰다. 8복제×2GiB(16GiB)+발생기 2×1GiB+다른 파드가 노드 23.46GiB에 안 들어가 발생기가 Pending이었다(2026-11-25). queue-svc single은 1GiB에서 OOM 없이 섰다. N=1~6은 2GiB다."
   ],
   "environment": {
     "stage": "창 1: kind lane4-f08 하나($env:PEAKET_CLUSTER='lane4-f08'), v1 --redis-tls on --replicas 3(K7 ②는 회마다 down/up, 데모 전에는 lane4-f08을 down). 창 2: 새 lane4-f08 클러스터, v1 --redis-tls on --replicas N --cpus <몫> --services queue-svc.",
@@ -2682,7 +2683,7 @@
             "--cpus",
             "{podCpus}",
             "--memory-mi",
-            "2048",
+            "1024",
             "--services",
             "queue-svc"
           ]
