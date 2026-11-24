@@ -11,6 +11,9 @@ COPY apps/web/queue-room/package.json apps/web/queue-room/
 RUN pnpm install --frozen-lockfile --filter @peaket/queue-room...
 COPY packages packages
 COPY apps/web/queue-room apps/web/queue-room
+# 대기실의 로그아웃 정리 루틴이 apps/web/src의 공용 keys.ts를 가져온다. 호스트 빌드에는 있지만
+# 이미지 문맥에는 없어 Docker 빌드가 UNRESOLVED_IMPORT로 실패했다(F-08-8 데모 S1, 2026-11-25).
+COPY apps/web/src apps/web/src
 # 빌드 때 정하는 API·대기열 출처(기본은 운영 값). 로컬 데모는 포트가 붙은 값을 넘긴다
 ARG VITE_PEAKET_API_ORIGIN=https://api.peaket.example
 ARG VITE_PEAKET_QUEUE_ORIGIN=https://queue.peaket.example
