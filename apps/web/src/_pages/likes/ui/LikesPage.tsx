@@ -2,17 +2,16 @@
 // ① 탭(관심 공연·알림 신청) ② 관심 공연 카드(공연 단위, 찜 해제) ③ 알림 신청 카드(끄기·밤 웹 푸시·끝난 까닭) ④ 오프라인 저장 대기 띠 ⑤ 알림 권한 설정(CMP-068).
 // 휴대폰 1열 → 태블릿(md 768) 2열 → 데스크톱(lg 1280, 본문 1040) 관심 공연 3열·알림 2열. 상태는 ?state=(보드 state 값), 다크는 ?theme=dark.
 // 계정 설정의 '오픈·취소표 신청 목록' 링크(?tab=alerts)로 들어오면 알림 신청 탭을 먼저 연다(추천안).
-import Link from 'next/link';
 import { resolvePreviewState, resolvePreviewTheme } from '@peaket/ds/Preview';
 import { SCR054_STATES } from '@/shared/config/screens.account';
 import { ORIGINS } from '@/shared/config/origins';
 import { firstParam, type PageProps } from '@/shared/lib/page-props';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
-import { activeAlertCount, alertItems, likeCards, serverLikeCards, type AlertItem, type LiveCard } from '../model/lists';
+import { activeAlertCount, alertItems, likeCards, type AlertItem, type LiveCard } from '../model/lists';
 import { likesView } from '../model/state';
 import { AlertActionButton, LikesTabs, PermissionSettingsButton } from './LikesClient';
-import { LikeCardList } from './LikeCardList';
+import { LikeCardList, LikesEmpty } from './LikeCardList';
 import { LikesLive } from './LikesLive';
 
 /** 목업 카드 → 공통 카드(미리보기 화면 전용) */
@@ -28,16 +27,13 @@ export async function LikesPage({ searchParams }: PageProps) {
   const v = likesView(state);
   // ?state=가 없으면 실서버 찜 목록(F-05-8). 있으면 디자인 보드 미리보기다.
   const live = firstParam(sp, 'state') === undefined && ORIGINS.api !== '';
-  const likes = previewCards(v.offline);
+  // 실서버 모드에는 목업 카드를 만들지 않는다(IR-06). 목업은 API 주소가 없는 퍼블리싱 빌드에만 남긴다
+  const likes = live ? [] : previewCards(v.offline);
   const alerts = v.empty ? [] : alertItems(v.endedSample);
   const pendingCount = likes.filter((c) => c.pending).length;
-  const likesPanel = live ? (
-    <LikesLive fallback={likes} initialOffline={v.offline} />
-  ) : likes.length === 0 ? (
-    <LikesEmpty />
-  ) : (
-    <LikeCardList cards={likes} offline={v.offline} pendingCount={pendingCount} />
-  );
+  const alertsBadge = v.empty ? undefined : activeAlertCount(alerts);
+  const alertsPanel = alerts.length === 0 ? <AlertsEmpty /> : <AlertsPanel items={alerts} />;
+  const previewLikesPanel = likes.length === 0 ? <LikesEmpty /> : <LikeCardList cards={likes} offline={v.offline} pendingCount={pendingCount} />;
 
   return (
     <AppShell dark={dark}>
@@ -47,13 +43,17 @@ export async function LikesPage({ searchParams }: PageProps) {
         tabIndex={-1}
       >
         <h1 className="t-xl">관심 공연·알림 신청</h1>
-        <LikesTabs
-          initial={v.tab}
-          likesBadge={v.empty ? undefined : likes.length}
-          alertsBadge={v.empty ? undefined : activeAlertCount(alerts)}
-          likesPanel={likesPanel}
-          alertsPanel={alerts.length === 0 ? <AlertsEmpty /> : <AlertsPanel items={alerts} />}
-        />
+        {live ? (
+          <LikesLive initialTab={v.tab} initialOffline={v.offline} alertsPanel={alertsPanel} alertsBadge={alertsBadge} />
+        ) : (
+          <LikesTabs
+            initial={v.tab}
+            likesBadge={v.empty ? undefined : likes.length}
+            alertsBadge={alertsBadge}
+            likesPanel={previewLikesPanel}
+            alertsPanel={alertsPanel}
+          />
+        )}
       </main>
       <PreviewSwitcher path="/my/likes" states={SCR054_STATES} current={state} keep={{ theme: dark ? 'dark' : undefined }} />
     </AppShell>
@@ -93,20 +93,6 @@ function AlertsPanel({ items }: { items: AlertItem[] }) {
       </ul>
       <p className="t-xs muted">밤(21:00~08:00)에는 &apos;밤에도 웹 푸시 받기&apos;를 켠 신청만 웹 푸시로 알리고, 끈 신청은 이메일로만 알립니다.</p>
       <PermissionSettingsButton />
-    </div>
-  );
-}
-
-function LikesEmpty() {
-  return (
-    <div className="state" style={{ padding: '56px 16px' }}>
-      <span className="state-icon">
-        <i className="ic ic-heart" aria-hidden="true" />
-      </span>
-      <h2 className="t-lg">관심 공연이 없습니다</h2>
-      <Link className="btn btn-secondary" href="/search">
-        공연 둘러보기
-      </Link>
     </div>
   );
 }

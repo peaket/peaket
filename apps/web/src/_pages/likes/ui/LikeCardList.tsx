@@ -89,6 +89,20 @@ export function LikeCardList({
   );
 }
 
+export function LikesEmpty() {
+  return (
+    <div className="state" style={{ padding: '56px 16px' }}>
+      <span className="state-icon">
+        <i className="ic ic-heart" aria-hidden="true" />
+      </span>
+      <h2 className="t-lg">관심 공연이 없습니다</h2>
+      <Link className="btn btn-secondary" href="/search">
+        공연 둘러보기
+      </Link>
+    </div>
+  );
+}
+
 /** 카드의 찜 해제(하트 아이콘 버튼). onToggle이 있으면 서버·대기열에 보내고 실패하면 되돌린다 */
 export function UnlikeButton({ title, onToggle }: { title: string; onToggle?: (next: boolean) => Promise<true | string> }) {
   const [liked, setLiked] = useState(true);

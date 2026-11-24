@@ -1,10 +1,11 @@
 'use client';
 // SCR-054 관심 공연 탭의 실서버 목록(F-05-8, GAT-260). 목업은 API 주소가 없는 퍼블리싱 빌드에만 남긴다.
 // - 목록은 브라우저가 같은 사이트 요청으로 `GET /v1/wishes`를 부른다(401이면 한 번 갱신). 401이 끝나면 로그인 안내다.
+// - 실서버 모드에는 목업 카드 fallback·목업 배지를 쓰지 않는다(IR-06). 첫 그리기·로딩·빈·오류를 실제 값으로 그린다.
 // - 찜 해제·다시 찜은 온라인이면 바로 저장하고, 오프라인이면 `peaket.wishQueue`에 마지막 동작만 남긴다.
-// - online·화면 복귀에 대기열을 다시 보낸다. 204만 지우고, 401·5xx·끊김은 남겨 다음 기회에 다시 보낸다(FE-T37).
+// - online·화면 복귀에 대기열을 다시 보낸다. 204만 지우고, 401은 멈추며 4xx·5xx·끊김은 지우지 않고 남긴다(FE-T37·IR-07).
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   flushWishQueue,
   queueWish,
@@ -15,9 +16,9 @@ import {
 import { isUnauthorizedError } from '@/shared/api/refresh';
 import { ORIGINS } from '@/shared/config/origins';
 import { serverLikeCards, type LiveCard } from '../model/lists';
-import { LikeCardList } from './LikeCardList';
-
-type Screen = 'loading' | 'ready' | 'guest' | 'error';
+import { liveLikesBadge, type LikesScreen } from '../model/live';
+import { LikesTabs } from './LikesClient';
+import { LikeCardList, LikesEmpty } from './LikeCardList';
 
 async function loadApi() {
   const [identity, api] = await Promise.all([import('@peaket/api-client/endpoints/identity'), import('@/shared/api')]);
@@ -25,9 +26,20 @@ async function loadApi() {
   return { ...identity, withFanRefresh: api.withFanRefresh };
 }
 
-export function LikesLive({ fallback, initialOffline }: { fallback: readonly LiveCard[]; initialOffline?: boolean }) {
-  const [cards, setCards] = useState<LiveCard[]>([...fallback]);
-  const [screen, setScreen] = useState<Screen>(ORIGINS.api ? 'loading' : 'ready');
+export function LikesLive({
+  initialTab,
+  initialOffline,
+  alertsPanel,
+  alertsBadge,
+}: {
+  initialTab: 'likes' | 'alerts';
+  initialOffline?: boolean;
+  alertsPanel: ReactNode;
+  alertsBadge?: number;
+}) {
+  // 실서버 모드의 첫 그리기는 빈 목록이다. 목업 카드 fallback을 쓰지 않는다(IR-06)
+  const [cards, setCards] = useState<LiveCard[]>([]);
+  const [screen, setScreen] = useState<LikesScreen>(ORIGINS.api ? 'loading' : 'ready');
   const [offline, setOffline] = useState(Boolean(initialOffline));
   const [pendingIds, setPendingIds] = useState<string[]>(() => readStoredWishQueue().map((x) => x.productionId));
   const mounted = useRef(true);
@@ -41,7 +53,6 @@ export function LikesLive({ fallback, initialOffline }: { fallback: readonly Liv
       const stored = readStoredWishQueue();
       setPendingIds(stored.map((x) => x.productionId));
       const next = serverLikeCards(r.data.items ?? [], stored.map((x) => x.productionId));
-      // 목록이 비어 있으면 목업을 남기지 않는다(찜한 공연이 없다는 정본 화면)
       setCards(next);
       setScreen('ready');
     } catch (e) {
@@ -49,7 +60,7 @@ export function LikesLive({ fallback, initialOffline }: { fallback: readonly Liv
       if (isUnauthorizedError(e)) setScreen('guest');
       else setScreen('error');
     }
-  }, [fallback.length]);
+  }, []);
 
   useEffect(() => {
     mounted.current = true;
@@ -122,8 +133,8 @@ export function LikesLive({ fallback, initialOffline }: { fallback: readonly Liv
     };
   }, [flush]);
 
-  if (screen === 'guest') {
-    return (
+  const likesPanel =
+    screen === 'guest' ? (
       <div className="state" style={{ padding: '56px 16px' }}>
         <span className="state-icon">
           <i className="ic ic-heart" aria-hidden="true" />
@@ -133,37 +144,32 @@ export function LikesLive({ fallback, initialOffline }: { fallback: readonly Liv
           로그인
         </Link>
       </div>
-    );
-  }
-  if (screen === 'error') {
-    return (
+    ) : screen === 'error' ? (
       <div className="state" style={{ padding: '56px 16px' }}>
         <h2 className="t-lg">찜한 공연을 불러오지 못했습니다</h2>
         <button className="btn btn-secondary" type="button" onClick={() => void load()}>
           다시 시도
         </button>
       </div>
-    );
-  }
-  if (cards.length === 0 && screen === 'ready') {
-    return (
-      <div className="state" style={{ padding: '56px 16px' }}>
+    ) : screen === 'loading' ? (
+      <div className="state" aria-busy="true" style={{ padding: '56px 16px' }}>
         <span className="state-icon">
           <i className="ic ic-heart" aria-hidden="true" />
         </span>
-        <h2 className="t-lg">관심 공연이 없습니다</h2>
-        <Link className="btn btn-secondary" href="/search">
-          공연 둘러보기
-        </Link>
+        <h2 className="t-lg">찜한 공연을 불러오는 중입니다</h2>
       </div>
+    ) : cards.length === 0 ? (
+      <LikesEmpty />
+    ) : (
+      <LikeCardList
+        cards={cards.map((c) => ({ ...c, pending: pendingIds.includes(c.id) }))}
+        offline={offline}
+        pendingCount={pendingIds.length}
+        onToggle={(id, next) => send(id, next ? 'PUT' : 'DELETE')}
+      />
     );
-  }
+
   return (
-    <LikeCardList
-      cards={cards.map((c) => ({ ...c, pending: pendingIds.includes(c.id) }))}
-      offline={offline}
-      pendingCount={pendingIds.length}
-      onToggle={(id, next) => send(id, next ? 'PUT' : 'DELETE')}
-    />
+    <LikesTabs initial={initialTab} likesBadge={liveLikesBadge(screen, cards)} alertsBadge={alertsBadge} likesPanel={likesPanel} alertsPanel={alertsPanel} />
   );
 }
