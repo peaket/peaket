@@ -108,6 +108,7 @@ node loadtest/run.mjs gw limits --from <a/sweep.json>,<b/sweep.json> --saturatio
 | `e2e/v1-rehearsal.e2e.mjs` | v1 합본 리허설(K1·K2·K7 ② 작은 규모 한 번씩, 장부에 남기지 않음, `node --test loadtest/e2e/v1-rehearsal.e2e.mjs`) |
 | `e2e/v0-rehearsal.e2e.mjs` | 실제 kind에서 시나리오마다 작은 규모로 끝까지 돌려 보는 리허설(docs/perf-ledger.md §3 1번, `node --test loadtest/e2e/v0-rehearsal.e2e.mjs`) |
 | `plan/bat025-plan.json`·`plan/bat025-plan.mjs` | BAT-025(PRF-220) 측정 창 1의 실행 목록(A/A·Q-T5·K2·K1·K7 ②·규칙 검사)과 상태 파일로 이어 돌기(`.cache/peaket-bat025/state.json`, 쓰는 법은 [plan/README.md](plan/README.md)) |
+| `analytics/` | F-04-8 측정 하네스. Kafka Avro 발생기·집계·검증·실행기로 초당 3만 건 신선도·누락률·강제 종료 정확성을 잰다([analytics/README.md](analytics/README.md), docs/review/plans/F-04-8.md) |
 
 ## 알아 둘 것
 
