@@ -581,7 +581,8 @@ export async function applySeed(o = {}) {
       headers: partnerHeaders,
       body: {
         seller: { legalName: promoter.legalName, representative: '예시 대표', address: '서울특별시 예시구 예시로 1', phone: '02-0000-0000', email: 'stella@example.test', businessRegNo: '000-00-00000', mailOrderReportNo: '제0000-예시호' },
-        payoutAccount: { bankCode: '000', accountNumber: '000000000000', holderName: promoter.legalName },
+        // bankCode는 두 자리 은행 코드 표(REFUND_BANK_CODES) 안의 값이어야 한다. '000'은 표 밖이라 core-svc가 400으로 막았다.
+        payoutAccount: { bankCode: '88', accountNumber: '000000000000', holderName: promoter.legalName },
         accessibleSeating: { confirmed: true },
       },
     });
