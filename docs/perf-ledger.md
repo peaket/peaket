@@ -539,6 +539,75 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | 2026-11-24 | 2026-11-24-k7-v1-fault-r3-f088 | K7 | v1 | local-10k | 11,002명, 100 RPS | 6,213 | 16.6% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-24-k7-v1-fault-r3-f088/ |
 | 2026-11-24 | 2026-11-24-k7-v1-peak-r1-f088 | K7 | v1 | local-100k | 18,002명, 300 RPS | 5,158 | 16.5% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-24-k7-v1-peak-r1-f088/ |
 | 2026-11-24 | 2026-11-24-k7-v1-peak-r1b-f088 | K7 | v1 | local-100k | 18,002명, 300 RPS | 5,222 | 19.6% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-24-k7-v1-peak-r1b-f088/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c05-r1-f082-s1 | NFR-001 | v1 | local-10k | 8,002명, 200 RPS | 87 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c05-r1-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c05-r1-f082-s2 | NFR-001 | v1 | local-10k | 9,602명, 240 RPS | 35 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c05-r1-f082-s2/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c05-r1-f082-s3 | NFR-001 | v1 | local-100k | 11,202명, 280 RPS | 160 | 0.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c05-r1-f082-s3/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c05-r1-f082-s4 | NFR-001 | v1 | local-100k | 12,802명, 320 RPS | 114 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c05-r1-f082-s4/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c05-r1-f082-s5 | NFR-001 | v1 | local-100k | 14,402명, 360 RPS | 170 | 0.6% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c05-r1-f082-s5/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c05-r2-f082-s1 | NFR-001 | v1 | local-10k | 8,002명, 200 RPS | 49 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c05-r2-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c05-r2-f082-s2 | NFR-001 | v1 | local-10k | 9,602명, 240 RPS | 211 | 0.3% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c05-r2-f082-s2/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c05-r3-f082-s1 | NFR-001 | v1 | local-10k | 8,002명, 200 RPS | 5,008 | 3.8% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c05-r3-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c05-r3-f082-s1-b1 | NFR-001 | v1 | local-10k | 4,002명, 100 RPS | 298 | 0.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c05-r3-f082-s1-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r1-f082-s1 | NFR-001 | v1 | local-100k | 16,002명, 400 RPS | 21 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r1-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r1-f082-s2 | NFR-001 | v1 | local-100k | 19,202명, 480 RPS | 35 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r1-f082-s2/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r1-f082-s3 | NFR-001 | v1 | local-100k | 22,402명, 560 RPS | 75 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r1-f082-s3/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r1-f082-s4 | NFR-001 | v1 | local-100k | 25,602명, 640 RPS | 91 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r1-f082-s4/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r1-f082-s5 | NFR-001 | v1 | local-100k | 28,802명, 720 RPS | 104 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r1-f082-s5/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r1-f082-s6 | NFR-001 | v1 | local-100k | 32,002명, 800 RPS | 149 | 0.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r1-f082-s6/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r2-f082-s1 | NFR-001 | v1 | local-100k | 16,002명, 400 RPS | 34 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r2-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r2-f082-s2 | NFR-001 | v1 | local-100k | 19,202명, 480 RPS | 58 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r2-f082-s2/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r2-f082-s3 | NFR-001 | v1 | local-100k | 22,402명, 560 RPS | 53 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r2-f082-s3/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r2-f082-s4 | NFR-001 | v1 | local-100k | 25,602명, 640 RPS | 97 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r2-f082-s4/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r2-f082-s5 | NFR-001 | v1 | local-100k | 28,802명, 720 RPS | 111 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r2-f082-s5/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r2-f082-s6 | NFR-001 | v1 | local-100k | 32,002명, 800 RPS | 179 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r2-f082-s6/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r2-f082-s7 | NFR-001 | v1 | local-100k | 35,202명, 880 RPS | 175 | 0.3% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r2-f082-s7/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r3-f082-s1 | NFR-001 | v1 | local-100k | 16,002명, 400 RPS | 34 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r3-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r3-f082-s2 | NFR-001 | v1 | local-100k | 19,202명, 480 RPS | 58 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r3-f082-s2/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r3-f082-s3 | NFR-001 | v1 | local-100k | 22,402명, 560 RPS | 74 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r3-f082-s3/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r3-f082-s4 | NFR-001 | v1 | local-100k | 25,602명, 640 RPS | 112 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r3-f082-s4/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r3-f082-s5 | NFR-001 | v1 | local-100k | 28,802명, 720 RPS | 142 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r3-f082-s5/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r3-f082-s6 | NFR-001 | v1 | local-100k | 32,002명, 800 RPS | 145 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r3-f082-s6/ |
+| 2026-11-24 | 2026-11-24-msr020-n1-c1-r3-f082-s7 | NFR-001 | v1 | local-100k | 35,202명, 880 RPS | 285 | 0.7% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n1-c1-r3-f082-s7/ |
+| 2026-11-24 | 2026-11-24-msr020-n2-c05-r1-f082-s1 | NFR-001 | v1 | local-100k | 12,802명, 320 RPS | 85 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n2-c05-r1-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n2-c05-r1-f082-s2 | NFR-001 | v1 | local-100k | 15,362명, 384 RPS | 129 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n2-c05-r1-f082-s2/ |
+| 2026-11-24 | 2026-11-24-msr020-n2-c05-r1-f082-s3 | NFR-001 | v1 | local-100k | 17,922명, 448 RPS | 147 | 0.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n2-c05-r1-f082-s3/ |
+| 2026-11-24 | 2026-11-24-msr020-n2-c05-r2-f082-s1 | NFR-001 | v1 | local-100k | 12,802명, 320 RPS | 55 | 0.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n2-c05-r2-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n2-c05-r2-f082-s2 | NFR-001 | v1 | local-100k | 15,362명, 384 RPS | 111 | 0.3% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n2-c05-r2-f082-s2/ |
+| 2026-11-24 | 2026-11-24-msr020-n2-c05-r3-f082-s1 | NFR-001 | v1 | local-100k | 12,802명, 320 RPS | 51 | 0.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n2-c05-r3-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n2-c05-r3-f082-s2 | NFR-001 | v1 | local-100k | 15,362명, 384 RPS | 174 | 0.2% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n2-c05-r3-f082-s2/ |
+| 2026-11-24 | 2026-11-24-msr020-n3-c05-r1-f082-s1 | NFR-001 | v1 | local-100k | 19,202명, 480 RPS | 134 | 0.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n3-c05-r1-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n3-c05-r1-f082-s1-b1 | NFR-001 | v1 | local-10k | 9,602명, 240 RPS | 26 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n3-c05-r1-f082-s1-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n3-c05-r1-f082-s2-b1 | NFR-001 | v1 | local-100k | 23,042명, 576 RPS | 124 | 0.2% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n3-c05-r1-f082-s2-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n3-c05-r2-f082-s1 | NFR-001 | v1 | local-100k | 19,202명, 480 RPS | 50 | 0.2% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n3-c05-r2-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n3-c05-r2-f082-s1-b1 | NFR-001 | v1 | local-10k | 9,602명, 240 RPS | 81 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n3-c05-r2-f082-s1-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n3-c05-r2-f082-s2-b1 | NFR-001 | v1 | local-100k | 23,042명, 576 RPS | 161 | 0.3% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n3-c05-r2-f082-s2-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n3-c05-r3-f082-s1 | NFR-001 | v1 | local-100k | 19,202명, 480 RPS | 45 | 0.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n3-c05-r3-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n3-c05-r3-f082-s2 | NFR-001 | v1 | local-100k | 23,042명, 576 RPS | 227 | 0.3% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n3-c05-r3-f082-s2/ |
+| 2026-11-24 | 2026-11-24-msr020-n4-c05-r1-f082-s1 | NFR-001 | v1 | local-100k | 25,602명, 640 RPS | 140 | 0.2% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n4-c05-r1-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n4-c05-r1-f082-s1-b1 | NFR-001 | v1 | local-100k | 12,802명, 320 RPS | 106 | 0.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n4-c05-r1-f082-s1-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n4-c05-r1-f082-s2-b1 | NFR-001 | v1 | local-100k | 30,722명, 768 RPS | 56 | 0.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n4-c05-r1-f082-s2-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n4-c05-r2-f082-s1 | NFR-001 | v1 | local-100k | 25,602명, 640 RPS | 122 | 0.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n4-c05-r2-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n4-c05-r2-f082-s2 | NFR-001 | v1 | local-100k | 30,722명, 768 RPS | 168 | 0.5% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n4-c05-r2-f082-s2/ |
+| 2026-11-24 | 2026-11-24-msr020-n4-c05-r3-f082-s1 | NFR-001 | v1 | local-100k | 25,602명, 640 RPS | 116 | 0.4% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n4-c05-r3-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n4-c05-r3-f082-s1-b1 | NFR-001 | v1 | local-100k | 12,802명, 320 RPS | 53 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n4-c05-r3-f082-s1-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n4-c05-r3-f082-s2-b1 | NFR-001 | v1 | local-100k | 30,722명, 768 RPS | 70 | 0.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n4-c05-r3-f082-s2-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n6-c05-r1-f082-s1 | NFR-001 | v1 | local-100k | 38,402명, 960 RPS | 163 | 0.2% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n6-c05-r1-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n6-c05-r1-f082-s1-b1 | NFR-001 | v1 | local-100k | 19,202명, 480 RPS | 74 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n6-c05-r1-f082-s1-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n6-c05-r1-f082-s2-b1 | NFR-001 | v1 | local-100k | 46,082명, 1,152 RPS | 186 | 0.2% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n6-c05-r1-f082-s2-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n6-c05-r2-f082-s1 | NFR-001 | v1 | local-100k | 38,402명, 960 RPS | 4,960 | 0.5% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n6-c05-r2-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n6-c05-r2-f082-s1-b1 | NFR-001 | v1 | local-100k | 19,202명, 480 RPS | 77 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n6-c05-r2-f082-s1-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n6-c05-r2-f082-s2-b1 | NFR-001 | v1 | local-100k | 46,082명, 1,152 RPS | 162 | 0.2% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n6-c05-r2-f082-s2-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n6-c05-r3-f082-s1 | NFR-001 | v1 | local-100k | 38,402명, 960 RPS | 116 | 0.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n6-c05-r3-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n6-c05-r3-f082-s2 | NFR-001 | v1 | local-100k | 46,082명, 1,152 RPS | 115 | 0.2% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n6-c05-r3-f082-s2/ |
+| 2026-11-24 | 2026-11-24-msr020-n8-c05-r1-f082-s1 | NFR-001 | v1 | local-100k | 51,202명, 1,280 RPS | 112 | 0.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n8-c05-r1-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n8-c05-r1-f082-s1-b1 | NFR-001 | v1 | local-100k | 25,602명, 640 RPS | 77 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n8-c05-r1-f082-s1-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n8-c05-r1-f082-s2-b1 | NFR-001 | v1 | local-100k | 61,442명, 1,536 RPS | 188 | 0.3% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n8-c05-r1-f082-s2-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n8-c05-r2-f082-s1 | NFR-001 | v1 | local-100k | 51,202명, 1,280 RPS | 177 | 0.5% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n8-c05-r2-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n8-c05-r2-f082-s1-b1 | NFR-001 | v1 | local-100k | 25,602명, 640 RPS | 98 | 0.1% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n8-c05-r2-f082-s1-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n8-c05-r2-f082-s2-b1 | NFR-001 | v1 | local-100k | 61,442명, 1,536 RPS | 202 | 0.2% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n8-c05-r2-f082-s2-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n8-c05-r3-f082-s1 | NFR-001 | v1 | local-100k | 51,202명, 1,280 RPS | 174 | 0.3% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n8-c05-r3-f082-s1/ |
+| 2026-11-24 | 2026-11-24-msr020-n8-c05-r3-f082-s1-b1 | NFR-001 | v1 | local-100k | 25,602명, 640 RPS | 91 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n8-c05-r3-f082-s1-b1/ |
+| 2026-11-24 | 2026-11-24-msr020-n8-c05-r3-f082-s2-b1 | NFR-001 | v1 | local-100k | 61,442명, 1,536 RPS | 188 | 0.3% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n8-c05-r3-f082-s2-b1/ |
 <!-- ledger:end -->
 
 표준 서식 예시 (참고용 Mock 데이터):

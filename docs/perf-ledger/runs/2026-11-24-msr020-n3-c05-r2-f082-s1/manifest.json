@@ -1,0 +1,113 @@
+{
+  "run_id": "2026-11-24-msr020-n3-c05-r2-f082-s1",
+  "kpi": "NFR-001",
+  "version": "v1",
+  "profile": "local-100k",
+  "scale": {
+    "users": 19202,
+    "arrival_rps": 480.0,
+    "duration_s": 30,
+    "warmup_s": 10
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v1-entry.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "7989ae113fcf65586213054148cb8ba818d77a8c",
+    "docs": null
+  },
+  "raw_uri": "s3://peaket-perf-raw/runs/2026-11-24-msr020-n3-c05-r2-f082-s1/",
+  "redis_tls": true,
+  "paired_run": null,
+  "host": {
+    "cpu_util": 2.1298260500636403,
+    "procs_running": 3,
+    "logical_cpus": 32,
+    "throttle": {
+      "bundle": {
+        "ratio": 0.0423728813559322,
+        "nrThrottled": 5,
+        "nrPeriods": 118,
+        "throttledUsec": 1195929,
+        "pods": 3
+      },
+      "valkey": {
+        "ratio": 0,
+        "nrThrottled": 0,
+        "nrPeriods": 0,
+        "throttledUsec": 0,
+        "pods": 1
+      },
+      "generator": {
+        "ratio": 0,
+        "nrThrottled": 0,
+        "nrPeriods": 12,
+        "throttledUsec": 0,
+        "pods": 1
+      }
+    },
+    "cpu_assigned": 5.5,
+    "tags": [],
+    "kernel": {
+      "listen_overflows": 0,
+      "listen_drops": 0
+    }
+  },
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 1대(CPU 2·메모리 1024Mi씩, kind 안)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-24T19:50:20Z",
+  "ended_at": "2026-11-24T19:51:00Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 3.667433,
+    "p95_ms": 5.121568,
+    "p99_ms": 49.724627,
+    "error_rate": 0.001944309422956739,
+    "requests": 14401,
+    "rps": 480.03333333333336,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": [
+    {
+      "name": "entry_p99_200ms",
+      "allowed": 0.01,
+      "trials": 14401,
+      "violations": 6,
+      "cp_upper": 0.000822,
+      "min_trials": 299,
+      "result": "pass",
+      "target": "entry p99 ≤ 200ms"
+    },
+    {
+      "name": "entry_errors",
+      "allowed": 0.001,
+      "trials": 14401,
+      "violations": 28,
+      "cp_upper": 0.002665,
+      "min_trials": 2995,
+      "result": "fail",
+      "target": "entry 오류율 < 0.1%"
+    }
+  ],
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "발생기 1대 CPU 평균 최고 15.1%·메모리 최대 57.6%, VU 최대 합 615, 시나리오 오류 0건, 계획 최고 도착률 480/s(docs/verification.md §3.9·§3.10); entry: 14401건, p99 49.7ms, 실패 28건; v1 한 프로세스 합본(queue-svc·admission-ctrl·purchase-svc·payment-svc, OTel 서비스 이름 bundle 하나), Redis TLS 켬; 넣지 않은 서비스의 대역: trust-svc 위험 판정 늘 축소 운영, identity-svc 재확인 토큰 판정, ticket-svc 늘 발권, core-svc 대신 시드(회차 일정·좌석 판매·좌석맵 판); 게이트웨이 없음: k6가 합본 Service와 대기 상태 파일 앞 nginx 캐시로 바로 보내고 신원 머리를 넣는다(입구 IP 한도 없음); MSR-020 진입 단계: 진입 서버(합본 복제) 3대 × CPU 0.5, 합본 서비스 queue-svc(모드 single), 도착률 480/s, 사람마다 진입 한 번(가상 대기자 19202명), 사전 검증 토큰 파일(측정 전 한 번) 30.4초, 요청 28803·만듦 28803·실패 0, 토큰 없어 못 보냄 0건(진입 VU 307개), 호스트 CPU 2.1%, procs_running 3/논리 32, 준 CPU 합 5.5, 커널 ListenOverflows +0·ListenDrops +0, 표시 없음",
+  "collected_at": "2026-11-24T19:53:32Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

@@ -1,0 +1,13 @@
+측정 환경(2026-11-24T18:10:54.133Z)
+PC: Intel(R) Core(TM) i9-14900HX 논리 프로세서 32개, 메모리 32 GiB
+Docker 엔진: Docker 29.8.1, CPU 32, 메모리 25194881024 B, 커널 6.18.33.2-microsoft-standard-WSL2, Docker Desktop
+WSL 설정(.wslconfig): [wsl2]; memory=24GB
+클러스터: kind peaket(노드 하나), kubeconfig D:\ticketpass-lane4-F-08-2-refresh\.cache\peaket-tools\kubeconfig-lane4-f08
+발생기: k6 grafana/k6:1.4.2@sha256:3656673de3f30424e8ebcfa46acd9558d83b6a43612d0f668ffeac953950c6c7, 파드 1대(CPU 2·메모리 1024Mi씩, 요청 = 한도), GOMAXPROCS 2
+시계: 발생기와 대상이 같은 PC 커널 시계를 쓴다(시계 차이 0, docs/perf-ledger.md §3 3번)
+CPU 배치: WSL 안에서 어느 코어에 놓일지 고르지 않는다(docs/verification.md §3.5 6번 '코어 혼합'은 표시만)
+인자: {"command":"v1","scenario":"entry","users":8002,"rate":200,"warmS":10,"mainS":30,"prepS":150,"cpus":2,"memoryMi":1024,"record":true,"invariants":false,"namespace":"v1","settle":false,"hpaTimeline":false,"dbStats":false,"redisStats":false,"hostMetrics":true,"replicas":1,"podCpus":0.5,"runId":"2026-11-24-msr020-n1-c05-r1-f082-s1","profile":"local-10k","promUrl":"http://127.0.0.1:9090","out":"D:\\ticketpass-lane4-F-08-2-refresh\\.cache\\peaket-f08\\msr020\\2026-11-24-n1-r1\\step-1"}
+
+v1 합본(docs/verification.md §3.8 '합본의 v1 무대'): 복제 1, CPU 요청 500m·한도 500m(목표 -), 메모리 요청 2Gi·한도 2Gi, 모드 single, HPA 끔
+대기열·좌석 Redis TLS 켬, 릴레이 purchase·payment 각 2, 대기 상태 파일 앞 nginx 캐시(nginxinc/nginx-unprivileged:1.29.3-alpine, 실은 이미지 sha256:5aea7cc516b419e3526f47dd1531be31a56a046cfe44754d94f9383e13e2ee99, linux/amd64 매니페스트 sha256:f7d0d0f2ebc0486dc110278672b9073f7fd641e58376b112b0c8865cf36d2e36)
+PostgreSQL(v1 무대 전용, max_connections 600) 클라이언트 연결 최대 7(5초마다 9번 잼, 못 읽음 0)

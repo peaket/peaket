@@ -1,0 +1,92 @@
+{
+  "app_cpu_cores": {
+    "points": 30,
+    "series": 1,
+    "labels": "{}",
+    "p50": 0.34814854323621575,
+    "p99": 0.37981232082138794,
+    "max": 0.37981232082138794,
+    "mean": 0.3504906628676502
+  },
+  "app_rps": {
+    "points": 30,
+    "series": 1,
+    "labels": "{}",
+    "p50": 279.5706094145886,
+    "p99": 656.8437895859724,
+    "max": 656.8437895859724,
+    "mean": 320.46681548778724
+  },
+  "error_rate": {
+    "points": 18,
+    "series": 1,
+    "labels": "{}",
+    "p50": 0.0,
+    "p99": 0.00023809523809523807,
+    "max": 0.00023809523809523807,
+    "mean": 3.9682539682539676e-05
+  },
+  "event_loop_lag_ms": {
+    "points": 30,
+    "series": 1,
+    "labels": "{}",
+    "p50": 11.190271,
+    "p99": 27.852799,
+    "max": 27.852799,
+    "mean": 16.239273666666666
+  },
+  "heap_used_mb": {
+    "points": 30,
+    "series": 1,
+    "labels": "{}",
+    "p50": 208.20103454589844,
+    "p99": 254.11714935302734,
+    "max": 254.11714935302734,
+    "mean": 210.60016428629558
+  },
+  "hold_p99_ms": {
+    "points": 0,
+    "series": 0,
+    "labels": null,
+    "p50": null,
+    "p99": null,
+    "max": null,
+    "mean": null
+  },
+  "origin_rps": {
+    "points": 0,
+    "series": 0,
+    "labels": null,
+    "p50": null,
+    "p99": null,
+    "max": null,
+    "mean": null
+  },
+  "p99_ms": {
+    "points": 30,
+    "series": 1,
+    "labels": "{}",
+    "p50": 18.826315789473753,
+    "p99": 20.0,
+    "max": 20.0,
+    "mean": 13.952067676123015
+  },
+  "payment_new_paused_rps": {
+    "points": 0,
+    "series": 0,
+    "labels": null,
+    "p50": null,
+    "p99": null,
+    "max": null,
+    "mean": null
+  },
+  "rss_mb": {
+    "points": 30,
+    "series": 1,
+    "labels": "{}",
+    "p50": 476.2265625,
+    "p99": 481.109375,
+    "max": 481.109375,
+    "mean": 476.67161458333334
+  }
+}
