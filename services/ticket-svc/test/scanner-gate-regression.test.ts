@@ -175,8 +175,8 @@ describe('R-622 C1-02 서버 재판정: 배치·구역·모드·세션 창·마�
           body,
         });
 
-    // 세션 유효 창 경계. 마감은 멀리 두어 다른 표시가 섞이지 않게 한다.
-    const windowRun = runWith(placedWith({ get: async () => ({ promoterId: ACCOUNT, reentryAllowed: false, entryClosesAtMs: NOW + 60_000 }) }));
+    // 세션 유효 창 경계. 마감 행이 없어 마감 표시는 섞이지 않는다(마감 행이 없으면 AFTER_CLOSE 없음, IR-12).
+    const windowRun = runWith(placedWith({ get: async () => ({ promoterId: ACCOUNT, reentryAllowed: false }) }));
     const before = scan({ ticketId: T.a, scannedAtDevice: new Date(NOW - 1).toISOString() });
     expect((await windowRun([before])).flags.map((f) => f.kind)).toEqual(['OUT_OF_SESSION']);
     const atStart = scan({ ticketId: T.b, scannedAtDevice: new Date(NOW).toISOString() });
@@ -186,15 +186,19 @@ describe('R-622 C1-02 서버 재판정: 배치·구역·모드·세션 창·마�
     const after = scan({ ticketId: T.d, scannedAtDevice: new Date(NOW + 10_001).toISOString() });
     expect((await windowRun([after])).flags.map((f) => f.kind)).toEqual(['OUT_OF_SESSION']);
 
-    // 입장 마감 경계. 세션 창은 넓게 둔다.
-    const closeRun = runWith(
-      placedWith({ get: async () => ({ promoterId: ACCOUNT, reentryAllowed: false, entryClosesAtMs: NOW + 5_000 }) }),
-      { sessionValidFromMs: NOW - 60_000, sessionValidUntilMs: NOW + 60_000 },
-    );
-    const atClose = scan({ ticketId: T.e, scannedAtDevice: new Date(NOW + 5_000).toISOString() });
+    // 입장 마감 경계. 세션 창은 넓게 둔다. 운영과 같이 마감 행(ticket-svc)과 받은 시각으로만 가르고,
+    // core 사본의 entryClosesAtMs·보정 시각은 쓰지 않는다(offline-gate §7.3, IR-12).
+    const closeRun = runWith(placedWith({ get: async () => ({ promoterId: ACCOUNT, reentryAllowed: false }) }), { sessionValidFromMs: NOW - 60_000, sessionValidUntilMs: NOW + 60_000 });
+    store.seedEntryClose(EVENT, NOW);
+    // 보정 시각이 옛 규칙의 마감 뒤여도 받은 시각이 마감 시각과 같으면 표시가 없다
+    const atClose = scan({ ticketId: T.e, scannedAtDevice: new Date(NOW + 5_001).toISOString() });
     expect((await closeRun([atClose])).flags).toEqual([]);
-    const afterClose = scan({ ticketId: T.f, scannedAtDevice: new Date(NOW + 5_001).toISOString() });
+    store.seedEntryClose(EVENT, NOW - 1);
+    // 보정 시각이 옛 규칙의 마감 전이어도 받은 시각이 마감 시각보다 뒤면 표시가 붙는다
+    const afterClose = scan({ ticketId: T.f, scannedAtDevice: new Date(NOW - 5_000).toISOString() });
     expect((await closeRun([afterClose])).flags.map((f) => f.kind)).toEqual(['AFTER_CLOSE']);
+    // 뒤의 시계 불확실 기록에 마감 표시가 섞이지 않게 마감 행 대역을 지운다
+    store.entryCloses.delete(EVENT);
 
     // 시계 불확실 경계. ±2분 정확히는 표시하지 않고 1ms 넘으면 표시한다.
     const clockRun = runWith(placedWith({ get: async () => ({ promoterId: ACCOUNT, reentryAllowed: false }) }), {

@@ -1,6 +1,7 @@
 // F-05-4 서버 판정의 보정 시각 시험(시험 리뷰 RV-02, 계획 docs/review/plans/F-05-4.md §2의 4).
-// 정본: docs/features/offline-gate.md §7.1 '보정 시각을 두 번 더하지 않는다'(올라온 scannedAtDevice가 이미 보정 시각이고, 순서·취소 뒤·세션 밖·마감 뒤는
+// 정본: docs/features/offline-gate.md §7.1 '보정 시각을 두 번 더하지 않는다'(올라온 scannedAtDevice가 이미 보정 시각이고, 순서·취소 뒤·세션 밖은
 // 그 값을 그대로 쓴다. clockOffsetMs는 '시각 불확실'에만), openapi ScanEvent.scannedAtDevice.
+// '마감 뒤 도착'만은 F-05-6이 바꾼 §7.3 규칙을 따른다: ticket-svc 마감 행과 받은 시각으로 정하고 보정 시각은 쓰지 않는다(IR-12).
 // 오차를 ±60,000ms로 골라 두 번 더하면 판정이 뒤집히게 했다(양쪽 방향). 저장소는 진짜 메모리 어댑터, Drizzle 짝은 test-int/scanner-f054.int.test.ts가 같은 꼴로 본다.
 import { beforeEach, describe, expect, test } from 'vitest';
 import { MemoryScannerGateStore } from '../src/modules/scanner/adapters/memory-scanner-gate-store.js';
@@ -31,13 +32,12 @@ const scan = (atMs: number, clockOffsetMs: number, over: Partial<ScanEventInput>
   deviceSeq: n,
   ...over,
 });
-const accept = (scans: ScanEventInput[], o: { validUntilMs?: number; entryClosesAtMs?: number } = {}) =>
+const accept = (scans: ScanEventInput[], o: { validUntilMs?: number } = {}) =>
   store.acceptScans({
     eventId: EVENT,
     deviceId: DEVICE,
     sessionId: SESSION,
     sessions: { [SESSION]: { accountId: 'acc', validFromMs: T0 - 3_600_000, validUntilMs: o.validUntilMs ?? T0 + 3_600_000 } },
-    ...(o.entryClosesAtMs !== undefined ? { entryClosesAtMs: o.entryClosesAtMs } : {}),
     scans,
     nowMs: T0 + 600_000,
   });
@@ -80,14 +80,18 @@ describe('보정 시각 = scannedAtDevice [RV-02]', () => {
     expect(flagOf(later.id)).toBe('DUPLICATE');
   });
 
-  test('GAT-160 마감 뒤 도착은 scannedAtDevice로 정한다(마감 30초 전 + 오차 +60초는 마감 전, 마감 30초 뒤 + 오차 −60초는 마감 뒤)', async () => {
-    const s1 = scan(T0 - 30_000, 60_000);
-    await accept([s1], { entryClosesAtMs: T0 });
-    expect(flagOf(s1.id)).toBe('NONE');
-    const s2 = scan(T0 + 30_000, -60_000, { ticketId: '0190f3a1-7c2e-7a00-8000-0000000f5606' });
-    store.seedTicket({ ticketId: s2.ticketId, eventId: EVENT, seatId: 'A-3', gateZone: '동문', status: 'ACTIVE' });
-    await accept([s2], { entryClosesAtMs: T0 });
-    expect(flagOf(s2.id)).toBe('AFTER_CLOSE');
+  test('GAT-160 마감 뒤 도착은 마감 행과 받은 시각으로 정한다(보정 시각·core 사본 값은 쓰지 않는다, F-05-6 규칙)', async () => {
+    // 받은 시각(accept의 nowMs T0+600,000)과 같은 마감 행이면 보정 시각이 마감 전이어도 표시가 없다
+    store.seedEntryClose(EVENT, T0 + 600_000);
+    const before = scan(T0 - 30_000, 60_000);
+    await accept([before]);
+    expect(flagOf(before.id)).toBe('NONE');
+    // 받은 시각 1ms 전 마감 행이면 보정 시각이 한 시간 전이어도 표시가 붙는다
+    store.seedEntryClose(EVENT, T0 + 600_000 - 1);
+    const after = scan(T0 - 3_600_000, -60_000, { ticketId: '0190f3a1-7c2e-7a00-8000-0000000f5606' });
+    store.seedTicket({ ticketId: after.ticketId, eventId: EVENT, seatId: 'A-3', gateZone: '동문', status: 'ACTIVE' });
+    await accept([after]);
+    expect(flagOf(after.id)).toBe('AFTER_CLOSE');
   });
 
   test('GAT-160 clockOffsetMs는 시각 불확실 판단에만 쓴다(±2분 넘으면 TIME_UNCERTAIN, 회귀 고정)', async () => {

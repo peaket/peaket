@@ -7,6 +7,7 @@
 // 4) 되돌림: 시험 트리거로 미보고 건 행 넣기를 한 번 실패시키면 마감 행도 남지 않는다(트리거가 실제로 돌았는지 시퀀스로 본다).
 // 바깥 경계(core 판매 설정·core 알림·ops CS 건)는 포트를 implements한 대역이다. start() 조립과 실제 HTTP는 entry-close-start.int.test.ts가 본다.
 import { createHash, randomUUID } from 'node:crypto';
+import { sql } from 'drizzle-orm';
 import { createDatabase, type Clock, type Database, fakeClock, systemClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateTicket } from '../scripts/migrate.mjs';
@@ -175,7 +176,7 @@ describe('마감과 늦은 업로드(O-T29 ④)', () => {
     const eventId = randomUUID();
     const ticketId = await seedEvent(eventId, Date.now() - 5 * 3_600_000);
     const scan = scanOf(eventId, ticketId, Date.now() - 1_000);
-    const res = await new DrizzleScannerGateStore(database).acceptScans({ eventId, deviceId: randomUUID(), sessionId: SESSION, entryClosesAtMs: Date.now() - 3_600_000, scans: [scan], nowMs: Date.now() });
+    const res = await new DrizzleScannerGateStore(database).acceptScans({ eventId, deviceId: randomUUID(), sessionId: SESSION, scans: [scan], nowMs: Date.now() });
     expect(res.acceptedIds).toEqual([scan.id]);
     expect(res.flags.map((f) => f.kind)).not.toContain('AFTER_CLOSE');
     expect(await afterCloseFlags(eventId)).toBe(0);
@@ -394,5 +395,55 @@ describe('되돌림(O-T29 ⑥)', () => {
     expect(await store.close({ eventId, nowMs: now + 60_000, endsAtMs: ends, clockNow: () => now + 60_000 })).toEqual({ closed: true, reason: 'TIMEOUT', closedAtMs: now + 60_000, unreported: 2 });
     expect(await rowsOf('entry_close', eventId)).toBe(1);
     expect(await rowsOf('scanner_unreported_case', eventId)).toBe(2);
+  });
+});
+
+describe('마감 후보 고르기와 회차 목록(F-05-6 정리 IR-03)', () => {
+  test('IR-03 후보 고르기는 회차 목록 (starts_at, event_id) 색인과 ticket (event_id) 색인을 탄다(EXPLAIN)', async () => {
+    // 다른 시험의 회차와 섞이지 않게 아주 이른 시작을 쓴다(계약 시험은 1989·1991년, 여기는 1975년)
+    const base = Date.parse('1975-04-05T06:07:08.000Z');
+    const eventIds: string[] = [];
+    for (let n = 0; n < 200; n++) {
+      const eventId = randomUUID();
+      eventIds.push(eventId);
+      for (let k = 0; k < 3; k++) await seedEvent(eventId, base + n * 1_000);
+    }
+    // 절반은 이미 마감된 회차다. 후보 질의의 not exists가 entry_close 기본 키로 걸러 내는지 함께 본다
+    for (const eventId of eventIds.filter((_, n) => n % 2 === 0)) {
+      await database.pool.query(`insert into entry_close (event_id, closed_at, reason, role_ends_at) values ($1, $2, 'ALL_REPORTED', $2)`, [eventId, new Date(base + 999_999)]);
+    }
+    await database.pool.query('analyze ticket');
+    await database.pool.query('analyze ticket_event_start');
+    await database.pool.query('analyze entry_close');
+
+    const { entryCloseCandidatesQuery } = await loadDrizzle();
+    const rows = await database.transaction(async (tx) => {
+      // 작은 시험 표에서도 색인을 타는지만 본다(docs/data.md §5.2 가벼운 판과 같은 방식)
+      await tx.execute(sql`set local enable_seqscan = off`);
+      const r = await tx.execute(sql`explain (format json) ${entryCloseCandidatesQuery({ nowMs: base + 300_000, limit: 50 })}`);
+      return r.rows as unknown as Record<string, unknown>[];
+    });
+    const plan = JSON.stringify(rows[0]?.['QUERY PLAN']);
+    expect(plan, '회차 목록 (starts_at, event_id) 색인').toContain('ticket_event_start_order_idx');
+    expect(plan, 'ticket (event_id) 색인').toContain('ticket_event_idx');
+    expect(plan, '큰 표 순차 스캔 없음').not.toContain('Seq Scan');
+  }, 120_000);
+
+  test('IR-03 회차 목록(ticket_event_start)은 발권 INSERT와 event_starts_at 고침을 따라간다', async () => {
+    const base = Date.parse('2035-02-03T04:05:06.000Z');
+    const eventId = randomUUID();
+    const first = await seedEvent(eventId, base);
+    await seedEvent(eventId, base + 1_000);
+    const startsOf = async (): Promise<number | undefined> => {
+      const r = await database.pool.query<{ starts_at: Date }>('select starts_at from ticket_event_start where event_id = $1', [eventId]);
+      return r.rows[0]?.starts_at.getTime();
+    };
+    expect(await startsOf(), '발권 INSERT가 가장 이른 시작을 넣는다').toBe(base);
+    // 이른 티켓을 뒤로 미루면 둘째 티켓의 시작이 남는다(트리거가 최솟값을 다시 센다)
+    await database.pool.query('update ticket set event_starts_at = $1 where id = $2', [new Date(base + 2_000), first]);
+    expect(await startsOf(), 'event_starts_at 고침을 따라간다').toBe(base + 1_000);
+    // 다시 앞으로 당기면 요약도 당긴다
+    await database.pool.query('update ticket set event_starts_at = $1 where id = $2', [new Date(base - 5_000), first]);
+    expect(await startsOf(), '앞으로 당긴 고침도 따라간다').toBe(base - 5_000);
   });
 });
