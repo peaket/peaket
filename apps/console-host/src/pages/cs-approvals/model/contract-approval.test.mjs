@@ -2,17 +2,25 @@
 // 서버의 2인 승인(요청자가 아닌 commander, 재인증)을 화면이 그대로 따르는지 순수 함수로 본다.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { register } from 'node:module';
 import { test } from 'node:test';
+
+// .tsx 부품을 서버 그리기로 읽는 시험 갈고리(콘솔의 다른 보드 시험과 같은 것)
+register('../../dashboard/ui/board.test.resolve.mjs', import.meta.url);
 import {
   approvalBodyOf,
   approvalEligibility,
   approvalMetaOf,
+  cardActionsOf,
   contractApprovalProblemMessage,
   contractRowsOf,
   isContractApproval,
   rejectionBodyOf,
   REJECTION_REASON_MAX,
 } from './contract-approval.ts';
+const { ContractApprovalActions } = await import('../ui/ContractApprovalActions.tsx');
+const { createElement } = await import('react');
+const { renderToStaticMarkup } = await import('react-dom/server');
 
 const TERMS = {
   current: { commissionRateBp: 1000, guaranteeRateBp: 1000, guaranteeKind: 'DEPOSIT', validFrom: '2026-10-01T00:00:00.000Z', validUntil: null, approvalId: null },
@@ -74,15 +82,44 @@ test('CON-APR ⑤ 재인증 만료·요청자 본인·먼저 처리됨을 상태
   assert.match(approvalMetaOf({ requestedBy: { adminAccountId: 'adm-1', displayName: '도윤' }, requestedAt: '2026-11-24T03:00:00.000Z', dueAt: '2026-11-26T03:00:00.000Z' }), /^도윤 · 2026\.11\.24\. 12:00 KST · 기한 2026\.11\.26\. 12:00 KST$/);
 });
 
+test('CON-APR ② 카드 자격은 현재 로그인 계정으로 판정한다(IR-01): 요청자 본인은 막고 다른 commander는 연다', () => {
+  const pending = { status: 'PENDING_APPROVAL', requestedBy: { adminAccountId: 'adm-1', displayName: '도윤', role: 'operator' }, canApprove: false };
+  assert.deepEqual(cardActionsOf(pending, { adminAccountId: 'adm-1', role: 'commander' }), { canApprove: false, canReject: false, reason: '요청한 분은 승인할 수 없습니다.' });
+  assert.deepEqual(cardActionsOf({ ...pending, canApprove: true }, { adminAccountId: 'adm-2', role: 'commander' }), { canApprove: true, canReject: true });
+  // 서버 판정이 우선한다(운영은 commander만 true). 세션 역할만으로 다시 막지 않는다
+  assert.deepEqual(cardActionsOf({ ...pending, canApprove: true }, { adminAccountId: 'adm-2', role: 'operator' }), { canApprove: true, canReject: true });
+  assert.equal(cardActionsOf({ ...pending, canApprove: false }, { adminAccountId: 'adm-2', role: 'operator' }).canApprove, false);
+  // 세션을 아직 읽지 못했으면 서버 판정만 따른다
+  assert.deepEqual(cardActionsOf({ ...pending, canApprove: true }, null), { canApprove: true, canReject: true });
+  assert.equal(cardActionsOf({ ...pending, canApprove: undefined }, null).canApprove, false);
+});
+
+test('CON-APR ② 승인 부품을 실제로 그리면 요청자 본인은 단추가 잠기고 다른 commander는 열린다(IR-01)', () => {
+  const props = { busy: false, reason: '', onReason: () => {}, rejectOpen: false, rejectReason: '', onRejectReason: () => {}, onApprove: () => {}, onToggleReject: () => {}, onReject: () => {}, rejectReady: false };
+  const requester = renderToStaticMarkup(createElement(ContractApprovalActions, { ...props, actions: { canApprove: false, canReject: false, reason: '요청한 분은 승인할 수 없습니다.' } }));
+  assert.ok(requester.includes('요청한 분은 승인할 수 없습니다.'));
+  assert.match(requester, /<button[^>]*disabled=""[^>]*>승인<\/button>/);
+  assert.match(requester, /<button[^>]*disabled=""[^>]*>반려<\/button>/);
+  const other = renderToStaticMarkup(createElement(ContractApprovalActions, { ...props, actions: { canApprove: true, canReject: true } }));
+  assert.doesNotMatch(other, /<button[^>]*disabled=""[^>]*>승인<\/button>/);
+  assert.doesNotMatch(other, /<button[^>]*disabled=""[^>]*>반려<\/button>/);
+  assert.ok(other.includes('승인'));
+});
+
 test('CON-APR ⑥ 카드는 실제 승인 경로로만 나가고 SCR-046 화면에 붙는다', () => {
   const card = readFileSync(new URL('../ui/ContractApprovalCard.tsx', import.meta.url), 'utf8');
-  for (const name of ['listOpsApprovalRequests', 'createOpsApprovalRequestApproval', 'createOpsApprovalRequestRejection', 'x-reauth-token', 'ReauthDialog']) {
+  for (const name of ['listOpsApprovalRequests', 'createOpsApprovalRequestApproval', 'createOpsApprovalRequestRejection', 'getMyOpsAuthSession', 'cardActionsOf', 'x-reauth-token', 'ReauthDialog']) {
     assert.ok(card.includes(name), `${name} 배선이 없다`);
   }
+  // 요청자의 계정을 '나'로 넘기지 않는다(IR-01)
+  assert.doesNotMatch(card, /accountId:\s*selected\.requestedBy/);
   assert.match(card, /kind: \['CONTRACT_TERMS_CHANGE'\]/);
   assert.match(card, /status: \['PENDING_APPROVAL'\]/);
-  assert.ok(card.includes('요청한 분은 승인할 수 없습니다'));
   assert.ok(card.includes('승인 뒤 판매 승인을 받는 공연부터'));
+  // 요청자 본인 문구와 단추 잠금은 승인 부품·모델이 맡는다(CON-APR ②에서 그린다)
+  const actions = readFileSync(new URL('../ui/ContractApprovalActions.tsx', import.meta.url), 'utf8');
+  assert.ok(actions.includes('승인'));
+  assert.ok(card.includes('ContractApprovalActions'));
   const page = readFileSync(new URL('../ui/Page.tsx', import.meta.url), 'utf8');
   assert.match(page, /<ContractApprovalCard \/>/);
 });

@@ -6,7 +6,7 @@ import { Writable } from 'node:stream';
 import { createService, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
-import type { OrderHistoryOrder, OrderHistoryReads, OrderSeatLabels } from '../src/modules/booking/index.js';
+import type { MergedAccounts, OrderHistoryOrder, OrderHistoryReads, OrderSeatLabels } from '../src/modules/booking/index.js';
 import { MemoryPurchaseSessions } from '../src/modules/inventory/index.js';
 import { AcceptFakes } from './accept-cases.js';
 import { ACCOUNT, CONSENT_VERSION, EVENT, JOURNEY, LOGIN, NOW, OrderFakes, PID, PSID } from './order-cases.js';
@@ -15,23 +15,33 @@ const KEY = Buffer.alloc(32, 9);
 const quiet = new Writable({ write: (_c, _e, cb) => cb() });
 const clock = fakeClock({ now: NOW });
 const OTHER = '00000000-0000-4000-8000-0000000000ff';
+/** ACCOUNT(대표)에 흡수된 계정 */
+const ABSORBED = '00000000-0000-4000-8000-0000000000aa';
 const ORDER_A = '0192f0aa-1111-7000-8000-000000000001';
 const ORDER_B = '0192f0aa-2222-7000-8000-000000000002';
 const ORDER_C = '0192f0aa-3333-7000-8000-000000000003';
 const ORDER_D = '0192f0aa-4444-7000-8000-000000000004';
 
-/** 가짜 읽기: 계정·커서·limit만 보고, 어댑터처럼 정렬은 이미 된 것으로 준다(도메인은 자르기·커서만 한다) */
+/** 가짜 읽기: 계정 묶음·커서·limit만 보고, 어댑터처럼 정렬은 이미 된 것으로 준다(도메인은 자르기·커서만 한다) */
 class FakeHistory implements OrderHistoryReads {
   rows: OrderHistoryOrder[] = [];
-  last?: { accountId: string; limit: number; before?: { createdAt: Date; orderId: string } };
-  async list(accountId: string, o: { limit: number; before?: { createdAt: Date; orderId: string } }): Promise<readonly OrderHistoryOrder[]> {
-    this.last = { accountId, ...o };
-    const mine = this.rows.filter((r) => r.accountId === accountId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.orderId < b.orderId ? 1 : -1));
+  last?: { accountIds: readonly string[]; limit: number; before?: { createdAt: Date; orderId: string } };
+  async list(accountIds: readonly string[], o: { limit: number; before?: { createdAt: Date; orderId: string } }): Promise<readonly OrderHistoryOrder[]> {
+    this.last = { accountIds, ...o };
+    const mine = this.rows.filter((r) => accountIds.includes(r.accountId)).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.orderId < b.orderId ? 1 : -1));
     const start = o.before ? mine.findIndex((r) => r.createdAt.getTime() < o.before!.createdAt.getTime() || (r.createdAt.getTime() === o.before!.createdAt.getTime() && r.orderId < o.before!.orderId)) : 0;
     return mine.slice(Math.max(0, start), Math.max(0, start) + o.limit);
   }
-  async find(orderId: string): Promise<OrderHistoryOrder | undefined> {
-    return this.rows.find((r) => r.orderId === orderId);
+  async find(orderId: string, accountIds: readonly string[]): Promise<OrderHistoryOrder | undefined> {
+    return this.rows.find((r) => r.orderId === orderId && accountIds.includes(r.accountId));
+  }
+}
+
+/** 가짜 계정 묶음: 시험이 넣은 표만 보고, 없으면 계정 하나다 */
+class FakeMergedAccounts implements MergedAccounts {
+  ids = new Map<string, string[]>();
+  async accountIdsOf(accountId: string): Promise<readonly string[]> {
+    return this.ids.get(accountId) ?? [accountId];
   }
 }
 
@@ -54,6 +64,7 @@ const orderOf = (over: Partial<OrderHistoryOrder> = {}): OrderHistoryOrder => ({
 });
 
 const reads = new FakeHistory();
+const merged = new FakeMergedAccounts();
 /** 서비스가 이 객체를 잡으므로, 시험은 메서드를 바꿔 끼운다(변수를 다시 대입하면 서비스에 닿지 않는다) */
 const seats: OrderSeatLabels = {
   async resolve(_eventId, seatIds) {
@@ -91,7 +102,7 @@ beforeAll(async () => {
         ...new AcceptFakes().bookingPorts(),
         consentVersion: CONSENT_VERSION,
         clock,
-        orderHistory: { reads, seats, configs },
+        orderHistory: { reads, seats, configs, accounts: merged },
       },
     }),
     purchaseSessions: sessions,
@@ -116,6 +127,7 @@ afterAll(async () => {
 beforeEach(() => {
   reads.rows = [];
   reads.last = undefined;
+  merged.ids.clear();
   seats.resolve = labelsOk;
 });
 
@@ -152,7 +164,7 @@ describe('F-07-2 주문 내역 받는 층', () => {
     });
     expect(String(body.items[0]!.bookingNumber)).toMatch(/^\d{13}$/);
     // 어댑터에는 limit+1을 요청해 다음 페이지가 있는지 싸게 본다(돌려주는 항목은 limit개까지다)
-    expect(reads.last).toMatchObject({ accountId: ACCOUNT, limit: 21 });
+    expect(reads.last).toMatchObject({ accountIds: [ACCOUNT], limit: 21 });
   });
 
   test('ORD-HIST ④ 다음 페이지는 커서로 이어지고 겹치지 않는다. 잘못된 커서·limit은 400이다', async () => {
@@ -168,6 +180,15 @@ describe('F-07-2 주문 내역 받는 층', () => {
       const r = await get(`/v1/orders${q}`);
       expect(r.statusCode, q).toBe(400);
       expect(r.headers['content-type']).toMatch(/^application\/problem\+json/);
+    }
+
+    // IR-03: 커서 안의 주문 ID가 정확한 UUID가 아니면 DB ::uuid 캐스트(500)까지 가지 않고 400이다
+    const at = '2026-10-14T03:00:00.000Z';
+    const rawCursor = (orderId: string) => encodeURIComponent(Buffer.from(`${at}|${orderId}`, 'utf8').toString('base64url'));
+    for (const orderId of ['-'.repeat(36), ORDER_A.toUpperCase(), '0192f0aa-1111-7000-8000-0000000000', 'not-a-uuid', ORDER_A.replace(/-/g, '')]) {
+      const r = await get(`/v1/orders?cursor=${rawCursor(orderId)}`);
+      expect(r.statusCode, orderId).toBe(400);
+      expect(JSON.parse(r.payload)).toMatchObject({ status: 400, type: expect.stringMatching(/invalid-query$/) });
     }
   });
 
@@ -203,6 +224,34 @@ describe('F-07-2 주문 내역 받는 층', () => {
     expect(problemOf(others.payload)).toEqual(problemOf(missing.payload));
     expect(problemOf(others.payload).type).toMatch(/not-found$/);
     expect(Object.keys(JSON.parse(others.payload) as Record<string, unknown>)).not.toContain('orderId');
+  });
+
+  test('ORD-HIST ② 대표 계정은 흡수 계정 주문을 목록·상세에서 보고, 묶음 밖은 404다(IR-02)', async () => {
+    merged.ids.set(ACCOUNT, [ACCOUNT, ABSORBED]);
+    reads.rows = [
+      orderOf({ orderId: ORDER_A, accountId: ACCOUNT, createdAt: new Date('2026-10-14T03:00:00.000Z') }),
+      orderOf({ orderId: ORDER_B, accountId: ABSORBED, createdAt: new Date('2026-10-15T03:00:00.000Z') }),
+      orderOf({ orderId: ORDER_C, accountId: OTHER, createdAt: new Date('2026-10-16T03:00:00.000Z') }),
+    ];
+    const list = json(await get('/v1/orders')) as { items: { orderId: string }[] };
+    expect(list.items.map((i) => i.orderId)).toEqual([ORDER_B, ORDER_A]);
+    expect(reads.last?.accountIds).toEqual([ACCOUNT, ABSORBED]);
+
+    expect((await get(`/v1/orders/${ORDER_B}`)).statusCode).toBe(200);
+    expect((await get(`/v1/orders/${ORDER_C}`)).statusCode).toBe(404);
+
+    // 흡수 계정으로 로그인한 세션도 같은 묶음을 본다(대표+흡수, 포트가 정한 차례 그대로)
+    merged.ids.set(ABSORBED, [ACCOUNT, ABSORBED]);
+    const asAbsorbed = await svc.http.inject({ method: 'GET', url: '/v1/orders', headers: { ...FAN, 'x-user-id': ABSORBED, 'x-user-pid': 'pid-absorbed' } });
+    expect(asAbsorbed.statusCode).toBe(200);
+    expect((json(asAbsorbed) as { items: { orderId: string }[] }).items.map((i) => i.orderId)).toEqual([ORDER_B, ORDER_A]);
+    expect((await get(`/v1/orders/${ORDER_A}`, { ...FAN, 'x-user-id': ABSORBED })).statusCode).toBe(200);
+
+    // 섞인 목록의 커서: 1건씩 두 번 받아도 겹치지 않고 최신순이다
+    const page1 = json(await get('/v1/orders?limit=1')) as { items: { orderId: string }[]; nextCursor: string };
+    const page2 = json(await get(`/v1/orders?limit=1&cursor=${encodeURIComponent(page1.nextCursor)}`)) as { items: { orderId: string }[] };
+    expect(page1.items.map((i) => i.orderId)).toEqual([ORDER_B]);
+    expect(page2.items.map((i) => i.orderId)).toEqual([ORDER_A]);
   });
 
   test('ORD-HIST ③ 좌석맵 판을 읽지 못하면 좌석 ID·등급 ID로 떨어지고 500이 아니다', async () => {

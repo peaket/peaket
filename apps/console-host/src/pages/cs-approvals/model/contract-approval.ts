@@ -43,6 +43,43 @@ export function approvalEligibility(a: Pick<ApprovalRequest, 'requestedBy' | 'st
   return { canApprove: true };
 }
 
+export interface AdminSessionLike {
+  adminAccountId?: string;
+  role?: ConsoleRole;
+}
+
+/** GET /v1/ops/auth/sessions/me 응답에서 카드가 쓰는 두 칸만 꺼낸다. 모양이 아니면 null */
+export function sessionOf(raw: unknown): AdminSessionLike | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const v = raw as Record<string, unknown>;
+  if (typeof v.adminAccountId !== 'string' || typeof v.role !== 'string') return null;
+  return { adminAccountId: v.adminAccountId, role: v.role as ConsoleRole };
+}
+
+export interface CardActions {
+  canApprove: boolean;
+  canReject: boolean;
+  reason?: string;
+}
+
+/**
+ * 카드가 지금 세션으로 승인·반려할 수 있는가(IR-01).
+ * 서버 `canApprove`가 정본 판정(commander이고 요청자가 아님)이므로 그것을 먼저 따르고,
+ * 세션 계정이 요청자와 같으면 서버가 실수로 true를 줘도 막는다. 세션을 아직 못 읽었으면 서버 판정만 본다.
+ */
+export function cardActionsOf(a: Pick<ApprovalRequest, 'status' | 'requestedBy' | 'canApprove'>, session: AdminSessionLike | null): CardActions {
+  if (a.status !== 'PENDING_APPROVAL') return { canApprove: false, canReject: false, reason: '이미 처리된 승인 요청입니다.' };
+  const me = session?.adminAccountId;
+  if (me !== undefined && a.requestedBy?.adminAccountId === me) return { canApprove: false, canReject: false, reason: '요청한 분은 승인할 수 없습니다.' };
+  if (a.canApprove === false) return { canApprove: false, canReject: false, reason: '이 요청은 지금 계정으로 승인할 수 없습니다. 요청자와 다른 commander가 승인합니다.' };
+  if (a.canApprove === true) return { canApprove: true, canReject: true };
+  // 서버가 판정을 싣지 않은 응답(구판): 세션 역할로 한 번 더 본다
+  const role = session?.role;
+  if (!me || !role) return { canApprove: false, canReject: false, reason: '세션을 확인하지 못해 승인할 수 없습니다. 새로 고친 뒤 다시 시도해 주세요.' };
+  const e = approvalEligibility(a, { accountId: me, role });
+  return e.canApprove ? { canApprove: true, canReject: true } : { canApprove: false, canReject: false, ...(e.reason ? { reason: e.reason } : {}) };
+}
+
 /** 승인 카드의 현재 값↔바꿀 값 줄. 서버가 준 바꿀 값이 비어 있으면(칸을 보내지 않음) 지금 값 그대로다 */
 export function contractRowsOf(terms: NonNullable<ApprovalRequest['contractTerms']>): readonly { label: string; current: string; requested: string; changed: boolean }[] {
   const current = terms.current ?? {};

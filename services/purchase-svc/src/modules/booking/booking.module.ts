@@ -18,6 +18,7 @@ import type {
   IdentityRecheck,
   OrderAcceptReads,
   OrderAcceptWrites,
+  MergedAccounts,
   OrderHoldExpiries,
   OrderHoldMarks, OrderHolds,
   OrderHistoryReads,
@@ -104,9 +105,10 @@ export interface BookingModuleDeps {
   };
   /**
    * 주문 내역 목록·상세 GET /v1/orders·GET /v1/orders/{orderId}(F-07-2). 운영(start.ts)은 reads = DrizzleOrderHistory(purchase DB),
-   * seats = LayoutSeatMap.resolve를 잇는 얇은 어댑터, configs는 saleConfigs 그대로 넘긴다. 없으면 두 경로가 404다
+   * seats = LayoutSeatMap.resolve를 잇는 얇은 어댑터, configs는 saleConfigs, accounts = DrizzleMergedAccounts(계정 묶음)를 넘긴다.
+   * 없으면 두 경로가 404다
    */
-  orderHistory?: { reads: OrderHistoryReads; seats?: OrderSeatLabels; configs?: SaleConfigs };
+  orderHistory?: { reads: OrderHistoryReads; seats?: OrderSeatLabels; configs?: SaleConfigs; accounts?: MergedAccounts };
   /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
   hotPath?: HotPathMetrics;
 }
@@ -193,7 +195,12 @@ export class BookingModule {
           {
             provide: ListOrders,
             useFactory: (platformClock: Clock) =>
-              new ListOrders({ reads: orderHistory.reads, configs: orderHistory.configs ?? ports.saleConfigs, clock: clock ?? platformClock }),
+              new ListOrders({
+                reads: orderHistory.reads,
+                ...(orderHistory.accounts ? { accounts: orderHistory.accounts } : {}),
+                configs: orderHistory.configs ?? ports.saleConfigs,
+                clock: clock ?? platformClock,
+              }),
             inject: [CLOCK],
           },
           {
@@ -201,6 +208,7 @@ export class BookingModule {
             useFactory: (platformClock: Clock) =>
               new GetOrder({
                 reads: orderHistory.reads,
+                ...(orderHistory.accounts ? { accounts: orderHistory.accounts } : {}),
                 configs: orderHistory.configs ?? ports.saleConfigs,
                 ...(orderHistory.seats ? { seats: orderHistory.seats } : {}),
                 clock: clock ?? platformClock,

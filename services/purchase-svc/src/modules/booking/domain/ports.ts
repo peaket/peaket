@@ -399,15 +399,32 @@ export interface OrderWrites {
 // ---- 주문 내역 GET /v1/orders·GET /v1/orders/{orderId}(openapi listOrders·getOrder, docs/frontend.md §5.29, F-07-2) ----
 // 읽기만 한다. 계정 대조는 쓰임새가 하고, 남의 주문과 없는 주문은 같은 404다. 어댑터는 계정의 주문만 주고 EXPIRED를 뺀다.
 
+/**
+ * 계정 묶음(대표 계정 + 흡수 계정, docs/data.md §4 경계 9·asyncapi identity.accounts-merged, IR-02).
+ * 주문·원장의 account_id는 고치지 않고, '내 주문' 조회·소유 확인만 이 묶음으로 넓힌다.
+ */
+export interface MergedAccounts {
+  /**
+   * 조회에 쓸 계정 ID 묶음. 대표 계정이면 [대표, ...흡수], 흡수 계정이면 [대표, ...흡수], 병합 이력이 없으면 [그 계정].
+   * 주문 넣는 순서(대표 먼저)를 지킨다.
+   */
+  accountIdsOf(accountId: string): Promise<readonly string[]>;
+}
+
+/** identity.accounts-merged 사건을 자기 DB의 merged_account에 채우는 쓰기(멱등: 흡수 계정 PK) */
+export interface MergedAccountWriter {
+  record(i: { mergeId: string; primaryAccountId: string; mergedAccountId: string; confirmedAt: Date }): Promise<void>;
+}
+
 /** 주문 내역 저장소 읽기(운영은 adapters/db/drizzle-order-history.ts) */
 export interface OrderHistoryReads {
   /**
-   * 계정의 티켓 주문을 createdAt 내림차순·같으면 주문 ID 오름차순으로 limit개 준다(어댑터는 limit+1을 받는다).
+   * 계정 묶음의 티켓 주문을 createdAt 내림차순·같으면 주문 ID 내림차순으로 limit개 준다(어댑터는 limit+1을 받는다).
    * EXPIRED는 주지 않는다. before가 있으면 그 키 뒤의 줄만 준다(키셋 페이지네이션)
    */
-  list(accountId: string, o: { limit: number; before?: { createdAt: Date; orderId: string } }): Promise<readonly OrderHistoryOrder[]>;
-  /** 주문 하나. 없거나 orderId가 소문자 UUID가 아니면 undefined(쓰임새가 계정과 함께 404로 가른다) */
-  find(orderId: string): Promise<OrderHistoryOrder | undefined>;
+  list(accountIds: readonly string[], o: { limit: number; before?: { createdAt: Date; orderId: string } }): Promise<readonly OrderHistoryOrder[]>;
+  /** 주문 하나. 없거나 orderId가 소문자 UUID가 아니거나 계정 묶음 밖이면 undefined(쓰임새가 404로 가른다) */
+  find(orderId: string, accountIds: readonly string[]): Promise<OrderHistoryOrder | undefined>;
 }
 
 /** 좌석맵 판에서 온 좌석 이름·등급 이름(선택 포트). 없거나 읽지 못하면 저장 값으로 떨어진다 */

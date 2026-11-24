@@ -65,6 +65,16 @@ describe('F-07-2 주문 내역 순수 규칙', () => {
     }
   });
 
+  test('ORD-HIST ④ 커서의 주문 ID는 정확한 소문자 UUID만 받는다(IR-03)', () => {
+    const at = new Date('2026-10-14T03:00:00.000Z');
+    const raw = (orderId: string) => Buffer.from(`${at.toISOString()}|${orderId}`, 'utf8').toString('base64url');
+    // 하이픈 36자·대문자·짧은 값·UUID가 아닌 값은 모두 깨진 커서다(DB ::uuid 캐스트까지 가지 않는다)
+    for (const orderId of ['-'.repeat(36), ORDER_A.toUpperCase(), '0192f0aa-1111-7000-8000-0000000000', 'not-a-uuid', ORDER_A.replace(/-/g, '')]) {
+      expect(decodeOrderHistoryCursor(raw(orderId)), orderId).toBeUndefined();
+    }
+    expect(decodeOrderHistoryCursor(raw(ORDER_A))).toEqual({ createdAt: at, orderId: ORDER_A });
+  });
+
   test('ORD-HIST ④ 다음 커서는 한 페이지를 가득 채웠을 때만 있고, 모자라면 없다', () => {
     const at = new Date('2026-10-14T03:00:00.000Z');
     const rows = [orderOf({ orderId: ORDER_A, createdAt: at }), orderOf({ orderId: ORDER_B, createdAt: new Date('2026-10-13T03:00:00.000Z') })];

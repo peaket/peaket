@@ -5,12 +5,15 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ApprovalRequest } from '@peaket/api-client/model';
 import { ReauthDialog } from '@/features/admin-reauth/ReauthDialog';
 import { ensureConsoleApi, opsApiAvailable } from '@/shared/api';
-import { approvalBodyOf, approvalEligibility, approvalMetaOf, contractApprovalProblemMessage, contractRowsOf, isContractApproval, rejectionBodyOf } from '../model/contract-approval';
+import { approvalBodyOf, approvalMetaOf, cardActionsOf, contractApprovalProblemMessage, contractRowsOf, isContractApproval, rejectionBodyOf, sessionOf, type AdminSessionLike } from '../model/contract-approval';
+import { ContractApprovalActions } from './ContractApprovalActions';
 
 type Load = { kind: 'loading' } | { kind: 'ready'; items: ApprovalRequest[] } | { kind: 'config' } | { kind: 'error'; message: string };
 
 export function ContractApprovalCard() {
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
+  /** 지금 로그인한 관리 계정(GET /v1/ops/auth/sessions/me). 요청자 본인 검사에 쓴다(IR-01) */
+  const [session, setSession] = useState<AdminSessionLike | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
@@ -27,7 +30,12 @@ export function ContractApprovalCard() {
     setLoad({ kind: 'loading' });
     try {
       const ops = await import('@peaket/api-client/endpoints/ops');
-      const res = await ops.listOpsApprovalRequests({ kind: ['CONTRACT_TERMS_CHANGE'], status: ['PENDING_APPROVAL'], limit: 100 });
+      // 세션을 못 읽어도 목록은 보인다(승인 자격만 서버 canApprove로 판정한다)
+      const [res, me] = await Promise.all([
+        ops.listOpsApprovalRequests({ kind: ['CONTRACT_TERMS_CHANGE'], status: ['PENDING_APPROVAL'], limit: 100 }),
+        ops.getMyOpsAuthSession().catch(() => null),
+      ]);
+      setSession(me ? sessionOf(me.data) : null);
       const items = (res.data.items as ApprovalRequest[] | undefined)?.filter(isContractApproval) ?? [];
       setLoad({ kind: 'ready', items });
       setSelectedId((prev) => (prev && items.some((a) => a.approvalId === prev) ? prev : (items[0]?.approvalId ?? null)));
@@ -48,9 +56,8 @@ export function ContractApprovalCard() {
   const terms = selected.contractTerms;
   if (!terms) return null;
   const rows = contractRowsOf(terms);
-  // 화면의 역할을 고른 프리뷰가 있으면 그 역할로, 없으면 서버 판정(canApprove)을 따른다
-  const eligibility = approvalEligibility(selected, { accountId: selected.requestedBy?.adminAccountId ?? '', role: 'commander' });
-  const canApprove = selected.canApprove !== false && eligibility.canApprove;
+  // 지금 로그인한 관리 계정으로 판정한다(요청자의 계정을 '나'로 넘기지 않는다, IR-01)
+  const actions = cardActionsOf(selected, session);
 
   const approve = async (token: string) => {
     if (!selected.approvalId || busy) return;
@@ -146,37 +153,19 @@ export function ContractApprovalCard() {
           <div className="banner-body">수수료율·보증 변경은 operator가 요청하고 요청자가 아닌 commander가 재인증 뒤 승인합니다(2인). 바뀐 값은 승인 뒤 판매 승인을 받는 공연부터 쓰고, 판매 승인 때 회차에 고정됩니다.</div>
         </div>
 
-        {selected.canApprove === false ? <p className="t-sm muted">요청한 분은 승인할 수 없습니다. 다른 commander가 승인해야 합니다.</p> : null}
-
-        <label className="field">
-          <span className="label">승인 판단 이유(선택, 1~1,000자)</span>
-          <input className="input" value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
-        </label>
-
-        <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-          <button className="btn btn-outline" type="button" onClick={() => setRejectOpen((v) => !v)} disabled={busy || !canApprove}>
-            반려
-          </button>
-          <button className="btn btn-primary" type="button" onClick={() => setReauthOpen(true)} disabled={busy || !canApprove} aria-describedby={canApprove ? undefined : 'contract-approval-blocked'}>
-            승인
-          </button>
-        </div>
-        {canApprove ? null : <p id="contract-approval-blocked" className="t-xs muted">{eligibility.reason ?? '이 요청은 지금 계정으로 승인할 수 없습니다.'}</p>}
-
-        {rejectOpen ? (
-          <section className="card-flat col" style={{ gap: 10, padding: 14 }} aria-labelledby="h-contract-reject">
-            <h3 className="t-sm fw-b" id="h-contract-reject">반려 사유(필수)</h3>
-            <textarea className="input" rows={3} value={rejectReason} maxLength={1000} onChange={(e) => setRejectReason(e.target.value)} />
-            <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-              <button className="btn btn-outline" type="button" onClick={() => setRejectOpen(false)}>
-                취소
-              </button>
-              <button className="btn btn-danger-outline" type="button" onClick={() => void reject()} disabled={busy || rejectionBodyOf(rejectReason) === undefined}>
-                반려합니다
-              </button>
-            </div>
-          </section>
-        ) : null}
+        <ContractApprovalActions
+          actions={actions}
+          busy={busy}
+          reason={reason}
+          onReason={setReason}
+          rejectOpen={rejectOpen}
+          rejectReason={rejectReason}
+          onRejectReason={setRejectReason}
+          onApprove={() => setReauthOpen(true)}
+          onToggleReject={() => setRejectOpen((v) => !v)}
+          onReject={() => void reject()}
+          rejectReady={rejectionBodyOf(rejectReason) !== undefined}
+        />
 
         {notice ? (
           <div className={notice.tone === 'ok' ? 'banner banner-success' : 'banner banner-warning'} role="status">

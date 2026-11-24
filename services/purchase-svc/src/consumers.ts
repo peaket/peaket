@@ -24,11 +24,14 @@ import {
 } from '@peaket/platform';
 import { runKeyedConsumer } from '@peaket/platform/stream-worker';
 import {
+  ACCOUNTS_MERGED_TOPIC,
+  AccountMergedHandler,
   ApplyPaymentResult,
   DrizzlePaymentResults,
   type DrizzleOrderStore,
   InventoryPaymentResultSessions,
   LoggerPaymentResultLog,
+  type MergedAccountWriter,
   type PaymentSessionSource,
   PaymentResultHandler,
   PromPaymentEventSkipSignals,
@@ -121,6 +124,8 @@ export function paymentResultApply(o: PaymentResultApplyOptions): ApplyPaymentRe
 export const HOLD_LEDGER_GROUP = (env: string): string => `peaket.purchase-svc-hold-ledger.${env}`;
 /** 결제 결과 반영(주문 Saga) 소비자 그룹 이름(docs/features/payment.md §2) */
 export const ORDER_SAGA_GROUP = (env: string): string => `peaket.purchase-svc-order-saga.${env}`;
+/** identity 계정 병합 소비자 그룹 이름(docs/data.md §4 경계 9, F-07-2 IR-02) */
+export const ACCOUNT_MERGE_GROUP = (env: string): string => `peaket.purchase-svc-account-merge.${env}`;
 
 /** 브로커 주소 모양(플랫폼 loadOutboxRelayProcessConfig의 BROKER와 같은 규칙. 플랫폼이 내보내지 않아 따로 적는다) */
 const BROKER = /^[A-Za-z0-9.-]+:\d{1,5}$/;
@@ -144,6 +149,8 @@ export interface PurchaseConsumersOptions {
   ledger: SeatHoldLedger;
   /** 결제 결과 반영 쓰임새(운영은 booking ApplyPaymentResult, onOrderChanged에 기다림 표 notify를 넘겨 만든다) */
   applyPaymentResult: Pick<ApplyPaymentResult, 'execute'>;
+  /** 계정 병합 대응표 쓰기(운영은 DrizzleMergedAccounts). identity.accounts-merged를 받아 흡수 계정 PK로 한 행만 쓴다 */
+  mergedAccounts: MergedAccountWriter;
   /** 소비자 지표(consumer_*)를 붙일 레지스트리(보통 서비스 레지스트리). 있으면 보류 수(heldEventCounts(database))도 잰다 */
   registry?: Registry;
   /** 소비자 경고 줄(보통 서비스 로거) */
@@ -188,7 +195,9 @@ export function startPurchaseConsumers(o: PurchaseConsumersOptions): PurchaseCon
   // 굿즈·부가 상품 결제(orderKind MERCH)는 반영하지 않고 payment_result_skipped_total{reason}로 센다(ADR-0299 결정 4). 레지스트리가 없으면 세지 않는다
   const skips = o.registry ? new PromPaymentEventSkipSignals().register(o.registry) : undefined;
   const saga = runKeyedConsumer({ ...base, maxKeys: 48, held: paymentHeld, groupId: ORDER_SAGA_GROUP(o.env), topics: [TRADE_PAYMENTS_TOPIC], handler: new PaymentResultHandler(o.applyPaymentResult, skips) });
-  const started = Promise.all([ledger.started, saga.started]).then(() => undefined);
+  // 계정 병합(IR-02): 흡수 계정 키로 한 행만 쓰는 작은 소비자다. 결제 결과와 같은 보류 표를 쓴다
+  const merges = runKeyedConsumer({ ...base, held: paymentHeld, groupId: ACCOUNT_MERGE_GROUP(o.env), topics: [ACCOUNTS_MERGED_TOPIC], handler: new AccountMergedHandler(o.mergedAccounts) });
+  const started = Promise.all([ledger.started, saga.started, merges.started]).then(() => undefined);
   // 부른 쪽이 started를 기다리지 않고 stop만 불러도 처리되지 않은 거부가 남지 않게 한다(거부는 started를 기다리는 쪽이 받는다)
   started.catch(() => undefined);
   let stopping: Promise<void> | undefined;
@@ -196,7 +205,7 @@ export function startPurchaseConsumers(o: PurchaseConsumersOptions): PurchaseCon
     started,
     stop() {
       stopping ??= (async () => {
-        const results = await Promise.allSettled([ledger.stop(), saga.stop()]);
+        const results = await Promise.allSettled([ledger.stop(), saga.stop(), merges.stop()]);
         const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
         if (failed) throw failed.reason;
       })();

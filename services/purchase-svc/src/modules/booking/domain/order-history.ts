@@ -10,6 +10,12 @@ export const HISTORY_LIMIT_MAX = 100;
 /** 예매번호 [가정: docs/data.md purchase_order에 칸이 아직 없다]. 날짜 8자리 + 일련번호 5자리 */
 export const BOOKING_NUMBER_PATTERN = /^\d{13}$/;
 
+/**
+ * 주문 ID의 정확한 모양(소문자 UUID 8-4-4-4-12). 커서의 주문 ID를 이 모양으로만 받는다(IR-03).
+ * 하이픈 36자·대문자·짧은 값을 SQL ::uuid 캐스트까지 보내면 500이 되므로 여기서 400으로 끊는다.
+ */
+export const ORDER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 /** 발권 지연 판정(ADR-0106, payment-status의 같은 값) */
 export const HISTORY_ISSUE_DELAYED_MS = 60_000;
 
@@ -140,7 +146,7 @@ export function decodeOrderHistoryCursor(cursor: string): { createdAt: Date; ord
   const orderId = text.slice(sep + 1);
   const createdAt = new Date(iso);
   if (Number.isNaN(createdAt.getTime()) || createdAt.toISOString() !== iso) return undefined;
-  if (!/^[0-9a-f-]{36}$/.test(orderId)) return undefined;
+  if (!ORDER_ID_PATTERN.test(orderId)) return undefined;
   return { createdAt, orderId };
 }
 

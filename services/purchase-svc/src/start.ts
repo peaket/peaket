@@ -123,6 +123,7 @@ import {
   type ContactRefs,
   CompensationRunner,
   discardBehaviorSignals,
+  DrizzleMergedAccounts,
   DrizzleOrderAccepts,
   DrizzleOrderHistory,
   DrizzleOrderStarts,
@@ -653,11 +654,13 @@ export async function start(o: StartOptions): Promise<StartedService> {
         },
         writes: new DrizzleOrderWrites({ database, store: orderStore, clock: systemClock }),
         accepts: new DrizzleOrderAccepts({ database, store: orderStore, clock: systemClock }),
-        // 주문 내역 GET /v1/orders·GET /v1/orders/{orderId}(F-07-2). 좌석 이름·등급 이름은 좌석맵 판에서 온다
+        // 주문 내역 GET /v1/orders·GET /v1/orders/{orderId}(F-07-2). 좌석 이름·등급 이름은 좌석맵 판에서 온다.
+        // 계정 묶음(대표+흡수)은 purchase DB의 merged_account에서 읽는다(IR-02)
         orderHistory: {
           reads: new DrizzleOrderHistory({ database }),
           seats: new LayoutOrderSeatLabels(seatMap),
           configs: new SeatMapSaleConfigs(seatMap),
+          accounts: new DrizzleMergedAccounts({ database }),
         },
         // 파드 메모리가 정지(명령 3 회차·전체, 판매 중지)라 하면 좌석 Redis를 부르지 않고 PAUSED(423 sale-paused)다(ADR-0365 결정 7)
         slots: pauseAwareSlots(new InventorySeatSlots(new RedisSeatSlots(redis)), saleMemory),
@@ -957,6 +960,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
         paymentDatabase: paymentConsumerDb,
         ledger: new DrizzleSeatHoldLedger(consumerDb),
         applyPaymentResult,
+        // identity.accounts-merged를 받아 purchase DB merged_account를 채운다(소비자 전용 풀, IR-02)
+        mergedAccounts: new DrizzleMergedAccounts({ database: consumerDb }),
         registry: service.metrics.registry,
         logger: service.logger,
       };

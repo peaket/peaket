@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { type Database, fakeClock, PlatformMetrics } from '@peaket/platform';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import {
+  ACCOUNT_MERGE_GROUP,
   consumerDatabaseOptions,
   HOLD_LEDGER_GROUP,
   kafkaConsumersFromEnv,
@@ -17,7 +18,7 @@ import {
   type PurchaseConsumersOptions,
   startPurchaseConsumers,
 } from '../src/consumers.js';
-import { type DrizzleOrderStore, PaymentResultHandler, type PaymentResultReads, type PaymentResultWrites } from '../src/modules/booking/index.js';
+import { AccountMergedHandler, type DrizzleOrderStore, PaymentResultHandler, type PaymentResultReads, type PaymentResultWrites } from '../src/modules/booking/index.js';
 import { DrizzleSeatSales, type SeatHoldLedger, SeatHoldLedgerHandler } from '../src/modules/inventory/index.js';
 import { APPLY_NOW, ORDER_ID, paymentEvent, ResultFakes } from './payment-result-cases.js';
 
@@ -69,6 +70,7 @@ describe('소비자 그룹 이름', () => {
     expect(HOLD_LEDGER_GROUP('local')).toBe('peaket.purchase-svc-hold-ledger.local');
     expect(ORDER_SAGA_GROUP('prod')).toBe('peaket.purchase-svc-order-saga.prod');
     expect(ORDER_SAGA_GROUP('staging')).toBe('peaket.purchase-svc-order-saga.staging');
+    expect(ACCOUNT_MERGE_GROUP('prod')).toBe('peaket.purchase-svc-account-merge.prod');
   });
 });
 
@@ -80,6 +82,7 @@ describe('startPurchaseConsumers(runKeyedConsumer 대역)', () => {
     database: {} as Database,
     ledger: {} as SeatHoldLedger,
     applyPaymentResult: { execute: vi.fn() } as unknown as PurchaseConsumersOptions['applyPaymentResult'],
+    mergedAccounts: { record: vi.fn() },
   });
   beforeEach(() => {
     runs.calls.length = 0;
@@ -87,19 +90,22 @@ describe('startPurchaseConsumers(runKeyedConsumer 대역)', () => {
     runs.stopImpl.clear();
   });
 
-  test('ST5_소비자 둘을 건다: 원장 적재는 그룹 peaket.purchase-svc-hold-ledger.<환경>·trade.seats·SeatHoldLedgerHandler, 결제 결과는 그룹 peaket.purchase-svc-order-saga.<환경>·trade.payments·PaymentResultHandler이고 같은 clientId다', async () => {
+  test('ST5_소비자 셋을 건다: 원장 적재·결제 결과·계정 병합이고 같은 clientId다', async () => {
     const c = startPurchaseConsumers(options());
     await c.started;
     // 그룹 이름은 정본 글을 따로 적는다(운영 상수를 기대 값으로 쓰지 않는다)
     const byGroup = Object.fromEntries(runs.calls.map((o) => [o.groupId, o]));
-    expect(Object.keys(byGroup).sort()).toEqual(['peaket.purchase-svc-hold-ledger.prod', 'peaket.purchase-svc-order-saga.prod']);
+    expect(Object.keys(byGroup).sort()).toEqual(['peaket.purchase-svc-account-merge.prod', 'peaket.purchase-svc-hold-ledger.prod', 'peaket.purchase-svc-order-saga.prod']);
     const ledger = byGroup['peaket.purchase-svc-hold-ledger.prod']!;
     const saga = byGroup['peaket.purchase-svc-order-saga.prod']!;
+    const merge = byGroup['peaket.purchase-svc-account-merge.prod']!;
     expect(ledger.topics).toEqual(['trade.seats']);
     expect(ledger.handler).toBeInstanceOf(SeatHoldLedgerHandler);
     expect(saga.topics).toEqual(['trade.payments']);
     expect(saga.handler).toBeInstanceOf(PaymentResultHandler);
-    for (const o of [ledger, saga]) expect([o.service, o.clientId]).toEqual([SERVICE, 'purchase-svc-prod-pod-1']);
+    expect(merge.topics).toEqual(['identity.accounts-merged']);
+    expect(merge.handler).toBeInstanceOf(AccountMergedHandler);
+    for (const o of [ledger, saga, merge]) expect([o.service, o.clientId]).toEqual([SERVICE, 'purchase-svc-prod-pod-1']);
     await c.stop();
   });
 
@@ -123,16 +129,17 @@ describe('startPurchaseConsumers(runKeyedConsumer 대역)', () => {
 
   test('ST5_stop: 한 소비자의 멈춤이 던져도 다른 소비자는 멈추고, 그 뒤 첫 오류를 던진다. 두 번 불러도 소비자마다 한 번만 멈춘다 [ASVS v5.0.0-16.5.2]', async () => {
     const boom = Object.assign(new Error('commit failed'), { name: 'KafkaJSError' });
-    for (const failing of ['peaket.purchase-svc-hold-ledger.prod', 'peaket.purchase-svc-order-saga.prod']) {
+    const groups = ['peaket.purchase-svc-hold-ledger.prod', 'peaket.purchase-svc-order-saga.prod', 'peaket.purchase-svc-account-merge.prod'];
+    for (const failing of groups) {
       runs.stops.length = 0;
       runs.stopImpl.clear();
       runs.stopImpl.set(failing, () => Promise.reject(boom));
       const c = startPurchaseConsumers(options());
       await c.started;
       await expect(c.stop(), failing).rejects.toBe(boom);
-      expect([...runs.stops].sort(), failing).toEqual(['peaket.purchase-svc-hold-ledger.prod', 'peaket.purchase-svc-order-saga.prod']);
+      expect([...runs.stops].sort(), failing).toEqual([...groups].sort());
       await expect(c.stop(), failing).rejects.toBe(boom);
-      expect(runs.stops, failing).toHaveLength(2);
+      expect(runs.stops, failing).toHaveLength(3);
     }
   });
 });

@@ -25,6 +25,7 @@ import {
   type ConfirmCommand,
   type ConfirmOutcome,
   DrizzleOrderAccepts,
+  DrizzleMergedAccounts,
   DrizzleOrderStore,
   DrizzleSaga,
   InventoryOrderSeatPins,
@@ -188,6 +189,7 @@ function running(): Promise<PurchaseConsumers> {
       database,
       ledger: new DrizzleSeatHoldLedger(database),
       applyPaymentResult: app().apply,
+      mergedAccounts: new DrizzleMergedAccounts({ database }),
       registry: new PlatformMetrics('purchase-svc').registry,
       logger: { warn: (_o, msg) => void consumerWarnings.push(String(msg)) },
     });

@@ -423,3 +423,20 @@ export const orderCompensation = pgTable(
     check('order_compensation_reason_check', sql`length(${t.reason}) > 0`),
   ],
 );
+
+/**
+ * 계정 병합 대응표(docs/data.md §4 경계 9, asyncapi identity.accounts-merged, F-07-2 IR-02).
+ * identity-svc가 계정을 병합해도 주문·원장의 account_id는 고치지 않는다. purchase-svc는 이 표만 채우고,
+ * '내 주문' 조회·소유 확인을 account_id = ANY(대표 계정 + 흡수 계정 ID들)로 넓힌다.
+ * absorbed_account_id가 PK라 같은 병합 사건을 다시 받아도 한 행이다(멱등). merge_id는 처리한 사건을 남기는 칸이다.
+ */
+export const mergedAccount = pgTable(
+  'merged_account',
+  {
+    absorbedAccountId: uuid('absorbed_account_id').primaryKey(),
+    representativeAccountId: uuid('representative_account_id').notNull(),
+    mergeId: uuid('merge_id').notNull(),
+    mergedAt: at('merged_at').notNull(),
+  },
+  (t) => [index('merged_account_representative_idx').on(t.representativeAccountId)],
+);

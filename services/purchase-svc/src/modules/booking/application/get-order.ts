@@ -3,10 +3,12 @@
 // → 회차 표시 값 → 좌석 이름(판이 있으면) → orderHistoryDetailOf. 읽기 실패는 500 그대로다(확인서를 반쪽으로 그리지 않는다).
 import type { Clock } from '@peaket/platform';
 import { type OrderHistoryContext, type OrderHistoryDetail, orderHistoryDetailOf } from '../domain/order-history.js';
-import type { OrderHistoryReads, OrderSeatLabels, SaleConfigs } from '../domain/ports.js';
+import type { MergedAccounts, OrderHistoryReads, OrderSeatLabels, SaleConfigs } from '../domain/ports.js';
 
 export interface GetOrderDeps {
   reads: OrderHistoryReads;
+  /** 계정 묶음(IR-02). 없으면 세션 계정 하나만 본다(구판·시험 대역) */
+  accounts?: MergedAccounts;
   /** 공연명·회차 시작·등급 이름(선택) */
   configs?: SaleConfigs;
   /** 좌석 이름·등급 이름(선택). 없거나 읽지 못하면 저장 값(좌석 ID·등급 ID)으로 떨어진다 */
@@ -26,8 +28,10 @@ export class GetOrder {
   constructor(private readonly deps: GetOrderDeps) {}
 
   async execute(c: GetOrderCommand): Promise<GetOrderResult> {
-    const order = await this.deps.reads.find(c.orderId);
-    if (!order || order.accountId !== c.accountId) return { status: 404 };
+    // SQL에서 주문 ID와 계정 묶음을 함께 걸러 읽는다(다른 계정의 주문 행을 메모리에 싣지 않는다, IR-02)
+    const accountIds = this.deps.accounts ? await this.deps.accounts.accountIdsOf(c.accountId) : [c.accountId];
+    const order = await this.deps.reads.find(c.orderId, accountIds);
+    if (!order || !accountIds.includes(order.accountId)) return { status: 404 };
     const ctx = await this.#contextOf(order.eventId);
     const labels = this.deps.seats
       ? await this.deps.seats

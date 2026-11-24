@@ -246,6 +246,13 @@
       "when": 1795425979723,
       "tag": "0038_event_refund_settlement_notice",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1795496109023,
+      "tag": "0039_merged_account",
+      "breakpoints": true
     }
   ]
 }

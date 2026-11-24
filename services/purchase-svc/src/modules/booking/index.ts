@@ -5,11 +5,14 @@ import { orderHistoryCheckTask as historyTaskOf, type OrderHistoryTaskDeps } fro
 
 export { DrizzleOrderStore, checkOrderHistory, type DrizzleOrderStoreOptions } from './adapters/db/drizzle-orders.js';
 export { DrizzleOrderHistory, type DrizzleOrderHistoryOptions } from './adapters/db/drizzle-order-history.js';
+export { DrizzleMergedAccounts, type DrizzleMergedAccountsOptions } from './adapters/db/drizzle-merged-accounts.js';
+export { AccountMergedHandler, ACCOUNTS_MERGED_TOPIC, type AccountMergedEvent, type AccountMergedRecord } from './inbound/account-merged.handler.js';
 export { LayoutOrderSeatLabels, type OrderSeatMapSource } from './adapters/layout-order-seat-labels.js';
 export { GetOrder, type GetOrderCommand, type GetOrderDeps, type GetOrderResult } from './application/get-order.js';
 export { ListOrders, type ListOrdersCommand, type ListOrdersDeps, type ListOrdersResult } from './application/list-orders.js';
 export {
   BOOKING_NUMBER_PATTERN,
+  ORDER_ID_PATTERN,
   bookingNumberOf,
   decodeOrderHistoryCursor,
   encodeOrderHistoryCursor,
@@ -597,6 +600,8 @@ export type {
   OrderExpiryRange,
   OrderExpirySessionEnded,
   OrderExpirySignals,
+  MergedAccounts,
+  MergedAccountWriter,
   OrderExpiryStore,
   OrderHistoryMismatch,
   OrderHistoryReads,

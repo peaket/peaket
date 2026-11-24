@@ -9,10 +9,12 @@ import {
   type OrderHistoryPage,
   orderHistoryPageOf,
 } from '../domain/order-history.js';
-import type { OrderHistoryReads, SaleConfigs } from '../domain/ports.js';
+import type { MergedAccounts, OrderHistoryReads, SaleConfigs } from '../domain/ports.js';
 
 export interface ListOrdersDeps {
   reads: OrderHistoryReads;
+  /** 계정 묶음(IR-02). 없으면 세션 계정 하나만 본다(구판·시험 대역) */
+  accounts?: MergedAccounts;
   /** 공연명·회차 시작·등급 이름(선택). 없거나 읽지 못하면 그 칸 없이 답한다 */
   configs?: SaleConfigs;
   clock: Clock;
@@ -36,7 +38,9 @@ export class ListOrders {
       before = decodeOrderHistoryCursor(c.cursor);
       if (!before) return { status: 400 };
     }
-    const rows = await this.deps.reads.list(c.accountId, {
+    // 병합된 계정의 주문도 '내 주문'이다(account_id는 고치지 않고 조회만 넓힌다, docs/data.md §4 경계 9)
+    const accountIds = this.deps.accounts ? await this.deps.accounts.accountIdsOf(c.accountId) : [c.accountId];
+    const rows = await this.deps.reads.list(accountIds, {
       limit: c.limit + 1,
       ...(before ? { before } : {}),
     });
