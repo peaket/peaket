@@ -1,0 +1,29 @@
+{
+  "name": "@peaket/inv-ingest",
+  "private": true,
+  "version": "0.0.0",
+  "description": "조사 저장소 inv 적재 작업자 — 원천 열 개를 ClickHouse inv 표 넷에 싣고, 적재 진행·보존 파기를 맡는다(docs/streaming.md §6.4, LCH-240, F-04-10)",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "migrate": "node dist/main.js migrate",
+    "purge": "node dist/main.js purge",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@peaket/contracts": "workspace:*",
+    "@peaket/platform": "workspace:*",
+    "@prometheus-io/client": "^0.16.1",
+    "fastify": "^5.12.7"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "avsc": "5.7.9",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
