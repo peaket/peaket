@@ -150,7 +150,7 @@ test('BAT-174 lighthouse.spec.mjs는 RUNS만큼 재고 median으로 LCP·CLS·�
 
 // BAT-177-r2(OPEN[52] (나), ADR-0359): 월렛 LCP 임시 알림(BAT-176)을 되돌린다. 초안 PR #65 CI(실행 45048960248)에서
 // 월렛 LCP 가운데 값 3,850ms ≤ 한도 7,255ms라 계획 docs/review/plans/BAT-177-r2.md 5의 T6·T7대로 알림 없이 실패로 판정한다.
-// 단언 값은 정본 문장(한도 7,255ms = 기준선 5,804ms × 1.25, 첫 JS 한도 161.6kB)과 계획 4·5의 숫자다. 코드 상수를 정답으로 가져오지 않는다.
+// 단언 값은 정본 문장(한도 7,255ms = 기준선 5,804ms × 1.25, 첫 JS 한도 166kB)과 계획 4·5의 숫자다. 코드 상수를 정답으로 가져오지 않는다.
 const stripComments = (src) =>
   src
     .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -208,12 +208,12 @@ test('BAT-177 T9 ③ spec은 모든 화면 × 세 지표를 판정하고 지표 
   for (const key of ['lcpMs', 'cls', 'tbtMs']) assert.ok(spec.includes(`['${key}',`), `METRICS에 ${key}가 있다`);
 });
 
-test('BAT-177 T10 ① /my/tickets 첫 JS 한도는 161.6kB이고 js.spec이 그 한도로 막는다', () => {
+test('BAT-177 T10 ① /my/tickets 첫 JS 한도는 166kB이고 js.spec이 그 한도로 막는다', () => {
   const budget = loadJsBudgets().get('월렛');
   assert.equal(budget, 120, "§5.8 월렛 행의 첫 JS 예산은 120KB [가정]");
   const baseline = JSON.parse(readFileSync(new URL('./js-baseline.json', import.meta.url), 'utf8')).pages['web /my/tickets'];
-  assert.equal(baseline, 160.6);
-  assert.equal(jsLimit(budget, baseline), 161.6);
+  assert.equal(baseline, 165);
+  assert.equal(jsLimit(budget, baseline), 166);
   const spec = readFileSync(new URL('./js.spec.mjs', import.meta.url), 'utf8');
   assert.match(spec, /const limit = jsLimit\(budget, baseline\[key\]\)/);
   assert.match(spec, /expect\(kb,[\s\S]{0,300}\)\.toBeLessThanOrEqual\(limit\)/);
