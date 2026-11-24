@@ -6,7 +6,7 @@
   "type": "module",
   "packageManager": "pnpm@12.16.0",
   "scripts": {
-    "test": "node --test \"seed-css/*.test.mjs\" \"lib/*.test.mjs\" \"seatmap/*.test.mjs\" \"budgets/*.test.mjs\" \"static/*.test.mjs\" \"reflow/*.test.mjs\"",
+    "test": "node --test \"seed-css/*.test.mjs\" \"lib/*.test.mjs\" \"seatmap/*.test.mjs\" \"budgets/*.test.mjs\" \"static/*.test.mjs\" \"reflow/*.test.mjs\" \"key-proof-poc/*.test.mjs\"",
     "seed-css:build": "node seed-css/build.mjs",
     "seed-css": "playwright test -c playwright.layers.config.mjs",
     "visual": "playwright test -c playwright.visual.config.mjs",
@@ -26,11 +26,14 @@
     "console-csp": "playwright test -c playwright.console-csp.config.mjs",
     "console-remotes": "playwright test -c playwright.console-remotes.config.mjs",
     "scanner-enroll": "playwright test -c playwright.scanner-enroll.config.mjs",
-    "scanner-scan": "playwright test -c playwright.scanner-scan.config.mjs"
+    "scanner-scan": "playwright test -c playwright.scanner-scan.config.mjs",
+    "key-proof-poc": "node key-proof-poc/run.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
     "@playwright/test": "1.64.1",
-    "lighthouse": "13.5.0"
+    "lighthouse": "13.5.0",
+    "qrcode": "1.5.4",
+    "zxing-wasm": "3.1.7"
   }
 }
