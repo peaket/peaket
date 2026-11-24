@@ -68,5 +68,5 @@ node loadtest/analytics/run.mjs cleanup                           # 이름표 pe
 
 - Kafka·ClickHouse 한 대, 작업자 호스트 프로세스, PC 한 대다. 운영 MSK·관리형 ClickHouse의 복제·네트워크 지연은 빠진다.
 - `ops-rt`는 가짜 Schema Registry(같은 계약의 고정 ID)로 띄운다. 실제 레지스트리의 인증·네트워크 지연은 빠진다.
-- 5,000건/초 스모크에서 ClickHouse CPU p95가 79%였다. 30,000건/초는 이 PC에서 포화될 수 있고, 그 값 자체가 V-T19의 한계다.
+- 5,000건/초 스모크에서 신선도 p95가 4,717ms(통과)와 8,724ms(실패)로 갈렸고 ClickHouse CPU p95는 70.2%였다. 30,000건/초는 이 PC에서 포화될 수 있고, 그 값 자체가 V-T19의 한계다.
 - 조사 사본(`investigation.requests`)·`inv-ingest`는 아직 저장소에 없어 입력에 넣지 않는다(ADR-0171 확장은 그 기능이 생긴 뒤).
