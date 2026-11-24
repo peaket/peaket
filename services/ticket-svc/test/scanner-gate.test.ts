@@ -285,11 +285,13 @@ describe('R-609 C1-02·C1-11 서버 재판정', () => {
   test('세션 유효 창 밖·입장 마감 뒤·시계 불확실을 표시하고, 재입장 허용의 IN 다음 IN은 NO_EXIT다', async () => {
     const shifts = new MemoryScannerShiftStore(store);
     await shifts.putPlacement({ eventId: EVENT, deviceId: DEVICE, gateZone: '동문', mode: 'IN', setBy: ACCOUNT, atMs: NOW, expectedVersion: 0 });
+    // 마감 행 대역을 심는다(운영처럼 마감 행이 있을 때만 AFTER_CLOSE). core 사본 값은 쓰지 않는다(IR-12)
+    store.seedEntryClose(EVENT, NOW - 1_000);
     const placed = new ScannerGate({
       store,
       clock: fakeClock({ now: NOW }),
       shifts,
-      policy: policy({ reentryAllowed: true, entryClosesAtMs: NOW - 1_000 }),
+      policy: policy({ reentryAllowed: true }),
       sessions: { check: async () => ({ valid: false, eventId: EVENT, accountId: ACCOUNT, validFromMs: NOW - 1_000, validUntilMs: NOW + 1_000 }) },
     });
     await shifts.putPlacement({ eventId: EVENT, deviceId: DEVICE, gateZone: '동문', mode: 'IN', setBy: ACCOUNT, atMs: NOW, expectedVersion: 1 });
@@ -305,6 +307,8 @@ describe('R-609 C1-02·C1-11 서버 재판정', () => {
       body: [scan({ clockOffsetMs: 3 * 60_000 })],
     });
     expect(outside.flags.map((f) => f.kind).sort()).toEqual(['AFTER_CLOSE', 'OUT_OF_SESSION', 'TIME_UNCERTAIN']);
+    // 이 시험 뒤의 재입장 기록에 마감 표시가 섞이지 않게 마감 행 대역을 지운다
+    store.entryCloses.delete(EVENT);
 
     const reentryGate = new ScannerGate({ store, clock: fakeClock({ now: NOW }), shifts, policy: policy({ reentryAllowed: true }) });
     const first = await reentryGate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [scan({ ticketId: TICKET_REENTRY, scannedAtDevice: new Date(NOW + 10_000).toISOString() })] });
@@ -312,6 +316,27 @@ describe('R-609 C1-02·C1-11 서버 재판정', () => {
     const second = await reentryGate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [scan({ ticketId: TICKET_REENTRY, scannedAtDevice: new Date(NOW + 20_000).toISOString() })] });
     expect(second.flags).toEqual([expect.objectContaining({ kind: 'NO_EXIT' })]);
     expect(store.scans.get(second.acceptedIds[0]!)).toMatchObject({ result: 'CHECK', reason: 'NO_EXIT_RECORD' });
+  });
+
+  test('IR-12 마감 행이 없으면 core 사본의 entryClosesAtMs가 지나도 AFTER_CLOSE가 없다(운영은 마감 행만 본다)', async () => {
+    const noCloseRow = new ScannerGate({ store, clock: fakeClock({ now: NOW }), policy: policy({ entryClosesAtMs: NOW - 30_000 }) });
+    // 보정 시각은 core 사본보다 뒤지만, ticket-svc 마감 행이 없으므로 운영에서는 표시가 없다
+    const s = scan({ scannedAtDevice: new Date(NOW).toISOString() });
+    const res = await noCloseRow.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [s] });
+    expect(res.flags.map((f) => f.kind)).not.toContain('AFTER_CLOSE');
+    expect(store.scans.get(s.id)).toMatchObject({ result: 'PASS' });
+  });
+
+  test('IR-12 마감 행이 있으면 받은 시각만 견준다(보정 시각이 마감 전이어도 받은 시각이 뒤면 AFTER_CLOSE, 같으면 아니다)', async () => {
+    store.seedEntryClose(EVENT, NOW);
+    const atClose = scan({ ticketId: TICKET_B, scannedAtDevice: new Date(NOW - 3_600_000).toISOString() });
+    const eq = await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [atClose] });
+    expect(eq.flags.map((f) => f.kind)).not.toContain('AFTER_CLOSE');
+
+    store.seedEntryClose(EVENT, NOW - 1);
+    const afterClose = scan({ ticketId: TICKET_ZONE, scannedAtDevice: new Date(NOW - 3_600_000).toISOString() });
+    const late = await gate.scans({ eventIdRaw: EVENT, sessionEventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, sessionId: SESSION, role: 'gate_lead', body: [afterClose] });
+    expect(late.flags.map((f) => f.kind)).toEqual(['AFTER_CLOSE']);
   });
 
   test('기기 단독 업로드는 scannerSessionId의 계정을 채우고, 기록 시각이 세션 창 안이면 정상이다', async () => {

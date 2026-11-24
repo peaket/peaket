@@ -127,6 +127,23 @@ describe('중복 입장 갈림의 앞 기록 번호(O-T2 ①, offline-gate §7.1
     }
   });
 
+  test('O-T2 ① 가장 이른 정상 기록이 state_seq 없는 옛 행이면 나중 기록의 갈림은 CONCURRENT다(운영 PG와 같은 규칙, IR-06)', async () => {
+    const r = rig();
+    const ticketId = r.ticket();
+    const first = scanOf(r.eventId, ticketId, T0, 0);
+    expect((await upload(r, DEVICE_A, first)).flags).toEqual([]);
+    // state_seq를 적기 전에 쌓인 옛 행처럼 심는다(운영은 scan_event.state_seq IS NULL)
+    const stored = r.store.scans.get(first.id)!;
+    expect(stored.stateSeq, '먼저 정상 기록의 state_seq를 확인한다').toBeTypeOf('number');
+    delete stored.stateSeq;
+    await bump(r);
+    // 지금 마지막 번호로 물러나면 KNOWN이 되는 knownSeq를 골라 두 규칙을 가른다
+    const lastSeq = (await r.store.changes({ eventId: r.eventId, after: 0, limit: 10_000 })).lastSeq;
+    const later = scanOf(r.eventId, ticketId, T0 + 60_000, lastSeq);
+    const res = await upload(r, DEVICE_B, later);
+    expect(res.flags.map((f) => ({ ticketId: f.ticketId, kind: f.kind, awareness: f.awareness }))).toEqual([{ ticketId, kind: 'DUPLICATE', awareness: 'CONCURRENT' }]);
+  });
+
   test('O-T2 ① 두 오프라인 스캐너(knownSeq 같음)의 1분 간격 중복은 올리는 차례를 바꿔도 표시 하나·정상은 이른 기록·나중 기록은 CONCURRENT다', async () => {
     for (const order of ['early-first', 'late-first'] as const) {
       const r = rig();
