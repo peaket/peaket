@@ -6,7 +6,7 @@
 
 ## 다음
 
-- F-04-8(초당 3만 건 신선도·누락률·강제 종료 뒤 정확성, 측정 창 3일). F-04-7은 끝났다.
+- F-04-8 계획·측정 하네스·스모크는 끝났다. **측정 창 3일**(S1 30k 30분 3회, S2 V-T19 사다리, S3 강제 종료 6경우, S4 ST-T17)을 열어 `docs/review/plans/F-04-8.md` §10 표를 채우고 `V-T19`를 장부에 '측정'으로 올린다. 측정 창은 갈래 4의 2026-11-26 09:00 창과 겹치지 않게 그 뒤에 잡고, Docker 잠금은 `docker-all`로 잡는다. 조사 사본(`investigation.requests`)·`inv-ingest`는 아직 없어 이번 입력에서 뺀다.
 
 ## 진행 로그
 
@@ -17,3 +17,4 @@
 - 2026-11-23 F-04-5(B, OPS-230 일부, A-T11·A-T20 ③·A-T25, R-802): 지표 사전 metrics.yml·결정 규칙 rules.yml 18행·F12 규칙 판정(95% Wilson 구간·보류 사유 넷)·같은 규모 기준선·품질 검사·현재 판 지표 뷰 여섯. 실제 ClickHouse 통합 2/2: 전환율 950/1,200 = 0.7917, 구간 [0.7678, 0.8137] → 걸림, 기준선 n=11 사분위, 입장 900 → 표본 부족, 바깥 품질 실패 → 보류, R0 → 미확정·매진 소요 잠정. 장르 랭킹 동결. 계획 docs/review/plans/F-04-5.md.
 - 2026-11-24 F-04-6(B, OPS-240, A-T7·A-T9·A-T18, R-803): 마감 실행기 `services/close-runner`(R0~R3 예정·할 일 고르기·두 번에 나눈 빌드·20분 상한·`gold.close_run_log`·R3 정산서 대조·실패해도 판 바꾸기), `data/macros/close.sql`(R2 판 온세일 동결·앞 판 날짜별·회차 차원 잇기, 새 `run_id` 별칭이 WHERE를 가리는 결함을 `src.run_id`로 고침), `data/models/gold` F1~F8·F11·dim_event·dim_section·dim_tier, `dim_date` 공휴일, 기준 자료 파일 싣기·`bronze.brz_intake_log`. 실제 ClickHouse 통합 1/1: L이 R0→R1(실패 주입 뒤 다시)→R2→매일(F15 3석·F2 2석 동결)→90일 지움→앞 판 잇기→R3 정산서 0원 차이·판매 좌석 3·판매 금액 400,000, M R3 1원 차이→품질 FAIL. 회귀 F-04-4 2/2·F-04-5 2/2, 유닛 9/9·타입 검사·lint·dbt parse. 장부 빈칸 36(막지 않음, 새 바탕에서 범위 335항목). origin/develop 9339cef4a 위로 다시 쌓음. 계획 docs/review/plans/F-04-6.md.
 - 2026-11-24 F-04-7(B, OPS-250, V-T16, R-806): `data/models/metrics/mtr_event_report`(현재 판 지표 카드·F12 결정 규칙 판정·품질)와 `partner_sales_gold`(R3 현재 판 판매량·매진 시각·등급별 판매/매출/환불·10분 판매 곡선, 5건 [가정] 미만 칸 합치기). 실제 ClickHouse·dbt 통합 1/1: 판매 좌석 3, R 2석·300,000·5분 매진, S 2석·200,000·환불 1석, 환불 1건 100,000, 곡선 2칸 merged, 리포트 R3 지표 32·규칙 18(매진 30분 TRIGGERED·전환율 DEFERRED)·품질 통과. 회귀 F-04-4 2/2·F-04-5 2/2·F-04-6 1/1, 장부 빈칸 24(B, 막지 않음). ops-svc 리포트 API·Markdown과 결정 기록 CRUD는 소비/다음 몫. 계획 docs/review/plans/F-04-7.md.
+- 2026-11-24 F-04-8 측정 준비(B, OPS-170, NFR-009·V-T19, 측정 창은 아직): 계획과 하네스만 끝냈다. `loadtest/analytics/`에 Avro 발생기(`produce.mjs`), 실행기(`run.mjs`: Kafka·ClickHouse·표 이전·`analytics-ingest`·`ops-rt`·`rt-pulse`·SIGKILL·따라잡기·집계), 검증기(`verify.mjs`: 오프셋 커버리지·고유 eventKey·금액·신선도), 순수 판정(`lib.mjs`), 가짜 Schema Registry를 두고 smoke/run/crash/hot/ladder/verify/cleanup을 만들었다. 계약 시험 7/7. 스모크 실측: 2,000건/초 × 30초 + 10초 SIGKILL → 60,000건, 신선도 p95 3,377ms(가장 늦은 파티션 기준), 누락률 0%, 정확성 차이 0(재조정 포함 40.8초); 5,000건/초 × 30초 → 150,000건, 신선도 p95 8,724ms·호스트 CPU 94.7%로 **실패**(누락 0·정확성 0, ClickHouse CPU 65.2%); 핫 모드 9,450건 → 핫 파티션 밀림 p95 850ms·신선도 3,442ms. 5,000건/초에서 이미 NFR-009를 못 지켜 이 PC의 한계가 그 아래일 수 있다. 3만 건/초·1분 창·V-T19 사다리·ops-svc `rt_freshness_seconds`는 측정 창 몫. 계획 docs/review/plans/F-04-8.md.
