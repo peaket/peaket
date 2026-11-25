@@ -37,6 +37,10 @@ function fresh(): FreshnessModule {
 /** 구현 전 트리에는 changes의 6번째 인자와 staleDevices 칸이 없다. 시험은 구현 모양을 느슨하게 불러 실패를 단언한다 */
 type GateLike = { changes(...args: unknown[]): Promise<{ changes: unknown[]; lastSeq: number; staleDevices?: StaleDevice[] }> };
 const Gate = ScannerGate as unknown as new (d: unknown) => GateLike;
+type MonitorLike = { staleDevices(i: { eventId: string; gateZone?: string; selfDeviceId?: string; nowMs: number }): Promise<StaleDevice[]> };
+const Monitor = (await import('../src/modules/scanner/application/scanner-freshness.js').catch(() => ({}))) as {
+  ScannerFreshness?: new (d: unknown) => MonitorLike;
+};
 
 const placements: Placement[] = [
   { deviceId: D1, gateZone: '동문' },
@@ -94,6 +98,23 @@ describe('O-T20 현장 책임자 신선도(서버)', () => {
     expect(f.staleDevicesOf({ placements, devices, policy: OPEN, nowMs: NOW, gateZone: '서문', selfDeviceId: SELF })).toEqual([
       expect.objectContaining({ deviceId: D3, gateZone: '서문' }),
     ]);
+  });
+
+  test('O-T20 신선도 감시는 기존 포트에서 같은 구역 지연 기기를 모아 현장 책임자 알림에 쓴다', async () => {
+    expect(typeof Monitor.ScannerFreshness, 'ScannerFreshness.staleDevices가 없다').toBe('function');
+    const monitor = new Monitor.ScannerFreshness!({
+      devices: { findById: async (deviceId: string) => devices.get(deviceId) },
+      shifts: { eventsWithPlacements: async () => [EVENT], placementsOf: async () => placements },
+      policy: { get: async () => ({ ...OPEN, promoterId: 'p-1', reentryAllowed: false }) },
+      sink: { open: async () => undefined, resolve: async () => undefined },
+      clock: fakeClock({ now: NOW }),
+    });
+    const rows = await monitor.staleDevices({ eventId: EVENT, gateZone: '동문', selfDeviceId: SELF, nowMs: NOW });
+    expect(rows).toEqual([expect.objectContaining({ deviceId: D1, deviceName: '동문-03', gateZone: '동문', ageMs: 180_001 })]);
+    expect(await monitor.staleDevices({ eventId: EVENT, gateZone: '서문', selfDeviceId: SELF, nowMs: NOW })).toEqual([
+      expect.objectContaining({ deviceId: D3, gateZone: '서문' }),
+    ]);
+    expect(await monitor.staleDevices({ eventId: EVENT, gateZone: '동문', selfDeviceId: SELF, nowMs: NOW + 7_200_000 })).toEqual([]);
   });
 
   test('O-T20 현장 책임자 변경분에만 같은 구역 지연 기기를 싣고 일반 스태프 응답에는 싣지 않는다', async () => {

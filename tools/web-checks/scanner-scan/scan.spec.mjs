@@ -796,9 +796,9 @@ test('GAT-140 C1-15 최소 지원 판보다 낮은 앱은 스캔 시작을 막�
   const api = await scannerApi(page, wallet, { minAppVersion: '99.0.0' });
   await signedIn(page);
   await page.goto('/setup?live=1');
-  // 근무 준비(첫 shift → 목록 → 둘째 shift)가 끝난 뒤에 판을 본다
-  await expect.poll(() => api.shifts, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+  // 최소 판은 목록 응답에 실린다: 목록을 받은 뒤 안내가 뜨고 [스캔 시작]이 막힌다
+  await expect.poll(() => api.packages, { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
+  await expect(page.getByText(/이 앱 판으로는 근무를 시작할 수 없습니다/)).toBeVisible();
   const start = page.getByRole('button', { name: '스캔 시작' });
   await expect(start).toHaveAttribute('aria-disabled', 'true');
-  await expect(page.getByText(/이 앱 판으로는 근무를 시작할 수 없습니다/)).toBeVisible();
 });
