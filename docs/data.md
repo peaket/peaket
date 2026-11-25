@@ -1658,6 +1658,7 @@ erDiagram
         uuid ticket_id
         uuid event_id "회차 ID"
         text type "TRANSFER_OFFERED|TRANSFER_ACCEPTED|TRANSFER_REJECTED|TRANSFER_WITHDRAWN|TRANSFER_EXPIRED|TICKET_RETURNED|TRANSFER_WEAK_REAUTH. 양도 사건마다 두 사람(보낸·받는) 행, 약한 재인증 알림은 보낸 사람 하나(추천 적용 2026-11-26, BUILD_ORDER F-05-11)"
+        text party "SENDER|RECIPIENT|PAYER|RETURNER. core 알림 입구가 당사자별 문안을 고른다(notify §4.8)"
         uuid account_id "알림 받는 계정"
         text reason "TRANSFER_WITHDRAWN일 때만 SENDER|EVENT_CANCELLED|EVENT_POSTPONED|OTHER. 공개 사유만 남긴다(부정 예매·탈퇴·입금 오류는 OTHER)"
         timestamptz created_at

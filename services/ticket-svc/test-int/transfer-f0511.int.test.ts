@@ -122,7 +122,7 @@ async function issue(payer: string, eventId: string, n = 1): Promise<string[]> {
   const r = await service.issue({ orderId: randomUUID(), eventId, payerAccountId: payer, seatIds: Array.from({ length: n }, () => randomUUID()), issueGeneration: 0, eventStartsAtMs: STARTS });
   return r.tickets.map((t) => t.ticketId);
 }
-async function offerDirect(ticketId: string, from: string, to: string, expiresAtMs = NOW + 48 * HOUR): Promise<string> {
+async function offerDirect(ticketId: string, from: string, to: string, expiresAtMs = clock.now() + 48 * HOUR): Promise<string> {
   const offerId = randomUUID();
   const out = await transferStore.createOffer({ offerId, ticketId, fromAccountId: from, toAccountId: to, status: 'OFFERED', expiresAtMs, createdAtMs: clock.now() }, clock.now());
   expect(out.kind).toBe('CREATED');
@@ -130,8 +130,8 @@ async function offerDirect(ticketId: string, from: string, to: string, expiresAt
 }
 const ticketRow = async (id: string) => (await q<{ account_id: string; status: string; transfer_pending: boolean; version: string }>('select account_id, status, transfer_pending, version from ticket where id = $1', [id]))[0]!;
 const offerRow = async (id: string) => (await q<{ status: string; withdraw_reason: string | null }>('select status, withdraw_reason from transfer_offer where id = $1', [id]))[0]!;
-const outboxRows = async (eventKey?: string) => q<{ topic: string; msg_key: string; payload: Buffer }>('select topic, msg_key, payload from outbox where topic = $1 and ($2::text is null or payload::text like $2) order by seq', ['trade.tickets', eventKey === undefined ? null : `%${eventKey}%`]);
-const noticeRows = async () => q<{ type: string; account_id: string; reason: string | null; sent_at: Date | null }>('select type, account_id, reason, sent_at from transfer_notice order by created_at, account_id');
+const outboxRows = async (eventId: string) => q<{ topic: string; msg_key: string; payload: Buffer }>('select topic, msg_key, payload from outbox where topic = $1 and msg_key = $2 order by seq', ['trade.tickets', eventId]);
+const noticeRows = async (offerId?: string) => q<{ type: string; party: string; offer_id: string; account_id: string; reason: string | null; sent_at: Date | null }>('select type, party, offer_id, account_id, reason, sent_at from transfer_notice where ($1::uuid is null or offer_id = $1::uuid) order by created_at, account_id', [offerId ?? null]);
 
 describe('F-05-11 T3 R-T25 ③ 연기 철회(PostgreSQL)', () => {
   test('F-05-11 T3 R-T25 ③ ① 그 회차 요청만 WITHDRAWN·EVENT_POSTPONED로 바꾸고 다른 회차는 그대로다', async () => {
@@ -147,6 +147,10 @@ describe('F-05-11 T3 R-T25 ③ 연기 철회(PostgreSQL)', () => {
     const out = await store.withdrawForEvent!({ eventId: w.event, reason: 'EVENT_POSTPONED', nowMs: at });
     expect([...out.withdrawn].sort()).toEqual([...offers].sort());
     for (const id of offers) expect(await offerRow(id)).toMatchObject({ status: 'WITHDRAWN', withdraw_reason: 'EVENT_POSTPONED' });
+    for (const id of offers) {
+      const notices = await noticeRows(id);
+      expect(notices.filter((n) => n.type === 'TRANSFER_WITHDRAWN' && n.reason === 'EVENT_POSTPONED')).toHaveLength(2);
+    }
     expect((await ticketRow(ids[0]!)).transfer_pending).toBe(false);
     expect((await offerRow(otherOffer)).status).toBe('OFFERED');
     expect((await store.withdrawForEvent!({ eventId: w.event, reason: 'EVENT_POSTPONED', nowMs: at + 1_000 })).withdrawn).toHaveLength(0);
@@ -169,15 +173,31 @@ describe('F-05-11 T8 Outbox 여섯 사건(PostgreSQL)', () => {
     const w = world();
     const t = (await issue(w.a, w.event, 1))[0]!;
     const r = await transfers.createOffer({ ticketId: t, accountId: w.a, sessionId: SESSION, reauthToken: 'r', recipientRef: (await transfers.lookupRecipient({ accountId: w.a, memberCode: w.codeB })).recipientRef, idempotencyKey: randomUUID() });
-    expect((await outboxRows()).map((x) => x.topic)).toEqual(['trade.tickets']);
-    const firstPayload = String((await outboxRows())[0]!.payload);
-    expect(firstPayload).toContain('TRANSFER_OFFERED');
-    expect((await outboxRows())[0]!.msg_key).toBe(w.event);
+    expect((await outboxRows(w.event)).map((x) => x.topic)).toEqual(['trade.tickets']);
+    const first = (await outboxRows(w.event))[0]!;
+    expect(String(first.payload)).toContain('TRANSFER_OFFERED');
+    expect(first.msg_key).toBe(w.event);
+    const firstKey = (JSON.parse(String(first.payload)) as { eventKey: string }).eventKey;
     await transfers.reject({ offerId: r.offerId, accountId: w.b });
-    await transfers.reject({ offerId: r.offerId, accountId: w.b });
-    const rows = await outboxRows();
+    const rows = await outboxRows(w.event);
     expect(rows).toHaveLength(2);
     expect(String(rows[1]!.payload)).toContain('TRANSFER_REJECTED');
+    await transfers.reject({ offerId: r.offerId, accountId: w.b });
+    expect(await outboxRows(w.event)).toHaveLength(2);
+    expect((JSON.parse(String((await outboxRows(w.event))[0]!.payload)) as { eventKey: string }).eventKey).toBe(firstKey);
+    expect(firstKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    // 철회·만료도 실제 표에 한 행씩 남고 accountId가 보낸 사람이다.
+    const t2 = (await issue(w.a, w.event, 1))[0]!;
+    const o2 = await offerDirect(t2, w.a, w.b);
+    await transfers.withdraw({ offerId: o2, accountId: w.a });
+    const t3 = (await issue(w.a, w.event, 1))[0]!;
+    await offerDirect(t3, w.a, w.b, clock.now() - 1);
+    expect(await transfers.expireOffers()).toBeGreaterThanOrEqual(1);
+    const all = await outboxRows(w.event);
+    const payloads = all.map((x) => JSON.parse(String(x.payload)) as { type: string; accountId: string });
+    expect(payloads.filter((p) => p.type === 'TRANSFER_WITHDRAWN')).toHaveLength(1);
+    expect(payloads.filter((p) => p.type === 'TRANSFER_EXPIRED')).toHaveLength(1);
+    for (const p of payloads.filter((x) => x.type === 'TRANSFER_WITHDRAWN' || x.type === 'TRANSFER_EXPIRED')) expect(p.accountId).toBe(w.a);
   });
 
   test('F-05-11 T8 ④ outbox 쓰기가 실패하면 상태 변경도 되돌아간다(장애 주입)', async () => {
@@ -191,7 +211,7 @@ describe('F-05-11 T8 Outbox 여섯 사건(PostgreSQL)', () => {
       await database.pool.query(`drop trigger if exists f0511_fail on outbox`);
     }
     expect((await ticketRow(t)).transfer_pending).toBe(false);
-    expect(await offerRow(randomUUID())).toBeUndefined();
+    expect((await q<{ n: number }>('select count(*)::int as n from transfer_offer where ticket_id = $1', [t]))[0]!.n).toBe(0);
   });
 });
 
@@ -200,29 +220,59 @@ describe('F-05-11 T9 알림 행(PostgreSQL)', () => {
     const w = world();
     const t = (await issue(w.a, w.event, 1))[0]!;
     const r = await transfers.createOffer({ ticketId: t, accountId: w.a, sessionId: SESSION, reauthToken: 'r', recipientRef: (await transfers.lookupRecipient({ accountId: w.a, memberCode: w.codeB })).recipientRef, idempotencyKey: randomUUID() });
-    const rows = await noticeRows();
+    const rows = await noticeRows(r.offerId);
     expect(rows.filter((x) => x.type === 'TRANSFER_OFFERED').map((x) => x.account_id).sort()).toEqual([w.a, w.b].sort());
     await transfers.withdraw({ offerId: r.offerId, accountId: w.a });
-    const withdrawn = (await noticeRows()).filter((x) => x.type === 'TRANSFER_WITHDRAWN');
+    const withdrawn = (await noticeRows(r.offerId)).filter((x) => x.type === 'TRANSFER_WITHDRAWN');
     expect(withdrawn.map((x) => x.account_id).sort()).toEqual([w.a, w.b].sort());
     expect(withdrawn[0]!.reason).toBe('SENDER');
     // 같은 사건을 다시 적으려 해도 유일 키가 막는다(다시 보냄은 상태로 끝나 행이 늘지 않는다)
-    expect((await noticeRows()).filter((x) => x.type === 'TRANSFER_OFFERED')).toHaveLength(2);
+    await expect(database.pool.query('insert into transfer_notice (id, type, party, offer_id, ticket_id, event_id, account_id, reason, created_at, attempts, next_attempt_at) values ($1, $2, $3, $4, $5, $6, $7, $8, now(), 0, now())', [randomUUID(), 'TRANSFER_OFFERED', 'RECIPIENT', r.offerId, t, w.event, w.b, null])).rejects.toMatchObject({ code: '23505' });
+    expect((await noticeRows(r.offerId)).filter((x) => x.type === 'TRANSFER_OFFERED')).toHaveLength(2);
+  });
+
+  test('F-05-11 T9 ② 알림 쓰기가 실패하면 회차 취소 전체가 되돌아간다(장애 주입)', async () => {
+    const w = world();
+    const t = (await issue(w.a, w.event, 1))[0]!;
+    const offerId = await offerDirect(t, w.a, w.b);
+    await database.pool.query(`create or replace function f0511_notice_fail() returns trigger language plpgsql as $$ begin raise exception 'f0511 알림 쓰기 실패'; end $$`);
+    await database.pool.query(`create trigger f0511_notice_fail before insert on transfer_notice for each row execute function f0511_notice_fail()`);
+    try {
+      await expect(tickets.eventCancel({ cancellationRequestId: randomUUID(), eventId: w.event, targets: [{ ticketId: t, cancellationId: randomUUID() }], nowMs: clock.now() })).rejects.toBeTruthy();
+    } finally {
+      await database.pool.query(`drop trigger if exists f0511_notice_fail on transfer_notice`);
+    }
+    expect((await offerRow(offerId)).status).toBe('OFFERED');
+    expect((await ticketRow(t)).status).toBe('TRANSFER_PENDING');
+    expect((await q<{ n: number }>('select count(*)::int as n from ticket_cancellation where ticket_id = $1', [t]))[0]!.n).toBe(0);
   });
 });
 
 describe('F-05-11 T10 입장 마감의 끝(PostgreSQL)', () => {
-  test('F-05-11 T10 ① entry_close.closed_at 뒤에는 돌려주기가 되고, 그 전에는 409다', async () => {
-    const w = world();
-    const t = (await issue(w.a, w.event, 1))[0]!;
-    const offerId = await offerDirect(t, w.a, w.b);
-    expect((await transfers.accept({ offerId, accountId: w.b })).status).toBe('ACCEPTED');
-    await database.pool.query('insert into entry_close (event_id, closed_at, reason, role_ends_at) values ($1, $2, $3, $2) on conflict (event_id) do update set closed_at = excluded.closed_at', [w.event, new Date(STARTS + 50 * HOUR), 'ALL_REPORTED']);
+  test('F-05-11 T10 ① entry_close(+3시간)와 마감 행 없음(+50시간)을 구분해 돌려준다', async () => {
+    // 한 시계를 앞으로만 옮기므로 두 경우를 한 시험에서 차례로 본다.
+    const w1 = world();
+    const t1 = (await issue(w1.a, w1.event, 1))[0]!;
+    const o1 = await offerDirect(t1, w1.a, w1.b);
+    expect((await transfers.accept({ offerId: o1, accountId: w1.b })).status).toBe('ACCEPTED');
+    const w2 = world();
+    const t2 = (await issue(w2.a, w2.event, 1))[0]!;
+    const o2 = await offerDirect(t2, w2.a, w2.b);
+    expect((await transfers.accept({ offerId: o2, accountId: w2.b })).status).toBe('ACCEPTED');
+    // 대체값(+50시간)과 다른 +3시간을 넣어 저장소가 entry_close를 읽는지 가른다(TR-06).
+    await database.pool.query('insert into entry_close (event_id, closed_at, reason, role_ends_at) values ($1, $2, $3, $2) on conflict (event_id) do update set closed_at = excluded.closed_at', [w1.event, new Date(STARTS + 3 * HOUR), 'ALL_REPORTED']);
     clock.advance(STARTS + 1 - clock.now());
-    await expect(transfers.returnToPayer({ ticketId: t, accountId: w.b, sessionId: SESSION, reauthToken: 'r', idempotencyKey: randomUUID() })).rejects.toMatchObject({ code: 'ENTRY_STARTED' });
-    clock.advance(STARTS + 50 * HOUR - clock.now());
-    const out = await transfers.returnToPayer({ ticketId: t, accountId: w.b, sessionId: SESSION, reauthToken: 'r', idempotencyKey: randomUUID() });
-    expect(out.status).toBe('RETURNED');
-    expect((await ticketRow(t)).account_id).toBe(w.a);
+    await expect(transfers.returnToPayer({ ticketId: t1, accountId: w1.b, sessionId: SESSION, reauthToken: 'r', idempotencyKey: randomUUID() })).rejects.toMatchObject({ code: 'ENTRY_STARTED' });
+    await expect(transfers.returnToPayer({ ticketId: t2, accountId: w2.b, sessionId: SESSION, reauthToken: 'r', idempotencyKey: randomUUID() })).rejects.toMatchObject({ code: 'ENTRY_STARTED' });
+    clock.advance(STARTS + 3 * HOUR - 1 - clock.now());
+    await expect(transfers.returnToPayer({ ticketId: t1, accountId: w1.b, sessionId: SESSION, reauthToken: 'r', idempotencyKey: randomUUID() })).rejects.toMatchObject({ code: 'ENTRY_STARTED' });
+    clock.advance(1);
+    expect((await transfers.returnToPayer({ ticketId: t1, accountId: w1.b, sessionId: SESSION, reauthToken: 'r', idempotencyKey: randomUUID() })).status).toBe('RETURNED');
+    expect((await ticketRow(t1)).account_id).toBe(w1.a);
+    // 마감 행이 없는 회차는 시작 + 50시간 −1ms까지 409, 그때부터 돌려준다.
+    clock.advance(STARTS + 50 * HOUR - 1 - clock.now());
+    await expect(transfers.returnToPayer({ ticketId: t2, accountId: w2.b, sessionId: SESSION, reauthToken: 'r', idempotencyKey: randomUUID() })).rejects.toMatchObject({ code: 'ENTRY_STARTED' });
+    clock.advance(1);
+    expect((await transfers.returnToPayer({ ticketId: t2, accountId: w2.b, sessionId: SESSION, reauthToken: 'r', idempotencyKey: randomUUID() })).status).toBe('RETURNED');
   });
 });

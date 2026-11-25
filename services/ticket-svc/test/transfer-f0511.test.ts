@@ -1,4 +1,4 @@
-﻿// F-05-11 양도 뒤 몫 단위 시험(BUILD_ORDER GAT-050·GAT-055·GAT-060, 계획 docs/review/plans/F-05-11.md §4·§5 T1~T10).
+// F-05-11 양도 뒤 몫 단위 시험(BUILD_ORDER GAT-050·GAT-055·GAT-060, 계획 docs/review/plans/F-05-11.md §4·§5 T1~T10).
 // 시험 담당이 구현 전에 썼다(ADR-0372·0381). 기준 트리에서 새 동작은 실패한다('실패 확인' 절).
 // 정본: docs/features/transfer-refund.md §3.1·§4·§5·§11, docs/features/identity.md §7.1·§8·§11(I-T43 ①·I-T54 ⑤),
 //       docs/features/notify.md §4.8, docs/design/d5 §5.23·§9.2, docs/api/openapi.yaml TransferOffer·Ticket, POL-017·POL-019·POL-033.
@@ -8,7 +8,7 @@
 // - 새 모듈(아직 없다)은 동적 가져오기로 불러 '모듈이 없다' 단언에서 떨어지게 한다(파일이 가져오기에서 멈추지 않는다).
 // - 시험 값은 정본 예와 다르게 고른다(회원 코드 QZ7-4K2M, 휴대폰 010-9371-2468, 공연 시작 19:37 KST).
 import 'reflect-metadata';
-import { randomUUID } from 'node:crypto';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { Writable } from 'node:stream';
 import { createService, fakeClock, type FakeClock, MemoryDpopReplayStore, type AdminAuthzPort, type ScannerSessionCheck } from '@peaket/platform';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -122,7 +122,7 @@ afterEach(async () => {
 
 type StoreExtras = {
   events?: Array<{ topic: string; key: string; payload: Uint8Array }>;
-  notices?: Array<{ noticeId: string; type: string; accountId: string; reason?: string }>;
+  notices?: Array<{ noticeId: string; type: string; party?: string; offerId?: string; accountId: string; reason?: string; sentAtMs?: number }>;
   setEntryClose?: (eventId: string, closedAtMs: number) => void;
   claimDue?: (nowMs: number, limit: number, leaseMs: number) => Promise<readonly unknown[]>;
   markSent?: (noticeId: string, nowMs: number) => Promise<void>;
@@ -155,13 +155,14 @@ async function harness() {
   });
   const replay = new MemoryDpopReplayStore(clock);
   const deviceKeysStore = new MemoryDeviceKeyStore();
+  const deviceKeys = new DeviceKeys({ store: deviceKeysStore, clock });
   const gate = new MemoryScannerGateStore(deviceKeysStore);
   const devices = new MemoryScannerDeviceStore();
   const svc = await createService({
     name: 'ticket-svc-transfer-f0511',
     module: AppModule.register({
       scanner: { store: devices, codes: new MemoryEnrollmentCodeStore(clock), replay, gate, shift: new MemoryScannerShiftStore(gate) },
-      ticket: { deviceKeys: new DeviceKeys({ store: deviceKeysStore, clock }), tickets: service, transfers },
+      ticket: { deviceKeys, tickets: service, transfers },
     }),
     env: { PEAKET_ENV: 'ci', PEAKET_LOG_SAMPLE_ONE_IN: '1' },
     clock,
@@ -203,10 +204,15 @@ async function harness() {
   const ticketRow = (ticketId: string) => tickets.tickets.get(ticketId)!;
   const extras = store as unknown as StoreExtras;
   const textras = transfers as unknown as TransfersExtras;
-  return { svc, clock, tickets, store, service, transfers, directory, reauth, revoked, logs, send, get, post, issue, offer, ticketRow, extras, textras };
+  return { svc, clock, tickets, store, service, transfers, directory, reauth, revoked, logs, send, get, post, issue, offer, ticketRow, extras, textras, deviceKeysStore, deviceKeys };
 }
 
 type H = Awaited<ReturnType<typeof harness>>;
+
+/** outbox 행의 payload(JSON 대역)를 편다 */
+const eventPayloads = (h: H): Array<Record<string, unknown>> => (h.extras.events ?? []).map((e) => JSON.parse(new TextDecoder().decode(e.payload)) as Record<string, unknown>);
+/** 그 표에 살아 있는 기기 키 수(메모리 저장소의 revokedAtMs) */
+const activeKeyCount = (h: H, ticketId: string): number => (h.deviceKeysStore.keys.get(ticketId) ?? []).filter((k) => k.revokedAtMs === undefined).length;
 
 const eventCancelInput = (ticketIds: readonly string[], nowMs: number) => ({
   cancellationRequestId: randomUUID(),
@@ -328,6 +334,42 @@ describe('F-05-11 T3 R-T25 ③ 연기 철회', () => {
     expect(again?.withdrawn).toHaveLength(0);
   });
 
+  test('F-05-11 T3 R-T25 ① ③ 회차 취소의 두 사람 알림 6행·재전송·한 사람 실패는 PENDING이다', async () => {
+    const h = await harness();
+    const ids = [await h.issue(), await h.issue(), await h.issue()];
+    const offers = [];
+    for (const t of ids) offers.push(await h.offer(t));
+    const cancelId = randomUUID();
+    const cancellations = ids.map(() => randomUUID());
+    const out = await h.tickets.eventCancel({ cancellationRequestId: cancelId, eventId: EVENT, targets: ids.map((ticketId, i) => ({ ticketId, cancellationId: cancellations[i]! })), nowMs: h.clock.now() } as never);
+    expect(out.map((o) => o.transferWithdrawn)).toEqual([true, true, true]);
+    let notices = h.extras.notices ?? [];
+    const cancelled = notices.filter((n) => n.type === 'TRANSFER_WITHDRAWN' && n.reason === 'EVENT_CANCELLED');
+    expect(cancelled).toHaveLength(6);
+    expect(cancelled.map((n) => n.offerId).sort()).toEqual([...offers, ...offers].sort());
+    expect(cancelled.map((n) => n.party).sort()).toEqual(['RECIPIENT', 'RECIPIENT', 'RECIPIENT', 'SENDER', 'SENDER', 'SENDER']);
+    // 같은 취소 ID로 다시 보내도 6행 그대로다.
+    await h.tickets.eventCancel({ cancellationRequestId: cancelId, eventId: EVENT, targets: ids.map((ticketId, i) => ({ ticketId, cancellationId: cancellations[i]! })), nowMs: h.clock.now() } as never);
+    notices = h.extras.notices ?? [];
+    expect(notices.filter((n) => n.type === 'TRANSFER_WITHDRAWN')).toHaveLength(6);
+
+    // 한 사람(받는 사람 B)에게 보내는 것만 실패하면 그 행은 PENDING으로 남고 나머지는 보낸다.
+    const mod = await import(/* @vite-ignore */ new URL('../src/modules/ticket/application/transfer-notices.ts', import.meta.url).href).catch(() => undefined);
+    expect(mod, 'transfer-notices 모듈이 없다').toBeDefined();
+    const Sender = (mod as { TransferNoticeSender?: new (d: object) => { runOnce(): Promise<Record<string, number>> } }).TransferNoticeSender;
+    const sender = new Sender!({
+      store: h.store,
+      sink: { send: async (n: { accountId: string }) => (n.accountId === B ? { kind: 'retry', reason: '503' } : { kind: 'sent' }) },
+      clock: h.clock,
+    });
+    const first = await sender.runOnce();
+    expect(first.sent).toBe(3);
+    expect(first.retried).toBe(3);
+    const pending = (h.extras.notices ?? []).filter((n) => n.accountId === B);
+    expect(pending.every((n) => n.sentAtMs === undefined)).toBe(true);
+    expect((h.extras.notices ?? []).filter((n) => n.accountId === A).every((n) => n.sentAtMs !== undefined)).toBe(true);
+  });
+
   test('F-05-11 T3 R-T25 ③ ② 철회 뒤 CancelTickets(EVENT_POSTPONED)가 TRANSFER_PENDING에 막히지 않고 끝난다', async () => {
     const h = await harness();
     const t = await h.issue();
@@ -352,6 +394,12 @@ describe('F-05-11 T4 I-T43 ① 탈퇴 참여자', () => {
     const created = await h.post(`/v1/tickets/${receivedTicket}/transfers`, A, { body: { recipientRef: found.body.recipientRef }, reauth: 'r' });
     expect(created.status, created.raw).toBe(201);
     expect((await h.post(`/v1/transfers/${String(created.body.offerId)}/acceptance`, B)).status).toBe(200);
+    // 받은 사람 B가 입장용 키를 등록한 상태에서 탈퇴한다(돌려주기에서 키가 폐기되어야 한다)
+    const pair = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    const jwk = pair.publicKey.export({ format: 'jwk' }) as { kty: 'EC'; crv: 'P-256'; x: string; y: string };
+    const key = await h.deviceKeys.register({ ticketId: receivedTicket, accountId: B, sessionId: SESSION, publicKeyJwk: jwk, reason: 'TRANSFER' });
+    expect(typeof key.keyId).toBe('string');
+    expect(activeKeyCount(h, receivedTicket)).toBe(1);
     // B가 결제자인 표를 C에게 보낸 요청(보낸 요청) — B가 결제자가 되도록 발권
     const bTicket = await h.issue({ payer: B });
     h.directory.codes.set('BQ7-4K2M', C);
@@ -364,10 +412,40 @@ describe('F-05-11 T4 I-T43 ① 탈퇴 참여자', () => {
     const out = await wd.run({ accountId: B });
     expect(out).toMatchObject({ state: 'DONE', returnedTickets: 1, withdrawnOffers: 1, rejectedOffers: 1 });
     expect(h.ticketRow(receivedTicket).accountId).toBe(A);
+    expect(activeKeyCount(h, receivedTicket)).toBe(0);
     expect((await h.store.getOffer(String(sent.body.offerId)))?.status).toBe('WITHDRAWN');
     expect((await h.store.getOffer(String(sent.body.offerId)))?.withdrawReason).toBe('ACCOUNT_DELETED');
     expect((await h.store.getOffer(offerToB))?.status).toBe('REJECTED');
     expect(h.ticketRow(toB).transferPending).toBe(false);
+    // 같은 트랜잭션에 남는 사건: 수락·돌려주기·보낸 요청 철회·받은 요청 거절
+    const types = eventPayloads(h).map((e) => e.type);
+    for (const type of ['TRANSFER_ACCEPTED', 'TICKET_RETURNED', 'TRANSFER_WITHDRAWN', 'TRANSFER_REJECTED']) expect(types, type).toContain(type);
+    const returned = eventPayloads(h).find((e) => e.type === 'TICKET_RETURNED')!;
+    expect(returned.accountId).toBe(A);
+    const again = await wd.run({ accountId: B });
+    expect(again).toMatchObject({ state: 'DONE', returnedTickets: 0, withdrawnOffers: 0, rejectedOffers: 0 });
+    expect(eventPayloads(h).filter((e) => e.type === 'TICKET_RETURNED')).toHaveLength(1);
+  });
+
+  test('F-05-11 T4 I-T43 ① ④ 돌려주기 쓰기가 실패하면 DONE이 아니라 PENDING이고 다음 호출이 이어 간다', async () => {
+    const mod = await import(/* @vite-ignore */ new URL('../src/modules/ticket/application/account-withdrawal.ts', import.meta.url).href).catch(() => undefined);
+    expect(mod, 'account-withdrawal 모듈이 없다').toBeDefined();
+    const TransferWithdrawal = (mod as { TransferWithdrawal?: new (d: object) => { run(i: { accountId: string }): Promise<Record<string, unknown>> } }).TransferWithdrawal;
+    const h = await harness();
+    const t = await h.issue();
+    const found = await h.post('/v1/transfer-recipient-lookups', A, { body: { memberCode: CODE_B } });
+    const created = await h.post(`/v1/tickets/${t}/transfers`, A, { body: { recipientRef: found.body.recipientRef }, reauth: 'r' });
+    await h.post(`/v1/transfers/${String(created.body.offerId)}/acceptance`, B);
+    const wd = new TransferWithdrawal!({ transfers: h.transfers, store: h.store, clock: h.clock });
+    const store = h.store as unknown as { returnForAccount?: (i: object) => Promise<unknown> };
+    const original = store.returnForAccount;
+    expect(original, '저장소가 returnForAccount를 구현하지 않는다').toBeDefined();
+    store.returnForAccount = async () => { throw new Error('DB 쓰기 실패'); };
+    const failed = await wd.run({ accountId: B });
+    expect(failed).toMatchObject({ state: 'PENDING', pendingReceivedTickets: 1 });
+    store.returnForAccount = original;
+    const ok = await wd.run({ accountId: B });
+    expect(ok).toMatchObject({ state: 'DONE', returnedTickets: 1 });
   });
 
   test('F-05-11 T4 I-T43 ① ② 입장 동결 중이면 키만 폐기하고 PENDING, 마감 뒤 다시 부르면 DONE이다', async () => {
@@ -379,17 +457,20 @@ describe('F-05-11 T4 I-T43 ① 탈퇴 참여자', () => {
     const found = await h.post('/v1/transfer-recipient-lookups', A, { body: { memberCode: CODE_B } });
     const created = await h.post(`/v1/tickets/${t}/transfers`, A, { body: { recipientRef: found.body.recipientRef }, reauth: 'r' });
     await h.post(`/v1/transfers/${String(created.body.offerId)}/acceptance`, B);
-    // 키 등록 뒤 입장 시작
-    const keyId = new Uint8Array(8);
-    new DataView(keyId.buffer).setUint32(4, 7);
+    const pair = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    const jwk = pair.publicKey.export({ format: 'jwk' }) as { kty: 'EC'; crv: 'P-256'; x: string; y: string };
+    await h.deviceKeys.register({ ticketId: t, accountId: B, sessionId: SESSION, publicKeyJwk: jwk, reason: 'TRANSFER' });
+    expect(activeKeyCount(h, t)).toBe(1);
     const wd = new TransferWithdrawal!({ transfers: h.transfers, store: h.store, clock: h.clock });
     const atStart = STARTS + 1;
     setNow(h.clock, atStart);
-    h.extras.setEntryClose?.(EVENT, STARTS + 50 * HOUR);
+    // 마감을 +3시간으로 두어 대체값(+50시간)과 구분한다(TR-06).
+    h.extras.setEntryClose?.(EVENT, STARTS + 3 * HOUR);
     const frozen = await wd.run({ accountId: B });
     expect(frozen).toMatchObject({ state: 'PENDING', pendingReceivedTickets: 1, returnedTickets: 0 });
     expect(h.ticketRow(t).accountId).toBe(B);
-    setNow(h.clock, STARTS + 50 * HOUR);
+    expect(activeKeyCount(h, t)).toBe(0);
+    setNow(h.clock, STARTS + 3 * HOUR);
     const after = await wd.run({ accountId: B });
     expect(after).toMatchObject({ state: 'DONE', returnedTickets: 1, pendingReceivedTickets: 0 });
     expect(h.ticketRow(t).accountId).toBe(A);
@@ -463,23 +544,41 @@ describe('F-05-11 T6 휴대폰으로 받는 사람 찾기', () => {
     expect(problemTypeOf(missing.body)).toBe('recipient-not-found');
   });
 
-  test('F-05-11 T6 ③ 11번째 조회는 429이고 번호 원문은 조회 기록·로그에 없다', async () => {
+  test('F-05-11 T6 ③ 11번째 조회는 429이고 60분 창 경계·Retry-After가 맞으며 번호 원문은 기록·로그에 없다', async () => {
     const h = await harness();
     for (let i = 0; i < 10; i += 1) expect((await h.post('/v1/transfer-recipient-lookups', A, { body: { phoneNumber: PHONE_B } })).status).toBe(200);
     const limited = await h.post('/v1/transfer-recipient-lookups', A, { body: { phoneNumber: PHONE_B } });
     expect(limited.status).toBe(429);
     expect(problemTypeOf(limited.body)).toBe('transfer-lookup-limited');
+    expect(Number(limited.headers['retry-after'])).toBeGreaterThanOrEqual(1);
+    // 창 경계: 첫 조회 + 60분 − 1ms는 아직 429, + 60분은 다시 200이다.
+    setNow(h.clock, NOW + 60 * MIN - 1);
+    expect((await h.post('/v1/transfer-recipient-lookups', A, { body: { phoneNumber: PHONE_B } })).status).toBe(429);
+    setNow(h.clock, NOW + 60 * MIN);
+    expect((await h.post('/v1/transfer-recipient-lookups', A, { body: { phoneNumber: PHONE_B } })).status).toBe(200);
     const joined = h.logs.join('\n');
     expect(joined).not.toContain('01093712468');
     expect(joined).not.toContain(PHONE_B);
   });
 
-  test('F-05-11 T6 ④ identity 실패는 503 dependency-unavailable이고 기록을 쓴다', async () => {
+  test('F-05-11 T6 ④ identity 실패는 503·기록 UNAVAILABLE이고, 기록 쓰기 실패는 identity를 부르지 않는다', async () => {
     const h = await harness();
     h.directory.fail = true;
     const res = await h.post('/v1/transfer-recipient-lookups', A, { body: { phoneNumber: PHONE_B } });
     expect(res.status).toBe(503);
     expect(problemTypeOf(res.body)).toBe('dependency-unavailable');
+    expect(h.store.lookups.at(-1)?.result).toBe('UNAVAILABLE');
+    // 기록 쓰기(claimLookup)가 실패하면 identity를 부르지 않고 503이다(닫힌 쪽).
+    h.directory.fail = false;
+    const callsBefore = h.directory.calls.length;
+    const store = h.store as unknown as { claimLookup: (i: object) => Promise<unknown> };
+    const original = store.claimLookup;
+    store.claimLookup = async () => { throw new Error('DB 쓰기 실패'); };
+    const failed = await h.post('/v1/transfer-recipient-lookups', A, { body: { phoneNumber: PHONE_B } });
+    expect(failed.status).toBe(503);
+    expect(problemTypeOf(failed.body)).toBe('dependency-unavailable');
+    expect(h.directory.calls.length).toBe(callsBefore);
+    store.claimLookup = original;
   });
 });
 
@@ -527,34 +626,75 @@ describe('F-05-11 T7 보낸 분 닉네임', () => {
 });
 
 describe('F-05-11 T8 Outbox 여섯 사건', () => {
-  test('F-05-11 T8 ① 요청·수락·거절·철회·만료·돌려주기가 각각 한 행을 남기고 accountId가 그 시각 보유자다', async () => {
+  test('F-05-11 T8 ① 요청·수락·거절·철회·만료·돌려주기가 각각 한 행이고 accountId·TicketEvent 모양이 맞다', async () => {
     const h = await harness();
-    const t = await h.issue();
-    const offerId = await h.offer(t);
-    let events = h.extras.events ?? [];
-    expect(events.map((e) => e.topic)).toEqual(['trade.tickets']);
-    expect(new TextDecoder().decode(events[0]!.payload)).toContain('TRANSFER_OFFERED');
-    expect(events[0]!.key).toBe(EVENT);
-    expect((await h.post(`/v1/transfers/${offerId}/acceptance`, B)).status).toBe(200);
-    events = h.extras.events ?? [];
-    expect(events.some((e) => new TextDecoder().decode(e.payload).includes('TRANSFER_ACCEPTED'))).toBe(true);
-    // 돌려주기
-    expect((await h.post(`/v1/tickets/${t}/returns`, B, { reauth: 'r' })).status).toBe(200);
-    events = h.extras.events ?? [];
-    expect(events.some((e) => new TextDecoder().decode(e.payload).includes('TICKET_RETURNED'))).toBe(true);
-    expect(events).toHaveLength(3);
-    const keys = events.map((e) => JSON.parse(new TextDecoder().decode(e.payload)) as { eventKey: string });
-    expect(new Set(keys.map((k) => k.eventKey)).size).toBe(3);
+    const UUID_V8 = /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    // 수락 → 돌려주기
+    const t1 = await h.issue();
+    const o1 = await h.offer(t1);
+    expect((await h.post(`/v1/transfers/${o1}/acceptance`, B)).status).toBe(200);
+    expect((await h.post(`/v1/tickets/${t1}/returns`, B, { reauth: 'r' })).status).toBe(200);
+    // 거절
+    const t2 = await h.issue();
+    const o2 = await h.offer(t2);
+    expect((await h.post(`/v1/transfers/${o2}/rejection`, B)).status).toBe(200);
+    // 철회
+    const t3 = await h.issue();
+    const o3 = await h.offer(t3);
+    expect((await h.post(`/v1/transfers/${o3}/withdrawal`, A)).status).toBe(200);
+    // 만료(요청 기한 + 1ms)
+    const t4 = await h.issue();
+    const o4 = await h.offer(t4);
+    const expires = (await h.store.getOffer(o4))!.expiresAtMs;
+    setNow(h.clock, expires + 1);
+    expect(await h.transfers.expireOffers()).toBeGreaterThanOrEqual(1);
+
+    const rows = h.extras.events ?? [];
+    expect(rows).toHaveLength(6);
+    expect(rows.every((e) => e.topic === 'trade.tickets')).toBe(true);
+    expect(rows.every((e) => e.key === EVENT)).toBe(true);
+    const events = eventPayloads(h);
+    expect(events.map((e) => e.type).sort()).toEqual(['TICKET_RETURNED', 'TRANSFER_ACCEPTED', 'TRANSFER_EXPIRED', 'TRANSFER_OFFERED', 'TRANSFER_REJECTED', 'TRANSFER_WITHDRAWN'].sort());
+    const byType = new Map(events.map((e) => [e.type, e]));
+    // accountId는 그 사건 시각의 보유자다.
+    expect(byType.get('TRANSFER_OFFERED')!.accountId).toBe(A);
+    expect(byType.get('TRANSFER_ACCEPTED')!.accountId).toBe(B);
+    expect(byType.get('TICKET_RETURNED')!.accountId).toBe(A);
+    expect(byType.get('TRANSFER_REJECTED')!.accountId).toBe(A);
+    expect(byType.get('TRANSFER_WITHDRAWN')!.accountId).toBe(A);
+    expect(byType.get('TRANSFER_EXPIRED')!.accountId).toBe(A);
+    for (const e of events) {
+      expect(e).toMatchObject({ ticketId: expect.any(String), eventId: EVENT, orderId: expect.any(String), accountId: expect.any(String), type: expect.any(String), eventKey: expect.any(String) });
+      expect(Number.isFinite(Date.parse(String(e.occurredAt))), `${String(e.type)} occurredAt`).toBe(true);
+      expect(String(e.eventKey)).toMatch(UUID_V8);
+    }
+    expect(new Set(events.map((e) => e.eventKey)).size).toBe(6);
   });
 
-  test('F-05-11 T8 ② 같은 사건을 다시 보내도 outbox 행이 늘지 않고 eventKey가 같다', async () => {
+  test('F-05-11 T8 ② 재생·재시도에도 outbox 행이 늘지 않고 같은 사건의 eventKey가 같다', async () => {
     const h = await harness();
     const t = await h.issue();
     const offerId = await h.offer(t);
-    const before = (h.extras.events ?? []).length;
-    await h.post(`/v1/transfers/${offerId}/rejection`, B);
-    await h.post(`/v1/transfers/${offerId}/rejection`, B);
-    expect((h.extras.events ?? []).length).toBe(before + 1);
+    const before = eventPayloads(h).length;
+    expect((await h.post(`/v1/transfers/${offerId}/rejection`, B)).status).toBe(200);
+    const rejected = eventPayloads(h).find((e) => e.type === 'TRANSFER_REJECTED')!;
+    expect(rejected.eventKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect((await h.post(`/v1/transfers/${offerId}/rejection`, B)).status).toBe(200);
+    expect(eventPayloads(h).length).toBe(before + 1);
+    expect(eventPayloads(h).find((e) => e.type === 'TRANSFER_REJECTED')!.eventKey).toBe(rejected.eventKey);
+    // 같은 멱등 키로 요청을 다시 보내도 같은 사건 한 행이다.
+    const t2 = await h.issue();
+    const found = await h.post('/v1/transfer-recipient-lookups', A, { body: { memberCode: CODE_B } });
+    const key = randomUUID();
+    const body = { recipientRef: found.body.recipientRef };
+    const first = await h.post(`/v1/tickets/${t2}/transfers`, A, { body, key, reauth: 'r' });
+    expect(first.status, first.raw).toBe(201);
+    const keyBefore = eventPayloads(h).find((e) => e.type === 'TRANSFER_OFFERED' && e.ticketId === t2)!.eventKey;
+    const second = await h.post(`/v1/tickets/${t2}/transfers`, A, { body, key, reauth: 'r' });
+    expect(second.status, second.raw).toBe(201);
+    expect(second.body.offerId).toBe(first.body.offerId);
+    expect(eventPayloads(h).filter((e) => e.type === 'TRANSFER_OFFERED' && e.ticketId === t2)).toHaveLength(1);
+    expect(eventPayloads(h).find((e) => e.type === 'TRANSFER_OFFERED' && e.ticketId === t2)!.eventKey).toBe(keyBefore);
   });
 
   test('F-05-11 T8 ③ 실패한 요청(409)에는 outbox 행이 0이다', async () => {
@@ -581,44 +721,70 @@ describe('F-05-11 T9 알림 행', () => {
     expect(withdrawn.map((n) => n.accountId).sort()).toEqual([A, B].sort());
   });
 
-  test('F-05-11 T9 ② 알림 보내기 반복: 202·422는 보낸 것으로, 5xx는 1·5·30분 뒤 다시 보낸다', async () => {
+  test('F-05-11 T9 ② 알림 보내기: 5xx는 1·5·30분 뒤 다시, 성공은 sent_at, 7일 뒤 지운다', async () => {
     const mod = await import(/* @vite-ignore */ new URL('../src/modules/ticket/application/transfer-notices.ts', import.meta.url).href).catch(() => undefined);
     expect(mod, 'transfer-notices 모듈이 없다').toBeDefined();
-    const Sender = (mod as { TransferNoticeSender?: new (d: object) => { runOnce(): Promise<Record<string, number>> } }).TransferNoticeSender;
+    const Sender = (mod as { TransferNoticeSender?: new (d: object) => { runOnce(): Promise<Record<string, number>>; backlog(): Promise<{ count: number; oldestSeconds: number }> } }).TransferNoticeSender;
     expect(Sender, 'TransferNoticeSender가 없다').toBeDefined();
     const h = await harness();
     const t = await h.issue();
     await h.offer(t);
     expect(h.extras.claimDue, '저장소가 TransferNoticeStore를 구현하지 않는다').toBeDefined();
-    const sent: string[] = [];
     let reply: 'ok' | 'bad' = 'bad';
-    const sender = new Sender!({ store: h.store, sink: { send: async (n: { noticeId: string }) => { sent.push(n.noticeId); return reply === 'ok' ? { kind: 'sent' } : { kind: 'retry', reason: '500' }; } }, clock: h.clock });
+    const sender = new Sender!({ store: h.store, sink: { send: async () => (reply === 'ok' ? { kind: 'sent' } : { kind: 'retry', reason: '500' }) }, clock: h.clock });
     const first = await sender.runOnce();
-    expect(first.sent).toBe(0);
-    expect(first.retried).toBe(2);
-    h.clock.advance(MIN);
+    expect(first).toMatchObject({ attempted: 2, sent: 0, retried: 2 });
+    h.clock.advance(MIN - 1);
+    expect(await sender.runOnce()).toMatchObject({ attempted: 0 });
+    h.clock.advance(1);
+    expect(await sender.runOnce()).toMatchObject({ attempted: 2, retried: 2 });
+    h.clock.advance(5 * MIN - 1);
+    expect(await sender.runOnce()).toMatchObject({ attempted: 0 });
+    h.clock.advance(1);
+    expect(await sender.runOnce()).toMatchObject({ attempted: 2, retried: 2 });
+    h.clock.advance(30 * MIN);
     reply = 'ok';
-    const second = await sender.runOnce();
-    expect(second.sent).toBe(2);
-    expect(sent).toHaveLength(4);
+    expect(await sender.runOnce()).toMatchObject({ attempted: 2, sent: 2, retried: 0 });
+    expect((h.extras.notices ?? []).every((n) => n.sentAtMs !== undefined)).toBe(true);
+    expect((await sender.backlog()).count).toBe(0);
+    // 보낸 지 7일 [가정]이 지나면 지운다.
+    h.clock.advance(7 * 24 * HOUR);
+    expect((await sender.runOnce()).purged).toBe(2);
+    expect(h.extras.notices ?? []).toHaveLength(0);
   });
 });
 
 describe('F-05-11 T10 입장 동결 끝과 돌려주기', () => {
-  test('F-05-11 T10 ① 입장 시작 전에는 돌려주기가 되고, 동결 중에는 409, 마감 뒤에는 다시 된다', async () => {
+  test('F-05-11 T10 ① entry_close.closed_at(+3시간)을 읽어 그 전에는 409, 그때부터 돌려준다', async () => {
     const h = await harness();
     const t = await h.issue();
     const offerId = await h.offer(t);
     expect((await h.post(`/v1/transfers/${offerId}/acceptance`, B)).status).toBe(200);
     setNow(h.clock, STARTS + 1);
-    h.extras.setEntryClose?.(EVENT, STARTS + 50 * HOUR);
+    // 대체값(+50시간)과 다른 +3시간을 넣어 저장소가 entry_close를 읽는지 가른다(TR-06).
+    h.extras.setEntryClose?.(EVENT, STARTS + 3 * HOUR);
     const frozen = await h.post(`/v1/tickets/${t}/returns`, B, { reauth: 'r' });
     expect(frozen.status).toBe(409);
     expect(problemTypeOf(frozen.body)).toBe('entry-started');
-    setNow(h.clock, STARTS + 50 * HOUR);
+    setNow(h.clock, STARTS + 3 * HOUR - 1);
+    expect((await h.post(`/v1/tickets/${t}/returns`, B, { reauth: 'r' })).status).toBe(409);
+    setNow(h.clock, STARTS + 3 * HOUR);
     const after = await h.post(`/v1/tickets/${t}/returns`, B, { reauth: 'r' });
     expect(after.status, after.raw).toBe(200);
     expect(after.body).toMatchObject({ status: 'RETURNED' });
+    expect(h.ticketRow(t).accountId).toBe(A);
+  });
+
+  test('F-05-11 T10 ③ 마감 행이 없으면 공연 시작 + 50시간 −1ms는 409, +50시간은 돌려준다', async () => {
+    const h = await harness();
+    const t = await h.issue();
+    const offerId = await h.offer(t);
+    expect((await h.post(`/v1/transfers/${offerId}/acceptance`, B)).status).toBe(200);
+    setNow(h.clock, STARTS + 50 * HOUR - 1);
+    expect((await h.post(`/v1/tickets/${t}/returns`, B, { reauth: 'r' })).status).toBe(409);
+    setNow(h.clock, STARTS + 50 * HOUR);
+    const after = await h.post(`/v1/tickets/${t}/returns`, B, { reauth: 'r' });
+    expect(after.status, after.raw).toBe(200);
     expect(h.ticketRow(t).accountId).toBe(A);
   });
 
@@ -630,11 +796,11 @@ describe('F-05-11 T10 입장 동결 끝과 돌려주기', () => {
     const made = await h.store.createOffer({ offerId, ticketId: t, fromAccountId: A, toAccountId: B, status: 'OFFERED', expiresAtMs: STARTS + 100 * HOUR, createdAtMs: h.clock.now() }, h.clock.now());
     expect(made.kind).toBe('CREATED');
     setNow(h.clock, STARTS + 1);
-    h.extras.setEntryClose?.(EVENT, STARTS + 50 * HOUR);
+    h.extras.setEntryClose?.(EVENT, STARTS + 3 * HOUR);
     const atStart = await h.post(`/v1/transfers/${offerId}/acceptance`, B);
     expect(atStart.status, atStart.raw).toBe(409);
     expect(problemTypeOf(atStart.body)).toBe('entry-started');
-    setNow(h.clock, STARTS + 50 * HOUR);
+    setNow(h.clock, STARTS + 3 * HOUR);
     const after = await h.post(`/v1/transfers/${offerId}/acceptance`, B);
     expect(after.status, after.raw).toBe(409);
     expect(problemTypeOf(after.body)).toBe('entry-started');

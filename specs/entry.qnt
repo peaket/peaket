@@ -47,6 +47,7 @@ module entry {
     tickets.get(t).holder == tickets.get(t).payer,
     tickets.get(t).status == "ACTIVE",
     tickets.get(t).offer == "NONE",
+    not(frozen.get(tickets.get(t).event)) or not(FREEZE),
     tickets' = update(t, x => x.with("offer", "OFFERED").with("status", "TRANSFER_PENDING")),
     seenIn' = seenIn, secondIn' = secondIn, flagged' = flagged, frozen' = frozen, closed' = closed,
   }
@@ -56,8 +57,8 @@ module entry {
     not(rcpt == tickets.get(t).holder),
     tickets.get(t).offer == "OFFERED",
     tickets.get(t).status == "TRANSFER_PENDING",
-    not(isFrozen(t)) or not(FREEZE),
-    tickets' = update(t, x => { holder: rcpt, payer: x.payer, event: x.event, status: "ACTIVE", offer: "ACCEPTED", lastIn: x.lastIn, moved: x.moved or isFrozen(t) }),
+    not(frozen.get(tickets.get(t).event)) or not(FREEZE),
+    tickets' = update(t, x => { holder: rcpt, payer: x.payer, event: x.event, status: "ACTIVE", offer: "ACCEPTED", lastIn: x.lastIn, moved: x.moved or (frozen.get(tickets.get(t).event) and not(closed.get(tickets.get(t).event))) }),
     seenIn' = seenIn, secondIn' = secondIn, flagged' = flagged, frozen' = frozen, closed' = closed,
   }
 
@@ -78,7 +79,7 @@ module entry {
     not(tickets.get(t).holder == tickets.get(t).payer),
     tickets.get(t).status == "ACTIVE",
     not(isFrozen(t)) or closed.get(tickets.get(t).event) or not(FREEZE),
-    tickets' = update(t, x => { holder: x.payer, payer: x.payer, event: x.event, status: "ACTIVE", offer: "NONE", lastIn: x.lastIn, moved: x.moved or isFrozen(t) }),
+    tickets' = update(t, x => { holder: x.payer, payer: x.payer, event: x.event, status: "ACTIVE", offer: "NONE", lastIn: x.lastIn, moved: x.moved or (frozen.get(tickets.get(t).event) and not(closed.get(tickets.get(t).event))) }),
     seenIn' = seenIn, secondIn' = secondIn, flagged' = flagged, frozen' = frozen, closed' = closed,
   }
 

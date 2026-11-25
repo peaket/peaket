@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { lookupRecipient, transferFailureOf } from './transfer-flow.ts';
+import { lookupRecipient, transferFailureOf, transferStateOf } from './transfer-flow.ts';
 
 const API = 'https://api.f0511.test';
 const PROBLEM = 'https://peaket.example/problems/';
@@ -48,20 +48,24 @@ test('F-05-11 T13 ② 회원 코드 갈래는 그대로이고, 휴대폰 400·40
 });
 
 test('F-05-11 T13 ③ 실제 실행부: 상대 닉네임(counterpartNickname)을 글자로만 그리고, 없으면 회원으로 둔다', () => {
-  const src = readAll('../ui/TransferOfferLive.tsx', '../ui/TransferOfferPage.tsx', '../../transfer-offer/model/offer-flow.ts');
+  const src = readAll('../../transfer-offer/ui/TransferOfferLive.tsx', '../../transfer-offer/ui/TransferOfferPage.tsx', '../../transfer-offer/model/offer-flow.ts');
   assert.ok(src.includes('counterpartNickname'), '상대 닉네임을 읽지 않는다');
   assert.ok(src.includes('회원'), '닉네임이 없을 때의 대체 값이 없다');
   // 원문 닉네임을 따로 받는 칸은 계약에 없다(가린 값만 온다)
   assert.equal(src.includes('counterpartyNicknameRaw'), false);
 });
 
-test('F-05-11 T14 R-T31 ①~⑦ 잠금 화면: 소명 보기 링크(/my/appeals)와 기한·잠금 문구가 있고 받은 표에는 없다', () => {
+test('F-05-11 T14 R-T31 ①~⑦ 잠금 화면: 기한 −1ms는 잠김·0ms는 풀림이고 받은 표에는 잠금이 없다', () => {
+  const t = (o = {}) => ({ ticketId: 't', eventId: 'e', status: 'ACTIVE', transferable: true, transferLocked: false, transferLockExpiresAt: null, receivedFromNickname: null, pendingTransfer: null, ...o });
+  const expires = new Date(NOW + 3_600_000).toISOString();
+  assert.equal(transferStateOf(t({ transferLocked: true, transferLockExpiresAt: expires }), Date.parse(expires) - 1), '부정 예매 조사로 잠김');
+  assert.equal(transferStateOf(t({ transferLocked: true, transferLockExpiresAt: expires }), Date.parse(expires)), '받는 사람 확인');
+  assert.equal(transferStateOf(t({ transferLocked: true, transferLockExpiresAt: null }), NOW), '부정 예매 조사로 잠김');
+  // 받은 표는 잠금 칸이 있어도 받은 티켓 상태가 먼저다(§4.1: 받은 사람에게 잠금 표시를 하지 않는다)
+  assert.equal(transferStateOf(t({ receivedFromNickname: '지*', transferLocked: true, transferLockExpiresAt: expires }), NOW), '양도 불가 · 받은 티켓');
   const src = readAll('../ui/TicketTransferLive.tsx', '../ui/TicketTransferPage.tsx', './transfer-flow.ts', './view.ts');
-  assert.ok(src.includes('transferLockExpiresAt'), '잠금 기한을 읽지 않는다');
   assert.ok(src.includes('/my/appeals'), '소명 보기(SCR-042) 링크가 없다');
   assert.ok(src.includes('부정 예매 조사가 끝날 때까지'), 'd5 §5.14 잠금 문구가 없다');
-  // 잠금은 결제자(양도 폼)에만 보인다: 받은 티켓 분기에서 잠금을 그리지 않는지 이름으로 확인한다
-  assert.ok(/payerHolds|received/.test(src));
 });
 
 test('F-05-11 T15 받은 표 카드가 receivedFromNickname을 보이고, 없으면 회원이다', () => {

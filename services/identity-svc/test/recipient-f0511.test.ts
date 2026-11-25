@@ -90,7 +90,7 @@ describe('F-05-11 T7 identity BatchGetNicknames', () => {
 });
 
 describe('F-05-11 T5 I-T43 ① identity 탈퇴 참여자 배선', () => {
-  test('F-05-11 T5 I-T43 ① ① 두 주소가 있으면 purchase·ticket 참여자가 둘 다 서고, 답의 state를 읽는다', () => {
+  test('F-05-11 T5 I-T43 ① ① 두 주소가 있으면 purchase·ticket 참여자가 둘 다 선다', () => {
     const r = withdrawalParticipantsFromEnv({ PEAKET_ENV: 'ci', PEAKET_PURCHASE_GRPC_URL: '127.0.0.1:50052', PEAKET_TICKET_GRPC_URL: '127.0.0.1:50051' });
     expect(r.participants.map((p) => p.name).sort()).toEqual(['purchase', 'ticket-svc']);
     expect(r.clients).toHaveLength(2);

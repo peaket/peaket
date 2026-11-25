@@ -138,3 +138,9 @@
 - F-05-6 IR-10 낮음: `entryClose` 저장소가 없을 때 500인데 주석은 503이다(`scanner-gate.ts`·`scanner.module.ts`)
 - F-05-6 IR-11 낮음: 큐 보고 `pendingUploads`에 상한이 없어 2^31−1 초과 값이 DB `integer` 범위 오류로 500이 된다(`domain/entry-close.ts`, openapi)
 - F-05-6 IR-12 낮음: 메모리 스캐너 게이트가 마감 행 대역이 없으면 옛 `entryClosesAtMs`(보정 시각) 규칙으로 물러나 단위 조립이 운영과 다르게 통과한다(`memory-scanner-gate-store.ts`) — **닫힘 2026-11-24**: fallback과 쓰이지 않던 `acceptScans.entryClosesAtMs`를 없애고, 마감 행이 있으면 받은 시각만 견준다. 단위 조립 시험은 `seedEntryClose`로 마감 행을 심는다(`scanner-gate.test.ts`·`scanner-gate-regression.test.ts`·`scanner-corrected-time.test.ts`).
+
+## F-05-11 (동결 로컬, 2026-11-26)
+- F-05-11 TR-14 남음: ticket 알림 싱크의 HTTP 202·422를 sent_at으로 적는 매핑은 단위 시험이 대역({kind:'sent'})으로만 본다. 실제 HTTP 어댑터(http-transfer-notice-sink.ts)의 상태 코드 매핑 시험을 구현 때 더한다.
+- F-05-11 TR-16 남음: SCR-013 받은 표의 eceivedFromNickname 표시는 소스에 이름이 있는지만 본다. WalletLive가 실제로 그 값을 글자로 그리는지(받은 표 카드의 조건 분기)는 화면 확인·구현 리뷰에서 본다.
+- F-05-11 TR-18 남음: identity ticket 탈퇴 참여자의 gRPC 답 state 매핑(	oWithdrawalAnswer에 해당하는 ticket 판)은 이름·클라이언트 수만 본다. ticket 참여자 process/state 매핑 시험을 구현 때 더한다.
+- F-05-11 정리: ticket 	ransfer_notice의 effective_* 칸·7일 purge 인덱스· 040 식 인덱스의 EXPLAIN 사용 확인은 구현·운영 리뷰에서 본다.

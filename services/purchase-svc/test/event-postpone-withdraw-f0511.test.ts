@@ -62,10 +62,11 @@ describe('F-05-11 T4 R-T25 ③ 연기 확정의 양도 철회', () => {
     expect(events.slice(0, 2)).toEqual(['withdraw', 'create']);
   });
 
-  test('F-05-11 T4 R-T25 ③ ② 철회 호출이 실패하면 503에 해당하는 오류로 끝나고 요청·항목이 0이다', async () => {
+  test('F-05-11 T4 R-T25 ③ ② 철회 호출이 실패하면 UNAVAILABLE(503)로 끝나고 요청·항목이 0이다', async () => {
     const f = fixture({ withdrawForEvent: async () => { throw new Error('ticket-svc 연결 실패'); } });
-    await expect(start(f.service, { kind: 'POSTPONE', postponedToMs: NOW + 10 * 86_400_000, refundWindowClosesAtMs: NOW + 5 * 86_400_000 })).rejects.toBeTruthy();
+    await expect(start(f.service, { kind: 'POSTPONE', postponedToMs: NOW + 10 * 86_400_000, refundWindowClosesAtMs: NOW + 5 * 86_400_000 })).rejects.toMatchObject({ code: 'UNAVAILABLE' });
     expect(f.store.requests.size).toBe(0);
+    expect(await f.store.items(REQUEST)).toEqual([]);
   });
 
   test('F-05-11 T4 R-T25 ③ ③ CANCEL이면 철회를 부르지 않고, 두 번 확정해도 철회는 요청마다 한 번이다', async () => {
