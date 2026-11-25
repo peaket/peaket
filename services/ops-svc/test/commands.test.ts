@@ -33,6 +33,9 @@ const COMMANDER_TYPES = ['BOT_LEVEL', 'KILL_SWITCH', 'AUTOMATION_STOP', 'SALE_ST
 /** 명령 1·2·3·4·5는 openapi Command.params의 칸만 받는다(ADR-0340 결정 9). 그 밖의 유형은 OPS-300 전까지 열린 객체다 */
 const PARAMS: Partial<Record<CommandType, Record<string, unknown>>> = {
   BOT_LEVEL: { level: 'AGGRESSIVE' },
+  // 명령 8·9도 F-02-5부터 칸을 닫는다(ADR-0365 결정 13: {service, level}·{flag})
+  LOG_LEVEL: { service: 'queue-svc', level: 'DEBUG' },
+  FEATURE_OFF: { flag: 'reviews' },
   KILL_SWITCH: { scope: 'PLATFORM' },
   AUTOMATION_STOP: {},
 };
@@ -97,13 +100,14 @@ describe('운영 명령 접수·승인', () => {
 
   test('GAT110_회차_ID가_UUID가_아니면_422다', async () => {
     const f = fixture();
-    await expect(f.create.execute(input('LOG_LEVEL', { params: { eventId: 'not-a-uuid' } }))).rejects.toMatchObject({ status: 422 });
+    // 칸이 열린 유형(명령 8은 F-02-5부터 닫혀 모르는 칸만으로 422가 되므로 1회 실행 명령으로 본다)
+    await expect(f.create.execute(input('SCALE_CHANGE', { params: { eventId: 'not-a-uuid' } }))).rejects.toMatchObject({ status: 422 });
   });
 
   test('GAT110_eventIds_배열이면_첫_회차를_목록_필터로_쓴다', async () => {
     const f = fixture();
     const eventId = randomUUID();
-    const c = await f.create.execute(input('LOG_LEVEL', { params: { eventIds: [eventId, randomUUID()] } }));
+    const c = await f.create.execute(input('SCALE_CHANGE', { params: { eventIds: [eventId, randomUUID()] } }));
     expect((await f.list.execute({ eventId, limit: 10 })).items.map((x) => x.commandId)).toEqual([c.commandId]);
   });
 

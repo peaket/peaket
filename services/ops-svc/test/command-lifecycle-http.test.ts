@@ -184,7 +184,9 @@ describe('C-T4 2인 승인 기한(10분)과 요청자 분리', () => {
     const ok = await h.post(`/v1/ops/commands/${id}/approvals`, h.withToken(approver), {});
     expect(ok.statusCode, ok.payload).toBe(200);
     expect(json(ok)).toMatchObject({ state: 'ACKED', approvals: [approver['x-user-id']] });
-    expect(h.calls.execute).toEqual([id]);
+    // 명령 5는 실행기가 아니라 같은 트랜잭션의 설정 사건으로 낸다(ADR-0365 결정 9·13, F-02-5에서 바꿈)
+    expect(h.calls.execute).toEqual([]);
+    expect(h.store.outboxSettings().map((s) => s.setting.commandId)).toEqual([id]);
   });
 
   test('C-T4 [ASVS v5.0.0-2.3.2] 승인 기한 10분 − 1ms의 승인은 통과하고, 10분 정각의 승인·거부는 409 command-not-pending이며 명령은 REJECTED(SYSTEM, approval-expired)로 닫힌다', async () => {
@@ -252,7 +254,9 @@ describe('AZ-T10 2인 승인 분리', () => {
     expect(again.statusCode).toBe(409);
     expect(json(await h.get(`/v1/ops/commands/${id}`, approver))).toMatchObject({ approvals: [approver['x-user-id']] });
     expect(h.store.actors().filter((a) => a.commandId === id && a.side === 'APPROVER').map((a) => a.adminAccountId)).toEqual([approver['x-user-id']]);
-    expect(h.calls.execute).toEqual([id]);
+    // 명령 5는 실행기가 아니라 설정 사건 하나로 낸다(ADR-0365 결정 13, F-02-5에서 바꿈)
+    expect(h.calls.execute).toEqual([]);
+    expect(h.store.outboxSettings().map((s) => s.setting.commandId)).toEqual([id]);
   });
 
   test('AZ-T10 명령 3 되돌리기 요청도 요청자 본인은 승인하지 못하고(403) 다른 operator 이상 한 명이 승인한다', async () => {
@@ -474,7 +478,8 @@ describe('사건 차례와 단계 건너뛰기(ASVS 2.3.1)', () => {
   test('[ASVS v5.0.0-2.3.1] 접수는 CREATED → DRY_RUN(dry-run 기록) → 첫 상태 차례이고, 감사 기록과 DISPATCHED 사건은 실행 포트를 부르기 전에 쓰여 있다', async () => {
     const h = await harness();
     const op = h.identity.ops('operator');
-    const one = idOf(await h.post('/v1/ops/commands', op, { type: 'LOG_LEVEL', reason: '로그 올림', params: { service: 'queue-svc', level: 'DEBUG' } }));
+    // 실행 포트를 부르는 명령으로 본다(명령 8은 F-02-5부터 실행기 없이 설정 사건으로 끝난다, ADR-0365 결정 9). 이 조립에는 제어 배경 작업이 없어 명령 1이 실행기로 간다
+    const one = idOf(await h.post('/v1/ops/commands', op, target(randomUUID(), 3_000)));
     expect(h.seenAtExecute.get(one)).toEqual({ events: ['CREATED', 'DRY_RUN', 'APPROVED', 'DISPATCHED'], audits: ['COMMAND_CREATED', 'COMMAND_EXECUTION_STARTED'] });
     const events = h.store.eventsOf(one);
     expect(events.map((e) => e.type)).toEqual(['CREATED', 'DRY_RUN', 'APPROVED', 'DISPATCHED', 'ACKED']);
@@ -504,7 +509,7 @@ describe('사건 차례와 단계 건너뛰기(ASVS 2.3.1)', () => {
     }
     expect(await h.store.find(pending)).toMatchObject({ state: 'PENDING_APPROVAL', attempts: 0 });
     const op = h.identity.ops('operator');
-    const acked = idOf(await h.post('/v1/ops/commands', op, { type: 'LOG_LEVEL', reason: '로그', params: { level: 'DEBUG' } }));
+    const acked = idOf(await h.post('/v1/ops/commands', op, { type: 'LOG_LEVEL', reason: '로그', params: { service: 'queue-svc', level: 'DEBUG' } }));
     const approveAcked = await h.post(`/v1/ops/commands/${acked}/approvals`, h.withToken(commander), {});
     expect([approveAcked.statusCode, slug(approveAcked)]).toEqual([409, expect.stringMatching(/command-not-pending$/)]);
     const oneShot = idOf(await h.post('/v1/ops/commands', op, { type: 'SCALE_CHANGE', reason: '규모', params: { eventId: randomUUID(), scale: 'LARGE' } }));
@@ -532,7 +537,7 @@ describe('행위자·상태 칸과 SYSTEM 자동 조치(ASVS 8.2.3)', () => {
       { ackedAt: iso(NOW) },
       { commandId: randomUUID() },
     ]) {
-      const r = await h.post('/v1/ops/commands', op, { type: 'LOG_LEVEL', reason: '칸 시험', params: { level: 'DEBUG' }, ...extra });
+      const r = await h.post('/v1/ops/commands', op, { type: 'LOG_LEVEL', reason: '칸 시험', params: { service: 'queue-svc', level: 'DEBUG' }, ...extra });
       expect(r.statusCode, JSON.stringify(extra)).toBe(400);
       expect(slug(r)).not.toMatch(/idempotency-key-invalid$/);
     }
@@ -585,7 +590,7 @@ describe('내부 사건 길의 서버 판정(ASVS 8.3.1)', () => {
     for (const body of [
       ask({ type: 'KILL_SWITCH', params: { scope: 'PLATFORM' }, requestedRole: 'operator' }),
       ask({ type: 'BOT_LEVEL', params: { level: 'AGGRESSIVE' }, requestedRole: 'operator' }),
-      ask({ type: 'LOG_LEVEL', params: { level: 'DEBUG' }, requestedRole: 'viewer' }),
+      ask({ type: 'LOG_LEVEL', params: { service: 'queue-svc', level: 'DEBUG' }, requestedRole: 'viewer' }),
     ]) {
       expect(json(await post(body)), JSON.stringify(body)).toEqual({ accepted: false });
       expect(await h.store.find(commandIdOfEventKey(body.eventKey as string))).toBeUndefined();
@@ -661,7 +666,7 @@ describe('멱등(OPS-260, ADR-0340 결정 7)', () => {
       ['키 없음', { 'idempotency-key': '' }],
       ['UUID 아님', { 'idempotency-key': 'not-a-uuid' }],
     ] as const) {
-      const r = await h.post('/v1/ops/commands', h.withToken(commander), { type: 'LOG_LEVEL', reason: label, params: { level: 'DEBUG' } }, headers);
+      const r = await h.post('/v1/ops/commands', h.withToken(commander), { type: 'LOG_LEVEL', reason: label, params: { service: 'queue-svc', level: 'DEBUG' } }, headers);
       expect([r.statusCode, slug(r)], label).toEqual([400, expect.stringMatching(/idempotency-key-invalid$/)]);
     }
     // 처음 요청이 재인증에서 막혔으면 기록이 없어 같은 키의 다시 보내기도 처음처럼 본다
@@ -677,14 +682,15 @@ describe('되돌리기·연장·자동 만료(OPS-260, ADR-0340 결정 5)', () =
   test('OPS-260 1인 카탈로그 명령의 되돌리기는 200 REVERTED이고, 보내지 못하면 ACKED 그대로·REVERT_FAILED·502 command-dispatch-failed다', async () => {
     const h = await harness();
     const op = h.identity.ops('operator');
-    const id = idOf(await h.post('/v1/ops/commands', op, { type: 'FEATURE_OFF', reason: '후기 기능 끄기', params: { flag: 'reviews' } }));
-    h.sendResult = { status: 'FAILED', error: 'queue-svc 503' };
-    const failed = await h.post(`/v1/ops/commands/${id}/reversions`, op, { reason: '공지 내리기' });
+    // 되돌림을 실행기로 보내는 1인 카탈로그 명령(명령 1, 이 조립엔 제어 배경 작업이 없다). 명령 9 되돌리기는 F-02-5부터 설정 사건이라 실행기를 부르지 않는다(ADR-0365 결정 13)
+    const id = idOf(await h.post('/v1/ops/commands', op, target(randomUUID(), 3_000)));
+    h.sendResult = { status: 'FAILED', error: 'admission-ctrl 503' };
+    const failed = await h.post(`/v1/ops/commands/${id}/reversions`, op, { reason: '목표 되돌리기' });
     expect([failed.statusCode, slug(failed)]).toEqual([502, expect.stringMatching(/command-dispatch-failed$/)]);
     expect((await h.store.find(id))?.state).toBe('ACKED');
-    expect(h.store.eventsOf(id).at(-1)).toMatchObject({ type: 'REVERT_FAILED', reason: 'queue-svc 503' });
+    expect(h.store.eventsOf(id).at(-1)).toMatchObject({ type: 'REVERT_FAILED', reason: 'admission-ctrl 503' });
     h.sendResult = { status: 'ACKED' };
-    const ok = await h.post(`/v1/ops/commands/${id}/reversions`, op, { reason: '공지 내리기' });
+    const ok = await h.post(`/v1/ops/commands/${id}/reversions`, op, { reason: '목표 되돌리기' });
     expect([ok.statusCode, json(ok).state]).toEqual([200, 'REVERTED']);
     expect(h.calls.revert).toEqual([id, id]);
     // 다시 되돌릴 수 없다(ACKED만)
@@ -790,7 +796,7 @@ describe('리뷰 반영 재현(BAT-355 리뷰 RV-02·RV-03)', () => {
     let failFirst = true;
     const h = await harness({
       result: (c) => {
-        if (c.type === 'FEATURE_OFF' && failFirst) {
+        if (c.type === 'ADMISSION_TARGET' && c.params.target === 2_500 && failFirst) {
           failFirst = false;
           return { status: 'FAILED', error: 'queue-svc 503' };
         }
@@ -801,14 +807,15 @@ describe('리뷰 반영 재현(BAT-355 리뷰 RV-02·RV-03)', () => {
     const checkpoints = async () => (json(await h.get('/v1/ops/audit-checkpoints?limit=100', viewer)).items as Array<{ actorRef: string; reason: string }>) ?? [];
     // 처음 실행: 요청한 operator가 아니라 SYSTEM이 보낸다(DISPATCHED 사건의 행위자)
     const operator = h.identity.ops('operator');
-    const once = idOf(await h.post('/v1/ops/commands', operator, { type: 'LOG_LEVEL', reason: '로그', params: { level: 'DEBUG' } }));
+    // 실행 포트로 보내는 명령 1로 본다(명령 8·9는 F-02-5부터 실행기 없이 설정 사건으로 끝난다, ADR-0365 결정 9)
+    const once = idOf(await h.post('/v1/ops/commands', operator, target(randomUUID(), 3_000)));
     expect(h.store.eventsOf(once).find((e) => e.type === 'DISPATCHED')?.actorRef).toBe(SYSTEM_REF);
     const first = await checkpoints();
     expect(first.length).toBeGreaterThan(0);
     expect(first.map((c) => c.actorRef)).toEqual(first.map(() => SYSTEM_REF));
     // 실패 뒤 다른 operator가 다시 보낸다: 체크포인트의 행위자는 그 사람의 가명 참조(대응 표 ACTOR)다
     const retrier = h.identity.ops('operator');
-    const failed = idOf(await h.post('/v1/ops/commands', operator, { type: 'FEATURE_OFF', reason: '후기 기능 끄기', params: { flag: 'reviews' } }));
+    const failed = idOf(await h.post('/v1/ops/commands', operator, target(randomUUID(), 2_500)));
     expect((await h.store.find(failed))?.state).toBe('FAILED');
     const retried = await h.post(`/v1/ops/commands/${failed}/retries`, retrier, {});
     expect([retried.statusCode, json(retried).state]).toEqual([200, 'ACKED']);

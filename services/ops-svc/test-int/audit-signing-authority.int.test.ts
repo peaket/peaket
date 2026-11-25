@@ -65,7 +65,7 @@ beforeEach(async () => {
 
 async function seed(n: number): Promise<void> {
   const create = new CreateCommand(new DrizzleCommandStore(db));
-  for (let i = 0; i < n; i += 1) await create.execute({ type: 'LOG_LEVEL', reason: `RV-01 ${i}`, params: { level: 'DEBUG' }, requestedBy: randomUUID(), requestedRole: 'operator', nowMs: DAY1 - HOUR + i });
+  for (let i = 0; i < n; i += 1) await create.execute({ type: 'LOG_LEVEL', reason: `RV-01 ${i}`, params: { service: 'queue-svc', level: 'DEBUG' }, requestedBy: randomUUID(), requestedRole: 'operator', nowMs: DAY1 - HOUR + i });
 }
 
 function job(signer: CheckpointSigner = SIGNER) {

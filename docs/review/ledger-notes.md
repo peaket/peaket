@@ -98,11 +98,8 @@ BAT-085(BAS-150)가 2026-11-20에 끝났다. 아래 항목의 상태·수는 바
 | catalog-review:v5.0.0-1.3.9 | 해당 없음 |  | — | memcache를 쓰지 않는다. 자동완성은 core-svc 파드 메모리 사전에서 답하고 사용자 입력을 Redis 키로 쓰지 않는다(ADR-0094) |
 | frontend:v5.0.0-3.4.4 | 다른 단계 |  | HOT-450 | 화면 앱은 `nosniff`를 보내지 않고 배포 응답 헤더 정책이 붙인다(docs/devops.md §6.6 '응답 보안 헤더 정책', `packages/config/headers/security-headers.mjs` 주석, 행의 '공통: delivery.md 판정'). 서비스 워커 스크립트(지금 `/serwist/sw.js`, 앱 서버 경로)와 `remoteEntry.js`(관제 정적 배포)도 같은 정책을 받는지는 CloudFront 캐시 동작별 응답 헤더 정책 몫이라 HOT-450 줄에 넘겼다. 게이트웨이 응답은 kind e2e(`tools/local/e2e/v0-deploy.e2e.mjs` BSL050)가 본다. BAT-170 웨이브 7에서 다시 판정(2026-11-16) |
 | D-T18 ② | 다른 단계 |  | BAS-150 | `--disable-sigusr1`이 없는 Node 파드를 거부하는 Kyverno 정책은 Kyverno CEL 정책 단계(BUILD_ORDER BAS-150, 묶음 BAT-085)가 만든다. ①(주석으로 진단 수집)은 BAT-075 시험이다(2026-11-19 계획). BAT-085의 시험 담당이 D-T18 ②를 이름에 단 시험을 더하는 커밋에서 이 줄을 지운다 |
-| C-T6 ① | 다른 단계 |  | BAT-365 | dry-run 센 값이 같은 시각의 원천(대기열 Redis·purchase DB·게이트웨이 집계)에서 직접 센 값과 같은지는 받는 쪽이 센 값을 주는 읽기 전용 `ControlReceiver.PreviewControl`이 생겨야 본다. 그 RPC(proto)와 받는 쪽은 OPS-300(묶음 BAT-365)이 만든다(감독 결정 2026-11-21, ADR-0340 결정 11). BAT-355는 `DryRunSource` 포트·기록·예측·비교와 `unavailable` 어댑터까지이고 ②③을 시험한다. BAT-365의 시험 담당이 C-T6 ①을 이름에 단 시험을 더하는 커밋에서 이 줄을 지운다 |
 | delivery:v5.0.0-16.1.1 | 다른 단계 |  | INF-020 | 로그 목록은 docs/observability.md §9 보존 표와 docs/devops.md §10.4에 있다. 그 목록과 실제로 띄운 수집기 내보내기·Loki·Tempo 보존 설정이 맞는지는 그 설정을 만드는 구간 5 배포 묶음(ADR-0331 결정 9, ADR-0332)이 대조 시험으로 본다. 서비스 쪽 몫(정규 로그 줄)은 16.2.1·16.2.4가 본다(2026-11-22, BAT-215 계획) |
 | delivery:v5.0.0-16.2.3 | 다른 단계 |  | INF-020 | 목록 밖으로 내보내지 않게 막는 것은 OTel 수집기 셋의 내보내기 설정과 그 정책 시험이다. 수집기는 배포 쪽(Helm·kind)이라 구간 5 배포 묶음이 만든다(ADR-0331 결정 9, ADR-0332 결정 7). BAT-215는 서비스가 표준 출력과 OTLP 말고 로그를 내보내지 않는지만 본다(2026-11-22, BAT-215 계획) |
-| C-T75 ① | 다른 단계 |  | F-02-1(OPS-300, 옛 BAT-365) | `LOG_SAMPLING`을 내는 쪽은 ops-svc의 `control.settings` Outbox와 릴레이가 있어야 한다(asyncapi publishSettingChanged). ops-svc는 갈래 4 영역이고 갈래 1 마이그레이션 몫이 없어 생산은 미뤘다(감독 결정 2026-11-22, BAT-215 계획 감독에게 2 (나)). Outbox 표·릴레이는 갈래 4 BAT-360이 만들고, 온세일 구간의 `LOG_SAMPLING` 내기와 이 판정은 BAT-365가 한다. C-T75 ③의 생산 쪽 절반(겹친 구간에서 끝을 늦춘 사건을 한 번 더 냄)도 그 묶음이 본다. 생산 규칙은 ADR-0334 결정 3 |
-| C-T75 ④ | 다른 단계 |  | F-02-1(OPS-300, 옛 BAT-365) | ops-svc 복제 둘이 같은 구간에 같은 `eventKey`를 내는지는 생산 쪽이 생겨야 본다(C-T75 ①과 같은 까닭). 소비 쪽 한 번만 적용은 BAT-215가 C-T75 ② 시험에서 본다 |
 
 ## 사람 확인
 

@@ -164,7 +164,8 @@ test('PRF215_마이그레이션잡은_합본이미지로_패키지실제경로�
 test('PRF215_Kafka토픽은_무대가쓰는것만_없을때만만든다', () => {
   // F-07-5(정본 settlement §4.2, ADR-0368 결정 1·3): payment-svc Outbox가 trade.settlements에 정산서 사건을 쓰므로 무대 토픽에 더한다
   // FIX-queue-agg-values(F-04-20): queue-svc가 관제 1초 대기 집계를 telemetry.queue에 내므로 더한다
-  assert.deepEqual([...V1_KAFKA_TOPICS].sort(), ['identity.accounts-withdrawn', 'telemetry.behavior', 'telemetry.queue', 'trade.orders', 'trade.payments', 'trade.purchase-sessions', 'trade.seats', 'trade.settlements']);
+  // control.settings는 F-02-5(ADR-0365 결정 20)가 더했다. 압축 설정은 아래 F025-TOPIC 시험이 본다
+  assert.deepEqual([...V1_KAFKA_TOPICS].sort(), ['control.settings', 'identity.accounts-withdrawn', 'telemetry.behavior', 'telemetry.queue', 'trade.orders', 'trade.payments', 'trade.purchase-sessions', 'trade.seats', 'trade.settlements']);
   assert.ok(kafkaTopicArgs('trade.settlements').includes('trade.settlements'));
   const a = kafkaTopicArgs('trade.payments');
   assert.ok(a.includes('--if-not-exists'));
@@ -172,6 +173,49 @@ test('PRF215_Kafka토픽은_무대가쓰는것만_없을때만만든다', () => 
   assert.deepEqual(a.slice(a.indexOf('--') + 1, a.indexOf('--') + 3), ['env', 'KAFKA_HEAP_OPTS=-Xms32m -Xmx96m']);
   assert.equal(a[a.indexOf('--topic') + 1], 'trade.payments');
   assert.throws(() => kafkaTopicArgs('trade.unknown'), RangeError);
+});
+
+// F-02-5 control.settings 압축 토픽 선언(ADR-0365 결정 20, ADR-0103 결정 4, docs/review/plans/F-02-5.md B27).
+// 정본 값: cleanup.policy=compact, min.compaction.lag.ms 1일(86,400,000ms), delete.retention.ms 7일(604,800,000ms), 시간 보존(retention.ms)은 걸지 않는다.
+// 새 이름(KAFKA_TOPIC_CONFIGS)은 이름공간으로 읽어 기준 트리에서 이 시험만 실패하게 한다(다른 시험은 그대로 돈다).
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** 지금(F-02-5 전) 토픽 하나의 인자 그대로. 압축 설정이 없는 토픽은 이 꼴에서 바뀌지 않아야 한다 */
+const plainTopicArgs = (topic) => ['-n', 'kafka', 'exec', 'peaket-dual-0', '-c', 'kafka', '--', 'env', 'KAFKA_HEAP_OPTS=-Xms32m -Xmx96m', 'bin/kafka-topics.sh', '--bootstrap-server', 'localhost:9092', '--create', '--if-not-exists', '--topic', topic, '--partitions', '3', '--replication-factor', '1'];
+
+test('F025-TOPIC ① control.settings는 무대 토픽이고 압축 설정 셋을 정본 값으로 선언하며 시간 보존을 걸지 않는다', async () => {
+  const objects = await import('./v1-objects.mjs');
+  assert.ok(objects.V1_KAFKA_TOPICS.includes('control.settings'));
+  const configs = objects.KAFKA_TOPIC_CONFIGS;
+  assert.equal(typeof configs, 'object', 'KAFKA_TOPIC_CONFIGS가 없다');
+  assert.deepEqual(configs['control.settings'], {
+    'cleanup.policy': 'compact',
+    'min.compaction.lag.ms': String(1 * DAY_MS),
+    'delete.retention.ms': String(7 * DAY_MS),
+  });
+  assert.equal(Object.hasOwn(configs['control.settings'], 'retention.ms'), false);
+});
+
+test('F025-TOPIC ① control.settings를 만드는 인자에 --config가 이름 차례로 붙는다', async () => {
+  const { kafkaTopicArgs: args } = await import('./v1-objects.mjs');
+  const a = args('control.settings');
+  // 앞부분은 다른 토픽과 같은 꼴(없을 때만 만들기, 분할 3·복제 1)
+  assert.deepEqual(a.slice(0, plainTopicArgs('control.settings').length), plainTopicArgs('control.settings'));
+  const rest = a.slice(plainTopicArgs('control.settings').length);
+  assert.deepEqual(rest, [
+    '--config', 'cleanup.policy=compact',
+    '--config', 'delete.retention.ms=604800000',
+    '--config', 'min.compaction.lag.ms=86400000',
+  ]);
+});
+
+test('F025-TOPIC ② 압축 설정이 없는 토픽의 인자는 그대로다(--config 0개)', async () => {
+  const { kafkaTopicArgs: args, KAFKA_TOPIC_CONFIGS: configs } = await import('./v1-objects.mjs');
+  const others = ['trade.seats', 'trade.payments', 'trade.orders', 'trade.purchase-sessions', 'identity.accounts-withdrawn', 'telemetry.behavior'];
+  for (const topic of others) {
+    assert.deepEqual(args(topic), plainTopicArgs(topic), topic);
+    assert.equal(configs?.[topic], undefined, `${topic}에 설정이 생겼다`);
+  }
+  assert.ok(configs !== undefined, 'KAFKA_TOPIC_CONFIGS가 없다');
 });
 
 test('PRF215_nginx캐시는_대기상태파일만캐시하고_잠금만켜고_낡은값허용을끈다', () => {

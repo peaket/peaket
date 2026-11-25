@@ -152,7 +152,7 @@ const count = async (text: string, params: unknown[] = []) => Number((await q<{ 
 async function seedCommands(reasons: readonly string[]): Promise<string[]> {
   const create = new CreateCommand(new DrizzleCommandStore(db));
   const ids: string[] = [];
-  for (const reason of reasons) ids.push((await create.execute({ type: 'LOG_LEVEL', reason, params: { level: 'DEBUG' }, requestedBy: randomUUID(), requestedRole: 'operator', nowMs: clock.now() })).commandId);
+  for (const reason of reasons) ids.push((await create.execute({ type: 'LOG_LEVEL', reason, params: { service: 'queue-svc', level: 'DEBUG' }, requestedBy: randomUUID(), requestedRole: 'operator', nowMs: clock.now() })).commandId);
   return ids;
 }
 /** 사유를 DB에서 바꾸고, 원본 행과 키 없는 해시 연쇄(record_sha256·prev_hash·머리)를 모두 다시 맞춘다. mac만 옛 값으로 남는다 */

@@ -64,13 +64,14 @@ const q = <R extends pg.QueryResultRow = pg.QueryResultRow>(text: string, params
 const count = async (text: string, params: unknown[] = []): Promise<number> => Number((await q<{ n: string }>(text, params)).rows[0]!.n);
 const COMMANDER_TYPES = ['BOT_LEVEL', 'DEGRADED_MODE', 'KILL_SWITCH', 'SALE_STOP', 'SALE_RESUME', 'AUTOMATION_STOP'];
 /** 명령 3·5는 openapi Command.params의 칸만 받는다(ADR-0340 결정 9). 그 밖의 유형은 열린 객체다 */
-const PARAMS: Record<string, Record<string, unknown>> = { BOT_LEVEL: { level: 'STANDARD' }, KILL_SWITCH: { scope: 'PLATFORM' } };
+// 명령 8도 F-02-5부터 칸을 닫는다({service, level}, ADR-0365 결정 13)
+const PARAMS: Record<string, Record<string, unknown>> = { BOT_LEVEL: { level: 'STANDARD' }, KILL_SWITCH: { scope: 'PLATFORM' }, LOG_LEVEL: { service: 'queue-svc', level: 'DEBUG' } };
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 /** 키 차례에 흔들리지 않는 JSON의 SHA-256(감사 기록에 실린 dry-run 지문과 견준다) */
 const sorted = (v: unknown): unknown =>
   Array.isArray(v) ? v.map(sorted) : v !== null && typeof v === 'object' ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, sorted((v as Record<string, unknown>)[k])])) : v;
 const digest = (v: unknown): string => createHash('sha256').update(JSON.stringify(sorted(v))).digest('hex');
-const commandInput = (type: 'LOG_LEVEL' | 'BOT_LEVEL' | 'DEGRADED_MODE' | 'KILL_SWITCH', over: Record<string, unknown> = {}) => ({
+const commandInput = (type: 'LOG_LEVEL' | 'BOT_LEVEL' | 'DEGRADED_MODE' | 'KILL_SWITCH' | 'SCALE_CHANGE', over: Record<string, unknown> = {}) => ({
   type,
   reason: '장애 대응',
   params: PARAMS[type] ?? {},
@@ -264,7 +265,8 @@ describe('운영 명령 저장소와 감사 해시 체인', () => {
 
   test('GAT110_목록은_유형·상태·회차로_거르고_커서로_나누며_상세는_params를_싣는다', async () => {
     const eventId = randomUUID();
-    const a = await create.execute(commandInput('LOG_LEVEL', { params: { eventId }, nowMs: NOW + 10 }));
+    // 칸이 열린 1인 명령으로 회차를 건다(명령 8은 F-02-5부터 칸이 닫혀 eventId를 받지 않는다, ADR-0365 결정 13)
+    const a = await create.execute(commandInput('SCALE_CHANGE', { params: { eventId }, nowMs: NOW + 10 }));
     // 명령 5(BOT_LEVEL)는 eventId 칸이 없다(ADR-0340 결정 9). 열린 객체인 DEGRADED_MODE로 회차를 건다
     const b = await create.execute(commandInput('DEGRADED_MODE', { params: { eventId }, nowMs: NOW + 11 }));
 

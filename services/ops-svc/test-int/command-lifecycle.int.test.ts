@@ -205,7 +205,7 @@ describe('한 트랜잭션과 가명 참조(ASVS 2.3.3·16.2.1)', () => {
         commandId: randomUUID(),
         type: 'LOG_LEVEL',
         reason,
-        params: { level: 'DEBUG' },
+        params: { service: 'queue-svc', level: 'DEBUG' },
         requestedBy,
         requestedRole: 'operator',
         nowMs: clock.now(),
@@ -355,7 +355,7 @@ describe('C-T6 ③·멱등 실제 DB', () => {
   test('OPS-260 실제 DB 멱등: 같은 키·같은 본문은 같은 명령(멱등 기록 1행, 사건 그대로), 같은 키·다른 본문은 422 idempotency-key-reused다', async () => {
     const op = identity.ops('operator');
     const key = randomUUID();
-    const body = { type: 'LOG_LEVEL', reason: '멱등', params: { level: 'DEBUG' } };
+    const body = { type: 'LOG_LEVEL', reason: '멱등', params: { service: 'queue-svc', level: 'DEBUG' } };
     const first = await post('/v1/ops/commands', { ...op, 'idempotency-key': key }, body);
     expect(first.statusCode).toBe(201);
     const id = json(first).commandId as string;

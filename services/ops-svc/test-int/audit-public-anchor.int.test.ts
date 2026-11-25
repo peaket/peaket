@@ -128,7 +128,7 @@ async function seed(n: number, atMs: number): Promise<string[]> {
   for (let i = 0; i < n; i += 1) {
     const reason = `공개 앵커 통합 ${runId} ${i}`;
     reasons.push(reason);
-    await create.execute({ type: 'LOG_LEVEL', reason, params: { level: 'DEBUG' }, requestedBy: randomUUID(), requestedRole: 'operator', nowMs: atMs + i });
+    await create.execute({ type: 'LOG_LEVEL', reason, params: { service: 'queue-svc', level: 'DEBUG' }, requestedBy: randomUUID(), requestedRole: 'operator', nowMs: atMs + i });
   }
   return reasons;
 }

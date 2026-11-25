@@ -170,7 +170,7 @@ describe('C-T47 ① 2인 승인 시연(데모 환경, 서버 몫)', () => {
   test('C-T47 ① 데모 밖 환경(ci)의 감사 기록에는 demo 칸이 없다(표시는 데모 환경에만)', async () => {
     vi.stubEnv('PEAKET_ENV', 'ci');
     try {
-      const c = await new CreateCommand(new DrizzleCommandStore(db)).execute({ type: 'LOG_LEVEL', reason: '데모 밖 기록', params: { level: 'DEBUG' }, requestedBy: randomUUID(), requestedRole: 'operator', nowMs: clock.now() });
+      const c = await new CreateCommand(new DrizzleCommandStore(db)).execute({ type: 'LOG_LEVEL', reason: '데모 밖 기록', params: { service: 'queue-svc', level: 'DEBUG' }, requestedBy: randomUUID(), requestedRole: 'operator', nowMs: clock.now() });
       const rows = await records(c.commandId);
       expect(rows.length).toBeGreaterThan(0);
       for (const r of rows) expect(r.record_json.payload).not.toHaveProperty('demo');

@@ -98,7 +98,7 @@ describe('C-T45 ① 운영 사건 줄(ADR-0349 결정 8, B23)', () => {
     const h = await harness();
     const commander = h.identity.ops('commander');
     const op = h.identity.ops('operator');
-    const log = await h.post('/v1/ops/commands', op, { type: 'LOG_LEVEL', reason: '로그 단계', params: { level: 'DEBUG' } });
+    const log = await h.post('/v1/ops/commands', op, { type: 'LOG_LEVEL', reason: '로그 단계', params: { service: 'queue-svc', level: 'DEBUG' } });
     const logId = (JSON.parse(log.payload) as { commandId: string }).commandId;
     expect(opsEvents(h.log.lines(), logId)[0]).toMatchObject({ opsEvent: '8:LOG_LEVEL', stage: 'REQUESTED', eventId: null, actorRole: 'operator', commandId: logId });
     const scale = await h.post('/v1/ops/commands', commander, { type: 'SCALE_CHANGE', reason: '규모 변경', params: { eventId: randomUUID(), scale: 'LARGE' } });

@@ -107,7 +107,7 @@ describe('위험 명령 재인증(I-T53 ⑤)', () => {
   test('I-T53 ⑤ 비위험 명령(LOG_LEVEL)은 토큰 없이 201이고, 위험 명령의 승인·재시도도 토큰을 요구한다', async () => {
     const requester = identity.ops('commander');
     const approver = identity.ops('commander');
-    const log = await post('/v1/ops/commands', requester, { type: 'LOG_LEVEL', reason: '로그 단계', params: { level: 'DEBUG' } });
+    const log = await post('/v1/ops/commands', requester, { type: 'LOG_LEVEL', reason: '로그 단계', params: { service: 'queue-svc', level: 'DEBUG' } });
     expect(log.statusCode, log.payload).toBe(201);
 
     const created = await post('/v1/ops/commands', withToken(requester, token(requester)), { type: 'SALE_STOP', reason: '판매 중지', params: { eventId: randomUUID(), reasonCode: 'LEGAL_REQUEST' } });

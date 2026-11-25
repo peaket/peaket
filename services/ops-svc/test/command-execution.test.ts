@@ -138,8 +138,9 @@ describe('운영 명령 실행·재시도', () => {
   });
 
   test('GAT310_대상이_없는_유형은_target_not_wired로_FAILED다', async () => {
+    // 실행기가 없는 조립의 1회 실행 명령. 명령 8은 F-02-5부터 실행기 없이 설정 사건으로 끝나므로(ADR-0365 결정 9·13) 이 시험의 대상이 아니다
     const f = fixture();
-    const c = await f.create.execute(input('LOG_LEVEL'));
+    const c = await f.create.execute(input('SCALE_CHANGE'));
     expect(c.state).toBe('FAILED');
     expect(c.lastError).toBe('target-not-wired');
     expect(c.attempts).toBe(1);

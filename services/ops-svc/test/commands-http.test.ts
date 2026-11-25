@@ -72,12 +72,12 @@ describe('/v1/ops/commands', () => {
 
   test('GAT110_상세는_params를_싣고_목록에는_싣지_않으며_viewer는_상세를_못_본다', async () => {
     const op = identity.ops('operator');
-    const created = await post('/v1/ops/commands', op, { type: 'LOG_LEVEL', reason: '상세', params: { level: 'DEBUG' } });
+    const created = await post('/v1/ops/commands', op, { type: 'LOG_LEVEL', reason: '상세', params: { service: 'queue-svc', level: 'DEBUG' } });
     const commandId = (JSON.parse(created.payload) as { commandId: string }).commandId;
     const detail = await get(`/v1/ops/commands/${commandId}`, op);
     expect(detail.statusCode).toBe(200);
     expect(detail.headers['cache-control']).toBe('no-store');
-    expect(JSON.parse(detail.payload)).toMatchObject({ commandId, params: { level: 'DEBUG' } });
+    expect(JSON.parse(detail.payload)).toMatchObject({ commandId, params: { service: 'queue-svc', level: 'DEBUG' } });
     const list = await get('/v1/ops/commands?type=LOG_LEVEL&limit=100', op);
     const item = (JSON.parse(list.payload) as { items: Array<Record<string, unknown>> }).items.find((i) => i.commandId === commandId);
     expect(item).toBeTruthy();
