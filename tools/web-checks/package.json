@@ -24,6 +24,7 @@
     "queue-room": "playwright test -c playwright.queue-room.config.mjs",
     "purchase": "playwright test -c playwright.purchase.config.mjs",
     "console-commands": "playwright test -c playwright.console-commands.config.mjs",
+    "console-notices": "playwright test -c playwright.console-notices.config.mjs",
     "console-browser-check": "playwright test -c playwright.console-browser-check.config.mjs",
     "console-csp": "playwright test -c playwright.console-csp.config.mjs",
     "console-remotes": "playwright test -c playwright.console-remotes.config.mjs",
