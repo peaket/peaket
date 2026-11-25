@@ -3,7 +3,7 @@
 // /assets/widgets-queue.*.chunk.js. 값은 같은 ops 대역에서 온다. 결과는 reports/console-baseline/isolation.json에 쌓는다.
 import { test, expect } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { DASHBOARD_PATH, MARK, blockRule } from './lib.mjs';
+import { DASHBOARD_PATH, blockRule, waitForMark } from './lib.mjs';
 import { startStage } from './stage.mjs';
 
 const RUNS = 3;
@@ -19,7 +19,7 @@ for (const build of ['mf', 'single']) {
         await page.route(blockRule(build, 'queue'), (r) => r.abort());
         try {
           await page.goto(stage.origin + DASHBOARD_PATH);
-          await page.waitForFunction((name) => performance.getEntriesByName(name).length === 1, MARK, { timeout: 20_000 });
+          await waitForMark(page);
           await expect(page.locator('main#main')).toBeVisible();
           await expect(page.getByRole('heading', { name: '중앙 관제 대시보드', level: 1 })).toBeVisible();
           await expect(page.locator('#w-alert')).toBeVisible();
