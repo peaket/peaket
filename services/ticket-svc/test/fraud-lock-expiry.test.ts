@@ -1,6 +1,7 @@
 // F-04-13 ticket-svc 부정 예매 양도 잠금 만료·경합 시험(동결 로컬, LCH-270·LCH-280, FX-T15).
 // 정본: docs/features/forensic-replay.md §6.7.4 C13·C17, docs/features/transfer-refund.md §4.1.
 // [ASVS v5.0.0-15.4.2] 잠금과 양도 수락의 TOCTOU.
+import { readFileSync } from 'node:fs';
 import { fakeClock } from '@peaket/platform';
 import { describe, expect, it } from 'vitest';
 import { MemoryTicketStore } from '../src/modules/ticket/adapters/memory-ticket-store.js';
@@ -67,21 +68,21 @@ describe('F-04-13 양도 잠금 만료·경합', () => {
     const t = seed(tickets, 1, { eventStartsAtMs: NOW + HOUR });
     await store.setTransferLock({ caseId: CASE, version: 1, locked: true, eventId: EVENT, accountIds: [PAYER], expiresAtMs: NOW + 14 * DAY, nowMs: NOW });
     expect(tickets.tickets.get(t.ticketId)?.fraudLockCaseId).toBe(CASE);
-    const sweep = (store as unknown as { expireFraudLocks(nowMs: number): Promise<number> }).expireFraudLocks;
+    const sweep = (transfers as unknown as { expireFraudLocks(nowMs: number): Promise<number> }).expireFraudLocks;
     expect(sweep).toBeTypeOf('function');
-    await sweep(NOW + 2 * HOUR);
+    await sweep.call(transfers, NOW + 2 * HOUR);
     expect(tickets.tickets.get(t.ticketId)?.fraudLockCaseId).toBeUndefined();
     expect(await store.activeTransferLock(EVENT, PAYER, NOW + 2 * HOUR)).toBeUndefined();
     expect(await transfers.lockState(t.ticketId, NOW + 2 * HOUR)).toEqual({ locked: false });
   });
 
   it('FX-T15 ⑮ 잠금 최대 기한에는 ops-svc가 멈춰도 ticket-svc가 잠금을 푼다', async () => {
-    const { tickets, store } = setup();
+    const { tickets, store, transfers } = setup();
     const t = seed(tickets, 2, { eventStartsAtMs: NOW + 72 * HOUR });
     await store.setTransferLock({ caseId: CASE, version: 1, locked: true, eventId: EVENT, accountIds: [PAYER], expiresAtMs: NOW + 14 * DAY, nowMs: NOW });
-    const sweep = (store as unknown as { expireFraudLocks(nowMs: number): Promise<number> }).expireFraudLocks;
+    const sweep = (transfers as unknown as { expireFraudLocks(nowMs: number): Promise<number> }).expireFraudLocks;
     expect(sweep).toBeTypeOf('function');
-    await sweep(NOW + 14 * DAY);
+    await sweep.call(transfers, NOW + 14 * DAY);
     expect(tickets.tickets.get(t.ticketId)?.fraudLockCaseId).toBeUndefined();
     expect(await store.activeTransferLock(EVENT, PAYER, NOW + 14 * DAY)).toBeUndefined();
   });
@@ -94,6 +95,8 @@ describe('F-04-13 양도 잠금 만료·경합', () => {
       return { payer, ticket: seed(tickets, 10_000 + i, { accountId: payer, payerAccountId: payer, eventStartsAtMs: NOW + 72 * HOUR }) };
     });
     let changed = 0;
+    let lockSuccesses = 0;
+    let acceptRejected = 0;
     for (let i = 0; i < count; i++) {
       const { payer, ticket: t } = rows[i]!;
       const created = await transfers.createOffer({
@@ -104,18 +107,56 @@ describe('F-04-13 양도 잠금 만료·경합', () => {
         recipientRef: ref(),
         idempotencyKey: `0193f2c0-0000-7003-8000-${String(i).padStart(12, '0')}`,
       });
-      const [lockOutcome] = await Promise.all([
+      const [lockOutcome, accepted] = await Promise.all([
         store.setTransferLock({ caseId: CASE, version: i + 1, locked: true, eventId: EVENT, accountIds: [payer], expiresAtMs: NOW + 14 * DAY, nowMs: NOW }),
         transfers.accept({ offerId: created.offerId, accountId: FRIEND, idempotencyKey: `0193f2c0-0000-7004-8000-${String(i).padStart(12, '0')}` }).then(
           (v) => v,
-          () => ({ status: 'TRANSFER_LOCKED' as const }),
+          (e: any) => ({ status: e?.code === 'TRANSFER_LOCKED' ? 'TRANSFER_LOCKED' : 'REJECTED' }),
         ),
       ]);
+      if (lockOutcome[0]?.result === 'LOCKED') lockSuccesses += 1;
+      if (accepted.status === 'TRANSFER_LOCKED' || accepted.status === 'REJECTED') acceptRejected += 1;
       const ticket = tickets.tickets.get(t.ticketId)!;
       if (lockOutcome[0]?.result === 'LOCKED' && ticket.accountId !== payer) changed += 1;
     }
+    expect(lockSuccesses).toBeGreaterThan(0);
+    expect(acceptRejected).toBeGreaterThan(0);
     expect(changed).toBe(0);
   }, 120_000);
+
+  it('FX-T15 ⑲ 만료 경계 직전에는 잠금이 남고 경계와 계정별 격리에서만 풀린다', async () => {
+    const { tickets, store, transfers } = setup();
+    const entry = seed(tickets, 20, { eventStartsAtMs: NOW + HOUR });
+    const max = seed(tickets, 21, { eventStartsAtMs: NOW + 30 * DAY });
+    await store.setTransferLock({ caseId: CASE, version: 1, locked: true, eventId: EVENT, accountIds: [PAYER], expiresAtMs: NOW + 14 * DAY, nowMs: NOW });
+    const sweep = (transfers as unknown as { expireFraudLocks(nowMs: number): Promise<number> }).expireFraudLocks;
+    expect(sweep).toBeTypeOf('function');
+    await sweep.call(transfers, NOW + HOUR - 1);
+    expect(tickets.tickets.get(entry.ticketId)?.fraudLockCaseId).toBe(CASE);
+    expect(tickets.tickets.get(max.ticketId)?.fraudLockCaseId).toBe(CASE);
+    await sweep.call(transfers, NOW + HOUR);
+    expect(tickets.tickets.get(entry.ticketId)?.fraudLockCaseId).toBeUndefined();
+    expect(tickets.tickets.get(max.ticketId)?.fraudLockCaseId).toBe(CASE);
+    await sweep.call(transfers, NOW + 14 * DAY - 1);
+    expect(tickets.tickets.get(max.ticketId)?.fraudLockCaseId).toBe(CASE);
+    await sweep.call(transfers, NOW + 14 * DAY);
+    expect(tickets.tickets.get(max.ticketId)?.fraudLockCaseId).toBeUndefined();
+  });
+
+  it('FX-T15 ⑳ 조립된 1분 정비 작업은 Transfers.expireFraudLocks를 부른다', async () => {
+    const sweepModulePath = '../src/fraud-lock-sweep.js';
+    const sweepModule = (await import(sweepModulePath)) as unknown as Record<string, any>;
+    const start = sweepModule.startFraudLockSweep;
+    expect(start).toBeTypeOf('function');
+    const calls: number[] = [];
+    const sweep = start({ transfers: { expireFraudLocks: async (nowMs: number) => { calls.push(nowMs); return 1; } }, intervalMs: 60_000, now: () => NOW });
+    await sweep.tick();
+    expect(calls).toEqual([NOW]);
+    sweep.stop();
+    const source = readFileSync(new URL('../src/start.ts', import.meta.url), 'utf8');
+    expect(source).toMatch(/startFraudLockSweep/);
+    expect(source).toMatch(/60_000|60 \* 1000|FRAUD_LOCK_SWEEP_MS/);
+  });
 
   it('FX-T15 ⑰ 옛 판의 잠금·풀기가 늦게 와도 새 상태를 덮지 않는다', async () => {
     const { tickets, store } = setup();
