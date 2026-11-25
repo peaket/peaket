@@ -36,6 +36,7 @@ export function fakeRest() {
       url,
       headers,
       raw,
+      bytes: init.body instanceof ArrayBuffer ? init.body.byteLength : undefined,
       form,
       body: raw && raw.startsWith('{') ? JSON.parse(raw) : undefined,
     };

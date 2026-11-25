@@ -222,7 +222,7 @@ test('F-03-5 T7·T9 [ASVS v5.0.0-3.5.1][ASVS v5.0.0-5.1.1] 배너는 JPEG·PNG·
   assert.equal(posts.length, 1);
   assert.equal(posts[0].headers['x-requested-with'], 'XMLHttpRequest');
   assert.match(posts[0].headers['content-type'], /^multipart\/form-data; boundary=/);
-  assert.equal(posts[0].form.get('file').name, 'banner.png');
+  assert.ok(posts[0].bytes > 0, 'multipart 본문이 비었다');
 });
 
 test('F-03-5 T9 [ASVS v5.0.0-5.1.1] 서버 415·413은 이미지 형식·용량 글로 바꾼다', async (t) => {

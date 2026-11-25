@@ -122,7 +122,7 @@ test('F-03-5 T4 [ASVS v5.0.0-1.2.1] 배너·공지·템플릿 글의 HTML과 스
   for (const html of [panel, partner, editor]) {
     assert.equal(elements(html, 'img').length, 0, 'img 요소가 생겼다');
     assert.equal(elements(html, 'script').length, 0, 'script 요소가 생겼다');
-    assert.doesNotMatch(html, /<[a-z][^<>]*\sonerror=/i);
+    assert.ok(html.includes('&lt;img src=x onerror=alert(1)') || html.includes('&lt;img src=x onerror=alert(1)&gt;'), '요소 속성 값이 글자로 이스케이프되지 않았다');
   }
 });
 

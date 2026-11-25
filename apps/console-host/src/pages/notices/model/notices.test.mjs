@@ -4,8 +4,12 @@
 // docs/api/openapi.yaml NoticeTemplateCreate·NoticeTemplateTextsInput·PartnerNoticeCreate·HomeLayoutInput,
 // 계획 docs/review/plans/F-03-5.md §4 공개 인터페이스.
 // 구현 전 트리에는 notices.ts가 없어 시험마다 가져오기부터 실패한다.
+import { register } from 'node:module';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+
+register('../../dashboard/ui/board.test.resolve.mjs', import.meta.url);
+globalThis.__PREVIEW__ = false;
 
 const UUID = '0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01';
 const TEXTS = {
