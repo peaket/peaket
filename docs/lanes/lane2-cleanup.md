@@ -242,3 +242,8 @@
 
 - ~~F-05-2 뒤 web reflow wallet-enroll·wallet-live (CI 45267206465)~~ — **닫힘(2026-11-24, 073dc18c3·c3175c7b5)**: wallet-enroll은 live 목록·회차 요약 대역과 UUIDv7 티켓으로 바꾸고, wallet-live O-T52 ⑥은 데스크톱 안내 뒤 [그래도 이 기기에 등록]을 누르게 고쳤다. `web / reflow`·`visual`·`console-csp` 모두 통과(9ebc100ec·c3175c7b5). 남은 것은 서비스 워커가 제어하는 페이지의 등록·갱신을 이 두 시험이 덮지 않는 점(wallet-sw가 따로 본다)
 - F-02-4 독립 시험 리뷰 TR-16(낮음, 그 밖): 계획 §8 머리의 시험 파일 이름이 `admin-access-log-intake.test.ts`로 남아 실제 `audit-admin-access.test.ts`와 다르고, ASVS `offline-gate.md` 14.1.2·14.2.4·16.1.1·16.4.2·16.4.3 행의 '테스트 결과'가 아직 `미실행`이다. 기록 커밋에서 이름과 결과 칸을 맞춘다.
+- F-02-4 구현 리뷰 IR-07(중간, 그 밖): `tools/local/access-log-jobs.mjs`의 ClickHouse·ops 감사 HTTP 호출에 시간 한도(AbortSignal)가 없다. 한쪽이 응답하지 않으면 잡이 끝나지 않아 종료 코드·`lastSuccess`·다음 실행이 멈춘다. 연결·전체 한도를 두고 시간 초과 → 1 시험을 더한다(계획 §11, `docs/api/guidelines.md` §5).
+- F-02-4 구현 리뷰 IR-11(낮음, 그 밖): `tools/local/access-log-jobs.mjs:480-482`가 모든 갈래 앞에서 `jobsConfig()`를 불러, `--purge`·`--admin-copy`·`--reapply`가 `jobs.yaml` 없이도 `retention.yaml`만으로 돌 수 있는데 종료 2로 막힌다. `jobsConfig`를 F-01-8 갈래에서만 읽는다.
+- F-02-4 구현 리뷰 IR-12(낮음, 그 밖): `tools/local/access-log-jobs.mjs:48-58`·`:279-323`의 `retentionConfig()`가 `backup.snapshotRetentionDays`·`reapplyWindowDays`를 읽지만 `reapply`가 쓰지 않는다. 7일 밖 스냅샷·40일 밖 파기 기록을 실행에서 거르지 않으므로 값을 실행에 쓰거나 '배포 설정 전용'임을 밝힌다.
+- F-02-4 구현 리뷰 IR-13(낮음, 그 밖): `tools/local/access-log-jobs.mjs:286-318`의 `--reapply` 두 실행이 겹치면 나중 실행이 없는 파티션 DROP으로 `FAILED`·종료 1이 된다. `purge`처럼 `DROPPED+reconciled:true`로 다루거나 시작 때 존재를 다시 확인한다(계획 §4 멱등, §6 B10).
+- F-02-4 구현 리뷰 IR-14(낮음, 그 밖): `tools/local/access-log-jobs.mjs:238-253`가 `requestId`·`event`·`result`·`provider`·`failure`를 자르지 않아 `audit-intake.ts:32-49`의 길이 한도(200·32·32·64·32)를 넘으면 그 관리 계정 줄이 2년 사본에서 빠진다. 보내기 전에 전 칸을 한도에 맞추고 긴 값 시험을 더한다.
