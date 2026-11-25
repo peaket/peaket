@@ -120,14 +120,20 @@ afterAll(async () => {
 });
 
 describe('F-02-4 실제 ClickHouse·ops-svc·Object Lock 통합', () => {
-  test('[ASVS v5.0.0-14.2.4] al_purger가 HTTP 인증으로 만료 파티션만 지우고 파기 기록이 PostgreSQL 감사 체인에 남는다', async () => {
+  test('[ASVS v5.0.0-14.2.4] al_purger가 HTTP 인증으로 만료 파티션만 지우고 파기 기록이 PostgreSQL 감사 체인에 상태별로 남는다', async () => {
     const token = internalToken;
+    await admin!.query('truncate audit_chain, audit_record_intake, audit_chain_head restart identity');
+    await admin!.query("insert into audit_chain_head (id, last_seq, last_hash) values (1, 0, ''::bytea) on conflict (id) do update set last_seq=0, last_hash=''::bytea");
     await ch!.exec(`INSERT INTO access_log.access_log (ts, source, gateway, request_id, method, path, status, duration_ms, client_ip, user_agent, account_id, event, result, provider, factors, failure, act, seq, pod, is_admin) VALUES
       ('2026-08-22 12:00:00.000', 'gateway', 'GW_FAN', 'old-1', 'GET', '/v1/events/1', 200, 10, toIPv6OrNull('203.0.113.7'), 'UA-old', '', '', '', '', [], '', '', 0, '', 0),
       ('2026-08-24 12:00:00.000', 'gateway', 'GW_FAN', 'edge-1', 'GET', '/v1/events/1', 200, 10, toIPv6OrNull('203.0.113.8'), 'UA-edge', '', '', '', '', [], '', '', 0, '', 0),
       ('2026-11-23 12:00:00.000', 'identity', '', 'admin-1', '', '', 0, 0, toIPv6OrNull('203.0.113.9'), 'UA-admin', '11111111-1111-4111-8111-111111111111', 'LOGIN', 'SUCCESS', 'PASSWORD', ['password','totp'], '', '', 1, 'identity-1', 1),
       ('2026-11-23 13:00:00.000', 'identity', '', 'admin-2', '', '', 0, 0, toIPv6OrNull('203.0.113.10'), 'UA-admin2', '22222222-2222-4222-8222-222222222222', 'REAUTH', 'SUCCESS', 'PASSKEY', ['passkey'], '', '', 2, 'identity-1', 1),
       ('2026-11-23 14:00:00.000', 'identity', '', 'fan-1', '', '', 0, 0, toIPv6OrNull('203.0.113.11'), 'UA-fan', '33333333-3333-4333-8333-333333333333', 'LOGIN', 'SUCCESS', 'PASSWORD', ['password'], '', '', 3, 'identity-1', 0)`);
+    // 원천 표(exporter 고정 칸)의 만료 파티션도 만든다.
+    await ch!.exec(`INSERT INTO access_log.access_log_otel
+      (Timestamp, TraceId, SpanId, TraceFlags, SeverityText, SeverityNumber, ServiceName, Body, ResourceSchemaUrl, ResourceAttributes, ScopeSchemaUrl, ScopeName, ScopeVersion, ScopeAttributes, LogAttributes, EventName) VALUES
+      ('2026-08-22 12:00:00.000', '', '', 0, '', 0, 'envoy', '', '', map('service.name','envoy'), '', '', '', map(), map('source','gateway','kind','envoy-access'), '')`);
     const r = await runCli([
       '--purge',
       '--today',
@@ -144,23 +150,48 @@ describe('F-02-4 실제 ClickHouse·ops-svc·Object Lock 통합', () => {
       token,
     ]);
     expect(r.code, `${r.out}\n${r.err}`).toBe(0);
-    const parts = JSON.parse(await ch!.exec("SELECT partition, table FROM system.parts WHERE database='access_log' AND active AND table='access_log' FORMAT JSON")).data as Array<{ partition: string }>;
-    expect(parts.map((p) => p.partition).sort()).toEqual(['20260824', '20261123']);
-    const types = (await admin!.query("select record_type, count(*)::int as n from audit_chain group by record_type order by record_type")).rows;
-    expect(types).toEqual([{ record_type: 'ACCESS_LOG_PARTITION_PURGE', n: 2 }]);
-    const raw = (await admin!.query("select record_json from audit_chain where record_type='ACCESS_LOG_PARTITION_PURGE' and record_json->'payload'->>'state'='DROPPED'")).rows[0].record_json;
+    const parts = JSON.parse(await ch!.exec("SELECT partition, table FROM system.parts WHERE database='access_log' AND active AND table IN ('access_log','access_log_otel') FORMAT JSON")).data as Array<{ partition: string; table: string }>;
+    expect(parts.filter((p) => p.table === 'access_log').map((p) => p.partition).sort()).toEqual(['20260824', '20261123']);
+    expect(parts.filter((p) => p.table === 'access_log_otel')).toEqual([]);
+    const states = (await admin!.query("select record_json->'payload'->>'state' as state, record_json->'payload'->>'table' as table, count(*)::int as n from audit_chain where record_type='ACCESS_LOG_PARTITION_PURGE' group by state, table order by state, table")).rows;
+    expect(states).toEqual([
+      { state: 'DROPPED', table: 'access_log', n: 1 },
+      { state: 'DROPPED', table: 'access_log_otel', n: 1 },
+      { state: 'PLANNED', table: 'access_log', n: 1 },
+      { state: 'PLANNED', table: 'access_log_otel', n: 1 },
+    ]);
+    const raw = (await admin!.query("select record_json from audit_chain where record_type='ACCESS_LOG_PARTITION_PURGE' and record_json->'payload'->>'state'='DROPPED' and record_json->'payload'->>'table'='access_log'")).rows[0].record_json;
     const payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    expect(payload.payload).toMatchObject({ day: '2026-08-22', table: 'access_log', state: 'DROPPED' });
+    expect(payload.payload).toMatchObject({ day: '2026-08-22', table: 'access_log', state: 'DROPPED', rows: null });
+    // TR-03: 실제 자격이 쓰였는지 확인한다. al_purger는 행을 읽지 못하고 currentUser()가 자기 이름이다.
+    const basic = (user: string, pass: string) => `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`;
+    const asUser = async (user: string, pass: string, sql: string) => fetch(`${ch!.url}/`, { method: 'POST', headers: { authorization: basic(user, pass) }, body: sql });
+    const me = await asUser('al_purger', PURGER_PASSWORD, 'SELECT currentUser()');
+    expect((await me.text()).trim()).toBe('al_purger');
+    const denied = await asUser('al_purger', PURGER_PASSWORD, 'SELECT count() FROM access_log.access_log');
+    expect(denied.status).toBe(403);
+    const wrong = await runCli([
+      '--purge', '--today', '2026-11-24', '--clickhouse', ch!.url,
+      '--clickhouse-user', 'al_purger', '--clickhouse-password', 'wrong-password',
+      '--ops-audit', `${svcBase}/internal/v1/ops/audit-records`, '--token', token,
+    ]);
+    expect(wrong.code, `${wrong.out}\n${wrong.err}`).toBe(1);
   });
 
-  test('[ASVS v5.0.0-16.4.3] al_admin_reader가 관리 계정 줄만 읽어 ops-svc PostgreSQL 감사 체인에 2년 보존으로 넣는다', async () => {
+  test('[ASVS v5.0.0-16.4.3] al_admin_reader가 KST 하루의 관리 계정 줄만 읽어 ops-svc PostgreSQL 감사 체인에 2년 보존으로 넣는다', async () => {
     const token = internalToken;
     await admin!.query('truncate audit_chain, audit_record_intake, audit_chain_head restart identity');
     await admin!.query("insert into audit_chain_head (id, last_seq, last_hash) values (1, 0, ''::bytea) on conflict (id) do update set last_seq=0, last_hash=''::bytea");
+    await ch!.exec(`INSERT INTO access_log.access_log (ts, source, gateway, request_id, method, path, status, duration_ms, client_ip, user_agent, account_id, event, result, provider, factors, failure, act, seq, pod, is_admin) VALUES
+      ('2026-11-23 14:59:59.000', 'identity', '', 'kst-before', '', '', 0, 0, NULL, 'UA', '44444444-4444-4444-8444-444444444444', 'LOGIN', 'SUCCESS', 'PASSWORD', ['password'], '', '', 4, 'identity-1', 1),
+      ('2026-11-23 15:00:00.000', 'identity', '', 'kst-start', '', '', 0, 0, NULL, 'UA', '55555555-5555-4555-8555-555555555555', 'LOGIN', 'SUCCESS', 'PASSWORD', ['password'], '', '', 5, 'identity-1', 1),
+      ('2026-11-24 08:59:59.000', 'identity', '', 'kst-mid', '', '', 0, 0, NULL, 'UA', '66666666-6666-4666-8666-666666666666', 'REAUTH', 'SUCCESS', 'PASSKEY', ['passkey'], '', '', 6, 'identity-1', 1),
+      ('2026-11-24 14:59:59.000', 'identity', '', 'kst-end', '', '', 0, 0, NULL, 'UA', '77777777-7777-4777-8777-777777777777', 'LOGOUT', 'SUCCESS', '', [], '', '', 7, 'identity-1', 1),
+      ('2026-11-24 15:00:00.000', 'identity', '', 'kst-after', '', '', 0, 0, NULL, 'UA', '88888888-8888-4888-8888-888888888888', 'LOGIN', 'SUCCESS', 'PASSWORD', ['password'], '', '', 8, 'identity-1', 1)`);
     const r = await runCli([
       '--admin-copy',
       '--date',
-      '2026-11-23',
+      '2026-11-24',
       '--clickhouse',
       ch!.url,
       '--clickhouse-user',
@@ -174,11 +205,13 @@ describe('F-02-4 실제 ClickHouse·ops-svc·Object Lock 통합', () => {
     ]);
     expect(r.code, `${r.out}\n${r.err}`).toBe(0);
     const rows = (await admin!.query("select record_json from audit_chain where record_type='ADMIN_ACCESS_LOG' order by seq")).rows;
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     const payloads = rows.map((r2) => (typeof r2.record_json === 'string' ? JSON.parse(r2.record_json) : r2.record_json).payload);
-    expect(payloads.map((p) => p.requestId).sort()).toEqual(['admin-1', 'admin-2']);
-    expect(payloads.every((p) => p.retainUntil === '2028-11-23T12:00:00.000Z' || p.retainUntil === '2028-11-23T13:00:00.000Z')).toBe(true);
-    expect(payloads.some((p) => p.requestId === 'fan-1')).toBe(false);
+    expect(payloads.map((p) => p.requestId).sort()).toEqual(['kst-end', 'kst-mid', 'kst-start']);
+    expect(payloads.map((p) => p.retainUntil).sort()).toEqual(['2028-11-23T15:00:00.000Z', '2028-11-24T08:59:59.000Z', '2028-11-24T14:59:59.000Z']);
+    expect(payloads.some((p) => p.requestId === 'kst-before' || p.requestId === 'kst-after' || p.requestId === 'fan-1')).toBe(false);
+    const keys = rows.map((r2) => (typeof r2.record_json === 'string' ? JSON.parse(r2.record_json) : r2.record_json).eventKey as string);
+    expect(keys.every((k) => k.split(':')[2] === '2026-11-24')).toBe(true);
   });
 
   test('[ASVS v5.0.0-16.4.2] Object Lock 준수 모드 사본 버킷과 보존 머리를 받는다(모토는 삭제 거절을 흉내 내지 않아 그 부분은 미검증)', async () => {
