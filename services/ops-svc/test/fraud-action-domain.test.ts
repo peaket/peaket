@@ -64,11 +64,30 @@ describe('F-04-13 조치 도메인', () => {
         events: Object.freeze(c.events.map((e: any) => Object.freeze({ ...e }))),
       });
     const investigating = caseOf({ status: 'INVESTIGATING', members: [member(1), member(2)] });
+    const appealed = caseOf({ status: 'APPEAL_PENDING', members: [member(1)] });
     const objected = caseOf({ status: 'OBJECTED', members: [member(1, { objectionResult: 'SUBMITTED' })] });
-    expect(() => domain.clearanceCase({ case: freeze(investigating), nowMs: NOW, reason: '근거 없음', outcomeLabel: 'HUMAN' })).not.toThrow();
+    const actioned = caseOf({ status: 'ACTIONED', members: [member(1, { actionNotifiedAtMs: NOW - 10 * DAY })] });
+    const frozenInvestigating = freeze(investigating);
+    const cleared = domain.clearanceCase({ case: frozenInvestigating, nowMs: NOW, reason: '근거 없음', outcomeLabel: 'HUMAN' });
+    expect(cleared.next).not.toBe(frozenInvestigating);
     expect(() => domain.decideObjections({ case: freeze(objected), decisions: [{ accountId: id(1), decision: 'ACCEPTED', reason: '정상' }], nowMs: NOW, reversalComplete: false })).not.toThrow();
+    expect(() => domain.actionRequestDecision({
+      case: freeze(appealed),
+      nowMs: NOW,
+      action: 'CANCEL_TICKETS',
+      accountIds: [id(1)],
+      openApproval: false,
+      priorActionDone: false,
+      tickets: [{ ticketId: id(0x501), payerAccountId: id(1), holderAccountId: id(1), status: 'ISSUED', entryRecorded: false }],
+    })).not.toThrow();
+    expect(() => domain.receiveObjection({ case: freeze(actioned), accountId: id(1), party: 'PAYER', appealId: id(0x600), nowMs: NOW })).not.toThrow();
+    expect(() => domain.closeActionedCaseIfDue({ case: freeze(actioned), nowMs: NOW, openApproval: false })).not.toThrow();
+    const decision = Object.freeze({ action: 'RESTRICT', requesterId: id(0x400), approverId: id(0x401), role: 'commander', designations: [], recentlyRevoked: [], reason: '근거', viewedAtMs: NOW, requestedAccountIds: [id(1)], requestedTicketIds: [] });
+    expect(() => domain.approvalDecisionCheck(decision)).not.toThrow();
+    expect(() => domain.approvalExecutionGuard({ action: 'RESTRICT', nowMs: NOW, cancelDeadlineAtMs: CANCEL, status: 'PENDING_APPROVAL' })).not.toThrow();
     expect(investigating.status).toBe('INVESTIGATING');
     expect(objected.members[0]!.objectionResult).toBe('SUBMITTED');
+    expect(actioned.members[0]!.objectionResult).toBe('NONE');
     expect(investigating.version).toBe(1);
   });
 
@@ -94,6 +113,11 @@ describe('F-04-13 조치 도메인', () => {
     expect(problemOf(() => domain.approvalDecisionCheck({ ...base, designations: ['PSEUDONYM_HANDLER'] }))?.type).toBe('fraud-approver-ineligible');
     expect(problemOf(() => domain.approvalDecisionCheck({ ...base, recentlyRevoked: ['PSEUDONYM_HANDLER'] }))?.type).toBe('fraud-approver-ineligible');
     expect(domain.approvalDecisionCheck({ ...base, excludeAccountIds: [id(2)], excludeTicketIds: [id(0x502)] })).toEqual({ excludedAccounts: [id(2)], excludedTickets: [id(0x502)] });
+    expect(problemOf(() => domain.approvalDecisionCheck({ ...base, reason: '가'.repeat(1001) }))?.type).toBe('approval-reason-required');
+    expect(() => domain.approvalDecisionCheck({ ...base, reason: '가'.repeat(1000) })).not.toThrow();
+    expect(problemOf(() => domain.approvalDecisionCheck({ ...base, role: 'cs_lead' }))?.type).toBe('fraud-approver-ineligible');
+    expect(problemOf(() => domain.approvalDecisionCheck({ ...base, excludeTicketIds: [id(0x999)] }))?.type).toBe('approval-scope-invalid');
+    expect(problemOf(() => domain.approvalDecisionCheck({ ...base, excludeTicketIds: [id(0x501), id(0x502)] }))?.type).toBe('approval-scope-invalid');
   });
 
   test('FX-T12 65 [ASVS v5.0.0-2.1.3] 이의 창·취소 마감·이용 제한 1년은 같은 순간을 만료로 본다', () => {
@@ -103,9 +127,13 @@ describe('F-04-13 조치 도메인', () => {
     expect(domain.CANCEL_NOTICE_LEADS_MS).toEqual([12 * HOUR, 2 * HOUR]);
     const c = caseOf({ status: 'ACTIONED', members: [member(1, { actionNotifiedAtMs: NOW - 30 * DAY })] });
     expect(domain.receiveObjection({ case: c, accountId: id(1), party: 'PAYER', appealId: id(0x600), nowMs: NOW }).result).toBe('EXPIRED');
+    const before = caseOf({ status: 'ACTIONED', members: [member(1, { actionNotifiedAtMs: NOW - 30 * DAY + 1 })] });
+    expect(domain.receiveObjection({ case: before, accountId: id(1), party: 'PAYER', appealId: id(0x601), nowMs: NOW }).result).toBe('ACCEPTED');
     expect(problemOf(() => domain.approvalExecutionGuard({ action: 'CANCEL_TICKETS', nowMs: CANCEL, cancelDeadlineAtMs: CANCEL, status: 'PENDING_APPROVAL' }))?.type).toBe('cancel-deadline-passed');
     expect(problemOf(() => domain.approvalExecutionGuard({ action: 'CANCEL_TICKETS', nowMs: CANCEL - 1, cancelDeadlineAtMs: CANCEL, status: 'PENDING_APPROVAL' }))).toBeNull();
-    expect(problemOf(() => domain.actionRequestDecision({ case: c, nowMs: NOW, action: 'RESTRICT', accountIds: [id(1)], restrictionEndsAtMs: NOW + 365 * DAY + 1, openApproval: false, priorActionDone: true, tickets: [] }))?.type).toBe('restriction-too-long');
+    const restrictCase = caseOf({ status: 'APPEAL_PENDING', members: [member(1)] });
+    expect(problemOf(() => domain.actionRequestDecision({ case: restrictCase, nowMs: NOW, action: 'RESTRICT', accountIds: [id(1)], restrictionEndsAtMs: NOW + 365 * DAY + 1, openApproval: false, priorActionDone: true, tickets: [] }))?.type).toBe('restriction-too-long');
+    expect(() => domain.actionRequestDecision({ case: restrictCase, nowMs: NOW, action: 'RESTRICT', accountIds: [id(1)], restrictionEndsAtMs: NOW + 365 * DAY, openApproval: false, priorActionDone: true, tickets: [] })).not.toThrow();
   });
 
   test('FX-T12 66 [ASVS v5.0.0-2.1.2] C7·C8·C11·C12의 상태 전이는 표에 없는 전이를 409로 거절한다', () => {
@@ -114,6 +142,8 @@ describe('F-04-13 조치 도메인', () => {
     expect(problemOf(() => domain.clearanceCase({ case: caseOf({ status: 'ACTIONED' }), nowMs: NOW, reason: 'x', outcomeLabel: 'HUMAN' }))?.type).toBe('fraud-case-state');
     const objected = caseOf({ status: 'OBJECTED', members: [member(1, { objectionResult: 'SUBMITTED' })] });
     expect(problemOf(() => domain.decideObjections({ case: objected, decisions: [{ accountId: id(2), decision: 'ACCEPTED', reason: 'x' }], nowMs: NOW, reversalComplete: true }))?.type).toBe('objection-decision-invalid');
+    const notSubmitted = caseOf({ status: 'OBJECTED', members: [member(1, { objectionResult: 'NONE' })] });
+    expect(problemOf(() => domain.decideObjections({ case: notSubmitted, decisions: [{ accountId: id(1), decision: 'ACCEPTED', reason: 'x' }], nowMs: NOW, reversalComplete: true }))?.type).toBe('objection-decision-invalid');
     const closed = caseOf({ status: 'ACTIONED', members: [member(1, { actionNotifiedAtMs: NOW - 31 * DAY })] });
     expect(domain.closeActionedCaseIfDue({ case: closed, nowMs: NOW, openApproval: false }).close).toBe(true);
     expect(domain.closeActionedCaseIfDue({ case: closed, nowMs: NOW, openApproval: true }).close).toBe(false);
