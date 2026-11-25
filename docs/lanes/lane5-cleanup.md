@@ -86,3 +86,13 @@
 - 시험 리뷰 낮음: TR-12(포트원 쪽), TR-16(409 `recalculation-conflict`의 오류 이름), TR-17(나)(계좌 원문 로그 확인).
 - 흔들림 후보: purchase 단위 전체 실행에서 `grpc-payment-checkout.test.ts` PT26·PT27이 부하 때 실패하고 단독 56/56 통과(이 기능과 무관).
 - 운영 전: 실제 은행 이체 어댑터(계약 단계), 결제사 취소 한도가 승인 한도와 같은지(토큰 버킷 값, ADR-0069 결정 10 끝 줄).
+
+## F-07-9(2026-11-26, 시험 리뷰)
+
+리뷰 지적 번호는 `docs/review/plans/F-07-9.md` '시험 리뷰' 절의 것이다.
+
+- TR-08(중간): 파트너 20경로 목록이 `partner-pages.test.mjs`·`partner-mobile.spec.mjs`·`rules.mjs` 세 곳에 복사돼 있고, `/login`·`/invite`·`/unlock`(SCR-020)이 빠져 '전 화면'이 아니다. 목록은 라우트나 정본 한 곳에서 만들고, AC-01의 '설정 네 화면'과 목록 다섯 개도 맞춘다.
+- TR-09(중간): `REFLOW_PAGES`에 20개를 더해 PR reflow가 3엔진×320/640으로 약 180개를 더 돈다(계획 20×2). FE-T31 정본은 PR 주요 흐름·출시 후보 전 화면이라 범위를 나누고, `docs/frontend.md`에 이 범위 변경을 적는다. 767·1279·1280 경계, 터치 목표 44px, 768에서 판매 정책·상품 폼·주문 표가 남는지도 시험하지 않는다.
+- TR-10(낮음): `live-product-mobile.test.mjs`는 `ProductFormLive`만 보고 `ProductEditLive`의 로딩·오류·고치기와 768 폼 보임을 보지 않는다. `seller-notice.test.mjs`는 `'0.00%'`·1/100자 상호·줄바꿈/`<`/`&`를 보지 않고, `productSellerNotice`는 이 기능에서 쓰는 화면이 없다.
+- TR-11(낮음): 계획 §실패 확인의 '실행 16·11 실패'는 `seller-notice.test.mjs`가 모듈 없음으로 파일째 1건이 된 수다. 구현 뒤 전체는 261개(257 − 파일째 1 + 5)가 되므로 수를 정정한다.
+- TR-12(낮음): d5 §6.1 판매자 정보에는 새 '중개자 지위와 정산' 구획이 없다. `settlementDisclosure` ④⑤는 정본 인용이 아니라 요약이고, 빈 상호에서 `performanceSellerNotice`는 '판매자:'를 뺀다. d5/§2.2에 구획을 더하거나 요약임을 표시하고 빈 값은 '확인 필요'로 채운다.
