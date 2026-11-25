@@ -11,6 +11,7 @@ export { LogBlockListChange, LogVerdictRecorder, PromTrustSignals } from './adap
 export { RedisFeatureStore } from './adapters/redis-feature-store.js';
 export { RedisLabelStore } from './adapters/redis-label-store.js';
 export { RuleBook } from './adapters/rule-book.js';
+export { BOT_LEVEL_SETTING_KEY, bindBotLevelSetting, intensityOfBotLevel } from './adapters/control-settings-intensity.js';
 export { startRuleRefresh } from './adapters/rule-refresh.js';
 export { TURNSTILE_BREAKER, TurnstileHumanCheck, turnstileFromEnv } from './adapters/turnstile-human-check.js';
 export { trustLabelServiceHandlers, trustPackage, trustServiceHandlers } from './inbound/trust.grpc.js';

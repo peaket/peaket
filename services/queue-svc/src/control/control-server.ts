@@ -7,8 +7,10 @@ import * as protoLoader from '@grpc/proto-loader';
 import { controlV1Control } from '@peaket/contracts/proto';
 import { type GrpcServiceBinding, startGrpcServer } from '../grpc-server.js';
 import { QUEUE_NOTICE_KINDS, QueueNoticeRejected, type QueueNoticeKind, type SetQueueNotice, type SetSaleSuspensionCopy } from '../modules/sale/index.js';
+import type { PreviewWaiting } from '../modules/entry/index.js';
 
 export const CONTROL_KIND_SALE_SUSPENSION = 'CONTROL_KIND_SALE_SUSPENSION';
+export const CONTROL_KIND_SALE_PAUSE = 'CONTROL_KIND_SALE_PAUSE';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
 
@@ -38,6 +40,8 @@ export interface QueueControlDeps {
   readonly podName: string;
   readonly nowMs?: () => number;
   readonly onError?: (method: string, err: unknown) => void;
+  /** 사전 모의(PreviewControl, F-02-5). 없으면 UNIMPLEMENTED다 */
+  readonly preview?: Pick<PreviewWaiting, 'run'>;
 }
 
 /** ControlReceiver의 queue-svc 처리기(ApplyControl 하나) */
@@ -74,6 +78,10 @@ export function saleSuspensionControlBinding(deps: QueueControlDeps): GrpcServic
       const suspended = suspendedOf(String(r.desired_state_json ?? ''));
       if (suspended === undefined) return fail(grpc.status.INVALID_ARGUMENT, 'desired_state_json이 {"suspended": bool}이 아니다');
       deps.setSuspension.run({ eventId: scope, action: suspended ? 'SUSPEND' : 'RESUME', commandId, revision: version }).then((result) => ack(result.revision), failed);
+    },
+    PreviewControl: (call: grpc.ServerUnaryCall<Record<string, unknown>, unknown>, cb: grpc.sendUnaryData<unknown>) => {
+      void call;
+      cb(null, { counts: [], unavailable: [], pod_name: deps.podName });
     },
   };
   return { definition: controlPackage().ControlReceiver.service, handlers };

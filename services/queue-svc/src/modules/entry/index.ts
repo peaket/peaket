@@ -8,6 +8,7 @@ export { PromArrivalSignals } from './adapters/prom-arrival-signals.js';
 export type { ArrivalCookies, ArrivalSignals, EligibilityCheck, EligibilitySignals, FirstVisitCookies, FirstVisitSignals, LobbyWindow } from './domain/ports.js';
 export { MemoryEventSchedules } from './adapters/memory-entry-store.js';
 export { guard, keys, QUEUE_REDIS } from './adapters/redis-entry-store.js';
+export { QUEUE_PREVIEW_KEYS, PreviewWaiting, type QueueWaitingReader } from './application/preview-waiting.js';
 export { RedisEventSchedules } from './adapters/redis-event-schedules.js';
 export { candidateEligibilityLists, type EligibilityConfig, type EligibilityGate, eligibilityAt, type EventSchedule, keepUntilOf, PLATFORM_SCOPE, QueueStoreUnavailable, REASONS, saleEndOf, seatmapLayoutPathOf, SEGMENT_SIZE, segmentOf } from './domain/queue.js';
 export { unavailableRisk } from './adapters/unavailable-risk.js';

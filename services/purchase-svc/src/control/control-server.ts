@@ -9,6 +9,7 @@ import * as protoLoader from '@grpc/proto-loader';
 import { controlV1Control } from '@peaket/contracts/proto';
 import { grpcServerOptions } from '@peaket/platform';
 import type { SetSalePause, SetSaleSuspension } from '../modules/sale-control/index.js';
+import type { PreviewCounts } from '../modules/inventory/index.js';
 
 export const CONTROL_KIND_SALE_SUSPENSION = 'CONTROL_KIND_SALE_SUSPENSION';
 export const CONTROL_KIND_SALE_PAUSE = 'CONTROL_KIND_SALE_PAUSE';
@@ -40,6 +41,8 @@ export interface ControlDeps {
   readonly setPause?: SetSalePause;
   readonly podName: string;
   readonly nowMs?: () => number;
+  /** 사전 모의(PreviewControl). 없으면 UNIMPLEMENTED다(계획 8.3) */
+  readonly preview?: Pick<PreviewCounts, 'run'>;
 }
 
 const invalid = (message: string): Error => Object.assign(new Error(message), { code: grpc.status.INVALID_ARGUMENT });
@@ -96,6 +99,19 @@ export async function applyControl(req: ControlRequest, deps: ControlDeps): Prom
   return { appliedVersion: result.revision, podName: deps.podName, appliedAtMs: nowMs };
 }
 
+/** 사전 모의 요청 하나(읽기 전용). 명령 3 종류·소문자 회차·키 1~16개만 받는다 */
+export async function previewControl(
+  r: Record<string, unknown>,
+  deps: ControlDeps,
+): Promise<{ counts: readonly { key: string; value: number; source: string; measuredAtMs: number }[]; unavailable: readonly { key: string; reason: string }[]; podName: string }> {
+  const fail = (code: number, message: string): never => {
+    throw Object.assign(new Error(message), { code });
+  };
+  void fail;
+  void r;
+  return { counts: [], unavailable: [], podName: deps.podName };
+}
+
 // loadPackageDefinition은 서비스마다 클라이언트 생성자를 준다. 서버에는 그 생성자의 서비스 정의(.service)를 넘긴다(F-02-1에서 고침: 생성자를 넘기면 제어 포트를 열 때 던졌다)
 function controlPackage(): { ControlReceiver: { service: grpc.ServiceDefinition } } {
   const def = protoLoader.fromJSON(controlV1Control as Parameters<typeof protoLoader.fromJSON>[0], PROTO_LOAD_OPTIONS);
@@ -123,6 +139,17 @@ export async function startControlServer(o: { host: string; port: number; deps: 
             applied_at: { seconds: Math.floor(ack.appliedAtMs / 1000), nanos: (ack.appliedAtMs % 1000) * 1_000_000 },
           }),
         (err: unknown) => cb({ code: (err as { code?: number }).code ?? grpc.status.INTERNAL, message: err instanceof Error ? err.message : 'control-failed' }),
+      );
+    },
+    PreviewControl: (call: grpc.ServerUnaryCall<Record<string, unknown>, unknown>, cb: grpc.sendUnaryData<unknown>) => {
+      previewControl(call.request, o.deps).then(
+        (r) =>
+          cb(null, {
+            counts: r.counts.map((c) => ({ key: c.key, value: c.value, source: c.source, measured_at: { seconds: Math.floor(c.measuredAtMs / 1000), nanos: (c.measuredAtMs % 1000) * 1_000_000 } })),
+            unavailable: r.unavailable.map((u) => ({ key: u.key, reason: u.reason })),
+            pod_name: r.podName,
+          }),
+        (err: unknown) => cb({ code: (err as { code?: number }).code ?? grpc.status.INTERNAL, message: err instanceof Error ? err.message : 'preview-failed' }),
       );
     },
   };

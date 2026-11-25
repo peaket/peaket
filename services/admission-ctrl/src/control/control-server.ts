@@ -7,7 +7,7 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { controlV1Control } from '@peaket/contracts/proto';
 import { type GrpcLbProfile, type PlatformMetrics, startGrpcServer, type StartedGrpcServer } from '@peaket/platform';
-import { type ApplyLeaderControl, LEADER_CONTROL_KINDS, LeaderControlRejected, type LeaderControlKind } from '../modules/leader/index.js';
+import { type ApplyLeaderControl, LEADER_CONTROL_KINDS, LeaderControlRejected, type LeaderControlKind, type PreviewLeader } from '../modules/leader/index.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
@@ -20,6 +20,8 @@ export interface AdmissionControlDeps {
   readonly podName: string;
   readonly nowMs?: () => number;
   readonly onError?: (method: string, err: unknown) => void;
+  /** 사전 모의(PreviewControl). 없으면 UNIMPLEMENTED다(계획 8.3) */
+  readonly preview?: PreviewLeader;
 }
 
 /** 요청 하나를 처리한다. 거절은 grpc 상태 코드를 단 Error로 던진다 */
@@ -45,6 +47,19 @@ export async function applyAdmissionControl(r: Record<string, unknown>, deps: Ad
   return { appliedVersion: result.appliedVersion, podName: deps.podName, appliedAtMs: deps.nowMs?.() ?? Date.now() };
 }
 
+/** PreviewControl 요청 하나(읽기 전용). 리더가 아니면 UNAVAILABLE not-leader, 미조립이면 UNIMPLEMENTED */
+export async function previewAdmissionControl(
+  r: Record<string, unknown>,
+  deps: AdmissionControlDeps,
+): Promise<{ counts: readonly { key: string; value: number; source: string; measuredAtMs: number }[]; unavailable: readonly { key: string; reason: string }[]; podName: string }> {
+  const fail = (code: number, message: string): never => {
+    throw Object.assign(new Error(message), { code });
+  };
+  void fail;
+  void r;
+  return { counts: [], unavailable: [], podName: deps.podName };
+}
+
 function controlPackage(): { ControlReceiver: { service: grpc.ServiceDefinition } } {
   const def = protoLoader.fromJSON(controlV1Control as Parameters<typeof protoLoader.fromJSON>[0], PROTO_LOAD_OPTIONS);
   return (grpc.loadPackageDefinition(def) as unknown as { peaket: { control: { v1: { ControlReceiver: { service: grpc.ServiceDefinition } } } } }).peaket.control.v1;
@@ -65,6 +80,21 @@ export function startAdmissionControlServer(o: { host: string; port: number; dep
           const code = (err as { code?: number }).code ?? grpc.status.INTERNAL;
           if (code === grpc.status.INTERNAL) o.deps.onError?.('ApplyControl', err);
           cb({ code, message: err instanceof Error ? err.message : 'control-failed' });
+        },
+      );
+    },
+    PreviewControl: (call: grpc.ServerUnaryCall<Record<string, unknown>, unknown>, cb: grpc.sendUnaryData<unknown>) => {
+      previewAdmissionControl(call.request, o.deps).then(
+        (r) =>
+          cb(null, {
+            counts: r.counts.map((c) => ({ key: c.key, value: c.value, source: c.source, measured_at: { seconds: Math.floor(c.measuredAtMs / 1000), nanos: (c.measuredAtMs % 1000) * 1_000_000 } })),
+            unavailable: r.unavailable.map((u) => ({ key: u.key, reason: u.reason })),
+            pod_name: r.podName,
+          }),
+        (err: unknown) => {
+          const code = (err as { code?: number }).code ?? grpc.status.INTERNAL;
+          if (code === grpc.status.INTERNAL) o.deps.onError?.('PreviewControl', err);
+          cb({ code, message: err instanceof Error ? err.message : 'preview-failed' });
         },
       );
     },
