@@ -73,8 +73,16 @@ export function redisScript(source: string): RedisScript {
 /** 클라이언트 하나(단일 노드나 클러스터)를 감싼 최소 면. key는 클러스터가 노드를 고르는 데 쓴다. binary면 문자열 응답을 Buffer로 받는다 */
 export interface RawRedis {
   send(key: string | undefined, args: string[], binary?: boolean, pin?: boolean): Promise<unknown>;
+  /** 여러 명령을 한 번에 보낸다(파이프라인). 없으면 hotRedisOver가 pipeline을 만들지 않는다(시험 가짜) */
+  pipeline?(commands: readonly RedisPipelineCommand[]): Promise<readonly unknown[]>;
   close(): Promise<void>;
   destroy(): void;
+}
+
+/** 파이프라인에 넣는 명령 하나. key는 클러스터가 노드를 고르는 데 쓴다 */
+export interface RedisPipelineCommand {
+  readonly key: string;
+  readonly args: readonly string[];
 }
 
 export interface CallOptions {
@@ -96,6 +104,8 @@ export interface HotRedis extends RedisCommander {
   command(args: string[], o?: CallOptions): Promise<unknown>;
   /** EVALSHA로 보내고 서버에 스크립트가 없으면(NOSCRIPT) 같은 마감 안에서 EVAL한다. keys는 한 해시 슬롯이어야 한다 */
   evalScript(script: RedisScript, keys: string[], args: string[], o?: Omit<CallOptions, 'key'>): Promise<unknown>;
+  /** 여러 명령을 한 번에 보낸다(파이프라인). 키가 다르면 클러스터는 노드별로 나눠 보낸다. 시험 가짜에는 없을 수 있다 */
+  pipeline?(commands: readonly RedisPipelineCommand[], o?: { readonly deadlineMs?: number }): Promise<readonly unknown[]>;
   close(): Promise<void>;
 }
 
@@ -126,6 +136,18 @@ export function hotRedisOver(raw: RawRedis, o: { sleep?: (ms: number) => Promise
     }
   };
 
+  /** 파이프라인 한 번. 연결이 끊겨 소켓에 쓰지 못했으면 묶음 전체를 잠깐 뒤 한 번 더 보낸다 */
+  const pipelineOnce = async (commands: readonly RedisPipelineCommand[], expired: () => boolean): Promise<readonly unknown[]> => {
+    try {
+      return await raw.pipeline!(commands);
+    } catch (err) {
+      if (!(err instanceof ClientOfflineError) || expired()) throw err;
+      await sleep(RESEND_DELAY_MS);
+      if (expired()) throw err;
+      return raw.pipeline!(commands);
+    }
+  };
+
   const withDeadline = async <T>(ms: number, run: (expired: () => boolean) => Promise<T>): Promise<T> => {
     let timer: NodeJS.Timeout | undefined;
     let expired = false;
@@ -153,6 +175,12 @@ export function hotRedisOver(raw: RawRedis, o: { sleep?: (ms: number) => Promise
     command,
     // RedisCommander 호출(키를 따로 주지 않음)은 둘째 인자를 키로 본다. 키 명령은 '명령 키 …' 모양이라 클러스터가 노드를 고를 수 있다
     sendCommand: (args) => command(args, { key: args[1] }),
+    ...(raw.pipeline
+      ? {
+          pipeline: (commands: readonly RedisPipelineCommand[], c: { readonly deadlineMs?: number } = {}) =>
+            withDeadline(c.deadlineMs ?? REDIS_CALL_DEADLINE_MS, (expired) => pipelineOnce(commands, expired)),
+        }
+      : {}),
     evalScript: (s, keys, args, c = {}) =>
       withDeadline(c.deadlineMs ?? REDIS_CALL_DEADLINE_MS, async (expired) => {
         const tail = [String(keys.length), ...keys, ...args];
@@ -275,6 +303,30 @@ export async function createHotRedis(o: HotRedisOptions): Promise<HotRedis> {
         const node = await cluster.getNodeClientForKey(key);
         return node.sendCommand(args, { ...(binary ? BINARY : {}), timeout: REDIS_COMMAND_TIMEOUT_MS });
       },
+      // 클러스터는 노드별로 묶어 파이프라인을 보낸다(한 노드의 multi는 같은 슬롯만 받는다). 응답은 원래 차례로 돌려준다
+      pipeline: async (commands) => {
+        type NodeClient = Awaited<ReturnType<typeof cluster.getNodeClientForKey>>;
+        const groups = new Map<NodeClient, { index: number; args: readonly string[] }[]>();
+        for (let i = 0; i < commands.length; i++) {
+          const c = commands[i]!;
+          const node = await cluster.getNodeClientForKey(c.key);
+          const list = groups.get(node) ?? [];
+          list.push({ index: i, args: c.args });
+          groups.set(node, list);
+        }
+        const out = new Array<unknown>(commands.length);
+        await Promise.all(
+          [...groups.entries()].map(async ([node, list]) => {
+            const multi = node.multi();
+            for (const it of list) multi.sendCommand([...it.args]);
+            const replies = (await multi.execAsPipeline()) as unknown[];
+            list.forEach((it, i) => {
+              out[it.index] = replies[i];
+            });
+          }),
+        );
+        return out;
+      },
       close: () => cluster.close(),
       destroy: () => cluster.destroy(),
     };
@@ -291,6 +343,11 @@ export async function createHotRedis(o: HotRedisOptions): Promise<HotRedis> {
     client.on('error', () => {});
     raw = {
       send: (_key, args, binary) => client.sendCommand(args, binary ? BINARY : undefined),
+      pipeline: async (commands) => {
+        const multi = client.multi();
+        for (const c of commands) multi.sendCommand([...c.args]);
+        return (await multi.execAsPipeline()) as unknown[];
+      },
       close: () => client.close(),
       destroy: () => client.destroy(),
     };
