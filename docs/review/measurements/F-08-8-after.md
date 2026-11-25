@@ -137,6 +137,7 @@
 - **산출물**: `.cache/peaket-tools/demo-artifacts/2026-11-24T23-42-57-855Z-b45e84d7/`(SCR-001·SCR-007 실패 그림 2장). 실행 기록 `docs/review/measurements/play/BAT-086-demo-2026-11-24T23-42-57-855Z-b45e84d7.md`.
 - **정리**: `node tools/local/demo.mjs down`으로 `lane4-demo`를 지웠고, `lock.sh drop docker-all lane4-F-08`·`pause` 삭제를 했다.
 - **남은 위험**: Docker 빌드·시드·Playwright는 이제 지나가지만, 웹 홈의 500(`ApiError HTTP 404 about:blank`)과 대기실 SCR-007 본문 없음은 **제품/화면 쪽 문제**다. S1을 닫으려면 이 둘을 먼저 고쳐야 한다. 데모 S1은 여전히 fail이다.
+- **2026-11-25 라우팅 판정(고침)**: S1 SCR-007의 실제 URL은 `https://queue.peaket.example:18442/events/{eventId}`였는데, `demo-queue-room` HTTPRoute와 queue-room nginx가 `/queue/{id}`만 받아 **둘 다 404**였다(게이트웨이는 `gw-queue-not-found`의 `/.*`, nginx는 `location /`의 404). 라우트에 `^/events/[^/]+/?$`·로케일 events를, nginx rewrite에 `/events`·로케일 events를 더하고, `demo-queue-verify`가 `/events/{id}/verify`도 받게 넓혔다(`6df517fc1`). 새 무대에서 `/events/{id}`가 **200·셸 `main`**을 내는 것과 `demo-objects`·`demo`·`demo-images` 시험 **63 통과**를 확인했다. 지시대로 전체 S1은 다시 돌리지 않았다.
 
 ## 8. 1.3배 판단과 창 2
 
