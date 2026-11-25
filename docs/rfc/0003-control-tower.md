@@ -1,6 +1,6 @@
 # RFC 0003: 관제 — 데이터 경로와 떨어진 제어 평면, 5초 실시간 표, 2인 승인
 
-- **상태**: 초안(2026-11-12, BUILD_ORDER BAS-230, wbs 0.8.1). 규범이 아니다. 정본은 [docs/features/control-tower.md](../features/control-tower.md), [docs/observability.md](../observability.md) §3~§9, [docs/streaming.md](../streaming.md) §4, [docs/devops.md](../devops.md) §8이다.
+- **상태**: 초안(2026-11-12, BUILD_ORDER BAS-230, wbs 0.8.1), 정본 대조 2026-11-25. 규범이 아니다. 정본은 [docs/features/control-tower.md](../features/control-tower.md), [docs/observability.md](../observability.md) §3~§9, [docs/streaming.md](../streaming.md) §4, [docs/devops.md](../devops.md) §8이다. 관제 실시간 표의 측정 범위와 판정하지 못한 항목은 [docs/verification.md](../verification.md) §1.2·§1.3과 성능 장부([docs/perf-ledger.md](../perf-ledger.md))를 따른다.
 - **독자**: 관제 콘솔·ops-svc·제어 명령을 받는 서비스·관측 저장소를 구현하는 엔지니어, 온세일 운영자, 장애 대응을 검토하는 이해관계자.
 - **요약**: 관제 콘솔은 판매 데이터 경로와 다른 제어 평면이다. 운영자는 T-30분 점검, T=0 집중, 판매 중, 종료 후의 네 단계로 시스템 상태를 보고, 12개 운영 명령을 2인 승인과 감사 기록 아래 실행한다. 실시간 표는 Kafka → `ops-rt` → ClickHouse → ops-svc → SSE로 이어지고, 종단 p95 5초 미만을 목표로 한다. ops-svc가 죽어도 판매는 계속되고, 관제 자체의 상실은 SEV1로 알린다.
 
@@ -18,7 +18,7 @@
 | 실시간 표 신선도 | 종단 p95 5초 미만 | NFR-009 |
 | T-30분 점검 | 필수 항목 전부 통과해야 Go | docs/features/control-tower.md §2 |
 | 운영 명령 | 12개, 사유 필수·dry-run·ack·되돌리기 | FR-030, POL-021 |
-| 2인 승인 | 위험 명령은 요청자와 다른 commander | POL-021, ADR-0086 |
+| 2인 승인 | 위험 명령은 원칙적으로 요청자와 다른 commander가 승인한다. 판매 일시정지는 commander 1인이 실행하고 재개만 2인 승인한다 | POL-021, ADR-0086·0095 |
 | 감사 기록 | 불변 해시 체인, KMS 서명, 공개 앵커 | ADR-0053·0075·0102 |
 | 관제 자체 상실 | 준비 파드 0이 30초 [가정]면 SEV1 | docs/features/control-tower.md §5 |
 
@@ -59,12 +59,12 @@
 
 ## 5. 운영 명령과 감사
 
-- **명령 12개**: 동시 입장 목표, 입장 일시정지, 판매 일시정지(킬스위치), ASN·IP 차단, 봇 판정 강도, 대체 결제사 전환, 공지, 로그 레벨, 기능 플래그, 대기열 배포 전환, 자동화 정지, 회차 취소·환불. 세부는 [docs/features/control-tower.md](../features/control-tower.md) §3.
+- **명령 12개**: 동시 입장 목표 조정, 입장 일시정지, 판매 일시정지(킬스위치), ASN·IP 대역 차단, 봇 판정 강도 변경, Degraded Mode 전환(대체 결제사 전환 포함), 대기실 공지 배너, 로그 레벨 변경, 비핵심 기능 끄기, 부정거래 게시물 노출 차단, 자동화 정지 스위치, 결제사 지정. 세부는 [docs/features/control-tower.md](../features/control-tower.md) §3.
 - **공통**: 사유 필수, dry-run으로 예상 영향 범위 확인, 대상 서비스의 명시적 ack, 되돌리기, 불변 감사 기록.
 - **승인**: 위험 명령은 요청자와 다른 commander가 승인한다. 판매 일시정지는 1인 실행·2인 재개다(ADR-0095). 2인 승인은 `command_approval` 자식 표에 남긴다.
 - **감사 체인**: 명령 트랜잭션은 기록과 체인 행(`seq`, 기록 해시)만 쓰고 mac은 비운 채 커밋한다. 체인 작업자가 `seq` 순서대로 KMS mac을 채운다. mac이 빈 행이 1분 [가정]을 넘으면 SEV2다(ADR-0102).
 - **공개 앵커**: 매일 00:10과 온세일 윈도우 끝 뒤 10분 안에 [가정] RFC 9162 머클 체크포인트를 만들어 KMS로 서명하고 OpenTimestamps에 고정한다. 누구나 `audit-verify`로 확인한다(ADR-0075).
-- **설정형 명령**: 명령 5·7·8·9·12는 Kafka 설정 사건으로 퍼진다. 받는 파드가 적용한 판 번호를 `control_settings_applied_version{service,key}`로 내고, 30초 [가정] 안에 확인되지 않으면 SEV3다(ADR-0143).
+- **설정형 명령**: 명령 5·8·9·12와 purchase-svc 쪽 명령 7은 Kafka 설정 사건(`control.settings`)으로 퍼진다. queue-svc 쪽 명령 7과 명령 6의 대체 결제사 전환은 제어 gRPC로 보낸다. 받는 파드가 적용한 판 번호를 `control_settings_applied_version{service,key}`로 내고, 30초 [가정] 안에 확인되지 않으면 SEV3다(ADR-0143·0365·0366).
 
 ## 6. 안전 장치
 
@@ -109,4 +109,21 @@
 - [docs/observability.md](../observability.md) §3~§9
 - [docs/streaming.md](../streaming.md) §4
 - [docs/devops.md](../devops.md) §8
-- ADR-0049, ADR-0053, ADR-0067, ADR-0069, ADR-0073, ADR-0075, ADR-0078, ADR-0086, ADR-0095, ADR-0100, ADR-0102, ADR-0103, ADR-0143
+- ADR-0049, ADR-0053, ADR-0067, ADR-0069, ADR-0073, ADR-0075, ADR-0078, ADR-0086, ADR-0095, ADR-0100, ADR-0102, ADR-0103, ADR-0143, ADR-0340, ADR-0365, ADR-0366
+
+## 11. 정본 대조(2026-11-25)
+
+아래는 이 초안의 주장을 지금 정본과 대조한 기록이다. '같음'은 고치지 않았고, '바뀜'만 본문에 반영했다. 새 결정·새 숫자는 만들지 않았다.
+
+| 주장(절) | 정본 자리 | 같음/바뀜 | 고친 곳 |
+| --- | --- | --- | --- |
+| 관제 콘솔은 판매 데이터 경로와 다른 제어 평면이고, ops-svc가 죽어도 판매는 계속된다(요약·§1·§3) | docs/features/control-tower.md §1, docs/architecture.md §3.1, ADR-0102 | 같음 | — |
+| 실시간 표는 Kafka → `ops-rt` → ClickHouse `rt` → ops-svc → SSE, 종단 p95 5초 미만(NFR-009)(§1·§3) | docs/streaming.md §4, docs/observability.md §3, NFR-009 | 같음 | — |
+| 운영 명령 12개의 이름과 번호(§5) | docs/features/control-tower.md §3 | **바뀜**: 명령 6은 Degraded Mode 전환(대체 결제사 전환 포함), 9는 비핵심 기능 끄기, 10은 부정거래 게시물 노출 차단, 12는 결제사 지정이다. '회차 취소·환불'은 12개 카탈로그가 아니라 별도 승인 흐름이다 | §5 첫 bullet의 목록을 정본 §3의 이름으로 고쳤다 |
+| 위험 명령은 요청자와 다른 commander가 승인하는 2인 승인(§2·§5) | POL-021, ADR-0086·0095 | **보완**: 판매 일시정지는 commander 1인이 실행하고 재개만 2인 승인하는 예외가 있다 | §2 목표 표와 §5 승인 bullet에 예외를 적었다 |
+| 설정형 명령 5·7·8·9·12는 Kafka 설정 사건으로 퍼진다(§5) | docs/features/control-tower.md §5 '전달 경로' | **바뀜**: 명령 5·8·9·12와 purchase-svc 쪽 명령 7은 Kafka, queue-svc 쪽 명령 7과 명령 6의 대체 결제사 전환은 제어 gRPC다 | §5 설정형 명령 bullet을 전달 경로별로 나눠 고쳤다 |
+| 감사 체인은 커밋 뒤 작업자가 mac을 채우고, 빈 행 1분 [가정] 초과는 SEV2(§5) | docs/features/control-tower.md §7, ADR-0102 | 같음([가정] 표시) | — |
+| 공개 앵커는 매일 00:10과 온세일 윈도우 끝 뒤 10분 안 [가정], 게시 지연 6시간 [가정]은 SEV3(§5·§7) | docs/features/control-tower.md §7, ADR-0075 | 같음([가정] 표시) | — |
+| 준비된 ops-svc 파드 0이 30초 [가정]면 SEV1, SSE는 35초 [가정] 안에 재연결(§7) | docs/features/control-tower.md §5, §8; docs/observability.md §5 | 같음([가정] 표시) | — |
+| 명령 12개는 사유 필수·dry-run·ack·되돌리기·불변 감사 기록(§5) | docs/features/control-tower.md §3·§4, ADR-0340 | 같음. 첫 구현의 세부는 ADR-0340이다 | §10 참고에 ADR-0340을 더했다 |
+| 실시간 표의 측정 범위·Game Day는 아직 판정 전(§9 열린 질문) | docs/verification.md §1.2·§1.3, docs/review/plans/F-08-7.md | 같음(측정 전). 이번 F-08-7에서도 새 수치를 만들지 않는다 | — |

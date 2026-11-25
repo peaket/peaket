@@ -2,14 +2,14 @@
 
 - **독자와 용도**: PEAKET의 기술 방향을 개발자·운영자·이해관계자에게 설명하는 RFC(요청 의견서) 초안을 둔다. 구현 전에 큰 그림과 남는 한계를 같은 말로 맞추는 것이 목적이다.
 - **규범이 아니다**: 이 폴더의 글은 정본을 풀어 쓴 설명이다. 새 결정이나 새 숫자를 담지 않는다. 글과 정본이 다르면 정본이 맞고, 글을 고친다. 정본은 `docs/architecture.md`, `docs/verification.md`, `docs/features/`, `docs/observability.md`, `docs/streaming.md`, `docs/devops.md`다.
-- **상태**: 3건 모두 초안(2026-11-12, BUILD_ORDER BAS-230, wbs 0.8.1)이다. 밖에 게시하거나 이해관계자에게 공식 배포하는 일은 소유자 몫이다.
+- **상태**: 3건 모두 초안(2026-11-12, BUILD_ORDER BAS-230, wbs 0.8.1)이고, 2026-11-25에 지금 정본과 대조했다. 각 글 끝의 '정본 대조(2026-11-25)' 표가 주장별 정본 자리와 고친 곳을 남긴다. 밖에 게시하거나 이해관계자에게 공식 배포하는 일은 소유자 몫이다.
 - **파일 이름**: `NNNN-<주제>.md`. 번호는 초안 순서이고, 정본 문서 번호와 무관하다.
 
 | 번호 | 제목 | 상태 | 정본 | WBS |
 | --- | --- | --- | --- | --- |
-| 0001 | [온세일 핫패스](0001-onsale-hot-path.md) | 초안(2026-11-12) | docs/architecture.md §9.1·§9.2·§9.5, docs/features/queue-admission.md·seat-hold.md·payment.md, docs/verification.md §3 | 0.8.1 |
-| 0002 | [봇 방어](0002-bot-defense.md) | 초안(2026-11-12) | docs/features/bot-defense.md, docs/features/queue-admission.md §2·§3·§7, docs/features/analytics.md §13 | 0.8.1 |
-| 0003 | [관제](0003-control-tower.md) | 초안(2026-11-12) | docs/features/control-tower.md, docs/observability.md §3~§9, docs/streaming.md §4 | 0.8.1 |
+| 0001 | [온세일 핫패스](0001-onsale-hot-path.md) | 초안(2026-11-12), 정본 대조(2026-11-25) | docs/architecture.md §9.1·§9.2·§9.5, docs/features/queue-admission.md·seat-hold.md·payment.md, docs/verification.md §3 | 0.8.1 |
+| 0002 | [봇 방어](0002-bot-defense.md) | 초안(2026-11-12), 정본 대조(2026-11-25) | docs/features/bot-defense.md, docs/features/queue-admission.md §2·§3·§7, docs/features/analytics.md §13 | 0.8.1 |
+| 0003 | [관제](0003-control-tower.md) | 초안(2026-11-12), 정본 대조(2026-11-25) | docs/features/control-tower.md, docs/observability.md §3~§9, docs/streaming.md §4 | 0.8.1 |
 
 ## 쓰는 규칙
 

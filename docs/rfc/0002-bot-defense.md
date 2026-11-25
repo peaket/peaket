@@ -1,6 +1,6 @@
 # RFC 0002: 봇 방어 — 로비에서 미리 판정하고, 축소 운영에서도 대기열을 막지 않는다
 
-- **상태**: 초안(2026-11-12, BUILD_ORDER BAS-230, wbs 0.8.1). 규범이 아니다. 정본은 [docs/features/bot-defense.md](../features/bot-defense.md), [queue-admission.md](../features/queue-admission.md) §2·§3·§7, [docs/features/analytics.md](../features/analytics.md) §13, [docs/streaming.md](../streaming.md) §5·§11이다.
+- **상태**: 초안(2026-11-12, BUILD_ORDER BAS-230, wbs 0.8.1), 정본 대조 2026-11-25. 규범이 아니다. 정본은 [docs/features/bot-defense.md](../features/bot-defense.md), [queue-admission.md](../features/queue-admission.md) §2·§3·§7, [docs/features/analytics.md](../features/analytics.md) §13, [docs/streaming.md](../streaming.md) §5·§11이다. 봇 판정 통계의 측정 범위와 판정하지 못한 항목은 [docs/verification.md](../verification.md) §1.2·§1.3과 성능 장부([docs/perf-ledger.md](../perf-ledger.md))를 따른다.
 - **독자**: 대기열·신뢰·계정·분석을 구현하는 엔지니어, 운영자, 봇 대응 정책을 검토하는 이해관계자.
 - **요약**: PEAKET은 오픈 순간의 진입 경로에서 봇을 판정하지 않는다. 로비와 공연 상세의 사전 검증에서 미리 판정하고, T=0에는 이미 받은 토큰만 확인한다. 판정은 사람 확인·기기 이력·네트워크·행동 요약·일관성·공유 패턴의 여섯 점수기와 확정 신호(차단 기기 목록·허니팟)로 한다. trust-svc가 멈추면 통과시키지 않고, queue-svc가 캐시한 기기·IP 한도로 줄인다.
 
@@ -30,7 +30,7 @@
 
 ## 3. 판정 흐름
 
-1. **입력 정리**: 부르는 쪽(queue-svc·identity-svc)이 판정하는 때(`LOBBY_ENTRY`·`PREVERIFY`·`VERIFICATION`·`LOGIN`)와 기기 가명·IP·ASN·UA·Client Hints·최초 방문 쿠키 나이·세션 나이를 넘긴다.
+1. **입력 정리**: 부르는 쪽(queue-svc·identity-svc)이 판정하는 때(`LOBBY_ENTRY`·`PREVERIFY`·`VERIFICATION`·`LOGIN`)와 기기 가명·IP·ASN·UA·Client Hints·최초 방문 쿠키 나이·세션 나이를 넘긴다. 로비·사전 검증 판정에는 조사용 여정 ID(`journeyId`)도 함께 넘긴다(ADR-0171).
 2. **확정 신호**: 차단 기기 목록(`tr:block`)과 허니팟 적중(`tr:hp`)을 먼저 본다. 있으면 `CHALLENGE`다.
 3. **점수기**: 여섯을 모두 돌린다. `HumanCheck`는 여기서 한 번만 검증한다(토큰 수명 300초, 1회용).
 4. **가중합**: 비공개 설정의 강도·정렬 방식별 기준값과 견준다. 기준값 이상이면 `CHALLENGE`, 아니면 `ALLOW`다.
@@ -108,4 +108,21 @@
 - [docs/features/queue-admission.md](../features/queue-admission.md) §2·§3·§7
 - [docs/features/analytics.md](../features/analytics.md) §13
 - [docs/streaming.md](../streaming.md) §5·§11
-- ADR-0039, ADR-0065, ADR-0148, ADR-0151, ADR-0156, ADR-0161, ADR-0174, ADR-0248, ADR-0249, ADR-0251, ADR-0258, ADR-0259
+- ADR-0039, ADR-0065, ADR-0148, ADR-0151, ADR-0156, ADR-0161, ADR-0171, ADR-0174, ADR-0248, ADR-0249, ADR-0251, ADR-0258, ADR-0259
+
+## 12. 정본 대조(2026-11-25)
+
+아래는 이 초안의 주장을 지금 정본과 대조한 기록이다. '같음'은 고치지 않았고, '바뀜'만 본문에 반영했다. 새 결정·새 숫자는 만들지 않았다.
+
+| 주장(절) | 정본 자리 | 같음/바뀜 | 고친 곳 |
+| --- | --- | --- | --- |
+| 판정은 오픈 순간이 아니라 로비·사전 검증에서 미리 하고, T=0에는 토큰만 확인(요약·§1·§2) | docs/features/bot-defense.md §3.1, ADR-0156 | 같음 | — |
+| 판정하는 때 넷(`LOBBY_ENTRY`·`PREVERIFY`·`VERIFICATION`·`LOGIN`)과 입력(기기 가명·IP·ASN·UA·Client Hints·최초 방문 쿠키 나이·세션 나이)(§3) | docs/features/bot-defense.md §3.1 | **보완**: 로비·사전 검증 판정은 조사용 여정 ID(`journeyId`)도 넘긴다 | §3 1번에 여정 ID 문장을 더하고 ADR-0171을 가리켰다 |
+| 점수기 여섯과 확정 신호(차단 기기 목록·허니팟)(§3·§4) | docs/features/bot-defense.md §4.1~§4.5, ADR-0156 | 같음 | — |
+| 사람 확인은 로비에서 한 번만 검증하고 토큰 수명은 300초·1회용(§3) | docs/features/bot-defense.md §6 | 같음 | — |
+| trust-svc가 멈춰도 대기열 진입을 막지 않고 queue-svc의 캐시 한도로 줄인다(§2·§6) | docs/features/bot-defense.md §11.1~§11.3 | 같음(두 층 축소 운영) | — |
+| 축소 운영 한도는 기기·pid 10초 5회 [가정], 호스팅·프록시 IP 같은 한도(§6) | docs/features/bot-defense.md §11.2 | 같음([가정] 표시) | — |
+| 서킷 브레이커는 10초 창 20건·실패 50%·5초 시험 호출 [가정](§6) | docs/features/bot-defense.md §11.3 | 같음([가정] 표시) | — |
+| 이의 제기는 추가 검증 화면의 `appeal`로 받아 CS 처리함 `VERIFICATION_APPEAL`로 보낸다(§5) | docs/features/bot-defense.md §12, queue-admission §7 | 같음 | — |
+| 사람 오탐 상한 0.5% 이하는 출시 뒤 확인(§2·§7) | docs/features/bot-defense.md §13, NFR-022 | 같음(출시 뒤 확인) | — |
+| 봇 평가 통계·Q-T57·Q-T58은 아직 측정 전(§8 열린 질문) | docs/features/bot-defense.md §13, docs/verification.md §9 | 같음(측정 전). 이번 F-08-7에서도 수치를 새로 만들지 않는다 | — |

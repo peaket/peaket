@@ -1,6 +1,6 @@
 # RFC 0001: 온세일 핫패스 — 100만 대기, 20만 진입 RPS, 5만 석을 한 흐름으로
 
-- **상태**: 초안(2026-11-12, BUILD_ORDER BAS-230, wbs 0.8.1). 규범이 아니다. 정본은 [docs/architecture.md](../architecture.md) §9.1·§9.2·§9.5, [docs/features/queue-admission.md](../features/queue-admission.md), [seat-hold.md](../features/seat-hold.md), [payment.md](../features/payment.md), [docs/verification.md](../verification.md) §3이다.
+- **상태**: 초안(2026-11-12, BUILD_ORDER BAS-230, wbs 0.8.1), 정본 대조 2026-11-25. 규범이 아니다. 정본은 [docs/architecture.md](../architecture.md) §9.1·§9.2·§9.5, [docs/features/queue-admission.md](../features/queue-admission.md), [seat-hold.md](../features/seat-hold.md), [payment.md](../features/payment.md), [docs/verification.md](../verification.md) §3이다. 측정 범위와 판정하지 못한 항목은 [docs/verification.md](../verification.md) §1.2·§1.3과 성능 장부([docs/perf-ledger.md](../perf-ledger.md))를 따른다.
 - **독자**: 대기열·구매·결제·플랫폼을 구현하는 엔지니어, 운영자, 기술 방향을 검토하는 이해관계자.
 - **요약**: PEAKET은 오픈 순간의 읽기 폭주와 좌석 쓰기 경합을 같은 데이터베이스로 받지 않는다. 대기 상태는 CDN의 정적 파일로, 진입 순번은 Redis의 원자 연산으로, 좌석 홀드는 Redis Lua와 PostgreSQL의 판매 확정으로, 결제는 멱등 접수와 Outbox로 나눈다. 목표는 100만 명 대기, T=0 진입 20만 RPS, 5만 석, 결제 피크 300 TPS다.
 
@@ -43,9 +43,9 @@
 ### 3.2 좌석 홀드와 판매
 
 - **홀드**: 5만 석 비트맵과 1인 매수 한도를 Redis Lua 하나로 원자 처리한다. 여러 좌석은 좌석 ID 순으로 잡아 DB 잠금 순서를 맞춘다. 경합 패배는 409로 정상 분기 처리하고 오류율에 넣지 않는다(NFR-003).
-- **만료·연장**: 홀드 TTL과 최대 체류를 두고, 만료는 서버가 회수한다. 만료 직전 1분 경고와 1회 연장을 준다.
+- **만료·연장**: 홀드 TTL과 최대 체류를 두고, 만료는 서버가 회수한다. 만료 직전 경고와 정해진 횟수의 연장(횟수·길이는 [docs/features/seat-hold.md](../features/seat-hold.md) §5)을 준다.
 - **판매 확정**: 홀드가 끝나면 PostgreSQL이 PENDING 행을 좌석 ID 순으로 잠그고 SOLD로 바꾼다. Redis와 DB의 상태가 다르면 DB가 최종 판정이다.
-- **실시간 전파**: 접속한 5,000명에게 100ms 주기로 구독 구역의 바이너리 델타만 보낸다. 전체 좌석 JSON을 모두에게 보내지 않는다(ADR-0063·0110).
+- **실시간 전파**: 접속한 5,000명에게 100ms 주기로 구독 구역의 바이너리 델타만 보낸다. 전체 좌석 JSON을 모두에게 보내지 않는다(ADR-0063·0079·0110).
 
 ### 3.3 결제와 발권
 
@@ -116,4 +116,19 @@
 - [docs/architecture.md](../architecture.md) §9.1·§9.2·§9.5
 - [docs/features/queue-admission.md](../features/queue-admission.md), [seat-hold.md](../features/seat-hold.md), [payment.md](../features/payment.md)
 - [docs/verification.md](../verification.md) §3, [docs/observability.md](../observability.md) §3·§4
-- ADR-0003, ADR-0015, ADR-0036, ADR-0044, ADR-0057, ADR-0058, ADR-0063, ADR-0065, ADR-0069, ADR-0106, ADR-0110, ADR-0116, ADR-0121, ADR-0140, ADR-0179
+- ADR-0003, ADR-0015, ADR-0036, ADR-0044, ADR-0057, ADR-0058, ADR-0063, ADR-0065, ADR-0069, ADR-0079, ADR-0106, ADR-0110, ADR-0116, ADR-0121, ADR-0140, ADR-0179
+
+## 10. 정본 대조(2026-11-25)
+
+아래는 이 초안의 주장을 지금 정본과 대조한 기록이다. '같음'은 고치지 않았고, '바뀜'만 본문에 반영했다. 새 결정·새 숫자는 만들지 않았다.
+
+| 주장(절) | 정본 자리 | 같음/바뀜 | 고친 곳 |
+| --- | --- | --- | --- |
+| 100만 대기, T=0 진입 20만 RPS, 5만 석, 동시 좌석 선택 5,000명(제목·§2) | docs/architecture.md §9.1, docs/planning/02-requirements.md NFR-001 | 같음(설계 목표) | — |
+| 결제 300 TPS·포트원 채널 초당 50건은 계약 전 추정(§2·§4) | docs/features/payment.md §2.1·§2.2, ADR-0036·0044 | 같음(추정 표시) | — |
+| 진입 API `POST /v1/queues/{eventId}/entries`·`/admission`, 결제 접수 `POST /v1/orders/{orderId}/payment-acceptance`(§3) | docs/api/openapi.yaml | 같음 | — |
+| 홀드 만료 직전 1분 경고와 **1회** 연장(§3.2) | docs/features/seat-hold.md §5 | **바뀜**: 연장은 정해진 횟수(정본 §5)이고 1회가 아니다 | §3.2 문장을 '정해진 횟수의 연장'으로 고치고 정본 절을 가리켰다 |
+| 실시간 좌석 전파의 근거 ADR-0063·0110(§3.2) | docs/features/seat-hold.md §9, ADR-0079 결정 10 | **보완**: WebSocket 인증·구독 계약은 ADR-0079가 정본이다 | §3.2·§9 참고에 ADR-0079를 더했다 |
+| 100만 명 전 구간을 실측하지 않고 PC·소규모 측정과 설계 식으로 외삽(§2 비목표·§8) | docs/verification.md §1.2, ADR-0057 | 같음. 측정 범위·판정하지 못한 항목은 정본 §1.2·§1.3과 성능 장부를 따른다 | 상태 줄에 측정 범위를 가리키는 문장을 더했다 |
+| 30만 RPS 공연 페이지 피크의 30%·2회·5건은 [가정](§8) | docs/architecture.md §9.1 '페이지당 호출 수' | 같음([가정] 표시) | — |
+| 토스 300 TPS·포트원 50/s는 계약 전 추정(§8) | ADR-0036·0044, docs/features/payment.md §2.2 | 같음 | — |
