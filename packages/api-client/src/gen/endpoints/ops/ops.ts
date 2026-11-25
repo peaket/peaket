@@ -87,6 +87,7 @@ import type {
   ComplianceNoticePage,
   CreateOpsApprovalRequestRejectionBody,
   CreateOpsApprovalRequestWithdrawalBody,
+  CreateOpsArtist201,
   CreateOpsArtistBody,
   CreateOpsAuditCheckpointBody,
   CreateOpsCaseVerificationAppealDecisionBody,
@@ -110,6 +111,7 @@ import type {
   CreateOpsHomeLayoutBannerImageBody,
   CreateOpsPayoutBatchBody,
   CreateOpsPayoutBatchPortoneExecutionBody,
+  CreateOpsPlace201,
   CreateOpsPlaceBody,
   CreateOpsReceivableGuaranteeCollectionBody,
   CreateOpsSaleReviewApprovalBody,
@@ -10176,7 +10178,7 @@ export const getCreateOpsSaleReviewApprovalUrl = (productionId: string,) => {
 }
 
 /**
- * FR-052, POL-037. 공연 단위로 승인하고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). BAT-617 화면은 등록된 공연장을 확인하고 회차별 규모를 정해 승인한다. 아티스트·다른 이름 연결과 새 아티스트·공연장 만들기는 LCH-080 잔여이며 이 본문에 넣지 않는다(2026-11-22 BAT-617). 회차에 결제사 지정이 없으면 그때의 플랫폼 기본값을 지정으로 저장한다(POL-036). 승인 쓰기 전에 payment 등록 읽기로 켜진 결제사의 조건을 보고, 참이면 payment에 판매자 확인을 쓴 뒤 승인한다(ADR-0370 결정 4). 회차마다 공연 규모를 정하고, LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격을 검사한다. 오픈 시각 검사는 다른 승인과 같은 잠금으로 직렬화한다(POL-030, 추천 적용 2026-10-14, ADR-0062). 확인 패널은 수요 예측(demand-forecast)의 예상 진입 인원과 제안 등급을 보이고 운영자가 정한다. 승인 뒤 규모 바꾸기는 scale-changes(올리기만, 추천 적용 2026-10-21, ADR-0078). 승인 커밋 뒤 비취소 회차마다 시작 시각 오름차순으로 purchase-svc 내부 판매 열기(POST /internal/v1/events/{eventId}/sale-open)를 부르고, 성공한 회차만 대기열 q:cfg·q:epoch를 쓴다. 열기나 사본 쓰기가 실패해도 승인은 200으로 남고 정비 일 sale-config-publish가 다시 시도한다(BAT-616, ADR-0327)
+ * FR-052, POL-037. 공연 단위로 승인하고 그 공연의 회차를 모두 함께 판정한다(추천 적용 2026-10-27, ADR-0093). BAT-617 화면은 등록된 공연장을 확인하고 회차별 규모를 정해 승인한다. 아티스트 연결은 artists, 새 공연장 연결은 placeId로 한다(2026-11-24 F-07-3). 다른 이름 고치기는 LCH-080 잔여다. 회차에 결제사 지정이 없으면 그때의 플랫폼 기본값을 지정으로 저장한다(POL-036). 승인 쓰기 전에 payment 등록 읽기로 켜진 결제사의 조건을 보고, 참이면 payment에 판매자 확인을 쓴 뒤 승인한다(ADR-0370 결정 4). 회차마다 공연 규모를 정하고, LARGE면 다른 LARGE 공연의 회차와 오픈 30분 간격을 검사한다. 오픈 시각 검사는 다른 승인과 같은 잠금으로 직렬화한다(POL-030, 추천 적용 2026-10-14, ADR-0062). 확인 패널은 수요 예측(demand-forecast)의 예상 진입 인원과 제안 등급을 보이고 운영자가 정한다. 승인 뒤 규모 바꾸기는 scale-changes(올리기만, 추천 적용 2026-10-21, ADR-0078). 승인 커밋 뒤 비취소 회차마다 시작 시각 오름차순으로 purchase-svc 내부 판매 열기(POST /internal/v1/events/{eventId}/sale-open)를 부르고, 성공한 회차만 대기열 q:cfg·q:epoch를 쓴다. 열기나 사본 쓰기가 실패해도 승인은 200으로 남고 정비 일 sale-config-publish가 다시 시도한다(BAT-616, ADR-0327)
  * @summary 판매 승인(operator). 판매 조건은 고치지 않음
  */
 export const createOpsSaleReviewApproval = async (productionId: string,
@@ -10486,7 +10488,7 @@ export function useListOpsArtists<TData = Awaited<ReturnType<typeof listOpsArtis
 
 
 export type createOpsArtistResponse201 = {
-  data: void
+  data: CreateOpsArtist201
   status: 201
 }
 
@@ -10825,7 +10827,7 @@ export function useListOpsPlaces<TData = Awaited<ReturnType<typeof listOpsPlaces
 
 
 export type createOpsPlaceResponse201 = {
-  data: void
+  data: CreateOpsPlace201
   status: 201
 }
 

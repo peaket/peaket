@@ -129,13 +129,14 @@ export function mapPayout(raw: Record<string, unknown>): Pick<SaleReviewDetail, 
     a && typeof a.bankCode === 'string' && typeof a.last4 === 'string'
       ? { bankCode: a.bankCode, last4: a.last4, holderVerified: a.holderVerified === true, holdUntil: typeof a.holdUntil === 'string' ? a.holdUntil : null }
       : null;
-  const sellers = Array.isArray(g?.tossSellers)
-    ? (g.tossSellers as unknown[]).flatMap((x) => {
-        const s = x as Record<string, unknown>;
-        if ((s.pgStore !== 'STANDARD' && s.pgStore !== 'ESCROW') || typeof s.status !== 'string') return [];
-        return [{ pgStore: s.pgStore, status: s.status }];
-      })
-    : [];
+  const sellers: PgRegistration['tossSellers'] = [];
+  if (Array.isArray(g?.tossSellers)) {
+    for (const x of g.tossSellers as unknown[]) {
+      const s = x as Record<string, unknown>;
+      if ((s.pgStore !== 'STANDARD' && s.pgStore !== 'ESCROW') || typeof s.status !== 'string') continue;
+      sellers.push({ pgStore: s.pgStore, status: s.status });
+    }
+  }
   const pgRegistration =
     g === null || g === undefined
       ? null

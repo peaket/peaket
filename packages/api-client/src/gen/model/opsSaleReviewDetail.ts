@@ -11,6 +11,7 @@
  */
 import type { OpsPayoutAccountSummary } from './opsPayoutAccountSummary';
 import type { OpsPgRegistration } from './opsPgRegistration';
+import type { OpsSaleReviewArtist } from './opsSaleReviewArtist';
 import type { OpsSaleReviewDetailSalePolicyItem } from './opsSaleReviewDetailSalePolicyItem';
 import type { OpsSaleReviewDetailStatus } from './opsSaleReviewDetailStatus';
 import type { OpsSaleReviewEvent } from './opsSaleReviewEvent';
@@ -35,8 +36,10 @@ export interface OpsSaleReviewDetail {
      * @nullable
      */
   placeName?: string | null;
-  /** 등록하지 않은 새 공연장 요청인지(운영자 연결은 LCH-080 잔여) */
+  /** 등록하지 않은 새 공연장 요청인지. 승인 본문 placeId로 잇는다 */
   requestedPlace?: boolean;
+  /** 등록된 아티스트와 파트너가 요청한 새 이름을 보이는 순서대로 합친 목록(LCH-080 잔여). 승인 본문 artists로 요청 이름을 잇는다 */
+  artists?: OpsSaleReviewArtist[];
   /**
      * 파트너가 휠체어석 확인을 했는지
      * @nullable

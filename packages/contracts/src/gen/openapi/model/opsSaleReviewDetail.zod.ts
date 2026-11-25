@@ -19,7 +19,11 @@ export const OpsSaleReviewDetail = zod.object({
   "status": zod.enum(['SUBMITTED', 'APPROVED', 'REJECTED', 'SUSPENDED']).optional(),
   "placeId": zod.uuid().nullish().describe('등록된 공연장. 새 공연장 요청이면 null'),
   "placeName": zod.string().nullish().describe('등록된 공연장 이름. 새 공연장 요청이면 요청한 이름'),
-  "requestedPlace": zod.boolean().optional().describe('등록하지 않은 새 공연장 요청인지(운영자 연결은 LCH-080 잔여)'),
+  "requestedPlace": zod.boolean().optional().describe('등록하지 않은 새 공연장 요청인지. 승인 본문 placeId로 잇는다'),
+  "artists": zod.array(zod.object({
+  "artistId": zod.uuid().nullable().describe('등록된 아티스트 ID. 새 이름 요청이면 null'),
+  "name": zod.string().describe('보이는 이름(등록 이름 또는 파트너가 적은 새 이름)')
+}).describe('판매 승인 확인 패널의 아티스트 한 줄(SCR-048, LCH-080 잔여). 등록된 아티스트는 artistId가 있고, 파트너가 새 이름으로 요청한 아티스트는 artistId가 null이다(운영자가 승인 때 잇는다, ADR-0093 결정 4·ADR-0198 결정 4)')).optional().describe('등록된 아티스트와 파트너가 요청한 새 이름을 보이는 순서대로 합친 목록(LCH-080 잔여). 승인 본문 artists로 요청 이름을 잇는다'),
   "accessibleSeatingCheck": zod.boolean().nullish().describe('파트너가 휠체어석 확인을 했는지'),
   "reapproval": zod.boolean().optional().describe('승인 이력이 있는 공연의 변경 재승인인지'),
   "submittedAt": zod.iso.datetime({"offset":true}).nullish(),

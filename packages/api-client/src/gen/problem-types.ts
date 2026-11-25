@@ -325,11 +325,13 @@ export type ProblemType =
   | 'sale-paused'
   | 'sale-policy-denied'
   | 'sale-policy-invalid'
+  | 'sale-review-artists-missing'
   | 'sale-review-list-missing'
   | 'sale-review-not-approved'
   | 'sale-review-not-cancellable'
   | 'sale-review-not-submitted'
   | 'sale-review-payout-registration-incomplete'
+  | 'sale-review-place-missing'
   | 'sale-review-request-invalid'
   | 'sale-review-scales-missing'
   | 'sale-setting-locked'
@@ -735,11 +737,13 @@ export const PROBLEM_TYPES = {
   'sale-paused': { status: 423, title: "판매가 잠시 멈췄습니다" },
   'sale-policy-denied': { status: 403, title: "판매 정책에 따라 지금은 예매할 수 없습니다" },
   'sale-policy-invalid': { status: 422, title: "판매 정책 규칙에 고칠 곳이 있습니다" },
+  'sale-review-artists-missing': { status: 422, title: "새 이름 아티스트마다 연결할 아티스트를 골라 주세요" },
   'sale-review-list-missing': { status: 422, title: "판매 정책이 쓰는 명단이 없습니다" },
   'sale-review-not-approved': { status: 409, title: "판매 승인된 공연만 회차 설정을 쓸 수 있습니다" },
   'sale-review-not-cancellable': { status: 409, title: "거둘 판매 승인 변경 요청이 없습니다" },
   'sale-review-not-submitted': { status: 409, title: "판매 승인 대기 중인 공연이 아닙니다" },
   'sale-review-payout-registration-incomplete': { status: 409, title: "지급대행 등록이 끝나지 않아 승인할 수 없습니다" },
+  'sale-review-place-missing': { status: 422, title: "새 공연장 요청은 연결할 공연장을 골라 주세요" },
   'sale-review-request-invalid': { status: 422, title: "판매 승인 요청을 받을 수 없습니다" },
   'sale-review-scales-missing': { status: 422, title: "모든 회차의 공연 규모를 정해 주세요" },
   'sale-setting-locked': { status: 409, title: "지금은 바꿀 수 없는 항목입니다" },

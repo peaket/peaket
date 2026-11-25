@@ -15,5 +15,8 @@ GRANT SELECT ON search_alias TO core_ops;
 -- 승인은 이미 등록된 아티스트 행을 그대로 두고, 새 이름 요청분만 더한다.
 GRANT SELECT, INSERT ON production_artist TO core_ops;
 --> statement-breakpoint
+-- 파트너 판매 승인 요청·변경 취소의 readState가 등록 아티스트를 함께 읽는다(0004는 INSERT만 열었다).
+GRANT SELECT ON production_artist TO core_partner;
+--> statement-breakpoint
 -- 승인 저장소가 requested_artists를 비운다(place_id·requested_place는 0012에 있다).
 GRANT UPDATE (requested_artists) ON production TO core_ops;

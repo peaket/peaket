@@ -10,17 +10,19 @@ import { useChosenRole, usePreviewHost } from '@/features/preview-host';
 import { ensureConsoleApi } from '@/shared/api';
 import { Overlay } from '@/shared/ui/Overlay';
 import {
-  approvalBody,
   canAct,
   canRead,
   formatKst,
   initialScales,
+  linkageBody,
   mapSaleReviewDetail,
   mapSaleReviewList,
   saleReviewProblem,
   statusLabel,
   validateApproval,
+  validateLinkage,
   validateRejection,
+  type ResolvedLinkage,
   type SaleReviewDetail,
   type SaleReviewPage,
   type SaleReviewStatus,
@@ -58,10 +60,22 @@ export function ConnectedPage() {
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<'approve' | 'reject' | null>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
+  /** 운영자가 고른 연결 값(요청 아티스트 이름 → ID, 공연장 ID) */
+  const [resolved, setResolved] = useState<ResolvedLinkage>({ artists: {}, placeId: null });
+  const [artistQuery, setArtistQuery] = useState<Record<string, string>>({});
+  const [artistItems, setArtistItems] = useState<Record<string, { artistId: string; name: string }[]>>({});
+  const [createArtistFor, setCreateArtistFor] = useState<string | null>(null);
+  const [createArtistReason, setCreateArtistReason] = useState('');
+  const [placeQuery, setPlaceQuery] = useState('');
+  const [placeItems, setPlaceItems] = useState<{ placeId: string; name: string; address: string }[]>([]);
+  const [createPlaceOpen, setCreatePlaceOpen] = useState(false);
+  const [newPlace, setNewPlace] = useState({ name: '', address: '', region: '', reason: '' });
 
   const write = canAct(chosen);
   const read = canRead(chosen);
-  const approvalIssues = useMemo(() => (detail ? validateApproval(detail, scales) : ['공연을 고르세요']), [detail, scales]);
+  const approvalIssues = useMemo(() => (detail ? [...validateApproval(detail, scales), ...validateLinkage(detail, resolved)] : ['공연을 고르세요']), [detail, scales, resolved]);
+  const selectedPlaceName = placeItems.find((p) => p.placeId === resolved.placeId)?.name ?? null;
+  const isCs = chosen === 'cs_agent' || chosen === 'cs_lead';
   const rejectionIssue = validateRejection(reason);
 
   usePreviewHost(
@@ -91,6 +105,7 @@ export function ConnectedPage() {
         const mapped = mapSaleReviewDetail(detailResponse.data as unknown as Record<string, unknown>);
         setDetail(mapped);
         setScales(initialScales(mapped.events));
+        setResolved({ artists: {}, placeId: mapped.placeId });
       } else {
         setDetail(null);
       }
@@ -119,6 +134,87 @@ export function ConnectedPage() {
     setSp(q, { replace: true });
   };
 
+  const searchArtists = async (name: string) => {
+    const q = (artistQuery[name] ?? name).trim();
+    if (q === '') return;
+    try {
+      const [{ listOpsArtists }] = await Promise.all([import('@peaket/api-client/endpoints/ops')]);
+      const r = await listOpsArtists({ q, limit: 20 });
+      setArtistItems((prev) => ({
+        ...prev,
+        [name]: (r.data.items ?? []).flatMap((a) =>
+          typeof a.artistId === 'string' && typeof a.name === 'string' ? [{ artistId: a.artistId, name: a.name }] : [],
+        ),
+      }));
+    } catch (e) {
+      setNotice({ tone: 'bad', text: saleReviewProblem(e).message });
+    }
+  };
+
+  const chooseArtist = (name: string, artistId: string) => {
+    setResolved((prev) => ({ ...prev, artists: { ...prev.artists, [name]: artistId } }));
+  };
+
+  const createArtist = async () => {
+    if (createArtistFor === null) return;
+    const reason = createArtistReason.trim();
+    if (reason === '') {
+      setNotice({ tone: 'bad', text: '새로 만들 사유를 적어 주세요.' });
+      return;
+    }
+    try {
+      const [{ createOpsArtist }] = await Promise.all([import('@peaket/api-client/endpoints/ops')]);
+      const r = await createOpsArtist({ name: createArtistFor, reason });
+      const created = { artistId: r.data.artistId, name: createArtistFor };
+      setArtistItems((prev) => ({ ...prev, [createArtistFor]: [created, ...(prev[createArtistFor] ?? [])] }));
+      chooseArtist(createArtistFor, created.artistId);
+      setCreateArtistFor(null);
+      setCreateArtistReason('');
+      setNotice({ tone: 'ok', text: `아티스트 '${created.name}'를 만들고 연결했습니다.` });
+    } catch (e) {
+      setNotice({ tone: 'bad', text: saleReviewProblem(e).message });
+    }
+  };
+
+  const searchPlaces = async () => {
+    const q = placeQuery.trim() || (detail?.placeName ?? '');
+    if (q === '') return;
+    try {
+      const [{ listOpsPlaces }] = await Promise.all([import('@peaket/api-client/endpoints/ops')]);
+      const r = await listOpsPlaces({ q, limit: 20 });
+      setPlaceItems((r.data.items ?? []).flatMap((p) =>
+        typeof p.placeId === 'string' && typeof p.name === 'string' && typeof p.address === 'string'
+          ? [{ placeId: p.placeId, name: p.name, address: p.address }]
+          : [],
+      ));
+    } catch (e) {
+      setNotice({ tone: 'bad', text: saleReviewProblem(e).message });
+    }
+  };
+
+  const createPlace = async () => {
+    const name = newPlace.name.trim();
+    const address = newPlace.address.trim();
+    const region = newPlace.region.trim();
+    const reason = newPlace.reason.trim();
+    if (name === '' || address === '' || region === '' || reason === '') {
+      setNotice({ tone: 'bad', text: '공연장 이름·주소·지역·사유를 모두 적어 주세요.' });
+      return;
+    }
+    try {
+      const [{ createOpsPlace }] = await Promise.all([import('@peaket/api-client/endpoints/ops')]);
+      const r = await createOpsPlace({ name, address, region, reason });
+      const created = { placeId: r.data.placeId, name, address };
+      setPlaceItems((prev) => [created, ...prev]);
+      setResolved((prev) => ({ ...prev, placeId: created.placeId }));
+      setCreatePlaceOpen(false);
+      setNewPlace({ name: '', address: '', region: '', reason: '' });
+      setNotice({ tone: 'ok', text: `공연장 '${name}'을(를) 만들고 연결했습니다.` });
+    } catch (e) {
+      setNotice({ tone: 'bad', text: saleReviewProblem(e).message });
+    }
+  };
+
   const run = async (kind: 'approve' | 'reject') => {
     if (!detail || busy || !write) return;
     const issue = kind === 'approve' ? approvalIssues[0] : rejectionIssue;
@@ -131,7 +227,7 @@ export function ConnectedPage() {
     setNotice(null);
     try {
       const [{ createOpsSaleReviewApproval, createOpsSaleReviewRejection }] = await Promise.all([import('@peaket/api-client/endpoints/ops')]);
-      if (kind === 'approve') await createOpsSaleReviewApproval(detail.productionId, approvalBody(detail, scales));
+      if (kind === 'approve') await createOpsSaleReviewApproval(detail.productionId, linkageBody(detail, resolved, scales));
       else await createOpsSaleReviewRejection(detail.productionId, { reason: reason.trim() });
       setConfirm(null);
       setNotice({ tone: 'ok', text: kind === 'approve' ? '판매를 승인했습니다. 판매 열기와 대기열 사본은 서버가 잇습니다.' : '판매 승인을 반려했습니다. 사유가 파트너 화면에 보입니다.' });
@@ -264,13 +360,113 @@ export function ConnectedPage() {
 
                 <div className="divider" />
                 <div className="col" style={{ gap: 8 }}>
+                  <h4 className="eyebrow">아티스트 연결</h4>
+                  {detail.artists.length === 0 ? <p className="t-sm muted">등록되거나 요청된 아티스트가 없습니다.</p> : null}
+                  <ul className="col" style={{ gap: 8, listStyle: 'none', padding: 0, margin: 0 }}>
+                    {detail.artists.map((a) => (
+                      <li key={`${a.artistId ?? 'new'}:${a.name}`} className="card-flat pad col" style={{ gap: 6 }}>
+                        <span className="row between wrap" style={{ gap: 6 }}>
+                          <strong className="t-sm">{a.name}</strong>
+                          <span className={`badge${a.artistId === null ? ' badge-warning' : ''}`}>{a.artistId === null ? '새 이름 요청' : '연결됨'}</span>
+                        </span>
+                        {a.artistId === null ? (
+                          <>
+                            <div className="row wrap" style={{ gap: 6 }}>
+                              <input
+                                className="input"
+                                aria-label={`${a.name} 아티스트 찾기`}
+                                value={artistQuery[a.name] ?? a.name}
+                                disabled={!write || busy}
+                                onChange={(e) => setArtistQuery((prev) => ({ ...prev, [a.name]: e.target.value }))}
+                              />
+                              <button className="btn btn-outline btn-sm" type="button" disabled={!write || busy} onClick={() => void searchArtists(a.name)}>찾기</button>
+                            </div>
+                            {(artistItems[a.name] ?? []).length > 0 ? (
+                              <select
+                                className="input"
+                                aria-label={`${a.name} 연결할 아티스트`}
+                                value={resolved.artists[a.name] ?? ''}
+                                disabled={!write || busy}
+                                onChange={(e) => chooseArtist(a.name, e.target.value)}
+                              >
+                                <option value="">기존 아티스트 고르기</option>
+                                {(artistItems[a.name] ?? []).map((x) => <option key={x.artistId} value={x.artistId}>{x.name}</option>)}
+                              </select>
+                            ) : null}
+                            <button className="btn btn-outline btn-sm" type="button" disabled={!write || busy} onClick={() => { setCreateArtistFor(a.name); setCreateArtistReason(''); setNotice(null); }}>새로 만들기</button>
+                          </>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="divider" />
+                <div className="col" style={{ gap: 8 }}>
                   <h4 className="eyebrow">공연장·휠체어석</h4>
                   <p className="t-sm">
-                    {detail.placeName ?? '공연장 미정'} <span className="badge">{detail.requestedPlace ? '새 공연장 요청' : '등록된 공연장'}</span>
+                    {selectedPlaceName ?? detail.placeName ?? '공연장 미정'} <span className="badge">{detail.requestedPlace ? (selectedPlaceName !== null ? '연결함' : '새 공연장 요청') : '등록된 공연장'}</span>
                   </p>
-                  {detail.requestedPlace ? <p className="t-xs muted">새 공연장 연결과 아티스트·다른 이름 연결은 다음 단계입니다. 지금 승인하면 등록된 공연장 값은 그대로 둡니다.</p> : null}
+                  {detail.requestedPlace ? (
+                    <>
+                      <p className="t-xs muted">파트너가 요청한 새 공연장입니다. 기존 공연장을 고르거나 새로 만들어 승인과 함께 잇습니다.</p>
+                      <div className="row wrap" style={{ gap: 6 }}>
+                        <input
+                          className="input"
+                          aria-label="공연장 찾기"
+                          value={placeQuery === '' ? (detail.placeName ?? '') : placeQuery}
+                          disabled={!write || busy}
+                          onChange={(e) => setPlaceQuery(e.target.value)}
+                        />
+                        <button className="btn btn-outline btn-sm" type="button" disabled={!write || busy} onClick={() => void searchPlaces()}>찾기</button>
+                      </div>
+                      {placeItems.length > 0 ? (
+                        <select
+                          className="input"
+                          aria-label="연결할 공연장"
+                          value={resolved.placeId ?? ''}
+                          disabled={!write || busy}
+                          onChange={(e) => setResolved((prev) => ({ ...prev, placeId: e.target.value === '' ? null : e.target.value }))}
+                        >
+                          <option value="">기존 공연장 고르기</option>
+                          {placeItems.map((p) => <option key={p.placeId} value={p.placeId}>{p.name} · {p.address}</option>)}
+                        </select>
+                      ) : null}
+                      <button
+                        className="btn btn-outline btn-sm"
+                        type="button"
+                        disabled={!write || busy}
+                        onClick={() => { setNewPlace({ name: detail.placeName ?? '', address: '', region: '', reason: '' }); setCreatePlaceOpen(true); setNotice(null); }}
+                      >
+                        새로 만들기
+                      </button>
+                    </>
+                  ) : null}
                   <p className="t-sm">휠체어석 확인: {detail.accessibleSeatingCheck === true ? '파트너 확인함' : detail.accessibleSeatingCheck === false ? '확인하지 않음' : '아직 없음'}</p>
-                  <p className="t-xs muted">지급대행 등록·예금주 일치: 지급대행 연동 전입니다(LCH-110).</p>
+                </div>
+
+                <div className="divider" />
+                <div className="col" style={{ gap: 8 }}>
+                  <h4 className="eyebrow">지급대행 등록</h4>
+                  {detail.payoutAccount ? (
+                    <dl className="t-sm grid grid-cols-[120px_minmax(0,1fr)] gap-x-3 gap-y-2">
+                      <dt className="muted">은행</dt><dd>{detail.payoutAccount.bankCode}</dd>
+                      <dt className="muted">계좌 끝 4자리</dt><dd>{detail.payoutAccount.last4}</dd>
+                      <dt className="muted">예금주 확인</dt><dd>{detail.payoutAccount.holderVerified ? '확인함' : '확인하지 못함'}</dd>
+                      <dt className="muted">보류 끝</dt><dd>{formatKst(detail.payoutAccount.holdUntil)}</dd>
+                    </dl>
+                  ) : (
+                    <p className="t-sm muted">{isCs ? 'CS 역할은 정산 계좌를 보지 않습니다.' : '정산 계좌를 읽지 못했습니다. 승인 판정은 서버가 다시 읽습니다.'}</p>
+                  )}
+                  {detail.pgRegistration ? (
+                    <p className="t-sm">
+                      토스페이먼츠 {detail.pgRegistration.tossEnabled ? '켜짐' : '꺼짐'}
+                      {detail.pgRegistration.tossSellers.length > 0 ? ` (${detail.pgRegistration.tossSellers.map((s) => `${s.pgStore === 'STANDARD' ? '일반' : '에스크로'} ${s.status}`).join(', ')})` : ''}
+                      {' · '}포트원 {detail.pgRegistration.portoneEnabled ? (detail.pgRegistration.portonePartnerRegistered ? '파트너 등록됨' : '파트너 미등록') : '꺼짐'}
+                    </p>
+                  ) : (
+                    <p className="t-sm muted">지급대행 등록을 읽지 못했습니다. 승인 판정은 서버가 다시 읽습니다.</p>
+                  )}
                 </div>
 
                 <div className="divider" />
@@ -347,7 +543,8 @@ export function ConnectedPage() {
             <dl className="kv card-flat pad">
               <dt>공연</dt><dd>{detail.title}</dd>
               <dt>회차</dt><dd>{detail.events.length}개</dd>
-              <dt>공연장</dt><dd>{detail.placeName ?? '등록된 값 유지'}</dd>
+              <dt>공연장</dt><dd>{selectedPlaceName ?? detail.placeName ?? '등록된 값 유지'}</dd>
+              <dt>아티스트</dt><dd>{detail.artists.map((a) => a.name).join(', ') || '—'}</dd>
             </dl>
             <div className="dialog-actions">
               <button className="btn btn-ghost" type="button" onClick={() => setConfirm(null)}>돌아가기</button>
@@ -370,6 +567,53 @@ export function ConnectedPage() {
             <div className="dialog-actions">
               <button className="btn btn-ghost" type="button" onClick={() => setConfirm(null)}>닫기</button>
               <button className="btn btn-danger" type="button" disabled={busy || rejectionIssue !== null} onClick={() => void run('reject')}>{busy ? '반려하는 중…' : '반려'}</button>
+            </div>
+          </div>
+        </Overlay>
+      ) : null}
+      {createArtistFor !== null ? (
+        <Overlay onClose={() => setCreateArtistFor(null)}>
+          <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="sr-artist-t">
+            <h2 className="dialog-title" id="sr-artist-t">아티스트 새로 만들기</h2>
+            <p className="t-sm">'{createArtistFor}' 이름으로 아티스트를 만들고 이 공연에 연결합니다. 사유는 감사 기록에 남습니다.</p>
+            <div className="field">
+              <label className="label" htmlFor="sr-artist-reason">사유 <span className="opt">(필수)</span></label>
+              <textarea className="input" id="sr-artist-reason" maxLength={500} value={createArtistReason} disabled={busy} onChange={(e) => setCreateArtistReason(e.target.value)} />
+            </div>
+            <div className="dialog-actions">
+              <button className="btn btn-ghost" type="button" onClick={() => setCreateArtistFor(null)}>닫기</button>
+              <button className="btn btn-primary" type="button" disabled={busy || createArtistReason.trim() === ''} onClick={() => void createArtist()}>만들고 연결</button>
+            </div>
+          </div>
+        </Overlay>
+      ) : null}
+
+      {createPlaceOpen ? (
+        <Overlay onClose={() => setCreatePlaceOpen(false)}>
+          <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="sr-place-t">
+            <h2 className="dialog-title" id="sr-place-t">공연장 새로 만들기</h2>
+            <p className="t-sm">파트너가 요청한 새 공연장을 만들고 이 공연에 연결합니다. 사유는 감사 기록에 남습니다.</p>
+            <div className="col" style={{ gap: 10 }}>
+              <div className="field">
+                <label className="label" htmlFor="sr-place-name">이름</label>
+                <input className="input" id="sr-place-name" maxLength={100} value={newPlace.name} disabled={busy} onChange={(e) => setNewPlace((p) => ({ ...p, name: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label className="label" htmlFor="sr-place-address">주소</label>
+                <input className="input" id="sr-place-address" maxLength={200} value={newPlace.address} disabled={busy} onChange={(e) => setNewPlace((p) => ({ ...p, address: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label className="label" htmlFor="sr-place-region">지역</label>
+                <input className="input" id="sr-place-region" maxLength={100} value={newPlace.region} disabled={busy} onChange={(e) => setNewPlace((p) => ({ ...p, region: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label className="label" htmlFor="sr-place-reason">사유</label>
+                <textarea className="input" id="sr-place-reason" maxLength={500} value={newPlace.reason} disabled={busy} onChange={(e) => setNewPlace((p) => ({ ...p, reason: e.target.value }))} />
+              </div>
+            </div>
+            <div className="dialog-actions">
+              <button className="btn btn-ghost" type="button" onClick={() => setCreatePlaceOpen(false)}>닫기</button>
+              <button className="btn btn-primary" type="button" disabled={busy} onClick={() => void createPlace()}>만들고 연결</button>
             </div>
           </div>
         </Overlay>

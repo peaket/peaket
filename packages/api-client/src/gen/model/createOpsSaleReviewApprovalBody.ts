@@ -9,6 +9,7 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { CreateOpsSaleReviewApprovalBodyArtistsItem } from './createOpsSaleReviewApprovalBodyArtistsItem';
 import type { CreateOpsSaleReviewApprovalBodyScalesItem } from './createOpsSaleReviewApprovalBodyScalesItem';
 
 export type CreateOpsSaleReviewApprovalBody = {
@@ -17,8 +18,10 @@ export type CreateOpsSaleReviewApprovalBody = {
      * @minItems 1
      */
   scales: CreateOpsSaleReviewApprovalBodyScalesItem[];
-  /** 확인한 공연장. 없으면 지금 값을 그대로 둔다. 새 공연장 요청 연결은 다음 단계다 */
+  /** 확인한 공연장. 새 공연장 요청이면 필수다. 등록된 공연장 공연은 없으면 지금 값을 그대로 둔다 */
   placeId?: string;
+  /** 파트너가 새 이름으로 요청한 아티스트를 잇는 목록(LCH-080 잔여). 요청 이름마다 하나씩이고, 빠지거나 모르는 artistId면 422 sale-review-artists-missing이다 */
+  artists?: CreateOpsSaleReviewApprovalBodyArtistsItem[];
   /** 휠체어석 확인 결과를 승인과 함께 남긴다. 없으면 지금 값을 둔다 */
   accessibleSeatingCheck?: boolean;
 };
