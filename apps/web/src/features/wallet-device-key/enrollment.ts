@@ -27,6 +27,8 @@ export type WalletKeyStatus =
   | { phase: 'reissue-at-booth' }
   /** '재발급 한도'(재인증 뒤 교체의 429) */
   | { phase: 'reissue-limit'; key?: StoredDeviceKey }
+  /** 부스 허용을 기다린다(재인증 복귀 때 책임자가 아직 코드를 찍지 않음). 같은 boothRequestId를 들고 있다 */
+  | { phase: 'booth-waiting'; key: StoredDeviceKey; boothRequestId: string }
   /** 토큰 갱신 뒤에도 401. 화면은 로그인으로 보내고 키는 둔다 */
   | { phase: 'needs-login'; key: StoredDeviceKey };
 
@@ -66,7 +68,7 @@ async function markReauthNeeded(key: StoredDeviceKey, reauthNeeded: 'REISSUE' | 
 }
 
 /** 등록 결과대로 저장소를 고치고 상태를 정한다. sentReason은 이번에 보낸 reason이다 */
-async function settle(key: StoredDeviceKey, result: DeviceKeyRegistrationResult, sentReason: RegisterDeviceKeyInput['reason']): Promise<WalletKeyStatus> {
+async function settle(key: StoredDeviceKey, result: DeviceKeyRegistrationResult, sentReason: RegisterDeviceKeyInput['reason'], boothRequestId?: string): Promise<WalletKeyStatus> {
   switch (result.kind) {
     case 'registered': {
       const current = await stillSame(key);
@@ -103,6 +105,10 @@ async function settle(key: StoredDeviceKey, result: DeviceKeyRegistrationResult,
     case 'needs-login':
       return { phase: 'needs-login', key };
     case 'rejected': {
+      // BOOTH 재인증 복귀 때 책임자가 아직 코드를 찍지 않았으면 같은 요청으로 계속 기다린다. 키를 지우지 않는다(IR-01)
+      if (sentReason === 'BOOTH' && result.status === 403 && result.type === 'booth-not-authorized' && boothRequestId) {
+        return { phase: 'booth-waiting', key, boothRequestId };
+      }
       if (await stillSame(key)) await deleteDeviceKey(key.ticketId);
       return { phase: 'no-key', notice: 'rejected' };
     }
@@ -198,7 +204,7 @@ export function sendWithReauth(i: SendWithReauthInput): Promise<WalletKeyStatus>
     if (!registrationAvailable(i)) return { phase: 'ready', key, localOnly: true };
     if (i.offline || browserOffline()) return { phase: 'pending', key, reason: 'offline' };
     const result = await registerDeviceKey({ ticketId: key.ticketId, publicKeyJwk: key.publicKeyJwk, keyId: key.keyId, reason: i.reason, reauthToken: i.reauthToken, ...(i.boothRequestId ? { boothRequestId: i.boothRequestId } : {}), ...transport(i) });
-    return settle({ ...key, ...(i.reason === 'BOOTH' ? {} : { reauthNeeded: i.reason }) }, result, i.reason);
+    return settle({ ...key, ...(i.reason === 'BOOTH' ? {} : { reauthNeeded: i.reason }) }, result, i.reason, i.boothRequestId);
   });
 }
 
@@ -206,9 +212,10 @@ export function sendWithReauth(i: SendWithReauthInput): Promise<WalletKeyStatus>
  * 재인증을 못 받고 돌아왔을 때(표시가 낡음·재인증 실패·취소): 요청 없이 저장된 키의 멈춘 상태로 돌아간다.
  * 이 기기에 키가 없으면(저장소 유실) 떠날 때의 reason으로 '저장소 유실, 입장 시작 전'·'다시 확인 필요'를 보인다
  */
-export async function walletKeyStatusWithoutSending(ticketId: string, o: SyncOptions & { reason?: 'REISSUE' | 'ISSUE' | 'BOOTH'; notice?: ReauthNotice } = {}): Promise<WalletKeyStatus> {
+export async function walletKeyStatusWithoutSending(ticketId: string, o: SyncOptions & { reason?: 'REISSUE' | 'ISSUE' | 'BOOTH'; boothRequestId?: string; notice?: ReauthNotice } = {}): Promise<WalletKeyStatus> {
   const key = await loadDeviceKey(ticketId);
   const notice = o.notice ? { notice: o.notice } : {};
+  if (key && o.reason === 'BOOTH' && o.boothRequestId) return { phase: 'booth-waiting', key, boothRequestId: o.boothRequestId };
   if (!key && o.reason) {
     if (o.reason === 'REISSUE') return { phase: 'reissue-required', ...notice };
     if (o.reason === 'BOOTH') return { phase: 'reissue-at-booth' };

@@ -34,7 +34,7 @@ export interface BoothReissuePorts {
   start(i: { ticketId: string; consent: true }): Promise<BoothStart>;
   confirm(i: { verificationId: string; providerResult: Record<string, string> }): Promise<{ resultToken?: string }>;
   request(i: { ticketId: string; reverificationToken: string }): Promise<{ boothRequestId: string; boothCode: string; expiresAt: string }>;
-  register(i: { ticketId: string; boothRequestId: string; reason: 'BOOTH'; publicKeyJwk: JsonWebKey }): Promise<{ keyId: string }>;
+  register(i: { ticketId: string; boothRequestId: string; reason: 'BOOTH'; publicKeyJwk: JsonWebKey; reauthToken?: string }): Promise<{ keyId: string }>;
 }
 
 export interface BoothReissueDeps {
@@ -58,6 +58,7 @@ const DEFAULT_RETRY_MS = 10_000;
 export class BoothReissueFlow {
   #state: BoothState = { phase: 'idle' };
   #token: string | undefined;
+  #reauthToken: string | undefined;
   #boothRequestId: string | undefined;
   #expiresAtMs: number | undefined;
   #lastAttemptMs: number | undefined;
@@ -81,6 +82,7 @@ export class BoothReissueFlow {
   /** 실패·창 닫힘 뒤 처음부터 다시 시작한다(IR-07). 토큰·코드·요청 ID를 모두 버린다 */
   reset(): void {
     this.#token = undefined;
+    this.#reauthToken = undefined;
     this.#boothRequestId = undefined;
     this.#expiresAtMs = undefined;
     this.#lastAttemptMs = undefined;
@@ -155,6 +157,14 @@ export class BoothReissueFlow {
     await this.#attempt();
   }
 
+  /** 재인증에서 돌아온 토큰으로 같은 부스 요청을 바로 다시 시도한다(IR-01). 코드·만료는 지우지 않는다 */
+  async reauth(token: string): Promise<void> {
+    this.#reauthToken = token;
+    if (this.#boothRequestId === undefined) return;
+    this.#lastAttemptMs = undefined;
+    await this.#attempt();
+  }
+
   /** online 사건: 10초를 기다리지 않고 바로 한 번 시도한다 */
   async online(): Promise<void> {
     if (this.#state.phase !== 'code' && this.#state.phase !== 'waiting') return;
@@ -175,12 +185,18 @@ export class BoothReissueFlow {
         boothRequestId: this.#boothRequestId,
         reason: 'BOOTH',
         publicKeyJwk: this.#d.deviceKey.publicKeyJwk,
+        ...(this.#reauthToken ? { reauthToken: this.#reauthToken } : {}),
       });
       this.#set({ phase: 'registered' });
     } catch (e) {
+      if (statusOf(e) === 403 && typeOf(e) === 'reauth-required') {
+        // 재인증이 필요해도 코드·QR·남은 시간을 지우지 않는다(IR-01). 화면은 같은 코드와 재인증 안내를 함께 보인다
+        this.#set({ ...this.#state, phase: 'waiting', error: 'reauth-required' });
+        return;
+      }
       if (statusOf(e) === 403 && typeOf(e) === 'booth-not-authorized') {
         // 403은 아직 책임자가 찍지 않았다는 뜻이다. 코드·QR·남은 시간을 지우지 않고 phase만 waiting으로 둔다(IR-04)
-        this.#set({ ...this.#state, phase: 'waiting' });
+        this.#set({ ...this.#state, phase: 'waiting', error: undefined });
         return;
       }
       this.#fail(e);

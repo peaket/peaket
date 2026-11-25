@@ -231,6 +231,7 @@ export function BoothReissueLive({ seat, showButton, initialOpen, ticketId, regi
           keyId: key.keyIdText,
           reason: 'BOOTH',
           boothRequestId: i.boothRequestId,
+          ...(i.reauthToken ? { reauthToken: i.reauthToken } : {}),
           origin,
           fetch: (input, init) => fetch(input, init),
         });
@@ -363,7 +364,8 @@ export function BoothReissueLive({ seat, showButton, initialOpen, ticketId, regi
     void flow.request();
   };
 
-  const reauthNeeded = state.phase === 'error' && state.error === 'reauth-required' && state.boothRequestId !== undefined;
+  const reauthNeeded = state.phase === 'waiting' && state.error === 'reauth-required' && state.boothRequestId !== undefined;
+  const codeVisible = (state.phase === 'code' || state.phase === 'waiting' || state.phase === 'error') && state.boothCode !== undefined;
   const startBoothReauth = async () => {
     const boothRequestId = state.boothRequestId;
     if (!boothRequestId || leaving) return;
@@ -466,7 +468,7 @@ export function BoothReissueLive({ seat, showButton, initialOpen, ticketId, regi
         </div>
       ) : null}
 
-      {(state.phase === 'code' || state.phase === 'waiting') && state.boothCode ? (
+      {codeVisible ? (
         <div className="card-flat col items-center gap-3 px-4 py-5 text-center" role="status">
           <span className="badge badge-solid">부스 코드 · 입장 QR이 아닙니다</span>
           {matrix ? <QrPattern label={`부스 재발급 코드 QR, ${seat}`} matrix={matrix} maxWidth={200} /> : null}
@@ -483,6 +485,11 @@ export function BoothReissueLive({ seat, showButton, initialOpen, ticketId, regi
               ? '부스 직원이 코드를 찍으면 10초 안에 이 휴대폰을 다시 등록합니다.'
               : '부스 직원이 코드를 찍으면 10분 안에 이 휴대폰을 입장용으로 다시 등록합니다.'}
           </p>
+          {reauthNeeded ? (
+            <button className="btn btn-primary btn-block" type="button" disabled={leaving} onClick={() => void startBoothReauth()}>
+              {leaving ? '이동 중…' : '다시 로그인하고 등록'}
+            </button>
+          ) : null}
           {error ? (
             <p className="t-sm" role="alert" style={{ color: 'var(--danger)' }}>
               {error}

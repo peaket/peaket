@@ -494,6 +494,19 @@ export function DeviceQr({ ticketId, label, maxWidth = 324, offline = false, sna
     );
   }
 
+  if (status?.phase === 'booth-waiting') {
+    // 재인증은 마쳤지만 책임자가 아직 부스 코드를 찍지 않았다. 같은 boothRequestId를 들고 기다린다(IR-01)
+    return (
+      <div className={CARD} style={{ minHeight: 400 }} role="status">
+        <span className="state-icon is-primary">
+          <i className="ic ic-clock" aria-hidden="true" />
+        </span>
+        <p className="t-md fw-b">현장 책임자가 부스 코드를 찍기를 기다리는 중입니다</p>
+        <p className="t-sm muted">책임자가 코드를 찍은 뒤 월렛을 다시 열면 같은 요청으로 등록합니다.</p>
+      </div>
+    );
+  }
+
   if (status?.phase === 'reissue-at-booth') {
     // d5 §5.13 '저장소 유실, 입장 시작 뒤'(403 reissue-at-booth). 실제 월렛은 boothReissue(부스 재발급 부품)를 넣고,
     // 퍼블리싱·부품이 없는 자리만 안내 글만 보인다.

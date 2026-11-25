@@ -118,6 +118,13 @@ export async function resumeWalletReauth(ticketId: string, d: ResumeWalletReauth
   if (taken.marker.ticketId !== ticketId) return { kind: 'none' };
   const reason = taken.marker.reason;
   const r = await (d.pickup ?? (() => pickupReauthToken()))();
-  if (r.kind !== 'token') return { kind: 'reauth-failed', reason: r.reason, status: await walletKeyStatusWithoutSending(ticketId, { ...transport, reason }) };
-  return { kind: 'sent', reason, status: await sendWithReauth({ ...transport, ticketId, reason, ...(taken.marker.boothRequestId ? { boothRequestId: taken.marker.boothRequestId } : {}), reauthToken: r.token }) };
+  if (r.kind !== 'token') {
+    return { kind: 'reauth-failed', reason: r.reason, status: await walletKeyStatusWithoutSending(ticketId, { ...transport, reason, ...(taken.marker.boothRequestId ? { boothRequestId: taken.marker.boothRequestId } : {}) }) };
+  }
+  const status = await sendWithReauth({ ...transport, ticketId, reason, ...(taken.marker.boothRequestId ? { boothRequestId: taken.marker.boothRequestId } : {}), reauthToken: r.token });
+  // 책임자가 아직 코드를 찍지 않았으면 같은 부스 요청 표시를 다시 남겨 다음에 같은 요청으로 이어 간다(IR-01)
+  if (status.phase === 'booth-waiting' && taken.marker.boothRequestId) {
+    writeWalletReauth(d.store, { ticketId, reason: 'BOOTH', boothRequestId: taken.marker.boothRequestId, at: d.now() });
+  }
+  return { kind: 'sent', reason, status };
 }

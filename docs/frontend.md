@@ -639,7 +639,7 @@ architecture §6.4의 원칙('앱 × 상태 종류'마다 도구 하나)을 그�
 | Cache Storage(월렛 서비스 워커) | `wallet-shell-{판}` | 월렛 셸 HTML·JS·CSS·글꼴 | 다음 판까지 | 새 판 활성화, 킬 스위치, 입장 키 지우기 선택 | 개인정보는 없다 |
 | Dexie `peaket-scanner`(스캐너 출처) | §3.8 | 회차 목록·키·폐기 목록·입장 상태 | §3.8 | §3.8 | P2(현장 검표 기록) |
 | Dexie `peaket-scanner-queue`(스캐너 출처) | §3.8 | 스캔 큐(`scanQueue`. 쓰기 내구성 strict로 여는 따로 둔 DB, 2026-11-02 정합 점검) | §3.8 | §3.8 | P2(현장 검표 기록) |
-| sessionStorage | `peaket.wallet.reauth` | 월렛 재발급·입장 시작 뒤 첫 등록의 재인증으로 떠날 때의 할 일. 값은 JSON `{v, ticketId, reason, at}`이고 `v`는 값 꼴의 판(지금 `1`, 다른 판이면 믿지 않고 지운다), `reason`은 보낼 등록 이유, `at`은 떠난 시각(밀리초)이다. 토큰·공개키는 넣지 않는다(추천 적용 2026-11-23, ADR-0363 결정 3, `v`는 F-05-1 시험 결과 5) | 탭(남긴 지 10분 [가정] 안일 때만 믿는다) | 돌아와 한 번 읽은 뒤, 로그아웃 | 등급 밖 |
+| sessionStorage | `peaket.wallet.reauth` | 월렛 재발급·입장 시작 뒤 첫 등록의 재인증으로 떠날 때의 할 일. 값은 JSON `{v, ticketId, reason, boothRequestId, at}`이고 `v`는 값 꼴의 판(지금 `1`, 다른 판이면 믿지 않고 지운다), `reason`은 보낼 등록 이유(REISSUE·ISSUE·BOOTH), `boothRequestId`는 BOOTH일 때 돌아와 다시 시도할 부스 요청 ID, `at`은 떠난 시각(밀리초)이다. 토큰·공개키·부스 코드는 넣지 않는다(추천 적용 2026-11-23, ADR-0363 결정 3, `v`는 F-05-1 시험 결과 5, `boothRequestId`는 F-05-12 IR-01) | 탭(남긴 지 10분 [가정] 안일 때만 믿는다) | 돌아와 한 번 읽은 뒤, 로그아웃 | 등급 밖 |
 | localStorage(관제 출처) | `peaket.console.ui` | 접은 위젯, 표 열 너비, 한 글자 단축키 켬(처음은 끔, 값이 없으면 끔으로 본다, docs/design/d3 §0), 화면 테마(자동·다크·라이트, 값이 없으면 자동, docs/design/d1 §4) | 사용자가 지울 때까지 | 로그아웃 정리 루틴(§5.14.4 2번. 관제 로그아웃 응답은 교차 출처인 `ops-api`에서 와서 `Clear-Site-Data`로는 이 출처를 지우지 못한다, 추천 적용 2026-10-28, 기술 검토 중간-067) | 등급 밖 |
 | IndexedDB `peaket-forensics`(포렌식 데모 출처) | `scenarios/{시드}` | 합성 시나리오 사건(개인정보는 없다) | 사용자가 지울 때까지 | [캐시 지우기], 사이트 데이터 삭제 | 개인정보는 없다(ADR-0080) |
 
