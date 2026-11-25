@@ -94,7 +94,7 @@ export function LiveAlertPanel({ alerts, eventId, style }: { alerts: readonly Li
   const g = groupAlerts(alerts, eventId);
   const virtual = g.event.length + g.platform.length > ALERT_VIRTUAL_AFTER;
   return (
-    <section className="widget" role="region" aria-labelledby="w-alert-h" id="w-alert" style={style}>
+    <section className="widget" role="region" aria-labelledby="w-alert-h" id="w-alert" style={style} data-slot-state="value">
       <div className="widget-head wrap">
         <h2 className="t-sm fw-b" id="w-alert-h">
           경보 패널

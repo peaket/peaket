@@ -116,7 +116,7 @@ export function RemoteWidget({ remote, name, title, style }: RemoteWidgetProps) 
   if (!Widget) return <Skeleton title={title} style={style} />;
   return (
     <Boundary title={title} style={style} onRetry={retry}>
-      <div ref={box} style={{ display: 'contents' }} data-remote={remote} data-widget={name} data-collapsed={collapsed ? 'true' : undefined}>
+      <div ref={box} style={{ display: 'contents' }} data-remote={remote} data-widget={name} data-slot-state="value" data-collapsed={collapsed ? 'true' : undefined}>
         <Widget
           eventId={eventId}
           timeRange={timeRange}

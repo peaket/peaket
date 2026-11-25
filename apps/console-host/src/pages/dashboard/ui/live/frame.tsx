@@ -59,12 +59,14 @@ export interface LiveFrameProps {
   style?: CSSProperties;
   /** 원천 연결 전 카드면 'pending' */
   source?: 'pending';
+  /** 위젯 자리 상태(F-03-6 FE-T29 첫 그림 표시): 값이 아직 없으면 loading, 값·빈 상태면 value, 대체 카드면 fallback */
+  state?: 'loading' | 'value' | 'fallback';
   children: ReactNode;
 }
 
-export function LiveFrame({ id, title, widgetKey, panel, eventId, range, kind, status, style, source, children }: LiveFrameProps) {
+export function LiveFrame({ id, title, widgetKey, panel, eventId, range, kind, status, style, source, state = 'value', children }: LiveFrameProps) {
   return (
-    <section className="widget" role="region" aria-labelledby={id} style={style} data-source={source}>
+    <section className="widget" role="region" aria-labelledby={id} style={style} data-source={source} data-slot-state={state}>
       <div className="widget-head wrap">
         <h2 className="t-sm fw-b" id={id}>
           {title}
@@ -88,7 +90,7 @@ export const NotReceived = () => <span className="slo slo-stale">받지 못함</
 /** 원천 기능이 붙기 전의 위젯 자리(고정 숫자를 실제 값으로 읽지 않게, 계획 6-9). 제목 id는 퍼블리싱 위젯과 같다 */
 export function PendingCard({ id, title, origin, eventId, range, kind, style }: { id: string; title: string; origin: string; eventId: string | null | undefined; range: TimeRange; kind?: 'grafana' | 'sentry'; style?: CSSProperties }) {
   return (
-    <section className="widget" role="region" aria-labelledby={id} style={style} data-source="pending">
+    <section className="widget" role="region" aria-labelledby={id} style={style} data-source="pending" data-slot-state="fallback">
       <div className="widget-head wrap">
         <h2 className="t-sm fw-b" id={id}>
           {title}

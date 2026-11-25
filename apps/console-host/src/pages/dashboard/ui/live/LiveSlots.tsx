@@ -16,7 +16,7 @@ import { JudgementDialog } from './JudgementDialog';
 import { LiveAlertPanel } from './LiveAlertPanel';
 import { ReadinessChecklist, type Readiness } from './ReadinessChecklist';
 import { SaturationWidget, type SaturationValue } from './SaturationWidget';
-import { DetailAnchor, fmt, JudgementLine, kst, PendingCard } from './frame';
+import { DetailAnchor, fmt, isUnavailable, JudgementLine, kst, PendingCard } from './frame';
 
 /** 위젯 키 하나의 지금 값(없으면 undefined = 아직 받지 않음) */
 export function useWidgetValue<T>(key: string, eventId: string | null): T | undefined {
@@ -45,17 +45,17 @@ export function useWidgetValue<T>(key: string, eventId: string | null): T | unde
 
 export function LiveBudgetSlot({ eventId, id }: { eventId: string | null; id: string }) {
   const value = useWidgetValue<BudgetValue>('ops-budget.journeys', eventId);
-  return <BudgetWidget id={id} value={value ?? { error: 'source-unavailable', eventId }} range={recentRange()} loading={value === undefined} />;
+  return <BudgetWidget id={id} value={value ?? { error: 'source-unavailable', eventId }} range={recentRange()} loading={value === undefined} state={value === undefined ? 'loading' : isUnavailable(value) ? 'fallback' : 'value'} />;
 }
 
 export function LiveSaturationSlot({ eventId, id }: { eventId: string | null; id: string }) {
   const value = useWidgetValue<SaturationValue>('ops-saturation.summary', eventId);
-  return <SaturationWidget id={id} value={value ?? { error: 'source-unavailable', eventId }} range={recentRange()} loading={value === undefined} />;
+  return <SaturationWidget id={id} value={value ?? { error: 'source-unavailable', eventId }} range={recentRange()} loading={value === undefined} state={value === undefined ? 'loading' : isUnavailable(value) ? 'fallback' : 'value'} />;
 }
 
 export function LiveDiagnosticsSlot({ eventId, id }: { eventId: string | null; id: string }) {
   const value = useWidgetValue<DiagnosticsValue>('ops-diagnostics.summary', eventId);
-  return <DiagnosticsRow id={id} value={value ?? { error: 'source-unavailable', eventId }} range={recentRange()} loading={value === undefined} />;
+  return <DiagnosticsRow id={id} value={value ?? { error: 'source-unavailable', eventId }} range={recentRange()} loading={value === undefined} state={value === undefined ? 'loading' : isUnavailable(value) ? 'fallback' : 'value'} />;
 }
 
 export function LiveAlertSlot({ style }: { style?: CSSProperties }) {
@@ -83,7 +83,7 @@ export function LiveControlCard({ eventId }: { eventId: string | null }) {
   const c = useLiveHost((s) => s.control);
   const tone = c.kind === 'ok' ? 'slo slo-ok' : c.kind === 'unknown' ? 'slo slo-stale' : c.kind === 'raise-stopped' || c.kind === 'paused' ? 'slo slo-burning' : 'slo slo-breached';
   return (
-    <section className="widget" role="region" aria-labelledby="w-ctl">
+    <section className="widget" role="region" aria-labelledby="w-ctl" data-slot-state="value">
       <div className="widget-head wrap">
         <h2 className="t-sm fw-b" id="w-ctl">
           자동 제어
@@ -190,7 +190,7 @@ export function LiveReadinessPanel({ eventId, role }: { eventId: string | null; 
 
   if (!shown) {
     return (
-      <section className="widget" role="region" aria-labelledby="w-pf" style={{ gridColumn: '1 / -1' }}>
+      <section className="widget" role="region" aria-labelledby="w-pf" style={{ gridColumn: '1 / -1' }} data-slot-state="loading">
         <div className="widget-head wrap">
           <h2 className="t-sm fw-b" id="w-pf">
             T-30분 점검

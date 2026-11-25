@@ -115,6 +115,41 @@ function shellPatch(f: Flags): HostPatch {
   return patch;
 }
 
+/** 실제 값 화면의 첫 그림 표시(F-03-6 FE-T29, docs/frontend.md §5.7): 보이는 보드의 위젯 자리가 모두 첫 값 또는 대체 카드를 그린 때 한 번 남긴다. */
+function DashboardReadySignal({ enabled }: { enabled: boolean }) {
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let done = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const check = () => {
+      if (done) return;
+      const board = document.querySelector('[data-dashboard-board]');
+      const slots = board ? [...board.querySelectorAll('[data-slot-state]')] : [];
+      if (!board || slots.length === 0 || slots.some((s) => s.getAttribute('data-slot-state') === 'loading')) {
+        timer = setTimeout(check, 50);
+        return;
+      }
+      done = true;
+      const at = performance.now();
+      performance.mark('peaket:dashboard-ready');
+      performance.measure('peaket:dashboard-ready', { start: 0, end: at });
+      observer.disconnect();
+    };
+    const observer = new MutationObserver(() => {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+      check();
+    });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-slot-state'] });
+    check();
+    return () => {
+      if (timer !== undefined) clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [enabled]);
+  return null;
+}
+
 export function Page() {
   const [params] = useSearchParams();
   const { pathname, hash } = useLocation();
@@ -174,24 +209,27 @@ export function Page() {
 
   return (
     <Suspense fallback={boardFallback}>
-      {layout === 'desktop' ? (
-        <div style={{ display: 'contents', ['--dash-cols' as string]: isXl ? 4 : 3 } as CSSProperties}>
-          <MainD v={asViewer(flagsD)} close={close} ctx={ctx} />
-          {showOverlays && !roleViewer && !live ? <OverlaysD v={flagsD} close={close} /> : null}
-        </div>
-      ) : null}
-      {layout === 'tablet' ? (
-        <>
-          <MainT v={asViewer(valsT(base))} close={close} ctx={ctx} />
-          {showOverlays && !roleViewer ? <OverlaysT v={valsT(base)} close={close} /> : null}
-        </>
-      ) : null}
-      {layout === 'phone' ? (
-        <>
-          <MainM v={asViewer(valsM(base))} close={close} ctx={ctx} />
-          {showOverlays && !roleViewer ? <OverlaysM v={valsM(base)} close={close} /> : null}
-        </>
-      ) : null}
+      <DashboardReadySignal enabled={live} />
+      <div data-dashboard-board="" style={{ display: 'contents' }}>
+        {layout === 'desktop' ? (
+          <div style={{ display: 'contents', ['--dash-cols' as string]: isXl ? 4 : 3 } as CSSProperties}>
+            <MainD v={asViewer(flagsD)} close={close} ctx={ctx} />
+            {showOverlays && !roleViewer && !live ? <OverlaysD v={flagsD} close={close} /> : null}
+          </div>
+        ) : null}
+        {layout === 'tablet' ? (
+          <>
+            <MainT v={asViewer(valsT(base))} close={close} ctx={ctx} />
+            {showOverlays && !roleViewer ? <OverlaysT v={valsT(base)} close={close} /> : null}
+          </>
+        ) : null}
+        {layout === 'phone' ? (
+          <>
+            <MainM v={asViewer(valsM(base))} close={close} ctx={ctx} />
+            {showOverlays && !roleViewer ? <OverlaysM v={valsM(base)} close={close} /> : null}
+          </>
+        ) : null}
+      </div>
       <PreviewSwitcher states={STATES} current={state} />
     </Suspense>
   );

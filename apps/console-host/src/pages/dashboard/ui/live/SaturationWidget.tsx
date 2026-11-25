@@ -34,10 +34,10 @@ const ROWS: { key: 'cpu' | 'redisMemory' | 'kafkaLag' | 'eventLoop'; label: stri
   { key: 'eventLoop', label: '이벤트 루프 p99', show: (v) => `${fmt(v * 1000, 1)}ms` },
 ];
 
-export function SaturationWidget({ value, range, id = 'w-live-sat', loading }: { value: SaturationValue | { error: 'source-unavailable'; eventId: string | null } | undefined; range: TimeRange; id?: string; loading?: boolean }) {
+export function SaturationWidget({ value, range, id = 'w-live-sat', loading, state }: { value: SaturationValue | { error: 'source-unavailable'; eventId: string | null } | undefined; range: TimeRange; id?: string; loading?: boolean; state?: 'loading' | 'value' | 'fallback' }) {
   const v = value && !isUnavailable(value) && 'cpu' in value ? value : null;
   return (
-    <LiveFrame id={id} title="포화도 요약" widgetKey="ops-saturation.summary" panel="saturation" eventId={value?.eventId ?? null} range={range} status={loading ? undefined : v ? <LevelBadge level={v.level} /> : <NotReceived />}>
+    <LiveFrame id={id} title="포화도 요약" widgetKey="ops-saturation.summary" panel="saturation" eventId={value?.eventId ?? null} range={range} state={state ?? (loading ? 'loading' : 'value')} status={loading ? undefined : v ? <LevelBadge level={v.level} /> : <NotReceived />}>
       {loading ? (
         <p className="t-xs muted" role="status">불러오는 중입니다…</p>
       ) : v ? (

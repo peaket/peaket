@@ -18,10 +18,10 @@ export interface DiagnosticsValue {
 
 const ms = (v: number | null) => (v === null ? <NotReceived /> : <span className="num">{`${fmt(v)}ms`}</span>);
 
-export function DiagnosticsRow({ value, range, id = 'w-live-diag', loading }: { value: DiagnosticsValue | { error: 'source-unavailable'; eventId: string | null } | undefined; range: TimeRange; id?: string; loading?: boolean }) {
+export function DiagnosticsRow({ value, range, id = 'w-live-diag', loading, state }: { value: DiagnosticsValue | { error: 'source-unavailable'; eventId: string | null } | undefined; range: TimeRange; id?: string; loading?: boolean; state?: 'loading' | 'value' | 'fallback' }) {
   const v = value && !isUnavailable(value) && 'network' in value ? value : null;
   return (
-    <section className="widget" role="region" aria-labelledby={id} style={{ gridColumn: '1 / -1' }} data-source="pending">
+    <section className="widget" role="region" aria-labelledby={id} style={{ gridColumn: '1 / -1' }} data-source="pending" data-slot-state={state ?? (loading ? 'loading' : v ? 'value' : 'fallback')}>
       <div className="widget-head wrap">
         <h2 className="t-sm fw-b" id={id}>
           진단 힌트 · 운영 명령 없음

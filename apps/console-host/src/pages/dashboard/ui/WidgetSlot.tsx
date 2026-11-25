@@ -28,7 +28,7 @@ export interface FailCardProps {
 
 export function FailCard({ title, style, remote, reason, onRetry }: FailCardProps) {
   return (
-    <section className="widget is-error" role="region" aria-label={title} style={style} data-remote-fail={reason}>
+    <section className="widget is-error" role="region" aria-label={title} style={style} data-remote-fail={reason} data-slot-state="fallback">
       <div className="widget-head wrap">
         <h2 className="t-sm fw-b">{title}</h2>
         <div className="actions" style={{ gap: 12 }}>
@@ -62,7 +62,7 @@ export function FailCard({ title, style, remote, reason, onRetry }: FailCardProp
 
 export function Skeleton({ title, style }: { title: string; style?: CSSProperties }) {
   return (
-    <section className="widget" role="region" aria-label={title} aria-busy="true" style={style}>
+    <section className="widget" role="region" aria-label={title} aria-busy="true" style={style} data-slot-state="loading">
       <div className="widget-head">
         <h2 className="t-sm fw-b">{title}</h2>
       </div>

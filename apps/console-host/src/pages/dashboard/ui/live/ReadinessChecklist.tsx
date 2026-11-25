@@ -133,7 +133,7 @@ export function ReadinessChecklist({ readiness, role, onJudge, range, nowMs }: R
   const noGo = r.preview.verdict === 'no-go';
   return (
     <>
-      <section className="widget" role="region" aria-labelledby="w-pf" style={{ gridColumn: 'span 3' }}>
+      <section className="widget" role="region" aria-labelledby="w-pf" style={{ gridColumn: 'span 3' }} data-slot-state="value">
         <div className="widget-head wrap">
           <h2 className="t-sm fw-b" id="w-pf">{`T-30분 점검 · 필수 ${req.length} · 권고 ${rec.length}`}</h2>
           <div className="actions" style={{ gap: 12 }}>

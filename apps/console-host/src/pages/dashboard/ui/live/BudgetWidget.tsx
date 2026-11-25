@@ -73,11 +73,11 @@ function Row({ j }: { j: BudgetJourney }) {
   );
 }
 
-export function BudgetWidget({ value, range, id = 'w-live-budget', loading }: { value: BudgetValue | { error: 'source-unavailable'; eventId: string | null } | undefined; range: TimeRange; id?: string; loading?: boolean }) {
+export function BudgetWidget({ value, range, id = 'w-live-budget', loading, state }: { value: BudgetValue | { error: 'source-unavailable'; eventId: string | null } | undefined; range: TimeRange; id?: string; loading?: boolean; state?: 'loading' | 'value' | 'fallback' }) {
   const eventId = value?.eventId ?? null;
   const journeys = value && !isUnavailable(value) && 'journeys' in value ? value.journeys : null;
   return (
-    <LiveFrame id={id} title={TITLE} widgetKey="ops-budget.journeys" panel="budget" eventId={eventId} range={range}>
+    <LiveFrame id={id} title={TITLE} widgetKey="ops-budget.journeys" panel="budget" eventId={eventId} range={range} state={state ?? (loading ? 'loading' : 'value')}>
       {loading ? (
         <p className="t-xs muted" role="status">불러오는 중입니다…</p>
       ) : journeys ? (

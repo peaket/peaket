@@ -50,7 +50,8 @@ export function lighthousePages(host) {
     { name: '좌석 화면 데모', url: at('web', `/booking/${SEAT_DEMO_EVENT}/seats`), row: '좌석 화면', sessionStorage: seatDemoAdmission() },
     { name: '결제 데모', url: at('web', `/booking/${SEAT_DEMO_EVENT}/checkout`), row: '결제 화면', sessionStorage: checkoutDemoStorage() },
     { name: '월렛', url: at('web', '/my/tickets'), row: '월렛' },
-    { name: '관제 대시보드 데모', url: at('console', '/'), row: '관제 콘솔' },
+    // 관제 첫 화면 `/`는 라우터가 `/dashboard`로 넘긴다(§5.17 '화면 목록의 경로': 넘김을 따라간 경로를 잰 것으로 치지 않는다)
+    { name: '관제 대시보드 데모', url: at('console', '/dashboard'), row: '관제 콘솔' },
     { name: '파트너 판매 현황 데모', url: at('partner', '/events'), row: '파트너 콘솔' },
   ];
 }

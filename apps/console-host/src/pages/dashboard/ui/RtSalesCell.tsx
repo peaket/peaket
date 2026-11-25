@@ -35,7 +35,7 @@ export function RtSalesCell({ id, style }: { id: string; style?: CSSProperties }
   if (value === 'failed') return <FailCard title={TITLE} style={style} />;
   const v = rtSalesViewOf(value);
   return (
-    <section className="widget" role="region" aria-labelledby={id} style={style} data-source="rt" data-widget={RT_SALES_KEY}>
+    <section className="widget" role="region" aria-labelledby={id} style={style} data-source="rt" data-widget={RT_SALES_KEY} data-slot-state="value">
       <div className="widget-head">
         <h2 className="t-sm fw-b" id={id}>
           {TITLE}
