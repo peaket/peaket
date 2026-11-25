@@ -363,11 +363,15 @@ describe('F-05-11 T3 R-T25 ③ 연기 철회', () => {
       clock: h.clock,
     });
     const first = await sender.runOnce();
-    expect(first.sent).toBe(3);
-    expect(first.retried).toBe(3);
+    // OFFERED 6행(요청 3×두 사람) + WITHDRAWN 6행 = 12행. B행 6개는 실패, A행 6개는 보낸다.
+    expect(first.sent).toBe(6);
+    expect(first.retried).toBe(6);
     const pending = (h.extras.notices ?? []).filter((n) => n.accountId === B);
+    expect(pending).toHaveLength(6);
     expect(pending.every((n) => n.sentAtMs === undefined)).toBe(true);
-    expect((h.extras.notices ?? []).filter((n) => n.accountId === A).every((n) => n.sentAtMs !== undefined)).toBe(true);
+    const sent = (h.extras.notices ?? []).filter((n) => n.accountId === A);
+    expect(sent).toHaveLength(6);
+    expect(sent.every((n) => n.sentAtMs !== undefined)).toBe(true);
   });
 
   test('F-05-11 T3 R-T25 ③ ② 철회 뒤 CancelTickets(EVENT_POSTPONED)가 TRANSFER_PENDING에 막히지 않고 끝난다', async () => {
@@ -626,7 +630,7 @@ describe('F-05-11 T7 보낸 분 닉네임', () => {
 });
 
 describe('F-05-11 T8 Outbox 여섯 사건', () => {
-  test('F-05-11 T8 ① 요청·수락·거절·철회·만료·돌려주기가 각각 한 행이고 accountId·TicketEvent 모양이 맞다', async () => {
+  test('F-05-11 T8 ① 요청 4건·여섯 종류(9행)가 남고 accountId·TicketEvent 모양이 맞다', async () => {
     const h = await harness();
     const UUID_V8 = /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
     // 수락 → 돌려주기
@@ -650,11 +654,12 @@ describe('F-05-11 T8 Outbox 여섯 사건', () => {
     expect(await h.transfers.expireOffers()).toBeGreaterThanOrEqual(1);
 
     const rows = h.extras.events ?? [];
-    expect(rows).toHaveLength(6);
+    // 요청 4건(OFFERED 4) + 수락·돌려주기(2) + 거절·철회·만료(3) = 9행. 사건 종류는 여섯이다.
+    expect(rows).toHaveLength(9);
     expect(rows.every((e) => e.topic === 'trade.tickets')).toBe(true);
     expect(rows.every((e) => e.key === EVENT)).toBe(true);
     const events = eventPayloads(h);
-    expect(events.map((e) => e.type).sort()).toEqual(['TICKET_RETURNED', 'TRANSFER_ACCEPTED', 'TRANSFER_EXPIRED', 'TRANSFER_OFFERED', 'TRANSFER_REJECTED', 'TRANSFER_WITHDRAWN'].sort());
+    expect(events.map((e) => e.type).sort()).toEqual(['TICKET_RETURNED', 'TRANSFER_ACCEPTED', 'TRANSFER_EXPIRED', 'TRANSFER_OFFERED', 'TRANSFER_OFFERED', 'TRANSFER_OFFERED', 'TRANSFER_OFFERED', 'TRANSFER_REJECTED', 'TRANSFER_WITHDRAWN'].sort());
     const byType = new Map(events.map((e) => [e.type, e]));
     // accountId는 그 사건 시각의 보유자다.
     expect(byType.get('TRANSFER_OFFERED')!.accountId).toBe(A);
@@ -668,7 +673,7 @@ describe('F-05-11 T8 Outbox 여섯 사건', () => {
       expect(Number.isFinite(Date.parse(String(e.occurredAt))), `${String(e.type)} occurredAt`).toBe(true);
       expect(String(e.eventKey)).toMatch(UUID_V8);
     }
-    expect(new Set(events.map((e) => e.eventKey)).size).toBe(6);
+    expect(new Set(events.map((e) => e.eventKey)).size).toBe(9);
   });
 
   test('F-05-11 T8 ② 재생·재시도에도 outbox 행이 늘지 않고 같은 사건의 eventKey가 같다', async () => {

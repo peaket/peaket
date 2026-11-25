@@ -55,17 +55,17 @@ function subscriber(): string {
   return accountId;
 }
 
-/** 한 건을 보내고(202) 작업을 처리한 뒤 그 계정의 이메일·웹 푸시 작업을 돌려준다 */
+/** 한 건을 보내고(202) 작업을 처리한 뒤 그 계정의 이메일·웹 푸시 작업을 돌려준다. 작업은 처리 전에 잡는다(처리기가 보낸 행을 지운다) */
 async function sendAndProcess(body: Record<string, unknown>) {
   const r = await transferEvent(body);
   expect(r.statusCode, r.payload).toBe(202);
+  const accountId = body.accountId as string;
+  const emailJob = [...store.jobs.values()].find((j) => j.accountId === accountId && j.channel === 'EMAIL');
+  const pushJob = [...store.jobs.values()].find((j) => j.accountId === accountId && j.channel === 'WEB_PUSH');
   push.responses.push(201);
   const worker = svc.app.get(FanNotificationWorker);
   await worker.processDue(new Date(NOW_MS));
-  const accountId = body.accountId as string;
   const email = mail.sent.filter((m) => m.to === recipients.rows.get(accountId)?.email).at(-1);
-  const emailJob = [...store.jobs.values()].find((j) => j.accountId === accountId && j.channel === 'EMAIL');
-  const pushJob = [...store.jobs.values()].find((j) => j.accountId === accountId && j.channel === 'WEB_PUSH');
   return { email, emailJob, pushJob, response: r };
 }
 

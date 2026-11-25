@@ -26,8 +26,8 @@ beforeAll(async () => {
     database.pool.query('insert into account (id, status, nickname, phone, created_at) values ($1, $2, $3, $4, $5)', [id, status, nickname, phone, new Date(NOW)]);
   await insert(ACTIVE, 'ACTIVE', '지민', '010-9371-2468');
   await insert(ACTIVE2, 'ACTIVE', '서윤', '010-0000-1111');
-  await insert(PENDING, 'WITHDRAWAL_PENDING', '탈퇴중', '010-9371-2468');
-  await insert(DELETED, 'DELETED', null, '010-9371-2468');
+  await insert(PENDING, 'WITHDRAWAL_PENDING', '탈퇴중', '010-2222-3333');
+  await insert(DELETED, 'DELETED', null, '010-4444-5555');
   resolver = new DrizzleMemberCodeResolver(database);
 }, 120_000);
 
@@ -46,8 +46,9 @@ describe('F-05-11 T6 identity ResolvePhone 실제 PostgreSQL', () => {
     expect(await resolve!.call(resolver, '0109371246')).toBeUndefined();
     expect(await resolve!.call(resolver, '010937124680')).toBeUndefined();
     expect(await resolve!.call(resolver, '01000001111')).toEqual({ accountId: ACTIVE2, nickname: '서윤' });
-    // 같은 번호를 가진 WITHDRAWAL_PENDING·DELETED 계정은 뒤에 있어도 돌려주지 않는다.
-    expect((await resolve!.call(resolver, '01093712468'))!.accountId).toBe(ACTIVE);
+    // ACTIVE가 아닌 계정에만 있는 번호는 상태 필터가 없으면 찾힌다. 찾지 않아야 한다.
+    expect(await resolve!.call(resolver, '01022223333')).toBeUndefined();
+    expect(await resolve!.call(resolver, '01044445555')).toBeUndefined();
   });
 
   test('F-05-11 T6 ⑥ 0040의 정규화 식 인덱스가 있고, 같은 식으로 질의한다', async () => {
