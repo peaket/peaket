@@ -51,6 +51,31 @@ export const parseCssBudgets = (md) => budgetsOf(md, 'CSS');
 export const parseJsBudgets = (md) => budgetsOf(md, '첫 JS');
 
 /**
+ * §5.8 첫 JS 열의 '+ Worker NKB [가정]'(좌석 화면만). Worker 스크립트도 첫 화면과 따로 받는 JS라 같은 gzip 단위로 막는다(F-08-1).
+ * @returns {Map<string, number>} 경로 묶음 칸의 글 → Worker 예산
+ */
+export function parseWorkerBudgets(md) {
+  const out = new Map();
+  for (const row of parseBudgetRows(md)) {
+    const m = /\+\s*Worker\s+(\d+(?:\.\d+)?)\s*KB/i.exec(row['첫 JS'] ?? '');
+    if (m) out.set(row['경로 묶음'], Number(m[1]));
+  }
+  if (out.size === 0) throw new Error("docs/frontend.md §5.8 첫 JS 열에서 Worker 예산('+ Worker NKB')을 찾지 못했다");
+  return out;
+}
+
+/**
+ * §5.8 '판정은 둘로 나눈다'가 정한 랩 반복 횟수(20회 [가정]).
+ * @param {string} md
+ */
+export function parseLabRuns(md) {
+  const line = md.split(/\r?\n/).find((l) => l.includes('같은 시나리오를'));
+  const m = line && /(\d+)회\s*\[가정\]/.exec(line);
+  if (!m) throw new Error("docs/frontend.md §5.8 '판정은 둘로 나눈다'에서 랩 반복 횟수(20회 [가정])를 찾지 못했다");
+  return Number(m[1]);
+}
+
+/**
  * §5.8 체감 목표 열에서 Lighthouse가 재는 적재 지표(LCP 초, CLS)를 읽는다. 없으면 그 칸은 비운다(예: 좌석 화면은 '통과 뒤 첫 그림')
  * @returns {Map<string, { lcpMs?: number, cls?: number }>}
  */
@@ -77,6 +102,8 @@ const frontendMd = () => readFileSync(resolve(repoRoot, 'docs/frontend.md'), 'ut
 export const loadTbtLimitMs = () => parseTbtLimitMs(frontendMd());
 export const loadCssBudgets = () => parseCssBudgets(frontendMd());
 export const loadJsBudgets = () => parseJsBudgets(frontendMd());
+export const loadWorkerBudgets = () => parseWorkerBudgets(frontendMd());
+export const loadLabRuns = () => parseLabRuns(frontendMd());
 export const loadLoadTargets = () => parseLoadTargets(frontendMd());
 
 /** tokens.json의 의미 색 하나를 별칭까지 풀어 #rrggbb로(예: lightColor('primary')) */

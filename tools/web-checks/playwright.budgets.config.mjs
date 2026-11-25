@@ -29,6 +29,8 @@ export default defineConfig({
     { name: 'search-quality', testMatch: /search-quality\.spec\.mjs$/, use: secureWebOrigin },
     // FE-T25 콘솔 덩어리 나눔(F-03-2 T11): 관제 화면 덩어리·파트너 늦게 싣는 부분·끌어 놓기 라이브러리
     { name: 'chunks', testMatch: /chunks\.spec\.mjs$/ },
+    // F-08-1: 좌석 화면 Worker 스크립트 예산(§5.8 좌석 화면 '+ Worker 60KB')
+    { name: 'worker', testMatch: /worker\.spec\.mjs$/ },
   ],
   // 앱마다 운영 빌드 서버 하나(4101~4105)와 대기실 경량 페이지 정적 서버(4106). 밖에서 띄웠으면(lib/docker.mjs) 여기서 띄우지 않는다
   webServer: EXTERNAL_SERVERS

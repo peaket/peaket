@@ -40,6 +40,9 @@ const seatDemoAdmission = () => ({
 /** 결제 화면도 입장 저장값과 홀드가 있어야 머문다(없으면 대기실로 옮긴다). 홀드를 읽지 못해 '불러오지 못함'까지 잰다(회귀 방지다) */
 const checkoutDemoStorage = () => ({ ...seatDemoAdmission(), [`peaket.hold.${SEAT_DEMO_EVENT}`]: JSON.stringify({ holdId: 'lighthouse-hold', seatIds: ['A-1-1'], expiresAt: '2099-01-01T00:00:00Z' }) });
 
+/** 좌석 화면 데모의 탭 저장소 값(js·Lighthouse·Worker 예산 검사가 같이 쓴다) */
+export { seatDemoAdmission };
+
 /** @param {string} host */
 export function lighthousePages(host) {
   const at = (name, path) => `http://${host}:${portOf(app(name), 'prod')}${path}`;
