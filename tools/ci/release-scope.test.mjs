@@ -194,14 +194,14 @@ test('--release는 마이그레이션 주석에 섞인 동결 기능을 잡는�
   assert.match(r.stderr, /동결 기능 F-01-40가 마이그레이션에 있다/);
 });
 
-test('저장소의 v1 범위는 37·1·67이고 gate 하나가 맞다', () => {
+test('저장소의 v1 범위는 38·0·67이고 gate가 없다', () => {
   const r = spawnSync(process.execPath, [script, '--check'], { cwd: repoRoot, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   const manifest = JSON.parse(readFileSync(join(repoRoot, 'docs/release/v1-scope.json'), 'utf8'));
-  assert.deepEqual(manifest.gates, ['F-08-7']);
+  assert.deepEqual(manifest.gates, []);
   const counts = { release: 0, gate: 0, 'frozen-local': 0 };
   for (const value of Object.values(manifest.features)) counts[value.class] += 1;
-  assert.deepEqual(counts, { release: 37, gate: 1, 'frozen-local': 67 });
+  assert.deepEqual(counts, { release: 38, gate: 0, 'frozen-local': 67 });
 });
 
 test('--help는 사용법을 찍고 통과한다', () => {

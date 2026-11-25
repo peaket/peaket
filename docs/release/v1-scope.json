@@ -330,8 +330,8 @@
       "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
     },
     "F-08-7": {
-      "class": "gate",
-      "reason": "대기, 계획 docs/review/plans/F-08-7.md. 게이트: 데모 영상·안내·RFC·블로그 목차"
+      "class": "release",
+      "reason": "계획 docs/review/plans/F-08-7.md. 2026-11-25 산출물: docs/onboarding.md, F-08-7-demo-script.md(대본·장면표·숫자 카드), RFC 3건 정본 대조, 블로그 10편 목차. 촬영본·S1/S7 실기 확인은 소유자 보류로 v1 위험 수용(결정 8 범위 줄이기)."
     },
     "F-08-8": {
       "class": "release",
@@ -422,9 +422,7 @@
       "reason": "v1 제외(외부 계정): 봇 시뮬레이터 12칸 소유자 결정 대기(OPEN[23], 막힘)."
     }
   },
-  "gates": [
-    "F-08-7"
-  ],
+  "gates": [],
   "frozen": [
     "F-01-8",
     "F-01-9",

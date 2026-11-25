@@ -150,6 +150,7 @@
 - 2026-11-25 09:0x 데모 S1은 대기실 SCR-007 404로 아직 fail이다. queue-room Dockerfile의 apps/web/src 누락과 시드 bankCode '000'은 고쳤고(02be01e75·a7e47a379), 라우팅 원인을 조사 중이다. F-05-1은 Android만 확인하고 iPhone·실제 스캐너는 보류한다. Argo CD 전환 준비 문서 docs/release/argocd-cutover.md를 만들었고 실제 적용은 하지 않는다.
 - 2026-11-25 10:0x F-05-1 gate를 release로 옮겼다. Android(POCO X7 Pro)에서 월렛 QR·새로고침·뒤로 가기·PWA 설치 통과(9914e4718). 키 증명은 PC 측정에서 QR v1보다 열화 여유가 한 단계 작아 v1 미채택, 기존 QR·부스 재발급 유지. iPhone Safari·홈 화면·실제 스캐너는 소유자 보류로 v1 위험 수용. release 34·gate 4.
 - 2026-11-25 12:1x F-04-8·F-08-2·F-08-8 gate를 release로 옮기고 수치 주장을 줄였다. F-04-8은 30k 불가·hash 5k 한계(ops-rt 단일 핫 파티션), F-08-2는 100만 외삽·비례 미확인, F-08-8은 K7 ② 불변식만 확인. V-T19·V-T4·ST-T17은 통과로 올리지 않았다. 이제 gate는 F-08-7 하나이고 release 37·gate 1.
+- 2026-11-25 16:3x F-08-7 gate를 결정 8(범위 줄이기)로 닫았다. 안내 docs/onboarding.md, 데모 대본·장면표·숫자 카드, RFC 3건 정본 대조, 블로그 10편 목차를 마감(8de190dc7). 촬영본·S1/S7 실기 확인은 소유자 보류로 v1 위험 수용. release 38·gate 0·frozen 67.
 ## SEG 때 정할 범위 늘어남(ADR-0283 결정 6)
 - 묶음 중에 더한 새 단계는 wbs.csv 일수에 바로 더하지 않고 여기 모아 구간 마무리 때 소유자가 한 번에 정한다(앞선 예: HOT-405 0.75일, 2026-11-18 OPEN[49]).
 - PRF-174(wbs 2.7.1 ③, 0.5일 [가정], BAT-013): 탈퇴 참여자의 결제한 미사용 티켓 취소·환급(BAT-010이 찾음, 돈 A 대상, R-685).
