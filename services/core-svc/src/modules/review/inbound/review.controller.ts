@@ -1,6 +1,6 @@
 // 받는 층: 관람 후기·신고(openapi reviews 태그, SCR-016, FR-016·FR-070, ADR-0063·0066, BAT-585).
 // 목록·요약은 공개(팬 쿠키가 있으면 mine·reportedByMe), 쓰기·고치기·지우기·신고는 로그인 팬만이다.
-import { Controller, Delete, Get, HttpCode, Patch, Post } from '@nestjs/common';
+import { Controller, Delete, Get, HttpCode, Patch, Post, UseGuards } from '@nestjs/common';
 import {
   CreateEventReviewBody,
   CreateEventReviewResponse,
@@ -18,6 +18,7 @@ import {
 import { ContractBody, ContractParams, ContractQuery, ContractRouteSchema, CurrentPrincipal, type Principal, Roles } from '@peaket/platform';
 import { z } from 'zod';
 import { Reviews } from '../application/reviews.js';
+import { ReviewFeatureGuard } from '../application/review-feature.js';
 import type { EligibilityView, ReviewPage, ReviewSort, ReviewSummary, ReviewView } from '../domain/review.js';
 
 const EventParams = z.object({ eventId: z.string() }).strict();
@@ -27,6 +28,7 @@ const ReportBody = CreateReviewReportBody;
 const NoBody = z.null();
 
 @Controller('v1')
+@UseGuards(ReviewFeatureGuard)
 export class ReviewController {
   constructor(private readonly reviews: Reviews) {}
 

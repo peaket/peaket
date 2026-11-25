@@ -4,7 +4,8 @@
 import { ProblemError } from '@peaket/platform';
 import type { Command, CommandExecutionActor } from '../domain/command.js';
 import { CommandInputRejected, normalizeReason } from '../domain/command-params.js';
-import { writeExtendResult, writeExtendStart, writeRevertRequest, writeRevertResult } from '../domain/command-writes.js';
+import { writeExtendResult, writeExtendStart, writeRevertRequest, writeRevertResult, writeSettingChange } from '../domain/command-writes.js';
+import { isSettingCommand } from '../domain/setting-commands.js';
 import type { CommandExecutor, CommandSendResult, CommandStore } from '../domain/ports.js';
 
 const notFound = (): ProblemError => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
@@ -43,6 +44,26 @@ export async function sendRevert(
   q: { actorRef: string; actorRole: string; fromPending: boolean },
   nowMs: number,
 ): Promise<Command> {
+  if (isSettingCommand(command.type)) {
+    const previousBotLevel =
+      command.type === 'BOT_LEVEL'
+        ? (await store.list({ type: 'BOT_LEVEL', states: ['ACKED'], limit: 100 })).items
+            .filter((c) => c.commandId !== command.commandId)
+            .sort((a, b) => b.createdAtMs - a.createdAtMs)[0]?.params
+        : undefined;
+    const out = await store.mutate(command.commandId, async (w) => {
+      try {
+        const ok = await writeSettingChange(w, { phase: 'REVERT', nowMs, ...(previousBotLevel !== undefined ? { previousBotLevel } : {}) });
+        if (!ok) return { ok: false, error: 'settings-outbox-not-wired', command: w.current };
+        return { ok: await writeRevertResult(w, { ok: true, ...q, nowMs }), command: w.current };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : 'settings-outbox-not-wired', command: w.current };
+      }
+    });
+    if (!out) throw notFound();
+    if (!out.ok) throw dispatchFailed(out.error ?? 'settings-outbox-not-wired');
+    return out.command;
+  }
   const r = await send(executor?.revert ? () => executor.revert!(command, actor) : undefined);
   const error = r.status === 'FAILED' ? r.error : undefined;
   const out = await store.mutate(command.commandId, async (w) => ({ ok: await writeRevertResult(w, { ok: r.status === 'ACKED', ...(error !== undefined ? { error } : {}), ...q, nowMs }), command: w.current }));

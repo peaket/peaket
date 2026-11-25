@@ -22,11 +22,16 @@ import type { CommandTimelineEntry } from '../domain/ports.js';
 import type { OutboxMessage } from '@peaket/platform';
 import type { SettingChange } from '../domain/ports.js';
 import { settingOutboxMessage } from './settings-outbox.js';
+import type { ApplyCheckRow } from '../domain/apply-check.js';
+import { ACTIVE_APPLY_STATUSES } from '../domain/apply-check.js';
 
 /** 메모리 Outbox 한 줄(설정 사건과 그 Kafka 메시지) */
 export interface MemoryOutboxSetting {
+  readonly id: string;
   readonly setting: SettingChange;
   readonly message: OutboxMessage;
+  /** 나간 시각(시험 손잡이 markOutboxSent). 없으면 아직 안 나갔다 */
+  sentAtMs?: number;
 }
 
 interface MemRow {
@@ -96,6 +101,8 @@ export class MemoryCommandStore extends CommandStoreBase {
   readonly #ledger = new Map<string, number>();
   /** 설정 사건 Outbox(ops DB outbox와 같은 메시지, ADR-0349 결정 5) */
   readonly #outbox: MemoryOutboxSetting[] = [];
+  /** 적용 확인 행(0026 command_apply_check와 같은 행, ADR-0365 결정 14) */
+  readonly #applyChecks: ApplyCheckRow[] = [];
 
   constructor(private readonly audit: AuditChain) {
     super();
@@ -104,6 +111,51 @@ export class MemoryCommandStore extends CommandStoreBase {
   /** 시험용: 쓰기가 성공해 남은 설정 사건(차례대로) */
   outboxSettings(): readonly MemoryOutboxSetting[] {
     return [...this.#outbox];
+  }
+
+  /** 시험용: Outbox 행(나감 시각 포함) */
+  outboxRows(): readonly MemoryOutboxSetting[] {
+    return [...this.#outbox];
+  }
+
+  /** 시험용: Outbox 행이 나간 것으로 표시한다(릴레이 대신) */
+  markOutboxSent(outboxId: string, atMs: number): void {
+    const row = this.#outbox.find((x) => x.id === outboxId);
+    if (row) row.sentAtMs = atMs;
+  }
+
+  /** 온세일 표본처럼 명령 행 없이 설정 사건을 내는 길(SettingsPublisher) */
+  async setting(s: SettingChange): Promise<string> {
+    const id = randomUUID();
+    this.#outbox.push({ id, setting: s, message: settingOutboxMessage(s) });
+    return id;
+  }
+
+  async due(nowMs: number, limit: number): Promise<readonly ApplyCheckRow[]> {
+    return this.#applyChecks
+      .filter((r) => ACTIVE_APPLY_STATUSES.includes(r.status) && r.nextCheckAtMs <= nowMs)
+      .sort((a, b) => a.nextCheckAtMs - b.nextCheckAtMs)
+      .slice(0, limit);
+  }
+
+  async save(row: ApplyCheckRow): Promise<void> {
+    this.#putApplyCheck(row);
+  }
+
+  async latestOf(commandId: string): Promise<ApplyCheckRow | undefined> {
+    return this.#applyChecks.filter((r) => r.commandId === commandId).sort((a, b) => b.version - a.version)[0];
+  }
+
+  async outboxOf(outboxId: string): Promise<{ exists: boolean; sentAtMs?: number }> {
+    const row = this.#outbox.find((x) => x.id === outboxId);
+    if (!row) return { exists: false };
+    return { exists: true, ...(row.sentAtMs !== undefined ? { sentAtMs: row.sentAtMs } : {}) };
+  }
+
+  #putApplyCheck(row: ApplyCheckRow): void {
+    const i = this.#applyChecks.findIndex((r) => r.commandId === row.commandId && r.stage === row.stage && r.version === row.version);
+    if (i >= 0) this.#applyChecks[i] = row;
+    else this.#applyChecks.push(row);
   }
 
   /** 시험용: 명령의 사건(차례대로) */
@@ -271,6 +323,7 @@ export class MemoryCommandStore extends CommandStoreBase {
     const newApprovals: MemApproval[] = [];
     const audits: { recordType: string; payload: Record<string, unknown>; nowMs: number }[] = [];
     const newSettings: MemoryOutboxSetting[] = [];
+    const newApplyChecks: ApplyCheckRow[] = [];
     const ledgerDraft = new Map<string, number>();
     const existingEvents = this.#events.get(commandId) ?? [];
     const allActors = () => [...this.#actors.values(), ...newActors];
@@ -337,7 +390,12 @@ export class MemoryCommandStore extends CommandStoreBase {
       },
       // 설정 사건(ADR-0349 결정 5): DB와 같은 꼴 검사(settingOutboxMessage)를 지난 메시지를 쓰기가 성공할 때만 남긴다
       async setting(s: SettingChange) {
-        newSettings.push({ setting: s, message: settingOutboxMessage(s) });
+        const id = randomUUID();
+        newSettings.push({ id, setting: s, message: settingOutboxMessage(s) });
+        return id;
+      },
+      async applyCheck(row: ApplyCheckRow) {
+        newApplyChecks.push(row);
       },
       postReviews: this.#postReviewWriter(commandId, () => [...existingEvents, ...newEvents], (r) => (review = r)),
       // 판 번호 원장(DB와 같은 규칙): max(범위들의 마지막 판 + 1, 지금 밀리초). 쓰기가 성공할 때만 반영한다
@@ -357,6 +415,7 @@ export class MemoryCommandStore extends CommandStoreBase {
     this.#approvals.push(...newApprovals);
     this.#events.set(commandId, [...existingEvents, ...newEvents]);
     this.#outbox.push(...newSettings);
+    for (const row of newApplyChecks) this.#putApplyCheck(row);
     for (const [k, v] of ledgerDraft) this.#ledger.set(k, v);
     for (const a of audits) await this.audit.append({ recordType: a.recordType, recordId: commandId, payload: a.payload, nowMs: a.nowMs });
     return result;

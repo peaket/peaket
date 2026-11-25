@@ -11,7 +11,10 @@
 import { createHash } from 'node:crypto';
 import { SettingChanged } from '@peaket/contracts/asyncapi';
 import { CONTROL_TOPICS, systemClock, writeOutbox, type Clock, type DbTransaction, type OutboxMessage } from '@peaket/platform';
+import { settingMessageKey } from '../domain/setting-commands.js';
 import type { SettingChange } from '../domain/ports.js';
+
+export { settingMessageKey } from '../domain/setting-commands.js';
 
 /** eventKey 도메인 글. 규칙을 바꾸면 v2로 올린다 */
 export const SETTING_EVENT_KEY_DOMAIN = 'PEAKET-setting-event-v1';
@@ -37,7 +40,6 @@ export function settingEventKey(commandId: string, kind: string, scope: string):
 }
 
 /** 메시지 키 '<범위>:<종류>:<대상>'(대상이 없으면 비움) */
-export const settingMessageKey = (s: Pick<SettingChange, 'scope' | 'kind' | 'target'>): string => `${s.scope}:${s.kind}:${s.target ?? ''}`;
 
 /**
  * 설정 사건 하나를 Outbox 메시지로 만든다(쓰지 않는다). 계약 생성물 SettingChanged로 꼴을 본다.

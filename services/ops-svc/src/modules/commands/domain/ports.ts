@@ -105,7 +105,9 @@ export interface CommandWriter {
    * 없는 저장소는 설정형 명령을 낼 수 없다(실행기가 FAILED로 남긴다)
    * @throws SettingChangeRejected 계약 꼴이 아님(트랜잭션째 되돌아간다)
    */
-  setting?(s: SettingChange): Promise<void>;
+  setting?(s: SettingChange): Promise<string>;
+  /** 설정형 명령의 적용 확인 행(같은 트랜잭션). 없으면 그 저장소는 적용 확인을 쓰지 못한다 */
+  applyCheck?(row: import('./apply-check.js').ApplyCheckRow): Promise<void>;
   /** 명령 3·11의 사후 검토 행(command_post_review)을 같은 트랜잭션에서 고친다(ADR-0349 결정 7). 두 저장소가 채운다 */
   readonly postReviews?: PostReviewWriter;
   /**
@@ -156,6 +158,16 @@ export interface ControlTargets {
 /** 주소 하나에 ApplyControl 한 번(데드라인 1초 [가정]). 실패·시간 초과는 던진다 */
 export interface ControlTransport {
   apply(service: string, address: string, req: { readonly commandId: string; readonly scope: string; readonly kind: string; readonly version: number; readonly desiredStateJson: string }): Promise<{ readonly appliedVersion: number; readonly podName: string }>;
+  /** 읽기 전용 사전 모의 센 값(PreviewControl, ADR-0365 결정 11·16). 없으면 그 전송은 미리보기를 못 한다 */
+  preview?(
+    service: string,
+    address: string,
+    req: { readonly scope: string; readonly kind: string; readonly keys: readonly string[] },
+  ): Promise<{
+    readonly counts: readonly { readonly key: string; readonly value: number; readonly source: string; readonly measuredAtMs: number }[];
+    readonly unavailable: readonly { readonly key: string; readonly reason: string }[];
+    readonly podName: string;
+  }>;
 }
 
 /** 받는 쪽 넷에 같은 판을 퍼뜨리고 ack를 기다리는 길(application ControlDispatcher가 구현, 실행기가 판매 중지·재개에 쓴다) */
@@ -222,6 +234,22 @@ export interface SettingChange {
   readonly actorRef: string;
   /** 판(사건 시각) */
   readonly occurredAtMs: number;
+}
+
+/** 적용 확인 행 저장소(ops DB command_apply_check, ADR-0365 결정 14) */
+export interface ApplyCheckStore {
+  /** 지금 볼 행(다음 볼 시각이 지난 것)을 limit개까지. 파드 여럿이 겹치지 않게 저장소가 잠근다 */
+  due(nowMs: number, limit: number): Promise<readonly import('./apply-check.js').ApplyCheckRow[]>;
+  save(row: import('./apply-check.js').ApplyCheckRow): Promise<void>;
+  /** 그 명령의 마지막 사건 행(단계·판이 가장 큼) */
+  latestOf(commandId: string): Promise<import('./apply-check.js').ApplyCheckRow | undefined>;
+  /** Outbox 행이 아직 있는지, 있으면 나간 시각(sent_at) */
+  outboxOf(outboxId: string): Promise<{ readonly exists: boolean; readonly sentAtMs?: number }>;
+}
+
+/** 받는 서비스의 적용 판을 Prometheus에서 읽는 포트(ADR-0365 결정 15) */
+export interface SettingsApplyProbe {
+  probe(q: { readonly service: string; readonly messageKey: string; readonly version: number }): Promise<import('./apply-check.js').ProbeResult>;
 }
 
 /** 명령 12·6이 묻는 결제사 이름(ops 쪽 값, payment.proto PgProvider와 대응) */

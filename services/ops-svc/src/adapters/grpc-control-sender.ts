@@ -23,8 +23,21 @@ export interface ControlAck {
   readonly podName: string;
 }
 
+export interface PreviewRequest {
+  readonly scope: string;
+  readonly kind: string;
+  readonly keys: readonly string[];
+}
+
+export interface PreviewResponse {
+  readonly counts: readonly { readonly key: string; readonly value: number; readonly source: string; readonly measuredAtMs: number }[];
+  readonly unavailable: readonly { readonly key: string; readonly reason: string }[];
+  readonly podName: string;
+}
+
 export interface ControlSender {
   apply(req: ControlRequest): Promise<ControlAck>;
+  preview?(req: PreviewRequest): Promise<PreviewResponse>;
   close(): void;
 }
 
@@ -54,7 +67,7 @@ export interface GrpcControlSenderOptions {
 }
 
 export class GrpcControlSender implements ControlSender {
-  readonly #client: grpc.Client & { ApplyControl: Unary };
+  readonly #client: grpc.Client & { ApplyControl: Unary; PreviewControl: Unary };
 
   /** @throws Error 주소가 host:port 모양이 아님(시작 실패) */
   constructor(o: GrpcControlSenderOptions) {
@@ -65,7 +78,7 @@ export class GrpcControlSender implements ControlSender {
       profile: o.profile ?? 'service',
       dependency: o.dependency,
       timeoutCapMs: CONTROL_DEADLINE_MS,
-    }) as unknown as grpc.Client & { ApplyControl: Unary };
+    }) as unknown as grpc.Client & { ApplyControl: Unary; PreviewControl: Unary };
   }
 
   apply(req: ControlRequest): Promise<ControlAck> {
@@ -87,6 +100,39 @@ export class GrpcControlSender implements ControlSender {
           const podName = typeof v?.pod_name === 'string' ? v.pod_name : '';
           if (!Number.isSafeInteger(applied) || applied < 0) return reject(new Error('제어 ack의 applied_version이 올바르지 않다'));
           resolve({ appliedVersion: applied, podName });
+        },
+      );
+    });
+  }
+
+  preview(req: PreviewRequest): Promise<PreviewResponse> {
+    const deadline = new Date(Date.now() + CONTROL_DEADLINE_MS);
+    return new Promise<PreviewResponse>((resolve, reject) => {
+      this.#client.PreviewControl(
+        { scope: req.scope, kind: req.kind, keys: [...req.keys] },
+        new grpc.Metadata(),
+        { deadline },
+        (e, v) => {
+          if (e) {
+            if (e.code === grpc.status.DEADLINE_EXCEEDED) return reject(Object.assign(new Error('preview-deadline'), { name: 'TimeoutError', code: e.code }));
+            return reject(Object.assign(new Error(e.details ?? e.message), { code: e.code, details: e.details }));
+          }
+          const rawCounts = Array.isArray(v?.counts) ? (v!.counts as Record<string, unknown>[]) : [];
+          const rawUnavailable = Array.isArray(v?.unavailable) ? (v!.unavailable as Record<string, unknown>[]) : [];
+          const tsMs = (t: unknown): number => {
+            const x = t as { seconds?: number | string; nanos?: number } | undefined;
+            return Number(x?.seconds ?? 0) * 1_000 + Math.floor(Number(x?.nanos ?? 0) / 1_000_000);
+          };
+          resolve({
+            counts: rawCounts.map((c) => ({
+              key: String(c.key ?? ''),
+              value: Number(c.value ?? Number.NaN),
+              source: String(c.source ?? ''),
+              measuredAtMs: tsMs(c.measured_at),
+            })),
+            unavailable: rawUnavailable.map((u) => ({ key: String(u.key ?? ''), reason: String(u.reason ?? '') })),
+            podName: typeof v?.pod_name === 'string' ? v.pod_name : '',
+          });
         },
       );
     });
@@ -114,6 +160,17 @@ export class GrpcControlTransport {
       this.#senders.set(key, sender);
     }
     return sender.apply(req);
+  }
+
+  /** 읽기 전용 사전 모의(PreviewControl). 부르는 쪽은 주소를 ControlTargets에서만 받는다 */
+  preview(service: string, address: string, req: PreviewRequest): Promise<PreviewResponse> {
+    const key = `${service}|${address}`;
+    let sender = this.#senders.get(key);
+    if (!sender) {
+      sender = this.make(address, service);
+      this.#senders.set(key, sender);
+    }
+    return sender.preview!(req);
   }
 
   close(): void {

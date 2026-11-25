@@ -5,7 +5,8 @@ import { ADMISSION_REDIS, BatchModule, type BatchModuleOptions, PublishBatchResu
 import { RedisLeaderStore } from './adapters/redis-leader-store.js';
 import { AdmissionLeader } from './application/admission-leader.js';
 import { LEADER_METRICS, type LeaderMetrics } from './application/leader-metrics.js';
-import { CONTROL_INPUTS, type ControlInputsReader, ELECTOR, type Elector, LEADER_STORE, PUBLISHER, SEED_REVEALER } from './domain/ports.js';
+import { CONTROL_INPUTS, LEADER_CYCLE_SNAPSHOTS, type ControlInputsReader, ELECTOR, type Elector, LEADER_STORE, PUBLISHER, SEED_REVEALER } from './domain/ports.js';
+import { LeaderCycleSnapshots } from './application/preview-leader.js';
 
 export interface LeaderModuleOptions {
   redis: HotRedis;
@@ -15,6 +16,8 @@ export interface LeaderModuleOptions {
   metrics?: LeaderMetrics;
   /** 자동 제어 입력(없으면 자동 제어를 끈다, ADR-0226 결정 13) */
   controlInputs?: ControlInputsReader;
+  /** 리더 주기 값(사전 모의, F-02-5). 없으면 새로 만든다 */
+  snapshots?: LeaderCycleSnapshots;
 }
 
 @Module({})
@@ -24,6 +27,7 @@ export class LeaderModule {
       module: LeaderModule,
       imports: [BatchModule.register({ redis: o.redis, ...o.batch })],
       providers: [
+        { provide: LEADER_CYCLE_SNAPSHOTS, useValue: o.snapshots ?? new LeaderCycleSnapshots() },
         AdmissionLeader,
         { provide: ADMISSION_REDIS, useValue: o.redis },
         // RB-05 복제 확인도 묶음 게시 확인과 같은 WAIT 전용 연결을 쓴다(ADR-0186)

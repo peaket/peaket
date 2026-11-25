@@ -4,7 +4,7 @@ import { DATABASE, type Database } from '@peaket/platform';
 import { eq, sql } from 'drizzle-orm';
 import type { EventSaleConfig } from '../../domain/event-sale-config.js';
 import { ONSALE_WINDOW_END_MS, OPS_DATABASE, type DueEventConfig, type OnsaleClosedEvent, type SaleConfigReader, type SaleConfigStore } from '../../domain/sale-config-ports.js';
-import { eventSaleConfig } from './schema.js';
+import { eventSaleConfig, event } from './schema.js';
 
 const dueEvents = async (database: Database, through: Date, limit: number): Promise<DueEventConfig[]> => {
   const rows = await database.db
@@ -31,6 +31,21 @@ const onsaleClosed = async (database: Database, from: Date, to: Date, limit: num
   return rows.map((r) => ({ eventId: r.eventId, closedAt: new Date(Number(r.closedAtMs)) }));
 };
 
+/** 판매 시작이 [from, to)에 든 취소되지 않은 회차(회차·오픈 시각·규모). F-02-5 온세일 로그 표본 */
+const onsaleOpens = async (database: Database, from: Date, to: Date, limit: number): Promise<{ eventId: string; opensAtMs: number; scale: 'LARGE' | 'MEDIUM' | 'SMALL' | null }[]> => {
+  const rows = await database.db
+    .select({ eventId: event.id, openAt: event.openAt, scale: event.scale })
+    .from(event)
+    .where(sql`${event.status} <> 'CANCELLED' and ${event.openAt} >= ${from} and ${event.openAt} < ${to}`)
+    .orderBy(event.openAt, event.id)
+    .limit(limit);
+  return rows.map((r) => ({
+    eventId: r.eventId,
+    opensAtMs: r.openAt.getTime(),
+    scale: r.scale === 'LARGE' || r.scale === 'MEDIUM' || r.scale === 'SMALL' ? r.scale : null,
+  }));
+};
+
 /** 내부 HTTP 읽기 전용 사본 읽기(core_app). 쓰기 역할(core_ops)을 읽기에 쓰지 않는다 */
 @Injectable()
 export class DrizzleSaleConfigReader implements SaleConfigReader {
@@ -47,6 +62,10 @@ export class DrizzleSaleConfigReader implements SaleConfigReader {
 
   listOnsaleClosed(from: Date, to: Date, limit: number): Promise<OnsaleClosedEvent[]> {
     return onsaleClosed(this.database, from, to, limit);
+  }
+
+  listOnsaleOpens(from: Date, to: Date, limit: number): Promise<{ eventId: string; opensAtMs: number; scale: 'LARGE' | 'MEDIUM' | 'SMALL' | null }[]> {
+    return onsaleOpens(this.database, from, to, limit);
   }
 
   async commissionRateBp(eventId: string): Promise<number | undefined> {
@@ -84,6 +103,10 @@ export class DrizzleSaleConfigStore implements SaleConfigStore {
 
   listOnsaleClosed(from: Date, to: Date, limit: number): Promise<OnsaleClosedEvent[]> {
     return onsaleClosed(this.database, from, to, limit);
+  }
+
+  listOnsaleOpens(from: Date, to: Date, limit: number): Promise<{ eventId: string; opensAtMs: number; scale: 'LARGE' | 'MEDIUM' | 'SMALL' | null }[]> {
+    return onsaleOpens(this.database, from, to, limit);
   }
 
   async commissionRateBp(eventId: string): Promise<number | undefined> {

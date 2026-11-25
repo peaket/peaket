@@ -12,6 +12,10 @@ export const controlV1Control: Record<string, unknown> = {
                     "ApplyControl": {
                       "requestType": "ApplyControlRequest",
                       "responseType": "ApplyControlResponse"
+                    },
+                    "PreviewControl": {
+                      "requestType": "PreviewControlRequest",
+                      "responseType": "PreviewControlResponse"
                     }
                   }
                 },
@@ -94,6 +98,73 @@ export const controlV1Control: Record<string, unknown> = {
                     },
                     "applied_at": {
                       "type": "google.protobuf.Timestamp",
+                      "id": 3
+                    }
+                  }
+                },
+                "PreviewControlRequest": {
+                  "fields": {
+                    "scope": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "kind": {
+                      "type": "ControlKind",
+                      "id": 2
+                    },
+                    "keys": {
+                      "rule": "repeated",
+                      "type": "string",
+                      "id": 3
+                    }
+                  }
+                },
+                "PreviewCount": {
+                  "fields": {
+                    "key": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "value": {
+                      "type": "double",
+                      "id": 2
+                    },
+                    "source": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "measured_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 4
+                    }
+                  }
+                },
+                "PreviewUnavailable": {
+                  "fields": {
+                    "key": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "reason": {
+                      "type": "string",
+                      "id": 2
+                    }
+                  }
+                },
+                "PreviewControlResponse": {
+                  "fields": {
+                    "counts": {
+                      "rule": "repeated",
+                      "type": "PreviewCount",
+                      "id": 1
+                    },
+                    "unavailable": {
+                      "rule": "repeated",
+                      "type": "PreviewUnavailable",
+                      "id": 2
+                    },
+                    "pod_name": {
+                      "type": "string",
                       "id": 3
                     }
                   }

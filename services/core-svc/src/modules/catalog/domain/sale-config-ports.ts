@@ -31,6 +31,15 @@ export interface SaleConfigStore {
   commissionRateBp(eventId: string): Promise<number | undefined>;
   /** 판매 시작 + 60분이 [from, to)에 든 회차(마감 시각·회차 ID 차례, limit개까지). 대기열 사본처럼 원천이 아니면 없다 */
   listOnsaleClosed?(from: Date, to: Date, limit: number): Promise<OnsaleClosedEvent[]>;
+  /** 판매 시작이 [from, to)에 든 취소되지 않은 회차(회차·오픈 시각·규모, limit개까지). F-02-5 온세일 로그 표본 */
+  listOnsaleOpens?(from: Date, to: Date, limit: number): Promise<readonly OnsaleOpenEvent[]>;
+}
+
+/** 온세일 오픈 하나(규모는 없을 수 있다) */
+export interface OnsaleOpenEvent {
+  eventId: string;
+  opensAtMs: number;
+  scale: 'LARGE' | 'MEDIUM' | 'SMALL' | null;
 }
 
 export const SALE_CONFIG_STORE = Symbol('SALE_CONFIG_STORE');
@@ -44,6 +53,8 @@ export interface SaleConfigReader {
   commissionRateBp(eventId: string): Promise<number | undefined>;
   /** 판매 시작 + 60분이 [from, to)에 든 회차(ops-svc 게시 작업, ADR-0348 결정 9). 없으면 내부 경로가 503이다 */
   listOnsaleClosed?(from: Date, to: Date, limit: number): Promise<OnsaleClosedEvent[]>;
+  /** 판매 시작이 [from, to)에 든 취소되지 않은 회차(회차·오픈 시각·규모, limit개까지). F-02-5 온세일 로그 표본 */
+  listOnsaleOpens?(from: Date, to: Date, limit: number): Promise<readonly OnsaleOpenEvent[]>;
 }
 
 export const SALE_CONFIG_READER = Symbol('SALE_CONFIG_READER');

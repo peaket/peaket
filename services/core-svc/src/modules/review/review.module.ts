@@ -1,6 +1,6 @@
 // review 모듈 조립. 메모리(단위 시험)와 Drizzle(운영) 저장소를 고른다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
-import { type Clock, type Database, CLOCK, DATABASE, INTERNAL_TOKEN, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
+import { type Clock, type Database, CLOCK, DATABASE, INTERNAL_TOKEN, PLATFORM_LOGGER, type PlatformLogger, type SettingsStore } from '@peaket/platform';
 import { MemoryCatalogRepository, type CatalogRepository } from '../catalog/index.js';
 import { DrizzleReviewEventDirectory } from './adapters/db/drizzle-review-event-directory.js';
 import { DrizzleReviewStore } from './adapters/db/drizzle-review-store.js';
@@ -11,6 +11,7 @@ import { MemoryReviewStore } from './adapters/memory-review-store.js';
 import { LogReviewCaseSink, LogReviewNotifier } from './adapters/review-notifier.js';
 import { UnavailableReviewEligibility } from './adapters/unavailable-review-eligibility.js';
 import { Reviews } from './application/reviews.js';
+import { ReviewFeatureGuard, REVIEW_SETTINGS } from './application/review-feature.js';
 import { FAN_PROFILE, REVIEW_CASE_SINK, REVIEW_ELIGIBILITY, REVIEW_EVENT_DIRECTORY, REVIEW_NOTIFIER, REVIEW_STORE, type FanProfile, type ReviewCaseSink, type ReviewEligibility, type ReviewEventDirectory, type ReviewNotifier, type ReviewStore } from './domain/ports.js';
 import { InternalReviewController } from './inbound/internal-review.controller.js';
 import { OpsReviewController } from './inbound/ops-review.controller.js';
@@ -24,6 +25,8 @@ export interface MemoryReviewWiring {
   fanProfile?: FanProfile;
   notifier?: ReviewNotifier;
   cases?: ReviewCaseSink;
+  /** 명령 9 플래그를 읽는 설정 저장소(F-02-5). 없으면 늘 켜짐 */
+  settings?: Pick<SettingsStore, 'get'>;
 }
 
 export interface DatabaseReviewWiring {
@@ -33,6 +36,8 @@ export interface DatabaseReviewWiring {
   fanProfile?: FanProfile;
   notifier?: ReviewNotifier;
   cases?: ReviewCaseSink;
+  /** 명령 9 플래그를 읽는 설정 저장소(F-02-5). 없으면 늘 켜짐 */
+  settings?: Pick<SettingsStore, 'get'>;
 }
 
 @Module({})
@@ -41,6 +46,7 @@ export class ReviewModule {
     const controllers = [ReviewController, OpsReviewController, InternalReviewController];
     const base: Provider[] = [
       { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
+      { provide: REVIEW_SETTINGS, useValue: o.storage === 'memory' ? o.wiring?.settings : o.settings },
       { provide: REVIEW_ELIGIBILITY, useValue: o.storage === 'memory' ? (o.wiring?.eligibility ?? new MemoryReviewEligibility()) : (o.eligibility ?? new UnavailableReviewEligibility()) },
       { provide: FAN_PROFILE, useValue: (o.storage === 'memory' ? o.wiring?.fanProfile : o.fanProfile) ?? new UnavailableFanProfile() },
       { provide: REVIEW_NOTIFIER, useValue: (o.storage === 'memory' ? o.wiring?.notifier : o.notifier) ?? new LogReviewNotifier() },

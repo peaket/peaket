@@ -15,6 +15,8 @@ import { SALE_CONFIG_READER, type SaleConfigReader } from '../domain/sale-config
 /** 끝난 회차 목록의 구간 상한(하루)·행 상한(500) [가정](ADR-0348 결정 9) */
 export const ONSALE_CLOSED_MAX_RANGE_MS = 24 * 60 * 60_000;
 export const ONSALE_CLOSED_MAX_ROWS = 500;
+/** 온세일 오픈 목록 상한(계획 14절 10 [가정]) */
+export const ONSALE_OPENS_MAX_ROWS = 200;
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 const invalidQuery = (): ProblemError => new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다' });
 
@@ -52,6 +54,7 @@ const DueEventsResponse = z
   .strict();
 const CommissionRateResponse = z.object({ commissionRateBp: z.number() }).strict();
 const OnsaleClosedResponse = z.object({ items: z.array(z.object({ eventId: z.string(), closedAt: z.string() }).strict()) }).strict();
+const OnsaleOpensResponse = z.object({ items: z.array(z.object({ eventId: z.string(), opensAt: z.string(), scale: z.enum(['LARGE', 'MEDIUM', 'SMALL']).nullable() }).strict()) }).strict();
 
 /**
  * 내부 토큰이 없거나 틀리면 401(공용 InternalTokenGuard의 403과 달리 이 경로의 계약이다).
@@ -103,6 +106,20 @@ export class InternalSaleConfigController {
     const rows = await this.configs.listOnsaleClosed(new Date(from), new Date(to), ONSALE_CLOSED_MAX_ROWS + 1);
     if (rows.length > ONSALE_CLOSED_MAX_ROWS) throw new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다', detail: 'too-many-rows' });
     return { items: rows.map((r) => ({ eventId: r.eventId, closedAt: r.closedAt.toISOString() })) };
+  }
+
+  @Get('onsale-opens')
+  @ContractRouteSchema({ responses: { 200: OnsaleOpensResponse } })
+  @Roles(['public'])
+  async onsaleOpens(@Query() q: Record<string, string | undefined>, @Res({ passthrough: true }) reply: FastifyReply): Promise<{ items: { eventId: string; opensAt: string; scale: string | null }[] }> {
+    void reply.header('cache-control', 'no-store');
+    const from = typeof q.from === 'string' && ISO_INSTANT.test(q.from) ? Date.parse(q.from) : Number.NaN;
+    const to = typeof q.to === 'string' && ISO_INSTANT.test(q.to) ? Date.parse(q.to) : Number.NaN;
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) throw invalidQuery();
+    if (!this.configs.listOnsaleOpens) throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '의존 서비스를 잠시 쓸 수 없습니다', retryAfterSeconds: 5 });
+    const rows = await this.configs.listOnsaleOpens(new Date(from), new Date(to), ONSALE_OPENS_MAX_ROWS + 1);
+    if (rows.length > ONSALE_OPENS_MAX_ROWS) throw new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다', detail: 'too-many-rows' });
+    return { items: rows.map((r) => ({ eventId: r.eventId, opensAt: new Date(r.opensAtMs).toISOString(), scale: r.scale })) };
   }
 
   @Get(':eventId/sale-config')

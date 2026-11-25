@@ -3,7 +3,7 @@
 // 듣기 시작한 뒤 Kafka 소비자(탈퇴 사건의 후기 파기와 16분 뒤 다시 정리, W7-audit COV2-06·ADR-0278, docs/streaming.md §2.6 'core-svc 소비자')를 켠다. 브로커 주소(PEAKET_KAFKA_BROKERS)가 없으면
 // local·ci만 경고 한 줄로 소비자 없이 뜨고 그 밖의 환경은 시작하지 않는다. 소비자를 켜지 못하면 오류 한 줄 뒤 SIGTERM과 같은 차례로 끝내고 종료 코드 1을 둔다.
 import { fileURLToPath } from 'node:url';
-import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, errorSummary, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, systemClock } from '@peaket/platform';
+import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, errorSummary, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, type SettingsStore, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import type { CoreConsumers } from './consumers/start.js';
@@ -192,6 +192,8 @@ await assertDatabaseRole(searchDatabase, 'core_search');
 await assertDatabaseRole(notifyDatabase, 'core_notify');
 /** 요청 하나(머리·본문)를 다 받는 시한 [가정]: 천천히 보내는 연결이 올리기 버퍼와 칸막이 자리를 오래 쥐지 않게(ADR-0257 결정 2) */
 const REQUEST_TIMEOUT_MS = 100_000;
+// 명령 9 플래그(F-02-5): createService 뒤에 켜는 제어 소비의 저장소를 지연 접근으로 넘긴다(계획 8.4)
+const reviewSettings: Pick<SettingsStore, 'get'> = { get: (key) => controlSync?.sync.settings.get(key) };
 const service = await createService({
   name: SERVICE,
   adminAuthz,
@@ -206,7 +208,7 @@ const service = await createService({
     opsDatabase,
     searchDatabase,
     media: { imageOrigin, processing: imageProcessing, store: new LocalFolderImageStore(imageStoreDir), seatmap: seatmapParser, publicFiles: new LocalFolderPublicFileStore(publicFileDir), memberCodes, eligibilityCopy, pseudonym, eligibilityMetrics, templates },
-    review: { eligibility: reviewEligibility, fanProfile: new UnavailableFanProfile() },
+    review: { eligibility: reviewEligibility, fanProfile: new UnavailableFanProfile(), settings: reviewSettings },
     shop: {
       stock: merchStock,
       payments: grpcPayments ?? unavailableMerchPayments,

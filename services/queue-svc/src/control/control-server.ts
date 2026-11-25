@@ -80,8 +80,26 @@ export function saleSuspensionControlBinding(deps: QueueControlDeps): GrpcServic
       deps.setSuspension.run({ eventId: scope, action: suspended ? 'SUSPEND' : 'RESUME', commandId, revision: version }).then((result) => ack(result.revision), failed);
     },
     PreviewControl: (call: grpc.ServerUnaryCall<Record<string, unknown>, unknown>, cb: grpc.sendUnaryData<unknown>) => {
-      void call;
-      cb(null, { counts: [], unavailable: [], pod_name: deps.podName });
+      const fail = (code: number, message: string): void => {
+        deps.onError?.('PreviewControl', new Error(message));
+        cb({ code, message });
+      };
+      if (!deps.preview) return fail(grpc.status.UNIMPLEMENTED, '사전 모의를 조립하지 않았다');
+      const r = call.request;
+      if (String(r.kind ?? '') !== CONTROL_KIND_SALE_PAUSE) return fail(grpc.status.UNIMPLEMENTED, '이 사전 모의 종류는 받지 않는다');
+      const scope = String(r.scope ?? '');
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(scope)) return fail(grpc.status.INVALID_ARGUMENT, 'scope는 소문자 회차 ID여야 한다');
+      const keys = Array.isArray(r.keys) ? (r.keys as unknown[]).map((x) => String(x)) : [];
+      if (keys.length === 0 || keys.length > 16) return fail(grpc.status.INVALID_ARGUMENT, 'keys는 1~16개여야 한다');
+      deps.preview!.run({ eventId: scope, keys }).then(
+        (p) =>
+          cb(null, {
+            counts: p.counts.map((c) => ({ key: c.key, value: c.value, source: c.source, measured_at: { seconds: Math.floor(c.measuredAtMs / 1000), nanos: (c.measuredAtMs % 1000) * 1_000_000 } })),
+            unavailable: p.unavailable.map((u) => ({ key: u.key, reason: u.reason })),
+            pod_name: deps.podName,
+          }),
+        (err: unknown) => fail(grpc.status.INTERNAL, err instanceof Error ? err.message : 'preview-failed'),
+      );
     },
   };
   return { definition: controlPackage().ControlReceiver.service, handlers };

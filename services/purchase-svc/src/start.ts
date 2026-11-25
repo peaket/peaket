@@ -219,6 +219,9 @@ import {
   HoldPauseView,
   type PaymentPauseSource,
   RedisOrderHolds,
+  DrizzleSaleRecordCounter,
+  PreviewCounts,
+  RedisPurchaseSessionCounter,
   RedisPurchaseSessionStore,
   RedisSaleCounts,
   RedisSeatSlots,
@@ -597,6 +600,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
             setPause: new SetSalePause(saleControl.store, saleControl.copies, saleControl.memory),
             podName: podId,
             nowMs: () => systemClock.now(),
+            ...(database ? { preview: new PreviewCounts({ sessions: new RedisPurchaseSessionCounter(redis), records: new DrizzleSaleRecordCounter(database), clock: systemClock }) } : {}),
           },
         })
       : undefined;

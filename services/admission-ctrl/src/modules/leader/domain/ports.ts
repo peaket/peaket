@@ -213,3 +213,5 @@ export interface LeaderControlStoreWrite extends LeaderControlWrite {
   readonly keepUntilMs?: number;
 }
 export type LeaderControlResult = { readonly kind: 'FENCED' } | { readonly kind: 'OK'; readonly appliedVersion: number; readonly changed: boolean };
+
+export const LEADER_CYCLE_SNAPSHOTS = Symbol('admission.LeaderCycleSnapshots');

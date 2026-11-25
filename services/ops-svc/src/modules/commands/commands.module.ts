@@ -13,12 +13,14 @@ import { GetCommand } from './application/get-command.js';
 import { HandleCommandEvent } from './application/handle-command-event.js';
 import { ListCommands } from './application/list-commands.js';
 import { MaintainCommands, type MaintainCommandsOptions } from './application/maintain-commands.js';
+import { CheckSettingsApply } from './application/check-settings-apply.js';
+import { PublishOnsaleLogSampling, type OnsaleScheduleSource } from './domain/log-sampling.js';
 import { PostReviews } from './application/post-review.js';
 import { RetryCommand } from './application/retry-command.js';
 import { ExtendCommand, RevertCommand } from './application/revert-command.js';
 import { COMMAND_MAINTENANCE_INTERVAL_MS, type CommandType } from './domain/command.js';
 import type { DryRunSource } from './domain/dry-run.js';
-import type { CancelledEventGuard, CommandExecutor, CommandSignals, CommandStore, ControlDeliveries, LobbyBannerTemplates, OnsaleStartSource, PgAssignmentCheck, PgSwitchResolver } from './domain/ports.js';
+import type { ApplyCheckStore, CancelledEventGuard, CommandExecutor, CommandSignals, CommandStore, ControlDeliveries, LobbyBannerTemplates, OnsaleStartSource, PgAssignmentCheck, PgSwitchResolver, SettingsApplyProbe } from './domain/ports.js';
 import { PgSwitchPlanner } from './application/pg-switch-plan.js';
 import type { ProtectedRangeList } from './domain/protected-ranges.js';
 import { LogCommandSecurityEvents, PromCommandSignals } from './adapters/command-signals.js';
@@ -26,15 +28,16 @@ import { UnavailableDryRunSource } from './adapters/unavailable-dry-run-source.j
 import { OpsEventLog, OpsEventStore } from './adapters/ops-event-log.js';
 import type { ActiveCommanders, BlockIpSetReader } from './domain/ports.js';
 import type { OpsAlertStore } from '../alerts/index.js';
+import { RecordOpsAlert } from '../alerts/index.js';
 import type { ApprovalReauthVerifier } from '../payouts/index.js';
 import { CommandDryRunsController } from './inbound/command-dry-runs.controller.js';
 import { CommandMaintenanceJob, type CommandMaintenanceOptions } from './inbound/command-maintenance.job.js';
 import { CommandsController } from './inbound/commands.controller.js';
 import { InternalCommandEventsController } from './inbound/internal-command-events.controller.js';
 import { PostReviewController } from './inbound/post-review.controller.js';
-import { COMMAND_EXECUTOR, COMMAND_MAINTENANCE_OPTIONS, COMMAND_OPS_EVENTS, COMMAND_REAUTH, COMMAND_SECURITY_EVENTS, COMMAND_SIGNALS, COMMAND_STORE } from './tokens.js';
+import { COMMAND_EXECUTOR, COMMAND_MAINTENANCE_EXTRAS, COMMAND_MAINTENANCE_OPTIONS, COMMAND_OPS_EVENTS, COMMAND_REAUTH, COMMAND_SECURITY_EVENTS, COMMAND_SIGNALS, COMMAND_STORE } from './tokens.js';
 
-export { COMMAND_STORE, COMMAND_EXECUTOR, COMMAND_REAUTH, COMMAND_SECURITY_EVENTS, COMMAND_SIGNALS, COMMAND_MAINTENANCE_OPTIONS, COMMAND_OPS_EVENTS } from './tokens.js';
+export { COMMAND_STORE, COMMAND_EXECUTOR, COMMAND_REAUTH, COMMAND_SECURITY_EVENTS, COMMAND_SIGNALS, COMMAND_MAINTENANCE_OPTIONS, COMMAND_MAINTENANCE_EXTRAS, COMMAND_OPS_EVENTS } from './tokens.js';
 
 /** 운영 명령 모듈의 덧붙임(BAT-355). 주지 않으면 원천 unavailable·기본 보호 목록·정비 꺼짐이다 */
 export interface CommandsModuleExtras {
@@ -72,6 +75,10 @@ export interface CommandsModuleExtras {
   };
   /** 명령 7의 승인 템플릿 찾기(RV-01). 없으면 늘 '없음'이라 명령 7 만들기·미리보기가 422다(F-03-5가 저장소를 잇는다) */
   readonly bannerTemplates?: LobbyBannerTemplates;
+  /** 설정형 명령의 적용 확인(F-02-5, ADR-0365 결정 10·14). 없으면 행은 CHECKING에 남고 바퀴가 돌지 않는다 */
+  readonly settingsApply?: { readonly probe: SettingsApplyProbe; readonly store?: ApplyCheckStore; readonly alerts?: OpsAlertStore; readonly roundMs?: number };
+  /** 온세일 로그 표본 생산(C-T75 ①④, ADR-0334). 없으면 그 바퀴가 돌지 않는다 */
+  readonly onsaleSchedule?: { readonly source: OnsaleScheduleSource; readonly enabled?: boolean };
 }
 
 @Module({})
@@ -107,11 +114,41 @@ export class CommandsModule {
     const dispatcher = extras.control ? new ControlDispatcher({ store, fanout: extras.control.fanout, clock: extras.control.clock ?? { now: () => Date.now() }, pgSwitch }) : undefined;
     const sender: CommandExecutor | undefined = dispatcher ? new ControlAwareExecutor(executor, dispatcher) : executor;
     const execution = new ExecuteCommand(store, sender, checkpoints, guard, { pgGate, pgSwitch, ...(dispatcher ? { control: dispatcher } : {}) });
-    const wired = sender || extras.pgAssignment ? execution : undefined;
-    const createCommand = new CreateCommand(store, wired, guard, { dryRun, security, pgGate, ...(extras.bannerTemplates ? { bannerTemplates: extras.bannerTemplates } : {}), ...(extras.control?.simulatorPg ? { simulatorPg: true } : {}) });
+    // 설정 사건은 메모리 저장소의 setting()이나 DB 저장소 쓰기 트랜잭션(settingsWritable 표시)이 낸다(F-02-5)
+    const storeSettingsWritable = typeof (rawStore as { setting?: unknown }).setting === 'function' || (rawStore as { settingsWritable?: unknown }).settingsWritable === true;
+    const wired = sender || extras.pgAssignment || storeSettingsWritable ? execution : undefined;
+    const settingsOnly = !sender && !extras.pgAssignment && storeSettingsWritable;
+    const createCommand = new CreateCommand(store, wired, guard, { dryRun, security, pgGate, settingsOnly, ...(extras.bannerTemplates ? { bannerTemplates: extras.bannerTemplates } : {}), ...(extras.control?.simulatorPg ? { simulatorPg: true } : {}) });
     const postReviews = new PostReviews({ store, ...(extras.postReviews?.commanders ? { commanders: extras.postReviews.commanders } : {}), ...(extras.postReviews?.alerts ? { alerts: extras.postReviews.alerts } : {}) });
+    // 적용 확인 바퀴(F-02-5): 저장소를 따로 주지 않으면 저장소 자체가 ApplyCheckStore를 구현했을 때만 쓴다(메모리 조립)
+    const applyChecks = extras.settingsApply?.store ?? (rawStore as Partial<ApplyCheckStore> & CommandStore);
+    const applyCheckStore =
+      typeof applyChecks.due === 'function' && typeof applyChecks.save === 'function' && typeof applyChecks.latestOf === 'function' && typeof applyChecks.outboxOf === 'function'
+        ? (applyChecks as ApplyCheckStore)
+        : undefined;
+    const checkSettings =
+      extras.settingsApply && applyCheckStore
+        ? new CheckSettingsApply({
+            store: applyCheckStore,
+            probe: extras.settingsApply.probe,
+            ...(extras.settingsApply.alerts ? { alerts: new RecordOpsAlert(extras.settingsApply.alerts, (extras.control?.clock ?? { now: () => Date.now() }).now) } : {}),
+            clock: extras.control?.clock ?? { now: () => Date.now() },
+          })
+        : undefined;
+    const logSampling =
+      extras.onsaleSchedule && extras.onsaleSchedule.enabled !== false
+        ? new PublishOnsaleLogSampling({
+            schedule: extras.onsaleSchedule.source,
+            publisher: rawStore as CommandStore & { setting(s: import('./domain/ports.js').SettingChange): Promise<string> },
+            clock: extras.control?.clock ?? { now: () => Date.now() },
+          })
+        : undefined;
     const maintain = new MaintainCommands(store, dryRun, extras.maintenance ?? {}, { postReviews, ...(extras.blockIpSets ? { blockIpSets: extras.blockIpSets } : {}), ...(dispatcher ? { control: dispatcher } : {}) });
-    const maintenance: CommandMaintenanceOptions = { enabled: extras.maintenance?.enabled ?? false, intervalMs: extras.maintenance?.intervalMs ?? COMMAND_MAINTENANCE_INTERVAL_MS };
+    const maintenance: CommandMaintenanceOptions = {
+      enabled: extras.maintenance?.enabled ?? false,
+      intervalMs: extras.maintenance?.intervalMs ?? COMMAND_MAINTENANCE_INTERVAL_MS,
+      ...(extras.settingsApply?.roundMs !== undefined ? { applyCheckRoundMs: extras.settingsApply.roundMs } : {}),
+    };
     // HTTP 수신기와 Kafka 소비자가 같은 처리기를 쓴다(두 길로 같은 사건이 와도 한 번만 만든다).
     onCommandEvent?.(new HandleCommandEvent({ createCommand, store }));
     const providers: Provider[] = [
@@ -124,14 +161,15 @@ export class CommandsModule {
       { provide: COMMAND_SIGNALS, useValue: signals },
       { provide: COMMAND_SECURITY_EVENTS, useFactory: (logger?: PlatformLogger) => security.attach(logger), inject: [{ token: PLATFORM_LOGGER, optional: true }] },
       { provide: COMMAND_MAINTENANCE_OPTIONS, useValue: maintenance },
+      { provide: COMMAND_MAINTENANCE_EXTRAS, useValue: { ...(checkSettings ? { settingsApply: checkSettings } : {}), ...(logSampling ? { logSampling } : {}) } },
       { provide: ExecuteCommand, useValue: execution },
       { provide: CreateCommand, useValue: createCommand },
       { provide: PreviewCommand, useValue: new PreviewCommand(createCommand) },
       { provide: MaintainCommands, useValue: maintain },
       { provide: ListCommands, useFactory: () => new ListCommands(store) },
-      { provide: GetCommand, useFactory: () => new GetCommand(store, extras.control?.deliveries) },
+      { provide: GetCommand, useFactory: () => new GetCommand(store, extras.control?.deliveries, applyCheckStore) },
       // 승인 뒤 실행과 되돌리기 승인 뒤 되돌림 보내기에 실행기를 쓴다(실행기가 없으면 실행 없이 상태만 바뀐다)
-      { provide: DecideCommand, useFactory: () => new DecideCommand(store, wired) },
+      { provide: DecideCommand, useFactory: () => new DecideCommand(store, wired, settingsOnly) },
       { provide: RetryCommand, useFactory: () => new RetryCommand(store, execution) },
       { provide: RevertCommand, useFactory: () => new RevertCommand(store, sender) },
       { provide: ExtendCommand, useFactory: () => new ExtendCommand(store, sender) },

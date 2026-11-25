@@ -28,7 +28,19 @@ export const V1_HOST_DIRS = Object.freeze({ seatmaps: '/var/local/peaket-v1/seat
  * 토픽이 없으면 뒤의 trade.payments까지 멈춘다. 그래서 미리 만든다(파티션 3, trade.payments와 같다 [가정]).
  * telemetry.queue는 queue-svc의 관제 1초 대기 집계(F-04-20, FIX-queue-agg-values)를 받는다
  */
-export const V1_KAFKA_TOPICS = Object.freeze(['trade.seats', 'trade.payments', 'trade.settlements', 'trade.orders', 'trade.purchase-sessions', 'identity.accounts-withdrawn', 'telemetry.behavior', 'telemetry.queue']);
+export const V1_KAFKA_TOPICS = Object.freeze(['trade.seats', 'trade.payments', 'trade.settlements', 'trade.orders', 'trade.purchase-sessions', 'identity.accounts-withdrawn', 'telemetry.behavior', 'telemetry.queue', 'control.settings']);
+
+/**
+ * 토픽별 만드는 설정(F-02-5, ADR-0365 결정 20): control.settings는 키마다 마지막 글만 남기는 압축 토픽이고
+ * 압축이 늦게 돌아도 새 소비자가 처음부터 읽을 수 있게 최근 1일은 남긴다. 시간 보존(retention.ms)은 걸지 않는다.
+ */
+export const KAFKA_TOPIC_CONFIGS = Object.freeze({
+  'control.settings': Object.freeze({
+    'cleanup.policy': 'compact',
+    'min.compaction.lag.ms': '86400000',
+    'delete.retention.ms': '604800000',
+  }),
+});
 /** v1 무대 전용 PostgreSQL(네임스페이스 v1)의 DB 둘 */
 export const V1_DATABASES = Object.freeze({ purchase: 'v1_purchase', payment: 'v1_payment' });
 /** deploy/local/postgres.yaml과 같은 PostgreSQL 18 다이제스트(통합 시험과 같은 판) */
@@ -411,7 +423,10 @@ export function v1MigrationJob(service) {
 export function kafkaTopicArgs(topic) {
   if (!V1_KAFKA_TOPICS.includes(topic)) throw new RangeError(`무대 토픽이 아니다: ${topic}`);
   // 도구 JVM은 브로커 컨테이너의 메모리 한도(1Gi)를 함께 쓴다. 기본 힙(256MiB 이상)이면 브로커째 OOMKilled될 수 있어 작게 준다(2026-11-10 v1 무대 올리기에서 겪음)
-  return ['-n', 'kafka', 'exec', 'peaket-dual-0', '-c', 'kafka', '--', 'env', 'KAFKA_HEAP_OPTS=-Xms32m -Xmx96m', 'bin/kafka-topics.sh', '--bootstrap-server', 'localhost:9092', '--create', '--if-not-exists', '--topic', topic, '--partitions', '3', '--replication-factor', '1'];
+  const args = ['-n', 'kafka', 'exec', 'peaket-dual-0', '-c', 'kafka', '--', 'env', 'KAFKA_HEAP_OPTS=-Xms32m -Xmx96m', 'bin/kafka-topics.sh', '--bootstrap-server', 'localhost:9092', '--create', '--if-not-exists', '--topic', topic, '--partitions', '3', '--replication-factor', '1'];
+  const configs = KAFKA_TOPIC_CONFIGS[topic];
+  if (configs) for (const name of Object.keys(configs).sort()) args.push('--config', `${name}=${configs[name]}`);
+  return args;
 }
 
 /**

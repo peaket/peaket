@@ -30,7 +30,8 @@ import {
   TICK_MS,
 } from '../domain/plan.js';
 import { pgGroupOf, pgWithRatio, type PgFields } from '../domain/pg-ratio.js';
-import { CONTROL_INPUTS, type Control, type ControlInputsReader, type ControlSnapshot, ELECTOR, type Elector, type EventPlan, LEADER_STORE, type LeaderStore, PUBLISHER, type Publisher, SEED_REVEALER, type SeedRevealer } from '../domain/ports.js';
+import { CONTROL_INPUTS, LEADER_CYCLE_SNAPSHOTS, type Control, type ControlInputsReader, type ControlSnapshot, ELECTOR, type Elector, type EventPlan, LEADER_STORE, type LeaderStore, PUBLISHER, type Publisher, SEED_REVEALER, type SeedRevealer } from '../domain/ports.js';
+import type { LeaderCycleSnapshots } from './preview-leader.js';
 import { drandRoundTimeMs, SEED_REVEAL_AFTER_MS } from '@peaket/shuffle';
 import { type ControlEvent, LEADER_METRICS, type LeaderMetrics } from './leader-metrics.js';
 
@@ -91,7 +92,7 @@ export class AdmissionLeader {
   /** 회차마다 하나씩 뒤에서 도는 RB-05 복제 확인(WAIT가 0.5초까지 걸려 다른 회차의 전진을 막지 않게, ADR-0186) */
   readonly #confirming = new Map<string, Promise<void>>();
   /** 직전 주기의 값(나누기의 수요와 감축 확인의 예매 단계 인원, ADR-0226 결정 10) */
-  readonly #last = new Map<string, { waiting: number; slots: number; soon: number; inFlight: number; saleState: string; gated: boolean }>();
+  readonly #last = new Map<string, { waiting: number; slots: number; soon: number; inFlight: number; ratio: number; saleState: string; gated: boolean }>();
   /** 회차마다 마지막으로 쓴 목표(준비가 실패한 회차의 몫으로 합산에 남긴다) */
   readonly #lastTargets = new Map<string, number>();
   /** 회차마다 아직 쓰지 못한 전진 몫(소수 몫을 주기마다 쌓는다, ADR-0226 결정 10) */
@@ -123,6 +124,7 @@ export class AdmissionLeader {
     @Optional() @Inject(LEADER_METRICS) private readonly metrics?: LeaderMetrics,
     @Optional() @Inject(CONTROL_INPUTS) private readonly inputs?: ControlInputsReader,
     @Optional() @Inject(SEED_REVEALER) private readonly revealer?: SeedRevealer,
+    @Optional() @Inject(LEADER_CYCLE_SNAPSHOTS) private readonly snapshots?: LeaderCycleSnapshots,
   ) {}
 
   start(): void {
@@ -184,6 +186,20 @@ export class AdmissionLeader {
       this.#checkOpenGaps(opens, now);
       const shares = this.#allocate(preps, failed);
       await Promise.all(preps.map((p) => this.#advance(p, gen, now, shares)));
+      // 사전 모의(PreviewControl)가 읽을 마지막 주기 값을 남긴다(값마다 따로 재지 않고 이 주기의 시각 하나)
+      for (const p of preps) {
+        const last = this.#last.get(p.eventId);
+        if (!last) continue;
+        this.snapshots?.record(p.eventId, now, {
+          currentTarget: shares.get(p.eventId)?.target ?? this.#lastTargets.get(p.eventId) ?? 0,
+          slotsUsed: last.slots,
+          soonAdmitted: last.soon,
+          inFlight: last.inFlight,
+          admitRatio: last.ratio,
+          servingRateCap: RATE_CAP_PER_SEC,
+          servingRate: shares.get(p.eventId)?.rate ?? 0,
+        });
+      }
     } catch (err) {
       this.#logError('*', this.clock.now(), err, 'admission-ctrl 리더 주기 실패');
     } finally {
@@ -280,7 +296,7 @@ export class AdmissionLeader {
         fields: p.fields,
       });
       if (r.kind === 'FENCED') return this.#fence(gen, eventId);
-      this.#last.set(eventId, { waiting: r.waiting, slots: r.slots, soon: r.soon, inFlight: r.inFlight, saleState: r.saleState, gated: r.gated === 1 });
+      this.#last.set(eventId, { waiting: r.waiting, slots: r.slots, soon: r.soon, inFlight: r.inFlight, ratio: r.ratio, saleState: r.saleState, gated: r.gated === 1 });
       this.#lastTargets.set(eventId, share.target);
       this.#saleStates.set(eventId, r.saleState);
       // 모르는 판매 상태는 전진 0이 된다. 조용히 멈추지 않게 남긴다

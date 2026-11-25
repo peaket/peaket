@@ -12,6 +12,7 @@ import type { ProtectedRangeHit } from '../domain/block-ranges.js';
 import { ComputeDryRun } from './compute-dry-run.js';
 import type { ExecuteCommand } from './execute-command.js';
 import { PgAssignmentGate } from './pg-assignment-gate.js';
+import { isSettingCommand } from '../domain/setting-commands.js';
 
 export interface CreateCommandInput {
   readonly type: CommandType;
@@ -57,7 +58,7 @@ const roleForbidden = (): ProblemError => new ProblemError({ type: 'command-role
 /** 도메인 거절을 422로 바꾼다. 한계 밖은 걸린 한계 이름을 detail에 싣는다(ADR-0340 결정 9) */
 export function problemOfRejection(e: CommandInputRejected): ProblemError {
   if (e.kind === 'OUT_OF_RANGE') return new ProblemError({ type: 'command-out-of-range', status: 422, title: '안전 허용 범위 밖의 명령입니다', detail: e.limit });
-  return invalidCommand();
+  return new ProblemError({ type: 'invalid-command', status: 422, title: '명령 값이 올바르지 않습니다', detail: e.limit });
 }
 
 export interface CreateCommandDeps {
@@ -67,6 +68,8 @@ export interface CreateCommandDeps {
   readonly pgGate?: PgAssignmentGate;
   /** 명령 7의 승인 템플릿 찾기(RV-01). 없으면 늘 '없음'(noApprovedLobbyBannerTemplates)이라 명령 7은 422다 */
   readonly bannerTemplates?: LobbyBannerTemplates;
+  /** 실행기를 설정형 명령·명령 12만 쓰는 조립인가(실행기가 없던 조립의 그 밖 명령은 APPROVED로 둔다) */
+  readonly settingsOnly?: boolean;
   /** 명령 6 해제 갈래에서 SIMULATOR를 받는가(local·ci만 참, ADR-0366 결정 8). 없으면 받지 않는다 */
   readonly simulatorPg?: boolean;
 }
@@ -80,6 +83,7 @@ export class CreateCommand {
   readonly #pgGate: PgAssignmentGate;
   readonly #bannerTemplates: LobbyBannerTemplates;
   readonly #simulatorPg: boolean;
+  readonly #settingsOnly: boolean;
 
   constructor(
     private readonly store: CommandStore,
@@ -93,6 +97,7 @@ export class CreateCommand {
     this.#pgGate = deps.pgGate ?? new PgAssignmentGate();
     this.#bannerTemplates = deps.bannerTemplates ?? noApprovedLobbyBannerTemplates;
     this.#simulatorPg = deps.simulatorPg === true;
+    this.#settingsOnly = deps.settingsOnly === true;
   }
 
   /**
@@ -163,7 +168,7 @@ export class CreateCommand {
     // 같은 멱등 키로 겹쳐 온 요청은 처음 명령을 그대로 돌려준다(새 일·실행 없음)
     if (replayed) return command;
     if (prepared.protectedRangeHits.length > 0) this.#security.blockProtectedRange({ commandId: command.commandId, requesterRole: input.requestedRole, hits: prepared.protectedRangeHits });
-    if (this.execution && command.state === 'APPROVED') {
+    if (this.execution && command.state === 'APPROVED' && (!this.#settingsOnly || isSettingCommand(command.type))) {
       const actor: CommandExecutionActor = input.actor ?? { accountId: input.requestedBy, sessionId: '', role: input.requestedRole };
       return this.execution.run(command, actor, input.nowMs);
     }

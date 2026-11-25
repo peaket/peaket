@@ -107,9 +107,14 @@ export async function previewControl(
   const fail = (code: number, message: string): never => {
     throw Object.assign(new Error(message), { code });
   };
-  void fail;
-  void r;
-  return { counts: [], unavailable: [], podName: deps.podName };
+  if (!deps.preview) fail(grpc.status.UNIMPLEMENTED, '사전 모의를 조립하지 않았다');
+  if (String(r.kind ?? '') !== CONTROL_KIND_SALE_PAUSE) fail(grpc.status.UNIMPLEMENTED, '이 사전 모의 종류는 받지 않는다');
+  const scope = String(r.scope ?? '');
+  if (!LOWER_UUID.test(scope)) fail(grpc.status.INVALID_ARGUMENT, 'scope는 소문자 회차 ID여야 한다');
+  const keys = Array.isArray(r.keys) ? (r.keys as unknown[]).map((x) => String(x)) : [];
+  if (keys.length === 0 || keys.length > 16) fail(grpc.status.INVALID_ARGUMENT, 'keys는 1~16개여야 한다');
+  const result = await deps.preview!.run({ eventId: scope, keys });
+  return { counts: result.counts, unavailable: result.unavailable, podName: deps.podName };
 }
 
 // loadPackageDefinition은 서비스마다 클라이언트 생성자를 준다. 서버에는 그 생성자의 서비스 정의(.service)를 넘긴다(F-02-1에서 고침: 생성자를 넘기면 제어 포트를 열 때 던졌다)

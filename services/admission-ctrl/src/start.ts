@@ -6,7 +6,7 @@ import type { Writable } from 'node:stream';
 import { createHotRedis, createService, inClusterLeaseApi, LeaseElector, type LeaseApi, memoryLeaseApi, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { CommittedSeedSource, kmsSeedClient, LocalResultFiles, minReplicasOf, RedisBatchStore, RedisShuffleRecords, shuffleRuntimeFromEnv } from './modules/batch/index.js';
-import { AdmissionLeader, ApplyLeaderControl, LEADER_STORE, LeaderMetrics, type LeaderStore, PrometheusControlInputs } from './modules/leader/index.js';
+import { AdmissionLeader, ApplyLeaderControl, LEADER_STORE, LeaderCycleSnapshots, LeaderMetrics, PreviewLeader, type LeaderStore, PrometheusControlInputs } from './modules/leader/index.js';
 import { startAdmissionControlServer } from './control/control-server.js';
 import { ApplyRb35, commanderKeysFromProcess, RedisRb35Store, Rb35Worker, SignedMarkAuth } from './modules/rb35/index.js';
 
@@ -61,11 +61,13 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // Lease 15초·갱신 시도 5초(docs/infra.md), 갱신 한도 10초 [가정](ADR-0182 결정 1)
   const elector = new LeaseElector({ api: leaseApi, identity: env.HOSTNAME ?? `${SERVICE}-local`, clock: systemClock, leaseDurationMs: 15_000, renewDeadlineMs: 10_000, retryPeriodMs: 5_000 });
 
+  // 사전 모의가 읽을 리더 주기 값(F-02-5, ADR-0365 결정 11·16). 리더와 제어 서버가 같은 객체를 본다
+  const snapshots = new LeaderCycleSnapshots();
   const service = await createService({
     name: SERVICE,
     env,
     ...(o.logDestination ? { logDestination: o.logDestination } : {}),
-    module: AppModule.register({ redis, elector, metrics, ...(controlInputs ? { controlInputs } : {}), batch: { seeds: new CommittedSeedSource(shuffleRecords, shuffleRuntime.opener), beacon: shuffleRuntime.beacon(shuffleRecords), files: new LocalResultFiles(resultDir), ...(commanderKeys ? { runbookAuth: new SignedMarkAuth(commanderKeys) } : {}), minReplicas, ...(waitRedis ? { waitRedis } : {}) } }),
+    module: AppModule.register({ redis, elector, metrics, snapshots, ...(controlInputs ? { controlInputs } : {}), batch: { seeds: new CommittedSeedSource(shuffleRecords, shuffleRuntime.opener), beacon: shuffleRuntime.beacon(shuffleRecords), files: new LocalResultFiles(resultDir), ...(commanderKeys ? { runbookAuth: new SignedMarkAuth(commanderKeys) } : {}), minReplicas, ...(waitRedis ? { waitRedis } : {}) } }),
   });
   metrics.register(service.metrics.registry);
   if (!controlInputs) service.logger.warn({}, '자동 제어 입력이 없어(PEAKET_PROMETHEUS_URL) AIMD를 끈 채 돈다(로컬·CI)');
@@ -91,6 +93,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
             apply: new ApplyLeaderControl(service.app.get(LEADER_STORE) as LeaderStore, elector, leader),
             podName: (env.PEAKET_POD ?? env.HOSTNAME ?? `${SERVICE}-local`).slice(0, 64),
             nowMs: () => systemClock.now(),
+            preview: new PreviewLeader({ elector: { isLeader: () => elector.generation() !== undefined && !leader.isFenced(elector.generation()!) }, snapshots }),
             onError: (method, err) => service.logger.error({ method, err: err instanceof Error ? { type: err.name, message: err.message } : String(err) }, 'ControlReceiver 처리 실패'),
           },
         })

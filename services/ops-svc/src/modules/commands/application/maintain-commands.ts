@@ -7,7 +7,7 @@
 //   새 몫의 수(blocksExpired·postReviewsOpened·postReviewAlerts)는 0이 아닐 때만 결과에 싣는다.
 import { ACTOR_MAPPING_PURGE_INTERVAL_MS, ACTOR_MAPPING_RETENTION_MS, type Command } from '../domain/command.js';
 import { blockCommandOf, blockExpired, blockExpiryVerdict, ipSetKeys, type IpFamily } from '../domain/block-expiry.js';
-import { closeIfApprovalExpired, writeAutoExpired, writeComparison } from '../domain/command-writes.js';
+import { closeIfApprovalExpired, writeAutoExpired, writeComparison, writeSettingChange } from '../domain/command-writes.js';
 import { compareDryRun, type DryRunPrediction } from '../domain/dry-run.js';
 import type { BlockIpSetReader, CommandDueKind, CommandStore } from '../domain/ports.js';
 import type { ComputeDryRun } from './compute-dry-run.js';
@@ -93,7 +93,13 @@ export class MaintainCommands {
     const expired: Command[] = [];
     const autoExpired = await safe(() =>
       this.#each('AUTO_EXPIRE', nowMs, async (w) => {
-        if (w.current.expiresAtMs !== undefined && w.current.expiresAtMs <= nowMs && (await writeAutoExpired(w, { reason: 'expired', nowMs }))) expired.push(w.current);
+        if (w.current.expiresAtMs !== undefined && w.current.expiresAtMs <= nowMs && (await writeAutoExpired(w, { reason: 'expired', nowMs }))) {
+          if (w.current.type === 'LOG_LEVEL') {
+            const ok = await writeSettingChange(w, { phase: 'EXPIRE', nowMs });
+            if (!ok) throw new Error('settings-outbox-not-wired');
+          }
+          expired.push(w.current);
+        }
       }),
     );
     // 만료 되돌림은 원장의 새 판이다(ADR-0365 결정 1). 받는 쪽(admission-ctrl)도 만료 시각으로 스스로 풀므로 기다리지 않는다(실패는 로그만)

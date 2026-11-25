@@ -1,4 +1,5 @@
 export { ReviewModule, type DatabaseReviewWiring, type MemoryReviewWiring } from './review.module.js';
+export { REVIEW_FEATURE_FLAG_KEY, REVIEW_SETTINGS, ReviewFeatureGuard, reviewsEnabled } from './application/review-feature.js';
 export { Reviews } from './application/reviews.js';
 export { reviewMaintenanceTasks } from './application/review-maintenance.js';
 export { type MemoryHeldEvent, MemoryReviewStore } from './adapters/memory-review-store.js';

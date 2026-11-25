@@ -7,6 +7,7 @@ import { normalizeReason, CommandInputRejected } from '../domain/command-params.
 import type { CommandDecision, CommandStore } from '../domain/ports.js';
 import type { ExecuteCommand } from './execute-command.js';
 import { sendRevert } from './revert-command.js';
+import { isSettingCommand } from '../domain/setting-commands.js';
 
 const notPending = (): ProblemError => new ProblemError({ type: 'command-not-pending', status: 409, title: '승인 대기 중인 명령이 아닙니다' });
 
@@ -30,6 +31,8 @@ export class DecideCommand {
   constructor(
     private readonly store: CommandStore,
     private readonly execution?: ExecuteCommand,
+    /** 실행기를 설정형 명령만 쓰는 조립인가(그 밖 명령은 승인 상태로 둔다) */
+    private readonly settingsOnly = false,
   ) {}
 
   /**
@@ -48,6 +51,8 @@ export class DecideCommand {
     const actor: CommandExecutionActor = q.actor ?? { accountId: q.approverRef, sessionId: '', role: q.approverRole };
     if (d.revert) return sendRevert(this.store, this.execution?.target, d.command, actor, { ...d.revert, fromPending: true }, q.nowMs);
     if (!this.execution) return d.command;
+    // 실행기가 없이 설정형·명령 12만 실행하는 조립이면 그 밖의 명령은 승인 상태로 둔다(전에는 실행기가 없어 그랬다)
+    if (this.settingsOnly && !isSettingCommand(d.command.type)) return d.command;
     return this.execution.run(d.command, actor, q.nowMs, pgRoutes ? { pgRoutes } : {});
   }
 

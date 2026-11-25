@@ -36,4 +36,12 @@ export class MemorySaleConfigStore implements SaleConfigStore {
   async commissionRateBp(eventId: string): Promise<number | undefined> {
     return this.configs.get(eventId)?.commissionRateBp;
   }
+
+  async listOnsaleOpens(from: Date, to: Date, limit: number): Promise<{ eventId: string; opensAtMs: number; scale: 'LARGE' | 'MEDIUM' | 'SMALL' | null }[]> {
+    return [...this.configs.values()]
+      .filter((c) => c.opensAtMs >= from.getTime() && c.opensAtMs < to.getTime())
+      .sort((a, b) => a.opensAtMs - b.opensAtMs || a.eventId.localeCompare(b.eventId))
+      .slice(0, limit)
+      .map((c) => ({ eventId: c.eventId, opensAtMs: c.opensAtMs, scale: null }));
+  }
 }

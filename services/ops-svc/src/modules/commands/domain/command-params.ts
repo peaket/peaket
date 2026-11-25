@@ -81,6 +81,35 @@ function botLevel(p: Record<string, unknown>): Record<string, unknown> {
   return p;
 }
 
+/** 명령 8이 로그 레벨을 올릴 수 있는 서비스(ADR-0365 결정 13, setting-commands의 목록과 같은 글) */
+export const LOG_LEVEL_SERVICES = ['core-svc', 'identity-svc', 'ops-svc', 'payment-svc', 'purchase-svc', 'queue-svc', 'ticket-svc'] as const;
+/** 명령 8의 수준은 올리는 둘뿐이다(내리는 것은 만료·되돌리기의 INFO) */
+export const LOG_LEVEL_RAISED = ['DEBUG', 'TRACE'] as const;
+/** 명령 9가 끌 수 있는 기능 플래그(서버 쪽에 실제 끄는 쪽이 있는 것만) */
+export const FEATURE_FLAGS = ['reviews'] as const;
+
+/** 설정형 명령의 모르는 칸은 그 칸 이름을 detail로 돌려준다(테스트·openapi: detail = 어긋난 칸) */
+function onlySettingKeys(p: Record<string, unknown>, keys: readonly string[]): void {
+  for (const k of Object.keys(p)) if (!keys.includes(k)) invalid(k);
+}
+
+/** 명령 8의 매개변수 {service, level}. 서비스는 설정을 읽는 일곱, 수준은 DEBUG·TRACE만 받는다 */
+export function logLevelParamsOf(p: Record<string, unknown>): { service: string; level: (typeof LOG_LEVEL_RAISED)[number] } {
+  if (!isObject(p)) return invalid('params');
+  onlySettingKeys(p, ['service', 'level']);
+  if (typeof p.service !== 'string' || !(LOG_LEVEL_SERVICES as readonly string[]).includes(p.service)) invalid('service');
+  if (typeof p.level !== 'string' || !(LOG_LEVEL_RAISED as readonly string[]).includes(p.level)) invalid('level');
+  return { service: p.service as string, level: p.level as (typeof LOG_LEVEL_RAISED)[number] };
+}
+
+/** 명령 9의 매개변수 {flag}. 지금은 reviews만 받는다 */
+export function featureOffParamsOf(p: Record<string, unknown>): { flag: (typeof FEATURE_FLAGS)[number] } {
+  if (!isObject(p)) return invalid('params');
+  onlySettingKeys(p, ['flag']);
+  if (typeof p.flag !== 'string' || !(FEATURE_FLAGS as readonly string[]).includes(p.flag)) invalid('flag');
+  return { flag: p.flag as (typeof FEATURE_FLAGS)[number] };
+}
+
 /** 명령 12·6 결제 갈래가 고르는 결제사(asyncapi PgAssignmentValue, ADR-0349 결정 1·6). 시뮬레이터는 고르지 못한다 */
 export const ASSIGNABLE_PGS = ['TOSS', 'PORTONE'] as const;
 export type AssignablePg = (typeof ASSIGNABLE_PGS)[number];
@@ -208,6 +237,10 @@ export function checkCommandParams(type: CommandType, params: unknown, nowMs: nu
       return params;
     case 'BOT_LEVEL':
       return botLevel(params);
+    case 'LOG_LEVEL':
+      return { ...logLevelParamsOf(params) };
+    case 'FEATURE_OFF':
+      return { ...featureOffParamsOf(params) };
     case 'PG_ASSIGN':
       return { ...pgAssignParamsOf(params) };
     case 'DEGRADED_MODE': {

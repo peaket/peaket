@@ -3,7 +3,7 @@
 // 앱 포트·관리 포트(/metrics, /ready)는 서비스 뼈대가, 업무 gRPC 포트(TrustService.ScoreRisk, TrustLabelService.ApplyLabel, TrustEvidenceService.GetVerdictEvidence)는 이 파일이 연다.
 // 비공개 규칙 설정을 읽어야 준비 상태가 된다(docs/features/bot-defense.md §4.4). 기준값·가중치는 파일로만 받고 저장소에 두지 않는다(POL-006).
 import 'reflect-metadata';
-import { CircuitBreaker, controlSyncRequired, createHotRedis, createService, internalGrpcTokenFromEnv, invRefKeyInfoGauge, kafkaTelemetrySend, type KafkaTelemetrySender, ReloadingAsnTable, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
+import { CircuitBreaker, controlSyncRequired, createHotRedis, createService, internalGrpcTokenFromEnv, invRefKeyInfoGauge, kafkaTelemetrySend, type KafkaTelemetrySender, ReloadingAsnTable, SettingsStore, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { checkProducerSchemas, createAvroEncoder, readSchemaIdsFile, type AvroEncoder } from '@peaket/platform/avro';
 import { avroSchemas } from '@peaket/contracts/avro';
 import { AppModule } from './app.module.js';
@@ -34,6 +34,7 @@ import {
   trustServiceHandlers,
   turnstileFromEnv,
 } from './modules/scoring/index.js';
+import { bindBotLevelSetting } from './modules/scoring/index.js';
 
 const SERVICE = 'trust-svc';
 const RULES_READY_TASK = 'trust-rules';
@@ -179,6 +180,9 @@ const { startServiceControlSync } = await import('@peaket/platform/stream-worker
   return { startServiceControlSync: () => undefined };
 });
 const controlSync = startServiceControlSync(service, env, { sessions: false });
+// 명령 5 강도(F-02-5, ADR-0365 결정 19): 설정 저장소의 PLATFORM:BOT_LEVEL: 바뀜을 규칙 묶음에 잇는다
+const fallbackRuleSettings = new SettingsStore(systemClock);
+bindBotLevelSetting(controlSync?.sync.settings ?? fallbackRuleSettings, rules, { warn: (o, m) => service.logger.warn(o, m) });
 
 // 생산자 시작 확인(ADR-0357 결정 5): 텔레메트리 Kafka가 켜졌을 때만, 듣기 전에 한 번. 다름·404·주소 없음(local·ci 밖)은 시작 실패, 닿지 못하면 경고와 게이지로 계속한다
 if (avroEncoder) {

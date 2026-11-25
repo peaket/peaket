@@ -22,6 +22,8 @@ import {
   type NewCommand,
 } from './command.js';
 import { controlKindOf, controlScopesOf } from './control-kinds.js';
+import { settingDraftOf, settingExpiryMs, settingLedgerKindOf, settingReceiverOf, type SettingPhase } from './setting-commands.js';
+import { settingMessageKey } from './setting-commands.js';
 import type { CommandDecision, CommandWriter, NewCommandEvent } from './ports.js';
 import { isPostReviewType, POST_REVIEW_DUE_MS } from './post-review.js';
 
@@ -261,6 +263,53 @@ export async function writeFailed(w: CommandWriter, q: { reason: string; nowMs: 
   await w.event({ type: 'FAILED', actorRef: SYSTEM_ACTOR_REF, actorRole: SYSTEM_ROLE, reason: q.reason, nowMs: q.nowMs });
   await w.patch({ state: to, lastError: q.reason, executedAtMs: q.nowMs, nowMs: q.nowMs });
   return w.current;
+}
+
+/**
+ * 설정형 명령의 사건·적용 확인 행을 같은 쓰기에 낸다(ADR-0365 결정 13·14). 판은 원장이 매기고,
+ * 사건의 occurredAt·expiresAt도 그 판을 쓴다. 설정형이 아니면 false, 저장소가 설정 사건·원장을 쓰지 못하면 false.
+ * 적용 확인 행의 outboxId가 필요해 사건을 먼저 쓰고 행을 쓴다(둘 다 같은 트랜잭션이라 하나가 실패하면 모두 없어진다).
+ */
+export async function writeSettingChange(
+  w: CommandWriter,
+  q: { readonly phase: SettingPhase; readonly nowMs: number; readonly previousBotLevel?: Record<string, unknown> },
+): Promise<boolean> {
+  const c = w.current;
+  const draft = settingDraftOf(c, q.phase, q.previousBotLevel !== undefined ? { previousBotLevel: q.previousBotLevel } : {});
+  if (!draft) return false;
+  if (!w.setting || !w.applyCheck || !w.assignControlVersion) return false;
+  const version = await w.assignControlVersion({ scopes: ['PLATFORM'], kind: settingLedgerKindOf(draft), nowMs: q.nowMs });
+  const event = {
+    kind: draft.kind,
+    scope: draft.scope,
+    ...(draft.target !== undefined ? { target: draft.target } : {}),
+    value: draft.value,
+    ...(draft.expires ? { expiresAtMs: version + settingExpiryMs() } : {}),
+    commandId: c.commandId,
+    actorRef: c.requesterRef ?? SYSTEM_ACTOR_REF,
+    occurredAtMs: version,
+  };
+  const outboxId = await w.setting(event);
+  const messageKey = settingMessageKey(event);
+  const stage = q.phase === 'APPLY' ? 'ACKED' : q.phase === 'REVERT' ? 'REVERTED' : 'AUTO_EXPIRED';
+  const service = settingReceiverOf(messageKey);
+  await w.applyCheck({
+    commandId: c.commandId,
+    stage,
+    version,
+    messageKey,
+    outboxId,
+    ...(service !== undefined ? { service } : {}),
+    status: 'CHECKING',
+    writtenAtMs: q.nowMs,
+    pods: [],
+    targetCount: 0,
+    ackedCount: 0,
+    alertOpen: false,
+    nextCheckAtMs: q.nowMs,
+    updatedAtMs: q.nowMs,
+  });
+  return true;
 }
 
 export type RevertStart =

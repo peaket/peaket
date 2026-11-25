@@ -480,4 +480,6 @@ export { SeatHoldLedgerHandler, type LedgerRecord } from './inbound/seat-hold-le
 export { SnapshotController } from './inbound/snapshot.controller.js';
 export { HOLD_OPERATION, HoldHeaders, HoldParams, HoldRequest, HoldResponseBody, HoldsController, SeatLuaFailure, sanitizedStoreError } from './inbound/holds.controller.js';
 export { InventoryModule, type AdmissionOptions, type InventoryModuleOptions } from './inventory.module.js';
-export { PAYING_COUNT_MAX, PREVIEW_DIVISOR, PREVIEW_WINDOW_MS, PURCHASE_PREVIEW_KEYS, PreviewCounts, type PurchaseSessionCounter, type SaleRecordCounter } from './application/preview-counts.js';
+export { PAYING_COUNT_MAX, PREVIEW_DIVISOR, PREVIEW_WINDOW_MS, PURCHASE_PREVIEW_KEYS, PreviewCounts, type PreviewCount, type PreviewCountsDeps, type PreviewUnavailable, type PurchaseSessionCounter, type SaleRecordCounter } from './application/preview-counts.js';
+export { RedisPurchaseSessionCounter } from './adapters/redis-preview-counters.js';
+export { DrizzleSaleRecordCounter } from './adapters/drizzle-sale-record-counter.js';

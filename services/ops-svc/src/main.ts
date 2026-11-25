@@ -24,7 +24,8 @@ import { eventCancellationDepsFromEnv, partnerDatabaseUrlFromEnv, partnerRoleChe
 import { kafkaConsumersFromEnv, type OpsConsumers, startOpsConsumers } from './consumers/index.js';
 import { AuditSignals, auditEnvName } from './modules/audit/index.js';
 import { CORE_APPLY_RETRY_MS, EventCancellations, PromEventCancellationSignals } from './modules/event-cancellations/index.js';
-import { AwsWafIpSets, ControlFanout, DrizzleControlDeliveries, GrpcPgAssignmentCheck, GrpcPgSwitchResolver, HttpCoreSaleStart, PromCommandSignals, wafIpSetsConfigFromEnv, type HandleCommandEvent } from './modules/commands/index.js';
+import { AwsWafIpSets, ControlFanout, ControlPreviewDryRunSource, DrizzleApplyChecks, DrizzleControlDeliveries, GrpcPgAssignmentCheck, GrpcPgSwitchResolver, HttpCoreSaleStart, HttpOnsaleScheduleSource, PromCommandSignals, settingsProbeFromEnv, wafIpSetsConfigFromEnv, type HandleCommandEvent } from './modules/commands/index.js';
+import { DrizzleOpsAlertStore } from './modules/alerts/index.js';
 import { GrpcPurchasePriorityGrants, HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
 import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
 import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts/index.js';
@@ -76,6 +77,7 @@ const queueClient = queueUrl ? createExternalHttpClient({ provider: 'queue-svc',
 // local·ci 밖에서 받는 쪽 주소 설정이 없으면 여기서 시작이 실패한다. 판매 중지·재개는 purchase·queue 설정이 다 있을 때만 이 길이다(없으면 HTTP 호환 경로).
 const controlTargets = controlTargetsFromEnv(process.env);
 const controlTransport = new GrpcControlTransport();
+const previewSource = new ControlPreviewDryRunSource({ targets: controlTargets.targets, transport: controlTransport });
 const controlFanout = new ControlFanout({ targets: controlTargets.targets, transport: controlTransport, deliveries: new DrizzleControlDeliveries(database), clock: { now: () => Date.now() } });
 const saleControlWired = !controlTargets.missing.includes('purchase-svc') && !controlTargets.missing.includes('queue-svc');
 const executor = new HttpCommandExecutor({
@@ -190,7 +192,7 @@ const service = await createService({
       accountRef: (accountId: string) => botReviewActorRef.ref(accountId),
     },
     onCommandEvent: (h) => (commandEvents = h),
-    commandExtras: { signals: commandSignals, pgAssignment, ...(wafIpSets ? { blockIpSets: wafIpSets } : {}), control: { fanout: controlFanout, deliveries: new DrizzleControlDeliveries(database), ...(pgSwitchResolver ? { pgSwitch: pgSwitchResolver } : {}), simulatorPg: ['local', 'ci'].includes(process.env.PEAKET_ENV ?? '') } },
+    commandExtras: { signals: commandSignals, pgAssignment, ...(wafIpSets ? { blockIpSets: wafIpSets } : {}), dryRunSources: { ADMISSION_TARGET: previewSource, KILL_SWITCH: previewSource }, settingsApply: { probe: settingsProbeFromEnv(process.env), store: new DrizzleApplyChecks(database), alerts: new DrizzleOpsAlertStore(database) }, ...(coreUrl ? { onsaleSchedule: { source: new HttpOnsaleScheduleSource({ baseUrl: coreUrl, token: process.env.PEAKET_INTERNAL_TOKEN }) } } : {}), control: { fanout: controlFanout, deliveries: new DrizzleControlDeliveries(database), ...(pgSwitchResolver ? { pgSwitch: pgSwitchResolver } : {}), simulatorPg: ['local', 'ci'].includes(process.env.PEAKET_ENV ?? '') } },
     auditSignals,
     calendar: caseCalendar,
     caseSignals,

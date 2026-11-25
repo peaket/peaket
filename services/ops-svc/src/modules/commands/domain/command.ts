@@ -322,11 +322,13 @@ export interface Command {
 
 /** 제어 gRPC 명령의 전파 상태(openapi CommandState.delivery의 ACK 갈래, ADR-0365 결정 4) */
 export interface CommandDeliveryView {
-  readonly kind: 'ACK';
+  readonly kind: 'ACK' | 'APPLY_CHECK';
   readonly ackedCount: number;
   readonly targetCount: number;
-  /** ack하지 않은 받는 쪽('<서비스>/<파드 이름 또는 주소>@<범위>') */
+  /** ack하지 않은 받는 쪽(ACK: '<서비스>/<파드 이름 또는 주소>@<범위>', APPLY_CHECK: '<파드>:<판>' 또는 '<파드>:-') */
   readonly unackedTargets: readonly string[];
+  /** APPLY_CHECK만: 적용 확인 상태 */
+  readonly applyStatus?: import('./apply-check.js').ApplyStatus;
 }
 
 /** 실행을 요청한 관리 계정. 대상 서비스에 넘길 신원 머리를 만드는 데 쓴다 */

@@ -55,9 +55,16 @@ export async function previewAdmissionControl(
   const fail = (code: number, message: string): never => {
     throw Object.assign(new Error(message), { code });
   };
-  void fail;
-  void r;
-  return { counts: [], unavailable: [], podName: deps.podName };
+  if (!deps.preview) fail(grpc.status.UNIMPLEMENTED, '사전 모의를 조립하지 않았다');
+  const kind = String(r.kind ?? '');
+  if (kind !== 'CONTROL_KIND_ADMISSION_TARGET') fail(grpc.status.UNIMPLEMENTED, '이 사전 모의 종류는 받지 않는다');
+  const scope = String(r.scope ?? '');
+  if (!UUID.test(scope) || scope !== scope.toLowerCase()) fail(grpc.status.INVALID_ARGUMENT, 'scope는 소문자 UUID여야 한다');
+  const keys = Array.isArray(r.keys) ? (r.keys as unknown[]).map((x) => String(x)) : [];
+  if (keys.length === 0 || keys.length > 16) fail(grpc.status.INVALID_ARGUMENT, 'keys는 1~16개여야 한다');
+  const result = deps.preview!.run({ scope, keys });
+  if (result.status === 'NOT_LEADER') return fail(grpc.status.UNAVAILABLE, NOT_LEADER);
+  return { counts: result.counts, unavailable: result.unavailable, podName: deps.podName };
 }
 
 function controlPackage(): { ControlReceiver: { service: grpc.ServiceDefinition } } {

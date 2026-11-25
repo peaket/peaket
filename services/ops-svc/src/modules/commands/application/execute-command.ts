@@ -13,7 +13,9 @@ import { ProblemError } from '@peaket/platform';
 import type { AuditCheckpointService } from '../../audit/index.js';
 import { SYSTEM_ACTOR_REF, type Command, type CommandExecutionActor } from '../domain/command.js';
 import { CommandInputRejected, isPgFallbackParams, pgAssignParamsOf, type PgAssignParams } from '../domain/command-params.js';
-import { writeSucceeded } from '../domain/command-writes.js';
+import { writeSettingChange, writeSucceeded } from '../domain/command-writes.js';
+import { isSettingCommand, settingDraftOf, settingLedgerKindOf, settingReceiverOf } from '../domain/setting-commands.js';
+import { settingMessageKey } from '../domain/setting-commands.js';
 import { controlScopesOf, isDispatchedControl } from '../domain/control-kinds.js';
 import type { PgSwitchRoutes } from '../domain/pg-switch.js';
 import type { CancelledEventGuard, CommandExecutor, CommandStore, SettingChange } from '../domain/ports.js';
@@ -102,10 +104,28 @@ export class ExecuteCommand {
     }
     const setting = pgAssignmentSettingOf(command, params, nowMs);
     const done = await this.store.mutate(command.commandId, async (w) => {
-      if (!w.setting) return undefined;
+      if (!w.setting || !w.applyCheck || !w.assignControlVersion) return undefined;
+      const version = await w.assignControlVersion({ scopes: [setting.scope], kind: 'SETTING:PG_ASSIGNMENT:', nowMs });
       const acked = await writeSucceeded(w, { result: { setting: PG_ASSIGNMENT_SETTING, scope: setting.scope }, ackedAtMs: nowMs, nowMs });
-      // Outbox 행은 트랜잭션의 마지막 쓰기다(ADR-0116 결정 3)
-      await w.setting(setting);
+      const event = { ...setting, occurredAtMs: version };
+      const outboxId = await w.setting(event);
+      const messageKey = settingMessageKey(event);
+      await w.applyCheck({
+        commandId: command.commandId,
+        stage: 'ACKED',
+        version,
+        messageKey,
+        outboxId,
+        service: settingReceiverOf(messageKey) ?? 'payment-svc',
+        status: 'CHECKING',
+        writtenAtMs: nowMs,
+        pods: [],
+        targetCount: 0,
+        ackedCount: 0,
+        alertOpen: false,
+        nextCheckAtMs: nowMs,
+        updatedAtMs: nowMs,
+      });
       return acked;
     });
     return done ?? this.store.markDispatchFailed(command.commandId, 'settings-outbox-not-wired', nowMs);
@@ -114,6 +134,25 @@ export class ExecuteCommand {
   /** 실행기(되돌림·연장을 보내는 쪽도 같다). 없으면 보내지 못한 것으로 본다 */
   get target(): CommandExecutor | undefined {
     return this.executor;
+  }
+
+  /**
+   * 설정형 명령 5·8·9 실행: 실행기 없이 ACKED와 같은 트랜잭션에 설정 사건·적용 확인 행을 쓴다.
+   * 저장소가 설정 사건·원장을 쓰지 못하면 트랜잭션을 되돌리고 FAILED(settings-outbox-not-wired 또는 오류 이름)로 남긴다.
+   */
+  async #setting(command: Command, nowMs: number): Promise<Command> {
+    try {
+      const done = await this.store.mutate(command.commandId, async (w) => {
+        const acked = await writeSucceeded(w, { result: { setting: settingDraftOf(w.current, 'APPLY')?.kind, scope: 'PLATFORM' }, ackedAtMs: nowMs, nowMs });
+        if (!w.setting || !w.applyCheck || !w.assignControlVersion) throw new Error('settings-outbox-not-wired');
+        const ok = await writeSettingChange(w, { phase: 'APPLY', nowMs });
+        if (!ok) throw new Error('settings-outbox-not-wired');
+        return acked;
+      });
+      return done ?? this.store.markDispatchFailed(command.commandId, 'settings-outbox-not-wired', nowMs);
+    } catch (err) {
+      return this.store.markDispatchFailed(command.commandId, err instanceof Error ? err.message : 'settings-outbox-not-wired', nowMs);
+    }
   }
 
   /**
@@ -152,6 +191,8 @@ export class ExecuteCommand {
       } catch (err) {
         finished = await this.store.markDispatchFailed(command.commandId, err instanceof Error ? err.message : 'execution-failed', nowMs);
       }
+    } else if (isSettingCommand(command.type)) {
+      finished = await this.#setting(dispatched, nowMs);
     } else if (!this.executor) {
       finished = await this.store.markDispatchFailed(command.commandId, 'target-not-wired', nowMs);
     } else {

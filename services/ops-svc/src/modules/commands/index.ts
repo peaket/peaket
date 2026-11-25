@@ -58,7 +58,7 @@ export {
   type CommandType,
   type NewCommand,
 } from './domain/command.js';
-export { CommandInputRejected, checkCommandParams, normalizeReason, BOT_LEVELS, BOT_REASSESS_MODES, KILL_SWITCH_SCOPES } from './domain/command-params.js';
+export { CommandInputRejected, checkCommandParams, featureOffParamsOf, logLevelParamsOf, normalizeReason, BOT_LEVELS, BOT_REASSESS_MODES, KILL_SWITCH_SCOPES } from './domain/command-params.js';
 export {
   BLOCK_IPV4_TWO_PERSON_BELOW,
   BLOCK_IPV6_TWO_PERSON_BELOW,
@@ -87,12 +87,63 @@ export {
   type DryRunTarget,
   type DryRunUnavailable,
 } from './domain/dry-run.js';
-export { closeIfApprovalExpired, planCreation, recordDigest, writeAutoExpired, writeComparison, writeDecision } from './domain/command-writes.js';
+export { closeIfApprovalExpired, planCreation, recordDigest, writeAutoExpired, writeComparison, writeDecision, writeSettingChange } from './domain/command-writes.js';
+export {
+  ACTIVE_APPLY_STATUSES,
+  APPLY_CHECK_OUTBOX_WAIT_MS,
+  APPLY_CHECK_QUERY_TIMEOUT_MS,
+  APPLY_CHECK_RECHECK_MS,
+  APPLY_CHECK_RECHECK_UNTIL_MS,
+  APPLY_CHECK_ROUND_MS,
+  APPLY_CHECK_WINDOW_MS,
+  APPLY_STATUSES,
+  SETTINGS_APPLY_ALERT,
+  applyCheckViewOf,
+  nextApplyCheck,
+  type ApplyCheckRow,
+  type ApplyCheckStage,
+  type ApplyStatus,
+  type ProbeResult,
+} from './domain/apply-check.js';
+export {
+  BOT_LEVEL_DEFAULT,
+  FEATURE_FLAGS,
+  LOG_LEVEL_RAISED,
+  LOG_LEVEL_SERVICES,
+  SETTING_COMMAND_TYPES,
+  deterministicUuidOf,
+  isSettingCommand,
+  settingDraftOf,
+  settingExpiryMs,
+  settingLedgerKindOf,
+  settingReceiverOf,
+  type SettingDraft,
+  type SettingPhase,
+} from './domain/setting-commands.js';
+export {
+  LOG_SAMPLING_AFTER_MS,
+  LOG_SAMPLING_BEFORE_MS,
+  LOG_SAMPLING_LOOKAHEAD_MS,
+  LOG_SAMPLING_ONE_IN,
+  PublishOnsaleLogSampling,
+  logSamplingEndOf,
+  logSamplingSettingOf,
+  type LogSamplingRound,
+  type OnsaleOpen,
+  type OnsaleScheduleSource,
+  type SettingsPublisher,
+} from './domain/log-sampling.js';
+export { CheckSettingsApply, type ApplyCheckRound, type CheckSettingsApplyDeps } from './application/check-settings-apply.js';
+export { ControlPreviewDryRunSource, PREVIEW_TIMEOUT_MS } from './adapters/control-preview-dry-run-source.js';
+export { PROMETHEUS_URL_ENV, PROM_LABEL_VALUE, PrometheusSettingsProbe, settingsProbeFromEnv } from './adapters/prometheus-settings-probe.js';
+export { HttpOnsaleScheduleSource } from './adapters/http-onsale-schedule-source.js';
+export { DrizzleApplyChecks } from './adapters/db/drizzle-apply-checks.js';
 export {
   DuplicateCommandActor,
   noCommandSecurityEvents,
   noCommandSignals,
   type ActorSide,
+  type ApplyCheckStore,
   type CancelledEventGuard,
   type CommandDecision,
   type CommandDueKind,
@@ -104,6 +155,7 @@ export {
   type CommandSignals,
   type CommandStore,
   type CommandWriter,
+  type SettingsApplyProbe,
 } from './domain/ports.js';
 export { MemoryCommandStore, type MemoryCommandActor, type MemoryCommandEvent } from './adapters/memory-command-store.js';
 export { DrizzleCommandStore } from './adapters/db/drizzle-command-store.js';

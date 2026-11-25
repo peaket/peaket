@@ -271,8 +271,27 @@ class DbCommandWriter implements CommandWriter {
   }
 
   /** 설정 사건을 같은 트랜잭션의 Outbox 행으로(ADR-0349 결정 5). 행 ID는 실제 시계의 UUIDv7이다(일 파티션은 릴레이가 실제 시계로 미리 만든다) */
-  async setting(s: SettingChange): Promise<void> {
-    await publishSetting(this.tx, s);
+  async setting(s: SettingChange): Promise<string> {
+    return publishSetting(this.tx, s);
+  }
+
+  /** 적용 확인 행(0026 command_apply_check)을 같은 트랜잭션에 쓴다(ADR-0365 결정 14) */
+  async applyCheck(row: import('../../domain/apply-check.js').ApplyCheckRow): Promise<void> {
+    await this.tx.execute(sql`
+      insert into command_apply_check
+        (command_id, stage, version, message_key, outbox_id, service, status, written_at, sent_at,
+         target_count, acked_count, pods, alert_open, reason, next_check_at, updated_at)
+      values (${row.commandId}::uuid, ${row.stage}, ${row.version}::bigint, ${row.messageKey}, ${row.outboxId}::uuid,
+        ${row.service ?? null}, ${row.status}, ${new Date(row.writtenAtMs)}::timestamptz,
+        ${row.sentAtMs !== undefined ? new Date(row.sentAtMs) : null}::timestamptz,
+        ${row.targetCount}::int, ${row.ackedCount}::int, ${JSON.stringify(row.pods)}::jsonb, ${row.alertOpen},
+        ${row.reason ?? null}, ${new Date(row.nextCheckAtMs)}::timestamptz, ${new Date(row.updatedAtMs)}::timestamptz)
+      on conflict (command_id, stage, version) do update set
+        message_key = excluded.message_key, outbox_id = excluded.outbox_id, service = excluded.service,
+        status = excluded.status, written_at = excluded.written_at, sent_at = excluded.sent_at,
+        target_count = excluded.target_count, acked_count = excluded.acked_count, pods = excluded.pods,
+        alert_open = excluded.alert_open, reason = excluded.reason, next_check_at = excluded.next_check_at,
+        updated_at = excluded.updated_at`);
   }
 }
 
@@ -285,6 +304,12 @@ const DUE: Record<CommandDueKind, (nowMs: number) => SQL> = {
 
 @Injectable()
 export class DrizzleCommandStore extends CommandStoreBase {
+  /**
+   * 쓰기 트랜잭션(CommandWriter)이 설정 사건·적용 확인 행·판 번호를 쓸 수 있다는 표시(F-02-5).
+   * 저장소 겉면에는 setting()이 없고 mutate()가 준 writer에만 있어, CommandsModule이 이 표시로 실행기를 정한다.
+   */
+  readonly settingsWritable = true;
+
   constructor(@Inject(DATABASE) private readonly database: Database) {
     super();
   }

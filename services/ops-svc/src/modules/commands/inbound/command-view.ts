@@ -97,5 +97,5 @@ export const viewOf = (c: Command, me?: Principal): z.output<typeof CommandView>
   ...baseViewOf(c, me),
   params: c.params,
   ...(c.dryRun !== undefined ? { dryRun: c.dryRun as z.output<typeof CommandDryRunView> } : {}),
-  ...(c.delivery !== undefined ? { delivery: { kind: c.delivery.kind, ackedCount: c.delivery.ackedCount, targetCount: c.delivery.targetCount, unackedTargets: [...c.delivery.unackedTargets] } } : {}),
+  ...(c.delivery !== undefined ? { delivery: { kind: c.delivery.kind, ackedCount: c.delivery.ackedCount, targetCount: c.delivery.targetCount, unackedTargets: [...c.delivery.unackedTargets], ...(c.delivery.applyStatus !== undefined ? { applyStatus: c.delivery.applyStatus } : {}) } } : {}),
 });
