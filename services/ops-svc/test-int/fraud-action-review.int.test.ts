@@ -95,7 +95,7 @@ describe('F-04-13 구현 리뷰 PostgreSQL', () => {
     const next = { ...c, status: 'DECISION_PENDING', approvalId: uuid(), version: 2, members: c.members.map((m: any) => ({ ...m, appealResult: 'EXPIRED' })) };
     const r = record(c, { approvalId: next.approvalId });
     const out = await approvals.request(r, {
-      events: [{ seq: 2, kind: 'ACTION_REQUESTED', actorId: r.requestedBy, note: null, detail: { approvalId: r.approvalId }, occurredAtMs: NOW }],
+      events: [{ seq: 2, kind: 'ACTION_REQUESTED', actorId: r.requestedBy, note: null, detail: { approvalId: r.approvalId, accountIds: r.accountIds, targets: r.targets }, occurredAtMs: NOW }],
       caseNext: next,
       expectedVersion: c.version,
       idem: { accountRef: r.requestedBy, operation: 'CREATE_FRAUD_ACTION_REQUEST', key: uuid(), requestHash: new Uint8Array(32) },
@@ -189,11 +189,13 @@ describe('F-04-13 구현 리뷰 PostgreSQL', () => {
     });
     const decisionPending = { ...c, status: 'DECISION_PENDING', approvalId: r.approvalId, version: 2 } as any;
     await approvals.request(r, {
-      events: [{ seq: 2, kind: 'ACTION_REQUESTED', actorId: r.requestedBy, note: null, detail: { approvalId: r.approvalId }, occurredAtMs: NOW }],
+      events: [{ seq: 2, kind: 'ACTION_REQUESTED', actorId: r.requestedBy, note: null, detail: { approvalId: r.approvalId, accountIds: r.accountIds, targets: r.targets }, occurredAtMs: NOW }],
       caseNext: decisionPending,
       expectedVersion: 1,
     } as any);
     const approver = uuid();
+    const loaded = await approvals.get(r.approvalId);
+    expect(loaded?.targets.map((t) => t.ticketId)).toEqual([t1, t2]);
     await approvals.recordSummaryView({ approvalId: r.approvalId, adminAccountId: approver, nowMs: NOW });
     const actions = new FraudActions({
       store,
