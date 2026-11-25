@@ -1,8 +1,10 @@
 // F-07-9 중개자 고지·정산 주체 문구(I-04, AC-05·AC-06·AC-08). 정본은 transfer-refund §2.2·§4,
-// settlement §3·§6, POL-037·POL-039다. 화면 조각을 읽지 않고 순수 함수의 반환 글자를 본다.
+// settlement §3·§6, POL-037·POL-039다. 화면 조각을 읽지 않고 순수 함수의 반환 글자와 React 렌더 결과를 본다.
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import { test } from 'node:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 register('./test-ts-resolve.mjs', import.meta.url);
 const { performanceSellerNotice, productSellerNotice, settlementDisclosure } = await import('./seller-notice.ts');
@@ -44,4 +46,26 @@ test('AC-05 빈 판매자·예금주·수수료율은 빈칸이 아니라 "확�
     'PEAKET이 처리하고, 환불은 결제자에게 갑니다',
     '양도는 PEAKET이 처리하고, 티켓값 정산은 당사자끼리 합니다. 부정판매는 처벌·과징금 대상입니다',
   ]);
+});
+
+test('AC-05 경계: 1자·100자·줄바꿈·<·&가 든 상호도 고지 안에서 글자로 남는다', () => {
+  for (const name of ['가', '가'.repeat(100), '가\n나', '가<나', '가&나']) {
+    const text = performanceSellerNotice(name);
+    assert.ok(text.includes(name), `${JSON.stringify(name)}가 고지에 없다`);
+    assert.ok(text.endsWith(PERFORMANCE), '고지 문장이 끝까지 이어지지 않는다');
+  }
+});
+
+test('AC-08 F-13 상호에 HTML을 넣어도 React가 글자로 그리고 요소를 만들지 않는다 [ASVS v5.0.0-1.2.1] [ASVS v5.0.0-3.2.2]', () => {
+  const html = renderToStaticMarkup(createElement('p', null, performanceSellerNotice('<img src=x onerror=alert(1)>')));
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(html, /<img\b/);
+});
+
+test('AC-06 상호가 바뀌면 렌더한 고지의 상호도 바뀐다', () => {
+  const one = renderToStaticMarkup(createElement('p', null, performanceSellerNotice('(주)피켓공연')));
+  const two = renderToStaticMarkup(createElement('p', null, performanceSellerNotice('(주)다른공연')));
+  assert.match(one, /판매자: \(주\)피켓공연\./);
+  assert.match(two, /판매자: \(주\)다른공연\./);
+  assert.notEqual(one, two);
 });
