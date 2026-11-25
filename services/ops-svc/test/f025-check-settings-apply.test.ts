@@ -304,13 +304,13 @@ describe('C-T54 적용 확인 바퀴(서버 몫, 단위 층)', () => {
     let fail = true;
     let handled = 0;
     const clock = { now: () => now };
-    const alerts: Pick<RecordOpsAlert, 'handle' | 'resolve'> = {
+    const alerts = {
       async handle() {
         handled += 1;
         if (fail) throw new Error('alert-store-down');
       },
       async resolve() {},
-    };
+    } as unknown as Pick<RecordOpsAlert, 'handle' | 'resolve'>;
     const check = new CheckSettingsApply({ store: h.store, probe: h.probe, alerts, clock });
     await check.runOnce(1).catch(() => undefined);
     expect(handled).toBe(1);
