@@ -296,7 +296,9 @@ export async function writeInvSeed(seed, o) {
   ]) {
     if (!rows.length) continue;
     const body = rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
-    const res = await fetch(`${o.url.replace(/\/$/, '')}/?query=${encodeURIComponent(`INSERT INTO ${table} FORMAT JSONEachRow`)}`, { method: 'POST', headers: auth, body });
+    // ISO 8601 시각을 그대로 받으려면 date_time_input_format=best_effort가 필요하다(F-04-11 통합 시험에서 확인).
+    const query = `?query=${encodeURIComponent(`INSERT INTO ${table} FORMAT JSONEachRow`)}&date_time_input_format=best_effort`;
+    const res = await fetch(`${o.url.replace(/\/$/, '')}/${query}`, { method: 'POST', headers: auth, body });
     if (!res.ok) throw new Error(`ClickHouse ${res.status}: ${(await res.text()).slice(0, 300)}`);
   }
 }
