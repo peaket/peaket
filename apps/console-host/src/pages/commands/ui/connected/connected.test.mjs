@@ -210,13 +210,14 @@ test('F-03-4 T10 C-T7 ②-6 전파 지연 카드는 "전파가 늦어지고 있�
   assert.match(early, /ack 4\/5/);
 });
 
-test('F-03-4 T10 C-T7 ②-7 실패 카드는 "전파에 실패했습니다"와 [다시 시도]가 바로 있고 런북 CLI 한 줄은 그리지 않는다. viewer에게는 [다시 시도]가 없다', async () => {
+test('F-03-4 T10 C-T7 ②-7 실패 카드는 "전파에 실패했습니다"와 [다시 시도]가 바로 있고 런북 CLI 한 줄(F-03-7 C-T7 ③)도 보인다. viewer에게는 [다시 시도]가 없다', async () => {
   const d = commandState({ state: 'FAILED', lastError: 'purchase-svc-3 ack 시간 초과', delivery: { kind: 'ACK', ackedCount: 2, targetCount: 3, unackedTargets: ['purchase-svc-3'] } });
   const st = await cardState(d, { nowMs: SEEN + 10_001, dispatchSeenAtMs: SEEN });
   const html = await render('CommandCard.tsx', 'CommandCard', { detail: d, state: st, role: 'operator', onApprove: noop, onReject: noop, onRetry: noop, onRevert: noop });
   assert.ok(textOf(html).includes('전파에 실패했습니다'));
   assert.ok(buttons(html).some((b) => b.text.includes('다시 시도')));
-  assert.equal(textOf(html).includes('peaket-runbook'), false);
+  assert.ok(textOf(html).includes('peaket-runbook draft'), '런북 CLI 한 줄(C-T7 ③)');
+  assert.ok(textOf(html).includes(d.commandId), '런북 한 줄에 명령 ID가 들어간다');
   const viewer = await render('CommandCard.tsx', 'CommandCard', { detail: d, state: st, role: 'viewer', onApprove: noop, onReject: noop, onRetry: noop, onRevert: noop });
   assert.equal(
     buttons(viewer).some((b) => b.text.includes('다시 시도')),
