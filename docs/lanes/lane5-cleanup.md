@@ -96,3 +96,14 @@
 - TR-10(낮음): `live-product-mobile.test.mjs`는 `ProductFormLive`만 보고 `ProductEditLive`의 로딩·오류·고치기와 768 폼 보임을 보지 않는다. `seller-notice.test.mjs`는 `'0.00%'`·1/100자 상호·줄바꿈/`<`/`&`를 보지 않고, `productSellerNotice`는 이 기능에서 쓰는 화면이 없다.
 - TR-11(낮음): 계획 §실패 확인의 '실행 16·11 실패'는 `seller-notice.test.mjs`가 모듈 없음으로 파일째 1건이 된 수다. 구현 뒤 전체는 261개(257 − 파일째 1 + 5)가 되므로 수를 정정한다.
 - TR-12(낮음): d5 §6.1 판매자 정보에는 새 '중개자 지위와 정산' 구획이 없다. `settlementDisclosure` ④⑤는 정본 인용이 아니라 요약이고, 빈 상호에서 `performanceSellerNotice`는 '판매자:'를 뺀다. d5/§2.2에 구획을 더하거나 요약임을 표시하고 빈 값은 '확인 필요'로 채운다.
+
+### F-07-9 구현 리뷰(2026-11-26)
+
+구현 리뷰 지적 가운데 중간·낮음이다. 자세한 내용과 정본 근거는 `docs/review/plans/F-07-9.md` '구현 리뷰' 절에 있다.
+
+- IR-01(중간): 소비자 웹 POL-037 고지가 `apps/web/src/_pages/booking-result/ui/ResultLive.tsx:147`·`apps/web/src/_pages/event-detail/model/content.ts:26`·`apps/web/src/_pages/order-detail/ui/DetailParts.tsx:16`에 아직 복사돼 있다. `ResultLive`는 "예매 취소와 환불은 PEAKET이 처리합니다"가 빠졌고, event-detail·order-detail은 빈 상호에서 `판매자: .`가 된다. 공용 함수 하나로 모으고 예매 확인서에 전체 문장을 쓴다. 이번 변경 밖의 기존 결함이라 이 기능의 판정을 막지는 않는다.
+- IR-02(중간): `apps/partner/src/_pages/sale-policy/ui/LiveSalePolicy.tsx:190` 모바일 규칙 카드의 규칙 이름이 `pickRule`을 부르는 버튼인데, 편집 구역이 `max-md:hidden`이라 휴대폰에서는 눌러도 보이는 변화가 없다. `link-more`가 19px이라 24px 터치 목표에도 못 미치고, 40자 규칙 이름은 `nowrap`으로 잘린다. 카드에서는 글자로만 두거나 24px 이상으로 만든다.
+- IR-03(낮음): `apps/partner/src/shared/lib/seller-notice.ts:17`의 `productSellerNotice`는 화면에서 쓰지 않는 시험 전용 함수다. 상품 화면을 실제 API로 이을 때 쓰거나 지운다(TR-10).
+- IR-04(낮음): `apps/partner/src/shared/lib/seller-notice.ts:37` ⑤ "부정판매는 처벌·과징금 대상입니다"는 POL-024 라목 원문이 아닌 요약이다. 요약임을 표시하거나 원문을 쓴다(TR-12).
+- IR-05(낮음): 계획 I-07이 정한 `docs/lanes/lane5.md` F-07-9 진행 로그가 없다. 동결 로컬 범위 기록에서 채운다.
+- IR-06(중간): 계획·시험·구현·기록 커밋이 `lane5-freeze-F-07-9-opencode` 한 세션을 함께 써 `roles-check --base 1d10d6da3 --head HEAD`가 exit 1이다(세션 겹침 3건). 커밋 꼬리말은 고쳐 쓸 수 없으므로 이 동결 가지는 합치지 않고, 기록 커밋에 예외를 남기거나 다음 묶음부터 역할마다 새 세션을 쓴다. 같은 출력의 '시험 리뷰가 구현보다 먼저'·'verify 없음'은 도구가 ADR-0372·0381을 아직 모르는 탓이다.
