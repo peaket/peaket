@@ -49,13 +49,13 @@ const caseOf = (o: Record<string, any> = {}) => ({
   members: [member(uuid())],
   events: [{ seq: 1, kind: 'CREATED', actorId: null, note: null, detail: null, occurredAtMs: NOW - DAY }],
   ...o,
-});
+}) as any;
 
 const record = (c: any, o: Record<string, any> = {}) => ({
   approvalId: uuid(),
   caseId: c.caseId,
   eventId: c.eventId,
-  action: 'RESTRICT',
+  action: 'RESTRICT' as const,
   accountIds: [c.members[0].accountId],
   targets: [],
   restrictionEndsAtMs: NOW + 30 * DAY,
@@ -63,7 +63,7 @@ const record = (c: any, o: Record<string, any> = {}) => ({
   requestedBy: uuid(),
   requesterRole: 'cs_lead',
   dueAtMs: NOW + DAY,
-  status: 'PENDING_APPROVAL',
+  status: 'PENDING_APPROVAL' as const,
   requestedAtMs: NOW,
   approverId: null,
   approvedAtMs: null,

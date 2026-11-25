@@ -94,7 +94,7 @@ class FakeAdmin extends FakeAdminIdentity {
     this.#count('recentlyRevoked');
     return this.revoked.get(adminAccountId) ?? [];
   }
-  async designations(adminAccountId: string) {
+  override async designations(adminAccountId: string) {
     this.#count('designations');
     return super.designations(adminAccountId);
   }
