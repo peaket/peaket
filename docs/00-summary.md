@@ -27,6 +27,7 @@
 | 대상 독자 | 권장 읽기 순서 |
 | --- | --- |
 | 처음 읽는 사람·면접관·소유자 복습 | README.md(저장소 첫 화면: 지금 상태·약속·읽는 순서·저장소 구성, 2026-10-30 더함) → docs/walkthrough/01-system-design.md(시스템 디자인 면접 순서로 전체 구조를 한 번에 완성하는 한 판 문서) → 단계마다 '더 깊이'에 적힌 정본(무엇을 어디까지 증명했는지는 docs/verification.md). 쉬운 설명서 docs/guide/는 2026-11-01 소유자가 지웠다(ADR-0177) |
+| 새로 온 엔지니어(첫날) | [docs/onboarding.md](onboarding.md)(저장소 받기 → 설치·빌드·시험 → 데모 → 문서 지도 → 기능 절차 → ADR 읽는 길, 2026-11-25 F-08-7에서 더함) |
 | 설계 전체를 설명할 수 있게 이해하려는 사람(소유자 복습·면접 준비) | docs/walkthrough/README(길잡이) → 한 판 문서 → 현황 한 장 → 구매 길 분야 편과 거기서 나오는 결정 카드·DB 설계 편 → 나머지 분야 편 → 덮개 표로 빈칸 확인. 규범이 아닌 해설서이고 정본과 다르면 정본이 맞다(2026-11-01, ADR-0177이 ADR-0175를 대신한다) |
 | 의사결정자(경영진·투자·채용 검토자) | docs/planning/00-executive-summary(2쪽) → docs/planning/01 §5.2(위험) → wbs §4(마일스톤) |
 | 프로젝트 소유자(전체 조망) | 00-summary → docs/planning/01 → review §9 → docs/review/open-items(나중에 정할 것) → wbs → 00-diagnosis |
