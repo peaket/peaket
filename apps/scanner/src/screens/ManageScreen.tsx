@@ -6,9 +6,11 @@
 import { CameraView } from "@peaket/ds/CameraView";
 import { ScannerShell } from "@peaket/ds/ScannerShell";
 import { useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { freshnessBannersOf } from "../app/freshness-notice";
 import type { ScannerLayout } from "../app/layout";
 import { PreviewSwitcher, usePreviewState } from "../app/preview";
 import { Link } from "../app/router";
+import { useScannerLive } from "../app/useScannerLive";
 import { device, fleet, myOverrides, placement, sync, zoneFlags } from "../fixtures/scanner";
 import { bottomStyle, ManageLink, Strip, stripStyle } from "../shared/shell";
 
@@ -38,15 +40,31 @@ export function ManageScreen() {
     !params.has("state") && (tabParam === "devices" || tabParam === "flags" || tabParam === "booth" || tabParam === "mine")
       ? tabParam
       : tabFromState(state);
+  const live = useScannerLive(search);
+  const banners = freshnessBannersOf({
+    role: live.shift?.role,
+    placementZone: live.shift?.placement.gateZone,
+    staleDevices: live.staleDevices,
+  });
   return (
     <>
-      <ManageBody key={`${state}-${initialTab}`} st={state} layout={layout} initialTab={initialTab} />
+      <ManageBody key={`${state}-${initialTab}`} st={state} layout={layout} initialTab={initialTab} banners={banners} />
       <PreviewSwitcher states={MANAGE_STATES} current={state} />
     </>
   );
 }
 
-function ManageBody({ st, layout, initialTab }: { st: ManageState; layout: ScannerLayout; initialTab: Tab }) {
+function ManageBody({
+  st,
+  layout,
+  initialTab,
+  banners,
+}: {
+  st: ManageState;
+  layout: ScannerLayout;
+  initialTab: Tab;
+  banners: { deviceId: string; title: string; detail: string }[];
+}) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ devices: null, flags: null, booth: null, mine: null });
   const t = layout === "t";
@@ -122,6 +140,15 @@ function ManageBody({ st, layout, initialTab }: { st: ManageState; layout: Scann
       mainClassName="col"
       mainStyle={t ? { padding: "20px 24px 24px", gap: 16 } : l ? { padding: "12px 20px 16px", gap: 12 } : { padding: "12px 16px 16px", gap: 10 }}
     >
+      {banners.map((b) => (
+        <div className="banner banner-warning" role="alert" key={b.deviceId} style={{ margin: t ? 4 : 2 }}>
+          <i className="ic ic-alert" aria-hidden="true" />
+          <div className="banner-body">
+            <span className="banner-title">{b.title}</span>
+            {b.detail}
+          </div>
+        </div>
+      ))}
       {l ? (
         <div className="row between wrap" style={{ alignItems: "flex-end" }}>
           <h1 className="t-xl">현장 관리</h1>

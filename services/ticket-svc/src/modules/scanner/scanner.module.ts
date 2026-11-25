@@ -71,6 +71,8 @@ export interface ScannerWiring {
   onQueueReport?: (result: 'empty' | 'pending' | 'no_placement') => void;
   /** 현장 책임자 변경분의 같은 구역 지연 기기(O-T20). 없으면 gate_lead에게 빈 목록 */
   freshness?: { staleDevices(i: { eventId: string; gateZone?: string; selfDeviceId?: string; nowMs: number }): Promise<import('./domain/scanner-gate.js').ScannerFreshnessDeviceView[]> };
+  /** 스캐너 앱 최소 지원 판(C1-15). 기본 1.4.0 */
+  minAppVersion?: string;
 }
 
 @Module({})
@@ -128,6 +130,7 @@ export class ScannerModule {
             ...(o.onQueueReport ? { onQueueReport: o.onQueueReport } : {}),
             ...(o.entryClose ? { entryClose: o.entryClose } : {}),
             ...(o.freshness ? { freshness: o.freshness } : {}),
+            ...(o.minAppVersion !== undefined ? { minAppVersion: o.minAppVersion } : {}),
           }),
         inject: [SCANNER_GATE_STORE, CLOCK, SCANNER_DEVICE_STORE],
       },

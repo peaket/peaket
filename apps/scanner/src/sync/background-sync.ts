@@ -116,10 +116,12 @@ export function createServiceWorkerUploader(i: {
   origin: string;
   key?: unknown;
   loadKey?: () => Promise<unknown>;
+  loadClockOffsetMs?: () => Promise<number | undefined>;
   fetch?: typeof fetch;
   now?: () => number;
 }): UploadPort {
   let keyPromise: Promise<DpopKey | undefined> | undefined;
+  let offsetPromise: Promise<number | undefined> | undefined;
   const load = async (): Promise<DpopKey | undefined> => {
     if (i.key) return i.key as DpopKey;
     if (!i.loadKey) return undefined;
@@ -128,13 +130,15 @@ export function createServiceWorkerUploader(i: {
   return {
     async upload(batch, _o) {
       keyPromise ??= load();
-      const key = await keyPromise;
+      offsetPromise ??= Promise.resolve(i.loadClockOffsetMs?.() ?? undefined).catch(() => undefined);
+      const [key, offset] = await Promise.all([keyPromise, offsetPromise]);
       if (!key) throw new Error('기기 키가 없어 서비스 워커가 업로드할 수 없다');
+      const baseNow = i.now ?? Date.now;
       const api = new ScannerApi({
         origin: i.origin,
         key,
         ...(i.fetch ? { fetch: i.fetch } : {}),
-        ...(i.now ? { now: i.now } : {}),
+        now: () => baseNow() + (offset ?? 0),
       });
       const result = await api.uploadScans(batch as Record<string, unknown>[]);
       return { acceptedIds: result.acceptedIds, resyncRequired: result.resyncRequired };

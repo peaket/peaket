@@ -1,6 +1,12 @@
 // 서비스 워커와 창 사이 메시지 경계(ASVS offline-gate v5.0.0-3.5.5).
 // 창이 보낸 메시지는 출처를 믿지 않고, 같은 출처의 창과 정해진 모양만 받는다.
 export type ScannerSwClientMessage = { type: 'SKIP_WAITING' } | { type: 'BACKGROUND_UPLOAD_DONE'; accepted: number };
+export type ScannerSwWorkerMessage = {
+  type: 'BACKGROUND_UPLOAD_DONE';
+  accepted: number;
+  resyncRequired?: boolean;
+  stopped?: 'device-revoked' | 'device-unregistered';
+};
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -27,6 +33,22 @@ function originOf(url: unknown): string | undefined {
  * 서비스 워커의 message 사건이 같은 출처 창에서 왔는가.
  * event.origin과 event.source.url의 출처가 모두 기대 출처와 같아야 한다.
  */
+/** 서비스 워커가 창에 보내는 업로드 완료 알림. 정해진 모양만 받는다 */
+export function parseServiceWorkerWorkerMessage(data: unknown): ScannerSwWorkerMessage | undefined {
+  if (!isRecord(data) || data.type !== 'BACKGROUND_UPLOAD_DONE') return undefined;
+  if (typeof data.accepted !== 'number' || !Number.isSafeInteger(data.accepted) || data.accepted < 0) return undefined;
+  const resyncRequired = data.resyncRequired === undefined ? undefined : data.resyncRequired;
+  if (resyncRequired !== undefined && typeof resyncRequired !== 'boolean') return undefined;
+  const stopped = data.stopped === undefined ? undefined : data.stopped;
+  if (stopped !== undefined && stopped !== 'device-revoked' && stopped !== 'device-unregistered') return undefined;
+  return {
+    type: 'BACKGROUND_UPLOAD_DONE',
+    accepted: data.accepted,
+    ...(resyncRequired !== undefined ? { resyncRequired } : {}),
+    ...(stopped !== undefined ? { stopped } : {}),
+  };
+}
+
 export function isTrustedClientMessage(
   i: { origin?: string; source?: { url?: string } | null; data: unknown },
   o: { origin: string },

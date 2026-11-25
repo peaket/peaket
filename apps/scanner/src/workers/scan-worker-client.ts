@@ -8,8 +8,13 @@ export interface ScanWorkerPort {
   addEventListener(type: 'message' | 'error', fn: (e: unknown) => void): void;
 }
 
+export interface DecodeDetail {
+  raw?: string;
+  reason?: 'EMPTY' | 'NO_DECODER' | 'DECODE_ERROR';
+}
+
 type Pending =
-  | { kind: 'decode'; resolve(value: string | undefined): void; timer: unknown }
+  | { kind: 'decode'; resolve(value: DecodeDetail): void; timer: unknown }
   | { kind: 'judge'; resolve(value: unknown): void; timer: unknown };
 
 export class ScanWorkerClient {
@@ -40,13 +45,18 @@ export class ScanWorkerClient {
     this.#worker.postMessage({ type: 'prepare', state });
   }
 
-  decode(bitmap: unknown): Promise<string | undefined> {
-    if (this.#disposed) return Promise.resolve(undefined);
-    return new Promise<string | undefined>((resolve) => {
+  async decode(bitmap: unknown): Promise<string | undefined> {
+    return (await this.decodeDetailed(bitmap)).raw;
+  }
+
+  /** IR-03: 'QR 없음'과 '디코더 없음', '디코딩 오류'를 화면이 가를 수 있게 이유를 보존한다 */
+  decodeDetailed(bitmap: unknown): Promise<DecodeDetail> {
+    if (this.#disposed) return Promise.resolve({ reason: 'DECODE_ERROR' });
+    return new Promise<DecodeDetail>((resolve) => {
       const id = this.#nextId++;
       const timer = this.#setTimer(() => {
         this.#pending.delete(id);
-        resolve(undefined);
+        resolve({ reason: 'DECODE_ERROR' });
       }, this.#timeoutMs);
       this.#pending.set(id, { kind: 'decode', resolve, timer });
       this.#worker.postMessage({ type: 'decode', id, bitmap });
@@ -72,7 +82,7 @@ export class ScanWorkerClient {
     this.#worker.terminate();
     for (const [id, pending] of this.#pending) {
       this.#clearTimer(pending.timer);
-      (pending.resolve as (value: unknown) => void)(pending.kind === 'judge' ? { result: 'RETRY' } : undefined);
+      (pending.resolve as (value: unknown) => void)(pending.kind === 'judge' ? { result: 'RETRY' } : { reason: 'DECODE_ERROR' });
       this.#pending.delete(id);
     }
   }
@@ -86,7 +96,7 @@ export class ScanWorkerClient {
     if (pending.kind === 'decode' && (message.type === 'decoded' || message.type === 'decode-failed')) {
       this.#clearTimer(pending.timer);
       this.#pending.delete(message.id);
-      pending.resolve(message.type === 'decoded' ? message.raw : undefined);
+      pending.resolve(message.type === 'decoded' ? (message.raw !== undefined ? { raw: message.raw } : { reason: 'EMPTY' }) : { reason: message.reason });
       return;
     }
     if (pending.kind === 'judge' && (message.type === 'judged' || message.type === 'worker-error')) {
@@ -99,7 +109,7 @@ export class ScanWorkerClient {
   #failAll(): void {
     for (const [id, pending] of this.#pending) {
       this.#clearTimer(pending.timer);
-      (pending.resolve as (value: unknown) => void)(pending.kind === 'judge' ? { result: 'RETRY' } : undefined);
+      (pending.resolve as (value: unknown) => void)(pending.kind === 'judge' ? { result: 'RETRY' } : { reason: 'DECODE_ERROR' });
       this.#pending.delete(id);
     }
   }

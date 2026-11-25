@@ -7,7 +7,7 @@ export type ScanWorkerRequest =
 
 export type ScanWorkerResponse =
   | { type: 'decoded'; id: number; raw?: string }
-  | { type: 'decode-failed'; id: number; reason: 'NO_DECODER' | 'DECODE_ERROR' }
+  | { type: 'decode-failed'; id: number; reason: 'EMPTY' | 'NO_DECODER' | 'DECODE_ERROR' }
   | { type: 'judged'; id: number; outcome: unknown }
   | { type: 'worker-error'; id: number };
 
@@ -40,7 +40,7 @@ export function parseScanWorkerResponse(data: unknown): ScanWorkerResponse | und
   }
   if (data.type === 'decode-failed' && onlyKeys(data, ['type', 'id', 'reason'])) {
     if (!isId(data.id)) return undefined;
-    if (data.reason !== 'NO_DECODER' && data.reason !== 'DECODE_ERROR') return undefined;
+    if (data.reason !== 'EMPTY' && data.reason !== 'NO_DECODER' && data.reason !== 'DECODE_ERROR') return undefined;
     return { type: 'decode-failed', id: data.id, reason: data.reason };
   }
   if (data.type === 'judged' && onlyKeys(data, ['type', 'id', 'outcome'])) {

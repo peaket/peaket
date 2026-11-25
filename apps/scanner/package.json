@@ -1,7 +1,7 @@
 {
   "name": "@peaket/scanner",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.4.0",
   "type": "module",
   "description": "현장 스캐너(Vite 8 + React, docs/frontend.md §2.3)",
   "scripts": {

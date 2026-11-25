@@ -6,6 +6,14 @@ import type { PackageState } from '../storage/package-state.ts';
 import { createBarcodeDecoder, createDecoderChain, createZxingDecoder, type BarcodeDecoder } from '../storage/decoder.ts';
 import { parseScanWorkerRequest, type ScanWorkerResponse } from './qr-protocol.ts';
 
+/** 디코더 자체가 없는 경우(정상 'QR 없음'과 구분한다) */
+export class NoDecoderError extends Error {
+  constructor() {
+    super('QR 디코더가 없다');
+    this.name = 'NoDecoderError';
+  }
+}
+
 export interface ScanWorkerHandlerDeps {
   decode(bitmap: unknown): Promise<string | undefined>;
   judge(i: { raw: string; nowMs: number; clockOffsetMs: number }): Promise<unknown>;
@@ -27,10 +35,14 @@ export function createScanWorkerHandler(deps: ScanWorkerHandlerDeps): {
       if (request.type === 'decode') {
         try {
           const raw = await deps.decode(request.bitmap);
-          if (raw === undefined) deps.post({ type: 'decode-failed', id: request.id, reason: 'NO_DECODER' });
+          if (raw === undefined) deps.post({ type: 'decode-failed', id: request.id, reason: 'EMPTY' });
           else deps.post({ type: 'decoded', id: request.id, raw });
-        } catch {
-          deps.post({ type: 'decode-failed', id: request.id, reason: 'DECODE_ERROR' });
+        } catch (error) {
+          deps.post({
+            type: 'decode-failed',
+            id: request.id,
+            reason: error instanceof NoDecoderError ? 'NO_DECODER' : 'DECODE_ERROR',
+          });
         }
         return;
       }
@@ -65,7 +77,8 @@ if (workerSelf && typeof workerSelf.addEventListener === 'function') {
   const handler = createScanWorkerHandler({
     decode: async (bitmap) => {
       const d = await decoder();
-      return d?.decode(bitmap as ImageBitmapSource);
+      if (!d) throw new NoDecoderError();
+      return d.decode(bitmap as ImageBitmapSource);
     },
     judge: async (i) => {
       if (!state) throw new Error('목록이 준비되지 않았다');

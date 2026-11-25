@@ -20,10 +20,9 @@ import { navigate } from './router';
 import { freshnessOf, type Freshness, type LiveSetupState, type LiveSyncState } from '../api/live';
 import { appVersionGate, packageRefetchAfterUpdate } from '../sw/update-gate';
 import { applyWaitingUpdate, getServiceWorkerRegistration } from '../sw/register';
+import { parseServiceWorkerWorkerMessage } from '../sw/protocol';
 import { BackgroundSyncGuard } from '../sync/background-sync';
-
-declare const __APP_VERSION__: string;
-const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.4.0';
+import { APP_VERSION } from './app-version';
 
 export interface LiveScanVerdict {
   outcome: JudgeOutcome;
@@ -104,6 +103,7 @@ class LiveRuntime {
   #minAppVersion: string | undefined;
   #staleDevices: ScannerStaleDevice[] = [];
   #syncGuard: BackgroundSyncGuard | undefined;
+  #swMessageBound = false;
   #bound = false;
   /** 상태 적용(스캔·변경분·전체 목록)을 한 줄로 세운다. 서로의 로컬 입장 상태·번호를 덮지 않게 한다 */
   #stateChain: Promise<unknown> = Promise.resolve();
@@ -256,6 +256,7 @@ class LiveRuntime {
       },
     });
     this.#bindBrowserEvents();
+    this.#bindServiceWorkerMessages();
     this.#changesTimer = setInterval(() => void this.syncChanges(), 60_000);
     this.#uploadState = { ...this.#uploadState, pending: await this.#queue.count() };
     this.#view = { ...this.#view, mode: 'live' };
@@ -271,6 +272,23 @@ class LiveRuntime {
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) void this.#resume();
     });
+  }
+
+  /** 서비스 워커가 백그라운드에서 올린 결과를 화면 큐·재동기화에 잇는다(IR-06) */
+  #bindServiceWorkerMessages(): void {
+    if (this.#swMessageBound || typeof navigator === 'undefined' || !navigator.serviceWorker) return;
+    this.#swMessageBound = true;
+    navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
+      const message = parseServiceWorkerWorkerMessage(event.data);
+      if (!message) return;
+      void this.#onBackgroundUploadDone(message);
+    });
+  }
+
+  async #onBackgroundUploadDone(message: { resyncRequired?: boolean }): Promise<void> {
+    this.#uploadState = { ...this.#uploadState, pending: (await this.#queue?.count()) ?? this.#uploadState.pending };
+    if (message.resyncRequired) this.#needsResync = true;
+    this.#publish();
   }
 
   /** 네트워크·화면이 돌아오면 큐를 올리고 변경분도 바로 받는다(§6.3 주기) */
@@ -381,7 +399,8 @@ class LiveRuntime {
 
   #ready(): boolean {
     const s = this.#state;
-    return s !== undefined && this.#clockOffsetMs !== undefined && s.placement.gateZone !== '' && !this.#updateRequired();
+    // 입장 중(SCR-034)에는 옛 판을 거부하지 않는다. 판이 낮으면 근무 준비의 [스캔 시작]만 막는다.
+    return s !== undefined && this.#clockOffsetMs !== undefined && s.placement.gateZone !== '';
   }
 
   #updateRequired(): boolean {
@@ -591,7 +610,11 @@ class LiveRuntime {
       registration,
       phase: 'prep',
       onApplied: () => {
-        if (packageRefetchAfterUpdate({ applied: true })) this.restart();
+        if (!packageRefetchAfterUpdate({ applied: true })) return;
+        // 새 서비스 워커가 활성화되어도 현재 문서의 번들은 바뀌지 않는다.
+        // 새 판을 실제로 실행하려면 새 문서를 받아야 하고, 그 문서가 목록을 다시 받는다.
+        if (typeof location !== 'undefined' && typeof location.reload === 'function') location.reload();
+        else this.restart();
       },
     });
   }

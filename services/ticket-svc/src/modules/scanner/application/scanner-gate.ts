@@ -70,13 +70,17 @@ export interface ScannerGateDeps {
   entryClose?: Pick<EntryCloseStore, 'putQueueReport'>;
   /** 현장 책임자 변경분에 실을 같은 구역 지연 기기(O-T20). 없으면 gate_lead에게 빈 목록 */
   freshness?: { staleDevices(i: { eventId: string; gateZone?: string; selfDeviceId?: string; nowMs: number }): Promise<ScannerFreshnessDeviceView[]> };
+  /** 스캐너 앱 최소 지원 판. 실제 응답에 싣는다(C1-15). 없으면 1.4.0 */
+  minAppVersion?: string;
 }
 
 export class ScannerGate {
   readonly #maxOfflineMs: number;
+  readonly #minAppVersion: string;
 
   constructor(private readonly d: ScannerGateDeps) {
     this.#maxOfflineMs = d.maxOfflineMs ?? DEFAULT_SCANNER_MAX_OFFLINE_MS;
+    this.#minAppVersion = d.minAppVersion ?? '1.4.0';
   }
 
   async package(eventIdRaw: unknown, sessionEventId: string | undefined): Promise<ScannerPackageView> {
@@ -88,7 +92,7 @@ export class ScannerGate {
     const synced = await this.d.store.syncPolicy({ eventId, ...(core ? { coreReentryAllowed: core.reentryAllowed } : {}), atMs: now });
     this.#policyChanged(eventId, synced);
     const p = await this.d.store.package({ eventId, nowMs: now });
-    return { ...p, reentryAllowed: synced.reentryAllowed ?? false, versionVector: { ...p.versionVector, maxOfflineMs: this.#maxOfflineMs } };
+    return { ...p, reentryAllowed: synced.reentryAllowed ?? false, minAppVersion: this.#minAppVersion, versionVector: { ...p.versionVector, maxOfflineMs: this.#maxOfflineMs } };
   }
 
   async changes(eventIdRaw: unknown, afterRaw: unknown, limitRaw: unknown, sessionEventId: string | undefined, deviceId?: string, role?: string): Promise<ScannerChangesView> {
@@ -128,6 +132,7 @@ export class ScannerGate {
     }
     return {
       ...c,
+      minAppVersion: this.#minAppVersion,
       ...(staleDevices !== undefined ? { staleDevices } : {}),
       versionVector: { ...c.versionVector, maxOfflineMs: this.#maxOfflineMs },
     };

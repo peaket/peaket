@@ -18,7 +18,6 @@ import { useScanLive, type ScanLive } from "../app/useScanLive";
 import { placement, recentScans, sync } from "../fixtures/scanner";
 import { feedbackOf, emitFeedback } from "../judge/feedback";
 import { messageOf, type JudgeOutcome } from "../judge/judge";
-import { createBarcodeDecoder, type BarcodeDecoder } from "../storage/decoder";
 import { ScanWorkerClient } from "../workers/scan-worker-client";
 import { bottomStyle, ManageLink, Strip, stripStyle } from "../shared/shell";
 import { OverrideDialog, OverrideInline } from "./OverrideForm";
@@ -377,7 +376,6 @@ function LiveScanBody({ live, layout }: { live: ScanLive; layout: ScannerLayout 
   const l = layout === "l";
   const [client, setClient] = useState<ScanWorkerClient | undefined>();
   const [workerBroken, setWorkerBroken] = useState(false);
-  const [fallbackDecoder] = useState<BarcodeDecoder | undefined>(() => createBarcodeDecoder());
   const [announcement, setAnnouncement] = useState("");
   useEffect(() => {
     let created: ScanWorkerClient | undefined;
@@ -393,8 +391,9 @@ function LiveScanBody({ live, layout }: { live: ScanLive; layout: ScannerLayout 
   useEffect(() => {
     if (client && live.state) client.prepare(live.state);
   }, [client, live.state]);
-  const detector = (client !== undefined && !workerBroken) || fallbackDecoder !== undefined;
-  const videoRef = useQrLoop(live.ready && detector && live.verdict === undefined, client, fallbackDecoder);
+  const markBroken = useCallback(() => setWorkerBroken(true), []);
+  const detector = client !== undefined && !workerBroken;
+  const videoRef = useQrLoop(live.ready && detector && live.verdict === undefined, client, markBroken);
   const mode = live.placement?.mode ?? "IN";
   const zone = live.placement?.gateZone;
   const strip = <Strip online={live.mode !== "error"} mode={mode === "OUT" ? "out" : "in"} queue={live.queue} />;
@@ -408,6 +407,15 @@ function LiveScanBody({ live, layout }: { live: ScanLive; layout: ScannerLayout 
     setAnnouncement(feedback.announcement);
     void emitFeedback(feedback, browserFeedbackPort());
   }, [live.verdict]);
+  const updateNotice = live.updateRequired ? (
+    <div className="banner banner-warning" role="status" style={{ margin: t ? 12 : 8 }}>
+      <i className="ic ic-download" aria-hidden="true" />
+      <div className="banner-body">
+        <span className="banner-title">새 앱 판이 있습니다</span>
+        입장 중에는 지금 판으로 계속 판정합니다. 다음 근무 준비 때 새 판을 적용합니다.
+      </div>
+    </div>
+  ) : null;
   const freshness = freshnessBannersOf({
     role: live.shift?.role,
     placementZone: live.placement?.gateZone,
@@ -485,6 +493,7 @@ function LiveScanBody({ live, layout }: { live: ScanLive; layout: ScannerLayout 
     notReady
   ) : (
     <>
+      {updateNotice}
       {freshness}
       {modeBar}
       {viewfinder}
@@ -540,10 +549,10 @@ function captureFrame(video: HTMLVideoElement): ImageData | undefined {
 }
 
 /** 카메라 프레임을 150ms마다 한 번씩 Worker로 보내 디코딩한다. 같은 글자는 런타임이 3초 동안 버린다 */
-function useQrLoop(enabled: boolean, client: ScanWorkerClient | undefined, fallbackDecoder: BarcodeDecoder | undefined) {
+function useQrLoop(enabled: boolean, client: ScanWorkerClient | undefined, onNoDecoder: () => void) {
   const ref = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
-    if (!enabled || (!client && !fallbackDecoder)) return;
+    if (!enabled || !client) return;
     let stopped = false;
     let busy = false;
     let stream: MediaStream | undefined;
@@ -568,19 +577,16 @@ function useQrLoop(enabled: boolean, client: ScanWorkerClient | undefined, fallb
       busy = true;
       void (async () => {
         try {
-          let raw: string | undefined;
-          try {
-            // createImageBitmap은 프레임이 아직 없을 때 늦게 끝난다. 그리기 가능한 순간의
-            // OffscreenCanvas 픽셀을 바로 보내 Worker 디코딩을 기다리지 않게 한다.
-            const frame = captureFrame(video);
-            if (frame) raw = client ? await client.decode(frame) : undefined;
-          } catch {
-            // Worker가 프레임을 읽지 못하면 화면 스레드 BarcodeDetector 대체를 시도한다
+          const frame = captureFrame(video);
+          if (!frame) return;
+          const decoded = await client.decodeDetailed(frame);
+          if (decoded.reason === 'NO_DECODER') {
+            // 디코더가 없는 기기는 '카메라 고장'으로 닫는다(정상 QR 없음과 구분).
+            onNoDecoder();
+            return;
           }
-          const value = raw ?? (fallbackDecoder ? await fallbackDecoder.decode(video) : undefined);
-          if (value && !stopped) {
-            const judge = client ? (i: { raw: string; nowMs: number; clockOffsetMs: number }) => client.judge(i) as Promise<JudgeOutcome> : undefined;
-            void liveRuntime.scan(value, judge);
+          if (decoded.raw && !stopped) {
+            void liveRuntime.scan(decoded.raw, (i) => client.judge(i) as Promise<JudgeOutcome>);
           }
         } catch {
           // 프레임을 읽지 못한 것은 다음 프레임에서 다시 시도한다(판정 중 예외는 RETRY로 닫힌다)
@@ -594,7 +600,7 @@ function useQrLoop(enabled: boolean, client: ScanWorkerClient | undefined, fallb
       clearInterval(timer);
       if (stream) for (const track of stream.getTracks()) track.stop();
     };
-  }, [enabled, client, fallbackDecoder]);
+  }, [enabled, client, onNoDecoder]);
   return ref;
 }
 

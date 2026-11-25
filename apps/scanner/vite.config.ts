@@ -4,8 +4,11 @@
 // - PWA(vite-plugin-pwa)·서비스 워커·Dexie·판정 Worker는 이 퍼블리싱 단계에서 붙이지 않는다(wbs 5.x).
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defaultClientConditions, defineConfig } from "vite";
+
+const scannerVersion = (JSON.parse(readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8")) as { version: string }).version;
 
 // SEED CSS 층 PoC 빌드(FE-T36, tools/web-checks/seed-css/)는 탐침 화면(poc-seed-css.html) 하나만 묶는다(운영 빌드처럼 진입점 하나)
 const seedCssPoc = process.env.PEAKET_POC === "seed-css";
@@ -13,8 +16,21 @@ const page = (name: string) => fileURLToPath(new URL(name, import.meta.url));
 
 export default defineConfig({
   appType: "spa",
-  define: { __APP_VERSION__: JSON.stringify(process.env.VITE_SCANNER_APP_VERSION ?? "1.4.0") },
-  plugins: [react(), tailwindcss()],
+  define: { __APP_VERSION__: JSON.stringify(process.env.VITE_SCANNER_APP_VERSION ?? scannerVersion) },
+  plugins: [
+    react(),
+    tailwindcss(),
+    {
+      name: "scanner-precache-manifest",
+      apply: "build",
+      generateBundle(_options, bundle) {
+        const assets = Object.keys(bundle)
+          .filter((name) => name !== "sw.js" && !name.endsWith(".map") && name !== "sw-precache.json")
+          .map((name) => `/${name}`);
+        this.emitFile({ type: "asset", fileName: "sw-precache.json", source: JSON.stringify({ v: 1, assets }) });
+      },
+    },
+  ],
   resolve: {
     conditions: ["seed-layered", ...defaultClientConditions],
   },
