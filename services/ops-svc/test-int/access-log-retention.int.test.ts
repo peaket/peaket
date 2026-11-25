@@ -153,7 +153,7 @@ describe('F-02-4 실제 ClickHouse·ops-svc·Object Lock 통합', () => {
     const parts = JSON.parse(await ch!.exec("SELECT partition, table FROM system.parts WHERE database='access_log' AND active AND table IN ('access_log','access_log_otel') FORMAT JSON")).data as Array<{ partition: string; table: string }>;
     expect(parts.filter((p) => p.table === 'access_log').map((p) => p.partition).sort()).toEqual(['20260824', '20261123']);
     expect(parts.filter((p) => p.table === 'access_log_otel')).toEqual([]);
-    const states = (await admin!.query("select record_json->'payload'->>'state' as state, record_json->'payload'->>'table' as table, count(*)::int as n from audit_chain where record_type='ACCESS_LOG_PARTITION_PURGE' group by state, table order by state, table")).rows;
+    const states = (await admin!.query("select record_json->'payload'->>'state' as state, record_json->'payload'->>'table' as \"table\", count(*)::int as n from audit_chain where record_type='ACCESS_LOG_PARTITION_PURGE' group by state, record_json->'payload'->>'table' order by state, record_json->'payload'->>'table'")).rows;
     expect(states).toEqual([
       { state: 'DROPPED', table: 'access_log', n: 1 },
       { state: 'DROPPED', table: 'access_log_otel', n: 1 },
@@ -169,7 +169,8 @@ describe('F-02-4 실제 ClickHouse·ops-svc·Object Lock 통합', () => {
     const me = await asUser('al_purger', PURGER_PASSWORD, 'SELECT currentUser()');
     expect((await me.text()).trim()).toBe('al_purger');
     const denied = await asUser('al_purger', PURGER_PASSWORD, 'SELECT count() FROM access_log.access_log');
-    expect(denied.status).toBe(403);
+    expect(denied.status).toBeGreaterThanOrEqual(400);
+    expect(await denied.text()).toMatch(/ACCESS_DENIED|Not enough privileges|denied/i);
     const wrong = await runCli([
       '--purge', '--today', '2026-11-24', '--clickhouse', ch!.url,
       '--clickhouse-user', 'al_purger', '--clickhouse-password', 'wrong-password',
@@ -210,7 +211,7 @@ describe('F-02-4 실제 ClickHouse·ops-svc·Object Lock 통합', () => {
     expect(payloads.map((p) => p.requestId).sort()).toEqual(['kst-end', 'kst-mid', 'kst-start']);
     expect(payloads.map((p) => p.retainUntil).sort()).toEqual(['2028-11-23T15:00:00.000Z', '2028-11-24T08:59:59.000Z', '2028-11-24T14:59:59.000Z']);
     expect(payloads.some((p) => p.requestId === 'kst-before' || p.requestId === 'kst-after' || p.requestId === 'fan-1')).toBe(false);
-    const keys = rows.map((r2) => (typeof r2.record_json === 'string' ? JSON.parse(r2.record_json) : r2.record_json).eventKey as string);
+    const keys = rows.map((r2) => (typeof r2.record_json === 'string' ? JSON.parse(r2.record_json) : r2.record_json).payload.eventKey as string);
     expect(keys.every((k) => k.split(':')[2] === '2026-11-24')).toBe(true);
   });
 
