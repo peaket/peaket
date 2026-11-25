@@ -7,8 +7,16 @@ import { createDatabase, type Database } from '@peaket/platform';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateOps } from '../scripts/migrate.mjs';
-import { DrizzleInvestigationStore } from '../src/modules/investigations/index.js';
-import type { FraudCaseRecord, FraudClusterMemberRecord, FraudClusterRecord, FraudRunRecord, FraudSnapshotRecord } from '../src/modules/investigations/index.js';
+import { DrizzleAuditChain } from '../src/modules/audit/index.js';
+import { DrizzleInvestigationStore, Investigations, MemoryInvestigationStore } from '../src/modules/investigations/index.js';
+import type {
+  FraudCaseRecord,
+  FraudClusterMemberRecord,
+  FraudClusterRecord,
+  FraudRunRecord,
+  FraudSnapshotRecord,
+  InvestigationsDeps,
+} from '../src/modules/investigations/index.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 
 const HOUR = 3_600_000;
@@ -20,7 +28,13 @@ const EVENT = '0194b210-0000-7000-8000-000000000001';
 const CLUSTER = '0194b210-0000-7000-8000-000000000101';
 const CLUSTER2 = '0194b210-0000-7000-8000-000000000102';
 const CASE = '0194b210-0000-7000-8000-000000000201';
+const CLUSTER_IDEM = '0194b210-0000-7000-8000-000000000103';
+const CASE_IDEM = '0194b210-0000-7000-8000-000000000202';
+const CLUSTER_AUDIT = '0194b210-0000-7000-8000-000000000104';
+const CASE_AUDIT = '0194b210-0000-7000-8000-000000000203';
+const CASE_AUDIT_UPDATE = '0194b210-0000-7000-8000-000000000204';
 const ACTOR = '0194b210-0000-7000-8000-000000000301';
+const OTHER = '0194b210-0000-7000-8000-000000000302';
 const ACC = (n: number) => `0194b210-0000-7000-8000-${String(0x1000 + n).padStart(12, '0')}`;
 const hex = (c: string) => c.repeat(64);
 
@@ -108,6 +122,37 @@ const caseRecord = (o: Partial<FraudCaseRecord> = {}): FraudCaseRecord => ({
   ...o,
 });
 
+/** 멱등 요청 값. 지문은 32바이트 SHA-256 자리다 */
+const idemOf = (operation: string, key = randomUUID(), byte = 1) => ({
+  accountRef: ACTOR,
+  operation,
+  key,
+  requestHash: new Uint8Array(32).fill(byte),
+});
+
+const resultOf = (caseId: string) => ({ view: { caseId, accountCount: 1 }, location: `/v1/ops/fraud-cases/${caseId}` });
+
+const never = async (): Promise<never> => {
+  throw new Error('이 시험에서는 부르지 않는다');
+};
+
+/** DB 감사 체인을 끼운 조사 응용 서비스(IR-03). 저장소는 메모리 판이면 충분하다 */
+const investigationService = (audit: DrizzleAuditChain): Investigations =>
+  new Investigations({
+    store: new MemoryInvestigationStore(),
+    identity: { designations: async () => ['FRAUD_INVESTIGATOR'] },
+    schedule: { get: async () => undefined },
+    locks: { set: never, release: never },
+    notifier: { holderNotice: never },
+    labels: { apply: never },
+    alerts: { raise: never },
+    access: { record: async () => undefined },
+    events: { emit: () => undefined },
+    verifier: { verify: never },
+    now: () => NOW,
+    audit,
+  } satisfies InvestigationsDeps);
+
 beforeAll(async () => {
   container = await startPostgres();
   await migrateOps(container.url);
@@ -136,13 +181,13 @@ describe('F-04-12 ops DB 저장소(PostgreSQL)', () => {
       1,
       [{ seq: 2, kind: 'NOTE', actorId: ACTOR, note: '메모', detail: { reason: '확인' }, occurredAtMs: NOW }],
     );
-    expect(ok).toBe(true);
+    expect(ok).toMatchObject({ ok: true });
     const second = await store.getCase(CASE);
     expect(second!.version).toBe(2);
     expect(second!.investigatorOpinion).toBe('의견');
     expect(second!.events.map((e: { kind: string }) => e.kind)).toEqual(['CREATED', 'NOTE']);
     // 같은 판으로 늦게 온 갱신은 실패한다
-    expect(await store.updateCase({ ...next, version: 3 }, 1, [])).toBe(false);
+    expect(await store.updateCase({ ...next, version: 3 }, 1, [])).toMatchObject({ ok: false });
     // 사건 기록을 고치거나 지우는 것은 트리거가 막는다
     await expect(raw.query("UPDATE fraud_case_event SET kind = 'CLEARED' WHERE case_id = $1 AND seq = 1", [CASE])).rejects.toThrow();
     await expect(raw.query('DELETE FROM fraud_case_event WHERE case_id = $1 AND seq = 1', [CASE])).rejects.toThrow();
@@ -165,9 +210,12 @@ describe('F-04-12 ops DB 저장소(PostgreSQL)', () => {
     await store.putClusters(EVENT, 1, [
       cluster(CLUSTER, [ACC(1), ACC(2)], { purchaseCount: 18 }),
       cluster(CLUSTER2, [ACC(3)], { scoreBand: 'LOW', purchaseCount: 1 }),
-    ]);
+    ], 'fraud-rules-v2');
     // 같은 (회차, 판)을 다시 저장해도 첫 결과가 이기고 중복이 생기지 않는다
-    await store.putClusters(EVENT, 1, [cluster(CLUSTER, [ACC(9)], { purchaseCount: 99 })]);
+    await store.putClusters(EVENT, 1, [cluster(CLUSTER, [ACC(9)], { purchaseCount: 99 })], 'fraud-rules-v9');
+    // 저장한 규칙 판은 F-04-11 결과의 값을 그대로 쓴다(IR-04)
+    const ruleRows = await raw.query('SELECT id, rule_version FROM fraud_cluster WHERE event_id = $1 ORDER BY id', [EVENT]);
+    expect(ruleRows.rows.map((r: { rule_version: string }) => r.rule_version)).toEqual(['fraud-rules-v2', 'fraud-rules-v2']);
     const list = await store.listClusters({ eventId: EVENT, generation: 1, sort: 'SCORE_DESC', limit: 10 });
     expect(list.items.map((c: { clusterId: string }) => c.clusterId)).toEqual([CLUSTER, CLUSTER2]);
     const detail = await store.getCluster(CLUSTER);
@@ -187,6 +235,80 @@ describe('F-04-12 ops DB 저장소(PostgreSQL)', () => {
     expect(await store.isSnapshotExportBlocked(EVENT, 1)).toBe(true);
     await store.verifySnapshot(EVENT, 1, 'OK', NOW + DAY);
     expect(await store.isSnapshotExportBlocked(EVENT, 1)).toBe(false);
+  });
+
+  test('FX-T16 ⑪ [ASVS v5.0.0-8.3.3] eventId 없는 목록·403 거절도 DB 감사 체인에 남는다', async () => {
+    const chain = new DrizzleAuditChain(db);
+    const svc = investigationService(chain);
+    const allowed = { accountId: ACTOR, role: 'cs_lead' };
+    const page = await svc.listCases(allowed, { limit: 10 });
+    expect(page).toMatchObject({ items: [] });
+    const allowedRows = await raw.query('SELECT count(*)::int AS n FROM audit_chain WHERE record_id = $1', [ACTOR]);
+    expect(allowedRows.rows[0].n).toBeGreaterThanOrEqual(1);
+    const denied = { accountId: OTHER, role: 'viewer' };
+    await expect(svc.listCases(denied, { limit: 10 })).rejects.toMatchObject({ status: 403 });
+    const deniedRows = await raw.query('SELECT count(*)::int AS n FROM audit_chain WHERE record_id = $1', [OTHER]);
+    expect(deniedRows.rows[0].n).toBeGreaterThanOrEqual(1);
+  });
+
+  test('FX-T12 ㊴ [ASVS v5.0.0-2.1.3] 같은 멱등 키는 저장소를 새로 만들어도 같은 결과이고 다른 지문은 422다', async () => {
+    const key = randomUUID();
+    const idem = idemOf('CREATE_FRAUD_CASE', key);
+    const result = resultOf(CASE_IDEM);
+    const first = await store.putCase(caseRecord({ caseId: CASE_IDEM, clusterId: CLUSTER_IDEM }), { idem, result });
+    expect(first).toMatchObject({ replayed: false });
+    // 프로세스가 바뀐 것과 같게 저장소를 새로 만든다
+    const restarted = new DrizzleInvestigationStore(db);
+    expect(await restarted.findIdempotent(idem)).toMatchObject({ kind: 'replay', result });
+    const again = await restarted.putCase(caseRecord({ caseId: CASE_IDEM, clusterId: CLUSTER_IDEM }), { idem, result });
+    expect(again).toMatchObject({ replayed: true, result });
+    expect((await store.listCases({ eventId: EVENT, limit: 100 })).items.filter((c) => c.clusterId === CLUSTER_IDEM)).toHaveLength(1);
+    // 다른 지문(다른 본문)은 422다
+    const reused = { ...idem, requestHash: new Uint8Array(32).fill(9) };
+    expect(await restarted.findIdempotent(reused)).toMatchObject({ kind: 'reused' });
+    await expect(restarted.putCase(caseRecord({ caseId: CASE_IDEM, clusterId: CLUSTER_IDEM }), { idem: reused, result })).rejects.toMatchObject({ status: 422 });
+    // 소명 갱신도 같은 트랜잭션에 멱등 결과를 남긴다
+    const appealIdem = idemOf('CREATE_FRAUD_APPEAL_REQUEST');
+    const appealResult = { appealRequestId: appealIdem.key, caseId: CASE_IDEM };
+    const updated = await store.updateCase(
+      caseRecord({ caseId: CASE_IDEM, clusterId: CLUSTER_IDEM, status: 'APPEAL_PENDING', version: 2 }),
+      1,
+      [{ seq: 2, kind: 'APPEAL_REQUESTED', actorId: ACTOR, note: null, detail: null, occurredAtMs: NOW }],
+      { idem: appealIdem, result: appealResult },
+    );
+    expect(updated).toMatchObject({ ok: true });
+    expect(await new DrizzleInvestigationStore(db).findIdempotent(appealIdem)).toMatchObject({ kind: 'replay', result: appealResult });
+    const appealAgain = await new DrizzleInvestigationStore(db).updateCase(
+      caseRecord({ caseId: CASE_IDEM, clusterId: CLUSTER_IDEM, status: 'APPEAL_PENDING', version: 2 }),
+      1,
+      [],
+      { idem: appealIdem, result: appealResult },
+    );
+    expect(appealAgain).toMatchObject({ ok: true, replayed: true, result: appealResult });
+  });
+
+  test('FX-T12 ㊶ 사건 변경과 감사 기록은 같은 트랜잭션이라 감사 실패 시 변경도 남지 않는다', async () => {
+    const auditOf = (recordId: string) => ({ recordType: 'ADMIN_DATA_ACCESS', recordId, payload: { action: 'TEST' }, nowMs: NOW });
+    // 잘못된 record_id(UUID 아님)로 감사가 실패하면 사건도 남지 않는다
+    await expect(store.putCase(caseRecord({ caseId: CASE_AUDIT, clusterId: CLUSTER_AUDIT }), { audit: auditOf('not-a-uuid') })).rejects.toThrow();
+    expect(await store.getCase(CASE_AUDIT)).toBeNull();
+    // 올바른 감사는 사건과 함께 남는다
+    await store.putCase(caseRecord({ caseId: CASE_AUDIT, clusterId: CLUSTER_AUDIT }), { audit: auditOf(CASE_AUDIT) });
+    expect(await store.getCase(CASE_AUDIT)).toMatchObject({ caseId: CASE_AUDIT, version: 1 });
+    const rows = await raw.query('SELECT count(*)::int AS n FROM audit_chain WHERE record_id = $1', [CASE_AUDIT]);
+    expect(rows.rows[0].n).toBeGreaterThanOrEqual(1);
+    // 갱신도 감사가 실패하면 판·사건 기록이 그대로다
+    await expect(
+      store.updateCase(
+        caseRecord({ caseId: CASE_AUDIT, clusterId: CLUSTER_AUDIT, version: 2 }),
+        1,
+        [{ seq: 2, kind: 'NOTE', actorId: ACTOR, note: null, detail: null, occurredAtMs: NOW }],
+        { audit: auditOf('not-a-uuid') },
+      ),
+    ).rejects.toThrow();
+    const after = await store.getCase(CASE_AUDIT);
+    expect(after!.version).toBe(1);
+    expect(after!.events.map((e) => e.kind)).toEqual(['CREATED']);
   });
 
   test('FX-T12 ㉛ [ASVS v5.0.0-2.1.3] 멱등 작업 이름과 ops_app 권한을 실제 DB에서 확인한다', async () => {

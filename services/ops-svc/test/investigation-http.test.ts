@@ -10,7 +10,7 @@ import { createService, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { AdminAccountProblem } from '../src/modules/admin-accounts/index.js';
-import { MemoryAuditChain } from '../src/modules/audit/index.js';
+import { MemoryAuditChain, type AuditRecord } from '../src/modules/audit/index.js';
 import {
   FraudClusterRunService,
   MemoryInvestigationStore,
@@ -74,6 +74,11 @@ const CL_ENTRY = id(0x30f);
 const CL_COMPENSATE = id(0x310);
 const CL_NOSTORE = id(0x311);
 const CL_COMMANDER = id(0x312);
+const CL_IR01 = id(0x313);
+const CL_RACE = id(0x314);
+const CL_IR07 = id(0x315);
+const CL_IR08 = id(0x316);
+const CL_IR11 = id(0x317);
 
 const A = (n: number) => id(0x1000 + n);
 const HOLDER = id(0x1500);
@@ -82,6 +87,7 @@ const T2 = id(0x1602);
 
 const CASE_SEEDED = id(0x400);
 const CASE_CLEAR = id(0x401);
+const CASE_IR08 = id(0x402);
 
 type Req = { statusCode: number; payload: string; headers: Record<string, string | string[] | undefined> };
 const json = (r: Req) => (r.payload === '' ? {} : (JSON.parse(r.payload) as Record<string, unknown>));
@@ -101,9 +107,10 @@ const schedule: SaleScheduleSource = { get: async (eventId: string) => scheduleM
 
 class FakeLocks implements TransferLocks {
   readonly sets: Array<{ caseId: string; eventId: string; accountIds: readonly string[]; version: number; expiresAtMs: number }> = [];
-  readonly releases: Array<{ caseId: string; eventId: string; accountIds: readonly string[] }> = [];
+  readonly releases: Array<{ caseId: string; eventId: string; accountIds: readonly string[]; version: number }> = [];
   holdersNext: Array<{ accountId: string; ticketIds: string[] }> | undefined;
   failNextSet = false;
+  failNextRelease = false;
   async set(i: { caseId: string; eventId: string; accountIds: readonly string[]; version: number; expiresAtMs: number }) {
     if (this.failNextSet) {
       this.failNextSet = false;
@@ -121,7 +128,11 @@ class FakeLocks implements TransferLocks {
       holders,
     };
   }
-  async release(i: { caseId: string; eventId: string; accountIds: readonly string[] }) {
+  async release(i: { caseId: string; eventId: string; accountIds: readonly string[]; version: number }) {
+    if (this.failNextRelease) {
+      this.failNextRelease = false;
+      throw new Error('ticket-svc SetTransferLock 해제 시간 초과');
+    }
     this.releases.push(i);
   }
 }
@@ -129,12 +140,35 @@ class FakeLocks implements TransferLocks {
 /** 저장 실패를 한 번 주입하는 저장소(TR-06). 잠금 성공 뒤 저장이 깨지면 잠금을 풀어야 한다 */
 class ToggleStore extends MemoryInvestigationStore {
   failNextUpdate = false;
-  override async updateCase(...args: any[]): Promise<boolean> {
+  raceNextFor: string | undefined;
+  onRace: ((caseId: string) => Promise<void>) | undefined;
+  constructor(auditAppend?: (r: AuditRecord) => Promise<void>) {
+    super(auditAppend);
+  }
+  override async updateCase(...args: any[]): Promise<Awaited<ReturnType<MemoryInvestigationStore['updateCase']>>> {
+    const [c] = args;
+    if (this.raceNextFor && c.caseId === this.raceNextFor) {
+      this.raceNextFor = undefined;
+      await this.onRace?.(c.caseId);
+      return { ok: false };
+    }
     if (this.failNextUpdate) {
       this.failNextUpdate = false;
       throw new Error('ops DB 저장 실패');
     }
-    return (super.updateCase as (...a: any[]) => Promise<boolean>)(...args);
+    return (super.updateCase as (...a: any[]) => Promise<Awaited<ReturnType<MemoryInvestigationStore['updateCase']>>>)(...args);
+  }
+}
+
+/** 감사 체인 실패를 한 번 주입한다(IR-11). 사건 변경과 감사가 같은 트랜잭션이면 변경도 남지 않아야 한다 */
+class ToggleAudit extends MemoryAuditChain {
+  failNext = false;
+  override async append(record: AuditRecord): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error('audit chain down');
+    }
+    return super.append(record);
   }
 }
 
@@ -151,7 +185,12 @@ class FakeRunner implements FraudForensicsRunner {
 
 class FakeNotifier implements FraudNotifier {
   readonly holders: Array<{ eventId: string; caseId: string; accountId: string; ticketIds: readonly string[]; dueAtMs: number }> = [];
+  failNext = false;
   async holderNotice(i: { eventId: string; caseId: string; accountId: string; ticketIds: readonly string[]; dueAtMs: number }) {
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error('notify-svc 발송 실패');
+    }
     this.holders.push(i);
   }
 }
@@ -191,7 +230,8 @@ class FakeVerifier implements SnapshotVerifier {
   }
 }
 
-const store = new ToggleStore();
+const audit = new ToggleAudit();
+const store = new ToggleStore((r) => audit.append(r));
 const locks = new FakeLocks();
 const notifier = new FakeNotifier();
 const labels = new FakeLabels();
@@ -202,7 +242,6 @@ const verifier = new FakeVerifier();
 const admin = new FakeAdminIdentity();
 const identity = new FakeIdentity();
 const clock = fakeClock({ now: NOW });
-const audit = new MemoryAuditChain();
 let svc: Awaited<ReturnType<typeof createService>>;
 let seq = 0;
 const newId = () => `0194b201-0000-7000-8000-${String(++seq).padStart(12, '0')}`;
@@ -308,8 +347,27 @@ beforeAll(async () => {
     clusterOf(CL_COMPENSATE, [A(45)], { purchaseCount: 1, scoreBand: 'LOW' }),
     clusterOf(CL_NOSTORE, [A(46)], { purchaseCount: 1, scoreBand: 'LOW' }),
     clusterOf(CL_COMMANDER, [A(47)], { purchaseCount: 1, scoreBand: 'LOW' }),
-  ]);
+    clusterOf(CL_IR01, [A(48), A(49)], { purchaseCount: 9 }),
+    clusterOf(CL_RACE, [A(52)], { purchaseCount: 9, scoreBand: 'LOW' }),
+    clusterOf(CL_IR07, [A(53)], { purchaseCount: 9, scoreBand: 'LOW' }),
+    clusterOf(CL_IR08, [A(50), A(51)], { purchaseCount: 9, scoreBand: 'LOW' }),
+    clusterOf(CL_IR11, [A(54)], { purchaseCount: 9, scoreBand: 'LOW' }),
+  ], 'fraud-rules-v1');
   await store.putCase(caseOf({ caseId: CASE_SEEDED, clusterId: CL_SEEDED }));
+  await store.putCase(
+    caseOf({
+      caseId: CASE_IR08,
+      clusterId: CL_IR08,
+      status: 'APPEAL_PENDING',
+      version: 2,
+      appealDueAtMs: NOW + 2 * DAY,
+      members: [A(50), A(51)].map((a) => memberOf(a, { appealResult: 'SUBMITTED', appealDueAtMs: NOW + 2 * DAY, lockExpiresAtMs: NOW + 14 * DAY })),
+      events: [
+        { seq: 1, kind: 'CREATED', actorId: id(0x900), note: null, detail: null, occurredAtMs: NOW - HOUR },
+        { seq: 2, kind: 'APPEAL_REQUESTED', actorId: id(0x900), note: null, detail: null, occurredAtMs: NOW - HOUR },
+      ],
+    }),
+  );
   await store.putCase(
     caseOf({
       caseId: CASE_CLEAR,
@@ -581,6 +639,12 @@ describe('F-04-12 조사 HTTP', () => {
     });
     expect(edited.statusCode, edited.payload).toBe(200);
     expect(json(edited)).toMatchObject({ investigatorOpinion: '결제 수단 연결이 강하다', reasonCategory: 'LIMIT_EVASION', version: 4 });
+    // 의견·사유 범주 변경도 사건 기록에 누가·무엇을 남긴다(IR-05)
+    const editedEvents = json(edited).events as Array<Record<string, unknown>>;
+    const opinionEvent = editedEvents.find((e) => e.kind === 'NOTE' && JSON.stringify(e).includes('결제 수단 연결이 강하다'));
+    expect(opinionEvent, JSON.stringify(editedEvents)).toMatchObject({ actorId: who['x-user-id'] });
+    expect(editedEvents.some((e) => e.kind === 'NOTE' && JSON.stringify(e).includes('LIMIT_EVASION'))).toBe(true);
+    expect(editedEvents.map((e) => e.seq)).toEqual(editedEvents.map((_, i) => i + 1));
   });
 
   test('FX-T12 ⑭ 소명 요청은 기한·사유 범주·잠금 결과·받은 사람 수를 주고 사건은 소명 대기가 된다', async () => {
@@ -615,6 +679,10 @@ describe('F-04-12 조사 HTTP', () => {
     expect(caseEvents.some((e) => e.kind === 'APPEAL_REQUESTED')).toBe(true);
     expect(caseEvents.some((e) => e.kind === 'LOCK_APPLIED')).toBe(true);
     expect(caseEvents.map((e) => e.seq)).toEqual(caseEvents.map((_, i) => i + 1));
+    // 알린 받은 사람의 계정과 표를 사건 기록에 남긴다(IR-06). 사유 범주는 받은 사람 세부에 넣지 않는다
+    const requestedEvent = caseEvents.find((e) => e.kind === 'APPEAL_REQUESTED')!;
+    expect(requestedEvent.detail).toMatchObject({ notifiedHolders: [{ accountId: HOLDER, ticketIds: [T1, T2] }] });
+    expect(JSON.stringify(requestedEvent.detail)).not.toContain('ACCOUNT_LENDING');
     const members = json(detail).members as Array<Record<string, unknown>>;
     expect(members.find((m) => m.accountId === A(10))).toMatchObject({ appealResult: 'PENDING', lockExpiresAt: iso(NOW + 14 * DAY) });
     expect(members.find((m) => m.accountId === A(12))).toMatchObject({ appealResult: 'NOT_REQUESTED', lockExpiresAt: null });
@@ -730,6 +798,13 @@ describe('F-04-12 조사 HTTP', () => {
     expect(clearedEvents.some((e) => e.kind === 'CLEARED')).toBe(true);
     expect(clearedEvents.some((e) => e.kind === 'LOCK_RELEASED')).toBe(true);
     expect(clearedEvents.map((e) => e.seq)).toEqual(clearedEvents.map((_, i) => i + 1));
+    // 잠금 기한 칸은 남지만 실제로 풀렸으므로 transferLocked는 false다(IR-09)
+    expect(json(r).transferLocked).toBe(false);
+    expect((json(r).members as Array<Record<string, unknown>>).every((m) => m.transferLocked === false)).toBe(true);
+    expect((json(r).members as Array<Record<string, unknown>>).every((m) => m.lockExpiresAt !== null)).toBe(true);
+    const clearedCluster = await send('GET', `/v1/ops/fraud-clusters/${CL_CLEAR}`, who);
+    expect(clearedCluster.statusCode, clearedCluster.payload).toBe(200);
+    expect((json(clearedCluster).members as Array<Record<string, unknown>>).every((m) => m.transferLocked === false)).toBe(true);
     // 정상 종료한 사건은 계정을 더하거나 뺄 수 없다
     const after = await send('PATCH', `/v1/ops/fraud-cases/${CASE_CLEAR}`, who, { ifMatch: '"3"', body: { removeMembers: [{ accountId: A(7), reason: 'x' }] } });
     expect(after.statusCode).toBe(409);
@@ -839,6 +914,24 @@ describe('F-04-12 조사 HTTP', () => {
     expect(audit.entries.filter((e) => e.recordType === 'ADMIN_DATA_ACCESS').length).toBeGreaterThanOrEqual(1);
   });
 
+  test('FX-T12 ㊵ 감사 기록이 실패하면 사건 변경도 남지 않는다', async () => {
+    const who = investigator();
+    const created = await createCase(who, CL_IR11);
+    expect(created.statusCode, created.payload).toBe(201);
+    const caseId = json(created).caseId as string;
+    audit.failNext = true;
+    const r = await send('PATCH', `/v1/ops/fraud-cases/${caseId}`, who, { ifMatch: '"1"', body: { note: '감사 실패' } });
+    expect(r.statusCode, r.payload).toBe(503);
+    expect(typeOf(r)).toMatch(/dependency-unavailable$/);
+    const after = await store.getCase(caseId);
+    expect(after).toMatchObject({ version: 1 });
+    expect(after!.events.some((e) => JSON.stringify(e).includes('감사 실패'))).toBe(false);
+    // 감사가 회복되면 같은 판으로 다시 고친다
+    const retry = await send('PATCH', `/v1/ops/fraud-cases/${caseId}`, who, { ifMatch: '"1"', body: { note: '감사 회복' } });
+    expect(retry.statusCode, retry.payload).toBe(200);
+    expect(json(retry)).toMatchObject({ version: 2 });
+  });
+
   test('FX-T12 ⑳ 사건 만들기와 소명 요청은 Idempotency-Key가 없으면 400이고 같은 키 재요청은 같은 결과다', async () => {
     const who = investigator();
     const noKey = await send('POST', '/v1/ops/fraud-cases', who, { body: { clusterId: CL_IDEM, reasonCategory: 'MACRO_BOT' } });
@@ -864,6 +957,64 @@ describe('F-04-12 조사 HTTP', () => {
     const replayAppeal = await send('POST', `/v1/ops/fraud-cases/${caseId}/appeal-requests`, who, { idem: appealKey, body: appeal });
     expect(replayAppeal.statusCode, replayAppeal.payload).toBe(201);
     expect(json(replayAppeal)).toEqual(json(firstAppeal));
+  });
+
+  test('FX-T12 ㉞ [ASVS v5.0.0-8.3.3] 같은 멱등 키 재생도 지정 확인 뒤에 하고 다른 본문·계정은 첫 결과를 돌려주지 않는다', async () => {
+    const who = investigator();
+    const key = randomUUID();
+    const body = { clusterId: CL_IR01, reasonCategory: 'MACRO_BOT' };
+    const first = await send('POST', '/v1/ops/fraud-cases', who, { idem: key, body });
+    expect(first.statusCode, first.payload).toBe(201);
+    const caseId = json(first).caseId as string;
+
+    // 같은 키·같은 본문은 재생하지만 접속기록을 남긴다
+    const beforeReplay = access.records.length;
+    const replay = await send('POST', '/v1/ops/fraud-cases', who, { idem: key, body });
+    expect(replay.statusCode, replay.payload).toBe(201);
+    expect(json(replay)).toEqual(json(first));
+    expect(access.records.slice(beforeReplay).some((x) => x.outcome === 'ALLOWED')).toBe(true);
+
+    // 지정을 거두면 같은 키라도 403이고 접속기록이 남는다(캐시가 지정 확인을 앞지르지 않는다)
+    admin.seed({ adminAccountId: who['x-user-id']!, role: 'cs_lead', designations: [] });
+    const beforeDenied = access.records.length;
+    const denied = await send('POST', '/v1/ops/fraud-cases', who, { idem: key, body });
+    expect(denied.statusCode, denied.payload).toBe(403);
+    expect(access.records.slice(beforeDenied).some((x) => x.outcome === 'DENIED')).toBe(true);
+
+    // 다른 계정은 같은 키를 써도 첫 결과를 받지 않는다(키 범위는 계정 × 작업이다)
+    const otherSame = await send('POST', '/v1/ops/fraud-cases', investigator(), { idem: key, body });
+    expect(otherSame.statusCode, otherSame.payload).toBe(409);
+    expect(typeOf(otherSame)).toMatch(/fraud-case-exists$/);
+
+    // 지정을 되돌리고 같은 키에 다른 본문을 보내면 422다
+    admin.seed({ adminAccountId: who['x-user-id']!, role: 'cs_lead', designations: ['FRAUD_INVESTIGATOR'] });
+    const reused = await send('POST', '/v1/ops/fraud-cases', who, { idem: key, body: { clusterId: CL_IR01, reasonCategory: 'LIMIT_EVASION' } });
+    expect(reused.statusCode, reused.payload).toBe(422);
+    expect(typeOf(reused)).toMatch(/idempotency-key-reused$/);
+
+    // 소명 요청도 같다: 같은 키·같은 본문은 재생하고, 지정 철회는 403, 다른 본문은 422다
+    const appealBody = { accountIds: [A(48)], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + 2 * DAY) };
+    const appealKey = randomUUID();
+    const appeal = await send('POST', `/v1/ops/fraud-cases/${caseId}/appeal-requests`, who, { idem: appealKey, body: appealBody });
+    expect(appeal.statusCode, appeal.payload).toBe(201);
+    const beforeAppealReplay = access.records.length;
+    const appealReplay = await send('POST', `/v1/ops/fraud-cases/${caseId}/appeal-requests`, who, { idem: appealKey, body: appealBody });
+    expect(appealReplay.statusCode, appealReplay.payload).toBe(201);
+    expect(json(appealReplay)).toEqual(json(appeal));
+    expect(access.records.slice(beforeAppealReplay).some((x) => x.outcome === 'ALLOWED')).toBe(true);
+    admin.seed({ adminAccountId: who['x-user-id']!, role: 'cs_lead', designations: [] });
+    const appealDenied = await send('POST', `/v1/ops/fraud-cases/${caseId}/appeal-requests`, who, { idem: appealKey, body: appealBody });
+    expect(appealDenied.statusCode).toBe(403);
+    admin.seed({ adminAccountId: who['x-user-id']!, role: 'cs_lead', designations: ['FRAUD_INVESTIGATOR'] });
+    const appealReused = await send('POST', `/v1/ops/fraud-cases/${caseId}/appeal-requests`, who, {
+      idem: appealKey,
+      body: { ...appealBody, dueAt: iso(NOW + 3 * DAY) },
+    });
+    expect(appealReused.statusCode, appealReused.payload).toBe(422);
+    expect(typeOf(appealReused)).toMatch(/idempotency-key-reused$/);
+    // 다른 계정이 같은 소명 키를 써도 첫 결과(201)를 받지 않는다
+    const otherAppeal = await send('POST', `/v1/ops/fraud-cases/${caseId}/appeal-requests`, investigator(), { idem: appealKey, body: appealBody });
+    expect(otherAppeal.statusCode, otherAppeal.payload).toBe(409);
   });
 
   test('FX-T12 ㉜ [ASVS v5.0.0-2.1.3] 소명 요청 입력·대상·기한·없는 자원을 HTTP에서 거절한다', async () => {
@@ -957,6 +1108,61 @@ describe('F-04-12 조사 HTTP', () => {
     expect((json(detail).members as Array<Record<string, unknown>>).every((m) => m.appealResult === 'NOT_REQUESTED')).toBe(true);
   });
 
+  test('FX-T15 ⑦ [ASVS v5.0.0-2.1.2] 동시 소명 요청의 진 쪽은 성공한 쪽 잠금을 다른 판으로 풀지 않는다', async () => {
+    const who = investigator();
+    const created = await createCase(who, CL_RACE);
+    expect(created.statusCode, created.payload).toBe(201);
+    const caseId = json(created).caseId as string;
+    // 다른 요청이 먼저 사건을 소명 대기(판 2)로 저장한 상황을 만든다
+    store.raceNextFor = caseId;
+    store.onRace = async (id) => {
+      const c = (await store.getCase(id))!;
+      const members = c.members.map((m) =>
+        m.accountId === A(52) ? { ...m, appealResult: 'PENDING' as const, appealDueAtMs: NOW + 2 * DAY, lockExpiresAtMs: NOW + 14 * DAY } : m,
+      );
+      store.cases.set(id, {
+        ...c,
+        status: 'APPEAL_PENDING',
+        version: 2,
+        members,
+        events: [...c.events, { seq: 2, kind: 'APPEAL_REQUESTED', actorId: who['x-user-id']!, note: null, detail: { accountIds: [A(52)] }, occurredAtMs: NOW }],
+      });
+    };
+    const before = locks.releases.length;
+    const r = await send('POST', `/v1/ops/fraud-cases/${caseId}/appeal-requests`, who, {
+      idem: randomUUID(),
+      body: { accountIds: [A(52)], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + 2 * DAY) },
+    });
+    expect(r.statusCode, r.payload).toBe(503);
+    // 진 쪽은 자기가 잡은 판(1)이 아니라 성공한 쪽 상태를 보고 풀지 않는다
+    expect(locks.releases.slice(before).filter((x) => x.caseId === caseId)).toHaveLength(0);
+    const detail = await send('GET', `/v1/ops/fraud-cases/${caseId}`, who);
+    expect(json(detail)).toMatchObject({ status: 'APPEAL_PENDING', version: 2 });
+    expect((json(detail).members as Array<Record<string, unknown>>).find((m) => m.accountId === A(52))).toMatchObject({ appealResult: 'PENDING' });
+  });
+
+  test('FX-T12 ㊲ 잠금 해제가 실패하면 사건을 바꾸지 않고 503이며 같은 판으로 다시 시도한다', async () => {
+    const who = investigator();
+    locks.failNextRelease = true;
+    const r = await send('PATCH', `/v1/ops/fraud-cases/${CASE_IR08}`, who, {
+      ifMatch: '"2"',
+      body: { appealDecisions: [A(50), A(51)].map((accountId) => ({ accountId, decision: 'ACCEPTED', reason: '정상 구매' })) },
+    });
+    expect(r.statusCode, r.payload).toBe(503);
+    expect(typeOf(r)).toMatch(/dependency-unavailable$/);
+    const afterFail = await store.getCase(CASE_IR08);
+    expect(afterFail).toMatchObject({ status: 'APPEAL_PENDING', version: 2 });
+    expect(afterFail!.events.some((e) => e.kind === 'CLEARED')).toBe(false);
+    // 같은 If-Match로 다시 시도하면 해제와 저장이 함께 된다
+    const retry = await send('PATCH', `/v1/ops/fraud-cases/${CASE_IR08}`, who, {
+      ifMatch: '"2"',
+      body: { appealDecisions: [A(50), A(51)].map((accountId) => ({ accountId, decision: 'ACCEPTED', reason: '정상 구매' })) },
+    });
+    expect(retry.statusCode, retry.payload).toBe(200);
+    expect(json(retry)).toMatchObject({ status: 'CLEARED' });
+    expect(locks.releases.filter((x) => x.caseId === CASE_IR08).at(-1)).toMatchObject({ accountIds: [A(50), A(51)], version: 2 });
+  });
+
   test('FX-T15 ⑤ 받은 사람이 사건 계정이면 알리지 않고 처음 잠긴 계정이 없으면 lockExpiresAt이 null이다', async () => {
     const who = investigator();
     // 받은 사람이 사건 계정이기도 하면 따로 알리지 않는다
@@ -999,6 +1205,24 @@ describe('F-04-12 조사 HTTP', () => {
     expect(json(second).lockExpiresAt).toBeNull();
     // 첫 요청 1→2, 빼기 2→3, 더하기 3→4 뒤의 두 번째 요청이다
     expect(locks.sets.filter((s) => s.caseId === repeatId).at(-1)!.version).toBe(4);
+  });
+
+  test('FX-T15 ⑧ 받은 사람 알림이 실패해도 사건은 소명 대기로 저장되고 실패가 사건 기록에 남는다', async () => {
+    const who = investigator();
+    const created = await createCase(who, CL_IR07);
+    expect(created.statusCode, created.payload).toBe(201);
+    const caseId = json(created).caseId as string;
+    notifier.failNext = true;
+    const r = await send('POST', `/v1/ops/fraud-cases/${caseId}/appeal-requests`, who, {
+      idem: randomUUID(),
+      body: { accountIds: [A(53)], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + 2 * DAY) },
+    });
+    // 알림이 실패해도 잠금만 남은 500이 아니라 소명 대기로 저장된 201이다
+    expect(r.statusCode, r.payload).toBe(201);
+    expect(locks.sets.filter((s) => s.caseId === caseId)).toHaveLength(1);
+    const detail = await send('GET', `/v1/ops/fraud-cases/${caseId}`, who);
+    expect(json(detail)).toMatchObject({ status: 'APPEAL_PENDING' });
+    expect(JSON.stringify(json(detail).events)).toContain('HOLDER_NOTICE_FAILED');
   });
 
   test('FX-T16 ⑩ [ASVS v5.0.0-14.2.2] 조사 경로 성공 응답은 Cache-Control no-store다', async () => {
