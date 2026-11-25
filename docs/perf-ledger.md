@@ -444,6 +444,81 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | 2026-11-13 | 2026-11-13-k7-v1-fault-r7-bat033 | K7 | v1 | local-10k | 11,002명, 100 RPS | 1,816 | 0.7% | baseline | 측정함 | - | perf-ledger/runs/2026-11-13-k7-v1-fault-r7-bat033/ |
 | 2026-11-13 | 2026-11-13-k7-v1-fault-r8-bat033 | K7 | v1 | local-10k | 11,002명, 100 RPS | 2,286 | 1.7% | baseline | 측정함 | - | perf-ledger/runs/2026-11-13-k7-v1-fault-r8-bat033/ |
 | 2026-11-13 | 2026-11-13-k7-v1-fault-r9-bat033 | K7 | v1 | local-10k | 11,002명, 100 RPS | 1,897 | 0.7% | baseline | 측정함 | - | perf-ledger/runs/2026-11-13-k7-v1-fault-r9-bat033/ |
+| 2026-11-18 | 2026-11-18-bat056-m1-capacity-01-r500 | NFR-001 | v1 | local-gw | 500 RPS | 6.89 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-m1-capacity-01-r500/ |
+| 2026-11-18 | 2026-11-18-bat056-m1-capacity-02-r1000 | NFR-001 | v1 | local-gw | 1,000 RPS | 6.96 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-m1-capacity-02-r1000/ |
+| 2026-11-18 | 2026-11-18-bat056-m1-capacity-03-r1500 | NFR-001 | v1 | local-gw | 1,500 RPS | 13 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-m1-capacity-03-r1500/ |
+| 2026-11-18 | 2026-11-18-bat056-m1b-capacity-01-r1000 | NFR-001 | v1 | local-gw | 1,000 RPS | 7.00 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-m1b-capacity-01-r1000/ |
+| 2026-11-18 | 2026-11-18-bat056-m1b-capacity-02-r1100 | NFR-001 | v1 | local-gw | 1,100 RPS | 7.24 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-m1b-capacity-02-r1100/ |
+| 2026-11-18 | 2026-11-18-bat056-m1b-capacity-03-r1200 | NFR-001 | v1 | local-gw | 1,200 RPS | 7.45 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-m1b-capacity-03-r1200/ |
+| 2026-11-18 | 2026-11-18-bat056-m1b-capacity-04-r1300 | NFR-001 | v1 | local-gw | 1,300 RPS | 7.58 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-m1b-capacity-04-r1300/ |
+| 2026-11-18 | 2026-11-18-bat056-m1b-capacity-05-r1400 | NFR-001 | v1 | local-gw | 1,400 RPS | 7.70 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-m1b-capacity-05-r1400/ |
+| 2026-11-18 | 2026-11-18-bat056-ma-p12-sweep-01-p12-q2-c12-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 98 | 16.2% | fail | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ma-p12-sweep-01-p12-q2-c12-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-ma-p128-sweep-01-p128-q16-c128-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 23 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ma-p128-sweep-01-p128-q16-c128-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-ma-p16-sweep-01-p16-q2-c16-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 10.0% | fail | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ma-p16-sweep-01-p16-q2-c16-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-ma-p24-sweep-01-p24-q3-c24-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 6.8% | fail | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ma-p24-sweep-01-p24-q3-c24-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-ma-p2400-sweep-01-p2400-q300-c2400-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 23 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ma-p2400-sweep-01-p2400-q300-c2400-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-ma-p256-sweep-01-p256-q32-c256-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 22 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ma-p256-sweep-01-p256-q32-c256-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-ma-p32-sweep-01-p32-q4-c32-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 4.5% | fail | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ma-p32-sweep-01-p32-q4-c32-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-ma-p4-sweep-01-p4-q1-c4-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 23 | 67.0% | fail | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ma-p4-sweep-01-p4-q1-c4-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-ma-p64-sweep-01-p64-q8-c64-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | fail | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ma-p64-sweep-01-p64-q8-c64-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-ma-p8-sweep-01-p8-q1-c8-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 38 | 38.1% | fail | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ma-p8-sweep-01-p8-q1-c8-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-ma-p96-sweep-01-p96-q12-c96-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | fail | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ma-p96-sweep-01-p96-q12-c96-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-ma-rep-p128-sweep-01-p128-q16-c128-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ma-rep-p128-sweep-01-p128-q16-c128-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-ma-rep-p128-sweep-02-p128-q16-c128-r2 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ma-rep-p128-sweep-02-p128-q16-c128-r2/ |
+| 2026-11-18 | 2026-11-18-bat056-ma-rep-p96-sweep-01-p96-q12-c96-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 25 | 0.0% | fail | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ma-rep-p96-sweep-01-p96-q12-c96-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-ma-rep-p96-sweep-02-p96-q12-c96-r2 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | fail | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ma-rep-p96-sweep-02-p96-q12-c96-r2/ |
+| 2026-11-18 | 2026-11-18-bat056-mb-sweep-01-p128-q1-c128-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 74 | 0.0% | fail | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-mb-sweep-01-p128-q1-c128-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-mb-sweep-02-p128-q16-c128-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-mb-sweep-02-p128-q16-c128-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-mb-sweep-03-p128-q64-c128-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-mb-sweep-03-p128-q64-c128-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-mc-d100-sweep-01-p128-q16-c128-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 293 | 25.3% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-mc-d100-sweep-01-p128-q16-c128-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-mc-d100-sweep-02-p128-q16-c128-r2 | NFR-001 | v1 | local-gw | 1,500 RPS | 261 | 23.4% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-mc-d100-sweep-02-p128-q16-c128-r2/ |
+| 2026-11-18 | 2026-11-18-bat056-mc-d100-sweep-03-p128-q16-c128-r3 | NFR-001 | v1 | local-gw | 1,500 RPS | 334 | 25.9% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-mc-d100-sweep-03-p128-q16-c128-r3/ |
+| 2026-11-18 | 2026-11-18-bat056-mc-d50-sweep-01-p64-q8-c64-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 142 | 29.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-mc-d50-sweep-01-p64-q8-c64-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-mc-d50-sweep-02-p64-q8-c64-r2 | NFR-001 | v1 | local-gw | 1,500 RPS | 146 | 27.4% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-mc-d50-sweep-02-p64-q8-c64-r2/ |
+| 2026-11-18 | 2026-11-18-bat056-mc-d50-sweep-03-p64-q8-c64-r3 | NFR-001 | v1 | local-gw | 1,500 RPS | 147 | 24.9% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-mc-d50-sweep-03-p64-q8-c64-r3/ |
+| 2026-11-18 | 2026-11-18-bat056-mc-d500-sweep-01-p128-q16-c128-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 718 | 82.4% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-mc-d500-sweep-01-p128-q16-c128-r1/ |
+| 2026-11-18 | 2026-11-18-bat056-mc-d500-sweep-02-p128-q16-c128-r2 | NFR-001 | v1 | local-gw | 1,500 RPS | 721 | 82.3% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-mc-d500-sweep-02-p128-q16-c128-r2/ |
+| 2026-11-18 | 2026-11-18-bat056-mc-d500-sweep-03-p128-q16-c128-r3 | NFR-001 | v1 | local-gw | 1,500 RPS | 705 | 82.5% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-mc-d500-sweep-03-p128-q16-c128-r3/ |
+| 2026-11-18 | 2026-11-18-bat056-ms-ip-many | NFR-028 | v1 | local-gw | 1,000 RPS | 22 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ms-ip-many/ |
+| 2026-11-18 | 2026-11-18-bat056-ms-ip-mixed | NFR-028 | v1 | local-gw | 1,150 RPS | 22 | 8.7% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ms-ip-mixed/ |
+| 2026-11-18 | 2026-11-18-bat056-ms-ip-single | NFR-028 | v1 | local-gw | 150 RPS | 21 | 66.7% | pass | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ms-ip-single/ |
+| 2026-11-18 | 2026-11-18-bat056-ms-ip-v6-64 | NFR-028 | v1 | local-gw | 1,000 RPS | 100 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-18-bat056-ms-ip-v6-64/ |
+| 2026-11-19 | 2026-11-19-bat058-aa-sweep-01-p2400-q300-c2400-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 82 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-aa-sweep-01-p2400-q300-c2400-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-aa-sweep-02-p2400-q300-c2400-r2 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-aa-sweep-02-p2400-q300-c2400-r2/ |
+| 2026-11-19 | 2026-11-19-bat058-aa2-sweep-01-p2400-q300-c2400-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | 무효(발생기가 반복을 시작하지 못함(dropped_itera) | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-aa2-sweep-01-p2400-q300-c2400-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-aa2-sweep-02-p2400-q300-c2400-r2 | NFR-001 | v1 | local-gw | 1,500 RPS | 31 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-aa2-sweep-02-p2400-q300-c2400-r2/ |
+| 2026-11-19 | 2026-11-19-bat058-aa3-sweep-01-p2400-q300-c2400-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-aa3-sweep-01-p2400-q300-c2400-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-aa3-sweep-02-p2400-q300-c2400-r2 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-aa3-sweep-02-p2400-q300-c2400-r2/ |
+| 2026-11-19 | 2026-11-19-bat058-dx-aa-sweep-01-p2400-q300-c2400-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-dx-aa-sweep-01-p2400-q300-c2400-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-dx-aa-sweep-02-p2400-q300-c2400-r2 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-dx-aa-sweep-02-p2400-q300-c2400-r2/ |
+| 2026-11-19 | 2026-11-19-bat058-dx-p32-sweep-01-p32-q4-c32-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | fail | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-dx-p32-sweep-01-p32-q4-c32-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-dx-p40-sweep-01-p40-q5-c40-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-dx-p40-sweep-01-p40-q5-c40-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-dx-p40-sweep-02-p40-q5-c40-r2 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | fail | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-dx-p40-sweep-02-p40-q5-c40-r2/ |
+| 2026-11-19 | 2026-11-19-bat058-dx-p40-sweep-03-p40-q5-c40-r3 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-dx-p40-sweep-03-p40-q5-c40-r3/ |
+| 2026-11-19 | 2026-11-19-bat058-dx-p48-sweep-01-p48-q6-c48-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-dx-p48-sweep-01-p48-q6-c48-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-dx-p48-sweep-02-p48-q6-c48-r2 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-dx-p48-sweep-02-p48-q6-c48-r2/ |
+| 2026-11-19 | 2026-11-19-bat058-dx-p48-sweep-03-p48-q6-c48-r3 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-dx-p48-sweep-03-p48-q6-c48-r3/ |
+| 2026-11-19 | 2026-11-19-bat058-dx-p64-sweep-01-p64-q8-c64-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 37 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-dx-p64-sweep-01-p64-q8-c64-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-dx-p64-sweep-02-p64-q8-c64-r2 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-dx-p64-sweep-02-p64-q8-c64-r2/ |
+| 2026-11-19 | 2026-11-19-bat058-dx-p64-sweep-03-p64-q8-c64-r3 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-dx-p64-sweep-03-p64-q8-c64-r3/ |
+| 2026-11-19 | 2026-11-19-bat058-ma-p12-sweep-01-p12-q2-c12-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 26 | 12.2% | fail | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-ma-p12-sweep-01-p12-q2-c12-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-ma-p16-sweep-01-p16-q2-c16-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 2.3% | fail | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-ma-p16-sweep-01-p16-q2-c16-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-ma-p20-sweep-01-p20-q3-c20-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.2% | fail | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-ma-p20-sweep-01-p20-q3-c20-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-ma-p24-sweep-01-p24-q3-c24-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.2% | fail | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-ma-p24-sweep-01-p24-q3-c24-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-ma-p28-sweep-01-p28-q4-c28-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.1% | fail | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-ma-p28-sweep-01-p28-q4-c28-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-ma-p32-sweep-01-p32-q4-c32-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | fail | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-ma-p32-sweep-01-p32-q4-c32-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-ma-p40-sweep-01-p40-q5-c40-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-ma-p40-sweep-01-p40-q5-c40-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-ma-p48-sweep-01-p48-q6-c48-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 56 | 0.0% | fail | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-ma-p48-sweep-01-p48-q6-c48-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-ma-p64-sweep-01-p64-q8-c64-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-ma-p64-sweep-01-p64-q8-c64-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-ma-p96-sweep-01-p96-q12-c96-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 101 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-ma-p96-sweep-01-p96-q12-c96-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-ma-rep-p64-sweep-01-p64-q8-c64-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-ma-rep-p64-sweep-01-p64-q8-c64-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-ma-rep-p64-sweep-02-p64-q8-c64-r2 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-ma-rep-p64-sweep-02-p64-q8-c64-r2/ |
+| 2026-11-19 | 2026-11-19-bat058-mc-d50-sweep-01-p66-q9-c66-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 70 | 13.6% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-mc-d50-sweep-01-p66-q9-c66-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-mc-d500-sweep-01-p66-q9-c66-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 906 | 90.2% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-mc-d500-sweep-01-p66-q9-c66-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-mw-sweep-01-p66-q9-c66-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | fail | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-mw-sweep-01-p66-q9-c66-r1/ |
+| 2026-11-19 | 2026-11-19-bat058-ops-sweep-01-p3120-q390-c3120-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-ops-sweep-01-p3120-q390-c3120-r1/ |
+| 2026-11-25 | 2026-11-25-fe-t29-console-mf | FE-T29 | v1 | local-lab | - | - | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-25-fe-t29-console-mf/ |
+| 2026-11-25 | 2026-11-25-fe-t29-console-single | FE-T29 | v1 | local-lab | - | - | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-25-fe-t29-console-single/ |
 <!-- ledger:end -->
 
 표준 서식 예시 (참고용 Mock 데이터):

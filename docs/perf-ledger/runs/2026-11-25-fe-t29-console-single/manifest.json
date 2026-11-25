@@ -1,0 +1,66 @@
+{
+  "run_id": "2026-11-25-fe-t29-console-single",
+  "kpi": "FE-T29",
+  "version": "v1",
+  "profile": "local-lab",
+  "scale": {
+    "users": null,
+    "arrival_rps": null,
+    "duration_s": null,
+    "warmup_s": 0
+  },
+  "scenario": {
+    "path": "tools/web-checks/console-baseline/measure.mjs",
+    "args": "--build single --runs 3",
+    "open_model": false
+  },
+  "commit": {
+    "code": "11bcd73a761ef7a8f28c553616d18eae830a72a3",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "host": null,
+  "generator": {
+    "description": null,
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-25T12:05:00Z",
+  "ended_at": "2026-11-25T12:20:00Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": null,
+    "error_rate": 0,
+    "requests": 18,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt",
+    "extra": [
+      "summary.json",
+      "summary.md",
+      "isolation-mf.json",
+      "isolation-single.json",
+      "rebuild.json",
+      "sizes-mf.json",
+      "sizes-single.json"
+    ]
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "한 앱(PEAKET_CONSOLE_BUILD=single) 중앙값 빈 1246.1ms·채운 334.6ms, MF A/A1 1346/342.4·A/A2 1431/334.8(한 앱÷MF 0.926·0.977). 첫 JS 한 앱 213.7kB·MF 221.8kB(0.963). 다시 빌드 한 앱 29121ms·7폴더, MF 5225ms·1폴더. 격리 두 빌드 3/3. 같은 Node 대역, Docker·kind 없음.",
+  "collected_at": "2026-11-25T12:18:22Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

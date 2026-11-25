@@ -1,0 +1,734 @@
+{
+  "bench": {
+    "p99_ms": null,
+    "error_rate": 0,
+    "requests": 18,
+    "dropped": 0
+  },
+  "summary": {
+    "kpi": "FE-T29",
+    "measuredAt": "2026-11-25T12:16:29.567Z",
+    "commit": "11bcd73a761ef7a8f28c553616d18eae830a72a3",
+    "chrome": "Chromium/156.0.8078.4",
+    "cpuThrottle": 4,
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "path": "/dashboard?tab=live&event=0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01",
+    "groups": {
+      "aa1": {
+        "label": "aa1",
+        "build": "mf",
+        "runs": 3,
+        "cold": {
+          "ready": {
+            "median": 1346,
+            "p75": 1495.7000000476837
+          },
+          "fcp": {
+            "median": 800,
+            "p75": 880
+          },
+          "lcp": {
+            "median": 1440,
+            "p75": 1592
+          },
+          "inp": {
+            "median": 112,
+            "p75": 120
+          }
+        },
+        "warm": {
+          "ready": {
+            "median": 342.39999997615814,
+            "p75": 345.2000000476837
+          },
+          "fcp": {
+            "median": 180,
+            "p75": 188
+          },
+          "lcp": {
+            "median": 420,
+            "p75": 420
+          },
+          "inp": {
+            "median": 64,
+            "p75": 80
+          }
+        },
+        "remoteLoad": {
+          "queue": {
+            "median": 1188,
+            "p75": 1328.3
+          },
+          "purchase": {
+            "median": 1189.4,
+            "p75": 1328.8
+          }
+        },
+        "stubRequests": 69
+      },
+      "aa2": {
+        "label": "aa2",
+        "build": "mf",
+        "runs": 3,
+        "cold": {
+          "ready": {
+            "median": 1431,
+            "p75": 1579
+          },
+          "fcp": {
+            "median": 804,
+            "p75": 916
+          },
+          "lcp": {
+            "median": 1552,
+            "p75": 1680
+          },
+          "inp": {
+            "median": 112,
+            "p75": 112
+          }
+        },
+        "warm": {
+          "ready": {
+            "median": 334.8000000715256,
+            "p75": 354.3000000715256
+          },
+          "fcp": {
+            "median": 180,
+            "p75": 192
+          },
+          "lcp": {
+            "median": 400,
+            "p75": 424
+          },
+          "inp": {
+            "median": 72,
+            "p75": 120
+          }
+        },
+        "remoteLoad": {
+          "queue": {
+            "median": 1241.1,
+            "p75": 1390.3
+          },
+          "purchase": {
+            "median": 1242.5,
+            "p75": 1390.9
+          }
+        },
+        "stubRequests": 69
+      },
+      "single": {
+        "label": "single",
+        "build": "single",
+        "runs": 3,
+        "cold": {
+          "ready": {
+            "median": 1246.1000000238419,
+            "p75": 1323.5999999046326
+          },
+          "fcp": {
+            "median": 776,
+            "p75": 792
+          },
+          "lcp": {
+            "median": 1412,
+            "p75": 1416
+          },
+          "inp": {
+            "median": 112,
+            "p75": 120
+          }
+        },
+        "warm": {
+          "ready": {
+            "median": 334.59999990463257,
+            "p75": 337.8000000715256
+          },
+          "fcp": {
+            "median": 232,
+            "p75": 244
+          },
+          "lcp": {
+            "median": 392,
+            "p75": 392
+          },
+          "inp": {
+            "median": 72,
+            "p75": 96
+          }
+        },
+        "remoteLoad": {
+          "queue": null,
+          "purchase": null
+        },
+        "stubRequests": 68
+      }
+    },
+    "aa": {
+      "readyCold": {
+        "a": 1346,
+        "b": 1431,
+        "drift": {
+          "abs": 85,
+          "ratio": 0.06315007429420505,
+          "noisy": false
+        }
+      },
+      "readyWarm": {
+        "a": 342.39999997615814,
+        "b": 334.8000000715256,
+        "drift": {
+          "abs": 7.599999904632568,
+          "ratio": 0.022196261405262173,
+          "noisy": false
+        }
+      },
+      "fcpCold": {
+        "a": 800,
+        "b": 804,
+        "drift": {
+          "abs": 4,
+          "ratio": 0.005,
+          "noisy": false
+        }
+      },
+      "lcpCold": {
+        "a": 1440,
+        "b": 1552,
+        "drift": {
+          "abs": 112,
+          "ratio": 0.07777777777777778,
+          "noisy": false
+        }
+      }
+    },
+    "readyRatio": {
+      "cold": 0.9257800891707592,
+      "warm": 0.9772196259577433
+    },
+    "sizes": {
+      "mf": {
+        "initial": {
+          "files": [
+            "/assets/main.ae94f7c6.js"
+          ],
+          "gzipKB": 7.5
+        },
+        "loaded": {
+          "files": [
+            "/assets/main.ae94f7c6.js",
+            "/assets/322.38eeda95.chunk.js",
+            "/assets/996.72423cbe.chunk.js",
+            "/assets/2.27cd38f0.chunk.js",
+            "/assets/scr-029.89cb26ba.chunk.js",
+            "/assets/scr-029-d.545d487e.chunk.js",
+            "/assets/361.ff3bcd41.chunk.js",
+            "/assets/823.2b9028da.chunk.js",
+            "/remotes/queue/11bcd73a761e/remoteEntry.js",
+            "/remotes/purchase/11bcd73a761e/remoteEntry.js"
+          ],
+          "gzipKB": 221.8
+        },
+        "chunks": [
+          {
+            "name": "main",
+            "path": "/assets/main.ae94f7c6.js",
+            "gzipKB": 7.5
+          },
+          {
+            "name": "remote:purchase",
+            "path": "/remotes/purchase/11bcd73a761e/remoteEntry.js",
+            "gzipKB": 5
+          },
+          {
+            "name": "remote:queue",
+            "path": "/remotes/queue/11bcd73a761e/remoteEntry.js",
+            "gzipKB": 4.8
+          },
+          {
+            "name": "scr-028",
+            "path": "/assets/scr-028.b412a054.chunk.js",
+            "gzipKB": 25
+          },
+          {
+            "name": "scr-029",
+            "path": "/assets/scr-029.89cb26ba.chunk.js",
+            "gzipKB": 4.2
+          },
+          {
+            "name": "scr-029-d",
+            "path": "/assets/scr-029-d.545d487e.chunk.js",
+            "gzipKB": 43.1
+          },
+          {
+            "name": "scr-029-m",
+            "path": "/assets/scr-029-m.fa00b452.chunk.js",
+            "gzipKB": 26.9
+          },
+          {
+            "name": "scr-029-t",
+            "path": "/assets/scr-029-t.133d9e42.chunk.js",
+            "gzipKB": 28.8
+          },
+          {
+            "name": "scr-030",
+            "path": "/assets/scr-030.1fc13346.chunk.js",
+            "gzipKB": 14
+          },
+          {
+            "name": "scr-031",
+            "path": "/assets/scr-031.ec8fa003.chunk.js",
+            "gzipKB": 20.4
+          },
+          {
+            "name": "scr-032",
+            "path": "/assets/scr-032.214b8e2a.chunk.js",
+            "gzipKB": 32.3
+          },
+          {
+            "name": "scr-045",
+            "path": "/assets/scr-045.3b35bbcc.chunk.js",
+            "gzipKB": 12
+          },
+          {
+            "name": "scr-046",
+            "path": "/assets/scr-046.a84db7ec.chunk.js",
+            "gzipKB": 25.9
+          },
+          {
+            "name": "scr-047",
+            "path": "/assets/scr-047.52daac4b.chunk.js",
+            "gzipKB": 8
+          },
+          {
+            "name": "scr-048",
+            "path": "/assets/scr-048.89e8b64c.chunk.js",
+            "gzipKB": 8.2
+          },
+          {
+            "name": "scr-049",
+            "path": "/assets/scr-049.662318d0.chunk.js",
+            "gzipKB": 9.2
+          },
+          {
+            "name": "scr-053",
+            "path": "/assets/scr-053.6efc27fe.chunk.js",
+            "gzipKB": 7.3
+          },
+          {
+            "name": "scr-059",
+            "path": "/assets/scr-059.3b136aad.chunk.js",
+            "gzipKB": 3.4
+          },
+          {
+            "name": "scr-064",
+            "path": "/assets/scr-064.753bf4a7.chunk.js",
+            "gzipKB": 22.7
+          },
+          {
+            "name": "scr-065",
+            "path": "/assets/scr-065.f0f453d6.chunk.js",
+            "gzipKB": 7.6
+          },
+          {
+            "name": "scr-066",
+            "path": "/assets/scr-066.60143d32.chunk.js",
+            "gzipKB": 7.1
+          },
+          {
+            "name": "scr-067",
+            "path": "/assets/scr-067.ceae9896.chunk.js",
+            "gzipKB": 7.8
+          },
+          {
+            "name": "scr-068",
+            "path": "/assets/scr-068.b9cd6692.chunk.js",
+            "gzipKB": 15.3
+          },
+          {
+            "name": "scr-070",
+            "path": "/assets/scr-070.070cc243.chunk.js",
+            "gzipKB": 7.2
+          },
+          {
+            "name": "scr-071",
+            "path": "/assets/scr-071.09827212.chunk.js",
+            "gzipKB": 12.2
+          }
+        ]
+      },
+      "single": {
+        "initial": {
+          "files": [
+            "/assets/main.d082d525.js"
+          ],
+          "gzipKB": 1.9
+        },
+        "loaded": {
+          "files": [
+            "/assets/main.d082d525.js",
+            "/assets/147.7b8af506.chunk.js",
+            "/assets/241.56584cfc.chunk.js",
+            "/assets/scr-029.630b39d0.chunk.js",
+            "/assets/scr-029-d.c8b5aa06.chunk.js",
+            "/assets/361.b2e2efc7.chunk.js",
+            "/assets/823.2b9028da.chunk.js",
+            "/assets/widgets-queue.c978a22e.chunk.js",
+            "/assets/widgets-purchase.2a473ad1.chunk.js",
+            "/assets/w-queue-admission-rate.27fdc697.chunk.js",
+            "/assets/w-purchase-pg-status.b0a915db.chunk.js"
+          ],
+          "gzipKB": 213.7
+        },
+        "chunks": [
+          {
+            "name": "main",
+            "path": "/assets/main.d082d525.js",
+            "gzipKB": 1.9
+          },
+          {
+            "name": "scr-028",
+            "path": "/assets/scr-028.9fa08b27.chunk.js",
+            "gzipKB": 25
+          },
+          {
+            "name": "scr-029",
+            "path": "/assets/scr-029.630b39d0.chunk.js",
+            "gzipKB": 4.2
+          },
+          {
+            "name": "scr-029-d",
+            "path": "/assets/scr-029-d.c8b5aa06.chunk.js",
+            "gzipKB": 43.2
+          },
+          {
+            "name": "scr-029-m",
+            "path": "/assets/scr-029-m.77ab73c2.chunk.js",
+            "gzipKB": 26.9
+          },
+          {
+            "name": "scr-029-t",
+            "path": "/assets/scr-029-t.bf7ae0de.chunk.js",
+            "gzipKB": 28.8
+          },
+          {
+            "name": "scr-030",
+            "path": "/assets/scr-030.4a364ce7.chunk.js",
+            "gzipKB": 14
+          },
+          {
+            "name": "scr-031",
+            "path": "/assets/scr-031.897bac84.chunk.js",
+            "gzipKB": 20.4
+          },
+          {
+            "name": "scr-032",
+            "path": "/assets/scr-032.53bc0b82.chunk.js",
+            "gzipKB": 32.3
+          },
+          {
+            "name": "scr-045",
+            "path": "/assets/scr-045.1504e641.chunk.js",
+            "gzipKB": 12
+          },
+          {
+            "name": "scr-046",
+            "path": "/assets/scr-046.8e542a1f.chunk.js",
+            "gzipKB": 25.9
+          },
+          {
+            "name": "scr-047",
+            "path": "/assets/scr-047.bd6366a0.chunk.js",
+            "gzipKB": 8
+          },
+          {
+            "name": "scr-048",
+            "path": "/assets/scr-048.5850523c.chunk.js",
+            "gzipKB": 8.2
+          },
+          {
+            "name": "scr-049",
+            "path": "/assets/scr-049.0d7527ec.chunk.js",
+            "gzipKB": 9.2
+          },
+          {
+            "name": "scr-053",
+            "path": "/assets/scr-053.9cfa55d0.chunk.js",
+            "gzipKB": 7.3
+          },
+          {
+            "name": "scr-059",
+            "path": "/assets/scr-059.4011c6d0.chunk.js",
+            "gzipKB": 3.4
+          },
+          {
+            "name": "scr-064",
+            "path": "/assets/scr-064.38460cb1.chunk.js",
+            "gzipKB": 22.7
+          },
+          {
+            "name": "scr-065",
+            "path": "/assets/scr-065.8a28f005.chunk.js",
+            "gzipKB": 7.6
+          },
+          {
+            "name": "scr-066",
+            "path": "/assets/scr-066.974a4480.chunk.js",
+            "gzipKB": 7.1
+          },
+          {
+            "name": "scr-067",
+            "path": "/assets/scr-067.c684ff19.chunk.js",
+            "gzipKB": 7.8
+          },
+          {
+            "name": "scr-068",
+            "path": "/assets/scr-068.ab55c2c8.chunk.js",
+            "gzipKB": 15.3
+          },
+          {
+            "name": "scr-070",
+            "path": "/assets/scr-070.50b686b2.chunk.js",
+            "gzipKB": 7.2
+          },
+          {
+            "name": "scr-071",
+            "path": "/assets/scr-071.37011552.chunk.js",
+            "gzipKB": 12.2
+          },
+          {
+            "name": "widgets-purchase",
+            "path": "/assets/widgets-purchase.2a473ad1.chunk.js",
+            "gzipKB": 0.5
+          },
+          {
+            "name": "widgets-queue",
+            "path": "/assets/widgets-queue.c978a22e.chunk.js",
+            "gzipKB": 0.5
+          }
+        ]
+      },
+      "firstJSRatio": 0.963,
+      "chunks": [
+        {
+          "name": "main",
+          "mfKB": 7.5,
+          "singleKB": 1.9,
+          "ratio": 0.253
+        },
+        {
+          "name": "remote:purchase",
+          "mfKB": 5,
+          "singleKB": null,
+          "ratio": null
+        },
+        {
+          "name": "remote:queue",
+          "mfKB": 4.8,
+          "singleKB": null,
+          "ratio": null
+        },
+        {
+          "name": "scr-028",
+          "mfKB": 25,
+          "singleKB": 25,
+          "ratio": 1
+        },
+        {
+          "name": "scr-029",
+          "mfKB": 4.2,
+          "singleKB": 4.2,
+          "ratio": 1
+        },
+        {
+          "name": "scr-029-d",
+          "mfKB": 43.1,
+          "singleKB": 43.2,
+          "ratio": 1.002
+        },
+        {
+          "name": "scr-029-m",
+          "mfKB": 26.9,
+          "singleKB": 26.9,
+          "ratio": 1
+        },
+        {
+          "name": "scr-029-t",
+          "mfKB": 28.8,
+          "singleKB": 28.8,
+          "ratio": 1
+        },
+        {
+          "name": "scr-030",
+          "mfKB": 14,
+          "singleKB": 14,
+          "ratio": 1
+        },
+        {
+          "name": "scr-031",
+          "mfKB": 20.4,
+          "singleKB": 20.4,
+          "ratio": 1
+        },
+        {
+          "name": "scr-032",
+          "mfKB": 32.3,
+          "singleKB": 32.3,
+          "ratio": 1
+        },
+        {
+          "name": "scr-045",
+          "mfKB": 12,
+          "singleKB": 12,
+          "ratio": 1
+        },
+        {
+          "name": "scr-046",
+          "mfKB": 25.9,
+          "singleKB": 25.9,
+          "ratio": 1
+        },
+        {
+          "name": "scr-047",
+          "mfKB": 8,
+          "singleKB": 8,
+          "ratio": 1
+        },
+        {
+          "name": "scr-048",
+          "mfKB": 8.2,
+          "singleKB": 8.2,
+          "ratio": 1
+        },
+        {
+          "name": "scr-049",
+          "mfKB": 9.2,
+          "singleKB": 9.2,
+          "ratio": 1
+        },
+        {
+          "name": "scr-053",
+          "mfKB": 7.3,
+          "singleKB": 7.3,
+          "ratio": 1
+        },
+        {
+          "name": "scr-059",
+          "mfKB": 3.4,
+          "singleKB": 3.4,
+          "ratio": 1
+        },
+        {
+          "name": "scr-064",
+          "mfKB": 22.7,
+          "singleKB": 22.7,
+          "ratio": 1
+        },
+        {
+          "name": "scr-065",
+          "mfKB": 7.6,
+          "singleKB": 7.6,
+          "ratio": 1
+        },
+        {
+          "name": "scr-066",
+          "mfKB": 7.1,
+          "singleKB": 7.1,
+          "ratio": 1
+        },
+        {
+          "name": "scr-067",
+          "mfKB": 7.8,
+          "singleKB": 7.8,
+          "ratio": 1
+        },
+        {
+          "name": "scr-068",
+          "mfKB": 15.3,
+          "singleKB": 15.3,
+          "ratio": 1
+        },
+        {
+          "name": "scr-070",
+          "mfKB": 7.2,
+          "singleKB": 7.2,
+          "ratio": 1
+        },
+        {
+          "name": "scr-071",
+          "mfKB": 12.2,
+          "singleKB": 12.2,
+          "ratio": 1
+        },
+        {
+          "name": "widgets-purchase",
+          "mfKB": null,
+          "singleKB": 0.5,
+          "ratio": null
+        },
+        {
+          "name": "widgets-queue",
+          "mfKB": null,
+          "singleKB": 0.5,
+          "ratio": null
+        }
+      ]
+    },
+    "isolation": [
+      {
+        "build": "mf",
+        "runs": 3,
+        "ok": true
+      },
+      {
+        "build": "single",
+        "runs": 3,
+        "ok": true
+      }
+    ],
+    "rebuild": {
+      "groups": {
+        "mf": {
+          "runs": 3,
+          "median": 5225,
+          "p75": 5312,
+          "values": [
+            5225,
+            5312,
+            3155
+          ],
+          "folders": [
+            "apps/widgets/queue"
+          ]
+        },
+        "single": {
+          "runs": 3,
+          "median": 29121,
+          "p75": 35071,
+          "values": [
+            35071,
+            29056,
+            29121
+          ],
+          "folders": [
+            "apps/console-host",
+            "apps/widgets/purchase",
+            "apps/widgets/queue",
+            "packages/api-client",
+            "packages/console-contract",
+            "packages/ds",
+            "packages/validation"
+          ]
+        }
+      },
+      "ratio": 5.573
+    },
+    "notes": "MF A/A 첫 그림(빈) 6.3%·(채운) 2.2%; MF 첫 그림 중앙값(빈/채운) 1346/342.39999997615814ms, 한 앱 1246.1000000238419/334.59999990463257ms; 첫 JS 221.8/213.7kB(한 앱÷MF 0.963); 다시 빌드 중앙값 5225/29121ms(한 앱÷MF 5.573), 폴더 1/7; 바꿀 조건(p75 300ms·첫 JS 20%)은 기록만 한다(정본 FE-T29)",
+    "valid": true,
+    "invalidReasons": []
+  }
+}

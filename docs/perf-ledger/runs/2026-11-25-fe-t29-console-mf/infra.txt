@@ -1,0 +1,13 @@
+F-03-6(FE-T29) 측정 환경(2026-11-25, 로컬 PC)
+- CPU: Intel Core i9-14900HX, 24 cores / 32 logical
+- RAM: 31.7 GB
+- OS: Microsoft Windows 11 Home 10.0.26200 build 26200
+- Node: v24.18.0, pnpm: 12.16.0
+- 브라우저: Playwright @playwright/test 1.64.1, Chromium 156.0.8078.4(headless)
+- 화면: 1440x900, deviceScaleFactor 1, ko-KR, dark, reduced motion
+- CPU: CDP Emulation.setCPUThrottlingRate 4. 네트워크 느리게 하기 없음
+- 정적 파일: apps/console-host/scripts/preview-server.mjs(포트 4310 MF, 4311 한 앱)
+- 관제 API: tools/web-checks/console-baseline/ops-stub.mjs(같은 값, 실제 ops-svc/Prometheus 아님)
+- Docker·kind: 쓰지 않음. 같은 PC에서 발생기와 대상이 함께 돎
+- 다른 갈래의 빌드·무거운 시험: 측정 중 돌리지 않음
+- 측정 묶음: MF A/A 1(3회), MF A/A 2(3회), 한 앱(3회). 회차마다 빈 캐시 1 + 채운 캐시 1

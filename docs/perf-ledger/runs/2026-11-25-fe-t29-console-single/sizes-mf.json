@@ -1,0 +1,152 @@
+{
+  "build": "mf",
+  "path": "/dashboard?tab=live&event=0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01",
+  "initial": {
+    "files": [
+      "/assets/main.ae94f7c6.js"
+    ],
+    "gzipKB": 7.5
+  },
+  "chunks": [
+    {
+      "name": "main",
+      "path": "/assets/main.ae94f7c6.js",
+      "gzipKB": 7.5
+    },
+    {
+      "name": "remote:purchase",
+      "path": "/remotes/purchase/11bcd73a761e/remoteEntry.js",
+      "gzipKB": 5
+    },
+    {
+      "name": "remote:queue",
+      "path": "/remotes/queue/11bcd73a761e/remoteEntry.js",
+      "gzipKB": 4.8
+    },
+    {
+      "name": "scr-028",
+      "path": "/assets/scr-028.b412a054.chunk.js",
+      "gzipKB": 25
+    },
+    {
+      "name": "scr-029",
+      "path": "/assets/scr-029.89cb26ba.chunk.js",
+      "gzipKB": 4.2
+    },
+    {
+      "name": "scr-029-d",
+      "path": "/assets/scr-029-d.545d487e.chunk.js",
+      "gzipKB": 43.1
+    },
+    {
+      "name": "scr-029-m",
+      "path": "/assets/scr-029-m.fa00b452.chunk.js",
+      "gzipKB": 26.9
+    },
+    {
+      "name": "scr-029-t",
+      "path": "/assets/scr-029-t.133d9e42.chunk.js",
+      "gzipKB": 28.8
+    },
+    {
+      "name": "scr-030",
+      "path": "/assets/scr-030.1fc13346.chunk.js",
+      "gzipKB": 14
+    },
+    {
+      "name": "scr-031",
+      "path": "/assets/scr-031.ec8fa003.chunk.js",
+      "gzipKB": 20.4
+    },
+    {
+      "name": "scr-032",
+      "path": "/assets/scr-032.214b8e2a.chunk.js",
+      "gzipKB": 32.3
+    },
+    {
+      "name": "scr-045",
+      "path": "/assets/scr-045.3b35bbcc.chunk.js",
+      "gzipKB": 12
+    },
+    {
+      "name": "scr-046",
+      "path": "/assets/scr-046.a84db7ec.chunk.js",
+      "gzipKB": 25.9
+    },
+    {
+      "name": "scr-047",
+      "path": "/assets/scr-047.52daac4b.chunk.js",
+      "gzipKB": 8
+    },
+    {
+      "name": "scr-048",
+      "path": "/assets/scr-048.89e8b64c.chunk.js",
+      "gzipKB": 8.2
+    },
+    {
+      "name": "scr-049",
+      "path": "/assets/scr-049.662318d0.chunk.js",
+      "gzipKB": 9.2
+    },
+    {
+      "name": "scr-053",
+      "path": "/assets/scr-053.6efc27fe.chunk.js",
+      "gzipKB": 7.3
+    },
+    {
+      "name": "scr-059",
+      "path": "/assets/scr-059.3b136aad.chunk.js",
+      "gzipKB": 3.4
+    },
+    {
+      "name": "scr-064",
+      "path": "/assets/scr-064.753bf4a7.chunk.js",
+      "gzipKB": 22.7
+    },
+    {
+      "name": "scr-065",
+      "path": "/assets/scr-065.f0f453d6.chunk.js",
+      "gzipKB": 7.6
+    },
+    {
+      "name": "scr-066",
+      "path": "/assets/scr-066.60143d32.chunk.js",
+      "gzipKB": 7.1
+    },
+    {
+      "name": "scr-067",
+      "path": "/assets/scr-067.ceae9896.chunk.js",
+      "gzipKB": 7.8
+    },
+    {
+      "name": "scr-068",
+      "path": "/assets/scr-068.b9cd6692.chunk.js",
+      "gzipKB": 15.3
+    },
+    {
+      "name": "scr-070",
+      "path": "/assets/scr-070.070cc243.chunk.js",
+      "gzipKB": 7.2
+    },
+    {
+      "name": "scr-071",
+      "path": "/assets/scr-071.09827212.chunk.js",
+      "gzipKB": 12.2
+    }
+  ],
+  "loaded": {
+    "files": [
+      "/assets/main.ae94f7c6.js",
+      "/assets/322.38eeda95.chunk.js",
+      "/assets/996.72423cbe.chunk.js",
+      "/assets/2.27cd38f0.chunk.js",
+      "/assets/scr-029.89cb26ba.chunk.js",
+      "/assets/scr-029-d.545d487e.chunk.js",
+      "/assets/361.ff3bcd41.chunk.js",
+      "/assets/823.2b9028da.chunk.js",
+      "/remotes/queue/11bcd73a761e/remoteEntry.js",
+      "/remotes/purchase/11bcd73a761e/remoteEntry.js"
+    ],
+    "gzipKB": 221.8
+  }
+}

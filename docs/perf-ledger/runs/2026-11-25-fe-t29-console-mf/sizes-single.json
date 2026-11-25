@@ -1,0 +1,153 @@
+{
+  "build": "single",
+  "path": "/dashboard?tab=live&event=0b8f1f2e-4a1d-4c1e-9b5a-1f0a2b3c4e01",
+  "initial": {
+    "files": [
+      "/assets/main.d082d525.js"
+    ],
+    "gzipKB": 1.9
+  },
+  "chunks": [
+    {
+      "name": "main",
+      "path": "/assets/main.d082d525.js",
+      "gzipKB": 1.9
+    },
+    {
+      "name": "scr-028",
+      "path": "/assets/scr-028.9fa08b27.chunk.js",
+      "gzipKB": 25
+    },
+    {
+      "name": "scr-029",
+      "path": "/assets/scr-029.630b39d0.chunk.js",
+      "gzipKB": 4.2
+    },
+    {
+      "name": "scr-029-d",
+      "path": "/assets/scr-029-d.c8b5aa06.chunk.js",
+      "gzipKB": 43.2
+    },
+    {
+      "name": "scr-029-m",
+      "path": "/assets/scr-029-m.77ab73c2.chunk.js",
+      "gzipKB": 26.9
+    },
+    {
+      "name": "scr-029-t",
+      "path": "/assets/scr-029-t.bf7ae0de.chunk.js",
+      "gzipKB": 28.8
+    },
+    {
+      "name": "scr-030",
+      "path": "/assets/scr-030.4a364ce7.chunk.js",
+      "gzipKB": 14
+    },
+    {
+      "name": "scr-031",
+      "path": "/assets/scr-031.897bac84.chunk.js",
+      "gzipKB": 20.4
+    },
+    {
+      "name": "scr-032",
+      "path": "/assets/scr-032.53bc0b82.chunk.js",
+      "gzipKB": 32.3
+    },
+    {
+      "name": "scr-045",
+      "path": "/assets/scr-045.1504e641.chunk.js",
+      "gzipKB": 12
+    },
+    {
+      "name": "scr-046",
+      "path": "/assets/scr-046.8e542a1f.chunk.js",
+      "gzipKB": 25.9
+    },
+    {
+      "name": "scr-047",
+      "path": "/assets/scr-047.bd6366a0.chunk.js",
+      "gzipKB": 8
+    },
+    {
+      "name": "scr-048",
+      "path": "/assets/scr-048.5850523c.chunk.js",
+      "gzipKB": 8.2
+    },
+    {
+      "name": "scr-049",
+      "path": "/assets/scr-049.0d7527ec.chunk.js",
+      "gzipKB": 9.2
+    },
+    {
+      "name": "scr-053",
+      "path": "/assets/scr-053.9cfa55d0.chunk.js",
+      "gzipKB": 7.3
+    },
+    {
+      "name": "scr-059",
+      "path": "/assets/scr-059.4011c6d0.chunk.js",
+      "gzipKB": 3.4
+    },
+    {
+      "name": "scr-064",
+      "path": "/assets/scr-064.38460cb1.chunk.js",
+      "gzipKB": 22.7
+    },
+    {
+      "name": "scr-065",
+      "path": "/assets/scr-065.8a28f005.chunk.js",
+      "gzipKB": 7.6
+    },
+    {
+      "name": "scr-066",
+      "path": "/assets/scr-066.974a4480.chunk.js",
+      "gzipKB": 7.1
+    },
+    {
+      "name": "scr-067",
+      "path": "/assets/scr-067.c684ff19.chunk.js",
+      "gzipKB": 7.8
+    },
+    {
+      "name": "scr-068",
+      "path": "/assets/scr-068.ab55c2c8.chunk.js",
+      "gzipKB": 15.3
+    },
+    {
+      "name": "scr-070",
+      "path": "/assets/scr-070.50b686b2.chunk.js",
+      "gzipKB": 7.2
+    },
+    {
+      "name": "scr-071",
+      "path": "/assets/scr-071.37011552.chunk.js",
+      "gzipKB": 12.2
+    },
+    {
+      "name": "widgets-purchase",
+      "path": "/assets/widgets-purchase.2a473ad1.chunk.js",
+      "gzipKB": 0.5
+    },
+    {
+      "name": "widgets-queue",
+      "path": "/assets/widgets-queue.c978a22e.chunk.js",
+      "gzipKB": 0.5
+    }
+  ],
+  "loaded": {
+    "files": [
+      "/assets/main.d082d525.js",
+      "/assets/147.7b8af506.chunk.js",
+      "/assets/241.56584cfc.chunk.js",
+      "/assets/scr-029.630b39d0.chunk.js",
+      "/assets/scr-029-d.c8b5aa06.chunk.js",
+      "/assets/361.b2e2efc7.chunk.js",
+      "/assets/823.2b9028da.chunk.js",
+      "/assets/widgets-queue.c978a22e.chunk.js",
+      "/assets/widgets-purchase.2a473ad1.chunk.js",
+      "/assets/w-queue-admission-rate.27fdc697.chunk.js",
+      "/assets/w-purchase-pg-status.b0a915db.chunk.js"
+    ],
+    "gzipKB": 213.7
+  }
+}

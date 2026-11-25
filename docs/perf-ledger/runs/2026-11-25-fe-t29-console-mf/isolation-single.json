@@ -1,0 +1,35 @@
+{
+  "build": "single",
+  "runs": [
+    {
+      "run": 1,
+      "ok": true,
+      "slots": {
+        "total": 10,
+        "loading": 0,
+        "fallback": 4,
+        "value": 6
+      }
+    },
+    {
+      "run": 2,
+      "ok": true,
+      "slots": {
+        "total": 10,
+        "loading": 0,
+        "fallback": 4,
+        "value": 6
+      }
+    },
+    {
+      "run": 3,
+      "ok": true,
+      "slots": {
+        "total": 10,
+        "loading": 0,
+        "fallback": 4,
+        "value": 6
+      }
+    }
+  ]
+}

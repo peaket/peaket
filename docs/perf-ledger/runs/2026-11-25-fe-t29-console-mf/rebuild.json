@@ -1,0 +1,146 @@
+{
+  "commit": "11bcd73a761ef7a8f28c553616d18eae830a72a3",
+  "runs": 3,
+  "records": [
+    {
+      "build": "mf",
+      "run": 1,
+      "ok": true,
+      "ms": 5225,
+      "folders": [
+        "apps/widgets/queue"
+      ],
+      "steps": [
+        "remote-queue",
+        "remotes-manifest",
+        "copy"
+      ],
+      "target": "D:\\ticketpass-freeze-F-03-6\\tools\\web-checks\\reports\\console-baseline\\rebuild\\mf-1"
+    },
+    {
+      "build": "mf",
+      "run": 2,
+      "ok": true,
+      "ms": 5312,
+      "folders": [
+        "apps/widgets/queue"
+      ],
+      "steps": [
+        "remote-queue",
+        "remotes-manifest",
+        "copy"
+      ],
+      "target": "D:\\ticketpass-freeze-F-03-6\\tools\\web-checks\\reports\\console-baseline\\rebuild\\mf-2"
+    },
+    {
+      "build": "mf",
+      "run": 3,
+      "ok": true,
+      "ms": 3155,
+      "folders": [
+        "apps/widgets/queue"
+      ],
+      "steps": [
+        "remote-queue",
+        "remotes-manifest",
+        "copy"
+      ],
+      "target": "D:\\ticketpass-freeze-F-03-6\\tools\\web-checks\\reports\\console-baseline\\rebuild\\mf-3"
+    },
+    {
+      "build": "single",
+      "run": 1,
+      "ok": true,
+      "ms": 35071,
+      "folders": [
+        "apps/console-host",
+        "apps/widgets/purchase",
+        "apps/widgets/queue",
+        "packages/api-client",
+        "packages/console-contract",
+        "packages/ds",
+        "packages/validation"
+      ],
+      "foldersSource": "webpack-stats",
+      "steps": [
+        "host"
+      ],
+      "target": "D:\\ticketpass-freeze-F-03-6\\tools\\web-checks\\reports\\console-baseline\\rebuild\\single-1"
+    },
+    {
+      "build": "single",
+      "run": 2,
+      "ok": true,
+      "ms": 29056,
+      "folders": [
+        "apps/console-host",
+        "apps/widgets/purchase",
+        "apps/widgets/queue",
+        "packages/api-client",
+        "packages/console-contract",
+        "packages/ds",
+        "packages/validation"
+      ],
+      "foldersSource": "webpack-stats",
+      "steps": [
+        "host"
+      ],
+      "target": "D:\\ticketpass-freeze-F-03-6\\tools\\web-checks\\reports\\console-baseline\\rebuild\\single-2"
+    },
+    {
+      "build": "single",
+      "run": 3,
+      "ok": true,
+      "ms": 29121,
+      "folders": [
+        "apps/console-host",
+        "apps/widgets/purchase",
+        "apps/widgets/queue",
+        "packages/api-client",
+        "packages/console-contract",
+        "packages/ds",
+        "packages/validation"
+      ],
+      "foldersSource": "webpack-stats",
+      "steps": [
+        "host"
+      ],
+      "target": "D:\\ticketpass-freeze-F-03-6\\tools\\web-checks\\reports\\console-baseline\\rebuild\\single-3"
+    }
+  ],
+  "groups": {
+    "mf": {
+      "runs": 3,
+      "median": 5225,
+      "p75": 5312,
+      "values": [
+        5225,
+        5312,
+        3155
+      ],
+      "folders": [
+        "apps/widgets/queue"
+      ]
+    },
+    "single": {
+      "runs": 3,
+      "median": 29121,
+      "p75": 35071,
+      "values": [
+        35071,
+        29056,
+        29121
+      ],
+      "folders": [
+        "apps/console-host",
+        "apps/widgets/purchase",
+        "apps/widgets/queue",
+        "packages/api-client",
+        "packages/console-contract",
+        "packages/ds",
+        "packages/validation"
+      ]
+    }
+  },
+  "sourceRestored": true
+}
