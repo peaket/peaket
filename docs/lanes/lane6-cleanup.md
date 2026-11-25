@@ -31,3 +31,6 @@
 - F-04-13 IR-29(낮음): `canApprove`가 요청자에게도 true이고, 목록·생성 응답의 `summaryViewedAt`은 늘 null이며, `caseView.evidenceBundleIds`는 늘 빈 배열이다. 요청자·상태를 반영하고 증거 묶음은 F-04-14가 채운다(`application/fraud-actions.ts` `#approvalView`·`caseView`).
 - F-04-13 IR-30(낮음): 정비 타이머가 앞 틱의 완료를 기다리지 않고 `Date.now`를 한 틱에 세 번 읽으며, ticket-svc는 시작 실패 catch에서 타이머를 멈추지 않는다. 진행 중 플래그와 한 번 읽은 시각을 쓰고 catch에서도 멈춘다(`application/fraud-action-sweep.ts`, `services/ticket-svc/src/start.ts`).
 - F-04-13 IR-31(낮음): `RESTRICT`·`LIFT_RESTRICTION`에 `ticketIds`를 보내도 조용히 무시하고, `actionRequestDecision`의 `priorActionDone`·`approvalExecutionGuard`·`approvalSummaryAllowed`는 쓰이지 않는다. 계약과 다른 본문은 422로 거절하고 쓰지 않는 공개 함수는 지우거나 판정에 쓴다(`application/fraud-actions.ts`, `domain/fraud-action.ts`).
+- F-04-13 IR-37(중간): 사본 어댑터의 `lock_active`·`lock_expires_at`·`locked_ticket_ids`는 실었지만, trust 주소가 없을 때 라벨이 로그로 후퇴하고 사본 어댑터가 core 주소 없이 꺼지는 경계는 그대로다. 시작 경고·대체 저장을 정한다(`adapters/grpc-fraud-appeal-copies.ts`, `main.ts`).
+- F-04-13 IR-38(중간): `reject`·`expireApproval`은 상태 커밋 뒤 잠금을 풀고 NOTE를 남기지만, 잠금 해제가 실패한 뒤 다시 푸는 재시도 큐가 없다. 정비가 NOTE를 읽어 다시 풀게 한다(`application/fraud-actions.ts`).
+- F-04-13 IR-39(낮음): LIFT `ACTION_REQUESTED`의 `eventId`는 넣었지만 `canApprove`가 요청자에게도 true이고 목록·생성 응답의 `summaryViewedAt`은 null이다. 보는 사람과 열람 시각을 화면에 맞춘다(`application/fraud-actions.ts`).

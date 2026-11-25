@@ -215,6 +215,7 @@ const investigations = {
   ...(fraudApproverDirectory ? { fraudApproverDirectory } : {}),
   ...(fraudCopies ? { fraudCopies } : {}),
   ...(fraudPriority ? { fraudPriority } : {}),
+  calendar: caseCalendar,
   notifier: new LoggingFraudNotifier(),
   labels: fraudLabels,
   alerts: new LoggingFraudAlerts(),

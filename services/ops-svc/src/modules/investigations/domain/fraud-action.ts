@@ -36,7 +36,7 @@ const cloneCase = (c: FraudCaseRecord): FraudCaseRecord => ({
 const active = (c: FraudCaseRecord): FraudClusterMemberRecord[] => c.members.filter((m) => m.removedAtMs === null);
 const nextSeq = (c: FraudCaseRecord): number => (c.events.at(-1)?.seq ?? 0) + 1;
 const assertTime = (name: string, v: number): void => {
-  if (!Number.isFinite(v)) throw problem('invalid-time', 422, `${name}이 유한한 밀리초가 아닙니다`);
+  if (!Number.isFinite(v)) throw problem('invalid-time', 400, `${name}이 유한한 밀리초가 아닙니다`);
 };
 
 export function actionRequestDecision(o: {
@@ -78,7 +78,7 @@ export function actionRequestDecision(o: {
     }
     nextStatus = 'DECISION_PENDING';
   } else if (o.case.status === 'INVESTIGATING') {
-    if (o.case.approvalId === null) throw problem('appeal-target-invalid', 409, '소명 요청 이력이 없습니다');
+    if (o.case.approvalId === null) throw problem('fraud-case-state', 409, '소명 요청 이력이 없습니다');
     if (o.action === 'LIFT_RESTRICTION') throw problem('fraud-case-state', 409, '이 상태에서는 이용 제한 풀기를 요청할 수 없습니다');
     for (const m of members) {
       if (m.appealResult !== 'REJECTED' && m.appealResult !== 'EXPIRED') throw problem('appeal-target-invalid', 422, '소명을 요청하지 않은 계정입니다');

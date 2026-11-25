@@ -21,7 +21,9 @@ export type ProblemType =
   | 'already-verified'
   | 'already-waiting'
   | 'anchor-unavailable'
+  | 'appeal-due-not-passed'
   | 'appeal-pending'
+  | 'appeal-target-invalid'
   | 'approval-already-open'
   | 'approval-conflict'
   | 'approval-kind-not-supported'
@@ -196,6 +198,7 @@ export type ProblemType =
   | 'not-running'
   | 'not-verifying'
   | 'notify-sender-unavailable'
+  | 'objection-decision-invalid'
   | 'onsale-window-unavailable'
   | 'open-interval-conflict'
   | 'open-maintenance-window'
@@ -438,7 +441,9 @@ export const PROBLEM_TYPES = {
   'already-verified': { status: 409, title: "이미 본인확인을 마친 계정입니다" },
   'already-waiting': { status: 409, title: "이미 다른 곳에서 대기 중입니다" },
   'anchor-unavailable': { status: 503, title: "외부 앵커를 지금 쓸 수 없습니다" },
+  'appeal-due-not-passed': { status: 409, title: "소명 기한이 지나지 않았습니다" },
   'appeal-pending': { status: 409, title: "판단 전 소명이 있습니다" },
+  'appeal-target-invalid': { status: 422, title: "소명 대상 계정이 올바르지 않습니다" },
   'approval-already-open': { status: 409, title: "열린 조치 승인 업무가 있습니다" },
   'approval-conflict': { status: 409, title: "다른 사람이 먼저 처리했습니다" },
   'approval-kind-not-supported': { status: 422, title: "이 경로로 만들 수 없는 승인 종류입니다" },
@@ -613,6 +618,7 @@ export const PROBLEM_TYPES = {
   'not-running': { status: 409, title: "진행 중인 요청이 아닙니다" },
   'not-verifying': { status: 409, title: "추가 검증 중인 대기표가 아닙니다" },
   'notify-sender-unavailable': { status: 503, title: "알림 발송기를 쓸 수 없습니다" },
+  'objection-decision-invalid': { status: 422, title: "이의 판단이 올바르지 않습니다" },
   'onsale-window-unavailable': { status: 503, title: "온세일 윈도우를 지금 확인할 수 없습니다" },
   'open-interval-conflict': { status: 409, title: "다른 대규모 공연과 오픈 시각이 겹칩니다" },
   'open-maintenance-window': { status: 409, title: "정비 시간에는 오픈할 수 없습니다" },

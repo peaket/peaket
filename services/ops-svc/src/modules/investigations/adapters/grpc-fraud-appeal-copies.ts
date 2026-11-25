@@ -48,6 +48,8 @@ export class GrpcFraudAppealCopies implements FraudAppealCopies {
           case_id: i.caseId,
           event_id: i.eventId,
           locked_ticket_ids: Array.isArray(result.lockedTicketIds) ? result.lockedTicketIds.map(String) : [],
+          lock_active: i.lockActive,
+          ...(typeof result.lockExpiresAt === 'string' ? { lock_expires_at: TS(Date.parse(result.lockExpiresAt)) } : {}),
           state: 'FRAUD_APPEAL_VIEW_STATE_OPEN',
           version: i.version,
           ...(i.objectionDueAtMs === null ? {} : { objection_due_at: TS(i.objectionDueAtMs) }),

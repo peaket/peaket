@@ -137,6 +137,9 @@ x-peaket-problem-types:
     event-settlement-source-unavailable: { status: 503, title: "회차 정산 원천을 읽을 수 없습니다" }
     event-suspended: { status: 410, title: "판매가 중지된 공연입니다" }
     first-partner-account-must-be-admin: { status: 422, title: "파트너사의 첫 계정은 관리자여야 합니다" }
+    appeal-due-not-passed: { status: 409, title: "소명 기한이 지나지 않았습니다" }
+    appeal-target-invalid: { status: 422, title: "소명 대상 계정이 올바르지 않습니다" }
+    objection-decision-invalid: { status: 422, title: "이의 판단이 올바르지 않습니다" }
     action-target-invalid: { status: 422, title: "조치 대상 계정·표가 올바르지 않습니다" }
     appeal-pending: { status: 409, title: "판단 전 소명이 있습니다" }
     approval-already-open: { status: 409, title: "열린 조치 승인 업무가 있습니다" }

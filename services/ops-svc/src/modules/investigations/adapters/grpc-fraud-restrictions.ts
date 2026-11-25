@@ -26,20 +26,24 @@ function client<T extends grpc.Client & Record<string, Unary>>(address: string, 
 export class GrpcFraudRestrictions {
   readonly identity = {
     restrict: async (i: { accountId: string; caseId: string; version: number; untilMs: number }): Promise<void> => {
-      await this.#call(this.#identity, 'SetRestrictedCiHold', { account_id: i.accountId, fraud_case_id: i.caseId, until: TS(i.untilMs), state: 'RESTRICTED_CI_HOLD_STATE_RESTRICTED', version: i.version });
+      const out = await this.#call(this.#identity, 'SetRestrictedCiHold', { account_id: i.accountId, fraud_case_id: i.caseId, until: TS(i.untilMs), state: 'RESTRICTED_CI_HOLD_STATE_RESTRICTED', version: i.version });
+      if (out.result !== 'RESTRICTED_CI_HOLD_RESULT_OK') throw new Error(`identity SetRestrictedCiHold 결과가 ${String(out.result)}입니다`);
     },
     lift: async (i: { accountId: string; caseId: string; version: number }): Promise<void> => {
-      await this.#call(this.#identity, 'SetRestrictedCiHold', { account_id: i.accountId, fraud_case_id: i.caseId, state: 'RESTRICTED_CI_HOLD_STATE_RELEASED', version: i.version });
+      const out = await this.#call(this.#identity, 'SetRestrictedCiHold', { account_id: i.accountId, fraud_case_id: i.caseId, state: 'RESTRICTED_CI_HOLD_STATE_RELEASED', version: i.version });
+      if (out.result !== 'RESTRICTED_CI_HOLD_RESULT_OK') throw new Error(`identity SetRestrictedCiHold 해제 결과가 ${String(out.result)}입니다`);
     },
   };
   readonly queue = {
     set: async (i: { accountId: string; caseId: string; restrictionId: string; state: 'ACTIVE' | 'LIFTED'; version: number; untilMs: number }): Promise<void> => {
-      await this.#call(this.#queue, 'SetBookingRestriction', { account_id: i.accountId, restriction_id: i.restrictionId, state: `BOOKING_RESTRICTION_STATE_${i.state}`, ends_at: TS(i.untilMs), version: i.version });
+      const out = await this.#call(this.#queue, 'SetBookingRestriction', { account_id: i.accountId, restriction_id: i.restrictionId, state: `BOOKING_RESTRICTION_STATE_${i.state}`, ends_at: TS(i.untilMs), version: i.version });
+      if (out.changed !== true) throw new Error('queue-svc SetBookingRestriction이 반영되지 않았습니다');
     },
   };
   readonly purchase = {
     set: async (i: { accountId: string; caseId: string; restrictionId: string; state: 'ACTIVE' | 'LIFTED'; version: number; untilMs: number }): Promise<void> => {
-      await this.#call(this.#purchase, 'SetBookingRestriction', { account_id: i.accountId, restriction_id: i.restrictionId, state: `BOOKING_RESTRICTION_STATE_${i.state}`, ends_at: TS(i.untilMs), version: i.version });
+      const out = await this.#call(this.#purchase, 'SetBookingRestriction', { account_id: i.accountId, restriction_id: i.restrictionId, state: `BOOKING_RESTRICTION_STATE_${i.state}`, ends_at: TS(i.untilMs), version: i.version });
+      if (out.changed !== true) throw new Error('purchase-svc SetBookingRestriction이 반영되지 않았습니다');
     },
   };
   readonly #identity: grpc.Client & Record<string, Unary>;
@@ -61,13 +65,13 @@ export class GrpcFraudRestrictions {
     return this.rows ? this.rows.activeForCase(caseId) : [];
   }
 
-  async #call(c: grpc.Client & Record<string, Unary>, method: string, req: object): Promise<void> {
+  async #call(c: grpc.Client & Record<string, Unary>, method: string, req: object): Promise<Record<string, unknown>> {
     const metadata = new grpc.Metadata();
     if (this.#token) {
       metadata.set(INTERNAL_GRPC_TOKEN_HEADER, this.#token);
       metadata.set(INTERNAL_GRPC_CALLER_HEADER, CALLER);
     }
-    await new Promise<void>((resolve, reject) => c[method]!(req, metadata, { deadline: Date.now() + DEADLINE_MS }, (e) => (e ? reject(e) : resolve())));
+    return new Promise<Record<string, unknown>>((resolve, reject) => c[method]!(req, metadata, { deadline: Date.now() + DEADLINE_MS }, (e, v) => (e ? reject(e) : resolve(v ?? {}))));
   }
 
   close(): void {
