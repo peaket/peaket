@@ -1176,6 +1176,7 @@ export * from './scannerDeviceCreatedCredentialType';
 export * from './scannerDeviceCreatedStatus';
 export * from './scannerDeviceCredentialType';
 export * from './scannerDeviceStatus';
+export * from './scannerFreshnessDevice';
 export * from './scannerPackage';
 export * from './scannerPackageTicket';
 export * from './scannerPackageTicketKeysItem';

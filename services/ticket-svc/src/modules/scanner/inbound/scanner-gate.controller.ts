@@ -71,7 +71,7 @@ export class ScannerGateController {
   ): Promise<ScannerChangesView> {
     void reply.header('cache-control', 'no-store');
     try {
-      return await this.gate.changes(params.eventId, query.after, query.limit, me.eventId, me.deviceId);
+      return await this.gate.changes(params.eventId, query.after, query.limit, me.eventId, me.deviceId, me.role);
     } catch (e) {
       reject(e);
     }

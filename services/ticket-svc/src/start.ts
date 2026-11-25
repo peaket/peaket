@@ -180,6 +180,15 @@ export async function start(o: StartOptions): Promise<StartedService> {
     const opsAlertSink = config.opsHttpUrl
       ? new HttpOpsAlertSink(createExternalHttpClient({ provider: 'ops-svc', baseUrl: config.opsHttpUrl, timeoutCapMs: 2_000, clock: systemClock }), config.internalToken)
       : undefined;
+    // 변경분 응답의 현장 책임자 신선도 알림(O-T20)은 알림 발송과 무관하게 같은 원천을 읽는다.
+    // sink는 staleDevices 계산에 쓰지 않지만 ScannerFreshness 생성자가 요구하므로 빈 입구를 준다.
+    const freshnessForGate = new ScannerFreshness({
+      devices: scannerStore,
+      shifts: shiftStore,
+      ...(policy ? { policy } : {}),
+      sink: { open: async () => undefined, resolve: async () => undefined },
+      clock: systemClock,
+    });
     // identity 주소가 없으면 스캐너 세션 확인은 503, 관제 역할 판정은 401로 닫는다(대역으로 통과시키지 않는다)
     adminAuthz = config.identityGrpcUrl ? new GrpcAdminAuthz(config.identityGrpcUrl, lbProfile) : { getAdminAuthz: async () => ({ valid: false, role: '' }) };
     scannerSessions = config.identityGrpcUrl
@@ -206,6 +215,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
           shift: shiftStore,
           ...(policy ? { policy } : {}),
           limiter,
+          freshness: freshnessForGate,
           sessions: scannerSessions,
           sessionLookup: scannerSessions,
           commands: scannerCommands,

@@ -4,6 +4,10 @@ import "./styles/global.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
+import { registerServiceWorker } from "./sw/register";
+
+// 앱 셸 서비스 워커는 뜰 때 한 번 등록한다. 실패해도 앱은 온라인으로 계속 뜬다(offline-gate §6.2).
+void registerServiceWorker({ url: "/sw.js", scope: "/" });
 
 const root = document.getElementById("root");
 if (!root) throw new Error("#root가 없습니다");

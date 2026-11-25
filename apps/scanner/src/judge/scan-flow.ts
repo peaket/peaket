@@ -122,16 +122,20 @@ export async function runScan(d: {
   scannerSessionId: string;
   id?: () => string;
   verify?: typeof verifyQrSignature;
+  /** 판정 Worker가 있으면 그쪽 judgeScan 결과를 쓴다(화면 스레드 밖 판정) */
+  judge?: (i: { raw: string; nowMs: number; clockOffsetMs: number }) => Promise<JudgeOutcome>;
 }): Promise<{ outcome: JudgeOutcome; state: PackageState; recorded: boolean; persisted: boolean }> {
   let outcome: JudgeOutcome;
   try {
-    outcome = await judgeScan({
-      raw: d.raw,
-      state: d.state,
-      nowMs: d.nowMs,
-      clockOffsetMs: d.clockOffsetMs,
-      ...(d.verify ? { verify: d.verify } : {}),
-    });
+    outcome = d.judge
+      ? await d.judge({ raw: d.raw, nowMs: d.nowMs, clockOffsetMs: d.clockOffsetMs })
+      : await judgeScan({
+          raw: d.raw,
+          state: d.state,
+          nowMs: d.nowMs,
+          clockOffsetMs: d.clockOffsetMs,
+          ...(d.verify ? { verify: d.verify } : {}),
+        });
   } catch {
     return { outcome: { result: 'RETRY' }, state: d.state, recorded: false, persisted: false };
   }

@@ -21,6 +21,7 @@ import {
   type GateFlagView,
   type ScanBatchResult,
   type ScannerChangesView,
+  type ScannerFreshnessDeviceView,
   type ScannerPackageView,
 } from '../domain/scanner-gate.js';
 
@@ -67,6 +68,8 @@ export interface ScannerGateDeps {
   onQueueReport?: (result: 'empty' | 'pending' | 'no_placement') => void;
   /** 입장 기록 마감 저장소(큐 비움 보고). 없으면 보고 경로가 503이다 */
   entryClose?: Pick<EntryCloseStore, 'putQueueReport'>;
+  /** 현장 책임자 변경분에 실을 같은 구역 지연 기기(O-T20). 없으면 gate_lead에게 빈 목록 */
+  freshness?: { staleDevices(i: { eventId: string; gateZone?: string; selfDeviceId?: string; nowMs: number }): Promise<ScannerFreshnessDeviceView[]> };
 }
 
 export class ScannerGate {
@@ -88,7 +91,7 @@ export class ScannerGate {
     return { ...p, reentryAllowed: synced.reentryAllowed ?? false, versionVector: { ...p.versionVector, maxOfflineMs: this.#maxOfflineMs } };
   }
 
-  async changes(eventIdRaw: unknown, afterRaw: unknown, limitRaw: unknown, sessionEventId: string | undefined, deviceId?: string): Promise<ScannerChangesView> {
+  async changes(eventIdRaw: unknown, afterRaw: unknown, limitRaw: unknown, sessionEventId: string | undefined, deviceId?: string, role?: string): Promise<ScannerChangesView> {
     const eventId = assertEventId(eventIdRaw);
     this.#sameEvent(eventId, sessionEventId);
     const now = this.d.clock.now();
@@ -98,7 +101,36 @@ export class ScannerGate {
     const c = await this.d.store.changes({ eventId, after: assertAfter(afterRaw), limit: assertChangesLimit(limitRaw), nowMs: now });
     // 신선도 경보(O-T20)의 기준은 '변경분을 실제로 받은 시각'이다. 실패해도 응답을 막지 않는다.
     if (deviceId !== undefined && this.d.devices) await this.d.devices.touchChanges(deviceId, now).catch(() => undefined);
-    return { ...c, versionVector: { ...c.versionVector, maxOfflineMs: this.#maxOfflineMs } };
+    let staleDevices: ScannerFreshnessDeviceView[] | undefined;
+    if (role === 'gate_lead') {
+      let gateZone: string | undefined;
+      if (deviceId !== undefined && this.d.shifts) {
+        try {
+          gateZone = (await this.d.shifts.placementOf(eventId, deviceId))?.gateZone;
+        } catch {
+          gateZone = undefined;
+        }
+      }
+      if (this.d.freshness) {
+        try {
+          staleDevices = await this.d.freshness.staleDevices({
+            eventId,
+            ...(gateZone !== undefined ? { gateZone } : {}),
+            ...(deviceId !== undefined ? { selfDeviceId: deviceId } : {}),
+            nowMs: now,
+          });
+        } catch {
+          staleDevices = [];
+        }
+      } else {
+        staleDevices = [];
+      }
+    }
+    return {
+      ...c,
+      ...(staleDevices !== undefined ? { staleDevices } : {}),
+      versionVector: { ...c.versionVector, maxOfflineMs: this.#maxOfflineMs },
+    };
   }
 
   /** 업로드는 스태프 세션의 회차나(기기 인증만이면) 본문의 회차를 받는다. 다른 회차 기록은 403으로 닫고 저장하지 않는다 */

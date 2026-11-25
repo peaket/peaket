@@ -10,12 +10,16 @@ import { ScanResult, type ScanTone } from "@peaket/ds/ScanResult";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { liveRequested } from "../api/config";
 import type { ScannerLayout } from "../app/layout";
+import { browserFeedbackPort } from "../app/feedback-io";
+import { freshnessBannersOf } from "../app/freshness-notice";
 import { liveRuntime } from "../app/live-runtime";
 import { PreviewSwitcher, usePreviewState } from "../app/preview";
 import { useScanLive, type ScanLive } from "../app/useScanLive";
 import { placement, recentScans, sync } from "../fixtures/scanner";
+import { feedbackOf, emitFeedback } from "../judge/feedback";
 import { messageOf, type JudgeOutcome } from "../judge/judge";
 import { createBarcodeDecoder, type BarcodeDecoder } from "../storage/decoder";
+import { ScanWorkerClient } from "../workers/scan-worker-client";
 import { bottomStyle, ManageLink, Strip, stripStyle } from "../shared/shell";
 import { OverrideDialog, OverrideInline } from "./OverrideForm";
 
@@ -360,10 +364,10 @@ function ScanBody({ st, layout }: { st: ScanState; layout: ScannerLayout }) {
   );
 }
 
-function liveVerdict(o: JudgeOutcome): { tone: ScanTone; verdict: string; reason?: string; note?: string; icon?: string } {
-  if (o.result === "PASS") return { tone: "pass", verdict: "통과" };
+function liveVerdict(o: JudgeOutcome): { tone: ScanTone; verdict: string; reason?: string; note?: string; icon?: string; seat?: string } {
+  if (o.result === "PASS") return { tone: "pass", verdict: "통과", seat: o.seatLabel };
   if (o.result === "RETRY") return { tone: "check", verdict: "다시 찍어 주세요", icon: "refresh" };
-  if (o.result === "CHECK") return { tone: "check", verdict: "확인 필요", reason: messageOf(o), note: "현장 책임자 확인 전에는 들여보내지 마세요" };
+  if (o.result === "CHECK") return { tone: "check", verdict: "확인 필요", reason: messageOf(o), note: "현장 책임자 확인 전에는 들여보내지 마세요", seat: o.seatLabel };
   return { tone: "reject", verdict: "거부", reason: messageOf(o) };
 }
 
@@ -371,13 +375,52 @@ function liveVerdict(o: JudgeOutcome): { tone: ScanTone; verdict: string; reason
 function LiveScanBody({ live, layout }: { live: ScanLive; layout: ScannerLayout }) {
   const t = layout === "t";
   const l = layout === "l";
-  const [decoder] = useState<BarcodeDecoder | undefined>(() => createBarcodeDecoder());
-  const detector = decoder !== undefined;
-  const videoRef = useQrLoop(live.ready && detector && live.verdict === undefined, decoder);
+  const [client, setClient] = useState<ScanWorkerClient | undefined>();
+  const [workerBroken, setWorkerBroken] = useState(false);
+  const [fallbackDecoder] = useState<BarcodeDecoder | undefined>(() => createBarcodeDecoder());
+  const [announcement, setAnnouncement] = useState("");
+  useEffect(() => {
+    let created: ScanWorkerClient | undefined;
+    try {
+      const worker = new Worker(new URL("../workers/scan.worker.ts", import.meta.url), { type: "module" });
+      created = new ScanWorkerClient({ worker });
+      setClient(created);
+    } catch {
+      setWorkerBroken(true);
+    }
+    return () => created?.dispose();
+  }, []);
+  useEffect(() => {
+    if (client && live.state) client.prepare(live.state);
+  }, [client, live.state]);
+  const detector = (client !== undefined && !workerBroken) || fallbackDecoder !== undefined;
+  const videoRef = useQrLoop(live.ready && detector && live.verdict === undefined, client, fallbackDecoder);
   const mode = live.placement?.mode ?? "IN";
   const zone = live.placement?.gateZone;
   const strip = <Strip online={live.mode !== "error"} mode={mode === "OUT" ? "out" : "in"} queue={live.queue} />;
   const v = live.verdict ? liveVerdict(live.verdict.outcome) : undefined;
+  useEffect(() => {
+    if (!live.verdict) {
+      setAnnouncement("");
+      return;
+    }
+    const feedback = feedbackOf(live.verdict.outcome);
+    setAnnouncement(feedback.announcement);
+    void emitFeedback(feedback, browserFeedbackPort());
+  }, [live.verdict]);
+  const freshness = freshnessBannersOf({
+    role: live.shift?.role,
+    placementZone: live.placement?.gateZone,
+    staleDevices: live.staleDevices,
+  }).map((banner) => (
+    <div className="banner banner-warning" role="alert" key={banner.deviceId} style={{ margin: t ? 12 : 8 }}>
+      <i className="ic ic-alert" aria-hidden="true" />
+      <div className="banner-body">
+        <span className="banner-title">{banner.title}</span>
+        {banner.detail}
+      </div>
+    </div>
+  ));
   const result = v ? (
     <ScanResult
       tone={v.tone}
@@ -385,6 +428,7 @@ function LiveScanBody({ live, layout }: { live: ScanLive; layout: ScannerLayout 
       reason={v.reason}
       note={v.note}
       icon={v.icon}
+      {...(v.seat ? { seat: v.seat } : {})}
       next="2초 뒤 다음 스캔"
       size={t ? "lg" : "md"}
       layout={l ? "inline" : "stack"}
@@ -441,8 +485,12 @@ function LiveScanBody({ live, layout }: { live: ScanLive; layout: ScannerLayout 
     notReady
   ) : (
     <>
+      {freshness}
       {modeBar}
       {viewfinder}
+      <p className="sr-only" aria-live="assertive">
+        {announcement}
+      </p>
     </>
   );
 
@@ -472,11 +520,30 @@ function LiveScanBody({ live, layout }: { live: ScanLive; layout: ScannerLayout 
   );
 }
 
-/** BarcodeDetector로 150ms마다 한 번씩 읽는다. 같은 글자는 런타임이 3초 동안 버린다 */
-function useQrLoop(enabled: boolean, decoder: BarcodeDecoder | undefined) {
+/** 그리기 가능한 프레임을 동기적으로 픽셀로 만든다. 아직 프레임이 없으면 빈 픽셀을 보낸다 */
+function captureFrame(video: HTMLVideoElement): ImageData | undefined {
+  const width = video.videoWidth || 640;
+  const height = video.videoHeight || 480;
+  try {
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return undefined;
+    ctx.drawImage(video, 0, 0, width, height);
+    return ctx.getImageData(0, 0, width, height);
+  } catch {
+    try {
+      return new ImageData(1, 1);
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+/** 카메라 프레임을 150ms마다 한 번씩 Worker로 보내 디코딩한다. 같은 글자는 런타임이 3초 동안 버린다 */
+function useQrLoop(enabled: boolean, client: ScanWorkerClient | undefined, fallbackDecoder: BarcodeDecoder | undefined) {
   const ref = useRef<HTMLVideoElement | null>(null);
   useEffect(() => {
-    if (!enabled || !decoder) return;
+    if (!enabled || (!client && !fallbackDecoder)) return;
     let stopped = false;
     let busy = false;
     let stream: MediaStream | undefined;
@@ -493,28 +560,41 @@ function useQrLoop(enabled: boolean, decoder: BarcodeDecoder | undefined) {
           await video.play().catch(() => undefined);
         }
       } catch {
-        // 카메라가 없어도 BarcodeDetector 대역(시험)은 동작한다
+        // 카메라가 없어도 Worker 시험 대역은 동작한다
       }
     })();
     const timer = setInterval(() => {
       if (stopped || busy || !video) return;
       busy = true;
-      void decoder
-        .decode(video)
-        .then((raw) => {
-          if (raw && !stopped) void liveRuntime.scan(raw);
-        })
-        .catch(() => undefined)
-        .finally(() => {
+      void (async () => {
+        try {
+          let raw: string | undefined;
+          try {
+            // createImageBitmap은 프레임이 아직 없을 때 늦게 끝난다. 그리기 가능한 순간의
+            // OffscreenCanvas 픽셀을 바로 보내 Worker 디코딩을 기다리지 않게 한다.
+            const frame = captureFrame(video);
+            if (frame) raw = client ? await client.decode(frame) : undefined;
+          } catch {
+            // Worker가 프레임을 읽지 못하면 화면 스레드 BarcodeDetector 대체를 시도한다
+          }
+          const value = raw ?? (fallbackDecoder ? await fallbackDecoder.decode(video) : undefined);
+          if (value && !stopped) {
+            const judge = client ? (i: { raw: string; nowMs: number; clockOffsetMs: number }) => client.judge(i) as Promise<JudgeOutcome> : undefined;
+            void liveRuntime.scan(value, judge);
+          }
+        } catch {
+          // 프레임을 읽지 못한 것은 다음 프레임에서 다시 시도한다(판정 중 예외는 RETRY로 닫힌다)
+        } finally {
           busy = false;
-        });
+        }
+      })();
     }, 150);
     return () => {
       stopped = true;
       clearInterval(timer);
       if (stream) for (const track of stream.getTracks()) track.stop();
     };
-  }, [enabled, decoder]);
+  }, [enabled, client, fallbackDecoder]);
   return ref;
 }
 

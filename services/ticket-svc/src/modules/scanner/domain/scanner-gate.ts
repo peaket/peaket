@@ -85,11 +85,23 @@ export interface ScannerChangeView {
   payload: Record<string, unknown>;
 }
 
+/** 현장 책임자(gate_lead) 변경분에만 싣는 같은 구역 지연 기기(offline-gate §7.2, F-05-10) */
+export interface ScannerFreshnessDeviceView {
+  deviceId: string;
+  deviceName: string;
+  gateZone: string;
+  lastChangesAt: string;
+  ageMs: number;
+  thresholdMs: number;
+}
+
 export interface ScannerChangesView {
   changes: ScannerChangeView[];
   lastSeq: number;
   hasMore: boolean;
   minAppVersion?: string;
+  /** gate_lead에게만 있다. 계산 실패는 빈 배열, 일반 스태프는 칸 없음 */
+  staleDevices?: ScannerFreshnessDeviceView[];
   versionVector: ScannerVersionVector;
 }
 

@@ -10,12 +10,15 @@
  * OpenAPI spec version: 1.0.0-draft
  */
 import type { ScannerChange } from './scannerChange';
+import type { ScannerFreshnessDevice } from './scannerFreshnessDevice';
 import type { ScannerVersionVector } from './scannerVersionVector';
 
 export interface ScannerChanges {
   changes?: ScannerChange[];
   lastSeq?: number;
   hasMore?: boolean;
+  /** 요청한 기기가 현장 책임자(gate_lead)일 때만 있다. 같은 회차·같은 배치 구역에서 입장 창 안에 2분 넘게 변경분을 받지 못한 ACTIVE 기기이며, 계산 실패는 빈 배열이다. 일반 스태프 응답에는 이 칸이 없다(추천 적용 2026-11-26, F-05-10) */
+  staleDevices?: ScannerFreshnessDevice[];
   versionVector?: ScannerVersionVector;
   /** ScannerPackage.minAppVersion과 같다(추천 적용 2026-10-29, ADR-0145 결정 4) */
   minAppVersion?: string;

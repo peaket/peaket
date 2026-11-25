@@ -2,9 +2,11 @@
 // ops-svc의 기존 ops_alert 경로로 SEV2를 남기고, 다시 동기화하면 푼다. 스캐너의 오프라인 판정은 막지 않는다.
 // 기준 시각은 마지막 변경분 수신 시각(scanner_device.last_changes_at)이다. 한 번도 받은 적 없는 기기는 경보하지 않는다.
 import type { Clock } from '@peaket/platform';
+import type { ScannerFreshnessDeviceView } from '../domain/scanner-gate.js';
 import type { ScannerDeviceStore, ScannerEventPolicy, ScannerEventPolicyProvider, ScannerFreshnessAlert, ScannerFreshnessAlertSink, ScannerFreshnessResolution, ScannerShiftStore } from '../domain/ports.js';
 
 export type { ScannerFreshnessAlert, ScannerFreshnessAlertSink, ScannerFreshnessResolution } from '../domain/ports.js';
+export type { ScannerFreshnessDeviceView } from '../domain/scanner-gate.js';
 
 /** 2분 [정본 offline-gate O-T20]. 경계(정확히 2분)는 아직 신선하다 */
 export const SCANNER_FRESHNESS_ALERT_MS = 2 * 60_000;
@@ -40,11 +42,84 @@ export function freshnessAlertKind(deviceId: string): string {
   return `scanner-freshness:${deviceId}`;
 }
 
+/**
+ * 현장 책임자 변경분에 실을 같은 구역 지연 기기(offline-gate §7.2).
+ * 같은 회차·같은 배치 구역·입장 창 안에서 2분을 넘긴 ACTIVE 기기만, 자기 기기는 뺀다.
+ * 구역을 모르면 아무것도 싣지 않는다.
+ */
+export function staleDevicesOf(i: {
+  placements: readonly { deviceId: string; gateZone: string }[];
+  devices: ReadonlyMap<string, { name: string; status: string; lastChangesAtMs?: number }>;
+  policy: { entryOpensAtMs?: number; entryClosesAtMs?: number } | undefined;
+  nowMs: number;
+  gateZone?: string;
+  selfDeviceId?: string;
+}): ScannerFreshnessDeviceView[] {
+  if (!i.gateZone) return [];
+  const policy = i.policy;
+  const inWindow =
+    policy !== undefined &&
+    policy.entryOpensAtMs !== undefined &&
+    i.nowMs >= policy.entryOpensAtMs &&
+    (policy.entryClosesAtMs === undefined || i.nowMs <= policy.entryClosesAtMs);
+  if (!inWindow) return [];
+  const out: ScannerFreshnessDeviceView[] = [];
+  for (const placement of i.placements) {
+    if (placement.gateZone !== i.gateZone) continue;
+    if (placement.deviceId === i.selfDeviceId) continue;
+    const device = i.devices.get(placement.deviceId);
+    if (!device || device.status !== 'ACTIVE' || device.lastChangesAtMs === undefined) continue;
+    const ageMs = i.nowMs - device.lastChangesAtMs;
+    if (ageMs <= SCANNER_FRESHNESS_ALERT_MS) continue;
+    out.push({
+      deviceId: placement.deviceId,
+      deviceName: device.name,
+      gateZone: placement.gateZone,
+      lastChangesAt: new Date(device.lastChangesAtMs).toISOString(),
+      ageMs,
+      thresholdMs: SCANNER_FRESHNESS_ALERT_MS,
+    });
+  }
+  return out;
+}
+
 export class ScannerFreshness {
   /** 지금 경보가 열려 있다고 아는 (eventId/deviceId) */
   readonly #open = new Set<string>();
 
   constructor(private readonly d: ScannerFreshnessDeps) {}
+
+  /** 현장 책임자 변경분에 실을 같은 구역 지연 기기. 계산 실패는 빈 목록(변경분 응답을 막지 않는다) */
+  async staleDevices(i: { eventId: string; gateZone?: string; selfDeviceId?: string; nowMs: number }): Promise<ScannerFreshnessDeviceView[]> {
+    try {
+      const placements = await this.d.shifts.placementsOf(i.eventId);
+      let policy: ScannerEventPolicy | undefined;
+      try {
+        policy = await this.d.policy?.get(i.eventId);
+      } catch {
+        policy = undefined;
+      }
+      const devices = new Map<string, { name: string; status: string; lastChangesAtMs?: number }>();
+      for (const placement of placements) {
+        try {
+          const device = await this.d.devices.findById(placement.deviceId);
+          if (device) devices.set(placement.deviceId, { name: device.name, status: device.status, ...(device.lastChangesAtMs !== undefined ? { lastChangesAtMs: device.lastChangesAtMs } : {}) });
+        } catch {
+          // 한 기기를 읽지 못해도 나머지 목록은 만든다
+        }
+      }
+      return staleDevicesOf({
+        placements,
+        devices,
+        policy,
+        nowMs: i.nowMs,
+        ...(i.gateZone !== undefined ? { gateZone: i.gateZone } : {}),
+        ...(i.selfDeviceId !== undefined ? { selfDeviceId: i.selfDeviceId } : {}),
+      });
+    } catch {
+      return [];
+    }
+  }
 
   async run(): Promise<ScannerFreshnessReport> {
     const now = this.d.clock.now();

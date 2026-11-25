@@ -69,6 +69,8 @@ export interface ScannerWiring {
   entryClose?: EntryCloseStore;
   /** 큐 비움 보고 결과 지표(ticket_scanner_queue_reports_total{result}) */
   onQueueReport?: (result: 'empty' | 'pending' | 'no_placement') => void;
+  /** 현장 책임자 변경분의 같은 구역 지연 기기(O-T20). 없으면 gate_lead에게 빈 목록 */
+  freshness?: { staleDevices(i: { eventId: string; gateZone?: string; selfDeviceId?: string; nowMs: number }): Promise<import('./domain/scanner-gate.js').ScannerFreshnessDeviceView[]> };
 }
 
 @Module({})
@@ -125,6 +127,7 @@ export class ScannerModule {
             ...(o.onPolicyChanged ? { onPolicyChanged: o.onPolicyChanged } : {}),
             ...(o.onQueueReport ? { onQueueReport: o.onQueueReport } : {}),
             ...(o.entryClose ? { entryClose: o.entryClose } : {}),
+            ...(o.freshness ? { freshness: o.freshness } : {}),
           }),
         inject: [SCANNER_GATE_STORE, CLOCK, SCANNER_DEVICE_STORE],
       },

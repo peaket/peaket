@@ -5,7 +5,7 @@
 // - 판정: runScan(판정→deviceSeq→큐→입장 상태→저장) 뒤 uploader.queued().
 // - 업로드: online·visibilitychange·[지금 동기화]는 바로, 로그아웃은 큐를 10초까지 올린 뒤 토큰을 지운다.
 import { liveRequested, SCANNER_API_ORIGIN } from '../api/config';
-import { ScannerApi, ScannerApiError, type GateFlagView, type ScannerShiftResponse } from '../api/client';
+import { ScannerApi, ScannerApiError, type GateFlagView, type ScannerShiftResponse, type ScannerStaleDevice } from '../api/client';
 import { generateDpopKey } from '../api/dpop';
 import { clearStaffToken, loadDeviceKey, loadStaffSession, loadStaffToken, saveDeviceKey } from '../api/key-store';
 import { reloginRequired, serverClockOffsetMs } from '../api/live';
@@ -18,6 +18,12 @@ import { openScanQueue, type ScanQueue } from '../storage/scan-queue';
 import { logoutAfterFlush, ScanUploader, type UploadState } from '../sync/uploader';
 import { navigate } from './router';
 import { freshnessOf, type Freshness, type LiveSetupState, type LiveSyncState } from '../api/live';
+import { appVersionGate, packageRefetchAfterUpdate } from '../sw/update-gate';
+import { applyWaitingUpdate, getServiceWorkerRegistration } from '../sw/register';
+import { BackgroundSyncGuard } from '../sync/background-sync';
+
+declare const __APP_VERSION__: string;
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.4.0';
 
 export interface LiveScanVerdict {
   outcome: JudgeOutcome;
@@ -53,12 +59,28 @@ export interface LiveView {
   verdict?: LiveScanVerdict;
   flags: GateFlagView[];
   sync?: LiveSyncView;
+  appVersion: string;
+  minAppVersion?: string;
+  updateRequired: boolean;
+  /** 현장 책임자(gate_lead)에게만 서버가 주는 같은 구역 지연 기기 */
+  staleDevices: ScannerStaleDevice[];
 }
 
 const TOKEN_MESSAGE = '스태프 로그인이 필요합니다. 기기 승인 로그인(SCR-036)을 먼저 마쳐 주세요.';
 
 class LiveRuntime {
-  #view: LiveView = { mode: 'preview', setupState: '준비 중', queue: 0, uploadFailed: false, needsResync: false, ready: false, flags: [] };
+  #view: LiveView = {
+    mode: 'preview',
+    setupState: '준비 중',
+    queue: 0,
+    uploadFailed: false,
+    needsResync: false,
+    ready: false,
+    flags: [],
+    appVersion: APP_VERSION,
+    updateRequired: false,
+    staleDevices: [],
+  };
   #listeners = new Set<() => void>();
   #started = false;
   #starting: Promise<void> | undefined;
@@ -79,6 +101,9 @@ class LiveRuntime {
   #lastChangesAtMs: number | undefined;
   #needsResync = false;
   #flags: GateFlagView[] = [];
+  #minAppVersion: string | undefined;
+  #staleDevices: ScannerStaleDevice[] = [];
+  #syncGuard: BackgroundSyncGuard | undefined;
   #bound = false;
   /** 상태 적용(스캔·변경분·전체 목록)을 한 줄로 세운다. 서로의 로컬 입장 상태·번호를 덮지 않게 한다 */
   #stateChain: Promise<unknown> = Promise.resolve();
@@ -148,6 +173,7 @@ class LiveRuntime {
       this.#measure(first.serverTime);
       const pkg = await this.#api.package(first.eventId);
       this.#measure(pkg.serverTime);
+      this.#minAppVersion = pkg.minAppVersion;
       // 목록 뒤 근무 준비를 한 번 더 받아 그 배치(판)를 쓴다(offline-gate §6.3, RV-17)
       const second = await this.#api.shift().catch(() => undefined);
       if (second) {
@@ -203,6 +229,8 @@ class LiveRuntime {
       clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
       onState: (s) => {
         this.#uploadState = s;
+        if (s.failed && s.pending > 0) void this.#syncGuard?.onFailure(s);
+        else this.#syncGuard?.reset();
         this.#publish();
       },
       onResync: () => {
@@ -216,6 +244,15 @@ class LiveRuntime {
           this.#resetSession();
           navigate('/login?live=1');
         });
+      },
+    });
+    this.#syncGuard = new BackgroundSyncGuard({
+      register: async (tag) => {
+        if (typeof navigator === 'undefined' || !navigator.serviceWorker) throw new Error('서비스 워커가 없다');
+        const registration = await navigator.serviceWorker.ready;
+        const sync = (registration as unknown as { sync?: { register(tag: string): Promise<void> } }).sync;
+        if (!sync) throw new Error('Background Sync를 쓸 수 없다');
+        await sync.register(tag);
       },
     });
     this.#bindBrowserEvents();
@@ -277,10 +314,24 @@ class LiveRuntime {
     this.#lastChangesAtMs = undefined;
     this.#needsResync = false;
     this.#flags = [];
+    this.#minAppVersion = undefined;
+    this.#staleDevices = [];
+    this.#syncGuard = undefined;
     this.#sameQr.clear();
     const pending = this.#uploadState.pending;
     this.#uploadState = { pending, failed: false };
-    this.#view = { mode: 'preview', setupState: '준비 중', queue: pending, uploadFailed: false, needsResync: false, ready: false, flags: [] };
+    this.#view = {
+      mode: 'preview',
+      setupState: '준비 중',
+      queue: pending,
+      uploadFailed: false,
+      needsResync: false,
+      ready: false,
+      flags: [],
+      appVersion: APP_VERSION,
+      updateRequired: false,
+      staleDevices: [],
+    };
     this.#publish();
   }
 
@@ -309,6 +360,10 @@ class LiveRuntime {
       setupState: this.#setupState(),
       ...(sync ? { sync } : {}),
       flags: this.#flags,
+      appVersion: APP_VERSION,
+      ...(this.#minAppVersion !== undefined ? { minAppVersion: this.#minAppVersion } : {}),
+      updateRequired: this.#updateRequired(),
+      staleDevices: this.#staleDevices,
     };
     for (const fn of this.#listeners) fn();
   }
@@ -326,7 +381,11 @@ class LiveRuntime {
 
   #ready(): boolean {
     const s = this.#state;
-    return s !== undefined && this.#clockOffsetMs !== undefined && s.placement.gateZone !== '';
+    return s !== undefined && this.#clockOffsetMs !== undefined && s.placement.gateZone !== '' && !this.#updateRequired();
+  }
+
+  #updateRequired(): boolean {
+    return !appVersionGate({ appVersion: APP_VERSION, ...(this.#minAppVersion !== undefined ? { minAppVersion: this.#minAppVersion } : {}) }).allowed;
   }
 
   #setupState(): LiveSetupState {
@@ -334,6 +393,7 @@ class LiveRuntime {
     const shift = this.#shift;
     if (!shift) return '준비 중';
     if (shift.device.status !== 'ACTIVE' || !shift.device.enrolled) return '미등록·폐기 기기';
+    if (this.#updateRequired()) return '앱 판이 낮음';
     if (this.#ready()) return '준비 완료';
     return '준비 중';
   }
@@ -356,6 +416,7 @@ class LiveRuntime {
       ...(this.#lastChangesAtMs !== undefined ? { lastSyncAtMs: this.#lastChangesAtMs } : {}),
       freshness,
       state: syncState,
+      ...(this.#minAppVersion !== undefined ? { minAppVersion: this.#minAppVersion } : {}),
     };
   }
 
@@ -400,6 +461,8 @@ class LiveRuntime {
           const latest = this.#state;
           if (!latest) return;
           this.#measure(pkg.serverTime);
+          this.#minAppVersion = pkg.minAppVersion;
+          this.#staleDevices = [];
           const next = packageStateOf(pkg, latest.placement, latest.entries);
           this.#state = next;
           await store.save(next);
@@ -415,6 +478,7 @@ class LiveRuntime {
       }
       const page = await api.changes(snapshot.eventId, snapshot.lastSeq);
       if (epoch !== this.#epoch) return;
+      this.#staleDevices = page.staleDevices ?? [];
       const terminated = page.changes.find((c) => c.kind === 'SESSION_TERMINATED' && c.payload.deviceId === this.#shift?.device.deviceId);
       if (terminated) {
         await this.#relogin('이 기기의 스캐너 세션이 끝났습니다. 기기 승인 로그인(SCR-036)을 다시 마쳐 주세요.');
@@ -442,7 +506,7 @@ class LiveRuntime {
   }
 
   /** 판정 한 번. 준비가 안 됐으면 아무것도 하지 않는다. 같은 QR은 3초 안에 버린다 */
-  async scan(raw: string): Promise<void> {
+  async scan(raw: string, judge?: (i: { raw: string; nowMs: number; clockOffsetMs: number }) => Promise<JudgeOutcome>): Promise<void> {
     const now = Date.now();
     const last = this.#sameQr.get(raw);
     if (last !== undefined && now - last < 3_000) return;
@@ -464,6 +528,7 @@ class LiveRuntime {
           nowMs: now,
           clockOffsetMs: this.#clockOffsetMs,
           ...(sessionId !== undefined ? { scannerSessionId: sessionId } : { scannerSessionId: '' }),
+          ...(judge ? { judge } : {}),
         });
         if (epoch !== this.#epoch) return;
         this.#state = r.state;
@@ -516,6 +581,19 @@ class LiveRuntime {
     this.#resetSession();
     navigate('/login?live=1');
     return remaining;
+  }
+
+  /** 근무 준비에서만 대기 중인 새 판을 적용한다. controllerchange 뒤 목록을 다시 받는다(C1-15) */
+  applyUpdate(): boolean {
+    const registration = getServiceWorkerRegistration();
+    if (!registration) return false;
+    return applyWaitingUpdate({
+      registration,
+      phase: 'prep',
+      onApplied: () => {
+        if (packageRefetchAfterUpdate({ applied: true })) this.restart();
+      },
+    });
   }
 
   /** 근무 준비를 다시 뜬다(배치 다시 확인·목록 다시 받기). 화면 구독은 그대로 둔다 */

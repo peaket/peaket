@@ -758,6 +758,7 @@ export * from './scannerChange.zod.js';
 export * from './scannerChanges.zod.js';
 export * from './scannerDevice.zod.js';
 export * from './scannerDeviceCreated.zod.js';
+export * from './scannerFreshnessDevice.zod.js';
 export * from './scannerPackage.zod.js';
 export * from './scannerPackageTicket.zod.js';
 export * from './scannerPlacement.zod.js';

@@ -13,6 +13,7 @@ const page = (name: string) => fileURLToPath(new URL(name, import.meta.url));
 
 export default defineConfig({
   appType: "spa",
+  define: { __APP_VERSION__: JSON.stringify(process.env.VITE_SCANNER_APP_VERSION ?? "1.4.0") },
   plugins: [react(), tailwindcss()],
   resolve: {
     conditions: ["seed-layered", ...defaultClientConditions],
@@ -20,7 +21,14 @@ export default defineConfig({
   server: { port: 3003, strictPort: true },
   preview: { port: 3003, strictPort: true },
   // 링크 없는 숨김 소스 맵(docs/frontend.md §5.18, FE-T21, BAS-220)
+  // 서비스 워커는 /sw.js로 따로 묶는다(ES 모듈 등록). 앱 셸 캐시는 이 워커가 맡는다.
   build: seedCssPoc
     ? { sourcemap: "hidden", rolldownOptions: { input: { "poc-seed-css": page("./poc-seed-css.html") } } }
-    : { sourcemap: "hidden" },
+    : {
+        sourcemap: "hidden",
+        rolldownOptions: {
+          input: { index: page("./index.html"), sw: page("./src/sw/service-worker.ts") },
+          output: { entryFileNames: (chunk) => (chunk.name === "sw" ? "sw.js" : "assets/[name]-[hash].js") },
+        },
+      },
 });

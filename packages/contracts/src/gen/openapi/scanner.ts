@@ -215,6 +215,14 @@ export const GetScannerEventChangesResponse = zod.object({
 })).optional(),
   "lastSeq": zod.int().optional(),
   "hasMore": zod.boolean().optional(),
+  "staleDevices": zod.array(zod.object({
+  "deviceId": zod.string(),
+  "deviceName": zod.string(),
+  "gateZone": zod.string(),
+  "lastChangesAt": zod.iso.datetime({"offset":true}),
+  "ageMs": zod.int(),
+  "thresholdMs": zod.int()
+}).describe('현장 책임자(gate_lead) 변경분에만 싣는 같은 구역 지연 기기(offline-gate §7.2, F-05-10). 기기 이름·구역·시각·경과·기준만 있고 관람객 개인정보는 없다')).optional().describe('요청한 기기가 현장 책임자(gate_lead)일 때만 있다. 같은 회차·같은 배치 구역에서 입장 창 안에 2분 넘게 변경분을 받지 못한 ACTIVE 기기이며, 계산 실패는 빈 배열이다. 일반 스태프 응답에는 이 칸이 없다(추천 적용 2026-11-26, F-05-10)'),
   "versionVector": zod.object({
   "eventId": zod.string(),
   "seq": zod.int(),

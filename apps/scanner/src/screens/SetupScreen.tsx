@@ -256,18 +256,18 @@ export function SetupScreen() {
     <div className="banner banner-warning" role="alert">
       <i className="ic ic-alert" aria-hidden="true" />
       <div className="banner-body">
-        <span className="banner-title">이 앱 판으로는 근무를 시작할 수 없습니다. 새 버전을 적용해 주세요</span>이 기기 앱 {prep.appVersion} · 근무에
-        필요한 판 {prep.minAppVersion} 이상
+        <span className="banner-title">이 앱 판으로는 근무를 시작할 수 없습니다. 새 버전을 적용해 주세요</span>이 기기 앱 {live.appVersion} · 근무에
+        필요한 판 {live.minAppVersion ?? "—"} 이상
         {t ? null : (
           <div style={{ marginTop: 6 }}>
-            <button className="btn btn-primary btn-sm" type="button" style={{ minHeight: 44 }}>
+            <button className="btn btn-primary btn-sm" type="button" style={{ minHeight: 44 }} onClick={() => live.applyUpdate()}>
               <i className="ic ic-download" aria-hidden="true" />새 버전 적용
             </button>
           </div>
         )}
       </div>
       {t ? (
-        <button className="btn btn-primary btn-lg" type="button" style={{ alignSelf: "center" }}>
+        <button className="btn btn-primary btn-lg" type="button" style={{ alignSelf: "center" }} onClick={() => live.applyUpdate()}>
           <i className="ic ic-download" aria-hidden="true" />새 버전 적용
         </button>
       ) : null}

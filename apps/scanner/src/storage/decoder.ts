@@ -32,3 +32,67 @@ export function createBarcodeDecoder(scope: { BarcodeDetector?: BarcodeDetectorC
     },
   };
 }
+
+type ZxingReadResult = { text?: string; isValid?: boolean };
+
+/** 프레임을 ImageData로 바꾼다(Worker의 OffscreenCanvas). 바꿀 수 없으면 undefined */
+async function imageDataOf(source: unknown): Promise<ImageData | undefined> {
+  if (typeof ImageData !== 'undefined' && source instanceof ImageData) return source;
+  const s = source as { width?: number; height?: number; videoWidth?: number; videoHeight?: number; naturalWidth?: number; naturalHeight?: number };
+  const width = s.videoWidth ?? s.naturalWidth ?? s.width;
+  const height = s.videoHeight ?? s.naturalHeight ?? s.height;
+  if (!width || !height || typeof OffscreenCanvas === 'undefined') return undefined;
+  try {
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return undefined;
+    ctx.drawImage(source as CanvasImageSource, 0, 0);
+    return ctx.getImageData(0, 0, width, height);
+  } catch {
+    return undefined;
+  }
+}
+
+/** BarcodeDetector가 없는 Worker의 zxing-wasm 대체. wasm을 읽지 못하면 undefined(카메라 고장) */
+export async function createZxingDecoder(): Promise<BarcodeDecoder | undefined> {
+  try {
+    const [{ readBarcodes, prepareZXingModule }, wasm] = await Promise.all([
+      import('zxing-wasm/reader') as Promise<{
+        readBarcodes(input: ImageData, options?: Record<string, unknown>): Promise<ZxingReadResult[]>;
+        prepareZXingModule(o: { overrides: { locateFile(path: string, prefix: string): string } }): void;
+      }>,
+      import('zxing-wasm/reader/zxing_reader.wasm?url') as Promise<{ default: string }>,
+    ]);
+    // 오프라인 스캐너이므로 CDN이 아니라 빌드가 함께 낸 wasm 파일을 읽는다.
+    prepareZXingModule({
+      overrides: {
+        locateFile: (path, prefix) => (path.endsWith('.wasm') ? wasm.default : prefix + path),
+      },
+    });
+    return {
+      async decode(source) {
+        const image = await imageDataOf(source);
+        if (!image) return undefined;
+        const results = await readBarcodes(image, { formats: ['QRCode'], tryHarder: true });
+        return results.find((r) => r.isValid !== false && typeof r.text === 'string' && r.text.length > 0)?.text;
+      },
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** 앞의 디코더가 있으면 그것을, 없으면 뒤의 대체를 쓴다. 둘 다 없거나 대체가 실패하면 undefined */
+export async function createDecoderChain(o: {
+  barcode?: () => BarcodeDecoder | undefined;
+  zxing?: () => Promise<BarcodeDecoder | undefined>;
+}): Promise<BarcodeDecoder | undefined> {
+  const native = o.barcode?.();
+  if (native) return native;
+  if (!o.zxing) return undefined;
+  try {
+    return await o.zxing();
+  } catch {
+    return undefined;
+  }
+}

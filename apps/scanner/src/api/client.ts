@@ -54,12 +54,23 @@ export interface ScannerPackageResponse {
   minAppVersion?: string;
 }
 
+export interface ScannerStaleDevice {
+  deviceId: string;
+  deviceName: string;
+  gateZone: string;
+  lastChangesAt: string;
+  ageMs: number;
+  thresholdMs: number;
+}
+
 export interface ScannerChangesResponse {
   changes: { seq: number; kind: string; payload: Record<string, unknown> }[];
   lastSeq: number;
   hasMore: boolean;
   versionVector: ScannerVersionVector;
   minAppVersion?: string;
+  /** gate_lead에게만 있는 같은 구역 지연 기기(offline-gate §7.2) */
+  staleDevices?: ScannerStaleDevice[];
 }
 
 export interface GateFlagView {
