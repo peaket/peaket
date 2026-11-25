@@ -6,7 +6,7 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { createService, fakeClock } from '@peaket/platform';
-import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { AdminAccountProblem } from '../src/modules/admin-accounts/index.js';
 import { MemoryAuditChain } from '../src/modules/audit/index.js';
@@ -24,6 +24,7 @@ import {
   type TransferLocks,
 } from '../src/modules/investigations/index.js';
 import type { SaleScheduleSource } from '../src/modules/readiness/index.js';
+import { WeekendHolidayCalendar, addBusinessDays } from '../src/modules/cases/index.js';
 import { reauthKit, FakeAdminIdentity } from './admin-support.js';
 import { FakeIdentity, quiet } from './support.js';
 
@@ -87,8 +88,22 @@ class FakeAccess implements InvestigationAccessLog {
 
 class FakeAdmin extends FakeAdminIdentity {
   readonly revoked = new Map<string, Array<{ kind: string; revokedAtMs: number }>>();
+  readonly counts = new Map<string, number>();
+  failOnCall: { method: 'designations' | 'recentlyRevoked'; at: number } | undefined;
   async recentlyRevoked(adminAccountId: string) {
+    this.#count('recentlyRevoked');
     return this.revoked.get(adminAccountId) ?? [];
+  }
+  async designations(adminAccountId: string) {
+    this.#count('designations');
+    return super.designations(adminAccountId);
+  }
+  #count(method: 'designations' | 'recentlyRevoked'): void {
+    const n = (this.counts.get(method) ?? 0) + 1;
+    this.counts.set(method, n);
+    if (this.failOnCall?.method === method && n === this.failOnCall.at) {
+      throw new AdminAccountProblem('admin-account-unavailable', 503, 'identity down');
+    }
   }
 }
 
@@ -114,14 +129,31 @@ const ticketDirectory = {
 const cancelCalls: any[] = [];
 const cancels = new Map<string, any[]>();
 const cancellationClient = {
+  nextEmptyResults: false,
+  nextThrow: false,
+  nextOmitLast: false,
   async cancel(i: any) {
     cancelCalls.push(i);
+    if (this.nextThrow) {
+      this.nextThrow = false;
+      throw new Error('purchase-svc CancelFraudTickets 실패');
+    }
     const key = i.approvalId;
     // 시험이 cancels에 심은 첫 결과는 그대로 돌려준다. 같은 승인 ID의 재시도에서만 FAILED를 ACCEPTED로 바꾼다.
     const attempt = cancelCalls.filter((c) => c.approvalId === key).length;
     if (cancels.has(key)) {
       const previous = cancels.get(key)!;
-      if (attempt === 1) return previous;
+      if (attempt === 1) {
+        if (this.nextEmptyResults) {
+          this.nextEmptyResults = false;
+          return [];
+        }
+        if (this.nextOmitLast) {
+          this.nextOmitLast = false;
+          return previous.slice(0, -1);
+        }
+        return previous;
+      }
       const out = previous.map((p: any) =>
         p.outcome === 'FAILED' ? { ...p, outcome: 'ACCEPTED', cancellationId: randomUUID(), refundAmount: 100_000 } : p,
       );
@@ -135,6 +167,14 @@ const cancellationClient = {
       refundAmount: 100_000,
     }));
     cancels.set(key, out);
+    if (this.nextEmptyResults) {
+      this.nextEmptyResults = false;
+      return [];
+    }
+    if (this.nextOmitLast) {
+      this.nextOmitLast = false;
+      return out.slice(0, -1);
+    }
     return out;
   },
 };
@@ -248,7 +288,7 @@ const investigationDeps: any = {
   fraudPriority: objections,
   fraudApproverIdentity: admin,
   reauth: kit.verifier,
-  calendar: { isBusinessDay: () => true },
+  calendar: new WeekendHolidayCalendar(),
 };
 
 let svc: Awaited<ReturnType<typeof createService>>;
@@ -1182,3 +1222,252 @@ describe('F-04-13 표 취소·환급·마감', () => {
     clock.advance(NOW - clock.now());
   });
 });
+
+describe('F-04-13 구현 리뷰 반영', () => {
+  beforeEach(() => {
+    clock.advance(NOW - clock.now());
+    cancellationClient.nextEmptyResults = false;
+    cancellationClient.nextThrow = false;
+    cancellationClient.nextOmitLast = false;
+    admin.failOnCall = undefined;
+  });
+
+  test('IR-06 반려·철회는 상태·승인 자격·요청자를 확인한다', async () => {
+    const who = investigator();
+    const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(301), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    const created = await actionRequest(c.caseId, who, { fraudAction: 'RESTRICT', accountIds: [A(301)], reason: '제한' });
+    const approvalId = String(json(created).approvalId);
+    const otherInvestigator = investigator();
+    expect((await reject(approvalId, otherInvestigator)).statusCode).toBe(403);
+    expect((await reject(approvalId, who)).statusCode).toBe(403);
+    const operator = identity.ops('operator');
+    admin.seed({ adminAccountId: operator['x-user-id']!, role: 'operator' });
+    expect((await withdraw(approvalId, operator)).statusCode).toBe(403);
+    expect((await withdraw(approvalId, commander())).statusCode).toBe(403);
+    expect((await withdraw(approvalId, who)).statusCode).toBe(200);
+    const expired = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(302), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    const lateCreated = await actionRequest(expired.caseId, who, { fraudAction: 'RESTRICT', accountIds: [A(302)], reason: '제한' });
+    clock.advance(10 * DAY);
+    await tick('expireDue');
+    expect((await reject(String(json(lateCreated).approvalId), commander())).statusCode).toBe(409);
+    clock.advance(NOW - clock.now());
+  });
+
+  test('IR-08 이용 제한 승인 기한은 5영업일이고 지난 뒤 승인·반려·철회는 409다', async () => {
+    clock.advance(NOW - clock.now());
+    const who = investigator();
+    const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(303), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    const created = await actionRequest(c.caseId, who, { fraudAction: 'RESTRICT', accountIds: [A(303)], reason: '제한', restrictionEndsAt: iso(NOW + 30 * DAY) });
+    expect(created.statusCode, created.payload).toBe(201);
+    expect(json(created).dueAt).toBe(iso(addBusinessDays(new WeekendHolidayCalendar(), NOW, 5)));
+    const approvalId = String(json(created).approvalId);
+    await getApproval(approvalId, commander());
+    clock.advance(7 * DAY);
+    expect((await approve(approvalId, commander(), { reason: '늦은 승인' })).statusCode).toBe(409);
+    expect((await reject(approvalId, commander())).statusCode).toBe(409);
+    expect((await withdraw(approvalId, who)).statusCode).toBe(409);
+    clock.advance(NOW - clock.now());
+  });
+
+  test('IR-09 반려는 Done이 있어도 요청 대상 계정만 잠금을 푼다', async () => {
+    const prior = randomUUID();
+    const c = await seedCase({
+      status: 'INVESTIGATING',
+      approvalId: prior,
+      members: [memberOf(A(310), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR }), memberOf(A(311), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })],
+      events: [
+        { seq: 1, kind: 'CREATED', actorId: id(0x900), note: null, detail: null, occurredAtMs: NOW - DAY },
+        { seq: 2, kind: 'ACTION_EXECUTED', actorId: id(0x900), note: null, detail: { action: 'CANCEL_TICKETS', results: [{ ticketId: T(310), outcome: 'ACCEPTED' }] }, occurredAtMs: NOW - 2 * HOUR },
+      ],
+    });
+    const created = await actionRequest(c.caseId, investigator(), { fraudAction: 'RESTRICT', accountIds: [A(310)], reason: '추가 제한', restrictionEndsAt: iso(NOW + 30 * DAY) });
+    expect(created.statusCode, created.payload).toBe(201);
+    const before = locks.releases.length;
+    expect((await reject(String(json(created).approvalId), commander())).statusCode).toBe(200);
+    const released = locks.releases.slice(before);
+    expect(released.some((r) => r.accountIds.includes(A(310)))).toBe(true);
+    expect(released.some((r) => r.accountIds.includes(A(311)))).toBe(false);
+  });
+
+  test('IR-10 표 취소 대상 경계와 취소 결과 누락·호출 오류는 422·FAILED다', async () => {
+    const who = investigator();
+    const emptyListCase = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(312), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    expect((await actionRequest(emptyListCase.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(312)], ticketIds: [], reason: '봇' })).statusCode).toBe(422);
+    expect((await actionRequest(emptyListCase.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(312)], reason: '봇' })).statusCode).toBe(422);
+
+    const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(313), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    seedTicket({ ticketId: T(313), payerAccountId: A(313) });
+    seedTicket({ ticketId: T(314), payerAccountId: A(314) });
+    expect((await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(313)], ticketIds: [T(313), T(314)], reason: '봇' })).statusCode).toBe(422);
+
+    const make = async (account: number, ticket: number, n: number) => {
+      const cs = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(account), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+      if (n > 0) seedTicket({ ticketId: T(ticket), payerAccountId: A(account) });
+      if (n > 1) seedTicket({ ticketId: T(ticket + 1), payerAccountId: A(account) });
+      const created = await actionRequest(cs.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(account)], reason: '봇' });
+      expect(created.statusCode, created.payload).toBe(201);
+      await getApproval(String(json(created).approvalId), commander());
+      return { caseId: cs.caseId, approvalId: String(json(created).approvalId) };
+    };
+    const empty = await make(315, 315, 1);
+    cancellationClient.nextEmptyResults = true;
+    expect(json(await approve(empty.approvalId, commander(), { reason: '근거' })).status).toBe('FAILED');
+    const thrown = await make(316, 316, 1);
+    cancellationClient.nextThrow = true;
+    expect(json(await approve(thrown.approvalId, commander(), { reason: '근거' })).status).toBe('FAILED');
+    const partial = await make(317, 317, 2);
+    cancellationClient.nextOmitLast = true;
+    expect(json(await approve(partial.approvalId, commander(), { reason: '근거' })).status).toBe('FAILED');
+  });
+
+  test('IR-12 인정 계정의 취소 표만 우선 구매로 열고 혼합 판정은 ACTIONED로 닫는다', async () => {
+    const c = await seedCase({
+      status: 'OBJECTED',
+      members: [
+        memberOf(A(320), { appealResult: 'REJECTED', actionNotifiedAtMs: NOW - 10 * DAY, objectionResult: 'SUBMITTED', objectionReceivedAtMs: NOW - DAY }),
+        memberOf(A(321), { appealResult: 'REJECTED', actionNotifiedAtMs: NOW - 10 * DAY, objectionResult: 'SUBMITTED', objectionReceivedAtMs: NOW - DAY }),
+        memberOf(A(322), { appealResult: 'REJECTED', actionNotifiedAtMs: NOW - 10 * DAY, objectionResult: 'NONE' }),
+      ],
+      events: [
+        { seq: 1, kind: 'CREATED', actorId: id(0x900), note: null, detail: null, occurredAtMs: NOW - DAY },
+        { seq: 2, kind: 'ACTION_EXECUTED', actorId: id(0x900), note: null, detail: { action: 'CANCEL_TICKETS', results: [{ ticketId: T(320), outcome: 'ACCEPTED' }, { ticketId: T(321), outcome: 'ACCEPTED' }] }, occurredAtMs: NOW - 2 * DAY },
+      ],
+    });
+    priorityCalls.length = 0;
+    const patch = await send('PATCH', `/v1/ops/fraud-cases/${c.caseId}`, investigator(), {
+      ifMatch: '"1"',
+      body: { objectionDecisions: [{ accountId: A(320), decision: 'ACCEPTED', reason: '정상' }, { accountId: A(321), decision: 'REJECTED', reason: '근거' }] },
+    });
+    expect(patch.statusCode, patch.payload).toBe(200);
+    expect(json(patch).status).toBe('ACTIONED');
+    expect(priorityCalls.filter((p) => p.decision === 'ACCEPTED').every((p) => p.accountId === A(320))).toBe(true);
+    expect(priorityCalls.flatMap((p) => p.cancelledTicketIds)).toEqual([T(320)]);
+
+    const restricted = await seedCase({
+      status: 'OBJECTED',
+      members: [
+        memberOf(A(323), { appealResult: 'REJECTED', actionNotifiedAtMs: NOW - 10 * DAY, objectionResult: 'SUBMITTED', objectionReceivedAtMs: NOW - DAY }),
+        memberOf(A(324), { appealResult: 'REJECTED', actionNotifiedAtMs: NOW - 10 * DAY, objectionResult: 'NONE' }),
+      ],
+      events: [{ seq: 1, kind: 'CREATED', actorId: id(0x900), note: null, detail: null, occurredAtMs: NOW - DAY }],
+    });
+    restrictionState.set(A(323), { caseId: restricted.caseId, accountId: A(323), restrictionId: randomUUID(), untilMs: NOW + 30 * DAY, version: 1, state: 'ACTIVE' });
+    const patch2 = await send('PATCH', `/v1/ops/fraud-cases/${restricted.caseId}`, investigator(), {
+      ifMatch: '"1"',
+      body: { objectionDecisions: [{ accountId: A(323), decision: 'ACCEPTED', reason: '정상' }] },
+    });
+    expect(patch2.statusCode, patch2.payload).toBe(200);
+    const liftApproval = String(json(patch2).approvalId);
+    await getApproval(liftApproval, commander());
+    expect((await approve(liftApproval, commander(), { reason: '이의 인정' })).statusCode).toBe(200);
+    expect(json(await getCase(restricted.caseId, investigator())).status).toBe('ACTIONED');
+  });
+
+  test('IR-14 받은 사람에게 취소 결과 CANCELED를 알린다', async () => {
+    const who = investigator();
+    const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(330), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    seedTicket({ ticketId: T(330), payerAccountId: A(330), holderAccountId: H(4) });
+    const created = await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(330)], ticketIds: [T(330)], reason: '봇' });
+    const approvalId = String(json(created).approvalId);
+    cancels.set(approvalId, [{ ticketId: T(330), outcome: 'ACCEPTED', cancellationId: randomUUID(), refundAmount: 100_000 }]);
+    await getApproval(approvalId, commander());
+    expect((await approve(approvalId, commander(), { reason: '근거' })).statusCode).toBe(200);
+    const notice = noticeCalls.find((n) => n.kind === 'holderResult' && n.accountId === H(4));
+    expect(notice).toMatchObject({ result: 'CANCELED' });
+  });
+
+  test('IR-17 사건 요약은 묶음의 실제 값과 소명 결과를 싣는다', async () => {
+    const clusterId = newId();
+    await store.putClusters(EVENT, 9, [{
+      clusterId,
+      eventId: EVENT,
+      generation: 9,
+      scoreBand: 'LOW',
+      accountCount: 1,
+      purchaseCount: 3,
+      limitPerPerson: 2,
+      sharedAttributes: ['PAYMENT_METHOD'],
+      signals: ['LINK_GRAPH'],
+      snapshotVersion: 1,
+      createdAtMs: NOW - DAY,
+      members: [memberOf(A(340))],
+    } as any], 'v9');
+    const who = investigator();
+    const c = await seedCase({
+      clusterId,
+      status: 'APPEAL_PENDING',
+      appealDueAtMs: NOW - HOUR,
+      members: [memberOf(A(340), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })],
+    });
+    const created = await actionRequest(c.caseId, who, { fraudAction: 'RESTRICT', accountIds: [A(340)], reason: '제한' });
+    const view = await getApproval(String(json(created).approvalId), commander());
+    expect(json(view).fraudCaseSummary).toMatchObject({ limitPerPerson: 2, scoreBand: 'LOW', sharedAttributes: ['PAYMENT_METHOD'], appealOutcome: 'REJECTED' });
+    const detail = await getCase(c.caseId, who);
+    expect(json(detail).appealOutcome).toBe('REJECTED');
+  });
+
+  test('IR-18 HOLDER 진술은 사건의 보유 표·계정·시각을 확인한다', async () => {
+    const c = await seedCase({ status: 'ACTIONED', members: [memberOf(A(350), { appealResult: 'REJECTED', actionNotifiedAtMs: NOW - 10 * DAY })] });
+    seedTicket({ ticketId: T(350), payerAccountId: A(350), holderAccountId: H(5) });
+    const body = (accountId: string, submittedAt = iso(NOW)) => ({ appealId: randomUUID(), accountId, party: 'HOLDER', submittedAt });
+    expect((await send('POST', `/internal/v1/fraud-cases/${c.caseId}/appeals`, {}, { body: body(H(5)) })).statusCode).toBe(200);
+    expect((await send('POST', `/internal/v1/fraud-cases/${c.caseId}/appeals`, {}, { body: body(H(6)) })).statusCode).toBe(409);
+    expect((await send('POST', `/internal/v1/fraud-cases/${c.caseId}/appeals`, {}, { body: body(H(5), 'not-a-date') })).statusCode).toBe(400);
+  });
+
+  test('IR-19 승인 직전 identity 조회 실패는 fail-open이 아니라 403이다', async () => {
+    const who = investigator();
+    const approver = commander();
+    const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(351), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    const created = await actionRequest(c.caseId, who, { fraudAction: 'RESTRICT', accountIds: [A(351)], reason: '제한' });
+    const approvalId = String(json(created).approvalId);
+    await getApproval(approvalId, approver);
+    admin.failOnCall = { method: 'designations', at: (admin.counts.get('designations') ?? 0) + 2 };
+    try {
+      expect((await approve(approvalId, approver, { reason: '근거' })).statusCode).toBe(403);
+    } finally {
+      admin.failOnCall = undefined;
+    }
+  });
+
+  test('IR-20 조치 본문의 날짜·경로 UUID를 계약으로 검증한다', async () => {
+    const who = investigator();
+    const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(352), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    expect((await actionRequest(c.caseId, who, { fraudAction: 'RESTRICT', accountIds: [A(352)], reason: '제한', restrictionEndsAt: 'not-a-date' })).statusCode).toBe(400);
+    expect((await send('POST', '/v1/ops/fraud-cases/not-a-uuid/action-requests', who, { idem: randomUUID(), body: { fraudAction: 'RESTRICT', accountIds: [A(352)], reason: '제한' } })).statusCode).toBe(400);
+  });
+
+  test('IR-23 최대 기한에 잠금을 풀면 사건 기록과 알림을 남긴다', async () => {
+    const who = investigator();
+    const c = await seedCase({ status: 'ACTIONED', members: [memberOf(A(360), { appealResult: 'REJECTED', actionNotifiedAtMs: NOW - 10 * DAY, lockExpiresAtMs: NOW + DAY })] });
+    clock.advance(NOW + DAY - clock.now());
+    await tick('expireDue');
+    expect(appealCopies.some((x) => x.caseId === c.caseId && x.accountId === A(360) && x.lockActive === false)).toBe(true);
+    expect(json(await getCase(c.caseId, who)).events.some((e: any) => e.kind === 'LOCK_RELEASED' && e.detail?.releaseReason === 'MAX_DEADLINE')).toBe(true);
+    expect(noticeCalls.some((n) => n.kind === 'transferLockReleased' && n.caseId === c.caseId && n.accountId === A(360))).toBe(true);
+    clock.advance(NOW - clock.now());
+  });
+
+  test('IR-27 잠금이 없어도 HUMAN 정상 종료는 활성 계정에 라벨을 남긴다', async () => {
+    const c = await seedCase({ status: 'INVESTIGATING', members: [memberOf(A(370), { appealResult: 'REJECTED', lockExpiresAtMs: null })] });
+    const r = await clearance(c.caseId, investigator(), { reason: '정상', outcomeLabel: 'HUMAN' });
+    expect(r.statusCode, r.payload).toBe(200);
+    expect(labels.calls.some((l) => l.label === 'HUMAN' && l.accountIds.includes(A(370)))).toBe(true);
+  });
+
+  test('IR-28 모두 건너뛴 표 취소는 ACTIONED·BOT 라벨·조치 알림을 만들지 않는다', async () => {
+    const who = investigator();
+    const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(380), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    seedTicket({ ticketId: T(380), payerAccountId: A(380) });
+    const created = await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(380)], reason: '봇' });
+    const approvalId = String(json(created).approvalId);
+    cancels.set(approvalId, [{ ticketId: T(380), outcome: 'SKIPPED_ALREADY_ENDED' }]);
+    await getApproval(approvalId, commander());
+    expect((await approve(approvalId, commander(), { reason: '근거' })).statusCode).toBe(200);
+    const after = json(await getCase(c.caseId, who));
+    expect(after.status).not.toBe('ACTIONED');
+    expect(labels.calls.some((l) => l.label === 'BOT' && l.accountIds.includes(A(380)))).toBe(false);
+    expect(noticeCalls.some((n) => n.kind === 'actionNotice' && n.accountId === A(380))).toBe(false);
+  });
+});
+
