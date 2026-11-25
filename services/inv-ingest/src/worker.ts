@@ -67,7 +67,8 @@ export function startInvIngest(o: InvIngestOptions): { started: Promise<void>; s
     if (m.topic === 'investigation.requests') {
       try {
         const value = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
-        return { kind: 'record', schemaId: 0, recordName: 'InvestigationRequest', value, unrecognized: [] };
+        const decoded: DecodedInvEvent = { record: 'InvestigationRequest', key: m.key, schemaId: null, value };
+        return { kind: 'record', schemaId: 0, recordName: 'InvestigationRequest', value: decoded, unrecognized: [] };
       } catch {
         return { kind: 'rejected', schemaId: null, reason: 'DESERIALIZE' };
       }

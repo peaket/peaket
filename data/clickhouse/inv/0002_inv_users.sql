@@ -13,4 +13,6 @@ CREATE USER IF NOT EXISTS inv_purger IDENTIFIED WITH sha256_password BY '{inv_pu
 
 GRANT INSERT ON inv.* TO inv_ingest;
 GRANT SELECT ON inv.* TO inv_reader;
-GRANT ALTER DROP PARTITION ON inv.* TO inv_purger;
+-- ClickHouse 24.12에는 'ALTER DROP PARTITION' 권한이 따로 없다(system.privileges). 파티션 지우기를 포함하는 가장 좁은 권한이 ALTER TABLE이다.
+-- 이 사용자는 inv 표에 ALTER TABLE(파티션 지우기·TTL·칼럼 변경)을 할 수 있다. 읽기·넣기는 없다. 좁은 권한이 생기면 그때 바꾼다(F-04-10 계획 §1.2).
+GRANT ALTER TABLE ON inv.* TO inv_purger;
