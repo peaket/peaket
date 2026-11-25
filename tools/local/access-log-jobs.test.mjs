@@ -274,8 +274,10 @@ test('[ASVS v5.0.0-16.4.3] 관리 계정 줄만 KST 하루로 복사하고 2년 
     ],
   });
   const audit = await fakeAudit();
+  const dir = mkdtempSync(join(tmpdir(), 'peaket-admin-copy-metrics-'));
+  const metrics = join(dir, 'metrics.txt');
   try {
-    const r = await runCli(['--admin-copy', '--date', '2026-11-23', '--clickhouse', ch.base, '--clickhouse-user', 'al_admin_reader', '--clickhouse-password', 'secret', '--ops-audit', audit.base]);
+    const r = await runCli(['--admin-copy', '--date', '2026-11-23', '--clickhouse', ch.base, '--clickhouse-user', 'al_admin_reader', '--clickhouse-password', 'secret', '--ops-audit', audit.base, '--metrics', metrics]);
     assert.equal(r.code, 0, `${r.out}\n${r.err}`);
     const query = ch.queries.find((q) => q.includes('is_admin = 1'));
     assert.ok(query, 'is_admin = 1 질의가 없다');
@@ -295,7 +297,33 @@ test('[ASVS v5.0.0-16.4.3] 관리 계정 줄만 KST 하루로 복사하고 2년 
     assert.equal(audit.posts.some((p) => p.payload.requestId === 'before' || p.payload.requestId === 'after'), false);
     assert.ok(ch.auths.some((a) => a.startsWith('Basic ')), 'ClickHouse 기본 인증을 보내지 않는다');
     assert.equal(JSON.parse(r.out.trim().split('\n').at(-1)).copied, 2);
+    const text = readFileSync(metrics, 'utf8');
+    assert.match(text, /^access_log_admin_copy_last_success_timestamp \d+$/m);
+    assert.match(text, /^access_log_admin_copy_rows_total\{result="copied"\} 2$/m);
+    assert.match(text, /^access_log_admin_copy_rows_total\{result="failed"\} 0$/m);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+    ch.server.close();
+    audit.server.close();
+  }
+});
+
+test('[ASVS v5.0.0-16.1.1] 관리 복사가 실패하면 --metrics에 failed와 마지막 성공 0을 낸다', async () => {
+  const ch = await fakeClickHouse({
+    filterAdmin: true,
+    adminRows: [{ ts: '2026-11-23T12:00:00.000Z', source: 'identity', request_id: 'fail', event: 'LOGIN', result: 'SUCCESS', provider: 'PASSWORD', factors: ['password'], failure: '', client_ip: null, user_agent: 'UA', account_id: null, pod: 'identity-1', seq: 1, is_admin: 1 }],
+  });
+  const audit = await fakeAudit({ fail: true });
+  const dir = mkdtempSync(join(tmpdir(), 'peaket-admin-copy-fail-metrics-'));
+  const metrics = join(dir, 'metrics.txt');
+  try {
+    const r = await runCli(['--admin-copy', '--date', '2026-11-23', '--clickhouse', ch.base, '--ops-audit', audit.base, '--metrics', metrics]);
+    assert.equal(r.code, 1, `${r.out}\n${r.err}`);
+    const text = readFileSync(metrics, 'utf8');
+    assert.match(text, /^access_log_admin_copy_last_success_timestamp 0$/m);
+    assert.match(text, /^access_log_admin_copy_rows_total\{result="failed"\} 1$/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
     ch.server.close();
     audit.server.close();
   }

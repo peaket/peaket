@@ -145,8 +145,17 @@ test('[ASVS v5.0.0-16.1.1] 로그 목록·보존·지표·경보가 한 벌로 �
   expectBlocked((root) => set(root, rel, 'sourceUser: al_admin_reader', 'sourceUser: al_migrator'), 'al_admin_reader');
   expectBlocked((root) => set(root, rel, 'metrics:\n  overdue:', 'metricsGone:\n  overdue:'), 'metrics');
   expectBlocked((root) => set(root, rel, 'lastSuccess: access_log_purge_last_success_timestamp', 'lastSuccess: wrong_metric'), 'access_log_purge_last_success_timestamp');
-  // timeZone은 purge와 adminCopy에 둘 있다. 첫째(purge)를 바꾼다.
-  expectBlocked((root) => replaceNth(root, rel, 'timeZone: Asia/Seoul', 'timeZone: UTC', 1), 'Asia/Seoul');
+  // timeZone은 purge와 adminCopy에 둘 있다. 첫째(purge)와 둘째(adminCopy)를 각각 바꾼다.
+  expectBlocked((root) => replaceNth(root, rel, 'timeZone: Asia/Seoul', 'timeZone: UTC', 1), 'purge.timeZone');
+  expectBlocked((root) => replaceNth(root, rel, 'timeZone: Asia/Seoul', 'timeZone: UTC', 2), 'adminCopy.timeZone');
+  expectBlocked((root) => set(root, rel, 'retentionYears: 2', 'retentionYears: 3'), 'adminCopy.retentionYears');
+  expectBlocked((root) => set(root, rel, 'recordType: ADMIN_ACCESS_LOG', 'recordType: ADMIN_ACCESS_LOG_OLD'), 'adminCopy.recordType');
+  expectBlocked((root) => set(root, rel, 'sourceFilter: "is_admin = 1"', 'sourceFilter: "is_admin = 0"'), 'adminCopy.sourceFilter');
+  expectBlocked((root) => set(root, rel, 'overdue: access_log_overdue_partitions', 'overdue: wrong_overdue'), 'metrics.overdue');
+  expectBlocked((root) => set(root, rel, 'adminCopyLastSuccess: access_log_admin_copy_last_success_timestamp', 'adminCopyLastSuccess: wrong_last_success'), 'metrics.adminCopyLastSuccess');
+  expectBlocked((root) => set(root, rel, 'adminCopyRows: access_log_admin_copy_rows_total', 'adminCopyRows: wrong_rows'), 'metrics.adminCopyRows');
+  expectBlocked((root) => set(root, rel, 'snapshotRetentionDays: 7', 'snapshotRetentionDays: 6'), 'backup.snapshotRetentionDays');
+  expectBlocked((root) => set(root, rel, 'objectLockRetention: P3M7D', 'objectLockRetention: P3M8D'), 'backup.objectLockRetention');
   expectBlocked((root) => set(root, 'deploy/platform/observability/alerts/access-log.yaml', 'alert: AccessLogPurgeOverdue', 'alert: AccessLogPurgeOverdueGone'), 'AccessLogPurgeOverdue');
   expectBlocked((root) => set(root, 'deploy/platform/observability/alerts/access-log.yaml', 'alert: AccessLogAdminCopyLate', 'alert: AccessLogAdminCopyLateGone'), 'AccessLogAdminCopyLate');
   expectBlocked((root) => set(root, 'deploy/platform/observability/alerts/access-log.yaml', 'alert: AccessLogPurgeFailed', 'alert: AccessLogPurgeFailedGone'), 'AccessLogPurgeFailed');
