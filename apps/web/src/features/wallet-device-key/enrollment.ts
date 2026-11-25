@@ -178,8 +178,10 @@ export async function enrollDeviceKey(ticketId: string, o: SyncOptions = {}): Pr
 
 export interface SendWithReauthInput extends SyncOptions {
   ticketId: string;
-  /** 재인증으로 떠날 때 남긴 reason(REISSUE: 저장소 유실 입장 시작 전, ISSUE: 입장 시작 뒤 첫 등록) */
-  reason: 'REISSUE' | 'ISSUE';
+  /** 재인증으로 떠날 때 남긴 reason(REISSUE: 저장소 유실 입장 시작 전, ISSUE: 입장 시작 뒤 첫 등록, BOOTH: 부스 재발급) */
+  reason: 'REISSUE' | 'ISSUE' | 'BOOTH';
+  /** BOOTH 재인증이 돌아와 등록할 부스 요청 ID */
+  boothRequestId?: string;
   /** POST /reauth/token으로 받은 토큰(메모리에만, 한 번) */
   reauthToken: string;
 }
@@ -195,8 +197,8 @@ export function sendWithReauth(i: SendWithReauthInput): Promise<WalletKeyStatus>
     const key = existing ?? (await newLocalKey(i.ticketId, i.reason));
     if (!registrationAvailable(i)) return { phase: 'ready', key, localOnly: true };
     if (i.offline || browserOffline()) return { phase: 'pending', key, reason: 'offline' };
-    const result = await registerDeviceKey({ ticketId: key.ticketId, publicKeyJwk: key.publicKeyJwk, keyId: key.keyId, reason: i.reason, reauthToken: i.reauthToken, ...transport(i) });
-    return settle({ ...key, reauthNeeded: i.reason }, result, i.reason);
+    const result = await registerDeviceKey({ ticketId: key.ticketId, publicKeyJwk: key.publicKeyJwk, keyId: key.keyId, reason: i.reason, reauthToken: i.reauthToken, ...(i.boothRequestId ? { boothRequestId: i.boothRequestId } : {}), ...transport(i) });
+    return settle({ ...key, ...(i.reason === 'BOOTH' ? {} : { reauthNeeded: i.reason }) }, result, i.reason);
   });
 }
 
@@ -204,10 +206,14 @@ export function sendWithReauth(i: SendWithReauthInput): Promise<WalletKeyStatus>
  * 재인증을 못 받고 돌아왔을 때(표시가 낡음·재인증 실패·취소): 요청 없이 저장된 키의 멈춘 상태로 돌아간다.
  * 이 기기에 키가 없으면(저장소 유실) 떠날 때의 reason으로 '저장소 유실, 입장 시작 전'·'다시 확인 필요'를 보인다
  */
-export async function walletKeyStatusWithoutSending(ticketId: string, o: SyncOptions & { reason?: 'REISSUE' | 'ISSUE'; notice?: ReauthNotice } = {}): Promise<WalletKeyStatus> {
+export async function walletKeyStatusWithoutSending(ticketId: string, o: SyncOptions & { reason?: 'REISSUE' | 'ISSUE' | 'BOOTH'; notice?: ReauthNotice } = {}): Promise<WalletKeyStatus> {
   const key = await loadDeviceKey(ticketId);
   const notice = o.notice ? { notice: o.notice } : {};
-  if (!key && o.reason) return o.reason === 'REISSUE' ? { phase: 'reissue-required', ...notice } : { phase: 'needs-reauth', ...notice };
+  if (!key && o.reason) {
+    if (o.reason === 'REISSUE') return { phase: 'reissue-required', ...notice };
+    if (o.reason === 'BOOTH') return { phase: 'reissue-at-booth' };
+    return { phase: 'needs-reauth', ...notice };
+  }
   const st = statusOf(key, o);
   if ((st.phase === 'reissue-required' || st.phase === 'needs-reauth') && o.notice) return { ...st, notice: o.notice };
   return st;

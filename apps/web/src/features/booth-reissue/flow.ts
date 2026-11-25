@@ -24,6 +24,8 @@ export type BoothStartAnswer = { kind: 'started'; id: string; window: BoothWindo
 export interface BoothState {
   phase: BoothPhase;
   boothCode?: string;
+  /** 부스 요청 ID(재인증 왕복 뒤 등록에 쓴다. 코드·토큰 원문은 아니다) */
+  boothRequestId?: string;
   expiresAtMs?: number;
   error?: string;
 }
@@ -76,6 +78,15 @@ export class BoothReissueFlow {
     if (this.#state.phase === 'idle') this.#set({ phase: 'consent' });
   }
 
+  /** 실패·창 닫힘 뒤 처음부터 다시 시작한다(IR-07). 토큰·코드·요청 ID를 모두 버린다 */
+  reset(): void {
+    this.#token = undefined;
+    this.#boothRequestId = undefined;
+    this.#expiresAtMs = undefined;
+    this.#lastAttemptMs = undefined;
+    this.#set({ phase: 'idle' });
+  }
+
   async consent(): Promise<void> {
     await this.startVerification();
   }
@@ -124,7 +135,7 @@ export class BoothReissueFlow {
       this.#boothRequestId = r.boothRequestId;
       this.#expiresAtMs = Date.parse(r.expiresAt);
       this.#lastAttemptMs = undefined;
-      this.#set({ phase: 'code', boothCode: r.boothCode, expiresAtMs: this.#expiresAtMs });
+      this.#set({ phase: 'code', boothCode: r.boothCode, boothRequestId: r.boothRequestId, expiresAtMs: this.#expiresAtMs });
     } catch (e) {
       if (statusOf(e) === 429) this.#set({ phase: 'limit' });
       else if (statusOf(e) === 409 && typeOf(e) === 'booth-mismatch') this.#set({ phase: 'mismatch' });
@@ -168,7 +179,8 @@ export class BoothReissueFlow {
       this.#set({ phase: 'registered' });
     } catch (e) {
       if (statusOf(e) === 403 && typeOf(e) === 'booth-not-authorized') {
-        this.#set({ phase: 'waiting' });
+        // 403은 아직 책임자가 찍지 않았다는 뜻이다. 코드·QR·남은 시간을 지우지 않고 phase만 waiting으로 둔다(IR-04)
+        this.#set({ ...this.#state, phase: 'waiting' });
         return;
       }
       this.#fail(e);
@@ -176,6 +188,6 @@ export class BoothReissueFlow {
   }
 
   #fail(e: unknown): void {
-    this.#set({ phase: 'error', ...(e instanceof Error ? { error: e.message } : {}) });
+    this.#set({ ...this.#state, phase: 'error', ...(e instanceof Error ? { error: e.message } : {}) });
   }
 }

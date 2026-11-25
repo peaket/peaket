@@ -98,7 +98,10 @@ export class GrpcTicketIssuer implements TicketIssuer, TicketVoider {
 
   async issue(c: TicketIssueCommand): Promise<readonly IssuedTicketRef[]> {
     const ms = Math.min(TICKET_ISSUE_CAP_MS, Math.max(1, Math.floor(Number.isFinite(c.deadlineMs) ? c.deadlineMs : TICKET_ISSUE_CAP_MS)));
-    const request = { order_id: c.orderId, event_id: c.eventId, payer_account_id: c.payerAccountId, seat_ids: [...c.seatIds], issue_generation: c.issueGeneration ?? 0, ...(c.seatLabels && c.seatLabels.every((s): s is string => typeof s === 'string') ? { seat_labels: [...c.seatLabels] } : {}) };
+    const labels = c.seatLabels;
+    // 이름을 읽지 못한 칸(빈 문자열·빈칸)이 하나라도 있으면 seat_labels를 통째로 싣지 않는다(IR-10, ticket이 seatId로 물러난다)
+    const seatLabelsOk = labels !== undefined && labels.length === c.seatIds.length && labels.every((s): s is string => typeof s === 'string' && s.trim() !== '');
+    const request = { order_id: c.orderId, event_id: c.eventId, payer_account_id: c.payerAccountId, seat_ids: [...c.seatIds], issue_generation: c.issueGeneration ?? 0, ...(seatLabelsOk ? { seat_labels: [...labels] } : {}) };
     const once = (): Promise<Record<string, unknown>> => {
       // 데드라인은 차단기가 들여보낸 뒤부터 잰다
       const deadline = new Date(Date.now() + ms);

@@ -9,7 +9,7 @@ import { ORIGINS } from '@/shared/config/origins';
 import { refreshLock } from '@/shared/lib/refresh-lock';
 import { refreshOnce } from '@/shared/lib/token-refresh';
 import { browserCallerEnv, startCallerFlow, type AgencyWindow, type ResultAnswer, type ResultBody, type StartAnswer, type VerifyApi } from '@/features/identity-verify';
-import { generateDeviceKey, loadDeviceKey, qrMatrix, registerDeviceKey, saveDeviceKey, type DeviceKey, type StoredDeviceKey } from '@/features/wallet-device-key';
+import { generateDeviceKey, leaveForWalletReauth, loadDeviceKey, qrMatrix, registerDeviceKey, saveDeviceKey, type DeviceKey, type StoredDeviceKey } from '@/features/wallet-device-key';
 import { BoothReissueFlow, type BoothReissuePorts, type BoothState } from '@/features/booth-reissue/flow';
 
 const CONSENT_ROWS: readonly { dt: string; dd: string }[] = [
@@ -118,6 +118,39 @@ function timeText(ms: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+/** 재인증에 쓸 지금 계정의 소셜 제공자 하나. 없으면 undefined */
+async function linkedProvider(): Promise<string | undefined> {
+  const [{ OPERATIONS }, api] = await Promise.all([import('@peaket/api-client'), import('@/shared/api')]);
+  const client = api.browserApiClient();
+  if (!client) return undefined;
+  const r = await api.withFanRefresh(() => client.send<{ providers?: { provider?: unknown }[] }>(OPERATIONS.getIdentityProviders));
+  return (r.data.providers ?? []).map((p) => p.provider).find((p): p is string => typeof p === 'string' && p.length > 0);
+}
+
+const tabStore = {
+  getItem: (k: string) => {
+    try {
+      return sessionStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  },
+  setItem: (k: string, v: string) => {
+    try {
+      sessionStorage.setItem(k, v);
+    } catch {
+      // 저장소가 막혀 있으면 돌아온 뒤 다시 시도한다
+    }
+  },
+  removeItem: (k: string) => {
+    try {
+      sessionStorage.removeItem(k);
+    } catch {
+      // 없다
+    }
+  },
+};
+
 export interface BoothReissueLiveProps {
   seat: string;
   showButton: boolean;
@@ -135,6 +168,7 @@ export function BoothReissueLive({ seat, showButton, initialOpen, ticketId, regi
   const [open, setOpen] = useState(initialOpen);
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const [state, setState] = useState<BoothState>({ phase: 'idle' });
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -277,6 +311,7 @@ export function BoothReissueLive({ seat, showButton, initialOpen, ticketId, regi
         if (outcome === 'success') {
           const token = tokenRef.current;
           if (!token) {
+            flow.reset();
             setError('본인확인 결과 토큰을 받지 못했습니다. 다시 시도해 주세요');
             return;
           }
@@ -284,6 +319,7 @@ export function BoothReissueLive({ seat, showButton, initialOpen, ticketId, regi
           void flow.request();
           return;
         }
+        flow.reset();
         if (outcome === 'mismatch') {
           setError('본인확인 결과가 이 티켓의 계정과 다릅니다');
           return;
@@ -327,7 +363,23 @@ export function BoothReissueLive({ seat, showButton, initialOpen, ticketId, regi
     void flow.request();
   };
 
+  const reauthNeeded = state.phase === 'error' && state.error === 'reauth-required' && state.boothRequestId !== undefined;
+  const startBoothReauth = async () => {
+    const boothRequestId = state.boothRequestId;
+    if (!boothRequestId || leaving) return;
+    setLeaving(true);
+    try {
+      const provider = await linkedProvider();
+      if (!provider) throw new Error('다시 로그인할 수단을 찾지 못했습니다');
+      leaveForWalletReauth({ ticketId, reason: 'BOOTH', boothRequestId }, { store: tabStore, now: () => Date.now(), provider });
+    } catch (e) {
+      setLeaving(false);
+      setError(e instanceof Error ? e.message : '다시 로그인을 시작하지 못했습니다');
+    }
+  };
+
   const closeNotice = () => {
+    flowRef.current?.reset();
     flowRef.current = undefined;
     tokenRef.current = undefined;
     setState({ phase: 'idle' });
@@ -482,8 +534,37 @@ export function BoothReissueLive({ seat, showButton, initialOpen, ticketId, regi
       {state.phase === 'error' ? (
         <div className="col gap-2" role="alert">
           <p className="t-sm fw-b">{flowError}</p>
-          <button className="btn btn-outline" type="button" onClick={closeNotice}>
+          {reauthNeeded ? (
+            <button className="btn btn-primary" type="button" disabled={leaving} onClick={() => void startBoothReauth()}>
+              {leaving ? '이동 중…' : '다시 로그인하고 등록'}
+            </button>
+          ) : (
+            <button
+              className="btn btn-outline"
+              type="button"
+              onClick={() => {
+                flowRef.current?.reset();
+                setState({ phase: 'idle' });
+                stateRef.current = { phase: 'idle' };
+                setError(null);
+                setAgreed(false);
+                setOpen(true);
+              }}
+            >
+              다시 시도
+            </button>
+          )}
+          <button className="btn btn-ghost" type="button" onClick={closeNotice}>
             닫기
+          </button>
+        </div>
+      ) : null}
+
+      {error && (state.phase === 'idle' || state.phase === 'consent') ? (
+        <div className="col gap-2" role="alert">
+          <p className="t-sm fw-b">{error}</p>
+          <button className="btn btn-outline" type="button" onClick={begin}>
+            다시 시도
           </button>
         </div>
       ) : null}

@@ -15,12 +15,14 @@ export const WALLET_REAUTH_TTL_MS = 10 * 60_000;
 /** 기기 키 등록의 재인증 웹 purpose(앱 서버가 DEVICE_KEY_ISSUE로 바꾼다, features/social-login/server/identity-client.ts) */
 export const WALLET_REAUTH_PURPOSE = 'device-key-issue';
 
-export type WalletReauthReason = 'REISSUE' | 'ISSUE';
+export type WalletReauthReason = 'REISSUE' | 'ISSUE' | 'BOOTH';
 
 export interface WalletReauthMarker {
   v: 1;
   ticketId: string;
   reason: WalletReauthReason;
+  /** BOOTH 재인증이 돌아와 등록할 부스 요청(코드·토큰 원문은 남기지 않는다) */
+  boothRequestId?: string;
   at: number;
 }
 
@@ -31,8 +33,8 @@ export interface TabStorageLike {
 }
 
 /** 표시를 남긴다(토큰·공개키 없음) */
-export function writeWalletReauth(store: TabStorageLike, m: { ticketId: string; reason: WalletReauthReason; at: number }): void {
-  const marker: WalletReauthMarker = { v: 1, ticketId: m.ticketId, reason: m.reason, at: m.at };
+export function writeWalletReauth(store: TabStorageLike, m: { ticketId: string; reason: WalletReauthReason; boothRequestId?: string; at: number }): void {
+  const marker: WalletReauthMarker = { v: 1, ticketId: m.ticketId, reason: m.reason, ...(m.boothRequestId ? { boothRequestId: m.boothRequestId } : {}), at: m.at };
   store.setItem(WALLET_REAUTH_KEY, JSON.stringify(marker));
 }
 
@@ -60,13 +62,16 @@ export function takeWalletReauth(store: TabStorageLike, nowMs: number): WalletRe
   } catch {
     return { kind: 'stale' };
   }
-  const reason = m.reason === 'REISSUE' || m.reason === 'ISSUE' ? m.reason : undefined;
+  const reason = m.reason === 'REISSUE' || m.reason === 'ISSUE' || m.reason === 'BOOTH' ? m.reason : undefined;
   const ticketId = typeof m.ticketId === 'string' && m.ticketId !== '' ? m.ticketId : undefined;
+  const boothRequestId = typeof m.boothRequestId === 'string' && m.boothRequestId !== '' ? m.boothRequestId : undefined;
   const at = typeof m.at === 'number' && Number.isFinite(m.at) ? m.at : undefined;
-  if (m.v !== 1 || !reason || !ticketId || at === undefined) return { kind: 'stale', ...(ticketId ? { ticketId } : {}), ...(reason ? { reason } : {}) };
+  if (m.v !== 1 || !reason || !ticketId || at === undefined || (reason === 'BOOTH' && !boothRequestId)) {
+    return { kind: 'stale', ...(ticketId ? { ticketId } : {}), ...(reason ? { reason } : {}) };
+  }
   const age = nowMs - at;
   if (age < 0 || age > WALLET_REAUTH_TTL_MS) return { kind: 'stale', ticketId, reason };
-  return { kind: 'fresh', marker: { v: 1, ticketId, reason, at } };
+  return { kind: 'fresh', marker: { v: 1, ticketId, reason, ...(boothRequestId ? { boothRequestId } : {}), at } };
 }
 
 export interface LeaveForWalletReauthDeps {
@@ -79,8 +84,8 @@ export interface LeaveForWalletReauthDeps {
 }
 
 /** [ 다시 로그인하고 받기 ]·'다시 확인 필요'의 재인증: 표시를 남기고 이 창에서 재인증으로 떠난다 */
-export function leaveForWalletReauth(i: { ticketId: string; reason: WalletReauthReason }, d: LeaveForWalletReauthDeps): void {
-  writeWalletReauth(d.store, { ticketId: i.ticketId, reason: i.reason, at: d.now() });
+export function leaveForWalletReauth(i: { ticketId: string; reason: WalletReauthReason; boothRequestId?: string }, d: LeaveForWalletReauthDeps): void {
+  writeWalletReauth(d.store, { ticketId: i.ticketId, reason: i.reason, ...(i.boothRequestId ? { boothRequestId: i.boothRequestId } : {}), at: d.now() });
   (d.submit ?? submitReauthForm)(d.provider, `/my/tickets/${encodeURIComponent(i.ticketId)}`, WALLET_REAUTH_PURPOSE);
 }
 
@@ -114,5 +119,5 @@ export async function resumeWalletReauth(ticketId: string, d: ResumeWalletReauth
   const reason = taken.marker.reason;
   const r = await (d.pickup ?? (() => pickupReauthToken()))();
   if (r.kind !== 'token') return { kind: 'reauth-failed', reason: r.reason, status: await walletKeyStatusWithoutSending(ticketId, { ...transport, reason }) };
-  return { kind: 'sent', reason, status: await sendWithReauth({ ...transport, ticketId, reason, reauthToken: r.token }) };
+  return { kind: 'sent', reason, status: await sendWithReauth({ ...transport, ticketId, reason, ...(taken.marker.boothRequestId ? { boothRequestId: taken.marker.boothRequestId } : {}), reauthToken: r.token }) };
 }

@@ -33,7 +33,10 @@ interface TicketRow {
 const atMs = (v: Date | string | null): number | undefined => (v === null ? undefined : v instanceof Date ? v.getTime() : Date.parse(v));
 
 export class DrizzleDeviceKeyStore implements DeviceKeyStore, DeviceKeyNoticeStore {
-  constructor(private readonly o: { database: Database; changes?: ScannerChangeWriter; booth?: BoothStore }) {}
+  readonly boothHandled: boolean;
+  constructor(private readonly o: { database: Database; changes?: ScannerChangeWriter; booth?: BoothStore }) {
+    this.boothHandled = o.booth !== undefined;
+  }
 
   async register(i: DeviceKeyRegistrationInput): Promise<DeviceKeyRegistrationResult> {
     return this.o.database.transaction(async (tx) => {
@@ -61,7 +64,8 @@ export class DrizzleDeviceKeyStore implements DeviceKeyStore, DeviceKeyNoticeSto
       // TRANSFER와 유효 키 없는 REISSUE는 지금처럼 거절, 유효 키 없는 첫 ISSUE만 재인증으로 받는다
       if (started) {
         if (i.reason === 'TRANSFER') return { kind: 'ENTRY_STARTED' };
-        if (hasActive) return { kind: 'REISSUE_AT_BOOTH' };
+        // BOOTH는 부스에서 옛 키를 바꾸는 정본 경로다(IR-03). 부스 허용을 이미 소모한 뒤이므로 여기서 막지 않는다
+        if (hasActive && i.reason !== 'BOOTH') return { kind: 'REISSUE_AT_BOOTH' };
         if (i.reason === 'REISSUE') return { kind: 'ENTRY_STARTED' };
         if (!i.reauthVerified) return { kind: 'ENTRY_STARTED' };
       }

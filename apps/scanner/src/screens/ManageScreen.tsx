@@ -5,7 +5,7 @@
 // - 가로 보드는 '이상 표시'·'내 예외 통과'만 그렸다. 가로의 기기·부스 탭은 태블릿의 카드 2열을 쓴다(추천안).
 import { CameraView } from "@peaket/ds/CameraView";
 import { ScannerShell } from "@peaket/ds/ScannerShell";
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import type { ScannerLayout } from "../app/layout";
 import { PreviewSwitcher, usePreviewState } from "../app/preview";
 import { LiveManageBridge, useLiveManage, type LiveManage } from "./LiveManageBridge";
@@ -621,12 +621,19 @@ function ResultButtons({
 }
 
 function ConfirmScanButton({ seat }: { seat: string }) {
-  // [확인 스캔하기]도 현장 주요 버튼이라 56px(btn-field)이다(캔버스 메모 cf052)
+  // [확인 스캔하기]도 현장 주요 버튼이라 56px(btn-field)이다(캔버스 메모 cf052).
+  // 이 화면은 스캔 화면의 VERIFY 모드를 열 수 없어 사유와 함께 비활성으로 둔다(IR-08, d5 §8.5 ③)
+  const whyId = useId();
   return (
-    <button className="btn btn-outline btn-field btn-block" type="button" aria-label={`${seat} 확인 스캔하기`}>
-      <i className="ic ic-scan" aria-hidden="true" />
-      확인 스캔하기
-    </button>
+    <div className="col" style={{ gap: 4 }}>
+      <button className="btn btn-outline btn-field btn-block" type="button" aria-label={`${seat} 확인 스캔하기`} disabled aria-describedby={whyId}>
+        <i className="ic ic-scan" aria-hidden="true" />
+        확인 스캔하기
+      </button>
+      <p className="t-xs muted" id={whyId}>
+        확인 스캔은 스캔 화면의 확인 스캔에서 해 주세요.
+      </p>
+    </div>
   );
 }
 

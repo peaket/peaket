@@ -33,7 +33,7 @@ export { transferLockHandlers, type TransferLockUseCases } from './inbound/ticke
 export { TicketDeviceKeysController } from './inbound/device-keys.controller.js';
 export { WalletTicketsController } from './inbound/wallet-tickets.controller.js';
 export { TicketModule, type TicketWiring } from './ticket.module.js';
-export { TicketBooth, BoothBeforeEntry, BoothCodeExpired, BoothLimit, BoothMismatch, BoothNotFound, type BoothReverificationVerifier, type TicketBoothDeps } from './application/booth.js';
+export { TicketBooth, BoothBeforeEntry, BoothCodeExpired, BoothLimit, BoothMismatch, BoothNotFound, BoothRateLimited, type BoothReverificationVerifier, type TicketBoothDeps } from './application/booth.js';
 export { BoothInputError, boothDayKey, boothHash, newBoothCode, parseBoothCode, type BoothAuthorizeOutcome, type BoothRequestOutcome, type GateStatusDeviceView, type GateStatusView, type OverridePassView, type OverrideReviewStatus } from './domain/booth.js';
 export { TicketBoothController } from './inbound/booth.controller.js';
 export { ticketPackage, ticketServiceHandlers, type TicketGrpcUseCases, type TicketPackage } from './inbound/ticket.grpc.js';

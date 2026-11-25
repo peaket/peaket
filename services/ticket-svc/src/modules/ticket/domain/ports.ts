@@ -174,7 +174,7 @@ export interface BoothStore {
   /** 보유자·회차 시작·하루 한도를 한 트랜잭션에서 보고 만든다. 새 코드는 옛 PENDING 코드를 무효로 한다 */
   createRequest(i: { ticketId: string; accountId: string; codeHash: string; nowMs: number; dayKey: string; expiresAtMs: number; reverificationId?: string }): Promise<BoothRequestOutcome>;
   /** 코드 해시로 활성 요청을 찾아 허용을 적는다(같은 코드를 다시 찍으면 같은 답, 사용된 코드는 410) */
-  authorize(i: { eventId: string; deviceId: string; codeHash: string; nowMs: number; allowUntilMs: number }): Promise<BoothAuthorizeOutcome>;
+  authorize(i: { eventId: string; deviceId: string; staffAccountId: string; codeHash: string; nowMs: number; allowUntilMs: number }): Promise<BoothAuthorizeOutcome>;
   /** 기기 키 저장과 같은 트랜잭션에서 부르는 확인·사용 표시(tx가 있으면 그 트랜잭션, 없으면 저장소가 연다) */
   consumeForRegistration(i: { ticketId: string; boothRequestId: string; nowMs: number }, tx?: unknown): Promise<boolean>;
   /** gate_lead의 SCR-052 기기 현황 */
@@ -184,7 +184,10 @@ export interface BoothStore {
 }
 export const BOOTH_STORE = Symbol('ticket.BoothStore');
 
-export interface DeviceKeyStore {  register(i: DeviceKeyRegistrationInput): Promise<DeviceKeyRegistrationResult>;
+export interface DeviceKeyStore {
+  /** BOOTH 등록의 부스 허용 소모를 저장소가 키 저장과 같은 트랜잭션에서 한다. 없으면 BOOTH는 fail-closed로 거절한다 */
+  readonly boothHandled?: boolean;
+  register(i: DeviceKeyRegistrationInput): Promise<DeviceKeyRegistrationResult>;
   /** 회차의 티켓별 유효 키(keyId·압축 공개키 base64url) */
   activeKeysByEvent(eventId: string): Promise<Map<string, { keyId: string; publicKey: string }[]>>;
   /** 회차에서 폐기된 keyId(base64url) 목록 */

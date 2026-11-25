@@ -90,11 +90,14 @@ export class ConfirmVerification {
     let resultToken: string | undefined;
     try {
       const checked = await this.#check(seen, i.providerResult, now);
-      done =
-        checked.outcome === 'VERIFIED'
-          ? await this.#confirm(i.verificationId, checked, now)
-          : await this.#settle(i.verificationId, checked.outcome, now, 'personMismatch' in checked && checked.personMismatch === true);
-      if (checked.outcome === 'VERIFIED') resultToken = checked.boothToken;
+      if (checked.outcome === 'VERIFIED') {
+        const confirmed = await this.#confirm(i.verificationId, checked, now);
+        done = confirmed.attempt;
+        // 이 요청이 실제로 토큰 해시를 저장한 경우에만 응답에 싣는다(동시 확정에서 진 쪽은 409, IR-09)
+        if (confirmed.applied) resultToken = checked.boothToken;
+      } else {
+        done = await this.#settle(i.verificationId, checked.outcome, now, 'personMismatch' in checked && checked.personMismatch === true);
+      }
     } catch (e) {
       if (!(e instanceof ProviderUnavailable || e instanceof KeyServiceUnavailable)) throw e;
       // 기관·연계정보·pid 키 장애(첫 저장의 pid 계산 포함): 그 건을 PROVIDER_DOWN으로 마친다(결과 조회가 같은 값을 주고, 다시 보내도 503이다)
@@ -133,7 +136,7 @@ export class ConfirmVerification {
     return { outcome: 'VERIFIED', hmacs, pid: null, ...(phoneRef ? { phoneRef } : {}), ...(phoneRefPrev ? { phoneRefPrev } : {}), ...(boothToken ? { boothToken } : {}) };
   }
 
-  async #confirm(verificationId: string, checked: Extract<Checked, { outcome: 'VERIFIED' }>, now: number): Promise<Attempt> {
+  async #confirm(verificationId: string, checked: Extract<Checked, { outcome: 'VERIFIED' }>, now: number): Promise<{ attempt: Attempt; applied: boolean }> {
     let c = checked;
     let erased = false;
     for (let round = 0; ; round++) {
@@ -164,17 +167,17 @@ export class ConfirmVerification {
     }
   }
 
-  #apply(verificationId: string, checked: Extract<Checked, { outcome: 'VERIFIED' }>, now: number): Promise<Attempt> {
+  #apply(verificationId: string, checked: Extract<Checked, { outcome: 'VERIFIED' }>, now: number): Promise<{ attempt: Attempt; applied: boolean }> {
     return this.store.transaction(async (tx) => {
       const a = await tx.attemptForUpdate(verificationId);
       if (!a) throw new VerificationError('NOT_FOUND', '없는 건이다');
-      if (a.status !== 'PENDING') return a;
+      if (a.status !== 'PENDING') return { attempt: a, applied: false };
       // 계정 행을 공유 잠금으로 읽어 탈퇴의 쓰기 잠금과 순서를 맞춘다: 탈퇴가 먼저면 DELETED를 보고 FAILED, 이 확정이 먼저면 탈퇴는 이 커밋을 기다린 뒤
       // 파기 트랜잭션이 이 기록까지 지운다(새 맥락 리뷰 M2). 메모리 저장소는 계정을 보지 못해 null이다
       const accountStatus = await tx.lockAccountForShare(a.accountId);
       if (accountStatus !== null && accountStatus !== 'ACTIVE') {
         await tx.completeAttempt(a.id, 'FAILED', now);
-        return { ...a, status: 'FAILED' as const, completedAt: now };
+        return { attempt: { ...a, status: 'FAILED' as const, completedAt: now }, applied: false };
       }
       const write = checked.hmacs[0]!;
       // 부스 대조(BOOTH): 계정의 기존 ci_hmac과만 비교하고 새 본인확인 기록을 만들지 않는다.
@@ -200,7 +203,7 @@ export class ConfirmVerification {
         await tx.completeAttempt(a.id, same ? 'VERIFIED' : 'FAILED', now, !same);
         if (same) this.boothSignals?.result('verified');
         else this.boothSignals?.result('mismatch');
-        return { ...a, status: same ? ('VERIFIED' as const) : ('FAILED' as const), completedAt: now };
+        return { attempt: { ...a, status: same ? ('VERIFIED' as const) : ('FAILED' as const), completedAt: now }, applied: same };
       }
       const owner = await tx.accountByCiHmac(checked.hmacs.map((h) => h.hmac), a.accountId);
       const mine = await tx.verificationOf(a.accountId);
@@ -247,7 +250,7 @@ export class ConfirmVerification {
       // 본인확인이 이 계정의 것으로 끝났을 때만 번호의 연락처 가명을 쓴다(다른 사람·중복은 쓰지 않는다)
       if (status === 'VERIFIED' && checked.phoneRef) await tx.setPhoneRef({ accountId: a.accountId, ref: checked.phoneRef, refPrev: checked.phoneRefPrev ?? null, now });
       await tx.completeAttempt(a.id, status, now, personMismatch);
-      return { ...a, status, completedAt: now };
+      return { attempt: { ...a, status, completedAt: now }, applied: true };
     });
   }
 
@@ -264,10 +267,9 @@ export class ConfirmVerification {
 
   async #answer(a: Attempt, resultToken?: string): Promise<VerificationResultView> {
     if (a.purpose === 'BOOTH') {
-      // 부스 대조는 결과가 다르면 토큰을 주지 않는다(409). 성공은 새 토큰을 만든 그 응답에만 싣는다
-      if (a.status !== 'VERIFIED') throw new VerificationError('BOOTH_MISMATCH', '본인확인 결과가 이 티켓의 계정과 다르다');
-      const view = viewOf(a, null);
-      return resultToken ? { ...view, resultToken } : view;
+      // 부스 대조는 결과가 다르면 토큰을 주지 않는다(409). 동시 확정에서 진 쪽은 토큰을 저장하지 못했으므로 409(IR-09)
+      if (a.status !== 'VERIFIED' || resultToken === undefined) throw new VerificationError('BOOTH_MISMATCH', '본인확인 결과가 이 티켓의 계정과 다르다');
+      return { ...viewOf(a, null), resultToken };
     }
     if (a.status === 'DUPLICATE_ACCOUNT') throw new VerificationError('DUPLICATE_ACCOUNT', '이미 다른 계정에서 본인확인한 분이다');
     if (a.status === 'PROVIDER_DOWN') throw new VerificationError('PROVIDER_DOWN', '본인확인기관을 쓸 수 없다');

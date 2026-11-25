@@ -116,6 +116,9 @@ export class DeviceKeys {
     // 확인기는 토큰이 없거나 비면 false이고, 통과하면 jti를 한 번 잡으므로 확인은 요청마다 한 번이다
     const reauth = reason === 'REISSUE' || reason === 'BOOTH' || reason === 'ISSUE' ? await this.#reauth(i) : false;
     if (reason === 'BOOTH' && !reauth) throw new DeviceKeyError('REAUTH_REQUIRED');
+    // 부스 허용을 소모할 곳이 없으면 BOOTH를 통과시키지 않는다(fail-closed). 운영 Drizzle 저장소는 boothHandled=true로
+    // 같은 트랜잭션에서 소모하고, 메모리·시험 조립은 booth 포트를 넘겨야 한다(IR-02)
+    if (reason === 'BOOTH' && this.d.booth === undefined && this.d.store.boothHandled !== true) throw new DeviceKeyError('BOOTH_NOT_ALLOWED');
     // 시험 조립은 여기서 허용을 소모한다(메모리 저장소). 운영은 DrizzleDeviceKeyStore가 키 저장과 같은 트랜잭션에서 소모한다
     if (reason === 'BOOTH' && this.d.booth) {
       if (this.d.booth.ownerOf) {

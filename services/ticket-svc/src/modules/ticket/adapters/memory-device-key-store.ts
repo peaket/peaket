@@ -72,7 +72,8 @@ export class MemoryDeviceKeyStore implements DeviceKeyStore, DeviceKeyNoticeStor
     // TRANSFER와 유효 키 없는 REISSUE는 지금처럼 거절, 유효 키 없는 첫 ISSUE만 재인증으로 받는다
     if (started) {
       if (i.reason === 'TRANSFER') return { kind: 'ENTRY_STARTED' };
-      if (active) return { kind: 'REISSUE_AT_BOOTH' };
+      // BOOTH는 부스에서 옛 키를 바꾸는 정본 경로다(IR-03)
+      if (active && i.reason !== 'BOOTH') return { kind: 'REISSUE_AT_BOOTH' };
       if (i.reason === 'REISSUE') return { kind: 'ENTRY_STARTED' };
       if (!i.reauthVerified) return { kind: 'ENTRY_STARTED' };
     }

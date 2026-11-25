@@ -5,7 +5,7 @@ import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Query, R
 import { assertScannerOrigin, ContractBody, ContractRouteSchema, CurrentPrincipal, ProblemError, RequestValidationError, Roles, ScannerAuth, type Principal } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { BoothCodeExpired, BoothInputError, BoothMismatch, type GateStatusView, type OverridePassView } from '../../ticket/index.js';
+import { BoothCodeExpired, BoothInputError, BoothMismatch, BoothRateLimited, type GateStatusView, type OverridePassView } from '../../ticket/index.js';
 import { SCANNER_PWA_ORIGIN } from '../domain/ports.js';
 import { ScannerGateForbidden } from '../application/scanner-gate.js';
 import { ScannerPlacementMissing } from '../domain/scanner-shift.js';
@@ -25,7 +25,7 @@ const OverridePage = z.object({ items: z.array(z.object({ scanId: z.string(), at
 
 /** 이 컨트롤러가 쓰는 부스 관리 포트(TicketBooth가 만족한다). 순환 의존을 피하려 모양만 둔다 */
 export interface ScannerBoothAdmin {
-  authorize(i: { eventId: string; deviceId: string; body: unknown }): Promise<{ ticketId: string; seatLabel: string; allowUntil: string }>;
+  authorize(i: { eventId: string; deviceId: string; staffAccountId: string; body: unknown }): Promise<{ ticketId: string; seatLabel: string; allowUntil: string }>;
   gateStatus(i: { eventId: string; deviceId: string }): Promise<GateStatusView>;
   overridePasses(i: { eventId: string; staffAccountId: string; deviceId: string; limit?: number }): Promise<{ items: OverridePassView[] }>;
 }
@@ -35,6 +35,7 @@ function reject(e: unknown): never {
   if (e instanceof BoothInputError) throw new RequestValidationError('부스 코드가 올바르지 않습니다');
   if (e instanceof BoothCodeExpired) throw new ProblemError({ type: 'booth-code-expired', status: 410, title: '부스 코드가 만료되었거나 이미 사용되었습니다' });
   if (e instanceof BoothMismatch) throw new ProblemError({ type: 'scanner-event-mismatch', status: 403, title: '스캐너 세션의 회차와 요청 회차가 다릅니다' });
+  if (e instanceof BoothRateLimited) throw new ProblemError({ type: 'booth-rate-limited', status: 429, title: '부스 코드 시도가 너무 많습니다. 잠시 뒤 다시 시도해 주세요' });
   if (e instanceof ScannerGateForbidden) throw new ProblemError({ type: 'scanner-event-mismatch', status: 403, title: '스캐너 세션의 회차와 요청 회차가 다릅니다' });
   if (e instanceof ScannerPlacementMissing) throw new ProblemError({ type: 'no-placement', status: 409, title: '배치되지 않은 기기입니다' });
   throw e;
@@ -61,7 +62,7 @@ export class ScannerBoothController {
     assertScannerOrigin(origin, this.pwaOrigin);
     void reply.header('cache-control', 'no-store');
     try {
-      return await this.booth.authorize({ eventId: me.eventId ?? '', deviceId: me.deviceId ?? '', body });
+      return await this.booth.authorize({ eventId: me.eventId ?? '', deviceId: me.deviceId ?? '', staffAccountId: me.accountId, body });
     } catch (e) {
       reject(e);
     }

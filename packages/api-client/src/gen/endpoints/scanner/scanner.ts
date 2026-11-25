@@ -1818,10 +1818,15 @@ export type createScannerBoothAuthorizationResponse410 = {
   status: 410
 }
 
+export type createScannerBoothAuthorizationResponse429 = {
+  data: TooManyRequestsResponse
+  status: 429
+}
+
 export type createScannerBoothAuthorizationResponseSuccess = (createScannerBoothAuthorizationResponse200) & {
   headers: Headers;
 };
-export type createScannerBoothAuthorizationResponseError = (createScannerBoothAuthorizationResponse403 | createScannerBoothAuthorizationResponse410) & {
+export type createScannerBoothAuthorizationResponseError = (createScannerBoothAuthorizationResponse403 | createScannerBoothAuthorizationResponse410 | createScannerBoothAuthorizationResponse429) & {
   headers: Headers;
 };
 
@@ -1868,7 +1873,7 @@ return orvalFetch<createScannerBoothAuthorizationResponseSuccess>(getCreateScann
 
 export const getCreateScannerBoothAuthorizationMutationKey = () => ['createScannerBoothAuthorization'] as const;
 
-export const getCreateScannerBoothAuthorizationMutationOptions = <TError = ErrorType<ProblemResponse>,
+export const getCreateScannerBoothAuthorizationMutationOptions = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createScannerBoothAuthorization>>, TError,CreateScannerBoothAuthorizationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createScannerBoothAuthorization>>, TError,CreateScannerBoothAuthorizationMutationVariables, TContext> => {
 
@@ -1897,13 +1902,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateScannerBoothAuthorizationMutationResult = NonNullable<Awaited<ReturnType<typeof createScannerBoothAuthorization>>>
     export type CreateScannerBoothAuthorizationMutationBody = BodyType<CreateScannerBoothAuthorizationBody> | undefined
-    export type CreateScannerBoothAuthorizationMutationError = ErrorType<ProblemResponse>
+    export type CreateScannerBoothAuthorizationMutationError = ErrorType<ProblemResponse | TooManyRequestsResponse>
     export type CreateScannerBoothAuthorizationMutationVariables = {data?: BodyType<CreateScannerBoothAuthorizationBody>}
 
     /**
  * @summary 부스 재발급 허용(현장 책임자가 관객 화면의 부스 코드를 찍음). 그 티켓의 BOOTH 등록을 10분 허용
  */
-export const useCreateScannerBoothAuthorization = <TError = ErrorType<ProblemResponse>,
+export const useCreateScannerBoothAuthorization = <TError = ErrorType<ProblemResponse | TooManyRequestsResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createScannerBoothAuthorization>>, TError,CreateScannerBoothAuthorizationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createScannerBoothAuthorization>>,

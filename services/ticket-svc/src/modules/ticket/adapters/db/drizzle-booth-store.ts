@@ -41,14 +41,14 @@ export class DrizzleBoothStore implements BoothStore {
       await tx.execute(sql`update booth_authorization set status = 'EXPIRED' where ticket_id = ${i.ticketId} and status = 'PENDING'`);
       const id = randomUUID();
       await tx.execute(sql`
-        insert into booth_authorization (id, ticket_id, event_id, booth_code_hash, reverification_id, status, day_key, requested_at, code_expires_at)
-        values (${id}, ${i.ticketId}, ${t.event_id}, ${i.codeHash}, ${i.reverificationId ?? null}, 'PENDING', ${i.dayKey}, ${new Date(i.nowMs)}, ${new Date(i.expiresAtMs)})
+        insert into booth_authorization (id, ticket_id, event_id, booth_code_hash, reverification_id, status, day_key, requested_at, code_expires_at, expires_at)
+        values (${id}, ${i.ticketId}, ${t.event_id}, ${i.codeHash}, ${i.reverificationId ?? null}, 'PENDING', ${i.dayKey}, ${new Date(i.nowMs)}, ${new Date(i.expiresAtMs)}, ${new Date(i.expiresAtMs)})
       `);
       return { kind: 'created' as const, boothRequestId: id, expiresAtMs: i.expiresAtMs };
     });
   }
 
-  async authorize(i: { eventId: string; deviceId: string; codeHash: string; nowMs: number; allowUntilMs: number }) {
+  async authorize(i: { eventId: string; deviceId: string; staffAccountId: string; codeHash: string; nowMs: number; allowUntilMs: number }) {
     return this.o.database.transaction(async (tx) => {
       const rows = (await tx.execute(sql`
         select b.id, b.ticket_id, b.event_id, b.status, b.expires_at, b.used_at, coalesce(t.seat_label, t.seat_id::text) seat_label, t.seat_id
@@ -64,7 +64,7 @@ export class DrizzleBoothStore implements BoothStore {
       const codeExpired = (await tx.execute(sql`select code_expires_at from booth_authorization where id = ${r.id}`)).rows as { code_expires_at: Date | string }[];
       if (ms(codeExpired[0]!.code_expires_at)! <= i.nowMs) return { kind: 'expired' as const };
       if (r.status === 'PENDING') {
-        await tx.execute(sql`update booth_authorization set status = 'ALLOWED', allowed_at = ${new Date(i.nowMs)}, expires_at = ${new Date(i.allowUntilMs)} where id = ${r.id}`);
+        await tx.execute(sql`update booth_authorization set status = 'ALLOWED', allowed_by = ${i.staffAccountId}, allowed_at = ${new Date(i.nowMs)}, expires_at = ${new Date(i.allowUntilMs)} where id = ${r.id}`);
         return { kind: 'authorized' as const, ticketId: r.ticket_id, seatLabel: r.seat_label ?? r.seat_id, allowUntilMs: i.allowUntilMs };
       }
       return { kind: 'authorized' as const, ticketId: r.ticket_id, seatLabel: r.seat_label ?? r.seat_id, allowUntilMs: ms(r.expires_at)! };
@@ -128,7 +128,8 @@ export class DrizzleBoothStore implements BoothStore {
              coalesce(se.reason, 'OVERRIDE_OTHER') reason, se.override_note note, gf.status flag_status
       from scan_event se
       join ticket t on t.id = se.ticket_id
-      left join gate_flag gf on gf.event_id = se.event_id and gf.ticket_id = se.ticket_id and gf.kind = 'OVERRIDE_REVIEW'
+      left join gate_flag_scan gfs on gfs.scan_event_id = se.id
+      left join gate_flag gf on gf.id = gfs.flag_id and gf.kind = 'OVERRIDE_REVIEW'
       where se.event_id = ${i.eventId} and se.method = 'OVERRIDE' and se.staff_account_id = ${i.staffAccountId}
       order by se.scanned_at_device desc, se.device_seq desc
       limit ${i.limit}

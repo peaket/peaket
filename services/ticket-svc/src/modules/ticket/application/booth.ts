@@ -34,6 +34,15 @@ export class BoothCodeExpired extends Error {
     this.name = 'BoothCodeExpired';
   }
 }
+/** 책임자·기기별 10분 5회 실패 제한(openapi createScannerBoothAuthorization, IR-11) */
+export class BoothRateLimited extends Error {
+  constructor() {
+    super('부스 코드 시도가 너무 많다');
+    this.name = 'BoothRateLimited';
+  }
+}
+export const BOOTH_FAILURE_LIMIT = 5;
+export const BOOTH_FAILURE_WINDOW_MS = 10 * 60_000;
 
 export interface BoothReverificationVerifier {
   verify(i: { token: string; accountId: string; ticketId: string }): Promise<boolean>;
@@ -50,6 +59,7 @@ export interface TicketBoothDeps {
 }
 
 export class TicketBooth {
+  #failures = new Map<string, { count: number; resetAtMs: number }>();
   constructor(private readonly d: TicketBoothDeps) {}
 
   /** 201 {boothRequestId, boothCode, expiresAt}. 코드·토큰 원문은 응답에만 싣는다 */
@@ -87,18 +97,28 @@ export class TicketBooth {
   }
 
   /** 200 {ticketId, seatLabel, allowUntil}. 모르는·만료·사용된 코드는 410 */
-  async authorize(i: { eventId: string; deviceId: string; body: unknown }): Promise<{ ticketId: string; seatLabel: string; allowUntil: string }> {
+  async authorize(i: { eventId: string; deviceId: string; staffAccountId: string; body: unknown }): Promise<{ ticketId: string; seatLabel: string; allowUntil: string }> {
     const body = (typeof i.body === 'object' && i.body !== null ? i.body : {}) as Record<string, unknown>;
     const code = parseBoothCode(body.boothCode);
     const now = this.d.clock.now();
+    const failureKey = `${i.staffAccountId}:${i.deviceId}`;
+    const failures = this.#failures.get(failureKey);
+    if (failures && failures.resetAtMs > now && failures.count >= BOOTH_FAILURE_LIMIT) throw new BoothRateLimited();
     const out: BoothAuthorizeOutcome = await this.d.store.authorize({
       eventId: i.eventId,
       deviceId: i.deviceId,
+      staffAccountId: i.staffAccountId,
       codeHash: boothHash(code),
       nowMs: now,
       allowUntilMs: now + BOOTH_PERMIT_TTL_MS,
     });
     this.d.onAuthorize?.(out.kind);
+    if (out.kind !== 'authorized') {
+      const current = failures && failures.resetAtMs > now ? failures : { count: 0, resetAtMs: now + BOOTH_FAILURE_WINDOW_MS };
+      this.#failures.set(failureKey, { ...current, count: current.count + 1 });
+    } else {
+      this.#failures.delete(failureKey);
+    }
     if (out.kind === 'not_found' || out.kind === 'expired') throw new BoothCodeExpired();
     // 다른 회차는 컨트롤러가 세션 회차로 먼저 막는다. 저장소가 알려 주면 403이다
     if (out.kind === 'event_mismatch') throw new BoothMismatch();

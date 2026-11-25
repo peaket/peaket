@@ -54,6 +54,8 @@ interface StoredFlag {
   kind: GateFlagKind;
   awareness: GateFlagAwareness;
   status: GateFlagStatus;
+  /** 이 표시를 만든 스캔(IR-06: 같은 티켓의 여러 예외 통과를 스캔별로 가른다) */
+  scanEventId?: string;
   resolvedBy?: string;
   resolvedAt?: string;
   note?: string;
@@ -326,7 +328,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
       this.scans.set(scan.id, stored);
       acceptedIds.push(scan.id);
       for (const kind of kinds) {
-        const flag = this.#createFlag(i.eventId, scan.ticketId, kind, scan.knownSeq, i.nowMs, kind === 'DUPLICATE' ? duplicateBase : undefined);
+        const flag = this.#createFlag(i.eventId, scan.ticketId, kind, scan.knownSeq, i.nowMs, kind === 'DUPLICATE' ? duplicateBase : undefined, scan.id);
         createdFlags.push(this.#flagView(flag));
         this.#appendChange(i.eventId, 'FLAG', { v: 1, flagId: flag.flagId, ticketId: flag.ticketId, kind: flag.kind, status: flag.status });
       }
@@ -347,7 +349,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
         const next: StoredScan = { ...old, result: 'REJECT', reason: 'ALREADY_IN', flag: 'DUPLICATE' };
         this.scans.set(old.id, next);
         // 내려간 기록은 새로 정상이 된 기록의 state_seq와 견준다
-        const flag = this.#createFlag(i.eventId, old.ticketId, 'DUPLICATE', old.knownSeq, i.nowMs, stateSeq ?? null);
+        const flag = this.#createFlag(i.eventId, old.ticketId, 'DUPLICATE', old.knownSeq, i.nowMs, stateSeq ?? null, old.id);
         createdFlags.push(this.#flagView(flag));
         this.#appendChange(i.eventId, 'FLAG', { v: 1, flagId: flag.flagId, ticketId: flag.ticketId, kind: flag.kind, status: flag.status });
       }
@@ -393,7 +395,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
     return this.#passScans(ticketId).at(-1);
   }
 
-  #createFlag(eventId: string, ticketId: string, kind: GateFlagKind, knownSeq: number, nowMs: number, awarenessBase?: number | null): StoredFlag {
+  #createFlag(eventId: string, ticketId: string, kind: GateFlagKind, knownSeq: number, nowMs: number, awarenessBase?: number | null, scanEventId?: string): StoredFlag {
     // '몰랐음/알고도 통과'는 정상 기록의 state_seq와 견준다. null이면 옛 행이라 CONCURRENT(offline-gate §7.1)
     const base = awarenessBase === null ? null : (awarenessBase ?? (this.seq.get(eventId) ?? 0));
     const flag: StoredFlag = {
@@ -403,6 +405,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
       kind,
       awareness: base === null || knownSeq < base ? 'CONCURRENT' : 'KNOWN',
       status: 'OPEN',
+      ...(scanEventId !== undefined ? { scanEventId } : {}),
       createdAt: new Date(nowMs).toISOString(),
     };
     this.flags.set(flag.flagId, flag);

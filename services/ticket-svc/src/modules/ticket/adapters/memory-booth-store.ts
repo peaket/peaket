@@ -22,6 +22,7 @@ interface ScanLike {
   gateZone?: string;
   scannedAtDevice: string;
   staffAccountId?: string;
+  overrideNote?: string;
 }
 interface FlagLike {
   flagId: string;
@@ -29,6 +30,8 @@ interface FlagLike {
   ticketId: string;
   kind: string;
   status: string;
+  /** 그 표시를 만든 스캔(IR-06: 티켓이 아니라 스캔으로 잇는다) */
+  scanEventId?: string;
 }
 interface Deps {
   deviceKeys: { tickets: Map<string, TicketLike> };
@@ -51,6 +54,7 @@ interface BoothRow {
   dayKey: string;
   requestedAtMs: number;
   codeExpiresAtMs: number;
+  allowedBy?: string;
   allowedAtMs?: number;
   expiresAtMs?: number;
   usedAtMs?: number;
@@ -90,11 +94,12 @@ export class MemoryBoothStore implements BoothStore {
       dayKey: i.dayKey,
       requestedAtMs: i.nowMs,
       codeExpiresAtMs: i.expiresAtMs,
+      expiresAtMs: i.expiresAtMs,
     });
     return { kind: 'created' as const, boothRequestId: id, expiresAtMs: i.expiresAtMs };
   }
 
-  async authorize(i: { eventId: string; deviceId: string; codeHash: string; nowMs: number; allowUntilMs: number }) {
+  async authorize(i: { eventId: string; deviceId: string; staffAccountId: string; codeHash: string; nowMs: number; allowUntilMs: number }) {
     // 회차를 먼저 거르면 다른 회차 기기의 코드가 not_found(410)가 된다. 코드로 먼저 찾고 회차 불일치는 event_mismatch(403)다(TR-25).
     // 같은 코드 해시가 여럿이면(시험이 같은 해시를 다시 쓴다) 아직 쓸 수 있는 PENDING·ALLOWED를 USED보다 먼저 고른다.
     const rank = (s: string): number => (s === 'PENDING' ? 0 : s === 'ALLOWED' ? 1 : 2);
@@ -107,6 +112,7 @@ export class MemoryBoothStore implements BoothStore {
     if (row.codeExpiresAtMs <= i.nowMs) return { kind: 'expired' as const };
     if (row.status === 'PENDING') {
       row.status = 'ALLOWED';
+      row.allowedBy = i.staffAccountId;
       row.allowedAtMs = i.nowMs;
       row.expiresAtMs = i.allowUntilMs;
     }
@@ -171,7 +177,7 @@ export class MemoryBoothStore implements BoothStore {
       .slice(0, i.limit);
     const flags = [...this.d.gate.flags.values()];
     return scans.map((s) => {
-      const flag = flags.find((f) => f.ticketId === s.ticketId && f.kind === 'OVERRIDE_REVIEW');
+      const flag = flags.find((f) => f.scanEventId === s.id && f.kind === 'OVERRIDE_REVIEW');
       const status: OverrideReviewStatus =
         flag?.status === 'OK' ? 'OK' : flag?.status === 'SUSPECT' ? 'SUSPECT' : flag?.status === 'UNDETERMINED' ? 'UNDETERMINED' : 'WAITING';
       return {
@@ -180,7 +186,7 @@ export class MemoryBoothStore implements BoothStore {
         ticketId: s.ticketId,
         seatLabel: this.#label(this.#ticket(s.ticketId)!),
         reason: s.reason ?? 'OVERRIDE_OTHER',
-        ...(s.reason ? {} : {}),
+        ...(s.overrideNote !== undefined ? { note: s.overrideNote } : {}),
         reviewStatus: status,
       };
     });
