@@ -1232,6 +1232,7 @@ describe('F-04-13 구현 리뷰 반영', () => {
     cancellationClient.nextEmptyResults = false;
     cancellationClient.nextThrow = false;
     cancellationClient.nextOmitLast = false;
+    locks.failNextRelease = false;
     admin.failOnCall = undefined;
   });
 
@@ -1461,7 +1462,7 @@ describe('F-04-13 구현 리뷰 반영', () => {
     expect(labels.calls.some((l) => l.label === 'HUMAN' && l.accountIds.includes(A(370)))).toBe(true);
   });
 
-  test('IR-28 모두 건너뛴 표 취소는 ACTIONED·BOT 라벨·조치 알림을 만들지 않는다', async () => {
+  test('IR-28 모두 건너뛴 표 취소는 닫히되 BOT 라벨·조치 알림을 만들지 않는다', async () => {
     const who = investigator();
     const approver = commander();
     const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(380), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
@@ -1472,9 +1473,80 @@ describe('F-04-13 구현 리뷰 반영', () => {
     await getApproval(approvalId, approver);
     expect((await approve(approvalId, approver, { reason: '근거' })).statusCode).toBe(200);
     const after = json(await getCase(c.caseId, who));
-    expect(after.status).not.toBe('ACTIONED');
+    expect(after.status).toBe('ACTIONED');
+    expect(after.closedAt).toBeTruthy();
     expect(labels.calls.some((l) => l.label === 'BOT' && l.accountIds.includes(A(380)))).toBe(false);
     expect(noticeCalls.some((n) => n.kind === 'actionNotice' && n.accountId === A(380))).toBe(false);
+  });
+
+  test('IR-12 모든 조치 계정이 인정되고 이용 제한이 없으면 REVERSED·HUMAN이다', async () => {
+    const c = await seedCase({
+      status: 'OBJECTED',
+      members: [memberOf(A(381), { appealResult: 'REJECTED', actionNotifiedAtMs: NOW - 10 * DAY, objectionResult: 'SUBMITTED', objectionReceivedAtMs: NOW - DAY })],
+      events: [
+        { seq: 1, kind: 'CREATED', actorId: id(0x900), note: null, detail: null, occurredAtMs: NOW - DAY },
+        { seq: 2, kind: 'ACTION_EXECUTED', actorId: id(0x900), note: null, detail: { action: 'CANCEL_TICKETS', results: [{ ticketId: T(381), outcome: 'ACCEPTED' }], targets: [{ ticketId: T(381), payerAccountId: A(381), holderAccountId: A(381) }] }, occurredAtMs: NOW - 2 * DAY },
+      ],
+    });
+    const patch = await send('PATCH', `/v1/ops/fraud-cases/${c.caseId}`, investigator(), {
+      ifMatch: '"1"',
+      body: { objectionDecisions: [{ accountId: A(381), decision: 'ACCEPTED', reason: '정상' }] },
+    });
+    expect(patch.statusCode, patch.payload).toBe(200);
+    expect(json(patch).status).toBe('REVERSED');
+    expect(json(patch).outcomeLabel).toBe('HUMAN');
+    expect(json(patch).closedAt).toBeTruthy();
+    const after = json(await getCase(c.caseId, investigator()));
+    expect(after.events.some((e: any) => e.kind === 'PRIORITY_GRANTED')).toBe(true);
+  });
+
+  test('IR-16 잠금 해제 실패는 승인을 FAILED로 되돌리고 다시 승인할 수 있다', async () => {
+    const who = investigator();
+    const approver = commander();
+    const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(390), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    seedTicket({ ticketId: T(390), payerAccountId: A(390) });
+    const created = await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(390)], reason: '봇' });
+    const approvalId = String(json(created).approvalId);
+    await getApproval(approvalId, approver);
+    locks.failNextRelease = true;
+    expect((await approve(approvalId, approver, { reason: '근거' })).statusCode).toBe(503);
+    expect(json(await getApproval(approvalId, approver)).status).toBe('FAILED');
+    expect((await approve(approvalId, approver, { reason: '다시' })).statusCode).toBe(200);
+    expect(json(await getApproval(approvalId, approver)).status).toBe('DONE');
+  });
+
+  test('IR-35 받은 사람의 취소 표와 제외 표를 결과별로 나눠 알린다', async () => {
+    const who = investigator();
+    const approver = commander();
+    const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(391), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    seedTicket({ ticketId: T(391), payerAccountId: A(391), holderAccountId: H(7) });
+    seedTicket({ ticketId: T(392), payerAccountId: A(391), holderAccountId: H(7) });
+    const created = await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(391)], ticketIds: [T(391), T(392)], reason: '봇' });
+    const approvalId = String(json(created).approvalId);
+    cancels.set(approvalId, [{ ticketId: T(391), outcome: 'ACCEPTED', cancellationId: randomUUID(), refundAmount: 100_000 }, { ticketId: T(392), outcome: 'SKIPPED_ALREADY_ENDED' }]);
+    await getApproval(approvalId, approver);
+    expect((await approve(approvalId, approver, { reason: '근거' })).statusCode).toBe(200);
+    const notices = noticeCalls.filter((n) => n.kind === 'holderResult' && n.accountId === H(7));
+    expect(notices.some((n) => n.result === 'CANCELED' && n.ticketIds.includes(T(391)) && !n.ticketIds.includes(T(392)))).toBe(true);
+    expect(notices.some((n) => n.result === 'EXCLUDED' && n.ticketIds.includes(T(392)) && !n.ticketIds.includes(T(391)))).toBe(true);
+  });
+
+  test('IR-34 HOLDER 진술은 소명 기한·사건 상태·사건 계정을 가린다', async () => {
+    const body = (accountId: string) => ({ appealId: randomUUID(), accountId, party: 'HOLDER', submittedAt: iso(NOW) });
+    const make = async (status: string) => {
+      const c = await seedCase({ status, appealDueAtMs: NOW + HOUR, members: [memberOf(A(392), { appealResult: 'REJECTED', actionNotifiedAtMs: NOW - 10 * DAY })] });
+      seedTicket({ ticketId: T(392), payerAccountId: A(392), holderAccountId: H(8) });
+      return c;
+    };
+    const ok = await make('ACTIONED');
+    expect((await send('POST', `/internal/v1/fraud-cases/${ok.caseId}/appeals`, {}, { body: body(H(8)) })).statusCode).toBe(200);
+    const account = await make('ACTIONED');
+    expect((await send('POST', `/internal/v1/fraud-cases/${account.caseId}/appeals`, {}, { body: body(A(392)) })).statusCode).toBe(409);
+    const cleared = await make('CLEARED');
+    expect((await send('POST', `/internal/v1/fraud-cases/${cleared.caseId}/appeals`, {}, { body: body(H(8)) })).statusCode).toBe(409);
+    const late = await make('ACTIONED');
+    clock.advance(2 * HOUR);
+    expect((await send('POST', `/internal/v1/fraud-cases/${late.caseId}/appeals`, {}, { body: body(H(8)) })).statusCode).toBe(409);
   });
 });
 

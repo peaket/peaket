@@ -146,6 +146,8 @@ describe('F-04-13 구현 리뷰 PostgreSQL', () => {
     expect(approval?.accountIds).toEqual([accountId]);
     const event = await raw.query("select count(*)::int as n from fraud_case_event where case_id = $1 and kind = 'ACTION_REQUESTED'", [c.caseId]);
     expect(event.rows[0].n).toBe(1);
+    const decided = await raw.query("select count(*)::int as n from fraud_case_event where case_id = $1 and kind = 'OBJECTION_DECIDED'", [c.caseId]);
+    expect(decided.rows[0].n).toBe(1);
   });
 
   test('IR-07 승인 상태와 사건·기록은 한 트랜잭션이고 판이 틀리면 승인도 남지 않는다', async () => {
@@ -169,6 +171,57 @@ describe('F-04-13 구현 리뷰 PostgreSQL', () => {
     expect(row.rows[0].status).toBe('PENDING_APPROVAL');
     const caseRow = await raw.query('select status, version from fraud_case where id = $1', [c.caseId]);
     expect(caseRow.rows[0]).toEqual({ status: 'APPEAL_PENDING', version: '1' });
+  });
+
+  test('IR-07 승인은 ACTION_APPROVED와 admin_data_access 감사를 같은 트랜잭션에 남긴다', async () => {
+    const approvals = new DrizzleFraudApprovalStore(database);
+    const payer = '0194b240-0000-7000-8000-000000000003';
+    const t1 = uuid();
+    const t2 = uuid();
+    const c = caseOf({ status: 'APPEAL_PENDING', members: [member(payer)] });
+    await store.putCase(c as any);
+    const r = record(c, {
+      action: 'CANCEL_TICKETS',
+      targets: [
+        { ticketId: t1, payerAccountId: payer, holderAccountId: payer, status: 'ISSUED', entryRecorded: false },
+        { ticketId: t2, payerAccountId: payer, holderAccountId: payer, status: 'ISSUED', entryRecorded: false },
+      ],
+    });
+    const decisionPending = { ...c, status: 'DECISION_PENDING', approvalId: r.approvalId, version: 2 } as any;
+    await approvals.request(r, {
+      events: [{ seq: 2, kind: 'ACTION_REQUESTED', actorId: r.requestedBy, note: null, detail: { approvalId: r.approvalId }, occurredAtMs: NOW }],
+      caseNext: decisionPending,
+      expectedVersion: 1,
+    } as any);
+    const approver = uuid();
+    await approvals.recordSummaryView({ approvalId: r.approvalId, adminAccountId: approver, nowMs: NOW });
+    const actions = new FraudActions({
+      store,
+      approvals,
+      schedule: { get: async () => undefined },
+      cancellations: { cancel: async (i: any) => i.targets.map((t: any) => ({ ticketId: t.ticketId, outcome: 'ACCEPTED', cancellationId: uuid(), refundAmount: 100_000 })) },
+      locks: { set: async () => ({ lockedTicketCount: 0, withdrawnOfferCount: 0, holders: [] }), release: async () => undefined },
+      labels: { apply: async () => undefined },
+      notifier: {
+        holderNotice: async () => undefined,
+        actionNotice: async () => undefined,
+        holderResult: async () => undefined,
+        objectionDecided: async () => undefined,
+        restrictionLifted: async () => undefined,
+        transferLockReleased: async () => undefined,
+        deadlineNotice: async () => undefined,
+      },
+      approverIdentity: { designations: async () => [], recentlyRevoked: async () => [] },
+      reauth: { verify: async () => ({ accountId: approver }) },
+      now: () => NOW,
+    } as any);
+    await actions.approve(r.approvalId, { accountId: approver, role: 'commander', sessionId: uuid() }, 'reauth-token', { reason: '근거', excludeTicketIds: [t2] });
+    const event = await raw.query("select detail from fraud_case_event where case_id = $1 and kind = 'ACTION_APPROVED'", [c.caseId]);
+    expect(event.rows).toHaveLength(1);
+    expect(event.rows[0].detail.excludedTickets).toEqual([t2]);
+    expect(event.rows[0].detail.summaryViewedAt).toBeTruthy();
+    const audit = await raw.query("select count(*)::int as n from audit_chain where record_type = 'ADMIN_DATA_ACCESS' and record_json->'payload'->>'approvalId' = $1", [r.approvalId]);
+    expect(audit.rows[0].n).toBe(1);
   });
 
   test('IR-11 한 사건의 열린 FRAUD_ACTION은 하나이고 상태 전이는 조건부다', async () => {

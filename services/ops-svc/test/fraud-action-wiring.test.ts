@@ -21,4 +21,15 @@ describe('F-04-13 운영 조립(IR-01·IR-02)', () => {
     expect(text).toMatch(/fraudApproverDirectory/);
     expect(text).toMatch(/GrpcFraudAppealCopies|HttpFraudAppealCopies/);
   });
+
+  test('IR-33 공휴일 달력을 investigations에 넘긴다', () => {
+    expect(source()).toMatch(/calendar:\s*caseCalendar/);
+  });
+
+  test('IR-36 새 Problem type이 계약 목록에 있다', () => {
+    const openapi = readFileSync(new URL('../../../docs/api/openapi.yaml', import.meta.url), 'utf8');
+    for (const type of ['appeal-due-not-passed', 'appeal-target-invalid', 'objection-decision-invalid', 'invalid-time']) {
+      expect(openapi).toContain(`${type}:`);
+    }
+  });
 });
