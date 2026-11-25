@@ -8,3 +8,5 @@
 - F-04-9 IR-11(낮음): `validateMeta`가 SYNTHETIC의 `seed` 패턴(1~64자 `[A-Za-z0-9._-]`)과 `generatorVersion=2`를 보지 않아 `seed='bad seed'`·`generatorVersion=3` 파일이 통과한다. 메타데이터 시드로 다시 생성하는 F-04-10·F-04-17 경로에서 `generateScenario`가 거절해 '같은 시드→같은 시나리오'가 끊긴다. `eventId`·`caseId` 길이 제한도 함께 정한다(`events.ts:259-292`)
 
 - 새 맥락 리뷰의 중간·낮은 지적 가운데 그 단계에서 고치지 않은 것을 '단계 ID: 지적 한 줄(파일)' 꼴로 적는다. 이 구간의 자기 단계를 다 끝낸 뒤 한 번에 고친다(ADR-0190 결정 2).
+- F-04-12 TR-19(낮음): 계획 §9 게이트 표가 "시험 36개 전부 실패(도메인 14·HTTP 22)"라고 적지만 §7·실제는 38개(도메인 16·HTTP 22)이고 마이그레이션 1개를 더하면 39개다. 세 숫자를 맞춘다(`docs/review/plans/F-04-12.md:280`, `:297`).
+- F-04-12 TR-20(낮음): `investigation-http.test.ts`가 공유 `clock`을 1일 앞당겼다가 마지막에 되돌리는데 `try/finally`가 없어, 중간 단언이 실패하면 시계가 앞당겨진 채 뒤 시험이 돌아 실패가 연쇄한다. 시험별 시계나 `try/finally`로 되돌린다(`services/ops-svc/test/investigation-http.test.ts:583-599`).
