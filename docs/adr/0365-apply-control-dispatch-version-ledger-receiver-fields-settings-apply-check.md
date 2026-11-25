@@ -1,8 +1,8 @@
 # ADR-0365: 제어 gRPC `ApplyControl`의 첫 전면 구현 — 판 번호 원장, 받는 파드 찾기와 ack, 받는 쪽 칸 이름, 판매 일시정지 중 유휴 시계, 설정형 명령의 적용 확인, 사전 모의 센 값(2026-11-23)
 
-- **상태**: 채택(추천 적용, 2026-11-23, BUILD_ORDER F-02-1 OPS-300 계획). [ADR-0102](0102-control-plane-direct-grpc-dedicated-pool-ops-db-audit-chain-worker-break-glass.md)(제어 전용 gRPC)·[ADR-0103](0103-control-as-state-startup-sync-broadcast-topics-compacted-settings.md)(제어는 상태, 판 번호, ack의 뜻)·[ADR-0143](0143-settings-commands-pg-switch-over-grpc-applied-version-outbox.md)(설정형 명령의 적용 확인)·[ADR-0340](0340-ops-command-lifecycle-dry-run-expiry-revert-actor-refs.md) 결정 11(사전 모의 센 값은 받는 쪽이 준다)이 정한 방향은 그대로 두고, 정본에 값이 없어 구현이 정해야 하는 세부만 정한다. 값마다 [가정]이고 측정·운영 뒤 바꿀 수 있다. 구현 몫: 결정 1~8은 F-02-1, 결정 9~11은 F-02-5가 구현한다(감독 결정 2026-11-23, 크기 5일 어림으로 나눔).
+- **상태**: 채택(추천 적용, 2026-11-23, BUILD_ORDER F-02-1 OPS-300 계획). [ADR-0102](0102-control-plane-direct-grpc-dedicated-pool-ops-db-audit-chain-worker-break-glass.md)(제어 전용 gRPC)·[ADR-0103](0103-control-as-state-startup-sync-broadcast-topics-compacted-settings.md)(제어는 상태, 판 번호, ack의 뜻)·[ADR-0143](0143-settings-commands-pg-switch-over-grpc-applied-version-outbox.md)(설정형 명령의 적용 확인)·[ADR-0340](0340-ops-command-lifecycle-dry-run-expiry-revert-actor-refs.md) 결정 11(사전 모의 센 값은 받는 쪽이 준다)이 정한 방향은 그대로 두고, 정본에 값이 없어 구현이 정해야 하는 세부만 정한다. 값마다 [가정]이고 측정·운영 뒤 바꿀 수 있다. 구현 몫: 결정 1~8은 F-02-1, 결정 9~11은 F-02-5가 구현한다(감독 결정 2026-11-23, 크기 5일 어림으로 나눔). 결정 13~20은 F-02-5 계획이 결정 9~11의 세부를 보충했다(추천 적용·감독 결정 2026-11-23).
 - **관련**: [docs/features/control-tower.md](../features/control-tower.md) §5 '제어 상태'·'설정형 명령의 적용 확인', §14 C-T6·C-T50·C-T51·C-T54, [docs/features/queue-admission.md](../features/queue-admission.md) §5(리더 상태·펜싱), [docs/features/seat-hold.md](../features/seat-hold.md) §2 '구매 세션 종료와 정리', [docs/data.md](../data.md) §3 `q:{event:E}:ctl`·`q:{admission}:ctl`·`q:{event:E}:notice`·`s:{event:E}:ctl`, docs/planning/03 §2.2 T11, `docs/api/proto/peaket/control/v1/control.proto`, openapi `CommandState.delivery`, [ADR-0056](0056-admission-leader-fencing-and-admission-person-recheck.md), [ADR-0073](0073-third-consistency-audit-delegated-decisions.md) 결정 17, [ADR-0123](0123-sale-review-suspended-takedown-resume-or-cancel.md), [ADR-0226](0226-aimd-safety-limits-and-control-input-first-implementation.md) 결정 7
-- **관련 ID**: OPS-300, C-T6 ①, C-T50, C-T51, C-T54, Q-T30, ASVS v5.0.0-1.4.2·2.1.1·15.1.3·15.3.5
+- **관련 ID**: OPS-300, C-T6 ①, C-T50, C-T51, C-T54, Q-T30, ASVS v5.0.0-1.3.6·1.4.2·2.1.1·2.3.3·15.1.3·15.3.5
 
 ## 맥락
 
@@ -69,6 +69,43 @@
 
 12. **시험 이름.** C-T50·C-T51·C-T54·C-T6 ①·Q-T30과 ASVS 행은 그 ID를 단다. 장부 항목 밖의 세부(판 원장, 대상 찾기, 칸 이름, 유휴 시계)는 `F021-` 번호를 단다.
 
+결정 13~20은 F-02-5 계획이 결정 9~11의 빈칸을 채운 보충이다(추천 적용 2026-11-23, BUILD_ORDER F-02-5 OPS-300 계획 `docs/review/plans/F-02-5.md`, 명령 7·trust-svc·core-svc·토픽 선언은 감독 결정 2026-11-23).
+
+13. **설정형 명령의 매개변수와 사건(결정 9 보충).** 범위는 모두 `PLATFORM`이다. 사건 값은 asyncapi `SettingChanged` 갈래 그대로이고, 모르는 칸은 접수 때 422 `invalid-command`다.
+
+    | 명령 | `params` | 메시지 키 | 실행(ACKED) 값 | 되돌리기·만료 |
+    | --- | --- | --- | --- | --- |
+    | 5 봇 판정 강도 | `{level, reassessMode?}`(BAT-355 그대로) | `PLATFORM:BOT_LEVEL:` | `{level, reassessMode}`(없으면 `SHADOW`, control-tower §3 명령 5) | 되돌리기: 그 키에 마지막으로 ACKED였던 명령 5의 값, 없으면 `{STANDARD, SHADOW}` [가정] |
+    | 8 로그 레벨 | `{service, level}`. `level`은 `DEBUG`·`TRACE`, `service`는 설정 사건을 읽는 서비스 목록(지금 core-svc·identity-svc·ops-svc·payment-svc·purchase-svc·queue-svc·ticket-svc) | `PLATFORM:LOG_LEVEL:<service>` | `{level}`, `expiresAt` = 판 + 30분 | 만료(정비 바퀴, `AUTO_EXPIRED`)와 되돌리기(`REVERTED`) 모두 `{level: INFO}`, `expiresAt` 없음 |
+    | 9 비핵심 기능 끄기 | `{flag}`. `flag`는 읽는 쪽이 있는 플래그 목록(지금 `reviews` → core-svc) | `PLATFORM:FEATURE_FLAG:<flag>` | `{enabled: false}` | 되돌리기: `{enabled: true}` |
+
+    - 목록 밖 서비스·플래그는 422 `invalid-command`다. 플랫폼은 받은 설정마다 `control_settings_applied_version`을 내므로, 읽는 쪽이 없는 플래그나 설정을 읽지 않는 서비스를 받으면 아무것도 바뀌지 않았는데 '적용 확인됨'이 될 수 있다. 그래서 목록은 실제로 읽는 쪽이 생길 때 그 기능이 더한다.
+    - 명령 7의 purchase-svc 사건(`LobbyBannerValue {templateId}`)은 승인된 공지 템플릿 저장소(OPS-410)와 좌석 선택 화면의 읽는 쪽이 없어 그것을 만드는 F-03-5(OPS-410)가 낸다(감독 결정 2026-11-23). 명령 7은 지금 결정 2의 제어 gRPC 갈래(queue-svc)뿐이다.
+    - 사건의 판(`occurredAt` 밀리초)은 결정 1의 원장이 (범위, `SETTING:<종류>:<대상>`)마다 max(마지막 판 + 1, 지금 밀리초)로 매긴다. 받는 쪽 설정 저장은 판이 같거나 작으면 버리므로, 같은 밀리초에 낸 두 명령의 뒤 것이 사라지지 않게 한다. 명령 12(BAT-360)도 이 원장으로 옮긴다.
+    - 지우는 표시(Kafka 빈 값)는 내지 않는다. 되돌리기·만료는 기본값의 새 사건이다.
+    - 상태 쓰기(`ACKED`·`REVERTED`·`AUTO_EXPIRED`), 명령 사건, 감사 기록, 적용 확인 행(결정 14)과 Outbox 행(마지막 문장)은 한 트랜잭션이다. 하나라도 실패하면 모두 되돌아가고 명령은 `FAILED`(사유 `settings-outbox-not-wired` 또는 오류 이름)로 남는다(ASVS 2.3.3).
+14. **적용 확인 기록과 경계(결정 10 보충).** ops DB `command_apply_check`(ops-svc 마이그레이션 0026)에 설정 사건마다 한 행을 둔다: 명령 ID, 단계(`ACKED`·`REVERTED`·`AUTO_EXPIRED`), 메시지 키, 판, Outbox 행 ID, 받는 서비스, 상태, 나간 시각, 못 미친 파드(파드 이름·판, 받지 못했으면 판 없음), 경보를 연 표시, 바꾼 시각. 명령의 `delivery`(`kind: APPLY_CHECK`)는 그 명령의 마지막 사건 행이고 `targetCount`·`ackedCount`는 마지막으로 본 파드 수·판 이상인 파드 수다.
+    - 나간 시각은 ops Outbox 행의 `sent_at`이다. 행이 아직 나가지 않았고 행을 쓴 때부터 5,000ms를 넘었으면 `OUTBOX_WAITING`, 그 전에는 `CHECKING`이다.
+    - 30초는 나간 시각부터 센다(Kafka가 멈춘 동안은 30초를 세지 않는다). 나간 시각 + 30,000ms 전에 모두 맞으면 `CONFIRMED`, 그 시각(정각 포함)에 못 미친 파드가 있으면 `UNCONFIRMED`이고 SEV3 ops 경보 `settings-apply-unconfirmed`(경보 사건 키 = 명령 ID)를 한 번 연다. 그 뒤 나간 시각 + 10분 30초까지 1분마다 다시 보고, 모두 맞으면 `CONFIRMED`로 바꾸고 경보를 닫는다. 그때까지 못 맞으면 `UNCONFIRMED`·경보 열림으로 멈춘다(온콜이 RB-11대로 본다).
+    - 같은 키의 더 새 판이 나가도 '판 이상'으로 견주므로 옛 행은 새 판을 받은 파드에서 맞는다.
+    - Outbox 행이 파티션 지우기로 없어졌으면 나간 것으로 보고, 처음 본 시각을 나간 시각으로 쓴다.
+15. **Prometheus 질의(결정 10 보충).** 주소는 `PEAKET_PROMETHEUS_URL`에서만 온다. 운영과 같은 환경(플랫폼 `isProductionLikeEnv`)에서 없으면 ops-svc 시작이 실패하고, local·ci에서 없으면 상태는 `UNKNOWN`(사유 `prometheus-not-wired`)이다. 받는 서비스마다 즉시 질의 둘(`GET /api/v1/query`, 2초 [가정])을 부른다: `up{service="<서비스>"} == 1`(파드 목록 P)과 `control_settings_applied_version{service="<서비스>", key="<메시지 키>"}`(파드별 판). 파드는 `pod` 라벨로 잇는다 [가정].
+    - 라벨 값은 결정 13의 목록과 ops-svc가 만든 메시지 키에서만 오고, 질의 글에 넣기 직전에 `^[A-Za-z0-9:_-]{1,200}$`로 다시 본다. 맞지 않으면 부르지 않고 `UNKNOWN`(`invalid-label`)이다(ASVS 1.3.6).
+    - P가 비면 `UNKNOWN`(`no-targets`)이다(빈 목록을 '모두 맞음'으로 보지 않는다). P의 파드 가운데 판 지표가 없는 파드는 못 미친 파드(판 없음)다.
+    - 시간 초과·연결 실패·HTTP 오류·응답 꼴 오류는 모두 `UNKNOWN`이고 경보를 열지 않으며 다음 바퀴(5초)에 다시 본다. `UNKNOWN`이 나간 시각 + 30초를 넘겨도 `UNCONFIRMED`로 바꾸지 않는다.
+    - 받는 서비스 표(결정 10)는 그대로다. 명령 5의 trust-svc 읽는 쪽은 결정 19다.
+16. **`PreviewControl` 계약(결정 11 보충).** `control.proto`의 `ControlReceiver`에 다음을 더한다.
+    - `PreviewControlRequest{scope, kind, keys}`: `kind`는 `CONTROL_KIND_ADMISSION_TARGET`(명령 1 키, admission-ctrl) 또는 `CONTROL_KIND_SALE_PAUSE`(명령 3 키, purchase-svc·queue-svc). `keys`는 1~16개 [가정]. 범위는 소문자 UUID 회차이고, 꼴이 틀리면 `INVALID_ARGUMENT`다.
+    - `PreviewControlResponse{counts[{key, value(double), source, measured_at}], unavailable[{key, reason}], pod_name}`. 받는 쪽이 세지 않는 키는 `unavailable`(`unknown-key`)이고 오류가 아니다. 아무것도 쓰지 않는다.
+    - admission-ctrl은 리더만 답하고(아니면 `UNAVAILABLE` `not-leader`), 회차마다 마지막 리더 주기의 값을 메모리에 두었다가 준다. 리더가 바뀐 뒤 첫 주기 전이면 `no-cycle`이다.
+    - purchase-svc의 `holdsPerSecond5m`·`paymentAcceptsPerSecond5m`은 purchase DB의 홀드 원장 `seat_hold`와 주문의 결제 접수 시각으로 센다. 세는 데 쓸 칸·색인이 없으면 `no-source`다.
+    - 명령 3 범위가 회차 여럿이면 ops-svc가 회차마다 부르고 더한다. 한 회차라도 실패하면 그 키는 `unavailable`이다(일부 합을 적지 않는다). `PLATFORM` 범위는 모두 `unavailable`(`platform-scope-not-counted`) [가정]이다. 명령 4 키는 원천이 정해지는 OPS-310 몫(F-02-6)까지 `unavailable` 그대로다.
+    - ops-svc는 받은 `key`가 요청한 키인지, `value`가 유한하고 0 이상인지 본다. 아니면 그 키를 `unavailable`(`invalid-count`)로 적는다. 부르기 실패는 `receiver-unavailable:<서비스>`·`receiver-timeout:<서비스>`다.
+17. **C-T51의 읽는 쪽(감독 결정 2026-11-23).** core-svc는 설정 저장소의 `PLATFORM:FEATURE_FLAG:reviews`가 `{enabled: false}`인 동안 후기 경로(openapi 후기 목록·쓰기·사진·신고)에 503(`ServiceUnavailable`, '후기 기능 꺼짐(명령 9)')을 돌려준다. 값이 없거나 `true`면 그대로다. 바뀜은 설정 저장소의 바뀜 알림으로 다음 요청부터 바로 반영한다(따로 캐시하지 않는다).
+18. **시험 이름(결정 12 보충).** C-T54 ①~④, C-T51 ①~③, C-T6 ①과 ASVS 1.3.6·2.3.3 행은 그 ID를 단다. 장부 밖 세부(사건 꼴, 판, 적용 확인 경계, 질의, 센 값, trust-svc 강도, 토픽 선언)는 `F025-` 번호를 단다.
+19. **trust-svc의 명령 5 적용(감독 결정 2026-11-23, docs/features/bot-defense.md §4.4 '설정 읽기').** trust-svc는 시작 작업에 플랫폼 설정 읽기(`startServiceControlSync`)를 더해, `control.settings`를 처음부터 읽기 전에는 준비 상태가 되지 않는다(Kafka에 닿지 못하면 ADR-0103 결정 2의 30초 뒤 기본값). 설정 저장소의 `PLATFORM:BOT_LEVEL:`이 바뀌면 규칙 묶음의 강도를 바로 바꾼다. 계약 강도와 비공개 규칙 파일의 강도 이름은 `RELAXED` → `RELAXED`, `STANDARD` → `BASE`, `AGGRESSIVE` → `STRICT`로 잇는다. 값이 없거나 만료됐거나 꼴이 틀리면 `BASE`다(꼴이 틀린 값은 경고 로그 한 줄). 재평가 모드(`reassessMode`)는 설정 저장소에 남기만 하고, 그것을 따르는 재평가 작업자(`trust-reassess`, bot-defense §8)를 만드는 기능이 읽는다. 강도는 한 요청 안에서 한 번만 읽는다(지금 `ScoreRisk` 그대로).
+20. **`control.settings` 토픽 선언(감독 결정 2026-11-23).** 로컬·CI kind 무대의 토픽 목록(`tools/local/v1-objects.mjs`의 `V1_KAFKA_TOPICS`·`kafkaTopicArgs`)에 `control.settings`를 더하고, 만들 때 `cleanup.policy=compact`, `min.compaction.lag.ms=86400000`(1일), `delete.retention.ms=604800000`(7일)을 싣는다(ADR-0103 결정 4). 압축 토픽에는 시간 보존(`retention.ms`)을 걸지 않는다. C-T51 ①의 통합 시험은 이 선언에서 토픽 설정을 읽어 토픽을 만든다. 운영 MSK(Terraform) 선언은 구간 5(F-09-3) 몫이다.
+
 ## 검토한 대안
 
 | 대안 | 판단 |
@@ -82,7 +119,7 @@
 ## 결과
 
 - 명령 1·2·3·7·11이 받는 쪽 저장소에 판과 함께 서고, 새로 뜨거나 늘어난 파드도 같은 상태로 시작한다. 옛 리더의 명령 쓰기는 펜싱으로 막힌다.
-- 대가: ops DB 표 둘(`control_version`·`command_delivery`)과 purchase DB 칸 셋이 늘고, 정비 바퀴가 `DISPATCHED`·적용 확인 명령을 더 본다.
+- 대가: ops DB 표 둘(`control_version`·`command_delivery`)과 purchase DB 칸 셋이 늘고, 정비 바퀴가 `DISPATCHED`·적용 확인 명령을 더 본다. F-02-5가 ops DB 표 하나(`command_apply_check`, 결정 14)와 `control.proto` RPC 하나(`PreviewControl`, 결정 16)를 더한다. trust-svc가 설정을 읽는다(결정 19).
 - 남는 한계: 헤드리스 DNS의 캐시만큼 새 파드를 늦게 볼 수 있다(다시 풀기와 새 파드의 시작 읽기가 메운다). 적용 확인은 관측이라 지표 수집 간격만큼 늦다(ADR-0143). 리더 전용 Service·`role=leader` 라벨·Lease 권한·`<서비스>-control` Service는 배포 차트 몫이고 구간 5(인프라 구축, ADR-0332)에서 kind로 본다.
 
 ## 되돌릴 조건
