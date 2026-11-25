@@ -1,0 +1,25 @@
+{
+  "name": "@peaket/inv-forensics",
+  "private": true,
+  "version": "0.0.0",
+  "description": "조사 저장소 inv의 기록 고정·해시 사슬과 부정 예매 후보 R1~R6·결과 지문(LCH-250, FX-T11, FX-T14, F-04-11). 동결 로컬 트랙이라 배포하지 않는다",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "snapshot": "node dist/main.js snapshot",
+    "cluster": "node dist/main.js cluster",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@peaket/platform": "workspace:*"
+  },
+  "devDependencies": {
+    "@peaket/config": "workspace:*",
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
