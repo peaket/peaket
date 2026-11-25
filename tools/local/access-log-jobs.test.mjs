@@ -44,7 +44,8 @@ async function fakeClickHouse({ partitions = [], adminRows = [], failDrop = null
   const queries = [];
   const h = await listen(async (req, res) => {
     const url = new URL(req.url, 'http://x');
-    const q = url.searchParams.get('query') ?? '';
+    const raw = await bodyOf(req);
+    const q = url.searchParams.get('query') ?? raw;
     queries.push(q);
     if (q.includes('system.parts') || q.includes('system.partitions')) {
       res.writeHead(200, { 'content-type': 'application/json' });
