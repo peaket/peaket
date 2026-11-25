@@ -1170,6 +1170,7 @@ describe('F-04-13 표 취소·환급·마감', () => {
     const bossId = boss['x-user-id']!;
     eligibleApproverIds = [bossId];
     const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(213), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    seedTicket({ ticketId: T(213), payerAccountId: A(213) });
     const created = await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(213)], reason: '봇' });
     expect(created.statusCode).toBe(201);
     const approvalId = String(json(created).approvalId);
@@ -1190,6 +1191,7 @@ describe('F-04-13 표 취소·환급·마감', () => {
     const bossId = boss['x-user-id']!;
     eligibleApproverIds = [bossId];
     const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(214), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    seedTicket({ ticketId: T(214), payerAccountId: A(214) });
     const created = await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(214)], reason: '봇' });
     expect(created.statusCode).toBe(201);
     const approvalId = String(json(created).approvalId);
@@ -1292,6 +1294,7 @@ describe('F-04-13 구현 리뷰 반영', () => {
 
   test('IR-10 표 취소 대상 경계와 취소 결과 누락·호출 오류는 422·FAILED다', async () => {
     const who = investigator();
+    const approver = commander();
     const emptyListCase = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(312), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
     expect((await actionRequest(emptyListCase.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(312)], ticketIds: [], reason: '봇' })).statusCode).toBe(422);
     expect((await actionRequest(emptyListCase.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(312)], reason: '봇' })).statusCode).toBe(422);
@@ -1307,18 +1310,18 @@ describe('F-04-13 구현 리뷰 반영', () => {
       if (n > 1) seedTicket({ ticketId: T(ticket + 1), payerAccountId: A(account) });
       const created = await actionRequest(cs.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(account)], reason: '봇' });
       expect(created.statusCode, created.payload).toBe(201);
-      await getApproval(String(json(created).approvalId), commander());
+      await getApproval(String(json(created).approvalId), approver);
       return { caseId: cs.caseId, approvalId: String(json(created).approvalId) };
     };
     const empty = await make(315, 315, 1);
     cancellationClient.nextEmptyResults = true;
-    expect(json(await approve(empty.approvalId, commander(), { reason: '근거' })).status).toBe('FAILED');
+    expect(json(await approve(empty.approvalId, approver, { reason: '근거' })).status).toBe('FAILED');
     const thrown = await make(316, 316, 1);
     cancellationClient.nextThrow = true;
-    expect(json(await approve(thrown.approvalId, commander(), { reason: '근거' })).status).toBe('FAILED');
+    expect(json(await approve(thrown.approvalId, approver, { reason: '근거' })).status).toBe('FAILED');
     const partial = await make(317, 317, 2);
     cancellationClient.nextOmitLast = true;
-    expect(json(await approve(partial.approvalId, commander(), { reason: '근거' })).status).toBe('FAILED');
+    expect(json(await approve(partial.approvalId, approver, { reason: '근거' })).status).toBe('FAILED');
   });
 
   test('IR-12 인정 계정의 취소 표만 우선 구매로 열고 혼합 판정은 ACTIONED로 닫는다', async () => {
@@ -1359,20 +1362,22 @@ describe('F-04-13 구현 리뷰 반영', () => {
     });
     expect(patch2.statusCode, patch2.payload).toBe(200);
     const liftApproval = String(json(patch2).approvalId);
-    await getApproval(liftApproval, commander());
-    expect((await approve(liftApproval, commander(), { reason: '이의 인정' })).statusCode).toBe(200);
+    const boss = commander();
+    await getApproval(liftApproval, boss);
+    expect((await approve(liftApproval, boss, { reason: '이의 인정' })).statusCode).toBe(200);
     expect(json(await getCase(restricted.caseId, investigator())).status).toBe('ACTIONED');
   });
 
   test('IR-14 받은 사람에게 취소 결과 CANCELED를 알린다', async () => {
     const who = investigator();
+    const approver = commander();
     const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(330), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
     seedTicket({ ticketId: T(330), payerAccountId: A(330), holderAccountId: H(4) });
     const created = await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(330)], ticketIds: [T(330)], reason: '봇' });
     const approvalId = String(json(created).approvalId);
     cancels.set(approvalId, [{ ticketId: T(330), outcome: 'ACCEPTED', cancellationId: randomUUID(), refundAmount: 100_000 }]);
-    await getApproval(approvalId, commander());
-    expect((await approve(approvalId, commander(), { reason: '근거' })).statusCode).toBe(200);
+    await getApproval(approvalId, approver);
+    expect((await approve(approvalId, approver, { reason: '근거' })).statusCode).toBe(200);
     const notice = noticeCalls.find((n) => n.kind === 'holderResult' && n.accountId === H(4));
     expect(notice).toMatchObject({ result: 'CANCELED' });
   });
@@ -1458,13 +1463,14 @@ describe('F-04-13 구현 리뷰 반영', () => {
 
   test('IR-28 모두 건너뛴 표 취소는 ACTIONED·BOT 라벨·조치 알림을 만들지 않는다', async () => {
     const who = investigator();
+    const approver = commander();
     const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(380), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
     seedTicket({ ticketId: T(380), payerAccountId: A(380) });
     const created = await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(380)], reason: '봇' });
     const approvalId = String(json(created).approvalId);
     cancels.set(approvalId, [{ ticketId: T(380), outcome: 'SKIPPED_ALREADY_ENDED' }]);
-    await getApproval(approvalId, commander());
-    expect((await approve(approvalId, commander(), { reason: '근거' })).statusCode).toBe(200);
+    await getApproval(approvalId, approver);
+    expect((await approve(approvalId, approver, { reason: '근거' })).statusCode).toBe(200);
     const after = json(await getCase(c.caseId, who));
     expect(after.status).not.toBe('ACTIONED');
     expect(labels.calls.some((l) => l.label === 'BOT' && l.accountIds.includes(A(380)))).toBe(false);
