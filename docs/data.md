@@ -2696,6 +2696,8 @@ erDiagram
         jsonb row_counts "표마다 행 수"
         timestamptz range_from "이 판에 든 행의 적재 시각(ingested_at) 하한(초과). 판 1은 NULL, 판 N은 직전 판의 frozen_at"
         bool late "'늦은 적재' 표시. 조사 적재가 따라오지 못해 30분 [가정] 기다린 뒤 고정했으면 true(늦게 들어온 행은 다음 판)"
+        text verify_status "OK|MISMATCH. 하루 한 번 다시 계산해 견준 결과(추천 적용 2026-11-25, F-04-12). MISMATCH면 SEV2와 보안 사고 기록 대상이고 그 판을 쓰는 증거 묶음 내보내기를 막는다(docs/features/forensic-replay.md §6.7.2)"
+        timestamptz verified_at "마지막으로 다시 계산해 견준 시각. 아직 검증하지 않았으면 NULL"
     }
     fraud_cluster {
         uuid id PK "부정 예매 후보 묶음(FR-072). 후보는 조치가 아니다"
