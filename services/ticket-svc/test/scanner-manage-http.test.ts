@@ -189,6 +189,9 @@ describe('SCR-052 기기 현황·내 예외 통과', () => {
   test('SCR-052 책임자는 기기 현황의 모든 칸과 내 OVERRIDE의 사후 검토 네 상태를 본다', async () => {
     const mine = await scanOverride(TICKET_A, LEAD_SESSION, LEAD, '액정 파손');
     expect(mine.statusCode).toBe(200);
+    // 같은 티켓을 두 번 예외 통과해도 스캔마다 한 행이고, 사후 검토 표시도 그 스캔에만 붙는다(IR-06)
+    const mineAgain = await scanOverride(TICKET_A, LEAD_SESSION, LEAD, '같은 사람 두 번째');
+    expect(mineAgain.statusCode).toBe(200);
     // 다른 책임자 기록은 다른 티켓에 둔다: LEAD의 '내 것만' 목록에 섞이지 않아야 한다(TR-09 자기모순 고침)
     const other = await scanOverride(TICKET_B, OTHER_LEAD_SESSION, OTHER_LEAD, '방전');
     expect(other.statusCode).toBe(200);
@@ -212,21 +215,24 @@ describe('SCR-052 기기 현황·내 예외 통과', () => {
     expect(body.devices.find((d) => d.deviceId === DEVICE)).toEqual(
       expect.objectContaining({ deviceId: DEVICE, name: '동문-01', placement: { gateZone: '동문', mode: 'IN' }, ready: true, packageSeq: 7, lastSyncAt: new Date(LAST_SYNC_MS).toISOString(), pendingUploads: 2 }),
     );
-    // 회차 전체: LEAD 4 + 다른 책임자 1 = 5
+    // 회차 전체: LEAD 5건(A 두 번 + C·D·E)이지만 같은 방향 재스캔은 앞 기록을 REJECT로 내리므로 입장 수는 5,
+    // 예외 통과 기록은 6건(A 두 번 + B + C·D·E)이다
     expect(body.entriesByZone).toEqual({ 동문: 5 });
-    expect(body.rejectsByReason).toEqual({});
+    expect(body.rejectsByReason).toEqual({ ALREADY_IN: 1 });
     expect(body.openFlags).toBe(openFlagsOf());
-    expect(body.openFlags).toBe(5);
+    expect(body.openFlags).toBe(7);
     expect(body.boothCount).toBe(0);
-    expect(body.overrideCount).toBe(5);
+    expect(body.overrideCount).toBe(6);
     expect(body.entryClosedAt).toBe(new Date(CLOSED_AT_MS).toISOString());
 
-    // 내 것만: LEAD의 A·C·D·E 4건. 다른 책임자의 B는 없다
+    // 내 것만: LEAD의 A 두 번·C·D·E 5건. 다른 책임자의 B는 없다
     const list = await scannerGet(`/v1/scanner/events/${EVENT}/override-passes`, LEAD_SESSION, LEAD);
     expect(list.statusCode).toBe(200);
     const passes = JSON.parse(list.payload) as { items: { scanId: string; at: string; ticketId: string; seatLabel: string; reason: string; note?: string; reviewStatus: string }[] };
-    expect(passes.items).toHaveLength(4);
-    expect(passes.items.map((p) => p.seatLabel).sort()).toEqual([SEAT_A, SEAT_C, SEAT_D, SEAT_E].sort());
+    expect(passes.items).toHaveLength(5);
+    expect(new Set(passes.items.map((p) => p.scanId)).size).toBe(5);
+    expect(passes.items.filter((p) => p.ticketId === TICKET_A)).toHaveLength(2);
+    expect(passes.items.map((p) => p.seatLabel).sort()).toEqual([SEAT_A, SEAT_A, SEAT_C, SEAT_D, SEAT_E].sort());
     expect(passes.items.every((p) => p.reviewStatus === 'WAITING')).toBe(true);
     expect(passes.items.some((p) => p.ticketId === TICKET_B || p.seatLabel === SEAT_B)).toBe(false);
     expect(passes.items.find((p) => p.ticketId === TICKET_A)?.seatLabel).toBe(SEAT_A);
@@ -244,16 +250,17 @@ describe('SCR-052 기기 현황·내 예외 통과', () => {
     }
     const after = await scannerGet(`/v1/scanner/events/${EVENT}/override-passes`, LEAD_SESSION, LEAD);
     const afterItems = (JSON.parse(after.payload) as { items: { ticketId: string; reviewStatus: string }[] }).items;
-    expect(Object.fromEntries(afterItems.map((p) => [p.ticketId, p.reviewStatus]))).toEqual({
-      [TICKET_A]: 'OK',
+    const aStatus = afterItems.filter((p) => p.ticketId === TICKET_A).map((p) => p.reviewStatus).sort();
+    expect(aStatus).toEqual(['OK', 'WAITING']);
+    expect(Object.fromEntries(afterItems.filter((p) => p.ticketId !== TICKET_A).map((p) => [p.ticketId, p.reviewStatus]))).toEqual({
       [TICKET_C]: 'SUSPECT',
       [TICKET_D]: 'UNDETERMINED',
       [TICKET_E]: 'WAITING',
     });
     const statusAfter = await scannerGet(`/v1/scanner/events/${EVENT}/devices`, LEAD_SESSION, LEAD);
-    // B(다른 책임자)와 E(내 대기)가 OPEN으로 남는다
+    // B(다른 책임자)·A의 두 번째·E(내 대기)·A 첫 스캔의 DUPLICATE 표시가 OPEN으로 남는다
     expect((JSON.parse(statusAfter.payload) as { openFlags: number }).openFlags).toBe(openFlagsOf());
-    expect((JSON.parse(statusAfter.payload) as { openFlags: number }).openFlags).toBe(2);
+    expect((JSON.parse(statusAfter.payload) as { openFlags: number }).openFlags).toBe(4);
   });
 
   test('SCR-052 내 예외 통과 limit은 기본 50·최대 200이고 0·201·400·글자는 400이다', async () => {

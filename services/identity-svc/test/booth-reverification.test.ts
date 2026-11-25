@@ -110,5 +110,21 @@ describe('O-T28 ① 부스 본인확인 대조', () => {
     expect(await verify.run({ token: done.resultToken!, accountId: s.accountId, ticketId: TICKET })).toBe(true);
     clock.advance(1);
     expect(await verify.run({ token: done.resultToken!, accountId: s.accountId, ticketId: TICKET })).toBe(false);
+
+    // IR-09: 같은 결과 확정이 동시에 두 번 와도 토큰을 실제 저장한 쪽만 200·resultToken이고, 진 쪽은 409다
+    const racer = await login();
+    await verifyFirst(racer.accountId, 'holder-race');
+    const raceStart = JSON.parse((await boothStart(racer, { ticketId: TICKET, consent: true })).payload) as { verificationId: string };
+    const [left, right] = await Promise.all([
+      verifyResult(racer, raceStart.verificationId, agencyResult(clock, raceStart.verificationId, { person: 'holder-race' })),
+      verifyResult(racer, raceStart.verificationId, agencyResult(clock, raceStart.verificationId, { person: 'holder-race' })),
+    ]);
+    const winner = [left, right].find((r) => r.statusCode === 200);
+    const loser = [left, right].find((r) => r.statusCode === 409);
+    expect(winner?.statusCode).toBe(200);
+    expect(loser?.statusCode).toBe(409);
+    const winnerBody = JSON.parse(winner!.payload) as { resultToken?: string };
+    expect(winnerBody.resultToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect((JSON.parse(loser!.payload) as { resultToken?: string }).resultToken).toBeUndefined();
   });
 });

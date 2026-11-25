@@ -269,6 +269,12 @@ describe('O-T28 ② 부스 코드·책임자 허용', () => {
     const fresh = bodyOf<{ boothCode: string }>(await requestBooth(TICKET_C));
     clock.advance(CODE_MS);
     expect((await authorizeBooth(fresh.boothCode)).statusCode).toBe(410);
+
+    // IR-11: 책임자·기기별 10분 5회 실패 제한. 위의 모르는 코드 1회 + 아래 4회 = 5회, 6번째는 429이고 10분이 지나면 다시 410이다
+    for (let n = 0; n < 4; n += 1) expect((await authorizeBooth('ZZZZZZZZ')).statusCode).toBe(410);
+    expect((await authorizeBooth('ZZZZZZZZ')).statusCode).toBe(429);
+    clock.advance(10 * 60_000);
+    expect((await authorizeBooth('ZZZZZZZZ')).statusCode).toBe(410);
   });
 
   test('O-T28 ② 부스 허용 경로는 PWA 출처·JSON만 받는다(Origin 없음·다른 출처 403, text/plain 415)', async () => {

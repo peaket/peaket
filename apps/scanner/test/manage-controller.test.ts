@@ -253,4 +253,9 @@ test('SCR-052 화면은 fixtures/scanner 목업을 읽지 않고 manage-model의
   assert.ok(/manageTabsFor|gate_lead|isGateLead/.test(shell), 'shell이 일반 스태프에게 현장 관리 메뉴를 숨겨야 한다');
   // 오프라인 안내는 d5 §8.5 상태 문구를 그대로 쓴다
   assert.ok(/오프라인: 배치 변경·부스 허용은 연결된 뒤에 됩니다/.test(banner), '오프라인 안내 문구가 없다');
+  // 확인 스캔은 이 화면에서 스캔 화면의 VERIFY 모드를 열 수 없으므로 사유와 함께 비활성으로 그린다(IR-08, d5 §8.5 ③)
+  const confirm = screen.slice(screen.indexOf('function ConfirmScanButton'), screen.indexOf('const GUIDE'));
+  assert.ok(/disabled/.test(confirm), '확인 스캔하기 버튼이 죽어 있으면 안 된다(사유 있는 비활성)');
+  assert.ok(/스캔 화면/.test(confirm), '확인 스캔을 할 수 없는 사유를 보여야 한다');
+  assert.ok(/aria-describedby/.test(confirm), '비활성 사유를 접근 이름으로 이어야 한다');
 });

@@ -121,7 +121,11 @@ test('O-T49 ① 화면은 저장소 유실, 입장 시작 전에 d5 문구와 [ 
   // 주석은 빼고 본다(주석이 버튼 이름을 말한다)
   const booth = src.slice(boothAt, src.indexOf('\n  if (status?.phase', boothAt + 10)).replace(/^\s*\/\/.*$/gm, '');
   assert.match(booth, /현장 부스에서 다시 받을 수 있습니다/);
-  assert.doesNotMatch(booth, /부스 재발급 요청|<button/);
+  assert.match(booth, /boothReissue/, '월렛이 부스 재발급 부품을 넣어야 한다');
+  const live = readFileSync(new URL('../../widgets/ticket-wallet/ui/BoothReissueLive.tsx', import.meta.url), 'utf8');
+  assert.match(live, /부스 재발급 요청/);
+  assert.match(live, /leaveForWalletReauth/);
+  assert.match(live, /reason: 'BOOTH'/);
 });
 
 test('O-T49 ② 떠날 때 표시에는 티켓 ID·이유·시각만 있고, 돌아오면 지운 뒤 같은 공개키로 REISSUE와 X-Reauth-Token을 한 번 보내 201이면 QR이 나온다', async () => {
@@ -259,6 +263,22 @@ test('O-T49 ⑥ 403 reauth-required(입장 시작 뒤 첫 등록) 뒤 재인증�
   assert.equal(api.calls[1].headers['x-reauth-token'], 'reauth-f051-c');
   assert.equal(keyIdOfJwk(api.calls[1].body.publicKeyJwk), kept.keyId);
   assert.equal(r.status.phase, 'ready');
+
+  // BOOTH도 같은 왕복을 쓴다: 표시에 boothRequestId를 남기고(코드·토큰 아님), 돌아오면 reason BOOTH와 X-Reauth-Token으로 한 번 보낸다
+  const boothTicket = nextTicket();
+  const boothApi = fanApi([reply.created]);
+  const boothRequestId = '0190f3a1-7c2e-7a00-8000-00000000b0b1';
+  const boothTab = tabStore();
+  leaveForWalletReauth({ ticketId: boothTicket, reason: 'BOOTH', boothRequestId }, { store: boothTab, now: () => LEFT_AT, provider: 'kakao', submit: submitSpy().submit });
+  const boothMarker = JSON.parse(boothTab.getItem(MARKER_KEY));
+  assert.deepEqual({ reason: boothMarker.reason, boothRequestId: boothMarker.boothRequestId }, { reason: 'BOOTH', boothRequestId });
+  const br = await resumeWalletReauth(boothTicket, { store: boothTab, now: () => LEFT_AT + 3_000, pickup: async () => ({ kind: 'token', token: 'reauth-f051-booth' }), ...boothApi.opts });
+  assert.equal(boothApi.calls.length, 1);
+  assert.equal(boothApi.calls[0].body.reason, 'BOOTH');
+  assert.equal(boothApi.calls[0].body.boothRequestId, boothRequestId);
+  assert.equal(boothApi.calls[0].headers['x-reauth-token'], 'reauth-f051-booth');
+  assert.equal(br.kind, 'sent');
+  assert.equal(br.status.phase, 'ready');
 });
 
 test('O-T49 ⑦ 돌아온 뒤 새로고침하면 표시가 없어 다시 보내지 않는다', async () => {

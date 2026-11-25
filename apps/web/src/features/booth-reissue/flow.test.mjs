@@ -96,9 +96,14 @@ test('부스 재발급: 403 booth-not-authorized는 기다림이고, 같은 시�
   });
   await toWaiting(h);
   assert.equal(attempts, 1, '코드를 보인 뒤 첫 tick은 바로 한 번 시도한다');
+  // 403은 화면을 바꾸지 않는다: 대기 중에도 코드·QR·남은 시간이 남아야 한다(IR-04)
+  assert.equal(h.states.at(-1)?.boothCode, 'K7QD2M9X');
+  assert.equal(h.states.at(-1)?.expiresAtMs, h.now.ms + CODE_MS);
   await h.flow.tick();
   await h.flow.tick();
   assert.equal(attempts, 1, '같은 now에서 tick을 여러 번 불러도 10초가 지나기 전에는 다시 부르지 않는다');
+  assert.equal(h.states.at(-1)?.boothCode, 'K7QD2M9X');
+  assert.equal(h.states.at(-1)?.expiresAtMs, h.now.ms + CODE_MS);
   h.now.ms += RETRY_MS - 1;
   await h.flow.tick();
   assert.equal(attempts, 1, '10,000−1ms에는 아직이다');
@@ -191,6 +196,23 @@ test('부스 재발급: 결과 확정 409 booth-mismatch는 mismatch, 요청 409
     await h.flow.request();
     assert.equal(h.states.at(-1)?.phase, phase, `${status}/${type}`);
   }
+  // IR-07: 본인확인 창이 닫히거나 실패해도 reset으로 처음(동의)부터 다시 시작할 수 있어야 한다
+  const failed = harness({
+    confirm: async () => {
+      throw Object.assign(new Error('기관 장애'), { status: 503, type: 'provider-down' });
+    },
+  });
+  failed.flow.begin();
+  await failed.flow.consent();
+  await failed.flow.verified({ verificationId: 'v-1', providerResult: { tx: 'v-1' } }).catch(() => undefined);
+  assert.equal(failed.states.at(-1)?.phase, 'error');
+  failed.flow.reset();
+  assert.equal(failed.states.at(-1)?.phase, 'idle');
+  failed.flow.begin();
+  assert.equal(failed.states.at(-1)?.phase, 'consent');
+  const ui = readFileSync(new URL('../../widgets/ticket-wallet/ui/BoothReissueLive.tsx', import.meta.url), 'utf8');
+  assert.match(ui, /reset\(\)/, '월렛 화면이 실패한 흐름을 reset한다');
+  assert.match(ui, /다시 시도/, '월렛 화면이 다시 시도 버튼을 그린다');
 });
 
 test('부스 재발급: 토큰·코드 원문을 로그에 남기지 않는다', async () => {

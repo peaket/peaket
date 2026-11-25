@@ -54,7 +54,10 @@ async function requestAndAllow(ticket: string): Promise<{ boothRequestId: string
   const reverificationId = randomUUID();
   const created = (await b.createRequest({ ticketId: ticket, accountId: ACCOUNT, codeHash: CODE_HASH, nowMs: NOW, dayKey: '2026-11-26', expiresAtMs: NOW + CODE_MS, reverificationId })) as { kind: string; boothRequestId: string };
   expect(created.kind).toBe('created');
-  const allowed = (await b.authorize({ eventId: EVENT, deviceId: DEVICE, codeHash: CODE_HASH, nowMs: NOW, allowUntilMs: NOW + CODE_MS })) as { kind: string; ticketId: string };
+  // PENDING에도 코드 만료 시각을 expires_at에 적는다(IR-05). 허용 전에는 그 값이 코드 만료와 같다
+  const pending = await database.pool.query<{ code_expires_at: Date; expires_at: Date | null }>('select code_expires_at, expires_at from booth_authorization where id = $1', [created.boothRequestId]);
+  expect(pending.rows[0]!.expires_at?.getTime()).toBe(pending.rows[0]!.code_expires_at.getTime());
+  const allowed = (await b.authorize({ eventId: EVENT, deviceId: DEVICE, staffAccountId: ACCOUNT, codeHash: CODE_HASH, nowMs: NOW, allowUntilMs: NOW + CODE_MS })) as { kind: string; ticketId: string };
   expect(allowed).toEqual(expect.objectContaining({ kind: 'authorized', ticketId: ticket }));
   return { boothRequestId: created.boothRequestId, reverificationId };
 }
@@ -86,12 +89,14 @@ afterAll(async () => {
 
 describe('O-T28 ③ 실제 PostgreSQL BOOTH 등록 한 번', () => {
   test('O-T28 ③ 같은 부스 허용의 BOOTH 등록 20개가 동시에 와도 키 하나만 저장되고 사용 표시·감사 변경이 한 트랜잭션에 남는다', async () => {
+    // IR-03: 저장소 유실의 보통 경우(서버에 옛 유효 키가 남음)에도 BOOTH는 부스에서 그 키를 바꾼다
+    const oldKey = await keys.register({ ticketId, accountId: ACCOUNT, sessionId: randomUUID(), publicKeyJwk: await publicJwk(), reason: 'ISSUE' });
     const { boothRequestId, reverificationId } = await requestAndAllow(ticketId);
-    const allowed = await database.pool.query<{ status: string; day_key: string; reverification_id: string; requested_at: Date; code_expires_at: Date; allowed_at: Date; expires_at: Date; used_at: Date | null }>(
-      'select status, day_key, reverification_id, requested_at, code_expires_at, allowed_at, expires_at, used_at from booth_authorization where id = $1',
+    const allowed = await database.pool.query<{ status: string; day_key: string; reverification_id: string; allowed_by: string; requested_at: Date; code_expires_at: Date; allowed_at: Date; expires_at: Date; used_at: Date | null }>(
+      'select status, day_key, reverification_id, allowed_by, requested_at, code_expires_at, allowed_at, expires_at, used_at from booth_authorization where id = $1',
       [boothRequestId],
     );
-    expect(allowed.rows[0]).toMatchObject({ status: 'ALLOWED', day_key: '2026-11-26', reverification_id: reverificationId, used_at: null });
+    expect(allowed.rows[0]).toMatchObject({ status: 'ALLOWED', day_key: '2026-11-26', reverification_id: reverificationId, allowed_by: ACCOUNT, used_at: null });
     expect(allowed.rows[0]!.code_expires_at.getTime() - allowed.rows[0]!.requested_at.getTime()).toBe(CODE_MS);
     expect(allowed.rows[0]!.expires_at.getTime() - allowed.rows[0]!.allowed_at.getTime()).toBe(CODE_MS);
 
@@ -104,10 +109,15 @@ describe('O-T28 ③ 실제 PostgreSQL BOOTH 등록 한 번', () => {
 
     const keyRows = await database.pool.query<{ n: number }>('select count(*)::int n from device_key where ticket_id = $1 and revoked_at is null', [ticketId]);
     expect(keyRows.rows[0]!.n).toBe(1);
+    // 옛 키는 폐기되고 새 키가 그 자리를 대신한다
+    const oldRows = await database.pool.query<{ n: number }>('select count(*)::int n from device_key where ticket_id = $1 and key_id = $2 and revoked_at is not null', [ticketId, Buffer.from(oldKey.keyId, 'base64url')]);
+    expect(oldRows.rows[0]!.n).toBe(1);
     const boothRows = await database.pool.query<{ used: boolean; status: string }>('select used_at is not null used, status from booth_authorization where id = $1', [boothRequestId]);
     expect(boothRows.rows[0]).toEqual({ used: true, status: 'USED' });
     const changeRows = await database.pool.query<{ n: number }>(`select count(*)::int n from scanner_change where event_id = $1 and kind = 'KEY_REGISTERED' and payload->>'ticketId' = $2`, [EVENT, ticketId]);
-    expect(changeRows.rows[0]!.n).toBe(1);
+    expect(changeRows.rows[0]!.n).toBe(2);
+    const revokedRows = await database.pool.query<{ n: number }>(`select count(*)::int n from scanner_change where event_id = $1 and kind = 'KEY_REVOKED' and payload->>'ticketId' = $2`, [EVENT, ticketId]);
+    expect(revokedRows.rows[0]!.n).toBe(1);
   });
 
   test('O-T28 ③ 감사(scanner_change) 삽입이 실패하면 부스 사용 표시·기기 키가 함께 되돌아가고, 다시 시도하면 201이다', async () => {
