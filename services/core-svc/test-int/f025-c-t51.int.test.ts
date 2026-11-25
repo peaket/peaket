@@ -14,7 +14,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { MemoryCatalogRepository, type Production } from '../src/modules/catalog/index.js';
 import { MemoryReviewEligibility, MemoryReviewStore } from '../src/modules/review/index.js';
-import { quiet } from '../test/support.js';
+import { FakeIdentity, quiet } from '../test/support.js';
 import { startKafka, until, type KafkaContainer } from './kafka.js';
 
 const SERVICE = 'core-svc';
@@ -131,6 +131,7 @@ async function pod(name: string, nowMs: number, o: ServiceControlSyncOptions = {
     env: { PEAKET_ENV: 'ci', PEAKET_LOG_LEVEL: START_LEVEL },
     clock: fakeClock({ now: nowMs }),
     logDestination: quiet(),
+    adminAuthz: new FakeIdentity(),
   });
   const sync = startServiceControlSync(svc, { PEAKET_ENV: 'ci', PEAKET_KAFKA_BROKERS: kafka.brokers.join(','), PEAKET_POD: name }, o);
   if (!sync) throw new Error('브로커 주소를 줬는데 제어 소비가 켜지지 않았다');

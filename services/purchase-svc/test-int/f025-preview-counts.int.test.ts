@@ -10,7 +10,7 @@
 // - '아무것도 쓰지 않는다'(결정 16): 부르기 전후 색인·세션 상태가 같다. 색인 점수는 1시간 뒤라 파드의 정리 반복도 건드리지 않는다.
 // - 시험 조립이 아니라 시작 파일 조립이다(계획 13절).
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
@@ -32,6 +32,9 @@ const FIVE_MIN_MS = 5 * MIN;
 const PER_SECOND_DIVISOR = 300;
 /** 계획 14절 1의 [가정] 상한 */
 const PAYING_COUNT_MAX = 10_000;
+/** purchase-svc 생산자 스키마 ID(시작할 때 PEAKET_SCHEMA_IDS_FILE이 필요하다, ADR-0357) */
+const SCHEMA_IDS = { 'trade.orders-peaket.trade.OrderEvent': 23, 'telemetry.behavior-peaket.telemetry.BehaviorSignal': 29 };
+const schemaIdsFile = () => join(seatDir, 'schema-ids.json');
 const ADMISSION = newKey('it-f025-adm');
 const ecdh = (() => {
   const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -56,6 +59,7 @@ beforeAll(async () => {
   await admin.connect();
   redis = await createHotRedis({ url: valkey.url });
   seatDir = await mkdtemp(join(tmpdir(), 'peaket-f025-'));
+  await writeFile(schemaIdsFile(), JSON.stringify(SCHEMA_IDS));
   const controlPort = await freePort();
   svc = await start({
     env: {
@@ -69,6 +73,7 @@ beforeAll(async () => {
       PEAKET_ADMISSION_ISSUER: 'https://queue.peaket.example',
       PEAKET_PURCHASE_ECDH_KEY: JSON.stringify(ecdh),
       PEAKET_SEATMAP_DIR: seatDir,
+      PEAKET_SCHEMA_IDS_FILE: schemaIdsFile(),
       PEAKET_PAYMENT_GRPC_ADDR: '127.0.0.1:1',
       PEAKET_TICKET_GRPC_ADDR: '127.0.0.1:1',
       PEAKET_PURCHASE_CONTROL_GRPC_PORT: String(controlPort),

@@ -55,7 +55,7 @@ beforeAll(async () => {
   resultDir = await mkdtemp(join(tmpdir(), 'peaket-f025-adm-'));
   startedAt = Date.now();
   // 진행 중인 회차 하나: 오픈 1분 전에 열림, 공연 시작 하루 뒤, 묶음 끔·로비 셔플 켬(둘 다 끈 조합은 없는 회차다)
-  await cmd(['HSET', k.cfg(E), 'opensAtMs', String(startedAt - MIN), 'startsAtMs', String(startedAt + DAY), 'lobbyShuffle', '1', 'openBatch', '0']);
+  await cmd(['HSET', k.cfg(E), 'opensAtMs', String(startedAt - MIN), 'startsAtMs', String(startedAt + 2 * DAY), 'lobbyShuffle', '1', 'openBatch', '0']);
   await cmd(['ZADD', k.events, String(startedAt + 2 * DAY), E]);
   await cmd(['ZADD', k.slots(E), ...Array.from({ length: SLOTS }, (_, i) => [String(startedAt + HOUR), `slot-${i}`]).flat()]);
   await cmd(['ZADD', k.soon(E), ...Array.from({ length: SOON }, (_, i) => [String(startedAt + HOUR), `soon-${i}`]).flat()]);
