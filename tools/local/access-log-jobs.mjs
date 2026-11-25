@@ -66,6 +66,14 @@ function uuidOf(key) {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
+/** ClickHouse HTTP 기본 인증(시험·운영에서 사용자별 자격을 넘긴다). 없으면 기존처럼 익명이다. */
+function chAuth(o) {
+  if (!o['clickhouse-user']) return undefined;
+  const basic = Buffer.from(`${o['clickhouse-user']}:${o['clickhouse-password'] ?? ''}`).toString('base64');
+  return { authorization: `Basic ${basic}` };
+}
+const chFetch = (url, o, init = {}) => fetchOk(url, { ...init, headers: { ...(init.headers ?? {}), ...(chAuth(o) ?? {}) } });
+
 async function postAudit(base, token, record) {
   const res = await fetch(base, {
     method: 'POST',
@@ -93,19 +101,19 @@ const chIso = (value) => {
 const factorsOf = (v) => (Array.isArray(v) ? v.map(String) : String(v ?? '').split(',').map((x) => x.trim()).filter(Boolean));
 
 /** ClickHouse system.parts에서 지금 살아 있는 하루 파티션과 표를 읽는다. */
-async function clickhousePartitions(base) {
+async function clickhousePartitions(o) {
   const sql = "SELECT partition, table FROM system.parts WHERE database = 'access_log' AND active AND table IN ('access_log', 'access_log_otel') ORDER BY table, partition FORMAT JSON";
-  const j = await (await fetchOk(chQuery(base, sql))).json();
+  const j = await (await chFetch(chQuery(o.clickhouse, sql), o)).json();
   const rows = (j?.data ?? []).map((r) => ({ day: dayOfPartition(r.partition), table: String(r.table) }));
   if (rows.length === 0) return [];
   return rows;
 }
 
-async function countRows(base, table, day) {
+async function countRows(o, table, day) {
   try {
     const timeCol = table === 'access_log_otel' ? 'Timestamp' : 'ts';
     const sql = `SELECT count() AS n FROM access_log.${table} WHERE toYYYYMMDD(${timeCol}) = toYYYYMMDD(toDate('${day}')) FORMAT JSON`;
-    const j = await (await fetchOk(chQuery(base, sql))).json();
+    const j = await (await chFetch(chQuery(o.clickhouse, sql), o)).json();
     const n = Number(j?.data?.[0]?.n);
     return Number.isInteger(n) && n >= 0 ? n : null;
   } catch {
@@ -113,15 +121,20 @@ async function countRows(base, table, day) {
   }
 }
 
-async function dropPartition(base, table, day) {
+async function dropPartition(o, table, day) {
   const partition = day.replaceAll('-', '');
-  await fetchOk(chQuery(base, `ALTER TABLE access_log.${table} DROP PARTITION '${partition}'`));
+  // DDL은 ClickHouse HTTP에 POST 본문으로 보낸다(읽기 질의만 GET을 쓴다).
+  await chFetch(`${o.clickhouse.replace(/\/$/, '')}/`, o, {
+    method: 'POST',
+    headers: { 'content-type': 'text/plain; charset=utf-8' },
+    body: `ALTER TABLE access_log.${table} DROP PARTITION '${partition}'`,
+  });
 }
 
 async function purge(o, r) {
   const today = o.today ?? new Date().toISOString().slice(0, 10);
   parseDay(today);
-  const partitions = await clickhousePartitions(o.clickhouse);
+  const partitions = await clickhousePartitions(o);
   const plan = purgePlan({ todayIso: today, partitionDays: partitions.map((p) => p.day), retentionMonths: r.months, maxDropPerRun: Number(o['max-drop'] ?? r.maxDrop) });
   const targets = partitions.filter((p) => plan.drop.includes(p.day));
   const out = { kind: 'access-log-purge', today, cutoff: plan.cutoff, expired: plan.expired, overdue: plan.overdue, truncated: plan.truncated, dropped: [], failed: [], reconciled: [] };
@@ -137,9 +150,9 @@ async function purge(o, r) {
     });
   }
   for (const t of targets) {
-    const rows = await countRows(o.clickhouse, t.table, t.day);
+    const rows = await countRows(o, t.table, t.day);
     try {
-      await dropPartition(o.clickhouse, t.table, t.day);
+      await dropPartition(o, t.table, t.day);
       const eventKey = `access-log-purge:v1:${t.day}:${t.table}:DROPPED`;
       await postAudit(o['ops-audit'], o.token, {
         eventKey,
@@ -188,7 +201,7 @@ async function adminCopy(o, r) {
   const day = o.date;
   parseDay(day);
   const sql = `SELECT ts, source, request_id, event, result, provider, factors, failure, toString(client_ip) AS client_ip, user_agent, account_id, pod, seq, is_admin FROM access_log.access_log WHERE toYYYYMMDD(ts) = toYYYYMMDD(toDate('${day}')) AND is_admin = 1 ORDER BY ts, request_id FORMAT JSON`;
-  const j = await (await fetchOk(chQuery(o.clickhouse, sql))).json();
+  const j = await (await chFetch(chQuery(o.clickhouse, sql), o)).json();
   const rows = j?.data ?? [];
   const out = { kind: 'access-log-admin-copy', date: day, read: rows.length, copied: 0, duplicates: 0, failed: [] };
   for (const row of rows) {
@@ -242,7 +255,7 @@ async function reapply(o, r) {
   if (!o['snapshot-at'] || !o.purges) throw new Error('--reapply에는 --snapshot-at과 --purges가 필요하다');
   const text = readFileSync(o.purges, 'utf8');
   const records = text.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l));
-  const partitions = await clickhousePartitions(o.clickhouse);
+  const partitions = await clickhousePartitions(o);
   const plan = reapplyPlan({ snapshotAtIso: o['snapshot-at'], records, partitionDays: partitions.map((p) => p.day) });
   const out = { kind: 'access-log-reapply', snapshotAt: o['snapshot-at'], reapplied: [], skipped: plan.skipped };
   for (const t of plan.drop) {
@@ -254,7 +267,7 @@ async function reapply(o, r) {
       payload: { day: t.day, table: t.table, state: 'PLANNED', rows: null, reconciled: false, reason: 'reapply' },
       occurredAt: new Date().toISOString(),
     });
-    await dropPartition(o.clickhouse, t.table, t.day);
+    await dropPartition(o, t.table, t.day);
     await postAudit(o['ops-audit'], o.token, {
       eventKey: `${eventKey}:DROPPED`,
       recordType: 'ACCESS_LOG_PARTITION_PURGE',
@@ -404,6 +417,8 @@ async function main(argv) {
         sha256: { type: 'string' },
         seq: { type: 'string' },
         clickhouse: { type: 'string' },
+        'clickhouse-user': { type: 'string' },
+        'clickhouse-password': { type: 'string' },
         envoy: { type: 'string' },
         'envoy-query': { type: 'string' },
         bucket: { type: 'string' },
