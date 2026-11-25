@@ -27,6 +27,33 @@ export function useLayout(): ConsoleLayout {
   return useSyncExternalStore(subscribe, snapshot, () => 'desktop');
 }
 
+const WIDE = '(min-width: 1024px)';
+
+/** 휴대폰에서 못 하는 일의 안내 글(d5 §3.9, CMP-017). shared는 pages를 가져오지 못해 이 상수를 여기 둔다 */
+export const PHONE_SCOPE_TEXT = '이 작업은 태블릿이나 데스크톱에서 합니다. 휴대폰에서는 볼 수만 있습니다';
+
+/** 열 수(휴대폰 1, 태블릿 768~1023 2, 1024 이상 3). d5 §3.9의 배치를 화면 격자에 쓴다 */
+export function columnsFor(width: number): 1 | 2 | 3 {
+  if (width < 768) return 1;
+  if (width < 1024) return 2;
+  return 3;
+}
+
+function subscribeGrid(cb: () => void) {
+  const a = window.matchMedia(MD);
+  const b = window.matchMedia(WIDE);
+  a.addEventListener('change', cb);
+  b.addEventListener('change', cb);
+  return () => {
+    a.removeEventListener('change', cb);
+    b.removeEventListener('change', cb);
+  };
+}
+
+export function useGridColumns(): 1 | 2 | 3 {
+  return useSyncExternalStore(subscribeGrid, () => columnsFor(window.innerWidth), () => 3);
+}
+
 /** xl 1440 이상(대시보드 4열) */
 export function useIsXl(): boolean {
   return useSyncExternalStore(
