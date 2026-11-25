@@ -258,17 +258,18 @@ describe('F025-APPLY 정비 바퀴의 적용 확인(TR-01)', () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(defaultCalls).toHaveLength(1);
 
-      // 시험 값 1,500ms를 주면 그 간격을 쓴다(상수와 다른 값으로 코드 상수 복사를 잡는다)
+      // 첫 tick은 시작 직후가 아니라 간격(1,500ms) 뒤다(기존 CommandMaintenanceJob의 정비 타이머와 같은 규칙,
+      // 계획 8.2 'applyCheckRoundMs마다'). 그래서 기본 job도 4,999ms에 0, 5,000ms에 1이고, 주입 job은 1,499ms에 0이다.
       const checkCalls: number[] = [];
       const maintainCalls: number[] = [];
       const job = new CommandMaintenanceJob(fakeMaintain(maintainCalls), clock, { enabled: true, intervalMs: 30_000, applyCheckRoundMs: 1_500 }, undefined, { settingsApply: fakeCheck(checkCalls) });
       job.onApplicationBootstrap();
       await vi.advanceTimersByTimeAsync(1_499);
-      expect(checkCalls).toHaveLength(1);
+      expect(checkCalls).toHaveLength(0);
       await vi.advanceTimersByTimeAsync(1);
-      expect(checkCalls).toHaveLength(2);
+      expect(checkCalls).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(1_500);
-      expect(checkCalls).toHaveLength(3);
+      expect(checkCalls).toHaveLength(2);
       // 정비 바퀴(30초)는 적용 확인 간격에 끌려 빨라지지 않는다. 두 번째 job은 t=5,000ms에 시작했고
       // 지금 t=8,000ms이라, 27,000ms를 더한 t=35,000ms(시작 +30,000ms)에 정확히 한 번 돈다.
       // 15초로 빨라진 구현이면 t=20,000·35,000 두 번이라 아래 단언이 잡는다.
