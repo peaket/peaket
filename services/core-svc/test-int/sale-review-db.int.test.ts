@@ -6,7 +6,7 @@ import { type Clock, createDatabase, createService, type Database } from '@peake
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateCore } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
-import { event, place, production, promoter } from '../src/modules/catalog/adapters/db/schema.js';
+import { artist, event, place, production, productionArtist, promoter } from '../src/modules/catalog/adapters/db/schema.js';
 import { FakeIdentity, quiet, testMedia } from '../test/support.js';
 import { type PostgresContainer, startPostgres } from './postgres.js';
 import { loginFor } from './roles.js';
@@ -70,6 +70,8 @@ const list = (headers: Record<string, string>, q = '') => svc.http.inject({ meth
 const detail = (headers: Record<string, string>, productionId: string) => svc.http.inject({ method: 'GET', url: `/v1/ops/sale-reviews/${productionId}`, headers });
 const rejection = (headers: Record<string, string>, productionId: string, body: unknown) =>
   svc.http.inject({ method: 'POST', url: `/v1/ops/sale-reviews/${productionId}/rejections`, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
+const approval = (headers: Record<string, string>, productionId: string, body: unknown) =>
+  svc.http.inject({ method: 'POST', url: `/v1/ops/sale-reviews/${productionId}/approvals`, headers: { ...headers, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 
 /** 실제 DB에 공연 하나와 비취소 회차 하나를 넣는다. 요청·목록·상세·반려가 모두 이 행을 쓴다 */
 async function makeProduction(
@@ -81,6 +83,7 @@ async function makeProduction(
     cancelled?: boolean;
     placeId?: string | null;
     requestedPlace?: { name: string; address: string };
+    requestedArtists?: { name: string; sortOrder: number }[];
   } = {},
 ) {
   const productionId = randomUUID();
@@ -90,6 +93,7 @@ async function makeProduction(
     promoterId: TENANT,
     placeId: o.placeId === undefined ? PLACE : o.placeId,
     ...(o.requestedPlace !== undefined ? { requestedPlace: o.requestedPlace } : {}),
+    ...(o.requestedArtists !== undefined ? { requestedArtists: o.requestedArtists } : {}),
     title,
     genre: '콘서트',
     saleReview: o.saleReview ?? 'DRAFT',
@@ -276,5 +280,67 @@ describe('관제 판매 승인 실제 PostgreSQL 경로(S-T41 ①③④⑤)', ()
     const second = JSON.parse(page2.payload) as { items: { productionId: string }[] };
     expect(second.items).toHaveLength(1);
     expect(second.items[0]!.productionId).not.toBe(first.items[0]!.productionId);
+  });
+
+  test('LCH-080 ㉣·㉤_ 실제 DB에서 새 이름 아티스트·새 공연장을 승인과 함께 잇고 요청 칸을 비운다', async () => {
+    const NEW_PLACE = randomUUID();
+    const FIRST_ARTIST = randomUUID();
+    const SECOND_ARTIST = randomUUID();
+    await admin.db.insert(artist).values([
+      { id: FIRST_ARTIST, name: '실제DB 아티스트', createdBy: randomUUID() },
+      { id: SECOND_ARTIST, name: '실제DB 새 이름', createdBy: randomUUID() },
+    ]);
+    await admin.db.insert(place).values({ id: NEW_PLACE, name: '실제DB 새 공연장', address: '서울 실제로 2', region: '서울', createdBy: randomUUID() });
+
+    const p = await makeProduction({
+      placeId: null,
+      requestedPlace: { name: '파트너가 요청한 공연장', address: '서울 요청로 3' },
+      requestedArtists: [
+        { name: '실제DB 아티스트', sortOrder: 0 },
+        { name: '실제DB 새 이름', sortOrder: 1 },
+      ],
+    });
+    expect((await request(partnerAdmin(), p.productionId)).statusCode).toBe(202);
+
+    // 연결이 빠지면 실제 DB 제약에 닿기 전에 422다
+    const missingArtists = await approval(identity.ops('operator'), p.productionId, { scales: [{ eventId: p.eventId, scale: 'SMALL' }] });
+    expect(missingArtists.statusCode).toBe(422);
+    const missingPlace = await approval(identity.ops('operator'), p.productionId, {
+      scales: [{ eventId: p.eventId, scale: 'SMALL' }],
+      artists: [
+        { name: '실제DB 아티스트', artistId: FIRST_ARTIST },
+        { name: '실제DB 새 이름', artistId: SECOND_ARTIST },
+      ],
+    });
+    expect(missingPlace.statusCode).toBe(422);
+    const still = await admin.pool.query('select sale_review, place_id, requested_place, requested_artists from production where id = $1', [p.productionId]);
+    expect(still.rows[0]).toMatchObject({ sale_review: 'SUBMITTED', place_id: null });
+    expect(still.rows[0]!.requested_place).not.toBeNull();
+    expect(still.rows[0]!.requested_artists).toHaveLength(2);
+
+    const ok = await approval(identity.ops('operator'), p.productionId, {
+      scales: [{ eventId: p.eventId, scale: 'SMALL' }],
+      placeId: NEW_PLACE,
+      artists: [
+        { name: '실제DB 아티스트', artistId: FIRST_ARTIST },
+        { name: '실제DB 새 이름', artistId: SECOND_ARTIST },
+      ],
+    });
+    expect(ok.statusCode).toBe(200);
+    const row = await admin.pool.query('select sale_review, place_id, requested_place, requested_artists from production where id = $1', [p.productionId]);
+    expect(row.rows[0]).toMatchObject({ sale_review: 'APPROVED', place_id: NEW_PLACE, requested_place: null, requested_artists: null });
+
+    const links = await admin.pool.query('select artist_id, sort_order from production_artist where production_id = $1 order by sort_order', [p.productionId]);
+    expect(links.rows).toEqual([
+      { artist_id: FIRST_ARTIST, sort_order: 0 },
+      { artist_id: SECOND_ARTIST, sort_order: 1 },
+    ]);
+    const d = JSON.parse((await detail(opsViewer(), p.productionId)).payload) as { artists: { artistId: string | null; name: string }[]; placeId: string | null; requestedPlace: boolean };
+    expect(d.placeId).toBe(NEW_PLACE);
+    expect(d.requestedPlace).toBe(false);
+    expect(d.artists).toEqual([
+      { artistId: FIRST_ARTIST, name: '실제DB 아티스트' },
+      { artistId: SECOND_ARTIST, name: '실제DB 새 이름' },
+    ]);
   });
 });

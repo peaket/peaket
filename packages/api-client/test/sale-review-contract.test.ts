@@ -41,13 +41,17 @@ afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
 describe('판매 승인 계약과 생성물', () => {
-  test('S-T41 ⑫_[ASVS v5.0.0-8.2.2] 승인 본문은 scales와 placeId·accessibleSeatingCheck만 받는다', () => {
+  test('S-T41 ⑫_[ASVS v5.0.0-8.2.2] 승인 본문은 scales와 placeId·artists·accessibleSeatingCheck를 받는다', () => {
     expect(approval.required).toEqual(['scales']);
-    expect(Object.keys(approval.properties).sort()).toEqual(['accessibleSeatingCheck', 'placeId', 'scales']);
+    expect(Object.keys(approval.properties).sort()).toEqual(['accessibleSeatingCheck', 'artists', 'placeId', 'scales']);
     expect(Object.keys(approval.properties)).not.toContain('artistIds');
     expect(Object.keys(approval.properties)).not.toContain('aliases');
 
-    const ok = CreateOpsSaleReviewApprovalBody.safeParse({ scales: [{ eventId: 'ev-1', scale: 'LARGE' }], placeId: '3f1c2d9e-0000-4000-8000-000000000001' });
+    const ok = CreateOpsSaleReviewApprovalBody.safeParse({
+      scales: [{ eventId: 'ev-1', scale: 'LARGE' }],
+      placeId: '3f1c2d9e-0000-4000-8000-000000000001',
+      artists: [{ name: '새 이름', artistId: '3f1c2d9e-0000-4000-8000-000000000010' }],
+    });
     expect(ok.success).toBe(true);
     for (const extra of [{ artistIds: [] }, { aliases: ['LUMEN CONCERT'] }]) {
       const bad = CreateOpsSaleReviewApprovalBody.safeParse({ scales: [{ eventId: 'ev-1', scale: 'LARGE' }], ...extra });
@@ -58,12 +62,14 @@ describe('판매 승인 계약과 생성물', () => {
 
   test('S-T41 ⑫ 관제 상세와 파트너 현황의 새 읽기 칸이 계약에 있다', () => {
     const detail = spec.components.schemas.OpsSaleReviewDetail!.properties!;
-    for (const key of ['placeId', 'placeName', 'requestedPlace', 'accessibleSeatingCheck']) expect(detail).toHaveProperty(key);
+    for (const key of ['placeId', 'placeName', 'requestedPlace', 'accessibleSeatingCheck', 'artists']) expect(detail).toHaveProperty(key);
+    expect(spec.components.schemas.OpsSaleReviewArtist!.properties!).toHaveProperty('artistId');
     expect(spec.components.schemas.PartnerSaleReviewStatus!.properties!).toHaveProperty('title');
     // 생성 TS 모델도 같은 칸을 쓴다(생성기 밖에서 손으로 고치지 않는다)
     const model = readFileSync(join(ROOT, 'packages/api-client/src/gen/model/createOpsSaleReviewApprovalBody.ts'), 'utf8');
     expect(model).not.toContain('artistIds');
     expect(model).not.toContain('aliases');
+    expect(model).toContain('artists');
   });
 
   test('S-T41 ⑫ MSW 처리기가 새 계약 모양의 목록·상세·승인·파트너 현황을 답한다', async () => {

@@ -45,7 +45,20 @@ test('S-T41 ⑫ 승인·반려·409 뒤 목록·상세를 새로 읽고, 반려 
   assert.match(page, /setNotice\(\{ tone: 'ok'[\s\S]{0,400}setReason\(''\);[\s\S]{0,40}await load\(\)/);
   assert.match(page, /validateRejection\(/);
   assert.match(page, /validateApproval\(/);
-  assert.match(page, /approvalBody\(/);
+  assert.match(page, /validateLinkage\(/);
+  assert.match(page, /linkageBody\(/);
+});
+
+test('S-T41 ⑫ LCH-080_ 아티스트·공연장 연결과 지급대행 등록 값을 실제 API로 읽고 만든다', () => {
+  for (const name of ['listOpsArtists', 'createOpsArtist', 'listOpsPlaces', 'createOpsPlace']) {
+    assert.match(page, new RegExp(`\\b${name}\\b`), `${name} 호출이 없다`);
+  }
+  assert.match(page, /artists/);
+  assert.match(page, /requestedPlace/);
+  assert.match(page, /payoutAccount/);
+  assert.match(page, /pgRegistration/);
+  assert.match(page, /지급대행/);
+  assert.match(page, /새로 만들기/);
 });
 
 test('S-T41 ⑫ 실제 경로는 연결 화면, 디자인 보드는 ?state= 미리보기에만 남긴다', () => {
