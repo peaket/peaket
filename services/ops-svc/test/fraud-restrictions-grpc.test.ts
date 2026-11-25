@@ -77,14 +77,14 @@ describe('IR-32 GrpcFraudRestrictions 응답 처리', () => {
     }
   });
 
-  test('queue·purchase가 changed=false면 실패로 닫는다', async () => {
+  test('IR-40 queue·purchase의 changed=false는 같은 판 재시도의 멱등 성공이다', async () => {
     identityResult = 'RESTRICTED_CI_HOLD_RESULT_OK';
     const c = adapter();
     queueChanged = false;
-    await expect(c.queue.set({ accountId: '0194b240-0000-7000-8000-000000000013', caseId: '0194b240-0000-7000-8000-000000000014', restrictionId: '0194b240-0000-7000-8000-000000000015', state: 'ACTIVE', version: 1, untilMs: 1_800_000_000_000 })).rejects.toThrow();
+    await expect(c.queue.set({ accountId: '0194b240-0000-7000-8000-000000000013', caseId: '0194b240-0000-7000-8000-000000000014', restrictionId: '0194b240-0000-7000-8000-000000000015', state: 'ACTIVE', version: 1, untilMs: 1_800_000_000_000 })).resolves.toBeUndefined();
     queueChanged = true;
     purchaseChanged = false;
-    await expect(c.purchase.set({ accountId: '0194b240-0000-7000-8000-000000000013', caseId: '0194b240-0000-7000-8000-000000000014', restrictionId: '0194b240-0000-7000-8000-000000000015', state: 'ACTIVE', version: 1, untilMs: 1_800_000_000_000 })).rejects.toThrow();
+    await expect(c.purchase.set({ accountId: '0194b240-0000-7000-8000-000000000013', caseId: '0194b240-0000-7000-8000-000000000014', restrictionId: '0194b240-0000-7000-8000-000000000015', state: 'ACTIVE', version: 1, untilMs: 1_800_000_000_000 })).resolves.toBeUndefined();
     purchaseChanged = true;
     await expect(c.queue.set({ accountId: '0194b240-0000-7000-8000-000000000013', caseId: '0194b240-0000-7000-8000-000000000014', restrictionId: '0194b240-0000-7000-8000-000000000015', state: 'ACTIVE', version: 1, untilMs: 1_800_000_000_000 })).resolves.toBeUndefined();
     c.close();

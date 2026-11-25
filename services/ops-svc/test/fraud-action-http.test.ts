@@ -1383,6 +1383,35 @@ describe('F-04-13 구현 리뷰 반영', () => {
     expect(notice).toMatchObject({ result: 'CANCELED' });
   });
 
+  test('IR-14 받은 사람이 그 사건의 활성 계정이면 holderResult를 보내지 않는다', async () => {
+    const who = investigator();
+    const approver = commander();
+    const c = await seedCase({
+      status: 'APPEAL_PENDING',
+      appealDueAtMs: NOW - HOUR,
+      members: [memberOf(A(393), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR }), memberOf(H(9), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })],
+    });
+    seedTicket({ ticketId: T(393), payerAccountId: A(393), holderAccountId: H(9) });
+    const created = await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(393)], ticketIds: [T(393)], reason: '봇' });
+    const approvalId = String(json(created).approvalId);
+    cancels.set(approvalId, [{ ticketId: T(393), outcome: 'ACCEPTED', cancellationId: randomUUID(), refundAmount: 100_000 }]);
+    await getApproval(approvalId, approver);
+    expect((await approve(approvalId, approver, { reason: '근거' })).statusCode).toBe(200);
+    expect(noticeCalls.some((n) => n.kind === 'holderResult' && n.accountId === H(9))).toBe(false);
+  });
+
+  test('IR-07 철회는 ADMIN_DATA_ACCESS 감사와 철회 사건 기록을 남긴다', async () => {
+    const who = investigator();
+    const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(394), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    const created = await actionRequest(c.caseId, who, { fraudAction: 'RESTRICT', accountIds: [A(394)], reason: '제한' });
+    const approvalId = String(json(created).approvalId);
+    const before = audit.entries.length;
+    expect((await withdraw(approvalId, who)).statusCode).toBe(200);
+    const events = json(await getCase(c.caseId, who)).events as any[];
+    expect(events.some((e) => e.kind === 'ACTION_REJECTED' && e.detail?.closeReason === 'WITHDRAWN')).toBe(true);
+    expect(audit.entries.slice(before).some((e) => e.recordType === 'ADMIN_DATA_ACCESS' && e.record.payload?.action === 'FRAUD_ACTION_WITHDRAWN')).toBe(true);
+  });
+
   test('IR-17 사건 요약은 묶음의 실제 값과 소명 결과를 싣는다', async () => {
     const clusterId = newId();
     await store.putClusters(EVENT, 9, [{
@@ -1477,6 +1506,7 @@ describe('F-04-13 구현 리뷰 반영', () => {
     expect(after.closedAt).toBeTruthy();
     expect(labels.calls.some((l) => l.label === 'BOT' && l.accountIds.includes(A(380)))).toBe(false);
     expect(noticeCalls.some((n) => n.kind === 'actionNotice' && n.accountId === A(380))).toBe(false);
+    expect(locks.releases.some((r: any) => r.accountIds.includes(A(380)) && r.releaseReason === 'ACTION_DONE')).toBe(true);
   });
 
   test('IR-12 모든 조치 계정이 인정되고 이용 제한이 없으면 REVERSED·HUMAN이다', async () => {
@@ -1498,6 +1528,7 @@ describe('F-04-13 구현 리뷰 반영', () => {
     expect(json(patch).closedAt).toBeTruthy();
     const after = json(await getCase(c.caseId, investigator()));
     expect(after.events.some((e: any) => e.kind === 'PRIORITY_GRANTED')).toBe(true);
+    expect(after.events.some((e: any) => e.kind === 'ACTIONED' && e.detail?.reason === 'OBJECTIONS_DECIDED')).toBe(false);
   });
 
   test('IR-16 잠금 해제 실패는 승인을 FAILED로 되돌리고 다시 승인할 수 있다', async () => {
