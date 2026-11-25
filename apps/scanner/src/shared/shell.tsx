@@ -4,6 +4,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { liveRequested } from "../api/config";
 import { lead, placement, staff } from "../fixtures/scanner";
 import { liveRuntime } from "../app/live-runtime";
+import { manageTabsFor } from "../screens/manage-model";
 import { Link, navigate, renderLink, useLocation } from "../app/router";
 import type { ScannerLayout } from "../app/layout";
 
@@ -60,6 +61,8 @@ export function Strip({ asStaff = false, online = true, mode = "in", queue, queu
 /** 아래 바의 [현장 관리](현장 책임자만) */
 export function ManageLink({ current = false }: { current?: boolean }) {
   const { search } = useLocation();
+  const role = liveRuntime.snapshot().shift?.role ?? "gate_lead";
+  if (manageTabsFor(role).length <= 1) return null;
   return (
     <Link className="btn btn-secondary" href={withLive("/manage", search)} aria-current={current ? "page" : undefined} style={{ height: 44 }}>
       현장 관리

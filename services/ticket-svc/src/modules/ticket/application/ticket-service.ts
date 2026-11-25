@@ -51,7 +51,7 @@ export class TicketService {
     const n = normalizeIssueInput(input);
     const fingerprint = issueFingerprint(n);
     const now = this.deps.clock.now();
-    const candidates: TicketRecord[] = n.seatIds.map((seatId) => {
+    const candidates: TicketRecord[] = n.seatIds.map((seatId, index) => {
       const ticketId = uuidv7(this.deps.clock);
       const ticketKey = newTicketKey();
       return {
@@ -61,6 +61,7 @@ export class TicketService {
         orderId: n.orderId,
         eventId: n.eventId,
         seatId,
+        ...(n.seatLabels?.[index] !== undefined ? { seatLabel: n.seatLabels[index] } : {}),
         gateZone: '',
         status: 'ISSUED',
         issueGeneration: n.issueGeneration,

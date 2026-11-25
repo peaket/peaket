@@ -25,6 +25,8 @@ export const verificationAttempt = pgTable(
     // 시작한 세션(고위험 재인증의 재통과 확인, docs/features/identity.md §5, BUILD_ORDER BOT-020). 예전 건은 없다
     sessionId: uuid('session_id'),
     purpose: text('purpose').notNull(),
+    // 부스 대조(BOOTH)만: 대조할 티켓 ID. ticket 논리 DB라 외래키 없음(F-05-12)
+    ticketId: uuid('ticket_id'),
     next: text('next').notNull(),
     status: text('status').notNull(),
     expiresAt: at('expires_at').notNull(),
@@ -36,7 +38,7 @@ export const verificationAttempt = pgTable(
   },
   (t) => [
     index('verification_attempt_account_idx').on(t.accountId),
-    check('verification_attempt_purpose_check', sql`${t.purpose} in ('FIRST', 'REVERIFY', 'MINOR_CONTRACT')`),
+    check('verification_attempt_purpose_check', sql`${t.purpose} in ('FIRST', 'REVERIFY', 'MINOR_CONTRACT', 'BOOTH')`),
     check('verification_attempt_status_check', sql`${t.status} in ('PENDING', 'VERIFIED', 'CANCELLED', 'FAILED', 'DUPLICATE_ACCOUNT', 'PROVIDER_DOWN', 'UNDER_14')`),
   ],
 );
@@ -53,6 +55,25 @@ export const pidKeyRotation = pgTable(
     finishedAt: at('finished_at'),
   },
   () => [uniqueIndex('pid_key_rotation_open_idx').on(sql`(true)`).where(sql`finished_at is null`)],
+);
+
+/**
+ * 부스 재발급 본인확인 대조 결과(docs/data.md booth_reverification, docs/features/identity.md §6.1, F-05-12).
+ * 연계정보 원문은 두지 않고, 대조 토큰도 SHA-256 해시만 둔다. ticket_id는 ticket 논리 DB라 외래키 없음
+ */
+export const boothReverification = pgTable(
+  'booth_reverification',
+  {
+    id: uuid('id').primaryKey(),
+    accountId: uuid('account_id').notNull(),
+    ticketId: uuid('ticket_id').notNull(),
+    verificationId: uuid('verification_id').notNull().unique(),
+    ciMatched: boolean('ci_matched').notNull(),
+    tokenHash: bytea('token_hash'),
+    createdAt: at('created_at').notNull(),
+    expiresAt: at('expires_at').notNull(),
+  },
+  (t) => [index('booth_reverification_token_idx').on(t.tokenHash), index('booth_reverification_ticket_idx').on(t.ticketId)],
 );
 
 // 같은 본인확인을 다른 계정에서 시도한 기록(docs/data.md identity_conflict_attempt, ADR-0171, I-T65). 연계정보·HMAC은 두지 않는다.

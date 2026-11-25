@@ -24,6 +24,7 @@ import type {
 } from 'msw';
 
 import type {
+  CreateScannerBoothAuthorization200,
   CreateScannerBoothAuthorizationBody,
   CreateScannerDeviceAuthorizationBody,
   CreateScannerDeviceEnrollment201,
@@ -35,6 +36,7 @@ import type {
   GateFlag,
   GateFlagPage,
   GateStatus,
+  GetScannerEventOverridePasses200,
   PutScannerEventQueueReportBody,
   PutScannerShiftReadinessBody,
   ScanEvent,
@@ -63,9 +65,13 @@ export const getGetScannerEventDevicesResponseMock = (overrideResponse: Partial<
         [faker.string.alphanumeric(5)]: faker.number.int()
       }, undefined]), openFlags: faker.helpers.arrayElement([faker.number.int(), undefined]), boothCount: faker.helpers.arrayElement([faker.number.int(), undefined]), overrideCount: faker.helpers.arrayElement([faker.number.int(), undefined]), entryClosedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), ...overrideResponse})
 
+export const getGetScannerEventOverridePassesResponseMock = (overrideResponse: Partial<Extract<GetScannerEventOverridePasses200, object>> = {}): GetScannerEventOverridePasses200 => ({items: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({scanId: faker.string.alpha({length: {min: 10, max: 20}}), at: faker.date.past().toISOString().slice(0, 19) + 'Z', ticketId: faker.string.alpha({length: {min: 10, max: 20}}), seatLabel: faker.string.alpha({length: {min: 10, max: 20}}), reason: faker.string.alpha({length: {min: 10, max: 20}}), note: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), reviewStatus: faker.helpers.arrayElement(['WAITING','OK','SUSPECT','UNDETERMINED'] as const)})), ...overrideResponse})
+
 export const getListScannerEventFlagsResponseMock = (overrideResponse: Partial<Extract<GateFlagPage, object>> = {}): GateFlagPage => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({flagId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), seatLabel: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), gateZone: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), kind: faker.helpers.arrayElement([faker.helpers.arrayElement(['DUPLICATE','NO_EXIT','AFTER_CANCEL','OUT_OF_SESSION','AFTER_CLOSE','TIME_UNCERTAIN','OVERRIDE_REVIEW','STALE_VERSION'] as const), undefined]), awareness: faker.helpers.arrayElement([faker.helpers.arrayElement(['CONCURRENT','KNOWN'] as const), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['OPEN','OK','SUSPECT','UNDETERMINED'] as const), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
 
 export const getCreateScannerFlagResolutionResponseMock = (overrideResponse: Partial<Extract<GateFlag, object>> = {}): GateFlag => ({flagId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), seatLabel: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), gateZone: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), kind: faker.helpers.arrayElement([faker.helpers.arrayElement(['DUPLICATE','NO_EXIT','AFTER_CANCEL','OUT_OF_SESSION','AFTER_CLOSE','TIME_UNCERTAIN','OVERRIDE_REVIEW','STALE_VERSION'] as const), undefined]), awareness: faker.helpers.arrayElement([faker.helpers.arrayElement(['CONCURRENT','KNOWN'] as const), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['OPEN','OK','SUSPECT','UNDETERMINED'] as const), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), ...overrideResponse})
+
+export const getCreateScannerBoothAuthorizationResponseMock = (overrideResponse: Partial<Extract<CreateScannerBoothAuthorization200, object>> = {}): CreateScannerBoothAuthorization200 => ({ticketId: faker.string.alpha({length: {min: 10, max: 20}}), seatLabel: faker.string.alpha({length: {min: 10, max: 20}}), allowUntil: faker.date.past().toISOString().slice(0, 19) + 'Z', ...overrideResponse})
 
 
 export const getCreateScannerDeviceEnrollmentMockHandler = (overrideResponse?: CreateScannerDeviceEnrollment201 | ((info: Parameters<HttpResponseResolver<PathParams, CreateScannerDeviceEnrollmentBody>>[0]) => Promise<CreateScannerDeviceEnrollment201> | CreateScannerDeviceEnrollment201), options?: RequestHandlerOptions) => {
@@ -182,6 +188,18 @@ export const getGetScannerEventDevicesMockHandler = (overrideResponse?: GateStat
   }, options)
 }
 
+export const getGetScannerEventOverridePassesMockHandler = (overrideResponse?: GetScannerEventOverridePasses200 | ((info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => Promise<GetScannerEventOverridePasses200> | GetScannerEventOverridePasses200), options?: RequestHandlerOptions) => {
+  return http.get<{ eventId: string }>('*/v1/scanner/events/:eventId/override-passes', async (info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetScannerEventOverridePassesResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
 export const getPutScannerEventDevicePlacementMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ eventId: string; deviceId: string }, ScannerPlacementInput>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
   return http.put<{ eventId: string; deviceId: string }, ScannerPlacementInput>('*/v1/scanner/events/:eventId/device-placements/:deviceId', async (info: Parameters<HttpResponseResolver<{ eventId: string; deviceId: string }, ScannerPlacementInput>>[0]) => {
   if (typeof overrideResponse === 'function') {await overrideResponse(info); }
@@ -216,11 +234,13 @@ export const getCreateScannerFlagResolutionMockHandler = (overrideResponse?: Gat
   }, options)
 }
 
-export const getCreateScannerBoothAuthorizationMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<PathParams, CreateScannerBoothAuthorizationBody>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+export const getCreateScannerBoothAuthorizationMockHandler = (overrideResponse?: CreateScannerBoothAuthorization200 | ((info: Parameters<HttpResponseResolver<PathParams, CreateScannerBoothAuthorizationBody>>[0]) => Promise<CreateScannerBoothAuthorization200> | CreateScannerBoothAuthorization200), options?: RequestHandlerOptions) => {
   return http.post<PathParams, CreateScannerBoothAuthorizationBody>('*/v1/scanner/booth-authorizations', async (info: Parameters<HttpResponseResolver<PathParams, CreateScannerBoothAuthorizationBody>>[0]) => {
-  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
 
-    return new HttpResponse(null,
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateScannerBoothAuthorizationResponseMock(),
       { status: 200
       })
   }, options)
@@ -236,6 +256,7 @@ export const getScannerMock = () => [
   getCreateScannerScanMockHandler(),
   getPutScannerEventQueueReportMockHandler(),
   getGetScannerEventDevicesMockHandler(),
+  getGetScannerEventOverridePassesMockHandler(),
   getPutScannerEventDevicePlacementMockHandler(),
   getListScannerEventFlagsMockHandler(),
   getCreateScannerFlagResolutionMockHandler(),

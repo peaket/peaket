@@ -16,6 +16,7 @@ import { applyChangePage, packageStateOf, type PackageState, type Placement } fr
 import { openPackageStore, type DeviceMeta, type PackageStore } from '../storage/package-store';
 import { openScanQueue, type ScanQueue } from '../storage/scan-queue';
 import { logoutAfterFlush, ScanUploader, type UploadState } from '../sync/uploader';
+import { QueueReporter } from './queue-reporter';
 import { navigate } from './router';
 import { freshnessOf, type Freshness, type LiveSetupState, type LiveSyncState } from '../api/live';
 
@@ -68,6 +69,7 @@ class LiveRuntime {
   #store: PackageStore | undefined;
   #queue: ScanQueue | undefined;
   #uploader: ScanUploader | undefined;
+  #queueReporter: QueueReporter | undefined;
   #shift: ScannerShiftResponse | undefined;
   #state: PackageState | undefined;
   #clockOffsetMs: number | undefined;
@@ -100,6 +102,11 @@ class LiveRuntime {
   };
 
   snapshot = (): LiveView => this.#view;
+
+  /** SCR-052 현장 관리가 실제 API를 부를 때 쓰는 클라이언트(시작 전이면 undefined) */
+  manageApi(): ScannerApi | undefined {
+    return this.#api;
+  }
 
   /** ?live=1이면 한 번 뜬다. 이미 떴으면 아무것도 하지 않는다 */
   ensure(search: string): void {
@@ -202,7 +209,9 @@ class LiveRuntime {
       setTimer: (fn, ms) => setTimeout(fn, ms),
       clearTimer: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
       onState: (s) => {
+        const previousPending = this.#uploadState.pending;
         this.#uploadState = s;
+        if (this.#queueReporter) void this.#queueReporter.note({ previousPending, nextPending: s.pending });
         this.#publish();
       },
       onResync: () => {
@@ -219,6 +228,10 @@ class LiveRuntime {
       },
     });
     this.#bindBrowserEvents();
+    this.#queueReporter = new QueueReporter({
+      api: { queueReport: (eventId, pendingUploads) => this.#api!.queueReport(eventId, pendingUploads) },
+      eventId: () => this.#shift?.eventId,
+    });
     this.#changesTimer = setInterval(() => void this.syncChanges(), 60_000);
     this.#uploadState = { ...this.#uploadState, pending: await this.#queue.count() };
     this.#view = { ...this.#view, mode: 'live' };
@@ -269,6 +282,7 @@ class LiveRuntime {
     this.#started = false;
     this.#starting = undefined;
     this.#api = undefined;
+    this.#queueReporter = undefined;
     this.#token = undefined;
     this.#shift = undefined;
     this.#state = undefined;
@@ -365,6 +379,7 @@ class LiveRuntime {
     const st = this.#state;
     if (!api || !st || this.#clockOffsetMs === undefined) return;
     const pending = (await this.#queue?.count()) ?? 0;
+    await this.#queueReporter?.reportFirstReady(pending);
     try {
       await api.readiness({ packageSeq: st.lastSeq, clockOffsetMs: this.#clockOffsetMs, pendingUploads: pending });
     } catch {

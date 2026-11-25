@@ -4,7 +4,7 @@
 // 서비스 뼈대가, 업무 gRPC 포트는 이 파일이 연다.
 // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고, 서비스를 닫은 뒤 끈다. identity 자신의 경로는 DB로도 끝난 세션을 막는다(identity §8)
 import 'reflect-metadata';
-import { type AdminAuthzPort, CircuitBreaker, type CircuitBreakerOptions, createDatabase, createExternalHttpClient, createHotRedis, createService, internalGrpcTokenFromEnv, invRefKeyInfoGauge, loadPlatformConfig, publicOriginFromEnv, systemClock } from '@peaket/platform';
+import { type AdminAuthzPort, CircuitBreaker, type CircuitBreakerOptions, Counter, createDatabase, createExternalHttpClient, createHotRedis, createService, internalGrpcTokenFromEnv, invRefKeyInfoGauge, loadPlatformConfig, publicOriginFromEnv, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { KMSClient } from '@aws-sdk/client-kms';
 import { adminAccountHandlers, adminAuthConfigFromEnv, adminDesignationHandlers, adminAuthzHandlers, adminMailerFromEnv, adminPepperFromEnv, adminSessionHandlers, CheckPasswordOnlyLogins, DispatchAdminNotices, GetAdminAuthz, hibpBreachListFromEnv, JoseAdminReauthVerifier, ManageAdminAccounts, JoseAdminTokenSigner, kmsPepperClient, loadPolicyLists, PromAdminLoginSignals, RedisLoginCounters, RedisPasskeyChallenges, relyingPartiesOf, TerminateAdminSessions, totpSeedCipherFromEnv, TURNSTILE_BREAKER, turnstileFromEnv } from './modules/admin/index.js';
@@ -67,6 +67,8 @@ import {
   kmsMacClient,
   restrictedCiHoldHandlers,
   reverificationCheckHandlers,
+  boothReverificationHandlers,
+  VerifyBoothReverification,
   SetRestrictedCiHold,
   TestVerificationProvider,
   unavailableHashers,
@@ -130,6 +132,8 @@ const verification = process.env[VERIFICATION_PROVIDER_ENV]
   ? // 연계정보·pid 키: KMS 키 목록이 있으면 KMS, 없으면 설정값 키(local·ci·demo만, identity §5 '키 판·만 14세…')
     { provider: TestVerificationProvider.fromEnv(process.env), hashers: KmsIdentityHashers.fromEnv(process.env) ?? HmacIdentityHashers.fromEnv(process.env), phoneRefs: phoneContactRefs(invRefs.ring) }
   : { provider: unavailableProvider, hashers: unavailableHashers };
+/** 부스 대조 지표(identity_booth_reverifications_total{result}). 계정·티켓·토큰·연계정보는 싣지 않는다 */
+const boothReverificationCounter = new Counter({ name: 'identity_booth_reverifications_total', help: '부스 재발급 본인확인 대조 결과(result)', labelNames: ['result'] as const, registers: [] });
 const signals = new PromSessionSignals();
 invRefs.ring.onMissing((label, reason) => signals.invRefMissing(label, reason));
 // 뜰 때 라벨 키를 먼저 받는다(2초 [가정]까지 기다리고, 그 뒤에는 받는 대로 쓴다). 로거가 서기 전의 실패는 모아 두었다가 남긴다
@@ -183,8 +187,9 @@ const service = await createService({
   // 파트너 테넌트당 600회/분 공용 가드(BAT-173, D-T50 ⑦). identity의 Redis는 세션·캐시 클러스터다
   ...(cache ? { tenantRateLimit: { redis: cache } } : {}),
   ...(adminPepper ? { adminAuthz } : {}),
-  module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now), nicknameCheckLimits: new RedisNicknameCheckLimits(cache) } : {}), mergeCheckers: merge.checkers, withdrawalParticipants: withdrawal.participants, withdrawalSignals: signals, invRefs: invRefs.ring, ...(loginRisk ? { loginRisk } : {}), ...(contactRefRps ? { contactRefRps } : {}), ...(deviceAuthorizations ? { deviceAuthorizations } : {}), ...(deviceApprovalLimits ? { deviceApprovalLimits } : {}), ...(scannerDevices ? { scannerDevices } : {}), ...(scannerDpopReplay ? { scannerDpopReplay } : {}), ...(coreEventOwners ? { coreEventOwners } : {}), ...(staffInviteMailer ? { staffInviteMailer } : {}), staffInvitationUrl, partnerStaff: Boolean(adminPepper) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, reauthVerifier: keys.has('admin') ? new JoseAdminReauthVerifier(keys, tokenIssuerFromEnv(process.env), systemClock) : null, relyingParties, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache), passkeyChallenges: new RedisPasskeyChallenges(cache) } : {}) } } : {}) }) });
+  module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now), nicknameCheckLimits: new RedisNicknameCheckLimits(cache) } : {}), mergeCheckers: merge.checkers, withdrawalParticipants: withdrawal.participants, withdrawalSignals: signals, invRefs: invRefs.ring, ...(loginRisk ? { loginRisk } : {}), ...(contactRefRps ? { contactRefRps } : {}), ...(deviceAuthorizations ? { deviceAuthorizations } : {}), ...(deviceApprovalLimits ? { deviceApprovalLimits } : {}), ...(scannerDevices ? { scannerDevices } : {}), ...(scannerDpopReplay ? { scannerDpopReplay } : {}), ...(coreEventOwners ? { coreEventOwners } : {}), ...(staffInviteMailer ? { staffInviteMailer } : {}), staffInvitationUrl, partnerStaff: Boolean(adminPepper) }, verification: { ...verification, boothSignals: { result: (r: 'started' | 'verified' | 'mismatch' | 'consent' | 'not_verified') => boothReverificationCounter.inc({ result: r }) } }, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, reauthVerifier: keys.has('admin') ? new JoseAdminReauthVerifier(keys, tokenIssuerFromEnv(process.env), systemClock) : null, relyingParties, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache), passkeyChallenges: new RedisPasskeyChallenges(cache) } : {}) } } : {}) }) });
 signals.register(service.metrics.registry);
+service.metrics.registry.registerMetric(boothReverificationCounter);
 adminSignals.register(service.metrics.registry);
 for (const [dependency, settings] of breakerSettings) breakers.set(dependency, new CircuitBreaker({ service: SERVICE, dependency, registry: service.metrics.registry, logger: service.logger, ...settings }));
 kmsFailoverLog.warn = (use, error) => service.logger.warn({ use, error }, '서울 KMS가 응답하지 않아 복제 키로 넘겼다(ADR-0102)');
@@ -335,7 +340,10 @@ const grpc = await startGrpcServer({
     // 추가 검증 제출의 본인확인 재통과 확인(queue-svc만, bot-defense §5.2 3단계, BOT-090). 신원은 메시 L7 허용 목록(I-T56 ⑤, HOT-400)
     {
       definition: identityPackage().ReverificationCheckService.service,
-      handlers: reverificationCheckHandlers({ check: service.app.get(CheckReverification) }, (method, err) => service.logger.error({ err, method }, 'ReverificationCheckService 처리 실패')),
+      handlers: {
+        ...boothReverificationHandlers({ verify: service.app.get(VerifyBoothReverification) }, (method, err) => service.logger.error({ err, method }, 'VerifyBoothReverification 처리 실패')),
+        ...reverificationCheckHandlers({ check: service.app.get(CheckReverification) }, (method, err) => service.logger.error({ err, method }, 'ReverificationCheckService 처리 실패')),
+      },
     },
     // 스캐너 경로 가드의 세션 확인(ticket-svc만, offline-gate §6.1, ADR-0051 결정 4, GAT-170)
     {

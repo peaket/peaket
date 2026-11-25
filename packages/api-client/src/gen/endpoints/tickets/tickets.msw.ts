@@ -30,6 +30,7 @@ import type {
   CompensationPage,
   CreateTicketAddon201,
   CreateTicketAddonBody,
+  CreateTicketBoothRequest201,
   CreateTicketBoothRequestBody,
   CreateTicketCancellationBody,
   CreateTicketDeviceKey201,
@@ -49,6 +50,8 @@ import type {
 export const getListTicketsResponseMock = (overrideResponse: Partial<Extract<ListTickets200, object>> = {}): ListTickets200 => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), seatLabel: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), gateZone: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['ISSUED','ACTIVE','TRANSFER_PENDING','CANCEL_REQUESTED','REFUNDED','FLAGGED','VOIDED'] as const), undefined]), transferable: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), transferLocked: faker.datatype.boolean(), transferLockExpiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), transferDeadline: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), cancelDeadline: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), eventTitle: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), placeName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), entryOpensAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), receivedFromNickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), bookingNumber: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), pendingTransfer: faker.helpers.arrayElement([{offerId: faker.string.alpha({length: {min: 10, max: 20}}), expiresAt: faker.date.past().toISOString().slice(0, 19) + 'Z'},null,]), enteredAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), seller: faker.helpers.arrayElement([{legalName: faker.string.alpha({length: {min: 10, max: 20}}), representative: faker.string.alpha({length: {min: 10, max: 20}}), address: faker.string.alpha({length: {min: 10, max: 20}}), phone: faker.string.alpha({length: {min: 10, max: 20}}), email: faker.internet.email(), businessRegNo: faker.string.alpha({length: {min: 10, max: 20}}), mailOrderReportNo: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), exemptionBasis: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined])}, undefined])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
 
 export const getCreateTicketDeviceKeyResponseMock = (overrideResponse: Partial<Extract<CreateTicketDeviceKey201, object>> = {}): CreateTicketDeviceKey201 => ({keyId: faker.string.alpha({length: {min: 10, max: 20}}), ...overrideResponse})
+
+export const getCreateTicketBoothRequestResponseMock = (overrideResponse: Partial<Extract<CreateTicketBoothRequest201, object>> = {}): CreateTicketBoothRequest201 => ({boothRequestId: faker.string.alpha({length: {min: 10, max: 20}}), boothCode: faker.string.alpha({length: {min: 10, max: 20}}), expiresAt: faker.date.past().toISOString().slice(0, 19) + 'Z', ...overrideResponse})
 
 export const getCreateTicketTransferResponseMock = (overrideResponse: Partial<Extract<TransferOffer, object>> = {}): TransferOffer => ({offerId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ticketId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), role: faker.helpers.arrayElement([faker.helpers.arrayElement(['SENDER','RECIPIENT'] as const), undefined]), counterpartNickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['OFFERED','ACCEPTED','REJECTED','WITHDRAWN','EXPIRED','RECLAIMED'] as const), undefined]), expiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), payerOnlyNotice: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), withdrawReason: faker.helpers.arrayElement([faker.helpers.arrayElement(['SENDER','EVENT_CANCELLED','EVENT_POSTPONED','OTHER'] as const), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventTitle: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventStartsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), seatLabel: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), ...overrideResponse})
 
@@ -101,11 +104,13 @@ export const getCreateTicketDeviceKeyMockHandler = (overrideResponse?: CreateTic
   }, options)
 }
 
-export const getCreateTicketBoothRequestMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ ticketId: string }, CreateTicketBoothRequestBody>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+export const getCreateTicketBoothRequestMockHandler = (overrideResponse?: CreateTicketBoothRequest201 | ((info: Parameters<HttpResponseResolver<{ ticketId: string }, CreateTicketBoothRequestBody>>[0]) => Promise<CreateTicketBoothRequest201> | CreateTicketBoothRequest201), options?: RequestHandlerOptions) => {
   return http.post<{ ticketId: string }, CreateTicketBoothRequestBody>('*/v1/tickets/:ticketId/booth-requests', async (info: Parameters<HttpResponseResolver<{ ticketId: string }, CreateTicketBoothRequestBody>>[0]) => {
-  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
 
-    return new HttpResponse(null,
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateTicketBoothRequestResponseMock(),
       { status: 201
       })
   }, options)

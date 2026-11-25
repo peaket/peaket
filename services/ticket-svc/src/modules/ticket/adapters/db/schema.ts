@@ -44,6 +44,8 @@ export const ticket = pgTable(
     orderId: uuid('order_id').notNull(),
     eventId: uuid('event_id').notNull(),
     seatId: uuid('seat_id').notNull(),
+    /** 발권 때 좌석맵 판에서 읽은 사람이 읽는 이름. 없으면 읽을 때 seat_id로 물러난다(F-05-12 O-T2 ②) */
+    seatLabel: text('seat_label'),
     /** 좌석 배치의 게이트 구역. 최소 구현은 빈 값이다(좌석 배치 연결은 후속). */
     gateZone: text('gate_zone').notNull().default(''),
     status: text('status').notNull(),

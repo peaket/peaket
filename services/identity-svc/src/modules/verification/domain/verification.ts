@@ -2,6 +2,8 @@
 
 export const PURPOSES = ['FIRST', 'REVERIFY', 'MINOR_CONTRACT'] as const;
 export type Purpose = (typeof PURPOSES)[number];
+/** 부스 대조는 전용 시작 경로(POST /v1/identity/booth-reverifications)로만 만든다(openapi, F-05-12). */
+export type AttemptPurpose = Purpose | 'BOOTH';
 
 /**
  * PROVIDER_DOWN은 결과 경로에서 기관·연계정보 키(KMS) 장애를 만난 건이다(그 건은 마치고, [다시 시도]는 새 건으로 한다).
@@ -22,7 +24,9 @@ export interface Attempt {
   accountId: string;
   /** 시작한 세션(고위험 재인증의 재통과 확인, identity §5). 예전 건은 없다 */
   sessionId: string | null;
-  purpose: Purpose;
+  purpose: AttemptPurpose;
+  /** 부스 대조(BOOTH)만: 대조할 티켓 ID(ticket 논리 DB라 외래키 없음) */
+  ticketId?: string | null;
   next: string;
   status: AttemptStatus;
   expiresAt: number;

@@ -1,5 +1,6 @@
-// 티켓 저장소 포트(BUILD_ORDER HOT-160). 메모리 구현은 단위 시험, Drizzle 구현은 운영 DB가 쓴다.
+﻿// 티켓 저장소 포트(BUILD_ORDER HOT-160). 메모리 구현은 단위 시험, Drizzle 구현은 운영 DB가 쓴다.
 import type { DeviceKeyReason } from './device-key.js';
+import type { BoothAuthorizeOutcome, BoothRequestOutcome, GateStatusView, OverridePassView } from './booth.js';
 import type {
   BlockTicketIssuanceResult,
   CancelTicketOutcome,
@@ -79,6 +80,8 @@ export interface DeviceKeyRegistrationInput {
   readonly publicKey: Uint8Array;
   readonly reason: DeviceKeyReason;
   readonly nowMs: number;
+  /** BOOTH만: 부스 요청 ID(그 허용에 묶인다) */
+  readonly boothRequestId?: string;
   /** 재인증을 확인했는가. 입장 시작 뒤 첫 ISSUE, 다른 키가 유효한 ISSUE, REISSUE의 허용 근거다 */
   readonly reauthVerified: boolean;
   /** 입장 키 알림 행 ID(성공한 교체·입장 시작 뒤 첫 등록이면 이 ID로 device_key_notice 한 행, ADR-0363 결정 4). 없으면 저장소가 만든다 */
@@ -116,7 +119,9 @@ export type DeviceKeyRegistrationResult =
   | { readonly kind: 'REISSUE_AT_BOOTH' }
   | { readonly kind: 'REISSUE_LIMIT' }
   /** 보유자가 결제자 그대로인데 TRANSFER를 부른 경우(양도 수락 전) */
-  | { readonly kind: 'TRANSFER_NOT_ALLOWED' };
+  | { readonly kind: 'TRANSFER_NOT_ALLOWED' }
+  /** BOOTH인데 그 boothRequestId의 허용이 없거나 지났거나 이미 썼다(403 booth-not-authorized) */
+  | { readonly kind: 'BOOTH_NOT_ALLOWED' };
 
 /** 보내기 반복이 집은 알림 행(연락처·키 값 없음) */
 export interface DeviceKeyNotice {
@@ -162,8 +167,24 @@ export interface DeviceKeyNoticeSink {
   send(e: DeviceKeyNoticeEvent): Promise<DeviceKeyNoticeSendResult>;
 }
 
-export interface DeviceKeyStore {
-  register(i: DeviceKeyRegistrationInput): Promise<DeviceKeyRegistrationResult>;
+/** 부스 재발급 저장소(openapi createTicketBoothRequest·createScannerBoothAuthorization, docs/review/plans/F-05-12.md §4) */
+export interface BoothStore {
+  /** 티켓 보유자(없으면 undefined). 부스 요청의 404를 토큰 확인보다 먼저 가른다 */
+  ownerOf(ticketId: string): Promise<string | undefined>;
+  /** 보유자·회차 시작·하루 한도를 한 트랜잭션에서 보고 만든다. 새 코드는 옛 PENDING 코드를 무효로 한다 */
+  createRequest(i: { ticketId: string; accountId: string; codeHash: string; nowMs: number; dayKey: string; expiresAtMs: number; reverificationId?: string }): Promise<BoothRequestOutcome>;
+  /** 코드 해시로 활성 요청을 찾아 허용을 적는다(같은 코드를 다시 찍으면 같은 답, 사용된 코드는 410) */
+  authorize(i: { eventId: string; deviceId: string; codeHash: string; nowMs: number; allowUntilMs: number }): Promise<BoothAuthorizeOutcome>;
+  /** 기기 키 저장과 같은 트랜잭션에서 부르는 확인·사용 표시(tx가 있으면 그 트랜잭션, 없으면 저장소가 연다) */
+  consumeForRegistration(i: { ticketId: string; boothRequestId: string; nowMs: number }, tx?: unknown): Promise<boolean>;
+  /** gate_lead의 SCR-052 기기 현황 */
+  gateStatus(i: { eventId: string; deviceId: string }): Promise<GateStatusView>;
+  /** 그 스태프가 한 예외 통과(최신순) */
+  overridePasses(i: { eventId: string; staffAccountId: string; deviceId: string; limit: number }): Promise<OverridePassView[]>;
+}
+export const BOOTH_STORE = Symbol('ticket.BoothStore');
+
+export interface DeviceKeyStore {  register(i: DeviceKeyRegistrationInput): Promise<DeviceKeyRegistrationResult>;
   /** 회차의 티켓별 유효 키(keyId·압축 공개키 base64url) */
   activeKeysByEvent(eventId: string): Promise<Map<string, { keyId: string; publicKey: string }[]>>;
   /** 회차에서 폐기된 keyId(base64url) 목록 */

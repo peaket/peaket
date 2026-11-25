@@ -16,6 +16,8 @@ export interface IssueTicketsInput {
   readonly eventId: string;
   readonly payerAccountId: string;
   readonly seatIds: readonly string[];
+  /** seatIds와 같은 차례의 사람이 읽는 좌석 이름(발권 때 좌석맵 판에서 읽는다). 없으면 seatId로 물러난다 */
+  readonly seatLabels?: readonly string[];
   readonly issueGeneration: number;
   /** 회차 시작 시각(epoch ms). 없으면 취소는 입장 전으로 본다. */
   readonly eventStartsAtMs?: number;
@@ -28,6 +30,8 @@ export interface TicketRecord {
   readonly orderId: string;
   readonly eventId: string;
   readonly seatId: string;
+  /** 사람이 읽는 좌석 이름(발권 때 스냅샷). 없으면 읽는 쪽이 seatId를 쓴다 */
+  readonly seatLabel?: string;
   /** 좌석 배치의 게이트 구역. 최소 구현은 빈 값이다(좌석 배치 연결은 후속). */
   readonly gateZone: string;
   readonly status: TicketStatus;
@@ -455,16 +459,27 @@ function requireText(name: string, v: string, max = 200): string {
 }
 
 /** 발권 입력을 검사하고 정규화한다. 좌석은 중복을 없애고 정렬해 멱등 지문을 안정적으로 만든다. */
-export function normalizeIssueInput(i: IssueTicketsInput): IssueTicketsInput & { readonly seatIds: readonly string[] } {
+export function normalizeIssueInput(i: IssueTicketsInput): IssueTicketsInput & { readonly seatIds: readonly string[]; readonly seatLabels?: readonly string[] } {
   const orderId = requireUuid('orderId', i.orderId);
   const eventId = requireUuid('eventId', i.eventId);
   const payerAccountId = requireUuid('payerAccountId', i.payerAccountId);
   if (!Number.isSafeInteger(i.issueGeneration) || i.issueGeneration < 0) throw new TicketInputError('issueGeneration은 0 이상의 정수여야 한다');
-  const seatIds = [...new Set(i.seatIds.map((s) => requireUuid('seatId', s)))].sort();
+  const rawSeatIds = i.seatIds.map((s) => requireUuid('seatId', s));
+  const bySeat = new Map<string, string | undefined>();
+  if (i.seatLabels !== undefined) {
+    if (i.seatLabels.length !== i.seatIds.length) throw new TicketInputError('seatLabels는 seatIds와 같은 수여야 한다');
+    for (let n = 0; n < rawSeatIds.length; n++) {
+      const label = i.seatLabels[n];
+      if (typeof label !== 'string' || label.trim() === '' || label.length > 100) throw new TicketInputError('seatLabel은 1~100자여야 한다');
+      bySeat.set(rawSeatIds[n]!, label);
+    }
+  }
+  const seatIds = [...new Set(rawSeatIds)].sort();
   if (seatIds.length === 0) throw new TicketInputError('seatIds가 비었다');
   if (seatIds.length > MAX_TICKETS_PER_ISSUE) throw new TicketInputError(`한 번에 ${MAX_TICKETS_PER_ISSUE}좌석까지만 발권한다`);
   if (i.eventStartsAtMs !== undefined && (!Number.isFinite(i.eventStartsAtMs) || i.eventStartsAtMs < 0)) throw new TicketInputError('eventStartsAtMs가 올바르지 않다');
-  return { orderId, eventId, payerAccountId, seatIds, issueGeneration: i.issueGeneration, ...(i.eventStartsAtMs === undefined ? {} : { eventStartsAtMs: i.eventStartsAtMs }) };
+  const seatLabels = i.seatLabels === undefined ? undefined : seatIds.map((id) => bySeat.get(id)!);
+  return { orderId, eventId, payerAccountId, seatIds, ...(seatLabels ? { seatLabels } : {}), issueGeneration: i.issueGeneration, ...(i.eventStartsAtMs === undefined ? {} : { eventStartsAtMs: i.eventStartsAtMs }) };
 }
 
 /** 같은 주문·세대의 재요청인지 가리는 지문. 좌석 차례가 달라도 같은 값이고, 회차 시작 시각 같은 표시 값은 넣지 않는다. */

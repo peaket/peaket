@@ -77,6 +77,11 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "event_starts_at": {
                       "type": "google.protobuf.Timestamp",
                       "id": 6
+                    },
+                    "seat_labels": {
+                      "rule": "repeated",
+                      "type": "string",
+                      "id": 7
                     }
                   }
                 },

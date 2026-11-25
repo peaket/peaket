@@ -304,6 +304,7 @@ export type OperationId =
   | 'getReview'
   | 'getScannerEventChanges'
   | 'getScannerEventDevices'
+  | 'getScannerEventOverridePasses'
   | 'getScannerEventPackage'
   | 'getScannerShift'
   | 'getSearchSuggestions'
@@ -713,6 +714,7 @@ export const OPERATIONS = {
   getReview: {operationId: "getReview",method: "GET",path: "/v1/reviews/{reviewId}",host: "api",kind: "read",cookie: true},
   getScannerEventChanges: {operationId: "getScannerEventChanges",method: "GET",path: "/v1/scanner/events/{eventId}/changes",host: "scanner-api",kind: "read",cookie: false,query: ["after","limit"]},
   getScannerEventDevices: {operationId: "getScannerEventDevices",method: "GET",path: "/v1/scanner/events/{eventId}/devices",host: "scanner-api",kind: "read",cookie: false},
+  getScannerEventOverridePasses: {operationId: "getScannerEventOverridePasses",method: "GET",path: "/v1/scanner/events/{eventId}/override-passes",host: "scanner-api",kind: "read",cookie: false,query: ["limit"]},
   getScannerEventPackage: {operationId: "getScannerEventPackage",method: "GET",path: "/v1/scanner/events/{eventId}/package",host: "scanner-api",kind: "read",cookie: false},
   getScannerShift: {operationId: "getScannerShift",method: "GET",path: "/v1/scanner/shift",host: "scanner-api",kind: "read",cookie: false},
   getSearchSuggestions: {operationId: "getSearchSuggestions",method: "GET",path: "/v1/search/suggestions",host: "api",kind: "read",cookie: false,query: ["q"]},

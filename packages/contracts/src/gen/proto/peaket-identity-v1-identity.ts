@@ -730,6 +730,10 @@ export const identityV1Identity: Record<string, unknown> = {
                     "CheckReverification": {
                       "requestType": "CheckReverificationRequest",
                       "responseType": "CheckReverificationResponse"
+                    },
+                    "VerifyBoothReverification": {
+                      "requestType": "VerifyBoothReverificationRequest",
+                      "responseType": "VerifyBoothReverificationResponse"
                     }
                   }
                 },
@@ -766,6 +770,30 @@ export const identityV1Identity: Record<string, unknown> = {
                     "verified_at_ms": {
                       "type": "int64",
                       "id": 2
+                    }
+                  }
+                },
+                "VerifyBoothReverificationRequest": {
+                  "fields": {
+                    "token": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "account_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "ticket_id": {
+                      "type": "string",
+                      "id": 3
+                    }
+                  }
+                },
+                "VerifyBoothReverificationResponse": {
+                  "fields": {
+                    "ok": {
+                      "type": "bool",
+                      "id": 1
                     }
                   }
                 },

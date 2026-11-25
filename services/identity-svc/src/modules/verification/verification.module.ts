@@ -12,9 +12,11 @@ import { SetRestrictedCiHold } from './application/set-restricted-ci-hold.js';
 import { CheckReverification } from './application/check-reverification.js';
 import { ConfirmVerification } from './application/confirm-verification.js';
 import { GetVerificationResult } from './application/get-verification-result.js';
+import { StartBoothReverification } from './application/start-booth-reverification.js';
 import { StartVerification } from './application/start-verification.js';
-import { IDENTITY_HASHERS, type IdentityHashers, PHONE_REFS, type PhoneRefs, VERIFICATION_PROVIDER, VERIFICATION_STORE, type VerificationProvider, type VerificationStore } from './domain/ports.js';
-import { VerificationController } from './inbound/verification.controller.js';
+import { VerifyBoothReverification } from './application/verify-booth-reverification.js';
+import { BOOTH_REVERIFICATIONS, BOOTH_SIGNALS, type BoothReverificationSignals, type BoothReverificationStore, IDENTITY_HASHERS, type IdentityHashers, PHONE_REFS, type PhoneRefs, VERIFICATION_PROVIDER, VERIFICATION_STORE, type VerificationProvider, type VerificationStore } from './domain/ports.js';
+import { BoothReverificationController, VerificationController } from './inbound/verification.controller.js';
 
 export interface VerificationModuleOptions {
   storage: 'database' | 'memory';
@@ -22,6 +24,8 @@ export interface VerificationModuleOptions {
   hashers: IdentityHashers;
   /** 본인확인 번호의 연락처 가명(identity §9.1). 없으면 쓰지 않는다 */
   phoneRefs?: PhoneRefs;
+  /** 부스 대조 지표(identity_booth_reverifications_total{result}). 없으면 세지 않는다 */
+  boothSignals?: BoothReverificationSignals;
 }
 
 @Module({})
@@ -30,12 +34,24 @@ export class VerificationModule {
     return {
       module: VerificationModule,
       global: true,
-      controllers: [VerificationController],
+      controllers: [VerificationController, BoothReverificationController],
       providers: [
         StartVerification,
+        {
+          provide: StartBoothReverification,
+          useFactory: (store: VerificationStore, provider: VerificationProvider, closure: AccountClosure, clock: Clock, signals: BoothReverificationSignals) => new StartBoothReverification({ store, provider, closure, clock, signals }),
+          inject: [VERIFICATION_STORE, VERIFICATION_PROVIDER, ACCOUNT_CLOSURE, CLOCK, BOOTH_SIGNALS],
+        },
+        {
+          provide: VerifyBoothReverification,
+          useFactory: (booth: BoothReverificationStore, clock: Clock) => new VerifyBoothReverification({ booth, clock }),
+          inject: [BOOTH_REVERIFICATIONS, CLOCK],
+        },
         ConfirmVerification,
         GetVerificationResult,
         o.storage === 'database' ? { provide: VERIFICATION_STORE, useClass: DrizzleVerificationStore } : { provide: VERIFICATION_STORE, useValue: new MemoryVerificationStore() },
+        { provide: BOOTH_REVERIFICATIONS, useExisting: VERIFICATION_STORE },
+        { provide: BOOTH_SIGNALS, useValue: o.boothSignals ?? { result: () => undefined } },
         { provide: VERIFICATION_PROVIDER, useValue: o.provider },
         { provide: IDENTITY_HASHERS, useValue: o.hashers },
         ...(o.phoneRefs ? [{ provide: PHONE_REFS, useValue: o.phoneRefs }] : []),

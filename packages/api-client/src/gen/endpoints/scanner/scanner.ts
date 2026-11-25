@@ -29,6 +29,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  CreateScannerBoothAuthorization200,
   CreateScannerBoothAuthorizationBody,
   CreateScannerDeviceAuthorizationBody,
   CreateScannerDeviceEnrollment201,
@@ -41,6 +42,8 @@ import type {
   GateFlagPage,
   GateStatus,
   GetScannerEventChangesParams,
+  GetScannerEventOverridePasses200,
+  GetScannerEventOverridePassesParams,
   ListScannerEventFlagsParams,
   OAuthError,
   ProblemResponse,
@@ -1182,10 +1185,15 @@ export type getScannerEventDevicesResponse403 = {
   status: 403
 }
 
+export type getScannerEventDevicesResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
 export type getScannerEventDevicesResponseSuccess = (getScannerEventDevicesResponse200) & {
   headers: Headers;
 };
-export type getScannerEventDevicesResponseError = (getScannerEventDevicesResponse403) & {
+export type getScannerEventDevicesResponseError = (getScannerEventDevicesResponse403 | getScannerEventDevicesResponse409) & {
   headers: Headers;
 };
 
@@ -1279,6 +1287,149 @@ export function useGetScannerEventDevices<TData = Awaited<ReturnType<typeof getS
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetScannerEventDevicesQueryOptions(eventId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getScannerEventOverridePassesResponse200 = {
+  data: GetScannerEventOverridePasses200
+  status: 200
+}
+
+export type getScannerEventOverridePassesResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type getScannerEventOverridePassesResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getScannerEventOverridePassesResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type getScannerEventOverridePassesResponseSuccess = (getScannerEventOverridePassesResponse200) & {
+  headers: Headers;
+};
+export type getScannerEventOverridePassesResponseError = (getScannerEventOverridePassesResponse400 | getScannerEventOverridePassesResponse403 | getScannerEventOverridePassesResponse409) & {
+  headers: Headers;
+};
+
+export const getGetScannerEventOverridePassesUrl = (eventId: string,
+    params?: GetScannerEventOverridePassesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/scanner/events/${encodeURIComponent(String(eventId))}/override-passes?${stringifiedParams}` : `/v1/scanner/events/${encodeURIComponent(String(eventId))}/override-passes`
+}
+
+/**
+ * FR-066, SCR-052 ⑥. 그 회차·그 스태프 계정이 남긴 method=OVERRIDE 기록만 최신순으로 준다. limit 기본 50·최대 200. reviewStatus는 연결된 OVERRIDE_REVIEW gate_flag의 상태(OPEN→WAITING, OK→OK, SUSPECT→SUSPECT, UNDETERMINED→UNDETERMINED)다. 배치가 없으면 409 no-placement(docs/design/d5 §8.5, docs/review/plans/F-05-12.md §3 결정 6)
+ * @summary 내가 한 예외 통과 목록(현장 책임자, 사후 검토 상태)
+ */
+export const getScannerEventOverridePasses = async (eventId: string,
+    params?: GetScannerEventOverridePassesParams, options?: Parameters<typeof orvalFetch>[1]): Promise<getScannerEventOverridePassesResponseSuccess> => {
+
+  return orvalFetch<getScannerEventOverridePassesResponseSuccess>(getGetScannerEventOverridePassesUrl(eventId,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetScannerEventOverridePassesQueryKey = (eventId: string,
+    params?: GetScannerEventOverridePassesParams,) => {
+    return [
+    `/v1/scanner/events/${eventId}/override-passes`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetScannerEventOverridePassesQueryOptions = <TData = Awaited<ReturnType<typeof getScannerEventOverridePasses>>, TError = ErrorType<ProblemResponse>>(eventId: string,
+    params?: GetScannerEventOverridePassesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getScannerEventOverridePasses>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetScannerEventOverridePassesQueryKey(eventId,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getScannerEventOverridePasses>>> = ({ signal }) => getScannerEventOverridePasses(eventId,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: eventId !== null && eventId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getScannerEventOverridePasses>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetScannerEventOverridePassesQueryResult = NonNullable<Awaited<ReturnType<typeof getScannerEventOverridePasses>>>
+export type GetScannerEventOverridePassesQueryError = ErrorType<ProblemResponse>
+
+
+export function useGetScannerEventOverridePasses<TData = Awaited<ReturnType<typeof getScannerEventOverridePasses>>, TError = ErrorType<ProblemResponse>>(
+ eventId: string,
+    params: undefined |  GetScannerEventOverridePassesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getScannerEventOverridePasses>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getScannerEventOverridePasses>>,
+          TError,
+          Awaited<ReturnType<typeof getScannerEventOverridePasses>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetScannerEventOverridePasses<TData = Awaited<ReturnType<typeof getScannerEventOverridePasses>>, TError = ErrorType<ProblemResponse>>(
+ eventId: string,
+    params?: GetScannerEventOverridePassesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getScannerEventOverridePasses>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getScannerEventOverridePasses>>,
+          TError,
+          Awaited<ReturnType<typeof getScannerEventOverridePasses>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetScannerEventOverridePasses<TData = Awaited<ReturnType<typeof getScannerEventOverridePasses>>, TError = ErrorType<ProblemResponse>>(
+ eventId: string,
+    params?: GetScannerEventOverridePassesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getScannerEventOverridePasses>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내가 한 예외 통과 목록(현장 책임자, 사후 검토 상태)
+ */
+
+export function useGetScannerEventOverridePasses<TData = Awaited<ReturnType<typeof getScannerEventOverridePasses>>, TError = ErrorType<ProblemResponse>>(
+ eventId: string,
+    params?: GetScannerEventOverridePassesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getScannerEventOverridePasses>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetScannerEventOverridePassesQueryOptions(eventId,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -1653,7 +1804,7 @@ export const useCreateScannerFlagResolution = <TError = ErrorType<ProblemRespons
       return useMutation(getCreateScannerFlagResolutionMutationOptions(options), queryClient);
     }
     export type createScannerBoothAuthorizationResponse200 = {
-  data: void
+  data: CreateScannerBoothAuthorization200
   status: 200
 }
 

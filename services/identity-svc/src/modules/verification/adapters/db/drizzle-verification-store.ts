@@ -5,9 +5,10 @@ import { DATABASE, type Database, type DbTransaction } from '@peaket/platform';
 import { and, asc, count, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import { writeContactRef } from '../../../session/index.js';
 import type { HoldRow, PidRotationRecord, PidRotationStore, VerificationStore, VerificationTx } from '../../domain/ports.js';
+import type { BoothReverificationStore, BoothTokenBinding } from '../../domain/ports.js';
 import type { ReverificationSummary } from '../../domain/reverification.js';
 import { type Attempt, CiAlreadyLinked, plusOneYear, VerificationRaced } from '../../domain/verification.js';
-import { identityConflictAttempt, identityVerification, pidKeyRotation, restrictedCiHold, verificationAttempt, verificationRecord } from './schema.js';
+import { boothReverification, identityConflictAttempt, identityVerification, pidKeyRotation, restrictedCiHold, verificationAttempt, verificationRecord } from './schema.js';
 
 type Row = typeof verificationAttempt.$inferSelect;
 const holdOf = (r: typeof restrictedCiHold.$inferSelect): HoldRow => ({
@@ -25,6 +26,7 @@ const attemptOf = (r: Row): Attempt => ({
   accountId: r.accountId,
   sessionId: r.sessionId,
   purpose: r.purpose as Attempt['purpose'],
+  ticketId: r.ticketId,
   next: r.next,
   status: r.status as Attempt['status'],
   expiresAt: r.expiresAt.getTime(),
@@ -33,7 +35,7 @@ const attemptOf = (r: Row): Attempt => ({
 });
 
 @Injectable()
-export class DrizzleVerificationStore implements VerificationStore, PidRotationStore {
+export class DrizzleVerificationStore implements VerificationStore, PidRotationStore, BoothReverificationStore {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
 
   transaction<T>(fn: (tx: VerificationTx) => Promise<T>): Promise<T> {
@@ -50,6 +52,7 @@ export class DrizzleVerificationStore implements VerificationStore, PidRotationS
           accountId: a.accountId,
           sessionId: a.sessionId,
           purpose: a.purpose,
+          ticketId: a.ticketId ?? null,
           next: a.next,
           status: a.status,
           expiresAt: new Date(a.expiresAt),
@@ -113,6 +116,18 @@ export class DrizzleVerificationStore implements VerificationStore, PidRotationS
         const row = r.rows[0] as { status?: unknown } | undefined;
         return typeof row?.status === 'string' ? row.status : null;
       },
+      insertBoothReverification: async (i) => {
+        await tx.insert(boothReverification).values({
+          id: i.id,
+          accountId: i.accountId,
+          ticketId: i.ticketId,
+          verificationId: i.verificationId,
+          ciMatched: i.ciMatched,
+          tokenHash: i.tokenHash === null ? null : Buffer.from(i.tokenHash, 'hex'),
+          createdAt: new Date(i.createdAtMs),
+          expiresAt: new Date(i.expiresAtMs),
+        });
+      },
       insertConflictAttempt: async (c) => {
         await tx.insert(identityConflictAttempt).values({ id: c.id, attemptedAccountId: c.attemptedAccountId, existingAccountId: c.existingAccountId, attemptedAt: new Date(c.attemptedAt) });
       },
@@ -141,8 +156,30 @@ export class DrizzleVerificationStore implements VerificationStore, PidRotationS
     };
   }
 
-  async attempt(id: string): Promise<Attempt | null> {
-    const [r] = await this.database.db.select().from(verificationAttempt).where(eq(verificationAttempt.id, id));
+  /** 부스 대조 결과 한 건(ci_matched=false도 남긴다). tokenHash가 null이면 토큰 없음 */
+  async insert(i: { id: string; accountId: string; ticketId: string; verificationId: string; ciMatched: boolean; tokenHash: string | null; createdAtMs: number; expiresAtMs: number }): Promise<void> {
+    await this.database.db.insert(boothReverification).values({
+      id: i.id,
+      accountId: i.accountId,
+      ticketId: i.ticketId,
+      verificationId: i.verificationId,
+      ciMatched: i.ciMatched,
+      tokenHash: i.tokenHash === null ? null : Buffer.from(i.tokenHash, 'hex'),
+      createdAt: new Date(i.createdAtMs),
+      expiresAt: new Date(i.expiresAtMs),
+    });
+  }
+
+  async byTokenHash(tokenHash: string): Promise<BoothTokenBinding | null> {
+    const [r] = await this.database.db
+      .select({ accountId: boothReverification.accountId, ticketId: boothReverification.ticketId, expiresAt: boothReverification.expiresAt, ciMatched: boothReverification.ciMatched })
+      .from(boothReverification)
+      .where(eq(boothReverification.tokenHash, Buffer.from(tokenHash, 'hex')))
+      .limit(1);
+    return r ? { accountId: r.accountId, ticketId: r.ticketId, expiresAtMs: r.expiresAt.getTime(), ciMatched: r.ciMatched } : null;
+  }
+
+  async attempt(id: string): Promise<Attempt | null> {    const [r] = await this.database.db.select().from(verificationAttempt).where(eq(verificationAttempt.id, id));
     return r ? attemptOf(r) : null;
   }
 

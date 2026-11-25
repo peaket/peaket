@@ -1,6 +1,6 @@
 // 메모리 저장소(시험·로컬 시제품용). 트랜잭션은 한 번에 하나씩 돌고 실패하면 되돌린다(PostgreSQL 저장소와 같은 규칙).
 // pid 키 전환 저장소(PidRotationStore)도 함께 구현한다(identity §5 'pid 키 전환의 첫 구현').
-import type { ConflictAttempt, HoldRow, PidRotationRecord, PidRotationStore, VerificationRecord, VerificationStore, VerificationTx } from '../domain/ports.js';
+import type { BoothReverificationStore, BoothTokenBinding, ConflictAttempt, HoldRow, PidRotationRecord, PidRotationStore, VerificationRecord, VerificationStore, VerificationTx } from '../domain/ports.js';
 import type { ReverificationSummary } from '../domain/reverification.js';
 import { type Attempt, CiAlreadyLinked, plusOneYear } from '../domain/verification.js';
 
@@ -29,6 +29,8 @@ interface State {
   phones: Map<string, { ref: string; refPrev: string | null; updatedAt: number }>;
   /** 결과가 그 계정의 본인과 다른 사람이었던 건 ID(verification_attempt.person_mismatch) */
   mismatches: Set<string>;
+  /** 부스 대조 결과(booth_reverification). verificationId가 기본 키 */
+  booths: Map<string, { id: string; accountId: string; ticketId: string; verificationId: string; ciMatched: boolean; tokenHash: string | null; createdAtMs: number; expiresAtMs: number }>;
 }
 
 const clone = (s: State): State => ({
@@ -38,11 +40,12 @@ const clone = (s: State): State => ({
   holds: new Map([...s.holds].map(([k, v]) => [k, { ...v }])),
   phones: new Map([...s.phones].map(([k, v]) => [k, { ...v }])),
   mismatches: new Set(s.mismatches),
+  booths: new Map([...s.booths].map(([k, v]) => [k, { ...v }])),
 });
 const holdKey = (sourceAccountId: string, caseId: string) => `${sourceAccountId}|${caseId}`;
 
-export class MemoryVerificationStore implements VerificationStore, PidRotationStore {
-  #state: State = { attempts: new Map(), verifications: new Map(), conflicts: [], holds: new Map(), phones: new Map(), mismatches: new Set() };
+export class MemoryVerificationStore implements VerificationStore, PidRotationStore, BoothReverificationStore {
+  #state: State = { attempts: new Map(), verifications: new Map(), conflicts: [], holds: new Map(), phones: new Map(), mismatches: new Set(), booths: new Map() };
   #queue: Promise<unknown> = Promise.resolve();
   readonly #rotations: PidRotationRecord[] = [];
   readonly #retention = new Map<string, RetainedRecord>();
@@ -57,6 +60,15 @@ export class MemoryVerificationStore implements VerificationStore, PidRotationSt
   contactRefsOf(accountId: string): { kind: 'PHONE'; ref: string }[] {
     const p = this.#state.phones.get(accountId);
     return p ? [{ kind: 'PHONE', ref: p.ref }] : [];
+  }
+
+  async insert(i: { id: string; accountId: string; ticketId: string; verificationId: string; ciMatched: boolean; tokenHash: string | null; createdAtMs: number; expiresAtMs: number }): Promise<void> {
+    this.#state.booths.set(i.verificationId, { ...i });
+  }
+
+  async byTokenHash(tokenHash: string): Promise<BoothTokenBinding | null> {
+    const r = [...this.#state.booths.values()].find((b) => b.tokenHash === tokenHash);
+    return r ? { accountId: r.accountId, ticketId: r.ticketId, expiresAtMs: r.expiresAtMs, ciMatched: r.ciMatched } : null;
   }
 
   transaction<T>(fn: (tx: VerificationTx) => Promise<T>): Promise<T> {
@@ -104,6 +116,9 @@ export class MemoryVerificationStore implements VerificationStore, PidRotationSt
         // 메모리 저장소는 계정 표를 보지 못한다(시험은 유스케이스의 앞선 확인으로 본다)
         lockAccountForShare: async () => null,
         accountStatusOf: async () => null,
+        insertBoothReverification: async (i) => {
+          s.booths.set(i.verificationId, { ...i });
+        },
         holdBySource: async (accountId, caseId) => {
           const h = s.holds.get(holdKey(accountId, caseId));
           return h ? { ...h } : null;

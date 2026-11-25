@@ -98,7 +98,7 @@ export class GrpcTicketIssuer implements TicketIssuer, TicketVoider {
 
   async issue(c: TicketIssueCommand): Promise<readonly IssuedTicketRef[]> {
     const ms = Math.min(TICKET_ISSUE_CAP_MS, Math.max(1, Math.floor(Number.isFinite(c.deadlineMs) ? c.deadlineMs : TICKET_ISSUE_CAP_MS)));
-    const request = { order_id: c.orderId, event_id: c.eventId, payer_account_id: c.payerAccountId, seat_ids: [...c.seatIds], issue_generation: c.issueGeneration ?? 0 };
+    const request = { order_id: c.orderId, event_id: c.eventId, payer_account_id: c.payerAccountId, seat_ids: [...c.seatIds], issue_generation: c.issueGeneration ?? 0, ...(c.seatLabels && c.seatLabels.every((s): s is string => typeof s === 'string') ? { seat_labels: [...c.seatLabels] } : {}) };
     const once = (): Promise<Record<string, unknown>> => {
       // 데드라인은 차단기가 들여보낸 뒤부터 잰다
       const deadline = new Date(Date.now() + ms);

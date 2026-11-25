@@ -1,17 +1,24 @@
 // 받는 층: 휴대폰 본인확인 시작·결과 확정·결과 조회(openapi /v1/identity/verifications*, docs/features/identity.md §5, FR-002).
 // 팬 경로라 게이트웨이가 넘긴 신원으로 계정을 정하고, 남의 건은 404다. 결과 응답은 캐시하지 않는다.
 import { Controller, Get, HttpCode, Param, Post, Res } from '@nestjs/common';
-import { ContractBody, CurrentPrincipal, type Principal, ProblemError, Roles } from '@peaket/platform';
+import { ContractBody, ContractRouteSchema, CurrentPrincipal, type Principal, ProblemError, Roles } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { ConfirmVerification } from '../application/confirm-verification.js';
 import { GetVerificationResult } from '../application/get-verification-result.js';
+import { StartBoothReverification } from '../application/start-booth-reverification.js';
 import { StartVerification } from '../application/start-verification.js';
 import { VerificationError } from '../application/verification-error.js';
 import { PURPOSES } from '../domain/verification.js';
 
 // openapi 요청 본문 모양(계약 생성물의 작업별 스키마가 operationId 정리(wbs 0.2.3) 뒤 이름이 바뀌어 여기 같은 모양으로 둔다)
 const StartBody = z.object({ purpose: z.enum(PURPOSES).default('FIRST'), next: z.string().max(512) }).strict();
+const BoothStartBody = z.object({ ticketId: z.string(), consent: z.boolean(), next: z.string().max(512).optional() }).strict();
+const BoothStartResult = z.object({
+  verificationId: z.string(),
+  window: z.object({ url: z.string(), method: z.enum(['GET', 'POST']), fields: z.record(z.string(), z.string()), mode: z.enum(['POPUP', 'REDIRECT']) }),
+  expiresAt: z.string(),
+});
 const ResultBody = z.object({ providerResult: z.record(z.string(), z.string()) }).strict();
 
 const PROBLEM: Record<VerificationError['code'], { status: number; type: string; title: string; retryAfterSeconds?: number }> = {
@@ -22,6 +29,10 @@ const PROBLEM: Record<VerificationError['code'], { status: number; type: string;
   PROVIDER_DOWN: { status: 503, type: 'provider-down', title: '지금은 본인확인을 할 수 없습니다', retryAfterSeconds: 30 },
   PURPOSE_UNSUPPORTED: { status: 400, type: 'purpose-not-supported', title: '아직 받지 않는 본인확인 목적입니다' },
   UNDER_14: { status: 403, type: 'under-14', title: '만 14세 미만은 피켓을 이용할 수 없습니다' },
+  CONSENT: { status: 422, type: 'booth-consent-required', title: '부스 대조 목적 동의가 필요합니다' },
+  NOT_VERIFIED: { status: 409, type: 'booth-mismatch', title: '본인확인 결과가 이 티켓의 계정과 다릅니다' },
+  BOOTH_MISMATCH: { status: 409, type: 'booth-mismatch', title: '본인확인 결과가 이 티켓의 계정과 다릅니다' },
+  TOKEN: { status: 422, type: 'invalid-booth-token', title: '부스 대조 토큰이 올바르지 않습니다' },
 };
 
 async function problem<T>(p: Promise<T>): Promise<T> {
@@ -40,7 +51,6 @@ export class VerificationController {
     private readonly confirmVerification: ConfirmVerification,
     private readonly getResult: GetVerificationResult,
   ) {}
-
   @Post()
   @Roles(['fan'])
   @HttpCode(201)
@@ -62,5 +72,25 @@ export class VerificationController {
   async result(@Param('verificationId') id: string, @CurrentPrincipal() me: Principal, @Res({ passthrough: true }) reply: FastifyReply) {
     void reply.header('cache-control', 'no-store');
     return problem(this.getResult.run({ accountId: me.accountId, verificationId: id }));
+  }
+}
+
+/**
+ * 부스 재발급 1/3단계: 대조 목적 동의를 받고 본인확인을 시작한다(openapi createIdentityBoothReverification, F-05-12).
+ * 결과 확정은 기존 POST /v1/identity/verifications/{id}/result가 BOOTH 목적이면 resultToken(reverificationToken)을 준다.
+ */
+@Controller('v1/identity')
+export class BoothReverificationController {
+  constructor(private readonly boothReverifications: StartBoothReverification) {}
+
+  @Post('booth-reverifications')
+  @Roles(['fan'])
+  @HttpCode(201)
+  @ContractRouteSchema({ body: BoothStartBody, responses: { 201: BoothStartResult } })
+  async start(@ContractBody(BoothStartBody) body: z.output<typeof BoothStartBody>, @CurrentPrincipal() me: Principal) {
+    const r = await problem(
+      this.boothReverifications.run({ accountId: me.accountId, sessionId: me.sessionId, ticketId: body.ticketId, consent: body.consent, next: body.next ?? '/' }),
+    );
+    return { verificationId: r.verificationId, window: r.window, expiresAt: new Date(r.expiresAt).toISOString() };
   }
 }

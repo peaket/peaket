@@ -21,6 +21,8 @@ export interface ScannerGateTicketSeed {
   ticketId: string;
   eventId: string;
   seatId: string;
+  /** 사람이 읽는 좌석 이름(없으면 seatId로 물러난다, F-05-12 O-T2 ②) */
+  seatLabel?: string;
   gateZone: string;
   status: ScannerTicketStatus;
   /** 취소 접수 시각. 있으면 이보다 이른 입장은 취소 뒤 입장으로 보지 않는다(C1-04) */
@@ -179,7 +181,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
       return {
         ticketId: t.ticketId,
         gateZone: t.gateZone,
-        seatLabel: t.seatId,
+        seatLabel: t.seatLabel ?? t.seatId,
         status: t.status,
         keys: keysByTicket.get(t.ticketId) ?? [],
         ...(last && last.method !== 'VERIFY'
@@ -412,7 +414,7 @@ export class MemoryScannerGateStore implements ScannerGateStore {
     return {
       flagId: f.flagId,
       ticketId: f.ticketId,
-      seatLabel: ticket?.seatId ?? '',
+      seatLabel: ticket ? (ticket.seatLabel ?? ticket.seatId) : '',
       gateZone: ticket?.gateZone ?? '',
       kind: f.kind,
       awareness: f.awareness,

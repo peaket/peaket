@@ -6,12 +6,12 @@ import { ATTENDEE_READER, AttendeeExportController } from './inbound/attendee-ex
 
 @Module({})
 export class AttendeeExportModule {
-  static register(o: { database: Database }): DynamicModule {
+  static register(o: { database: Database; labels?: { resolve(eventId: string, seatIds: readonly string[]): Promise<readonly (string | undefined)[]> } }): DynamicModule {
     return {
       module: AttendeeExportModule,
       controllers: [AttendeeExportController],
       providers: [
-        { provide: ATTENDEE_READER, useValue: new DrizzleAttendeeReader(o.database) },
+        { provide: ATTENDEE_READER, useValue: new DrizzleAttendeeReader(o.database, o.labels) },
         { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
         InternalTokenGuard,
       ],

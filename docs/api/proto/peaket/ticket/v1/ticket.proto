@@ -80,6 +80,9 @@ message IssueTicketsRequest {
   int64 issue_generation = 5;
   // 회차 시작 시각. 취소가 입장 시작 전인지 판정한다. 없으면 취소는 입장 전으로 본다(첫 구현).
   google.protobuf.Timestamp event_starts_at = 6;
+  // seat_ids와 같은 차례의 사람이 읽는 좌석 이름(예 'R구역 12열 7번', F-05-12 O-T2 ②).
+  // 없거나 빈 칸이면 ticket-svc는 그 좌석을 seat_id로 물러나게 한다(옛 클라이언트·좌석맵 읽기 실패).
+  repeated string seat_labels = 7;
 }
 
 message VoidTicketsRequest {

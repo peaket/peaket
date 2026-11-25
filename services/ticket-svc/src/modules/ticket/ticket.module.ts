@@ -4,8 +4,10 @@ import { Transfers } from './application/transfers.js';
 import { DeviceKeys } from './application/device-keys.js';
 import { TicketService } from './application/ticket-service.js';
 import { TicketDeviceKeysController } from './inbound/device-keys.controller.js';
+import { TicketBoothController } from './inbound/booth.controller.js';
 import { TransfersController } from './inbound/transfers.controller.js';
 import { WalletTicketsController } from './inbound/wallet-tickets.controller.js';
+import { TicketBooth } from './application/booth.js';
 
 export interface TicketWiring {
   deviceKeys: DeviceKeys;
@@ -13,6 +15,8 @@ export interface TicketWiring {
   tickets?: TicketService;
   /** 양도·돌려주기(GAT-050). 없으면 그 처리기를 싣지 않는다(기기 키만 쓰는 단위 시험) */
   transfers?: Transfers;
+  /** 부스 재발급(F-05-12). 없으면 booth-requests를 싣지 않는다 */
+  booth?: TicketBooth;
 }
 
 /**
@@ -38,11 +42,12 @@ export class TicketModule implements NestModule {
   static register(o: TicketWiring): DynamicModule {
     return {
       module: TicketModule,
-      controllers: [TicketDeviceKeysController, ...(o.tickets ? [WalletTicketsController] : []), ...(o.transfers ? [TransfersController] : [])],
+      controllers: [TicketDeviceKeysController, ...(o.tickets ? [WalletTicketsController] : []), ...(o.transfers ? [TransfersController] : []), ...(o.booth ? [TicketBoothController] : [])],
       providers: [
         { provide: DeviceKeys, useValue: o.deviceKeys },
         ...(o.tickets ? [{ provide: TicketService, useValue: o.tickets }] : []),
         ...(o.transfers ? [{ provide: Transfers, useValue: o.transfers }] : []),
+        ...(o.booth ? [{ provide: TicketBooth, useValue: o.booth }] : []),
       ],
     };
   }

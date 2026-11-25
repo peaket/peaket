@@ -66,6 +66,14 @@ export function serverClockOffsetMs(serverTime: string, nowMs: number): number {
   return Math.round(server - nowMs);
 }
 
+/**
+ * 큐 비움 보고를 보낼 순간인가(offline-gate §7.3 '큐 비움 보고' 끝, F-05-12).
+ * 첫 '비었음'(emptyReported=false)과 1건 이상에서 0건이 된 순간에만 보낸다. 0건이 이어지면 보내지 않는다.
+ */
+export function queueReportDue(i: { previousPending: number; nextPending: number; emptyReported: boolean }): boolean {
+  return i.nextPending === 0 && (i.previousPending > 0 || !i.emptyReported);
+}
+
 /** 세션이 끝날 때까지 남은 시간(ms). 이미 끝났으면 0, 만료를 모르면 undefined(C1-08) */
 export function sessionExpiryDelayMs(expiresAtMs: number, nowMs: number): number | undefined {
   if (!Number.isFinite(expiresAtMs) || expiresAtMs === Number.MAX_SAFE_INTEGER) return undefined;

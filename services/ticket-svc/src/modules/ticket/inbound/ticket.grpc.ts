@@ -79,6 +79,7 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
           eventId: text(req.event_id),
           payerAccountId: text(req.payer_account_id),
           seatIds: Array.isArray(req.seat_ids) ? req.seat_ids.map(text) : [],
+          ...(Array.isArray(req.seat_labels) && req.seat_labels.length > 0 ? { seatLabels: req.seat_labels.map(text) } : {}),
           issueGeneration: typeof req.issue_generation === 'number' ? req.issue_generation : 0,
           ...(msOf(req.event_starts_at) === undefined ? {} : { eventStartsAtMs: msOf(req.event_starts_at)! }),
         })

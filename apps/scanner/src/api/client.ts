@@ -73,6 +73,35 @@ export interface GateFlagView {
   createdAt: string;
 }
 
+export interface GateStatusDeviceView {
+  deviceId: string;
+  name: string;
+  placement?: { gateZone: string; mode: 'IN' | 'OUT'; version?: number };
+  ready: boolean;
+  packageSeq?: number;
+  lastSyncAt?: string;
+  pendingUploads: number;
+  staffLoggedIn?: boolean;
+}
+export interface GateStatusView {
+  devices: GateStatusDeviceView[];
+  entriesByZone: Record<string, number>;
+  rejectsByReason: Record<string, number>;
+  openFlags: number;
+  boothCount: number;
+  overrideCount: number;
+  entryClosedAt?: string;
+}
+export interface OverridePassView {
+  scanId: string;
+  at: string;
+  ticketId: string;
+  seatLabel: string;
+  reason: string;
+  note?: string;
+  reviewStatus: 'WAITING' | 'OK' | 'SUSPECT' | 'UNDETERMINED';
+}
+
 /** openapi ScanEvent와 같은 모양(업로드 본문). 스캐너 앱이 큐에 싣는 값이다 */
 export interface ScanEventBody {
   id: string;
@@ -169,6 +198,27 @@ export class ScannerApi {
 
   async uploadScans(scans: readonly Record<string, unknown>[]): Promise<{ acceptedIds: string[]; resyncRequired: boolean; staleIds: string[] }> {
     return this.#json('POST', '/v1/scanner/scans', scans);
+  }
+
+  /** 큐 비움 보고(openapi putScannerEventQueueReport). 서버는 204 빈 본문이라 JSON을 읽지 않는다 */
+  async queueReport(eventId: string, pendingUploads: number): Promise<void> {
+    await this.#send('PUT', `/v1/scanner/queue-reports/${encodeURIComponent(eventId)}`, { pendingUploads });
+  }
+
+  devices(eventId: string): Promise<GateStatusView> {
+    return this.#json<GateStatusView>('GET', `/v1/scanner/events/${encodeURIComponent(eventId)}/devices`);
+  }
+
+  async resolveFlag(flagId: string, status: 'OK' | 'SUSPECT' | 'UNDETERMINED', note?: string): Promise<void> {
+    await this.#send('POST', `/v1/scanner/flags/${encodeURIComponent(flagId)}/resolution`, { status, ...(note !== undefined ? { note } : {}) });
+  }
+
+  boothAuthorization(boothCode: string): Promise<{ ticketId: string; seatLabel: string; allowUntil: string }> {
+    return this.#json('POST', '/v1/scanner/booth-authorizations', { boothCode });
+  }
+
+  overridePasses(eventId: string): Promise<{ items: OverridePassView[] }> {
+    return this.#json('GET', `/v1/scanner/events/${encodeURIComponent(eventId)}/override-passes`);
   }
 
   async #json<T>(method: string, path: string, body?: unknown): Promise<T> {

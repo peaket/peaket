@@ -35,6 +35,7 @@ import type {
   CompensationPage,
   CreateTicketAddon201,
   CreateTicketAddonBody,
+  CreateTicketBoothRequest201,
   CreateTicketBoothRequestBody,
   CreateTicketCancellationBody,
   CreateTicketDeviceKey201,
@@ -326,8 +327,13 @@ export const useCreateTicketDeviceKey = <TError = ErrorType<ProblemResponse | To
       return useMutation(getCreateTicketDeviceKeyMutationOptions(options), queryClient);
     }
     export type createTicketBoothRequestResponse201 = {
-  data: void
+  data: CreateTicketBoothRequest201
   status: 201
+}
+
+export type createTicketBoothRequestResponse404 = {
+  data: ProblemResponse
+  status: 404
 }
 
 export type createTicketBoothRequestResponse409 = {
@@ -343,7 +349,7 @@ export type createTicketBoothRequestResponse429 = {
 export type createTicketBoothRequestResponseSuccess = (createTicketBoothRequestResponse201) & {
   headers: Headers;
 };
-export type createTicketBoothRequestResponseError = (createTicketBoothRequestResponse409 | createTicketBoothRequestResponse429) & {
+export type createTicketBoothRequestResponseError = (createTicketBoothRequestResponse404 | createTicketBoothRequestResponse409 | createTicketBoothRequestResponse429) & {
   headers: Headers;
 };
 

@@ -90,6 +90,8 @@ export interface VerificationTx {
   lockAccountForShare(accountId: string): Promise<string | null>;
   /** 그 계정의 상태를 잠그지 않고 읽는다(되돌아가지 않는 DELETED를 보는 데만 쓴다: 병합의 쓰기 잠금과 교착하지 않게, 재검토 2026-11-05). 계정을 보지 못하는 저장소는 null */
   accountStatusOf(accountId: string): Promise<string | null>;
+  /** 부스 대조 결과를 같은 트랜잭션에 남긴다(BOOTH 확정). ci_matched=false도 남기고 token_hash는 null이다 */
+  insertBoothReverification(i: { id: string; accountId: string; ticketId: string; verificationId: string; ciMatched: boolean; tokenHash: string | null; createdAtMs: number; expiresAtMs: number }): Promise<void>;
 }
 
 /** pid 키 전환 기록 한 줄(docs/data.md pid_key_rotation) */
@@ -154,8 +156,38 @@ export interface VerificationStore {
   purgeVerificationRecords(now: number): Promise<number>;
 }
 
-export const PHONE_REFS = Symbol('identity.PhoneRefs');
-/** 본인확인 결과 번호(기관 값 그대로)의 연락처 가명. 맞출 수 없는 번호거나 라벨 키가 없으면 undefined(번호는 저장하지 않는다, identity §9.1) */
+export interface BoothTokenBinding {
+  accountId: string;
+  ticketId: string;
+  expiresAtMs: number;
+  ciMatched: boolean;
+}
+
+/** 부스 대조 결과 표(docs/data.md booth_reverification, docs/review/plans/F-05-12.md §4) */
+export interface BoothReverificationStore {
+  /** 대조가 끝난 건 하나를 남긴다. 같은 verificationId는 한 번만(기본 키) */
+  insert(i: {
+    id: string;
+    accountId: string;
+    ticketId: string;
+    verificationId: string;
+    ciMatched: boolean;
+    tokenHash: string | null;
+    createdAtMs: number;
+    expiresAtMs: number;
+  }): Promise<void>;
+  /** 해시로 찾는다. 만료·불일치는 null(저장소는 지우지 않는다) */
+  byTokenHash(tokenHash: string): Promise<BoothTokenBinding | null>;
+}
+export const BOOTH_REVERIFICATIONS = Symbol('identity.BoothReverifications');
+
+/** 부스 대조 지표(identity_booth_reverifications_total{result}). 계정·티켓·토큰·연계정보는 싣지 않는다 */
+export interface BoothReverificationSignals {
+  result(result: 'started' | 'verified' | 'mismatch' | 'consent' | 'not_verified'): void;
+}
+export const BOOTH_SIGNALS = Symbol('identity.BoothSignals');
+
+export const PHONE_REFS = Symbol('identity.PhoneRefs');/** 본인확인 결과 번호(기관 값 그대로)의 연락처 가명. 맞출 수 없는 번호거나 라벨 키가 없으면 undefined(번호는 저장하지 않는다, identity §9.1) */
 export interface PhoneRefs {
   ref(rawPhone: string): string | undefined;
   /** 키 회전의 이음 기간에만: 옛 판의 값(BOT-046) */

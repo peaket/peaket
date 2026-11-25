@@ -101,6 +101,8 @@ export interface TicketIssueDeps {
    * STALE·RETRY·STOPPED에는 부르지 않는다(주문 상태가 그대로다). 던지지 않는다(던져도 실행기는 삼킨다). 없으면 부르지 않는다
    */
   onOrderChanged?: (orderId: string) => void;
+  /** 발권 호출에 실을 좌석 이름(F-05-12 O-T2 ②). 없거나 실패하면 칸을 비워 seatId로 물러난다 */
+  seatLabels?: { labels(eventId: string, seatIds: readonly string[]): Promise<readonly (string | undefined)[]> };
 }
 
 /** 틱 하나의 결과(시험·로그용 수) */
@@ -319,12 +321,15 @@ export class TicketIssueRunner {
   async #issueAndWrite(job: TicketIssueJob): Promise<TicketIssueOutcome> {
     let tickets: readonly IssuedTicketRef[] | undefined;
     let code: TicketIssueFailureCode | undefined;
+    // 좌석 이름은 있으면 싣고, 읽지 못하면 칸을 비워 seatId로 물러난다(발권을 막지 않는다)
+    const seatLabels = this.deps.seatLabels ? await this.deps.seatLabels.labels(job.eventId, job.seatIds).catch(() => undefined) : undefined;
     try {
       tickets = await this.deps.issuer.issue({
         orderId: job.orderId,
         eventId: job.eventId,
         payerAccountId: job.payerAccountId,
         seatIds: job.seatIds,
+        ...(seatLabels !== undefined ? { seatLabels } : {}),
         deadlineMs: this.deps.callDeadlineMs ?? TICKET_ISSUE_CALL_DEADLINE_MS,
         // 0은 세대를 적지 않은 옛 행이다(칸을 비운다)
         ...(job.issueGeneration > 0 ? { issueGeneration: job.issueGeneration } : {}),

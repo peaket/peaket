@@ -113,7 +113,11 @@ export const CreateTicketBoothRequestBody = zod.object({
   "reverificationToken": zod.string()
 }).strict()
 
-export const CreateTicketBoothRequestResponse = zod.void()
+export const CreateTicketBoothRequestResponse = zod.object({
+  "boothRequestId": zod.string(),
+  "boothCode": zod.string().describe('혼동 글자(I·O·0·1)를 뺀 8자, 10분'),
+  "expiresAt": zod.iso.datetime({"offset":true})
+})
 
 /**
  * FR-013, POL-017, ADR-0046. 행 잠금 + 버전으로 이중 양도 방지. 받은 티켓의 재양도는 409

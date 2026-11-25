@@ -13,4 +13,8 @@ export { SetRestrictedCiHold } from './application/set-restricted-ci-hold.js';
 export { restrictedCiHoldHandlers } from './inbound/restricted-ci-hold.grpc.js';
 export { CheckReverification } from './application/check-reverification.js';
 export { reverificationCheckHandlers } from './inbound/reverification.grpc.js';
+export { boothReverificationHandlers } from './inbound/booth-reverification.grpc.js';
+export { StartBoothReverification } from './application/start-booth-reverification.js';
+export { VerifyBoothReverification } from './application/verify-booth-reverification.js';
+export { BOOTH_REVERIFICATIONS, type BoothReverificationStore } from './domain/ports.js';
 export { parsePidRotationArgs, PidRotation, PidRotationError } from './application/pid-rotation.js';

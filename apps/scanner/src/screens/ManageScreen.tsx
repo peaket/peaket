@@ -8,8 +8,10 @@ import { ScannerShell } from "@peaket/ds/ScannerShell";
 import { useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import type { ScannerLayout } from "../app/layout";
 import { PreviewSwitcher, usePreviewState } from "../app/preview";
+import { LiveManageBridge } from "./LiveManageBridge";
+export { ManageController } from "./manage-model";
 import { Link } from "../app/router";
-import { device, fleet, myOverrides, placement, sync, zoneFlags } from "../fixtures/scanner";
+import { device, fleet, myOverrides, placement, sync, zoneFlags } from "./manage-demo";
 import { bottomStyle, ManageLink, Strip, stripStyle } from "../shared/shell";
 
 export const MANAGE_STATES = ["이상 표시", "기기 탭", "부스 탭", "내 예외 통과", "오프라인", "빈 화면"] as const;
@@ -40,6 +42,7 @@ export function ManageScreen() {
       : tabFromState(state);
   return (
     <>
+      <LiveManageBridge />
       <ManageBody key={`${state}-${initialTab}`} st={state} layout={layout} initialTab={initialTab} />
       <PreviewSwitcher states={MANAGE_STATES} current={state} />
     </>

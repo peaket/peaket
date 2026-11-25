@@ -7,6 +7,7 @@ import { and, eq, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { keyIdTextOf, publicKeyTextOf } from '../../domain/device-key.js';
 import {
+  type BoothStore,
   deviceKeyNoticeTypeOf,
   type DeviceKeyNotice,
   type DeviceKeyNoticeStore,
@@ -32,7 +33,7 @@ interface TicketRow {
 const atMs = (v: Date | string | null): number | undefined => (v === null ? undefined : v instanceof Date ? v.getTime() : Date.parse(v));
 
 export class DrizzleDeviceKeyStore implements DeviceKeyStore, DeviceKeyNoticeStore {
-  constructor(private readonly o: { database: Database; changes?: ScannerChangeWriter }) {}
+  constructor(private readonly o: { database: Database; changes?: ScannerChangeWriter; booth?: BoothStore }) {}
 
   async register(i: DeviceKeyRegistrationInput): Promise<DeviceKeyRegistrationResult> {
     return this.o.database.transaction(async (tx) => {
@@ -42,6 +43,11 @@ export class DrizzleDeviceKeyStore implements DeviceKeyStore, DeviceKeyNoticeSto
       const ticket = rows[0];
       if (!ticket) return reissueUnverified ? { kind: 'REISSUE_REQUIRED' } : { kind: 'NOT_FOUND' };
       if (ticket.account_id !== i.accountId) return reissueUnverified ? { kind: 'REISSUE_REQUIRED' } : { kind: 'NOT_HOLDER' };
+      // BOOTH는 키 저장과 같은 트랜잭션에서 부스 허용(used_at)을 소모한다. 허용이 없으면 아무것도 저장하지 않는다(TR-03)
+      if (i.reason === 'BOOTH') {
+        if (!i.boothRequestId || !this.o.booth) return { kind: 'BOOTH_NOT_ALLOWED' };
+        if (!(await this.o.booth.consumeForRegistration({ ticketId: i.ticketId, boothRequestId: i.boothRequestId, nowMs: i.nowMs }, tx))) return { kind: 'BOOTH_NOT_ALLOWED' };
+      }
       const activeRows = (await tx.execute(sql`select key_id from device_key where ticket_id = ${i.ticketId} and revoked_at is null limit 1`)).rows as { key_id: Buffer }[];
       const activeKeyId = activeRows[0] ? new Uint8Array(activeRows[0].key_id) : undefined;
       // 같은 키 다시 등록(offline-gate §2, ADR-0336 결정 4): 티켓 행 잠금 안에서, 보유자 확인 바로 뒤·입장 시작·TRANSFER·재인증 확인보다 앞에서 본다.

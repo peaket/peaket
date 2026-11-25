@@ -505,6 +505,8 @@ message TerminateAdminSessionsResponse {
 // 답이 없으면 queue-svc는 통과로 보지 않고 503으로 답한다(trust-svc가 멈췄을 때와 같은 규칙, 초안, 추천 적용 2026-10-30).
 service ReverificationCheckService {
   rpc CheckReverification(CheckReverificationRequest) returns (CheckReverificationResponse);
+  // 부스 재발급 대조 토큰 확인(F-05-12 O-T28 ①, docs/features/identity.md §6.1)
+  rpc VerifyBoothReverification(VerifyBoothReverificationRequest) returns (VerifyBoothReverificationResponse);
 }
 
 message CheckReverificationRequest {
@@ -529,6 +531,19 @@ message CheckReverificationResponse {
   ReverificationResult result = 1;
   // PASSED일 때만 채운다(epoch 밀리초)
   int64 verified_at_ms = 2;
+}
+
+// 부스 재발급 대조 토큰(5분) 확인. ticket-svc가 부스 코드를 만들기 전에 부른다.
+// 토큰 원문은 이 요청에만 싣고, identity-svc는 SHA-256 해시로 찾는다. 계정·티켓 묶임과 만료를 함께 본다.
+message VerifyBoothReverificationRequest {
+  string token = 1;
+  string account_id = 2;
+  string ticket_id = 3;
+}
+
+message VerifyBoothReverificationResponse {
+  // true는 계정·티켓이 맞고 아직 5분이 지나지 않은 대조가 있다는 뜻이다. 거절은 false(오류 아님)
+  bool ok = 1;
 }
 
 // 부르는 쪽: 관리 경로(대상 partner·ops)를 처리하는 모든 서비스의 공통 가드 RolesGuard(packages/platform).

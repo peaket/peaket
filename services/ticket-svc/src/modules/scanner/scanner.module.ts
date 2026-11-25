@@ -34,6 +34,7 @@ import { ScannerEnrollmentController } from './inbound/scanner-enrollment.contro
 import { ScannerGateController } from './inbound/scanner-gate.controller.js';
 import { ScannerPlacementController } from './inbound/scanner-placement.controller.js';
 import { ScannerShiftController } from './inbound/scanner-shift.controller.js';
+import { SCANNER_BOOTH_ADMIN, ScannerBoothController, type ScannerBoothAdmin } from './inbound/scanner-booth.controller.js';
 
 export interface ScannerWiring {
   store: ScannerDeviceStore;
@@ -69,6 +70,8 @@ export interface ScannerWiring {
   entryClose?: EntryCloseStore;
   /** 큐 비움 보고 결과 지표(ticket_scanner_queue_reports_total{result}) */
   onQueueReport?: (result: 'empty' | 'pending' | 'no_placement') => void;
+  /** SCR-052 부스 허용·기기 현황·내 예외 통과(F-05-12). 없으면 그 경로를 싣지 않는다 */
+  booth?: ScannerBoothAdmin;
 }
 
 @Module({})
@@ -81,6 +84,7 @@ export class ScannerModule {
       { provide: SCANNER_GATE_STORE, useValue: o.gate },
       { provide: SCANNER_SHIFT_STORE, useValue: o.shift },
       { provide: SCANNER_PWA_ORIGIN, useValue: o.scannerPwaOrigin ?? scannerPwaOriginFromEnv({}) },
+      ...(o.booth ? [{ provide: SCANNER_BOOTH_ADMIN, useValue: o.booth } satisfies Provider] : []),
       ...(o.entryClose ? [{ provide: ENTRY_CLOSE_STORE, useValue: o.entryClose } satisfies Provider] : []),
       ...(o.mtlsSecret ? [{ provide: SCANNER_MTLS_SECRET, useValue: o.mtlsSecret } satisfies Provider] : []),
       ...(o.policy ? [{ provide: SCANNER_EVENT_POLICY, useValue: o.policy } satisfies Provider] : []),
@@ -150,6 +154,7 @@ export class ScannerModule {
         ScannerShiftController,
         ScannerPlacementController,
         PartnerScannerPlacementController,
+        ...(o.booth ? [ScannerBoothController] : []),
       ],
       providers,
     };

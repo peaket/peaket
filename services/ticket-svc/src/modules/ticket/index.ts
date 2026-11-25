@@ -24,10 +24,16 @@ export { DrizzleTransferStore, type DrizzleTransferStoreOptions } from './adapte
 export { DrizzleDeviceKeyStore } from './adapters/db/drizzle-device-key-store.js';
 export { JwksFanReauthGate } from './adapters/jwks-fan-reauth-gate.js';
 export { GrpcMemberCodeDirectory } from './adapters/identity-member-codes.js';
+export { GrpcBoothReverificationVerifier } from './adapters/grpc-booth-reverification.js';
+export { DrizzleBoothStore } from './adapters/db/drizzle-booth-store.js';
+export { MemoryBoothStore } from './adapters/memory-booth-store.js';
 export { TransferError, Transfers, type TransferReauthGate, type TransferStore, type TransferAct, type TransferOp } from './application/transfers.js';
 export { TransfersController } from './inbound/transfers.controller.js';
 export { transferLockHandlers, type TransferLockUseCases } from './inbound/ticket.grpc.js';
 export { TicketDeviceKeysController } from './inbound/device-keys.controller.js';
 export { WalletTicketsController } from './inbound/wallet-tickets.controller.js';
 export { TicketModule, type TicketWiring } from './ticket.module.js';
+export { TicketBooth, BoothBeforeEntry, BoothCodeExpired, BoothLimit, BoothMismatch, BoothNotFound, type BoothReverificationVerifier, type TicketBoothDeps } from './application/booth.js';
+export { BoothInputError, boothDayKey, boothHash, newBoothCode, parseBoothCode, type BoothAuthorizeOutcome, type BoothRequestOutcome, type GateStatusDeviceView, type GateStatusView, type OverridePassView, type OverrideReviewStatus } from './domain/booth.js';
+export { TicketBoothController } from './inbound/booth.controller.js';
 export { ticketPackage, ticketServiceHandlers, type TicketGrpcUseCases, type TicketPackage } from './inbound/ticket.grpc.js';

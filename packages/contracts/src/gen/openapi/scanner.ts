@@ -338,6 +338,35 @@ export const GetScannerEventDevicesResponse = zod.object({
 }).describe('파트너 현장 운영 탭(SCR-037)·관제 입장 탭(SCR-029)용 집계. 개인정보 없음')
 
 /**
+ * FR-066, SCR-052 ⑥. 그 회차·그 스태프 계정이 남긴 method=OVERRIDE 기록만 최신순으로 준다. limit 기본 50·최대 200. reviewStatus는 연결된 OVERRIDE_REVIEW gate_flag의 상태(OPEN→WAITING, OK→OK, SUSPECT→SUSPECT, UNDETERMINED→UNDETERMINED)다. 배치가 없으면 409 no-placement(docs/design/d5 §8.5, docs/review/plans/F-05-12.md §3 결정 6)
+ * @summary 내가 한 예외 통과 목록(현장 책임자, 사후 검토 상태)
+ */
+export const GetScannerEventOverridePassesParams = zod.object({
+  "eventId": zod.string().describe('대기열 경로(/v1/queues/{eventId}/…)에서는 대기열 식별자다. 회차 대기열은 회차 ID, 인기 MD 대기열은 상품 ID(product.id, 화면 주소 /shop/[productId]/queue의 productId)를 넣는다 [가정](docs/frontend.md §6.2 31번). 두 값 모두 UUIDv7이라 겹치지 않고 queue-svc는 1~64자 불투명 문자열로 다룬다. 그래서 새 경로를 더하지 않는다')
+})
+
+export const getScannerEventOverridePassesQueryLimitDefault = 50;
+export const getScannerEventOverridePassesQueryLimitMax = 200;
+
+
+
+export const GetScannerEventOverridePassesQueryParams = zod.object({
+  "limit": zod.int().min(1).max(getScannerEventOverridePassesQueryLimitMax).default(getScannerEventOverridePassesQueryLimitDefault)
+})
+
+export const GetScannerEventOverridePassesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "scanId": zod.string(),
+  "at": zod.iso.datetime({"offset":true}),
+  "ticketId": zod.string(),
+  "seatLabel": zod.string(),
+  "reason": zod.string(),
+  "note": zod.string().optional(),
+  "reviewStatus": zod.enum(['WAITING', 'OK', 'SUSPECT', 'UNDETERMINED'])
+}))
+})
+
+/**
  * FR-066, ADR-0051. gate_staff·대리 승인 세션은 403
  * @summary 기기 배치(현장 책임자). 같은 파트너 기기만, 온라인에서만
  */
@@ -424,5 +453,9 @@ export const CreateScannerBoothAuthorizationBody = zod.object({
   "boothCode": zod.string()
 }).strict()
 
-export const CreateScannerBoothAuthorizationResponse = zod.unknown()
+export const CreateScannerBoothAuthorizationResponse = zod.object({
+  "ticketId": zod.string(),
+  "seatLabel": zod.string().describe('사람이 읽는 좌석 이름(없으면 seatId, O-T2 ②)'),
+  "allowUntil": zod.iso.datetime({"offset":true})
+})
 

@@ -79,7 +79,7 @@ export class AppModule implements NestModule {
       /** 판매 중지·재개 사본(BAT-465 R-584). 운영은 purchase DB와 좌석 Redis가 있을 때만 넘긴다 */
       saleControl?: SaleControlModuleDeps;
       /** 예매자 명단 내부 HTTP(A2-03). purchase DB가 있을 때만 연다 */
-      attendeeExport?: { database: Database };
+      attendeeExport?: { database: Database; labels?: { resolve(eventId: string, seatIds: readonly string[]): Promise<readonly (string | undefined)[]> } };
       /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
       hotPath?: HotPathMetrics;
     },

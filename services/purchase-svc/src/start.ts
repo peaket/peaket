@@ -704,7 +704,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
           }
         : {}),
       ...(saleControl ? { saleControl } : {}),
-      ...(database ? { attendeeExport: { database } } : {}),
+      ...(database ? { attendeeExport: { database, labels: { resolve: async (eventId: string, seatIds: readonly string[]) => (await seatMap.resolve(eventId, [...seatIds])).map((s) => s?.label) } } } : {}),
       hotPath,
       admission: {
         store: sessionStore,
@@ -864,6 +864,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
       log: new LoggerTicketIssueLog(service.logger),
       signals: new PromTicketIssueSignals().register(service.metrics.registry),
       clock: systemClock,
+      seatLabels: {
+        labels: async (eventId: string, seatIds: readonly string[]) => (await seatMap.resolve(eventId, [...seatIds])).map((s) => s?.label),
+      },
       ...(paymentStatusWaiters ? { onOrderChanged: (orderId: string) => paymentStatusWaiters.notify(orderId) } : {}),
     });
     ticketVoidRunner = new TicketVoidRunner({ jobs: new DrizzleTicketVoid({ database: ticketDb, clock: systemClock }), voider: ticketIssuer.voider, log: new LoggerTicketVoidLog(service.logger), signals: new PromTicketVoidSignals().register(service.metrics.registry), clock: systemClock });

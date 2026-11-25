@@ -9,6 +9,9 @@ import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { loadTicketServiceConfig, TICKET_DB_POOL_MAX } from './config.js';
 import { startGrpcServer } from './grpc-server.js';
 import { DrizzleDeviceKeyStore } from './modules/ticket/adapters/db/drizzle-device-key-store.js';
+import { DrizzleBoothStore } from './modules/ticket/adapters/db/drizzle-booth-store.js';
+import { GrpcBoothReverificationVerifier } from './modules/ticket/adapters/grpc-booth-reverification.js';
+import { TicketBooth } from './modules/ticket/application/booth.js';
 import { DrizzleTicketStore } from './modules/ticket/adapters/db/drizzle-ticket-store.js';
 import { DrizzleTransferStore } from './modules/ticket/adapters/db/drizzle-transfer-store.js';
 import { GrpcMemberCodeDirectory } from './modules/ticket/adapters/identity-member-codes.js';
@@ -124,7 +127,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
     const gateStore = new DrizzleScannerGateStore(database);
     const shiftStore = new DrizzleScannerShiftStore(database);
     const entryCloseStore = new DrizzleEntryCloseStore(database);
-    const deviceKeyStore = new DrizzleDeviceKeyStore({ database, changes: gateStore });
+    const boothStore = new DrizzleBoothStore({ database });
+    const deviceKeyStore = new DrizzleDeviceKeyStore({ database, changes: gateStore, booth: boothStore });
     const store = new DrizzleTicketStore({ database, changes: gateStore, deviceKeys: deviceKeyStore });
     const ticket = new TicketService({ store, clock: systemClock });
     const scannerStore = new DrizzleScannerDeviceStore(database);
@@ -154,7 +158,18 @@ export async function start(o: StartOptions): Promise<StartedService> {
       observe: (r) => registrationMetric?.(r),
       observeNotice: (r) => noticeMetric?.(r),
     });
+    const boothRequestMetric = new Counter({ name: 'ticket_booth_requests_total', help: '부스 재발급 요청(result: created·before_entry·mismatch·limit·not_found)', labelNames: ['result'] as const, registers: [] });
+    const boothAuthorizeMetric = new Counter({ name: 'ticket_booth_authorizations_total', help: '부스 코드 허용(result: authorized·not_found·expired·event_mismatch)', labelNames: ['result'] as const, registers: [] });
+    const boothRegisterMetric = new Counter({ name: 'ticket_booth_registrations_total', help: 'BOOTH 기기 키 등록(result: registered·not_authorized·expired·reused)', labelNames: ['result'] as const, registers: [] });
     const memberCodes = config.identityGrpcUrl ? new GrpcMemberCodeDirectory(config.identityGrpcUrl, lbProfile) : undefined;
+    const booth = new TicketBooth({
+      store: boothStore,
+      verifications: config.identityGrpcUrl ? new GrpcBoothReverificationVerifier(config.identityGrpcUrl, lbProfile) : { verify: async () => false },
+      clock: systemClock,
+      onRequest: (result) => boothRequestMetric.inc({ result }),
+      onAuthorize: (result) => boothAuthorizeMetric.inc({ result }),
+      onRegister: (result) => boothRegisterMetric.inc({ result }),
+    });
     const transfers = new Transfers({
       store: transferStore,
       reauth,
@@ -218,8 +233,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
           onPolicyChanged: (i) => policyChanged?.(i),
           onQueueReport: (result) => queueReported?.(result),
           entryClose: entryCloseStore,
+          booth,
         },
-        ticket: { deviceKeys, tickets: ticket, transfers },
+        ticket: { deviceKeys, tickets: ticket, transfers, booth },
       }),
       adminAuthz,
       scanner: {
@@ -254,6 +270,9 @@ export async function start(o: StartOptions): Promise<StartedService> {
     expireTimer.unref?.();
     expire();
     // 기기 키 등록 지표·로그 줄(docs/features/offline-gate.md §10.1). 계정·keyId는 싣지 않는다
+    service.metrics.registry.registerMetric(boothRequestMetric);
+    service.metrics.registry.registerMetric(boothAuthorizeMetric);
+    service.metrics.registry.registerMetric(boothRegisterMetric);
     const registrations = new Counter({
       name: 'ticket_device_key_registrations_total',
       help: '입장용 기기 키 등록 수(reason, result, offline-gate §10.1)',

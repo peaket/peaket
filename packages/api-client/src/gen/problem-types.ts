@@ -34,6 +34,7 @@ export type ProblemType =
   | 'auto-condition-invalid'
   | 'batching'
   | 'booking-restricted'
+  | 'booth-before-entry'
   | 'booth-mismatch'
   | 'booth-not-authorized'
   | 'bot-review-already-recorded'
@@ -444,6 +445,7 @@ export const PROBLEM_TYPES = {
   'auto-condition-invalid': { status: 400, title: "희망 조건이 올바르지 않습니다" },
   'batching': { status: 503, title: "순서를 정하는 중입니다. 잠시 뒤 다시 시도해 주세요" },
   'booking-restricted': { status: 403, title: "예매가 제한된 계정입니다" },
+  'booth-before-entry': { status: 409, title: "입장 시작 전에는 온라인으로 다시 받아야 합니다" },
   'booth-mismatch': { status: 409, title: "티켓 보유자와 다른 분입니다" },
   'booth-not-authorized': { status: 403, title: "부스 재발급 허용이 없거나 10분이 지났습니다" },
   'bot-review-already-recorded': { status: 409, title: "이미 판정을 기록한 표본입니다" },

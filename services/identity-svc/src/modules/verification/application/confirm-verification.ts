@@ -10,7 +10,8 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
 import { ACCOUNT_CLOSURE, type AccountClosure } from '../../session/index.js';
-import { IDENTITY_HASHERS, type IdentityHashers, PHONE_REFS, type PhoneRefs, VERIFICATION_PROVIDER, VERIFICATION_STORE, type VerificationProvider, type VerificationStore } from '../domain/ports.js';
+import { BOOTH_TOKEN_TTL_MS, hashBoothToken, newBoothToken } from '../domain/booth-reverification.js';
+import { BOOTH_SIGNALS, type BoothReverificationSignals, IDENTITY_HASHERS, type IdentityHashers, PHONE_REFS, type PhoneRefs, VERIFICATION_PROVIDER, VERIFICATION_STORE, type VerificationProvider, type VerificationStore } from '../domain/ports.js';
 import {
   acceptsResult,
   ageOnKst,
@@ -32,6 +33,8 @@ export interface VerificationResultView {
   next: string;
   /** 부정 예매 이용 제한이 이어진 사람의 제한 끝(openapi). 그 확인은 BUILD_ORDER BOT-030이 붙이고 그 전에는 늘 null */
   restrictedUntil: string | null;
+  /** 부스 대조(BOOTH)가 VERIFIED일 때만: ticket-svc가 부스 코드를 만들 때 쓰는 reverificationToken(5분) */
+  resultToken?: string;
 }
 
 export const viewOf = (a: Attempt, restrictedUntil: number | null = null): VerificationResultView => ({
@@ -52,7 +55,7 @@ export async function restrictedUntilFor(store: Pick<VerificationStore, 'restric
 type Checked =
   | { outcome: 'CANCELLED' | 'FAILED'; personMismatch?: true }
   | { outcome: 'UNDER_14' }
-  | { outcome: 'VERIFIED'; hmacs: { hmac: Buffer; version: number }[]; pid: { pid: Buffer; version: number } | null; phoneRef?: string; phoneRefPrev?: string };
+  | { outcome: 'VERIFIED'; hmacs: { hmac: Buffer; version: number }[]; pid: { pid: Buffer; version: number } | null; phoneRef?: string; phoneRefPrev?: string; boothToken?: string };
 
 /** 트랜잭션 안에서 새로 저장해야 하는데 아직 pid가 없다: 트랜잭션을 되돌리고 pid를 계산해(KMS는 트랜잭션 밖) 한 번 더 한다 */
 class NeedPid extends Error {}
@@ -74,6 +77,8 @@ export class ConfirmVerification {
     @Inject(CLOCK) private readonly clock: Clock,
     /** 본인확인 번호의 연락처 가명(없으면 쓰지 않는다: 시험, identity §9.1 '조사용 값의 첫 구현') */
     @Optional() @Inject(PHONE_REFS) private readonly phoneRefs?: PhoneRefs,
+    /** 부스 대조 지표(BOOTH만). 없으면 세지 않는다 */
+    @Optional() @Inject(BOOTH_SIGNALS) private readonly boothSignals?: BoothReverificationSignals,
   ) {}
 
   async run(i: { accountId: string; verificationId: string; providerResult: Record<string, string> }): Promise<VerificationResultView> {
@@ -82,18 +87,20 @@ export class ConfirmVerification {
     if (!seen || !acceptsResult(seen, i.accountId, now)) throw new VerificationError('NOT_FOUND', '없는 건이거나 만료됐거나 다른 계정의 건이다');
     if (seen.status !== 'PENDING') return this.#answer(seen);
     let done: Attempt;
+    let resultToken: string | undefined;
     try {
       const checked = await this.#check(seen, i.providerResult, now);
       done =
         checked.outcome === 'VERIFIED'
           ? await this.#confirm(i.verificationId, checked, now)
           : await this.#settle(i.verificationId, checked.outcome, now, 'personMismatch' in checked && checked.personMismatch === true);
+      if (checked.outcome === 'VERIFIED') resultToken = checked.boothToken;
     } catch (e) {
       if (!(e instanceof ProviderUnavailable || e instanceof KeyServiceUnavailable)) throw e;
       // 기관·연계정보·pid 키 장애(첫 저장의 pid 계산 포함): 그 건을 PROVIDER_DOWN으로 마친다(결과 조회가 같은 값을 주고, 다시 보내도 503이다)
       done = await this.#settle(i.verificationId, 'PROVIDER_DOWN', now);
     }
-    return this.#answer(done);
+    return this.#answer(done, resultToken);
   }
 
   /** 기관 값 확인 → 정리 중 확인 → 만 나이 → 연계정보 HMAC(모든 판)·pid. 모두 트랜잭션 밖이다 */
@@ -121,7 +128,9 @@ export class ConfirmVerification {
     const phoneRef = outcome.phone === undefined ? undefined : this.phoneRefs?.ref(outcome.phone);
     // 키 회전의 이음 기간이면 옛 판 값도 구해 둔다(회전 전 기록과 잇는다, BOT-046)
     const phoneRefPrev = phoneRef && outcome.phone !== undefined ? this.phoneRefs?.prevRef?.(outcome.phone) : undefined;
-    return { outcome: 'VERIFIED', hmacs, pid: null, ...(phoneRef ? { phoneRef } : {}), ...(phoneRefPrev ? { phoneRefPrev } : {}) };
+    // 부스 대조는 결과 확정 때 토큰을 한 번 만든다(5분). 토큰 원문은 이 응답에만 싣고 저장소에는 해시만 남긴다
+    const boothToken = a.purpose === 'BOOTH' ? newBoothToken() : undefined;
+    return { outcome: 'VERIFIED', hmacs, pid: null, ...(phoneRef ? { phoneRef } : {}), ...(phoneRefPrev ? { phoneRefPrev } : {}), ...(boothToken ? { boothToken } : {}) };
   }
 
   async #confirm(verificationId: string, checked: Extract<Checked, { outcome: 'VERIFIED' }>, now: number): Promise<Attempt> {
@@ -168,6 +177,31 @@ export class ConfirmVerification {
         return { ...a, status: 'FAILED' as const, completedAt: now };
       }
       const write = checked.hmacs[0]!;
+      // 부스 대조(BOOTH): 계정의 기존 ci_hmac과만 비교하고 새 본인확인 기록을 만들지 않는다.
+      // 결과 행은 ci_matched=false도 남기고, 같을 때만 토큰 해시를 남긴다(원문은 응답에만).
+      if (a.purpose === 'BOOTH') {
+        const ticketId = a.ticketId;
+        if (!ticketId) throw new VerificationError('BOOTH_MISMATCH', '부스 대조 건에 티켓이 없다');
+        const mineBooth = await tx.verificationOf(a.accountId);
+        const same =
+          mineBooth !== null &&
+          checked.hmacs.some((h) => h.version === mineBooth.ciHmacKeyVersion && h.hmac.equals(mineBooth.ciHmac));
+        const tokenHash = same && checked.boothToken ? hashBoothToken(checked.boothToken) : null;
+        await tx.insertBoothReverification({
+          id: uuidv7(this.clock),
+          accountId: a.accountId,
+          ticketId,
+          verificationId: a.id,
+          ciMatched: same,
+          tokenHash,
+          createdAtMs: now,
+          expiresAtMs: now + BOOTH_TOKEN_TTL_MS,
+        });
+        await tx.completeAttempt(a.id, same ? 'VERIFIED' : 'FAILED', now, !same);
+        if (same) this.boothSignals?.result('verified');
+        else this.boothSignals?.result('mismatch');
+        return { ...a, status: same ? ('VERIFIED' as const) : ('FAILED' as const), completedAt: now };
+      }
       const owner = await tx.accountByCiHmac(checked.hmacs.map((h) => h.hmac), a.accountId);
       const mine = await tx.verificationOf(a.accountId);
       let status: Exclude<AttemptStatus, 'PENDING'>;
@@ -228,7 +262,13 @@ export class ConfirmVerification {
     });
   }
 
-  async #answer(a: Attempt): Promise<VerificationResultView> {
+  async #answer(a: Attempt, resultToken?: string): Promise<VerificationResultView> {
+    if (a.purpose === 'BOOTH') {
+      // 부스 대조는 결과가 다르면 토큰을 주지 않는다(409). 성공은 새 토큰을 만든 그 응답에만 싣는다
+      if (a.status !== 'VERIFIED') throw new VerificationError('BOOTH_MISMATCH', '본인확인 결과가 이 티켓의 계정과 다르다');
+      const view = viewOf(a, null);
+      return resultToken ? { ...view, resultToken } : view;
+    }
     if (a.status === 'DUPLICATE_ACCOUNT') throw new VerificationError('DUPLICATE_ACCOUNT', '이미 다른 계정에서 본인확인한 분이다');
     if (a.status === 'PROVIDER_DOWN') throw new VerificationError('PROVIDER_DOWN', '본인확인기관을 쓸 수 없다');
     if (a.status === 'UNDER_14') {

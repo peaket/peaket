@@ -1,4 +1,4 @@
-// 운영 스캐너 목록·변경분·스캔·이상 표시 저장소(Drizzle, BUILD_ORDER GAT-180·GAT-190).
+﻿// 운영 스캐너 목록·변경분·스캔·이상 표시 저장소(Drizzle, BUILD_ORDER GAT-180·GAT-190).
 // 목록은 REPEATABLE READ 한 스냅샷에서 scanner_seq와 내용을 함께 읽고(offline-gate §6.3),
 // 스캔 판정·이상 표시·변경 기록은 한 트랜잭션에서 끝낸다. 티켓 표는 ticket 모듈 소유라 이름으로만 읽는다.
 import type { Database, DbTransaction } from '@peaket/platform';
@@ -24,6 +24,7 @@ import { gateFlag, gateFlagScan, scanEvent, scannerChange, scannerEventPolicy, s
 interface TicketRow {
   id: string;
   seat_id: string;
+  seat_label?: string | null;
   gate_zone: string;
   status: ScannerTicketStatus;
   cancelled_at?: Date | string | null;
@@ -56,6 +57,7 @@ interface FlagRow {
   id: string;
   ticket_id: string;
   seat_id: string | null;
+  seat_label?: string | null;
   gate_zone: string | null;
   kind: GateFlagKind;
   awareness: GateFlagAwareness;
@@ -79,7 +81,7 @@ const parseCursor = (raw: string): { atMs: number; flagId: string } | undefined 
 const flagView = (r: FlagRow): GateFlagView => ({
   flagId: r.id,
   ticketId: r.ticket_id,
-  seatLabel: r.seat_id ?? '',
+  seatLabel: r.seat_label ?? r.seat_id ?? '',
   gateZone: r.gate_zone ?? '',
   kind: r.kind,
   awareness: r.awareness,
@@ -179,7 +181,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
   async package(i: { eventId: string; nowMs: number }): Promise<ScannerPackageView> {
     return this.database.transaction(
       async (tx) => {
-        const tickets = (await tx.execute(sql`select id, seat_id, gate_zone, status from ticket where event_id = ${i.eventId} order by id`)).rows as unknown as TicketRow[];
+        const tickets = (await tx.execute(sql`select id, seat_id, seat_label, gate_zone, status from ticket where event_id = ${i.eventId} order by id`)).rows as unknown as TicketRow[];
         const seqRows = (await tx.execute(sql`select last_seq from scanner_seq where event_id = ${i.eventId}`)).rows as { last_seq: string | number }[];
         const kindRows = (await tx.execute(sql`select kind, max(seq) as seq from scanner_change where event_id = ${i.eventId} group by kind`)).rows as { kind: string; seq: string | number }[];
         const lastOf = (...kinds: string[]) => Math.max(0, ...kindRows.filter((r) => kinds.includes(r.kind)).map((r) => Number(r.seq)));
@@ -225,7 +227,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
             return {
               ticketId: t.id,
               gateZone: t.gate_zone,
-              seatLabel: t.seat_id,
+              seatLabel: t.seat_label ?? t.seat_id,
               status: t.status,
               keys: keysByTicket.get(t.id) ?? [],
               ...(scan
@@ -332,7 +334,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
         flags.push({
           flagId,
           ticketId,
-          seatLabel: ticket?.seat_id ?? '',
+          seatLabel: ticket ? (ticket.seat_label ?? ticket.seat_id) : '',
           gateZone: ticket?.gate_zone ?? '',
           kind,
           awareness: flagRow.awareness as GateFlagAwareness,
@@ -351,7 +353,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${i.eventId} || ':' || ${scan.ticketId}, 0))`);
         const ticket = (
           (await tx.execute(sql`
-            select t.id, t.seat_id, t.gate_zone, t.status,
+            select t.id, t.seat_id, t.seat_label, t.gate_zone, t.status,
                    (select min(c.cancelled_at) from ticket_cancellation c where c.ticket_id = t.id) as cancelled_at
             from ticket t where t.event_id = ${i.eventId} and t.id = ${scan.ticketId} limit 1
           `)).rows as unknown as TicketRow[]
@@ -501,14 +503,14 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
     const rows = (
       cursor
         ? await this.database.db.execute(sql`
-            select f.id, f.ticket_id, t.seat_id, t.gate_zone, f.kind, f.awareness, f.status, f.created_at
+            select f.id, f.ticket_id, t.seat_id, t.seat_label, t.gate_zone, f.kind, f.awareness, f.status, f.created_at
             from gate_flag f left join ticket t on t.id = f.ticket_id
             where f.event_id = ${i.eventId} ${filter}
               and (f.created_at < ${new Date(cursor.atMs)} or (f.created_at = ${new Date(cursor.atMs)} and f.id < ${cursor.flagId}))
             order by f.created_at desc, f.id desc limit ${i.limit + 1}
           `)
         : await this.database.db.execute(sql`
-            select f.id, f.ticket_id, t.seat_id, t.gate_zone, f.kind, f.awareness, f.status, f.created_at
+            select f.id, f.ticket_id, t.seat_id, t.seat_label, t.gate_zone, f.kind, f.awareness, f.status, f.created_at
             from gate_flag f left join ticket t on t.id = f.ticket_id
             where f.event_id = ${i.eventId} ${filter}
             order by f.created_at desc, f.id desc limit ${i.limit + 1}
@@ -534,7 +536,7 @@ export class DrizzleScannerGateStore implements ScannerGateStore {
       if (!updated) return undefined;
       const rows = (
         await tx.execute(sql`
-          select f.id, f.ticket_id, t.seat_id, t.gate_zone, f.kind, f.awareness, f.status, f.created_at
+          select f.id, f.ticket_id, t.seat_id, t.seat_label, t.gate_zone, f.kind, f.awareness, f.status, f.created_at
           from gate_flag f left join ticket t on t.id = f.ticket_id where f.id = ${i.flagId}
         `)
       ).rows as unknown as FlagRow[];

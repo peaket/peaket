@@ -63,6 +63,8 @@ export interface DeviceKeysDeps {
   readonly clock: Clock;
   /** 없으면 재인증이 필요한 요청은 모두 거절한다(local·ci의 닫힌 대역과 같다) */
   readonly reauth?: ReauthGate;
+  /** BOOTH 허용 확인(시험 조립). 운영은 DrizzleDeviceKeyStore가 같은 트랜잭션에서 부른다 */
+  readonly booth?: { ownerOf?(ticketId: string): Promise<string | undefined>; consumeForRegistration(i: { ticketId: string; boothRequestId: string; nowMs: number }): Promise<boolean> };
   /** 등록 한 번마다 이유·결과를 알린다(지표·로그 줄, 계정·keyId 없음). start.ts가 지표에 잇는다 */
   readonly observe?: (o: { readonly reason: DeviceKeyReason | 'UNKNOWN'; readonly result: DeviceKeyRegistrationOutcome }) => void;
 }
@@ -114,7 +116,16 @@ export class DeviceKeys {
     // 확인기는 토큰이 없거나 비면 false이고, 통과하면 jti를 한 번 잡으므로 확인은 요청마다 한 번이다
     const reauth = reason === 'REISSUE' || reason === 'BOOTH' || reason === 'ISSUE' ? await this.#reauth(i) : false;
     if (reason === 'BOOTH' && !reauth) throw new DeviceKeyError('REAUTH_REQUIRED');
-    if (reason === 'BOOTH') throw new DeviceKeyError('BOOTH_NOT_ALLOWED');
+    // 시험 조립은 여기서 허용을 소모한다(메모리 저장소). 운영은 DrizzleDeviceKeyStore가 키 저장과 같은 트랜잭션에서 소모한다
+    if (reason === 'BOOTH' && this.d.booth) {
+      if (this.d.booth.ownerOf) {
+        const owner = await this.d.booth.ownerOf(i.ticketId);
+        if (owner === undefined || owner !== i.accountId) throw new DeviceKeyError('NOT_FOUND');
+      }
+      if (i.boothRequestId === undefined || !(await this.d.booth.consumeForRegistration({ ticketId: i.ticketId, boothRequestId: i.boothRequestId, nowMs: now }))) {
+        throw new DeviceKeyError('BOOTH_NOT_ALLOWED');
+      }
+    }
     const r: DeviceKeyRegistrationResult = await this.d.store.register({
       ticketId: i.ticketId,
       accountId: i.accountId,
@@ -123,6 +134,7 @@ export class DeviceKeys {
       reason,
       nowMs: now,
       reauthVerified: reauth,
+      ...(i.boothRequestId !== undefined ? { boothRequestId: i.boothRequestId } : {}),
     });
     switch (r.kind) {
       case 'REGISTERED':
@@ -142,6 +154,8 @@ export class DeviceKeys {
         throw new DeviceKeyError('REISSUE_LIMIT');
       case 'TRANSFER_NOT_ALLOWED':
         throw new DeviceKeyError('TRANSFER_NOT_ALLOWED');
+      case 'BOOTH_NOT_ALLOWED':
+        throw new DeviceKeyError('BOOTH_NOT_ALLOWED');
     }
   }
 

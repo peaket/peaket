@@ -1501,6 +1501,8 @@ export interface TicketIssueCommand {
   readonly payerAccountId: string;
   /** 판매 확정(SOLD)된 좌석(주문 항목, 1~10개) */
   readonly seatIds: readonly string[];
+  /** seatIds와 같은 차례의 사람이 읽는 좌석 이름(F-05-12 O-T2 ②). 없으면 칸을 비운다 */
+  readonly seatLabels?: readonly (string | undefined)[];
   /** 이 호출의 데드라인(ms, 1 이상 정수). 실행기가 TICKET_ISSUE_CALL_DEADLINE_MS(2초 [가정])로 준다 */
   readonly deadlineMs: number;
   /** 이 발권을 낳은 승인 사건의 순번(재발권이 앞 세대와 멱등 충돌하지 않게, BUILD_ORDER HOT-152). 없으면 칸을 비운다(0) */

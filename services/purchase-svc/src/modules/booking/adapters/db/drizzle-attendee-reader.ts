@@ -31,7 +31,11 @@ const cursorOf = (orderId: string): string => Buffer.from(orderId, 'utf8').toStr
 const afterOf = (cursor: string | undefined): string | undefined => (cursor ? Buffer.from(cursor, 'base64url').toString('utf8') : undefined);
 
 export class DrizzleAttendeeReader {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    /** 좌석 이름 해석(F-05-12 O-T2 ②). 없거나 이름이 없으면 seatId로 물러난다 */
+    private readonly labels?: { resolve(eventId: string, seatIds: readonly string[]): Promise<readonly (string | undefined)[]> },
+  ) {}
 
   async list(eventId: string, limit: number, cursor?: string): Promise<AttendeePage> {
     const after = afterOf(cursor);
@@ -55,9 +59,16 @@ export class DrizzleAttendeeReader {
       .where(inArray(orderItem.orderId, ids))
       .orderBy(asc(orderItem.orderId), asc(orderItem.lineNo));
     const byOrder = new Map<string, AttendeeSeat[]>();
+    // 좌석 이름을 한 번에 읽어 seatId 자리에 넣는다(없으면 seatId, F-05-12 O-T2 ②)
+    const labelBySeat = new Map<string, string>();
+    if (this.labels && items.length > 0) {
+      const resolved = await this.labels.resolve(eventId, [...new Set(items.map((i) => i.seatId))].sort());
+      const ids = [...new Set(items.map((i) => i.seatId))].sort();
+      for (const [n, id] of ids.entries()) if (resolved[n] !== undefined) labelBySeat.set(id, resolved[n]!);
+    }
     for (const i of items) {
       const seats = byOrder.get(i.orderId) ?? [];
-      seats.push({ seatLabel: i.seatId, tier: i.tier });
+      seats.push({ seatLabel: labelBySeat.get(i.seatId) ?? i.seatId, tier: i.tier });
       byOrder.set(i.orderId, seats);
     }
     const rows: AttendeeRow[] = [];
