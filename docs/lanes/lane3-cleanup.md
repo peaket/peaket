@@ -138,3 +138,4 @@
 - F-05-6 IR-10 낮음: `entryClose` 저장소가 없을 때 500인데 주석은 503이다(`scanner-gate.ts`·`scanner.module.ts`)
 - F-05-6 IR-11 낮음: 큐 보고 `pendingUploads`에 상한이 없어 2^31−1 초과 값이 DB `integer` 범위 오류로 500이 된다(`domain/entry-close.ts`, openapi)
 - F-05-6 IR-12 낮음: 메모리 스캐너 게이트가 마감 행 대역이 없으면 옛 `entryClosesAtMs`(보정 시각) 규칙으로 물러나 단위 조립이 운영과 다르게 통과한다(`memory-scanner-gate-store.ts`) — **닫힘 2026-11-24**: fallback과 쓰이지 않던 `acceptScans.entryClosesAtMs`를 없애고, 마감 행이 있으면 받은 시각만 견준다. 단위 조립 시험은 `seedEntryClose`로 마감 행을 심는다(`scanner-gate.test.ts`·`scanner-gate-regression.test.ts`·`scanner-corrected-time.test.ts`).
+- F-05-12 TR-16 낮음(2026-11-26 시험 리뷰에서 넘김, 시험 고침 범위 밖): 새 시험 이름에 요구사항·시험 ID가 없는 곳이 있다(SCR-052는 화면 ID다). purchase 좌석 이름 대역이 계획 §4 `IssueSeatLabels.labels`와 다른 `{resolve}`를 쓴다. `devicesViewOf`가 `GateStatus`에 없는 `selfDeviceId`를 요구한다. ticket 시험의 대역 verifier가 `TICKET`·`TICKET_2`를 모두 받고, `beforeAll`의 `catch`가 조립 오류를 삼킨다. 시험 고침 담당이 고치지 않고 이 목록으로 넘겼다.

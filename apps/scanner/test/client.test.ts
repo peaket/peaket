@@ -29,7 +29,8 @@ function recording(status = 200, body: unknown = { acceptedIds: [], resyncRequir
   const calls: { url: string; init: RequestInit; headers: Headers }[] = [];
   const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
     calls.push({ url: String(url), init: init ?? {}, headers: new Headers(init?.headers) });
-    return new Response(JSON.stringify(body), { status, headers });
+    // 서버의 204는 본문이 없다(queue-reports). body가 undefined면 빈 본문으로 답한다(JSON.parse('')가 아니다)
+    return new Response(body === undefined ? null : JSON.stringify(body), { status, headers: body === undefined ? {} : headers });
   }) as typeof fetch;
   return { fetch: fetchImpl, calls };
 }
@@ -68,8 +69,9 @@ interface LiveMethods {
 }
 const liveApi = (fetchImpl: typeof fetch): LiveMethods => apiWithout(fetchImpl) as unknown as LiveMethods; // type-escape: 메서드는 구현 뒤 생긴다
 
-test('큐 비움 보고는 PUT /v1/scanner/queue-reports/{eventId}에 pendingUploads 0을 싣는다', async () => {
-  const r = recording(200, {});
+test('O-T29 ⑤ 큐 비움 보고는 PUT /v1/scanner/queue-reports/{eventId}에 pendingUploads 0을 싣고, 서버의 204 빈 본문을 그대로 받는다', async () => {
+  // 서버는 204(본문 없음)로 답한다(openapi putScannerEventQueueReport). 200·JSON 대역은 #json으로 읽는 구현도 통과시킨다(TR-13)
+  const r = recording(204, undefined, {});
   await liveApi(r.fetch).queueReport('ev-1', 0);
   assert.equal(r.calls.length, 1);
   const c = r.calls[0]!;
@@ -77,17 +79,27 @@ test('큐 비움 보고는 PUT /v1/scanner/queue-reports/{eventId}에 pendingUpl
   assert.equal(c.init.method, 'PUT');
   assert.equal(c.headers.get('content-type'), 'application/json');
   assert.equal(c.headers.get('authorization'), null);
+  assert.equal(c.init.credentials, 'omit');
   assert.deepEqual(JSON.parse(String(c.init.body)), { pendingUploads: 0 });
   const p = payloadOf(c.headers.get('dpop')!);
   assert.equal(p.htm, 'PUT');
   assert.equal(p.htu, `${API}/v1/scanner/queue-reports/ev-1`);
+  assert.equal(p.ath, undefined);
 });
 
-test('SCR-052 API 메서드는 기기·부스·이상 표시·내 예외 통과 경로를 바르게 부른다', async () => {
+test('SCR-052 API 메서드는 기기·부스·이상 표시·내 예외 통과 경로를 바르게 부르고 DPoP 증명의 htm·htu를 맞춘다', async () => {
   const status = { devices: [], entriesByZone: {}, rejectsByReason: {}, openFlags: 0, boothCount: 0, overrideCount: 0 };
   const r = recording(200, status);
   await liveApi(r.fetch).devices('ev-1');
   assert.equal(r.calls[0]!.url, `${API}/v1/scanner/events/ev-1/devices`);
+  assert.equal(r.calls[0]!.init.method, 'GET');
+  assert.equal(r.calls[0]!.init.credentials, 'omit');
+  {
+    const p = payloadOf(r.calls[0]!.headers.get('dpop')!);
+    assert.equal(p.htm, 'GET');
+    assert.equal(p.htu, `${API}/v1/scanner/events/ev-1/devices`);
+    assert.equal(p.ath, undefined);
+  }
 
   const r2 = recording(200, { ticketId: 't-1', seatLabel: 'R구역 12열 7번', allowUntil: '2026-11-26T03:10:00Z' });
   const auth = await liveApi(r2.fetch).boothAuthorization('K7QD2M9X');
@@ -95,16 +107,35 @@ test('SCR-052 API 메서드는 기기·부스·이상 표시·내 예외 통과 
   assert.equal(r2.calls[0]!.url, `${API}/v1/scanner/booth-authorizations`);
   assert.equal(r2.calls[0]!.init.method, 'POST');
   assert.deepEqual(JSON.parse(String(r2.calls[0]!.init.body)), { boothCode: 'K7QD2M9X' });
+  {
+    const p = payloadOf(r2.calls[0]!.headers.get('dpop')!);
+    assert.equal(p.htm, 'POST');
+    assert.equal(p.htu, `${API}/v1/scanner/booth-authorizations`);
+    assert.equal(p.ath, undefined);
+  }
 
   const r3 = recording(200, { flagId: 'f-1', status: 'OK' });
   await liveApi(r3.fetch).resolveFlag('f-1', 'OK', '좌석 확인');
   assert.equal(r3.calls[0]!.url, `${API}/v1/scanner/flags/f-1/resolution`);
   assert.equal(r3.calls[0]!.init.method, 'POST');
   assert.deepEqual(JSON.parse(String(r3.calls[0]!.init.body)), { status: 'OK', note: '좌석 확인' });
+  {
+    const p = payloadOf(r3.calls[0]!.headers.get('dpop')!);
+    assert.equal(p.htm, 'POST');
+    assert.equal(p.htu, `${API}/v1/scanner/flags/f-1/resolution`);
+    assert.equal(p.ath, undefined);
+  }
 
   const r4 = recording(200, { items: [] });
   assert.deepEqual(await liveApi(r4.fetch).overridePasses('ev-1'), { items: [] });
   assert.equal(r4.calls[0]!.url, `${API}/v1/scanner/events/ev-1/override-passes`);
+  assert.equal(r4.calls[0]!.init.method, 'GET');
+  {
+    const p = payloadOf(r4.calls[0]!.headers.get('dpop')!);
+    assert.equal(p.htm, 'GET');
+    assert.equal(p.htu, `${API}/v1/scanner/events/ev-1/override-passes`);
+    assert.equal(p.ath, undefined);
+  }
 });
 
 test('O-T21 ③ 토큰이 있으면 Authorization: DPoP <토큰>과 ath를 싣는다(지금과 같다)', async () => {

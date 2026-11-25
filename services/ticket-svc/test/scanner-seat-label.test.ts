@@ -30,7 +30,7 @@ describe('O-T2 ② 좌석 이름', () => {
     expect(labelOf(other.tickets[0]!.ticketId)).toBeUndefined();
   });
 
-  test('O-T2 ② 스캐너 회차 목록은 좌석 이름을 주고, 이름이 없는 옛 행은 seatId다', async () => {
+  test('O-T2 ② 스캐너 회차 목록은 좌석 이름을 주고, 이름이 없는 옛 행은 좌석 ID다(seatId를 이름으로 쓰지 않는다)', async () => {
     const gate = new MemoryScannerGateStore();
     gate.seedTicket({ ticketId: '0190f3a1-7c2e-7a00-8000-00000000b007', eventId: EVENT, seatId: SEAT_A, gateZone: '동문', status: 'ACTIVE' } as unknown as Parameters<typeof gate.seedTicket>[0]); // type-escape: seatLabel은 구현 뒤 생긴다
     gate.seedTicket({ ticketId: '0190f3a1-7c2e-7a00-8000-00000000b008', eventId: EVENT, seatId: SEAT_B, seatLabel: 'R구역 12열 8번', gateZone: '동문', status: 'ACTIVE' } as unknown as Parameters<typeof gate.seedTicket>[0]); // type-escape: seatLabel은 구현 뒤 생긴다
@@ -38,5 +38,32 @@ describe('O-T2 ② 좌석 이름', () => {
     const labels = Object.fromEntries(pkg.tickets.map((t) => [t.ticketId, t.seatLabel]));
     expect(labels['0190f3a1-7c2e-7a00-8000-00000000b007']).toBe(SEAT_A);
     expect(labels['0190f3a1-7c2e-7a00-8000-00000000b008']).toBe('R구역 12열 8번');
+  });
+
+  test('O-T2 ② 이상 표시도 저장한 좌석 이름을 주고, 이름이 없는 옛 행은 seatId다(TR-04·TR-10)', async () => {
+    const gate = new MemoryScannerGateStore();
+    const T1 = '0190f3a1-7c2e-7a00-8000-00000000b009';
+    const T2 = '0190f3a1-7c2e-7a00-8000-00000000b00a';
+    gate.seedTicket({ ticketId: T1, eventId: EVENT, seatId: SEAT_A, seatLabel: 'R구역 12열 7번', gateZone: '동문', status: 'ACTIVE' } as unknown as Parameters<typeof gate.seedTicket>[0]); // type-escape: seatLabel은 구현 뒤 생긴다
+    gate.seedTicket({ ticketId: T2, eventId: EVENT, seatId: SEAT_B, gateZone: '동문', status: 'ACTIVE' } as unknown as Parameters<typeof gate.seedTicket>[0]);
+    const scan = (ticketId: string, i: number) => ({
+      id: `0190f3a1-7c2e-7a00-8000-00000000d0${String(i).padStart(2, '0')}`,
+      eventId: EVENT,
+      ticketId,
+      scannerSessionId: '0190f3a1-7c2e-7a00-8000-00000000b00b',
+      direction: 'IN' as const,
+      method: 'OVERRIDE' as const,
+      result: 'PASS' as const,
+      gateZone: '동문',
+      scannedAtDevice: new Date(NOW).toISOString(),
+      knownSeq: 0,
+      deviceSeq: i,
+    });
+    await gate.acceptScans({ eventId: EVENT, deviceId: 'dev-1', scans: [scan(T1, 1)], nowMs: NOW });
+    await gate.acceptScans({ eventId: EVENT, deviceId: 'dev-1', scans: [scan(T2, 2)], nowMs: NOW });
+    const page = await gate.listFlags({ eventId: EVENT, limit: 50 });
+    const labels = Object.fromEntries(page.items.map((f) => [f.ticketId, f.seatLabel]));
+    expect(labels[T1]).toBe('R구역 12열 7번');
+    expect(labels[T2]).toBe(SEAT_B);
   });
 });
