@@ -8,6 +8,10 @@ export { DrizzleInvestigationStore } from './adapters/db/drizzle-investigation-s
 export { GrpcTransferLocks, UnavailableTransferLocks } from './adapters/grpc-transfer-locks.js';
 export { GrpcFraudTickets } from './adapters/grpc-fraud-tickets.js';
 export { GrpcFraudCancellations } from './adapters/grpc-fraud-cancellations.js';
+export { GrpcFraudLabels } from './adapters/grpc-fraud-labels.js';
+export { GrpcFraudRestrictions } from './adapters/grpc-fraud-restrictions.js';
+export { GrpcFraudAppealCopies } from './adapters/grpc-fraud-appeal-copies.js';
+export { AuditFraudApproverIdentity, AdminFraudApproverDirectory } from './adapters/fraud-approvers.js';
 export {
   LoggingFraudAlerts,
   LoggingFraudLabels,

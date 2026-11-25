@@ -575,7 +575,7 @@ export class Investigations {
     actor: FraudActor,
     caseId: string,
     idem: IdempotentWrite,
-    body: { fraudAction: 'CANCEL_TICKETS' | 'RESTRICT' | 'LIFT_RESTRICTION'; accountIds: string[]; ticketIds?: string[]; restrictionEndsAt?: string; reason: string },
+    body: { fraudAction: 'CANCEL_TICKETS' | 'RESTRICT' | 'LIFT_RESTRICTION'; accountIds: string[]; ticketIds?: string[]; restrictionEndsAt?: string | null; reason: string },
   ): Promise<Record<string, unknown>> {
     await this.authorize(actor, 'FRAUD_CASE_ACTION_REQUEST', { caseId });
     if (!this.d.fraud) throw problem('dependency-unavailable', 503, '조치 승인 모듈이 조립되지 않았습니다');

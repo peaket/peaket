@@ -19,6 +19,8 @@ import {
 } from '../domain/fraud-action.js';
 import type { FraudCaseEventRecord, FraudCaseRecord, FraudClusterMemberRecord, FraudSnapshotRecord } from '../domain/investigation.js';
 import { bareProblem, asBareProblem } from './bare-problem.js';
+import { addBusinessDays, weekendOnlyCalendar, type BusinessCalendar } from '../../cases/index.js';
+import { FraudApprovalConflictError, FraudCaseConflictError } from '../domain/ports.js';
 import type {
   CaseAuditRecord,
   FraudAppealCopies,
@@ -55,7 +57,7 @@ export interface FraudActionsDeps {
     readonly identity: FraudIdentityHold;
     readonly queue: FraudRestrictionCopies;
     readonly purchase: FraudRestrictionCopies;
-    activeForCase(caseId: string): Promise<readonly { accountId: string; restrictionId: string; untilMs: number; version: number }[]>;
+    activeForCase(caseId: string): Promise<readonly { accountId: string; caseId?: string; restrictionId: string; untilMs: number; version: number }[]>;
   };
   readonly restrictionRows?: FraudRestrictionRows;
   readonly locks: TransferLocks;
@@ -66,18 +68,19 @@ export interface FraudActionsDeps {
   readonly approverIdentity?: FraudApproverIdentity;
   readonly approverDirectory?: FraudApproverDirectory;
   readonly reauth?: ApprovalReauthVerifier;
+  readonly calendar?: BusinessCalendar;
   readonly now: () => number;
   readonly audit?: { append(r: CaseAuditRecord): Promise<void> };
 }
 
-const HOUR = 3_600_000;
 const DAY = 86_400_000;
 const clone = <T>(v: T): T => structuredClone(v);
 const active = (c: FraudCaseRecord): FraudClusterMemberRecord[] => c.members.filter((m) => m.removedAtMs === null);
 const openStatuses: readonly FraudApprovalStatus[] = ['PENDING_APPROVAL', 'EXECUTING', 'FAILED'];
+const iso = (ms: number | null): string | null => (ms === null ? null : new Date(ms).toISOString());
 
 export class FraudActions {
-  readonly executions = new Map<string, { restrictionId: string; version: number; results: readonly any[] }>();
+  readonly executions = new Map<string, { results: readonly any[]; restrictions: Map<string, { restrictionId: string; version: number }> }>();
   readonly #copied = new Set<string>();
   constructor(private readonly d: FraudActionsDeps) {}
 
@@ -85,7 +88,7 @@ export class FraudActions {
     actor: FraudActionActor & { accountId: string },
     caseId: string,
     idem: IdempotentWrite,
-    body: { fraudAction: FraudAction; accountIds: string[]; ticketIds?: string[]; restrictionEndsAt?: string; reason: string },
+    body: { fraudAction: FraudAction; accountIds: string[]; ticketIds?: string[]; restrictionEndsAt?: string | null; reason: string },
   ): Promise<Record<string, unknown>> {
     const current = await this.d.store.getCase(caseId);
     if (!current) throw bareProblem('not-found', 404, '사건을 찾을 수 없습니다');
@@ -112,7 +115,7 @@ export class FraudActions {
     }));
     const nowMs = this.d.now();
     const approvalId = randomUUID();
-    const dueAtMs = body.fraudAction === 'CANCEL_TICKETS' ? current.cancelDeadlineAtMs : nowMs + ACTION_APPROVAL_BUSINESS_DAYS * DAY;
+    const dueAtMs = body.fraudAction === 'CANCEL_TICKETS' ? current.cancelDeadlineAtMs : addBusinessDays(this.d.calendar ?? weekendOnlyCalendar, nowMs, ACTION_APPROVAL_BUSINESS_DAYS);
     const record: FraudApprovalRecord = {
       approvalId,
       caseId,
@@ -148,9 +151,8 @@ export class FraudActions {
     for (const m of next.members) {
       if (body.accountIds.includes(m.accountId) && m.appealResult === 'PENDING') m.appealResult = 'EXPIRED';
     }
-    const seq = (current.events.at(-1)?.seq ?? 0) + 1;
     const event: FraudCaseEventRecord = {
-      seq,
+      seq: (current.events.at(-1)?.seq ?? 0) + 1,
       kind: 'ACTION_REQUESTED',
       actorId: actor.accountId,
       note: null,
@@ -158,16 +160,20 @@ export class FraudActions {
       occurredAtMs: nowMs,
     };
     next.events = [...current.events, event];
-    const result = this.#approvalView(record, current);
-    await this.d.approvals.request(record, {
-      events: [event],
-      idem,
-      result,
-      caseStatus: decision.nextStatus,
-      ...(this.d.audit ? { audit: { recordType: 'ADMIN_DATA_ACCESS', recordId: approvalId, payload: { caseId, action: body.fraudAction, accountIds: body.accountIds }, nowMs } } : {}),
-    });
-    if (!(this.d.approvals as unknown as { updatesCase?: boolean }).updatesCase) {
-      await this.d.store.updateCase(next, current.version, [event], { idem, result, ...(this.d.audit ? { audit: { recordType: 'ADMIN_DATA_ACCESS', recordId: approvalId, payload: { caseId, action: body.fraudAction }, nowMs } } : {}) });
+    const result = await this.#approvalView(record, current);
+    try {
+      await this.d.approvals.request(record, {
+        events: [event],
+        idem,
+        result,
+        caseNext: next,
+        expectedVersion: current.version,
+        ...(this.d.audit ? { audit: { recordType: 'ADMIN_DATA_ACCESS', recordId: approvalId, payload: { caseId, action: body.fraudAction, accountIds: body.accountIds }, nowMs } } : {}),
+      });
+    } catch (e) {
+      if (e instanceof FraudApprovalConflictError) throw bareProblem('approval-already-open', 409, '열린 조치 승인 업무가 있습니다');
+      if (e instanceof FraudCaseConflictError) throw bareProblem('precondition-failed', 412, '다른 곳에서 먼저 고쳤습니다');
+      throw e;
     }
     return result;
   }
@@ -196,8 +202,18 @@ export class FraudActions {
     const audit: CaseAuditRecord = { recordType: 'ADMIN_DATA_ACCESS', recordId: caseId, payload: { caseId, outcomeLabel: body.outcomeLabel }, nowMs };
     const result = { view: this.caseView(r.next, null), version: r.next.version };
     const outcome = await this.d.store.updateCase(r.next, current.version, r.events, { audit, ...(idem ? { idem, result } : {}) });
-    if (!outcome.ok) throw bareProblem('precondition-failed', 412, '다른 곳에서 먼저 고쳤습니다');
-    if (body.outcomeLabel === 'HUMAN') await this.d.labels.apply({ eventId: current.eventId, caseId, accountIds: r.lockReleases, label: 'HUMAN', actedBy: actor.accountId });
+    if (!outcome.ok) {
+      await this.#relock(current, r.lockReleases, actor.accountId);
+      throw bareProblem('precondition-failed', 412, '다른 곳에서 먼저 고쳤습니다');
+    }
+    if (body.outcomeLabel === 'HUMAN') {
+      const accountIds = r.next.members.filter((m) => m.removedAtMs === null).map((m) => m.accountId);
+      try {
+        await this.d.labels.apply({ eventId: current.eventId, caseId, accountIds, label: 'HUMAN', actedBy: actor.accountId });
+      } catch {
+        await this.#note(caseId, 'LABEL_FAILED');
+      }
+    }
     const saved = (await this.d.store.getCase(caseId)) ?? r.next;
     const snapshot = await this.d.store.latestSnapshot(saved.eventId);
     const schedule = await this.#schedule(saved.eventId);
@@ -219,7 +235,7 @@ export class FraudActions {
     const c = await this.d.store.getCase(r.caseId);
     if (!c) throw bareProblem('not-found', 404, '사건을 찾을 수 없습니다');
     const viewedAt = await this.d.approvals.summaryViewedAt({ approvalId, adminAccountId: actor.accountId });
-    return { ...this.#approvalView(r, c), summaryViewedAt: viewedAt === null ? null : iso(viewedAt) };
+    return { ...(await this.#approvalView(r, c)), summaryViewedAt: viewedAt === null ? null : iso(viewedAt) };
   }
 
   async listApprovals(
@@ -231,7 +247,7 @@ export class FraudActions {
     for (const r of rows) {
       if (r.requestedBy !== actor.accountId && !(await this.#eligible(actor.accountId, actor.role))) continue;
       const c = await this.d.store.getCase(r.caseId);
-      if (c) items.push(this.#approvalView(r, c));
+      if (c) items.push(await this.#approvalView(r, c));
     }
     return { items, nextCursor: null };
   }
@@ -242,12 +258,17 @@ export class FraudActions {
     reauthToken: string | undefined,
     body: { reason?: string; excludeAccountIds?: string[]; excludeTicketIds?: string[] },
   ): Promise<Record<string, unknown>> {
+    const nowMs = this.d.now();
     const r = await this.d.approvals.get(approvalId);
     if (!r) throw bareProblem('not-found', 404, '승인 업무를 찾을 수 없습니다');
     const c = await this.d.store.getCase(r.caseId);
     if (!c) throw bareProblem('not-found', 404, '사건을 찾을 수 없습니다');
-    if (r.action === 'CANCEL_TICKETS' && this.d.now() >= c.cancelDeadlineAtMs) throw bareProblem('cancel-deadline-passed', 409, '취소 마감이 지났습니다');
-    if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED' && r.status !== 'EXECUTING') throw bareProblem('approval-not-pending', 409, '승인 대기 중인 업무가 아닙니다');
+    if (r.action === 'CANCEL_TICKETS' && nowMs >= c.cancelDeadlineAtMs) throw bareProblem('cancel-deadline-passed', 409, '취소 마감이 지났습니다');
+    if (nowMs >= r.dueAtMs) {
+      await this.#expireApproval(r, c, nowMs);
+      throw bareProblem('approval-not-pending', 409, '승인 기한이 지났습니다');
+    }
+    if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') throw bareProblem('approval-not-pending', 409, '승인 대기 중인 업무가 아닙니다');
     if (!this.d.reauth || !reauthToken) throw bareProblem('reauth-required', 403, '재인증이 필요합니다');
     let verified: { accountId: string };
     try {
@@ -260,7 +281,7 @@ export class FraudActions {
     if (!eligible || actor.accountId === r.requestedBy) throw bareProblem('fraud-approver-ineligible', 403, '승인할 수 없는 사람입니다');
     const viewedAt = await this.d.approvals.summaryViewedAt({ approvalId, adminAccountId: actor.accountId });
     const designations = await this.#designations(actor.accountId);
-    const recentlyRevoked = (await this.#recentRevocations(actor.accountId)).filter((x) => x.revokedAtMs > this.d.now() - 90 * DAY).map((x) => x.kind);
+    const recentlyRevoked = (await this.#recentRevocations(actor.accountId)).filter((x) => x.revokedAtMs > nowMs - 90 * DAY).map((x) => x.kind);
     const check = this.#domain(() => approvalDecisionCheck({
       action: r.action,
       requesterId: r.requestedBy,
@@ -275,18 +296,32 @@ export class FraudActions {
       ...(body.excludeAccountIds ? { excludeAccountIds: body.excludeAccountIds } : {}),
       ...(body.excludeTicketIds ? { excludeTicketIds: body.excludeTicketIds } : {}),
     }));
-    await this.d.approvals.setStatus({ approvalId, status: 'EXECUTING', nowMs: this.d.now() });
+    const claim = await this.d.approvals.setStatus({ approvalId, status: 'EXECUTING', from: ['PENDING_APPROVAL', 'FAILED'], nowMs });
+    if (!claim.ok) {
+      throw bareProblem('approval-not-pending', 409, '승인 대기 중인 업무가 아닙니다');
+    }
     const excludedAccounts = new Set(check.excludedAccounts);
     const excludedTickets = new Set(check.excludedTickets);
     const targetAccounts = r.accountIds.filter((a) => !excludedAccounts.has(a));
+    const restrictions = this.executions.get(approvalId)?.restrictions ?? new Map<string, { restrictionId: string; version: number }>();
+    const priorResults = this.executions.get(approvalId)?.results ?? [];
+    let next = clone(c);
+    let events: FraudCaseEventRecord[] = [];
+    let failed = false;
+    let label: 'BOT' | 'HUMAN' | null = null;
+    let labelAccounts: string[] = [];
+    let noticeAccounts: string[] = [];
+    let holderNotices: { accountId: string; ticketIds: string[]; result: 'CANCELED' | 'EXCLUDED' }[] = [];
+    let priorityGrants: Record<string, unknown>[] = [];
+
     if (r.action === 'CANCEL_TICKETS') {
-      const prior = this.executions.get(approvalId);
-      const failedBefore = prior?.results.some((x) => x.outcome === 'FAILED') === true;
-      const targets = (failedBefore ? r.targets.filter((t) => prior!.results.some((x) => x.outcome === 'FAILED' && x.ticketId === t.ticketId)) : r.targets).filter(
+      const failedBefore = priorResults.some((x) => x.outcome === 'FAILED');
+      const targets = (failedBefore ? r.targets.filter((t) => priorResults.some((x) => x.outcome === 'FAILED' && x.ticketId === t.ticketId)) : r.targets).filter(
         (t) => targetAccounts.includes(t.payerAccountId) && !excludedTickets.has(t.ticketId),
       );
       let results: readonly any[] = [];
-      if (targets.length > 0 && this.d.cancellations) {
+      try {
+        if (targets.length === 0 || !this.d.cancellations) throw new Error('취소 경로가 없습니다');
         results = await this.d.cancellations.cancel({
           approvalId,
           caseId: r.caseId,
@@ -294,128 +329,202 @@ export class FraudActions {
           targets: targets.map((t) => ({ ticketId: t.ticketId, expectedHolderAccountId: t.holderAccountId })),
           requestedBy: r.requestedBy,
           approvedBy: actor.accountId,
-          approvedAtMs: this.d.now(),
+          approvedAtMs: nowMs,
         });
+      } catch {
+        failed = true;
       }
-      const failed = results.find((x) => x.outcome === 'FAILED') ?? (targets.length > 0 && !this.d.cancellations ? { ticketId: targets[0]!.ticketId, outcome: 'FAILED', failureCode: 'CANCELLATION_UNAVAILABLE' } : undefined);
-      this.executions.set(approvalId, { restrictionId: prior?.restrictionId ?? randomUUID(), version: prior?.version ?? 1, results });
-      if (failed) {
-        await this.d.approvals.setStatus({ approvalId, status: 'FAILED', approverId: actor.accountId, reason: body.reason ?? null, closeReason: 'FAILED', nowMs: this.d.now() });
-        await this.#appendEvent(c, 'ACTION_FAILED', { approvalId, action: r.action, results }, actor.accountId);
-        return this.#approvalView((await this.d.approvals.get(approvalId))!, c);
-      }
-      await this.#releaseForDone(r.caseId, r.eventId, targetAccounts, actor.accountId);
-      if (excludedAccounts.size > 0) await this.#release(r.caseId, r.eventId, [...excludedAccounts], actor.accountId, 'ACTION_CLOSED');
-      const next = await this.#actioned(c, targetAccounts, actor.accountId, { approvalId, action: r.action, results, excludedAccounts: [...excludedAccounts], excludedTickets: [...excludedTickets] });
-      for (const h of results.filter((x) => x.outcome === 'SKIPPED_HOLDER_CHANGED')) {
-        const t = r.targets.find((x) => x.ticketId === h.ticketId);
-        if (t && t.holderAccountId !== t.payerAccountId) await this.d.notifier.holderResult({ eventId: c.eventId, caseId: c.caseId, accountId: t.holderAccountId, ticketIds: [t.ticketId], result: 'EXCLUDED' });
-      }
-      await this.d.labels.apply({ eventId: c.eventId, caseId: c.caseId, accountIds: targetAccounts, label: 'BOT', source: 'FRAUD_ACTIONED', version: next.version, actedBy: actor.accountId });
-      for (const a of targetAccounts) {
-        await this.d.notifier.actionNotice({
-          eventId: c.eventId,
-          caseId: c.caseId,
-          accountId: a,
-          action: r.action,
-          ticketIds: r.targets.filter((t) => t.payerAccountId === a).map((t) => t.ticketId),
-          restrictionEndsAtMs: null,
-        });
+      const ids = new Set(targets.map((t) => t.ticketId));
+      const filtered = results.filter((x) => ids.has(x.ticketId));
+      const complete = filtered.length === targets.length && new Set(filtered.map((x) => x.ticketId)).size === filtered.length;
+      results = filtered;
+      if (!complete || results.some((x) => x.outcome === 'FAILED')) failed = true;
+      this.executions.set(approvalId, { results, restrictions });
+      if (!failed) {
+        const accepted = results.filter((x) => x.outcome === 'ACCEPTED');
+        const acceptedAccounts = [...new Set(accepted.map((x) => r.targets.find((t) => t.ticketId === x.ticketId)!.payerAccountId))];
+        if (acceptedAccounts.length === 0) {
+          const ev: FraudCaseEventRecord = { seq: (c.events.at(-1)?.seq ?? 0) + 1, kind: 'ACTION_EXECUTED', actorId: actor.accountId, note: null, detail: { approvalId, action: r.action, results, targets, executed: false }, occurredAtMs: nowMs };
+          next = { ...clone(c), version: c.version + 1, events: [...c.events, ev] };
+          events = [ev];
+        } else {
+          const a = this.#actionedCase(c, acceptedAccounts, { approvalId, action: r.action, results, targets, excludedAccounts: [...excludedAccounts], excludedTickets: [...excludedTickets] }, nowMs, actor.accountId);
+          next = a.next;
+          events = a.events;
+          await this.#release(r.caseId, r.eventId, targetAccounts, actor.accountId, 'ACTION_DONE');
+          if (excludedAccounts.size > 0) await this.#release(r.caseId, r.eventId, [...excludedAccounts], actor.accountId, 'ACTION_CLOSED');
+          label = 'BOT';
+          labelAccounts = acceptedAccounts;
+          noticeAccounts = acceptedAccounts;
+          const byHolder = new Map<string, { ids: string[]; result: 'CANCELED' | 'EXCLUDED' }>();
+          for (const t of r.targets) {
+            if (t.holderAccountId === t.payerAccountId) continue;
+            const res = results.find((x) => x.ticketId === t.ticketId);
+            const kind = res?.outcome === 'ACCEPTED' ? 'CANCELED' : 'EXCLUDED';
+            const cur = byHolder.get(t.holderAccountId) ?? { ids: [], result: kind };
+            cur.ids.push(t.ticketId);
+            if (kind === 'CANCELED') cur.result = 'CANCELED';
+            byHolder.set(t.holderAccountId, cur);
+          }
+          holderNotices = [...byHolder].map(([accountId, v]) => ({ accountId, ticketIds: v.ids, result: v.result }));
+        }
       }
     } else if (r.action === 'RESTRICT') {
-      const prior = this.executions.get(approvalId);
-      const restrictionId = prior?.restrictionId ?? randomUUID();
-      const version = prior?.version ?? 1;
-      const untilMs = r.restrictionEndsAtMs ?? this.d.now() + RESTRICTION_MAX_MS;
+      this.executions.set(approvalId, { results: priorResults, restrictions });
       try {
+        if (!this.d.restrictions) throw new Error('이용 제한 경로가 없습니다');
         for (const a of targetAccounts) {
-          await this.d.restrictions!.identity.restrict({ accountId: a, caseId: r.caseId, version, untilMs });
-          await this.d.restrictions!.queue.set({ accountId: a, caseId: r.caseId, restrictionId, state: 'ACTIVE', version, untilMs });
-          await this.d.restrictions!.purchase.set({ accountId: a, caseId: r.caseId, restrictionId, state: 'ACTIVE', version, untilMs });
-          await this.d.restrictionRows?.restrict({ accountId: a, caseId: r.caseId, restrictionId, version, untilMs, actedBy: actor.accountId });
+          const prior = restrictions.get(a);
+          const restrictionId = prior?.restrictionId ?? randomUUID();
+          const version = prior?.version ?? 1;
+          const untilMs = r.restrictionEndsAtMs ?? nowMs + RESTRICTION_MAX_MS;
+          restrictions.set(a, { restrictionId, version });
+          const applied = await this.d.restrictionRows?.restrict({ accountId: a, caseId: r.caseId, restrictionId, version, untilMs, actedBy: actor.accountId });
+          const v = applied?.version ?? version;
+          restrictions.set(a, { restrictionId, version: v });
+          await this.d.restrictions.identity.restrict({ accountId: a, caseId: r.caseId, version: v, untilMs });
+          await this.d.restrictions.queue.set({ accountId: a, caseId: r.caseId, restrictionId, state: 'ACTIVE', version: v, untilMs });
+          await this.d.restrictions.purchase.set({ accountId: a, caseId: r.caseId, restrictionId, state: 'ACTIVE', version: v, untilMs });
         }
-        this.executions.set(approvalId, { restrictionId, version, results: [] });
+        this.executions.set(approvalId, { results: priorResults, restrictions });
+        const a = this.#actionedCase(c, targetAccounts, { approvalId, action: r.action }, nowMs, actor.accountId);
+        next = a.next;
+        events = a.events;
+        label = 'BOT';
+        labelAccounts = targetAccounts;
+        noticeAccounts = targetAccounts;
       } catch {
-        this.executions.set(approvalId, { restrictionId, version, results: [] });
-        await this.d.approvals.setStatus({ approvalId, status: 'FAILED', approverId: actor.accountId, reason: body.reason ?? null, closeReason: 'FAILED', nowMs: this.d.now() });
-        return this.#approvalView((await this.d.approvals.get(approvalId))!, c);
+        failed = true;
       }
-      const next = await this.#actioned(c, targetAccounts, actor.accountId, { approvalId, action: r.action });
-      await this.d.labels.apply({ eventId: c.eventId, caseId: c.caseId, accountIds: targetAccounts, label: 'BOT', source: 'FRAUD_ACTIONED', version: next.version, actedBy: actor.accountId });
-      for (const a of targetAccounts) await this.d.notifier.actionNotice({ eventId: c.eventId, caseId: c.caseId, accountId: a, action: r.action, ticketIds: [], restrictionEndsAtMs: untilMs });
     } else {
       try {
+        if (!this.d.restrictions) throw new Error('이용 제한 경로가 없습니다');
+        const activeRows = await this.d.restrictions.activeForCase(r.caseId);
         for (const a of targetAccounts) {
-          const prior = this.executions.get(approvalId);
-          const activeRows = await this.d.restrictions!.activeForCase(r.caseId);
-          await this.d.restrictions!.identity.lift({ accountId: a, caseId: r.caseId, version: prior?.version ?? 1 });
-          await this.d.restrictions!.queue.set({ accountId: a, caseId: r.caseId, restrictionId: randomUUID(), state: 'LIFTED', version: prior?.version ?? 1, untilMs: this.d.now() });
-          await this.d.restrictions!.purchase.set({ accountId: a, caseId: r.caseId, restrictionId: randomUUID(), state: 'LIFTED', version: prior?.version ?? 1, untilMs: this.d.now() });
-          await this.d.restrictionRows?.lift({
-            accountId: a,
-            caseId: r.caseId,
-            restrictionId: activeRows.find((x) => x.accountId === a)?.restrictionId ?? randomUUID(),
-            version: (prior?.version ?? 1) + 1,
-            actedBy: actor.accountId,
-          });
+          const prior = restrictions.get(a);
+          const row = activeRows.find((x) => x.accountId === a);
+          const restrictionId = row?.restrictionId ?? prior?.restrictionId ?? randomUUID();
+          const version = row?.version ?? prior?.version ?? 1;
+          await this.d.restrictions.identity.lift({ accountId: a, caseId: r.caseId, version });
+          await this.d.restrictions.queue.set({ accountId: a, caseId: r.caseId, restrictionId, state: 'LIFTED', version: version + 1, untilMs: nowMs });
+          await this.d.restrictions.purchase.set({ accountId: a, caseId: r.caseId, restrictionId, state: 'LIFTED', version: version + 1, untilMs: nowMs });
+          const lifted = await this.d.restrictionRows?.lift({ accountId: a, caseId: r.caseId, restrictionId, version: version + 1, actedBy: actor.accountId });
+          restrictions.set(a, { restrictionId, version: lifted?.version ?? version + 1 });
+        }
+        this.executions.set(approvalId, { results: priorResults, restrictions });
+        const accepted = targetAccounts.filter((a) => c.members.find((m) => m.accountId === a)?.objectionResult === 'ACCEPTED');
+        const allAccepted = active(c).filter((m) => m.actionNotifiedAtMs !== undefined && m.actionNotifiedAtMs !== null).every((m) => m.objectionResult === 'ACCEPTED');
+        const isReversed = allAccepted && accepted.length > 0;
+        next = clone(c);
+        next.version = c.version + 1;
+        next.status = isReversed ? 'REVERSED' : 'ACTIONED';
+        if (isReversed) {
+          next.outcomeLabel = 'HUMAN';
+          next.closedAtMs = nowMs;
+        }
+        const ev: FraudCaseEventRecord = { seq: (c.events.at(-1)?.seq ?? 0) + 1, kind: isReversed ? 'REVERSED' : 'ACTIONED', actorId: actor.accountId, note: null, detail: { reason: isReversed ? 'ALL_OBJECTIONS_ACCEPTED' : 'OBJECTIONS_DECIDED' }, occurredAtMs: nowMs };
+        next.events = [...c.events, ev];
+        events = [ev];
+        priorityGrants = await this.#reversalPriority(c, r, accepted, actor.accountId);
+        if (priorityGrants.length > 0) ev.detail = { ...(ev.detail ?? {}), grants: priorityGrants };
+        label = accepted.length > 0 ? 'HUMAN' : null;
+        labelAccounts = accepted;
+        noticeAccounts = accepted;
+      } catch {
+        failed = true;
+      }
+    }
+
+    if (failed) {
+      const ev: FraudCaseEventRecord = { seq: (c.events.at(-1)?.seq ?? 0) + 1, kind: 'ACTION_FAILED', actorId: actor.accountId, note: null, detail: { approvalId, action: r.action }, occurredAtMs: nowMs };
+      next = { ...clone(c), version: c.version + 1, events: [...c.events, ev] };
+      events = [ev];
+    }
+    const final = await this.d.approvals.setStatus({
+      approvalId,
+      status: failed ? 'FAILED' : 'DONE',
+      from: ['EXECUTING'],
+      approverId: actor.accountId,
+      reason: body.reason ?? null,
+      closeReason: failed ? 'FAILED' : null,
+      nowMs,
+      case: { next, expectedVersion: c.version, events },
+    });
+    if (!final.ok) {
+      await this.d.approvals.setStatus({ approvalId, status: 'FAILED', from: ['EXECUTING'], closeReason: 'CONFLICT', nowMs });
+      throw bareProblem('precondition-failed', 412, '다른 곳에서 먼저 고쳤습니다');
+    }
+    if (!failed) {
+      try {
+        for (const h of holderNotices) await this.d.notifier.holderResult({ eventId: c.eventId, caseId: c.caseId, accountId: h.accountId, ticketIds: h.ticketIds, result: h.result });
+        if (label) await this.d.labels.apply({ eventId: c.eventId, caseId: c.caseId, accountIds: labelAccounts, label, source: label === 'HUMAN' ? 'FRAUD_APPEAL_ACCEPTED' : 'FRAUD_ACTIONED', version: next.version, actedBy: actor.accountId });
+        for (const a of noticeAccounts) {
+          if (next.status === 'REVERSED') await this.d.notifier.restrictionLifted({ eventId: c.eventId, caseId: c.caseId, accountId: a });
+          else await this.d.notifier.actionNotice({ eventId: c.eventId, caseId: c.caseId, accountId: a, action: r.action, ticketIds: r.targets.filter((t) => t.payerAccountId === a).map((t) => t.ticketId), restrictionEndsAtMs: r.restrictionEndsAtMs });
         }
       } catch {
-        await this.d.approvals.setStatus({ approvalId, status: 'FAILED', approverId: actor.accountId, reason: body.reason ?? null, closeReason: 'FAILED', nowMs: this.d.now() });
-        return this.#approvalView((await this.d.approvals.get(approvalId))!, c);
+        await this.#note(c.caseId, 'NOTICE_FAILED');
       }
-      const accepted = active(c).filter((m) => m.objectionResult === 'ACCEPTED');
-      const allAccepted = accepted.length > 0 && authAllAccepted(c);
-      const next = clone(c);
-      next.version = c.version + 1;
-      if (allAccepted) {
-        next.status = 'REVERSED';
-        next.outcomeLabel = 'HUMAN';
-        next.closedAtMs = this.d.now();
-        next.events = [...next.events, { seq: (c.events.at(-1)?.seq ?? 0) + 1, kind: 'REVERSED', actorId: actor.accountId, note: null, detail: { reason: 'ALL_OBJECTIONS_ACCEPTED' }, occurredAtMs: this.d.now() }];
-        await this.d.labels.apply({ eventId: c.eventId, caseId: c.caseId, accountIds: targetAccounts, label: 'HUMAN', source: 'FRAUD_APPEAL_ACCEPTED', version: next.version, actedBy: actor.accountId });
-        for (const a of targetAccounts) await this.d.notifier.restrictionLifted({ eventId: c.eventId, caseId: c.caseId, accountId: a });
-        const grants = await this.#reversalPriority(c, targetAccounts, actor.accountId);
-        if (grants.length > 0) {
-          const last = next.events[next.events.length - 1]!;
-          next.events = [...next.events.slice(0, -1), { ...last, detail: { ...(last.detail ?? {}), grants } }];
-        }
-      }
-      await this.d.store.updateCase(next, c.version, next.events.slice(c.events.length), {});
-      await this.d.approvals.setStatus({ approvalId, status: 'DONE', approverId: actor.accountId, reason: body.reason ?? null, nowMs: this.d.now() });
-      return this.#approvalView((await this.d.approvals.get(approvalId))!, (await this.d.store.getCase(c.caseId)) ?? next);
     }
-    await this.d.approvals.setStatus({ approvalId, status: 'DONE', approverId: actor.accountId, reason: body.reason ?? null, nowMs: this.d.now() });
-    return this.#approvalView((await this.d.approvals.get(approvalId))!, (await this.d.store.getCase(r.caseId)) ?? c);
+    return this.#approvalView((await this.d.approvals.get(approvalId))!, (await this.d.store.getCase(r.caseId)) ?? next);
   }
 
   async reject(approvalId: string, actor: FraudActionActor & { accountId: string }, reason: string): Promise<Record<string, unknown>> {
+    const nowMs = this.d.now();
     const r = await this.d.approvals.get(approvalId);
     if (!r) throw bareProblem('not-found', 404, '승인 업무를 찾을 수 없습니다');
     const c = await this.d.store.getCase(r.caseId);
     if (!c) throw bareProblem('not-found', 404, '사건을 찾을 수 없습니다');
+    if (nowMs >= r.dueAtMs) {
+      await this.#expireApproval(r, c, nowMs);
+      throw bareProblem('approval-not-pending', 409, '승인 기한이 지났습니다');
+    }
+    if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') throw bareProblem('approval-not-pending', 409, '승인 대기 중인 업무가 아닙니다');
+    if (actor.accountId === r.requestedBy) throw bareProblem('fraud-approver-ineligible', 403, '요청자는 반려할 수 없습니다');
+    if (!(await this.#eligible(actor.accountId, actor.role))) throw bareProblem('fraud-approver-ineligible', 403, '승인할 수 없는 사람입니다');
+    if (reason.trim() === '') throw bareProblem('approval-reason-required', 422, '반려 이유가 필요합니다');
+    await this.#release(r.caseId, r.eventId, r.accountIds, actor.accountId, 'ACTION_CLOSED');
     const priorDone = c.events.some((e) => e.kind === 'ACTION_EXECUTED');
-    await this.d.approvals.setStatus({ approvalId, status: 'REJECTED', approverId: actor.accountId, reason, closeReason: 'REJECTED', nowMs: this.d.now() });
-    await this.#closeAction(c, priorDone ? 'ACTIONED' : 'INVESTIGATING', 'REJECTED', actor.accountId, !priorDone);
-    return this.#approvalView((await this.d.approvals.get(approvalId))!, (await this.d.store.getCase(r.caseId)) ?? c);
+    const next = this.#closedCase(c, priorDone ? 'ACTIONED' : 'INVESTIGATING', 'REJECTED', actor.accountId, nowMs);
+    const out = await this.d.approvals.setStatus({ approvalId, status: 'REJECTED', from: ['PENDING_APPROVAL', 'FAILED'], approverId: actor.accountId, reason, closeReason: 'REJECTED', nowMs, case: { next: next.next, expectedVersion: c.version, events: next.events } });
+    if (!out.ok) throw bareProblem('approval-not-pending', 409, '승인 대기 중인 업무가 아닙니다');
+    return this.#approvalView((await this.d.approvals.get(approvalId))!, (await this.d.store.getCase(r.caseId)) ?? next.next);
   }
 
   async withdraw(approvalId: string, actor: FraudActionActor & { accountId: string }, reason: string): Promise<Record<string, unknown>> {
+    const nowMs = this.d.now();
     const r = await this.d.approvals.get(approvalId);
     if (!r) throw bareProblem('not-found', 404, '승인 업무를 찾을 수 없습니다');
+    if (actor.accountId !== r.requestedBy) throw bareProblem('fraud-approver-ineligible', 403, '요청자만 철회할 수 있습니다');
     const c = await this.d.store.getCase(r.caseId);
     if (!c) throw bareProblem('not-found', 404, '사건을 찾을 수 없습니다');
+    if (nowMs >= r.dueAtMs) {
+      await this.#expireApproval(r, c, nowMs);
+      throw bareProblem('approval-not-pending', 409, '승인 기한이 지났습니다');
+    }
+    if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') throw bareProblem('approval-not-pending', 409, '승인 대기 중인 업무가 아닙니다');
     const priorDone = c.events.some((e) => e.kind === 'ACTION_EXECUTED');
-    await this.d.approvals.setStatus({ approvalId, status: 'WITHDRAWN', closeReason: reason, nowMs: this.d.now() });
-    await this.#closeAction(c, priorDone ? 'ACTIONED' : 'INVESTIGATING', 'WITHDRAWN', actor.accountId, false);
-    return this.#approvalView((await this.d.approvals.get(approvalId))!, (await this.d.store.getCase(r.caseId)) ?? c);
+    const next = this.#closedCase(c, priorDone ? 'ACTIONED' : 'INVESTIGATING', 'WITHDRAWN', actor.accountId, nowMs);
+    const out = await this.d.approvals.setStatus({ approvalId, status: 'WITHDRAWN', from: ['PENDING_APPROVAL', 'FAILED'], closeReason: reason, nowMs, case: { next: next.next, expectedVersion: c.version, events: next.events } });
+    if (!out.ok) throw bareProblem('approval-not-pending', 409, '승인 대기 중인 업무가 아닙니다');
+    return this.#approvalView((await this.d.approvals.get(approvalId))!, (await this.d.store.getCase(r.caseId)) ?? next.next);
   }
 
   async receiveObjection(caseId: string, body: { appealId: string; accountId: string; party: 'PAYER' | 'HOLDER'; submittedAt: string }): Promise<{ result: string; status?: number }> {
+    const nowMs = Date.parse(body.submittedAt);
+    if (!Number.isFinite(nowMs)) throw bareProblem('invalid-time', 400, '접수 시각이 올바르지 않습니다');
     const c = await this.d.store.getCase(caseId);
     if (!c) throw bareProblem('not-found', 404, '사건을 찾을 수 없습니다');
-    const r = this.#domain(() => receiveObjection({ case: c, accountId: body.accountId, party: body.party, appealId: body.appealId, nowMs: Date.parse(body.submittedAt) }));
+    if (body.party === 'HOLDER') {
+      const tickets = await this.d.tickets?.listForAction({ eventId: c.eventId, payerAccountIds: active(c).map((m) => m.accountId) });
+      if (!tickets || !tickets.some((t) => t.holderAccountId === body.accountId)) throw bareProblem('fraud-case-state', 409, '이 사건의 받은 사람이 아닙니다');
+    }
+    const r = this.#domain(() => receiveObjection({ case: c, accountId: body.accountId, party: body.party, appealId: body.appealId, nowMs }));
     if (r.result === 'INVALID') throw bareProblem('fraud-case-state', 409, '이의를 접수할 수 없습니다');
-    if (r.next.version !== c.version) await this.d.store.updateCase(r.next, c.version, r.events, {});
+    if (r.next.version !== c.version) {
+      const out = await this.d.store.updateCase(r.next, c.version, r.events, {});
+      if (!out.ok) throw bareProblem('precondition-failed', 412, '다른 곳에서 먼저 고쳤습니다');
+    }
     if (r.result === 'EXPIRED') await this.d.notifier.objectionDecided({ eventId: c.eventId, caseId, accountId: body.accountId, decision: 'REJECTED', reason: '기한 경과', restrictionLifted: false });
     return { result: r.result };
   }
@@ -424,6 +533,16 @@ export class FraudActions {
     const restricted = this.d.restrictions ? await this.d.restrictions.activeForCase(c.caseId) : [];
     const r = this.#domain(() => decideObjections({ case: c, decisions, nowMs: this.d.now(), reversalComplete: false, restrictedAccountIds: restricted.map((x) => x.accountId) }));
     let next = r.next;
+    const events = [...r.events];
+    const granted: Record<string, unknown>[] = [];
+    for (const d of decisions.filter((x) => x.decision === 'ACCEPTED' && !r.liftAccountIds.includes(x.accountId))) {
+      const grants = await this.#priorityForAccount(c, c.caseId, d.accountId, actor.accountId);
+      if (grants.length > 0) {
+        granted.push(...grants);
+        events.push({ seq: (next.events.at(-1)?.seq ?? 0) + 1, kind: 'PRIORITY_GRANTED', actorId: actor.accountId, note: null, detail: { accountId: d.accountId, grants }, occurredAtMs: this.d.now() });
+      }
+    }
+    if (granted.length > 0) next = { ...next, events: [...next.events, ...events.slice(r.events.length)] };
     if (r.liftAccountIds.length > 0) {
       const approvalId = randomUUID();
       const record: FraudApprovalRecord = {
@@ -437,7 +556,7 @@ export class FraudActions {
         reason: '이의 인정',
         requestedBy: actor.accountId,
         requesterRole: actor.role,
-        dueAtMs: this.d.now() + ACTION_APPROVAL_BUSINESS_DAYS * DAY,
+        dueAtMs: addBusinessDays(this.d.calendar ?? weekendOnlyCalendar, this.d.now(), ACTION_APPROVAL_BUSINESS_DAYS),
         status: 'PENDING_APPROVAL',
         requestedAtMs: this.d.now(),
         approverId: null,
@@ -445,10 +564,19 @@ export class FraudActions {
         closeReason: null,
         approvals: [],
       };
-      await this.d.approvals.request(record, { events: [] });
-      next = { ...next, approvalId };
+      const event: FraudCaseEventRecord = { seq: (next.events.at(-1)?.seq ?? 0) + 1, kind: 'ACTION_REQUESTED', actorId: actor.accountId, note: null, detail: { approvalId, action: 'LIFT_RESTRICTION', accountIds: r.liftAccountIds, targets: [], restrictionEndsAt: null }, occurredAtMs: this.d.now() };
+      next = { ...next, approvalId, events: [...next.events, event] };
+      try {
+        await this.d.approvals.request(record, { events: [event], caseNext: next, expectedVersion: c.version });
+      } catch (e) {
+        if (e instanceof FraudApprovalConflictError) throw bareProblem('approval-already-open', 409, '열린 조치 승인 업무가 있습니다');
+        if (e instanceof FraudCaseConflictError) throw bareProblem('precondition-failed', 412, '다른 곳에서 먼저 고쳤습니다');
+        throw e;
+      }
+    } else {
+      const out = await this.d.store.updateCase(next, c.version, events, {});
+      if (!out.ok) throw bareProblem('precondition-failed', 412, '다른 곳에서 먼저 고쳤습니다');
     }
-    await this.d.store.updateCase(next, c.version, r.events, {});
     for (const id of r.liftAccountIds) await this.d.notifier.objectionDecided({ eventId: c.eventId, caseId: c.caseId, accountId: id, decision: 'ACCEPTED', reason: decisions.find((d) => d.accountId === id)?.reason ?? '', restrictionLifted: false });
     for (const d of decisions) if (d.decision === 'REJECTED') await this.d.notifier.objectionDecided({ eventId: c.eventId, caseId: c.caseId, accountId: d.accountId, decision: 'REJECTED', reason: d.reason, restrictionLifted: false });
     return next;
@@ -456,33 +584,47 @@ export class FraudActions {
 
   async expireDue(nowMs: number): Promise<number> {
     let n = 0;
-    const rows = await this.d.approvals.list({ status: openStatuses, limit: 1000 });
+    const rows = await this.d.approvals.list({ status: ['PENDING_APPROVAL', 'FAILED'], limit: 1000 });
     for (const r of rows) {
       if (r.dueAtMs > nowMs) continue;
-      await this.d.approvals.setStatus({ approvalId: r.approvalId, status: 'EXPIRED', closeReason: 'EXPIRED', nowMs });
       const c = await this.d.store.getCase(r.caseId);
-      if (c) await this.#closeAction(c, c.events.some((e) => e.kind === 'ACTION_EXECUTED') ? 'ACTIONED' : 'INVESTIGATING', 'EXPIRED', null, c.status !== 'ACTIONED');
-      n += 1;
+      if (c && (await this.#expireApproval(r, c, nowMs))) n += 1;
     }
     const cases = await this.d.store.listCases({ limit: 1000 });
     for (const c of cases.items) {
-      for (const m of active(c)) {
-        if (m.lockExpiresAtMs === null) continue;
-        const schedule = await this.#schedule(c.eventId);
-        const entryOpensAtMs = schedule?.entryOpensAtMs ?? null;
-        if (nowMs < m.lockExpiresAtMs && (entryOpensAtMs === null || nowMs < entryOpensAtMs)) continue;
-        const key = `${c.caseId}:${m.accountId}`;
-        if (this.#copied.has(key)) continue;
-        this.#copied.add(key);
-        await this.d.copies?.set({
-          caseId: c.caseId,
-          eventId: c.eventId,
-          accountId: m.accountId,
-          version: c.version,
-          lockActive: false,
-          objectionDueAtMs: m.actionNotifiedAtMs === undefined || m.actionNotifiedAtMs === null ? null : m.actionNotifiedAtMs + OBJECTION_WINDOW_MS,
-          actionResult: null,
-        });
+      const schedule = await this.#schedule(c.eventId);
+      const entryOpensAtMs = schedule?.entryOpensAtMs ?? null;
+      const due = active(c).filter((m) => {
+        if (m.lockExpiresAtMs === null) return false;
+        return nowMs >= m.lockExpiresAtMs || (entryOpensAtMs !== null && nowMs >= entryOpensAtMs);
+      });
+      const pending = due.filter((m) => !this.#copied.has(`${c.caseId}:${m.accountId}`));
+      if (pending.length === 0) continue;
+      const events: FraudCaseEventRecord[] = pending.map((m, i) => ({
+        seq: (c.events.at(-1)?.seq ?? 0) + 1 + i,
+        kind: 'LOCK_RELEASED',
+        actorId: null,
+        note: null,
+        detail: { accountId: m.accountId, releaseReason: nowMs >= (m.lockExpiresAtMs ?? Infinity) ? 'MAX_DEADLINE' : 'ENTRY_STARTED' },
+        occurredAtMs: nowMs,
+      }));
+      const next = { ...clone(c), version: c.version + 1, events: [...c.events, ...events] };
+      const out = await this.d.store.updateCase(next, c.version, events, {});
+      if (!out.ok) continue;
+      for (const m of pending) {
+        try {
+          await this.d.copies?.set({ caseId: c.caseId, eventId: c.eventId, accountId: m.accountId, version: next.version, lockActive: false, objectionDueAtMs: m.actionNotifiedAtMs === undefined || m.actionNotifiedAtMs === null ? null : m.actionNotifiedAtMs + OBJECTION_WINDOW_MS, actionResult: null });
+        } catch {
+          continue;
+        }
+        this.#copied.add(`${c.caseId}:${m.accountId}`);
+        if (nowMs >= (m.lockExpiresAtMs ?? Infinity)) {
+          try {
+            await this.d.notifier.transferLockReleased({ eventId: c.eventId, caseId: c.caseId, accountId: m.accountId });
+          } catch {
+            await this.#note(c.caseId, 'NOTICE_FAILED');
+          }
+        }
       }
     }
     return n;
@@ -490,7 +632,7 @@ export class FraudActions {
 
   async notifyDeadlines(nowMs: number): Promise<number> {
     let n = 0;
-    const rows = await this.d.approvals.list({ status: openStatuses, limit: 1000 });
+    const rows = await this.d.approvals.list({ status: ['PENDING_APPROVAL', 'FAILED'], limit: 1000 });
     const recipients = this.d.approverDirectory ? [...new Set(await this.d.approverDirectory.listEligible())] : [];
     for (const r of rows) {
       if (r.action !== 'CANCEL_TICKETS') continue;
@@ -503,8 +645,8 @@ export class FraudActions {
       const ids = [...new Set([c.assigneeId, ...recipients])];
       await this.d.notifier.deadlineNotice({ eventId: c.eventId, caseId: c.caseId, approvalId: r.approvalId, leadMs: wants, recipients: ids });
       const seq = (c.events.at(-1)?.seq ?? 0) + 1;
-      await this.d.store.updateCase({ ...c, version: c.version + 1 }, c.version, [{ seq, kind: 'CANCEL_DEADLINE_NOTICE', actorId: null, note: null, detail: { approvalId: r.approvalId, leadMs: wants }, occurredAtMs: nowMs }], {});
-      n += 1;
+      const out = await this.d.store.updateCase({ ...c, version: c.version + 1 }, c.version, [{ seq, kind: 'CANCEL_DEADLINE_NOTICE', actorId: null, note: null, detail: { approvalId: r.approvalId, leadMs: wants }, occurredAtMs: nowMs }], {});
+      if (out.ok) n += 1;
     }
     return n;
   }
@@ -516,10 +658,90 @@ export class FraudActions {
       const open = c.approvalId ? await this.d.approvals.get(c.approvalId) : null;
       const r = this.#domain(() => closeActionedCaseIfDue({ case: c, nowMs, openApproval: open !== null && openStatuses.includes(open.status) }));
       if (!r.close) continue;
-      await this.d.store.updateCase(r.next, c.version, r.events, {});
-      n += 1;
+      const out = await this.d.store.updateCase(r.next, c.version, r.events, {});
+      if (out.ok) n += 1;
     }
     return n;
+  }
+
+  async #expireApproval(r: FraudApprovalRecord, c: FraudCaseRecord, nowMs: number): Promise<boolean> {
+    if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') return false;
+    const priorDone = c.events.some((e) => e.kind === 'ACTION_EXECUTED');
+    await this.#release(r.caseId, r.eventId, r.accountIds, c.assigneeId, 'ACTION_CLOSED');
+    const next = this.#closedCase(c, priorDone ? 'ACTIONED' : 'INVESTIGATING', 'EXPIRED', null, nowMs);
+    const out = await this.d.approvals.setStatus({ approvalId: r.approvalId, status: 'EXPIRED', from: ['PENDING_APPROVAL', 'FAILED'], closeReason: 'EXPIRED', nowMs, case: { next: next.next, expectedVersion: c.version, events: next.events } });
+    return out.ok;
+  }
+
+  #closedCase(c: FraudCaseRecord, status: FraudCaseRecord['status'], reason: string, actorId: string | null, nowMs: number): { next: FraudCaseRecord; events: FraudCaseEventRecord[] } {
+    const event: FraudCaseEventRecord = { seq: (c.events.at(-1)?.seq ?? 0) + 1, kind: 'ACTION_CLOSED', actorId, note: null, detail: { reason }, occurredAtMs: nowMs };
+    return { next: { ...clone(c), status, version: c.version + 1, events: [...c.events, event] }, events: [event] };
+  }
+
+  #actionedCase(c: FraudCaseRecord, accounts: readonly string[], detail: Record<string, unknown>, nowMs: number, actorId: string): { next: FraudCaseRecord; events: FraudCaseEventRecord[] } {
+    const next = clone(c);
+    next.status = 'ACTIONED';
+    next.outcomeLabel = 'BOT';
+    next.version = c.version + 1;
+    for (const m of next.members) if (accounts.includes(m.accountId)) m.actionNotifiedAtMs = nowMs;
+    const event: FraudCaseEventRecord = { seq: (c.events.at(-1)?.seq ?? 0) + 1, kind: 'ACTION_EXECUTED', actorId, note: null, detail, occurredAtMs: nowMs };
+    next.events = [...c.events, event];
+    return { next, events: [event] };
+  }
+
+  async #priorityForAccount(c: FraudCaseRecord, caseId: string, accountId: string, actorId: string): Promise<Record<string, unknown>[]> {
+    if (!this.d.priority) return [];
+    const ids: string[] = [];
+    for (const e of c.events.filter((x) => x.kind === 'ACTION_EXECUTED')) {
+      const results = Array.isArray(e.detail?.results) ? (e.detail!.results as any[]) : [];
+      const targets = Array.isArray(e.detail?.targets) ? (e.detail!.targets as any[]) : [];
+      for (const x of results) {
+        if (x.outcome !== 'ACCEPTED') continue;
+        const t = targets.find((y) => y.ticketId === x.ticketId);
+        if (!t || t.payerAccountId !== accountId) continue;
+        ids.push(x.ticketId);
+      }
+    }
+    if (ids.length === 0) return [];
+    const out = await this.d.priority.run({ caseId, accountId, eventId: c.eventId, cancelledTicketIds: ids, cancelledTicketId: ids[0]!, decision: 'ACCEPTED', actedBy: actorId });
+    return [...out.grants];
+  }
+
+  async #reversalPriority(c: FraudCaseRecord, r: FraudApprovalRecord, accounts: readonly string[], actorId: string): Promise<Record<string, unknown>[]> {
+    const all: Record<string, unknown>[] = [];
+    for (const a of accounts) {
+      const grants = await this.#priorityForAccount(c, r.caseId, a, actorId);
+      all.push(...grants);
+    }
+    return all;
+  }
+
+  async #release(caseId: string, eventId: string, accounts: readonly string[], actorId: string, releaseReason: string): Promise<void> {
+    if (accounts.length === 0) return;
+    try {
+      const version = await this.d.store.nextLockVersion();
+      await this.d.locks.release({ caseId, eventId, accountIds: accounts, version, actedBy: actorId, releaseReason });
+    } catch {
+      throw bareProblem('dependency-unavailable', 503, '양도 잠금을 풀지 못했습니다');
+    }
+  }
+
+  async #relock(c: FraudCaseRecord, accounts: readonly string[], actorId: string): Promise<void> {
+    if (accounts.length === 0) return;
+    const expiries = accounts.map((id) => c.members.find((m) => m.accountId === id)?.lockExpiresAtMs).filter((x): x is number => x !== null && x !== undefined);
+    const version = await this.d.store.nextLockVersion();
+    await this.d.locks.set({ caseId: c.caseId, eventId: c.eventId, accountIds: accounts, version, expiresAtMs: expiries.length > 0 ? Math.max(...expiries) : this.d.now() + 14 * DAY, actedBy: actorId });
+  }
+
+  async #note(caseId: string, note: string): Promise<void> {
+    try {
+      const c = await this.d.store.getCase(caseId);
+      if (!c) return;
+      const event: FraudCaseEventRecord = { seq: (c.events.at(-1)?.seq ?? 0) + 1, kind: 'NOTE', actorId: null, note, detail: { note }, occurredAtMs: this.d.now() };
+      await this.d.store.updateCase({ ...c, version: c.version + 1 }, c.version, [event], {});
+    } catch {
+      // 부수 효과 실패 기록도 실패하면 다음 정비에 맡긴다
+    }
   }
 
   #domain<T>(fn: () => T): T {
@@ -528,65 +750,6 @@ export class FraudActions {
     } catch (e) {
       throw asBareProblem(e);
     }
-  }
-
-  async #appendEvent(c: FraudCaseRecord, kind: FraudCaseEventRecord['kind'], detail: Record<string, unknown>, actorId: string): Promise<void> {
-    const seq = (c.events.at(-1)?.seq ?? 0) + 1;
-    await this.d.store.updateCase({ ...c, version: c.version + 1 }, c.version, [{ seq, kind: kind as FraudCaseEventRecord['kind'], actorId, note: null, detail, occurredAtMs: this.d.now() }], {});
-  }
-
-  async #actioned(c: FraudCaseRecord, accounts: readonly string[], actorId: string, detail: Record<string, unknown>): Promise<FraudCaseRecord> {
-    const next = clone(c);
-    next.status = 'ACTIONED';
-    next.outcomeLabel = 'BOT';
-    next.version = c.version + 1;
-    for (const m of next.members) if (accounts.includes(m.accountId)) m.actionNotifiedAtMs = this.d.now();
-    const seq = (c.events.at(-1)?.seq ?? 0) + 1;
-    next.events = [...c.events, { seq, kind: 'ACTION_EXECUTED', actorId, note: null, detail, occurredAtMs: this.d.now() }];
-    await this.d.store.updateCase(next, c.version, next.events.slice(c.events.length), {});
-    return next;
-  }
-
-  async #closeAction(c: FraudCaseRecord, status: FraudCaseRecord['status'], reason: string, actorId: string | null, release: boolean): Promise<void> {
-    const next = clone(c);
-    next.status = status;
-    next.version = c.version + 1;
-    const seq = (c.events.at(-1)?.seq ?? 0) + 1;
-    next.events = [...c.events, { seq, kind: 'ACTION_CLOSED', actorId, note: null, detail: { reason }, occurredAtMs: this.d.now() }];
-    if (release) await this.#release(c.caseId, c.eventId, active(c).map((m) => m.accountId), actorId ?? c.assigneeId, 'ACTION_CLOSED');
-    await this.d.store.updateCase(next, c.version, next.events.slice(c.events.length), {});
-  }
-
-  async #releaseForDone(caseId: string, eventId: string, accounts: readonly string[], actorId: string): Promise<void> {
-    if (accounts.length > 0) await this.#release(caseId, eventId, accounts, actorId, 'ACTION_DONE');
-  }
-
-  async #release(caseId: string, eventId: string, accounts: readonly string[], actorId: string, releaseReason: string): Promise<void> {
-    if (accounts.length === 0) return;
-    let version: number;
-    try {
-      version = await this.d.store.nextLockVersion();
-    } catch {
-      return;
-    }
-    await this.d.locks.release({ caseId, eventId, accountIds: accounts, version, actedBy: actorId, releaseReason });
-  }
-
-  async #reversalPriority(c: FraudCaseRecord, accounts: readonly string[], actorId: string): Promise<readonly Record<string, unknown>[]> {
-    if (!this.d.priority) return [];
-    const all: Record<string, unknown>[] = [];
-    for (const e of c.events.filter((x) => x.kind === 'ACTION_EXECUTED')) {
-      const results = Array.isArray(e.detail?.results) ? (e.detail!.results as any[]) : [];
-      for (const a of accounts) {
-        const ids = results.filter((r) => r.outcome === 'ACCEPTED' && c.members.some((m) => m.accountId === a)).map((r) => r.ticketId);
-        if (ids.length === 0) continue;
-        const out = await this.d.priority.run({ caseId: c.caseId, accountId: a, eventId: c.eventId, cancelledTicketIds: ids, cancelledTicketId: ids[0]!, decision: 'ACCEPTED', actedBy: actorId });
-        all.push(...out.grants);
-        break;
-      }
-      break;
-    }
-    return all;
   }
 
   async #eligible(accountId: string, role: string): Promise<boolean> {
@@ -601,28 +764,31 @@ export class FraudActions {
   }
 
   async #designations(accountId: string): Promise<readonly string[]> {
+    if (!this.d.approverIdentity) throw bareProblem('fraud-approver-ineligible', 403, '승인할 수 없는 사람입니다');
     try {
-      return (await this.d.approverIdentity?.designations(accountId)) ?? [];
+      return await this.d.approverIdentity.designations(accountId);
     } catch {
-      return [];
+      throw bareProblem('fraud-approver-ineligible', 403, '승인 자격을 확인할 수 없습니다');
     }
   }
 
   async #recentRevocations(accountId: string): Promise<readonly { kind: string; revokedAtMs: number }[]> {
+    if (!this.d.approverIdentity) throw bareProblem('fraud-approver-ineligible', 403, '승인할 수 없는 사람입니다');
     try {
-      return (await this.d.approverIdentity?.recentlyRevoked(accountId)) ?? [];
+      return await this.d.approverIdentity.recentlyRevoked(accountId);
     } catch {
-      return [];
+      throw bareProblem('fraud-approver-ineligible', 403, '승인 자격을 확인할 수 없습니다');
     }
   }
 
-  #approvalView(r: FraudApprovalRecord, c: FraudCaseRecord): Record<string, unknown> {
+  async #approvalView(r: FraudApprovalRecord, c: FraudCaseRecord): Promise<Record<string, unknown>> {
     const targets = r.accountIds.map((accountId) => ({
       accountId,
       ticketIds: r.targets.filter((t) => t.payerAccountId === accountId).map((t) => t.ticketId),
       holderTicketIds: r.targets.filter((t) => t.payerAccountId === accountId && t.holderAccountId !== accountId).map((t) => t.ticketId),
       appealOutcome: c.members.find((m) => m.accountId === accountId)?.appealResult ?? 'NOT_REQUESTED',
     }));
+    const cluster = await this.d.store.getCluster(c.clusterId).catch(() => null);
     return {
       approvalId: r.approvalId,
       kind: 'FRAUD_ACTION',
@@ -641,16 +807,27 @@ export class FraudActions {
       summaryViewedAt: null,
       fraudCaseSummary: {
         accountCount: active(c).length,
-        purchaseCount: active(c).reduce((n, m) => n + m.ticketCount, 0),
-        limitPerPerson: 4,
-        scoreBand: 'HIGH',
+        purchaseCount: cluster?.purchaseCount ?? active(c).reduce((n, m) => n + m.ticketCount, 0),
+        limitPerPerson: cluster?.limitPerPerson ?? 4,
+        scoreBand: cluster?.scoreBand ?? 'HIGH',
+        sharedAttributes: cluster?.sharedAttributes ?? [],
         signals: [...new Set(active(c).flatMap((m) => m.signals))],
-        appealOutcome: 'REJECTED',
+        appealOutcome: this.#appealOutcome(c),
         investigatorOpinion: c.investigatorOpinion,
         cancelDeadlineAt: iso(c.cancelDeadlineAtMs),
         targets,
       },
     };
+  }
+
+  #appealOutcome(c: FraudCaseRecord): string {
+    const results = active(c).map((m) => m.appealResult);
+    if (results.length === 0) return 'NOT_REQUESTED';
+    if (results.every((r) => r === 'ACCEPTED')) return 'ACCEPTED';
+    if (results.every((r) => r === 'REJECTED' || r === 'EXPIRED')) return 'REJECTED';
+    if (results.every((r) => r === 'NOT_REQUESTED')) return 'NOT_REQUESTED';
+    if (results.every((r) => r === 'PENDING' || r === 'SUBMITTED')) return 'PENDING';
+    return 'PARTIAL';
   }
 
   caseView(c: FraudCaseRecord, snapshot: FraudSnapshotRecord | null, entryOpensAtMs?: number | null): Record<string, unknown> {
@@ -691,7 +868,7 @@ export class FraudActions {
         transferLocked: locked(m),
         lockExpiresAt: iso(m.lockExpiresAtMs),
       })),
-      appealOutcome: 'REJECTED',
+      appealOutcome: this.#appealOutcome(c),
       investigatorOpinion: c.investigatorOpinion,
       evidenceBundleIds: [],
       events: c.events.map((e) => ({ seq: e.seq, kind: e.kind, actorId: e.actorId, note: e.note, detail: e.detail, occurredAt: iso(e.occurredAtMs) })),
@@ -708,9 +885,3 @@ export class FraudActions {
     }
   }
 }
-
-const iso = (ms: number | null): string | null => (ms === null ? null : new Date(ms).toISOString());
-const authAllAccepted = (c: FraudCaseRecord): boolean => {
-  const actioned = active(c).filter((m) => m.actionNotifiedAtMs !== undefined && m.actionNotifiedAtMs !== null);
-  return actioned.length > 0 && actioned.every((m) => m.objectionResult === 'ACCEPTED');
-};

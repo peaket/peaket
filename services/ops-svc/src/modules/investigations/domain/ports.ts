@@ -153,8 +153,8 @@ export interface FraudRestrictionCopies {
 }
 
 export interface FraudRestrictionRows {
-  restrict(i: { accountId: string; caseId: string; restrictionId: string; version: number; untilMs: number; actedBy: string }): Promise<void>;
-  lift(i: { accountId: string; caseId: string; restrictionId: string; version: number; actedBy: string }): Promise<void>;
+  restrict(i: { accountId: string; caseId: string; restrictionId: string; version: number; untilMs: number; actedBy: string }): Promise<{ version: number }>;
+  lift(i: { accountId: string; caseId: string; restrictionId: string; version: number; actedBy: string }): Promise<{ version: number }>;
   activeForCase(caseId: string): Promise<readonly { accountId: string; caseId: string; restrictionId: string; untilMs: number; version: number }[]>;
 }
 
@@ -203,6 +203,11 @@ export interface FraudApprovalRecord {
   approvals: readonly string[];
 }
 
+/** 한 사건의 열린 FRAUD_ACTION 하나 규칙을 DB가 거절했을 때(IR-11). */
+export class FraudApprovalConflictError extends Error {}
+/** 사건 판이 이미 바뀌어 트랜잭션을 되돌렸을 때(IR-07). */
+export class FraudCaseConflictError extends Error {}
+
 export interface FraudApprovalStore {
   request(
     i: FraudApprovalRecord,
@@ -212,11 +217,30 @@ export interface FraudApprovalStore {
       audit?: CaseAuditRecord;
       events: readonly FraudCaseRecord['events'][number][];
       caseStatus?: FraudCaseRecord['status'];
+      /** 사건 상태·판·회원 변경을 승인 저장과 같은 트랜잭션에 쓴다(IR-04·IR-07). */
+      caseNext?: FraudCaseRecord;
+      expectedVersion?: number;
     },
-  ): Promise<void>;
+  ): Promise<{ replayed: boolean }>;
   get(approvalId: string): Promise<FraudApprovalRecord | null>;
   list(q: { status?: readonly string[]; requesterId?: string; awaitingApprover?: string; limit: number }): Promise<FraudApprovalRecord[]>;
-  setStatus(i: { approvalId: string; status: import('./fraud-action.js').FraudApprovalStatus; approverId?: string | null; reason?: string | null; closeReason?: string | null; nowMs: number }): Promise<void>;
+  setStatus(i: {
+    approvalId: string;
+    status: import('./fraud-action.js').FraudApprovalStatus;
+    approverId?: string | null;
+    reason?: string | null;
+    closeReason?: string | null;
+    nowMs: number;
+    /** 이 상태에서만 바꾼다(조건부 전이, IR-11). */
+    from?: readonly import('./fraud-action.js').FraudApprovalStatus[];
+    /** 사건 상태·판·회원 변경·기록·감사를 같은 트랜잭션에 쓴다(IR-07). */
+    case?: {
+      next: FraudCaseRecord;
+      expectedVersion: number;
+      events: readonly FraudCaseRecord['events'][number][];
+      audit?: CaseAuditRecord;
+    };
+  }): Promise<{ ok: boolean }>;
   recordSummaryView(i: { approvalId: string; adminAccountId: string; nowMs: number }): Promise<number>;
   summaryViewedAt(i: { approvalId: string; adminAccountId: string }): Promise<number | null>;
 }

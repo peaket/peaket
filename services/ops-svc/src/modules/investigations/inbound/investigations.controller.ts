@@ -3,6 +3,12 @@
 import { Body, Controller, Get, Header, Headers, HttpCode, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { z } from 'zod';
 import {
+  CreateOpsFraudCaseActionRequestBody,
+  CreateOpsFraudCaseActionRequestParams,
+  CreateOpsFraudCaseActionRequestResponse,
+  CreateOpsFraudCaseClearanceBody,
+  CreateOpsFraudCaseClearanceParams,
+  CreateOpsFraudCaseClearanceResponse,
   CreateOpsEventFraudClusterRunParams,
   CreateOpsEventFraudClusterRunResponse,
   CreateOpsFraudCaseAppealRequestBody,
@@ -38,16 +44,8 @@ const reject = (e: unknown): never => {
   throw e;
 };
 
-const ActionBody = z
-  .object({
-    fraudAction: z.enum(['CANCEL_TICKETS', 'RESTRICT', 'LIFT_RESTRICTION']),
-    accountIds: z.array(z.string()).min(1).max(100),
-    ticketIds: z.array(z.string()).max(500).optional(),
-    restrictionEndsAt: z.string().optional(),
-    reason: z.string().min(1).max(2000),
-  })
-  .strict();
-const ClearanceBody = z.object({ reason: z.string().min(1).max(2000), outcomeLabel: z.enum(['HUMAN', 'NONE']) }).strict();
+const ActionBody = CreateOpsFraudCaseActionRequestBody;
+const ClearanceBody = CreateOpsFraudCaseClearanceBody;
 
 const one = (v: string | string[] | undefined): string | undefined => (typeof v === 'string' ? v : Array.isArray(v) ? v[0] : undefined);
 const listOf = (v: string | string[] | undefined): string[] | undefined => {
@@ -225,15 +223,15 @@ export class InvestigationsController {
   @Header('Cache-Control', 'no-store')
   @Roles([...OPS_ROLES] as AdminRole[])
   @Idempotent({ operation: 'CREATE_FRAUD_ACTION_REQUEST' })
-  @ContractRouteSchema({ body: ActionBody, responses: { 201: z.record(z.string(), z.unknown()) } })
+  @ContractRouteSchema({ params: CreateOpsFraudCaseActionRequestParams, body: ActionBody, responses: { 201: CreateOpsFraudCaseActionRequestResponse } })
   async actionRequest(
-    @Param('caseId') caseId: string,
-    @Body() body: z.output<typeof ActionBody>,
+    @ContractParams(CreateOpsFraudCaseActionRequestParams) params: z.output<typeof CreateOpsFraudCaseActionRequestParams>,
+    @ContractBody(ActionBody) body: z.output<typeof ActionBody>,
     @CurrentPrincipal() me: Principal,
     @IdempotencyRequest() idem: IdempotencyRequest,
   ) {
     try {
-      return await this.investigations.actionRequest(actorOf(me), caseId, idem, body);
+      return await this.investigations.actionRequest(actorOf(me), params.caseId, idem, body);
     } catch (e) {
       reject(e);
     }
@@ -244,17 +242,17 @@ export class InvestigationsController {
   @Header('Cache-Control', 'no-store')
   @Roles([...OPS_ROLES] as AdminRole[])
   @Idempotent({ operation: 'CLEAR_FRAUD_CASE' })
-  @ContractRouteSchema({ body: ClearanceBody, responses: { 200: z.record(z.string(), z.unknown()) } })
+  @ContractRouteSchema({ params: CreateOpsFraudCaseClearanceParams, body: ClearanceBody, responses: { 200: CreateOpsFraudCaseClearanceResponse } })
   async clearance(
-    @Param('caseId') caseId: string,
-    @Body() body: z.output<typeof ClearanceBody>,
+    @ContractParams(CreateOpsFraudCaseClearanceParams) params: z.output<typeof CreateOpsFraudCaseClearanceParams>,
+    @ContractBody(ClearanceBody) body: z.output<typeof ClearanceBody>,
     @CurrentPrincipal() me: Principal,
     @IdempotencyRequest() idem: IdempotencyRequest,
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     try {
-      const out = await this.investigations.clearance(actorOf(me), caseId, one(headers['if-match']), idem, body);
+      const out = await this.investigations.clearance(actorOf(me), params.caseId, one(headers['if-match']), idem, body);
       void reply.header('etag', etag(out.version));
       return out.view;
     } catch (e) {

@@ -34,6 +34,7 @@ import { realtimeTableFromEnv } from './rt-wiring.js';
 import { HttpCoreContract } from './adapters/http-core-contract.js';
 import {
   DrizzleInvestigationStore,
+  DrizzleFraudRestrictions,
   FraudActions,
   GrpcTransferLocks,
   LoggingFraudAlerts,
@@ -47,7 +48,13 @@ import {
   startFraudActionSweep,
   GrpcFraudTickets,
   GrpcFraudCancellations,
+  GrpcFraudLabels,
+  GrpcFraudRestrictions,
+  GrpcFraudAppealCopies,
+  AuditFraudApproverIdentity,
+  AdminFraudApproverDirectory,
 } from './modules/investigations/index.js';
+import { GrantPriority, ResolveFraudObjection, WithdrawPriority } from './modules/priority/index.js';
 import { HttpCoreSaleSchedule, UnavailableSaleSchedule } from './modules/readiness/index.js';
 import { PromCsCaseSignals, PromCsDispatchSignals, ReceiveCaseRequested, loadBusinessCalendar } from './modules/cases/index.js';
 import { csAppealPortsFromEnv } from './cs-appeal-wiring.js';
@@ -184,14 +191,32 @@ const realtimeTable = realtimeTableFromEnv(process.env, { ...(cancellationDeps.o
 // F-04-12 부정 예매 조사(동결 로컬). 실제 기록 재계산기·후보 실행기는 아직 조립하지 않아 하루 검증·자동 재시도는 판정하지 않는다.
 const fraudTickets = ticketGrpcUrl ? new GrpcFraudTickets({ address: ticketGrpcUrl, ...(internalToken ? { token: internalToken } : {}) }) : undefined;
 const fraudCancellations = purchaseGrpcAddr ? new GrpcFraudCancellations({ address: purchaseGrpcAddr, ...(internalToken ? { token: internalToken } : {}) }) : undefined;
+const trustGrpcUrl = process.env.PEAKET_TRUST_GRPC_URL;
+const queueGrpcUrl = process.env.PEAKET_QUEUE_GRPC_URL;
+const coreGrpcUrl = process.env.PEAKET_CORE_GRPC_URL;
+const fraudLabels = trustGrpcUrl ? new GrpcFraudLabels({ address: trustGrpcUrl, ...(internalToken ? { token: internalToken } : {}) }) : new LoggingFraudLabels();
+const fraudCopies = coreGrpcUrl ? new GrpcFraudAppealCopies({ address: coreGrpcUrl, ...(internalToken ? { token: internalToken } : {}) }) : undefined;
+const fraudRestrictions = identityUrl && queueGrpcUrl && purchaseGrpcAddr
+  ? new GrpcFraudRestrictions({ identityAddress: identityUrl, queueAddress: queueGrpcUrl, purchaseAddress: purchaseGrpcAddr, ...(internalToken ? { token: internalToken } : {}), rows: new DrizzleFraudRestrictions(database) })
+  : undefined;
+const fraudApproverIdentity = adminIdentity ? new AuditFraudApproverIdentity({ identity: adminIdentity, database }) : undefined;
+const fraudApproverDirectory = adminIdentity ? new AdminFraudApproverDirectory(adminIdentity) : undefined;
+const fraudPriority = priority
+  ? new ResolveFraudObjection(new GrantPriority(priority.purchase, priority.copies), new WithdrawPriority(priority.purchase, priority.copies))
+  : undefined;
 const investigations = {
   store: new DrizzleInvestigationStore(database),
   schedule: coreUrl ? HttpCoreSaleSchedule.fromUrl(coreUrl, () => Date.now(), internalToken) : new UnavailableSaleSchedule(),
   locks: ticketGrpcUrl ? new GrpcTransferLocks(ticketGrpcUrl) : new UnavailableTransferLocks(),
   ...(fraudTickets ? { fraudTickets } : {}),
   ...(fraudCancellations ? { fraudCancellations } : {}),
+  ...(fraudRestrictions ? { fraudRestrictions } : {}),
+  ...(fraudApproverIdentity ? { fraudApproverIdentity } : {}),
+  ...(fraudApproverDirectory ? { fraudApproverDirectory } : {}),
+  ...(fraudCopies ? { fraudCopies } : {}),
+  ...(fraudPriority ? { fraudPriority } : {}),
   notifier: new LoggingFraudNotifier(),
-  labels: new LoggingFraudLabels(),
+  labels: fraudLabels,
   alerts: new LoggingFraudAlerts(),
   access: new LoggingInvestigationAccess(),
   events: new LoggingFraudOpsEvent(),
@@ -341,6 +366,9 @@ process.once('SIGTERM', () => {
       scannerDevices?.close();
       fraudTickets?.close();
       fraudCancellations?.close();
+      fraudRestrictions?.close();
+      fraudCopies?.close();
+      if ('close' in fraudLabels && typeof fraudLabels.close === 'function') fraudLabels.close();
       pgAssignmentCheck?.close();
       pgSwitchResolver?.close();
       botReviewLabels?.close();

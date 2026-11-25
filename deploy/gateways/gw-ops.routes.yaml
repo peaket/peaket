@@ -1,5 +1,5 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-ops.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
-# openapi info.version 1.0.0-draft · 계약 sha256 35d45e7b7bb732c3c7598d44f4b7902caad2d1eacd86db64bd7d98f7ff2a6e75
+# openapi info.version 1.0.0-draft · 계약 sha256 500dac660ded631c0b4f7b1060559a5d79dc1c5bbdd3f61bd2d2c0f4de1b7398
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -1709,6 +1709,14 @@ spec:
           method: OPTIONS
         - path:
             type: RegularExpression
+            value: /v1/ops/fraud-cases/[^/]+/clearance
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/ops/fraud-cases/[^/]+/clearance
+          method: OPTIONS
+        - path:
+            type: RegularExpression
             value: /v1/ops/fraud-cases/[^/]+/evidence-bundles
           method: POST
         - path:
@@ -1727,14 +1735,6 @@ spec:
             type: RegularExpression
             value: /v1/ops/fraud-cases/[^/]+/ip-reveals
           method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/ops/fraud-cases/[^/]+/ip-reveals
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/fraud-cases/[^/]+/replay-export
-          method: GET
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -1773,6 +1773,14 @@ spec:
     - ops-api.peaket.example
   rules:
     - matches:
+        - path:
+            type: RegularExpression
+            value: /v1/ops/fraud-cases/[^/]+/ip-reveals
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/fraud-cases/[^/]+/replay-export
+          method: GET
         - path:
             type: RegularExpression
             value: /v1/ops/fraud-cases/[^/]+/replay-export

@@ -650,6 +650,7 @@ export const CreateOpsFraudCaseActionRequestResponse = zod.object({
   "ticketCount": zod.int().min(createOpsFraudCaseActionRequestResponseFraudCaseSummaryOneTicketCountMin).optional().describe('조치 대상 티켓 수'),
   "purchaseCount": zod.int().min(createOpsFraudCaseActionRequestResponseFraudCaseSummaryOnePurchaseCountMin).optional(),
   "limitPerPerson": zod.int().min(1).optional(),
+  "scoreBand": zod.enum(['HIGH', 'MEDIUM', 'LOW']).optional().describe('묶음의 점수대'),
   "sharedAttributes": zod.array(zod.enum(['DEVICE', 'PAYMENT_METHOD', 'CONTACT', 'IP', 'ASN', 'IDENTITY_CONFLICT']).describe('묶음 계정이 함께 쓴 연결 값의 종류(FR-072): 기기 가명(deviceRef), 결제 수단 연결값(paymentMethodRef. 카드 지문이 없어 약한 값이다, docs/features/payment.md), 연락처·수령 정보 가명(contactRef), 시간창 안의 같은 IP, 같은 ASN(망 운영자 번호), 같은 본인확인으로 다른 계정에서 시도한 기록(docs/data.md identity_conflict_attempt). 추천 적용 2026-10-31, ADR-0171')).optional(),
   "signals": zod.array(zod.enum(['LINK_GRAPH', 'SYNC_STEPS', 'VELOCITY', 'TIMING_BASELINE', 'BYPASS_TRACE', 'POST_MATCH']).describe('근거 신호. ADR-0171 결정 6의 분석 방법 여섯과 같다: 연결 그래프, 거의 같은 시각에 같은 단계를 밟는 동시 행동 군집, 같은 IP·기기에서 여러 계정을 빠르게 오가는 속도 규칙, 판매 시작부터 단계별 걸린 시간이 정상 기준선 밖, 입장 토큰 없는 홀드 시도·우회 링크 흔적, 외부 되팔이 게시물과 좌석 대조. 규칙과 점수는 docs/features/forensic-replay.md가 정한다(추천 적용 2026-10-31)')).optional(),
   "appealOutcome": zod.enum(['NOT_REQUESTED', 'PENDING', 'ACCEPTED', 'REJECTED', 'PARTIAL']).optional(),

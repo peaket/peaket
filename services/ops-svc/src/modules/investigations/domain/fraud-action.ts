@@ -98,13 +98,21 @@ export function actionRequestDecision(o: {
   } else {
     throw problem('fraud-case-state', 409, '조치를 요청할 수 없는 사건 상태입니다');
   }
-  const explicit = new Set(o.ticketIds ?? []);
+  const explicit = o.ticketIds === undefined ? undefined : new Set(o.ticketIds);
+  if (explicit !== undefined && explicit.size === 0) throw problem('action-target-invalid', 422, '취소할 표 목록이 비었습니다');
   const targets: FraudCancelTarget[] = o.action !== 'CANCEL_TICKETS'
     ? []
     : o.tickets
-        .filter((t) => o.accountIds.includes(t.payerAccountId) && (explicit.has(t.ticketId) || (!o.ticketIds && t.holderAccountId === t.payerAccountId)))
+        .filter((t) => o.accountIds.includes(t.payerAccountId) && (explicit?.has(t.ticketId) === true || (explicit === undefined && t.holderAccountId === t.payerAccountId)))
         .map((t) => ({ ticketId: t.ticketId, expectedHolderAccountId: t.holderAccountId }));
-  if (o.action === 'CANCEL_TICKETS' && targets.length === 0 && (o.ticketIds?.length ?? 0) > 0) throw problem('action-target-invalid', 422, '취소할 표가 없습니다');
+  if (o.action === 'CANCEL_TICKETS') {
+    if (targets.length === 0) throw problem('action-target-invalid', 422, '취소할 표가 없습니다');
+    if (explicit !== undefined) {
+      const got = new Set(targets.map((t) => t.ticketId));
+      const known = new Set(o.tickets.filter((t) => o.accountIds.includes(t.payerAccountId)).map((t) => t.ticketId));
+      if ([...explicit].some((id) => !known.has(id)) || got.size !== explicit.size) throw problem('action-target-invalid', 422, '취소 대상 표가 회차·결제자와 맞지 않습니다');
+    }
+  }
   return { nextStatus, expiresAtMs: o.action === 'CANCEL_TICKETS' ? o.case.cancelDeadlineAtMs : now + ACTION_EXPIRY_MS, restrictionEndsAtMs, targets };
 }
 

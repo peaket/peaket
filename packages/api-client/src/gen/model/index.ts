@@ -504,6 +504,7 @@ export * from './fraudCaseStatus';
 export * from './fraudCaseSummary';
 export * from './fraudCaseSummaryAppealCounts';
 export * from './fraudCaseSummaryAppealOutcome';
+export * from './fraudCaseSummaryScoreBand';
 export * from './fraudCaseSummaryTargetsItem';
 export * from './fraudCaseSummaryTargetsItemAppealOutcome';
 export * from './fraudCluster';

@@ -2,6 +2,7 @@
 
 /** 이름 붙은 오류(RFC 9457 type의 마지막 경로, openapi x-peaket-problem-types, docs/api/guidelines.md §2) */
 export type ProblemType =
+  | 'action-target-invalid'
   | 'admin-account-locked'
   | 'admin-account-state-conflict'
   | 'admin-account-unavailable'
@@ -20,7 +21,11 @@ export type ProblemType =
   | 'already-verified'
   | 'already-waiting'
   | 'anchor-unavailable'
+  | 'appeal-pending'
+  | 'approval-already-open'
   | 'approval-conflict'
+  | 'approval-kind-not-supported'
+  | 'approval-not-pending'
   | 'approval-reason-required'
   | 'approval-role-required'
   | 'approval-scope-invalid'
@@ -105,6 +110,7 @@ export type ProblemType =
   | 'event-suspended'
   | 'export-format-unavailable'
   | 'first-partner-account-must-be-admin'
+  | 'fraud-action-requires-case-request'
   | 'fraud-approver-ineligible'
   | 'fraud-case-exists'
   | 'fraud-case-state'
@@ -148,6 +154,7 @@ export type ProblemType =
   | 'invalid-priority-grant'
   | 'invalid-query'
   | 'invalid-seat'
+  | 'invalid-time'
   | 'investigation-source-expired'
   | 'investigator-required'
   | 'invitation-invalid'
@@ -412,6 +419,7 @@ export const PROBLEM_TYPE_BASE = "https://peaket.example/problems/";
 
 /** 이름마다 상태 코드와 제목(제목은 화면에 보이지 않는다. 화면은 문구 키로 고른다, docs/frontend.md §5.12) */
 export const PROBLEM_TYPES = {
+  'action-target-invalid': { status: 422, title: "조치 대상 계정·표가 올바르지 않습니다" },
   'admin-account-locked': { status: 423, title: "계정이 잠겼습니다" },
   'admin-account-state-conflict': { status: 409, title: "지금 계정 상태에서는 할 수 없습니다" },
   'admin-account-unavailable': { status: 503, title: "관리 계정 서비스에 닿지 못했습니다" },
@@ -430,7 +438,11 @@ export const PROBLEM_TYPES = {
   'already-verified': { status: 409, title: "이미 본인확인을 마친 계정입니다" },
   'already-waiting': { status: 409, title: "이미 다른 곳에서 대기 중입니다" },
   'anchor-unavailable': { status: 503, title: "외부 앵커를 지금 쓸 수 없습니다" },
+  'appeal-pending': { status: 409, title: "판단 전 소명이 있습니다" },
+  'approval-already-open': { status: 409, title: "열린 조치 승인 업무가 있습니다" },
   'approval-conflict': { status: 409, title: "다른 사람이 먼저 처리했습니다" },
+  'approval-kind-not-supported': { status: 422, title: "이 경로로 만들 수 없는 승인 종류입니다" },
+  'approval-not-pending': { status: 409, title: "승인 대기 중인 업무가 아닙니다" },
   'approval-reason-required': { status: 422, title: "승인 사유를 적어 주세요" },
   'approval-role-required': { status: 403, title: "commander만 승인할 수 있습니다" },
   'approval-scope-invalid': { status: 422, title: "요청 범위 밖의 대상입니다" },
@@ -515,6 +527,7 @@ export const PROBLEM_TYPES = {
   'event-suspended': { status: 410, title: "판매가 중지된 공연입니다" },
   'export-format-unavailable': { status: 503, title: "이 파일 형식은 아직 만들 수 없습니다" },
   'first-partner-account-must-be-admin': { status: 422, title: "파트너사의 첫 계정은 관리자여야 합니다" },
+  'fraud-action-requires-case-request': { status: 422, title: "FRAUD_ACTION은 사건 조치 요청 경로로만 만듭니다" },
   'fraud-approver-ineligible': { status: 403, title: "이 사건을 승인할 수 없는 계정입니다" },
   'fraud-case-exists': { status: 409, title: "이 묶음으로 만든 사건이 이미 있습니다" },
   'fraud-case-state': { status: 409, title: "지금 사건 상태에서는 할 수 없습니다" },
@@ -558,6 +571,7 @@ export const PROBLEM_TYPES = {
   'invalid-priority-grant': { status: 400, title: "우선 구매 권리 요청이 올바르지 않습니다" },
   'invalid-query': { status: 400, title: "목록 조건이 올바르지 않습니다" },
   'invalid-seat': { status: 422, title: "고를 수 없는 좌석이 있습니다" },
+  'invalid-time': { status: 400, title: "시각이 올바르지 않습니다" },
   'investigation-source-expired': { status: 410, title: "조사 원천 보존 기간이 끝났습니다" },
   'investigator-required': { status: 403, title: "부정 거래 조사관만 할 수 있습니다" },
   'invitation-invalid': { status: 410, title: "초대가 만료되었습니다" },

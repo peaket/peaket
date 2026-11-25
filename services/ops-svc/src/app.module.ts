@@ -208,6 +208,7 @@ function fraudActionsOf(o: CommonWiring, approvals: import('./modules/investigat
     ...(inv.fraudApproverIdentity ? { approverIdentity: inv.fraudApproverIdentity } : {}),
     ...(inv.fraudApproverDirectory ? { approverDirectory: inv.fraudApproverDirectory } : {}),
     ...(o.approvals?.reauth ?? o.payouts?.reauth ? { reauth: o.approvals?.reauth ?? o.payouts?.reauth } : {}),
+    ...(inv.calendar ? { calendar: inv.calendar } : {}),
     now: typeof inv.now === 'function' ? inv.now : () => o.nowMs ?? Date.now(),
     ...(o.auditChain ? { audit: o.auditChain } : {}),
   });
@@ -296,7 +297,7 @@ export class AppModule {
     const cancellations = new MemoryEventCancellationStore(chain);
     const memoryAlerts = new MemoryOpsAlertStore();
     const cases = caseKitOf(o, new MemoryCsCaseStore(chain), memoryAlerts);
-    const fraudActions = fraudActionsOf(o, new MemoryFraudApprovalStore());
+    const fraudActions = fraudActionsOf(o, new MemoryFraudApprovalStore(o.investigations?.store));
     return {
       module: AppModule,
       imports: [

@@ -11,6 +11,7 @@
  */
 import type { FraudCaseSummaryAppealCounts } from './fraudCaseSummaryAppealCounts';
 import type { FraudCaseSummaryAppealOutcome } from './fraudCaseSummaryAppealOutcome';
+import type { FraudCaseSummaryScoreBand } from './fraudCaseSummaryScoreBand';
 import type { FraudCaseSummaryTargetsItem } from './fraudCaseSummaryTargetsItem';
 import type { FraudLinkKind } from './fraudLinkKind';
 import type { FraudReasonCategory } from './fraudReasonCategory';
@@ -34,6 +35,8 @@ export interface FraudCaseSummary {
   readonly purchaseCount?: number;
   /** @minimum 1 */
   readonly limitPerPerson?: number;
+  /** 묶음의 점수대 */
+  readonly scoreBand?: FraudCaseSummaryScoreBand;
   readonly sharedAttributes?: FraudLinkKind[];
   readonly signals?: FraudSignal[];
   readonly appealOutcome?: FraudCaseSummaryAppealOutcome;

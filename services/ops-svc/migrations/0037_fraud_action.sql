@@ -35,8 +35,12 @@ ALTER TABLE idempotency_record DROP CONSTRAINT IF EXISTS idempotency_record_oper
 ALTER TABLE idempotency_record ADD CONSTRAINT idempotency_record_operation_check CHECK (operation IN (
   'CREATE_EVENT_CANCELLATION', 'CREATE_PARTNER_EVENT_CANCELLATION', 'CREATE_BOT_REVIEW_JUDGEMENT',
   'CREATE_OPS_COMMAND', 'DECIDE_VERIFICATION_APPEAL', 'CREATE_FRAUD_CASE', 'CREATE_FRAUD_APPEAL_REQUEST',
-  'CREATE_FRAUD_CLUSTER_RUN', 'FRAUD_ACTION_REQUEST', 'CLEAR_FRAUD_CASE'
+  'CREATE_FRAUD_CLUSTER_RUN', 'CREATE_FRAUD_ACTION_REQUEST', 'CLEAR_FRAUD_CASE'
 ));
+--> statement-breakpoint
+-- 한 사건에 열린 FRAUD_ACTION은 하나다(IR-11). 경합한 두 요청은 두 번째 INSERT가 이 인덱스에서 거절된다.
+CREATE UNIQUE INDEX IF NOT EXISTS approval_request_fraud_open_uq ON approval_request (kind, target_ref)
+  WHERE kind = 'FRAUD_ACTION' AND status IN ('PENDING_APPROVAL', 'EXECUTING', 'FAILED');
 --> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE ON approval_summary_view TO ops_app;
 --> statement-breakpoint
