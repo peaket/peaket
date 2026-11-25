@@ -148,6 +148,7 @@
 - 2026-11-24 17:4x F-05-4 release 브라우저 확인(GAT-140)을 닫았다(release-check/F-05-4, f8dddf7be). 실제 연결 화면 이동의 ?live=1 결함을 재현·고침(7bdab70b5), scanner-scan 20/20·scanner 159/159·scanner-enroll 9/9. 실제 카메라·휴대폰 QR·실서비스 조합은 남은 위험.
 - 2026-11-25 08:1x F-08 창 1·2 측정을 마쳤다. 창 1은 9 pass·20 fail/invalid·3 skip, 512Mi·1GiB 무대 OOM으로 2GiB로 올렸다. 창 2는 X₁=800, N=1 무효, E(N) 0.25(기준 0.9), 외삽 31.25배(0.5 vCPU는 78배). V-T4는 100k 무효로 판정 못 함, V-T5 표 대조는 완료. K7 ② 불변식은 3회 PASS. 결과·장부는 feature/lane4-F-08-2-refresh에 있다. v1 수치 주장은 측정 범위로 줄인다.
 - 2026-11-25 09:0x 데모 S1은 대기실 SCR-007 404로 아직 fail이다. queue-room Dockerfile의 apps/web/src 누락과 시드 bankCode '000'은 고쳤고(02be01e75·a7e47a379), 라우팅 원인을 조사 중이다. F-05-1은 Android만 확인하고 iPhone·실제 스캐너는 보류한다. Argo CD 전환 준비 문서 docs/release/argocd-cutover.md를 만들었고 실제 적용은 하지 않는다.
+- 2026-11-25 10:0x F-05-1 gate를 release로 옮겼다. Android(POCO X7 Pro)에서 월렛 QR·새로고침·뒤로 가기·PWA 설치 통과(9914e4718). 키 증명은 PC 측정에서 QR v1보다 열화 여유가 한 단계 작아 v1 미채택, 기존 QR·부스 재발급 유지. iPhone Safari·홈 화면·실제 스캐너는 소유자 보류로 v1 위험 수용. release 34·gate 4.
 ## SEG 때 정할 범위 늘어남(ADR-0283 결정 6)
 - 묶음 중에 더한 새 단계는 wbs.csv 일수에 바로 더하지 않고 여기 모아 구간 마무리 때 소유자가 한 번에 정한다(앞선 예: HOT-405 0.75일, 2026-11-18 OPEN[49]).
 - PRF-174(wbs 2.7.1 ③, 0.5일 [가정], BAT-013): 탈퇴 참여자의 결제한 미사용 티켓 취소·환급(BAT-010이 찾음, 돈 A 대상, R-685).

@@ -178,8 +178,8 @@
       "reason": "R-797, 8d0b58848, 계획 docs/review/plans/F-04-20.md"
     },
     "F-05-1": {
-      "class": "gate",
-      "reason": "R-787, GAT-040 끝·GAT-020 대기, 계획 docs/review/plans/F-05-1.md. 게이트: GAT-030 키 증명 PoC + 소유자 실기기 확인"
+      "class": "release",
+      "reason": "R-787, 계획 docs/review/plans/F-05-1.md. GAT-020 Android 월렛 QR·새로고침·PWA 설치 통과(9914e4718), PC 키 증명 측정 af63e511b. 키 증명 v1 미채택, 기존 QR·부스 재발급 유지. iPhone Safari·홈 화면·실제 스캐너는 소유자 보류로 v1 위험 수용"
     },
     "F-05-2": {
       "class": "release",
@@ -424,7 +424,6 @@
   },
   "gates": [
     "F-04-8",
-    "F-05-1",
     "F-08-2",
     "F-08-7",
     "F-08-8"
