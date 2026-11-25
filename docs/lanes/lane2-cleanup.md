@@ -247,3 +247,10 @@
 - F-02-5 시험 리뷰 TR-09(낮음): `main.ts` 원문 정규식 시험은 주석 속 죽은 코드로도 통과할 수 있다. TR-01·TR-04의 실제 시작/조립 시험이 생기면 원문 검사는 보조로만 둔다(계획 13절).
 - F-02-5 시험 리뷰 TR-10(낮음): core-svc 관제 조치는 `not.toBe(503)`, 내부 경로는 `not.toBe(503)`·`Retry-After` 없음만 본다. 관제는 기대 상태(200 등), 내부는 401/403을 정확히 단언한다(ADR-0365 결정 17).
 - F-02-5 시험 리뷰 TR-11(낮음): 계획 9절은 C-T51을 'PostgreSQL·Kafka'라 적었지만 통합은 후기 저장소를 메모리로 쓴다. **닫음(2026-11-25)**: 계획 9절을 'Kafka(+메모리 후기 저장소)'로 고쳤다(판정은 그대로).
+- F-02-5 구현 리뷰 IR-10(중간): 적용 확인이 `alertOpen: true`를 경보 저장보다 먼저 저장해, `ops_alert` 쓰기가 실패하면 다음 바퀴에 SEV3를 다시 열지 않는다. 경보 저장이 성공한 뒤 표시하거나 실패 때 `alertOpen:false`로 되돌린다(services/ops-svc/src/modules/commands/application/check-settings-apply.ts:43-54)
+- F-02-5 구현 리뷰 IR-11(낮음): `LOG_LEVEL_SERVICES`·`LOG_LEVEL_RAISED`·`FEATURE_FLAGS`가 `domain/command-params.ts`와 `domain/setting-commands.ts`에 중복이다. 한 곳에서 export해 접수 검사와 사건 꼴이 갈라지지 않게 한다(계획 8.2)
+- F-02-5 구현 리뷰 IR-12(낮음): queue-svc 대기 인원을 `seq`·`serving`·`skipped` 세 번의 따로 읽기로 센다. 계획 8.3의 같은 슬롯 Lua 한 번(원자적 읽기)으로 바꾼다(services/queue-svc/src/modules/entry/adapters/redis-preview-waiting.ts:13-19)
+- F-02-5 구현 리뷰 IR-13(낮음): openapi `Command.params` 설명에 `LOG_LEVEL {service, level}`·`FEATURE_OFF {flag}`가 없고 `docs/api/proto/README.md` 호출 표에 `PreviewControl` 줄이 없다(계획 7·8.1)
+- F-02-5 구현 리뷰 IR-14(낮음): `ControlPreviewDryRunSource`가 계획 8.1에 없는 사유 `invalid-scope`를 내고, 명령 3에서 purchase/queue 어느 쪽에도 속하지 않는 키를 조용히 버린다. 모르는 키는 `unknown-key`로 남긴다(services/ops-svc/src/modules/commands/adapters/control-preview-dry-run-source.ts:57-75,176-179)
+- F-02-5 구현 리뷰 IR-15(낮음): `DrizzleSaleRecordCounter`가 '칸이 없으면 no-source'라고 적었지만 실제로는 0을 세거나 던진다. `seat_hold`·`payment_attempt`의 색인을 `EXPLAIN`으로 확인하고 원천 없음의 답(no-source 또는 0034)을 정한다(services/purchase-svc/src/modules/inventory/adapters/drizzle-sale-record-counter.ts:1-23, 계획 14절 3)
+- F-02-5 구현 리뷰 IR-16(낮음): `MemorySaleConfigStore.listOnsaleOpens`가 늘 `scale:null`이라 local·ci 메모리 세계에서는 `LOG_SAMPLING`이 나가지 않는다. 또 `docs/data.md`의 `command_apply_check`·ASVS 1.3.6·2.3.3·control-tower §5 갱신이 구현 범위에 없다(계획 7절 '정본(구현·기록 때)'). 기록 커밋에서 채운다(services/core-svc/src/modules/catalog/adapters/memory-sale-config-store.ts:40-46)
