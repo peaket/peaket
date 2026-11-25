@@ -37,6 +37,10 @@ export interface LiveSyncView {
   freshness: Freshness;
   state: LiveSyncState;
   minAppVersion?: string;
+  /** 서비스 워커가 403으로 멈춘 이유(IR-06) */
+  stopped?: 'device-revoked' | 'device-unregistered';
+  /** 서비스 워커 업로드가 resyncRequired를 받았는가(IR-06) */
+  resyncRequired?: boolean;
 }
 
 export interface LiveView {
@@ -285,8 +289,15 @@ class LiveRuntime {
     });
   }
 
-  async #onBackgroundUploadDone(message: { resyncRequired?: boolean }): Promise<void> {
-    this.#uploadState = { ...this.#uploadState, pending: (await this.#queue?.count()) ?? this.#uploadState.pending };
+  async #onBackgroundUploadDone(message: {
+    resyncRequired?: boolean;
+    stopped?: 'device-revoked' | 'device-unregistered';
+  }): Promise<void> {
+    this.#uploadState = {
+      ...this.#uploadState,
+      pending: (await this.#queue?.count()) ?? this.#uploadState.pending,
+      ...(message.stopped !== undefined ? { stopped: message.stopped } : {}),
+    };
     if (message.resyncRequired) this.#needsResync = true;
     this.#publish();
   }
@@ -436,6 +447,8 @@ class LiveRuntime {
       freshness,
       state: syncState,
       ...(this.#minAppVersion !== undefined ? { minAppVersion: this.#minAppVersion } : {}),
+      ...(this.#uploadState.stopped !== undefined ? { stopped: this.#uploadState.stopped } : {}),
+      ...(this.#needsResync ? { resyncRequired: true } : {}),
     };
   }
 

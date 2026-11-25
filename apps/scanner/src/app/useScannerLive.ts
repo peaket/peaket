@@ -13,6 +13,8 @@ export interface LiveSyncView {
   freshness: Freshness;
   state: LiveSyncState;
   minAppVersion?: string;
+  stopped?: 'device-revoked' | 'device-unregistered';
+  resyncRequired?: boolean;
 }
 
 export interface ScannerLive {

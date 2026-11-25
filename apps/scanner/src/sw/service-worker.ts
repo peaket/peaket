@@ -44,6 +44,11 @@ export function createServiceWorkerHandler(deps: ServiceWorkerHandlerDeps): {
       if (url.origin !== deps.origin || url.pathname === '/sw.js') return undefined;
       const cached = await deps.caches?.match(event.request);
       if (cached) return cached;
+      // SPA 이동은 캐시한 앱 셸로 돌린다(설치 start_url 밖 경로도 오프라인에서 다시 연다).
+      if (event.request.mode === 'navigate') {
+        const shell = await deps.caches?.match('/index.html');
+        if (shell) return shell;
+      }
       if (!deps.fetch) return undefined;
       return deps.fetch(event.request as unknown as RequestInfo, { credentials: 'omit' } as RequestInit);
     },
@@ -68,8 +73,12 @@ type SelfLike = {
   addEventListener(type: string, fn: (event: unknown) => void): void;
   skipWaiting?(): void;
   clients?: { claim?(): Promise<void>; matchAll?(): Promise<{ postMessage(message: unknown): void }[]> };
+  caches?: unknown;
+  fetch?: typeof fetch;
   registration?: { showNotification?(title: string, options?: unknown): Promise<void> };
 };
+
+type UploadResult = { accepted: number; resyncRequired?: boolean; stopped?: 'device-revoked' | 'device-unregistered' };
 
 const workerSelf = typeof self !== 'undefined' ? (self as unknown as SelfLike) : undefined;
 
@@ -93,23 +102,41 @@ async function uploadFromWorker(): Promise<{ accepted: number; resyncRequired: b
   };
 }
 
-if (workerSelf && typeof workerSelf.addEventListener === 'function') {
-  const origin = workerSelf.location?.origin ?? (typeof location !== 'undefined' ? location.origin : '');
+/**
+ * 실제 서비스 워커 조립. self의 caches·fetch·clients를 createServiceWorkerHandler에 넘기고
+ * install·activate·fetch·sync·message 사건을 건다. 시험도 이 함수를 그대로 부른다.
+ */
+export function createScannerServiceWorker(o: {
+  scope: SelfLike;
+  caches?: unknown;
+  fetch?: typeof fetch;
+  clients?: { matchAll(): Promise<{ postMessage(message: unknown): void }[]> };
+  upload?: () => Promise<UploadResult>;
+}): ReturnType<typeof createServiceWorkerHandler> {
+  const scope = o.scope;
+  const origin = scope.location?.origin ?? (typeof location !== 'undefined' ? location.origin : '');
+  const caches = o.caches ?? scope.caches;
+  const fetchImpl = o.fetch ?? scope.fetch ?? (typeof fetch !== 'undefined' ? fetch : undefined);
+  const clients = o.clients ?? (scope.clients?.matchAll ? { matchAll: () => scope.clients!.matchAll!() } : undefined);
   const handler = createServiceWorkerHandler({
     origin,
-    skipWaiting: () => workerSelf.skipWaiting?.(),
-    upload: uploadFromWorker,
+    skipWaiting: () => scope.skipWaiting?.(),
+    ...(o.upload ? { upload: o.upload } : {}),
+    ...(caches ? { caches: caches as { match(request: unknown): Promise<Response | undefined> } } : {}),
+    ...(fetchImpl ? { fetch: fetchImpl } : {}),
+    ...(clients ? { clients } : {}),
   });
-  workerSelf.addEventListener('message', (event) => {
+  scope.addEventListener('message', (event) => {
     void handler.onMessage(event as { origin?: string; source?: { url?: string } | null; data: unknown });
   });
-  workerSelf.addEventListener('install', (event) => {
+  scope.addEventListener('install', (event) => {
     const e = event as { waitUntil?(p: Promise<unknown>): void };
     e.waitUntil?.(
       (async () => {
         let assets: string[] = [];
         try {
-          const res = await fetch('/sw-precache.json', { cache: 'no-store' });
+          if (!fetchImpl) return { cached: 0, failed: true };
+          const res = await fetchImpl('/sw-precache.json', { cache: 'no-store' });
           if (res.ok) {
             const body = (await res.json()) as { assets?: unknown };
             if (Array.isArray(body.assets)) assets = body.assets.filter((x): x is string => typeof x === 'string');
@@ -117,20 +144,20 @@ if (workerSelf && typeof workerSelf.addEventListener === 'function') {
         } catch {
           // 매니페스트가 없으면 셸만 캐시한다
         }
-        return cacheAppShell({ cacheName: CACHE_NAME, assets });
+        return cacheAppShell({ cacheName: CACHE_NAME, assets, ...(caches ? { caches } : {}) });
       })().catch(() => ({ cached: 0, failed: true })),
     );
   });
-  workerSelf.addEventListener('activate', (event) => {
+  scope.addEventListener('activate', (event) => {
     const e = event as { waitUntil?(p: Promise<unknown>): void };
     e.waitUntil?.(
-      cleanupCaches({ keep: CACHE_NAME })
+      cleanupCaches({ keep: CACHE_NAME, ...(caches ? { caches } : {}) })
         .catch(() => ({ removed: 0 }))
-        .then(() => workerSelf.clients?.claim?.())
+        .then(() => scope.clients?.claim?.())
         .catch(() => undefined),
     );
   });
-  workerSelf.addEventListener('fetch', (event) => {
+  scope.addEventListener('fetch', (event) => {
     const e = event as { request?: { method: string; url: string; mode?: string }; respondWith?(p: Promise<Response | undefined>): void };
     if (!e.request || e.request.method !== 'GET') return;
     let url: URL;
@@ -139,12 +166,21 @@ if (workerSelf && typeof workerSelf.addEventListener === 'function') {
     } catch {
       return;
     }
-    // 같은 출처의 정적 자산만 가로챈다. API·다른 출처는 브라우저·페이지 대역이 그대로 처리한다.
     if (url.origin !== origin || url.pathname === '/sw.js') return;
-    e.respondWith?.(handler.onFetch({ request: e.request }).then((r) => r ?? fetch(e.request as unknown as Request)));
+    e.respondWith?.(
+      handler
+        .onFetch({ request: e.request })
+        .then((r) => r ?? (fetchImpl ? fetchImpl(e.request as unknown as Request) : undefined))
+        .catch(() => (caches ? (caches as { match(request: unknown): Promise<Response | undefined> }).match('/index.html') : undefined)),
+    );
   });
-  workerSelf.addEventListener('sync', (event) => {
+  scope.addEventListener('sync', (event) => {
     const e = event as { tag?: string; waitUntil?(p: Promise<unknown>): void };
     e.waitUntil?.(handler.onSync({ tag: e.tag }).catch(() => undefined));
   });
+  return handler;
+}
+
+if (workerSelf && typeof workerSelf.addEventListener === 'function') {
+  createScannerServiceWorker({ scope: workerSelf, upload: uploadFromWorker });
 }

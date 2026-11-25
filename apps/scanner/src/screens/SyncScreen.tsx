@@ -58,6 +58,18 @@ export function SyncScreen() {
           업로드 대기 {queue}건 · 연결되면 바로 다시 보냅니다
         </p>
       ) : null}
+      {liveSync?.stopped ? (
+        <p className={t ? "row t-md fw-b" : "row t-sm fw-b"} role="alert" style={{ gap: 6, alignItems: "flex-start", color: "var(--danger)" }}>
+          <i className="ic ic-ban ic-16" aria-hidden="true" style={t ? { marginTop: 3 } : undefined} />
+          기기 폐기 또는 등록 해제로 업로드를 멈췄습니다. 기록은 기기에 남아 있습니다.
+        </p>
+      ) : null}
+      {liveSync?.resyncRequired ? (
+        <p className={t ? "row t-md fw-b" : "row t-sm fw-b"} role="status" style={{ gap: 6, alignItems: "flex-start" }}>
+          <i className="ic ic-refresh ic-16" aria-hidden="true" style={t ? { marginTop: 3 } : undefined} />
+          다음 동기화에 전체 목록을 다시 받습니다.
+        </p>
+      ) : null}
       <span className="stat-meta">마지막 업로드 {lastUpload}</span>
     </div>
   );
