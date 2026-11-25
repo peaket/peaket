@@ -8,6 +8,44 @@ export type Genre = (typeof GENRES)[number];
 /** 판매 승인(POL-037, docs/planning/03 §2.14). 공연마다 하나다(ADR-0093 결정 7) */
 export type SaleReview = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
 
+/** 판매 승인 요청 때 저장한 휠체어석 확인·서버 재계산 값(LCH-090, data.md production.accessible_seating_check). 옛 행은 boolean일 수 있다 */
+export interface AccessibleSeatingRecord {
+  confirmed: boolean;
+  shortfallReason?: 'RELAXED_STANDARD' | 'RECOMMENDED_FACILITY' | 'NOT_USED_THIS_SHOW' | 'OTHER';
+  note?: string;
+  totalSeats: number | null;
+  wheelchairSeats: number | null;
+  requiredSeats: number | null;
+  locationCheckSeats: number | null;
+  onlineWheelchairSeats: number | null;
+}
+
+/**
+ * 저장 값(옛 boolean 또는 jsonb 객체)을 관제 응답 모양으로 바꾼다.
+ * 옛 true는 확인만 남은 값이고, false·빈 객체는 확인 전이다. 값이 없으면 null.
+ */
+export function accessibleSeatingOf(value: unknown): AccessibleSeatingRecord | null {
+  if (value === true) return { confirmed: true, totalSeats: null, wheelchairSeats: null, requiredSeats: null, locationCheckSeats: null, onlineWheelchairSeats: null };
+  if (value === false || value === null || value === undefined) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  if (v.confirmed !== true) return null;
+  const numberOrNull = (x: unknown): number | null => (typeof x === 'number' && Number.isSafeInteger(x) && x >= 0 ? x : null);
+  const reason = v.shortfallReason;
+  const shortfallReason =
+    reason === 'RELAXED_STANDARD' || reason === 'RECOMMENDED_FACILITY' || reason === 'NOT_USED_THIS_SHOW' || reason === 'OTHER' ? reason : undefined;
+  return {
+    confirmed: true,
+    ...(shortfallReason !== undefined ? { shortfallReason } : {}),
+    ...(typeof v.note === 'string' ? { note: v.note } : {}),
+    totalSeats: numberOrNull(v.totalSeats),
+    wheelchairSeats: numberOrNull(v.wheelchairSeats),
+    requiredSeats: numberOrNull(v.requiredSeats),
+    locationCheckSeats: numberOrNull(v.locationCheckSeats),
+    onlineWheelchairSeats: numberOrNull(v.onlineWheelchairSeats),
+  };
+}
+
 export interface Production {
   id: string;
   promoterId: string;
@@ -28,8 +66,10 @@ export interface Production {
   requestedArtists?: unknown[] | null;
   /** 등록 시각(목록 정렬 폴백, 메모리·DB를 같게, BAT-617 RV-06) */
   createdAt?: Date;
-  /** 판매 승인 요청 때 파트너가 확인한 휠체어석(FR-023, BAT-616) */
+  /** 판매 승인 요청 때 파트너가 확인했는지(FR-023, BAT-616). 옛 값과 호환한다 */
   accessibleSeatingCheck?: boolean;
+  /** 파트너 확인과 서버가 좌석맵으로 다시 센 값(LCH-090). 좌석맵 없이 확인만 했으면 수가 비어 있다 */
+  accessibleSeating?: AccessibleSeatingRecord;
 }
 
 /** 회차 상태(docs/data.md event.status) */
@@ -43,6 +83,9 @@ export interface CatalogEvent {
   openAt: Date;
   startsAt: Date;
   status: EventStatus;
+  /** 판매 승인 때 고정한 회차 결제사 지정(payment §2.2). 승인 전에는 없다 */
+  pgPrimary?: 'TOSS' | 'PORTONE';
+  pgFallback?: 'TOSS' | 'PORTONE';
 }
 
 /**

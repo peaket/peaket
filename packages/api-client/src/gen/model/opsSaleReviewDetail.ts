@@ -11,6 +11,7 @@
  */
 import type { OpsPayoutAccountSummary } from './opsPayoutAccountSummary';
 import type { OpsPgRegistration } from './opsPgRegistration';
+import type { OpsSaleReviewAccessibleSeating } from './opsSaleReviewAccessibleSeating';
 import type { OpsSaleReviewArtist } from './opsSaleReviewArtist';
 import type { OpsSaleReviewDetailSalePolicyItem } from './opsSaleReviewDetailSalePolicyItem';
 import type { OpsSaleReviewDetailStatus } from './opsSaleReviewDetailStatus';
@@ -41,10 +42,12 @@ export interface OpsSaleReviewDetail {
   /** 등록된 아티스트와 파트너가 요청한 새 이름을 보이는 순서대로 합친 목록(LCH-080 잔여). 승인 본문 artists로 요청 이름을 잇는다 */
   artists?: OpsSaleReviewArtist[];
   /**
-     * 파트너가 휠체어석 확인을 했는지
+     * 파트너가 휠체어석 확인을 했는지(호환 값)
      * @nullable
      */
   accessibleSeatingCheck?: boolean | null;
+  /** 파트너 확인과 서버가 좌석맵으로 다시 센 휠체어석 값(LCH-090). 아직 요청 전이면 null */
+  accessibleSeating?: OpsSaleReviewAccessibleSeating | null;
   /** 승인 이력이 있는 공연의 변경 재승인인지 */
   reapproval?: boolean;
   /** @nullable */

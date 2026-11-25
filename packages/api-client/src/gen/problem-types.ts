@@ -331,6 +331,7 @@ export type ProblemType =
   | 'sale-review-not-cancellable'
   | 'sale-review-not-submitted'
   | 'sale-review-payout-registration-incomplete'
+  | 'sale-review-pg-unavailable'
   | 'sale-review-place-missing'
   | 'sale-review-request-invalid'
   | 'sale-review-scales-missing'
@@ -743,6 +744,7 @@ export const PROBLEM_TYPES = {
   'sale-review-not-cancellable': { status: 409, title: "거둘 판매 승인 변경 요청이 없습니다" },
   'sale-review-not-submitted': { status: 409, title: "판매 승인 대기 중인 공연이 아닙니다" },
   'sale-review-payout-registration-incomplete': { status: 409, title: "지급대행 등록이 끝나지 않아 승인할 수 없습니다" },
+  'sale-review-pg-unavailable': { status: 422, title: "기본 결제사 채널이 꺼져 있어 승인할 수 없습니다" },
   'sale-review-place-missing': { status: 422, title: "새 공연장 요청은 연결할 공연장을 골라 주세요" },
   'sale-review-request-invalid': { status: 422, title: "판매 승인 요청을 받을 수 없습니다" },
   'sale-review-scales-missing': { status: 422, title: "모든 회차의 공연 규모를 정해 주세요" },

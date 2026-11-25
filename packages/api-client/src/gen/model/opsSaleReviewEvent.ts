@@ -9,6 +9,8 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { OpsSaleReviewEventPgFallback } from './opsSaleReviewEventPgFallback';
+import type { OpsSaleReviewEventPgPrimary } from './opsSaleReviewEventPgPrimary';
 import type { OpsSaleReviewEventScale } from './opsSaleReviewEventScale';
 import type { OpsSaleReviewEventStatus } from './opsSaleReviewEventStatus';
 
@@ -25,6 +27,16 @@ export interface OpsSaleReviewEvent {
      * @nullable
      */
   scale?: OpsSaleReviewEventScale;
+  /**
+     * 판매 승인 때 고정한 기본 결제사(R-T19). 승인 전이면 null
+     * @nullable
+     */
+  pgPrimary?: OpsSaleReviewEventPgPrimary;
+  /**
+     * 판매 승인 때 고정한 대체 결제사(R-T19). 없으면 null
+     * @nullable
+     */
+  pgFallback?: OpsSaleReviewEventPgFallback;
   /** GET /v1/ops/events/{eventId}/demand-forecast */
   demandForecastPath?: string;
 }

@@ -2,6 +2,7 @@
 // 공연마다 한 줄로 세워 잠금을 흉내 내고, 쓰기는 fn이 끝난 뒤에만 반영한다(던지면 버린다, DB 트랜잭션과 같게 답한다). 운영은 Drizzle 저장소다.
 import type { EventEditable, ListWrite, SaleEventRow, SaleOwnerView, SaleState, SaleStore, SaleTx } from '../domain/sale-ports.js';
 import { applyApproval, type SaleApprovalInput } from '../domain/sale-approval.js';
+import { accessibleSeatingOf } from '../domain/production.js';
 import { sellerInfoOf } from '../domain/promoter-contract.js';
 import { decodeSaleReviewCursor, encodeSaleReviewCursor, saleReviewSortKey, type OpsSaleReviewDetail, type OpsSaleReviewPage, type OpsSaleReviewQuery, type PartnerSaleReviewView } from '../domain/sale-review.js';
 import type { MemoryCatalogRepository } from './memory-catalog-repository.js';
@@ -145,6 +146,13 @@ export class MemorySaleStore implements SaleStore {
                 seatAssignment: e.seatAssignment,
                 perPersonLimit: e.perPersonLimit,
               });
+              // 이미 지정된 회차는 그대로 두고, 승인 입력이 채운 회차만 저장한다(applyApproval이 가른다)
+              const current = this.repo.events.get(e.eventId)!;
+              this.repo.events.set(e.eventId, {
+                ...current,
+                ...(e.pgPrimary !== undefined ? { pgPrimary: e.pgPrimary } : {}),
+                ...(e.pgFallback !== undefined ? { pgFallback: e.pgFallback } : {}),
+              });
               this.repo.eventVersions.set(e.eventId, e.version);
             }
             this.repo.eventChanges.delete(productionId);
@@ -158,7 +166,7 @@ export class MemorySaleStore implements SaleStore {
             this.repo.productions.set(productionId, { ...p, saleReview: 'REJECTED', rejectionReason: reason });
           });
         },
-        requestReview: async (body, now) => {
+        requestReview: async (body, now, accessible) => {
           writes.push(() => {
             const prev = this.repo.promoters.get(tenantId);
             this.repo.promoters.set(tenantId, {
@@ -177,7 +185,7 @@ export class MemorySaleStore implements SaleStore {
             });
             this.repo.sellerNames.set(tenantId, body.seller.legalName);
             const p = this.repo.productions.get(productionId)!;
-            this.repo.productions.set(productionId, { ...p, saleReview: 'SUBMITTED', saleSubmittedAt: now, rejectionReason: null, accessibleSeatingCheck: true });
+            this.repo.productions.set(productionId, { ...p, saleReview: 'SUBMITTED', saleSubmittedAt: now, rejectionReason: null, accessibleSeatingCheck: true, accessibleSeating: accessible });
           });
         },
         cancelReview: async () => {
@@ -329,13 +337,16 @@ export class MemorySaleStore implements SaleStore {
           .sort((a, b) => a.sortOrder - b.sortOrder || (a.name < b.name ? -1 : 1))
           .map((a) => ({ artistId: null, name: a.name })),
       ],
-      accessibleSeatingCheck: p.accessibleSeatingCheck ?? null,
+      accessibleSeatingCheck: (p.accessibleSeating ?? accessibleSeatingOf(p.accessibleSeatingCheck))?.confirmed ?? null,
+      accessibleSeating: p.accessibleSeating ?? accessibleSeatingOf(p.accessibleSeatingCheck),
       events: events.map((e) => ({
         eventId: e.id,
         openAt: e.openAt,
         startsAt: e.startsAt,
         status: e.status,
         ...(this.repo.eventScales.get(e.id) !== undefined ? { scale: this.repo.eventScales.get(e.id)! } : {}),
+        pgPrimary: e.pgPrimary ?? null,
+        pgFallback: e.pgFallback ?? null,
         demandForecastPath: `/v1/ops/events/${e.id}/demand-forecast`,
       })),
       suspensionApprovalPending: false,
@@ -361,7 +372,7 @@ export class MemorySaleStore implements SaleStore {
   }
 
   /** 회차를 시작 시각 차례로. 목록·파트너 현황은 취소 회차를 빼고, 관제 상세는 포함한다(계약 OpsSaleReviewEvent.status, RV-06) */
-  #events(productionId: string, includeCancelled = false): { id: string; openAt: Date; startsAt: Date; status: 'SCHEDULED' | 'CANCELLED' | 'POSTPONED' }[] {
+  #events(productionId: string, includeCancelled = false): { id: string; openAt: Date; startsAt: Date; status: 'SCHEDULED' | 'CANCELLED' | 'POSTPONED'; pgPrimary?: 'TOSS' | 'PORTONE'; pgFallback?: 'TOSS' | 'PORTONE' }[] {
     return [...this.repo.events.values()]
       .filter((e) => e.productionId === productionId && (includeCancelled || e.status !== 'CANCELLED'))
       .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime() || (a.id < b.id ? -1 : 1));
@@ -386,6 +397,8 @@ export class MemorySaleStore implements SaleStore {
       perPersonLimit: d?.perPersonLimit ?? draft?.perPersonLimit ?? 4,
       ...(this.repo.eventScales.get(eventId) !== undefined ? { scale: this.repo.eventScales.get(eventId) } : {}),
       ...(this.repo.eventCommissionRates.get(eventId) !== undefined ? { commissionRateBp: this.repo.eventCommissionRates.get(eventId) } : {}),
+      ...(e.pgPrimary !== undefined ? { pgPrimary: e.pgPrimary } : {}),
+      ...(e.pgFallback !== undefined ? { pgFallback: e.pgFallback } : {}),
     };
   }
 

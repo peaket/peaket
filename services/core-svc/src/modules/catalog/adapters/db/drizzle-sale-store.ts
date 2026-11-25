@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import type { Database, DbTransaction } from '@peaket/platform';
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
 import { and, asc, count, eq, getTableColumns, gt, gte, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
-import type { EventStatus, SaleReview } from '../../domain/production.js';
+import { accessibleSeatingOf, type EventStatus, type SaleReview } from '../../domain/production.js';
 import type { PendingEvent } from '../../domain/registration.js';
 import { destroyTime, listEventIds, MEMBER_CHUNK } from '../../domain/sale-eligibility.js';
 import type { EventEditable, ListWrite, MaintenanceList, PendingDrop, SaleEventRow, SaleMaintenanceStore, SaleOwnerView, SaleState, SaleStore, SaleTx, StoredList } from '../../domain/sale-ports.js';
@@ -85,6 +85,8 @@ const eventRow = (e: typeof event.$inferSelect & { commissionRateBp: number | nu
   entryClosedAt: e.entryClosedAt,
   ...(e.scale !== null ? { scale: e.scale as 'LARGE' | 'MEDIUM' | 'SMALL' } : {}),
   ...(e.commissionRateBp !== null ? { commissionRateBp: e.commissionRateBp } : {}),
+  ...(e.pgPrimary !== null ? { pgPrimary: e.pgPrimary as 'TOSS' | 'PORTONE' } : {}),
+  ...(e.pgFallback !== null ? { pgFallback: e.pgFallback as 'TOSS' | 'PORTONE' } : {}),
 });
 
 /**
@@ -397,7 +399,7 @@ export class DrizzleSaleStore implements SaleStore {
           place_id: string | null;
           requested_place: { name?: string } | null;
           requested_artists: { name?: string; sortOrder?: number }[] | null;
-          accessible_seating_check: boolean | null;
+          accessible_seating_check: unknown;
           place_name: string | null;
           legal_name: string;
           representative: string | null;
@@ -412,7 +414,7 @@ export class DrizzleSaleStore implements SaleStore {
       | undefined;
     if (!p) return undefined;
     const ev = await this.db.db.execute(sql`
-      select id, open_at, starts_at, status, scale
+      select id, open_at, starts_at, status, scale, pg_primary, pg_fallback
         from event
        where production_id = ${productionId}::uuid
        order by starts_at asc, id asc`);
@@ -453,13 +455,16 @@ export class DrizzleSaleStore implements SaleStore {
       placeName: p.place_name ?? (typeof p.requested_place?.name === 'string' ? p.requested_place.name : null),
       requestedPlace: p.place_id === null && p.requested_place !== null,
       artists: [...linked.map((a) => ({ artistId: a.artistId, name: a.name })), ...requested],
-      accessibleSeatingCheck: p.accessible_seating_check,
-      events: (ev.rows as { id: string; open_at: Date | string; starts_at: Date | string; status: EventStatus; scale: 'LARGE' | 'MEDIUM' | 'SMALL' | null }[]).map((e) => ({
+      accessibleSeatingCheck: accessibleSeatingOf(p.accessible_seating_check)?.confirmed ?? null,
+      accessibleSeating: accessibleSeatingOf(p.accessible_seating_check),
+      events: (ev.rows as { id: string; open_at: Date | string; starts_at: Date | string; status: EventStatus; scale: 'LARGE' | 'MEDIUM' | 'SMALL' | null; pg_primary: 'TOSS' | 'PORTONE' | null; pg_fallback: 'TOSS' | 'PORTONE' | null }[]).map((e) => ({
         eventId: e.id,
         openAt: new Date(e.open_at),
         startsAt: new Date(e.starts_at),
         status: e.status,
         ...(e.scale !== null ? { scale: e.scale } : {}),
+        pgPrimary: e.pg_primary,
+        pgFallback: e.pg_fallback,
         demandForecastPath: `/v1/ops/events/${e.id}/demand-forecast`,
       })),
       suspensionApprovalPending: false,
@@ -558,6 +563,8 @@ export class DrizzleSaleStore implements SaleStore {
                 perPersonLimit: e.perPersonLimit,
                 version: e.version,
                 ...(e.scale !== undefined ? { scale: e.scale } : {}),
+                ...(e.pgPrimary !== undefined ? { pgPrimary: e.pgPrimary } : {}),
+                ...(e.pgFallback !== undefined ? { pgFallback: e.pgFallback } : {}),
               })
               .where(and(eq(event.id, e.eventId), eq(event.productionId, p.id), eq(event.promoterId, tenantId)));
             if (e.commissionRateBp !== undefined) {
@@ -581,6 +588,8 @@ export class DrizzleSaleStore implements SaleStore {
               perPersonLimit: e.perPersonLimit,
               version: e.version,
               ...(e.scale !== undefined ? { scale: e.scale } : {}),
+              ...(e.pgPrimary !== undefined ? { pgPrimary: e.pgPrimary } : {}),
+              ...(e.pgFallback !== undefined ? { pgFallback: e.pgFallback } : {}),
             });
             if (e.commissionRateBp !== undefined) {
               await tx.update(eventContractState).set({ commissionRateBp: e.commissionRateBp }).where(and(eq(eventContractState.id, e.eventId), eq(eventContractState.productionId, p.id), eq(eventContractState.promoterId, tenantId)));
@@ -612,7 +621,7 @@ export class DrizzleSaleStore implements SaleStore {
       reject: async (reason, _now) => {
         await tx.update(production).set({ saleReview: 'REJECTED', rejectionReason: reason }).where(mineProduction);
       },
-      requestReview: async (body, now) => {
+      requestReview: async (body, now, accessible) => {
         // 판매자 정보는 promoter의 마지막 값으로 덮는다. verified_at(운영자 확인 시각)은 바꾸지 않는다(settlement §3)
         await tx
           .update(promoter)
@@ -627,7 +636,7 @@ export class DrizzleSaleStore implements SaleStore {
             exemptionBasis: body.seller.exemptionBasis ?? null,
           })
           .where(eq(promoter.id, tenantId));
-        await tx.update(production).set({ saleReview: 'SUBMITTED', saleSubmittedAt: now, rejectionReason: null, accessibleSeatingCheck: true }).where(mineProduction);
+        await tx.update(production).set({ saleReview: 'SUBMITTED', saleSubmittedAt: now, rejectionReason: null, accessibleSeatingCheck: accessible }).where(mineProduction);
       },
       cancelReview: async () => {
         await tx.update(production).set({ pendingRevision: null, saleReview: 'APPROVED', saleSubmittedAt: null, rejectionReason: null }).where(mineProduction);

@@ -5,7 +5,10 @@
 // 공연은 SUBMITTED가 되지 않는다. 계좌번호 원문은 이 요청 안에서 payment로만 넘기고 core의 저장 행·감사·로그·Outbox에 넣지 않는다.
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger, ProblemError } from '@peaket/platform';
+import { wheelchairSummaryOf } from '@peaket/validation/seatmap-checks';
 import { OPS_SALE_STORE, SALE_STORE, type SaleStore } from '../domain/sale-ports.js';
+import { SEATMAP_LAYOUT_STORE, type SeatmapLayoutStore } from '../domain/seatmap-ports.js';
+import type { AccessibleSeatingRecord } from '../domain/production.js';
 import { businessTypeOf, PAYOUT_REGISTRATION, type PayoutRegistrationPort } from '../domain/payout-registration-port.js';
 import { payoutRegistrationOf } from './payout-registration-view.js';
 import { decodeSaleReviewCursor, isSaleReviewFilterStatus, type OpsSaleReviewDetail, type OpsSaleReviewPage, type OpsSaleReviewQuery, type PartnerSaleReviewView, SaleReviewProblem, validateSaleReviewRequest } from '../domain/sale-review.js';
@@ -27,6 +30,7 @@ export class RequestSaleReview {
     @Inject(SALE_STORE) private readonly store: SaleStore,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(PAYOUT_REGISTRATION) private readonly payout: PayoutRegistrationPort,
+    @Optional() @Inject(SEATMAP_LAYOUT_STORE) private readonly layouts?: SeatmapLayoutStore,
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: Pick<PlatformLogger, 'info'>,
   ) {}
 
@@ -37,6 +41,32 @@ export class RequestSaleReview {
     if (!st.production.hasPlace) throw new SaleReviewProblem('sale-review-request-invalid', 422, '등록 공연장이나 새 공연장 요청이 필요합니다');
     if (!st.events.some((e) => e.status !== 'CANCELLED')) throw new SaleReviewProblem('sale-review-request-invalid', 422, '판매 승인을 요청하려면 회차가 하나 이상 필요합니다');
     return false;
+  }
+
+  /**
+   * 파트너 확인과 서버가 저장된 좌석맵으로 다시 센 휠체어석 값(FR-023, LCH-090, d5 §6.5).
+   * 좌석맵이 없거나 읽지 못하면 수는 비우고 확인·부족 이유만 남긴다. 이 실패가 판매 승인 요청을 막지는 않는다.
+   */
+  private async seating(q: RequestSaleReviewInput): Promise<AccessibleSeatingRecord> {
+    const body = q.body.accessibleSeating;
+    const base = {
+      confirmed: body.confirmed,
+      ...(body.shortfallReason !== undefined ? { shortfallReason: body.shortfallReason } : {}),
+      ...(body.note !== undefined ? { note: body.note } : {}),
+      totalSeats: null,
+      wheelchairSeats: null,
+      requiredSeats: null,
+      locationCheckSeats: null,
+      onlineWheelchairSeats: null,
+    } satisfies AccessibleSeatingRecord;
+    try {
+      const current = await this.layouts?.current(q.productionId, q.tenantId);
+      if (!current || current === 'not-found') return base;
+      return { ...base, ...wheelchairSummaryOf(current.doc.sections) };
+    } catch (err) {
+      this.logger?.info({ event: 'sale_review_seating_unread', productionId: q.productionId, err: (err as Error).name }, '휠체어석을 좌석맵으로 다시 세지 못해 확인만 저장한다');
+      return base;
+    }
   }
 
   /** 지급대행 등록(payment). 포트원 플랫폼이 꺼져 있으면 payment가 모양만 보고 holderChecked false를 답한다 */
@@ -59,11 +89,12 @@ export class RequestSaleReview {
       const before = await this.store.read(q.productionId, q.tenantId);
       if (!before) throw notFound();
       if (RequestSaleReview.check(before)) return { status: 'SUBMITTED' };
+      const accessible = await this.seating(q);
       await this.register(q);
       const out = await this.store.withLockedProduction(q.productionId, q.tenantId, async (tx) => {
         const st = await tx.state();
         if (RequestSaleReview.check(st)) return { status: 'SUBMITTED' as const };
-        await tx.requestReview(q.body, new Date(this.clock.now()));
+        await tx.requestReview(q.body, new Date(this.clock.now()), accessible);
         return { status: 'SUBMITTED' as const };
       });
       if (out === 'not-found') throw notFound();

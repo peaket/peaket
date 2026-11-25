@@ -4,6 +4,16 @@
 import type { SaleEventRow, SaleState } from './sale-ports.js';
 
 export type ShowScale = 'LARGE' | 'MEDIUM' | 'SMALL';
+export type PgName = 'TOSS' | 'PORTONE';
+
+/** 승인 때 회차에 고정할 플랫폼 기본 결제사(payment §2.2, ADR-0062 결정 33). 운영 main.ts가 환경 값으로 넘긴다 */
+export interface PgDefaults {
+  primary: PgName;
+  fallback?: PgName;
+}
+
+/** 플랫폼 기본 결제사 주입 토큰. 없으면(메모리 시험 조립) 결제사 칸을 쓰지 않고 채널 확인도 하지 않는다 */
+export const PG_DEFAULTS = Symbol('PG_DEFAULTS');
 
 export interface SaleApprovalInput {
   now: Date;
@@ -19,6 +29,8 @@ export interface SaleApprovalInput {
   accessibleSeatingCheck?: boolean;
   /** 승인 트랜잭션 안에서 읽은 그 파트너의 지금 계약 수수료율(만분율). 계약이 없으면 없다 */
   commissionRateBp?: number;
+  /** 지정이 빈 회차에 채울 플랫폼 기본 결제사(그 시점 값). 없으면 결제사 칸을 쓰지 않는다 */
+  pgDefaults?: PgDefaults;
 }
 
 /**
@@ -32,6 +44,13 @@ export function applyApproval(st: SaleState, input: SaleApprovalInput): SaleStat
   const firstApproval = st.production.saleApprovedAt === null;
   const rate = input.commissionRateBp;
   const withRate = (e: SaleEventRow): Partial<SaleEventRow> => (rate === undefined ? {} : e.commissionRateBp === undefined && firstApproval ? { commissionRateBp: rate } : {});
+  // 결제사 지정은 회차 칸이고 판매 승인 뒤에는 비지 않는다(payment §2.2, ADR-0062 결정 33).
+  // 이미 지정된 회차는 그대로 두고, 비어 있는 회차(첫 승인·새로 더한 회차)에만 그 시점 기본값을 쓴다
+  const pg = input.pgDefaults;
+  const withPg = (e: Pick<SaleEventRow, 'pgPrimary' | 'pgFallback'>): Partial<SaleEventRow> => {
+    if (pg === undefined || e.pgPrimary !== undefined) return {};
+    return { pgPrimary: pg.primary, ...(pg.fallback !== undefined && pg.fallback !== pg.primary ? { pgFallback: pg.fallback } : {}) };
+  };
   const events = st.events
     .map((e) => {
       const change = st.eventChanges[e.eventId] ?? {};
@@ -42,6 +61,7 @@ export function applyApproval(st: SaleState, input: SaleApprovalInput): SaleStat
         version: e.version + 1,
         ...(scale !== undefined ? { scale } : {}),
         ...withRate(e),
+        ...withPg(e),
       } as SaleEventRow;
     })
     .concat(
@@ -61,6 +81,7 @@ export function applyApproval(st: SaleState, input: SaleApprovalInput): SaleStat
         perPersonLimit: e.perPersonLimit,
         ...(scaleOf.get(e.eventId) !== undefined ? { scale: scaleOf.get(e.eventId) } : {}),
         ...(rate !== undefined ? { commissionRateBp: rate } : {}),
+        ...withPg({}),
       })),
     )
     .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime() || (a.eventId < b.eventId ? -1 : 1));

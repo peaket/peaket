@@ -17,6 +17,8 @@ export const OpsSaleReviewEvent = zod.object({
   "startsAt": zod.iso.datetime({"offset":true}).optional(),
   "status": zod.enum(['SCHEDULED', 'CANCELLED', 'POSTPONED']).optional(),
   "scale": zod.union([zod.literal('LARGE'),zod.literal('MEDIUM'),zod.literal('SMALL'),zod.literal(null)]).nullish().describe('판매 승인 때 정한 규모. 승인 전이면 null'),
+  "pgPrimary": zod.union([zod.literal('TOSS'),zod.literal('PORTONE'),zod.literal(null)]).nullish().describe('판매 승인 때 고정한 기본 결제사(R-T19). 승인 전이면 null'),
+  "pgFallback": zod.union([zod.literal('TOSS'),zod.literal('PORTONE'),zod.literal(null)]).nullish().describe('판매 승인 때 고정한 대체 결제사(R-T19). 없으면 null'),
   "demandForecastPath": zod.string().optional().describe('GET /v1/ops/events/{eventId}/demand-forecast')
 }).describe('판매 승인 확인 패널의 회차 한 줄(SCR-048). 수요 예측은 링크로 가리킨다')
 

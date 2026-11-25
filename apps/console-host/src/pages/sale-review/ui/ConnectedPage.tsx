@@ -10,18 +10,25 @@ import { useChosenRole, usePreviewHost } from '@/features/preview-host';
 import { ensureConsoleApi } from '@/shared/api';
 import { Overlay } from '@/shared/ui/Overlay';
 import {
+  accessibleSeatingLabel,
   canAct,
   canRead,
+  demandForecastLabel,
   formatKst,
   initialScales,
   linkageBody,
+  mapDemandForecast,
   mapSaleReviewDetail,
   mapSaleReviewList,
   saleReviewProblem,
+  scaleChangeBody,
+  scaleProblem,
+  scaleRaiseIssues,
   statusLabel,
   validateApproval,
   validateLinkage,
   validateRejection,
+  type DemandForecastSummary,
   type ResolvedLinkage,
   type SaleReviewDetail,
   type SaleReviewPage,
@@ -70,6 +77,11 @@ export function ConnectedPage() {
   const [placeItems, setPlaceItems] = useState<{ placeId: string; name: string; address: string }[]>([]);
   const [createPlaceOpen, setCreatePlaceOpen] = useState(false);
   const [newPlace, setNewPlace] = useState({ name: '', address: '', region: '', reason: '' });
+  /** 회차별 수요 예측(SCR-048, ADR-0078). 읽지 못한 회차는 null이다 */
+  const [forecasts, setForecasts] = useState<Record<string, DemandForecastSummary | null>>({});
+  const [raiseFor, setRaiseFor] = useState<{ eventId: string; current: ShowScale } | null>(null);
+  const [raiseScale, setRaiseScale] = useState<ShowScale | ''>('');
+  const [raiseReason, setRaiseReason] = useState('');
 
   const write = canAct(chosen);
   const read = canRead(chosen);
@@ -87,6 +99,29 @@ export function ConnectedPage() {
     },
     [chosen, filter, productionId],
   );
+
+  const loadForecasts = useCallback(async (eventIds: readonly string[]) => {
+    if (eventIds.length === 0) {
+      setForecasts({});
+      return;
+    }
+    try {
+      const [{ getOpsEventDemandForecast }] = await Promise.all([import('@peaket/api-client/endpoints/ops')]);
+      const rows = await Promise.all(
+        eventIds.map(async (eventId) => {
+          try {
+            const r = await getOpsEventDemandForecast(eventId);
+            return [eventId, mapDemandForecast(r.data)] as const;
+          } catch {
+            return [eventId, null] as const;
+          }
+        }),
+      );
+      setForecasts(Object.fromEntries(rows));
+    } catch {
+      setForecasts(Object.fromEntries(eventIds.map((id) => [id, null])));
+    }
+  }, []);
 
   const load = useCallback(async () => {
     if (!ensureConsoleApi()) {
@@ -106,8 +141,10 @@ export function ConnectedPage() {
         setDetail(mapped);
         setScales(initialScales(mapped.events));
         setResolved({ artists: {}, placeId: mapped.placeId });
+        void loadForecasts(mapped.events.map((e) => e.eventId));
       } else {
         setDetail(null);
+        setForecasts({});
       }
       setScreen({ kind: 'ready' });
     } catch (e) {
@@ -120,7 +157,7 @@ export function ConnectedPage() {
         setScreen({ kind: 'error', message: p.message });
       }
     }
-  }, [filter, productionId]);
+  }, [filter, productionId, loadForecasts]);
 
   useEffect(() => {
     void load();
@@ -238,6 +275,32 @@ export function ConnectedPage() {
       setConfirm(null);
       setNotice({ tone: 'bad', text: problem.message });
       if (problem.kind === 'forbidden') setScreen({ kind: 'forbidden' });
+      if (problem.reload) await load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitRaise = async () => {
+    if (!raiseFor || busy || !write) return;
+    const issues = scaleRaiseIssues(raiseFor.current, raiseScale === '' ? null : raiseScale, raiseReason);
+    if (issues.length > 0 || raiseScale === '') {
+      setNotice({ tone: 'bad', text: issues[0] ?? '올릴 규모를 골라 주세요' });
+      return;
+    }
+    setBusy(true);
+    setNotice(null);
+    try {
+      const [{ createOpsEventScaleChange }] = await Promise.all([import('@peaket/api-client/endpoints/ops')]);
+      await createOpsEventScaleChange(raiseFor.eventId, scaleChangeBody(raiseFor.eventId, raiseScale === 'LARGE' ? 'LARGE' : 'MEDIUM', raiseReason));
+      setRaiseFor(null);
+      setRaiseScale('');
+      setRaiseReason('');
+      setNotice({ tone: 'ok', text: '규모를 올렸습니다. 동결 달력과 CDN 한도는 서버가 다시 계산합니다.' });
+      await load();
+    } catch (e) {
+      const problem = scaleProblem(e);
+      setNotice({ tone: 'bad', text: problem.message });
       if (problem.reload) await load();
     } finally {
       setBusy(false);
@@ -442,7 +505,8 @@ export function ConnectedPage() {
                       </button>
                     </>
                   ) : null}
-                  <p className="t-sm">휠체어석 확인: {detail.accessibleSeatingCheck === true ? '파트너 확인함' : detail.accessibleSeatingCheck === false ? '확인하지 않음' : '아직 없음'}</p>
+                  <p className="t-sm" data-accessible-check={String(detail.accessibleSeatingCheck)}>{accessibleSeatingLabel(detail.accessibleSeating)}</p>
+                  {detail.accessibleSeating?.shortfallReason ? <p className="t-xs muted">부족 이유: {detail.accessibleSeating.shortfallReason}{detail.accessibleSeating.note ? ` · ${detail.accessibleSeating.note}` : ''}</p> : null}
                 </div>
 
                 <div className="divider" />
@@ -480,11 +544,16 @@ export function ConnectedPage() {
                         <span className="t-sm">오픈 {formatKst(e.openAt)} · 시작 {formatKst(e.startsAt)}</span>
                         <span className="row" style={{ gap: 6 }}>
                           {e.status === 'CANCELLED' ? <span className="badge badge-danger">취소</span> : null}
-                          <a className="link" href={`${__OPS_API_ORIGIN__}${e.demandForecastPath}`} target="_blank" rel="noreferrer">
-                            수요 예측
-                          </a>
+                          {forecasts[e.eventId]?.raiseSuggested ? <span className="badge badge-warning">규모 올리기 검토</span> : null}
                         </span>
                       </div>
+                      <p className="t-xs muted">
+                        수요 예측: {forecasts[e.eventId] ? demandForecastLabel(forecasts[e.eventId]!) : '읽지 못했습니다'}
+                      </p>
+                      <p className="t-xs muted">
+                        결제사: {e.pgPrimary === 'TOSS' ? '토스페이먼츠' : e.pgPrimary === 'PORTONE' ? '포트원' : '승인 때 고정'}
+                        {e.pgFallback ? ` · 대체 ${e.pgFallback === 'TOSS' ? '토스페이먼츠' : '포트원'}` : ''}
+                      </p>
                       <fieldset className="row wrap" style={{ gap: 12, border: 0, padding: 0, margin: 0 }} disabled={!write || busy} aria-label={`회차 ${e.eventId} 규모`}>
                         <legend className="sr-only">회차 규모</legend>
                         {SCALES.map((s) => (
@@ -501,6 +570,21 @@ export function ConnectedPage() {
                           </label>
                         ))}
                       </fieldset>
+                      {detail.status === 'APPROVED' && e.status !== 'CANCELLED' && e.scale !== null && e.scale !== 'LARGE' ? (
+                        <button
+                          className="btn btn-outline btn-sm"
+                          type="button"
+                          disabled={!write || busy}
+                          onClick={() => {
+                            setRaiseFor({ eventId: e.eventId, current: e.scale! });
+                            setRaiseScale('');
+                            setRaiseReason('');
+                            setNotice(null);
+                          }}
+                        >
+                          규모 올리기
+                        </button>
+                      ) : null}
                     </div>
                   ))}
                 </div>
@@ -614,6 +698,33 @@ export function ConnectedPage() {
             <div className="dialog-actions">
               <button className="btn btn-ghost" type="button" onClick={() => setCreatePlaceOpen(false)}>닫기</button>
               <button className="btn btn-primary" type="button" disabled={busy} onClick={() => void createPlace()}>만들고 연결</button>
+            </div>
+          </div>
+        </Overlay>
+      ) : null}
+
+      {raiseFor !== null ? (
+        <Overlay onClose={() => setRaiseFor(null)}>
+          <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="sr-raise-t">
+            <h2 className="dialog-title" id="sr-raise-t">회차 규모 올리기</h2>
+            <p className="t-sm">승인 뒤에는 T-30분 점검 전까지 올리기만 할 수 있습니다. 대형으로 올릴 때 다른 대형 공연과 30분 안이면 서버가 거절합니다.</p>
+            <div className="field">
+              <label className="label" htmlFor="sr-raise-scale">올릴 규모</label>
+              <select className="input" id="sr-raise-scale" value={raiseScale} disabled={busy} onChange={(e) => setRaiseScale(e.target.value as ShowScale | '')}>
+                <option value="">고르기</option>
+                {raiseFor.current === 'SMALL' ? <option value="MEDIUM">중형</option> : null}
+                <option value="LARGE">대형</option>
+              </select>
+            </div>
+            <div className="field">
+              <label className="label" htmlFor="sr-raise-reason">사유 <span className="opt">(필수)</span></label>
+              <textarea className="input" id="sr-raise-reason" maxLength={500} value={raiseReason} disabled={busy} onChange={(e) => setRaiseReason(e.target.value)} />
+            </div>
+            <div className="dialog-actions">
+              <button className="btn btn-ghost" type="button" onClick={() => setRaiseFor(null)}>닫기</button>
+              <button className="btn btn-primary" type="button" disabled={busy || scaleRaiseIssues(raiseFor.current, raiseScale === '' ? null : raiseScale, raiseReason).length > 0} onClick={() => void submitRaise()}>
+                {busy ? '올리는 중…' : '규모 올리기'}
+              </button>
             </div>
           </div>
         </Overlay>

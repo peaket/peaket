@@ -2,7 +2,7 @@
 // 파트너 경로는 행 보안 대상 사용자(core_partner)로 접속하고 트랜잭션에 테넌트를 건다. 조회에도 테넌트 조건을 넣는다(범위 인자, 행 보안은 2차 방어).
 // 쓰기는 공연 행을 FOR NO KEY UPDATE로 잡은 트랜잭션(등록·이미지·좌석맵과 같은 잠금) 안에서 한다.
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
-import type { EventStatus, SaleReview } from './production.js';
+import type { AccessibleSeatingRecord, EventStatus, SaleReview } from './production.js';
 import type { SaleApprovalInput } from './sale-approval.js';
 import type { ShowScale } from './demand-forecast.js';
 import type { PendingEvent } from './registration.js';
@@ -36,6 +36,9 @@ export interface SaleEventRow extends EventEditable {
   scale?: 'LARGE' | 'MEDIUM' | 'SMALL';
   /** 판매 승인 때 그 파트너의 지금 계약 수수료율을 고정한 값(만분율, ADR-0060·0320). 계약이 없으면 없다 */
   commissionRateBp?: number;
+  /** 판매 승인 때 고정한 회차 결제사 지정(payment §2.2, ADR-0062 결정 33). 승인 전에는 없다 */
+  pgPrimary?: 'TOSS' | 'PORTONE';
+  pgFallback?: 'TOSS' | 'PORTONE';
 }
 
 /** 저장한 명단 정보(구성원은 싣지 않는다) */
@@ -140,7 +143,7 @@ export interface SaleTx {
    * 판매 승인 요청(BAT-616, ADR-0327): 판매자 정보를 promoter에 쓰고 production을 SUBMITTED로, sale_submitted_at을 지금으로 쓴다.
    * 반려 사유는 지우고 휠체어석 확인을 남긴다. 같은 상태에서 다시 불러도 행·시각을 새로 만들지 않는다(부르는 쪽이 먼저 가른다).
    */
-  requestReview(body: SaleReviewRequestBody, now: Date): Promise<void>;
+  requestReview(body: SaleReviewRequestBody, now: Date, accessible: AccessibleSeatingRecord): Promise<void>;
   /**
    * 변경 취소(승인 이력이 있는 공연): pending_revision을 비우고 APPROVED로 돌아간다. sale_submitted_at·rejection_reason도 비운다.
    * 부를 수 있는 상태인지는 유스케이스가 먼저 본다.

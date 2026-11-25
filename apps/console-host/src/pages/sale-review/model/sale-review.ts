@@ -34,7 +34,36 @@ export interface SaleReviewEvent {
   startsAt: string;
   status: 'SCHEDULED' | 'CANCELLED' | 'POSTPONED';
   scale: ShowScale | null;
+  /** 판매 승인 때 고정한 결제사 지정(R-T19). 승인 전에는 null */
+  pgPrimary: 'TOSS' | 'PORTONE' | null;
+  pgFallback: 'TOSS' | 'PORTONE' | null;
   demandForecastPath: string;
+}
+
+/** 파트너 확인과 서버가 좌석맵으로 다시 센 휠체어석 값(LCH-090, d5 §6.5) */
+export interface AccessibleSeatingSummary {
+  confirmed: boolean;
+  shortfallReason: 'RELAXED_STANDARD' | 'RECOMMENDED_FACILITY' | 'NOT_USED_THIS_SHOW' | 'OTHER' | null;
+  note: string | null;
+  totalSeats: number | null;
+  wheelchairSeats: number | null;
+  requiredSeats: number | null;
+  locationCheckSeats: number | null;
+  onlineWheelchairSeats: number | null;
+}
+
+/** 수요 예측 응답의 화면 값(ADR-0078 결정 1) */
+export interface DemandForecastSummary {
+  subscribers: number;
+  ratioMedian: number;
+  ratioUpper: number;
+  sampleCount: number;
+  defaultRatioUsed: boolean;
+  expectedMedian: number;
+  expectedUpper: number;
+  suggestedScale: ShowScale;
+  currentScale: ShowScale | null;
+  raiseSuggested: boolean;
 }
 export interface SellerInfo {
   legalName: string;
@@ -63,6 +92,7 @@ export interface SaleReviewDetail {
   /** 등록 아티스트와 파트너가 요청한 새 이름(artistId null)을 보이는 순서대로 합친 목록 */
   artists: SaleReviewArtist[];
   accessibleSeatingCheck: boolean | null;
+  accessibleSeating: AccessibleSeatingSummary | null;
   salePolicy: unknown[];
   events: SaleReviewEvent[];
   suspensionApprovalPending: boolean;
@@ -121,6 +151,38 @@ export function mapArtists(raw: unknown): SaleReviewArtist[] {
   });
 }
 
+/** 휠체어석 요약(LCH-090). 없거나 모양이 다르면 null이고, 화면은 확인 여부만 보인다 */
+export function mapAccessibleSeating(raw: unknown): AccessibleSeatingSummary | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.confirmed !== 'boolean') return null;
+  const n = (x: unknown): number | null => (typeof x === 'number' && Number.isSafeInteger(x) && x >= 0 ? x : null);
+  const reason = r.shortfallReason;
+  const shortfallReason =
+    reason === 'RELAXED_STANDARD' || reason === 'RECOMMENDED_FACILITY' || reason === 'NOT_USED_THIS_SHOW' || reason === 'OTHER' ? reason : null;
+  return {
+    confirmed: r.confirmed,
+    shortfallReason,
+    note: typeof r.note === 'string' ? r.note : null,
+    totalSeats: n(r.totalSeats),
+    wheelchairSeats: n(r.wheelchairSeats),
+    requiredSeats: n(r.requiredSeats),
+    locationCheckSeats: n(r.locationCheckSeats),
+    onlineWheelchairSeats: n(r.onlineWheelchairSeats),
+  };
+}
+
+/** 휠체어석 한 줄(예 "휠체어석 2석(기준 3석 이상) · 위치 확인 1석 · 온라인 1석 · 파트너 확인함") */
+export function accessibleSeatingLabel(s: AccessibleSeatingSummary | null): string {
+  if (s === null) return '휠체어석 확인: 아직 없음';
+  if (s.wheelchairSeats === null || s.requiredSeats === null) return `휠체어석 확인: ${s.confirmed ? '파트너 확인함' : '확인하지 않음'}`;
+  const parts = [`휠체어석 ${s.wheelchairSeats}석(기준 ${s.requiredSeats}석 이상)`];
+  if (s.locationCheckSeats !== null && s.locationCheckSeats > 0) parts.push(`위치 확인 ${s.locationCheckSeats}석`);
+  if (s.onlineWheelchairSeats !== null) parts.push(`온라인 ${s.onlineWheelchairSeats}석`);
+  parts.push(s.confirmed ? '파트너 확인함' : '확인하지 않음');
+  return parts.join(' · ');
+}
+
 /** 상세의 지급대행 등록 읽기(F-07-7). 없거나 모양이 다르면 null로 두고 화면이 '읽지 못함'을 적는다 */
 export function mapPayout(raw: Record<string, unknown>): Pick<SaleReviewDetail, 'payoutAccount' | 'pgRegistration'> {
   const a = raw.payoutAccount as Record<string, unknown> | null | undefined;
@@ -173,6 +235,7 @@ export function mapSaleReviewDetail(raw: Record<string, unknown>): SaleReviewDet
     requestedPlace: raw.requestedPlace === true,
     artists: mapArtists(raw.artists),
     accessibleSeatingCheck: typeof raw.accessibleSeatingCheck === 'boolean' ? raw.accessibleSeatingCheck : null,
+    accessibleSeating: mapAccessibleSeating(raw.accessibleSeating),
     ...mapPayout(raw),
     salePolicy: Array.isArray(raw.salePolicy) ? raw.salePolicy : [],
     events: (Array.isArray(raw.events) ? raw.events : []).map((e) => {
@@ -184,6 +247,8 @@ export function mapSaleReviewDetail(raw: Record<string, unknown>): SaleReviewDet
         startsAt: S(x.startsAt),
         status: (S(x.status, 'SCHEDULED') as SaleReviewEvent['status']),
         scale,
+        pgPrimary: x.pgPrimary === 'TOSS' || x.pgPrimary === 'PORTONE' ? x.pgPrimary : null,
+        pgFallback: x.pgFallback === 'TOSS' || x.pgFallback === 'PORTONE' ? x.pgFallback : null,
         demandForecastPath: S(x.demandForecastPath, `/v1/ops/events/${S(x.eventId)}/demand-forecast`),
       };
     }),
@@ -270,6 +335,90 @@ export function placeOptions(items: readonly { placeId: string; name: string; ad
   return items.map((p) => ({ value: p.placeId, label: `${p.name} · ${p.address}` }));
 }
 
+/** 수요 예측 응답(ADR-0078 결정 1). 모르는 모양이면 null이고 화면은 '읽지 못함'을 적는다 */
+export function mapDemandForecast(raw: unknown): DemandForecastSummary | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const num = (x: unknown): number | null => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? x : null);
+  const subscribers = num(r.subscribers);
+  const expectedMedian = num(r.expectedMedian);
+  const expectedUpper = num(r.expectedUpper);
+  const scale = (x: unknown): ShowScale | null => (x === 'LARGE' || x === 'MEDIUM' || x === 'SMALL' ? x : null);
+  const suggestedScale = scale(r.suggestedScale);
+  if (subscribers === null || expectedMedian === null || expectedUpper === null || suggestedScale === null) return null;
+  return {
+    subscribers,
+    ratioMedian: num(r.ratioMedian) ?? 0,
+    ratioUpper: num(r.ratioUpper) ?? 0,
+    sampleCount: num(r.sampleCount) ?? 0,
+    defaultRatioUsed: r.defaultRatioUsed === true,
+    expectedMedian,
+    expectedUpper,
+    suggestedScale,
+    currentScale: scale(r.currentScale),
+    raiseSuggested: r.raiseSuggested === true,
+  };
+}
+
+/** 예측 한 줄(예 "구독 120 · 예상 240~360명 · 표본 0회(기본 비율) · 제안 소형") */
+export function demandForecastLabel(f: DemandForecastSummary): string {
+  const scale = { LARGE: '대형', MEDIUM: '중형', SMALL: '소형' } as const;
+  const sample = f.defaultRatioUsed ? `표본 ${f.sampleCount}회(기본 비율)` : `표본 ${f.sampleCount}회`;
+  return `구독 ${f.subscribers} · 예상 ${f.expectedMedian}~${f.expectedUpper}명 · ${sample} · 제안 ${scale[f.suggestedScale]}`;
+}
+
+/** 규모 올리기 화면 막힘. 서버가 같은 규칙을 다시 보고, 화면은 이유를 먼저 보인다(ADR-0078) */
+export function scaleRaiseIssues(current: ShowScale | null | undefined, next: ShowScale | null, reason: string): string[] {
+  const issues: string[] = [];
+  if (next === null || next === undefined) issues.push('올릴 규모를 골라 주세요');
+  else if (next === 'SMALL' || current === null || current === undefined || scaleRankOf(next) <= scaleRankOf(current)) issues.push('지금보다 큰 규모만 올릴 수 있습니다');
+  const value = reason.trim();
+  if (value === '') issues.push('사유를 적어 주세요');
+  else if (value.length > 500) issues.push('사유는 500자까지 적을 수 있습니다');
+  return issues;
+}
+
+function scaleRankOf(s: ShowScale): number {
+  return s === 'LARGE' ? 2 : s === 'MEDIUM' ? 1 : 0;
+}
+
+/** 규모 올리기 본문(openapi createOpsEventScaleChange). 올리기는 LARGE·MEDIUM만 받는다 */
+export function scaleChangeBody(_eventId: string, scale: 'MEDIUM' | 'LARGE', reason: string, intervalException = false) {
+  return {
+    scale,
+    reason: reason.trim(),
+    ...(intervalException ? { intervalException: true } : {}),
+  };
+}
+
+export type SuspensionReasonCode = 'SELLER_IDENTITY' | 'LEGAL_REQUEST' | 'FRAUD_SUSPECTED' | 'OTHER';
+
+/**
+ * 판매 중지·재개 요청(ADR-0123 결정 2, SCR-048). 회차마다 나누는 운영 명령이지만 같은 참조(suspensionRef)를 써
+ * 두 번째 사람이 승인할 때 한 업무로 묶인다. 이번에는 모델·시험만 두고 화면 단추는 다음 몫이다.
+ */
+export function saleSuspensionCommand(
+  detail: SaleReviewDetail,
+  kind: 'SALE_STOP' | 'SALE_RESUME',
+  reasonCode: SuspensionReasonCode,
+  reason: string,
+): { commands: { type: 'SALE_STOP' | 'SALE_RESUME'; reason: string; params: { eventId: string; reasonCode: SuspensionReasonCode; suspensionRef: string } }[]; issues: string[] } {
+  const issues: string[] = [];
+  const value = reason.trim();
+  if (value === '') issues.push('사유를 적어 주세요');
+  else if (value.length > 1_000) issues.push('사유는 1,000자까지 적을 수 있습니다');
+  if (kind === 'SALE_STOP' && detail.status !== 'APPROVED') issues.push('승인된 공연만 판매 중지를 요청할 수 있습니다');
+  if (kind === 'SALE_RESUME' && detail.status !== 'SUSPENDED') issues.push('판매 중지된 공연만 판매 재개를 요청할 수 있습니다');
+  const events = detail.events.filter((e) => e.status !== 'CANCELLED');
+  if (events.length === 0) issues.push('판매 중지·재개할 회차가 없습니다');
+  if (issues.length > 0) return { commands: [], issues };
+  const suspensionRef = crypto.randomUUID();
+  return {
+    commands: events.map((e) => ({ type: kind, reason: value, params: { eventId: e.eventId, reasonCode, suspensionRef } })),
+    issues: [],
+  };
+}
+
 export function validateRejection(reason: string): string | null {
   const value = reason.trim();
   if (value === '') return '반려 사유를 적어 주세요';
@@ -301,6 +450,19 @@ export function saleReviewProblem(e: unknown): { kind: SaleReviewProblemKind; me
   if (p.status === 503) return { kind: 'server', message: '지급 서비스에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', reload: false };
   if (typeof p.status === 'number' && p.status >= 500) return { kind: 'server', message: '서버가 잠시 응답하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', reload: false };
   return { kind: 'unknown', message: '요청을 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.', reload: false };
+}
+
+/** 규모 올리기 오류 문구(ADR-0078). 승인 오류와 달리 '파트너에게 반려'가 아니라 운영자가 다시 고른다 */
+export function scaleProblem(e: unknown): { message: string; reload: boolean } {
+  const p = (typeof e === 'object' && e !== null ? e : {}) as ProblemLike;
+  if (p.status === 403) return { message: '규모 올리기는 operator·commander만 할 수 있습니다. 간격 예외는 commander만 할 수 있습니다.', reload: false };
+  if (p.status === 404) return { message: '회차를 찾을 수 없습니다. 화면을 새로 고칩니다.', reload: true };
+  if (p.status === 409 && p.type === 'open-interval-conflict') return { message: '다른 대형 공연과 오픈 30분 안입니다. commander가 간격 예외로 올릴 수 있습니다.', reload: false };
+  if (p.status === 409 && p.type === 'scale-change-closed') return { message: 'T-30분 점검이 시작되어 규모를 올릴 수 없습니다.', reload: true };
+  if (p.status === 422) return { message: '지금보다 큰 규모와 1~500자 사유를 확인해 주세요.', reload: false };
+  if (p.status === 503) return { message: '서버가 잠시 응답하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', reload: false };
+  if (typeof p.status === 'number' && p.status >= 500) return { message: '서버가 잠시 응답하지 못했습니다. 잠시 뒤 다시 시도해 주세요.', reload: false };
+  return { message: '규모를 올리지 못했습니다. 잠시 뒤 다시 시도해 주세요.', reload: false };
 }
 
 /** operator·commander만 승인·반려한다. 역할을 모르면(실제 세션) 서버 판정에 맡기고 true다 */

@@ -6,7 +6,7 @@
 // 판매자 확인은 같은 값이면 멱등이라, 그 뒤 승인 쓰기가 실패해 다시 승인해도 안전하다.
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, type PlatformLogger, ProblemError } from '@peaket/platform';
-import type { SaleApprovalInput, ShowScale } from '../domain/sale-approval.js';
+import { PG_DEFAULTS, type PgDefaults, type SaleApprovalInput, type ShowScale } from '../domain/sale-approval.js';
 import { eligibleListKeys } from '../domain/event-sale-config.js';
 import { CDN_INVALIDATION, type CdnInvalidation } from '../domain/media-ports.js';
 import { missingPayoutConditions, PAYOUT_REGISTRATION, PAYOUT_REGISTRATION_UNWIRED, type PayoutRegistrationPort } from '../domain/payout-registration-port.js';
@@ -37,6 +37,8 @@ export class ApproveSaleReview {
     @Optional() @Inject(PAYOUT_REGISTRATION) private readonly payout: PayoutRegistrationPort = PAYOUT_REGISTRATION_UNWIRED,
     /** 없으면(직접 조립한 시험) 아티스트 존재·공연장 사용 가능 검사를 건너뛴다(이름·필수 검사는 그대로) */
     @Optional() @Inject(OPS_CATALOG_STORE) private readonly catalog?: OpsCatalogStore,
+    /** 없으면(메모리 시험 조립) 결제사 칸을 쓰지 않고 채널 확인도 건너뛴다. 운영 조립은 늘 넘긴다 */
+    @Optional() @Inject(PG_DEFAULTS) private readonly pgDefaults?: PgDefaults,
   ) {}
 
   async run(q: ApproveSaleReviewInput): Promise<{ applied: true; events: number }> {
@@ -49,7 +51,14 @@ export class ApproveSaleReview {
       await this.checkLinks(before, q, true);
     }
     await this.checkPayout(q.productionId, tenantId);
-    const input: SaleApprovalInput = { now: new Date(this.clock.now()), scales: q.scales, ...(q.placeId !== undefined ? { placeId: q.placeId } : {}), ...(q.artists !== undefined ? { artists: q.artists } : {}), ...(q.accessibleSeatingCheck !== undefined ? { accessibleSeatingCheck: q.accessibleSeatingCheck } : {}) };
+    const input: SaleApprovalInput = {
+      now: new Date(this.clock.now()),
+      scales: q.scales,
+      ...(q.placeId !== undefined ? { placeId: q.placeId } : {}),
+      ...(q.artists !== undefined ? { artists: q.artists } : {}),
+      ...(q.accessibleSeatingCheck !== undefined ? { accessibleSeatingCheck: q.accessibleSeatingCheck } : {}),
+      ...(this.pgDefaults !== undefined ? { pgDefaults: this.pgDefaults } : {}),
+    };
     const out = await this.store.withScaleChangeLock(tenantId, () =>
       this.store.withLockedProduction(q.productionId, tenantId, async (tx) => {
         const st = await tx.state();
@@ -131,6 +140,11 @@ export class ApproveSaleReview {
     const missing = missingPayoutConditions(view);
     if (missing.length > 0) {
       throw new ProblemError({ type: 'sale-review-payout-registration-incomplete', status: 409, title: '지급대행 등록이 끝나지 않아 승인할 수 없습니다', extensions: { missing } });
+    }
+    // 승인 때 고정할 기본 결제사의 채널이 꺼져 있으면 승인하지 않는다(R-T19, payment §2.2, ADR-0062 결정 33)
+    const pg = this.pgDefaults;
+    if (pg !== undefined && ((pg.primary === 'TOSS' && !view.tossEnabled) || (pg.primary === 'PORTONE' && !view.portoneEnabled))) {
+      throw new ProblemError({ type: 'sale-review-pg-unavailable', status: 422, title: '기본 결제사 채널이 꺼져 있어 승인할 수 없습니다' });
     }
     const detail = await this.store.opsReviewDetail(productionId);
     if (!detail) throw notFound();

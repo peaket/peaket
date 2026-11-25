@@ -596,6 +596,7 @@ export * from './opsReadinessItem.zod.js';
 export * from './opsReadinessPreview.zod.js';
 export * from './opsReauthPasswordStep.zod.js';
 export * from './opsReviewDetail.zod.js';
+export * from './opsSaleReviewAccessibleSeating.zod.js';
 export * from './opsSaleReviewArtist.zod.js';
 export * from './opsSaleReviewDetail.zod.js';
 export * from './opsSaleReviewEvent.zod.js';

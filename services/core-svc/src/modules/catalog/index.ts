@@ -80,6 +80,7 @@ export { CATALOG_REPOSITORY, type CatalogRepository } from './domain/ports.js';
 export { GetDemandForecast } from './application/demand-forecast.js';
 export { ChangeEventScale } from './application/change-event-scale.js';
 export { forecastDemand, medianAndUpper, suggestedScaleOf, DEFAULT_RATIO_MEDIAN, DEFAULT_RATIO_UPPER, MIN_FORECAST_SAMPLE, type DemandForecast as DemandForecastView, type ForecastHistoryRow, type ForecastTrigger, type ShowScale } from './domain/demand-forecast.js';
+export { applyApproval, PG_DEFAULTS, type PgDefaults, type PgName } from './domain/sale-approval.js';
 export { checkScaleChange, SCALE_CHANGE_CLOSE_MS, LARGE_INTERVAL_MS } from './domain/scale-change.js';
 export { EmptyDemandForecastSource } from './adapters/empty-demand-forecast-source.js';
 export { DEMAND_FORECAST_SOURCE, type DemandForecastSource } from './domain/demand-ports.js';

@@ -5596,7 +5596,17 @@ export const GetOpsSaleReviewResponse = zod.object({
   "artistId": zod.uuid().nullable().describe('등록된 아티스트 ID. 새 이름 요청이면 null'),
   "name": zod.string().describe('보이는 이름(등록 이름 또는 파트너가 적은 새 이름)')
 }).describe('판매 승인 확인 패널의 아티스트 한 줄(SCR-048, LCH-080 잔여). 등록된 아티스트는 artistId가 있고, 파트너가 새 이름으로 요청한 아티스트는 artistId가 null이다(운영자가 승인 때 잇는다, ADR-0093 결정 4·ADR-0198 결정 4)')).optional().describe('등록된 아티스트와 파트너가 요청한 새 이름을 보이는 순서대로 합친 목록(LCH-080 잔여). 승인 본문 artists로 요청 이름을 잇는다'),
-  "accessibleSeatingCheck": zod.boolean().nullish().describe('파트너가 휠체어석 확인을 했는지'),
+  "accessibleSeatingCheck": zod.boolean().nullish().describe('파트너가 휠체어석 확인을 했는지(호환 값)'),
+  "accessibleSeating": zod.union([zod.object({
+  "confirmed": zod.boolean(),
+  "shortfallReason": zod.union([zod.literal('RELAXED_STANDARD'),zod.literal('RECOMMENDED_FACILITY'),zod.literal('NOT_USED_THIS_SHOW'),zod.literal('OTHER'),zod.literal(null)]).nullish(),
+  "note": zod.string().nullish(),
+  "totalSeats": zod.int().nullish().describe('판매 제외를 포함한 전체 좌석 수'),
+  "wheelchairSeats": zod.int().nullish().describe('휠체어석 수(판매 제외 포함)'),
+  "requiredSeats": zod.int().nullish().describe('기준 수 min(⌈전체÷100⌉, 20)'),
+  "locationCheckSeats": zod.int().nullish().describe('열 안 위치 확인이 필요한 휠체어석 수(W2)'),
+  "onlineWheelchairSeats": zod.int().nullish().describe('온라인 판매 가능 휠체어석 수(판매 제외가 아닌 것)')
+}).describe('파트너가 확인한 휠체어석과 서버가 저장된 좌석맵으로 다시 센 값(FR-023, LCH-090). 좌석맵이 없으면 수 칸은 null이고 확인·이유만 있다'),zod.null()]).optional().describe('파트너 확인과 서버가 좌석맵으로 다시 센 휠체어석 값(LCH-090). 아직 요청 전이면 null'),
   "reapproval": zod.boolean().optional().describe('승인 이력이 있는 공연의 변경 재승인인지'),
   "submittedAt": zod.iso.datetime({"offset":true}).nullish(),
   "rejectionReason": zod.string().nullish().describe('마지막 반려 사유'),
@@ -5618,6 +5628,8 @@ export const GetOpsSaleReviewResponse = zod.object({
   "startsAt": zod.iso.datetime({"offset":true}).optional(),
   "status": zod.enum(['SCHEDULED', 'CANCELLED', 'POSTPONED']).optional(),
   "scale": zod.union([zod.literal('LARGE'),zod.literal('MEDIUM'),zod.literal('SMALL'),zod.literal(null)]).nullish().describe('판매 승인 때 정한 규모. 승인 전이면 null'),
+  "pgPrimary": zod.union([zod.literal('TOSS'),zod.literal('PORTONE'),zod.literal(null)]).nullish().describe('판매 승인 때 고정한 기본 결제사(R-T19). 승인 전이면 null'),
+  "pgFallback": zod.union([zod.literal('TOSS'),zod.literal('PORTONE'),zod.literal(null)]).nullish().describe('판매 승인 때 고정한 대체 결제사(R-T19). 없으면 null'),
   "demandForecastPath": zod.string().optional().describe('GET /v1/ops/events/{eventId}/demand-forecast')
 }).describe('판매 승인 확인 패널의 회차 한 줄(SCR-048). 수요 예측은 링크로 가리킨다')).optional(),
   "suspensionApprovalPending": zod.boolean().optional().describe('LCH-090 전에는 늘 false다'),

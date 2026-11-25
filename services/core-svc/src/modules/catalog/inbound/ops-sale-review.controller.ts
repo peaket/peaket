@@ -59,6 +59,18 @@ const SaleReviewDetailView = z
     requestedPlace: z.boolean(),
     artists: z.array(z.object({ artistId: z.string().nullable(), name: z.string() }).passthrough()),
     accessibleSeatingCheck: z.boolean().nullable(),
+    accessibleSeating: z
+      .object({
+        confirmed: z.boolean(),
+        shortfallReason: z.enum(['RELAXED_STANDARD', 'RECOMMENDED_FACILITY', 'NOT_USED_THIS_SHOW', 'OTHER']).optional(),
+        note: z.string().optional(),
+        totalSeats: z.number().nullable(),
+        wheelchairSeats: z.number().nullable(),
+        requiredSeats: z.number().nullable(),
+        locationCheckSeats: z.number().nullable(),
+        onlineWheelchairSeats: z.number().nullable(),
+      })
+      .nullable(),
     suspensionApprovalPending: z.boolean(),
     // 지급대행 등록 값(payment 등록 읽기, F-07-7 ADR-0370 결정 4). CS 두 역할에게 정산 계좌는 null이다
     payoutAccount: z.object({ bankCode: z.string(), last4: z.string(), holdUntil: z.string().nullable(), holderVerified: z.boolean() }).strict().nullable(),

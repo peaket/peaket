@@ -32,6 +32,7 @@ import {
   SearchReadModelTimers,
   StaticTemplateCatalog,
   UnwiredSaleEligibilityCopy,
+  type PgDefaults,
 } from './modules/catalog/index.js';
 import {
   DrizzleReviewStore,
@@ -165,6 +166,17 @@ const saleOpen = purchaseHttpUrl
 if (!purchaseHttpUrl) console.warn(JSON.stringify({ level: 'warn', kind: 'sale-open-wiring', msg: 'PEAKET_PURCHASE_HTTP_URL이 없어 판매 승인 뒤 판매 열기·사본 쓰기가 unwired다(대기열은 닫힌 채로 남는다)' }));
 // 판매 승인의 payment-svc 지급대행 등록·등록 읽기·판매자 확인(F-07-7, ADR-0370 결정 3·4). 주소가 없으면 local·ci·test만 둘 다 꺼짐으로 뜨고 그 밖은 시작하지 않는다
 const payoutRegistration = assemblePayoutRegistration(process.env, { warn: (m) => console.warn(JSON.stringify({ level: 'warn', kind: 'payout-registration-wiring', msg: m })) });
+// 판매 승인 때 회차에 고정할 플랫폼 기본 결제사(R-T19, payment §2.2). payment-svc와 같은 이름을 읽고, 모르는 값(시뮬레이터)은 기본값으로 물러난다
+const pgOf = (name: 'PEAKET_PG_DEFAULT' | 'PEAKET_PG_FALLBACK'): 'TOSS' | 'PORTONE' | undefined => {
+  const v = process.env[name]?.trim().toUpperCase();
+  if (v === 'NONE') return undefined;
+  return v === 'TOSS' || v === 'PORTONE' ? v : undefined;
+};
+const pgPrimary = pgOf('PEAKET_PG_DEFAULT') ?? 'TOSS';
+const pgFallbackRaw = process.env.PEAKET_PG_FALLBACK?.trim().toUpperCase();
+const pgFallback = pgFallbackRaw === 'NONE' ? undefined : (pgOf('PEAKET_PG_FALLBACK') ?? (pgPrimary === 'PORTONE' ? 'TOSS' : 'PORTONE'));
+if (pgFallback === pgPrimary) throw new Error('PEAKET_PG_FALLBACK이 PEAKET_PG_DEFAULT와 같다');
+const pgDefaults: PgDefaults = { primary: pgPrimary, ...(pgFallback !== undefined ? { fallback: pgFallback } : {}) };
 // 판매 승인 부수 효과 지표(sale_open_total·sale_config_publish_total). 서비스를 만든 뒤 등록부에 단다
 const saleConfigMetrics = new SaleConfigMetrics();
 
@@ -222,6 +234,7 @@ const service = await createService({
     saleOpen,
     saleConfigMetrics,
     payoutRegistration,
+    pgDefaults,
     ...(process.env.PEAKET_IDENTITY_JWKS_URL ? { exportJwks: { url: process.env.PEAKET_IDENTITY_JWKS_URL, issuer: process.env.PEAKET_IDENTITY_ISSUER ?? 'https://identity.peaket.example' } } : {}),
     ...(process.env.PEAKET_PURCHASE_HTTP_URL
       ? { purchaseHttp: { url: process.env.PEAKET_PURCHASE_HTTP_URL, ...(process.env.PEAKET_INTERNAL_TOKEN ? { token: process.env.PEAKET_INTERNAL_TOKEN } : {}) } }

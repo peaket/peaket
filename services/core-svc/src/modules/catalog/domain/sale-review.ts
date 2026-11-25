@@ -2,7 +2,7 @@
 // 요청 본문은 닫힌 객체이고(모르는 칸 400), 여기서는 여러 칸이 함께 맞아야 하는 규칙(통신판매업 신고번호 또는 면제 근거, 휠체어석 확인)만 본다.
 // 정산 계좌는 모양만 보고 저장하지 않는다(지급대행 연동 전, LCH-110). 계좌번호 원문은 응답·로그·감사에 싣지 않는다.
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
-import type { EventStatus, SaleReview } from './production.js';
+import type { AccessibleSeatingRecord, EventStatus, SaleReview } from './production.js';
 import type { ShowScale } from './demand-forecast.js';
 import type { SellerInfo } from './promoter-contract.js';
 
@@ -107,6 +107,9 @@ export interface OpsSaleReviewEvent {
   startsAt: Date;
   status: EventStatus;
   scale?: ShowScale;
+  /** 판매 승인 때 고정한 결제사 지정(payment §2.2, ADR-0062 결정 33). 승인 전에는 null이다 */
+  pgPrimary: 'TOSS' | 'PORTONE' | null;
+  pgFallback: 'TOSS' | 'PORTONE' | null;
   demandForecastPath: string;
 }
 
@@ -131,8 +134,10 @@ export interface OpsSaleReviewDetail {
   requestedPlace: boolean;
   /** 등록된 아티스트와 파트너가 요청한 새 이름을 보이는 순서대로 합친 목록(LCH-080 잔여) */
   artists: { artistId: string | null; name: string }[];
-  /** 파트너가 휠체어석 확인을 했는지(BAT-617). 아직 요청 전이면 null */
+  /** 파트너가 휠체어석 확인을 했는지(BAT-617 호환 값). 아직 요청 전이면 null */
   accessibleSeatingCheck: boolean | null;
+  /** 파트너 확인과 서버가 좌석맵으로 다시 센 휠체어석 값(LCH-090). 아직 요청 전이면 null */
+  accessibleSeating: AccessibleSeatingRecord | null;
   suspensionApprovalPending: boolean;
 }
 

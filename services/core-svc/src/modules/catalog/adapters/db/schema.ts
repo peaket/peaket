@@ -5,7 +5,7 @@
 // open_batch·seat_assignment·per_person_limit, production.kopis_fields·pending_revision·requested_place·requested_artists)과 찜·멱등 기록 표는
 // HOT-171이 더했다(ADR-0198). 배치본 표(venue·section·seat·price_tier)와 회차의 배치본 외래키는 HOT-240이 더했다(ADR-0260). 판매 정책 규칙(공연 단위
 // production.sale_policy·sale_policy_version, event.sale_policy는 없앰)·회차 판 event.version·판매 자격 명단 두 표는 HOT-250이 더했다(ADR-0261 결정 1·4·8).
-// 남은 칸: LCH-080·LCH-090(판매 승인)의 event.pg_primary·pg_fallback·scale·commission_rate_bp, production.accessible_seating_check
+// 판매 승인 칸(규모·수수료율·결제사 지정·휠체어석)은 LCH-080·LCH-090이 더했다(pg_primary·pg_fallback은 0049)
 // - 판매자(promoter)는 공개 신원정보 칸만 둔다. 지급대행·정산 계좌·수수료율 칸은 파트너 등록·정산 단계가 더한다.
 // 공개 판단의 전제: production·event 행은 늘 마지막 승인 내용(공개본)이다. 승인 뒤 바꾼 것은 승인 때까지 pending_revision에만 둔다(domain/production.ts isPublic).
 import { heldEventTable, idempotencyRecordTable, statSnapshotTable } from '@peaket/platform';
@@ -111,8 +111,8 @@ export const production = pgTable(
     salePolicy: jsonb('sale_policy'),
     /** 규칙 고치기 If-Match의 판(1부터, 저장마다 +1, 변경분에 둘 때도 오른다, ADR-0261 결정 2) */
     salePolicyVersion: integer('sale_policy_version').notNull().default(1),
-    /** 판매 승인 때 운영자가 확인한 휠체어석 수·위치(FR-023, LCH-090). 승인 전에는 false */
-    accessibleSeatingCheck: boolean('accessible_seating_check').notNull().default(false),
+    /** 판매 승인 요청 때 서버가 좌석맵으로 다시 센 휠체어석 수·기준·위치 확인·온라인 판매 수와 파트너 확인·부족 이유(FR-023, LCH-090) */
+    accessibleSeatingCheck: jsonb('accessible_seating_check').notNull().default(sql`'{}'::jsonb`),
     /** 판매 중지 시각·사유·승인 업무·당시 판매 중이던 회차(ADR-0123, BAT-620). SUSPENDED일 때만 있다 */
     suspendedAt: at('suspended_at'),
     suspensionReasonCode: text('suspension_reason_code'),
@@ -143,6 +143,7 @@ export const production = pgTable(
     check('production_place_check', sql`(${t.placeId} is null) <> (${t.requestedPlace} is null)`),
     check('production_approved_place_check', sql`${t.saleApprovedAt} is null or ${t.placeId} is not null`),
     check('production_sale_policy_version_check', sql`${t.salePolicyVersion} >= 1`),
+    check('production_accessible_seating_object_check', sql`jsonb_typeof(${t.accessibleSeatingCheck}) = 'object'`),
     // 회차의 판매자 사본이 공연의 판매자와 같게 묶는 외래키의 대상
     unique('production_id_promoter_uq').on(t.id, t.promoterId),
     index('production_promoter_idx').on(t.promoterId),
@@ -342,6 +343,9 @@ export const event = pgTable(
     perPersonLimit: integer('per_person_limit').notNull().default(4),
     /** 판매 승인 때 정한 공연 규모(회차 칸, ADR-0093). 승인 전에는 비어 있다 */
     scale: text('scale'),
+    /** 판매 승인 때 고정한 회차 결제사 지정(payment §2.2, ADR-0062 결정 33). 승인 전에는 비어 있다 */
+    pgPrimary: text('pg_primary'),
+    pgFallback: text('pg_fallback'),
     /** 회차 고치기 If-Match의 판(1부터, 고칠 때마다 +1, 변경분에 둘 때도 오른다, ADR-0261 결정 4) */
     version: integer('version').notNull().default(1),
   },
@@ -355,6 +359,9 @@ export const event = pgTable(
     check('event_queue_order_check', sql`${t.lobbyShuffle} or ${t.openBatch}`),
     check('event_seat_assignment_check', sql`${t.seatAssignment} in ('PICK', 'AUTO')`),
     check('event_scale_check', sql`${t.scale} is null or ${t.scale} in ('LARGE', 'MEDIUM', 'SMALL')`),
+    check('event_pg_primary_check', sql`${t.pgPrimary} is null or ${t.pgPrimary} in ('TOSS', 'PORTONE')`),
+    check('event_pg_fallback_check', sql`${t.pgFallback} is null or ${t.pgFallback} in ('TOSS', 'PORTONE')`),
+    check('event_pg_distinct_check', sql`${t.pgFallback} is null or ${t.pgPrimary} is null or ${t.pgFallback} <> ${t.pgPrimary}`),
     check('event_per_person_limit_check', sql`${t.perPersonLimit} between 1 and 10`),
     check('event_version_check', sql`${t.version} >= 1`),
     index('event_production_idx').on(t.productionId),

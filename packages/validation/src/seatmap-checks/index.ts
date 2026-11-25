@@ -32,6 +32,20 @@ export interface CheckLayout {
   sections: readonly CheckSection[];
 }
 
+/** 판매 승인 요청 때 저장하는 휠체어석 요약(LCH-090, data.md production.accessible_seating_check) */
+export interface WheelchairSummary {
+  /** 판매 제외를 포함한 전체 좌석 수 */
+  totalSeats: number;
+  /** 휠체어석 수(판매 제외 포함) */
+  wheelchairSeats: number;
+  /** 기준 수 min(⌈전체÷100⌉, 20). 좌석이 없으면 0 */
+  requiredSeats: number;
+  /** 열 안 위치 확인이 필요한 휠체어석 수(W2) */
+  locationCheckSeats: number;
+  /** 온라인 판매 가능 휠체어석 수(판매 제외가 아닌 것) */
+  onlineWheelchairSeats: number;
+}
+
 /** 경고마다 싣는 좌석 ID 상한 [가정] */
 export const WARNING_SEAT_IDS_MAX = 100;
 /** 좌석 간격이 없을 때 쓰는 기본값(cm) [가정] */
@@ -47,6 +61,24 @@ export const WHEELCHAIR_MAX_REQUIRED = 20;
 const seatIds = (ids: readonly string[]): string[] => ids.slice(0, WARNING_SEAT_IDS_MAX);
 
 const seatsOf = (s: CheckSection): readonly CheckSeat[] => s.seats ?? [];
+
+/**
+ * 판매 승인 요청이 저장할 휠체어석 요약(FR-023, d5 §6.5). W1~W3 경고와 같은 계산을 쓴다.
+ * 좌석이 하나도 없으면 기준은 0이고 위치 확인·온라인 판매 수도 0이다(검사 전).
+ */
+export function wheelchairSummaryOf(sections: readonly CheckSection[]): WheelchairSummary {
+  const seats = sections.flatMap((s) => seatsOf(s));
+  const wheels = seats.filter((s) => s.wheelchair === true);
+  const total = seats.length;
+  const required = total === 0 ? 0 : Math.min(Math.ceil(total / WHEELCHAIR_PER_100), WHEELCHAIR_MAX_REQUIRED);
+  return {
+    totalSeats: total,
+    wheelchairSeats: wheels.length,
+    requiredSeats: required,
+    locationCheckSeats: adjacentWheelchairRuns(sections).length,
+    onlineWheelchairSeats: wheels.filter((s) => s.unavailable !== true).length,
+  };
+}
 
 /** W1~W3: 휠체어석 기준. N은 판매 제외를 포함한 전체 좌석 수다 */
 export function wheelchairWarnings(sections: readonly CheckSection[]): SeatMapWarning[] {
