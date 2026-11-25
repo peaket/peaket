@@ -506,8 +506,14 @@ export class Investigations {
     const released = [...new Set(lockReleases)];
     // 저장 전에 풀어 해제 실패가 '정상 종료인데 표는 잠김'으로 남지 않게 한다(IR-08)
     if (released.length > 0) {
+      let releaseVersion: number;
       try {
-        await this.d.locks.release({ caseId, eventId: current.eventId, accountIds: released, version: current.version, actedBy: actor.accountId });
+        releaseVersion = await this.d.store.nextLockVersion();
+      } catch {
+        throw problem('dependency-unavailable', 503, '잠금 판을 만들지 못했습니다');
+      }
+      try {
+        await this.d.locks.release({ caseId, eventId: current.eventId, accountIds: released, version: releaseVersion, actedBy: actor.accountId });
       } catch {
         throw problem('dependency-unavailable', 503, '양도 잠금을 풀지 못했습니다');
       }
@@ -548,7 +554,8 @@ export class Investigations {
         .map((id) => saved.members.find((x) => x.accountId === id)!.lockExpiresAtMs)
         .filter((x): x is number => x !== null);
       const expiresAtMs = expiries.length > 0 ? Math.max(...expiries) : nowMs + LOCK_MAX_MS;
-      await this.d.locks.set({ caseId, eventId: saved.eventId, accountIds: accounts, version: saved.version, expiresAtMs, actedBy: actor.accountId });
+      const version = await this.d.store.nextLockVersion();
+      await this.d.locks.set({ caseId, eventId: saved.eventId, accountIds: accounts, version, expiresAtMs, actedBy: actor.accountId });
     } catch {
       // 보상 실패는 원래 오류를 가리지 않는다. 다음 요청이 같은 판으로 다시 시도한다
     }
@@ -584,13 +591,19 @@ export class Investigations {
     }
     const firstLocked = targets.filter((m) => m!.lockExpiresAtMs === null).map((m) => m!.accountId);
     const lockExpiresAtMs = nowMs + LOCK_MAX_MS;
+    let lockVersion: number;
+    try {
+      lockVersion = await this.d.store.nextLockVersion();
+    } catch {
+      throw problem('dependency-unavailable', 503, '잠금 판을 만들지 못했습니다');
+    }
     let lockResult: Awaited<ReturnType<TransferLocks['set']>>;
     try {
       lockResult = await this.d.locks.set({
         caseId,
         eventId: current.eventId,
         accountIds: body.accountIds,
-        version: current.version,
+        version: lockVersion,
         expiresAtMs: lockExpiresAtMs,
         actedBy: actor.accountId,
       });
@@ -639,7 +652,7 @@ export class Investigations {
         kind: 'LOCK_APPLIED',
         actorId: actor.accountId,
         note: null,
-        detail: { accountIds: body.accountIds, expiresAt: iso(lockExpiresAtMs), version: current.version },
+        detail: { accountIds: body.accountIds, expiresAt: iso(lockExpiresAtMs), version: lockVersion, caseVersion: current.version },
         occurredAtMs: nowMs,
       },
     ];
@@ -685,7 +698,7 @@ export class Investigations {
     return result;
   }
 
-  /** 저장 실패 보상은 자기가 잡은 정확한 판으로 풀고, 다른 요청이 이미 성공했으면 그 계정을 풀지 않는다(IR-02) */
+  /** 저장 실패 보상은 자기가 잡은 잠금보다 큰 새 판으로 풀고, 다른 요청이 이미 성공했으면 그 계정을 풀지 않는다(IR-02·IR-20) */
   async #compensateAppeal(caseId: string, current: FraudCaseRecord, accountIds: readonly string[], actor: FraudActor): Promise<void> {
     let release = [...accountIds];
     try {
@@ -700,8 +713,14 @@ export class Investigations {
       // 다시 읽지 못하면 요청한 계정을 그대로 풀어 본다
     }
     if (release.length === 0) return;
+    let version: number;
     try {
-      await this.d.locks.release({ caseId, eventId: current.eventId, accountIds: release, version: current.version, actedBy: actor.accountId });
+      version = await this.d.store.nextLockVersion();
+    } catch {
+      return;
+    }
+    try {
+      await this.d.locks.release({ caseId, eventId: current.eventId, accountIds: release, version, actedBy: actor.accountId });
     } catch {
       // 보상 실패는 원래 503으로 알린다
     }

@@ -26,6 +26,8 @@ export interface InvestigationStore {
     limit: number;
   }): Promise<{ items: FraudClusterRecord[]; nextCursor: string | null }>;
   getCluster(clusterId: string): Promise<FraudClusterRecord | null>;
+  /** ticket-svc SetTransferLock.version. 사건 판과 분리한 단조 증가 값이다(IR-20) */
+  nextLockVersion(): Promise<number>;
   putCase(c: FraudCaseRecord, o?: CaseWriteOptions): Promise<CaseWriteOutcome | undefined>;
   getCase(caseId: string): Promise<FraudCaseRecord | null>;
   findCaseByCluster(clusterId: string): Promise<FraudCaseRecord | null>;

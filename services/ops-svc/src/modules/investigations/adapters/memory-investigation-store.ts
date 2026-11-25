@@ -126,6 +126,12 @@ export class MemoryInvestigationStore implements InvestigationStore {
     return c ? clone(c) : null;
   }
 
+  #lockVersion = 0;
+  async nextLockVersion(): Promise<number> {
+    this.#lockVersion += 1;
+    return this.#lockVersion;
+  }
+
   async findIdempotent(i: IdempotentWrite): Promise<IdempotentLookup> {
     const found = this.idempotent.get(this.#idemKey(i));
     if (!found) return { kind: 'none' };

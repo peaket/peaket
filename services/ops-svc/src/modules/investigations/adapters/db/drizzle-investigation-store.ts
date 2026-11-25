@@ -208,6 +208,12 @@ export class DrizzleInvestigationStore implements InvestigationStore {
     return clusterOf(r, members);
   }
 
+  /** ticket-svc 잠금 판. 시퀀스라 사건 트랜잭션이 되돌아가도 값이 재사용되지 않는다 */
+  async nextLockVersion(): Promise<number> {
+    const rows = (await this.db.db.execute(sql`select nextval('fraud_lock_version_seq') as v`)).rows as { v: string | number }[];
+    return Number(rows[0]!.v);
+  }
+
   async findIdempotent(i: IdempotentWrite): Promise<IdempotentLookup> {
     const rows = (
       await this.db.db.execute(sql`select request_hash, result_ref from idempotency_record
