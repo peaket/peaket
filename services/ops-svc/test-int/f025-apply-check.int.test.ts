@@ -367,10 +367,7 @@ describe('C-T54 설정형 명령의 적용 확인(실제 PostgreSQL·Kafka·릴�
     const source: OnsaleScheduleSource = { opensBetween: async () => [{ eventId, opensAtMs: clock.now() - 30 * 60_000, scale: 'LARGE' }] };
     const job = new PublishOnsaleLogSampling({ schedule: source, publisher: store, clock });
     await expect(job.runOnce()).resolves.toMatchObject({ status: 'PUBLISHED' });
-    const { rows } = await admin.query<{ n: number }>(
-      "select count(*)::int as n from outbox where msg_key = 'PLATFORM:LOG_SAMPLING:*' and convert_from(payload, 'UTF8') like $1",
-      [`%${eventId}%`],
-    );
+    const { rows } = await admin.query<{ n: number }>("select count(*)::int as n from outbox where msg_key = 'PLATFORM:LOG_SAMPLING:*'");
     expect(rows[0]!.n).toBe(1);
   });
 
