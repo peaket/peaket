@@ -311,6 +311,20 @@ describe('F-04-12 ops DB 저장소(PostgreSQL)', () => {
     expect(after!.events.map((e) => e.kind)).toEqual(['CREATED']);
   });
 
+  test('FX-T15 ⑪ [ASVS v5.0.0-2.1.2] 잠금 판은 사건 판과 분리된 단조 증가 시퀀스다', async () => {
+    const a = await store.nextLockVersion();
+    const b = await store.nextLockVersion();
+    expect(b).toBeGreaterThan(a);
+    // ops_app이 시퀀스를 쓸 수 있어야 한다(마이그레이션 0036 GRANT)
+    try {
+      await raw.query('SET ROLE ops_app');
+      const r = await raw.query("SELECT nextval('fraud_lock_version_seq') AS v");
+      expect(Number(r.rows[0].v)).toBeGreaterThan(b);
+    } finally {
+      await raw.query('RESET ROLE');
+    }
+  });
+
   test('FX-T12 ㉛ [ASVS v5.0.0-2.1.3] 멱등 작업 이름과 ops_app 권한을 실제 DB에서 확인한다', async () => {
     const insert = (operation: string) =>
       raw.query(
