@@ -247,7 +247,7 @@
 - F-02-5 시험 리뷰 TR-09(낮음): `main.ts` 원문 정규식 시험은 주석 속 죽은 코드로도 통과할 수 있다. TR-01·TR-04의 실제 시작/조립 시험이 생기면 원문 검사는 보조로만 둔다(계획 13절).
 - F-02-5 시험 리뷰 TR-10(낮음): core-svc 관제 조치는 `not.toBe(503)`, 내부 경로는 `not.toBe(503)`·`Retry-After` 없음만 본다. 관제는 기대 상태(200 등), 내부는 401/403을 정확히 단언한다(ADR-0365 결정 17).
 - F-02-5 시험 리뷰 TR-11(낮음): 계획 9절은 C-T51을 'PostgreSQL·Kafka'라 적었지만 통합은 후기 저장소를 메모리로 쓴다. **닫음(2026-11-25)**: 계획 9절을 'Kafka(+메모리 후기 저장소)'로 고쳤다(판정은 그대로).
-- F-02-5 구현 리뷰 IR-10(중간): 적용 확인이 `alertOpen: true`를 경보 저장보다 먼저 저장해, `ops_alert` 쓰기가 실패하면 다음 바퀴에 SEV3를 다시 열지 않는다. 경보 저장이 성공한 뒤 표시하거나 실패 때 `alertOpen:false`로 되돌린다(services/ops-svc/src/modules/commands/application/check-settings-apply.ts:43-54)
+- F-02-5 구현 리뷰 IR-10(낮음): IR-08(중간·통과 기준)과 같은 자리(적용 확인 `alertOpen` 저장 순서)의 중복 지적이다. IR-08을 고칠 때 함께 정리한다(services/ops-svc/src/modules/commands/application/check-settings-apply.ts:43-54)
 - F-02-5 구현 리뷰 IR-11(낮음): `LOG_LEVEL_SERVICES`·`LOG_LEVEL_RAISED`·`FEATURE_FLAGS`가 `domain/command-params.ts`와 `domain/setting-commands.ts`에 중복이다. 한 곳에서 export해 접수 검사와 사건 꼴이 갈라지지 않게 한다(계획 8.2)
 - F-02-5 구현 리뷰 IR-12(낮음): queue-svc 대기 인원을 `seq`·`serving`·`skipped` 세 번의 따로 읽기로 센다. 계획 8.3의 같은 슬롯 Lua 한 번(원자적 읽기)으로 바꾼다(services/queue-svc/src/modules/entry/adapters/redis-preview-waiting.ts:13-19)
 - F-02-5 구현 리뷰 IR-13(낮음): openapi `Command.params` 설명에 `LOG_LEVEL {service, level}`·`FEATURE_OFF {flag}`가 없고 `docs/api/proto/README.md` 호출 표에 `PreviewControl` 줄이 없다(계획 7·8.1)
