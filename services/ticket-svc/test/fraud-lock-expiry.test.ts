@@ -124,23 +124,33 @@ describe('F-04-13 양도 잠금 만료·경합', () => {
     expect(changed).toBe(0);
   }, 120_000);
 
-  it('FX-T15 ⑲ 만료 경계 직전에는 잠금이 남고 경계와 계정별 격리에서만 풀린다', async () => {
+  it('FX-T15 ⑲ 만료 경계 직전에는 잠금이 남고 회차·계정별 격리에서만 풀린다', async () => {
     const { tickets, store, transfers } = setup();
-    const entry = seed(tickets, 20, { eventStartsAtMs: NOW + HOUR });
-    const max = seed(tickets, 21, { eventStartsAtMs: NOW + 30 * DAY });
-    await store.setTransferLock({ caseId: CASE, version: 1, locked: true, eventId: EVENT, accountIds: [PAYER], expiresAtMs: NOW + 14 * DAY, nowMs: NOW });
+    const eventA = '0193f2c0-0000-7000-8000-0000000000e2';
+    const eventB = '0193f2c0-0000-7000-8000-0000000000e3';
+    const payerA = '0193f2c0-0000-7000-8000-0000000000a2';
+    const payerB = '0193f2c0-0000-7000-8000-0000000000a3';
+    const caseA = '0193f2c0-0000-7000-8000-0000000000ab';
+    const caseB = '0193f2c0-0000-7000-8000-0000000000ac';
+    const entry = seed(tickets, 20, { eventId: eventA, accountId: payerA, payerAccountId: payerA, eventStartsAtMs: NOW + HOUR });
+    const max = seed(tickets, 21, { eventId: eventB, accountId: payerB, payerAccountId: payerB, eventStartsAtMs: NOW + 30 * DAY });
+    await store.setTransferLock({ caseId: caseA, version: 1, locked: true, eventId: eventA, accountIds: [payerA], expiresAtMs: NOW + 14 * DAY, nowMs: NOW });
+    await store.setTransferLock({ caseId: caseB, version: 1, locked: true, eventId: eventB, accountIds: [payerB], expiresAtMs: NOW + 14 * DAY, nowMs: NOW });
     const sweep = (transfers as unknown as { expireFraudLocks(nowMs: number): Promise<number> }).expireFraudLocks;
     expect(sweep).toBeTypeOf('function');
     await sweep.call(transfers, NOW + HOUR - 1);
-    expect(tickets.tickets.get(entry.ticketId)?.fraudLockCaseId).toBe(CASE);
-    expect(tickets.tickets.get(max.ticketId)?.fraudLockCaseId).toBe(CASE);
+    expect(tickets.tickets.get(entry.ticketId)?.fraudLockCaseId).toBe(caseA);
+    expect(tickets.tickets.get(max.ticketId)?.fraudLockCaseId).toBe(caseB);
     await sweep.call(transfers, NOW + HOUR);
     expect(tickets.tickets.get(entry.ticketId)?.fraudLockCaseId).toBeUndefined();
-    expect(tickets.tickets.get(max.ticketId)?.fraudLockCaseId).toBe(CASE);
+    expect(tickets.tickets.get(max.ticketId)?.fraudLockCaseId).toBe(caseB);
+    expect(await store.activeTransferLock(eventA, payerA, NOW + HOUR)).toBeUndefined();
+    expect((await store.activeTransferLock(eventB, payerB, NOW + HOUR))?.caseId).toBe(caseB);
     await sweep.call(transfers, NOW + 14 * DAY - 1);
-    expect(tickets.tickets.get(max.ticketId)?.fraudLockCaseId).toBe(CASE);
+    expect(tickets.tickets.get(max.ticketId)?.fraudLockCaseId).toBe(caseB);
     await sweep.call(transfers, NOW + 14 * DAY);
     expect(tickets.tickets.get(max.ticketId)?.fraudLockCaseId).toBeUndefined();
+    expect(await store.activeTransferLock(eventB, payerB, NOW + 14 * DAY)).toBeUndefined();
   });
 
   it('FX-T15 ⑳ 조립된 1분 정비 작업은 Transfers.expireFraudLocks를 부른다', async () => {

@@ -68,6 +68,24 @@ describe('F-04-13 ticket-svc 실제 잠금 경합', () => {
     expect(changed).toBe(0);
   }, 120_000);
 
+  test('FX-T15 ㉓ DrizzleTransferStore.expireFraudLocks가 실제 DB의 표·잠금 행을 정리한다', async () => {
+    const payer = randomUUID();
+    const eventId = randomUUID();
+    const issued = await service.issue({ orderId: randomUUID(), eventId, payerAccountId: payer, seatIds: [randomUUID()], issueGeneration: 0, eventStartsAtMs: NOW + HOUR });
+    const ticketId = issued.tickets[0]!.ticketId;
+    await transfers.setTransferLock({ caseId: CASE, version: 1, locked: true, eventId, accountIds: [payer], expiresAtMs: NOW + 14 * DAY, nowMs: NOW });
+    const before = await database.pool.query('select fraud_lock_case_id, fraud_lock_version from ticket where id=$1', [ticketId]);
+    expect(before.rows[0].fraud_lock_case_id).toBe(CASE);
+    const expire = (transfers as unknown as { expireFraudLocks(nowMs: number): Promise<number> }).expireFraudLocks;
+    expect(expire).toBeTypeOf('function');
+    await expire.call(transfers, NOW + 2 * HOUR);
+    const after = await database.pool.query('select fraud_lock_case_id, fraud_lock_version from ticket where id=$1', [ticketId]);
+    expect(after.rows[0].fraud_lock_case_id).toBeNull();
+    expect(Number(after.rows[0].fraud_lock_version)).toBeGreaterThan(Number(before.rows[0].fraud_lock_version));
+    const lock = await database.pool.query('select locked from fraud_transfer_lock where case_id=$1 and event_id=$2 and account_id=$3', [CASE, eventId, payer]);
+    expect(lock.rows[0].locked).toBe(false);
+  });
+
   test('FX-T15 ㉒ 마이그레이션 0022의 잠금 만료 정비 인덱스가 실제 DB에 있다', async () => {
     const rows = await database.pool.query("select indexname from pg_indexes where tablename in ('fraud_transfer_lock','ticket')");
     const names = rows.rows.map((r) => r.indexname);

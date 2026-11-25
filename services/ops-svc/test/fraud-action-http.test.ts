@@ -140,6 +140,7 @@ const restrictionCalls: any[] = [];
 const restrictionState = new Map<string, any>();
 const restrictionClient = {
   failNextQueue: false,
+  failNextPurchase: false,
   failNextIdentity: false,
   identity: {
     async restrict(i: any) {
@@ -157,7 +158,7 @@ const restrictionClient = {
   },
   queue: {
     async set(i: any) {
-      restrictionCalls.push({ op: 'queue', accountId: i.accountId, state: i.state, version: i.version });
+      restrictionCalls.push({ op: 'queue', accountId: i.accountId, state: i.state, version: i.version, restrictionId: i.restrictionId });
       if (restrictionClient.failNextQueue) {
         restrictionClient.failNextQueue = false;
         throw new Error('queue-svc SetBookingRestriction 실패');
@@ -166,7 +167,11 @@ const restrictionClient = {
   },
   purchase: {
     async set(i: any) {
-      restrictionCalls.push({ op: 'purchase', accountId: i.accountId, state: i.state, version: i.version });
+      restrictionCalls.push({ op: 'purchase', accountId: i.accountId, state: i.state, version: i.version, restrictionId: i.restrictionId });
+      if (restrictionClient.failNextPurchase) {
+        restrictionClient.failNextPurchase = false;
+        throw new Error('purchase-svc SetBookingRestriction 실패');
+      }
     },
   },
   async activeForCase(caseId: string) {
@@ -219,11 +224,13 @@ const objections = {
   },
 };
 
+let eligibleApproverIds: string[] = [];
 const investigationDeps: any = {
   store,
   schedule,
   locks,
   notifier: caseNotifier,
+  fraudApproverDirectory: { listEligible: async () => eligibleApproverIds },
   labels,
   alerts: { raise: async () => undefined },
   access,
@@ -785,8 +792,10 @@ describe('F-04-13 FRAUD_ACTION 조치·승인', () => {
     const downCase = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(131), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
     const downCreated = await actionRequest(downCase.caseId, who, { fraudAction: 'RESTRICT', accountIds: [A(131)], reason: '제한' });
     const down = commander();
+    const downApprovalId = String(json(downCreated).approvalId);
+    expect((await getApproval(downApprovalId, down)).statusCode).toBe(200);
     admin.fail = { method: 'designations', problem: new AdminAccountProblem('admin-account-unavailable', 503, 'identity down') };
-    expect((await approve(String(json(downCreated).approvalId), down, { reason: '답 없음' })).statusCode).toBe(403);
+    expect((await approve(downApprovalId, down, { reason: '답 없음' })).statusCode).toBe(403);
   });
 
   test('FX-T12 58 FRAUD_ACTION 승인은 같은 승인 ID로 두 번 실행해도 한 번만 취소한다', async () => {
@@ -823,10 +832,19 @@ describe('F-04-13 FRAUD_ACTION 조치·승인', () => {
     expect(json(retried).status).toBe('FAILED');
     expect(restrictionCalls.at(-1).op).toBe('identity.RESTRICTED');
     expect(json(await getApproval(approvalId, approver)).status).toBe('FAILED');
+    restrictionClient.failNextPurchase = true;
+    restrictionCalls.length = 0;
+    const purchaseFailed = await approve(approvalId, approver, { reason: '근거' });
+    expect(json(purchaseFailed).status).toBe('FAILED');
+    expect(restrictionCalls.map((x) => x.op)).toEqual(['identity.RESTRICTED', 'queue', 'purchase']);
+    const failedPurchase = restrictionCalls.find((x) => x.op === 'purchase')!;
     restrictionCalls.length = 0;
     const ok = await approve(approvalId, approver, { reason: '근거' });
     expect(json(ok).status).toBe('DONE');
     expect(restrictionCalls.map((x) => x.op)).toEqual(['identity.RESTRICTED', 'queue', 'purchase']);
+    const okPurchase = restrictionCalls.find((x) => x.op === 'purchase')!;
+    expect(okPurchase.restrictionId).toBe(failedPurchase.restrictionId);
+    expect(okPurchase.version).toBe(failedPurchase.version);
   });
 
   test('FX-T12 60 LIFT_RESTRICTION은 진행 중 OBJECTED이고 identity 해제와 두 사본 해제 뒤 Done이다', async () => {
@@ -1090,7 +1108,8 @@ describe('F-04-13 표 취소·환급·마감', () => {
     expect(cancelCalls.length).toBe(before);
     expect(json(await getApproval(approvalId, who)).status).toBe('EXPIRED');
     const again = await approve(approvalId, approver, { reason: '마감 뒤 재시도' });
-    expect([409, 410]).toContain(again.statusCode);
+    expect(again.statusCode).toBe(409);
+    expect(typeOf(again)).toBe('cancel-deadline-passed');
     expect(cancelCalls.length).toBe(before);
     expect(json(await getCase(c.caseId, who)).status).toBe('INVESTIGATING');
     const cancelAgain = await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(212)], reason: '다시' });
@@ -1103,6 +1122,9 @@ describe('F-04-13 표 취소·환급·마감', () => {
 
   test('FX-T18 ⑧ 표 취소 마감 12시간 전에 담당 조사관과 승인 대기 commander에게 알린다', async () => {
     const who = investigator();
+    const boss = commander();
+    const bossId = boss['x-user-id']!;
+    eligibleApproverIds = [bossId];
     const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(213), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
     const created = await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(213)], reason: '봇' });
     expect(created.statusCode).toBe(201);
@@ -1111,30 +1133,38 @@ describe('F-04-13 표 취소·환급·마감', () => {
     await tick('notifyDeadlines');
     const first = noticeCalls.filter((n) => n.kind === 'deadlineNotice' && n.approvalId === approvalId && n.leadMs === 12 * HOUR);
     expect(first).toHaveLength(1);
-    expect(first[0]!.recipients).toContain(c.assigneeId);
-    expect(first[0]!.recipients.some((r: string) => r !== c.assigneeId)).toBe(true);
+    expect(new Set(first[0]!.recipients)).toEqual(new Set([c.assigneeId, bossId]));
     await tick('notifyDeadlines');
     expect(noticeCalls.filter((n) => n.kind === 'deadlineNotice' && n.approvalId === approvalId && n.leadMs === 12 * HOUR)).toHaveLength(1);
     clock.advance(NOW - clock.now());
+    eligibleApproverIds = [];
   });
 
   test('FX-T18 ⑨ 표 취소 마감 2시간 전에 담당 조사관과 승인 대기 commander에게 알린다', async () => {
     const who = investigator();
+    const boss = commander();
+    const bossId = boss['x-user-id']!;
+    eligibleApproverIds = [bossId];
     const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(214), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
     const created = await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(214)], reason: '봇' });
     expect(created.statusCode).toBe(201);
     const approvalId = String(json(created).approvalId);
     clock.advance(CANCEL - 12 * HOUR - clock.now());
     await tick('notifyDeadlines');
-    expect(noticeCalls.some((n) => n.kind === 'deadlineNotice' && n.approvalId === approvalId && n.leadMs === 12 * HOUR)).toBe(true);
+    const twelve = noticeCalls.find((n) => n.kind === 'deadlineNotice' && n.approvalId === approvalId && n.leadMs === 12 * HOUR);
+    expect(twelve).toBeTruthy();
+    expect(new Set(twelve.recipients)).toEqual(new Set([c.assigneeId, bossId]));
     clock.advance(10 * HOUR);
     await tick('notifyDeadlines');
-    expect(noticeCalls.some((n) => n.kind === 'deadlineNotice' && n.approvalId === approvalId && n.leadMs === 2 * HOUR)).toBe(true);
+    const two = noticeCalls.find((n) => n.kind === 'deadlineNotice' && n.approvalId === approvalId && n.leadMs === 2 * HOUR);
+    expect(two).toBeTruthy();
+    expect(new Set(two.recipients)).toEqual(new Set([c.assigneeId, bossId]));
     const before = noticeCalls.filter((n) => n.kind === 'deadlineNotice' && n.approvalId === approvalId).length;
     clock.advance(3 * HOUR);
     await tick('notifyDeadlines');
     expect(noticeCalls.filter((n) => n.kind === 'deadlineNotice' && n.approvalId === approvalId).length).toBe(before);
     clock.advance(NOW - clock.now());
+    eligibleApproverIds = [];
   });
 
   test('FX-T18 ⑩ 취소 마감 뒤 표 취소 요청은 409 cancel-deadline-passed이고 이용 제한은 된다', async () => {
