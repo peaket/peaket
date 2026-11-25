@@ -297,9 +297,8 @@ describe('O-T28 ③ BOOTH 등록 한 번', () => {
     expect(registeredChanges(TICKET_D)).toHaveLength(0);
   });
 
-  test('O-T28 ③ 허용 600,000−1ms에 첫 등록은 201·키 1·scanner_change KEY_REGISTERED 1이고, 두 번째는 403이다', async () => {
+  test('O-T28 ③ 허용 600,000−1ms에 첫 등록은 201·키 1·scanner_change KEY_REGISTERED 1이고, 두 번째는 403이며 사용한 코드 재허용은 410이다', async () => {
     const req = bodyOf<{ boothRequestId: string; boothCode: string }>(await requestBooth(TICKET_H));
-    const at = clock.now();
     expect((await authorizeBooth(req.boothCode)).statusCode).toBe(200);
     clock.advance(CODE_MS - 1);
     const first = await registerBooth(TICKET_H, req.boothRequestId, await publicJwk());
@@ -309,8 +308,8 @@ describe('O-T28 ③ BOOTH 등록 한 번', () => {
     expect(changes.filter((c) => c.kind === 'KEY_REGISTERED' && c.payload.ticketId === TICKET_H)[0]!.eventId).toBe(EVENT);
     expect((await registerBooth(TICKET_H, req.boothRequestId, await publicJwk())).statusCode).toBe(403);
     expect(keysOf(TICKET_H)).toHaveLength(1);
-    const allow = bodyOf<{ allowUntil: string }>(await authorizeBooth(req.boothCode));
-    expect(Date.parse(allow.allowUntil) - at).toBe(CODE_MS);
+    // 사용 표시가 남은 코드는 다시 허용하지 않는다(openapi createScannerBoothAuthorization 410 '코드 만료·사용됨')
+    expect((await authorizeBooth(req.boothCode)).statusCode).toBe(410);
   });
 
   test('O-T28 ③ 허용 시각 600,000ms에는 아직 키가 없는 티켓도 403이다', async () => {

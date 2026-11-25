@@ -29,10 +29,12 @@ const TICKET_A = '0190f3a1-7c2e-7a00-8000-00000000d007';
 const TICKET_B = '0190f3a1-7c2e-7a00-8000-00000000d008';
 const TICKET_C = '0190f3a1-7c2e-7a00-8000-00000000d009';
 const TICKET_D = '0190f3a1-7c2e-7a00-8000-00000000d00a';
+const TICKET_E = '0190f3a1-7c2e-7a00-8000-00000000d013';
 const SEAT_A = 'R구역 12열 7번';
 const SEAT_B = 'R구역 12열 8번';
 const SEAT_C = 'S구역 1열 1번';
 const SEAT_D = 'S구역 1열 2번';
+const SEAT_E = 'S구역 1열 3번';
 const DEVICE = '0190f3a1-7c2e-7a00-8000-00000000d00f';
 const DEVICE_UNPLACED = '0190f3a1-7c2e-7a00-8000-00000000d010';
 const LEAD_SESSION = '0190f3a1-7c2e-7a00-8000-00000000d00b';
@@ -122,6 +124,7 @@ beforeAll(async () => {
     [TICKET_B, SEAT_B],
     [TICKET_C, SEAT_C],
     [TICKET_D, SEAT_D],
+    [TICKET_E, SEAT_E],
   ] as const;
   for (let i = 0; i < 51; i++) bulkTickets.push(`0190f3a1-7c2e-7a00-8000-0000000b${String(i).padStart(4, '0')}`);
   for (const [ticketId, seatLabel] of [...seeded, ...bulkTickets.map((t) => [t, `T구역 ${t.slice(-4)}번`] as const)]) {
@@ -186,10 +189,12 @@ describe('SCR-052 기기 현황·내 예외 통과', () => {
   test('SCR-052 책임자는 기기 현황의 모든 칸과 내 OVERRIDE의 사후 검토 네 상태를 본다', async () => {
     const mine = await scanOverride(TICKET_A, LEAD_SESSION, LEAD, '액정 파손');
     expect(mine.statusCode).toBe(200);
+    // 다른 책임자 기록은 다른 티켓에 둔다: LEAD의 '내 것만' 목록에 섞이지 않아야 한다(TR-09 자기모순 고침)
     const other = await scanOverride(TICKET_B, OTHER_LEAD_SESSION, OTHER_LEAD, '방전');
     expect(other.statusCode).toBe(200);
     await scanOverride(TICKET_C, LEAD_SESSION, LEAD, '키 미반영');
     await scanOverride(TICKET_D, LEAD_SESSION, LEAD, '카메라');
+    await scanOverride(TICKET_E, LEAD_SESSION, LEAD, '기타');
     // 스캔을 모두 적은 뒤에 마감 행을 심는다(스캔이 '마감 뒤 도착' 표시를 만들지 않게)
     gate.seedEntryClose(EVENT, CLOSED_AT_MS);
 
@@ -207,21 +212,23 @@ describe('SCR-052 기기 현황·내 예외 통과', () => {
     expect(body.devices.find((d) => d.deviceId === DEVICE)).toEqual(
       expect.objectContaining({ deviceId: DEVICE, name: '동문-01', placement: { gateZone: '동문', mode: 'IN' }, ready: true, packageSeq: 7, lastSyncAt: new Date(LAST_SYNC_MS).toISOString(), pendingUploads: 2 }),
     );
-    expect(body.entriesByZone).toEqual({ 동문: 4 });
+    // 회차 전체: LEAD 4 + 다른 책임자 1 = 5
+    expect(body.entriesByZone).toEqual({ 동문: 5 });
     expect(body.rejectsByReason).toEqual({});
     expect(body.openFlags).toBe(openFlagsOf());
-    expect(body.openFlags).toBe(4);
+    expect(body.openFlags).toBe(5);
     expect(body.boothCount).toBe(0);
-    expect(body.overrideCount).toBe(4);
+    expect(body.overrideCount).toBe(5);
     expect(body.entryClosedAt).toBe(new Date(CLOSED_AT_MS).toISOString());
 
+    // 내 것만: LEAD의 A·C·D·E 4건. 다른 책임자의 B는 없다
     const list = await scannerGet(`/v1/scanner/events/${EVENT}/override-passes`, LEAD_SESSION, LEAD);
     expect(list.statusCode).toBe(200);
     const passes = JSON.parse(list.payload) as { items: { scanId: string; at: string; ticketId: string; seatLabel: string; reason: string; note?: string; reviewStatus: string }[] };
     expect(passes.items).toHaveLength(4);
-    expect(passes.items.map((p) => p.seatLabel).sort()).toEqual([SEAT_A, SEAT_B, SEAT_C, SEAT_D].sort());
+    expect(passes.items.map((p) => p.seatLabel).sort()).toEqual([SEAT_A, SEAT_C, SEAT_D, SEAT_E].sort());
     expect(passes.items.every((p) => p.reviewStatus === 'WAITING')).toBe(true);
-    expect(passes.items.some((p) => p.ticketId === TICKET_B && p.seatLabel === SEAT_B)).toBe(false);
+    expect(passes.items.some((p) => p.ticketId === TICKET_B || p.seatLabel === SEAT_B)).toBe(false);
     expect(passes.items.find((p) => p.ticketId === TICKET_A)?.seatLabel).toBe(SEAT_A);
 
     const flags = await scannerGet(`/v1/scanner/events/${EVENT}/flags`, LEAD_SESSION, LEAD);
@@ -230,8 +237,8 @@ describe('SCR-052 기기 현황·내 예외 통과', () => {
     const flagOf = (ticketId: string) => [...gate.flags.values()].find((f) => f.ticketId === ticketId && f.kind === 'OVERRIDE_REVIEW')!;
     for (const [ticketId, statusName] of [
       [TICKET_A, 'OK'],
-      [TICKET_B, 'SUSPECT'],
-      [TICKET_C, 'UNDETERMINED'],
+      [TICKET_C, 'SUSPECT'],
+      [TICKET_D, 'UNDETERMINED'],
     ] as const) {
       expect((await scannerPost(`/v1/scanner/flags/${flagOf(ticketId).flagId}/resolution`, { status: statusName }, LEAD_SESSION, LEAD)).statusCode).toBe(200);
     }
@@ -239,13 +246,14 @@ describe('SCR-052 기기 현황·내 예외 통과', () => {
     const afterItems = (JSON.parse(after.payload) as { items: { ticketId: string; reviewStatus: string }[] }).items;
     expect(Object.fromEntries(afterItems.map((p) => [p.ticketId, p.reviewStatus]))).toEqual({
       [TICKET_A]: 'OK',
-      [TICKET_B]: 'SUSPECT',
-      [TICKET_C]: 'UNDETERMINED',
-      [TICKET_D]: 'WAITING',
+      [TICKET_C]: 'SUSPECT',
+      [TICKET_D]: 'UNDETERMINED',
+      [TICKET_E]: 'WAITING',
     });
     const statusAfter = await scannerGet(`/v1/scanner/events/${EVENT}/devices`, LEAD_SESSION, LEAD);
+    // B(다른 책임자)와 E(내 대기)가 OPEN으로 남는다
     expect((JSON.parse(statusAfter.payload) as { openFlags: number }).openFlags).toBe(openFlagsOf());
-    expect((JSON.parse(statusAfter.payload) as { openFlags: number }).openFlags).toBe(1);
+    expect((JSON.parse(statusAfter.payload) as { openFlags: number }).openFlags).toBe(2);
   });
 
   test('SCR-052 내 예외 통과 limit은 기본 50·최대 200이고 0·201·400·글자는 400이다', async () => {
