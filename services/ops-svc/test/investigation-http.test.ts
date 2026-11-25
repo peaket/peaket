@@ -978,6 +978,12 @@ describe('F-04-12 조사 HTTP', () => {
     expect(removed.statusCode, removed.payload).toBe(200);
     const added = await send('PATCH', `/v1/ops/fraud-cases/${repeatId}`, who, { ifMatch: '"3"', body: { addMembers: [{ accountId: A(43), reason: '다시 더함' }] } });
     expect(added.statusCode, added.payload).toBe(200);
+    expect((json(added).members as Array<Record<string, unknown>>).find((m) => m.accountId === A(43))).toMatchObject({
+      removed: false,
+      addedBy: 'INVESTIGATOR',
+      appealResult: 'NOT_REQUESTED',
+      lockExpiresAt: iso(NOW + 14 * DAY),
+    });
     const second = await send('POST', `/v1/ops/fraud-cases/${repeatId}/appeal-requests`, who, {
       idem: randomUUID(),
       body: { accountIds: [A(43)], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + 2 * DAY) },
