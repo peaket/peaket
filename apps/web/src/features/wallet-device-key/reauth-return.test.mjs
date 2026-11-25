@@ -28,7 +28,7 @@ registerHooks({
     return next(specifier, context);
   },
 });
-const { enrollDeviceKey, syncDeviceKeyRegistration } = await import('./enrollment.ts');
+const { enrollDeviceKey, sendWithReauth, syncDeviceKeyRegistration } = await import('./enrollment.ts');
 const { leaveForWalletReauth, resumeWalletReauth, takeWalletReauth } = await import('./reauth-return.ts');
 const { walletScreenStateOf } = await import('./register.ts');
 const { loadDeviceKey } = await import('./store.ts');
@@ -279,6 +279,15 @@ test('O-T49 ⑥ 403 reauth-required(입장 시작 뒤 첫 등록) 뒤 재인증�
   assert.equal(boothApi.calls[0].headers['x-reauth-token'], 'reauth-f051-booth');
   assert.equal(br.kind, 'sent');
   assert.equal(br.status.phase, 'ready');
+
+  // IR-01: 재인증 복귀 때 책임자가 아직 코드를 찍지 않았으면 같은 boothRequestId로 기다리고 로컬 키를 지우지 않는다
+  const waitTicket = nextTicket();
+  const waitRequest = '0190f3a1-7c2e-7a00-8000-00000000b0b2';
+  const waitApi = fanApi([reply.status(403, 'booth-not-authorized')]);
+  const wait = await sendWithReauth({ ticketId: waitTicket, reason: 'BOOTH', boothRequestId: waitRequest, reauthToken: 'reauth-f051-wait', ...waitApi.opts });
+  assert.equal(wait.phase, 'booth-waiting');
+  assert.equal(wait.phase === 'booth-waiting' ? wait.boothRequestId : undefined, waitRequest);
+  assert.equal((await loadDeviceKey(waitTicket))?.registration, 'LOCAL');
 });
 
 test('O-T49 ⑦ 돌아온 뒤 새로고침하면 표시가 없어 다시 보내지 않는다', async () => {

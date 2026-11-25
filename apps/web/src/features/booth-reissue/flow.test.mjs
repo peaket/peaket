@@ -116,6 +116,44 @@ test('부스 재발급: 403 booth-not-authorized는 기다림이고, 같은 시�
   assert.equal(attempts, 3, 'online 사건에 바로 다시 시도한다');
 });
 
+test('부스 재발급: 첫 tick의 reauth-required와 재인증 뒤 booth-not-authorized에도 코드·만료를 보이고, 같은 boothRequestId로 registered가 된다', async () => {
+  let staffAllowed = false;
+  let attempts = 0;
+  const h = harness({
+    register: async (i) => {
+      attempts++;
+      h.calls.register.push(i);
+      if (!i.reauthToken) throw Object.assign(new Error('재인증 필요'), { status: 403, type: 'reauth-required' });
+      if (!staffAllowed) throw Object.assign(new Error('아직 책임자 허용 없음'), { status: 403, type: 'booth-not-authorized' });
+      return { keyId: 'key-booth' };
+    },
+  });
+  await toWaiting(h);
+  assert.equal(attempts, 1);
+  assert.equal(h.states.at(-1)?.phase, 'waiting');
+  assert.equal(h.states.at(-1)?.error, 'reauth-required');
+  assert.equal(h.states.at(-1)?.boothCode, 'K7QD2M9X');
+  assert.equal(h.states.at(-1)?.expiresAtMs, h.now.ms + CODE_MS);
+  // 재인증에서 돌아온 토큰으로 같은 요청을 다시 시도한다
+  await h.flow.reauth('reauth-f051-booth');
+  assert.equal(attempts, 2);
+  assert.equal(h.calls.register.at(-1)?.boothRequestId, BOOTH_REQUEST);
+  assert.equal(h.calls.register.at(-1)?.reauthToken, 'reauth-f051-booth');
+  assert.equal(h.states.at(-1)?.phase, 'waiting');
+  assert.equal(h.states.at(-1)?.boothCode, 'K7QD2M9X');
+  assert.equal(h.states.at(-1)?.expiresAtMs, h.now.ms + CODE_MS);
+  // 책임자가 허용하면 같은 boothRequestId의 다음 tick이 registered다
+  staffAllowed = true;
+  h.now.ms += RETRY_MS;
+  await h.flow.tick();
+  assert.equal(h.states.at(-1)?.phase, 'registered');
+  assert.equal(h.calls.register.at(-1)?.boothRequestId, BOOTH_REQUEST);
+  // 화면은 error가 아니라 waiting이어도 코드·QR·만료를 계속 그리고 재인증 안내를 함께 보여야 한다
+  const ui = readFileSync(new URL('../../widgets/ticket-wallet/ui/BoothReissueLive.tsx', import.meta.url), 'utf8');
+  assert.match(ui, /state\.phase === ['"]code['"] \|\| state\.phase === ['"]waiting['"] \|\| state\.phase === ['"]error['"]/);
+  assert.match(ui, /reauthNeeded[\s\S]{0,500}boothCode/);
+});
+
 test('부스 재발급: 201이면 registered이고 등록 본문에 reason BOOTH·boothRequestId·이 기기 공개키를 싣는다', async () => {
   let attempts = 0;
   const h = harness({
