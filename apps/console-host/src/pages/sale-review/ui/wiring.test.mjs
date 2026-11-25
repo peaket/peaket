@@ -61,6 +61,18 @@ test('S-T41 ⑫ LCH-080_ 아티스트·공연장 연결과 지급대행 등록 �
   assert.match(page, /새로 만들기/);
 });
 
+test('LCH-090 ㉠㉡ SCR-048은 수요 예측을 읽어 보이고 규모 올리기를 실제 API로 부른다', () => {
+  for (const name of ['getOpsEventDemandForecast', 'createOpsEventScaleChange']) {
+    assert.match(page, new RegExp(`\\b${name}\\b`), `${name} 호출이 없다`);
+  }
+  assert.match(model, /mapDemandForecast/);
+  assert.match(model, /scaleRaiseIssues/);
+  assert.match(model, /scaleChangeBody/);
+  assert.match(page, /수요 예측/);
+  assert.match(page, /규모 올리기/);
+  assert.match(page, /pgPrimary/);
+});
+
 test('S-T41 ⑫ 실제 경로는 연결 화면, 디자인 보드는 ?state= 미리보기에만 남긴다', () => {
   assert.match(routePage, /__PREVIEW__ && sp\.get\('state'\) \? <BoardPage \/> : <ConnectedPage \/>/);
   assert.match(routePage, /function BoardPage/);
