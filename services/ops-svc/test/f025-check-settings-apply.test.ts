@@ -269,9 +269,11 @@ describe('F025-APPLY 정비 바퀴의 적용 확인(TR-01)', () => {
       expect(checkCalls).toHaveLength(2);
       await vi.advanceTimersByTimeAsync(1_500);
       expect(checkCalls).toHaveLength(3);
-      // 정비 바퀴(30초)는 적용 확인 간격에 끌려 빨라지지 않는다
+      // 정비 바퀴(30초)는 적용 확인 간격에 끌려 빨라지지 않는다. 두 번째 job은 t=5,000ms에 시작했고
+      // 지금 t=8,000ms이라, 27,000ms를 더한 t=35,000ms(시작 +30,000ms)에 정확히 한 번 돈다.
+      // 15초로 빨라진 구현이면 t=20,000·35,000 두 번이라 아래 단언이 잡는다.
       expect(maintainCalls).toHaveLength(0);
-      await vi.advanceTimersByTimeAsync(30_000 - 4_500);
+      await vi.advanceTimersByTimeAsync(30_000 - 3_000);
       expect(maintainCalls).toHaveLength(1);
       job.onModuleDestroy();
       byDefault.onModuleDestroy();
