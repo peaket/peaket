@@ -364,7 +364,7 @@ describe('C-T54 설정형 명령의 적용 확인(실제 PostgreSQL·Kafka·릴�
   test('IR-02 DB 조립에서 PublishOnsaleLogSampling.runOnce가 LOG_SAMPLING Outbox를 낸다', async () => {
     const store = new DrizzleCommandStore(appDb);
     const eventId = randomUUID();
-    const source: OnsaleScheduleSource = { opensBetween: async () => [{ eventId, opensAtMs: clock.now() + 30 * 60_000, scale: 'LARGE' }] };
+    const source: OnsaleScheduleSource = { opensBetween: async () => [{ eventId, opensAtMs: clock.now() - 30 * 60_000, scale: 'LARGE' }] };
     const job = new PublishOnsaleLogSampling({ schedule: source, publisher: store, clock });
     await expect(job.runOnce()).resolves.toMatchObject({ status: 'PUBLISHED' });
     const { rows } = await admin.query<{ n: number }>(
