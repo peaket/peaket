@@ -10,13 +10,16 @@
 //   끝이 바뀔 때만 다시 낸다, 범위 PLATFORM·메시지 키 PLATFORM:LOG_SAMPLING:*·oneIn 100, 행위자 SYSTEM, commandId·eventKey는 expiresAt에서 정한다,
 //   core를 읽지 못하면 내지 않는다(ADR-0334 결정 1·3, docs/observability.md §7 '온세일 구간에 100').
 import 'reflect-metadata';
+import { readFileSync } from 'node:fs';
 import { SettingChanged } from '@peaket/contracts/asyncapi';
 import { CONTROL_TOPICS, controlEventCodec, createService, fakeClock, startControlSync, type BroadcastRecord, type BroadcastSource, type ControlSync } from '@peaket/platform';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { MemoryAuditChain } from '../src/modules/audit/index.js';
 import {
+  CommandMaintenanceJob,
   LOG_SAMPLING_ONE_IN,
+  MaintainCommands,
   MemoryCommandStore,
   PublishOnsaleLogSampling,
   SYSTEM_ACTOR_REF,
@@ -295,5 +298,34 @@ describe('F025-LOGS 생산 규칙 세부(ADR-0334 결정 3)', () => {
     const q = s.schedule.asked.at(-1)!;
     expect(q.fromMs).toBeLessThanOrEqual(T - 10 * MIN);
     expect(q.untilMs).toBeGreaterThanOrEqual(T - 10 * MIN + 120 * MIN);
+  });
+});
+
+describe('F025-LOGS 정비 바퀴와 시작 조립(TR-03)', () => {
+  const fakeMaintain = (calls: number[]): MaintainCommands =>
+    ({ runOnce: async (nowMs: number) => (calls.push(nowMs), { approvalsExpired: 0, revertsExpired: 0, autoExpired: 0, compared: 0, actorsPurged: 0 }) }) as unknown as MaintainCommands;
+
+  test('F025-LOGS ⑥ 정비 바퀴 한 번이 PublishOnsaleLogSampling.runOnce를 부르고, 손잡이가 없으면 정비만 한다', async () => {
+    const clock = fakeClock({ now: T });
+    const calls: number[] = [];
+    const sampling = { runOnce: async () => (calls.push(1), { status: 'OUTSIDE' as const }) } as unknown as PublishOnsaleLogSampling;
+    const maintainCalls: number[] = [];
+    const job = new CommandMaintenanceJob(fakeMaintain(maintainCalls), clock, { enabled: false, intervalMs: 30_000 }, undefined, { logSampling: sampling });
+    await job.tick();
+    expect(maintainCalls).toEqual([T]);
+    expect(calls).toHaveLength(1);
+
+    const without = new CommandMaintenanceJob(fakeMaintain([]), clock, { enabled: false, intervalMs: 30_000 }, undefined);
+    await without.tick();
+    expect(calls).toHaveLength(1);
+  });
+
+  test('F025-LOGS ⑦ 시작 파일(main.ts)이 HttpOnsaleScheduleSource를 onsaleSchedule로 넘긴다', () => {
+    const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+    // commandExtras 안의 onsaleSchedule 블록만 본다
+    const inside = /commandExtras:\s*\{[\s\S]*?onsaleSchedule:\s*\{([\s\S]*?)\}/.exec(main)?.[1] ?? '';
+    expect(inside, 'main.ts에 commandExtras.onsaleSchedule이 없다').not.toBe('');
+    expect(inside).toContain('new HttpOnsaleScheduleSource(');
+    expect(inside).toMatch(/PEAKET_CORE_HTTP_URL|coreUrl/);
   });
 });

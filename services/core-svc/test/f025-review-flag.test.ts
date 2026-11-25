@@ -6,6 +6,7 @@
 // - 가드는 팬 v1 후기 경로(ReviewController)에만 걸고, 관제(v1/ops/reviews)·내부(internal/v1/reviews) 후기 경로는 그대로다(계획 8.4).
 //   openapi의 사진 올리기(POST /v1/review-images)는 아직 core-svc에 경로가 없어(후기 사진은 422 review-images-unavailable) 이 시험 밖이다.
 import 'reflect-metadata';
+import { readFileSync } from 'node:fs';
 import { createService, fakeClock, SettingsStore, type SettingChanged } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -210,5 +211,13 @@ describe('F025-FLAG 후기 기능 플래그 읽기(ADR-0365 결정 17)', () => {
     h.settings.apply(FLAG_KEY, flagEvent(false));
     expect((await h.svc.http.inject({ method: 'GET', url: `/v1/events/${h.eventId}/reviews` })).statusCode).toBe(200);
     expect((await h.svc.http.inject({ method: 'GET', url: `/v1/reviews/${h.reviewId}` })).statusCode).toBe(200);
+  });
+
+  test('TR-04 시작 파일(main.ts)이 controlSync?.sync.settings를 후기 모듈 설정 저장소로 넘긴다', () => {
+    const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+    // 시작 파일은 createService 뒤에 제어 소비를 켜므로, 나중에 채워지는 저장소를 읽는 꼴을 넘겨야 한다(계획 8.4)
+    expect(main).toMatch(/get:\s*\(key[^)]*\)\s*=>\s*controlSync\?\.sync\.settings\.get\(key/);
+    const review = /review:\s*\{([^}]*)\}/.exec(main)?.[1] ?? '';
+    expect(review, 'main.ts의 review 조립에 settings가 없다').toMatch(/\bsettings\b/);
   });
 });

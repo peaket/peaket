@@ -6,13 +6,18 @@
 // - Prometheus는 바깥 경계라 SettingsApplyProbe를 구현한 짝 가짜(답은 계획 8.2 ProbeResult 꼴, Prometheus 응답 해석은 f025-prometheus-probe.test.ts)다.
 // - 바퀴는 정비 바퀴처럼 일정 간격으로 돌린다. 간격은 5초 상수와 다르게 2,500ms(시험 값)로 고른다. 시계는 주입 값이다.
 // 정본 값: 30초는 나간 시각부터, SEV3 경보 settings-apply-unconfirmed(경보 사건 키 = 명령 ID), 경보 근원 ops-svc, Prometheus 실패는 UNKNOWN·경보 없음.
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fakeClock } from '@peaket/platform';
 import { MemoryOpsAlertStore, RecordOpsAlert, type OpsAlert, type OpsAlertStore } from '../src/modules/alerts/index.js';
 import { AuditCheckpointService, MemoryAuditChain, MemoryAuditCheckpointStore } from '../src/modules/audit/index.js';
 import {
+  APPLY_CHECK_ROUND_MS,
   CheckSettingsApply,
+  CommandMaintenanceJob,
   CreateCommand,
   ExecuteCommand,
+  MaintainCommands,
   MemoryCommandStore,
   applyCheckViewOf,
   type ApplyCheckRow,
@@ -226,5 +231,78 @@ describe('C-T54 적용 확인 바퀴(서버 몫, 단위 층)', () => {
     expect(await check.runOnce(0)).toEqual({ checked: 0, opened: 0, resolved: 0 });
     expect(h.probe.asked).toHaveLength(0);
     expect((await check.runOnce(1)).checked).toBe(1);
+  });
+});
+
+describe('F025-APPLY 정비 바퀴의 적용 확인(TR-01)', () => {
+  /** 정비 한 바퀴를 부른 시각만 적는 짝(CommandMaintenanceJob은 정비와 적용 확인을 따로 부른다) */
+  const fakeMaintain = (calls: number[]): MaintainCommands =>
+    ({ runOnce: async (nowMs: number) => (calls.push(nowMs), { approvalsExpired: 0, revertsExpired: 0, autoExpired: 0, compared: 0, actorsPurged: 0 }) }) as unknown as MaintainCommands;
+  /** 적용 확인 한 바퀴를 부른 시각만 적는 짝 */
+  const fakeCheck = (calls: number[]): CheckSettingsApply =>
+    ({ runOnce: async () => (calls.push(1), { checked: 0, opened: 0, resolved: 0 }) }) as unknown as CheckSettingsApply;
+
+  test('F025-APPLY ⑳ 적용 확인 바퀴 기본값은 정본 5,000ms이고, 주면 그 간격마다 CheckSettingsApply.runOnce를 부른다', async () => {
+    // 정본 값(ADR-0365 결정 10·14 '정비 바퀴 5초', 계획 8.2)
+    expect(APPLY_CHECK_ROUND_MS).toBe(5_000);
+
+    // 기본값: 4,999ms에는 아직, 5,000ms 정각에 한 번
+    vi.useFakeTimers();
+    try {
+      const defaultCalls: number[] = [];
+      const clock = { now: () => NOW };
+      const byDefault = new CommandMaintenanceJob(fakeMaintain([]), clock, { enabled: true, intervalMs: 30_000 }, undefined, { settingsApply: fakeCheck(defaultCalls) });
+      byDefault.onApplicationBootstrap();
+      await vi.advanceTimersByTimeAsync(APPLY_CHECK_ROUND_MS - 1);
+      expect(defaultCalls).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(defaultCalls).toHaveLength(1);
+
+      // 시험 값 1,500ms를 주면 그 간격을 쓴다(상수와 다른 값으로 코드 상수 복사를 잡는다)
+      const checkCalls: number[] = [];
+      const maintainCalls: number[] = [];
+      const job = new CommandMaintenanceJob(fakeMaintain(maintainCalls), clock, { enabled: true, intervalMs: 30_000, applyCheckRoundMs: 1_500 }, undefined, { settingsApply: fakeCheck(checkCalls) });
+      job.onApplicationBootstrap();
+      await vi.advanceTimersByTimeAsync(1_499);
+      expect(checkCalls).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(checkCalls).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(checkCalls).toHaveLength(3);
+      // 정비 바퀴(30초)는 적용 확인 간격에 끌려 빨라지지 않는다
+      expect(maintainCalls).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(30_000 - 4_500);
+      expect(maintainCalls).toHaveLength(1);
+      job.onModuleDestroy();
+      byDefault.onModuleDestroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('F025-APPLY ㉑ 적용 확인 손잡이가 없으면(settingsApply 없음) 적용 확인 바퀴는 돌지 않고 정비만 돈다', async () => {
+    vi.useFakeTimers();
+    try {
+      const maintainCalls: number[] = [];
+      const job = new CommandMaintenanceJob(fakeMaintain(maintainCalls), fakeClock({ now: NOW }), { enabled: true, intervalMs: 30_000 }, undefined);
+      job.onApplicationBootstrap();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(maintainCalls).toHaveLength(1);
+      job.onModuleDestroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('F025-APPLY ㉒ 시작 파일(main.ts)이 settingsProbeFromEnv·DrizzleApplyChecks·DrizzleOpsAlertStore를 settingsApply로 넘긴다', () => {
+    const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+    // commandExtras 안의 settingsApply 블록만 본다(다른 곳의 같은 이름에 기대지 않는다)
+    const inside = /commandExtras:\s*\{[\s\S]*?settingsApply:\s*\{([\s\S]*?)\}/.exec(main)?.[1] ?? '';
+    expect(inside, 'main.ts에 commandExtras.settingsApply가 없다').not.toBe('');
+    expect(inside).toContain('settingsProbeFromEnv(process.env)');
+    expect(inside).toContain('new DrizzleApplyChecks(database)');
+    expect(inside).toContain('new DrizzleOpsAlertStore(database)');
+    // 환경 값에서 만든 주소를 쓴다(운영과 같은 환경에서 없으면 시작 실패는 settingsProbeFromEnv가 맡는다)
+    expect(inside).toMatch(/PEAKET_PROMETHEUS_URL|settingsProbeFromEnv/);
   });
 });

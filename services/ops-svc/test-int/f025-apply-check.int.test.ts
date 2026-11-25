@@ -41,7 +41,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateOps } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
 import { DrizzleOpsAlertStore, RecordOpsAlert } from '../src/modules/alerts/index.js';
-import { CheckSettingsApply, DrizzleApplyChecks, MaintainCommands, PrometheusSettingsProbe } from '../src/modules/commands/index.js';
+import { CheckSettingsApply, CommandMaintenanceJob, DrizzleApplyChecks, MaintainCommands, PrometheusSettingsProbe } from '../src/modules/commands/index.js';
 import { startOpsRelay } from '../src/relay-app.js';
 import { FakeIdentity, quiet } from '../test/support.js';
 import { collectTopics, type KafkaContainer, startKafka, type TopicCollector, type TopicRecord } from './kafka.js';
@@ -191,7 +191,13 @@ const prometheus = new FakePrometheus();
 /** 적용 확인 바퀴 하나(같은 DB 역할 ops_app, 같은 가짜 시계). probe만 시험마다 고른다 */
 const checkerWith = (probe: PrometheusSettingsProbe) =>
   new CheckSettingsApply({ store: new DrizzleApplyChecks(appDb), probe, alerts: new RecordOpsAlert(new DrizzleOpsAlertStore(appDb), () => clock.now()), clock });
+/** 실제 정비 작업의 적용 확인 바퀴(TR-01): 시험은 CheckSettingsApply를 손으로 부르지 않고 이 작업의 tickApplyCheck를 부른다 */
+const jobWith = (check: CheckSettingsApply): CommandMaintenanceJob => {
+  const maintain = { runOnce: async () => ({ approvalsExpired: 0, revertsExpired: 0, autoExpired: 0, compared: 0, actorsPurged: 0 }) } as unknown as MaintainCommands;
+  return new CommandMaintenanceJob(maintain, clock, { enabled: false, intervalMs: 30_000 }, undefined, { settingsApply: check });
+};
 let checker: CheckSettingsApply;
+let job: CommandMaintenanceJob;
 
 beforeAll(async () => {
   const [a, b] = await Promise.allSettled([startPostgres(), startKafka()]);
@@ -215,6 +221,7 @@ beforeAll(async () => {
   await prometheus.start();
   const liveProbe = new PrometheusSettingsProbe({ url: prometheus.url });
   checker = checkerWith(liveProbe);
+  job = jobWith(checker);
   svc = await createService({
     name: 'ops-svc',
     module: AppModule.register({
@@ -378,13 +385,13 @@ describe('C-T54 설정형 명령의 적용 확인(실제 PostgreSQL·Kafka·릴�
     expect((await podA.appliedVersions()).get('PLATFORM:LOG_LEVEL:purchase-svc')).toBe(version);
 
     clockTo(sent + WINDOW_MS - 1);
-    await checker.runOnce();
+    await job.tickApplyCheck();
     expect((await applyRows(commandId))[0]).toMatchObject({ status: 'CHECKING', alert_open: false });
     expect(await alertsOf(commandId)).toEqual([]);
     expect((await commandView(commandId)).delivery).toMatchObject({ kind: 'APPLY_CHECK', applyStatus: 'CHECKING' });
 
     clockTo(sent + WINDOW_MS);
-    const round = await checker.runOnce();
+    const round = await job.tickApplyCheck();
     expect(round.opened).toBe(1);
     const [after] = await applyRows(commandId);
     expect(after).toMatchObject({ status: 'UNCONFIRMED', alert_open: true, target_count: 2, acked_count: 1 });
@@ -399,13 +406,13 @@ describe('C-T54 설정형 명령의 적용 확인(실제 PostgreSQL·Kafka·릴�
     expect(prometheus.queries.some((q) => /^control_settings_applied_version\{service="purchase-svc",\s*key="PLATFORM:LOG_LEVEL:purchase-svc"\}$/.test(q))).toBe(true);
 
     // 같은 때 바퀴를 한 번 더 돌려도 경보를 다시 열지 않는다(명령마다 하나)
-    expect((await checker.runOnce()).opened).toBe(0);
+    expect((await job.tickApplyCheck()).opened).toBe(0);
     expect(await alertsOf(commandId)).toHaveLength(1);
 
     // ② 뒤 절반: UNCONFIRMED 뒤 1분 다시 보기에 파드 B가 따라잡았으면 CONFIRMED로 바꾸고 경보를 닫는다
     expect(podB.receive(await recordOf(commandId))).toBe(true);
     clockTo(sent + WINDOW_MS + MIN);
-    expect((await checker.runOnce()).resolved).toBe(1);
+    expect((await job.tickApplyCheck()).resolved).toBe(1);
     expect((await applyRows(commandId))[0]).toMatchObject({ status: 'CONFIRMED', alert_open: false, target_count: 2, acked_count: 2 });
     const [alert] = await alertsOf(commandId);
     expect(alert?.resolved_at).not.toBeNull();
@@ -425,7 +432,7 @@ describe('C-T54 설정형 명령의 적용 확인(실제 PostgreSQL·Kafka·릴�
     const older = real.occurredAt - 1;
     expect(p2.applyRaw(rec.key!, { ...real, occurredAt: older, eventKey: randomUUID() })).toBe(true);
     clockTo(sent + WINDOW_MS);
-    await checker.runOnce();
+    await job.tickApplyCheck();
     expect((await commandView(commandId)).delivery).toEqual({ kind: 'APPLY_CHECK', applyStatus: 'UNCONFIRMED', targetCount: 2, ackedCount: 1, unackedTargets: [`payment-svc-1:${older}`] });
     expect(await alertsOf(commandId)).toHaveLength(1);
   }, 90_000);
@@ -442,12 +449,12 @@ describe('C-T54 설정형 명령의 적용 확인(실제 PostgreSQL·Kafka·릴�
     // y는 같은 키의 더 새 판을 이미 받았다('판 이상'으로 맞는다, ADR-0365 결정 14)
     expect(y.applyRaw(rec.key!, { ...real, occurredAt: real.occurredAt + 7, eventKey: randomUUID() })).toBe(true);
     clockTo(sent + OUTBOX_WAIT_MS);
-    await checker.runOnce();
+    await job.tickApplyCheck();
     expect((await applyRows(commandId))[0]).toMatchObject({ status: 'CONFIRMED', alert_open: false, target_count: 2, acked_count: 2 });
     expect((await commandView(commandId)).delivery).toEqual({ kind: 'APPLY_CHECK', applyStatus: 'CONFIRMED', targetCount: 2, ackedCount: 2, unackedTargets: [] });
     // 30초가 지나도 CONFIRMED 그대로이고 경보가 없다
     clockTo(sent + WINDOW_MS + 5 * SEC);
-    await checker.runOnce();
+    await job.tickApplyCheck();
     expect((await applyRows(commandId))[0]!.status).toBe('CONFIRMED');
     expect(await alertsOf(commandId)).toEqual([]);
   }, 90_000);
@@ -468,16 +475,16 @@ describe('C-T54 설정형 명령의 적용 확인(실제 PostgreSQL·Kafka·릴�
       expect((await applyRows(commandId))[0]).toMatchObject({ stage: 'ACKED', service: 'core-svc', status: 'CHECKING', sent_at: null });
 
       clockTo(written + OUTBOX_WAIT_MS);
-      await checker.runOnce();
+      await job.tickApplyCheck();
       expect((await applyRows(commandId))[0]!.status).toBe('CHECKING');
       clockTo(written + OUTBOX_WAIT_MS + 1);
-      await checker.runOnce();
+      await job.tickApplyCheck();
       expect((await applyRows(commandId))[0]!.status).toBe('OUTBOX_WAITING');
       expect((await commandView(commandId)).delivery).toMatchObject({ kind: 'APPLY_CHECK', applyStatus: 'OUTBOX_WAITING' });
 
       // 30초는 나간 시각부터다(M5): 쓴 때부터 45초가 지나도 나가지 않았으면 OUTBOX_WAITING이고 경보가 없다
       clockTo(written + WINDOW_MS + 15 * SEC);
-      await checker.runOnce();
+      await job.tickApplyCheck();
       expect((await applyRows(commandId))[0]).toMatchObject({ status: 'OUTBOX_WAITING', alert_open: false });
       expect(await alertsOf(commandId)).toEqual([]);
       // 장애가 실제로 있었다: 그 행은 여전히 나가지 않았다
@@ -493,14 +500,14 @@ describe('C-T54 설정형 명령의 적용 확인(실제 PostgreSQL·Kafka·릴�
 
       // 나간 직후: 아직 받은 파드가 없어도 나간 때부터 30초가 안 됐으니 CHECKING이다(쓴 때부터 세면 UNCONFIRMED가 된다)
       clockTo(sent);
-      await checker.runOnce();
+      await job.tickApplyCheck();
       expect((await applyRows(commandId))[0]).toMatchObject({ status: 'CHECKING', alert_open: false });
       expect((await applyRows(commandId))[0]!.sent_at?.getTime()).toBe(sent);
 
       expect(c1.receive(rec)).toBe(true);
       expect(c2.receive(rec)).toBe(true);
       clockTo(sent + OUTBOX_WAIT_MS);
-      await checker.runOnce();
+      await job.tickApplyCheck();
       expect((await commandView(commandId)).delivery).toEqual({ kind: 'APPLY_CHECK', applyStatus: 'CONFIRMED', targetCount: 2, ackedCount: 2, unackedTargets: [] });
       expect(await alertsOf(commandId)).toEqual([]);
     } finally {
@@ -520,6 +527,7 @@ describe('C-T54 설정형 명령의 적용 확인(실제 PostgreSQL·Kafka·릴�
     const deadUrl = dead.url;
     await dead.stop();
     const blind = checkerWith(new PrometheusSettingsProbe({ url: deadUrl }));
+    const blindJob = jobWith(blind);
 
     const { commandId } = await issue('LOG_LEVEL', { service: 'ticket-svc', level: 'TRACE' });
     const sent = await sentAtOf(commandId);
@@ -527,7 +535,7 @@ describe('C-T54 설정형 명령의 적용 확인(실제 PostgreSQL·Kafka·릴�
     const statuses: string[] = [];
     for (let at = sent + OUTBOX_WAIT_MS; at <= sent + WINDOW_MS + 10 * SEC; at += OUTBOX_WAIT_MS) {
       clockTo(at);
-      await blind.runOnce();
+      await blindJob.tickApplyCheck();
       statuses.push((await applyRows(commandId))[0]!.status);
     }
     // 장애가 실제로 있었다: 30초 앞뒤 바퀴 여덟 번이 모두 UNKNOWN이었다

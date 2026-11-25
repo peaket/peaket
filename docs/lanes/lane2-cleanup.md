@@ -241,3 +241,9 @@
 - F-05-3 구현 리뷰 IR-10(낮음): 대조 한 틱이 100개를 차례로 2초 데드라인으로 보내 최악 200초까지 늘어난다. 한 틱 시간 한도나 병렬 상한을 두고, `queue.proto`의 1초 주석과 클라이언트 2초도 맞춘다
 
 - ~~F-05-2 뒤 web reflow wallet-enroll·wallet-live (CI 45267206465)~~ — **닫힘(2026-11-24, 073dc18c3·c3175c7b5)**: wallet-enroll은 live 목록·회차 요약 대역과 UUIDv7 티켓으로 바꾸고, wallet-live O-T52 ⑥은 데스크톱 안내 뒤 [그래도 이 기기에 등록]을 누르게 고쳤다. `web / reflow`·`visual`·`console-csp` 모두 통과(9ebc100ec·c3175c7b5). 남은 것은 서비스 워커가 제어하는 페이지의 등록·갱신을 이 두 시험이 덮지 않는 점(wallet-sw가 따로 본다)
+- F-02-5 시험 리뷰 TR-06(중간): 적용 확인 행을 ops-svc 파드 둘이 동시에 볼 때 `FOR UPDATE SKIP LOCKED`로 한 번만 잡는지 시험이 없다(계획 14절 6, ADR-0365 결정 14). 실제 PostgreSQL에서 `CheckSettingsApply` 둘을 겹쳐 `opened` 합 1·경보 1건·행 한 번을 보고, 0026 색인을 `EXPLAIN`으로 확인한다.
+- F-02-5 시험 리뷰 TR-07(낮음): `delivery`가 마지막 사건 행(되돌리기·자동 만료)을 보이는지 HTTP에서 단언하지 않는다(계획 B16, ADR-0365 결정 14). 되돌리기·만료 뒤 `applyStatus`·`targetCount`·`unackedTargets`를 새 행으로 본다.
+- F-02-5 시험 리뷰 TR-08(낮음): queue-svc 대기 인원을 `seq`·`serving`·`skipped` 한 슬롯에서 한 번에 읽는지(원자적 Lua) 실제 Valkey에서 serving 전진과 겹쳐 재현하지 않는다(계획 8.3).
+- F-02-5 시험 리뷰 TR-09(낮음): `main.ts` 원문 정규식 시험은 주석 속 죽은 코드로도 통과할 수 있다. TR-01·TR-04의 실제 시작/조립 시험이 생기면 원문 검사는 보조로만 둔다(계획 13절).
+- F-02-5 시험 리뷰 TR-10(낮음): core-svc 관제 조치는 `not.toBe(503)`, 내부 경로는 `not.toBe(503)`·`Retry-After` 없음만 본다. 관제는 기대 상태(200 등), 내부는 401/403을 정확히 단언한다(ADR-0365 결정 17).
+- F-02-5 시험 리뷰 TR-11(낮음): 계획 9절은 C-T51을 'PostgreSQL·Kafka'라 적었지만 통합은 후기 저장소를 메모리로 쓴다. **닫음(2026-11-25)**: 계획 9절을 'Kafka(+메모리 후기 저장소)'로 고쳤다(판정은 그대로).

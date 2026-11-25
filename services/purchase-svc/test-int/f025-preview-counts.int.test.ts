@@ -200,10 +200,12 @@ describe('C-T6 ① purchase-svc PreviewControl 센 값 = 같은 시각 좌석 Re
     expect(byKey.purchaseSessions?.value).toBe(d.purchaseSessions);
     expect(byKey.paymentSessions?.value).toBe(d.paymentSessions);
     expect(byKey.holdsPerSecond5m?.value).toBe(d.holdsPerSecond5m);
-    // 결제 접수: 센 값이면 직접 센 값과 같아야 하고, 아니면 no-source(세는 칸이 없다는 구현 판단, ADR-0365 결정 16)만 된다. 0으로 덮지 않는다
-    const accepts = byKey.paymentAcceptsPerSecond5m;
-    if (accepts) expect(accepts.value).toBe(d.paymentAcceptsPerSecond5m);
-    else expect(r.unavailable).toContainEqual({ key: 'paymentAcceptsPerSecond5m', reason: 'no-source' });
+    // 결제 접수는 payment_attempt.accepted_at(원천이 있다)에서 직접 센다: 센 값이어야 하고 그 값은 직접 센 값과 같다.
+    // no-source로 두려면 원천(칸·색인)이 없다는 것을 이 세계에서 먼저 보여야 하는데, 아래 seedAccepts가 그 원천을 채운다(TR-05)
+    expect(d.accepts).toBe(3);
+    expect(byKey.paymentAcceptsPerSecond5m?.value).toBe(d.paymentAcceptsPerSecond5m);
+    expect(byKey.paymentAcceptsPerSecond5m?.value).toBe(3 / PER_SECOND_DIVISOR);
+    expect(r.unavailable).not.toContainEqual({ key: 'paymentAcceptsPerSecond5m', reason: 'no-source' });
     expect(r.counts.length + r.unavailable.length).toBe(KEYS.length);
     for (const c of r.counts) {
       expect(c.measuredAtMs).toBeGreaterThanOrEqual(t0 - 1_000);
@@ -215,9 +217,14 @@ describe('C-T6 ① purchase-svc PreviewControl 센 값 = 같은 시각 좌석 Re
 
   test('C-T6 ① 아무 기록도 세션도 없는 회차는 센 값 0이다(원천이 있고 0을 셌을 때)', async () => {
     const e = uuidv7(systemClock);
-    const r = await previewOf(e, ['purchaseSessions', 'paymentSessions', 'holdsPerSecond5m']);
+    const r = await previewOf(e);
     expect(r.unavailable).toEqual([]);
-    expect(Object.fromEntries(r.counts.map((c) => [c.key, c.value]))).toEqual({ purchaseSessions: 0, paymentSessions: 0, holdsPerSecond5m: 0 });
+    expect(Object.fromEntries(r.counts.map((c) => [c.key, c.value]))).toEqual({
+      purchaseSessions: 0,
+      paymentSessions: 0,
+      holdsPerSecond5m: 0,
+      paymentAcceptsPerSecond5m: 0,
+    });
   });
 });
 
