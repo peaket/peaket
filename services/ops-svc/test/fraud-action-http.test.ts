@@ -648,7 +648,7 @@ describe('F-04-13 FRAUD_ACTION 조치·승인', () => {
 
     const expiredCase = await seedCase(base);
     const r3 = await actionRequest(expiredCase.caseId, who, { fraudAction: 'RESTRICT', accountIds: [A(50)], reason: '제한', restrictionEndsAt: iso(NOW + 30 * DAY) });
-    clock.advance(6 * DAY);
+    clock.advance(8 * DAY);
     await tick('expireDue');
     expect(json(await getCase(expiredCase.caseId, who)).status).toBe('INVESTIGATING');
     expect(locks.releases.some((r) => r.accountIds.includes(A(50)) && r.releaseReason === 'ACTION_CLOSED')).toBe(true);
@@ -1017,7 +1017,7 @@ describe('F-04-13 표 취소·환급·마감', () => {
       members: [memberOf(A(203), { appealResult: 'REJECTED', actionNotifiedAtMs: NOW - 10 * DAY, objectionResult: 'SUBMITTED', objectionReceivedAtMs: NOW - DAY })],
       events: [
         { seq: 1, kind: 'CREATED', actorId: id(0x900), note: null, detail: null, occurredAtMs: NOW - DAY },
-        { seq: 2, kind: 'ACTION_EXECUTED', actorId: id(0x900), note: null, detail: { action: 'CANCEL_TICKETS', results: [{ ticketId: T(203), outcome: 'ACCEPTED' }] }, occurredAtMs: NOW - DAY },
+        { seq: 2, kind: 'ACTION_EXECUTED', actorId: id(0x900), note: null, detail: { action: 'CANCEL_TICKETS', results: [{ ticketId: T(203), outcome: 'ACCEPTED' }], targets: [{ ticketId: T(203), payerAccountId: A(203), holderAccountId: A(203) }] }, occurredAtMs: NOW - DAY },
       ],
     });
     restrictionState.set(A(203), { caseId: c.caseId, accountId: A(203), restrictionId: randomUUID(), untilMs: NOW + 30 * DAY, version: 1, state: 'ACTIVE' });
@@ -1331,7 +1331,7 @@ describe('F-04-13 구현 리뷰 반영', () => {
       ],
       events: [
         { seq: 1, kind: 'CREATED', actorId: id(0x900), note: null, detail: null, occurredAtMs: NOW - DAY },
-        { seq: 2, kind: 'ACTION_EXECUTED', actorId: id(0x900), note: null, detail: { action: 'CANCEL_TICKETS', results: [{ ticketId: T(320), outcome: 'ACCEPTED' }, { ticketId: T(321), outcome: 'ACCEPTED' }] }, occurredAtMs: NOW - 2 * DAY },
+        { seq: 2, kind: 'ACTION_EXECUTED', actorId: id(0x900), note: null, detail: { action: 'CANCEL_TICKETS', results: [{ ticketId: T(320), outcome: 'ACCEPTED' }, { ticketId: T(321), outcome: 'ACCEPTED' }], targets: [{ ticketId: T(320), payerAccountId: A(320), holderAccountId: A(320) }, { ticketId: T(321), payerAccountId: A(321), holderAccountId: A(321) }] }, occurredAtMs: NOW - 2 * DAY },
       ],
     });
     priorityCalls.length = 0;
