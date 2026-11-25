@@ -459,7 +459,8 @@ export function checkCollectorConfig(root) {
       const pi = pr.indexOf(PII);
       const f = definedIn(['service', 'pipelines', p, 'processors']);
       if (li < 0) bad(f, `로그 파이프라인 ${p}에 Loki 라벨 처리기 ${LOKI_LABELS}가 없다`);
-      else if (pi < 0 || li < pi || li > pr.length - 2) bad(f, `로그 파이프라인 ${p}의 Loki 라벨 처리기 차례가 2차 마스킹 뒤·묶기 앞이 아니다(${pr.join(', ')})`);
+      else if (pi >= 0 && (li < pi || li > pr.length - 2)) bad(f, `로그 파이프라인 ${p}의 Loki 라벨 처리기 차례가 2차 마스킹 뒤·묶기 앞이 아니다(${pr.join(', ')})`);
+      // 2차 마스킹 처리기가 없으면 위의 파이프라인 검사가 이미 막았다(막음 줄을 겹쳐 내지 않는다)
     }
   }
   common(gateway, (path) => definedIn(path));
