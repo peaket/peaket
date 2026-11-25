@@ -416,7 +416,7 @@ describe('F-04-12 조사 도메인', () => {
     expect(() => clustersFromForensics(withoutFingerprint, { eventId: id(0x200), generation: 1, snapshotVersion: 1, createdAtMs: NOW })).toThrow();
   });
 
-  test('FX-T15 ② [ASVS v5.0.0-2.1.2] 계정 변경·소명 판단은 입력 사건을 바꾸지 않는다', () => {
+  test('FX-T15 ⑥ [ASVS v5.0.0-2.1.2] 계정 변경·소명 판단은 입력 사건을 바꾸지 않는다', () => {
     const deepFreeze = <T,>(v: T): T => {
       if (v !== null && typeof v === 'object') {
         Object.freeze(v);

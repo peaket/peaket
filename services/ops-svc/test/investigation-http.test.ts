@@ -290,7 +290,7 @@ beforeAll(async () => {
   await store.putSnapshot(snapshotOf(EVENT));
   await store.putRun(runOf(EVENT));
   await store.putClusters(EVENT, 1, [
-    clusterOf(CL_MAIN, [A(1), A(2), A(3)], { purchaseCount: 27 }),
+    clusterOf(CL_MAIN, [A(1), A(2), A(3)], { purchaseCount: 27, createdAtMs: NOW - 10 * 60_000 }),
     clusterOf(CL_PATCH, [A(4), A(5), A(6)], { purchaseCount: 18 }),
     clusterOf(CL_CLEAR, [A(7), A(8), A(9)], { purchaseCount: 12 }),
     clusterOf(CL_APPEAL, [A(10), A(11), A(12)], { purchaseCount: 9 }),
@@ -606,7 +606,7 @@ describe('F-04-12 조사 HTTP', () => {
     expect(out.appealRequestId).toBe(idem);
     const lock = locks.sets.at(-1)!;
     expect(lock).toMatchObject({ caseId, eventId: EVENT, accountIds: [A(10), A(11)], expiresAtMs: NOW + 14 * DAY });
-    expect(lock.version).toBeGreaterThanOrEqual(1);
+    expect(lock.version).toBe(1);
     const detail = await send('GET', `/v1/ops/fraud-cases/${caseId}`, who);
     expect(detail.statusCode, detail.payload).toBe(200);
     expectNoStore(detail);
@@ -696,6 +696,8 @@ describe('F-04-12 조사 HTTP', () => {
       expect(second.statusCode, second.payload).toBe(201);
       expectNoStore(second);
       expect(json(second).lockExpiresAt).toBe(iso(clock.now() + 14 * DAY));
+      // 두 번째 요청 시점 사건 판은 4다(첫 요청 1→2, 빼기 2→3, 더하기 3→4)
+      expect(locks.sets.filter((s) => s.caseId === caseId).at(-1)!.version).toBe(4);
       const detail = await send('GET', `/v1/ops/fraud-cases/${caseId}`, who);
       const members = json(detail).members as Array<Record<string, unknown>>;
       // A(13)의 기한은 첫 요청 + 14일 그대로다
@@ -749,6 +751,11 @@ describe('F-04-12 조사 HTTP', () => {
     const ratioItems = json(byRatio).items as Array<Record<string, unknown>>;
     expect(ratioItems[0]!.purchaseCount).toBe(27);
     expect(ratioItems.at(-1)!.purchaseCount).toBe(1);
+    // 가장 최근 만든 묶음이 먼저 온다(CL_MAIN만 createdAt이 더 최근이다)
+    const latest = await send('GET', `/v1/ops/fraud-clusters?eventId=${EVENT}&sort=LATEST`, who);
+    expect(latest.statusCode, latest.payload).toBe(200);
+    const latestItems = json(latest).items as Array<Record<string, unknown>>;
+    expect(latestItems[0]).toMatchObject({ clusterId: CL_MAIN, createdAt: iso(NOW - 10 * 60_000) });
     const detail = await send('GET', `/v1/ops/fraud-clusters/${CL_MAIN}`, who);
     expect(detail.statusCode, detail.payload).toBe(200);
     expectNoStore(detail);
@@ -990,6 +997,8 @@ describe('F-04-12 조사 HTTP', () => {
     });
     expect(second.statusCode, second.payload).toBe(201);
     expect(json(second).lockExpiresAt).toBeNull();
+    // 첫 요청 1→2, 빼기 2→3, 더하기 3→4 뒤의 두 번째 요청이다
+    expect(locks.sets.filter((s) => s.caseId === repeatId).at(-1)!.version).toBe(4);
   });
 
   test('FX-T16 ⑩ [ASVS v5.0.0-14.2.2] 조사 경로 성공 응답은 Cache-Control no-store다', async () => {
