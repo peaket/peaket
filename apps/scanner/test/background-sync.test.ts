@@ -90,11 +90,13 @@ test('O-T11 업로드가 실패하면 일회성 Background Sync를 예비로 등
   assert.equal(b.shouldRegisterBackgroundSync({ pending: 3, failed: true, hasRegistration: true, stopped: 'device-revoked' }), false);
   assert.equal(b.shouldRegisterBackgroundSync({ pending: 3, failed: true, hasRegistration: true, stopped: 'device-unregistered' }), false);
 
+  let attempts = 0;
   let calls = 0;
   let fail = false;
   const guard = new b.BackgroundSyncGuard({
     register: async (tag) => {
       assert.equal(tag, b.BACKGROUND_SYNC_TAG);
+      attempts += 1;
       if (fail) throw new Error('동기화 등록이 막혔다');
       calls += 1;
     },
@@ -102,14 +104,23 @@ test('O-T11 업로드가 실패하면 일회성 Background Sync를 예비로 등
   assert.equal(await guard.onFailure({ pending: 2, failed: true }), true);
   assert.equal(await guard.onFailure({ pending: 2, failed: true }), false, '같은 실패에 두 번 등록하지 않는다');
   assert.equal(calls, 1);
+  assert.equal(attempts, 1, '성공한 등록은 한 번만 부른다');
   assert.equal(await guard.onFailure({ pending: 0, failed: false }), false, '성공하면 등록 표시를 푼다');
   assert.equal(await guard.onFailure({ pending: 1, failed: true }), true, '다음 실패에는 다시 등록한다');
   assert.equal(calls, 2);
+  assert.equal(attempts, 2);
   fail = true;
   guard.reset();
   assert.equal(await guard.onFailure({ pending: 1, failed: true }), false, '등록 실패는 던지지 않고 false다');
-  assert.equal(await guard.onFailure({ pending: 1, failed: true }), true, '실패한 등록은 다음 기회에 다시 시도한다');
+  assert.equal(attempts, 3, '실패한 등록은 등록 표시를 남기지 않는다');
+  // 같은 실패가 이어져도 다음 onFailure는 다시 시도한다(시도는 늘고 성공은 아니다)
+  assert.equal(await guard.onFailure({ pending: 1, failed: true }), false, '같은 실패가 이어지면 false다');
+  assert.equal(calls, 2);
+  assert.equal(attempts, 4, '실패한 등록은 다음 기회에 다시 시도한다');
+  fail = false;
+  assert.equal(await guard.onFailure({ pending: 1, failed: true }), true, '다음 기회에 성공하면 true다');
   assert.equal(calls, 3);
+  assert.equal(attempts, 5);
 });
 
 test('O-T11 Background Sync가 3번 시도하고 포기해도 화면이 다시 켜지면 남은 큐를 바로 올린다', async () => {
