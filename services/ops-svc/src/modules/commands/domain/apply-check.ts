@@ -13,6 +13,10 @@ export const APPLY_CHECK_RECHECK_MS = 60_000;
 export const APPLY_CHECK_RECHECK_UNTIL_MS = 630_000;
 /** 정비 바퀴가 적용 확인을 보는 간격(정본 5초 [가정], ADR-0365 결정 10) */
 export const APPLY_CHECK_ROUND_MS = 5_000;
+/** 한 바퀴가 행을 잡은 동안 다른 파드가 같은 행을 고르지 않게 미루는 폭(5분 [가정]) */
+export const APPLY_CHECK_CLAIM_MS = 5 * 60_000;
+/** 10분 30초를 넘긴 UNCONFIRMED를 due에서 빼기 위해 다음 볼 시각을 미루는 폭(10년, 사실상 정지) */
+export const APPLY_CHECK_STOPPED_MS = 10 * 365 * 24 * 60 * 60_000;
 /** Prometheus 즉시 질의 한 번의 시간 한도(2초 [가정]) */
 export const APPLY_CHECK_QUERY_TIMEOUT_MS = 2_000;
 export const APPLY_STATUSES = ['OUTBOX_WAITING', 'CHECKING', 'CONFIRMED', 'UNCONFIRMED', 'UNKNOWN'] as const;
@@ -89,9 +93,10 @@ export function nextApplyCheck(
 function finish(row: ApplyCheckRow, probe: ProbeResult | undefined): { readonly row: ApplyCheckRow; readonly alert?: 'OPEN' | 'RESOLVE' } {
   const now = row.updatedAtMs;
   const sent = row.sentAtMs!;
-  // 10분 30초를 넘긴 UNCONFIRMED는 더 보지 않고 열린 채로 멈춘다(맞아도 닫지 않는다, B11)
+  // 10분 30초를 넘긴 UNCONFIRMED는 더 보지 않고 열린 채로 멈춘다(맞아도 닫지 않는다, B11).
+  // due에서 빠지도록 다음 볼 시각을 사실상 미래(10년)로 미룬다. 지난 시각을 두면 매 바퀴 같은 행을 다시 골라 새 행을 굶긴다(IR-01)
   if (row.status === 'UNCONFIRMED' && now > sent + APPLY_CHECK_RECHECK_UNTIL_MS) {
-    return { row: { ...row, nextCheckAtMs: sent + APPLY_CHECK_RECHECK_UNTIL_MS + 1 } };
+    return { row: { ...row, nextCheckAtMs: now + APPLY_CHECK_STOPPED_MS } };
   }
   if (!probe) return { row: { ...row, status: row.status === 'OUTBOX_WAITING' ? 'CHECKING' : row.status, nextCheckAtMs: now + APPLY_CHECK_ROUND_MS } };
   if (!probe.ok) {
@@ -116,9 +121,9 @@ function finish(row: ApplyCheckRow, probe: ProbeResult | undefined): { readonly 
   if (inWindow) {
     return { row: { ...row, status: 'CHECKING', reason: undefined, pods, targetCount, ackedCount, nextCheckAtMs: Math.min(now + APPLY_CHECK_ROUND_MS, sent + APPLY_CHECK_WINDOW_MS) } };
   }
-  // 10분 30초를 넘기면 더 보지 않고 열린 채로 멈춘다(다음 볼 시각을 아주 뒤로 둔다)
+  // 10분 30초를 넘기면 더 보지 않고 열린 채로 멈춘다(다음 볼 시각을 사실상 미래로 둔다, IR-01)
   if (now > sent + APPLY_CHECK_RECHECK_UNTIL_MS) {
-    return { row: { ...row, status: 'UNCONFIRMED', reason: undefined, pods, targetCount, ackedCount, nextCheckAtMs: sent + APPLY_CHECK_RECHECK_UNTIL_MS + 1 } };
+    return { row: { ...row, status: 'UNCONFIRMED', reason: undefined, pods, targetCount, ackedCount, nextCheckAtMs: now + APPLY_CHECK_STOPPED_MS } };
   }
   if (row.alertOpen) return { row: { ...row, status: 'UNCONFIRMED', reason: undefined, pods, targetCount, ackedCount, nextCheckAtMs: now + APPLY_CHECK_RECHECK_MS } };
   return {

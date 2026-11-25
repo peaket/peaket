@@ -6,7 +6,7 @@ export { LEADER_STORE, LEADER_CYCLE_SNAPSHOTS, type Elector, type LeaderControlR
 export { PrometheusControlInputs } from './adapters/prometheus-control-inputs.js';
 // 제어 gRPC 받는 쪽(F-02-1 OPS-300, ADR-0365 결정 2·5·6)
 export { ApplyLeaderControl, type ApplyLeaderControlInput, type ApplyLeaderControlResult, type LeaderFence } from './application/apply-control.js';
-export { ADMISSION_PREVIEW_KEYS, LeaderCycleSnapshots, PREVIEW_MAX_KEYS, PreviewLeader, type PreviewLeaderResult } from './application/preview-leader.js';
+export { ADMISSION_PREVIEW_KEYS, LeaderCycleSnapshots, PREVIEW_MAX_KEYS, PreviewLeader, SERVING_RATE_WINDOW_MS, servingRateOf, type PreviewLeaderResult, type ServingSample } from './application/preview-leader.js';
 export type { PreviewCount, PreviewUnavailable } from './domain/preview-types.js';
 export { LEADER_CONTROL_KINDS, LEADER_CONTROL_PLATFORM, LeaderControlRejected, PG_GROUP_KEY, leaderControlOf, type LeaderControlKind, type LeaderControlWrite } from './domain/control.js';
 export { CONTROL_WRITE_LUA } from './adapters/leader-lua.js';

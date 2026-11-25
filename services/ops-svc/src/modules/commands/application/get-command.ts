@@ -17,7 +17,7 @@ export class GetCommand {
   async execute(commandId: string): Promise<Command> {
     const command = await this.store.find(commandId);
     if (!command) throw new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
-    if (isSettingCommand(command.type) && this.applyChecks) {
+    if ((isSettingCommand(command.type) || command.type === 'PG_ASSIGN') && this.applyChecks) {
       const row = await this.applyChecks.latestOf(command.commandId);
       if (row) return { ...command, delivery: applyCheckViewOf(row) };
     }

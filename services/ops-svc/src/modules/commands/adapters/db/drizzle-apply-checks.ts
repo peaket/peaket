@@ -1,9 +1,9 @@
 // 적용 확인 행 저장소(ops DB command_apply_check, F-02-5 OPS-300, ADR-0365 결정 14, 마이그레이션 0026).
-// due는 다음 볼 시각이 지난 활성 행을 오래된 순으로 준다. 파드 여럿이 겹치는 경합은 TR-06 정리 목록이다.
+// due는 다음 볼 시각이 지난 활성 행을 오래된 순으로 잡아 준다(FOR UPDATE SKIP LOCKED). 잡은 채 5분이 지나면 다시 due에 든다.
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Database } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
-import type { ApplyCheckRow, ApplyCheckStage, ApplyStatus } from '../../domain/apply-check.js';
+import { APPLY_CHECK_CLAIM_MS, type ApplyCheckRow, type ApplyCheckStage, type ApplyStatus } from '../../domain/apply-check.js';
 import type { ApplyCheckStore } from '../../domain/ports.js';
 
 interface Row {
@@ -50,13 +50,23 @@ export class DrizzleApplyChecks implements ApplyCheckStore {
   constructor(@Inject(DATABASE) private readonly database: Database) {}
 
   async due(nowMs: number, limit: number): Promise<readonly ApplyCheckRow[]> {
+    // 한 문장으로 고르고 잡는다(FOR UPDATE SKIP LOCKED, 계획 14.6·IR-03): 다른 파드는 잡힌 행을 건너뛰고,
+    // 잡은 파드가 죽으면 5분 뒤 다시 due에 든다. 반환 행의 next_check_at은 잡은 시각 + 5분이다.
     const rows = (
       await this.database.db.execute(sql`
-        select command_id, stage, version, message_key, outbox_id, service, status, written_at, sent_at,
-               target_count, acked_count, pods, alert_open, reason, next_check_at, updated_at
-        from command_apply_check
-        where status in ('OUTBOX_WAITING', 'CHECKING', 'UNCONFIRMED', 'UNKNOWN') and next_check_at <= ${new Date(nowMs)}::timestamptz
-        order by next_check_at, command_id limit ${limit}`)
+        with picked as (
+          select command_id, stage, version
+          from command_apply_check
+          where status in ('OUTBOX_WAITING', 'CHECKING', 'UNCONFIRMED', 'UNKNOWN') and next_check_at <= ${new Date(nowMs)}::timestamptz
+          order by next_check_at, command_id limit ${limit}
+          for update skip locked
+        )
+        update command_apply_check a
+        set next_check_at = ${new Date(nowMs + APPLY_CHECK_CLAIM_MS)}::timestamptz, updated_at = ${new Date(nowMs)}::timestamptz
+        from picked p
+        where a.command_id = p.command_id and a.stage = p.stage and a.version = p.version
+        returning a.command_id, a.stage, a.version, a.message_key, a.outbox_id, a.service, a.status, a.written_at, a.sent_at,
+                  a.target_count, a.acked_count, a.pods, a.alert_open, a.reason, a.next_check_at, a.updated_at`)
     ).rows as unknown as Row[];
     return rows.map(rowOf);
   }

@@ -4,6 +4,24 @@ import type { PreviewUnavailable } from '../domain/preview-types.js';
 
 export const ADMISSION_PREVIEW_KEYS = ['currentTarget', 'slotsUsed', 'soonAdmitted', 'inFlight', 'admitRatio', 'avgDwellSeconds', 'servingRateCap', 'servingRate'] as const;
 export const PREVIEW_MAX_KEYS = 16;
+/** servingRate를 재는 창(정본 '최근 10초', ADR-0365 결정 11) */
+export const SERVING_RATE_WINDOW_MS = 10_000;
+
+export interface ServingSample {
+  readonly atMs: number;
+  readonly serving: number;
+}
+
+/** 최근 10초 창의 serving 증가 속도(초당). 표본이 2개 미만이거나 창이 0초면 undefined(no-source) */
+export function servingRateOf(samples: readonly ServingSample[], nowMs: number): number | undefined {
+  const window = samples.filter((s) => s.atMs >= nowMs - SERVING_RATE_WINDOW_MS && s.atMs <= nowMs);
+  if (window.length < 2) return undefined;
+  const first = window[0]!;
+  const last = window[window.length - 1]!;
+  const seconds = (last.atMs - first.atMs) / 1_000;
+  if (seconds <= 0) return undefined;
+  return Math.max(0, (last.serving - first.serving) / seconds);
+}
 
 interface Cycle {
   readonly atMs: number;

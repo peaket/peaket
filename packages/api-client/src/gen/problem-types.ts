@@ -306,6 +306,7 @@ export type ProblemType =
   | 'review-already-written'
   | 'review-eligibility-unavailable'
   | 'review-event-cancelled'
+  | 'review-feature-off'
   | 'review-hidden-by-notice'
   | 'review-not-author'
   | 'review-not-ended'
@@ -716,6 +717,7 @@ export const PROBLEM_TYPES = {
   'review-already-written': { status: 409, title: "이 회차의 후기를 이미 썼습니다" },
   'review-eligibility-unavailable': { status: 503, title: "후기 자격을 잠시 확인할 수 없습니다" },
   'review-event-cancelled': { status: 403, title: "취소된 회차에는 후기를 쓸 수 없습니다" },
+  'review-feature-off': { status: 503, title: "후기 기능이 꺼져 있습니다(명령 9)" },
   'review-hidden-by-notice': { status: 409, title: "통보로 가린 후기는 고칠 수 없습니다" },
   'review-not-author': { status: 403, title: "내 후기만 고칠 수 있습니다" },
   'review-not-ended': { status: 403, title: "공연이 끝난 뒤에 후기를 쓸 수 있습니다" },

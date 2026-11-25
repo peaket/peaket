@@ -32,6 +32,7 @@ import {
 import { pgGroupOf, pgWithRatio, type PgFields } from '../domain/pg-ratio.js';
 import { CONTROL_INPUTS, LEADER_CYCLE_SNAPSHOTS, type Control, type ControlInputsReader, type ControlSnapshot, ELECTOR, type Elector, type EventPlan, LEADER_STORE, type LeaderStore, PUBLISHER, type Publisher, SEED_REVEALER, type SeedRevealer } from '../domain/ports.js';
 import type { LeaderCycleSnapshots } from './preview-leader.js';
+import { SERVING_RATE_WINDOW_MS, servingRateOf, type ServingSample } from './preview-leader.js';
 import { drandRoundTimeMs, SEED_REVEAL_AFTER_MS } from '@peaket/shuffle';
 import { type ControlEvent, LEADER_METRICS, type LeaderMetrics } from './leader-metrics.js';
 
@@ -93,6 +94,8 @@ export class AdmissionLeader {
   readonly #confirming = new Map<string, Promise<void>>();
   /** 직전 주기의 값(나누기의 수요와 감축 확인의 예매 단계 인원, ADR-0226 결정 10) */
   readonly #last = new Map<string, { waiting: number; slots: number; soon: number; inFlight: number; ratio: number; saleState: string; gated: boolean }>();
+  /** 회차마다 최근 10초 serving 표본(IR-07). servingRate는 이 창의 실제 증가 속도다 */
+  readonly #servingSamples = new Map<string, ServingSample[]>();
   /** 회차마다 마지막으로 쓴 목표(준비가 실패한 회차의 몫으로 합산에 남긴다) */
   readonly #lastTargets = new Map<string, number>();
   /** 회차마다 아직 쓰지 못한 전진 몫(소수 몫을 주기마다 쌓는다, ADR-0226 결정 10) */
@@ -168,6 +171,7 @@ export class AdmissionLeader {
         this.#last.clear();
         this.#lastTargets.clear();
         this.#rateCredit.clear();
+        this.#servingSamples.clear();
       }
       // 새 세대는 회차와 무관한 세대 키(q:{admission}:leader)부터 올린다(RV-02, ADR-0056 결정 3). 옛 리더의 전체 범위 제어 쓰기와 오픈 전 회차 쓰기가 FENCED가 된다
       if (this.#platformBumped !== gen && this.store.bumpPlatform) {
@@ -190,6 +194,7 @@ export class AdmissionLeader {
       for (const p of preps) {
         const last = this.#last.get(p.eventId);
         if (!last) continue;
+        const servingRate = servingRateOf(this.#servingSamples.get(p.eventId) ?? [], now);
         this.snapshots?.record(p.eventId, now, {
           currentTarget: shares.get(p.eventId)?.target ?? this.#lastTargets.get(p.eventId) ?? 0,
           slotsUsed: last.slots,
@@ -197,7 +202,7 @@ export class AdmissionLeader {
           inFlight: last.inFlight,
           admitRatio: last.ratio,
           servingRateCap: RATE_CAP_PER_SEC,
-          servingRate: shares.get(p.eventId)?.rate ?? 0,
+          ...(servingRate !== undefined ? { servingRate } : {}),
         });
       }
     } catch (err) {
@@ -297,6 +302,10 @@ export class AdmissionLeader {
       });
       if (r.kind === 'FENCED') return this.#fence(gen, eventId);
       this.#last.set(eventId, { waiting: r.waiting, slots: r.slots, soon: r.soon, inFlight: r.inFlight, ratio: r.ratio, saleState: r.saleState, gated: r.gated === 1 });
+      // 실제 최근 10초 serving 증가 속도를 위해 이번 주기 표본을 남긴다(IR-07)
+      const samples = (this.#servingSamples.get(eventId) ?? []).filter((s) => s.atMs >= now - SERVING_RATE_WINDOW_MS);
+      samples.push({ atMs: now, serving: r.serving });
+      this.#servingSamples.set(eventId, samples);
       this.#lastTargets.set(eventId, share.target);
       this.#saleStates.set(eventId, r.saleState);
       // 모르는 판매 상태는 전진 0이 된다. 조용히 멈추지 않게 남긴다

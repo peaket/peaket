@@ -314,6 +314,11 @@ export class DrizzleCommandStore extends CommandStoreBase {
     super();
   }
 
+  /** 온세일 표본 작업(IR-02)이 설정 사건을 낼 때 쓰는 public 문. writer의 setting과 같은 트랜잭션 함수를 연다 */
+  async setting(s: SettingChange): Promise<string> {
+    return this.database.transaction((tx) => publishSetting(tx, s));
+  }
+
   async replayOf(idem: CommandIdempotency, nowMs: number): Promise<string | undefined> {
     const since = new Date(nowMs - IDEMPOTENCY_RETENTION_MS);
     const [row] = (

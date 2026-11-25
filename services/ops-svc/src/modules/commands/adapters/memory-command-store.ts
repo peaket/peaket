@@ -23,7 +23,7 @@ import type { OutboxMessage } from '@peaket/platform';
 import type { SettingChange } from '../domain/ports.js';
 import { settingOutboxMessage } from './settings-outbox.js';
 import type { ApplyCheckRow } from '../domain/apply-check.js';
-import { ACTIVE_APPLY_STATUSES } from '../domain/apply-check.js';
+import { ACTIVE_APPLY_STATUSES, APPLY_CHECK_CLAIM_MS } from '../domain/apply-check.js';
 
 /** 메모리 Outbox 한 줄(설정 사건과 그 Kafka 메시지) */
 export interface MemoryOutboxSetting {
@@ -132,10 +132,15 @@ export class MemoryCommandStore extends CommandStoreBase {
   }
 
   async due(nowMs: number, limit: number): Promise<readonly ApplyCheckRow[]> {
-    return this.#applyChecks
-      .filter((r) => ACTIVE_APPLY_STATUSES.includes(r.status) && r.nextCheckAtMs <= nowMs)
-      .sort((a, b) => a.nextCheckAtMs - b.nextCheckAtMs)
+    const due = this.#applyChecks
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => ACTIVE_APPLY_STATUSES.includes(row.status) && row.nextCheckAtMs <= nowMs)
+      .sort((a, b) => a.row.nextCheckAtMs - b.row.nextCheckAtMs)
       .slice(0, limit);
+    // 두 파드가 같은 행을 동시에 보지 않게 due가 잡은 동안 다음 볼 시각을 미룬다(IR-03, 계획 14.6)
+    const claimUntil = nowMs + APPLY_CHECK_CLAIM_MS;
+    for (const { row, index } of due) this.#applyChecks[index] = { ...row, nextCheckAtMs: claimUntil, updatedAtMs: nowMs };
+    return due.map(({ row }) => ({ ...row, nextCheckAtMs: claimUntil, updatedAtMs: nowMs, pods: [...row.pods] }));
   }
 
   async save(row: ApplyCheckRow): Promise<void> {
