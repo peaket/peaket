@@ -1127,6 +1127,7 @@ describe('F-04-13 표 취소·환급·마감', () => {
   test('FX-T18 ⑥ 승인 대기 중 취소 마감이 지나면 요청은 EXPIRED이고 표는 바뀌지 않는다', async () => {
     const who = investigator();
     const c = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(211), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    seedTicket({ ticketId: T(211), payerAccountId: A(211) });
     const created = await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(211)], reason: '봇' });
     const approvalId = String(json(created).approvalId);
     clock.advance(CANCEL - clock.now());
