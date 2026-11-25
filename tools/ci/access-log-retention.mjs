@@ -112,14 +112,25 @@ export function purgePlan({ todayIso, partitionDays, retentionMonths, maxDropPer
   };
 }
 
-/** 복원한 저장소에 다시 적용할 파기. 스냅샷 시각 뒤에 실행된 DROPPED 기록만 대상이고, PLANNED·FAILED는 넣지 않는다. */
-export function reapplyPlan({ snapshotAtIso, records, partitionDays }) {
+/**
+ * 복원한 저장소에 다시 적용할 파기. 스냅샷 시각 뒤에 실행된 DROPPED 기록만 대상이고, PLANNED·FAILED는 넣지 않는다.
+ * partitions는 `{day, table}` 목록이다(되살아난 표·날짜만 지운다). 문자열이면 두 표 모두로 본다.
+ */
+export function reapplyPlan({ snapshotAtIso, records, partitions, partitionDays }) {
   const snapshot = Date.parse(snapshotAtIso);
   if (Number.isNaN(snapshot)) throw new Error(`스냅샷 시각을 읽지 못했다: ${snapshotAtIso}`);
-  const present = new Set((partitionDays ?? []).map((d) => {
-    parseDay(d);
-    return d;
-  }));
+  const present = new Set();
+  for (const p of partitions ?? partitionDays ?? []) {
+    if (typeof p === 'string') {
+      parseDay(p);
+      present.add(`${p}|access_log`);
+      present.add(`${p}|access_log_otel`);
+    } else {
+      parseDay(p.day);
+      if (!['access_log', 'access_log_otel'].includes(p.table)) throw new Error(`모르는 표다: ${p.table}`);
+      present.add(`${p.day}|${p.table}`);
+    }
+  }
   const drop = [];
   const skipped = [];
   const seen = new Set();
@@ -127,13 +138,14 @@ export function reapplyPlan({ snapshotAtIso, records, partitionDays }) {
     // 저장된 파기 기록에는 state가 있다. 오래된 기록처럼 state가 없으면 지운 기록으로 본다.
     if (r?.state !== undefined && r.state !== 'DROPPED') continue;
     parseDay(r.day);
+    if (!['access_log', 'access_log_otel'].includes(r.table)) throw new Error(`모르는 표다: ${r.table}`);
     const executed = Date.parse(r.executedAt);
     if (Number.isNaN(executed)) throw new Error(`파기 실행 시각을 읽지 못했다: ${r.executedAt}`);
     if (executed <= snapshot) {
       skipped.push({ day: r.day, reason: 'before-snapshot' });
       continue;
     }
-    if (!present.has(r.day)) {
+    if (!present.has(`${r.day}|${r.table}`)) {
       skipped.push({ day: r.day, reason: 'not-restored' });
       continue;
     }
@@ -212,18 +224,33 @@ export function checkAccessLogRetention(root) {
   const r = retention ?? {};
   if (r.purge?.retentionMonths !== canon.accessMonths) add(FILES.retention, `purge.retentionMonths가 ${canon.accessMonths}이 아니다`);
   if (r.purge?.graceDays !== 0) add(FILES.retention, 'purge.graceDays가 0이 아니다');
+  if (r.purge?.timeZone !== 'Asia/Seoul') add(FILES.retention, `purge.timeZone이 Asia/Seoul이 아니다(${r.purge?.timeZone})`);
+  if (r.purge?.schedule !== '0 5 * * *') add(FILES.retention, `purge.schedule이 05:00 KST(0 5 * * *)가 아니다(${r.purge?.schedule})`);
+  if (r.purge?.maxDropPerRun !== 40) add(FILES.retention, `purge.maxDropPerRun이 40이 아니다(${r.purge?.maxDropPerRun})`);
   if (r.purge?.auditRecordType !== 'ACCESS_LOG_PARTITION_PURGE') add(FILES.retention, 'purge.auditRecordType이 ACCESS_LOG_PARTITION_PURGE가 아니다');
   if (!Array.isArray(r.purge?.auditStates) || !['PLANNED', 'DROPPED', 'FAILED'].every((s) => r.purge.auditStates.includes(s))) add(FILES.retention, 'purge.auditStates에 PLANNED·DROPPED·FAILED가 없다');
   if (r.adminCopy?.retentionYears !== canon.adminYears) add(FILES.retention, `adminCopy.retentionYears가 ${canon.adminYears}이 아니다`);
   if (r.adminCopy?.recordType !== 'ADMIN_ACCESS_LOG') add(FILES.retention, 'adminCopy.recordType이 ADMIN_ACCESS_LOG가 아니다');
   if (r.adminCopy?.sourceFilter !== 'is_admin = 1') add(FILES.retention, 'adminCopy.sourceFilter가 is_admin = 1이 아니다');
+  if (r.adminCopy?.timeZone !== 'Asia/Seoul') add(FILES.retention, `adminCopy.timeZone이 Asia/Seoul이 아니다(${r.adminCopy?.timeZone})`);
+  if (r.adminCopy?.schedule !== '30 4 * * *') add(FILES.retention, `adminCopy.schedule이 04:30 KST(30 4 * * *)가 아니다(${r.adminCopy?.schedule})`);
+  if (r.adminCopy?.lookbackDays !== 1) add(FILES.retention, `adminCopy.lookbackDays가 1이 아니다(${r.adminCopy?.lookbackDays})`);
+  if (r.adminCopy?.sourceUser !== 'al_admin_reader') add(FILES.retention, `adminCopy.sourceUser가 al_admin_reader가 아니다(${r.adminCopy?.sourceUser})`);
+  for (const [key, value] of [
+    ['overdue', 'access_log_overdue_partitions'],
+    ['lastSuccess', 'access_log_purge_last_success_timestamp'],
+    ['adminCopyLastSuccess', 'access_log_admin_copy_last_success_timestamp'],
+    ['adminCopyRows', 'access_log_admin_copy_rows_total'],
+  ]) {
+    if (r.metrics?.[key] !== value) add(FILES.retention, `metrics.${key}가 ${value}가 아니다(${r.metrics?.[key]})`);
+  }
   if (r.backup?.snapshotRetentionDays !== canon.snapshotDays) add(FILES.retention, `backup.snapshotRetentionDays가 ${canon.snapshotDays}이 아니다`);
   if (r.backup?.reapplyWindowDays !== canon.reapplyDays) add(FILES.retention, `backup.reapplyWindowDays가 ${canon.reapplyDays}일이 아니다`);
   const lock = String(jobs?.copy?.objectLock ?? '');
   if (lock !== 'COMPLIANCE') add(FILES.jobs, `copy.objectLock이 COMPLIANCE가 아니다(${lock})`);
   const copyRet = /^P(\d+)M(\d+)D$/.exec(String(jobs?.copy?.retention ?? ''));
   if (!copyRet) add(FILES.jobs, `copy.retention이 P<개월>M<일>D 꼴이 아니다(${jobs?.copy?.retention})`);
-  else if (Number(copyRet[1]) !== canon.copyMonths || Number(copyRet[2]) !== canon.copyDays) add(FILES.jobs, `copy.retention(${jobs?.copy?.retention})이 정본(P${canon.copyMonths}M${canon.copyDays}D, ${canon.copyMonths}개월+${canon.copyDays}일)과 다르다`);
+  else if (Number(copyRet[1]) !== canon.copyMonths || Number(copyRet[2]) !== canon.copyDays) add(FILES.jobs, `copy.retention(${jobs?.copy?.retention})이 정본(P${canon.copyMonths}M${canon.copyDays}D, ${canon.copyMonths}개월+${canon.copyDays}일)과 다르다(설정 ${copyRet[1]}개월+${copyRet[2]}일)`);
   if (r.backup?.objectLockRetention !== jobs?.copy?.retention) add(FILES.retention, 'backup.objectLockRetention이 jobs.yaml의 copy.retention과 다르다');
 
   // 감사 접수 종류·경보·실행기

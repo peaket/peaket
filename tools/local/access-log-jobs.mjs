@@ -72,7 +72,14 @@ function chAuth(o) {
   const basic = Buffer.from(`${o['clickhouse-user']}:${o['clickhouse-password'] ?? ''}`).toString('base64');
   return { authorization: `Basic ${basic}` };
 }
-const chFetch = (url, o, init = {}) => fetchOk(url, { ...init, headers: { ...(init.headers ?? {}), ...(chAuth(o) ?? {}) } });
+const chFetch = async (url, o, init = {}) => {
+  try {
+    return await fetchOk(url, { ...init, headers: { ...(init.headers ?? {}), ...(chAuth(o) ?? {}) } });
+  } catch (e) {
+    // ClickHouse 응답 없음·401·500은 운영 실패(종료 1)다. 파일 읽기·인자 오류(2)와 가른다.
+    throw e instanceof OperationalError ? e : new OperationalError(e instanceof Error ? e.message : String(e));
+  }
+};
 
 async function postAudit(base, token, record) {
   const res = await fetch(base, {
@@ -151,32 +158,46 @@ async function purge(o, r) {
   }
   for (const t of targets) {
     const rows = await countRows(o, t.table, t.day);
+    let reconciled = false;
     try {
       await dropPartition(o, t.table, t.day);
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      // 이미 없는 파티션(다른 실행·TTL이 먼저 지움)은 실패가 아니라 DROPPED + reconciled다.
+      if (/doesn't exist|does not exist|not found|UNKNOWN_PARTITION/i.test(reason)) {
+        reconciled = true;
+      } else {
+        const short = reason.slice(0, 200);
+        const eventKey = `access-log-purge:v1:${t.day}:${t.table}:FAILED`;
+        try {
+          await postAudit(o['ops-audit'], o.token, {
+            eventKey,
+            recordType: 'ACCESS_LOG_PARTITION_PURGE',
+            recordId: uuidOf(eventKey),
+            payload: { day: t.day, table: t.table, state: 'FAILED', rows, reconciled: false, reason: short },
+            occurredAt: new Date().toISOString(),
+          });
+        } catch {
+          // 실패 기록도 못 남기면 아래 종료 1로 알린다.
+        }
+        out.failed.push({ day: t.day, table: t.table, reason: short });
+        continue;
+      }
+    }
+    try {
       const eventKey = `access-log-purge:v1:${t.day}:${t.table}:DROPPED`;
       await postAudit(o['ops-audit'], o.token, {
         eventKey,
         recordType: 'ACCESS_LOG_PARTITION_PURGE',
         recordId: uuidOf(eventKey),
-        payload: { day: t.day, table: t.table, state: 'DROPPED', rows, reconciled: false, reason: null },
+        payload: { day: t.day, table: t.table, state: 'DROPPED', rows, reconciled, reason: null },
         occurredAt: new Date().toISOString(),
       });
-      out.dropped.push({ day: t.day, table: t.table, rows });
+      out.dropped.push({ day: t.day, table: t.table, rows, reconciled });
+      if (reconciled) out.reconciled.push({ day: t.day, table: t.table });
     } catch (e) {
-      const reason = e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200);
-      const eventKey = `access-log-purge:v1:${t.day}:${t.table}:FAILED`;
-      try {
-        await postAudit(o['ops-audit'], o.token, {
-          eventKey,
-          recordType: 'ACCESS_LOG_PARTITION_PURGE',
-          recordId: uuidOf(eventKey),
-          payload: { day: t.day, table: t.table, state: 'FAILED', rows, reconciled: false, reason },
-          occurredAt: new Date().toISOString(),
-        });
-      } catch {
-        // 실패 기록도 못 남기면 아래 종료 1로 알린다.
-      }
-      out.failed.push({ day: t.day, table: t.table, reason });
+      // DROP은 됐는데 감사 접수가 실패했다. 이 실행은 실패로 끝내고 다음 실행이 reconciled로 정리한다.
+      out.failed.push({ day: t.day, table: t.table, reason: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200) });
     }
   }
   const stillOverdue = partitions.filter((p) => plan.expired.includes(p.day) && !out.dropped.some((d) => d.day === p.day && d.table === p.table)).length;
@@ -199,8 +220,12 @@ async function purge(o, r) {
 
 async function adminCopy(o, r) {
   const day = o.date;
-  parseDay(day);
-  const sql = `SELECT ts, source, request_id, event, result, provider, factors, failure, toString(client_ip) AS client_ip, user_agent, account_id, pod, seq, is_admin FROM access_log.access_log WHERE toYYYYMMDD(ts) = toYYYYMMDD(toDate('${day}')) AND is_admin = 1 ORDER BY ts, request_id FORMAT JSON`;
+  const { y, m0, d } = parseDay(day);
+  // --date는 KST 하루다. UTC 표(ts)에서는 전날 15:00부터 그날 15:00 전까지다.
+  const start = new Date(Date.UTC(y, m0, d) - 9 * 3_600_000);
+  const end = new Date(start.getTime() + 24 * 3_600_000);
+  const chTime = (t) => t.toISOString().slice(0, 19).replace('T', ' ');
+  const sql = `SELECT ts, source, request_id, event, result, provider, factors, failure, toString(client_ip) AS client_ip, user_agent, account_id, pod, seq, is_admin FROM access_log.access_log WHERE ts >= toDateTime64('${chTime(start)}', 3, 'UTC') AND ts < toDateTime64('${chTime(end)}', 3, 'UTC') AND is_admin = 1 ORDER BY ts, request_id FORMAT JSON`;
   const j = await (await chFetch(chQuery(o.clickhouse, sql), o)).json();
   const rows = j?.data ?? [];
   const out = { kind: 'access-log-admin-copy', date: day, read: rows.length, copied: 0, duplicates: 0, failed: [] };
@@ -256,29 +281,45 @@ async function reapply(o, r) {
   const text = readFileSync(o.purges, 'utf8');
   const records = text.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l));
   const partitions = await clickhousePartitions(o);
-  const plan = reapplyPlan({ snapshotAtIso: o['snapshot-at'], records, partitionDays: partitions.map((p) => p.day) });
-  const out = { kind: 'access-log-reapply', snapshotAt: o['snapshot-at'], reapplied: [], skipped: plan.skipped };
+  const plan = reapplyPlan({ snapshotAtIso: o['snapshot-at'], records, partitions });
+  const out = { kind: 'access-log-reapply', snapshotAt: o['snapshot-at'], reapplied: [], skipped: plan.skipped, failed: [] };
   for (const t of plan.drop) {
-    const eventKey = `access-log-purge:v1:${t.day}:${t.table}:REAPPLIED:${o['snapshot-at']}`;
-    await postAudit(o['ops-audit'], o.token, {
-      eventKey,
-      recordType: 'ACCESS_LOG_PARTITION_PURGE',
-      recordId: uuidOf(eventKey),
-      payload: { day: t.day, table: t.table, state: 'PLANNED', rows: null, reconciled: false, reason: 'reapply' },
-      occurredAt: new Date().toISOString(),
-    });
-    await dropPartition(o, t.table, t.day);
-    await postAudit(o['ops-audit'], o.token, {
-      eventKey: `${eventKey}:DROPPED`,
-      recordType: 'ACCESS_LOG_PARTITION_PURGE',
-      recordId: uuidOf(`${eventKey}:DROPPED`),
-      payload: { day: t.day, table: t.table, state: 'DROPPED', rows: null, reconciled: false, reason: 'reapply' },
-      occurredAt: new Date().toISOString(),
-    });
-    out.reapplied.push(t);
+    const baseKey = `access-log-purge:v1:${t.day}:${t.table}:REAPPLIED:${o['snapshot-at']}`;
+    try {
+      await postAudit(o['ops-audit'], o.token, {
+        eventKey: baseKey,
+        recordType: 'ACCESS_LOG_PARTITION_PURGE',
+        recordId: uuidOf(baseKey),
+        payload: { day: t.day, table: t.table, state: 'PLANNED', rows: null, reconciled: false, reason: 'reapply' },
+        occurredAt: new Date().toISOString(),
+      });
+      await dropPartition(o, t.table, t.day);
+      await postAudit(o['ops-audit'], o.token, {
+        eventKey: `${baseKey}:DROPPED`,
+        recordType: 'ACCESS_LOG_PARTITION_PURGE',
+        recordId: uuidOf(`${baseKey}:DROPPED`),
+        payload: { day: t.day, table: t.table, state: 'DROPPED', rows: null, reconciled: false, reason: 'reapply' },
+        occurredAt: new Date().toISOString(),
+      });
+      out.reapplied.push(t);
+    } catch (e) {
+      const reason = e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200);
+      try {
+        await postAudit(o['ops-audit'], o.token, {
+          eventKey: `${baseKey}:FAILED`,
+          recordType: 'ACCESS_LOG_PARTITION_PURGE',
+          recordId: uuidOf(`${baseKey}:FAILED`),
+          payload: { day: t.day, table: t.table, state: 'FAILED', rows: null, reconciled: false, reason },
+          occurredAt: new Date().toISOString(),
+        });
+      } catch {
+        // 감사도 실패하면 아래 종료 1로 알린다.
+      }
+      out.failed.push({ day: t.day, table: t.table, reason });
+    }
   }
   console.log(JSON.stringify(out));
-  return 0;
+  return out.failed.length > 0 ? 1 : 0;
 }
 
 async function fetchOk(url, init) {
