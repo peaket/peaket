@@ -9,7 +9,7 @@ import { cpus, freemem, platform, release, totalmem } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CH_PASSWORD, CH_USER, cleanupContainers, clickhouseClient, errText, freePort, sleep, startClickHouse, startKafka, waitFor } from './docker.mjs';
-import { allocCounts, judgeAccuracy, listOf, ms, percentile } from './lib.mjs';
+import { allocCounts, judgeAccuracy, listOf, ms, percentile, recordsToMs } from './lib.mjs';
 import { loadPlatform, loadContracts } from './modules.mjs';
 import { WORKER_TOPICS } from './records.mjs';
 import { GROUPS, expectedAccuracy, groupLag, kafkaOffsets, mergeManifests, readAccuracy, verifyRun, writeReport } from './verify.mjs';
@@ -174,6 +174,13 @@ async function runOne(o) {
 
   try {
     [kafka, ch] = await Promise.all([startKafka({ runId }), startClickHouse({ runId })]);
+    // 계획 §7.1: ClickHouse와 호스트 시계 차이를 재서 20ms를 넘으면 이 실행을 invalid로 둔다.
+    // 질의 왕복 시간이 섞이지 않게 보내기 전·받은 뒤의 중간 시각과 견준다(한쪽 끝만 쓰면 RTT가 차이로 보인다).
+    const clockT0 = Date.now();
+    const chNowMs = Number((await ch.query('SELECT toInt64(toUnixTimestamp64Milli(now64(3)))')).trim());
+    const clockT1 = Date.now();
+    run.clockSkewMs = chNowMs - Math.round((clockT0 + clockT1) / 2);
+    run.clockRoundTripMs = clockT1 - clockT0;
     run.brokers = kafka.brokers;
     run.clickhouse = ch.url;
     writeFileSync(runPath, `${JSON.stringify(run, null, 2)}\n`, 'utf8');
@@ -302,7 +309,7 @@ async function runOne(o) {
     const phaseOf = (at) => (at < startAt ? 'warmup' : at < recoveryUntil ? 'recovery' : at < startAt + durationMs ? 'steady' : 'drain');
     const samples = [];
     const samplePath = join(out, 'freshness.jsonl');
-    sampler = startSampler({ ch, admin, groups: run.groups, start: run.start, eventId, out, samplePath, samples, phaseOf, hotTopics: ['trade.seats', 'trade.orders'], pulseParts: 3 * o.partitions });
+    sampler = startSampler({ ch, admin, groups: run.groups, start: run.start, eventId, out, samplePath, samples, phaseOf, hotTopics: ['trade.seats', 'trade.orders'], pulseParts: 3 * o.partitions, hotRate: o.mode === 'hot' ? o.hotRate : 0 });
 
     // ── 강제 종료 타이머 ──
     let killTimer;
@@ -405,6 +412,8 @@ async function runOne(o) {
       groups: run.groups,
       samples,
       mode: o.mode,
+      clockSkewMs: run.clockSkewMs,
+      warmupMs: o.mode === 'smoke' ? 0 : undefined,
       minFreshnessSamples: o.minFreshnessSamples ?? (o.mode === 'smoke' ? 5 : 10),
     });
     writeReport(out, report);
@@ -460,7 +469,7 @@ function infraOf(runId, kafka, ch) {
 }
 
 /** 1초마다 신선도·조회 시간·소비 밀림·CPU를 남긴다 */
-function startSampler({ ch, admin, groups, start, eventId, out, samplePath, samples, phaseOf, hotTopics, pulseParts }) {
+function startSampler({ ch, admin, groups, start, eventId, out, samplePath, samples, phaseOf, hotTopics, pulseParts, hotRate }) {
   let stopped = false;
   let busy = false;
   let prevCpu = cpus().map((c) => c.times);
@@ -489,7 +498,7 @@ function startSampler({ ch, admin, groups, start, eventId, out, samplePath, samp
     busy = true;
     const at = Date.now();
     const phase = phaseOf(at);
-    const sample = { at, phase, label: new Date(at).toISOString(), rtMs: null, bronzeMs: null, queryMs: null, hotLag: null, lag: null, hostCpu: hostCpu(), chCpu: null, error: null };
+    const sample = { at, phase, label: new Date(at).toISOString(), rtMs: null, bronzeMs: null, queryMs: null, hotLag: null, hotLagRecords: null, lag: null, hostCpu: hostCpu(), chCpu: null, error: null };
     try {
       const rt = await ch.rows(`SELECT count() AS parts, if(count() = 0, NULL, toInt64(toUnixTimestamp64Milli(now64(3)) - toUnixTimestamp64Milli(min(last)))) AS ms, if(count() = 0, NULL, toInt64(toUnixTimestamp64Milli(now64(3)) - toUnixTimestamp64Milli(toStartOfSecond(min(last))))) AS bucket_ms FROM (SELECT topic, kafka_partition, max(produced_at) AS last FROM rt.pulse WHERE produced_at >= now64(3) - INTERVAL 1 HOUR GROUP BY topic, kafka_partition)`);
       sample.pulseParts = Number(rt[0]?.parts ?? 0);
@@ -513,8 +522,11 @@ function startSampler({ ch, admin, groups, start, eventId, out, samplePath, samp
         const a = await groupLag(admin, groups.analytics, end, start);
         const r = await groupLag(admin, groups.rt, end, start);
         sample.lag = { analytics: { total: a.total, max: a.max }, rt: { total: r.total, max: r.max } };
-        const hot = [...(a.partitions ?? []), ...(r.partitions ?? [])].filter((p) => hotTopics.includes(p.topic) && p.partition === 0);
-        sample.hotLag = hot.length ? Math.max(...hot.map((p) => p.lag)) : 0;
+        // ST-T17은 관제(ops-rt) 쪽 핫 파티션의 '시간' 밀림을 본다. 분석 그룹은 10,000건 묶음 때문에
+        // 기록 수 밀림이 묶음 크기만큼 튀어 시간으로 바꿔도 과대평가된다(2026-11-25 S4에서 확인).
+        const hotRt = (r.partitions ?? []).filter((p) => hotTopics.includes(p.topic) && p.partition === 0);
+        sample.hotLagRecords = hotRt.length ? Math.max(...hotRt.map((p) => p.lag)) : 0;
+        sample.hotLag = recordsToMs(sample.hotLagRecords, hotRate);
       }
       if (tick % 3 === 0) {
         // Docker 통계는 느리므로 3초에 한 번만 읽는다
@@ -565,7 +577,7 @@ async function main(argv) {
       const end = await kafkaOffsets(admin, Object.keys(run.start ?? {}));
       const samples = existsSync(join(resolve(o.out), 'freshness.jsonl')) ? readFileSync(join(resolve(o.out), 'freshness.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
       const ch = clickhouseClient(run.clickhouse);
-      const report = await verifyRun({ ch, admin, manifest, start: run.start ?? {}, end, groups: run.groups, samples, mode: run.config?.mode, minFreshnessSamples: o.minFreshnessSamples ?? 5 });
+      const report = await verifyRun({ ch, admin, manifest, start: run.start ?? {}, end, groups: run.groups, samples, mode: run.config?.mode, clockSkewMs: run.clockSkewMs, warmupMs: run.config?.mode === 'smoke' ? 0 : undefined, minFreshnessSamples: o.minFreshnessSamples ?? 5 });
       writeReport(resolve(o.out), report);
       process.stdout.write(`${report.verdict}: ${o.out}\n`);
       return report.verdict === 'pass' ? 0 : report.verdict === 'invalid' ? 3 : 1;

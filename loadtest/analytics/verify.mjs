@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { judgeAccuracy, judgeFreshness, judgeHotLag, judgeLoss, judgeRun, percentile } from './lib.mjs';
+import { FRESHNESS_WARMUP_MS, judgeAccuracy, judgeClockSkew, judgeFreshness, judgeHotLag, judgeLoss, judgeRun, percentile } from './lib.mjs';
 import { loadPlatform } from './modules.mjs';
 
 export const GROUPS = Object.freeze({
@@ -234,15 +234,20 @@ export async function verifyRun(o) {
   const accuracyActual = await readAccuracy(o.ch, manifest);
   const accuracy = judgeAccuracy({ expected: accuracyExpected, actual: accuracyActual });
   const f = freshnessFromSamples(o.samples ?? []);
-  const freshness = judgeFreshness(f.rt, { minSamples: o.minFreshnessSamples ?? 5 });
-  const bronzeFreshness = judgeFreshness(f.bronze, { minSamples: o.minFreshnessSamples ?? 5 });
+  // 계획 §7.1: 예열 첫 60초[가정]는 1분 창 판정에서 뺀다. 이 값을 빼지 않으면 파이프라인이 차는
+  // 첫 창이 늘 실패로 찍혀 제품 한계와 시작 과도를 섞는다(2026-11-25 내려가는 사다리에서 확인).
+  const warmupMs = o.warmupMs ?? FRESHNESS_WARMUP_MS;
+  const freshness = judgeFreshness(f.rt, { minSamples: o.minFreshnessSamples ?? 5, warmupMs });
+  const bronzeFreshness = judgeFreshness(f.bronze, { minSamples: o.minFreshnessSamples ?? 5, warmupMs });
   const hot = o.mode === 'hot' && f.hot.length ? judgeHotLag(f.hot, { minSamples: o.minHotSamples ?? 5 }) : null;
+  const clock = judgeClockSkew(o.clockSkewMs);
   const queryP95 = percentile(f.query, 0.95);
   const hostCpu = percentile((o.samples ?? []).map((s) => s.hostCpu).filter((v) => Number.isFinite(v)), 0.95);
   const chCpu = percentile((o.samples ?? []).map((s) => s.chCpu).filter((v) => Number.isFinite(v)), 0.95);
 
-  const judged = judgeRun({ freshness: { samples: f.rt, options: { minSamples: o.minFreshnessSamples ?? 5 } }, loss, accuracy, ...(hot ? { hot: { samples: f.hot, options: { minSamples: o.minHotSamples ?? 5 } } } : {}), mode: o.mode });
+  const judged = judgeRun({ freshness: { samples: f.rt, options: { minSamples: o.minFreshnessSamples ?? 5, warmupMs } }, loss, accuracy, ...(hot ? { hot: { samples: f.hot, options: { minSamples: o.minHotSamples ?? 5 } } } : {}), mode: o.mode });
   const invalidReasons = [];
+  if (!clock.pass) invalidReasons.push(...clock.reasons);
   if (!manifest.producerOk) invalidReasons.push(...manifest.producerReasons);
   if (!lag.analytics.found) invalidReasons.push(`분석 소비자 그룹을 찾지 못했다: ${lag.analytics.error ?? ''}`);
   if (!lag.rt.found) invalidReasons.push(`관제 소비자 그룹을 찾지 못했다: ${lag.rt.error ?? ''}`);
@@ -259,8 +264,9 @@ export async function verifyRun(o) {
     lag,
     loss,
     accuracy: { pass: accuracy.pass, compared: accuracy.compared, reasons: accuracy.reasons, expected: accuracyExpected, actual: accuracyActual },
-    freshness: { rt: freshness, bronze: bronzeFreshness, queryP95, samples: f.rt.length },
+    freshness: { rt: freshness, bronze: bronzeFreshness, queryP95, samples: f.rt.length, warmupMs },
     hot,
+    clock,
     cpu: { hostP95: hostCpu, clickhouseP95: chCpu },
     manifest,
     verdict,
@@ -285,8 +291,9 @@ export function reportMarkdown(r) {
     '',
     `- 판정: **${r.verdict}**${r.reasons.length ? ` — ${r.reasons.slice(0, 6).join(' / ')}` : ''}`,
     `- 입력: ${r.manifest.total.toLocaleString()}건, 발생기 실패 ${r.manifest.producerFailures}건, 모드 ${r.mode}`,
-    `- 신선도(관제): p95 ${f.p95 === null ? '—' : `${Math.round(f.p95)}ms`}, 샘플 ${f.count}개, 1분 창 ${f.fullWindows}개, 창 위반 ${f.windows.filter((w) => w.p95 !== null && w.p95 >= f.limitMs).length}개`,
+    `- 신선도(관제): p95 ${f.p95 === null ? '—' : `${Math.round(f.p95)}ms`}, 샘플 ${f.count}개, 1분 창 ${f.fullWindows}개, 창 위반 ${f.windows.filter((w) => w.p95 !== null && w.p95 >= f.limitMs).length}개(예열 ${Math.round((r.freshness.warmupMs ?? 0) / 1000)}초 제외)`,
     `- 신선도(브론즈, 참고): p95 ${r.freshness.bronze.p95 === null ? '—' : `${Math.round(r.freshness.bronze.p95)}ms`}`,
+    `- 시계 차(ClickHouse−호스트): ${r.clock?.skewMs === null || r.clock?.skewMs === undefined ? '—' : `${r.clock.skewMs}ms`} (${r.clock?.pass ? '통과' : '실패'})`,
     `- 누락률: ${l.ratio === null ? '—' : `${(l.ratio * 100).toFixed(4)}%`} (전체 ${l.denominator.toLocaleString()}, 못 읽음 ${l.missing}, 거절 ${r.coverage.rejected})`,
     `- 정확성: ${a.pass ? '차이 0' : `차이 있음 — ${a.reasons.slice(0, 4).join(' / ')}`} (비교 ${a.compared}개)`,
     `- 소비자 밀림: 분석 ${r.lag.analytics.total ?? '—'}, 관제 ${r.lag.rt.total ?? '—'}`,

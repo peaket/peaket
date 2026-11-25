@@ -9,7 +9,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  CLOCK_SKEW_LIMIT_MS,
   FRESHNESS_LIMIT_MS,
+  FRESHNESS_WARMUP_MS,
   HOT_LAG_LIMIT_MS,
   LOSS_LIMIT,
   MIX,
@@ -17,12 +19,14 @@ import {
   benchOf,
   buildPlan,
   judgeAccuracy,
+  judgeClockSkew,
   judgeFreshness,
   judgeHotLag,
   judgeLoss,
   judgeRun,
   lossRatio,
   percentile,
+  recordsToMs,
 } from '../analytics/lib.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -58,6 +62,35 @@ test('V-T19 ① 신선도 p95는 5초 경계의 아래만 통과하고 1분 창�
   assert.equal(judgeFreshness([]).valid, false);
   assert.equal(judgeFreshness([1_000, 2_000]).valid, false);
   assert.equal(judgeFreshness(Array.from({ length: 20 }, () => 1_000), { minSamples: 21 }).valid, false);
+});
+
+test('V-T19 ① 예열 첫 60초는 창 판정에서 빼고, 그 뒤 창이 넘으면 실패다', () => {
+  assert.equal(FRESHNESS_WARMUP_MS, 60_000);
+  // 0~120초는 6초(파이프라인이 차는 구간), 120~240초는 2초다.
+  const samples = [...Array.from({ length: 120 }, (_, i) => ({ at: i * 1_000, ms: 6_000 })), ...Array.from({ length: 120 }, (_, i) => ({ at: 120_000 + i * 1_000, ms: 2_000 }))];
+  assert.equal(judgeFreshness(samples, { warmupMs: 60_000 }).pass, false, '예열을 빼도 60~120초 창이 6초라 실패다');
+  // 60~120초도 2초이면 예열 60초를 뺀 뒤에는 통과한다.
+  const warmOnly = [...Array.from({ length: 60 }, (_, i) => ({ at: i * 1_000, ms: 6_000 })), ...Array.from({ length: 180 }, (_, i) => ({ at: 60_000 + i * 1_000, ms: 2_000 }))];
+  assert.equal(judgeFreshness(warmOnly, { warmupMs: 60_000 }).pass, true);
+  assert.equal(judgeFreshness(warmOnly, { warmupMs: 0 }).pass, false);
+});
+
+test('계획 §7.1 시계 차는 20ms까지만 통과하고 못 재면 무효다', () => {
+  assert.equal(CLOCK_SKEW_LIMIT_MS, 20);
+  assert.equal(judgeClockSkew(0).pass, true);
+  assert.equal(judgeClockSkew(-19).pass, true);
+  assert.equal(judgeClockSkew(20).pass, true);
+  assert.equal(judgeClockSkew(21).pass, false);
+  assert.equal(judgeClockSkew(Date.now()).pass, false);
+  assert.equal(judgeClockSkew(undefined).valid, false);
+});
+
+test('ST-T17 핫 파티션 밀림은 기록 수를 도착률로 나눠 시간으로 바꾼다', () => {
+  assert.equal(recordsToMs(12_000, 2_000), 6_000);
+  assert.equal(recordsToMs(0, 4_500), 0);
+  assert.equal(recordsToMs(4_500, 4_500), 1_000);
+  assert.equal(recordsToMs(100, 0), null);
+  assert.equal(recordsToMs(Number.NaN, 1_000), null);
 });
 
 // ───────────────────────── V-T19 ② 누락률 ─────────────────────────

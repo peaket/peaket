@@ -141,6 +141,7 @@ async function main(argv) {
   let producer;
   const controllers = [];
   const stopping = { value: false };
+  let manifestTimer;
   process.on('SIGTERM', () => { stopping.value = true; });
   process.on('SIGINT', () => { stopping.value = true; });
 
@@ -163,6 +164,12 @@ async function main(argv) {
     const total = Object.values(myCounts).reduce((a, b) => a + b, 0);
     let sent = 0;
     manifest.startedAt = new Date().toISOString();
+    // 중단·외부 종료(SIGKILL) 때도 진행을 잃지 않게 10초마다 manifest를 쓴다(2026-11-25 r1 유실의 원인).
+    const manifestTimerId = setInterval(() => {
+      try { writeManifest(o.out, manifest); } catch { /* 디스크 문제는 끝날 때 다시 시도한다 */ }
+    }, 10_000);
+    manifestTimerId.unref?.();
+    manifestTimer = manifestTimerId;
 
     const sendBatch = async (batch) => {
       const byTopic = new Map();
@@ -265,6 +272,7 @@ async function main(argv) {
     process.stderr.write(`[f048-producer ${o.shard}] 실패: ${manifest.error}\n`);
     return 1;
   } finally {
+    clearInterval(manifestTimer);
     for (const c of controllers) c();
     await producer?.disconnect().catch(() => {});
   }

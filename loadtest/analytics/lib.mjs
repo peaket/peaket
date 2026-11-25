@@ -11,6 +11,8 @@ export const LOSS_MIN_POPULATION = 10_000;
 export const FRESHNESS_WINDOW_MS = 60_000;
 /** 예열 [가정](docs/verification.md §3.7의 30분 측정에서 첫 1분) */
 export const FRESHNESS_WARMUP_MS = 60_000;
+/** 발생기·작업자·ClickHouse 시계 차 허용(계획 §7.1). 넘으면 그 실행은 invalid다 */
+export const CLOCK_SKEW_LIMIT_MS = 20;
 
 /** 입력 비율(100칸). docs/features/analytics.md §11의 피크 비율을 줄인 값이다 */
 export const MIX = Object.freeze({
@@ -344,7 +346,35 @@ export function judgeAccuracy(o) {
 }
 
 /**
- * ST-T17 인기 회차 파티션의 소비 밀림 p95.
+ * 기록 수(Kafka 밀림)를 그 파티션의 도착률로 나눠 시간(ms)으로 바꾼다.
+ * ST-T17의 '소비 밀림 5초'는 기록 수가 아니라 시간이므로, 핫 파티션 도착률로 나눈다.
+ * @param {number} records
+ * @param {number} perSecond
+ * @returns {number | null}
+ */
+export function recordsToMs(records, perSecond) {
+  const r = Number(records);
+  const rate = Number(perSecond);
+  if (!Number.isFinite(r) || !Number.isFinite(rate) || rate <= 0) return null;
+  return (r / rate) * 1000;
+}
+
+/**
+ * ClickHouse 시계와 호스트 시계의 차이(ms). 절댓값이 20ms를 넘으면 신선도에 시계 오차가 섞이므로 invalid다.
+ * @param {number|null|undefined} skewMs
+ * @param {{limitMs?:number}} [o]
+ */
+export function judgeClockSkew(skewMs, o = {}) {
+  const limitMs = o.limitMs ?? CLOCK_SKEW_LIMIT_MS;
+  const valid = Number.isFinite(skewMs);
+  const abs = valid ? Math.abs(Number(skewMs)) : null;
+  const reasons = [];
+  if (!valid) reasons.push('시계 차를 재지 못했다(발생기·작업자·ClickHouse 시계 차 검사 누락)');
+  else if (abs > limitMs) reasons.push(`ClickHouse와 호스트 시계 차 ${abs}ms가 ${limitMs}ms를 넘었다`);
+  return { valid, skewMs: valid ? Number(skewMs) : null, absMs: abs, limitMs, pass: valid && abs <= limitMs, reasons };
+}
+
+/** ST-T17 인기 회차 파티션의 소비 밀림 p95.
  * @param {readonly number[]} samples
  * @param {{limitMs?:number,minSamples?:number}} [o]
  */
