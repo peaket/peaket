@@ -1073,6 +1073,28 @@ test('O-T20 IR-08 현장 관리(SCR-052)에도 같은 구역 기기의 동기화
   await expect(page.getByText(/동문-03.*2분/)).toBeVisible();
 });
 
+test('O-T11 IR-06 서비스 워커 업로드 완료의 resyncRequired·stopped를 창이 받아 보인다', async ({ page }) => {
+  const wallet = await walletKey();
+  await workerDecoder(page, { keyId: wallet.keyId });
+  await serviceWorkerStub(page);
+  const api = await scannerApi(page, wallet, { scanReply: () => ({ status: 503, type: 'scanner-auth-unavailable' }) });
+  await page.clock.install();
+  await signedIn(page);
+  await startShift(page);
+  await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())));
+  await expect(verdict(page, '통과')).toBeVisible();
+  await page.clock.fastForward(5_000);
+  await expect.poll(() => api.scans.length).toBeGreaterThan(0);
+  await expect.poll(() => queueCount(page)).toBe(1);
+
+  await page.evaluate(() =>
+    window.__peaketSwMessage({ type: 'BACKGROUND_UPLOAD_DONE', accepted: 1, resyncRequired: true, stopped: 'device-revoked' }),
+  );
+  await goInApp(page, '/sync?live=1');
+  await expect(page.getByText(/기기 폐기|등록되지 않은 기기/)).toBeVisible();
+  await expect(page.getByText(/전체 목록을 다시/)).toBeVisible();
+});
+
 test('GAT-140 C1-15 최소 지원 판보다 낮은 앱은 스캔 시작을 막고 새 판 안내를 보인다', async ({ page }) => {
   const wallet = await walletKey();
   await workerDecoder(page, { keyId: wallet.keyId });
