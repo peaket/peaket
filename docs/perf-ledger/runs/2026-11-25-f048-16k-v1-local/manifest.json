@@ -1,0 +1,61 @@
+{
+  "run_id": "2026-11-25-f048-16k-v1-local",
+  "kpi": "NFR-009",
+  "version": "v1",
+  "profile": "local-16k",
+  "scale": {
+    "users": null,
+    "arrival_rps": 16000.0,
+    "duration_s": 300,
+    "warmup_s": 60
+  },
+  "scenario": {
+    "path": "loadtest/analytics/run.mjs run",
+    "args": "--rate 16000 --duration 300 --partitions 12 --shards 4 --workers 2",
+    "open_model": true
+  },
+  "commit": {
+    "code": "7ab167a55989213b3c0a990ddc50bacc04657179",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "host": null,
+  "generator": {
+    "description": "Kafka producer 4 shards, 16000/s target, 0 failures",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-25T03:15:43Z",
+  "ended_at": "2026-11-25T03:27:43Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 374952,
+    "error_rate": 0,
+    "requests": 4800000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt",
+    "extra": [
+      "verify.json",
+      "report.md"
+    ]
+  },
+  "valid": false,
+  "invalid_reason": "제품 실패 방향: 5분 동안 480만 건을 넣었으나 관제 소비자 밀림이 1,302,550건 남아 따라잡기 실패(도구 한도 300초). 신선도 p95 374,952ms, 구간 p95 36,260~394,207ms. 발생기 실패 0, 호스트 CPU p95 57.6%, ClickHouse CPU p95 67.5%.",
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": null,
+  "notes": "Descending ladder hard failure above the 15k five-minute pass. ops-rt (one hot partition) is the bottleneck, not the generator or ClickHouse.",
+  "collected_at": "2026-11-25T06:06:40Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

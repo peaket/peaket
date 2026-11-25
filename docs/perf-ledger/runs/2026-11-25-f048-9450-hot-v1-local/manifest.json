@@ -1,0 +1,61 @@
+{
+  "run_id": "2026-11-25-f048-9450-hot-v1-local",
+  "kpi": "NFR-009",
+  "version": "v1",
+  "profile": "local-hot-9450",
+  "scale": {
+    "users": null,
+    "arrival_rps": 9450.0,
+    "duration_s": 600,
+    "warmup_s": 60
+  },
+  "scenario": {
+    "path": "loadtest/analytics/run.mjs hot",
+    "args": "--hot-rate 4500 --duration 600 --background-events 11 --partitions 12 --shards 4 --workers 2",
+    "open_model": true
+  },
+  "commit": {
+    "code": "7ab167a55989213b3c0a990ddc50bacc04657179",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "host": null,
+  "generator": {
+    "description": "Kafka producer 4 shards, hot 4500/s + 11 background events 450/s",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-25T05:45:51Z",
+  "ended_at": "2026-11-25T06:02:32Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 5700,
+    "error_rate": 0,
+    "requests": 5670000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt",
+    "extra": [
+      "verify.json",
+      "report.md"
+    ]
+  },
+  "valid": false,
+  "invalid_reason": "제품 실패 방향: 관제 소비자 밀림 1,713,069건, 인기 회차 파티션 밀림 약 623,538ms(기록 2,805,920건÷4,500/s), 신선도 p95 5,700ms. 한계 5,000건/초를 넘는 9,450건/초 입력이라 ST-T17 판정 불가. 주: 이 실행의 verify.json은 핫 밀림을 기록 수로 적은 옛 하네스 산출물이다.",
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": null,
+  "notes": "S4 canonical input (9,450/s) over 10 minutes. Hot partition (partition 0) is the bottleneck; generator failures 0, host CPU p95 31.4%, ClickHouse CPU p95 47.9%.",
+  "collected_at": "2026-11-25T06:16:40Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

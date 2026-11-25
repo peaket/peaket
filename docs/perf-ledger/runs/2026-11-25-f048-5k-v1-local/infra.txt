@@ -1,0 +1,22 @@
+{
+  "runId": "2026-11-25T04-44-03-run",
+  "capturedAt": "2026-11-25T04:55:19.909Z",
+  "platform": "win32",
+  "release": "10.0.26200",
+  "cpu": "Intel(R) Core(TM) i9-14900HX",
+  "cores": 32,
+  "memoryGiB": 31.7,
+  "freeGiB": 2.8,
+  "docker": "29.8.1",
+  "kafka": {
+    "image": "apache/kafka:3.9.2",
+    "brokers": [
+      "127.0.0.1:57578"
+    ]
+  },
+  "clickhouse": {
+    "image": "clickhouse/clickhouse-server:24.12",
+    "url": "http://127.0.0.1:57579",
+    "user": "it"
+  }
+}

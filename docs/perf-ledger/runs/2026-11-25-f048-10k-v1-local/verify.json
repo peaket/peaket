@@ -1,0 +1,500 @@
+{
+  "runId": "2026-11-25T02-51-14-run",
+  "mode": "run",
+  "generatedAt": "2026-11-25T02:57:12.244Z",
+  "expectedOffsets": 3011268,
+  "coverage": {
+    "covered": 3011268,
+    "rejected": 0,
+    "skipped": 11268,
+    "byTopic": {
+      "telemetry.queue": {
+        "0": {
+          "covered": 60313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "1": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "2": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "3": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "4": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "5": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "6": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "7": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "8": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "9": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "10": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "11": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        }
+      },
+      "telemetry.purchase": {
+        "0": {
+          "covered": 600313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "1": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "2": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "3": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "4": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "5": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "6": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "7": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "8": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "9": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "10": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "11": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        }
+      },
+      "telemetry.trust-verdicts": {
+        "0": {
+          "covered": 480313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "1": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "2": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "3": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "4": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "5": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "6": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "7": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "8": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "9": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "10": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        },
+        "11": {
+          "covered": 313,
+          "rejected": 0,
+          "skipped": 313
+        }
+      },
+      "trade.orders": {
+        "0": {
+          "covered": 450000,
+          "rejected": 0,
+          "skipped": 0
+        }
+      },
+      "trade.seats": {
+        "0": {
+          "covered": 870000,
+          "rejected": 0,
+          "skipped": 0
+        }
+      },
+      "trade.tickets": {
+        "0": {
+          "covered": 240000,
+          "rejected": 0,
+          "skipped": 0
+        }
+      },
+      "trade.payments": {
+        "0": {
+          "covered": 300000,
+          "rejected": 0,
+          "skipped": 0
+        }
+      }
+    }
+  },
+  "lag": {
+    "analytics": {
+      "groupId": "peaket.analytics-ingest.ci",
+      "found": true,
+      "total": 0,
+      "max": 0,
+      "partitions": []
+    },
+    "rt": {
+      "groupId": "peaket.ops-rt.ci",
+      "found": true,
+      "total": 0,
+      "max": 0,
+      "partitions": []
+    }
+  },
+  "loss": {
+    "denominator": 3011268,
+    "missing": 0,
+    "numerator": 0,
+    "ratio": 0,
+    "valid": true,
+    "pass": true,
+    "small": false,
+    "reasons": []
+  },
+  "accuracy": {
+    "pass": true,
+    "compared": 17,
+    "reasons": [],
+    "expected": {
+      "bronze": {
+        "seat": 870000,
+        "order": 450000,
+        "payment": 300000,
+        "ticket": 240000,
+        "hold": 600000,
+        "verdict": 480000,
+        "queue": 60000,
+        "orderAmount": 5849995000,
+        "paymentAmount": 9600000000
+      },
+      "rt": {
+        "seatSold": 870000,
+        "orderConfirmed": 450000,
+        "paymentApproved": 300000,
+        "ticketIssued": 240000,
+        "paymentAmount": 9600000000,
+        "holdHelped": 480000,
+        "holdConflict": 120000,
+        "verdictPass": 480000
+      }
+    },
+    "actual": {
+      "bronze": {
+        "seat": 870000,
+        "order": 450000,
+        "payment": 300000,
+        "ticket": 240000,
+        "hold": 600000,
+        "verdict": 480000,
+        "queue": 60000,
+        "rawRows": {
+          "seat": 870000,
+          "order": 450000,
+          "payment": 300000,
+          "ticket": 240000,
+          "hold": 600000,
+          "verdict": 480000,
+          "queue": 60000
+        },
+        "orderAmount": 5849995000,
+        "paymentAmount": 9600000000
+      },
+      "rt": {
+        "seatSold": 870000,
+        "orderConfirmed": 450000,
+        "paymentApproved": 300000,
+        "ticketIssued": 240000,
+        "orderAmount": 0,
+        "paymentAmount": 9600000000,
+        "holdHelped": 480000,
+        "holdConflict": 120000,
+        "verdictPass": 480000,
+        "rawRows": {
+          "sale": {
+            "TICKET/ISSUED": 240000,
+            "PAYMENT/APPROVED": 300000,
+            "ORDER/CONFIRMED": 450000,
+            "SEAT/SOLD": 870000
+          },
+          "hold": {
+            "HELD": 480000,
+            "CONFLICT": 120000
+          },
+          "verdict": {
+            "PASS": 480000
+          }
+        }
+      }
+    }
+  },
+  "freshness": {
+    "rt": {
+      "valid": true,
+      "pass": true,
+      "p95": 4018,
+      "limitMs": 5000,
+      "count": 228,
+      "windows": [
+        {
+          "index": 0,
+          "from": 1795575115633,
+          "to": 1795575175633,
+          "count": 45,
+          "p95": 4787
+        },
+        {
+          "index": 1,
+          "from": 1795575175633,
+          "to": 1795575235633,
+          "count": 44,
+          "p95": 3683
+        },
+        {
+          "index": 2,
+          "from": 1795575235633,
+          "to": 1795575295633,
+          "count": 44,
+          "p95": 3323
+        },
+        {
+          "index": 3,
+          "from": 1795575295633,
+          "to": 1795575355633,
+          "count": 45,
+          "p95": 3689
+        },
+        {
+          "index": 4,
+          "from": 1795575355633,
+          "to": 1795575415633,
+          "count": 45,
+          "p95": 4018
+        },
+        {
+          "index": 5,
+          "from": 1795575415633,
+          "to": 1795575475633,
+          "count": 5,
+          "p95": 3554
+        }
+      ],
+      "fullWindows": 5,
+      "reasons": []
+    },
+    "bronze": {
+      "valid": true,
+      "pass": true,
+      "p95": 1331,
+      "limitMs": 5000,
+      "count": 224,
+      "windows": [
+        {
+          "index": 0,
+          "from": 0,
+          "to": 60000,
+          "count": 60,
+          "p95": 1315
+        },
+        {
+          "index": 1,
+          "from": 60000,
+          "to": 120000,
+          "count": 60,
+          "p95": 1272
+        },
+        {
+          "index": 2,
+          "from": 120000,
+          "to": 180000,
+          "count": 60,
+          "p95": 1274
+        },
+        {
+          "index": 3,
+          "from": 180000,
+          "to": 240000,
+          "count": 44,
+          "p95": 4489
+        }
+      ],
+      "fullWindows": 3,
+      "reasons": []
+    },
+    "queryP95": 26.84480000002077,
+    "samples": 228
+  },
+  "hot": null,
+  "cpu": {
+    "hostP95": 56.84402000909504,
+    "clickhouseP95": 87.35
+  },
+  "manifest": {
+    "runId": "2026-11-25T02-51-14-run",
+    "mode": "normal",
+    "shards": 4,
+    "total": 3000000,
+    "byRecord": {
+      "seat": 870000,
+      "order": 450000,
+      "payment": 300000,
+      "ticket": 240000,
+      "hold": 600000,
+      "verdict": 480000,
+      "queue": 60000
+    },
+    "sums": {
+      "orderAmount": 5849995000,
+      "paymentAmount": 9600000000
+    },
+    "results": {
+      "hold": {
+        "HELD": 480000,
+        "CONFLICT": 120000
+      },
+      "verdict": {
+        "PASS": 480000
+      }
+    },
+    "producerFailures": 0,
+    "errors": [],
+    "shardStatus": [
+      {
+        "shard": 0,
+        "status": "done",
+        "sent": 750000,
+        "failures": 0
+      },
+      {
+        "shard": 1,
+        "status": "done",
+        "sent": 750000,
+        "failures": 0
+      },
+      {
+        "shard": 2,
+        "status": "done",
+        "sent": 750000,
+        "failures": 0
+      },
+      {
+        "shard": 3,
+        "status": "done",
+        "sent": 750000,
+        "failures": 0
+      }
+    ],
+    "partitions": 12,
+    "startedAt": "2026-11-25T02:51:58.730Z",
+    "endedAt": "2026-11-25T02:56:55.086Z",
+    "producerOk": true,
+    "producerReasons": []
+  },
+  "verdict": "pass",
+  "pass": true,
+  "reasons": [],
+  "bench": {
+    "requests": 3000000,
+    "dropped": 0,
+    "p99_ms": 4018,
+    "error_rate": 0
+  }
+}

@@ -517,7 +517,13 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | 2026-11-19 | 2026-11-19-bat058-mc-d500-sweep-01-p66-q9-c66-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 906 | 90.2% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-mc-d500-sweep-01-p66-q9-c66-r1/ |
 | 2026-11-19 | 2026-11-19-bat058-mw-sweep-01-p66-q9-c66-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | fail | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-mw-sweep-01-p66-q9-c66-r1/ |
 | 2026-11-19 | 2026-11-19-bat058-ops-sweep-01-p3120-q390-c3120-r1 | NFR-001 | v1 | local-gw | 1,500 RPS | 100 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-19-bat058-ops-sweep-01-p3120-q390-c3120-r1/ |
+| 2026-11-25 | 2026-11-25-f048-10k-v1-local | NFR-009 | v1 | local-10k | 10,000 RPS | 4,018 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-25-f048-10k-v1-local/ |
+| 2026-11-25 | 2026-11-25-f048-12k-v1-local | NFR-009 | v1 | local-12k | 12,000 RPS | 3,881 | 0.0% | fail | 측정함 | - | perf-ledger/runs/2026-11-25-f048-12k-v1-local/ |
+| 2026-11-25 | 2026-11-25-f048-16k-v1-local | NFR-009 | v1 | local-16k | 16,000 RPS | 374,952 | 0.0% | 무효(제품 실패 방향: 5분 동안 480만 건을 넣었으나 관) | 측정함 | - | perf-ledger/runs/2026-11-25-f048-16k-v1-local/ |
 | 2026-11-25 | 2026-11-25-f048-30k-v1-local-poc | NFR-009 | v1 | local-poc | 30,000 RPS | 1,437,862 | - | 무효(중단: 사용자 요청(Android 실기기 확인 우선)으) | 측정함 | - | perf-ledger/runs/2026-11-25-f048-30k-v1-local-poc/ |
+| 2026-11-25 | 2026-11-25-f048-4200-hot-v1-local | NFR-009 | v1 | local-hot-4200 | 4,200 RPS | 4,096 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-25-f048-4200-hot-v1-local/ |
+| 2026-11-25 | 2026-11-25-f048-5k-v1-local | NFR-009 | v1 | local-5k | 5,000 RPS | 3,744 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-25-f048-5k-v1-local/ |
+| 2026-11-25 | 2026-11-25-f048-9450-hot-v1-local | NFR-009 | v1 | local-hot-9450 | 9,450 RPS | 5,700 | 0.0% | 무효(제품 실패 방향: 관제 소비자 밀림 1,713,069건) | 측정함 | - | perf-ledger/runs/2026-11-25-f048-9450-hot-v1-local/ |
 <!-- ledger:end -->
 
 표준 서식 예시 (참고용 Mock 데이터):

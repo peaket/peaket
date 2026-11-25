@@ -1,0 +1,61 @@
+{
+  "run_id": "2026-11-25-f048-10k-v1-local",
+  "kpi": "NFR-009",
+  "version": "v1",
+  "profile": "local-10k",
+  "scale": {
+    "users": null,
+    "arrival_rps": 10000.0,
+    "duration_s": 300,
+    "warmup_s": 60
+  },
+  "scenario": {
+    "path": "loadtest/analytics/run.mjs run",
+    "args": "--rate 10000 --duration 300 --partitions 12 --shards 4 --workers 2",
+    "open_model": true
+  },
+  "commit": {
+    "code": "7ab167a55989213b3c0a990ddc50bacc04657179",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "host": null,
+  "generator": {
+    "description": "Kafka producer 4 shards, 10000/s target, 0 failures",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-25T02:51:14Z",
+  "ended_at": "2026-11-25T02:57:12Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 4018,
+    "error_rate": 0,
+    "requests": 3000000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt",
+    "extra": [
+      "verify.json",
+      "report.md"
+    ]
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "pass",
+  "notes": "5-minute pass (p95 4018ms, loss 0, accuracy 0, lag 0). Not stable: the same rate over 10 minutes left ops-rt 605,334 records behind and freshness rose to 405s. Highest 5-minute pass of the requested ladder, not the stable limit.",
+  "collected_at": "2026-11-25T06:06:39Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

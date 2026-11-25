@@ -1,0 +1,61 @@
+{
+  "run_id": "2026-11-25-f048-12k-v1-local",
+  "kpi": "NFR-009",
+  "version": "v1",
+  "profile": "local-12k",
+  "scale": {
+    "users": null,
+    "arrival_rps": 12000.0,
+    "duration_s": 600,
+    "warmup_s": 60
+  },
+  "scenario": {
+    "path": "loadtest/analytics/run.mjs run",
+    "args": "--rate 12000 --duration 600 --partitions 12 --shards 4 --workers 2",
+    "open_model": true
+  },
+  "commit": {
+    "code": "7ab167a55989213b3c0a990ddc50bacc04657179",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "host": null,
+  "generator": {
+    "description": "Kafka producer 4 shards, 12000/s target, 0 failures",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-25T04:02:58Z",
+  "ended_at": "2026-11-25T04:14:23Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 3881,
+    "error_rate": 0,
+    "requests": 7200000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt",
+    "extra": [
+      "verify.json",
+      "report.md"
+    ]
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "fail",
+  "notes": "10-minute valid fail: overall freshness p95 3881ms but one-minute windows 3 (5524ms) and 0 (5449ms) exceeded 5000ms; loss 0, accuracy 0, lag 0, ClickHouse CPU p95 86%. First valid fail above the 5-minute 10k pass.",
+  "collected_at": "2026-11-25T06:06:39Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

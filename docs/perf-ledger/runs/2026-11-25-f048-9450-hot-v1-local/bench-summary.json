@@ -1,0 +1,611 @@
+{
+  "runId": "2026-11-25T05-45-51-hot",
+  "mode": "hot",
+  "generatedAt": "2026-11-25T06:02:32.124Z",
+  "expectedOffsets": 5698080,
+  "coverage": {
+    "covered": 5698080,
+    "rejected": 0,
+    "skipped": 28080,
+    "byTopic": {
+      "telemetry.queue": {
+        "0": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "1": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "2": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "3": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "4": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "5": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "6": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "7": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "8": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "9": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "10": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "11": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        }
+      },
+      "telemetry.purchase": {
+        "0": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "1": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "2": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "3": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "4": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "5": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "6": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "7": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "8": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "9": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "10": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "11": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        }
+      },
+      "telemetry.trust-verdicts": {
+        "0": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "1": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "2": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "3": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "4": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "5": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "6": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "7": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "8": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "9": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "10": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        },
+        "11": {
+          "covered": 780,
+          "rejected": 0,
+          "skipped": 780
+        }
+      },
+      "trade.orders": {
+        "0": {
+          "covered": 1890000,
+          "rejected": 0,
+          "skipped": 0
+        }
+      },
+      "trade.seats": {
+        "0": {
+          "covered": 3780000,
+          "rejected": 0,
+          "skipped": 0
+        }
+      }
+    }
+  },
+  "lag": {
+    "analytics": {
+      "groupId": "peaket.analytics-ingest.ci",
+      "found": true,
+      "total": 0,
+      "max": 0,
+      "partitions": []
+    },
+    "rt": {
+      "groupId": "peaket.ops-rt.ci",
+      "found": true,
+      "total": 1713069,
+      "max": 1713069,
+      "partitions": [
+        {
+          "topic": "trade.seats",
+          "partition": 0,
+          "lag": 1713069,
+          "committed": 2066931,
+          "high": 3780000
+        }
+      ]
+    }
+  },
+  "loss": {
+    "denominator": 5698080,
+    "missing": 0,
+    "numerator": 0,
+    "ratio": 0,
+    "valid": true,
+    "pass": true,
+    "small": false,
+    "reasons": []
+  },
+  "accuracy": {
+    "pass": false,
+    "compared": 16,
+    "reasons": [
+      "rt.seatSold: 기대 3780000, 실제 2066931(차이 -1713069)"
+    ],
+    "expected": {
+      "bronze": {
+        "seat": 3780000,
+        "order": 1890000,
+        "payment": 0,
+        "ticket": 0,
+        "hold": 0,
+        "verdict": 0,
+        "queue": 0,
+        "orderAmount": 24570000000,
+        "paymentAmount": 0
+      },
+      "rt": {
+        "seatSold": 3780000,
+        "orderConfirmed": 1890000,
+        "paymentApproved": 0,
+        "ticketIssued": 0,
+        "paymentAmount": 0,
+        "holdHelped": 0,
+        "holdConflict": 0,
+        "verdictPass": 0
+      }
+    },
+    "actual": {
+      "bronze": {
+        "seat": 3780000,
+        "order": 1890000,
+        "payment": 0,
+        "ticket": 0,
+        "hold": 0,
+        "verdict": 0,
+        "queue": 0,
+        "rawRows": {
+          "seat": 3780000,
+          "order": 1890000,
+          "payment": 0,
+          "ticket": 0,
+          "hold": 0,
+          "verdict": 0,
+          "queue": 0
+        },
+        "orderAmount": 24570000000,
+        "paymentAmount": 0
+      },
+      "rt": {
+        "seatSold": 2066931,
+        "orderConfirmed": 1890000,
+        "paymentApproved": 0,
+        "ticketIssued": 0,
+        "orderAmount": 0,
+        "paymentAmount": 0,
+        "holdHelped": 0,
+        "holdConflict": 0,
+        "verdictPass": 0,
+        "rawRows": {
+          "sale": {
+            "ORDER/CONFIRMED": 1890000,
+            "SEAT/SOLD": 2066931
+          },
+          "hold": {},
+          "verdict": {}
+        }
+      }
+    }
+  },
+  "freshness": {
+    "rt": {
+      "valid": true,
+      "pass": false,
+      "p95": 5700,
+      "limitMs": 5000,
+      "count": 528,
+      "windows": [
+        {
+          "index": 1,
+          "from": 1795585647771,
+          "to": 1795585707771,
+          "count": 45,
+          "p95": 6847
+        },
+        {
+          "index": 2,
+          "from": 1795585707771,
+          "to": 1795585767771,
+          "count": 45,
+          "p95": 5459
+        },
+        {
+          "index": 3,
+          "from": 1795585767771,
+          "to": 1795585827771,
+          "count": 43,
+          "p95": 5334
+        },
+        {
+          "index": 4,
+          "from": 1795585827771,
+          "to": 1795585887771,
+          "count": 43,
+          "p95": 5319
+        },
+        {
+          "index": 5,
+          "from": 1795585887771,
+          "to": 1795585947771,
+          "count": 44,
+          "p95": 5549
+        },
+        {
+          "index": 6,
+          "from": 1795585947771,
+          "to": 1795586007771,
+          "count": 45,
+          "p95": 4454
+        },
+        {
+          "index": 7,
+          "from": 1795586007771,
+          "to": 1795586067771,
+          "count": 44,
+          "p95": 5728
+        },
+        {
+          "index": 8,
+          "from": 1795586067771,
+          "to": 1795586127771,
+          "count": 45,
+          "p95": 5161
+        },
+        {
+          "index": 9,
+          "from": 1795586127771,
+          "to": 1795586187771,
+          "count": 45,
+          "p95": 5379
+        },
+        {
+          "index": 10,
+          "from": 1795586187771,
+          "to": 1795586247771,
+          "count": 42,
+          "p95": 5425
+        },
+        {
+          "index": 11,
+          "from": 1795586247771,
+          "to": 1795586307771,
+          "count": 43,
+          "p95": 6170
+        },
+        {
+          "index": 12,
+          "from": 1795586307771,
+          "to": 1795586367771,
+          "count": 44,
+          "p95": 8383
+        }
+      ],
+      "fullWindows": 11,
+      "reasons": [
+        "전 구간 신선도 p95 5700ms가 5000ms 미만이 아니다",
+        "신선도 1분 창 1 p95 6847ms가 5000ms 미만이 아니다(45샘플)",
+        "신선도 1분 창 2 p95 5459ms가 5000ms 미만이 아니다(45샘플)",
+        "신선도 1분 창 3 p95 5334ms가 5000ms 미만이 아니다(43샘플)",
+        "신선도 1분 창 4 p95 5319ms가 5000ms 미만이 아니다(43샘플)",
+        "신선도 1분 창 5 p95 5549ms가 5000ms 미만이 아니다(44샘플)",
+        "신선도 1분 창 7 p95 5728ms가 5000ms 미만이 아니다(44샘플)",
+        "신선도 1분 창 8 p95 5161ms가 5000ms 미만이 아니다(45샘플)",
+        "신선도 1분 창 9 p95 5379ms가 5000ms 미만이 아니다(45샘플)",
+        "신선도 1분 창 10 p95 5425ms가 5000ms 미만이 아니다(42샘플)",
+        "신선도 1분 창 11 p95 6170ms가 5000ms 미만이 아니다(43샘플)"
+      ]
+    },
+    "bronze": {
+      "valid": true,
+      "pass": false,
+      "p95": 146426,
+      "limitMs": 5000,
+      "count": 512,
+      "windows": [
+        {
+          "index": 1,
+          "from": 60000,
+          "to": 120000,
+          "count": 60,
+          "p95": 15041
+        },
+        {
+          "index": 2,
+          "from": 120000,
+          "to": 180000,
+          "count": 60,
+          "p95": 13138
+        },
+        {
+          "index": 3,
+          "from": 180000,
+          "to": 240000,
+          "count": 60,
+          "p95": 24199
+        },
+        {
+          "index": 4,
+          "from": 240000,
+          "to": 300000,
+          "count": 60,
+          "p95": 27842
+        },
+        {
+          "index": 5,
+          "from": 300000,
+          "to": 360000,
+          "count": 60,
+          "p95": 30881
+        },
+        {
+          "index": 6,
+          "from": 360000,
+          "to": 420000,
+          "count": 60,
+          "p95": 35003
+        },
+        {
+          "index": 7,
+          "from": 420000,
+          "to": 480000,
+          "count": 60,
+          "p95": 47851
+        },
+        {
+          "index": 8,
+          "from": 480000,
+          "to": 540000,
+          "count": 60,
+          "p95": 133287
+        },
+        {
+          "index": 9,
+          "from": 540000,
+          "to": 600000,
+          "count": 32,
+          "p95": 178698
+        }
+      ],
+      "fullWindows": 8,
+      "reasons": [
+        "전 구간 신선도 p95 146426ms가 5000ms 미만이 아니다",
+        "신선도 1분 창 1 p95 15041ms가 5000ms 미만이 아니다(60샘플)",
+        "신선도 1분 창 2 p95 13138ms가 5000ms 미만이 아니다(60샘플)",
+        "신선도 1분 창 3 p95 24199ms가 5000ms 미만이 아니다(60샘플)",
+        "신선도 1분 창 4 p95 27842ms가 5000ms 미만이 아니다(60샘플)",
+        "신선도 1분 창 5 p95 30881ms가 5000ms 미만이 아니다(60샘플)",
+        "신선도 1분 창 6 p95 35003ms가 5000ms 미만이 아니다(60샘플)",
+        "신선도 1분 창 7 p95 47851ms가 5000ms 미만이 아니다(60샘플)",
+        "신선도 1분 창 8 p95 133287ms가 5000ms 미만이 아니다(60샘플)"
+      ]
+    },
+    "queryP95": 28.94089999998687,
+    "samples": 573,
+    "warmupMs": 60000
+  },
+  "hot": {
+    "valid": true,
+    "pass": false,
+    "p95": 2805920,
+    "limitMs": 5000,
+    "count": 287,
+    "reasons": [
+      "파티션 밀림 p95 2805920ms가 5000ms 미만이 아니다"
+    ]
+  },
+  "clock": {
+    "valid": true,
+    "skewMs": -1,
+    "absMs": 1,
+    "limitMs": 20,
+    "pass": true,
+    "reasons": []
+  },
+  "cpu": {
+    "hostP95": 31.43720802418247,
+    "clickhouseP95": 47.88
+  },
+  "manifest": {
+    "runId": "2026-11-25T05-45-51-hot",
+    "mode": "hot",
+    "shards": 4,
+    "total": 5670000,
+    "byRecord": {
+      "seat": 3780000,
+      "order": 1890000
+    },
+    "sums": {
+      "orderAmount": 24570000000,
+      "paymentAmount": 0
+    },
+    "results": {
+      "hold": {},
+      "verdict": {}
+    },
+    "producerFailures": 0,
+    "errors": [],
+    "shardStatus": [
+      {
+        "shard": 0,
+        "status": "done",
+        "sent": 1417500,
+        "failures": 0
+      },
+      {
+        "shard": 1,
+        "status": "done",
+        "sent": 1417500,
+        "failures": 0
+      },
+      {
+        "shard": 2,
+        "status": "done",
+        "sent": 1417500,
+        "failures": 0
+      },
+      {
+        "shard": 3,
+        "status": "done",
+        "sent": 1417500,
+        "failures": 0
+      }
+    ],
+    "partitions": 12,
+    "startedAt": "2026-11-25T05:46:22.939Z",
+    "endedAt": "2026-11-25T05:56:26.750Z",
+    "producerOk": true,
+    "producerReasons": []
+  },
+  "verdict": "invalid",
+  "pass": false,
+  "reasons": [
+    "관제 소비자 밀림이 1713069건 남았다(따라잡기 실패)",
+    "전 구간 신선도 p95 5700ms가 5000ms 미만이 아니다",
+    "신선도 1분 창 1 p95 6847ms가 5000ms 미만이 아니다(45샘플)",
+    "신선도 1분 창 2 p95 5459ms가 5000ms 미만이 아니다(45샘플)",
+    "신선도 1분 창 3 p95 5334ms가 5000ms 미만이 아니다(43샘플)",
+    "신선도 1분 창 4 p95 5319ms가 5000ms 미만이 아니다(43샘플)",
+    "신선도 1분 창 5 p95 5549ms가 5000ms 미만이 아니다(44샘플)",
+    "신선도 1분 창 7 p95 5728ms가 5000ms 미만이 아니다(44샘플)",
+    "신선도 1분 창 8 p95 5161ms가 5000ms 미만이 아니다(45샘플)",
+    "신선도 1분 창 9 p95 5379ms가 5000ms 미만이 아니다(45샘플)",
+    "신선도 1분 창 10 p95 5425ms가 5000ms 미만이 아니다(42샘플)",
+    "신선도 1분 창 11 p95 6170ms가 5000ms 미만이 아니다(43샘플)",
+    "정확성: rt.seatSold: 기대 3780000, 실제 2066931(차이 -1713069)",
+    "파티션 밀림 p95 2805920ms가 5000ms 미만이 아니다"
+  ],
+  "bench": {
+    "requests": 5670000,
+    "dropped": 0,
+    "p99_ms": 5700,
+    "error_rate": 0
+  }
+}

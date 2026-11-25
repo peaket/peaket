@@ -1,0 +1,61 @@
+{
+  "run_id": "2026-11-25-f048-4200-hot-v1-local",
+  "kpi": "NFR-009",
+  "version": "v1",
+  "profile": "local-hot-4200",
+  "scale": {
+    "users": null,
+    "arrival_rps": 4200.0,
+    "duration_s": 600,
+    "warmup_s": 60
+  },
+  "scenario": {
+    "path": "loadtest/analytics/run.mjs hot",
+    "args": "--hot-rate 2000 --duration 600 --background-events 11 --partitions 12 --shards 4 --workers 2",
+    "open_model": true
+  },
+  "commit": {
+    "code": "7ab167a55989213b3c0a990ddc50bacc04657179",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "host": null,
+  "generator": {
+    "description": "Kafka producer 4 shards, hot 2000/s + 11 background events 200/s",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-25T06:15:38Z",
+  "ended_at": "2026-11-25T06:26:37Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 4096,
+    "error_rate": 0,
+    "requests": 2520000,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt",
+    "extra": [
+      "verify.json",
+      "report.md"
+    ]
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "pass",
+  "notes": "Supplementary popular-show run inside the 5k limit (4,200/s total, 2,000/s hot). Hot partition lag p95 666ms, freshness p95 4,096ms, loss 0, accuracy 0, clock +1ms. Not the ST-T17 canonical 9,450/s input, so it does not judge ST-T17.",
+  "collected_at": "2026-11-25T06:30:53Z",
+  "tool": "tools/perf-ledger/collect.py"
+}
