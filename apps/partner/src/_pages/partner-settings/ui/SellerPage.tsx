@@ -5,6 +5,7 @@ import { SELLER_FIELDS, stellaOrg } from '@/entities/partner-org';
 import { routes } from '@/shared/config/routes';
 import { SELLER_STATES } from '@/shared/config/states/scr020-settings';
 import { readPreview, type RouteProps } from '@/shared/lib/preview';
+import { performanceSellerNotice, settlementDisclosure } from '@/shared/lib/seller-notice';
 import { BigScreenNotice } from '@/shared/ui/BigScreenNotice';
 import { Modal } from '@/shared/ui/Modal';
 import { PreviewStateSwitcher } from '@/shared/ui/PreviewStateSwitcher';
@@ -16,6 +17,11 @@ export default async function SellerPage({ searchParams }: RouteProps) {
   const pv = readPreview(await searchParams, SELLER_STATES, '판매자 정보');
   const isReview = pv.state === '판매자 정보 검토 중';
   const seller = stellaOrg.seller;
+  const rows = settlementDisclosure({
+    sellerName: seller.companyName,
+    payoutHolder: stellaOrg.payout.holder,
+    commissionRate: stellaOrg.commissionRate,
+  });
 
   return (
     <>
@@ -75,6 +81,13 @@ export default async function SellerPage({ searchParams }: RouteProps) {
             <i className="ic ic-info" aria-hidden="true" />
             <div className="banner-body">이 정보는 공연 상세·결제 직전·예매 확인서에 판매자 정보로 보입니다(전자상거래법 §20②).</div>
           </div>
+          <div className="banner banner-legal">
+            <i className="ic ic-scale" aria-hidden="true" />
+            <div className="banner-body">
+              <span className="legal-tag">법정 고지</span>
+              {performanceSellerNotice(seller.companyName)}
+            </div>
+          </div>
           <h2 className="t-lg" id="h-seller">
             판매자 신원정보 7항목
           </h2>
@@ -90,6 +103,29 @@ export default async function SellerPage({ searchParams }: RouteProps) {
             <p className="t-xs muted">마지막 확인 {seller.lastVerifiedAt} · PEAKET 판매 승인에 쓰인 값</p>
             <p className="t-xs muted">통신판매업 신고번호가 없으면 면제 근거를 적습니다.</p>
           </div>
+        </section>
+
+        <section className="card pad-lg col gap-4 max-md:gap-3 max-md:p-4" aria-labelledby="h-disclosure">
+          <div className="row between wrap" style={{ gap: '4px 8px' }}>
+            <h2 className="t-lg" id="h-disclosure">
+              중개자 지위와 정산
+            </h2>
+            <Link className="link-more" href={routes.settingsPayout()}>
+              정산 계좌
+              <i className="ic ic-chevron-right" aria-hidden="true" />
+            </Link>
+          </div>
+          <p className="t-sm muted">
+            PEAKET은 통신판매중개자이며 공연 거래의 당사자가 아닙니다. 예매 취소·환불은 PEAKET이 처리하고, 정산은 판매자와 같은 예금주 계좌로 갑니다.
+          </p>
+          <dl className="kv md:grid-cols-[180px_minmax(0,1fr)] md:[&_dd]:text-left">
+            {rows.map((row) => (
+              <div key={row.label} className="contents">
+                <dt>{row.label}</dt>
+                <dd>{row.value}</dd>
+              </div>
+            ))}
+          </dl>
         </section>
       </SettingsFrame>
 

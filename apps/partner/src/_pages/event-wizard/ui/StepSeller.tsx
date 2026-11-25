@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { stellaOrg } from '@/entities/partner-org';
 import { routes } from '@/shared/config/routes';
+import { performanceSellerNotice } from '@/shared/lib/seller-notice';
 import { WHEELCHAIR_REASONS } from '../model/fixtures';
 
 export interface StepSellerProps {
@@ -124,8 +125,8 @@ export function StepSeller({ eventId, holderMismatch, wheelchairMissing, rejecte
               <div className="banner banner-legal">
                 <i className="ic ic-scale" aria-hidden="true" />
                 <div className="banner-body">
-                  <span className="legal-tag">법정 고지</span>판매자: {s.companyName}. PEAKET은 통신판매중개자로서 이 공연의 당사자가 아닙니다. 공연의 개최·변경·취소에 따른 책임은
-                  판매자에게 있고, 예매 취소와 환불은 PEAKET이 처리합니다
+                  <span className="legal-tag">법정 고지</span>
+                  {performanceSellerNotice(s.companyName)}
                 </div>
               </div>
               <dl className="kv">

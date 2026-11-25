@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { isProblem, problemMessage, problemType } from '@/shared/api/problem';
 import { routes } from '@/shared/config/routes';
 import { Modal } from '@/shared/ui/Modal';
+import { performanceSellerNotice } from '@/shared/lib/seller-notice';
 import {
   emptySaleReviewForm,
   formFromStatus,
@@ -246,6 +247,13 @@ export function LiveSaleReview({ productionId }: { productionId: string }) {
 
       {view.editable ? (
         <div className="col" style={{ gap: 16 }}>
+          <div className="banner banner-legal" role="note">
+            <i className="ic ic-scale" aria-hidden="true" />
+            <div className="banner-body">
+              <span className="legal-tag">법정 고지</span>
+              {performanceSellerNotice(form.seller.legalName)}
+            </div>
+          </div>
           <section className="card pad-lg col" style={{ gap: 14 }} aria-labelledby="sr-seller">
             <div className="section-title">
               <h2 id="sr-seller">판매자 정보 7항목</h2>

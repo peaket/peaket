@@ -10,6 +10,7 @@ import { getVenue } from '@/entities/venue';
 import { routes } from '@/shared/config/routes';
 import { OVERVIEW_STATES } from '@/shared/config/states/scr063';
 import { readParam, readPreview, type RouteProps } from '@/shared/lib/preview';
+import { performanceSellerNotice } from '@/shared/lib/seller-notice';
 import { BigScreenNotice } from '@/shared/ui/BigScreenNotice';
 import { PreviewStateSwitcher } from '@/shared/ui/PreviewStateSwitcher';
 import { EventContextHeader } from '@/widgets/event-context';
@@ -519,8 +520,7 @@ function SellerNotice({ missingReportNo }: { missingReportNo: boolean }) {
             <i className="ic ic-scale" aria-hidden="true" />
             <div className="banner-body">
               <span className="legal-tag">법정 고지</span>
-              판매자: {seller.companyName}. PEAKET은 통신판매중개자로서 이 공연의 당사자가 아닙니다. 공연의 개최·변경·취소에 따른 책임은 판매자에게 있고,
-              예매 취소와 환불은 PEAKET이 처리합니다
+              {performanceSellerNotice(seller.companyName)}
             </div>
           </div>
           <dl className="t-sm grid grid-cols-1 lg:grid-cols-2 lg:gap-x-8">

@@ -85,9 +85,12 @@ export const SORT_NOTICE: Record<SortMode, { title: string; body: string }> = {
   },
 };
 
-/** 판매자·중개자 법정 고지(POL-037, 공연 상세·결제 결과와 같은 문구) */
+/** 판매자·중개자 법정 고지(POL-037, 공연 상세·결제 결과와 같은 문구). 상호가 비면 접두사를 빼 `판매자: .`를 만들지 않는다. */
 export function brokerNotice(sellerName: string): string {
-  return `판매자: ${sellerName}. PEAKET은 통신판매중개자로서 이 공연의 당사자가 아닙니다. 공연의 개최·변경·취소에 따른 책임은 판매자에게 있고, 예매 취소와 환불은 PEAKET이 처리합니다`;
+  const name = sellerName.trim();
+  const notice =
+    'PEAKET은 통신판매중개자로서 이 공연의 당사자가 아닙니다. 공연의 개최·변경·취소에 따른 책임은 판매자에게 있고, 예매 취소와 환불은 PEAKET이 처리합니다';
+  return name ? `판매자: ${name}. ${notice}` : notice;
 }
 
 /** 미성년자 계약 취소 고지(전자상거래법 §13③, d5 §5.11 ⑨) */

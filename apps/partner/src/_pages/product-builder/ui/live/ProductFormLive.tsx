@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { createProduct, listProductionEvents, listProductions, updateProduct, type PartnerProductCreate, type PartnerProductDetail } from '@/shared/api/partner-live';
 import { problemMessage } from '@/shared/api/problem';
 import { useAsync } from '@/shared/ui/Async';
+import { BigScreenNotice } from '@/shared/ui/BigScreenNotice';
 import { ADDON_REFUND_RULE, GOODS_REFUND_RULE } from '../../model/products';
 import { EMPTY_PRODUCT_FORM, buildProductBody, commaDigits, detailToForm, kstText, type ProductFormValues } from '../../model/product-live';
 
@@ -86,7 +87,18 @@ export function LiveProductForm({ listHref, editing }: { listHref: string; editi
   const goods = !v.ticketLinked;
 
   return (
-    <form className="card col" style={{ padding: 24, gap: 20 }} onSubmit={submit} aria-labelledby="h-new" noValidate>
+    <>
+      <section className="col md:hidden" style={{ gap: 12 }} aria-labelledby="h-new-m">
+        <h2 className="t-lg" id="h-new-m">
+          {editing ? '상품 고치기' : '새 상품'}
+        </h2>
+        <BigScreenNotice title="상품 만들기·게시는 태블릿이나 데스크톱에서 합니다" />
+        <Link className="link-more" href={listHref} style={{ alignSelf: 'flex-start', minHeight: 44 }}>
+          상품 목록 보기
+          <i className="ic ic-chevron-right" aria-hidden="true" />
+        </Link>
+      </section>
+      <form className="card col max-md:hidden" style={{ padding: 24, gap: 20 }} onSubmit={submit} aria-labelledby="h-new" noValidate>
       <div className="row between wrap" style={{ gap: 8 }}>
         <h2 className="t-lg" id="h-new">
           {editing ? '상품 고치기' : '새 상품'}
@@ -326,5 +338,6 @@ export function LiveProductForm({ listHref, editing }: { listHref: string; editi
         </div>
       </div>
     </form>
+    </>
   );
 }

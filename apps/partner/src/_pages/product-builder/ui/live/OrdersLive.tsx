@@ -139,6 +139,16 @@ export function LiveOrdersSection() {
                 </tbody>
               </table>
             </div>
+            <ul className="col md:hidden" style={{ gap: 10 }} aria-label="상품별 주문">
+              {page.data.items.map((r) => (
+                <li key={`${r.productId}-m`} className="card-flat pad col" style={{ gap: 4 }}>
+                  <span className="fw-b">{r.productName}</span>
+                  <span className="t-sm muted">
+                    주문 {n(r.orderCount)}건 · 수량 {n(r.quantity)}개 · 택배 {n(r.deliveryQuantity)} · 현장 수령 {n(r.pickupQuantity)} · 취소 {n(r.cancelCount)} · 반품 {n(r.returnCount)}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </section>
 
           <section className="col" style={{ gap: 10 }} aria-labelledby="h-o-d">

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { evaluateSalePolicy, parseSalePolicy, type SalePolicyRule } from '@peaket/validation/sale-policy';
 import { deleteEligibility, listEligibility, readPolicy, savePolicy, uploadEligibility, type EligibilityList } from '../model/api';
 import { type FormKind, kindOf, ruleFromForm, summaryOf } from '../model/form';
+import { BigScreenNotice } from '@/shared/ui/BigScreenNotice';
 
 type Kind = FormKind;
 const CTX = { rounds: [], grades: ['R', 'S', 'A'] } as const;
@@ -166,21 +167,32 @@ export function LiveSalePolicy({ productionId }: { productionId: string }) {
         <section className="card col" style={{ overflow: 'hidden' }} aria-labelledby="h-live-rules">
           <div className="row between" style={{ padding: '16px 16px 12px' }}>
             <h2 className="t-md fw-b" id="h-live-rules">등록 규칙</h2>
-            <button className="btn btn-outline btn-sm" type="button" onClick={() => resetForm('presale')}>새 규칙</button>
+            <button className="btn btn-outline btn-sm max-md:hidden" type="button" onClick={() => resetForm('presale')}>새 규칙</button>
           </div>
-          <table className="table dense">
-            <caption className="sr-only">등록 규칙 {rules.length}개의 이름, 조건 요약, 상태</caption>
-            <thead><tr><th scope="col">규칙 이름</th><th scope="col">조건 요약</th><th scope="col">상태</th></tr></thead>
-            <tbody>
-              {rules.length === 0 ? <tr><td colSpan={3} className="muted">등록한 규칙이 없습니다</td></tr> : rules.map((r, i) => (
-                <tr key={`${r.name}-${i}`} className={editAt === i ? 'is-selected' : undefined}>
-                  <td className="fw-b"><button className="link-more" type="button" onClick={() => pickRule(i)}>{r.name}</button></td>
-                  <td>{summaryOf(r)}</td>
-                  <td><span className="badge">초안</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap table-scroll max-md:hidden" role="region" aria-label="등록 규칙 표" tabIndex={0}>
+            <table className="table dense">
+              <caption className="sr-only">등록 규칙 {rules.length}개의 이름, 조건 요약, 상태</caption>
+              <thead><tr><th scope="col">규칙 이름</th><th scope="col">조건 요약</th><th scope="col">상태</th></tr></thead>
+              <tbody>
+                {rules.length === 0 ? <tr><td colSpan={3} className="muted">등록한 규칙이 없습니다</td></tr> : rules.map((r, i) => (
+                  <tr key={`${r.name}-${i}`} className={editAt === i ? 'is-selected' : undefined}>
+                    <td className="fw-b"><button className="link-more" type="button" onClick={() => pickRule(i)}>{r.name}</button></td>
+                    <td>{summaryOf(r)}</td>
+                    <td><span className="badge">초안</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <ul className="col md:hidden" style={{ gap: 8, padding: '0 16px 16px' }} aria-label="등록 규칙 목록">
+            {rules.length === 0 ? <li className="t-sm muted">등록한 규칙이 없습니다</li> : rules.map((r, i) => (
+              <li key={`${r.name}-m-${i}`} className="card-flat pad col" style={{ gap: 4 }}>
+                <button className="link-more" type="button" onClick={() => pickRule(i)}>{r.name}</button>
+                <span className="t-sm muted">{summaryOf(r)}</span>
+                <span className="badge" style={{ alignSelf: 'flex-start' }}>초안</span>
+              </li>
+            ))}
+          </ul>
         </section>
         <section className="card col" style={{ gap: 10 }} aria-labelledby="h-live-lists">
           <h2 className="t-md fw-b" id="h-live-lists">판매 자격 명단</h2>
@@ -193,16 +205,20 @@ export function LiveSalePolicy({ productionId }: { productionId: string }) {
             ))}
             {lists.length === 0 ? <li className="t-sm muted">올린 명단이 없습니다</li> : null}
           </ul>
-          <div className="field" style={{ gap: 4 }}>
+          <div className="field max-md:hidden" style={{ gap: 4 }}>
             <label className="label" htmlFor="live-list-file">명단 올리기(CSV·텍스트, 8MB까지)</label>
             <input id="live-list-file" type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(e) => void upload(e.target.files?.[0] ?? null)} />
             <p className="t-xs muted">명단 키는 아래 규칙 폼의 자격 명단 값으로 씁니다.</p>
           </div>
         </section>
+        <BigScreenNotice
+          title="규칙 편집과 시뮬레이션은 태블릿이나 데스크톱에서 합니다"
+          body="새 규칙 저장·JSON 보기·판매 자격 명단 올리기도 큰 화면에서 합니다"
+        />
       </div>
 
       <div className="col min-w-0 gap-4 md:gap-5">
-        <section className="card col" style={{ gap: 12 }} aria-labelledby="h-live-edit">
+        <section className="card col max-md:hidden" style={{ gap: 12 }} aria-labelledby="h-live-edit">
           <h2 className="t-md fw-b" id="h-live-edit">{editAt === null ? '새 규칙' : '규칙 고치기'}</h2>
           <fieldset className="col" style={{ border: 0, padding: 0, margin: 0, gap: 8 }}>
             <legend className="label">규칙 종류</legend>
@@ -273,7 +289,7 @@ export function LiveSalePolicy({ productionId }: { productionId: string }) {
           {pending ? <p className="t-sm muted">승인된 공연이라 이 규칙은 재승인 대기 판에 저장됩니다.</p> : null}
         </section>
 
-        <section className="card col" style={{ gap: 10 }} aria-labelledby="h-live-sim" role="region">
+        <section className="card col max-md:hidden" style={{ gap: 10 }} aria-labelledby="h-live-sim" role="region">
           <h2 className="t-md fw-b" id="h-live-sim">시뮬레이션</h2>
           <div className="row wrap" style={{ gap: 12 }}>
             <label className="check-row t-sm">등급 <input className="input input-sm" style={{ width: 70 }} value={grade} onChange={(e) => setGrade(e.target.value)} /></label>
