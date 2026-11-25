@@ -172,6 +172,7 @@ describe('O-T20 현장 책임자 신선도(서버)', () => {
     const page = await gate.changes(EVENT, 0, 100, EVENT, SELF, 'gate_lead');
     expect(page.changes).toEqual([]);
     expect(page.lastSeq).toBe(0);
-    expect('staleDevices' in page).toBe(false);
+    // 현장 책임자에게는 계산 실패도 빈 목록으로 싣는다
+    expect(page.staleDevices).toEqual([]);
   });
 });

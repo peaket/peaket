@@ -36,9 +36,13 @@ test('O-T20 현장 책임자 화면은 같은 구역 기기의 동기화 지연�
   const banners = m.freshnessBannersOf({
     role: 'gate_lead',
     placementZone: '동문',
-    staleDevices: [stale(), stale({ deviceId: 'd-2', deviceName: '동문-04', ageMs: 121_000 })],
+    staleDevices: [
+      stale(),
+      stale({ deviceId: 'd-2', deviceName: '동문-04', ageMs: 121_000 }),
+      stale({ deviceId: 'd-3', deviceName: '서문-01', gateZone: '서문', ageMs: 200_000 }),
+    ],
   });
-  assert.equal(banners.length, 2);
+  assert.equal(banners.length, 2, '응답에 섞인 다른 구역 기기는 배너로 만들지 않는다');
   assert.deepEqual(banners.map((b) => b.deviceId), ['0190f3a1-7c2e-7a00-8000-0000000f5482', 'd-2']);
   assert.match(banners[0].title, /동문-03/);
   assert.match(banners[0].title, /2분/);

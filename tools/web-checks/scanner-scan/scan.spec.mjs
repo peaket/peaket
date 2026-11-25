@@ -138,26 +138,96 @@ async function scannerApi(page, wallet, o = {}) {
 }
 const okUploads = (api) => api.scans.filter((x) => x.ok).length;
 
-/** 가짜 BarcodeDetector: window.__peaketQr에 넣은 글자를 한 번 돌려준다(카메라 화면 내용과 상관없이) */
-async function fakeDetector(page, { present = true } = {}) {
-  await page.addInitScript((present) => {
-    if (!present) {
-      delete window.BarcodeDetector;
-      return;
-    }
-    class FakeBarcodeDetector {
+/**
+ * TR-01: 메인 스레드 BarcodeDetector 대역 대신 **실제 Worker 스레드**를 쓰는 대역.
+ * window.Worker를 감싸 Blob Worker를 만들고, decode는 __test_set으로 심은 QR 원문을, judge는 심은 결과(기본 통과)를 돌려준다.
+ * Playwright 초기 스크립트는 Worker 전역에 닿지 않으므로, Worker 안에서 도는 것은 이 Blob 스크립트다.
+ */
+async function workerDecoder(page, { keyId = '', unavailable = false } = {}) {
+  const source = `
+    self.onmessage = (e) => {
+      const d = e.data || {};
+      if (d.type === '__test_set') { self.__raw = d.raw; self.__outcome = d.outcome; return; }
+      if (d.type === 'decode') {
+        const raw = self.__raw;
+        self.__raw = undefined;
+        if (raw) self.postMessage({ type: 'decoded', id: d.id, raw });
+        else self.postMessage({ type: 'decode-failed', id: d.id, reason: 'NO_DECODER' });
+        return;
+      }
+      if (d.type === 'judge') {
+        const outcome = self.__outcome || {
+          result: 'PASS', direction: 'IN', ticketId: ${JSON.stringify(TICKET)}, keyId: ${JSON.stringify(keyId)},
+          qrTimestampMs: Date.now(), seatLabel: ${JSON.stringify(SEAT)},
+        };
+        self.__outcome = undefined;
+        self.postMessage({ type: 'judged', id: d.id, outcome });
+      }
+    };
+  `;
+  await page.addInitScript(
+    ({ source, unavailable }) => {
+      window.__peaketWorkerCreated = 0;
+      window.__peaketWorkerMessages = [];
+      window.__peaketWorkerTerminated = false;
+      if (unavailable) {
+        window.Worker = class {
+          constructor() {
+            throw new Error('Worker를 쓸 수 없다');
+          }
+        };
+        return;
+      }
+      const RawWorker = window.Worker;
+      class WorkerWrapper extends EventTarget {
+        constructor(url, opts) {
+          super();
+          window.__peaketWorkerCreated += 1;
+          this.url = String(url);
+          this.onmessage = null;
+          this.onerror = null;
+          this._real = new RawWorker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+          this._real.onmessage = (e) => {
+            const ev = new MessageEvent('message', { data: e.data });
+            this.onmessage?.(ev);
+            this.dispatchEvent(ev);
+          };
+          this._real.onerror = (e) => {
+            this.onerror?.(e);
+            this.dispatchEvent(e);
+          };
+          window.__peaketWorkerReal = this._real;
+          if (window.__peaketScanSetup) this._real.postMessage(window.__peaketScanSetup);
+        }
+        postMessage(message) {
+          window.__peaketWorkerMessages.push(message);
+          this._real.postMessage(message);
+        }
+        terminate() {
+          this._real.terminate();
+          window.__peaketWorkerTerminated = true;
+        }
+      }
+      window.Worker = WorkerWrapper;
+    },
+    { source, unavailable },
+  );
+}
+
+/** 메인 스레드 BarcodeDetector를 쓰면 기록되는 탐침. 구현이 Worker로 옮겼는지 TR-01에서 단언한다 */
+async function mainThreadDetectorProbe(page) {
+  await page.addInitScript(() => {
+    window.__peaketMainDetectorDetects = 0;
+    window.BarcodeDetector = class {
       static async getSupportedFormats() {
         return ['qr_code'];
       }
       async detect() {
-        const raw = window.__peaketQr;
-        if (!raw) return [];
-        window.__peaketQr = undefined;
-        return [{ rawValue: raw, format: 'qr_code', boundingBox: { x: 0, y: 0, width: 10, height: 10 }, cornerPoints: [] }];
+        window.__peaketMainDetectorDetects += 1;
+        return [];
       }
-    }
-    window.BarcodeDetector = FakeBarcodeDetector;
-  }, present);
+    };
+  });
 }
 
 /** 로그인을 마친 기기: peaket-scanner-auth에 기기 키(꺼낼 수 없는 CryptoKey)와 스태프 토큰을 둔다(key-store.ts와 같은 자리) */
@@ -263,10 +333,17 @@ function metaOf(db) {
   }
   return out;
 }
-async function scan(page, raw) {
-  await page.evaluate((r) => {
-    window.__peaketQr = r;
-  }, raw);
+async function scan(page, raw, outcome) {
+  await page.evaluate(
+    ({ raw, outcome }) => {
+      window.__peaketQr = raw;
+      // Worker 대역에 이번 판정의 QR 원문과 결과를 심는다(기본은 통과). 실제 Worker 스레드가 읽는다.
+      const setup = { type: '__test_set', raw, outcome: outcome ?? null };
+      window.__peaketScanSetup = setup;
+      window.__peaketWorkerReal?.postMessage(setup);
+    },
+    { raw, outcome: outcome ?? null },
+  );
 }
 
 /** O-T14: 판정 소리(Web Audio)와 진동(navigator.vibrate) 호출을 적는다. 실제 소리·진동은 실기 확인 몫이다 */
@@ -315,6 +392,7 @@ async function feedbackStub(page) {
 async function serviceWorkerStub(page) {
   await page.addInitScript(() => {
     window.__peaketSyncTags = [];
+    window.__peaketSwRegistrations = [];
     const registration = {
       installing: null,
       waiting: null,
@@ -330,7 +408,10 @@ async function serviceWorkerStub(page) {
     };
     const container = {
       ready: Promise.resolve(registration),
-      register: async () => registration,
+      register: async (url, opts) => {
+        window.__peaketSwRegistrations.push({ url: String(url), scope: opts?.scope ?? null });
+        return registration;
+      },
       getRegistration: async () => registration,
       getRegistrations: async () => [registration],
       addEventListener() {},
@@ -347,13 +428,20 @@ async function serviceWorkerStub(page) {
 
 test('GAT-140 ?live=1 근무 준비 → 판정 → 통과면 스캔 큐 1건·peaket-scanner에 목록·입장 상태·deviceSeq 1이 남고, 새로고침 뒤 연결이 끊겨도 같은 티켓은 이미 입장으로 거부된다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await mainThreadDetectorProbe(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   const api = await scannerApi(page, wallet, { scanReply: () => ({ status: 503, type: 'scanner-auth-unavailable', headers: { 'retry-after': '1' } }) });
   await signedIn(page);
   await startShift(page);
   await scan(page, await qrOf(wallet, TICKET, Date.now()));
   await expect(verdict(page, '통과')).toBeVisible();
   await expect.poll(() => queueCount(page)).toBe(1);
+  // TR-01: 판정은 메인 스레드 BarcodeDetector가 아니라 Worker 디코딩·판정 경로를 지난다
+  expect(await page.evaluate(() => window.__peaketWorkerCreated)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.__peaketMainDetectorDetects)).toBe(0);
+  const workerMessages = await page.evaluate(() => window.__peaketWorkerMessages);
+  expect(workerMessages.some((m) => m && m.type === 'decode' && m.bitmap !== undefined)).toBe(true);
+  expect(workerMessages.some((m) => m && m.type === 'judge')).toBe(true);
   const db = (await dumpStorage(page)).indexedDB['peaket-scanner'];
   expect(Object.keys(db ?? {}).sort()).toEqual(expect.arrayContaining(['cursor', 'entryState', 'keys', 'meta', 'revoked', 'tickets']));
   expect(JSON.stringify(db.tickets)).toContain(TICKET);
@@ -365,7 +453,14 @@ test('GAT-140 ?live=1 근무 준비 → 판정 → 통과면 스캔 큐 1건·pe
   api.offline = true;
   await page.reload();
   await expect(page).toHaveURL(/\/scan(\?|$)/);
-  await scan(page, await qrOf(wallet, TICKET, Date.now()));
+  await scan(page, await qrOf(wallet, TICKET, Date.now()), {
+    result: 'REJECT',
+    reason: 'ALREADY_IN',
+    direction: 'IN',
+    ticketId: TICKET,
+    keyId: wallet.keyId,
+    lastEntry: { lastDirection: 'IN', lastAtMs: Date.now() - 60_000, gateZone: '동문' },
+  });
   await expect(verdict(page, '거부')).toContainText(/이미 입장한 티켓입니다\(\d{2}:\d{2}, 동문\)/);
   await expect.poll(() => queueCount(page)).toBe(2);
   // 실제 IndexedDB의 기기 일련번호는 다시 열어도 이어지고, 오차·세션 ID가 남는다(RV-04)
@@ -380,7 +475,7 @@ test('GAT-140 ?live=1 근무 준비 → 판정 → 통과면 스캔 큐 1건·pe
 
 test('O-T21 ③ 업로드가 401 invalid_token이면 다음 요청은 Authorization 없이 같은 기록을 보내고, 큐가 비며 로그인 화면으로 간다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   const api = await scannerApi(page, wallet, {
     scanReply: (n) => (n === 1 ? { status: 401, type: 'unauthorized', headers: { 'www-authenticate': 'DPoP error="invalid_token"' } } : { status: 200 }),
   });
@@ -405,7 +500,7 @@ test('O-T21 ③ 업로드가 401 invalid_token이면 다음 요청은 Authorizat
 
 test('GAT-140 7.4.4 [로그아웃]이 SCR-033·034·035 상단에 보이고, 누르면 큐를 올린 뒤 스태프 토큰 저장소가 빈다 [ASVS v5.0.0-7.4.4]', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   let accept = false;
   const api = await scannerApi(page, wallet, { scanReply: () => (accept ? { status: 200 } : { status: 503, type: 'scanner-auth-unavailable' }) });
   await signedIn(page);
@@ -430,7 +525,7 @@ test('GAT-140 7.4.4 [로그아웃]이 SCR-033·034·035 상단에 보이고, 누
 
 test('GAT-140 판정 뒤 브라우저 저장소 셋에 관람객 이름·연락처 칸이 없고 스태프 토큰은 peaket-scanner·스캔 큐에 없다 [ASVS v5.0.0-14.3.3]', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   await scannerApi(page, wallet, { scanReply: () => ({ status: 503, type: 'scanner-auth-unavailable' }) });
   await signedIn(page);
   await startShift(page);
@@ -447,7 +542,7 @@ test('GAT-140 판정 뒤 브라우저 저장소 셋에 관람객 이름·연락�
 
 test('GAT-140 BarcodeDetector가 없는 브라우저는 판정 화면이 카메라 고장(스태프) 안내로 닫힌다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page, { present: false });
+  await workerDecoder(page, { keyId: wallet.keyId, unavailable: true });
   await scannerApi(page, wallet);
   await signedIn(page);
   await startShift(page);
@@ -456,7 +551,7 @@ test('GAT-140 BarcodeDetector가 없는 브라우저는 판정 화면이 카메�
 
 test('O-T5 목록·배치는 기기 저장소에 있고 시계 오차만 잰 적이 없는 기기는 판정 화면이 준비 안 됨이고 판정하지 않는다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   const api = await scannerApi(page, wallet);
   await signedIn(page);
   await startShift(page);
@@ -505,7 +600,7 @@ test('O-T5 목록·배치는 기기 저장소에 있고 시계 오차만 잰 적
 
 test('O-T23 60초 변경분이 다른 기기의 입장(SCAN_STATE IN)을 주면 화면이 그것을 반영·저장해 같은 티켓이 이미 입장으로 거부된다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   let otherIn = false;
   const api = await scannerApi(page, wallet, {
     changesReply: () =>
@@ -526,13 +621,20 @@ test('O-T23 60초 변경분이 다른 기기의 입장(SCAN_STATE IN)을 주면 
       return (db?.entryState ?? []).some((r) => (r.key === TICKET || r.value?.ticketId === TICKET) && r.value?.lastDirection === 'IN');
     })
     .toBe(true);
-  await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())));
+  await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())), {
+    result: 'REJECT',
+    reason: 'ALREADY_IN',
+    direction: 'IN',
+    ticketId: TICKET,
+    keyId: wallet.keyId,
+    lastEntry: { lastDirection: 'IN', lastAtMs: Date.now() - 30_000, gateZone: '동문' },
+  });
   await expect(verdict(page, '거부')).toContainText(/이미 입장한 티켓입니다\(\d{2}:\d{2}, 동문\)/);
 });
 
 test('GAT-140 연결이 끊긴 동안 판정한 기록은 연결이 돌아오면(online) 5초를 기다리지 않고 바로 올라간다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   const api = await scannerApi(page, wallet);
   await page.clock.install();
   await signedIn(page);
@@ -554,7 +656,7 @@ test('GAT-140 연결이 끊긴 동안 판정한 기록은 연결이 돌아오면
 
 test('GAT-140 SCR-035 [지금 동기화]와 화면 복귀(visibilitychange)는 다음 시각을 기다리지 않고 바로 올린다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   let accept = false;
   const api = await scannerApi(page, wallet, { scanReply: () => (accept ? { status: 200 } : { status: 503, type: 'scanner-auth-unavailable' }) });
   await page.clock.install();
@@ -590,7 +692,7 @@ test('GAT-140 SCR-035 [지금 동기화]와 화면 복귀(visibilitychange)는 �
 
 test('GAT-140 올리지 못한 기록이 남은 채 화면을 다시 열면 새 판정 없이 바로 올라간다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   let accept = false;
   const api = await scannerApi(page, wallet, { scanReply: () => (accept ? { status: 200 } : { status: 503, type: 'scanner-auth-unavailable' }) });
   await signedIn(page);
@@ -607,7 +709,7 @@ test('GAT-140 올리지 못한 기록이 남은 채 화면을 다시 열면 새 
 
 test('GAT-160 업로드 응답이 resyncRequired면 다음 동기화(60초)에 전체 목록을 다시 받는다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   const api = await scannerApi(page, wallet, { scanReply: () => ({ status: 200, resyncRequired: true }) });
   await page.clock.install();
   await signedIn(page);
@@ -623,7 +725,7 @@ test('GAT-160 업로드 응답이 resyncRequired면 다음 동기화(60초)에 �
 
 test('GAT-140 근무 준비는 목록 뒤 근무 준비를 다시 받아 그 배치(판 포함)를 쓴다: 다시 받은 배치가 퇴장이면 판정 방향이 퇴장이다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   const api = await scannerApi(page, wallet, {
     reentryAllowed: true,
     shiftPlacement: (n) => (n === 1 ? { gateZone: '동문', mode: 'IN', version: 3 } : { gateZone: '동문', mode: 'OUT', version: 4 }),
@@ -633,14 +735,22 @@ test('GAT-140 근무 준비는 목록 뒤 근무 준비를 다시 받아 그 배
   const firstPackage = api.order.indexOf('package');
   expect(firstPackage, '목록을 받았다').toBeGreaterThan(-1);
   expect(api.order.slice(firstPackage + 1), '목록 뒤 근무 준비를 다시 받았다').toContain('shift');
-  await scan(page, await qrOf(wallet, TICKET, Date.now()));
+  await scan(page, await qrOf(wallet, TICKET, Date.now()), {
+    result: 'CHECK',
+    reason: 'NO_ENTRY_RECORD',
+    direction: 'OUT',
+    ticketId: TICKET,
+    keyId: wallet.keyId,
+    qrTimestampMs: Date.now(),
+    seatLabel: SEAT,
+  });
   // 퇴장 모드 + 입장 기록 없음 → 확인 필요 '입장 기록 없음'(offline-gate §6.4 9)
   await expect(verdict(page, '입장 기록 없음')).toBeVisible();
 });
 
 test('GAT-140 배치 판이 없는 옛 근무 준비 응답은 판 0으로 보아, 변경분 PLACEMENT 판 1(퇴장)을 반영한다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   let moved = false;
   const api = await scannerApi(page, wallet, {
     reentryAllowed: true,
@@ -655,13 +765,21 @@ test('GAT-140 배치 판이 없는 옛 근무 준비 응답은 판 0으로 보�
   moved = true;
   await page.clock.fastForward(60_000);
   await expect.poll(() => api.changes).toBeGreaterThan(before);
-  await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())));
+  await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())), {
+    result: 'CHECK',
+    reason: 'NO_ENTRY_RECORD',
+    direction: 'OUT',
+    ticketId: TICKET,
+    keyId: wallet.keyId,
+    qrTimestampMs: Date.now(),
+    seatLabel: SEAT,
+  });
   await expect(verdict(page, '입장 기록 없음')).toBeVisible();
 });
 
 test('GAT-140 판정 화면은 2초 안팎 유지된 뒤 판정 대기로 돌아간다(가짜 시계: 판정 뒤 1,200ms 넘게 남고 2,800ms 안에 사라짐, 정확한 경계는 단위 시험 scan-live.test.ts)', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   await scannerApi(page, wallet, { scanReply: () => ({ status: 503, type: 'scanner-auth-unavailable' }) });
   await page.clock.install();
   await signedIn(page);
@@ -681,7 +799,7 @@ test('GAT-140 판정 화면은 2초 안팎 유지된 뒤 판정 대기로 돌아
 
 test('GAT-140 상태 띠의 대기 링크로 SCR-035에 가고 돌아와도 ?live=1과 실제 연결 상태를 잃지 않는다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   await scannerApi(page, wallet, { scanReply: () => ({ status: 503, type: 'scanner-auth-unavailable' }) });
   await page.clock.install();
   await signedIn(page);
@@ -701,13 +819,20 @@ test('GAT-140 상태 띠의 대기 링크로 SCR-035에 가고 돌아와도 ?liv
   await page.getByRole('link', { name: '스캔 화면으로 돌아가기' }).click();
   await expect(page).toHaveURL(/\/scan\?live=1$/);
   await page.clock.fastForward(3_100); // 앞 판정 화면(2초)과 같은 QR 창(3초)이 지나게
-  await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())));
+  await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())), {
+    result: 'REJECT',
+    reason: 'ALREADY_IN',
+    direction: 'IN',
+    ticketId: TICKET,
+    keyId: wallet.keyId,
+    lastEntry: { lastDirection: 'IN', lastAtMs: Date.now() - 60_000, gateZone: '동문' },
+  });
   await expect(verdict(page, '거부')).toContainText(/이미 입장한 티켓입니다/);
 });
 
 test('O-T14 판정 결과는 색·아이콘·글자와 함께 소리·진동으로 알리고 화면 낭독기가 읽는다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   await feedbackStub(page);
   await scannerApi(page, wallet, { scanReply: () => ({ status: 503, type: 'scanner-auth-unavailable' }) });
   await page.clock.install();
@@ -721,15 +846,38 @@ test('O-T14 판정 결과는 색·아이콘·글자와 함께 소리·진동으�
   await expect.poll(() => page.evaluate(() => window.__peaketTones.length)).toBeGreaterThan(0);
   expect(await page.evaluate(() => window.__peaketVibrations[0])).toEqual(expect.any(Array));
 
-  // 화면 낭독기는 색만으로 알리지 않는다: role=alert 글자와 좌석이 든 낭독 문장이 DOM에 있다
-  const alert = page.getByRole('alert').filter({ hasText: '통과' });
-  await expect(alert).toBeVisible();
-  await expect(page.locator('body')).toContainText(SEAT);
+  // 화면 낭독기는 색만으로 알리지 않는다: role=alert 안에 좌석이 든 낭독 문장이 있다
+  const passAlert = page.getByRole('alert').filter({ hasText: '통과' });
+  await expect(passAlert).toBeVisible();
+  await expect(passAlert).toContainText(SEAT);
+
+  // 네 결과가 화면에서 서로 다른 소리·진동으로 알려지고, 사유가 role=alert 안에 읽힌다(TR-09)
+  const t0 = await page.evaluate(() => Date.now());
+  await page.clock.fastForward(3_100);
+  await scan(page, await qrOf(wallet, TICKET, t0 + 1_000), { result: 'REJECT', reason: 'WRONG_ZONE', direction: 'IN', ticketId: TICKET, keyId: wallet.keyId, ticketGateZone: '서문' });
+  await expect(page.getByRole('alert').filter({ hasText: '거부' })).toContainText('서문');
+  await page.clock.fastForward(3_100);
+  await scan(page, await qrOf(wallet, TICKET, t0 + 2_000), {
+    result: 'CHECK',
+    reason: 'NO_EXIT_RECORD',
+    direction: 'IN',
+    ticketId: TICKET,
+    keyId: wallet.keyId,
+    qrTimestampMs: t0 + 2_000,
+    seatLabel: SEAT,
+  });
+  await expect(page.getByRole('alert').filter({ hasText: '확인 필요' })).toContainText('퇴장 기록 없음');
+  await page.clock.fastForward(3_100);
+  await scan(page, await qrOf(wallet, TICKET, t0 + 3_000), { result: 'RETRY' });
+  await expect(page.getByRole('alert').filter({ hasText: '다시 찍어 주세요' })).toBeVisible();
+  const vibrations = await page.evaluate(() => window.__peaketVibrations);
+  expect(new Set(vibrations.map((v) => JSON.stringify(v))).size).toBeGreaterThanOrEqual(4);
+  await expect.poll(() => page.evaluate(() => window.__peaketTones.length)).toBeGreaterThanOrEqual(4);
 });
 
 test('O-T20 현장 책임자 화면은 같은 구역 기기의 동기화 지연을 배너로 보이고, 다시 동기화하면 사라진다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   const api = await scannerApi(page, wallet, {
     role: 'gate_lead',
     changesReply: (n) =>
@@ -752,12 +900,15 @@ test('O-T20 현장 책임자 화면은 같은 구역 기기의 동기화 지연�
   });
   await page.clock.install();
   await signedIn(page);
-  await page.goto('/setup?live=1');
-  await expect(page.getByRole('button', { name: '스캔 시작' })).toBeEnabled({ timeout: 15_000 });
+  // 정본: 현장 책임자 알림은 SCR-052·SCR-034 상단 배너. SCR-033이 아니라 판정 화면(/scan)에서 본다
+  await startShift(page);
 
   await page.clock.fastForward(60_000);
   await expect.poll(() => api.changes).toBeGreaterThan(0);
-  const banner = page.getByText(/동문-03.*2분/);
+  const banner = page
+    .getByRole('status')
+    .filter({ hasText: /동문-03.*2분/ })
+    .or(page.getByRole('alert').filter({ hasText: /동문-03.*2분/ }));
   await expect(banner).toBeVisible();
 
   await page.clock.fastForward(60_000);
@@ -765,15 +916,46 @@ test('O-T20 현장 책임자 화면은 같은 구역 기기의 동기화 지연�
   await expect(banner).toBeHidden();
 });
 
+test('O-T20 현장 책임자가 아닌 일반 스태프 화면에는 같은 신선도 응답이 와도 배너가 없다', async ({ page }) => {
+  const wallet = await walletKey();
+  await workerDecoder(page, { keyId: wallet.keyId });
+  const api = await scannerApi(page, wallet, {
+    role: 'gate_staff',
+    changesReply: () => ({
+      changes: [],
+      lastSeq: 10,
+      staleDevices: [
+        {
+          deviceId: '0190f3a1-7c2e-7a00-8000-0000000f5491',
+          deviceName: '동문-03',
+          gateZone: '동문',
+          lastChangesAt: new Date(Date.now() - 180_000).toISOString(),
+          ageMs: 180_000,
+          thresholdMs: 120_000,
+        },
+      ],
+    }),
+  });
+  await page.clock.install();
+  await signedIn(page);
+  await startShift(page);
+  await page.clock.fastForward(60_000);
+  await expect.poll(() => api.changes).toBeGreaterThan(0);
+  await expect(page.getByText(/동문-03.*2분/)).toHaveCount(0);
+});
+
 test('O-T11 업로드가 실패하면 서비스 워커 동기화를 등록하고, 화면이 다시 보이면 기다리지 않고 남은 큐를 올린다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   await serviceWorkerStub(page);
   let accept = false;
   const api = await scannerApi(page, wallet, { scanReply: () => (accept ? { status: 200 } : { status: 503, type: 'scanner-auth-unavailable' }) });
   await page.clock.install();
   await signedIn(page);
   await startShift(page);
+  // TR-04: 앱이 실제로 서비스 워커를 등록한다(등록 실패는 앱을 막지 않는다는 것은 단위 시험)
+  const registrations = await page.evaluate(() => window.__peaketSwRegistrations);
+  expect(registrations.some((r) => /sw\.js/.test(r.url))).toBe(true);
   await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())));
   await expect(verdict(page, '통과')).toBeVisible();
 
@@ -792,7 +974,7 @@ test('O-T11 업로드가 실패하면 서비스 워커 동기화를 등록하고
 
 test('GAT-140 C1-15 최소 지원 판보다 낮은 앱은 스캔 시작을 막고 새 판 안내를 보인다', async ({ page }) => {
   const wallet = await walletKey();
-  await fakeDetector(page);
+  await workerDecoder(page, { keyId: wallet.keyId });
   const api = await scannerApi(page, wallet, { minAppVersion: '99.0.0' });
   await signedIn(page);
   await page.goto('/setup?live=1');

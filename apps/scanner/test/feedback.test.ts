@@ -101,6 +101,17 @@ test('O-T14 소리·진동이 막힌 브라우저에서도 글자·아이콘·�
   assert.deepEqual(announced, [feedback.announcement], '소리·진동 실패와 상관없이 낭독은 한 번 한다');
   assert.equal(feedback.icon.length > 0, true);
 
+  // 비동기 소리 시작(AudioContext.resume 등)이 거부해도 낭독은 건너뛰지 않는다(TR-08)
+  const asyncAnnounced: string[] = [];
+  await f.emitFeedback(feedback, {
+    play: async () => {
+      throw new Error('resume이 거부됐다');
+    },
+    vibrate: () => undefined,
+    announce: (text) => void asyncAnnounced.push(text),
+  });
+  assert.deepEqual(asyncAnnounced, [feedback.announcement]);
+
   // 포트가 아예 없는 브라우저(소리·진동 API 없음)도 던지지 않는다
   await f.emitFeedback(feedback, {});
   // 낭독까지 막혀도 판정 결과를 바꾸지 않는다

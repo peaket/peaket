@@ -23,7 +23,8 @@ type BackgroundModule = {
   createServiceWorkerUploader(i: {
     queue: MemoryScanQueue;
     origin: string;
-    key: Awaited<ReturnType<typeof generateDpopKey>>;
+    key?: Awaited<ReturnType<typeof generateDpopKey>>;
+    loadKey?: () => Promise<Awaited<ReturnType<typeof generateDpopKey>> | undefined>;
     fetch?: typeof fetch;
     now?: () => number;
   }): UploadPort;
@@ -118,16 +119,60 @@ test('O-T11 Background Sync가 3번 시도하고 포기해도 화면이 다시 �
   const failing = new ScriptedPort([{ throws: new Error('연결 끊김') }, { throws: new Error('연결 끊김') }, { throws: new Error('연결 끊김') }]);
   for (let attempt = 0; attempt < 3; attempt++) {
     const r = await b.runBackgroundUpload({ queue, port: failing, nowMs: 1 });
-    assert.deepEqual(r, { sent: 0, accepted: 0, remaining: 501 }, '브라우저가 포기해도 기록을 지우지 않는다');
+    assert.deepEqual(r, { sent: 0, accepted: 0, remaining: 501, resyncRequired: false }, '브라우저가 포기해도 기록을 지우지 않는다');
   }
   assert.equal(await queue.count(), 501);
 
   // 화면이 다시 켜져 앱이 부르는 경로(성공)는 남은 기록을 500건씩 올린다
   const ok = new ScriptedPort();
   const resumed = await b.runBackgroundUpload({ queue, port: ok, nowMs: 1 });
-  assert.deepEqual(resumed, { sent: 501, accepted: 501, remaining: 0 });
+  assert.deepEqual(resumed, { sent: 501, accepted: 501, remaining: 0, resyncRequired: false });
   assert.deepEqual(ok.calls.map((c) => c.ids.length), [500, 1]);
   assert.equal(await queue.count(), 0);
+});
+
+test('O-T11 acceptedIds만 큐에서 지운다: 받지 않은 기록은 남기고 다음 동기화에 다시 올린다', async () => {
+  const b = bg();
+  const queue = new MemoryScanQueue();
+  const rows = [record(1), record(2), record(3)];
+  for (const row of rows) await queue.put(row);
+  const port = new ScriptedPort([{ acceptedIds: [rows[0].id, rows[2].id] }]);
+  const first = await b.runBackgroundUpload({ queue, port, nowMs: 1 });
+  assert.deepEqual(first, { sent: 3, accepted: 2, remaining: 1, resyncRequired: false });
+  assert.equal(await queue.count(), 1);
+  assert.deepEqual((await queue.due(1, 10)).map((r) => r.id), [rows[1].id], '받지 않은 기록만 남는다');
+
+  const again = new ScriptedPort();
+  const second = await b.runBackgroundUpload({ queue, port: again, nowMs: 1 });
+  assert.deepEqual(second, { sent: 1, accepted: 1, remaining: 0, resyncRequired: false });
+  assert.deepEqual(again.calls.map((c) => c.ids), [[rows[1].id]]);
+  assert.equal(await queue.count(), 0);
+});
+
+test('O-T11 resyncRequired와 403 stopped를 결과로 돌려주고 받지 않은 기록은 남긴다', async () => {
+  const b = bg();
+  const queue = new MemoryScanQueue();
+  await fill(queue, 2);
+  // ScriptedPort는 resyncRequired를 돌려주지 않으므로 직접 포트를 만든다
+  const resyncPort: UploadPort = {
+    upload: async (batch) => ({ acceptedIds: [String((batch[0] as { id: string }).id)], resyncRequired: true }),
+  };
+  const r1 = await b.runBackgroundUpload({ queue, port: resyncPort, nowMs: 1 });
+  assert.equal(r1.resyncRequired, true);
+  assert.equal(r1.remaining, 1);
+  assert.equal(await queue.count(), 1);
+
+  const stoppedPort: UploadPort = {
+    upload: async () => {
+      const e = new Error('기기 폐기') as Error & { status: number; type: string };
+      e.status = 403;
+      e.type = 'device-revoked';
+      throw e;
+    },
+  };
+  const r2 = await b.runBackgroundUpload({ queue, port: stoppedPort, nowMs: 1 });
+  assert.equal(r2.stopped, 'device-revoked');
+  assert.equal(await queue.count(), 1, '폐기 기기도 기록은 남긴다');
 });
 
 test('O-T11 폐기된 기기(403)에서는 Background Sync를 등록하지 않고 기록을 남긴다', async () => {
@@ -137,7 +182,7 @@ test('O-T11 폐기된 기기(403)에서는 Background Sync를 등록하지 않�
   await fill(queue, 2);
   const port = new ScriptedPort([{ throws: Object.assign(new Error('기기 폐기'), { status: 403, type: 'device-revoked' }) }]);
   const r = await b.runBackgroundUpload({ queue, port, nowMs: 1 });
-  assert.deepEqual(r, { sent: 0, accepted: 0, remaining: 2 });
+  assert.deepEqual(r, { sent: 0, accepted: 0, remaining: 2, resyncRequired: false, stopped: 'device-revoked' });
   assert.equal(await queue.count(), 2, '폐기 기기도 기록은 남긴다');
 });
 
@@ -159,7 +204,7 @@ test('GAT-140 O-T37 ⑧ 서비스 워커 업로드는 화면과 같은 기기 �
   }) as typeof fetch;
   const uploader = b.createServiceWorkerUploader({ queue, origin, key, fetch: fakeFetch, now: () => T0 + 1_000 });
   const r = await b.runBackgroundUpload({ queue, port: uploader, nowMs: 1 });
-  assert.deepEqual(r, { sent: 2, accepted: 2, remaining: 0 });
+  assert.deepEqual(r, { sent: 2, accepted: 2, remaining: 0, resyncRequired: false });
   assert.equal(requests.length, 1);
   const req = requests[0];
   assert.equal(req.url, `${origin}/v1/scanner/scans`);
@@ -176,4 +221,35 @@ test('GAT-140 O-T37 ⑧ 서비스 워커 업로드는 화면과 같은 기기 �
   assert.equal(payloadJson.htm, 'POST');
   assert.equal(payloadJson.htu, `${origin}/v1/scanner/scans`);
   assert.equal('ath' in payloadJson, false, '토큰이 없으면 ath도 없다');
+});
+
+test('GAT-140 O-T37 ⑧ 서비스 워커는 화면과 같은 저장소에서 기기 키를 읽어 업로드한다', async () => {
+  const b = bg();
+  const queue = new MemoryScanQueue();
+  await fill(queue, 1);
+  const key = await generateDpopKey();
+  const origin = 'https://scanner-api.peaket.example';
+  let loaded = 0;
+  const headers: Record<string, string>[] = [];
+  const fakeFetch = (async (_url: string, init?: RequestInit) => {
+    headers.push((init?.headers ?? {}) as Record<string, string>);
+    const body = init?.body ? (JSON.parse(String(init.body)) as { id: string }[]) : [];
+    return new Response(JSON.stringify({ acceptedIds: body.map((x) => x.id), resyncRequired: false, staleIds: [] }), { status: 200 });
+  }) as typeof fetch;
+  const uploader = b.createServiceWorkerUploader({
+    queue,
+    origin,
+    loadKey: async () => {
+      loaded += 1;
+      return key;
+    },
+    fetch: fakeFetch,
+    now: () => T0,
+  });
+  const r = await b.runBackgroundUpload({ queue, port: uploader, nowMs: 1 });
+  assert.deepEqual(r, { sent: 1, accepted: 1, remaining: 0, resyncRequired: false });
+  assert.equal(loaded, 1, '키를 넘기지 않으면 저장소에서 한 번 읽는다');
+  const [, payload] = headers[0].dpop.split('.');
+  const payloadJson = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { htu: string };
+  assert.equal(payloadJson.htu, `${origin}/v1/scanner/scans`);
 });

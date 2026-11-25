@@ -55,6 +55,14 @@ let sessions: FakeSessions;
 let key: Key;
 let clock: ReturnType<typeof fakeClock>;
 let seq = 0;
+let freshnessRows: { deviceId: string; deviceName: string; gateZone: string; lastChangesAt: string; ageMs: number; thresholdMs: number }[] = [];
+let freshnessThrows = false;
+const freshness = {
+  staleDevices: async () => {
+    if (freshnessThrows) throw new Error('신선도 원천 장애');
+    return freshnessRows;
+  },
+};
 
 async function keyOf(): Promise<Key> {
   const pair = await generateKeyPair('ES256', { extractable: true });
@@ -114,7 +122,7 @@ beforeAll(async () => {
   await shift.putPlacement({ eventId: EVENT, deviceId: DEVICE, gateZone: '동문', mode: 'IN', setBy: ACCOUNT, atMs: NOW, expectedVersion: 0 });
   svc = await createService({
     name: 'ticket-svc-gate-int',
-    module: AppModule.register({ scanner: { store, codes: new MemoryEnrollmentCodeStore(clock), replay, gate, shift } }),
+    module: AppModule.register({ scanner: { store, codes: new MemoryEnrollmentCodeStore(clock), replay, gate, shift, freshness } as never }),
     env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: quiet(),
@@ -161,6 +169,36 @@ describe('스캐너 목록·변경분 HTTP [GAT-180]', () => {
     expect((await post('/v1/scanner/scans', [s])).statusCode).toBe(200);
     const after = JSON.parse((await get(`/v1/scanner/events/${EVENT}/changes?after=0`)).payload) as { changes: { kind: string }[] };
     expect(after.changes.map((c) => c.kind)).toContain('SCAN_STATE');
+  });
+
+  test('O-T20 변경분 HTTP 응답은 gate_lead에게만 staleDevices를 싣고 gate_staff에는 칸이 없다', async () => {
+    const row = {
+      deviceId: DEVICE,
+      deviceName: '동문-03',
+      gateZone: '동문',
+      lastChangesAt: new Date(NOW - 180_000).toISOString(),
+      ageMs: 180_000,
+      thresholdMs: 120_000,
+    };
+    freshnessRows = [row];
+    freshnessThrows = false;
+    sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_lead', eventId: EVENT });
+    clock.advance(6_000);
+    const lead = JSON.parse((await get(`/v1/scanner/events/${EVENT}/changes?after=0`)).payload) as { staleDevices?: unknown };
+    expect(lead.staleDevices).toEqual([row]);
+
+    sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_staff', eventId: EVENT });
+    clock.advance(6_000);
+    const staff = JSON.parse((await get(`/v1/scanner/events/${EVENT}/changes?after=0`)).payload) as Record<string, unknown>;
+    expect('staleDevices' in staff).toBe(false);
+
+    sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_lead', eventId: EVENT });
+    clock.advance(6_000);
+    freshnessThrows = true;
+    const failed = JSON.parse((await get(`/v1/scanner/events/${EVENT}/changes?after=0`)).payload) as { staleDevices?: unknown };
+    expect(failed.staleDevices).toEqual([]);
+    freshnessRows = [];
+    freshnessThrows = false;
   });
 });
 
