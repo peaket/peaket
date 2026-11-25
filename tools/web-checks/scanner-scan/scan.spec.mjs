@@ -86,10 +86,10 @@ async function scannerApi(page, wallet, o = {}) {
         reentryAllowed: o.reentryAllowed ?? false,
         placement,
         packageSeq: 10,
-        role: 'gate_staff',
+        role: o.role ?? 'gate_staff',
         proxy: false,
         device: { deviceId: DEVICE, name: '동문-01', status: 'ACTIVE', credentialType: 'DEVICE_KEY', enrolled: true, mtls: false },
-        assignment: { assignmentId: 'as-1', role: 'gate_staff', validFrom: new Date(Date.now() - 3_600_000).toISOString(), validUntil: new Date(Date.now() + 3_600_000).toISOString(), proxy: false },
+        assignment: { assignmentId: 'as-1', role: o.role ?? 'gate_staff', validFrom: new Date(Date.now() - 3_600_000).toISOString(), validUntil: new Date(Date.now() + 3_600_000).toISOString(), proxy: false },
         package: { seq: 10, issuedAt: new Date().toISOString(), maxOfflineMs: 86_400_000, stale: false },
         versionVector: vector(10),
         auth: { deviceProof: 'DPOP', staffSession: true, confirmation: 'jkt' },
@@ -108,13 +108,20 @@ async function scannerApi(page, wallet, o = {}) {
         revokedKeyIds: [],
         lastSeq: 10,
         versionVector: vector(10),
+        ...(o.minAppVersion ? { minAppVersion: o.minAppVersion } : {}),
       });
     }
     if (path === `/v1/scanner/events/${EVENT}/changes`) {
       log.changes++;
       log.order.push('changes');
       const page = o.changesReply?.(log.changes) ?? { changes: [], lastSeq: 10 };
-      return json(200, { changes: page.changes, lastSeq: page.lastSeq, hasMore: false, versionVector: vector(page.lastSeq) });
+      return json(200, {
+        changes: page.changes,
+        lastSeq: page.lastSeq,
+        hasMore: false,
+        versionVector: vector(page.lastSeq),
+        ...(page.staleDevices ? { staleDevices: page.staleDevices } : {}),
+      });
     }
     if (path === `/v1/scanner/events/${EVENT}/flags`) return json(200, { items: [] });
     if (path === '/v1/scanner/scans' && req.method() === 'POST') {
@@ -260,6 +267,82 @@ async function scan(page, raw) {
   await page.evaluate((r) => {
     window.__peaketQr = r;
   }, raw);
+}
+
+/** O-T14: 판정 소리(Web Audio)와 진동(navigator.vibrate) 호출을 적는다. 실제 소리·진동은 실기 확인 몫이다 */
+async function feedbackStub(page) {
+  await page.addInitScript(() => {
+    window.__peaketVibrations = [];
+    window.__peaketTones = [];
+    const vibrate = (pattern) => {
+      window.__peaketVibrations.push(pattern);
+      return true;
+    };
+    try {
+      Object.defineProperty(Navigator.prototype, 'vibrate', { value: vibrate, configurable: true });
+    } catch {
+      Object.defineProperty(navigator, 'vibrate', { value: vibrate, configurable: true });
+    }
+    class FakeAudioContext {
+      constructor() {
+        this.destination = {};
+        this.currentTime = 0;
+      }
+      createOscillator() {
+        return {
+          type: '',
+          frequency: { value: 0 },
+          connect() {},
+          start() {
+            window.__peaketTones.push('start');
+          },
+          stop() {},
+        };
+      }
+      createGain() {
+        return { gain: { value: 0 }, connect() {} };
+      }
+      close() {
+        return Promise.resolve();
+      }
+    }
+    window.AudioContext = FakeAudioContext;
+    window.webkitAudioContext = FakeAudioContext;
+  });
+}
+
+/** O-T11: 서비스 워커 등록·일회성 동기화 등록을 적는다. 실제 서비스 워커 실행은 브라우저 확인 몫이다 */
+async function serviceWorkerStub(page) {
+  await page.addInitScript(() => {
+    window.__peaketSyncTags = [];
+    const registration = {
+      installing: null,
+      waiting: null,
+      active: null,
+      sync: {
+        register: async (tag) => {
+          window.__peaketSyncTags.push(tag);
+        },
+      },
+      addEventListener() {},
+      removeEventListener() {},
+      update: async () => undefined,
+    };
+    const container = {
+      ready: Promise.resolve(registration),
+      register: async () => registration,
+      getRegistration: async () => registration,
+      getRegistrations: async () => [registration],
+      addEventListener() {},
+      removeEventListener() {},
+      controller: null,
+    };
+    try {
+      Object.defineProperty(Navigator.prototype, 'serviceWorker', { get: () => container, configurable: true });
+    } catch {
+      Object.defineProperty(navigator, 'serviceWorker', { value: container, configurable: true });
+    }
+  });
 }
 
 test('GAT-140 ?live=1 근무 준비 → 판정 → 통과면 스캔 큐 1건·peaket-scanner에 목록·입장 상태·deviceSeq 1이 남고, 새로고침 뒤 연결이 끊겨도 같은 티켓은 이미 입장으로 거부된다', async ({ page }) => {
@@ -620,4 +703,102 @@ test('GAT-140 상태 띠의 대기 링크로 SCR-035에 가고 돌아와도 ?liv
   await page.clock.fastForward(3_100); // 앞 판정 화면(2초)과 같은 QR 창(3초)이 지나게
   await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())));
   await expect(verdict(page, '거부')).toContainText(/이미 입장한 티켓입니다/);
+});
+
+test('O-T14 판정 결과는 색·아이콘·글자와 함께 소리·진동으로 알리고 화면 낭독기가 읽는다', async ({ page }) => {
+  const wallet = await walletKey();
+  await fakeDetector(page);
+  await feedbackStub(page);
+  await scannerApi(page, wallet, { scanReply: () => ({ status: 503, type: 'scanner-auth-unavailable' }) });
+  await page.clock.install();
+  await signedIn(page);
+  await startShift(page);
+  await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())));
+  await expect(verdict(page, '통과')).toBeVisible();
+
+  // 소리·진동이 실제로 불렸다(값의 종류는 단위 시험이 본다)
+  await expect.poll(() => page.evaluate(() => window.__peaketVibrations.length)).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => window.__peaketTones.length)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.__peaketVibrations[0])).toEqual(expect.any(Array));
+
+  // 화면 낭독기는 색만으로 알리지 않는다: role=alert 글자와 좌석이 든 낭독 문장이 DOM에 있다
+  const alert = page.getByRole('alert').filter({ hasText: '통과' });
+  await expect(alert).toBeVisible();
+  await expect(page.locator('body')).toContainText(SEAT);
+});
+
+test('O-T20 현장 책임자 화면은 같은 구역 기기의 동기화 지연을 배너로 보이고, 다시 동기화하면 사라진다', async ({ page }) => {
+  const wallet = await walletKey();
+  await fakeDetector(page);
+  const api = await scannerApi(page, wallet, {
+    role: 'gate_lead',
+    changesReply: (n) =>
+      n === 1
+        ? {
+            changes: [],
+            lastSeq: 10,
+            staleDevices: [
+              {
+                deviceId: '0190f3a1-7c2e-7a00-8000-0000000f5491',
+                deviceName: '동문-03',
+                gateZone: '동문',
+                lastChangesAt: new Date(Date.now() - 180_000).toISOString(),
+                ageMs: 180_000,
+                thresholdMs: 120_000,
+              },
+            ],
+          }
+        : { changes: [], lastSeq: 10 },
+  });
+  await page.clock.install();
+  await signedIn(page);
+  await page.goto('/setup?live=1');
+  await expect(page.getByRole('button', { name: '스캔 시작' })).toBeEnabled({ timeout: 15_000 });
+
+  await page.clock.fastForward(60_000);
+  await expect.poll(() => api.changes).toBeGreaterThan(0);
+  const banner = page.getByText(/동문-03.*2분/);
+  await expect(banner).toBeVisible();
+
+  await page.clock.fastForward(60_000);
+  await expect.poll(() => api.changes).toBeGreaterThan(1);
+  await expect(banner).toBeHidden();
+});
+
+test('O-T11 업로드가 실패하면 서비스 워커 동기화를 등록하고, 화면이 다시 보이면 기다리지 않고 남은 큐를 올린다', async ({ page }) => {
+  const wallet = await walletKey();
+  await fakeDetector(page);
+  await serviceWorkerStub(page);
+  let accept = false;
+  const api = await scannerApi(page, wallet, { scanReply: () => (accept ? { status: 200 } : { status: 503, type: 'scanner-auth-unavailable' }) });
+  await page.clock.install();
+  await signedIn(page);
+  await startShift(page);
+  await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())));
+  await expect(verdict(page, '통과')).toBeVisible();
+
+  await page.clock.fastForward(5_000);
+  await expect.poll(() => api.scans.length).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => window.__peaketSyncTags)).toContain('peaket-scanner-scans');
+  await expect.poll(() => queueCount(page)).toBe(1);
+
+  // 브라우저가 동기화를 3번 시도하고 포기한 뒤 화면이 다시 보이면 앱이 바로 올린다
+  accept = true;
+  const before = api.scans.length;
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect.poll(() => api.scans.length).toBeGreaterThan(before);
+  await expect.poll(() => queueCount(page)).toBe(0);
+});
+
+test('GAT-140 C1-15 최소 지원 판보다 낮은 앱은 스캔 시작을 막고 새 판 안내를 보인다', async ({ page }) => {
+  const wallet = await walletKey();
+  await fakeDetector(page);
+  const api = await scannerApi(page, wallet, { minAppVersion: '99.0.0' });
+  await signedIn(page);
+  await page.goto('/setup?live=1');
+  // 근무 준비(첫 shift → 목록 → 둘째 shift)가 끝난 뒤에 판을 본다
+  await expect.poll(() => api.shifts, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+  const start = page.getByRole('button', { name: '스캔 시작' });
+  await expect(start).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByText(/이 앱 판으로는 근무를 시작할 수 없습니다/)).toBeVisible();
 });
