@@ -153,3 +153,66 @@ test('I-T24 ③ SESSION_TERMINATED 변경분은 그 기기의 세션 종료만 �
   assert.deepEqual(mine, { reason: 'DEVICE_REVOKED' });
   assert.deepEqual(sessionTerminatedOf({ ...base, changes: [{ seq: 13, kind: 'SESSION_TERMINATED', payload: { deviceId: 'mine' } }] }, 'mine'), {});
 });
+
+// ---- F-05-12 SCR-052 현장 관리 실제 API·큐 비움 보고 ----
+type ManageTab = 'devices' | 'flags' | 'booth' | 'mine';
+interface ManageModel {
+  manageTabsFor(role: 'gate_staff' | 'gate_lead'): ManageTab[];
+  devicesViewOf(s: {
+    devices: { deviceId: string; name: string; placement?: { gateZone: string; mode: string }; ready: boolean; lastSyncAt?: string; pendingUploads: number }[];
+    selfDeviceId: string;
+  }): { deviceId: string; name: string; placement: string; ready: boolean; lastSyncAt?: string; pendingUploads: number; self: boolean }[];
+  boothViewOf(r: { ticketId: string; seatLabel: string; allowUntil: string } | { status: number; type: string }): { kind: string; seatLabel?: string; allowUntil?: string };
+  overridesViewOf(items: { scanId: string; at: string; seatLabel: string; reason: string; reviewStatus: 'WAITING' | 'OK' | 'SUSPECT' | 'UNDETERMINED' }[]): { at: string; seatLabel: string; reason: string; reviewLabel: string }[];
+}
+const MANAGEMODEL = '../src/screens/manage-model.ts';
+const manageLoaded = (await import(MANAGEMODEL).catch(() => ({}))) as Partial<ManageModel>;
+function manage(): ManageModel {
+  assert.equal(typeof manageLoaded.manageTabsFor, 'function', `${MANAGEMODEL}가 없다`);
+  return manageLoaded as ManageModel;
+}
+
+test('SCR-052 책임자만 네 탭을 보고 일반 스태프는 기기 탭만 본다', () => {
+  assert.deepEqual(manage().manageTabsFor('gate_lead'), ['devices', 'flags', 'booth', 'mine']);
+  assert.deepEqual(manage().manageTabsFor('gate_staff'), ['devices']);
+});
+
+test('SCR-052 기기 탭은 서버 GateStatus를 표 행으로 옮기고 이 기기를 표시한다', () => {
+  const rows = manage().devicesViewOf({
+    selfDeviceId: 'dev-1',
+    devices: [
+      { deviceId: 'dev-1', name: '동문-01', placement: { gateZone: '동문', mode: 'IN' }, ready: true, lastSyncAt: '2026-11-26T03:00:00Z', pendingUploads: 0 },
+      { deviceId: 'dev-2', name: '서문-01', ready: false, pendingUploads: 12 },
+    ],
+  });
+  assert.deepEqual(rows[0], { deviceId: 'dev-1', name: '동문-01', placement: '동문 · 입장', ready: true, lastSyncAt: '2026-11-26T03:00:00Z', pendingUploads: 0, self: true });
+  assert.deepEqual(rows[1], { deviceId: 'dev-2', name: '서문-01', placement: '배치 없음', ready: false, lastSyncAt: undefined, pendingUploads: 12, self: false });
+});
+
+test('SCR-052 부스 탭은 허용·만료·권한 없음 갈래를 가른다', () => {
+  assert.deepEqual(manage().boothViewOf({ ticketId: 't-1', seatLabel: 'R구역 12열 7번', allowUntil: '2026-11-26T03:10:00Z' }), { kind: 'authorized', seatLabel: 'R구역 12열 7번', allowUntil: '2026-11-26T03:10:00Z' });
+  assert.deepEqual(manage().boothViewOf({ status: 410, type: 'booth-code-expired' }), { kind: 'expired' });
+  assert.deepEqual(manage().boothViewOf({ status: 403, type: 'scanner-override-forbidden' }), { kind: 'forbidden' });
+});
+
+test('SCR-052 내 예외 통과 탭은 사후 검토 상태를 네 글자로 옮긴다', () => {
+  const rows = manage().overridesViewOf([
+    { scanId: 's-1', at: '2026-11-26T03:01:00Z', seatLabel: 'R구역 12열 7번', reason: 'OVERRIDE_PHONE_DEAD', reviewStatus: 'WAITING' },
+    { scanId: 's-2', at: '2026-11-26T03:02:00Z', seatLabel: 'R구역 12열 8번', reason: 'OVERRIDE_OTHER', reviewStatus: 'OK' },
+    { scanId: 's-3', at: '2026-11-26T03:03:00Z', seatLabel: 'S구역 1열 1번', reason: 'OVERRIDE_KEY_UNKNOWN', reviewStatus: 'SUSPECT' },
+    { scanId: 's-4', at: '2026-11-26T03:04:00Z', seatLabel: 'S구역 1열 2번', reason: 'OVERRIDE_CAMERA', reviewStatus: 'UNDETERMINED' },
+  ]);
+  assert.deepEqual(rows.map((r) => r.reviewLabel), ['검토 대기', '정상', '부적정', '판단 불가']);
+  assert.equal(rows[0]!.seatLabel, 'R구역 12열 7번');
+});
+
+test('큐 비움 보고는 첫 비었음과 1건 이상에서 0건이 된 순간에만 필요하다', async () => {
+  const live = (await import('../src/api/live.ts')) as unknown as { queueReportDue?: (i: { previousPending: number; nextPending: number; emptyReported: boolean }) => boolean }; // type-escape: queueReportDue는 구현 뒤 생긴다
+  assert.equal(typeof live.queueReportDue, 'function');
+  assert.equal(live.queueReportDue!({ previousPending: 0, nextPending: 0, emptyReported: false }), true);
+  assert.equal(live.queueReportDue!({ previousPending: 0, nextPending: 0, emptyReported: true }), false);
+  assert.equal(live.queueReportDue!({ previousPending: 1, nextPending: 0, emptyReported: false }), true);
+  assert.equal(live.queueReportDue!({ previousPending: 1, nextPending: 0, emptyReported: true }), true);
+  assert.equal(live.queueReportDue!({ previousPending: 0, nextPending: 1, emptyReported: false }), false);
+  assert.equal(live.queueReportDue!({ previousPending: 1, nextPending: 2, emptyReported: false }), false);
+});

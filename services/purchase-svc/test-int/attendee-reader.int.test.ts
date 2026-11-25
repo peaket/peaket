@@ -89,4 +89,17 @@ describe('A2-17 purchase 명단 원천 커서', () => {
     expect(p3.items.map((r) => r.orderId)).toEqual([o3]);
     expect(p3.nextCursor).toBeNull();
   });
+
+  test('O-T2 ② 명단의 좌석 이름은 주입한 좌석맵 이름을 쓰고, 이름이 없으면 seatId로 물러난다', async () => {
+    const eventId = randomUUID();
+    const orderId = await paidOrder(eventId, 'SOLD');
+    const seat = (await admin.pool.query<{ seat_id: string }>('select seat_id from order_item where order_id = $1', [orderId])).rows[0]!.seat_id;
+    const withLabels = new (DrizzleAttendeeReader as unknown as new (db: Database, labels: unknown) => DrizzleAttendeeReader)(admin, {
+      resolve: async (_eventId: string, seatIds: readonly string[]) => seatIds.map((id) => (id === seat ? 'R구역 12열 7번' : undefined)),
+    });
+    const page = await withLabels.list(eventId, 10);
+    expect(page.items[0]!.seats[0]!.seatLabel).toBe('R구역 12열 7번');
+    const fallback = await reader.list(eventId, 10);
+    expect(fallback.items[0]!.seats[0]!.seatLabel).toBe(seat);
+  });
 });

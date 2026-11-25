@@ -58,6 +58,55 @@ test('O-T21 ③ 토큰 없이 만든 ScannerApi의 업로드는 Authorization �
   assert.deepEqual(JSON.parse(String(c.init.body)), scans);
 });
 
+// ---- F-05-12 SCR-052 실제 API·큐 비움 보고 ----
+interface LiveMethods {
+  queueReport(eventId: string, pendingUploads: number): Promise<void>;
+  devices(eventId: string): Promise<Record<string, unknown>>;
+  resolveFlag(flagId: string, status: 'OK' | 'SUSPECT' | 'UNDETERMINED', note?: string): Promise<void>;
+  boothAuthorization(boothCode: string): Promise<Record<string, unknown>>;
+  overridePasses(eventId: string): Promise<{ items: Record<string, unknown>[] }>;
+}
+const liveApi = (fetchImpl: typeof fetch): LiveMethods => apiWithout(fetchImpl) as unknown as LiveMethods; // type-escape: 메서드는 구현 뒤 생긴다
+
+test('큐 비움 보고는 PUT /v1/scanner/queue-reports/{eventId}에 pendingUploads 0을 싣는다', async () => {
+  const r = recording(200, {});
+  await liveApi(r.fetch).queueReport('ev-1', 0);
+  assert.equal(r.calls.length, 1);
+  const c = r.calls[0]!;
+  assert.equal(c.url, `${API}/v1/scanner/queue-reports/ev-1`);
+  assert.equal(c.init.method, 'PUT');
+  assert.equal(c.headers.get('content-type'), 'application/json');
+  assert.equal(c.headers.get('authorization'), null);
+  assert.deepEqual(JSON.parse(String(c.init.body)), { pendingUploads: 0 });
+  const p = payloadOf(c.headers.get('dpop')!);
+  assert.equal(p.htm, 'PUT');
+  assert.equal(p.htu, `${API}/v1/scanner/queue-reports/ev-1`);
+});
+
+test('SCR-052 API 메서드는 기기·부스·이상 표시·내 예외 통과 경로를 바르게 부른다', async () => {
+  const status = { devices: [], entriesByZone: {}, rejectsByReason: {}, openFlags: 0, boothCount: 0, overrideCount: 0 };
+  const r = recording(200, status);
+  await liveApi(r.fetch).devices('ev-1');
+  assert.equal(r.calls[0]!.url, `${API}/v1/scanner/events/ev-1/devices`);
+
+  const r2 = recording(200, { ticketId: 't-1', seatLabel: 'R구역 12열 7번', allowUntil: '2026-11-26T03:10:00Z' });
+  const auth = await liveApi(r2.fetch).boothAuthorization('K7QD2M9X');
+  assert.deepEqual(auth, { ticketId: 't-1', seatLabel: 'R구역 12열 7번', allowUntil: '2026-11-26T03:10:00Z' });
+  assert.equal(r2.calls[0]!.url, `${API}/v1/scanner/booth-authorizations`);
+  assert.equal(r2.calls[0]!.init.method, 'POST');
+  assert.deepEqual(JSON.parse(String(r2.calls[0]!.init.body)), { boothCode: 'K7QD2M9X' });
+
+  const r3 = recording(200, { flagId: 'f-1', status: 'OK' });
+  await liveApi(r3.fetch).resolveFlag('f-1', 'OK', '좌석 확인');
+  assert.equal(r3.calls[0]!.url, `${API}/v1/scanner/flags/f-1/resolution`);
+  assert.equal(r3.calls[0]!.init.method, 'POST');
+  assert.deepEqual(JSON.parse(String(r3.calls[0]!.init.body)), { status: 'OK', note: '좌석 확인' });
+
+  const r4 = recording(200, { items: [] });
+  assert.deepEqual(await liveApi(r4.fetch).overridePasses('ev-1'), { items: [] });
+  assert.equal(r4.calls[0]!.url, `${API}/v1/scanner/events/ev-1/override-passes`);
+});
+
 test('O-T21 ③ 토큰이 있으면 Authorization: DPoP <토큰>과 ath를 싣는다(지금과 같다)', async () => {
   const r = recording();
   await new (api().ScannerApi)({ origin: API, key, token: 'staff-token', fetch: r.fetch }).uploadScans([{ id: 'a' }]);
