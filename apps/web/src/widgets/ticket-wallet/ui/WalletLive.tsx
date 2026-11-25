@@ -24,6 +24,8 @@ import { DeviceQrLazy, OfflineBannerLazy } from './wallet-lazy';
 // 받은 티켓 카드의 돌려주기 확인 대화상자·WebShell은 누를 때만 필요하다. 첫 화면 JS에서 빼고 늦게 싣는다
 // (docs/frontend.md §5.8 월렛 첫 JS 예산, CI 실행 45240606103에서 195.9kB > 한도 161.6kB).
 const ReturnAction = dynamic(() => import('./return-action').then((m) => m.ReturnAction), { ssr: false });
+// 부스 재발급 부품(동의→본인확인→부스 코드→등록)은 403 reissue-at-booth일 때만 필요한 무거운 조각이라 늦게 싣는다.
+const BoothReissueLazy = dynamic(() => import('./BoothReissueLive').then((m) => m.BoothReissueLive), { ssr: false });
 
 export interface WalletLiveProps {
   /** 서버가 그린 '불러오는 중'(첫 HTML의 글과 QR 뼈대) */
@@ -96,7 +98,22 @@ function TicketCard({ card, qrFallback }: { card: WalletCard; qrFallback: ReactN
         <span className={badgeClass(card)}>{card.badge}</span>
       </div>
       {card.note ? <p className="t-sm">{card.note}</p> : null}
-      {card.showQr ? <DeviceQrLazy ticketId={card.ticketId} label={card.qrLabel} fallback={qrFallback} /> : null}
+      {card.showQr ? (
+        <DeviceQrLazy
+          ticketId={card.ticketId}
+          label={card.qrLabel}
+          fallback={qrFallback}
+          boothReissue={
+            <BoothReissueLazy
+              seat={card.title ?? card.ticketId}
+              showButton
+              initialOpen={false}
+              ticketId={card.ticketId}
+              registeredQr={<DeviceQrLazy ticketId={card.ticketId} label={card.qrLabel} fallback={qrFallback} />}
+            />
+          }
+        />
+      ) : null}
       {card.received &&
       card.badge === '받은 티켓' &&
       canReturn({ ticketId: card.ticketId, status: card.status, received: card.received, eventStartsAt: card.startsAt ?? undefined, entryOpensAt: card.entryOpensAt ?? undefined }, Date.now()) ? (

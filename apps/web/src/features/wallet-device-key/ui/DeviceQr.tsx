@@ -14,7 +14,7 @@
 //   화면이 다시 보이면(visibilitychange) 그 순간에도 다시 서명한다. 네트워크와 무관하다.
 // - 티켓 스냅샷과 마지막 동기화 시각을 IndexedDB에 남겨 서비스 워커가 셸을 연 뒤 오프라인에서도 같은 화면을 그린다.
 // - 붙어 있는 동안 Web Lock `peaket.wallet.qr`(공유)을 쥐어 월렛 워커 갱신을 미룬다(docs/frontend.md §5.4 '갱신' ②, HOT-390).
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { QrPattern, QrStatus, useScreenWakeLock } from '@peaket/ds/RotatingQR';
 import { browserClock } from '@/shared/lib/clock';
 import { openInBrowserHref } from '@/shared/lib/in-app-browser';
@@ -50,6 +50,8 @@ export interface DeviceQrProps {
    * 누르면 안내 없이 바로 등록한다(사용자가 데스크톱 등록을 골랐다, ADR-0363 결정 10). 값은 그 버튼의 접근 이름이다
    */
   desktopProceedLabel?: string;
+  /** 403 reissue-at-booth일 때 그 자리에 그릴 부스 재발급 부품(월렛 실제 화면이 넣는다). 없으면 안내 글만 보인다 */
+  boothReissue?: ReactNode;
 }
 
 function errorText(error: unknown): string {
@@ -92,7 +94,7 @@ async function linkedProvider(): Promise<string | undefined> {
   return (r.data.providers ?? []).map((p) => p.provider).find((p): p is string => typeof p === 'string' && p.length > 0);
 }
 
-export function DeviceQr({ ticketId, label, maxWidth = 324, offline = false, snapshot, desktopProceedLabel }: DeviceQrProps) {
+export function DeviceQr({ ticketId, label, maxWidth = 324, offline = false, snapshot, desktopProceedLabel, boothReissue }: DeviceQrProps) {
   const [phase, setPhase] = useState<Phase>('loading');
   const [status, setStatus] = useState<WalletKeyStatus | null>(null);
   const [frame, setFrame] = useState<QrFrame | null>(null);
@@ -493,7 +495,20 @@ export function DeviceQr({ ticketId, label, maxWidth = 324, offline = false, sna
   }
 
   if (status?.phase === 'reissue-at-booth') {
-    // d5 §5.13 '저장소 유실, 입장 시작 뒤'(403 reissue-at-booth). [ 부스 재발급 요청 ]은 GAT-190 전까지 그리지 않는다(ADR-0363 결정 9)
+    // d5 §5.13 '저장소 유실, 입장 시작 뒤'(403 reissue-at-booth). 실제 월렛은 boothReissue(부스 재발급 부품)를 넣고,
+    // 퍼블리싱·부품이 없는 자리만 안내 글만 보인다.
+    if (boothReissue) {
+      return (
+        <div className={CARD} style={{ minHeight: 400 }} role="status">
+          <span className="state-icon is-primary">
+            <i className="ic ic-phone" aria-hidden="true" />
+          </span>
+          <p className="t-md fw-b">현장 부스에서 다시 받을 수 있습니다</p>
+          <p className="t-sm muted">입장이 시작되어 이 화면에서는 다시 받을 수 없습니다. 공연장의 현장 부스로 와 주세요.</p>
+          {boothReissue}
+        </div>
+      );
+    }
     return (
       <div className={CARD} style={{ minHeight: 400 }} role="status">
         <span className="state-icon is-primary">
