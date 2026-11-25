@@ -386,7 +386,10 @@ erDiagram
         uuid id PK
         uuid account_id FK
         uuid ticket_id "ticket 논리 DB라 외래키 없음"
+        uuid verification_id "identity_verification 건. 같은 건은 한 번만"
         bool ci_matched "ci_hmac이 일치했는지. 연계정보 원문은 받자마자 버린다"
+        bytea token_hash "reverificationToken(32바이트 불투명 값)의 SHA-256. 원문은 저장하지 않는다"
+        timestamptz expires_at "토큰 수명 5분 [가정]. 서버 시각"
         timestamptz verified_at "회차 종료 뒤 1년 [가정] 보존(data-classification)"
     }
     staff_assignment {
@@ -1611,6 +1614,7 @@ erDiagram
         uuid order_id "발권한 주문(purchase 논리 DB라 외래키 없음). ticket-svc가 발권 때 쓰고 CheckReviewEligibility가 이 칸으로 근거 주문을 찾는다(소유자 결정 2026-11-11, open-items 92번)"
         uuid event_id
         uuid seat_id
+        text seat_label "발권할 때 좌석맵 판에서 읽은 좌석 이름(예 'R구역 12열 7번'). 없으면(옛 행) 스캐너·명단이 seat_id로 물러난다(추천 적용, 2026-11-26, F-05-12, O-T2 ②)"
         text gate_zone
         text status "ISSUED|ACTIVE|TRANSFER_PENDING|CANCEL_REQUESTED|REFUNDED|FLAGGED|VOIDED(가상계좌 입금 오류). docs/planning/03 §2.5의 Reissued·Transferred는 상태가 아니라 사건이고, ScannedIn·ScannedOut은 이 칸이 아니라 판정 표가 갱신하는 입장 상태다(§4 14)"
         uuid fraud_lock_case_id "부정 예매 양도 잠금(POL-046 ③). 빈 값이면 잠금 없음. 소명을 요청한 사건 ID(ops 논리 DB라 외래키 없음)이고, 있으면 양도 요청을 409 transfer-locked로 막는다. 돌려주기와 입장은 막지 않는다(돌아온 표는 그 계정이 결제한 표라 잠긴 채로 남는다(추천 적용 2026-10-31, ADR-0173)). 잠금은 사건 계정이 그 회차에서 결제한 표 전부에 걸리고(fraud_transfer_lock), 잠금 뒤에 산 표도 발권 때 잠긴다. 풀리는 때는 그 계정에 대해 소명 인정, 사건 CLEARED, 조치 실행 끝(취소된 표 말고 남은 표), 조사관이 계정을 뺌, 입장 시작, 그 계정 대상 조치 요청의 반려·만료(다른 열린 조치 요청이 없을 때), 최대 기한(fraud_transfer_lock.expires_at) 가운데 먼저 오는 때다(입장 시작과 최대 기한은 ticket-svc가 스스로 푼다, 추천 적용 2026-10-31, ADR-0171 결정 3, ADR-0173 결정 3)"
@@ -1799,14 +1803,19 @@ erDiagram
         text note "개인정보 금지"
     }
     booth_authorization {
-        uuid id PK
+        uuid id PK "boothRequestId"
         uuid ticket_id FK
+        uuid event_id "ticket에서 복사(코드 확인·기기 배치 대조)"
         bytea booth_code_hash "8자 코드의 SHA-256"
         uuid reverification_id "identity 부스 본인확인 대조"
         text status "PENDING|ALLOWED|USED|EXPIRED"
-        uuid allowed_by "gate_lead"
-        timestamptz allowed_at
-        timestamptz expires_at "허용 뒤 10분"
+        text day_key "요청을 센 KST 날짜(yyyy-mm-dd). 티켓당 하루 3회 [가정]"
+        uuid allowed_by "gate_lead. 찍은 기기의 스태프 계정"
+        timestamptz requested_at "코드를 만든 시각. 코드 수명 10분 [가정]"
+        timestamptz code_expires_at "requested_at + 10분"
+        timestamptz allowed_at "책임자가 코드를 찍은 시각"
+        timestamptz expires_at "allowed_at + 10분(허용 수명). allowed_at이 비면 코드 만료 시각"
+        timestamptz used_at "BOOTH 키 저장과 같은 트랜잭션에서 한 번만 적는다. 있으면 다시 허용하지 않는다"
     }
     scanner_seq {
         uuid event_id PK
