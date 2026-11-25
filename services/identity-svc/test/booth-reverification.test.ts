@@ -93,7 +93,8 @@ describe('O-T28 ① 부스 본인확인 대조', () => {
     expect(st.statusCode).toBe(201);
     const start = JSON.parse(st.payload) as { verificationId: string; expiresAt: string };
     expect(Date.parse(start.expiresAt) - NOW).toBe(300_000);
-    const r = await verifyResult(s, start.verificationId, agencyResult(clock, start.verificationId, { person: 'oholder' }));
+    // 대조 목적 동의 때 확인한 계정의 ci_hmac과 같은 사람이어야 한다(다른 문자열이면 409)
+    const r = await verifyResult(s, start.verificationId, agencyResult(clock, start.verificationId, { person: 'holder-match' }));
     expect(r.statusCode).toBe(200);
     const done = JSON.parse(r.payload) as { resultToken?: string };
     expect(done.resultToken).toMatch(/^[A-Za-z0-9_-]{43}$/);

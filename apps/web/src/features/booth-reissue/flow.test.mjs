@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-const MODULE = '../src/features/booth-reissue/flow.ts';
+const MODULE = './flow.ts';
 const loaded = await import(MODULE).catch(() => ({}));
 function flowClass() {
   assert.equal(typeof loaded.BoothReissueFlow, 'function', `${MODULE}가 없다`);

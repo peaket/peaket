@@ -42,7 +42,8 @@ function harness(o: { eventId?: string | undefined; failFirst?: boolean } = {}) 
       }
     },
   };
-  const reporter = new (reporterClass())({ api, eventId: () => o.eventId ?? 'ev-shift' });
+  // `{ eventId: undefined }`는 '회차 없음'이다. `??`로 기본값을 주면 그 경우를 만들 수 없다
+  const reporter = new (reporterClass())({ api, eventId: () => ('eventId' in o ? o.eventId : 'ev-shift') });
   return { reporter, calls };
 }
 

@@ -120,7 +120,6 @@ describe('O-T28 ③ 실제 PostgreSQL BOOTH 등록 한 번', () => {
       begin
         if new.kind = 'KEY_REGISTERED' then
           if (select fail from f0512_change_fault where id = 1) then
-            update f0512_change_fault set fail = false where id = 1;
             raise exception 'f0512 fault: scanner_change insert';
           end if;
         end if;
@@ -130,6 +129,8 @@ describe('O-T28 ③ 실제 PostgreSQL BOOTH 등록 한 번', () => {
     await database.pool.query('create trigger f0512_fail_change before insert on scanner_change for each row execute function f0512_fail_change()');
 
     await expect(keys.register({ ticketId: ticket, accountId: ACCOUNT, sessionId: randomUUID(), publicKeyJwk: await publicJwk(), reason: 'BOOTH', boothRequestId })).rejects.toBeTruthy();
+    // 트리거가 같은 트랜잭션에서 fail=false를 쓰면 그 갱신도 되돌아간다. 실패를 본 뒤 바깥 연결에서 한 번만 푼다
+    await database.pool.query('update f0512_change_fault set fail = false where id = 1');
     const afterFail = await database.pool.query<{ keys: number; used: boolean; status: string }>(
       'select (select count(*)::int from device_key where ticket_id = $1 and revoked_at is null) keys, used_at is not null used, status from booth_authorization where id = $2',
       [ticket, boothRequestId],

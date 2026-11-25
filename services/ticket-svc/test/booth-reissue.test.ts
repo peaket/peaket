@@ -24,7 +24,6 @@ import { MemoryDeviceKeyStore } from '../src/modules/ticket/adapters/memory-devi
 import { DeviceKeys } from '../src/modules/ticket/application/device-keys.js';
 
 const NOW = Date.parse('2026-11-26T03:00:00.000Z');
-const IAT = Math.floor(NOW / 1000);
 const PROMOTER = '0190f3a1-7c2e-7a00-8000-00000000a001';
 const ADMIN = '0190f3a1-7c2e-7a00-8000-00000000a002';
 const ACCOUNT = '0190f3a1-7c2e-7a00-8000-00000000a003';
@@ -33,6 +32,10 @@ const EVENT = '0190f3a1-7c2e-7a00-8000-00000000a005';
 const OTHER_EVENT = '0190f3a1-7c2e-7a00-8000-00000000a006';
 const DEVICE = '0190f3a1-7c2e-7a00-8000-00000000a009';
 const SESSION = '0190f3a1-7c2e-7a00-8000-00000000a00a';
+// 역할·회차를 바꿀 때 같은 세션의 답을 고치면 ScannerSessionCheckService의 5초 캐시가 옛 답을 준다.
+// 세션을 따로 두어 캐시 키를 가른다.
+const STAFF_SESSION = '0190f3a1-7c2e-7a00-8000-00000000a00b';
+const OTHER_EVENT_SESSION = '0190f3a1-7c2e-7a00-8000-00000000a00c';
 const TOKEN = 'staff-access-token';
 const ATH = athOf(TOKEN);
 const HOST = 'scanner-api.peaket.example';
@@ -93,7 +96,8 @@ async function keyOf(): Promise<Key> {
 }
 
 async function proofOf(htm: string, path: string): Promise<string> {
-  return new SignJWT({ jti: randomUUID(), htm, htu: `https://${HOST}${path}`, iat: IAT, ath: ATH })
+  // 가짜 시계를 돌린 뒤에도 증명의 iat는 지금 서버 시계(±5분 창) 안이어야 한다
+  return new SignJWT({ jti: randomUUID(), htm, htu: `https://${HOST}${path}`, iat: Math.floor(clock.now() / 1000), ath: ATH })
     .setProtectedHeader({ typ: 'dpop+jwt', alg: 'ES256', jwk: key.jwk as never })
     .sign(key.privateKey);
 }
@@ -114,9 +118,9 @@ async function scannerHeaders(htm: string, path: string, session = SESSION): Pro
 
 const fanHeaders = (account = ACCOUNT) => ({ 'x-user-id': account, 'x-session-id': SESSION, 'x-user-aud': 'fan', 'x-user-scope': '', 'content-type': 'application/json' });
 const fanPost = (path: string, body: unknown, account = ACCOUNT, headers: Record<string, string> = {}) => svc.http.inject({ method: 'POST', url: path, headers: { ...fanHeaders(account), ...headers }, payload: JSON.stringify(body) });
-type ScannerPostOptions = { origin?: string | null; contentType?: string; raw?: string };
+type ScannerPostOptions = { origin?: string | null; contentType?: string; raw?: string; session?: string };
 const scannerPost = async (path: string, body: unknown, o: ScannerPostOptions = {}) => {
-  const h = await scannerHeaders('POST', path);
+  const h = await scannerHeaders('POST', path, o.session);
   return svc.http.inject({
     method: 'POST',
     url: path,
@@ -146,7 +150,9 @@ beforeAll(async () => {
     keyStore.seedTicket({ ticketId, eventId: EVENT, accountId: ACCOUNT, eventStartsAtMs: NOW - 1 });
   }
   sessions = new FakeSessions();
-  sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_lead', eventId: EVENT });
+  sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_lead', eventId: EVENT, accountId: ACCOUNT });
+  sessions.answers.set(`${STAFF_SESSION}/${DEVICE}`, { valid: true, role: 'gate_staff', eventId: EVENT, accountId: ACCOUNT });
+  sessions.answers.set(`${OTHER_EVENT_SESSION}/${DEVICE}`, { valid: true, role: 'gate_lead', eventId: OTHER_EVENT, accountId: ACCOUNT });
   const replay = new MemoryDpopReplayStore(clock);
   const shift = new MemoryScannerShiftStore(gate);
   await shift.putPlacement({ eventId: EVENT, deviceId: DEVICE, gateZone: '동문', mode: 'IN', setBy: ACCOUNT, atMs: NOW, expectedVersion: 0 });
@@ -201,8 +207,8 @@ afterAll(async () => {
 
 const requestBooth = (ticketId = TICKET_A, token = 'good-token', account = ACCOUNT) => fanPost(`/v1/tickets/${ticketId}/booth-requests`, { reverificationToken: token }, account);
 const authorizeBooth = (boothCode: string, o: ScannerPostOptions = {}) => scannerPost('/v1/scanner/booth-authorizations', { boothCode }, o);
-const registerBooth = (ticketId: string, boothRequestId: string, publicKeyJwk: Record<string, unknown>, account = ACCOUNT, reauthToken: string | undefined = GOOD_REAUTH) =>
-  fanPost(`/v1/tickets/${ticketId}/device-keys`, { publicKeyJwk, reason: 'BOOTH', boothRequestId }, account, reauthToken === undefined ? {} : { 'x-reauth-token': reauthToken });
+const registerBooth = (ticketId: string, boothRequestId: string, publicKeyJwk: Record<string, unknown>, account = ACCOUNT, reauthToken: string | null = GOOD_REAUTH) =>
+  fanPost(`/v1/tickets/${ticketId}/device-keys`, { publicKeyJwk, reason: 'BOOTH', boothRequestId }, account, reauthToken === null ? {} : { 'x-reauth-token': reauthToken });
 const bodyOf = <T>(r: { payload: string }): T => JSON.parse(r.payload) as T;
 const keysOf = (ticketId: string) => (keyStore.keys.get(ticketId) ?? []).filter((k) => k.revokedAtMs === undefined);
 const registeredChanges = (ticketId: string) => changes.filter((c) => c.kind === 'KEY_REGISTERED' && c.payload.ticketId === ticketId);
@@ -245,11 +251,8 @@ describe('O-T28 ② 부스 코드·책임자 허용', () => {
 
   test('O-T28 ② 일반 스태프는 403, 모르는 코드는 410, 만료 600,000−1ms는 200·600,000ms는 410이고, 같은 코드 재허용은 같은 allowUntil이다', async () => {
     const req = bodyOf<{ boothCode: string }>(await requestBooth(TICKET_C));
-    sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_staff', eventId: EVENT });
-    expect((await authorizeBooth(req.boothCode)).statusCode).toBe(403);
-    sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_lead', eventId: OTHER_EVENT });
-    expect((await authorizeBooth(req.boothCode)).statusCode).toBe(403);
-    sessions.answers.set(`${SESSION}/${DEVICE}`, { valid: true, role: 'gate_lead', eventId: EVENT });
+    expect((await authorizeBooth(req.boothCode, { session: STAFF_SESSION })).statusCode).toBe(403);
+    expect((await authorizeBooth(req.boothCode, { session: OTHER_EVENT_SESSION })).statusCode).toBe(403);
     expect((await authorizeBooth('ZZZZZZZZ')).statusCode).toBe(410);
 
     clock.advance(CODE_MS - 1);
@@ -333,8 +336,8 @@ describe('O-T28 ③ BOOTH 등록 한 번', () => {
 
   test('O-T28 ③ 재인증 없음·틀림은 허용보다 먼저 403 reauth-required이고, 다른 계정은 404로 거부하며 허용을 소모하지 않는다', async () => {
     const req = bodyOf<{ boothRequestId: string; boothCode: string }>(await requestBooth(TICKET_G));
-    expect((await registerBooth(TICKET_G, req.boothRequestId, await publicJwk(), ACCOUNT, undefined)).statusCode).toBe(403);
-    expect(bodyOf<{ type: string }>(await registerBooth(TICKET_G, req.boothRequestId, await publicJwk(), ACCOUNT, undefined)).type).toBe('https://peaket.example/problems/reauth-required');
+    expect((await registerBooth(TICKET_G, req.boothRequestId, await publicJwk(), ACCOUNT, null)).statusCode).toBe(403);
+    expect(bodyOf<{ type: string }>(await registerBooth(TICKET_G, req.boothRequestId, await publicJwk(), ACCOUNT, null)).type).toBe('https://peaket.example/problems/reauth-required');
     expect((await authorizeBooth(req.boothCode)).statusCode).toBe(200);
     const wrong = await registerBooth(TICKET_G, req.boothRequestId, await publicJwk(), ACCOUNT, 'reauth-wrong');
     expect(wrong.statusCode).toBe(403);

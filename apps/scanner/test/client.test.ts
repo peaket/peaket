@@ -25,12 +25,13 @@ const API = 'https://scanner-api.peaket.example';
 const key = await generateDpopKey();
 const payloadOf = (jwt: string): Record<string, unknown> => JSON.parse(Buffer.from(jwt.split('.')[1]!, 'base64url').toString('utf8')) as Record<string, unknown>;
 
-function recording(status = 200, body: unknown = { acceptedIds: [], resyncRequired: false, staleIds: [] }, headers: Record<string, string> = { 'content-type': 'application/json' }) {
+function recording(status = 200, body?: unknown, headers: Record<string, string> = { 'content-type': 'application/json' }) {
   const calls: { url: string; init: RequestInit; headers: Headers }[] = [];
+  const effective = body === undefined && status !== 204 ? { acceptedIds: [], resyncRequired: false, staleIds: [] } : body;
   const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
     calls.push({ url: String(url), init: init ?? {}, headers: new Headers(init?.headers) });
-    // 서버의 204는 본문이 없다(queue-reports). body가 undefined면 빈 본문으로 답한다(JSON.parse('')가 아니다)
-    return new Response(body === undefined ? null : JSON.stringify(body), { status, headers: body === undefined ? {} : headers });
+    // 서버의 204는 본문이 없다(queue-reports). `recording(204, undefined)`도 빈 본문이어야 한다
+    return new Response(effective === undefined ? null : JSON.stringify(effective), { status, headers });
   }) as typeof fetch;
   return { fetch: fetchImpl, calls };
 }
