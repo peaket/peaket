@@ -62,7 +62,7 @@ function wish(accountId: string, productionId: string, atMs: number): void {
 const list = (accountId: string, query = '') => svc.http.inject({ method: 'GET', url: `/v1/wishes${query}`, headers: fan(accountId) });
 
 interface Page {
-  items: { productionId: string; eventId?: string; title?: string; placeName?: string; periodStart?: string; periodEnd?: string; saleStatus?: string }[];
+  items: { productionId: string; eventId?: string; title?: string; placeName?: string; periodStart?: string; periodEnd?: string; saleStatus?: string; badges?: string[] }[];
   nextCursor: string | null;
 }
 
@@ -85,6 +85,32 @@ describe('찜 목록', () => {
     const only = await list(ME, `?productionIds=${b.productionId},${c.productionId}`);
     expect(only.statusCode).toBe(200);
     expect((JSON.parse(only.payload) as Page).items.map((x) => x.productionId)).toEqual([b.productionId]);
+  });
+
+  test('GAT-260 ProductionCard.badges는 대표 회차의 정렬·선예매·좌석 배정을 실제 값으로 싣는다', async () => {
+    const s = seed({ title: '배지 공연' });
+    // FIFO(로비 셔플 끔) + AUTO_SEAT + 지금 열려 있는 팬클럽 선예매
+    repo.details.set(s.eventId, {
+      ...repo.details.get(s.eventId),
+      event: { ...(repo.details.get(s.eventId)?.event ?? {}), lobbyShuffle: false, openBatch: true, seatAssignment: 'AUTO' },
+    });
+    repo.salePolicies.set(s.productionId, {
+      version: 1,
+      rules: [
+        {
+          version: 1,
+          name: '팬클럽 선예매',
+          rounds: 'ALL',
+          during: { from: '2026-11-04T00:00:00Z', to: '2026-11-06T00:00:00Z' },
+          rule: { if: { fact: 'buyer.lists', has: 'lumen' }, then: { limitPerPerson: 2 }, else: { deny: 'PRESALE_ONLY' } },
+        },
+      ],
+    });
+    wish(ME, s.productionId, NOW_MS - 1_000);
+
+    const r = await list(ME, `?productionIds=${s.productionId}`);
+    expect(r.statusCode).toBe(200);
+    expect((JSON.parse(r.payload) as Page).items[0]?.badges).toEqual(['FIFO', 'PRESALE', 'AUTO_SEAT']);
   });
 
   test('[ASVS v5.0.0-8.2.2] 남의 찜은 목록에 없고 내 찜만 온다', async () => {

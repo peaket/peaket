@@ -1,5 +1,6 @@
 // GAT-260 찜 목록 실제 PostgreSQL 통합 시험(BUILD_ORDER F-05-8, 시험 먼저).
 // wish 표의 차례·커서·공개 여부가 search_document_source_at의 카드와 맞는지 본다.
+import { eq } from 'drizzle-orm';
 import 'reflect-metadata';
 import { createDatabase, createService, type Database, ensureOutboxPartitions, systemClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
@@ -91,6 +92,31 @@ describe('찜 목록(실제 DB)', () => {
     const p2 = JSON.parse(p2r.payload) as typeof p1;
     expect(p2.items.map((x) => x.productionId)).toEqual([first.productionId]);
     expect(p2.nextCursor).toBeNull();
+  });
+
+  test('GAT-260 실제 DB 카드 배지는 대표 회차의 정렬·선예매·좌석 배정을 실제 값으로 싣는다', async () => {
+    const me = randomUUID();
+    const s = await seed({ title: '배지 공연' });
+    await database.db.update(event).set({ lobbyShuffle: false, openBatch: true, seatAssignment: 'AUTO' }).where(eq(event.id, s.eventId));
+    await database.db
+      .update(production)
+      .set({
+        salePolicy: [
+          {
+            version: 1,
+            name: '팬클럽 선예매',
+            rounds: 'ALL',
+            during: { from: new Date(NOW - 86_400_000).toISOString(), to: new Date(NOW + 86_400_000).toISOString() },
+            rule: { if: { fact: 'buyer.lists', has: 'lumen' }, then: { limitPerPerson: 2 }, else: { deny: 'PRESALE_ONLY' } },
+          },
+        ],
+      })
+      .where(eq(production.id, s.productionId));
+    await database.db.insert(wish).values({ accountId: me, productionId: s.productionId, createdAt: new Date(NOW) });
+
+    const r = await list(me, `?productionIds=${s.productionId}`);
+    expect(r.statusCode).toBe(200);
+    expect((JSON.parse(r.payload) as { items: { badges?: string[] }[] }).items[0]?.badges).toEqual(['FIFO', 'PRESALE', 'AUTO_SEAT']);
   });
 
   test('GAT-260 실제 DB에서 판매 중지·승인 전 공연은 빠지고 productionIds는 내 찜만 준다', async () => {
