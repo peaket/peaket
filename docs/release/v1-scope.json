@@ -126,8 +126,8 @@
       "reason": "R-808, 994c1ab2d, 계획 docs/review/plans/F-04-7.md"
     },
     "F-04-8": {
-      "class": "gate",
-      "reason": "진행, 계획 docs/review/plans/F-04-8.md §6·§10. 게이트: 3만 건/초·1분 창·V-T19·ops-svc 신선도 측정"
+      "class": "release",
+      "reason": "계획 docs/review/plans/F-04-8.md §10. 2026-11-25 측정: 30k 불가, hash 10분 안정 한계 5k(신선도 p95 3,744ms·누락 0). 병목 ops-rt 단일 핫 파티션. V-T19 ①②③ 미통과, v1 30k 수치 주장 제외."
     },
     "F-04-9": {
       "class": "frozen-local",
@@ -310,8 +310,8 @@
       "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
     },
     "F-08-2": {
-      "class": "gate",
-      "reason": "진행, 계획 docs/review/plans/F-08-2.md. 게이트: 100만 외삽·진입 서버 비례·외부 한도 측정"
+      "class": "release",
+      "reason": "계획 docs/review/plans/F-08-2.md. 창 1·2 측정: X₁=800, N=1 무효, E(N) 0.25(기준 0.9), 외삽 31.25배, V-T4 판정 못 함, V-T5 표 대조 완료. v1 100만 수치 주장 제외."
     },
     "F-08-3": {
       "class": "frozen-local",
@@ -334,8 +334,8 @@
       "reason": "대기, 계획 docs/review/plans/F-08-7.md. 게이트: 데모 영상·안내·RFC·블로그 목차"
     },
     "F-08-8": {
-      "class": "gate",
-      "reason": "대기, 계획 docs/review/plans/F-08-8.md. 게이트: K1·K2·K7 After(장애 주입 1만 건) 측정"
+      "class": "release",
+      "reason": "계획 docs/review/plans/F-08-8.md. 창 1·2: K7 ② 불변식 3회 PASS(이중 결제·좌석 누수 0), K1/K2/K7 ① 유효 실행 부족. v1 K 수치 제한, V-T19 미통과."
     },
     "F-08-9": {
       "class": "frozen-local",
@@ -423,10 +423,7 @@
     }
   },
   "gates": [
-    "F-04-8",
-    "F-08-2",
-    "F-08-7",
-    "F-08-8"
+    "F-08-7"
   ],
   "frozen": [
     "F-01-8",
