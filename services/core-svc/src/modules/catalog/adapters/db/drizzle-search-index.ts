@@ -10,6 +10,7 @@
 // - 검색 전용 연결 묶음(운영은 읽기 전용 복제본): 연결 대기를 넘기면 SearchUnavailable('pool-timeout'), 질의 시간 상한을 넘기면 'statement-timeout'(503).
 import { type Database, type DbTransaction, Gauge, type Registry } from '@peaket/platform';
 import { GRADE, normalize, queryKeys, qwertyToHangul, type Grade, type QueryKeys } from '@peaket/search-normalize';
+import type { SalePolicyRule } from '@peaket/validation/sale-policy';
 import { sql, type SQL } from 'drizzle-orm';
 import {
   card,
@@ -35,6 +36,7 @@ import {
   type SearchOutcome,
   type SearchQuery,
 } from '../../domain/search.js';
+import { hasOpenPresale, productionBadges, queueOrder, type ProductionBadge } from '../../domain/event-detail.js';
 import { documentOfRow, rowsOf, type DocumentRow } from './search-rows.js';
 
 /** 검색 질의 시간 상한(docs/features/search.md:242, 300ms [가정]) */
@@ -45,6 +47,19 @@ const CONNECT_TIMEOUTS = new Set(['timeout exceeded when trying to connect', 'Co
 // searchIndexed의 한/영 변환과 같은 입력 다듬기
 const INVISIBLE = /[​-‍⁠﻿ᅟᅠㅤ]/g;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** 카드 배지 계산에 읽는 회차·공연 칸(대표 회차 하나) */
+interface BadgeRow {
+  id: string;
+  lobby_shuffle: boolean;
+  open_batch: boolean;
+  seat_assignment: string;
+  open_at: string | Date;
+  starts_at: string | Date;
+  per_person_limit: number | string;
+  sale_policy: unknown;
+}
+const at = (v: string | Date): Date => (v instanceof Date ? v : new Date(v));
 
 /**
  * 게이지 search_pool_waiting(docs/features/search.md §10·SR-T13 ①): 검색 전용 연결 묶음에서 연결을 기다리는 요청 수(pg Pool.waitingCount). 이름표는 없다.
@@ -171,10 +186,34 @@ export class DrizzleSearchIndex implements SearchIndex {
    */
   async cardsByIds(ids: readonly string[]): Promise<SearchCard[]> {
     if (ids.length === 0) return [];
-    const rows = await this.#read(async (tx) =>
-      rowsOf<DocumentRow>(await tx.execute(sql`select ${DOCUMENT_COLUMNS} from search_document_source_at(now(), ${uuidArray(ids)}::uuid[]) d`)),
-    );
-    return rows.map((r) => card(documentOfRow(r, this.origin)));
+    const nowMs = Date.now();
+    const { rows, badges } = await this.#read(async (tx) => {
+      const rows = rowsOf<DocumentRow>(await tx.execute(sql`select ${DOCUMENT_COLUMNS} from search_document_source_at(now(), ${uuidArray(ids)}::uuid[]) d`));
+      // 카드의 배지(ProductionCard.badges)는 대표 회차의 정렬 설정·좌석 배정과 마지막 승인 판매 정책에서 지금 값으로 계산한다.
+      // search_document에는 이 칸이 없으므로 같은 트랜잭션에서 회차·공연을 한 번 더 읽는다(찜 목록은 최대 100줄)
+      const eventIds = [...new Set(rows.map((r) => r.representative_event_id).filter((id): id is string => id !== null))];
+      const badges = new Map<string, ProductionBadge[]>();
+      if (eventIds.length > 0) {
+        const sources = rowsOf<BadgeRow>(await tx.execute(sql`select * from search_card_badges(${uuidArray(eventIds)}::uuid[])`));
+        for (const b of sources) {
+          const rules = Array.isArray(b.sale_policy) ? (b.sale_policy as SalePolicyRule[]) : [];
+          badges.set(
+            b.id,
+            productionBadges(
+              queueOrder(b.lobby_shuffle, b.open_batch),
+              hasOpenPresale(rules, b.id, { openAt: at(b.open_at), startsAt: at(b.starts_at), perPersonLimit: Number(b.per_person_limit) }, nowMs),
+              b.seat_assignment === 'AUTO' ? 'AUTO' : 'PICK',
+            ),
+          );
+        }
+      }
+      return { rows, badges };
+    });
+    return rows.map((r) => {
+      const doc = documentOfRow(r, this.origin);
+      const b = r.representative_event_id ? badges.get(r.representative_event_id) : undefined;
+      return card(b ? { ...doc, badges: b } : doc);
+    });
   }
 
   /** 검색 전용 연결로 짧은 읽기 트랜잭션 하나. 연결 묶음 포화·질의 시간 초과는 SearchUnavailable(503) */

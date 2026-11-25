@@ -7,6 +7,7 @@ export { WishLifecycle } from './application/wish-lifecycle.js';
 export { Wishes, decodeWishCursor, encodeWishCursor, WISH_PAGE_DEFAULT, WISH_PAGE_MAX, WISH_PRODUCTION_IDS_MAX, type WishListQuery, type WishPage } from './application/wish.js';
 export { CatalogAccountWithdrawnHandler, CATALOG_ACCOUNTS_WITHDRAWN_TOPIC, readCatalogWithdrawn, type CatalogWithdrawnEvent } from './inbound/account-withdrawn.handler.js';
 export { CatalogAccountMergedHandler, CATALOG_ACCOUNTS_MERGED_TOPIC, readCatalogMerged, type CatalogMergedEvent } from './inbound/account-merged.handler.js';
+export { accountMergeCheckHandlers, corePackage, type AccountMergeCheckUseCases, type AccountMergeCheckErrorLog, type CorePackage } from './inbound/account-merge-check.grpc.js';
 export { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 export { GrpcMemberCodeDirectory } from './adapters/identity-member-codes.js';
 export { SaleEligibilityMetrics } from './application/sale-eligibility-metrics.js';

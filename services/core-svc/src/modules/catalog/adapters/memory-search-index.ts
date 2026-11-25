@@ -5,6 +5,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Clock } from '@peaket/platform';
 import { imageBaseUrl } from '../domain/production-image.js';
+import { hasOpenPresale, productionBadges, queueOrder } from '../domain/event-detail.js';
 import { isPublic, saleEndsAt, type EventSaleState } from '../domain/production.js';
 import {
   documentOf,
@@ -139,6 +140,16 @@ export class MemorySearchIndex implements SearchIndex {
         popularity,
       });
       if (!doc) continue;
+      const rep = doc.eventId ? events.find((e) => e.id === doc.eventId) : undefined;
+      if (rep) {
+        const flags = this.repo.details.get(rep.id)?.event;
+        const rules = this.repo.salePolicies.get(p.id)?.rules ?? [];
+        doc.badges = productionBadges(
+          queueOrder(flags?.lobbyShuffle ?? true, flags?.openBatch ?? true),
+          hasOpenPresale(rules, rep.id, { openAt: rep.openAt, startsAt: rep.startsAt, perPersonLimit: flags?.perPersonLimit ?? 4 }, nowMs),
+          flags?.seatAssignment ?? 'PICK',
+        );
+      }
       docs.push(doc);
       // 아티스트·공연장 줄은 여러 공연이 함께 쓴다(뒤에 나온 것이 이긴다, suggestDocuments와 같다)
       for (const t of termRowsOf({ productionId: doc.productionId, title: doc.title, aliases: aliasRows, artists: doc.artists, placeId: doc.placeId ?? null, placeName: doc.placeName ?? null }, 0)) terms.set(t.id, t);

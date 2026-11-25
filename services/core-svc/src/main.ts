@@ -5,6 +5,7 @@
 import { fileURLToPath } from 'node:url';
 import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, errorSummary, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
+import { startGrpcServer } from './grpc-server.js';
 import { kafkaConsumersFromEnv, CoreAccountEventHandler } from './consumers/index.js';
 import type { CoreConsumers } from './consumers/start.js';
 import {
@@ -15,6 +16,8 @@ import {
   SaleConfigMetrics,
   UnwiredSaleOpen,
   assertDatabaseRole,
+  accountMergeCheckHandlers,
+  corePackage,
   DrizzleCommissionRate,
   DrizzleCatalogRepository,
   DrizzleSearchReadModel,
@@ -196,6 +199,7 @@ await assertDatabaseRole(searchDatabase, 'core_search');
 await assertDatabaseRole(notifyDatabase, 'core_notify');
 /** 요청 하나(머리·본문)를 다 받는 시한 [가정]: 천천히 보내는 연결이 올리기 버퍼와 칸막이 자리를 오래 쥐지 않게(ADR-0257 결정 2) */
 const REQUEST_TIMEOUT_MS = 100_000;
+let grpc: Awaited<ReturnType<typeof startGrpcServer>> | undefined;
 const service = await createService({
   name: SERVICE,
   adminAuthz,
@@ -254,7 +258,27 @@ const searchTimers = new SearchReadModelTimers({
 // 그 밖은 여기서 시작에 실패한다. 이 도우미가 Kafka 클라이언트(네이티브 모듈)를 싣는다. 서비스를 닫은 뒤 끈다
 const { startServiceControlSync } = await import('@peaket/platform/stream-worker');
 const controlSync = startServiceControlSync(service, process.env);
+// 업무 gRPC 포트도 준비 표시에 건다(IR-04). 포트를 열기 전에는 /ready가 200이 아니다
+service.readiness.register('grpc');
 await service.listen();
+// core gRPC AccountMergeCheckService(identity만 부른다, IR-04). HTTP가 뜬 뒤에 열고, 닫을 때는 이 포트를 먼저 닫는다
+grpc = await startGrpcServer({
+  host: process.env.PEAKET_GRPC_HOST ?? '0.0.0.0',
+  // 포트는 공용 설정(PEAKET_GRPC_PORT, 기본 50051)이다. 부하 분산 프로필·호출 지표는 공용 설정·지표 묶음을 쓴다(BAS-080)
+  port: service.config.grpcPort,
+  profile: service.config.grpcLbProfile,
+  metrics: service.metrics,
+  services: [
+    {
+      definition: corePackage().AccountMergeCheckService.service,
+      handlers: accountMergeCheckHandlers({ wishes: service.app.get(WishLifecycle) }, (method, err) => {
+        service.logger.error({ method, err }, 'AccountMergeCheckService 처리 실패');
+      }),
+    },
+  ],
+});
+service.readiness.complete('grpc');
+service.logger.info({ port: grpc.port }, '업무 gRPC 포트를 열었다');
 // 시작 따라잡기(ADR-0271 결정 12) → 사전 첫 읽기 → 주기 일. 둘 다 준비 확인에 넣지 않는다: 그동안 /ready는 200이고 검색은 표에 있는 줄로, 자동완성은 빈 후보·no-store로 답한다(결정 14)
 await searchTimers.start();
 
@@ -319,6 +343,8 @@ function shutdown(): Promise<void> {
     searchTimers.stop();
     // Kafka 소비자를 먼저 멈춘다(받기를 멈추고 처리 중인 키를 마친 뒤 커밋). 실패해도 나머지는 그대로 끝낸다
     await consumers?.stop().catch((err: unknown) => service.logger.error({ dep: 'kafka', err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)'));
+    // gRPC 포트를 HTTP보다 먼저 닫는다: 새 호출을 받지 않고 처리 중인 호출이 끝난 뒤에 DB 연결을 닫는다
+    await grpc?.close().catch((err: unknown) => service.logger.error({ err }, 'core-svc gRPC 종료 실패(나머지는 그대로 끝낸다)'));
     // 받는 요청을 마치고 identity 채널과 DB 연결을 닫는다
     await service
       .close()

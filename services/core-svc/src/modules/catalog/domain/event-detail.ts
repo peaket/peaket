@@ -1,4 +1,5 @@
 // 도메인 층: 공연 상세 응답의 값 판정(openapi EventPublicSummary, ADR-0118, ADR-0200 결정 4·5, BUILD_ORDER HOT-306). 순수 함수만 둔다.
+import { salePhases, type SalePolicyRule } from '@peaket/validation/sale-policy';
 import { type EventStatus, saleEndsAt } from './production.js';
 
 /** 공개 회차 목록의 상한 [가정](openapi rounds maxItems) */
@@ -10,10 +11,28 @@ export const MAX_DESCRIPTION_TEXT = 20_000;
 
 export type QueueOrder = 'HYBRID' | 'PREQUEUE_SHUFFLE' | 'FIFO';
 
+/** 공연 카드·상세가 함께 쓰는 판매 정보 배지(openapi ProductionCard.badges, EventPublicSummary.badges) */
+export type ProductionBadge = QueueOrder | 'PRESALE' | 'AUTO_SEAT';
+
 /** 정렬 방식 이름: 회차의 두 설정에서 계산한다(ADR-0118). 둘 다 끈 값은 DB 제약이 막는다 */
 export function queueOrder(lobbyShuffle: boolean, openBatch: boolean): QueueOrder {
   if (!lobbyShuffle) return 'FIFO';
   return openBatch ? 'HYBRID' : 'PREQUEUE_SHUFFLE';
+}
+
+/** 배지 차례는 정본 그대로다: 정렬 방식 → PRESALE → AUTO_SEAT */
+export function productionBadges(order: QueueOrder, presale: boolean, seatAssignment: 'PICK' | 'AUTO'): ProductionBadge[] {
+  return [order, ...(presale ? (['PRESALE'] as const) : []), ...(seatAssignment === 'AUTO' ? (['AUTO_SEAT'] as const) : [])];
+}
+
+/** 아직 끝나지 않은 선예매 조각이 있으면 PRESALE 배지다(ADR-0261 결정 5) */
+export function hasOpenPresale(
+  rules: readonly SalePolicyRule[],
+  round: string,
+  o: { openAt: Date; startsAt: Date; perPersonLimit: number },
+  nowMs: number,
+): boolean {
+  return salePhases(rules, round, { openAt: o.openAt, saleEndsAt: saleEndsAt(o), perPersonLimit: o.perPersonLimit }).some((p) => p.kind === 'PRESALE' && p.endsAt.getTime() > nowMs);
 }
 
 /** 로비 개방 시각. 로비 셔플을 끈 회차(FIFO)는 null */

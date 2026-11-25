@@ -7,6 +7,8 @@ service:
   enabled: true
   replicas: 1
   port: 8080
+  extraPorts:
+    - { name: grpc, port: 50051 }
   command: ["node", "--import", "@peaket/platform/telemetry/register", "dist/main.js"]
   env: {}
   resources:

@@ -6,7 +6,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
 import { salePhases } from '@peaket/validation/sale-policy';
-import { lobbyOpensAt, MAX_ARTISTS, MAX_DESCRIPTION_TEXT, publicRounds, queueOrder, sellerInfo, type PublicRound, type QueueOrder, type SellerInfo } from '../domain/event-detail.js';
+import { lobbyOpensAt, MAX_ARTISTS, MAX_DESCRIPTION_TEXT, productionBadges, publicRounds, queueOrder, sellerInfo, type ProductionBadge, type PublicRound, type QueueOrder, type SellerInfo } from '../domain/event-detail.js';
 import type { DescriptionDoc } from '../domain/description.js';
 import { IMAGE_ORIGIN } from '../domain/media-ports.js';
 import { CATALOG_REPOSITORY, type CatalogRepository } from '../domain/ports.js';
@@ -42,7 +42,7 @@ export interface EventPublicSummary {
   seatAssignment: 'PICK' | 'AUTO';
   perPersonLimit: number;
   reentryAllowed: boolean;
-  badges: (QueueOrder | 'PRESALE' | 'AUTO_SEAT')[];
+  badges: ProductionBadge[];
   rounds: PublicRound[];
   /** 등급별 정가(보이는 순서, 마지막 승인 내용, ADR-0200 결정 4·ADR-0260 결정 12). 배치본이 없으면 빈 목록 */
   priceTiers: { tierId: string; name: string; price: number }[];
@@ -105,7 +105,7 @@ export class GetEventSummary {
       seatAssignment: e.seatAssignment,
       perPersonLimit: e.perPersonLimit,
       reentryAllowed: e.reentryAllowed,
-      badges: [order, ...(presale ? (['PRESALE'] as const) : []), ...(e.seatAssignment === 'AUTO' ? (['AUTO_SEAT'] as const) : [])],
+      badges: productionBadges(order, presale, e.seatAssignment),
       rounds: publicRounds(row.rounds, e.id, now),
       priceTiers: row.priceTiers.map((t) => ({ tierId: t.tierId, name: t.name, price: t.price })),
       ...(seller ? { seller } : {}),
