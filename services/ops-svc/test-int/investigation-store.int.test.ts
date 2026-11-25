@@ -1,5 +1,6 @@
 ﻿// F-04-12 ops DB 저장소 통합 시험(동결 로컬, LCH-260, FX-T12).
 // 실제 PostgreSQL 18 컨테이너에 마이그레이션 0035를 적용하고 저장소의 판 조건부 갱신·덧붙이기·제약·검증 칸을 본다.
+// [ASVS v5.0.0-2.1.2] 상태·기록 일관성, [ASVS v5.0.0-2.1.3] 업무 한도·멱등 작업 이름·권한.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { createDatabase, type Database } from '@peaket/platform';
@@ -123,7 +124,7 @@ afterAll(async () => {
 });
 
 describe('F-04-12 ops DB 저장소(PostgreSQL)', () => {
-  test('FX-T12 ㉓ Postgres 저장소는 사건 판을 조건부로 올리고 사건 기록을 덧붙이기만 한다', async () => {
+  test('FX-T12 ㉓ [ASVS v5.0.0-2.1.2] Postgres 저장소는 사건 판을 조건부로 올리고 사건 기록을 덧붙이기만 한다', async () => {
     await store.putCase(caseRecord());
     const first = await store.getCase(CASE);
     expect(first).toMatchObject({ caseId: CASE, version: 1, status: 'INVESTIGATING' });
@@ -147,7 +148,7 @@ describe('F-04-12 ops DB 저장소(PostgreSQL)', () => {
     await expect(raw.query('DELETE FROM fraud_case_event WHERE case_id = $1 AND seq = 1', [CASE])).rejects.toThrow();
   });
 
-  test('FX-T12 ㉔ 같은 묶음에 사건은 하나이고 후보 계산 시도는 (회차, 판, 시도)로 남는다', async () => {
+  test('FX-T12 ㉔ [ASVS v5.0.0-2.1.3] 같은 묶음에 사건은 하나이고 후보 계산 시도는 (회차, 판, 시도)로 남는다', async () => {
     for (const attempt of [1, 2, 3, 4]) await store.putRun(run({ attempt, status: 'FAILED', failureReason: 'TIMEOUT' }));
     const runs = await store.listRuns(EVENT);
     expect(runs.map((r: { attempt: number }) => r.attempt)).toEqual([1, 2, 3, 4]);
@@ -156,13 +157,17 @@ describe('F-04-12 ops DB 저장소(PostgreSQL)', () => {
     await expect(store.putCase(caseRecord({ caseId: randomUUID() }))).rejects.toThrow();
   });
 
-  test('FX-T12 ㉕ 후보 결과와 기록 고정 판을 저장하면 머리·목록·상세에 보인다', async () => {
+  test('FX-T12 ㉕ [ASVS v5.0.0-2.1.2] 후보 결과와 기록 고정 판을 저장하면 머리·목록·상세에 보인다', async () => {
     await store.putSnapshot(snapshot());
     expect(await store.latestSnapshot(EVENT)).toMatchObject({ version: 1, invHash: hex('b'), verifyStatus: null });
+    // 같은 판을 다시 넣으면 던진다(기본 키)
+    await expect(store.putSnapshot(snapshot())).rejects.toThrow();
     await store.putClusters(EVENT, 1, [
       cluster(CLUSTER, [ACC(1), ACC(2)], { purchaseCount: 18 }),
       cluster(CLUSTER2, [ACC(3)], { scoreBand: 'LOW', purchaseCount: 1 }),
     ]);
+    // 같은 (회차, 판)을 다시 저장해도 첫 결과가 이기고 중복이 생기지 않는다
+    await store.putClusters(EVENT, 1, [cluster(CLUSTER, [ACC(9)], { purchaseCount: 99 })]);
     const list = await store.listClusters({ eventId: EVENT, generation: 1, sort: 'SCORE_DESC', limit: 10 });
     expect(list.items.map((c: { clusterId: string }) => c.clusterId)).toEqual([CLUSTER, CLUSTER2]);
     const detail = await store.getCluster(CLUSTER);
@@ -182,5 +187,30 @@ describe('F-04-12 ops DB 저장소(PostgreSQL)', () => {
     expect(await store.isSnapshotExportBlocked(EVENT, 1)).toBe(true);
     await store.verifySnapshot(EVENT, 1, 'OK', NOW + DAY);
     expect(await store.isSnapshotExportBlocked(EVENT, 1)).toBe(false);
+  });
+
+  test('FX-T12 ㉛ [ASVS v5.0.0-2.1.3] 멱등 작업 이름과 ops_app 권한을 실제 DB에서 확인한다', async () => {
+    const insert = (operation: string) =>
+      raw.query(
+        "INSERT INTO idempotency_record (account_ref, operation, idempotency_key, request_hash, created_at) VALUES ('ops-test', $1, $2, decode(repeat('aa', 32), 'hex'), now())",
+        [operation, randomUUID()],
+      );
+    await insert('CREATE_FRAUD_CASE');
+    await insert('CREATE_FRAUD_APPEAL_REQUEST');
+    await expect(insert('NOT_A_FRAUD_OPERATION')).rejects.toThrow();
+
+    // ops_app은 조사 표를 읽고 쓸 수 있고, 사건 기록은 덧붙이기만 한다
+    try {
+      await raw.query('SET ROLE ops_app');
+      await raw.query("UPDATE fraud_snapshot SET verify_status = 'OK' WHERE event_id = $1 AND version = 1", [EVENT]);
+      await raw.query(
+        "INSERT INTO fraud_case_event (case_id, seq, kind, actor_id, note, detail, occurred_at) VALUES ($1, 3, 'NOTE', $2, '권한 시험', '{}'::jsonb, now())",
+        [CASE, ACTOR],
+      );
+      await expect(raw.query("UPDATE fraud_case_event SET kind = 'CLEARED' WHERE case_id = $1 AND seq = 3", [CASE])).rejects.toThrow();
+      await expect(raw.query('DELETE FROM fraud_case_event WHERE case_id = $1 AND seq = 3', [CASE])).rejects.toThrow();
+    } finally {
+      await raw.query('RESET ROLE');
+    }
   });
 });

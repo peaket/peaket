@@ -1,6 +1,7 @@
 ﻿// F-04-12 조사 도메인 시험(동결 로컬, LCH-260, FX-T12·FX-T15·FX-T16·FX-T18).
 // 정본: docs/features/forensic-replay.md §6.7.3~§6.7.5, docs/data.md fraud_*.
 // 도메인 함수는 시계·난수를 직접 쓰지 않고 받은 nowMs만 쓴다. 단언 값은 정본의 [가정] 값이다.
+// [ASVS v5.0.0-2.1.2] 상태·기한·잠금 조합, [ASVS v5.0.0-2.1.3] 업무 한도, [ASVS v5.0.0-8.2.1] 조사관 지정.
 import { describe, expect, test } from 'vitest';
 import {
   APPEAL_MIN_LEAD_MS,
@@ -145,7 +146,7 @@ describe('F-04-12 조사 도메인', () => {
     expect(problemOf(() => assertAppealDue({ nowMs: NOW, showStartsAtMs: SHOW, entryOpensAtMs: null, dueAtMs: SHOW }))).toMatchObject({ status: 422 });
   });
 
-  test('FX-T15 ① 잠금 최대 기한은 계정의 첫 소명 요청 + 14일이고 다시 요청해도 늘지 않는다', () => {
+  test('FX-T15 ① [ASVS v5.0.0-2.1.3] 잠금 최대 기한은 계정의 첫 소명 요청 + 14일이고 다시 요청해도 늘지 않는다', () => {
     expect(LOCK_MAX_MS).toBe(14 * DAY);
     expect(lockExpiryOf({ existingLockExpiresAtMs: null, nowMs: NOW })).toBe(NOW + 14 * DAY);
     // 이미 잠근 계정은 기존 기한을 그대로 쓴다
@@ -153,7 +154,7 @@ describe('F-04-12 조사 도메인', () => {
     expect(lockExpiryOf({ existingLockExpiresAtMs: null, nowMs: NOW + 5 * DAY })).toBe(NOW + 19 * DAY);
   });
 
-  test('FX-T12 ② 실패한 후보 계산은 세 번까지 자동으로 다시 하고 그 뒤에만 다시 돌리기를 연다', () => {
+  test('FX-T12 ② [ASVS v5.0.0-2.1.3] 실패한 후보 계산은 세 번까지 자동으로 다시 하고 그 뒤에만 다시 돌리기를 연다', () => {
     expect(AUTO_RETRY_LIMIT).toBe(3);
     for (const [attempt, left] of [[1, 3], [2, 2], [3, 1], [4, 0]] as const) {
       expect(autoRetriesLeftOf({ status: 'FAILED', attempt }), `FAILED ${attempt}`).toBe(left);
@@ -230,7 +231,7 @@ describe('F-04-12 조사 도메인', () => {
     expect(problemOf(() => addMembers({ case: caseOf(), adds: [{ accountId: id(1), reason: 'x' }], nowMs: NOW }))).toMatchObject({ status: 422 });
   });
 
-  test('FX-T12 ⑥ 소명 판단으로 모든 계정이 인정되면 정상 종료하고 잠금을 모두 푼다', () => {
+  test('FX-T12 ⑥ [ASVS v5.0.0-2.1.2] 소명 판단으로 모든 계정이 인정되면 정상 종료하고 잠금을 모두 푼다', () => {
     const c = caseOf({
       status: 'APPEAL_PENDING',
       members: [1, 2, 3].map((n) => memberOf(n, { appealResult: 'SUBMITTED', appealDueAtMs: NOW + DAY, lockExpiresAtMs: NOW + 14 * DAY })),
@@ -313,7 +314,7 @@ describe('F-04-12 조사 도메인', () => {
     expect(classifyRunFailure('문자열 오류')).toBe('OTHER');
   });
 
-  test('FX-T16 ① 조사관 지정이 없거나 가명정보 취급자 지정을 함께 가진 계정은 조사 경로를 쓸 수 없다', () => {
+  test('FX-T16 ① [ASVS v5.0.0-8.2.1] 조사관 지정이 없거나 가명정보 취급자 지정을 함께 가진 계정은 조사 경로를 쓸 수 없다', () => {
     expect(problemOf(() => assertInvestigator(['FRAUD_INVESTIGATOR']))).toBeNull();
     expect(problemOf(() => assertInvestigator([]))).toEqual({ type: 'investigator-required', status: 403 });
     expect(problemOf(() => assertInvestigator(['PSEUDONYM_HANDLER']))).toEqual({ type: 'investigator-required', status: 403 });
@@ -346,49 +347,61 @@ describe('F-04-12 조사 도메인', () => {
     });
     // 모르는 칸·빠진 칸·모양이 다른 해시는 거절한다
     expect(() => snapshotFromForensics({ eventId: id(0x200) })).toThrow();
-    expect(() => snapshotFromForensics({ ...snapshotOf(), extra: 1 })).toThrow();
-    expect(() => snapshotFromForensics({ ...snapshotOf(), frozenAtMs: NOW })).toThrow();
-    expect(() => snapshotFromForensics({ ...snapshotOf(), invHash: 'abc' })).toThrow();
+    const valid = {
+      eventId: id(0x200),
+      version: 2,
+      frozenAt,
+      invHash: hex('b'),
+      prevHash: hex('a'),
+      tableHashes: { inv_request: hex('1'), inv_step: hex('2'), inv_behavior: hex('3'), inv_link: hex('4') },
+      rowCounts: { inv_request: 1, inv_step: 2, inv_behavior: 3, inv_link: 4 },
+      rangeFrom: '2026-11-25T00:00:00.000Z',
+      late: true,
+    };
+    // 모르는 칸만 더한 입력은 반드시 거절한다
+    expect(() => snapshotFromForensics({ ...valid, extra: 1 })).toThrow();
+    const { inv_link: _drop, ...withoutLink } = valid.tableHashes;
+    expect(() => snapshotFromForensics({ ...valid, tableHashes: withoutLink })).toThrow();
+    expect(() => snapshotFromForensics({ ...valid, invHash: 'abc' })).toThrow();
+    expect(() => snapshotFromForensics({ ...valid, rangeFrom: 'not-a-date' })).toThrow();
   });
 
   test('FX-T12 ㉘ F-04-11 후보 결과는 후보 묶음만 저장하고 지문·규칙 판을 보존한다', () => {
-    const result = clustersFromForensics(
-      {
-        eventId: id(0x200),
-        snapshotVersion: 1,
-        ruleVersion: 'fraud-rules-v1',
-        candidateCount: 1,
-        resultFingerprint: hex('d'),
-        clusters: [
-          {
-            accounts: ['b', 'a'],
-            accountCount: 2,
-            purchaseCount: 27,
-            limitPerPerson: 4,
-            scoreBand: 'HIGH',
-            sharedAttributes: ['PAYMENT_METHOD'],
-            signals: ['LINK_GRAPH', 'POST_MATCH'],
-            members: [
-              { accountId: 'b', signals: ['POST_MATCH'], ticketCount: 9 },
-              { accountId: 'a', signals: ['LINK_GRAPH'], ticketCount: 18 },
-            ],
-            candidate: true,
-          },
-          {
-            accounts: ['c'],
-            accountCount: 1,
-            purchaseCount: 1,
-            limitPerPerson: 4,
-            scoreBand: 'LOW',
-            sharedAttributes: ['CONTACT'],
-            signals: ['LINK_GRAPH'],
-            members: [{ accountId: 'c', signals: ['LINK_GRAPH'], ticketCount: 1 }],
-            candidate: false,
-          },
-        ],
-      },
-      { eventId: id(0x200), generation: 1, snapshotVersion: 1, createdAtMs: NOW },
-    );
+    const valid = {
+      eventId: id(0x200),
+      snapshotVersion: 1,
+      ruleVersion: 'fraud-rules-v1',
+      candidateCount: 1,
+      resultFingerprint: hex('d'),
+      clusters: [
+        {
+          accounts: ['b', 'a'],
+          accountCount: 2,
+          purchaseCount: 27,
+          limitPerPerson: 4,
+          scoreBand: 'HIGH',
+          sharedAttributes: ['PAYMENT_METHOD'],
+          signals: ['LINK_GRAPH', 'POST_MATCH'],
+          members: [
+            { accountId: 'b', signals: ['POST_MATCH'], ticketCount: 9 },
+            { accountId: 'a', signals: ['LINK_GRAPH'], ticketCount: 18 },
+          ],
+          candidate: true,
+        },
+        {
+          accounts: ['c'],
+          accountCount: 1,
+          purchaseCount: 1,
+          limitPerPerson: 4,
+          scoreBand: 'LOW',
+          sharedAttributes: ['CONTACT'],
+          signals: ['LINK_GRAPH'],
+          members: [{ accountId: 'c', signals: ['LINK_GRAPH'], ticketCount: 1 }],
+          candidate: false,
+        },
+      ],
+    };
+    const result = clustersFromForensics(valid, { eventId: id(0x200), generation: 1, snapshotVersion: 1, createdAtMs: NOW });
     expect(result.resultFingerprint).toBe(hex('d'));
     expect(result.ruleVersion).toBe('fraud-rules-v1');
     expect(result.clusters).toHaveLength(1);
@@ -398,6 +411,39 @@ describe('F-04-12 조사 도메인', () => {
     expect(c.members.find((m: { accountId: string }) => m.accountId === 'a')).toMatchObject({ ticketCount: 18, addedBy: 'SYSTEM', appealResult: 'NOT_REQUESTED' });
     expect(c.clusterId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     // 모르는 칸·빠진 칸은 거절한다
-    expect(() => clustersFromForensics({ eventId: id(0x200) }, { eventId: id(0x200), generation: 1, snapshotVersion: 1, createdAtMs: NOW })).toThrow();
+    expect(() => clustersFromForensics({ ...valid, extra: 1 }, { eventId: id(0x200), generation: 1, snapshotVersion: 1, createdAtMs: NOW })).toThrow();
+    const { resultFingerprint: _drop, ...withoutFingerprint } = valid;
+    expect(() => clustersFromForensics(withoutFingerprint, { eventId: id(0x200), generation: 1, snapshotVersion: 1, createdAtMs: NOW })).toThrow();
+  });
+
+  test('FX-T15 ② [ASVS v5.0.0-2.1.2] 계정 변경·소명 판단은 입력 사건을 바꾸지 않는다', () => {
+    const deepFreeze = <T,>(v: T): T => {
+      if (v !== null && typeof v === 'object') {
+        Object.freeze(v);
+        for (const x of Object.values(v as Record<string, unknown>)) deepFreeze(x);
+      }
+      return v;
+    };
+    const c = deepFreeze(caseOf());
+    const before = JSON.stringify(c);
+    const removed = removeMembers({ case: c, removals: [{ accountId: id(1), reason: 'x' }], nowMs: NOW + HOUR });
+    expect(removed.next).not.toBe(c);
+    expect(removed.next.members[0]!.removedAtMs).toBe(NOW + HOUR);
+    expect(JSON.stringify(c)).toBe(before);
+    const added = addMembers({ case: c, adds: [{ accountId: id(4), reason: 'x' }], nowMs: NOW + HOUR });
+    expect(added.next).not.toBe(c);
+    expect(added.next.members).toHaveLength(4);
+    expect(JSON.stringify(c)).toBe(before);
+    const appeal = deepFreeze(
+      caseOf({
+        status: 'APPEAL_PENDING',
+        members: [memberOf(1, { appealResult: 'SUBMITTED' }), memberOf(2, { appealResult: 'SUBMITTED' }), memberOf(3)],
+      }),
+    );
+    const appealBefore = JSON.stringify(appeal);
+    const decided = decideAppeals({ case: appeal, decisions: [{ accountId: id(1), decision: 'ACCEPTED', reason: 'x' }], nowMs: NOW + HOUR });
+    expect(decided.next).not.toBe(appeal);
+    expect(decided.next.members.find((m: { accountId: string }) => m.accountId === id(1))!.appealResult).toBe('ACCEPTED');
+    expect(JSON.stringify(appeal)).toBe(appealBefore);
   });
 });

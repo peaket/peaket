@@ -242,6 +242,7 @@ export class FakeAdminIdentity implements AdminIdentity {
 
   async designations(adminAccountId: string): Promise<DesignationKind[]> {
     this.calls.push(`designations:${adminAccountId}`);
+    this.#throwIf('designations');
     return [...(this.accounts.get(adminAccountId)?.designations ?? [])];
   }
 

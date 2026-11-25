@@ -1,12 +1,13 @@
 // F-04-12 마이그레이션 0035의 정적 검사(동결 로컬, LCH-260, FX-T12).
 // 표·기본 키·검사 제약·권한·멱등 작업 이름·사건 기록 덧붙이기 트리거가 SQL에 있는지 본다.
+// [ASVS v5.0.0-2.1.2] 사건 기록 덧붙이기(일관성), [ASVS v5.0.0-2.1.3] 멱등 작업 이름·업무 한도.
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 
 const sql = readFileSync(new URL('../migrations/0035_fraud_investigation.sql', import.meta.url), 'utf8');
 
 describe('0035 부정 예매 조사 마이그레이션', () => {
-  test('FX-T12 ㉒ 마이그레이션 0035는 fraud_* 표와 제약·권한을 만든다', () => {
+  test('FX-T12 ㉒ [ASVS v5.0.0-2.1.2] 마이그레이션 0035는 fraud_* 표와 제약·권한을 만든다', () => {
     for (const table of ['fraud_snapshot', 'fraud_cluster_run', 'fraud_cluster', 'fraud_cluster_member', 'fraud_case', 'fraud_case_event']) {
       expect(sql).toContain(`CREATE TABLE IF NOT EXISTS ${table}`);
     }
