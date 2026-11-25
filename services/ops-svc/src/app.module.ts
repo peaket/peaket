@@ -107,6 +107,8 @@ interface CommonWiring {
   };
   /** 관제 실시간 표(OPS-160, F-04-1): 0.5초 조회 보드와 파트너 판매 현황 REST. 시작 조립(rt-wiring)이 만든다. 없으면 그 경로를 열지 않는다 */
   readonly realtimeTable?: RealtimeTableModuleDeps;
+  /** F-04-12 조사 모듈 조립(뼈대). 다음 커밋에서 타입을 채운다 */
+  readonly investigations?: unknown;
   /**
    * 회차 취소 요청(BAT-425 GAT-130 잔여, BAT-420 GAT-110). refunds·reauth가 없으면 요청·확정이 503이다.
    * reader(미리보기·진행률)·stopper(판매 멈춤)·owners(파트너 소속)는 시작 조립(event-cancellation-wiring)이 고른다. 없으면 그 경로가 503이다.
