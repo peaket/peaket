@@ -86,7 +86,7 @@ describe('F-04-13 ops DB 통합', () => {
     await expect(
       approvals.request(
         { approvalId, caseId: c.caseId, eventId: c.eventId, action: 'CANCEL_TICKETS', accountIds: [id(2)], targets: [target(uuid(), id(2))], restrictionEndsAtMs: null, reason: '봇', requestedBy: c.assigneeId, dueAtMs: NOW + DAY, nowMs: NOW },
-        { idem: { accountRef: c.assigneeId, operation: 'FRAUD_ACTION_REQUEST', key: uuid(), requestHash: new Uint8Array(32) }, result: { approvalId }, audit: { recordType: 'ADMIN_DATA_ACCESS', recordId: approvalId, payload: { action: 'REQUEST' }, nowMs: NOW }, events },
+        { idem: { accountRef: c.assigneeId, operation: 'CREATE_FRAUD_ACTION_REQUEST', key: uuid(), requestHash: new Uint8Array(32) }, result: { approvalId }, audit: { recordType: 'ADMIN_DATA_ACCESS', recordId: approvalId, payload: { action: 'REQUEST' }, nowMs: NOW }, events },
       ),
     ).rejects.toThrow();
     const approvalRows = await raw.query('select count(*)::int as n from approval_request where id = $1', [approvalId]);
@@ -106,7 +106,7 @@ describe('F-04-13 ops DB 통합', () => {
     const approvalId = uuid();
     await approvals.request(
       { approvalId, caseId: c.caseId, eventId: c.eventId, action: 'RESTRICT', accountIds: [id(1)], targets: [], restrictionEndsAtMs: NOW + 30 * DAY, reason: '제한', requestedBy: c.assigneeId, dueAtMs: NOW + DAY, nowMs: NOW },
-      { idem: { accountRef: c.assigneeId, operation: 'FRAUD_ACTION_REQUEST', key: uuid(), requestHash: new Uint8Array(32) }, result: { approvalId }, audit: { recordType: 'ADMIN_DATA_ACCESS', recordId: approvalId, payload: { action: 'REQUEST' }, nowMs: NOW }, events: [] },
+      { idem: { accountRef: c.assigneeId, operation: 'CREATE_FRAUD_ACTION_REQUEST', key: uuid(), requestHash: new Uint8Array(32) }, result: { approvalId }, audit: { recordType: 'ADMIN_DATA_ACCESS', recordId: approvalId, payload: { action: 'REQUEST' }, nowMs: NOW }, events: [] },
     );
     const adminId = uuid();
     const first = await approvals.recordSummaryView({ approvalId, adminAccountId: adminId, nowMs: NOW });
