@@ -9,6 +9,7 @@ import {
   assertInvestigator,
   decideAppeals,
   defaultAppealDueAt,
+  LOCK_MAX_MS,
   lockExpiryOf,
   problem,
   removeMembers,
@@ -18,6 +19,7 @@ import {
   type FraudRunRecord,
   type FraudSnapshotRecord,
 } from '../domain/investigation.js';
+import { CaseAlreadyExistsError, type CaseAuditRecord, type IdempotentWrite } from '../domain/ports.js';
 import type {
   FraudAlerts,
   FraudForensicsRunner,
@@ -55,21 +57,27 @@ const iso = (ms: number | null): string | null => (ms === null ? null : new Date
 const etag = (version: number): string => `"${version}"`;
 const activeMembers = (c: FraudCaseRecord) => c.members.filter((m) => m.removedAtMs === null);
 const caseTicketCount = (c: FraudCaseRecord): number => activeMembers(c).reduce((n, m) => n + m.ticketCount, 0);
+type AccessLine = Parameters<InvestigationAccessLog['record']>[0];
+const uniqueViolation = (e: unknown): boolean => {
+  const any = e as { code?: unknown; cause?: { code?: unknown } } | undefined;
+  return any?.code === '23505' || any?.cause?.code === '23505';
+};
+const isProblem = (e: unknown): e is { type: string; status: number; message?: string } =>
+  e !== null && typeof e === 'object' && 'type' in e && 'status' in e;
 
 export { etag };
 
 export class Investigations {
-  readonly #idempotent = new Map<string, unknown>();
   constructor(private readonly d: InvestigationsDeps) {}
 
-  async #record(
+  #accessLine(
     actor: FraudActor,
     action: string,
     ids: { eventId?: string; caseId?: string; clusterId?: string },
     outcome: 'ALLOWED' | 'DENIED',
     rows?: number,
-  ): Promise<void> {
-    const line = {
+  ): AccessLine {
+    return {
       accountId: actor.accountId,
       role: actor.role,
       action,
@@ -79,11 +87,41 @@ export class Investigations {
       ...(rows !== undefined ? { rows } : {}),
       outcome,
     };
+  }
+
+  /** 감사 체인의 record_id는 uuid다. 사건·묶음·회차가 없으면 요청 계정 ID를 쓴다(IR-03) */
+  #recordId(actor: FraudActor, ids: { eventId?: string; caseId?: string; clusterId?: string }): string {
+    return ids.caseId ?? ids.clusterId ?? ids.eventId ?? actor.accountId;
+  }
+
+  #caseAudit(
+    actor: FraudActor,
+    action: string,
+    ids: { eventId?: string; caseId?: string; clusterId?: string },
+    rows: number,
+  ): CaseAuditRecord {
+    return {
+      recordType: 'ADMIN_DATA_ACCESS',
+      recordId: this.#recordId(actor, ids),
+      payload: this.#accessLine(actor, action, ids, 'ALLOWED', rows),
+      nowMs: this.d.now(),
+    };
+  }
+
+  async #record(
+    actor: FraudActor,
+    action: string,
+    ids: { eventId?: string; caseId?: string; clusterId?: string },
+    outcome: 'ALLOWED' | 'DENIED',
+    rows?: number,
+    opts: { audit?: boolean } = {},
+  ): Promise<void> {
+    const line = this.#accessLine(actor, action, ids, outcome, rows);
     await this.d.access.record(line);
-    if (this.d.audit) {
+    if (this.d.audit && opts.audit !== false) {
       await this.d.audit.append({
         recordType: 'ADMIN_DATA_ACCESS',
-        recordId: ids.caseId ?? ids.clusterId ?? ids.eventId ?? 'fraud-investigations',
+        recordId: this.#recordId(actor, ids),
         payload: line,
         nowMs: this.d.now(),
       });
@@ -108,8 +146,28 @@ export class Investigations {
     }
   }
 
-  async allow(actor: FraudActor, action: string, ids: { eventId?: string; caseId?: string; clusterId?: string }, rows: number): Promise<void> {
-    await this.#record(actor, action, ids, 'ALLOWED', rows);
+  async allow(
+    actor: FraudActor,
+    action: string,
+    ids: { eventId?: string; caseId?: string; clusterId?: string },
+    rows: number,
+    opts: { audit?: boolean } = {},
+  ): Promise<void> {
+    await this.#record(actor, action, ids, 'ALLOWED', rows, opts);
+  }
+
+  /** 같은 키의 커밋된 결과를 지정 확인 뒤에 읽는다. 처음 요청이 아직 처리 중이면 409다 */
+  async #replay(idem: IdempotentWrite): Promise<unknown | undefined> {
+    const found = await this.d.store.findIdempotent(idem);
+    if (found.kind === 'reused') throw problem('idempotency-key-reused', 422, '같은 멱등 키를 다른 요청에 썼습니다');
+    if (found.kind === 'in_progress') throw problem('idempotency-request-in-progress', 409, '같은 요청을 아직 처리하고 있습니다');
+    if (found.kind === 'replay') return found.result;
+    return undefined;
+  }
+
+  /** 감사 기록을 사건 트랜잭션 밖에서만 남기는 저장소(메모리 판)를 위한 보완 */
+  async #auditIfStoreCannot(audit: CaseAuditRecord): Promise<void> {
+    if (!this.d.store.auditsWrites && this.d.audit) await this.d.audit.append(audit);
   }
 
   async #schedule(eventId: string) {
@@ -149,7 +207,12 @@ export class Investigations {
     };
   }
 
-  memberView(m: FraudCaseRecord['members'][number], nowMs: number): Record<string, unknown> {
+  /** 잠금 기한이 남아 있어도 뺀 계정·인정된 소명·정상 종료 사건은 실제로 잠기지 않았다(IR-09) */
+  #lockActive(m: FraudCaseRecord['members'][number], caseStatus: FraudCaseRecord['status'] | null, nowMs: number): boolean {
+    return m.removedAtMs === null && m.lockExpiresAtMs !== null && m.lockExpiresAtMs > nowMs && m.appealResult !== 'ACCEPTED' && caseStatus !== 'CLEARED';
+  }
+
+  memberView(m: FraudCaseRecord['members'][number], nowMs: number, caseStatus: FraudCaseRecord['status'] | null): Record<string, unknown> {
     return {
       accountId: m.accountId,
       ticketCount: m.ticketCount,
@@ -160,7 +223,7 @@ export class Investigations {
       appealDueAt: iso(m.appealDueAtMs),
       objectionResult: m.objectionResult ?? 'NONE',
       objectionDueAt: null,
-      transferLocked: m.lockExpiresAtMs !== null && m.lockExpiresAtMs > nowMs,
+      transferLocked: this.#lockActive(m, caseStatus, nowMs),
       lockExpiresAt: iso(m.lockExpiresAtMs),
     };
   }
@@ -187,12 +250,12 @@ export class Investigations {
       ticketCount: caseTicketCount(c),
       appealDueAt: iso(c.appealDueAtMs),
       cancelDeadlineAt: iso(c.cancelDeadlineAtMs),
-      transferLocked: active.some((m) => m.lockExpiresAtMs !== null && m.lockExpiresAtMs > nowMs),
+      transferLocked: active.some((m) => this.#lockActive(m, c.status, nowMs)),
       approvalId: c.approvalId,
       version: c.version,
       createdAt: iso(c.createdAtMs),
       closedAt: iso(c.closedAtMs),
-      members: c.members.map((m) => this.memberView(m, nowMs)),
+      members: c.members.map((m) => this.memberView(m, nowMs, c.status)),
       appealOutcome,
       investigatorOpinion: c.investigatorOpinion,
       evidenceBundleIds: [],
@@ -251,14 +314,15 @@ export class Investigations {
     const items = await Promise.all(
       page.items.map(async (c) => {
         const found = await this.d.store.findCaseByCluster(c.clusterId);
-        return this.clusterView(c, found?.caseId ?? null);
+        return this.clusterView(c, found?.caseId ?? null, found?.status ?? null);
       }),
     );
     await this.allow(actor, 'FRAUD_CLUSTER_LIST', { eventId: q.eventId }, items.length);
     return { items, nextCursor: page.nextCursor };
   }
 
-  clusterView(c: FraudClusterRecord, caseId: string | null): Record<string, unknown> {
+  clusterView(c: FraudClusterRecord, caseId: string | null, caseStatus: FraudCaseRecord['status'] | null): Record<string, unknown> {
+    const nowMs = this.d.now();
     return {
       clusterId: c.clusterId,
       eventId: c.eventId,
@@ -271,19 +335,7 @@ export class Investigations {
       signals: c.signals,
       caseId,
       createdAt: iso(c.createdAtMs),
-      members: c.members.map((m) => ({
-        accountId: m.accountId,
-        ticketCount: m.ticketCount,
-        signals: m.signals,
-        addedBy: m.addedBy,
-        removed: m.removedAtMs !== null,
-        appealResult: m.appealResult,
-        appealDueAt: iso(m.appealDueAtMs),
-        objectionResult: m.objectionResult ?? 'NONE',
-        objectionDueAt: null,
-        transferLocked: m.lockExpiresAtMs !== null && m.lockExpiresAtMs > this.d.now(),
-        lockExpiresAt: iso(m.lockExpiresAtMs),
-      })),
+      members: c.members.map((m) => this.memberView(m, nowMs, caseStatus)),
     };
   }
 
@@ -292,7 +344,7 @@ export class Investigations {
     const c = await this.d.store.getCluster(clusterId);
     if (!c) throw problem('not-found', 404, '후보 묶음을 찾을 수 없습니다');
     const found = await this.d.store.findCaseByCluster(clusterId);
-    const out = this.clusterView(c, found?.caseId ?? null);
+    const out = this.clusterView(c, found?.caseId ?? null, found?.status ?? null);
     await this.allow(actor, 'FRAUD_CLUSTER_GET', { clusterId }, c.accountCount);
     return out;
   }
@@ -300,14 +352,18 @@ export class Investigations {
   async createCase(
     actor: FraudActor,
     body: { clusterId: string; reasonCategory?: string },
-    idemKey?: string,
+    idem?: IdempotentWrite,
   ): Promise<{ view: Record<string, unknown>; location: string }> {
-    const replayKey = idemKey ? `CASE:${idemKey}` : undefined;
-    if (replayKey) {
-      const cached = this.#idempotent.get(replayKey);
-      if (cached) return cached as { view: Record<string, unknown>; location: string };
-    }
+    // 지정 확인이 멱등 재생보다 먼저다(IR-01). 재생도 접속기록·감사를 남긴다
     await this.authorize(actor, 'FRAUD_CASE_CREATE', { clusterId: body.clusterId });
+    if (idem) {
+      const replay = await this.#replay(idem) as { view: Record<string, unknown>; location: string } | undefined;
+      if (replay) {
+        const view = replay.view;
+        await this.allow(actor, 'FRAUD_CASE_CREATE', { caseId: String(view.caseId), eventId: String(view.eventId) }, Number(view.accountCount ?? 0));
+        return replay;
+      }
+    }
     const cluster = await this.d.store.getCluster(body.clusterId);
     if (!cluster) throw problem('not-found', 404, '후보 묶음을 찾을 수 없습니다');
     const existing = await this.d.store.findCaseByCluster(body.clusterId);
@@ -340,15 +396,22 @@ export class Investigations {
       members,
       events: [{ seq: 1, kind: 'CREATED', actorId: actor.accountId, note: null, detail: { reasonCategory: body.reasonCategory ?? 'MACRO_BOT' }, occurredAtMs: nowMs }],
     };
-    try {
-      await this.d.store.putCase(created);
-    } catch {
-      throw problem('fraud-case-exists', 409, '이 묶음으로 만든 사건이 이미 있습니다');
-    }
     const snapshot = await this.d.store.latestSnapshot(cluster.eventId);
-    await this.allow(actor, 'FRAUD_CASE_CREATE', { caseId, eventId: cluster.eventId }, members.length);
     const result = { view: this.caseView(created, nowMs, snapshot), location: `/v1/ops/fraud-cases/${caseId}` };
-    if (replayKey) this.#idempotent.set(replayKey, result);
+    const audit = this.#caseAudit(actor, 'FRAUD_CASE_CREATE', { caseId, eventId: cluster.eventId }, members.length);
+    try {
+      const write = await this.d.store.putCase(created, { ...(idem ? { idem } : {}), audit, result });
+      if (write?.replayed) {
+        await this.allow(actor, 'FRAUD_CASE_CREATE', { caseId, eventId: cluster.eventId }, members.length);
+        return write.result as { view: Record<string, unknown>; location: string };
+      }
+    } catch (e) {
+      if (e instanceof CaseAlreadyExistsError || uniqueViolation(e)) throw problem('fraud-case-exists', 409, '이 묶음으로 만든 사건이 이미 있습니다');
+      if (isProblem(e)) throw e;
+      throw problem('dependency-unavailable', 503, '사건을 저장하지 못했습니다');
+    }
+    await this.#auditIfStoreCannot(audit);
+    await this.allow(actor, 'FRAUD_CASE_CREATE', { caseId, eventId: cluster.eventId }, members.length, { audit: false });
     return result;
   }
 
@@ -415,8 +478,20 @@ export class Investigations {
       events.push({ seq, kind: 'NOTE', actorId: actor.accountId, note: body.note, detail: { note: body.note }, occurredAtMs: nowMs });
       next = { ...next, events: [...next.events, ...events.slice(-1)] };
     }
-    if (body.investigatorOpinion !== undefined) next = { ...next, investigatorOpinion: body.investigatorOpinion };
-    if (body.reasonCategory !== undefined) next = { ...next, reasonCategory: body.reasonCategory };
+    if (body.investigatorOpinion !== undefined) {
+      next = { ...next, investigatorOpinion: body.investigatorOpinion };
+      const seq = (next.events.at(-1)?.seq ?? 0) + 1;
+      const event = { seq, kind: 'NOTE', actorId: actor.accountId, note: '조사 의견 변경', detail: { field: 'investigatorOpinion', value: body.investigatorOpinion }, occurredAtMs: nowMs };
+      events.push(event);
+      next = { ...next, events: [...next.events, event] };
+    }
+    if (body.reasonCategory !== undefined) {
+      next = { ...next, reasonCategory: body.reasonCategory };
+      const seq = (next.events.at(-1)?.seq ?? 0) + 1;
+      const event = { seq, kind: 'NOTE', actorId: actor.accountId, note: '사유 범주 변경', detail: { field: 'reasonCategory', value: body.reasonCategory }, occurredAtMs: nowMs };
+      events.push(event);
+      next = { ...next, events: [...next.events, event] };
+    }
     if (body.appealDecisions && body.appealDecisions.length > 0) {
       const r = decideAppeals({ case: next, decisions: body.appealDecisions, nowMs });
       next = { ...r.next, events: [...r.next.events, ...withActor(r.events)] };
@@ -424,34 +499,75 @@ export class Investigations {
       lockReleases.push(...r.lockReleases);
       if (r.outcomeLabel === 'HUMAN') label = 'HUMAN';
     }
-    if (events.length === 0 && body.investigatorOpinion === undefined && body.reasonCategory === undefined) {
+    if (events.length === 0) {
       throw problem('invalid-body', 400, '고칠 칸이 없습니다');
     }
-    if (body.investigatorOpinion !== undefined || body.reasonCategory !== undefined) {
-      next = { ...next, version: current.version + 1 };
-    }
     if (next.version === current.version) next = { ...next, version: current.version + 1 };
-    const ok = await this.d.store.updateCase({ ...next, events: current.events }, current.version, events);
-    if (!ok) throw problem('precondition-failed', 412, '다른 곳에서 이 사건을 먼저 고쳤습니다');
-    if (lockReleases.length > 0) await this.d.locks.release({ caseId, eventId: current.eventId, accountIds: [...new Set(lockReleases)], version: next.version, actedBy: actor.accountId });
-    if (label) await this.d.labels.apply({ eventId: current.eventId, caseId, accountIds: [...new Set(lockReleases)], label });
+    const released = [...new Set(lockReleases)];
+    // 저장 전에 풀어 해제 실패가 '정상 종료인데 표는 잠김'으로 남지 않게 한다(IR-08)
+    if (released.length > 0) {
+      try {
+        await this.d.locks.release({ caseId, eventId: current.eventId, accountIds: released, version: current.version, actedBy: actor.accountId });
+      } catch {
+        throw problem('dependency-unavailable', 503, '양도 잠금을 풀지 못했습니다');
+      }
+    }
+    const audit = this.#caseAudit(actor, 'FRAUD_CASE_PATCH', { caseId }, next.members.length);
+    let outcome: Awaited<ReturnType<InvestigationStore['updateCase']>>;
+    try {
+      outcome = await this.d.store.updateCase({ ...next, events: current.events }, current.version, events, { audit });
+    } catch {
+      await this.#relock(caseId, released, actor, nowMs);
+      throw problem('dependency-unavailable', 503, '사건을 저장하지 못했습니다');
+    }
+    if (!outcome.ok) {
+      await this.#relock(caseId, released, actor, nowMs);
+      throw problem('precondition-failed', 412, '다른 곳에서 이 사건을 먼저 고쳤습니다');
+    }
+    await this.#auditIfStoreCannot(audit);
+    if (label) await this.d.labels.apply({ eventId: current.eventId, caseId, accountIds: released, label });
     const saved = await this.d.store.getCase(caseId);
     const out = saved ?? next;
     const snapshot = await this.d.store.latestSnapshot(out.eventId);
-    await this.allow(actor, 'FRAUD_CASE_PATCH', { caseId }, out.members.length);
+    await this.allow(actor, 'FRAUD_CASE_PATCH', { caseId }, out.members.length, { audit: false });
     return { view: this.caseView(out, nowMs, snapshot), version: out.version };
+  }
+
+  /** 저장이 실패해 되돌릴 때, 아직 잠겨 있어야 하는 계정만 다시 잠근다(다른 요청의 성공을 덮지 않는다) */
+  async #relock(caseId: string, released: readonly string[], actor: FraudActor, nowMs: number): Promise<void> {
+    if (released.length === 0) return;
+    try {
+      const saved = await this.d.store.getCase(caseId);
+      if (!saved || saved.status === 'CLEARED') return;
+      const accounts = released.filter((id) => {
+        const m = saved.members.find((x) => x.accountId === id && x.removedAtMs === null);
+        return m !== undefined && m.appealResult !== 'ACCEPTED' && m.lockExpiresAtMs !== null && m.lockExpiresAtMs > nowMs;
+      });
+      if (accounts.length === 0) return;
+      const expiries = accounts
+        .map((id) => saved.members.find((x) => x.accountId === id)!.lockExpiresAtMs)
+        .filter((x): x is number => x !== null);
+      const expiresAtMs = expiries.length > 0 ? Math.max(...expiries) : nowMs + LOCK_MAX_MS;
+      await this.d.locks.set({ caseId, eventId: saved.eventId, accountIds: accounts, version: saved.version, expiresAtMs, actedBy: actor.accountId });
+    } catch {
+      // 보상 실패는 원래 오류를 가리지 않는다. 다음 요청이 같은 판으로 다시 시도한다
+    }
   }
 
   async appeal(
     actor: FraudActor,
     caseId: string,
-    idemKey: string,
+    idem: IdempotentWrite,
     body: { accountIds: string[]; reasonCategories: FraudCaseRecord['reasonCategory'][]; dueAt: string },
   ): Promise<Record<string, unknown>> {
-    const replayKey = `APPEAL:${idemKey}`;
-    const cached = this.#idempotent.get(replayKey);
-    if (cached) return cached as Record<string, unknown>;
+    // 지정 확인이 멱등 재생보다 먼저다(IR-01)
     await this.authorize(actor, 'FRAUD_CASE_APPEAL', { caseId });
+    const replay = (await this.#replay(idem)) as Record<string, unknown> | undefined;
+    if (replay) {
+      const accountIds = Array.isArray(replay.accountIds) ? replay.accountIds.map(String) : [];
+      await this.allow(actor, 'FRAUD_CASE_APPEAL', { caseId }, accountIds.length);
+      return replay;
+    }
     const current = await this.d.store.getCase(caseId);
     if (!current) throw problem('not-found', 404, '사건을 찾을 수 없습니다');
     const schedule = await this.#schedule(current.eventId);
@@ -467,7 +583,7 @@ export class Investigations {
       }
     }
     const firstLocked = targets.filter((m) => m!.lockExpiresAtMs === null).map((m) => m!.accountId);
-    const lockExpiresAtMs = nowMs + 14 * 86_400_000;
+    const lockExpiresAtMs = nowMs + LOCK_MAX_MS;
     let lockResult: Awaited<ReturnType<TransferLocks['set']>>;
     try {
       lockResult = await this.d.locks.set({
@@ -489,9 +605,6 @@ export class Investigations {
       for (const t of h.ticketIds) if (!list.includes(t)) list.push(t);
       holders.set(h.accountId, list);
     }
-    for (const [accountId, ticketIds] of holders) {
-      await this.d.notifier.holderNotice({ eventId: current.eventId, caseId, accountId, ticketIds, dueAtMs });
-    }
     const nextMembers = current.members.map((m) => {
       if (!body.accountIds.includes(m.accountId)) return m;
       return {
@@ -504,13 +617,21 @@ export class Investigations {
       };
     });
     const seq = (current.events.at(-1)?.seq ?? 0) + 1;
+    const notifiedHolders = [...holders].map(([accountId, ticketIds]) => ({ accountId, ticketIds }));
     const events: FraudCaseRecord['events'] = [
       {
         seq,
         kind: 'APPEAL_REQUESTED',
         actorId: actor.accountId,
         note: null,
-        detail: { accountIds: body.accountIds, reasonCategories: body.reasonCategories, dueAt: iso(dueAtMs), lockExpiresAt: iso(lockExpiresAtMs), notifiedHolderCount: holders.size },
+        detail: {
+          accountIds: body.accountIds,
+          reasonCategories: body.reasonCategories,
+          dueAt: iso(dueAtMs),
+          lockExpiresAt: iso(lockExpiresAtMs),
+          notifiedHolderCount: holders.size,
+          notifiedHolders,
+        },
         occurredAtMs: nowMs,
       },
       {
@@ -530,20 +651,8 @@ export class Investigations {
       members: nextMembers,
       events: [...current.events, ...events],
     };
-    try {
-      const ok = await this.d.store.updateCase({ ...next, events: current.events }, current.version, events);
-      if (!ok) throw new Error('version');
-    } catch {
-      try {
-        await this.d.locks.release({ caseId, eventId: current.eventId, accountIds: body.accountIds, version: current.version + 1, actedBy: actor.accountId });
-      } catch {
-        // 보상 실패는 삼키지 않고 503으로 알린다
-      }
-      throw problem('dependency-unavailable', 503, '사건을 저장하지 못했습니다');
-    }
-    await this.allow(actor, 'FRAUD_CASE_APPEAL', { caseId }, body.accountIds.length);
     const result = {
-      appealRequestId: idemKey,
+      appealRequestId: idem.key,
       caseId,
       accountIds: body.accountIds,
       dueAt: iso(dueAtMs),
@@ -552,8 +661,89 @@ export class Investigations {
       lockExpiresAt: firstLocked.length > 0 ? iso(lockExpiresAtMs) : null,
       notifiedHolderCount: holders.size,
     };
-    this.#idempotent.set(replayKey, result);
+    const audit = this.#caseAudit(actor, 'FRAUD_CASE_APPEAL', { caseId }, body.accountIds.length);
+    let outcome: Awaited<ReturnType<InvestigationStore['updateCase']>>;
+    try {
+      outcome = await this.d.store.updateCase({ ...next, events: current.events }, current.version, events, { idem, audit, result });
+    } catch (e) {
+      await this.#compensateAppeal(caseId, current, body.accountIds, actor);
+      if (isProblem(e)) throw e;
+      throw problem('dependency-unavailable', 503, '사건을 저장하지 못했습니다');
+    }
+    if (!outcome.ok) {
+      await this.#compensateAppeal(caseId, current, body.accountIds, actor);
+      throw problem('dependency-unavailable', 503, '사건을 저장하지 못했습니다');
+    }
+    if (outcome.replayed) {
+      await this.allow(actor, 'FRAUD_CASE_APPEAL', { caseId }, body.accountIds.length);
+      return outcome.result as Record<string, unknown>;
+    }
+    await this.#auditIfStoreCannot(audit);
+    // 알림은 사건 저장 뒤에 보낸다(IR-07). 실패해도 잠금만 남은 500이 아니라 201이고 실패를 사건 기록에 남긴다
+    await this.#notifyHolders(actor, current.eventId, caseId, dueAtMs, holders, nowMs);
+    await this.allow(actor, 'FRAUD_CASE_APPEAL', { caseId }, body.accountIds.length, { audit: false });
     return result;
+  }
+
+  /** 저장 실패 보상은 자기가 잡은 정확한 판으로 풀고, 다른 요청이 이미 성공했으면 그 계정을 풀지 않는다(IR-02) */
+  async #compensateAppeal(caseId: string, current: FraudCaseRecord, accountIds: readonly string[], actor: FraudActor): Promise<void> {
+    let release = [...accountIds];
+    try {
+      const saved = await this.d.store.getCase(caseId);
+      if (saved && saved.version !== current.version) {
+        release = release.filter((id) => {
+          const m = saved.members.find((x) => x.accountId === id && x.removedAtMs === null);
+          return m === undefined || m.appealResult === 'NOT_REQUESTED';
+        });
+      }
+    } catch {
+      // 다시 읽지 못하면 요청한 계정을 그대로 풀어 본다
+    }
+    if (release.length === 0) return;
+    try {
+      await this.d.locks.release({ caseId, eventId: current.eventId, accountIds: release, version: current.version, actedBy: actor.accountId });
+    } catch {
+      // 보상 실패는 원래 503으로 알린다
+    }
+  }
+
+  async #notifyHolders(
+    actor: FraudActor,
+    eventId: string,
+    caseId: string,
+    dueAtMs: number,
+    holders: ReadonlyMap<string, readonly string[]>,
+    nowMs: number,
+  ): Promise<void> {
+    const failed: string[] = [];
+    for (const [accountId, ticketIds] of holders) {
+      try {
+        await this.d.notifier.holderNotice({ eventId, caseId, accountId, ticketIds, dueAtMs });
+      } catch {
+        failed.push(accountId);
+      }
+    }
+    if (failed.length === 0) return;
+    try {
+      const saved = await this.d.store.getCase(caseId);
+      if (!saved) return;
+      const seq = (saved.events.at(-1)?.seq ?? 0) + 1;
+      const events: FraudCaseRecord['events'] = [
+        {
+          seq,
+          kind: 'NOTE',
+          actorId: actor.accountId,
+          note: '받은 사람 알림 실패',
+          detail: { notification: 'HOLDER_NOTICE_FAILED', accountIds: failed },
+          occurredAtMs: nowMs,
+        },
+      ];
+      const audit = this.#caseAudit(actor, 'FRAUD_CASE_APPEAL', { caseId }, failed.length);
+      await this.d.store.updateCase({ ...saved, version: saved.version + 1 }, saved.version, events, { audit });
+      await this.#auditIfStoreCannot(audit);
+    } catch {
+      // 실패 기록도 실패하면 다음 정비가 다시 본다
+    }
   }
 
   async rerun(actor: FraudActor, eventId: string): Promise<Record<string, unknown>> {

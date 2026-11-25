@@ -28,6 +28,7 @@ import { etag, Investigations, type FraudActor } from '../application/investigat
 const actorOf = (me: Principal): FraudActor => ({ accountId: me.accountId, role: me.role ?? 'viewer' });
 
 const reject = (e: unknown): never => {
+  if (e instanceof ProblemError) throw e;
   if (e && typeof e === 'object' && 'type' in e && 'status' in e) {
     const p = e as { type: string; status: number; message?: string };
     throw new ProblemError({ type: p.type, status: p.status, title: p.message ?? p.type, cause: e });
@@ -120,7 +121,7 @@ export class InvestigationsController {
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     try {
-      const out = await this.investigations.createCase(actorOf(me), body, idem.key);
+      const out = await this.investigations.createCase(actorOf(me), body, idem);
       void reply.header('location', out.location);
       return out.view;
     } catch (e) {
@@ -200,7 +201,7 @@ export class InvestigationsController {
     @IdempotencyRequest() idem: IdempotencyRequest,
   ) {
     try {
-      return await this.investigations.appeal(actorOf(me), params.caseId, idem.key, body);
+      return await this.investigations.appeal(actorOf(me), params.caseId, idem, body);
     } catch (e) {
       reject(e);
     }

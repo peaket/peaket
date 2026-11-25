@@ -1,4 +1,5 @@
 // F-04-12 조사 저장소 메모리 판(시험·로컬). DB 판과 같은 인터페이스를 쓴다.
+import { timingSafeEqual } from 'node:crypto';
 import type {
   FraudCaseRecord,
   FraudCaseStatus,
@@ -6,25 +7,51 @@ import type {
   FraudRunRecord,
   FraudSnapshotRecord,
 } from '../domain/investigation.js';
-import type { InvestigationStore } from '../domain/ports.js';
+import { problem } from '../domain/investigation.js';
+import type {
+  CaseAuditRecord,
+  CaseUpdateOutcome,
+  CaseWriteOptions,
+  CaseWriteOutcome,
+  IdempotentLookup,
+  IdempotentWrite,
+  InvestigationStore,
+} from '../domain/ports.js';
+import { CaseAlreadyExistsError } from '../domain/ports.js';
 
 const clone = <T>(v: T): T => structuredClone(v);
 const OPEN: readonly FraudCaseStatus[] = ['INVESTIGATING', 'APPEAL_PENDING', 'DECISION_PENDING', 'ACTIONED', 'OBJECTED'];
 const scoreRank = (b: FraudClusterRecord['scoreBand']): number => (b === 'HIGH' ? 0 : b === 'MEDIUM' ? 1 : 2);
 const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+const sameHash = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+
+interface MemoryIdempotent {
+  readonly requestHash: Uint8Array;
+  readonly result: unknown;
+}
 
 export class MemoryInvestigationStore implements InvestigationStore {
   readonly snapshots = new Map<string, FraudSnapshotRecord>();
   readonly runs = new Map<string, FraudRunRecord>();
   readonly clusters = new Map<string, FraudClusterRecord>();
   readonly clustersByRun = new Map<string, string[]>();
+  readonly clusterRuleVersions = new Map<string, string>();
   readonly cases = new Map<string, FraudCaseRecord>();
+  readonly idempotent = new Map<string, MemoryIdempotent>();
+  readonly auditsWrites: boolean;
+
+  constructor(private readonly auditAppend?: (r: CaseAuditRecord) => Promise<void>) {
+    this.auditsWrites = auditAppend !== undefined;
+  }
 
   #snapshotKey(eventId: string, version: number): string {
     return `${eventId}:${version}`;
   }
   #runKey(eventId: string, generation: number, attempt: number): string {
     return `${eventId}:${generation}:${attempt}`;
+  }
+  #idemKey(i: IdempotentWrite): string {
+    return `${i.accountRef}:${i.operation}:${i.key}`;
   }
 
   async putSnapshot(s: FraudSnapshotRecord): Promise<void> {
@@ -62,9 +89,9 @@ export class MemoryInvestigationStore implements InvestigationStore {
       .sort((a, b) => a.generation - b.generation || a.attempt - b.attempt)
       .map(clone);
   }
-  async putClusters(eventId: string, generation: number, clusters: readonly FraudClusterRecord[]): Promise<void> {
+  async putClusters(eventId: string, generation: number, clusters: readonly FraudClusterRecord[], ruleVersion: string): Promise<void> {
     const key = `${eventId}:${generation}`;
-    if ((this.clustersByRun.get(key) ?? []).length > 0) return; // 첫 결과가 이긴다
+    if (this.clustersByRun.has(key)) return; // 첫 결과가 이긴다(빈 결과 포함)
     const ids: string[] = [];
     for (const c of clusters) {
       if (this.clusters.has(c.clusterId)) continue;
@@ -72,6 +99,7 @@ export class MemoryInvestigationStore implements InvestigationStore {
       ids.push(c.clusterId);
     }
     this.clustersByRun.set(key, ids);
+    this.clusterRuleVersions.set(key, ruleVersion);
   }
   async listClusters(q: {
     eventId: string;
@@ -97,11 +125,34 @@ export class MemoryInvestigationStore implements InvestigationStore {
     const c = this.clusters.get(clusterId);
     return c ? clone(c) : null;
   }
-  async putCase(c: FraudCaseRecord): Promise<void> {
-    if ([...this.cases.values()].some((x) => x.clusterId === c.clusterId)) throw new Error('fraud_case 묶음 중복');
-    if (this.cases.has(c.caseId)) throw new Error('fraud_case 중복');
-    this.cases.set(c.caseId, clone(c));
+
+  async findIdempotent(i: IdempotentWrite): Promise<IdempotentLookup> {
+    const found = this.idempotent.get(this.#idemKey(i));
+    if (!found) return { kind: 'none' };
+    if (!sameHash(found.requestHash, i.requestHash)) return { kind: 'reused' };
+    return { kind: 'replay', result: clone(found.result) };
   }
+
+  #remember(i: IdempotentWrite, result: unknown): void {
+    this.idempotent.set(this.#idemKey(i), { requestHash: new Uint8Array(i.requestHash), result: clone(result) });
+  }
+
+  async putCase(c: FraudCaseRecord, o?: CaseWriteOptions): Promise<CaseWriteOutcome | undefined> {
+    if (o?.idem) {
+      const found = this.idempotent.get(this.#idemKey(o.idem));
+      if (found) {
+        if (!sameHash(found.requestHash, o.idem.requestHash)) throw problem('idempotency-key-reused', 422, '같은 멱등 키를 다른 요청에 썼습니다');
+        return { replayed: true, result: clone(found.result) };
+      }
+    }
+    if ([...this.cases.values()].some((x) => x.clusterId === c.clusterId)) throw new CaseAlreadyExistsError();
+    if (this.cases.has(c.caseId)) throw new CaseAlreadyExistsError();
+    if (o?.audit && this.auditAppend) await this.auditAppend(o.audit);
+    this.cases.set(c.caseId, clone(c));
+    if (o?.idem) this.#remember(o.idem, o.result);
+    return o?.idem ? { replayed: false } : undefined;
+  }
+
   async getCase(caseId: string): Promise<FraudCaseRecord | null> {
     const c = this.cases.get(caseId);
     return c ? clone(c) : null;
@@ -124,12 +175,21 @@ export class MemoryInvestigationStore implements InvestigationStore {
     const page = after.slice(0, q.limit);
     return { items: page.map(clone), nextCursor: after.length > q.limit ? (page.at(-1)?.caseId ?? null) : null };
   }
-  async updateCase(c: FraudCaseRecord, expectedVersion: number, events: readonly FraudCaseRecord['events'][number][]): Promise<boolean> {
+  async updateCase(c: FraudCaseRecord, expectedVersion: number, events: readonly FraudCaseRecord['events'][number][], o?: CaseWriteOptions): Promise<CaseUpdateOutcome> {
+    if (o?.idem) {
+      const found = this.idempotent.get(this.#idemKey(o.idem));
+      if (found) {
+        if (!sameHash(found.requestHash, o.idem.requestHash)) throw problem('idempotency-key-reused', 422, '같은 멱등 키를 다른 요청에 썼습니다');
+        return { ok: true, replayed: true, result: clone(found.result) };
+      }
+    }
     const current = this.cases.get(c.caseId);
-    if (!current || current.version !== expectedVersion) return false;
+    if (!current || current.version !== expectedVersion) return { ok: false };
+    if (o?.audit && this.auditAppend) await this.auditAppend(o.audit);
     const merged: FraudCaseRecord = { ...clone(c), events: [...current.events.map((e) => ({ ...e, detail: e.detail ? { ...e.detail } : null })), ...events.map((e) => ({ ...e, detail: e.detail ? { ...e.detail } : null }))] };
     this.cases.set(c.caseId, merged);
-    return true;
+    if (o?.idem) this.#remember(o.idem, o.result);
+    return { ok: true, replayed: false };
   }
   async markAppealSubmitted(caseId: string, accountId: string, nowMs: number): Promise<boolean> {
     const c = this.cases.get(caseId);

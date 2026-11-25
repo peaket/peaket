@@ -1,6 +1,9 @@
 // F-04-12 조사 저장소 Drizzle 판(ops DB, 마이그레이션 0035).
+// 사건 쓰기·감사 기록·멱등 기록은 같은 트랜잭션에 넣는다(IR-10·IR-11).
+import { timingSafeEqual } from 'node:crypto';
 import { and, asc, count, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
-import type { Database } from '@peaket/platform';
+import { IdempotencyStore, systemClock, type Database, type DbTransaction } from '@peaket/platform';
+import { appendAuditIn } from '../../../audit/index.js';
 import type {
   FraudCaseRecord,
   FraudCaseStatus,
@@ -12,7 +15,14 @@ import type {
   FraudRunTrigger,
   FraudSnapshotRecord,
 } from '../../domain/investigation.js';
-import type { InvestigationStore } from '../../domain/ports.js';
+import type {
+  CaseUpdateOutcome,
+  CaseWriteOptions,
+  CaseWriteOutcome,
+  IdempotentLookup,
+  IdempotentWrite,
+  InvestigationStore,
+} from '../../domain/ports.js';
 import { fraudCase, fraudCaseEvent, fraudCluster, fraudClusterMember, fraudClusterRun, fraudSnapshot } from './schema.js';
 
 const OPEN: readonly FraudCaseStatus[] = ['INVESTIGATING', 'APPEAL_PENDING', 'DECISION_PENDING', 'ACTIONED', 'OBJECTED'];
@@ -41,8 +51,26 @@ const memberOf = (r: MemberRow): FraudClusterMemberRecord => ({
   objectionDecisionReason: r.objectionDecisionReason,
 });
 
+/** result_ref는 응답 JSON이다. 옛 행이 ID만 담았으면 그 문자열을 그대로 돌려준다 */
+const parseStoredResult = (ref: string): unknown => {
+  try {
+    return JSON.parse(ref);
+  } catch {
+    return ref;
+  }
+};
+
+const sameHash = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+
+class CaseVersionConflict extends Error {}
+
 export class DrizzleInvestigationStore implements InvestigationStore {
-  constructor(private readonly db: Database) {}
+  readonly auditsWrites = true;
+  readonly #idem: IdempotencyStore;
+
+  constructor(private readonly db: Database) {
+    this.#idem = new IdempotencyStore({ clock: systemClock });
+  }
 
   async putSnapshot(s: FraudSnapshotRecord): Promise<void> {
     await this.db.db.insert(fraudSnapshot).values({
@@ -121,7 +149,7 @@ export class DrizzleInvestigationStore implements InvestigationStore {
       .orderBy(asc(fraudClusterRun.generation), asc(fraudClusterRun.attempt));
     return rows.map(runOf);
   }
-  async putClusters(eventId: string, generation: number, clusters: readonly FraudClusterRecord[]): Promise<void> {
+  async putClusters(eventId: string, generation: number, clusters: readonly FraudClusterRecord[], ruleVersion: string): Promise<void> {
     await this.db.transaction(async (tx) => {
       const seen = await tx.select({ id: fraudCluster.id }).from(fraudCluster).where(and(eq(fraudCluster.eventId, eventId), eq(fraudCluster.generation, generation))).limit(1);
       if (seen[0]) return;
@@ -130,7 +158,7 @@ export class DrizzleInvestigationStore implements InvestigationStore {
           id: c.clusterId,
           eventId: c.eventId,
           generation: c.generation,
-          ruleVersion: 'fraud-rules-v1',
+          ruleVersion,
           scoreBand: c.scoreBand,
           accountCount: c.accountCount,
           purchaseCount: c.purchaseCount,
@@ -179,13 +207,38 @@ export class DrizzleInvestigationStore implements InvestigationStore {
     const members = await this.db.db.select().from(fraudClusterMember).where(eq(fraudClusterMember.clusterId, clusterId)).orderBy(asc(fraudClusterMember.accountId));
     return clusterOf(r, members);
   }
-  async putCase(c: FraudCaseRecord): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      await tx.insert(fraudCase).values(caseValues(c));
-      if (c.members.length > 0) await tx.insert(fraudClusterMember).values(c.members.map((m) => memberValues(c.clusterId, m))).onConflictDoNothing();
-      if (c.events.length > 0) await tx.insert(fraudCaseEvent).values(c.events.map((e) => eventValues(c.caseId, e)));
-    });
+
+  async findIdempotent(i: IdempotentWrite): Promise<IdempotentLookup> {
+    const rows = (
+      await this.db.db.execute(sql`select request_hash, result_ref from idempotency_record
+        where account_ref = ${i.accountRef} and operation = ${i.operation} and idempotency_key = ${i.key}`)
+    ).rows as { request_hash: Buffer; result_ref: string | null }[];
+    const row = rows[0];
+    if (!row) return { kind: 'none' };
+    if (!sameHash(Buffer.from(row.request_hash), i.requestHash)) return { kind: 'reused' };
+    if (row.result_ref === null) return { kind: 'in_progress' };
+    return { kind: 'replay', result: parseStoredResult(row.result_ref) };
   }
+
+  async putCase(c: FraudCaseRecord, o?: CaseWriteOptions): Promise<CaseWriteOutcome | undefined> {
+    const idem = o?.idem;
+    const audit = o?.audit;
+    if (!idem) {
+      await this.db.transaction((tx) => this.#insertCase(tx, c, audit));
+      return undefined;
+    }
+    const resultRef = JSON.stringify(o?.result ?? c.caseId);
+    return this.db.transaction((tx) =>
+      this.#idem.run<CaseWriteOutcome>(tx, idem, {
+        execute: async () => {
+          await this.#insertCase(tx, c, audit);
+          return { resultRef, value: { replayed: false } };
+        },
+        replay: async (ref) => ({ replayed: true, result: parseStoredResult(ref) }),
+      }),
+    );
+  }
+
   async getCase(caseId: string): Promise<FraudCaseRecord | null> {
     const rows = await this.db.db.select().from(fraudCase).where(eq(fraudCase.id, caseId)).limit(1);
     const r = rows[0];
@@ -223,23 +276,29 @@ export class DrizzleInvestigationStore implements InvestigationStore {
     }
     return { items, nextCursor: rows.length > q.limit ? (page.at(-1)?.id ?? null) : null };
   }
-  async updateCase(c: FraudCaseRecord, expectedVersion: number, events: readonly FraudCaseRecord['events'][number][]): Promise<boolean> {
-    return this.db.transaction(async (tx) => {
-      const updated = await tx
-        .update(fraudCase)
-        .set({ ...caseValues(c), version: c.version })
-        .where(and(eq(fraudCase.id, c.caseId), eq(fraudCase.version, expectedVersion)))
-        .returning({ id: fraudCase.id });
-      if (updated.length === 0) return false;
-      for (const m of c.members) {
-        await tx.insert(fraudClusterMember).values(memberValues(c.clusterId, m)).onConflictDoUpdate({
-          target: [fraudClusterMember.clusterId, fraudClusterMember.accountId],
-          set: memberValues(c.clusterId, m),
-        });
-      }
-      if (events.length > 0) await tx.insert(fraudCaseEvent).values(events.map((e) => eventValues(c.caseId, e)));
-      return true;
-    });
+  async updateCase(c: FraudCaseRecord, expectedVersion: number, events: readonly FraudCaseRecord['events'][number][], o?: CaseWriteOptions): Promise<CaseUpdateOutcome> {
+    const idem = o?.idem;
+    const audit = o?.audit;
+    if (!idem) {
+      const ok = await this.db.transaction((tx) => this.#updateCaseIn(tx, c, expectedVersion, events, audit));
+      return { ok };
+    }
+    const resultRef = JSON.stringify(o?.result ?? {});
+    try {
+      return await this.db.transaction((tx) =>
+        this.#idem.run<CaseUpdateOutcome>(tx, idem, {
+          execute: async () => {
+            const ok = await this.#updateCaseIn(tx, c, expectedVersion, events, audit);
+            if (!ok) throw new CaseVersionConflict();
+            return { resultRef, value: { ok: true, replayed: false } };
+          },
+          replay: async (ref) => ({ ok: true, replayed: true, result: parseStoredResult(ref) }),
+        }),
+      );
+    } catch (e) {
+      if (e instanceof CaseVersionConflict) return { ok: false };
+      throw e;
+    }
   }
   async markAppealSubmitted(caseId: string, accountId: string, nowMs: number): Promise<boolean> {
     const c = await this.getCase(caseId);
@@ -275,6 +334,37 @@ export class DrizzleInvestigationStore implements InvestigationStore {
       .from(fraudCase)
       .where(and(isNull(fraudCase.closedAt), inArray(fraudCase.status, [...OPEN])));
     return rows.map((r) => r.eventId);
+  }
+
+  async #insertCase(tx: DbTransaction, c: FraudCaseRecord, audit?: CaseWriteOptions['audit']): Promise<void> {
+    await tx.insert(fraudCase).values(caseValues(c));
+    if (c.members.length > 0) await tx.insert(fraudClusterMember).values(c.members.map((m) => memberValues(c.clusterId, m))).onConflictDoNothing();
+    if (c.events.length > 0) await tx.insert(fraudCaseEvent).values(c.events.map((e) => eventValues(c.caseId, e)));
+    if (audit) await appendAuditIn(tx, audit);
+  }
+
+  async #updateCaseIn(
+    tx: DbTransaction,
+    c: FraudCaseRecord,
+    expectedVersion: number,
+    events: readonly FraudCaseRecord['events'][number][],
+    audit?: CaseWriteOptions['audit'],
+  ): Promise<boolean> {
+    const updated = await tx
+      .update(fraudCase)
+      .set({ ...caseValues(c), version: c.version })
+      .where(and(eq(fraudCase.id, c.caseId), eq(fraudCase.version, expectedVersion)))
+      .returning({ id: fraudCase.id });
+    if (updated.length === 0) return false;
+    for (const m of c.members) {
+      await tx.insert(fraudClusterMember).values(memberValues(c.clusterId, m)).onConflictDoUpdate({
+        target: [fraudClusterMember.clusterId, fraudClusterMember.accountId],
+        set: memberValues(c.clusterId, m),
+      });
+    }
+    if (events.length > 0) await tx.insert(fraudCaseEvent).values(events.map((e) => eventValues(c.caseId, e)));
+    if (audit) await appendAuditIn(tx, audit);
+    return true;
   }
 }
 
