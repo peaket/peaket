@@ -6,7 +6,7 @@
   "type": "module",
   "packageManager": "pnpm@12.16.0",
   "scripts": {
-    "test": "node --test \"seed-css/*.test.mjs\" \"lib/*.test.mjs\" \"seatmap/*.test.mjs\" \"budgets/*.test.mjs\" \"static/*.test.mjs\" \"reflow/*.test.mjs\"",
+    "test": "node --test \"seed-css/*.test.mjs\" \"lib/*.test.mjs\" \"seatmap/*.test.mjs\" \"budgets/*.test.mjs\" \"static/*.test.mjs\" \"reflow/*.test.mjs\" \"console-baseline/*.test.mjs\"",
     "seed-css:build": "node seed-css/build.mjs",
     "seed-css": "playwright test -c playwright.layers.config.mjs",
     "visual": "playwright test -c playwright.visual.config.mjs",
@@ -27,6 +27,7 @@
     "console-browser-check": "playwright test -c playwright.console-browser-check.config.mjs",
     "console-csp": "playwright test -c playwright.console-csp.config.mjs",
     "console-remotes": "playwright test -c playwright.console-remotes.config.mjs",
+    "console-baseline": "playwright test -c playwright.console-baseline.config.mjs",
     "scanner-enroll": "playwright test -c playwright.scanner-enroll.config.mjs",
     "scanner-scan": "playwright test -c playwright.scanner-scan.config.mjs"
   },
