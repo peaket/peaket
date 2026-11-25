@@ -13,11 +13,13 @@ import {
   autoRetriesLeftOf,
   cancelDeadlineAtMs,
   classifyRunFailure,
+  clustersFromForensics,
   decideAppeals,
   defaultAppealDueAt,
   lockExpiryOf,
   removeMembers,
   rerunDecision,
+  snapshotFromForensics,
   verifySnapshotDecision,
   type FraudCaseRecord,
   type FraudClusterMemberRecord,
@@ -316,5 +318,86 @@ describe('F-04-12 조사 도메인', () => {
     expect(problemOf(() => assertInvestigator([]))).toEqual({ type: 'investigator-required', status: 403 });
     expect(problemOf(() => assertInvestigator(['PSEUDONYM_HANDLER']))).toEqual({ type: 'investigator-required', status: 403 });
     expect(problemOf(() => assertInvestigator(['FRAUD_INVESTIGATOR', 'PSEUDONYM_HANDLER']))).toEqual({ type: 'investigator-required', status: 403 });
+  });
+
+  test('FX-T12 ㉗ F-04-11 기록 고정 결과를 저장 모양으로 옮긴다', () => {
+    const frozenAt = '2026-11-25T01:00:00.000Z';
+    const out = snapshotFromForensics({
+      eventId: id(0x200),
+      version: 2,
+      frozenAt,
+      invHash: hex('b'),
+      prevHash: hex('a'),
+      tableHashes: { inv_request: hex('1'), inv_step: hex('2'), inv_behavior: hex('3'), inv_link: hex('4') },
+      rowCounts: { inv_request: 1, inv_step: 2, inv_behavior: 3, inv_link: 4 },
+      rangeFrom: '2026-11-25T00:00:00.000Z',
+      late: true,
+    });
+    expect(out).toMatchObject({
+      eventId: id(0x200),
+      version: 2,
+      frozenAtMs: Date.parse(frozenAt),
+      invHash: hex('b'),
+      prevHash: hex('a'),
+      rangeFromMs: Date.parse('2026-11-25T00:00:00.000Z'),
+      late: true,
+      verifyStatus: null,
+      verifiedAtMs: null,
+    });
+    // 모르는 칸·빠진 칸·모양이 다른 해시는 거절한다
+    expect(() => snapshotFromForensics({ eventId: id(0x200) })).toThrow();
+    expect(() => snapshotFromForensics({ ...snapshotOf(), extra: 1 })).toThrow();
+    expect(() => snapshotFromForensics({ ...snapshotOf(), frozenAtMs: NOW })).toThrow();
+    expect(() => snapshotFromForensics({ ...snapshotOf(), invHash: 'abc' })).toThrow();
+  });
+
+  test('FX-T12 ㉘ F-04-11 후보 결과는 후보 묶음만 저장하고 지문·규칙 판을 보존한다', () => {
+    const result = clustersFromForensics(
+      {
+        eventId: id(0x200),
+        snapshotVersion: 1,
+        ruleVersion: 'fraud-rules-v1',
+        candidateCount: 1,
+        resultFingerprint: hex('d'),
+        clusters: [
+          {
+            accounts: ['b', 'a'],
+            accountCount: 2,
+            purchaseCount: 27,
+            limitPerPerson: 4,
+            scoreBand: 'HIGH',
+            sharedAttributes: ['PAYMENT_METHOD'],
+            signals: ['LINK_GRAPH', 'POST_MATCH'],
+            members: [
+              { accountId: 'b', signals: ['POST_MATCH'], ticketCount: 9 },
+              { accountId: 'a', signals: ['LINK_GRAPH'], ticketCount: 18 },
+            ],
+            candidate: true,
+          },
+          {
+            accounts: ['c'],
+            accountCount: 1,
+            purchaseCount: 1,
+            limitPerPerson: 4,
+            scoreBand: 'LOW',
+            sharedAttributes: ['CONTACT'],
+            signals: ['LINK_GRAPH'],
+            members: [{ accountId: 'c', signals: ['LINK_GRAPH'], ticketCount: 1 }],
+            candidate: false,
+          },
+        ],
+      },
+      { eventId: id(0x200), generation: 1, snapshotVersion: 1, createdAtMs: NOW },
+    );
+    expect(result.resultFingerprint).toBe(hex('d'));
+    expect(result.ruleVersion).toBe('fraud-rules-v1');
+    expect(result.clusters).toHaveLength(1);
+    const c = result.clusters[0]!;
+    expect(c).toMatchObject({ eventId: id(0x200), generation: 1, scoreBand: 'HIGH', purchaseCount: 27, limitPerPerson: 4, snapshotVersion: 1 });
+    expect(c.members.map((m: { accountId: string }) => m.accountId)).toEqual(['a', 'b']);
+    expect(c.members.find((m: { accountId: string }) => m.accountId === 'a')).toMatchObject({ ticketCount: 18, addedBy: 'SYSTEM', appealResult: 'NOT_REQUESTED' });
+    expect(c.clusterId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    // 모르는 칸·빠진 칸은 거절한다
+    expect(() => clustersFromForensics({ eventId: id(0x200) }, { eventId: id(0x200), generation: 1, snapshotVersion: 1, createdAtMs: NOW })).toThrow();
   });
 });
