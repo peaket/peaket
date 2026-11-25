@@ -37,7 +37,7 @@ const ALLOWED_BACKENDS = new Set(['identity-svc', 'core-svc', 'ticket-svc', 'pur
 /** 게이트웨이 다섯 + console·scanner 앱 호스트(포트는 게이트웨이별) */
 const HOST_KEYS = ['www', 'api', 'queue', 'queue-files', 'partner', 'partner-api', 'ops-api', 'console', 'scanner-api', 'scanner'];
 /** 대기실 정규식 셋(계획 §5 B5·DS-04) */
-const QUEUE_ROOM_PATHS = ['^/queue/[^/]+/?$', '^/(en|ja|zh)/queue/[^/]+/?$', '^/shop/[^/]+/queue$'];
+const QUEUE_ROOM_PATHS = ['^/queue/[^/]+/?$', '^/(en|ja|zh)/queue/[^/]+/?$', '^/events/[^/]+/?$', '^/(en|ja|zh)/events/[^/]+/?$', '^/shop/[^/]+/queue$'];
 
 const objects = () => demoGatewayObjects(readGatewayObjects(GATEWAY_DIR));
 const stringify = (o) => JSON.stringify(o);
@@ -176,7 +176,7 @@ test('DS-04 인증서 SAN에 열 호스트가 모두 들어간다', () => {
   for (const host of Object.values(DEMO_HOSTS)) assert.ok(san.includes(`DNS:${host}`), `SAN에 ${host}가 없다`);
 });
 
-test('DS-04 대기실 정규식은 세 개이고 /queue/{id}/verify를 잡지 않는다', () => {
+test('DS-04 대기실 정규식은 /queue·/events를 잡고 /{id}/verify를 잡지 않는다', () => {
   const defs = objects();
   const route = routesByName(defs, 'demo-queue-room');
   assert.ok(route, '대기실 HTTPRoute가 없다');
@@ -186,10 +186,10 @@ test('DS-04 대기실 정규식은 세 개이고 /queue/{id}/verify를 잡지 �
   assert.deepEqual(matches.map((p) => p.value), ['^/_q/.*', ...QUEUE_ROOM_PATHS], '대기실 경로 목록');
   for (const p of matches) assert.equal(p.type, 'RegularExpression', `대기실 경로 ${p.value}의 종류`);
   const regexes = QUEUE_ROOM_PATHS.map((p) => new RegExp(p));
-  for (const ok of ['/queue/abc', '/queue/abc/', '/en/queue/abc', '/ja/queue/abc/', '/zh/queue/abc', '/shop/event-1/queue']) {
+  for (const ok of ['/queue/abc', '/queue/abc/', '/en/queue/abc', '/ja/queue/abc/', '/zh/queue/abc', '/events/abc', '/events/abc/', '/en/events/abc', '/ja/events/abc/', '/zh/events/abc', '/shop/event-1/queue']) {
     assert.ok(regexes.some((r) => r.test(ok)), `대기실 경로 ${ok}를 잡지 않는다`);
   }
-  for (const bad of ['/queue/abc/verify', '/queue/abc/verify/', '/en/queue/abc/verify', '/shop/event-1/queue/extra']) {
+  for (const bad of ['/queue/abc/verify', '/queue/abc/verify/', '/en/queue/abc/verify', '/events/abc/verify', '/events/abc/verify/', '/en/events/abc/verify', '/shop/event-1/queue/extra']) {
     assert.ok(!regexes.some((r) => r.test(bad)), `대기실 정규식이 ${bad}까지 잡는다(추가 검증 화면이 대기실 셸로 간다)`);
   }
   // verify는 소비자 웹 라우트가 따로 받는다
@@ -198,6 +198,8 @@ test('DS-04 대기실 정규식은 세 개이고 /queue/{id}/verify를 잡지 �
   const verifyRegex = new RegExp(verify.spec.rules[0].matches[0].path.value);
   assert.ok(verifyRegex.test('/queue/abc/verify'), '/queue/{id}/verify를 잡는 라우트가 없다');
   assert.ok(verifyRegex.test('/en/queue/abc/verify'), '/en/queue/{id}/verify를 잡는 라우트가 없다');
+  assert.ok(verifyRegex.test('/events/abc/verify'), '/events/{id}/verify를 잡는 라우트가 없다');
+  assert.ok(verifyRegex.test('/en/events/abc/verify'), '/en/events/{id}/verify를 잡는 라우트가 없다');
 });
 
 test('DS-04 게이트웨이 프록시는 로컬 kind 값(ClusterIP·100m·추적 없음)을 쓴다', () => {

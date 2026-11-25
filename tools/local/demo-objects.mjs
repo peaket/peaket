@@ -566,11 +566,14 @@ export function demoGatewayObjects(objects, origins = demoOrigins()) {
       { type: 'RegularExpression', value: '^/_q/.*' },
       { type: 'RegularExpression', value: '^/queue/[^/]+/?$' },
       { type: 'RegularExpression', value: '^/(en|ja|zh)/queue/[^/]+/?$' },
+      // S1 화면은 /events/{id}로 연다. 이 경로가 없으면 게이트웨이의 not-found(/.*)로 떨어져 404가 난다
+      { type: 'RegularExpression', value: '^/events/[^/]+/?$' },
+      { type: 'RegularExpression', value: '^/(en|ja|zh)/events/[^/]+/?$' },
       { type: 'RegularExpression', value: '^/shop/[^/]+/queue$' },
     ]),
   );
   // 추가 검증(/queue/{id}/verify)은 소비자 웹 화면이다. 대기실 정규식에 들지 않게 따로 웹 앱 서버로 보낸다
-  out.push(appRoute('demo-queue-verify', 'gw-queue', 'queue', DEMO_HOSTS.queue, 'web', 3000, [{ type: 'RegularExpression', value: '^/(?:en|ja|zh)/queue/[^/]+/verify/?$|^/queue/[^/]+/verify/?$' }]));
+  out.push(appRoute('demo-queue-verify', 'gw-queue', 'queue', DEMO_HOSTS.queue, 'web', 3000, [{ type: 'RegularExpression', value: '^/(?:en|ja|zh)/(?:queue|events)/[^/]+/verify/?$|^/(?:queue|events)/[^/]+/verify/?$' }]));
   // 데모에서만 필요한 출처는 공용 deploy/gateways에 두지 않고 여기서 더한다(리뷰 RV-01). gw-fan 정책만 넓힌다
   return demoOriginSecurityPatch(out, origins);
 }
