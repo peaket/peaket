@@ -8,6 +8,7 @@
 // 정본 값: 30초는 나간 시각부터, SEV3 경보 settings-apply-unconfirmed(경보 사건 키 = 명령 ID), 경보 근원 ops-svc, Prometheus 실패는 UNKNOWN·경보 없음.
 import { describe, expect, test, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { fakeClock } from '@peaket/platform';
 import { MemoryOpsAlertStore, RecordOpsAlert, type OpsAlert, type OpsAlertStore } from '../src/modules/alerts/index.js';
 import { AuditCheckpointService, MemoryAuditChain, MemoryAuditCheckpointStore } from '../src/modules/audit/index.js';
@@ -21,6 +22,7 @@ import {
   MemoryCommandStore,
   applyCheckViewOf,
   type ApplyCheckRow,
+  type ApplyCheckStore,
   type CommandExecutionActor,
   type ProbeResult,
   type SettingsApplyProbe,
@@ -231,6 +233,95 @@ describe('C-T54 적용 확인 바퀴(서버 몫, 단위 층)', () => {
     expect(await check.runOnce(0)).toEqual({ checked: 0, opened: 0, resolved: 0 });
     expect(h.probe.asked).toHaveLength(0);
     expect((await check.runOnce(1)).checked).toBe(1);
+  });
+
+  test('IR-01 10분 30초를 넘긴 UNCONFIRMED 50행이 앞에 있어도 다음 바퀴에 새 행을 굶기지 않는다', async () => {
+    const h = await harness();
+    h.store.markOutboxSent(h.row.outboxId, SENT);
+    h.probe.answer = podsOf(h.row.version, false);
+    const at = SENT + 2 * CANON_ROUND;
+    h.setNow(at);
+    // 새 행의 다음 볼 시각을 정지 행들보다 뒤로 둬, 정지 행 50개가 먼저 고르이게 한다
+    await h.store.save({ ...h.row, nextCheckAtMs: at, updatedAtMs: at });
+    // 오래된 정지 행 50개: nextCheckAtMs가 이미 지났고, 지금 코드는 continue로 저장하지 않는다
+    for (let i = 0; i < 50; i++) {
+      await h.store.save({
+        ...h.row,
+        commandId: randomUUID(),
+        status: 'UNCONFIRMED',
+        sentAtMs: SENT - 700_000,
+        nextCheckAtMs: at - 1_000,
+        alertOpen: true,
+        writtenAtMs: SENT - 700_000,
+        updatedAtMs: at,
+      });
+    }
+    const check = new CheckSettingsApply({ store: h.store, probe: h.probe, clock: { now: () => at } });
+    await check.runOnce(50);
+    await check.runOnce(50);
+    // 정지 행이 같은 자리를 계속 차지하면 새 행은 CHECKING에 남고 probe도 안 불린다
+    expect(h.probe.asked.some((q) => q.messageKey === 'PLATFORM:LOG_LEVEL:purchase-svc')).toBe(true);
+    expect((await h.latest()).status).toBe('CONFIRMED');
+  });
+
+  test('IR-03 두 파드가 같은 바퀴를 동시에 돌려도 한 행은 한 번만 본다', async () => {
+    const h = await harness();
+    h.store.markOutboxSent(h.row.outboxId, SENT);
+    h.probe.answer = podsOf(h.row.version, true);
+    const at = SENT + WINDOW + CANON_ROUND;
+    h.setNow(at);
+    const clock = { now: () => at };
+    const a = new CheckSettingsApply({ store: h.store, probe: h.probe, clock });
+    const b = new CheckSettingsApply({ store: h.store, probe: h.probe, clock });
+    const [ra, rb] = await Promise.all([a.runOnce(1), b.runOnce(1)]);
+    expect(h.probe.asked).toHaveLength(1);
+    expect(ra.opened + rb.opened).toBe(1);
+  });
+
+  test('IR-06 Outbox 행이 파티션 지우기로 없어졌으면 없음=나감으로 보고 probe한다', async () => {
+    const h = await harness();
+    h.store.markOutboxSent(h.row.outboxId, SENT);
+    h.probe.answer = podsOf(h.row.version, false);
+    const at = SENT + CANON_ROUND;
+    h.setNow(at);
+    const store: ApplyCheckStore = {
+      due: (nowMs, limit) => h.store.due(nowMs, limit),
+      save: (row) => h.store.save(row),
+      latestOf: (commandId) => h.store.latestOf(commandId),
+      outboxOf: async () => ({ exists: false }),
+    };
+    const check = new CheckSettingsApply({ store, probe: h.probe, clock: { now: () => at } });
+    await check.runOnce(1);
+    expect(h.probe.asked).toHaveLength(1);
+    expect((await h.latest()).status).toBe('CONFIRMED');
+  });
+
+  test('IR-08 경보 저장이 실패하면 alertOpen을 열지 않고 다음 바퀴에 다시 연다', async () => {
+    const h = await harness();
+    h.store.markOutboxSent(h.row.outboxId, SENT);
+    h.probe.answer = podsOf(h.row.version, true);
+    let now = SENT + WINDOW + CANON_ROUND;
+    let fail = true;
+    let handled = 0;
+    const clock = { now: () => now };
+    const alerts: Pick<RecordOpsAlert, 'handle' | 'resolve'> = {
+      async handle() {
+        handled += 1;
+        if (fail) throw new Error('alert-store-down');
+      },
+      async resolve() {},
+    };
+    const check = new CheckSettingsApply({ store: h.store, probe: h.probe, alerts, clock });
+    await check.runOnce(1).catch(() => undefined);
+    expect(handled).toBe(1);
+    expect((await h.latest()).alertOpen).toBe(false);
+
+    fail = false;
+    now += 60 * SEC;
+    const run = await check.runOnce(1);
+    expect(handled).toBe(2);
+    expect(run.opened).toBe(1);
+    expect((await h.latest()).alertOpen).toBe(true);
   });
 });
 

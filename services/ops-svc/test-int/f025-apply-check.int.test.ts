@@ -41,7 +41,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { migrateOps } from '../scripts/migrate.mjs';
 import { AppModule } from '../src/app.module.js';
 import { DrizzleOpsAlertStore, RecordOpsAlert } from '../src/modules/alerts/index.js';
-import { CheckSettingsApply, CommandMaintenanceJob, DrizzleApplyChecks, MaintainCommands, PrometheusSettingsProbe } from '../src/modules/commands/index.js';
+import { CheckSettingsApply, CommandMaintenanceJob, DrizzleApplyChecks, DrizzleCommandStore, MaintainCommands, PrometheusSettingsProbe, PublishOnsaleLogSampling, type OnsaleScheduleSource } from '../src/modules/commands/index.js';
 import { startOpsRelay } from '../src/relay-app.js';
 import { FakeIdentity, quiet } from '../test/support.js';
 import { collectTopics, type KafkaContainer, startKafka, type TopicCollector, type TopicRecord } from './kafka.js';
@@ -361,6 +361,19 @@ async function recordOf(commandId: string, ms = 30_000): Promise<TopicRecord> {
 }
 
 describe('C-T54 설정형 명령의 적용 확인(실제 PostgreSQL·Kafka·릴레이, 가짜 Prometheus)', () => {
+  test('IR-02 DB 조립에서 PublishOnsaleLogSampling.runOnce가 LOG_SAMPLING Outbox를 낸다', async () => {
+    const store = new DrizzleCommandStore(appDb);
+    const eventId = randomUUID();
+    const source: OnsaleScheduleSource = { opensBetween: async () => [{ eventId, opensAtMs: clock.now() + 30 * 60_000, scale: 'LARGE' }] };
+    const job = new PublishOnsaleLogSampling({ schedule: source, publisher: store, clock });
+    await expect(job.runOnce()).resolves.toMatchObject({ status: 'PUBLISHED' });
+    const { rows } = await admin.query<{ n: number }>(
+      "select count(*)::int as n from outbox where msg_key = 'PLATFORM:LOG_SAMPLING:*' and convert_from(payload, 'UTF8') like $1",
+      [`%${eventId}%`],
+    );
+    expect(rows[0]!.n).toBe(1);
+  });
+
   test('C-T54 ① 명령 8을 내고 받는 서비스 파드 하나가 그 판을 내지 않으면 나간 뒤 30초 정각에 UNCONFIRMED·SEV3 하나이고 unackedTargets에 그 파드와 판(없으면 -)이 있다', async () => {
     const podA = new ReceiverPod('purchase-svc', 'purchase-svc-7d9f-a');
     const podB = new ReceiverPod('purchase-svc', 'purchase-svc-7d9f-b');
