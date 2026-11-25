@@ -21,7 +21,7 @@ export {
   type WithdrawalParticipantAnswer,
   type WithdrawalSignals,
 } from './domain/withdrawal.js';
-export { doneWithdrawalParticipant, GrpcWithdrawalParticipant, toUnusedTicketsQuote, toWithdrawalAnswer, unavailableWithdrawalParticipant, withdrawalParticipantsFromEnv } from './adapters/grpc-withdrawal-participants.js';
+export { doneWithdrawalParticipant, GrpcTicketWithdrawalParticipant, GrpcWithdrawalParticipant, toTicketWithdrawalAnswer, toUnusedTicketsQuote, toWithdrawalAnswer, unavailableTicketWithdrawalParticipant, unavailableWithdrawalParticipant, withdrawalParticipantsFromEnv } from './adapters/grpc-withdrawal-participants.js';
 export { DrizzleSessionStore, writeContactRef } from './adapters/db/drizzle-session-store.js';
 export { CreateSession } from './application/create-session.js';
 export { GetLinkProposal } from './application/get-link-proposal.js';

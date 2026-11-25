@@ -19,6 +19,7 @@ import { FanNotificationWorker } from './application/fan-notification-worker.js'
 import { FanNotifyController } from './inbound/fan-notify.controller.js';
 import { InternalNotifyIdentityController } from './inbound/internal-notify-identity.controller.js';
 import { InternalNotifyTicketController } from './inbound/internal-notify-ticket.controller.js';
+import { InternalNotifyTransferController } from './inbound/internal-notify-transfer.controller.js';
 import { MemoryFanNotifyStore } from './adapters/memory-fan-notify-store.js';
 import { DrizzleFanNotifyStore } from './adapters/db/drizzle-fan-notify-store.js';
 import { MemoryNotificationEventDirectory } from './adapters/memory-event-directory.js';
@@ -145,7 +146,7 @@ export class NotifyModule {
       },
       ...fan.providers,
     ];
-    const controllers = [PartnerWebhookController, InternalWebhookEventController, InternalNotifyController, FanNotifyController, InternalNotifyIdentityController, InternalNotifyTicketController];
+    const controllers = [PartnerWebhookController, InternalWebhookEventController, InternalNotifyController, FanNotifyController, InternalNotifyIdentityController, InternalNotifyTicketController, InternalNotifyTransferController];
     if (o.storage === 'database') {
       return {
         module: NotifyModule,

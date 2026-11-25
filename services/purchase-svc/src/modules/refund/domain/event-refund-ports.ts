@@ -161,6 +161,11 @@ export interface EventRefundFanNotifier {
   failed(request: EventCancellationRequest, item: EventRefundItem, target: EventRefundTarget | undefined, nowMs: number): EventRefundOutboxMessage;
 }
 
+/** ticket-svc TicketTransferService.WithdrawTransfersForEvent(F-05-11, R-T25 ③). 실패·시간 초과는 던진다 */
+export interface EventTransferWithdrawals {
+  withdrawForEvent(q: { readonly eventId: string; readonly nowMs: number }): Promise<{ readonly withdrawn: readonly string[] }>;
+}
+
 export interface EventRefundServiceDeps {
   readonly store: EventRefundStore;
   readonly targets: EventRefundTargets;
@@ -192,6 +197,11 @@ export interface EventRefundServiceDeps {
   readonly holds?: EventRefundHolds;
   /** 확정 때 남는 공제 차액 대상(입장 시작 뒤 공제하고 결제사로 보낸 사용자 취소). 없으면 찾지 않는다 */
   readonly gaps?: DeductionGapCancellations;
+  /**
+   * F-05-11 연기(POSTPONE) 확정 시작 때 ticket-svc WithdrawTransfersForEvent를 한 번 부른다.
+   * 실패하면 EventRefundError('UNAVAILABLE')로 끝나 아무것도 쓰지 않는다. 없으면 부르지 않는다(옛 조립·단위 시험)
+   */
+  readonly transfers?: EventTransferWithdrawals;
   /** 남는 차액의 CS 처리함 건(REFUND_FAILED, category DEDUCTION_GAP) */
   readonly gapNotice?: DeductionGapNotice;
   /** 보충 2: 차액 대상의 입장 시작 시각은 대상 표가 아니라 회차 판매 설정(entryOpensAtMs)에서 읽는다(대상 0이어도 찾는다). 없으면 차액을 찾지 않는다 */

@@ -8,7 +8,7 @@
 // PEAKET_ENV가 없거나 빈 글이면 운영으로 본다(플랫폼 설정과 같은 닫힌 쪽 기본값, identity §8 '참여자 호출', BAT-010 리뷰 RV-01).
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
-import { purchaseV1Account } from '@peaket/contracts/proto';
+import { purchaseV1Account, ticketV1Ticket } from '@peaket/contracts/proto';
 import { type CircuitBreaker, createGrpcClient, type GrpcLbProfile } from '@peaket/platform';
 import {
   WITHDRAWAL_RETRY_DEADLINE_MS,
@@ -26,10 +26,13 @@ type Breaker = Pick<CircuitBreaker, 'run'>;
 
 /** 주소 환경 값(host:port). 병합 확인과 같은 purchase-svc 주소다 */
 export const PURCHASE_GRPC_URL_ENV = 'PEAKET_PURCHASE_GRPC_URL';
+/** ticket-svc 참여자 주소(F-05-11) */
+export const TICKET_GRPC_URL_ENV = 'PEAKET_TICKET_GRPC_URL';
 /** purchase-svc에 싣는 호출자 머리(내부 gRPC, account.proto '부르는 쪽: identity-svc만') */
 export const WITHDRAWAL_CALLER = 'identity-svc';
 /** 참여자 이름(지표 participant·로그) */
 export const PURCHASE_PARTICIPANT = 'purchase';
+export const TICKET_PARTICIPANT = 'ticket-svc';
 
 const STATES: Readonly<Record<string, 'DONE' | 'PENDING'>> = {
   WITHDRAWAL_PARTICIPANT_STATE_DONE: 'DONE',
@@ -162,6 +165,73 @@ export const unavailableWithdrawalParticipant: WithdrawalParticipant = {
   },
 };
 
+const TICKET_STATES: Readonly<Record<string, 'DONE' | 'PENDING'>> = {
+  WITHDRAWAL_PARTICIPANT_STATE_DONE: 'DONE',
+  WITHDRAWAL_PARTICIPANT_STATE_PENDING: 'PENDING',
+};
+const TICKET_REASONS: Readonly<Record<string, string>> = {
+  WITHDRAWAL_PENDING_REASON_TICKET_TRANSFER_PENDING: 'TICKET_TRANSFER_PENDING',
+};
+
+/** ticket-svc 답 → 참여자 답. 모르는 state·이유는 DONE으로 접지 않는다 */
+export function toTicketWithdrawalAnswer(r: Record<string, unknown>): WithdrawalParticipantAnswer {
+  const state = TICKET_STATES[String(r.state ?? '')];
+  if (!state) throw new WithdrawalParticipantUnavailable(TICKET_PARTICIPANT, new Error(`모르는 state ${String(r.state)}`));
+  const reasons: string[] = [];
+  for (const raw of Array.isArray(r.reasons) ? (r.reasons as unknown[]) : []) {
+    const reason = TICKET_REASONS[String(raw)];
+    if (!reason) throw new WithdrawalParticipantUnavailable(TICKET_PARTICIPANT, new Error(`모르는 이유 ${String(raw)}`));
+    if (!reasons.includes(reason)) reasons.push(reason);
+  }
+  if (state === 'DONE') return reasons.length > 0 ? { state: 'PENDING', reasons } : { state: 'DONE' };
+  return { state: 'PENDING', reasons };
+}
+
+export class GrpcTicketWithdrawalParticipant implements WithdrawalParticipant {
+  readonly name = TICKET_PARTICIPANT;
+  readonly #client: grpc.Client & { ProcessAccountWithdrawal: Unary };
+
+  constructor(private readonly o: { address: string; profile?: GrpcLbProfile; breaker?: Breaker }) {
+    const def = protoLoader.fromJSON(ticketV1Ticket as Parameters<typeof protoLoader.fromJSON>[0], PROTO_LOAD_OPTIONS);
+    const pkg = (grpc.loadPackageDefinition(def) as unknown as { peaket: { ticket: { v1: { WithdrawalParticipantService: grpc.ServiceClientConstructor } } } }).peaket.ticket.v1;
+    const at = o.address.lastIndexOf(':');
+    const port = Number(o.address.slice(at + 1));
+    if (at <= 0 || !Number.isInteger(port) || port <= 0 || port > 65_535) throw new Error(`${TICKET_GRPC_URL_ENV}는 host:port여야 한다: ${o.address}`);
+    this.#client = createGrpcClient(pkg.WithdrawalParticipantService, {
+      host: o.address.slice(0, at),
+      port,
+      profile: o.profile ?? 'service',
+      dependency: 'ticket-svc',
+      timeoutCapMs: WITHDRAWAL_RETRY_DEADLINE_MS,
+      caller: WITHDRAWAL_CALLER,
+    }) as unknown as grpc.Client & { ProcessAccountWithdrawal: Unary };
+  }
+
+  async process(accountId: string, o: { deadlineMs: number }): Promise<WithdrawalParticipantAnswer> {
+    const ms = Math.max(1, Math.floor(Number.isFinite(o.deadlineMs) ? o.deadlineMs : WITHDRAWAL_RETRY_DEADLINE_MS));
+    const call = () =>
+      new Promise<Record<string, unknown>>((resolve, reject) => {
+        this.#client.ProcessAccountWithdrawal({ account_id: accountId, deadline_at_ms: Date.now() + ms }, new grpc.Metadata(), { deadline: new Date(Date.now() + ms) }, (e, v) => (e ? reject(e) : resolve(v ?? {})));
+      });
+    try {
+      return toTicketWithdrawalAnswer(await (this.o.breaker ? this.o.breaker.run(call) : call()));
+    } catch (e) {
+      throw e instanceof WithdrawalParticipantUnavailable ? e : new WithdrawalParticipantUnavailable(this.name, e);
+    }
+  }
+
+  close(): void {
+    this.#client.close();
+  }
+}
+
+export const unavailableTicketWithdrawalParticipant: WithdrawalParticipant = {
+  name: TICKET_PARTICIPANT,
+  process: async () => {
+    throw new WithdrawalParticipantUnavailable(TICKET_PARTICIPANT, new Error('주소가 설정에 없다'));
+  },
+};
+
 /**
  * 환경값으로 참여자 목록을 만든다. warnings: 대역을 쓴 참여자(시작 로그에 남긴다).
  * breakerOf: 의존성 이름마다 차단기를 준다(main이 병합 확인과 같은 purchase-svc 차단기를 준다). 대역에는 붙이지 않는다
@@ -169,16 +239,39 @@ export const unavailableWithdrawalParticipant: WithdrawalParticipant = {
 export function withdrawalParticipantsFromEnv(
   env: Record<string, string | undefined>,
   profile: GrpcLbProfile = 'service',
-  breakerOf?: (dependency: 'purchase-svc') => Breaker,
-): { participants: WithdrawalParticipant[]; warnings: string[]; clients: GrpcWithdrawalParticipant[] } {
+  breakerOf?: (dependency: 'purchase-svc' | 'ticket-svc') => Breaker,
+): { participants: WithdrawalParticipant[]; warnings: string[]; clients: Array<{ close(): void }> } {
   // 값이 없거나 빈 글이면 운영이다: 환경 값과 주소가 함께 빠진 배포가 참여자를 건너뛰고 탈퇴를 끝내지 않게(열린 실패를 막는다, RV-01)
   const local = env.PEAKET_ENV === 'local' || env.PEAKET_ENV === 'ci';
-  const addr = env[PURCHASE_GRPC_URL_ENV];
-  if (addr) {
+  const participants: WithdrawalParticipant[] = [];
+  const clients: Array<{ close(): void }> = [];
+  const warnings: string[] = [];
+  const purchaseAddr = env[PURCHASE_GRPC_URL_ENV];
+  if (purchaseAddr) {
     const breaker = breakerOf?.('purchase-svc');
-    const client = new GrpcWithdrawalParticipant({ address: addr, profile, ...(breaker ? { breaker } : {}) });
-    return { participants: [client], warnings: [], clients: [client] };
+    const client = new GrpcWithdrawalParticipant({ address: purchaseAddr, profile, ...(breaker ? { breaker } : {}) });
+    participants.push(client);
+    clients.push(client);
+  } else {
+    warnings.push(`${PURCHASE_GRPC_URL_ENV}이 없어 purchase의 탈퇴 참여자를 ${local ? '늘 DONE인 대역으로' : '늘 답하지 않는 것으로(탈퇴가 늘 202)'} 둔다`);
+    participants.push(local ? doneWithdrawalParticipant : unavailableWithdrawalParticipant);
   }
-  const warnings = [`${PURCHASE_GRPC_URL_ENV}이 없어 purchase의 탈퇴 참여자를 ${local ? '늘 DONE인 대역으로' : '늘 답하지 않는 것으로(탈퇴가 늘 202)'} 둔다`];
-  return { participants: [local ? doneWithdrawalParticipant : unavailableWithdrawalParticipant], warnings, clients: [] };
+  // F-05-11 ticket-svc 참여자: local·ci에서 주소가 없으면 그 참여자를 빼고 경고만 남긴다.
+  // 그 밖의 환경은 '늘 답하지 않는' 참여자로 두어 받은 티켓이 남은 채 탈퇴가 끝나지 않게 한다(identity §8).
+  // purchase 주소조차 없는 옛 조립은 이 기능 전과 같은 한 참여자·한 경고를 유지한다
+  const ticketAddr = env[TICKET_GRPC_URL_ENV];
+  if (ticketAddr) {
+    const breaker = breakerOf?.('ticket-svc');
+    const client = new GrpcTicketWithdrawalParticipant({ address: ticketAddr, profile, ...(breaker ? { breaker } : {}) });
+    participants.push(client);
+    clients.push(client);
+  } else if (purchaseAddr) {
+    if (local) {
+      warnings.push(`${TICKET_GRPC_URL_ENV}이 없어 ticket-svc 탈퇴 참여자를 뺀다(로컬·CI)`);
+    } else {
+      warnings.push(`${TICKET_GRPC_URL_ENV}이 없어 ticket-svc 탈퇴 참여자를 늘 답하지 않는 것으로 둔다(탈퇴가 늘 202)`);
+      participants.push(unavailableTicketWithdrawalParticipant);
+    }
+  }
+  return { participants, warnings, clients };
 }

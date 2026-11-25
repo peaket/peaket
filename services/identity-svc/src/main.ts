@@ -348,7 +348,14 @@ const grpc = await startGrpcServer({
     // 알림 받는 사람 묶음(core-svc 팬 알림 발송 워커만, notify §2.1 E6, BAT-455 N-T24)
     {
       definition: identityPackage().RecipientQueryService.service,
-      handlers: recipientQueryHandlers({ recipients: service.app.get(GetRecipients) }, (method, err) => service.logger.error({ err, method }, 'RecipientQueryService 처리 실패')),
+      handlers: recipientQueryHandlers(
+        {
+          recipients: service.app.get(GetRecipients),
+          resolvePhone: (digits) => memberCodes.resolvePhone(digits),
+          resolveNicknames: (ids) => memberCodes.resolveNicknames(ids),
+        },
+        (method, err) => service.logger.error({ err, method }, 'RecipientQueryService 처리 실패'),
+      ),
     },
     // 회원 코드 일괄 변환(core-svc 판매 자격 명단·ticket-svc 양도 받는 사람 찾기, GAT-050, ADR-0261 결정 6)
     {

@@ -40,7 +40,7 @@ const BANNERS: Partial<Record<Scr041State, OfferView['banner']>> = {
   처리됨: {
     tone: 'danger',
     title: '이미 처리된 요청입니다',
-    body: '이미 받거나 거절한 요청이라 다시 처리할 수 없습니다. 받은 티켓은 마이 티켓에서 볼 수 있습니다.',
+    body: '이미 받거나 거절한 요청이라 다시 처리할 수 없습니다. 받은 티켓은 마이 티켓에서 볼 수 있습니다',
   },
   '입장 시작': {
     tone: 'danger',

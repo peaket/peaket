@@ -274,6 +274,13 @@
       "when": 1795338000000,
       "tag": "0038_scanner_session_device_name",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1795683600000,
+      "tag": "0040_recipient_phone_index",
+      "breakpoints": true
     }
   ]
 }

@@ -43,6 +43,9 @@ const withoutKey = (t: TicketRecord): TicketRecord => {
 };
 const copy = (t: TicketRecord): TicketRecord => ({ ...t });
 
+/** 시험·로컬 조립에서 기기 키 저장소가 같은 프로세스의 표 보유자를 볼 수 있게 마지막 표 상태를 모은다(운영은 DB가 정본) */
+export const memoryTicketRegistry = new Map<string, TicketRecord>();
+
 export class MemoryTicketStore implements TicketStore {
   readonly issues = new Map<string, IssueRecord>();
   readonly tickets = new Map<string, TicketRecord>();
@@ -91,6 +94,7 @@ export class MemoryTicketStore implements TicketStore {
     const saved = candidates.map((c) => copy(lock ? { ...c, fraudLockCaseId: lock.caseId, fraudLockVersion: lock.version } : c));
     this.issues.set(key, { fingerprint: input.fingerprint, tickets: saved });
     for (const t of saved) this.tickets.set(t.ticketId, t);
+    for (const t of saved) memoryTicketRegistry.set(t.ticketId, t);
     return { tickets: saved, replayed: false };
   }
 
@@ -168,6 +172,7 @@ export class MemoryTicketStore implements TicketStore {
   /** 티켓 행과 발권 기록의 사본을 함께 바꾼다 */
   #put(next: TicketRecord): void {
     this.tickets.set(next.ticketId, next);
+    memoryTicketRegistry.set(next.ticketId, next);
     const issue = this.issues.get(issueKey(next.orderId, next.issueGeneration));
     if (issue) {
       this.issues.set(issueKey(next.orderId, next.issueGeneration), { ...issue, tickets: issue.tickets.map((x) => (x.ticketId === next.ticketId ? next : x)) });

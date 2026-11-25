@@ -989,6 +989,109 @@ export const ticketV1Ticket: Record<string, unknown> = {
                       "id": 1
                     }
                   }
+                },
+                "TicketTransferService": {
+                  "methods": {
+                    "WithdrawTransfersForEvent": {
+                      "requestType": "WithdrawTransfersForEventRequest",
+                      "responseType": "WithdrawTransfersForEventResponse"
+                    }
+                  }
+                },
+                "WithdrawTransfersForEventRequest": {
+                  "fields": {
+                    "event_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "reason": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "now_ms": {
+                      "type": "int64",
+                      "id": 3
+                    }
+                  }
+                },
+                "WithdrawTransfersForEventResponse": {
+                  "fields": {
+                    "withdrawn": {
+                      "rule": "repeated",
+                      "type": "string",
+                      "id": 1
+                    }
+                  }
+                },
+                "WithdrawalParticipantService": {
+                  "methods": {
+                    "ProcessAccountWithdrawal": {
+                      "requestType": "ProcessAccountWithdrawalRequest",
+                      "responseType": "ProcessAccountWithdrawalResponse"
+                    }
+                  }
+                },
+                "ProcessAccountWithdrawalRequest": {
+                  "fields": {
+                    "account_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "deadline_at_ms": {
+                      "type": "int64",
+                      "id": 2
+                    }
+                  }
+                },
+                "WithdrawalParticipantState": {
+                  "values": {
+                    "WITHDRAWAL_PARTICIPANT_STATE_UNSPECIFIED": 0,
+                    "WITHDRAWAL_PARTICIPANT_STATE_DONE": 1,
+                    "WITHDRAWAL_PARTICIPANT_STATE_PENDING": 2
+                  }
+                },
+                "WithdrawalPendingReason": {
+                  "values": {
+                    "WITHDRAWAL_PENDING_REASON_UNSPECIFIED": 0,
+                    "WITHDRAWAL_PENDING_REASON_TICKET_TRANSFER_PENDING": 1
+                  }
+                },
+                "ProcessAccountWithdrawalResponse": {
+                  "fields": {
+                    "state": {
+                      "type": "WithdrawalParticipantState",
+                      "id": 1
+                    },
+                    "returned_tickets": {
+                      "type": "int32",
+                      "id": 2
+                    },
+                    "withdrawn_offers": {
+                      "type": "int32",
+                      "id": 3
+                    },
+                    "rejected_offers": {
+                      "type": "int32",
+                      "id": 4
+                    },
+                    "pending_received_tickets": {
+                      "type": "int32",
+                      "id": 5
+                    },
+                    "pending_sent_offers": {
+                      "type": "int32",
+                      "id": 6
+                    },
+                    "pending_received_offers": {
+                      "type": "int32",
+                      "id": 7
+                    },
+                    "reasons": {
+                      "rule": "repeated",
+                      "type": "WithdrawalPendingReason",
+                      "id": 8
+                    }
+                  }
                 }
               }
             }

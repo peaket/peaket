@@ -14,6 +14,10 @@ import { DrizzleTransferStore } from './modules/ticket/adapters/db/drizzle-trans
 import { GrpcMemberCodeDirectory } from './modules/ticket/adapters/identity-member-codes.js';
 import { JwksFanReauthGate } from './modules/ticket/adapters/jwks-fan-reauth-gate.js';
 import { Transfers, type TransferReauthGate } from './modules/ticket/application/transfers.js';
+import { TransferWithdrawal } from './modules/ticket/application/account-withdrawal.js';
+import { TRANSFER_NOTICE_EVERY_MS, TransferNoticeSender } from './modules/ticket/application/transfer-notices.js';
+import { HttpTransferNoticeSink } from './modules/ticket/adapters/http-transfer-notice-sink.js';
+import { transferEventWithdrawalHandlers, transferWithdrawalHandlers } from './modules/ticket/inbound/transfer-withdrawal.grpc.js';
 import { DeviceKeys, type DeviceKeysDeps } from './modules/ticket/application/device-keys.js';
 import { DEVICE_KEY_NOTICE_EVERY_MS, DeviceKeyNoticeSender } from './modules/ticket/application/device-key-notices.js';
 import { HttpDeviceKeyNoticeSink } from './modules/ticket/adapters/http-key-notice-sink.js';
@@ -116,6 +120,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let freshnessTimer: ReturnType<typeof setInterval> | undefined;
   let expireTimer: ReturnType<typeof setInterval> | undefined;
   let noticeTimer: ReturnType<typeof setInterval> | undefined;
+  let transferNoticeTimer: ReturnType<typeof setInterval> | undefined;
   let entryCloseTimer: ReturnType<typeof setInterval> | undefined;
   let controlSync: { close(): Promise<void> } | undefined;
   // 스캐너 가드 거절 이유 지표(O-T37 ⑨). 서비스 지표 묶음은 createService 뒤에 생기므로 그때 잇는다
@@ -125,14 +130,14 @@ export async function start(o: StartOptions): Promise<StartedService> {
     const shiftStore = new DrizzleScannerShiftStore(database);
     const entryCloseStore = new DrizzleEntryCloseStore(database);
     const deviceKeyStore = new DrizzleDeviceKeyStore({ database, changes: gateStore });
-    const store = new DrizzleTicketStore({ database, changes: gateStore, deviceKeys: deviceKeyStore });
+    const store = new DrizzleTicketStore({ database, changes: gateStore, deviceKeys: deviceKeyStore, clock: systemClock });
     const ticket = new TicketService({ store, clock: systemClock });
     const scannerStore = new DrizzleScannerDeviceStore(database);
     const scannerCommands = new DrizzleScannerDeviceCommandStore(database);
     redis = config.redisUrl ? await createHotRedis({ url: config.redisUrl }) : undefined;
     // 양도·돌려주기(GAT-050·055): 행 잠금 저장소, 재인증 확인기, 회원 코드 찾기.
     // 팬 공개키 묶음 주소가 없으면 local·ci만 닫힌 대역(늘 403)이고, 그 밖 환경은 설정이 시작을 막는다
-    const transferStore = new DrizzleTransferStore({ database, deviceKeys: deviceKeyStore });
+    const transferStore = new DrizzleTransferStore({ database, deviceKeys: deviceKeyStore, clock: systemClock });
     const jti = reauthJtiStoreFromEnv(env, redis);
     const reauth: TransferReauthGate = config.identityFanJwksUrl
       ? new JwksFanReauthGate({ jwksUrl: config.identityFanJwksUrl, issuer: config.identityIssuer ?? 'https://identity.peaket.example', jti, clock: systemClock })
@@ -165,8 +170,27 @@ export async function start(o: StartOptions): Promise<StartedService> {
           if (!memberCodes) throw new Error('PEAKET_IDENTITY_GRPC_URL이 없어 회원 코드를 찾지 못한다');
           return memberCodes.resolveMemberCode(code);
         },
+        resolvePhone: async (digits: string) => {
+          if (!memberCodes) throw new Error('PEAKET_IDENTITY_GRPC_URL이 없어 휴대폰 번호를 찾지 못한다');
+          return memberCodes.resolvePhone!(digits);
+        },
+        resolveNicknames: async (ids: readonly string[]) => {
+          if (!memberCodes) throw new Error('PEAKET_IDENTITY_GRPC_URL이 없어 닉네임을 찾지 못한다');
+          return memberCodes.resolveNicknames!(ids);
+        },
       },
     });
+    const transferWithdrawal = new TransferWithdrawal({ transfers, store: transferStore, clock: systemClock });
+    const transferNotices = config.coreHttpUrl
+      ? new TransferNoticeSender({
+          store: transferStore,
+          sink: new HttpTransferNoticeSink(
+            createExternalHttpClient({ provider: 'core-svc', baseUrl: config.coreHttpUrl, timeoutCapMs: DEVICE_KEY_NOTICE_TIMEOUT_MS, clock: systemClock }),
+            config.internalToken,
+          ),
+          clock: systemClock,
+        })
+      : undefined;
     const codes = redis ? new RedisEnrollmentCodeStore(redis) : new MemoryEnrollmentCodeStore(systemClock);
     const replay = redis ? new RedisDpopReplayStore(redis) : new MemoryDpopReplayStore(systemClock);
     const limiter = redis ? new RedisEnrollmentAttemptLimiter(redis) : new MemoryEnrollmentAttemptLimiter(() => systemClock.now());
@@ -253,6 +277,22 @@ export async function start(o: StartOptions): Promise<StartedService> {
     expireTimer = setInterval(expire, 60_000);
     expireTimer.unref?.();
     expire();
+    // 양도 알림 보내기 반복(docs/features/notify.md §4.8): 5초 [가정]마다 transfer_notice의 보낼 때가 된 행을 core-svc로 보낸다
+    if (transferNotices) {
+      const sendTransferNotices = (): void => {
+        void transferNotices
+          .runOnce()
+          .then((r) => {
+            if (r.sent > 0 || r.retried > 0) service!.logger.info({ sent: r.sent, retried: r.retried, purged: r.purged }, '양도 알림을 보냈다');
+          })
+          .catch((err: unknown) => service!.logger.warn({ err }, '양도 알림 보내기가 실패했다(다음 틱에 다시 한다)'));
+      };
+      transferNoticeTimer = setInterval(sendTransferNotices, TRANSFER_NOTICE_EVERY_MS);
+      transferNoticeTimer.unref?.();
+      sendTransferNotices();
+    } else {
+      service.logger.warn({}, 'PEAKET_CORE_HTTP_URL이 없어 양도 알림을 보내지 않는다(transfer_notice 행만 쌓인다)');
+    }
     // 기기 키 등록 지표·로그 줄(docs/features/offline-gate.md §10.1). 계정·keyId는 싣지 않는다
     const registrations = new Counter({
       name: 'ticket_device_key_registrations_total',
@@ -470,8 +510,33 @@ export async function start(o: StartOptions): Promise<StartedService> {
             service!.logger.error({ method, err }, 'TransferLockService 처리 실패');
           }, { ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}) }),
         },
+        {
+          // 탈퇴 참여자(identity-svc만, I-T43 ①)
+          definition: ticketPackage().WithdrawalParticipantService.service,
+          handlers: transferWithdrawalHandlers(
+            { process: (i) => transferWithdrawal.run({ accountId: i.accountId }) },
+            (method, err) => {
+              service!.logger.error({ method, err }, 'WithdrawalParticipantService 처리 실패');
+            },
+            { ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}) },
+          ),
+        },
+        {
+          // 연기 철회(purchase-svc만, R-T25 ③)
+          definition: ticketPackage().TicketTransferService.service,
+          handlers: transferEventWithdrawalHandlers(
+            { withdrawForEvent: (i) => transfers.withdrawForEvent(i) },
+            (method, err) => {
+              service!.logger.error({ method, err }, 'TicketTransferService 처리 실패');
+            },
+            { ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}) },
+          ),
+        },
       ],
-      internal: { ...(internalGrpcToken ? { token: internalGrpcToken } : {}), services: ['peaket.ticket.v1.ScannerDeviceService'] },
+      internal: {
+        ...(internalGrpcToken ? { token: internalGrpcToken } : {}),
+        services: ['peaket.ticket.v1.ScannerDeviceService', 'peaket.ticket.v1.WithdrawalParticipantService'],
+      },
     });
     service.readiness.complete('grpc');
     service.logger.info({ port: grpc.port }, '업무 gRPC 포트를 열었다');
@@ -486,6 +551,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       if (freshnessTimer) clearInterval(freshnessTimer);
       if (expireTimer) clearInterval(expireTimer);
       if (noticeTimer) clearInterval(noticeTimer);
+      if (transferNoticeTimer) clearInterval(transferNoticeTimer);
       if (entryCloseTimer) clearInterval(entryCloseTimer);
       return (closing ??= (async () => {
         try {
@@ -507,6 +573,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     if (freshnessTimer) clearInterval(freshnessTimer);
     if (expireTimer) clearInterval(expireTimer);
     if (noticeTimer) clearInterval(noticeTimer);
+    if (transferNoticeTimer) clearInterval(transferNoticeTimer);
     if (entryCloseTimer) clearInterval(entryCloseTimer);
     await grpc?.close().catch(() => {});
     await service?.close().catch(() => {});

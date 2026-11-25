@@ -1,6 +1,6 @@
 'use client';
-// SCR-041 양도 받기 실제 화면(F-05-2). 첫 이동은 정적 셸이고, 요청 값은 화면 스크립트가 같은 사이트 요청으로 읽는다(R-T21 ③).
-// 고지 세 문장이 [받기]보다 먼저 읽힌다(d5 §5.23, POL-017·ADR-0173 결정 4). [거절]은 뒤 몫 F-05-11이라 그리지 않는다.
+// SCR-041 양도 수락 실제 화면(F-05-2). 첫 이동은 정적 셸이고, 요청 값은 화면 스크립트가 같은 사이트 요청으로 읽는다(R-T21 ③).
+// 고지 세 문장이 수락 버튼보다 먼저 읽힌다(d5 §5.23, POL-017·ADR-0173 결정 4). 두 번째 버튼은 F-05-11에서 붙였다.
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { NoticeBanner } from '@peaket/ds/NoticeBanner';
@@ -8,7 +8,7 @@ import { TransferOfferCard } from '@peaket/ds/TransferOfferCard';
 import { TRANSFER_OFFER_FRAUD_NOTICE } from '@/entities/appeal';
 import { createEventSummaryReader, type EventSummary } from '@/entities/event-summary';
 import { ORIGINS } from '@/shared/config/origins';
-import { acceptFailureStateOf, acceptOffer, loadOffer, offerStateOf, type OfferBody } from '../model/offer-flow';
+import { acceptFailureStateOf, acceptOffer, loadOffer, offerStateOf, rejectFailureStateOf, rejectOffer, type OfferBody } from '../model/offer-flow';
 import { offerView } from '../model/view';
 
 type Load = { kind: 'loading' } | { kind: 'ready' } | { kind: 'error'; text: string; denied?: boolean };
@@ -28,6 +28,8 @@ export function TransferOfferLive({ offerId }: { offerId: string }) {
   const [accepted, setAccepted] = useState(false);
   const keyRef = useRef<string | null>(null);
   if (keyRef.current === null) keyRef.current = crypto.randomUUID();
+  const rejectKeyRef = useRef<string | null>(null);
+  if (rejectKeyRef.current === null) rejectKeyRef.current = crypto.randomUUID();
 
   useEffect(() => {
     let cancelled = false;
@@ -82,8 +84,28 @@ export function TransferOfferLive({ offerId }: { offerId: string }) {
     setAccepted(true);
   };
 
+  const reject = async () => {
+    const origin = ORIGINS.api;
+    if (origin === '' || offer === null) return;
+    setBusy(true);
+    setNotice(null);
+    const r = await rejectOffer({ offerId, idempotencyKey: rejectKeyRef.current ?? crypto.randomUUID(), origin, fetch: globalThis.fetch });
+    setBusy(false);
+    if (r.kind === 'network') {
+      setNotice('연결이 끊겨 거절하지 못했습니다. 같은 요청으로 다시 시도해 주세요');
+      return;
+    }
+    if (r.kind === 'problem') {
+      setState(rejectFailureStateOf(r));
+      return;
+    }
+    setOffer(r.body);
+    setState(offerStateOf(r.body, Date.now()));
+  };
+
   const st = state ?? (offer ? offerStateOf(offer, Date.now()) : '요청');
   const v = offerView(st as Parameters<typeof offerView>[0]);
+  const counterpart = offer?.counterpartNickname ?? '회원';
   const title = summary?.title ?? (offer ? '공연 정보를 불러오지 못했습니다' : '양도 받기');
   const when = summary?.startsAt ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(summary.startsAt)) : '';
 
@@ -118,7 +140,7 @@ export function TransferOfferLive({ offerId }: { offerId: string }) {
             <TransferOfferCard
               variant="recipient"
               aria-label="양도 요청"
-              partyName="보낸 분"
+              partyName={counterpart}
               partyInitial="보"
               status={v.badge ?? { label: '수락 대기', tone: 'warning' }}
               details={[]}
@@ -154,6 +176,9 @@ export function TransferOfferLive({ offerId }: { offerId: string }) {
                 ) : null}
                 <button className="btn btn-primary btn-lg btn-block" type="button" disabled={busy} onClick={() => void accept()}>
                   받기
+                </button>
+                <button className="btn btn-secondary btn-lg btn-block" type="button" disabled={busy} onClick={() => void reject()}>
+                  거절
                 </button>
                 <p className="t-xs muted">받기 전에 위 고지를 확인해 주세요. 받은 뒤에는 이 휴대폰에서 입장용 등록을 해야 QR이 나옵니다.</p>
               </>

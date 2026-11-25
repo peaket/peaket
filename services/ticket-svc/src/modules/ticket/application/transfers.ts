@@ -91,6 +91,8 @@ export interface TransferOfferView {
   readonly eventId: string;
   /** WITHDRAWN일 때만. 받는 사람에게 사유를 가린 공개 값이다 */
   readonly withdrawReason?: PublicWithdrawReason;
+  /** 상대(보낸 사람/받는 사람)의 가린 닉네임. identity를 못 부르면 칸이 없다 */
+  readonly counterpartNickname?: string;
 }
 
 /** 받은 요청 목록 한 쪽 */
@@ -135,6 +137,13 @@ export function maskNickname(nickname: string): string {
   return `${first}${'*'.repeat(Math.min(3, chars.length - 1))}`;
 }
 
+/** 휴대폰 번호를 숫자만 남기고 +82를 0으로 맞춘다. 모양이 틀리면 undefined(400 invalid-body) */
+export function normalizePhoneDigits(raw: string): string | undefined {
+  let digits = raw.replace(/[^0-9]/g, '');
+  if (digits.startsWith('82')) digits = `0${digits.slice(2)}`;
+  return /^01[016789][0-9]{7,8}$/.test(digits) ? digits : undefined;
+}
+
 export class Transfers {
   constructor(private readonly d: TransfersDeps) {}
 
@@ -151,8 +160,11 @@ export class Transfers {
   }): Promise<{ readonly recipientRef: string; readonly nicknameMasked: string }> {
     const accountId = requireUuid('accountId', i.accountId);
     const code = i.memberCode === undefined ? '' : normalizeMemberCode(i.memberCode);
-    const phone = i.phoneNumber?.trim() ?? '';
-    if (code === '' && phone === '') throw new TransferError('INVALID_INPUT');
+    const rawPhone = i.phoneNumber?.trim() ?? '';
+    if (code === '' && rawPhone === '') throw new TransferError('INVALID_INPUT');
+    // 모양이 틀린 번호는 조회 기록을 쓰기 전에 400이다(원문은 어디에도 남기지 않는다)
+    const phone = rawPhone === '' ? undefined : normalizePhoneDigits(rawPhone);
+    if (rawPhone !== '' && phone === undefined) throw new TransferError('INVALID_INPUT');
     const nowMs = i.nowMs ?? this.d.clock.now();
     let claim: RecipientLookupClaim;
     try {
@@ -162,13 +174,15 @@ export class Transfers {
       throw new TransferError('UNAVAILABLE');
     }
     if (claim.kind === 'LIMITED') throw new TransferError('TOO_MANY_REQUESTS', claim.retryAfterSeconds);
-    if (phone !== '') {
-      await this.#finishLookup(claim.lookupId, 'NOT_FOUND');
-      throw new TransferError('RECIPIENT_NOT_FOUND');
-    }
     let found: { readonly accountId: string; readonly nickname: string } | undefined;
     try {
-      found = await this.d.directory.resolveMemberCode(code);
+      if (phone !== undefined) {
+        const resolvePhone = this.d.directory.resolvePhone?.bind(this.d.directory);
+        // 옛 짝 가짜(회원 코드만)는 휴대폰을 찾지 못한다. 포트가 없으면 '없음'이고, 포트가 던지면 '확인할 수 없음'이다
+        found = resolvePhone ? await resolvePhone(phone) : undefined;
+      } else {
+        found = await this.d.directory.resolveMemberCode(code);
+      }
     } catch {
       await this.#finishLookup(claim.lookupId, 'UNAVAILABLE');
       throw new TransferError('UNAVAILABLE');
@@ -210,8 +224,14 @@ export class Transfers {
     }
     const limit = Math.max(1, Math.min(MAX_TRANSFER_PAGE_LIMIT, Math.trunc(i.limit ?? DEFAULT_TRANSFER_PAGE_LIMIT) || DEFAULT_TRANSFER_PAGE_LIMIT));
     const page = await this.d.store.listOffers({ recipientAccountId: accountId, statuses, limit, ...(cursor === undefined ? {} : { cursor }) });
+    const items = await Promise.all(
+      page.offers.map(async (o) => {
+        const counterpart = await this.counterpartNicknameOf(o, accountId);
+        return this.#view(o, accountId, o.eventId, counterpart);
+      }),
+    );
     return {
-      items: page.offers.map((o) => this.#view(o, accountId, o.eventId)),
+      items,
       nextCursor: page.nextCursor === undefined ? null : transferCursorOf(page.nextCursor),
     };
   }
@@ -225,11 +245,14 @@ export class Transfers {
     const t = await this.d.store.ticket(ticketId);
     if (!t || t.accountId !== accountId) throw new TransferError('NOT_FOUND');
     const [open, lock] = await Promise.all([this.d.store.openOffer(ticketId), this.d.store.activeTransferLock(t.eventId, t.payerAccountId, nowMs)]);
+    // 받은 표면 결제자 닉네임을 가려 싣는다. identity를 못 부르면 '회원'이고 돌려주기를 막지 않는다(transfer-refund §4)
+    const receivedFromNickname = t.accountId === t.payerAccountId ? null : await this.#maskedNicknameOf(t.payerAccountId);
     return ticketDetailOf(t, {
       nowMs,
       lockActive: lock !== undefined,
       ...(lock === undefined ? {} : { lockExpiresAtMs: lock.expiresAtMs }),
       ...(open === undefined ? {} : { openOffer: { offerId: open.offerId, expiresAtMs: open.expiresAtMs } }),
+      receivedFromNickname,
     });
   }
 
@@ -246,7 +269,7 @@ export class Transfers {
     const offerId = requireUuid('idempotencyKey', i.idempotencyKey);
     const accountId = requireUuid('accountId', i.accountId);
     const nowMs = this.d.clock.now();
-    await this.#reauth(i.reauthToken, { accountId, sessionId: i.sessionId }, 'FAN_HIGH_RISK', 'TRANSFER_REQUEST');
+    const strength = await this.#reauth(i.reauthToken, { accountId, sessionId: i.sessionId }, 'FAN_HIGH_RISK', 'TRANSFER_REQUEST');
     const toAccountId = verifyRecipientRef(i.recipientRef, { secret: this.d.recipientRefSecret, nowMs });
     if (toAccountId === undefined) throw new TransferError('INVALID_INPUT');
     const t = await this.d.store.ticket(ticketId);
@@ -260,10 +283,12 @@ export class Transfers {
       status: 'OFFERED',
       expiresAtMs: offerExpiryMs(nowMs, t.eventStartsAtMs),
       createdAtMs: nowMs,
+      ...(strength === 'requested' ? { weakReauth: true } : {}),
     };
     const out = await this.d.store.createOffer(offer, nowMs);
     if (out.kind === 'REJECTED') throw new TransferError(errorOfCreate(out.reason));
-    return this.#view(out.offer, accountId, t.eventId);
+    const counterpart = await this.counterpartNicknameOf(out.offer, accountId);
+    return this.#view(out.offer, accountId, t.eventId, counterpart);
   }
 
   async getOffer(i: { readonly offerId: string; readonly accountId: string }): Promise<TransferOfferView> {
@@ -272,7 +297,8 @@ export class Transfers {
     const offer = await this.d.store.getOffer(offerId);
     if (!offer || (offer.fromAccountId !== accountId && offer.toAccountId !== accountId)) throw new TransferError('NOT_FOUND');
     const t = await this.d.store.ticket(offer.ticketId);
-    return this.#view(offer, accountId, t?.eventId ?? '');
+    const counterpart = await this.counterpartNicknameOf(offer, accountId);
+    return this.#view(offer, accountId, t?.eventId ?? '', counterpart);
   }
 
   async accept(i: { readonly offerId: string; readonly accountId: string; readonly idempotencyKey?: string }): Promise<TransferOfferView> {
@@ -340,18 +366,52 @@ export class Transfers {
     return this.d.store.setTransferLock({ ...i, caseId, eventId, accountIds });
   }
 
-  async #reauth(token: string | undefined, who: { accountId: string; sessionId: string }, act: TransferAct, op: TransferOp): Promise<void> {
-    let ok: boolean;
+  /** 연기 확정 때 그 회차 OFFERED를 모두 철회한다(멱등). 저장소가 없으면 아무것도 하지 않는다 */
+  async withdrawForEvent(i: { readonly eventId: string; readonly nowMs?: number }): Promise<{ readonly withdrawn: readonly string[] }> {
+    const eventId = requireUuid('eventId', i.eventId);
+    if (!this.d.store.withdrawForEvent) return { withdrawn: [] };
+    return this.d.store.withdrawForEvent({ eventId, reason: 'EVENT_POSTPONED', nowMs: i.nowMs ?? this.d.clock.now() });
+  }
+
+  /** 받은 요청·목록에 싣는 상대의 가린 닉네임. identity를 못 부르면 undefined(칸 없음) */
+  async counterpartNicknameOf(offer: TransferOfferRecord, accountId: string): Promise<string | undefined> {
+    const other = offer.fromAccountId === accountId ? offer.toAccountId : offer.fromAccountId;
+    if (other === accountId) return undefined;
+    return this.#maskedNicknameOf(other);
+  }
+
+  async #maskedNicknameOf(accountId: string): Promise<string | undefined> {
+    const resolve = this.d.directory.resolveNicknames?.bind(this.d.directory);
+    if (!resolve) return undefined;
     try {
-      ok = await this.d.reauth.verify(token, { ...who, act, op });
+      const found = await resolve([accountId]);
+      const nickname = found.get(accountId);
+      return nickname === undefined ? undefined : maskNickname(nickname);
+    } catch {
+      // '확인할 수 없음'을 404·빈 문자열로 읽지 않는다. 요청 조회는 칸을 빼고, 상세는 받은 분이 '회원'으로 채운다
+      return undefined;
+    }
+  }
+
+  async #reauth(token: string | undefined, who: { accountId: string; sessionId: string }, act: TransferAct, op: TransferOp): Promise<'verified' | 'requested' | undefined> {
+    const detailed = this.d.reauth.verifyDetailed?.bind(this.d.reauth);
+    try {
+      if (detailed) {
+        const r = await detailed(token, { ...who, act, op });
+        if (!r.ok) throw new TransferError('REAUTH_REQUIRED');
+        return r.strength === 'requested' ? 'requested' : 'verified';
+      }
+      const ok = await this.d.reauth.verify(token, { ...who, act, op });
+      if (!ok) throw new TransferError('REAUTH_REQUIRED');
+      return 'verified';
     } catch (e) {
+      if (e instanceof TransferError) throw e;
       if (e instanceof ReauthUnavailable) throw new TransferError('REAUTH_UNAVAILABLE');
       throw e;
     }
-    if (!ok) throw new TransferError('REAUTH_REQUIRED');
   }
 
-  #view(offer: TransferOfferRecord, accountId: string, eventId: string): TransferOfferView {
+  #view(offer: TransferOfferRecord, accountId: string, eventId: string, counterpartNickname?: string): TransferOfferView {
     return {
       offerId: offer.offerId,
       ticketId: offer.ticketId,
@@ -360,6 +420,7 @@ export class Transfers {
       expiresAt: new Date(offer.expiresAtMs).toISOString(),
       eventId,
       ...(offer.status === 'WITHDRAWN' ? { withdrawReason: publicWithdrawReasonOf(offer.withdrawReason) } : {}),
+      ...(counterpartNickname === undefined ? {} : { counterpartNickname }),
     };
   }
 }

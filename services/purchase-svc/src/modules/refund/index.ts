@@ -89,6 +89,7 @@ export { DrizzleFraudCancellationStore } from './adapters/db/drizzle-fraud-cance
 export { fraudCancellationHandlers, fraudCancellationPackage, type FraudCancellationPackage } from './inbound/fraud-cancellation.grpc.js';
 export { DrizzleCancellationOrders, DrizzleCancellationWrites, DrizzleSeatReturns } from './adapters/db/drizzle-cancellation.js';
 export { GrpcTicketCancellations, type GrpcTicketCancellationsOptions } from './adapters/grpc-ticket-cancellations.js';
+export { GrpcTransferWithdrawals, type GrpcTransferWithdrawalsOptions } from './adapters/grpc-transfer-withdrawals.js';
 export { GrpcPaymentCancellations, type GrpcPaymentCancellationsOptions } from './adapters/grpc-payment-cancellations.js';
 export { GrpcCompensationTransfer, type GrpcCompensationTransferOptions } from './adapters/grpc-compensation-transfer.js';
 export { HttpPgCircuits, PG_CIRCUIT_CACHE_MS, type HttpPgCircuitsOptions } from './adapters/http-pg-circuits.js';
@@ -213,7 +214,7 @@ export { EventRefundGrpcController, eventRefundPackage, eventRefundServiceHandle
 // BAT-420 GAT-090 A·GAT-110 E·H(빈 뼈대)
 export { ENTRY_LOOKUP_DEADLINE_MS, type CancellationClaims, type EntryFlagNotice, type EntryRecords, type EntryRecordView } from './domain/ports.js';
 export { EVENT_REFUND_ESTIMATE_TPS, eventRefundPreviewOf, isEventOrderOpen } from './domain/event-refund.js';
-export type { EventOpenOrders, EventRefundItemAdder, EventTicketCancellations, PendingCancellationConversions } from './domain/event-refund-ports.js';
+export type { EventOpenOrders, EventRefundItemAdder, EventTicketCancellations, EventTransferWithdrawals, PendingCancellationConversions } from './domain/event-refund-ports.js';
 export { EventTicketCanceller, type EventTicketCancellerDeps } from './application/event-ticket-canceller.js';
 export { EventRefundCancellerRouter } from './application/event-refund-canceller-router.js';
 export { HttpEntryFlagNotice } from './adapters/http-entry-flag-notice.js';

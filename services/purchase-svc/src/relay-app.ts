@@ -73,6 +73,7 @@ import {
   EventTicketCanceller,
   GrpcPaymentCancellations,
   GrpcTicketCancellations,
+  GrpcTransferWithdrawals,
   HttpCoreEntryCloseTimes,
   HttpDeductionGapNotice,
   HttpEntryFlagNotice,
@@ -242,6 +243,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
   // EventCancelTickets·GetEntryRecords는 내부 토큰·호출자 purchase-svc로 묶인다(BAT-420 리뷰 D4). 운영에서 토큰이 없으면 시작 실패다(local·ci는 없음)
   const ticketGrpcToken = ticketGrpcAddr ? internalGrpcTokenFromEnv(o.env ?? {}) : undefined;
   const refundTicketCancels = ticketGrpcAddr ? new GrpcTicketCancellations({ address: ticketGrpcAddr, ...(ticketGrpcToken ? { internalToken: ticketGrpcToken } : {}) }) : undefined;
+  const refundTransfers = ticketGrpcAddr ? new GrpcTransferWithdrawals({ address: ticketGrpcAddr, ...(ticketGrpcToken ? { internalToken: ticketGrpcToken } : {}) }) : undefined;
   const opsClient = opsUrl ? createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsUrl, timeoutCapMs: 5_000 }) : undefined;
   const refundWrites = new DrizzleCancellationWrites(o.serviceDatabase, new DrizzleOrderStore({ clock, ...(o.orderEventCodec ? { codec: o.orderEventCodec } : {}) }));
   // 열지 못한 이상 표시·공제 차액 CS 건 다시 열기(웨이브 끝 리뷰 C2·S1). ops 주소가 있을 때만 꽂는다(로그 대역이 '연 것'으로 남지 않게, 주소가 생기면 그때 연다)
@@ -329,6 +331,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
           gaps: new DrizzleDeductionGapCancellations(o.serviceDatabase),
           gapNotice: deductionGapNotice,
           configs: new SeatMapSaleConfigs(o.seatMap),
+          ...(refundTransfers ? { transfers: refundTransfers } : {}),
           // API 파드의 Start·Resume·Apply·CloseWindow와 겹쳐도 주문 단위 잡기를 거친 쪽만 처리한다(웨이브 끝 리뷰 K2)
           claims: new DrizzleEventRefundClaims(o.serviceDatabase, clock),
           // 확정·항목 끝내기 때 표시한 차액 건은 이 실행기 틱이 행마다 연다(C2·S1). ops 주소가 없으면 꽂지 않아 차액 건은 표시와 함께 로그 대역으로 간다
@@ -557,6 +560,7 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
       clearInterval(refresh);
       paymentCancels?.close();
       refundTicketCancels?.close();
+      refundTransfers?.close();
       compensationFence?.close();
       compensationPayment?.close();
       compensationLookup?.close();

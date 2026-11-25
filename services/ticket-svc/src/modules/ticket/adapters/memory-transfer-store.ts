@@ -1,6 +1,8 @@
 // 메모리 양도 저장소(BUILD_ORDER GAT-050·GAT-055 단위 시험). 운영은 adapters/db/drizzle-transfer-store.ts가 쓴다.
 // 티켓 상태·키 폐기·표시는 MemoryTicketStore를 그대로 고친다(운영의 행 잠금 자리를 대신한다).
+// F-05-11: Outbox 사건·transfer_notice 알림 행·entry_close 마감을 업무 변경과 같은 자리(메모리라 같은 호출)에서 적는다.
 import { randomUUID } from 'node:crypto';
+import type { Clock, OutboxMessage } from '@peaket/platform';
 import type {
   CreateOfferOutcome,
   DecideOutcome,
@@ -10,7 +12,9 @@ import type {
   RecipientLookupResult,
   ReturnOutcome,
   SetTransferLockInput,
+  StoredTransferNotice,
   TransferLockOutcome,
+  TransferNoticeStore,
   TransferOfferListRow,
   TransferStore,
 } from '../domain/transfer-ports.js';
@@ -21,6 +25,8 @@ import {
   ENDED_STATUSES,
   lockActiveAt,
   lockResultOf,
+  ownershipFrozen,
+  publicWithdrawReasonOf,
   rejectRejectionOf,
   returnRejectionOf,
   type TransferOfferRecord,
@@ -28,7 +34,12 @@ import {
   type TransferTicketSnapshot,
   withdrawRejectionOf,
 } from '../domain/transfer.js';
+import { noticesOf, type TransferNoticeParty, type TransferNoticeType } from '../domain/transfer-notice.js';
+import type { TransferEventType } from '../domain/transfer-events.js';
+import { TransferOutbox, type TransferEventCodec } from '../domain/transfer-events.js';
 import type { MemoryTicketStore } from './memory-ticket-store.js';
+import { memoryTicketRegistry } from './memory-ticket-store.js';
+import { revokeMemoryDeviceKeys } from './memory-device-key-store.js';
 
 interface LockRow {
   readonly caseId: string;
@@ -39,20 +50,13 @@ interface LockRow {
   readonly expiresAtMs: number;
 }
 
-const snapshotOf = (t: TicketRecord): TransferTicketSnapshot => ({
-  ticketId: t.ticketId,
-  accountId: t.accountId,
-  payerAccountId: t.payerAccountId,
-  eventId: t.eventId,
-  status: t.status,
-  transferPending: t.transferPending,
-  gateZone: t.gateZone,
-  ...(t.eventStartsAtMs === undefined ? {} : { eventStartsAtMs: t.eventStartsAtMs }),
-  ...(t.fraudLockCaseId === undefined ? {} : { fraudLockCaseId: t.fraudLockCaseId }),
-  ...(t.fraudLockVersion === undefined ? {} : { fraudLockVersion: t.fraudLockVersion }),
-});
+type NoticeRow = Omit<StoredTransferNotice, 'attempts'> & {
+  attempts: number;
+  nextAttemptAtMs: number;
+  sentAtMs?: number;
+};
 
-export class MemoryTransferStore implements TransferStore {
+export class MemoryTransferStore implements TransferStore, TransferNoticeStore {
   /** 양도 요청(offerId = Idempotency-Key) */
   readonly offers = new Map<string, TransferOfferRecord>();
   /** (case_id, event_id, account_id) 잠금 행 */
@@ -61,8 +65,24 @@ export class MemoryTransferStore implements TransferStore {
   readonly lookups: { id: string; accountId: string; lookedUpAtMs: number; result: RecipientLookupResult }[] = [];
   /** 돌려주기 멱등 기록(`accountId:key` → ticketId). 0018 ticket_return의 대역 */
   readonly returns = new Map<string, { ticketId: string; returnedAtMs: number }>();
+  /** Outbox 행(trade.tickets). 시험이 읽는다 */
+  readonly events: OutboxMessage[] = [];
+  /** transfer_notice 행. 시험이 읽는다 */
+  readonly notices: NoticeRow[] = [];
+  /** entry_close.closed_at 대역(회차 → 마감 시각) */
+  readonly entryCloses = new Map<string, number>();
 
-  constructor(private readonly o: { readonly tickets: MemoryTicketStore; readonly revokeKey?: (ticketId: string, nowMs: number) => void }) {
+  readonly #outbox: TransferOutbox;
+
+  constructor(
+    private readonly o: {
+      readonly tickets: MemoryTicketStore;
+      readonly revokeKey?: (ticketId: string, nowMs: number) => void;
+      readonly clock?: Clock;
+      readonly outboxCodec?: TransferEventCodec;
+    },
+  ) {
+    this.#outbox = new TransferOutbox(o.outboxCodec === undefined ? {} : { codec: o.outboxCodec });
     // 잠금 뒤에 발권한 표도 잠긴다(R-T31 ⑬). MemoryTicketStore가 발권 때 이 함수를 본다
     this.o.tickets.fraudLockLookup = (eventId, payerAccountId, nowMs) => {
       const lock = this.#activeLockRow(eventId, payerAccountId, nowMs);
@@ -77,9 +97,14 @@ export class MemoryTransferStore implements TransferStore {
     this.o.tickets.withdrawOpenOffer = (ticketId, reason, nowMs) => this.#withdrawOpenOffer(ticketId, reason, nowMs);
   }
 
+  /** entry_close 마감을 심는다(시험·로컬). 마감 행이 없으면 시작 + 50시간을 쓴다 */
+  setEntryClose(eventId: string, closedAtMs: number): void {
+    this.entryCloses.set(eventId, closedAtMs);
+  }
+
   async ticket(ticketId: string): Promise<TransferTicketSnapshot | undefined> {
     const t = this.o.tickets.tickets.get(ticketId);
-    return t ? snapshotOf(t) : undefined;
+    return t ? this.#snapshot(t) : undefined;
   }
 
   async activeTransferLock(eventId: string, payerAccountId: string, nowMs: number): Promise<{ caseId: string; expiresAtMs: number } | undefined> {
@@ -95,10 +120,11 @@ export class MemoryTransferStore implements TransferStore {
     const t = this.o.tickets.tickets.get(offer.ticketId);
     if (!t) return { kind: 'REJECTED', reason: 'NOT_HOLDER' };
     const lock = this.#activeLockRow(t.eventId, t.payerAccountId, nowMs);
-    const reason = createOfferRejectionOf(snapshotOf(t), { callerAccountId: offer.fromAccountId, recipientAccountId: offer.toAccountId, nowMs, lockActive: lock !== undefined });
+    const reason = createOfferRejectionOf(this.#snapshot(t), { callerAccountId: offer.fromAccountId, recipientAccountId: offer.toAccountId, nowMs, lockActive: lock !== undefined });
     if (reason) return { kind: 'REJECTED', reason };
     this.offers.set(offer.offerId, offer);
     this.#put({ ...t, status: 'TRANSFER_PENDING', transferPending: true, version: t.version + 1 });
+    this.#writeOfferEffects(t, offer, 'TRANSFER_OFFERED', offer.fromAccountId, nowMs, offer.weakReauth === true);
     return { kind: 'CREATED', offer };
   }
 
@@ -160,8 +186,9 @@ export class MemoryTransferStore implements TransferStore {
     if (ENDED_STATUSES.has(t.status)) return { kind: 'REJECTED', reason: 'ALREADY_ENDED' };
     const decided: TransferOfferRecord = { ...offer, status: 'ACCEPTED', decidedAtMs: i.nowMs };
     this.offers.set(offer.offerId, decided);
-    this.o.revokeKey?.(t.ticketId, i.nowMs);
+    this.#revokeKeys(t.ticketId, i.nowMs);
     this.#put({ ...t, accountId: offer.toAccountId, status: 'ACTIVE', transferPending: false, keyRevokedAtMs: i.nowMs, version: t.version + 1 });
+    this.#writeOfferEffects(t, offer, 'TRANSFER_ACCEPTED', offer.toAccountId, i.nowMs);
     return { kind: 'OK', offer: decided, replayed: false };
   }
 
@@ -176,6 +203,7 @@ export class MemoryTransferStore implements TransferStore {
     const decided: TransferOfferRecord = { ...offer, status: 'REJECTED', decidedAtMs: i.nowMs };
     this.offers.set(offer.offerId, decided);
     this.#release(t);
+    this.#writeOfferEffects(t, offer, 'TRANSFER_REJECTED', offer.fromAccountId, i.nowMs);
     return { kind: 'OK', offer: decided, replayed: false };
   }
 
@@ -190,6 +218,7 @@ export class MemoryTransferStore implements TransferStore {
     const decided: TransferOfferRecord = { ...offer, status: 'WITHDRAWN', withdrawReason: 'SENDER', decidedAtMs: i.nowMs };
     this.offers.set(offer.offerId, decided);
     this.#release(t);
+    this.#writeOfferEffects(t, decided, 'TRANSFER_WITHDRAWN', offer.fromAccountId, i.nowMs);
     return { kind: 'OK', offer: decided, replayed: false };
   }
 
@@ -198,15 +227,15 @@ export class MemoryTransferStore implements TransferStore {
     if (recorded) return recorded.ticketId === i.ticketId ? { kind: 'OK', ticketId: recorded.ticketId, replayed: true } : { kind: 'REJECTED', reason: 'IDEMPOTENCY_KEY_REUSED' };
     const t = this.o.tickets.tickets.get(i.ticketId);
     if (!t) return { kind: 'REJECTED', reason: 'NOT_FOUND' };
-    const reason = returnRejectionOf(snapshotOf(t), {
+    const reason = returnRejectionOf(this.#snapshot(t), {
       accountId: i.accountId,
       nowMs: i.nowMs,
       eventStartsAtMs: t.eventStartsAtMs,
+      ...(this.entryCloses.get(t.eventId) === undefined ? {} : { entryClosesAtMs: this.entryCloses.get(t.eventId)! }),
       entryRecorded: this.o.tickets.entries.has(t.ticketId),
     });
     if (reason) return { kind: 'REJECTED', reason };
-    this.o.revokeKey?.(t.ticketId, i.nowMs);
-    this.#put({ ...t, accountId: t.payerAccountId, status: 'ACTIVE', transferPending: false, keyRevokedAtMs: i.nowMs, version: t.version + 1 });
+    this.#returnTicket(t, i.nowMs);
     this.returns.set(`${i.accountId}:${i.idempotencyKey}`, { ticketId: t.ticketId, returnedAtMs: i.nowMs });
     return { kind: 'OK', ticketId: t.ticketId, replayed: false };
   }
@@ -216,12 +245,135 @@ export class MemoryTransferStore implements TransferStore {
     for (const offer of this.offers.values()) {
       if (n >= limit) break;
       if (offer.status !== 'OFFERED' || nowMs < offer.expiresAtMs) continue;
-      this.offers.set(offer.offerId, { ...offer, status: 'EXPIRED', decidedAtMs: nowMs });
+      const expired: TransferOfferRecord = { ...offer, status: 'EXPIRED', decidedAtMs: nowMs };
+      this.offers.set(offer.offerId, expired);
       const t = this.o.tickets.tickets.get(offer.ticketId);
-      if (t) this.#release(t);
+      if (t) {
+        this.#release(t);
+        this.#writeOfferEffects(t, expired, 'TRANSFER_EXPIRED', offer.fromAccountId, nowMs);
+      }
       n++;
     }
     return n;
+  }
+
+  // ---- F-05-11: 연기 철회·탈퇴 참여자 ----
+
+  async withdrawForEvent(i: { eventId: string; reason: 'EVENT_POSTPONED'; nowMs: number }): Promise<{ withdrawn: readonly string[] }> {
+    const withdrawn: string[] = [];
+    for (const offer of [...this.offers.values()]) {
+      if (offer.status !== 'OFFERED') continue;
+      const t = this.o.tickets.tickets.get(offer.ticketId);
+      if (!t || t.eventId !== i.eventId) continue;
+      const decided: TransferOfferRecord = { ...offer, status: 'WITHDRAWN', withdrawReason: i.reason, decidedAtMs: i.nowMs };
+      this.offers.set(offer.offerId, decided);
+      this.#release(t);
+      this.#writeOfferEffects(t, decided, 'TRANSFER_WITHDRAWN', offer.fromAccountId, i.nowMs);
+      withdrawn.push(offer.offerId);
+    }
+    return { withdrawn };
+  }
+
+  async accountTransfers(i: { accountId: string }): Promise<{ heldReceived: readonly string[]; sentOffers: readonly string[]; receivedOffers: readonly string[] }> {
+    const heldReceived = [...this.o.tickets.tickets.values()]
+      .filter((t) => t.accountId === i.accountId && t.payerAccountId !== i.accountId && !ENDED_STATUSES.has(t.status))
+      .map((t) => t.ticketId)
+      .sort();
+    const sentOffers = [...this.offers.values()]
+      .filter((o) => o.fromAccountId === i.accountId && o.status === 'OFFERED')
+      .map((o) => o.offerId)
+      .sort();
+    const receivedOffers = [...this.offers.values()]
+      .filter((o) => o.toAccountId === i.accountId && o.fromAccountId !== o.toAccountId && o.status === 'OFFERED')
+      .map((o) => o.offerId)
+      .sort();
+    return { heldReceived, sentOffers, receivedOffers };
+  }
+
+  async returnForAccount(i: { ticketId: string; accountId: string; nowMs: number }): Promise<'RETURNED' | 'FROZEN'> {
+    const t = this.o.tickets.tickets.get(i.ticketId);
+    if (!t || t.accountId !== i.accountId || t.payerAccountId === i.accountId) throw new Error('돌려줄 받은 표가 아니다');
+    if (ENDED_STATUSES.has(t.status)) throw new Error('이미 끝난 표다');
+    if (ownershipFrozen(t.eventStartsAtMs, this.entryCloses.get(t.eventId), i.nowMs)) {
+      // 동결 중에는 키만 폐기하고 보유자는 그대로 둔다(마감 뒤 고리가 다시 부른다)
+      this.#revokeKeys(t.ticketId, i.nowMs);
+      return 'FROZEN';
+    }
+    this.#returnTicket(t, i.nowMs);
+    return 'RETURNED';
+  }
+
+  async withdrawForAccount(i: { offerId: string; accountId: string; nowMs: number }): Promise<void> {
+    const offer = this.offers.get(i.offerId);
+    if (!offer || offer.fromAccountId !== i.accountId || offer.status !== 'OFFERED') return;
+    const t = this.o.tickets.tickets.get(offer.ticketId);
+    if (!t) return;
+    const decided: TransferOfferRecord = { ...offer, status: 'WITHDRAWN', withdrawReason: 'ACCOUNT_DELETED', decidedAtMs: i.nowMs };
+    this.offers.set(offer.offerId, decided);
+    this.#release(t);
+    this.#writeOfferEffects(t, decided, 'TRANSFER_WITHDRAWN', offer.fromAccountId, i.nowMs);
+  }
+
+  async rejectForAccount(i: { offerId: string; accountId: string; nowMs: number }): Promise<void> {
+    const offer = this.offers.get(i.offerId);
+    if (!offer || offer.toAccountId !== i.accountId || offer.status !== 'OFFERED') return;
+    const t = this.o.tickets.tickets.get(offer.ticketId);
+    if (!t) return;
+    const decided: TransferOfferRecord = { ...offer, status: 'REJECTED', decidedAtMs: i.nowMs };
+    this.offers.set(offer.offerId, decided);
+    this.#release(t);
+    this.#writeOfferEffects(t, offer, 'TRANSFER_REJECTED', offer.fromAccountId, i.nowMs);
+  }
+
+  // ---- transfer_notice 보내기 표(TransferNoticeStore) ----
+
+  async claimDue(nowMs: number, limit: number, leaseMs: number): Promise<readonly StoredTransferNotice[]> {
+    const due = this.notices
+      .filter((n) => n.sentAtMs === undefined && n.nextAttemptAtMs <= nowMs)
+      .sort((a, b) => a.nextAttemptAtMs - b.nextAttemptAtMs || a.createdAtMs - b.createdAtMs)
+      .slice(0, limit);
+    return due.map((n) => {
+      n.attempts += 1;
+      n.nextAttemptAtMs = nowMs + leaseMs;
+      return {
+        noticeId: n.noticeId,
+        type: n.type,
+        party: n.party,
+        offerId: n.offerId,
+        ticketId: n.ticketId,
+        eventId: n.eventId,
+        accountId: n.accountId,
+        createdAtMs: n.createdAtMs,
+        attempts: n.attempts,
+        ...(n.reason === undefined ? {} : { reason: n.reason }),
+      };
+    });
+  }
+
+  async markSent(noticeId: string, nowMs: number): Promise<void> {
+    const n = this.notices.find((x) => x.noticeId === noticeId);
+    if (n && n.sentAtMs === undefined) n.sentAtMs = nowMs;
+  }
+
+  async reschedule(noticeId: string, nextAttemptAtMs: number): Promise<void> {
+    const n = this.notices.find((x) => x.noticeId === noticeId);
+    if (n && n.sentAtMs === undefined) n.nextAttemptAtMs = nextAttemptAtMs;
+  }
+
+  async purgeSent(beforeMs: number): Promise<number> {
+    const before = this.notices.length;
+    // 보낸 지 7일이 되는 순간 지운다(정본의 경계 0ms를 포함)
+    for (let k = this.notices.length - 1; k >= 0; k -= 1) {
+      const n = this.notices[k]!;
+      if (n.sentAtMs !== undefined && n.sentAtMs <= beforeMs) this.notices.splice(k, 1);
+    }
+    return before - this.notices.length;
+  }
+
+  async backlog(): Promise<{ count: number; oldestCreatedAtMs?: number }> {
+    const open = this.notices.filter((n) => n.sentAtMs === undefined);
+    if (open.length === 0) return { count: 0 };
+    return { count: open.length, oldestCreatedAtMs: Math.min(...open.map((n) => n.createdAtMs)) };
   }
 
   async setTransferLock(input: SetTransferLockInput): Promise<readonly TransferLockOutcome[]> {
@@ -243,7 +395,7 @@ export class MemoryTransferStore implements TransferStore {
       }
       const targets = [...this.o.tickets.tickets.values()].filter((t) => t.eventId === input.eventId && t.payerAccountId === accountId).sort((a, b) => a.ticketId.localeCompare(b.ticketId));
       for (const t of targets) {
-        const result = lockResultOf(snapshotOf(t), {
+        const result = lockResultOf(this.#snapshot(t), {
           caseId: input.caseId,
           version: input.version,
           locked: input.locked,
@@ -302,7 +454,10 @@ export class MemoryTransferStore implements TransferStore {
   #expireTicketOffers(ticketId: string, nowMs: number): void {
     for (const offer of this.offers.values()) {
       if (offer.ticketId !== ticketId || offer.status !== 'OFFERED' || nowMs < offer.expiresAtMs) continue;
-      this.offers.set(offer.offerId, { ...offer, status: 'EXPIRED', decidedAtMs: nowMs });
+      const expired: TransferOfferRecord = { ...offer, status: 'EXPIRED', decidedAtMs: nowMs };
+      this.offers.set(offer.offerId, expired);
+      const t = this.o.tickets.tickets.get(ticketId);
+      if (t) this.#writeOfferEffects(t, expired, 'TRANSFER_EXPIRED', offer.fromAccountId, nowMs);
     }
     const t = this.o.tickets.tickets.get(ticketId);
     if (!t || (!t.transferPending && t.status !== 'TRANSFER_PENDING')) return;
@@ -318,7 +473,10 @@ export class MemoryTransferStore implements TransferStore {
   #withdrawOpenOffer(ticketId: string, reason: 'EVENT_CANCELLED' | 'FRAUD_LOCK', nowMs: number): string | undefined {
     const offer = this.#openOfferRecord(ticketId);
     if (!offer) return undefined;
-    this.offers.set(offer.offerId, { ...offer, status: 'WITHDRAWN', withdrawReason: reason, decidedAtMs: nowMs });
+    const decided: TransferOfferRecord = { ...offer, status: 'WITHDRAWN', withdrawReason: reason, decidedAtMs: nowMs };
+    this.offers.set(offer.offerId, decided);
+    const t = this.o.tickets.tickets.get(ticketId);
+    if (t) this.#writeOfferEffects(t, decided, 'TRANSFER_WITHDRAWN', offer.fromAccountId, nowMs);
     return offer.offerId;
   }
 
@@ -343,5 +501,72 @@ export class MemoryTransferStore implements TransferStore {
 
   #put(t: TicketRecord): void {
     this.o.tickets.tickets.set(t.ticketId, t);
+    memoryTicketRegistry.set(t.ticketId, t);
+  }
+
+  #snapshot(t: TicketRecord): TransferTicketSnapshot {
+    const close = this.entryCloses.get(t.eventId);
+    return {
+      ticketId: t.ticketId,
+      accountId: t.accountId,
+      payerAccountId: t.payerAccountId,
+      eventId: t.eventId,
+      status: t.status,
+      transferPending: t.transferPending,
+      gateZone: t.gateZone,
+      ...(t.eventStartsAtMs === undefined ? {} : { eventStartsAtMs: t.eventStartsAtMs }),
+      ...(close === undefined ? {} : { entryClosesAtMs: close }),
+      ...(t.fraudLockCaseId === undefined ? {} : { fraudLockCaseId: t.fraudLockCaseId }),
+      ...(t.fraudLockVersion === undefined ? {} : { fraudLockVersion: t.fraudLockVersion }),
+    };
+  }
+
+  /** 받은 표를 결제자에게 돌려주고 키를 폐기한 뒤 TICKET_RETURNED 사건·두 사람 알림을 남긴다 */
+  #returnTicket(t: TicketRecord, nowMs: number): void {
+    const offerId = this.#lastOfferIdOf(t.ticketId);
+    this.#revokeKeys(t.ticketId, nowMs);
+    this.#put({ ...t, accountId: t.payerAccountId, status: 'ACTIVE', transferPending: false, keyRevokedAtMs: nowMs, version: t.version + 1 });
+    this.events.push(...this.#outbox.messagesFor({ type: 'TICKET_RETURNED', offerId, ticketId: t.ticketId, eventId: t.eventId, orderId: t.orderId, accountId: t.payerAccountId, occurredAtMs: nowMs }));
+    this.#pushNotices(noticesOf({ type: 'TICKET_RETURNED', offerId, ticketId: t.ticketId, eventId: t.eventId, fromAccountId: t.accountId, toAccountId: t.payerAccountId, nowMs }));
+  }
+
+  #revokeKeys(ticketId: string, nowMs: number): void {
+    this.o.revokeKey?.(ticketId, nowMs);
+    // 단위 시험 조립은 DeviceKeys의 메모리 저장소를 따로 만든다. 같은 표의 유효 키를 실제로 폐기한다
+    revokeMemoryDeviceKeys(ticketId, nowMs);
+  }
+
+  #lastOfferIdOf(ticketId: string): string {
+    let last: TransferOfferRecord | undefined;
+    for (const o of this.offers.values()) if (o.ticketId === ticketId && (last === undefined || o.createdAtMs >= last.createdAtMs)) last = o;
+    return last?.offerId ?? ticketId;
+  }
+
+  #writeOfferEffects(t: TicketRecord, offer: TransferOfferRecord, type: TransferEventType, accountId: string, nowMs: number, weakReauth = false): void {
+    this.events.push(...this.#outbox.messagesFor({ type, offerId: offer.offerId, ticketId: t.ticketId, eventId: t.eventId, orderId: t.orderId, accountId, occurredAtMs: nowMs }));
+    const noticeType: TransferNoticeType = type;
+    const reason = type === 'TRANSFER_WITHDRAWN' ? publicWithdrawReasonOf(offer.withdrawReason) : undefined;
+    this.#pushNotices(
+      noticesOf({
+        type: noticeType,
+        offerId: offer.offerId,
+        ticketId: t.ticketId,
+        eventId: t.eventId,
+        fromAccountId: offer.fromAccountId,
+        toAccountId: offer.toAccountId,
+        ...(reason === undefined ? {} : { reason }),
+        nowMs,
+        ...(weakReauth ? { weakReauth: true } : {}),
+      }),
+    );
+  }
+
+  #pushNotices(rows: readonly ReturnType<typeof noticesOf>[number][]): void {
+    for (const n of rows) {
+      if (this.notices.some((x) => x.type === n.type && x.offerId === n.offerId && x.accountId === n.accountId)) continue;
+      this.notices.push({ ...n, attempts: 0, nextAttemptAtMs: n.createdAtMs });
+    }
   }
 }
+
+export type { TransferNoticeParty };

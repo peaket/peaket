@@ -626,6 +626,14 @@ export const identityV1Identity: Record<string, unknown> = {
                     "BatchGetRecipients": {
                       "requestType": "BatchGetRecipientsRequest",
                       "responseType": "BatchGetRecipientsResponse"
+                    },
+                    "ResolvePhone": {
+                      "requestType": "ResolvePhoneRequest",
+                      "responseType": "ResolvePhoneResponse"
+                    },
+                    "BatchGetNicknames": {
+                      "requestType": "BatchGetNicknamesRequest",
+                      "responseType": "BatchGetNicknamesResponse"
                     }
                   }
                 },
@@ -681,6 +689,60 @@ export const identityV1Identity: Record<string, unknown> = {
                     "recipients": {
                       "rule": "repeated",
                       "type": "Recipient",
+                      "id": 1
+                    }
+                  }
+                },
+                "ResolvePhoneRequest": {
+                  "fields": {
+                    "phone_number": {
+                      "type": "string",
+                      "id": 1
+                    }
+                  }
+                },
+                "ResolvePhoneResponse": {
+                  "fields": {
+                    "found": {
+                      "type": "bool",
+                      "id": 1
+                    },
+                    "account_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "nickname": {
+                      "type": "string",
+                      "id": 3
+                    }
+                  }
+                },
+                "BatchGetNicknamesRequest": {
+                  "fields": {
+                    "account_ids": {
+                      "rule": "repeated",
+                      "type": "string",
+                      "id": 1
+                    }
+                  }
+                },
+                "Nickname": {
+                  "fields": {
+                    "account_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "nickname": {
+                      "type": "string",
+                      "id": 2
+                    }
+                  }
+                },
+                "BatchGetNicknamesResponse": {
+                  "fields": {
+                    "recipients": {
+                      "rule": "repeated",
+                      "type": "Nickname",
                       "id": 1
                     }
                   }

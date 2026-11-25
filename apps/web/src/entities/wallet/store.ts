@@ -55,6 +55,8 @@ export interface WalletTicketSnapshot {
   eventStartsAt?: string;
   /** 받은 티켓(보유자가 결제자가 아님, 목록 항목에 receivedFromNickname null이 없음) */
   received?: boolean;
+  /** 받은 표의 보낸 분 가린 닉네임(없으면 화면이 '회원') */
+  receivedFromNickname?: string | null;
   /** 진행 중인 양도 요청. 브라우저 저장소에는 요청 ID만 둔다(ASVS 14.3.3) */
   pendingTransfer?: { readonly offerId: string };
   /** 회차 공개 요약(GET /v1/events/{eventId})의 표시 값. 그 회차 요약을 못 읽었으면 없다 */

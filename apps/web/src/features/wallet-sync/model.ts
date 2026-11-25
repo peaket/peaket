@@ -35,6 +35,8 @@ export interface WalletCard {
   status?: string;
   /** 받은 표인가(SCR-013 돌려주기 버튼) */
   received: boolean;
+  /** 받은 표의 보낸 분 가린 닉네임(없으면 '회원') */
+  receivedFromNickname?: string | null;
   /** 입장 시작(공개 요약이 알면 그것, 없으면 null). 돌려주기 버튼 경계 */
   entryOpensAt: string | null;
   /** 진행 중인 양도 요청 ID(결제자 표). 있으면 SCR-014 ⑥로 잇는다 */
@@ -69,6 +71,7 @@ export function walletCardOf(snapshot: WalletTicketSnapshot, nowMs: number): Wal
     qrLabel: walletQrLabel(snapshot.ticketId),
     ...(snapshot.status === undefined ? {} : { status: snapshot.status }),
     received: snapshot.received === true,
+    ...(typeof snapshot.receivedFromNickname === 'string' ? { receivedFromNickname: snapshot.receivedFromNickname } : {}),
     entryOpensAt: snapshot.entryOpensAt ?? null,
     ...(snapshot.pendingTransfer === undefined ? {} : { pendingOfferId: snapshot.pendingTransfer.offerId }),
   };

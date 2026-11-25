@@ -72,7 +72,7 @@ export function addKstWeekdays(fromMs: number, days: number): number {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export type EventRefundErrorCode = 'INVALID' | 'NOT_FOUND' | 'CONFLICT';
+export type EventRefundErrorCode = 'INVALID' | 'NOT_FOUND' | 'CONFLICT' | 'UNAVAILABLE';
 
 export class EventRefundError extends Error {
   constructor(
@@ -211,6 +211,15 @@ export class EventRefundService {
     if (existing) {
       if (existing.eventId !== i.eventId || existing.fault !== i.fault || existing.kind !== kind) throw new EventRefundError('CONFLICT', '같은 요청 ID의 회차·판정·종류가 다릅니다');
       return this.get(i.requestId);
+    }
+    // 연기 확정 시작은 ticket-svc의 진행 중 양도 요청을 먼저 철회한다(F-05-11, R-T25 ③).
+    // 실패하면 아무것도 쓰지 않고 503(UNAVAILABLE)이다. 같은 요청 ID의 다시 부르기는 위에서 돌아가 한 번만 부른다
+    if (kind === 'POSTPONE' && this.o.transfers) {
+      try {
+        await this.o.transfers.withdrawForEvent({ eventId: i.eventId, nowMs: this.o.nowMs() });
+      } catch (err) {
+        throw new EventRefundError('UNAVAILABLE', `양도 요청을 철회하지 못했습니다: ${err instanceof Error ? err.name : 'unknown'}`);
+      }
     }
     const nowMs = this.o.nowMs();
     const window = this.#windowOf(kind, i, nowMs);

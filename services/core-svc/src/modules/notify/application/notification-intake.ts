@@ -62,6 +62,22 @@ export interface TicketKeyNoticeEvent {
   registeredAtMs: number;
 }
 
+/** F-05-11 양도 알림(docs/features/notify.md §4.8). party가 당사자별 문안을 고른다 */
+export type TransferNoticeType = 'TRANSFER_OFFERED' | 'TRANSFER_ACCEPTED' | 'TRANSFER_REJECTED' | 'TRANSFER_WITHDRAWN' | 'TRANSFER_EXPIRED' | 'TICKET_RETURNED' | 'TRANSFER_WEAK_REAUTH';
+export type TransferNoticeParty = 'SENDER' | 'RECIPIENT' | 'PAYER' | 'RETURNER';
+
+export interface TransferNoticeEvent {
+  noticeId: string;
+  type: TransferNoticeType;
+  party: TransferNoticeParty;
+  offerId: string;
+  ticketId: string;
+  eventId: string;
+  accountId: string;
+  occurredAtMs: number;
+  reason?: 'SENDER' | 'EVENT_CANCELLED' | 'EVENT_POSTPONED' | 'OTHER';
+}
+
 export interface NoticeInput {
   kind: FanNoticeKind;
   targetId: string;
@@ -137,6 +153,60 @@ export class NotificationIntake {
         channel: 'WEB_PUSH',
         vars,
         dedupKey: ticketKeyNoticeDedupKey({ ...key, channel: 'WEB_PUSH', subscriptionKey: sub.endpointHash }),
+      });
+      out[r] += 1;
+    }
+    return out;
+  }
+
+  /**
+   * 양도 알림(notify §4.8): 이메일 하나와 그 계정의 살아 있는 웹 푸시 구독마다 하나. 중복 키에 type·offerId·accountId가 들어
+   * 같은 사건이 다시 와도 작업은 하나다. 받는 사람에게 결제 금액·연락처·사유 범주를 싣지 않는다
+   */
+  async transferEvent(e: TransferNoticeEvent): Promise<{ created: number; duplicate: number }> {
+    const partyOf: Record<TransferNoticeType, readonly TransferNoticeParty[]> = {
+      TRANSFER_OFFERED: ['SENDER', 'RECIPIENT'],
+      TRANSFER_ACCEPTED: ['SENDER', 'RECIPIENT'],
+      TRANSFER_REJECTED: ['SENDER', 'RECIPIENT'],
+      TRANSFER_WITHDRAWN: ['SENDER', 'RECIPIENT'],
+      TRANSFER_EXPIRED: ['SENDER', 'RECIPIENT'],
+      TICKET_RETURNED: ['PAYER', 'RETURNER'],
+      TRANSFER_WEAK_REAUTH: ['SENDER'],
+    };
+    if (!isUuid(e.noticeId) || !isUuid(e.offerId) || !isUuid(e.ticketId) || !isUuid(e.eventId) || !isUuid(e.accountId)) throw new FanNotifyProblem('INVALID', 'ID 모양이 올바르지 않습니다');
+    if (!(e.type in partyOf)) throw new FanNotifyProblem('INVALID', '알 수 없는 양도 알림 종류입니다');
+    if (!partyOf[e.type].includes(e.party)) throw new FanNotifyProblem('INVALID', '그 종류에 맞지 않는 당사자입니다');
+    const reasons = ['SENDER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'OTHER'] as const;
+    if (e.reason !== undefined && (e.type !== 'TRANSFER_WITHDRAWN' || !reasons.includes(e.reason))) throw new FanNotifyProblem('INVALID', '철회 사유가 올바르지 않습니다');
+    if (!Number.isSafeInteger(e.occurredAtMs) || e.occurredAtMs < 0) throw new FanNotifyProblem('INVALID', '사건 시각이 올바르지 않습니다');
+    const reason = e.type === 'TRANSFER_WITHDRAWN' ? (e.reason ?? 'SENDER') : undefined;
+    const url = e.type === 'TRANSFER_OFFERED' ? `/my/transfers/${e.offerId}` : '/my/tickets';
+    const vars = assertVars(e.type, {
+      type: e.type,
+      party: e.party,
+      offerId: e.offerId,
+      ticketId: e.ticketId,
+      url,
+      ...(reason === undefined ? {} : { reason }),
+    });
+    const out = { created: 0, duplicate: 0 };
+    const email = await this.enqueue({
+      kind: e.type,
+      targetId: e.offerId,
+      accountId: e.accountId,
+      channel: 'EMAIL',
+      vars,
+      dedupKey: `${e.type}:${e.offerId}:${e.accountId}:EMAIL`,
+    });
+    out[email] += 1;
+    for (const sub of await this.d.store.listPushSubscriptions(e.accountId)) {
+      const r = await this.enqueue({
+        kind: e.type,
+        targetId: e.offerId,
+        accountId: e.accountId,
+        channel: 'WEB_PUSH',
+        vars,
+        dedupKey: `${e.type}:${e.offerId}:${e.accountId}:WEB_PUSH:${sub.endpointHash}`,
       });
       out[r] += 1;
     }

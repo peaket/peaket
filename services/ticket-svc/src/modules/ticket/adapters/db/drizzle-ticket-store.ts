@@ -1,6 +1,7 @@
 // 운영 티켓 저장소(BUILD_ORDER HOT-160). 발권은 (order_id, issue_generation) PK의 INSERT 경합으로 한 번만 만들고,
 // 취소는 티켓 행 FOR UPDATE 안에서 조건을 보고 (cancellation_id, ticket_id) 취소표를 남긴다.
-import type { Database, DbTransaction } from '@peaket/platform';
+import type { Clock, Database, DbTransaction } from '@peaket/platform';
+import { systemClock } from '@peaket/platform';
 import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
 import type { IssueStoreInput, TicketStore } from '../../domain/ports.js';
 import {
@@ -32,6 +33,8 @@ import {
   walletTicketOf,
 } from '../../domain/ticket.js';
 import { ticket, ticketCancellation, ticketIssue, ticketIssueGuard, ticketOperatorCancellation, fraudTransferLock, transferOffer } from './schema.js';
+import { TransferOutbox, type TransferEventCodec } from '../../domain/transfer-events.js';
+import { writeTransferEffects } from './transfer-effects.js';
 
 /** 발권·취소와 같은 트랜잭션에 스캐너 변경 기록을 넣는 포트(offline-gate §6.3) */
 export interface ScannerChangeWriter {
@@ -49,6 +52,10 @@ export interface DrizzleTicketStoreOptions {
   readonly changes?: ScannerChangeWriter;
   /** 없으면 기기 키를 폐기하지 않는다(단위 시험·구성 전) */
   readonly deviceKeys?: DeviceKeyRevoker;
+  /** 회차 취소·운영자 취소 때 Outbox ID(uuidv7)를 만드는 시계 */
+  readonly clock?: Clock;
+  /** trade.tickets 값 코덱. 없으면 JSON 대역(시험) */
+  readonly outboxCodec?: TransferEventCodec;
 }
 
 /** ticket_cancellation.result의 회차 취소 값(팬 취소의 REFUND_NOW·REFUND_AFTER_CLOSE와 따로 센다) */
@@ -103,7 +110,10 @@ const valuesOf = (t: TicketRecord) => ({
 });
 
 export class DrizzleTicketStore implements TicketStore {
-  constructor(private readonly o: DrizzleTicketStoreOptions) {}
+  readonly #outbox: TransferOutbox;
+  constructor(private readonly o: DrizzleTicketStoreOptions) {
+    this.#outbox = new TransferOutbox(o.outboxCodec === undefined ? {} : { codec: o.outboxCodec });
+  }
 
   async issue(input: IssueStoreInput, candidates: readonly TicketRecord[]): Promise<IssueTicketsResult> {
     return this.o.database.transaction(async (tx) => {
@@ -341,17 +351,17 @@ export class DrizzleTicketStore implements TicketStore {
         }
         const result = operatorCancelResultOf({ status: statusOf(row.status), accountId: row.accountId }, await this.#entryRecorded(tx, row.eventId, row.id), target.expectedHolderAccountId);
         // 표를 끝내는 같은 트랜잭션에서 진행 중 양도 요청을 FRAUD_LOCK으로 거둔다(불변식 D1, 정본 §7.4 ①)
-        const withdrawnTransferOfferId = result === 'CANCELED' ? await this.#operatorCancelOne(tx, row, input.nowMs, 'FRAUD_LOCK') : undefined;
+        const withdrawnOffer = result === 'CANCELED' ? await this.#operatorCancelOne(tx, row, input.nowMs, 'FRAUD_LOCK') : undefined;
         await tx.insert(ticketOperatorCancellation).values({
           approvalId: input.approvalId,
           ticketId: row.id,
           orderId: row.orderId,
           fraudCaseId: input.fraudCaseId,
           result,
-          withdrawnTransferOfferId: withdrawnTransferOfferId ?? null,
+          withdrawnTransferOfferId: withdrawnOffer?.offerId ?? null,
           cancelledAt: new Date(input.nowMs),
         });
-        out.push({ ticketId: row.id, result, orderId: row.orderId, ...(withdrawnTransferOfferId ? { withdrawnTransferOfferId } : {}) });
+        out.push({ ticketId: row.id, result, orderId: row.orderId, ...(withdrawnOffer ? { withdrawnTransferOfferId: withdrawnOffer.offerId } : {}) });
       }
       return out;
     });
@@ -367,13 +377,13 @@ export class DrizzleTicketStore implements TicketStore {
    * 행 잠금 안: 진행 중 양도 요청을 거두고(사유·결정 시각), 키를 폐기하고, 환급 상태로 바꾼다(스캐너 변경분 TICKET_STATUS·KEY_REVOKED).
    * 거둔 요청 ID를 돌려준다(운영자 취소 기록의 withdrawn_transfer_offer_id, 회차 취소의 transferWithdrawn).
    */
-  async #operatorCancelOne(tx: DbTransaction, row: Row, nowMs: number, withdrawReason: 'EVENT_CANCELLED' | 'FRAUD_LOCK'): Promise<string | undefined> {
+  async #operatorCancelOne(tx: DbTransaction, row: Row, nowMs: number, withdrawReason: 'EVENT_CANCELLED' | 'FRAUD_LOCK'): Promise<{ offerId: string; fromAccountId: string; toAccountId: string } | undefined> {
     const status: TicketStatus = 'REFUNDED';
     const withdrawn = await tx
       .update(transferOffer)
       .set({ status: 'WITHDRAWN', withdrawReason, decidedAt: new Date(nowMs) })
       .where(and(eq(transferOffer.ticketId, row.id), eq(transferOffer.status, 'OFFERED')))
-      .returning({ id: transferOffer.id });
+      .returning({ id: transferOffer.id, fromAccountId: transferOffer.fromAccountId, toAccountId: transferOffer.toAccountId });
     const revokedKeyId = await this.o.deviceKeys?.revokeActiveInTx(tx, row.id, nowMs);
     await tx
       .update(ticket)
@@ -383,7 +393,20 @@ export class DrizzleTicketStore implements TicketStore {
       await this.o.changes.append(tx, row.eventId, 'TICKET_STATUS', { v: 1, ticketId: row.id, status, version: row.version + 1 });
       await this.o.changes.append(tx, row.eventId, 'KEY_REVOKED', { v: 1, ticketId: row.id, keyId: revokedKeyId ? Buffer.from(revokedKeyId).toString('base64url') : null });
     }
-    return withdrawn[0]?.id;
+    const offer = withdrawn[0];
+    if (offer) {
+      await writeTransferEffects(tx, this.#outbox, this.o.clock ?? systemClock, {
+        ticket: { ticketId: row.id, eventId: row.eventId, orderId: row.orderId },
+        offerId: offer.id,
+        type: 'TRANSFER_WITHDRAWN',
+        fromAccountId: offer.fromAccountId,
+        toAccountId: offer.toAccountId,
+        accountId: offer.fromAccountId,
+        reason: withdrawReason === 'EVENT_CANCELLED' ? 'EVENT_CANCELLED' : 'OTHER',
+        nowMs,
+      });
+    }
+    return offer === undefined ? undefined : { offerId: offer.id, fromAccountId: offer.fromAccountId, toAccountId: offer.toAccountId };
   }
 
   /**

@@ -15,6 +15,8 @@ export interface OfferBody {
   readonly expiresAt?: string;
   readonly eventId?: string;
   readonly withdrawReason?: string;
+  /** 상대의 가린 닉네임. 없으면 화면이 '회원'으로 둔다 */
+  readonly counterpartNickname?: string;
 }
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -88,4 +90,19 @@ export function loadOffer(i: { readonly offerId: string } & Net): Promise<OfferR
 
 export function acceptOffer(i: { readonly offerId: string; readonly idempotencyKey: string } & Net): Promise<OfferResult<OfferBody>> {
   return send(i, 'POST', `/v1/transfers/${encodeURIComponent(i.offerId)}/acceptance`, { 'idempotency-key': i.idempotencyKey });
+}
+
+/** [거절]은 POST …/rejection에 Idempotency-Key를 싣는다(openapi createTransferRejection). 200이면 처리됨이다 */
+export function rejectOffer(i: { readonly offerId: string; readonly idempotencyKey: string } & Net): Promise<OfferResult<OfferBody>> {
+  return send(i, 'POST', `/v1/transfers/${encodeURIComponent(i.offerId)}/rejection`, { 'idempotency-key': i.idempotencyKey });
+}
+
+/** 거절 409·404 → d5 §5.23 상태. 확인할 수 없음(5xx·끊김)은 요청 자리를 지킨다 */
+export function rejectFailureStateOf(p: { status: number; type: string }): Scr041State {
+  const type = p.type.split('/').filter(Boolean).pop() ?? p.type;
+  if (p.status === 404) return '권한 없음';
+  if (p.status === 409 && type === 'transfer-expired') return '기한 만료';
+  if (p.status === 409 && type === 'entry-started') return '입장 시작';
+  if (p.status === 409 && (type === 'transfer-not-offered' || type === 'ticket-ended')) return '처리됨';
+  return '요청';
 }

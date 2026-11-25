@@ -430,6 +430,10 @@ message TerminateScannerSessionsResponse {
 // 읽기라 멱등 키가 없다. 데드라인은 아직 정하지 않았다(초안, 추천 적용 2026-10-30, docs/features/notify.md §4.2).
 service RecipientQueryService {
   rpc BatchGetRecipients(BatchGetRecipientsRequest) returns (BatchGetRecipientsResponse);
+  // F-05-11 양도 받는 사람 찾기: 숫자만 남긴 휴대폰 번호로 ACTIVE 계정을 정확히 찾는다. 부르는 쪽은 ticket-svc만이다.
+  rpc ResolvePhone(ResolvePhoneRequest) returns (ResolvePhoneResponse);
+  // F-05-11 가린 닉네임: 계정 ID 여럿의 ACTIVE 닉네임만 답한다(최대 500개). 부르는 쪽은 ticket-svc만이다.
+  rpc BatchGetNicknames(BatchGetNicknamesRequest) returns (BatchGetNicknamesResponse);
 }
 
 message BatchGetRecipientsRequest {
@@ -466,6 +470,34 @@ message Recipient {
 message BatchGetRecipientsResponse {
   // 요청한 계정 ID마다 한 줄, 요청 순서대로
   repeated Recipient recipients = 1;
+}
+
+// ---- F-05-11 양도 받는 사람(휴대폰·닉네임) ----
+
+message ResolvePhoneRequest {
+  // 010-9371-2468·+82 10-9371-2468 같은 표기를 받는다. 서버가 숫자만 남겨 01[016789] 모양을 검사한다.
+  string phone_number = 1;
+}
+
+message ResolvePhoneResponse {
+  bool found = 1;
+  string account_id = 2;
+  string nickname = 3;
+}
+
+message BatchGetNicknamesRequest {
+  // 계정 ID 목록. 500개를 넘거나 비었으면 INVALID_ARGUMENT다.
+  repeated string account_ids = 1;
+}
+
+message Nickname {
+  string account_id = 1;
+  string nickname = 2;
+}
+
+message BatchGetNicknamesResponse {
+  // ACTIVE 계정만, 요청 차례
+  repeated Nickname recipients = 1;
 }
 
 // 부르는 쪽: ops-svc만(관제 콘솔 '관리 계정·세션 관리' SCR-064의 세션 강제 종료). 운영자·CS·파트너 관리 계정의 세션을 끝낸다.

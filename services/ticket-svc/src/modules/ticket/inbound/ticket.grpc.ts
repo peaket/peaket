@@ -14,6 +14,8 @@ export interface TicketPackage {
   ScannerDeviceLookupService: grpc.ServiceClientConstructor;
   ScannerDeviceService: grpc.ServiceClientConstructor;
   TransferLockService: grpc.ServiceClientConstructor;
+  TicketTransferService: grpc.ServiceClientConstructor;
+  WithdrawalParticipantService: grpc.ServiceClientConstructor;
 }
 
 /** 이름은 proto 그대로, enum은 이름, int64는 숫자로 읽는다. */

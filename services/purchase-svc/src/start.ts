@@ -88,6 +88,7 @@ import {
   GrpcCompensationTransfer,
   GrpcPaymentCancellations,
   GrpcTicketCancellations,
+  GrpcTransferWithdrawals,
   HttpCompensationCaseNotice,
   HttpDeductionGapNotice,
   HttpEventRefundAlert,
@@ -379,6 +380,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let refund: RefundModuleDeps | undefined;
   const fanReauthWarnings: string[] = [];
   let refundTickets: GrpcTicketCancellations | undefined;
+  let refundTransfers: GrpcTransferWithdrawals | undefined;
   let refundPayments: GrpcPaymentCancellations | undefined;
   /**
    * 회차 취소 실행기가 쓰는 보상 큐(BAT-011). 보상 저장소는 booking 조립(아래)에서 생기므로 늦게 묶는다.
@@ -398,6 +400,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     const calendar = withdrawalCalendar;
     // ticket-svc 운영자 취소는 내부 토큰 + 호출자 purchase-svc만 받는다(리뷰 B6)
     refundTickets = new GrpcTicketCancellations({ address: ticketGrpcAddr, ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}) });
+    refundTransfers = new GrpcTransferWithdrawals({ address: ticketGrpcAddr, ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}) });
     refundPayments = new GrpcPaymentCancellations({ address: paymentGrpcAddr });
     // BAT-425: 배상 송금(같은 payment-svc gRPC)과 서킷 읽기(payment-svc 내부 HTTP). 주소가 없으면 local·ci는 닫힌 대역이고 그 밖은 시작 실패다(아래)
     compensationTransfers = new GrpcCompensationTransfer({ address: paymentGrpcAddr });
@@ -509,6 +512,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
             },
           },
       configs: new SeatMapSaleConfigs(seatMap),
+      ...(refundTransfers ? { transfers: refundTransfers } : {}),
       log: { warn: (obj: object, msg: string) => log?.warn(obj, msg) },
       // BAT-425 GAT-120: 결제사 서킷이 열린 몫만 AUTO_CIRCUIT_OPEN으로 멈춘다. 읽기 실패는 거짓(환급은 계속한다, R-T45)
       ...(pgCircuits ? { circuitOpen: (pg) => pgCircuits!.circuitOpen(pg) } : {}),

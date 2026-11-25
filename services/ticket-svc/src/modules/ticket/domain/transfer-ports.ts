@@ -1,5 +1,7 @@
 // 양도 저장소·재인증·회원 코드 찾기 포트(BUILD_ORDER GAT-050·GAT-055). 재인증 확인 포트는 기기 키 등록도 쓴다(GAT-020, ADR-0363 결정 1). 어댑터는 application이 아니라 이 파일을 본다(architecture §3.1).
 import type { CreateOfferRejection, ReturnRejection, TransferCursor, TransferOfferRecord, TransferStatus, TransferTicketSnapshot } from './transfer.js';
+import type { PublicWithdrawReason } from './transfer.js';
+import type { TransferNoticeParty, TransferNoticeType } from './transfer-notice.js';
 
 export type TransferAct = 'FAN_HIGH_RISK' | 'FAN_SENSITIVE';
 /** 받는 쪽 작업(authz-matrix §6). DEVICE_KEY_ISSUE는 기기 키 등록(재발급·입장 시작 뒤 첫 등록, ADR-0363 결정 1)이 쓴다 */
@@ -8,6 +10,8 @@ export type TransferOp = 'TRANSFER_REQUEST' | 'TICKET_RETURN' | 'DEVICE_KEY_ISSU
 /** 재인증 토큰 확인 포트(어댑터 JwksFanReauthGate). false면 403, 던지면 503(ReauthUnavailable) */
 export interface TransferReauthGate {
   verify(token: string | undefined, q: { readonly accountId: string; readonly sessionId: string; readonly act: TransferAct; readonly op: TransferOp }): Promise<boolean>;
+  /** 약한 재인증('requested')을 가르기 위한 선택 면. 없으면 verify만 쓴다(기존 짝 가짜) */
+  verifyDetailed?(token: string | undefined, q: { readonly accountId: string; readonly sessionId: string; readonly act: TransferAct; readonly op: TransferOp }): Promise<{ readonly ok: boolean; readonly strength?: 'verified' | 'requested' }>;
 }
 
 /** 재인증을 확인하지 못했다(공개키 묶음·jti 저장소 장애). 503 reauth-unavailable */
@@ -21,6 +25,9 @@ export class ReauthUnavailable extends Error {
 /** 회원 코드 찾기(identity MemberCodeService). 없으면 UNAVAILABLE, 찾는 코드가 없으면 undefined */
 export interface MemberCodeDirectory {
   resolveMemberCode(code: string): Promise<{ readonly accountId: string; readonly nickname: string } | undefined>;
+  /** 정규화한 숫자만 받는다(010…). identity가 ACTIVE 계정의 phone을 정확히 같은 식으로 맞춘다 */
+  resolvePhone?(phoneDigits: string): Promise<{ readonly accountId: string; readonly nickname: string } | undefined>;
+  resolveNicknames?(accountIds: readonly string[]): Promise<ReadonlyMap<string, string>>;
 }
 
 /** 저장소가 행 잠금 안에서 돌려주는 결과. 거절은 도메인 사유 그대로다 */
@@ -99,4 +106,34 @@ export interface TransferStore {
   setTransferLock(input: SetTransferLockInput): Promise<readonly TransferLockOutcome[]>;
   /** 그 표의 잠금이 지금 유효한가(풀림·기한·입장 시작 반영) */
   lockActive(ticketId: string, nowMs: number): Promise<boolean>;
+  /** 그 회차 OFFERED 요청을 모두 WITHDRAWN·EVENT_POSTPONED로 바꾸고 표시를 되돌린다(멱등) */
+  withdrawForEvent?(i: { readonly eventId: string; readonly reason: 'EVENT_POSTPONED'; readonly nowMs: number }): Promise<{ readonly withdrawn: readonly string[] }>;
+  /** 탈퇴 참여자가 정리할 것: 받은 표·보낸 요청·받은 요청 */
+  accountTransfers?(i: { readonly accountId: string }): Promise<{ readonly heldReceived: readonly string[]; readonly sentOffers: readonly string[]; readonly receivedOffers: readonly string[] }>;
+  /** 받은 표를 결제자에게 돌려준다. 동결 중이면 키만 폐기하고 FROZEN */
+  returnForAccount?(i: { readonly ticketId: string; readonly accountId: string; readonly nowMs: number }): Promise<'RETURNED' | 'FROZEN'>;
+  withdrawForAccount?(i: { readonly offerId: string; readonly accountId: string; readonly nowMs: number }): Promise<void>;
+  rejectForAccount?(i: { readonly offerId: string; readonly accountId: string; readonly nowMs: number }): Promise<void>;
+}
+
+/** 알림 보내기 반복이 잡는 행(transfer_notice) */
+export interface StoredTransferNotice {
+  readonly noticeId: string;
+  readonly type: TransferNoticeType;
+  readonly party: TransferNoticeParty;
+  readonly offerId: string;
+  readonly ticketId: string;
+  readonly eventId: string;
+  readonly accountId: string;
+  readonly reason?: PublicWithdrawReason;
+  readonly createdAtMs: number;
+  readonly attempts: number;
+}
+
+export interface TransferNoticeStore {
+  claimDue(nowMs: number, limit: number, leaseMs: number): Promise<readonly StoredTransferNotice[]>;
+  markSent(noticeId: string, nowMs: number): Promise<void>;
+  reschedule(noticeId: string, nextAttemptAtMs: number): Promise<void>;
+  purgeSent(beforeMs: number): Promise<number>;
+  backlog(): Promise<{ readonly count: number; readonly oldestCreatedAtMs?: number }>;
 }

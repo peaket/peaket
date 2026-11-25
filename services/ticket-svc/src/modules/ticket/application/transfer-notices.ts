@@ -1,0 +1,20 @@
+// 양도 알림 보내기 반복(응용 자리). 규칙은 domain/transfer-notice.ts에 있고, 시험·서비스가 이 파일로 가져온다.
+export {
+  TRANSFER_NOTICE_EVERY_MS,
+  TRANSFER_NOTICE_LEASE_MS,
+  TRANSFER_NOTICE_RETENTION_MS,
+  TRANSFER_NOTICE_RETRY_MS,
+  TransferNoticeSender,
+  noticesOf,
+  transferNoticeEventOf,
+  transferNoticeRetryDelayMs,
+  type TransferNoticeEvent,
+  type TransferNoticeClock,
+  type TransferNoticeParty,
+  type TransferNoticeRecord,
+  type TransferNoticeRunResult,
+  type TransferNoticeSendResult,
+  type TransferNoticeSenderDeps,
+  type TransferNoticeSink,
+  type TransferNoticeType,
+} from '../domain/transfer-notice.js';

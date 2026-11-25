@@ -20,6 +20,13 @@ export type FanNoticeKind =
   | 'ACCOUNT_MERGED'
   | 'DEVICE_KEY_REISSUED'
   | 'DEVICE_KEY_LATE_ISSUE'
+  | 'TRANSFER_OFFERED'
+  | 'TRANSFER_ACCEPTED'
+  | 'TRANSFER_REJECTED'
+  | 'TRANSFER_WITHDRAWN'
+  | 'TRANSFER_EXPIRED'
+  | 'TICKET_RETURNED'
+  | 'TRANSFER_WEAK_REAUTH'
   | 'OPEN_LOBBY'
   | 'OPEN_VERIFY'
   | 'CANCELLATION_ALERT'
@@ -51,6 +58,13 @@ export const FAN_NOTICE_KINDS: readonly FanNoticeKind[] = [
   'ACCOUNT_MERGED',
   'DEVICE_KEY_REISSUED',
   'DEVICE_KEY_LATE_ISSUE',
+  'TRANSFER_OFFERED',
+  'TRANSFER_ACCEPTED',
+  'TRANSFER_REJECTED',
+  'TRANSFER_WITHDRAWN',
+  'TRANSFER_EXPIRED',
+  'TICKET_RETURNED',
+  'TRANSFER_WEAK_REAUTH',
   'OPEN_LOBBY',
   'OPEN_VERIFY',
   'CANCELLATION_ALERT',
@@ -60,6 +74,9 @@ export const FAN_NOTICE_KINDS: readonly FanNoticeKind[] = [
 /** 입장 키 알림 종류(docs/features/notify.md §4.7, ADR-0363 결정 4) */
 export type TicketKeyNoticeKind = Extract<FanNoticeKind, 'DEVICE_KEY_REISSUED' | 'DEVICE_KEY_LATE_ISSUE'>;
 export const TICKET_KEY_NOTICE_KINDS: readonly TicketKeyNoticeKind[] = ['DEVICE_KEY_REISSUED', 'DEVICE_KEY_LATE_ISSUE'];
+
+/** 양도 알림 종류(notify §4.8). 웹 푸시 작업의 중복 키 모양이 입장 키 알림과 다르다 */
+export const TRANSFER_NOTICE_KINDS: ReadonlySet<string> = new Set(['TRANSFER_OFFERED', 'TRANSFER_ACCEPTED', 'TRANSFER_REJECTED', 'TRANSFER_WITHDRAWN', 'TRANSFER_EXPIRED', 'TICKET_RETURNED', 'TRANSFER_WEAK_REAUTH']);
 
 /**
  * 입장 키 알림의 중복 키 `{type}:{ticketId}:{noticeId}:{accountId}:{채널}`(notify §4.3·§4.7). 웹 푸시는 그 계정의 구독마다 작업 하나라
@@ -74,11 +91,20 @@ const SUBSCRIPTION_KEY = /^[A-Za-z0-9_-]{43}$/;
 
 /** 구독 하나에 묶인 웹 푸시 작업이면 그 구독 키. 계정 단위 작업(로그인 수단·병합 등)이면 undefined(그 계정의 모든 구독에 보낸다) */
 export function webPushTargetOf(kind: string, dedupKey: string): string | undefined {
-  if (!(TICKET_KEY_NOTICE_KINDS as readonly string[]).includes(kind)) return undefined;
-  const parts = dedupKey.split(':');
-  if (parts.length !== 6 || parts[4] !== 'WEB_PUSH') return undefined;
-  const key = parts[5]!;
-  return SUBSCRIPTION_KEY.test(key) ? key : undefined;
+  if ((TICKET_KEY_NOTICE_KINDS as readonly string[]).includes(kind)) {
+    const parts = dedupKey.split(':');
+    if (parts.length !== 6 || parts[4] !== 'WEB_PUSH') return undefined;
+    const key = parts[5]!;
+    return SUBSCRIPTION_KEY.test(key) ? key : undefined;
+  }
+  // 양도 알림의 웹 푸시 작업은 `{type}:{offerId}:{accountId}:WEB_PUSH:{구독 키}`다
+  if (TRANSFER_NOTICE_KINDS.has(kind)) {
+    const parts = dedupKey.split(':');
+    if (parts.length !== 5 || parts[3] !== 'WEB_PUSH') return undefined;
+    const key = parts[4]!;
+    return SUBSCRIPTION_KEY.test(key) ? key : undefined;
+  }
+  return undefined;
 }
 
 /** 문안 변수 허용 목록(notify §12). 주소·전화번호·이름은 종류를 가리지 않고 받지 않는다 */
@@ -92,6 +118,13 @@ const VARS_ALLOWED: Record<FanNoticeKind, readonly string[]> = {
   ACCOUNT_MERGED: [],
   DEVICE_KEY_REISSUED: ['type', 'registeredAt', 'ticketId'],
   DEVICE_KEY_LATE_ISSUE: ['type', 'registeredAt', 'ticketId'],
+  TRANSFER_OFFERED: ['type', 'offerId', 'ticketId', 'party', 'reason', 'url'],
+  TRANSFER_ACCEPTED: ['type', 'offerId', 'ticketId', 'party', 'reason', 'url'],
+  TRANSFER_REJECTED: ['type', 'offerId', 'ticketId', 'party', 'reason', 'url'],
+  TRANSFER_WITHDRAWN: ['type', 'offerId', 'ticketId', 'party', 'reason', 'url'],
+  TRANSFER_EXPIRED: ['type', 'offerId', 'ticketId', 'party', 'reason', 'url'],
+  TICKET_RETURNED: ['type', 'offerId', 'ticketId', 'party', 'reason', 'url'],
+  TRANSFER_WEAK_REAUTH: ['type', 'offerId', 'ticketId', 'party', 'reason', 'url'],
   OPEN_LOBBY: ['title', 'body', 'url'],
   OPEN_VERIFY: ['title', 'body', 'url'],
   CANCELLATION_ALERT: ['title', 'body', 'url', 'eventTitle', 'startsAt'],
@@ -137,7 +170,7 @@ export function assertVars(kind: FanNoticeKind, vars: Vars | undefined): Vars {
     if (typeof value === 'boolean') continue;
     if (typeof value !== 'string') throw bad('알림 문구 변수는 문자열·숫자·불리언이어야 합니다');
     // 티켓 ID(UUID)는 숫자 자리가 우연히 전화번호 꼴과 겹칠 수 있어 UUID 꼴이면 그 검사를 건너뛴다(입장 키 알림의 ticketId, notify §4.7)
-    const uuidLike = k === 'ticketId' && UUID_TEXT.test(value);
+    const uuidLike = (k === 'ticketId' || k === 'offerId') && UUID_TEXT.test(value);
     if (!uuidLike && (EMAIL_LIKE.test(value) || PHONE_LIKE.test(value))) throw bad('알림 문구 변수에 이메일·전화번호 꼴 값이 있습니다');
     if (/[\u0000-\u001f\u007f]/.test(value)) throw bad('알림 문구 변수에 제어 문자가 있습니다');
   }
@@ -188,6 +221,46 @@ export function messageOf(kind: FanNoticeKind, vars: Vars): NoticeMessage {
           : `입장이 시작된 뒤 티켓 한 장을 ${at}에 이 계정의 휴대폰에 등록했습니다. 직접 하신 일이 아니면 고객센터로 알려 주세요`;
       return { title: '티켓 입장 키를 새 휴대폰에 등록했습니다', body, url };
     }
+    case 'TRANSFER_OFFERED': {
+      const offerId = text('offerId');
+      const url = offerId && UUID_TEXT.test(offerId) ? `/my/transfers/${offerId}` : '/my/tickets';
+      return text('party') === 'SENDER'
+        ? { title: '양도 요청을 보냈습니다', body: '받는 분에게 양도 요청을 보냈습니다. 받는 분이 수락하면 알려 드립니다.', url }
+        : { title: '양도 요청이 도착했습니다', body: '티켓 양도 요청이 도착했습니다. 마이 티켓에서 확인해 주세요.', url };
+    }
+    case 'TRANSFER_ACCEPTED':
+      return text('party') === 'SENDER'
+        ? { title: '양도가 수락되었습니다', body: '보낸 티켓을 받는 분이 수락했습니다. 이 티켓은 이제 받는 분의 것입니다.', url: '/my/tickets' }
+        : { title: '티켓을 받았습니다', body: '입장할 휴대폰에서 입장용으로 등록해야 QR이 나옵니다.', url: '/my/tickets' };
+    case 'TRANSFER_REJECTED':
+      return text('party') === 'SENDER'
+        ? { title: '양도 요청이 거절되었습니다', body: '티켓은 그대로 보낸 분에게 있습니다.', url: '/my/tickets' }
+        : { title: '양도 요청을 거절했습니다', body: '요청을 거절했습니다. 티켓은 보낸 분에게 있습니다.', url: '/my/tickets' };
+    case 'TRANSFER_WITHDRAWN':
+      if (text('party') === 'SENDER') return { title: '양도 요청을 철회했습니다', body: '티켓은 그대로 보낸 분에게 있습니다.', url: '/my/tickets' };
+      if (text('reason') === 'EVENT_CANCELLED') {
+        return {
+          title: '공연이 취소되어 양도 요청이 철회되었습니다',
+          body: '이 요청은 더 이상 받을 수 없습니다. 이 티켓은 결제하신 분(보낸 분)께 전액 환급됩니다. 티켓값을 미리 주고받으셨다면 보낸 분과 직접 정산해 주세요.',
+          url: '/my/tickets',
+        };
+      }
+      if (text('reason') === 'EVENT_POSTPONED') {
+        return {
+          title: '공연 일정이 바뀌어 양도 요청이 철회되었습니다',
+          body: '이 요청은 더 이상 받을 수 없습니다. 보낸 분이 바뀐 일정으로 다시 양도를 요청하면 새 요청을 다시 알려 드립니다.',
+          url: '/my/tickets',
+        };
+      }
+      return { title: '양도 요청이 철회되었습니다', body: '보낸 분이 양도 요청을 철회했습니다. 티켓은 보낸 분에게 그대로 있습니다.', url: '/my/tickets' };
+    case 'TRANSFER_EXPIRED':
+      return { title: '양도 요청 기한이 지났습니다', body: '티켓은 보낸 분에게 그대로 있습니다.', url: '/my/tickets' };
+    case 'TICKET_RETURNED':
+      return text('party') === 'PAYER'
+        ? { title: '티켓이 결제자에게 돌아왔습니다', body: '입장할 휴대폰에서 입장용으로 다시 등록해 주세요.', url: '/my/tickets' }
+        : { title: '티켓을 결제자에게 돌려주었습니다', body: '—', url: '/my/tickets' };
+    case 'TRANSFER_WEAK_REAUTH':
+      return { title: '양도 요청을 보냈습니다', body: '간편 재인증으로 양도 요청을 보냈습니다. 본인이 아니라면 고객센터에 알려 주세요.', url: '/my/tickets' };
     case 'OPEN_LOBBY':
       return { title: text('title') ?? '대기실이 열렸습니다', body: text('body') ?? '공연 상세에서 대기실에 들어가세요.', ...(safeUrl(text('url')) ? { url: safeUrl(text('url')) } : {}) };
     case 'OPEN_VERIFY':

@@ -11,8 +11,23 @@ import {
   type DeviceKeyRegistrationResult,
   type DeviceKeyStore,
 } from '../domain/ports.js';
+import { memoryTicketRegistry } from './memory-ticket-store.js';
 
 const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((v, i) => v === b[i]);
+
+/** 같은 프로세스의 MemoryTicketStore가 마지막으로 아는 그 표(시험·로컬 조립). 없으면 undefined */
+function memoryDeviceKeyTicketOf(ticketId: string): MemoryDeviceKeyTicket | undefined {
+  const t = memoryTicketRegistry.get(ticketId);
+  return t === undefined
+    ? undefined
+    : {
+        ticketId: t.ticketId,
+        eventId: t.eventId,
+        accountId: t.accountId,
+        payerAccountId: t.payerAccountId,
+        ...(t.eventStartsAtMs === undefined ? {} : { eventStartsAtMs: t.eventStartsAtMs }),
+      };
+}
 
 export interface MemoryDeviceKeyTicket {
   ticketId: string;
@@ -42,14 +57,22 @@ interface StoredNotice {
   sentAtMs?: number;
 }
 
-export class MemoryDeviceKeyStore implements DeviceKeyStore, DeviceKeyNoticeStore {
+export class MemoryDeviceKeyStore implements DeviceKeyStore, DeviceKeyNoticeStore {  /** 시험·로컬 조립에서 같은 티켓의 키를 양도 저장소가 폐기할 수 있게 인스턴스를 모은다(운영은 Drizzle이 한 트랜잭션에서 폐기한다) */
+  static readonly instances: MemoryDeviceKeyStore[] = [];
   readonly tickets = new Map<string, MemoryDeviceKeyTicket>();
   readonly keys = new Map<string, StoredKey[]>();
   /** 입장 키 알림 행(device_key_notice). 시험이 행 수·종류를 본다 */
   readonly notices: StoredNotice[] = [];
 
   /** 변경 기록을 남길 곳(시험·로컬). 없으면 키만 바꾼다 */
-  constructor(private readonly changes?: (eventId: string, kind: string, payload: Record<string, unknown>) => void) {}
+  constructor(private readonly changes?: (eventId: string, kind: string, payload: Record<string, unknown>) => void) {
+    MemoryDeviceKeyStore.instances.push(this);
+  }
+
+  /** 같은 프로세스의 메모리 저장소들이 가진 그 표의 유효 키를 모두 폐기한다(양도·돌려주기 시험 조립) */
+  revokeActive(ticketId: string, nowMs: number): void {
+    for (const k of this.keys.get(ticketId) ?? []) if (k.revokedAtMs === undefined) k.revokedAtMs = nowMs;
+  }
 
   seedTicket(t: MemoryDeviceKeyTicket): void {
     this.tickets.set(t.ticketId, { ...t });
@@ -58,7 +81,7 @@ export class MemoryDeviceKeyStore implements DeviceKeyStore, DeviceKeyNoticeStor
   async register(i: DeviceKeyRegistrationInput): Promise<DeviceKeyRegistrationResult> {
     // 재인증 없는 REISSUE는 보유자 확인보다 403이 먼저다(offline-gate §2, RV350-1). 이름은 reissue-required(ADR-0363 결정 2)
     const reissueUnverified = i.reason === 'REISSUE' && !i.reauthVerified;
-    const ticket = this.tickets.get(i.ticketId);
+    const ticket = this.tickets.get(i.ticketId) ?? memoryDeviceKeyTicketOf(i.ticketId);
     if (!ticket) return reissueUnverified ? { kind: 'REISSUE_REQUIRED' } : { kind: 'NOT_FOUND' };
     if (ticket.accountId !== i.accountId) return reissueUnverified ? { kind: 'REISSUE_REQUIRED' } : { kind: 'NOT_HOLDER' };
     const list = this.keys.get(i.ticketId) ?? [];
@@ -170,4 +193,9 @@ export class MemoryDeviceKeyStore implements DeviceKeyStore, DeviceKeyNoticeStor
     if (match.length > 0) return 'REVOKED';
     return 'UNKNOWN';
   }
+}
+
+/** 같은 프로세스의 메모리 기기 키 저장소에서 그 표의 유효 키를 폐기한다(양도 저장소의 메모리 짝) */
+export function revokeMemoryDeviceKeys(ticketId: string, nowMs: number): void {
+  for (const store of MemoryDeviceKeyStore.instances) store.revokeActive(ticketId, nowMs);
 }

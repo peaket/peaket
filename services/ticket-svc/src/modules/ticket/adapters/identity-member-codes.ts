@@ -12,7 +12,7 @@ type Unary = (req: object, md: grpc.Metadata, opts: grpc.CallOptions, cb: (e: gr
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export class GrpcMemberCodeDirectory implements MemberCodeDirectory {
-  readonly #client: grpc.Client & { ResolveMemberCodes: Unary };
+  readonly #client: grpc.Client & { ResolveMemberCodes: Unary; ResolvePhone: Unary; BatchGetNicknames: Unary };
 
   constructor(address: string, profile: GrpcLbProfile = 'service') {
     const def = protoLoader.fromJSON(identityV1Identity as Parameters<typeof protoLoader.fromJSON>[0], PROTO_LOAD_OPTIONS);
@@ -26,7 +26,7 @@ export class GrpcMemberCodeDirectory implements MemberCodeDirectory {
       profile,
       dependency: 'identity-svc',
       timeoutCapMs: DEADLINE_CAP_MS,
-    }) as unknown as grpc.Client & { ResolveMemberCodes: Unary };
+    }) as unknown as grpc.Client & { ResolveMemberCodes: Unary; ResolvePhone: Unary; BatchGetNicknames: Unary };
   }
 
   async resolveMemberCode(code: string): Promise<{ accountId: string; nickname: string } | undefined> {
@@ -40,6 +40,32 @@ export class GrpcMemberCodeDirectory implements MemberCodeDirectory {
     if (!UUID.test(accountId)) throw new Error('회원 코드 답의 계정 ID가 UUID가 아니다');
     // ResolveMemberCodes는 닉네임을 싣지 않는다. 화면에는 '회원'으로 가린다(닉네임 조회는 후속)
     return { accountId, nickname: '회원' };
+  }
+
+  async resolvePhone(phoneDigits: string): Promise<{ accountId: string; nickname: string } | undefined> {
+    const v = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      this.#client.ResolvePhone({ phone_number: phoneDigits }, new grpc.Metadata(), { deadline: Date.now() + DEADLINE_CAP_MS }, (e, r) => (e ? reject(e) : resolve(r ?? {})));
+    });
+    if (v.found !== true) return undefined;
+    const accountId = typeof v.account_id === 'string' ? v.account_id.toLowerCase() : '';
+    if (!UUID.test(accountId)) throw new Error('휴대폰 답의 계정 ID가 UUID가 아니다');
+    return { accountId, nickname: typeof v.nickname === 'string' ? v.nickname : '' };
+  }
+
+  async resolveNicknames(accountIds: readonly string[]): Promise<ReadonlyMap<string, string>> {
+    const ids = [...new Set(accountIds.filter((id) => UUID.test(id)))].slice(0, 500);
+    if (ids.length === 0) return new Map();
+    const v = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      this.#client.BatchGetNicknames({ account_ids: ids }, new grpc.Metadata(), { deadline: Date.now() + DEADLINE_CAP_MS }, (e, r) => (e ? reject(e) : resolve(r ?? {})));
+    });
+    const rows = Array.isArray(v.recipients) ? (v.recipients as Record<string, unknown>[]) : [];
+    const out = new Map<string, string>();
+    for (const r of rows) {
+      const id = typeof r.account_id === 'string' ? r.account_id.toLowerCase() : '';
+      const nickname = typeof r.nickname === 'string' ? r.nickname : '';
+      if (UUID.test(id) && nickname.trim() !== '') out.set(id, nickname);
+    }
+    return out;
   }
 
   close(): void {

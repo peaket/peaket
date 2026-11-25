@@ -96,6 +96,7 @@ function TicketCard({ card, qrFallback }: { card: WalletCard; qrFallback: ReactN
         <span className={badgeClass(card)}>{card.badge}</span>
       </div>
       {card.note ? <p className="t-sm">{card.note}</p> : null}
+      {card.received ? <p className="t-sm muted">보낸 분 {card.receivedFromNickname ?? '회원'}</p> : null}
       {card.showQr ? <DeviceQrLazy ticketId={card.ticketId} label={card.qrLabel} fallback={qrFallback} /> : null}
       {card.received &&
       card.badge === '받은 티켓' &&

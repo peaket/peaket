@@ -25,6 +25,30 @@ export { DrizzleDeviceKeyStore } from './adapters/db/drizzle-device-key-store.js
 export { JwksFanReauthGate } from './adapters/jwks-fan-reauth-gate.js';
 export { GrpcMemberCodeDirectory } from './adapters/identity-member-codes.js';
 export { TransferError, Transfers, type TransferReauthGate, type TransferStore, type TransferAct, type TransferOp } from './application/transfers.js';
+export { TransferWithdrawal, type TransferWithdrawalDeps, type TransferWithdrawalResult } from './application/account-withdrawal.js';
+export { TRANSFER_EVENT_TOPIC, TransferOutbox, type TransferEventCodec } from './application/transfer-outbox.js';
+export {
+  TRANSFER_NOTICE_EVERY_MS,
+  TRANSFER_NOTICE_LEASE_MS,
+  TRANSFER_NOTICE_RETENTION_MS,
+  TRANSFER_NOTICE_RETRY_MS,
+  TransferNoticeSender,
+  noticesOf,
+  transferNoticeEventOf,
+  transferNoticeRetryDelayMs,
+  type TransferNoticeEvent,
+  type TransferNoticeParty,
+  type TransferNoticeRecord,
+  type TransferNoticeRunResult,
+  type TransferNoticeSendResult,
+  type TransferNoticeSenderDeps,
+  type TransferNoticeSink,
+  type TransferNoticeType,
+} from './domain/transfer-notice.js';
+export { noticesOf as transferNoticesOf } from './domain/transfer-notice.js';
+export { ticketEventOf, transferEventKeyOf, type TransferEventRecord, type TransferEventType } from './domain/transfer-events.js';
+export { HttpTransferNoticeSink, TRANSFER_NOTICE_PATH } from './adapters/http-transfer-notice-sink.js';
+export { transferEventWithdrawalHandlers, transferWithdrawalHandlers, type TransferEventWithdrawalUseCases, type TransferWithdrawalUseCases } from './inbound/transfer-withdrawal.grpc.js';
 export { TransfersController } from './inbound/transfers.controller.js';
 export { transferLockHandlers, type TransferLockUseCases } from './inbound/ticket.grpc.js';
 export { TicketDeviceKeysController } from './inbound/device-keys.controller.js';

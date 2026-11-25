@@ -201,8 +201,9 @@ export function loadTransferTicket(i: { readonly ticketId: string } & Net): Prom
   return send<TransferTicketBody>(i, 'GET', `/v1/tickets/${encodeURIComponent(i.ticketId)}`);
 }
 
-export function lookupRecipient(i: { readonly memberCode: string } & Net): Promise<TransferResult<{ recipientRef: string; nicknameMasked: string }>> {
-  return send(i, 'POST', '/v1/transfer-recipient-lookups', { body: { memberCode: i.memberCode } });
+export function lookupRecipient(i: ({ readonly memberCode: string } | { readonly phoneNumber: string }) & Net): Promise<TransferResult<{ recipientRef: string; nicknameMasked: string }>> {
+  const body = 'phoneNumber' in i ? { phoneNumber: i.phoneNumber } : { memberCode: i.memberCode };
+  return send(i, 'POST', '/v1/transfer-recipient-lookups', { body });
 }
 
 export function sendTransferRequest(

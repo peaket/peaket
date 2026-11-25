@@ -32,6 +32,7 @@ const OfferResponse = z.object({
   expiresAt: z.iso.datetime({ offset: true }),
   eventId: z.string(),
   withdrawReason: z.enum(['SENDER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'OTHER']).optional(),
+  counterpartNickname: z.string().optional(),
 });
 const ReturnResponse = z.object({ ticketId: z.string(), status: z.literal('RETURNED') });
 
@@ -174,6 +175,7 @@ export class TransfersController {
           expiresAt: v.expiresAt,
           eventId: v.eventId,
           ...(v.withdrawReason === undefined ? {} : { withdrawReason: v.withdrawReason }),
+          ...(v.counterpartNickname === undefined ? {} : { counterpartNickname: v.counterpartNickname }),
         })),
         nextCursor: page.nextCursor,
       };
@@ -192,7 +194,7 @@ export class TransfersController {
   ): Promise<z.output<typeof GetTransferResponse>> {
     try {
       const v = await this.transfers.getOffer({ offerId: params.offerId, accountId: me.accountId });
-      return { offerId: v.offerId, ticketId: v.ticketId, role: v.role, status: v.status, expiresAt: v.expiresAt, eventId: v.eventId, ...(v.withdrawReason ? { withdrawReason: v.withdrawReason } : {}) };
+      return { offerId: v.offerId, ticketId: v.ticketId, role: v.role, status: v.status, expiresAt: v.expiresAt, eventId: v.eventId, ...(v.withdrawReason ? { withdrawReason: v.withdrawReason } : {}), ...(v.counterpartNickname ? { counterpartNickname: v.counterpartNickname } : {}) };
     } catch (e) {
       if (codeOnly(e)) problem(e);
       throw e;

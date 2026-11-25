@@ -637,3 +637,54 @@ message TransferLockOutcome {
 message SetTransferLockResponse {
   repeated TransferLockOutcome outcomes = 1;
 }
+
+// ---- F-05-11 양도 뒤 몫(docs/features/transfer-refund.md §5, docs/features/identity.md §8) ----
+
+// 부르는 쪽: purchase-svc(연기 확정 시작). 그 회차의 OFFERED 양도 요청을 모두 WITHDRAWN·EVENT_POSTPONED로 바꾸고 표시를 되돌린다(멱등).
+service TicketTransferService {
+  rpc WithdrawTransfersForEvent(WithdrawTransfersForEventRequest) returns (WithdrawTransfersForEventResponse);
+}
+
+message WithdrawTransfersForEventRequest {
+  string event_id = 1;
+  // 지금은 EVENT_POSTPONED만 받는다.
+  string reason = 2;
+  int64 now_ms = 3;
+}
+
+message WithdrawTransfersForEventResponse {
+  repeated string withdrawn = 1;
+}
+
+// 부르는 쪽: identity-svc(탈퇴 참여자). 받은 표 돌려주기·보낸 요청 철회·받은 요청 거절을 한 번에 하고, 동결 중이면 키만 폐기하고 PENDING이다.
+service WithdrawalParticipantService {
+  rpc ProcessAccountWithdrawal(ProcessAccountWithdrawalRequest) returns (ProcessAccountWithdrawalResponse);
+}
+
+message ProcessAccountWithdrawalRequest {
+  string account_id = 1;
+  int64 deadline_at_ms = 2;
+}
+
+enum WithdrawalParticipantState {
+  WITHDRAWAL_PARTICIPANT_STATE_UNSPECIFIED = 0;
+  WITHDRAWAL_PARTICIPANT_STATE_DONE = 1;
+  WITHDRAWAL_PARTICIPANT_STATE_PENDING = 2;
+}
+
+enum WithdrawalPendingReason {
+  WITHDRAWAL_PENDING_REASON_UNSPECIFIED = 0;
+  // 입장 동결 등으로 받은 표를 아직 돌려주지 못했다(마감 뒤 고리가 다시 부른다).
+  WITHDRAWAL_PENDING_REASON_TICKET_TRANSFER_PENDING = 1;
+}
+
+message ProcessAccountWithdrawalResponse {
+  WithdrawalParticipantState state = 1;
+  int32 returned_tickets = 2;
+  int32 withdrawn_offers = 3;
+  int32 rejected_offers = 4;
+  int32 pending_received_tickets = 5;
+  int32 pending_sent_offers = 6;
+  int32 pending_received_offers = 7;
+  repeated WithdrawalPendingReason reasons = 8;
+}

@@ -74,8 +74,9 @@ export type {
 export { MailTransportError } from './domain/fan-notify-ports.js';
 export { encryptWebPush, vapidAuthorization, pushTopic, pushTtlUrgency } from './domain/push-crypto.js';
 export { FanSubscriptions, PushSubscriptions, SubscriptionOptOuts, MemoryRecipientDirectory } from './application/fan-notify.js';
-export { NotificationIntake, type AccountMergedInput, type LoginMethodChangedInput, type NoticeInput, type TicketKeyNoticeEvent, type TradeNoticeEvent } from './application/notification-intake.js';
+export { NotificationIntake, type AccountMergedInput, type LoginMethodChangedInput, type NoticeInput, type TicketKeyNoticeEvent, type TradeNoticeEvent, type TransferNoticeEvent, type TransferNoticeParty, type TransferNoticeType } from './application/notification-intake.js';
 export { InternalNotifyTicketController, TicketKeyNoticeBody, TicketKeyNoticeResponse } from './inbound/internal-notify-ticket.controller.js';
+export { InternalNotifyTransferController, TransferNoticeBody, TransferNoticeResponse } from './inbound/internal-notify-transfer.controller.js';
 export { FanNotificationWorker, type WorkerResult } from './application/fan-notification-worker.js';
 export { MemoryFanNotifyStore } from './adapters/memory-fan-notify-store.js';
 export { DrizzleFanNotifyStore } from './adapters/db/drizzle-fan-notify-store.js';

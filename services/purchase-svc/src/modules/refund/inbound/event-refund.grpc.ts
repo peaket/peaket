@@ -117,7 +117,14 @@ export interface EventRefundGrpcOptions {
 
 const statusOf = (err: unknown): grpc.ServiceError => {
   if (err instanceof EventRefundError) {
-    const code = err.code === 'INVALID' ? grpc.status.INVALID_ARGUMENT : err.code === 'NOT_FOUND' ? grpc.status.NOT_FOUND : grpc.status.FAILED_PRECONDITION;
+    const code =
+      err.code === 'INVALID'
+        ? grpc.status.INVALID_ARGUMENT
+        : err.code === 'NOT_FOUND'
+          ? grpc.status.NOT_FOUND
+          : err.code === 'UNAVAILABLE'
+            ? grpc.status.UNAVAILABLE
+            : grpc.status.FAILED_PRECONDITION;
     return { code, details: err.message } as grpc.ServiceError;
   }
   return { code: grpc.status.UNAVAILABLE, details: '지금 처리할 수 없다' } as grpc.ServiceError;

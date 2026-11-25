@@ -39,6 +39,8 @@ export interface TransferOfferRecord {
   readonly expiresAtMs: number;
   readonly createdAtMs: number;
   readonly decidedAtMs?: number;
+  /** 재인증 강도가 '요청만 함'이면 같은 트랜잭션에서 보낸 사람에게 약한 재인증 알림을 더한다 */
+  readonly weakReauth?: boolean;
 }
 
 /** 판정에 쓰는 티켓의 칸만. 저장소가 행 잠금 안에서 읽어 넘긴다 */
@@ -50,6 +52,8 @@ export interface TransferTicketSnapshot {
   readonly status: TicketStatus;
   readonly transferPending: boolean;
   readonly eventStartsAtMs?: number;
+  /** entry_close.closed_at. 없으면 공연 시작 + 50시간을 쓴다(소유권 동결의 끝) */
+  readonly entryClosesAtMs?: number;
   readonly fraudLockCaseId?: string;
   readonly fraudLockVersion?: number;
   /** 월렛 목록과 상세가 같은 값을 싣도록 저장소가 넘긴다 */
@@ -73,8 +77,10 @@ export interface TicketDetailView {
   readonly pendingTransfer: { readonly offerId: string; readonly expiresAt: string } | null;
 }
 
-/** 받은 표의 보낸 분 자리(닉네임 원천이 없다, 계획 §6-8) */
-export const RECEIVED_FROM_MASKED = '회*';
+/** 받은 표의 보낸 분 자리(닉네임 원천이 없다, 계획 §6-8). identity가 답하지 못하면 이 값을 쓴다 */
+export const RECEIVED_FROM_MASKED = '회원';
+/** 입장 마감을 모를 때의 대체값: 공연 시작 + 50시간 [가정](transfer-refund §3.1, offline-gate §5) */
+export const ENTRY_FREEZE_FALLBACK_MS = 50 * 60 * 60 * 1000;
 
 /**
  * 상세 한 장. 양도 가능은 상품 양도 가능(원천 없음 → 참)·결제자 보유·마감 전·입장 시작 전·진행 중 요청 없음·잠금 없음이다.
@@ -87,6 +93,8 @@ export function ticketDetailOf(
     readonly openOffer?: { readonly offerId: string; readonly expiresAtMs: number };
     readonly lockActive: boolean;
     readonly lockExpiresAtMs?: number;
+    /** 받은 표의 보낸 분 닉네임(가린 값). 없으면 '회원'. 결제자 보유 표는 null 고정 */
+    readonly receivedFromNickname?: string | null;
   },
 ): TicketDetailView {
   const starts = t.eventStartsAtMs;
@@ -115,7 +123,7 @@ export function ticketDetailOf(
     ...(close === undefined ? {} : { transferDeadline: new Date(close).toISOString() }),
     ...(starts === undefined ? {} : { cancelDeadline: new Date(starts).toISOString(), eventStartsAt: new Date(starts).toISOString() }),
     ...(t.gateZone === undefined || t.gateZone.trim() === '' ? {} : { gateZone: t.gateZone }),
-    receivedFromNickname: payerHolds ? null : RECEIVED_FROM_MASKED,
+    receivedFromNickname: payerHolds ? null : (o.receivedFromNickname ?? RECEIVED_FROM_MASKED),
     pendingTransfer: pendingOffer === undefined ? null : { offerId: pendingOffer.offerId, expiresAt: new Date(pendingOffer.expiresAtMs).toISOString() },
   };
 }
@@ -240,20 +248,28 @@ export function withdrawRejectionOf(offer: TransferOfferRecord, o: { readonly ac
   return undefined;
 }
 
+/** 입장 시작부터 마감까지 소유권 이전이 막힌다. 마감을 모르면 시작 + 50시간 [가정] */
+export function ownershipFrozen(startsAtMs: number | undefined, entryClosesAtMs: number | undefined, nowMs: number): boolean {
+  // 공연 시작을 모르면 동결하지 않는다(기존 규칙과 같다). 시작 전이면 마감과 상관없이 동결이 아니다
+  if (startsAtMs === undefined || nowMs < startsAtMs) return false;
+  const closes = entryClosesAtMs ?? startsAtMs + ENTRY_FREEZE_FALLBACK_MS;
+  return nowMs < closes;
+}
+
 export type ReturnRejection = 'NOT_HOLDER' | 'PAYER_HOLDS' | 'ENTRY_STARTED' | 'ENTRY_RECORDED' | 'ALREADY_ENDED';
 
 /**
- * 받은 보유자가 결제자에게 돌려줄 수 있는가(§3.1, R-T17). 결제자 본인이면 PAYER_HOLDS, 입장 시작 뒤는 ENTRY_STARTED,
- * 입장 기록이 있으면 ENTRY_RECORDED다. 부정 예매 양도 잠금은 막지 않는다(ADR-0173 결정 3).
+ * 받은 보유자가 결제자에게 돌려줄 수 있는가(§3.1, R-T17). 결제자 본인이면 PAYER_HOLDS, 입장 동결(시작~마감) 중은 ENTRY_STARTED,
+ * 입장 기록이 있으면 ENTRY_RECORDED다. 마감 뒤는 허용한다. 부정 예매 양도 잠금은 막지 않는다(ADR-0173 결정 3).
  */
 export function returnRejectionOf(
   t: TransferTicketSnapshot,
-  o: { readonly accountId: string; readonly nowMs: number; readonly eventStartsAtMs: number | undefined; readonly entryRecorded: boolean },
+  o: { readonly accountId: string; readonly nowMs: number; readonly eventStartsAtMs: number | undefined; readonly entryClosesAtMs?: number; readonly entryRecorded: boolean },
 ): ReturnRejection | undefined {
   if (t.accountId !== o.accountId) return 'NOT_HOLDER';
   if (t.accountId === t.payerAccountId) return 'PAYER_HOLDS';
   if (ENDED_STATUSES.has(t.status)) return 'ALREADY_ENDED';
-  if (!beforeEntryStart(o.eventStartsAtMs, o.nowMs)) return 'ENTRY_STARTED';
+  if (ownershipFrozen(o.eventStartsAtMs, o.entryClosesAtMs, o.nowMs)) return 'ENTRY_STARTED';
   if (o.entryRecorded) return 'ENTRY_RECORDED';
   return undefined;
 }

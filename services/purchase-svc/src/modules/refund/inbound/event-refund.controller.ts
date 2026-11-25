@@ -3,7 +3,7 @@
 // 이 HTTP는 같은 쓰임새를 여는 호환 경로다(구버전 ops-svc·로컬·CI). 두 길은 같은 EventRefundService와 멱등 키를 쓴다.
 // 클러스터 안에서만 열고, 인증은 서비스 메시/네트워크 정책 몫이다(공개 경로 아님).
 import { BadRequestException, Body, ConflictException, Controller, Get, HttpCode, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
-import { ContractRouteSchema, InternalTokenGuard, Roles } from '@peaket/platform';
+import { ContractRouteSchema, InternalTokenGuard, ProblemError, Roles } from '@peaket/platform';
 import { z } from 'zod';
 import { EventRefundError, EventRefundService } from '../application/event-refund-service.js';
 import {
@@ -85,6 +85,7 @@ const fail = (err: unknown): never => {
   if (err instanceof EventRefundError) {
     if (err.code === 'INVALID') throw new BadRequestException(err.message);
     if (err.code === 'NOT_FOUND') throw new NotFoundException(err.message);
+    if (err.code === 'UNAVAILABLE') throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '의존 서비스를 잠시 쓸 수 없습니다', retryAfterSeconds: 1 });
     throw new ConflictException(err.message);
   }
   throw err;

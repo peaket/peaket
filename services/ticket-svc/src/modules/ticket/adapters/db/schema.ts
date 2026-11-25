@@ -246,3 +246,38 @@ export const ticketOperatorCancellation = pgTable(
     check('ticket_operator_cancellation_result_check', sql`${t.result} IN ('CANCELED', 'SKIPPED_ALREADY_ENDED', 'SKIPPED_ENTRY_RECORDED', 'SKIPPED_HOLDER_CHANGED')`),
   ],
 );
+
+/**
+ * 양도 알림 보낼 표(docs/data.md `transfer_notice`, docs/features/notify.md §4.8, 마이그레이션 0023).
+ * 양도 사건과 같은 트랜잭션에 두 사람(약한 재인증은 한 사람) 행을 적고, 보내기 반복이 core-svc 내부 입구로 보낸다.
+ * 중복 키 (type, offer_id, account_id)가 같은 사건의 재전송을 한 행으로 막는다. 연락처·금액은 두지 않는다
+ */
+export const transferNotice = pgTable(
+  'transfer_notice',
+  {
+    id: uuid('id').primaryKey(),
+    type: text('type').notNull(),
+    party: text('party').notNull(),
+    offerId: uuid('offer_id').notNull(),
+    ticketId: uuid('ticket_id').notNull(),
+    eventId: uuid('event_id').notNull(),
+    accountId: uuid('account_id').notNull(),
+    reason: text('reason'),
+    createdAt: at('created_at').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: at('next_attempt_at').notNull(),
+    sentAt: at('sent_at'),
+  },
+  (t) => [
+    uniqueIndex('transfer_notice_event_account_uq').on(t.type, t.offerId, t.accountId),
+    index('transfer_notice_due_idx').on(t.nextAttemptAt).where(sql`${t.sentAt} IS NULL`),
+    index('transfer_notice_sent_idx').on(t.sentAt).where(sql`${t.sentAt} IS NOT NULL`),
+    check(
+      'transfer_notice_type_check',
+      sql`${t.type} IN ('TRANSFER_OFFERED', 'TRANSFER_ACCEPTED', 'TRANSFER_REJECTED', 'TRANSFER_WITHDRAWN', 'TRANSFER_EXPIRED', 'TICKET_RETURNED', 'TRANSFER_WEAK_REAUTH')`,
+    ),
+    check('transfer_notice_party_check', sql`${t.party} IN ('SENDER', 'RECIPIENT', 'PAYER', 'RETURNER')`),
+    check('transfer_notice_reason_check', sql`${t.reason} IS NULL OR ${t.reason} IN ('SENDER', 'EVENT_CANCELLED', 'EVENT_POSTPONED', 'OTHER')`),
+    check('transfer_notice_attempts_check', sql`${t.attempts} >= 0`),
+  ],
+);
