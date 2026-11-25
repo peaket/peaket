@@ -32,6 +32,19 @@ import { PromBotReviewSignals } from './modules/bot-review/index.js';
 import { botReviewLabelsFromEnv, botReviewSourceFromEnv } from './bot-review-wiring.js';
 import { realtimeTableFromEnv } from './rt-wiring.js';
 import { HttpCoreContract } from './adapters/http-core-contract.js';
+import {
+  DrizzleInvestigationStore,
+  GrpcTransferLocks,
+  LoggingFraudAlerts,
+  LoggingFraudLabels,
+  LoggingFraudNotifier,
+  LoggingFraudOpsEvent,
+  LoggingInvestigationAccess,
+  UnavailableFraudForensicsRunner,
+  UnavailableSnapshotVerifier,
+  UnavailableTransferLocks,
+} from './modules/investigations/index.js';
+import { HttpCoreSaleSchedule, UnavailableSaleSchedule } from './modules/readiness/index.js';
 import { PromCsCaseSignals, PromCsDispatchSignals, ReceiveCaseRequested, loadBusinessCalendar } from './modules/cases/index.js';
 import { csAppealPortsFromEnv } from './cs-appeal-wiring.js';
 
@@ -164,6 +177,20 @@ const botReviewLabels = botReviewLabelsFromEnv(process.env);
 const botReviewActorRef = loadLogPseudonymizer(process.env).pseudonymizer;
 // 관제 실시간 표(OPS-160, F-04-1): rt 뷰 0.5초 조회 보드와 파트너 판매 현황. 소속 확인은 회차 취소와 같은 core 판매 설정 클라이언트다
 const realtimeTable = realtimeTableFromEnv(process.env, { ...(cancellationDeps.owners ? { owners: cancellationDeps.owners } : {}) });
+// F-04-12 부정 예매 조사(동결 로컬). 실제 기록 재계산기·후보 실행기는 아직 조립하지 않아 하루 검증·자동 재시도는 판정하지 않는다.
+const investigations = {
+  store: new DrizzleInvestigationStore(database),
+  schedule: coreUrl ? HttpCoreSaleSchedule.fromUrl(coreUrl, () => Date.now(), internalToken) : new UnavailableSaleSchedule(),
+  locks: ticketGrpcUrl ? new GrpcTransferLocks(ticketGrpcUrl) : new UnavailableTransferLocks(),
+  notifier: new LoggingFraudNotifier(),
+  labels: new LoggingFraudLabels(),
+  alerts: new LoggingFraudAlerts(),
+  access: new LoggingInvestigationAccess(),
+  events: new LoggingFraudOpsEvent(),
+  verifier: new UnavailableSnapshotVerifier(),
+  runner: new UnavailableFraudForensicsRunner(),
+  now: () => Date.now(),
+};
 // 명령·감사 체인 지표(BAT-355): ops_command_dry_run_unavailable_total, ops_audit_mac_lag_seconds, ops_audit_kms_failover_total. 서비스를 만든 뒤 레지스트리에 붙인다
 const commandSignals = new PromCommandSignals();
 const auditSignals = new AuditSignals();
@@ -183,6 +210,7 @@ const service = await createService({
     adminAccounts: { identity: adminIdentity, ...(reauth ? { reauth } : {}) },
     eventCancellations,
     realtimeTable: realtimeTable.deps,
+    investigations,
     botReview: {
       source: botReviewSource.source,
       ...(botReviewLabels ? { labels: botReviewLabels } : {}),

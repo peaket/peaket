@@ -20,7 +20,7 @@ export interface FakeClock extends Clock {
   advance(ms: number): void;
 }
 
-/** 시험용 시계. 저절로 흐르지 않고 advance로만 간다 */
+/** 시험용 시계. 저절로 흐르지 않고 advance로만 간다. 음수는 시험이 앞당긴 시계를 되돌릴 때만 쓴다 */
 export function fakeClock(start: { now?: number; monotonic?: number } = {}): FakeClock {
   let wall = start.now ?? Date.parse('2026-11-01T00:00:00.000Z');
   let mono = start.monotonic ?? 0;
@@ -28,7 +28,7 @@ export function fakeClock(start: { now?: number; monotonic?: number } = {}): Fak
     now: () => wall,
     monotonicMs: () => mono,
     advance(ms: number) {
-      if (!(ms >= 0)) throw new Error(`시계는 앞으로만 간다: ${ms}`);
+      if (!Number.isFinite(ms)) throw new Error(`시계 이동 값이 유한하지 않다: ${ms}`);
       wall += ms;
       mono += ms;
     },

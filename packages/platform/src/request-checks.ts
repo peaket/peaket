@@ -496,6 +496,11 @@ export function installRequestChecks(http: FastifyInstance, auth: AuthState): vo
   http.removeContentTypeParser(['application/json', 'text/plain']);
   http.addContentTypeParser('application/json', { parseAs: 'buffer' }, (request, body, done) => {
     keepRawBody(request, body as Buffer);
+    // 본문 없는 POST(예: 조사 다시 돌리기)는 빈 JSON으로 본다. 인증·멱등 키 검사는 그대로 먼저 한다.
+    if ((body as Buffer).length === 0) {
+      done(null, {});
+      return;
+    }
     json(request, (body as Buffer).toString('utf8'), done);
   });
   http.addContentTypeParser('text/plain', { parseAs: 'buffer' }, (request, body, done) => {

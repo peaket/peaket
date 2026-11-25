@@ -30,6 +30,7 @@ import { PayoutsModule, UnavailableApprovalVerifier, type PayoutsModuleDeps } fr
 import { ApprovalsModule, type ApprovalsModuleDeps } from './modules/approvals/index.js';
 import { BotReviewModule, type BotReviewSignals, type BotReviewSource, type TrustLabels } from './modules/bot-review/index.js';
 import { RealtimeTableModule, RtWidgetSource, type RealtimeTableModuleDeps } from './modules/realtime-table/index.js';
+import { InvestigationsModule, type InvestigationsModuleDeps } from './modules/investigations/index.js';
 import type { AdminIdentity, AdminReauth } from './modules/admin-accounts/domain/ports.js';
 import {
   CsCaseEventCancellationCases,
@@ -107,8 +108,8 @@ interface CommonWiring {
   };
   /** 관제 실시간 표(OPS-160, F-04-1): 0.5초 조회 보드와 파트너 판매 현황 REST. 시작 조립(rt-wiring)이 만든다. 없으면 그 경로를 열지 않는다 */
   readonly realtimeTable?: RealtimeTableModuleDeps;
-  /** F-04-12 조사 모듈 조립(뼈대). 다음 커밋에서 타입을 채운다 */
-  readonly investigations?: unknown;
+  /** F-04-12 부정 예매 조사 모듈. identity·audit은 AppModule이 채운다 */
+  readonly investigations?: Omit<InvestigationsModuleDeps, 'identity' | 'audit'>;
   /**
    * 회차 취소 요청(BAT-425 GAT-130 잔여, BAT-420 GAT-110). refunds·reauth가 없으면 요청·확정이 503이다.
    * reader(미리보기·진행률)·stopper(판매 멈춤)·owners(파트너 소속)는 시작 조립(event-cancellation-wiring)이 고른다. 없으면 그 경로가 503이다.
@@ -245,6 +246,7 @@ export class AppModule {
             failureCases: cases.approvalFailures,
           }),
           BotReviewModule.register({ database: o.database, ...(o.botReview ?? {}) }),
+          ...(o.investigations && o.adminAccounts ? [InvestigationsModule.register({ ...o.investigations, identity: o.adminAccounts.identity, audit: chain })] : []),
           ...(o.realtimeTable ? [RealtimeTableModule.register(o.realtimeTable)] : []),
           EventCancellationsModule.register(
             eventCancellationDeps(
@@ -294,6 +296,7 @@ export class AppModule {
           },
         }),
         BotReviewModule.register({ ...(o.botReview ?? {}) }),
+        ...(o.investigations && o.adminAccounts ? [InvestigationsModule.register({ ...o.investigations, identity: o.adminAccounts.identity, audit: chain })] : []),
         ...(o.realtimeTable ? [RealtimeTableModule.register(o.realtimeTable)] : []),
         EventCancellationsModule.register(eventCancellationDeps(o, cancellations, { suspension: new MemorySaleSuspensionLookup(store), cases: new CsCaseEventCancellationCases(cases.receive) }, chain)),
       ],
