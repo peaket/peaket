@@ -47,7 +47,7 @@ describe('ST-T24 inv 표 넷과 권한', () => {
     expect(sql).toContain("CREATE SETTINGS PROFILE IF NOT EXISTS inv_reader_profile SETTINGS readonly = 1, max_execution_time = 60, max_memory_usage = 4294967296");
     expect(sql).toContain('GRANT INSERT ON inv.* TO inv_ingest');
     expect(sql).toContain('GRANT SELECT ON inv.* TO inv_reader');
-    expect(sql).toContain('GRANT ALTER DROP PARTITION ON inv.* TO inv_purger');
+    expect(sql).toContain('GRANT ALTER TABLE ON inv.* TO inv_purger');
     expect(sql).not.toMatch(/GRANT ALL/);
     expect(sql).not.toContain('ON *.*');
     expect(sql).not.toContain('GRANT SELECT ON inv.* TO inv_ingest');

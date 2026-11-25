@@ -144,8 +144,7 @@ test('ST-T21 ⑩ 실제 Kafka·ClickHouse에서 한 여정과 다시 보낸 묶�
   expect(rows.find((r) => r.step === 'PAY_TRY')).toMatchObject({ payment_method_ref: 'k1.pay-abc', card_bin: '433028' });
 }, 120_000);
 
-test('ST-T24 ⑤ 실제 ClickHouse에서 지난 회차 파티션이 지워지고 날짜가 바뀐 회차는 남는다', async () => {
-  const oldId = 'aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa';
+test('ST-T24 ⑤ 실제 ClickHouse에서 지난 회차 파티션이 지워지고 날짜가 바뀐 회차는 남는다', async () => {  const oldId = 'aaaaaaaa-aaaa-7aaa-8aaa-aaaaaaaaaaaa';
   const movedId = 'bbbbbbbb-bbbb-7bbb-8bbb-bbbbbbbbbbbb';
   // JSONEachRow로 두 회차를 넣는다. 표의 칸을 모두 채운다
   for (const [eventId, retain] of [
@@ -166,4 +165,47 @@ test('ST-T24 ⑤ 실제 ClickHouse에서 지난 회차 파티션이 지워지고
   expect(logs.length).toBeGreaterThanOrEqual(4);
   const partition = await ch.rows<{ partition: string }>(`SELECT partition FROM system.parts WHERE database = 'inv' AND table = 'inv_request' AND active AND partition = '${oldId}'`);
   expect(partition).toHaveLength(0);
+}, 120_000);
+
+test('ST-T24 ⑧ 실제 ClickHouse에서 사용자 권한이 최소 권한이다', async () => {
+  const admin = new ClickHouseHttp({ baseUrl: ch.url, user: CH_USER, password: CH_PASSWORD });
+  // 비밀번호 자리표시자를 채워 사용자·프로필·권한을 만든다
+  await migrateInv((sql) => admin.exec(sql), fileURLToPath(new URL('../../../data/clickhouse/inv', import.meta.url)), 'single', {
+    inv_ingest_password: 'Ingest-Pa55word',
+    inv_reader_password: 'Reader-Pa55word',
+    inv_purger_password: 'Purger-Pa55word',
+  });
+  const ingest = new ClickHouseHttp({ baseUrl: ch.url, user: 'inv_ingest', password: 'Ingest-Pa55word' });
+  const reader = new ClickHouseHttp({ baseUrl: ch.url, user: 'inv_reader', password: 'Reader-Pa55word' });
+  const purger = new ClickHouseHttp({ baseUrl: ch.url, user: 'inv_purger', password: 'Purger-Pa55word' });
+
+  // inv_ingest: 넣기만. 읽기는 거절된다
+  await ingest.exec(
+    `INSERT INTO inv.inv_ingest_progress (topic, partition, offset, ingested_at) SETTINGS date_time_input_format = 'best_effort' FORMAT JSONEachRow\n` +
+      `${JSON.stringify({ topic: 'diag', partition: 0, offset: '1', ingested_at: '2026-12-01T09:00:00.000Z' })}\n`,
+  );
+  await expect(ingest.exec('SELECT count() FROM inv.inv_request')).rejects.toThrow(/Not enough privileges|ACCESS_DENIED/);
+
+  // inv_reader: 읽기만. 넣기는 거절되고 프로필이 읽기 전용이다
+  expect(Number((await reader.rows<{ c: string }>('SELECT count() c FROM inv.inv_ingest_progress'))[0]!.c)).toBeGreaterThanOrEqual(0);
+  await expect(
+    reader.exec(
+      `INSERT INTO inv.inv_ingest_progress (topic, partition, offset, ingested_at) SETTINGS date_time_input_format = 'best_effort' FORMAT JSONEachRow\n` +
+        `${JSON.stringify({ topic: 'diag', partition: 0, offset: '2', ingested_at: '2026-12-01T09:00:00.000Z' })}\n`,
+    ),
+  ).rejects.toThrow(/Not enough privileges|ACCESS_DENIED|readonly/);
+
+  // inv_purger: 회차 파티션 지우기만. 읽기는 거절되고, 파티션 지우기는 된다
+  await expect(purger.exec('SELECT count() FROM inv.inv_request')).rejects.toThrow(/Not enough privileges|ACCESS_DENIED/);
+  const dropId = 'cccccccc-cccc-7ccc-8ccc-cccccccccccc';
+  await admin.exec(
+    `INSERT INTO inv.inv_request (ts, ingested_at, request_id, event_id, gateway, route_kind, status, ip, asn, net_class, ja4, edge_bot_labels, device_ref, pid, account_id, journey_id, retain_until, ingest_rank) SETTINGS date_time_input_format = 'best_effort' FORMAT JSONEachRow\n` +
+      `${JSON.stringify({ ts: iso(0), ingested_at: iso(0), request_id: 'r-drop', event_id: dropId, gateway: 'GW_QUEUE', route_kind: 'QUEUE_ENTRY', status: 200, ip: '::ffff:203.0.113.9', asn: 1, net_class: 'OTHER', ja4: '', edge_bot_labels: [], device_ref: '', pid: 'pid-9', account_id: 'acct-9', journey_id: '', retain_until: '2027-01-01T00:00:00.000Z', ingest_rank: '1' })}\n`,
+  );
+  await purger.exec(`ALTER TABLE inv.inv_request DROP PARTITION '${dropId}'`);
+  expect(await n(`SELECT count() c FROM inv.inv_request FINAL WHERE event_id = '${dropId}'`)).toBe(0);
+  // 다른 데이터베이스에는 권한이 없다
+  await admin.exec('CREATE DATABASE IF NOT EXISTS it_other');
+  await admin.exec('CREATE TABLE IF NOT EXISTS it_other.t (x UInt8) ENGINE = Memory');
+  await expect(purger.exec('SELECT count() FROM it_other.t')).rejects.toThrow(/Not enough privileges|ACCESS_DENIED/);
 }, 120_000);
