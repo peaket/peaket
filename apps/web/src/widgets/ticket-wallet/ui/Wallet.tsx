@@ -491,7 +491,7 @@ function FirstTicket({ v, go, path }: { v: WalletView; go: Go; path: string }) {
                   </li>
                 ))}
               </ol>
-              <BoothReissue seat={T1.seat} showButton={v.boothBtn} initialOpen={v.consentOpen} nextHref={go('부스 코드(10분)')} />
+              <BoothReissue seat={T1.seat} showButton={v.boothBtn} initialOpen={v.consentOpen} nextHref={go('부스 코드(10분)')} ticketId={T1.qrUuid} />
               {v.boothLimit ? (
                 <NoticeBanner tone="danger" role="alert">
                   오늘은 부스 재발급을 더 요청할 수 없습니다(하루 3회)

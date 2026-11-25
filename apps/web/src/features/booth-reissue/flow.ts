@@ -4,6 +4,23 @@
 // 토큰·코드 원문은 이 객체 밖으로(로그·저장소) 내보내지 않는다.
 export type BoothPhase = 'idle' | 'consent' | 'verifying' | 'code' | 'waiting' | 'registered' | 'expired' | 'limit' | 'mismatch' | 'before-entry' | 'error';
 
+/** 기관 창 값(openapi VerificationStart.window). 화면은 이 값으로 팝업에 양식을 보낸다 */
+export interface BoothWindow {
+  url: string;
+  method: 'GET' | 'POST';
+  fields: Record<string, string>;
+  mode: 'POPUP' | 'REDIRECT';
+}
+
+export interface BoothStart {
+  verificationId: string;
+  window: BoothWindow;
+  expiresAt: string;
+}
+
+/** `startVerification()`의 답: started면 기관 창을 열고, error면 onState가 이미 이유를 보인다 */
+export type BoothStartAnswer = { kind: 'started'; id: string; window: BoothWindow } | { kind: 'error' };
+
 export interface BoothState {
   phase: BoothPhase;
   boothCode?: string;
@@ -12,7 +29,7 @@ export interface BoothState {
 }
 
 export interface BoothReissuePorts {
-  start(i: { ticketId: string; consent: true }): Promise<{ verificationId: string; window: unknown; expiresAt: string }>;
+  start(i: { ticketId: string; consent: true }): Promise<BoothStart>;
   confirm(i: { verificationId: string; providerResult: Record<string, string> }): Promise<{ resultToken?: string }>;
   request(i: { ticketId: string; reverificationToken: string }): Promise<{ boothRequestId: string; boothCode: string; expiresAt: string }>;
   register(i: { ticketId: string; boothRequestId: string; reason: 'BOOTH'; publicKeyJwk: JsonWebKey }): Promise<{ keyId: string }>;
@@ -60,14 +77,31 @@ export class BoothReissueFlow {
   }
 
   async consent(): Promise<void> {
-    if (this.#state.phase !== 'consent') return;
+    await this.startVerification();
+  }
+
+  /**
+   * 대조 목적 동의 뒤 본인확인 건을 만들고 기관 창 값을 돌려준다. 화면은 이 값으로 팝업을 열고,
+   * 결과 확정(resultToken)은 복귀 화면이 보내는 값(BroadcastChannel)을 받아 acceptResultToken으로 넣는다.
+   * 시작이 거절되면 이 객체의 phase가 mismatch·error로 바뀐다(호출한 화면은 startCallerFlow의 onDone도 본다).
+   */
+  async startVerification(): Promise<BoothStartAnswer> {
+    if (this.#state.phase !== 'consent') return { kind: 'error' };
     this.#set({ phase: 'verifying' });
     try {
-      await this.#d.api.start({ ticketId: this.#d.ticketId, consent: true });
+      const r = await this.#d.api.start({ ticketId: this.#d.ticketId, consent: true });
+      return { kind: 'started', id: r.verificationId, window: r.window };
     } catch (e) {
-      this.#fail(e);
-      throw e;
+      if (statusOf(e) === 409 || typeOf(e) === 'booth-mismatch') this.#set({ phase: 'mismatch' });
+      else this.#fail(e);
+      return { kind: 'error' };
     }
+  }
+
+  /** 복귀 화면이 확인 응답으로 받은 reverificationToken. 원문은 로그·저장소에 남기지 않는다 */
+  acceptResultToken(token: string): void {
+    if (this.#state.phase !== 'verifying') return;
+    this.#token = token;
   }
 
   async verified(i: { verificationId: string; providerResult: Record<string, string> }): Promise<void> {

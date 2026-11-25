@@ -6,6 +6,8 @@ import { useEffect, useId, useState, type ComponentType, type ReactNode } from '
 import { WebShellModal } from '@peaket/ds/WebShell';
 import type { DeviceQrProps, DeviceQrSnapshot } from '@/features/wallet-device-key/ui/DeviceQr';
 import type { OfflineBannerProps } from '@/features/wallet-device-key/ui/OfflineBanner';
+import { deviceKeyRegistrationAvailable } from '@/features/wallet-device-key';
+import { BoothReissueLive } from './BoothReissueLive';
 import { afterLoad } from '@/shared/lib/after-load';
 import { useToast } from '@/shared/ui/toast';
 
@@ -175,11 +177,42 @@ export function ReturnToPayerButton({
 }
 
 /**
- * 부스 재발급 1/3단계: 본인확인 결과 대조 동의(d5 §5.13 저장소 유실·입장 시작 뒤 → 대조 목적 동의 → SCR-006 → 부스 코드).
+ * 부스 재발급 1/3단계. 팬 API 주소가 있는 빌드는 실제 흐름(BoothReissueLive)을 쓰고,
+ * 주소가 없는 디자인 미리보기만 다음 상태로 옮기는 예전 시트를 쓴다.
+ */
+export function BoothReissue({
+  seat,
+  showButton,
+  initialOpen,
+  nextHref,
+  ticketId,
+}: {
+  seat: string;
+  showButton: boolean;
+  initialOpen: boolean;
+  nextHref: string;
+  ticketId: string;
+}) {
+  if (!deviceKeyRegistrationAvailable()) {
+    return <BoothReissuePreview seat={seat} showButton={showButton} initialOpen={initialOpen} nextHref={nextHref} />;
+  }
+  return (
+    <BoothReissueLive
+      seat={seat}
+      showButton={showButton}
+      initialOpen={initialOpen}
+      ticketId={ticketId}
+      registeredQr={<DeviceQrLazy ticketId={ticketId} label={`입장 QR, ${seat}, 부스 재발급 뒤 새로 등록한 기기`} />}
+    />
+  );
+}
+
+/**
+ * 부스 재발급 1/3단계(디자인 미리보기): 본인확인 결과 대조 동의(d5 §5.13 저장소 유실·입장 시작 뒤 → 대조 목적 동의 → SCR-006 → 부스 코드).
  * 휴대폰은 아래 시트(보드 m), 태블릿·데스크톱은 가운데 대화상자(보드 t·d, 최대 폭 520). 동의에 체크해야 [동의하고 휴대폰 본인확인]이 눌린다.
  * 퍼블리싱 단계라 본인확인 창(SCR-006) 없이 다음 단계인 부스 코드 상태로 옮긴다.
  */
-export function BoothReissue({
+function BoothReissuePreview({
   seat,
   showButton,
   initialOpen,

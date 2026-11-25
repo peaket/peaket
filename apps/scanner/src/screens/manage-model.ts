@@ -40,6 +40,15 @@ export interface ManageSnapshot {
   devices: DeviceRow[];
   flags: FlagRow[];
   overrides: OverrideRow[];
+  /** SCR-052 상단 요약(서버 GateStatus의 집계). 시험은 이 칸을 보지 않는다 */
+  summary?: {
+    entriesByZone: Record<string, number>;
+    rejectsByReason: Record<string, number>;
+    openFlags: number;
+    boothCount: number;
+    overrideCount: number;
+    entryClosedAt?: string;
+  };
   error?: string;
 }
 
@@ -155,6 +164,14 @@ export class ManageController {
       devices: devicesViewOf({ devices: status.devices, selfDeviceId: this.#d.deviceId }),
       flags: flagsViewOf(flags),
       overrides: overridesViewOf(overrides),
+      summary: {
+        entriesByZone: status.entriesByZone,
+        rejectsByReason: status.rejectsByReason,
+        openFlags: status.openFlags,
+        boothCount: status.boothCount,
+        overrideCount: status.overrideCount,
+        ...(status.entryClosedAt !== undefined ? { entryClosedAt: status.entryClosedAt } : {}),
+      },
     };
   }
 

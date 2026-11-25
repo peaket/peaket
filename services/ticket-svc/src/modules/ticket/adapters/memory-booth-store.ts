@@ -61,7 +61,7 @@ export class MemoryBoothStore implements BoothStore {
   constructor(private readonly d: Deps) {}
 
   #ticket(ticketId: string): TicketLike | undefined {
-    return this.d.deviceKeys.tickets.get(ticketId) ?? this.d.gate.tickets?.get(ticketId);
+    return this.d.gate.tickets?.get(ticketId) ?? this.d.deviceKeys.tickets.get(ticketId);
   }
 
   #label(t: TicketLike): string {
@@ -69,11 +69,11 @@ export class MemoryBoothStore implements BoothStore {
   }
 
   async ownerOf(ticketId: string): Promise<string | undefined> {
-    return this.#ticket(ticketId)?.accountId;
+    return this.d.deviceKeys.tickets.get(ticketId)?.accountId;
   }
 
   async createRequest(i: { ticketId: string; accountId: string; codeHash: string; nowMs: number; dayKey: string; expiresAtMs: number; reverificationId?: string }) {
-    const t = this.#ticket(i.ticketId);
+    const t = this.d.deviceKeys.tickets.get(i.ticketId);
     if (!t || t.accountId !== i.accountId) return { kind: 'not_found' as const };
     if (t.eventStartsAtMs === undefined || i.nowMs < t.eventStartsAtMs) return { kind: 'before_entry' as const };
     if ([...this.rows.values()].filter((r) => r.ticketId === i.ticketId && r.dayKey === i.dayKey).length >= 3) return { kind: 'limit' as const };
@@ -95,7 +95,12 @@ export class MemoryBoothStore implements BoothStore {
   }
 
   async authorize(i: { eventId: string; deviceId: string; codeHash: string; nowMs: number; allowUntilMs: number }) {
-    const row = [...this.rows.values()].find((r) => r.eventId === i.eventId && r.codeHash === i.codeHash && (r.status === 'PENDING' || r.status === 'ALLOWED' || r.status === 'USED'));
+    // 회차를 먼저 거르면 다른 회차 기기의 코드가 not_found(410)가 된다. 코드로 먼저 찾고 회차 불일치는 event_mismatch(403)다(TR-25).
+    // 같은 코드 해시가 여럿이면(시험이 같은 해시를 다시 쓴다) 아직 쓸 수 있는 PENDING·ALLOWED를 USED보다 먼저 고른다.
+    const rank = (s: string): number => (s === 'PENDING' ? 0 : s === 'ALLOWED' ? 1 : 2);
+    const row = [...this.rows.values()]
+      .filter((r) => r.codeHash === i.codeHash && (r.status === 'PENDING' || r.status === 'ALLOWED' || r.status === 'USED'))
+      .sort((a, b) => rank(a.status) - rank(b.status) || b.requestedAtMs - a.requestedAtMs)[0];
     if (!row) return { kind: 'not_found' as const };
     if (row.eventId !== i.eventId) return { kind: 'event_mismatch' as const };
     if (row.status === 'USED' || row.usedAtMs !== undefined) return { kind: 'expired' as const };

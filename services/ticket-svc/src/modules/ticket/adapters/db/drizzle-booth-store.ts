@@ -53,11 +53,13 @@ export class DrizzleBoothStore implements BoothStore {
       const rows = (await tx.execute(sql`
         select b.id, b.ticket_id, b.event_id, b.status, b.expires_at, b.used_at, coalesce(t.seat_label, t.seat_id::text) seat_label, t.seat_id
         from booth_authorization b join ticket t on t.id = b.ticket_id
-        where b.event_id = ${i.eventId} and b.booth_code_hash = ${i.codeHash} and b.status in ('PENDING','ALLOWED','USED')
-        order by b.requested_at desc limit 1 for update of b
+        where b.booth_code_hash = ${i.codeHash} and b.status in ('PENDING','ALLOWED','USED')
+        order by case b.status when 'PENDING' then 0 when 'ALLOWED' then 1 else 2 end, b.requested_at desc limit 1 for update of b
       `)).rows as unknown as Row[];
       const r = rows[0];
       if (!r) return { kind: 'not_found' as const };
+      // 회차를 먼저 거르면 다른 회차 기기의 코드가 not_found(410)가 된다. 코드로 먼저 찾고 회차 불일치는 event_mismatch(403)다(TR-25)
+      if (r.event_id !== i.eventId) return { kind: 'event_mismatch' as const };
       if (r.used_at !== null || r.status === 'USED') return { kind: 'expired' as const };
       const codeExpired = (await tx.execute(sql`select code_expires_at from booth_authorization where id = ${r.id}`)).rows as { code_expires_at: Date | string }[];
       if (ms(codeExpired[0]!.code_expires_at)! <= i.nowMs) return { kind: 'expired' as const };

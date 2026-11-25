@@ -57,6 +57,8 @@ export interface ResultBody {
   status: ServerStatus;
   next: string;
   restrictedUntil?: string | null;
+  /** BOOTH 목적이 VERIFIED일 때만. 부스 코드를 요청하는 5분 토큰(원문은 이 응답·채널에만) */
+  resultToken?: string;
 }
 
 /** under14: 만 14세 미만으로 정리 중인 계정이라 시작을 받지 않는다(403 under-14, BUILD_ORDER BOT-020) */
@@ -141,7 +143,15 @@ export function isResultMessage(m: unknown, expectedId: string): boolean {
   if (typeof m !== 'object' || m === null || Array.isArray(m)) return false;
   const o = m as Record<string, unknown>;
   const keys = Object.keys(o).sort();
-  return keys.length === 3 && keys[0] === 'status' && keys[1] === 'type' && keys[2] === 'verificationId' && o.type === 'result' && o.verificationId === expectedId && isStatus(o.status);
+  const base = keys.length === 3 && keys[0] === 'status' && keys[1] === 'type' && keys[2] === 'verificationId';
+  const withToken = keys.length === 4 && keys[0] === 'resultToken' && keys[1] === 'status' && keys[2] === 'type' && keys[3] === 'verificationId';
+  return (
+    (base || withToken) &&
+    o.type === 'result' &&
+    o.verificationId === expectedId &&
+    isStatus(o.status) &&
+    (o.resultToken === undefined || (typeof o.resultToken === 'string' && o.resultToken.length > 0))
+  );
 }
 
 function isAckMessage(m: unknown, expectedId: string): boolean {
@@ -167,7 +177,13 @@ async function problemType(r: Response): Promise<string> {
 function isResultBody(v: unknown): v is ResultBody {
   if (typeof v !== 'object' || v === null) return false;
   const o = v as Record<string, unknown>;
-  return isVerificationId(o.verificationId) && typeof o.purpose === 'string' && isStatus(o.status) && typeof o.next === 'string';
+  return (
+    isVerificationId(o.verificationId) &&
+    typeof o.purpose === 'string' &&
+    isStatus(o.status) &&
+    typeof o.next === 'string' &&
+    (o.resultToken === undefined || (typeof o.resultToken === 'string' && o.resultToken.length > 0))
+  );
 }
 
 function isWindow(v: unknown): v is AgencyWindow {
@@ -318,6 +334,8 @@ export interface CallerHandlers {
   onWaiting(): void;
   /** 결과 대화상자(완료면 토스트). 지금 창이 기관으로 넘어가면 부르지 않는다 */
   onDone(outcome: Exclude<VerifyOutcome, 'popup'>): void;
+  /** BOOTH 결과 메시지에 실린 resultToken. 부스 재발급 화면만 받는다(원문은 저장·로그하지 않는다) */
+  onResultToken?: (token: string) => void;
 }
 
 /** [휴대폰 본인확인]을 누른 동작 안에서 부른다(창을 먼저 연다). 돌려준 함수로 기다리기를 멈춘다 */
@@ -404,6 +422,8 @@ export function startCallerFlow(env: CallerEnv, h: CallerHandlers): { cancel(): 
     // 창 닫힘 쪽 조회가 도는 동안 온 메시지도 받는다. 그때는 세대를 올려 앞 조회의 답을 버린다(새 맥락 리뷰 다시 보기 1)
     channel.onmessage = (e) => {
       if (stopped || acked || !isResultMessage(e.data, s.id)) return;
+      const token = (e.data as { resultToken?: unknown }).resultToken;
+      if (typeof token === 'string' && token.length > 0) h.onResultToken?.(token);
       acked = true;
       told = (e.data as { status: unknown }).status;
       channel?.postMessage({ type: 'ack', verificationId: s.id });
@@ -486,7 +506,7 @@ export interface ReturnEnv {
 const LOGIN_AFTER_LOST = `/login?next=${encodeURIComponent('/')}`;
 
 /** 부르는 화면(팝업)에 결과 코드를 알리고 받은 표시를 1초 기다린다. 받으면 true(팝업), 아니면 false(페이지 이동) */
-async function announce(env: ReturnEnv, id: string, status: ServerStatus): Promise<boolean> {
+async function announce(env: ReturnEnv, id: string, status: ServerStatus, resultToken?: string): Promise<boolean> {
   const channel = env.channel();
   const acked = new Promise<boolean>((resolve) => {
     channel.onmessage = (e) => {
@@ -494,7 +514,7 @@ async function announce(env: ReturnEnv, id: string, status: ServerStatus): Promi
     };
     void env.sleep(ACK_WAIT_MS).then(() => resolve(false));
   });
-  channel.postMessage({ type: 'result', verificationId: id, status });
+  channel.postMessage({ type: 'result', verificationId: id, status, ...(resultToken ? { resultToken } : {}) });
   const popup = await acked;
   channel.close();
   return popup;
@@ -546,7 +566,8 @@ export async function runReturnFlow(env: ReturnEnv, posted: Record<string, strin
   const { status, next } = a.body;
   // VERIFIED면 토큰을 갱신한다(일시 장애면 한 번 더). 갱신하지 못했으면 VERIFIED 대신 처리 중으로 알려 부르는 화면이 직접 갱신하게 한다(새 맥락 재검토)
   const refreshed = status === 'VERIFIED' && (await refreshAfterVerified(env.api, (ms) => env.sleep(ms))) === 'ok';
-  const popup = await announce(env, id, status === 'VERIFIED' && !refreshed ? 'PENDING' : status);
+  const announced = status === 'VERIFIED' && !refreshed ? 'PENDING' : status;
+  const popup = await announce(env, id, announced, status === 'VERIFIED' ? a.body.resultToken : undefined);
   const to = safeNext(next);
   if (popup) {
     closeOr(env, to);

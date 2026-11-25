@@ -5,13 +5,14 @@
 // - 가로 보드는 '이상 표시'·'내 예외 통과'만 그렸다. 가로의 기기·부스 탭은 태블릿의 카드 2열을 쓴다(추천안).
 import { CameraView } from "@peaket/ds/CameraView";
 import { ScannerShell } from "@peaket/ds/ScannerShell";
-import { useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import type { ScannerLayout } from "../app/layout";
 import { PreviewSwitcher, usePreviewState } from "../app/preview";
-import { LiveManageBridge } from "./LiveManageBridge";
+import { LiveManageBridge, useLiveManage, type LiveManage } from "./LiveManageBridge";
 export { ManageController } from "./manage-model";
 import { Link } from "../app/router";
 import { device, fleet, myOverrides, placement, sync, zoneFlags } from "./manage-demo";
+import type { BoothView, DeviceRow, FlagRow, ManageSnapshot, OverrideRow } from "./manage-model";
 import { bottomStyle, ManageLink, Strip, stripStyle } from "../shared/shell";
 
 export const MANAGE_STATES = ["이상 표시", "기기 탭", "부스 탭", "내 예외 통과", "오프라인", "빈 화면"] as const;
@@ -34,49 +35,73 @@ function tabFromState(st: ManageState): Tab {
 
 export function ManageScreen() {
   const { state, layout, search } = usePreviewState(MANAGE_STATES, "이상 표시");
+  const live = useLiveManage();
   const params = new URLSearchParams(search);
   const tabParam = params.get("tab");
-  const initialTab: Tab =
+  const allowed = live.live && live.snap ? live.snap.tabs : undefined;
+  const wanted =
     !params.has("state") && (tabParam === "devices" || tabParam === "flags" || tabParam === "booth" || tabParam === "mine")
-      ? tabParam
+      ? (tabParam as Tab)
       : tabFromState(state);
+  const initialTab: Tab = allowed && !allowed.includes(wanted) ? (allowed[0] ?? "devices") : wanted;
+  const counts =
+    live.live && live.snap?.state === "ready"
+      ? `기기 ${live.snap.devices.length} · 이상 표시 ${live.snap.flags.filter((f) => !f.resolved).length} · 내 예외 통과 ${live.snap.overrides.length}`
+      : undefined;
   return (
     <>
-      <LiveManageBridge />
-      <ManageBody key={`${state}-${initialTab}`} st={state} layout={layout} initialTab={initialTab} />
+      <LiveManageBridge
+        state={live.live ? (live.loading ? "불러오는 중" : (live.snap?.state ?? (live.error ? "error" : undefined))) : undefined}
+        error={live.error ?? live.snap?.error}
+        counts={counts}
+      />
+      <ManageBody key={`${state}-${initialTab}`} st={state} layout={layout} initialTab={initialTab} live={live} />
       <PreviewSwitcher states={MANAGE_STATES} current={state} />
     </>
   );
 }
 
-function ManageBody({ st, layout, initialTab }: { st: ManageState; layout: ScannerLayout; initialTab: Tab }) {
+function ManageBody({ st, layout, initialTab, live }: { st: ManageState; layout: ScannerLayout; initialTab: Tab; live: LiveManage }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ devices: null, flags: null, booth: null, mine: null });
   const t = layout === "t";
   const l = layout === "l";
-  const off = st === "오프라인";
-  const empty = st === "빈 화면";
+  const liveMode = live.live;
+  const snap = live.snap;
+  const off = liveMode ? snap?.state === "offline" : st === "오프라인";
+  const empty = !liveMode && st === "빈 화면";
+  const visibleTabs = liveMode && snap ? TABS.filter((x) => snap.tabs.includes(x.key)) : TABS;
+  const active = visibleTabs.some((x) => x.key === tab) ? tab : (visibleTabs[0]?.key ?? "devices");
+  const openFlagCount = liveMode
+    ? (snap?.flags.filter((f) => !f.resolved).length ?? 0)
+    : empty
+      ? 0
+      : 2;
+
+  useEffect(() => {
+    if (active !== tab) setTab(active);
+  }, [active, tab]);
 
   const onTabKey = (event: KeyboardEvent<HTMLButtonElement>) => {
-    const i = TABS.findIndex((x) => x.key === tab);
+    const i = visibleTabs.findIndex((x) => x.key === active);
     let next = -1;
-    if (event.key === "ArrowRight") next = (i + 1) % TABS.length;
-    else if (event.key === "ArrowLeft") next = (i - 1 + TABS.length) % TABS.length;
+    if (event.key === "ArrowRight") next = (i + 1) % visibleTabs.length;
+    else if (event.key === "ArrowLeft") next = (i - 1 + visibleTabs.length) % visibleTabs.length;
     else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = TABS.length - 1;
+    else if (event.key === "End") next = visibleTabs.length - 1;
     if (next < 0) return;
     event.preventDefault();
-    const key = TABS[next]!.key;
+    const key = visibleTabs[next]!.key;
     setTab(key);
     tabRefs.current[key]?.focus();
   };
 
-  const current = TABS.find((x) => x.key === tab)!;
+  const current = TABS.find((x) => x.key === active)!;
   const tabs = (
     // 폭 320에서 마지막 탭이 잘리지 않게 탭 줄만 가로로 넘긴다(키트 20b .tabs-scroll)
     <div className="tabs tabs-scroll" role="tablist" aria-label="현장 관리 메뉴">
-      {TABS.map((x) => {
-        const selected = x.key === tab;
+      {visibleTabs.map((x) => {
+        const selected = x.key === active;
         return (
           <button
             key={x.key}
@@ -95,7 +120,7 @@ function ManageBody({ st, layout, initialTab }: { st: ManageState; layout: Scann
             style={layout === "p" ? { padding: "0 8px" } : undefined}
           >
             {x.label}
-            {x.key === "flags" && !empty ? <span className="badge badge-warning">2</span> : null}
+            {x.key === "flags" && openFlagCount > 0 ? <span className="badge badge-warning">{openFlagCount}</span> : null}
           </button>
         );
       })}
@@ -103,9 +128,16 @@ function ManageBody({ st, layout, initialTab }: { st: ManageState; layout: Scann
   );
 
   let panel: ReactNode;
-  if (tab === "flags") panel = empty ? <EmptyFlags layout={layout} /> : <FlagsPanel layout={layout} />;
-  else if (tab === "devices") panel = <DevicesPanel layout={layout} off={off} />;
-  else if (tab === "booth") panel = <BoothPanel layout={layout} off={off} />;
+  if (liveMode) {
+    if (!snap) panel = live.error ? <LiveStatePanel state="error" error={live.error} onRetry={live.reload} /> : <LiveLoadingPanel />;
+    else if (snap.state !== "ready") panel = <LiveStatePanel state={snap.state} error={snap.error} onRetry={live.reload} />;
+    else if (active === "flags") panel = <LiveFlagsPanel layout={layout} snap={snap} onResolve={live.resolveFlag} />;
+    else if (active === "devices") panel = <LiveDevicesPanel layout={layout} snap={snap} />;
+    else if (active === "booth") panel = <LiveBoothPanel layout={layout} off={off} onAuthorize={live.authorizeBooth} />;
+    else panel = <LiveMinePanel layout={layout} snap={snap} />;
+  } else if (active === "flags") panel = empty ? <EmptyFlags layout={layout} /> : <FlagsPanel layout={layout} />;
+  else if (active === "devices") panel = <DevicesPanel layout={layout} off={off} />;
+  else if (active === "booth") panel = <BoothPanel layout={layout} off={off} />;
   else panel = <MinePanel layout={layout} />;
 
   return (
@@ -149,8 +181,421 @@ function ManageBody({ st, layout, initialTab }: { st: ManageState; layout: Scann
   );
 }
 
-function ResultButtons({ seat, grid }: { seat: string; grid: boolean }) {
+function timeText(iso?: string): string {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Seoul" });
+}
+
+const OVERRIDE_REASON: Record<string, string> = {
+  OVERRIDE_CAMERA: "카메라 고장",
+  OVERRIDE_PHONE_DEAD: "휴대폰 방전",
+  OVERRIDE_KEY_UNKNOWN: "키 미반영",
+  OVERRIDE_BOOTH_OFFLINE: "부스 오프라인",
+  OVERRIDE_OTHER: "그 밖의 사유",
+};
+const reasonLabel = (v: string): string => OVERRIDE_REASON[v] ?? v;
+
+function LiveLoadingPanel() {
+  return (
+    <section className="card state" style={{ padding: "40px 20px", gap: 12 }} aria-busy="true">
+      <span className="state-icon is-primary">
+        <i className="ic ic-clock" aria-hidden="true" />
+      </span>
+      <h2 className="t-xl">현장 관리 정보를 불러오는 중입니다</h2>
+      <p className="t-sm">이 회차 기기·이상 표시·내 예외 통과를 서버에서 읽습니다.</p>
+    </section>
+  );
+}
+
+function LiveStatePanel({ state, error, onRetry }: { state: string; error?: string; onRetry: () => void }) {
+  const body =
+    state === "offline"
+      ? "오프라인입니다. 연결되면 다시 불러옵니다."
+      : state === "forbidden"
+        ? "현장 책임자만 이 화면을 볼 수 있습니다."
+        : state === "no-placement"
+          ? "이 기기의 배치가 없습니다. 책임자에게 배치를 요청해 주세요."
+          : error ?? "스캐너 API에 닿지 못했습니다.";
+  return (
+    <section className="card state" style={{ padding: "40px 20px", gap: 12 }} role="status">
+      <span className={`state-icon ${state === "forbidden" || state === "error" ? "is-danger" : "is-primary"}`}>
+        <i className={`ic ${state === "offline" ? "ic-wifi-off" : state === "error" || state === "forbidden" ? "ic-warning" : "ic-info"}`} aria-hidden="true" />
+      </span>
+      <h2 className="t-xl">{state === "offline" ? "오프라인" : state === "forbidden" ? "권한 없음" : state === "no-placement" ? "배치 없음" : "불러오지 못했습니다"}</h2>
+      <p className="t-sm" role={state === "error" ? "alert" : undefined}>
+        {body}
+      </p>
+      {state === "offline" ? <OfflineBanner /> : null}
+      {state === "error" || state === "offline" ? (
+        <button className="btn btn-outline" type="button" onClick={onRetry}>
+          다시 불러오기
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
+function LiveDevicesPanel({ layout, snap }: { layout: ScannerLayout; snap: ManageSnapshot }) {
+  const wide = layout !== "p";
+  const summary = snap.summary;
+  return (
+    <>
+      <div className="row between" style={{ gap: 8 }}>
+        <h2 className="t-lg">이 회차 기기</h2>
+        <span className="t-sm fw-b">{snap.devices.length}대</span>
+      </div>
+      <div className="table-wrap table-scroll">
+        <table className={wide ? "table" : "table dense"}>
+          <caption className="sr-only">서버가 준 이 회차 기기의 준비 상태, 마지막 동기화, 업로드 대기, 배치</caption>
+          <thead>
+            {wide ? (
+              <tr>
+                <th scope="col">기기</th>
+                <th scope="col">준비 상태</th>
+                <th scope="col">마지막 동기화</th>
+                <th scope="col" className="r">업로드 대기</th>
+                <th scope="col">배치</th>
+              </tr>
+            ) : (
+              <tr>
+                <th scope="col">기기</th>
+                <th scope="col">준비 · 동기화</th>
+                <th scope="col" className="r">대기</th>
+                <th scope="col">배치</th>
+              </tr>
+            )}
+          </thead>
+          <tbody>
+            {snap.devices.map((d) => {
+              const ready = d.ready ? <span className="badge badge-success">준비</span> : <span className="badge">준비 전</span>;
+              const placed = d.placement === "배치 없음" ? <span className="badge badge-warning">배치 없음</span> : d.placement;
+              return wide ? (
+                <tr key={d.deviceId}>
+                  <td className="fw-b">
+                    {d.name}
+                    {d.self ? (
+                      <>
+                        {" "}
+                        <span className="badge">이 기기</span>
+                      </>
+                    ) : null}
+                  </td>
+                  <td>{ready}</td>
+                  <td>{timeText(d.lastSyncAt)}</td>
+                  <td className="r">{d.pendingUploads}</td>
+                  <td>{placed}</td>
+                </tr>
+              ) : (
+                <tr key={d.deviceId}>
+                  <td className="fw-b">
+                    {d.name}
+                    {d.self ? (
+                      <>
+                        <br />
+                        <span className="t-xs">이 기기</span>
+                      </>
+                    ) : null}
+                  </td>
+                  <td>
+                    {ready} {timeText(d.lastSyncAt)}
+                  </td>
+                  <td className="r">{d.pendingUploads}</td>
+                  <td>{placed}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {summary ? (
+        <div className="row wrap" style={{ gap: 8 }}>
+          <span className="badge">입장 {Object.values(summary.entriesByZone).reduce((a, b) => a + b, 0)}</span>
+          <span className="badge badge-warning">이상 표시 {summary.openFlags}</span>
+          <span className="badge">부스 {summary.boothCount}</span>
+          <span className="badge">예외 통과 {summary.overrideCount}</span>
+          {summary.entryClosedAt ? <span className="badge">입장 마감 {timeText(summary.entryClosedAt)}</span> : null}
+        </div>
+      ) : null}
+      <p className="t-sm">배치 변경은 기존 연결 화면의 몫입니다. 이 표는 서버가 준 현재 상태만 보여 줍니다.</p>
+    </>
+  );
+}
+
+function LiveFlagsPanel({ layout, snap, onResolve }: { layout: ScannerLayout; snap: ManageSnapshot; onResolve: LiveManage["resolveFlag"] }) {
+  const t = layout === "t";
+  const openRows = snap.flags.filter((f) => !f.resolved);
+  const [selected, setSelected] = useState<string>(openRows[0]?.flagId ?? snap.flags[0]?.flagId ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const sel = snap.flags.find((f) => f.flagId === selected) ?? openRows[0] ?? snap.flags[0];
+  const resolve = async (status: "OK" | "SUSPECT" | "UNDETERMINED") => {
+    if (!sel || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onResolve(sel.flagId, status);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "이상 표시 처리에 닿지 못했습니다");
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (snap.flags.length === 0) return <EmptyFlags layout={layout} />;
+  if (layout === "l" && sel) {
+    return (
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 16, flex: 1 }}>
+        <section className="col" style={{ gap: 8 }} aria-labelledby="h-live-list">
+          <h2 className="t-md fw-b" id="h-live-list">
+            처리 전 {openRows.length}건 · 처리함 {snap.flags.length - openRows.length}건
+          </h2>
+          <ul className="col" style={{ gap: 8 }}>
+            {snap.flags.map((f) => {
+              const on = f.flagId === sel.flagId;
+              return (
+                <li key={f.flagId}>
+                  <button
+                    type="button"
+                    className="card row"
+                    aria-current={on ? "true" : undefined}
+                    onClick={() => setSelected(f.flagId)}
+                    style={{ width: "100%", textAlign: "left", gap: 10, padding: "10px 14px", minHeight: 64, color: "inherit", cursor: "pointer", ...(on ? { border: "2px solid var(--border-primary)" } : null) }}
+                  >
+                    <span className="col grow" style={{ gap: 2 }}>
+                      <span className="t-md fw-b">{f.seatLabel}</span>
+                      <span className="t-sm">
+                        {f.kindLabel} · {f.statusLabel}
+                      </span>
+                    </span>
+                    <span className={f.resolved ? "badge badge-success" : "badge badge-warning"}>{f.resolved ? f.statusLabel : "처리 전"}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+        <section className="card col" style={{ padding: "14px 16px", gap: 8, ...(sel.resolved ? null : { border: "2px solid var(--warning)" }) }} aria-labelledby="h-live-sel">
+          <div className="row between">
+            <h2 className="t-xl" id="h-live-sel">{sel.seatLabel}</h2>
+            <span className={sel.resolved ? "badge badge-success" : "badge badge-warning"}>{sel.resolved ? sel.statusLabel : "처리 전"}</span>
+          </div>
+          <p className="row wrap t-md" style={{ gap: "4px 12px" }}>
+            <span className="fw-b">{sel.kindLabel}</span>
+            <span>{sel.awarenessLabel}</span>
+          </p>
+          {sel.resolved ? null : (
+            <>
+              <ConfirmScanButton seat={sel.seatLabel} />
+              <ResultButtons seat={sel.seatLabel} grid={false} onResult={resolve} busy={busy} />
+            </>
+          )}
+          {error ? <p className="t-sm" role="alert" style={{ color: "var(--danger)" }}>{error}</p> : null}
+          <p className="t-sm">{GUIDE}</p>
+        </section>
+      </div>
+    );
+  }
+  return (
+    <div className="col" style={{ gap: t ? 16 : 8 }}>
+      <p className={t ? "t-md fw-b" : "t-sm fw-b"}>
+        처리 전 {openRows.length}건 · 처리함 {snap.flags.length - openRows.length}건
+      </p>
+      <ul className={t ? undefined : "col"} style={t ? { display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16 } : { gap: 10 }}>
+        {snap.flags.map((f) => (
+          <li key={f.flagId} className="card col" style={{ padding: t ? 16 : "12px 14px", gap: 8, ...(f.resolved ? null : { border: "2px solid var(--warning)" }) }}>
+            <div className="row between" style={t ? { gap: 8 } : undefined}>
+              <span className="t-lg">{f.seatLabel}</span>
+              <span className={f.resolved ? "badge badge-success" : "badge badge-warning"}>{f.resolved ? f.statusLabel : "처리 전"}</span>
+            </div>
+            <p className="row wrap t-md" style={{ gap: "4px 12px" }}>
+              <span className="fw-b">{f.kindLabel}</span>
+              <span>{f.awarenessLabel}</span>
+            </p>
+            {f.resolved ? null : (
+              <>
+                <ConfirmScanButton seat={f.seatLabel} />
+                <ResultButtons seat={f.seatLabel} grid={t} busy={busy} onResult={(s) => void resolve(s)} />
+                {error ? <p className="t-sm" role="alert" style={{ color: "var(--danger)" }}>{error}</p> : null}
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className={t ? "t-md" : "t-sm"}>{GUIDE}</p>
+    </div>
+  );
+}
+
+function LiveBoothPanel({ layout, off, onAuthorize }: { layout: ScannerLayout; off: boolean; onAuthorize: LiveManage["authorizeBooth"] }) {
+  const wide = layout !== "p";
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<BoothView | null>(null);
+  const [history, setHistory] = useState<{ label: string; at: string; tone: "ok" | "warn" }[]>([]);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (off || busy || code.trim().length === 0) return;
+    setBusy(true);
+    const r = await onAuthorize(code.trim().toUpperCase());
+    setResult(r);
+    setBusy(false);
+    setCode("");
+    const at = new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Seoul" });
+    if (r.kind === "authorized") setHistory((h) => [{ label: `${r.seatLabel ?? "티켓"} 허용`, at, tone: "ok" as const }, ...h].slice(0, 5));
+    else if (r.kind === "expired") setHistory((h) => [{ label: "부스 코드 만료", at, tone: "warn" as const }, ...h].slice(0, 5));
+  };
+  const resultText =
+    result === null
+      ? null
+      : result.kind === "authorized"
+        ? `부스 허용 완료: ${result.seatLabel} · ${timeText(result.allowUntil)}까지`
+        : result.kind === "expired"
+          ? "부스 코드가 만료되었습니다. 관객에게 다시 요청하게 하세요"
+          : result.kind === "not-found"
+            ? "모르는 부스 코드입니다. 코드를 다시 확인해 주세요"
+            : result.kind === "forbidden"
+              ? "현장 책임자만 부스 코드를 찍을 수 있습니다"
+              : result.kind === "offline"
+                ? "오프라인: 배치 변경·부스 허용은 연결된 뒤에 됩니다"
+                : "부스 허용에 닿지 못했습니다";
+  const resultTone = result?.kind === "authorized" ? "success" : result === null ? undefined : "warning";
+  const form = (
+    <form className="col" style={{ gap: 8 }} onSubmit={submit}>
+      <div className="field">
+        <label className="label" htmlFor="booth-code">
+          관객 화면의 부스 코드 8자
+        </label>
+        <input
+          id="booth-code"
+          className="input mono"
+          value={code}
+          onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8))}
+          autoComplete="off"
+          inputMode="text"
+          maxLength={8}
+          disabled={off || busy}
+          placeholder="ABCD2345"
+        />
+      </div>
+      <button className="btn btn-primary btn-lg btn-block" type="submit" disabled={off || busy || code.length === 0}>
+        {busy ? "확인 중…" : "부스 코드 확인"}
+      </button>
+      {resultText ? (
+        <div className={`banner ${resultTone === "success" ? "banner-success" : "banner-warning"}`} role="status">
+          <i className={`ic ${resultTone === "success" ? "ic-check-circle" : "ic-warning"}`} aria-hidden="true" />
+          <div className="banner-body">
+            <span className="banner-title">{resultText}</span>
+          </div>
+        </div>
+      ) : null}
+    </form>
+  );
+  const intro = <p className="t-sm">관객 휴대폰 화면의 부스 코드 QR을 찍으면 그 티켓의 새 키 등록을 10분 동안 허용합니다.</p>;
+  const recent =
+    history.length === 0 ? (
+      <p className="t-sm">이 기기에서 처리한 부스 허용이 아직 없습니다.</p>
+    ) : (
+      <ul className="col">
+        {history.map((h, i) => (
+          <li key={`${h.at}-${i}`} className="li" style={{ alignItems: "flex-start", minHeight: 48, padding: wide ? "10px 0" : "8px 0", ...(wide ? { borderBottom: 0 } : null) }}>
+            <span className={`badge ${h.tone === "ok" ? "badge-success" : "badge-warning"}`}>{h.tone === "ok" ? "허용" : "만료"}</span>
+            <span className="col grow" style={{ gap: 2 }}>
+              <span className="t-sm fw-b">{h.label}</span>
+              <span className="t-xs">{h.at}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    );
+  if (wide) {
+    return (
+      <>
+        {off ? <OfflineBanner /> : null}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16, alignItems: "start" }}>
+          <section className="card col" style={{ padding: 20, gap: 12 }} aria-labelledby="h-live-bo">
+            <h2 className="t-lg" id="h-live-bo">부스 코드 찍기</h2>
+            {intro}
+            {form}
+          </section>
+          <section className="col" style={{ gap: 16 }} aria-labelledby="h-live-bo-r">
+            <h2 className="sr-only" id="h-live-bo-r">부스 처리 결과</h2>
+            <div className="card col" style={{ padding: 20, gap: 4 }}>
+              <h3 className="t-md fw-b">최근 부스 처리</h3>
+              {recent}
+            </div>
+          </section>
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      {off ? <OfflineBanner /> : null}
+      <h2 className="t-lg">부스 코드 찍기</h2>
+      {intro}
+      {form}
+      <h3 className="t-md fw-b">최근 부스 처리</h3>
+      {recent}
+    </>
+  );
+}
+
+function LiveMinePanel({ layout, snap }: { layout: ScannerLayout; snap: ManageSnapshot }) {
+  const t = layout === "t";
+  return (
+    <section className="col" style={{ gap: t ? 12 : 8 }} aria-labelledby="h-live-mine">
+      <div className="row between" style={{ gap: 8 }}>
+        <h2 className="t-lg" id="h-live-mine">내가 한 예외 통과</h2>
+        <span className="t-sm fw-b">오늘 {snap.overrides.length}건</span>
+      </div>
+      {snap.overrides.length === 0 ? (
+        <p className="t-sm">내가 한 예외 통과가 없습니다.</p>
+      ) : (
+        <div className="table-wrap table-scroll">
+          <table className={layout === "p" ? "table dense" : "table"}>
+            <caption className="sr-only">내가 한 예외 통과: 시각, 좌석, 사유, 사후 검토</caption>
+            <thead>
+              <tr>
+                <th scope="col">시각</th>
+                <th scope="col">좌석</th>
+                <th scope="col">사유</th>
+                <th scope="col">사후 검토</th>
+              </tr>
+            </thead>
+            <tbody>
+              {snap.overrides.map((o: OverrideRow) => (
+                <tr key={o.scanId}>
+                  <td className="num">{timeText(o.at)}</td>
+                  <td className="fw-b">{o.seatLabel}</td>
+                  <td>{reasonLabel(o.reason)}</td>
+                  <td>
+                    <span className={o.reviewLabel === "정상" ? "badge badge-success" : o.reviewLabel === "부적정" ? "badge badge-danger" : "badge"}>{o.reviewLabel}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="t-sm">모든 예외 통과는 사후 검토(CS 처리함)에 오르고, 검토 결과는 이 표에 검토 대기·정상·부적정으로 보입니다. 메모에는 개인정보를 적지 않습니다.</p>
+    </section>
+  );
+}
+
+function ResultButtons({
+  seat,
+  grid,
+  onResult,
+  busy = false,
+}: {
+  seat: string;
+  grid: boolean;
+  onResult?: (status: "OK" | "SUSPECT" | "UNDETERMINED") => void;
+  busy?: boolean;
+}) {
   const labels = ["정상 확인", "부정 의심", "판단 불가"];
+  const statuses = ["OK", "SUSPECT", "UNDETERMINED"] as const;
   return (
     <div
       className={grid ? undefined : "row"}
@@ -158,13 +603,15 @@ function ResultButtons({ seat, grid }: { seat: string; grid: boolean }) {
       role="group"
       aria-label={`${seat} 확인 결과 기록`}
     >
-      {labels.map((x) => (
+      {labels.map((x, i) => (
         <button
           key={x}
           className={grid ? "btn btn-secondary btn-lg" : "btn btn-secondary btn-lg grow"}
           type="button"
           style={{ padding: "0 6px", whiteSpace: "normal" }}
           aria-label={`${seat} ${x}`}
+          disabled={busy}
+          onClick={onResult ? () => onResult(statuses[i]!) : undefined}
         >
           {x}
         </button>
