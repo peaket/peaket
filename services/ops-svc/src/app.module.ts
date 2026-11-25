@@ -30,7 +30,7 @@ import { PayoutsModule, UnavailableApprovalVerifier, type PayoutsModuleDeps } fr
 import { ApprovalsModule, type ApprovalsModuleDeps } from './modules/approvals/index.js';
 import { BotReviewModule, type BotReviewSignals, type BotReviewSource, type TrustLabels } from './modules/bot-review/index.js';
 import { RealtimeTableModule, RtWidgetSource, type RealtimeTableModuleDeps } from './modules/realtime-table/index.js';
-import { InvestigationsModule, type InvestigationsModuleDeps } from './modules/investigations/index.js';
+import { DrizzleFraudApprovalStore, DrizzleFraudRestrictions, FraudActions, InvestigationsModule, MemoryFraudApprovalStore, type InvestigationsModuleDeps } from './modules/investigations/index.js';
 import type { AdminIdentity, AdminReauth } from './modules/admin-accounts/domain/ports.js';
 import {
   CsCaseEventCancellationCases,
@@ -189,6 +189,30 @@ function liveExtrasOf(o: { readonly realtimeTable?: RealtimeTableModuleDeps }): 
   return o.realtimeTable ? { widgetSources: [...widgetSourcesFromEnv(process.env), new RtWidgetSource(o.realtimeTable.board)] } : {};
 }
 
+function fraudActionsOf(o: CommonWiring, approvals: import('./modules/investigations/index.js').FraudApprovalStore, restrictionRows?: DrizzleFraudRestrictions): FraudActions | undefined {
+  const inv = o.investigations as (InvestigationsModuleDeps & Record<string, any>) | undefined;
+  if (!inv) return undefined;
+  return new FraudActions({
+    store: inv.store,
+    approvals,
+    schedule: inv.schedule,
+    ...(inv.fraudTickets ? { tickets: inv.fraudTickets } : {}),
+    ...(inv.fraudCancellations ? { cancellations: inv.fraudCancellations } : {}),
+    ...(inv.fraudRestrictions ? { restrictions: inv.fraudRestrictions } : {}),
+    ...(restrictionRows ? { restrictionRows } : {}),
+    locks: inv.locks,
+    labels: inv.labels,
+    notifier: (inv.fraudNotifier ?? inv.notifier) as any,
+    ...(inv.fraudCopies ? { copies: inv.fraudCopies } : {}),
+    ...(inv.fraudPriority ? { priority: inv.fraudPriority } : {}),
+    ...(inv.fraudApproverIdentity ? { approverIdentity: inv.fraudApproverIdentity } : {}),
+    ...(inv.fraudApproverDirectory ? { approverDirectory: inv.fraudApproverDirectory } : {}),
+    ...(o.approvals?.reauth ?? o.payouts?.reauth ? { reauth: o.approvals?.reauth ?? o.payouts?.reauth } : {}),
+    now: typeof inv.now === 'function' ? inv.now : () => o.nowMs ?? Date.now(),
+    ...(o.auditChain ? { audit: o.auditChain } : {}),
+  });
+}
+
 @Module({})
 export class AppModule {
   /**
@@ -202,6 +226,7 @@ export class AppModule {
       const cancellations = new DrizzleEventCancellationStore(o.database);
       const alerts = new DrizzleOpsAlertStore(o.database);
       const cases = caseKitOf(o, new DrizzleCsCaseStore(o.database), alerts);
+      const fraudActions = fraudActionsOf(o, new DrizzleFraudApprovalStore(o.database), new DrizzleFraudRestrictions(o.database));
       const background = o.background === false ? undefined : (o.background ?? {});
       return {
         module: AppModule,
@@ -244,9 +269,10 @@ export class AppModule {
             ...(o.adminAccounts ? { admin: o.adminAccounts } : {}),
             reauth: o.approvals?.reauth ?? o.payouts?.reauth ?? new UnavailableApprovalVerifier(),
             failureCases: cases.approvalFailures,
+            ...(fraudActions ? { fraud: fraudActions } : {}),
           }),
           BotReviewModule.register({ database: o.database, ...(o.botReview ?? {}) }),
-          ...(o.investigations && o.adminAccounts ? [InvestigationsModule.register({ ...o.investigations, identity: o.adminAccounts.identity, audit: chain })] : []),
+          ...(o.investigations && o.adminAccounts ? [InvestigationsModule.register({ ...o.investigations, identity: o.adminAccounts.identity, audit: chain, ...(fraudActions ? { fraudActions } : {}) })] : []),
           ...(o.realtimeTable ? [RealtimeTableModule.register(o.realtimeTable)] : []),
           EventCancellationsModule.register(
             eventCancellationDeps(
@@ -270,6 +296,7 @@ export class AppModule {
     const cancellations = new MemoryEventCancellationStore(chain);
     const memoryAlerts = new MemoryOpsAlertStore();
     const cases = caseKitOf(o, new MemoryCsCaseStore(chain), memoryAlerts);
+    const fraudActions = fraudActionsOf(o, new MemoryFraudApprovalStore());
     return {
       module: AppModule,
       imports: [
@@ -293,10 +320,11 @@ export class AppModule {
             reader: chain,
             reauth: o.approvals?.reauth ?? o.payouts?.reauth ?? new UnavailableApprovalVerifier(),
             failureCases: cases.approvalFailures,
+            ...(fraudActions ? { fraud: fraudActions } : {}),
           },
         }),
         BotReviewModule.register({ ...(o.botReview ?? {}) }),
-        ...(o.investigations && o.adminAccounts ? [InvestigationsModule.register({ ...o.investigations, identity: o.adminAccounts.identity, audit: chain })] : []),
+        ...(o.investigations && o.adminAccounts ? [InvestigationsModule.register({ ...o.investigations, identity: o.adminAccounts.identity, audit: chain, ...(fraudActions ? { fraudActions } : {}) })] : []),
         ...(o.realtimeTable ? [RealtimeTableModule.register(o.realtimeTable)] : []),
         EventCancellationsModule.register(eventCancellationDeps(o, cancellations, { suspension: new MemorySaleSuspensionLookup(store), cases: new CsCaseEventCancellationCases(cases.receive) }, chain)),
       ],

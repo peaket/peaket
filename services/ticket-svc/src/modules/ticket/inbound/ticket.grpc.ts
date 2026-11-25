@@ -253,6 +253,22 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
         .catch((err: unknown) => fail('ListHeldTickets', err, undefined, cb, onError));
     },
 
+    ListFraudTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      if (o?.internalToken && !verifyInternalGrpcActor(call.metadata, o.internalToken, { caller: 'ops-svc' }).ok) {
+        cb({ code: grpc.status.PERMISSION_DENIED, details: '부를 수 없는 호출자다' });
+        return;
+      }
+      const req = call.request;
+      useCases.ticket
+        .listFraudTickets({ eventId: text(req.event_id), payerAccountIds: Array.isArray(req.payer_account_ids) ? req.payer_account_ids.map(text) : [] })
+        .then((rows) => {
+          cb(null, {
+            tickets: rows.map((t) => ({ ticket_id: t.ticketId, payer_account_id: t.payerAccountId, holder_account_id: t.holderAccountId, status: statusOf(t.status), entry_recorded: t.entryRecorded })),
+          });
+        })
+        .catch((err: unknown) => fail('ListFraudTickets', err, undefined, cb, onError));
+    },
+
     ListTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
       const req = call.request;
       useCases.ticket

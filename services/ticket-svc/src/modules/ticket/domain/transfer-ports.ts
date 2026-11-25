@@ -96,6 +96,7 @@ export interface TransferStore {
   claimLookup(input: { readonly accountId: string; readonly nowMs: number; readonly windowMs: number; readonly limit: number }): Promise<RecipientLookupClaim>;
   finishLookup(lookupId: string, result: RecipientLookupResult): Promise<void>;
   expireOffers(nowMs: number, limit: number): Promise<number>;
+  expireFraudLocks(nowMs: number): Promise<number>;
   setTransferLock(input: SetTransferLockInput): Promise<readonly TransferLockOutcome[]>;
   /** 그 표의 잠금이 지금 유효한가(풀림·기한·입장 시작 반영) */
   lockActive(ticketId: string, nowMs: number): Promise<boolean>;

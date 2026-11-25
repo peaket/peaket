@@ -62,6 +62,7 @@ export interface TicketStore {
 
   /** 계정의 월렛 목록. 발권 최신순, 커서 페이지. */
   list(input: ListTicketsInput): Promise<ListTicketsResult>;
+  listFraudTickets(input: { eventId: string; payerAccountIds: readonly string[] }): Promise<readonly { ticketId: string; payerAccountId: string; holderAccountId: string; status: string; entryRecorded: boolean }[]>;
 
   /** 후기 자격 판정에 쓰는 그 회차의 티켓(모든 계정·상태). 결제자·유효 상태는 도메인이 가른다(BAT-585) */
   listReviewEligibility(eventId: string): Promise<readonly ReviewEligibilityTicket[]>;

@@ -67,6 +67,8 @@ service TicketService {
   // 팬 월렛의 내 티켓 목록(FR-012, openapi GET /v1/tickets). 계정의 티켓을 최근 발권 순으로 커서 페이지로 준다.
   // 티켓 키는 발권 응답에만 싣고 목록에는 싣지 않는다. QR 페이로드는 공개 포인터(PEAKET1:<ticket_id>)라 목록에도 싣는다.
   rpc ListTickets(ListTicketsRequest) returns (ListTicketsResponse);
+  // F-04-13: ops-svc가 부정 예매 사건의 결제자별 표를 나열한다(회차·결제자). 내부 토큰과 호출자 ops-svc만 받는다.
+  rpc ListFraudTickets(ListFraudTicketsRequest) returns (ListFraudTicketsResponse);
 }
 
 message IssueTicketsRequest {
@@ -347,6 +349,26 @@ message ListTicketsResponse {
   repeated WalletTicket tickets = 1;
   // 다음 쪽 커서. 마지막 쪽이면 비운다.
   string next_cursor = 2;
+}
+
+message ListFraudTicketsRequest {
+  // 회차 ID(필수).
+  string event_id = 1;
+  // 결제자 계정 ID 목록(1~100).
+  repeated string payer_account_ids = 2;
+}
+
+// 사건 조사용 표 한 장. 보유자(양도받은 사람)와 입장 기록을 함께 싣는다.
+message FraudTicket {
+  string ticket_id = 1;
+  string payer_account_id = 2;
+  string holder_account_id = 3;
+  TicketStatus status = 4;
+  bool entry_recorded = 5;
+}
+
+message ListFraudTicketsResponse {
+  repeated FraudTicket tickets = 1;
 }
 
 // 부르는 쪽: ops-svc만(관제 콘솔 '스캐너 기기 관리' SCR-053, ADR-0148 결정 1·2). 기기 원장의 주인은 ticket-svc다.

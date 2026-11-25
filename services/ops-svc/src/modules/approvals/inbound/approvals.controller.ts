@@ -6,11 +6,18 @@ import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ApprovalRouter } from '../application/approval-router.js';
 import type { OpsActor } from '../../payouts/index.js';
+import { bareProblem } from '../../investigations/index.js';
 
 const ApprovalParams = z.object({ approvalId: z.string().min(1).max(64) });
 const RejectBody = z.object({ reason: z.string().min(1).max(2_000) }).strict();
 const WithdrawBody = z.object({ reason: z.string().min(1).max(2_000) }).strict();
-const DecisionBody = z.object({ reason: z.string().min(1).max(1_000).optional() }).strict();
+const DecisionBody = z
+  .object({
+    reason: z.string().min(1).max(1_000).optional(),
+    excludeAccountIds: z.array(z.string()).max(100).optional(),
+    excludeTicketIds: z.array(z.string()).max(500).optional(),
+  })
+  .strict();
 const ApprovalView = z.record(z.string(), z.unknown());
 const ApprovalPage = z.object({ items: z.array(ApprovalView), nextCursor: z.string().nullable() });
 
@@ -27,6 +34,16 @@ const num = (v: string | undefined, fallback: number): number => {
 @Controller('v1/ops/approval-requests')
 export class ApprovalsController {
   constructor(private readonly router: ApprovalRouter) {}
+
+  @Post()
+  @HttpCode(422)
+  @Roles(['operator', 'commander', 'cs_agent', 'cs_lead'])
+  @ContractRouteSchema({ responses: { 200: z.object({}).passthrough(), 422: z.object({ type: z.string(), title: z.string(), status: z.number() }).passthrough() } })
+  async createGeneric(@Body() raw: unknown): Promise<never> {
+    const kind = typeof raw === 'object' && raw !== null ? String((raw as { kind?: unknown }).kind ?? '') : '';
+    if (kind === 'FRAUD_ACTION') throw bareProblem('fraud-action-requires-case-request', 422, 'FRAUD_ACTION은 사건 조치 요청 경로로만 만듭니다');
+    throw bareProblem('approval-kind-not-supported', 422, '이 경로로 만들 수 없는 승인 종류입니다');
+  }
 
   @Get()
   @Header('Cache-Control', 'no-store')
@@ -52,8 +69,11 @@ export class ApprovalsController {
   async approve(@ContractParams(ApprovalParams) params: z.output<typeof ApprovalParams>, @CurrentPrincipal() me: Principal, @Req() request: FastifyRequest, @Body() raw?: unknown) {
     const token = request.headers['x-reauth-token'];
     const parsed = DecisionBody.safeParse(raw ?? {});
-    const reason = parsed.success ? parsed.data.reason : undefined;
-    return this.router.approve(params.approvalId, actorOf(me), typeof token === 'string' ? token : undefined, reason);
+    const data = parsed.success ? parsed.data : {};
+    return this.router.approve(params.approvalId, actorOf(me), typeof token === 'string' ? token : undefined, data.reason, {
+      ...(data.excludeAccountIds ? { excludeAccountIds: data.excludeAccountIds } : {}),
+      ...(data.excludeTicketIds ? { excludeTicketIds: data.excludeTicketIds } : {}),
+    });
   }
 
   @Post(':approvalId/rejections')
@@ -66,7 +86,7 @@ export class ApprovalsController {
 
   @Post(':approvalId/withdrawals')
   @HttpCode(200)
-  @Roles(['operator', 'commander'])
+  @Roles(['operator', 'commander', 'cs_lead'])
   @ContractRouteSchema({ params: ApprovalParams, body: WithdrawBody, responses: { 200: ApprovalView } })
   async withdraw(@ContractParams(ApprovalParams) params: z.output<typeof ApprovalParams>, @ContractBody(WithdrawBody) body: z.output<typeof WithdrawBody>, @CurrentPrincipal() me: Principal) {
     return this.router.withdraw(params.approvalId, actorOf(me), body.reason);

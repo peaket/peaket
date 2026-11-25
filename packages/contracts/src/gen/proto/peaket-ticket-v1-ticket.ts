@@ -48,6 +48,10 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "ListTickets": {
                       "requestType": "ListTicketsRequest",
                       "responseType": "ListTicketsResponse"
+                    },
+                    "ListFraudTickets": {
+                      "requestType": "ListFraudTicketsRequest",
+                      "responseType": "ListFraudTicketsResponse"
                     }
                   }
                 },
@@ -567,6 +571,52 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "next_cursor": {
                       "type": "string",
                       "id": 2
+                    }
+                  }
+                },
+                "ListFraudTicketsRequest": {
+                  "fields": {
+                    "event_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "payer_account_ids": {
+                      "rule": "repeated",
+                      "type": "string",
+                      "id": 2
+                    }
+                  }
+                },
+                "FraudTicket": {
+                  "fields": {
+                    "ticket_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "payer_account_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "holder_account_id": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "status": {
+                      "type": "TicketStatus",
+                      "id": 4
+                    },
+                    "entry_recorded": {
+                      "type": "bool",
+                      "id": 5
+                    }
+                  }
+                },
+                "ListFraudTicketsResponse": {
+                  "fields": {
+                    "tickets": {
+                      "rule": "repeated",
+                      "type": "FraudTicket",
+                      "id": 1
                     }
                   }
                 },

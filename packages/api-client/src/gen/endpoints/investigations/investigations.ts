@@ -45,6 +45,7 @@ import type {
   FraudAppealRequest,
   FraudAppealRequestCreate,
   FraudCase,
+  FraudCaseClearanceCreate,
   FraudCaseCreate,
   FraudCaseDetail,
   FraudCaseGraph,
@@ -1736,6 +1737,137 @@ export const useCreateOpsFraudCaseActionRequest = <TError = ErrorType<ProblemRes
         TContext
       > => {
       return useMutation(getCreateOpsFraudCaseActionRequestMutationOptions(options), queryClient);
+    }
+    export type createOpsFraudCaseClearanceResponse200 = {
+  data: FraudCaseDetail
+  status: 200
+}
+
+export type createOpsFraudCaseClearanceResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsFraudCaseClearanceResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsFraudCaseClearanceResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsFraudCaseClearanceResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsFraudCaseClearanceResponse412 = {
+  data: ProblemResponse
+  status: 412
+}
+
+export type createOpsFraudCaseClearanceResponse428 = {
+  data: ProblemResponse
+  status: 428
+}
+
+export type createOpsFraudCaseClearanceResponseSuccess = (createOpsFraudCaseClearanceResponse200) & {
+  headers: Headers;
+};
+export type createOpsFraudCaseClearanceResponseError = (createOpsFraudCaseClearanceResponse400 | createOpsFraudCaseClearanceResponse403 | createOpsFraudCaseClearanceResponse404 | createOpsFraudCaseClearanceResponse409 | createOpsFraudCaseClearanceResponse412 | createOpsFraudCaseClearanceResponse428) & {
+  headers: Headers;
+};
+
+export const getCreateOpsFraudCaseClearanceUrl = (caseId: string,) => {
+
+
+
+
+  return `/v1/ops/fraud-cases/${encodeURIComponent(String(caseId))}/clearance`
+}
+
+/**
+ * FR-073, POL-046, docs/features/forensic-replay.md §6.7.4 C2. INVESTIGATING에서만 받고 CLEARED로 닫으며 남은 양도 잠금을 모두 푼다. outcomeLabel HUMAN은 사람 라벨을 남기고 NONE은 남기지 않는다. If-Match와 Idempotency-Key가 필수다. 그 밖의 상태는 409 fraud-case-state, If-Match 없음은 428 precondition-required, 판이 다르면 412 precondition-failed다
+ * @summary 정상 종료(조사 결과 사람·판단 없음)와 양도 잠금 해제
+ */
+export const createOpsFraudCaseClearance = async (caseId: string,
+    fraudCaseClearanceCreate: FraudCaseClearanceCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsFraudCaseClearanceResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsFraudCaseClearanceResponseSuccess>(getCreateOpsFraudCaseClearanceUrl(caseId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(fraudCaseClearanceCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsFraudCaseClearanceMutationKey = () => ['createOpsFraudCaseClearance'] as const;
+
+export const getCreateOpsFraudCaseClearanceMutationOptions = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsFraudCaseClearance>>, TError,CreateOpsFraudCaseClearanceMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsFraudCaseClearance>>, TError,CreateOpsFraudCaseClearanceMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsFraudCaseClearanceMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsFraudCaseClearance>>, CreateOpsFraudCaseClearanceMutationVariables> = (props) => {
+          const {caseId,data} = props ?? {};
+
+          return  createOpsFraudCaseClearance(caseId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsFraudCaseClearanceMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsFraudCaseClearance>>>
+    export type CreateOpsFraudCaseClearanceMutationBody = BodyType<FraudCaseClearanceCreate>
+    export type CreateOpsFraudCaseClearanceMutationError = ErrorType<ProblemResponse>
+    export type CreateOpsFraudCaseClearanceMutationVariables = {caseId: string;data: BodyType<FraudCaseClearanceCreate>}
+
+    /**
+ * @summary 정상 종료(조사 결과 사람·판단 없음)와 양도 잠금 해제
+ */
+export const useCreateOpsFraudCaseClearance = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsFraudCaseClearance>>, TError,CreateOpsFraudCaseClearanceMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsFraudCaseClearance>>,
+        TError,
+        CreateOpsFraudCaseClearanceMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsFraudCaseClearanceMutationOptions(options), queryClient);
     }
     export type createOpsExternalPostResponse201 = {
   data: ExternalPost

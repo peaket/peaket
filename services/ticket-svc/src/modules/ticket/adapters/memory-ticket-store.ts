@@ -259,6 +259,13 @@ export class MemoryTicketStore implements TicketStore {
       .map((t) => ({ ticketId: t.ticketId, status: t.status }));
   }
 
+  async listFraudTickets(input: { eventId: string; payerAccountIds: readonly string[] }): Promise<readonly { ticketId: string; payerAccountId: string; holderAccountId: string; status: string; entryRecorded: boolean }[]> {
+    return [...this.tickets.values()]
+      .filter((t) => t.eventId === input.eventId && input.payerAccountIds.includes(t.payerAccountId))
+      .sort((a, b) => a.ticketId.localeCompare(b.ticketId))
+      .map((t) => ({ ticketId: t.ticketId, payerAccountId: t.payerAccountId, holderAccountId: t.accountId, status: t.status, entryRecorded: this.entries.has(t.ticketId) }));
+  }
+
   async list(input: ListTicketsInput): Promise<ListTicketsResult> {
     const all = [...this.tickets.values()]
       .filter((t) => t.accountId === input.accountId)

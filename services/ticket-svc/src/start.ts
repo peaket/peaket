@@ -14,6 +14,7 @@ import { DrizzleTransferStore } from './modules/ticket/adapters/db/drizzle-trans
 import { GrpcMemberCodeDirectory } from './modules/ticket/adapters/identity-member-codes.js';
 import { JwksFanReauthGate } from './modules/ticket/adapters/jwks-fan-reauth-gate.js';
 import { Transfers, type TransferReauthGate } from './modules/ticket/application/transfers.js';
+import { startFraudLockSweep } from './fraud-lock-sweep.js';
 import { DeviceKeys, type DeviceKeysDeps } from './modules/ticket/application/device-keys.js';
 import { DEVICE_KEY_NOTICE_EVERY_MS, DeviceKeyNoticeSender } from './modules/ticket/application/device-key-notices.js';
 import { HttpDeviceKeyNoticeSink } from './modules/ticket/adapters/http-key-notice-sink.js';
@@ -253,6 +254,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
     expireTimer = setInterval(expire, 60_000);
     expireTimer.unref?.();
     expire();
+    // 부정 예매 양도 잠금 만료 정비(1분 [가정], F-04-13). 일부러 expireTimer와 따로 두어 한쪽 실패가 다른 쪽을 멈추지 않게 한다
+    const fraudLockSweep = startFraudLockSweep({ transfers, intervalMs: 60_000 });
     // 기기 키 등록 지표·로그 줄(docs/features/offline-gate.md §10.1). 계정·keyId는 싣지 않는다
     const registrations = new Counter({
       name: 'ticket_device_key_registrations_total',
@@ -487,6 +490,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       if (expireTimer) clearInterval(expireTimer);
       if (noticeTimer) clearInterval(noticeTimer);
       if (entryCloseTimer) clearInterval(entryCloseTimer);
+      fraudLockSweep.stop();
       return (closing ??= (async () => {
         try {
           await startedGrpc.close();

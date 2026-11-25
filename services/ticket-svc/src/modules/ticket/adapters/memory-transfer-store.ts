@@ -224,6 +224,23 @@ export class MemoryTransferStore implements TransferStore {
     return n;
   }
 
+  async expireFraudLocks(nowMs: number): Promise<number> {
+    let n = 0;
+    for (const [key, row] of this.locks) {
+      const start = this.#eventStartsAt(row.eventId);
+      if (lockActiveAt({ locked: row.locked, expiresAtMs: row.expiresAtMs, nowMs, eventStartsAtMs: start })) continue;
+      if (!row.locked) continue;
+      this.locks.set(key, { ...row, locked: false });
+      for (const t of this.o.tickets.tickets.values()) {
+        if (t.eventId !== row.eventId || t.payerAccountId !== row.accountId) continue;
+        if (t.fraudLockCaseId !== row.caseId) continue;
+        this.#put({ ...t, fraudLockCaseId: undefined, fraudLockVersion: row.version + 1 });
+        n += 1;
+      }
+    }
+    return n;
+  }
+
   async setTransferLock(input: SetTransferLockInput): Promise<readonly TransferLockOutcome[]> {
     const out: TransferLockOutcome[] = [];
     for (const accountId of input.accountIds) {

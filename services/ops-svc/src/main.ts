@@ -34,6 +34,7 @@ import { realtimeTableFromEnv } from './rt-wiring.js';
 import { HttpCoreContract } from './adapters/http-core-contract.js';
 import {
   DrizzleInvestigationStore,
+  FraudActions,
   GrpcTransferLocks,
   LoggingFraudAlerts,
   LoggingFraudLabels,
@@ -43,6 +44,9 @@ import {
   UnavailableFraudForensicsRunner,
   UnavailableSnapshotVerifier,
   UnavailableTransferLocks,
+  startFraudActionSweep,
+  GrpcFraudTickets,
+  GrpcFraudCancellations,
 } from './modules/investigations/index.js';
 import { HttpCoreSaleSchedule, UnavailableSaleSchedule } from './modules/readiness/index.js';
 import { PromCsCaseSignals, PromCsDispatchSignals, ReceiveCaseRequested, loadBusinessCalendar } from './modules/cases/index.js';
@@ -178,10 +182,14 @@ const botReviewActorRef = loadLogPseudonymizer(process.env).pseudonymizer;
 // 관제 실시간 표(OPS-160, F-04-1): rt 뷰 0.5초 조회 보드와 파트너 판매 현황. 소속 확인은 회차 취소와 같은 core 판매 설정 클라이언트다
 const realtimeTable = realtimeTableFromEnv(process.env, { ...(cancellationDeps.owners ? { owners: cancellationDeps.owners } : {}) });
 // F-04-12 부정 예매 조사(동결 로컬). 실제 기록 재계산기·후보 실행기는 아직 조립하지 않아 하루 검증·자동 재시도는 판정하지 않는다.
+const fraudTickets = ticketGrpcUrl ? new GrpcFraudTickets({ address: ticketGrpcUrl, ...(internalToken ? { token: internalToken } : {}) }) : undefined;
+const fraudCancellations = purchaseGrpcAddr ? new GrpcFraudCancellations({ address: purchaseGrpcAddr, ...(internalToken ? { token: internalToken } : {}) }) : undefined;
 const investigations = {
   store: new DrizzleInvestigationStore(database),
   schedule: coreUrl ? HttpCoreSaleSchedule.fromUrl(coreUrl, () => Date.now(), internalToken) : new UnavailableSaleSchedule(),
   locks: ticketGrpcUrl ? new GrpcTransferLocks(ticketGrpcUrl) : new UnavailableTransferLocks(),
+  ...(fraudTickets ? { fraudTickets } : {}),
+  ...(fraudCancellations ? { fraudCancellations } : {}),
   notifier: new LoggingFraudNotifier(),
   labels: new LoggingFraudLabels(),
   alerts: new LoggingFraudAlerts(),
@@ -275,6 +283,8 @@ const coreApplyTimer = cancellationDeps.core
     }, CORE_APPLY_RETRY_MS)
   : undefined;
 coreApplyTimer?.unref();
+// 부정 예매 조치 정비(1분 [가정], F-04-13): 승인 기한 만료·마감 알림·이의 창이 지난 사건 닫기
+const fraudActionSweep = service.app ? startFraudActionSweep({ actions: service.app.get(FraudActions), intervalMs: 60_000 }) : undefined;
 
 // 명령 요청·결과 사건 소비자(ops.command-events, BAT-465 R-584). HTTP 수신기와 같은 처리기를 쓴다.
 let consumers: OpsConsumers | undefined;
@@ -305,6 +315,7 @@ try {
 
 process.once('SIGTERM', () => {
   if (coreApplyTimer) clearInterval(coreApplyTimer);
+  fraudActionSweep?.stop();
   void (async () => {
     try {
       await consumers?.stop();
@@ -328,6 +339,8 @@ process.once('SIGTERM', () => {
         service.logger.error({ err }, '제어 gRPC 클라이언트 닫기 실패');
       }
       scannerDevices?.close();
+      fraudTickets?.close();
+      fraudCancellations?.close();
       pgAssignmentCheck?.close();
       pgSwitchResolver?.close();
       botReviewLabels?.close();

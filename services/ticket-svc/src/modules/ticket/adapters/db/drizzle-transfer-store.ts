@@ -355,6 +355,32 @@ export class DrizzleTransferStore implements TransferStore {
     });
   }
 
+  async expireFraudLocks(nowMs: number): Promise<number> {
+    return this.o.database.transaction(async (tx) => {
+      const rows = await tx.execute(sql`
+        select l.case_id, l.event_id, l.account_id, l.version
+        from fraud_transfer_lock l
+        join ticket t on t.event_id = l.event_id and t.payer_account_id = l.account_id
+        where l.locked = true
+          and (l.expires_at <= ${new Date(nowMs)} or (t.event_starts_at is not null and t.event_starts_at <= ${new Date(nowMs)}))
+        for update of l skip locked
+      `);
+      let n = 0;
+      for (const row of (rows as any).rows as any[]) {
+        await tx.execute(sql`
+          update ticket set fraud_lock_case_id = null, fraud_lock_version = fraud_lock_version + 1, version = version + 1
+          where event_id = ${row.event_id}::uuid and payer_account_id = ${row.account_id}::uuid and fraud_lock_case_id = ${row.case_id}::uuid
+        `);
+        await tx.execute(sql`
+          update fraud_transfer_lock set locked = false, version = version + 1, changed_at = ${new Date(nowMs)}
+          where case_id = ${row.case_id}::uuid and event_id = ${row.event_id}::uuid and account_id = ${row.account_id}::uuid
+        `);
+        n += 1;
+      }
+      return n;
+    });
+  }
+
   async setTransferLock(input: SetTransferLockInput): Promise<readonly TransferLockOutcome[]> {
     return this.o.database.transaction(async (tx) => {
       const out: TransferLockOutcome[] = [];

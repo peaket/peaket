@@ -9,6 +9,24 @@ export class LoggingFraudNotifier implements FraudNotifier {
   async holderNotice(i: { eventId: string; caseId: string; accountId: string; ticketIds: readonly string[]; dueAtMs: number }): Promise<void> {
     line('fraud_holder_notice', { eventId: i.eventId, caseId: i.caseId, accountId: i.accountId, ticketCount: i.ticketIds.length, dueAt: new Date(i.dueAtMs).toISOString() });
   }
+  async actionNotice(i: { eventId: string; caseId: string; accountId: string; action: string; ticketIds: readonly string[]; restrictionEndsAtMs: number | null }): Promise<void> {
+    line('fraud_action_notice', { eventId: i.eventId, caseId: i.caseId, accountId: i.accountId, action: i.action, ticketCount: i.ticketIds.length, restrictionEndsAtMs: i.restrictionEndsAtMs });
+  }
+  async holderResult(i: { eventId: string; caseId: string; accountId: string; ticketIds: readonly string[]; result: string }): Promise<void> {
+    line('fraud_holder_result', { eventId: i.eventId, caseId: i.caseId, accountId: i.accountId, ticketCount: i.ticketIds.length, result: i.result });
+  }
+  async objectionDecided(i: { eventId: string; caseId: string; accountId: string; decision: string; reason: string; restrictionLifted: boolean }): Promise<void> {
+    line('fraud_objection_decided', { eventId: i.eventId, caseId: i.caseId, accountId: i.accountId, decision: i.decision, restrictionLifted: i.restrictionLifted });
+  }
+  async restrictionLifted(i: { eventId: string; caseId: string; accountId: string }): Promise<void> {
+    line('fraud_restriction_lifted', { eventId: i.eventId, caseId: i.caseId, accountId: i.accountId });
+  }
+  async transferLockReleased(i: { eventId: string; caseId: string; accountId: string }): Promise<void> {
+    line('fraud_transfer_lock_released', { eventId: i.eventId, caseId: i.caseId, accountId: i.accountId });
+  }
+  async deadlineNotice(i: { eventId: string; caseId: string; approvalId: string; leadMs: number; recipients: readonly string[] }): Promise<void> {
+    line('fraud_deadline_notice', { eventId: i.eventId, caseId: i.caseId, approvalId: i.approvalId, leadMs: i.leadMs, recipientCount: i.recipients.length });
+  }
 }
 
 export class LoggingFraudLabels implements FraudLabels {

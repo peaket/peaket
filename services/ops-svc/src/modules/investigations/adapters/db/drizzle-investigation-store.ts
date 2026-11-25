@@ -49,6 +49,7 @@ const memberOf = (r: MemberRow): FraudClusterMemberRecord => ({
   ...(r.objectionReceivedAt ? { objectionReceivedAtMs: r.objectionReceivedAt.getTime() } : {}),
   ...(r.objectionDecidedAt ? { objectionDecidedAtMs: r.objectionDecidedAt.getTime() } : {}),
   objectionDecisionReason: r.objectionDecisionReason,
+  actionNotifiedAtMs: ms(r.actionNotifiedAt),
 });
 
 /** result_ref는 응답 JSON이다. 옛 행이 ID만 담았으면 그 문자열을 그대로 돌려준다 */
@@ -437,6 +438,7 @@ const memberValues = (clusterId: string, m: FraudClusterMemberRecord) => ({
   objectionReceivedAt: date(m.objectionReceivedAtMs ?? null),
   objectionDecisionReason: m.objectionDecisionReason ?? null,
   objectionDecidedAt: date(m.objectionDecidedAtMs ?? null),
+  actionNotifiedAt: date(m.actionNotifiedAtMs ?? null),
 });
 
 const eventValues = (caseId: string, e: FraudCaseRecord['events'][number]) => ({

@@ -320,6 +320,10 @@ export class Transfers {
   }
 
   /** 만료 작업. 만료된 OFFERED를 EXPIRED로 바꾸고 표시를 되돌린다 */
+  async expireFraudLocks(nowMs?: number): Promise<number> {
+    return this.d.store.expireFraudLocks(nowMs ?? this.d.clock.now());
+  }
+
   async expireOffers(nowMs?: number): Promise<number> {
     return this.d.store.expireOffers(nowMs ?? this.d.clock.now(), 100);
   }

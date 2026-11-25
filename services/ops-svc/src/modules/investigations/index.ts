@@ -6,6 +6,8 @@ export { VerifyDailySnapshots } from './application/verify-daily.js';
 export { MemoryInvestigationStore } from './adapters/memory-investigation-store.js';
 export { DrizzleInvestigationStore } from './adapters/db/drizzle-investigation-store.js';
 export { GrpcTransferLocks, UnavailableTransferLocks } from './adapters/grpc-transfer-locks.js';
+export { GrpcFraudTickets } from './adapters/grpc-fraud-tickets.js';
+export { GrpcFraudCancellations } from './adapters/grpc-fraud-cancellations.js';
 export {
   LoggingFraudAlerts,
   LoggingFraudLabels,
@@ -62,4 +64,40 @@ export type {
   InvestigationStore,
   SnapshotVerifier,
   TransferLocks,
+  FraudTicketDirectory,
+  FraudCancellations,
+  FraudIdentityHold,
+  FraudRestrictionCopies,
+  FraudRestrictionRows,
+  FraudCaseNotifier,
+  FraudApproverIdentity,
+  FraudApproverDirectory,
+  FraudAppealCopies,
+  FraudApprovalRecord,
+  FraudApprovalStore,
 } from './domain/ports.js';
+export { FraudActions, type FraudActionsDeps, type FraudActionActor } from './application/fraud-actions.js';
+export { BareProblemError, bareProblem } from './application/bare-problem.js';
+export {
+  ACTION_APPROVAL_BUSINESS_DAYS,
+  CANCEL_NOTICE_LEADS_MS,
+  OBJECTION_WINDOW_MS,
+  RESTRICTION_MAX_MS,
+  actionRequestDecision,
+  approvalDecisionCheck,
+  approvalExecutionGuard,
+  approvalSummaryAllowed,
+  clearanceCase,
+  closeActionedCaseIfDue,
+  decideObjections,
+  objectionWindowEndMs,
+  receiveObjection,
+  type FraudAction,
+  type FraudApprovalStatus,
+  type FraudCancelTarget,
+  type FraudTicketRef,
+} from './domain/fraud-action.js';
+export { MemoryFraudApprovalStore } from './adapters/memory-fraud-approval-store.js';
+export { DrizzleFraudApprovalStore } from './adapters/db/drizzle-fraud-approval-store.js';
+export { DrizzleFraudRestrictions } from './adapters/db/drizzle-fraud-restrictions.js';
+export { startFraudActionSweep } from './application/fraud-action-sweep.js';

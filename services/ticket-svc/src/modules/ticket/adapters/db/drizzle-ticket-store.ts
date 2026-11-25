@@ -478,6 +478,16 @@ export class DrizzleTicketStore implements TicketStore {
     return rows.map((r) => ({ ticketId: r.id, status: statusOf(r.status) }));
   }
 
+  async listFraudTickets(input: { eventId: string; payerAccountIds: readonly string[] }): Promise<readonly { ticketId: string; payerAccountId: string; holderAccountId: string; status: string; entryRecorded: boolean }[]> {
+    const rows = await this.o.database.pool.query(
+      `select t.id, t.payer_account_id, t.account_id, t.status,
+              exists(select 1 from scan_event s where s.event_id = t.event_id and s.ticket_id = t.id and s.direction = 'IN' and s.result = 'PASS') as entry_recorded
+       from ticket t where t.event_id = $1 and t.payer_account_id = any($2::uuid[]) order by t.id`,
+      [input.eventId, input.payerAccountIds],
+    );
+    return rows.rows.map((r: any) => ({ ticketId: r.id, payerAccountId: r.payer_account_id, holderAccountId: r.account_id, status: r.status, entryRecorded: r.entry_recorded === true }));
+  }
+
   async list(input: ListTicketsInput): Promise<ListTicketsResult> {
     const cursor = input.cursor ? decodeCursor(input.cursor) : undefined;
     const where = cursor

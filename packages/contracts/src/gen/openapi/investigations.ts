@@ -214,6 +214,7 @@ export const CreateOpsFraudCaseResponse = zod.object({
   "cancelDeadlineAt": zod.iso.datetime({"offset":true}).optional().describe('취소 마감 시각 = 판매 종료(공연 시작 24시간 전) − 재판매 준비 2시간 [가정](POL-046 ⑤). 이 시각이 지나면 표 취소를 요청·승인할 수 없고 이용 제한만 한다'),
   "transferLocked": zod.boolean().default(createOpsFraudCaseResponseTransferLockedDefault).describe('이 사건으로 양도가 잠긴 티켓이 있는지(POL-046 ③)'),
   "approvalId": zod.string().nullish().describe('진행 중이거나 마지막 조치 승인 업무(kind FRAUD_ACTION)'),
+  "outcomeLabel": zod.union([zod.literal('BOT'),zod.literal('HUMAN'),zod.literal('NONE'),zod.literal(null)]).nullish().describe('사건의 최종 판단(조치 실행 뒤 BOT, 정상 종료·되돌림 뒤 HUMAN, 판단 전 null). 정본 docs/data.md fraud_case.outcome_label'),
   "version": zod.int().optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "closedAt": zod.iso.datetime({"offset":true}).nullish()
@@ -254,6 +255,7 @@ export const ListOpsFraudCasesResponse = zod.object({
   "cancelDeadlineAt": zod.iso.datetime({"offset":true}).optional().describe('취소 마감 시각 = 판매 종료(공연 시작 24시간 전) − 재판매 준비 2시간 [가정](POL-046 ⑤). 이 시각이 지나면 표 취소를 요청·승인할 수 없고 이용 제한만 한다'),
   "transferLocked": zod.boolean().default(listOpsFraudCasesResponseItemsItemTransferLockedDefault).describe('이 사건으로 양도가 잠긴 티켓이 있는지(POL-046 ③)'),
   "approvalId": zod.string().nullish().describe('진행 중이거나 마지막 조치 승인 업무(kind FRAUD_ACTION)'),
+  "outcomeLabel": zod.union([zod.literal('BOT'),zod.literal('HUMAN'),zod.literal('NONE'),zod.literal(null)]).nullish().describe('사건의 최종 판단(조치 실행 뒤 BOT, 정상 종료·되돌림 뒤 HUMAN, 판단 전 null). 정본 docs/data.md fraud_case.outcome_label'),
   "version": zod.int().optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "closedAt": zod.iso.datetime({"offset":true}).nullish()
@@ -296,6 +298,7 @@ export const GetOpsFraudCaseResponse = zod.object({
   "cancelDeadlineAt": zod.iso.datetime({"offset":true}).optional().describe('취소 마감 시각 = 판매 종료(공연 시작 24시간 전) − 재판매 준비 2시간 [가정](POL-046 ⑤). 이 시각이 지나면 표 취소를 요청·승인할 수 없고 이용 제한만 한다'),
   "transferLocked": zod.boolean().default(getOpsFraudCaseResponseOneTransferLockedDefault).describe('이 사건으로 양도가 잠긴 티켓이 있는지(POL-046 ③)'),
   "approvalId": zod.string().nullish().describe('진행 중이거나 마지막 조치 승인 업무(kind FRAUD_ACTION)'),
+  "outcomeLabel": zod.union([zod.literal('BOT'),zod.literal('HUMAN'),zod.literal('NONE'),zod.literal(null)]).nullish().describe('사건의 최종 판단(조치 실행 뒤 BOT, 정상 종료·되돌림 뒤 HUMAN, 판단 전 null). 정본 docs/data.md fraud_case.outcome_label'),
   "version": zod.int().optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "closedAt": zod.iso.datetime({"offset":true}).nullish()
@@ -418,6 +421,7 @@ export const UpdateOpsFraudCaseResponse = zod.object({
   "cancelDeadlineAt": zod.iso.datetime({"offset":true}).optional().describe('취소 마감 시각 = 판매 종료(공연 시작 24시간 전) − 재판매 준비 2시간 [가정](POL-046 ⑤). 이 시각이 지나면 표 취소를 요청·승인할 수 없고 이용 제한만 한다'),
   "transferLocked": zod.boolean().default(updateOpsFraudCaseResponseOneTransferLockedDefault).describe('이 사건으로 양도가 잠긴 티켓이 있는지(POL-046 ③)'),
   "approvalId": zod.string().nullish().describe('진행 중이거나 마지막 조치 승인 업무(kind FRAUD_ACTION)'),
+  "outcomeLabel": zod.union([zod.literal('BOT'),zod.literal('HUMAN'),zod.literal('NONE'),zod.literal(null)]).nullish().describe('사건의 최종 판단(조치 실행 뒤 BOT, 정상 종료·되돌림 뒤 HUMAN, 판단 전 null). 정본 docs/data.md fraud_case.outcome_label'),
   "version": zod.int().optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "closedAt": zod.iso.datetime({"offset":true}).nullish()
@@ -688,6 +692,93 @@ export const CreateOpsFraudCaseActionRequestResponse = zod.object({
   "requestedGuaranteeKind": zod.union([zod.literal('DEPOSIT'),zod.literal('PERFORMANCE_BOND'),zod.literal(null)]).nullish()
 }).nullish().describe('CONTRACT_TERMS_CHANGE에만. 지금 값과 바꿀 값. 다른 종류는 null이다')
 }).describe('승인 업무(POL-038)')
+
+/**
+ * FR-073, POL-046, docs/features/forensic-replay.md §6.7.4 C2. INVESTIGATING에서만 받고 CLEARED로 닫으며 남은 양도 잠금을 모두 푼다. outcomeLabel HUMAN은 사람 라벨을 남기고 NONE은 남기지 않는다. If-Match와 Idempotency-Key가 필수다. 그 밖의 상태는 409 fraud-case-state, If-Match 없음은 428 precondition-required, 판이 다르면 412 precondition-failed다
+ * @summary 정상 종료(조사 결과 사람·판단 없음)와 양도 잠금 해제
+ */
+export const CreateOpsFraudCaseClearanceParams = zod.object({
+  "caseId": zod.uuid()
+})
+
+export const CreateOpsFraudCaseClearanceHeader = zod.object({
+  "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)'),
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
+})
+
+export const createOpsFraudCaseClearanceBodyReasonMax = 2000;
+
+
+
+export const CreateOpsFraudCaseClearanceBody = zod.object({
+  "reason": zod.string().min(1).max(createOpsFraudCaseClearanceBodyReasonMax),
+  "outcomeLabel": zod.enum(['HUMAN', 'NONE'])
+}).strict().describe('정상 종료(C2, forensic-replay.md §6.7.4). INVESTIGATING에서만 받고 사건을 CLEARED로 닫으며 남은 양도 잠금을 모두 푼다. HUMAN은 조사 결과 사람으로 판단한 정답 라벨이고 NONE은 라벨을 남기지 않는다')
+
+export const createOpsFraudCaseClearanceResponseOneAccountCountMin = 0;
+
+export const createOpsFraudCaseClearanceResponseOneTicketCountMin = 0;
+
+export const createOpsFraudCaseClearanceResponseOneTransferLockedDefault = false;
+export const createOpsFraudCaseClearanceResponseTwoMembersItemTicketCountMin = 0;
+
+export const createOpsFraudCaseClearanceResponseTwoMembersItemRemovedDefault = false;
+export const createOpsFraudCaseClearanceResponseTwoMembersItemTransferLockedDefault = false;
+export const createOpsFraudCaseClearanceResponseTwoSnapshotInvHashRegExp = new RegExp('^[0-9a-f]{64}$');
+export const createOpsFraudCaseClearanceResponseTwoInvestigatorOpinionMax = 2000;
+
+
+
+export const CreateOpsFraudCaseClearanceResponse = zod.object({
+  "caseId": zod.uuid().optional(),
+  "eventId": zod.string().optional(),
+  "clusterId": zod.uuid().optional(),
+  "status": zod.enum(['INVESTIGATING', 'APPEAL_PENDING', 'DECISION_PENDING', 'ACTIONED', 'CLEARED', 'OBJECTED', 'REVERSED']).optional().describe('사건 상태(docs/data.md fraud_case.status, 상태 모형은 docs/features/forensic-replay.md): 조사 중, 소명 대기, 결정 대기(승인 업무 진행), 조치됨, 정상 종료, 이의 접수, 이의 인정(되돌림). 이의는 계정별이다. OBJECTED는 결정되지 않은 이의가 하나라도 있는 상태이고, 이용 제한 풀기 승인 업무가 진행 중이어도 OBJECTED에 머문다(DECISION_PENDING으로 가지 않는다). 모든 이의가 결정되면 조치받은 계정 모두가 인정되어 되돌림(이용 제한 풀기 Done, 표마다 우선 구매 부여나 보상 건)을 마쳤을 때 REVERSED, 아니면 ACTIONED로 돌아간다. 전이와 조건(C1~C15)의 정본은 docs/features/forensic-replay.md §6.7.4다. 표 취소는 취소 마감 시각(판매 종료 − 재판매 준비 2시간 [가정] = 공연 시작 26시간 전)까지만 요청·승인하고 그 뒤에는 이용 제한만 한다. 취소한 좌석은 언제나 정가 재판매로 돌린다(2026-10-31 정함, POL-038 ⑪·POL-046 ⑤). 입장 시작에는 양도 잠금이 모두 풀리고 사건은 이용 제한만 남긴 채 계속한다(상태는 그대로, 추천 적용 2026-10-31, ADR-0171)'),
+  "reasonCategory": zod.enum(['MACRO_BOT', 'QUEUE_BYPASS', 'CAPTCHA_BYPASS', 'ACCOUNT_LENDING', 'LIMIT_EVASION']).optional().describe('부정 예매 사유 범주 다섯(POL-046 ①): 자동화 프로그램(매크로·봇), 대기열 우회 링크, 보안문자 우회, 명의 대여·사들인 계정, 1인 매수 제한 회피. 팬에게 알리는 것은 이 범주뿐이고 점수와 가중치는 알리지 않는다(추천 적용 2026-10-31, ADR-0171)'),
+  "assigneeId": zod.string().optional().describe('담당 조사관 관리 계정 ID'),
+  "accountCount": zod.int().min(createOpsFraudCaseClearanceResponseOneAccountCountMin).optional(),
+  "ticketCount": zod.int().min(createOpsFraudCaseClearanceResponseOneTicketCountMin).optional(),
+  "appealDueAt": zod.iso.datetime({"offset":true}).nullish().describe('소명 기한. 소명 요청 전이면 null'),
+  "cancelDeadlineAt": zod.iso.datetime({"offset":true}).optional().describe('취소 마감 시각 = 판매 종료(공연 시작 24시간 전) − 재판매 준비 2시간 [가정](POL-046 ⑤). 이 시각이 지나면 표 취소를 요청·승인할 수 없고 이용 제한만 한다'),
+  "transferLocked": zod.boolean().default(createOpsFraudCaseClearanceResponseOneTransferLockedDefault).describe('이 사건으로 양도가 잠긴 티켓이 있는지(POL-046 ③)'),
+  "approvalId": zod.string().nullish().describe('진행 중이거나 마지막 조치 승인 업무(kind FRAUD_ACTION)'),
+  "outcomeLabel": zod.union([zod.literal('BOT'),zod.literal('HUMAN'),zod.literal('NONE'),zod.literal(null)]).nullish().describe('사건의 최종 판단(조치 실행 뒤 BOT, 정상 종료·되돌림 뒤 HUMAN, 판단 전 null). 정본 docs/data.md fraud_case.outcome_label'),
+  "version": zod.int().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "closedAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('부정 예매 사건(SCR-070 ③·SCR-071, FR-073, docs/data.md fraud_case). version은 PATCH의 If-Match에 쓰는 판이고 단건 응답의 ETag와 같다(guidelines §12, 추천 적용 2026-10-31, ADR-0171)').and(zod.object({
+  "members": zod.array(zod.object({
+  "accountId": zod.string().optional(),
+  "ticketCount": zod.int().min(createOpsFraudCaseClearanceResponseTwoMembersItemTicketCountMin).optional(),
+  "signals": zod.array(zod.enum(['LINK_GRAPH', 'SYNC_STEPS', 'VELOCITY', 'TIMING_BASELINE', 'BYPASS_TRACE', 'POST_MATCH']).describe('근거 신호. ADR-0171 결정 6의 분석 방법 여섯과 같다: 연결 그래프, 거의 같은 시각에 같은 단계를 밟는 동시 행동 군집, 같은 IP·기기에서 여러 계정을 빠르게 오가는 속도 규칙, 판매 시작부터 단계별 걸린 시간이 정상 기준선 밖, 입장 토큰 없는 홀드 시도·우회 링크 흔적, 외부 되팔이 게시물과 좌석 대조. 규칙과 점수는 docs/features/forensic-replay.md가 정한다(추천 적용 2026-10-31)')).optional(),
+  "addedBy": zod.enum(['SYSTEM', 'INVESTIGATOR']).optional(),
+  "removed": zod.boolean().default(createOpsFraudCaseClearanceResponseTwoMembersItemRemovedDefault).describe('조사관이 묶음에서 뺀 계정. 뺀 이유는 사건 기록에 남는다'),
+  "appealResult": zod.enum(['NOT_REQUESTED', 'PENDING', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'EXPIRED']).optional().describe('그 계정의 소명 결과(docs/data.md fraud_cluster_member.appeal_result). PENDING 요청했고 제출 전, SUBMITTED 제출했고 판단 전(판단 전까지 조치 대상이 아니다), EXPIRED 기한까지 제출하지 않음'),
+  "appealDueAt": zod.iso.datetime({"offset":true}).nullish(),
+  "objectionResult": zod.enum(['NONE', 'PENDING', 'ACCEPTED', 'REJECTED']).optional().describe('그 계정의 이의(조치 결과 통지 + 30일 [가정] 안). PENDING은 접수했고 결정 전'),
+  "objectionDueAt": zod.iso.datetime({"offset":true}).nullish().describe('이의 창의 끝(결과 통지 + 30일 [가정])'),
+  "transferLocked": zod.boolean().default(createOpsFraudCaseClearanceResponseTwoMembersItemTransferLockedDefault).describe('그 계정이 결제한 표에 이 사건의 양도 잠금이 걸려 있는지'),
+  "lockExpiresAt": zod.iso.datetime({"offset":true}).nullish().describe('그 계정의 양도 잠금 최대 기한(그 계정의 첫 소명 요청 + 14일 [가정], 연장 없음). 계정마다 따로이고 소명을 다시 요청해도 늘지 않는다. 잠근 적이 없으면 null(docs/data.md fraud_cluster_member.lock_expires_at, 추천 적용 2026-10-31, ADR-0173)')
+}).describe('묶음에 든 계정 하나. 조사 갈래라 계정 ID를 그대로 싣는다(ADR-0171 결정 2)')).optional(),
+  "snapshot": zod.object({
+  "version": zod.int().optional(),
+  "frozenAt": zod.iso.datetime({"offset":true}).optional(),
+  "invHash": zod.string().regex(createOpsFraudCaseClearanceResponseTwoSnapshotInvHashRegExp).optional()
+}).optional().describe('고정 시점의 조사용 기록(docs/data.md fraud_snapshot)'),
+  "appealOutcome": zod.enum(['NOT_REQUESTED', 'PENDING', 'ACCEPTED', 'REJECTED', 'PARTIAL']).optional().describe('소명 결과. PENDING은 아직 제출 전이거나 판단 전인 계정이 남음, PARTIAL은 계정마다 판단이 갈린 경우. 계정별 값은 members[].appealResult'),
+  "investigatorOpinion": zod.string().max(createOpsFraudCaseClearanceResponseTwoInvestigatorOpinionMax).nullish(),
+  "evidenceBundleIds": zod.array(zod.uuid()).optional().describe('이 사건의 증거 묶음 ID(만든 순서). 작업대가 GET /v1/ops/evidence-bundles/{bundleId}를 부른다. 아직 없으면 빈 목록(추천 적용 2026-10-31, ADR-0171, FRN-070)'),
+  "events": zod.array(zod.object({
+  "seq": zod.int().optional(),
+  "kind": zod.string().optional().describe('docs/data.md fraud_case_event.kind의 값'),
+  "actorId": zod.string().nullish().describe('관리 계정 ID. 시스템이면 null'),
+  "note": zod.string().nullish(),
+  "detail": zod.looseObject({
+
+}).nullish().describe('kind별 세부(docs/data.md fraud_case_event.detail). 예: LOCK_RELEASED는 풀린 때(releaseReason 일곱 가운데 하나)와 계정, APPEAL_REQUESTED는 대상 계정·기한·잠금 최대 기한과 함께 알린 받은 사람 수·표, APPEAL_RECEIVED는 party(PAYER·HOLDER), ACTION_APPROVED는 승인자의 판단 이유·뺀 계정·표·그 승인자의 요약 첫 열람 시각. 연락처·IP 원문은 없다(추천 적용 2026-10-31, ADR-0173)'),
+  "occurredAt": zod.iso.datetime({"offset":true}).optional()
+}).describe('사건 기록 한 줄(누가·언제·무엇을, SCR-071 ⑧, docs/data.md fraud_case_event)')).optional()
+})).describe('사건 상세(GET /v1/ops/fraud-cases/{caseId})')
 
 /**
  * FR-072. 신고와 조사관의 수동 등록으로만 받는다(자동 수집은 수집 방법과 상대 사이트 약관을 검토한 뒤, ADR-0171 결정 4). multipart/form-data이고 쿠키로 인증하는 쓰기라 gw-ops가 Origin을 확인한다(guidelines §9). 서버가 캡처의 SHA-256을 남기고 게시물의 좌석을 그 회차 티켓과 대조한다. 지정 확인과 기록은 태그 investigations 설명(추천 적용 2026-10-31). 근거는 개인정보 보호법 제15조 제1항 제6호(정당한 이익)이고 받는 범위는 ExternalPostCreate 설명의 최소화 규칙이다. source REPORT는 문의 유형 RESALE_POST_REPORT의 CS 처리함 건(reportCaseId)만 받고, 그 밖의 건이면 422다. 연락처로 맞추지 않으며, 조사관이 화면의 연락처를 사람 눈으로 견줄 때는 사건 기록에 사유를 남긴다(추천 적용 2026-10-31, ADR-0173)

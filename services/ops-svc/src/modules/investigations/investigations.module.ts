@@ -1,10 +1,12 @@
 // F-04-12 조사 모듈 조립. AppModule이 저장소·외부 포트·지정 확인기를 넘긴다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
-import { CLOCK, type Clock } from '@peaket/platform';
+import { CLOCK, INTERNAL_TOKEN, InternalTokenGuard, type Clock } from '@peaket/platform';
 import { type AdminIdentity } from '../admin-accounts/index.js';
 import type { SaleScheduleSource } from '../readiness/index.js';
 import { Investigations, type InvestigationsDeps } from './application/investigations.js';
+import { FraudActions } from './application/fraud-actions.js';
 import { InvestigationsController } from './inbound/investigations.controller.js';
+import { FraudAppealsController } from './inbound/fraud-appeals.controller.js';
 import type {
   FraudAlerts,
   FraudForensicsRunner,
@@ -31,6 +33,7 @@ export interface InvestigationsModuleDeps {
   readonly identity: Pick<AdminIdentity, 'designations'>;
   readonly audit?: InvestigationsDeps['audit'];
   readonly runner?: FraudForensicsRunner;
+  readonly fraudActions?: FraudActions;
 }
 
 @Module({})
@@ -44,6 +47,7 @@ export class InvestigationsModule {
           store: deps.store,
           identity: deps.identity,
           schedule: deps.schedule,
+          ...(deps.fraudActions ? { fraud: deps.fraudActions } : {}),
           locks: deps.locks,
           notifier: deps.notifier,
           labels: deps.labels,
@@ -56,6 +60,8 @@ export class InvestigationsModule {
           ...(deps.runner ? { runner: deps.runner } : {}),
         }),
     };
-    return { module: InvestigationsModule, controllers: [InvestigationsController], providers: [service] };
+    const providers: Provider[] = [service, { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN }, InternalTokenGuard];
+    if (deps.fraudActions) providers.push({ provide: FraudActions, useValue: deps.fraudActions });
+    return { module: InvestigationsModule, controllers: deps.fraudActions ? [InvestigationsController, FraudAppealsController] : [InvestigationsController], providers, ...(deps.fraudActions ? { exports: [FraudActions] } : {}) };
   }
 }

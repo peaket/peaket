@@ -1,6 +1,7 @@
 // F-04-12 조사 API(openapi 태그 investigations). 모든 경로는 요청마다 FRAUD_INVESTIGATOR 지정을 확인하고,
 // 성공·거절을 접속기록에 남긴다. 응답은 Cache-Control: no-store다.
 import { Body, Controller, Get, Header, Headers, HttpCode, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { z } from 'zod';
 import {
   CreateOpsEventFraudClusterRunParams,
   CreateOpsEventFraudClusterRunResponse,
@@ -24,6 +25,7 @@ import { ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, Id
 import type { FastifyReply } from 'fastify';
 import { OPS_ROLES, type AdminRole } from '../../admin-accounts/index.js';
 import { etag, Investigations, type FraudActor } from '../application/investigations.js';
+import { bareProblem } from '../application/bare-problem.js';
 
 const actorOf = (me: Principal): FraudActor => ({ accountId: me.accountId, role: me.role ?? 'viewer' });
 
@@ -31,10 +33,21 @@ const reject = (e: unknown): never => {
   if (e instanceof ProblemError) throw e;
   if (e && typeof e === 'object' && 'type' in e && 'status' in e) {
     const p = e as { type: string; status: number; message?: string };
-    throw new ProblemError({ type: p.type, status: p.status, title: p.message ?? p.type, cause: e });
+    throw bareProblem(p.type, p.status, p.message ?? p.type);
   }
   throw e;
 };
+
+const ActionBody = z
+  .object({
+    fraudAction: z.enum(['CANCEL_TICKETS', 'RESTRICT', 'LIFT_RESTRICTION']),
+    accountIds: z.array(z.string()).min(1).max(100),
+    ticketIds: z.array(z.string()).max(500).optional(),
+    restrictionEndsAt: z.string().optional(),
+    reason: z.string().min(1).max(2000),
+  })
+  .strict();
+const ClearanceBody = z.object({ reason: z.string().min(1).max(2000), outcomeLabel: z.enum(['HUMAN', 'NONE']) }).strict();
 
 const one = (v: string | string[] | undefined): string | undefined => (typeof v === 'string' ? v : Array.isArray(v) ? v[0] : undefined);
 const listOf = (v: string | string[] | undefined): string[] | undefined => {
@@ -202,6 +215,48 @@ export class InvestigationsController {
   ) {
     try {
       return await this.investigations.appeal(actorOf(me), params.caseId, idem, body);
+    } catch (e) {
+      reject(e);
+    }
+  }
+
+  @Post('fraud-cases/:caseId/action-requests')
+  @HttpCode(201)
+  @Header('Cache-Control', 'no-store')
+  @Roles([...OPS_ROLES] as AdminRole[])
+  @Idempotent({ operation: 'CREATE_FRAUD_ACTION_REQUEST' })
+  @ContractRouteSchema({ body: ActionBody, responses: { 201: z.record(z.string(), z.unknown()) } })
+  async actionRequest(
+    @Param('caseId') caseId: string,
+    @Body() body: z.output<typeof ActionBody>,
+    @CurrentPrincipal() me: Principal,
+    @IdempotencyRequest() idem: IdempotencyRequest,
+  ) {
+    try {
+      return await this.investigations.actionRequest(actorOf(me), caseId, idem, body);
+    } catch (e) {
+      reject(e);
+    }
+  }
+
+  @Post('fraud-cases/:caseId/clearance')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  @Roles([...OPS_ROLES] as AdminRole[])
+  @Idempotent({ operation: 'CLEAR_FRAUD_CASE' })
+  @ContractRouteSchema({ body: ClearanceBody, responses: { 200: z.record(z.string(), z.unknown()) } })
+  async clearance(
+    @Param('caseId') caseId: string,
+    @Body() body: z.output<typeof ClearanceBody>,
+    @CurrentPrincipal() me: Principal,
+    @IdempotencyRequest() idem: IdempotencyRequest,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    try {
+      const out = await this.investigations.clearance(actorOf(me), caseId, one(headers['if-match']), idem, body);
+      void reply.header('etag', etag(out.version));
+      return out.view;
     } catch (e) {
       reject(e);
     }

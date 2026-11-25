@@ -108,7 +108,7 @@ export interface TransferLocks {
     withdrawnOfferCount: number;
     holders: readonly { accountId: string; ticketIds: readonly string[] }[];
   }>;
-  release(i: { caseId: string; eventId: string; accountIds: readonly string[]; version: number; actedBy: string }): Promise<void>;
+  release(i: { caseId: string; eventId: string; accountIds: readonly string[]; version: number; actedBy: string; releaseReason?: string }): Promise<void>;
 }
 
 export interface FraudNotifier {
@@ -116,7 +116,109 @@ export interface FraudNotifier {
 }
 
 export interface FraudLabels {
-  apply(i: { eventId: string; caseId: string; accountIds: readonly string[]; label: 'HUMAN' | 'BOT' }): Promise<void>;
+  apply(i: {
+    eventId: string;
+    caseId: string;
+    accountIds: readonly string[];
+    label: 'HUMAN' | 'BOT';
+    source?: 'FRAUD_ACTIONED' | 'FRAUD_APPEAL_ACCEPTED';
+    version?: number;
+    actedBy?: string;
+  }): Promise<void>;
+}
+
+export interface FraudTicketDirectory {
+  listForAction(i: { eventId: string; payerAccountIds: readonly string[] }): Promise<readonly import('./fraud-action.js').FraudTicketRef[]>;
+}
+
+export interface FraudCancellations {
+  cancel(i: {
+    approvalId: string;
+    caseId: string;
+    eventId: string;
+    targets: readonly import('./fraud-action.js').FraudCancelTarget[];
+    requestedBy: string;
+    approvedBy: string;
+    approvedAtMs: number;
+  }): Promise<readonly { ticketId: string; outcome: 'ACCEPTED' | 'SKIPPED_ALREADY_ENDED' | 'SKIPPED_ENTRY_STARTED' | 'SKIPPED_HOLDER_CHANGED' | 'FAILED'; cancellationId?: string; refundAmount?: number; withdrawnTransferOfferId?: string; failureCode?: string }[]>;
+}
+
+export interface FraudIdentityHold {
+  restrict(i: { accountId: string; caseId: string; version: number; untilMs: number }): Promise<void>;
+  lift(i: { accountId: string; caseId: string; version: number }): Promise<void>;
+}
+
+export interface FraudRestrictionCopies {
+  set(i: { accountId: string; caseId: string; restrictionId: string; state: 'ACTIVE' | 'LIFTED'; version: number; untilMs: number }): Promise<void>;
+}
+
+export interface FraudRestrictionRows {
+  restrict(i: { accountId: string; caseId: string; restrictionId: string; version: number; untilMs: number; actedBy: string }): Promise<void>;
+  lift(i: { accountId: string; caseId: string; restrictionId: string; version: number; actedBy: string }): Promise<void>;
+  activeForCase(caseId: string): Promise<readonly { accountId: string; caseId: string; restrictionId: string; untilMs: number; version: number }[]>;
+}
+
+export interface FraudCaseNotifier {
+  holderNotice(i: { eventId: string; caseId: string; accountId: string; ticketIds: readonly string[]; dueAtMs: number }): Promise<void>;
+  actionNotice(i: { eventId: string; caseId: string; accountId: string; action: import('./fraud-action.js').FraudAction; ticketIds: readonly string[]; restrictionEndsAtMs: number | null }): Promise<void>;
+  holderResult(i: { eventId: string; caseId: string; accountId: string; ticketIds: readonly string[]; result: 'CANCELED' | 'EXCLUDED' }): Promise<void>;
+  objectionDecided(i: { eventId: string; caseId: string; accountId: string; decision: 'ACCEPTED' | 'REJECTED'; reason: string; restrictionLifted: boolean }): Promise<void>;
+  restrictionLifted(i: { eventId: string; caseId: string; accountId: string }): Promise<void>;
+  transferLockReleased(i: { eventId: string; caseId: string; accountId: string }): Promise<void>;
+  deadlineNotice(i: { eventId: string; caseId: string; approvalId: string; leadMs: number; recipients: readonly string[] }): Promise<void>;
+}
+
+export interface FraudApproverIdentity {
+  designations(adminAccountId: string): Promise<readonly string[]>;
+  recentlyRevoked(adminAccountId: string): Promise<readonly { kind: string; revokedAtMs: number }[]>;
+}
+
+export interface FraudApproverDirectory {
+  listEligible(): Promise<readonly string[]>;
+}
+
+export interface FraudAppealCopies {
+  set(i: { caseId: string; eventId: string; accountId: string; version: number; lockActive: boolean; objectionDueAtMs: number | null; actionResult: Record<string, unknown> | null }): Promise<void>;
+}
+
+export interface FraudApprovalRecord {
+  approvalId: string;
+  caseId: string;
+  eventId: string;
+  action: import('./fraud-action.js').FraudAction;
+  accountIds: readonly string[];
+  targets: readonly import('./fraud-action.js').FraudTicketRef[];
+  restrictionEndsAtMs: number | null;
+  reason: string;
+  requestedBy: string;
+  requesterRole?: string;
+  dueAtMs: number;
+  status: import('./fraud-action.js').FraudApprovalStatus;
+  requestedAtMs?: number;
+  /** 저장소가 요청 시각을 requestedAtMs 대신 받는 이름(통합 시험 계약). */
+  nowMs?: number;
+  approverId: string | null;
+  approvedAtMs: number | null;
+  closeReason: string | null;
+  approvals: readonly string[];
+}
+
+export interface FraudApprovalStore {
+  request(
+    i: FraudApprovalRecord,
+    o: {
+      idem?: IdempotentWrite;
+      result?: unknown;
+      audit?: CaseAuditRecord;
+      events: readonly FraudCaseRecord['events'][number][];
+      caseStatus?: FraudCaseRecord['status'];
+    },
+  ): Promise<void>;
+  get(approvalId: string): Promise<FraudApprovalRecord | null>;
+  list(q: { status?: readonly string[]; requesterId?: string; awaitingApprover?: string; limit: number }): Promise<FraudApprovalRecord[]>;
+  setStatus(i: { approvalId: string; status: import('./fraud-action.js').FraudApprovalStatus; approverId?: string | null; reason?: string | null; closeReason?: string | null; nowMs: number }): Promise<void>;
+  recordSummaryView(i: { approvalId: string; adminAccountId: string; nowMs: number }): Promise<number>;
+  summaryViewedAt(i: { approvalId: string; adminAccountId: string }): Promise<number | null>;
 }
 
 export interface FraudAlerts {

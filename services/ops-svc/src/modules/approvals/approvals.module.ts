@@ -25,6 +25,7 @@ import { ApprovalsController } from './inbound/approvals.controller.js';
 import { SettlementAdjustmentsController } from './inbound/settlement-adjustments.controller.js';
 import { MemoryCoreContract, UnavailableCoreContract } from '../../adapters/http-core-contract.js';
 import type { ApprovalFailureCases } from '../cases/index.js';
+import type { FraudActions } from '../investigations/index.js';
 
 export interface ApprovalsModuleDeps {
   readonly store?: ContractApprovalStore;
@@ -40,6 +41,8 @@ export interface ApprovalsModuleDeps {
   readonly settlementAdjustmentStore?: SettlementAdjustmentApprovalStore;
   /** CS '승인 업무 실행 실패' 건(F-06-2 ADR-0364 결정 6). 계약 조건 변경·관리 역할 변경 승인이 부른다 */
   readonly failureCases?: ApprovalFailureCases;
+  /** F-04-13 부정 예매 조치 승인. 없으면 FRAUD_ACTION 경로를 열지 않는다 */
+  readonly fraud?: FraudActions;
 }
 
 @Module({})
@@ -70,7 +73,7 @@ export class ApprovalsModule {
       },
       {
         provide: ApprovalRouter,
-        useFactory: (payouts: PayoutApprovals, contracts: ContractApprovals, roleChanges: RoleChangeApprovals, adjustments: SettlementAdjustmentApprovals) => new ApprovalRouter(payouts, contracts, roleChanges, adjustments),
+        useFactory: (payouts: PayoutApprovals, contracts: ContractApprovals, roleChanges: RoleChangeApprovals, adjustments: SettlementAdjustmentApprovals) => new ApprovalRouter(payouts, contracts, roleChanges, adjustments, deps.fraud),
         inject: [PayoutApprovals, ContractApprovals, RoleChangeApprovals, SettlementAdjustmentApprovals],
       },
       {

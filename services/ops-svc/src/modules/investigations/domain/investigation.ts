@@ -65,6 +65,8 @@ export interface FraudClusterMemberRecord {
   objectionReceivedAtMs?: number | null;
   objectionDecidedAtMs?: number | null;
   objectionDecisionReason?: string | null;
+  /** 조치 결과를 알린 시각. 이의 창(30일)의 시작이다 */
+  actionNotifiedAtMs?: number | null;
 }
 
 export interface FraudClusterRecord {

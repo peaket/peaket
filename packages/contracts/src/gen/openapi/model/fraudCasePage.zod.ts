@@ -30,6 +30,7 @@ export const FraudCasePage = zod.object({
   "cancelDeadlineAt": zod.iso.datetime({"offset":true}).optional().describe('취소 마감 시각 = 판매 종료(공연 시작 24시간 전) − 재판매 준비 2시간 [가정](POL-046 ⑤). 이 시각이 지나면 표 취소를 요청·승인할 수 없고 이용 제한만 한다'),
   "transferLocked": zod.boolean().default(fraudCasePageItemsItemTransferLockedDefault).describe('이 사건으로 양도가 잠긴 티켓이 있는지(POL-046 ③)'),
   "approvalId": zod.string().nullish().describe('진행 중이거나 마지막 조치 승인 업무(kind FRAUD_ACTION)'),
+  "outcomeLabel": zod.union([zod.literal('BOT'),zod.literal('HUMAN'),zod.literal('NONE'),zod.literal(null)]).nullish().describe('사건의 최종 판단(조치 실행 뒤 BOT, 정상 종료·되돌림 뒤 HUMAN, 판단 전 null). 정본 docs/data.md fraud_case.outcome_label'),
   "version": zod.int().optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
   "closedAt": zod.iso.datetime({"offset":true}).nullish()

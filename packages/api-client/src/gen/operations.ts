@@ -97,6 +97,7 @@ export type OperationId =
   | 'createOpsFraudCase'
   | 'createOpsFraudCaseActionRequest'
   | 'createOpsFraudCaseAppealRequest'
+  | 'createOpsFraudCaseClearance'
   | 'createOpsFraudCaseEvidenceBundle'
   | 'createOpsFraudCaseIpReveal'
   | 'createOpsGoNoGoJudgement'
@@ -506,6 +507,7 @@ export const OPERATIONS = {
   createOpsFraudCase: {operationId: "createOpsFraudCase",method: "POST",path: "/v1/ops/fraud-cases",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsFraudCaseActionRequest: {operationId: "createOpsFraudCaseActionRequest",method: "POST",path: "/v1/ops/fraud-cases/{caseId}/action-requests",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsFraudCaseAppealRequest: {operationId: "createOpsFraudCaseAppealRequest",method: "POST",path: "/v1/ops/fraud-cases/{caseId}/appeal-requests",host: "ops-api",kind: "write",idempotent: true,cookie: true},
+  createOpsFraudCaseClearance: {operationId: "createOpsFraudCaseClearance",method: "POST",path: "/v1/ops/fraud-cases/{caseId}/clearance",host: "ops-api",kind: "write",idempotent: true,cookie: true,ifMatch: true},
   createOpsFraudCaseEvidenceBundle: {operationId: "createOpsFraudCaseEvidenceBundle",method: "POST",path: "/v1/ops/fraud-cases/{caseId}/evidence-bundles",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsFraudCaseIpReveal: {operationId: "createOpsFraudCaseIpReveal",method: "POST",path: "/v1/ops/fraud-cases/{caseId}/ip-reveals",host: "ops-api",kind: "write",cookie: true},
   createOpsGoNoGoJudgement: {operationId: "createOpsGoNoGoJudgement",method: "POST",path: "/v1/ops/events/{eventId}/go-no-go-judgements",host: "ops-api",kind: "write",cookie: true},

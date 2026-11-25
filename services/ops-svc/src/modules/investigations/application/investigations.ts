@@ -41,6 +41,7 @@ export interface InvestigationsDeps {
   readonly store: InvestigationStore;
   readonly identity: Pick<AdminIdentity, 'designations'>;
   readonly schedule: SaleScheduleSource;
+  readonly fraud?: import('./fraud-actions.js').FraudActions;
   readonly locks: TransferLocks;
   readonly notifier: FraudNotifier;
   readonly labels: FraudLabels;
@@ -207,12 +208,12 @@ export class Investigations {
     };
   }
 
-  /** 잠금 기한이 남아 있어도 뺀 계정·인정된 소명·정상 종료 사건은 실제로 잠기지 않았다(IR-09) */
-  #lockActive(m: FraudCaseRecord['members'][number], caseStatus: FraudCaseRecord['status'] | null, nowMs: number): boolean {
-    return m.removedAtMs === null && m.lockExpiresAtMs !== null && m.lockExpiresAtMs > nowMs && m.appealResult !== 'ACCEPTED' && caseStatus !== 'CLEARED';
+  /** 잠금 기한이 남아 있어도 뺀 계정·인정된 소명·정상 종료 사건·입장 시작은 실제로 잠기지 않았다(IR-09·C13) */
+  #lockActive(m: FraudCaseRecord['members'][number], caseStatus: FraudCaseRecord['status'] | null, nowMs: number, entryOpensAtMs?: number | null): boolean {
+    return m.removedAtMs === null && m.lockExpiresAtMs !== null && m.lockExpiresAtMs > nowMs && (entryOpensAtMs === undefined || entryOpensAtMs === null || nowMs < entryOpensAtMs) && m.appealResult !== 'ACCEPTED' && caseStatus !== 'CLEARED';
   }
 
-  memberView(m: FraudCaseRecord['members'][number], nowMs: number, caseStatus: FraudCaseRecord['status'] | null): Record<string, unknown> {
+  memberView(m: FraudCaseRecord['members'][number], nowMs: number, caseStatus: FraudCaseRecord['status'] | null, entryOpensAtMs?: number | null): Record<string, unknown> {
     return {
       accountId: m.accountId,
       ticketCount: m.ticketCount,
@@ -222,13 +223,13 @@ export class Investigations {
       appealResult: m.appealResult,
       appealDueAt: iso(m.appealDueAtMs),
       objectionResult: m.objectionResult ?? 'NONE',
-      objectionDueAt: null,
-      transferLocked: this.#lockActive(m, caseStatus, nowMs),
+      objectionDueAt: iso(m.actionNotifiedAtMs === undefined || m.actionNotifiedAtMs === null ? null : m.actionNotifiedAtMs + 30 * 86_400_000),
+      transferLocked: this.#lockActive(m, caseStatus, nowMs, entryOpensAtMs),
       lockExpiresAt: iso(m.lockExpiresAtMs),
     };
   }
 
-  caseView(c: FraudCaseRecord, nowMs: number, snapshot?: FraudSnapshotRecord | null): Record<string, unknown> {
+  caseView(c: FraudCaseRecord, nowMs: number, snapshot?: FraudSnapshotRecord | null, entryOpensAtMs?: number | null): Record<string, unknown> {
     const active = activeMembers(c);
     const results = active.map((m) => m.appealResult);
     let appealOutcome = 'NOT_REQUESTED';
@@ -250,12 +251,13 @@ export class Investigations {
       ticketCount: caseTicketCount(c),
       appealDueAt: iso(c.appealDueAtMs),
       cancelDeadlineAt: iso(c.cancelDeadlineAtMs),
-      transferLocked: active.some((m) => this.#lockActive(m, c.status, nowMs)),
+      transferLocked: active.some((m) => this.#lockActive(m, c.status, nowMs, entryOpensAtMs)),
       approvalId: c.approvalId,
+      outcomeLabel: c.outcomeLabel,
       version: c.version,
       createdAt: iso(c.createdAtMs),
       closedAt: iso(c.closedAtMs),
-      members: c.members.map((m) => this.memberView(m, nowMs, c.status)),
+      members: c.members.map((m) => this.memberView(m, nowMs, c.status, entryOpensAtMs)),
       appealOutcome,
       investigatorOpinion: c.investigatorOpinion,
       evidenceBundleIds: [],
@@ -431,8 +433,9 @@ export class Investigations {
     const c = await this.d.store.getCase(caseId);
     if (!c) throw problem('not-found', 404, '사건을 찾을 수 없습니다');
     const snapshot = await this.d.store.latestSnapshot(c.eventId);
+    const schedule = await this.d.schedule.get(c.eventId).catch(() => null);
     await this.allow(actor, 'FRAUD_CASE_GET', { caseId }, c.members.length);
-    return { view: this.caseView(c, this.d.now(), snapshot), version: c.version };
+    return { view: this.caseView(c, this.d.now(), snapshot, schedule?.entryOpensAtMs), version: c.version };
   }
 
   async patchCase(
@@ -456,6 +459,13 @@ export class Investigations {
     if (version === null) throw problem('precondition-required', 428, '고칠 판(If-Match)을 보내 주세요');
     if (version !== current.version) throw problem('precondition-failed', 412, '다른 곳에서 이 사건을 먼저 고쳤습니다');
     const nowMs = this.d.now();
+    if (body.objectionDecisions && body.objectionDecisions.length > 0) {
+      if (!this.d.fraud) throw problem('dependency-unavailable', 503, '조치 승인 모듈이 조립되지 않았습니다');
+      const decided = await this.d.fraud.decideObjections(actor, current, body.objectionDecisions);
+      const snapshot = await this.d.store.latestSnapshot(decided.eventId);
+      await this.allow(actor, 'FRAUD_CASE_PATCH', { caseId }, decided.members.length, { audit: false });
+      return { view: this.caseView(decided, nowMs, snapshot), version: decided.version };
+    }
     let next = current;
     const events: FraudCaseRecord['events'] = [];
     const lockReleases: string[] = [];
@@ -559,6 +569,33 @@ export class Investigations {
     } catch {
       // 보상 실패는 원래 오류를 가리지 않는다. 다음 요청이 같은 판으로 다시 시도한다
     }
+  }
+
+  async actionRequest(
+    actor: FraudActor,
+    caseId: string,
+    idem: IdempotentWrite,
+    body: { fraudAction: 'CANCEL_TICKETS' | 'RESTRICT' | 'LIFT_RESTRICTION'; accountIds: string[]; ticketIds?: string[]; restrictionEndsAt?: string; reason: string },
+  ): Promise<Record<string, unknown>> {
+    await this.authorize(actor, 'FRAUD_CASE_ACTION_REQUEST', { caseId });
+    if (!this.d.fraud) throw problem('dependency-unavailable', 503, '조치 승인 모듈이 조립되지 않았습니다');
+    const out = await this.d.fraud.request(actor, caseId, idem, body);
+    await this.allow(actor, 'FRAUD_CASE_ACTION_REQUEST', { caseId }, body.accountIds.length);
+    return out;
+  }
+
+  async clearance(
+    actor: FraudActor,
+    caseId: string,
+    ifMatch: string | undefined,
+    idem: IdempotentWrite,
+    body: { reason: string; outcomeLabel: 'HUMAN' | 'NONE' },
+  ): Promise<{ view: Record<string, unknown>; version: number }> {
+    await this.authorize(actor, 'FRAUD_CASE_CLEARANCE', { caseId });
+    if (!this.d.fraud) throw problem('dependency-unavailable', 503, '조치 승인 모듈이 조립되지 않았습니다');
+    const out = await this.d.fraud.clearance(actor, caseId, ifMatch, body, idem);
+    await this.allow(actor, 'FRAUD_CASE_CLEARANCE', { caseId }, 1);
+    return out;
   }
 
   async appeal(

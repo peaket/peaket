@@ -9,6 +9,7 @@
  *
  * OpenAPI spec version: 1.0.0-draft
  */
+import type { FraudCaseOutcomeLabel } from './fraudCaseOutcomeLabel';
 import type { FraudCaseStatus } from './fraudCaseStatus';
 import type { FraudReasonCategory } from './fraudReasonCategory';
 
@@ -41,6 +42,11 @@ export interface FraudCase {
      * @nullable
      */
   approvalId?: string | null;
+  /**
+     * 사건의 최종 판단(조치 실행 뒤 BOT, 정상 종료·되돌림 뒤 HUMAN, 판단 전 null). 정본 docs/data.md fraud_case.outcome_label
+     * @nullable
+     */
+  outcomeLabel?: FraudCaseOutcomeLabel;
   version?: number;
   createdAt?: string;
   /** @nullable */

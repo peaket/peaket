@@ -18,6 +18,7 @@ import {
   type ListHeldTicketsInput,
   type ListTicketsInput,
   type ListTicketsResult,
+  TicketInputError,
   type OperatorCancelInput,
   type OperatorCancelOutcome,
   newTicketKey,
@@ -110,6 +111,14 @@ export class TicketService {
   }
 
   /** 계정의 월렛 목록(최신 발권순). */
+  async listFraudTickets(input: { eventId: string; payerAccountIds: readonly string[] }): Promise<readonly { ticketId: string; payerAccountId: string; holderAccountId: string; status: string; entryRecorded: boolean }[]> {
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuid.test(input.eventId) || input.payerAccountIds.length === 0 || input.payerAccountIds.length > 100 || input.payerAccountIds.some((a) => !uuid.test(a))) {
+      throw new TicketInputError('ListFraudTickets 입력이 틀렸다');
+    }
+    return this.deps.store.listFraudTickets(input);
+  }
+
   async list(input: ListTicketsInput): Promise<ListTicketsResult> {
     return this.deps.store.list(normalizeListInput(input));
   }
