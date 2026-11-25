@@ -241,3 +241,4 @@
 - F-05-3 구현 리뷰 IR-10(낮음): 대조 한 틱이 100개를 차례로 2초 데드라인으로 보내 최악 200초까지 늘어난다. 한 틱 시간 한도나 병렬 상한을 두고, `queue.proto`의 1초 주석과 클라이언트 2초도 맞춘다
 
 - ~~F-05-2 뒤 web reflow wallet-enroll·wallet-live (CI 45267206465)~~ — **닫힘(2026-11-24, 073dc18c3·c3175c7b5)**: wallet-enroll은 live 목록·회차 요약 대역과 UUIDv7 티켓으로 바꾸고, wallet-live O-T52 ⑥은 데스크톱 안내 뒤 [그래도 이 기기에 등록]을 누르게 고쳤다. `web / reflow`·`visual`·`console-csp` 모두 통과(9ebc100ec·c3175c7b5). 남은 것은 서비스 워커가 제어하는 페이지의 등록·갱신을 이 두 시험이 덮지 않는 점(wallet-sw가 따로 본다)
+- F-02-4 독립 시험 리뷰 TR-16(낮음, 그 밖): 계획 §8 머리의 시험 파일 이름이 `admin-access-log-intake.test.ts`로 남아 실제 `audit-admin-access.test.ts`와 다르고, ASVS `offline-gate.md` 14.1.2·14.2.4·16.1.1·16.4.2·16.4.3 행의 '테스트 결과'가 아직 `미실행`이다. 기록 커밋에서 이름과 결과 칸을 맞춘다.
