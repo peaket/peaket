@@ -1,4 +1,4 @@
-// 다른 서비스의 감사 기록 받기(BAT-355 OPS-270, ADR-0341 결정 7, POST /internal/v1/ops/audit-records).
+﻿// 다른 서비스의 감사 기록 받기(BAT-355 OPS-270, ADR-0341 결정 7, POST /internal/v1/ops/audit-records).
 // 내부 토큰이 없으면 거절, 허용 목록 밖 recordType·payload 칸(개인정보 칸 포함)은 400이고 아무것도 쓰지 않으며,
 // 같은 eventKey는 체인 행 하나이고 처음 seq를 돌려주며 행위자는 SYSTEM(빈 UUID)이다. 받는 쪽 첫 값은 SHUFFLE_COMMIT_DISCLOSED다.
 import 'reflect-metadata';
@@ -72,13 +72,13 @@ describe('OPS-270 다른 서비스의 감사 기록 받기', () => {
     }
     expect(h.audit.entries).toEqual([]);
     const first = await h.post(auth, good);
-    expect([first.statusCode, JSON.parse(first.payload)]).toEqual([202, { accepted: true, seq: 1 }]);
+    expect([first.statusCode, JSON.parse(first.payload)]).toEqual([202, { accepted: true, duplicate: false, seq: 1 }]);
     const again = await h.post(auth, { ...good, occurredAt: new Date(NOW).toISOString() });
-    expect([again.statusCode, JSON.parse(again.payload)]).toEqual([202, { accepted: true, seq: 1 }]);
+    expect([again.statusCode, JSON.parse(again.payload)]).toEqual([202, { accepted: true, duplicate: true, seq: 1 }]);
     expect(h.audit.entries).toHaveLength(1);
     expect(h.audit.entries[0]).toMatchObject({ seq: 1, recordType: 'SHUFFLE_COMMIT_DISCLOSED', recordId: eventId });
     expect(h.audit.entries[0]!.record.payload).toEqual({ ...good.payload, eventKey: good.eventKey, occurredAt: good.occurredAt, actorRef: SYSTEM_REF, actorRole: 'system' });
     const second = await h.post(auth, disclosure(eventId, { eventKey: `shuffle-commit:${eventId}:1:${'cd'.repeat(32)}`, payload: { ...good.payload, group: 1, commit: 'cd'.repeat(32) } }));
-    expect(JSON.parse(second.payload)).toEqual({ accepted: true, seq: 2 });
+    expect(JSON.parse(second.payload)).toEqual({ accepted: true, duplicate: false, seq: 2 });
   });
 });

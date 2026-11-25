@@ -176,6 +176,11 @@ test('[ASVS v5.0.0-16.4.2] 파기 역할은 행을 읽지 못하고 다음 적�
     (root) => set(root, 'data/clickhouse/access-log/002_users.sql', 'CREATE ROW POLICY IF NOT EXISTS admin_rows_only ON access_log.access_log FOR SELECT USING is_admin = 1 TO al_admin_reader;', ''),
     'admin_rows_only',
   );
+  // ClickHouse 24.12에는 파티션만 좁히는 권한이 없어 정본에 al_purger와 한계를 적는다.
+  expectBlocked((root) => set(root, 'docs/observability.md', '| `al_purger` |', '| `al_purger_gone` |'), 'al_purger');
+  // 원천 표(access_log_otel)도 TTL·하루 파티션 검사를 받는다.
+  expectBlocked((root) => set(root, 'data/clickhouse/access-log/001_access_log.sql', 'TTL toDate(Timestamp) + INTERVAL 3 MONTH', 'TTL toDate(Timestamp) + INTERVAL 1 MONTH'), 'access_log_otel');
+  expectBlocked((root) => set(root, 'data/clickhouse/access-log/001_access_log.sql', 'PARTITION BY toDate(Timestamp)', 'PARTITION BY toYYYYMM(Timestamp)'), 'access_log_otel');
 });
 
 test('[ASVS v5.0.0-16.4.3] 전용 DB·감사 접수 종류·일반 사용자 권한 분리가 빠지면 막는다', async () => {
@@ -196,10 +201,32 @@ test('[ASVS v5.0.0-14.2.4] 3개월 컷오프는 월말·윤달을 보정하고 �
   );
   // 같은 날짜(2026-08-24)는 남긴다: 그날 늦은 줄은 아직 3개월이 안 됐다.
   assert.deepEqual(expiredPartitionDays({ todayIso: '2026-11-24', partitionDays: ['2026-08-24'], retentionMonths: 3 }), []);
-  const plan = purgePlan({ todayIso: '2026-11-24', partitionDays: ['2026-08-23', '2026-08-22', '2026-08-25'], retentionMonths: 3, maxDropPerRun: 1 });
-  assert.deepEqual(plan.drop, ['2026-08-22']);
+  const plan = purgePlan({
+    todayIso: '2026-11-24',
+    partitions: [
+      { day: '2026-08-23', table: 'access_log' },
+      { day: '2026-08-22', table: 'access_log' },
+      { day: '2026-08-25', table: 'access_log' },
+    ],
+    retentionMonths: 3,
+    maxDropPerRun: 1,
+  });
+  assert.deepEqual(plan.drop, [{ day: '2026-08-22', table: 'access_log' }]);
   assert.equal(plan.overdue, 2);
   assert.equal(plan.truncated, true);
+  // 상한은 날짜가 아니라 파티션 단위다. 같은 날 두 표는 두 파티션이다.
+  const twoTables = purgePlan({
+    todayIso: '2026-11-24',
+    partitions: [
+      { day: '2026-08-22', table: 'access_log' },
+      { day: '2026-08-22', table: 'access_log_otel' },
+    ],
+    retentionMonths: 3,
+    maxDropPerRun: 1,
+  });
+  assert.deepEqual(twoTables.drop, [{ day: '2026-08-22', table: 'access_log' }]);
+  assert.equal(twoTables.overdue, 2);
+  assert.equal(twoTables.truncated, true);
   assert.equal(retentionUntil('2026-11-24', 3, 7), '2027-03-03T00:00:00.000Z');
   assert.equal(adminRetainUntil('2024-02-29T00:00:00.000Z', 2), '2026-03-01T00:00:00.000Z');
   assert.equal(adminRetainUntil('2024-02-29T00:00:00.000Z', 4), '2028-02-29T00:00:00.000Z');
@@ -238,7 +265,7 @@ test('access-log-retention 실행기는 --plan과 --check에서 정해진 끝 �
   const plan = run(ROOT, ['--plan', '--today', '2026-11-24', '--partitions', '2026-08-23,2026-08-24,2026-08-25']);
   assert.equal(plan.code, 0, plan.out);
   const parsed = JSON.parse(plan.out);
-  assert.deepEqual(parsed.drop, ['2026-08-23']);
+  assert.deepEqual(parsed.drop, [{ day: '2026-08-23', table: 'access_log' }]);
   assert.equal(parsed.cutoff, '2026-08-24');
   assert.equal(parsed.overdue, 1);
   const bad = run(ROOT, ['--plan', '--today', '2026-13-40', '--partitions', 'x']);

@@ -1,4 +1,4 @@
-// F-02-4 관리 계정 접속기록(2년 보존)과 접속기록 파기 기록의 감사 접수 시험.
+﻿// F-02-4 관리 계정 접속기록(2년 보존)과 접속기록 파기 기록의 감사 접수 시험.
 // 정본: docs/security/data-classification.md '관리자 시스템 접속기록'·'백업 보존 상한과 파기',
 // docs/observability.md §7 '불변 감사 로그 격리'. 같은 eventKey는 체인 행 하나이고 행위자는 SYSTEM이다.
 import 'reflect-metadata';
@@ -81,9 +81,9 @@ describe('F-02-4 접속기록 파기·관리 계정 접속기록 감사 접수',
     const good = adminAccess();
     const first = await h.post(auth, good);
     expect(first.statusCode).toBe(202);
-    expect(JSON.parse(first.payload)).toEqual({ accepted: true, seq: 1 });
+    expect(JSON.parse(first.payload)).toEqual({ accepted: true, duplicate: false, seq: 1 });
     const again = await h.post(auth, good);
-    expect(JSON.parse(again.payload)).toEqual({ accepted: true, seq: 1 });
+    expect(JSON.parse(again.payload)).toEqual({ accepted: true, duplicate: true, seq: 1 });
     expect(h.audit.entries).toHaveLength(1);
     expect(h.audit.entries[0]).toMatchObject({ seq: 1, recordType: 'ADMIN_ACCESS_LOG', recordId: good.recordId });
     expect(h.audit.entries[0]!.record.payload).toMatchObject({

@@ -40,7 +40,7 @@ function runCli(args) {
 }
 
 /** 가짜 ClickHouse: system.parts 목록, ALTER DROP 기록, 관리 계정 줄 응답을 한 곳에서 처리한다. */
-async function fakeClickHouse({ partitions = [], adminRows = [], failDrop = null, missingDrop = null, failQuery = null, countRows = 0, filterAdmin = false } = {}) {
+async function fakeClickHouse({ partitions = [], tables = ['access_log', 'access_log_otel'], adminRows = [], failDrop = null, missingDrop = null, failQuery = null, countRows = 0, filterAdmin = false } = {}) {
   const queries = [];
   const auths = [];
   const h = await listen(async (req, res) => {
@@ -52,6 +52,11 @@ async function fakeClickHouse({ partitions = [], adminRows = [], failDrop = null
     if (failQuery) {
       res.writeHead(failQuery);
       res.end(`query failed ${failQuery}`);
+      return;
+    }
+    if (q.includes('system.tables')) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: tables.map((name) => ({ name })) }));
       return;
     }
     if (q.includes('system.parts') || q.includes('system.partitions')) {
@@ -97,8 +102,9 @@ async function fakeClickHouse({ partitions = [], adminRows = [], failDrop = null
   return { ...h, queries, auths };
 }
 
-async function fakeAudit({ fail = false, failAfter = null } = {}) {
+async function fakeAudit({ fail = false, failAfter = null, dedupe = false } = {}) {
   const posts = [];
+  const seen = new Map();
   const h = await listen(async (req, res) => {
     const body = await bodyOf(req);
     if (fail || (failAfter !== null && posts.length >= failAfter)) {
@@ -106,9 +112,17 @@ async function fakeAudit({ fail = false, failAfter = null } = {}) {
       res.end('audit down');
       return;
     }
-    posts.push(JSON.parse(body));
+    const record = JSON.parse(body);
+    if (dedupe && seen.has(record.eventKey)) {
+      posts.push(record);
+      res.writeHead(202, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ accepted: true, duplicate: true, seq: seen.get(record.eventKey) }));
+      return;
+    }
+    posts.push(record);
+    seen.set(record.eventKey, posts.length);
     res.writeHead(202, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ accepted: true, seq: posts.length }));
+    res.end(JSON.stringify({ accepted: true, duplicate: false, seq: posts.length }));
   });
   return { ...h, posts };
 }
@@ -378,12 +392,165 @@ test('[ASVS v5.0.0-14.2.4] 복원하면 스냅샷 뒤 파기 기록의 날짜·�
     assert.ok(drops.some((q) => q.includes('access_log.access_log ') && q.includes('20261124')));
     assert.ok(drops.some((q) => q.includes('access_log.access_log ') && q.includes('20261125')));
     assert.ok(drops.every((q) => !q.includes('access_log_otel') && !q.includes('20261123')));
-    assert.equal(audit.posts.filter((p) => p.recordType === 'ACCESS_LOG_PARTITION_PURGE').length >= 4, true, JSON.stringify(audit.posts));
+    const purgePosts = audit.posts.filter((p) => p.recordType === 'ACCESS_LOG_PARTITION_PURGE');
+    assert.deepEqual(
+      purgePosts.map((p) => `${p.payload.state}:${p.payload.day}:${p.payload.table}`).sort(),
+      ['DROPPED:2026-11-24:access_log', 'DROPPED:2026-11-25:access_log', 'PLANNED:2026-11-24:access_log', 'PLANNED:2026-11-25:access_log'],
+    );
+    assert.equal(purgePosts.every((p) => p.payload.reason === 'reapply'), true);
     assert.equal(JSON.parse(r.out.trim().split('\n').at(-1)).reapplied.length, 2);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     ch.server.close();
     audit.server.close();
+  }
+});
+
+test('[ASVS v5.0.0-14.2.4] system.parts가 같은 파티션을 여러 번 줘도 한 번만 지운다', async () => {
+  const ch = await fakeClickHouse({
+    partitions: [
+      { partition: '20260822', table: 'access_log' },
+      { partition: '20260822', table: 'access_log' },
+      { partition: '20260822', table: 'access_log_otel' },
+    ],
+  });
+  const audit = await fakeAudit();
+  try {
+    const r = await runCli(['--purge', '--today', '2026-11-24', '--clickhouse', ch.base, '--ops-audit', audit.base]);
+    assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+    const drops = ch.queries.filter((q) => q.includes('DROP PARTITION'));
+    assert.equal(drops.length, 2, drops.join('\n'));
+    assert.equal(drops.filter((q) => q.includes('access_log.access_log ')).length, 1);
+    assert.equal(audit.posts.filter((p) => p.payload?.state === 'PLANNED').length, 2);
+    assert.equal(JSON.parse(r.out.trim().split('\n').at(-1)).overdue, 0);
+  } finally {
+    ch.server.close();
+    audit.server.close();
+  }
+});
+
+test('[ASVS v5.0.0-14.2.4] 없는 표는 할 일 없음이 아니라 실패(종료 1)다', async () => {
+  const ch = await fakeClickHouse({ tables: ['access_log'], partitions: ['2026-08-22'] });
+  const audit = await fakeAudit();
+  try {
+    const r = await runCli(['--purge', '--today', '2026-11-24', '--clickhouse', ch.base, '--ops-audit', audit.base]);
+    assert.equal(r.code, 1, `${r.out}\n${r.err}`);
+    assert.equal(ch.queries.filter((q) => q.includes('DROP PARTITION')).length, 0);
+    assert.equal(audit.posts.length, 0);
+  } finally {
+    ch.server.close();
+    audit.server.close();
+  }
+});
+
+test('[ASVS v5.0.0-14.2.4] DROP 뒤 DROPPED 감사 실패는 outbox로 닫고 다음 실행이 reconciled로 남긴다', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'peaket-purge-outbox-'));
+  const outbox = join(dir, 'outbox.jsonl');
+  const ch1 = await fakeClickHouse({ partitions: ['2026-08-22'] });
+  const audit1 = await fakeAudit({ failAfter: 1 });
+  try {
+    const first = await runCli(['--purge', '--today', '2026-11-24', '--clickhouse', ch1.base, '--ops-audit', audit1.base, '--outbox', outbox]);
+    assert.equal(first.code, 1, `${first.out}\n${first.err}`);
+    assert.equal(readFileSync(outbox, 'utf8').includes('2026-08-22'), true);
+  } finally {
+    ch1.server.close();
+    audit1.server.close();
+  }
+  const ch2 = await fakeClickHouse({ partitions: [] });
+  const audit2 = await fakeAudit();
+  try {
+    const second = await runCli(['--purge', '--today', '2026-11-24', '--clickhouse', ch2.base, '--ops-audit', audit2.base, '--outbox', outbox]);
+    assert.equal(second.code, 0, `${second.out}\n${second.err}`);
+    const done = audit2.posts.find((p) => p.payload?.state === 'DROPPED');
+    assert.equal(done?.payload?.reconciled, true, JSON.stringify(audit2.posts));
+    assert.equal(done?.payload?.day, '2026-08-22');
+    assert.equal(readFileSync(outbox, 'utf8').trim(), '');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    ch2.server.close();
+    audit2.server.close();
+  }
+});
+
+test('[ASVS v5.0.0-14.2.4] 한 번에 지우는 상한은 날짜가 아니라 파티션 수다', async () => {
+  const ch = await fakeClickHouse({
+    partitions: [
+      { partition: '20260822', table: 'access_log' },
+      { partition: '20260822', table: 'access_log_otel' },
+    ],
+  });
+  const audit = await fakeAudit();
+  try {
+    const r = await runCli(['--purge', '--today', '2026-11-24', '--clickhouse', ch.base, '--ops-audit', audit.base, '--max-drop', '1']);
+    assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+    assert.equal(ch.queries.filter((q) => q.includes('DROP PARTITION')).length, 1);
+    const out = JSON.parse(r.out.trim().split('\n').at(-1));
+    assert.equal(out.overdue, 1);
+    assert.equal(out.truncated, true);
+  } finally {
+    ch.server.close();
+    audit.server.close();
+  }
+});
+
+test('[ASVS v5.0.0-16.4.2] 감사 서버 연결 거절은 종료 1이다', async () => {
+  const ch = await fakeClickHouse({ partitions: ['2026-08-22'] });
+  try {
+    const r = await runCli(['--purge', '--today', '2026-11-24', '--clickhouse', ch.base, '--ops-audit', 'http://127.0.0.1:1']);
+    assert.equal(r.code, 1, `${r.out}\n${r.err}`);
+  } finally {
+    ch.server.close();
+  }
+});
+
+test('[ASVS v5.0.0-16.1.1] 관리 복사 지표는 누적이고 중복 접수를 duplicates로 센다', async () => {
+  const ch = await fakeClickHouse({
+    filterAdmin: true,
+    adminRows: [{ ts: '2026-11-23T12:00:00.000Z', source: 'identity', request_id: 'same', event: 'LOGIN', result: 'SUCCESS', provider: 'PASSWORD', factors: ['password'], failure: '', client_ip: null, user_agent: 'UA', account_id: null, pod: 'identity-1', seq: 1, is_admin: 1 }],
+  });
+  const audit = await fakeAudit({ dedupe: true });
+  const dir = mkdtempSync(join(tmpdir(), 'peaket-admin-copy-cumulative-'));
+  const metrics = join(dir, 'metrics.txt');
+  try {
+    const args = ['--admin-copy', '--date', '2026-11-23', '--clickhouse', ch.base, '--ops-audit', audit.base, '--metrics', metrics];
+    assert.equal((await runCli(args)).code, 0);
+    const second = await runCli(args);
+    assert.equal(second.code, 0, `${second.out}\n${second.err}`);
+    const out = JSON.parse(second.out.trim().split('\n').at(-1));
+    assert.equal(out.copied, 0);
+    assert.equal(out.duplicates, 1);
+    const text = readFileSync(metrics, 'utf8');
+    assert.match(text, /^access_log_admin_copy_rows_total\{result="copied"\} 1$/m);
+    assert.match(text, /^access_log_admin_copy_rows_total\{result="duplicate"\} 1$/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    ch.server.close();
+    audit.server.close();
+  }
+});
+
+test('[ASVS v5.0.0-16.1.1] 파기 실패 지표는 성공 실행이 0으로 덮지 않는다', async () => {
+  const ch1 = await fakeClickHouse({ partitions: ['2026-08-22'] });
+  const audit1 = await fakeAudit({ fail: true });
+  const dir = mkdtempSync(join(tmpdir(), 'peaket-purge-fail-metrics-'));
+  const metrics = join(dir, 'metrics.txt');
+  try {
+    assert.equal((await runCli(['--purge', '--today', '2026-11-24', '--clickhouse', ch1.base, '--ops-audit', audit1.base, '--metrics', metrics])).code, 1);
+    assert.match(readFileSync(metrics, 'utf8'), /^access_log_purge_audit_failures_total 1$/m);
+  } finally {
+    ch1.server.close();
+    audit1.server.close();
+  }
+  const ch2 = await fakeClickHouse({ partitions: [] });
+  const audit2 = await fakeAudit();
+  try {
+    const r2 = await runCli(['--purge', '--today', '2026-11-24', '--clickhouse', ch2.base, '--ops-audit', audit2.base, '--metrics', metrics]);
+    assert.equal(r2.code, 0, `${r2.out}\n${r2.err}`);
+    assert.match(readFileSync(metrics, 'utf8'), /^access_log_purge_audit_failures_total 1$/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    ch2.server.close();
+    audit2.server.close();
   }
 });
 

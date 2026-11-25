@@ -46,6 +46,8 @@ function runCli(args: string[]) {
 }
 
 const statements = (sql: string) => sql.split(/;\s*\n/).map((s) => s.trim()).filter((s) => s && !s.split('\n').every((l) => l.trim().startsWith('--') || l.trim() === ''));
+const basic = (user: string, pass: string) => `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`;
+const asUser = (user: string, pass: string, sql: string) => fetch(`${ch!.url}/`, { method: 'POST', headers: { authorization: basic(user, pass) }, body: sql });
 
 async function apply(sql: string) {
   for (const s of statements(sql)) await ch!.exec(s);
@@ -163,14 +165,25 @@ describe('F-02-4 실제 ClickHouse·ops-svc·Object Lock 통합', () => {
     const raw = (await admin!.query("select record_json from audit_chain where record_type='ACCESS_LOG_PARTITION_PURGE' and record_json->'payload'->>'state'='DROPPED' and record_json->'payload'->>'table'='access_log'")).rows[0].record_json;
     const payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
     expect(payload.payload).toMatchObject({ day: '2026-08-22', table: 'access_log', state: 'DROPPED', rows: null });
-    // TR-03: 실제 자격이 쓰였는지 확인한다. al_purger는 행을 읽지 못하고 currentUser()가 자기 이름이다.
-    const basic = (user: string, pass: string) => `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`;
-    const asUser = async (user: string, pass: string, sql: string) => fetch(`${ch!.url}/`, { method: 'POST', headers: { authorization: basic(user, pass) }, body: sql });
+    // IR-03/TR-03: 실제 자격이 쓰였는지 확인한다. al_purger는 행을 읽지 못하고 currentUser()가 자기 이름이다.
     const me = await asUser('al_purger', PURGER_PASSWORD, 'SELECT currentUser()');
     expect((await me.text()).trim()).toBe('al_purger');
     const denied = await asUser('al_purger', PURGER_PASSWORD, 'SELECT count() FROM access_log.access_log');
     expect(denied.status).toBeGreaterThanOrEqual(400);
     expect(await denied.text()).toMatch(/ACCESS_DENIED|Not enough privileges|denied/i);
+    // IR-04: ALTER는 두 표에만 주고, 다른 표·DB·system.tables에는 권한이 없다.
+    const grants = JSON.parse(await ch!.exec("SELECT database, table, access_type FROM system.grants WHERE user_name = 'al_purger' FORMAT JSON")) as { data: Array<{ database: string; table: string; access_type: string }> };
+    expect(
+      grants.data.map((g) => `${g.database}.${g.table}:${g.access_type}`).sort(),
+    ).toEqual(['access_log.access_log:ALTER TABLE', 'access_log.access_log:ALTER VIEW', 'access_log.access_log_otel:ALTER TABLE', 'access_log.access_log_otel:ALTER VIEW', 'system.parts:SELECT']);
+    for (const sql of ['SELECT count() FROM bronze.events', 'SELECT count() FROM access_log.access_log']) {
+      const r = await asUser('al_purger', PURGER_PASSWORD, sql);
+      expect(r.status, sql).toBeGreaterThanOrEqual(400);
+    }
+    for (const [user, pass] of [['al_ingest', 'ingest-test'], ['al_admin_reader', ADMIN_READER_PASSWORD]] as const) {
+      const alter = await asUser(user, pass, "ALTER TABLE access_log.access_log DROP PARTITION '20260101'");
+      expect(alter.status, `${user} ALTER`).toBeGreaterThanOrEqual(400);
+    }
     const wrong = await runCli([
       '--purge', '--today', '2026-11-24', '--clickhouse', ch!.url,
       '--clickhouse-user', 'al_purger', '--clickhouse-password', 'wrong-password',
@@ -187,6 +200,7 @@ describe('F-02-4 실제 ClickHouse·ops-svc·Object Lock 통합', () => {
       ('2026-11-23 14:59:59.000', 'identity', '', 'kst-before', '', '', 0, 0, NULL, 'UA', '44444444-4444-4444-8444-444444444444', 'LOGIN', 'SUCCESS', 'PASSWORD', ['password'], '', '', 4, 'identity-1', 1),
       ('2026-11-23 15:00:00.000', 'identity', '', 'kst-start', '', '', 0, 0, NULL, 'UA', '55555555-5555-4555-8555-555555555555', 'LOGIN', 'SUCCESS', 'PASSWORD', ['password'], '', '', 5, 'identity-1', 1),
       ('2026-11-24 08:59:59.000', 'identity', '', 'kst-mid', '', '', 0, 0, NULL, 'UA', '66666666-6666-4666-8666-666666666666', 'REAUTH', 'SUCCESS', 'PASSKEY', ['passkey'], '', '', 6, 'identity-1', 1),
+      ('2026-11-24 12:00:00.000', 'identity', '', 'kst-fan', '', '', 0, 0, NULL, 'UA', '99999999-9999-4999-8999-999999999999', 'LOGIN', 'SUCCESS', 'PASSWORD', ['password'], '', '', 9, 'identity-1', 0),
       ('2026-11-24 14:59:59.000', 'identity', '', 'kst-end', '', '', 0, 0, NULL, 'UA', '77777777-7777-4777-8777-777777777777', 'LOGOUT', 'SUCCESS', '', [], '', '', 7, 'identity-1', 1),
       ('2026-11-24 15:00:00.000', 'identity', '', 'kst-after', '', '', 0, 0, NULL, 'UA', '88888888-8888-4888-8888-888888888888', 'LOGIN', 'SUCCESS', 'PASSWORD', ['password'], '', '', 8, 'identity-1', 1)`);
     const r = await runCli([
@@ -210,9 +224,14 @@ describe('F-02-4 실제 ClickHouse·ops-svc·Object Lock 통합', () => {
     const payloads = rows.map((r2) => (typeof r2.record_json === 'string' ? JSON.parse(r2.record_json) : r2.record_json).payload);
     expect(payloads.map((p) => p.requestId).sort()).toEqual(['kst-end', 'kst-mid', 'kst-start']);
     expect(payloads.map((p) => p.retainUntil).sort()).toEqual(['2028-11-23T15:00:00.000Z', '2028-11-24T08:59:59.000Z', '2028-11-24T14:59:59.000Z']);
-    expect(payloads.some((p) => p.requestId === 'kst-before' || p.requestId === 'kst-after' || p.requestId === 'fan-1')).toBe(false);
+    expect(payloads.some((p) => p.requestId === 'kst-before' || p.requestId === 'kst-after' || p.requestId === 'kst-fan' || p.requestId === 'fan-1')).toBe(false);
     const keys = rows.map((r2) => (typeof r2.record_json === 'string' ? JSON.parse(r2.record_json) : r2.record_json).payload.eventKey as string);
     expect(keys.every((k) => k.split(':')[2] === '2026-11-24')).toBe(true);
+    // IR-09: 실제 al_admin_reader 자격과 행 정책을 직접 확인한다.
+    const me = await asUser('al_admin_reader', ADMIN_READER_PASSWORD, 'SELECT currentUser()');
+    expect((await me.text()).trim()).toBe('al_admin_reader');
+    const visible = JSON.parse(await asUser('al_admin_reader', ADMIN_READER_PASSWORD, 'SELECT DISTINCT is_admin FROM access_log.access_log FORMAT JSON').then((r) => r.text())) as { data: Array<{ is_admin: number }> };
+    expect(visible.data).toEqual([{ is_admin: 1 }]);
   });
 
   test('[ASVS v5.0.0-16.4.2] Object Lock 준수 모드 사본 버킷과 보존 머리를 받는다(모토는 삭제 거절을 흉내 내지 않아 그 부분은 미검증)', async () => {

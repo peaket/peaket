@@ -1,4 +1,4 @@
-// 정산 계좌 변경 감사 기록 받기(J-T40 ⑦, F-07-7 LCH-120, ADR-0370 결정 5, ADR-0341 결정 7, settlement §8 '정산 계좌 변경' 행).
+﻿// 정산 계좌 변경 감사 기록 받기(J-T40 ⑦, F-07-7 LCH-120, ADR-0370 결정 5, ADR-0341 결정 7, settlement §8 '정산 계좌 변경' 행).
 // payment-svc 정산 일꾼이 payout_account_change 행을 POST /internal/v1/ops/audit-records(recordType PAYOUT_ACCOUNT_CHANGED)로 보낸다.
 // ops는 허용 칸(파트너·행위자·결과·재인증 요소·예금주 일치·은행·끝 4자리·보류 끝·결제사별 결과)만 받고,
 // 목록 밖 칸(계좌번호·예금주명)과 칸마다 허용 값 밖은 400이며 아무것도 쓰지 않는다. 같은 사건 키는 체인 행 하나다.
@@ -73,7 +73,7 @@ describe('J-T40 ⑦ PAYOUT_ACCOUNT_CHANGED 감사 받기', () => {
     }
     expect(seqs).toEqual([1, 2, 3]);
     const again = await h.post(accepted);
-    expect([again.statusCode, JSON.parse(again.payload)]).toEqual([202, { accepted: true, seq: 1 }]);
+    expect([again.statusCode, JSON.parse(again.payload)]).toEqual([202, { accepted: true, duplicate: true, seq: 1 }]);
     expect(h.audit.entries).toHaveLength(3);
     expect(h.audit.entries[0]).toMatchObject({ seq: 1, recordType: 'PAYOUT_ACCOUNT_CHANGED', recordId: accepted.recordId });
     expect(h.audit.entries[0]!.record.payload).toEqual({ ...accepted.payload, eventKey: accepted.eventKey, occurredAt: accepted.occurredAt, actorRef: SYSTEM_REF, actorRole: 'system' });
@@ -109,7 +109,7 @@ describe('J-T40 ⑦ PAYOUT_ACCOUNT_CHANGED 감사 받기', () => {
     expect(h.audit.entries).toEqual([]);
     // 대조: 같은 모양의 바른 본문은 받는다(거부가 recordType 하나 때문이 아니라 칸 규칙 때문인지 본다)
     const ok = await h.post(changed());
-    expect([ok.statusCode, JSON.parse(ok.payload)]).toEqual([202, { accepted: true, seq: 1 }]);
+    expect([ok.statusCode, JSON.parse(ok.payload)]).toEqual([202, { accepted: true, duplicate: false, seq: 1 }]);
     expect(h.audit.entries).toHaveLength(1);
   });
 });
