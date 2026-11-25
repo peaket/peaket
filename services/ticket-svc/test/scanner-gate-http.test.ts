@@ -122,7 +122,7 @@ beforeAll(async () => {
   await shift.putPlacement({ eventId: EVENT, deviceId: DEVICE, gateZone: '동문', mode: 'IN', setBy: ACCOUNT, atMs: NOW, expectedVersion: 0 });
   svc = await createService({
     name: 'ticket-svc-gate-int',
-    module: AppModule.register({ scanner: { store, codes: new MemoryEnrollmentCodeStore(clock), replay, gate, shift, freshness } as never }),
+    module: AppModule.register({ scanner: { store, codes: new MemoryEnrollmentCodeStore(clock), replay, gate, shift, freshness, minAppVersion: '1.5.0' } as never }),
     env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: quiet(),
@@ -169,6 +169,13 @@ describe('스캐너 목록·변경분 HTTP [GAT-180]', () => {
     expect((await post('/v1/scanner/scans', [s])).statusCode).toBe(200);
     const after = JSON.parse((await get(`/v1/scanner/events/${EVENT}/changes?after=0`)).payload) as { changes: { kind: string }[] };
     expect(after.changes.map((c) => c.kind)).toContain('SCAN_STATE');
+  });
+
+  test('GAT-140 IR-05 목록·변경분 HTTP 응답이 실제 minAppVersion을 싣는다', async () => {
+    const pkg = JSON.parse((await get(`/v1/scanner/events/${EVENT}/package`)).payload) as { minAppVersion?: string };
+    expect(pkg.minAppVersion).toBe('1.5.0');
+    const changes = JSON.parse((await get(`/v1/scanner/events/${EVENT}/changes?after=0`)).payload) as { minAppVersion?: string };
+    expect(changes.minAppVersion).toBe('1.5.0');
   });
 
   test('O-T20 변경분 HTTP 응답은 gate_lead에게만 staleDevices를 싣고 gate_staff에는 칸이 없다', async () => {

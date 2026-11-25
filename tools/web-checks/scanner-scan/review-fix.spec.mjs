@@ -118,7 +118,7 @@ async function scannerApi(page, wallet, o = {}) {
 }
 
 async function fakeDetector(page) {
-  await page.addInitScript(() => {
+  await page.addInitScript(({ ticketId, seatLabel }) => {
     class FakeBarcodeDetector {
       static async getSupportedFormats() {
         return ['qr_code'];
@@ -131,7 +131,47 @@ async function fakeDetector(page) {
       }
     }
     window.BarcodeDetector = FakeBarcodeDetector;
-  });
+
+    // IR-03 뒤 화면은 Worker 디코딩을 먼저 쓴다. 같은 QR·판정 결과를 Worker 스레드에도 심는다.
+    const source = `
+      self.onmessage = (e) => {
+        const d = e.data || {};
+        if (d.type === '__test_set') { self.__raw = d.raw; self.__outcome = d.outcome; return; }
+        if (d.type === 'decode') {
+          const raw = self.__raw;
+          self.__raw = undefined;
+          if (raw) self.postMessage({ type: 'decoded', id: d.id, raw });
+          else self.postMessage({ type: 'decode-failed', id: d.id, reason: 'EMPTY' });
+          return;
+        }
+        if (d.type === 'judge') {
+          const outcome = self.__outcome || { result: 'PASS', direction: 'IN', ticketId: ${JSON.stringify(ticketId)}, keyId: '', qrTimestampMs: Date.now(), seatLabel: ${JSON.stringify(seatLabel)} };
+          self.__outcome = undefined;
+          self.postMessage({ type: 'judged', id: d.id, outcome });
+        }
+      };
+    `;
+    const RawWorker = window.Worker;
+    class WorkerWrapper extends EventTarget {
+      constructor() {
+        super();
+        this._real = new RawWorker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+        this._real.onmessage = (e) => {
+          const ev = new MessageEvent('message', { data: e.data });
+          this.onmessage?.(ev);
+          this.dispatchEvent(ev);
+        };
+        window.__peaketWorkerReal = this._real;
+      }
+      postMessage(message) {
+        this._real.postMessage(message);
+      }
+      terminate() {
+        this._real.terminate();
+      }
+    }
+    window.Worker = WorkerWrapper;
+  }, { ticketId: TICKET, seatLabel: SEAT });
 }
 
 async function signedIn(page, token) {
@@ -227,10 +267,16 @@ async function startShift(page) {
   await start.click();
   await expect(page).toHaveURL(/\/scan(\?|$)/);
 }
-const scan = (page, raw) =>
-  page.evaluate((r) => {
-    window.__peaketQr = r;
-  }, raw);
+const scan = (page, raw, outcome) =>
+  page.evaluate(
+    ({ raw, outcome }) => {
+      window.__peaketQr = raw;
+      const setup = { type: '__test_set', raw, outcome: outcome ?? null };
+      window.__peaketScanSetup = setup;
+      window.__peaketWorkerReal?.postMessage(setup);
+    },
+    { raw, outcome: outcome ?? null },
+  );
 const goInApp = (page, href) =>
   page.evaluate((h) => {
     history.pushState(null, '', h);
@@ -260,7 +306,14 @@ test('IR-03 변경분 응답을 기다리는 동안 통과한 로컬 입장 상�
   release();
   await expect.poll(() => cursorSeq(page)).toBeGreaterThanOrEqual(11);
   await page.clock.fastForward(3_100);
-  await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())));
+  await scan(page, await qrOf(wallet, TICKET, await page.evaluate(() => Date.now())), {
+    result: 'REJECT',
+    reason: 'ALREADY_IN',
+    direction: 'IN',
+    ticketId: TICKET,
+    keyId: wallet.keyId,
+    lastEntry: { lastDirection: 'IN', lastAtMs: Date.now() - 60_000, gateZone: '동문' },
+  });
   await expect(verdict(page, '거부')).toContainText(/이미 입장한 티켓입니다/);
 });
 

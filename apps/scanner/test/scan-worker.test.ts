@@ -28,6 +28,7 @@ type ClientModule = {
   }) => {
     prepare(state: unknown): void;
     decode(bitmap: unknown): Promise<string | undefined>;
+    decodeDetailed(bitmap: unknown): Promise<{ raw?: string; reason?: 'EMPTY' | 'NO_DECODER' | 'DECODE_ERROR' }>;
     judge(i: { raw: string; nowMs: number; clockOffsetMs: number }): Promise<unknown>;
     dispose(): void;
   };
@@ -39,6 +40,7 @@ type DecoderModule = {
   }): Promise<{ decode(source: unknown): Promise<string | undefined> } | undefined>;
 };
 type EntryModule = {
+  NoDecoderError: new () => Error;
   createScanWorkerHandler(deps: {
     decode(bitmap: unknown): Promise<string | undefined>;
     judge(i: { raw: string; nowMs: number; clockOffsetMs: number }): Promise<unknown>;
@@ -70,6 +72,7 @@ function decoderModule(): DecoderModule {
 }
 function entryModule(): EntryModule {
   assert.equal(typeof entryLoaded.createScanWorkerHandler, 'function', `${ENTRY}의 createScanWorkerHandler가 없다`);
+  assert.equal(typeof entryLoaded.NoDecoderError, 'function', `${ENTRY}의 NoDecoderError가 없다`);
   return entryLoaded as EntryModule;
 }
 
@@ -234,10 +237,19 @@ test('GAT-140 판정 Worker 처리기는 실제 디코딩·judgeScan을 실행�
   assert.equal(calls.length, 2);
   assert.equal(posts.length, 2);
 
-  // 디코더가 없으면 decode-failed, 던지면 DECODE_ERROR, 판정이 던지면 worker-error다(fail-closed)
-  const noDecoder = e.createScanWorkerHandler({ decode: async () => undefined, judge: async () => PASS, post: (m) => void posts.push(m) });
-  await noDecoder.onMessage({ data: { type: 'decode', id: 10, bitmap: {} } });
-  assert.deepEqual(posts[2], { type: 'decode-failed', id: 10, reason: 'NO_DECODER' });
+  // 정상 'QR 없음'은 EMPTY, 디코더가 없으면 NO_DECODER, 그 밖의 던짐은 DECODE_ERROR다
+  const empty = e.createScanWorkerHandler({ decode: async () => undefined, judge: async () => PASS, post: (m) => void posts.push(m) });
+  await empty.onMessage({ data: { type: 'decode', id: 10, bitmap: {} } });
+  assert.deepEqual(posts[2], { type: 'decode-failed', id: 10, reason: 'EMPTY' });
+  const noDecoder = e.createScanWorkerHandler({
+    decode: async () => {
+      throw new e.NoDecoderError();
+    },
+    judge: async () => PASS,
+    post: (m) => void posts.push(m),
+  });
+  await noDecoder.onMessage({ data: { type: 'decode', id: 13, bitmap: {} } });
+  assert.deepEqual(posts.find((p) => p.id === 13), { type: 'decode-failed', id: 13, reason: 'NO_DECODER' });
   const broken = e.createScanWorkerHandler({
     decode: async () => {
       throw new Error('decode broken');
@@ -246,7 +258,7 @@ test('GAT-140 판정 Worker 처리기는 실제 디코딩·judgeScan을 실행�
     post: (m) => void posts.push(m),
   });
   await broken.onMessage({ data: { type: 'decode', id: 11, bitmap: {} } });
-  assert.deepEqual(posts[3], { type: 'decode-failed', id: 11, reason: 'DECODE_ERROR' });
+  assert.deepEqual(posts.find((p) => p.id === 11), { type: 'decode-failed', id: 11, reason: 'DECODE_ERROR' });
   const judgeBroken = e.createScanWorkerHandler({
     decode: async () => 'QR',
     judge: async () => {
@@ -255,7 +267,21 @@ test('GAT-140 판정 Worker 처리기는 실제 디코딩·judgeScan을 실행�
     post: (m) => void posts.push(m),
   });
   await judgeBroken.onMessage({ data: { type: 'judge', id: 12, raw: 'QR', nowMs: 1, clockOffsetMs: 0 } });
-  assert.deepEqual(posts[4], { type: 'worker-error', id: 12 });
+  assert.deepEqual(posts.find((p) => p.id === 12), { type: 'worker-error', id: 12 });
+});
+
+test('GAT-140 IR-03 ScanWorkerClient.decodeDetailed는 QR 없음과 디코더 없음, 디코딩 오류를 가른다', async () => {
+  const h = harness();
+  for (const reason of ['EMPTY', 'NO_DECODER', 'DECODE_ERROR'] as const) {
+    const pending = h.api.decodeDetailed({ width: 10 });
+    const req = h.worker.last('decode');
+    h.worker.emit({ type: 'decode-failed', id: req.id, reason });
+    assert.deepEqual(await pending, { reason });
+  }
+  const decoded = h.api.decodeDetailed({ width: 10 });
+  const req = h.worker.last('decode');
+  h.worker.emit({ type: 'decoded', id: req.id, raw: 'QR' });
+  assert.deepEqual(await decoded, { raw: 'QR' });
 });
 
 test('GAT-140 판정 Worker 클라이언트는 응답 id를 가른다: 늦은 응답·다른 요청의 응답이 다음 판정을 통과시키지 않는다', async () => {

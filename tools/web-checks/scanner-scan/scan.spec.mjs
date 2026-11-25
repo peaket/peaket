@@ -143,16 +143,20 @@ const okUploads = (api) => api.scans.filter((x) => x.ok).length;
  * window.Worker를 감싸 Blob Worker를 만들고, decode는 __test_set으로 심은 QR 원문을, judge는 심은 결과(기본 통과)를 돌려준다.
  * Playwright 초기 스크립트는 Worker 전역에 닿지 않으므로, Worker 안에서 도는 것은 이 Blob 스크립트다.
  */
-async function workerDecoder(page, { keyId = '', unavailable = false } = {}) {
+async function workerDecoder(page, { keyId = '', unavailable = false, noDecoder = false, empty = false } = {}) {
   const source = `
+    self.__noDecoder = ${JSON.stringify(noDecoder)};
+    self.__empty = ${JSON.stringify(empty)};
     self.onmessage = (e) => {
       const d = e.data || {};
       if (d.type === '__test_set') { self.__raw = d.raw; self.__outcome = d.outcome; return; }
       if (d.type === 'decode') {
         const raw = self.__raw;
         self.__raw = undefined;
+        if (self.__noDecoder) { self.postMessage({ type: 'decode-failed', id: d.id, reason: 'NO_DECODER' }); return; }
+        if (self.__empty) { self.postMessage({ type: 'decode-failed', id: d.id, reason: 'EMPTY' }); return; }
         if (raw) self.postMessage({ type: 'decoded', id: d.id, raw });
-        else self.postMessage({ type: 'decode-failed', id: d.id, reason: 'NO_DECODER' });
+        else self.postMessage({ type: 'decode-failed', id: d.id, reason: 'EMPTY' });
         return;
       }
       if (d.type === 'judge') {
@@ -389,22 +393,40 @@ async function feedbackStub(page) {
 }
 
 /** O-T11: 서비스 워커 등록·일회성 동기화 등록을 적는다. 실제 서비스 워커 실행은 브라우저 확인 몫이다 */
-async function serviceWorkerStub(page) {
-  await page.addInitScript(() => {
+async function serviceWorkerStub(page, { waiting = false } = {}) {
+  await page.addInitScript(({ waiting }) => {
     window.__peaketSyncTags = [];
     window.__peaketSwRegistrations = [];
+    window.__peaketSwPosted = [];
+    window.__peaketSwMessages = [];
+    const controllerListeners = [];
+    const messageListeners = [];
     const registration = {
       installing: null,
-      waiting: null,
+      waiting: waiting
+        ? {
+            postMessage: (m) => {
+              window.__peaketSwPosted.push(m);
+            },
+          }
+        : null,
       active: null,
       sync: {
         register: async (tag) => {
           window.__peaketSyncTags.push(tag);
         },
       },
-      addEventListener() {},
+      addEventListener(type, fn) {
+        if (type === 'controllerchange') controllerListeners.push(fn);
+      },
       removeEventListener() {},
       update: async () => undefined,
+    };
+    window.__peaketTriggerControllerChange = () => {
+      for (const fn of controllerListeners) fn();
+    };
+    window.__peaketSwMessage = (data) => {
+      for (const fn of messageListeners) fn({ data });
     };
     const container = {
       ready: Promise.resolve(registration),
@@ -414,7 +436,9 @@ async function serviceWorkerStub(page) {
       },
       getRegistration: async () => registration,
       getRegistrations: async () => [registration],
-      addEventListener() {},
+      addEventListener(type, fn) {
+        if (type === 'message') messageListeners.push(fn);
+      },
       removeEventListener() {},
       controller: null,
     };
@@ -423,7 +447,7 @@ async function serviceWorkerStub(page) {
     } catch {
       Object.defineProperty(navigator, 'serviceWorker', { value: container, configurable: true });
     }
-  });
+  }, { waiting });
 }
 
 test('GAT-140 ?live=1 근무 준비 → 판정 → 통과면 스캔 큐 1건·peaket-scanner에 목록·입장 상태·deviceSeq 1이 남고, 새로고침 뒤 연결이 끊겨도 같은 티켓은 이미 입장으로 거부된다', async ({ page }) => {
@@ -970,6 +994,83 @@ test('O-T11 업로드가 실패하면 서비스 워커 동기화를 등록하고
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
   await expect.poll(() => api.scans.length).toBeGreaterThan(before);
   await expect.poll(() => queueCount(page)).toBe(0);
+});
+
+test('GAT-140 IR-01 입장 중에는 최소 지원 판이 높아도 판정을 계속하고 새 판 안내만 보인다', async ({ page }) => {
+  const wallet = await walletKey();
+  await workerDecoder(page, { keyId: wallet.keyId });
+  await scannerApi(page, wallet, { minAppVersion: '99.0.0' });
+  await signedIn(page);
+  await page.goto('/scan?live=1');
+  // 입장 중에는 옛 판을 거부하지 않는다: 준비 완료/판정 화면이 뜨고 QR을 판정한다
+  await expect(page.getByText('입장 모드')).toBeVisible({ timeout: 15_000 });
+  await scan(page, await qrOf(wallet, TICKET, Date.now()));
+  await expect(verdict(page, '통과')).toBeVisible();
+  await expect(page.getByText('준비 안 됨')).toHaveCount(0);
+});
+
+test('GAT-140 IR-02 [새 버전 적용]은 새 문서를 다시 받아 실제 새 앱 판을 실행한다', async ({ page }) => {
+  const wallet = await walletKey();
+  await workerDecoder(page, { keyId: wallet.keyId });
+  await scannerApi(page, wallet, { minAppVersion: '99.0.0' });
+  await serviceWorkerStub(page, { waiting: true });
+  await signedIn(page);
+  await page.goto('/setup?live=1');
+  const apply = page.getByRole('button', { name: '새 버전 적용' }).first();
+  await expect(apply).toBeVisible({ timeout: 15_000 });
+  const navigated = page.waitForEvent('framenavigated', { timeout: 3_000 }).catch(() => undefined);
+  await apply.click();
+  await page.evaluate(() => window.__peaketTriggerControllerChange());
+  expect(await navigated).not.toBeUndefined();
+});
+
+test('GAT-140 IR-03 Worker 디코더가 없으면 카메라 고장으로 닫고, QR 없음은 화면 디코더로 다시 읽지 않는다', async ({ page }) => {
+  const wallet = await walletKey();
+  await mainThreadDetectorProbe(page);
+  await workerDecoder(page, { keyId: wallet.keyId, noDecoder: true });
+  await scannerApi(page, wallet);
+  await page.clock.install();
+  await signedIn(page);
+  await startShift(page);
+  await page.clock.runFor(2_500);
+  await expect(page.getByText('예비 기기로 바꾸거나 현장 책임자를 부르세요')).toBeVisible();
+  expect(await page.evaluate(() => window.__peaketMainDetectorDetects)).toBe(0);
+
+  // 정상적인 'QR 없음'은 화면 스레드 BarcodeDetector로 다시 읽지 않는다
+  await workerDecoder(page, { keyId: wallet.keyId, empty: true });
+  await page.goto('/scan?live=1');
+  await expect(page.getByText('입장 모드')).toBeVisible({ timeout: 15_000 });
+  await page.clock.runFor(2_500);
+  expect(await page.evaluate(() => window.__peaketMainDetectorDetects)).toBe(0);
+});
+
+test('O-T20 IR-08 현장 관리(SCR-052)에도 같은 구역 기기의 동기화 지연 배너가 보인다', async ({ page }) => {
+  const wallet = await walletKey();
+  await workerDecoder(page, { keyId: wallet.keyId });
+  const api = await scannerApi(page, wallet, {
+    role: 'gate_lead',
+    changesReply: () => ({
+      changes: [],
+      lastSeq: 10,
+      staleDevices: [
+        {
+          deviceId: '0190f3a1-7c2e-7a00-8000-0000000f5491',
+          deviceName: '동문-03',
+          gateZone: '동문',
+          lastChangesAt: new Date(Date.now() - 180_000).toISOString(),
+          ageMs: 180_000,
+          thresholdMs: 120_000,
+        },
+      ],
+    }),
+  });
+  await page.clock.install();
+  await signedIn(page);
+  await startShift(page);
+  await goInApp(page, '/manage?live=1');
+  await page.clock.fastForward(60_000);
+  await expect.poll(() => api.changes).toBeGreaterThan(0);
+  await expect(page.getByText(/동문-03.*2분/)).toBeVisible();
 });
 
 test('GAT-140 C1-15 최소 지원 판보다 낮은 앱은 스캔 시작을 막고 새 판 안내를 보인다', async ({ page }) => {

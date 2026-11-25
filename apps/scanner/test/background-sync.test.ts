@@ -25,6 +25,7 @@ type BackgroundModule = {
     origin: string;
     key?: Awaited<ReturnType<typeof generateDpopKey>>;
     loadKey?: () => Promise<Awaited<ReturnType<typeof generateDpopKey>> | undefined>;
+    loadClockOffsetMs?: () => Promise<number | undefined>;
     fetch?: typeof fetch;
     now?: () => number;
   }): UploadPort;
@@ -263,4 +264,29 @@ test('GAT-140 O-T37 ⑧ 서비스 워커는 화면과 같은 저장소에서 기
   const [, payload] = headers[0].dpop.split('.');
   const payloadJson = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { htu: string };
   assert.equal(payloadJson.htu, `${origin}/v1/scanner/scans`);
+});
+
+test('GAT-140 IR-07 서비스 워커 DPoP iat는 저장한 시계 오차를 더한다', async () => {
+  const b = bg();
+  const queue = new MemoryScanQueue();
+  await fill(queue, 1);
+  const key = await generateDpopKey();
+  const origin = 'https://scanner-api.peaket.example';
+  let proof = '';
+  const fakeFetch = (async (_url: string, init?: RequestInit) => {
+    proof = String((init?.headers as Record<string, string>).dpop);
+    return new Response(JSON.stringify({ acceptedIds: [record(1).id], resyncRequired: false, staleIds: [] }), { status: 200 });
+  }) as typeof fetch;
+  const uploader = b.createServiceWorkerUploader({
+    queue,
+    origin,
+    key,
+    loadClockOffsetMs: async () => 120_000,
+    fetch: fakeFetch,
+    now: () => T0,
+  });
+  await b.runBackgroundUpload({ queue, port: uploader, nowMs: 1 });
+  const [, payload] = proof.split('.');
+  const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { iat: number };
+  assert.equal(claims.iat, Math.floor((T0 + 120_000) / 1000), '기기 시계 대신 보정 시각으로 iat를 만든다');
 });

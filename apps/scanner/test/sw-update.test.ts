@@ -12,6 +12,7 @@ type GateModule = {
 };
 type ProtocolModule = {
   parseServiceWorkerMessage(data: unknown): { type: string; accepted?: number } | undefined;
+  parseServiceWorkerWorkerMessage(data: unknown): { type: string; accepted?: number; resyncRequired?: boolean; stopped?: string } | undefined;
   isTrustedClientMessage(
     i: { origin?: string; source?: { url?: string } | null; data: unknown },
     o: { origin: string },
@@ -19,7 +20,8 @@ type ProtocolModule = {
 };
 type RegisterModule = {
   registerServiceWorker(o: { container?: unknown; url?: string; scope?: string }): Promise<{ registered: boolean; registration?: unknown; error?: unknown }>;
-  cacheAppShell(o: { caches?: unknown; cacheName?: string; shell?: readonly string[] }): Promise<{ cached: number; failed: boolean }>;
+  cacheAppShell(o: { caches?: unknown; cacheName?: string; shell?: readonly string[]; assets?: readonly string[] }): Promise<{ cached: number; failed: boolean }>;
+  cleanupCaches(o: { caches?: unknown; keep?: string }): Promise<{ removed: number }>;
   applyWaitingUpdate(o: {
     registration?: {
       waiting?: { postMessage(m: unknown): void } | null;
@@ -36,8 +38,15 @@ type ServiceWorkerModule = {
     origin: string;
     skipWaiting(): void;
     claim?(): void;
-    upload?(): Promise<{ accepted: number }>;
-  }): { onMessage(event: { origin?: string; source?: { url?: string } | null; data: unknown }): Promise<void> };
+    upload?(): Promise<{ accepted: number; resyncRequired?: boolean; stopped?: 'device-revoked' | 'device-unregistered' }>;
+    caches?: unknown;
+    fetch?: typeof fetch;
+    clients?: { matchAll(): Promise<{ postMessage(message: unknown): void }[]> };
+  }): {
+    onMessage(event: { origin?: string; source?: { url?: string } | null; data: unknown }): Promise<void>;
+    onFetch?(event: { request: { method: string; url: string; mode?: string } }): Promise<Response | undefined>;
+    onSync?(event: { tag?: string }): Promise<void>;
+  };
 };
 
 const GATE = '../src/sw/update-gate.ts';
@@ -55,13 +64,13 @@ function gate(): GateModule {
   return gateLoaded as GateModule;
 }
 function protocol(): ProtocolModule {
-  for (const name of ['parseServiceWorkerMessage', 'isTrustedClientMessage'] as const) {
+  for (const name of ['parseServiceWorkerMessage', 'parseServiceWorkerWorkerMessage', 'isTrustedClientMessage'] as const) {
     assert.equal(typeof protocolLoaded[name], 'function', `${PROTOCOL}의 ${name}가 없다`);
   }
   return protocolLoaded as ProtocolModule;
 }
 function register(): RegisterModule {
-  for (const name of ['registerServiceWorker', 'cacheAppShell', 'applyWaitingUpdate'] as const) {
+  for (const name of ['registerServiceWorker', 'cacheAppShell', 'cleanupCaches', 'applyWaitingUpdate'] as const) {
     assert.equal(typeof registerLoaded[name], 'function', `${REGISTER}의 ${name}가 없다`);
   }
   return registerLoaded as RegisterModule;
@@ -128,6 +137,20 @@ test('[ASVS v5.0.0-3.5.5] 서비스 워커는 같은 출처 창의 정해진 모
   assert.equal(p.parseServiceWorkerMessage('SKIP_WAITING'), undefined);
   assert.equal(p.parseServiceWorkerMessage(null), undefined);
   assert.equal(p.parseServiceWorkerMessage([]), undefined);
+
+  // 서비스 워커 → 창 알림(IR-06): 정해진 모양만 받는다
+  assert.deepEqual(p.parseServiceWorkerWorkerMessage({ type: 'BACKGROUND_UPLOAD_DONE', accepted: 2, resyncRequired: true }), {
+    type: 'BACKGROUND_UPLOAD_DONE',
+    accepted: 2,
+    resyncRequired: true,
+  });
+  assert.deepEqual(p.parseServiceWorkerWorkerMessage({ type: 'BACKGROUND_UPLOAD_DONE', accepted: 0, stopped: 'device-revoked' }), {
+    type: 'BACKGROUND_UPLOAD_DONE',
+    accepted: 0,
+    stopped: 'device-revoked',
+  });
+  assert.equal(p.parseServiceWorkerWorkerMessage({ type: 'BACKGROUND_UPLOAD_DONE', accepted: -1 }), undefined);
+  assert.equal(p.parseServiceWorkerWorkerMessage({ type: 'RUN', code: 'x' }), undefined);
 });
 
 test('GAT-140 C1-15 서비스 워커 등록·앱 셸 캐시·적용 시점·적용 뒤 목록 재수신을 시험한다', async () => {
@@ -193,6 +216,87 @@ test('GAT-140 C1-15 서비스 워커 등록·앱 셸 캐시·적용 시점·적�
   for (const fn of listeners) fn();
   assert.equal(applied, 1, 'controllerchange 뒤 목록을 다시 받는 고리가 한 번 돈다');
   assert.equal(r.applyWaitingUpdate({ registration, phase: 'prep', activeScans: 1, post: (m) => void posted.push(m) }), false, '스캔 중에는 적용하지 않는다');
+});
+
+test('GAT-140 IR-04 앱 셸의 해시 자산·Worker·wasm을 캐시하고 fetch 처리기로 꺼내며 옛 캐시를 지운다', async () => {
+  const r = register();
+  const added: string[][] = [];
+  const assets = ['/assets/index-abc.js', '/assets/index-abc.css', '/assets/scan.worker-def.js', '/assets/zxing_reader-ghi.wasm'];
+  const cacheOk = await r.cacheAppShell({
+    caches: { open: async () => ({ addAll: async (urls: string[]) => void added.push(urls) }) },
+    cacheName: 'peaket-scanner-v2',
+    shell: ['/', '/index.html'],
+    assets,
+  });
+  assert.deepEqual(cacheOk, { cached: 6, failed: false });
+  assert.deepEqual(added[0], ['/', '/index.html', ...assets]);
+
+  const removed: string[] = [];
+  const cleanup = await r.cleanupCaches({
+    caches: {
+      keys: async () => ['peaket-scanner-v1', 'peaket-scanner-v2', 'other'],
+      delete: async (k: string) => {
+        removed.push(k);
+        return true;
+      },
+    },
+    keep: 'peaket-scanner-v2',
+  });
+  assert.deepEqual(cleanup, { removed: 1 });
+  assert.deepEqual(removed, ['peaket-scanner-v1']);
+
+  const cached = new Response('cached', { status: 200 });
+  let fetched = 0;
+  const handler = sw().createServiceWorkerHandler({
+    origin: 'https://scanner.peaket.example',
+    skipWaiting: () => undefined,
+    caches: {
+      match: async (request: unknown) => (String((request as { url?: string }).url ?? request).includes('index-abc') ? cached : undefined),
+      open: async () => ({ addAll: async () => undefined }),
+    },
+    fetch: (async () => {
+      fetched += 1;
+      return new Response('network', { status: 200 });
+    }) as typeof fetch,
+  });
+  assert.equal(typeof handler.onFetch, 'function', '서비스 워커 fetch 처리기가 없다');
+  const got = await handler.onFetch!({ request: { method: 'GET', url: 'https://scanner.peaket.example/assets/index-abc.js', mode: 'cors' } });
+  assert.equal(await got?.text(), 'cached');
+  assert.equal(fetched, 0, '캐시에 있으면 네트워크를 부르지 않는다');
+  const miss = await handler.onFetch!({ request: { method: 'GET', url: 'https://scanner.peaket.example/assets/miss.js', mode: 'cors' } });
+  assert.equal(await miss?.text(), 'network');
+  assert.equal(fetched, 1);
+});
+
+test('GAT-140 IR-04 서비스 워커 fetch 처리기는 API·비GET 요청을 가로채지 않는다', async () => {
+  const cached = new Response('cached', { status: 200 });
+  const handler = sw().createServiceWorkerHandler({
+    origin: 'https://scanner.peaket.example',
+    skipWaiting: () => undefined,
+    caches: { match: async () => cached, open: async () => ({ addAll: async () => undefined }) },
+  });
+  assert.equal(await handler.onFetch?.({ request: { method: 'POST', url: 'https://scanner.peaket.example/scan', mode: 'cors' } }), undefined);
+  assert.equal(await handler.onFetch?.({ request: { method: 'GET', url: 'https://scanner-api.peaket.example/v1/scanner/shift', mode: 'cors' } }), undefined);
+});
+
+test('GAT-140 IR-06 서비스 워커 sync 처리기는 업로드 결과를 창에 알린다', async () => {
+  const posted: unknown[] = [];
+  let uploads = 0;
+  const handler = sw().createServiceWorkerHandler({
+    origin: 'https://scanner.peaket.example',
+    skipWaiting: () => undefined,
+    upload: async () => {
+      uploads += 1;
+      return { accepted: 2, resyncRequired: true, stopped: 'device-revoked' as const };
+    },
+    clients: { matchAll: async () => [{ postMessage: (m: unknown) => void posted.push(m) }] },
+  });
+  assert.equal(typeof handler.onSync, 'function', '서비스 워커 sync 처리기가 없다');
+  await handler.onSync!({ tag: 'peaket-scanner-scans' });
+  assert.equal(uploads, 1);
+  assert.deepEqual(posted, [{ type: 'BACKGROUND_UPLOAD_DONE', accepted: 2, resyncRequired: true, stopped: 'device-revoked' }]);
+  await handler.onSync!({ tag: 'other' });
+  assert.equal(uploads, 1, '다른 태그는 업로드하지 않는다');
 });
 
 test('[ASVS v5.0.0-3.5.5] 서비스 워커 처리기는 같은 출처의 정해진 메시지만 실제로 실행한다', async () => {
