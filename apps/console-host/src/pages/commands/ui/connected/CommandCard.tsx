@@ -1,12 +1,13 @@
 // 명령 카드(d5 §7.3 CMP-036 상태 표). 상세(REST)와 카드 상태(card-state.ts)로 그린다. props만으로 그린다.
 // 승인 대기(남은 시간)·전파 중·전파 지연(ack 못 한 대상)·실패와 [다시 시도]·적용 확인·재개 승인 대기·되돌림·자동 만료.
-// 승인자도 접수 때 남긴 dry-run을 그대로 본다(d2 §3.5). 런북 CLI 한 줄은 그리지 않는다(F-02-7·F-03-7). 모든 값은 글자로만 그린다(ASVS v5.0.0-1.2.1).
+// 승인자도 접수 때 남긴 dry-run을 그대로 본다(d2 §3.5). 실패하면 런북 CLI 한 줄(C-T7 ③, runbook.ts)도 보인다. 모든 값은 글자로만 그린다(ASVS v5.0.0-1.2.1).
 import type { ReactNode } from 'react';
 import { formatKstDateTime, stateLabel, stateTone, typeLabel, type CommandStateValue } from '../../model/commands';
 import { revertAvailability, type CommandDetail } from '../../model/command-actions';
 import type { ConsoleLayoutKind, ConsoleRole } from '../../model/command-form';
 import type { CardState } from '../../model/card-state';
 import { dryRunView } from '../../model/dry-run';
+import { runbookLineOf } from '../../model/runbook';
 import { DryRunPanel } from './DryRunPanel';
 
 export interface CommandCardProps {
@@ -50,6 +51,7 @@ export function CommandCard({ detail, state, role, layout = 'desktop', busy = fa
   const revert = revertAvailability({ role, layout, type: detail.type, params: detail.params ?? null });
   const view = detail.dryRun ? dryRunView(detail.dryRun) : null;
   const unacked = state.unacked && state.unacked.length > 0 ? state.unacked : null;
+  const runbook = state.kind === 'failed' ? runbookLineOf(detail) : null;
 
   let line: ReactNode = null;
   let actions: ReactNode = null;
@@ -167,6 +169,11 @@ export function CommandCard({ detail, state, role, layout = 'desktop', busy = fa
         </p>
       ) : null}
       {line}
+      {runbook ? (
+        <p className="t-xs" style={{ margin: 0 }}>
+          런북 CLI 한 줄: <code style={{ overflowWrap: 'anywhere' }}>{runbook}</code>
+        </p>
+      ) : null}
       <dl className="t-sm" style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 6, margin: 0 }}>
         <dt className="muted">사유</dt>
         <dd style={{ margin: 0 }}>{detail.reason}</dd>

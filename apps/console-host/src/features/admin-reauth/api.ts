@@ -169,8 +169,8 @@ async function post(body: unknown): Promise<ReauthResponse> {
   return r.data as ReauthResponse;
 }
 
-/** 재인증 동작(openapi OpsReauthPasswordStep act). 운영 명령은 OPS_COMMAND, 회차 취소·정산 확정 승인은 APPROVAL(control-tower §3, ADR-0206) */
-export type ReauthAct = 'OPS_COMMAND' | 'APPROVAL';
+/** 재인증 동작(openapi OpsReauthPasswordStep act). 운영 명령은 OPS_COMMAND, 회차 취소·정산 확정 승인은 APPROVAL(control-tower §3, ADR-0206), 수사기관 자료 추출·승인은 AUTHORITY_DATA(control-tower §9, F-03-7) */
+export type ReauthAct = 'OPS_COMMAND' | 'APPROVAL' | 'AUTHORITY_DATA';
 
 /**
  * 비밀번호·TOTP를 확인하고, 서버가 패스키 단계를 주면 브라우저 패스키 창을 띄워 마친다.

@@ -2,11 +2,14 @@
 // 명령 6 해제(새 결제 진입 정지 열기)는 결제사 하나를 고르고 사유를 적어 commander가 재인증 뒤 바로 보낸다(승인 대기 없음).
 // 막히면 단추는 aria-disabled(초점은 받음, disabled 없음)이고 카드 안에 이유 글이 늘 보이며 aria-describedby로 잇는다(d5 CMP-036 disabled).
 // 막힌 단추를 눌러도 onSubmit을 부르지 않는다(요청 0). 명령 3은 단추를 누르면 위험 확인 대화상자가 사유를 다시 받는다(여기 적은 사유를 채워 둔다).
-import type { Availability, CommandDraft, CommandScope, PgName, ReleasePg } from '../../model/command-form';
+import type { Availability, CommandScope, PgName, ReleasePg, SimpleCommandDraft } from '../../model/command-form';
+
+/** 명령 1·3·6(결제 갈래·해제)의 작성 값. 새 명령(2·4·5·8·9·11·12)은 MoreCommands가 맡는다 */
+export type { SimpleCommandDraft };
 
 export interface CommandFormProps {
-  draft: CommandDraft;
-  onChange: (next: CommandDraft) => void;
+  draft: SimpleCommandDraft;
+  onChange: (next: SimpleCommandDraft) => void;
   availability: Availability;
   /** [보내기]·[판매를 전면 중단합니다]를 눌렀을 때(막혔으면 부르지 않는다) */
   onSubmit?: () => void;
@@ -127,7 +130,7 @@ export function CommandForm({ draft, onChange, availability, onSubmit, busy = fa
               value={draft.toPg ?? ''}
               onChange={(e) => {
                 const v = e.currentTarget.value as PgName | '';
-                const next: CommandDraft = { kind: 'PG_FALLBACK', scope: draft.scope, reason: draft.reason, ...(draft.eventId ? { eventId: draft.eventId } : {}), ...(v ? { toPg: v } : {}) };
+                const next: SimpleCommandDraft = { kind: 'PG_FALLBACK', scope: draft.scope, reason: draft.reason, ...(draft.eventId ? { eventId: draft.eventId } : {}), ...(v ? { toPg: v } : {}) };
                 onChange(next);
               }}
             >

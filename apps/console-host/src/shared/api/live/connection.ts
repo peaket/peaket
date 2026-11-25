@@ -166,6 +166,16 @@ function onLiveFrame(f: SseFrame): void {
       emit('control', data);
       break;
     case 'autoAction':
+      // 본문 모양은 wbs 0.2.3 전이라 이름·상태·대상·시작/끝난 시각만 읽어 저장한다(계획 1-5)
+      if (typeof d.name === 'string' && typeof d.state === 'string') {
+        hostActions.autoAction({
+          name: d.name,
+          state: d.state,
+          ...(typeof d.target === 'string' ? { target: d.target } : {}),
+          ...(typeof d.startedAt === 'string' ? { startedAt: d.startedAt } : {}),
+          ...(typeof d.endedAt === 'string' ? { endedAt: d.endedAt } : {}),
+        });
+      }
       emit('autoAction', data);
       break;
     case 'reset':

@@ -14,13 +14,18 @@ import { onLive, setLiveEvent } from '@/shared/api/live';
 import { useLayout } from '@/shared/lib/layout';
 import { useLiveHost } from '@/shared/model/live-host';
 import { filterCommands, formatKstDateTime, stateLabel, stateTone, typeLabel, type CommandRow, type CommandStateValue } from '../model/commands';
-import { commandAvailability, commandBodyOf, Submission, type CommandDraft, type CommandKind, type ConsoleRole } from '../model/command-form';
+import { commandAvailability, commandBodyOf, Submission, type CommandDraft, type CommandKind, type ConsoleRole, type SimpleCommandDraft } from '../model/command-form';
 import { createCommandActions, type ActionResult, type CommandDetail } from '../model/command-actions';
 import { syncCommands, type CommandSync } from '../model/command-sync';
 import { commandCardState } from '../model/card-state';
 import type { DryRunView } from '../model/dry-run';
 import { CommandCatalog } from './connected/CommandCatalog';
 import { CommandForm } from './connected/CommandForm';
+import { MoreCommands } from './connected/MoreCommands';
+import { AutoActionStrip, AutoResumeDialog, EffectStrip } from './connected/CommandExtras';
+import { effectRowOf, type EffectRow } from '../model/command-effects';
+import { autoActionView } from '../model/auto-actions';
+import { autoResumePrompt, autoResumeView } from '../model/auto-resume';
 import { DryRunPanel } from './connected/DryRunPanel';
 import { CommandCard } from './connected/CommandCard';
 import { KillSwitchConfirm } from './connected/KillSwitchConfirm';
@@ -44,15 +49,15 @@ const SIMULATOR_ALLOWED = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\/?$
 /** 남은 시간·전파 지연을 다시 그리는 화면 시계(요청을 보내지 않는다) */
 const CLOCK_MS = 1_000;
 
-function draftOf(kind: CommandKind, eventId: string | null): CommandDraft {
+function draftOf(kind: CommandKind, eventId: string | null): SimpleCommandDraft {
   const ev = eventId ?? '';
   if (kind === 'ADMISSION_TARGET') return { kind, eventId: ev, target: Number.NaN, reason: '' };
   if (kind === 'KILL_SWITCH') return { kind, scope: 'EVENT', ...(eventId ? { eventId } : {}), reason: '' };
   if (kind === 'PG_ENTRY_RELEASE') return { kind, reason: '' };
-  return { kind, scope: 'EVENT', ...(eventId ? { eventId } : {}), reason: '' };
+  return { kind: 'PG_FALLBACK', scope: 'EVENT', ...(eventId ? { eventId } : {}), reason: '' };
 }
 
-function withEvent(d: CommandDraft, eventId: string | null): CommandDraft {
+function withEvent(d: SimpleCommandDraft, eventId: string | null): SimpleCommandDraft {
   if (d.kind === 'ADMISSION_TARGET') return { ...d, eventId: eventId ?? '' };
   // 해제 갈래는 회차 범위가 없다(결제사 하나)
   if (d.kind === 'PG_ENTRY_RELEASE') return d;
@@ -99,7 +104,7 @@ export function ConnectedPage() {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [live, setLive] = useState<'connecting' | 'open' | 'closed'>('connecting');
-  const [draft, setDraft] = useState<CommandDraft | null>(null);
+  const [draft, setDraft] = useState<SimpleCommandDraft | null>(null);
   const [dryRun, setDryRun] = useState<{ view: DryRunView | null; error?: string }>({ view: null });
   const [formError, setFormError] = useState<string | null>(null);
   const [killOpen, setKillOpen] = useState(false);
@@ -221,6 +226,15 @@ export function ConnectedPage() {
 
   // 흐름 상태는 호스트 연결에서 읽는다
   const connected = useLiveHost((s) => s.connected);
+  const liveAutoActions = useLiveHost((s) => s.autoActions);
+  const controlKind = useLiveHost((s) => s.control.kind);
+  const [autoResumeOpen, setAutoResumeOpen] = useState(false);
+  const prevControlKind = useRef(controlKind);
+  useEffect(() => {
+    const prev = prevControlKind.current;
+    prevControlKind.current = controlKind;
+    if (autoResumePrompt(prev, controlKind) === 'open') setAutoResumeOpen(true);
+  }, [controlKind]);
   useEffect(() => {
     if (opsApiAvailable()) setLive(connected ? 'open' : 'connecting');
   }, [connected]);
@@ -398,6 +412,26 @@ export function ConnectedPage() {
   const availability = draft ? commandAvailability({ role: viewRole, layout, kind: draft.kind }) : { canRequest: false };
   const card = detail ? commandCardState(detail, { nowMs, ...(detail.commandId && dispatchSeen.current.has(detail.commandId) ? { dispatchSeenAtMs: dispatchSeen.current.get(detail.commandId)! } : {}) }) : null;
   const selectedRow = items.find((c) => c.commandId === selectedId) ?? null;
+  const autoView = autoActionView(liveAutoActions, nowMs);
+  const autoResume = autoResumeView(autoResumeOpen ? 'open' : 'none');
+  const effectRows: { type: string; row: EffectRow }[] = [];
+  if (detail && (detail.type === 'BLOCK_ASN_IP' || detail.type === 'BOT_LEVEL')) {
+    const row = effectRowOf({ type: detail.type, ackedAt: (detail as { ackedAt?: string | null }).ackedAt ?? null, nowMs });
+    if (row) effectRows.push({ type: detail.type, row });
+  }
+
+  const sendMore = async (d: CommandDraft) => {
+    if (!actions) return;
+    const dry = await actions.dryRun(d);
+    const reauth = dry.kind === 'ok' ? dry.view.reauth : true;
+    const r = await run(
+      () => actions.submit(d, new Submission(), { reauth }),
+      (c) => {
+        if (c.commandId) setSelectedId(c.commandId);
+      },
+    );
+    if (r?.kind === 'problem') setFormError(r.message);
+  };
 
   return (
     <>
@@ -417,6 +451,11 @@ export function ConnectedPage() {
         </div>
       </div>
 
+      <div className="col" style={{ gap: 8, marginTop: 12 }}>
+        <AutoActionStrip stuck={autoView.stuck} recentlyCleared={autoView.recentlyCleared} unavailable={autoView.unavailable} message={autoView.message} />
+        <EffectStrip rows={effectRows} />
+      </div>
+
       <div className="tabs" style={{ marginTop: 16 }} role="tablist" aria-label="운영 명령 탭">
         <button className={tab === 'commands' ? 'tab active' : 'tab'} type="button" role="tab" aria-selected={tab === 'commands'} onClick={() => setTab('commands')}>
           명령
@@ -429,7 +468,8 @@ export function ConnectedPage() {
       {tab === 'commands' ? (
         <div className="grid-12" style={{ rowGap: 16, alignItems: 'start', marginTop: 16 }}>
           <div className={`${layout === 'phone' ? 'span-12' : 'span-4'} col`} style={{ gap: 16 }}>
-            {role ? <CommandCatalog role={viewRole} layout={layout} picked={draft?.kind ?? null} onPick={(kind) => setDraft(draftOf(kind, eventId))} /> : null}
+            {role ? <CommandCatalog role={viewRole} layout={layout} picked={draft?.kind ?? null} onPick={(kind) => { if (kind === 'ADMISSION_TARGET' || kind === 'KILL_SWITCH' || kind === 'PG_FALLBACK' || kind === 'PG_ENTRY_RELEASE') setDraft(draftOf(kind, eventId)); }} /> : null}
+            {role ? <MoreCommands role={viewRole} layout={layout} eventId={eventId} busy={busy} onSend={(d) => void sendMore(d)} /> : null}
             {draft && layout !== 'phone' ? (
               <section className="widget" aria-labelledby="h-form">
                 <div className="widget-head">
@@ -609,6 +649,7 @@ export function ConnectedPage() {
         />
       ) : null}
       {revertOpen && detail ? <RevertDialog detail={detail} busy={busy} onClose={() => setRevertOpen(false)} onConfirm={(reason) => revert(reason)} /> : null}
+      <AutoResumeDialog open={autoResumeOpen} why={autoResume.why ?? null} onClose={() => setAutoResumeOpen(false)} />
       <ReauthDialog open={reauthOpen} act="OPS_COMMAND" title="명령을 보내기 전에 다시 인증해 주세요" description={REAUTH_LINE} onDone={(token) => finishReauth(token)} onClose={() => finishReauth(null)} />
 
       {toast ? (

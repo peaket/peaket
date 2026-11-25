@@ -10,6 +10,10 @@ import type { HostAlert, HostOperator, HostState } from '@peaket/console-contrac
 export const ALERTS_MAX = 500;
 /** 풀린 경보를 두는 시간 60분 [가정] */
 export const RESOLVED_KEEP_MS = 60 * 60_000;
+/** 들고 있는 자동 조치 상한(들고 있는 양의 상한, frontend §3.10) */
+export const AUTO_ACTIONS_MAX = 50;
+/** 풀린 자동 조치를 '최근 풀림'으로 두는 시간 10분 [가정](C-T44 ⑦) */
+export const AUTO_ACTION_KEEP_MS = 10 * 60_000;
 
 export interface PendingApproval {
   commandId: string;
@@ -39,6 +43,15 @@ export interface LiveControl extends HostControl {
   targetNow?: number;
   budgetHoldAt?: string;
   lastDecrease?: { reason?: string; journey?: string; from?: number; to?: number; exposureReduction?: boolean };
+}
+
+/** 늘 여는 흐름 autoAction 사건의 콘솔 몫. 본문 모양은 wbs 0.2.3 전이라 console-contract의 칸과 끝난 시각만 읽는다 */
+export interface LiveAutoAction {
+  name: string;
+  target?: string;
+  state: string;
+  startedAt?: string;
+  endedAt?: string;
 }
 
 export interface LiveHostState extends HostState {
@@ -78,6 +91,20 @@ export function alertsFromList(items: readonly LiveAlert[], nowMs: number): Live
   let next: LiveAlert[] = [];
   for (const a of [...items].reverse()) next = mergeAlert(next, a, nowMs);
   return next;
+}
+
+const AUTO_ACTION_TERMINAL = new Set(['CLEARED', 'RELEASED', 'ENDED']);
+
+/** 자동 조치 하나를 합친다(같은 이름·대상은 바꾼다). 풀린 지 10분이 지난 것과 상한 밖은 버린다 */
+export function mergeAutoAction(list: readonly LiveAutoAction[], a: LiveAutoAction, nowMs: number): LiveAutoAction[] {
+  const rest = list.filter((x) => !(x.name === a.name && (x.target ?? '') === (a.target ?? '')));
+  const next = [a, ...rest].filter((x) => {
+    const terminal = AUTO_ACTION_TERMINAL.has(x.state) || typeof x.endedAt === 'string';
+    if (!terminal) return true;
+    const ended = x.endedAt ? Date.parse(x.endedAt) : Number.NaN;
+    return Number.isFinite(ended) && nowMs - ended <= AUTO_ACTION_KEEP_MS;
+  });
+  return next.slice(0, AUTO_ACTIONS_MAX);
 }
 
 const PENDING = new Set(['PENDING_APPROVAL', 'REVERT_PENDING']);
@@ -126,6 +153,10 @@ export const hostActions = {
   /** control 사건 본문 그대로 넣는다 */
   control(body: LiveControl): void {
     hostStore.setState({ control: body });
+  },
+  /** autoAction 사건(걸린 자동 조치·풀림)을 넣는다. 같은 이름·대상은 바꾸고, 풀린 지 10분이 지나면 버린다 */
+  autoAction(a: LiveAutoAction, nowMs = Date.now()): void {
+    hostStore.setState((s) => ({ autoActions: mergeAutoAction(s.autoActions as readonly LiveAutoAction[], a, nowMs) }));
   },
   resync(): void {
     hostStore.setState((s) => ({ resyncSeq: s.resyncSeq + 1 }));
