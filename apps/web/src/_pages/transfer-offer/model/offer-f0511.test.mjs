@@ -14,6 +14,8 @@ const NOW = Date.parse('2026-11-23T01:00:00.000Z');
 const OFFER = '5b1e6f0c-8d2a-4c3e-9f41-0f51110001';
 const KEY = '9e2d4b6f-1a3c-4e5f-8b7d-0f51110002';
 const EXPIRES = NOW + 31 * 3_600_000;
+/** 실행부·목업·흐름 모듈을 합쳐 읽는다(문구·경로가 어느 파일에 있어도 본다) */
+const readAll = (...files) => files.map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
 
 const offer = (o = {}) => ({ offerId: OFFER, ticketId: '0190f3a1-7c2e-7a00-8000-000000511041', role: 'RECIPIENT', status: 'OFFERED', expiresAt: new Date(EXPIRES).toISOString(), eventId: '0193f2c0-0000-7000-8000-000000511e01', ...o });
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -58,7 +60,8 @@ test('F-05-11 T12 ③ 거절한 요청은 처리됨이고 d5 §5.23 제목·본�
 });
 
 test('F-05-11 T12 ④ 실제 실행부: 고지 세 문장이 [받기]·[거절]보다 앞이고 거절 호출이 있다(응답을 잃으면 같은 키로 다시 보낸다)', () => {
-  const src = readFileSync(new URL('../ui/TransferOfferLive.tsx', import.meta.url), 'utf8');
+  const src = readAll('../ui/TransferOfferLive.tsx', '../ui/TransferOfferPage.tsx', './offer-flow.ts');
+  const flow = readAll('./offer-flow.ts');
   const notice1 = src.indexOf('이 티켓은 결제한 사람만 취소할 수 있고');
   const accept = src.indexOf('받기');
   const reject = src.indexOf('거절');
@@ -67,5 +70,5 @@ test('F-05-11 T12 ④ 실제 실행부: 고지 세 문장이 [받기]·[거절]�
   assert.ok(notice1 < reject, '고지가 거절보다 뒤에 있다');
   assert.ok(src.includes('rejection'), '거절 경로를 부르지 않는다');
   assert.ok(/reject/i.test(src), '거절 흐름 이름이 없다');
-  assert.ok(/idempotenc/i.test(src), '멱등 키를 다루지 않는다');
+  assert.ok(flow.includes('idempotencyKey'), '멱등 키를 다루지 않는다');
 });

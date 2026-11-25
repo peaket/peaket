@@ -10,6 +10,8 @@ import { lookupRecipient, transferFailureOf } from './transfer-flow.ts';
 const API = 'https://api.f0511.test';
 const PROBLEM = 'https://peaket.example/problems/';
 const NOW = Date.parse('2026-11-23T01:00:00.000Z');
+/** 실행부·목업·흐름 모듈을 합쳐 읽는다(문구·경로가 어느 파일에 있어도 본다) */
+const readAll = (...files) => files.map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n');
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const problem = (status, name) => json(status, { type: `${PROBLEM}${name}`, title: '서버 제목', status });
 function fakeApi(...replies) {
@@ -46,7 +48,7 @@ test('F-05-11 T13 ② 회원 코드 갈래는 그대로이고, 휴대폰 400·40
 });
 
 test('F-05-11 T13 ③ 실제 실행부: 상대 닉네임(counterpartNickname)을 글자로만 그리고, 없으면 회원으로 둔다', () => {
-  const src = readFileSync(new URL('../ui/TransferOfferLive.tsx', import.meta.url), 'utf8');
+  const src = readAll('../ui/TransferOfferLive.tsx', '../ui/TransferOfferPage.tsx', '../../transfer-offer/model/offer-flow.ts');
   assert.ok(src.includes('counterpartNickname'), '상대 닉네임을 읽지 않는다');
   assert.ok(src.includes('회원'), '닉네임이 없을 때의 대체 값이 없다');
   // 원문 닉네임을 따로 받는 칸은 계약에 없다(가린 값만 온다)
@@ -54,7 +56,7 @@ test('F-05-11 T13 ③ 실제 실행부: 상대 닉네임(counterpartNickname)을
 });
 
 test('F-05-11 T14 R-T31 ①~⑦ 잠금 화면: 소명 보기 링크(/my/appeals)와 기한·잠금 문구가 있고 받은 표에는 없다', () => {
-  const src = readFileSync(new URL('../ui/TicketTransferLive.tsx', import.meta.url), 'utf8');
+  const src = readAll('../ui/TicketTransferLive.tsx', '../ui/TicketTransferPage.tsx', './transfer-flow.ts', './view.ts');
   assert.ok(src.includes('transferLockExpiresAt'), '잠금 기한을 읽지 않는다');
   assert.ok(src.includes('/my/appeals'), '소명 보기(SCR-042) 링크가 없다');
   assert.ok(src.includes('부정 예매 조사가 끝날 때까지'), 'd5 §5.14 잠금 문구가 없다');
@@ -63,7 +65,7 @@ test('F-05-11 T14 R-T31 ①~⑦ 잠금 화면: 소명 보기 링크(/my/appeals)
 });
 
 test('F-05-11 T15 받은 표 카드가 receivedFromNickname을 보이고, 없으면 회원이다', () => {
-  const src = readFileSync(new URL('../../../widgets/ticket-wallet/ui/WalletLive.tsx', import.meta.url), 'utf8');
+  const src = readAll('../../../widgets/ticket-wallet/ui/WalletLive.tsx', '../../../widgets/ticket-wallet/model/transfer-actions.ts', '../../../widgets/ticket-wallet/model/wallet.ts');
   assert.ok(src.includes('receivedFromNickname'), '받은 분 닉네임을 읽지 않는다');
   assert.ok(src.includes('회원'), '닉네임이 없을 때의 대체 값이 없다');
 });
