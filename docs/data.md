@@ -1652,6 +1652,20 @@ erDiagram
         uuid ticket_id FK
         timestamptz returned_at
     }
+    transfer_notice {
+        uuid id PK
+        uuid offer_id "transfer_offer.id. 외래키 없음(표가 커지지 않게 지우지 않는다)"
+        uuid ticket_id
+        uuid event_id "회차 ID"
+        text type "TRANSFER_OFFERED|TRANSFER_ACCEPTED|TRANSFER_REJECTED|TRANSFER_WITHDRAWN|TRANSFER_EXPIRED|TICKET_RETURNED|TRANSFER_WEAK_REAUTH. 양도 사건마다 두 사람(보낸·받는) 행, 약한 재인증 알림은 보낸 사람 하나(추천 적용 2026-11-26, BUILD_ORDER F-05-11)"
+        uuid account_id "알림 받는 계정"
+        text reason "TRANSFER_WITHDRAWN일 때만 SENDER|EVENT_CANCELLED|EVENT_POSTPONED|OTHER. 공개 사유만 남긴다(부정 예매·탈퇴·입금 오류는 OTHER)"
+        timestamptz created_at
+        integer attempts "보낸 횟수"
+        timestamptz next_attempt_at "1분·5분·30분 [가정] 뒤. 보낸 행은 이 값과 상관없다"
+        timestamptz lease_until "한 파드가 잡은 시간(60초 [가정])"
+        timestamptz sent_at "2xx·422를 받은 때. 보낸 지 7일 [가정] 뒤 지운다. 유일 키 (type, offer_id, account_id)가 같은 사건의 두 번 적기를 막는다"
+    }
     ticket_operator_cancellation {
         uuid approval_id PK "ops 승인 업무 ID. 기본 키 (approval_id, ticket_id)가 OperatorCancelTickets의 멱등이다(추천 적용 2026-11-16, BUILD_ORDER GAT-080, docs/features/transfer-refund.md §7.4)"
         uuid ticket_id PK "FK ticket"
