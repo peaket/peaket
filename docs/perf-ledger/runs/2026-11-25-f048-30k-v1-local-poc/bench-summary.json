@@ -1,0 +1,8 @@
+{
+  "bench": {
+    "requests": 50886659,
+    "dropped": 0,
+    "p99_ms": 1437862,
+    "error_rate": null
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "run_id": "2026-11-25-f048-30k-v1-local-poc",
+  "kpi": "NFR-009",
+  "version": "v1",
+  "profile": "local-poc",
+  "scale": {
+    "users": null,
+    "arrival_rps": 30000.0,
+    "duration_s": 1696,
+    "warmup_s": 60
+  },
+  "scenario": {
+    "path": "loadtest/analytics/run.mjs run",
+    "args": "--rate 30000 --duration 1800 --partitions 12 --shards 4 --workers 2",
+    "open_model": true
+  },
+  "commit": {
+    "code": "3768bca4bab7249e9f788f94212609531513db93",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "host": null,
+  "generator": {
+    "description": "Kafka 생산자 4샤드, 샤드당 7,500/s, 최종 실패 0",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-25T00:26:14Z",
+  "ended_at": "2026-11-25T00:54:32Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": {
+    "p99_ms": 1437862,
+    "error_rate": null,
+    "requests": 50886659,
+    "dropped": 0
+  },
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "bench": "bench-summary.json",
+    "infra": "infra.txt",
+    "extra": [
+      "interim-summary.json"
+    ]
+  },
+  "valid": false,
+  "invalid_reason": "중단: 사용자 요청(Android 실기기 확인 우선)으로 30분 실행이 1,696초에서 멈춰 manifest·따라잡기·verify가 없다. 누락률·정확성을 계산하지 못했다.",
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": null,
+  "notes": "S1 r1 시도. 발생기 4샤드 각 7,500/s·실패 0, 호스트 CPU p95 67.7%, ClickHouse CPU p95 156%(1.56코어), 신선도 p95 1,437,862ms, 마지막 소비 밀림 분석 32,072,447·관제 35,971,799. V-T19 첫 실패 지점 방향은 30,000건/초(발생기 한계 아님). 계획 docs/review/plans/F-04-8.md §10, 요약 docs/review/measurements/F-04-8.md.",
+  "collected_at": "2026-11-25T01:01:37Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

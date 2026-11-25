@@ -1,0 +1,8 @@
+F-04-8 S1 r1 (2026-11-25, 중단) 측정 환경
+- PC: 32 cores, 23.5 GiB RAM, Windows, Docker Desktop
+- 저장소: 로컬 Docker apache/kafka:3.9.2 (KRaft 1대), clickhouse/clickhouse-server:24.12 (1대)
+- 작업자: 호스트 Node 24 프로세스, services/analytics-ingest/dist/main.js 2개, services/ops-rt/dist/main.js 2개, services/rt-pulse/dist/main.js 1개
+- 발생기: 호스트 Node 24 4샤드, @confluentinc/kafka-javascript, acks=all·멱등·linger 5ms·lz4
+- 입력: 한 회차(eventId 1개)를 토픽마다 파티션 0에 몰음(hash), 파티션 12, telemetry 3토픽 × 12 = 36 심장 박동 파티션
+- D: 빈 공간 약 80GB (계획 §4 시작 조건 3의 100GB 미만)
+- 커밋 3768bca4bab7249e9f788f94212609531513db93, 가지 feature/lane6-F-04-8
