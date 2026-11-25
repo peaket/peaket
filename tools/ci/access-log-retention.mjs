@@ -99,12 +99,29 @@ export function adminRetainUntil(accessTsIso, years) {
   return iso(y, m0, d, t.getUTCHours(), t.getUTCMinutes(), t.getUTCSeconds(), t.getUTCMilliseconds());
 }
 
-export function purgePlan({ todayIso, partitionDays, retentionMonths, maxDropPerRun = 40 }) {
+/**
+ * 파기 계획. 상한은 날짜가 아니라 `{day, table}` 파티션 단위다(같은 날 두 표는 둘).
+ * `partitionDays`는 옛 호출 호환용이며 표를 알 수 없어 `access_log`로 본다.
+ */
+export function purgePlan({ todayIso, partitions, partitionDays, retentionMonths, maxDropPerRun = 40 }) {
   if (!Number.isInteger(maxDropPerRun) || maxDropPerRun < 1) throw new Error(`한 번에 지울 상한이 1 이상의 정수다: ${maxDropPerRun}`);
-  const expired = expiredPartitionDays({ todayIso, partitionDays, retentionMonths });
+  const list = partitions ?? (partitionDays ?? []).map((day) => ({ day, table: 'access_log' }));
+  const cutoff = monthCutoff(todayIso, retentionMonths);
+  const seen = new Set();
+  const expired = [];
+  for (const p of list) {
+    parseDay(p.day);
+    if (!['access_log', 'access_log_otel'].includes(p.table)) throw new Error(`모르는 표다: ${p.table}`);
+    if (p.day >= cutoff) continue;
+    const key = `${p.day}|${p.table}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    expired.push({ day: p.day, table: p.table });
+  }
+  expired.sort((a, b) => (a.day === b.day ? a.table.localeCompare(b.table) : a.day.localeCompare(b.day)));
   return {
     today: todayIso,
-    cutoff: monthCutoff(todayIso, retentionMonths),
+    cutoff,
     expired,
     drop: expired.slice(0, maxDropPerRun),
     overdue: expired.length,
@@ -205,10 +222,18 @@ export function checkAccessLogRetention(root) {
 
   // 표·TTL·파기 사용자
   const ddl = readText(root, FILES.ddl);
-  const ttl = /TTL toDateTime\(ts\) \+ INTERVAL (\d+) MONTH/.exec(ddl);
-  if (!ttl) add(FILES.ddl, 'TTL을 읽지 못했다(3개월 이상이어야 한다)');
-  else if (Number(ttl[1]) < canon.accessMonths) add(FILES.ddl, `TTL ${ttl[1]}개월이 최소 ${canon.accessMonths}개월보다 짧다`);
-  if (!/PARTITION BY toYYYYMMDD\(ts\)/.test(ddl)) add(FILES.ddl, '하루 파티션(toYYYYMMDD)이 아니다');
+  for (const [table, ttlRe, partitionRe] of [
+    ['access_log', /TTL toDateTime\(ts\) \+ INTERVAL (\d+) MONTH/, /PARTITION BY toYYYYMMDD\(ts\)/],
+    ['access_log_otel', /TTL toDate\(Timestamp\) \+ INTERVAL (\d+) MONTH/, /PARTITION BY toDate\(Timestamp\)/],
+  ]) {
+    const ttl = ttlRe.exec(ddl);
+    if (!ttl) add(FILES.ddl, `${table} TTL을 읽지 못했다(3개월 이상이어야 한다)`);
+    else if (Number(ttl[1]) < canon.accessMonths) add(FILES.ddl, `${table} TTL ${ttl[1]}개월이 최소 ${canon.accessMonths}개월보다 짧다`);
+    if (!partitionRe.test(ddl)) add(FILES.ddl, `${table}의 하루 파티션이 아니다`);
+  }
+  // al_purger의 넓은 ALTER 한계와 자격 분리를 정본에 적는다(ClickHouse 24.12에는 파티션만 좁히는 권한이 없다).
+  if (!/\|\s*`al_purger`\s*\|/.test(texts.observability)) add(FILES.observability, '접속기록 사용자 표에 al_purger가 없다');
+  if (!/ALTER TABLE/.test(texts.observability) || !/SELECT/.test(texts.observability)) add(FILES.observability, 'al_purger의 ALTER·SELECT 한계 설명이 없다');
   const users = readText(root, FILES.users);
   if (!/CREATE ROW POLICY IF NOT EXISTS admin_rows_only ON access_log\.access_log FOR SELECT USING is_admin = 1 TO al_admin_reader;/.test(users)) add(FILES.users, 'al_admin_reader 행 정책(admin_rows_only)이 없다');
   const purgeUsers = readText(root, FILES.purgeUsers);

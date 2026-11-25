@@ -82,13 +82,74 @@ const chFetch = async (url, o, init = {}) => {
 };
 
 async function postAudit(base, token, record) {
-  const res = await fetch(base, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...(token ? { 'x-peaket-internal-token': token } : {}) },
-    body: JSON.stringify(record),
-  });
+  let res;
+  try {
+    res = await fetch(base, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(token ? { 'x-peaket-internal-token': token } : {}) },
+      body: JSON.stringify(record),
+    });
+  } catch (e) {
+    // 연결 거절·DNS·시간 초과는 운영 실패다(인자·읽기 오류 2와 가른다).
+    throw new OperationalError(`감사 접수 연결 실패: ${e instanceof Error ? e.message : String(e)}`);
+  }
   if (!res.ok) throw new OperationalError(`감사 접수 실패: HTTP ${res.status} ${await res.text()}`);
   return res.json().catch(() => ({}));
+}
+
+const readOutbox = (path) => {
+  if (!path || !existsSync(path)) return [];
+  const text = readFileSync(path, 'utf8').trim();
+  return text ? text.split('\n').map((l) => JSON.parse(l)) : [];
+};
+const writeOutbox = (path, entries) => {
+  if (!path) return;
+  writeFileSync(path, entries.map((e) => JSON.stringify(e)).join('\n') + (entries.length ? '\n' : ''));
+};
+const appendOutbox = (path, entry) => {
+  if (!path) return;
+  const entries = readOutbox(path).filter((e) => !(e.day === entry.day && e.table === entry.table));
+  entries.push(entry);
+  writeOutbox(path, entries);
+};
+const closeOutbox = async (o) => {
+  const entries = readOutbox(o.outbox);
+  if (entries.length === 0) return { closed: 0, failed: [] };
+  const remain = [];
+  const failed = [];
+  for (const e of entries) {
+    try {
+      const eventKey = `access-log-purge:v1:${e.day}:${e.table}:DROPPED`;
+      await postAudit(o['ops-audit'], o.token, {
+        eventKey,
+        recordType: 'ACCESS_LOG_PARTITION_PURGE',
+        recordId: uuidOf(eventKey),
+        payload: { day: e.day, table: e.table, state: 'DROPPED', rows: null, reconciled: true, reason: null },
+        occurredAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      remain.push(e);
+      failed.push({ day: e.day, table: e.table, reason: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200) });
+    }
+  }
+  writeOutbox(o.outbox, remain);
+  return { closed: entries.length - remain.length, failed };
+};
+
+/** 기존 지표 파일을 읽어 `_total`은 누적하고 게이지는 덮어쓴다. */
+function writeMetrics(path, entries) {
+  const prev = new Map();
+  if (existsSync(path)) {
+    for (const line of readFileSync(path, 'utf8').split('\n')) {
+      const m = /^(\S+)\s+(-?\d+(?:\.\d+)?)$/.exec(line.trim());
+      if (m) prev.set(m[1], Number(m[2]));
+    }
+  }
+  const out = entries.map(([name, value, cumulative]) => {
+    const v = cumulative ? (prev.get(name) ?? 0) + value : value;
+    return `${name} ${v}`;
+  });
+  writeFileSync(path, `${out.join('\n')}\n`);
 }
 
 const dayOfPartition = (partition) => {
@@ -107,12 +168,29 @@ const chIso = (value) => {
 };
 const factorsOf = (v) => (Array.isArray(v) ? v.map(String) : String(v ?? '').split(',').map((x) => x.trim()).filter(Boolean));
 
-/** ClickHouse system.parts에서 지금 살아 있는 하루 파티션과 표를 읽는다. */
-async function clickhousePartitions(o) {
-  const sql = "SELECT partition, table FROM system.parts WHERE database = 'access_log' AND active AND table IN ('access_log', 'access_log_otel') ORDER BY table, partition FORMAT JSON";
+/** 두 표가 실제로 있는지 확인한다. 없는 표를 '할 일 없음'으로 넘기지 않는다(IR-02). */
+async function clickhouseTables(o) {
+  const sql = "SELECT name FROM system.tables WHERE database = 'access_log' AND name IN ('access_log', 'access_log_otel') FORMAT JSON";
   const j = await (await chFetch(chQuery(o.clickhouse, sql), o)).json();
-  const rows = (j?.data ?? []).map((r) => ({ day: dayOfPartition(r.partition), table: String(r.table) }));
-  if (rows.length === 0) return [];
+  return new Set((j?.data ?? []).map((r) => String(r.name)));
+}
+
+/** ClickHouse system.parts에서 지금 살아 있는 하루 파티션과 표를 읽는다. part가 아니라 파티션 단위로 접는다(IR-01). */
+async function clickhousePartitions(o) {
+  const present = await clickhouseTables(o);
+  const missing = ['access_log', 'access_log_otel'].filter((t) => !present.has(t));
+  if (missing.length > 0) throw new OperationalError(`접속기록 표가 없다: ${missing.join(', ')}`);
+  const sql = "SELECT DISTINCT partition, table FROM system.parts WHERE database = 'access_log' AND active AND table IN ('access_log', 'access_log_otel') ORDER BY table, partition FORMAT JSON";
+  const j = await (await chFetch(chQuery(o.clickhouse, sql), o)).json();
+  const seen = new Set();
+  const rows = [];
+  for (const r of j?.data ?? []) {
+    const row = { day: dayOfPartition(r.partition), table: String(r.table) };
+    const key = `${row.day}|${row.table}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push(row);
+  }
   return rows;
 }
 
@@ -142,21 +220,29 @@ async function purge(o, r) {
   const today = o.today ?? new Date().toISOString().slice(0, 10);
   parseDay(today);
   const partitions = await clickhousePartitions(o);
-  const plan = purgePlan({ todayIso: today, partitionDays: partitions.map((p) => p.day), retentionMonths: r.months, maxDropPerRun: Number(o['max-drop'] ?? r.maxDrop) });
-  const targets = partitions.filter((p) => plan.drop.includes(p.day));
+  const plan = purgePlan({ todayIso: today, partitions, retentionMonths: r.months, maxDropPerRun: Number(o['max-drop'] ?? r.maxDrop) });
   const out = { kind: 'access-log-purge', today, cutoff: plan.cutoff, expired: plan.expired, overdue: plan.overdue, truncated: plan.truncated, dropped: [], failed: [], reconciled: [] };
-  // 계획을 먼저 남긴다. 접수 실패면 아무것도 지우지 않는다(닫힘 실패).
+  const closed = await closeOutbox(o);
+  out.failed.push(...closed.failed);
+  const targets = plan.drop;
+  // 계획을 먼저 남긴다. 그 파티션의 접수 실패면 그 파티션은 지우지 않는다(닫힘 실패).
+  const planned = [];
   for (const t of targets) {
     const eventKey = `access-log-purge:v1:${t.day}:${t.table}:PLANNED`;
-    await postAudit(o['ops-audit'], o.token, {
-      eventKey,
-      recordType: 'ACCESS_LOG_PARTITION_PURGE',
-      recordId: uuidOf(eventKey),
-      payload: { day: t.day, table: t.table, state: 'PLANNED', rows: null, reconciled: false, reason: null },
-      occurredAt: new Date().toISOString(),
-    });
+    try {
+      await postAudit(o['ops-audit'], o.token, {
+        eventKey,
+        recordType: 'ACCESS_LOG_PARTITION_PURGE',
+        recordId: uuidOf(eventKey),
+        payload: { day: t.day, table: t.table, state: 'PLANNED', rows: null, reconciled: false, reason: null },
+        occurredAt: new Date().toISOString(),
+      });
+      planned.push(t);
+    } catch (e) {
+      out.failed.push({ day: t.day, table: t.table, reason: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200) });
+    }
   }
-  for (const t of targets) {
+  for (const t of planned) {
     const rows = await countRows(o, t.table, t.day);
     let reconciled = false;
     try {
@@ -196,23 +282,20 @@ async function purge(o, r) {
       out.dropped.push({ day: t.day, table: t.table, rows, reconciled });
       if (reconciled) out.reconciled.push({ day: t.day, table: t.table });
     } catch (e) {
-      // DROP은 됐는데 감사 접수가 실패했다. 이 실행은 실패로 끝내고 다음 실행이 reconciled로 정리한다.
+      // DROP은 됐는데 감사 접수가 실패했다. outbox에 남겨 다음 실행이 reconciled로 닫는다(IR-03).
+      appendOutbox(o.outbox, { day: t.day, table: t.table });
       out.failed.push({ day: t.day, table: t.table, reason: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200) });
     }
   }
-  const stillOverdue = partitions.filter((p) => plan.expired.includes(p.day) && !out.dropped.some((d) => d.day === p.day && d.table === p.table)).length;
+  const stillOverdue = plan.expired.filter((p) => !out.dropped.some((d) => d.day === p.day && d.table === p.table)).length;
   out.overdue = stillOverdue;
   if (o.metrics) {
     const m = r.metrics;
-    writeFileSync(
-      o.metrics,
-      [
-        `${m.overdue ?? 'access_log_overdue_partitions'} ${stillOverdue}`,
-        `${m.lastSuccess ?? 'access_log_purge_last_success_timestamp'} ${out.failed.length === 0 ? Math.floor(Date.now() / 1000) : 0}`,
-        `access_log_purge_audit_failures_total ${out.failed.length}`,
-        '',
-      ].join('\n'),
-    );
+    writeMetrics(o.metrics, [
+      [m.overdue ?? 'access_log_overdue_partitions', stillOverdue, false],
+      [m.lastSuccess ?? 'access_log_purge_last_success_timestamp', out.failed.length === 0 ? Math.floor(Date.now() / 1000) : 0, false],
+      ['access_log_purge_audit_failures_total', out.failed.length, true],
+    ]);
   }
   console.log(JSON.stringify(out));
   return out.failed.length > 0 ? 1 : 0;
@@ -254,7 +337,8 @@ async function adminCopy(o, r) {
     };
     try {
       const res = await postAudit(o['ops-audit'], o.token, { eventKey, recordType: 'ADMIN_ACCESS_LOG', recordId: uuidOf(eventKey), payload, occurredAt: accessTs });
-      if (res?.accepted === true) out.copied += 1;
+      if (res?.duplicate === true) out.duplicates += 1;
+      else if (res?.accepted === true) out.copied += 1;
       else out.duplicates += 1;
     } catch (e) {
       out.failed.push({ eventKey, reason: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200) });
@@ -262,15 +346,12 @@ async function adminCopy(o, r) {
   }
   if (o.metrics) {
     const rowsMetric = r.metrics.adminCopyRows ?? 'access_log_admin_copy_rows_total';
-    writeFileSync(
-      o.metrics,
-      [
-        `${r.metrics.adminCopyLastSuccess ?? 'access_log_admin_copy_last_success_timestamp'} ${out.failed.length === 0 ? Math.floor(Date.now() / 1000) : 0}`,
-        `${rowsMetric}{result="copied"} ${out.copied}`,
-        `${rowsMetric}{result="failed"} ${out.failed.length}`,
-        '',
-      ].join('\n'),
-    );
+    writeMetrics(o.metrics, [
+      [r.metrics.adminCopyLastSuccess ?? 'access_log_admin_copy_last_success_timestamp', out.failed.length === 0 ? Math.floor(Date.now() / 1000) : 0, false],
+      [`${rowsMetric}{result="copied"}`, out.copied, true],
+      [`${rowsMetric}{result="failed"}`, out.failed.length, true],
+      [`${rowsMetric}{result="duplicate"}`, out.duplicates, true],
+    ]);
   }
   console.log(JSON.stringify(out));
   return out.failed.length > 0 ? 1 : 0;
@@ -283,6 +364,8 @@ async function reapply(o, r) {
   const partitions = await clickhousePartitions(o);
   const plan = reapplyPlan({ snapshotAtIso: o['snapshot-at'], records, partitions });
   const out = { kind: 'access-log-reapply', snapshotAt: o['snapshot-at'], reapplied: [], skipped: plan.skipped, failed: [] };
+  const closed = await closeOutbox(o);
+  out.failed.push(...closed.failed);
   for (const t of plan.drop) {
     const baseKey = `access-log-purge:v1:${t.day}:${t.table}:REAPPLIED:${o['snapshot-at']}`;
     try {
@@ -293,15 +376,12 @@ async function reapply(o, r) {
         payload: { day: t.day, table: t.table, state: 'PLANNED', rows: null, reconciled: false, reason: 'reapply' },
         occurredAt: new Date().toISOString(),
       });
+    } catch (e) {
+      out.failed.push({ day: t.day, table: t.table, reason: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200) });
+      continue;
+    }
+    try {
       await dropPartition(o, t.table, t.day);
-      await postAudit(o['ops-audit'], o.token, {
-        eventKey: `${baseKey}:DROPPED`,
-        recordType: 'ACCESS_LOG_PARTITION_PURGE',
-        recordId: uuidOf(`${baseKey}:DROPPED`),
-        payload: { day: t.day, table: t.table, state: 'DROPPED', rows: null, reconciled: false, reason: 'reapply' },
-        occurredAt: new Date().toISOString(),
-      });
-      out.reapplied.push(t);
     } catch (e) {
       const reason = e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200);
       try {
@@ -316,6 +396,21 @@ async function reapply(o, r) {
         // 감사도 실패하면 아래 종료 1로 알린다.
       }
       out.failed.push({ day: t.day, table: t.table, reason });
+      continue;
+    }
+    try {
+      await postAudit(o['ops-audit'], o.token, {
+        eventKey: `${baseKey}:DROPPED`,
+        recordType: 'ACCESS_LOG_PARTITION_PURGE',
+        recordId: uuidOf(`${baseKey}:DROPPED`),
+        payload: { day: t.day, table: t.table, state: 'DROPPED', rows: null, reconciled: false, reason: 'reapply' },
+        occurredAt: new Date().toISOString(),
+      });
+      out.reapplied.push(t);
+    } catch (e) {
+      // DROP은 성공했으므로 FAILED를 적지 않고 outbox로 닫는다(IR-03).
+      appendOutbox(o.outbox, { day: t.day, table: t.table });
+      out.failed.push({ day: t.day, table: t.table, reason: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200) });
     }
   }
   console.log(JSON.stringify(out));
@@ -449,6 +544,7 @@ async function main(argv) {
         'max-drop': { type: 'string' },
         'snapshot-at': { type: 'string' },
         purges: { type: 'string' },
+        outbox: { type: 'string' },
         metrics: { type: 'string' },
         ingress: { type: 'string' },
         rows: { type: 'string' },

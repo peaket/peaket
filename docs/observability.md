@@ -686,6 +686,16 @@ flowchart LR
   - 역할: 운영자는 Viewer(콘솔 장애 때 읽기), 엔지니어는 Editor(Explore가 필요하다. 대시보드는 Git으로 배포하고 화면에서 고친 것은 저장하지 않는다), 조직 관리자는 플랫폼(SRE) 2명 [가정]이다. 팀은 가상 팀 단위, 폴더는 팀별과 '온세일 공용'이다.
   - SSO 그룹 → 조직·팀·역할 연결은 IAM Identity Center와 같은 신원 공급자를 쓴다 [가정]. 신원 공급자 계정이 없어 wbs 4.1.2(F-01-2)에서는 그룹 이름 자리만 원천 파일에 두고, 실제 연결은 구간 5(INF-020)에서 확정한다(ADR-0356 결정 2). Grafana 로그인 기록은 Loki로 모아 접근 감사에 쓴다(docs/devops.md §10.1, docs/security/asvs/delivery.md 16.3.1).
 
+- **접속기록 저장소 사용자(추천 적용 2026-11-25, F-02-4)**: 법정 접속기록 DB(`access_log`)의 사용자는 다음과 같다. 자격은 배포마다 하나씩이고 서로의 권한을 겸하지 않는다.
+  | 사용자 | 권한 | 쓰는 곳 |
+  | --- | --- | --- |
+  | `al_ingest` | `access_log_otel`에 `INSERT`만 | 에이전트 수집기의 ClickHouse exporter |
+  | `al_admin_reader` | `access_log`의 `SELECT` 중 `is_admin = 1` 줄만(행 정책 `admin_rows_only`) | ops-svc의 관리 계정 2년 사본 |
+  | `al_investigation` | `access_log`의 `SELECT`만 | 적법한 영장을 확인한 수사 대응(POL-025) |
+  | `al_purger` | `access_log`·`access_log_otel`의 `ALTER TABLE`만(파티션 `DROP PARTITION` 포함)과 `system.parts`의 `SELECT`만. 접속기록 행 `SELECT`·다른 DB 권한은 없다 | 보존 만료 파기 작업(`tools/local/access-log-jobs.mjs --purge`) |
+  | `al_migrator` | `ALTER`·`DROP`·`CREATE TABLE` | 표·TTL을 바꾸는 마이그레이션 |
+  - **ClickHouse 24.12의 한계(2026-11-25 확인)**: `DROP PARTITION`만 허용하는 세부 권한이 없고 `ALTER`가 `ALTER DELETE`(임의 행 삭제)·`ALTER TTL`(보존 연장)·칼럼 변경을 함께 포함한다. 그래서 `al_purger`의 `ALTER`는 파티션보다 넓다. 이 자격은 파기 작업에만 주고 `al_admin_reader`·`al_ingest`와 분리하며, 파기 작업의 실행 기록(누가·언제·어느 파티션)을 감사에 남겨 오용을 찾는다. 더 좁은 권한이 생기면 그때 바꾼다.
+
 ## 10. 관제 시스템 자체의 감시
 
 - **데드맨 스위치 (Dead Man's Switch)**: Prometheus Alertmanager가 정상일 때 늘 보내는 하트비트(서비스가 살아 있음을 알리려고 주기적으로 보내는 신호) 알림인 `Watchdog`을 외부 모니터링 서비스(Healthchecks.io의 고유 핑 URL)로 계속 보낸다. 사내 인프라 전체가 멈춰 하트비트가 2주기 이상 빠지면, 외부 서비스가 온콜 엔지니어에게 바로 비상 호출(페이징)을 보낸다. 규칙·경로·핑 주기는 §5 '경보 보내는 길'이다(추천 적용 2026-11-23, F-01-6 계획).

@@ -94,7 +94,7 @@ export const AuditRecordIntakeBody = z
   })
   .strict();
 export type AuditRecordIntakeBody = z.output<typeof AuditRecordIntakeBody>;
-export const AuditRecordIntakeResponse = z.object({ accepted: z.boolean(), seq: z.number().int() });
+export const AuditRecordIntakeResponse = z.object({ accepted: z.boolean(), duplicate: z.boolean(), seq: z.number().int() });
 
 /** 받은 기록의 감사 payload: 보낸 값 + 행위자 SYSTEM·보낸 서비스의 사건 키·일어난 시각 */
 export function intakeRecordOf(body: AuditRecordIntakeBody, nowMs: number): { recordType: string; recordId: string; payload: Record<string, unknown>; nowMs: number } {

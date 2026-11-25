@@ -19,11 +19,11 @@ export class InternalAuditRecordsController {
   @HttpCode(202)
   @Roles(['public'])
   @ContractRouteSchema({ responses: { 202: AuditRecordIntakeResponse } })
-  async accept(@Body() body: unknown): Promise<{ accepted: boolean; seq: number }> {
+  async accept(@Body() body: unknown): Promise<{ accepted: boolean; duplicate: boolean; seq: number }> {
     const parsed = AuditRecordIntakeBody.safeParse(body);
     if (!parsed.success) throw invalidBody();
     if (!AUDIT_INTAKE_PAYLOADS[parsed.data.recordType].safeParse(parsed.data.payload).success) throw invalidBody();
     const r = await this.intake.accept(parsed.data.eventKey, intakeRecordOf(parsed.data, this.clock.now()));
-    return { accepted: true, seq: r.seq };
+    return { accepted: true, duplicate: r.duplicate, seq: r.seq };
   }
 }
