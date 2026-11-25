@@ -711,6 +711,20 @@ describe('F-04-12 조사 HTTP', () => {
     const replay = await send('POST', '/v1/ops/fraud-cases', who, { idem: key, body: { clusterId: CL_IDEM, reasonCategory: 'MACRO_BOT' } });
     expect(replay.statusCode, replay.payload).toBe(201);
     expect(json(replay)).toEqual(json(first));
+    // 소명 요청도 같은 규칙이다
+    const caseId = json(first).caseId as string;
+    const noAppealKey = await send('POST', `/v1/ops/fraud-cases/${caseId}/appeal-requests`, who, {
+      body: { accountIds: [A(30)], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + 2 * DAY) },
+    });
+    expect(noAppealKey.statusCode).toBe(400);
+    expect(typeOf(noAppealKey)).toMatch(/idempotency-key-invalid$/);
+    const appealKey = randomUUID();
+    const appeal = { accountIds: [A(30)], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + 2 * DAY) };
+    const firstAppeal = await send('POST', `/v1/ops/fraud-cases/${caseId}/appeal-requests`, who, { idem: appealKey, body: appeal });
+    expect(firstAppeal.statusCode, firstAppeal.payload).toBe(201);
+    const replayAppeal = await send('POST', `/v1/ops/fraud-cases/${caseId}/appeal-requests`, who, { idem: appealKey, body: appeal });
+    expect(replayAppeal.statusCode, replayAppeal.payload).toBe(201);
+    expect(json(replayAppeal)).toEqual(json(firstAppeal));
   });
 
   test('FX-T12 ㉑ 하루 검증이 불일치를 내면 SEV2 경보와 내보내기 차단을 남긴다', async () => {
