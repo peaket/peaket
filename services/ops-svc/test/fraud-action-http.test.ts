@@ -117,8 +117,11 @@ const cancellationClient = {
   async cancel(i: any) {
     cancelCalls.push(i);
     const key = i.approvalId;
+    // 시험이 cancels에 심은 첫 결과는 그대로 돌려준다. 같은 승인 ID의 재시도에서만 FAILED를 ACCEPTED로 바꾼다.
+    const attempt = cancelCalls.filter((c) => c.approvalId === key).length;
     if (cancels.has(key)) {
       const previous = cancels.get(key)!;
+      if (attempt === 1) return previous;
       const out = previous.map((p: any) =>
         p.outcome === 'FAILED' ? { ...p, outcome: 'ACCEPTED', cancellationId: randomUUID(), refundAmount: 100_000 } : p,
       );
