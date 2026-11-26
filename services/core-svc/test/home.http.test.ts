@@ -303,8 +303,9 @@ describe('홈 피드(HOT-305)', () => {
       },
       home: {
         banners: [
-          { bannerId: 'b0', productionId: pid(1), eventId: eid(1), title: '같은 순서 낮은 ID', imageUrl: `${IMAGE_ORIGIN_TEST}/home-banners/b0`, alt: '같은 순서 낮은 ID 그림', displayFrom: '2026-11-01T00:00:00.000Z', displayUntil: '2026-12-01T00:00:00.000Z', sortOrder: 2 },
+          // 같은 sort_order는 입력 차례를 b1→b0으로 두고 기대는 ID 차례 b0→b1로 둔다(TR-19).
           { bannerId: 'b1', productionId: pid(1), eventId: eid(1), title: '첫 배너', subtitle: '11/20', imageUrl: `${IMAGE_ORIGIN_TEST}/home-banners/b1`, alt: '첫 배너 그림', displayFrom: '2026-11-01T00:00:00.000Z', displayUntil: '2026-12-01T00:00:00.000Z', sortOrder: 2 },
+          { bannerId: 'b0', productionId: pid(1), eventId: eid(1), title: '같은 순서 낮은 ID', imageUrl: `${IMAGE_ORIGIN_TEST}/home-banners/b0`, alt: '같은 순서 낮은 ID 그림', displayFrom: '2026-11-01T00:00:00.000Z', displayUntil: '2026-12-01T00:00:00.000Z', sortOrder: 2 },
           { bannerId: 'b2', productionId: pid(2), eventId: eid(2), title: '둘째 배너', imageUrl: `${IMAGE_ORIGIN_TEST}/home-banners/b2`, alt: '둘째 배너 그림', displayFrom: '2026-11-01T00:00:00.000Z', displayUntil: '2026-12-01T00:00:00.000Z', sortOrder: 1 },
           { bannerId: 'b3', productionId: pid(3), eventId: eid(3), imageUrl: `${IMAGE_ORIGIN_TEST}/home-banners/b3`, alt: '중지 공연 배너', displayFrom: '2026-11-01T00:00:00.000Z', displayUntil: '2026-12-01T00:00:00.000Z', sortOrder: 0 },
           { bannerId: 'b4', productionId: pid(1), eventId: eid(1), imageUrl: `${IMAGE_ORIGIN_TEST}/home-banners/b4`, alt: '끝난 배너', displayFrom: '2026-10-01T00:00:00.000Z', displayUntil: new Date(NOW).toISOString(), sortOrder: 0 },

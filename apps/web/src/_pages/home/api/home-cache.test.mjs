@@ -57,11 +57,13 @@ test('HOT-305 홈 캐시 처리기는 토큰 설정이 비었거나 다른 메�
   assert.deepEqual(calls, []);
 });
 
-test('HOT-305 app/internal/v1/home-cache/route.ts가 revalidateTag("home")과 내부 토큰을 처리기에 넘긴다', () => {
-  // 계획 I-04의 배선을 소스로 고정한다(TR-08). 처리기만 만들고 경로를 만들지 않는 구현을 잡는다.
+test('HOT-305 app/internal/v1/home-cache/route.ts가 revalidateTag("home")과 내부 토큰을 실제 인자로 처리기에 넘긴다', () => {
+  // 계획 I-04의 배선을 소스로 고정한다(TR-08·TR-20). 처리기만 만들고 경로를 만들거나,
+  // POST가 직접 revalidateTag를 부르고 처리기에 no-op을 넘기는 구현을 잡는다.
   const route = readFileSync(new URL('../../../../app/internal/v1/home-cache/route.ts', import.meta.url), 'utf8');
-  assert.match(route, /export\s+(async\s+)?function\s+POST|export\s+const\s+POST/);
-  assert.match(route, /createHomeCacheHandler/);
-  assert.match(route, /revalidateTag\(\s*['"]home['"]\s*\)/);
-  assert.match(route, /PEAKET_INTERNAL_TOKEN/);
+  assert.match(route, /import\s*\{\s*revalidateTag\s*\}\s*from\s*['"]next\/cache['"]/);
+  assert.match(route, /createHomeCacheHandler\s*\(\s*\{[\s\S]*?revalidate\s*:\s*revalidateTag\b[\s\S]*?token\s*:\s*process\.env\.PEAKET_INTERNAL_TOKEN\b[\s\S]*?\}\s*\)/);
+  assert.match(route, /export\s+(?:const\s+POST\s*=\s*[A-Za-z_$][\w$]*|(?:async\s+)?function\s+POST)/);
+  // 토큰 확인 전에 매 POST마다 홈 캐시를 비우는 직접 호출이 없어야 한다.
+  assert.doesNotMatch(route, /(?:^|\n)\s*revalidateTag\s*\(/);
 });
