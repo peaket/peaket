@@ -1,4 +1,4 @@
-// F-06-5 ops-svc CS 문의 답변 시험 공용 도우미(시험 담당 lane2-freeze-F-06-5-opencode).
+﻿// F-06-5 ops-svc CS 문의 답변 시험 공용 도우미(시험 담당 lane2-freeze-F-06-5-opencode).
 // core-svc SupportCaseService를 정본 설명자로 띄운 **실제 gRPC 서버**로 두고, 시작 조립과 같은 supportCasePortsFromEnv(env)로 만든
 // 실제 gRPC 클라이언트를 AppModule.register({ memory:true, supportCases })에 넣는다. 구현 전에는 조립 파일이 없어 포트가 비고
 // 답변 경로가 404로 끝난다(시험은 행동으로 실패한다).
@@ -93,7 +93,7 @@ export async function supportCaseHarness(o: { record?: Record<string, unknown>; 
     h,
     stub,
     calls: stub.calls,
-    async reply(hdrs, caseId, body, key = `reply-${randomUUID()}`) {
+    async reply(hdrs, caseId, body, key = randomUUID()) {
       const r = await h.svc.http.inject({ method: 'POST', url: `/v1/ops/cases/${caseId}/replies`, headers: { ...hdrs, 'content-type': 'application/json', 'idempotency-key': key }, payload: JSON.stringify(body) });
       return { status: r.statusCode, body: r.payload ? (JSON.parse(r.payload) as Record<string, unknown>) : {} };
     },

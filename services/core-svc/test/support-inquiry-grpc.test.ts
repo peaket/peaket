@@ -1,4 +1,4 @@
-// F-06-5 core-svc support 문의 gRPC 시험(SupportCaseService, 시험 담당 lane2-freeze-F-06-5-opencode).
+﻿// F-06-5 core-svc support 문의 gRPC 시험(SupportCaseService, 시험 담당 lane2-freeze-F-06-5-opencode).
 // 정본: docs/api/proto/peaket/core/v1/core.proto SupportCaseService, openapi CaseReply, data.md inquiry·inquiry_message, R-T27 ⑤.
 // 구현 전에는 키트에 inquiryGrpcHandlers가 없어 각 RPC가 UNIMPLEMENTED로 끝나 그 자리에서 실패한다.
 import 'reflect-metadata';
@@ -62,7 +62,7 @@ async function open(h: InquiryHarness = current!): Promise<{ accountId: string; 
 }
 
 async function answer(inquiryId: string, body = '확인했습니다. 배송 예정일은 다음 주 수요일입니다.', actedBy = crypto.randomUUID()) {
-  const r = await call('AddInquiryReply', { request_id: `req-${++seq}`, inquiry_id: inquiryId, kind: 'INQUIRY_REPLY_KIND_ANSWER', body, acted_by: actedBy });
+  const r = await call('AddInquiryReply', { request_id: crypto.randomUUID(), inquiry_id: inquiryId, kind: 'INQUIRY_REPLY_KIND_ANSWER', body, acted_by: actedBy });
   return { ...r, actedBy };
 }
 
@@ -129,7 +129,7 @@ describe('SupportCaseService 내부 경계', () => {
 
   test('R-T27 ④ [ASVS v5.0.0-2.3.2] 진행 경과는 IN_PROGRESS, 추가 문의는 다시 IN_PROGRESS와 CS 건 재개 요청, 답변은 ANSWERED다', async () => {
     const { accountId, inquiryId } = await open();
-    const p = await call('AddInquiryReply', { request_id: `req-${++seq}`, inquiry_id: inquiryId, kind: 'INQUIRY_REPLY_KIND_PROGRESS', body: '판매자에게 사실 확인을 요청했습니다. 조금만 기다려 주세요.', acted_by: crypto.randomUUID() });
+    const p = await call('AddInquiryReply', { request_id: crypto.randomUUID(), inquiry_id: inquiryId, kind: 'INQUIRY_REPLY_KIND_PROGRESS', body: '판매자에게 사실 확인을 요청했습니다. 조금만 기다려 주세요.', acted_by: crypto.randomUUID() });
     expect(p.res).toMatchObject({ result: 'INQUIRY_REPLY_RESULT_RECORDED', status: 'INQUIRY_STATUS_IN_PROGRESS' });
     await answer(inquiryId);
     const before = current!.kit().inquiries.outbox().length;
@@ -145,22 +145,23 @@ describe('SupportCaseService 내부 경계', () => {
 
   test('R-T27 [ASVS v5.0.0-2.3.2] 같은 request_id 같은 본문은 같은 기록, 다른 본문은 ALREADY_EXISTS다', async () => {
     const { inquiryId } = await open();
-    const first = await call('AddInquiryReply', { request_id: 'same-req-77', inquiry_id: inquiryId, kind: 'INQUIRY_REPLY_KIND_ANSWER', body: '같은 요청 열쇠로 한 번만 남기는 답변입니다.', acted_by: crypto.randomUUID() });
+    const sameReq = crypto.randomUUID();
+    const first = await call('AddInquiryReply', { request_id: sameReq, inquiry_id: inquiryId, kind: 'INQUIRY_REPLY_KIND_ANSWER', body: '같은 요청 열쇠로 한 번만 남기는 답변입니다.', acted_by: crypto.randomUUID() });
     expect(first.res).toMatchObject({ result: 'INQUIRY_REPLY_RESULT_RECORDED' });
-    const again = await call('AddInquiryReply', { request_id: 'same-req-77', inquiry_id: inquiryId, kind: 'INQUIRY_REPLY_KIND_ANSWER', body: '같은 요청 열쇠로 한 번만 남기는 답변입니다.', acted_by: crypto.randomUUID() });
+    const again = await call('AddInquiryReply', { request_id: sameReq, inquiry_id: inquiryId, kind: 'INQUIRY_REPLY_KIND_ANSWER', body: '같은 요청 열쇠로 한 번만 남기는 답변입니다.', acted_by: crypto.randomUUID() });
     expect(again.res).toMatchObject({ result: 'INQUIRY_REPLY_RESULT_RECORDED' });
     expect((again.res!.message as Record<string, unknown>).message_id).toBe((first.res!.message as Record<string, unknown>).message_id);
     expect(current!.kit().inquiries.messages().filter((m) => m.kind === 'ANSWER')).toHaveLength(1);
-    const other = await call('AddInquiryReply', { request_id: 'same-req-77', inquiry_id: inquiryId, kind: 'INQUIRY_REPLY_KIND_ANSWER', body: '같은 열쇠에 다른 본문을 보내는 시험입니다.', acted_by: crypto.randomUUID() });
+    const other = await call('AddInquiryReply', { request_id: sameReq, inquiry_id: inquiryId, kind: 'INQUIRY_REPLY_KIND_ANSWER', body: '같은 열쇠에 다른 본문을 보내는 시험입니다.', acted_by: crypto.randomUUID() });
     expect(other.err?.code).toBe(grpc.status.ALREADY_EXISTS);
   });
 
   test('R-T27 ⑤ [ASVS v5.0.0-2.3.1] 닫힌 문의에는 주인의 추가 문의도 409 inquiry-closed이고 답변도 INQUIRY_CLOSED이며 기록이 늘지 않는다', async () => {
     const { accountId, inquiryId } = await open();
-    const closed = await call('CloseInquiry', { request_id: 'close-1', inquiry_id: inquiryId, acted_by: crypto.randomUUID() });
+    const closed = await call('CloseInquiry', { request_id: crypto.randomUUID(), inquiry_id: inquiryId, acted_by: crypto.randomUUID() });
     expect(closed.res).toMatchObject({ status: 'INQUIRY_STATUS_CLOSED' });
     const before = current!.kit().inquiries.messages().length;
-    const fan = await current!.message(current!.fanHeaders(accountId), inquiryId, { body: '닫힌 내 문의에 다시 글을 남겨 보는 시험 본문입니다.' }, 'closed-owner-msg');
+    const fan = await current!.message(current!.fanHeaders(accountId), inquiryId, { body: '닫힌 내 문의에 다시 글을 남겨 보는 시험 본문입니다.' }, crypto.randomUUID());
     expect(fan.status).toBe(409);
     expect(problemType(fan.body)).toBe('inquiry-closed');
     const r = await answer(inquiryId);
@@ -220,10 +221,10 @@ describe('SupportCaseService 내부 경계', () => {
   test('R-T27 [ASVS v5.0.0-16.5.3] CloseInquiry 저장 실패에는 INTERNAL이고 상태가 그대로다', async () => {
     const { inquiryId } = await open();
     current!.kit().inquiries.failNext('saveClose');
-    const failed = await call('CloseInquiry', { request_id: 'close-fail', inquiry_id: inquiryId, acted_by: crypto.randomUUID() });
+    const failed = await call('CloseInquiry', { request_id: crypto.randomUUID(), inquiry_id: inquiryId, acted_by: crypto.randomUUID() });
     expect(failed.err?.code).toBe(grpc.status.INTERNAL);
     expect(current!.kit().inquiries.rows()[0]).toMatchObject({ status: 'RECEIVED', closedAtMs: null });
-    const ok = await call('CloseInquiry', { request_id: 'close-ok', inquiry_id: inquiryId, acted_by: crypto.randomUUID() });
+    const ok = await call('CloseInquiry', { request_id: crypto.randomUUID(), inquiry_id: inquiryId, acted_by: crypto.randomUUID() });
     expect(ok.res).toMatchObject({ status: 'INQUIRY_STATUS_CLOSED' });
     expect(tsOf((ok.res as Record<string, unknown>).closed_at)).toBe(current!.clock.now());
     expect(current!.kit().inquiries.rows()[0]!.closedAtMs).toBe(current!.clock.now());

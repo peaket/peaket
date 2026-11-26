@@ -76,10 +76,10 @@ describe('R-T27 고객 문의 접수·목록·상세·추가 문의', () => {
   test('R-T27 ③ [ASVS v5.0.0-2.1.3][ASVS v5.0.0-2.3.2][ASVS v5.0.0-2.4.1] 하루 10건까지 받고 11번째는 429이며 다음 KST 날에는 다시 받는다', async () => {
     const accountId = randomUUID();
     for (let i = 1; i <= 10; i += 1) {
-      const r = await submit(h, { accountId, title: `배송 문의 ${i}번째`, key: `daily-${i}` });
+      const r = await submit(h, { accountId, title: `배송 문의 ${i}번째`, key: randomUUID() });
       expect(r.status, `${i}번째 ${JSON.stringify(r.body)}`).toBe(201);
     }
-    const eleventh = await submit(h, { accountId, title: '배송 문의 열한번째', key: 'daily-11' });
+    const eleventh = await submit(h, { accountId, title: '배송 문의 열한번째', key: randomUUID() });
     expect(eleventh.status).toBe(429);
     expect(problemType(eleventh.body)).toBe('inquiry-daily-limit');
     h.clock.advance(86_400_000);
@@ -90,12 +90,13 @@ describe('R-T27 고객 문의 접수·목록·상세·추가 문의', () => {
 
   test('R-T27 ③ 같은 Idempotency-Key 같은 본문은 201 한 행, 다른 본문은 422다', async () => {
     const accountId = randomUUID();
-    const first = await h.create(h.fanHeaders(accountId), { category: 'MERCH', title: '응원봉 배송 문의', body: '응원봉 배송 예정일을 알고 싶습니다. 확인 부탁드립니다.' } as never, 'same-key-1');
+    const sameKey = randomUUID();
+    const first = await h.create(h.fanHeaders(accountId), { category: 'MERCH', title: '응원봉 배송 문의', body: '응원봉 배송 예정일을 알고 싶습니다. 확인 부탁드립니다.' } as never, sameKey);
     expect(first.status, JSON.stringify(first.body)).toBe(201);
-    const again = await h.create(h.fanHeaders(accountId), { category: 'MERCH', title: '응원봉 배송 문의', body: '응원봉 배송 예정일을 알고 싶습니다. 확인 부탁드립니다.' } as never, 'same-key-1');
+    const again = await h.create(h.fanHeaders(accountId), { category: 'MERCH', title: '응원봉 배송 문의', body: '응원봉 배송 예정일을 알고 싶습니다. 확인 부탁드립니다.' } as never, sameKey);
     expect(again.status).toBe(201);
     expect(again.body.inquiryId).toBe(first.body.inquiryId);
-    const other = await h.create(h.fanHeaders(accountId), { category: 'MERCH', title: '다른 제목의 문의', body: '같은 열쇠에 다른 본문을 보내 봅니다. 어떻게 되는지 궁금합니다.' } as never, 'same-key-1');
+    const other = await h.create(h.fanHeaders(accountId), { category: 'MERCH', title: '다른 제목의 문의', body: '같은 열쇠에 다른 본문을 보내 봅니다. 어떻게 되는지 궁금합니다.' } as never, sameKey);
     expect(other.status).toBe(422);
     expect(problemType(other.body)).toBe('idempotency-key-reused');
     expect(h.kit().inquiries.rows()).toHaveLength(1);
@@ -188,11 +189,11 @@ describe('계좌번호 꼴·길이·트랜잭션·로그', () => {
   test('R-T27 [ASVS v5.0.0-1.1.1][ASVS v5.0.0-1.4.2] 제목 5/50·내용 10/2,000 경계는 받고 4/51·9/2,001과 page 0·limit 51은 거절한다', async () => {
     const accountId = randomUUID();
     expect((await submit(h, { accountId, title: '12345', body: '1234567890' })).status).toBe(201);
-    expect((await submit(h, { accountId, title: '가'.repeat(50), body: '나'.repeat(2000), key: 'boundary-max' })).status).toBe(201);
-    expect((await submit(h, { accountId, title: '1234', body: '1234567890', key: 't4' })).status).toBe(422);
-    expect((await submit(h, { accountId, title: '가'.repeat(51), body: '나'.repeat(10), key: 't51' })).status).toBe(422);
-    expect((await submit(h, { accountId, title: '12345', body: '123456789', key: 'b9' })).status).toBe(422);
-    expect((await submit(h, { accountId, title: '12345', body: '나'.repeat(2001), key: 'b2001' })).status).toBe(422);
+    expect((await submit(h, { accountId, title: '가'.repeat(50), body: '나'.repeat(2000), key: randomUUID() })).status).toBe(201);
+    expect((await submit(h, { accountId, title: '1234', body: '1234567890', key: randomUUID() })).status).toBe(422);
+    expect((await submit(h, { accountId, title: '가'.repeat(51), body: '나'.repeat(10), key: randomUUID() })).status).toBe(422);
+    expect((await submit(h, { accountId, title: '12345', body: '123456789', key: randomUUID() })).status).toBe(422);
+    expect((await submit(h, { accountId, title: '12345', body: '나'.repeat(2001), key: randomUUID() })).status).toBe(422);
     expect((await h.list(h.fanHeaders(accountId), 'page=0')).status).toBe(400);
     expect((await h.list(h.fanHeaders(accountId), 'limit=51')).status).toBe(400);
     expect((await h.list(h.fanHeaders(accountId), 'status=UNKNOWN')).status).toBe(400);
