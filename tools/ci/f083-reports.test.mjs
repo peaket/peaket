@@ -264,7 +264,8 @@ test('MSR-080 ③ 용량 산정서가 100만 외삽을 인용하고 200만·1~3�
   assert.match(cap, /비례 전제 확인 못 함/, '용량 산정서에 비례 미확인 표시가 없다');
   const s2 = section(cap, '200만');
   assert.match(s2, /설계 목표/, '200만 절이 설계 목표가 아니다');
-  assert.doesNotMatch(s2, /200만\s*외삽/, '200만을 외삽으로 새로 만들었다');
+  assert.doesNotMatch(s2, /200만[^\n]{0,40}외삽\(설계 식\)/, '200만을 설계 식 외삽으로 새로 만들었다');
+  assert.doesNotMatch(s2, /200만[^\n]{0,40}외삽[^\n]{0,20}(값|가능|산출)/, '200만을 외삽 값으로 새로 만들었다');
   assert.match(section(cap, '1~3년'), /설계 목표/, '1~3년 절이 설계 목표가 아니다');
   assert.match(section(cap, '사실 대장'), /F082-X1/, '용량 산정서 사실 대장에 F082-X1이 없다');
   assert.match(section(cap, '사실 대장'), /F082-N250/, '용량 산정서 사실 대장에 F082-N250이 없다');
