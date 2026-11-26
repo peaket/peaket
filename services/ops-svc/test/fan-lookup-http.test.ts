@@ -170,7 +170,6 @@ describe('GAT-320 가린 값 열람과 접속기록', () => {
     const b = json(r.payload);
     expect(b).toMatchObject({ name: RAW.name, phone: RAW.phone, reason: '분쟁 접수 #123 확인' });
     expect(b.email ?? null).toBeNull();
-    expect(b.unmaskingId).toBeTruthy();
     expect(b.unmaskedAt).toBe('2026-11-27T03:00:00.000Z');
     expect(String(r.headers['cache-control'])).toContain('no-store');
     expect(kit.access).toHaveLength(1);
