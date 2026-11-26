@@ -90,6 +90,7 @@ const progressView = (p: EventRefundProgress): Record<string, unknown> => ({
     failed_orders: x.failed,
     unknown_orders: x.unknown,
     not_applied_orders: x.notApplied,
+    ...(x.recentCalls !== undefined ? { recent_calls: x.recentCalls, recent_failures: x.recentFailures ?? 0, recent_window_seconds: 300 } : {}),
   })),
 });
 

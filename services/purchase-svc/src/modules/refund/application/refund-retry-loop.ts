@@ -9,13 +9,15 @@ export const REFUND_RETRY_TICK_MS = 60_000;
 export interface RefundRetryLoopDeps {
   /** RefundAfterEntry.run. 입장 기록 대조의 셈(entryRecorded·unverified, BAT-420)도 그대로 넘긴다 */
   refund: { run(): Promise<{ refunded: number; pending: number; failed: number }> };
+  /** 계좌 입력 요청 첫 발송·재발송(F-07-15 I-02). 환급 결과를 바꾸지 않는다 */
+  accountRequests?: { run(limit?: number): Promise<{ sent: number; skipped: number }> };
   leader: { isLeader(): boolean };
   logger?: { warn(o: object, msg: string): void; info?(o: object, msg: string): void };
   tickMs?: number;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
-export type RefundRetryTick = { skipped: 'not_leader' } | { refunded: number; pending: number; failed: number };
+export type RefundRetryTick = { skipped: 'not_leader' } | { refunded: number; pending: number; failed: number; notified?: number };
 
 const defaultSleep = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise<void>((resolve) => {
@@ -46,7 +48,15 @@ export class RefundRetryLoop implements LeaderLoop {
   /** 한 번 본다. 리더가 아니면 아무것도 부르지 않는다 */
   async tick(): Promise<RefundRetryTick> {
     if (!this.deps.leader.isLeader()) return { skipped: 'not_leader' };
-    return this.deps.refund.run();
+    const result = await this.deps.refund.run();
+    if (!this.deps.accountRequests) return result;
+    try {
+      const notice = await this.deps.accountRequests.run();
+      return { ...result, notified: notice.sent };
+    } catch (err) {
+      this.deps.logger?.warn({ kind: 'account-request-notice', err: (err as Error).name }, '계좌 입력 요청 훑기가 실패했다(다음 틱이 다시 한다)');
+      return result;
+    }
   }
 
   start(): void {

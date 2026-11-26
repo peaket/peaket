@@ -43,7 +43,9 @@ export const tradeOrderEvent: Readonly<Record<string, unknown>> = {
           "EXPIRED",
           "ISSUE_DELAYED",
           "EVENT_POSTPONED",
-          "REFUND_FAILED"
+          "REFUND_FAILED",
+          "REFUND_ACCOUNT_REQUESTED",
+          "COMPENSATION_ACCOUNT_REQUESTED"
         ]
       }
     },
@@ -54,7 +56,7 @@ export const tradeOrderEvent: Readonly<Record<string, unknown>> = {
     },
     {
       "name": "refundAmount",
-      "doc": "그 환급에서 돌려준 금액(원). 고객 취소로 끝난 주문은 그 전이를 일으킨 취소의 환급액, 회차 취소·연기는 그 표의 환급액이다. REFUNDED에만 싣는다(2026-11-15 R-583, avsc는 2026-11-23 F-04-2)",
+      "doc": "그 환급에서 돌려준 금액(원). 고객 취소로 끝난 주문은 그 전이를 일으킨 취소의 환급액, 회차 취소·연기는 그 표의 환급액이다. REFUNDED와 계좌 입력 요청 두 사건에만 싣는다(2026-11-15 R-583, F-07-15)",
       "type": [
         "null",
         "long"
@@ -63,7 +65,9 @@ export const tradeOrderEvent: Readonly<Record<string, unknown>> = {
       "x-present-when": [
         {
           "type": [
-            "REFUNDED"
+            "REFUNDED",
+            "REFUND_ACCOUNT_REQUESTED",
+            "COMPENSATION_ACCOUNT_REQUESTED"
           ]
         }
       ]
@@ -82,6 +86,38 @@ export const tradeOrderEvent: Readonly<Record<string, unknown>> = {
             "EVENT_CANCELLATION_CONFIRMED",
             "EVENT_POSTPONED",
             "REFUND_FAILED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "cancellationId",
+      "doc": "환불 계좌 입력을 요청한 취소 ID. REFUND_ACCOUNT_REQUESTED에만 싣는다(F-07-15, notify §9)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "REFUND_ACCOUNT_REQUESTED"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "compensationId",
+      "doc": "배상 계좌 입력을 요청한 배상 ID. COMPENSATION_ACCOUNT_REQUESTED에만 싣는다(F-07-15, notify §9)",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null,
+      "x-present-when": [
+        {
+          "type": [
+            "COMPENSATION_ACCOUNT_REQUESTED"
           ]
         }
       ]

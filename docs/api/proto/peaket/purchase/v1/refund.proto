@@ -168,6 +168,10 @@ message PgRefundPart {
   int32 unknown_orders = 6;
   // 연기(POSTPONE)에서 신청하지 않아 환급하지 않은 건
   int32 not_applied_orders = 7;
+  // 최근 5분 시도 집계(F-07-15 I-06). 호출은 SUCCESS+FAILURE+UNKNOWN, 실패는 FAILURE+UNKNOWN이고 REJECT는 어느 쪽도 아니다
+  int32 recent_calls = 8;
+  int32 recent_failures = 9;
+  int32 recent_window_seconds = 10;
 }
 
 message GetEventRefundJobResponse {

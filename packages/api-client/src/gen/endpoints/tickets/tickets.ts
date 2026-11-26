@@ -30,6 +30,7 @@ import type {
 
 import type {
   Cancellation,
+  CancellationDetail,
   CancellationQuote,
   Compensation,
   CompensationPage,
@@ -2184,6 +2185,129 @@ export function useListTransfers<TData = Awaited<ReturnType<typeof listTransfers
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getListTransfersQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getCancellationResponse200 = {
+  data: CancellationDetail
+  status: 200
+}
+
+export type getCancellationResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getCancellationResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getCancellationResponseSuccess = (getCancellationResponse200) & {
+  headers: Headers;
+};
+export type getCancellationResponseError = (getCancellationResponse401 | getCancellationResponse404) & {
+  headers: Headers;
+};
+
+export const getGetCancellationUrl = (cancellationId: string,) => {
+
+
+
+
+  return `/v1/cancellations/${encodeURIComponent(String(cancellationId))}`
+}
+
+/**
+ * F-07-15, FR-047, POL-014, ADR-0316. 결제자 본인만 읽고 남의 취소·없는 취소는 같은 404다. 계좌 원문은 응답에 넣지 않는다. Cache-Control: private, no-store
+ * @summary 취소 상세(SCR-060 지연 환급 계좌 입력)
+ */
+export const getCancellation = async (cancellationId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getCancellationResponseSuccess> => {
+
+  return orvalFetch<getCancellationResponseSuccess>(getGetCancellationUrl(cancellationId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCancellationQueryKey = (cancellationId: string,) => {
+    return [
+    `/v1/cancellations/${cancellationId}`
+    ] as const;
+    }
+
+
+export const getGetCancellationQueryOptions = <TData = Awaited<ReturnType<typeof getCancellation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(cancellationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCancellation>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCancellationQueryKey(cancellationId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCancellation>>> = ({ signal }) => getCancellation(cancellationId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: cancellationId !== null && cancellationId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCancellation>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetCancellationQueryResult = NonNullable<Awaited<ReturnType<typeof getCancellation>>>
+export type GetCancellationQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetCancellation<TData = Awaited<ReturnType<typeof getCancellation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ cancellationId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCancellation>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCancellation>>,
+          TError,
+          Awaited<ReturnType<typeof getCancellation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetCancellation<TData = Awaited<ReturnType<typeof getCancellation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ cancellationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCancellation>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCancellation>>,
+          TError,
+          Awaited<ReturnType<typeof getCancellation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetCancellation<TData = Awaited<ReturnType<typeof getCancellation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ cancellationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCancellation>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 취소 상세(SCR-060 지연 환급 계좌 입력)
+ */
+
+export function useGetCancellation<TData = Awaited<ReturnType<typeof getCancellation>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ cancellationId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCancellation>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetCancellationQueryOptions(cancellationId,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 

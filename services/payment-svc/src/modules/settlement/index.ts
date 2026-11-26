@@ -97,6 +97,8 @@ export {
   type PgStore,
   type ProductSettlementItem,
   type ReceivableCause,
+  type ReceivableActionKind,
+  type ReceivableActionRecord,
   type ReceivableRecord,
   type ReceivableStatus,
   type SettlementEventType,

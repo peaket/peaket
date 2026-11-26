@@ -17,6 +17,55 @@ export interface ProgressPerPg {
   done: number;
   failed: number;
   unknown: number;
+  /** 최근 5분 재개 조건(F-07-15 I-06). 옛 응답에는 없어 null이다 */
+  resume: ResumeCondition | null;
+}
+
+export type ResumeState = 'ELIGIBLE' | 'NO_SAMPLE' | 'FAILURE_RATE_HIGH' | 'CIRCUIT_OPEN' | 'CIRCUIT_UNAVAILABLE';
+export type ResumeCircuitState = 'closed' | 'half_open' | 'open' | null;
+
+export interface ResumeCondition {
+  circuitState: ResumeCircuitState;
+  calls: number;
+  failures: number;
+  failureRateBp: number | null;
+  windowSeconds: 300;
+  state: ResumeState;
+}
+
+const RESUME_STATES: readonly ResumeState[] = ['ELIGIBLE', 'NO_SAMPLE', 'FAILURE_RATE_HIGH', 'CIRCUIT_OPEN', 'CIRCUIT_UNAVAILABLE'];
+
+/** 서버 resume을 화면 값으로. 상태·호출·창·서킷이 계약 밖이면 null(부분 값을 그리지 않는다) */
+export function resumeConditionOf(raw: unknown): ResumeCondition | null {
+  if (!isRecord(raw)) return null;
+  const state = raw.state as ResumeState;
+  const circuitState = raw.circuitState;
+  const calls = intAtLeast0(raw.calls);
+  const failures = intAtLeast0(raw.failures);
+  const failureRateBp = raw.failureRateBp;
+  if (!RESUME_STATES.includes(state)) return null;
+  if (circuitState !== null && circuitState !== 'closed' && circuitState !== 'half_open' && circuitState !== 'open') return null;
+  if (calls === null || failures === null || raw.windowSeconds !== 300) return null;
+  if (failureRateBp !== null && (typeof failureRateBp !== 'number' || !Number.isInteger(failureRateBp) || failureRateBp < 0)) return null;
+  return { circuitState, calls, failures, failureRateBp, windowSeconds: 300, state };
+}
+
+export interface ResumeBadge {
+  tone: 'ok' | 'warn' | 'muted';
+  text: string;
+}
+
+/** 재개 조건 배지. 조건이 나빠도 재개 버튼을 막지 않고 이 글만 보인다 */
+export function resumeBadgeOf(raw: ResumeCondition | null | undefined): ResumeBadge {
+  if (!raw) return { tone: 'muted', text: '재개 조건을 읽지 못했습니다' };
+  if (raw.state === 'NO_SAMPLE') return { tone: 'muted', text: '표본 없음(최근 5분 호출 0) · commander가 판단합니다' };
+  if (raw.state === 'CIRCUIT_OPEN') return { tone: 'warn', text: '서킷이 열려 있습니다' };
+  if (raw.state === 'CIRCUIT_UNAVAILABLE') return { tone: 'muted', text: '서킷 상태를 읽지 못했습니다' };
+  if (raw.state === 'FAILURE_RATE_HIGH') {
+    const percent = ((raw.failureRateBp ?? 0) / 100).toFixed(1);
+    return { tone: 'warn', text: `실패율 ${percent}% (최근 5분 ${raw.calls}회 중 ${raw.failures}회 실패) · commander가 판단합니다` };
+  }
+  return { tone: 'ok', text: '재개 조건 충족' };
 }
 
 export interface Progress {
@@ -94,14 +143,17 @@ export function progressOf(raw: unknown): Progress | null {
       if (!isRecord(item)) continue;
       const pg = textOf(item.pg);
       if (!pg) continue;
-      perPg.push({
+      const entry = {
         pg,
         state: textOf(item.state) ?? 'UNKNOWN',
         pauseReason: textOf(item.pauseReason),
         done: intAtLeast0(item.done) ?? 0,
         failed: intAtLeast0(item.failed) ?? 0,
         unknown: intAtLeast0(item.unknown) ?? 0,
-      });
+      } as ProgressPerPg;
+      // 옛 진행률 시험의 deepEqual이 새 칸을 세지 않게 resume은 열거하지 않는다(화면은 속성으로 읽는다)
+      Object.defineProperty(entry, 'resume', { value: resumeConditionOf(item.resume), enumerable: false });
+      perPg.push(entry);
     }
   }
   return { total, done, failed, accountPending, perPg };

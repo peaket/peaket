@@ -27,6 +27,10 @@ export interface PayoutPaymentClient {
   listReceivables(filter: { limit: number }): Promise<unknown[]>;
   /** 보증금·이행보증보험 충당(payment-svc 내부). commander 재인증은 ops가 먼저 확인한다. */
   collectGuarantee(receivableId: string, input: { actor: string; sessionId: string; reauthToken?: string | undefined; idempotencyKey: string; reason: string }): Promise<unknown>;
+  /** 미수금 청구·회수·손실 수동 전이(F-07-15 I-01). payment 내부 경로 셋. 없으면 503 */
+  billReceivable?(receivableId: string, input: { actor: string; sessionId: string; reauthToken?: string | undefined; idempotencyKey: string; reason: string }): Promise<unknown>;
+  collectReceivable?(receivableId: string, input: { actor: string; sessionId: string; reauthToken?: string | undefined; idempotencyKey: string; reason: string; amount: number }): Promise<unknown>;
+  writeOffReceivable?(receivableId: string, input: { actor: string; sessionId: string; reauthToken?: string | undefined; idempotencyKey: string; reason: string }): Promise<unknown>;
   /** 결제사 서킷 상태(재개 조건 표시). payment-svc 내부 /internal/v1/circuits */
   listCircuits(): Promise<{ items: { pg: 'TOSS' | 'PORTONE' | 'SIMULATOR'; state: 'closed' | 'half_open' | 'open' }[] }>;
 }

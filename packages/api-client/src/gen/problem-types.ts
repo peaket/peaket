@@ -147,6 +147,8 @@ export type ProblemType =
   | 'invalid-placement'
   | 'invalid-priority-grant'
   | 'invalid-query'
+  | 'invalid-receivable-action'
+  | 'invalid-receivable-amount'
   | 'invalid-seat'
   | 'investigation-source-expired'
   | 'investigator-required'
@@ -290,6 +292,9 @@ export type ProblemType =
   | 'reauth-step-invalid'
   | 'reauth-unavailable'
   | 'recalculation-conflict'
+  | 'receivable-billing-not-due'
+  | 'receivable-not-billed'
+  | 'receivable-not-open'
   | 'recipient-not-found'
   | 'recommended-reason-required'
   | 'refresh-token-invalid'
@@ -557,6 +562,8 @@ export const PROBLEM_TYPES = {
   'invalid-placement': { status: 400, title: "기기 배치 입력이 올바르지 않습니다" },
   'invalid-priority-grant': { status: 400, title: "우선 구매 권리 요청이 올바르지 않습니다" },
   'invalid-query': { status: 400, title: "목록 조건이 올바르지 않습니다" },
+  'invalid-receivable-action': { status: 422, title: "미수금 전이 요청이 올바르지 않습니다" },
+  'invalid-receivable-amount': { status: 422, title: "회수 금액이 올바르지 않습니다" },
   'invalid-seat': { status: 422, title: "고를 수 없는 좌석이 있습니다" },
   'investigation-source-expired': { status: 410, title: "조사 원천 보존 기간이 끝났습니다" },
   'investigator-required': { status: 403, title: "부정 거래 조사관만 할 수 있습니다" },
@@ -700,6 +707,9 @@ export const PROBLEM_TYPES = {
   'reauth-step-invalid': { status: 410, title: "처음부터 다시 인증해 주세요" },
   'reauth-unavailable': { status: 503, title: "재인증 검증기를 쓸 수 없습니다" },
   'recalculation-conflict': { status: 409, title: "같은 요청 ID로 다른 회차·종류의 다시 계산이 있습니다" },
+  'receivable-billing-not-due': { status: 409, title: "미수금 발생 30일이 지나야 청구할 수 있습니다" },
+  'receivable-not-billed': { status: 409, title: "청구한 미수금이 아닙니다" },
+  'receivable-not-open': { status: 409, title: "열린 미수금이 아닙니다" },
   'recipient-not-found': { status: 404, title: "받을 수 있는 회원을 찾지 못했습니다" },
   'recommended-reason-required': { status: 422, title: "실패한 권고 항목의 사유를 적어 주세요" },
   'refresh-token-invalid': { status: 401, title: "다시 로그인해 주세요" },

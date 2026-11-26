@@ -256,6 +256,70 @@ export class PayoutApprovals {
     });
   }
 
+  async billReceivable(
+    receivableId: string,
+    input: { actor: OpsActor; reason: string; idempotencyKey: string; reauthToken: string | undefined },
+  ): Promise<unknown> {
+    return this.#receivableAction('BILLED', receivableId, input);
+  }
+
+  async collectReceivable(
+    receivableId: string,
+    input: { actor: OpsActor; reason: string; idempotencyKey: string; reauthToken: string | undefined; amount: number },
+  ): Promise<unknown> {
+    return this.#receivableAction('COLLECTED', receivableId, input);
+  }
+
+  async writeOffReceivable(
+    receivableId: string,
+    input: { actor: OpsActor; reason: string; idempotencyKey: string; reauthToken: string | undefined },
+  ): Promise<unknown> {
+    return this.#receivableAction('WRITE_OFF', receivableId, input);
+  }
+
+  async #receivableAction(
+    kind: 'BILLED' | 'COLLECTED' | 'WRITE_OFF',
+    receivableId: string,
+    input: { actor: OpsActor; reason: string; idempotencyKey: string; reauthToken: string | undefined; amount?: number },
+  ): Promise<unknown> {
+    if (input.reason.trim() === '') throw new PayoutApprovalProblem('invalid-body', 400, '사유가 필요합니다');
+    if (input.actor.role !== 'commander') throw new PayoutApprovalProblem('approval-role-required', 403, 'commander만 미수금을 옮길 수 있습니다');
+    let verified: { accountId: string; factors: string[] };
+    try {
+      verified = await this.d.reauth.verify(input.reauthToken, { sessionId: input.actor.sessionId, act: 'APPROVAL' });
+    } catch (e) {
+      if ((e as { status?: unknown }).status === 503) throw new PayoutApprovalProblem('reauth-unavailable', 503, '재인증을 확인하지 못했습니다');
+      throw new PayoutApprovalProblem('reauth-required', 403, '다시 인증해 주세요');
+    }
+    if (verified.accountId !== input.actor.accountId) throw new PayoutApprovalProblem('reauth-required', 403, '다시 인증해 주세요');
+    const base = {
+      actor: input.actor.accountId,
+      sessionId: input.actor.sessionId,
+      ...(input.reauthToken ? { reauthToken: input.reauthToken } : {}),
+      idempotencyKey: input.idempotencyKey,
+      reason: input.reason.trim(),
+    };
+    const payments = this.d.payments;
+    if ((kind === 'BILLED' && !payments.billReceivable) || (kind === 'COLLECTED' && !payments.collectReceivable) || (kind === 'WRITE_OFF' && !payments.writeOffReceivable)) {
+      throw new PayoutApprovalProblem('settlement-unavailable', 503, '정산 서비스를 쓸 수 없습니다');
+    }
+    const out =
+      kind === 'BILLED'
+        ? await payments.billReceivable!(receivableId, base)
+        : kind === 'COLLECTED'
+          ? await payments.collectReceivable!(receivableId, { ...base, amount: input.amount! })
+          : await payments.writeOffReceivable!(receivableId, base);
+    const result = out as { action?: { amount?: unknown }; amount?: unknown; receivable?: { promoterId?: unknown } };
+    await this.#audit(`RECEIVABLE_${kind === 'WRITE_OFF' ? 'WRITTEN_OFF' : kind}`, receivableId, input.actor.accountId, {
+      receivableId,
+      amount: result.action?.amount ?? result.amount ?? null,
+      reason: input.reason.trim(),
+      promoterId: result.receivable?.promoterId ?? null,
+      idempotencyKey: input.idempotencyKey,
+    }, this.d.clock.now());
+    return out;
+  }
+
   listStatements(filter: { kind?: string | undefined; status?: string | undefined; pg?: string | undefined; pgStore?: string | undefined; payoutDate?: string | undefined; limit: number }): Promise<unknown[]> {
     return this.d.payments.listStatements(filter);
   }

@@ -6,6 +6,7 @@ import { type Clock, type Database, type DbTransaction, systemClock, writeOutbox
 import type {
   AdjustmentInsertResult,
   GuaranteeCollectionAtomicInput,
+  ReceivableActionAtomicInput,
   OpsIntakeRow,
   PayoutBatchAtomicInput,
   PayoutWrite,
@@ -57,6 +58,7 @@ import {
 import {
   guaranteeCollection,
   partnerReceivable,
+  receivableAction,
   payout,
   payoutAccount,
   payoutAccountChange,
@@ -1453,6 +1455,67 @@ export class DrizzleSettlementStore implements SettlementStore {
   async hasWebhookEvent(eventId: string): Promise<boolean> {
     const rows = await this.db.db.select({ id: settlementWebhookReceipt.transmissionId }).from(settlementWebhookReceipt).where(eq(settlementWebhookReceipt.eventId, eventId)).limit(1);
     return rows.length > 0;
+  }
+
+  async findReceivableAction(idempotencyKey: string) {
+    const rows = await this.db.db.select().from(receivableAction).where(eq(receivableAction.idempotencyKey, idempotencyKey)).limit(1);
+    const r = rows[0];
+    return r
+      ? {
+          actionId: r.id,
+          idempotencyKey: r.idempotencyKey,
+          receivableId: r.receivableId,
+          promoterId: r.promoterId,
+          kind: r.kind as 'BILLED' | 'COLLECTED' | 'WRITE_OFF',
+          amount: r.amount,
+          remainingAfter: r.remainingAfter,
+          actor: r.actor,
+          reason: r.reason,
+          createdAt: r.createdAt,
+        }
+      : undefined;
+  }
+
+  async applyReceivableActionAtomically(input: ReceivableActionAtomicInput) {
+    let written = false;
+    await this.db.transaction(async (tx) => {
+      const locked = await tx.execute(sql`select id, remaining, status from partner_receivable where id = ${input.action.receivableId} for update`);
+      const row = (locked.rows as { id: string; remaining: number | string; status: string }[])[0];
+      if (!row || row.status !== input.expectedStatus || Number(row.remaining) !== input.expectedRemaining) return;
+      const already = await tx.select({ id: receivableAction.id }).from(receivableAction).where(eq(receivableAction.idempotencyKey, input.action.idempotencyKey)).limit(1);
+      if (already.length > 0) return;
+      await tx.insert(receivableAction).values({
+        id: input.action.actionId,
+        idempotencyKey: input.action.idempotencyKey,
+        receivableId: input.action.receivableId,
+        promoterId: input.action.promoterId,
+        kind: input.action.kind,
+        amount: input.action.amount,
+        remainingAfter: input.action.remainingAfter,
+        actor: input.action.actor,
+        reason: input.action.reason,
+        createdAt: input.action.createdAt,
+      });
+      if (input.movement) {
+        await tx.insert(receivableMoveCompat).values({
+          ...(input.movement.moveId ? { id: input.movement.moveId } : {}),
+          receivableId: input.movement.receivableId,
+          statementId: input.movement.statementId,
+          amount: input.movement.amount,
+          kind: input.movement.kind ?? 'OFFSET',
+          movedAt: input.movement.movedAt,
+        });
+      }
+      await tx
+        .update(partnerReceivable)
+        .set({ remaining: input.nextRemaining, status: input.nextStatus, updatedAt: input.updatedAt })
+        .where(eq(partnerReceivable.id, input.action.receivableId));
+      written = true;
+    });
+    if (!written) return undefined;
+    const receivable = await this.findReceivable(input.action.receivableId);
+    if (!receivable) return undefined;
+    return { receivable, action: input.action };
   }
 
   async recordWebhookEvent(o: { eventId: string; transmissionId: string; receivedAt: Date }): Promise<void> {

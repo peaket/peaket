@@ -44,6 +44,7 @@ export type {
   EventRefundStartInput,
   EventRefundStarter,
   EventSaleStopper,
+  PgCircuitReader,
   SaleSuspensionLookup,
 } from './domain/ports.js';
 export { EventCancellationsController } from './inbound/event-cancellations.controller.js';

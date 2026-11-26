@@ -4,6 +4,7 @@ import type {
   AdjustmentInsertResult,
   OpsIntakeRow,
   GuaranteeCollectionAtomicInput,
+  ReceivableActionAtomicInput,
   PayoutBatchAtomicInput,
   PayoutFactSnapshot,
   PayoutWrite,
@@ -41,6 +42,7 @@ import {
   type Pg,
   type PgBalanceReconciliationRecord,
   type PgStore,
+  type ReceivableActionRecord,
   type ReceivableMoveRecord,
   type ReceivableRecord,
   type RefundScanRecord,
@@ -97,6 +99,11 @@ export class MemorySettlementStore implements SettlementStore {
   readonly accounts = new Map<string, PayoutAccountRecord>();
   readonly receivables = new Map<string, ReceivableRecord>();
   readonly receivableMoves: ReceivableMoveRecord[] = [];
+  readonly receivableActions = new Map<string, ReceivableActionRecord>();
+  /** 시험 주입(0034): action/이동/상태 쓰기를 각각 실패시킨다 */
+  failReceivableAction = false;
+  failReceivableMovement = false;
+  failReceivableStatus = false;
   readonly guaranteeCollections = new Map<string, GuaranteeCollectionRecord>();
   /** 정산 웹훅 받음 기록(본문 eventId, payment 0029 settlement_webhook_receipt.event_id) */
   readonly webhookEvents = new Set<string>();
@@ -855,6 +862,24 @@ export class MemorySettlementStore implements SettlementStore {
     this.guaranteeCollections.set(input.collection.idempotencyKey, input.collection);
     this.receivableMoves.push({ ...input.move, kind: 'GUARANTEE' });
     this.receivables.set(r.receivableId, { ...r, remaining: input.receivable.remaining, status: input.receivable.status, updatedAt: input.receivable.updatedAt });
+  }
+
+  async findReceivableAction(idempotencyKey: string) {
+    return this.receivableActions.get(idempotencyKey);
+  }
+
+  async applyReceivableActionAtomically(input: ReceivableActionAtomicInput) {
+    if (this.failReceivableAction) throw new SettlementProblem('receivable-action-failed', 503, '미수금 전이를 쓰지 못했습니다');
+    if (this.receivableActions.has(input.action.idempotencyKey)) return undefined;
+    const r = this.receivables.get(input.action.receivableId);
+    if (!r || r.status !== input.expectedStatus || r.remaining !== input.expectedRemaining) return undefined;
+    if (input.movement && this.failReceivableMovement) throw new SettlementProblem('receivable-movement-failed', 503, '미수금 이동을 쓰지 못했습니다');
+    if (this.failReceivableStatus) throw new SettlementProblem('receivable-status-failed', 503, '미수금 상태를 쓰지 못했습니다');
+    this.receivableActions.set(input.action.idempotencyKey, input.action);
+    if (input.movement) this.receivableMoves.push(input.movement);
+    const next = { ...r, remaining: input.nextRemaining, status: input.nextStatus, updatedAt: input.updatedAt };
+    this.receivables.set(r.receivableId, next);
+    return { receivable: next, action: input.action };
   }
 
   // ---- F-07-7 포트원 지급대행·계좌 변경·사후 대사(payment 0030·0032) ----

@@ -24,7 +24,27 @@ const Progress = z.object({
   /** 가상계좌 계좌 대기 항목 수(있을 때만, BAT-420-rest 리뷰 반영 RV-05, R-T40 ⑤) */
   accountPending: z.number().int().optional(),
   perPg: z
-    .array(z.object({ pg: z.enum(PGS), state: z.string(), pauseReason: z.string().nullable().optional(), done: z.number().int(), failed: z.number().int(), unknown: z.number().int() }))
+    .array(
+      z.object({
+        pg: z.enum(PGS),
+        state: z.string(),
+        pauseReason: z.string().nullable().optional(),
+        done: z.number().int(),
+        failed: z.number().int(),
+        unknown: z.number().int(),
+        /** 최근 5분 재개 조건(F-07-15 I-06). 서킷을 읽지 못하면 circuitState null·CIRCUIT_UNAVAILABLE */
+        resume: z
+          .object({
+            circuitState: z.enum(['closed', 'half_open', 'open']).nullable(),
+            calls: z.number().int().min(0),
+            failures: z.number().int().min(0),
+            failureRateBp: z.number().int().min(0).nullable(),
+            windowSeconds: z.literal(300),
+            state: z.enum(['ELIGIBLE', 'NO_SAMPLE', 'FAILURE_RATE_HIGH', 'CIRCUIT_OPEN', 'CIRCUIT_UNAVAILABLE']),
+          })
+          .optional(),
+      }),
+    )
     .optional(),
 });
 

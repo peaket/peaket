@@ -15,11 +15,19 @@ import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
 import { refundAccountView } from '../model/state';
 import { RefundAccountForm } from './RefundAccountForm';
+import { RefundAccountLiveLoader } from './RefundAccountLiveLoader';
+
+/** 실제 취소 ID 꼴(UUID). 목업 지연 환급(rfd-…)과 가른다 */
+const CANCELLATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export async function RefundAccountPage({ params, searchParams }: PageProps<{ refundId: string }>) {
   const { refundId } = await params;
   const r = getDelayedRefund(refundId);
-  const order = r ? getOrder(r.orderId) : undefined;
+  if (!r) {
+    if (!CANCELLATION_ID.test(refundId)) notFound();
+    return <RefundAccountLiveLoader refundId={refundId} />;
+  }
+  const order = getOrder(r.orderId);
   const production = order?.productionId ? getProduction(order.productionId) : undefined;
   const perf = order?.performanceId ? getPerformance(order.performanceId) : undefined;
   if (!r || !order || !production || !perf) notFound();

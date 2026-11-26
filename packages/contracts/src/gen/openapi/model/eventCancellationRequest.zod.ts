@@ -15,6 +15,12 @@ export const eventCancellationRequestFanNoticeReasonMax = 200;
 
 export const eventCancellationRequestProgressAccountPendingMin = 0;
 
+export const eventCancellationRequestProgressPerPgItemResumeCallsMin = 0;
+
+export const eventCancellationRequestProgressPerPgItemResumeFailuresMin = 0;
+
+export const eventCancellationRequestProgressPerPgItemResumeFailureRateBpMin = 0;
+
 
 export const EventCancellationRequest = zod.object({
   "requestId": zod.string().optional(),
@@ -37,6 +43,14 @@ export const EventCancellationRequest = zod.object({
   "pauseReason": zod.union([zod.literal('AUTO_FAILURE_RATE'),zod.literal('AUTO_FAILED_AMOUNT'),zod.literal('AUTO_CONSECUTIVE_FAILURES'),zod.literal('AUTO_CIRCUIT_OPEN'),zod.literal('AUTO_REJECT_RATE'),zod.literal('MANUAL'),zod.literal(null)]).nullish().describe('PAUSED일 때만. AUTO_로 시작하면 스스로 멈춤'),
   "done": zod.int().optional(),
   "failed": zod.int().optional(),
+  "resume": zod.object({
+  "circuitState": zod.union([zod.literal('closed'),zod.literal('half_open'),zod.literal('open'),zod.literal(null)]).nullish(),
+  "calls": zod.int().min(eventCancellationRequestProgressPerPgItemResumeCallsMin).optional(),
+  "failures": zod.int().min(eventCancellationRequestProgressPerPgItemResumeFailuresMin).optional(),
+  "failureRateBp": zod.int().min(eventCancellationRequestProgressPerPgItemResumeFailureRateBpMin).nullish(),
+  "windowSeconds": zod.literal(300).optional(),
+  "state": zod.enum(['ELIGIBLE', 'NO_SAMPLE', 'FAILURE_RATE_HIGH', 'CIRCUIT_OPEN', 'CIRCUIT_UNAVAILABLE']).optional()
+}).optional().describe('SCR-047 결제사 몫의 재개 조건(F-07-15 I-06). calls=0이면 NO_SAMPLE, 서킷 open은 CIRCUIT_OPEN, 서킷을 읽지 못하면 CIRCUIT_UNAVAILABLE, 실패율 500bp 이상은 FAILURE_RATE_HIGH, 그 밖은 ELIGIBLE'),
   "unknown": zod.int().optional().describe('결과 모름으로 재시도 큐에 있는 건')
 })).optional().describe('결제사 몫마다의 진행과 멈춘 이유(transfer-refund §5, 추천 적용 2026-10-28, 기술 검토 중간-045)')
 }).optional(),

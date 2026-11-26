@@ -42,6 +42,11 @@ export interface CancellationRecord {
   readonly refundAccountIdemKey?: string;
   /** 그 키의 첫 답(같은 키 재요청은 같은 202·422를 준다, BAT-425 RV-03). 계좌 원문이 아니다 */
   readonly refundAccountAnswer?: RefundAccountAnswer;
+  /** 취소 상세 화면용(0039, F-07-15 I-03). 저장소가 order_cancellation에서 읽는다 */
+  readonly deductionBp?: number;
+  readonly deductionAmount?: number;
+  readonly reason?: string;
+  readonly createdAt?: Date;
 }
 
 /** 계좌 다시 받기의 저장한 답(202 REFUNDED·REFUND_PENDING, 422 REFUND_ACCOUNT_REQUIRED·REJECTED) */

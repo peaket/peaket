@@ -7,6 +7,7 @@ import type {
   CompensationOrder,
   EventCancellationRequest,
   EventRefundAttempt,
+  EventRefundAttemptOutcome,
   EventRefundFault,
   EventRefundItem,
   EventRefundKind,
@@ -93,6 +94,8 @@ export interface EventRefundStore {
 export interface EventRefundAttemptStore {
   record(attempt: EventRefundAttempt): Promise<void>;
   window(pg: RefundPgProvider, sinceMs: number): Promise<EventRefundWindowStats>;
+  /** 최근 시도(재개 조건, F-07-15 I-06): 호출·실패를 결제사별로 센다. REJECT는 어느 쪽도 아니다 */
+  recent(sinceMs: number): Promise<readonly { pg: RefundPgProvider; outcome: EventRefundAttemptOutcome; atMs: number }[]>;
   /** 결제사 전체의 1분 창. 업무 거절률은 작업 전체를 멈추므로 결제사 몫과 따로 센다 */
   windowAll(sinceMs: number): Promise<EventRefundWindowStats>;
   consecutiveFailures(pg: RefundPgProvider): Promise<number>;

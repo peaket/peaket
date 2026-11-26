@@ -2,7 +2,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { DATABASE, type Database } from '@peaket/platform';
 import { sql } from 'drizzle-orm';
-import type { EventRefundAttempt, EventRefundWindowStats, RefundPgProvider } from '../../domain/event-refund.js';
+import type { EventRefundAttempt, EventRefundAttemptOutcome, EventRefundWindowStats, RefundPgProvider } from '../../domain/event-refund.js';
 import type { EventRefundAttemptStore } from '../../domain/event-refund-ports.js';
 
 interface StatsRow {
@@ -49,6 +49,19 @@ export class DrizzleEventRefundAttempts implements EventRefundAttemptStore {
         from event_refund_attempt
        where attempted_at >= ${new Date(sinceMs)}::timestamptz`);
     return statsOf(r.rows[0] as unknown as StatsRow);
+  }
+
+  async recent(sinceMs: number): Promise<readonly { pg: RefundPgProvider; outcome: EventRefundAttemptOutcome; atMs: number }[]> {
+    const r = await this.database.db.execute(sql`
+      select pg, outcome, attempted_at
+        from event_refund_attempt
+       where attempted_at > ${new Date(sinceMs)}::timestamptz
+       order by attempted_at asc`);
+    return (r.rows as unknown as { pg: RefundPgProvider; outcome: EventRefundAttemptOutcome; attempted_at: Date | string }[]).map((row) => ({
+      pg: row.pg,
+      outcome: row.outcome,
+      atMs: row.attempted_at instanceof Date ? row.attempted_at.getTime() : new Date(row.attempted_at).getTime(),
+    }));
   }
 
   async consecutiveFailures(pg: RefundPgProvider): Promise<number> {

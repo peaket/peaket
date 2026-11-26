@@ -12,6 +12,7 @@
 import type { EventCancellationRequestProgressPerPgItemPauseReason } from './eventCancellationRequestProgressPerPgItemPauseReason';
 import type { EventCancellationRequestProgressPerPgItemPg } from './eventCancellationRequestProgressPerPgItemPg';
 import type { EventCancellationRequestProgressPerPgItemState } from './eventCancellationRequestProgressPerPgItemState';
+import type { ResumeCondition } from './resumeCondition';
 
 export type EventCancellationRequestProgressPerPgItem = {
   pg?: EventCancellationRequestProgressPerPgItemPg;
@@ -23,6 +24,7 @@ export type EventCancellationRequestProgressPerPgItem = {
   pauseReason?: EventCancellationRequestProgressPerPgItemPauseReason;
   done?: number;
   failed?: number;
+  resume?: ResumeCondition;
   /** 결과 모름으로 재시도 큐에 있는 건 */
   unknown?: number;
 };

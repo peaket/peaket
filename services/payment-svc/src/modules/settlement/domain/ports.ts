@@ -30,6 +30,7 @@ import type {
   PgStore,
   ProductSettlementItem,
   ReceivableMoveRecord,
+  ReceivableActionRecord,
   ReceivableRecord,
   ReceivableStatus,
   SettlementEventValue,
@@ -173,6 +174,17 @@ export interface GuaranteeCollectionAtomicInput {
   collection: GuaranteeCollectionRecord;
   move: ReceivableMoveRecord;
   receivable: Pick<ReceivableRecord, 'receivableId' | 'remaining' | 'status' | 'updatedAt'>;
+}
+
+/** 청구·회수·손실 한 건(0034, F-07-15 I-01): action·(회수·손실이면) 이동·미수금 상태를 한 트랜잭션에 쓴다 */
+export interface ReceivableActionAtomicInput {
+  action: ReceivableActionRecord;
+  expectedStatus: 'OPEN' | 'BILLED';
+  expectedRemaining: number;
+  movement?: ReceivableMoveRecord;
+  nextRemaining: number;
+  nextStatus: 'BILLED' | 'CLOSED' | 'WRITTEN_OFF';
+  updatedAt: Date;
 }
 
 /** core-svc 지금 계약 조건(보증 비율·종류). 없으면 undefined. payment-svc는 계약 없이 보증을 만들지 않는다. */
@@ -541,6 +553,10 @@ export interface SettlementStore {
   findGuaranteeCollection(idempotencyKey: string): Promise<GuaranteeCollectionRecord | undefined>;
   /** 보증 이동·남은 금액·상태를 한 트랜잭션에 쓴다. 같은 미수금의 동시 충당은 행 잠금으로 직렬화한다. */
   collectGuaranteeAtomically(input: GuaranteeCollectionAtomicInput): Promise<void>;
+  /** 미수금 수동 전이의 멱등 기록(0034, F-07-15 I-01) */
+  findReceivableAction(idempotencyKey: string): Promise<ReceivableActionRecord | undefined>;
+  /** action·(회수·손실이면) 이동·미수금 상태를 한 트랜잭션에 쓴다. 조건이 다르면 undefined */
+  applyReceivableActionAtomically(input: ReceivableActionAtomicInput): Promise<{ receivable: ReceivableRecord; action: ReceivableActionRecord } | undefined>;
   /** 그 파트너의 토스 지급 예정 정산서 합계(지급일 [from, to]). KYC 예고가 쓴다. */
   sumScheduledTossPayouts(promoterId: string, from: string, to: string): Promise<number>;
   /** 같은 지급일·결제사·상점의 HELD 정산서(SCR-049 제외 목록). */

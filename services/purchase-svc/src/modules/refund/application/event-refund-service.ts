@@ -473,7 +473,27 @@ export class EventRefundService {
     if (!request) throw new EventRefundError('NOT_FOUND', '회차 취소 요청을 찾을 수 없습니다');
     const items = await this.o.store.items(requestId);
     const paused = pausedOf(request);
-    return { ...request, progress: progressOf(items, paused, this.#windowOpen(request)) };
+    let progress: EventRefundProgress = progressOf(items, paused, this.#windowOpen(request));
+    if (this.o.attempts) {
+      try {
+        const recent = await this.o.attempts.recent(this.o.nowMs() - 300_000);
+        const counts = new Map<string, { calls: number; failures: number }>();
+        for (const a of recent) {
+          if (a.outcome === 'REJECT') continue;
+          const c = counts.get(a.pg) ?? { calls: 0, failures: 0 };
+          c.calls += 1;
+          if (a.outcome === 'FAILURE' || a.outcome === 'UNKNOWN') c.failures += 1;
+          counts.set(a.pg, c);
+        }
+        progress = {
+          ...progress,
+          perPg: progress.perPg.map((p) => ({ ...p, recentCalls: counts.get(p.pg)?.calls ?? 0, recentFailures: counts.get(p.pg)?.failures ?? 0 })),
+        };
+      } catch (err) {
+        this.o.log?.warn({ requestId, err: err instanceof Error ? err.message : 'unknown' }, 'event-refund-recent-attempts-failed');
+      }
+    }
+    return { ...request, progress };
   }
 
   async pause(i: EventRefundPauseInput): Promise<EventCancellationRequest> {

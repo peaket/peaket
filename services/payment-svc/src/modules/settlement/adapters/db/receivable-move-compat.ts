@@ -7,7 +7,7 @@ import { bigint, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 export const receivableMoveCompat = pgTable('receivable_move', {
   id: uuid('id').defaultRandom().primaryKey(),
   receivableId: uuid('receivable_id').notNull(),
-  statementId: uuid('statement_id').notNull(),
+  statementId: uuid('statement_id'),
   amount: bigint('amount', { mode: 'number' }).notNull(),
   kind: text('kind').notNull().default('OFFSET'),
   movedAt: timestamp('moved_at', { withTimezone: true, mode: 'date' }).notNull(),

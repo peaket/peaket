@@ -258,6 +258,18 @@ export const purchaseV1Refund: Record<string, unknown> = {
                     "not_applied_orders": {
                       "type": "int32",
                       "id": 7
+                    },
+                    "recent_calls": {
+                      "type": "int32",
+                      "id": 8
+                    },
+                    "recent_failures": {
+                      "type": "int32",
+                      "id": 9
+                    },
+                    "recent_window_seconds": {
+                      "type": "int32",
+                      "id": 10
                     }
                   }
                 },

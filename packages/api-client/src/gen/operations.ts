@@ -109,7 +109,10 @@ export type OperationId =
   | 'createOpsPlace'
   | 'createOpsPromoter'
   | 'createOpsPromoterContractTermChange'
+  | 'createOpsReceivableBilling'
+  | 'createOpsReceivableCollection'
   | 'createOpsReceivableGuaranteeCollection'
+  | 'createOpsReceivableWriteOff'
   | 'createOpsResearchExport'
   | 'createOpsReviewModeration'
   | 'createOpsSaleReviewApproval'
@@ -219,6 +222,7 @@ export type OperationId =
   | 'deletePushSubscription'
   | 'deleteReview'
   | 'getAppeal'
+  | 'getCancellation'
   | 'getCompensation'
   | 'getEvent'
   | 'getEventReviewEligibility'
@@ -518,7 +522,10 @@ export const OPERATIONS = {
   createOpsPlace: {operationId: "createOpsPlace",method: "POST",path: "/v1/ops/places",host: "ops-api",kind: "write",cookie: true},
   createOpsPromoter: {operationId: "createOpsPromoter",method: "POST",path: "/v1/ops/promoters",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsPromoterContractTermChange: {operationId: "createOpsPromoterContractTermChange",method: "POST",path: "/v1/ops/promoters/{promoterId}/contract-term-changes",host: "ops-api",kind: "write",idempotent: true,cookie: true},
+  createOpsReceivableBilling: {operationId: "createOpsReceivableBilling",method: "POST",path: "/v1/ops/receivables/{receivableId}/billing",host: "ops-api",kind: "write",idempotent: true,cookie: true},
+  createOpsReceivableCollection: {operationId: "createOpsReceivableCollection",method: "POST",path: "/v1/ops/receivables/{receivableId}/collections",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsReceivableGuaranteeCollection: {operationId: "createOpsReceivableGuaranteeCollection",method: "POST",path: "/v1/ops/receivables/{receivableId}/guarantee-collections",host: "ops-api",kind: "write",idempotent: true,cookie: true},
+  createOpsReceivableWriteOff: {operationId: "createOpsReceivableWriteOff",method: "POST",path: "/v1/ops/receivables/{receivableId}/write-offs",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsResearchExport: {operationId: "createOpsResearchExport",method: "POST",path: "/v1/ops/research-exports",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsReviewModeration: {operationId: "createOpsReviewModeration",method: "POST",path: "/v1/ops/reviews/{reviewId}/moderation",host: "ops-api",kind: "write",cookie: true},
   createOpsSaleReviewApproval: {operationId: "createOpsSaleReviewApproval",method: "POST",path: "/v1/ops/sale-reviews/{productionId}/approvals",host: "ops-api",kind: "write",cookie: true},
@@ -628,6 +635,7 @@ export const OPERATIONS = {
   deletePushSubscription: {operationId: "deletePushSubscription",method: "DELETE",path: "/v1/push-subscriptions/{subscriptionKey}",host: "api",kind: "write",cookie: true},
   deleteReview: {operationId: "deleteReview",method: "DELETE",path: "/v1/reviews/{reviewId}",host: "api",kind: "write",cookie: true},
   getAppeal: {operationId: "getAppeal",method: "GET",path: "/v1/appeals/{appealId}",host: "api",kind: "read",cookie: true},
+  getCancellation: {operationId: "getCancellation",method: "GET",path: "/v1/cancellations/{cancellationId}",host: "api",kind: "read",cookie: true},
   getCompensation: {operationId: "getCompensation",method: "GET",path: "/v1/compensations/{compensationId}",host: "api",kind: "read",cookie: true},
   getEvent: {operationId: "getEvent",method: "GET",path: "/v1/events/{eventId}",host: "api",kind: "read",cookie: false},
   getEventReviewEligibility: {operationId: "getEventReviewEligibility",method: "GET",path: "/v1/events/{eventId}/review-eligibility",host: "api",kind: "read",cookie: true},

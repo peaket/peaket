@@ -379,9 +379,9 @@ const noticeOf = (r: NoticeRow): EventRefundSettlementNotice => ({
 async function insertCompensations(tx: DbTransaction, rows: readonly CompensationRow[]): Promise<void> {
   for (const c of rows) {
     await tx.execute(sql`
-      insert into compensation (id, event_cancellation_request_id, order_id, event_id, account_id, promoter_id, base_amount, amount, status, account_last4, transfer_id, receivable_id, failure_reason, created_at, updated_at)
+      insert into compensation (id, event_cancellation_request_id, order_id, event_id, account_id, promoter_id, base_amount, amount, status, account_last4, transfer_id, receivable_id, failure_reason, account_notice_count, account_notice_next_at, created_at, updated_at)
       values (${c.id}::uuid, ${c.eventCancellationRequestId}::uuid, ${c.orderId}::uuid, ${c.eventId}::uuid, ${c.accountId}::uuid, ${c.promoterId ?? null}::uuid,
-              ${c.baseAmount}, ${c.amount}, 'ACCOUNT_PENDING', null, null, null, null,
+              ${c.baseAmount}, ${c.amount}, 'ACCOUNT_PENDING', null, null, null, null, 0, ${new Date(c.createdAtMs)}::timestamptz,
               ${new Date(c.createdAtMs)}::timestamptz, ${new Date(c.updatedAtMs)}::timestamptz)
       on conflict (event_cancellation_request_id, order_id) do nothing`);
   }

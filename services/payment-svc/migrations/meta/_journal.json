@@ -232,6 +232,13 @@
       "when": 1795428197449,
       "tag": "0033_settlement_event_recalculation",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795750000000,
+      "tag": "0034_receivable_actions",
+      "breakpoints": true
     }
   ]
 }

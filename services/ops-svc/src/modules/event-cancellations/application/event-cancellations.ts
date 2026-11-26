@@ -45,6 +45,7 @@ import {
   type EventRefundHolds,
   type EventCancellationInsert,
   type PartnerEventCancellationStore,
+  type PgCircuitReader,
   CORE_APPLY_BATCH,
   CORE_APPLY_OVERDUE_MS,
   CORE_APPLY_REJECTED_RETRY_MS,
@@ -53,6 +54,7 @@ import {
   type CoreEventStatus,
   CoreEventStatusRejected,
 } from '../domain/ports.js';
+import { resumeConditionOf } from '../domain/resume-condition.js';
 
 const audit = (recordType: string, recordId: string, payload: Record<string, unknown>, nowMs: number): AuditRecord => ({ recordType, recordId, payload, nowMs });
 /** 모든 회차 취소 감사에 싣는 원본 대조용 고정 값(사유·회차·종류·요청자) */
@@ -104,6 +106,8 @@ export interface EventCancellationExtra {
   readonly suspension?: SaleSuspensionLookup;
   readonly stopper?: EventSaleStopper;
   readonly reader?: EventRefundReader;
+  /** payment 서킷 상태(재개 조건, F-07-15 I-06). 없거나 실패하면 CIRCUIT_UNAVAILABLE */
+  readonly circuits?: PgCircuitReader;
   readonly owners?: EventOwnerLookup;
   readonly cases?: EventCancellationCases;
   /** 요청 전 미룸 걸기·판정·확정 때 늘리기·판정 전 반려 때 풀기(BAT-420 몫 D). 없으면 CANCEL 요청·판정·확정이 503이다 */
@@ -264,8 +268,43 @@ export class EventCancellations {
     const title = await this.#eventTitle(r.eventId);
     if (!PROGRESS_STATUSES.has(r.status) || !this.extra.reader) return eventCancellationDetailView(r, undefined, title);
     const job = await this.#job(r.requestId);
+    let circuits: Map<string, 'closed' | 'half_open' | 'open'> | undefined;
+    if (job && this.extra.circuits) {
+      try {
+        const c = this.extra.circuits;
+        const listed = c.list ? await c.list() : c.listCircuits ? await c.listCircuits() : undefined;
+        if (!listed) throw new Error('서킷 조회기를 찾지 못했습니다');
+        circuits = new Map(listed.items.map((x) => [x.pg, x.state]));
+      } catch {
+        circuits = new Map();
+      }
+    }
     const progress: EventCancellationProgress = job
-      ? { state: job.state, total: job.total, done: job.done, failed: job.failed, ...(job.accountPending !== undefined ? { accountPending: job.accountPending } : {}), perPg: job.perPg.map((p) => ({ pg: p.pg, state: p.state, ...(p.pauseReason !== undefined ? { pauseReason: p.pauseReason } : {}), done: p.done, failed: p.failed, unknown: p.unknown })) }
+      ? {
+          state: job.state,
+          total: job.total,
+          done: job.done,
+          failed: job.failed,
+          ...(job.accountPending !== undefined ? { accountPending: job.accountPending } : {}),
+          perPg: job.perPg.map((p) => ({
+            pg: p.pg,
+            state: p.state,
+            ...(p.pauseReason !== undefined ? { pauseReason: p.pauseReason } : {}),
+            done: p.done,
+            failed: p.failed,
+            unknown: p.unknown,
+            ...(circuits
+              ? {
+                  resume: resumeConditionOf({
+                    pg: p.pg,
+                    calls: p.recentCalls ?? 0,
+                    failures: p.recentFailures ?? 0,
+                    circuitState: circuits.get(p.pg) ?? null,
+                  }),
+                }
+              : {}),
+          })),
+        }
       : { state: r.refundJobState ?? r.status };
     return eventCancellationDetailView(r, progress, title);
   }

@@ -54,6 +54,27 @@ export class HttpPayoutPaymentClient implements PayoutPaymentClient, SettlementP
     );
   }
 
+  async billReceivable(receivableId: string, input: { actor: string; sessionId: string; reauthToken?: string | undefined; idempotencyKey: string; reason: string }) {
+    return this.#json<unknown>(
+      await this.#client.request({ method: 'POST', path: `/internal/v1/settlements/receivables/${receivableId}/billing`, headers: headers(this.token), body: JSON.stringify(input), timeoutCapMs: 10_000 }),
+      '미수금 청구를 저장하지 못했습니다',
+    );
+  }
+
+  async collectReceivable(receivableId: string, input: { actor: string; sessionId: string; reauthToken?: string | undefined; idempotencyKey: string; reason: string; amount: number }) {
+    return this.#json<unknown>(
+      await this.#client.request({ method: 'POST', path: `/internal/v1/settlements/receivables/${receivableId}/collections`, headers: headers(this.token), body: JSON.stringify(input), timeoutCapMs: 10_000 }),
+      '미수금 회수를 저장하지 못했습니다',
+    );
+  }
+
+  async writeOffReceivable(receivableId: string, input: { actor: string; sessionId: string; reauthToken?: string | undefined; idempotencyKey: string; reason: string }) {
+    return this.#json<unknown>(
+      await this.#client.request({ method: 'POST', path: `/internal/v1/settlements/receivables/${receivableId}/write-offs`, headers: headers(this.token), body: JSON.stringify(input), timeoutCapMs: 10_000 }),
+      '미수금 손실 처리를 저장하지 못했습니다',
+    );
+  }
+
   async approveBatch(batchId: string, approvalId: string) {
     return this.#json<PayoutBatchView>(
       await this.#client.request({ method: 'POST', path: `/internal/v1/settlements/payout-batches/${batchId}/approvals`, headers: headers(this.token), body: JSON.stringify({ approvalId }), timeoutCapMs: 10_000 }),

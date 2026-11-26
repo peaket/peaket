@@ -16,6 +16,7 @@ import type {
   EventRefundStarter,
   EventSaleStopper,
   PartnerEventCancellationStore,
+  PgCircuitReader,
   SaleSuspensionLookup,
 } from './domain/ports.js';
 import { EventCancellationsController } from './inbound/event-cancellations.controller.js';
@@ -35,6 +36,8 @@ export interface EventCancellationsModuleDeps {
   readonly stopper?: EventSaleStopper;
   /** 미리보기·진행률 읽기. 없으면 판정이 503 event-refund-unavailable(JUDGED에 남음)이다 */
   readonly reader?: EventRefundReader;
+  /** payment 서킷 상태(재개 조건, F-07-15 I-06) */
+  readonly circuits?: PgCircuitReader;
   /** 파트너 소속 확인(core 판매 설정). 없으면 파트너 경로가 503 authz-unavailable이다 */
   readonly owners?: EventOwnerLookup;
   /** CS 처리함 '판정 대기' 건 */
@@ -72,6 +75,7 @@ export class EventCancellationsModule {
               ...(deps.suspension ? { suspension: deps.suspension } : {}),
               ...(deps.stopper ? { stopper: deps.stopper } : {}),
               ...(deps.reader ? { reader: deps.reader } : {}),
+        ...(deps.circuits ? { circuits: deps.circuits } : {}),
               ...(deps.owners ? { owners: deps.owners } : {}),
               ...(deps.cases ? { cases: deps.cases } : {}),
               ...(deps.holds ? { holds: deps.holds } : {}),

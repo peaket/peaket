@@ -84,7 +84,7 @@ export interface EventRefundJobProgress {
   readonly failed: number;
   /** 계좌 대기 항목 수(GetEventRefundJob.account_pending_orders, 0이면 싣지 않는다, BAT-420-rest 리뷰 반영 RV-05) */
   readonly accountPending?: number;
-  readonly perPg: readonly { readonly pg: EventCancellationPg; readonly state: string; readonly pauseReason?: string; readonly done: number; readonly failed: number; readonly unknown: number }[];
+  readonly perPg: readonly { readonly pg: EventCancellationPg; readonly state: string; readonly pauseReason?: string; readonly done: number; readonly failed: number; readonly unknown: number; readonly recentCalls?: number; readonly recentFailures?: number }[];
   readonly appliedOrders?: number;
   /** ISO 8601 */
   readonly refundWindowClosesAt?: string;
@@ -98,6 +98,12 @@ export interface EventRefundReader {
    * 그 밖의 실패(UNAVAILABLE·시간 초과 등)는 던진다(없음으로 보지 않는다)
    */
   job(q: { requestId: string }): Promise<EventRefundJobProgress | undefined>;
+}
+
+/** payment-svc 내부 /internal/v1/circuits(재개 조건 표시, F-07-15 I-06). 실패는 던진다. list는 시험 대역 이름 */
+export interface PgCircuitReader {
+  list?(): Promise<{ items: { pg: EventCancellationPg; state: 'closed' | 'half_open' | 'open' }[] }>;
+  listCircuits?(): Promise<{ items: { pg: EventCancellationPg; state: 'closed' | 'half_open' | 'open' }[] }>;
 }
 
 /** core-svc 내부 판매 설정(GET /internal/v1/events/{eventId}/sale-config). 없으면 undefined, 실패는 던진다 */

@@ -14,10 +14,18 @@ import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
 import { compensationView } from '../model/state';
 import { CompensationAccountForm } from './CompensationAccountForm';
+import { CompensationLiveLoader } from './CompensationLiveLoader';
+
+/** 실제 배상 ID 꼴(UUID). 목업 배상(cmp-…)과 가른다 */
+const COMPENSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export async function CompensationPage({ params, searchParams }: PageProps<{ id: string }>) {
-  const { id } = await params;
-  const c = getCompensation(id);
+  const { id: compensationId } = await params;
+  const c = getCompensation(compensationId);
+  if (!c) {
+    if (!COMPENSATION_ID.test(compensationId)) notFound();
+    return <CompensationLiveLoader compensationId={compensationId} />;
+  }
   const production = c ? getProduction(c.productionId) : undefined;
   const perf = c ? getPerformance(c.performanceId) : undefined;
   if (!c || !production || !perf) notFound();
@@ -131,7 +139,7 @@ export async function CompensationPage({ params, searchParams }: PageProps<{ id:
           ) : null}
         </div>
       </main>
-      <PreviewSwitcher path={`/my/compensations/${id}`} states={SCR043_STATES} current={state} keep={{ theme: dark ? 'dark' : undefined }} />
+      <PreviewSwitcher path={`/my/compensations/${compensationId}`} states={SCR043_STATES} current={state} keep={{ theme: dark ? 'dark' : undefined }} />
     </AppShell>
   );
 }

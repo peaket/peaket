@@ -115,6 +115,7 @@ export {
 } from './domain/compensation.js';
 export { Compensations, RequestCompensationAccount, type RequestCompensationAccountDeps, type RequestCompensationAccountInput } from './application/compensations.js';
 export { InvalidRefundAccount, REFUND_ACCOUNT_RETRY_DELAY_MS, RequestRefundAccount, type RequestRefundAccountInput } from './application/request-refund-account.js';
+export { GetCancellationDetail, type CancellationDetail } from './application/get-cancellation-detail.js';
 export { CancellationAccountController, CompensationController } from './inbound/compensation.controller.js';
 export { RedisSeatReturnNotices } from './adapters/redis-seat-returns.js';
 export { CancelTicket, zeroDeductionFor, type CancelTicketInput } from './application/cancel-ticket.js';
@@ -130,6 +131,9 @@ export { JwksFanReauthGate, type FanReauthResult, type ReauthRejectReason } from
 export { eventStartsAtOf, QuoteCancellation, type CancellationQuoteView, type QuoteCancellationInput, type QuoteCancellationResult } from './application/quote-cancellation.js';
 export { RefundAfterEntry, type RefundAfterEntryDeps, refundAfterEntryTask } from './application/refund-after-entry.js';
 export { REFUND_RETRY_TICK_MS, RefundRetryLoop, type RefundRetryLoopDeps, type RefundRetryTick } from './application/refund-retry-loop.js';
+export { AccountRequestNotices, type AccountNoticeCodec, type AccountNoticeRow, type AccountNoticeSource, type AccountRequestNoticesDeps } from './application/account-request-notices.js';
+export { accountNoticeKey, nextAccountNoticeAt, type AccountNoticeCalendar } from './domain/account-request.js';
+export { DrizzleAccountNoticeSource } from './adapters/db/drizzle-account-notice-source.js';
 export {
   ENTRY_CLOSE_DUE_EVERY_MS,
   ENTRY_CLOSE_DUE_LIMIT,

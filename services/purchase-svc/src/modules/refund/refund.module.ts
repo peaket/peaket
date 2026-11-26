@@ -7,11 +7,13 @@ import { Compensations, RequestCompensationAccount } from './application/compens
 import { EventRefundService } from './application/event-refund-service.js';
 import { QuoteCancellation } from './application/quote-cancellation.js';
 import { RequestRefundAccount } from './application/request-refund-account.js';
+import { GetCancellationDetail } from './application/get-cancellation-detail.js';
 import { REAUTH_GATE, type CancellationOrders, type CancellationWrites, type CompensationCaseNotice, type CompensationStore, type CompensationTransfer, type EventCancellationLookup, type PaymentCancellations, type PaymentMethodLookup, type ReauthGate, type RefundAccountWrites, type SeatReturns, type TicketCancellations } from './domain/ports.js';
 import type { BusinessCalendar } from './domain/refund-policy.js';
 import { CancellationAccountController, CompensationController } from './inbound/compensation.controller.js';
 import { EventRefundController } from './inbound/event-refund.controller.js';
 import { TicketCancellationController, unavailableReauth } from './inbound/ticket-cancellation.controller.js';
+import { CancellationDetailController } from './inbound/cancellation-detail.controller.js';
 
 export interface RefundModuleDeps {
   orders: CancellationOrders;
@@ -104,9 +106,14 @@ export class RefundModule {
             },
           ]
         : []),
+      {
+        provide: GetCancellationDetail,
+        useFactory: () => new GetCancellationDetail({ orders: deps.orders }),
+      },
     ];
     const controllers = [
       TicketCancellationController,
+      CancellationDetailController,
       ...(deps.eventRefund ? [EventRefundController] : []),
       ...(deps.refundAccountWrites ? [CancellationAccountController] : []),
       ...(deps.compensationStore && deps.compensationTransfer ? [CompensationController] : []),

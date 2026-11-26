@@ -211,6 +211,9 @@ export const compensation = pgTable(
     receivableId: uuid('receivable_id'),
     /** FAILED의 개인정보 없는 까닭 이름표 */
     failureReason: text('failure_reason'),
+    /** 배상 계좌 입력 요청을 보낸 횟수와 다음 시각(0039, F-07-15 I-02) */
+    accountNoticeCount: integer('account_notice_count').notNull().default(0),
+    accountNoticeNextAt: at('account_notice_next_at'),
     createdAt: at('created_at').notNull(),
     updatedAt: at('updated_at').notNull(),
   },
@@ -225,5 +228,7 @@ export const compensation = pgTable(
     check('compensation_receivable_check', sql`${t.receivableId} is null or ${t.status} = 'PAID'`),
     // 송금 결과 확정 바퀴가 REQUESTED만 읽는다(F-07-8 I-06, transfer-refund §6 '송금 결과 확정')
     index('compensation_requested_idx').on(t.status).where(sql`${t.status} = 'REQUESTED'`),
+    // 배상 계좌 입력 요청 대상(0039, F-07-15). ACCOUNT_PENDING이고 다음 요청 시각이 된 행만 센다
+    index('compensation_account_notice_due_idx').on(t.accountNoticeNextAt).where(sql`${t.status} = 'ACCOUNT_PENDING'`),
   ],
 );

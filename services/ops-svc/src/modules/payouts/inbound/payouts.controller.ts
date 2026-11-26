@@ -3,6 +3,7 @@ import { Body, Controller, Get, Header, Headers, HttpCode, Inject, Param, Post, 
 import { ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, type Principal, ProblemError, Roles } from '@peaket/platform';
 import { z } from 'zod';
 import { PayoutApprovals, type OpsActor } from '../application/payout-approvals.js';
+import { PayoutApprovalProblem } from '../domain/payout-approval.js';
 import { PAYOUT_PAYMENT_CLIENT, type PayoutPaymentClient } from '../domain/ports.js';
 
 const BatchBody = z
@@ -16,6 +17,26 @@ const BatchBody = z
 const BatchParams = z.object({ batchId: z.string().min(1) });
 const PortoneBody = z.object({ bulkPayoutId: z.string().min(1) });
 const ReceivableParams = z.object({ receivableId: z.string().min(1) });
+const ReceivableActionBody = z.object({ reason: z.string().min(1).max(2_000) }).strict();
+const ReceivableCollectionBody = z.object({ amount: z.number().int().positive(), reason: z.string().min(1).max(2_000) }).strict();
+const ReceivableActionView = z.object({
+  actionId: z.string(),
+  kind: z.enum(['BILLED', 'COLLECTED', 'WRITE_OFF']),
+  amount: z.number().int(),
+  remainingAfter: z.number().int(),
+  createdAt: z.string(),
+  receivable: z.unknown(),
+});
+
+/** 새 수동 전이 응용은 PayoutApprovalProblem을 그대로 던진다(시험 대조). HTTP에서는 Problem으로 바꾼다 */
+const asProblem = async <T>(fn: () => Promise<T>): Promise<T> => {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof PayoutApprovalProblem) throw new ProblemError({ type: e.type, status: e.status, title: e.title });
+    throw e;
+  }
+};
 const GuaranteeBody = z.object({ reason: z.string().min(1).max(2_000) }).strict();
 const StatementParams = z.object({ statementId: z.string().min(1).max(64) });
 /** openapi createOpsSettlementDisputeDismissal 본문. 길이(1~2,000자)는 유스케이스가 본다(400) */
@@ -120,6 +141,51 @@ export class PayoutsController {
   ) {
     if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 128) throw new ProblemError({ type: 'idempotency-key-invalid', status: 400, title: '멱등 키(Idempotency-Key)가 없거나 형식이 맞지 않습니다' });
     return this.approvals.collectGuarantee(params.receivableId, { actor: actorOf(me), reason: body.reason, idempotencyKey, reauthToken });
+  }
+
+  @Post('receivables/:receivableId/billing')
+  @HttpCode(200)
+  @Roles(['commander'])
+  @ContractRouteSchema({ params: ReceivableParams, body: ReceivableActionBody, responses: { 200: ReceivableActionView } })
+  async billReceivable(
+    @ContractParams(ReceivableParams) params: z.output<typeof ReceivableParams>,
+    @ContractBody(ReceivableActionBody) body: z.output<typeof ReceivableActionBody>,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Headers('x-reauth-token') reauthToken: string | undefined,
+    @CurrentPrincipal() me: Principal,
+  ) {
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 128) throw new ProblemError({ type: 'idempotency-key-invalid', status: 400, title: '멱등 키(Idempotency-Key)가 없거나 형식이 맞지 않습니다' });
+    return asProblem(() => this.approvals.billReceivable(params.receivableId, { actor: actorOf(me), reason: body.reason, idempotencyKey, reauthToken }));
+  }
+
+  @Post('receivables/:receivableId/collections')
+  @HttpCode(200)
+  @Roles(['commander'])
+  @ContractRouteSchema({ params: ReceivableParams, body: ReceivableCollectionBody, responses: { 200: ReceivableActionView } })
+  async collectReceivable(
+    @ContractParams(ReceivableParams) params: z.output<typeof ReceivableParams>,
+    @ContractBody(ReceivableCollectionBody) body: z.output<typeof ReceivableCollectionBody>,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Headers('x-reauth-token') reauthToken: string | undefined,
+    @CurrentPrincipal() me: Principal,
+  ) {
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 128) throw new ProblemError({ type: 'idempotency-key-invalid', status: 400, title: '멱등 키(Idempotency-Key)가 없거나 형식이 맞지 않습니다' });
+    return asProblem(() => this.approvals.collectReceivable(params.receivableId, { actor: actorOf(me), reason: body.reason, amount: body.amount, idempotencyKey, reauthToken }));
+  }
+
+  @Post('receivables/:receivableId/write-offs')
+  @HttpCode(200)
+  @Roles(['commander'])
+  @ContractRouteSchema({ params: ReceivableParams, body: ReceivableActionBody, responses: { 200: ReceivableActionView } })
+  async writeOffReceivable(
+    @ContractParams(ReceivableParams) params: z.output<typeof ReceivableParams>,
+    @ContractBody(ReceivableActionBody) body: z.output<typeof ReceivableActionBody>,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Headers('x-reauth-token') reauthToken: string | undefined,
+    @CurrentPrincipal() me: Principal,
+  ) {
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 128) throw new ProblemError({ type: 'idempotency-key-invalid', status: 400, title: '멱등 키(Idempotency-Key)가 없거나 형식이 맞지 않습니다' });
+    return asProblem(() => this.approvals.writeOffReceivable(params.receivableId, { actor: actorOf(me), reason: body.reason, idempotencyKey, reauthToken }));
   }
 
   @Post('payout-batches/:batchId/portone-execution')

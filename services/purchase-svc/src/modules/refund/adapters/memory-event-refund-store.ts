@@ -1,5 +1,5 @@
 // 회차 취소 일괄 환불의 메모리 저장소(단위 시험·로컬 대역).
-import { EventRefundActiveConflict, type EventCancellationRequest, type EventRefundAttempt, type EventRefundItem, type EventRefundWindowStats, type RefundPgProvider } from '../domain/event-refund.js';
+import { EventRefundActiveConflict, type EventCancellationRequest, type EventRefundAttempt, type EventRefundAttemptOutcome, type EventRefundItem, type EventRefundWindowStats, type RefundPgProvider } from '../domain/event-refund.js';
 import type { EventRefundAttemptStore, EventRefundItemAdder, EventRefundOutboxMessage, EventRefundSettlementNotice, EventRefundStore } from '../domain/event-refund-ports.js';
 import type { CompensationRow } from '../domain/compensation.js';
 
@@ -182,6 +182,10 @@ export class MemoryEventRefundAttemptStore implements EventRefundAttemptStore {
 
   async windowAll(sinceMs: number): Promise<EventRefundWindowStats> {
     return this.#window(this.attempts.filter((a) => a.atMs >= sinceMs));
+  }
+
+  async recent(sinceMs: number): Promise<readonly { pg: RefundPgProvider; outcome: EventRefundAttemptOutcome; atMs: number }[]> {
+    return this.attempts.filter((a) => a.atMs > sinceMs).map((a) => ({ pg: a.pg, outcome: a.outcome, atMs: a.atMs }));
   }
 
   #window(rows: readonly EventRefundAttempt[]): EventRefundWindowStats {

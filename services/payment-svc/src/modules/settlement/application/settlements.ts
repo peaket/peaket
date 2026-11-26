@@ -99,6 +99,7 @@ import {
   type PayoutRecord,
   type Pg,
   type PgStore,
+  type ReceivableActionRecord,
   type ReceivableMoveRecord,
   type ReceivableRecord,
   type SettlementEventValue,
@@ -218,6 +219,15 @@ const adjustmentFactsOf = (f: VerifiedAdjustmentApproval, a: AdjustmentRecord): 
 const batchCurrency = 'KRW';
 const DAY_MS = 24 * 60 * 60 * 1000;
 const GUARANTEE_DUE_DAYS = 30;
+
+/** 미수금 수동 전이 입력(0034, F-07-15 I-01). ops가 commander 재인증 토큰과 멱등 키를 싣는다 */
+export interface ReceivableActionInput {
+  readonly actor: string;
+  readonly sessionId: string;
+  readonly reauthToken?: string | undefined;
+  readonly idempotencyKey: string;
+  readonly reason: string;
+}
 const KYC_NOTICE_THRESHOLD = 10_000_000;
 const KYC_NOTICE_WINDOW_DAYS = 6;
 const addDays = (date: string, days: number): string => dateOnly(new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS));
@@ -1228,6 +1238,99 @@ export class Settlements {
       });
       return { collection, receivable: next };
     });
+  }
+
+  /**
+   * 미수금 청구(0034, F-07-15 I-01, settlement §7). 발생 30일 뒤의 OPEN 미수금만,
+   * 그때의 remaining을 청구 금액으로 삼는다. 돈이 움직이지 않아 이동 기록은 만들지 않는다.
+   */
+  async billReceivable(receivableId: string, input: ReceivableActionInput): Promise<{ action: ReceivableActionRecord; receivable: ReceivableRecord }> {
+    return this.#receivableAction(receivableId, 'BILLED', input);
+  }
+
+  /** 미수금 회수(0034, F-07-15 I-01). BILLED에 1원 이상 remaining 이하, COLLECTED 이동 한 줄, 0이면 CLOSED */
+  async collectReceivable(receivableId: string, input: ReceivableActionInput & { amount: number }): Promise<{ action: ReceivableActionRecord; receivable: ReceivableRecord }> {
+    return this.#receivableAction(receivableId, 'COLLECTED', input);
+  }
+
+  /** 미수금 손실 처리(0034, F-07-15 I-01). BILLED의 남은 금액 전부를 WRITE_OFF 한 줄로 닫는다 */
+  async writeOffReceivable(receivableId: string, input: ReceivableActionInput): Promise<{ action: ReceivableActionRecord; receivable: ReceivableRecord }> {
+    return this.#receivableAction(receivableId, 'WRITE_OFF', input);
+  }
+
+  async #receivableAction(
+    receivableId: string,
+    kind: ReceivableActionRecord['kind'],
+    input: ReceivableActionInput & { amount?: number },
+  ): Promise<{ action: ReceivableActionRecord; receivable: ReceivableRecord }> {
+    const key = input.idempotencyKey.trim();
+    if (key === '' || key.length > 128) throw new SettlementProblem('invalid-query', 422, '멱등 키가 필요합니다');
+    const reason = input.reason.trim();
+    if (reason === '' || reason.length > 2_000) throw new SettlementProblem('invalid-receivable-action', 422, '사유는 1~2,000자여야 합니다');
+    const existing = await this.d.store.findReceivableAction(key);
+    if (existing) {
+      const current = await this.d.store.findReceivable(existing.receivableId);
+      if (!current) throw notFound();
+      const same = existing.receivableId === receivableId && existing.kind === kind && (kind !== 'COLLECTED' || existing.amount === input.amount);
+      if (!same) throw new SettlementProblem('idempotency-key-reused', 422, '같은 멱등 키에 다른 요청을 보냈습니다');
+      return { action: existing, receivable: current };
+    }
+    const receivable = await this.d.store.findReceivable(receivableId);
+    if (!receivable) throw notFound();
+    const now = new Date(this.d.clock.now());
+    let amount: number;
+    let nextRemaining: number;
+    let nextStatus: 'BILLED' | 'CLOSED' | 'WRITTEN_OFF';
+    let movement: ReceivableMoveRecord | undefined;
+    if (kind === 'BILLED') {
+      if (receivable.status !== 'OPEN' || receivable.remaining <= 0) throw new SettlementProblem('receivable-not-open', 409, '열린 미수금이 아닙니다');
+      if (now.getTime() - receivable.createdAt.getTime() < GUARANTEE_DUE_DAYS * DAY_MS) {
+        throw new SettlementProblem('receivable-billing-not-due', 409, '미수금 발생 30일이 지나야 청구할 수 있습니다');
+      }
+      amount = receivable.remaining;
+      nextRemaining = receivable.remaining;
+      nextStatus = 'BILLED';
+    } else if (kind === 'COLLECTED') {
+      if (receivable.status !== 'BILLED') throw new SettlementProblem('receivable-not-billed', 409, '청구된 미수금이 아닙니다');
+      const take = input.amount;
+      if (typeof take !== 'number' || !Number.isInteger(take) || take < 1 || take > receivable.remaining) {
+        throw new SettlementProblem('invalid-receivable-amount', 422, '회수 금액은 1원 이상 남은 금액 이하여야 합니다');
+      }
+      amount = take;
+      nextRemaining = receivable.remaining - take;
+      nextStatus = nextRemaining === 0 ? 'CLOSED' : 'BILLED';
+      movement = { receivableId, statementId: null, amount: take, kind: 'COLLECTED', movedAt: now };
+    } else {
+      if (receivable.status !== 'BILLED' || receivable.remaining <= 0) throw new SettlementProblem('receivable-not-billed', 409, '청구된 미수금이 아닙니다');
+      amount = receivable.remaining;
+      nextRemaining = 0;
+      nextStatus = 'WRITTEN_OFF';
+      movement = { receivableId, statementId: null, amount, kind: 'WRITE_OFF', movedAt: now };
+    }
+    await this.d.reauth.verify(input.reauthToken, { sessionId: input.sessionId, act: 'APPROVAL' });
+    const action: ReceivableActionRecord = {
+      actionId: uuidv7(this.d.clock),
+      idempotencyKey: key,
+      receivableId,
+      promoterId: receivable.promoterId,
+      kind,
+      amount,
+      remainingAfter: nextRemaining,
+      actor: input.actor,
+      reason,
+      createdAt: now,
+    };
+    const applied = await this.d.store.applyReceivableActionAtomically({
+      action,
+      expectedStatus: kind === 'BILLED' ? 'OPEN' : 'BILLED',
+      expectedRemaining: receivable.remaining,
+      ...(movement ? { movement } : {}),
+      nextRemaining,
+      nextStatus,
+      updatedAt: now,
+    });
+    if (!applied) throw new SettlementProblem('receivable-action-conflict', 409, '다른 요청이 먼저 미수금을 바꿨습니다');
+    return applied;
   }
 
   /**

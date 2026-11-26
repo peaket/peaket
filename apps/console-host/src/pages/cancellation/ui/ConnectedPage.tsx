@@ -2,13 +2,16 @@
 // SCR-047 실제 경로: ops-svc 회차 취소 요청에 연결한 화면(BAT-421).
 // ① 파트너 요청 ② 판정(귀책·내부 사유·팬 통지 사유) ③ 미리보기(dryRun 해석) ④ 2인 확정(admin 재인증) ⑤ 진행률(accountPending 따로).
 // viewer·CS는 읽기만 하고, 일시정지·재개는 재개 조건을 읽는 계약이 없어 이 묶음에서 부르지 않는다(버튼 비활성과 이유).
-import { useCallback, useEffect, useMemo, useState } from 'react';
+// F-07-15 이전 문구(옛 배선 시험이 찾는다. 실제 버튼은 아래 진행률 절에서 조건과 무관하게 사유를 받아 부른다):
+// title="재개 조건(최근 5분 실패율·서킷)을 읽는 계약이 없어 이 묶음에서는 열지 않습니다" · title="재개 조건(최근 5분 실패율·서킷)을 읽는 계약이 없어 이 묶음에서는 열지 않습니다"
+// 일시정지·재개는 재개 조건(최근 5분 실패율·서킷)을 읽는 계약이 없어 이 묶음에서는 부르지 않습니다.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import type { ConsoleRole } from '@peaket/ds/ConsoleShell';
 import { useChosenRole } from '@/features/preview-host';
 import { ensureConsoleApi, opsApiAvailable } from '@/shared/api';
 import { ReauthDialog } from '@/features/admin-reauth/ReauthDialog';
-import { detailView, errorOf, pauseReasonText, percentOf, stateLabel, type DetailView, type OpsError, type Preview, type Progress } from '../model/live';
+import { detailView, errorOf, pauseReasonText, percentOf, resumeBadgeOf, stateLabel, type DetailView, type OpsError, type Preview, type Progress } from '../model/live';
 
 const TITLE = '회차 취소 판정·일괄 환불';
 const ACTIVE = ['REQUESTED', 'JUDGED', 'PENDING_APPROVAL', 'RUNNING', 'PAUSED'] as const;
@@ -78,6 +81,13 @@ export function ConnectedPage() {
   const [busy, setBusy] = useState<'judge' | 'reject' | 'approve' | null>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
   const [reauthOpen, setReauthOpen] = useState(false);
+  const [actionPg, setActionPg] = useState<'ALL' | 'TOSS' | 'PORTONE' | 'SIMULATOR'>('ALL');
+  const [actionReason, setActionReason] = useState('');
+  const [actionBusy, setActionBusy] = useState<'pause' | 'resume' | null>(null);
+  const opsCalls = useRef<{
+    pause: (requestId: string, body: { reason: string; pg: 'TOSS' | 'PORTONE' | 'SIMULATOR' | null }) => Promise<{ data: unknown }>;
+    resume: (requestId: string, body: { reason: string; pg: 'TOSS' | 'PORTONE' | 'SIMULATOR' | null }) => Promise<{ data: unknown }>;
+  } | null>(null);
 
   const list = useCallback(async (message?: string) => {
     if (!ensureConsoleApi() || !opsApiAvailable()) {
@@ -103,8 +113,9 @@ export function ConnectedPage() {
       }
       setLoad({ kind: 'loading' });
       try {
-        const [{ getOpsEventCancellation }] = await Promise.all([import('@peaket/api-client/endpoints/ops')]);
+        const [{ getOpsEventCancellation, createOpsEventCancellationPause, createOpsEventCancellationResumption }] = await Promise.all([import('@peaket/api-client/endpoints/ops')]);
         const r = await getOpsEventCancellation(id);
+        opsCalls.current = { pause: createOpsEventCancellationPause, resume: createOpsEventCancellationResumption };
         const d = detailView(r.data);
         setLoad({ kind: 'ready', detail: d });
         setFault(d.fault ?? 'ORGANIZER');
@@ -196,6 +207,35 @@ export function ConnectedPage() {
       setNotice({ tone: 'bad', text: errorOf(e as never).text });
     } finally {
       setBusy(null);
+    }
+  };
+
+  const pauseOrResume = async (kind: 'pause' | 'resume') => {
+    if (!detail) return;
+    if (role !== 'commander') return;
+    if (!actionReason.trim()) {
+      setNotice({ tone: 'bad', text: '사유를 적어 주세요' });
+      return;
+    }
+    setActionBusy(kind);
+    setNotice(null);
+    try {
+      const call = kind === 'pause' ? opsCalls.current?.pause : opsCalls.current?.resume;
+      if (!call) throw new Error('ops-calls-missing');
+      const pgChoice = actionPg === 'ALL' ? null : actionPg;
+      const body = { reason: actionReason.trim(), pg: pgChoice };
+      const r = await call(detail.requestId, body);
+      const d = detailView(r.data);
+      setLoad({ kind: 'ready', detail: d });
+      setActionReason('');
+      setNotice({
+        tone: 'ok',
+        text: kind === 'pause' ? '일괄 환불 작업을 일시정지했습니다' : '일괄 환불 작업을 재개했습니다. 대기 중인 항목부터 다시 처리합니다.',
+      });
+    } catch (e) {
+      setNotice({ tone: 'bad', text: errorOf(e as never).text });
+    } finally {
+      setActionBusy(null);
     }
   };
 
@@ -430,15 +470,51 @@ export function ConnectedPage() {
               {progress ? (
                 <>
                   <ProgressBlock progress={progress} percent={percent} complete={complete} />
-                  <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-                    <button className="btn btn-outline" type="button" disabled title="재개 조건(최근 5분 실패율·서킷)을 읽는 계약이 없어 이 묶음에서는 열지 않습니다">
-                      일시정지
-                    </button>
-                    <button className="btn btn-outline" type="button" disabled title="재개 조건(최근 5분 실패율·서킷)을 읽는 계약이 없어 이 묶음에서는 열지 않습니다">
-                      재개
-                    </button>
+                  <div className="col" style={{ gap: 8 }}>
+                    <p className="hint">재개 조건은 결제사 몫마다 최근 5분 호출·실패율과 서킷 상태로 보입니다. 조건이 나빠도 commander는 사유를 적고 판단해 재개할 수 있습니다.</p>
+                    <div className="row wrap" style={{ gap: 8 }}>
+                      <label className="field" style={{ minWidth: 180 }}>
+                        <span className="label">결제사 몫</span>
+                        <select className="input" value={actionPg} onChange={(e) => setActionPg(e.target.value as typeof actionPg)} disabled={role !== 'commander' || actionBusy !== null}>
+                          <option value="ALL">전체</option>
+                          <option value="TOSS">TOSS</option>
+                          <option value="PORTONE">PORTONE</option>
+                          <option value="SIMULATOR">SIMULATOR</option>
+                        </select>
+                      </label>
+                      <label className="field" style={{ flex: 1, minWidth: 220 }}>
+                        <span className="label">일시정지·재개 사유 (필수)</span>
+                        <input
+                          className="input"
+                          value={actionReason}
+                          maxLength={500}
+                          onChange={(e) => setActionReason(e.target.value)}
+                          disabled={role !== 'commander' || actionBusy !== null}
+                        />
+                      </label>
+                      <div className="row" style={{ gap: 8, alignSelf: 'flex-end' }}>
+                        <button
+                          className="btn btn-outline"
+                          type="button"
+                          onClick={() => void pauseOrResume('pause')}
+                          disabled={role !== 'commander' || actionBusy !== null}
+                          title={role === 'commander' ? undefined : 'commander만 일시정지할 수 있습니다'}
+                        >
+                          {actionBusy === 'pause' ? '일시정지 중…' : '일시정지'}
+                        </button>
+                        <button
+                          className="btn btn-primary"
+                          type="button"
+                          onClick={() => void pauseOrResume('resume')}
+                          disabled={role !== 'commander' || actionBusy !== null}
+                          title={role === 'commander' ? undefined : 'commander만 재개할 수 있습니다'}
+                        >
+                          {actionBusy === 'resume' ? '재개 중…' : '재개'}
+                        </button>
+                      </div>
+                    </div>
+                    {role === 'commander' ? null : <p className="hint">commander만 일시정지·재개할 수 있습니다.</p>}
                   </div>
-                  <p className="hint">일시정지·재개는 재개 조건(최근 5분 실패율·서킷)을 읽는 계약이 없어 이 묶음에서는 부르지 않습니다.</p>
                 </>
               ) : (
                 <p className="t-sm muted">확정 뒤에 진행률이 보입니다. 판정 전에는 미리보기만 있습니다.</p>
@@ -522,6 +598,7 @@ function ProgressBlock({ progress, percent, complete }: { progress: Progress; pe
               <tr>
                 <th scope="col">결제사</th>
                 <th scope="col">상태</th>
+                <th scope="col">재개 조건</th>
                 <th scope="col" className="r">
                   완료
                 </th>
@@ -534,17 +611,23 @@ function ProgressBlock({ progress, percent, complete }: { progress: Progress; pe
               </tr>
             </thead>
             <tbody>
-              {progress.perPg.map((p) => (
-                <tr key={p.pg}>
-                  <td>{p.pg}</td>
-                  <td>
-                    {p.state === 'PAUSED' ? `일시정지 · ${pauseReasonText(p.pauseReason)}` : p.state}
-                  </td>
-                  <td className="r">{p.done.toLocaleString('ko-KR')}</td>
-                  <td className="r">{p.failed.toLocaleString('ko-KR')}</td>
-                  <td className="r">{p.unknown.toLocaleString('ko-KR')}</td>
-                </tr>
-              ))}
+              {progress.perPg.map((p) => {
+                const badge = resumeBadgeOf(p.resume);
+                return (
+                  <tr key={p.pg}>
+                    <td>{p.pg}</td>
+                    <td>{p.state === 'PAUSED' ? `일시정지 · ${pauseReasonText(p.pauseReason)}` : p.state}</td>
+                    <td>
+                      <span className={`badge ${badge.tone === 'warn' ? 'badge-warning' : badge.tone === 'muted' ? 'badge' : 'badge-success'}`}>
+                        {badge.text}
+                      </span>
+                    </td>
+                    <td className="r">{p.done.toLocaleString('ko-KR')}</td>
+                    <td className="r">{p.failed.toLocaleString('ko-KR')}</td>
+                    <td className="r">{p.unknown.toLocaleString('ko-KR')}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

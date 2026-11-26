@@ -46,6 +46,7 @@ import {
   type EventOwnerLookup,
   type EventRefundReader,
   type EventRefundStarter,
+  type PgCircuitReader,
   type EventSaleStopper,
   type PartnerEventCancellationStore,
   type SaleSuspensionLookup,
@@ -116,6 +117,8 @@ interface CommonWiring {
     readonly refunds?: EventRefundStarter;
     readonly reauth?: EventCancellationReauth;
     readonly reader?: EventRefundReader;
+    /** payment-svc GET /internal/v1/circuits(재개 조건, F-07-15 I-06) */
+    readonly circuits?: PgCircuitReader;
     readonly stopper?: EventSaleStopper;
     readonly owners?: EventOwnerLookup;
     readonly suspension?: SaleSuspensionLookup;
@@ -155,6 +158,7 @@ function eventCancellationDeps(
     ...(e.refunds ? { refunds: e.refunds } : {}),
     ...(e.reauth ? { reauth: e.reauth } : {}),
     ...(e.reader ? { reader: e.reader } : {}),
+    ...(e.circuits ? { circuits: e.circuits } : o.payouts?.payments ? { circuits: o.payouts.payments } : {}),
     ...(e.stopper ? { stopper: e.stopper } : {}),
     ...(e.owners ? { owners: e.owners } : {}),
     ...(e.holds ? { holds: e.holds } : {}),

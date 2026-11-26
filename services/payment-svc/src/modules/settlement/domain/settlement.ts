@@ -70,13 +70,31 @@ export interface ReceivableMoveRecord {
   /** 0026부터 이동마다 하나. 기존 코드는 생략하고 저장소가 채운다 */
   moveId?: string;
   receivableId: string;
-  statementId: string;
+  /** 회수·손실처럼 근거 정산서가 없는 이동은 null(0034, F-07-15) */
+  statementId: string | null;
   amount: number;
   /** SUPERSEDED: 다시 계산으로 옛 판의 NEGATIVE_STATEMENT 미수금을 남은 금액만큼 닫음(ADR-0380 결정 8) */
   kind?: 'OFFSET' | 'GUARANTEE' | 'COLLECTED' | 'WRITE_OFF' | 'REVERSAL' | 'SUPERSEDED';
   /** REVERSAL이 되돌린 이동 기록(payment 0033, 외래 키 없음) */
   reversesId?: string | null;
   movedAt: Date;
+}
+
+/** 미수금 수동 전이 한 건(0034, F-07-15 I-01). 청구·회수·손실의 멱등 기록이고 감사 근거다 */
+export type ReceivableActionKind = 'BILLED' | 'COLLECTED' | 'WRITE_OFF';
+
+export interface ReceivableActionRecord {
+  actionId: string;
+  idempotencyKey: string;
+  receivableId: string;
+  promoterId: string;
+  kind: ReceivableActionKind;
+  /** BILLED는 그때의 remaining, COLLECTED는 받은 금액, WRITE_OFF는 남은 금액 */
+  amount: number;
+  remainingAfter: number;
+  actor: string;
+  reason: string;
+  createdAt: Date;
 }
 
 export class SettlementProblem extends Error {

@@ -205,7 +205,7 @@ export class GrpcEventRefunds implements EventRefundStarter, EventRefundReader, 
         const pg = typeof p.pg === 'string' ? PG_OF[p.pg] : undefined;
         if (!pg) return [];
         const pauseReason = enumOf(p.pause_reason, 'REFUND_PAUSE_REASON_');
-        return [{ pg, state: enumOf(p.state, 'REFUND_JOB_STATE_') ?? 'UNKNOWN', ...(pauseReason !== undefined ? { pauseReason } : {}), done: intOf(p.done_orders), failed: intOf(p.failed_orders), unknown: intOf(p.unknown_orders) }];
+        return [{ pg, state: enumOf(p.state, 'REFUND_JOB_STATE_') ?? 'UNKNOWN', ...(pauseReason !== undefined ? { pauseReason } : {}), done: intOf(p.done_orders), failed: intOf(p.failed_orders), unknown: intOf(p.unknown_orders), recentCalls: intOf(p.recent_calls), recentFailures: intOf(p.recent_failures) }];
       }),
       ...(a.kind === 'EVENT_REFUND_KIND_POSTPONE' ? { appliedOrders: intOf(a.applied_orders) } : {}),
       ...(closesAtMs !== undefined && closesAtMs > 0 ? { refundWindowClosesAt: new Date(closesAtMs).toISOString() } : {}),

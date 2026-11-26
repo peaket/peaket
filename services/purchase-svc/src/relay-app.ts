@@ -94,6 +94,8 @@ import {
   RedisSeatReturnNotices,
   RefundAfterEntry,
   RefundRetryLoop,
+  AccountRequestNotices,
+  DrizzleAccountNoticeSource,
   WeekendBusinessCalendar,
 } from './modules/refund/index.js';
 import { entryRecordsFromEnv, requireOpsInternalToken } from './refund-wiring.js';
@@ -506,6 +508,13 @@ export async function startPurchaseRelay(o: PurchaseRelayOptions): Promise<Outbo
           ? [
               new RefundRetryLoop({
                 refund: refundAfterEntry,
+                accountRequests: new AccountRequestNotices({
+                  refunds: new DrizzleAccountNoticeSource(o.serviceDatabase, ctx.clock, 'REFUND'),
+                  compensations: new DrizzleAccountNoticeSource(o.serviceDatabase, ctx.clock, 'COMPENSATION'),
+                  calendar: new WeekendBusinessCalendar(),
+                  clock: ctx.clock,
+                  ...(o.orderEventCodec ? { codec: o.orderEventCodec } : {}),
+                }),
                 leader: ctx.leader,
                 logger: ctx.logger,
                 ...(o.refundRetryTickMs !== undefined ? { tickMs: o.refundRetryTickMs } : {}),

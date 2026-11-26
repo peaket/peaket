@@ -506,6 +506,36 @@ export const ListTransfersResponse = zod.object({
 })
 
 /**
+ * F-07-15, FR-047, POL-014, ADR-0316. 결제자 본인만 읽고 남의 취소·없는 취소는 같은 404다. 계좌 원문은 응답에 넣지 않는다. Cache-Control: private, no-store
+ * @summary 취소 상세(SCR-060 지연 환급 계좌 입력)
+ */
+export const GetCancellationParams = zod.object({
+  "cancellationId": zod.uuid()
+})
+
+export const getCancellationResponseRefundAmountMin = 0;
+
+export const getCancellationResponseDeductionAmountMin = 0;
+
+export const getCancellationResponseDeductionBpMin = 0;
+export const getCancellationResponseDeductionBpMax = 10000;
+
+
+
+export const GetCancellationResponse = zod.object({
+  "cancellationId": zod.string().optional(),
+  "orderId": zod.string().optional(),
+  "eventId": zod.string().optional(),
+  "refundAmount": zod.int().min(getCancellationResponseRefundAmountMin).optional(),
+  "deductionAmount": zod.int().min(getCancellationResponseDeductionAmountMin).optional(),
+  "deductionBp": zod.int().min(getCancellationResponseDeductionBpMin).max(getCancellationResponseDeductionBpMax).optional(),
+  "reason": zod.string().optional(),
+  "status": zod.enum(['REQUESTED', 'REFUND_PENDING', 'REFUNDED', 'VOIDED']).optional(),
+  "refundAccountRequired": zod.boolean().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+}).describe('SCR-060이 읽는 취소 상세(F-07-15, getCancellation). 결제자 본인만 읽고 계좌 원문은 넣지 않는다')
+
+/**
  * FR-056, POL-019, POL-032, ADR-0046 결정 5, docs/design/d5 §1.6 18번. 그 주문의 결제자 본인 건만 최근 순으로 준다. 계좌는 끝 4자리만 싣는다(data.md compensation.account_last4). Cache-Control: private, no-store
  * @summary 내 배상 건 목록(SCR-055, SCR-013에서 잇는다)
  */

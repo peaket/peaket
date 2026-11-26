@@ -60,6 +60,10 @@ export class DrizzleCancellationOrders implements CancellationOrders {
         orderId: orderCancellation.orderId,
         ticketId: orderCancellation.ticketId,
         refundAmount: orderCancellation.refundAmount,
+        deductionAmount: orderCancellation.deductionAmount,
+        deductionBp: orderCancellation.deductionBp,
+        reason: orderCancellation.reason,
+        createdAt: orderCancellation.createdAt,
         state: orderCancellation.status,
         refundAttempts: orderCancellation.refundAttempts,
         refundAttempt: orderCancellation.refundAttempt,
@@ -75,6 +79,7 @@ export class DrizzleCancellationOrders implements CancellationOrders {
     return {
       ...rest,
       state: row.state as CancellationRecord['state'],
+      reason: row.reason as CancellationRecord['reason'],
       ...(accountRequiredAt ? { refundAccountRequired: true } : {}),
       ...(refundAccountIdemKey !== null ? { refundAccountIdemKey } : {}),
       ...(refundAccountAnswer !== null ? { refundAccountAnswer: refundAccountAnswer as RefundAccountAnswer } : {}),
@@ -247,6 +252,7 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
       .set({
         nextRefundAt: null,
         refundAccountRequiredAt: sql`coalesce(${orderCancellation.refundAccountRequiredAt}, ${new Date(q.nowMs)}::timestamptz)`,
+        refundAccountNoticeNextAt: sql`coalesce(${orderCancellation.refundAccountNoticeNextAt}, ${new Date(q.nowMs)}::timestamptz)`,
         refundLastError: 'REFUND_ACCOUNT_REQUIRED',
         statusChangedAt: new Date(q.nowMs),
       })
@@ -379,6 +385,7 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
       .update(orderCancellation)
       .set({
         refundAccountRequiredAt: null,
+        refundAccountNoticeNextAt: null,
         nextRefundAt: q.nextRefundAtMs === undefined ? null : new Date(q.nextRefundAtMs),
         ...(q.lastError !== undefined ? { refundLastError: q.lastError } : {}),
         // payment가 새 시도 행을 만들지 않았으면 시도 번호를 되돌린다(RV-28). 다음 재시도가 앞 시도(a0)를 계속 조회한다

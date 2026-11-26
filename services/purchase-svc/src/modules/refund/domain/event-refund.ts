@@ -183,6 +183,9 @@ export interface EventRefundPgProgress {
   readonly failed: number;
   readonly unknown: number;
   readonly notApplied: number;
+  /** 최근 5분 시도 집계(재개 조건, F-07-15 I-06). 옛 진행률에는 없다 */
+  readonly recentCalls?: number;
+  readonly recentFailures?: number;
 }
 
 export interface EventRefundProgress {

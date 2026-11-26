@@ -458,9 +458,7 @@ export const receivableMovement = pgTable(
     receivableId: uuid('receivable_id')
       .notNull()
       .references(() => partnerReceivable.id),
-    statementId: uuid('statement_id')
-      .notNull()
-      .references(() => settlementStatement.id),
+    statementId: uuid('statement_id').references(() => settlementStatement.id),
     amount: amount('amount').notNull(),
     kind: text('kind').notNull().default('OFFSET'),
     movedAt: at('moved_at').notNull(),
@@ -472,6 +470,32 @@ export const receivableMovement = pgTable(
     check('receivable_movement_amount_check', sql`${t.amount} > 0`),
     // SUPERSEDED: 다시 계산으로 옛 판의 NEGATIVE_STATEMENT 미수금을 남은 금액만큼 닫음(0033, ADR-0380 결정 8). 제약 이름은 그대로다(PRF180 M3 ⑦)
     check('receivable_movement_kind_check', sql`${t.kind} in ('OFFSET', 'GUARANTEE', 'COLLECTED', 'WRITE_OFF', 'REVERSAL', 'SUPERSEDED')`),
+  ],
+);
+
+/** 미수금 수동 전이의 멱등 기록(0034, F-07-15 I-01, docs/data.md receivable_action) */
+export const receivableAction = pgTable(
+  'receivable_action',
+  {
+    id: uuid('id').primaryKey(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    receivableId: uuid('receivable_id')
+      .notNull()
+      .references(() => partnerReceivable.id),
+    promoterId: uuid('promoter_id').notNull(),
+    kind: text('kind').notNull(),
+    amount: amount('amount').notNull(),
+    remainingAfter: amount('remaining_after').notNull(),
+    actor: text('actor').notNull(),
+    reason: text('reason').notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('receivable_action_key_uidx').on(t.idempotencyKey),
+    check('receivable_action_kind_check', sql`${t.kind} in ('BILLED', 'COLLECTED', 'WRITE_OFF')`),
+    check('receivable_action_amount_check', sql`${t.amount} >= 0 and ${t.remainingAfter} >= 0`),
+    check('receivable_action_reason_check', sql`char_length(${t.reason}) between 1 and 2000`),
+    index('receivable_action_receivable_idx').on(t.receivableId, t.createdAt),
   ],
 );
 

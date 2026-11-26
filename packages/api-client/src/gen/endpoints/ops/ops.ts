@@ -111,7 +111,10 @@ import type {
   CreateOpsPayoutBatchBody,
   CreateOpsPayoutBatchPortoneExecutionBody,
   CreateOpsPlaceBody,
+  CreateOpsReceivableBillingBody,
+  CreateOpsReceivableCollectionBody,
   CreateOpsReceivableGuaranteeCollectionBody,
+  CreateOpsReceivableWriteOffBody,
   CreateOpsSaleReviewApprovalBody,
   CreateOpsSaleReviewRejectionBody,
   CreateOpsScannerDeviceBody,
@@ -221,6 +224,7 @@ import type {
   PutOpsArtistAliasesBody,
   PutOpsPlaceAliasesBody,
   PutOpsProductionAliasesBody,
+  ReceivableAction,
   ReportStage,
   ResearchExport,
   ResearchExportCreate,
@@ -12440,6 +12444,399 @@ export const useCreateOpsPayoutBatchPortoneExecution = <TError = ErrorType<Probl
         TContext
       > => {
       return useMutation(getCreateOpsPayoutBatchPortoneExecutionMutationOptions(options), queryClient);
+    }
+    export type createOpsReceivableBillingResponse200 = {
+  data: ReceivableAction
+  status: 200
+}
+
+export type createOpsReceivableBillingResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsReceivableBillingResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsReceivableBillingResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsReceivableBillingResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsReceivableBillingResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsReceivableBillingResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
+export type createOpsReceivableBillingResponseSuccess = (createOpsReceivableBillingResponse200) & {
+  headers: Headers;
+};
+export type createOpsReceivableBillingResponseError = (createOpsReceivableBillingResponse400 | createOpsReceivableBillingResponse403 | createOpsReceivableBillingResponse404 | createOpsReceivableBillingResponse409 | createOpsReceivableBillingResponse422 | createOpsReceivableBillingResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsReceivableBillingUrl = (receivableId: string,) => {
+
+
+
+
+  return `/v1/ops/receivables/${encodeURIComponent(String(receivableId))}/billing`
+}
+
+/**
+ * F-07-15, settlement §7. 남은 미수금 전액을 청구로 옮기고 receivable_movement·receivable_action에 한 트랜잭션으로 남긴다. 같은 Idempotency-Key는 같은 결과를 준다
+ * @summary 미수금 청구(commander, 사유·멱등 키·재인증)
+ */
+export const createOpsReceivableBilling = async (receivableId: string,
+    createOpsReceivableBillingBody: CreateOpsReceivableBillingBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsReceivableBillingResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsReceivableBillingResponseSuccess>(getCreateOpsReceivableBillingUrl(receivableId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createOpsReceivableBillingBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsReceivableBillingMutationKey = () => ['createOpsReceivableBilling'] as const;
+
+export const getCreateOpsReceivableBillingMutationOptions = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsReceivableBilling>>, TError,CreateOpsReceivableBillingMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsReceivableBilling>>, TError,CreateOpsReceivableBillingMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsReceivableBillingMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsReceivableBilling>>, CreateOpsReceivableBillingMutationVariables> = (props) => {
+          const {receivableId,data} = props ?? {};
+
+          return  createOpsReceivableBilling(receivableId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsReceivableBillingMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsReceivableBilling>>>
+    export type CreateOpsReceivableBillingMutationBody = BodyType<CreateOpsReceivableBillingBody>
+    export type CreateOpsReceivableBillingMutationError = ErrorType<ProblemResponse>
+    export type CreateOpsReceivableBillingMutationVariables = {receivableId: string;data: BodyType<CreateOpsReceivableBillingBody>}
+
+    /**
+ * @summary 미수금 청구(commander, 사유·멱등 키·재인증)
+ */
+export const useCreateOpsReceivableBilling = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsReceivableBilling>>, TError,CreateOpsReceivableBillingMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsReceivableBilling>>,
+        TError,
+        CreateOpsReceivableBillingMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsReceivableBillingMutationOptions(options), queryClient);
+    }
+    export type createOpsReceivableCollectionResponse200 = {
+  data: ReceivableAction
+  status: 200
+}
+
+export type createOpsReceivableCollectionResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsReceivableCollectionResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsReceivableCollectionResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsReceivableCollectionResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsReceivableCollectionResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsReceivableCollectionResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
+export type createOpsReceivableCollectionResponseSuccess = (createOpsReceivableCollectionResponse200) & {
+  headers: Headers;
+};
+export type createOpsReceivableCollectionResponseError = (createOpsReceivableCollectionResponse400 | createOpsReceivableCollectionResponse403 | createOpsReceivableCollectionResponse404 | createOpsReceivableCollectionResponse409 | createOpsReceivableCollectionResponse422 | createOpsReceivableCollectionResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsReceivableCollectionUrl = (receivableId: string,) => {
+
+
+
+
+  return `/v1/ops/receivables/${encodeURIComponent(String(receivableId))}/collections`
+}
+
+/**
+ * F-07-15, settlement §7. 회수 금액만큼 남은 미수금을 줄이고 receivable_movement·receivable_action에 한 트랜잭션으로 남긴다. 부분 회수를 허용하고 남은 금액을 넘으면 422다
+ * @summary 미수금 회수(commander, 사유·멱등 키·재인증)
+ */
+export const createOpsReceivableCollection = async (receivableId: string,
+    createOpsReceivableCollectionBody: CreateOpsReceivableCollectionBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsReceivableCollectionResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsReceivableCollectionResponseSuccess>(getCreateOpsReceivableCollectionUrl(receivableId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createOpsReceivableCollectionBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsReceivableCollectionMutationKey = () => ['createOpsReceivableCollection'] as const;
+
+export const getCreateOpsReceivableCollectionMutationOptions = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsReceivableCollection>>, TError,CreateOpsReceivableCollectionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsReceivableCollection>>, TError,CreateOpsReceivableCollectionMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsReceivableCollectionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsReceivableCollection>>, CreateOpsReceivableCollectionMutationVariables> = (props) => {
+          const {receivableId,data} = props ?? {};
+
+          return  createOpsReceivableCollection(receivableId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsReceivableCollectionMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsReceivableCollection>>>
+    export type CreateOpsReceivableCollectionMutationBody = BodyType<CreateOpsReceivableCollectionBody>
+    export type CreateOpsReceivableCollectionMutationError = ErrorType<ProblemResponse>
+    export type CreateOpsReceivableCollectionMutationVariables = {receivableId: string;data: BodyType<CreateOpsReceivableCollectionBody>}
+
+    /**
+ * @summary 미수금 회수(commander, 사유·멱등 키·재인증)
+ */
+export const useCreateOpsReceivableCollection = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsReceivableCollection>>, TError,CreateOpsReceivableCollectionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsReceivableCollection>>,
+        TError,
+        CreateOpsReceivableCollectionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsReceivableCollectionMutationOptions(options), queryClient);
+    }
+    export type createOpsReceivableWriteOffResponse200 = {
+  data: ReceivableAction
+  status: 200
+}
+
+export type createOpsReceivableWriteOffResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsReceivableWriteOffResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsReceivableWriteOffResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsReceivableWriteOffResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsReceivableWriteOffResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsReceivableWriteOffResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
+export type createOpsReceivableWriteOffResponseSuccess = (createOpsReceivableWriteOffResponse200) & {
+  headers: Headers;
+};
+export type createOpsReceivableWriteOffResponseError = (createOpsReceivableWriteOffResponse400 | createOpsReceivableWriteOffResponse403 | createOpsReceivableWriteOffResponse404 | createOpsReceivableWriteOffResponse409 | createOpsReceivableWriteOffResponse422 | createOpsReceivableWriteOffResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsReceivableWriteOffUrl = (receivableId: string,) => {
+
+
+
+
+  return `/v1/ops/receivables/${encodeURIComponent(String(receivableId))}/write-offs`
+}
+
+/**
+ * F-07-15, settlement §7. 남은 미수금을 손실로 옮기고 receivable_movement·receivable_action에 한 트랜잭션으로 남긴다. 손실은 되돌리지 않는다
+ * @summary 미수금 손실 처리(commander, 사유·멱등 키·재인증)
+ */
+export const createOpsReceivableWriteOff = async (receivableId: string,
+    createOpsReceivableWriteOffBody: CreateOpsReceivableWriteOffBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsReceivableWriteOffResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsReceivableWriteOffResponseSuccess>(getCreateOpsReceivableWriteOffUrl(receivableId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createOpsReceivableWriteOffBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsReceivableWriteOffMutationKey = () => ['createOpsReceivableWriteOff'] as const;
+
+export const getCreateOpsReceivableWriteOffMutationOptions = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsReceivableWriteOff>>, TError,CreateOpsReceivableWriteOffMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsReceivableWriteOff>>, TError,CreateOpsReceivableWriteOffMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsReceivableWriteOffMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsReceivableWriteOff>>, CreateOpsReceivableWriteOffMutationVariables> = (props) => {
+          const {receivableId,data} = props ?? {};
+
+          return  createOpsReceivableWriteOff(receivableId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsReceivableWriteOffMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsReceivableWriteOff>>>
+    export type CreateOpsReceivableWriteOffMutationBody = BodyType<CreateOpsReceivableWriteOffBody>
+    export type CreateOpsReceivableWriteOffMutationError = ErrorType<ProblemResponse>
+    export type CreateOpsReceivableWriteOffMutationVariables = {receivableId: string;data: BodyType<CreateOpsReceivableWriteOffBody>}
+
+    /**
+ * @summary 미수금 손실 처리(commander, 사유·멱등 키·재인증)
+ */
+export const useCreateOpsReceivableWriteOff = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsReceivableWriteOff>>, TError,CreateOpsReceivableWriteOffMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsReceivableWriteOff>>,
+        TError,
+        CreateOpsReceivableWriteOffMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsReceivableWriteOffMutationOptions(options), queryClient);
     }
     export type listOpsReceivablesResponse200 = {
   data: ListOpsReceivables200

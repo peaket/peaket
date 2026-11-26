@@ -1,5 +1,7 @@
 // 회차 취소 요청·판정·2인 확정(BAT-425 GAT-130 잔여, FR-055, POL-038, ADR-0046, openapi EventCancellationRequest).
 // commander가 요청하고, commander가 귀책을 판정한 뒤 판정자가 아닌 operator·commander가 확정한다.
+import type { ResumeCondition } from './resume-condition.js';
+
 export type EventCancellationKind = 'CANCEL' | 'POSTPONE';
 export type EventCancellationStatus = 'REQUESTED' | 'JUDGED' | 'PENDING_APPROVAL' | 'APPROVED' | 'RUNNING' | 'PAUSED' | 'REFUND_WINDOW' | 'COMPLETED' | 'REJECTED';
 export type EventCancellationFault = 'ORGANIZER' | 'FORCE_MAJEURE' | 'CONTENT_CHANGE';
@@ -34,7 +36,7 @@ export interface EventCancellationProgress {
   readonly failed?: number;
   /** 가상계좌 계좌 대기 항목 수(있을 때만, docs/features/payment.md §6 '계좌 대기' 끝, R-T40 ⑤). 결제사별 몫에는 없다 */
   readonly accountPending?: number;
-  readonly perPg?: readonly { readonly pg: EventCancellationPg; readonly state: string; readonly pauseReason?: string | null; readonly done: number; readonly failed: number; readonly unknown: number }[];
+  readonly perPg?: readonly { readonly pg: EventCancellationPg; readonly state: string; readonly pauseReason?: string | null; readonly done: number; readonly failed: number; readonly unknown: number; readonly resume?: ResumeCondition }[];
 }
 
 /** 파트너 사유 상한 1,000자 [가정] */

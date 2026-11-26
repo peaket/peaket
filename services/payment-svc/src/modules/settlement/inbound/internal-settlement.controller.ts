@@ -50,6 +50,7 @@ const ReceivableBody = z.object({ promoterId: z.string().uuid(), pg: PgBody, cau
 const GuaranteeBody = z
   .object({ actor: z.string().min(1), sessionId: z.string().min(1), reauthToken: z.string().min(1).optional(), idempotencyKey: z.string().min(1).max(128), reason: z.string().min(1).max(2_000) })
   .strict();
+const ReceivableCollectionBody = GuaranteeBody.extend({ amount: z.number().int().positive() }).strict();
 
 const StatementView = z
   .object({ statementId: z.string(), kind: z.enum(['EVENT', 'PRODUCT']), pg: z.enum(['TOSS', 'PORTONE']), pgStore: z.enum(['STANDARD', 'ESCROW']), status: z.string(), payoutAmount: z.number() })
@@ -83,6 +84,16 @@ const shaped = <T>(s: z.ZodType<T>, body: unknown, title: string): T => {
   const p = s.safeParse(body);
   if (!p.success) throw new ProblemError({ type: 'invalid-body', status: 400, title });
   return p.data as T;
+};
+
+/** 새 수동 전이 응용은 SettlementProblem을 그대로 던진다(시험 대조). HTTP에서는 Problem으로 바꾼다 */
+const asHttpProblem = async <T>(fn: () => Promise<T>): Promise<T> => {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof SettlementProblem) throw new ProblemError({ type: e.type, status: e.status, title: e.title });
+    throw e;
+  }
 };
 type Reply = { header(name: string, value: string): unknown };
 
@@ -249,6 +260,30 @@ export class InternalSettlementController {
   async collectGuarantee(@Param('receivableId') receivableId: string, @Body() body: unknown) {
     const b = one(GuaranteeBody, body, '보증 충당 본문이 맞지 않습니다');
     return this.settlements.collectGuarantee(receivableId, b);
+  }
+
+  @Post('receivables/:receivableId/billing')
+  @HttpCode(200)
+  @ContractRouteSchema({ responses: { 200: z.record(z.string(), z.unknown()) } })
+  async billReceivable(@Param('receivableId') receivableId: string, @Body() body: unknown) {
+    const b = one(GuaranteeBody, body, '청구 본문이 맞지 않습니다');
+    return asHttpProblem(() => this.settlements.billReceivable(receivableId, b));
+  }
+
+  @Post('receivables/:receivableId/collections')
+  @HttpCode(200)
+  @ContractRouteSchema({ responses: { 200: z.record(z.string(), z.unknown()) } })
+  async collectReceivable(@Param('receivableId') receivableId: string, @Body() body: unknown) {
+    const b = one(ReceivableCollectionBody, body, '회수 본문이 맞지 않습니다');
+    return asHttpProblem(() => this.settlements.collectReceivable(receivableId, b));
+  }
+
+  @Post('receivables/:receivableId/write-offs')
+  @HttpCode(200)
+  @ContractRouteSchema({ responses: { 200: z.record(z.string(), z.unknown()) } })
+  async writeOffReceivable(@Param('receivableId') receivableId: string, @Body() body: unknown) {
+    const b = one(GuaranteeBody, body, '손실 본문이 맞지 않습니다');
+    return asHttpProblem(() => this.settlements.writeOffReceivable(receivableId, b));
   }
 
   @Post('payout-batches/:batchId/approvals')

@@ -3633,6 +3633,12 @@ export const createOpsEventCancellationResponseFanNoticeReasonMax = 200;
 
 export const createOpsEventCancellationResponseProgressAccountPendingMin = 0;
 
+export const createOpsEventCancellationResponseProgressPerPgItemResumeCallsMin = 0;
+
+export const createOpsEventCancellationResponseProgressPerPgItemResumeFailuresMin = 0;
+
+export const createOpsEventCancellationResponseProgressPerPgItemResumeFailureRateBpMin = 0;
+
 
 
 export const CreateOpsEventCancellationResponse = zod.object({
@@ -3656,6 +3662,14 @@ export const CreateOpsEventCancellationResponse = zod.object({
   "pauseReason": zod.union([zod.literal('AUTO_FAILURE_RATE'),zod.literal('AUTO_FAILED_AMOUNT'),zod.literal('AUTO_CONSECUTIVE_FAILURES'),zod.literal('AUTO_CIRCUIT_OPEN'),zod.literal('AUTO_REJECT_RATE'),zod.literal('MANUAL'),zod.literal(null)]).nullish().describe('PAUSED일 때만. AUTO_로 시작하면 스스로 멈춤'),
   "done": zod.int().optional(),
   "failed": zod.int().optional(),
+  "resume": zod.object({
+  "circuitState": zod.union([zod.literal('closed'),zod.literal('half_open'),zod.literal('open'),zod.literal(null)]).nullish(),
+  "calls": zod.int().min(createOpsEventCancellationResponseProgressPerPgItemResumeCallsMin).optional(),
+  "failures": zod.int().min(createOpsEventCancellationResponseProgressPerPgItemResumeFailuresMin).optional(),
+  "failureRateBp": zod.int().min(createOpsEventCancellationResponseProgressPerPgItemResumeFailureRateBpMin).nullish(),
+  "windowSeconds": zod.literal(300).optional(),
+  "state": zod.enum(['ELIGIBLE', 'NO_SAMPLE', 'FAILURE_RATE_HIGH', 'CIRCUIT_OPEN', 'CIRCUIT_UNAVAILABLE']).optional()
+}).optional().describe('SCR-047 결제사 몫의 재개 조건(F-07-15 I-06). calls=0이면 NO_SAMPLE, 서킷 open은 CIRCUIT_OPEN, 서킷을 읽지 못하면 CIRCUIT_UNAVAILABLE, 실패율 500bp 이상은 FAILURE_RATE_HIGH, 그 밖은 ELIGIBLE'),
   "unknown": zod.int().optional().describe('결과 모름으로 재시도 큐에 있는 건')
 })).optional().describe('결제사 몫마다의 진행과 멈춘 이유(transfer-refund §5, 추천 적용 2026-10-28, 기술 검토 중간-045)')
 }).optional(),
@@ -3692,6 +3706,12 @@ export const listOpsEventCancellationsResponseItemsItemFanNoticeReasonMax = 200;
 
 export const listOpsEventCancellationsResponseItemsItemProgressAccountPendingMin = 0;
 
+export const listOpsEventCancellationsResponseItemsItemProgressPerPgItemResumeCallsMin = 0;
+
+export const listOpsEventCancellationsResponseItemsItemProgressPerPgItemResumeFailuresMin = 0;
+
+export const listOpsEventCancellationsResponseItemsItemProgressPerPgItemResumeFailureRateBpMin = 0;
+
 
 
 export const ListOpsEventCancellationsResponse = zod.object({
@@ -3716,6 +3736,14 @@ export const ListOpsEventCancellationsResponse = zod.object({
   "pauseReason": zod.union([zod.literal('AUTO_FAILURE_RATE'),zod.literal('AUTO_FAILED_AMOUNT'),zod.literal('AUTO_CONSECUTIVE_FAILURES'),zod.literal('AUTO_CIRCUIT_OPEN'),zod.literal('AUTO_REJECT_RATE'),zod.literal('MANUAL'),zod.literal(null)]).nullish().describe('PAUSED일 때만. AUTO_로 시작하면 스스로 멈춤'),
   "done": zod.int().optional(),
   "failed": zod.int().optional(),
+  "resume": zod.object({
+  "circuitState": zod.union([zod.literal('closed'),zod.literal('half_open'),zod.literal('open'),zod.literal(null)]).nullish(),
+  "calls": zod.int().min(listOpsEventCancellationsResponseItemsItemProgressPerPgItemResumeCallsMin).optional(),
+  "failures": zod.int().min(listOpsEventCancellationsResponseItemsItemProgressPerPgItemResumeFailuresMin).optional(),
+  "failureRateBp": zod.int().min(listOpsEventCancellationsResponseItemsItemProgressPerPgItemResumeFailureRateBpMin).nullish(),
+  "windowSeconds": zod.literal(300).optional(),
+  "state": zod.enum(['ELIGIBLE', 'NO_SAMPLE', 'FAILURE_RATE_HIGH', 'CIRCUIT_OPEN', 'CIRCUIT_UNAVAILABLE']).optional()
+}).optional().describe('SCR-047 결제사 몫의 재개 조건(F-07-15 I-06). calls=0이면 NO_SAMPLE, 서킷 open은 CIRCUIT_OPEN, 서킷을 읽지 못하면 CIRCUIT_UNAVAILABLE, 실패율 500bp 이상은 FAILURE_RATE_HIGH, 그 밖은 ELIGIBLE'),
   "unknown": zod.int().optional().describe('결과 모름으로 재시도 큐에 있는 건')
 })).optional().describe('결제사 몫마다의 진행과 멈춘 이유(transfer-refund §5, 추천 적용 2026-10-28, 기술 검토 중간-045)')
 }).optional(),
@@ -3757,6 +3785,12 @@ export const createOpsEventCancellationJudgementResponseFanNoticeReasonMax = 200
 
 export const createOpsEventCancellationJudgementResponseProgressAccountPendingMin = 0;
 
+export const createOpsEventCancellationJudgementResponseProgressPerPgItemResumeCallsMin = 0;
+
+export const createOpsEventCancellationJudgementResponseProgressPerPgItemResumeFailuresMin = 0;
+
+export const createOpsEventCancellationJudgementResponseProgressPerPgItemResumeFailureRateBpMin = 0;
+
 
 
 export const CreateOpsEventCancellationJudgementResponse = zod.object({
@@ -3780,6 +3814,14 @@ export const CreateOpsEventCancellationJudgementResponse = zod.object({
   "pauseReason": zod.union([zod.literal('AUTO_FAILURE_RATE'),zod.literal('AUTO_FAILED_AMOUNT'),zod.literal('AUTO_CONSECUTIVE_FAILURES'),zod.literal('AUTO_CIRCUIT_OPEN'),zod.literal('AUTO_REJECT_RATE'),zod.literal('MANUAL'),zod.literal(null)]).nullish().describe('PAUSED일 때만. AUTO_로 시작하면 스스로 멈춤'),
   "done": zod.int().optional(),
   "failed": zod.int().optional(),
+  "resume": zod.object({
+  "circuitState": zod.union([zod.literal('closed'),zod.literal('half_open'),zod.literal('open'),zod.literal(null)]).nullish(),
+  "calls": zod.int().min(createOpsEventCancellationJudgementResponseProgressPerPgItemResumeCallsMin).optional(),
+  "failures": zod.int().min(createOpsEventCancellationJudgementResponseProgressPerPgItemResumeFailuresMin).optional(),
+  "failureRateBp": zod.int().min(createOpsEventCancellationJudgementResponseProgressPerPgItemResumeFailureRateBpMin).nullish(),
+  "windowSeconds": zod.literal(300).optional(),
+  "state": zod.enum(['ELIGIBLE', 'NO_SAMPLE', 'FAILURE_RATE_HIGH', 'CIRCUIT_OPEN', 'CIRCUIT_UNAVAILABLE']).optional()
+}).optional().describe('SCR-047 결제사 몫의 재개 조건(F-07-15 I-06). calls=0이면 NO_SAMPLE, 서킷 open은 CIRCUIT_OPEN, 서킷을 읽지 못하면 CIRCUIT_UNAVAILABLE, 실패율 500bp 이상은 FAILURE_RATE_HIGH, 그 밖은 ELIGIBLE'),
   "unknown": zod.int().optional().describe('결과 모름으로 재시도 큐에 있는 건')
 })).optional().describe('결제사 몫마다의 진행과 멈춘 이유(transfer-refund §5, 추천 적용 2026-10-28, 기술 검토 중간-045)')
 }).optional(),
@@ -3842,6 +3884,12 @@ export const createOpsEventCancellationPauseResponseFanNoticeReasonMax = 200;
 
 export const createOpsEventCancellationPauseResponseProgressAccountPendingMin = 0;
 
+export const createOpsEventCancellationPauseResponseProgressPerPgItemResumeCallsMin = 0;
+
+export const createOpsEventCancellationPauseResponseProgressPerPgItemResumeFailuresMin = 0;
+
+export const createOpsEventCancellationPauseResponseProgressPerPgItemResumeFailureRateBpMin = 0;
+
 
 
 export const CreateOpsEventCancellationPauseResponse = zod.object({
@@ -3865,6 +3913,14 @@ export const CreateOpsEventCancellationPauseResponse = zod.object({
   "pauseReason": zod.union([zod.literal('AUTO_FAILURE_RATE'),zod.literal('AUTO_FAILED_AMOUNT'),zod.literal('AUTO_CONSECUTIVE_FAILURES'),zod.literal('AUTO_CIRCUIT_OPEN'),zod.literal('AUTO_REJECT_RATE'),zod.literal('MANUAL'),zod.literal(null)]).nullish().describe('PAUSED일 때만. AUTO_로 시작하면 스스로 멈춤'),
   "done": zod.int().optional(),
   "failed": zod.int().optional(),
+  "resume": zod.object({
+  "circuitState": zod.union([zod.literal('closed'),zod.literal('half_open'),zod.literal('open'),zod.literal(null)]).nullish(),
+  "calls": zod.int().min(createOpsEventCancellationPauseResponseProgressPerPgItemResumeCallsMin).optional(),
+  "failures": zod.int().min(createOpsEventCancellationPauseResponseProgressPerPgItemResumeFailuresMin).optional(),
+  "failureRateBp": zod.int().min(createOpsEventCancellationPauseResponseProgressPerPgItemResumeFailureRateBpMin).nullish(),
+  "windowSeconds": zod.literal(300).optional(),
+  "state": zod.enum(['ELIGIBLE', 'NO_SAMPLE', 'FAILURE_RATE_HIGH', 'CIRCUIT_OPEN', 'CIRCUIT_UNAVAILABLE']).optional()
+}).optional().describe('SCR-047 결제사 몫의 재개 조건(F-07-15 I-06). calls=0이면 NO_SAMPLE, 서킷 open은 CIRCUIT_OPEN, 서킷을 읽지 못하면 CIRCUIT_UNAVAILABLE, 실패율 500bp 이상은 FAILURE_RATE_HIGH, 그 밖은 ELIGIBLE'),
   "unknown": zod.int().optional().describe('결과 모름으로 재시도 큐에 있는 건')
 })).optional().describe('결제사 몫마다의 진행과 멈춘 이유(transfer-refund §5, 추천 적용 2026-10-28, 기술 검토 중간-045)')
 }).optional(),
@@ -3899,6 +3955,12 @@ export const createOpsEventCancellationResumptionResponseFanNoticeReasonMax = 20
 
 export const createOpsEventCancellationResumptionResponseProgressAccountPendingMin = 0;
 
+export const createOpsEventCancellationResumptionResponseProgressPerPgItemResumeCallsMin = 0;
+
+export const createOpsEventCancellationResumptionResponseProgressPerPgItemResumeFailuresMin = 0;
+
+export const createOpsEventCancellationResumptionResponseProgressPerPgItemResumeFailureRateBpMin = 0;
+
 
 
 export const CreateOpsEventCancellationResumptionResponse = zod.object({
@@ -3922,6 +3984,14 @@ export const CreateOpsEventCancellationResumptionResponse = zod.object({
   "pauseReason": zod.union([zod.literal('AUTO_FAILURE_RATE'),zod.literal('AUTO_FAILED_AMOUNT'),zod.literal('AUTO_CONSECUTIVE_FAILURES'),zod.literal('AUTO_CIRCUIT_OPEN'),zod.literal('AUTO_REJECT_RATE'),zod.literal('MANUAL'),zod.literal(null)]).nullish().describe('PAUSED일 때만. AUTO_로 시작하면 스스로 멈춤'),
   "done": zod.int().optional(),
   "failed": zod.int().optional(),
+  "resume": zod.object({
+  "circuitState": zod.union([zod.literal('closed'),zod.literal('half_open'),zod.literal('open'),zod.literal(null)]).nullish(),
+  "calls": zod.int().min(createOpsEventCancellationResumptionResponseProgressPerPgItemResumeCallsMin).optional(),
+  "failures": zod.int().min(createOpsEventCancellationResumptionResponseProgressPerPgItemResumeFailuresMin).optional(),
+  "failureRateBp": zod.int().min(createOpsEventCancellationResumptionResponseProgressPerPgItemResumeFailureRateBpMin).nullish(),
+  "windowSeconds": zod.literal(300).optional(),
+  "state": zod.enum(['ELIGIBLE', 'NO_SAMPLE', 'FAILURE_RATE_HIGH', 'CIRCUIT_OPEN', 'CIRCUIT_UNAVAILABLE']).optional()
+}).optional().describe('SCR-047 결제사 몫의 재개 조건(F-07-15 I-06). calls=0이면 NO_SAMPLE, 서킷 open은 CIRCUIT_OPEN, 서킷을 읽지 못하면 CIRCUIT_UNAVAILABLE, 실패율 500bp 이상은 FAILURE_RATE_HIGH, 그 밖은 ELIGIBLE'),
   "unknown": zod.int().optional().describe('결과 모름으로 재시도 큐에 있는 건')
 })).optional().describe('결제사 몫마다의 진행과 멈춘 이유(transfer-refund §5, 추천 적용 2026-10-28, 기술 검토 중간-045)')
 }).optional(),
@@ -4649,6 +4719,125 @@ export const CreateOpsPayoutBatchPortoneExecutionBody = zod.object({
 }).strict()
 
 export const CreateOpsPayoutBatchPortoneExecutionResponse = zod.unknown()
+
+/**
+ * F-07-15, settlement §7. 남은 미수금 전액을 청구로 옮기고 receivable_movement·receivable_action에 한 트랜잭션으로 남긴다. 같은 Idempotency-Key는 같은 결과를 준다
+ * @summary 미수금 청구(commander, 사유·멱등 키·재인증)
+ */
+export const CreateOpsReceivableBillingParams = zod.object({
+  "receivableId": zod.uuid()
+})
+
+export const CreateOpsReceivableBillingHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
+})
+
+export const createOpsReceivableBillingBodyReasonMax = 2000;
+
+
+
+export const CreateOpsReceivableBillingBody = zod.object({
+  "reason": zod.string().min(1).max(createOpsReceivableBillingBodyReasonMax)
+}).strict()
+
+export const CreateOpsReceivableBillingResponse = zod.object({
+  "actionId": zod.string().optional(),
+  "kind": zod.enum(['BILLED', 'COLLECTED', 'WRITE_OFF']).optional(),
+  "amount": zod.int().optional(),
+  "remainingAfter": zod.int().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "receivable": zod.object({
+  "receivableId": zod.string().optional(),
+  "promoterId": zod.string().optional(),
+  "pg": zod.union([zod.literal('TOSS'),zod.literal('PORTONE'),zod.literal(null)]).nullish(),
+  "cause": zod.enum(['REFUND_AFTER_PAYOUT', 'CHARGEBACK', 'COMPENSATION_ADVANCE', 'NEGATIVE_STATEMENT']).optional(),
+  "eventId": zod.string().nullish(),
+  "amount": zod.int().optional(),
+  "remaining": zod.int().optional(),
+  "status": zod.enum(['OPEN', 'OFFSET', 'GUARANTEE', 'BILLED', 'CLOSED', 'WRITTEN_OFF']).optional()
+}).optional().describe('미수금(상계 → 보증 → 청구)')
+}).describe('미수금 수동 전이 결과(J-T11 ⑤, F-07-15). 청구·회수·손실을 한 번만 적용하고 남은 금액을 돌려준다')
+
+/**
+ * F-07-15, settlement §7. 회수 금액만큼 남은 미수금을 줄이고 receivable_movement·receivable_action에 한 트랜잭션으로 남긴다. 부분 회수를 허용하고 남은 금액을 넘으면 422다
+ * @summary 미수금 회수(commander, 사유·멱등 키·재인증)
+ */
+export const CreateOpsReceivableCollectionParams = zod.object({
+  "receivableId": zod.uuid()
+})
+
+export const CreateOpsReceivableCollectionHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
+})
+
+
+export const createOpsReceivableCollectionBodyReasonMax = 2000;
+
+
+
+export const CreateOpsReceivableCollectionBody = zod.object({
+  "amount": zod.int().min(1),
+  "reason": zod.string().min(1).max(createOpsReceivableCollectionBodyReasonMax)
+}).strict()
+
+export const CreateOpsReceivableCollectionResponse = zod.object({
+  "actionId": zod.string().optional(),
+  "kind": zod.enum(['BILLED', 'COLLECTED', 'WRITE_OFF']).optional(),
+  "amount": zod.int().optional(),
+  "remainingAfter": zod.int().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "receivable": zod.object({
+  "receivableId": zod.string().optional(),
+  "promoterId": zod.string().optional(),
+  "pg": zod.union([zod.literal('TOSS'),zod.literal('PORTONE'),zod.literal(null)]).nullish(),
+  "cause": zod.enum(['REFUND_AFTER_PAYOUT', 'CHARGEBACK', 'COMPENSATION_ADVANCE', 'NEGATIVE_STATEMENT']).optional(),
+  "eventId": zod.string().nullish(),
+  "amount": zod.int().optional(),
+  "remaining": zod.int().optional(),
+  "status": zod.enum(['OPEN', 'OFFSET', 'GUARANTEE', 'BILLED', 'CLOSED', 'WRITTEN_OFF']).optional()
+}).optional().describe('미수금(상계 → 보증 → 청구)')
+}).describe('미수금 수동 전이 결과(J-T11 ⑤, F-07-15). 청구·회수·손실을 한 번만 적용하고 남은 금액을 돌려준다')
+
+/**
+ * F-07-15, settlement §7. 남은 미수금을 손실로 옮기고 receivable_movement·receivable_action에 한 트랜잭션으로 남긴다. 손실은 되돌리지 않는다
+ * @summary 미수금 손실 처리(commander, 사유·멱등 키·재인증)
+ */
+export const CreateOpsReceivableWriteOffParams = zod.object({
+  "receivableId": zod.uuid()
+})
+
+export const CreateOpsReceivableWriteOffHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)'),
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
+})
+
+export const createOpsReceivableWriteOffBodyReasonMax = 2000;
+
+
+
+export const CreateOpsReceivableWriteOffBody = zod.object({
+  "reason": zod.string().min(1).max(createOpsReceivableWriteOffBodyReasonMax)
+}).strict()
+
+export const CreateOpsReceivableWriteOffResponse = zod.object({
+  "actionId": zod.string().optional(),
+  "kind": zod.enum(['BILLED', 'COLLECTED', 'WRITE_OFF']).optional(),
+  "amount": zod.int().optional(),
+  "remainingAfter": zod.int().optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "receivable": zod.object({
+  "receivableId": zod.string().optional(),
+  "promoterId": zod.string().optional(),
+  "pg": zod.union([zod.literal('TOSS'),zod.literal('PORTONE'),zod.literal(null)]).nullish(),
+  "cause": zod.enum(['REFUND_AFTER_PAYOUT', 'CHARGEBACK', 'COMPENSATION_ADVANCE', 'NEGATIVE_STATEMENT']).optional(),
+  "eventId": zod.string().nullish(),
+  "amount": zod.int().optional(),
+  "remaining": zod.int().optional(),
+  "status": zod.enum(['OPEN', 'OFFSET', 'GUARANTEE', 'BILLED', 'CLOSED', 'WRITTEN_OFF']).optional()
+}).optional().describe('미수금(상계 → 보증 → 청구)')
+}).describe('미수금 수동 전이 결과(J-T11 ⑤, F-07-15). 청구·회수·손실을 한 번만 적용하고 남은 금액을 돌려준다')
 
 /**
  * POL-039. 상계 → 보증 → 청구. 목록은 커서로 나눈다(추천 적용 2026-10-21, ADR-0081). 관제 역할(viewer·operator·commander)만이고 CS 담당자는 403이다(open-items 72번, 2026-10-30)
@@ -5497,6 +5686,12 @@ export const getOpsEventCancellationResponseFanNoticeReasonMax = 200;
 
 export const getOpsEventCancellationResponseProgressAccountPendingMin = 0;
 
+export const getOpsEventCancellationResponseProgressPerPgItemResumeCallsMin = 0;
+
+export const getOpsEventCancellationResponseProgressPerPgItemResumeFailuresMin = 0;
+
+export const getOpsEventCancellationResponseProgressPerPgItemResumeFailureRateBpMin = 0;
+
 
 
 export const GetOpsEventCancellationResponse = zod.object({
@@ -5520,6 +5715,14 @@ export const GetOpsEventCancellationResponse = zod.object({
   "pauseReason": zod.union([zod.literal('AUTO_FAILURE_RATE'),zod.literal('AUTO_FAILED_AMOUNT'),zod.literal('AUTO_CONSECUTIVE_FAILURES'),zod.literal('AUTO_CIRCUIT_OPEN'),zod.literal('AUTO_REJECT_RATE'),zod.literal('MANUAL'),zod.literal(null)]).nullish().describe('PAUSED일 때만. AUTO_로 시작하면 스스로 멈춤'),
   "done": zod.int().optional(),
   "failed": zod.int().optional(),
+  "resume": zod.object({
+  "circuitState": zod.union([zod.literal('closed'),zod.literal('half_open'),zod.literal('open'),zod.literal(null)]).nullish(),
+  "calls": zod.int().min(getOpsEventCancellationResponseProgressPerPgItemResumeCallsMin).optional(),
+  "failures": zod.int().min(getOpsEventCancellationResponseProgressPerPgItemResumeFailuresMin).optional(),
+  "failureRateBp": zod.int().min(getOpsEventCancellationResponseProgressPerPgItemResumeFailureRateBpMin).nullish(),
+  "windowSeconds": zod.literal(300).optional(),
+  "state": zod.enum(['ELIGIBLE', 'NO_SAMPLE', 'FAILURE_RATE_HIGH', 'CIRCUIT_OPEN', 'CIRCUIT_UNAVAILABLE']).optional()
+}).optional().describe('SCR-047 결제사 몫의 재개 조건(F-07-15 I-06). calls=0이면 NO_SAMPLE, 서킷 open은 CIRCUIT_OPEN, 서킷을 읽지 못하면 CIRCUIT_UNAVAILABLE, 실패율 500bp 이상은 FAILURE_RATE_HIGH, 그 밖은 ELIGIBLE'),
   "unknown": zod.int().optional().describe('결과 모름으로 재시도 큐에 있는 건')
 })).optional().describe('결제사 몫마다의 진행과 멈춘 이유(transfer-refund §5, 추천 적용 2026-10-28, 기술 검토 중간-045)')
 }).optional(),
