@@ -382,3 +382,9 @@ ADR-0373 결정 2의 '동결로 미검증'이다. 완성 판정에서 빼고 완
 | S-T14 ④ | 미검증 |  | BAT-095(K4, 완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). Degraded Mode 완화 SLO p99 1.5초와 초과 판매 0건도 K4 무대가 필요하다(S-T12 ①과 같은 까닭). ①~③(자동 전환)은 BAT-053(HOT-091) 시험이다 |
 | S-T15 | 미검증 |  | LCH-200(K5, 완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). K5 랩 판정 도구 `loadtest/k5/seatmap-lab.mjs`는 v0 입구 고정이고 v1 좌석맵 랩 판정은 LCH-200(F-08-1, 동결)이다 |
 | P-T31 | 미검증 |  | 구간 측정(완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). 결제사 전환 훈련과 결제사별 동시 입장 목표 상한은 스테이징 무대가 필요하다(F-09 클라우드 기반, 동결) |
+
+## F-07-15 PostgreSQL 통합(2026-11-27)
+
+| 실행 ID | 시각 | 결과 | 근거 |
+| --- | --- | --- | --- |
+| F0715-PG-20261127-0719 | 2026-11-27 07:19:21~07:24:10 KST | 통과 10/10(신규 7, 기존 ops 3), 실패 0 | 잠금 `docker`/`lane5-F-07-15`. 실제 PostgreSQL 18에서 payment `test-int/receivable.int.test.ts` 3/3(0034 표·CHECK·색인·ACL, nullable statement_id, action+movement 트랜잭션, Drizzle 조건부 갱신), purchase `test-int/refund-account.int.test.ts` 4/4(0039 칸·부분 색인, count+1·다음 영업일 10:00 KST·Outbox 한 트랜잭션, RefundRetryLoop, event_refund_attempt 최근 5분 경계·REJECT 제외), ops `test-int/admin-accounts.int.test.ts` 3/3(감사·재인증 DB 왕복). 첫 실행의 실패 2건은 신규 시험 자체의 정렬·시드 트랜잭션 문제였고 구현 결함은 없었다. `admin_data_access` 표·경로는 이 트리에 없어 미실행. 컨테이너·볼륨 정리 뒤 `docker ps` 0, 잠금은 07:24:10에 놓았다. 브라우저·kind·AWS는 쓰지 않았다. |
