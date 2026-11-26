@@ -123,7 +123,7 @@
 | F-08-1 | 출시·측정 | B | LCH-200 | 3.00 | FE-T10, docs/frontend.md | 경로별 번들 예산·좌석맵 랩·web-vitals p75가 된다 판정: FE-T10, docs/frontend.md | - | 동결 | 동결(ADR-0373, 7일 완성 범위 밖) |
 | F-08-2 | 출시·측정 | B | MSR-010·MSR-020 | 4.25 | V-T2, V-T4, V-T5, V-T17 | 100만 외삽·진입 서버 비례·외부 한도 대조가 나온다 판정: V-T2, V-T4, V-T5, V-T17 | F-08-1 | 진행 | 측정 창 4; 7일 범위(ADR-0373): 갈래 4, 동결한 선행은 보지 않는다; 2026-11-23 계획(`docs/review/plans/F-08-2.md`): 장부 범위를 docs/verification.md 전체(106개)에서 이 단계가 만드는 넷으로 좁혔다. 측정 창은 F-08-8과 하나로 잇는다 |
 | F-08-3 | 출시·측정 | B | MSR-030·MSR-080 | 3.50 | - | M6 블로그·용량 산정서·비용 리포트·DORA 추세가 나온다 | F-08-2 | 동결 | 측정 창 4; 장부 없음: 시험·측정으로 본다; 동결(ADR-0373, 7일 완성 범위 밖) |
-| F-08-4 | 출시·측정 | B | MSR-040 | 3.00 | docs/features/queue-admission.md, docs/features/bot-defense.md | 정렬 설정 켬/끔 10만 비교와 ADR 재검토가 나온다 판정: docs/features/queue-admission.md, docs/features/bot-defense.md | F-08-3 | 동결 | 측정 창 4; 동결(ADR-0373, 7일 완성 범위 밖) |
+| F-08-4 | 출시·측정 | B | MSR-040 | 3.00 | Q-T1, Q-T23 | 정렬 설정 켬/끔 10만 비교와 ADR 재검토가 나온다 판정: docs/features/queue-admission.md, docs/features/bot-defense.md | F-08-3 | 동결 | 측정 창 4; 동결(ADR-0373, 7일 완성 범위 밖); 2026-11-26 계획(`docs/review/plans/F-08-4.md`): 장부 범위를 두 문서 전체(322개)에서 Q-T1·Q-T23으로 좁혔다 |
 | F-08-5 | 출시·측정 | B | MSR-050 | 1.50 | NFR-027, V-T10 | 5종 6시간 장시간 시험·누수 주입 대조가 된다 판정: NFR-027, V-T10 | F-08-4 | 동결 | 측정 창 4; 동결(ADR-0373, 7일 완성 범위 밖) |
 | F-08-6 | 출시·측정 | B | MSR-060·MSR-070 | 4.00 | docs/observability.md | Game Day 전체 재실행·포스트모템·SLO/KPI ADR이 나온다 판정: docs/observability.md | F-08-5 | 동결 | 측정 창 4; 동결(ADR-0373, 7일 완성 범위 밖) |
 | F-08-7 | 출시·측정 | C | LCH-350 | 1.50 | - | 관제 데모 영상·안내·RFC 정리·블로그 목차가 나온다 | F-08-6 | 대기 | 측정 창 4; 장부 없음: 시험·측정으로 본다; 7일 범위(ADR-0373): 갈래 5, 동결한 선행은 보지 않는다 |
