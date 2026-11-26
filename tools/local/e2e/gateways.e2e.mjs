@@ -237,7 +237,8 @@ test('B-T18 ④ 원본 확인 머리 없이(또는 틀린 값으로) 보낸 위�
       for (const k of Object.keys(forged)) assert.equal(h[k], undefined, `${m}: 백엔드에 ${k}`);
       assert.equal(h['x-peaket-origin-verify'], undefined, `${m}: 원본 확인 머리가 넘었다`);
     }
-    const [line] = await waitLogLine(c, gw, ip);
+    // gw-scanner는 XFF를 신뢰하지 않아 clientIp가 연결 주소다. 로그에서 그 요청을 찾는 표지는 토큰 sub로 쓴다.
+    const [line] = await waitLogLine(c, gw, gw === 'gw-scanner' ? sub : ip);
     assert.ok(blank(line.ja4) && blank(line.asn) && blank(line.edgeBotLabels), `${m}: 로그 ${JSON.stringify(line)}`);
     assert.ok(!JSON.stringify(line).includes(ja4), `${m}: 로그에 위조 JA4`);
   }

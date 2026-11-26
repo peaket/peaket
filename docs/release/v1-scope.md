@@ -121,7 +121,7 @@
 | F-09-3 | 기반·보안 | Redis/Aurora/MSK/Schema Registry/PgBouncer | 동결 | frozen-local | v1 제외(외부 계정): Aurora·MSK·Redis 관리형 설정. | - | - | - | 동결 해제 뒤 freeze/<ID>에서 시작 |
 | F-09-4 | 기반·보안 | TLS/KMS/MSK 역할·비밀 교체·CloudFront/WAF | 동결 | frozen-local | v1 제외(외부 계정): TLS·KMS·CloudFront·WAF 실제 연결. | - | - | - | 동결 해제 뒤 freeze/<ID>에서 시작 |
 | F-09-6 | 기반·보안 | gw-ops IP/VPN·재인증·관리 계정·DAST | 동결 | frozen-local | v1 제외(외부 계정): gw-ops IP/VPN·DAST·관리 계정. | - | - | - | 동결 해제 뒤 freeze/<ID>에서 시작 |
-| F-09-8 | 기반·보안 | kind 재가동·야간 실행 복구 | 일부 구현 있음 | frozen-local | 동결(범위): 구간 5 인프라. 측정에 kind가 필요하면 클러스터 재가동 몫만. 2026-11-26 동결 로컬: 예약 셋·kind 재가동·장부 재확인, DAST·야간 성능·mesh 잔여. | - | - | - | 측정에 kind가 필요할 때 클러스터 재가동만 |
+| F-09-8 | 기반·보안 | kind 재가동·야간 실행 복구 | 일부 구현 있음 | frozen-local | 동결(범위): 구간 5 인프라. 측정에 kind가 필요하면 클러스터 재가동 몫만. 2026-11-26 동결 로컬: 예약 셋·kind 재가동·장부 재확인, DAST·야간 성능 잔여. | - | - | - | 측정에 kind가 필요할 때 클러스터 재가동만 |
 | F-09-9 | 기반·보안 | 엣지 KVS·KMS 키·WS 게이트웨이 PoC | 막힘 | frozen-local | v1 제외(외부 계정): 엣지 KVS·KMS 키·WS PoC(막힘, ADR-0234). | - | - | - | 클라우드 계정·KMS 키 뒤 |
 | F-09-10 | 기반·보안 | KEDA/Karpenter/Argo Rollouts | 동결 | frozen-local | v1 제외(외부 계정): KEDA·Karpenter·Argo Rollouts 클러스터 설정. | - | - | - | 동결 해제 뒤 freeze/<ID>에서 시작 |
 | F-09-11 | 기반·보안 | 카나리 분석·리더 인지 롤링·그림자 계산 | 동결 | frozen-local | v1 제외(외부 계정): 카나리 분석·그림자 계산 클러스터 설정. | - | - | - | 동결 해제 뒤 freeze/<ID>에서 시작 |

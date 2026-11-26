@@ -63,13 +63,14 @@ const PORT = {
 };
 const GRPC_RECEIVERS = ['core-svc', 'identity-svc', 'image-worker', 'payment-svc', 'purchase-svc', 'queue-svc', 'seatmap-worker', 'ticket-svc', 'trust-svc'];
 const CONTROL_RECEIVERS = ['admission-ctrl', 'payment-svc', 'purchase-svc', 'queue-svc'];
-/** 게이트웨이 → REST 포트(라우트 backendRefs·remoteJWKS, 2026-11-18 저장소. trust-svc는 ADR-0285 결정 9 끝의 gw-fan 예외라 MK-06이 본다) */
+/** 게이트웨이 → REST 포트(라우트 backendRefs, 2026-11-26 대조. trust-svc는 ADR-0285 결정 9 끝의 gw-fan 예외라 MK-06이 본다.
+ * payment-svc REST는 gw-partner만 본다. gw-fan의 결제 입력은 purchase-svc가 받고 payment-svc는 내부 호출이다(gw-fan.yaml 원천 주석). */
 const REST_GATEWAYS = {
   'core-svc': ['gw-fan', 'gw-ops', 'gw-partner'],
   'identity-svc': ['gw-fan', 'gw-ops', 'gw-partner', 'gw-queue', 'gw-scanner'],
   'ops-svc': ['gw-ops', 'gw-partner'],
   partner: ['gw-partner'],
-  'payment-svc': ['gw-fan', 'gw-partner'],
+  'payment-svc': ['gw-partner'],
   'purchase-svc': ['gw-fan'],
   'queue-svc': ['gw-queue'],
   'ticket-svc': ['gw-fan', 'gw-partner', 'gw-scanner'],
@@ -124,10 +125,10 @@ for (const w of GRPC_RECEIVERS) {
   c('MK-02', GRPC_CONTROL_CALLER[w], w, 'grpc', 'connect');
 }
 for (const w of ['payment-svc', 'ticket-svc', 'identity-svc']) c('MK-02', 'purchase-svc@core', w, 'grpc', 'deny');
-// MK-03 ③ 웹 앱 서버 → identity-svc 업무 gRPC는 연결, web이 부르지 않는 업무 gRPC(payment-svc 등)는 거부. ticket-svc는 ListTickets를 부른다(메시 없는 포트는 합)
+// MK-03 ③ 웹 앱 서버 → identity-svc 업무 gRPC는 연결, web이 부르지 않는 업무 gRPC(payment-svc·ticket-svc 등)는 거부.
+// web은 ticket-svc를 HTTP(GET /v1/tickets)로 부르고 gRPC ListTickets는 부르지 않는다(FIX-wallet-tickets, docs/api/proto/README.md §3).
 c('MK-03', 'web', 'identity-svc', 'grpc', 'connect');
-c('MK-03', 'web', 'ticket-svc', 'grpc', 'connect');
-for (const w of GRPC_RECEIVERS.filter((x) => x !== 'identity-svc' && x !== 'ticket-svc')) c('MK-03', 'web', w, 'grpc', 'deny');
+for (const w of GRPC_RECEIVERS.filter((x) => x !== 'identity-svc')) c('MK-03', 'web', w, 'grpc', 'deny');
 // MK-04 ④ 게이트웨이 다섯 → 제어 포트 넷: 모두 거부
 for (const g of GATEWAYS) for (const w of CONTROL_RECEIVERS) c('MK-04', g, w, 'control', 'deny');
 // MK-05 ⑤ 비상 런북 Job·ops-svc → 제어 포트 넷: 연결. 다른 서비스(같은 네임스페이스의 queue-svc 포함)·표에 없는 파드는 거부

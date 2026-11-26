@@ -10,16 +10,17 @@
 
 | 무엇 | 값 |
 | --- | --- |
-| 날짜 | 2026-11-26 19:45~21:58 KST |
-| 커밋 | 시험 고정 `07a7fa7e2` + 구현 `d5c81547a` |
+| 날짜 | 2026-11-26 19:45~22:40 KST |
+| 커밋 | 시험 고정 `07a7fa7e2`, 구현 `d5c81547a`, 시험 불일치 고침 `F098-01`·`F098-02` |
 | PC·OS | Windows, Docker Desktop 29.8.1 |
 | Node·pnpm | Node v24.18.0, pnpm 12.16.0 |
 | Docker 엔진 | 29.8.1 |
 | kind·kubectl·helm 판 | kind v0.33.0, kubectl v1.35.8, helm v3.22.1 |
 | 클러스터 이름·포트 | `freeze-f098`·`18641~18645` |
-| Docker 잠금 | 1차 19:45:54~21:35:53, 재확인 21:50:38~21:57:41(한 자리 `docker`, `docker-all` 아님) |
+| Docker 잠금 | 1차 19:45:54~21:35:53, 재확인 21:50:38~21:57:41, 시험 불일치 고침 22:20:48~22:40:26(한 자리 `docker`, `docker-all` 아님) |
 
 - 21:50 재확인 때 첫 `take`가 `lane6-F-04-15`에 막혀 있었는데 `up`·`gateways`가 먼저 돌았다(잠금 전 실행). 21:50:38에 잠근 뒤 시험과 정리를 마쳤고, 다른 갈래의 컨테이너는 없었다. 다음부터는 `take` 성공을 확인한 뒤에만 Docker를 만진다.
+- 22:20~22:40 시험 불일치 고침 확인은 `take` 성공(22:20:48) 뒤에만 클러스터를 띄웠다. 게이트웨이 44/44, 메시 8/8을 확인하고 22:40:26에 정리·잠금 해제했다.
 
 ## kind 재가동
 
@@ -38,13 +39,13 @@
 | 프로브 | 통과 | 2/2(D-T19 ③④) |
 | 진단 | 통과 | 2/2(D-T18 ①) |
 | v0 배포 | 통과 | 12/12. 첫 실행은 `openssl`이 PATH에 없어 실패, Git openssl을 PATH에 두고 다시 실행 |
-| 게이트웨이 | 실패 1 | 44개 중 43 통과, 1 실패. B-T18 ④ gw-scanner가 로그 마커(XFF 주소)를 찾지 못함(아래 남은 위험) |
+| 게이트웨이 | 통과 | 44/44(2차). B-T18 ④ gw-scanner는 토큰 `sub`를 로그 표지로 바꾼 시험 수정 뒤 통과 |
 | 큐 CORS | 통과 | 18/18(Playwright chromium·firefox·webkit) |
 | 게이트웨이 한도 | 통과 | 18/18(D-T50·D-T43·V-T43) |
 | 게이트웨이 라우트 | 통과 | 10/10 |
 | 입장 토큰 | 통과 | 18/18(S-T28 ①) |
 | 입장 장애 | 통과 | 3/3(Q-T69 ②) |
-| 메시 NetworkPolicy | 실패 2 | 8/8 중 6 통과. MK-01·MK-03(아래 남은 위험) |
+| 메시 NetworkPolicy | 통과 | 8/8(2차). MK-01 payment-svc는 gw-partner만, MK-03 web→ticket-svc gRPC는 거부로 시험 기대를 라우트에 맞춤 |
 | Kyverno | 통과 | 5/5(D-T11 ②·D-T18 ② 등) |
 | I-T36 | 통과 | 7/7 |
 | D-T33 ①② | 통과 | `tools/ci/gitops-check.test.mjs` 18/18 |
@@ -54,9 +55,9 @@
 | 시험·단계 | 실패 줄 | 원인 | 고침 | 다시 실행 | 남은 위험 |
 | --- | --- | --- | --- | --- | --- |
 | v0 배포 첫 실행 | `spawnSync openssl ENOENT` | Windows PATH에 openssl이 없었다 | Git openssl(`C:\Program Files\Git\usr\bin`)을 PATH에 둠 | 12/12 통과 | 없다. 복구 절차 §1에 적었다 |
-| 게이트웨이 B-T18 ④ RV-01 | gw-ops 401 로그에 위조 `ja4`·`asn`·`edgeBotLabels`가 남음 | Envoy Gateway 엄격 검증이 `envoy_on_request`를 핸들 없이 불러 Lua가 멈췄고, gw-ops의 원본 확인이 맞은 요청은 끝단 머리를 지우지 않았다 | `envoy_on_request`의 `filterContext`를 `pcall`로 감싸 검증 호출을 건너뛰고, gw-ops는 허용 IP 확인 뒤 끝단 머리를 지운다. `docs/infra.md` §4.1·`docs/features/bot-defense.md` §3.3에 적었다 | RV-01 1/1 통과, 전체 게이트웨이 44개 중 43 통과·1 실패 | B-T18 ④ gw-scanner는 별도(아래) |
-| 게이트웨이 B-T18 ④ | `gw-scanner: 203.0.113.x가 든 접근 로그 줄이 20000ms 안에 없다` | gw-scanner는 정본대로 XFF를 신뢰하지 않아 `clientIp`가 연결 주소(10.244.0.1)다. 시험은 XFF 주소를 로그 마커로 찾는다. 정적 시험 `gateways.test.mjs`는 gw-scanner가 XFF를 신뢰하지 않기를 요구한다 | 고치지 않았다(시험·정본 대조 필요) | — | 시험 기대와 정본이 어긋난다. 시험 담당이 마커를 연결 주소 또는 다른 필드로 바꿔야 한다 |
-| 메시 MK-01·MK-03 | `gw-fan → payment-svc rest(8080)`·`web → ticket-svc grpc(50052)`가 `deny` | `deploy/platform/mesh/port-allow.yaml`과 현재 라우트가 시험 기대와 다르다. payment-svc gw-fan 라우트는 원천 주석상 없고, web은 ticket-svc를 HTTP로 부른다 | 고치지 않았다(시험·라우트 대조 필요) | — | 시험 기대가 옛 라우트를 가리킨다. 확대 적용 전 시험·정본을 맞춰야 한다 |
+| 게이트웨이 B-T18 ④ RV-01 | gw-ops 401 로그에 위조 `ja4`·`asn`·`edgeBotLabels`가 남음 | Envoy Gateway 엄격 검증이 `envoy_on_request`를 핸들 없이 불러 Lua가 멈췄고, gw-ops의 원본 확인이 맞은 요청은 끝단 머리를 지우지 않았다 | `envoy_on_request`의 `filterContext`를 `pcall`로 감싸 검증 호출을 건너뛰고, gw-ops는 허용 IP 확인 뒤 끝단 머리를 지운다. `docs/infra.md` §4.1·`docs/features/bot-defense.md` §3.3에 적었다 | RV-01 1/1 통과, 2차 전체 게이트웨이 44/44 | 없다 |
+| 게이트웨이 B-T18 ④ | `gw-scanner: 203.0.113.x가 든 접근 로그 줄이 20000ms 안에 없다` | gw-scanner는 정본대로 XFF를 신뢰하지 않아 `clientIp`가 연결 주소(10.244.0.1)다. 시험은 XFF 주소를 로그 마커로 찾았다 | 시험 표지를 토큰 `sub`로 바꿨다(제품·XFF 규칙 그대로). `gateways.e2e.mjs:240` | 2차 게이트웨이 44/44 | 없다 |
+| 메시 MK-01·MK-03 | `gw-fan → payment-svc rest(8080)`·`web → ticket-svc grpc(50052)`가 `deny` | 시험 기대가 현재 라우트와 달랐다. payment-svc는 gw-partner만 라우트가 있고, web은 ticket-svc를 HTTP로 부른다(`port-allow.yaml` `ListTickets: []`) | `REST_GATEWAYS['payment-svc']=['gw-partner']`, MK-03의 web→ticket-svc gRPC를 거부로 바꿨다. `port-allow.yaml`은 고치지 않았다 | 2차 메시 8/8 | 없다 |
 | DAST | `ZAP 미끼 점검 3회 안에 High를 못 찾았다` | Windows Docker Desktop에서 `--network host`로 호스트의 미끼 서버에 닿지 못했다 | 고치지 않았다(환경) | — | 대상 High 0은 확인하지 못했다. Linux CI에서 다시 봐야 한다 |
 | 야간 성능 | `k6 실패(base/new, 종료 1, 약속 없음)`·`dropped_iterations 155/70` | 이 PC에서 1,000 VU 발생기가 반복 시작을 다 못 해 측정이 무효가 됐다(게이트웨이·Kyverno 등을 내린 뒤에도 같음) | 고치지 않았다(환경) | 두 번 시도, 모두 무효 | 결과 파일이 없어 `compare`를 하지 못했다. 측정 창의 전용 러너에서 다시 해야 한다 |
 | F-01-5 rule_files | `/api/v1/rules`의 `groups` 0개 | 로컬 Prometheus 설정에 `rule_files`가 없다 | 고치지 않았다(F-01-5 후속) | — | SLO 규칙이 로컬에서 평가되지 않는다 |
@@ -98,16 +99,14 @@
 
 | 무엇 | 결과 |
 | --- | --- |
-| 이 가지 클러스터 | 지움(1차 21:35:53, 재확인 뒤 21:57:41. `PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs down`) |
+| 이 가지 클러스터 | 지움(1차 21:35:53, 재확인 21:57:41, 시험 불일치 고침 뒤 22:40:26. `PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs down`) |
 | 다른 클러스터·컨테이너 | kind 클러스터 0개, `freeze-f098`·`peaket` 컨테이너 0개 |
-| Docker 잠금 | 1차 21:35:53, 재확인 21:57:41 놓음 |
+| Docker 잠금 | 1차 21:35:53, 재확인 21:57:41, 시험 불일치 고침 뒤 22:40:26 놓음 |
 | 남은 포트·`.cache` | 포트 18641~18645 해제. `.cache`의 실행 로그·결과 파일은 커밋하지 않는다 |
 
 ## 남은 위험
 
-1. **B-T18 ④ gw-scanner**: 시험이 XFF 주소를 로그 마커로 찾지만 gw-scanner는 정본대로 XFF를 신뢰하지 않는다. 시험·정본 대조가 필요하다.
-2. **메시 MK-01·MK-03**: 시험 기대(gw-fan→payment-svc, web→ticket-svc gRPC)가 현재 라우트·원천과 다르다. 확대 적용 전에 시험·정본을 맞춘다.
-3. **DAST**: Windows Docker Desktop의 `--network host` 제약으로 미끼가 실패했다. Linux CI에서 다시 본다.
-4. **야간 성능**: 이 PC의 1,000 VU 발생기가 반복 시작을 못 해 두 번 무효였다. 측정 창 전용 러너에서 다시 잰다.
-5. **저장소 변수·CI**: `PEAKET_KIND_IN_CI`는 소유자 몫이고, develop CI kind 초록은 병합 뒤에 본다.
-6. **F-01-5 rule_files**: 로컬 Prometheus에 규칙이 실리지 않는다(F-01-5 후속).
+1. **DAST**: Windows Docker Desktop의 `--network host` 제약으로 미끼가 실패했다. Linux CI에서 다시 본다.
+2. **야간 성능**: 이 PC의 1,000 VU 발생기가 반복 시작을 못 해 두 번 무효였다. 측정 창 전용 러너에서 다시 잰다.
+3. **저장소 변수·CI**: `PEAKET_KIND_IN_CI`는 소유자 몫이고, develop CI kind 초록은 병합 뒤에 본다.
+4. **F-01-5 rule_files**: 로컬 Prometheus에 규칙이 실리지 않는다(F-01-5 후속). Grafana 주석 링크도 아직 확인하지 못했다.
