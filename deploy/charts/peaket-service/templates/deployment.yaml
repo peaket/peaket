@@ -24,6 +24,17 @@ spec:
   {{- if not .Values.service.autoscaling.enabled }}
   replicas: {{ .Values.service.replicas }}
   {{- end }}
+  {{- if .Values.service.rollingUpdate.enabled }}
+  {{- $mu := int .Values.service.rollingUpdate.maxUnavailable }}
+  {{- $ms := int .Values.service.rollingUpdate.maxSurge }}
+  {{- if or (lt $mu 0) (lt $ms 0) }}{{- fail "service.rollingUpdate의 maxUnavailable·maxSurge는 0 이상이다" }}{{- end }}
+  {{- if and (eq $mu 0) (eq $ms 0) }}{{- fail "service.rollingUpdate의 maxUnavailable·maxSurge가 둘 다 0이면 롤링이 멈춘다" }}{{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ $mu }}
+      maxSurge: {{ $ms }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ $name }}

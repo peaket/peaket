@@ -1,0 +1,32 @@
+# admission-ctrl-shadow 배포 단위 기본 값(F-09-11, docs/devops.md §6.3).
+# Lease에 참여하지 않고 같은 제어 입력으로 목표를 계산만 한다. 앱 포트·Service가 없는 작업자 모드다.
+# Redis는 읽기 전용 계정의 Secret(admission-ctrl-shadow-secrets)을 쓴다. 실제 ACL 계정 생성·교체는 F-09-4/F-09-8 몫이다.
+name: admission-ctrl-shadow
+
+secretEnvFrom: admission-ctrl-shadow-secrets
+
+managementPort: 9464
+
+worker:
+  enabled: true
+
+service:
+  replicas: 1
+  command: ["node", "--import", "@peaket/platform/telemetry/register", "dist/main.js"]
+  env:
+    PEAKET_ADMISSION_SHADOW: "1"
+    PEAKET_PROMETHEUS_URL: http://prometheus.observability.svc:9090
+  networkPolicy:
+    enabled: true
+    managementFromNamespaces: [observability]
+    egress:
+      internal:
+        # 대기열 Redis(읽기 전용 계정). 목적지를 namespace로 좁힌다
+        - namespaces: [peaket-local]
+          ports: [6379]
+        # 자동 제어 입력 Prometheus
+        - namespaces: [observability]
+          ports: [9090]
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 384Mi }

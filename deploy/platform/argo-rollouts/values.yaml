@@ -14,9 +14,12 @@ controller:
       value: ops
       effect: NoSchedule
   priorityClassName: peaket-control
-  # 컨트롤러 지표를 긁어 카나리·롤아웃 상태를 본다(docs/observability.md §3)
+  # 컨트롤러 지표를 긁어 카나리·롤아웃 상태를 본다(docs/observability.md §3, F-09-11)
   metrics:
     enabled: true
+    serviceMonitor:
+      enabled: true
+      namespace: observability
   # 노드 정비 때 컨트롤러 하나는 남긴다
   pdb:
     enabled: true

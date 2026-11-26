@@ -24,8 +24,24 @@ export interface StartedService {
   close(): Promise<void>;
 }
 
+/** 시작 조립의 갈래. 그림자(`PEAKET_ADMISSION_SHADOW=1`)는 선출·리더·제어 gRPC·RB-35·묶음 결과 폴더를 켜지 않는다 */
+export interface StartPlan {
+  elector: boolean;
+  leader: boolean;
+  control: boolean;
+  rb35: boolean;
+  batch: boolean;
+  shadow: boolean;
+}
+
+export function startPlanOf(env: Record<string, string | undefined>): StartPlan {
+  if (env.PEAKET_ADMISSION_SHADOW === '1') return { elector: false, leader: false, control: false, rb35: false, batch: false, shadow: true };
+  return { elector: true, leader: true, control: true, rb35: true, batch: true, shadow: false };
+}
+
 export async function start(o: StartOptions): Promise<StartedService> {
   const { env } = o;
+  const plan = startPlanOf(env);
   // 대기열 Redis: 로컬·CI는 단일 노드 주소, 운영은 클러스터 시작 노드 주소들(쉼표)
   const clusterUrls = (env.PEAKET_QUEUE_REDIS_CLUSTER_URLS ?? '')
     .split(',')
@@ -36,12 +52,12 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // 게시 전 복제 확인의 최소 복제본 수(운영 1, 로컬·CI 0 [가정], ADR-0182 결정 7)
   const minReplicas = minReplicasOf(env.PEAKET_QUEUE_REDIS_MIN_REPLICAS, clusterUrls.length > 0);
   // 시드·비콘(ADR-0239 결정 5): 운영은 KMS Decrypt와 drand 비콘(BLS 검증)이고 설정이 없으면 시작하지 않는다. local·ci·demo는 시험 값이다.
-  // 시드는 queue-svc 공시 일꾼이 쓴 봉인을 풀어 받는다(ADR-0231 결정 6)
-  const shuffleRuntime = shuffleRuntimeFromEnv(env, { kms: (endpoint, region) => kmsSeedClient({ region, ...(endpoint ? { endpoint } : {}) }), clock: systemClock });
+  // 시드는 queue-svc 공시 일꾼이 쓴 봉인을 풀어 받는다(ADR-0231 결정 6). 그림자는 셔플을 하지 않아 만들지 않는다
+  const shuffleRuntime = plan.batch ? shuffleRuntimeFromEnv(env, { kms: (endpoint, region) => kmsSeedClient({ region, ...(endpoint ? { endpoint } : {}) }), clock: systemClock }) : undefined;
   // RB-35 commander 공개키(ADR-0239 결정 7): 운영은 없으면 시작하지 않는다. local·ci·demo는 없으면 RB-35 일꾼을 켜지 않는다
   const commanderKeys = commanderKeysFromProcess(env);
   const resultDir = env.PEAKET_BATCH_RESULT_DIR;
-  if (!resultDir) throw new Error('PEAKET_BATCH_RESULT_DIR가 없다(묶음 결과 파일을 쓸 곳. 운영의 회차별 S3 어댑터는 BUILD_ORDER HOT-012, ADR-0232)');
+  if (plan.batch && !resultDir) throw new Error('PEAKET_BATCH_RESULT_DIR가 없다(묶음 결과 파일을 쓸 곳. 운영의 회차별 S3 어댑터는 BUILD_ORDER HOT-012, ADR-0232)');
 
   // 자동 제어 입력(클러스터 안 Prometheus, ADR-0226 결정 13). 운영에서 빠지면 조용히 자동 제어가 꺼지지 않게 시작을 실패시키고, 로컬·CI는 꺼진 채 돈다. 주소가 http(s)가 아니거나 사용자 정보가 있으면 여기서 던져 시작이 실패한다
   const promUrl = env.PEAKET_PROMETHEUS_URL;
@@ -61,11 +77,34 @@ export async function start(o: StartOptions): Promise<StartedService> {
   // Lease 15초·갱신 시도 5초(docs/infra.md), 갱신 한도 10초 [가정](ADR-0182 결정 1)
   const elector = new LeaseElector({ api: leaseApi, identity: env.HOSTNAME ?? `${SERVICE}-local`, clock: systemClock, leaseDurationMs: 15_000, renewDeadlineMs: 10_000, retryPeriodMs: 5_000 });
 
+  const batch = plan.batch
+    ? {
+        seeds: new CommittedSeedSource(shuffleRecords, shuffleRuntime!.opener),
+        beacon: shuffleRuntime!.beacon(shuffleRecords),
+        files: new LocalResultFiles(resultDir!),
+        ...(commanderKeys ? { runbookAuth: new SignedMarkAuth(commanderKeys) } : {}),
+        minReplicas,
+        ...(waitRedis ? { waitRedis } : {}),
+      }
+    : {
+        // 그림자는 셔플 게시·시드 공개를 하지 않는다. 쓰이지 않는 자리만 채운다
+        seeds: new CommittedSeedSource(shuffleRecords, {
+          open: async () => {
+            throw new Error('그림자는 셔플 시드를 풀지 않는다');
+          },
+        }),
+        beacon: (() => {
+          throw new Error('그림자는 셔플 비콘을 쓰지 않는다');
+        }) as never,
+        files: new LocalResultFiles(''),
+        minReplicas: 0,
+      };
+
   const service = await createService({
     name: SERVICE,
     env,
     ...(o.logDestination ? { logDestination: o.logDestination } : {}),
-    module: AppModule.register({ redis, elector, metrics, ...(controlInputs ? { controlInputs } : {}), batch: { seeds: new CommittedSeedSource(shuffleRecords, shuffleRuntime.opener), beacon: shuffleRuntime.beacon(shuffleRecords), files: new LocalResultFiles(resultDir), ...(commanderKeys ? { runbookAuth: new SignedMarkAuth(commanderKeys) } : {}), minReplicas, ...(waitRedis ? { waitRedis } : {}) } }),
+    module: AppModule.register({ redis, elector, metrics, ...(controlInputs ? { controlInputs } : {}), batch }),
   });
   metrics.register(service.metrics.registry);
   if (!controlInputs) service.logger.warn({}, '자동 제어 입력이 없어(PEAKET_PROMETHEUS_URL) AIMD를 끈 채 돈다(로컬·CI)');
@@ -76,12 +115,13 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const controlSync = startServiceControlSync(service, env, { sessions: false });
   await service.listen();
   const leader = service.app.get(AdmissionLeader);
-  elector.start();
-  leader.start();
+  if (plan.elector) elector.start();
+  if (plan.leader) leader.start();
+  else leader.startShadow();
   // 제어 gRPC 받는 쪽(F-02-1 OPS-300, ADR-0365 결정 5): 제어 전용 포트가 있을 때만 연다. 리더만 쓰고(아니면 UNAVAILABLE not-leader), 세대 확인 Lua로 쓴다
   const controlPort = Number(env.PEAKET_ADMISSION_CONTROL_GRPC_PORT ?? '');
   const control =
-    Number.isInteger(controlPort) && controlPort > 0
+    plan.control && Number.isInteger(controlPort) && controlPort > 0
       ? await startAdmissionControlServer({
           host: env.PEAKET_CONTROL_GRPC_HOST ?? '0.0.0.0',
           port: controlPort,
@@ -97,7 +137,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       : undefined;
   if (control) service.logger.info({ port: control.port }, '제어 gRPC 포트를 열었다');
   // RB-35 일꾼(ADR-0239 결정 8): 리더만 전달된 묶음을 검증해 적용한다
-  const rb35Worker = commanderKeys
+  const rb35Worker = plan.rb35 && commanderKeys
     ? new Rb35Worker({
         store: new RedisRb35Store(redis, new RedisBatchStore(redis)),
         apply: new ApplyRb35(new RedisRb35Store(redis, new RedisBatchStore(redis)), commanderKeys, systemClock, {

@@ -1,5 +1,8 @@
 {{- if and .Values.service.enabled .Values.service.pdb.enabled }}
 {{- $name := include "peaket.name" . }}
+{{- $min := .Values.service.pdb.minAvailable }}
+{{- $max := .Values.service.pdb.maxUnavailable }}
+{{- if and (ne $min nil) (ne $max nil) }}{{- fail "service.pdb.minAvailable과 maxUnavailable 가운데 하나만 준다" }}{{- end }}
 # 강제 축출(노드 정비) 때 준비된 파드를 최소 하나 남긴다(docs/devops.md §6.1). 복제 2 이상에서 쓴다
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -9,7 +12,18 @@ metadata:
     {{- include "peaket.labels" . | nindent 4 }}
     app.kubernetes.io/component: service
 spec:
-  maxUnavailable: {{ int .Values.service.pdb.maxUnavailable }}
+  {{- if ne $min nil }}
+  {{- $m := int $min }}
+  {{- if lt $m 1 }}{{- fail "service.pdb.minAvailable은 1 이상이다" }}{{- end }}
+  {{- if and (not .Values.service.autoscaling.enabled) (ge $m (int .Values.service.replicas)) }}{{- fail "service.pdb.minAvailable은 복제 수보다 작아야 한다(모두 남기면 축출이 막힌다)" }}{{- end }}
+  minAvailable: {{ $m }}
+  {{- else if ne $max nil }}
+  {{- $m := int $max }}
+  {{- if lt $m 1 }}{{- fail "service.pdb.maxUnavailable은 1 이상이다" }}{{- end }}
+  maxUnavailable: {{ $m }}
+  {{- else }}
+  maxUnavailable: 1
+  {{- end }}
   unhealthyPodEvictionPolicy: AlwaysAllow
   selector:
     matchLabels:

@@ -1,7 +1,9 @@
+{{- if and .Values.service.rollout.analysis.enabled (not .Values.service.rollout.enabled) }}{{ fail "service.rollout.analysis.enabled를 켜려면 service.rollout.enabled도 참이어야 한다" }}{{ end }}
 {{- if and .Values.service.enabled .Values.service.rollout.enabled }}
 {{- $name := include "peaket.name" . }}
 {{- include "peaket.extraPorts" . }}
 {{- $steps := .Values.service.rollout.steps }}
+{{- $analysis := .Values.service.rollout.analysis.enabled }}
 {{- if not $steps }}{{- fail "service.rollout.steps가 비었다. 카나리 단계를 하나 이상 적는다" }}{{- end }}
 {{- $prev := 0 }}
 {{- $last := int (sub (len $steps) 1) }}
@@ -17,8 +19,9 @@
 {{- $prev = $w }}
 {{- end }}
 {{- if ne $prev 100 }}{{- fail (printf "service.rollout.steps의 마지막 weight는 100이어야 한다(%d)" $prev) }}{{- end }}
-# Argo Rollouts 카나리(docs/devops.md §6.2, BUILD_ORDER BAS-140). 켜면 Deployment 대신 이 Rollout 하나만 낸다.
-# 단계는 값(service.rollout.steps)의 weight·pauseSeconds를 그대로 옮긴다. 되돌리기는 rollbackWindow.revisions(3) 안에서 Git 되돌리기로 한다
+# Argo Rollouts 카나리(docs/devops.md §6.2, BUILD_ORDER BAS-140·OPS-440). 켜면 Deployment 대신 이 Rollout 하나만 낸다.
+# 단계는 값(service.rollout.steps)의 weight·pauseSeconds를 그대로 옮긴다. 분석을 켜면 5%·25%·50% 단계 뒤에 인라인 분석을 붙인다.
+# 분석 실패는 Argo Rollouts가 자동 중단하고 안정판 100%로 되돌린다. 판정 불가는 Inconclusive로 그 단계에서 멈춘다.
 apiVersion: argoproj.io/v1alpha1
 kind: Rollout
 metadata:
@@ -40,11 +43,34 @@ spec:
   strategy:
     canary:
       steps:
-        {{- range .Values.service.rollout.steps }}
-        - setWeight: {{ int .weight }}
-          {{- if hasKey . "pauseSeconds" }}
-          pause: { duration: {{ printf "%ds" (int .pauseSeconds) }} }
+        {{- range $i, $step := .Values.service.rollout.steps }}
+        {{- $w := int $step.weight }}
+        {{- if $analysis }}
+        - setWeight: {{ $w }}
+          {{- if hasKey $step "pauseSeconds" }}
+        - pause: { duration: {{ printf "%ds" (int $step.pauseSeconds) }} }
           {{- end }}
+          {{- if lt $w 100 }}
+        - analysis:
+            templates:
+              - { templateName: peaket-canary-error-ratio, clusterScope: true }
+              {{- if ge $w 25 }}
+              - { templateName: peaket-canary-latency, clusterScope: true }
+              {{- end }}
+              - { templateName: peaket-canary-event-loop, clusterScope: true }
+            args:
+              - { name: service, value: {{ $name | quote }} }
+              - name: canary-hash
+                valueFrom: { podTemplateHashValue: Latest }
+              - name: stable-hash
+                valueFrom: { podTemplateHashValue: Stable }
+          {{- end }}
+        {{- else }}
+        - setWeight: {{ $w }}
+          {{- if hasKey $step "pauseSeconds" }}
+          pause: { duration: {{ printf "%ds" (int $step.pauseSeconds) }} }
+          {{- end }}
+        {{- end }}
         {{- end }}
       rollbackWindow:
         revisions: 3

@@ -64,7 +64,9 @@ const NO_CONTROL = { decreases: [], suppressed: 0, ignored: [], staleKinds: [] }
 @Injectable()
 export class AdmissionLeader {
   #timer?: NodeJS.Timeout;
+  #shadowTimer?: NodeJS.Timeout;
   #busy = false;
+  #shadowBusy = false;
   /** 세대를 올린 회차(세대가 바뀌면 다시 올린다) */
   #bumped: { gen: number | undefined; events: Set<string> } = { gen: undefined, events: new Set() };
   /** FENCED를 받은 세대: 이 세대로는 더 쓰지 않는다 */
@@ -94,6 +96,8 @@ export class AdmissionLeader {
   readonly #last = new Map<string, { waiting: number; slots: number; soon: number; inFlight: number; saleState: string; gated: boolean }>();
   /** 회차마다 마지막으로 쓴 목표(준비가 실패한 회차의 몫으로 합산에 남긴다) */
   readonly #lastTargets = new Map<string, number>();
+  /** 그림자가 마지막으로 계산한 목표(다음 주기의 시작 값, 리더 목표와 섞지 않는다) */
+  readonly #shadowTargets = new Map<string, number>();
   /** 회차마다 아직 쓰지 못한 전진 몫(소수 몫을 주기마다 쌓는다, ADR-0226 결정 10) */
   readonly #rateCredit = new Map<string, number>();
   /** 제어 입력(첫 읽기 전에는 없다: 판단하지 않는다, ADR-0226 결정 4). 세대가 바뀌면 버린다 */
@@ -130,15 +134,75 @@ export class AdmissionLeader {
     this.#timer = setInterval(() => void this.tick(), TICK_MS);
   }
 
+  /** 그림자 루프: Lease에 참여하지 않고 같은 입력으로 목표를 계산만 한다 */
+  startShadow(): void {
+    if (this.#shadowTimer) return;
+    this.#shadowTimer = setInterval(() => void this.shadowTick(), TICK_MS);
+  }
+
   /** 루프를 멈춘다(종료 신호: 쓰기를 멈춘 뒤 Lease를 놓는 것은 시작 파일이 한다) */
   async stop(): Promise<void> {
     clearInterval(this.#timer);
+    clearInterval(this.#shadowTimer);
     this.#timer = undefined;
+    this.#shadowTimer = undefined;
     while (this.#busy) await new Promise((r) => setTimeout(r, 10));
     // 게시를 하다 만 채 Lease를 놓으면 새 리더가 같은 묶음을 또 게시한다. 한도 안에서 끝나기를 기다린다
     let timer: NodeJS.Timeout | undefined;
     await Promise.race([Promise.allSettled([...this.#publishing.values(), ...this.#confirming.values()]), new Promise((r) => (timer = setTimeout(r, STOP_WAIT_MS)))]);
     clearTimeout(timer);
+  }
+
+  /** 그림자 한 주기. Lease에 참여하지 않고 입력으로 목표를 계산만 하고 리더의 aimdTarget과 비교한다 */
+  async shadowTick(): Promise<void> {
+    if (this.#shadowBusy || !this.inputs) return;
+    this.#shadowBusy = true;
+    const now = this.clock.now();
+    try {
+      const snapshot = await this.inputs.read();
+      const platform = await this.store.platformControl();
+      const platformPg = platform.pgKey !== undefined && platform.pgTps !== undefined ? { pgKey: platform.pgKey, pgTps: platform.pgTps } : undefined;
+      const ids = await this.store.activeEvents(now);
+      for (const eventId of ids) {
+        try {
+          const plan = await this.store.schedule(eventId);
+          if (!plan || now < plan.opensAtMs) continue;
+          const ctl = await this.store.control(eventId, now);
+          const stored = storedTarget(ctl.memory ?? {});
+          // 리더가 아직 AIMD 목표를 남기지 않았으면 비교하지 않는다
+          if (stored === null) continue;
+          const group = pgGroupOf(ctl, platformPg, plan);
+          // 그림자는 결제사 비율 입력을 따로 읽지 않는다. 첫 구현은 100%로 계산하고 차이는 후속이다
+          const pg = group ? pgWithRatio(group, new Map()) : undefined;
+          const { upper, lower } = boundsOf(pg?.tps);
+          const memory = memoryFromFields(ctl.memory ?? {}, DEFAULT_TARGET, now);
+          // 그림자의 다음 목표는 리더의 aimdTarget이 아니라 그림자가 직전에 계산한 목표에서 이어 간다
+          const previous = this.#shadowTargets.get(eventId);
+          if (previous !== undefined) memory.target = previous;
+          const result = decideAimd({
+            nowMs: now,
+            memory,
+            inputs: snapshot.forEvent(eventId),
+            slotsUsed: undefined,
+            gated: false,
+            paused: ctl.paused || platform.allPaused === true,
+            autoStopped: platform.autoStopped,
+            operator: ctl.operator ?? { value: ctl.target ?? null, untilMs: null, resumeAtMs: null },
+            upper,
+            lower,
+            pgLimited: pg !== undefined,
+          });
+          this.#shadowTargets.set(eventId, result.target);
+          this.metrics?.shadow(eventId, result.target - stored, result.target);
+        } catch (err) {
+          this.#logError(`${eventId}:shadow`, now, err, 'admission-ctrl 그림자: 회차 계산 실패');
+        }
+      }
+    } catch (err) {
+      this.#logError('*shadow', now, err, 'admission-ctrl 그림자 주기 실패');
+    } finally {
+      this.#shadowBusy = false;
+    }
   }
 
   /** 한 주기. 앞 주기가 아직 돌면 건너뛴다 */
@@ -173,6 +237,8 @@ export class AdmissionLeader {
         this.#platformBumped = gen;
       }
       const now = this.clock.now();
+      // 만료 회차 정리는 리더만 한다. 그림자는 activeEvents를 읽기만 한다(읽기 전용 ACL)
+      await this.store.pruneEvents?.(now);
       this.#refreshInputs();
       const ids = await this.#activeEvents(now);
       this.#forgetEnded(ids);
@@ -480,6 +546,7 @@ export class AdmissionLeader {
       this.#rb05At.delete(e);
       this.#last.delete(e);
       this.#lastTargets.delete(e);
+      this.#shadowTargets.delete(e);
       this.#rateCredit.delete(e);
       this.#revealAt.delete(e);
       for (const k of [...this.#publishRetryAt.keys()]) if (k.startsWith(`${e}:`)) this.#publishRetryAt.delete(k);

@@ -1,0 +1,52 @@
+# F-09-11 카나리 분석·그림자 불일치 경보(docs/devops.md §6.2·§6.3, G-18, docs/observability.md §5).
+# - 분석 실패: Argo Rollouts가 롤아웃을 자동 중단한다. SEV2·RB-23.
+# - 판정 불가: 카나리가 표본 부족 등으로 멈춰 사람이 resume/abort를 정한다. SEV3.
+# - 그림자 불일치: 승격 전 판단 자료다. SEV3.
+# 실제 클러스터·Argo 분석은 이 동결 트랙에서 실행하지 않는다(미실행).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: argo-rollouts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: peaket
+spec:
+  groups:
+    - name: argo-rollouts
+      # 평가 간격: docs/observability.md §4 '그 밖의 규칙 평가 간격'(alert-check가 본다)
+      interval: 30s
+      rules:
+        - alert: peaket_canary_analysis_failed
+          expr: analysis_run_phase{phase="Failed"} == 1
+          for: 0m
+          labels:
+            severity: sev2
+            kind: cause
+          annotations:
+            summary: 카나리 분석이 실패해 롤아웃이 자동 중단됐다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-23-배포-되돌리기와-동결-중-긴급-변경
+            dashboard_url: https://github.com/peaket/peaket/blob/develop/docs/devops.md#62-카나리-분석
+            game_day: G-18
+            description: 'AnalysisRun이 Failed다. Argo Rollouts가 안정판 100%로 되돌렸는지 RB-23대로 확인하고, 이전 다이제스트로 되돌리는 PR을 연다.'
+        - alert: peaket_canary_analysis_inconclusive
+          expr: analysis_run_phase{phase="Inconclusive"} == 1
+          for: 5m
+          labels:
+            severity: sev3
+            kind: cause
+          annotations:
+            summary: 카나리 분석이 판정 불가로 멈춰 사람의 결정을 기다린다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/infra.md#rb-23-배포-되돌리기와-동결-중-긴급-변경
+            dashboard_url: https://github.com/peaket/peaket/blob/develop/docs/devops.md#62-카나리-분석
+            description: '카나리 요청이 200건 미만이거나 지표가 모자라 AnalysisRun이 Inconclusive다. 표본이 차면 다시 재거나, 사람이 resume/abort를 정한다.'
+        - alert: admission_shadow_diverged
+          expr: admission_shadow_diff > 0
+          for: 10m
+          labels:
+            severity: sev3
+            kind: cause
+          annotations:
+            summary: admission-ctrl 그림자 목표가 리더 목표와 다르다
+            runbook_url: https://github.com/peaket/peaket/blob/develop/docs/devops.md#63-admission-ctrl활성-리더-1
+            dashboard_url: https://github.com/peaket/peaket/blob/develop/docs/devops.md#63-admission-ctrl활성-리더-1
+            description: '그림자(비리더)가 같은 제어 입력으로 계산한 AIMD 목표가 리더의 aimdTarget과 10분 넘게 다르다. 승격 전에 알고리즘·입력 차이를 확인한다.'

@@ -51,20 +51,31 @@ service:
   # (ADR-0102 결정 3, docs/infra-handover.md §3.1, 추천 적용 2026-11-20, BUILD_ORDER BAT-085)
   nodeSelector: {}
   tolerations: []
+  # 리더 인지 롤링(F-09-11). opt-in일 때만 Deployment 전략을 낸다. 기본값은 전략을 내지 않아 기존 렌더가 바뀌지 않는다
+  # admission-ctrl은 복제 3·maxUnavailable 1·maxSurge 0으로 순차 재시작한다(docs/devops.md §6.3)
+  rollingUpdate:
+    enabled: false
+    maxUnavailable: 0
+    maxSurge: 0
   # Argo Rollouts 카나리(운영). 켜면 Deployment 대신 Rollout 하나를 내고, local·CI는 기본값(Deployment)을 쓴다
   # 단계의 pauseSeconds는 그 단계 뒤 분석·대기 시간(초)이다. 값은 [가정](docs/devops.md §6.2)
   # 5% → 25% → 50% → 100%, 단계마다 5분 대기다(docs/devops.md:525). 마지막 100%에는 pause를 두지 않는다
   rollout:
     enabled: false
+    # 카나리 단계 뒤 인라인 분석(F-09-11). 켜려면 rollout.enabled도 참이어야 한다
+    analysis:
+      enabled: false
     steps:
       - { weight: 5, pauseSeconds: 300 }
       - { weight: 25, pauseSeconds: 300 }
       - { weight: 50, pauseSeconds: 300 }
       - { weight: 100 }
-  # PodDisruptionBudget. maxUnavailable: 1은 복제 2 이상일 때 쓴다(docs/devops.md §6.1)
+  # PodDisruptionBudget. minAvailable과 maxUnavailable 가운데 하나만 준다. 둘 다 없으면 maxUnavailable: 1이다
+  # admission-ctrl은 복제 3에서 minAvailable: 2로 정족수를 지킨다(docs/devops.md §6.3)
   pdb:
     enabled: false
-    maxUnavailable: 1
+    minAvailable: null
+    maxUnavailable: null
   # KEDA ScaledObject(wbs 0.4.4, BUILD_ORDER OPS-430). 지표를 못 읽으면 fallback behavior currentReplicas로 지금 복제 수를 유지한다(docs/observability.md §5 G-21)
   # 켤 때 minReplicaCount(1 이상)와 maxReplicaCount(min 이상)를 반드시 값으로 준다. 기본 0은 실수로 KEDA 기본값 0/100을 쓰지 않게 렌더를 멈춘다
   keda:

@@ -38,9 +38,11 @@ export class LeaderMetrics {
   readonly #suppressed = new Counter({ name: 'admission_decrease_suppressed_total', help: '감축 확인 시간 동안 막은 AIMD 감축 수', registers: [] });
   readonly #ignored = new Counter({ name: 'admission_budget_signal_ignored_total', help: '연동 여정이 아니라 감축하지 않은 예산 신호 수', labelNames: ['journey'] as const, registers: [] });
   readonly #openGaps = new Gauge({ name: 'admission_open_gap_violations', help: '진행 중인 회차끼리 오픈 시각이 5분 [가정]보다 가까운 쌍의 수', registers: [] });
+  readonly #shadowDiff = new Gauge({ name: 'admission_shadow_diff', help: '그림자 목표와 리더 aimdTarget의 차이(절댓값). 0보다 크면 승격 전 확인', labelNames: ['event_id'] as const, registers: [] });
+  readonly #shadowTarget = new Gauge({ name: 'admission_shadow_target', help: '그림자가 같은 입력으로 계산한 AIMD 목표', labelNames: ['event_id'] as const, registers: [] });
 
   register(registry: Registry): this {
-    for (const m of [this.#inFlight, this.#ratio, this.#soon, this.#dropped, this.#loop, this.#leader, this.#fenced, this.#leaseFailures, this.#publish, this.#seedReveal, this.#beaconStopped, this.#rb35, this.#arrivalSlots, this.#arrivalNumbers, this.#slots, this.#target, this.#stale, this.#decrease, this.#suppressed, this.#ignored, this.#openGaps]) registry.registerMetric(m);
+    for (const m of [this.#inFlight, this.#ratio, this.#soon, this.#dropped, this.#loop, this.#leader, this.#fenced, this.#leaseFailures, this.#publish, this.#seedReveal, this.#beaconStopped, this.#rb35, this.#arrivalSlots, this.#arrivalNumbers, this.#slots, this.#target, this.#stale, this.#decrease, this.#suppressed, this.#ignored, this.#openGaps, this.#shadowDiff, this.#shadowTarget]) registry.registerMetric(m);
     return this;
   }
 
@@ -71,6 +73,12 @@ export class LeaderMetrics {
 
   openGaps(n: number): void {
     this.#openGaps.set(n);
+  }
+
+  /** 그림자 목표와 리더 목표의 차이(절댓값)·그림자 목표. 리더 목표가 없으면 부르지 않는다 */
+  shadow(eventId: string, diff: number, target: number): void {
+    this.#shadowDiff.set({ event_id: eventId }, Math.abs(diff));
+    this.#shadowTarget.set({ event_id: eventId }, target);
   }
 
   arrival(slots: number, returned: number): void {
@@ -113,6 +121,8 @@ export class LeaderMetrics {
     this.#ratio.remove({ event_id: eventId });
     this.#slots.remove({ event_id: eventId });
     this.#target.remove({ event_id: eventId });
+    this.#shadowDiff.remove({ event_id: eventId });
+    this.#shadowTarget.remove({ event_id: eventId });
     for (const input of INPUT_KINDS) this.#stale.remove({ event_id: eventId, input });
   }
 }

@@ -1,0 +1,100 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterAnalysisTemplate
+metadata:
+  name: peaket-canary-error-ratio
+  labels:
+    app.kubernetes.io/part-of: peaket
+spec:
+  args:
+    - name: service
+    - name: canary-hash
+    - name: stable-hash
+  metrics:
+    - name: error-ratio
+      interval: 1m
+      count: 2
+      failureLimit: 1
+      successCondition: len(result) > 0 && result[0] == 0
+      failureCondition: len(result) > 0 && result[0] == 1
+      provider:
+        prometheus:
+          address: http://prometheus.observability.svc:9090
+          timeout: 30s
+          query: |
+            # 200건 미만 가지: (sum(increase(http_server_request_duration_seconds_count{service="svc", pod=~"canary-.*", status_class!="4xx"})) < bool 200) * 2
+            # 200건 이상 가지: + (sum(increase(http_server_request_duration_seconds_count{service="svc", pod=~"canary-.*", status_class!="4xx"})) >= bool 200) * (...)
+            (
+              (sum(increase(http_server_request_duration_seconds_count{service="{{args.service}}", pod=~"{{args.service}}-{{args.canary-hash}}-.*", status_class!="4xx"}[5m])) < bool 200) * 2
+              +
+              (sum(increase(http_server_request_duration_seconds_count{service="{{args.service}}", pod=~"{{args.service}}-{{args.canary-hash}}-.*", status_class!="4xx"}[5m])) >= bool 200) * (
+                (sum(increase(http_server_errors_total{service="{{args.service}}", pod=~"{{args.service}}-{{args.canary-hash}}-.*"}[5m])) / clamp_min(sum(increase(http_server_request_duration_seconds_count{service="{{args.service}}", pod=~"{{args.service}}-{{args.canary-hash}}-.*", status_class!="4xx"}[5m])), 0.000001) > bool 2 * (sum(increase(http_server_errors_total{service="{{args.service}}", pod=~"{{args.service}}-{{args.stable-hash}}-.*"}[5m])) / clamp_min(sum(increase(http_server_request_duration_seconds_count{service="{{args.service}}", pod=~"{{args.service}}-{{args.stable-hash}}-.*", status_class!="4xx"}[5m])), 0.000001)))
+                * ((sum(increase(http_server_errors_total{service="{{args.service}}", pod=~"{{args.service}}-{{args.canary-hash}}-.*"}[5m])) / clamp_min(sum(increase(http_server_request_duration_seconds_count{service="{{args.service}}", pod=~"{{args.service}}-{{args.canary-hash}}-.*", status_class!="4xx"}[5m])), 0.000001)) - (sum(increase(http_server_errors_total{service="{{args.service}}", pod=~"{{args.service}}-{{args.stable-hash}}-.*"}[5m])) / clamp_min(sum(increase(http_server_request_duration_seconds_count{service="{{args.service}}", pod=~"{{args.service}}-{{args.stable-hash}}-.*", status_class!="4xx"}[5m])), 0.000001)) >= bool 0.005)
+                * (sum(increase(http_server_errors_total{service="{{args.service}}", pod=~"{{args.service}}-{{args.canary-hash}}-.*"}[5m])) >= bool 5)
+              )
+            )
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterAnalysisTemplate
+metadata:
+  name: peaket-canary-latency
+  labels:
+    app.kubernetes.io/part-of: peaket
+spec:
+  args:
+    - name: service
+    - name: canary-hash
+    - name: stable-hash
+  metrics:
+    - name: latency
+      interval: 1m
+      count: 2
+      failureLimit: 1
+      successCondition: len(result) > 0 && result[0] == 0
+      failureCondition: len(result) > 0 && result[0] == 1
+      provider:
+        prometheus:
+          address: http://prometheus.observability.svc:9090
+          timeout: 30s
+          query: |
+            # 200건 미만 가지: (sum(increase(http_server_request_duration_seconds_count{service="svc", pod=~"canary-.*", status_class!="5xx"})) < bool 200) * 2
+            (
+              (sum(increase(http_server_request_duration_seconds_count{service="{{args.service}}", pod=~"{{args.service}}-{{args.canary-hash}}-.*", status_class!="4xx"}[5m])) < bool 200) * 2
+              +
+              (sum(increase(http_server_request_duration_seconds_count{service="{{args.service}}", pod=~"{{args.service}}-{{args.canary-hash}}-.*", status_class!="4xx"}[5m])) >= bool 200) * (sum(increase(http_server_request_duration_seconds_count{service="{{args.service}}", pod=~"{{args.service}}-{{args.canary-hash}}-.*", status_class!="4xx"}[5m])) < bool 1000) * (
+                histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{service="{{args.service}}", pod=~"{{args.service}}-{{args.canary-hash}}-.*", status_class!="4xx", status_class!="5xx"}[5m])))
+                > bool (histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{service="{{args.service}}", pod=~"{{args.service}}-{{args.stable-hash}}-.*", status_class!="4xx", status_class!="5xx"}[5m]))) * 1.2 + 0.005)
+              )
+              +
+              (sum(increase(http_server_request_duration_seconds_count{service="{{args.service}}", pod=~"{{args.service}}-{{args.canary-hash}}-.*", status_class!="4xx"}[5m])) >= bool 1000) * (
+                histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{service="{{args.service}}", pod=~"{{args.service}}-{{args.canary-hash}}-.*", status_class!="4xx", status_class!="5xx"}[5m])))
+                > bool (histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{service="{{args.service}}", pod=~"{{args.service}}-{{args.stable-hash}}-.*", status_class!="4xx", status_class!="5xx"}[5m]))) * 1.2 + 0.005)
+              )
+            )
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ClusterAnalysisTemplate
+metadata:
+  name: peaket-canary-event-loop
+  labels:
+    app.kubernetes.io/part-of: peaket
+spec:
+  args:
+    - name: service
+    - name: canary-hash
+    - name: stable-hash
+  metrics:
+    - name: event-loop
+      interval: 1m
+      count: 2
+      failureLimit: 1
+      successCondition: len(result) > 0 && result[0] == 0
+      failureCondition: len(result) > 0 && result[0] == 1
+      provider:
+        prometheus:
+          address: http://prometheus.observability.svc:9090
+          timeout: 30s
+          query: |
+            (
+              max(nodejs_eventloop_lag_p99_seconds{service="{{args.service}}", pod=~"{{args.service}}-{{args.canary-hash}}-.*"})
+              > bool 1.5 * max(nodejs_eventloop_lag_p99_seconds{service="{{args.service}}", pod=~"{{args.service}}-{{args.stable-hash}}-.*"})
+            )

@@ -121,6 +121,8 @@ export const LEADER_STORE = Symbol('admission.LeaderStore');
 export interface LeaderStore {
   /** 진행 중인 회차 목록 q:{admission}:events(점수 = 판매 종료 + 1일). 점수가 지난 회차는 지운다 */
   activeEvents(nowMs: number): Promise<string[]>;
+  /** 리더만 부르는 만료 회차 정리. 그림자는 읽지 않는다(읽기 전용 ACL) */
+  pruneEvents?(nowMs: number): Promise<void>;
   schedule(eventId: string): Promise<EventPlan | null>;
   control(eventId: string, nowMs: number): Promise<Control>;
   /**

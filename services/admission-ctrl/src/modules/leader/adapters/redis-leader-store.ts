@@ -80,10 +80,16 @@ export class RedisLeaderStore implements LeaderStore {
 
   async activeEvents(nowMs: number): Promise<string[]> {
     const k = keys.events();
-    await this.redis.command(['ZREMRANGEBYSCORE', k, '-inf', `(${nowMs}`], { key: k });
-    const ids = (await this.redis.command(['ZRANGE', k, '0', '-1'], { key: k })) as unknown[];
+    // 그림자도 이 경로를 읽으므로 지우지 않는다(읽기 전용 ACL). 지우기는 리더의 pruneEvents가 맡는다
+    const ids = (await this.redis.command(['ZRANGEBYSCORE', k, `(${nowMs}`, '+inf'], { key: k })) as unknown[];
     // 해시 태그를 깨는 값은 받지 않는다(queue-svc가 넣을 때 이미 거른다)
     return ids.map((x) => str(x)!).filter((id) => /^[A-Za-z0-9_-]{1,64}$/.test(id));
+  }
+
+  /** 리더만 부르는 만료 회차 정리(그림자는 부르지 않는다) */
+  async pruneEvents(nowMs: number): Promise<void> {
+    const k = keys.events();
+    await this.redis.command(['ZREMRANGEBYSCORE', k, '-inf', `(${nowMs}`], { key: k });
   }
 
   async schedule(eventId: string): Promise<EventPlan | null> {

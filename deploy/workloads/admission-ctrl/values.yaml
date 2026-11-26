@@ -1,0 +1,34 @@
+# admission-ctrl 배포 단위 기본 값(F-09-11, docs/devops.md §6.3).
+# 리더 하나가 200ms 루프를 돌고 나머지 둘은 대기한다. 롤링은 복제 3에서 1/0으로 순차 재시작한다.
+# 제어 gRPC 50061·Lease RBAC·리더 전용 Service·<서비스>-control Service는 F-09-8(OPS-300) 몫이라 여기에 두지 않는다.
+name: admission-ctrl
+
+secretEnvFrom: admission-ctrl-secrets
+
+managementPort: 9464
+
+service:
+  # 핫패스: 온디맨드 노드에 둔다(karpenter.sh/capacity-type: on-demand [가정], ADR-0102 결정 3)
+  nodeSelector:
+    karpenter.sh/capacity-type: on-demand
+  # 활성 리더 1 + 대기 2(docs/devops.md §6.3)
+  replicas: 3
+  port: 8080
+  command: ["node", "--import", "@peaket/platform/telemetry/register", "dist/main.js"]
+  # 순차 재시작: 새 파드를 먼저 띄우지 않고 하나씩 바꾼다(docs/devops.md §6.3)
+  rollingUpdate:
+    enabled: true
+    maxUnavailable: 1
+    maxSurge: 0
+  # 3 가운데 2를 남겨 정족수를 지킨다. 리더 전용 Service는 F-09-8이 붙인다
+  pdb:
+    enabled: true
+    minAvailable: 2
+  env:
+    # 자동 제어 입력(클러스터 안 Prometheus, ADR-0226 결정 13)
+    PEAKET_PROMETHEUS_URL: http://prometheus.observability.svc:9090
+    # 묶음 결과 파일을 쓸 곳(운영의 회차별 S3 어댑터는 HOT-012). 이 기능은 경로만 둔다
+    PEAKET_BATCH_RESULT_DIR: /tmp/peaket-batch
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }

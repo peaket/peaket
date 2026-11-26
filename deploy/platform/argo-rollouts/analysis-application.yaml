@@ -1,0 +1,26 @@
+# F-09-11 카나리 분석 ClusterAnalysisTemplate 적용 Application(docs/devops.md §5.2·§6.2).
+# 차트 Application과 분리해 `analysis-templates.yaml`만 적용한다. 실제 클러스터 동기화는 이 동결 트랙에서 하지 않는다(미실행).
+# - ClusterAnalysisTemplate은 클러스터 범위라 destination.namespace는 형식만 맞춘다.
+# - directory.include로 같은 폴더의 values.yaml·application.yaml은 적용하지 않는다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argo-rollouts-analysis
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: peaket
+    peaket.io/environment: platform
+spec:
+  project: peaket-platform
+  source:
+    repoURL: https://github.com/peaket/peaket
+    targetRevision: develop
+    path: deploy/platform/argo-rollouts
+    directory:
+      include: analysis-templates.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argo-rollouts
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]
