@@ -293,3 +293,14 @@
 - 흔들림 후보(2026-11-23, 갈래 4 PR #69 CI): platform `test/control-log-sampling.test.ts:150` C-T75 ② 첫 시험이 5초 한도 초과. 원인은 표본 1/100에서 한 건도 안 남을 확률을 없애려고 Fastify 전체 경로로 요청 2,000건을 차례로 보내는 것(#64 CI에서도 3.6초). 고칠 길(감독 지시): 정한 trace ID로 표본 결과를 확정해 요청 수를 줄인다(뽑히는 ID와 안 뽑히는 ID를 둘 다 넣고, 비율 값을 바꾸면 결과가 달라지는지까지 본다). 안 되면 시험별 시간 한도. CI를 막을 때만 시험만 고치는 작은 고침으로 한다(소유자 결정 2026-11-23, 7일 완성).
 - FIX-agrade-impl-review(R-795, RV-11 낮음): ADR-0381 결정 7의 작성 시각 기준에 두 구절을 더할지 정한다. ① 다시 쌓을 때 작성 시각을 바꾸지 않는다(`rebase --ignore-date`·`--reset-author-date`·`GIT_AUTHOR_DATE` 금지, 바꾸면 진행 중 기능이 새 A 기능으로 갈려 막힌다), ② 적용 시각과 견줄 때 같은 오프셋으로 바꿔 시각으로 견준다(글자로 견주지 않는다). 적용 시각 앞에 계획 커밋을 미리 만들어 새 기능이 빠지는 틈은 소유자 의도(진행 중 방해 금지)를 앞세워 받아들였다(docs/review/plans/FIX-agrade-impl-review.md 리뷰 절).
 - F-01-7(2026-11-23 구현 메모 넘김): realtime-gw의 자체 히스토그램 칸(`services/realtime-gw/src/start.ts:17` 등)이 표준 목록 밖 칸을 둔다. V-T16은 규칙의 `le`·서비스 템플릿·Envoy 설정만 보므로 이 기능의 검사 밖이다(docs/observability.md §8 '개별 서비스가 칸을 마음대로 바꾸지 않는다'와 어긋나 보인다).
+- F-11-2(2026-11-26 감독 결정 1): `bot_sample_review` DDL·적재기와 `bot-review-assign` 스케줄러의 주인이 없다. OPS-220은 dbt 15사실·11차원으로 끝났고 `data/`에 표가 없다. 첫 온세일 전에 주인을 정하지 않으면 표본 검토가 시작되지 않는다(소유자 결정 목록).
+- F-11-2(2026-11-26 감독 결정 2): BOT-080 잔여 — `services/ops-svc/src/modules/bot-review/domain/bot-review.ts`의 `sampleView`가 `PASSED_SAMPLE`에도 `riskBand`·`behaviorSummaryBand`를 null로 주게 고친다. `reviewKind` 노출은 승인된 한계다.
+- F-11-2(2026-11-26 감독 결정 3): BOT-080 잔여 — `HUMAN_BASELINE`의 `PASSED` 부분에 `PASSED_SAMPLE`에서 판정한 세션이 있으면 그 판정을 재사용하고 `ApplyLabel`을 두 번 부르지 않는다. 배정에서 세션을 빼지 않는다(첫째 묶음 무작위성).
+- F-11-2(2026-11-26 감독 결정 4): BOT-080 잔여 — `record-judgement.ts`의 `evidenceRequired()`를 `PASSED_SAMPLE`에도 걸어 BOT 근거 0개 저장을 막는다. 지금은 `PASSED_SAMPLE` BOT이 근거 0개로도 200이다.
+- F-11-2(2026-11-26 감독 결정 5): `PASSED_SAMPLE`은 구조적으로 첫째 묶음이라 묶음 가림이 불가능하다. 승인된 한계로 두고, 정본과 맞추려면 두 묶음을 섞은 `HUMAN_BASELINE`만 화면에 남기는 안을 소유자 결정 목록에 올린다.
+- F-11-2 TR-11(낮음): `OTHER` 하나만으로 `BOT`을 붙이지 않는다는 규칙은 추천 적용이고 제품은 강제하지 않는다. 감독이 정할 때 `evidenceKinds` 검사에 `OTHER` 예외를 넣을지 함께 본다.
+- F-11-2 TR-12(낮음): 계획 §9.7·§11의 역할 문구를 '계획·시험은 같은 세션, 리뷰는 새 세션, review-fix·doc·record는 이 세션'으로 고쳤다.
+- F-11-2 TR-13(낮음): 블로그 목차 시험이 README 8번째 M3 행의 `초안(2026-11-26)`·`게시 전`·링크·제목을 함께 본다.
+- F-11-2 TR-14(낮음): 카드에 pid·계정 ID가 없어 '그 표본의 계정 소유자'는 검토자가 확인할 수 없다. 검토자 목록·이해관계 self-declaration·다른 검토자 교체로 확인하고, 제품 강제가 아님을 마감 기록에 적는다.
+- F-11-2 TR-15(낮음): OPS-220은 dbt 15사실·11차원으로 끝났고 `bot_sample_review` 적재는 그 범위에 없다. 검사기의 `OPS-220` 필수 토큰을 `원장 적재 주인`·`미정`으로 바꾸고, 적재 주인을 소유자 결정 목록에 올렸다.
+- F-11-2 TR-16(낮음): 봇 점유율 5% 목표의 정본 자리를 `docs/features/bot-defense.md` §19·`docs/planning/01-overview.md` §5.2로 고쳐 NFR-022의 95%·0.5%와 분리했다.
