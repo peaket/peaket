@@ -44,12 +44,13 @@ let imagingServer: grpc.Server;
 let processing: GrpcImageProcessing;
 let store: LocalFolderImageStore;
 let jobStore: {
-  enqueue(record: { sourceKey: string; kind: string }, now: Date): Promise<unknown>;
+  enqueue(record: { sourceKey: string; kind: string; derivativeKeys?: string[] }, now: Date): Promise<unknown>;
   find(sourceKey: string): Promise<Record<string, unknown> | undefined>;
   leaseDue(now: Date, limit: number, leaseMs: number): Promise<Record<string, unknown>[]>;
   save(record: Record<string, unknown>): Promise<void>;
 };
 let worker: { runOnce(now?: Date): Promise<{ claimed: number; done: number; retrying: number; dead: number }> };
+let jobWorkerFactory: ((o: Record<string, unknown>) => typeof worker) | undefined;
 let jobProcessing: { process(q: { sourceKey: string; kind: string; timeoutMs: number }): Promise<Record<string, unknown>> };
 let startFailure: string | undefined;
 const ready = () => {
@@ -57,7 +58,16 @@ const ready = () => {
   if (!jobStore || !worker || !jobProcessing) throw new Error('이미지 작업 큐가 배선되지 않았다');
 };
 
-type Reply = { status: string; derivative_keys?: string[]; width?: number; height?: number; reject_reason?: string; skipStaging?: boolean };
+type Reply = {
+  status: string;
+  derivative_keys?: string[];
+  width?: number;
+  height?: number;
+  reject_reason?: string;
+  skipStaging?: boolean;
+  /** 정한 키에 임의 바이트를 쓰는 시험용(IR-01) */
+  bytes?: (name: string) => Buffer | Uint8Array;
+};
 const imaging = {
   calls: [] as { source_key: string; kind: string }[],
   answer: undefined as undefined | ((id: string, size: { width: number; height: number }, kind: string) => Reply | 'hang' | grpc.status),
@@ -95,14 +105,16 @@ function startImaging(): Promise<number> {
       if (ans === 'hang') return;
       if (typeof ans === 'number') return cb({ code: ans, details: 'fake' });
       const prefix = prefixOf(call.request.source_key);
-      const names = call.request.kind === 'IMAGE_KIND_REVIEW_PHOTO' ? reviewNames(Math.max(size.width, size.height)) : namesFor(size.width);
+      const outWidth = ans?.width ?? size.width;
+      const outHeight = ans?.height ?? size.height;
+      const names = call.request.kind === 'IMAGE_KIND_REVIEW_PHOTO' ? reviewNames(Math.max(outWidth, outHeight)) : namesFor(outWidth);
       if (!ans?.skipStaging) {
         for (const n of names) {
           mkdirSync(dirname(join(dir, 'staging', prefix, id, n)), { recursive: true });
-          writeFileSync(join(dir, 'staging', prefix, id, n), derived(n, id));
+          writeFileSync(join(dir, 'staging', prefix, id, n), ans?.bytes?.(n) ?? derived(n, id));
         }
       }
-      cb(null, ans ?? { status: 'IMAGE_STATUS_ACCEPTED', derivative_keys: names.map((n) => `staging/${prefix}/${id}/${n}`), width: size.width, height: size.height });
+      cb(null, ans ?? { status: 'IMAGE_STATUS_ACCEPTED', derivative_keys: names.map((n) => `staging/${prefix}/${id}/${n}`), width: outWidth, height: outHeight });
     },
   });
   return new Promise((res, rej) => imagingServer.bindAsync('127.0.0.1:0', grpc.ServerCredentials.createInsecure(), (e, p) => (e ? rej(e) : res(p))));
@@ -150,6 +162,37 @@ async function waitJobExcept(kind: string, exclude: string | undefined): Promise
   }
 }
 
+/** 첫 처리(검사 대기)를 끝내 503을 받고, 그 작업이 60초 뒤 다시 맡겨질 수 있게 한다. */
+async function pendingUpload(): Promise<{ key: string; statusCode: number }> {
+  imaging.answer = () => ({ status: 'IMAGE_STATUS_SCAN_PENDING' });
+  const p = upload();
+  const key = await waitJob();
+  await worker.runOnce(new Date(clock.now()));
+  const r = await p;
+  clock.advance(60_000);
+  return { key, statusCode: r.statusCode };
+}
+
+/** 공개·정리 호출을 정한 횟수만큼 실패시키는 시험용 저장소 껍데기(IR-07). */
+function flakyStore(inner: typeof store, fail: { putPublic: number; deletePublic: number }) {
+  const call = (name: string, args: unknown[]) => (inner as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>)[name]!(...args);
+  return {
+    putQuarantine: (...a: unknown[]) => call('putQuarantine', a),
+    deleteQuarantine: (...a: unknown[]) => call('deleteQuarantine', a),
+    readStaging: (...a: unknown[]) => call('readStaging', a),
+    stagingSize: (...a: unknown[]) => call('stagingSize', a),
+    deleteStaging: (...a: unknown[]) => call('deleteStaging', a),
+    async putPublic(...a: unknown[]) {
+      if (fail.putPublic > 0 && fail.putPublic--) throw new Error('공개 쓰기 실패');
+      return call('putPublic', a);
+    },
+    async deletePublic(...a: unknown[]) {
+      if (fail.deletePublic > 0 && fail.deletePublic--) throw new Error('공개 지우기 실패');
+      return call('deletePublic', a);
+    },
+  };
+}
+
 beforeAll(async () => {
   pg_ = await startPostgres();
   await migrateCore(pg_.url);
@@ -176,6 +219,7 @@ beforeAll(async () => {
       jobStore = new JobStore(appDb);
       jobProcessing = new JobProcessing({ store: jobStore, clock, waitMs: 10 });
       worker = new JobWorker({ store: jobStore, processing, objects: store, clock });
+      jobWorkerFactory = (o) => new JobWorker(o);
     }
   } catch (e) {
     startFailure = e instanceof Error ? e.message : String(e);
@@ -251,6 +295,11 @@ describe('F-10-2 이미지 작업 원장 실제 DB 배선', () => {
     const done = await jobStore.find(key);
     expect(done).toMatchObject({ status: 'DONE', resultStatus: 'ACCEPTED' });
     expect(publicFiles(idOf(key))).toEqual([...namesFor(1200)].sort());
+    // 늦게 성공한 뒤 격리 원본·준비 위치가 남지 않는다.
+    await eventually(() => {
+      expect(quarantineFiles()).not.toContain(idOf(key));
+      expect(stagingDirs()).not.toContain(idOf(key));
+    });
   });
 
   test('F-10-2 처리 무응답은 5초 뒤 다시 맡기고 열 번이면 DEAD로 두며 요청은 503 Retry-After 30이다 [ASVS v5.0.0-16.5.3]', async () => {
@@ -328,6 +377,8 @@ describe('F-10-2 이미지 작업 원장 실제 DB 배선', () => {
     const second = upload({ kind: 'POSTER' });
     const secondKey = await waitJobExcept('PRODUCTION', firstKey);
     expect(secondKey).not.toBe(firstKey);
+    // 새 작업을 넣어도 먼저 끝난 작업 이력은 남는다.
+    expect(await jobStore.find(firstKey)).toMatchObject({ id: firstJobId, status: 'DONE' });
     await worker.runOnce(new Date(clock.now()));
     await eventually(async () => expect((await jobStore.find(secondKey))!.status).toBe('DONE'));
     expect((await second).statusCode).toBe(201);
@@ -338,6 +389,79 @@ describe('F-10-2 이미지 작업 원장 실제 DB 배선', () => {
     expect(stagingDirs()).not.toContain(firstId);
     expect(quarantineFiles()).not.toContain(firstId);
     expect(await jobStore.find(cleanupKey)).toMatchObject({ status: 'DONE', resultStatus: 'DELETED' });
+  });
+
+  test('F-10-2 늦게 성공한 결과의 키·소유·바이트·크기·화소를 다시 보고 아니면 공개하지 않는다 [ASVS v5.0.0-5.4.3]', async () => {
+    ready();
+    // 다른 이미지의 준비 객체를 가리키는 결과를 만들 수 있게 미리 둔다
+    const victim = randomUUID();
+    mkdirSync(join(dir, 'staging', 'production', victim), { recursive: true });
+    writeFileSync(join(dir, 'staging', 'production', victim, '320.webp'), derived('320.webp', victim));
+    const scenarios: { why: string; answer: (id: string, size: { width: number; height: number }, kind: string) => Reply }[] = [
+      { why: '다른 이미지 준비 키', answer: () => ({ status: 'IMAGE_STATUS_ACCEPTED', width: 1200, height: 1600, derivative_keys: namesFor(1200).map((n) => `staging/production/${victim}/${n}`), skipStaging: true }) },
+      { why: '임의 바이트', answer: (id, size) => ({ status: 'IMAGE_STATUS_ACCEPTED', width: size.width, height: size.height, derivative_keys: namesFor(size.width).map((n) => `staging/production/${id}/${n}`), bytes: () => Buffer.from('not-an-image') }) },
+      { why: '5MiB 초과', answer: (id, size) => ({ status: 'IMAGE_STATUS_ACCEPTED', width: size.width, height: size.height, derivative_keys: namesFor(size.width).map((n) => `staging/production/${id}/${n}`), bytes: () => Buffer.alloc(5 * 1024 * 1024 + 1, 0x52) }) },
+      { why: '화소·세로형 미달', answer: () => ({ status: 'IMAGE_STATUS_ACCEPTED', width: 500, height: 400 }) },
+    ];
+    for (const s of scenarios) {
+      await admin.db.execute(sql`delete from image_job`);
+      imaging.answer = () => ({ status: 'IMAGE_STATUS_SCAN_PENDING' });
+      const p = upload();
+      const key = await waitJob();
+      await worker.runOnce(new Date(clock.now()));
+      expect((await p).statusCode, s.why).toBe(503);
+      clock.advance(60_000);
+      imaging.answer = s.answer;
+      expect((await worker.runOnce(new Date(clock.now()))).claimed, s.why).toBe(1);
+      expect(await jobStore.find(key), s.why).toMatchObject({ status: 'RETRYING' });
+      expect(publicFiles(idOf(key)), s.why).toEqual([]);
+      // 원본은 남겨 다시 맡긴다
+      expect(existsSync(join(dir, key)), s.why).toBe(true);
+    }
+    expect(publicFiles(victim)).toEqual([]);
+  });
+
+  test('F-10-2 늦게 악성으로 판정되면 격리 원본과 준비 위치를 지운다 [ASVS v5.0.0-5.4.3]', async () => {
+    ready();
+    const pending = await pendingUpload();
+    expect(pending.statusCode).toBe(503);
+    imaging.answer = () => ({ status: 'IMAGE_STATUS_REJECTED', reject_reason: 'IMAGE_REJECT_REASON_MALWARE', skipStaging: true });
+    expect((await worker.runOnce(new Date(clock.now()))).claimed).toBe(1);
+    expect(await jobStore.find(pending.key)).toMatchObject({ status: 'DONE', resultStatus: 'REJECTED', rejectReason: 'MALWARE' });
+    await eventually(() => expect(existsSync(join(dir, pending.key))).toBe(false));
+    expect(stagingDirs()).not.toContain(idOf(pending.key));
+    expect(publicFiles(idOf(pending.key))).toEqual([]);
+  });
+
+  test('F-10-2 게시·정리 실패는 재시도로 이어지고 부분 게시는 다시 해도 막히지 않는다 [ASVS v5.0.0-16.5.3]', async () => {
+    ready();
+    expect(jobWorkerFactory, 'ImageJobWorker를 다시 만들 수 없다').toBeTypeOf('function');
+    const pending = await pendingUpload();
+    expect(pending.statusCode).toBe(503);
+    imaging.answer = undefined;
+    const fail = { putPublic: 1, deletePublic: 0 };
+    const flakyWorker = jobWorkerFactory!({ store: jobStore, processing, objects: flakyStore(store, fail), clock });
+    expect((await flakyWorker.runOnce(new Date(clock.now()))).claimed).toBe(1);
+    expect(await jobStore.find(pending.key)).toMatchObject({ status: 'RETRYING', rejectReason: 'UNAVAILABLE' });
+    expect(publicFiles(idOf(pending.key))).toEqual([]);
+    // 같은 작업을 다시 집으면 처음부터 다시 게시한다(부분 게시가 남아 막히지 않는다)
+    clock.advance(5_000);
+    expect((await flakyWorker.runOnce(new Date(clock.now()))).claimed).toBe(1);
+    expect(await jobStore.find(pending.key)).toMatchObject({ status: 'DONE', resultStatus: 'ACCEPTED' });
+    expect(publicFiles(idOf(pending.key))).toEqual([...namesFor(1200)].sort());
+    // CLEANUP의 삭제 실패도 DONE으로 적지 않고 재시도한다
+    const oldId = randomUUID();
+    await store.putPublic(`production/${oldId}/320.webp`, derived('320.webp', oldId));
+    const cleanupKey = `cleanup/production/${oldId}`;
+    await jobStore.enqueue({ sourceKey: cleanupKey, kind: 'CLEANUP', derivativeKeys: [`production/${oldId}/320.webp`] }, new Date(clock.now()));
+    fail.deletePublic = 1;
+    expect((await flakyWorker.runOnce(new Date(clock.now()))).claimed).toBe(1);
+    expect(await jobStore.find(cleanupKey)).toMatchObject({ status: 'RETRYING', rejectReason: 'UNAVAILABLE' });
+    expect(existsSync(join(dir, 'public', 'production', oldId, '320.webp'))).toBe(true);
+    clock.advance(5_000);
+    expect((await flakyWorker.runOnce(new Date(clock.now()))).claimed).toBe(1);
+    expect(await jobStore.find(cleanupKey)).toMatchObject({ status: 'DONE', resultStatus: 'DELETED' });
+    expect(existsSync(join(dir, 'public', 'production', oldId, '320.webp'))).toBe(false);
   });
 
   test('F-10-2 image_job 표는 실제 DB에서 칸·기본값·core_app 권한을 갖는다 [ASVS v5.0.0-16.5.3]', async () => {

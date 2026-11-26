@@ -21,6 +21,7 @@ const BUCKET = 'peaket-it-image-worker';
 const REGION = 'ap-northeast-2';
 const TAG_KEY = 'GuardDutyMalwareScanStatus';
 const SCANNER = join(REPO, 'tools', 'local', 'mock-malware-scanner.mjs');
+const AUTH = 'AWS4-HMAC-SHA256 Credential=test/20260101/ap-northeast-1/s3/aws4_request, SignedHeaders=host, Signature=abc';
 const EICAR = 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*';
 const SECRET = 'PEAKET-GPS-SECRET';
 const WIDTHS = [320, 640, 960, 1280];
@@ -126,22 +127,22 @@ async function until(pred: () => boolean | Promise<boolean>, what: string | (() 
   }
 }
 async function put(key: string, bytes: Buffer | string, tag?: string): Promise<void> {
-  const r = await fetch(url(key), { method: 'PUT', body: bytes, headers: tag ? { 'x-amz-tagging': `${TAG_KEY}=${tag}` } : {} });
+  const r = await fetch(url(key), { method: 'PUT', body: bytes, headers: { authorization: AUTH, ...(tag ? { 'x-amz-tagging': `${TAG_KEY}=${tag}` } : {}) } });
   expect(r.status, `S3 PUT ${key}`).toBeLessThan(300);
 }
 async function list(prefix: string): Promise<string[]> {
-  const r = await fetch(`${endpoint}/${BUCKET}?list-type=2&prefix=${encodeURIComponent(prefix)}`);
+  const r = await fetch(`${endpoint}/${BUCKET}?list-type=2&prefix=${encodeURIComponent(prefix)}`, { headers: { authorization: AUTH } });
   expect(r.status).toBe(200);
   const xml = await r.text();
   return [...xml.matchAll(/<Key>([^<]+)<\/Key>/g)].map((m) => m[1]!).sort();
 }
 async function get(key: string): Promise<Buffer> {
-  const r = await fetch(url(key));
+  const r = await fetch(url(key), { headers: { authorization: AUTH } });
   expect(r.status, `S3 GET ${key}`).toBe(200);
   return Buffer.from(await r.arrayBuffer());
 }
 async function head(key: string): Promise<Headers> {
-  const r = await fetch(url(key), { method: 'HEAD' });
+  const r = await fetch(url(key), { method: 'HEAD', headers: { authorization: AUTH } });
   expect(r.status, `S3 HEAD ${key}`).toBe(200);
   return r.headers;
 }
@@ -243,6 +244,12 @@ describe('F-10-2 image-worker', () => {
       expect(h.get('cache-control')).toBe('private, no-store');
     }
     expect(await list('public/')).toEqual([]);
+    // 로컬 버킷 정책도 공개 접두사만 연다(격리 원본을 열지 않는다, IR-10)
+    const policy = await (await fetch(`${endpoint}/${BUCKET}?policy`, { headers: { authorization: AUTH } })).text();
+    for (const kind of ['production', 'banner', 'review']) expect(policy, `공개 접두사 ${kind}`).toContain(`arn:aws:s3:::${BUCKET}/${kind}/*`);
+    expect(policy).not.toContain('quarantine');
+    expect(policy).not.toContain('staging');
+    expect(policy).not.toMatch(new RegExp(`arn:aws:s3:::${BUCKET}/\\*`));
     // 같은 원본 키로 다시 맡기면 같은 결과이고 객체를 더 쓰지 않는다
     const again = await processImage(key);
     expect(again).toMatchObject({ status: 'IMAGE_STATUS_ACCEPTED', width: 1200, height: 1600 });
@@ -270,6 +277,16 @@ describe('F-10-2 image-worker', () => {
     expect(banner.status).toBe('IMAGE_STATUS_ACCEPTED');
     expect([...(banner.derivative_keys as string[])].sort()).toEqual(namesFor(1240).map((n) => `staging/banner/${id}/${n}`));
     expect((banner.derivative_keys as string[]).some((k) => k.includes('/1280.'))).toBe(false);
+  });
+
+  test('D-T35 ④ EXIF orientation 6은 화소를 돌린 뒤 폭·높이를 보고한다 [ASVS v5.0.0-5.1.1]', async () => {
+    ready();
+    const id = randomUUID();
+    await put(`quarantine/production/${id}`, fixture64('poster-rot6-1200x1600.jpg.b64'), 'NO_THREATS_FOUND');
+    const out = await processImage(`quarantine/production/${id}`);
+    expect(out.status).toBe('IMAGE_STATUS_ACCEPTED');
+    expect([out.width, out.height]).toEqual([1600, 1200]);
+    expect([...(out.derivative_keys as string[])].sort()).toEqual(namesFor(1600).map((n) => `staging/production/${id}/${n}`).sort());
   });
 
   test('D-T35 ④ EICAR를 THREATS_FOUND로 표시하면 MALWARE로 거절하고 파생본을 쓰지 않는다 [ASVS v5.0.0-5.4.3]', async () => {
@@ -315,7 +332,7 @@ describe('F-10-2 image-worker', () => {
       expect(out.status, `태그 ${tag ?? '없음'}`).toBe('IMAGE_STATUS_SCAN_PENDING');
       expect(await list(`staging/production/${id}/`)).toEqual([]);
       // 원본은 남는다(작업 워커가 60초 뒤 다시 맡긴다)
-      expect((await fetch(url(key), { method: 'HEAD' })).status).toBe(200);
+      expect((await fetch(url(key), { method: 'HEAD', headers: { authorization: AUTH } })).status).toBe(200);
     }
   });
 
@@ -387,7 +404,20 @@ describe('F-10-2 image-worker', () => {
     ]) {
       await expect(processImage(key), key).rejects.toThrow(/INVALID_ARGUMENT/i);
     }
+    // 격리 접두사와 kind가 어긋나면 받지 않는다.
+    await expect(processImage(`quarantine/banner/${randomUUID()}`, 'IMAGE_KIND_PRODUCTION')).rejects.toThrow(/INVALID_ARGUMENT/i);
+    await expect(processImage(`quarantine/review/${randomUUID()}`, 'IMAGE_KIND_HOME_BANNER')).rejects.toThrow(/INVALID_ARGUMENT/i);
     expect((await list('staging/')).filter((k) => k.includes('not-a-uuid') || k.includes('..'))).toEqual([]);
+  });
+
+  test('D-T35 ④ image-worker는 10MB를 넘는 격리 객체를 읽지 않고 TOO_LARGE로 거절한다 [ASVS v5.0.0-5.2.1]', async () => {
+    ready();
+    const id = randomUUID();
+    const key = `quarantine/production/${id}`;
+    await put(key, Buffer.alloc(10 * 1024 * 1024 + 1, 0x41), 'NO_THREATS_FOUND');
+    const out = await processImage(key);
+    expect(out).toMatchObject({ status: 'IMAGE_STATUS_REJECTED', reject_reason: 'IMAGE_REJECT_REASON_TOO_LARGE' });
+    expect(await list(`staging/production/${id}/`)).toEqual([]);
   });
 
   test('D-T35 ① image-worker는 DB·Kafka·Redis 자격 증명이 있으면 뜨지 않고 AWS S3 자격 증명은 받는다 [ASVS v5.0.0-15.2.5]', async () => {

@@ -8,13 +8,14 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 const MOTO_IMAGE = 'motoserver/moto:5.2.5';
 const REGION = 'ap-northeast-2';
 const BUCKET = 'peaket-it-images';
+const AUTH = 'AWS4-HMAC-SHA256 Credential=test/20260101/ap-northeast-1/s3/aws4_request, SignedHeaders=host, Signature=abc';
 const ID = randomUUID();
 /** 첫 시험이 덮어쓰기 거절로 쓰는 키와 겹치지 않게, 접두사 왕복 시험은 다른 ID를 쓴다. */
 const PREFIX_ID = randomUUID();
 
 const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 
-let S3ImageObjectStore: new (o: { bucket: string; region: string; endpoint?: string }) => unknown;
+let S3ImageObjectStore: new (o: { bucket: string; region: string; endpoint?: string; env?: string }) => unknown;
 let startFailure: string | undefined;
 const ready = () => {
   if (startFailure) throw new Error(startFailure);
@@ -41,8 +42,8 @@ async function until(pred: () => boolean | Promise<boolean>, ms = 30_000): Promi
 }
 
 const url = (key: string) => `${endpoint}/${BUCKET}/${key}`;
-const putRaw = (key: string, bytes: Uint8Array, headers: Record<string, string> = {}) => fetch(url(key), { method: 'PUT', body: bytes, headers });
-const head = (key: string) => fetch(url(key), { method: 'HEAD' });
+const putRaw = (key: string, bytes: Uint8Array, headers: Record<string, string> = {}) => fetch(url(key), { method: 'PUT', body: bytes, headers: { authorization: AUTH, ...headers } });
+const head = (key: string) => fetch(url(key), { method: 'HEAD', headers: { authorization: AUTH } });
 
 beforeAll(async () => {
   try {
@@ -61,7 +62,7 @@ beforeAll(async () => {
       }
     });
     expect((await fetch(`${endpoint}/${BUCKET}`, { method: 'PUT' })).status).toBeLessThan(300);
-    store = new S3ImageObjectStore({ bucket: BUCKET, region: REGION, endpoint }) as typeof store;
+    store = new S3ImageObjectStore({ bucket: BUCKET, region: REGION, endpoint, env: 'ci' }) as typeof store;
   } catch (e) {
     startFailure = e instanceof Error ? e.message : String(e);
   }
@@ -98,11 +99,25 @@ describe('F-10-2 S3 이미지 저장소', () => {
     // 공개 파생본은 immutable이라 같은 키를 덮어쓰지 않는다
     await expect(store.putPublic(`production/${ID}/320.webp`, new Uint8Array([9, 9, 9]), 'image/webp')).rejects.toThrow();
     expect(Buffer.from(await (await fetch(`http://127.0.0.1:${new URL(endpoint).port}/${BUCKET}/production/${ID}/320.webp`)).arrayBuffer())).toEqual(Buffer.from(webp));
+    // 로컬 버킷 정책은 공개 접두사만 연다(격리·준비 위치는 열지 않는다, IR-10)
+    const policy = await (await fetch(`${endpoint}/${BUCKET}?policy`, { headers: { authorization: AUTH } })).text();
+    for (const kind of ['production', 'banner', 'review']) expect(policy, `공개 접두사 ${kind}`).toContain(`arn:aws:s3:::${BUCKET}/${kind}/*`);
+    expect(policy, '격리 접두사를 열었다').not.toContain('quarantine');
+    expect(policy, '준비 접두사를 열었다').not.toContain('staging');
+    expect(policy, '버킷 전체를 열었다').not.toMatch(new RegExp(`arn:aws:s3:::${BUCKET}/\\*`));
+    // production 환경에서는 endpoint가 있어도 버킷 정책을 열지 않는다
+    const prodBucket = `${BUCKET}-prod`;
+    expect((await fetch(`${endpoint}/${prodBucket}`, { method: 'PUT' })).status).toBeLessThan(300);
+    const prodStore = new S3ImageObjectStore({ bucket: prodBucket, region: REGION, endpoint, env: 'production' }) as typeof store;
+    await prodStore.putPublic(`production/${ID}/960.webp`, webp, 'image/webp');
+    expect((await fetch(`${endpoint}/${prodBucket}?policy`, { headers: { authorization: AUTH } })).status).toBe(404);
     // 격리 원본은 비공개·no-store다
     await store.putQuarantine(`quarantine/production/${ID}`, webp);
     const q = await head(`quarantine/production/${ID}`);
     expect(q.status).toBe(200);
     expect(q.headers.get('cache-control')).toBe('private, no-store');
+    // 서명 없는 읽기로는 격리 원본에 닿지 못한다(IR-10)
+    expect((await fetch(url(`quarantine/production/${ID}`), { method: 'HEAD' })).status).toBe(403);
   });
 
   test('F-10-2 저장소는 서버가 만든 키 꼴 밖을 거절하고 없는 준비 객체는 undefined다 [ASVS v5.0.0-5.3.1] [ASVS v5.0.0-5.3.2]', async () => {

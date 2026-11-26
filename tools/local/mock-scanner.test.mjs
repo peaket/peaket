@@ -13,6 +13,7 @@ const SCRIPT = join(REPO, 'tools', 'local', 'mock-malware-scanner.mjs');
 const MOTO_IMAGE = 'motoserver/moto:5.2.5';
 const BUCKET = 'peaket-it-mock-scan';
 const TAG_KEY = 'GuardDutyMalwareScanStatus';
+const AUTH = 'AWS4-HMAC-SHA256 Credential=test/20260101/ap-northeast-1/s3/aws4_request, SignedHeaders=host, Signature=abc';
 const EICAR = 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*';
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1, 0, 0, 0, 1]);
 
@@ -34,7 +35,7 @@ async function scan(endpoint) {
 
 /** S3 GET ?tagging 응답에서 태그 값을 읽는다(없으면 undefined) */
 async function tagOf(endpoint, key) {
-  const r = await fetch(`${endpoint}/${BUCKET}/${key}?tagging`);
+  const r = await fetch(`${endpoint}/${BUCKET}/${key}?tagging`, { headers: { authorization: AUTH } });
   if (r.status === 404) return undefined;
   assert.equal(r.status, 200, `태그 읽기 ${r.status}`);
   const xml = await r.text();
@@ -67,13 +68,13 @@ test('D-T35 ④ 모의 검사기는 moto S3에서 EICAR만 THREATS_FOUND로 표�
     assert.equal(await tagOf(endpoint, 'tagged.png'), 'NO_THREATS_FOUND');
     assert.equal(await tagOf(endpoint, 'tagged-failed.png'), 'FAILED');
     // 두 번째 실행은 객체·태그를 바꾸지 않는다(멱등)
-    const before = await (await fetch(`${endpoint}/${BUCKET}?list-type=2`)).text();
+    const before = await (await fetch(`${endpoint}/${BUCKET}?list-type=2`, { headers: { authorization: AUTH } })).text();
     await scan(endpoint);
     assert.equal(await tagOf(endpoint, 'clean.png'), 'NO_THREATS_FOUND');
     assert.equal(await tagOf(endpoint, 'eicar.png'), 'THREATS_FOUND');
     assert.equal(await tagOf(endpoint, 'tagged.png'), 'NO_THREATS_FOUND');
     assert.equal(await tagOf(endpoint, 'tagged-failed.png'), 'FAILED');
-    const after = await (await fetch(`${endpoint}/${BUCKET}?list-type=2`)).text();
+    const after = await (await fetch(`${endpoint}/${BUCKET}?list-type=2`, { headers: { authorization: AUTH } })).text();
     assert.equal(after, before, '다시 돌렸더니 객체 목록이 바뀌었다');
   } finally {
     try {

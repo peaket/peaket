@@ -72,12 +72,13 @@ describe('F-10-2 image-worker 배포·코드 모양', () => {
     expect(rows.length).toBeGreaterThan(0);
     for (const r of rows) {
       expect(r.effect).toBe('Allow');
-      expect(['s3:GetObject', 's3:PutObject', 's3:AbortMultipartUpload']).toContain(r.action);
+      expect(['s3:GetObject', 's3:GetObjectTagging', 's3:PutObject', 's3:AbortMultipartUpload']).toContain(r.action);
       expect(r.resource, '버킷 ARN이 아니다').toMatch(/^arn:aws:s3:::[a-z0-9.-]+\/(?:quarantine|staging)\/\*$/);
-      if (r.action === 's3:GetObject') expect(r.resource).toMatch(/\/quarantine\/\*$/);
+      if (r.action === 's3:GetObject' || r.action === 's3:GetObjectTagging') expect(r.resource).toMatch(/\/quarantine\/\*$/);
       else expect(r.resource).toMatch(/\/staging\/\*$/);
     }
     expect(rows.some((r) => r.action === 's3:GetObject')).toBe(true);
+    expect(rows.some((r) => r.action === 's3:GetObjectTagging')).toBe(true);
     expect(rows.some((r) => r.action === 's3:PutObject')).toBe(true);
   });
 
@@ -121,5 +122,9 @@ describe('F-10-2 image-worker 배포·코드 모양', () => {
     for (const kind of ['production', 'banner', 'review']) expect(store, `S3 어댑터에 ${kind} 접두사가 없다`).toContain(kind);
     const localStore = read('services/core-svc/src/modules/catalog/adapters/image-store.ts');
     for (const kind of ['production', 'banner', 'review']) expect(localStore, `로컬 저장소에 ${kind} 접두사가 없다`).toContain(kind);
+    // 계약 설명도 구현처럼 원본 폭 이하만 만든다고 적는다(여덟 개 고정 금지, IR-06)
+    const openapi = read('docs/api/openapi.yaml');
+    expect(openapi).toMatch(/원본 폭 이하|원본보다 넓은 폭은 만들지 않는다/);
+    expect(openapi).not.toMatch(/320·640·960·1,?280 \[가정\]의 여덟 개/);
   });
 });
