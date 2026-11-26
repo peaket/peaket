@@ -42,4 +42,13 @@ describe('마이그레이션 저널', () => {
     expect(search.map((x) => x.tag)).toEqual(['0023_search_read_model_tables']);
     expect(search[0]!.when).toBeGreaterThan(LANE3_WHEN);
   });
+
+  // F-10-2: 다른 동결 가지가 0048·0049를 이미 쓴다. 겹치지 않게 0050을 쓰고, 저널 순서는 0047 뒤다.
+  test('F-10-2 이미지 작업 표는 0050_image_job이고 0047 뒤에 적용된다', () => {
+    const job = journal.entries.find((x) => x.tag === '0050_image_job');
+    expect(job).toMatchObject({ idx: 50 });
+    const e47 = journal.entries.find((x) => x.tag === '0047_entry_closed_grant');
+    expect(job!.when).toBeGreaterThan(e47!.when);
+    expect(existsSync(`${dir}0050_image_job.sql`)).toBe(true);
+  });
 });

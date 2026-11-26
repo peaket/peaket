@@ -1,6 +1,6 @@
 // 공연 이미지 올리기·고치기·지우기와 공연 상세 이미지 칸 통합 시험(BUILD_ORDER HOT-190, ADR-0257 결정 1~3, docs/data.md production_image·§5 마지막 줄).
 // 실제 PostgreSQL 18 컨테이너, 실제 core-svc HTTP 앱(운영과 같은 권한의 DB 사용자 core_app·core_partner, 행 보안), 로컬 폴더 이미지 저장소,
-// 시험 안의 ImageService gRPC 서버(image-worker는 HOT-200이라 이 경계만 대역이다)를 잇는다. 대역은 같은 폴더의 격리 원본을 읽고 준비 위치에 파생본 여덟 개를 쓴다.
+// 시험 안의 ImageService gRPC 서버(image-worker는 HOT-200이라 이 경계만 대역이다)를 잇는다. 대역은 같은 폴더의 격리 원본을 읽고 준비 위치에 원본 폭 이하의 파생본을 쓴다.
 // 처리 결과(폭·높이)는 PNG 머리(IHDR)에서 읽고, 시험마다 답을 바꿀 수 있다(호출 수를 센다).
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
@@ -32,7 +32,8 @@ import { loginFor } from './roles.js';
 const ORIGIN = 'https://img.peaket.test';
 const P = 'https://peaket.example/problems/';
 const MB = 1024 * 1024;
-const NAMES = [320, 640, 960, 1280].flatMap((w) => [`${w}.avif`, `${w}.webp`]);
+/** 원본 폭 이하의 폭만 만든다(HOT-200 '원본보다 넓은 폭 칸은 늘리지 않고', 계획 F-10-2 §3) */
+const namesFor = (width: number) => [320, 640, 960, 1280].filter((w) => w <= width).flatMap((w) => [`${w}.avif`, `${w}.webp`]);
 
 let pg_: PostgresContainer;
 let admin: Database;
@@ -144,12 +145,13 @@ function startImaging(): Promise<number> {
       const ans = imaging.answer?.(id, size);
       if (ans === 'hang') return;
       if (typeof ans === 'number') return cb({ code: ans, details: 'fake' });
-      // 받으면 준비 위치에 파생본 여덟 개를 쓴다(내용은 이름이 든 바이트)
-      if (!ans?.skipStaging) for (const n of NAMES) {
+      // 받으면 준비 위치에 원본 폭 이하의 파생본을 쓴다(내용은 이름이 든 바이트)
+      const names = namesFor(size.width);
+      if (!ans?.skipStaging) for (const n of names) {
         mkdirSync(dirname(stagingFile(id, n)), { recursive: true });
         writeFileSync(stagingFile(id, n), imaging.content?.(n) ?? derived(n, id));
       }
-      cb(null, ans ?? { status: 'IMAGE_STATUS_ACCEPTED', derivative_keys: NAMES.map((n) => `staging/production/${id}/${n}`), width: size.width, height: size.height });
+      cb(null, ans ?? { status: 'IMAGE_STATUS_ACCEPTED', derivative_keys: names.map((n) => `staging/production/${id}/${n}`), width: size.width, height: size.height });
     },
   });
   return new Promise((res, rej) => imagingServer.bindAsync('127.0.0.1:0', grpc.ServerCredentials.createInsecure(), (e, p) => (e ? rej(e) : res(p))));
@@ -245,7 +247,7 @@ async function clearImages(productionId = PA): Promise<void> {
 }
 
 describe('공연 이미지 올리기', () => {
-  test('포스터를 올리면 서버가 만든 ID로 원본·파생본 키를 만들고 파생본 여덟 개만 게시하며 원본·준비 위치는 남지 않는다 [ASVS v5.0.0-5.3.2] [ASVS v5.0.0-5.1.1]', async () => {
+  test('포스터를 올리면 서버가 만든 ID로 원본·파생본 키를 만들고 원본 폭 이하의 파생본만 게시하며 원본·준비 위치는 남지 않는다 [ASVS v5.0.0-5.3.2] [ASVS v5.0.0-5.1.1]', async () => {
     await clearImages();
     const calls = imaging.calls.length;
     const cdnCalls = cdn.calls.length;
@@ -254,10 +256,10 @@ describe('공연 이미지 올리기', () => {
     const out = CreatePartnerProductionImageResponse.parse(json(r));
     const id = out.imageId!;
     expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-    expect(json(r)).toEqual({ imageId: id, kind: 'POSTER', alt: '포스터: LUMEN 겨울 콘서트', order: 0, width: 1200, height: 1600, version: 1, url: `${ORIGIN}/production/${id}`, derivatives: Object.fromEntries(NAMES.map((n) => [n, `${ORIGIN}/production/${id}/${n}`])) });
+    expect(json(r)).toEqual({ imageId: id, kind: 'POSTER', alt: '포스터: LUMEN 겨울 콘서트', order: 0, width: 1200, height: 1600, version: 1, url: `${ORIGIN}/production/${id}`, derivatives: Object.fromEntries(namesFor(1200).map((n) => [n, `${ORIGIN}/production/${id}/${n}`])) });
     expect(r.headers.etag).toBe('"1"');
     expect(imaging.calls.slice(calls)).toEqual([{ source_key: `quarantine/production/${id}`, kind: 'IMAGE_KIND_PRODUCTION' }]);
-    expect(publicFiles(id)).toEqual([...NAMES].sort());
+    expect(publicFiles(id)).toEqual([...namesFor(1200)].sort());
     expect(readFileSync(join(dir, 'public', 'production', id, '640.webp'))).toEqual(derived('640.webp', id));
     await eventually(() => expect(leftovers()).toEqual({ quarantine: [], staging: [] }));
     expect((await rows()).map((x) => ({ id: x.id, promoterId: x.promoterId, kind: x.kind, alt: x.alt, order: x.displayOrder, width: x.width, height: x.height, version: x.version }))).toEqual([
@@ -275,7 +277,7 @@ describe('공연 이미지 올리기', () => {
     const now = await rows();
     expect(now.map((x) => [x.id, x.kind, x.width])).toEqual([[second, 'POSTER', 1000]]);
     await eventually(() => expect(publicFiles(first)).toEqual([]));
-    expect(publicFiles(second)).toHaveLength(8);
+    expect(publicFiles(second)).toHaveLength(namesFor(1000).length);
     const [x, y] = await Promise.all([upload({ kind: 'POSTER', bytes: png(1100, 1500) }), upload({ kind: 'POSTER', bytes: png(1101, 1500) })]);
     expect([x.statusCode, y.statusCode]).toEqual([201, 201]);
     const posters = (await rows()).filter((r) => r.kind === 'POSTER');
@@ -286,7 +288,7 @@ describe('공연 이미지 올리기', () => {
     await eventually(() => {
       for (const l of lost) expect(publicFiles(l)).toEqual([]);
     });
-    expect(publicFiles(kept)).toHaveLength(8);
+    expect(publicFiles(kept)).toHaveLength(namesFor(1101).length);
   });
 
   test('상세 이미지 10장은 받고 11장째는 409이며 처리 작업을 부르지 않는다 [ASVS v5.0.0-2.3.2]', async () => {
@@ -416,9 +418,9 @@ describe('공연 이미지 올리기', () => {
     expect(logs.lines().filter((l) => l.event === 'image_malware')).toEqual([expect.objectContaining({ kind: 'security', productionId: PA })]);
   });
 
-  test('파생본 키가 여덟 개가 아니거나 접두사 밖이거나 준비 위치에 없으면 게시하지 않고 503이며 보안 사건으로 남긴다 [ASVS v5.0.0-16.5.3]', async () => {
+  test('파생본 키가 원본 폭 이하의 정확한 집합이 아니거나 접두사 밖이거나 준비 위치에 없으면 게시하지 않고 503이며 보안 사건으로 남긴다 [ASVS v5.0.0-16.5.3]', async () => {
     const before = await rows();
-    const keys = (id: string) => NAMES.map((n) => `staging/production/${id}/${n}`);
+    const keys = (id: string) => namesFor(1200).map((n) => `staging/production/${id}/${n}`);
     const variants: ((id: string) => string[])[] = [(id) => keys(id).slice(1), (id) => [...keys(id), `staging/production/${id}/2560.webp`], (id) => [...keys(id).slice(1), `production/${id}/320.avif`], (id) => keys(id).map((k) => k.replace(id, randomUUID()))];
     for (const v of variants) {
       imaging.answer = (id, s) => ({ status: 'IMAGE_STATUS_ACCEPTED', derivative_keys: v(id), width: s.width, height: s.height });
@@ -579,11 +581,11 @@ describe('공연 이미지 고치기·지우기', () => {
     expect(imaging.calls.length).toBe(calls);
   });
 
-  test('포스터는 지우지 못하고(409), 상세 이미지를 지우면 남은 순서를 다시 매기고 공개 파생본 여덟 개를 지우며 무효화한다', async () => {
+  test('포스터는 지우지 못하고(409), 상세 이미지를 지우면 남은 순서를 다시 매기고 공개 파생본을 지우며 무효화한다', async () => {
     const [a, b, c, d] = await fourDetails();
     const poster = (await rows()).find((x) => x.kind === 'POSTER')!;
     expect(json(await remove(poster.id))).toMatchObject({ type: `${P}poster-not-deletable`, status: 409 });
-    expect(publicFiles(poster.id)).toHaveLength(8);
+    expect(publicFiles(poster.id)).toHaveLength(namesFor(1200).length);
     const cdnCalls = cdn.calls.length;
     const r = await remove(b!);
     expect(r.statusCode).toBe(204);
@@ -593,7 +595,7 @@ describe('공연 이미지 고치기·지우기', () => {
       [d, 2, 2],
     ]);
     await eventually(() => expect(publicFiles(b!)).toEqual([]));
-    expect(publicFiles(a!)).toHaveLength(8);
+    expect(publicFiles(a!)).toHaveLength(namesFor(1200).length);
     await eventually(() => expect(cdn.calls.slice(cdnCalls)).toContainEqual([`production:${PA}`]));
     expect((await remove(b!)).statusCode).toBe(404);
     expect((await remove('not-a-uuid')).statusCode).toBe(404);
@@ -634,7 +636,7 @@ describe('공연 이미지 고치기·지우기', () => {
     }
     expect(await rows()).toEqual(before);
     expect(imaging.calls.length).toBe(calls + 1);
-    expect(publicFiles(a!)).toHaveLength(8);
+    expect(publicFiles(a!)).toHaveLength(namesFor(1200).length);
     const denied = logs.lines().filter((l) => l.event === 'partner_production_denied' && l.route === 'production_image');
     expect(denied.map((l) => l.action)).toEqual(expect.arrayContaining(['upload', 'update', 'delete']));
     expect(denied.find((l) => l.action === 'update')).toMatchObject({ kind: 'security', productionId: PA, tenantId: B });

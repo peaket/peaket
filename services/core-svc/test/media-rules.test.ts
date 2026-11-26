@@ -58,17 +58,28 @@ describe('공연 이미지 규칙', () => {
       expect(specViolation('DETAIL', w, h)).toBe('PIXEL_LIMIT');
   });
 
-  test('파생본 키는 그 이미지 준비 위치의 여덟 개와 정확히 같아야 한다(모자람·남음·겹침·접두사 밖 거절) [ASVS v5.0.0-5.3.2]', () => {
+  test('파생본 키는 그 이미지 원본 폭 이하의 폭만 정확히 갖는다(원본보다 넓은 폭·모자람·남음·접두사 밖 거절) [ASVS v5.0.0-5.3.2]', () => {
     const id = '0190f3a1-7c2e-7a00-8000-000000000001';
-    const keys = derivativeNames().map((n) => stagingKey(id, n));
-    expect(keys).toEqual([320, 640, 960, 1280].flatMap((w) => [`staging/production/${id}/${w}.avif`, `staging/production/${id}/${w}.webp`]));
-    expect(derivativeKeysMatch(id, keys)).toBe(true);
-    expect(derivativeKeysMatch(id, [...keys].reverse())).toBe(true);
-    expect(derivativeKeysMatch(id, keys.slice(1))).toBe(false);
-    expect(derivativeKeysMatch(id, [...keys, `staging/production/${id}/2560.webp`])).toBe(false);
-    expect(derivativeKeysMatch(id, [...keys.slice(1), keys[2]!])).toBe(false);
-    expect(derivativeKeysMatch(id, keys.map((k) => k.replace(id, '0190f3a1-7c2e-7a00-8000-000000000002')))).toBe(false);
-    expect(derivativeKeysMatch(id, [...keys.slice(1), `production/${id}/320.avif`])).toBe(false);
+    // 구현 전 서명(인자 없음·폭 없음)과 새 서명을 함께 견디게 시험 쪽에서만 넓힌다(시험 먼저, ADR-0372)
+    const names = derivativeNames as unknown as (width: number) => string[];
+    const matches = derivativeKeysMatch as unknown as (imageId: string, keys: string[], width: number) => boolean;
+    const keysFor = (width: number) => names(width).map((n) => stagingKey(id, n));
+    // 1,200px 원본: 320·640·960만. 1,280px 칸은 원본보다 넓으므로 만들지 않는다
+    expect(names(1200)).toEqual([320, 640, 960].flatMap((w) => [`${w}.avif`, `${w}.webp`]));
+    expect(names(800)).toEqual([320, 640].flatMap((w) => [`${w}.avif`, `${w}.webp`]));
+    expect(names(20_000)).toEqual([320, 640, 960, 1280].flatMap((w) => [`${w}.avif`, `${w}.webp`]));
+    expect(keysFor(1200)).toEqual([320, 640, 960].flatMap((w) => [`staging/production/${id}/${w}.avif`, `staging/production/${id}/${w}.webp`]));
+    expect(matches(id, keysFor(1200), 1200)).toBe(true);
+    expect(matches(id, [...keysFor(1200)].reverse(), 1200)).toBe(true);
+    expect(matches(id, keysFor(800), 800)).toBe(true);
+    expect(matches(id, keysFor(20_000), 20_000)).toBe(true);
+    // 모자람·남음·원본보다 넓은 폭·다른 폭 기준·겹침·접두사 밖
+    expect(matches(id, keysFor(1200).slice(1), 1200)).toBe(false);
+    expect(matches(id, [...keysFor(1200), `staging/production/${id}/1280.webp`], 1200)).toBe(false);
+    expect(matches(id, keysFor(1200), 800)).toBe(false);
+    expect(matches(id, [...keysFor(1200).slice(1), keysFor(1200)[2]!], 1200)).toBe(false);
+    expect(matches(id, keysFor(1200).map((k) => k.replace(id, '0190f3a1-7c2e-7a00-8000-000000000002')), 1200)).toBe(false);
+    expect(matches(id, [...keysFor(1200).slice(1), `production/${id}/320.avif`], 1200)).toBe(false);
   });
 
   test('대체 텍스트는 1~300자(코드 포인트)이고 NUL·짝 잃은 서로게이트는 받지 않는다', () => {
