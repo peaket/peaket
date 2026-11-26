@@ -16,6 +16,19 @@ test('UI-01 SCR-071 운영 경로는 실제 사건·그래프·소명·조치·�
   assert.match(page, /await load\(/);
   assert.match(page, /mapCaseDetail\(|mapGraph\(/);
   assert.doesNotMatch(page, /from ['"][^'"]*entities\/fraud-case/);
+  // IR-01: 그래프·IP 원문은 실제 경로로 받고, 연 원문은 고른 점 모두를 화면 상태에 둔다.
+  assert.match(page, /getOpsFraudCaseGraph\(/);
+  assert.match(page, /createOpsFraudCaseIpReveal\(/);
+  assert.match(page, /items\.map\(/);
+  assert.doesNotMatch(page, /items\?\.find\(\(x\) => x\.ip\)/);
+  // IR-02: 사건 고치기(PATCH)와 계정·사건 기록 표시
+  assert.match(page, /updateOpsFraudCase\(/);
+  assert.match(page, /members\.map\(/);
+  assert.match(page, /events\.map\(/);
+  // IR-13: 묶음 상세와 내보내기 응답을 화면에 쓴다.
+  assert.match(page, /setBundleDetail\(/);
+  assert.match(page, /content-disposition/i);
+  assert.match(page, /createObjectURL\(/);
 });
 
 test('UI-01 SCR-071 보드 미리보기는 __PREVIEW__와 ?state=에만 남는다', () => {

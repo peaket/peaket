@@ -125,4 +125,13 @@ describe('화면 사본', () => {
     expect(item.actionResult?.restrictedUntil).toBeUndefined();
     expect(item.actionResult?.cancelledTicketIds).toEqual([T1]);
   });
+
+  test('IR-12 제출했지만 판단 전인 사본은 30일이 지나도 남고 CLEARED 사건 사본은 빈 목록이다', async () => {
+    const me = `ir12-${randomUUID()}`;
+    await views.set(seed({ accountId: me, caseId: 'case-submitted', state: 'SUBMITTED', updatedAtMs: NOW_MS - 31 * DAY }));
+    await views.set(seed({ accountId: me, caseId: 'case-cleared', state: 'ACCEPTED', caseStatus: 'CLEARED', updatedAtMs: NOW_MS }));
+    await views.set(seed({ accountId: me, caseId: 'case-decided', state: 'ACCEPTED', updatedAtMs: NOW_MS - 31 * DAY }));
+    const body = JSON.parse((await svc.http.inject({ method: 'GET', url: '/v1/fraud-appeal-requests', headers: fan(me) })).payload);
+    expect(body.items.map((x: { caseId: string }) => x.caseId).sort()).toEqual(['case-submitted']);
+  });
 });

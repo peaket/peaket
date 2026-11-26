@@ -19,6 +19,12 @@ test('UI-01 SCR-046 부정 예매 조치 운영 경로는 실제 승인 API를 �
   assert.match(page, /fraudApprovalBody\(/);
   assert.match(page, /await load\(/);
   assert.doesNotMatch(page, /from ['"][^'"]*entities\/fraud-case/);
+  // IR-09: 화면이 실제 세션의 계정·역할·지정으로 요청자 본인·가명 취급자를 한 번 더 막는다.
+  assert.match(page, /getMyOpsAuthSession\(/);
+  assert.match(page, /meId:\s*me\?\.accountId/);
+  assert.match(page, /role:\s*me\?\.role/);
+  assert.match(page, /designations:\s*me\?\.designations/);
+  assert.doesNotMatch(page, /meId:\s*''/);
 });
 
 test('UI-01 SCR-046 보드 미리보기는 __PREVIEW__와 ?state=에만 남는다', () => {

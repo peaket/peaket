@@ -6,6 +6,7 @@
 import 'reflect-metadata';
 import { createService, fakeClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { FakeIdentity, NOW_MS, fan, quiet } from './support.js';
@@ -227,5 +228,11 @@ describe('support 저장소', () => {
     expect(await appeals.findIdempotent({ ...idem, key: randomUUID() })).toMatchObject({ kind: 'none' });
     expect(await appeals.update({ ...a, status: 'INVALID', decidedAtMs: NOW_MS })).toBe(true);
     expect(await appeals.get(a.id)).toMatchObject({ status: 'INVALID', decidedAtMs: NOW_MS });
+  });
+
+  test('IR-11 gRPC 사본은 조치 결과가 있을 때만 actionResult를 만든다', () => {
+    const src = readFileSync(new URL('../src/modules/support/inbound/fraud-appeal-views.grpc.ts', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/actionResult:\s*\{\s*cancelledTicketIds:/);
+    expect(src).toMatch(/cancelled\.length\s*>\s*0|restricted\s*!==\s*null/);
   });
 });

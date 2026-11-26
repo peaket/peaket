@@ -591,9 +591,9 @@ describe('F-04-13 FRAUD_ACTION 조치·승인', () => {
         memberOf(A(41), { appealResult: 'EXPIRED', appealDueAtMs: NOW - HOUR, lockExpiresAtMs: NOW + 10 * DAY }),
       ],
     });
-    seedTicket({ ticketId: T(40), payerAccountId: A(40) });
+    seedTicket({ ticketId: T(40), payerAccountId: A(40), holderAccountId: H(40) });
     seedTicket({ ticketId: T(41), payerAccountId: A(41) });
-    const created = await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(40), A(41)], reason: '봇' });
+    const created = await actionRequest(c.caseId, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(40), A(41)], ticketIds: [T(40), T(41)], reason: '봇' });
     expect(created.statusCode, created.payload).toBe(201);
     const approvalId = String(json(created).approvalId);
     const viewed = await getApproval(approvalId, approver);
@@ -609,6 +609,13 @@ describe('F-04-13 FRAUD_ACTION 조치·승인', () => {
     expect(noticeCalls.some((n) => n.kind === 'actionNotice' && n.accountId === A(40) && Array.isArray(n.ticketIds))).toBe(true);
     expect(noticeCalls.some((n) => n.kind === 'actionNotice' && n.accountId === A(41) && n.action === 'CANCEL_TICKETS')).toBe(true);
     expect(locks.releases.some((r) => r.accountIds.includes(A(40)) && r.accountIds.includes(A(41)) && r.releaseReason === 'ACTION_DONE')).toBe(true);
+    // IR-04·05: 조치 결과 사본은 상태·취소 표·잠긴 표 목록을 싣고 HOLDER의 가진 표를 유지한다.
+    const payerCopy = appealCopies.find((x) => x.caseId === c.caseId && x.accountId === A(40) && x.actionResult?.cancelledTicketIds?.includes(T(40)));
+    expect(payerCopy).toMatchObject({ party: 'PAYER', lockActive: false, state: 'REJECTED', actionResult: { cancelledTicketIds: [T(40)] }, excludedTicketIds: [], priorityPurchases: [] });
+    expect(payerCopy.lockedTicketIds).toEqual([T(40)]);
+    expect(payerCopy.objectionDueAtMs).toBe(NOW + 30 * DAY);
+    const holderCopy = appealCopies.find((x) => x.caseId === c.caseId && x.accountId === H(40) && x.party === 'HOLDER' && x.actionResult?.cancelledTicketIds?.includes(T(40)));
+    expect(holderCopy).toMatchObject({ party: 'HOLDER', lockActive: false, heldTicketIds: [T(40)], priorityPurchases: [], actionResult: { cancelledTicketIds: [T(40)] } });
   });
 
   test('FX-T15 ⑬ 조치 실행이 끝나면 취소된 표 말고 남은 표의 잠금을 ACTION_DONE으로 푼다', async () => {
@@ -736,11 +743,14 @@ describe('F-04-13 FRAUD_ACTION 조치·승인', () => {
   test('FX-T12 53 C13·C17 입장 시작·최대 기한에 ops 사본 잠금이 풀리고 ticket-svc가 스스로 푼다', async () => {
     const who = investigator();
     const c = await seedCase({ status: 'ACTIONED', members: [memberOf(A(90), { appealResult: 'REJECTED', actionNotifiedAtMs: NOW - 10 * DAY, lockExpiresAtMs: NOW - 1 })] });
+    seedTicket({ ticketId: T(90), payerAccountId: A(90) });
     const view = await getCase(c.caseId, who);
     expect(json(view).members[0].transferLocked).toBe(false);
     expect(json(view).members[0].objectionDueAt).toBe(iso(NOW - 10 * DAY + 30 * DAY));
     await tick('expireDue');
-    expect(appealCopies.some((x) => x.caseId === c.caseId && x.accountId === A(90) && x.lockActive === false && x.objectionDueAtMs === NOW - 10 * DAY + 30 * DAY)).toBe(true);
+    const expiredCopy = appealCopies.find((x) => x.caseId === c.caseId && x.accountId === A(90) && x.lockActive === false && x.objectionDueAtMs === NOW - 10 * DAY + 30 * DAY);
+    expect(expiredCopy).toMatchObject({ state: 'REJECTED' });
+    expect(expiredCopy.lockedTicketIds).toEqual([T(90)]);
     const beforeEntry = await seedCase({ status: 'APPEAL_PENDING', members: [memberOf(A(91), { lockExpiresAtMs: ENTRY + DAY })] });
     clock.advance(ENTRY - clock.now() + 1);
     const afterEntry = await getCase(beforeEntry.caseId, who);

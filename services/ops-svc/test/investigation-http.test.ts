@@ -289,6 +289,22 @@ const alerts = new FakeAlerts();
 const access = new FakeAccess();
 const events = new FakeEvents();
 const verifier = new FakeVerifier();
+const graphFake = {
+  async graph() {
+    return {
+      nodes: [
+        { nodeId: 'n-acc', kind: 'ACCOUNT' as const, label: A(60), inCluster: true },
+        { nodeId: 'n-ip', kind: 'IP' as const, label: '203.0.113.0/24', inCluster: true },
+        { nodeId: 'n-dev', kind: 'DEVICE' as const, label: 'abcd1234', inCluster: false },
+      ],
+      edges: [{ from: 'n-acc', to: 'n-ip', kind: 'IP', firstSeenAt: iso(NOW - DAY), lastSeenAt: iso(NOW), count: 2 }],
+      truncated: false,
+    };
+  },
+  async revealIps(_caseId: string, nodeIds: readonly string[]) {
+    return nodeIds.map((nodeId) => ({ nodeId, ip: nodeId === 'n-ip' ? '203.0.113.45' : '203.0.113.46' }));
+  },
+};
 const admin = new FakeAdminIdentity();
 const identity = new FakeIdentity();
 const clock = fakeClock({ now: NOW });
@@ -474,6 +490,7 @@ beforeAll(async () => {
         access,
         events,
         verifier,
+        graph: graphFake,
         now: () => clock.now(),
       },
     }),
@@ -1387,5 +1404,28 @@ describe('F-04-12 조사 HTTP', () => {
     expect(r.statusCode, r.payload).toBe(200);
     expect(json(r)).toMatchObject({ eventId: EVENT_EMPTY, snapshot: null, latestRun: null, rerunAllowed: false });
     expect(json(r).summary).toMatchObject({ clusterCount: 0, caseCount: 0 });
+  });
+
+  test('IR-01 SCR-071 연결 그래프와 IP 원문 열기는 사유·접속기록·no-store를 지킨다', async () => {
+    const who = investigator();
+    const g = await send('GET', `/v1/ops/fraud-cases/${CASE_SEEDED}/graph`, who);
+    expect(g.statusCode, g.payload).toBe(200);
+    expect(json(g)).toMatchObject({ truncated: false });
+    expect((json(g).nodes as Array<Record<string, unknown>>).find((n) => n.kind === 'IP')).toMatchObject({ label: '203.0.113.0/24' });
+    expect(g.payload).not.toContain('203.0.113.45');
+
+    const before = access.records.length;
+    const r = await send('POST', `/v1/ops/fraud-cases/${CASE_SEEDED}/ip-reveals`, who, { body: { nodeIds: ['n-ip'], reason: '수사기관 요청 확인' } });
+    expect(r.statusCode, r.payload).toBe(200);
+    expect(json(r).items).toEqual([{ nodeId: 'n-ip', ip: '203.0.113.45' }]);
+    expect(String(r.headers['cache-control'])).toBe('no-store');
+    const record = access.records.slice(before).find((x) => x.action === 'GRAPH_IP_REVEAL')!;
+    expect(record).toMatchObject({ accountId: who['x-user-id'], caseId: CASE_SEEDED, outcome: 'ALLOWED' });
+    expect(record.detail).toMatchObject({ nodeCount: 1, reason: '수사기관 요청 확인' });
+    expect(JSON.stringify(record)).not.toContain('203.0.113.45');
+
+    // 그 사건 그래프의 IP 점이 아니면 422다
+    const bad = await send('POST', `/v1/ops/fraud-cases/${CASE_SEEDED}/ip-reveals`, who, { body: { nodeIds: ['n-acc'], reason: '수사기관 요청 확인' } });
+    expect(bad.statusCode, bad.payload).toBe(422);
   });
 });

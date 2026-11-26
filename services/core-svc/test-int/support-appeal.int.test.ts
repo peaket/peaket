@@ -89,6 +89,42 @@ describe('0048 소명 표(실제 PostgreSQL)', () => {
     expect(await store.update({ ...first, id: randomUUID() })).toBe(false);
   });
 
+  test('IR-06 소명 멱등은 idempotency_record로 남아 재시작·다중 인스턴스에서 재생하고 DB 실패는 남지 않는다', async () => {
+    const me = randomUUID();
+    const key = randomUUID();
+    const requestHash = new Uint8Array([1, 2, 3]);
+    const record = {
+      id: randomUUID(),
+      accountId: me,
+      kind: 'FRAUD_CASE' as const,
+      targetId: CASE,
+      body: '가족이 대신 예매했습니다',
+      status: 'SUBMITTED' as const,
+      result: null,
+      caseId: null,
+      submittedAtMs: NOW,
+      decidedAtMs: null,
+    };
+    const idem = { accountRef: me, operation: 'CREATE_APPEAL', key, requestHash };
+    expect(await store.put(record, { idem, result: { appealId: record.id } })).toMatchObject({ replayed: false });
+    const rows = await q('select result_ref from idempotency_record where account_ref = $1 and operation = $2 and idempotency_key = $3', [me, 'CREATE_APPEAL', key]);
+    expect(rows.rows).toEqual([{ result_ref: record.id }]);
+
+    // 서버를 다시 띄운 것과 같은 새 저장소 인스턴스가 같은 키를 재생한다.
+    const restarted = new DrizzleSupportAppealStore(appDb);
+    expect(await restarted.findIdempotent(idem)).toMatchObject({ kind: 'replay', result: { appealId: record.id } });
+    expect(await restarted.put({ ...record, id: randomUUID() }, { idem, result: { appealId: 'other' } })).toMatchObject({ replayed: true });
+
+    // DB insert가 실패하면 멱등 기록도 남지 않아 같은 키로 다시 할 수 있다.
+    const failedKey = randomUUID();
+    const failedIdem = { accountRef: me, operation: 'CREATE_APPEAL', key: failedKey, requestHash };
+    await expect(store.put({ ...record, id: randomUUID(), body: '가'.repeat(2001) }, { idem: failedIdem, result: { appealId: 'x' } })).rejects.toThrow();
+    expect(await store.findIdempotent(failedIdem)).toEqual({ kind: 'none' });
+    const retry = { ...record, id: randomUUID() };
+    expect(await store.put(retry, { idem: failedIdem, result: { appealId: retry.id } })).toMatchObject({ replayed: false });
+    expect(await store.findIdempotent(failedIdem)).toMatchObject({ kind: 'replay', result: { appealId: retry.id } });
+  });
+
   test('FX-T20 ⑬ appeal 검사는 kind·status·result·본문 2,000자를 지킨다', async () => {
     const row = (over: Record<string, unknown> = {}) => ({
       id: randomUUID(),

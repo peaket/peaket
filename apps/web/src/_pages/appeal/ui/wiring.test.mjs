@@ -16,6 +16,11 @@ test('UI-05 SCR-042 실제 화면은 listFraudAppealRequests·createAppeal만 �
   assert.match(page, /mapFraudLive\(/);
   assert.match(page, /createFraudAppealBody\(/);
   assert.doesNotMatch(page, /from ['"][^'"]*entities\/appeal/);
+  // IR-15: 잠금 최대 기한·제외 표·이의 상태를 보이고, 우선 구매 기한은 서버 시각으로 판정한다.
+  assert.match(page, /lockExpiresAtMs/);
+  assert.match(page, /excludedTicketIds/);
+  assert.match(page, /objectionStatus/);
+  assert.match(page, /priorityPurchaseRows\(view,\s*nowMs\)/);
 });
 
 test('UI-05 SCR-042 목업 보드는 apl- id와 ?state=에만 남는다', () => {

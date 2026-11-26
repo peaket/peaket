@@ -1335,6 +1335,10 @@ describe('F-04-14 HTTP', () => {
       expect.objectContaining({ caseId: c.caseId, accountId: A(66), ticketId: T(4), reason: 'ENTRY_STARTED' }),
     ]);
     expect(copies.some((x) => x.accountId === A(66) && x.lockActive === false)).toBe(true);
+    const reversalCopy = copies.find((x) => x.caseId === c.caseId && x.accountId === A(66) && x.objectionState === 'ACCEPTED' && x.lockActive === false);
+    expect(reversalCopy).toMatchObject({ state: 'REJECTED', actionResult: { cancelledTicketIds: [T(1), T(2), T(3), T(4)] } });
+    expect(reversalCopy.priorityPurchases?.length).toBeGreaterThan(0);
+    expect(reversalCopy.priorityPurchases?.[0]).toMatchObject({ grantId: expect.any(String), price: 100_000 });
     const grant = json(after).events.find((e: any) => e.kind === 'PRIORITY_GRANTED');
     expect(grant.detail.grants[0]).toMatchObject({ result: 'SAME_SEAT', price: 100_000, fee: 0 });
     expect(Date.parse(grant.detail.grants[0].expiresAt)).toBe(NOW + 48 * HOUR);
@@ -1343,6 +1347,8 @@ describe('F-04-14 HTTP', () => {
   test('C-T70 ① C-T70 ② 소명 요청·잠금·받은 사람 알림·돌려주기·인정·해제가 서버에서 이어진다', async () => {
     const who = investigator();
     const c = await seedCase({ status: 'INVESTIGATING', members: [memberOf(A(67))] });
+    seedTicket({ ticketId: T(67), payerAccountId: A(67) });
+    seedTicket({ ticketId: T(68), payerAccountId: A(67), holderAccountId: H(1) });
     locks.sets.length = 0;
     locks.releases.length = 0;
     const requested = await send('POST', `/v1/ops/fraud-cases/${c.caseId}/appeal-requests`, who, { idem: randomUUID(), body: { accountIds: [A(67)], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + 2 * DAY) } });
@@ -1360,6 +1366,12 @@ describe('F-04-14 HTTP', () => {
     expect(json(patch).status).toBe('CLEARED');
     expect(json(patch).outcomeLabel).toBe('HUMAN');
     expect(locks.releases.length).toBeGreaterThanOrEqual(1);
+    // IR-04·05·12: 인정 사본은 상태·사건 상태·잠긴 표를 남기고 HOLDER의 가진 표도 유지한다.
+    const acceptedCopy = copies.find((x) => x.caseId === c.caseId && x.accountId === A(67) && x.state === 'ACCEPTED');
+    expect(acceptedCopy).toMatchObject({ party: 'PAYER', lockActive: false, state: 'ACCEPTED', caseStatus: 'CLEARED', actionResult: null, excludedTicketIds: [] });
+    expect(acceptedCopy.lockedTicketIds).toEqual([T(67), T(68)]);
+    const holderCopy = copies.find((x) => x.caseId === c.caseId && x.accountId === H(1) && x.party === 'HOLDER' && x.state === 'ACCEPTED');
+    expect(holderCopy).toMatchObject({ party: 'HOLDER', lockActive: false, state: 'ACCEPTED', caseStatus: 'CLEARED', heldTicketIds: [T(9)], lockedTicketIds: [], actionResult: null });
 
     // 14일이 지나면 ops-svc가 멈춰도 ticket-svc가 잠금을 풀고, ops 사본도 풀린다.
     const expiredCase = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW + 2 * DAY, members: [memberOf(A(68), { appealResult: 'PENDING', lockExpiresAtMs: NOW + 14 * DAY })] });
@@ -1515,9 +1527,13 @@ describe('F-04-15 화면 보완', () => {
     const who = investigator();
     const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(80), { appealResult: 'REJECTED', actionNotifiedAtMs: NOW - DAY })] });
     const first = json(await createBundle(c.caseId, who));
+    // 만든 시각이 다르면 최신순 목록(내림차순)과 만든 순서가 갈린다(IR-07)
+    clock.advance(HOUR);
     const second = json(await createBundle(c.caseId, who));
+    clock.advance(HOUR);
+    const third = json(await createBundle(c.caseId, who));
     const detail = json(await getCase(c.caseId, who));
-    expect(detail.evidenceBundleIds).toEqual([first.bundleId, second.bundleId]);
+    expect(detail.evidenceBundleIds).toEqual([first.bundleId, second.bundleId, third.bundleId]);
   });
 
   test('C-T71 ⑤ 승인 상세의 사건 요약은 계약 칸을 모두 싣고 요청자에게 canApprove 거짓을 준다', async () => {
@@ -1533,7 +1549,13 @@ describe('F-04-15 화면 보완', () => {
         memberOf(A(82), { appealResult: 'EXPIRED', appealDueAtMs: NOW - HOUR, lockExpiresAtMs: NOW + 10 * DAY }),
       ],
     });
+    // 대상 표가 하나도 없으면 여러 계정이어도 422다(IR-08, F-04-14 IR-10).
+    const empty = await send('POST', `/v1/ops/fraud-cases/${c.caseId}/action-requests`, who, { idem: randomUUID(), body: { fraudAction: 'CANCEL_TICKETS', accountIds: [A(81), A(82)], reason: '취소' } });
+    expect(empty.statusCode, empty.payload).toBe(422);
+    expect(typeOf(empty)).toBe('action-target-invalid');
+    seedTicket({ ticketId: T(81), payerAccountId: A(81) });
     const created = await send('POST', `/v1/ops/fraud-cases/${c.caseId}/action-requests`, who, { idem: randomUUID(), body: { fraudAction: 'CANCEL_TICKETS', accountIds: [A(81), A(82)], reason: '취소' } });
+    expect(created.statusCode, created.payload).toBe(201);
     const approvalId = String(json(created).approvalId);
     const requesterView = json(await getApproval(approvalId, who));
     expect(requesterView.canApprove).toBe(false);
@@ -1542,7 +1564,7 @@ describe('F-04-15 화면 보완', () => {
       eventId: EVENT,
       reasonCategory: 'MACRO_BOT',
       accountCount: 2,
-      ticketCount: 2,
+      ticketCount: 1,
       purchaseCount: 9,
       limitPerPerson: 4,
       scoreBand: 'HIGH',
@@ -1555,7 +1577,8 @@ describe('F-04-15 화면 보완', () => {
       appealCounts: { accepted: 0, rejected: 1, expired: 1, submitted: 0, pending: 0 },
     });
     expect(requesterView.fraudCaseSummary.targets.map((t: any) => t.accountId)).toEqual([A(81), A(82)]);
-    expect(requesterView.fraudCaseSummary.targets[0]).toMatchObject({ accountId: A(81), appealOutcome: 'REJECTED', ticketIds: [], holderTicketIds: [] });
+    expect(requesterView.fraudCaseSummary.targets[0]).toMatchObject({ accountId: A(81), appealOutcome: 'REJECTED', ticketIds: [T(81)], holderTicketIds: [] });
+    expect(requesterView.fraudCaseSummary.targets[1]).toMatchObject({ accountId: A(82), appealOutcome: 'EXPIRED', ticketIds: [], holderTicketIds: [] });
     const approverView = json(await getApproval(approvalId, approver));
     expect(approverView.canApprove).toBe(true);
     expect(approverView.summaryViewedAt).toMatch(/^20/);

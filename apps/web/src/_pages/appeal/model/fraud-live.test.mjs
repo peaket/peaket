@@ -57,6 +57,7 @@ test('UI-04 결제자 소명 화면은 사유 범주·잠긴 표·잠금 기한�
       priorityPurchases: [
         { grantId: 'g1', seatLabel: 'A구역 3열 14번', price: 154000, expiresAt: iso(NOW + 2 * DAY), status: 'OFFERED' },
         { grantId: 'g2', seatLabel: 'A구역 3열 15번', price: 154000, expiresAt: iso(NOW - HOUR), status: 'OFFERED' },
+        { grantId: 'g3', seatLabel: 'A구역 3열 16번', price: 154000, expiresAt: iso(NOW + HOUR), status: 'OFFERED' },
       ],
     }),
     NOW,
@@ -69,8 +70,8 @@ test('UI-04 결제자 소명 화면은 사유 범주·잠긴 표·잠금 기한�
   assert.equal(v.objectionNote, '이의를 인정합니다');
   assert.equal(v.actionResult?.restrictedUntilMs, NOW + 365 * DAY);
   assert.equal(canSeeReasonCategories(v), true);
-  const rows = priorityPurchaseRows(v);
-  assert.equal(rows.length, 1);
+  const rows = priorityPurchaseRows(v, NOW);
+  assert.equal(rows.length, 2);
   assert.match(rows[0].priceText, /154,000/);
   assert.match(rows[0].deadlineText, /2026|11월|11\/28/);
   assert.match(fraudDeadlineText(v), /기한|11월|11\/28/);
