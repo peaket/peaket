@@ -3,7 +3,7 @@
 // 듣기 시작한 뒤 Kafka 소비자(탈퇴 사건의 후기 파기와 16분 뒤 다시 정리, W7-audit COV2-06·ADR-0278, docs/streaming.md §2.6 'core-svc 소비자')를 켠다. 브로커 주소(PEAKET_KAFKA_BROKERS)가 없으면
 // local·ci만 경고 한 줄로 소비자 없이 뜨고 그 밖의 환경은 시작하지 않는다. 소비자를 켜지 못하면 오류 한 줄 뒤 SIGTERM과 같은 차례로 끝내고 종료 코드 1을 둔다.
 import { fileURLToPath } from 'node:url';
-import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, errorSummary, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, systemClock } from '@peaket/platform';
+import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, errorSummary, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, startGrpcServer, systemClock, type StartedGrpcServer } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import { supportPortsFromEnv } from './support-wiring.js';
@@ -49,7 +49,8 @@ import {
 } from './modules/review/index.js';
 import { DrizzleWebhookStore, FanNotificationWorker, HttpsWebhookTransport, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
 import { GrpcHeldTickets, GrpcMerchPayments, RedisMerchStock, type ShopLogger, ShopSignals, closedShopReauthGate, shopReauthGateFromEnv, unavailableHeldTickets, unavailableMerchPayments, unavailableMerchStock } from './modules/shop/index.js';
-import { RedisFraudAppealViewStore, RedisRestrictionViewStore } from './modules/support/index.js';
+import { SUPPORT_KIT, RedisFraudAppealViewStore, RedisRestrictionViewStore, type SupportKit } from './modules/support/index.js';
+import { supportGrpcDefinitions } from './modules/support/inbound/support-grpc-services.js';
 
 const SERVICE = 'core-svc';
 assertInternalGrpcToken(process.env);
@@ -247,6 +248,19 @@ const service = await createService({
   }),
 });
 serviceLogger = service.logger;
+// 화면용 사본 gRPC(F-06-4). ops-svc만 부르고, 열지 못하면 시작을 실패시킨다(팬 화면이 제한·사건을 모르면 안 된다)
+const supportKit = service.app.get<SupportKit>(SUPPORT_KIT);
+const supportDefinitions = supportGrpcDefinitions();
+const supportGrpc: StartedGrpcServer = await startGrpcServer({
+  host: process.env.PEAKET_GRPC_HOST ?? '0.0.0.0',
+  port: service.config.grpcPort,
+  profile: service.config.grpcLbProfile,
+  metrics: service.metrics,
+  services: [
+    { definition: supportDefinitions.bookingRestrictionView, handlers: supportKit.grpcHandlers.bookingRestrictionView },
+    { definition: supportDefinitions.fraudAppealView, handlers: supportKit.grpcHandlers.fraudAppealView },
+  ],
+});
 shopSignals.register(service.metrics.registry);
 saleConfigMetrics.register(service.metrics.registry);
 if (eligibilityCopy instanceof UnwiredSaleEligibilityCopy) eligibilityCopy.register(service.metrics.registry);
@@ -340,6 +354,7 @@ function shutdown(): Promise<void> {
         seatmapParser.close();
         if (reviewEligibility instanceof GrpcReviewEligibility) reviewEligibility.close();
         supportPorts.close();
+        void supportGrpc.close();
         grpcPayments?.close();
         heldTickets?.close();
         void queueRedis?.close();

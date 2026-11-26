@@ -1,5 +1,6 @@
 // core-svc support 모듈(F-06-4). 소명·화면용 사본·내부 API·gRPC 사본 수신을 한 벌로 묶는다.
 import { type DynamicModule, Global, Module } from '@nestjs/common';
+import type { UntypedServiceImplementation } from '@grpc/grpc-js';
 import { CLOCK, type Clock, type Database, INTERNAL_TOKEN } from '@peaket/platform';
 import { Appeals } from './application/appeals.js';
 import type { AppealStore, FanNotifier, FraudAppealClient, FraudAppealViewStore, RestrictionViewStore } from './domain/ports.js';
@@ -28,7 +29,7 @@ export interface SupportKit {
   readonly appeals: { find(id: string): Promise<Record<string, unknown> | undefined> };
   failNext(op: 'saveAppeal' | 'saveResult'): void;
   dispatchOnce(nowMs: number): Promise<void>;
-  readonly grpcHandlers: Record<string, unknown>;
+  readonly grpcHandlers: { bookingRestrictionView: UntypedServiceImplementation; fraudAppealView: UntypedServiceImplementation };
 }
 
 export interface SupportModuleOptions {
