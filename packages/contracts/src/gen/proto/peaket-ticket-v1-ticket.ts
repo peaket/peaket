@@ -48,6 +48,10 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "ListTickets": {
                       "requestType": "ListTicketsRequest",
                       "responseType": "ListTicketsResponse"
+                    },
+                    "ReclaimTransfer": {
+                      "requestType": "ReclaimTransferRequest",
+                      "responseType": "ReclaimTransferResponse"
                     }
                   }
                 },
@@ -855,6 +859,56 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "result": {
                       "type": "ReclaimResult",
                       "id": 1
+                    }
+                  }
+                },
+                "ReclaimTransferRequest": {
+                  "fields": {
+                    "approval_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "ticket_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "expected_payer_account_id": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "expected_holder_account_id": {
+                      "type": "string",
+                      "id": 4
+                    },
+                    "deadline_ms": {
+                      "type": "int64",
+                      "id": 5
+                    }
+                  }
+                },
+                "ReclaimTransferResult": {
+                  "values": {
+                    "RECLAIM_TRANSFER_RESULT_UNSPECIFIED": 0,
+                    "RECLAIM_TRANSFER_RESULT_RECLAIMED": 1,
+                    "RECLAIM_TRANSFER_RESULT_SKIPPED_ENTRY_STARTED": 2,
+                    "RECLAIM_TRANSFER_RESULT_SKIPPED_ENTRY_RECORDED": 3,
+                    "RECLAIM_TRANSFER_RESULT_SKIPPED_NOT_TRANSFERRED": 4,
+                    "RECLAIM_TRANSFER_RESULT_SKIPPED_HOLDER_CHANGED": 5
+                  }
+                },
+                "ReclaimTransferResponse": {
+                  "fields": {
+                    "result": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "ticket_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "previous_holder_account_id": {
+                      "type": "string",
+                      "id": 3
                     }
                   }
                 },

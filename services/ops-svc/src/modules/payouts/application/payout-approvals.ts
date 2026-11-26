@@ -5,6 +5,7 @@ import type { ApprovalReauthVerifier, PayoutApprovalStore, PayoutPaymentClient, 
 import type { ApprovalFailureCases } from '../../cases/index.js';
 import {
   approvalDueAt,
+  nextBusinessDayOf,
   payoutApprovalFacts,
   payoutApprovalView,
   PayoutApprovalProblem,
@@ -82,6 +83,7 @@ export class PayoutApprovals {
         payoutDate: batch.payoutDate,
         amount: batch.totalAmount,
         statementCount: batch.statementCount,
+        payeeDigest: batch.payeeDigest ?? null,
         status: 'PENDING_APPROVAL',
         requesterId: actor.accountId,
         requesterRole: actor.role,
@@ -143,6 +145,8 @@ export class PayoutApprovals {
       const r = await this.d.store.find(approvalId);
       if (!r) throw notFound();
       if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') throw new PayoutApprovalProblem('payout-batch-not-approved', 409, '승인 대기 중인 지급 묶음이 아닙니다');
+      // 지급일 전 영업일 15:00 정각부터는 늦은 승인을 받지 않는다(F-06-3, settlement §5.1).
+      if (this.d.clock.now() >= approvalDueAt(r.payoutDate).getTime()) throw new PayoutApprovalProblem('approval-expired', 409, '기한이 지난 지급 승인입니다');
       if (r.requesterId === actor.accountId) throw new PayoutApprovalProblem('approval-self-not-allowed', 403, '요청자는 승인할 수 없습니다');
       if (actor.role !== 'commander') throw new PayoutApprovalProblem('approval-role-required', 403, 'commander만 승인할 수 있습니다');
       const verified = await this.d.reauth.verify(reauthToken, { sessionId: actor.sessionId, act: 'APPROVAL' });
@@ -155,7 +159,7 @@ export class PayoutApprovals {
         throw new PayoutApprovalProblem('payout-approval-conflict', 409, '다른 사람이 먼저 처리했습니다');
       let executed = false;
       try {
-        await this.d.payments.approveBatch(r.batchId, r.approvalId);
+        await this.d.payments.approveBatch(r.batchId, r.approvalId, r.payeeDigest ?? undefined);
         await this.d.payments.executeBatch(r.batchId);
         executed = true;
         const doneMs = this.d.clock.now();
@@ -181,6 +185,48 @@ export class PayoutApprovals {
         throw e;
       }
     });
+  }
+
+  /**
+   * 15시 미승인 만료(F-06-3, settlement §5.1). 지급일 전 영업일 15:00이 지난 승인 대기 건을 payment에 만료 요청하고,
+   * 성공한 건만 EXPIRED로 바꾸며 파트너 알림·운영 경보를 한 번 낸다. payment가 409로 거절하면 승인은 그대로 두고 failed로 센다.
+   */
+  async expireDue(nowMs: number, ports: { notifier?: { send(i: { approvalId: string; event: 'EXPIRED' | 'ESCALATED' | 'WITHDRAWN' | 'PAYOUT_POSTPONED'; recipient: { kind: 'ACCOUNT'; accountId: string } | { kind: 'ROLE'; role: 'cs_lead' | 'commander' }; payoutDate?: string }): Promise<void> }; alerts?: { open(i: { approvalId?: string; kind: 'APPROVAL_ESCALATED' | 'settlement_batch_unapproved'; recipient: { kind: 'ACCOUNT'; accountId: string } | { kind: 'ROLE'; role: 'cs_lead' | 'commander' }; pg?: 'TOSS' | 'PORTONE'; payoutDate?: string }): Promise<void> } }): Promise<{ expired: number; failed: number }> {
+    let expired = 0;
+    let failed = 0;
+    const rows = await this.d.store.list({ status: ['PENDING_APPROVAL'], limit: 10_000 });
+    for (const r of rows) {
+      if (nowMs < approvalDueAt(r.payoutDate).getTime()) continue;
+      const postponedPayoutDate = nextBusinessDayOf(r.payoutDate);
+      if (!this.d.payments.expireBatch) {
+        failed += 1;
+        continue;
+      }
+      try {
+        await this.d.payments.expireBatch(r.batchId, { approvalId: r.approvalId, postponedPayoutDate });
+      } catch {
+        failed += 1;
+        continue;
+      }
+      const now = new Date(this.d.clock.now());
+      const next: PayoutApprovalRecord = { ...r, status: 'EXPIRED', failure: 'DEADLINE_PASSED', updatedAt: now, version: r.version + 1 };
+      if (!(await this.d.store.save(next, auditRecord('PAYOUT_APPROVAL_EXPIRED', next.approvalId, { ...payoutBase(next), status: next.status, closeReason: 'DEADLINE_PASSED' }, nowMs)))) {
+        failed += 1;
+        continue;
+      }
+      expired += 1;
+      try {
+        await ports.notifier?.send({ approvalId: r.approvalId, event: 'PAYOUT_POSTPONED', recipient: { kind: 'ROLE', role: 'commander' }, payoutDate: postponedPayoutDate });
+      } catch {
+        // 알림 실패는 만료를 되돌리지 않는다
+      }
+      try {
+        await ports.alerts?.open({ approvalId: r.approvalId, kind: 'settlement_batch_unapproved', pg: r.pg, payoutDate: r.payoutDate, recipient: { kind: 'ROLE', role: 'commander' } });
+      } catch {
+        // 경보 실패는 만료를 되돌리지 않는다
+      }
+    }
+    return { expired, failed };
   }
 
   async reject(approvalId: string, actor: OpsActor, reason: string): Promise<PayoutApprovalView> {

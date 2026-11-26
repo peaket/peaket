@@ -36,6 +36,7 @@ import {
   reviewEligibilityOf,
   type TicketRecord,
   ticketKeyHash,
+  TicketReclaimError,
 } from '../domain/ticket.js';
 
 export interface TicketServiceDeps {
@@ -45,6 +46,17 @@ export interface TicketServiceDeps {
 
 export class TicketService {
   constructor(private readonly deps: TicketServiceDeps) {}
+
+  /**
+   * 양도 회수(F-06-3). 마감이 지났으면 아무것도 바꾸지 않고 실패한다. 승인 ID 멱등·기대 값 대조는 저장소가
+   * 티켓 행 잠금 안에서 한다(입장 시작·입장 기록·보유자·결제자 재확인).
+   */
+  async reclaimTransfer(input: { approvalId: string; ticketId: string; expectedPayerAccountId: string; expectedHolderAccountId: string; deadlineMs: number }): Promise<import('../domain/ticket.js').TransferReclaimOutcome> {
+    const nowMs = this.deps.clock.now();
+    if (!Number.isFinite(input.deadlineMs) || nowMs >= input.deadlineMs) throw new TicketReclaimError('FAILED_PRECONDITION', '회수 마감이 지났습니다');
+    if (!this.deps.store.reclaimTransfer) throw new TicketReclaimError('FAILED_PRECONDITION', '양도 회수를 지원하지 않는 저장소입니다');
+    return this.deps.store.reclaimTransfer({ approvalId: input.approvalId, ticketId: input.ticketId, expectedPayerAccountId: input.expectedPayerAccountId, expectedHolderAccountId: input.expectedHolderAccountId, nowMs });
+  }
 
   /** 주문 ID·발권 세대 단위 멱등 발권. 새 발권에만 ticketKey를 싣는다. */
   async issue(input: IssueTicketsInput): Promise<IssueTicketsResult> {

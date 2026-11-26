@@ -122,6 +122,8 @@ export { CancelTicket, zeroDeductionFor, type CancelTicketInput } from './applic
 export { TRANSFER_CLOSE_BEFORE_START_MS, withdrawalTicketCancellationId, type WithdrawalTicket, type WithdrawalTicketStore } from './domain/account-withdrawal-tickets.js';
 export { AccountWithdrawalTickets, type AccountWithdrawalTicketsDeps } from './application/account-withdrawal-tickets.js';
 export { DrizzleWithdrawalTickets } from './adapters/db/drizzle-account-withdrawal-tickets.js';
+export { ApprovalRefunds, type ApprovalRefundDeps, type ApprovalRefundInput, type ApprovalRefundKind, type ApprovalRefundResult, type ApprovalRefundStatus } from './application/approval-refund.js';
+export { ApprovalRefundController } from './inbound/approval-refund.controller.js';
 export { RefundModule, type RefundModuleDeps } from './refund.module.js';
 export { TicketCancellationController, unavailableReauth } from './inbound/ticket-cancellation.controller.js';
 // BAT-415-reauth(팬 취소의 재인증 확인, docs/features/transfer-refund.md §3.1)

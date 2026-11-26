@@ -254,10 +254,23 @@ export class InternalSettlementController {
   @Post('payout-batches/:batchId/approvals')
   @HttpCode(200)
   @ContractRouteSchema({ responses: { 200: BatchView } })
-  async approve(@Param('batchId') batchId: string, @Body() body: { approvalId?: unknown }) {
+  async approve(@Param('batchId') batchId: string, @Body() body: { approvalId?: unknown; payeeDigest?: unknown }) {
     const approvalId = body.approvalId;
     if (typeof approvalId !== 'string' || approvalId === '') bad('승인 업무 ID가 필요합니다');
-    return this.settlements.approveBatch(batchId, approvalId as string);
+    if (body.payeeDigest !== undefined && typeof body.payeeDigest !== 'string') bad('지급 대상 지문이 맞지 않습니다');
+    return this.settlements.approveBatch(batchId, approvalId as string, body.payeeDigest as string | undefined);
+  }
+
+  /** 15시 미승인 만료(F-06-3, settlement §5.1). ops의 만료 작업이 부른다. */
+  @Post('payout-batches/:batchId/expiry')
+  @HttpCode(200)
+  @ContractRouteSchema({ responses: { 200: z.object({ batchId: z.string(), status: z.literal('EXPIRED'), postponedPayoutDate: z.string() }) } })
+  async expire(@Param('batchId') batchId: string, @Body() body: { approvalId?: unknown; postponedPayoutDate?: unknown }) {
+    const approvalId = body.approvalId;
+    const postponedPayoutDate = body.postponedPayoutDate;
+    if (typeof approvalId !== 'string' || approvalId === '') bad('승인 업무 ID가 필요합니다');
+    if (typeof postponedPayoutDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(postponedPayoutDate)) bad('미룬 지급일이 필요합니다');
+    return this.settlements.expireBatch(batchId, { approvalId: approvalId as string, postponedPayoutDate: postponedPayoutDate as string });
   }
 
   @Post('payout-batches/:batchId/release')

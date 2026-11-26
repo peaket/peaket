@@ -502,6 +502,8 @@ export interface SettlementStore {
   releasePayoutBatch(batchId: string): Promise<boolean>;
   /** 승인 상태 저장과 감사 행을 한 트랜잭션에 쓴다. 다른 요청이 먼저 승인했으면 false(버전 조건부). */
   approvePayoutBatchAtomically(batch: PayoutBatchRecord, audit: PayoutBatchAuditRecord): Promise<boolean>;
+  /** 15시 만료: 묶음을 EXPIRED로, 묶인 정산서 결속을 풀고, 감사·OUTBOX 사건을 한 트랜잭션에 쓴다(F-06-3). */
+  expirePayoutBatchAtomically(batch: PayoutBatchRecord, statementIds: readonly string[], audit: PayoutBatchAuditRecord, events: readonly SettlementEventValue[], postponedPayoutDate: string): Promise<boolean>;
   /** 거절 감사. 배치 상태는 바꾸지 않는다. */
   insertPayoutBatchAudit(audit: PayoutBatchAuditRecord): Promise<void>;
   findPayoutBatch(batchId: string): Promise<PayoutBatchRecord | undefined>;

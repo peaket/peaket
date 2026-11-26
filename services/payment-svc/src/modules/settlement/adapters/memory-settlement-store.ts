@@ -511,6 +511,20 @@ export class MemorySettlementStore implements SettlementStore {
     this.payoutBatchAudits.push(audit);
     return true;
   }
+  async expirePayoutBatchAtomically(batch: PayoutBatchRecord, statementIds: readonly string[], audit: PayoutBatchAuditRecord, events: readonly SettlementEventValue[], postponedPayoutDate: string): Promise<boolean> {
+    const current = this.batches.get(batch.batchId);
+    if (!current || (current.status !== 'PENDING_APPROVAL' && current.status !== 'PREPARED')) return false;
+    if ([...this.payouts.values()].some((p) => p.batchId === batch.batchId)) return false;
+    // 정산서 결속만 풀고 상태는 CONFIRMED 그대로 둔다. 지급일은 다음 영업일로 미룬다. 감사·사건은 같은 호출에 쌓는다.
+    for (const id of statementIds) {
+      const s = this.statements.get(id);
+      if (s) this.statements.set(id, { ...s, payoutBatchId: s.payoutBatchId === batch.batchId ? null : s.payoutBatchId, payoutDate: postponedPayoutDate });
+    }
+    this.batches.set(batch.batchId, batch);
+    this.payoutBatchAudits.push(audit);
+    this.#emit(events);
+    return true;
+  }
   async insertPayoutBatchAudit(audit: PayoutBatchAuditRecord) {
     this.payoutBatchAudits.push(audit);
   }

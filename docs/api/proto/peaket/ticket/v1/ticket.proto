@@ -67,6 +67,12 @@ service TicketService {
   // 팬 월렛의 내 티켓 목록(FR-012, openapi GET /v1/tickets). 계정의 티켓을 최근 발권 순으로 커서 페이지로 준다.
   // 티켓 키는 발권 응답에만 싣고 목록에는 싣지 않는다. QR 페이로드는 공개 포인터(PEAKET1:<ticket_id>)라 목록에도 싣는다.
   rpc ListTickets(ListTicketsRequest) returns (ListTicketsResponse);
+
+  // 양도 회수(F-06-3, transfer-refund §3.1·§7.2, POL-038 ③, FR-059). 부르는 쪽은 ops-svc뿐이다.
+  // 승인 업무 ID로 멱등하고, 티켓 행 잠금 안에서 입장 시작·입장 기록·보유자·결제자를 다시 본 뒤 보유자를 결제자로 되돌린다.
+  // expected_payer_account_id가 표의 결제자와 다르면 INVALID_ARGUMENT, deadline_ms가 지났으면 FAILED_PRECONDITION,
+  // 같은 승인에 다른 티켓이 오면 ALREADY_EXISTS, 같은 (승인, 티켓)에 다른 기대 값이 오면 FAILED_PRECONDITION이다.
+  rpc ReclaimTransfer(ReclaimTransferRequest) returns (ReclaimTransferResponse);
 }
 
 message IssueTicketsRequest {
@@ -543,6 +549,36 @@ enum ReclaimResult {
 
 message ReclaimTicketResponse {
   ReclaimResult result = 1;
+}
+
+// 양도 회수(F-06-3). TicketService.ReclaimTransfer의 요청·답. ops-svc만 부른다.
+message ReclaimTransferRequest {
+  // 승인 업무 ID(approval_request.id). 멱등 키다.
+  string approval_id = 1;
+  string ticket_id = 2;
+  // 승인 시점의 결제자. 표의 결제자와 다르면 INVALID_ARGUMENT다.
+  string expected_payer_account_id = 3;
+  // 승인 시점의 보유자. 다르면 SKIPPED_HOLDER_CHANGED다.
+  string expected_holder_account_id = 4;
+  // 실행 마감(epoch ms). 지났으면 FAILED_PRECONDITION이고 아무것도 바꾸지 않는다.
+  int64 deadline_ms = 5;
+}
+
+enum ReclaimTransferResult {
+  RECLAIM_TRANSFER_RESULT_UNSPECIFIED = 0;
+  RECLAIM_TRANSFER_RESULT_RECLAIMED = 1;
+  RECLAIM_TRANSFER_RESULT_SKIPPED_ENTRY_STARTED = 2;
+  RECLAIM_TRANSFER_RESULT_SKIPPED_ENTRY_RECORDED = 3;
+  RECLAIM_TRANSFER_RESULT_SKIPPED_NOT_TRANSFERRED = 4;
+  RECLAIM_TRANSFER_RESULT_SKIPPED_HOLDER_CHANGED = 5;
+}
+
+message ReclaimTransferResponse {
+  // RECLAIMED·SKIPPED_ENTRY_STARTED·SKIPPED_ENTRY_RECORDED·SKIPPED_NOT_TRANSFERRED·SKIPPED_HOLDER_CHANGED
+  string result = 1;
+  string ticket_id = 2;
+  // 되돌리기 전 보유자. RECLAIMED일 때만 있다.
+  string previous_holder_account_id = 3;
 }
 
 // 부르는 쪽: identity-svc만. 스캐너 기기 승인 로그인(RFC 8628)의 승인 요청(POST /v1/scanner/device-authorizations)과

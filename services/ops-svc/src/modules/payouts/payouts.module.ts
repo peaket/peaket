@@ -1,6 +1,6 @@
-// 지�??�인 ?�무 모듈 조립.
+// 지�??�인 ?�무 모듈 조립.
 import { type DynamicModule, Global, Module, type Provider } from '@nestjs/common';
-import { type Clock, type Database, CLOCK, INTERNAL_TOKEN } from '@peaket/platform';
+import { type Clock, type Database, CLOCK } from '@peaket/platform';
 import type { AuditChain } from '../audit/audit.js';
 import type { ApprovalFailureCases } from '../cases/index.js';
 import { PayoutApprovals } from './application/payout-approvals.js';
@@ -28,7 +28,7 @@ export interface PayoutsModuleDeps {
   readonly reauth?: ApprovalReauthVerifier;
   /** payment-svc 정산서 이의 기각·수기 조정 경로. 없으면 payments가 그 경로도 가지면 그것을, 아니면 503 대역을 쓴다 */
   readonly settlementPayments?: SettlementPaymentClient;
-  /** ?�기 ?�트???�행 감사(OPSV-03). ?�태 ?�??감사???�?�소가 같�? ?�랜??��???�다 */
+  /** ?�기 ?�트???�행 감사(OPSV-03). ?�태 ?�??감사???�?�소가 같�? ?�랜??��???�다 */
   readonly audit?: AuditChain;
   /** CS '승인 업무 실행 실패' 건(F-06-2 ADR-0364 결정 6) */
   readonly failureCases?: ApprovalFailureCases;
@@ -45,7 +45,6 @@ export class PayoutsModule {
     const payments = o.storage === 'database' ? o.payments : o.deps?.payments;
     const settlementPayments = (o.storage === 'database' ? o.settlementPayments : o.deps?.settlementPayments) ?? (isSettlementPaymentClient(payments) ? payments : new UnavailablePayoutPaymentClient());
     const providers: Provider[] = [
-      { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
       { provide: SETTLEMENT_PAYMENT_CLIENT, useValue: settlementPayments },
       {
         provide: PayoutApprovals,

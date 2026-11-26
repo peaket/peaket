@@ -54,10 +54,17 @@ export class HttpPayoutPaymentClient implements PayoutPaymentClient, SettlementP
     );
   }
 
-  async approveBatch(batchId: string, approvalId: string) {
+  async approveBatch(batchId: string, approvalId: string, payeeDigest?: string) {
     return this.#json<PayoutBatchView>(
-      await this.#client.request({ method: 'POST', path: `/internal/v1/settlements/payout-batches/${batchId}/approvals`, headers: headers(this.token), body: JSON.stringify({ approvalId }), timeoutCapMs: 10_000 }),
+      await this.#client.request({ method: 'POST', path: `/internal/v1/settlements/payout-batches/${batchId}/approvals`, headers: headers(this.token), body: JSON.stringify({ approvalId, ...(payeeDigest === undefined ? {} : { payeeDigest }) }), timeoutCapMs: 10_000 }),
       '지급 묶음을 승인하지 못했습니다',
+    );
+  }
+
+  async expireBatch(batchId: string, input: { approvalId: string; postponedPayoutDate: string }) {
+    return this.#json<{ batchId: string; status: 'EXPIRED'; postponedPayoutDate: string }>(
+      await this.#client.request({ method: 'POST', path: `/internal/v1/settlements/payout-batches/${batchId}/expiry`, headers: headers(this.token), body: JSON.stringify(input), timeoutCapMs: 10_000 }),
+      '지급 묶음을 만료하지 못했습니다',
     );
   }
 
@@ -164,6 +171,9 @@ export class UnavailablePayoutPaymentClient implements PayoutPaymentClient, Sett
     throw new ProblemError({ type: 'payout-dependency-unavailable', status: 503, title: '지급 서비스에 연결하지 못했습니다' });
   }
   async executeBatch(): Promise<PayoutBatchView> {
+    throw new ProblemError({ type: 'payout-dependency-unavailable', status: 503, title: '지급 서비스에 연결하지 못했습니다' });
+  }
+  async expireBatch(): Promise<{ batchId: string; status: 'EXPIRED'; postponedPayoutDate: string }> {
     throw new ProblemError({ type: 'payout-dependency-unavailable', status: 503, title: '지급 서비스에 연결하지 못했습니다' });
   }
   async releaseBatch(): Promise<void> {

@@ -15,6 +15,8 @@ export const payoutApproval = pgTable(
     payoutDate: date('payout_date', { mode: 'string' }).notNull(),
     amount: amount('amount').notNull(),
     statementCount: integer('statement_count').notNull(),
+    /** 승인할 때 payment가 준 지급 대상 지문(F-06-3, ops 0038) */
+    payeeDigest: text('payee_digest'),
     status: text('status').notNull().default('PENDING_APPROVAL'),
     requesterId: uuid('requester_id').notNull(),
     requesterRole: text('requester_role').notNull(),
@@ -30,8 +32,9 @@ export const payoutApproval = pgTable(
   (t) => [
     check('payout_approval_pg_check', sql`${t.pg} in ('TOSS', 'PORTONE')`),
     check('payout_approval_pg_store_check', sql`${t.pgStore} in ('STANDARD', 'ESCROW')`),
-    check('payout_approval_status_check', sql`${t.status} in ('PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'EXECUTING', 'DONE', 'FAILED')`),
+    check('payout_approval_status_check', sql`${t.status} in ('PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'EXECUTING', 'DONE', 'FAILED', 'EXPIRED')`),
     check('payout_approval_amount_check', sql`${t.amount} >= 0 and ${t.statementCount} >= 0`),
+    check('payout_approval_payee_digest_check', sql`${t.payeeDigest} is null or ${t.payeeDigest} ~ '^[0-9a-f]{64}$'`),
     check('payout_approval_version_check', sql`${t.version} >= 1`),
     index('payout_approval_status_idx').on(t.status, t.createdAt),
     index('payout_approval_batch_idx').on(t.batchId),

@@ -2,12 +2,13 @@
 // PUT /internal/v1/approval-requests/{approvalId}: 같은 승인 ID 재호출은 같은 답(멱등). 서비스 사이 토큰으로 좁힌다.
 // GET /internal/v1/approval-requests/{approvalId}: SETTLEMENT_ADJUSTMENT의 사실만(종류·대상·금액·사유 코드·상태·정족수·요청자·승인자·승인 시각), 늘 no-store.
 // 근거 메모·요청자 역할·계좌·내부 토큰은 싣지 않는다. 그 밖 종류와 없는 승인은 404다.
-import { Controller, Get, HttpCode, Param, Put, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, HttpCode, Param, Post, Put, Res, UseGuards } from '@nestjs/common';
 import { ContractBody, ContractParams, ContractRouteSchema, InternalTokenGuard, ProblemError, Roles } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { ContractApprovals } from '../application/contract-approvals.js';
 import { SettlementAdjustmentApprovals } from '../application/settlement-adjustment-approvals.js';
+import { ApprovalRouter } from '../application/approval-router.js';
 
 const ApprovalParams = z.object({ approvalId: z.string().min(1).max(64) });
 const CurrentTerms = z
@@ -56,7 +57,17 @@ export class InternalApprovalsController {
   constructor(
     private readonly contracts: ContractApprovals,
     private readonly adjustments: SettlementAdjustmentApprovals,
+    private readonly router: ApprovalRouter,
   ) {}
+
+  /** 5분 작업과 시험이 같은 함수를 부른다. 일반 승인 만료·상위 알림과 지급 묶음 15시 만료. */
+  @Post('tick')
+  @HttpCode(200)
+  @Roles(['public'])
+  @ContractRouteSchema({ responses: { 200: z.object({ escalated: z.number().int(), expired: z.number().int(), failed: z.number().int() }) } })
+  async tick() {
+    return this.router.tick();
+  }
 
   @Get(':approvalId')
   @Roles(['public'])

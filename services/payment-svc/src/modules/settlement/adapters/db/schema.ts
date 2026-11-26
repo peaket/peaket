@@ -185,6 +185,8 @@ export const payoutBatch = pgTable(
     pgBalanceObservedBy: uuid('pg_balance_observed_by'),
     pgBalanceLedgerKrw: amount('pg_balance_ledger_krw'),
     status: text('status').notNull(),
+    /** 정산서별 지급 대상 지문(0040, settlement §5.1). 옛 행은 null */
+    payeeDigest: text('payee_digest'),
     /** 토스 전송 시도 수·다음 전송 시각·자동 전송 마감·마지막 전송 결과 이름표·날짜 오류 한 번 재요청(0029, ADR-0369 결정 7) */
     submitAttempts: integer('submit_attempts').notNull().default(0),
     nextSubmitAt: at('next_submit_at'),
@@ -200,7 +202,8 @@ export const payoutBatch = pgTable(
     check('payout_batch_last_submit_error_check', sql`${t.lastSubmitError} is null or char_length(${t.lastSubmitError}) <= 200`),
     index('payout_batch_next_submit_idx').on(t.nextSubmitAt).where(sql`${t.nextSubmitAt} is not null`),
     check('payout_batch_pg_store_check', sql`${t.pgStore} in (${PG_STORE})`),
-    check('payout_batch_status_check', sql`${t.status} in ('PREPARED', 'PENDING_APPROVAL', 'APPROVED', 'SUBMITTED', 'COMPLETED', 'PARTIAL_FAILED')`),
+    check('payout_batch_status_check', sql`${t.status} in ('PREPARED', 'PENDING_APPROVAL', 'APPROVED', 'SUBMITTED', 'COMPLETED', 'PARTIAL_FAILED', 'EXPIRED')`),
+    check('payout_batch_payee_digest_check', sql`${t.payeeDigest} is null or ${t.payeeDigest} ~ '^[0-9a-f]{64}$'`),
     check('payout_batch_balance_source_check', sql`${t.pgBalanceSource} is null or ${t.pgBalanceSource} in ('PG_API', 'OPERATOR_CONSOLE')`),
     check('payout_batch_total_check', sql`${t.totalAmount} >= 0 and ${t.statementCount} >= 0`),
     uniqueIndex('payout_batch_key').on(t.pg, t.pgStore, t.payoutDate).where(sql`${t.status} not in ('COMPLETED', 'PARTIAL_FAILED')`),
@@ -224,10 +227,12 @@ export const payoutBatchAudit = pgTable(
     approverId: text('approver_id'),
     amount: amount('amount'),
     currency: text('currency').notNull(),
+    /** 승인 시점의 지급 대상 지문(F-06-3, 0040). 옛 행은 null */
+    payeeDigest: text('payee_digest'),
     createdAt: at('created_at').notNull(),
   },
   (t) => [
-    check('payout_batch_audit_event_check', sql`${t.event} in ('APPROVED', 'REJECTED')`),
+    check('payout_batch_audit_event_check', sql`${t.event} in ('APPROVED', 'REJECTED', 'EXPIRED')`),
     check('payout_batch_audit_currency_check', sql`${t.currency} = 'KRW'`),
     index('payout_batch_audit_batch_idx').on(t.batchId, t.createdAt),
   ],

@@ -226,6 +226,27 @@ export const ticketCancellation = pgTable(
   ],
 );
 
+/** 양도 회수 결과(F-06-3, transfer-refund §3.1·§7.2, docs/data.md transfer_reclaim). (approval_id, ticket_id)로 멱등하고 건너뜀도 남긴다 */
+export const transferReclaim = pgTable(
+  'transfer_reclaim',
+  {
+    approvalId: uuid('approval_id').notNull(),
+    ticketId: uuid('ticket_id')
+      .notNull()
+      .references(() => ticket.id),
+    expectedPayerAccountId: uuid('expected_payer_account_id').notNull(),
+    expectedHolderAccountId: uuid('expected_holder_account_id').notNull(),
+    previousHolderAccountId: uuid('previous_holder_account_id'),
+    result: text('result').notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.approvalId, t.ticketId] }),
+    uniqueIndex('transfer_reclaim_approval_uq').on(t.approvalId),
+    check('transfer_reclaim_result_check', sql`${t.result} in ('RECLAIMED', 'SKIPPED_ENTRY_STARTED', 'SKIPPED_ENTRY_RECORDED', 'SKIPPED_NOT_TRANSFERRED', 'SKIPPED_HOLDER_CHANGED')`),
+  ],
+);
+
 /** 부정 예매 운영자 취소의 표별 결과(0008, BUILD_ORDER GAT-080, docs/data.md ticket_operator_cancellation). (approval_id, ticket_id)로 멱등하다. 건너뜀도 남긴다 */
 export const ticketOperatorCancellation = pgTable(
   'ticket_operator_cancellation',

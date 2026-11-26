@@ -18,8 +18,10 @@ export interface PayoutPaymentClient {
   listBatches(filter: { payoutDate?: string | undefined; pg?: string | undefined; pgStore?: string | undefined; status?: readonly string[] | undefined; limit: number }): Promise<PayoutBatchView[]>;
   /** SCR-049 묶음 상세(정산서·지급 건·보류·KYC 예고). */
   getBatchDetail(batchId: string): Promise<PayoutBatchDetailView>;
-  approveBatch(batchId: string, approvalId: string): Promise<PayoutBatchView>;
+  approveBatch(batchId: string, approvalId: string, payeeDigest?: string): Promise<PayoutBatchView>;
   executeBatch(batchId: string): Promise<PayoutBatchView>;
+  /** 15시 미승인 만료(F-06-3). PREPARED·PENDING_APPROVAL이고 지급 건이 없을 때만 푼다. */
+  expireBatch?(batchId: string, input: { approvalId: string; postponedPayoutDate: string }): Promise<{ batchId: string; status: 'EXPIRED'; postponedPayoutDate: string }>;
   /** 반려한 배치를 풀어 정산서를 CONFIRMED로 되돌린다(CONS-V02). */
   releaseBatch(batchId: string): Promise<void>;
   recordPortoneExecution(batchId: string, bulkPayoutId: string): Promise<PayoutBatchView>;

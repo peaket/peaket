@@ -3,6 +3,7 @@
 // 정산서 상태는 조건부 전이로만 바꾼다(지금 상태가 출발 상태일 때만, 상태·감사·trade.settlements 사건을 한 트랜잭션에, ADR-0368 결정 2).
 // 계산 = 통지(결정 1), 이의(결정 5)·기각(결정 6)·수기 조정(결정 7·8·9)·확정 때의 0 이하 처리(결정 10)·모두 보류된 묶음의 보류 저장(결정 11)을 여기서 한다.
 import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
+import { payeeDigestOf, type PayeeDigestRow } from '../domain/payee-digest.js';
 import type {
   AdjustmentApprovalVerifier,
   DueEventSettlementSource,
@@ -1417,6 +1418,7 @@ export class Settlements {
       pgBalanceObservedBy: input.pg === 'PORTONE' ? input.actor : null,
       pgBalanceLedgerKrw: null,
       status: o.status,
+      payeeDigest: null,
       submitAttempts: 0,
       nextSubmitAt: null,
       submitDeadlineAt: null,
@@ -1450,7 +1452,8 @@ export class Settlements {
       const prepared = existing.find((b) => b.status === 'PREPARED');
       const j = await this.#judgeBatch(input, now, 'request');
       if (!j) throw new SettlementProblem('payout-batch-empty', 409, '지급할 확정 정산서가 없습니다');
-      const fresh: PayoutBatchRecord = { ...this.#newBatch(input, { totalAmount: j.totalAmount, statementCount: j.included.length, status: 'PENDING_APPROVAL' }, now), ...(j.portoneLedger === undefined ? {} : { pgBalanceLedgerKrw: j.portoneLedger }) };
+      const payeeDigest = await this.#payeeDigestOf(j.included);
+      const fresh: PayoutBatchRecord = { ...this.#newBatch(input, { totalAmount: j.totalAmount, statementCount: j.included.length, status: 'PENDING_APPROVAL' }, now), payeeDigest, ...(j.portoneLedger === undefined ? {} : { pgBalanceLedgerKrw: j.portoneLedger }) };
       const batch: PayoutBatchRecord = prepared
         ? { ...fresh, batchId: prepared.batchId, createdAt: prepared.createdAt, submitAttempts: prepared.submitAttempts, nextSubmitAt: prepared.nextSubmitAt, submitDeadlineAt: prepared.submitDeadlineAt, lastSubmitError: prepared.lastSubmitError, dateRetryUsed: prepared.dateRetryUsed }
         : fresh;
@@ -1510,7 +1513,7 @@ export class Settlements {
     const input = { pg: 'TOSS' as const, pgStore, payoutDate, actor: 'system' };
     const j = await this.#judgeBatch(input, now, 'prepare');
     if (!j) return false;
-    const batch = this.#newBatch(input, { totalAmount: j.totalAmount, statementCount: j.included.length, status: 'PREPARED' }, now);
+    const batch = { ...this.#newBatch(input, { totalAmount: j.totalAmount, statementCount: j.included.length, status: 'PREPARED' }, now), payeeDigest: await this.#payeeDigestOf(j.included) };
     try {
       // 묶지 않고 상계하지 않는다. 보류만 같은 트랜잭션에 쓴다
       await this.d.store.createPayoutBatchAtomically({ batch, statementIds: [], statementUpdates: j.holdUpdates, receivableUpdates: [], receivableMoves: [] });
@@ -1532,7 +1535,7 @@ export class Settlements {
     });
   }
 
-  async approveBatch(batchId: string, approvalId: string): Promise<ReturnType<typeof payoutBatchView>> {
+  async approveBatch(batchId: string, approvalId: string, expectedPayeeDigest?: string): Promise<ReturnType<typeof payoutBatchView>> {
     return guard(async () => {
       if (typeof approvalId !== 'string' || approvalId.trim() === '') throw new SettlementProblem('invalid-query', 422, '승인 업무 ID가 필요합니다');
       const id = approvalId.trim();
@@ -1550,6 +1553,8 @@ export class Settlements {
         facts = await this.d.approvals.verify(id);
         if (!facts) throw new SettlementProblem('payout-approval-missing', 409, 'ops-svc에서 승인 업무를 찾지 못했습니다');
         approvalFactsOf(facts, b);
+        // 지급 대상 지문을 승인 직전에 다시 본다(F-06-3, settlement §5.1). 다르면 거절 감사를 남기고 아무것도 바꾸지 않는다.
+        await this.#assertPayeeDigest(b, expectedPayeeDigest);
       } catch (e) {
         // 확인기가 SettlementProblem 밖의 오류(프로그램 결함·다른 구현)를 던져도 돈 경로는 503으로 닫는다.
         // ops가 5xx·시간 초과일 때와 같은 결과이고, payout_batch 상태는 바꾸지 않는다.
@@ -1569,6 +1574,7 @@ export class Settlements {
         approverId: facts.approvals[0] ?? null,
         amount: b.totalAmount,
         currency: batchCurrency,
+        payeeDigest: b.payeeDigest ?? null,
         createdAt: now,
       };
       const saved = await this.d.store.approvePayoutBatchAtomically(next, audit);
@@ -1588,6 +1594,65 @@ export class Settlements {
         at: now,
       });
       return payoutBatchView(next);
+    });
+  }
+
+  /** 정산서별 지급 대상 지문(승인·실행 직전 재계산). 옛 묶음(payeeDigest 없음)은 건너뛴다. */
+  async #payeeDigestOf(statements: readonly { statementId: string; payoutAmount: number; promoterId: string }[]): Promise<string> {
+    const accounts = new Map<string, { bankCode?: string | null; accountLast4?: string | null }>();
+    for (const promoterId of new Set(statements.map((s) => s.promoterId))) accounts.set(promoterId, (await this.d.store.findPayoutAccount(promoterId)) ?? {});
+    const rows: PayeeDigestRow[] = statements.map((s) => ({ statementId: s.statementId, payoutAmount: s.payoutAmount, promoterId: s.promoterId, bankCode: accounts.get(s.promoterId)?.bankCode, accountLast4: accounts.get(s.promoterId)?.accountLast4 }));
+    return payeeDigestOf(rows);
+  }
+
+  async #assertPayeeDigest(b: PayoutBatchRecord, expected?: string): Promise<void> {
+    if (b.payeeDigest && expected !== undefined && expected !== b.payeeDigest) throw new SettlementProblem('payout-batch-payee-mismatch', 409, '지급 대상이 바뀌었습니다');
+    if (!b.payeeDigest) return;
+    const statements = await this.d.store.listStatementsByBatch(b.batchId);
+    if (statements.length === 0) return;
+    const current = await this.#payeeDigestOf(statements);
+    if (current !== b.payeeDigest) throw new SettlementProblem('payout-batch-payee-mismatch', 409, '지급 대상이 바뀌었습니다');
+  }
+
+  /**
+   * 15시 미승인 만료(F-06-3, settlement §5.1). PREPARED·PENDING_APPROVAL이고 지급 건이 없는 묶음만 푼다.
+   * 정산서는 CONFIRMED·결속 없음으로 두고 PAYOUT_HELD를 남긴다. 이미 EXPIRED면 처음 답을 그대로 준다.
+   */
+  async expireBatch(batchId: string, input: { approvalId: string; postponedPayoutDate: string }): Promise<{ batchId: string; status: 'EXPIRED'; postponedPayoutDate: string }> {
+    return guard(async () => {
+      const b = await this.d.store.findPayoutBatch(batchId);
+      if (!b) throw notFound();
+      if (b.status === 'EXPIRED') return { batchId, status: 'EXPIRED' as const, postponedPayoutDate: input.postponedPayoutDate };
+      if (b.status !== 'PREPARED' && b.status !== 'PENDING_APPROVAL') throw new SettlementProblem('payout-batch-not-expellable', 409, '만료할 수 없는 지급 묶음입니다');
+      const payouts = await this.d.store.listPayouts(batchId);
+      if (payouts.length > 0) throw new SettlementProblem('payout-batch-not-expellable', 409, '지급 건이 있는 묶음은 풀 수 없습니다');
+      const now = new Date(this.d.clock.now());
+      const statements = b.status === 'PENDING_APPROVAL' ? await this.d.store.listStatementsByBatch(batchId) : [];
+      // PREPARED 묶음은 정산서를 아직 결속하지 않았으므로 같은 지급일의 확정 정산서를 함께 다음 지급일로 미룬다.
+      const movable = await this.d.store.listConfirmed(b.pg, b.pgStore, b.payoutDate);
+      const postponedIds = [...new Set([...statements.map((s) => s.statementId), ...movable.map((s) => s.statementId)])];
+      const audit: PayoutBatchAuditRecord = {
+        auditId: uuidv7(this.d.clock),
+        batchId,
+        approvalId: input.approvalId,
+        event: 'EXPIRED',
+        reason: 'payout-batch-expired',
+        requesterId: null,
+        approverId: null,
+        amount: b.totalAmount,
+        currency: batchCurrency,
+        payeeDigest: b.payeeDigest ?? null,
+        createdAt: now,
+      };
+      const events = statements.map((s) => payoutEvent(s, 'PAYOUT_HELD', s.payoutAmount, now, audit.auditId));
+      const expired: PayoutBatchRecord = { ...b, status: 'EXPIRED', updatedAt: now };
+      const ok = await this.d.store.expirePayoutBatchAtomically(expired, postponedIds, audit, events, input.postponedPayoutDate);
+      if (!ok) {
+        const after = await this.d.store.findPayoutBatch(batchId);
+        if (after?.status === 'EXPIRED') return { batchId, status: 'EXPIRED' as const, postponedPayoutDate: input.postponedPayoutDate };
+        throw new SettlementProblem('payout-batch-not-expellable', 409, '만료할 수 없는 지급 묶음입니다');
+      }
+      return { batchId, status: 'EXPIRED' as const, postponedPayoutDate: input.postponedPayoutDate };
     });
   }
 
@@ -1636,6 +1701,7 @@ export class Settlements {
       if (b.status !== 'APPROVED') throw new SettlementProblem('payout-batch-not-approved', 409, '승인된 지급 묶음이 아닙니다');
       // 승인 기록을 거치지 않고 APPROVED가 된 묶음은 실행하지 않는다(승인 ID가 없으면 승인 근거가 없다).
       if (!b.approvalId) throw new SettlementProblem('payout-batch-not-approved', 409, '승인 업무 ID가 없는 지급 묶음입니다');
+      await this.#assertPayeeDigest(b);
       return payoutBatchView(await this.#submitBatch(b));
     });
   }

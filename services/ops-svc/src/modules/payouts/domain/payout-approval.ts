@@ -1,6 +1,6 @@
 // 지급 묶음 승인 업무(BUILD_ORDER BAT-610 잔여, FR-062, POL-038·039, settlement §5.1).
 // 2인 승인: 요청자(operator)와 승인자(commander)가 달라야 하고, 승인자는 재인증(act APPROVAL)을 거친다.
-export type PayoutApprovalStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXECUTING' | 'DONE' | 'FAILED';
+export type PayoutApprovalStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXECUTING' | 'DONE' | 'FAILED' | 'EXPIRED';
 
 export class PayoutApprovalProblem extends Error {
   constructor(
@@ -21,6 +21,8 @@ export interface PayoutApprovalRecord {
   payoutDate: string;
   amount: number;
   statementCount: number;
+  /** payment-svc가 묶음을 만들 때 계산한 지급 대상 지문(F-06-3). 옛 행은 없을 수 있다 */
+  payeeDigest?: string | null;
   status: PayoutApprovalStatus;
   requesterId: string;
   requesterRole: string;
@@ -42,6 +44,7 @@ export interface PayoutBatchView {
   totalAmount: number;
   statementCount: number;
   status: string;
+  payeeDigest?: string | undefined;
   approvalId?: string;
   portoneBulkPayoutId?: string;
 }
@@ -62,6 +65,7 @@ export interface PayoutApprovalView {
   amount: number;
   reasonCode: 'PAYOUT_BATCH';
   reasonText: string;
+  payeeDigest: string | null;
   status: PayoutApprovalStatus;
   requiredApprovals: 2;
   approvals: string[];
@@ -85,6 +89,7 @@ export interface PayoutApprovalFacts {
   amount: number;
   statementCount: number;
   status: PayoutApprovalStatus;
+  payeeDigest: string | null;
   requiredApprovals: 2;
   requestedBy: string;
   approvals: string[];
@@ -103,6 +108,7 @@ export const payoutApprovalFacts = (r: PayoutApprovalRecord): PayoutApprovalFact
   amount: r.amount,
   statementCount: r.statementCount,
   status: r.status,
+  payeeDigest: r.payeeDigest ?? null,
   requiredApprovals: 2,
   requestedBy: r.requesterId,
   approvals: r.approverId ? [r.approverId] : [],
@@ -116,6 +122,7 @@ export const payoutApprovalView = (r: PayoutApprovalRecord, actor: { accountId: 
   amount: r.amount,
   reasonCode: 'PAYOUT_BATCH',
   reasonText: r.reasonText,
+  payeeDigest: r.payeeDigest ?? null,
   status: r.status,
   requiredApprovals: 2,
   approvals: r.approverId ? [r.approverId] : [],
@@ -123,7 +130,7 @@ export const payoutApprovalView = (r: PayoutApprovalRecord, actor: { accountId: 
   requestedAt: r.createdAt.toISOString(),
   canApprove: r.status === 'PENDING_APPROVAL' || r.status === 'FAILED' ? r.requesterId !== actor.accountId && actor.role === 'commander' : false,
   dueAt: approvalDueAt(r.payoutDate).toISOString(),
-  closeReason: r.status === 'REJECTED' ? r.reasonText : r.failure,
+  closeReason: r.status === 'REJECTED' ? r.reasonText : r.status === 'EXPIRED' ? (r.failure ?? 'DEADLINE_PASSED') : r.failure,
 });
 
 /**
@@ -140,6 +147,18 @@ export function approvalDueAt(payoutDate: string): Date {
   const mm = String(base.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(base.getUTCDate()).padStart(2, '0');
   return new Date(`${yyyy}-${mm}-${dd}T15:00:00+09:00`);
+}
+
+/**
+ * 지급일 다음 은행 영업일(토·일만 뺀다). 15시 만료 뒤 파트너에게 알리는 새 지급일이다(F-06-3).
+ */
+export function nextBusinessDayOf(payoutDate: string): string {
+  const [y, m, d] = payoutDate.split('-').map(Number);
+  const at = new Date(Date.UTC(y!, m! - 1, d!));
+  do {
+    at.setUTCDate(at.getUTCDate() + 1);
+  } while (at.getUTCDay() === 0 || at.getUTCDay() === 6);
+  return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, '0')}-${String(at.getUTCDate()).padStart(2, '0')}`;
 }
 
 /**

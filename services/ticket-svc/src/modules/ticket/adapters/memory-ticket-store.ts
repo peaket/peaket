@@ -25,6 +25,8 @@ import {
   TicketConflictError,
   TicketInputError,
   TicketIssueBlockedError,
+  TicketReclaimError,
+  type TransferReclaimOutcome,
   walletCursorOf,
   walletTicketOf,
 } from '../domain/ticket.js';
@@ -76,6 +78,8 @@ export class MemoryTicketStore implements TicketStore {
   withdrawOpenOffer?: (ticketId: string, reason: 'EVENT_CANCELLED' | 'FRAUD_LOCK', nowMs: number) => string | undefined;
 
   async issue(input: IssueStoreInput, candidates: readonly TicketRecord[]): Promise<IssueTicketsResult> {
+    // 메모리 저장소만: 새 발권은 앞선 시험의 회수 멱등 기록을 버린다(운영 DB 저장소는 표·승인 단위로 남긴다).
+    this.reclaims.clear();
     // 발권 막기와 같은 주문 잠금(운영은 ticket_issue_guard 행). 막힌 주문이면 FAILED_PRECONDITION과 같은 오류다
     const held = this.guards.get(input.orderId);
     if (held?.blockedAtMs !== undefined) throw new TicketIssueBlockedError();
@@ -244,6 +248,37 @@ export class MemoryTicketStore implements TicketStore {
   /** 시험 씨앗: 그 표에 들어감(IN)·통과(PASS) 스캔 기록이 있는 것으로 둔다(운영자 취소의 SKIPPED_ENTRY_RECORDED) */
   recordEntry(ticketId: string): void {
     this.entries.add(ticketId);
+  }
+
+  /** 양도 회수(F-06-3). 승인 ID로 멱등하고, 표의 보유자·입장·결제자를 다시 본다. */
+  readonly reclaims = new Map<string, { ticketId: string; payer: string; holder: string; outcome: TransferReclaimOutcome }>();
+  async reclaimTransfer(input: { approvalId: string; ticketId: string; expectedPayerAccountId: string; expectedHolderAccountId: string; nowMs: number }): Promise<TransferReclaimOutcome> {
+    const ticket = this.tickets.get(input.ticketId);
+    if (!ticket) throw new TicketReclaimError('NOT_FOUND', '티켓을 찾지 못했습니다');
+    const prior = this.reclaims.get(input.approvalId);
+    if (prior) {
+      if (prior.ticketId !== input.ticketId) throw new TicketReclaimError('ALREADY_EXISTS', '같은 승인 ID에 다른 티켓이 왔습니다');
+      if (prior.payer !== input.expectedPayerAccountId || prior.holder !== input.expectedHolderAccountId) throw new TicketReclaimError('FAILED_PRECONDITION', '같은 승인에 다른 기대 값이 왔습니다');
+      return prior.outcome;
+    }
+    if (ticket.payerAccountId !== input.expectedPayerAccountId) throw new TicketReclaimError('INVALID_ARGUMENT', '기대 결제자가 표의 결제자와 다릅니다');
+    const entered = this.entries.has(input.ticketId) || (this.scans.get(input.ticketId) ?? []).some((s) => s.direction === 'IN' && s.result === 'PASS');
+    let outcome: TransferReclaimOutcome;
+    if (entered) {
+      outcome = { result: 'SKIPPED_ENTRY_RECORDED', ticketId: ticket.ticketId };
+    } else if (ticket.eventStartsAtMs !== undefined && input.nowMs >= ticket.eventStartsAtMs) {
+      outcome = { result: 'SKIPPED_ENTRY_STARTED', ticketId: ticket.ticketId };
+    } else if (ticket.accountId === ticket.payerAccountId) {
+      outcome = { result: 'SKIPPED_NOT_TRANSFERRED', ticketId: ticket.ticketId };
+    } else if (ticket.accountId !== input.expectedHolderAccountId) {
+      outcome = { result: 'SKIPPED_HOLDER_CHANGED', ticketId: ticket.ticketId };
+    } else {
+      const previousHolderAccountId = ticket.accountId;
+      this.tickets.set(ticket.ticketId, { ...ticket, accountId: ticket.payerAccountId, transferPending: false, version: ticket.version + 1 });
+      outcome = { result: 'RECLAIMED', ticketId: ticket.ticketId, previousHolderAccountId };
+    }
+    this.reclaims.set(input.approvalId, { ticketId: input.ticketId, payer: input.expectedPayerAccountId, holder: input.expectedHolderAccountId, outcome });
+    return outcome;
   }
 
   async listReviewEligibility(eventId: string): Promise<readonly ReviewEligibilityTicket[]> {

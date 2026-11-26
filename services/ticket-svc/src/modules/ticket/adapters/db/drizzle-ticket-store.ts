@@ -27,11 +27,13 @@ import {
   TicketConflictError,
   TicketInputError,
   TicketIssueBlockedError,
+  TicketReclaimError,
   type TicketStatus,
+  type TransferReclaimOutcome,
   walletCursorOf,
   walletTicketOf,
 } from '../../domain/ticket.js';
-import { ticket, ticketCancellation, ticketIssue, ticketIssueGuard, ticketOperatorCancellation, fraudTransferLock, transferOffer } from './schema.js';
+import { ticket, ticketCancellation, ticketIssue, ticketIssueGuard, ticketOperatorCancellation, fraudTransferLock, transferOffer, transferReclaim } from './schema.js';
 
 /** 발권·취소와 같은 트랜잭션에 스캐너 변경 기록을 넣는 포트(offline-gate §6.3) */
 export interface ScannerChangeWriter {
@@ -358,6 +360,50 @@ export class DrizzleTicketStore implements TicketStore {
   }
 
   /** 그 표에 들어감(IN)·통과(PASS) 스캔이 있는가(거절·확인·나감은 입장이 아니다) */
+  async reclaimTransfer(input: { approvalId: string; ticketId: string; expectedPayerAccountId: string; expectedHolderAccountId: string; nowMs: number }): Promise<TransferReclaimOutcome> {
+    return this.o.database.transaction(async (tx) => {
+      const prior = await tx
+        .select({ ticketId: transferReclaim.ticketId, payer: transferReclaim.expectedPayerAccountId, holder: transferReclaim.expectedHolderAccountId, previousHolder: transferReclaim.previousHolderAccountId, result: transferReclaim.result })
+        .from(transferReclaim)
+        .where(eq(transferReclaim.approvalId, input.approvalId))
+        .limit(1);
+      if (prior[0]) {
+        if (prior[0].ticketId !== input.ticketId) throw new TicketReclaimError('ALREADY_EXISTS', '같은 승인 ID에 다른 티켓이 왔습니다');
+        if (prior[0].payer !== input.expectedPayerAccountId || prior[0].holder !== input.expectedHolderAccountId) throw new TicketReclaimError('FAILED_PRECONDITION', '같은 승인에 다른 기대 값이 왔습니다');
+        return { result: prior[0].result as TransferReclaimOutcome['result'], ticketId: prior[0].ticketId, ...(prior[0].previousHolder ? { previousHolderAccountId: prior[0].previousHolder } : {}) };
+      }
+      const rows = await tx.select().from(ticket).where(eq(ticket.id, input.ticketId)).for('update');
+      const row = rows[0];
+      if (!row) throw new TicketReclaimError('NOT_FOUND', '티켓을 찾지 못했습니다');
+      if (row.payerAccountId !== input.expectedPayerAccountId) throw new TicketReclaimError('INVALID_ARGUMENT', '기대 결제자가 표의 결제자와 다릅니다');
+      let result: TransferReclaimOutcome['result'];
+      let previousHolderAccountId: string | undefined;
+      if (await this.#entryRecorded(tx, row.eventId, row.id)) {
+        result = 'SKIPPED_ENTRY_RECORDED';
+      } else if (row.eventStartsAt !== null && input.nowMs >= row.eventStartsAt.getTime()) {
+        result = 'SKIPPED_ENTRY_STARTED';
+      } else if (row.accountId === row.payerAccountId) {
+        result = 'SKIPPED_NOT_TRANSFERRED';
+      } else if (row.accountId !== input.expectedHolderAccountId) {
+        result = 'SKIPPED_HOLDER_CHANGED';
+      } else {
+        previousHolderAccountId = row.accountId;
+        result = 'RECLAIMED';
+        await tx.update(ticket).set({ accountId: row.payerAccountId, transferPending: false, version: row.version + 1 }).where(eq(ticket.id, row.id));
+      }
+      await tx.insert(transferReclaim).values({
+        approvalId: input.approvalId,
+        ticketId: row.id,
+        expectedPayerAccountId: input.expectedPayerAccountId,
+        expectedHolderAccountId: input.expectedHolderAccountId,
+        previousHolderAccountId: previousHolderAccountId ?? null,
+        result,
+        createdAt: new Date(input.nowMs),
+      });
+      return { result, ticketId: row.id, ...(previousHolderAccountId ? { previousHolderAccountId } : {}) };
+    });
+  }
+
   async #entryRecorded(tx: DbTransaction, eventId: string, ticketId: string): Promise<boolean> {
     const r = await tx.execute(sql`select 1 from scan_event where event_id = ${eventId}::uuid and ticket_id = ${ticketId}::uuid and direction = 'IN' and result = 'PASS' limit 1`);
     return r.rows.length > 0;

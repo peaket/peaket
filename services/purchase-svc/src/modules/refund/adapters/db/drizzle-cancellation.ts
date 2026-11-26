@@ -53,8 +53,44 @@ export class DrizzleCancellationOrders implements CancellationOrders {
     };
   }
 
-  async findCancellation(cancellationId: string): Promise<CancellationRecord | undefined> {
-    const [row] = await this.database.db
+  /** 주문 ID의 항목 전부(F-06-3 승인 환불). 항목마다 회차 설정을 읽는다 */
+  async byOrder(orderId: string): Promise<CancellationOrderView[]> {
+    const rows = await this.database.db
+      .select({
+        orderId: purchaseOrder.id,
+        eventId: purchaseOrder.eventId,
+        accountId: purchaseOrder.accountId,
+        status: purchaseOrder.status,
+        createdAt: purchaseOrder.createdAt,
+        ticketId: orderItem.ticketId,
+        seatId: orderItem.seatId,
+        unitPrice: orderItem.unitPrice,
+      })
+      .from(orderItem)
+      .innerJoin(purchaseOrder, eq(orderItem.orderId, purchaseOrder.id))
+      .where(eq(orderItem.orderId, orderId));
+    const out: CancellationOrderView[] = [];
+    for (const row of rows) {
+      if (row.ticketId === null) continue;
+      const config = await this.configs.config(row.eventId);
+      if (!config) continue;
+      out.push({
+        orderId: row.orderId,
+        eventId: row.eventId,
+        ticketId: row.ticketId,
+        seatId: row.seatId,
+        payerAccountId: row.accountId,
+        ticketPrice: row.unitPrice,
+        bookedAtMs: row.createdAt.getTime(),
+        saleEndsAtMs: config.saleEndsAtMs,
+        ...(config.entryOpensAtMs !== undefined ? { entryOpensAtMs: config.entryOpensAtMs } : {}),
+        orderStatus: row.status,
+      });
+    }
+    return out;
+  }
+
+  async findCancellation(cancellationId: string): Promise<CancellationRecord | undefined> {    const [row] = await this.database.db
       .select({
         cancellationId: orderCancellation.id,
         orderId: orderCancellation.orderId,

@@ -60,6 +60,9 @@ export interface TicketStore {
   /** 입장 기록 대조(BAT-420 GAT-090 A). 읽기만, 요청 차례 */
   entryRecords(ticketIds: readonly string[]): Promise<readonly EntryRecord[]>;
 
+  /** 양도 회수(F-06-3). 승인 ID로 멱등하고 티켓 행 잠금 안에서 조건을 다시 본다. */
+  reclaimTransfer?(input: { approvalId: string; ticketId: string; expectedPayerAccountId: string; expectedHolderAccountId: string; nowMs: number }): Promise<import('./ticket.js').TransferReclaimOutcome>;
+
   /** 계정의 월렛 목록. 발권 최신순, 커서 페이지. */
   list(input: ListTicketsInput): Promise<ListTicketsResult>;
 

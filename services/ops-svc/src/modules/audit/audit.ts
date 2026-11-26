@@ -17,6 +17,8 @@ export interface AuditEntry {
   readonly seq: number;
   readonly recordType: string;
   readonly recordId: string;
+  /** 기록 payload의 사본(시험·조회 편의). 해시 대상은 record.payload다 */
+  readonly payload?: Record<string, unknown>;
   readonly hash: string;
   readonly prevHash: string;
   readonly createdAtMs: number;
@@ -66,6 +68,7 @@ export class MemoryAuditChain implements AuditChain {
       seq: this.entries.length + 1,
       recordType: record.recordType,
       recordId: record.recordId,
+      payload: record.payload,
       hash: auditHash(prevHash, record),
       prevHash,
       createdAtMs: record.nowMs,

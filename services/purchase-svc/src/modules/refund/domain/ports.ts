@@ -21,6 +21,13 @@ export interface CancellationOrders {
   findByTicket(ticketId: string): Promise<CancellationOrderView | undefined>;
   /** 같은 취소 ID의 기존 기록. 견적·티켓 취소 전에 재요청을 알아본다 */
   findCancellation(cancellationId: string): Promise<CancellationRecord | undefined>;
+  /** 주문 ID의 항목들(F-06-3 승인 환불). 운영 어댑터가 구현한다 */
+  byOrder?(orderId: string): Promise<CancellationOrderView[] | undefined>;
+}
+
+/** 입장 기록 확인(F-06-3 미성년 계약 취소). 없으면 확인하지 않는다 */
+export interface ApprovalEntryRecords {
+  hasEntry(ticketId: string): Promise<boolean>;
 }
 
 /** ticket-svc TicketService.CancelTickets(티켓 행 잠금 안에서 결제자·보유자·양도·공연 시작을 본다) */

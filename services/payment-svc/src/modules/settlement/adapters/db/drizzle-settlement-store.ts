@@ -289,6 +289,7 @@ const batchRecord = (r: typeof payoutBatch.$inferSelect): PayoutBatchRecord => (
   pgBalanceObservedBy: r.pgBalanceObservedBy,
   pgBalanceLedgerKrw: r.pgBalanceLedgerKrw,
   status: r.status as PayoutBatchRecord['status'],
+  payeeDigest: r.payeeDigest,
   submitAttempts: r.submitAttempts,
   nextSubmitAt: r.nextSubmitAt,
   submitDeadlineAt: r.submitDeadlineAt,
@@ -314,6 +315,7 @@ const batchValues = (record: PayoutBatchRecord) => ({
   pgBalanceObservedBy: record.pgBalanceObservedBy,
   pgBalanceLedgerKrw: record.pgBalanceLedgerKrw,
   status: record.status,
+  payeeDigest: record.payeeDigest ?? null,
   submitAttempts: record.submitAttempts ?? 0,
   nextSubmitAt: record.nextSubmitAt ?? null,
   submitDeadlineAt: record.submitDeadlineAt ?? null,
@@ -988,6 +990,7 @@ export class DrizzleSettlementStore implements SettlementStore {
           approverId: audit.approverId,
           amount: audit.amount,
           currency: audit.currency,
+          payeeDigest: audit.payeeDigest ?? null,
           createdAt: audit.createdAt,
         });
         return true;
@@ -1009,7 +1012,41 @@ export class DrizzleSettlementStore implements SettlementStore {
       approverId: audit.approverId,
       amount: audit.amount,
       currency: audit.currency,
+      payeeDigest: audit.payeeDigest ?? null,
       createdAt: audit.createdAt,
+    });
+  }
+
+  async expirePayoutBatchAtomically(batch: PayoutBatchRecord, statementIds: readonly string[], audit: PayoutBatchAuditRecord, events: readonly SettlementEventValue[], postponedPayoutDate: string): Promise<boolean> {
+    return await this.db.transaction(async (tx) => {
+      const updated = await tx
+        .update(payoutBatch)
+        .set({ status: batch.status, payeeDigest: batch.payeeDigest ?? null, updatedAt: batch.updatedAt })
+        .where(and(eq(payoutBatch.id, batch.batchId), inArray(payoutBatch.status, ['PENDING_APPROVAL', 'PREPARED']), isNull(payoutBatch.approvalId)))
+        .returning({ id: payoutBatch.id });
+      if (updated.length === 0) return false;
+      const payouts = await tx.select({ id: payout.id }).from(payout).where(eq(payout.batchId, batch.batchId)).limit(1);
+      if (payouts.length > 0) throw new SettlementProblem('payout-batch-not-expellable', 409, '지급 건이 있는 묶음은 풀 수 없습니다');
+      if (statementIds.length > 0) {
+        // 정산서 상태는 CONFIRMED 그대로 두고 결속만 풀며 지급일은 다음 영업일로 미룬다(ADR-0369 결정 14 ①)
+        await tx.update(settlementStatement).set({ payoutBatchId: null, payoutDate: postponedPayoutDate, updatedAt: batch.updatedAt }).where(and(inArray(settlementStatement.id, [...statementIds]), eq(settlementStatement.payoutBatchId, batch.batchId)));
+        await tx.update(settlementStatement).set({ payoutDate: postponedPayoutDate, updatedAt: batch.updatedAt }).where(and(inArray(settlementStatement.id, [...statementIds]), isNull(settlementStatement.payoutBatchId)));
+      }
+      await tx.insert(payoutBatchAudit).values({
+        id: audit.auditId,
+        batchId: audit.batchId,
+        approvalId: audit.approvalId,
+        event: audit.event,
+        reason: audit.reason,
+        requesterId: audit.requesterId,
+        approverId: audit.approverId,
+        amount: audit.amount,
+        currency: audit.currency,
+        payeeDigest: audit.payeeDigest ?? null,
+        createdAt: audit.createdAt,
+      });
+      await writeOutbox(tx, this.clock, settlementOutbox([...events]));
+      return true;
     });
   }
 
@@ -1046,6 +1083,7 @@ export class DrizzleSettlementStore implements SettlementStore {
         pgBalanceObservedBy: record.pgBalanceObservedBy,
         pgBalanceLedgerKrw: record.pgBalanceLedgerKrw,
         payoutDate: record.payoutDate,
+        payeeDigest: record.payeeDigest ?? null,
         submitAttempts: record.submitAttempts,
         nextSubmitAt: record.nextSubmitAt,
         submitDeadlineAt: record.submitDeadlineAt,

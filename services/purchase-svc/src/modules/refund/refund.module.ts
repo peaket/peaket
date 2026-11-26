@@ -1,16 +1,18 @@
 // 예매 취소 모듈 조립(GAT-070·GAT-080·GAT-120·GAT-130). 운영은 purchase DB·ticket-svc·payment-svc 어댑터를, 시험은 같은 포트의 대역을 넘긴다.
 // BAT-425: 지연 환급 계좌 다시 받기(RequestRefundAccount)와 배상 목록·계좌 입력(CompensationService)은 그 포트가 꽂혔을 때만 경로를 연다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
-import { INTERNAL_TOKEN, InternalTokenGuard } from '@peaket/platform';
+import { CLOCK, type Clock, InternalTokenGuard } from '@peaket/platform';
 import { CancelTicket } from './application/cancel-ticket.js';
+import { ApprovalRefunds } from './application/approval-refund.js';
 import { Compensations, RequestCompensationAccount } from './application/compensations.js';
 import { EventRefundService } from './application/event-refund-service.js';
 import { QuoteCancellation } from './application/quote-cancellation.js';
 import { RequestRefundAccount } from './application/request-refund-account.js';
-import { REAUTH_GATE, type CancellationOrders, type CancellationWrites, type CompensationCaseNotice, type CompensationStore, type CompensationTransfer, type EventCancellationLookup, type PaymentCancellations, type PaymentMethodLookup, type ReauthGate, type RefundAccountWrites, type SeatReturns, type TicketCancellations } from './domain/ports.js';
+import { REAUTH_GATE, type CancellationOrders, type CancellationWrites, type CompensationCaseNotice, type CompensationStore, type CompensationTransfer, type ApprovalEntryRecords, type EventCancellationLookup, type PaymentCancellations, type PaymentMethodLookup, type ReauthGate, type RefundAccountWrites, type SeatReturns, type TicketCancellations } from './domain/ports.js';
 import type { BusinessCalendar } from './domain/refund-policy.js';
 import { CancellationAccountController, CompensationController } from './inbound/compensation.controller.js';
 import { EventRefundController } from './inbound/event-refund.controller.js';
+import { ApprovalRefundController } from './inbound/approval-refund.controller.js';
 import { TicketCancellationController, unavailableReauth } from './inbound/ticket-cancellation.controller.js';
 
 export interface RefundModuleDeps {
@@ -39,6 +41,8 @@ export interface RefundModuleDeps {
   refundAccountSignals?: { readonly inc: (result: 'accepted' | 'refunded' | 'pending' | 'rejected' | 'invalid') => void };
   /** purchase_compensation_total{result} */
   compensationSignals?: { readonly inc: (result: 'account_pending' | 'requested' | 'paid' | 'failed' | 'unavailable') => void };
+  /** 입장 기록 확인(F-06-3 미성년 계약 취소). 없으면 확인하지 않는다 */
+  entryRecords?: ApprovalEntryRecords;
 }
 
 @Module({})
@@ -70,8 +74,12 @@ export class RefundModule {
           }),
       },
       { provide: REAUTH_GATE, useValue: deps.reauth ?? unavailableReauth },
-      { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
       InternalTokenGuard,
+      {
+        provide: ApprovalRefunds,
+        useFactory: (clock: Clock) => new ApprovalRefunds({ orders: deps.orders, writes: deps.writes, tickets: deps.tickets, payments: deps.payments, clock, ...(deps.entryRecords ? { entryRecords: deps.entryRecords } : {}) }),
+        inject: [CLOCK],
+      },
       ...(deps.eventRefund ? [{ provide: EventRefundService, useValue: deps.eventRefund }] : []),
       ...(deps.refundAccountWrites
         ? [
@@ -107,6 +115,7 @@ export class RefundModule {
     ];
     const controllers = [
       TicketCancellationController,
+      ApprovalRefundController,
       ...(deps.eventRefund ? [EventRefundController] : []),
       ...(deps.refundAccountWrites ? [CancellationAccountController] : []),
       ...(deps.compensationStore && deps.compensationTransfer ? [CompensationController] : []),

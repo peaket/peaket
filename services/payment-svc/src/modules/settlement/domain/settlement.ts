@@ -1,6 +1,7 @@
 // 정산서·지급 묶음·KYC 도메인(BUILD_ORDER BAT-610 잔여, FR-062, POL-038·POL-039, ADR-0047·0062·0101).
 // 금액 식과 상태 전이는 docs/features/settlement.md §4·§5·§6, 표는 docs/data.md settlement_statement…payout.
 import { createHash } from 'node:crypto';
+import { payoutApprovalDueAt } from './payee-digest.js';
 
 export type Pg = 'TOSS' | 'PORTONE';
 export type PgStore = 'STANDARD' | 'ESCROW';
@@ -33,7 +34,7 @@ export type PayoutAgency = 'PORTONE' | 'TOSS_STANDARD' | 'TOSS_ESCROW';
 export type PayoutAgencyOutcome = 'REGISTERED' | 'UPDATED' | 'SKIPPED' | 'FAILED';
 export type PayoutAgencyResults = Record<PayoutAgency, PayoutAgencyOutcome>;
 export type GuaranteeKind = 'DEPOSIT' | 'PERFORMANCE_BOND';
-export type PayoutBatchStatus = 'PREPARED' | 'PENDING_APPROVAL' | 'APPROVED' | 'SUBMITTED' | 'COMPLETED' | 'PARTIAL_FAILED';
+export type PayoutBatchStatus = 'PREPARED' | 'PENDING_APPROVAL' | 'APPROVED' | 'SUBMITTED' | 'COMPLETED' | 'PARTIAL_FAILED' | 'EXPIRED';
 export type PayoutStatus = 'REQUESTED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'CANCELED';
 export type ReceivableCause = 'REFUND_AFTER_PAYOUT' | 'CHARGEBACK' | 'COMPENSATION_ADVANCE' | 'NEGATIVE_STATEMENT';
 export type ReceivableStatus = 'OPEN' | 'OFFSET' | 'GUARANTEE' | 'BILLED' | 'CLOSED' | 'WRITTEN_OFF';
@@ -317,6 +318,8 @@ export interface PayoutBatchRecord {
   status: PayoutBatchStatus;
   /** 토스 전송 시도 수·다음 전송 시각·자동 전송 마감·마지막 전송 결과 이름표·날짜 오류 한 번 재요청을 썼는지(payment 0029, ADR-0369 결정 7) */
   submitAttempts: number;
+  /** 정산서별 지급 대상 지문(F-06-3, BAT-625 RV-02). 옛 행은 null */
+  payeeDigest?: string | null;
   nextSubmitAt: Date | null;
   submitDeadlineAt: Date | null;
   lastSubmitError: string | null;
@@ -451,12 +454,13 @@ export interface PayoutBatchAuditRecord {
   auditId: string;
   batchId: string;
   approvalId: string;
-  event: 'APPROVED' | 'REJECTED';
+  event: 'APPROVED' | 'REJECTED' | 'EXPIRED';
   reason: string;
   requesterId: string | null;
   approverId: string | null;
   amount: number | null;
   currency: string;
+  payeeDigest?: string | null;
   createdAt: Date;
 }
 
@@ -520,6 +524,8 @@ export const payoutBatchView = (b: PayoutBatchRecord) => ({
   totalAmount: b.totalAmount,
   statementCount: b.statementCount,
   status: b.status,
+  payeeDigest: b.payeeDigest ?? null,
+  approvalDueAt: payoutApprovalDueAt(b.payoutDate).toISOString(),
   createdAt: b.createdAt.toISOString(),
   lastSubmitError: b.lastSubmitError ?? null,
   nextSubmitAt: b.nextSubmitAt?.toISOString() ?? null,

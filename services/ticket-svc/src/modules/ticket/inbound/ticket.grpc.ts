@@ -7,7 +7,7 @@ import { ticketV1Ticket } from '@peaket/contracts/proto';
 import { verifyInternalGrpcActor } from '@peaket/platform';
 import type { TicketService } from '../application/ticket-service.js';
 import { TransferError } from '../application/transfers.js';
-import { TicketConflictError, TicketInputError, TicketIssueBlockedError } from '../domain/ticket.js';
+import { TicketConflictError, TicketInputError, TicketIssueBlockedError, TicketReclaimError } from '../domain/ticket.js';
 
 export interface TicketPackage {
   TicketService: grpc.ServiceClientConstructor;
@@ -277,10 +277,48 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
         })
         .catch((err: unknown) => fail('ListTickets', err, undefined, cb, onError));
     },
+
+    // 양도 회수(F-06-3). 부르는 쪽은 ops-svc뿐이다. 티켓 행 잠금 안에서 조건을 다시 보고, 승인 ID로 멱등하다.
+    ReclaimTransfer: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      if (o?.internalToken && !verifyInternalGrpcActor(call.metadata, o.internalToken, { caller: 'ops-svc' }).ok) {
+        cb({ code: grpc.status.PERMISSION_DENIED, details: '부를 수 없는 호출자다' });
+        return;
+      }
+      const req = call.request;
+      useCases.ticket
+        .reclaimTransfer({
+          approvalId: text(req.approval_id),
+          ticketId: text(req.ticket_id),
+          expectedPayerAccountId: text(req.expected_payer_account_id),
+          expectedHolderAccountId: text(req.expected_holder_account_id),
+          deadlineMs: typeof req.deadline_ms === 'number' ? req.deadline_ms : Number.NaN,
+        })
+        .then((r) => {
+          cb(null, {
+            result: r.result,
+            ticket_id: r.ticketId,
+            ...(r.previousHolderAccountId ? { previous_holder_account_id: r.previousHolderAccountId } : {}),
+          });
+        })
+        .catch((err: unknown) => fail('ReclaimTransfer', err, undefined, cb, onError));
+    },
   };
 }
 
 function fail(method: string, err: unknown, orderId: string | undefined, cb: grpc.sendUnaryData<Req>, onError: TicketGrpcErrorLog): void {
+  if (err instanceof TicketReclaimError) {
+    const code =
+      err.code === 'ALREADY_EXISTS'
+        ? grpc.status.ALREADY_EXISTS
+        : err.code === 'FAILED_PRECONDITION'
+          ? grpc.status.FAILED_PRECONDITION
+          : err.code === 'INVALID_ARGUMENT'
+            ? grpc.status.INVALID_ARGUMENT
+            : grpc.status.NOT_FOUND;
+    onError(method, err, orderId);
+    cb({ code, details: err.message });
+    return;
+  }
   const invalid = err instanceof TicketInputError || (err instanceof TransferError && err.code === 'INVALID_INPUT');
   const code = invalid
     ? grpc.status.INVALID_ARGUMENT

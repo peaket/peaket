@@ -1,6 +1,6 @@
 // 승인 업무 Drizzle 스키마(ops DB approval_request·approval_vote·promoter_contract_change, BAT-615, ADR-0320).
 import { sql } from 'drizzle-orm';
-import { bigint, check, index, integer, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { bigint, check, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 const amount = (name: string) => bigint(name, { mode: 'number' });
@@ -11,6 +11,10 @@ export const approvalRequest = pgTable(
     id: uuid('id').primaryKey(),
     kind: text('kind').notNull(),
     targetRef: text('target_ref').notNull(),
+    /** 결제자 계정(F-06-3, 0038). 응답·감사·로그에 싣지 않는다 */
+    targetAccountId: uuid('target_account_id'),
+    /** 재량 면제의 여러 주문(F-06-3, 0038) */
+    relatedOrderIds: jsonb('related_order_ids').$type<string[]>(),
     fraudAction: text('fraud_action'),
     requestedRole: text('requested_role'),
     amount: amount('amount'),
@@ -23,12 +27,23 @@ export const approvalRequest = pgTable(
     status: text('status').notNull().default('PENDING_APPROVAL'),
     closeReason: text('close_reason'),
     dueAt: at('due_at'),
+    /** 양도 회수의 소명 기한(요청 + 1일, F-06-3) */
+    appealNotBefore: at('appeal_not_before'),
+    /** 양도 회수의 입장 시작(F-06-3) */
+    entryStartsAt: at('entry_starts_at'),
+    /** 1영업일 상위 알림을 한 번만 열기 위한 시각(F-06-3) */
+    escalatedAt: at('escalated_at'),
     approverId: uuid('approver_id'),
     createdAt: at('created_at').notNull(),
     updatedAt: at('updated_at').notNull(),
     version: integer('version').notNull().default(1),
   },
-  (t) => [check('approval_request_status_check', sql`${t.status} in ('REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'ESCALATED', 'EXECUTING', 'DONE', 'FAILED', 'WITHDRAWN', 'EXPIRED')`), index('approval_request_status_idx').on(t.status, t.createdAt)],
+  (t) => [
+    check('approval_request_status_check', sql`${t.status} in ('REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'ESCALATED', 'EXECUTING', 'DONE', 'FAILED', 'WITHDRAWN', 'EXPIRED')`),
+    check('approval_request_required_approvals_check', sql`${t.requiredApprovals} between 1 and 3`),
+    index('approval_request_status_idx').on(t.status, t.createdAt),
+    index('approval_request_target_account_idx').on(t.kind, t.targetAccountId, t.createdAt),
+  ],
 );
 
 export const approvalVote = pgTable(

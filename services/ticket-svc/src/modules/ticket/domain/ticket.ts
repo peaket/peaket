@@ -50,6 +50,26 @@ export interface TicketRecord {
   readonly eventStartsAtMs?: number;
 }
 
+/** 양도 회수 결과(F-06-3, transfer-refund §3.1·§7.2, POL-038 ③). 조건이 맞지 않으면 값으로 돌려준다. */
+export type TransferReclaimResult = 'RECLAIMED' | 'SKIPPED_ENTRY_STARTED' | 'SKIPPED_ENTRY_RECORDED' | 'SKIPPED_NOT_TRANSFERRED' | 'SKIPPED_HOLDER_CHANGED';
+
+export interface TransferReclaimOutcome {
+  readonly result: TransferReclaimResult;
+  readonly ticketId: string;
+  readonly previousHolderAccountId?: string;
+}
+
+export type TicketReclaimErrorCode = 'ALREADY_EXISTS' | 'FAILED_PRECONDITION' | 'INVALID_ARGUMENT' | 'NOT_FOUND';
+export class TicketReclaimError extends Error {
+  constructor(
+    readonly code: TicketReclaimErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'TicketReclaimError';
+  }
+}
+
 export interface IssueTicketsResult {
   readonly tickets: readonly TicketRecord[];
   /** 같은 주문·세대의 재요청이면 true. 이때 ticketKey는 비어 있다. */

@@ -37,7 +37,7 @@ export interface CancelTicketInput {
  * 회원 탈퇴(ACCOUNT_WITHDRAWAL)는 여기 없다: POL-032 공제율을 그대로 쓴다(공제 0원이 아니다, docs/planning/03 §1.5 ①, payment §4.1 '회원 탈퇴 연동', BAT-013)
  */
 export function zeroDeductionFor(reason: CancellationReason): boolean {
-  return reason === 'FRAUD' || reason === 'EVENT_CANCELLED' || reason === 'EVENT_POSTPONED' || reason === 'MINOR_CONTRACT_CANCEL';
+  return reason === 'FRAUD' || reason === 'EVENT_CANCELLED' || reason === 'EVENT_POSTPONED' || reason === 'MINOR_CONTRACT_CANCEL' || reason === 'EXCEPTION';
 }
 
 export class CancelTicket {
