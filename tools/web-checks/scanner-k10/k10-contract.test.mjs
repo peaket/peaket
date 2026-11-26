@@ -22,26 +22,28 @@ test('K10 시나리오 6종 계약: 계획에 S1~S6이 있고 하네스에 S3~S6
   assert.match(plan, /scanner-f054\.int\.test\.ts/, 'S2가 기존 통합 시험을 가리키지 않는다');
 });
 
-test('O-T40 계약: 전환 실행 3회·업로드 중·변경분 중·판정 시험이 있고 측정 전에는 미측정이다', () => {
+const RUN_ID = '2026-11-27-f059-k10-r2';
+
+test('O-T40 계약: 전환 실행 3회·업로드 중·변경분 중·판정 시험이 있고 측정 결과가 미달로 적혀 있다', () => {
   assert.match(spec, /K10-O-T40-a 전환 사이에 끊기 r1/);
   assert.match(spec, /K10-O-T40-a 전환 사이에 끊기 r2/);
   assert.match(spec, /K10-O-T40-a 전환 사이에 끊기 r3/);
   assert.match(spec, /K10-O-T40-b 업로드가 진행 중일 때/);
   assert.match(spec, /K10-O-T40-c 변경분 받기가 진행 중일 때/);
   assert.match(spec, /test\('O-T40 전환 앞뒤 판정이/);
-  assert.match(plan, /O-T40 \(a\) 전환 사이 \| 미측정 \| 미측정 \| 미측정/);
+  assert.ok(plan.includes(`| O-T40 (a) 전환 사이 | \`${RUN_ID}\` | **미달** |`), '계획 §15에 O-T40 미달 결과가 없다');
   assert.match(lib, /export function judgeTransition/);
 });
 
-test('O-T41 계약: 온라인·오프라인 3회 실행과 판정 시험이 있고 90% 경계를 쓴다', () => {
+test('O-T41 계약: 온라인·오프라인 3회 실행과 판정 시험이 있고 90% 경계·측정 결과가 적혀 있다', () => {
   for (const condition of ['온라인', '오프라인']) {
     for (const run of [1, 2, 3]) assert.match(spec, new RegExp(`K10-O-T41 ${condition} r${run}`), `${condition} r${run} 시험이 없다`);
   }
   assert.match(spec, /test\('O-T41 오프라인 분당 통과 인원 중앙값이 온라인의 90% 이상이다'/);
   assert.match(lib, /laneRatioPercent: 90/);
   assert.match(lib, /export function judgeLane/);
-  assert.match(plan, /O-T41 온라인 \| 미측정 \| 미측정 \| 미측정/);
-  assert.match(plan, /O-T41 오프라인 \| 미측정 \| 미측정 \| 미측정/);
+  assert.ok(plan.includes(`| O-T41 온라인 | \`${RUN_ID}\` | 통과(상대) |`), '계획 §15에 O-T41 온라인 결과가 없다');
+  assert.ok(plan.includes(`| O-T41 오프라인 | \`${RUN_ID}\` | 통과(상대) |`), '계획 §15에 O-T41 오프라인 결과가 없다');
 });
 
 test('K10 측정 실행 계약: 측정 창에서만 돌고, 스캐너 빌드·Chromium·가짜 API를 쓴다', () => {

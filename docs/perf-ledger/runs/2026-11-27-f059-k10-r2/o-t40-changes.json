@@ -1,0 +1,10 @@
+{
+  "runId": "2026-11-27-f059-k10-r2",
+  "scenario": "O-T40-c",
+  "pass": true,
+  "calls": 2,
+  "aborted": 1,
+  "nextAfter": "10",
+  "appliedStatus": "REFUNDED",
+  "verdict": "거부취소되었거나 무효가 된 티켓입니다2초 뒤 다음 스캔"
+}

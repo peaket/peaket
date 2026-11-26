@@ -1,0 +1,102 @@
+{
+  "runId": "2026-11-27-f059-k10-r2",
+  "verdicts": [
+    {
+      "pass": false,
+      "reasons": [
+        "무효 실행: 2초+150ms를 넘긴 간격 318건 / 간격 중앙값 2167ms",
+        "간격 중앙값 2167ms가 2000±150ms 밖이다",
+        "2초+150ms를 넘긴 간격 318건",
+        "평소 p95 162.3ms > 150ms",
+        "전환 앞뒤 최대 180.8ms > 150ms"
+      ],
+      "metrics": {
+        "scans": 330,
+        "expectedScans": 330,
+        "missingCount": 0,
+        "errorCount": 0,
+        "normalP95Ms": 162.2999999988824,
+        "transitionMaxMs": 180.80000000074506,
+        "stoppedMs": 0,
+        "queueAfter": 0,
+        "intervalMedianMs": 2167.4500000001863,
+        "intervalMaxMs": 2227.7000000011176,
+        "intervalOverruns": 318,
+        "offlineScans": 151,
+        "queueBeforeReconnect": 154
+      }
+    },
+    {
+      "pass": false,
+      "reasons": [
+        "무효 실행: 2초+150ms를 넘긴 간격 322건 / 간격 중앙값 2168ms",
+        "간격 중앙값 2168ms가 2000±150ms 밖이다",
+        "2초+150ms를 넘긴 간격 322건",
+        "평소 p95 163.1ms > 150ms",
+        "전환 앞뒤 최대 168.6ms > 150ms"
+      ],
+      "metrics": {
+        "scans": 330,
+        "expectedScans": 330,
+        "missingCount": 0,
+        "errorCount": 0,
+        "normalP95Ms": 163.10000000149012,
+        "transitionMaxMs": 168.59999999962747,
+        "stoppedMs": 0,
+        "queueAfter": 0,
+        "intervalMedianMs": 2167.6500000003725,
+        "intervalMaxMs": 2203.7000000011176,
+        "intervalOverruns": 322,
+        "offlineScans": 151,
+        "queueBeforeReconnect": 154
+      }
+    },
+    {
+      "pass": false,
+      "reasons": [
+        "무효 실행: 2초+150ms를 넘긴 간격 322건 / 간격 중앙값 2168ms",
+        "간격 중앙값 2168ms가 2000±150ms 밖이다",
+        "2초+150ms를 넘긴 간격 322건",
+        "평소 p95 163.8ms > 150ms",
+        "전환 앞뒤 최대 170.8ms > 150ms"
+      ],
+      "metrics": {
+        "scans": 330,
+        "expectedScans": 330,
+        "missingCount": 0,
+        "errorCount": 0,
+        "normalP95Ms": 163.80000000074506,
+        "transitionMaxMs": 170.80000000074506,
+        "stoppedMs": 0,
+        "queueAfter": 0,
+        "intervalMedianMs": 2167.5,
+        "intervalMaxMs": 2221.0999999996275,
+        "intervalOverruns": 322,
+        "offlineScans": 151,
+        "queueBeforeReconnect": 154
+      }
+    }
+  ],
+  "variants": [
+    {
+      "runId": "2026-11-27-f059-k10-r2",
+      "scenario": "O-T40-b",
+      "pass": true,
+      "batches": 2,
+      "responseLost": true,
+      "sameIdRetried": true,
+      "receivedCount": 2,
+      "uniqueCount": 1
+    },
+    {
+      "runId": "2026-11-27-f059-k10-r2",
+      "scenario": "O-T40-c",
+      "pass": true,
+      "calls": 2,
+      "aborted": 1,
+      "nextAfter": "10",
+      "appliedStatus": "REFUNDED",
+      "verdict": "거부취소되었거나 무효가 된 티켓입니다2초 뒤 다음 스캔"
+    }
+  ]
+}

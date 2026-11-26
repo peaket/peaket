@@ -1,0 +1,13 @@
+{
+  "runId": "2026-11-27-f059-k10-r2",
+  "pass": true,
+  "reasons": [],
+  "metrics": {
+    "onlineRuns": 3,
+    "offlineRuns": 3,
+    "onlineMedian": 27.58717196503626,
+    "offlineMedian": 27.593975315389475,
+    "ratioPercent": 100.02466128228671,
+    "thresholdPercent": 90
+  }
+}

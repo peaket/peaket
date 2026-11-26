@@ -1,0 +1,10 @@
+{
+  "runId": "2026-11-27-f059-k10-r2",
+  "scenario": "O-T40-b",
+  "pass": true,
+  "batches": 2,
+  "responseLost": true,
+  "sameIdRetried": true,
+  "receivedCount": 2,
+  "uniqueCount": 1
+}
