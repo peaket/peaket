@@ -1509,3 +1509,47 @@ describe('F-04-14 HTTP', () => {
     expect(decided.find((e: any) => e.detail?.accountId === A(75)).actorId).toBe(secondWho['x-user-id']);
   });
 });
+
+describe('F-04-15 화면 보완', () => {
+  test('C-T71 ⑥ 사건 상세의 evidenceBundleIds는 실제 묶음 ID를 만든 순서로 싣는다', async () => {
+    const who = investigator();
+    const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(80), { appealResult: 'REJECTED', actionNotifiedAtMs: NOW - DAY })] });
+    const first = json(await createBundle(c.caseId, who));
+    const second = json(await createBundle(c.caseId, who));
+    const detail = json(await getCase(c.caseId, who));
+    expect(detail.evidenceBundleIds).toEqual([first.bundleId, second.bundleId]);
+  });
+
+  test('C-T71 ⑤ 승인 상세의 사건 요약은 계약 칸을 모두 싣고 요청자에게 canApprove 거짓을 준다', async () => {
+    const who = investigator();
+    const approver = commander();
+    const c = await seedCase({
+      status: 'APPEAL_PENDING',
+      clusterId: CLUSTER,
+      appealDueAtMs: NOW - HOUR,
+      members: [
+        memberOf(A(81), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR, lockExpiresAtMs: NOW + 10 * DAY }),
+        memberOf(A(82), { appealResult: 'EXPIRED', appealDueAtMs: NOW - HOUR, lockExpiresAtMs: NOW + 10 * DAY }),
+      ],
+    });
+    const created = await send('POST', `/v1/ops/fraud-cases/${c.caseId}/action-requests`, who, { idem: randomUUID(), body: { fraudAction: 'CANCEL_TICKETS', accountIds: [A(81), A(82)], reason: '취소' } });
+    const approvalId = String(json(created).approvalId);
+    const requesterView = json(await getApproval(approvalId, who));
+    expect(requesterView.canApprove).toBe(false);
+    expect(requesterView.fraudCaseSummary).toMatchObject({
+      caseId: c.caseId,
+      eventId: EVENT,
+      reasonCategory: 'MACRO_BOT',
+      accountCount: 2,
+      ticketCount: 2,
+      scoreBand: 'HIGH',
+      sharedAttributes: ['PAYMENT_METHOD'],
+      snapshotHash: 'a'.repeat(64),
+      appealCounts: { accepted: 0, rejected: 1, expired: 1, submitted: 0, pending: 0 },
+    });
+    expect(requesterView.fraudCaseSummary.targets.map((t: any) => t.accountId)).toEqual([A(81), A(82)]);
+    const approverView = json(await getApproval(approvalId, approver));
+    expect(approverView.canApprove).toBe(true);
+    expect(approverView.summaryViewedAt).toMatch(/^20/);
+  });
+});
