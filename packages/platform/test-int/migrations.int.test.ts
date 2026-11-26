@@ -20,19 +20,19 @@ async function migrations(files: Record<string, string>): Promise<string> {
   for (const [name, sql] of entries) await writeFile(join(dir, name), sql, 'utf8');
   await writeFile(
     join(dir, 'meta', '_journal.json'),
-    JSON.stringify({ version: '7', dialect: 'postgresql', entries: entries.map(([name], idx) => ({ idx, tag: name.replace(/\.sql$/, '') })) }),
+    JSON.stringify({ version: '7', dialect: 'postgresql', entries: entries.map(([name], idx) => ({ idx, tag: name.replace(/\.sql$/, ''), when: 1000 + idx })) }),
     'utf8',
   );
   return dir;
 }
 
 const clientFor = async (url = container.url): Promise<pg.Client> => {
-  const client = new pg.Client({ connectionString: url, applicationName: 'peaket-migration-test' });
+  const client = new pg.Client({ connectionString: url, application_name: 'peaket-migration-test' });
   await client.connect();
   return client;
 };
 const asMigrationClient = (client: pg.Client): MigrationClient => ({
-  query: async (sql, params) => client.query(sql, params as unknown[] | undefined),
+  query: async (sql: string, params?: readonly unknown[]) => client.query(sql, params as unknown[] | undefined),
 });
 
 beforeAll(async () => {
@@ -45,7 +45,8 @@ afterAll(() => {
 
 beforeEach(async () => {
   const admin = await clientFor();
-  await admin.query('DROP TABLE IF EXISTS a, b, hot, peaket_migration CASCADE');
+  await admin.query('DROP TABLE IF EXISTS a, b, hot, account, ops_migration, ticket_migration, peaket_migration CASCADE');
+  await admin.query('DROP ROLE IF EXISTS peaket_ddl_test').catch(() => {});
   await admin.end();
 });
 
@@ -151,6 +152,85 @@ describe('마이그레이션 실행기(실제 PostgreSQL)', () => {
       await client.end();
       await blocker.query('ROLLBACK').catch(() => {});
       await blocker.end();
+    }
+  });
+
+  it('D-T10 statement_timeout 57014은 다시 시도하지 않고 STATEMENT_TIMEOUT이다', async () => {
+    const dir = await migrations({ '0000_slow.sql': 'SELECT pg_sleep(1);' });
+    const client = await clientFor();
+    try {
+      await expect(
+        runMigrations({ client: asMigrationClient(client), dir, statementTimeoutMs: 100, ...quiet }),
+      ).rejects.toMatchObject({ code: 'STATEMENT_TIMEOUT' });
+      const rows = await client.query('SELECT name FROM peaket_migration');
+      expect(rows.rowCount).toBe(0);
+    } finally {
+      await client.end();
+    }
+  });
+
+  it('D-T8 확장 뒤 N-1 앱 질의가 동작한다', async () => {
+    const setup = await clientFor();
+    await setup.query('CREATE TABLE account (id int PRIMARY KEY, email text NOT NULL)');
+    await setup.query("INSERT INTO account (id, email) VALUES (1, 'a@example.com')");
+    await setup.end();
+    const dir = await migrations({ '0000_expand.sql': 'ALTER TABLE account ADD COLUMN nickname text;' });
+    const client = await clientFor();
+    try {
+      await runMigrations({ client: asMigrationClient(client), dir, ...quiet });
+      const oldRead = await client.query('SELECT id, email FROM account WHERE email = $1', ['a@example.com']);
+      expect(oldRead.rows).toEqual([{ id: 1, email: 'a@example.com' }]);
+      await client.query("INSERT INTO account (id, email) VALUES (2, 'b@example.com')");
+      const count = await client.query('SELECT count(*)::int AS n FROM account');
+      expect(count.rows[0]?.n).toBe(2);
+    } finally {
+      await client.end();
+    }
+  });
+
+  it('D-T44 ⑤ DDL 역할로 직접 붙어 마이그레이션한다', async () => {
+    const admin = await clientFor();
+    await admin.query("CREATE ROLE peaket_ddl_test LOGIN PASSWORD 'peaket-test'");
+    await admin.query('GRANT CREATE, USAGE ON SCHEMA public TO peaket_ddl_test');
+    await admin.end();
+    const dir = await migrations({ '0000_a.sql': 'CREATE TABLE a (id int);' });
+    const client = await clientFor(container.urlFor('peaket_ddl_test', 'peaket-test'));
+    try {
+      const result = await runMigrations({ client: asMigrationClient(client), dir, ...quiet });
+      expect(result.applied).toEqual(['0000_a.sql']);
+      const me = await client.query('SELECT current_user AS user');
+      expect(me.rows[0]?.user).toBe('peaket_ddl_test');
+    } finally {
+      await client.end();
+      const cleanup = await clientFor();
+      await cleanup.query('DROP OWNED BY peaket_ddl_test').catch(() => {});
+      await cleanup.query('DROP ROLE IF EXISTS peaket_ddl_test').catch(() => {});
+      await cleanup.end();
+    }
+  });
+
+  it('D-T44 기존 ops_migration 기록이 있는 DB를 peaket_migration으로 이관한다', async () => {
+    const setup = await clientFor();
+    await setup.query('CREATE TABLE ops_migration (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
+    await setup.query("INSERT INTO ops_migration (name) VALUES ('0000_a.sql')");
+    await setup.end();
+    const dir = await migrations({ '0000_a.sql': 'CREATE TABLE a (id int);' });
+    const client = await clientFor();
+    try {
+      const result = await runMigrations({
+        client: asMigrationClient(client),
+        dir,
+        legacy: { table: 'ops_migration', kind: 'name' },
+        ...quiet,
+      });
+      expect(result.adopted).toEqual(['0000_a.sql']);
+      expect(result.applied).toEqual([]);
+      const a = await client.query("SELECT to_regclass('public.a') AS t");
+      expect(a.rows[0]?.t).toBeNull();
+      const ledger = await client.query('SELECT name FROM peaket_migration');
+      expect(ledger.rows.map((r) => r.name)).toEqual(['0000_a.sql']);
+    } finally {
+      await client.end();
     }
   });
 

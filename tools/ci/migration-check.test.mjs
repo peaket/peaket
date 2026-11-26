@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse } from 'yaml';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CLI = join(REPO, 'tools', 'ci', 'migration-check.mjs');
@@ -108,16 +109,18 @@ test('D-T9 같은 번호의 파일 둘은 막는다', () => {
   assert.match(result.stdout + result.stderr, /번호|DUPLICATE/);
 });
 
-test('D-T8 DROP COLUMN·RENAME COLUMN·SET NOT NULL은 N-1 비호환이라 막는다', () => {
-  for (const sql of [
-    'ALTER TABLE account DROP COLUMN nickname;',
-    'ALTER TABLE account RENAME COLUMN nickname TO display_name;',
-    'ALTER TABLE account ALTER COLUMN email SET NOT NULL;',
+test('D-T8 DROP COLUMN·RENAME COLUMN·SET NOT NULL·TYPE·NOT VALID 없는 제약은 N-1 비호환이라 막는다', () => {
+  for (const [sql, pattern] of [
+    ['ALTER TABLE account DROP COLUMN nickname;', /DROP COLUMN|N-1/],
+    ['ALTER TABLE account RENAME COLUMN nickname TO display_name;', /RENAME COLUMN|N-1/],
+    ['ALTER TABLE account ALTER COLUMN email SET NOT NULL;', /SET NOT NULL|N-1/],
+    ['ALTER TABLE account ALTER COLUMN email TYPE varchar(10);', /ALTER COLUMN|TYPE|N-1/],
+    ["ALTER TABLE account ADD CONSTRAINT account_email_check CHECK (email <> '');", /ADD CONSTRAINT|NOT VALID|N-1/],
   ]) {
     const root = migrationRoot({ '0000_change.sql': sql });
     const result = run(['n1', '--root', root, '--files', 'services/core-svc/migrations/0000_change.sql']);
     assert.equal(result.status, 1, `${sql}\n${result.stderr}`);
-    assert.match(result.stdout + result.stderr, /DROP COLUMN|RENAME COLUMN|SET NOT NULL|N-1/);
+    assert.match(result.stdout + result.stderr, pattern);
   }
 });
 
@@ -196,6 +199,21 @@ test('D-T44 ⑤ 차트의 PreSync 마이그레이션 Job은 DDL 역할 주소만
   assert.match(text, /scripts\/migrate\.mjs/);
 });
 
+test('RV092-06 마이그레이션 Job은 기본 꺼짐이고 DB 서비스 여섯만 켠다', () => {
+  const chart = parse(readFileSync(join(REPO, 'deploy', 'charts', 'peaket-service', 'values.yaml'), 'utf8'));
+  assert.equal(chart?.migration?.enabled, false, '차트 기본값은 false여야 한다');
+  for (const service of ['core-svc', 'identity-svc', 'ops-svc', 'payment-svc', 'purchase-svc', 'ticket-svc']) {
+    const values = parse(readFileSync(join(REPO, 'deploy', 'workloads', service, 'values.yaml'), 'utf8'));
+    assert.equal(values?.migration?.enabled, true, `${service}만 마이그레이션 Job을 켠다`);
+  }
+  for (const workload of ['web', 'queue-svc', 'realtime-gw', 'trust-svc']) {
+    const values = parse(readFileSync(join(REPO, 'deploy', 'workloads', workload, 'values.yaml'), 'utf8'));
+    assert.notEqual(values?.migration?.enabled, true, `${workload}에는 마이그레이션 Job이 붙으면 안 된다`);
+  }
+  const bundle = parse(readFileSync(join(REPO, 'deploy', 'envs', 'local', 'v1-bundle.yaml'), 'utf8'));
+  assert.notEqual(bundle?.migration?.enabled, true, 'v1-bundle에는 마이그레이션 Job이 붙으면 안 된다');
+});
+
 test('D-T44 ⑤ 모든 PostgreSQL 서비스 스크립트는 공용 실행기를 부른다', () => {
   const services = ['core-svc', 'identity-svc', 'ops-svc', 'payment-svc', 'purchase-svc', 'ticket-svc'];
   for (const service of services) {
@@ -207,6 +225,16 @@ test('D-T44 ⑤ 모든 PostgreSQL 서비스 스크립트는 공용 실행기를 
     assert.doesNotMatch(text, /query\(['"]BEGIN['"]\)/, `${service}: 자체 BEGIN 루프가 남아 있다`);
     assert.match(text, /PEAKET_MIGRATION_DATABASE_URL/, `${service}: DDL 역할 주소를 읽지 않는다`);
     assert.doesNotMatch(text, /PEAKET_DATABASE_URL/, `${service}: 앱 PgBouncer 주소를 읽는다`);
+    const legacy = {
+      'core-svc': 'drizzle.__drizzle_migrations',
+      'identity-svc': 'drizzle.__drizzle_migrations',
+      'ops-svc': 'ops_migration',
+      'payment-svc': 'drizzle.__drizzle_migrations',
+      'purchase-svc': 'drizzle.__drizzle_migrations',
+      'ticket-svc': 'ticket_migration',
+    }[service];
+    assert.match(text, /legacy/, `${service}: 기존 적용 기록 이관을 넘기지 않는다`);
+    assert.match(text, new RegExp(legacy.replace('.', '\\.')), `${service}: ${legacy} 이관을 넘기지 않는다`);
   }
 });
 
@@ -221,8 +249,34 @@ test('[ASVS v5.0.0-13.2.2] 서비스별 역할 SQL은 릴레이에 SELECT와 sen
     assert.match(text, /GRANT SELECT ON [^;]*outbox/i);
     assert.match(text, /GRANT UPDATE \(sent_at\) ON [^;]*outbox/i);
     assert.doesNotMatch(text, /GRANT (INSERT|DELETE|UPDATE) ON [^;]*outbox[^;]*TO [^;]*_outbox_relay/i);
-    assert.match(text, /REVOKE (UPDATE|DELETE)/i);
+    assert.match(text, new RegExp(`REVOKE UPDATE, DELETE ON [^;]*order_event[^;]*FROM [^;]*${db}_app`, 'i'));
+    assert.match(text, new RegExp(`GRANT SELECT ON [^;]*TO [^;]*${db}_maintenance`, 'i'));
+    assert.match(text, new RegExp(`GRANT DELETE ON [^;]*TO [^;]*${db}_maintenance`, 'i'));
   }
+});
+
+test('[ASVS v5.0.0-13.2.2] roles 검사는 역할 분리를 어긴 db/roles.sql을 막는다', () => {
+  const good = temp({
+    'services/core-svc/db/roles.sql': [
+      'GRANT SELECT ON outbox TO core_outbox_relay;',
+      'GRANT UPDATE (sent_at) ON outbox TO core_outbox_relay;',
+      'REVOKE UPDATE, DELETE ON order_event FROM core_app;',
+      'GRANT SELECT ON core_order TO core_maintenance;',
+      'GRANT DELETE ON core_order TO core_maintenance;',
+    ].join('\n'),
+  });
+  const ok = run(['roles', '--root', good]);
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+
+  const bad = temp({
+    'services/core-svc/db/roles.sql': [
+      'GRANT UPDATE ON outbox TO core_outbox_relay;',
+      'GRANT UPDATE ON order_event TO core_app;',
+    ].join('\n'),
+  });
+  const failed = run(['roles', '--root', bad]);
+  assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+  assert.match(failed.stdout + failed.stderr, /outbox_relay|order_event|roles/i);
 });
 
 test('마이그레이션 검사 워크플로가 ci.yml에 연결돼 있다', () => {
