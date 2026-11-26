@@ -122,6 +122,8 @@ ADR-0042의 1층(원시 비즈니스 이벤트)은 브론즈, 2층(공연 리포
 | 운영 기록 코드(명령 종류·시각·결과, 경보 종류, CS 처리함 유형·결과, 이의 제기 결과, 수요 예측(계산 시각·계기, 구독 수, 비율, 비율에 쓴 지난 회차 수, 예상 진입 인원, 제안 등급)과 규모 올리기 기록, ADR-0078) | ops-svc, 온세일 윈도우 종료 때(명령·경보·수요 예측), 하루 1회와 R2 때(CS·이의 제기). 자유 텍스트와 계정 ID는 쓰지 않는다 | JSON | `brz_ops_command`, `brz_ops_case`, `brz_ops_forecast` |
 | 부정 예매 사건 집계(회차 × 사유 범주마다 사건 수, 소명(의심받은 사람이 정상 구매라고 해명하는 절차) 요청·인정 계정 수, 이의 인정 계정 수, 조치한 계정 수·표 수. 계정 수가 5 [가정] 미만인 사유 범주 칸은 '기타'로 합친다. 계정 ID·사건 ID·묶음 근거·시각은 쓰지 않는다. 연구 갈래가 조사 갈래에서 받는 정답 라벨은 이 집계뿐이다. 조사 갈래가 아닌 사후 라벨은 실버 `slv_trust_label`로 받는다(§3.3·§11, 2026-11-01 정합 점검), 추천 적용 2026-10-31, ADR-0171 결정 6) | ops-svc 조사 모듈, 하루 1회와 R3 때 | JSON | `brz_ops_fraud_summary` |
 
+- **부정 예매 사건 집계 규칙(추천 적용 2026-11-27, F-04-19)**: 사건 수는 사건 하나를 한 번 센다. 소명 요청 계정은 `appealRequestedAtMs`가 있는 계정, 소명 인정은 `appealResult`가 `ACCEPTED`, 이의 인정은 `objectionResult`가 `ACCEPTED`, 조치 계정은 `actionNotifiedAtMs`가 있는 계정이다. 표 수는 조치 계정마다 `ticketCount`를 한 번만 더한다(같은 계정이 여러 사건에 있으면 가장 큰 값). 계정 수가 5 [가정] 미만인 사유 범주 칸은 같은 회차의 `OTHER`('기타') 행으로 합치고, 합칠 때 계정 집합은 합집합으로 다시 센다. 출력은 회차·사유 범주·수만 담고 계정 ID·사건 ID·시각을 넣지 않는다. 지표 32(소명 인정 비율)는 소명 인정 계정 수 / 소명 요청 계정 수이고 분모가 0이면 값이 없다. 실제 적재·dbt 모델·리포트 표시는 데이터 갈래가 맡는다.
+
 브론즈 표의 칸 이름은 아래와 같다(소유자 결정 2026-11-11, open-items 101번 ⑽). 개인정보·계정 ID·자유 텍스트는 넣지 않는다.
 - `brz_ops_command`: `command_id`, `seq`, `command_kind`, `type`, `actor_role`, `event_id`, `reason_code`, `occurred_at`, `result`, `dry_run`.
 - `brz_ops_case`: `case_id`, `kind`, `status`, `event_id`, `reason_code`, `opened_at`, `due_at`, `closed_at`, `outcome`.
