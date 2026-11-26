@@ -66,7 +66,7 @@ const rawCase = (over = {}) => ({
   ...over,
 });
 
-test('C-T71 ⑥ 사건 상세는 계정 라벨·증거 묶음 ID·사건 기록을 서버 값으로 채운다', () => {
+test('C-T71 ⑥ [ASVS v5.0.0-8.2.3] 사건 상세는 계정 라벨·증거 묶음 ID·사건 기록을 서버 값으로 채운다', () => {
   const d = mapCaseDetail(rawCase());
   assert.equal(d.caseId, 'case-1');
   assert.equal(d.members.length, 3);
@@ -100,7 +100,10 @@ test('UI-03 [ASVS v5.0.0-14.3.1] 연결 그래프는 가린 IP와 가명만 그�
   assert.equal(validateIpReveal({ nodeIds: ['n2'], reason: '수사기관 요청 확인' }), undefined);
   assert.match(validateIpReveal({ nodeIds: [], reason: '수사기관 요청 확인' }), /점/);
   assert.match(validateIpReveal({ nodeIds: ['n2'], reason: '짧음' }), /5자/);
+  assert.equal(validateIpReveal({ nodeIds: Array.from({ length: 50 }, () => 'n2'), reason: '수사기관 요청 확인' }), undefined);
   assert.match(validateIpReveal({ nodeIds: Array.from({ length: 51 }, () => 'n2'), reason: '수사기관 요청 확인' }), /50/);
+  assert.equal(validateIpReveal({ nodeIds: ['n2'], reason: '가'.repeat(500) }), undefined);
+  assert.match(validateIpReveal({ nodeIds: ['n2'], reason: '가'.repeat(501) }), /500/);
 });
 
 test('C-T70 ③ 소명 요청 기본값은 3일·24시간 하한·취소 마감 6시간 전을 지킨다', () => {
@@ -120,11 +123,18 @@ test('C-T70 ③ 소명 요청은 사건 계정·사유 범주·기한·입장 �
   const c = mapCaseDetail(rawCase({ status: 'INVESTIGATING' }));
   const o = { nowMs: NOW, entryOpensAtMs: NOW + 6 * DAY, cancelDeadlineMs: NOW + 5 * DAY };
   assert.equal(validateAppealRequest(c, { accountIds: [A1], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + 2 * DAY) }, o), undefined);
+  assert.equal(validateAppealRequest(c, { accountIds: [A1], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + DAY) }, o), undefined);
+  assert.match(validateAppealRequest(c, { accountIds: [A1], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + DAY - 1) }, o), /24시간/);
   assert.match(validateAppealRequest(c, { accountIds: ['outside'], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + 2 * DAY) }, o), /계정/);
   assert.match(validateAppealRequest(c, { accountIds: [A1], reasonCategories: [], dueAt: iso(NOW + 2 * DAY) }, o), /사유/);
+  assert.match(validateAppealRequest(c, { accountIds: [A1], reasonCategories: ['A', 'B', 'C', 'D', 'E', 'F'], dueAt: iso(NOW + 2 * DAY) }, o), /사유|5/);
+  const removed = mapCaseDetail(rawCase({ status: 'INVESTIGATING', members: [member(A1, { removed: true }), member(A2)] }));
+  assert.match(validateAppealRequest(removed, { accountIds: [A1], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + 2 * DAY) }, o), /계정/);
   assert.match(validateAppealRequest(c, { accountIds: [A1], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + HOUR) }, o), /24시간/);
   assert.match(validateAppealRequest(c, { accountIds: [A1], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + 7 * DAY) }, o), /입장/);
-  assert.match(validateAppealRequest(mapCaseDetail(rawCase({ status: 'DECISION_PENDING' })), { accountIds: [A1], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + 2 * DAY) }, o), /상태/);
+  for (const status of ['DECISION_PENDING', 'CLEARED', 'REVERSED']) {
+    assert.match(validateAppealRequest(mapCaseDetail(rawCase({ status })), { accountIds: [A1], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + 2 * DAY) }, o), /상태/, status);
+  }
 });
 
 test('C-T70 ③ 조치 요청은 소명 결과·취소 마감·이용 제한 1년·열린 승인 업무를 지킨다', () => {
@@ -139,6 +149,10 @@ test('C-T70 ③ 조치 요청은 소명 결과·취소 마감·이용 제한 1�
   assert.equal(validateActionRequest(mapCaseDetail(rawCase({ status: 'OBJECTED' })), { fraudAction: 'LIFT_RESTRICTION', accountIds: [A1], reason: '풀기' }, o), undefined);
   assert.match(validateActionRequest(c, { fraudAction: 'CANCEL_TICKETS', accountIds: [A1], reason: '' }, o), /사유/);
   assert.match(validateActionRequest(c, { fraudAction: 'CANCEL_TICKETS', accountIds: [A1], reason: '취소' }, { nowMs: NOW, cancelDeadlineMs: NOW + 2 * DAY, openApproval: true }), /승인/);
+  for (const appealResult of ['SUBMITTED', 'PENDING']) {
+    const waiting = mapCaseDetail(rawCase({ status: 'APPEAL_PENDING', members: [member(A1, { appealResult })] }));
+    assert.match(validateActionRequest(waiting, { fraudAction: 'CANCEL_TICKETS', accountIds: [A1], reason: '취소' }, o), /소명/, appealResult);
+  }
   assert.deepEqual(actionRequestBody({ fraudAction: 'RESTRICT', accountIds: [A1], reason: '제한', restrictionEndsAt: iso(NOW + DAY) }), { fraudAction: 'RESTRICT', accountIds: [A1], reason: '제한', restrictionEndsAt: iso(NOW + DAY) });
   assert.deepEqual(actionRequestBody({ fraudAction: 'CANCEL_TICKETS', accountIds: [A1], ticketIds: ['t1'], reason: '취소' }), { fraudAction: 'CANCEL_TICKETS', accountIds: [A1], ticketIds: ['t1'], reason: '취소' });
 });
@@ -164,13 +178,14 @@ test('C-T71 ⑥ 정상 종료와 증거 묶음·보존 이유/끝·내보내기 
   assert.deepEqual(exportBody('AUTHORITY', '기관 제출', B1), { kind: 'AUTHORITY', reason: '기관 제출', dataRequestId: B1 });
 });
 
-test('FX-T20 ⑪ [ASVS v5.0.0-8.2.3] 내보내기 응답은 양식에 맞는 파일 이름·형식으로 내려받고 AUTHORITY는 documentId를 보인다', () => {
+test('FX-T20 ⑪ [ASVS v5.0.0-5.4.1] 내보내기 파일 이름은 서버 Content-Disposition을 쓰고 AUTHORITY는 documentId를 보인다', () => {
   assert.equal(exportIssue('AUTHORITY', '기관 제출'), '자료 요청 번호가 필요합니다');
   assert.equal(exportIssue('AUTHORITY', '기관 제출', B1), undefined);
   assert.equal(exportIssue('PROMOTER', ''), '사유를 적어 주세요');
-  assert.equal(exportFilename('COMPLAINT', B1, NOW), 'peaket-complaint-0194b220-0000-7000-8000-000000000201-20261126.json');
-  assert.equal(exportFilename('PROMOTER', B1, NOW), 'peaket-promoter-0194b220-0000-7000-8000-000000000201-20261126.csv');
-  assert.match(exportFilename('AUTHORITY', B1, NOW), /^[A-Za-z0-9.-]+$/);
+  assert.equal(exportFilename('COMPLAINT', { 'content-disposition': 'attachment; filename="complaint-CASE-2610-0007.json"' }), 'complaint-CASE-2610-0007.json');
+  assert.equal(exportFilename('PROMOTER', { 'content-disposition': 'attachment; filename="promoter-report-EVENT-1.csv"' }), 'promoter-report-EVENT-1.csv');
+  assert.equal(exportFilename('COMPLAINT', {}, 'CASE-2610-0007'), 'complaint-CASE-2610-0007.json');
+  assert.match(exportFilename('AUTHORITY', {}, undefined, B1), /^authority-[A-Za-z0-9.-]+\.json$/);
   assert.equal(exportContentType('PROMOTER'), 'text/csv; charset=utf-8');
   assert.equal(exportContentType('COMPLAINT'), 'application/json');
 });

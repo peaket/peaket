@@ -58,7 +58,7 @@ const caseOf = (): FraudCaseRecord =>
   }) as FraudCaseRecord;
 
 describe('소명 화면용 사본', () => {
-  test('C-T70 ③ [ASVS v5.0.0-3.5.3] 소명 요청은 결제자·받은 사람 사본을 사유·기한·잠금과 함께 쓴다', async () => {
+  test('C-T70 ③ 소명 요청은 결제자·받은 사람 사본을 사유·기한·잠금과 함께 쓴다', async () => {
     const store = new MemoryInvestigationStore();
     await store.putCase(caseOf());
     const copies: any[] = [];
@@ -88,11 +88,11 @@ describe('소명 화면용 사본', () => {
     expect(out).toMatchObject({ caseId: CASE, accountIds: [A1], dueAt: iso(NOW + 2 * DAY) });
     expect(locks.sets).toHaveLength(1);
     const payer = copies.find((c) => c.party === 'PAYER' && c.accountId === A1);
-    expect(payer).toMatchObject({ caseId: CASE, eventId: EVENT, lockActive: true, reasonCategories: ['MACRO_BOT'], lockExpiresAtMs: NOW + 14 * DAY });
+    expect(payer).toMatchObject({ caseId: CASE, eventId: EVENT, lockActive: true, reasonCategories: ['MACRO_BOT'], dueAtMs: NOW + 2 * DAY, state: 'OPEN', version: 2, lockExpiresAtMs: NOW + 14 * DAY });
     expect(payer.lockedTicketIds).toEqual([T1]);
     expect(payer.heldTicketIds).toEqual([]);
     const holder = copies.find((c) => c.party === 'HOLDER' && c.accountId === H1);
-    expect(holder).toMatchObject({ heldTicketIds: [T1], reasonCategories: [], lockActive: false });
+    expect(holder).toMatchObject({ heldTicketIds: [T1], lockedTicketIds: [], reasonCategories: [], lockActive: false, dueAtMs: NOW + 2 * DAY, state: 'OPEN', version: 2 });
     expect(holder.lockExpiresAtMs).toBeNull();
   });
 });

@@ -9,12 +9,13 @@ const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 test('UI-05 SCR-042 실제 화면은 listFraudAppealRequests·createAppeal만 부르고 목업을 가져오지 않는다', () => {
   const page = read('./FraudAppealLive.tsx');
   for (const name of ['listFraudAppealRequests', 'createAppeal']) {
-    assert.match(page, new RegExp(`\\b${name}\\b`), `${name} 호출이 없다`);
+    assert.match(page, new RegExp(`\\b${name}\\s*\\(`), `${name} 호출식이 없다`);
   }
   assert.match(page, /import\('@peaket\/api-client\/endpoints\/support'\)/);
   assert.match(page, /ensureBrowserApi\(/);
-  assert.doesNotMatch(page, /@\/entities\/appeal/);
-  assert.doesNotMatch(page, /from '@\/entities\/appeal'/);
+  assert.match(page, /mapFraudLive\(/);
+  assert.match(page, /createFraudAppealBody\(/);
+  assert.doesNotMatch(page, /from ['"][^'"]*entities\/appeal/);
 });
 
 test('UI-05 SCR-042 목업 보드는 apl- id와 ?state=에만 남는다', () => {

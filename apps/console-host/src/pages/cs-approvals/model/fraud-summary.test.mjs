@@ -52,18 +52,29 @@ test('C-T71 ⑤ 사건 요약은 계약 칸만 읽고 계정 라벨에 내부 ID
   assert.equal(s.ticketCount, 3);
   assert.deepEqual(s.appealCounts, { accepted: 0, rejected: 1, expired: 1, submitted: 0, pending: 0 });
   assert.equal(s.snapshotHash, 'a'.repeat(64));
+  assert.equal(s.purchaseCount, 12);
+  assert.equal(s.limitPerPerson, 4);
+  assert.deepEqual(s.signals, ['LINK_GRAPH', 'VELOCITY']);
+  assert.equal(s.appealOutcome, 'PARTIAL');
+  assert.equal(s.investigatorOpinion, '같은 기기에서 여러 계정이 샀습니다');
+  assert.equal(s.cancelDeadlineAt, '2026-11-27T00:00:00.000Z');
   assert.equal(s.targets.length, 2);
   const rows = summaryTargets(s);
   assert.deepEqual(rows.map((r) => r.label), ['계정 1', '계정 2']);
   assert.ok(rows.every((r) => !r.label.includes(A1) && !r.label.includes(A2)));
+  assert.deepEqual(rows[0].ticketIds, [T1, T2]);
+  assert.deepEqual(rows[0].holderTicketIds, []);
+  assert.deepEqual(rows[1].ticketIds, [T3]);
   assert.deepEqual(rows[1].holderTicketIds, [T3]);
+  assert.equal(rows[1].appealOutcome, 'EXPIRED');
   assert.equal(mapFraudSummary({}), null);
 });
 
 test('C-T71 ⑤ [ASVS v5.0.0-8.2.2] 승인 가능은 요청자·역할·지정·요약 열람·상태로 갈린다', () => {
   const s = summary();
-  const base = { summary: s, status: 'PENDING_APPROVAL', requesterId: 'requester', meId: 'approver', role: 'commander', designations: [], summaryViewedAt: '2026-11-26T00:00:00.000Z' };
+  const base = { summary: s, status: 'PENDING_APPROVAL', canApprove: true, requesterId: 'requester', meId: 'approver', role: 'commander', designations: [], summaryViewedAt: '2026-11-26T00:00:00.000Z' };
   assert.equal(approveBlockReason(base), undefined);
+  assert.match(approveBlockReason({ ...base, canApprove: false }), /서버|승인/);
   assert.match(approveBlockReason({ ...base, meId: 'requester' }), /요청자/);
   assert.match(approveBlockReason({ ...base, role: 'cs_lead' }), /권한/);
   assert.match(approveBlockReason({ ...base, designations: ['PSEUDONYM_HANDLER'] }), /가명/);
@@ -74,6 +85,7 @@ test('C-T71 ⑤ [ASVS v5.0.0-8.2.2] 승인 가능은 요청자·역할·지정·
 
 test('C-T71 ⑤ 판단 이유와 범위 줄이기는 서버 본문으로만 만들고 모두 빼기를 막는다', () => {
   assert.equal(approvalReasonError('판단 이유'), undefined);
+  assert.equal(approvalReasonError('가'.repeat(1000)), undefined);
   assert.match(approvalReasonError(''), /이유/);
   assert.match(approvalReasonError('가'.repeat(1001)), /1,000/);
   const s = summary();

@@ -1527,6 +1527,7 @@ describe('F-04-15 화면 보완', () => {
       status: 'APPEAL_PENDING',
       clusterId: CLUSTER,
       appealDueAtMs: NOW - HOUR,
+      investigatorOpinion: '같은 결제 수단을 여러 계정이 썼습니다',
       members: [
         memberOf(A(81), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR, lockExpiresAtMs: NOW + 10 * DAY }),
         memberOf(A(82), { appealResult: 'EXPIRED', appealDueAtMs: NOW - HOUR, lockExpiresAtMs: NOW + 10 * DAY }),
@@ -1542,12 +1543,19 @@ describe('F-04-15 화면 보완', () => {
       reasonCategory: 'MACRO_BOT',
       accountCount: 2,
       ticketCount: 2,
+      purchaseCount: 9,
+      limitPerPerson: 4,
       scoreBand: 'HIGH',
       sharedAttributes: ['PAYMENT_METHOD'],
+      signals: ['LINK_GRAPH'],
+      appealOutcome: 'REJECTED',
+      investigatorOpinion: '같은 결제 수단을 여러 계정이 썼습니다',
+      cancelDeadlineAt: iso(CANCEL),
       snapshotHash: 'a'.repeat(64),
       appealCounts: { accepted: 0, rejected: 1, expired: 1, submitted: 0, pending: 0 },
     });
     expect(requesterView.fraudCaseSummary.targets.map((t: any) => t.accountId)).toEqual([A(81), A(82)]);
+    expect(requesterView.fraudCaseSummary.targets[0]).toMatchObject({ accountId: A(81), appealOutcome: 'REJECTED', ticketIds: [], holderTicketIds: [] });
     const approverView = json(await getApproval(approvalId, approver));
     expect(approverView.canApprove).toBe(true);
     expect(approverView.summaryViewedAt).toMatch(/^20/);

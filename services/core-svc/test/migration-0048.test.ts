@@ -11,7 +11,9 @@ test('FX-T20 ⑬ 마이그레이션 0048은 appeal 표·검사·인덱스·core_
   for (const column of ['id', 'account_id', 'kind', 'target_id', 'body', 'status', 'result', 'case_id', 'submitted_at', 'decided_at']) {
     assert.match(sql, new RegExp(`"${column}"`, 'i'), column);
   }
-  assert.match(sql, /create index[^;]*appeal[^;]*account_id/i);
+  assert.match(sql, /create index[^;]*appeal[^;]*account_id[^;]*submitted_at/i);
+  assert.match(sql, /create index[^;]*appeal[^;]*target_id/i);
+  assert.match(sql, /char_length\("?body"?\) <= 2000/i);
   assert.match(sql, /grant select, insert, update on "appeal" to core_app/i);
 });
 

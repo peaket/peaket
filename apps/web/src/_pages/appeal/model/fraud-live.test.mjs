@@ -78,24 +78,29 @@ test('UI-04 결제자 소명 화면은 사유 범주·잠긴 표·잠금 기한�
   assert.ok(!JSON.stringify(v).includes('"score"'));
 });
 
-test('UI-04 [ASVS v5.0.0-1.2.2] 받은 사람 화면은 가진 표와 기한만 보이고 사유 범주·잠금·우선 구매를 비운다', () => {
+test('UI-04 [ASVS v5.0.0-14.2.6] 받은 사람 화면은 가진 표와 기한만 보이고 사유 범주·잠금·이용 제한·우선 구매를 비운다', () => {
   const v = mapFraudLive(
     raw({
       party: 'HOLDER',
       heldTicketIds: [T2],
       excludedTicketIds: [],
       reasonCategories: ['MACRO_BOT'],
+      lockedTicketIds: [T1],
       lockActive: true,
       lockExpiresAt: iso(NOW + 14 * DAY),
+      actionResult: { cancelledTicketIds: [T2], restrictedUntil: iso(NOW + 365 * DAY) },
       priorityPurchases: [{ grantId: 'g1', seatLabel: 'A구역', price: 154000, expiresAt: iso(NOW + DAY), status: 'OFFERED' }],
     }),
     NOW,
   );
   assert.equal(v.party, 'HOLDER');
   assert.deepEqual(v.reasonCategories, []);
+  assert.deepEqual(v.lockedTicketIds, []);
   assert.equal(v.lockActive, false);
   assert.equal(v.lockExpiresAtMs, null);
   assert.deepEqual(v.priorityPurchases, []);
+  assert.equal(v.actionResult?.restrictedUntilMs, null);
+  assert.deepEqual(v.actionResult?.cancelledTicketIds, [T2]);
   assert.equal(canSeeReasonCategories(v), false);
   assert.match(holderTicketText(v), /1매|1장/);
   assert.deepEqual(priorityPurchaseRows(v), []);
@@ -114,6 +119,15 @@ test('UI-05 소명 제출은 기한·이의 창·상태로만 열리고 본문�
   assert.equal(appealContentError('가'.repeat(2000)), undefined);
   assert.match(appealContentError(''), /1자/);
   assert.match(appealContentError('가'.repeat(2001)), /2,000/);
+});
+
+test('UI-05 [ASVS v5.0.0-14.2.6] 받은 사람은 OPEN·EXPIRED에서만 제출하고 판단이 끝난 상태에서는 막는다', () => {
+  const holder = (status) => mapFraudLive(raw({ party: 'HOLDER', heldTicketIds: [T2], status, dueAt: iso(NOW - HOUR), objectionDueAt: null }), NOW);
+  assert.equal(submissionOf(holder('OPEN'), NOW).allowed, true);
+  assert.equal(submissionOf(holder('EXPIRED'), NOW).allowed, true);
+  for (const status of ['SUBMITTED', 'ACCEPTED', 'REJECTED']) {
+    assert.equal(submissionOf(holder(status), NOW).allowed, false, status);
+  }
 });
 
 test('UI-05 소명 본문은 kind FRAUD_CASE·targetId 사건 ID로 만들고 오류를 화면 문구로 바꾼다', () => {

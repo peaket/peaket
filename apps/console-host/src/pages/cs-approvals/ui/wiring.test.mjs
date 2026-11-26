@@ -9,13 +9,16 @@ const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
 test('UI-01 SCR-046 부정 예매 조치 운영 경로는 실제 승인 API를 부르고 목업을 가져오지 않는다', () => {
   const page = read('./ConnectedPage.tsx');
   for (const name of ['listOpsApprovalRequests', 'getOpsApprovalRequest', 'createOpsApprovalRequestApproval', 'createOpsApprovalRequestRejection']) {
-    assert.match(page, new RegExp(`\\b${name}\\b`), `${name} 호출이 없다`);
+    assert.match(page, new RegExp(`\\b${name}\\s*\\(`), `${name} 호출식이 없다`);
   }
   assert.match(page, /import\('@peaket\/api-client\/endpoints\/ops'\)/);
   assert.match(page, /ensureConsoleApi\(/);
   assert.match(page, /mapFraudSummary\(/);
-  assert.doesNotMatch(page, /@\/entities\/fraud-case/);
-  assert.doesNotMatch(page, /from '@\/entities\/fraud-case'/);
+  assert.match(page, /canApprove/);
+  assert.match(page, /approveBlockReason\(/);
+  assert.match(page, /fraudApprovalBody\(/);
+  assert.match(page, /await load\(/);
+  assert.doesNotMatch(page, /from ['"][^'"]*entities\/fraud-case/);
 });
 
 test('UI-01 SCR-046 보드 미리보기는 __PREVIEW__와 ?state=에만 남는다', () => {

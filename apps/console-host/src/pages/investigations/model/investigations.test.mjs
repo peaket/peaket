@@ -28,7 +28,10 @@ const NOW = Date.parse('2026-11-26T00:00:00.000Z');
 const iso = (ms) => new Date(ms).toISOString();
 const UUID = '0194b220-0000-7000-8000-000000000001';
 
-const capture = (over = {}) => ({ name: 'capture.png', type: 'image/png', sizeBytes: 1024, bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]), ...over });
+const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const JPEG = [0xff, 0xd8, 0xff, 0xe0];
+const PDF = [0x25, 0x50, 0x44, 0x46, 0x2d];
+const capture = (over = {}) => ({ name: 'capture.png', type: 'image/png', sizeBytes: 1024, bytes: new Uint8Array(PNG), ...over });
 const post = (over = {}) => ({
   eventId: UUID,
   url: 'https://example.com/market/12345',
@@ -47,6 +50,15 @@ test('FX-T19 ⑩ [ASVS v5.0.0-1.2.2] 외부 게시물 등록은 주소를 링크
   assert.deepEqual(externalPostIssues(post({ source: 'REPORT', reportCaseId: 'CS-2610-0377' })), []);
   assert.match(externalPostIssues(post({ capture: capture({ name: 'capture.gif', type: 'image/gif' }) }))[0], /PNG/);
   assert.match(externalPostIssues(post({ capture: capture({ sizeBytes: 10 * 1024 * 1024 + 1 }) }))[0], /10MB/);
+  assert.equal(externalPostIssues(post({ capture: capture({ sizeBytes: 10 * 1024 * 1024 }) })).length, 0);
+  assert.equal(externalPostIssues(post({ url: 'http://example.com/a' })).length, 0);
+  assert.match(externalPostIssues(post({ url: 'https://user:pass@example.com/a' }))[0], /사용자 정보|주소/);
+  const url2048 = `https://example.com/${'a'.repeat(2048 - 'https://example.com/'.length)}`;
+  const url2049 = `https://example.com/${'a'.repeat(2049 - 'https://example.com/'.length)}`;
+  assert.equal(externalPostIssues(post({ url: url2048 })).length, 0);
+  assert.match(externalPostIssues(post({ url: url2049 }))[0], /2,048|2048|주소/);
+  assert.equal(externalPostIssues(post({ capture: capture({ name: 'capture.jpg', type: 'image/jpeg', bytes: new Uint8Array(JPEG) }) })).length, 0);
+  assert.equal(externalPostIssues(post({ capture: capture({ name: 'capture.pdf', type: 'application/pdf', bytes: new Uint8Array(PDF) }) })).length, 0);
   assert.match(externalPostIssues(post({ maskRegions: Array.from({ length: 21 }, () => ({ x: 0, y: 0, w: 0.1, h: 0.1 })) }))[0], /20/);
 
   const form = externalPostFormData(post({ postedAt: iso(NOW + HOUR), maskRegions: [{ x: 0.1, y: 0.2, w: 0.3, h: 0.4 }] }));
@@ -84,7 +96,7 @@ test('FX-T19 ⑪ 게시물 목록은 검사 상태·보기 가능·맞은 표 �
   assert.equal(postUrlDisplay('javascript:alert(1)'), '주소 형식이 아닙니다');
 });
 
-test('C-T71 ⑤ [ASVS v5.0.0-8.2.1] 회차 머리·후보·사건 목록은 서버 값만 쓰고 점수 원값·가중치를 싣지 않는다', () => {
+test('C-T71 ⑤ [ASVS v5.0.0-8.1.2] 회차 머리·후보·사건 목록은 서버 값만 쓰고 점수 원값·가중치를 싣지 않는다', () => {
   const overview = mapOverview(
     {
       eventId: UUID,
@@ -102,6 +114,10 @@ test('C-T71 ⑤ [ASVS v5.0.0-8.2.1] 회차 머리·후보·사건 목록은 서�
   assert.equal(overview.latestRun?.autoRetriesLeft, 0);
   assert.equal(overview.summary.appealAcceptedRatio, 0.5);
   assert.equal(canRerun(overview), true);
+  assert.equal(canRerun({ ...overview, rerunAllowed: false }), false);
+  assert.equal(canRerun({ ...overview, latestRun: { ...overview.latestRun, status: 'RUNNING' } }), false);
+  assert.equal(canRerun({ ...overview, latestRun: { ...overview.latestRun, status: 'DONE' } }), false);
+  assert.equal(canRerun({ ...overview, latestRun: { ...overview.latestRun, autoRetriesLeft: 1 } }), false);
   assert.match(candidateRetryText(2), /2/);
 
   const before = mapOverview({ eventId: UUID, snapshot: null, latestRun: null, rerunAllowed: false, summary: { clusterCount: 0, caseCount: 0, byStatus: {}, actionedTicketCount: 0, restrictedAccountCount: 0, appealAcceptedRatio: null }, cancelDeadlineAt: null, sourceExpiresAt: null }, UUID);
@@ -132,7 +148,7 @@ test('C-T71 ⑤ 사건 만들기·다시 돌리기 가능 판정과 오류 문�
   assert.match(investigationsProblem(new Error('boom')).message, /불러오지 못했습니다/);
 });
 
-test('C-T71 ⑤ [ASVS v5.0.0-8.2.2] 지정 없는 viewer·operator·cs_agent는 조사 화면을 쓸 수 없다', () => {
+test('C-T71 ⑤ [ASVS v5.0.0-8.2.1] 지정 없는 viewer·operator·cs_agent는 조사 화면을 쓸 수 없다', () => {
   assert.equal(isInvestigator('commander', ['FRAUD_INVESTIGATOR']), true);
   assert.equal(isInvestigator('cs_lead', ['FRAUD_INVESTIGATOR']), true);
   assert.equal(isInvestigator('commander', []), false);
