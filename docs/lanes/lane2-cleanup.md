@@ -265,3 +265,22 @@
 - IR-24: APPEAL 건 상세 리더가 없어 SCR-045가 제한 ID·기한·결과를 건 상세에서 못 본다. `cases.module`에 appeal 상세 리더(본문 없이)를 둔다.
 
 정본: `docs/review/plans/F-06-4.md` 구현 리뷰 IR-13·15·17·18~24.
+
+## F-06-5 시험 리뷰 정리(2026-11-27)
+
+- RV065-15(중간): `Inquiry.hasNewAnswer`(답변 뒤 목록 true·상세를 연 뒤 false)와 `orderRef`가 있는 상세의 서버 만든 `orderSummary`를 시험이 단언하지 않는다. 다음 시험 고침이나 구현 뒤 정리에서 본다.
+- RV065-16(중간): 하루 한도를 `now + 86,400,000ms`로만 넘겨 KST 날짜 경계를 보지 않고, 닫힌 문의를 한도에 세는지도 보지 않는다. KST 자정 직전·직후와 닫힌 문의를 더한다.
+- RV065-17(중간): 양도 탭의 원문 `counterpartNickname` 부재와 주문·티켓·양도·대기·건 목록의 `Cache-Control: no-store`를 단언하지 않는다(이번에 양도 원문·일부 no-store는 보강). 나머지 목록 no-store를 더한다.
+- RV065-18(중간): 같은 `Idempotency-Key` 재전송(ops가 core를 두 번 부르거나 감사 `CS_CASE_REPLIED`를 두 번 남기는 결함), `PATCH RESOLVED`의 `CloseInquiry.request_id`, `ANSWERED` 뒤 `PROGRESS`가 `IN_PROGRESS`로 돌아가는지를 보지 않는다.
+- RV065-19(중간): core `GetInquiryRecord`의 성공 응답(번호·계정·기록)을 core 쪽에서 한 번도 보지 않는다. ops 대역과 core 핸들러의 칸 이름이 어긋나도 양쪽이 통과한다.
+- RV065-20(중간): `fan-lookup-rate-limited`·`access-log-unavailable`은 이번에 계획 §3·§4.3에 넣었고, 쓰지 않는 `account-number-in-reply`는 뺐다. 구현 첫 커밋에서 problem type 목록과 맞춘다.
+- RV065-21(중간): openapi 건 탭 설명의 `target_ref` 잇기 [가정]과 `docs/data.md` `cs_case`에 `account_id`를 구현 첫 커밋에서 함께 적는다(계획 §3에 넣었다).
+- RV065-22(중간): 팬 조회 원천 어댑터(`adapters/http-*`)와 core→purchase HTTP를 실제 로컬 서버로 부르는 시험이 없다. 이번 단계는 메모리 포트까지이고, 어댑터 인증·URL·실패→503 시험은 합성 때 더한다(계획 §6·§9).
+- RV065-23(중간): 완료의 정의 ④가 팬 SCR-056 화면 연결을 전제하지만 §1.1·§2.12·§9는 뒤 화면 묶음으로 미룬다. ④를 CS 화면(SCR-066·SCR-045)으로 좁히거나 팬 화면 연결 시험을 더한다.
+- RV065-24(중간): 마이그레이션 시험이 `retain_until` NULL 허용, `cs_case.account_id` NULL 안전, `ops_app` 권한, `(account_id, created_at)` 인덱스가 실제로 서는지를 보지 않는다. PostgreSQL 통합 시험에서 본다.
+- RV065-25(중간): console 시험 이름에 `GAT-320`·`GAT-330`·`R-T27` ID가 없고 `inquiry.test.mjs`는 첫 시험만 ASVS 태그가 있다. trace-check·장부 대조가 이름으로 찾는다.
+- RV065-26(낮음): 계획 §5의 '2026-11-20이 아닌 다른 날짜'와 시험 `NOW_MS`(2026-11-20)가 어긋나고, `apps/web/src/_entities/inquiry` 경로가 실제 `apps/web/src/entities/inquiry`와 다르며, R-T27 ②의 '내용 9자' 본문이 6자였다(이번에 9자 미만으로 고침). 날짜·경로를 정확히 맞춘다.
+- RV065-27(낮음): `failNext`에 Outbox 저장이 없고(이번에 `saveOutbox` 추가), local·ci의 `none.close()`가 실제로 불렸는지 단언하지 않는다. `GET /v1/ops/fan-lookups`의 429와 `limit=0`·빈 상태 필터도 시험이 없다.
+- RV065-28(낮음): Outbox 정확한 키 목록이 선택 칸 `dueBaseAt`(asyncapi 469)을 허용하지 않고, 제목 200자·본문 8,000자 요청 상한과 C1·U+2066 제어 문자를 보지 않는다. 팬 상세는 `accountId` 부재를 단언하지 않는다.
+
+정본: `docs/review/plans/F-06-5.md` §12 시험 리뷰 RV065-15~28.

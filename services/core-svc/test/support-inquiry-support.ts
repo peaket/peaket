@@ -50,7 +50,7 @@ export interface InquiryKit {
     rows(): InquiryRowLike[];
     messages(): InquiryMessageLike[];
     outbox(): Array<Record<string, unknown>>;
-    failNext(op: 'saveInquiry' | 'saveMessage' | 'saveReply' | 'saveClose'): void;
+    failNext(op: 'saveInquiry' | 'saveMessage' | 'saveOutbox' | 'saveReply' | 'saveClose'): void;
     closeIdle(nowMs: number): Promise<number>;
   };
   readonly inquiryGrpcHandlers: Record<string, (call: never, cb: never) => void>;
@@ -64,10 +64,10 @@ export interface InquiryHarness {
   /** 관련 주문 원천: orderRef → 그 계정·표시 요약. 'boom'으로 넣으면 원천 실패를 흉내 낸다 */
   readonly orders: Map<string, { accountId: string; summary: string } | 'boom'>;
   fanHeaders(accountId?: string): Record<string, string>;
-  create(h: Record<string, string>, body: unknown, idempotencyKey?: string): Promise<{ status: number; body: Record<string, unknown>; location?: string; headers: Record<string, unknown> }>;
+  create(h: Record<string, string>, body: unknown, idempotencyKey?: string | null): Promise<{ status: number; body: Record<string, unknown>; location?: string; headers: Record<string, unknown> }>;
   list(h: Record<string, string>, query?: string): Promise<{ status: number; body: Record<string, unknown>; headers: Record<string, unknown> }>;
   get(h: Record<string, string>, inquiryId: string): Promise<{ status: number; body: Record<string, unknown>; headers: Record<string, unknown> }>;
-  message(h: Record<string, string>, inquiryId: string, body: unknown, idempotencyKey?: string): Promise<{ status: number; body: Record<string, unknown> }>;
+  message(h: Record<string, string>, inquiryId: string, body: unknown, idempotencyKey?: string | null): Promise<{ status: number; body: Record<string, unknown> }>;
   internalCase(inquiryId: string, caseId: string, token?: string | null): Promise<{ status: number; body: Record<string, unknown> }>;
   tick(nowMs?: number): Promise<number>;
   kit(): InquiryKit;
@@ -138,7 +138,8 @@ export async function inquiryHarness(o: { notifyFails?: boolean } = {}): Promise
     orders,
     fanHeaders: (accountId) => fan(accountId ?? randomUUID()),
     async create(h, body, idempotencyKey) {
-      const r = await svc.http.inject({ method: 'POST', url: '/v1/inquiries', headers: { ...hdr(h), ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}) }, payload: JSON.stringify(body) });
+      const key = idempotencyKey === null ? undefined : (idempotencyKey ?? randomUUID());
+      const r = await svc.http.inject({ method: 'POST', url: '/v1/inquiries', headers: { ...hdr(h), ...(key ? { 'idempotency-key': key } : {}) }, payload: JSON.stringify(body) });
       return { status: r.statusCode, body: parse(r.payload), ...(typeof r.headers.location === 'string' ? { location: r.headers.location } : {}), headers: r.headers as Record<string, unknown> };
     },
     async list(h, query = '') {
@@ -150,7 +151,8 @@ export async function inquiryHarness(o: { notifyFails?: boolean } = {}): Promise
       return { status: r.statusCode, body: parse(r.payload), headers: r.headers as Record<string, unknown> };
     },
     async message(h, inquiryId, body, idempotencyKey) {
-      const r = await svc.http.inject({ method: 'POST', url: `/v1/inquiries/${inquiryId}/messages`, headers: { ...hdr(h), ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}) }, payload: JSON.stringify(body) });
+      const key = idempotencyKey === null ? undefined : (idempotencyKey ?? randomUUID());
+      const r = await svc.http.inject({ method: 'POST', url: `/v1/inquiries/${inquiryId}/messages`, headers: { ...hdr(h), ...(key ? { 'idempotency-key': key } : {}) }, payload: JSON.stringify(body) });
       return { status: r.statusCode, body: parse(r.payload) };
     },
     async internalCase(inquiryId, caseId, token = INTERNAL) {
@@ -167,8 +169,8 @@ export async function inquiryHarness(o: { notifyFails?: boolean } = {}): Promise
 
 export const problemType = (b: Record<string, unknown>): string => String(b.type ?? '').split('/').pop() ?? '';
 
-/** 문의 하나를 접수하고 그 응답을 돌려준다(201 기대) */
-export async function submit(h: InquiryHarness, o: { accountId: string; category?: string; orderRef?: string; title?: string; body?: string; key?: string }) {
+/** 문의 하나를 접수하고 그 응답을 돌려준다(201 기대). key를 null로 주면 Idempotency-Key 없이 보낸다 */
+export async function submit(h: InquiryHarness, o: { accountId: string; category?: string; orderRef?: string; title?: string; body?: string; key?: string | null }) {
   return h.create(h.fanHeaders(o.accountId), {
     category: o.category ?? 'MERCH',
     ...(o.orderRef ? { orderRef: o.orderRef } : {}),

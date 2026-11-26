@@ -18,15 +18,21 @@ const ORDER = '2026101400123';
 const GOODS = 'ord-20261018-0010';
 
 describe('R-T27 고객 문의 접수·목록·상세·추가 문의', () => {
-  test('R-T27 ① [ASVS v5.0.0-1.2.1][ASVS v5.0.0-2.1.1][ASVS v5.0.0-14.2.1][ASVS v5.0.0-14.2.6][ASVS v5.0.0-16.2.5] 문의를 접수하면 번호·3영업일 기한·첫 기록·CS 건 요청이 생기고 Outbox에 본문이 없다', async () => {
+  test('R-T27 ① [ASVS v5.0.0-1.2.1][ASVS v5.0.0-1.2.3][ASVS v5.0.0-2.1.1][ASVS v5.0.0-14.2.1][ASVS v5.0.0-14.2.6][ASVS v5.0.0-16.2.5] 문의를 접수하면 번호·3영업일 기한·첫 기록·CS 건 요청이 생기고 Outbox에 본문이 없다', async () => {
     const accountId = randomUUID();
     h.orders.set(ORDER, { accountId, summary: 'LUMEN 콘서트 2026 서울 · 10/25(일) 18:00 · R석 2매' });
-    const r = await submit(h, { accountId, category: 'BOOKING_PAYMENT', orderRef: ORDER, body: '예매한 표를 취소하고 싶은데 수수료가 얼마인지 궁금합니다. 확인 부탁드립니다.' });
+    const body = '예매한 표를 취소하고 싶습니다. <script>alert(1)</script> 와 "}},{"x":1 같은 글도 그대로 남는지 봅니다.';
+    const r = await submit(h, { accountId, category: 'BOOKING_PAYMENT', orderRef: ORDER, body });
     expect(r.status, JSON.stringify(r.body)).toBe(201);
     expect(String(r.body.number)).toMatch(/^Q-2611-\d{4}$/);
     expect(r.body.dueAt).toBe(BD3);
     expect(r.location).toBe(`/v1/inquiries/${String(r.body.inquiryId)}`);
+    expect(String(r.headers['content-type'])).toContain('application/json');
     expect(String(r.headers['cache-control'])).toContain('no-store');
+    const detail = await h.get(h.fanHeaders(accountId), String(r.body.inquiryId));
+    expect(detail.status).toBe(200);
+    expect((detail.body.messages as Record<string, unknown>[])[0]!.body).toBe(body);
+    expect(String(detail.headers['content-type'])).toContain('application/json');
     const rows = h.kit().inquiries.rows();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ inquiryId: r.body.inquiryId, accountId, category: 'BOOKING_PAYMENT', orderRef: ORDER, status: 'RECEIVED', caseId: null });
@@ -43,12 +49,12 @@ describe('R-T27 고객 문의 접수·목록·상세·추가 문의', () => {
     expect(JSON.stringify(outbox)).not.toContain(ORDER);
   });
 
-  test('R-T27 ② [ASVS v5.0.0-1.3.3][ASVS v5.0.0-2.2.1][ASVS v5.0.0-2.2.2][ASVS v5.0.0-8.2.3] 유형 없음·제목 4자·내용 9자는 422이고 행 0이며 모르는 칸은 400이다', async () => {
+  test('R-T27 ② [ASVS v5.0.0-1.3.3][ASVS v5.0.0-1.5.2][ASVS v5.0.0-2.2.1][ASVS v5.0.0-2.2.2][ASVS v5.0.0-8.2.3] 유형 없음·제목 4자·내용 9자 미만은 422이고 행 0이며 모르는 칸·__proto__는 400이다', async () => {
     const accountId = randomUUID();
     const bad = [
       { title: '제목입니다', body: '내용이 열 자를 넘는 문의 본문입니다.' },
       { category: 'MERCH', title: '네자', body: '내용이 열 자를 넘는 문의 본문입니다.' },
-      { category: 'MERCH', title: '제목입니다', body: '아홉자본문입' },
+      { category: 'MERCH', title: '제목입니다', body: '123456789' },
       { category: 'NOT_A_CATEGORY', title: '제목입니다', body: '내용이 열 자를 넘는 문의 본문입니다.' },
     ];
     for (const body of bad) {
@@ -59,6 +65,11 @@ describe('R-T27 고객 문의 접수·목록·상세·추가 문의', () => {
     const extra = await h.create(h.fanHeaders(accountId), { category: 'MERCH', title: '제목입니다', body: '내용이 열 자를 넘는 문의 본문입니다.', caseId: randomUUID() });
     expect(extra.status).toBe(400);
     expect(problemType(extra.body)).toBe('invalid-body');
+    const proto = JSON.parse('{"category":"MERCH","title":"제목입니다","body":"내용이 열 자를 넘는 문의 본문입니다.","__proto__":{"polluted":true}}');
+    const polluted = await h.create(h.fanHeaders(accountId), proto);
+    expect(polluted.status).toBe(400);
+    expect(problemType(polluted.body)).toBe('invalid-body');
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     expect(h.kit().inquiries.rows()).toHaveLength(0);
   });
 
@@ -90,24 +101,34 @@ describe('R-T27 고객 문의 접수·목록·상세·추가 문의', () => {
     expect(h.kit().inquiries.rows()).toHaveLength(1);
   });
 
-  test('R-T27 ④ [ASVS v5.0.0-2.1.2][ASVS v5.0.0-14.2.2][ASVS v5.0.0-14.3.2] 분쟁 문의 상세는 진행 3영업일·결과 10영업일을 보이고 목록에는 기록이 없으며 열면 본 시각을 남긴다', async () => {
+  test('R-T27 ④ [ASVS v5.0.0-2.1.2][ASVS v5.0.0-8.2.2][ASVS v5.0.0-14.2.2][ASVS v5.0.0-14.3.2] 분쟁 문의 상세는 진행 3영업일·결과 10영업일을 보이고 목록에는 내 것만 있으며 열면 본 시각을 남긴다', async () => {
     const accountId = randomUUID();
+    const otherAccount = randomUUID();
     const created = await submit(h, { accountId, category: 'SELLER_DISPUTE', title: '공연 시간이 바뀌었는데 안내를 못 받았습니다', body: '예매한 공연의 시작 시간이 바뀌었다는 이야기를 들었는데 안내를 받지 못했습니다. 확인 부탁드립니다.' });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const otherCreated = await submit(h, { accountId: otherAccount, category: 'MERCH', title: '다른 계정의 배송 문의', body: '다른 계정의 문의가 목록에 섞이는지 보는 시험 본문입니다.' });
+    expect(otherCreated.status, JSON.stringify(otherCreated.body)).toBe(201);
     const id = String(created.body.inquiryId);
     const detail = await h.get(h.fanHeaders(accountId), id);
     expect(detail.status).toBe(200);
     expect(detail.body).toMatchObject({ inquiryId: id, category: 'SELLER_DISPUTE', status: 'RECEIVED', progressDueAt: BD3, resultDueAt: BD10 });
     expect(Array.isArray(detail.body.messages)).toBe(true);
     expect(String(detail.headers['cache-control'])).toContain('no-store');
-    expect(h.kit().inquiries.rows()[0]!.fanViewedAtMs).toBe(h.clock.now());
+    expect(h.kit().inquiries.rows().find((r) => r.inquiryId === id)!.fanViewedAtMs).toBe(h.clock.now());
     const list = await h.list(h.fanHeaders(accountId), 'status=RECEIVED,IN_PROGRESS');
     expect(list.status).toBe(200);
     expect(list.body.total).toBe(1);
-    const item = (list.body.items as Record<string, unknown>[])[0]!;
-    expect(item.messages).toBeUndefined();
-    expect(item.progressDueAt).toBe(BD3);
-    expect(item.resultDueAt).toBe(BD10);
+    const items = list.body.items as Record<string, unknown>[];
+    expect(items).toHaveLength(1);
+    expect(items[0]!.inquiryId).toBe(id);
+    expect(JSON.stringify(items)).not.toContain(String(otherCreated.body.inquiryId));
+    const mine = items[0]!;
+    expect(mine.messages).toBeUndefined();
+    expect(mine.progressDueAt).toBe(BD3);
+    expect(mine.resultDueAt).toBe(BD10);
+    const otherList = await h.list(h.fanHeaders(otherAccount));
+    expect(otherList.body.total).toBe(1);
+    expect((otherList.body.items as Record<string, unknown>[])[0]!.inquiryId).toBe(otherCreated.body.inquiryId);
   });
 
   test('R-T27 ⑥ [ASVS v5.0.0-8.2.2][ASVS v5.0.0-8.3.1][ASVS v5.0.0-16.3.2][ASVS v5.0.0-16.5.1] 남의 문의는 없는 문의와 같은 404이고 시도가 로그에 남는다', async () => {
@@ -127,7 +148,7 @@ describe('R-T27 고객 문의 접수·목록·상세·추가 문의', () => {
     expect(denied.length).toBeGreaterThanOrEqual(2);
   });
 
-  test('R-T27 ⑦ [ASVS v5.0.0-1.2.3][ASVS v5.0.0-1.3.5][ASVS v5.0.0-3.2.2] 12개 유형을 받고 외부 되팔이 신고는 INQUIRY 건·category 그대로이며 첨부가 없다', async () => {
+  test('R-T27 ⑦ 12개 유형을 받고 외부 되팔이 신고는 INQUIRY 건·category 그대로이며 첨부가 없다', async () => {
     const accounts = [randomUUID(), randomUUID()];
     const categories = ['BOOKING_PAYMENT', 'CANCEL_REFUND', 'TRANSFER', 'ENTRY', 'ACCOUNT', 'AUTOMATED_DECISION', 'SELLER_DISPUTE', 'MINOR_CONTRACT_CANCEL', 'MERCH', 'MODERATION_APPEAL', 'RESALE_POST_REPORT', 'OTHER'];
     for (const [i, category] of categories.entries()) {
@@ -149,7 +170,7 @@ describe('R-T27 고객 문의 접수·목록·상세·추가 문의', () => {
 });
 
 describe('계좌번호 꼴·길이·트랜잭션·로그', () => {
-  test('R-T27 [ASVS v5.0.0-16.2.1][ASVS v5.0.0-16.4.1][ASVS v5.0.0-1.5.2] 계좌번호는 저장값 그대로이고 로그·Outbox에 남지 않으며 제어 문자는 지운다', async () => {
+  test('R-T27 [ASVS v5.0.0-16.2.1][ASVS v5.0.0-16.4.1] 계좌번호는 저장값 그대로이고 로그·Outbox에 남지 않으며 제어 문자는 지운다', async () => {
     const accountId = randomUUID();
     const body = '환불은 [은행] 110-123-456789 계좌로 받고 싶습니다.\n줄바꿈\u202e양방향\u0007 제어 문자도 넣어 봅니다.';
     const r = await submit(h, { accountId, category: 'CANCEL_REFUND', body });
@@ -177,17 +198,19 @@ describe('계좌번호 꼴·길이·트랜잭션·로그', () => {
     expect((await h.list(h.fanHeaders(accountId), 'status=UNKNOWN')).status).toBe(400);
   });
 
-  test('R-T27 [ASVS v5.0.0-2.3.3][ASVS v5.0.0-1.2.4] 저장 실패를 주입하면 문의·첫 기록·Outbox가 모두 0이다', async () => {
-    const accountId = randomUUID();
-    h.kit().inquiries.failNext('saveInquiry');
-    const r = await submit(h, { accountId });
-    expect([500, 503]).toContain(r.status);
-    expect(h.kit().inquiries.rows()).toHaveLength(0);
-    expect(h.kit().inquiries.messages()).toHaveLength(0);
-    expect(h.kit().inquiries.outbox()).toHaveLength(0);
+  test('R-T27 [ASVS v5.0.0-2.3.3][ASVS v5.0.0-1.2.4] 문의·첫 기록·Outbox 어느 저장이 실패해도 반쪽 행이 남지 않는다', async () => {
+    for (const op of ['saveInquiry', 'saveMessage', 'saveOutbox'] as const) {
+      const accountId = randomUUID();
+      h.kit().inquiries.failNext(op);
+      const r = await submit(h, { accountId, title: `${op} 실패를 보는 문의` });
+      expect([500, 503], op).toContain(r.status);
+      expect(h.kit().inquiries.rows(), op).toHaveLength(0);
+      expect(h.kit().inquiries.messages(), op).toHaveLength(0);
+      expect(h.kit().inquiries.outbox(), op).toHaveLength(0);
+    }
   });
 
-  test('R-T27 [ASVS v5.0.0-2.2.3][ASVS v5.0.0-1.3.7][ASVS v5.0.0-1.3.11] 남의 주문은 422, 주문 원천 실패는 503이고 행이 없으며 알림 문구에 본문을 싣지 않는다', async () => {
+  test('R-T27 [ASVS v5.0.0-2.2.3] 남의 주문은 422, 주문 원천 실패는 503이고 행이 없으며 알림 문구에 본문을 싣지 않는다', async () => {
     const owner = randomUUID();
     const other = randomUUID();
     h.orders.set(ORDER, { accountId: owner, summary: 'LUMEN 콘서트' });
@@ -204,11 +227,28 @@ describe('계좌번호 꼴·길이·트랜잭션·로그', () => {
     expect(h.notices).toHaveLength(0);
   });
 
-  test('R-T27 [ASVS v5.0.0-3.5.1][ASVS v5.0.0-3.5.2][ASVS v5.0.0-3.5.3] Idempotency-Key 없이도 접수하고 같은 열쇠는 한 번만 반영하며 JSON 아닌 본문은 415, GET·POST 밖 메서드는 405다', async () => {
+  test('R-T27 [ASVS v5.0.0-3.5.1][ASVS v5.0.0-3.5.2][ASVS v5.0.0-3.5.3] Idempotency-Key가 없거나 UUID가 아니면 400이고 같은 열쇠는 한 번만 반영하며 JSON 아닌 본문은 415, GET·POST 밖 메서드는 405다', async () => {
     const accountId = randomUUID();
-    const noKey = await h.create(h.fanHeaders(accountId), { category: 'MERCH', title: '열쇠 없는 문의', body: '멱등 열쇠 없이 접수해 보는 시험 본문입니다.' } as never);
-    expect(noKey.status, JSON.stringify(noKey.body)).toBe(201);
-    const form = await h.svc.http.inject({ method: 'POST', url: '/v1/inquiries', headers: { ...h.fanHeaders(accountId), 'content-type': 'application/x-www-form-urlencoded' }, payload: 'category=MERCH' });
+    const body = { category: 'MERCH', title: '열쇠를 보는 문의', body: '멱등 열쇠의 경계를 보는 시험 본문입니다.' };
+    const noKey = await h.create(h.fanHeaders(accountId), body, null);
+    expect(noKey.status, JSON.stringify(noKey.body)).toBe(400);
+    expect(problemType(noKey.body)).toBe('idempotency-key-invalid');
+    const badKey = await h.create(h.fanHeaders(accountId), body, 'not-a-uuid');
+    expect(badKey.status).toBe(400);
+    expect(problemType(badKey.body)).toBe('idempotency-key-invalid');
+    const key = randomUUID();
+    const first = await h.create(h.fanHeaders(accountId), body, key);
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const again = await h.create(h.fanHeaders(accountId), body, key);
+    expect(again.status).toBe(201);
+    expect(again.body.inquiryId).toBe(first.body.inquiryId);
+    const different = await h.create(h.fanHeaders(accountId), { ...body, body: '같은 열쇠에 다른 본문을 보내는 시험 본문입니다.' }, key);
+    expect(different.status).toBe(422);
+    expect(problemType(different.body)).toBe('idempotency-key-reused');
+    const noMsgKey = await h.message(h.fanHeaders(accountId), String(first.body.inquiryId), { body: '추가 문의에 열쇠가 없는 경우를 보는 본문입니다.' }, null);
+    expect(noMsgKey.status).toBe(400);
+    expect(problemType(noMsgKey.body)).toBe('idempotency-key-invalid');
+    const form = await h.svc.http.inject({ method: 'POST', url: '/v1/inquiries', headers: { ...h.fanHeaders(accountId), 'content-type': 'application/x-www-form-urlencoded', 'idempotency-key': randomUUID() }, payload: 'category=MERCH' });
     expect(form.statusCode).toBe(415);
     const put = await h.svc.http.inject({ method: 'PUT', url: '/v1/inquiries', headers: h.fanHeaders(accountId) });
     expect([404, 405]).toContain(put.statusCode);

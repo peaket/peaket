@@ -3,7 +3,8 @@
 // 원천 넷은 문서화된 포트 계약을 구현한 메모리 대역이다(실제 원천 서비스 연결은 계획 §9 합성 몫). 구현 전에는 경로가 404다.
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
-import { csHarness, type CsHarness, type OpsRole } from './cs-support.js';
+import { caseRequest, csHarness, type CsHarness, type OpsRole } from './cs-support.js';
+import { ACCOUNT_ID, INQUIRY_ID, supportCaseHarness } from './support-case-support.js';
 
 const ACCOUNT = '0194f065-0000-7000-8000-0000000000c1';
 const OTHER = '0194f065-0000-7000-8000-0000000000c2';
@@ -19,7 +20,10 @@ interface AccessRow {
   reason: string;
   fields: string[];
   sourceIp: string;
+  sourceService: string;
+  targetCount: number;
   occurredAtMs: number;
+  recordedAtMs: number;
   retainUntilMs: number;
 }
 
@@ -34,6 +38,7 @@ function wiring() {
       selfRequestCaseIds: ['0194f065-0000-7000-8000-0000000000d1'],
     }],
     [OTHER, { accountId: OTHER, memberCode: 'PK-000124', nickname: '다른팬', status: 'MERGED', mergedIntoAccountId: ACCOUNT, name: '이병합', phone: '010-1111-2222', email: 'merged@example.com', identityVerifiedAt: null, loginProviders: [], mergeHistory: [], bookingRestriction: null, selfRequestCaseIds: [] }],
+    [ACCOUNT_ID, { accountId: ACCOUNT_ID, memberCode: 'PK-000123', nickname: '피켓팬', status: 'ACTIVE', mergedIntoAccountId: null, name: RAW.name, phone: RAW.phone, email: RAW.email, identityVerifiedAt: '2026-10-01T03:00:00.000Z', loginProviders: [], mergeHistory: [], bookingRestriction: null, selfRequestCaseIds: [] }],
   ]);
   const orders: Record<string, unknown>[] = [
     { orderId: randomUUID(), orderNo: ORDER, reservationNo: '2026101400123', kind: 'TICKET', eventId: randomUUID(), title: 'LUMEN 콘서트 2026 서울', status: 'CONFIRMED', amount: 95000, orderedAt: '2026-10-14T11:00:00.000Z', buyerName: RAW.name, buyerPhone: RAW.phone },
@@ -65,13 +70,15 @@ function wiring() {
       orders: {
         async list(_accountId: string, p: { limit: number }) { return page(orders, p.limit); },
         async unmask(_accountId: string, orderId: string) {
-          const o = orders.find((x) => x.orderNo === orderId || x.orderId === orderId);
-          return o ? { name: RAW.name, phone: RAW.phone } : {};
+          if (orderId === 'ord-purged') return { error: 'gone' };
+          if (orderId === 'ord-other') return { error: 'not-found' };
+          if (orderId === ORDER) return { name: '주문예매자', phone: '010-0000-1111' };
+          return { error: 'not-found' };
         },
       },
       tickets: { async list(_accountId: string, p: { limit: number }) { return page(tickets, p.limit); } },
       transfers: { async list(_accountId: string, p: { limit: number }) { return page(transfers, p.limit); } },
-      queueEntries: { async list(_accountId: string, p: { limit: number }) { return page(queueEntries, p.limit); } },
+      queueEntries: { async list(_accountId: string, p: { caseId: string; limit: number }) { return p.caseId ? page(queueEntries, p.limit) : { items: [], nextCursor: null }; } },
       access: {
         rows: () => access.map((r) => ({ ...r })),
         async append(r: Omit<AccessRow, 'id'>) {
@@ -156,21 +163,42 @@ describe('GAT-320 팬 찾기와 요약', () => {
 });
 
 describe('GAT-320 가린 값 열람과 접속기록', () => {
-  test('GAT-320 [ASVS v5.0.0-14.2.6][ASVS v5.0.0-14.3.2] 사유를 넣어 원문을 열면 접속기록이 먼저 남고 원문 값은 기록에 없다', async () => {
-    const r = await unmask('cs_agent', ACCOUNT, { fields: ['NAME', 'PHONE'], reason: '분쟁 접수 #123 확인' });
+  test('GAT-320 [ASVS v5.0.0-14.2.6][ASVS v5.0.0-14.3.2][ASVS v5.0.0-16.2.1] 사유를 넣어 원문을 열면 접속지·기록·감사 체인이 먼저 남고 고른 칸만 주며 원문 값은 기록에 없다', async () => {
+    const raw = (body: unknown) => h.svc.http.inject({ method: 'POST', url: `/v1/ops/fans/${ACCOUNT}/unmaskings`, headers: { ...h.as('cs_agent'), 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.7' }, payload: JSON.stringify(body) });
+    const r = await raw({ fields: ['NAME', 'PHONE'], reason: '분쟁 접수 #123 확인' });
     expect(r.statusCode, r.payload).toBe(200);
     const b = json(r.payload);
     expect(b).toMatchObject({ name: RAW.name, phone: RAW.phone, reason: '분쟁 접수 #123 확인' });
+    expect(b.email ?? null).toBeNull();
+    expect(b.unmaskingId).toBeTruthy();
     expect(b.unmaskedAt).toBe('2026-11-27T03:00:00.000Z');
     expect(String(r.headers['cache-control'])).toContain('no-store');
     expect(kit.access).toHaveLength(1);
     expect(kit.access[0]).toMatchObject({
       adminAccountId: h.as('cs_agent')['x-user-id'], actorRole: 'cs_agent', action: 'VIEW_UNMASKED', targetKind: 'FAN_PROFILE',
-      reason: '분쟁 접수 #123 확인', fields: ['NAME', 'PHONE'], occurredAtMs: Date.parse('2026-11-27T03:00:00.000Z'),
+      reason: '분쟁 접수 #123 확인', fields: ['NAME', 'PHONE'], sourceIp: '203.0.113.7', sourceService: 'ops-svc', targetCount: 2,
+      occurredAtMs: Date.parse('2026-11-27T03:00:00.000Z'), recordedAtMs: Date.parse('2026-11-27T03:00:00.000Z'),
     });
     expect(kit.access[0]!.retainUntilMs).toBe(Date.parse('2028-11-27T03:00:00.000Z'));
     expect(JSON.stringify(kit.access)).not.toContain(RAW.name);
     expect(JSON.stringify(kit.access)).not.toContain(RAW.phone);
+    const chain = h.audit.entries.filter((e) => e.recordType === 'ADMIN_DATA_ACCESS_RECORDED');
+    expect(chain).toHaveLength(1);
+    expect(chain[0]!.recordId).toBe(kit.access[0]!.id);
+    expect(JSON.stringify(chain[0]!.payload)).not.toContain(RAW.name);
+    expect(JSON.stringify(chain[0]!.payload)).not.toContain(RAW.phone);
+    const byOrder = await raw({ fields: ['NAME', 'PHONE'], reason: '그 주문의 예매자 확인', orderId: ORDER });
+    expect(byOrder.statusCode, byOrder.payload).toBe(200);
+    expect(json(byOrder.payload)).toMatchObject({ name: '주문예매자', phone: '010-0000-1111' });
+    expect(json(byOrder.payload).email ?? null).toBeNull();
+    expect(kit.access).toHaveLength(2);
+    const otherOrder = await raw({ fields: ['NAME'], reason: '남의 주문을 열어 보는 시험', orderId: 'ord-other' });
+    expect(otherOrder.statusCode).toBe(404);
+    expect(kit.access).toHaveLength(2);
+    const purged = await raw({ fields: ['NAME'], reason: '보존 기간이 지난 주문 확인', orderId: 'ord-purged' });
+    expect(purged.statusCode).toBe(410);
+    expect(problem(json(purged.payload))).toBe('retention-ended');
+    expect(kit.access).toHaveLength(2);
   });
 
   test('GAT-320 [ASVS v5.0.0-8.2.3] 사유 5~500자·fields 1~3개·EMAIL+orderId 조합을 검사한다', async () => {
@@ -243,27 +271,51 @@ describe('GAT-320 주문·티켓·양도·대기·건 탭', () => {
     expect(item.qrPayload).toBeUndefined();
   });
 
-  test('GAT-320 양도 탭은 상대 닉네임을 가리고 대기 탭은 순번·위험 점수 없이 보인다', async () => {
+  test('GAT-320 [ASVS v5.0.0-14.2.6][ASVS v5.0.0-14.3.2] 양도 탭은 상대 닉네임 원문을 싣지 않고 대기 탭은 본인 확인 요청 건이 있을 때만 연다', async () => {
     const t = await get('cs_agent', `/v1/ops/fans/${ACCOUNT}/transfers`);
     expect(t.statusCode).toBe(200);
     const transfer = (json(t.payload).items as Record<string, unknown>[])[0]!;
     expect(transfer.direction).toBe('SENT');
     expect(String(transfer.counterpartNicknameMasked)).not.toBe('받는팬');
-    const q = await get('cs_agent', `/v1/ops/fans/${ACCOUNT}/queue-entries`);
+    expect(transfer.counterpartNickname).toBeUndefined();
+    expect(String(t.headers['cache-control'])).toContain('no-store');
+    const noCase = await get('cs_agent', `/v1/ops/fans/${ACCOUNT}/queue-entries`);
+    expect(noCase.statusCode).toBe(400);
+    expect(problem(json(noCase.payload))).toBe('invalid-query');
+    const otherCase = await get('cs_agent', `/v1/ops/fans/${ACCOUNT}/queue-entries?caseId=case-other`);
+    expect(otherCase.statusCode).toBe(403);
+    expect(problem(json(otherCase.payload))).toBe('self-request-required');
+    const q = await get('cs_agent', `/v1/ops/fans/${ACCOUNT}/queue-entries?caseId=0194f065-0000-7000-8000-0000000000d1`);
     expect(q.statusCode).toBe(200);
     const entry = (json(q.payload).items as Record<string, unknown>[])[0]!;
     expect(entry).toMatchObject({ status: 'ENTERED' });
     expect(entry.rank).toBeUndefined();
     expect(entry.riskScore).toBeUndefined();
+    expect((await get('cs_agent', `/v1/ops/fans/${randomUUID()}/queue-entries?caseId=0194f065-0000-7000-8000-0000000000d1`)).statusCode).toBe(404);
   });
 
-  test('GAT-320 건 탭은 그 계정의 건만 주고 원천이 없으면 503이며 빈 목록으로 속이지 않는다', async () => {
+  test('GAT-320 건 탭은 그 계정의 건만 주고 네 역할이 보며 viewer는 403이고 원천이 없으면 503이며 빈 목록으로 속이지 않는다', async () => {
     const caseId = await h.seed('INQUIRY', 'inq-fan-1', { accountId: ACCOUNT });
     await h.seed('INQUIRY', 'inq-other-1', { accountId: OTHER });
-    const r = await get('cs_agent', `/v1/ops/fans/${ACCOUNT}/cases`);
-    expect(r.statusCode).toBe(200);
-    const items = json(r.payload).items as Record<string, unknown>[];
-    expect(items.map((x) => x.caseId)).toEqual([caseId]);
+    for (const role of ['operator', 'commander', 'cs_agent', 'cs_lead'] as const) {
+      const r = await get(role, `/v1/ops/fans/${ACCOUNT}/cases`);
+      expect(r.statusCode, role).toBe(200);
+      const items = json(r.payload).items as Record<string, unknown>[];
+      expect(items.map((x) => x.caseId), role).toEqual([caseId]);
+    }
+    expect((await get('viewer', `/v1/ops/fans/${ACCOUNT}/cases`)).statusCode).toBe(403);
+    const opened = await supportCaseHarness({ fanLookup: wiring().wiring });
+    try {
+      const intake = await opened.h.intake(caseRequest('INQUIRY', { sourceId: INQUIRY_ID, category: 'MERCH' }));
+      expect(intake.body.accepted, JSON.stringify(intake.body)).toBe(true);
+      const stored = (await opened.h.kit.store.find(String(intake.body.caseId))) as unknown as { accountId?: string };
+      expect(stored.accountId).toBe(ACCOUNT_ID);
+      const byAccount = await opened.h.svc.http.inject({ method: 'GET', url: `/v1/ops/fans/${ACCOUNT_ID}/cases`, headers: opened.h.as('cs_agent') });
+      expect(byAccount.statusCode).toBe(200);
+      expect((json(byAccount.payload).items as Record<string, unknown>[]).map((x) => x.caseId)).toContain(String(intake.body.caseId));
+    } finally {
+      await opened.close();
+    }
     const broken = wiring();
     delete (broken.wiring as { orders?: unknown }).orders;
     await h.close();

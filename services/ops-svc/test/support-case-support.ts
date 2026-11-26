@@ -54,7 +54,7 @@ export interface SupportCaseHarness {
   close(): Promise<void>;
 }
 
-export async function supportCaseHarness(o: { record?: Record<string, unknown>; replyAnswer?: () => Record<string, unknown> } = {}): Promise<SupportCaseHarness> {
+export async function supportCaseHarness(o: { record?: Record<string, unknown>; replyAnswer?: () => Record<string, unknown>; token?: string; fanLookup?: unknown } = {}): Promise<SupportCaseHarness> {
   const stub = new StubService({
     GetInquiryRecord: () => ({ value: o.record ?? inquiryRecord() }),
     AddInquiryReply: (req) => ({
@@ -71,7 +71,7 @@ export async function supportCaseHarness(o: { record?: Record<string, unknown>; 
       },
     }),
     CloseInquiry: () => ({ value: { status: 'INQUIRY_STATUS_CLOSED', closed_at: ts(Date.parse('2026-11-20T15:10:00.000Z')) } }),
-  });
+  }, (md) => (md['x-peaket-internal-token'] === INTERNAL && md['x-peaket-caller'] === 'ops-svc' ? null : grpc.status.PERMISSION_DENIED));
   const server: StartedGrpcServer = await startGrpcServer({
     host: '127.0.0.1',
     port: 0,
@@ -83,12 +83,12 @@ export async function supportCaseHarness(o: { record?: Record<string, unknown>; 
   try {
     const spec = '../src/support-case-wiring.js';
     const mod = (await import(/* @vite-ignore */ spec)) as { supportCasePortsFromEnv(env: Record<string, string>): unknown };
-    ports = mod.supportCasePortsFromEnv({ PEAKET_ENV: 'ci', PEAKET_CORE_GRPC_URL: `127.0.0.1:${server.port}`, PEAKET_INTERNAL_TOKEN: INTERNAL });
+    ports = mod.supportCasePortsFromEnv({ PEAKET_ENV: 'ci', PEAKET_CORE_GRPC_URL: `127.0.0.1:${server.port}`, PEAKET_INTERNAL_TOKEN: o.token ?? INTERNAL });
   } catch (err) {
     if (!(err instanceof Error) || !/Cannot find module|Failed to load url|ERR_MODULE_NOT_FOUND|Does the file exist/i.test(err.message)) throw err;
     ports = undefined;
   }
-  const h = await csHarness({ supportCases: ports });
+  const h = await csHarness({ supportCases: ports, ...(o.fanLookup ? { fanLookup: o.fanLookup } : {}) });
   return {
     h,
     stub,

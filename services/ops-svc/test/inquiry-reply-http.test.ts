@@ -37,12 +37,25 @@ describe('문의가 이어진 CS 건의 답변', () => {
     const calls = s.stub.of('AddInquiryReply');
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ request_id: 'reply-key-1', inquiry_id: INQUIRY_ID, kind: 'INQUIRY_REPLY_KIND_ANSWER', acted_by: me['x-user-id'] });
+    expect(s.stub.calls.find((x) => x.method === 'AddInquiryReply')!.md).toMatchObject({ 'x-peaket-internal-token': 'support-case-internal-token-0000', 'x-peaket-caller': 'ops-svc' });
     const audit = s.h.audit.entries.filter((e) => e.recordType === 'CS_CASE_REPLIED');
     expect(audit).toHaveLength(1);
     expect(audit[0]!.payload).toMatchObject({ caseId, inquiryId: INQUIRY_ID, kind: 'ANSWER' });
     expect(JSON.stringify(audit[0]!.payload)).not.toContain('다음 주 수요일');
     const c = await s.h.get(s.h.as('cs_lead'), caseId);
     expect(c.body.resultDueAt).toBe(BD3);
+    const wrong = await supportCaseHarness({ token: 'wrong-token' });
+    try {
+      const wrongCaseId = await wrong.h.seed('INQUIRY', INQUIRY_ID, { accountId: ACCOUNT_ID });
+      const bad = await wrong.reply(wrong.h.as('cs_agent'), wrongCaseId, { kind: 'ANSWER', body: '잘못된 토큰으로 답변을 보내 봅니다.' }, 'wrong-token-reply');
+      expect(bad.status).toBe(503);
+      const sent = wrong.stub.calls.filter((x) => x.method === 'AddInquiryReply');
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.md['x-peaket-internal-token']).toBe('wrong-token');
+      expect(sent[0]!.md['x-peaket-caller']).toBe('ops-svc');
+    } finally {
+      await wrong.close();
+    }
   });
 
   test('R-T27 ④ 진행 경과는 PROGRESS로 가고 문의 상태는 IN_PROGRESS로 돌아온다', async () => {
@@ -127,7 +140,7 @@ describe('문의가 이어진 CS 건의 답변', () => {
 });
 
 describe('건 상세의 문의 스레드', () => {
-  test('R-T27 ④ [ASVS v5.0.0-14.2.6][ASVS v5.0.0-16.3.2] 건 상세는 문의 스레드를 계좌번호를 가려 싣고 담당자 ID를 싣지 않는다', async () => {
+  test('R-T27 ④ [ASVS v5.0.0-14.2.6][ASVS v5.0.0-16.3.2] 정본 CsCaseDetail.messages는 계좌번호를 가려 싣고 담당자 ID를 싣지 않는다', async () => {
     const caseId = await openInquiry();
     s.stub.set('GetInquiryRecord', {
       value: inquiryRecord({ messages: [
@@ -137,15 +150,16 @@ describe('건 상세의 문의 스레드', () => {
     });
     const r = await s.h.get(s.h.as('cs_agent'), caseId);
     expect(r.status).toBe(200);
-    const inquiry = r.body.inquiry as Record<string, unknown>;
-    expect(inquiry).toMatchObject({ inquiryId: INQUIRY_ID, number: 'Q-2611-0042', category: 'MERCH', accountId: ACCOUNT_ID });
-    const msgs = inquiry.messages as Record<string, unknown>[];
+    expect(r.body).toMatchObject({ caseId, kind: 'INQUIRY', targetRef: INQUIRY_ID, category: 'MERCH' });
+    expect(r.body.inquiry).toBeUndefined();
+    const msgs = r.body.messages as Record<string, unknown>[];
     expect(msgs).toHaveLength(2);
     expect(String(msgs[0]!.body)).toContain('(계좌번호 지움)');
     expect(String(msgs[0]!.body)).not.toContain('110-123-456789');
     expect(msgs[0]!.authorDisplay).toBe('나');
     expect(msgs[1]!.authorDisplay).toBe('피켓 고객센터');
-    expect(JSON.stringify(inquiry)).not.toContain('actedBy');
+    expect(JSON.stringify(r.body)).not.toContain('actedBy');
+    expect(JSON.stringify(r.body)).not.toContain('agentName');
     expect(s.stub.of('GetInquiryRecord')[0]).toMatchObject({ inquiry_id: INQUIRY_ID, acted_by: s.h.as('cs_agent')['x-user-id'] });
     expect(String(r.headers['cache-control'])).toContain('no-store');
   });

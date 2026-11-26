@@ -7,7 +7,7 @@ import * as protoLoader from '@grpc/proto-loader';
 import { startGrpcServer, type StartedGrpcServer } from '@peaket/platform';
 import { coreV1Core } from '@peaket/contracts/proto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest';
-import { INTERNAL, inquiryHarness, submit, type InquiryHarness } from './support-inquiry-support.js';
+import { INTERNAL, inquiryHarness, problemType, submit, type InquiryHarness } from './support-inquiry-support.js';
 
 const LOAD: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
 const pkg = (grpc.loadPackageDefinition(protoLoader.fromJSON(coreV1Core as never, LOAD)) as unknown as { peaket: { core: { v1: { SupportCaseService: grpc.ServiceClientConstructor } } } }).peaket.core.v1;
@@ -61,8 +61,9 @@ async function open(h: InquiryHarness = current!): Promise<{ accountId: string; 
   return { accountId, inquiryId: String(r.body.inquiryId) };
 }
 
-async function answer(inquiryId: string, body = '확인했습니다. 배송 예정일은 다음 주 수요일입니다.') {
-  return call('AddInquiryReply', { request_id: `req-${++seq}`, inquiry_id: inquiryId, kind: 'INQUIRY_REPLY_KIND_ANSWER', body, acted_by: crypto.randomUUID() });
+async function answer(inquiryId: string, body = '확인했습니다. 배송 예정일은 다음 주 수요일입니다.', actedBy = crypto.randomUUID()) {
+  const r = await call('AddInquiryReply', { request_id: `req-${++seq}`, inquiry_id: inquiryId, kind: 'INQUIRY_REPLY_KIND_ANSWER', body, acted_by: actedBy });
+  return { ...r, actedBy };
 }
 
 beforeAll(async () => {
@@ -102,7 +103,7 @@ describe('SupportCaseService 내부 경계', () => {
     expect(missing.err?.code).toBe(grpc.status.NOT_FOUND);
   });
 
-  test('R-T27 ④ [ASVS v5.0.0-8.1.2][ASVS v5.0.0-8.2.1] 답변은 기록되고 상태가 ANSWERED가 되며 담당자 ID가 기록·팬 알림에 실리지 않는다', async () => {
+  test('R-T27 ④ [ASVS v5.0.0-1.3.7][ASVS v5.0.0-1.3.11][ASVS v5.0.0-8.1.2][ASVS v5.0.0-8.2.1] 답변은 기록되고 상태가 ANSWERED가 되며 담당자 ID가 기록·팬 알림에 실리지 않고 팬 상세에는 피켓 고객센터로만 보인다', async () => {
     const { accountId, inquiryId } = await open();
     const r = await answer(inquiryId);
     expect(r.err).toBeUndefined();
@@ -115,16 +116,29 @@ describe('SupportCaseService 내부 경계', () => {
     expect(current!.kit().inquiries.rows()[0]).toMatchObject({ status: 'ANSWERED' });
     expect(current!.notices).toEqual([{ inquiryId, accountId, event: 'ANSWER' }]);
     expect(JSON.stringify(current!.notices)).not.toContain('acted_by');
+    const fanView = await current!.get(current!.fanHeaders(accountId), inquiryId);
+    expect(fanView.status).toBe(200);
+    const messages = fanView.body.messages as Record<string, unknown>[];
+    const agentMsg = messages.find((m) => m.authorKind === 'AGENT')!;
+    expect(agentMsg).toMatchObject({ authorKind: 'AGENT', authorDisplay: '피켓 고객센터' });
+    expect(JSON.stringify(agentMsg)).not.toContain(r.actedBy);
+    for (const k of ['actedBy', 'agentId', 'agentName', 'staffName', 'email']) expect(k in agentMsg, k).toBe(false);
+    expect(JSON.stringify(current!.notices)).not.toContain('다음 주 수요일');
+    expect(JSON.stringify(current!.notices)).not.toContain('응원봉');
   });
 
-  test('R-T27 ④ 진행 경과는 IN_PROGRESS, 추가 문의는 다시 IN_PROGRESS, 답변은 ANSWERED다', async () => {
+  test('R-T27 ④ [ASVS v5.0.0-2.3.2] 진행 경과는 IN_PROGRESS, 추가 문의는 다시 IN_PROGRESS와 CS 건 재개 요청, 답변은 ANSWERED다', async () => {
     const { accountId, inquiryId } = await open();
     const p = await call('AddInquiryReply', { request_id: `req-${++seq}`, inquiry_id: inquiryId, kind: 'INQUIRY_REPLY_KIND_PROGRESS', body: '판매자에게 사실 확인을 요청했습니다. 조금만 기다려 주세요.', acted_by: crypto.randomUUID() });
     expect(p.res).toMatchObject({ result: 'INQUIRY_REPLY_RESULT_RECORDED', status: 'INQUIRY_STATUS_IN_PROGRESS' });
     await answer(inquiryId);
+    const before = current!.kit().inquiries.outbox().length;
     const fan = await current!.message(current!.fanHeaders(accountId), inquiryId, { body: '추가로 궁금한 것이 있어 다시 문의드립니다. 확인 부탁드립니다.' });
     expect(fan.status).toBe(201);
     expect(current!.kit().inquiries.rows()[0]).toMatchObject({ status: 'IN_PROGRESS' });
+    const outbox = current!.kit().inquiries.outbox();
+    expect(outbox).toHaveLength(before + 1);
+    expect(outbox.at(-1)).toMatchObject({ eventKey: fan.body.messageId, kind: 'INQUIRY', sourceId: inquiryId, followUp: true });
     const a2 = await answer(inquiryId);
     expect(a2.res).toMatchObject({ status: 'INQUIRY_STATUS_ANSWERED' });
   });
@@ -141,11 +155,14 @@ describe('SupportCaseService 내부 경계', () => {
     expect(other.err?.code).toBe(grpc.status.ALREADY_EXISTS);
   });
 
-  test('R-T27 ⑤ [ASVS v5.0.0-2.3.1] 닫힌 문의에는 답변하지 않고 INQUIRY_CLOSED를 주며 기록이 늘지 않는다', async () => {
-    const { inquiryId } = await open();
+  test('R-T27 ⑤ [ASVS v5.0.0-2.3.1] 닫힌 문의에는 주인의 추가 문의도 409 inquiry-closed이고 답변도 INQUIRY_CLOSED이며 기록이 늘지 않는다', async () => {
+    const { accountId, inquiryId } = await open();
     const closed = await call('CloseInquiry', { request_id: 'close-1', inquiry_id: inquiryId, acted_by: crypto.randomUUID() });
     expect(closed.res).toMatchObject({ status: 'INQUIRY_STATUS_CLOSED' });
     const before = current!.kit().inquiries.messages().length;
+    const fan = await current!.message(current!.fanHeaders(accountId), inquiryId, { body: '닫힌 내 문의에 다시 글을 남겨 보는 시험 본문입니다.' }, 'closed-owner-msg');
+    expect(fan.status).toBe(409);
+    expect(problemType(fan.body)).toBe('inquiry-closed');
     const r = await answer(inquiryId);
     expect(r.res).toMatchObject({ result: 'INQUIRY_REPLY_RESULT_INQUIRY_CLOSED', status: 'INQUIRY_STATUS_CLOSED' });
     expect(current!.kit().inquiries.messages()).toHaveLength(before);

@@ -1,5 +1,5 @@
-// F-06-5 SCR-045 문의 스레드·답변 화면 값 해석 시험(시험 담당 lane2-freeze-F-06-5-opencode).
-// 정본: openapi CsCaseDetail·CaseReply·InquiryMessage, d5 §7.6 '문의', docs/features/transfer-refund.md §7.3. 구현 전에는 model/inquiry.ts가 없다.
+// F-06-5 SCR-045 문의 스레드·답변 화면 값 해석 시험(시험 담당 lane2-freeze-F-06-5-opencode, RV065-08·13 반영).
+// 정본: openapi CsCaseDetail.messages·CaseReply·InquiryMessage, d5 §7.6 '문의', docs/features/transfer-refund.md §7.3. 구현 전에는 model/inquiry.ts가 없다.
 // 서버가 담당자 ID를 싣지 않고 계좌번호를 가려 준다. 이 해석은 그 값을 그대로 두고 모르는 칸을 버린다.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,36 +12,40 @@ async function mod() {
   }
 }
 
-const INQUIRY = {
-  inquiryId: 'inq-1', number: 'Q-2611-0042', category: 'MERCH', title: '응원봉 배송 예정일이 궁금합니다', status: 'RECEIVED',
-  dueAt: '2026-11-26T14:30:00.000Z',
+const CASE = {
+  caseId: 'case-1', kind: 'INQUIRY', targetRef: 'inq-1', category: 'MERCH', status: 'OPEN',
+  resultDueAt: '2026-11-26T14:30:00.000Z',
   messages: [
-    { messageId: 'm-1', authorKind: 'FAN', authorDisplay: '나', kind: 'MESSAGE', body: '환불은 (계좌번호 지움) 계좌로 받고 싶습니다.', createdAt: '2026-11-20T14:31:00.000Z' },
+    { messageId: 'm-1', authorKind: 'FAN', authorDisplay: '나', kind: 'MESSAGE', body: '환불은 (계좌번호 지움) 계좌로 받고 싶습니다. **강조** <b>태그</b>', createdAt: '2026-11-20T14:31:00.000Z' },
     { messageId: 'm-2', authorKind: 'AGENT', authorDisplay: '피켓 고객센터', kind: 'ANSWER', body: '확인했습니다.', createdAt: '2026-11-20T15:00:00.000Z' },
   ],
   actedBy: 'admin-1', assignee: 'admin-2', agentName: '김담당',
 };
 
-test('건 상세의 문의 스레드는 담당자 표시·종류·시각만 남기고 담당자 ID·이름을 버린다 [ASVS v5.0.0-1.2.1][ASVS v5.0.0-1.3.5][ASVS v5.0.0-3.2.2]', async () => {
+test('R-T27 ④ [ASVS v5.0.0-1.2.1][ASVS v5.0.0-1.3.5][ASVS v5.0.0-3.2.2] 정본 CsCaseDetail.messages는 담당자 표시·종류·시각만 남기고 담당자 ID·이름을 버리며 HTML·마크다운을 해석하지 않는다', async () => {
   const m = await mod();
-  const v = m.inquiryThreadOf({ inquiry: INQUIRY });
+  const v = m.inquiryThreadOf(CASE);
   assert.equal(v.inquiryId, 'inq-1');
-  assert.equal(v.number, 'Q-2611-0042');
+  assert.equal(v.resultDueAt, '2026-11-26T14:30:00.000Z');
   assert.equal(v.messages.length, 2);
   assert.equal(v.messages[1].authorDisplay, '피켓 고객센터');
   assert.equal(v.messages[1].kind, 'ANSWER');
   assert.equal(v.actedBy, undefined);
   assert.equal(v.assignee, undefined);
   assert.deepEqual(Object.keys(v.messages[1]).sort(), ['authorDisplay', 'authorKind', 'body', 'createdAt', 'kind', 'messageId']);
+  assert.ok(v.messages[0].body.includes('**강조**'));
+  assert.ok(v.messages[0].body.includes('<b>태그</b>'));
+  assert.equal('html' in v.messages[0], false);
+  assert.equal('__html' in v.messages[0], false);
   assert.equal(m.inquiryThreadOf({}), null);
 });
 
 test('문의 기록의 계좌번호 가림은 서버가 한 그대로 두고 다시 바꾸지 않는다', async () => {
   const m = await mod();
-  const v = m.inquiryThreadOf({ inquiry: INQUIRY });
+  const v = m.inquiryThreadOf(CASE);
   assert.ok(v.messages[0].body.includes('(계좌번호 지움)'));
   assert.ok(!v.messages[0].body.includes('110-123-456789'));
-  assert.equal(m.inquiryThreadOf({ inquiry: { ...INQUIRY, messages: [{ messageId: '', authorKind: 'FAN', kind: 'MESSAGE', body: 'x', createdAt: 't' }] } }).messages.length, 0);
+  assert.equal(m.inquiryThreadOf({ ...CASE, messages: [{ messageId: '', authorKind: 'FAN', kind: 'MESSAGE', body: 'x', createdAt: 't' }] }).messages.length, 0);
 });
 
 test('답변·진행 경과 본문은 NFC 뒤 1~2,000자이고 종류는 ANSWER·PROGRESS만 받는다', async () => {

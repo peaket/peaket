@@ -43,9 +43,11 @@ export class StubService {
   readonly #defaults: Record<string, Responder>;
   readonly #once = new Map<string, Responder[]>();
   readonly #set = new Map<string, Responder>();
+  readonly #guard?: (md: Record<string, string>) => grpc.status | null;
 
-  constructor(defaults: Record<string, Responder>) {
+  constructor(defaults: Record<string, Responder>, guard?: (md: Record<string, string>) => grpc.status | null) {
     this.#defaults = defaults;
+    this.#guard = guard;
   }
 
   /** 받은 그 메서드의 요청 본문(차례대로) */
@@ -89,6 +91,8 @@ export class StubService {
         const md: Record<string, string> = {};
         for (const [k, v] of Object.entries(call.metadata.getMap())) md[k] = String(v);
         this.calls.push({ method: m, req: call.request, md });
+        const denied = this.#guard?.(md);
+        if (denied !== null && denied !== undefined) return cb({ code: denied, details: '시험 대역이 정한 신원 거절' });
         const once = this.#once.get(m);
         const r = once?.length ? once.shift()! : (this.#set.get(m) ?? this.#defaults[m]!);
         Promise.resolve()
