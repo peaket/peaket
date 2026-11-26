@@ -94,8 +94,9 @@ class FakePayments implements PayoutPaymentClient {
     this.calls.push('portone');
     return { ...this.batches.find((x) => x.batchId === batchId)!, status: 'SUBMITTED', portoneBulkPayoutId: 'bulk-1' };
   }
+  statementRows: Record<string, unknown>[] = [];
   async listStatements() {
-    return [];
+    return this.statementRows;
   }
   async listReceivables() {
     return [];
@@ -135,6 +136,7 @@ beforeEach(() => {
   payments.expired.length = 0;
   payments.approvalDigests.length = 0;
   payments.prepared = false;
+  payments.statementRows = [];
   payments.rejectApproval = false;
   payments.rejectExpire = false;
   audit.entries.length = 0;
@@ -285,11 +287,12 @@ describe('R-T29 ④ 15시 미승인 만료', () => {
     expect(payments.expired).toEqual([{ batchId, input: { approvalId: expect.any(String), postponedPayoutDate: '2026-12-02' } }]);
   });
 
-  test('IR-19 지급 만료의 파트너 알림은 PARTNER 수신자로 간다', async () => {
+  test('IR-19 지급 만료의 파트너 알림은 정산서의 판매자 ID로 간다', async () => {
     const op = as('operator');
     await createBatch(op);
+    payments.statementRows = [{ promoterId: 'promoter-1' }];
     wall = Date.parse(DUE);
     await tick();
-    expect(notified).toContainEqual(expect.objectContaining({ event: 'PAYOUT_POSTPONED', recipient: expect.objectContaining({ kind: 'PARTNER' }) }));
+    expect(notified).toContainEqual(expect.objectContaining({ event: 'PAYOUT_POSTPONED', recipient: { kind: 'PARTNER', promoterId: 'promoter-1' } }));
   });
 });

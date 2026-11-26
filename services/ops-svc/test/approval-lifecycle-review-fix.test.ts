@@ -39,7 +39,8 @@ const targets = {
   },
 };
 
-let refundOutcome: { status: 'REFUNDED' | 'REFUND_PENDING'; cancellationId: string; refundAmount: number } = { status: 'REFUNDED', cancellationId: randomUUID(), refundAmount: 100_000 };
+let refundThrows = false;
+let refundOutcome: { status: 'REFUNDED' | 'REFUND_PENDING' | 'REQUESTED'; cancellationId: string; refundAmount: number } = { status: 'REFUNDED', cancellationId: randomUUID(), refundAmount: 100_000 };
 let reclaimOutcome: { result: 'RECLAIMED' | 'SKIPPED_ENTRY_STARTED' | 'SKIPPED_ENTRY_RECORDED' | 'SKIPPED_NOT_TRANSFERRED' | 'SKIPPED_HOLDER_CHANGED'; previousHolderAccountId?: string } = { result: 'RECLAIMED' };
 const refundCalls: Record<string, unknown>[] = [];
 const reclaimCalls: Record<string, unknown>[] = [];
@@ -56,6 +57,7 @@ const lifecycle = new ApprovalLifecycle({
   executors: {
     async refund(i) {
       refundCalls.push(i);
+      if (refundThrows) throw new Error('refund down');
       return refundOutcome;
     },
     async reclaim(i) {
@@ -86,6 +88,7 @@ beforeEach(() => {
   failedCases.length = 0;
   succeededCases.length = 0;
   wall = NOW;
+  refundThrows = false;
   refundOutcome = { status: 'REFUNDED', cancellationId: randomUUID(), refundAmount: 100_000 };
   reclaimOutcome = { result: 'RECLAIMED' };
 });
@@ -102,13 +105,14 @@ describe('IR-08 실행 결과 처리', () => {
     expect(failedCases).toHaveLength(1);
   });
 
-  test('IR-08 환급이 REFUND_PENDING이면 DONE이 아니라 FAILED이고 CS 건을 연다', async () => {
-    const created = await refund();
+  test('IR-08 환급이 REFUND_PENDING·REQUESTED면 실행 실패가 아니라 DONE이고 CS 건을 열지 않는다', async () => {
+    const a = await refund();
     refundOutcome = { status: 'REFUND_PENDING', cancellationId: randomUUID(), refundAmount: 100_000 };
-    const out = await lifecycle.approve(created.approvalId, lead, 't', undefined, '"1"');
-    expect(out.status).toBe('FAILED');
-    expect(out.closeReason).toContain('REFUND_PENDING');
-    expect(failedCases).toHaveLength(1);
+    expect((await lifecycle.approve(a.approvalId, lead, 't', undefined, '"1"')).status).toBe('DONE');
+    const b = await refund();
+    refundOutcome = { status: 'REQUESTED', cancellationId: randomUUID(), refundAmount: 100_000 };
+    expect((await lifecycle.approve(b.approvalId, lead, 't', undefined, '"1"')).status).toBe('DONE');
+    expect(failedCases).toHaveLength(0);
   });
 });
 
@@ -149,8 +153,8 @@ describe('IR-20 고착 복구', () => {
 describe('IR-18 FAILED 재승인', () => {
   test('IR-18 실행 실패 뒤 canApprove는 다시 승인할 수 있고 view가 FAILED를 연다', async () => {
     const created = await refund();
-    refundOutcome = { status: 'REFUND_PENDING', cancellationId: randomUUID(), refundAmount: 100_000 };
-    await lifecycle.approve(created.approvalId, lead, 't', undefined, '"1"');
+    refundThrows = true;
+    await expect(lifecycle.approve(created.approvalId, lead, 't', undefined, '"1"')).rejects.toMatchObject({ status: 500 });
     const view = await lifecycle.get(created.approvalId, lead);
     expect(view.status).toBe('FAILED');
     expect(lifecycleView((await store.find(created.approvalId))!, lead).canApprove).toBe(true);

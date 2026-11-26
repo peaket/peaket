@@ -37,7 +37,7 @@ const writes: CancellationWrites = {
   async create(q) {
     state.created.push({ ...q });
     if (state.createOutcome.status === 'CONFLICT') return { status: 'CONFLICT' } as never;
-    state.records.set(q.cancellationId, { cancellationId: q.cancellationId, orderId: q.orderId, ticketId: q.ticketId, refundAmount: q.refundAmount, state: q.status, refundAttempts: 0 });
+    state.records.set(q.cancellationId, { cancellationId: q.cancellationId, orderId: q.orderId, ticketId: q.ticketId, refundAmount: q.refundAmount, state: q.status, refundAttempts: 0, ...(typeof (q as { kind?: unknown }).kind === 'string' ? { kind: (q as { kind: string }).kind } : {}) } as CancellationRecord);
     return { status: 'CREATED' };
   },
   async updateStatus() {},
@@ -127,10 +127,26 @@ describe('IR-13 입장 기록', () => {
   });
 });
 
+describe('IR-10 다른 티켓 부분 취소', () => {
+  test('IR-10 같은 주문의 다른 티켓 취소는 남은 금액 환급을 막지 않는다', async () => {
+    state.view = view({ refundableAmount: 20_000 });
+    state.prior = [{ cancellationId: randomUUID(), orderId: state.view.orderId, ticketId: randomUUID(), refundAmount: 13_333, state: 'REFUNDED', refundAttempts: 0 }];
+    const ok = await refunds.execute(approvalId(), { kind: 'SYSTEM_FAULT_REFUND', orderId: state.view.orderId, amount: 20_000 });
+    expect(ok.refundAmount).toBe(20_000);
+  });
+});
+
 describe('IR-21 멱등 kind', () => {
   test('IR-21 같은 승인 ID에 다른 kind가 오면 409다', async () => {
     const id = approvalId();
     await refunds.execute(id, { kind: 'SYSTEM_FAULT_REFUND', orderId: state.view.orderId, amount: PRICE });
     await expect(refunds.execute(id, { kind: 'MINOR_CONTRACT_CANCEL', orderId: state.view.orderId, amount: PRICE })).rejects.toMatchObject({ status: 409, type: expect.stringContaining('approval-refund-conflict') });
+  });
+
+  test('IR-21 다른 프로세스(새 인스턴스)에서도 같은 승인 ID의 다른 kind를 막는다', async () => {
+    const id = approvalId();
+    await refunds.execute(id, { kind: 'SYSTEM_FAULT_REFUND', orderId: state.view.orderId, amount: PRICE });
+    const other = new ApprovalRefunds({ orders, writes, tickets, payments, clock: { now: () => NOW, monotonicMs: () => NOW }, entryRecords: { async hasEntry() { return state.entry; } } });
+    await expect(other.execute(id, { kind: 'MINOR_CONTRACT_CANCEL', orderId: state.view.orderId, amount: PRICE })).rejects.toMatchObject({ status: 409, type: expect.stringContaining('approval-refund-conflict') });
   });
 });

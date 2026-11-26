@@ -54,3 +54,37 @@ describe('IR-17 콘솔 목록', () => {
     expect(router).toMatch(/path: 'cs\/approvals',[\s\S]*?Component: m\.ConnectedPage/);
   });
 });
+
+describe('구현 재리뷰 IR-03·10·11·21·28·29', () => {
+  test('IR-03 purchase byOrder가 결제 승인 시각·남은 환급액·입장 기록을 싣는다', () => {
+    const src = read('services/purchase-svc/src/modules/refund/adapters/db/drizzle-cancellation.ts');
+    expect(src).toMatch(/paidAtMs/);
+    expect(src).toMatch(/refundableAmount/);
+    expect(src).toMatch(/entryRecorded/);
+  });
+
+  test('IR-10 Drizzle이 주문의 이전 취소를 읽는다', () => {
+    const src = read('services/purchase-svc/src/modules/refund/adapters/db/drizzle-cancellation.ts');
+    expect(src).toMatch(/cancellationsOf/);
+  });
+
+  test('IR-11 system-refund가 승인 업무를 만든다', () => {
+    const src = read('services/ops-svc/src/modules/cases/inbound/ops-cases.controller.ts');
+    expect(src).toMatch(/approvalLifecycle|ApprovalLifecycle/);
+  });
+
+  test('IR-21 승인 환불이 주문의 모든 티켓을 쓴다', () => {
+    const src = read('services/purchase-svc/src/modules/refund/application/approval-refund.ts');
+    expect(src).toMatch(/ticketIds/);
+  });
+
+  test('IR-28 DB 목록이 SQL에서 일반 승인 종류만 거른다', () => {
+    const src = read('services/ops-svc/src/modules/approvals/adapters/db/drizzle-lifecycle-store.ts');
+    expect(src).toMatch(/inArray\(approvalRequest\.kind/);
+  });
+
+  test('IR-29 tick이 임차로 한 파드만 실행한다', () => {
+    const src = read('services/ops-svc/src/modules/approvals/application/approval-lifecycle.ts') + read('services/ops-svc/src/modules/approvals/adapters/db/drizzle-lifecycle-store.ts');
+    expect(src).toMatch(/withTickLease|tickLease/);
+  });
+});
