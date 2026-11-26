@@ -251,3 +251,14 @@
 - RV068-17(낮음, 그 밖): N-T27 ⑥이 `bookingNo=null`만 보고 `모양이 틀림`(13자리·문자·0으로 시작하지 않음)을 보지 않는다. §4.9.1은 "없거나 모양이 틀리면" 작업을 만들지 않는다.
 - RV068-18(낮음, 그 밖): N-T28이 `<form>`·`<iframe>`·외부 `<link rel=stylesheet>`와 `From`/`Reply-To`를 단언하지 않는다. §4.9.2는 폼 없음·인라인 CSS·`From`/`Reply-To`를 정한다.
 - RV068-19(낮음, 그 밖): B-09 템플릿 판 되돌림(`templateVersion` v0 → 현재 판 + `notify_template_fallback_total`), B-14 80,000건 경고, 예매번호 없음·모양 틈의 SEV3를 시험하지 않는다. 80,000 경고는 F-06-9 관측 몫인지 이 기능 몫인지 계획에 적는다.
+
+## F-06-8 구현 리뷰(2026-11-27, IR068)
+
+- IR068-10(중간, 그 밖): `trade.orders` 소비자의 `NotificationIntake`가 API `database` 풀(`DrizzleFanNotifyStore(o.appDatabase)`)을 쓴다. `consumerDatabase`(max 2)는 held store와 후기 처리기에만 쓰인다. 확정 사건이 몰리면 API 요청 풀을 소비자가 나눠 쓴다. 소비자 전용 `NotificationIntake`·`DrizzleFanNotifyStore`·held store를 따로 만들어 streaming §2.6의 연결 분리를 지킨다(`main.ts:323`, `notify.module.ts:70`).
+- IR068-11(중간, 그 밖): `core-consumers` 10/10은 새 `trade.orders` 소비자를 보지 않는다. K2가 `runKeyedConsumer` 한 번만 보고 `booking`을 넘기지 않아 새 그룹·토픽·처리기·stop·오프셋 커밋을 검증하는 커밋된 시험이 없다. 계획의 일회 실행 대신 시험을 더해 구현을 지우면 빨간불이 되게 한다(`test/core-consumers.test.ts:227-249`).
+- IR068-12(중간, 그 밖): `OrderResponseBody`에 `bookingNumber`가 없어 Fastify 응답 직렬화가 `orderResponseOf`가 넣은 칸을 버린다. 시험은 `orderResponseOf`를 직접 불러 HTTP를 건너뛰고, `lane2.md`·계획 구현 절은 '201 bookingNumber'를 사실처럼 적었다. openapi `Order`에 칸을 더하고 `gen`을 돌리거나(소유자 결정) 기록에서 그 주장을 뺀다(`orders.controller.ts:72-78,126-132`, `booking-number.test.ts:82`, `lane2.md:26`).
+- IR068-13(중간, 그 밖): 계획 §5(`:196`)이 구현 때 적기로 한 `docs/api/guidelines.md` §8 내부 HTTP 목록·ASVS notify 태그가 없다. notice-view는 `eventId`·`tierIds`를 더했지만 `docs/features/notify.md:406`·`docs/architecture.md:286`는 아직 네 칸/'번호만'이다. 내부 계약과 정본을 함께 넓힌다.
+- IR068-14(중간, 그 밖): 주문 취소 진행 판정이 `status not in ('CANCELLED','VOIDED')`다. 실제 상태는 `REQUESTED`·`REFUND_PENDING`·`REFUNDED`·`VOIDED`이고 `CANCELLED`는 없다. 끝난 `REFUNDED`도 '진행 중'으로 세어 `CONFIRMED` 주문의 알림을 막을 수 있다. `REQUESTED`·`REFUND_PENDING`만 활성으로 본다(`drizzle-booking-notice.ts:26-33`, `0014_order_cancellation.sql:22`).
+- IR068-15(중간, 그 밖): 예매번호 고갈은 카운터만 있고 SEV2 경보 규칙·80,000건 경고·운영 확인 표가 없다. 정본 §4.9.1이 정한 80,000 경고와 계획 B-14의 SEV2를 observability/alert 규칙에 잇거나 F-06-9 몫으로 명시한다(`prom-order-signals.ts:55-59`, `docs/observability.md`).
+- IR068-16(낮음, 그 밖): 이메일 작업과 구독별 푸시 작업을 각각 `store.enqueue`(작업마다 트랜잭션)로 적는다. 계획 §4.2의 '한 트랜잭션'이 아니다. 중간에 죽으면 일부 작업만 남고 Kafka 재처리·dedup으로 이어지지만 한 사건의 작업 셋이 원자적이지 않다. 묶음 enqueue를 두거나 계획 문구를 맞춘다(`notification-intake.ts:170-179`, `drizzle-fan-notify-store.ts:184-190`).
+- IR068-17(낮음, 그 밖): `BookingConfirmedHandler`의 `items.flatMap`이 `tierId`가 문자열이 아닌 항목을 조용히 버린다. 빈 배열·일부 항목이면 `seatSummary`가 '좌석 0매' 또는 실제보다 적은 매수로 나간다. 사건 모양이 틀리면 던져 재시도·보류하게 한다(`consumers/booking-confirmed.ts:48-49`).
