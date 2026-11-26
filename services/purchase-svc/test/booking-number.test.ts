@@ -1,17 +1,17 @@
 // F-06-8 N-T27 ①·②: 예매번호 KST 날짜 8자리 + 5자리 일련번호, 99,999 상한, 503 booking-number-exhausted.
 // 흉내 저장소·고정 시계. 실제 DB·Docker를 쓰지 않는다.
 import { randomUUID } from 'node:crypto';
-import { fakeClock } from '@peaket/platform';
+import { ProblemError, fakeClock } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { CreateOrder } from '../src/modules/booking/application/create-order.js';
-import { ORDER_PROBLEMS, orderResponseOf, type CreateOrderDeps, type NewOrder, type OrderView } from '../src/modules/booking/index.js';
+import * as booking from '../src/modules/booking/index.js';
+import { ORDER_PROBLEMS, orderResponseOf, throwOrderProblem, type CreateOrderDeps, type NewOrder } from '../src/modules/booking/index.js';
 import { CONSENT_VERSION, ITEMS, NOW, okBody, okCommand, okIdem, OrderFakes } from './order-cases.js';
 
 type BookingNumberAllocation = { seq: number } | { exhausted: true };
 type BookingNumbers = { next(nowMs: number): Promise<BookingNumberAllocation> };
 type BookingCreateDeps = CreateOrderDeps & { bookingNumbers: BookingNumbers };
 type CreatedOrder = NewOrder & { bookingNo?: string };
-type ViewWithBooking = OrderView & { bookingNumber?: string };
 
 /** 일련번호를 차례로 내주는 흉내. exhaustion이면 100,000번째를 흉내 낸다 */
 function numbersOf(seqs: number[] | (() => BookingNumberAllocation)) {
@@ -100,5 +100,28 @@ describe('F-06-8 예매번호', () => {
 
     const problem = (ORDER_PROBLEMS as unknown as Record<string, { status: number; type: string } | undefined>).BOOKING_NUMBER_EXHAUSTED;
     expect(problem).toMatchObject({ status: 503, type: 'booking-number-exhausted' });
+
+    // 100,000을 직접 넣어 경계를 닫는다(일련번호 어댑터가 99,999 다음을 exhausted로 닫는 근거)
+    const formatBookingNo = (booking as unknown as { formatBookingNo?: (kstDay: string, seq: number) => string }).formatBookingNo;
+    expect(formatBookingNo).toBeTypeOf('function');
+    expect(formatBookingNo!('20261014', 99_999)).toBe('2026101499999');
+    expect(() => formatBookingNo!('20261014', 100_000)).toThrow(RangeError);
+    expect(() => formatBookingNo!('20261014', 0)).toThrow(RangeError);
+
+    // 503 Problem으로 바뀌는지(HTTP가 쓰는 함수)
+    const reply = {
+      headers: new Map<string, string>(),
+      header(name: string, value: string) {
+        this.headers.set(name, value);
+        return this;
+      },
+    };
+    try {
+      throwOrderProblem('BOOKING_NUMBER_EXHAUSTED' as never, reply);
+      expect.unreachable('BOOKING_NUMBER_EXHAUSTED는 던져야 한다');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ProblemError);
+      expect(e).toMatchObject({ status: 503, type: 'booking-number-exhausted' });
+    }
   });
 });

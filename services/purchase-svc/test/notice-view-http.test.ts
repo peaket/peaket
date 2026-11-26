@@ -6,6 +6,7 @@ import { Writable } from 'node:stream';
 import { fakeClock, createService } from '@peaket/platform';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
+import * as booking from '../src/modules/booking/index.js';
 import { MemoryPurchaseSessions } from '../src/modules/inventory/index.js';
 import { AcceptFakes } from './accept-cases.js';
 import { ACCOUNT, CONSENT_VERSION, EVENT, JOURNEY, LOGIN, NOW, OrderFakes, PID, PSID } from './order-cases.js';
@@ -26,6 +27,8 @@ const notice = {
   bookingNo: '2026101400001',
   status: 'CONFIRMED',
   noticeAllowed: true,
+  // 정본 §4.9.1: 내부 응답에만 있는 번호. 작업·기록·로그·vars에는 넣지 않는다(F-06-9가 쓴다)
+  phoneE164: '+821012345678',
   eventId: EVENT,
   tierIds: ['R', 'S'],
 };
@@ -79,7 +82,7 @@ const get = (orderId: string, token: string | null = TOKEN) =>
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 
 describe('F-06-8 notice-view', () => {
-  test('N-T27 ② notice-view는 내부 토큰이 없거나 틀리면 401, 없으면 404, 있으면 예매번호·상태·허용·회차·등급 ID만 준다', async () => {
+  test('N-T27 ② notice-view는 내부 토큰이 없거나 틀리면 401, 없으면 404, 있으면 예매번호·상태·허용·번호·회차·등급 ID만 준다', async () => {
     expect((await get(ORDER, null)).statusCode).toBe(401);
     expect((await get(ORDER, 'wrong-token')).statusCode).toBe(401);
     expect((await get(UNKNOWN)).statusCode).toBe(404);
@@ -88,9 +91,19 @@ describe('F-06-8 notice-view', () => {
     const ok = await get(ORDER);
     expect(ok.statusCode).toBe(200);
     expect(json(ok)).toEqual(notice);
-    for (const key of ['buyerName', 'buyerPhone', 'name', 'phone', 'phoneE164', 'seatNumber', 'seatIds']) {
+    for (const key of ['buyerName', 'buyerPhone', 'name', 'phone', 'seatNumber', 'seatIds', 'bookingNoFull', 'password']) {
       expect(json(ok)).not.toHaveProperty(key);
     }
-    expect(noticeViews.calls).toEqual([UNKNOWN, ORDER]);
+    expect(noticeViews.calls).toEqual([UNKNOWN, UNKNOWN, ORDER]);
+
+    // noticeAllowed 네 경우: 정상·CONFIRMED 아님·주문 취소 진행·회차 취소 승인 전
+    const noticeAllowedOf = (booking as unknown as {
+      noticeAllowedOf?: (o: { status: string; orderCancellationActive: boolean; eventCancellationApprovalPending: boolean }) => boolean;
+    }).noticeAllowedOf;
+    expect(noticeAllowedOf).toBeTypeOf('function');
+    expect(noticeAllowedOf!({ status: 'CONFIRMED', orderCancellationActive: false, eventCancellationApprovalPending: false })).toBe(true);
+    expect(noticeAllowedOf!({ status: 'PARTIALLY_REFUNDED', orderCancellationActive: false, eventCancellationApprovalPending: false })).toBe(false);
+    expect(noticeAllowedOf!({ status: 'CONFIRMED', orderCancellationActive: true, eventCancellationApprovalPending: false })).toBe(false);
+    expect(noticeAllowedOf!({ status: 'CONFIRMED', orderCancellationActive: false, eventCancellationApprovalPending: true })).toBe(false);
   });
 });

@@ -26,6 +26,8 @@ export interface BookingNotice {
   bookingNo: string | null;
   status: string;
   noticeAllowed: boolean;
+  /** 정본 §4.9.1의 내부 응답 값. 작업·기록·로그·vars에는 넣지 않는다 */
+  phoneE164: string | null;
   eventId: string;
   tierIds: string[];
 }
@@ -73,6 +75,10 @@ export interface BookingSignalsLike {
   templateMissing(locale: string): void;
   emailSent(): void;
   emailFailed(): void;
+  /** DEAD 1건 이상이면 SEV3(§4.8 실패, ADR-0180) */
+  dead(kind: string): void;
+  /** 5분 [가정] 목표를 넘긴 발송(99% 경보의 원천) */
+  latencyOverTarget(kind: string, channel: string, seconds: number): void;
   suppressed(reason: 'not_confirmed' | 'not_allowed'): void;
   tierNameMissing(): void;
   bookingNoInvalid(): void;
@@ -86,7 +92,7 @@ export interface BookingConfirmedEventLike {
   accountId: string;
   occurredAtMs: number;
   amount: number;
-  items: readonly { tierId: string }[];
+  items: readonly { tierId: string; seatLabel?: string }[];
 }
 
 export interface BookingIntakeResultLike {
@@ -125,6 +131,8 @@ export function signalCounts() {
     templateMissing: [] as string[],
     emailSent: 0,
     emailFailed: 0,
+    dead: [] as string[],
+    latencyOverTarget: [] as { kind: string; channel: string; seconds: number }[],
     suppressed: [] as string[],
     tierNameMissing: 0,
     bookingNoInvalid: 0,
@@ -139,6 +147,8 @@ export function signalCounts() {
     emailFailed: () => {
       c.emailFailed += 1;
     },
+    dead: (kind) => c.dead.push(kind),
+    latencyOverTarget: (kind, channel, seconds) => c.latencyOverTarget.push({ kind, channel, seconds }),
     suppressed: (reason) => c.suppressed.push(reason),
     tierNameMissing: () => {
       c.tierNameMissing += 1;
@@ -151,7 +161,15 @@ export function signalCounts() {
 }
 
 export function noticeOf(over: Partial<BookingNotice> = {}): BookingNotice {
-  return { bookingNo: '2026101400001', status: 'CONFIRMED', noticeAllowed: true, eventId: EVENT, tierIds: ['R', 'S'], ...over };
+  return {
+    bookingNo: '2026101400001',
+    status: 'CONFIRMED',
+    noticeAllowed: true,
+    phoneE164: '+821012345678',
+    eventId: EVENT,
+    tierIds: ['R', 'S'],
+    ...over,
+  };
 }
 
 export function catalogOf(over: Partial<CatalogNotice> = {}): CatalogNotice {
@@ -303,7 +321,11 @@ export function eventOf(t: Setup, over: Partial<BookingConfirmedEventLike> = {})
     accountId: t.accountId,
     occurredAtMs: NOW,
     amount: 308_000,
-    items: [{ tierId: 'R' }, { tierId: 'R' }, { tierId: 'S' }],
+    items: [
+      { tierId: 'R', seatLabel: 'A01' },
+      { tierId: 'R', seatLabel: 'A02' },
+      { tierId: 'S', seatLabel: 'B01' },
+    ],
     ...over,
   };
 }

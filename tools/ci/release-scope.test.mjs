@@ -11,9 +11,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const script = join(here, 'release-scope.mjs');
 const repoRoot = join(here, '..', '..');
 
-// 시험 무대는 기능 109개를 만든다. 도구가 v1 범위의 109개를 요구하므로 작은 무대로는 검사기를 시험할 수 없다.
-// 앞 32개 release, 다음 6개 gate, 나머지 71개 frozen-local이다(2026-11-26 알림 상세 설계로 F-06-8~11을 더했다).
-const IDS = Array.from({ length: 109 }, (_, i) => `F-01-${i + 1}`);
+// 시험 무대는 기능 105개를 만든다. 도구가 v1 범위의 105개를 요구하므로 작은 무대로는 검사기를 시험할 수 없다.
+// 앞 32개 release, 다음 6개 gate, 나머지 67개 frozen-local이다.
+const IDS = Array.from({ length: 105 }, (_, i) => `F-01-${i + 1}`);
 const RELEASE = IDS.slice(0, 32);
 const GATE = IDS.slice(32, 38);
 const FROZEN = IDS.slice(38);
@@ -67,7 +67,7 @@ function run(dir, ...args) {
 test('맞는 무대는 --check를 통과한다', () => {
   const r = run(writeFixture(), '--check');
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /release 32, gate 6, frozen-local 71/);
+  assert.match(r.stdout, /release 32, gate 6, frozen-local 67/);
 });
 
 test('manifest에 없는 기능은 실패한다', () => {
@@ -194,14 +194,14 @@ test('--release는 마이그레이션 주석에 섞인 동결 기능을 잡는�
   assert.match(r.stderr, /동결 기능 F-01-40가 마이그레이션에 있다/);
 });
 
-test('저장소의 v1 범위는 38·0·71이고 gate가 없다', () => {
+test('저장소의 v1 범위는 38·0·67이고 gate가 없다', () => {
   const r = spawnSync(process.execPath, [script, '--check'], { cwd: repoRoot, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   const manifest = JSON.parse(readFileSync(join(repoRoot, 'docs/release/v1-scope.json'), 'utf8'));
   assert.deepEqual(manifest.gates, []);
   const counts = { release: 0, gate: 0, 'frozen-local': 0 };
   for (const value of Object.values(manifest.features)) counts[value.class] += 1;
-  assert.deepEqual(counts, { release: 38, gate: 0, 'frozen-local': 71 });
+  assert.deepEqual(counts, { release: 38, gate: 0, 'frozen-local': 67 });
 });
 
 test('--help는 사용법을 찍고 통과한다', () => {

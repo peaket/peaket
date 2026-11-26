@@ -2,9 +2,9 @@
 // 흉내 SES·흉내 푸시·고정 시계·메모리 원장. 실제 수신자 주소·전화번호를 쓰지 않는다.
 import { randomUUID } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
-import { messageOf, type NotificationJob } from '../src/modules/notify/index.js';
+import { MailTransportError, messageOf, type NotificationJob } from '../src/modules/notify/index.js';
 import { assertVars } from '../src/modules/notify/domain/fan-notify.js';
-import { eventOf, noticeOf, setupBooking, NOW } from './booking-confirmed-support.js';
+import { bookingJob, eventOf, noticeOf, setupBooking, NOW } from './booking-confirmed-support.js';
 
 type JobWithVersion = NotificationJob & { templateVersion?: string };
 type MailWithHtml = { to: string; subject: string; body: string; html?: string; headers: Record<string, string> };
@@ -27,6 +27,10 @@ describe('F-06-8 예매 확정 알림', () => {
     }
     expect(t.intake.bookingConfirmed(eventOf(t))).toEqual({ created: 0, duplicate: 3 });
     expect(t.store.jobs.size).toBe(3);
+    // 사건의 좌석 라벨·이름·전화번호는 vars에 들어가지 않는다
+    for (const job of t.store.jobs.values()) {
+      for (const value of ['A01', 'A02', 'B01', '2026101400001', '홍길동', '010-1234-5678']) expect(JSON.stringify(job.vars)).not.toContain(value);
+    }
 
     // APPROVED·ISSUE_DELAYED·AWAITING_DEPOSIT·PARTIALLY_REFUNDED만으로는 가지 않는다
     for (const type of ['APPROVED', 'ISSUE_DELAYED', 'AWAITING_DEPOSIT', 'PARTIALLY_REFUNDED']) {
@@ -56,6 +60,9 @@ describe('F-06-8 예매 확정 알림', () => {
     expect(emailLatency).toBeTruthy();
     expect(emailLatency!.seconds).toBeGreaterThan(0);
     expect(emailLatency!.seconds).toBeLessThanOrEqual(300);
+    expect(t.counts.emailSent).toBe(1);
+    expect(t.counts.emailFailed).toBe(0);
+    expect(t.counts.dueBacklog.reduce((n, x) => n + x.count, 0)).toBe(3);
 
     // 이메일은 판매자 7항목·법정 고지를 담고, 좌석 번호·예매번호 전체·이름·전화번호는 어느 채널에도 없다
     expect(email.subject).toContain('겨울 콘서트');
@@ -80,6 +87,33 @@ describe('F-06-8 예매 확정 알림', () => {
     });
     expect(pushMsg).toMatchObject({ title: '겨울 콘서트 예매가 확정되었습니다', url: '/my/tickets' });
     expect(Buffer.byteLength(JSON.stringify({ v: 1, kind: 'BOOKING_CONFIRMED', ...pushMsg, tag: 'a'.repeat(32) }), 'utf8')).toBeLessThan(2_048);
+    // 웹 푸시 본문·작업 vars에도 좌석 번호·예매번호 전체·이름·전화번호가 없다
+    for (const value of ['A01', 'A02', 'B01', '2026101400001', '홍길동', '010-1234-5678']) {
+      expect(JSON.stringify(pushMsg)).not.toContain(value);
+    }
+
+    // 실패·DEAD는 이메일 지표·SEV3로 남고, 주문·결제·발권 상태를 바꾸지 않는다(ADR-0180)
+    const business = { order: 'CONFIRMED', payment: 'APPROVED', ticket: 'ISSUED' };
+    const failed = setupBooking({ subscriptions: 0 });
+    bookingJob(failed, { channel: 'EMAIL', templateVersion: 'v1' });
+    failed.mail.fail.push(new MailTransportError('PERMANENT', '400'));
+    const deadRun = await failed.worker.processDue(new Date(NOW));
+    expect(deadRun).toMatchObject({ attempted: 1, dead: 1 });
+    expect(failed.counts.emailFailed).toBe(1);
+    expect(failed.counts.emailSent).toBe(0);
+    expect(failed.counts.dead).toEqual(['BOOKING_CONFIRMED']);
+    expect(failed.store.deliveries[0]).toMatchObject({ status: 'DEAD', channel: 'EMAIL' });
+    expect(failed.store.jobs.size).toBe(0);
+    expect(business).toEqual({ order: 'CONFIRMED', payment: 'APPROVED', ticket: 'ISSUED' });
+
+    // 5분 [가정]을 넘긴 발송은 지연 지표와 99% 경보의 원천 신호를 남긴다
+    const late = setupBooking({ subscriptions: 0 });
+    bookingJob(late, { channel: 'EMAIL', templateVersion: 'v1', createdAt: NOW - 5 * 60_000 - 1 });
+    expect((await late.worker.processDue(new Date(NOW))).sent).toBe(1);
+    const lateLatency = late.counts.latency.find((x) => x.kind === 'BOOKING_CONFIRMED' && x.channel === 'EMAIL');
+    expect(lateLatency).toBeTruthy();
+    expect(lateLatency!.seconds).toBeGreaterThan(300);
+    expect(late.counts.latencyOverTarget).toEqual([{ kind: 'BOOKING_CONFIRMED', channel: 'EMAIL', seconds: lateLatency!.seconds }]);
   });
 
   test('N-T27 ③ R석 2매·S석 1매 주문의 vars는 일곱 키뿐이고 seatSummary가 R석 2매, S석 1매다', async () => {
@@ -156,8 +190,9 @@ describe('F-06-8 예매 확정 알림', () => {
     expect(t.held.rows[0]).toMatchObject({ eventKey: t.eventKey, kind: 'BOOKING_CONFIRMED', attempts: 3 });
     expect(t.store.jobs.size).toBe(0);
 
-    // 같은 eventKey를 다시 넣어도 보류 표에 한 번만 남는다(오프셋을 적고 커밋한 것으로 본다)
+    // 같은 eventKey를 다시 넣어도 purchase-svc를 다시 부르지 않고 보류 표에 한 번만 남는다(오프셋을 적고 커밋한 것으로 본다)
     expect(await t.intake.bookingConfirmed(eventOf(t))).toMatchObject({ created: 0, duplicate: 0, held: true });
+    expect(calls).toBe(3);
     expect(t.held.rows).toHaveLength(1);
   });
 
