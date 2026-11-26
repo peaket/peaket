@@ -96,6 +96,7 @@ test('F089-1 ① 릴레이 규칙·부하/소비자 계획·인자는 30분, 126
   const consumer = relayConsumerPlan({ topic: 'trade.events', table: 'f089_received' });
   assert.equal(consumer.table, 'f089_received');
   assert.deepEqual(consumer.columns, ['id', 'key', 'seq', 'event_key', 'publisher', 'received_at']);
+  assert.deepEqual(load.receivedColumns, consumer.columns, '부하 계획과 소비자 계약의 받은 행 칼럼');
   assert.ok(consumer.maxBatch > 0 && consumer.group);
 
   const a = parseRelayFaultArgs([
@@ -172,8 +173,12 @@ test('F089-2 ② judgeRelayRun은 DB 건수로 판정하고, 옛 리더·같은 
   assert.equal(judgeRelayRun({ ...base, rate: 100 }).verdict, 'invalid', 'V-T27 2배 [가정] 도착률이 아님');
   assert.equal(judgeRelayRun({ ...base, payment: { ...base.payment, runId: 'other-run' } }).verdict, 'invalid', '다른 실행 P-T5');
   assert.equal(judgeRelayRun({ ...base, payment: { ...base.payment, mode: 'const' } }).verdict, 'invalid', '상수 P-T5');
+  assert.equal(judgeRelayRun({ ...base, payment: { ...base.payment, rate: 0 } }).verdict, 'invalid', '결제 부하 없음(rate 0)');
   assert.equal(judgeRelayRun({ ...base, payment: { ...base.payment, p99Ms: null } }).verdict, 'invalid');
   assert.equal(judgeRelayRun({ ...base, payment: { ...base.payment, p99BrokerRestartMs: null } }).verdict, 'invalid');
+  assert.equal(judgeRelayRun({ ...base, payment: { ...base.payment, pullCount: undefined } }).verdict, 'invalid', '당기기 반영 수 없음');
+  assert.equal(judgeRelayRun({ ...base, payment: { ...base.payment, pullCount: 0 } }).verdict, 'pass', '당기기 반영 0은 유효');
+  assert.equal(judgeRelayRun({ ...base, payment: { ...base.payment, pullCount: -1 } }).verdict, 'invalid');
   assert.equal(judgeRelayRun({ ...base, faults: [] }).verdict, 'invalid');
   assert.equal(judgeRelayRun({ ...base, faults: base.faults.map((f) => (f.kind === 'db-cut' ? { ...f, applied: false } : f)) }).verdict, 'invalid', 'applied:false');
   assert.equal(judgeRelayRun({ ...base, lagSeconds: [] }).verdict, 'invalid');
@@ -277,11 +282,12 @@ test('F089-4 ② 시뮬레이터 원장은 실제 NDJSON을 읽고, 이중 원�
 test('F089-4 ③ 표본 헬퍼·DB 증거 SQL·P-T1 인자/판정이 빠짐·옛 리더·발생기 무효를 잡는다', async () => {
   const { missingRowIds, oldLeaderSendCount, RELAY_EVIDENCE_SQL, parsePaymentFaultArgs, judgePaymentFaultRun } = await relay();
   const pt1Args = parsePaymentFaultArgs([
-    '--payments', '10000', '--rate', '100', '--generators', '2', '--webhook-duplicates', '2',
+    '--payments', '10000', '--rate', '100', '--generators', '2', '--webhook-duplicates', '2', '--invariants',
     '--out', '.cache/peaket-f09/pt1', '--record', '--run-id', '2026-11-27-pt1-f089',
     '--prom-url', 'http://127.0.0.1:9090',
   ]);
   assert.deepEqual([pt1Args.payments, pt1Args.rate, pt1Args.generators, pt1Args.webhookDuplicates], [10000, 100, 2, 2]);
+  assert.equal(pt1Args.invariants, true);
   usage(() => parsePaymentFaultArgs(['--payments', '0']));
   usage(() => parsePaymentFaultArgs(['--payments', '10000', '--generators', '0']));
   usage(() => parsePaymentFaultArgs(['--payments', '10000', '--webhook-duplicates', '1']));
