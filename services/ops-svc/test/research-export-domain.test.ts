@@ -154,6 +154,12 @@ describe('F-04-19 연구 내보내기 순수 모델', () => {
     for (const col of ['entropy', 'net_type', 'asn', 'device_group', 'member', 'post_seat']) {
       expect(q.sql, col).toContain(m.researchMaskExpression(col));
     }
+    let last = -1;
+    for (const expr of m.researchSelectList()) {
+      const at = q.sql.indexOf(expr);
+      expect(at, expr).toBeGreaterThan(last);
+      last = at;
+    }
     for (const bad of ['inv.', 'trust.behavior_raw', 'journeyId', 'deviceRef', 'contactRef', 'paymentMethodRef', 'cardBin', 'raw_ip']) {
       expect(q.sql, bad).not.toContain(bad);
     }

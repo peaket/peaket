@@ -263,6 +263,8 @@ describe('F-04-19 연구 내보내기 HTTP', () => {
     expect(store.map.size).toBe(0);
     expect(deniedAudit()).toHaveLength(4);
     expect(deniedLog()).toHaveLength(4);
+    for (const row of deniedAudit()) expect(row.payload.problemType).toBe('about:blank');
+    for (const row of deniedLog()) expect(row.usage.problemType).toBe('about:blank');
     expect(requestedAudit()).toHaveLength(0);
 
     const ok = await post(who, body({ reason: 'x'.repeat(500) }));
@@ -431,6 +433,8 @@ describe('F-04-19 연구 내보내기 HTTP', () => {
     expect(byAccount.statusCode, byAccount.payload).toBe(403);
     expect(deniedAudit()).toHaveLength(2);
     expect(deniedLog()).toHaveLength(2);
+    for (const row of deniedAudit()) expect(row.payload.problemType).toBe('pseudonym-handler-required');
+    for (const row of deniedLog()) expect(row.usage.problemType).toBe('pseudonym-handler-required');
 
     const missing = await get(who, randomUUID());
     expect(missing.statusCode, missing.payload).toBe(404);
