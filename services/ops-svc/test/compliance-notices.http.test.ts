@@ -256,16 +256,19 @@ describe('/v1/ops/compliance/notices', () => {
     expect((await post(`/v1/ops/compliance/notices/${n.noticeId}/takedown`, operator, { reason: '차단' }, null)).statusCode).toBe(400);
     expect((await post(`/v1/ops/compliance/notices/${n.noticeId}/takedown`, operator, { reason: '차단' }, 'not-a-uuid')).statusCode).toBe(400);
     const key = randomUUID();
-    const first = await post(`/v1/ops/compliance/notices/${n.noticeId}/takedown`, operator, { reason: '통보에 따른 노출 차단' }, key);
+    const rawReason = '통\u202e보\u0007 차단';
+    const first = await post(`/v1/ops/compliance/notices/${n.noticeId}/takedown`, operator, { reason: rawReason }, key);
     expect(first.statusCode).toBe(200);
+    // 저장·core 전달·응답 모두 정규화한 사유다
+    expect(JSON.parse(first.payload)).toMatchObject({ noticeId: n.noticeId, status: 'TAKEN_DOWN', reason: '통보 차단' });
     expect(core.applyCalls).toHaveLength(1);
-    expect(core.applyCalls[0]).toMatchObject({ noticeId: n.noticeId, reviewIds: body.reviewIds, receivedAt: body.receivedAt, deadline: 'H24', reason: '통보에 따른 노출 차단' });
+    expect(core.applyCalls[0]).toMatchObject({ noticeId: n.noticeId, reviewIds: body.reviewIds, receivedAt: body.receivedAt, deadline: 'H24', reason: '통보 차단' });
     const detail = JSON.parse((await get(`/v1/ops/compliance/notices/${n.noticeId}`, operator)).payload) as { status: string; takenDownAt: string | null };
     expect(detail.status).toBe('TAKEN_DOWN');
     expect(typeof detail.takenDownAt).toBe('string');
 
     // 같은 키는 core를 다시 부르지 않고 같은 200, 같은 키·다른 본문은 422, 다른 키는 409
-    expect((await post(`/v1/ops/compliance/notices/${n.noticeId}/takedown`, operator, { reason: '통보에 따른 노출 차단' }, key)).statusCode).toBe(200);
+    expect((await post(`/v1/ops/compliance/notices/${n.noticeId}/takedown`, operator, { reason: rawReason }, key)).statusCode).toBe(200);
     expect(core.applyCalls).toHaveLength(1);
     const reused = await post(`/v1/ops/compliance/notices/${n.noticeId}/takedown`, operator, { reason: '다른 사유' }, key);
     expect(reused.statusCode).toBe(422);
@@ -308,13 +311,15 @@ describe('/v1/ops/compliance/notices', () => {
     expect((await post(`/v1/ops/compliance/notices/${n.noticeId}/withdrawal`, operator, { reason: '철회' }, 'not-a-uuid')).statusCode).toBe(400);
     expect((await post(`/v1/ops/compliance/notices/${n.noticeId}/withdrawal`, operator, { reason: '가'.repeat(2_001) }, randomUUID())).statusCode).toBe(400);
     const key = randomUUID();
-    const out = await post(`/v1/ops/compliance/notices/${n.noticeId}/withdrawal`, operator, { reason: '통보 철회' }, key);
+    const rawReason = '통\u202e보\u0007 철회';
+    const out = await post(`/v1/ops/compliance/notices/${n.noticeId}/withdrawal`, operator, { reason: rawReason }, key);
     expect(out.statusCode).toBe(200);
+    expect(JSON.parse(out.payload)).toMatchObject({ noticeId: n.noticeId, status: 'WITHDRAWN', reason: '통보 철회' });
     expect(core.withdrawCalls[0]).toMatchObject({ noticeId: n.noticeId, reason: '통보 철회' });
     const detail = JSON.parse((await get(`/v1/ops/compliance/notices/${n.noticeId}`, operator)).payload) as { status: string; withdrawnAt: string | null };
     expect(detail.status).toBe('WITHDRAWN');
     expect(typeof detail.withdrawnAt).toBe('string');
-    expect((await post(`/v1/ops/compliance/notices/${n.noticeId}/withdrawal`, operator, { reason: '통보 철회' }, key)).statusCode).toBe(200);
+    expect((await post(`/v1/ops/compliance/notices/${n.noticeId}/withdrawal`, operator, { reason: rawReason }, key)).statusCode).toBe(200);
     expect(core.withdrawCalls).toHaveLength(1);
     const reused = await post(`/v1/ops/compliance/notices/${n.noticeId}/withdrawal`, operator, { reason: '다른 사유' }, key);
     expect(reused.statusCode).toBe(422);

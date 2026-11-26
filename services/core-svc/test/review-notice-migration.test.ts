@@ -91,13 +91,13 @@ describe('F-07-11 마이그레이션 번호와 색인', () => {
       expect({ file: f, purgeIdx: /index[^;]*on content_report[^;]*\(purge_at\)/.test(sql) }).toEqual({ file: f, purgeIdx: false });
     }
     const grants = grantsOf(flatSql(sqlOf('0053_compliance_notice.sql')));
-    // DELETE는 WHERE(status, purge_at)를 읽으므로 SELECT가 함께 있어야 PostgreSQL이 허용한다
-    const tableSelect = grants.includes('core_maintenance content_report SELECT');
-    const columnSelect = grants
-      .filter((g) => g.startsWith('core_maintenance content_report SELECT ['))
-      .some((g) => g.includes('purge_at') && g.includes('status'));
+    // DELETE는 WHERE(status, purge_at)를 읽으므로 SELECT가 함께 있어야 PostgreSQL이 허용한다.
+    // data.md는 칸 한정 SELECT("purge_at","status")만 정한다: 표 전체 SELECT·다른 칸·UPDATE/INSERT는 실패다.
     expect(grants).toContain('core_maintenance content_report DELETE');
-    expect(tableSelect || columnSelect).toBe(true);
+    expect(grants).toContain('core_maintenance content_report SELECT [purge_at,status]');
+    expect(grants).not.toContain('core_maintenance content_report SELECT');
+    expect(grants.some((g) => g.startsWith('core_maintenance content_report SELECT [') && g !== 'core_maintenance content_report SELECT [purge_at,status]')).toBe(false);
+    expect(grants.some((g) => /^core_maintenance content_report (INSERT|UPDATE)( |$)/.test(g))).toBe(false);
     // 행 지우기는 정비 역할에만 주고, 팬 경로에는 주지 않는다
     expect(grants.some((g) => g.startsWith('core_app '))).toBe(false);
   });
