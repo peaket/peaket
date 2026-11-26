@@ -257,7 +257,9 @@ const acquireLock = async (client: MigrationClient, options: Required<Pick<RunMi
   await client.query(`SET lock_timeout = '${options.lockTimeoutMs}ms'`);
   for (let attempt = 0; attempt <= options.maxLockRetries; attempt += 1) {
     const result = await client.query('SELECT pg_try_advisory_lock($1, $2)', [MIGRATION_LOCK_CLASS, MIGRATION_LOCK_OBJECT]);
-    if (Boolean(result.rows[0]?.locked)) return;
+    const row = result.rows[0];
+    const locked = Boolean(row?.locked ?? row?.pg_try_advisory_lock ?? (row ? Object.values(row)[0] : false));
+    if (locked) return;
     if (attempt < options.maxLockRetries) {
       const delay = options.retryDelayMs[Math.min(attempt, options.retryDelayMs.length - 1)] ?? 0;
       await options.sleep(delay);
