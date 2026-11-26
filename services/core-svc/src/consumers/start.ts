@@ -6,8 +6,8 @@
 import { type Clock, type Database, drizzleHeldEventStore, heldEventCounts, type KafkaAuth, type Registry, systemClock } from '@peaket/platform';
 import { runKeyedConsumer } from '@peaket/platform/stream-worker';
 import type { ReviewAccountWithdrawnHandler } from '../modules/review/index.js';
-import { BookingConfirmedHandler, TRADE_ORDERS_TOPIC } from './booking-confirmed.js';
-import { CORE_GROUP, CORE_NOTIFY_GROUP, CORE_REVIEW_TOPICS, pidFreeHeldEventStore } from './index.js';
+import { BookingConfirmedHandler } from './booking-confirmed.js';
+import { CORE_GROUP, CORE_NOTIFY_GROUP, CORE_NOTIFY_TOPICS, CORE_REVIEW_TOPICS, pidFreeHeldEventStore } from './index.js';
 import { type ReviewRecheckLoopOptions, startReviewRecheckLoop } from './review-recheck.js';
 import type { NotificationIntake } from '../modules/notify/index.js';
 
@@ -81,7 +81,7 @@ export function startCoreConsumers(o: CoreConsumersOptions): CoreConsumers {
         clientId: `${o.clientId}-notify`,
         auth: o.auth,
         groupId: CORE_NOTIFY_GROUP(o.env),
-        topics: [TRADE_ORDERS_TOPIC],
+        topics: [...CORE_NOTIFY_TOPICS],
         handler: new BookingConfirmedHandler(o.booking.intake) as never,
         held: drizzleHeldEventStore(o.database, o.clock ?? systemClock),
         registry: o.registry,

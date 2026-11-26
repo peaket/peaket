@@ -12,8 +12,11 @@ export const CORE_NOTIFY_GROUP = (env: string): string => `peaket.core-svc-notif
 /** 탈퇴 사건 소비자가 읽는 토픽 */
 export const CORE_REVIEW_TOPICS = [ACCOUNTS_WITHDRAWN_TOPIC] as const satisfies readonly ['identity.accounts-withdrawn'];
 
-/** core-svc가 읽는 토픽 전체(탈퇴 사건 + F-06-8 trade.orders) */
-export const CORE_TOPICS = [...CORE_REVIEW_TOPICS, TRADE_ORDERS_TOPIC] as const;
+/** 탈퇴 사건 소비자가 읽는 토픽(기존 계약 그대로) */
+export const CORE_TOPICS = CORE_REVIEW_TOPICS;
+
+/** F-06-8 알림 소비자가 읽는 토픽 */
+export const CORE_NOTIFY_TOPICS = [TRADE_ORDERS_TOPIC] as const;
 
 export { BookingConfirmedHandler, TRADE_ORDERS_TOPIC } from './booking-confirmed.js';
 
