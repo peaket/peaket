@@ -4,7 +4,7 @@
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { ticketV1Ticket } from '@peaket/contracts/proto';
-import { verifyInternalGrpcActor } from '@peaket/platform';
+import { INTERNAL_GRPC_CALLER_HEADER, verifyInternalGrpcActor } from '@peaket/platform';
 import type { TicketService } from '../application/ticket-service.js';
 import { TransferError } from '../application/transfers.js';
 import { TicketConflictError, TicketInputError, TicketIssueBlockedError, TicketReclaimError } from '../domain/ticket.js';
@@ -280,20 +280,22 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
 
     // FLAGGED 취소 무효(F-06-3 IR-30). ops-svc만. 주문의 티켓을 무효로 하고 키를 폐기한다.
     VoidTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
-      if (o?.internalToken && !verifyInternalGrpcActor(call.metadata, o.internalToken, { caller: 'ops-svc' }).ok) {
+      const caller = call.metadata.get(INTERNAL_GRPC_CALLER_HEADER)[0];
+      // 이 RPC는 purchase-svc의 입금 오류 되돌림(입장 기록과 무관하게 무효)과 ops-svc의 FLAGGED 취소 무효(입장 기록이 있어야 무효)가 함께 쓴다.
+      // 부르는 쪽을 가르고, 두 호출자만 받는다(내부 토큰이 설정된 환경).
+      if (o?.internalToken && (!verifyInternalGrpcActor(call.metadata, o.internalToken, {}).ok || (caller !== 'ops-svc' && caller !== 'purchase-svc'))) {
         cb({ code: grpc.status.PERMISSION_DENIED, details: '부를 수 없는 호출자다' });
         return;
       }
       const req = call.request;
-      useCases.ticket
-        .voidOrderTickets({
-          orderId: text(req.order_id),
-          ...(text(req.event_id) ? { eventId: text(req.event_id) } : {}),
-          issueGeneration: typeof req.issue_generation === 'number' ? req.issue_generation : Number(req.issue_generation ?? 0),
-          nowMs: useCases.nowMs?.() ?? Date.now(),
-        })
-        .then((r) => cb(null, { voided: r.voided, already_entered: r.alreadyEntered }))
-        .catch((err: unknown) => fail('VoidTickets', err, text(req.order_id), cb, onError));
+      const orderId = text(req.order_id);
+      const issueGeneration = typeof req.issue_generation === 'number' ? req.issue_generation : Number(req.issue_generation ?? 0);
+      const nowMs = useCases.nowMs?.() ?? Date.now();
+      const work =
+        caller === 'ops-svc'
+          ? useCases.ticket.voidOrderTickets({ orderId, ...(text(req.event_id) ? { eventId: text(req.event_id) } : {}), issueGeneration, nowMs })
+          : useCases.ticket.blockIssue({ orderId, reason: 'FLAGGED_VOID', nowMs });
+      work.then((r) => cb(null, { voided: r.voided, already_entered: r.alreadyEntered })).catch((err: unknown) => fail('VoidTickets', err, orderId, cb, onError));
     },
 
     // 양도 회수 승인 전 대상 확인(F-06-3 IR-01·IR-08). 부르는 쪽은 ops-svc뿐이다.

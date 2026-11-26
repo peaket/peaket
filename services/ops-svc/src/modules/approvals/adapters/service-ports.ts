@@ -25,7 +25,7 @@ export class TicketReclaimClient {
     const at = address.lastIndexOf(':');
     const port = Number(address.slice(at + 1));
     if (at <= 0 || !Number.isInteger(port)) throw new Error('PEAKET_TICKET_GRPC_URL은 host:port여야 한다');
-    this.#client = createGrpcClient(ticketPackageLocal(), { host: address.slice(0, at), port, dependency: 'ticket-svc', caller: 'ops-svc', profile: 'service', timeoutCapMs: 10_000 }) as unknown as { GetReclaimBasis: Unary; ReclaimTransfer: Unary; VoidTickets: Unary };
+    this.#client = createGrpcClient(ticketPackageLocal(), { host: address.slice(0, at), port, dependency: 'ticket-svc', caller: 'ops-svc', ...(internalToken ? { internalToken } : {}), profile: 'service', timeoutCapMs: 10_000 }) as unknown as { GetReclaimBasis: Unary; ReclaimTransfer: Unary; VoidTickets: Unary };
   }
 
   async getBasis(ticketId: string): Promise<{ ticketId: string; payerAccountId: string; holderAccountId: string; entryStartsAtMs?: number; entryRecorded: boolean; status: string } | undefined> {
@@ -62,10 +62,8 @@ export class TicketReclaimClient {
   }
 
   #call(fn: Unary, req: object): Promise<Record<string, unknown>> {
-    const md = new grpc.Metadata();
-    if (this.internalToken) md.set('x-peaket-internal-token', this.internalToken);
-    md.set('x-peaket-caller', 'ops-svc');
-    return new Promise((resolve, reject) => fn(req, md, { deadline: Date.now() + 10_000 }, (e, v) => (e ? reject(e) : resolve(v ?? {}))));
+    // 토큰·호출자 머리는 createGrpcClient의 인터셉터가 붙인다(내부 gRPC 머리 이름과 토큰을 섞지 않는다)
+    return new Promise((resolve, reject) => fn(req, new grpc.Metadata(), { deadline: Date.now() + 10_000 }, (e, v) => (e ? reject(e) : resolve(v ?? {}))));
   }
 }
 

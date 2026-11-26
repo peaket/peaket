@@ -92,6 +92,7 @@ export class GrpcTicketIssuer implements TicketIssuer, TicketVoider {
       port,
       profile: o.profile ?? 'service',
       dependency: TICKET_DEPENDENCY,
+      caller: 'purchase-svc',
       timeoutCapMs: TICKET_ISSUE_CAP_MS,
     }) as unknown as grpc.Client & { IssueTickets: Unary; VoidTickets: Unary };
   }

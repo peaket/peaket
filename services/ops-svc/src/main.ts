@@ -9,7 +9,7 @@
 // staging·prod는 PEAKET_QUEUE_GRPC_URL·PEAKET_TRUST_GRPC_URL이 없으면 서비스를 만들기 전에 시작하지 않는다.
 import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
-import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, loadLogPseudonymizer, reauthJtiStoreFromEnv, tenantRateLimitRedisUrlFromEnv } from '@peaket/platform';
+import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, internalGrpcTokenFromEnv, loadLogPseudonymizer, reauthJtiStoreFromEnv, tenantRateLimitRedisUrlFromEnv } from '@peaket/platform';
 import { startServiceControlSync } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
 import { GrpcControlTransport } from './adapters/grpc-control-sender.js';
@@ -70,6 +70,8 @@ const coreUrl = process.env.PEAKET_CORE_HTTP_URL;
 const queueUrl = process.env.PEAKET_QUEUE_HTTP_URL;
 const paymentUrl = process.env.PEAKET_PAYMENT_HTTP_URL;
 const internalToken = process.env.PEAKET_INTERNAL_TOKEN;
+// ticket-svc gRPC는 HTTP 내부 토큰이 아니라 내부 gRPC 공유 토큰을 쓴다(SEC-01)
+const internalGrpcToken = internalGrpcTokenFromEnv(process.env);
 // 회차 취소 일괄 환불 gRPC(BAT-425 GAT-130). 주소가 없으면 EVENT_CANCEL은 내부 HTTP 호환 경로로 물러난다.
 const refunds = purchaseGrpcAddr ? new GrpcEventRefunds({ address: purchaseGrpcAddr }) : undefined;
 // queue-svc 클라이언트는 판매 중지·재개 집행(BAT-465 R-584)과 우선 구매 사본(GAT-135)이 함께 쓴다. 요청마다 자기 마감을 넘긴다.
@@ -134,7 +136,7 @@ const payouts = paymentUrl
   : undefined;
 // 계약 조건 변경 승인(BAT-615): core 계약 적용·취소. 주소가 없으면 그 경로가 503이고 시작은 막지 않는다
 const ticketReclaimUrl = process.env.PEAKET_TICKET_GRPC_URL;
-const ticketReclaim = ticketReclaimUrl ? new TicketReclaimClient(ticketReclaimUrl, internalToken) : undefined;
+const ticketReclaim = ticketReclaimUrl ? new TicketReclaimClient(ticketReclaimUrl, internalGrpcToken) : undefined;
 const approvalPorts = new HttpApprovalLifecyclePorts(purchaseUrl, ticketReclaim, internalToken);
 const approvals = {
   ...(coreUrl ? { core: new HttpCoreContract(createExternalHttpClient({ provider: 'core-svc', baseUrl: coreUrl, timeoutCapMs: 3_000 }), internalToken) } : {}),
