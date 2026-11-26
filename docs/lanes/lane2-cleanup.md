@@ -241,3 +241,4 @@
 - F-05-3 구현 리뷰 IR-10(낮음): 대조 한 틱이 100개를 차례로 2초 데드라인으로 보내 최악 200초까지 늘어난다. 한 틱 시간 한도나 병렬 상한을 두고, `queue.proto`의 1초 주석과 클라이언트 2초도 맞춘다
 
 - ~~F-05-2 뒤 web reflow wallet-enroll·wallet-live (CI 45267206465)~~ — **닫힘(2026-11-24, 073dc18c3·c3175c7b5)**: wallet-enroll은 live 목록·회차 요약 대역과 UUIDv7 티켓으로 바꾸고, wallet-live O-T52 ⑥은 데스크톱 안내 뒤 [그래도 이 기기에 등록]을 누르게 고쳤다. `web / reflow`·`visual`·`console-csp` 모두 통과(9ebc100ec·c3175c7b5). 남은 것은 서비스 워커가 제어하는 페이지의 등록·갱신을 이 두 시험이 덮지 않는 점(wallet-sw가 따로 본다)
+- F-06-3 시험 리뷰 낮음(2026-11-26, TR-18~20): `BOOKING_RESTRICTION` 승인 수명주기 시험 문장과 F-04-13 0037의 `reason_code` `FRAUD` 제한(F-06-4 확장 마이그레이션 필요), identity 0041을 쓰지 않는 근거(0003 CHECK·coord 반납), `contracts gen:check` 7파일 stale(구현 첫 커밋에서 `gen`). 계획 `docs/review/plans/F-06-3.md`
