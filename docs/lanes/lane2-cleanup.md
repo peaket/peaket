@@ -241,3 +241,13 @@
 - F-05-3 구현 리뷰 IR-10(낮음): 대조 한 틱이 100개를 차례로 2초 데드라인으로 보내 최악 200초까지 늘어난다. 한 틱 시간 한도나 병렬 상한을 두고, `queue.proto`의 1초 주석과 클라이언트 2초도 맞춘다
 
 - ~~F-05-2 뒤 web reflow wallet-enroll·wallet-live (CI 45267206465)~~ — **닫힘(2026-11-24, 073dc18c3·c3175c7b5)**: wallet-enroll은 live 목록·회차 요약 대역과 UUIDv7 티켓으로 바꾸고, wallet-live O-T52 ⑥은 데스크톱 안내 뒤 [그래도 이 기기에 등록]을 누르게 고쳤다. `web / reflow`·`visual`·`console-csp` 모두 통과(9ebc100ec·c3175c7b5). 남은 것은 서비스 워커가 제어하는 페이지의 등록·갱신을 이 두 시험이 덮지 않는 점(wallet-sw가 따로 본다)
+
+## F-06-8 시험 리뷰(2026-11-27, RV068)
+
+- RV068-13(중간, 그 밖): 계획 커밋 `eaa079320`이 로컬 develop `a565962a8`의 알림 설계 100파일을 통째로 가져왔다. F-06-9/10/11 계획·ADR-0389~0391·ops 알림 API·identity gen·d3/d5·wbs가 F-06-8에 필요하지 않다. F-06-8 정본(notify §4.8·§4.9, ADR-0392·0387·0388, data.md 예매번호·알림 표, openapi `OrderSummary.bookingNumber`, architecture §3.2 notice-view, ASVS notify)만 남기고 형제 기능 문서는 각 동결 가지나 공용 바탕으로 나눈다.
+- RV068-14(중간, 그 밖): 계획 §5·§10이 `openapi Order.bookingNumber`를 가리키지만 `Order`에는 그 칸이 없고 `OrderSummary.bookingNumber`(openapi 3049)와 `Ticket.bookingNumber`(729)만 있다. `Order`에 칸을 더할지 `OrderSummary`로 링크를 고칠지 정하고 `gen`을 함께 돌린다.
+- RV068-15(낮음, 그 밖): N-T25 가상계좌 시험이 `AWAITING_DEPOSIT → CONFIRMED → CONFIRMED(새 eventKey)`라 정본의 `CONFIRMED → AWAITING_DEPOSIT(입금 오류) → CONFIRMED` 되돌림을 보지 않는다. `AWAITING_DEPOSIT`에서 중복 표를 지우는 결함이 통과한다.
+- RV068-16(낮음, 그 밖): B-12 야간 푸시(21:00~08:00 KST에도 바로)를 시험하지 않는다. NOW가 12:00 KST라 야간 시각·`nightPush=false` 구독으로 푸시가 가는지 보는 시험이 필요하다.
+- RV068-17(낮음, 그 밖): N-T27 ⑥이 `bookingNo=null`만 보고 `모양이 틀림`(13자리·문자·0으로 시작하지 않음)을 보지 않는다. §4.9.1은 "없거나 모양이 틀리면" 작업을 만들지 않는다.
+- RV068-18(낮음, 그 밖): N-T28이 `<form>`·`<iframe>`·외부 `<link rel=stylesheet>`와 `From`/`Reply-To`를 단언하지 않는다. §4.9.2는 폼 없음·인라인 CSS·`From`/`Reply-To`를 정한다.
+- RV068-19(낮음, 그 밖): B-09 템플릿 판 되돌림(`templateVersion` v0 → 현재 판 + `notify_template_fallback_total`), B-14 80,000건 경고, 예매번호 없음·모양 틈의 SEV3를 시험하지 않는다. 80,000 경고는 F-06-9 관측 몫인지 이 기능 몫인지 계획에 적는다.
