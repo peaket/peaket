@@ -147,7 +147,7 @@ const full = (kind: string, extra: Record<string, unknown> = {}) => ({ kind, ord
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 
 describe('R-T26 ① 시스템 잘못이 확인된 환불', () => {
-  test('R-T26 ① SYSTEM_FAULT_REFUND는 EXCEPTION 사유·공제 0원으로 티켓을 취소하고 전액 환급한다', async () => {
+  test('R-T26 ① SYSTEM_FAULT_REFUND는 [ASVS v5.0.0-2.3.3] EXCEPTION 사유·공제 0원으로 티켓을 취소하고 전액 환급한다', async () => {
     const r = await post(full('SYSTEM_FAULT_REFUND'));
     expect(r.statusCode).toBe(200);
     expect(json(r)).toMatchObject({ status: 'REFUNDED', refundAmount: PRICE });
@@ -157,7 +157,7 @@ describe('R-T26 ① 시스템 잘못이 확인된 환불', () => {
     expect(state.created[0]).toMatchObject({ orderId: ORDER, ticketId: TICKET, reason: 'EXCEPTION', deductionAmount: 0, refundAmount: PRICE, approvalId: APPROVAL });
   });
 
-  test('R-T26 ① 같은 승인 ID로 다시 보내면 같은 취소 ID·결과를 주고 티켓을 다시 부르지 않는다', async () => {
+  test('R-T26 ① 같은 승인 ID로 [ASVS v5.0.0-2.3.4] 다시 보내면 같은 취소 ID·결과를 주고 티켓을 다시 부르지 않는다', async () => {
     const a = json(await post(full('SYSTEM_FAULT_REFUND')));
     const b = await post(full('SYSTEM_FAULT_REFUND'));
     expect(b.statusCode).toBe(200);
@@ -166,7 +166,7 @@ describe('R-T26 ① 시스템 잘못이 확인된 환불', () => {
     expect(state.created).toHaveLength(1);
   });
 
-  test('같은 승인 ID에 다른 본문이 오면 409 approval-refund-conflict이고 쓰기가 0이다', async () => {
+  test('같은 승인 ID에 다른 본문이 오면 [ASVS v5.0.0-2.3.4] 409 approval-refund-conflict이고 쓰기가 0이다', async () => {
     await post(full('SYSTEM_FAULT_REFUND'));
     const r = await post(full('SYSTEM_FAULT_REFUND', { amount: PRICE - 1 }));
     expect(r.statusCode).toBe(409);
@@ -175,7 +175,7 @@ describe('R-T26 ① 시스템 잘못이 확인된 환불', () => {
     expect(state.created).toHaveLength(1);
   });
 
-  test('승인 금액이 권면 전액과 다르면 422 approval-refund-amount-mismatch이고 쓰기가 0이다', async () => {
+  test('승인 금액이 권면 전액과 다르면 [ASVS v5.0.0-2.2.1] 422 approval-refund-amount-mismatch이고 쓰기가 0이다', async () => {
     const r = await post(full('SYSTEM_FAULT_REFUND', { amount: PRICE - 1 }));
     expect(r.statusCode).toBe(422);
     expect(json(r)).toMatchObject({ type: expect.stringContaining('approval-refund-amount-mismatch') });
@@ -199,7 +199,7 @@ describe('R-T26 ① 시스템 잘못이 확인된 환불', () => {
     expect(state.created).toHaveLength(0);
   });
 
-  test('내부 토큰이 없거나 틀리면 403이고, 호출자가 ops-svc가 아니면 403이며 쓰기가 0이다', async () => {
+  test('내부 토큰이 없거나 틀리면 [ASVS v5.0.0-8.3.1] 403이고, 호출자가 ops-svc가 아니면 403이며 쓰기가 0이다', async () => {
     const noToken = await svc.http.inject({ method: 'POST', url: `/internal/v1/approval-refunds/${APPROVAL}`, headers: { 'content-type': 'application/json' }, payload: JSON.stringify(full('SYSTEM_FAULT_REFUND')) });
     expect(noToken.statusCode).toBe(403);
     const wrongCaller = await post(full('SYSTEM_FAULT_REFUND'), APPROVAL, { 'x-peaket-caller': 'purchase-svc' });
@@ -259,9 +259,27 @@ describe('R-T26 ③ 미성년자 계약 취소', () => {
     expect(state.created).toHaveLength(0);
   });
 
-  test('R-T26 ③ 응답에 생년월일·연계정보·계좌 원문이 없다', async () => {
+  test('R-T26 ③ 응답에 생년월일·연계정보·계좌 원문이 없다 [ASVS v5.0.0-16.3.2]', async () => {
     const r = await post(full('MINOR_CONTRACT_CANCEL'));
     expect(r.statusCode).toBe(200);
     expect(r.payload).not.toMatch(/birth|resident|accountNumber|CI|연계정보|생년월일/);
+  });
+
+  test('R-T26 ③ 입장 시작 시각이 지났으면 409 minor-contract-entry-started이고 쓰기가 0이다 [ASVS v5.0.0-8.2.2]', async () => {
+    state.views.set(TICKET, viewOf({ entryOpensAtMs: NOW - 1 }));
+    const r = await post(full('MINOR_CONTRACT_CANCEL'));
+    expect(r.statusCode).toBe(409);
+    expect(json(r)).toMatchObject({ type: expect.stringContaining('minor-contract-entry-started') });
+    expect(state.ticketCalls).toHaveLength(0);
+    expect(state.created).toHaveLength(0);
+  });
+
+  test('R-T26 ① 시스템 잘못 환불이 입장 시작 뒤면 지금 환급하지 않고 REQUESTED로 두어 마감 뒤 실행기가 맡는다 [ASVS v5.0.0-2.3.3]', async () => {
+    state.views.set(TICKET, viewOf({ entryOpensAtMs: NOW - 1 }));
+    const r = await post(full('SYSTEM_FAULT_REFUND'));
+    expect(r.statusCode).toBe(200);
+    expect(json(r)).toMatchObject({ status: 'REQUESTED' });
+    expect(state.paymentCalls).toHaveLength(0);
+    expect(state.created[0]).toMatchObject({ reason: 'EXCEPTION', status: 'REQUESTED', deductionAmount: 0, refundAmount: PRICE });
   });
 });

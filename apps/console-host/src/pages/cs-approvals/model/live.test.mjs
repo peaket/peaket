@@ -3,7 +3,7 @@
 // docs/api/openapi.yaml ApprovalRequest·PayoutBatch.payeeDigest, docs/api/guidelines.md '판·ETag'.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { approvalPageOf, approvalViewOf, canAct, digestMatches, errorOf, ifMatchOf, kindLabel, payeeDigestOf, statusOf, versionOfEtag } from './live.ts';
+import { approvalPageOf, approvalViewOf, canAct, digestMatches, errorOf, evidenceOf, ifMatchOf, kindLabel, payeeDigestOf, quorumLabel, statusOf, versionOfEtag } from './live.ts';
 
 const BASE = {
   approvalId: '0194f063-0000-7000-8000-000000000001',
@@ -26,11 +26,28 @@ const BASE = {
 };
 
 test('알 수 없는 칸은 버리고 화면이 쓰는 칸만 남긴다', () => {
-  const v = approvalViewOf({ ...BASE, payerName: '홍길동', phone: '010-0000-0000', bankAccount: '123-456', nested: { x: 1 } });
+  const v = approvalViewOf({ ...BASE, payerName: '홍길동', phone: '010-0000-0000', bankAccount: '123-456', nested: { x: 1 }, requiredApprovals: 2, evidenceChecked: 'PHONE_VERIFICATION', version: 7 });
   assert.ok(v);
   for (const k of ['payerName', 'phone', 'bankAccount', 'nested']) assert.equal(k in v, false, k);
   assert.equal(v.approvalId, BASE.approvalId);
   assert.equal(v.amount, 30_000);
+  assert.equal(v.requiredApprovals, 2);
+  assert.equal(v.evidenceChecked, 'PHONE_VERIFICATION');
+  assert.equal(v.version, 7);
+});
+
+test('1·2인 배지는 요청자 말고 필요한 승인 인원으로 읽는다', () => {
+  assert.equal(quorumLabel(2), '1인 승인');
+  assert.equal(quorumLabel(3), '2인 승인');
+  assert.equal(quorumLabel(1), '승인 없음');
+  assert.equal(quorumLabel(9), null);
+});
+
+test('증빙은 확인한 종류만 보이고 파일·내용은 보이지 않는다', () => {
+  assert.equal(evidenceOf({ evidenceChecked: 'DOCUMENT:진단서', evidenceFile: 'x' }), '서류: 진단서');
+  assert.equal(evidenceOf({ evidenceChecked: 'PHONE_VERIFICATION' }), '휴대폰 본인확인 대조');
+  assert.equal(evidenceOf({}), null);
+  assert.equal(evidenceOf({ evidenceChecked: 'OTHER' }), 'OTHER');
 });
 
 test('필수 칸이 빠지거나 모르는 종류·상태면 그 줄을 버린다', () => {

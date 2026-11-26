@@ -91,7 +91,7 @@ const req = (ticketId: string, approvalId = APPROVAL, o: { payer?: string; holde
 });
 
 describe('TransferReclaim 호출자 검사', () => {
-  it('R-T29 ops-svc가 아닌 신원의 ReclaimTransfer는 PERMISSION_DENIED이고 보유자가 그대로다', async () => {
+  it('R-T29 ops-svc가 아닌 신원의 ReclaimTransfer는 PERMISSION_DENIED이고 보유자가 그대로다 [ASVS v5.0.0-8.3.1]', async () => {
     const t = await seed();
     for (const m of [md({ caller: 'purchase-svc' }), md({ token: 'wrong', caller: 'ops-svc' }), md({ token: TOKEN }), new grpc.Metadata()]) {
       await expect(call(guardedClient, req(t.ticketId), m)).rejects.toMatchObject({ code: grpc.status.PERMISSION_DENIED });
@@ -101,7 +101,7 @@ describe('TransferReclaim 호출자 검사', () => {
 });
 
 describe('R-T29 양도 회수', () => {
-  it('R-T29 소명 기한 뒤·입장 시작 전이면 보유자를 결제자로 되돌리고 결과를 남긴다', async () => {
+  it('R-T29 소명 기한 뒤·입장 시작 전이면 보유자를 결제자로 되돌리고 결과를 남긴다 [ASVS v5.0.0-15.4.2]', async () => {
     const t = await seed();
     const r = await call(openClient, req(t.ticketId), md({ caller: 'ops-svc' }));
     expect(r).toMatchObject({ result: 'RECLAIMED', ticket_id: t.ticketId, previous_holder_account_id: RECIPIENT });
@@ -160,9 +160,28 @@ describe('R-T29 양도 회수', () => {
     await expect(call(openClient, req(randomUUID()), md({ caller: 'ops-svc' }))).rejects.toMatchObject({ code: grpc.status.NOT_FOUND });
   });
 
-  it('R-T29 같은 승인으로 다른 기대 보유자를 보내면 결과가 갈리지 않는다', async () => {
+  it('R-T29 같은 승인으로 다른 기대 보유자를 보내면 결과가 갈리지 않는다 [ASVS v5.0.0-2.3.4]', async () => {
     const t = await seed();
     await call(openClient, req(t.ticketId), md({ caller: 'ops-svc' }));
     await expect(call(openClient, req(t.ticketId, APPROVAL, { holder: randomUUID() }), md({ caller: 'ops-svc' }))).rejects.toMatchObject({ code: grpc.status.FAILED_PRECONDITION });
+  });
+
+  it('R-T29 기대 결제자가 표의 결제자와 다르면 INVALID_ARGUMENT이고 보유자가 그대로다 [ASVS v5.0.0-8.2.2]', async () => {
+    const t = await seed();
+    const wrongPayer = randomUUID();
+    await expect(call(openClient, req(t.ticketId, APPROVAL, { payer: wrongPayer, holder: RECIPIENT }), md({ caller: 'ops-svc' }))).rejects.toMatchObject({ code: grpc.status.INVALID_ARGUMENT });
+    expect((await tickets.tickets.get(t.ticketId))?.accountId).toBe(RECIPIENT);
+  });
+
+  it('R-T29 마감(deadline_ms)이 지났으면 FAILED_PRECONDITION이고 보유자가 그대로다 [ASVS v5.0.0-2.3.3]', async () => {
+    const t = await seed();
+    await expect(call(openClient, { ...req(t.ticketId), deadline_ms: NOW - 1 }, md({ caller: 'ops-svc' }))).rejects.toMatchObject({ code: grpc.status.FAILED_PRECONDITION });
+    expect((await tickets.tickets.get(t.ticketId))?.accountId).toBe(RECIPIENT);
+  });
+
+  it('R-T29 같은 승인·표에 다른 기대 결제자를 보내도 결과가 갈리지 않는다 [ASVS v5.0.0-15.4.2]', async () => {
+    const t = await seed();
+    await call(openClient, req(t.ticketId), md({ caller: 'ops-svc' }));
+    await expect(call(openClient, req(t.ticketId, APPROVAL, { payer: randomUUID(), holder: RECIPIENT }), md({ caller: 'ops-svc' }))).rejects.toMatchObject({ code: grpc.status.FAILED_PRECONDITION });
   });
 });

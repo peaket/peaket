@@ -28,13 +28,23 @@ test('화면은 생성 호출 다섯과 세션 읽기만 쓰고 fetch를 만들�
   assert.match(operations, /createOpsApprovalRequestApproval: \{[^}]*method: "POST",path: "\/v1\/ops\/approval-requests\/\{approvalId\}\/approvals"/);
 });
 
-test('승인·반려·철회는 한 곳에서만 보내고 처리 중에는 다시 보내지 않는다', () => {
+test('승인·반려·철회는 한 곳에서만 보내고 처리 중에는 다시 보내지 않으며 판을 If-Match로 싣는다', () => {
   assert.equal(count(connected, /createOpsApprovalRequestApproval\(/g), 1);
   assert.equal(count(connected, /createOpsApprovalRequestRejection\(/g), 1);
   assert.equal(count(connected, /createOpsApprovalRequestWithdrawal\(/g), 1);
   assert.match(connected, /if \(busy\) return/);
   assert.match(connected, /setBusy\(true\)/);
   assert.match(connected, /finally \{\s*setBusy\(false\)/);
+  assert.match(connected, /headers: \{ 'If-Match': ifMatchOf\(version\) \}/);
+  assert.ok(count(connected, /'If-Match': ifMatchOf\(/g) >= 1);
+});
+
+test('1·2인 배지와 증빙 확인 사실을 싣고 종류별 카드를 그린다', () => {
+  assert.match(connected, /quorumLabel\(/);
+  assert.match(connected, /evidenceOf\(/);
+  assert.match(cards, /SYSTEM_FAULT_REFUND/);
+  assert.match(cards, /MINOR_CONTRACT_CANCEL/);
+  assert.match(cards, /TRANSFER_RECLAIM/);
 });
 
 test('승인은 재인증 토큰을 머리로 보내고 요청자에게는 버튼을 숨긴다', () => {
