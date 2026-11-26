@@ -62,18 +62,58 @@ const core = {
   },
 };
 
+/** 통보 표·조치 표의 시험 저장소. `takedown_notice_action.reason` 저장값을 직접 읽기 위해 넘긴다 */
+class TestComplianceStore {
+  readonly notices = new Map<string, any>();
+  readonly actions: any[] = [];
+  async insertNotice(n: any): Promise<void> {
+    this.notices.set(n.noticeId, n);
+  }
+  async findNotice(noticeId: string): Promise<any> {
+    return this.notices.get(noticeId);
+  }
+  async findByIdempotency(requestedBy: string, idempotencyKey: string): Promise<any> {
+    return [...this.notices.values()].find((n) => n.requestedBy === requestedBy && n.idempotencyKey === idempotencyKey);
+  }
+  async listNotices(q: any): Promise<{ items: any[]; nextCursor: string | null }> {
+    let items = [...this.notices.values()];
+    if (typeof q.status === 'string' && q.status !== '') items = items.filter((n) => n.status === q.status);
+    items.sort((a, b) => (q.sort === 'LATEST' ? b.createdAtMs - a.createdAtMs : a.dueAtMs - b.dueAtMs));
+    const at = typeof q.cursor === 'string' ? items.findIndex((n) => n.noticeId === q.cursor) : -1;
+    const start = at >= 0 ? at + 1 : 0;
+    const page = items.slice(start, start + q.limit);
+    const next = start + page.length < items.length ? (page.at(-1)?.noticeId ?? null) : null;
+    return { items: page, nextCursor: next };
+  }
+  async updateNotice(noticeId: string, patch: any): Promise<void> {
+    const n = this.notices.get(noticeId);
+    if (n) this.notices.set(noticeId, { ...n, ...patch });
+  }
+  async insertAction(a: any): Promise<void> {
+    this.actions.push(a);
+  }
+  async findAction(noticeId: string, action: string, idempotencyKey: string): Promise<any> {
+    return this.actions.find((a) => a.noticeId === noticeId && a.action === action && a.idempotencyKey === idempotencyKey);
+  }
+  async actionsOf(noticeId: string): Promise<any[]> {
+    return this.actions.filter((a) => a.noticeId === noticeId);
+  }
+}
+
 let svc: Awaited<ReturnType<typeof createService>>;
+let store: TestComplianceStore;
 const opened: Awaited<ReturnType<typeof createService>>[] = [];
 afterAll(async () => {
   for (const s of opened.splice(0)) await s.close();
 });
 
-async function harness(): Promise<{ clock: ReturnType<typeof fakeClock> }> {
+async function harness(): Promise<{ clock: ReturnType<typeof fakeClock>; store: TestComplianceStore }> {
   const clock = fakeClock({ now: NOW });
+  store = new TestComplianceStore();
   svc = await createService({
     name: 'ops-svc',
     // compliance 옵션은 이 기능이 더한다. 기준 트리에서는 AppModule이 모르는 칸을 무시해 경로가 404다
-    module: AppModule.register({ memory: true, compliance: { core, audit } } as never),
+    module: AppModule.register({ memory: true, compliance: { core, audit, store } } as never),
     env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: quiet(),
@@ -84,7 +124,7 @@ async function harness(): Promise<{ clock: ReturnType<typeof fakeClock> }> {
   core.withdrawCalls.length = 0;
   core.failNext = false;
   audit.calls.length = 0;
-  return { clock };
+  return { clock, store };
 }
 
 interface CreateBody {
@@ -263,6 +303,8 @@ describe('/v1/ops/compliance/notices', () => {
     expect(JSON.parse(first.payload)).toMatchObject({ noticeId: n.noticeId, status: 'TAKEN_DOWN', reason: '통보 차단' });
     expect(core.applyCalls).toHaveLength(1);
     expect(core.applyCalls[0]).toMatchObject({ noticeId: n.noticeId, reviewIds: body.reviewIds, receivedAt: body.receivedAt, deadline: 'H24', reason: '통보 차단' });
+    // takedown_notice_action.reason 저장값도 정규화한 사유다(data.md 2263)
+    expect((await store.actionsOf(n.noticeId)).find((a) => a.action === 'TAKEDOWN')?.reason).toBe('통보 차단');
     const detail = JSON.parse((await get(`/v1/ops/compliance/notices/${n.noticeId}`, operator)).payload) as { status: string; takenDownAt: string | null };
     expect(detail.status).toBe('TAKEN_DOWN');
     expect(typeof detail.takenDownAt).toBe('string');
@@ -316,6 +358,8 @@ describe('/v1/ops/compliance/notices', () => {
     expect(out.statusCode).toBe(200);
     expect(JSON.parse(out.payload)).toMatchObject({ noticeId: n.noticeId, status: 'WITHDRAWN', reason: '통보 철회' });
     expect(core.withdrawCalls[0]).toMatchObject({ noticeId: n.noticeId, reason: '통보 철회' });
+    // takedown_notice_action.reason 저장값도 정규화한 사유다(data.md 2263)
+    expect((await store.actionsOf(n.noticeId)).find((a) => a.action === 'WITHDRAWAL')?.reason).toBe('통보 철회');
     const detail = JSON.parse((await get(`/v1/ops/compliance/notices/${n.noticeId}`, operator)).payload) as { status: string; withdrawnAt: string | null };
     expect(detail.status).toBe('WITHDRAWN');
     expect(typeof detail.withdrawnAt).toBe('string');
