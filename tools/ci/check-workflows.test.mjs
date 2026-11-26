@@ -1163,6 +1163,12 @@ const wfFile = (n) => join(REPO, '.github', 'workflows', n);
 const wfText = (n) => readFileSync(wfFile(n), 'utf8');
 const wfDoc = (n) => YAML.parse(wfText(n));
 
+/** `${{ ... }}` GitHub 조건을 시험 문맥으로 계산한다. `schedule && false` 같은 문자열만 맞춘 조건을 잡는다 */
+function evalGithubIf(expr, github, inputs = {}) {
+  const body = String(expr).replace(/^\s*\$\{\{\s*/, '').replace(/\s*\}\}\s*$/, '');
+  return Boolean(new Function('github', 'inputs', `return (${body});`)(github, inputs));
+}
+
 test('BOT-161 dast-nightly.yml은 수동·workflow_call로도 돌고 PR·푸시마다 돌지 않는다(예약은 INF-030이 되살린다)', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
   const d = wfDoc('dast-nightly.yml');
   assert.ok('workflow_dispatch' in d.on);
@@ -1181,6 +1187,7 @@ test('INF-030 ① ci-kind.yml은 매주 토요일 03:00 KST에 예약하고 참�
   assert.ok('workflow_dispatch' in w.on, 'ci-kind.yml에 수동 실행이 없다');
   assert.ok('workflow_call' in w.on, 'ci-kind.yml에 workflow_call이 없다');
   assert.ok(!('push' in w.on) && !('pull_request' in w.on), 'ci-kind.yml이 푸시·PR마다 돈다');
+  assert.equal(w.permissions?.['issues'], undefined, 'ci-kind.yml 워크플로 맨 위 permissions에 issues: write가 있다');
   assert.ok(
     !Object.values(w.jobs).some((j) => j.permissions?.['issues'] === 'write'),
     'ci-kind.yml이 이슈를 연다(참고용이라 이슈를 열지 않는다, ADR-0331 결정 9)',
@@ -1193,17 +1200,24 @@ test('INF-030 ② dast-nightly.yml은 매일 03:00 KST에 예약하고 예약 �
   assert.ok('workflow_dispatch' in d.on, 'dast-nightly.yml에 수동 실행이 없다');
   assert.ok('workflow_call' in d.on, 'dast-nightly.yml에 workflow_call이 없다');
   const withIssues = Object.entries(d.jobs).filter(([, j]) => j.permissions?.['issues'] === 'write');
+  assert.equal(d.permissions?.['issues'], undefined, 'dast-nightly.yml 워크플로 맨 위 permissions에 issues: write가 있다');
   assert.deepEqual(withIssues.map(([name]) => name), ['notify-scheduled-failure'], 'issues: write가 알림 잡 밖에 있다');
   const notify = d.jobs['notify-scheduled-failure'];
   assert.match(String(notify.if), /failure\(\)/);
   assert.match(String(notify.if), /github\.event_name == 'schedule'/);
 });
 
-test('INF-030 ③ perf-nightly.yml은 매일 03:00 KST에 예약하고 예약에서 nightly 잡이 돈다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
+test('INF-030 ③ perf-nightly.yml은 매일 03:00 KST에 예약하고 예약에서만 nightly 잡이 돈다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
   const p = wfDoc('perf-nightly.yml');
   assert.deepEqual(p.on.schedule, [{ cron: '0 18 * * *' }], `perf-nightly.yml 예약: ${JSON.stringify(p.on.schedule)}`);
   assert.ok('workflow_dispatch' in p.on, 'perf-nightly.yml에 수동 실행이 없다');
-  assert.match(String(p.jobs.nightly.if), /github\.event_name == 'schedule'/, 'nightly 잡이 예약에서 돌지 않는다');
+  const nightlyIf = p.jobs.nightly.if;
+  assert.equal(evalGithubIf(nightlyIf, { event_name: 'schedule' }, {}), true, `예약에서 nightly 잡이 돌지 않는다: ${nightlyIf}`);
+  assert.equal(evalGithubIf(nightlyIf, { event_name: 'workflow_dispatch' }, { mode: 'nightly' }), true, `수동 nightly에서 잡이 돌지 않는다: ${nightlyIf}`);
+  assert.equal(evalGithubIf(nightlyIf, { event_name: 'workflow_dispatch' }, { mode: 'aa' }), false, `A/A 실행에서 nightly 잡이 돈다: ${nightlyIf}`);
+  const aaIf = p.jobs.aa.if;
+  assert.equal(evalGithubIf(aaIf, { event_name: 'schedule' }, {}), false, `예약에서 A/A 잡이 돈다: ${aaIf}`);
+  assert.equal(evalGithubIf(aaIf, { event_name: 'workflow_dispatch' }, { mode: 'aa' }), true, `수동 A/A에서 잡이 돌지 않는다: ${aaIf}`);
 });
 
 test('BOT-161 dast-nightly.yml은 kind에 v0·게이트웨이를 올리고 www·api·partner만 ZAP으로 점검하며 ops-api·scanner-api는 뺀다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {

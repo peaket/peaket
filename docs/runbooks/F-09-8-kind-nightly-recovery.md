@@ -7,10 +7,19 @@
 
 ## 1. 준비
 
-아래 명령은 저장소 뿌리에서 Git Bash로 실행하는 것을 기준으로 적는다. PowerShell에서는 `export` 대신 `$env:PEAKET_CLUSTER='freeze-f098'`처럼 같은 값을 잡는다.
+아래 명령은 저장소 뿌리에서 Git Bash로 실행하는 것을 기준으로 적는다. PowerShell에서는 같은 환경 값을 `$env:PEAKET_CLUSTER='freeze-f098'`처럼 잡는다. **`export`에 기대지 않는다**: 클러스터를 만지거나 그 클러스터를 쓰는 명령마다 `PEAKET_CLUSTER=freeze-f098`을 붙인다. 새 셸에서 `export`가 빠지면 기본 이름 `peaket` 클러스터를 지울 수 있기 때문이다.
 
 1. Docker 엔진과 Node 24, pnpm이 있는지 본다. `docker version`이 서버 판을 내야 한다.
-2. Docker 차례 잠금을 잡는다. **다른 갈래가 kind를 쓰는 중이면 기다린다.**
+2. 뿌리 의존성을 잠금 파일대로 설치한다. `cluster.mjs`가 `yaml`을 쓰고, `tools/web-checks`의 Playwright가 `queue-cors.e2e.mjs`에 필요하다.
+
+   ```bash
+   corepack pnpm install --frozen-lockfile
+   corepack pnpm --dir tools/web-checks install --frozen-lockfile
+   corepack pnpm --dir tools/web-checks exec playwright install --with-deps chromium firefox webkit
+   ```
+
+   Windows에서 `--with-deps`가 시스템 패키지 설치를 건너뛰어도 브라우저 셋은 받는다. 브라우저를 받지 못하면 `queue-cors.e2e.mjs`가 Playwright를 찾지 못해 실패한다.
+3. Docker 차례 잠금을 잡는다. **다른 갈래가 kind를 쓰는 중이면 기다린다.**
 
    ```bash
    "C:\Program Files\Git\bin\bash.exe" D:/ticketpass-locks/lock.sh who docker
@@ -18,53 +27,59 @@
    ```
 
    `pause` 파일이 있으면 `allow: lane1-F-09-8`이 있을 때만 잡는다. 잡은 시각을 측정 기록에 적는다.
-3. 이 PC에서 다른 갈래의 클러스터를 건드리지 않도록 이름과 포트를 고정한다. 기본 이름 `peaket`을 쓰지 않는다.
-
-   ```bash
-   export PEAKET_CLUSTER=freeze-f098
-   export PEAKET_GATEWAY_BASE_PORT=18641
-   ```
-
-   kubeconfig는 `.cache/peaket-tools/kubeconfig-freeze-f098`이고, 게이트웨이 포트는 `127.0.0.1:18641~18645`다. 다른 클러스터·컨테이너는 그대로 둔다.
-4. 도구를 받고 해시를 확인한다. `node tools/local/tools.mjs kind`·`kubectl`·`helm`이 경로를 내야 한다.
+4. 도구를 받고 해시를 확인한다. `node tools/local/tools.mjs kind`·`kubectl`·`helm`이 경로를 내야 한다. kubeconfig는 `.cache/peaket-tools/kubeconfig-freeze-f098`이고, 게이트웨이 포트는 `127.0.0.1:18641~18645`다.
 
 ## 2. kind 재가동
 
 ```bash
-node tools/local/cluster.mjs up
-node tools/local/cluster.mjs status
+PEAKET_CLUSTER=freeze-f098 PEAKET_GATEWAY_BASE_PORT=18641 node tools/local/cluster.mjs up
+PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs status
 ```
 
 `up`은 kind 클러스터 `freeze-f098`과 Strimzi Kafka 3.9.1, PostgreSQL 18, AWS 흉내 서버를 띄운다. 처음에는 이미지를 받느라 몇 분 걸린다. `status`가 핵심 파드가 준비됐다고 할 때까지 기다린다. 실패하면 `docker ps`·`kubectl --kubeconfig .cache/peaket-tools/kubeconfig-freeze-f098 get pods -A`로 원인을 가르고 측정 기록에 적는다.
 
 ## 3. ci-kind 시험
 
-`ci-kind.yml`과 같은 차례로 돈다. 각 명령의 실패 줄·소요 시간을 측정 기록에 적는다.
+`ci-kind.yml`과 같은 차례로 돈다. 준비·정리 단계까지 그대로 따른다. 각 명령의 실패 줄·소요 시간을 측정 기록에 적는다.
 
 ```bash
-node tools/local/cluster.mjs image
+PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs image
 node --test tools/local/e2e/aws-emulator.e2e.mjs tools/local/e2e/relay-takeover.e2e.mjs
 node --test tools/local/e2e/observability.e2e.mjs
 node --test --test-timeout=900000 tools/local/e2e/probes.e2e.mjs
 node --test --test-timeout=900000 tools/local/e2e/diagnose.e2e.mjs
-node tools/local/cluster.mjs v0
+
+# v0 앞: 앞 시험의 작업 부하(예제 서비스·Kafka)를 내려 자리를 낸다
+k=$(node tools/local/tools.mjs kubectl | cut -d' ' -f2)
+"$k" --kubeconfig .cache/peaket-tools/kubeconfig-freeze-f098 delete namespace example kafka --ignore-not-found --wait=false
+
+PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs v0
 node --test tools/local/e2e/v0-deploy.e2e.mjs
-node tools/local/cluster.mjs gateways
+
+# 게이트웨이 앞: v0를 내려 자리를 낸다
+"$k" --kubeconfig .cache/peaket-tools/kubeconfig-freeze-f098 delete namespace v0 --ignore-not-found --wait=false
+
+PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs gateways
 node --test --test-timeout=300000 tools/local/e2e/gateways.e2e.mjs
 node --test --test-timeout=300000 tools/local/e2e/queue-cors.e2e.mjs
 node --test --test-timeout=300000 tools/local/e2e/gateway-limits.e2e.mjs
 node --test --test-timeout=300000 tools/local/e2e/gateway-routes.e2e.mjs
 node --test --test-timeout=300000 tools/local/e2e/gateway-admission.e2e.mjs
 node --test --test-timeout=600000 tools/local/e2e/gateway-admission-fault.e2e.mjs
-node tools/local/cluster.mjs mesh-netpol
+PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs mesh-netpol
 node --test --test-timeout=300000 tools/local/e2e/mesh-netpol.e2e.mjs
-node tools/local/cluster.mjs kyverno --env demo
+PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs kyverno --env demo
 node --test --test-timeout=900000 tools/local/e2e/kyverno.e2e.mjs
 ```
 
-- v0와 게이트웨이 사이에 v0 네임스페이스를 지우는 단계가 있다(`ci-kind.yml`). 같은 클러스터에서 자리를 비우려면 그 단계를 그대로 따른다.
-- Kyverno 입장 시험은 Linux의 `--network host`를 전제한다. Windows에서는 설치·정책 적용(`cluster.mjs kyverno --env demo`)까지만 보고, 입장 시험은 CI/Linux 몫으로 넘긴다. 넘긴 사실을 측정 기록에 적는다.
-- 실패가 나오면 마지막 통과 커밋 `fe21934d`(2026-11-19) 뒤에 바뀐 것을 먼저 본다. ADR-0332 맥락이 든 후보는 Kyverno 입장 시험, 게이트웨이 e2e, 데모 시드다. 재현 명령·실패 줄·원인·고침(또는 남은 위험)을 적는다.
+- `queue-cors.e2e.mjs`는 `tools/web-checks`의 Playwright 브라우저 셋을 쓴다. §1의 설치를 건너뛰면 브라우저를 찾지 못해 실패한다.
+- Kyverno 입장 시험은 Linux의 `--network host`를 전제한다. Windows에서는 설치·정책 적용(`PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs kyverno --env demo`)까지만 보고, 입장 시험은 CI/Linux 몫으로 넘긴다. 넘긴 사실을 측정 기록에 적는다.
+- 실패가 나오면 마지막 통과 커밋 `fe21934d`(2026-11-19) 뒤에 바뀐 것을 먼저 본다. 범위를 좁히는 명령은 아래와 같다. ADR-0332 맥락이 든 후보는 Kyverno 입장 시험, 게이트웨이 e2e, 데모 시드다. 재현 명령·실패 줄·원인·고침(또는 남은 위험)을 적는다.
+
+  ```bash
+  git log --oneline fe21934d..HEAD -- tools/local .github/workflows deploy/local deploy/gateways
+  git diff --stat fe21934d..HEAD -- tools/local .github/workflows deploy/local deploy/gateways
+  ```
 
 ## 4. 야간 실행 수동 복구
 
@@ -80,8 +95,10 @@ kind의 www·api·partner만 ZAP 기준선으로 점검하고 High(7.0 이상) 0
 
 ### 4.2 야간 축소 성능(D-T40)
 
+`prepare.mjs`가 안에서 `cluster.mjs up --v0-only`와 `v0`를 부르므로, `PEAKET_CLUSTER`를 명령 앞에 붙여 자식 프로세스까지 같은 클러스터를 쓰게 한다.
+
 ```bash
-python -I -X utf8 tools/perf-ledger/nightly.py run --config loadtest/nightly/config.json --out .cache/nightly-results.json --deadline-s 7000
+PEAKET_CLUSTER=freeze-f098 python -I -X utf8 tools/perf-ledger/nightly.py run --config loadtest/nightly/config.json --out .cache/nightly-results.json --deadline-s 7000
 python -I -X utf8 tools/perf-ledger/nightly.py compare --results .cache/nightly-results.json --threshold loadtest/nightly/threshold.json --alert-out .cache/nightly-alert.md
 ```
 
@@ -92,7 +109,16 @@ python -I -X utf8 tools/perf-ledger/nightly.py compare --results .cache/nightly-
 `docs/review/measurements/F-09-8-kind-recheck.md`의 표를 위에서 아래로 돈다. 행마다 명령·판정 근거·상태를 채운다.
 
 - 상태는 `대기`·`통과`·`실패`·`해당 없음`·`동결` 다섯뿐이다. 실행하지 않은 항목을 `통과`로 적지 않는다.
-- `동결`은 까닭을 적는다(예: C-T61 ⑦은 BAT-365/INF-020, V-T47 ⑥·V-T30 ③은 운영 Grafana·Mimir·수집기 배포가 INF-020).
+- `동결`은 까닭을 적는다(예: C-T61 ⑦은 BAT-365/INF-020, V-T47 ⑥·V-T30 ③은 운영 Grafana·Mimir·수집기 배포가 INF-020, F-01-4 운영 확인 네 줄·Tempo 마이크로서비스 모드도 같은 배포가 필요하다).
+- F-01-5의 로컬 Prometheus `rule_files`와 Grafana 주석 링크는 로컬 관측 최소로 확인한다.
+
+  ```bash
+  PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs observability
+  PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs prometheus
+  curl -s http://127.0.0.1:9090/api/v1/rules
+  PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs grafana
+  ```
+
 - 상태가 바뀐 항목만 `docs/review/ledger-notes.md`를 고치고, 장부 파일은 손으로 고치지 않고 다시 쓴다.
 
 ```bash
@@ -104,8 +130,8 @@ node tools/ci/ledger.mjs --batch F-09-8 --require
 ## 6. 정리
 
 ```bash
-node tools/local/cluster.mjs status
-node tools/local/cluster.mjs down
+PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs status
+PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs down
 ```
 
 - `down`은 `PEAKET_CLUSTER=freeze-f098` 클러스터만 지운다. 기본 이름 `peaket`이나 다른 갈래의 `lane*` 클러스터를 지우지 않았는지 `kind get clusters`와 `docker ps`로 확인한다.
@@ -122,5 +148,5 @@ node tools/local/cluster.mjs down
 - **기본 가지 예약**: GitHub은 예약 워크플로를 기본 가지(`develop`)의 최신 커밋에서만 돌린다. freeze 가지의 `on.schedule`은 병합 전에 울리지 않는다.
 - **저장소 변수**: `PEAKET_KIND_IN_CI`는 저장소 변수라 소유자가 켠다. 이 절차는 `ci.yml`의 조건이 그 변수를 보는지 정적으로 확인할 뿐, 변수를 켜지 않는다.
 - **Windows Kyverno**: Kyverno 입장 시험은 Linux 환경 몫이다. Windows에서는 설치·정책 적용까지만 본다.
-- **동결 몫**: INF-020의 배포 묶음, 운영 Grafana·Mimir·Loki·Tempo 응답, 수집기 셋의 실제 kind 확인, CronJob 마지막 성공 경보는 이 절차에서 닫지 않는다.
+- **동결 몫**: INF-020의 배포 묶음, 운영 Grafana·Mimir·Loki·Tempo 응답, 수집기 셋의 실제 kind 확인, CronJob 마지막 성공 경보, F-01-4 운영 확인 표 네 줄·Tempo 마이크로서비스 모드는 이 절차에서 닫지 않는다.
 - **비용·알림**: 병합 뒤 예약이 돌면 주 1회 kind(약 90분 상한), 매일 DAST·야간 성능이 돌고, DAST·성능 실패는 SEV3 이슈를 연다. 동결을 풀 때 소유자가 판단한다.

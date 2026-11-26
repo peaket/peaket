@@ -16,6 +16,11 @@ const LEDGER_NOTES = join(REPO, 'docs', 'review', 'ledger-notes.md');
 const YAML = await import('yaml').catch(() => null);
 const read = (p) => readFileSync(p, 'utf8');
 
+/** 문서의 펜스 코드 블록만 이어 붙인다. 산문 속 명령 이름과 실제 실행 명령을 가르려고 쓴다 */
+function fencedBlocks(doc) {
+  return [...doc.matchAll(/```[a-z]*\r?\n([\s\S]*?)```/g)].map((m) => m[1]).join('\n');
+}
+
 /** ci-kind.yml의 run 줄에서 kind 무대 명령과 e2e 파일을 뽑는다(주석 줄도 글자로는 센다) */
 function ciKindCommands() {
   const wf = YAML.parse(read(join(REPO, '.github', 'workflows', 'ci-kind.yml')));
@@ -39,7 +44,7 @@ test('INF-010 ① 복구 절차는 ci-kind.yml의 모든 kind 무대·e2e 명령
   for (const c of cluster) assert.ok(doc.includes(`cluster.mjs ${c}`), `복구 절차에 cluster.mjs ${c}가 없다`);
 });
 
-test('INF-010 ② 복구 절차는 동결 로컬 한계와 다른 갈래 보호를 적는다', () => {
+test('INF-010 ② 복구 절차는 동결 로컬 한계와 다른 갈래 보호를 적고 모든 클러스터 명령에 이름을 붙인다', () => {
   assert.ok(existsSync(RUNBOOK), `복구 절차 문서가 없다: ${RUNBOOK}`);
   const doc = read(RUNBOOK);
   for (const s of [
@@ -55,9 +60,38 @@ test('INF-010 ② 복구 절차는 동결 로컬 한계와 다른 갈래 보호�
   }
   assert.match(doc, /cluster\.mjs down/, '복구 절차에 정리(down)가 없다');
   assert.match(doc, /다른 갈래|다른 클러스터/, '다른 갈래 클러스터를 건드리지 않는 주의가 없다');
+  // 새 셸에서 export가 빠져도 기본 peaket 클러스터를 만지지 않도록 명령마다 이름을 붙인다
+  for (const line of fencedBlocks(doc).split(/\r?\n/)) {
+    if (!line.includes('tools/local/cluster.mjs')) continue;
+    assert.ok(line.includes('PEAKET_CLUSTER=freeze-f098'), `클러스터 이름이 없는 명령: ${line.trim()}`);
+  }
 });
 
-/** ledger-notes가 kind 보류로 적은 항목(첫 칸)과 ADR-0332 결정 4가 든 재확인 ID */
+test('INF-010 ③ 복구 절차는 ci-kind의 준비·정리 단계를 차례대로 담는다', () => {
+  assert.ok(existsSync(RUNBOOK), `복구 절차 문서가 없다: ${RUNBOOK}`);
+  const doc = read(RUNBOOK);
+  for (const s of [
+    'pnpm install --frozen-lockfile',
+    'pnpm --dir tools/web-checks install --frozen-lockfile',
+    'playwright install --with-deps chromium firefox webkit',
+    'delete namespace example kafka',
+    'delete namespace v0',
+  ]) {
+    assert.ok(doc.includes(s), `복구 절차에 준비·정리 단계 '${s}'가 없다`);
+  }
+  const code = fencedBlocks(doc);
+  const at = (s) => {
+    const i = code.indexOf(s);
+    assert.ok(i >= 0, `복구 절차 코드에 '${s}'가 없다`);
+    return i;
+  };
+  assert.ok(at('pnpm install --frozen-lockfile') < at('cluster.mjs up'), '의존성 설치가 클러스터 생성 뒤에 있다');
+  assert.ok(at('playwright install') < at('queue-cors.e2e.mjs'), 'Playwright 설치가 queue-cors 시험 뒤에 있다');
+  assert.ok(at('delete namespace example kafka') < at('cluster.mjs v0'), 'example·kafka 정리가 v0 배포 뒤에 있다');
+  assert.ok(at('delete namespace v0') < at('cluster.mjs gateways'), 'v0 정리가 게이트웨이 배포 뒤에 있다');
+});
+
+/** ledger-notes가 kind 보류로 적은 항목(첫 칸)과 ADR-0332 결정 4·BUILD_ORDER INF-040이 든 재확인 ID */
 function recheckIds() {
   const ids = new Set();
   for (const line of read(LEDGER_NOTES).split(/\r?\n/)) {
@@ -65,8 +99,17 @@ function recheckIds() {
     const id = line.split('|')[1]?.trim();
     if (id) ids.add(id);
   }
-  // ADR-0332 결정 4 '이미 통과했던 것' + 이 기능이 함께 보는 kind 항목
-  for (const id of ['Q-T69 ②', 'S-T28 ①', 'D-T50', 'D-T43', 'D-T36', 'D-T33', 'D-T18', 'D-T19', 'V-T43', 'I-T36', 'V-T28 ①']) ids.add(id);
+  // ADR-0332 결정 4 '이미 통과했던 것'과 이 기능이 함께 보는 하위 번호
+  for (const id of [
+    'Q-T69 ②', 'S-T28 ①', 'D-T50', 'D-T43', 'D-T36', 'D-T11 ②',
+    'D-T18 ①', 'D-T18 ②', 'D-T19 ③', 'D-T19 ④', 'D-T33 ①', 'D-T33 ②',
+    'V-T43', 'I-T36', 'V-T28 ①',
+  ]) ids.add(id);
+  // BUILD_ORDER INF-040이 F-01-2·F-01-3·F-01-4·F-01-5에서 넘겨받은 것
+  for (const id of [
+    'F-01-4 운영 확인 ①', 'F-01-4 운영 확인 ②', 'F-01-4 운영 확인 ③', 'F-01-4 운영 확인 ④',
+    'F-01-4 Tempo 마이크로서비스 모드', 'F-01-5 로컬 Prometheus rule_files', 'F-01-5 Grafana 주석 링크',
+  ]) ids.add(id);
   return ids;
 }
 
@@ -85,10 +128,10 @@ function recheckRows() {
   return rows;
 }
 
-/** 'D-T33' 요구를 'D-T33 ①' 행이 덮는지 */
-const covered = (rows, id) => rows.some((r) => r[0] === id || r[0].startsWith(`${id} `));
+/** 요구한 ID와 첫 칸이 정확히 같은 행이 있는지(하위 번호를 뭉뚱그리지 않는다) */
+const covered = (rows, id) => rows.some((r) => r[0] === id);
 
-test('INF-040 ① 장부 재확인 표는 kind 보류·INF-040 항목과 ADR-0332의 재확인 ID를 모두 담는다', () => {
+test('INF-040 ① 장부 재확인 표는 kind 보류·INF-040 항목과 ADR-0332·F-01-4·F-01-5의 재확인 ID를 모두 담는다', () => {
   const rows = recheckRows();
   const missing = [...recheckIds()].filter((id) => !covered(rows, id));
   assert.deepEqual(missing, [], `재확인 표에 빠진 항목: ${missing.join(', ')}`);
@@ -96,7 +139,7 @@ test('INF-040 ① 장부 재확인 표는 kind 보류·INF-040 항목과 ADR-033
 
 test('INF-040 ② 재확인 표의 각 줄은 명령·판정 근거·상태를 가진다', () => {
   const rows = recheckRows();
-  assert.ok(rows.length >= 11, `재확인 표가 ${rows.length}줄뿐이다`);
+  assert.ok(rows.length >= 20, `재확인 표가 ${rows.length}줄뿐이다`);
   const allowed = new Set(['대기', '통과', '실패', '해당 없음', '동결']);
   for (const [id, what, command, basis, status] of rows) {
     assert.ok(id, '항목 칸이 비었다');
