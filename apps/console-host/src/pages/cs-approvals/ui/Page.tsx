@@ -6,11 +6,13 @@
 // 부정 예매 조치 넷(보드에 없는 변형, d5 §7.7)의 사람: 승인자 수진(commander, 지정 없음) · 요청자 본인은 조사관 도윤(cs_lead) ·
 // 열 수 없음은 가명정보 취급자 태오(commander). ?designation=으로 고른 지정이 이 사람의 지정보다 이긴다(features/preview-host).
 import type { ConsoleRole } from '@peaket/ds/ConsoleShell';
+import { useSearchParams } from 'react-router';
 import { DESIGNATED, OPERATORS, type Operator } from '@/entities/operator';
 import { useBoardPage, type BoardGaps } from '@/shared/lib/board';
 import { usePreviewHost, useChosenRole } from '@/features/preview-host';
 import { BOARD_PEOPLE, NoAccess, ReadOnlyScope, type Access } from '@/features/screen-access';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
+import { ConnectedPage } from './ConnectedPage';
 import { DEFAULT, STATES, fraudVariant, type FraudVariant, type State } from '../states';
 import { MainD, OverlaysD, valsD } from './board-d';
 import { MainM, OverlaysM, valsM } from './board-m';
@@ -37,6 +39,11 @@ const FRAUD_PEOPLE: Record<FraudVariant, Operator> = {
 };
 
 export function Page() {
+  const [sp] = useSearchParams();
+  return __PREVIEW__ && sp.get('state') ? <BoardPage /> : <ConnectedPage />;
+}
+
+function BoardPage() {
   const chosen = useChosenRole();
   const { state, boardStates, layout, close, go } = useBoardPage(TITLE, STATES, DEFAULT, GAPS);
   const vd = valsD(state);

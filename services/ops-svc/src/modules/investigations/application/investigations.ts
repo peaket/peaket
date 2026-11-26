@@ -22,10 +22,12 @@ import {
 import { CaseAlreadyExistsError, type CaseAuditRecord, type IdempotentWrite } from '../domain/ports.js';
 import type {
   FraudAlerts,
+  FraudAppealCopies,
   FraudForensicsRunner,
   FraudLabels,
   FraudNotifier,
   FraudOpsEventSink,
+  FraudTicketDirectory,
   InvestigationAccessLog,
   InvestigationStore,
   SnapshotVerifier,
@@ -52,6 +54,12 @@ export interface InvestigationsDeps {
   readonly now: () => number;
   readonly audit?: { append(r: { recordType: string; recordId: string; payload: Record<string, unknown>; nowMs: number }): Promise<void> };
   readonly runner?: FraudForensicsRunner;
+  /** F-04-15 소명 화면용 사본. 없으면 사본을 쓰지 않는다 */
+  readonly copies?: FraudAppealCopies;
+  /** F-04-15 결제자별 잠긴 표를 사본에 싣기 위한 티켓 조회 */
+  readonly tickets?: Pick<FraudTicketDirectory, 'listForAction'>;
+  /** F-04-15 사건 상세 evidenceBundleIds. 없으면 빈 목록 */
+  readonly evidence?: { listBundleIds(eventId: string, caseId: string): Promise<readonly string[]> };
 }
 
 const iso = (ms: number | null): string | null => (ms === null ? null : new Date(ms).toISOString());
@@ -229,7 +237,7 @@ export class Investigations {
     };
   }
 
-  caseView(c: FraudCaseRecord, nowMs: number, snapshot?: FraudSnapshotRecord | null, entryOpensAtMs?: number | null): Record<string, unknown> {
+  caseView(c: FraudCaseRecord, nowMs: number, snapshot?: FraudSnapshotRecord | null, entryOpensAtMs?: number | null, evidenceBundleIds: readonly string[] = []): Record<string, unknown> {
     const active = activeMembers(c);
     const results = active.map((m) => m.appealResult);
     let appealOutcome = 'NOT_REQUESTED';
@@ -260,7 +268,7 @@ export class Investigations {
       members: c.members.map((m) => this.memberView(m, nowMs, c.status, entryOpensAtMs)),
       appealOutcome,
       investigatorOpinion: c.investigatorOpinion,
-      evidenceBundleIds: [],
+      evidenceBundleIds: [...evidenceBundleIds],
       events: c.events.map((e) => ({ seq: e.seq, kind: e.kind, actorId: e.actorId, note: e.note, detail: e.detail, occurredAt: iso(e.occurredAtMs), occurredAtMs: e.occurredAtMs })),
       ...(snapshot ? { snapshot: this.snapshotView(snapshot)! } : {}),
     };
@@ -434,8 +442,9 @@ export class Investigations {
     if (!c) throw problem('not-found', 404, '사건을 찾을 수 없습니다');
     const snapshot = await this.d.store.latestSnapshot(c.eventId);
     const schedule = await this.d.schedule.get(c.eventId).catch(() => null);
+    const evidenceBundleIds = this.d.evidence ? await this.d.evidence.listBundleIds(c.eventId, caseId).catch(() => []) : [];
     await this.allow(actor, 'FRAUD_CASE_GET', { caseId }, c.members.length);
-    return { view: this.caseView(c, this.d.now(), snapshot, schedule?.entryOpensAtMs), version: c.version };
+    return { view: this.caseView(c, this.d.now(), snapshot, schedule?.entryOpensAtMs, evidenceBundleIds), version: c.version };
   }
 
   async patchCase(
@@ -729,6 +738,41 @@ export class Investigations {
       return outcome.result as Record<string, unknown>;
     }
     await this.#auditIfStoreCannot(audit);
+    // F-04-15: 결제자·받은 사람 화면용 사본. 사본 실패는 소명 요청·잠금을 막지 않는다.
+    if (this.d.copies) {
+      const ticketRows = this.d.tickets ? await this.d.tickets.listForAction({ eventId: current.eventId, payerAccountIds: body.accountIds }).catch(() => []) : [];
+      for (const accountId of body.accountIds) {
+        const member = next.members.find((m) => m.accountId === accountId);
+        const lockedTicketIds = ticketRows.filter((t) => t.payerAccountId === accountId).map((t) => t.ticketId);
+        try {
+          await this.d.copies.set({
+            caseId,
+            eventId: current.eventId,
+            accountId,
+            version: next.version,
+            lockActive: true,
+            objectionDueAtMs: null,
+            actionResult: null,
+            party: 'PAYER',
+            state: 'OPEN',
+            reasonCategories: [...body.reasonCategories],
+            dueAtMs,
+            lockedTicketIds,
+            heldTicketIds: [],
+            lockExpiresAtMs: member?.lockExpiresAtMs ?? null,
+          });
+        } catch {
+          // 사본 실패는 다음 정비·재요청이 다시 쓴다.
+        }
+      }
+      for (const [accountId, ticketIds] of holders) {
+        try {
+          await this.d.copies.set({ caseId, eventId: current.eventId, accountId, version: next.version, lockActive: false, objectionDueAtMs: null, actionResult: null, party: 'HOLDER', state: 'OPEN', reasonCategories: [], dueAtMs, lockedTicketIds: [], heldTicketIds: [...ticketIds], lockExpiresAtMs: null });
+        } catch {
+          // 위와 같다.
+        }
+      }
+    }
     // 알림은 사건 저장 뒤에 보낸다(IR-07). 실패해도 잠금만 남은 500이 아니라 201이고 실패를 사건 기록에 남긴다
     await this.#notifyHolders(actor, current.eventId, caseId, dueAtMs, holders, nowMs);
     await this.allow(actor, 'FRAUD_CASE_APPEAL', { caseId }, body.accountIds.length, { audit: false });

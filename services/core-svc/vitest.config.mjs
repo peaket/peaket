@@ -1,6 +1,6 @@
 // 단위 시험(Vitest). 공용 패키지는 원본으로 잇는다(빌드 없이 시험, packages/platform과 같은 방식).
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import { testReport } from '../../packages/config/vitest/report.mjs';
 
 const src = (p) => fileURLToPath(new URL(p, import.meta.url));
@@ -17,6 +17,8 @@ export default defineConfig({
     ...testReport(),
     environment: 'node',
     include: ['test/**/*.test.ts'],
+    // F-04-15 migration-0048은 node:test로 쓴 고정 시험이라 Vitest 밖에서 `node --test`로 돈다(package.json test).
+    exclude: [...configDefaults.exclude, 'test/migration-0048.test.ts'],
     passWithNoTests: false,
   },
 });

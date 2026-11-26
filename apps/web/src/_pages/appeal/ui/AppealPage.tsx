@@ -55,6 +55,7 @@ import type { PageProps } from '@/shared/lib/page-props';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { AppShell } from '@/widgets/app-shell';
 import { appealView, type AppealView } from '../model/state';
+import { FraudAppealLive } from './FraudAppealLive';
 import { ObjectionToggle } from './ObjectionToggle';
 
 const HINT = '건강 정보 같은 민감한 내용은 적지 않아도 됩니다';
@@ -104,11 +105,23 @@ function heldTickets(a: Appeal, withNotes: boolean): AppealLockedTickets | undef
 
 export async function AppealPage({ params, searchParams }: PageProps<{ id: string }>) {
   const { id } = await params;
+  const sp = await searchParams;
+  const dark = resolvePreviewTheme(sp) === 'dark';
+  // 실제 부정 예매 소명(사건 UUID)은 live 화면, apl- 예시와 ?state=는 퍼블리싱 보드다.
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return (
+      <AppShell dark={dark}>
+        <main className="page-main px-4 pt-4 pb-10 md:px-6 md:pt-8 md:pb-12 lg:pt-10 lg:pb-16" id="main" tabIndex={-1}>
+          <div className="col mx-auto w-full max-w-[560px] gap-5">
+            <FraudAppealLive caseId={id} />
+          </div>
+        </main>
+      </AppShell>
+    );
+  }
   const base = getAppeal(id);
   if (!base) notFound();
-  const sp = await searchParams;
   const state = resolvePreviewState(sp, SCR042_STATES, defaultState(base));
-  const dark = resolvePreviewTheme(sp) === 'dark';
   const v = appealView(state);
   const appeal = pickAppeal(v, base);
   const reclaim = appeal.kind === 'reclaim';

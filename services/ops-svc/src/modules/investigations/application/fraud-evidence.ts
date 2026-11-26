@@ -115,8 +115,6 @@ export class EvidenceBundles {
     if (!c) throw bareProblem('not-found', 404, '사건을 찾을 수 없습니다');
     if (c.status !== 'ACTIONED' && c.status !== 'OBJECTED' && c.status !== 'REVERSED') throw bareProblem('case-not-actioned', 409, '조치한 사건만 증거 묶음을 만들 수 있습니다');
     if (body.reason.trim() === '') throw bareProblem('invalid-body', 400, '사유가 필요합니다');
-    const existing = await this.#findBundleForCase(c);
-    if (existing) return this.#bundleView(existing, await this.d.store.listCustody(existing.bundleId));
     const nowMs = this.d.now();
     const bundle = await this.#newBundle(c, actor.accountId, nowMs, body.reason);
     const view = this.#bundleView(bundle, [{ ...(await this.#createdCustody(bundle, actor.accountId, body.reason, nowMs)) }]);

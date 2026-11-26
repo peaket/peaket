@@ -8,6 +8,7 @@ import { NotifyModule } from './modules/notify/index.js';
 import type { NotificationTransport } from './modules/notify/index.js';
 import type { WebhookStore } from './modules/notify/domain/ports.js';
 import { ExportModule, type MemoryExportWiring } from './modules/export/index.js';
+import { SupportModule, type SupportWiring } from './modules/support/index.js';
 
 @Module({})
 export class AppModule {
@@ -43,6 +44,8 @@ export class AppModule {
           saleConfigMetrics?: SaleConfigMetrics;
           /** payment-svc 지급대행 등록(F-07-7, ADR-0370). main.ts가 assemblePayoutRegistration으로 넘긴다 */
           payoutRegistration?: PayoutRegistrationPort;
+          /** F-04-15 support. 운영은 DB 저장소와 Redis 사본을 main이 넘긴다 */
+          support?: Partial<SupportWiring>;
         }
       | {
           memory: true;
@@ -60,6 +63,8 @@ export class AppModule {
           saleConfigMetrics?: SaleConfigMetrics;
           /** 시험이 넘기는 지급대행 등록 대역(F-07-7). 없으면 둘 다 꺼짐 */
           payoutRegistration?: PayoutRegistrationPort;
+          /** F-04-15 support. 시험은 메모리 저장소·사본·fake 포트를 넘긴다 */
+          support?: SupportWiring;
         },
   ): DynamicModule {
     if ('database' in o)
@@ -88,6 +93,7 @@ export class AppModule {
             ...(o.purchaseHttp ? { purchaseHttp: o.purchaseHttp } : {}),
             ...(o.reauthJti ? { reauthJti: o.reauthJti } : {}),
           }),
+          SupportModule.register({ storage: 'database', database: o.database, ...(o.support ?? {}) }),
         ],
       };
     return {
@@ -98,6 +104,7 @@ export class AppModule {
         ShopModule.register({ storage: 'memory', ...(o.shop ? { wiring: o.shop } : {}) }),
         NotifyModule.register({ storage: 'memory', ...(o.notify?.store ? { store: o.notify.store } : {}), ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}), ...(o.notify?.fanNotify ? { fanNotify: o.notify.fanNotify } : {}), ...(o.catalog ? { catalog: o.catalog } : {}) }),
         ExportModule.register({ storage: 'memory', ...(o.export ? { wiring: o.export } : {}) }),
+        SupportModule.register({ storage: 'memory', ...(o.support ? { wiring: o.support } : {}) }),
       ],
     };
   }

@@ -187,7 +187,28 @@ export interface FraudApproverDirectory {
 }
 
 export interface FraudAppealCopies {
-  set(i: { caseId: string; eventId: string; accountId: string; version: number; lockActive: boolean; objectionDueAtMs: number | null; actionResult: Record<string, unknown> | null }): Promise<void>;
+  set(i: {
+    caseId: string;
+    eventId: string;
+    accountId: string;
+    version: number;
+    lockActive: boolean;
+    objectionDueAtMs: number | null;
+    actionResult: Record<string, unknown> | null;
+    party: 'PAYER' | 'HOLDER';
+    state?: 'OPEN' | 'SUBMITTED' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
+    reasonCategories?: readonly string[];
+    dueAtMs?: number;
+    lockedTicketIds?: readonly string[];
+    heldTicketIds?: readonly string[];
+    excludedTicketIds?: readonly string[];
+    lockExpiresAtMs?: number | null;
+    objectionState?: 'NONE' | 'SUBMITTED' | 'ACCEPTED' | 'REJECTED';
+    objectionNote?: string | null;
+    priorityPurchases?: readonly Record<string, unknown>[];
+    restrictedUntilMs?: number | null;
+    cancelledTicketIds?: readonly string[];
+  }): Promise<void>;
 }
 
 export interface FraudApprovalRecord {

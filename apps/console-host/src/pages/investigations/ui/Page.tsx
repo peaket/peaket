@@ -42,6 +42,7 @@ import { usePreviewKeep } from '@/shared/lib/preview';
 import { Overlay } from '@/shared/ui/Overlay';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { DEFAULT, STATES, type State } from '../states';
+import { ConnectedPage } from './ConnectedPage';
 
 const TITLE = '부정 거래 조사';
 
@@ -64,6 +65,11 @@ const shortHash = (h: string) => `${h.slice(0, 8)}…${h.slice(-8)}`;
 const copy = (text: string) => void navigator.clipboard?.writeText(text).catch(() => undefined);
 
 export function Page() {
+  const [sp] = useSearchParams();
+  return __PREVIEW__ && sp.get('state') ? <BoardPage /> : <ConnectedPage />;
+}
+
+function BoardPage() {
   const chosen = useChosenRole();
   const { state, boardStates, layout, close, go } = useBoardPage(TITLE, STATES, DEFAULT, GAPS);
   const now = NOW_OF[state] ?? NOW;

@@ -7,7 +7,7 @@
 // - 자체 법률 검토(ADR-0173, apply-legal-review-to-screens): 잠금에 최대 기한(소명 요청 + 14일), 받은 사람 안내와 진술, 이용 제한 끝은 요청 + 1년까지,
 //   받은 사람이 가진 표는 조치 대상에서 기본으로 빠짐, 의견 칸의 행동 요약 규칙, 고소·고발용 요약(COMPLAINT). 묶음 계정의 행동 값을 나란히 견주는 보기는 두지 않는다(결정 5).
 import { useEffect, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
 import { CaseStatusBadge } from '@peaket/ds/CaseStatusBadge';
 import {
   APPEAL_LOCK_NOTICE,
@@ -60,6 +60,7 @@ import { useBoardPage, type BoardGaps } from '@/shared/lib/board';
 import { Overlay } from '@/shared/ui/Overlay';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
 import { STATES, type State } from '../states';
+import { ConnectedPage } from './ConnectedPage';
 import { LegendShape, LinkGraph, LinkTable } from './LinkGraph';
 
 const TITLE = '사건 작업대';
@@ -148,6 +149,11 @@ function resultsOf(phase: Phase, c: FraudCaseFixture): (i: number) => AppealResu
 }
 
 export function Page() {
+  const [sp] = useSearchParams();
+  return __PREVIEW__ && sp.get('state') ? <BoardPage /> : <ConnectedPage />;
+}
+
+function BoardPage() {
   const { caseId = DEFAULT_CASE_ID } = useParams();
   const c = getCase(caseId);
   const chosen = useChosenRole();

@@ -48,6 +48,7 @@ import {
 } from './modules/review/index.js';
 import { DrizzleWebhookStore, FanNotificationWorker, HttpsWebhookTransport, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
 import { GrpcHeldTickets, GrpcMerchPayments, RedisMerchStock, type ShopLogger, ShopSignals, closedShopReauthGate, shopReauthGateFromEnv, unavailableHeldTickets, unavailableMerchPayments, unavailableMerchStock } from './modules/shop/index.js';
+import { HttpFraudCaseAppeals, MemoryFraudAppealViews, RedisFraudAppealViews, startSupportGrpc } from './modules/support/index.js';
 
 const SERVICE = 'core-svc';
 assertInternalGrpcToken(process.env);
@@ -156,6 +157,10 @@ const opsApprovals = opsHttpUrl
   ? new HttpOpsApprovals(createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsHttpUrl, timeoutCapMs: 3_000 }), process.env.PEAKET_INTERNAL_TOKEN)
   : undefined;
 if (!opsApprovals) console.warn(JSON.stringify({ level: 'warn', kind: 'promoter-contract-wiring', msg: 'PEAKET_OPS_HTTP_URL이 없어 계약 변경 요청이 503 dependency-unavailable이다' }));
+// F-04-15 support. 화면용 사본은 PEAKET_REDIS_URL이 있으면 세션·캐시 Redis, 없으면 local·ci 메모리다. FRAUD_CASE는 ops 내부 경로로 잇는다.
+const supportRedis = process.env.PEAKET_REDIS_URL ? await createHotRedis({ url: process.env.PEAKET_REDIS_URL }) : undefined;
+const supportViews = supportRedis ? new RedisFraudAppealViews(supportRedis) : new MemoryFraudAppealViews();
+const supportCases = opsHttpUrl ? new HttpFraudCaseAppeals(createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsHttpUrl, timeoutCapMs: 3_000 }), process.env.PEAKET_INTERNAL_TOKEN) : undefined;
 
 // 판매 승인 뒤 purchase-svc 내부 판매 열기(BAT-616, ADR-0327). 주소가 없으면 승인은 되고 열기·사본은 'unwired' 경고만 남긴다(대기열은 닫힌 채로 남는다)
 const purchaseHttpUrl = process.env.PEAKET_PURCHASE_HTTP_URL;
@@ -228,9 +233,12 @@ const service = await createService({
       : {}),
     identityGrpc,
     reauthJti: reauthJtiStoreFromEnv(process.env, queueRedis),
+    support: { views: supportViews, ...(supportCases ? { fraudCases: supportCases } : {}) },
   }),
 });
 serviceLogger = service.logger;
+const supportGrpcPort = process.env.PEAKET_SUPPORT_GRPC_PORT ? Number(process.env.PEAKET_SUPPORT_GRPC_PORT) : undefined;
+const supportGrpc = supportGrpcPort && Number.isInteger(supportGrpcPort) ? startSupportGrpc({ port: supportGrpcPort, ...(process.env.PEAKET_INTERNAL_TOKEN ? { token: process.env.PEAKET_INTERNAL_TOKEN } : {}), views: supportViews }) : undefined;
 shopSignals.register(service.metrics.registry);
 saleConfigMetrics.register(service.metrics.registry);
 if (eligibilityCopy instanceof UnwiredSaleEligibilityCopy) eligibilityCopy.register(service.metrics.registry);
@@ -314,6 +322,7 @@ function shutdown(): Promise<void> {
     // Kafka 소비자를 먼저 멈춘다(받기를 멈추고 처리 중인 키를 마친 뒤 커밋). 실패해도 나머지는 그대로 끝낸다
     await consumers?.stop().catch((err: unknown) => service.logger.error({ dep: 'kafka', err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)'));
     // 받는 요청을 마치고 identity 채널과 DB 연결을 닫는다
+    supportGrpc?.forceShutdown();
     await service
       .close()
       .catch((err: unknown) => service.logger.error({ err }, 'core-svc 종료 실패'))
@@ -327,6 +336,7 @@ function shutdown(): Promise<void> {
         heldTickets?.close();
         void queueRedis?.close();
         void shopRedis?.close();
+        void supportRedis?.close();
         // 종료 세션 목록 소비는 서비스를 닫은 뒤(처리 중인 요청이 끝난 뒤) 끈다(ADR-0333 결정 2)
         return Promise.all([controlSync?.close(), database.close(), partnerDatabase.close(), opsDatabase.close(), consumerDatabase.close(), searchDatabase.close(), notifyDatabase.close()]);
       });

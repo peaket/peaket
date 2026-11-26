@@ -33,28 +33,37 @@ export class GrpcFraudAppealCopies implements FraudAppealCopies {
     this.#token = o.token;
   }
 
-  async set(i: { caseId: string; eventId: string; accountId: string; version: number; lockActive: boolean; objectionDueAtMs: number | null; actionResult: Record<string, unknown> | null }): Promise<void> {
+  async set(i: { caseId: string; eventId: string; accountId: string; version: number; lockActive: boolean; objectionDueAtMs: number | null; actionResult: Record<string, unknown> | null; party?: 'PAYER' | 'HOLDER'; state?: 'OPEN' | 'SUBMITTED' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED'; reasonCategories?: readonly string[]; dueAtMs?: number; lockedTicketIds?: readonly string[]; heldTicketIds?: readonly string[]; excludedTicketIds?: readonly string[]; lockExpiresAtMs?: number | null; objectionState?: 'NONE' | 'SUBMITTED' | 'ACCEPTED' | 'REJECTED'; objectionNote?: string | null; priorityPurchases?: readonly Record<string, unknown>[]; restrictedUntilMs?: number | null; cancelledTicketIds?: readonly string[] }): Promise<void> {
     const metadata = new grpc.Metadata();
     if (this.#token) {
       metadata.set(INTERNAL_GRPC_TOKEN_HEADER, this.#token);
       metadata.set(INTERNAL_GRPC_CALLER_HEADER, CALLER);
     }
     const result = i.actionResult ?? {};
-    const cancelled = Array.isArray(result.cancelledTicketIds) ? result.cancelledTicketIds.map(String) : [];
+    const cancelled = Array.isArray(i.cancelledTicketIds) ? i.cancelledTicketIds.map(String) : Array.isArray(result.cancelledTicketIds) ? result.cancelledTicketIds.map(String) : [];
+    const state = i.state ?? 'OPEN';
+    const stateName = state === 'OPEN' ? 'FRAUD_APPEAL_VIEW_STATE_OPEN' : state === 'SUBMITTED' ? 'FRAUD_APPEAL_VIEW_STATE_SUBMITTED' : state === 'ACCEPTED' ? 'FRAUD_APPEAL_VIEW_STATE_ACCEPTED' : state === 'REJECTED' ? 'FRAUD_APPEAL_VIEW_STATE_REJECTED' : 'FRAUD_APPEAL_VIEW_STATE_EXPIRED';
     await new Promise<void>((resolve, reject) => {
       this.#client.SetFraudAppealView(
         {
           account_id: i.accountId,
           case_id: i.caseId,
           event_id: i.eventId,
-          locked_ticket_ids: Array.isArray(result.lockedTicketIds) ? result.lockedTicketIds.map(String) : [],
+          reason_categories: [...(i.reasonCategories ?? [])],
+          ...(i.dueAtMs === undefined ? {} : { due_at: TS(i.dueAtMs) }),
+          locked_ticket_ids: [...(i.lockedTicketIds ?? (Array.isArray(result.lockedTicketIds) ? result.lockedTicketIds.map(String) : []))],
           lock_active: i.lockActive,
-          ...(typeof result.lockExpiresAt === 'string' ? { lock_expires_at: TS(Date.parse(result.lockExpiresAt)) } : {}),
-          state: 'FRAUD_APPEAL_VIEW_STATE_OPEN',
+          ...(i.lockExpiresAtMs === undefined || i.lockExpiresAtMs === null ? {} : { lock_expires_at: TS(i.lockExpiresAtMs) }),
+          state: stateName,
           version: i.version,
           ...(i.objectionDueAtMs === null ? {} : { objection_due_at: TS(i.objectionDueAtMs) }),
-          ...(result.restrictedUntil ? { restricted_until: TS(Date.parse(String(result.restrictedUntil))) } : {}),
+          ...(i.objectionState ? { objection_state: i.objectionState } : {}),
+          ...(i.objectionNote ? { objection_note: i.objectionNote } : {}),
+          ...(i.restrictedUntilMs === undefined || i.restrictedUntilMs === null ? {} : { restricted_until: TS(i.restrictedUntilMs) }),
           ...(cancelled.length > 0 ? { cancelled_ticket_ids: cancelled } : {}),
+          party: i.party ?? 'PAYER',
+          held_ticket_ids: [...(i.heldTicketIds ?? [])],
+          excluded_ticket_ids: [...(i.excludedTicketIds ?? [])],
         },
         metadata,
         { deadline: Date.now() + DEADLINE_MS },

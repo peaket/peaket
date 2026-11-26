@@ -245,7 +245,8 @@ export class FraudActions {
     const c = await this.d.store.getCase(r.caseId);
     if (!c) throw bareProblem('not-found', 404, '사건을 찾을 수 없습니다');
     const viewedAt = await this.d.approvals.summaryViewedAt({ approvalId, adminAccountId: actor.accountId });
-    return { ...(await this.#approvalView(r, c)), summaryViewedAt: viewedAt === null ? null : iso(viewedAt) };
+    const view = await this.#approvalView(r, c);
+    return { ...view, canApprove: r.requestedBy !== actor.accountId && view.canApprove === true, summaryViewedAt: viewedAt === null ? null : iso(viewedAt) };
   }
 
   async listApprovals(
@@ -464,6 +465,7 @@ export class FraudActions {
               eventId: c.eventId,
               accountId,
               version: next.version,
+              party: 'PAYER',
               lockActive: false,
               objectionDueAtMs: member?.actionNotifiedAtMs === undefined || member.actionNotifiedAtMs === null ? null : member.actionNotifiedAtMs + OBJECTION_WINDOW_MS,
               actionResult: null,
@@ -721,7 +723,7 @@ export class FraudActions {
       if (!out.ok) continue;
       for (const m of pending) {
         try {
-          await this.d.copies?.set({ caseId: c.caseId, eventId: c.eventId, accountId: m.accountId, version: next.version, lockActive: false, objectionDueAtMs: m.actionNotifiedAtMs === undefined || m.actionNotifiedAtMs === null ? null : m.actionNotifiedAtMs + OBJECTION_WINDOW_MS, actionResult: null });
+          await this.d.copies?.set({ caseId: c.caseId, eventId: c.eventId, accountId: m.accountId, version: next.version, party: 'PAYER', lockActive: false, objectionDueAtMs: m.actionNotifiedAtMs === undefined || m.actionNotifiedAtMs === null ? null : m.actionNotifiedAtMs + OBJECTION_WINDOW_MS, actionResult: null });
         } catch {
           continue;
         }
@@ -948,6 +950,15 @@ export class FraudActions {
       appealOutcome: c.members.find((m) => m.accountId === accountId)?.appealResult ?? 'NOT_REQUESTED',
     }));
     const cluster = await this.d.store.getCluster(c.clusterId).catch(() => null);
+    const snapshot = await this.d.store.latestSnapshot(c.eventId).catch(() => null);
+    const appealCounts = { accepted: 0, rejected: 0, expired: 0, submitted: 0, pending: 0 };
+    for (const m of active(c)) {
+      if (m.appealResult === 'ACCEPTED') appealCounts.accepted += 1;
+      else if (m.appealResult === 'REJECTED') appealCounts.rejected += 1;
+      else if (m.appealResult === 'EXPIRED') appealCounts.expired += 1;
+      else if (m.appealResult === 'SUBMITTED') appealCounts.submitted += 1;
+      else if (m.appealResult === 'PENDING') appealCounts.pending += 1;
+    }
     return {
       approvalId: r.approvalId,
       kind: 'FRAUD_ACTION',
@@ -965,15 +976,21 @@ export class FraudActions {
       closeReason: r.closeReason,
       summaryViewedAt: null,
       fraudCaseSummary: {
+        caseId: c.caseId,
+        eventId: c.eventId,
+        reasonCategory: c.reasonCategory,
         accountCount: active(c).length,
+        ticketCount: active(c).reduce((n, m) => n + m.ticketCount, 0),
         purchaseCount: cluster?.purchaseCount ?? active(c).reduce((n, m) => n + m.ticketCount, 0),
         limitPerPerson: cluster?.limitPerPerson ?? 4,
         scoreBand: cluster?.scoreBand ?? 'HIGH',
         sharedAttributes: cluster?.sharedAttributes ?? [],
         signals: [...new Set(active(c).flatMap((m) => m.signals))],
         appealOutcome: this.#appealOutcome(c),
+        appealCounts,
         investigatorOpinion: c.investigatorOpinion,
         cancelDeadlineAt: iso(c.cancelDeadlineAtMs),
+        snapshotHash: snapshot?.invHash ?? '',
         targets,
       },
     };

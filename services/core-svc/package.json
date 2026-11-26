@@ -11,7 +11,7 @@
     "start:seatmap-worker": "node dist/seatmap-worker/main.js",
     "migrate": "node scripts/migrate.mjs",
     "db:generate": "node scripts/db-generate.mjs",
-    "test": "vitest run",
+    "test": "vitest run && node --test test/migration-0048.test.ts",
     "test:integration": "vitest run --config vitest.integration.config.mjs",
     "typecheck": "tsc --noEmit"
   },
