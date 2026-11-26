@@ -939,7 +939,7 @@ describe('F-04-14 HTTP', () => {
   test('FX-T23 ③ C-T72 ① 이의 인정은 LIFT_RESTRICTION을 만들고 풀기 Done 뒤 우선 구매를 열며 모두 인정이면 REVERSED다', async () => {
     const who = investigator();
     const approver = commander();
-    const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(63), { actionNotifiedAtMs: NOW - DAY, appealResult: 'REJECTED', objectionResult: 'SUBMITTED' })] });
+    const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(63), { actionNotifiedAtMs: NOW - DAY, appealResult: 'REJECTED' })] });
     activeRestrictions.set(c.caseId, [{ accountId: A(63), caseId: c.caseId, restrictionId: id(0x950), untilMs: NOW + 30 * DAY, version: 1 }]);
     await send('POST', `/internal/v1/fraud-cases/${c.caseId}/appeals`, {}, { body: { appealId: randomUUID(), accountId: A(63), party: 'PAYER', submittedAt: iso(NOW) } });
     const current = json(await getCase(c.caseId, who));

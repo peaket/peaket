@@ -1,18 +1,19 @@
-// F-04-14 마이그레이션 0038 정적 시험(동결 로컬, LCH-290·LCH-300, FX-T13·FX-T20).
+// F-04-14 마이그레이션 0039 정적 시험(동결 로컬, LCH-290·LCH-300, FX-T13·FX-T20).
+// 번호는 MIG-01(2026-11-26)로 정했다: lane2 F-06-3이 ops 0038을 쓰므로 F-04-14는 0039부터다.
 // 정본: docs/data.md evidence_bundle·evidence_custody_log·external_post·evidence_export, docs/features/forensic-replay.md §6.7.6.
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 
 const sql = (() => {
   try {
-    return readFileSync(new URL('../migrations/0038_fraud_evidence.sql', import.meta.url), 'utf8');
+    return readFileSync(new URL('../migrations/0039_fraud_evidence.sql', import.meta.url), 'utf8');
   } catch {
     return '';
   }
 })();
 
-describe('F-04-14 마이그레이션 0038', () => {
-  test('FX-T13 ⑨ [ASVS v5.0.0-16.4.2] 마이그레이션 0038은 증거 표 넷·덧붙이기 트리거·권한·멱등 작업 이름을 만든다', () => {
+describe('F-04-14 마이그레이션 0039', () => {
+  test('FX-T13 ⑨ [ASVS v5.0.0-16.4.2] 마이그레이션 0039는 증거 표 넷·덧붙이기 트리거·권한·멱등 작업 이름을 만든다', () => {
     expect(sql).not.toBe('');
     for (const table of ['evidence_bundle', 'evidence_custody_log', 'external_post', 'evidence_export']) {
       expect(sql).toContain(`CREATE TABLE IF NOT EXISTS ${table}`);
