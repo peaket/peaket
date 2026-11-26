@@ -301,3 +301,10 @@
 - F-10-2(2026-11-26 시험 재리뷰 낮음 TR-10): 폭 960 정확한 경계는 시험하지 않는다(959·1,280만). 960 경계를 더한다.
 - F-10-2(2026-11-26 시험 재리뷰 낮음 TR-13): IRSA 버킷 이름이 임의 허용이고, 공용 차트에 `serviceAccountAnnotations`를 싣는 변경이 계획 §4 E6 파일 목록에 아직 없다. 버킷 이름을 고정하고 차트 파일을 계획에 더한다.
 - F-10-2(2026-11-26 시험 재리뷰 낮음 TR-18): EXIF·GPS는 보지만 XMP 별도 문자열은 보지 않는다. XMP 메타데이터 제거 시험을 더한다.
+- F-10-2(2026-11-26 구현 리뷰 중간 IR-08): `DrizzleImageJobStore.save`가 `id`만 보고 써서 lease가 만료돼 다른 파드가 집은 작업을 늦게 덮어쓸 수 있다. `lease_until`·lease 토큰을 조건에 넣어 소유를 확인한다(복제를 늘릴 때).
+- F-10-2(2026-11-26 구현 리뷰 낮음 IR-09): `S3ImageObjectStore.putPublic`이 계획 §3의 `If-None-Match: *` 대신 HeadObject 뒤 PutObject를 쓴다. 같은 키의 동시 쓰기에서 원자적이지 않고, `image-worker-config.test.ts:120`의 정적 단언은 주석 낱말로 통과한다. SDK의 `IfNoneMatch`를 실제로 싣고, 모토가 무시하면 시험 대역에서 대신 거절하게 한다.
+- F-10-2(2026-11-26 구현 리뷰 낮음 IR-11): `deploy/workloads/image-worker/values.yaml`은 endpoint를 `moto.data.svc.cluster.local:5000`으로 두지만 egress는 `10.20.0.0/16:443` 하나다. 로컬 kind에 올릴 때 moto에 닿지 못하므로 로컬 전용 egress(또는 endpoint 없는 시험)와 배포 값을 맞춘다.
+- F-10-2(2026-11-26 구현 리뷰 낮음 IR-12): `image_job.id`를 `randomUUID()`(v4)로 만든다. `docs/data.md` §2는 UUIDv7이므로 `uuidv7(clock)`로 바꾼다.
+- F-10-2(2026-11-26 구현 리뷰 낮음 IR-13): `createImageQueue`가 시한을 넘긴 작업을 취소하지 않고 다음 작업을 시작해 동시 처리 1이 깨질 수 있다. 시한 뒤 원래 작업의 정리를 기다리거나 sharp 취소 수단을 둔다.
+- F-10-2(2026-11-26 구현 리뷰 낮음 IR-14): image-worker가 `TOO_SMALL`을 돌려주지 않아 후기 사진 짧은 변 320px 미만을 거르지 않는다. F-10-1이 이 포트를 쓰기 전에 worker 또는 review 경로에 최소 크기 검사를 둔다.
+- F-10-2(2026-11-26 구현 리뷰 낮음 IR-17): 워커는 성공·거절에도 `attempts`를 +1 하지만 순수 상태 함수는 +하지 않는다. `docs/data.md`의 '다시 맡긴 횟수' 뜻과 시험 단언(`image-job.int` 첫 성공 attempts 1)을 한쪽으로 맞춘다.
