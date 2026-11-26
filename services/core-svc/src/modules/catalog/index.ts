@@ -29,6 +29,9 @@ export { MemorySearchDictionarySource, MemorySearchIndex } from './adapters/memo
 export { DrizzleSearchIndex, registerSearchPoolWaiting, SEARCH_STATEMENT_TIMEOUT_MS } from './adapters/db/drizzle-search-index.js';
 export { SearchCatalog } from './application/search.js';
 export { SEARCH_INDEX, type SearchDocument, type SearchIndex } from './domain/search.js';
+export { HOME_FEED_SOURCE, type HomeBannerSeed, type HomeFeedSource, type HomeMemoryWiring, type HomeThemeSeed } from './domain/home-ports.js';
+export { HomeFeed } from './application/home-feed.js';
+export { HomeCacheInvalidator } from './application/home-cache.js';
 export { DrizzleSearchReadModel } from './adapters/db/drizzle-search-read-model.js';
 export { SearchReadModelTimers, withSearchSync } from './application/search-maintenance.js';
 export {

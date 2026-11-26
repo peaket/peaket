@@ -288,6 +288,13 @@
       "when": 1795319200000,
       "tag": "0047_entry_closed_grant",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1795400000000,
+      "tag": "0051_home_layout_read",
+      "breakpoints": true
     }
   ]
 }

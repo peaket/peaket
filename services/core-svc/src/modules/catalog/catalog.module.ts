@@ -101,6 +101,15 @@ import { PartnerSeatmapController } from './inbound/partner-seatmap.controller.j
 import { PartnerSeatmapTemplatesController } from './inbound/partner-seatmap-templates.controller.js';
 import { SearchController } from './inbound/search.controller.js';
 import { WishController } from './inbound/wish.controller.js';
+import { HomeController } from './inbound/home.controller.js';
+import { InternalHomeCacheController } from './inbound/internal-home-cache.controller.js';
+import { HomeFeed } from './application/home-feed.js';
+import { HomeCacheInvalidator } from './application/home-cache.js';
+import { HOME_FEED_SOURCE, type HomeMemoryWiring } from './domain/home-ports.js';
+import { NEXT_CACHE_INVALIDATOR } from './domain/next-cache-ports.js';
+import { MemoryHomeFeedSource } from './adapters/memory-home-feed-source.js';
+import { DrizzleHomeFeedSource } from './adapters/db/drizzle-home-feed-source.js';
+import { HttpNextCacheInvalidator } from './adapters/http-next-cache.js';
 
 /** 이미지·좌석맵 가져오기의 바깥 잇기(ADR-0257). 운영은 모두 정한다(없으면 시작하지 않는다, main.ts) */
 export interface MediaWiring {
@@ -164,7 +173,7 @@ const noStore = (_req: unknown, res: { setHeader(name: string, value: string): u
  */
 const searchNoStore = (req: { url?: string; originalUrl?: string }, res: { setHeader(name: string, value: string): unknown }, next: () => void): void => {
   const url = req.originalUrl ?? req.url ?? '';
-  if (url.startsWith('/v1/search')) res.setHeader('cache-control', 'no-store');
+  if (url.startsWith('/v1/search') || url.startsWith('/v1/home') || url.startsWith('/internal/v1/home-cache')) res.setHeader('cache-control', 'no-store');
   next();
 };
 
@@ -220,10 +229,10 @@ export class CatalogModule implements NestModule {
           /** payment-svc 지급대행 등록(F-07-7). 없으면 둘 다 꺼짐(main.ts는 assemblePayoutRegistration으로 넘긴다) */
           payoutRegistration?: PayoutRegistrationPort;
         }
-      | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring>; saleConfigs?: SaleConfigStore; opsApprovals?: OpsApprovalClient; saleOpen?: SaleOpen; saleConfigMetrics?: SaleConfigMetrics; payoutRegistration?: PayoutRegistrationPort },
+      | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring>; saleConfigs?: SaleConfigStore; opsApprovals?: OpsApprovalClient; saleOpen?: SaleOpen; saleConfigMetrics?: SaleConfigMetrics; payoutRegistration?: PayoutRegistrationPort; home?: HomeMemoryWiring },
   ): DynamicModule {
-    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview, GetDemandForecast, ChangeEventScale, Promoters, ApplyContractApproval, RequestSaleReview, OpsSaleReviews];
-    const controllers = [EventSummaryController, PartnerProductionController, PartnerSaleReviewController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, InternalSaleConfigController, InternalEntryClosedController, OpsEventController, OpsPromoterController, InternalPromoterController];
+    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview, GetDemandForecast, ChangeEventScale, Promoters, ApplyContractApproval, RequestSaleReview, OpsSaleReviews, HomeFeed, HomeCacheInvalidator];
+    const controllers = [EventSummaryController, PartnerProductionController, PartnerSaleReviewController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, InternalSaleConfigController, InternalEntryClosedController, OpsEventController, OpsPromoterController, InternalPromoterController, HomeController, InternalHomeCacheController];
     if (o.storage === 'database') {
       return {
         module: CatalogModule,
@@ -261,6 +270,8 @@ export class CatalogModule implements NestModule {
           { provide: SEARCH_DICTIONARY_SOURCE, useExisting: SEARCH_READ_MODEL_SYNC },
           { provide: SEARCH_DICTIONARY, useFactory: (source: SearchDictionarySource, clock: Clock) => new SuggestionDictionary(source, clock), inject: [SEARCH_DICTIONARY_SOURCE, CLOCK] },
           { provide: DEMAND_FORECAST_SOURCE, useValue: o.media.demandSource ?? new EmptyDemandForecastSource() },
+          { provide: HOME_FEED_SOURCE, useClass: DrizzleHomeFeedSource },
+          { provide: NEXT_CACHE_INVALIDATOR, useClass: HttpNextCacheInvalidator },
           { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
           ...mediaProviders(o.media, false),
         ],
@@ -295,6 +306,8 @@ export class CatalogModule implements NestModule {
         { provide: SEARCH_DICTIONARY_SOURCE, useFactory: (index: MemorySearchIndex) => new MemorySearchDictionarySource(index), inject: [SEARCH_INDEX] },
         { provide: SEARCH_DICTIONARY, useFactory: (source: SearchDictionarySource, clock: Clock) => new SuggestionDictionary(source, clock), inject: [SEARCH_DICTIONARY_SOURCE, CLOCK] },
         { provide: DEMAND_FORECAST_SOURCE, useValue: o.media?.demandSource ?? new EmptyDemandForecastSource() },
+        { provide: HOME_FEED_SOURCE, useFactory: (index: MemorySearchIndex) => o.home?.source ?? new MemoryHomeFeedSource(index, o.home ?? {}), inject: [SEARCH_INDEX] },
+        { provide: NEXT_CACHE_INVALIDATOR, useClass: HttpNextCacheInvalidator },
         { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
         ...mediaProviders(o.media ?? {}, true),
       ],

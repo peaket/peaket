@@ -77,6 +77,7 @@
 - 응답 머리는 `Cache-Control: public, max-age=30, stale-while-revalidate=30, stale-if-error=86400` [가정]이고 쿠키를 캐시 키에 넣지 않는다(openapi `getHome`). 200 JSON에만 붙이고 그 밖의 응답(404·405·503, 정의 밖 경로, 내부 경로의 다른 메서드)은 `no-store`다.
 - 홈 구성 저장(OPS-410이 생기면)·판매 승인·판매 중지·회차 전부 취소로 홈에 보이는 공연이 바뀌면 `home` 태그를 기존 event·production 태그와 **따로** 한 번 무효화하고, 이어서 `apps/web`의 내부 처리기로 `revalidateTag('home')`을 부른다. 둘 다 기다리되 한쪽이 실패해도 다른 쪽을 부르고 응답을 바꾸지 않으며 로그·지표로 알린다. ISR 수명(60초 [가정])이 지나면 저절로 맞는다.
 - 카드 배지(`ProductionCard.badges`)는 HOT-250이 넘긴 남은 갭이다. 검색 읽기 모델 `search_document`가 아직 배지 값을 싣지 않아 홈 피드·검색 결과 카드의 `badges`는 비어 있다. 계약에서 선택 칸이므로 화면은 배지 없이 그리고, 값은 후속 기능에서 대표 회차의 `lobby_shuffle`·`open_batch`·`seat_assignment`와 승인된 판매 정책의 `PRESALE` 조각으로 채운다(ADR-0118, ADR-0261 결정 5). 이 기능은 그 값을 만들지 않는다(동결 로컬 범위, 계획 §10).
+- 구현 자리(추천 적용, 2026-11-26): `GET /v1/home`은 core-svc `catalog/inbound/home.controller.ts`·`application/home-feed.ts`·`domain/home-feed.ts`가 만들고, 메모리·DB 원천은 `adapters/memory-home-feed-source.ts`·`adapters/db/drizzle-home-feed-source.ts`다. 홈 캐시 무효화는 `application/home-cache.ts`·`adapters/http-next-cache.ts`, `apps/web` 처리기는 `_pages/home/api/home-cache.ts`·`app/internal/v1/home-cache/route.ts`다.
 
 ## 3. 한글 입력 처리
 

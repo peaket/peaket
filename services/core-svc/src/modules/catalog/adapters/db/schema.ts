@@ -569,3 +569,59 @@ export const eventSaleConfig = pgTable(
     index('event_sale_config_production_idx').on(t.productionId),
   ],
 );
+
+/** 홈 배너 읽기 표(0051_home_layout_read, docs/data.md §2, BUILD_ORDER HOT-305). core_app은 SELECT만 갖는다 */
+export const homeBanner = pgTable(
+  'home_banner',
+  {
+    id: uuid('id').primaryKey(),
+    productionId: uuid('production_id')
+      .notNull()
+      .references(() => production.id, { onDelete: 'cascade' }),
+    imageKey: text('image_key').notNull(),
+    altText: text('alt_text').notNull(),
+    title: text('title'),
+    subtitle: text('subtitle'),
+    sortOrder: integer('sort_order').notNull(),
+    displayFrom: at('display_from').notNull(),
+    displayUntil: at('display_until').notNull(),
+    createdBy: uuid('created_by').notNull(),
+    updatedBy: uuid('updated_by').notNull(),
+    updatedAt: at('updated_at').defaultNow().notNull(),
+  },
+  (t) => [index('home_banner_display_idx').on(t.displayFrom, t.displayUntil)],
+);
+
+/** 홈 테마 묶음 읽기 표(0051_home_layout_read, docs/data.md §2, BUILD_ORDER HOT-305). core_app은 SELECT만 갖는다 */
+export const homeTheme = pgTable(
+  'home_theme',
+  {
+    id: uuid('id').primaryKey(),
+    name: text('name').notNull(),
+    sortOrder: integer('sort_order').notNull(),
+    displayFrom: at('display_from').notNull(),
+    displayUntil: at('display_until').notNull(),
+    createdBy: uuid('created_by').notNull(),
+    updatedBy: uuid('updated_by').notNull(),
+    updatedAt: at('updated_at').defaultNow().notNull(),
+  },
+  (t) => [index('home_theme_display_idx').on(t.displayFrom, t.displayUntil)],
+);
+
+/** 홈 테마 안의 공연 목록(0051_home_layout_read, docs/data.md §2, BUILD_ORDER HOT-305). core_app은 SELECT만 갖는다 */
+export const homeThemeItem = pgTable(
+  'home_theme_item',
+  {
+    themeId: uuid('theme_id')
+      .notNull()
+      .references(() => homeTheme.id, { onDelete: 'cascade' }),
+    productionId: uuid('production_id')
+      .notNull()
+      .references(() => production.id, { onDelete: 'cascade' }),
+    sortOrder: integer('sort_order').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.themeId, t.productionId] }),
+    index('home_theme_item_order_idx').on(t.themeId, t.sortOrder),
+  ],
+);

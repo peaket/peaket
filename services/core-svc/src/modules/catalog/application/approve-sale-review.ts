@@ -12,6 +12,7 @@ import { CDN_INVALIDATION, type CdnInvalidation } from '../domain/media-ports.js
 import { missingPayoutConditions, PAYOUT_REGISTRATION, PAYOUT_REGISTRATION_UNWIRED, type PayoutRegistrationPort } from '../domain/payout-registration-port.js';
 import { OPS_SALE_STORE, type SaleStore } from '../domain/sale-ports.js';
 import { PublishSaleConfigs } from './publish-sale-configs.js';
+import { HomeCacheInvalidator } from './home-cache.js';
 import { notFound, productionSuspended } from './problems.js';
 
 export interface ApproveSaleReviewInput {
@@ -31,6 +32,8 @@ export class ApproveSaleReview {
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: Pick<PlatformLogger, 'info' | 'warn'>,
     /** 없으면(직접 조립한 시험) 둘 다 꺼짐 */
     @Optional() @Inject(PAYOUT_REGISTRATION) private readonly payout: PayoutRegistrationPort = PAYOUT_REGISTRATION_UNWIRED,
+    /** 홈 피드 CDN·Next 캐시 무효화(HOT-305). 없으면(직접 조립한 시험) 건너뛴다 */
+    @Optional() @Inject(HomeCacheInvalidator) private readonly homeCache?: HomeCacheInvalidator,
   ) {}
 
   async run(q: ApproveSaleReviewInput): Promise<{ applied: true; events: number }> {
@@ -78,6 +81,8 @@ export class ApproveSaleReview {
     } catch (err) {
       this.logger?.warn({ event: 'cdn_invalidate_failed', productionId: q.productionId, err: (err as Error).name }, '판매 승인 뒤 CDN 태그를 무효화하지 못했다(승인은 그대로다)');
     }
+    // 홈 피드는 별도 home 태그와 Next ISR 태그를 함께 비운다(HOT-305). HomeCacheInvalidator가 양쪽 실패를 삼킨다.
+    await this.homeCache?.invalidate('SALE_APPROVED');
     this.logger?.info({ event: 'sale_review_approved', productionId: q.productionId, events: out.events.length }, '판매 승인을 적용했다');
     return { applied: true, events: out.events.length };
   }
