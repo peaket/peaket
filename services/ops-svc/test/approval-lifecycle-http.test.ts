@@ -180,6 +180,27 @@ describe('R-T6 재량 면제의 1인·2인 판정', () => {
     expect(json(r)).toMatchObject({ requiredApprovals: 3 });
   });
 
+  test('R-T6 ② 30만 원 정각은 1인이고 30만 원을 1원 넘으면 2인이다', async () => {
+    const a = randomUUID();
+    const b = randomUUID();
+    orderBasis(a, randomUUID());
+    orderBasis(b, randomUUID());
+    expect(json(await request(as('cs_agent'), { kind: 'DISCRETIONARY_WAIVER', targetRef: a, amount: 300_000, reasonCode: 'ILLNESS', reasonText: '정각' }))).toMatchObject({ requiredApprovals: 2 });
+    expect(json(await request(as('cs_agent'), { kind: 'DISCRETIONARY_WAIVER', targetRef: b, amount: 300_001, reasonCode: 'ILLNESS', reasonText: '1원 초과' }))).toMatchObject({ requiredApprovals: 3 });
+  });
+
+  test('R-T6 ② 철회한 앞 요청은 90일 안 두 번째로 세지 않는다', async () => {
+    const payer = randomUUID();
+    const first = randomUUID();
+    const second = randomUUID();
+    orderBasis(first, payer);
+    orderBasis(second, payer);
+    const agent = as('cs_agent');
+    const a = json(await request(agent, { kind: 'DISCRETIONARY_WAIVER', targetRef: first, amount: 100_000, reasonCode: 'ILLNESS', reasonText: '철회할 요청' }));
+    expect((await withdraw(agent, a['approvalId'] as string, '요청자 철회')).statusCode).toBe(200);
+    expect(json(await request(agent, { kind: 'DISCRETIONARY_WAIVER', targetRef: second, amount: 100_000, reasonCode: 'ILLNESS', reasonText: '두 번째' }))).toMatchObject({ requiredApprovals: 2 });
+  });
+
   test('R-T6 ② 90일이 지난 앞 요청은 세지 않는다', async () => {
     const payer = randomUUID();
     const first = randomUUID();
@@ -394,7 +415,7 @@ describe('R-T29 ③⑤ 대상 변경 만료와 승인 직전 재확인', () => {
     expect(json(r)).toMatchObject({ expired: 1 });
     const after = json(await get(as('cs_lead'), created['approvalId'] as string));
     expect(after).toMatchObject({ status: 'EXPIRED', closeReason: 'TARGET_CHANGED' });
-    expect(notified.filter((n) => n['approvalId'] === created['approvalId']).length).toBeGreaterThanOrEqual(1);
+    expect(notified.filter((n) => n['approvalId'] === created['approvalId']).length).toBeGreaterThanOrEqual(2);
     expect(reclaimCalls).toHaveLength(0);
   });
 

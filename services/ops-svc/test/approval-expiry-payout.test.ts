@@ -145,7 +145,7 @@ describe('J-T3 지급 묶음 2인 승인', () => {
     expect(json(await getApproval(op, approvalIdOf(batch)))).toMatchObject({ status: 'PENDING_APPROVAL', requiredApprovals: 2 });
   });
 
-  test('J-T3 2.5억(25억) 묶음도 금액을 그대로 저장하고 commander 승인·실행에 같은 금액을 넘긴다', async () => {
+  test('J-T3 25억 묶음도 금액을 그대로 저장하고 commander 승인·실행에 같은 금액을 넘긴다', async () => {
     const op = as('operator');
     const batch = json(await createBatch(op));
     expect(batch['totalAmount']).toBe(2_500_000_000);
