@@ -28,6 +28,7 @@ interface Row {
   id: string;
   kind: string;
   target_ref: string;
+  account_id: string | null;
   status: string;
   category: string;
   progress_due_at: Date | string | null;
@@ -43,7 +44,7 @@ interface Row {
   detail: string | null;
 }
 
-const COLUMNS = sql`id, kind, target_ref, status, category, progress_due_at, result_due_at, assignee, version, result_note, resolved_at, created_at, updated_at, due_soon_alerted_for, overdue_alerted_for, detail`;
+const COLUMNS = sql`id, kind, target_ref, account_id, status, category, progress_due_at, result_due_at, assignee, version, result_note, resolved_at, created_at, updated_at, due_soon_alerted_for, overdue_alerted_for, detail`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const msOf = (v: Date | string | null): number | null => (v === null ? null : new Date(v).getTime());
@@ -51,6 +52,7 @@ const toCase = (r: Row): CsCase => ({
   caseId: r.id,
   kind: r.kind as CsCaseKind,
   targetRef: r.target_ref,
+  accountId: r.account_id,
   status: r.status as CsCaseStatus,
   createdAtMs: new Date(r.created_at).getTime(),
   category: r.category,
@@ -156,8 +158,8 @@ export class DrizzleCsCaseStore implements CsCaseStore, CsAppealStore {
     if (input.kind === 'SETTLEMENT_ADJUSTMENT_SUGGESTED') {
       const inserted = (
         await ex.execute(sql`
-          insert into cs_case (id, kind, target_ref, status, category, progress_due_at, result_due_at, created_at, updated_at, detail)
-          values (${input.caseId}::uuid, ${input.kind}, ${input.targetRef}, 'OPEN', ${input.category ?? ''}, ${ts(input.progressDueAtMs)}, ${ts(input.resultDueAtMs)},
+          insert into cs_case (id, kind, target_ref, account_id, status, category, progress_due_at, result_due_at, created_at, updated_at, detail)
+          values (${input.caseId}::uuid, ${input.kind}, ${input.targetRef}, ${input.accountId ?? null}::uuid, 'OPEN', ${input.category ?? ''}, ${ts(input.progressDueAtMs)}, ${ts(input.resultDueAtMs)},
                   ${new Date(input.nowMs)}::timestamptz, ${new Date(input.nowMs)}::timestamptz, ${input.detail ?? null})
           returning ${COLUMNS}`)
       ).rows as unknown as Row[];
@@ -165,8 +167,8 @@ export class DrizzleCsCaseStore implements CsCaseStore, CsAppealStore {
     }
     const inserted = (
       await ex.execute(sql`
-        insert into cs_case (id, kind, target_ref, status, category, progress_due_at, result_due_at, created_at, updated_at, detail)
-        values (${input.caseId}::uuid, ${input.kind}, ${input.targetRef}, 'OPEN', ${input.category ?? ''}, ${ts(input.progressDueAtMs)}, ${ts(input.resultDueAtMs)},
+        insert into cs_case (id, kind, target_ref, account_id, status, category, progress_due_at, result_due_at, created_at, updated_at, detail)
+        values (${input.caseId}::uuid, ${input.kind}, ${input.targetRef}, ${input.accountId ?? null}::uuid, 'OPEN', ${input.category ?? ''}, ${ts(input.progressDueAtMs)}, ${ts(input.resultDueAtMs)},
                 ${new Date(input.nowMs)}::timestamptz, ${new Date(input.nowMs)}::timestamptz, ${input.detail ?? null})
         on conflict (kind, target_ref) where status <> 'RESOLVED' and kind <> 'SETTLEMENT_ADJUSTMENT_SUGGESTED' do nothing
         returning ${COLUMNS}`)
@@ -262,6 +264,7 @@ export class DrizzleCsCaseStore implements CsCaseStore, CsAppealStore {
     return this.database.transaction(async (tx) => {
       const updated = await tx.execute(sql`
         update cs_case set
+          account_id = ${next.accountId === null ? sql`null` : sql`${next.accountId}::uuid`},
           status = ${next.status},
           assignee = ${next.assignee === null ? sql`null` : sql`${next.assignee}::uuid`},
           result_note = ${next.resultNote},

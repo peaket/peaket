@@ -33,6 +33,7 @@ export {
 export { deadlinesOf, dueSoonAtOf, dueStateOf, type CsDueState } from './domain/case-deadlines.js';
 export { ReceiveCaseRequested, type CaseRequestResult } from './application/receive-case-requested.js';
 export { CsCases, type CsCaseView, type CsCaseUpdateBody } from './application/cs-cases.js';
+export { CaseInquiryDetail, CaseReplies, maskAccountNumbers, type SupportCaseMessage, type SupportCaseRecord, type SupportCaseReplyPort } from './application/case-replies.js';
 export { CS_CASE_DEADLINE_TICK_MS, CS_CASE_DUE_SOON_ALERT, CS_CASE_OVERDUE_ALERT, CsCaseDeadlineTick, csCaseAlertKey } from './application/cs-case-deadline-tick.js';
 export { CsApprovalFailureCases } from './application/approval-failure-cases.js';
 export {
@@ -57,6 +58,7 @@ export { CsCaseDispatch, csCaseDispatchAlertKey } from './application/cs-case-di
 export { DECIDE_VERIFICATION_APPEAL, VerificationAppealDecision } from './application/verification-appeal-decision.js';
 export { VerificationAppealDetail } from './application/verification-appeal-detail.js';
 export { GrpcAccountHolds, GrpcAppealLabels, GrpcVerdictEvidence, GrpcVerificationAppeals } from './adapters/grpc-appeal-ports.js';
+export { GrpcSupportCases, type SupportCasesClientOptions } from './adapters/grpc-support-cases.js';
 export { PromCsDispatchSignals } from './adapters/prom-cs-dispatch-signals.js';
 export { MemoryCsCaseStore } from './adapters/memory-cs-case-store.js';
 export { DrizzleCsCaseStore } from './adapters/db/drizzle-cs-case-store.js';

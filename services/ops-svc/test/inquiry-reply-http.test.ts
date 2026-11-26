@@ -117,8 +117,8 @@ describe('문의가 이어진 CS 건의 답변', () => {
     s.stub.set('CloseInquiry', { value: { status: 'INQUIRY_STATUS_CLOSED', closed_at: { seconds: 1_795_000_100, nanos: 0 } } });
     const ok = await s.h.patch(s.h.as('cs_agent'), caseId, { status: 'RESOLVED', resultNote: '문의를 닫고 해결합니다.' }, `"${String((got.body as Record<string, unknown>).version)}"`);
     expect([200, 202]).toContain(ok.status);
-    expect(s.stub.of('CloseInquiry')).toHaveLength(1);
-    expect(s.stub.of('CloseInquiry')[0]).toMatchObject({ inquiry_id: INQUIRY_ID, acted_by: s.h.as('cs_agent')['x-user-id'] });
+    expect(s.stub.of('CloseInquiry')).toHaveLength(2);
+    expect(s.stub.of('CloseInquiry').at(-1)).toMatchObject({ inquiry_id: INQUIRY_ID, acted_by: s.h.as('cs_agent')['x-user-id'] });
   });
 
   test('R-T27 [ASVS v5.0.0-16.1.1][ASVS v5.0.0-16.3.4] core가 멈추면 503 support-unavailable이고 성공 감사를 남기지 않는다', async () => {
@@ -162,7 +162,7 @@ describe('건 상세의 문의 스레드', () => {
     expect(msgs[1]!.authorDisplay).toBe('피켓 고객센터');
     expect(JSON.stringify(r.body)).not.toContain('actedBy');
     expect(JSON.stringify(r.body)).not.toContain('agentName');
-    expect(s.stub.of('GetInquiryRecord')[0]).toMatchObject({ inquiry_id: INQUIRY_ID, acted_by: s.h.as('cs_agent')['x-user-id'] });
+    expect(s.stub.of('GetInquiryRecord').at(-1)).toMatchObject({ inquiry_id: INQUIRY_ID, acted_by: s.h.as('cs_agent')['x-user-id'] });
     expect(String(r.headers['cache-control'])).toContain('no-store');
   });
 });

@@ -30,6 +30,7 @@ import { PayoutsModule, UnavailableApprovalVerifier, type PayoutsModuleDeps } fr
 import { ApprovalsModule, type ApprovalsModuleDeps } from './modules/approvals/index.js';
 import { RestrictionsModule } from './modules/restrictions/index.js';
 import { MemoryBookingRestrictionStore } from './modules/restrictions/adapters/memory-restrictions.js';
+import { FanLookupModule, type FanLookupWiring } from './modules/fan-lookup/index.js';
 import { DrizzleBookingRestrictionStore } from './modules/restrictions/adapters/db/drizzle-restrictions.js';
 import type { OpsRestrictionsWiring } from './modules/restrictions/domain/ports.js';
 import { BotReviewModule, type BotReviewSignals, type BotReviewSource, type TrustLabels } from './modules/bot-review/index.js';
@@ -96,6 +97,10 @@ interface CommonWiring {
   readonly approvals?: ApprovalsModuleDeps;
   /** 예매 제한 집행·CS 소명(F-06-4). store·engineRef는 AppModule이 채우고, 사본·소명·보류·알림은 시작 조립이 넘긴다 */
   readonly restrictions?: Omit<OpsRestrictionsWiring, 'store' | 'engineRef'> & Partial<Pick<OpsRestrictionsWiring, 'store' | 'engineRef'>>;
+  /** 문의 답변·닫기(F-06-5). core SupportCaseService gRPC 클라이언트 */
+  readonly supportCases?: import('./modules/cases/application/case-replies.js').SupportCaseReplyPort;
+  /** 팬 조회 원천·접속기록(F-06-5). 없으면 그 경로가 503이다 */
+  readonly fanLookup?: FanLookupWiring;
   /** 관리 계정 REST·승인 업무(BAT-045 BOT-152, ADR-0322). identity는 필수이고, reauth가 없으면 쓰기가 503이다 */
   readonly adminAccounts?: {
     readonly identity: AdminIdentity;
@@ -180,12 +185,13 @@ function casesModule(o: CommonWiring, kit: CsCaseKit, background: { csCaseDeadli
     background: { enabled: background !== undefined, ...(background?.csCaseDeadlineMs !== undefined ? { intervalMs: background.csCaseDeadlineMs } : {}) },
     dispatchBackground: { enabled: dispatch !== undefined, ...(dispatch?.csCaseDispatchMs !== undefined ? { intervalMs: dispatch.csCaseDispatchMs } : {}) },
     ...(restrictions ? { restrictions } : {}),
+    ...(o.supportCases ? { supportCases: o.supportCases } : {}),
   });
 }
 
 /** CS 처리함 부품 한 벌(건 요청 처리기·기한 알림·실패한 승인 업무의 건·이의 보낼 호출) */
-function caseKitOf(o: CommonWiring, store: import('./modules/cases/index.js').CsCaseStore & CsAppealStore, alerts: OpsAlertStore, restrictions?: OpsRestrictionsWiring): CsCaseKit {
-  return csCaseKit({ store, alerts, ...(o.calendar ? { calendar: o.calendar } : {}), ...(o.caseSignals ? { signals: o.caseSignals } : {}), ...(o.csAppeals ? { appeals: o.csAppeals } : {}), ...(restrictions ? { restrictions } : {}) });
+function caseKitOf(o: CommonWiring, store: import('./modules/cases/index.js').CsCaseStore & CsAppealStore, alerts: OpsAlertStore, restrictions?: OpsRestrictionsWiring, audit?: import('./modules/audit/index.js').AuditChain): CsCaseKit {
+  return csCaseKit({ store, alerts, ...(o.calendar ? { calendar: o.calendar } : {}), ...(o.caseSignals ? { signals: o.caseSignals } : {}), ...(o.csAppeals ? { appeals: o.csAppeals } : {}), ...(restrictions ? { restrictions } : {}), ...(audit ? { audit } : {}), ...(o.supportCases ? { supportCases: o.supportCases } : {}) });
 }
 
 /** 관제 위젯 원천: 환경 값의 Prometheus 원천에 관제 실시간 표(rt-sales.summary, F-04-1)를 더한다. 실시간 표가 없으면 LiveModule 기본 그대로 */
@@ -207,7 +213,7 @@ export class AppModule {
       const store = new DrizzleCommandStore(o.database);
       const cancellations = new DrizzleEventCancellationStore(o.database);
       const alerts = new DrizzleOpsAlertStore(o.database);
-      const cases = caseKitOf(o, new DrizzleCsCaseStore(o.database), alerts, restrictions);
+      const cases = caseKitOf(o, new DrizzleCsCaseStore(o.database), alerts, restrictions, chain);
       const background = o.background === false ? undefined : (o.background ?? {});
       return {
         module: AppModule,
@@ -233,6 +239,7 @@ export class AppModule {
           }),
           LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints }), liveExtrasOf(o)),
           casesModule(o, cases, background, background, restrictions),
+          FanLookupModule.register({ ...(o.fanLookup ? { wiring: o.fanLookup } : {}), caseStore: cases.store, audit: chain }),
           AlertsModule.register(alerts),
           ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
           ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
@@ -276,7 +283,7 @@ export class AppModule {
     const store = new MemoryCommandStore(chain);
     const cancellations = new MemoryEventCancellationStore(chain);
     const memoryAlerts = new MemoryOpsAlertStore();
-    const cases = caseKitOf(o, new MemoryCsCaseStore(chain), memoryAlerts, restrictions);
+    const cases = caseKitOf(o, new MemoryCsCaseStore(chain), memoryAlerts, restrictions, chain);
     return {
       module: AppModule,
       imports: [
@@ -287,6 +294,7 @@ export class AppModule {
         AuditModule.register(checkpoints, { intake: new MemoryAuditIntakeStore(chain), ...(o.auditSignals ? { signals: o.auditSignals } : {}) }),
         LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints }), liveExtrasOf(o)),
         casesModule(o, cases, undefined, o.background === false ? undefined : o.background, restrictions),
+        FanLookupModule.register({ ...(o.fanLookup ? { wiring: o.fanLookup } : {}), caseStore: cases.store, audit: chain }),
         AlertsModule.register(memoryAlerts),
         ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
         ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),

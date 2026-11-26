@@ -26,6 +26,11 @@
       "types": "./src/refund-account/index.ts",
       "development": "./src/refund-account/index.ts",
       "default": "./dist/refund-account/index.js"
+    },
+    "./account-number": {
+      "types": "./src/account-number/index.ts",
+      "development": "./src/account-number/index.ts",
+      "default": "./dist/account-number/index.js"
     }
   },
   "scripts": {

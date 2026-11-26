@@ -61,6 +61,10 @@ function ruleOf(kind: CsCaseKind, category: string): Rule | undefined {
     // 예매 제한 소명 3영업일. 부정 예매 사건 소명은 사건의 소명 기한(dueBaseAt)을 그대로 쓴다(F-06-4)
     case 'APPEAL':
       return category === 'FRAUD_CASE' ? { resultBase: true } : { result: bd(3) };
+    // 고객 문의 답변 3영업일 [가정], 미성년자 계약 취소 확인 결과 3영업일(F-06-5)
+    case 'INQUIRY':
+    case 'MINOR_CONTRACT_CANCEL':
+      return { result: bd(3) };
     default:
       return undefined;
   }

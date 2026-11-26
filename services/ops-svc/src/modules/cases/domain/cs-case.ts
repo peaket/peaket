@@ -67,6 +67,9 @@ export const ACCEPTED_KINDS: ReadonlySet<CsCaseKind> = new Set<CsCaseKind>([
   'TICKET_NOT_ISSUED',
   // 예매 제한·부정 예매 소명(F-06-4). 대상 = appeal ID. category = RESTRICTION|FRAUD_CASE
   'APPEAL',
+  // 고객 문의(F-06-5). 대상 = inquiry ID. category = 문의 유형
+  'INQUIRY',
+  'MINOR_CONTRACT_CANCEL',
   // 취소·양도 남용 표시(F-06-4). 대상 = 계정 ID. 시스템이 표시만 하고 cs_agent가 제한 요청을 낸다
   'ABUSE_FLAG',
 ]);
@@ -135,6 +138,8 @@ export interface CsCase {
   readonly caseId: string;
   readonly kind: CsCaseKind;
   readonly targetRef: string;
+  /** 문의 건의 팬 계정(F-06-5). 다른 종류는 null */
+  readonly accountId: string | null;
   readonly status: CsCaseStatus;
   readonly createdAtMs: number;
   /** 건 요청의 category. 없으면 빈 글 */
@@ -168,6 +173,8 @@ export interface CsCaseOpenInput {
   readonly kind: CsCaseKind;
   readonly targetRef: string;
   readonly nowMs: number;
+  /** 문의 건의 팬 계정(F-06-5). core GetInquiryRecord가 준 값 */
+  readonly accountId?: string | null;
   readonly category?: string;
   readonly progressDueAtMs?: number | null;
   readonly resultDueAtMs?: number | null;
@@ -181,6 +188,7 @@ export function newCsCase(i: CsCaseOpenInput): CsCase {
     caseId: i.caseId,
     kind: i.kind,
     targetRef: i.targetRef,
+    accountId: i.accountId ?? null,
     status: 'OPEN',
     createdAtMs: i.nowMs,
     category: i.category ?? '',
@@ -203,6 +211,8 @@ export type CsCaseReceiveResult = 'opened' | 'existing' | 'duplicate';
 /** 목록 조건(정렬은 next_due_at·caseId 차례, 기한 없는 건은 끝) */
 export interface CsCaseListQuery {
   readonly statuses: readonly CsCaseStatus[];
+  /** 이 계정의 건만(F-06-5 팬 조회 건 탭, cs_case.account_id) */
+  readonly accountId?: string;
   /** 이 종류만(없으면 전부) */
   readonly kinds?: readonly CsCaseKind[];
   /** 이 종류는 뺀다(CS 담당자의 지급·대사·KYC 건) */

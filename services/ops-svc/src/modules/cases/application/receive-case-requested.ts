@@ -16,12 +16,15 @@ export interface ReceiveCaseRequestedOptions {
   readonly signals?: CsCaseSignals;
   /** APPEAL 건을 연 직후 소명 원본에 잇는다(F-06-4). 실패해도 건은 남는다 */
   readonly onOpened?: (c: CsCase, nowMs: number) => Promise<void>;
+  /** 문의 건의 팬 계정을 core GetInquiryRecord로 읽는다(F-06-5). 실패해도 건은 남고 account_id는 null */
+  readonly supportCases?: { read(inquiryId: string, actedBy: string): Promise<{ accountId?: string | null } | undefined> };
 }
 
 export class ReceiveCaseRequested {
   readonly #calendar: BusinessCalendar;
   readonly #signals: CsCaseSignals | undefined;
   readonly #onOpened: ((c: CsCase, nowMs: number) => Promise<void>) | undefined;
+  readonly #supportCases: ReceiveCaseRequestedOptions['supportCases'];
 
   constructor(
     private readonly store: CsCaseStore,
@@ -30,6 +33,7 @@ export class ReceiveCaseRequested {
     this.#calendar = o.calendar ?? weekendOnlyCalendar;
     this.#signals = o.signals;
     this.#onOpened = o.onOpened;
+    this.#supportCases = o.supportCases;
   }
 
   /** 받지 않은 요청을 지표에 센다(본문 모양이 틀려 handle까지 오지 못한 것) */
@@ -48,11 +52,21 @@ export class ReceiveCaseRequested {
     // 시각을 읽지 못하면 받은 시각으로 센다(본문 검사는 받는 층이 했다)
     const baseMs = Number.isFinite(baseRaw) ? baseRaw : nowMs;
     const due = deadlinesOf({ kind: payload.kind, category: payload.category, baseMs, inheritedDueMs: o.inheritedDueMs ?? null }, this.#calendar);
+    let accountId: string | null = null;
+    if ((payload.kind === 'INQUIRY' || payload.kind === 'DISPUTE' || payload.kind === 'MINOR_CONTRACT_CANCEL') && this.#supportCases) {
+      try {
+        const found = await this.#supportCases.read(payload.sourceId, 'system');
+        accountId = found?.accountId ?? null;
+      } catch {
+        // core가 멈춰도 건은 연다(팬 조회 건 탭은 계정이 채워진 뒤 보인다)
+      }
+    }
     const r = await this.store.receive({
       caseId: randomUUID(),
       eventKey: payload.eventKey,
       kind: payload.kind,
       targetRef: payload.sourceId,
+      ...(accountId ? { accountId } : {}),
       category: payload.category,
       progressDueAtMs: due.progressDueMs,
       resultDueAtMs: due.resultDueMs,

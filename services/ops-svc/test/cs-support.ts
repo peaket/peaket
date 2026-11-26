@@ -92,6 +92,7 @@ export async function csHarness(
   const parse = (payload: string): Record<string, unknown> => (payload ? (JSON.parse(payload) as Record<string, unknown>) : {});
   const etagOf = (h: Record<string, unknown>): string | undefined => (typeof h.etag === 'string' ? h.etag : undefined);
   let seq = 0;
+  const actors = new Map<OpsRole, Record<string, string>>();
   return {
     svc,
     clock,
@@ -100,7 +101,13 @@ export async function csHarness(
     audit,
     logs,
     kit,
-    as: (role) => identity.ops(role),
+    as: (role) => {
+      const seen = actors.get(role);
+      if (seen) return seen;
+      const created = identity.ops(role);
+      actors.set(role, created);
+      return created;
+    },
     async intake(body) {
       const r = await svc.http.inject({ method: 'POST', url: '/internal/v1/cs-cases', headers: { 'content-type': 'application/json' }, payload: JSON.stringify(body) });
       return { status: r.statusCode, body: parse(r.payload) as { accepted: boolean; caseId?: string } };

@@ -53,9 +53,21 @@ const debugOf = (exception: unknown) => {
  * Fastify 라우터가 처리기를 찾기 전에 낸 오류(FST_ERR_BAD_URL 등, frameworkErrors). Nest 필터와 onRequest 훅을 지나지 않는다.
  * 요청 경로는 잘못된 값 그대로라 싣지 않는다(되비침 방지). 지표에는 맞는 경로 없음(unmatched)으로 넣는다
  */
+/** Fastify 본문 해석 오류(깨진 JSON·__proto__)는 이름 붙은 invalid-body로 답한다(openapi 지원 경로) */
+const namedBodyError = (exception: unknown): { type: string; title: string } | undefined => {
+  const code = (exception as { code?: unknown } | null)?.code;
+  const message = exception instanceof Error ? exception.message : '';
+  const badJson = code === 'FST_ERR_CTP_INVALID_JSON_BODY' || code === 'FST_ERR_CTP_EMPTY_JSON_BODY' || /^Body is not valid JSON/i.test(message);
+  return badJson ? { type: 'invalid-body', title: '요청 본문이 올바르지 않습니다' } : undefined;
+};
+
 export function frameworkErrorProblem(error: unknown, debugErrors: boolean): { status: number; body: Record<string, unknown> } {
   const status = statusOf(error) ?? 400;
-  const body: Record<string, unknown> = { type: 'about:blank', title: STATUS_CODES[status] ?? 'Error', status, traceId: newTraceId() };
+  const named = namedBodyError(error);
+  const body: Record<string, unknown> = named
+    ? { type: named.type, title: named.title, status }
+    : { type: 'about:blank', title: STATUS_CODES[status] ?? 'Error', status, traceId: newTraceId() };
+  if (named) body.traceId = newTraceId();
   if (debugErrors) body.debug = debugOf(error);
   return { status, body };
 }
@@ -89,7 +101,8 @@ export class ProblemFilter implements ExceptionFilter {
       if (state && exception.normalBranch) state.normalBranch = true;
     } else {
       status = statusOf(exception) ?? 500;
-      body = { type: 'about:blank', title: STATUS_CODES[status] ?? 'Error', status };
+      const named = namedBodyError(exception);
+      body = named ? { type: named.type, title: named.title, status } : { type: 'about:blank', title: STATUS_CODES[status] ?? 'Error', status };
       // 5xx는 요청 경로도 싣지 않는다(일반 문구와 traceId만, guidelines §2)
       if (status < 500) body.instance = instance;
       body.traceId = traceId;

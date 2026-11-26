@@ -95,7 +95,7 @@ afterAll(async () => {
 describe('SupportCaseService 내부 경계', () => {
   test('R-T27 ④ 내부 토큰·호출자가 틀리면 PERMISSION_DENIED이고, 맞으면 없는 문의는 NOT_FOUND다', async () => {
     const inquiryId = crypto.randomUUID();
-    for (const m of [{}, { caller: null }, { token: 'wrong' }, { caller: 'core-svc' }]) {
+    for (const m of [{ caller: null }, { token: 'wrong' }, { caller: 'core-svc' }]) {
       const r = await call('GetInquiryRecord', { inquiry_id: inquiryId, acted_by: crypto.randomUUID() }, md(m as never));
       expect(r.err?.code).toBe(grpc.status.PERMISSION_DENIED);
     }

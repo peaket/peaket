@@ -39,6 +39,8 @@ import { HttpCoreContract } from './adapters/http-core-contract.js';
 import { PromCsCaseSignals, PromCsDispatchSignals, ReceiveCaseRequested, loadBusinessCalendar } from './modules/cases/index.js';
 import { csAppealPortsFromEnv } from './cs-appeal-wiring.js';
 import { restrictionPortsFromEnv } from './restriction-wiring.js';
+import { supportCasePortsFromEnv } from './support-case-wiring.js';
+import { fanLookupPortsFromEnv } from './fan-lookup-wiring.js';
 
 const SERVICE = 'ops-svc';
 assertInternalGrpcToken(process.env);
@@ -215,6 +217,8 @@ const service = await createService({
       signals: csDispatchSignals,
     },
     restrictions: restrictionPorts,
+    supportCases: supportCasePortsFromEnv(process.env),
+    fanLookup: fanLookupPortsFromEnv(process.env),
   }),
 });
 eventCancellationSignals.register(service.metrics.registry);
