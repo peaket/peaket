@@ -72,13 +72,15 @@ const check = (h: Record<string, string>, body: Record<string, unknown>) =>
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 
 /** MINOR_CONTRACT 목적의 본인확인을 HTTP로 마치고 확인 POST 응답 전체와 resultToken을 준다 */
-async function minorConfirmation(s: { accountId: string; sessionId: string }, birth: string | undefined, person = 'minor-person', skipFirst = false) {
+async function minorConfirmation(s: { accountId: string; sessionId: string }, birth: string | undefined, person?: string, skipFirst = false) {
+  // 계정마다 다른 사람이어야 한다. 같은 연계정보를 여러 계정에 쓰면 두 번째 확인이 DUPLICATE_ACCOUNT다.
+  const who = person ?? `minor-person-${s.accountId}`;
   // 계정의 연계정보를 먼저 만든다(휴대폰 본인확인을 마친 계정만 확인할 수 있다). 같은 사람이면 다시 해도 같은 CI다.
-  if (!skipFirst) await firstVerify(s, person);
+  if (!skipFirst) await firstVerify(s, who);
   const st = await start(s, 'MINOR_CONTRACT');
   expect(st.statusCode).toBe(201);
   const verificationId = json(st)['verificationId'] as string;
-  const confirmed = await confirm(s, verificationId, agencyResult(clock, verificationId, { person, ...(birth === undefined ? { birth: undefined } : { birth }) }));
+  const confirmed = await confirm(s, verificationId, agencyResult(clock, verificationId, { person: who, ...(birth === undefined ? { birth: undefined } : { birth }) }));
   expect(confirmed.statusCode).toBe(200);
   return { verificationId, body: json(confirmed), token: json(confirmed)['resultToken'] as string | undefined };
 }
@@ -123,7 +125,7 @@ describe('R-T26 ③ 미성년자 계약 취소 확인', () => {
     expect((await result(s, id)).payload).not.toContain('resultToken');
 
     // 같은 계정의 MINOR_CONTRACT 확인에만 토큰이 붙는다(이 줄이 기준 트리에서 실패해 음성 단언만 통과하는 것을 막는다)
-    const minor = await minorConfirmation(s, '2009-03-01', 'first-person');
+    const minor = await minorConfirmation(s, '2009-03-01', 'first-person', true);
     expect(typeof minor.token).toBe('string');
     expect(minor.token).not.toBe('');
   });
