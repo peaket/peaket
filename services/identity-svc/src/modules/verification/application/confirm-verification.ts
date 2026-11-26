@@ -100,7 +100,7 @@ export class ConfirmVerification {
       done = await this.#settle(i.verificationId, 'PROVIDER_DOWN', now);
     }
     const view = await this.#answer(done);
-    if (seen.purpose !== 'MINOR_CONTRACT' || !issued || !this.minorContractSigner?.minorContract) return view;
+    if (seen.purpose !== 'MINOR_CONTRACT' || !issued || done.status !== 'VERIFIED' || !this.minorContractSigner?.minorContract) return view;
     const signed = await this.minorContractSigner.minorContract({ accountId: done.accountId, ...(issued.birth ? { birth: issued.birth } : {}), ci: issued.ci }, this.clock.now());
     return { ...view, resultToken: signed.token };
   }

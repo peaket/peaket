@@ -31,6 +31,8 @@ export interface CancellationRecord {
   readonly refundAmount: number;
   readonly state: CancellationStatus;
   readonly refundAttempts: number;
+  /** 승인 업무 종류(F-06-3). 승인 환불이 아니면 없다 */
+  readonly kind?: string;
   /**
    * 같은 취소 ID의 환급 시도 번호(BAT-425, ADR-0316). 0은 첫 시도이고 1~3 [가정]은 지연 환급 계좌를 다시 받은 시도다.
    * 결제사 멱등키는 시도 0이 `cancel-{id}`, 1 이상이 `cancel-{id}-a{n}`이다. 옛 행·대역은 비어 있을 수 있어 0으로 읽는다
@@ -123,6 +125,8 @@ export interface CancellationOrderView {
   readonly saleEndsAtMs: number;
   /** 입장 시작 시각(있을 때) */
   readonly entryOpensAtMs?: number;
+  /** 공연 시작 시각(승인 근거, F-06-3) */
+  readonly eventStartsAtMs?: number;
   /** purchase_order.status */
   readonly orderStatus: string;
   /** 결제 승인 시각(F-06-3 승인 근거). 없으면 bookedAtMs를 쓴다 */

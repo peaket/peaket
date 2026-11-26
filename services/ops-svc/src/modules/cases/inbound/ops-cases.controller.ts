@@ -4,12 +4,13 @@
 // 응답은 Cache-Control: no-store다(가린 값과 처리 메모가 공용 캐시에 남지 않게).
 // 추가 검증 이의 인정·기각(F-06-7, openapi createOpsCaseVerificationAppealDecision): 경로 역할은 넷이고(operator·commander가 403 case-update-not-allowed를 받게)
 // 결정은 CS 담당자만 한다. Idempotency-Key(@Idempotent)·If-Match를 읽고 202에 해결한 새 판의 ETag를 싣는다.
-import { Body, Controller, Get, Header, Headers, HttpCode, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Header, Headers, HttpCode, Optional, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { CreateOpsCaseVerificationAppealDecisionResponse, GetOpsCaseResponse, ListOpsCasesResponse, UpdateOpsCaseResponse } from '@peaket/contracts/openapi/ops';
 import { ContractRouteSchema, CurrentPrincipal, Idempotent, IdempotencyRequest, ProblemError, Roles, type Principal } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { CsCases } from '../application/cs-cases.js';
+import { ApprovalLifecycle } from '../../approvals/index.js';
 import { DECIDE_VERIFICATION_APPEAL, VerificationAppealDecision } from '../application/verification-appeal-decision.js';
 import { CS_CASE_STATUSES } from '../domain/cs-case.js';
 
@@ -49,6 +50,7 @@ export class OpsCasesController {
   constructor(
     private readonly cases: CsCases,
     private readonly decision: VerificationAppealDecision,
+    @Optional() private readonly approvalLifecycle?: ApprovalLifecycle,
   ) {}
 
   @Get()
@@ -117,6 +119,10 @@ export class OpsCasesController {
     if (!parsed.success) throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
     const before = await this.cases.get(actorOf(me), caseId);
     if (before.view.kind !== 'FLAGGED') throw new ProblemError({ type: 'case-not-flagged', status: 409, title: '이상 표시 건이 아닙니다' });
+    if (parsed.data.decision === 'REFUND') {
+      if (!this.approvalLifecycle) throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '승인 업무 연결을 사용할 수 없습니다' });
+      await this.approvalLifecycle.request({ kind: 'SYSTEM_FAULT_REFUND', targetRef: before.view.targetRef, amount: 0, reasonCode: 'FLAGGED_REFUND', reasonText: parsed.data.reason }, { ...actorOf(me), role: 'cs_agent', sessionId: 'case-action' });
+    }
     await this.cases.resolveAsSystem(caseId, `cancellation-decision:${parsed.data.decision}:${parsed.data.reason}`, Date.now(), me.accountId);
     const after = await this.cases.get(actorOf(me), caseId);
     return after.view;
@@ -132,9 +138,10 @@ export class OpsCasesController {
     if (!parsed.success) throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
     const before = await this.cases.get(actorOf(me), caseId);
     if (before.view.kind !== 'TICKET_NOT_ISSUED') throw new ProblemError({ type: 'case-not-refundable', status: 409, title: '미발권 건이 아닙니다' });
+    if (!this.approvalLifecycle) throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '승인 업무 연결을 사용할 수 없습니다' });
+    const approval = await this.approvalLifecycle.request({ kind: 'SYSTEM_FAULT_REFUND', targetRef: before.view.targetRef, amount: 0, reasonCode: 'TICKET_NOT_ISSUED', reasonText: parsed.data.reason }, { ...actorOf(me), role: 'cs_agent', sessionId: 'case-action' });
     await this.cases.resolveAsSystem(caseId, `system-refund:${parsed.data.reason}`, Date.now(), me.accountId);
-    const after = await this.cases.get(actorOf(me), caseId);
-    return { approvalId: caseId, kind: 'SYSTEM_FAULT_REFUND', targetRef: after.view.targetRef, status: 'PENDING_APPROVAL', amount: 0 };
+    return approval;
   }
 
 }

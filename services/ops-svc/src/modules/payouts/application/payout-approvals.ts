@@ -218,7 +218,7 @@ export class PayoutApprovals {
       }
       expired += 1;
       try {
-        await ports.notifier?.send({ approvalId: r.approvalId, event: 'PAYOUT_POSTPONED', recipient: { kind: 'PARTNER', promoterId: await this.#promoterOf(r.batchId) }, payoutDate: postponedPayoutDate });
+        await ports.notifier?.send({ approvalId: r.approvalId, event: 'PAYOUT_POSTPONED', recipient: { kind: 'PARTNER', promoterId: await this.#promoterOf(r.batchId, r.pg, r.pgStore, r.payoutDate) }, payoutDate: postponedPayoutDate });
       } catch {
         // 알림 실패는 만료를 되돌리지 않는다
       }
@@ -242,7 +242,7 @@ export class PayoutApprovals {
         }
         expired += 1;
         try {
-          await ports.notifier?.send({ approvalId: b.approvalId ?? b.batchId, event: 'PAYOUT_POSTPONED', recipient: { kind: 'PARTNER', promoterId: await this.#promoterOf(b.batchId) }, payoutDate: postponedPayoutDate });
+          await ports.notifier?.send({ approvalId: b.approvalId ?? b.batchId, event: 'PAYOUT_POSTPONED', recipient: { kind: 'PARTNER', promoterId: await this.#promoterOf(b.batchId, b.pg, b.pgStore, b.payoutDate) }, payoutDate: postponedPayoutDate });
         } catch {
           // 알림 실패는 만료를 되돌리지 않는다
         }
@@ -258,11 +258,18 @@ export class PayoutApprovals {
     return { expired, failed };
   }
 
-  async #promoterOf(batchId: string): Promise<string> {
+  async #promoterOf(batchId: string, pg: 'TOSS' | 'PORTONE', pgStore: 'STANDARD' | 'ESCROW', payoutDate: string): Promise<string> {
     try {
       const detail = await this.d.payments.getBatchDetail(batchId);
       const first = detail.statements.find((s) => typeof s.promoterId === 'string');
-      return typeof first?.promoterId === 'string' ? first.promoterId : '';
+      if (typeof first?.promoterId === 'string') return first.promoterId;
+    } catch {
+      // 상세를 못 읽으면 정산서 목록으로 이어 간다
+    }
+    try {
+      const rows = await this.d.payments.listStatements({ pg, pgStore, payoutDate, limit: 1 });
+      const first = (rows[0] ?? {}) as { promoterId?: unknown };
+      return typeof first.promoterId === 'string' ? first.promoterId : '';
     } catch {
       return '';
     }

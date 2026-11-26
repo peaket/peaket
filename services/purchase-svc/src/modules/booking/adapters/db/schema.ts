@@ -97,6 +97,8 @@ export const orderCancellation = pgTable(
     fraudCaseId: uuid('fraud_case_id'),
     reason: text('reason').notNull(),
     approvalId: uuid('approval_id'),
+    /** 승인 업무 종류(F-06-3, 0041). 같은 승인 ID의 다른 kind 재요청을 막는다 */
+    approvalKind: text('approval_kind'),
     daysBefore: integer('days_before').notNull(),
     within24h: boolean('within_24h').notNull(),
     deductionBp: integer('deduction_bp').notNull(),

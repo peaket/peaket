@@ -11,6 +11,17 @@ export class MemoryApprovalLifecycleStore implements ApprovalLifecycleStore {
   constructor(private readonly audit?: AuditChain) {}
 
   /** 단위 시험이 beforeEach에서 시계를 되돌리거나 감사 체인을 비우면 앞선 시험의 승인을 버린다. 운영 DB 저장소에는 없는 메모리 전용 동작이다. */
+  #tickBusy = false;
+  async withTickLease<T>(fn: () => Promise<T>): Promise<T | undefined> {
+    if (this.#tickBusy) return undefined;
+    this.#tickBusy = true;
+    try {
+      return await fn();
+    } finally {
+      this.#tickBusy = false;
+    }
+  }
+
   resetForClock(nowMs: number): void {
     const entries = (this.audit as unknown as { entries?: unknown[] } | undefined)?.entries;
     if (Array.isArray(entries) && entries.length < this.#lastAuditCount) this.rows.clear();

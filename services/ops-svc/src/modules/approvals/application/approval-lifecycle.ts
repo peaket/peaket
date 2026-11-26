@@ -242,6 +242,11 @@ export class ApprovalLifecycle {
 
   /** 5분 작업·시험이 같은 함수를 부른다. 만료·상위 알림·고착 실행 복구와 지급 묶음 15시 만료를 함께 센다. */
   async tick(): Promise<{ escalated: number; expired: number; failed: number }> {
+    if (this.d.store.withTickLease) return (await this.d.store.withTickLease(() => this.#tickInner())) ?? { escalated: 0, expired: 0, failed: 0 };
+    return this.#tickInner();
+  }
+
+  async #tickInner(): Promise<{ escalated: number; expired: number; failed: number }> {
     const nowMs = this.d.clock.now();
     this.d.store.resetForClock?.(nowMs);
     let escalated = 0;
@@ -334,7 +339,7 @@ export class ApprovalLifecycle {
       }
       throw new ProblemError({ type: 'approval-execution-failed', status: 500, title: '승인 업무 실행에 실패했습니다' });
     }
-    if (outcome !== 'RECLAIMED' && outcome !== 'REFUNDED') {
+    if (executing.kind === 'TRANSFER_RECLAIM' ? outcome !== 'RECLAIMED' : !['REFUNDED', 'REFUND_PENDING', 'REQUESTED'].includes(outcome)) {
       const failed: ApprovalLifecycleRecord = { ...executing, status: 'FAILED', closeReason: outcome, updatedAt: new Date(nowMs) };
       await this.#save(failed, 'APPROVAL_FAILED', { kind: executing.kind, targetRef: executing.targetRef, status: failed.status, outcome }, nowMs);
       try {

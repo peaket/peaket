@@ -253,6 +253,13 @@
       "when": 1796000000001,
       "tag": "0040_approval_refund",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1796000000002,
+      "tag": "0041_approval_refund_kind",
+      "breakpoints": true
     }
   ]
 }

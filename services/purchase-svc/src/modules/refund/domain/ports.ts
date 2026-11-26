@@ -109,6 +109,8 @@ export interface CancellationWrites {
     readonly deductionAmount: number;
     readonly refundAmount: number;
     readonly status: CancellationStatus;
+    /** 승인 업무 종류(F-06-3). 승인 환불이 아니면 없다 */
+    readonly kind?: string;
     readonly nowMs: number;
     /** 입장 기록 마감 뒤 환급할 시각(REQUESTED만) */
     readonly refundDueAtMs?: number;

@@ -41,7 +41,7 @@ export class ApprovalBasisOrders {
       payerAccountId: first.payerAccountId,
       paidAt: new Date(paidAtMs).toISOString(),
       orderStatus: first.orderStatus,
-      eventStartsAt: null,
+      eventStartsAt: first.eventStartsAtMs === undefined ? null : new Date(first.eventStartsAtMs).toISOString(),
       entryOpensAt: first.entryOpensAtMs === undefined ? null : new Date(first.entryOpensAtMs).toISOString(),
       entryRecorded: first.entryRecorded === true,
       refundableAmount: refundable,

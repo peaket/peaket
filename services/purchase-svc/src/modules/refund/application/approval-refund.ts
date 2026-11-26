@@ -58,7 +58,8 @@ export class ApprovalRefunds {
     return guard(async () => {
       const existing = await this.d.orders.findCancellation(approvalId);
       if (existing) {
-        if (existing.orderId !== input.orderId || existing.refundAmount !== input.amount || (this.#kinds.has(approvalId) && this.#kinds.get(approvalId) !== input.kind)) throw new ApprovalRefundProblem('approval-refund-conflict', 409, '같은 승인 ID에 다른 환불 요청이 왔습니다');
+        const known = existing.kind ?? this.#kinds.get(approvalId);
+        if (existing.orderId !== input.orderId || existing.refundAmount !== input.amount || (known !== undefined && known !== input.kind)) throw new ApprovalRefundProblem('approval-refund-conflict', 409, '같은 승인 ID에 다른 환불 요청이 왔습니다');
         return { status: existing.state === 'REFUNDED' ? 'REFUNDED' : existing.state === 'REQUESTED' ? 'REQUESTED' : 'REFUND_PENDING', cancellationId: existing.cancellationId, refundAmount: existing.refundAmount };
       }
       const orders = (await (this.d.orders.byOrder ? this.d.orders.byOrder(input.orderId) : Promise.resolve([]))) ?? [];
@@ -67,9 +68,10 @@ export class ApprovalRefunds {
       if (order.orderStatus === 'REFUNDED' || order.orderStatus === 'CANCELED' || order.orderStatus === 'CANCELLED') {
         throw new ApprovalRefundProblem('approval-refund-conflict', 409, '이미 환급·취소된 주문입니다');
       }
+      const tickets = new Set(orders.map((o) => o.ticketId));
       const prior = (await this.d.orders.cancellationsOf?.(input.orderId)) ?? [];
-      if (prior.some((c) => c.state !== 'VOIDED')) throw new ApprovalRefundProblem('approval-refund-conflict', 409, '이미 취소·환급 기록이 있는 주문입니다');
-      const refundable = order.refundableAmount ?? order.ticketPrice;
+      if (prior.some((c) => tickets.has(c.ticketId) && c.state !== 'VOIDED')) throw new ApprovalRefundProblem('approval-refund-conflict', 409, '이미 취소·환급 기록이 있는 티켓입니다');
+      const refundable = orders.reduce((sum, o) => sum + (o.refundableAmount ?? o.ticketPrice), 0);
       this.#kinds.set(approvalId, input.kind);
       if (input.kind === 'DISCRETIONARY_WAIVER') {
         if (input.amount <= 0 || input.amount > refundable) throw new ApprovalRefundProblem('approval-refund-amount-mismatch', 422, '면제 금액이 남은 환급 금액을 넘습니다');
@@ -123,7 +125,8 @@ export class ApprovalRefunds {
       status: i.status,
       nowMs: i.nowMs,
       actor: `approval:${i.approvalId}`,
-      ...({ kind: i.kind, approvalId: i.approvalId } as Record<string, unknown>),
+      kind: i.kind,
+      ...({ approvalId: i.approvalId } as Record<string, unknown>),
     } as never);
     if ((out as { status?: string }).status === 'CONFLICT') throw new ApprovalRefundProblem('approval-refund-conflict', 409, '같은 주문·티켓의 취소가 이미 진행 중입니다');
   }

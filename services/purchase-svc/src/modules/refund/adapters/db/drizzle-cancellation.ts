@@ -7,7 +7,7 @@ import type { SeatMap, SeatSales } from '../../../inventory/index.js';
 import type { CancellationOrderView, CancellationReason, CancellationRecord, CancellationWriteOutcome, DueRefund, RefundAccountAnswer } from '../../domain/cancellation.js';
 import { REFUND_ACCOUNT_MAX_ATTEMPTS } from '../../domain/cancellation.js';
 import type { CancellationClaims, CancellationConfigs, CancellationOrders, CancellationWrites, RefundAccountWrites, SeatReturnNotices, SeatReturns } from '../../domain/ports.js';
-import { DrizzleOrderStore, orderCancellation, orderItem, purchaseOrder } from '../../../booking/index.js';
+import { DrizzleOrderStore, orderCancellation, orderEvent, orderItem, purchaseOrder } from '../../../booking/index.js';
 
 /** 같은 트랜잭션의 시도 올리기가 0행일 때 멱등 키 행까지 되돌리는 표지 */
 class BeginAttemptNotApplied extends Error {}
@@ -69,6 +69,18 @@ export class DrizzleCancellationOrders implements CancellationOrders {
       .from(orderItem)
       .innerJoin(purchaseOrder, eq(orderItem.orderId, purchaseOrder.id))
       .where(eq(orderItem.orderId, orderId));
+    if (rows.length === 0) return [];
+    const paid = await this.database.db
+      .select({ occurredAt: orderEvent.occurredAt })
+      .from(orderEvent)
+      .where(and(eq(orderEvent.orderId, orderId), eq(orderEvent.toStatus, 'CONFIRMED')))
+      .orderBy(sql`${orderEvent.seq} desc`)
+      .limit(1);
+    const cancelled = await this.database.db
+      .select({ ticketId: orderCancellation.ticketId, refundAmount: orderCancellation.refundAmount, status: orderCancellation.status, entryRecordedAt: orderCancellation.entryRecordedAt })
+      .from(orderCancellation)
+      .where(eq(orderCancellation.orderId, orderId));
+    const active = cancelled.filter((c) => c.status !== 'VOIDED');
     const out: CancellationOrderView[] = [];
     for (const row of rows) {
       if (row.ticketId === null) continue;
@@ -84,13 +96,23 @@ export class DrizzleCancellationOrders implements CancellationOrders {
         bookedAtMs: row.createdAt.getTime(),
         saleEndsAtMs: config.saleEndsAtMs,
         ...(config.entryOpensAtMs !== undefined ? { entryOpensAtMs: config.entryOpensAtMs } : {}),
+        eventStartsAtMs: config.saleEndsAtMs + 86_400_000,
         orderStatus: row.status,
+        ...(paid[0]?.occurredAt ? { paidAtMs: paid[0].occurredAt.getTime() } : {}),
+        refundableAmount: Math.max(0, row.unitPrice - active.filter((c) => c.ticketId === row.ticketId).reduce((sum, c) => sum + c.refundAmount, 0)),
+        entryRecorded: active.some((c) => c.ticketId === row.ticketId && c.entryRecordedAt !== null),
       });
     }
     return out;
   }
 
-  async findCancellation(cancellationId: string): Promise<CancellationRecord | undefined> {    const [row] = await this.database.db
+  async cancellationsOf(orderId: string): Promise<CancellationRecord[]> {
+    const rows = await this.database.db.select().from(orderCancellation).where(eq(orderCancellation.orderId, orderId));
+    return rows.map((r) => ({ cancellationId: r.id, orderId: r.orderId, ticketId: r.ticketId, refundAmount: r.refundAmount, state: r.status as CancellationRecord['state'], refundAttempts: r.refundAttempts, ...(r.approvalKind ? { kind: r.approvalKind } : {}) }));
+  }
+
+  async findCancellation(cancellationId: string): Promise<CancellationRecord | undefined> {
+    const [row] = await this.database.db
       .select({
         cancellationId: orderCancellation.id,
         orderId: orderCancellation.orderId,
@@ -99,6 +121,7 @@ export class DrizzleCancellationOrders implements CancellationOrders {
         state: orderCancellation.status,
         refundAttempts: orderCancellation.refundAttempts,
         refundAttempt: orderCancellation.refundAttempt,
+        kind: orderCancellation.approvalKind,
         accountRequiredAt: orderCancellation.refundAccountRequiredAt,
         refundAccountIdemKey: orderCancellation.refundAccountIdemKey,
         refundAccountAnswer: orderCancellation.refundAccountAnswer,
@@ -107,10 +130,11 @@ export class DrizzleCancellationOrders implements CancellationOrders {
       .where(eq(orderCancellation.id, cancellationId))
       .limit(1);
     if (!row) return undefined;
-    const { accountRequiredAt, refundAccountIdemKey, refundAccountAnswer, ...rest } = row;
+    const { accountRequiredAt, refundAccountIdemKey, refundAccountAnswer, kind, ...rest } = row;
     return {
       ...rest,
       state: row.state as CancellationRecord['state'],
+      ...(kind !== null ? { kind } : {}),
       ...(accountRequiredAt ? { refundAccountRequired: true } : {}),
       ...(refundAccountIdemKey !== null ? { refundAccountIdemKey } : {}),
       ...(refundAccountAnswer !== null ? { refundAccountAnswer: refundAccountAnswer as RefundAccountAnswer } : {}),
@@ -164,6 +188,7 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
         // 부정 예매 운영자 취소(사유 FRAUD)의 사건·승인(BAT-415 몫 F, ADR-0171)
         ...(q.fraudCaseId !== undefined ? { fraudCaseId: q.fraudCaseId } : {}),
         ...(q.approvalId !== undefined ? { approvalId: q.approvalId } : {}),
+        ...(q.kind !== undefined ? { approvalKind: q.kind } : {}),
         ...(q.refundDueAtMs !== undefined ? { refundDueAt: new Date(q.refundDueAtMs) } : {}),
         createdAt: now,
         statusChangedAt: now,

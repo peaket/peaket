@@ -1,7 +1,7 @@
 // 승인 업무 모듈 조립(BAT-615 LCH-070, ADR-0320, BAT-045 BOT-152, F-06-3). 지급 승인은 PayoutsModule의 것을 그대로 쓰고(global export),
 // 이 모듈은 계약 조건 변경 승인·commander 역할 변경 승인(admin-accounts 모듈)·정산서 수기 조정 승인(F-07-5)·일반 승인 수명주기(F-06-3)·라우터·HTTP 경로를 함께 조립한다.
 // 조정 승인의 payment-svc 클라이언트는 PayoutsModule이 전역으로 내보내는 SETTLEMENT_PAYMENT_CLIENT를 쓴다.
-import { type DynamicModule, Module, type Provider } from '@nestjs/common';
+import { type DynamicModule, Global, Module, type Provider } from '@nestjs/common';
 import { type Clock, type Database, CLOCK } from '@peaket/platform';
 import { MemoryAuditChain, type AuditChain, type AuditChainReader } from '../audit/index.js';
 import { AdminAccountsModule, DrizzleRoleChangeApprovalStore, MemoryRoleChangeApprovalStore, RoleChangeApprovals, UnavailableAdminIdentity, type AdminIdentity, type AdminReauth, type RoleChangeApprovalStore } from '../admin-accounts/index.js';
@@ -51,6 +51,7 @@ export interface ApprovalsModuleDeps {
   readonly failureCases?: ApprovalFailureCases;
 }
 
+@Global()
 @Module({})
 export class ApprovalsModule {
   static register(o: { storage: 'memory'; deps?: Partial<ApprovalsModuleDeps>; audit?: AuditChain } | ({ storage: 'database'; database: Database; audit: AuditChain } & ApprovalsModuleDeps)): DynamicModule {
@@ -120,6 +121,7 @@ export class ApprovalsModule {
         module: ApprovalsModule,
         imports: [adminModule],
         controllers: [ApprovalsController, InternalApprovalsController, SettlementAdjustmentsController],
+        exports: [ApprovalLifecycle],
         providers: [...providers, reauthProvider, { provide: APPROVAL_STORE, useValue: o.store ?? new DrizzleContractApprovalStore(o.database) }, { provide: CORE_CONTRACT_CLIENT, useValue: o.core ?? new UnavailableCoreContract() }],
       };
     }

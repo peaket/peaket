@@ -114,7 +114,7 @@ export class HttpApprovalLifecyclePorts implements ApprovalLifecycleTargets, App
     });
     if (!res.ok) throw new ProblemError({ type: 'approval-execution-failed', status: 502, title: '승인 환불을 실행하지 못했습니다' });
     const body = (await res.json()) as { status?: unknown; cancellationId?: unknown; refundAmount?: unknown };
-    const status: 'REFUNDED' | 'REFUND_PENDING' = body.status === 'REFUNDED' ? 'REFUNDED' : 'REFUND_PENDING';
+    const status: 'REFUNDED' | 'REFUND_PENDING' | 'REQUESTED' = body.status === 'REFUNDED' ? 'REFUNDED' : body.status === 'REQUESTED' ? 'REQUESTED' : 'REFUND_PENDING';
     return { status, cancellationId: String(body.cancellationId ?? ''), refundAmount: Number(body.refundAmount ?? i.amount) };
   }
 

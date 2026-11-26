@@ -1,9 +1,9 @@
 // 승인 업무 수명주기 Drizzle 저장소(F-06-3, ops 0038·0039). approval_request·approval_vote를 쓴다.
 // 상태·감사·투표는 같은 트랜잭션에 쓰고, 판은 직전 판 조건으로만 올린다(동시 승인 CAS).
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
 import { appendAuditIn, type AuditRecord } from '../../../audit/audit.js';
-import { approverRolesOf, type ApprovalLifecycleRecord, type LifecycleKind } from '../../domain/approval-lifecycle.js';
+import { LIFECYCLE_KINDS, approverRolesOf, type ApprovalLifecycleRecord, type LifecycleKind } from '../../domain/approval-lifecycle.js';
 import type { ApprovalLifecycleStore } from '../../domain/lifecycle-ports.js';
 import { approvalRequest, approvalVote } from './schema.js';
 
@@ -71,6 +71,14 @@ export class DrizzleApprovalLifecycleStore implements ApprovalLifecycleStore {
     });
   }
 
+  async withTickLease<T>(fn: () => Promise<T>): Promise<T | undefined> {
+    return this.database.transaction(async (tx) => {
+      const r = await tx.execute(sql`select pg_try_advisory_xact_lock(6283) as ok`);
+      if ((r.rows[0] as { ok?: boolean } | undefined)?.ok !== true) return undefined;
+      return fn();
+    });
+  }
+
   async find(approvalId: string): Promise<ApprovalLifecycleRecord | undefined> {
     const rows = await this.database.db.select().from(approvalRequest).where(eq(approvalRequest.id, approvalId)).limit(1);
     if (!rows[0] || !isLifecycleKind(rows[0].kind)) return undefined;
@@ -105,7 +113,7 @@ export class DrizzleApprovalLifecycleStore implements ApprovalLifecycleStore {
   }
 
   async list(filter: { status?: readonly string[] | undefined; kind?: LifecycleKind | undefined; targetAccountId?: string | undefined; limit: number }): Promise<ApprovalLifecycleRecord[]> {
-    const conditions = [];
+    const conditions = [inArray(approvalRequest.kind, [...LIFECYCLE_KINDS])];
     if (filter.status && filter.status.length > 0) conditions.push(inArray(approvalRequest.status, [...filter.status]));
     if (filter.kind) conditions.push(eq(approvalRequest.kind, filter.kind));
     if (filter.targetAccountId) conditions.push(eq(approvalRequest.targetAccountId, filter.targetAccountId));
