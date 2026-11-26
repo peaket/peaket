@@ -175,7 +175,7 @@ describe('F-04-14 도메인', () => {
     const secondCsv = ev.promoterCsv({ eventName: '이차', cases: second as any });
     expect(secondCsv.match(/5건 미만/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
     expect(secondCsv).not.toMatch(/reason_(QUEUE_BYPASS|CAPTCHA_BYPASS),1/);
-    expect(secondCsv).not.toMatch(/appeal_accepted_ratio,[0-9]/);
+    expect(secondCsv).toMatch(/appeal_accepted_ratio,0\.5(0)?/);
   });
 
   test('FX-T20 ③ 고소·고발용 요약은 개인정보 칸 없이 고정 문장과 봉인 해시를 싣는다', () => {

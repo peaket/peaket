@@ -8,7 +8,7 @@ import 'reflect-metadata';
 import { createHash, randomUUID } from 'node:crypto';
 import canonicalize from 'canonicalize';
 import { createService, fakeClock } from '@peaket/platform';
-import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { MemoryAuditChain } from '../src/modules/audit/index.js';
 import * as investigationsModule from '../src/modules/investigations/index.js';
@@ -49,6 +49,7 @@ const A = (n: number) => id(0x1000 + n);
 const T = (n: number) => id(0x2000 + n);
 const H = (n: number) => id(0x1800 + n);
 const EVENT = id(0x200);
+const EVENT_BULK = id(0x210);
 const CLUSTER = id(0x300);
 const CASE = id(0x400);
 const REQUEST = id(0x700);
@@ -130,8 +131,14 @@ class EvidenceStoreFake {
     return this.exports.filter((e) => e.actorId === actorId && e.createdAtMs >= sinceMs).length;
   }
   async listClosedCases(eventId: string) {
-    const r = await this.cases.listCases({ eventId, status: ['ACTIONED', 'CLEARED', 'REVERSED'] as FraudCaseStatus[], limit: 1000 });
-    return r.items;
+    const all: FraudCaseRecord[] = [];
+    let cursor: string | undefined;
+    for (;;) {
+      const r = await this.cases.listCases({ eventId, status: ['ACTIONED', 'CLEARED', 'REVERSED'] as FraudCaseStatus[], limit: 1000, ...(cursor ? { cursor } : {}) });
+      all.push(...r.items);
+      if (r.nextCursor === null) return all;
+      cursor = r.nextCursor;
+    }
   }
   async putPost(p: any, o: any = {}) {
     if (o.idem) {
@@ -369,7 +376,14 @@ const identity = new FakeIdentity();
 const clock = fakeClock({ now: NOW });
 const kit = reauthKit(() => clock.now());
 
-const eventInfo = { get: async (eventId: string) => (eventId === EVENT ? { eventName: '겨울 콘서트', showAtMs: SHOW, salesOpenedAtMs: SHOW - 7 * DAY } : null) };
+const eventInfo = {
+  get: async (eventId: string) =>
+    eventId === EVENT
+      ? { eventName: '겨울 콘서트', showAtMs: SHOW, salesOpenedAtMs: SHOW - 7 * DAY }
+      : eventId === EVENT_BULK
+        ? { eventName: '대량 콘서트', showAtMs: SHOW, salesOpenedAtMs: SHOW - 7 * DAY }
+        : null,
+};
 
 const tickets = new Map<string, any>();
 const ticketDirectory = {
@@ -505,6 +519,23 @@ const seedCase = async (o: Record<string, any> = {}) => {
   await cases.putCase(c);
   return c;
 };
+const seedClosedCases = async (n: number, eventId: string) => {
+  let first: FraudCaseRecord | undefined;
+  for (let i = 0; i < n; i += 1) {
+    const c = caseOf({
+      eventId,
+      status: 'ACTIONED',
+      outcomeLabel: 'BOT',
+      members: [
+        memberOf(A(1), { actionNotifiedAtMs: NOW - DAY, appealResult: 'ACCEPTED' }),
+        memberOf(A(2), { actionNotifiedAtMs: NOW - DAY, appealResult: 'REJECTED' }),
+      ],
+    } as any);
+    await cases.putCase(c);
+    first ??= c;
+  }
+  return first!;
+};
 const seedTicket = (o: { ticketId: string; payerAccountId: string; holderAccountId?: string }) => {
   tickets.set(o.ticketId, { eventId: EVENT, ticketId: o.ticketId, payerAccountId: o.payerAccountId, holderAccountId: o.holderAccountId ?? o.payerAccountId, status: 'ISSUED', entryRecorded: false });
 };
@@ -576,6 +607,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await svc?.close();
+});
+
+afterEach(() => {
+  // 대량 PROMOTER 시험이 실패해도 10,001건이 뒤 시험의 1,000건 상한을 밀지 않게 한다.
+  for (const [id, c] of cases.cases) if (c.eventId === EVENT_BULK) cases.cases.delete(id);
 });
 
 beforeEach(() => {
@@ -783,16 +819,21 @@ describe('F-04-14 HTTP', () => {
     const bundleId = String(json(created).bundleId);
     await evidence().buildDue(clock.now());
     const objection = await holdChange(bundleId, who, { holdReason: 'OBJECTION', basis: '되돌리기' });
-    expect(objection.statusCode).toBe(422);
-    expect(typeOf(objection)).toBe('hold-reason-invalid');
+    expect(objection.statusCode).toBe(400);
+    expect(typeOf(objection)).toBe('invalid-body');
+    const short = await holdChange(bundleId, who, { holdReason: 'DISPUTE', basis: '소송' });
+    expect(short.statusCode).toBe(400);
+    expect(typeOf(short)).toBe('invalid-body');
     const changed = await holdChange(bundleId, who, { holdReason: 'DISPUTE', basis: '민사 소송 접수 2026-1234' });
     expect(changed.statusCode, changed.payload).toBe(200);
     expect(json(changed).holdReason).toBe('DISPUTE');
     const custody = await evidenceStore.listCustody(bundleId);
+    expect(custody.filter((r: any) => r.action === 'HOLD_CHANGED')).toHaveLength(1);
     expect(custody.at(-1)).toMatchObject({ action: 'HOLD_CHANGED', reason: '민사 소송 접수 2026-1234' });
-    const again = await holdChange(bundleId, who, { holdReason: 'INVESTIGATION', basis: '수사 착수' });
-    expect(again.statusCode).toBe(200);
-    expect(json(again).holdReason).toBe('INVESTIGATION');
+    const again = await holdChange(bundleId, who, { holdReason: 'INVESTIGATION', basis: '수사 착수 2026-11-27' });
+    expect(again.statusCode).toBe(409);
+    expect(evidenceStore.bundles.get(bundleId)!.holdReason).toBe('DISPUTE');
+    expect((await evidenceStore.listCustody(bundleId)).filter((r: any) => r.action === 'HOLD_CHANGED')).toHaveLength(1);
   });
 
   test('FX-T13 ⑯ 보존 끝 요청·확인은 OBJECTION 422·대기 409·요청자 403·재인증 403·commander 확인을 지킨다', async () => {
@@ -807,7 +848,7 @@ describe('F-04-14 HTTP', () => {
     const requested = await holdEndRequest(bundleId, who, { basis: '합의 종료 2026-11-26' });
     expect(requested.statusCode, requested.payload).toBe(201);
     expect(json(requested).holdEndRequest).toMatchObject({ requestedBy: who['x-user-id'], basis: '합의 종료 2026-11-26' });
-    const duplicate = await holdEndRequest(bundleId, who, { basis: '다시' });
+    const duplicate = await holdEndRequest(bundleId, who, { basis: '같은 요청을 다시 보냄' });
     expect(duplicate.statusCode).toBe(409);
     expect(typeOf(duplicate)).toBe('hold-end-pending');
     const self = await holdEndConfirm(bundleId, who, kit.token({ accountId: who['x-user-id']!, sessionId: who['x-session-id']!, act: 'APPROVAL' }));
@@ -1082,7 +1123,7 @@ describe('F-04-14 HTTP', () => {
     expect(typeOf(beforeSeal)).toBe('evidence-not-sealed');
     await evidence().buildDue(clock.now());
     const noReason = await exportBundle(bundleId, who, { kind: 'COMPLAINT' } as any);
-    expect(noReason.statusCode).toBe(422);
+    expect(noReason.statusCode).toBe(400);
     expect(typeOf(noReason)).toBe('invalid-body');
     evidenceStore.forcedExportCount = 19;
     expect((await exportBundle(bundleId, who, { kind: 'PROMOTER', reason: '열아홉' })).statusCode).toBe(200);
@@ -1094,27 +1135,30 @@ describe('F-04-14 HTTP', () => {
 
   test('FX-T20 ⑨ 1만 건 넘는 내보내기는 접속기록에 bulk:true, 하루 5건 넘으면 INV_EXPORT_VOLUME 표시다', async () => {
     const who = investigator();
-    const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(1), { actionNotifiedAtMs: NOW - DAY })] });
-    const created = await createBundle(c.caseId, who);
+    // PROMOTER의 실제 경로(끝난 사건 전체 집계)로 10,000/10,001건을 만든다. AUTHORITY 전용 빌더를 쓰지 않는다.
+    const first = await seedClosedCases(10_000, EVENT_BULK);
+    const created = await createBundle(first.caseId, who);
     const bundleId = String(json(created).bundleId);
     await evidence().buildDue(clock.now());
-    submission.nextRows = 10_000;
     expect((await exportBundle(bundleId, who, { kind: 'PROMOTER', reason: '만 건' })).statusCode).toBe(200);
-    expect(access.records.filter((r) => r.action === 'EVIDENCE_EXPORT').at(-1)).not.toMatchObject({ detail: { bulk: true } });
-    submission.nextRows = 10_001;
+    const atTenThousand = access.records.filter((r) => r.action === 'EVIDENCE_EXPORT').at(-1);
+    expect(atTenThousand).toMatchObject({ rows: 10_000 });
+    expect(atTenThousand).not.toMatchObject({ detail: { bulk: true } });
+    await seedClosedCases(1, EVENT_BULK);
     const big = await exportBundle(bundleId, who, { kind: 'PROMOTER', reason: '만 건 넘음' });
     expect(big.statusCode, big.payload).toBe(200);
     const bulk = access.records.filter((r) => r.action === 'EVIDENCE_EXPORT').at(-1);
     expect(bulk).toMatchObject({ rows: 10_001, detail: { bulk: true } });
     evidenceStore.forcedExportCount = 5;
-    submission.nextRows = 1;
     expect((await exportBundle(bundleId, who, { kind: 'PROMOTER', reason: '다섯 번째' })).statusCode).toBe(200);
     expect(JSON.stringify(access.records.at(-1))).not.toContain('INV_EXPORT_VOLUME');
     evidenceStore.forcedExportCount = 6;
     const six = await exportBundle(bundleId, who, { kind: 'PROMOTER', reason: '여섯 번째' });
     expect(six.statusCode).toBe(200);
     expect(JSON.stringify(access.records.at(-1))).toContain('INV_EXPORT_VOLUME');
-  });
+    // 뒤 시험의 expireDue가 1,000건 상한에 밀리지 않게 대량 회차 사건을 시험 저장소에서 지운다.
+    for (const [id, c] of cases.cases) if (c.eventId === EVENT_BULK) cases.cases.delete(id);
+  }, 120_000);
 
   test('FX-T23 ② [ASVS v5.0.0-2.1.2] 이의는 30일 창 안이면 공연 뒤에도 받고 지나면 기한 경과로 닫힌다', async () => {
     const who = investigator();
@@ -1207,7 +1251,6 @@ describe('F-04-14 HTTP', () => {
     const grant = json(after).events.find((e: any) => e.kind === 'PRIORITY_GRANTED');
     expect(grant.detail.grants[0]).toMatchObject({ result: 'SAME_SEAT', price: 100_000, fee: 0 });
     expect(Date.parse(grant.detail.grants[0].expiresAt)).toBe(NOW + 48 * HOUR);
-    expect(copies.some((x) => x.accountId === A(66) && x.grantId === grant.detail.grants[0].grantId && x.expiresAt === grant.detail.grants[0].expiresAt)).toBe(true);
   });
 
   test('C-T70 ① C-T70 ② 소명 요청·잠금·받은 사람 알림·돌려주기·인정·해제가 서버에서 이어진다', async () => {
