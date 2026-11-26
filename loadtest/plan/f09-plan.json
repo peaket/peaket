@@ -1,0 +1,171 @@
+{
+ "plan": "f09-plan",
+ "title": "F-08-9 장애 주입 기록 검사·검색 측정(동결 로컬 트랙)",
+ "created": "2026-11-27",
+ "basis": "docs/review/plans/F-08-9.md 6.2·7.1~7.2",
+ "state_file": ".cache/peaket-f09/state.json",
+ "start_gate": "WINDOW-F089: 감독이 연다(계획 2절 6·11절)",
+ "gates": {
+  "WINDOW-F089": "감독이 측정 창을 연다"
+ },
+ "runs": [
+  {
+   "n": 1,
+   "gate": "WINDOW-F089",
+   "key": "w2-stage",
+   "group": "무대",
+   "title": "v1 2GiB·호스트 core-svc·검색 채우기",
+   "estimate_min": 55,
+   "stage": "stage",
+   "conditions": "Docker 잠금 docker lane4-F-08-9 한 자리, kind lane4-f09, v1 복제 3·2GiB, 호스트 core PostgreSQL·core-svc(:3001)·fill-search 1만.",
+   "commands": [
+    {
+     "label": "Docker 잠금(한 자리)",
+     "argv": ["C:/PROGRA~1/Git/bin/bash.exe", "D:/ticketpass-locks/lock.sh", "take", "docker", "lane4-F-08-9"]
+    },
+    {
+     "label": "kind 클러스터",
+     "argv": ["node", "tools/local/cluster.mjs", "up"]
+    },
+    {
+     "label": "관측 묶음",
+     "argv": ["node", "tools/local/cluster.mjs", "observability"]
+    },
+    {
+     "label": "v1 무대 2GiB",
+     "argv": ["node", "tools/local/cluster.mjs", "v1", "--redis-tls", "on", "--replicas", "3", "--memory-mi", "2048"]
+    },
+    {
+     "label": "호스트 core-svc·core DB",
+     "argv": ["node", "tools/local/core-host.mjs", "up", "--port", "3001"]
+    },
+    {
+     "label": "검색 채우기 1만",
+     "argv": ["node", "services/core-svc/scripts/fill-search.mjs", "--count", "10000"]
+    }
+   ],
+   "criteria": ["계획 6.1: v1 2GiB(F-08-8 OOM 뒤), 호스트 core-svc(:3001)·core DB·fill-search"],
+   "ledger": "무대 준비(장부 없음)",
+   "artifact": ".cache/peaket-f09/stage/"
+  },
+  {
+   "n": 2,
+   "gate": "WINDOW-F089",
+   "key": "w2-search-10k",
+   "group": "SR-T13 ①",
+   "title": "검색 1만·골든·3회",
+   "estimate_min": 20,
+   "stage": "search-10k",
+   "conditions": "호스트 core-svc(:3001), 공연 1만, 몰림·무작위 20/20·60초, 골든 SR-T12 보고 포함, 3회.",
+   "commands": [
+    {
+     "label": "검색 1만 3회",
+     "argv": ["node", "loadtest/run.mjs", "v1", "search", "--size", "10000", "--reps", "3", "--golden", "--crowd-rate", "20", "--random-rate", "20", "--duration", "60", "--base", "http://host.docker.internal:3001", "--record", "--run-id", "2026-11-27-search-10k-f089", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-f09/search/10k"]
+    }
+   ],
+   "criteria": ["SR-T13 ①(docs/features/search.md:307): 유효 2회 이상, 구간별 200 1건 이상, p95·503·5xx·대기 비율", "NFR-028(docs/planning/02-requirements.md:189): 자동완성·검색 p95, 1위·3위, 사전 판 지연", "SR-T12 골든 보고", "판매 승인 취소 반영 인용"],
+   "ledger": "SR-T13 ①·NFR-028, kpi NFR-028, 골든 보고",
+   "artifact": ".cache/peaket-f09/search/10k/"
+  },
+  {
+   "n": 3,
+   "gate": "WINDOW-F089",
+   "key": "w2-search-20k",
+   "group": "SR-T13 ①",
+   "title": "검색 2만·3회",
+   "estimate_min": 20,
+   "stage": "search-20k",
+   "conditions": "호스트 core-svc(:3001), 공연 2만, 몰림·무작위 20/20·60초, 3회.",
+   "commands": [
+    {
+     "label": "검색 2만 3회",
+     "argv": ["node", "loadtest/run.mjs", "v1", "search", "--size", "20000", "--reps", "3", "--crowd-rate", "20", "--random-rate", "20", "--duration", "60", "--base", "http://host.docker.internal:3001", "--record", "--run-id", "2026-11-27-search-20k-f089", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-f09/search/20k"]
+    }
+   ],
+   "criteria": ["SR-T13 ①(docs/features/search.md:307)", "NFR-028(docs/planning/02-requirements.md:189)", "판매 승인 취소 반영 인용"],
+   "ledger": "SR-T13 ①·NFR-028, kpi NFR-028",
+   "artifact": ".cache/peaket-f09/search/20k/"
+  },
+  {
+   "n": 4,
+   "gate": "WINDOW-F089",
+   "key": "w2-relay-baseline",
+   "group": "V-T27 기준",
+   "title": "릴레이 끈 기준 10분",
+   "estimate_min": 20,
+   "stage": "relay-baseline",
+   "conditions": "v1 purchase DB, 같은 도착률 12600/s, 릴레이 끔, 10분. 결제 부하는 릴레이 켬과 같게 기본 300/s.",
+   "commands": [
+    {
+     "label": "릴레이 끈 기준 실행",
+     "argv": ["node", "loadtest/run.mjs", "v1", "relay-fault", "--main", "600", "--rate", "12600", "--relay", "off", "--record", "--run-id", "2026-11-27-relay-baseline-f089", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-f09/relay/baseline"]
+    }
+   ],
+   "criteria": ["V-T27(docs/verification.md:657): 릴레이를 끈 실행과의 DB CPU 차이"],
+   "ledger": "V-T27, kpi V-T27",
+   "artifact": ".cache/peaket-f09/relay/baseline/"
+  },
+  {
+   "n": 5,
+   "gate": "WINDOW-F089",
+   "key": "w2-relay-fault",
+   "group": "V-T27·V-T28",
+   "title": "릴레이 30분·장애 ①②③·P-T5",
+   "estimate_min": 50,
+   "stage": "relay-fault",
+   "conditions": "V-T27 30분 12600/s, V-T28 ① 600초·② 1200초 30초·③ 1500초, 드레인 300초, 같은 실행 P-T5 300/s.",
+   "commands": [
+    {
+     "label": "V-T27·V-T28·P-T5",
+     "argv": ["node", "loadtest/run.mjs", "v1", "relay-fault", "--main", "1800", "--rate", "12600", "--relay", "on", "--payment-rate", "300", "--payment-mode", "load", "--record", "--run-id", "2026-11-27-relay-fault-f089", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-f09/relay/fault"]
+    }
+   ],
+   "criteria": ["V-T27(docs/verification.md:657): 지연 p50·p99, 묶음 p99, DB CPU, P-T5 p99, ADR-0140 당기기 반영 수", "V-T28 ①②③(docs/verification.md:658): 빠진 행 0·순서 0·eventKey 같음·옛 리더 0, ② 30초", "P-T5(docs/features/payment.md:901): 결제 접수→확정 p99"],
+   "ledger": "V-T27·V-T28 ①②③, kpi V-T27, P-T5",
+   "artifact": ".cache/peaket-f09/relay/fault/"
+  },
+  {
+   "n": 6,
+   "gate": "WINDOW-F089",
+   "key": "w2-pt1-fault",
+   "group": "P-T1",
+   "title": "P-T1 추가 장애(결제 1만)",
+   "estimate_min": 25,
+   "stage": "pt1-fault",
+   "conditions": "결제 1만, 100/s, 발생기 2대, Toxiproxy 지연·시간 초과·끊김, 웹훅 중복 2회, 불변식 검사.",
+   "commands": [
+    {
+     "label": "P-T1 추가 장애",
+     "argv": ["node", "loadtest/run.mjs", "v1", "payment-fault", "--payments", "10000", "--rate", "100", "--generators", "2", "--webhook-duplicates", "2", "--invariants", "--record", "--run-id", "2026-11-27-pt1-fault-f089", "--prom-url", "http://127.0.0.1:9090", "--out", ".cache/peaket-f09/pt1"]
+    }
+   ],
+   "criteria": ["P-T1(docs/features/payment.md:897): P6 0·이중 결제 0·웹훅 sent=2·processed=1", "불변식 S3 SKIPPED: 이중 발권 미측정"],
+   "ledger": "P-T1, S3 SKIPPED·이중 발권 미측정",
+   "artifact": ".cache/peaket-f09/pt1/"
+  },
+  {
+   "n": 7,
+   "gate": "WINDOW-F089",
+   "key": "w2-report",
+   "group": "보고서",
+   "title": "보고서·정리",
+   "estimate_min": 20,
+   "stage": "report",
+   "conditions": "측정 보고서 작성, 장부 notes, kind 내리기, Docker 잠금 놓기.",
+   "commands": [
+    {
+     "label": "kind 내리기",
+     "argv": ["node", "tools/local/cluster.mjs", "down"]
+    },
+    {
+     "label": "Docker 잠금 놓기",
+     "argv": ["C:/PROGRA~1/Git/bin/bash.exe", "D:/ticketpass-locks/lock.sh", "drop", "docker", "lane4-F-08-9"]
+    }
+   ],
+   "criteria": ["계획 9·12절: 보고서·장부 notes·정리"],
+   "ledger": "보고서·기록",
+   "artifact": ".cache/peaket-f09/report/"
+  }
+ ]
+}
+

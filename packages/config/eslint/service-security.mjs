@@ -465,6 +465,11 @@ export const OUTBOUND_HTTP_EXCEPTIONS = [
     allow: ['fetch'],
     reason: '한 프로세스 합본의 관리 포트가 같은 프로세스 안 서비스 관리 포트(127.0.0.1 고정)의 /ready·/metrics를 모은다. 바깥 주소를 부르지 않는 시험 도구다(PEAKET_ENV local·ci에서만 시작, docs/verification.md §3.8 합본의 v1 무대, BUILD_ORDER PRF-215)',
   },
+  {
+    file: 'services/pg-simulator/src/server.ts',
+    allow: ['fetch'],
+    reason: 'F-08-9 P-T1의 웹훅 중복 발송 시험만 받는다. 받는 곳을 payment-svc.v1.svc.cluster.local과 루프백으로 제한하고, 로컬·CI 시뮬레이터에서만 도는 시험용 전송이다(계획 docs/review/plans/F-08-9.md 6.3·7.1)',
+  },
 ];
 
 /** 기준선: HEAD 320e213a의 라우트 처리기 가운데 응답 스키마 표시가 없는 것('파일 경로#클래스.메서드') */

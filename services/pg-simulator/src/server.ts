@@ -508,6 +508,54 @@ export function buildSimulatorApp(o: SimulatorAppOptions): SimulatorApp {
     { schema: { querystring: { type: 'object', additionalProperties: false, properties: { paymentKey: KEY_PARAM.properties.paymentKey } } } },
     async (req) => engine.webhooks(req.query.paymentKey),
   );
+  // F-08-9 P-T1: 같은 webhook-id를 duplicates회 보내 payment-svc의 멱등 처리를 시험한다(로컬·CI 전용).
+  // 받는 곳은 클러스터 안 payment-svc나 루프백만 허용한다(제어 API가 임의 주소로 요청을 보내지 않게).
+  app.post<{ Body: { targetUrl: string; paymentKey?: string; duplicates?: number } }>(
+    '/sim/webhooks/deliver',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['targetUrl'],
+          additionalProperties: false,
+          properties: {
+            targetUrl: { type: 'string', minLength: 1, maxLength: 300 },
+            paymentKey: KEY_PARAM.properties.paymentKey,
+            duplicates: { type: 'integer', minimum: 2, maximum: 10 },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      const u = (() => {
+        try {
+          return new URL(req.body.targetUrl);
+        } catch {
+          return null;
+        }
+      })();
+      const host = u?.hostname ?? '';
+      if (!u || (u.protocol !== 'http:' && u.protocol !== 'https:') || !['payment-svc.v1.svc.cluster.local', '127.0.0.1', 'localhost'].includes(host)) {
+        return reply.code(400).send({ code: 'INVALID_REQUEST', message: '받는 곳은 payment-svc.v1.svc.cluster.local 또는 루프백만 된다' });
+      }
+      const events = engine.webhooks(req.body.paymentKey);
+      const duplicates = req.body.duplicates ?? 2;
+      let sent = 0;
+      for (const e of events) {
+        const id = e.headers['tosspayments-webhook-transmission-id'] ?? `wh_f089_${e.paymentKey}`;
+        for (let i = 0; i < duplicates; i++) {
+          const r = await fetch(u, {
+            method: 'POST',
+            headers: { ...e.headers, 'content-type': 'application/json', 'tosspayments-webhook-transmission-id': id },
+            body: JSON.stringify(e.body),
+          });
+          if (!r.ok) return reply.code(502).send({ code: 'WEBHOOK_DELIVERY_FAILED', message: `받는 쪽 ${r.status}`, sent });
+          sent++;
+        }
+      }
+      return reply.code(200).send({ sent, events: events.length, duplicates });
+    },
+  );
   app.post<{ Params: { paymentKey: string } }>('/sim/deposits/:paymentKey', { schema: { params: KEY_PARAM } }, async (req, reply) => send(req, reply, engine.deposit(req.params.paymentKey)));
   app.post<{ Params: { paymentKey: string }; Body?: { dueDate?: string } }>('/sim/deposits/:paymentKey/reverse', { schema: { params: KEY_PARAM } }, async (req, reply) => send(req, reply, engine.reverseDeposit(req.params.paymentKey, req.body ?? {})));
   app.post<{ Params: { paymentKey: string } }>('/sim/deposits/:paymentKey/expire', { schema: { params: KEY_PARAM } }, async (req, reply) => send(req, reply, engine.expireDeposit(req.params.paymentKey)));

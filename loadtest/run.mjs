@@ -2297,6 +2297,31 @@ async function runCalibrate(a, runTag) {
   }
 }
 
+// ───────────── F-08-9 동결 로컬 트랙(v1 relay-fault·search·payment-fault) ─────────────
+
+/**
+ * F-08-9 명령은 측정 창 전에는 계획만 쓴다(측정·Docker·kind·k6를 시작하지 않는다).
+ * 측정 창에서 PEAKET_F089_EXECUTE=1을 주면 같은 계획을 남기고 실행 절차로 넘긴다.
+ */
+async function runF089Command(a, runTag, kind) {
+  const outDir = resolve(a.out ?? join('.cache', 'peaket-f09', kind, a.runId ?? runTag));
+  mkdirSync(outDir, { recursive: true });
+  const base = { tool: kind, args: a, recordedAt: new Date().toISOString(), execute: process.env.PEAKET_F089_EXECUTE === '1' };
+  if (kind === 'relay-fault') {
+    const m = await import('./runner/relay-fault.mjs');
+    const plan = m.relayLoadPlan({ mainSeconds: a.mainSeconds, rate: a.rate });
+    writeFileSync(join(outDir, 'command.json'), JSON.stringify({ ...base, load: plan, faults: m.faultPlan({ mainSeconds: a.mainSeconds }), evidenceSql: m.RELAY_EVIDENCE_SQL }, null, 2));
+  } else if (kind === 'search') {
+    const m = await import('./runner/search-measure.mjs');
+    writeFileSync(join(outDir, 'command.json'), JSON.stringify({ ...base, rules: m.SEARCH_RULES }, null, 2));
+  } else {
+    const p = await import('./runner/relay-fault.mjs');
+    writeFileSync(join(outDir, 'command.json'), JSON.stringify({ ...base, webhook: p.webhookDuplicatePlan({ webhookId: `f089-${runTag}`, duplicates: a.webhookDuplicates }), rules: { payments: a.payments, rate: a.rate, generators: a.generators } }, null, 2));
+  }
+  log(`F-08-9 ${kind}: 계획을 ${outDir}에 남겼다${base.execute ? ' (측정 창 실행 표시)' : ' (측정 전 — Docker·kind·k6를 시작하지 않는다)'}`);
+  return { outDir, exitCode: 0 };
+}
+
 // ───────────── 게이트웨이 차단 상한·검색 IP 한도(gw, V-T43·SR-T13 ②, BAT-056) ─────────────
 
 /** 시나리오가 쓰는 회차 ID(대역 백엔드는 보지 않는다) */
@@ -2509,7 +2534,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } catch (e) {
     if (e instanceof UsageError) {
       console.error(`loadtest/run.mjs: ${e.message}`);
-      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment|entry-steps [...] | gw sweep|capacity|ip-limit|limits [...] | cleanup (loadtest/README.md)');
+      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment|entry-steps|relay-fault|search|payment-fault [...] | gw sweep|capacity|ip-limit|limits [...] | cleanup (loadtest/README.md)');
       process.exit(2);
     }
     throw e;
@@ -2536,7 +2561,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     });
   }
   try {
-    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : await runV1(a, runTag)) : await runV0(a, runTag);
+    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : a.scenario === 'relay-fault' ? await runF089Command(a, runTag, 'relay-fault') : a.scenario === 'search' ? await runF089Command(a, runTag, 'search') : a.scenario === 'payment-fault' ? await runF089Command(a, runTag, 'payment-fault') : await runV1(a, runTag)) : await runV0(a, runTag);
     log(`\n산출물: ${r.outDir}`);
     process.exit(r.exitCode);
   } catch (e) {

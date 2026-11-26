@@ -121,7 +121,7 @@ test('F089-9 ② 명령은 2GiB 무대·docker 한 자리·12600/s·20/20/60·P-
   assert.ok(hasPair(pt1, '--webhook-duplicates', '2'), '웹훅 중복 2회');
   assert.ok(pt1.includes('--invariants'), 'P-T1 불변식 결과');
 
-  const allArgvs = plan.runs.flatMap((r) => argvsOf(r));
+  const allArgvs = plan.runs.flatMap((r) => r.commands.map((c) => c.argv));
   const drop = allArgvs.find((a) => a.some((x) => x.endsWith('lock.sh')) && a.includes('drop'));
   assert.ok(drop, 'Docker 잠금 drop 명령이 없다');
   assert.ok(drop.includes('docker') && drop.includes('lane4-F-08-9') && !drop.includes('docker-all'), drop.join(' '));
@@ -141,7 +141,7 @@ test('F089-9 ② 명령은 2GiB 무대·docker 한 자리·12600/s·20/20/60·P-
 
 test('F089-9 ③ 판정 자리는 V-T27·V-T28·P-T1·SR-T13 ①②만 가리키고, P-T5·취소 반영·게이트를 빠뜨리지 않는다', () => {
   const plan = readPlan();
-  const allowed = new Set(['V-T27', 'V-T28', 'P-T1', 'SR-T12', 'SR-T13', 'NFR-028']);
+  const allowed = new Set(['V-T27', 'V-T28', 'P-T1', 'P-T5', 'SR-T12', 'SR-T13', 'NFR-028']);
   for (const run of plan.runs) {
     assert.equal(run.gate, GATE, `${run.key}: gate`);
     const text = [...run.criteria, run.ledger].join(' ');

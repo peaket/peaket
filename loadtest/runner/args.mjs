@@ -22,6 +22,10 @@ export class UsageError extends Error {
 import { parseGwArgs } from './gw.mjs';
 // entry-scale.mjs도 같은 꼴로 UsageError를 이 파일에서 가져온다(함수 안에서만 쓴다)
 import { parseEntryStepsArgs } from './entry-scale.mjs';
+// F-08-9 동결 로컬 트랙의 v1 하위 명령(계획 docs/review/plans/F-08-9.md 7.1~7.2)
+import { parseRelayFaultArgs } from './relay-fault.mjs';
+import { parseSearchArgs } from './search-measure.mjs';
+import { parsePaymentFaultArgs } from './payment-fault.mjs';
 
 /** 입구의 IP당 초당 요청 한도(deploy/envs/local/v0-gateway.yaml PEAKET_V0_RATE_PER_SECOND, 시험이 견준다) */
 export const GATEWAY_RATE_PER_IP = 10;
@@ -230,6 +234,10 @@ export function parseArgs(argv) {
   } else if (command === 'v1') {
     const scenario = rest0[0];
     if (scenario === 'entry-steps') return parseEntryStepsArgs(rest0.slice(1));
+    // F-08-9: 릴레이 장애 주입·검색·P-T1 추가 장애는 v1의 별도 하위 명령이다(계획 7.1~7.2)
+    if (scenario === 'relay-fault') return { command: 'v1', scenario, ...parseRelayFaultArgs(rest0.slice(1)) };
+    if (scenario === 'search') return { command: 'v1', scenario, ...parseSearchArgs(rest0.slice(1)) };
+    if (scenario === 'payment-fault') return { command: 'v1', scenario, ...parsePaymentFaultArgs(rest0.slice(1)) };
     if (!Object.hasOwn(V1_SCENARIOS, scenario ?? '')) fail(`v1 시나리오는 ${Object.keys(V1_SCENARIOS).join('·')} 가운데 하나다: ${scenario ?? '(없음)'}`);
     kind = `v1:${scenario}`;
     rest = rest0.slice(1);

@@ -15,7 +15,7 @@ async function relay() {
   }
   for (const name of [
     'parseRelayFaultArgs', 'relayLoadPlan', 'relayConsumerPlan', 'faultPlan', 'validateFaultRecords', 'judgeRelayRun',
-    'RELAY_EVIDENCE_SQL', 'buildToxiproxy', 'TOXIPROXY_RULES', 'reconcileSimLedger',
+    'buildToxiproxy', 'reconcileSimLedger',
     'webhookDuplicatePlan', 'judgeWebhookDuplicates', 'parsePaymentFaultArgs', 'judgePaymentFaultRun',
     'missingRowIds', 'oldLeaderSendCount', 'summarizeSamples',
   ]) assert.equal(typeof m[name], 'function', `${name} 공개 함수가 없다`);
