@@ -5,7 +5,7 @@
 // 그전에는 이 파일의 PostgreSQL 직접 인증으로 SCRAM verifier·두 세대·옛 세대 거절만 본다.
 // 이번 턴(2026-11-27)은 Docker를 쓰지 않아 미실행이다.
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
-import pg from 'pg';
+import pg, { type Client } from 'pg';
 import { startPostgres, type PostgresContainer } from './postgres.js';
 import { alternatingUsers, isAuthFailure, scramSha256Verifier } from '../src/secret-rotation.js';
 
@@ -20,7 +20,7 @@ const PASSWORDS = {
 };
 
 let container: PostgresContainer;
-let admin: pg.Client;
+let admin: Client;
 
 async function setPassword(user: string, password: string): Promise<void> {
   const verifier = scramSha256Verifier(password, SALT, 4096);
