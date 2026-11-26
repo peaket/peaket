@@ -137,8 +137,11 @@ test('FX-T21 ② [ASVS v5.0.0-5.2.2] replay-export는 앞뒤 ARROW1 매직과 20
 
   // 0바이트·6바이트 미만도 읽기 전에 거절한다
   assert.deepEqual(envelopeOf(new Uint8Array(0)), { byteLength: 0, head: '', tail: '' });
+  assert.match(fileIssue({ byteLength: 0, head: '', tail: '' }), /ARROW1|크기/);
   const six = new TextEncoder().encode('ARROW1');
-  assert.deepEqual(envelopeOf(six), { byteLength: 6, head: 'ARROW1', tail: 'ARROW1' });
+  const sixEnvelope = envelopeOf(six);
+  assert.deepEqual(sixEnvelope, { byteLength: 6, head: 'ARROW1', tail: 'ARROW1' });
+  assert.match(fileIssue(sixEnvelope), /ARROW1|크기/, '6바이트 ARROW1 봉투는 파일이 아니다');
 
   assert.match(fileIssue({ byteLength: 12, head: 'ARROW0', tail: 'ARROW1' }), /ARROW1/);
   assert.match(fileIssue({ byteLength: 12, head: 'ARROW1', tail: '' }), /ARROW1/);

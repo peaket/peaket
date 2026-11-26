@@ -147,6 +147,7 @@ test('FX-T21 ① 사건 작업대에서 연 탭은 사건·회차와 조사 배�
   assert.match(head, /aria-live|role=["']status["']/, '상태 띠에 알림 역할이 없다');
   assert.match(readOperating('ReceivingMain.tsx'), /role=["']status["']|aria-live/, '받는 중 상태에 알림 역할이 없다');
   assert.match(readOperating('ProblemMain.tsx'), /role=["']alert["']|aria-live/, '오류 상태에 알림 역할이 없다');
+  assert.match(readOperating('ReadyMain.tsx'), /role=["']status["']|aria-live/, '재생 상태에 알림 역할이 없다');
 });
 
 test('A-T23 ② 연구 탭은 내보내기 ID와 회차가 있어야 열리고 배지가 연구다', () => {
@@ -233,8 +234,9 @@ test('FX-T17 ① 운영 묶음에는 합성 시나리오·시드·정답·파일
   assert.match(app, /from\s+['"]@peaket\/api-client['"]/, 'api-client를 가져오지 않는다');
   assert.match(app, /createApiClient\(/, 'api-client를 만들지 않는다');
   assert.match(app, /\.request\(/, 'api-client request를 부르지 않는다');
-  const order = ['replayOperation(', 'replayHeadersIssue(', 'replayEnvelopeOf(', 'replayFileIssue(', 'replayFileValidation('].map((x) => app.indexOf(x));
-  for (let i = 0; i < order.length; i += 1) assert.ok(order[i] >= 0, `OperatingApp이 ${['replayOperation', 'replayHeadersIssue', 'replayEnvelopeOf', 'replayFileIssue', 'replayFileValidation'][i]}을 부르지 않는다`);
+  const calls = ['replayOperation', 'replayHeadersIssue', 'arrayBuffer', 'replayEnvelopeOf', 'replayFileIssue', 'replayFileValidation'];
+  const order = calls.map((x) => app.indexOf(`${x}(`));
+  for (let i = 0; i < order.length; i += 1) assert.ok(order[i] >= 0, `OperatingApp이 ${calls[i]}을 부르지 않는다`);
   for (let i = 1; i < order.length; i += 1) assert.ok(order[i - 1] < order[i], '받기·검증 호출 순서가 계획 §4.4와 다르다');
   assert.match(app, /arrayBuffer\(/, '응답 본문을 바이트로 읽지 않는다');
 
