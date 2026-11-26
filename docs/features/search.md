@@ -65,16 +65,17 @@
 | 줄 | 고르는 것 | 차례 | 상한 [가정] |
 | --- | --- | --- | --- |
 | 배너 | `home_banner` 가운데 `display_from <= 지금 < display_until`이고 대상 공연이 공개(`isPublic`)인 줄 | `sort_order` 오름차순, `home_banner.id` 오름차순 | 10(계약) |
-| 오픈 예정 | `search_document` 가운데 `sale_status = UPCOMING`인 공연. 다음 오픈 회차는 `next_open_at`이 가장 이른 회차다 | `next_open_at` 오름차순, 공연 ID 오름차순 | 10 |
-| 지금 판매 중 | `search_document` 가운데 `sale_status = ON_SALE`인 공연. 판매 종료는 마지막 회차의 `starts_at − 24시간`(POL-043, ADR-0064) | `sale_ends_at` 오름차순, 공연 ID 오름차순 | 9 |
+| 오픈 예정 | `search_document` 가운데 `sale_status = UPCOMING`이고 `next_open_at > 지금`인 공연. 다음 오픈 회차는 `next_open_at`이 가장 이른 회차다 | `next_open_at` 오름차순, 공연 ID 오름차순 | 10 |
+| 지금 판매 중 | `search_document` 가운데 `sale_status = ON_SALE`인 공연. 줄 고르기에 `sale_ends_at`을 쓰지 않는다. 판매 종료는 마지막 회차의 `starts_at − 24시간`(POL-043, ADR-0064) | `sale_ends_at` 오름차순, 공연 ID 오름차순 | 9 |
 | 테마 | `home_theme` 가운데 `display_from <= 지금 < display_until`인 줄. 항목은 공개 공연만, 적힌 차례대로 | `sort_order` 오름차순, `home_theme.id` 오름차순 | 5(계약)·테마마다 20(계약) |
 | 공연장 | 오픈 예정·지금 판매 중 공연이 있는 `place`(공연장) | 그 줄에 든 공연 수 내림차순, 이름 한국어 가나다순, 공연장 ID 오름차순 | 10 |
 
 - `sale_status`가 `SOLD_OUT`·`ENDED`인 공연은 오픈 예정·지금 판매 중 줄에 넣지 않는다. `ALL_HELD`(일시 매진)는 판매 중으로 센다(ADR-0122). core-svc가 좌석 사본을 갖기 전에는 실제 매진을 알 수 없어, 매진 뒤에도 `ON_SALE`로 남을 수 있다. 매진을 알게 된 쪽(purchase-svc)이 홈 캐시를 무효화하고 다음 읽기에서 빠지는 것은 후속 몫이다(HOT-280 known gap).
+- 시각 경계: `display_from = 지금`은 포함하고 `display_until = 지금`은 제외한다(반열린 구간). `next_open_at = 지금`은 이미 오픈한 것이라 오픈 예정이 아니다. `sale_ends_at = 지금`인 회차는 DB 뷰가 `ENDED`로 계산하므로 지금 판매 중에 들지 않는다.
 - 빈 줄은 빈 배열로 싣고 화면이 그 줄만 숨긴다(openapi `HomeFeed` 설명, d5 §5.1 '섹션 비어 있음'). 응답은 개인 값(찜·알림)을 싣지 않는다.
 - `rankingsPath`는 늘 `/v1/home/rankings.json`이다. 랭킹 파일을 만드는 일은 분석 파이프라인(F-04-5·OPS-230, 동결) 몫이고, 이 기능은 경로만 싣는다. 파일이 없거나 2일 [가정] 넘게 묵으면 화면이 그 줄을 숨긴다(d5 §5.1, docs/features/analytics.md §8.5).
-- 응답 머리는 `Cache-Control: public, max-age=30, stale-while-revalidate=30, stale-if-error=86400` [가정]이고 쿠키를 캐시 키에 넣지 않는다(openapi `getHome`). 200 JSON에만 붙이고 그 밖의 응답은 `no-store`다.
-- 홈 구성 저장(OPS-410이 생기면)·판매 승인·판매 중지·회차 전부 취소로 홈에 보이는 공연이 바뀌면 `home` 태그를 무효화하고 `apps/web`의 내부 처리기로 `revalidateTag('home')`을 부른다. 한쪽이 실패해도 응답을 바꾸지 않고 로그·지표로 알린다. ISR 수명(60초 [가정])이 지나면 저절로 맞는다.
+- 응답 머리는 `Cache-Control: public, max-age=30, stale-while-revalidate=30, stale-if-error=86400` [가정]이고 쿠키를 캐시 키에 넣지 않는다(openapi `getHome`). 200 JSON에만 붙이고 그 밖의 응답(404·405·503, 정의 밖 경로, 내부 경로의 다른 메서드)은 `no-store`다.
+- 홈 구성 저장(OPS-410이 생기면)·판매 승인·판매 중지·회차 전부 취소로 홈에 보이는 공연이 바뀌면 `home` 태그를 기존 event·production 태그와 **따로** 한 번 무효화하고, 이어서 `apps/web`의 내부 처리기로 `revalidateTag('home')`을 부른다. 둘 다 기다리되 한쪽이 실패해도 다른 쪽을 부르고 응답을 바꾸지 않으며 로그·지표로 알린다. ISR 수명(60초 [가정])이 지나면 저절로 맞는다.
 - 카드 배지(`ProductionCard.badges`)는 HOT-250이 넘긴 남은 갭이다. 검색 읽기 모델 `search_document`가 아직 배지 값을 싣지 않아 홈 피드·검색 결과 카드의 `badges`는 비어 있다. 계약에서 선택 칸이므로 화면은 배지 없이 그리고, 값은 후속 기능에서 대표 회차의 `lobby_shuffle`·`open_batch`·`seat_assignment`와 승인된 판매 정책의 `PRESALE` 조각으로 채운다(ADR-0118, ADR-0261 결정 5). 이 기능은 그 값을 만들지 않는다(동결 로컬 범위, 계획 §10).
 
 ## 3. 한글 입력 처리

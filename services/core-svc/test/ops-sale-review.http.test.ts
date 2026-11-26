@@ -3,6 +3,7 @@
 import 'reflect-metadata';
 import { createService, fakeClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
+import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { MemoryCdnInvalidation, MemoryCatalogRepository, MemorySaleConfigStore, OpsSaleReviews } from '../src/modules/catalog/index.js';
@@ -26,11 +27,27 @@ let failCdn = false;
 const TENANT = randomUUID();
 const PLACE = randomUUID();
 const P = 'https://peaket.example/problems/';
+const WEB_TOKEN = 'home-cache-approval-token';
+const originalToken = process.env.PEAKET_INTERNAL_TOKEN;
+const originalWeb = process.env.PEAKET_WEB_INTERNAL_URL;
+let web: Server | undefined;
+let webStatus = 204;
+let webHits: { method: string | undefined; url: string | undefined; token: string | undefined }[] = [];
 
 beforeAll(async () => {
   repo.places.add(PLACE);
   repo.placeNames.push({ id: PLACE, name: '피켓홀', address: '서울 어딘가 1', aliases: [] });
   repo.promoters.set(TENANT, sellerRow(TENANT, '(주)피켓공연'));
+  web = createServer((req, res) => {
+    webHits.push({ method: req.method, url: req.url, token: req.headers['x-peaket-internal-token'] as string | undefined });
+    res.statusCode = webStatus;
+    res.end();
+  });
+  await new Promise<void>((resolve) => web!.listen(0, '127.0.0.1', () => resolve()));
+  const address = web.address();
+  if (address === null || typeof address === 'string') throw new Error('웹 대역 주소를 읽지 못했다');
+  process.env.PEAKET_INTERNAL_TOKEN = WEB_TOKEN;
+  process.env.PEAKET_WEB_INTERNAL_URL = `http://127.0.0.1:${address.port}`;
   svc = await createService({
     name: 'core-svc',
     module: AppModule.register({ memory: true, catalog: repo, saleConfigs, media: { cdn: flakyCdn } }),
@@ -43,6 +60,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await svc?.close();
+  await new Promise<void>((resolve) => (web ? web.close(() => resolve()) : resolve()));
+  web = undefined;
+  if (originalToken === undefined) delete process.env.PEAKET_INTERNAL_TOKEN;
+  else process.env.PEAKET_INTERNAL_TOKEN = originalToken;
+  if (originalWeb === undefined) delete process.env.PEAKET_WEB_INTERNAL_URL;
+  else process.env.PEAKET_WEB_INTERNAL_URL = originalWeb;
 });
 
 function sellerRow(promoterId: string, legalName: string) {
@@ -277,23 +300,31 @@ describe('관제 판매 승인 목록·상세·반려·CDN(S-T41 ④⑤⑩)', ()
     expect(repo.productions.get(strict.id)?.saleReview).toBe('SUBMITTED');
   });
 
-  test('S-T41 ⑩_ 승인은 회차마다 event 태그·production 태그·home 태그를 한 번 무효화하고, 반려는 부르지 않으며 CDN 실패에도 200이다', async () => {
+  test('S-T41 ⑩_ 승인은 event·production·home 태그를 무효화하고 웹 재검증을 부르며, 반려는 부르지 않고 CDN·웹 실패에도 200이다', async () => {
     const before = cdn.calls.length;
+    const webBefore = webHits.length;
     const p = production({ events: 2, rules: [general] });
     const r = await approval(ops('commander'), p.id, { scales: p.eventIds.map((eventId) => ({ eventId, scale: 'SMALL' })), placeId: PLACE });
     expect(r.statusCode).toBe(200);
-    expect(cdn.calls.length).toBe(before + 1);
-    const tags = cdn.calls.at(-1)!;
-    expect(new Set(tags)).toEqual(new Set([`event:${p.eventIds[0]!.toLowerCase()}`, `event:${p.eventIds[1]!.toLowerCase()}`, `production:${p.id.toLowerCase()}`, 'home']));
+    // HomeCacheInvalidator가 ['home']을 기존 event·production 호출과 따로 부를 수 있다(TR-02). 호출 수는 1~2만 본다.
+    const calls = cdn.calls.slice(before);
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    expect(calls.length).toBeLessThanOrEqual(2);
+    expect(new Set(calls.flat())).toEqual(new Set([`event:${p.eventIds[0]!.toLowerCase()}`, `event:${p.eventIds[1]!.toLowerCase()}`, `production:${p.id.toLowerCase()}`, 'home']));
+    // 승인 뒤 apps/web 재검증(TR-03).
+    expect(webHits.slice(webBefore)).toEqual([{ method: 'POST', url: '/internal/v1/home-cache', token: WEB_TOKEN }]);
 
     const p2 = production({ events: 1 });
     const afterApprove = cdn.calls.length;
+    const webAfterApprove = webHits.length;
     expect((await rejection(ops(), p2.id, { reason: '공개본이 바뀌지 않는 반려' })).statusCode).toBe(200);
     expect(cdn.calls.length).toBe(afterApprove);
+    expect(webHits.length).toBe(webAfterApprove);
     expect(repo.productions.get(p2.id)?.saleReview).toBe('REJECTED');
 
-    // 무효화가 실패해도 승인은 성공이다(로그만 남긴다)
+    // CDN이 실패해도 웹 재검증을 부르고 승인은 성공이다(로그만 남긴다).
     const p3 = production({ events: 1, rules: [general] });
+    const webBeforeCdnFail = webHits.length;
     failCdn = true;
     try {
       expect((await approval(ops(), p3.id, { scales: [{ eventId: p3.eventIds[0], scale: 'SMALL' }], placeId: PLACE })).statusCode).toBe(200);
@@ -301,6 +332,18 @@ describe('관제 판매 승인 목록·상세·반려·CDN(S-T41 ④⑤⑩)', ()
       failCdn = false;
     }
     expect(repo.productions.get(p3.id)?.saleReview).toBe('APPROVED');
+    expect(webHits.length).toBe(webBeforeCdnFail + 1);
+
+    // 웹 재검증이 500이어도 CDN 무효화를 부르고 승인은 200이다(TR-03).
+    const p4 = production({ events: 1, rules: [general] });
+    const cdnBeforeWebFail = cdn.calls.length;
+    webStatus = 500;
+    try {
+      expect((await approval(ops(), p4.id, { scales: [{ eventId: p4.eventIds[0], scale: 'SMALL' }], placeId: PLACE })).statusCode).toBe(200);
+    } finally {
+      webStatus = 204;
+    }
+    expect(new Set(cdn.calls.slice(cdnBeforeWebFail).flat())).toEqual(new Set([`event:${p4.eventIds[0]!.toLowerCase()}`, `production:${p4.id.toLowerCase()}`, 'home']));
   });
 });
 

@@ -3,6 +3,7 @@
 // 기준 트리에서는 이 모듈이 없어 시험이 실패한다(새 동작이 아직 없다).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createHomeCacheHandler } from './home-cache.ts';
 
 const url = 'http://localhost/internal/v1/home-cache';
@@ -21,13 +22,18 @@ test('HOT-305 홈 캐시 처리기는 토큰이 맞을 때만 revalidateTag("hom
   const again = await handler(request('POST', 'secret'));
   assert.equal(again.status, 204);
   assert.deepEqual(calls, ['home', 'home']);
+
+  // Fetch Headers는 앞뒤 공백을 지운다. 헤더 값이 'secret '이어도 실제로는 'secret'이라 204다(TR-01).
+  const trimmed = await handler(request('POST', 'secret '));
+  assert.equal(trimmed.status, 204);
+  assert.deepEqual(calls, ['home', 'home', 'home']);
 });
 
 test('HOT-305 홈 캐시 처리기는 토큰이 없거나 틀리면 401·no-store이고 revalidateTag를 부르지 않는다 [ASVS v5.0.0-8.1.1]', async () => {
   const calls = [];
   const handler = createHomeCacheHandler({ revalidate: (tag) => calls.push(tag), token: 'secret' });
 
-  for (const token of [undefined, '', 'wrong', 'secret ']) {
+  for (const token of [undefined, '', 'wrong', 'secret2', 'Secret']) {
     const r = await handler(request('POST', token));
     assert.equal(r.status, 401, String(token));
     assert.equal(r.headers.get('cache-control'), 'no-store');
@@ -49,4 +55,13 @@ test('HOT-305 홈 캐시 처리기는 토큰 설정이 비었거나 다른 메�
     assert.equal(r.headers.get('cache-control'), 'no-store');
   }
   assert.deepEqual(calls, []);
+});
+
+test('HOT-305 app/internal/v1/home-cache/route.ts가 revalidateTag("home")과 내부 토큰을 처리기에 넘긴다', () => {
+  // 계획 I-04의 배선을 소스로 고정한다(TR-08). 처리기만 만들고 경로를 만들지 않는 구현을 잡는다.
+  const route = readFileSync(new URL('../../../../app/internal/v1/home-cache/route.ts', import.meta.url), 'utf8');
+  assert.match(route, /export\s+(async\s+)?function\s+POST|export\s+const\s+POST/);
+  assert.match(route, /createHomeCacheHandler/);
+  assert.match(route, /revalidateTag\(\s*['"]home['"]\s*\)/);
+  assert.match(route, /PEAKET_INTERNAL_TOKEN/);
 });

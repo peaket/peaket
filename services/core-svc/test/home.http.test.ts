@@ -108,11 +108,14 @@ const getHome = async (s: Awaited<ReturnType<typeof createService>>) => s.http.i
 const bodyOf = (r: { payload: string }) => GetHomeResponse.parse(JSON.parse(r.payload));
 
 describe('홈 피드(HOT-305)', () => {
-  test('HOT-305 빈 피드는 계약 모양·랭킹 경로·생성 시각·캐시 머리를 지키고 개인 값을 싣지 않는다 [ASVS v5.0.0-1.2.1] [ASVS v5.0.0-14.2.5]', async () => {
+  test('HOT-305 빈 피드는 계약 모양·랭킹 경로·생성 시각·캐시 머리를 지키고 개인 값을 싣지 않는다 [ASVS v5.0.0-14.2.5]', async () => {
     const s = await boot();
     const r = await getHome(s);
     expect(r.statusCode).toBe(200);
     expect(r.headers['cache-control']).toBe('public, max-age=30, stale-while-revalidate=30, stale-if-error=86400');
+    // Zod로 모르는 칸을 지우기 전의 원문에서 본다(TR-07).
+    const raw = String(r.payload).toLowerCase();
+    for (const forbidden of ['accountid', 'cookie', 'authorization', 'wishes', 'subscriptions', '__secure-peaket_at']) expect(raw).not.toContain(forbidden);
     const body = bodyOf(r);
     expect(body).toMatchObject({
       banners: [],
@@ -123,10 +126,16 @@ describe('홈 피드(HOT-305)', () => {
       rankingsPath: '/v1/home/rankings.json',
       generatedAt: new Date(NOW).toISOString(),
     });
-    const text = JSON.stringify(body).toLowerCase();
-    expect(text).not.toContain('accountid');
-    expect(text).not.toContain('cookie');
-    expect(text).not.toContain('authorization');
+
+    // 쿠키·인증 머리를 실어도 공개 피드는 같은 본문·같은 공개 캐시 머리다.
+    const withCredentials = await s.http.inject({
+      method: 'GET',
+      url: '/v1/home',
+      headers: { cookie: '__Secure-peaket_at=secret', authorization: 'Bearer secret', 'x-user-id': '0194b197-0000-7000-8000-0000000000ff' },
+    });
+    expect(withCredentials.statusCode).toBe(200);
+    expect(withCredentials.headers['cache-control']).toBe(r.headers['cache-control']);
+    expect(JSON.parse(withCredentials.payload)).toEqual(body);
   });
 
   test('HOT-305 오픈 예정은 공개 공연만 다음 오픈이 이른 순·ID 순으로 10개까지 싣는다 [ASVS v5.0.0-2.1.3]', async () => {
@@ -150,6 +159,9 @@ describe('홈 피드(HOT-305)', () => {
         event(repo, eid(42), pid(42), { openAt: new Date(NOW + hours(1)).toISOString(), startsAt: new Date(NOW + days(132)).toISOString(), sale: 'UPCOMING' });
         production(repo, pid(43));
         event(repo, eid(43), pid(43), { openAt: new Date(NOW - days(30)).toISOString(), startsAt: new Date(NOW - days(1)).toISOString(), sale: 'ENDED' });
+        // next_open_at = now는 이미 오픈한 것으로 본다(TR-13).
+        production(repo, pid(46), { title: '지금 오픈' });
+        event(repo, eid(46), pid(46), { openAt: new Date(NOW).toISOString(), startsAt: new Date(NOW + days(30)).toISOString(), sale: 'UPCOMING' });
       },
     });
     const r = await getHome(s);
@@ -165,7 +177,28 @@ describe('홈 피드(HOT-305)', () => {
     expect(body.upcoming?.[0]?.posterUrl).toMatch(new RegExp(`^${IMAGE_ORIGIN_TEST.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/production/`));
     expect(body.upcoming?.[0]?.periodStart).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     const ids = new Set(body.upcoming?.map((c) => c.productionId));
-    for (const absent of [pid(40), pid(41), pid(42), pid(43)]) expect(ids.has(absent)).toBe(false);
+    for (const absent of [pid(40), pid(41), pid(42), pid(43), pid(46)]) expect(ids.has(absent)).toBe(false);
+  });
+
+  test('HOT-305 공개 판정은 승인 시각 기준이고 재승인 대기 공연은 공개, 승인 시각 없는 APPROVED는 비공개다 (TR-11)', async () => {
+    const s = await boot({
+      seed: (repo) => {
+        // 승인 뒤 내용을 고쳐 재승인 대기: saleApprovedAt이 있어 공개다.
+        production(repo, pid(1), { title: '재승인 대기', saleReview: 'SUBMITTED', approved: true });
+        event(repo, eid(1), pid(1), { openAt: new Date(NOW + hours(1)).toISOString(), startsAt: new Date(NOW + days(10)).toISOString(), sale: 'UPCOMING' });
+        // APPROVED지만 승인 시각이 없으면 공개가 아니다.
+        production(repo, pid(2), { title: '승인 시각 없음', saleReview: 'APPROVED', approved: false });
+        event(repo, eid(2), pid(2), { openAt: new Date(NOW + hours(2)).toISOString(), startsAt: new Date(NOW + days(11)).toISOString(), sale: 'UPCOMING' });
+        // 중지 공연은 승인 시각이 있어도 공개가 아니다.
+        production(repo, pid(3), { title: '중지', saleReview: 'SUSPENDED', approved: true });
+        event(repo, eid(3), pid(3), { openAt: new Date(NOW + hours(3)).toISOString(), startsAt: new Date(NOW + days(12)).toISOString(), sale: 'UPCOMING' });
+        production(repo, pid(4), { title: '정상 공개', saleReview: 'APPROVED', approved: true });
+        event(repo, eid(4), pid(4), { openAt: new Date(NOW + hours(4)).toISOString(), startsAt: new Date(NOW + days(13)).toISOString(), sale: 'UPCOMING' });
+      },
+    });
+    const r = await getHome(s);
+    expect(r.statusCode).toBe(200);
+    expect(bodyOf(r).upcoming?.map((c) => c.productionId)).toEqual([pid(1), pid(4)]);
   });
 
   test('HOT-305 지금 판매 중은 판매 종료가 이른 순·ID 순으로 9개까지 싣고 saleEndsAt을 정확히 준다 [ASVS v5.0.0-2.1.3]', async () => {
@@ -173,13 +206,14 @@ describe('홈 피드(HOT-305)', () => {
       seed: (repo) => {
         for (let i = 1; i <= 10; i++) {
           production(repo, pid(i), { title: `판매 ${i}` });
-          event(repo, eid(i), pid(i), { openAt: new Date(NOW - days(10)).toISOString(), startsAt: new Date(NOW + days(i)).toISOString(), sale: 'ON_SALE' });
+          // 시작을 +1시간 두어 saleEndsAt이 now와 같아지는 DB에서 나올 수 없는 상태를 만들지 않는다(TR-04).
+          event(repo, eid(i), pid(i), { openAt: new Date(NOW - days(10)).toISOString(), startsAt: new Date(NOW + days(i) + hours(1)).toISOString(), sale: 'ON_SALE' });
         }
         // 같은 판매 종료 시각은 ID 오름차순
         production(repo, pid(20), { title: '같은 종료 낮은 ID' });
-        event(repo, eid(20), pid(20), { openAt: new Date(NOW - days(10)).toISOString(), startsAt: new Date(NOW + days(1)).toISOString(), sale: 'ON_SALE' });
+        event(repo, eid(20), pid(20), { openAt: new Date(NOW - days(10)).toISOString(), startsAt: new Date(NOW + days(1) + hours(1)).toISOString(), sale: 'ON_SALE' });
         production(repo, pid(21), { title: '같은 종료 높은 ID' });
-        event(repo, eid(21), pid(21), { openAt: new Date(NOW - days(10)).toISOString(), startsAt: new Date(NOW + days(1)).toISOString(), sale: 'ON_SALE' });
+        event(repo, eid(21), pid(21), { openAt: new Date(NOW - days(10)).toISOString(), startsAt: new Date(NOW + days(1) + hours(1)).toISOString(), sale: 'ON_SALE' });
         // 오픈 전·매진·끝남은 없다
         production(repo, pid(30));
         event(repo, eid(30), pid(30), { openAt: new Date(NOW + days(1)).toISOString(), startsAt: new Date(NOW + days(20)).toISOString(), sale: 'UPCOMING' });
@@ -187,53 +221,77 @@ describe('홈 피드(HOT-305)', () => {
         event(repo, eid(31), pid(31), { openAt: new Date(NOW - days(10)).toISOString(), startsAt: new Date(NOW + days(3)).toISOString(), sale: 'SOLD_OUT' });
         production(repo, pid(32));
         event(repo, eid(32), pid(32), { openAt: new Date(NOW - days(10)).toISOString(), startsAt: new Date(NOW - days(1)).toISOString(), sale: 'ENDED' });
+        // saleEndsAt = now인 회차는 DB가 ENDED로 계산한다. 줄은 sale_status로만 고르므로 이 공연은 없다(TR-04).
+        production(repo, pid(33));
+        event(repo, eid(33), pid(33), { openAt: new Date(NOW - days(10)).toISOString(), startsAt: new Date(NOW + days(1)).toISOString(), sale: 'ENDED' });
       },
     });
     const r = await getHome(s);
     expect(r.statusCode).toBe(200);
     const body = bodyOf(r);
     expect(body.onSale).toHaveLength(9);
-    // 1일 뒤 시작(2개, ID 차례) → 2일 → … → 9일
+    // 1일+1시간 뒤 시작(2개, ID 차례) → 2일+1시간 → … → 9일+1시간
     const expected = [pid(1), pid(20), pid(21), pid(2), pid(3), pid(4), pid(5), pid(6), pid(7)];
     expect(body.onSale?.map((c) => c.productionId)).toEqual(expected);
-    expect(body.onSale?.[0]?.saleEndsAt).toBe(new Date(NOW + days(1) - hours(24)).toISOString());
+    expect(body.onSale?.[0]?.saleEndsAt).toBe(new Date(NOW + days(1) + hours(1) - hours(24)).toISOString());
     expect(body.onSale?.[0]?.saleStatus).toBe('ON_SALE');
     const ids = new Set(body.onSale?.map((c) => c.productionId));
-    for (const absent of [pid(30), pid(31), pid(32)]) expect(ids.has(absent)).toBe(false);
+    for (const absent of [pid(30), pid(31), pid(32), pid(33)]) expect(ids.has(absent)).toBe(false);
   });
 
-  test('HOT-305 공연장 줄은 공연이 있는 곳만 공연 수·이름·ID 순으로 10개까지 싣고 initial을 준다', async () => {
-    const places = [PLACE_A, PLACE_B, PLACE_C, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb6', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb7', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb8', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb9', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbba', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'];
-    const names: Record<string, string> = { [PLACE_A]: '가홀', [PLACE_B]: '나홀', [PLACE_C]: '다홀' };
-    places.forEach((p, i) => (names[p] = names[p] ?? `${'가나다라마바사아자차카'[i]}홀`));
+  test('HOT-305 saleEndsAt은 첫 회차가 아니라 마지막 회차의 시작 − 24시간이다 (TR-12)', async () => {
+    const s = await boot({
+      seed: (repo) => {
+        production(repo, pid(500), { title: '회차 둘' });
+        event(repo, eid(500), pid(500), { openAt: new Date(NOW - days(10)).toISOString(), startsAt: new Date(NOW + days(10) + hours(1)).toISOString(), sale: 'ON_SALE' });
+        event(repo, eid(501), pid(500), { openAt: new Date(NOW - days(10)).toISOString(), startsAt: new Date(NOW + days(20) + hours(1)).toISOString(), sale: 'ON_SALE' });
+        production(repo, pid(501), { title: '회차 하나' });
+        event(repo, eid(502), pid(501), { openAt: new Date(NOW - days(10)).toISOString(), startsAt: new Date(NOW + days(5) + hours(1)).toISOString(), sale: 'ON_SALE' });
+      },
+    });
+    const r = await getHome(s);
+    expect(r.statusCode).toBe(200);
+    const body = bodyOf(r);
+    // 마지막 회차 기준이면 20일+1시간−24시간 = 19일+1시간, 첫 회차 기준이면 9일+1시간이다.
+    expect(body.onSale?.find((c) => c.productionId === pid(500))?.saleEndsAt).toBe(new Date(NOW + days(20) + hours(1) - hours(24)).toISOString());
+    expect(body.onSale?.map((c) => c.productionId)).toEqual([pid(501), pid(500)]);
+  });
+
+  test('HOT-305 공연장 줄은 공연 수 내림차순·이름 가나다순으로 10개까지 싣고 ID·이름과 다른 차례를 만든다', async () => {
+    const places = ['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb0', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb5', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb6', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb7', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb8', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb9', 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbba'];
+    // ID 오름차순과 이름 가나다순을 반대로 둔다(0=카, 10=가).
+    const names: Record<string, string> = {};
+    places.forEach((p, i) => (names[p] = `${'카차자아사바마라다나가'[i]}홀`));
     Object.assign(LABELS, names);
     const s = await boot({
       seed: (repo) => {
-        // 에이홀 3, 비홀 2, 나머지 1씩. 오픈 예정 10 + 판매 중 10으로 11곳이 모두 보이게 한다.
-        const up = [places[0]!, places[0]!, places[1]!, places[1]!, ...places.slice(2, 8)];
+        // 공연 수: 0번 3, 2번 3, 1·3·4·5번 2, 6·7·8·9·10번 1. ID 순서와 공연 수가 엇갈린다.
+        const up = [places[0]!, places[0]!, places[2]!, places[2]!, places[1]!, places[3]!, places[4]!, places[5]!, places[6]!, places[7]!];
         up.forEach((placeId, i) => {
           const id = pid(100 + i);
           production(repo, id, { placeId, title: `오픈 ${i}` });
           event(repo, eid(100 + i), id, { openAt: new Date(NOW + hours(i + 1)).toISOString(), startsAt: new Date(NOW + days(90 + i)).toISOString(), sale: 'UPCOMING', placeId });
         });
-        const sale = [places[8]!, places[9]!, places[10]!, places[0]!, places[1]!, places[2]!, places[3]!, places[4]!, places[5]!, places[6]!];
+        const sale = [places[8]!, places[9]!, places[10]!, places[0]!, places[1]!, places[2]!, places[3]!, places[4]!, places[5]!];
         sale.forEach((placeId, i) => {
           const id = pid(200 + i);
           production(repo, id, { placeId, title: `판매 ${i}` });
-          event(repo, eid(200 + i), id, { openAt: new Date(NOW - days(10)).toISOString(), startsAt: new Date(NOW + days(i + 1)).toISOString(), sale: 'ON_SALE', placeId });
+          event(repo, eid(200 + i), id, { openAt: new Date(NOW - days(10)).toISOString(), startsAt: new Date(NOW + days(i + 1) + hours(1)).toISOString(), sale: 'ON_SALE', placeId });
         });
       },
     });
     const r = await getHome(s);
     expect(r.statusCode).toBe(200);
     const body = bodyOf(r);
-    expect(body.places).toHaveLength(10);
-    expect(body.places?.[0]).toEqual({ placeId: PLACE_A, name: '가홀', initial: '가' });
-    expect(body.places?.[1]).toEqual({ placeId: PLACE_B, name: '나홀', initial: '나' });
-    expect(new Set(body.places?.map((p) => p.placeId)).size).toBe(10);
+    // 공연 수 3: 2(자)·0(카) → 2: 5(바)·4(사)·3(아)·1(차) → 1: 10(가)·9(나)·8(다)·7(라). 6(마)은 11번째라 빠진다.
+    expect(body.places?.map((p) => p.placeId)).toEqual([places[2], places[0], places[5], places[4], places[3], places[1], places[10], places[9], places[8], places[7]]);
+    expect(body.places?.[0]).toEqual({ placeId: places[2], name: '자홀', initial: '자' });
+    expect(body.places?.[1]).toEqual({ placeId: places[0], name: '카홀', initial: '카' });
+    expect(body.places?.[9]).toEqual({ placeId: places[7], name: '라홀', initial: '라' });
+    expect(body.places?.some((p) => p.placeId === places[6])).toBe(false);
   });
 
-  test('HOT-305 배너·테마는 노출 기간·공개 공연·정렬·상한을 지키고 빈 테마는 싣지 않는다 [ASVS v5.0.0-2.1.1] [ASVS v5.0.0-2.1.3]', async () => {
+  test('HOT-305 배너·테마는 노출 기간·공개 공연·정렬·상한을 지키고 빈 테마는 싣지 않는다 [ASVS v5.0.0-2.1.3]', async () => {
     const s = await boot({
       seed: (repo) => {
         production(repo, pid(1), { title: '판매 중 공연' });
@@ -245,6 +303,7 @@ describe('홈 피드(HOT-305)', () => {
       },
       home: {
         banners: [
+          { bannerId: 'b0', productionId: pid(1), eventId: eid(1), title: '같은 순서 낮은 ID', imageUrl: `${IMAGE_ORIGIN_TEST}/home-banners/b0`, alt: '같은 순서 낮은 ID 그림', displayFrom: '2026-11-01T00:00:00.000Z', displayUntil: '2026-12-01T00:00:00.000Z', sortOrder: 2 },
           { bannerId: 'b1', productionId: pid(1), eventId: eid(1), title: '첫 배너', subtitle: '11/20', imageUrl: `${IMAGE_ORIGIN_TEST}/home-banners/b1`, alt: '첫 배너 그림', displayFrom: '2026-11-01T00:00:00.000Z', displayUntil: '2026-12-01T00:00:00.000Z', sortOrder: 2 },
           { bannerId: 'b2', productionId: pid(2), eventId: eid(2), title: '둘째 배너', imageUrl: `${IMAGE_ORIGIN_TEST}/home-banners/b2`, alt: '둘째 배너 그림', displayFrom: '2026-11-01T00:00:00.000Z', displayUntil: '2026-12-01T00:00:00.000Z', sortOrder: 1 },
           { bannerId: 'b3', productionId: pid(3), eventId: eid(3), imageUrl: `${IMAGE_ORIGIN_TEST}/home-banners/b3`, alt: '중지 공연 배너', displayFrom: '2026-11-01T00:00:00.000Z', displayUntil: '2026-12-01T00:00:00.000Z', sortOrder: 0 },
@@ -255,18 +314,22 @@ describe('홈 피드(HOT-305)', () => {
           { themeId: 't1', name: '루멘 테마', productionIds: [pid(2), pid(1), pid(3)], displayFrom: '2026-11-01T00:00:00.000Z', displayUntil: '2026-12-01T00:00:00.000Z', sortOrder: 2 },
           { themeId: 't2', name: '빈 테마', productionIds: [pid(3)], displayFrom: '2026-11-01T00:00:00.000Z', displayUntil: '2026-12-01T00:00:00.000Z', sortOrder: 1 },
           { themeId: 't3', name: '끝난 테마', productionIds: [pid(1)], displayFrom: '2026-10-01T00:00:00.000Z', displayUntil: new Date(NOW).toISOString(), sortOrder: 0 },
-          { themeId: 't4', name: '시작 경계 테마', productionIds: [pid(1)], displayFrom: new Date(NOW).toISOString(), displayUntil: '2026-12-01T00:00:00.000Z', sortOrder: 3 },
+          { themeId: 't4', name: '시작 경계 테마', productionIds: [pid(1)], displayFrom: new Date(NOW).toISOString(), displayUntil: '2026-12-01T00:00:00.000Z', sortOrder: 1 },
         ],
       },
     });
     const r = await getHome(s);
     expect(r.statusCode).toBe(200);
     const body = bodyOf(r);
-    expect(body.banners?.map((b) => b.bannerId)).toEqual(['b2', 'b1', 'b5']);
+    // b2(sort 1) → 같은 sort 2는 ID 차례 b0·b1 → b5(sort 3). 끝난 b4·중지 공연 b3은 없다.
+    expect(body.banners?.map((b) => b.bannerId)).toEqual(['b2', 'b0', 'b1', 'b5']);
     expect(body.banners?.[0]).toMatchObject({ productionId: pid(2), eventId: eid(2), title: '둘째 배너', imageUrl: `${IMAGE_ORIGIN_TEST}/home-banners/b2`, alt: '둘째 배너 그림', displayUntil: '2026-12-01T00:00:00.000Z' });
-    expect(body.themes?.map((t) => t.themeId)).toEqual(['t1', 't4']);
-    expect(body.themes?.[0]?.productions?.map((c) => c.productionId)).toEqual([pid(2), pid(1)]);
-    expect(body.themes?.[1]?.productions?.map((c) => c.productionId)).toEqual([pid(1)]);
+    expect(body.banners?.[2]).toMatchObject({ bannerId: 'b1', subtitle: '11/20', alt: '첫 배너 그림' });
+    // t4(sort 1)가 입력·ID 차례의 t1(sort 2)보다 앞선다.
+    expect(body.themes?.map((t) => t.themeId)).toEqual(['t4', 't1']);
+    expect(body.themes?.map((t) => t.name)).toEqual(['시작 경계 테마', '루멘 테마']);
+    expect(body.themes?.[1]?.productions?.map((c) => c.productionId)).toEqual([pid(2), pid(1)]);
+    expect(body.themes?.[0]?.productions?.map((c) => c.productionId)).toEqual([pid(1)]);
   });
 
   test('HOT-305 배너 10·테마 5·테마 항목 20 상한을 넘지 않는다', async () => {
@@ -284,7 +347,8 @@ describe('홈 피드(HOT-305)', () => {
     const themes = Array.from({ length: 6 }, (_, i) => ({
       themeId: pid(500 + i),
       name: `테마 ${i}`,
-      productionIds: i === 0 ? ids : [ids[0]!],
+      // ID 오름차순과 반대로 넣어 '적힌 차례'를 지키는지 본다(TR-10).
+      productionIds: i === 0 ? [...ids].reverse() : [ids[0]!],
       displayFrom: '2026-11-01T00:00:00.000Z',
       displayUntil: '2026-12-01T00:00:00.000Z',
       sortOrder: i,
@@ -306,28 +370,68 @@ describe('홈 피드(HOT-305)', () => {
     expect(body.themes).toHaveLength(5);
     expect(body.themes?.map((t) => t.themeId)).toEqual(themes.slice(0, 5).map((t) => t.themeId));
     expect(body.themes?.[0]?.productions).toHaveLength(20);
-    expect(body.themes?.[0]?.productions?.map((c) => c.productionId)).toEqual(ids.slice(0, 20));
+    expect(body.themes?.[0]?.productions?.map((c) => c.productionId)).toEqual([...ids].reverse().slice(0, 20));
   });
 
-  test('HOT-305 원천이 실패하면 배너·테마만 비우고 200이며, 검색 원천이 실패하면 503·no-store다 [ASVS v5.0.0-16.5.2]', async () => {
-    const degraded = await boot({
+  test('HOT-305 원천이 실패하면 그 줄만 비우고 다른 줄은 살아 있으며, 검색 원천이 실패하면 503·no-store다 [ASVS v5.0.0-16.5.2]', async () => {
+    const doc = {
+      productionId: pid(1),
+      eventId: eid(1),
+      title: '살아 있는 공연',
+      aliases: [],
+      genre: '콘서트',
+      placeId: PLACE_A,
+      placeName: '에이홀',
+      artists: [],
+      saleStatus: 'ON_SALE',
+      saleEndsAt: new Date(NOW + days(3)).toISOString(),
+      periodStart: '2026-11-01',
+      periodEnd: '2026-12-31',
+      popularity: 0,
+    };
+    const theme = { themeId: 't1', name: '살아 있는 테마', productionIds: [pid(1)], displayFrom: '2026-11-01T00:00:00.000Z', displayUntil: '2026-12-01T00:00:00.000Z', sortOrder: 1 };
+    const banner = { bannerId: 'b1', productionId: pid(1), eventId: eid(1), imageUrl: `${IMAGE_ORIGIN_TEST}/home-banners/b1`, alt: '살아 있는 배너', displayFrom: '2026-11-01T00:00:00.000Z', displayUntil: '2026-12-01T00:00:00.000Z', sortOrder: 1 };
+
+    // 배너 원천만 실패: 테마·검색 문서 줄은 살아 있다.
+    const bannersDown = await boot({
       home: {
         source: {
-          documents: async () => [],
+          documents: async () => [doc],
           banners: async () => {
             throw new Error('banner store down');
           },
+          themes: async () => [theme],
+        },
+      },
+    });
+    const r = await getHome(bannersDown);
+    expect(r.statusCode).toBe(200);
+    const body = bodyOf(r);
+    expect(body.banners).toEqual([]);
+    expect(body.onSale?.map((c) => c.productionId)).toEqual([pid(1)]);
+    expect(body.places?.map((p) => p.placeId)).toEqual([PLACE_A]);
+    expect(body.themes?.map((t) => t.themeId)).toEqual(['t1']);
+
+    // 테마 원천만 실패: 배너·검색 문서 줄은 살아 있다.
+    const themesDown = await boot({
+      home: {
+        source: {
+          documents: async () => [doc],
+          banners: async () => [banner],
           themes: async () => {
             throw new Error('theme store down');
           },
         },
       },
     });
-    const r = await getHome(degraded);
-    expect(r.statusCode).toBe(200);
-    expect(bodyOf(r)).toMatchObject({ banners: [], upcoming: [], onSale: [], themes: [], places: [], rankingsPath: '/v1/home/rankings.json' });
+    const r2 = await getHome(themesDown);
+    expect(r2.statusCode).toBe(200);
+    const body2 = bodyOf(r2);
+    expect(body2.banners?.map((b) => b.bannerId)).toEqual(['b1']);
+    expect(body2.onSale?.map((c) => c.productionId)).toEqual([pid(1)]);
+    expect(body2.themes).toEqual([]);
 
-    const unknown = await degraded.http.inject({ method: 'GET', url: '/v1/home/unknown' });
+    const unknown = await bannersDown.http.inject({ method: 'GET', url: '/v1/home/unknown' });
     expect(unknown.statusCode).toBe(404);
     expect(unknown.headers['cache-control']).toBe('no-store');
 
@@ -346,5 +450,16 @@ describe('홈 피드(HOT-305)', () => {
     expect(failed.statusCode).toBe(503);
     expect(failed.headers['cache-control']).toBe('no-store');
     expect(failed.headers['retry-after']).toBeDefined();
+  });
+
+  test('HOT-305 다른 메서드는 2xx가 아니고 no-store다 (TR-13)', async () => {
+    const s = await boot();
+    const post = await s.http.inject({ method: 'POST', url: '/v1/home' });
+    expect([404, 405]).toContain(post.statusCode);
+    expect(post.headers['cache-control']).toBe('no-store');
+
+    const internalGet = await s.http.inject({ method: 'GET', url: '/internal/v1/home-cache/revalidate' });
+    expect([404, 405]).toContain(internalGet.statusCode);
+    expect(internalGet.headers['cache-control']).toBe('no-store');
   });
 });
