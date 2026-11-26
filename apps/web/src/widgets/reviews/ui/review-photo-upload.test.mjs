@@ -88,3 +88,30 @@ test('WEB-05 사진 설명에 <img onerror>가 들어와도 alt 속성 값으로
   has(web, /alt=\{/, '웹 사진 alt가 없다');
   has(ds, /alt=\{/, 'DS 사진 alt가 없다');
 });
+
+
+test('WEB-06 [IR-05] 검사 중 상태를 보이고, [다시 시도]는 원본 파일로 실제 업로드를 다시 부른다', async () => {
+  const state = await import('../../../../../../packages/ds/src/components/ImageUploader/upload-state.ts');
+  const file = new File([new Uint8Array([1, 2, 3])], 'photo.jpg', { type: 'image/jpeg' });
+  const failed = [{ id: 'i1', status: 'error', error: '올리지 못했습니다', retryable: true, file }];
+
+  assert.equal(state.retryFile(failed, 'i1'), file);
+  const scanning = state.beginUpload(failed, 'i1');
+  assert.equal(scanning[0].status, 'scanning');
+  assert.equal(scanning[0].error, undefined);
+  assert.equal(scanning[0].retryable, undefined);
+
+  const ready = state.finishUpload(scanning, 'i1', 'img-1');
+  assert.equal(ready[0].status, 'ready');
+  assert.equal(ready[0].imageId, 'img-1');
+
+  const again = state.failUpload(scanning, 'i1', '다시 시도해 주세요', true);
+  assert.deepEqual([again[0].status, again[0].error, again[0].retryable], ['error', '다시 시도해 주세요', true]);
+
+  const ds = read('../../../../../../packages/ds/src/components/ImageUploader/ImageUploader.tsx');
+  has(ds, /file\?: File/, '항목이 원본 File을 들지 않는다');
+  has(ds, /beginUpload\(/, '검사 중(scanning) 상태로 바꾸지 않는다');
+  has(ds, /retryFile\(/, '다시 시도할 원본 파일을 찾지 않는다');
+  has(ds, /runUpload\(/, '다시 시도에서 업로드를 다시 부르지 않는다');
+  has(ds, /onClick=\{\(\) => retry\(/, '다시 시도 버튼이 retry를 부르지 않는다');
+});

@@ -506,3 +506,128 @@ describe('운영자 후기 상세', () => {
     expect(plainDetail.summary.total).toBe(0);
   });
 });
+
+
+describe('후기 사진 한도·설명·가림·정리(구현 리뷰 IR-03·04·06·07·08)', () => {
+  test('IMG-12 [ASVS v5.0.0-2.4.1] 한도는 성공 장수가 아니라 시도로 세고, 동시에 올려도 30장을 넘지 않는다', async () => {
+    const rejectedAccount = randomUUID();
+    for (let i = 0; i < 30; i += 1) {
+      const rejectedUpload = await upload(rejectedAccount, marked(JPEG, 'MALWARE'));
+      expect(rejectedUpload.statusCode).toBe(422);
+    }
+    const limited = await upload(rejectedAccount, JPEG);
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers['retry-after']).toBeDefined();
+    // 다른 계정은 따로 센다
+    expect((await upload(randomUUID(), JPEG)).statusCode).toBe(201);
+
+    // 29장을 올린 뒤 두 요청이 동시에 들어와도 성공은 30장까지다(세고 넣는 사이에 끼어들지 않는다)
+    const parallelAccount = randomUUID();
+    for (let i = 0; i < 29; i += 1) expect((await upload(parallelAccount, JPEG)).statusCode).toBe(201);
+    const results = await Promise.all([upload(parallelAccount, JPEG), upload(parallelAccount, JPEG)]);
+    expect(results.filter((r) => r.statusCode === 201)).toHaveLength(1);
+    expect(results.filter((r) => r.statusCode === 429)).toHaveLength(1);
+  });
+
+  test('IMG-13 [ASVS v5.0.0-1.3.3] 사진 설명은 서버와 DB가 같은 코드 포인트 단위로 100자를 세어, 결합 이모지 100개를 500이 아니라 422로 닫는다', async () => {
+    const { eventId } = seed();
+    const me = randomUUID();
+    eligibility.set(me, eventId, { eligible: true, basisOrderId: randomUUID() });
+    const a = await uploadOk(me);
+    const tooLong = await postReview(eventId, me, { rating: 5, body: '결합 이모지 설명이 너무 긴 후기 본문입니다.', images: [{ imageId: a.imageId, alt: '👍🏽'.repeat(100) }] });
+    // DB CHECK(char_length)가 아니라 서버가 422로 먼저 닫는다(500이 아니다)
+    expect(tooLong.statusCode).toBe(422);
+
+    const b = await uploadOk(me);
+    const exactly = '👍🏽'.repeat(50);
+    const ok = await postReview(eventId, me, { rating: 5, body: '결합 이모지 설명이 100 코드 포인트인 후기 본문입니다.', images: [{ imageId: b.imageId, alt: exactly }] });
+    expect(ok.statusCode).toBe(201);
+    expect(JSON.parse(ok.payload).images[0].alt).toBe(exactly);
+  });
+
+  test('IMG-14 [ASVS v5.0.0-2.3.3] 공개 파생본 지우기가 실패한 행은 지우지 않고 다음 정리에서 다시 지운다', async () => {
+    const me = randomUUID();
+    const a = await uploadOk(me);
+    clock.advance(24 * 60 * 60 * 1000 + 1);
+
+    let failed = false;
+    const flaky = {
+      async deletePublic(key: string): Promise<void> {
+        if (!failed && key === `review/${a.imageId}/240.webp`) {
+          failed = true;
+          throw new Error('일시 장애');
+        }
+        await objects.deletePublic(key);
+      },
+    };
+    const task = reviewMaintenanceTasks(store, clock, { images: { objects: flaky } } as never).find((t) => t.name === 'review-image-cleanup');
+    expect(task).toBeDefined();
+    await task!.run();
+    // 240은 실패했으므로 행을 지우지 않고 다음 정리를 기다린다(1280은 이미 지웠다)
+    expect((await imageRowsByAccount(me)).map((r) => r.status)).toEqual(['READY']);
+    expect(publishedKeys(a.imageId)).toHaveLength(1);
+
+    await task!.run();
+    expect(await imageRowsByAccount(me)).toEqual([]);
+    expect(publishedKeys(a.imageId)).toEqual([]);
+  });
+
+  test('IMG-15 [ASVS v5.0.0-2.2.3] 불법 촬영물로 가린 후기는 작성자가 고쳐도 다시 보이지 않고, 운영자가 해제한 뒤에만 고칠 수 있다', async () => {
+    const { eventId } = seed();
+    const me = randomUUID();
+    const reporter = randomUUID();
+    eligibility.set(me, eventId, { eligible: true, basisOrderId: randomUUID() });
+    const a = await uploadOk(me);
+    const created = await postReview(eventId, me, { rating: 5, body: '불법 촬영물로 신고될 사진 후기 본문입니다.', images: [{ imageId: a.imageId }] });
+    expect(created.statusCode).toBe(201);
+    const reviewId = JSON.parse(created.payload).reviewId;
+    expect((await report(reviewId, reporter, 'ILLEGAL_FILMING')).statusCode).toBe(201);
+
+    const edited = await patchReview(reviewId, me, { rating: 5, body: '가림을 피해 고친 후기 본문입니다.', images: [] });
+    expect(edited.statusCode).toBe(409);
+    const detail = JSON.parse((await svc.http.inject({ method: 'GET', url: `/v1/ops/reviews/${reviewId}`, headers: identity.ops('cs_agent') })).payload);
+    expect(detail.review).toMatchObject({ status: 'HIDDEN', takedownReason: 'FILMING_HOLD' });
+    expect((await getReview(reviewId, randomUUID())).statusCode).toBe(404);
+
+    const released = await svc.http.inject({
+      method: 'POST',
+      url: `/v1/ops/reviews/${reviewId}/moderation`,
+      headers: { ...identity.ops('cs_agent'), 'content-type': 'application/json' },
+      payload: JSON.stringify({ action: 'RELEASE', reason: '확인 뒤 되돌림' }),
+    });
+    expect(released.statusCode).toBe(200);
+    const after = await patchReview(reviewId, me, { rating: 5, body: '해제 뒤 고친 후기 본문입니다.', images: [{ imageId: a.imageId }] });
+    expect(after.statusCode).toBe(200);
+    expect(JSON.parse(after.payload).images).toHaveLength(1);
+  });
+
+  test('IMG-16 [ASVS v5.0.0-2.3.3] 정리는 한 번에 100행을 넘겨도 그날의 24시간 지난 사진을 모두 지운다', async () => {
+    const me = randomUUID();
+    const old = clock.now() - 24 * 60 * 60 * 1000 - 1;
+    const ids: string[] = [];
+    for (let i = 0; i < 150; i += 1) {
+      const imageId = randomUUID();
+      ids.push(imageId);
+      store.images.set(imageId, {
+        imageId,
+        reviewId: null,
+        accountId: me,
+        status: 'READY',
+        altText: '',
+        width: 800,
+        height: 600,
+        sort: 0,
+        thumbKey: `review/${imageId}/240.webp`,
+        viewKey: `review/${imageId}/1280.webp`,
+        createdAtMs: old,
+      });
+      objects.published.set(`review/${imageId}/240.webp`, { bytes: WEBP, contentType: 'image/webp' });
+      objects.published.set(`review/${imageId}/1280.webp`, { bytes: WEBP, contentType: 'image/webp' });
+    }
+    const task = reviewMaintenanceTasks(store, clock, { images: { objects } } as never).find((t) => t.name === 'review-image-cleanup');
+    expect(task).toBeDefined();
+    await task!.run();
+    expect(await imageRowsByAccount(me)).toEqual([]);
+    for (const imageId of ids) expect(publishedKeys(imageId)).toEqual([]);
+  });
+});

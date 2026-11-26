@@ -88,14 +88,21 @@ describe('F-07-10 마이그레이션 번호와 표', () => {
     expect(sql).toMatch(/char_length\(alt_text\)\s*<=\s*100|char_length\(alt_text\)\s*between\s*0\s*and\s*100/);
     expect(sql).toMatch(/sort\s+between\s+0\s+and\s+2|sort\s*>=\s*0\s+and\s+sort\s*<=\s*2/);
     expect(sql).toMatch(/review_id is null\)\s*=\s*\(attached_at is null|\(review_id is null\)\s*=\s*\(attached_at is null/);
-    // 부분 유일·색인
-    expect(sql).toMatch(/unique index[^;]*on review_image[^;]*\(review_id\s*,\s*sort\)[^;]*where[^;]*review_id is not null/);
+    // 부분 유일·색인. 지운 행(DELETED)은 빼서 같은 순서로 새 사진을 붙일 수 있게 한다(구현 리뷰 IR-01)
+    expect(sql).toMatch(/unique index[^;]*on review_image[^;]*\(review_id\s*,\s*sort\)[^;]*where[^;]*review_id is not null[^;]*status\s*<>\s*'deleted'/);
     expect(sql).toMatch(/index[^;]*on review_image[^;]*\(account_id\s*,\s*created_at\)/);
     expect(sql).toMatch(/index[^;]*on review_image[^;]*\(review_id\)/);
     expect(sql).toMatch(/index[^;]*on review_image[^;]*\(status\s*,\s*created_at\)/);
+    // 올리기 시도 표(구현 리뷰 IR-04): 성공 행이 아니라 시도를 세어 시간당 30장을 지킨다
+    expect(sql).toContain('create table review_image_upload_attempt');
+    for (const column of ['account_id', 'created_at']) {
+      expect({ column, present: new RegExp(`(?:^|[\\s,(])${column}\\s`).test(sql) }).toEqual({ column, present: true });
+    }
+    expect(sql).toMatch(/index[^;]*on review_image_upload_attempt[^;]*\(account_id\s*,\s*created_at\)/);
     expect(existsSync(`${dir}meta/0052_snapshot.json`)).toBe(true);
     const snapshot = readFileSync(`${dir}meta/0052_snapshot.json`, 'utf8');
     expect(snapshot).toContain('"review_image"');
+    expect(snapshot).toContain('"review_image_upload_attempt"');
 
     // 저널 idx 52의 when은 0047보다 크고 파일 번호와 idx가 같다
     const e = journal().entries;
@@ -119,25 +126,38 @@ describe('F-07-10 마이그레이션 번호와 표', () => {
         'core_app review_image INSERT',
         `core_app review_image UPDATE ${cols('review_id', 'alt_text', 'sort', 'attached_at', 'status', 'deleted_at')}`,
         'core_maintenance review_image SELECT',
+        `core_maintenance review_image UPDATE ${cols('deleted_at', 'status')}`,
         'core_maintenance review_image DELETE',
+        'core_app review_image_upload_attempt SELECT',
+        'core_app review_image_upload_attempt INSERT',
+        'core_maintenance review_image_upload_attempt SELECT',
+        'core_maintenance review_image_upload_attempt DELETE',
       ].sort(),
     );
-    // 거부 쪽: core_app의 지우기·자르기·전체 권한, core_maintenance의 넣기·고치기, 다른 역할이 없다
+    // 거부 쪽: core_app의 지우기·자르기·전체 권한, core_maintenance의 넣기·전체 권한, 다른 역할이 없다
     expect(grants.some((g) => g.startsWith('core_app ') && / (DELETE|TRUNCATE|ALL)( |$)/.test(g))).toBe(false);
-    expect(grants.filter((g) => g.startsWith('core_maintenance ')).every((g) => / (SELECT|DELETE)( |$)/.test(g))).toBe(true);
+    expect(grants.some((g) => g.startsWith('core_maintenance ') && / (INSERT|TRUNCATE|ALL)( |$)/.test(g))).toBe(false);
+    expect(grants.filter((g) => g.startsWith('core_maintenance ') && g.includes(' review_image ')).every((g) => / (SELECT|DELETE|UPDATE)( |$)/.test(g))).toBe(true);
     expect(grants.every((g) => g.startsWith('core_app ') || g.startsWith('core_maintenance '))).toBe(true);
 
-    // 정본 권한 표(data.md §2)에 review_image의 역할·칸 목록이 먼저 있다
+    // 정본 권한 표(data.md §2)에 review_image·review_image_upload_attempt의 역할·칸 목록이 먼저 있다
     const data = readFileSync(`${root}docs/data.md`, 'utf8');
     const paragraph = /후기 사진 표 `review_image`의 권한[^\n]*/.exec(data)?.[0] ?? '';
     expect(paragraph).toContain('core_app');
     expect(paragraph).toContain('core_maintenance');
     expect(paragraph).toContain('행 지우기');
+    expect(paragraph).toContain('고치기');
     expect(paragraph).toContain('`review_id`');
     expect(paragraph).toContain('`alt_text`');
     expect(paragraph).toContain('`sort`');
     expect(paragraph).toContain('`attached_at`');
     expect(paragraph).toContain('`status`');
     expect(paragraph).toContain('`deleted_at`');
+    const attempt = /후기 사진 올리기 시도 표 `review_image_upload_attempt`의 권한[^\n]*/.exec(data)?.[0] ?? '';
+    expect(attempt).toContain('core_app');
+    expect(attempt).toContain('core_maintenance');
+    expect(attempt).toContain('행 지우기');
+    expect(attempt).toContain('`account_id`');
+    expect(attempt).toContain('`created_at`');
   });
 });
