@@ -263,7 +263,7 @@ export class DrizzleFraudEvidenceStore implements FraudEvidenceStore {
       rowHash,
       occurredAt: new Date(c.occurredAtMs),
     });
-    return { bundleId, seq, ...c, prevHash, rowHash };
+    return { bundleId, seq, ...c, prevHash: prevHash === null ? null : Buffer.from(prevHash, 'hex'), rowHash: Buffer.from(rowHash, 'hex') };
   }
 }
 
@@ -295,8 +295,8 @@ const custodyOf = (r: CustodyRow): CustodyRecord => ({
   reason: r.reason,
   exportKind: r.exportKind as CustodyRecord['exportKind'],
   dataRequestId: r.dataRequestId,
-  prevHash: r.prevHash,
-  rowHash: r.rowHash,
+  prevHash: r.prevHash === null ? null : Buffer.from(r.prevHash, 'hex'),
+  rowHash: Buffer.from(r.rowHash, 'hex'),
   occurredAtMs: r.occurredAt.getTime(),
 });
 

@@ -62,8 +62,8 @@ export interface CustodyRecord {
   reason: string | null;
   exportKind: EvidenceExportKind | null;
   dataRequestId: string | null;
-  prevHash: string | null;
-  rowHash: string;
+  prevHash: string | Uint8Array | null;
+  rowHash: string | Uint8Array;
   occurredAtMs: number;
 }
 
@@ -147,6 +147,13 @@ export function sha256Hex(bytes: Uint8Array | string): string {
   return hex(typeof bytes === 'string' ? utf8(bytes) : bytes);
 }
 
+/** 해시 값은 저장소에 따라 16진 문자열 또는 bytea(Uint8Array)다. 해시 입력은 16진 문자열로 맞춘다. */
+export function hexOf(v: string | Uint8Array | null): string {
+  if (v === null) return '';
+  if (typeof v === 'string') return /^[0-9a-f]{64}$/i.test(v) ? v.toLowerCase() : Buffer.from(v, 'utf8').toString('hex');
+  return Buffer.from(v).toString('hex');
+}
+
 export function canonicalJson(value: unknown): string {
   return canonicalize(value) ?? '';
 }
@@ -172,7 +179,7 @@ export function manifestOf(o: {
   return { bytes, manifestSha256: sha256Hex(bytes), files };
 }
 
-export function custodyRowHash(o: Omit<CustodyRecord, 'rowHash' | 'prevHash'> & { prevHash: string | null }): string {
+export function custodyRowHash(o: Omit<CustodyRecord, 'rowHash' | 'prevHash'> & { prevHash: string | Uint8Array | null }): string {
   const body = canonicalJson({
     bundleId: o.bundleId,
     seq: o.seq,
@@ -183,7 +190,7 @@ export function custodyRowHash(o: Omit<CustodyRecord, 'rowHash' | 'prevHash'> & 
     dataRequestId: o.dataRequestId,
     occurredAt: new Date(o.occurredAtMs).toISOString(),
   });
-  return sha256Hex(`${o.prevHash ?? ''}${body}`);
+  return sha256Hex(`${hexOf(o.prevHash)}${body}`);
 }
 
 export function verifyCustodyChain(rows: readonly CustodyRecord[]): { ok: boolean; brokenSeq: number | null } {
@@ -200,8 +207,8 @@ export function verifyCustodyChain(rows: readonly CustodyRecord[]): { ok: boolea
       occurredAtMs: row.occurredAtMs,
       prevHash: prev,
     });
-    if (row.prevHash !== prev || row.rowHash !== expected) return { ok: false, brokenSeq: row.seq };
-    prev = row.rowHash;
+    if (hexOf(row.prevHash) !== (prev ?? '') || hexOf(row.rowHash) !== expected) return { ok: false, brokenSeq: row.seq };
+    prev = hexOf(row.rowHash);
   }
   return { ok: true, brokenSeq: null };
 }

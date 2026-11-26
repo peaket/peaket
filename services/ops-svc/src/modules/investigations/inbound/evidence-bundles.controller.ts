@@ -1,6 +1,7 @@
 // F-04-14 증거 묶음 API(openapi 태그 investigations, FR-074).
 // 지정 확인·접속기록은 F-04-12 조사 경로와 같고, 모든 응답은 Cache-Control: no-store다.
 import { Body, Controller, Get, Header, Headers, HttpCode, Param, Post, Query, Res } from '@nestjs/common';
+import { z } from 'zod';
 import {
   CreateOpsEvidenceBundleExportBody,
   CreateOpsEvidenceBundleExportParams,
@@ -37,6 +38,8 @@ const reject = (e: unknown): never => {
 
 const one = (v: string | string[] | undefined): string | undefined => (typeof v === 'string' ? v : Array.isArray(v) ? v[0] : undefined);
 const actorOf = (me: Principal) => ({ accountId: me.accountId, role: me.role ?? 'viewer' });
+/** 내보내기 응답은 200 CSV 문자열 또는 200/201 JSON이다. 둘 다 칸을 거르지 않도록 열어 둔다. */
+const ExportResponse = z.union([z.string(), z.looseObject({})]);
 
 @Controller('v1/ops')
 export class EvidenceBundlesController {
@@ -81,7 +84,7 @@ export class EvidenceBundlesController {
   @Get('evidence-bundles/:bundleId')
   @Header('Cache-Control', 'no-store')
   @Roles([...OPS_ROLES] as AdminRole[])
-  @ContractRouteSchema({ params: GetOpsEvidenceBundleParams, responses: {} })
+  @ContractRouteSchema({ params: GetOpsEvidenceBundleParams, responses: { 200: z.looseObject({}) } })
   async get(@ContractParams(GetOpsEvidenceBundleParams) params: { bundleId: string }, @CurrentPrincipal() me: Principal) {
     try {
       return await this.evidence.get(actorOf(me), params.bundleId);
@@ -151,7 +154,7 @@ export class EvidenceBundlesController {
   @Header('Cache-Control', 'no-store')
   @Roles([...OPS_ROLES] as AdminRole[])
   @Idempotent({ operation: 'CREATE_EVIDENCE_EXPORT' })
-  @ContractRouteSchema({ params: CreateOpsEvidenceBundleExportParams, responses: {} })
+  @ContractRouteSchema({ params: CreateOpsEvidenceBundleExportParams, responses: { 200: ExportResponse, 201: ExportResponse } })
   async export(
     @ContractParams(CreateOpsEvidenceBundleExportParams) params: { bundleId: string },
     @Body() body: { kind: 'AUTHORITY' | 'PROMOTER' | 'COMPLAINT'; dataRequestId?: string; reason: string },

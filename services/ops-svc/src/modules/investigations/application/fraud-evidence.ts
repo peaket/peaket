@@ -202,9 +202,6 @@ export class EvidenceBundles {
     const nowMs = this.d.now();
     const next: EvidenceBundleRecord = {
       ...bundle,
-      holdEndRequestedBy: null,
-      holdEndRequestedAtMs: null,
-      holdEndBasis: null,
       holdEndConfirmedBy: actor.accountId,
       holdEndedAtMs: nowMs,
     };
@@ -555,7 +552,7 @@ export class EvidenceBundles {
       files: b.files.map((f) => ({ name: f.name, sha256: f.sha256, sizeBytes: f.sizeBytes })),
       holdReason: b.holdReason,
       holdEndRequest:
-        b.holdEndRequestedBy === null
+        b.holdEndConfirmedBy !== null || b.holdEndRequestedBy === null
           ? null
           : { requestedBy: b.holdEndRequestedBy, requestedAt: iso(b.holdEndRequestedAtMs), basis: b.holdEndBasis },
       holdEndedAt: iso(b.holdEndedAtMs),

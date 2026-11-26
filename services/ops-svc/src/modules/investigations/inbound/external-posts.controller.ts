@@ -4,6 +4,7 @@ import { Controller, Get, Header, HttpCode, Post, Query, Req, Res } from '@nestj
 import {
   CreateOpsExternalPostResponse,
   GetOpsExternalPostCaptureParams,
+  GetOpsExternalPostCaptureResponse,
   ListOpsExternalPostsResponse,
 } from '@peaket/contracts/openapi/investigations';
 import { AcceptMultipart, ContractParams, ContractRouteSchema, CurrentPrincipal, IdempotencyRequest, Idempotent, ProblemError, Roles, type Principal } from '@peaket/platform';
@@ -96,7 +97,7 @@ export class ExternalPostsController {
   @Get('external-posts/:postId/capture')
   @Header('Cache-Control', 'no-store')
   @Roles([...OPS_ROLES] as AdminRole[])
-  @ContractRouteSchema({ params: GetOpsExternalPostCaptureParams, responses: {} })
+  @ContractRouteSchema({ params: GetOpsExternalPostCaptureParams, responses: { 200: GetOpsExternalPostCaptureResponse } })
   async capture(@ContractParams(GetOpsExternalPostCaptureParams) params: { postId: string }, @CurrentPrincipal() me: Principal, @Res() reply: FastifyReply) {
     try {
       const out = await this.posts.view(actorOf(me), params.postId);
