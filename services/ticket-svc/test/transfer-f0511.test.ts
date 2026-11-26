@@ -517,9 +517,11 @@ describe('F-05-11 T5 I-T54 ⑤ 요청만 함 재인증', () => {
     expect(ok.status, ok.raw).toBe(201);
     expect((h.extras.notices ?? []).filter((n) => n.type === 'TRANSFER_WEAK_REAUTH')).toHaveLength(0);
     const t2 = await h.issue();
+    // 성공한 t의 두 사람(보낸·받는) OFFERED 알림은 그대로 두고, 거절된 t2의 요청만 새 알림 0인지 본다.
+    const noticesBeforeDenied = (h.extras.notices ?? []).length;
     const denied = await h.post(`/v1/tickets/${t2}/transfers`, A, { body: { recipientRef: found.body.recipientRef }, reauth: REJECTED_TOKEN });
     expect(denied.status).toBe(403);
-    expect((h.extras.notices ?? []).filter((n) => n.accountId === A && n.type === 'TRANSFER_OFFERED')).toHaveLength(0);
+    expect((h.extras.notices ?? []).length).toBe(noticesBeforeDenied);
   });
 });
 

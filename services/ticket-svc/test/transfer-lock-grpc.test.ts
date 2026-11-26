@@ -9,7 +9,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startGrpcServer } from '../src/grpc-server.js';
 import { ticketPackage, transferLockHandlers } from '../src/modules/ticket/inbound/ticket.grpc.js';
 
-const NOW = Date.parse('2026-11-22T12:00:00Z');
+// 고정 날짜를 쓰면 오늘 날짜가 +72시간을 지나 실제 시계가 '입장 시작'을 넘겨 시험이 깨진다.
+// 이 시험은 지금 결과를 보는 것이 아니므로 현재 시각을 기준으로 삼아 시한 폭탄을 없앤다(develop 8a7081d94).
+const NOW = Date.now();
 const TOKEN = 'internal-grpc-token-bat410';
 const PAYER = randomUUID();
 const EVENT = randomUUID();

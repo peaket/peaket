@@ -390,12 +390,17 @@ describe('withdrawalParticipantsFromEnv(주소가 없을 때, I-T84 ⑦)', () =>
     }
   });
 
-  test('I-T84⑦_주소가있으면그서버를부르는클라이언트하나이고경고가없다(운영도같다)', async () => {
+  test('I-T84⑦_purchase_주소가_있으면_purchase_클라이언트가_서고_ticket_주소가_없으면_경고하며_local은_빼고_운영은_답하지_않는_참여자를_둔다', async () => {
     for (const env of ['local', 'prod']) {
       seen.length = 0;
       const r = withdrawalParticipantsFromEnv({ PEAKET_ENV: env, PEAKET_PURCHASE_GRPC_URL: address });
-      expect(r.warnings).toEqual([]);
-      expect(r.participants).toHaveLength(1);
+      // F-05-11 §3-6·identity §8: ticket 주소가 없으면 local·ci는 참여자를 빼고, 그 밖은 답하지 않는 참여자를 둔다. 둘 다 경고를 남긴다.
+      expect(r.warnings).toHaveLength(1);
+      expect(r.warnings.join('\n')).toContain('PEAKET_TICKET_GRPC_URL');
+      expect(r.participants).toHaveLength(env === 'local' ? 1 : 2);
+      if (env !== 'local') {
+        expect(await rejection(r.participants[1]!.process(ACCOUNT, { deadlineMs: 100 }))).toBeInstanceOf(WithdrawalParticipantUnavailable);
+      }
       plan.length = 0;
       plan.push({ reply: { state: 'WITHDRAWAL_PARTICIPANT_STATE_PENDING', reasons: ['WITHDRAWAL_PENDING_REASON_DEPOSIT_CANCEL_PENDING'] } });
       expect(await r.participants[0]!.process(ACCOUNT, { deadlineMs: 1_000 })).toEqual({ state: 'PENDING', reasons: ['DEPOSIT_CANCEL_PENDING'] });
