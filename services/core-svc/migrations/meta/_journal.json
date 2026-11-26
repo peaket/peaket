@@ -288,6 +288,20 @@
       "when": 1795319200000,
       "tag": "0047_entry_closed_grant",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1795322800000,
+      "tag": "0049_support_appeal",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1795326400000,
+      "tag": "0055_support_inquiry",
+      "breakpoints": true
     }
   ]
 }

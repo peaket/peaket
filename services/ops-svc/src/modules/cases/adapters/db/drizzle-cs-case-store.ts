@@ -245,6 +245,7 @@ export class DrizzleCsCaseStore implements CsCaseStore, CsAppealStore {
   async list(q: CsCaseListQuery): Promise<CsCase[]> {
     if (q.statuses.length === 0 || (q.kinds && q.kinds.length === 0)) return [];
     let where = sql`status in (${inList(q.statuses)})`;
+    if (q.accountId) where = sql`${where} and account_id = ${q.accountId}::uuid`;
     if (q.kinds) where = sql`${where} and kind in (${inList(q.kinds)})`;
     if (q.excludeKinds && q.excludeKinds.length > 0) where = sql`${where} and kind not in (${inList(q.excludeKinds)})`;
     if (q.excludeCategories && q.excludeCategories.categories.length > 0) {

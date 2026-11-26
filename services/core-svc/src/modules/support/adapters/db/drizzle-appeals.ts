@@ -1,8 +1,7 @@
 // core-svc support Drizzle 저장소(F-06-4, 0049). 소명과 CS 건 요청(Outbox)을 한 트랜잭션으로 쓴다.
 // 조회·갱신은 drizzle 식·파라미터로만 한다(ASVS 1.2.4). 보내기 값은 기존 outbox 표(JSON 바이트, 아브로 인코더 전)에 둔다.
 import { and, desc, eq, inArray, lte } from 'drizzle-orm';
-import type { Database } from '@peaket/platform';
-import { randomUUID } from 'node:crypto';
+import { uuidv7, type Database } from '@peaket/platform';
 import type { AppealRow, CaseRequestedRow } from '../../domain/appeal.js';
 import type { AppealStore } from '../../domain/ports.js';
 import { appeal, outbox } from './schema.js';
@@ -50,7 +49,7 @@ export class DrizzleAppealStore implements AppealStore {
         dispatchedAt: null,
       });
       await tx.insert(outbox).values({
-        id: randomUUID(),
+        id: uuidv7({ now: () => row.submittedAtMs, monotonicMs: () => 0 }),
         topic: topik,
         msgKey: caseRequest.sourceId,
         payload: Buffer.from(JSON.stringify(caseRequest), 'utf8'),

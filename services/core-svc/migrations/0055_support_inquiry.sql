@@ -52,3 +52,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS "inquiry_message_request_key_idx" ON "inquiry_
 GRANT SELECT, INSERT, UPDATE, DELETE ON "inquiry" TO core_app;
 --> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE, DELETE ON "inquiry_message" TO core_app;
+--> statement-breakpoint
+-- 문의·추가 문의를 Outbox에 같은 트랜잭션으로 넣는다(0004는 core_app에 SELECT만 준다). 시퀀스는 seq 기본값이 쓴다.
+GRANT INSERT ON "outbox" TO core_app;
+--> statement-breakpoint
+GRANT USAGE, SELECT ON SEQUENCE "outbox_seq" TO core_app;

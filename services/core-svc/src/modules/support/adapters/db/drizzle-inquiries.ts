@@ -1,8 +1,7 @@
 // core-svc support 문의 Drizzle 저장소(F-06-5, 0055). 문의·기록·Outbox를 한 트랜잭션으로 쓴다.
 // 조회·갱신은 drizzle 식·파라미터로만 한다(ASVS 1.2.4).
 import { and, asc, eq, gte, inArray, isNotNull, lt, sql } from 'drizzle-orm';
-import type { Database } from '@peaket/platform';
-import { randomUUID } from 'node:crypto';
+import { uuidv7, type Database } from '@peaket/platform';
 import type { InquiryCaseRequestRow, InquiryMessageRow, InquiryRow, InquiryStatus } from '../../domain/inquiry.js';
 import type { InquiryStore } from '../../domain/inquiry-ports.js';
 import { inquiry, inquiryMessage, outbox } from './schema.js';
@@ -53,7 +52,7 @@ export class DrizzleInquiryStore implements InquiryStore {
         progressDueAt: r.progressDueAtMs === null ? null : new Date(r.progressDueAtMs), resultDueAt: new Date(r.resultDueAtMs),
       });
       await tx.insert(inquiryMessage).values({ id: m.messageId, inquiryId: m.inquiryId, authorKind: m.authorKind, kind: m.kind, body: m.body, requestKey: m.requestKey, requestHash: m.requestHash, createdAt: new Date(m.createdAtMs) });
-      await tx.insert(outbox).values({ id: randomUUID(), topic: TOPIC, msgKey: c.sourceId, payload: Buffer.from(JSON.stringify(c), 'utf8'), headers: {} });
+      await tx.insert(outbox).values({ id: uuidv7({ now: () => r.createdAtMs, monotonicMs: () => 0 }), topic: TOPIC, msgKey: c.sourceId, payload: Buffer.from(JSON.stringify(c), 'utf8'), headers: {} });
     });
   }
 
@@ -106,7 +105,7 @@ export class DrizzleInquiryStore implements InquiryStore {
     await this.database.transaction(async (tx) => {
       await tx.insert(inquiryMessage).values({ id: m.messageId, inquiryId: m.inquiryId, authorKind: m.authorKind, kind: m.kind, body: m.body, requestKey: m.requestKey, requestHash: m.requestHash, createdAt: new Date(m.createdAtMs) });
       await tx.update(inquiry).set({ status }).where(eq(inquiry.id, m.inquiryId));
-      await tx.insert(outbox).values({ id: randomUUID(), topic: TOPIC, msgKey: c.sourceId, payload: Buffer.from(JSON.stringify(c), 'utf8'), headers: {} });
+      await tx.insert(outbox).values({ id: uuidv7({ now: () => m.createdAtMs, monotonicMs: () => 0 }), topic: TOPIC, msgKey: c.sourceId, payload: Buffer.from(JSON.stringify(c), 'utf8'), headers: {} });
     });
   }
 
