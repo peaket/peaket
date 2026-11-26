@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "batch": "F-08-5",
+  "feature": "F-08-5",
+  "window": 4,
+  "windows": ["4a", "4b", "4c"],
+  "status": "미측정",
+  "start_gate": "감독이 창 4a~4c를 열고 docker lane4-F-08-5 한 자리를 비운 뒤 시작한다",
+  "lock": "docker lane4-F-08-5",
+  "defaults": {
+    "durationMin": 360,
+    "warmupMin": 30,
+    "sampleSec": 60
+  },
+  "stage": {
+    "cluster": "lane4-f085",
+    "namespace": "v1",
+    "memoryMi": 2048,
+    "replicas": 3,
+    "cpus": 1,
+    "redisTls": true
+  },
+  "targets": [
+    {
+      "id": "queue-svc",
+      "load": "http",
+      "rate": 500,
+      "rateSource": "K1 1,000/s 중 r3 1회 통과의 50%(문서 인용)",
+      "entryUsers": 5000,
+      "entrySeconds": 10,
+      "admitPerSecond": 28,
+      "errorRateLimit": 0.001,
+      "minTrials": 2995,
+      "errorRateSource": "NFR-001·Q-T2 0.1%",
+      "judge": "NFR-027",
+      "commands": [
+        "node loadtest/run.mjs v1 soak --target queue-svc --rate 500 --out .cache/peaket-f085/{day}-queue-r{round}"
+      ],
+      "artifacts": ["series.ndjson", "errors.json", "summary.json", "records.ndjson", "probe.json", "restarts.json", "host.json", "run.json"]
+    },
+    {
+      "id": "purchase-svc",
+      "load": "http",
+      "rate": 1000,
+      "rateSource": "K2 2,000/s 유효 2회의 50%(문서 인용, S-T1 미달)",
+      "holdSize": 2,
+      "release": true,
+      "errorRateLimit": 0.001,
+      "minTrials": 2995,
+      "errorRateSource": "[가정, F-08-5 계획] NFR-003·S-T1에 오류율 기준이 없다",
+      "judge": "NFR-027",
+      "commands": [
+        "node loadtest/run.mjs v1 soak --target purchase-svc --rate 1000 --out .cache/peaket-f085/{day}-purchase-r{round}"
+      ],
+      "artifacts": ["series.ndjson", "errors.json", "summary.json", "records.ndjson", "probe.json", "restarts.json", "host.json", "run.json"]
+    },
+    {
+      "id": "payment-svc",
+      "load": "http",
+      "rate": 150,
+      "rateSource": "[가정, F-08-5 계획] K7 ① 300/s 계획의 50%, 유효 실행 0",
+      "seatsPerOrder": 2,
+      "errorRateLimit": 0.0005,
+      "minTrials": 5991,
+      "errorRateSource": "NFR-006 완료율 99.95%·P-T5 0.05% 이하",
+      "judge": "NFR-027",
+      "commands": [
+        "node loadtest/run.mjs v1 soak --target payment-svc --rate 150 --out .cache/peaket-f085/{day}-payment-r{round}"
+      ],
+      "artifacts": ["series.ndjson", "errors.json", "summary.json", "records.ndjson", "probe.json", "restarts.json", "host.json", "run.json"]
+    },
+    {
+      "id": "realtime-gw",
+      "load": "ws",
+      "rate": 63,
+      "rateSource": "S-T12 설계 5,000 연결·125/s의 50%(연결 2,500, 홀드 63/s)",
+      "connections": 2500,
+      "holdRate": 63,
+      "errorRateLimit": 0.001,
+      "minTrials": 2995,
+      "errorRateSource": "[가정, F-08-5 계획]",
+      "judge": "NFR-027",
+      "commands": [
+        "node loadtest/run.mjs v1 soak --target realtime-gw --rate 2500 --connections 2500 --hold-rate 63 --out .cache/peaket-f085/{day}-realtime-r{round}"
+      ],
+      "artifacts": ["series.ndjson", "errors.json", "summary.json", "records.ndjson", "probe.json", "restarts.json", "host.json", "run.json"]
+    },
+    {
+      "id": "outbox-relay",
+      "load": "relay",
+      "rate": 100,
+      "rateSource": "[가정, F-08-5 계획] 유효 최대값 없음",
+      "errorRateLimit": 0.001,
+      "minTrials": 2995,
+      "errorRateSource": "[가정, F-08-5 계획]",
+      "judge": "NFR-027",
+      "commands": [
+        "node loadtest/run.mjs v1 soak --target outbox-relay --rate 100 --out .cache/peaket-f085/{day}-relay-r{round}"
+      ],
+      "artifacts": ["series.ndjson", "errors.json", "summary.json", "records.ndjson", "probe.json", "restarts.json", "host.json", "run.json"]
+    }
+  ],
+  "leak": {
+    "target": "purchase-svc",
+    "variant": "db-conn",
+    "intervalMin": 10,
+    "connectionsPerHour": 6,
+    "fdStartMax": 600,
+    "dbStart": 16,
+    "dbMax": 100,
+    "applicationName": "purchase-svc-leak",
+    "patch": "loadtest/soak/db-conn-leak.patch",
+    "commands": [
+      "git apply loadtest/soak/db-conn-leak.patch",
+      "docker build -f services/purchase-svc/Dockerfile -t peaket/purchase-svc:soak-leak .",
+      "node loadtest/run.mjs v1 soak --target purchase-svc --rate 1000 --leak db-conn --out .cache/peaket-f085/{day}-purchase-leak-r{round}"
+    ]
+  },
+  "report": "docs/review/measurements/F-08-5-soak.md",
+  "not_included": [
+    "F-08-4 정렬 설정 10만 비교",
+    "F-08-6 Game Day 전체 재실행·SLO/KPI ADR",
+    "F-08-2 100만 외삽·V-T4·V-T5·V-T17 상태 변경",
+    "F-08-8 K1·K2·K7 재측정",
+    "30,000건/초·100만·K1/K2/K7의 새 수치 주장"
+  ],
+  "remaining_risk": [
+    "payment-svc·realtime-gw·Outbox 릴레이는 유효 최대 도착률이 없어 [가정] 세기다",
+    "queue-svc 진입은 사용자 상한 5,000명 때문에 10초만 본다",
+    "누수율 10분에 1개는 [가정]이고 FD 시작값이 600 이상이면 FD 기울기가 1%를 넘지 않는다",
+    "4a와 4c는 다른 무대 인스턴스라 DB·Redis·Kafka가 새것이다"
+  ]
+}

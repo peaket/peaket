@@ -1,0 +1,68 @@
+diff --git a/services/purchase-svc/src/soak-leak.ts b/services/purchase-svc/src/soak-leak.ts
+new file mode 100644
+--- /dev/null
++++ b/services/purchase-svc/src/soak-leak.ts
+@@ -0,0 +1,58 @@
++// F-08-5 V-T10 누수 주입 판(로컬 전용). 이 파일은 저장소에 커밋하지 않고
++// loadtest/soak/db-conn-leak.patch를 임시 사본에 적용할 때만 생긴다.
++import { Client } from 'pg';
++
++/** 6시간을 채우면서 시간당 6개를 새게 하는 누수율(분) */
++export const SOAK_LEAK_INTERVAL_MIN = 10;
++export const SOAK_LEAK_CONNECTIONS_PER_HOUR = 6;
++export const SOAK_LEAK_APPLICATION_NAME = 'purchase-svc-leak';
++
++export interface SoakLeakOptions {
++  env: Record<string, string | undefined>;
++  url: string;
++}
++
++/**
++ * PEAKET_SOAK_LEAK=db-conn이고 PEAKET_ENV=local일 때만 10분마다 PostgreSQL 연결을
++ * 새로 맺고 끝내지 않는다. release·운영에서는 모드를 켜면 시작을 거부한다.
++ * 돌려주는 함수는 반복을 멈춘다.
++ */
++export function startSoakLeak({ env, url }: SoakLeakOptions): () => void {
++  const mode = env.PEAKET_SOAK_LEAK;
++  if (!mode) return () => {};
++  if (env.PEAKET_ENV !== 'local') {
++    throw new Error('PEAKET_SOAK_LEAK는 PEAKET_ENV=local에서만 쓸 수 있다');
++  }
++  if (mode !== 'db-conn') throw new Error(`모르는 PEAKET_SOAK_LEAK: ${mode}`);
++
++  let stopped = false;
++  const intervalMin = SOAK_LEAK_INTERVAL_MIN;
++  const timer = setInterval(() => {
++    if (stopped) return;
++    const client = new Client({
++      connectionString: url,
++      application_name: SOAK_LEAK_APPLICATION_NAME,
++    });
++    // 일부러 end()를 부르지 않는다. DB 연결 수와 열린 FD가 시간당 6개씩 는다.
++    void client.connect().catch(() => {});
++  }, intervalMin * 60_000);
++  timer.unref?.();
++  return () => {
++    stopped = true;
++    clearInterval(timer);
++  };
++}
+diff --git a/services/purchase-svc/src/start.ts b/services/purchase-svc/src/start.ts
+--- a/services/purchase-svc/src/start.ts
++++ b/services/purchase-svc/src/start.ts
+@@ -40,6 +40,7 @@
+ import { avroSchemas } from '@peaket/contracts/avro';
+ import { AppModule } from './app.module.js';
++import { startSoakLeak } from './soak-leak.js';
+ import {
+   DrizzleCancelledTickets,
+   DrizzlePriorityGrantStore,
+@@ -311,6 +312,8 @@
+   // purchase DB가 있으면 주문 Saga 1단계 실행기(OrderSagaRunner, PRF-165)도 같이 켜고 끈다.
+   // 승인 명령 주소는 PEAKET_PAYMENT_GRPC_ADDR(없으면 local·ci만 '늘 접수' 대역).
+   const databaseUrl = env.PEAKET_DATABASE_URL;
++  // V-T10 누수 주입 판: PEAKET_ENV=local·PEAKET_SOAK_LEAK=db-conn일 때만 10분에 1개를 샌다.
++  if (databaseUrl) startSoakLeak({ env, url: databaseUrl });
+ 
+   // purchase DB가 있으면 발권 실행기(TicketIssueRunner, PRF-170)도 Saga 실행기와 같은 자리에서 켜고 끈다.
+   // 발권 재시도 큐 ticket_issue_job, ADR-0106 결정 2).
