@@ -34,6 +34,7 @@ import { DrizzleOrderStore } from '../src/modules/booking/index.js';
 import { ApprovalBasisOrders } from '../src/modules/booking/application/approval-basis.js';
 import { DrizzleSeatSales, MemorySeatMap, RedisSeatStore, seatKeys } from '../src/modules/inventory/index.js';
 import {
+  ApprovalRefunds,
   CancelTicket,
   DrizzleCancellationOrders,
   DrizzleCancellationWrites,
@@ -374,6 +375,53 @@ describe('IR-30 취소 행 무효 상태 전이', () => {
     );
     expect(await writes.updateStatus({ cancellationId, status: 'VOIDED', nowMs: NOW })).toBe(false);
     expect((await cancellationRow(cancellationId))?.status).toBe('REFUNDED');
+  });
+});
+
+describe('IR-11 FLAGGED REFUND의 DB 상태 전이', () => {
+  const cancelRow = async (cancellationId: string) =>
+    (await admin.pool.query('select status, refund_due_at from order_cancellation where id = $1', [cancellationId])).rows[0] as { status: string; refund_due_at: Date | null };
+  const seed = async () => {
+    const w = await world({ ticketPrice: 11_000 });
+    const cancellationId = randomUUID();
+    await admin.pool.query(
+      `insert into order_cancellation (id, order_id, ticket_id, reason, days_before, within_24h, deduction_bp, deduction_amount, refund_amount, status, created_at, status_changed_at)
+       values ($1, $2, $3, 'USER', 3, false, 0, 0, 11_000, 'REQUESTED', now(), now())`,
+      [cancellationId, w.orderId, w.ticketId],
+    );
+    const orders = new DrizzleCancellationOrders(purchaseDb, seatMap);
+    return { w, cancellationId, orders };
+  };
+  const deps = (orders: DrizzleCancellationOrders, writesFor: DrizzleCancellationWrites) => ({
+    orders,
+    writes: writesFor,
+    tickets: { async cancel() { return 'REFUND_NOW' as const; } },
+    payments: { async cancel() { return 'CANCELLED' as const; } },
+    clock: { now: () => NOW, monotonicMs: () => NOW },
+  });
+
+  test('REQUESTED 취소를 결제사 취소 뒤 REFUND_PENDING을 거쳐 REFUNDED로 끝낸다', async () => {
+    const { cancellationId, orders } = await seed();
+    const refunds = new ApprovalRefunds(deps(orders, writes) as never);
+    const out = await refunds.execute(cancellationId, { kind: 'SYSTEM_FAULT_REFUND', orderId: cancellationId, amount: 11_000 });
+    expect(out.status).toBe('REFUNDED');
+    expect((await cancelRow(cancellationId)).status).toBe('REFUNDED');
+  });
+
+  test('REFUNDED 전이가 실패하면 REFUND_PENDING으로 남고 dueRefunds가 그 행을 집는다', async () => {
+    const { cancellationId, orders } = await seed();
+    const failing = {
+      ...writes,
+      updateStatus: (q: Parameters<DrizzleCancellationWrites['updateStatus']>[0]) => (q.status === 'REFUNDED' ? Promise.resolve(false) : writes.updateStatus(q)),
+    } as DrizzleCancellationWrites;
+    const refunds = new ApprovalRefunds(deps(orders, failing) as never);
+    const out = await refunds.execute(cancellationId, { kind: 'SYSTEM_FAULT_REFUND', orderId: cancellationId, amount: 11_000 });
+    expect(out.status).toBe('REFUND_PENDING');
+    expect((await cancelRow(cancellationId)).status).toBe('REFUND_PENDING');
+    expect((await cancelRow(cancellationId)).refund_due_at).not.toBeNull();
+    expect((await writes.dueRefunds(NOW, 10)).some((r) => r.cancellationId === cancellationId)).toBe(true);
+    // 뒤 시험의 실행기가 이 행을 집지 않게 끝낸다
+    await admin.pool.query("update order_cancellation set status = 'VOIDED' where id = $1", [cancellationId]);
   });
 });
 

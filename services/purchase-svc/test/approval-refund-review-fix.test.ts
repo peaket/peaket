@@ -19,6 +19,8 @@ const state = {
   createOutcome: { status: 'CREATED' } as { status: string },
   created: [] as Record<string, unknown>[],
   records: new Map<string, CancellationRecord & { approvalId?: string }>(),
+  updates: [] as { cancellationId: string; status: string }[],
+  failRefunded: false,
   entry: false,
 };
 const orders: CancellationOrders = {
@@ -48,7 +50,17 @@ const writes: CancellationWrites = {
     state.records.set(q.cancellationId, record);
     return { status: 'CREATED' };
   },
-  async updateStatus() {},
+  async updateStatus(q) {
+    state.updates.push({ cancellationId: q.cancellationId, status: q.status });
+    const record = state.records.get(q.cancellationId);
+    if (!record) return false;
+    if (q.status === 'REFUNDED') {
+      if (state.failRefunded || record.state !== 'REFUND_PENDING') return false;
+    }
+    if (q.status === 'VOIDED' && (record.state === 'REFUNDED' || record.state === 'VOIDED')) return false;
+    state.records.set(q.cancellationId, { ...record, state: q.status });
+    return true;
+  },
   async scheduleRefundRetry() {},
   async markRefundFailed() {},
   async markRefundAccountRequired() {},
@@ -102,6 +114,8 @@ beforeEach(() => {
   state.createOutcome = { status: 'CREATED' };
   state.created.length = 0;
   state.records.clear();
+  state.updates.length = 0;
+  state.failRefunded = false;
   state.entry = false;
 });
 
@@ -238,10 +252,30 @@ describe('IR-21 다중 티켓 기록', () => {
   test('IR-11 FLAGGED REFUND는 이미 있는 REQUESTED 취소 행을 그대로 환급한다', async () => {
     const existing = randomUUID();
     state.prior = [{ cancellationId: existing, orderId: state.view.orderId, ticketId: state.view.ticketId, refundAmount: PRICE, state: 'REQUESTED', refundAttempts: 0 }];
+    state.records.set(existing, state.prior[0]!);
     const out = await refunds.execute(approvalId(), { kind: 'SYSTEM_FAULT_REFUND', orderId: state.view.orderId, amount: PRICE });
     expect(out).toMatchObject({ status: 'REFUNDED', cancellationId: existing, refundAmount: PRICE });
     expect(state.paymentCalls).toEqual([{ amount: PRICE, cancellationId: existing }]);
     expect(state.created).toHaveLength(0);
+    expect(state.updates).toEqual([
+      { cancellationId: existing, status: 'REFUND_PENDING' },
+      { cancellationId: existing, status: 'REFUNDED' },
+    ]);
+    expect(state.records.get(existing)?.state).toBe('REFUNDED');
+  });
+
+  test('IR-11 REFUNDED 전이가 실패하면 승인은 REFUNDED가 아니라 REFUND_PENDING이고 행은 다시 집을 수 있다', async () => {
+    const existing = randomUUID();
+    state.prior = [{ cancellationId: existing, orderId: state.view.orderId, ticketId: state.view.ticketId, refundAmount: PRICE, state: 'REQUESTED', refundAttempts: 0 }];
+    state.records.set(existing, state.prior[0]!);
+    state.failRefunded = true;
+    const out = await refunds.execute(approvalId(), { kind: 'SYSTEM_FAULT_REFUND', orderId: existing, amount: PRICE });
+    expect(out.status).toBe('REFUND_PENDING');
+    expect(state.records.get(existing)?.state).toBe('REFUND_PENDING');
+    expect(state.updates).toEqual([
+      { cancellationId: existing, status: 'REFUND_PENDING' },
+      { cancellationId: existing, status: 'REFUNDED' },
+    ]);
   });
 
   test('IR-11 취소가 둘일 때 지정한 취소 ID 하나만 환급한다', async () => {

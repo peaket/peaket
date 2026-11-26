@@ -15,13 +15,14 @@ const state = {
   kind: 'FLAGGED' as string,
   targetRef: CANCELLATION,
   basis: { orderId: ORDER, refundableAmount: 33_333, entryRecorded: true, issueGeneration: 4, eventId: randomUUID() } as
-    | { orderId: string; refundableAmount: number; entryRecorded: boolean; issueGeneration?: number; eventId?: string }
+    | { orderId: string; refundableAmount: number; entryRecorded: boolean; issueGeneration?: number; eventId?: string; cancellationState?: string; ticketIds?: string[] }
     | undefined,
   requests: [] as Record<string, unknown>[],
   voidCalls: [] as Record<string, unknown>[],
   cancellationVoids: [] as string[],
   resolved: [] as string[],
   voidResult: { voided: 2, alreadyEntered: 1 },
+  voidCancellationResult: true,
 };
 
 const lifecycle = {
@@ -41,6 +42,7 @@ const lifecycle = {
   },
   async voidCancellation(cancellationId: string) {
     state.cancellationVoids.push(cancellationId);
+    return state.voidCancellationResult;
   },
 };
 
@@ -65,6 +67,7 @@ const reset = () => {
   state.cancellationVoids.length = 0;
   state.resolved.length = 0;
   state.voidResult = { voided: 2, alreadyEntered: 1 };
+  state.voidCancellationResult = true;
 };
 
 describe('IR-11 FLAGGED REFUND는 취소 ID를 주문 ID로 풀어 실제 남은 환급액으로 승인한다', () => {
@@ -101,6 +104,22 @@ describe('IR-30 FLAGGED VOID는 입장 기록이 있을 때만 티켓을 무효�
     expect(state.voidCalls).toEqual([{ orderId: ORDER, reason: 'FLAGGED_VOID', issueGeneration: 4, eventId: expect.any(String) }]);
     expect(state.cancellationVoids).toEqual([CANCELLATION]);
     expect(state.resolved).toHaveLength(1);
+  });
+
+  test('IR-30 취소 행 무효가 false면 409이고 CS 건을 닫지 않는다', async () => {
+    reset();
+    state.voidCancellationResult = false;
+    await expect(controller.cancellationDecision(CASE, { decision: 'VOID', reason: '무효' }, me as never)).rejects.toMatchObject({ status: 409 });
+    expect(state.cancellationVoids).toEqual([CANCELLATION]);
+    expect(state.resolved).toHaveLength(0);
+  });
+
+  test('IR-30 취소 행이 이미 REFUNDED면 티켓을 무효로 하지 않고 409다', async () => {
+    reset();
+    state.basis = { orderId: ORDER, refundableAmount: 33_333, entryRecorded: true, issueGeneration: 4, cancellationState: 'REFUNDED' };
+    await expect(controller.cancellationDecision(CASE, { decision: 'VOID', reason: '무효' }, me as never)).rejects.toMatchObject({ status: 409 });
+    expect(state.voidCalls).toHaveLength(0);
+    expect(state.resolved).toHaveLength(0);
   });
 
   test('IR-30 ticket-svc가 입장 기록을 0으로 답하면 409이고 CS 건을 닫지 않는다', async () => {

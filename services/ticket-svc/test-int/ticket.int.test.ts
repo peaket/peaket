@@ -713,6 +713,29 @@ describe('F-06-3 IR-30 취소 무효의 DB 경계', () => {
     );
   const statusOf = async (ticketId: string) => (await database.pool.query('select status from ticket where id = $1', [ticketId])).rows[0] as { status: string };
 
+  test('지정한 티켓만 무효로 하고 같은 주문의 다른 티켓은 남긴다', async () => {
+    const orderId = randomUUID();
+    const eventId = randomUUID();
+    const issued = await service.issue({ orderId, eventId, payerAccountId: ACCOUNT, seatIds: [randomUUID(), randomUUID()], issueGeneration: 1 });
+    const [first, second] = issued.tickets.map((t) => t.ticketId);
+    await scan(eventId, first!);
+    expect(await service.voidOrderTickets({ orderId, eventId, issueGeneration: 1, ticketIds: [first!] } as never)).toEqual({ voided: 1, alreadyEntered: 1 });
+    expect((await statusOf(first!)).status).toBe('VOIDED');
+    expect((await statusOf(second!)).status).toBe('ISSUED');
+  });
+
+  test('지정한 REFUNDED 티켓은 VOIDED로 끝내고 다른 REFUNDED 티켓은 건드리지 않는다', async () => {
+    const orderId = randomUUID();
+    const eventId = randomUUID();
+    const issued = await service.issue({ orderId, eventId, payerAccountId: ACCOUNT, seatIds: [randomUUID(), randomUUID()], issueGeneration: 1 });
+    const [first, second] = issued.tickets.map((t) => t.ticketId);
+    await database.pool.query("update ticket set status = 'REFUNDED' where id = any($1::uuid[])", [[first!, second!]]);
+    await scan(eventId, first!);
+    expect(await service.voidOrderTickets({ orderId, eventId, issueGeneration: 1, ticketIds: [first!] } as never)).toEqual({ voided: 1, alreadyEntered: 1 });
+    expect((await statusOf(first!)).status).toBe('VOIDED');
+    expect((await statusOf(second!)).status).toBe('REFUNDED');
+  });
+
   test('요청한 발권 세대 이하만 VOIDED로 바꾸고 REFUNDED는 덮지 않는다', async () => {
     const orderId = randomUUID();
     const eventId = randomUUID();

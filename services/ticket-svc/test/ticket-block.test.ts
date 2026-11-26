@@ -70,8 +70,10 @@ const issue = (orderId: string, over: Record<string, unknown> = {}) =>
     client.IssueTickets({ order_id: orderId, event_id: EVENT, payer_account_id: ACCOUNT, seat_ids: [SEAT_A, SEAT_B], issue_generation: 0, ...over }, purchaseMetadata(), {}, cb),
   );
 
-const voidTickets = (orderId: string, issueGeneration = 0) =>
-  call<{ voided: number; already_entered: number }>((cb) => client.VoidTickets({ order_id: orderId, event_id: EVENT, issue_generation: issueGeneration }, opsMetadata(), {}, cb));
+const voidTickets = (orderId: string, issueGeneration = 0, ticketIds?: string[]) =>
+  call<{ voided: number; already_entered: number }>((cb) =>
+    client.VoidTickets({ order_id: orderId, event_id: EVENT, issue_generation: issueGeneration, ...(ticketIds ? { ticket_ids: ticketIds } : {}) }, opsMetadata(), {}, cb),
+  );
 
 const block = (orderId: string, reason = 'EVENT_CANCELLED') =>
   call<{ already_entered: number }>((cb) => client.BlockTicketIssuance({ order_id: orderId, reason }, purchaseMetadata(), {}, cb));
@@ -208,6 +210,27 @@ describe('BlockTicketIssuance 단위 계약 [HOT-161] [P-T15] [P-T39 ③]', () =
     const out = await voidTickets(orderId, 1);
     expect(out).toEqual({ voided: 0, already_entered: 1 });
     expect(store.tickets.get(target)?.status).toBe('REFUNDED');
+  });
+
+  test('IR-30 지정한 티켓만 무효로 하고 같은 주문의 다른 티켓은 남긴다', async () => {
+    const orderId = '0190f3a1-7c2e-7a00-8000-000000000128';
+    const issued = await issue(orderId);
+    const [first, second] = issued.tickets.map((t) => t.ticket_id);
+    store.recordEntry(first!);
+    expect(await voidTickets(orderId, 1, [first!])).toEqual({ voided: 1, already_entered: 1 });
+    expect(store.tickets.get(first!)?.status).toBe('VOIDED');
+    expect(store.tickets.get(second!)?.status).toBe('ISSUED');
+  });
+
+  test('IR-30 지정한 REFUNDED 티켓은 VOIDED로 끝낼 수 있다', async () => {
+    const orderId = '0190f3a1-7c2e-7a00-8000-000000000129';
+    const issued = await issue(orderId);
+    const [first, second] = issued.tickets.map((t) => t.ticket_id);
+    store.tickets.set(first!, { ...store.tickets.get(first!)!, status: 'REFUNDED' });
+    store.recordEntry(first!);
+    expect(await voidTickets(orderId, 1, [first!])).toEqual({ voided: 1, already_entered: 1 });
+    expect(store.tickets.get(first!)?.status).toBe('VOIDED');
+    expect(store.tickets.get(second!)?.status).toBe('ISSUED');
   });
 
   test('IR-30 VoidTickets는 ops-svc(입장 기록 필요)와 purchase-svc(입금 오류 되돌림)만 받는다', async () => {
