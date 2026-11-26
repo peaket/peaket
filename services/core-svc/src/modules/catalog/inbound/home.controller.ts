@@ -29,6 +29,8 @@ export class HomeController {
   async get(@Res({ passthrough: true }) reply: FastifyReply) {
     const body = await this.home.get();
     void reply.header('cache-control', HOME_CACHE);
+    // CDN 태그 무효화는 원본이 태그 머리를 실은 응답에만 걸린다(docs/infra.md §4.1). 200 JSON에만 싣는다.
+    void reply.header('x-peaket-cache-tag', 'home');
     return body;
   }
 }
