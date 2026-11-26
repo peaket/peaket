@@ -189,7 +189,7 @@ flowchart LR
 - 복사 방식 하나로 만든다(추천 적용 2026-10-28, 기술 검토 낮음-049). 메인 스레드가 프레임마다 재생 시각·재생 상태·필터 판 번호를 세 Worker에 메시지로 보내고, 큰 버퍼는 `Transferable`(복사하지 않고 소유권을 넘기는 방식)로 넘긴다. 교차 출처 격리가 있든 없든 같은 길이라, 공개 위치의 응답 헤더에 기대지 않는다.
 - **더할 조건**: FX-T5(기준 기기)와 FX-T6에서 필터 반영 p95 50ms나 재생 프레임 p95 20ms [가정](§7.1)을 이 방식으로 못 맞추고, 원인이 메시지 전달로 확인될 때만 공유 시계를 더한다. 공유 시계는 `SharedArrayBuffer` 위의 `Int32Array`(재생 시각 ms, 재생 상태, 필터 판 번호)를 세 Worker가 함께 읽고 `Atomics.notify`로 깨우는 방식이다. 더해도 교차 출처 격리(`crossOriginIsolated`가 참)인 곳에서만 켜고, 그 밖에서는 복사 방식으로 돈다.
 - 좌석맵 공용 패키지(`packages/seatmap`)도 공유 메모리를 쓰지 않는 메시지 한 길이다(기술 검토 중간-015, docs/frontend.md §5.2).
-- **후보 패널의 Worker(추천 적용 2026-11-27, F-04-18)**: 후보 점·기기 묶음·영역 집계는 데이터 Worker가 계산한다. 메인 스레드는 `{kind: 'candidate', version, columns, keep, source}`를 `Transferable`로 보내고, Worker는 `{kind: 'candidate-done', version, points, sessions, bots, totalBots, sampled}`만 돌려준다. 메시지는 정해진 종류와 판 번호가 아니면 버린다(ASVS 3.5.5). 공유 시계는 이번 동결 로컬 구현에서 더하지 않는다. FX-T5에서 복사 방식이 §7.1 목표를 못 맞추고 원인이 메시지 전달로 확인될 때만 위 '더할 조건'대로 더한다(측정 미실행).
+- **후보 패널의 Worker(추천 적용 2026-11-27, F-04-18)**: 후보 점·기기 묶음·영역 집계는 데이터 Worker가 계산한다. 메인 스레드는 후보 계산에 쓰는 열의 **복사본**과 `keep` 복사본을 `{kind: 'candidate', version, source, columns, keep}`로 전송 목록에 넘기고, 메인의 좌석 재생용 원본 열은 그대로 둔다. Worker는 `{kind: 'candidate-done', version, panel, points, sessions, bots, totalSessions, totalBots, bursts, histogram}`만 돌려준다. `points`는 점마다 x·y 두 값이고 `sessions` 길이의 두 배다. 메시지는 정해진 종류·판 번호·형이 아니면 버린다(ASVS 3.5.5). 고른 세션의 좌석 점등은 메인이 원본 열로 `seatsOfSessions`를 불러 계산한다. 공유 시계는 이번 동결 로컬 구현에서 더하지 않는다. FX-T5에서 복사 방식이 §7.1 목표를 못 맞추고 원인이 메시지 전달로 확인될 때만 위 '더할 조건'대로 더한다(측정 미실행).
 
 ### 3.4 좌석 상태 재구성
 

@@ -2,6 +2,7 @@
 // 구현 전에는 candidate.ts가 없어 모든 시험이 단언으로 실패한다(architecture §8.6 4의 3·7).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import {
   EVENT_KIND,
   NO_SEAT,
@@ -12,12 +13,9 @@ import { defaultParams, generateScenario } from '../forensics/scenario.ts';
 import { baselineRows, stageBands } from './table.ts';
 
 async function load() {
-  try {
-    return await import('./candidate.ts');
-  } catch (error) {
-    if (error?.code === 'ERR_MODULE_NOT_FOUND') return null;
-    throw error;
-  }
+  const path = new URL('./candidate.ts', import.meta.url);
+  if (!existsSync(path)) return null;
+  return await import('./candidate.ts');
 }
 
 const candidate = await load();
@@ -74,10 +72,30 @@ test('FX-T9 ① 원천마다 후보 패널의 종류·고정 문구가 다르고
   const panelKind = need('candidatePanelKind');
   const notice = need('candidateNotice');
   const precision = need('precisionNotice');
+  const sectionsOf = need('panelSections');
 
   assert.equal(panelKind('SYNTHETIC'), 'scatter');
   assert.equal(panelKind('RESEARCH'), 'distribution');
   assert.equal(panelKind('INVESTIGATION'), 'baseline');
+
+  assert.deepEqual(sectionsOf('SYNTHETIC'), {
+    precision: true,
+    deviceGroups: true,
+    histogram: false,
+    baseline: false,
+  });
+  assert.deepEqual(sectionsOf('RESEARCH'), {
+    precision: false,
+    deviceGroups: false,
+    histogram: true,
+    baseline: false,
+  });
+  assert.deepEqual(sectionsOf('INVESTIGATION'), {
+    precision: false,
+    deviceGroups: true,
+    histogram: false,
+    baseline: true,
+  });
 
   const pol046 = '후보 찾기용입니다. 조치는 사건 작업대에서 소명과 승인을 거쳐 합니다(POL-046).';
   const pol006 = '후보 찾기용입니다. 봇 판정은 표본 검토(SCR-067)와 정해진 규칙(POL-006)으로 합니다.';
@@ -126,6 +144,12 @@ test('FX-T9 ② 합성 정답 기준 정밀도·재현율을 영역 안 세션�
   assert.equal(second.bots, 3);
   assert.equal(second.precision, 0.6);
   assert.equal(second.recall, 1);
+
+  // 재현율 분모는 호출자가 넘긴 값이어야 한다. 점의 봇 수와 다르게 넘겨 인자 무시를 잡는다.
+  const shifted = selectionStats(points, all, totalBots + 2);
+  assert.equal(shifted.sessions, 5);
+  assert.equal(shifted.bots, 3);
+  nearly(shifted.recall, 3 / 5, '바뀐 분모의 재현율');
 
   // 반열림: x0·y0는 들고 x1·y1은 뺀다.
   const edge = { x0: 50, x1: 80, y0: 0.1, y1: 0.2 };
@@ -307,6 +331,9 @@ test('FX-T9 ⑤ 후보 영역의 세션 좌석만 점등하고 기기 묶음은 
       { deviceGroup: 10, sessions: 1, attempts: 2, firstAtMs: 4_000, lastAtMs: 4_010 },
     ],
   );
+  // 기본 창은 10ms다.
+  assert.deepEqual(burstsOf(columns, keep), burstsOf(columns, keep, 10));
+  assert.deepEqual(burstsOf(columns, keep, 9).map((b) => b.deviceGroup), [7]);
 
   // 두 번째 행을 버리면 묶음 10은 짝이 없어 사라진다.
   const dropped = keepAll(columns.t_ms.length);
@@ -330,8 +357,10 @@ test('FX-T9 ⑥ 연구 원천은 한 축 24칸 분포로 그리고 첫·마지�
     { session: 7, firstHoldMs: 10_000, entropy: null, botTier: 0, deviceGroup: 0, member: false },
     { session: 8, firstHoldMs: 20_000, entropy: null, botTier: 0, deviceGroup: 0, member: false },
     { session: 9, firstHoldMs: 0, entropy: null, botTier: 0, deviceGroup: 0, member: false },
+    { session: 10, firstHoldMs: Number.NaN, entropy: null, botTier: 0, deviceGroup: 0, member: false },
   ];
-  const histogram = histogramOf(points, 10, 10_000, 24);
+  // 기본값 10ms·10s·24칸을 쓴다.
+  const histogram = histogramOf(points);
   assert.equal(histogram.bins.length, 24);
   assert.equal(histogram.edges.length, 25);
   assert.equal(histogram.minMs, 10);
@@ -347,16 +376,66 @@ test('FX-T9 ⑥ 연구 원천은 한 축 24칸 분포로 그리고 첫·마지�
   assert.equal(histogram.bins.reduce((sum, n) => sum + n, 0), 8);
 });
 
-test('FX-T9 ⑦ 후보 모델은 원천별 패널 종류와 세션·봇·기기 묶음 수를 함께 낸다', () => {
+test('FX-T9 ⑦⑧ 한 세션의 여러 행을 하나로 합치고, 마스크·표 값이 같은 모델에서 나온다', () => {
+  const sessionPoints = need('sessionPoints');
+  const maskToKeep = need('maskToKeep');
   const modelOf = need('candidateModel');
-  const syntheticRows = [
+  const tableRows = need('candidateTableRows');
+  const histRows = need('histogramRows');
+
+  // 같은 세션의 여러 행: 가장 이른 first_hold, 첫 유한 entropy, 가장 큰 botTier,
+  // 첫 0 아닌 deviceGroup, member는 하나라도 1이면 참. 세션 번호 오름차순.
+  const rows = [
+    { t_ms: 0, kind: EVENT_KIND.HOLD_TRY, session: 9, first_hold_ms: 500, entropy: 0.4, bot_tier: 1, device_group: 0, member: 0 },
+    { t_ms: 1, kind: EVENT_KIND.ADMIT, session: 2, first_hold_ms: 300, entropy: 0.3, bot_tier: 0, device_group: 5, member: 1 },
+    { t_ms: 2, kind: EVENT_KIND.HOLD_TRY, session: 9, first_hold_ms: 200, entropy: Number.NaN, bot_tier: 3, device_group: 7, member: 1 },
+  ];
+  const points = sessionPoints(build(rows), keepAll(rows.length));
+  assert.deepEqual(points, [
+    { session: 2, firstHoldMs: 300, entropy: 0.3, botTier: 0, deviceGroup: 5, member: true },
+    { session: 9, firstHoldMs: 200, entropy: 0.4, botTier: 3, deviceGroup: 7, member: true },
+  ]);
+
+  // 교차 필터 마스크 → keep 배열.
+  const mask = new Uint32Array(2);
+  mask[0] = 0b101;
+  mask[1] = 1;
+  const keep = maskToKeep(mask, 33);
+  assert.equal(keep.length, 33);
+  assert.equal(keep[0], 1);
+  assert.equal(keep[1], 0);
+  assert.equal(keep[2], 1);
+  assert.equal(keep[32], 1);
+  assert.equal(keep.reduce((sum, v) => sum + v, 0), 3);
+  assert.equal(maskToKeep(mask, 2).length, 2);
+
+  // 표 값은 같은 모델·집계에서 나온다.
+  const modelRows = [
     admit(1, 50, 0.1, { bot_tier: 3, device_group: 7 }),
     admit(2, 80, 0.2, { device_group: 7 }),
     { t_ms: 10, kind: EVENT_KIND.HOLD_TRY, session: 1, seat: 1, device_group: 7 },
     { t_ms: 15, kind: EVENT_KIND.HOLD_TRY, session: 2, seat: 2, device_group: 7 },
-    admit(3, 0, 0.5, { bot_tier: 1 }),
   ];
-  const synthetic = modelOf(build(syntheticRows), keepAll(syntheticRows.length), 'SYNTHETIC');
+  const model = modelOf(build(modelRows), keepAll(modelRows.length), 'SYNTHETIC');
+  assert.deepEqual(
+    tableRows(model, { sessions: 2, bots: 1, precision: 0.5, recall: 1 }),
+    [
+      { label: '세션', value: 2 },
+      { label: '봇 세션', value: 1 },
+      { label: '기기 묶음', value: 1 },
+      { label: '고른 세션', value: 2 },
+      { label: '정밀도', value: 0.5 },
+      { label: '재현율', value: 1 },
+    ],
+  );
+  const histogram = { bins: [2, 3], edges: [10, 100, 1_000], minMs: 10, maxMs: 1_000 };
+  assert.deepEqual(histRows(histogram), [
+    { fromMs: 10, toMs: 100, sessions: 2 },
+    { fromMs: 100, toMs: 1_000, sessions: 3 },
+  ]);
+
+  // 원천별 모델 요약: 합성은 점, 연구는 분포, 조사는 기준선(점 없음).
+  const synthetic = modelOf(build(modelRows), keepAll(modelRows.length), 'SYNTHETIC');
   assert.equal(synthetic.kind, 'scatter');
   assert.equal(synthetic.points.length, 2);
   assert.equal(synthetic.totalSessions, 2);
@@ -392,8 +471,8 @@ test('FX-T9 ⑦ 후보 모델은 원천별 패널 종류와 세션·봇·기기 
   assert.equal(investigation.bursts.length, 1);
 
   // keep=0은 모델의 어느 값에도 들어가지 않는다.
-  const keep = keepAll(investigationRows.length);
-  keep[1] = 0;
-  const dropped = modelOf(build(investigationRows), keep, 'INVESTIGATION');
+  const keepDropped = keepAll(investigationRows.length);
+  keepDropped[1] = 0;
+  const dropped = modelOf(build(investigationRows), keepDropped, 'INVESTIGATION');
   assert.deepEqual(dropped.bursts, []);
 });
