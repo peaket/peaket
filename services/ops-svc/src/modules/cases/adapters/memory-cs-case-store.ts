@@ -113,9 +113,9 @@ export class MemoryCsCaseStore implements CsCaseStore, CsAppealStore {
   async update(next: CsCase, expectedVersion: number, audit?: AuditRecord): Promise<boolean> {
     const cur = this.cases.get(next.caseId);
     if (!cur || cur.version !== expectedVersion) return false;
-    // 감사가 실패하면 상태도 바꾸지 않는다(DB 저장소의 한 트랜잭션과 같다)
-    if (audit) await this.audit?.append(audit);
+    // 판 검사와 쓰기를 먼저 끝낸다(감사 append의 await 사이에 다른 결정이 같은 판을 쓰지 않게)
     this.cases.set(next.caseId, next);
+    if (audit) await this.audit?.append(audit);
     return true;
   }
 

@@ -34,6 +34,11 @@ export interface FraudAppealClient {
   send(i: { caseId: string; appealId: string; accountId: string; party: 'PAYER' | 'HOLDER'; submittedAtMs: number }): Promise<{ result: 'ACCEPTED' | 'EXPIRED' | 'NOT_TARGET' | 'RETRY' }>;
 }
 
+/** FRAUD_CASE 소명이 대상 아님·기한 경과로 닫힐 때 ops CS 건·보류를 닫게 알린다(IR-07) */
+export interface AppealCaseSink {
+  invalid(i: { appealId: string; reason: string }): Promise<void>;
+}
+
 export interface FanNotifier {
   send(i: { appealId: string; accountId: string; event: 'INVALID' | 'DECIDED'; result?: string }): Promise<void>;
 }

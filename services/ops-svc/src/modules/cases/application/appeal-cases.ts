@@ -42,6 +42,17 @@ export class AppealCases {
     }
   }
 
+  /** core가 FRAUD_CASE 소명을 대상 아님·기한 경과로 닫았을 때 건과 보류를 닫는다(IR-07). 이미 닫혔으면 false. */
+  async invalidFromCore(appealId: string, note: string, nowMs: number): Promise<boolean> {
+    const c = await this.d.store.findOpen('APPEAL', appealId);
+    if (!c) return false;
+    const src = await this.d.restrictions.appeals?.read(appealId);
+    if (src) await this.d.restrictions.holds?.set({ accountId: src.accountId, caseId: c.caseId, kind: 'APPEAL', state: 'CLOSED', version: 2 });
+    const next: CsCase = { ...c, status: 'RESOLVED', resultNote: note, resolvedAtMs: nowMs, updatedAtMs: nowMs, version: c.version + 1 };
+    await this.d.store.update(next, c.version, caseUpdateAudit(c, next, { accountId: 'system', role: 'system' }, nowMs));
+    return true;
+  }
+
   async #invalid(c: CsCase, nowMs: number, note: string, reason: string): Promise<void> {
     const src = await this.d.restrictions.appeals?.read(c.targetRef);
     if (!src) return;

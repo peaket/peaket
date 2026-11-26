@@ -30,6 +30,8 @@ import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
 import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts/index.js';
 import { ApprovalLifecycle, HttpApprovalLifecyclePorts, LogApprovalAlerts, LogApprovalNotifier, TicketReclaimClient } from './modules/approvals/index.js';
 import { ApprovalTickJob } from './jobs/approval-tick.js';
+import { RestrictionMaintenanceJob } from './jobs/restriction-maintenance.js';
+import { RESTRICTION_KIT, type RestrictionKit } from './modules/restrictions/index.js';
 import { PromBotReviewSignals } from './modules/bot-review/index.js';
 import { botReviewLabelsFromEnv, botReviewSourceFromEnv } from './bot-review-wiring.js';
 import { realtimeTableFromEnv } from './rt-wiring.js';
@@ -266,6 +268,9 @@ const approvalLifecycle = service.app.get(ApprovalLifecycle);
 approvalLifecycle.configure({ notifier: new LogApprovalNotifier(service.logger), alerts: new LogApprovalAlerts(service.logger) });
 const approvalTick = new ApprovalTickJob(approvalLifecycle, service.logger);
 approvalTick.start();
+// 예매 제한 10분 정비·다시 보내기(IR-02). 1분마다 실패 사본·EXPIRED를 보고, 같은 판 재전송은 엔진이 10분 간격으로 가둔다
+const restrictionMaintenance = new RestrictionMaintenanceJob(service.app.get<RestrictionKit>(RESTRICTION_KIT), service.logger);
+restrictionMaintenance.start();
 
 let consumers: OpsConsumers | undefined;
 try {
@@ -296,6 +301,7 @@ try {
 process.once('SIGTERM', () => {
   if (coreApplyTimer) clearInterval(coreApplyTimer);
   approvalTick.stop();
+  restrictionMaintenance.stop();
   void (async () => {
     try {
       await consumers?.stop();

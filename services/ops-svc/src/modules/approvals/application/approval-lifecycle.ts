@@ -213,7 +213,7 @@ export class ApprovalLifecycle {
       this.#assertIfMatch(r, ifMatch);
       const nowMs = this.d.clock.now();
       if (r.status === 'EXPIRED') throw new ApprovalLifecycleProblem('approval-expired', 409, '기한이 지난 승인 업무입니다');
-      if (r.status === 'PENDING_APPROVAL' || r.status === 'ESCALATED') {
+      if (r.status === 'PENDING_APPROVAL' || r.status === 'ESCALATED' || r.status === 'FAILED') {
         const changed = await this.#targetChanged(r, nowMs);
         if (changed) {
           await this.#expire(r, 'TARGET_CHANGED', nowMs);
@@ -224,7 +224,7 @@ export class ApprovalLifecycle {
           throw new ApprovalLifecycleProblem('approval-expired', 409, '기한이 지난 승인 업무입니다');
         }
         if (r.kind === 'TRANSFER_RECLAIM' && r.appealNotBefore && nowMs < r.appealNotBefore.getTime()) throw new ApprovalLifecycleProblem('reclaim-appeal-window', 409, '소명 기한 전에는 승인할 수 없습니다');
-      } else if (r.status !== 'FAILED') {
+      } else {
         throw new ApprovalLifecycleProblem('approval-not-pending', 409, '승인 대기 중인 업무가 아닙니다');
       }
       if (r.requesterId === actor.accountId) {

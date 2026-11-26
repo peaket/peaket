@@ -16,6 +16,7 @@ import { VerificationAppealDecision } from './application/verification-appeal-de
 import { VerificationAppealDetail } from './application/verification-appeal-detail.js';
 import { weekendOnlyCalendar, type BusinessCalendar } from './domain/business-calendar.js';
 import type { CsAssigneeDirectory, CsCaseDetailReader, CsCaseKind, CsCaseSignals, CsCaseStore } from './domain/cs-case.js';
+import { CS_CASE_KIT } from './domain/cs-case.js';
 import { CS_CASE_DISPATCH_TICK_MS, type CsAppealPorts, type CsAppealStore } from './domain/verification-appeal.js';
 import { CasesController } from './inbound/cases.controller.js';
 import { OpsCasesController } from './inbound/ops-cases.controller.js';
@@ -77,7 +78,6 @@ export interface CasesModuleOptions {
   readonly restrictions?: import('../restrictions/index.js').OpsRestrictionsWiring;
 }
 
-const CS_CASE_KIT = Symbol.for('peaket.ops.cs-case-kit');
 const CS_CASE_BACKGROUND = Symbol.for('peaket.ops.cs-case-background');
 const CS_CASE_DISPATCH_BACKGROUND = Symbol.for('peaket.ops.cs-case-dispatch-background');
 

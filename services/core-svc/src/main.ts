@@ -7,6 +7,7 @@ import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, crea
 import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import { supportPortsFromEnv } from './support-wiring.js';
+import { AppealDispatchJob } from './jobs/appeal-dispatch.js';
 import type { CoreConsumers } from './consumers/start.js';
 import {
   CompositeSaleConfigStore,
@@ -281,6 +282,9 @@ const searchTimers = new SearchReadModelTimers({
 const { startServiceControlSync } = await import('@peaket/platform/stream-worker');
 const controlSync = startServiceControlSync(service, process.env);
 await service.listen();
+// FRAUD_CASE 소명 보내기(IR-03): 1분마다 SUBMITTED·RETRY를 ops F-04-13 입구로 보낸다
+const appealDispatch = new AppealDispatchJob({ dispatchOnce: (nowMs) => supportKit.dispatchOnce(nowMs ?? Date.now()) }, service.logger);
+appealDispatch.start();
 // 시작 따라잡기(ADR-0271 결정 12) → 사전 첫 읽기 → 주기 일. 둘 다 준비 확인에 넣지 않는다: 그동안 /ready는 200이고 검색은 표에 있는 줄로, 자동완성은 빈 후보·no-store로 답한다(결정 14)
 await searchTimers.start();
 
@@ -340,6 +344,7 @@ function shutdown(): Promise<void> {
   closing ??= (async () => {
     webhookWorker?.stop();
     fanNotifyWorker?.stop();
+    appealDispatch.stop();
     searchTimers.stop();
     // Kafka 소비자를 먼저 멈춘다(받기를 멈추고 처리 중인 키를 마친 뒤 커밋). 실패해도 나머지는 그대로 끝낸다
     await consumers?.stop().catch((err: unknown) => service.logger.error({ dep: 'kafka', err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)'));

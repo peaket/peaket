@@ -2,13 +2,15 @@
 // staging·prod는 둘 다 없으면 변수 이름을 말하며 던진다. local·ci·demo는 칸이 빈다.
 // 시험 조립(support-main-wiring)이 5초 안에 읽도록 무거운 모듈(지원 모듈·플랫폼) 없이 어댑터만 가져온다.
 import { HttpFraudAppealClient, type HttpFraudAppealOptions } from './modules/support/adapters/http-fraud-appeals.js';
+import { HttpAppealCaseSink } from './modules/support/adapters/http-appeal-case-sink.js';
 import { MemoryFraudAppealViewStore, MemoryRestrictionViewStore } from './modules/support/adapters/memory-support.js';
-import type { AppealStore, FanNotifier, FraudAppealClient, FraudAppealViewStore, RestrictionViewStore } from './modules/support/domain/ports.js';
+import type { AppealCaseSink, AppealStore, FanNotifier, FraudAppealClient, FraudAppealViewStore, RestrictionViewStore } from './modules/support/domain/ports.js';
 
 export interface SupportWiring {
   readonly store?: AppealStore;
   readonly views?: { readonly restriction?: RestrictionViewStore; readonly fraud?: FraudAppealViewStore };
   readonly fraudAppeals?: FraudAppealClient | HttpFraudAppealOptions;
+  readonly caseSink?: AppealCaseSink;
   readonly notifier?: FanNotifier;
 }
 export type SupportPortsWiring = SupportWiring & { close(): void };
@@ -36,8 +38,10 @@ export function supportPortsFromEnv(env: Record<string, string | undefined>): Su
   if (!ops && !redis) return { close() {} };
   const token = value(env, 'PEAKET_INTERNAL_TOKEN') ?? '';
   const fraudAppeals = ops ? new HttpFraudAppealClient({ url: ops, token, caller: 'core-svc' }) : undefined;
+  const caseSink = ops ? new HttpAppealCaseSink({ url: ops, token }) : undefined;
   return {
     ...(fraudAppeals ? { fraudAppeals } : {}),
+    ...(caseSink ? { caseSink } : {}),
     notifier: new LogFanNotifier(),
     // 실제 Redis 어댑터는 main.ts가 PEAKET_REDIS_URL로 연결해 덮는다(시험·기본은 메모리)
     views: { restriction: new MemoryRestrictionViewStore(), fraud: new MemoryFraudAppealViewStore() },

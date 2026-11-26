@@ -3,10 +3,11 @@ import { type DynamicModule, Global, Module } from '@nestjs/common';
 import type { UntypedServiceImplementation } from '@grpc/grpc-js';
 import { CLOCK, type Clock, type Database, INTERNAL_TOKEN } from '@peaket/platform';
 import { Appeals } from './application/appeals.js';
-import type { AppealStore, FanNotifier, FraudAppealClient, FraudAppealViewStore, RestrictionViewStore } from './domain/ports.js';
+import type { AppealCaseSink, AppealStore, FanNotifier, FraudAppealClient, FraudAppealViewStore, RestrictionViewStore } from './domain/ports.js';
 import { MemoryAppealStore, MemoryFraudAppealViewStore, MemoryRestrictionViewStore } from './adapters/memory-support.js';
 import { DrizzleAppealStore } from './adapters/db/drizzle-appeals.js';
 import { HttpFraudAppealClient, type HttpFraudAppealOptions } from './adapters/http-fraud-appeals.js';
+import { HttpAppealCaseSink } from './adapters/http-appeal-case-sink.js';
 import { SupportController } from './inbound/support.controller.js';
 import { InternalAppealsController } from './inbound/internal-appeals.controller.js';
 import { supportGrpcHandlers } from './inbound/support.grpc.js';
@@ -18,6 +19,7 @@ export interface SupportWiring {
   readonly views?: { readonly restriction?: RestrictionViewStore; readonly fraud?: FraudAppealViewStore };
   /** 이미 만든 클라이언트나 시작 조립이 읽은 주소 설정(시험 조립) */
   readonly fraudAppeals?: FraudAppealClient | HttpFraudAppealOptions;
+  readonly caseSink?: AppealCaseSink;
   readonly notifier?: FanNotifier;
 }
 
@@ -52,6 +54,7 @@ export class SupportModule {
       : wiring.fraudAppeals
         ? new HttpFraudAppealClient(wiring.fraudAppeals)
         : undefined;
+    const caseSink: AppealCaseSink | undefined = wiring.caseSink ?? (!isFraudClient(wiring.fraudAppeals) && wiring.fraudAppeals ? new HttpAppealCaseSink(wiring.fraudAppeals) : undefined);
     return {
       module: SupportModule,
       controllers: [SupportController, InternalAppealsController],
@@ -66,6 +69,7 @@ export class SupportModule {
               fraudViews,
               clock,
               ...(fraudAppeals ? { fraudAppeals } : {}),
+              ...(caseSink ? { caseSink } : {}),
               ...(wiring.notifier ? { notifier: wiring.notifier } : {}),
             }),
         },

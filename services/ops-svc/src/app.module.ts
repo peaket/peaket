@@ -271,6 +271,7 @@ export class AppModule {
       };
     }
     const chain = o.auditChain ?? new MemoryAuditChain();
+    if (restrictionStore instanceof MemoryBookingRestrictionStore) restrictionStore.useAudit(chain);
     const checkpoints = new AuditCheckpointService(o.auditCheckpoints ?? new MemoryAuditCheckpointStore(), chain, () => o.nowMs ?? Date.now());
     const store = new MemoryCommandStore(chain);
     const cancellations = new MemoryEventCancellationStore(chain);

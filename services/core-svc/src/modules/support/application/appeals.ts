@@ -3,13 +3,14 @@
 import { ProblemError } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
 import { APPEAL_BODY_MAX, bodyLength, dispatchRetryDelayMs, isAppealKind, normalizeBody, type AppealRow, type FraudAppealViewRow, type RestrictionViewRow } from '../domain/appeal.js';
-import type { AppealStore, FanNotifier, FraudAppealClient, FraudAppealViewStore, RestrictionViewStore } from '../domain/ports.js';
+import type { AppealCaseSink, AppealStore, FanNotifier, FraudAppealClient, FraudAppealViewStore, RestrictionViewStore } from '../domain/ports.js';
 
 export interface AppealsDeps {
   readonly store: AppealStore;
   readonly restrictionViews: RestrictionViewStore;
   readonly fraudViews: FraudAppealViewStore;
   readonly fraudAppeals?: FraudAppealClient;
+  readonly caseSink?: AppealCaseSink;
   readonly notifier?: FanNotifier;
   readonly clock: { now(): number };
 }
@@ -27,9 +28,13 @@ export class Appeals {
     const len = bodyLength(body);
     if (len < 1 || len > APPEAL_BODY_MAX) throw problem('invalid-body', 400, '소명 글은 1~2,000자입니다');
     const now = this.d.clock.now();
+    let dueBaseAt: string | undefined;
     if (input.kind === 'RESTRICTION') {
       const view = await this.d.restrictionViews.get(accountId, input.targetId);
       if (view && view.state === 'ACTIVE' && now >= view.appealDueAtMs) throw problem('appeal-deadline-passed', 409, '소명 기한이 지났습니다');
+    } else {
+      const view = await this.d.fraudViews.get(accountId, input.targetId);
+      if (view) dueBaseAt = iso(view.dueAtMs);
     }
     const row: AppealRow = {
       appealId: randomUUID(),
@@ -48,7 +53,7 @@ export class Appeals {
       nextDispatchAtMs: now,
       dispatchedAtMs: null,
     };
-    await this.d.store.saveAppeal(row, { eventKey: row.appealId, kind: 'APPEAL', sourceId: row.appealId, category: row.kind, createdAt: iso(now) });
+    await this.d.store.saveAppeal(row, { eventKey: row.appealId, kind: 'APPEAL', sourceId: row.appealId, category: row.kind, createdAt: iso(now), ...(dueBaseAt ? { dueBaseAt } : {}) });
     return this.#view(row);
   }
 
@@ -123,7 +128,9 @@ export class Appeals {
         await this.d.store.saveDispatch(row.appealId, { state: 'SENT', attempts: row.dispatchAttempts + 1, nextAtMs: null, dispatchedAtMs: nowMs });
         sent += 1;
       } else if (answer.result === 'EXPIRED' || answer.result === 'NOT_TARGET') {
-        await this.d.store.saveResult(row.appealId, { status: 'INVALID', resultNote: answer.result === 'EXPIRED' ? '기한 경과' : '대상 아님', decidedAtMs: nowMs });
+        const reason = answer.result === 'EXPIRED' ? '기한 경과' : '대상 아님';
+        await this.d.store.saveResult(row.appealId, { status: 'INVALID', resultNote: reason, decidedAtMs: nowMs });
+        try { await this.d.caseSink?.invalid({ appealId: row.appealId, reason }); } catch { /* ops 건 닫기는 다시 보낼 수 있게 삼킨다 */ }
         try { await this.d.notifier?.send({ appealId: row.appealId, accountId: row.accountId, event: 'INVALID' }); } catch { /* 알림 실패는 결과를 되돌리지 않는다 */ }
         invalid += 1;
       } else {
@@ -152,6 +159,12 @@ export class Appeals {
   }
 
   #fraudView(r: FraudAppealViewRow): Record<string, unknown> {
+    const actionResult =
+      r.party === 'HOLDER'
+        ? null
+        : r.actionResult ?? (r.cancelledTicketIds.length > 0 || r.restrictedUntilMs !== null
+            ? { cancelledTicketIds: r.cancelledTicketIds, restrictedUntil: r.restrictedUntilMs === null ? null : iso(r.restrictedUntilMs) }
+            : null);
     return {
       caseId: r.caseId,
       eventId: r.eventId,
@@ -163,7 +176,7 @@ export class Appeals {
       objectionDueAt: r.objectionDueAtMs === null ? null : iso(r.objectionDueAtMs),
       objectionStatus: r.objectionStatus,
       objectionNote: r.objectionNote,
-      actionResult: r.actionResult ?? null,
+      actionResult,
       priorityPurchases: r.priorityPurchases.map((p) => ({ grantId: p.grantId, seatLabel: p.seatLabel, price: p.price, expiresAt: iso(p.expiresAtMs), status: p.status })),
       lockExpiresAt: r.lockExpiresAtMs === null ? null : iso(r.lockExpiresAtMs),
       lockActive: r.lockActive,

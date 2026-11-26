@@ -65,7 +65,11 @@ export class HttpAppealSource implements AppealSource {
       body: JSON.stringify(r),
       timeoutCapMs: this.#deadlineMs,
     });
-    if (!res.ok && res.status !== 409) {
+    if (res.status === 409) {
+      const { ProblemError } = await import('@peaket/platform');
+      throw new ProblemError({ type: 'appeal-result-conflict', status: 409, title: '같은 소명에 다른 결과가 먼저 적혔습니다' });
+    }
+    if (!res.ok) {
       const { ProblemError } = await import('@peaket/platform');
       throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '소명 결과를 적지 못했습니다' });
     }

@@ -3,6 +3,7 @@
 import * as grpc from '@grpc/grpc-js';
 import { constantTimeEqual } from '@peaket/platform';
 import type { FraudAppealViewRow, RestrictionViewRow } from '../domain/appeal.js';
+import { redactFraudView } from '../domain/appeal.js';
 import type { FraudAppealViewStore, RestrictionViewStore } from '../domain/ports.js';
 import type { Metadata } from '@grpc/grpc-js';
 
@@ -111,7 +112,7 @@ export function supportGrpcHandlers(o: SupportGrpcOptions): grpc.UntypedServiceI
       priorityPurchases: priority,
       actionResult: null,
     };
-    o.fraudViews.apply(view).then((x) => cb(null, { changed: x.changed }), () => cb({ code: grpc.status.INTERNAL, details: '저장 실패' }));
+    o.fraudViews.apply(redactFraudView(view)).then((x) => cb(null, { changed: x.changed }), () => cb({ code: grpc.status.INTERNAL, details: '저장 실패' }));
   };
   return { SetBookingRestrictionView, SetFraudAppealView };
 }

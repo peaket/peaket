@@ -105,6 +105,8 @@ export function isCommanderOnlyCase(c: Pick<CsCase, 'kind' | 'category'>): boole
 }
 
 export const CS_CASE_STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED'] as const;
+/** CS 처리함 키트 토큰(모듈·시험·내부 컨트롤러가 같은 키를 쓴다) */
+export const CS_CASE_KIT = Symbol.for('peaket.ops.cs-case-kit');
 export type CsCaseStatus = (typeof CS_CASE_STATUSES)[number];
 
 /** 해결 메모 글자 수 상한(코드 포인트, data.md cs_case.result_note) */

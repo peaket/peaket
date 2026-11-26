@@ -1,7 +1,7 @@
 // 일반 남용 예매 제한의 집행·해제·정비(F-06-4, transfer-refund §7.2 T14, queue-admission §6).
 // 승인 업무 실행기(executors.restriction)와 CS 소명 판정이 같은 엔진을 쓴다. 사본이 아직 안 끝나면 PENDING으로 두고 다시 보낸다.
 import { ProblemError } from '@peaket/platform';
-import type { AuditChain } from '../../audit/audit.js';
+import type { AuditChain, AuditRecord } from '../../audit/audit.js';
 import { addOneYear, APPEAL_WINDOW_MS, copyRetryDelayMs, nextVersionOf, restrictionActiveAt, type RestrictionCopyInput, type RestrictionRow } from '../domain/booking-restriction.js';
 import type { BookingRestrictionStore, RestrictionClock, RestrictionCopies } from '../domain/ports.js';
 
@@ -29,6 +29,10 @@ export class BookingRestrictions {
   readonly #clock: RestrictionClock;
   readonly #audit?: AuditChain;
   #lastResyncMs = Number.NEGATIVE_INFINITY;
+
+  #auditRecord(recordType: string, row: RestrictionRow, nowMs: number): AuditRecord {
+    return { recordType, recordId: row.restrictionId, payload: { version: row.version, reasonCode: row.reasonCode }, nowMs };
+  }
 
   constructor(d: BookingRestrictionsDeps) {
     this.#store = d.store;
@@ -79,7 +83,7 @@ export class BookingRestrictions {
       return { status: 'PENDING' };
     }
     const applied: RestrictionRow = { ...row, deliveryDone: true, copyNextAtMs: null, copyAttempts: 0 };
-    await this.#store.update(applied);
+    await this.#store.update(applied, this.#auditRecord('RESTRICTION_APPLIED', row, nowMs));
     // 화면용 사본은 집행이 아니다. 실패해도 Done을 막지 않는다
     try {
       await this.#copies.view({ ...active, reasonCode: row.reasonCode, startsAtMs: row.startsAtMs, appealDueAtMs: row.appealDueAtMs });
@@ -87,7 +91,6 @@ export class BookingRestrictions {
       // 다음 정비가 다시 보낸다
     }
     this.#lastResyncMs = nowMs;
-    await this.#audit?.append({ recordType: 'RESTRICTION_APPLIED', recordId: row.restrictionId, payload: { version: row.version, reasonCode: row.reasonCode }, nowMs });
     return { status: 'DONE' };
   }
 
@@ -97,28 +100,54 @@ export class BookingRestrictions {
     if (!row) throw notFound();
     if (row.reasonCode === 'FRAUD') throw new ProblemError({ type: 'fraud-restriction-requires-approval', status: 403, title: '부정 예매 이용 제한은 승인 업무로만 풀 수 있습니다' });
     if (row.status === 'LIFTED') return row;
-    if (row.status === 'EXPIRED') throw new ProblemError({ type: 'case-action-not-applicable', status: 409, title: '이미 끝난 제한입니다' });
-    const input = { accountId: row.accountId, restrictionId: row.restrictionId, state: 'LIFTED' as const, version: row.version };
+    // 이미 끝난 제한은 풀 것이 없다. 소명 건은 닫을 수 있게 현재 행을 그대로 돌려준다
+    if (row.status === 'EXPIRED') return row;
+    const nextVersion = row.version + 1;
+    const input = { accountId: row.accountId, restrictionId: row.restrictionId, state: 'LIFTED' as const, version: nextVersion };
     try {
       await this.#copies.queue(input);
       await this.#copies.purchase(input);
     } catch {
       throw unavailable();
     }
-    const lifted: RestrictionRow = { ...row, status: 'LIFTED' };
-    await this.#store.update(lifted);
+    const lifted: RestrictionRow = { ...row, status: 'LIFTED', version: nextVersion };
+    await this.#store.update(lifted, this.#auditRecord('RESTRICTION_LIFTED', lifted, this.#clock.now()));
     try {
       await this.#copies.view({ ...input, reasonCode: row.reasonCode, startsAtMs: row.startsAtMs, appealDueAtMs: row.appealDueAtMs });
     } catch {
       // 화면용 사본 실패는 해제를 막지 않는다
     }
-    await this.#audit?.append({ recordType: 'RESTRICTION_LIFTED', recordId: row.restrictionId, payload: { version: row.version, reasonCode: row.reasonCode }, nowMs: this.#clock.now() });
     return lifted;
   }
 
+  /** 10분 정비·다시 보내기(IR-02). 끝난 행을 EXPIRED로, 실패한 사본을 다시, 잃은 사본을 같은 판으로 다시 세운다. */
+  async maintain(nowMs = this.#clock.now()): Promise<{ expired: number; retried: number; resent: number }> {
+    const expired = await this.expireDue(nowMs);
+    const retried = await this.retryPending(nowMs);
+    const resent = await this.resyncIfDue(nowMs);
+    return { expired, retried, resent };
+  }
+
+  /** 사본 보내기가 실패해 다음 시각이 된 ACTIVE 행을 같은 승인 ID로 다시 실행한다. */
+  async retryPending(nowMs = this.#clock.now()): Promise<number> {
+    let retried = 0;
+    for (const row of await this.#store.rows()) {
+      if (row.status !== 'ACTIVE' || row.deliveryDone || row.approvalId === null) continue;
+      if (row.copyNextAtMs === null || nowMs < row.copyNextAtMs) continue;
+      const result = await this.execute({
+        approvalId: row.approvalId,
+        targetRef: row.accountId,
+        reasonCode: row.reasonCode,
+        restrictionEndsAtMs: row.endsAtMs ?? addOneYear(nowMs),
+        approvedBy: row.confirmedBy,
+      });
+      if (result.status === 'DONE') retried += 1;
+    }
+    return retried;
+  }
+
   /** 끝이 지난 ACTIVE를 EXPIRED로 바꾼다(집행 사본은 끝 시각으로 판정하므로 지우지 않는다). */
-  async expireDue(): Promise<number> {
-    const nowMs = this.#clock.now();
+  async expireDue(nowMs = this.#clock.now()): Promise<number> {
     let expired = 0;
     for (const row of await this.#store.rows()) {
       if (row.status === 'ACTIVE' && !restrictionActiveAt(row, nowMs)) {
@@ -130,8 +159,7 @@ export class BookingRestrictions {
   }
 
   /** 10분마다 ACTIVE 행의 사본을 같은 판으로 다시 보낸다. 사본 저장소가 잃어도 다시 선다. */
-  async resyncIfDue(): Promise<number> {
-    const nowMs = this.#clock.now();
+  async resyncIfDue(nowMs = this.#clock.now()): Promise<number> {
     if (nowMs - this.#lastResyncMs < 600_000) return 0;
     this.#lastResyncMs = nowMs;
     let sent = 0;

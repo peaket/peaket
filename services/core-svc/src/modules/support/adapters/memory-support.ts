@@ -1,5 +1,5 @@
 // core-svc support 메모리 저장소·화면용 사본(단위 시험·개발).
-import type { AppealRow, CaseRequestedRow, FraudAppealViewRow, RestrictionViewRow } from '../domain/appeal.js';
+import { redactFraudView, type AppealRow, type CaseRequestedRow, type FraudAppealViewRow, type RestrictionViewRow } from '../domain/appeal.js';
 import type { AppealStore, FraudAppealViewStore, RestrictionViewStore } from '../domain/ports.js';
 
 export class MemoryAppealStore implements AppealStore {
@@ -96,24 +96,6 @@ export class MemoryRestrictionViewStore implements RestrictionViewStore {
   }
 }
 
-const sanitizeFraud = (i: FraudAppealViewRow): FraudAppealViewRow => ({
-  ...(i.party === 'HOLDER'
-    ? {
-        ...i,
-        reasonCategories: [],
-        lockedTicketIds: [],
-        priorityPurchases: [],
-        lockActive: false,
-        lockExpiresAtMs: null,
-        objectionDueAtMs: null,
-        objectionStatus: 'NONE' as const,
-        objectionNote: null,
-        restrictedUntilMs: null,
-      }
-    : i),
-  actionResult: i.actionResult ?? null,
-});
-
 export class MemoryFraudAppealViewStore implements FraudAppealViewStore {
   readonly rows = new Map<string, FraudAppealViewRow>();
   readonly #key = (accountId: string, caseId: string) => `${accountId}:${caseId}`;
@@ -122,17 +104,17 @@ export class MemoryFraudAppealViewStore implements FraudAppealViewStore {
     const key = this.#key(i.accountId, i.caseId);
     const cur = this.rows.get(key);
     if (cur && cur.version >= i.version) return { changed: false };
-    this.rows.set(key, sanitizeFraud(i));
+    this.rows.set(key, redactFraudView(i));
     return { changed: true };
   }
 
   async get(accountId: string, caseId: string): Promise<FraudAppealViewRow | undefined> {
     const r = this.rows.get(this.#key(accountId, caseId));
-    return r ? sanitizeFraud(r) : undefined;
+    return r ? redactFraudView(r) : undefined;
   }
 
   async list(accountId: string): Promise<FraudAppealViewRow[]> {
-    return [...this.rows.values()].filter((r) => r.accountId === accountId).map((r) => sanitizeFraud(r));
+    return [...this.rows.values()].filter((r) => r.accountId === accountId).map(redactFraudView);
   }
 
   async clear(): Promise<void> {

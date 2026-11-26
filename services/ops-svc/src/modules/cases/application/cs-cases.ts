@@ -185,8 +185,8 @@ export class CsCases {
   async update(actor: CsActor, caseId: string, ifMatch: string | undefined, body: CsCaseUpdateBody): Promise<{ view: CsCaseView; version: number }> {
     const c = await this.visible(actor, caseId);
     if (!canUpdate(actor, c)) throw notAllowed();
-    // 이의 건을 호출 없이 닫으면 대기표·라벨·병합 막기가 남는다(인정·기각은 결정 경로, bot-defense §12 '결정')
-    if (c.kind === 'VERIFICATION_APPEAL' && body.status === 'RESOLVED') throw problem('case-action-not-applicable', 409, '이 건 종류에는 이 처리가 없습니다');
+    // 이의·소명 건을 호출 없이 닫으면 대기표·라벨·병합 막기·제한 해제가 남는다(인정·기각은 결정 경로, bot-defense §12 '결정')
+    if ((c.kind === 'VERIFICATION_APPEAL' || c.kind === 'APPEAL') && body.status === 'RESOLVED') throw problem('case-action-not-applicable', 409, '이 건 종류에는 이 처리가 없습니다');
     const version = parseIfMatch(ifMatch);
     if (version === null) throw problem('precondition-required', 428, '고칠 판(If-Match)을 보내 주세요');
     if (version !== c.version) throw problem('precondition-failed', 412, '다른 곳에서 이 건을 먼저 고쳤습니다');

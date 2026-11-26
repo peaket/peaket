@@ -40,6 +40,8 @@ export interface CaseRequestedRow {
   readonly sourceId: string;
   readonly category: AppealKind;
   readonly createdAt: string;
+  /** FRAUD_CASE는 사건의 소명 기한(IR-08). 없으면 ops가 createdAt에서 센다 */
+  readonly dueBaseAt?: string;
 }
 
 export interface RestrictionViewRow {
@@ -75,3 +77,24 @@ export interface FraudAppealViewRow {
   readonly priorityPurchases: Array<{ grantId: string; seatLabel: string; price: number; expiresAtMs: number; status: string }>;
   readonly actionResult: Record<string, unknown> | null;
 }
+
+/**
+ * HOLDER(받은 사람) 사본에서 사유 범주·잠금·우선 구매·이의 창·제한 끝을 비운다.
+ * 운영 Redis·gRPC 경계에도 같은 규칙을 적용한다(core.proto HOLDER, data.md sup:far, POL-046 ⑥).
+ */
+export const redactFraudView = (i: FraudAppealViewRow): FraudAppealViewRow =>
+  i.party !== 'HOLDER'
+    ? { ...i, actionResult: i.actionResult ?? null }
+    : {
+        ...i,
+        reasonCategories: [],
+        lockedTicketIds: [],
+        priorityPurchases: [],
+        lockActive: false,
+        lockExpiresAtMs: null,
+        objectionDueAtMs: null,
+        objectionStatus: 'NONE',
+        objectionNote: null,
+        restrictedUntilMs: null,
+        actionResult: null,
+      };

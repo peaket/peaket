@@ -35,6 +35,8 @@ export interface RestrictionKit {
   rows(): RestrictionRow[];
   seed(row: RestrictionKitSeed): void;
   tick(nowMs?: number): Promise<void>;
+  /** 10분 정비·다시 보내기(IR-02): EXPIRED 정비, 실패 사본 재시도, 잃은 사본 다시 세우기 */
+  maintain(nowMs?: number): Promise<void>;
 }
 
 const unavailableCopies: RestrictionCopies = {
@@ -108,6 +110,9 @@ export class RestrictionsModule {
                 await lifecycle.tick();
                 await engine.expireDue();
                 await engine.resyncIfDue();
+              },
+              maintain: async (nowMs) => {
+                await engine.maintain(nowMs);
               },
             };
           },
