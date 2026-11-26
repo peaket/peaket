@@ -41,10 +41,12 @@ export function scramSha256Verifier(password: string, salt: Buffer, iterations =
   return `SCRAM-SHA-256$${iterations}:${salt.toString('base64')}$${storedKey.toString('base64')}:${serverKey.toString('base64')}`;
 }
 
-/** PostgreSQL 인증 실패(28P01 잘못된 비밀번호, 28000 인증 거절)인지 가른다. */
+/** PostgreSQL 인증 실패(28P01 잘못된 비밀번호, 28000 인증 거절)인지 가른다.
+ * PgBouncer는 클라이언트 SCRAM 실패를 08P01(protocol_violation) + "SASL authentication failed"로 보낸다. */
 export function isAuthFailure(error: unknown): boolean {
-  const code = (error as { code?: unknown } | null | undefined)?.code;
-  return code === '28P01' || code === '28000';
+  const err = error as { code?: unknown; message?: unknown } | null | undefined;
+  if (err?.code === '28P01' || err?.code === '28000') return true;
+  return err?.code === '08P01' && typeof err.message === 'string' && /SASL authentication failed/i.test(err.message);
 }
 
 /** 재시도 창(초)이 PgBouncer 목록 재읽기(60초)를 덮는지. D-T34 ②. */
