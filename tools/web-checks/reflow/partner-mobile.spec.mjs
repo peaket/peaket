@@ -280,34 +280,34 @@ test.describe('FE-T31 íŒŒíŠ¸ë„ˆ 640: íƒœë¸”ë¦¿ 768 ê²½ê³„', () => {
   });
 });
 
-// F-07-12(HOT-260, TR-13): SCR-063 ¶óÀÌºê °³¿äÀÇ ¼º°ø¡¤0°Ç¡¤¿À·ù »óÅÂ¸¦ partner-api ´ë¿ªÀ¸·Î ¿¬´Ù.
-// ºê¶ó¿ìÀú ½ÇÇàÀº ¿şÀÌºê ³¡À¸·Î ¹Ì·ç´õ¶óµµ °æ·Î¡¤´ë¿ª¡¤»óÅÂ¸¦ ¸ñ·Ï¿¡ ³²±ä´Ù.
+// F-07-12(HOT-260, TR-13): SCR-063 ë¼ì´ë¸Œ ê°œìš”ì˜ ì„±ê³µÂ·0ê±´Â·ì˜¤ë¥˜ ìƒíƒœë¥¼ partner-api ëŒ€ì—­ìœ¼ë¡œ ì—°ë‹¤.
+// ë¸Œë¼ìš°ì € ì‹¤í–‰ì€ ì›¨ì´ë¸Œ ëìœ¼ë¡œ ë¯¸ë£¨ë”ë¼ë„ ê²½ë¡œÂ·ëŒ€ì—­Â·ìƒíƒœë¥¼ ëª©ë¡ì— ë‚¨ê¸´ë‹¤. ì´ ë¸”ë¡ì€ UTF-8ë¡œ ì €ì¥í•œë‹¤.
 for (const size of SIZES) {
-  test.describe(`FE-T31 ÆÄÆ®³Ê ¶óÀÌºê °³¿ä${size.token}${size.name}`, () => {
+  test.describe(`FE-T31 íŒŒíŠ¸ë„ˆ ë¼ì´ë¸Œ ê°œìš”${size.token}${size.name}`, () => {
     test.use({ viewport: { width: size.width, height: size.height } });
 
-    test('¶óÀÌºê °³¿ä ¼º°ø: È¸Â÷ Ç¥/Ä«µå°¡ º¸ÀÌ°í °¡·Î ½ºÅ©·ÑÀÌ ¾ø´Ù', async ({ page }) => {
+    test('ë¼ì´ë¸Œ ê°œìš” ì„±ê³µ: íšŒì°¨ í‘œ/ì¹´ë“œê°€ ë³´ì´ê³  ê°€ë¡œ ìŠ¤í¬ë¡¤ì´ ì—†ë‹¤', async ({ page }) => {
       await stubPartnerApi(page, liveRoutes([LIVE_EVENT]));
       await openReflowPage(page, { app: 'partner', path: `/events/${LIVE_PRODUCTION}` });
-      await expect(page.getByRole('heading', { name: 'LUMEN ¶óÀÌºê °ø¿¬' })).toBeVisible();
-      await expect(page.getByText('10/25(ÀÏ) 18:00 KST')).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'LUMEN ë¼ì´ë¸Œ ê³µì—°' })).toBeVisible();
+      await expect(page.getByText('10/25(ì¼) 18:00 KST')).toBeVisible();
       const m = await overflow(page);
       expect(m.scrollWidth).toBeLessThanOrEqual(m.clientWidth + 1);
     });
 
-    test('¶óÀÌºê °³¿ä 0°Ç: ºó È¸Â÷ ¾È³»°¡ º¸ÀÎ´Ù', async ({ page }) => {
+    test('ë¼ì´ë¸Œ ê°œìš” 0ê±´: ë¹ˆ íšŒì°¨ ì•ˆë‚´ê°€ ë³´ì¸ë‹¤', async ({ page }) => {
       await stubPartnerApi(page, liveRoutes([]));
       await openReflowPage(page, { app: 'partner', path: `/events/${LIVE_PRODUCTION}` });
-      await expect(page.getByText('µî·ÏµÈ È¸Â÷°¡ ¾ø½À´Ï´Ù')).toBeVisible();
+      await expect(page.getByText('ë“±ë¡ëœ íšŒì°¨ê°€ ì—†ìŠµë‹ˆë‹¤')).toBeVisible();
       const m = await overflow(page);
       expect(m.scrollWidth).toBeLessThanOrEqual(m.clientWidth + 1);
     });
 
-    test('¶óÀÌºê °³¿ä ¿À·ù: ¿À·ù Ä«µå¿Í ´Ù½Ã ½Ãµµ°¡ º¸ÀÎ´Ù', async ({ page }) => {
+    test('ë¼ì´ë¸Œ ê°œìš” ì˜¤ë¥˜: ì˜¤ë¥˜ ì¹´ë“œì™€ ë‹¤ì‹œ ì‹œë„ê°€ ë³´ì¸ë‹¤', async ({ page }) => {
       await stubPartnerApi(page, {});
       await openReflowPage(page, { app: 'partner', path: `/events/${LIVE_PRODUCTION}` });
-      await expect(page.getByText('°ø¿¬ °³¿ä¸¦ ºÒ·¯¿ÀÁö ¸øÇß½À´Ï´Ù')).toBeVisible();
-      await expect(page.getByText('´Ù½Ã ½Ãµµ')).toBeVisible();
+      await expect(page.getByText('ê³µì—° ê°œìš”ë¥¼ ë¶ˆëŸ¬ì˜¤ì§€ ëª»í–ˆìŠµë‹ˆë‹¤')).toBeVisible();
+      await expect(page.getByText('ë‹¤ì‹œ ì‹œë„')).toBeVisible();
       const m = await overflow(page);
       expect(m.scrollWidth).toBeLessThanOrEqual(m.clientWidth + 1);
     });

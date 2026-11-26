@@ -28,8 +28,9 @@ test('F-07-12 AC-06 UO-13 UUID+?state= 없음에서만 라이브를 고르고 �
   assert.match(src, /PreviewStateSwitcher/, '?state= 목업 미리보기를 지우면 안 된다');
 });
 
-test('F-07-12 AC-06 UO-14 라이브 화면은 뷰 함수·개요/판매자 API·allSettled를 쓰고 HTML을 주입하지 않는다 [ASVS v5.0.0-1.2.1]', () => {
+test('F-07-12 AC-06 UO-14 라이브 화면·뷰가 API·allSettled를 쓰고 HTML을 주입하지 않는다 [ASVS v5.0.0-1.2.1]', () => {
   const src = live();
+  const view = readFileSync(viewUrl, 'utf8');
   assert.match(src, /OverviewLiveView/);
   assert.match(src, /getPartnerProduction/);
   assert.match(src, /getPartnerSellerProfile/);
@@ -37,6 +38,5 @@ test('F-07-12 AC-06 UO-14 라이브 화면은 뷰 함수·개요/판매자 API·
   assert.match(src, /progressOf/);
   assert.match(src, /eventRowsOf/);
   assert.match(src, /Promise\.allSettled/);
-  assert.equal(/dangerouslySetInnerHTML|innerHTML/.test(src), false);
-  assert.equal(/dangerouslySetInnerHTML|innerHTML/.test(page()), false);
+  for (const file of [src, view, page()]) assert.equal(/dangerouslySetInnerHTML|innerHTML/.test(file), false);
 });

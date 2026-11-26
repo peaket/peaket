@@ -116,11 +116,13 @@ test('F-07-12 AC-06 UO-10 공연명·판매자 상호에 HTML을 넣어도 요�
       production: production({ name: `공연 ${evil}`, reviewLabel: `배지 ${evil}` }),
       progress: { steps, current: 3 },
       rounds: [round()],
-      seller: { ...seller, notice: `판매자: ${evil}`, fields: seller.fields.map((f) => ({ ...f, value: f.value })) },
+      // TR-03: 공연명·고지문뿐 아니라 판매자 7항목의 값도 사용자 데이터다. 첫 값에 evil을 넣어 글자 노드인지 본다.
+      seller: { ...seller, notice: `판매자: ${evil}`, fields: seller.fields.map((f, i) => (i === 0 ? { ...f, value: `상호 ${evil}` } : f)) },
     }),
   );
   assert.equal(html.includes('<img'), false);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(html, /상호 &lt;img/);
 });
 
 test('F-07-12 AC-06 UO-11 로딩이면 개요를 불러오는 중임을 그린다', async () => {

@@ -26,14 +26,14 @@ test('F-07-12 AC-05 UH-13 ?state=가 없으면 라이브, 있으면 목업 미�
   assert.match(src, /PreviewStateSwitcher/, '?state= 목업 미리보기를 지우면 안 된다');
 });
 
-test('F-07-12 AC-05 UH-14 라이브 화면은 뷰 함수·두 API·allSettled를 쓰고 HTML을 주입하지 않는다 [ASVS v5.0.0-1.2.1]', () => {
+test('F-07-12 AC-05 UH-14 라이브 화면·뷰가 두 API·allSettled를 쓰고 HTML을 주입하지 않는다 [ASVS v5.0.0-1.2.1]', () => {
   const src = live();
+  const view = readFileSync(viewUrl, 'utf8');
   assert.match(src, /HomeLiveView/);
   assert.match(src, /listPartnerProductions/);
   assert.match(src, /getPartnerTodoSummary/);
   assert.match(src, /homeRowsOf/);
   assert.match(src, /todoCardsOf/);
   assert.match(src, /Promise\.allSettled/, '할 일이 실패해도 목록은 그려야 한다');
-  assert.equal(/dangerouslySetInnerHTML|innerHTML/.test(src), false);
-  assert.equal(/dangerouslySetInnerHTML|innerHTML/.test(page()), false);
+  for (const file of [src, view, page()]) assert.equal(/dangerouslySetInnerHTML|innerHTML/.test(file), false);
 });
