@@ -176,6 +176,38 @@ export function catalogOf(over: Partial<CatalogNotice> = {}): CatalogNotice {
   return { ...CATALOG, ...over };
 }
 
+export interface BusinessState {
+  order: string;
+  payment: string;
+  ticket: string;
+}
+
+/** 주문·결제·발권 변경 스파이. 알림이 이 포트를 부르면 상태를 바꾸고 던져 시험이 잡는다(RV068-07) */
+export interface BusinessChanges {
+  state: BusinessState;
+  calls: string[];
+  changeOrder(status: string): void;
+  changePayment(status: string): void;
+  changeTicket(status: string): void;
+}
+
+export function businessChangesSpy(): BusinessChanges {
+  const state: BusinessState = { order: 'CONFIRMED', payment: 'APPROVED', ticket: 'ISSUED' };
+  const calls: string[] = [];
+  const change = (what: keyof BusinessState, value: string): void => {
+    calls.push(`${what}:${value}`);
+    state[what] = value;
+    throw new Error(`알림이 ${what} 상태를 바꾸려 했다(알림은 주문·결제·발권을 바꾸지 않는다)`);
+  };
+  return {
+    state,
+    calls,
+    changeOrder: (status) => change('order', status),
+    changePayment: (status) => change('payment', status),
+    changeTicket: (status) => change('ticket', status),
+  };
+}
+
 export interface Setup {
   clock: FakeClock;
   store: MemoryFanNotifyStore;
@@ -189,6 +221,7 @@ export interface Setup {
   noticeReader: BookingNoticeReaderLike & { calls: string[] };
   catalog: CatalogNoticeLike & { calls: { eventId: string; tierIds: readonly string[] }[] };
   held: HeldEventsLike & { rows: HeldEventInput[] };
+  businessChanges: BusinessChanges;
   signals: BookingSignalsLike;
   counts: ReturnType<typeof signalCounts>['c'];
   intake: BookingIntakeLike;
@@ -202,6 +235,8 @@ export interface SetupOptions {
   email?: string | null;
   /** 살아 있는 웹 푸시 구독 수 */
   subscriptions?: number;
+  /** 주문·결제·발권 변경 스파이를 바꿔 끼울 때 */
+  businessChanges?: BusinessChanges;
 }
 
 /** 같은 계정·회차·판매자로 시험 무대 하나를 만든다. 실제 주소는 example.test만 쓴다 */
@@ -249,6 +284,7 @@ export function setupBooking(o: SetupOptions = {}): Setup {
     },
   };
   const { c: counts, signals } = signalCounts();
+  const businessChanges = o.businessChanges ?? businessChangesSpy();
 
   for (let i = 0; i < (o.subscriptions ?? 0); i += 1) {
     const kp = pushKeyPair();
@@ -288,6 +324,7 @@ export function setupBooking(o: SetupOptions = {}): Setup {
     noticeReader,
     catalog,
     signals,
+    businessChanges,
     publicOrigin: 'https://peaket.example',
   } as never);
 
@@ -304,6 +341,7 @@ export function setupBooking(o: SetupOptions = {}): Setup {
     noticeReader,
     catalog,
     held,
+    businessChanges,
     signals,
     counts,
     intake,

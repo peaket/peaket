@@ -92,19 +92,43 @@ describe('F-06-8 예매 확정 알림', () => {
       expect(JSON.stringify(pushMsg)).not.toContain(value);
     }
 
-    // 실패·DEAD는 이메일 지표·SEV3로 남고, 주문·결제·발권 상태를 바꾸지 않는다(ADR-0180)
-    const business = { order: 'CONFIRMED', payment: 'APPROVED', ticket: 'ISSUED' };
-    const failed = setupBooking({ subscriptions: 0 });
-    bookingJob(failed, { channel: 'EMAIL', templateVersion: 'v1' });
+    // 실패·DEAD는 이메일 지표·SEV3로 남고, 주문·결제·발권 변경 스파이와 fetch를 부르지 않는다(ADR-0180)
+    const failed = setupBooking({ subscriptions: 1 });
+    const emailJob = bookingJob(failed, { channel: 'EMAIL', templateVersion: 'v1' });
+    const pushJob = bookingJob(failed, {
+      channel: 'WEB_PUSH',
+      subscriptionKey: [...failed.store.push.values()][0]!.endpointHash,
+      templateVersion: 'v1',
+    });
     failed.mail.fail.push(new MailTransportError('PERMANENT', '400'));
-    const deadRun = await failed.worker.processDue(new Date(NOW));
-    expect(deadRun).toMatchObject({ attempted: 1, dead: 1 });
-    expect(failed.counts.emailFailed).toBe(1);
-    expect(failed.counts.emailSent).toBe(0);
-    expect(failed.counts.dead).toEqual(['BOOKING_CONFIRMED']);
-    expect(failed.store.deliveries[0]).toMatchObject({ status: 'DEAD', channel: 'EMAIL' });
-    expect(failed.store.jobs.size).toBe(0);
-    expect(business).toEqual({ order: 'CONFIRMED', payment: 'APPROVED', ticket: 'ISSUED' });
+    failed.push.responses.push(500);
+    // 대조군: 스파이가 실제로 상태 변경을 잡는지 먼저 확인하고 되돌린다
+    expect(() => failed.businessChanges.changeOrder('CANCELLED')).toThrow();
+    expect(failed.businessChanges.calls).toEqual(['order:CANCELLED']);
+    expect(failed.businessChanges.state.order).toBe('CANCELLED');
+    failed.businessChanges.calls.length = 0;
+    failed.businessChanges.state.order = 'CONFIRMED';
+    const fetchCalls: string[] = [];
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = (async (...args: unknown[]) => {
+      fetchCalls.push(String(args[0]));
+      throw new Error('알림이 바깥 상태 변경 API를 불렀다');
+    }) as typeof fetch;
+    try {
+      const deadRun = await failed.worker.processDue(new Date(NOW));
+      expect(deadRun).toMatchObject({ attempted: 2, sent: 0, dead: 1, retrying: 1 });
+      expect(failed.counts.emailFailed).toBe(1);
+      expect(failed.counts.emailSent).toBe(0);
+      expect(failed.counts.dead).toEqual(['BOOKING_CONFIRMED']);
+      expect(failed.store.deliveries[0]).toMatchObject({ status: 'DEAD', channel: 'EMAIL' });
+      expect(failed.store.jobs.has(emailJob.dedupKey)).toBe(false);
+      expect(failed.store.jobs.has(pushJob.dedupKey)).toBe(true);
+      expect(failed.businessChanges.calls).toEqual([]);
+      expect(failed.businessChanges.state).toEqual({ order: 'CONFIRMED', payment: 'APPROVED', ticket: 'ISSUED' });
+      expect(fetchCalls).toEqual([]);
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
 
     // 5분 [가정]을 넘긴 발송은 지연 지표와 99% 경보의 원천 신호를 남긴다
     const late = setupBooking({ subscriptions: 0 });
