@@ -510,6 +510,26 @@ describe('F-05-11 T4 I-T43 ① 탈퇴 참여자', () => {
     expect(h.ticketRow(t).accountId).toBe(B);
   });
 
+  test('F-05-11 T4 I-T43 ① ⑦ 탈퇴 PENDING 나이를 저장해 24시간 경보 지표로 낸다', async () => {
+    const mod = await import(/* @vite-ignore */ new URL('../src/modules/ticket/application/account-withdrawal.ts', import.meta.url).href).catch(() => undefined);
+    const TransferWithdrawal = (mod as { TransferWithdrawal?: new (d: object) => { run(i: { accountId: string }): Promise<Record<string, unknown>> } }).TransferWithdrawal;
+    const h = await harness();
+    const t = await h.issue();
+    const found = await h.post('/v1/transfer-recipient-lookups', A, { body: { memberCode: CODE_B } });
+    const created = await h.post(`/v1/tickets/${t}/transfers`, A, { body: { recipientRef: found.body.recipientRef }, reauth: 'r' });
+    await h.post(`/v1/transfers/${String(created.body.offerId)}/acceptance`, B);
+    const wd = new TransferWithdrawal!({ transfers: h.transfers, store: h.store, clock: h.clock });
+    const frozenAt = STARTS + 1;
+    setNow(h.clock, frozenAt);
+    h.extras.setEntryClose?.(EVENT, STARTS + 3 * HOUR);
+    expect(await wd.run({ accountId: B })).toMatchObject({ state: 'PENDING' });
+    const pending = (h.store as unknown as { pendingWithdrawalSeconds?: (nowMs: number) => Promise<number | undefined> }).pendingWithdrawalSeconds;
+    expect(pending, '저장소가 탈퇴 PENDING 나이를 내지 않는다').toBeDefined();
+    expect(await pending!.call(h.store, frozenAt)).toBe(0);
+    setNow(h.clock, frozenAt + 24 * HOUR);
+    expect(await pending!.call(h.store, h.clock.now())).toBeGreaterThanOrEqual(24 * HOUR / 1000);
+  });
+
   test('F-05-11 T4 I-T43 ① ⑥ 참여자 호출의 deadline_at_ms를 저장소에 그대로 넘긴다', async () => {
     const mod = await import(/* @vite-ignore */ new URL('../src/modules/ticket/application/account-withdrawal.ts', import.meta.url).href).catch(() => undefined);
     const TransferWithdrawal = (mod as { TransferWithdrawal?: new (d: object) => { run(i: { accountId: string; deadlineAtMs?: number }): Promise<Record<string, unknown>> } }).TransferWithdrawal;

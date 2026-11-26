@@ -303,3 +303,58 @@ describe('F-05-11 T10 ìž…ìž¥ ë§ˆê°ì˜ ë(PostgreSQL)', () => {
     expect((await transfers.returnToPayer({ ticketId: t2, accountId: w2.b, sessionId: SESSION, reauthToken: 'r', idempotencyKey: randomUUID() })).status).toBe('RETURNED');
   });
 });
+
+describe('F-05-11 T4 I-T43 ¨ç Å»Åð Âü¿©ÀÚ ÇÑ Æ®·£Àè¼Ç¡¤deadline(PostgreSQL)', () => {
+  const processWithdrawal = async (i: { accountId: string; nowMs: number; deadlineAtMs?: number }) => {
+    const store = transferStore as unknown as {
+      processAccountWithdrawal?: (x: { accountId: string; nowMs: number; deadlineAtMs?: number }) => Promise<{ state: string; returnedTickets: number; withdrawnOffers: number; rejectedOffers: number; pendingReceivedTickets: number }>;
+      pendingWithdrawalSeconds?: (nowMs: number) => Promise<number | undefined>;
+    };
+    expect(store.processAccountWithdrawal, 'processAccountWithdrawalÀÌ ¾ø´Ù').toBeDefined();
+    return { store, run: await store.processAccountWithdrawal!(i) };
+  };
+
+  test('F-05-11 T4 I-T43 ¨ç ¨î deadline_at_ms¸¦ DB¿¡ ¾²°í, ÇÑ Æ®·£Àè¼ÇÀÌ ½ÇÆÐÇÏ¸é ÀüºÎ µÇµ¹¸°´Ù', async () => {
+    const w = world();
+    const held = (await issue(w.a, w.event, 1))[0]!;
+    const heldOffer = await offerDirect(held, w.a, w.b);
+    expect((await transfers.accept({ offerId: heldOffer, accountId: w.b })).status).toBe('ACCEPTED');
+    const bTicket = (await issue(w.b, w.event, 1))[0]!;
+    const sentOffer = await offerDirect(bTicket, w.b, w.a);
+    const toB = (await issue(w.a, w.event, 1))[0]!;
+    const receivedOffer = await offerDirect(toB, w.a, w.b);
+
+    await database.pool.query(`create or replace function f0511_withdrawal_fail() returns trigger language plpgsql as $$ begin raise exception 'f0511 Å»Åð ½ÇÆÐ'; end $$`);
+    await database.pool.query(`create trigger f0511_withdrawal_fail before insert on transfer_notice for each row execute function f0511_withdrawal_fail()`);
+    try {
+      await expect(transferStore.processAccountWithdrawal!({ accountId: w.b, nowMs: clock.now(), deadlineAtMs: clock.now() + 3_000 })).rejects.toBeTruthy();
+    } finally {
+      await database.pool.query(`drop trigger if exists f0511_withdrawal_fail on transfer_notice`);
+    }
+    expect((await ticketRow(held)).account_id).toBe(w.b);
+    expect((await offerRow(sentOffer)).status).toBe('OFFERED');
+    expect((await offerRow(receivedOffer)).status).toBe('OFFERED');
+
+    const deadline = clock.now() + 3_000;
+    const done = await processWithdrawal({ accountId: w.b, nowMs: clock.now(), deadlineAtMs: deadline });
+    expect(done.run).toMatchObject({ state: 'DONE', returnedTickets: 1, withdrawnOffers: 1, rejectedOffers: 1 });
+    const runs = await q<{ state: string; deadline_at: Date | string | null }>('select state, deadline_at from transfer_withdrawal_run where account_id = $1 order by created_at desc limit 1', [w.b]);
+    expect(runs[0]!.state).toBe('DONE');
+    expect(new Date(runs[0]!.deadline_at!).getTime()).toBe(deadline);
+    expect(await done.store.pendingWithdrawalSeconds!(clock.now())).toBeUndefined();
+  });
+
+  test('F-05-11 T4 I-T43 ¨ç ¨ï PENDINGÀÌ¸é ³ªÀÌ¸¦ ÀúÀåÇÏ°í 24½Ã°£ µÚ¿¡µµ ³²´Â´Ù', async () => {
+    const w = world();
+    const t = (await issue(w.a, w.event, 1))[0]!;
+    const offerId = await offerDirect(t, w.a, w.b);
+    expect((await transfers.accept({ offerId, accountId: w.b })).status).toBe('ACCEPTED');
+    await database.pool.query('insert into entry_close (event_id, closed_at, reason, role_ends_at) values ($1, $2, $3, $2) on conflict (event_id) do update set closed_at = excluded.closed_at', [w.event, new Date(STARTS + 3 * HOUR), 'ALL_REPORTED']);
+    clock.advance(STARTS + 1 - clock.now());
+    const p = await processWithdrawal({ accountId: w.b, nowMs: clock.now(), deadlineAtMs: clock.now() + 3_000 });
+    expect(p.run.state).toBe('PENDING');
+    expect(await p.store.pendingWithdrawalSeconds!(clock.now())).toBe(0);
+    clock.advance(24 * HOUR);
+    expect(await p.store.pendingWithdrawalSeconds!(clock.now())).toBeGreaterThanOrEqual(24 * HOUR / 1000);
+  });
+});
