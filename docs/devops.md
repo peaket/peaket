@@ -614,6 +614,7 @@ flowchart LR
   - 후보 2 node-pg-migrate(9.0.0, MIT): `--no-single-transaction`이면 마이그레이션마다 따로 트랜잭션이고, `pgm.noTransaction()`을 부른 마이그레이션은 트랜잭션 밖에서 돈다. 실행 잠금은 advisory lock이다(`advisory-lock-mode`). SQL 파일 마이그레이션도 받는다(node-pg-migrate 문서, 2026-10-28 확인).
   - ③의 문장별 `lock_timeout`과 다시 시도는 두 도구의 문서에서 기본 기능으로 찾지 못했다. 파일 안의 `SET`이나 도구를 감싼 작은 스크립트로 채울 수 있는지 함께 본다.
   - 판정은 D-T44로 한다. 기성 도구가 ①~④를 채우면 그 도구를 쓰고 자체 실행기를 만들지 않는다. 하나라도 못 채우면 지금처럼 자체 실행기를 만들되, 못 채운 항목을 그 이유로 적는다.
+- **도구 판정과 실행기 계약(추천 적용 2026-11-27, F-09-2 계획)**: 세 안 가운데 'Drizzle SQL 파일 + 자체 실행기'를 고른다. Atlas와 node-pg-migrate는 ① 파일마다 트랜잭션·② 트랜잭션 밖 표시·④ 실행 잠금을 문서상 채우지만, ③ 문장마다 `lock_timeout`을 걸고 5회 다시 시도하는 일과 ⑤ DDL 역할로 PgBouncer를 거치지 않고 붙는 일을 도구가 보장하지 않는다. Atlas의 무료 사용 조건도 확인 전이다. 그래서 Drizzle은 `drizzle-kit generate`로 SQL만 만들고, 실행은 `packages/platform`의 공용 실행기가 한다. 실행기는 파일 순서·SHA-256 체크섬 기록 표(`peaket_migration`)·드라이런·앞으로만 가기를 지키고, 첫 줄이 `-- peaket:no-transaction`인 파일만 트랜잭션 밖에서 문장 단위로 실행한다. 서비스 `scripts/migrate.mjs`는 그 실행기를 부르는 얇은 껍데기가 되고 `PEAKET_MIGRATION_DATABASE_URL`(DDL 역할)과 `PEAKET_MAINTENANCE_DATABASE_URL`(정비 역할)만 읽는다. 실제 PostgreSQL에서 세 안을 돌려 ①~⑤를 견주는 PoC는 Docker를 쓸 수 있는 구현 차례에 하고, 결과를 D-T44 표와 ADR-0054 상태 줄에 적는다. 그전까지 이 판정은 문서 비교에 따른 [가정]이다.
 - **잠금 대기 제한**: 문장마다 `SET lock_timeout = '3s'`와 `statement_timeout`을 건다 [가정, wbs 0.3.4에서 확정]. 잠금을 얻지 못하면 간격을 지수로 늘리며 5회 다시 시도하고, 그래도 안 되면 잡이 실패한다(RB-24). 잠금 대기열에 선 DDL이 그 뒤에 오는 핫패스 쿼리까지 막는 일을 피하려는 것이다. `lock_timeout`은 잠금 시도마다 따로 적용된다(PostgreSQL 문서).
 - **실행 잠금과 권한**: 실행기는 시작할 때 `pg_advisory_lock`을 잡아 같은 DB에서 두 실행이 겹치지 않게 한다. 마이그레이션 잡은 DDL 역할, 앱은 DML 역할만 쓴다(자격 증명 분리, ASVS 13.2.2).
 - **연결 경로**: 마이그레이션 잡은 PgBouncer를 거치지 않고 클러스터 쓰기 엔드포인트에 직접 붙는다(통신을 암호화하는 TLS, `verify-full`). 세션 단위 advisory 잠금과 세션 `SET`(위의 `lock_timeout`·`statement_timeout`)을 PgBouncer 트랜잭션 풀링이 지원하지 않기 때문이다(PgBouncer 기능 표, 추천 적용 2026-10-22, ADR-0083). 앱 연결은 PgBouncer를 거친다.
@@ -627,6 +628,7 @@ flowchart LR
 ### 7.3 검사
 
 - **Squawk**로 위험 패턴을 막는다: 동시 생성이 아닌 인덱스, 트랜잭션 안의 동시 인덱스, NOT NULL 열 추가, 열 삭제, `NOT VALID` 없는 제약, `lock_timeout` 없는 문장 등. 파티션 부모의 `CREATE INDEX … ON ONLY`는 메타데이터만 바꾸므로 예외로 등록한다(추천 적용 2026-10-22, ADR-0086).
+- **검사 도구와 CI 연결(추천 적용 2026-11-27, F-09-2 계획)**: `tools/ci/migration-check.mjs`가 ① 파일 이름·번호·journal·첫 줄 `-- peaket:no-transaction` 표시와 트랜잭션 밖 문장 허용 목록 ② 바뀐 마이그레이션의 Squawk 검사 ③ `DROP COLUMN`·`RENAME COLUMN`·`SET NOT NULL` 같은 N-1 비호환 축소 ④ 서비스 스크립트가 공용 실행기를 쓰는지 ⑤ 차트의 PreSync 마이그레이션 Job이 DDL·정비 역할 주소만 쓰는지를 본다. Squawk 실행 파일이 없거나 결과를 읽지 못하면 통과로 보지 않는다(끝 코드 2). `.github/workflows/migration-check.yml`이 바뀐 `services/*/migrations`에만 돈다. 파티션 부모의 `CREATE INDEX … ON ONLY` 예외는 `tools/ci/` 아래 `squawk-exceptions.json`에 파일·규칙·까닭·만료를 적어 둔다.
 - **실행 계획 검사(추천 적용 2026-10-22, ADR-0086)**: 새 쿼리나 바뀐 쿼리는 docs/data.md §5.1 표에 한 줄을 더하고, PR에 합성 데이터의 `EXPLAIN (ANALYZE, BUFFERS)`와 `EXPLAIN (GENERIC_PLAN)` 결과를 붙인다. 부분 인덱스 조건을 바인드 변수로 쓰면 일반 계획에서 그 인덱스를 쓰지 못하므로 상수로 쓴다(docs/data.md §5.2).
 - **적용 시험**: ① 빈 DB에 전체 적용, ② 직전 운영 스키마(스키마만 덤프)에 새 마이그레이션 적용, ③ N-1 앱의 통합 시험 묶음을 새 스키마에서 실행(호환 확인).
 - **실행 시간**: 합성 데이터 1/100 규모에서 실행 시간을 잰다. 운영 규모로 환산해 1분을 넘으면 정비 시간 지정을 필수로 한다 [가정].
