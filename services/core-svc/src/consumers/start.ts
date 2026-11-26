@@ -6,8 +6,10 @@
 import { type Clock, type Database, drizzleHeldEventStore, heldEventCounts, type KafkaAuth, type Registry, systemClock } from '@peaket/platform';
 import { runKeyedConsumer } from '@peaket/platform/stream-worker';
 import type { ReviewAccountWithdrawnHandler } from '../modules/review/index.js';
-import { CORE_GROUP, CORE_TOPICS, pidFreeHeldEventStore } from './index.js';
+import { BookingConfirmedHandler, TRADE_ORDERS_TOPIC } from './booking-confirmed.js';
+import { CORE_GROUP, CORE_NOTIFY_GROUP, CORE_REVIEW_TOPICS, pidFreeHeldEventStore } from './index.js';
 import { type ReviewRecheckLoopOptions, startReviewRecheckLoop } from './review-recheck.js';
+import type { NotificationIntake } from '../modules/notify/index.js';
 
 export interface CoreConsumersOptions {
   env: string;
@@ -26,6 +28,8 @@ export interface CoreConsumersOptions {
   commitEveryMs?: number;
   /** 보류 수 재는 주기(기본 30초, 시험이 줄인다) */
   measureHeldEveryMs?: number;
+  /** F-06-8 trade.orders CONFIRMED 알림 intake. 있으면 별도 그룹 소비자를 함께 켠다 */
+  booking?: { intake: NotificationIntake };
   /** 탈퇴 후기 다시 정리 반복이 쓰는 유스케이스(처리기와 같은 소비자 전용 풀의 Reviews, docs/streaming.md §2.6). 소비자를 켜면 반복도 늘 켠다 */
   recheck: ReviewRecheckLoopOptions['reviews'];
   /** 다시 정리 반복 간격(기본 60초 [가정], 시험이 줄인다) */
@@ -48,7 +52,7 @@ export function startCoreConsumers(o: CoreConsumersOptions): CoreConsumers {
     clientId: o.clientId,
     auth: o.auth,
     groupId: CORE_GROUP(o.env),
-    topics: [...CORE_TOPICS],
+    topics: [...CORE_REVIEW_TOPICS],
     handler: o.handler,
     held: pidFreeHeldEventStore(drizzleHeldEventStore(o.database, o.clock ?? systemClock)),
     registry: o.registry,
@@ -69,11 +73,34 @@ export function startCoreConsumers(o: CoreConsumersOptions): CoreConsumers {
     ...(o.registry ? { registry: o.registry } : {}),
     ...(o.logger ? { logger: o.logger } : {}),
   });
+  // F-06-8 trade.orders CONFIRMED는 별도 그룹(peaket.core-svc-notify.<환경>)으로 읽는다. 오프셋 커밋은 같은 플랫폼 소비자 경계가 한다
+  const bookingRun = o.booking
+    ? runKeyedConsumer({
+        service: 'core-svc',
+        brokers: o.brokers,
+        clientId: `${o.clientId}-notify`,
+        auth: o.auth,
+        groupId: CORE_NOTIFY_GROUP(o.env),
+        topics: [TRADE_ORDERS_TOPIC],
+        handler: new BookingConfirmedHandler(o.booking.intake) as never,
+        held: drizzleHeldEventStore(o.database, o.clock ?? systemClock),
+        registry: o.registry,
+        ...(o.registry ? { heldCounts: () => heldEventCounts(o.database) } : {}),
+        logger: o.logger,
+        maxKeys: CORE_CONSUMER_MAX_KEYS,
+        partitionsConcurrently: CORE_CONSUMER_PARTITIONS,
+        startAt: o.startAt,
+        ...(o.commitEveryMs !== undefined ? { commitEveryMs: o.commitEveryMs } : {}),
+        ...(o.measureHeldEveryMs !== undefined ? { measureHeldEveryMs: o.measureHeldEveryMs } : {}),
+      })
+    : undefined;
+  bookingRun?.started.catch(() => undefined);
   return {
-    started: run.started,
+    started: bookingRun ? Promise.all([run.started, bookingRun.started]).then(() => undefined) : run.started,
     // 반복을 먼저 멈춘다(돌던 한 번이 끝날 때까지 기다린다). 그 뒤 소비자를 멈춰 처리 중인 키를 마치고 커밋한다
     stop: async () => {
       await recheck.stop();
+      await bookingRun?.stop();
       await run.stop();
     },
   };

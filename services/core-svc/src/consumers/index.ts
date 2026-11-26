@@ -2,12 +2,20 @@
 // (시험이 그것 없이 설정·보류 감싸기만 쓰게). 그룹 peaket.core-svc.<환경> 하나가 identity.accounts-withdrawn을 읽는다.
 import { type HeldEventInput, type HeldEventStore, type KafkaAuth, kafkaAuthFromEnv, PlatformConfigError } from '@peaket/platform';
 import { ACCOUNTS_WITHDRAWN_TOPIC, readReviewWithdrawn } from '../modules/review/index.js';
+import { TRADE_ORDERS_TOPIC } from './booking-confirmed.js';
 
 /** 서비스 소비자 그룹 이름(docs/streaming.md §2.6) */
 export const CORE_GROUP = (env: string): string => `peaket.core-svc.${env}`;
+/** F-06-8 알림 소비자 그룹(notify §4.9.1) */
+export const CORE_NOTIFY_GROUP = (env: string): string => `peaket.core-svc-notify.${env}`;
 
-/** 읽는 토픽 셋(탈퇴 사건 하나) */
-export const CORE_TOPICS = [ACCOUNTS_WITHDRAWN_TOPIC] as const satisfies readonly ['identity.accounts-withdrawn'];
+/** 탈퇴 사건 소비자가 읽는 토픽 */
+export const CORE_REVIEW_TOPICS = [ACCOUNTS_WITHDRAWN_TOPIC] as const satisfies readonly ['identity.accounts-withdrawn'];
+
+/** core-svc가 읽는 토픽 전체(탈퇴 사건 + F-06-8 trade.orders) */
+export const CORE_TOPICS = [...CORE_REVIEW_TOPICS, TRADE_ORDERS_TOPIC] as const;
+
+export { BookingConfirmedHandler, TRADE_ORDERS_TOPIC } from './booking-confirmed.js';
 
 /** 브로커 주소 모양(플랫폼 loadOutboxRelayProcessConfig의 BROKER와 같은 규칙, queue-svc와 같다) */
 const BROKER = /^[A-Za-z0-9.-]+:\d{1,5}$/;

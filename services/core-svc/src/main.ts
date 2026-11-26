@@ -46,7 +46,19 @@ import {
   UnavailableReviewEligibility,
   UnavailableFanProfile,
 } from './modules/review/index.js';
-import { DrizzleWebhookStore, FanNotificationWorker, HttpsWebhookTransport, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
+import {
+  CatalogBookingNoticeView,
+  DrizzleNotifyHeldEvents,
+  DrizzleWebhookStore,
+  FanNotificationWorker,
+  HttpBookingNoticeReader,
+  HttpsWebhookTransport,
+  NotificationIntake,
+  PromNotifySignals,
+  WebhookDispatcher,
+  WebhookWorker,
+} from './modules/notify/index.js';
+import { DrizzleCatalogRepository } from './modules/catalog/index.js';
 import { GrpcHeldTickets, GrpcMerchPayments, RedisMerchStock, type ShopLogger, ShopSignals, closedShopReauthGate, shopReauthGateFromEnv, unavailableHeldTickets, unavailableMerchPayments, unavailableMerchStock } from './modules/shop/index.js';
 
 const SERVICE = 'core-svc';
@@ -167,7 +179,6 @@ if (!purchaseHttpUrl) console.warn(JSON.stringify({ level: 'warn', kind: 'sale-o
 const payoutRegistration = assemblePayoutRegistration(process.env, { warn: (m) => console.warn(JSON.stringify({ level: 'warn', kind: 'payout-registration-wiring', msg: m })) });
 // 판매 승인 부수 효과 지표(sale_open_total·sale_config_publish_total). 서비스를 만든 뒤 등록부에 단다
 const saleConfigMetrics = new SaleConfigMetrics();
-
 const database = createDatabase({ url, applicationName: SERVICE });
 const partnerDatabase = createDatabase({ url: partnerUrl, applicationName: `${SERVICE}-partner`, max: PARTNER_POOL_MAX });
 const opsDatabase = createDatabase({ url: opsUrl, applicationName: `${SERVICE}-ops`, max: PARTNER_POOL_MAX });
@@ -183,6 +194,15 @@ const searchDatabase = createDatabase({ url: searchUrl, applicationName: `${SERV
 // 웹훅 발송기 전용 풀(core_notify, ADR-0351 결정 2). 발송 주기 5초·한 번에 100행과 내부 입구가 함께 쓴다
 const NOTIFY_POOL_MAX = 4;
 const notifyDatabase = createDatabase({ url: notifyUrl, applicationName: `${SERVICE}-notify`, max: NOTIFY_POOL_MAX });
+// F-06-8 예매 확정 알림: notice-view·catalog·held_event·지표 5종을 실제 조립한다(ADR-0388).
+// purchase 주소가 없으면 notice-view만 unwired이고, 그때는 이 알림 작업이 재시도·보류된다.
+const notifySignals = new PromNotifySignals();
+const bookingNotice = purchaseHttpUrl
+  ? new HttpBookingNoticeReader(createExternalHttpClient({ provider: 'purchase-svc', baseUrl: purchaseHttpUrl, timeoutCapMs: 300 }), process.env.PEAKET_INTERNAL_TOKEN)
+  : undefined;
+if (!bookingNotice) console.warn(JSON.stringify({ level: 'warn', kind: 'booking-notice-wiring', msg: 'PEAKET_PURCHASE_HTTP_URL이 없어 예매 확정 notice-view가 unwired다' }));
+const bookingCatalog = new CatalogBookingNoticeView(new DrizzleCatalogRepository(database, partnerDatabase, systemClock));
+const bookingHeldEvents = new DrizzleNotifyHeldEvents(database);
 // 소유자 주소를 넣거나 역할을 겸하면 행 보안이 조용히 꺼지므로 시작하지 않는다(ADR-0241)
 await assertDatabaseRole(database, 'core_app');
 await assertDatabaseRole(partnerDatabase, 'core_partner');
@@ -226,6 +246,15 @@ const service = await createService({
     ...(process.env.PEAKET_PURCHASE_HTTP_URL
       ? { purchaseHttp: { url: process.env.PEAKET_PURCHASE_HTTP_URL, ...(process.env.PEAKET_INTERNAL_TOKEN ? { token: process.env.PEAKET_INTERNAL_TOKEN } : {}) } }
       : {}),
+    notify: {
+      env: process.env,
+      fanNotify: {
+        ...(bookingNotice ? { bookingNotice } : {}),
+        bookingCatalog,
+        heldEvents: bookingHeldEvents,
+        notifySignals,
+      },
+    },
     identityGrpc,
     reauthJti: reauthJtiStoreFromEnv(process.env, queueRedis),
   }),
@@ -233,6 +262,7 @@ const service = await createService({
 serviceLogger = service.logger;
 shopSignals.register(service.metrics.registry);
 saleConfigMetrics.register(service.metrics.registry);
+notifySignals.register(service.metrics.registry);
 if (eligibilityCopy instanceof UnwiredSaleEligibilityCopy) eligibilityCopy.register(service.metrics.registry);
 eligibilityMetrics.register(service.metrics.registry);
 // 검색 전용 연결 묶음의 대기 수(게이지 search_pool_waiting, SR-T13 ①). 기본 core_app 묶음이 아니라 검색 묶음을 넘긴다
@@ -290,6 +320,7 @@ else {
     auth: kafka.auth,
     database: consumerDatabase,
     handler: new ReviewAccountWithdrawnHandler(consumerReviews, undefined, { logger: service.logger }),
+    booking: { intake: service.app.get(NotificationIntake) },
     recheck: consumerReviews,
     registry: service.metrics.registry,
     logger: service.logger,

@@ -2,6 +2,7 @@
 export { CatalogModule, SEARCH_DATABASE, type MediaWiring } from './catalog.module.js';
 export { tenantOf } from './inbound/partner-production.controller.js';
 export { MemoryCatalogRepository } from './adapters/memory-catalog-repository.js';
+export { DrizzleCatalogRepository } from './adapters/db/drizzle-catalog-repository.js';
 export { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 export { GrpcMemberCodeDirectory } from './adapters/identity-member-codes.js';
 export { SaleEligibilityMetrics } from './application/sale-eligibility-metrics.js';
