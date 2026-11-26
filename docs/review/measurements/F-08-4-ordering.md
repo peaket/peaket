@@ -25,6 +25,8 @@
 | 합본 메모리 | 2,048 MiB | 실측(PC) | 2026-11-27-f084-hybrid-ordering-r1 |
 | Redis TLS | 켬 | 실측(PC) | 2026-11-27-f084-hybrid-ordering-r1 |
 | 실행 시각(hybrid r1) | 2026-11-27 03:39:37~03:51:56(+09:00) | 실측(PC) | 2026-11-27-f084-hybrid-ordering-r1 |
+| kind 삭제 | 2026-11-27 04:17:13(+09:00) | 실측(PC) | 2026-11-27-f084-hybrid-ordering-r1 |
+| Docker 잠금 해제 | 2026-11-27 04:17:18(+09:00), docker 비어 있음 | 실측(PC) | 2026-11-27-f084-hybrid-ordering-r1 |
 
 - 명령: `node loadtest/run.mjs v1 ordering --cell hybrid --users 100000 --batch-users 10000 --batch-rate 5000 --lobby-rate 200 --entry-rate 2000 --token-rate 1000 --record --run-id 2026-11-27-f084-hybrid-ordering-r1`.
 - 계획 파일 `loadtest/plan/f084-plan.json`의 네 셀·명령·산출물과 같은 명령 꼴을 썼다(토큰 속도 인자만 추가).
