@@ -67,7 +67,8 @@ test('F089-9 ② 계획에는 릴레이·검색·P-T1·보고서 실행이 있�
   assert.ok(relay.includes('--rate') && relay.includes('--record'), '도착률·기록 인자');
   assert.ok(relay.includes('--out') && relay.includes('--run-id'), '산출물·실행 ID');
   const baseline = argvsOf(runOf(plan, 'w2-relay-baseline'));
-  assert.ok(baseline.includes('relay-baseline') || baseline.some((a) => a.includes('relay-off') || a.includes('baseline')), baseline.join(' '));
+  const relayOff = baseline.indexOf('--relay');
+  assert.ok(relayOff >= 0 && baseline[relayOff + 1] === 'off', `릴레이 끈 기준 실행: ${baseline.join(' ')}`);
 
   const search10 = argvsOf(runOf(plan, 'w2-search-10k'));
   assert.ok(search10.includes('loadtest/run.mjs') && search10.includes('v1') && search10.includes('search'), search10.join(' '));

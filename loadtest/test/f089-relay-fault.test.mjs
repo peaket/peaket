@@ -84,10 +84,13 @@ test('F089-1 ① relay-fault 인자는 30분·도착률·기록을 읽고 범위
   assert.equal(a.record, true);
   assert.equal(a.runId, '2026-11-27-relay-f089');
   assert.equal(a.promUrl, 'http://127.0.0.1:9090');
+  assert.equal(a.relay, 'on');
+  assert.equal(parseRelayFaultArgs(['--main', String(MAIN_SECONDS), '--rate', '1', '--relay', 'off']).relay, 'off');
 
   usage(() => parseRelayFaultArgs(['--main', '59', '--rate', '1']));
   usage(() => parseRelayFaultArgs(['--main', '3601', '--rate', '1']));
   usage(() => parseRelayFaultArgs(['--main', String(MAIN_SECONDS), '--rate', '0']));
+  usage(() => parseRelayFaultArgs(['--main', String(MAIN_SECONDS), '--rate', '1', '--relay', 'wat']));
   usage(() => parseRelayFaultArgs(['--main', String(MAIN_SECONDS), '--rate', '1', '--wat', 'x']));
 });
 
