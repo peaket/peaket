@@ -277,14 +277,14 @@ describe('관제 판매 승인 목록·상세·반려·CDN(S-T41 ④⑤⑩)', ()
     expect(repo.productions.get(strict.id)?.saleReview).toBe('SUBMITTED');
   });
 
-  test('S-T41 ⑩_ 승인은 회차마다 event 태그와 production 태그를 한 번 무효화하고, 반려는 부르지 않으며 CDN 실패에도 200이다', async () => {
+  test('S-T41 ⑩_ 승인은 회차마다 event 태그·production 태그·home 태그를 한 번 무효화하고, 반려는 부르지 않으며 CDN 실패에도 200이다', async () => {
     const before = cdn.calls.length;
     const p = production({ events: 2, rules: [general] });
     const r = await approval(ops('commander'), p.id, { scales: p.eventIds.map((eventId) => ({ eventId, scale: 'SMALL' })), placeId: PLACE });
     expect(r.statusCode).toBe(200);
     expect(cdn.calls.length).toBe(before + 1);
     const tags = cdn.calls.at(-1)!;
-    expect(new Set(tags)).toEqual(new Set([`event:${p.eventIds[0]!.toLowerCase()}`, `event:${p.eventIds[1]!.toLowerCase()}`, `production:${p.id.toLowerCase()}`]));
+    expect(new Set(tags)).toEqual(new Set([`event:${p.eventIds[0]!.toLowerCase()}`, `event:${p.eventIds[1]!.toLowerCase()}`, `production:${p.id.toLowerCase()}`, 'home']));
 
     const p2 = production({ events: 1 });
     const afterApprove = cdn.calls.length;
