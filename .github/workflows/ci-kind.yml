@@ -3,11 +3,13 @@
 # 로컬과 같은 스크립트(tools/local)로 kind 클러스터(Strimzi Kafka 3.9.1, PostgreSQL 18, 계정 없는 AWS 흉내 서버)를 띄운다.
 # 도구와 이미지는 판·해시·다이제스트로 고정했다. 비밀이 필요 없어 포크 PR에서도 돈다(비밀이 필요한 단계는 tools/ci/fork-guard.mjs를 거친다).
 # 구간 5(인프라 구축, ADR-0332) 전까지는 ci.yml이 부르지 않고(저장소 변수 PEAKET_KIND_IN_CI가 'true'일 때만, ADR-0331 결정 9)
-# 예약 실행도 하지 않는다. 클러스터가 필요하면 수동 실행으로 돌린다(소유자 결정 2026-11-21, ADR-0332 결정 1).
+# 2026-11-26 F-09-8(INF-030): 매주 토요일 03:00 KST(금요일 18:00 UTC) 예약을 되살린다. 참고용이라 이슈를 열지 않는다.
 # 클러스터 없이 도는 tools/local/*.test.mjs는 tools-check.yml로 옮겼다
 name: ci-kind
 
 on:
+  schedule:
+    - cron: '0 18 * * 5'
   workflow_call:
   workflow_dispatch:
 

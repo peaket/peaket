@@ -924,15 +924,23 @@ data:
     end
 
     function envoy_on_request(handle)
-      local ctx = handle:filterContext()
+      -- Envoy Gateway의 엄격 검증이 이 함수를 핸들이 아닌 값으로 한 번 부른다. 그때는 아무것도 하지 않는다.
+      if type(handle) ~= "userdata" then return end
+      local ok_ctx, ctx = pcall(function() return handle:filterContext() end)
+      if not ok_ctx then return end
       local headers = handle:headers()
       -- 1을 가장 먼저 한다: 뒤의 어느 거절(404·401·403·사전 요청)이든 접근 로그 줄에 위조 끝단 머리가 남지 않게(리뷰 RV-01)
       local verified = setting(ctx, "originVerify") == true and origin_ok(headers:get(ORIGIN_VERIFY))
       if not verified then strip_edge(headers) end
       headers:remove(ORIGIN_VERIFY)
       if is_internal(headers:get(":path")) then
+        -- /internal/ 404는 끝단 머리를 지운 다음 답한다(docs/infra.md §4.1 '호스트와 내부 경로')
+        strip_edge(headers)
         return handle:respond(direct_headers("404"), NOT_FOUND)
       end
+      -- gw-ops는 허용 IP를 CloudFront-Viewer-Address로만 보고, 조사 칸(ja4·asn·edgeBotLabels)은 접근 로그에 남기지 않는다.
+      -- 허용 IP 확인이 끝난 뒤에 지운다(B-T18 ④, 운영 콘솔에 시청자 지문을 남기지 않는다).
+      local strip_ops = setting(ctx, "requireOriginVerify") == true
       -- gw-ops는 CloudFront를 거쳐야만 닿는다(ADR-0144 결정 2, ADR-0321 결정 2). /internal/ 404 다음이다
       if setting(ctx, "requireOriginVerify") == true and not verified then
         return handle:respond(direct_headers("403"), FORBIDDEN)
@@ -943,10 +951,15 @@ data:
         local ok, denied = pcall(ops_ip_check, handle, headers, opsEnv)
         if not ok then
           pcall(function() handle:logWarn("peaket ops ip check error (rejected)") end)
+          if strip_ops then strip_edge(headers) end
           return handle:respond(direct_headers("403"), FORBIDDEN)
         end
-        if denied ~= nil then return handle:respond(direct_headers("403"), FORBIDDEN) end
+        if denied ~= nil then
+          if strip_ops then strip_edge(headers) end
+          return handle:respond(direct_headers("403"), FORBIDDEN)
+        end
       end
+      if strip_ops then strip_edge(headers) end
       -- CSRF 출처는 글자 그대로 견준다(Envoy csrf 필터가 끝 슬래시를 떼는 것을 덮는다, BAT-045 리뷰 W-02)
       if csrf_origin_denied(handle, headers, ctx) then
         return handle:respond(direct_headers("403"), FORBIDDEN)

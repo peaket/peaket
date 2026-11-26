@@ -110,14 +110,29 @@ python -I -X utf8 tools/perf-ledger/nightly.py compare --results .cache/nightly-
 
 - 상태는 `대기`·`통과`·`실패`·`해당 없음`·`동결` 다섯뿐이다. 실행하지 않은 항목을 `통과`로 적지 않는다.
 - `동결`은 까닭을 적는다(예: C-T61 ⑦은 BAT-365/INF-020, V-T47 ⑥·V-T30 ③은 운영 Grafana·Mimir·수집기 배포가 INF-020, F-01-4 운영 확인 네 줄·Tempo 마이크로서비스 모드도 같은 배포가 필요하다).
-- F-01-5의 로컬 Prometheus `rule_files`와 Grafana 주석 링크는 로컬 관측 최소로 확인한다.
+- F-01-5의 로컬 Prometheus `rule_files`와 Grafana 주석 링크는 로컬 관측 최소로 확인한다. `prometheus`·`grafana`는 `kubectl port-forward`라 끝나지 않으므로 **셸을 나눠 켜 두고** 다른 셸에서 `curl`·브라우저로 본다. `&&`로 이어 붙이지 않는다.
 
   ```bash
+  # 셸 1: 관측 스택을 올린다(끝나면 다음 셸로)
   PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs observability
+  ```
+
+  ```bash
+  # 셸 2: Prometheus 포트 전달을 켜 둔다(이 셸은 끝나지 않는다)
   PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs prometheus
+  ```
+
+  ```bash
+  # 셸 3: 포트 전달이 열린 뒤 규칙을 읽는다
   curl -s http://127.0.0.1:9090/api/v1/rules
+  ```
+
+  ```bash
+  # 셸 4: Grafana 포트 전달을 켜 둔다(이 셸은 끝나지 않는다)
   PEAKET_CLUSTER=freeze-f098 node tools/local/cluster.mjs grafana
   ```
+
+  브라우저는 `http://127.0.0.1:3000`의 Grafana에서 경보 주석 링크를 눌러 연다.
 
 - 상태가 바뀐 항목만 `docs/review/ledger-notes.md`를 고치고, 장부 파일은 손으로 고치지 않고 다시 쓴다.
 

@@ -5,11 +5,12 @@
 #   High(보안 등급 7.0 이상)는 tools/ci/scan-gate.mjs가 막고, 결과 파일이 없거나 비었거나 꼴이 아니면 dast-gate가 막는다.
 # - 결과는 산출물로 남기고, 예약 실행이 실패하면 SEV3 이슈를 연다(issues: write는 notify 잡만).
 # - 출시 후보 데모 점검은 workflow_call 자리만 둔다. 데모 환경이 생긴 뒤 release.yml/promote.yml이 부른다(이 묶음에서는 부르지 않는다).
-# 구간 5(인프라 구축) 전까지는 예약 실행을 멈추고 수동 실행·workflow_call만 둔다(소유자 결정 2026-11-21, ADR-0332 결정 1).
-# 되살릴 때(BUILD_ORDER INF-030)의 예약은 18:00 UTC = 03:00 KST(다음 날) [가정]이다: cron '0 18 * * *'
+# 2026-11-26 F-09-8(INF-030): 매일 03:00 KST(18:00 UTC) 예약을 되살린다. High 0을 막고 예약 실패만 SEV3 이슈를 연다.
 name: dast-nightly
 
 on:
+  schedule:
+    - cron: '0 18 * * *'
   workflow_dispatch:
   workflow_call:
 
