@@ -1007,6 +1007,18 @@ erDiagram
         timestamptz refund_account_case_opened_at "CS '환불 대기'(REFUND_ACCOUNT_PENDING) 건을 ops-svc가 2xx로 받은 시각. refund_account_required_at 없이 쓰지 않는다(CHECK). 비어 있으면 마감 뒤 환급 실행기 틱 끝에 다시 연다(purchase 0029)"
         timestamptz entry_recorded_at "입장 시작 뒤 취소(REQUESTED)의 마감 뒤 대조에서 찾은 가장 이른 들어감·통과 시각. 있으면 환급 실행기가 결제사를 부르지 않고 refund_due_at을 비우며 CS 처리함 FLAGGED 건을 연다. 무효·환급은 CS가 정한다(추천 적용 2026-11-16, BUILD_ORDER GAT-090, docs/features/transfer-refund.md §3.1 '입장 기록 대조')"
     }
+    approval_refund {
+        uuid approval_id PK "ops 승인 업무 ID. 같은 승인 ID의 다시 부름은 처음 답을 준다(F-06-3, purchase 0040)"
+        uuid order_id
+        text kind "SYSTEM_FAULT_REFUND|DISCRETIONARY_WAIVER|MINOR_CONTRACT_CANCEL(openapi ApprovalRequest.kind의 부분집합)"
+        bigint amount "승인된 환급액(원). 시스템 잘못·미성년자는 권면 전액, 재량 면제는 면제분"
+        text status "REQUESTED|REFUND_PENDING|REFUNDED|VOIDED. 티켓을 취소하는 둘은 order_cancellation.status와 같은 뜻이고, 재량 면제는 payment 부분 취소만 한다"
+        uuid cancellation_id "order_cancellation.id 또는 재량 면제의 payment 부분 취소 ID. 같은 승인 ID의 실행 멱등키"
+        timestamptz refund_due_at
+        timestamptz created_at
+        timestamptz updated_at
+        int version
+    }
     fraud_cancellation_request {
         uuid approval_id PK "ops 승인 업무 ID(FRAUD_ACTION). CancelFraudTickets의 멱등키(추천 적용 2026-11-16, BUILD_ORDER GAT-080, docs/features/transfer-refund.md §7.4)"
         uuid fraud_case_id "ops 사건 ID(다른 논리 DB라 외래키 없음)"
@@ -1351,7 +1363,8 @@ erDiagram
         timestamptz pg_balance_observed_at
         uuid pg_balance_observed_by "OPERATOR_CONSOLE일 때 입력한 operator"
         bigint pg_balance_ledger_krw "포트원만. 이체 원장으로 계산한 잔액. 입력값과 다르면 작은 값으로 판정(ADR-0108)"
-        text status "PREPARED|PENDING_APPROVAL|APPROVED|SUBMITTED|COMPLETED|PARTIAL_FAILED. PREPARED는 정산 일꾼이 09시에 미리 만든 토스 묶음이다. 정산서를 묶지 않고 상계하지 않으며 합계·건수만 미리 셈한다. operator 확인 요청 때 같은 ID로 다시 판정해 묶고 PENDING_APPROVAL로 바꾼다(ADR-0369 결정 13)"
+        text status "PREPARED|PENDING_APPROVAL|APPROVED|SUBMITTED|COMPLETED|PARTIAL_FAILED|EXPIRED. PREPARED는 정산 일꾼이 09시에 미리 만든 토스 묶음이다. 정산서를 묶지 않고 상계하지 않으며 합계·건수만 미리 셈한다. operator 확인 요청 때 같은 ID로 다시 판정해 묶고 PENDING_APPROVAL로 바꾼다(ADR-0369 결정 13). EXPIRED는 지급일 전 영업일 15시까지 승인되지 않아 푼 묶음이다(추천 적용 2026-11-26, F-06-3)"
+        text payee_digest "정산서별 지급 대상 지문(SHA-256 16진 64자, settlement §5.1). 묶음을 만들 때 계산해 저장하고 승인·실행 직전에 다시 계산해 다르면 409 payout-batch-payee-mismatch다(F-06-3, BAT-625 RV-02, payment 0040)"
         int submit_attempts "토스 전송 시도 수(응답 없음·처리 중·잔액 모자람이면 같은 키로 다시 보낸다, payment 0029, ADR-0369 결정 7)"
         timestamptz next_submit_at "다음 전송 시각(1분에서 두 배씩, 30분 상한 [가정]). 일꾼이 이 값을 조건으로 잡아 두 파드가 같은 묶음을 함께 보내지 않는다"
         timestamptz submit_deadline_at "자동 전송 마감(지급일 전 영업일 22:00 KST [가정]). 넘기면 지급일을 미루고 PAYOUT_DELAYED"
@@ -1677,6 +1690,15 @@ erDiagram
         bigint version "SetTransferLock.version. 같은 case_id 안에서만 견준다"
         timestamptz expires_at "잠금 최대 기한(SetTransferLock.expires_at = 그 계정의 첫 소명 요청 + 14일 [가정], 연장 없음). 계정마다 따로이고(이 행이 계정 단위), 처음 잠글 때 정하고 더 큰 판으로 다시 잠가도 바꾸지 않는다. 한 요청에 처음 잠그는 계정과 다시 요청받은 계정이 섞이면 계정마다 자기 값을 둔다(ops DB fraud_cluster_member.lock_expires_at과 같은 값). ticket-svc가 min(expires_at, 입장 시작)에 스스로 locked를 false로 바꾼다(추천 적용 2026-10-31, ADR-0173)"
         timestamptz changed_at "행은 풀려도 지우지 않는다. 보존은 그 사건이 끝난 때(closed_at)와 그 회차 공연일 + 30일 [가정] 가운데 늦은 때까지이고, 그 뒤 정비 작업이 지운다(§6, 추천 적용 2026-10-31, ADR-0171. 기준일은 (추천 적용 2026-10-31, ADR-0173))"
+    }
+    transfer_reclaim {
+        uuid approval_id PK "ops 승인 업무 ID(TRANSFER_RECLAIM). 기본 키 (approval_id, ticket_id)가 ReclaimTransfer의 멱등이다(F-06-3, ticket 0024)"
+        uuid ticket_id PK "FK ticket"
+        uuid previous_holder_account_id "회수 전 보유자(받은 사람)"
+        uuid new_holder_account_id "되돌린 뒤 보유자(결제자)"
+        text result "RECLAIMED|SKIPPED_ENTRY_STARTED|SKIPPED_ENTRY_RECORDED|SKIPPED_NOT_TRANSFERRED|SKIPPED_HOLDER_CHANGED. 건너뜀도 남겨 다시 부르면 같은 결과를 준다"
+        text withdrawn_transfer_offer_id "거둔 양도 요청 ID"
+        timestamptz created_at
     }
     device_key {
         uuid id PK
@@ -2477,7 +2499,8 @@ erDiagram
         text evidence_checked "확인한 증빙 종류만(내용·파일 없음)"
         uuid requested_by
         text requester_role "요청한 관리 계정의 역할(화면 표시, ADR-0320)"
-        int required_approvals "1|2(POL-038). 승인은 자식 표 approval_vote(ADR-0086)"
+        int required_approvals "요청자를 포함한 승인 관여 인원 수 1~3(POL-038, F-06-3 추천 적용 2026-11-26). 시스템 잘못 환불·재량 면제·미성년자 계약 취소는 요청자 + cs_lead = 2, 재량 면제의 2인(30만 원 초과·여러 주문·90일 안 두 번째)은 요청자 + cs_lead + commander = 3이다. 실제 표는 자식 표 approval_vote(요청자 제외, ADR-0086)"
+        uuid target_account_id "재량 면제·예외 환불의 결제자 계정(NFC). 요청할 때 purchase-svc 내부 approval-basis로 읽어 복사한다. 30만 원·90일 두 번째 판정과 승인 화면에만 쓰고 응답·로그에는 싣지 않는다(추천 적용 2026-11-26, F-06-3)"
         text status "REQUESTED|PENDING_APPROVAL|APPROVED|REJECTED|ESCALATED|EXECUTING|DONE|FAILED|WITHDRAWN|EXPIRED. FAILED는 원인을 고친 뒤 승인자가 같은 approve를 다시 부르면(재인증) EXECUTING으로 다시 실행(추천 적용 2026-10-20, ADR-0073). WITHDRAWN은 승인 전 요청자 철회, EXPIRED는 대상 상태가 바뀌었거나 처리 기한(due_at)이 지나 시스템이 끝냄(docs/planning/03 §2.10·POL-038 공통, 추천 적용 2026-10-28, 기술 검토 낮음-087)"
         text close_reason "WITHDRAWN의 요청자 사유, EXPIRED의 TARGET_CHANGED|DEADLINE_PASSED, FAILED의 적용 실패 사유(낮음-087, ADR-0320)"
         timestamptz due_at "종류별 만료 시각(POL-038 공통). 정하지 않은 종류는 요청 뒤 5영업일 [가정]"

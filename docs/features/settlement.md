@@ -223,6 +223,8 @@ sequenceDiagram
   - operator가 합계, 건수, 보류·이의 제외 목록을 확인해 요청한다.
   - commander가 승인한다(2인, 요청자 ≠ 승인자).
 - 지급일 전 영업일 15시까지 승인되지 않으면 지급일을 다음 영업일로 미루고 파트너에게 알린다. 그 승인 업무는 만료(EXPIRED)되고, 다음 영업일 09시에 새 묶음을 만든다(docs/planning/03 §2.10·POL-038 공통, 추천 적용 2026-10-28, 기술 검토 낮음-087).
+- **15시 만료의 구현(F-06-3, 추천 적용 2026-11-26)**: ops-svc의 승인 만료 작업이 5분 [가정]마다 지급일 전 영업일 15시가 지난 `PENDING_APPROVAL` 지급 승인을 찾아 payment-svc 내부 `POST /internal/v1/settlements/payout-batches/{batchId}/expiry`를 부른다. payment는 `PREPARED`·`PENDING_APPROVAL`이고 지급 건이 없는 묶음만 푼다: 정산서의 `payout_batch_id`를 비우고(상태는 `CONFIRMED` 그대로), 묶음을 `EXPIRED`로, 감사 한 줄(사유 `payout-batch-expired`, 행위자 `system`)과 `PAYOUT_HELD`(금액 = 지급액)를 같은 트랜잭션에 쓴다. 지급일은 다음 은행 영업일로 미루고, 다음 영업일 09시 작업이 새 묶음을 만든다. ops는 승인을 `EXPIRED`로, 파트너 알림 `PAYOUT_POSTPONED` 한 번, 운영 경보 `settlement_batch_unapproved{pg}` 한 번을 남긴다. 경계는 15:00 정각부터 만료다(14:59:59.999는 승인할 수 있다). 지급 건이 이미 있으면 409 `payout-batch-not-expellable`이고 아무것도 바꾸지 않는다.
+- **지급 대상 지문(F-06-3, BAT-625 RV-02, 추천 적용 2026-11-26)**: 승인 기록이 묶음 단위(묶음 ID·합계·건수)만 대조하면 같은 합계·건수로 정산서 한 장을 바꿔치기해도 알아채지 못한다. 그래서 payment-svc가 묶음을 만들 때 `payeeDigest`를 계산해 응답에 싣고, ops-svc는 `payout_approval.payee_digest`에 저장한다. 값은 정산서를 ID 차례로 정렬해 `statementId|payoutAmount|promoterId|payeeBankCode|payeeAccountLast4`를 줄바꿈으로 이은 UTF-8 바이트의 SHA-256 16진(소문자 64자)이고, 정산 계좌가 없으면 계좌 자리에 `NO_PAYEE`를 쓴다. 승인과 실행 직전에 payment가 다시 계산해 다르면 409 `payout-batch-payee-mismatch`이고 `payout_batch` 상태·감사 성공 기록을 바꾸지 않는다.
 
 ### 5.2 토스페이먼츠 결제분
 
