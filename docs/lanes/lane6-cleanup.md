@@ -42,3 +42,4 @@
 - F-04-14 TR-25(낮음): 계획 §7.2 표는 30행인데 실제 HTTP 시험은 22개다. C-T70 ②·C-T71 ①~④·C-T72 ①~③이 다른 ID와 합쳐져 표의 행과 1:1이 아니다. 표를 실제 시험 이름으로 맞추거나 합친 행을 명시한다(`docs/review/plans/F-04-14.md`).
 - F-04-14 TR-26(낮음): `FX-T19 ⑥`은 문의 유형이 다른 경우와 건이 없는 경우만 본다. 그 건이 `INQUIRY`가 아닌 경우(예: 후기 신고)를 보지 않아 `FraudInquiryReports` 포트가 kind를 확인하지 않는 구현이 통과할 수 있다(`services/ops-svc/test/fraud-evidence-http.test.ts`).
 - F-04-14 TR-27(낮음): `FX-T13 ②`는 한 행의 필드 변조만 본다. `seq` 중간 누락·순서 바꾸기·`prev_hash`만 바꾸기·마지막 행 누락을 보지 않아 사슬 검증의 경계가 약하다(`services/ops-svc/test/fraud-evidence-domain.test.ts`).
+- F-04-14 TR-34(낮음): `FX-T13 ⑮`의 `basis`는 2자 거절과 긴 유효값만 보고 정확히 5자·500자·501자 경계를 보지 않는다. `basis` 5~500자의 양쪽 경계를 더한다(`services/ops-svc/test/fraud-evidence-http.test.ts`).

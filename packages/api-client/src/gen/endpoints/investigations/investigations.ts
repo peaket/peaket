@@ -2739,6 +2739,11 @@ export type createOpsEvidenceBundleExportResponse201 = {
   status: 201
 }
 
+export type createOpsEvidenceBundleExportResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
 export type createOpsEvidenceBundleExportResponse403 = {
   data: ProblemResponse
   status: 403
@@ -2767,7 +2772,7 @@ export type createOpsEvidenceBundleExportResponse422 = {
 export type createOpsEvidenceBundleExportResponseSuccess = (createOpsEvidenceBundleExportResponse200TextCsv | createOpsEvidenceBundleExportResponse200ApplicationJson | createOpsEvidenceBundleExportResponse201) & {
   headers: Headers;
 };
-export type createOpsEvidenceBundleExportResponseError = (createOpsEvidenceBundleExportResponse403 | createOpsEvidenceBundleExportResponse404 | createOpsEvidenceBundleExportResponse409 | createOpsEvidenceBundleExportResponse410 | createOpsEvidenceBundleExportResponse422) & {
+export type createOpsEvidenceBundleExportResponseError = (createOpsEvidenceBundleExportResponse400 | createOpsEvidenceBundleExportResponse403 | createOpsEvidenceBundleExportResponse404 | createOpsEvidenceBundleExportResponse409 | createOpsEvidenceBundleExportResponse410 | createOpsEvidenceBundleExportResponse422) & {
   headers: Headers;
 };
 
