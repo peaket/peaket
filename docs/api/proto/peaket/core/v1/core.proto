@@ -897,6 +897,9 @@ message SetFraudAppealViewRequest {
   // HOLDER일 때 held_ticket_ids 가운데 이 사건에서 더는 취소하지 않게 된 표(취소 대상에서 빠짐: 그 표 없이 표 취소가 Done, 승인자가 뺌,
   // 결제자의 소명 인정·계정 빼기·사건 정상 종료, 취소 마감 지남). 늘면 FRAUD_HOLDER_RESULT를 보낸다(fraud_appeal_notice.notified_excluded_count). PAYER면 비운다(추천 적용 2026-10-31, ADR-0173 결정 4).
   repeated string excluded_ticket_ids = 19;
+  // 사건 상태(fraud_case.status). CLEARED면 support 모듈이 팬 GET /v1/fraud-appeal-requests 목록에서 이 사본을 뺀다(IR-12).
+  // 비우면 예전 호출과 같게 사건 상태를 모른 채로 둔다.
+  string case_status = 20;
 }
 
 message SetFraudAppealViewResponse {

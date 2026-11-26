@@ -41,6 +41,33 @@ import type {
 } from '../domain/ports.js';
 import type { SaleScheduleSource } from '../../readiness/index.js';
 
+/** 사건 기록의 마지막 조치 실행 결과(취소된 표·실패). 사본의 actionResult를 다시 만들 때 쓴다. */
+function lastActionResultRows(c: FraudCaseRecord): { ticketId: string; outcome: string }[] {
+  for (const e of [...c.events].reverse()) {
+    if (e.kind !== 'ACTION_EXECUTED' || !e.detail) continue;
+    return Array.isArray(e.detail.results) ? (e.detail.results as { ticketId: string; outcome: string }[]) : [];
+  }
+  return [];
+}
+
+/** 사건 기록의 마지막 조치 실행 대상(표·결제자·받는 사람). 사본의 actionResult를 다시 만들 때 쓴다. */
+function lastActionTargets(c: FraudCaseRecord): { ticketId: string; payerAccountId: string; holderAccountId: string }[] {
+  for (const e of [...c.events].reverse()) {
+    if (e.kind !== 'ACTION_EXECUTED' || !e.detail) continue;
+    return Array.isArray(e.detail.targets) ? (e.detail.targets as { ticketId: string; payerAccountId: string; holderAccountId: string }[]) : [];
+  }
+  return [];
+}
+
+/** 사건 기록의 우선 구매 권리(계정 태그 포함). */
+function allPriorityGrants(c: FraudCaseRecord): Record<string, unknown>[] {
+  const rows: Record<string, unknown>[] = [];
+  for (const e of c.events) {
+    if (e.kind === 'PRIORITY_GRANTED' && e.detail && Array.isArray(e.detail.grants)) rows.push(...(e.detail.grants as Record<string, unknown>[]));
+  }
+  return rows;
+}
+
 export interface FraudActionActor {
   readonly accountId: string;
   readonly sessionId?: string;
@@ -384,6 +411,7 @@ export class FraudActions {
             ...(v.canceled.length > 0 ? [{ accountId, ticketIds: v.canceled, result: 'CANCELED' as const }] : []),
             ...(v.excluded.length > 0 ? [{ accountId, ticketIds: v.excluded, result: 'EXCLUDED' as const }] : []),
           ]);
+          await this.#writeActionCopies({ c: next, version: next.version, accounts: acceptedAccounts, targets: r.targets, results });
         }
       }
     } else if (r.action === 'RESTRICT') {
@@ -407,6 +435,7 @@ export class FraudActions {
         const a = this.#actionedCase(c, targetAccounts, { approvalId, action: r.action }, nowMs, actor.accountId);
         next = a.next;
         events = a.events;
+        await this.#writeActionCopies({ c: next, version: next.version, accounts: targetAccounts, targets: r.targets, results: priorResults, restrictedUntilMs: r.restrictionEndsAtMs ?? null });
         label = 'BOT';
         labelAccounts = targetAccounts;
         noticeAccounts = targetAccounts;
@@ -457,23 +486,15 @@ export class FraudActions {
           events = [...events, grantEvent];
           await this.#openCompensations(c, priorityGrants, actor.accountId);
         }
-        for (const accountId of accepted) {
-          const member = c.members.find((m) => m.accountId === accountId);
-          try {
-            await this.d.copies?.set({
-              caseId: c.caseId,
-              eventId: c.eventId,
-              accountId,
-              version: next.version,
-              party: 'PAYER',
-              lockActive: false,
-              objectionDueAtMs: member?.actionNotifiedAtMs === undefined || member.actionNotifiedAtMs === null ? null : member.actionNotifiedAtMs + OBJECTION_WINDOW_MS,
-              actionResult: null,
-            });
-          } catch {
-            // 사본 갱신 실패는 승인 결과를 막지 않는다
-          }
-        }
+        await this.#writeActionCopies({
+          c: next,
+          version: next.version,
+          accounts: accepted,
+          targets: lastActionTargets(next),
+          results: lastActionResultRows(next),
+          priority: priorityGrants,
+          objection: { state: 'ACCEPTED', note: r.reason ?? null },
+        });
         label = accepted.length > 0 ? 'HUMAN' : null;
         labelAccounts = accepted;
         noticeAccounts = accepted;
@@ -721,12 +742,9 @@ export class FraudActions {
       const next = { ...clone(c), version: c.version + 1, events: [...c.events, ...events] };
       const out = await this.d.store.updateCase(next, c.version, events, {});
       if (!out.ok) continue;
+      const ticketRows = this.d.tickets ? await this.d.tickets.listForAction({ eventId: c.eventId, payerAccountIds: pending.map((m) => m.accountId) }).catch(() => []) : [];
+      await this.#writeActionCopies({ c: next, version: next.version, accounts: pending.map((m) => m.accountId), targets: ticketRows, results: lastActionResultRows(next), priority: allPriorityGrants(next) });
       for (const m of pending) {
-        try {
-          await this.d.copies?.set({ caseId: c.caseId, eventId: c.eventId, accountId: m.accountId, version: next.version, party: 'PAYER', lockActive: false, objectionDueAtMs: m.actionNotifiedAtMs === undefined || m.actionNotifiedAtMs === null ? null : m.actionNotifiedAtMs + OBJECTION_WINDOW_MS, actionResult: null });
-        } catch {
-          continue;
-        }
         this.#copied.add(`${c.caseId}:${m.accountId}`);
         if (nowMs >= (m.lockExpiresAtMs ?? Infinity)) {
           try {
@@ -813,6 +831,105 @@ export class FraudActions {
     return { next, events: [event] };
   }
 
+  /** 조치 결과·이의 판단 뒤 화면용 사본(PAYER·HOLDER)을 상태·조치 결과·우선 구매와 함께 쓴다(IR-04·05). */
+  async #writeActionCopies(o: {
+    c: FraudCaseRecord;
+    version: number;
+    accounts: readonly string[];
+    targets: readonly { ticketId: string; payerAccountId: string; holderAccountId: string }[];
+    results?: readonly { ticketId: string; outcome: string }[];
+    priority?: readonly Record<string, unknown>[];
+    restrictedUntilMs?: number | null;
+    objection?: { state: 'ACCEPTED' | 'REJECTED'; note: string | null };
+  }): Promise<void> {
+    const copies = this.d.copies;
+    if (!copies) return;
+    const stateOf = (r: string): 'OPEN' | 'SUBMITTED' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' =>
+      r === 'ACCEPTED' || r === 'REJECTED' || r === 'EXPIRED' ? r : r === 'SUBMITTED' ? 'SUBMITTED' : 'OPEN';
+    const results = o.results ?? [];
+    for (const accountId of o.accounts) {
+      const m = o.c.members.find((x) => x.accountId === accountId);
+      const targets = o.targets.filter((t) => t.payerAccountId === accountId);
+      const cancelled = targets
+        .filter((t) => results.find((r) => r.ticketId === t.ticketId)?.outcome === 'ACCEPTED')
+        .map((t) => t.ticketId);
+      const actionResult = cancelled.length > 0 || (o.restrictedUntilMs !== undefined && o.restrictedUntilMs !== null)
+        ? { cancelledTicketIds: cancelled, ...(o.restrictedUntilMs === undefined || o.restrictedUntilMs === null ? {} : { restrictedUntilMs: o.restrictedUntilMs }) }
+        : null;
+      const priority = (o.priority ?? [])
+        .filter((g) => g.accountId === accountId)
+        .map((g) => ({
+          grantId: String(g.grantId ?? ''),
+          seatLabel: String(g.seatLabel ?? g.seatId ?? g.ticketId ?? ''),
+          price: Number(g.price ?? 0),
+          expiresAtMs: typeof g.expiresAt === 'string' ? Date.parse(g.expiresAt) : Number(g.expiresAtMs ?? 0),
+          status: g.status === 'USED' || g.status === 'EXPIRED' || g.status === 'WITHDRAWN' ? g.status : 'OFFERED',
+        }));
+      try {
+        await copies.set({
+          caseId: o.c.caseId,
+          eventId: o.c.eventId,
+          accountId,
+          version: o.version,
+          party: 'PAYER',
+          state: stateOf(m?.appealResult ?? 'NOT_REQUESTED'),
+          caseStatus: o.c.status,
+          reasonCategories: [o.c.reasonCategory],
+          ...(m?.appealDueAtMs !== undefined && m.appealDueAtMs !== null ? { dueAtMs: m.appealDueAtMs } : o.c.appealDueAtMs !== null ? { dueAtMs: o.c.appealDueAtMs } : {}),
+          lockedTicketIds: targets.map((t) => t.ticketId),
+          heldTicketIds: [],
+          excludedTicketIds: [],
+          lockActive: false,
+          lockExpiresAtMs: m?.lockExpiresAtMs ?? null,
+          objectionDueAtMs: m?.actionNotifiedAtMs === undefined || m.actionNotifiedAtMs === null ? null : m.actionNotifiedAtMs + 30 * 24 * 3_600_000,
+          objectionState: o.objection?.state ?? (m?.objectionResult === 'SUBMITTED' || m?.objectionResult === 'ACCEPTED' || m?.objectionResult === 'REJECTED' ? m.objectionResult : 'NONE'),
+          objectionNote: o.objection?.note ?? null,
+          actionResult,
+          priorityPurchases: priority,
+        });
+      } catch {
+        // 사본 실패는 조치 결과를 막지 않는다.
+      }
+    }
+    const holders = new Map<string, { held: string[]; cancelled: string[]; excluded: string[] }>();
+    for (const t of o.targets) {
+      if (typeof t.holderAccountId !== 'string' || t.holderAccountId === t.payerAccountId) continue;
+      const cur = holders.get(t.holderAccountId) ?? { held: [], cancelled: [], excluded: [] };
+      cur.held.push(t.ticketId);
+      const outcome = results.find((r) => r.ticketId === t.ticketId)?.outcome;
+      if (outcome === 'ACCEPTED') cur.cancelled.push(t.ticketId);
+      else if (outcome !== undefined) cur.excluded.push(t.ticketId);
+      holders.set(t.holderAccountId, cur);
+    }
+    for (const [holderId, v] of holders) {
+      const payerState = o.c.members.find((m) => o.targets.some((t) => t.holderAccountId === holderId && t.payerAccountId === m.accountId));
+      try {
+        await copies.set({
+          caseId: o.c.caseId,
+          eventId: o.c.eventId,
+          accountId: holderId,
+          version: o.version,
+          party: 'HOLDER',
+          state: stateOf(payerState?.appealResult ?? 'NOT_REQUESTED'),
+          caseStatus: o.c.status,
+          reasonCategories: [],
+          lockedTicketIds: [],
+          heldTicketIds: v.held,
+          excludedTicketIds: v.excluded,
+          lockActive: false,
+          lockExpiresAtMs: null,
+          objectionDueAtMs: null,
+          objectionState: 'NONE',
+          objectionNote: null,
+          actionResult: v.cancelled.length > 0 ? { cancelledTicketIds: v.cancelled } : null,
+          priorityPurchases: [],
+        });
+      } catch {
+        // 위와 같다.
+      }
+    }
+  }
+
   async #priorityForAccount(c: FraudCaseRecord, caseId: string, accountId: string, actorId: string): Promise<Record<string, unknown>[]> {
     if (!this.d.priority) return [];
     const ids: string[] = [];
@@ -828,7 +945,7 @@ export class FraudActions {
     }
     if (ids.length === 0) return [];
     const out = await this.d.priority.run({ caseId, accountId, eventId: c.eventId, cancelledTicketIds: ids, cancelledTicketId: ids[0]!, decision: 'ACCEPTED', actedBy: actorId });
-    return out.grants.map((g, i) => ({ ...g, ...(g.ticketId ? {} : { ticketId: ids[i] ?? ids[0]! }) }));
+    return out.grants.map((g, i) => ({ ...g, accountId, ...(g.ticketId ? {} : { ticketId: ids[i] ?? ids[0]! }) }));
   }
 
   async #reversalPriority(c: FraudCaseRecord, r: FraudApprovalRecord, accounts: readonly string[], actorId: string): Promise<Record<string, unknown>[]> {
@@ -980,7 +1097,7 @@ export class FraudActions {
         eventId: c.eventId,
         reasonCategory: c.reasonCategory,
         accountCount: active(c).length,
-        ticketCount: active(c).reduce((n, m) => n + m.ticketCount, 0),
+        ticketCount: targets.reduce((n, t) => n + t.ticketIds.length, 0),
         purchaseCount: cluster?.purchaseCount ?? active(c).reduce((n, m) => n + m.ticketCount, 0),
         limitPerPerson: cluster?.limitPerPerson ?? 4,
         scoreBand: cluster?.scoreBand ?? 'HIGH',

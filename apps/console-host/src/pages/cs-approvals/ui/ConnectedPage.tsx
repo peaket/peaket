@@ -17,6 +17,7 @@ export function ConnectedPage() {
   const [reason, setReason] = useState('');
   const [excluded, setExcluded] = useState<string[]>([]);
   const [reauth, setReauth] = useState('');
+  const [me, setMe] = useState<{ accountId: string; role: string; designations: string[] } | null>(null);
 
   const load = useCallback(async () => {
     if (!ensureConsoleApi()) {
@@ -25,7 +26,13 @@ export function ConnectedPage() {
     }
     setScreen((s) => (s === 'ready' ? s : 'loading'));
     try {
-      const [{ listOpsApprovalRequests, getOpsApprovalRequest }] = await Promise.all([import('@peaket/api-client/endpoints/ops')]);
+      const [{ listOpsApprovalRequests, getOpsApprovalRequest, getMyOpsAuthSession }] = await Promise.all([import('@peaket/api-client/endpoints/ops')]);
+      const session = (await getMyOpsAuthSession()).data as unknown as { adminAccountId?: string; role?: string; designations?: string[] };
+      setMe({
+        accountId: typeof session.adminAccountId === 'string' ? session.adminAccountId : '',
+        role: typeof session.role === 'string' ? session.role : '',
+        designations: Array.isArray(session.designations) ? session.designations.map(String) : [],
+      });
       const list = await listOpsApprovalRequests({ status: ['PENDING_APPROVAL'], limit: 100 });
       setItems(list.data.items as unknown as Record<string, unknown>[]);
       if (approvalId) {
@@ -54,9 +61,9 @@ export function ConnectedPage() {
         status: String(detail?.status ?? ''),
         canApprove: detail?.canApprove === true,
         requesterId: String((detail?.requestedBy as { adminAccountId?: string } | undefined)?.adminAccountId ?? ''),
-        meId: '',
-        role: 'commander',
-        designations: [],
+        meId: me?.accountId ?? '',
+        role: me?.role ?? '',
+        designations: me?.designations ?? [],
         summaryViewedAt: typeof detail?.summaryViewedAt === 'string' ? detail.summaryViewedAt : null,
       })
     : '사건 요약이 아직 실리지 않았습니다';

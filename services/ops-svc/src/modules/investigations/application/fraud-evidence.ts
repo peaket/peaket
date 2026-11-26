@@ -130,6 +130,20 @@ export class EvidenceBundles {
     return { items: page.items.map((b) => this.#summaryView(b)), nextCursor: page.nextCursor };
   }
 
+  /** 사건 상세 evidenceBundleIds를 만든 순서로 준다(IR-07). 저장소가 직접 못 주면 목록을 끝까지 읽어 시각·ID로 정렬한다. */
+  async listBundleIdsForCase(eventId: string, caseId: string): Promise<readonly string[]> {
+    if (this.d.store.listBundleIdsForCase) return this.d.store.listBundleIdsForCase(eventId, caseId);
+    const found: EvidenceBundleRecord[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 100; page += 1) {
+      const r = await this.d.store.listBundles({ eventId, limit: 100, ...(cursor ? { cursor } : {}) });
+      found.push(...r.items.filter((b) => b.caseId === caseId));
+      if (r.nextCursor === null) break;
+      cursor = r.nextCursor;
+    }
+    return found.sort((a, b) => a.createdAtMs - b.createdAtMs || a.bundleId.localeCompare(b.bundleId)).map((b) => b.bundleId);
+  }
+
   async get(actor: { accountId: string; role: string }, bundleId: string): Promise<Record<string, unknown>> {
     const bundle = await this.d.store.getBundle(bundleId);
     if (!bundle) throw bareProblem('not-found', 404, '증거 묶음을 찾을 수 없습니다');

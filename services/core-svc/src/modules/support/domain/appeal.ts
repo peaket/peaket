@@ -7,6 +7,7 @@ export type AppealStatus = 'SUBMITTED' | 'DECIDED' | 'INVALID';
 export type AppealResult = 'LIFTED' | 'KEPT' | 'NOT_RECLAIMED' | 'RECLAIMED' | 'ACCEPTED' | 'REJECTED';
 export type FraudParty = 'PAYER' | 'HOLDER';
 export type FraudAppealState = 'OPEN' | 'SUBMITTED' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
+export type FraudCaseStatusForView = 'INVESTIGATING' | 'APPEAL_PENDING' | 'DECISION_PENDING' | 'ACTIONED' | 'OBJECTED' | 'CLEARED' | 'REVERSED';
 
 export interface AppealRecord {
   readonly id: string;
@@ -53,11 +54,13 @@ export interface FraudAppealViewRecord {
   readonly actionResult: FraudAppealActionResult | null;
   readonly priorityPurchases: readonly FraudPriorityPurchase[];
   readonly version: number;
+  readonly caseStatus?: FraudCaseStatusForView;
   readonly updatedAtMs: number;
 }
 
 const ZERO_WIDTH = /[\u200b-\u200d\u2060\ufeff]/g;
 const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
+const CASE_STATUSES = new Set(['INVESTIGATING', 'APPEAL_PENDING', 'DECISION_PENDING', 'ACTIONED', 'OBJECTED', 'CLEARED', 'REVERSED']);
 
 /** NFC 뒤 제로 폭·제어 문자를 지우고 앞뒤 공백을 지운다. 코드 포인트로 센다. */
 export function normalizeAppealBody(input: string): string {
@@ -104,6 +107,7 @@ export function normalizeFraudAppealView(input: Record<string, any>, nowMs: numb
   const priority = Array.isArray(input.priorityPurchases)
     ? input.priorityPurchases.map((p: any) => ({ grantId: String(p.grantId), seatLabel: String(p.seatLabel), price: Number(p.price), expiresAtMs: msOf(p.expiresAtMs ?? p.expiresAt) ?? 0, status: p.status === 'USED' || p.status === 'EXPIRED' || p.status === 'WITHDRAWN' ? p.status : 'OFFERED' }))
     : [];
+  const caseStatusInput = String(input.caseStatus ?? input.case_status ?? '');
   const base: FraudAppealViewRecord = {
     accountId: String(input.accountId),
     caseId: String(input.caseId),
@@ -123,6 +127,7 @@ export function normalizeFraudAppealView(input: Record<string, any>, nowMs: numb
     actionResult: action ? { cancelledTicketIds: cancelled, ...(restricted === null ? {} : { restrictedUntilMs: restricted }) } : null,
     priorityPurchases: priority,
     version: Number(input.version ?? 0),
+    ...(CASE_STATUSES.has(caseStatusInput) ? { caseStatus: caseStatusInput as FraudCaseStatusForView } : {}),
     updatedAtMs: msOf(input.updatedAtMs) ?? nowMs,
   };
   if (party !== 'HOLDER') return base;

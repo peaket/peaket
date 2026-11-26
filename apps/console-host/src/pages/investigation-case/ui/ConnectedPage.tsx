@@ -9,6 +9,8 @@ import {
   appealDefaults,
   clearanceBody,
   exportBody,
+  exportContentType,
+  exportFilename,
   exportIssue,
   holdChangeBody,
   holdChangeIssue,
@@ -30,18 +32,29 @@ import {
   type GraphView,
 } from '../model/investigation-case';
 
+type RevealedIp = { nodeId: string; ip: string };
+type BundleDetail = { bundleId: string; data: Record<string, unknown> };
+type Decision = 'ACCEPTED' | 'REJECTED';
+
 export function ConnectedPage() {
   const { caseId = '' } = useParams();
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const [graph, setGraph] = useState<GraphView | null>(null);
   const [bundles, setBundles] = useState<Record<string, unknown>[]>([]);
+  const [bundleDetail, setBundleDetail] = useState<BundleDetail | null>(null);
   const [screen, setScreen] = useState<'loading' | 'ready' | 'forbidden' | 'config' | 'error'>('loading');
   const [message, setMessage] = useState('');
-  const [revealed, setRevealed] = useState<string | null>(null);
+  const [graphNotice, setGraphNotice] = useState('');
+  const [revealed, setRevealed] = useState<RevealedIp[] | null>(null);
   const [revealReason, setRevealReason] = useState('');
   const [selectedIp, setSelectedIp] = useState<string[]>([]);
   const [memo, setMemo] = useState('');
   const [reason, setReason] = useState('');
+  const [note, setNote] = useState('');
+  const [opinion, setOpinion] = useState('');
+  const [removal, setRemoval] = useState<string[]>([]);
+  const [appealDecision, setAppealDecision] = useState<Record<string, Decision>>({});
+  const [objectionDecision, setObjectionDecision] = useState<Record<string, Decision>>({});
 
   const load = useCallback(async () => {
     if (!ensureConsoleApi()) {
@@ -51,10 +64,18 @@ export function ConnectedPage() {
     setScreen((s) => (s === 'ready' ? s : 'loading'));
     try {
       const [{ getOpsFraudCase, getOpsFraudCaseGraph, listOpsEvidenceBundles }] = await Promise.all([import('@peaket/api-client/endpoints/investigations')]);
-      const [d, g] = await Promise.all([getOpsFraudCase(caseId), getOpsFraudCaseGraph(caseId)]);
-      const mapped = mapCaseDetail(d.data as unknown as Record<string, unknown>);
+      const [caseResult, graphResult] = await Promise.allSettled([getOpsFraudCase(caseId), getOpsFraudCaseGraph(caseId)]);
+      if (caseResult.status === 'rejected') throw caseResult.reason;
+      const mapped = mapCaseDetail(caseResult.value.data as unknown as Record<string, unknown>);
       setDetail(mapped);
-      setGraph(mapGraph(g.data as unknown as Record<string, unknown>));
+      setOpinion(mapped.investigatorOpinion ?? '');
+      if (graphResult.status === 'fulfilled') {
+        setGraph(mapGraph(graphResult.value.data as unknown as Record<string, unknown>));
+        setGraphNotice('');
+      } else {
+        setGraph(null);
+        setGraphNotice(investigationsProblem(graphResult.reason).message);
+      }
       if (mapped.eventId) {
         const b = await listOpsEvidenceBundles({ eventId: mapped.eventId, limit: 100 });
         setBundles((b.data.items as unknown as Record<string, unknown>[]).filter((x) => x.caseId === caseId));
@@ -84,8 +105,35 @@ export function ConnectedPage() {
     try {
       const [{ createOpsFraudCaseIpReveal }] = await Promise.all([import('@peaket/api-client/endpoints/investigations')]);
       const r = await createOpsFraudCaseIpReveal(caseId, { nodeIds: selectedIp, reason: revealReason } as never);
-      const first = (r.data as unknown as { items?: { ip?: string }[] }).items?.find((x) => x.ip)?.ip ?? null;
-      setRevealed(first);
+      const items = ((r.data as unknown as { items?: RevealedIp[] }).items ?? []) as RevealedIp[];
+      setRevealed(items.map((x) => ({ nodeId: x.nodeId, ip: x.ip })));
+    } catch (e) {
+      setMessage(investigationsProblem(e).message);
+    }
+  };
+
+  const savePatch = async () => {
+    if (!detail) return;
+    const body: Record<string, unknown> = {};
+    if (note.trim() !== '') body.note = note.trim();
+    if (opinion !== (detail.investigatorOpinion ?? '')) body.investigatorOpinion = opinion;
+    if (removal.length > 0) body.removeMembers = removal.map((accountId) => ({ accountId, reason: note.trim() || '조사관 제외' }));
+    const appeals = Object.entries(appealDecision).map(([accountId, decision]) => ({ accountId, decision, reason: note.trim() || '소명 판단' }));
+    const objections = Object.entries(objectionDecision).map(([accountId, decision]) => ({ accountId, decision, reason: note.trim() || '이의 판단' }));
+    if (appeals.length > 0) body.appealDecisions = appeals;
+    if (objections.length > 0) body.objectionDecisions = objections;
+    if (Object.keys(body).length === 0) {
+      setMessage('바꿀 내용을 적어 주세요');
+      return;
+    }
+    try {
+      const [{ updateOpsFraudCase }] = await Promise.all([import('@peaket/api-client/endpoints/investigations')]);
+      await updateOpsFraudCase(caseId, body as never, { headers: { 'if-match': `"${detail.version}"`, 'idempotency-key': crypto.randomUUID() } } as never);
+      setRemoval([]);
+      setAppealDecision({});
+      setObjectionDecision({});
+      setNote('');
+      await load();
     } catch (e) {
       setMessage(investigationsProblem(e).message);
     }
@@ -153,7 +201,8 @@ export function ConnectedPage() {
   const openBundle = async (bundleId: string) => {
     try {
       const [{ getOpsEvidenceBundle }] = await Promise.all([import('@peaket/api-client/endpoints/investigations')]);
-      await getOpsEvidenceBundle(bundleId);
+      const r = await getOpsEvidenceBundle(bundleId);
+      setBundleDetail({ bundleId, data: r.data as unknown as Record<string, unknown> });
     } catch (e) {
       setMessage(investigationsProblem(e).message);
     }
@@ -167,7 +216,20 @@ export function ConnectedPage() {
     }
     try {
       const [{ createOpsEvidenceBundleExport }] = await Promise.all([import('@peaket/api-client/endpoints/investigations')]);
-      await createOpsEvidenceBundleExport(bundleId, exportBody(kind, reason, kind === 'AUTHORITY' ? memo : undefined) as never, { headers: { 'idempotency-key': crypto.randomUUID() } } as never);
+      const r = await createOpsEvidenceBundleExport(bundleId, exportBody(kind, reason, kind === 'AUTHORITY' ? memo : undefined) as never, { headers: { 'idempotency-key': crypto.randomUUID() } } as never);
+      const headers = r.headers as Headers;
+      const disposition = headers.get('content-disposition');
+      const data = r.data as unknown;
+      const documentId = typeof data === 'object' && data !== null ? String((data as Record<string, unknown>).documentId ?? '') : '';
+      const filename = exportFilename(kind, { 'content-disposition': disposition ?? undefined }, caseId, documentId || undefined);
+      const blob = new Blob([typeof data === 'string' ? data : JSON.stringify(data)], { type: exportContentType(kind) });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMessage(`${filename} 내려받기를 시작했습니다`);
     } catch (e) {
       setMessage(investigationsProblem(e).message);
     }
@@ -206,6 +268,7 @@ export function ConnectedPage() {
   if (screen === 'loading') return <p className="state">불러오는 중입니다</p>;
   if (!detail) return <p className="state">{message || '사건을 찾을 수 없습니다'}</p>;
 
+  const ipNodes = (graph?.nodes ?? []).filter((n) => n.kind === 'IP');
   return (
     <div className="col" style={{ gap: 16 }}>
       <div className="page-head">
@@ -219,28 +282,77 @@ export function ConnectedPage() {
         <p>{detail.accountCount}계정 · {detail.ticketCount}장 · 소명 {detail.appealOutcome}</p>
         <p className="t-sm muted">{detail.investigatorOpinion ?? '조사관 의견 없음'}</p>
       </section>
+
       <section className="widget">
         <h2 className="t-sm fw-b">연결 그래프</h2>
-        <p className="t-sm">{graph ? `${graph.nodes.length}개 점${graph.truncated ? ' · 묶음을 나눠 보세요' : ''}` : '없음'}</p>
+        {graphNotice ? <p className="banner banner-warning">{graphNotice}</p> : null}
+        <p className="t-sm">{graph ? `${graph.nodes.length}개 점 · ${graph.edges.length}개 선${graph.truncated ? ' · 묶음을 나눠 보세요' : ''}` : '그래프 없음'}</p>
         <ul className="col" style={{ gap: 4 }}>
-          {(graph?.nodes ?? []).filter((n) => n.kind === 'IP').map((n) => (
+          {ipNodes.map((n) => (
             <li key={n.nodeId} className="row" style={{ gap: 8 }}>
-              <button className="btn btn-ghost btn-sm" type="button" onClick={() => setSelectedIp((xs) => (xs.includes(n.nodeId) ? xs.filter((x) => x !== n.nodeId) : [...xs, n.nodeId]))}>{nodeText(n)}</button>
+              <label className="check-row">
+                <input className="cb" type="checkbox" checked={selectedIp.includes(n.nodeId)} onChange={(e) => setSelectedIp((xs) => (e.target.checked ? [...xs, n.nodeId] : xs.filter((x) => x !== n.nodeId)))} />
+                {nodeText(n)}
+              </label>
             </li>
           ))}
         </ul>
-        {revealed ? (
-          <p className="row" style={{ gap: 8 }}>
-            <span className="mono">{revealed}</span>
+        {revealed !== null && revealed.length > 0 ? (
+          <div className="col" style={{ gap: 6 }}>
+            <ul className="col" style={{ gap: 4 }}>
+              {revealed.map((x) => <li key={x.nodeId} className="mono">{x.nodeId} · {x.ip}</li>)}
+            </ul>
             <button className="btn btn-ghost btn-sm" type="button" onClick={() => setRevealed(null)}>원문 숨기기</button>
-          </p>
+          </div>
         ) : (
           <div className="col" style={{ gap: 6 }}>
             <input className="input" value={revealReason} onChange={(e) => setRevealReason(e.target.value)} placeholder="IP 원문을 여는 사유" aria-label="IP 원문 사유" />
             <button className="btn btn-secondary btn-sm" type="button" onClick={() => void openReveal()}>IP 원문 열기</button>
           </div>
         )}
+        <p className="t-xs muted">{revealableNodeIds(graph ?? { nodes: [], edges: [], truncated: false }).length}개 IP 점</p>
       </section>
+
+      <section className="widget">
+        <h2 className="t-sm fw-b">계정과 사건 기록</h2>
+        <ul className="col" style={{ gap: 8 }}>
+          {detail.members.map((m) => (
+            <li key={m.accountId} className="card-flat pad col" style={{ gap: 4 }}>
+              <span>{m.label} · 표 {m.ticketCount}장 · 소명 {m.appealResult} · 이의 {m.appealResult === 'REJECTED' ? '기각' : '-'}</span>
+              <span className="t-xs muted">추가 {m.addedBy}{m.removed ? ' · 제외됨' : ''}</span>
+              {!m.removed ? (
+                <label className="check-row">
+                  <input className="cb" type="checkbox" checked={removal.includes(m.accountId)} onChange={(e) => setRemoval((xs) => (e.target.checked ? [...xs, m.accountId] : xs.filter((x) => x !== m.accountId)))} />
+                  이 계정 빼기
+                </label>
+              ) : null}
+              {m.appealResult === 'SUBMITTED' || m.appealResult === 'PENDING' ? (
+                <select className="input input-sm" value={appealDecision[m.accountId] ?? ''} onChange={(e) => setAppealDecision((xs) => ({ ...xs, [m.accountId]: e.target.value as Decision }))} aria-label={`${m.label} 소명 판단`}>
+                  <option value="">소명 판단 안 함</option>
+                  <option value="ACCEPTED">인정</option>
+                  <option value="REJECTED">불인정</option>
+                </select>
+              ) : null}
+              <select className="input input-sm" value={objectionDecision[m.accountId] ?? ''} onChange={(e) => setObjectionDecision((xs) => ({ ...xs, [m.accountId]: e.target.value as Decision }))} aria-label={`${m.label} 이의 판단`}>
+                <option value="">이의 판단 안 함</option>
+                <option value="ACCEPTED">인정</option>
+                <option value="REJECTED">기각</option>
+              </select>
+            </li>
+          ))}
+        </ul>
+        <div className="col" style={{ gap: 8 }}>
+          <textarea className="textarea" value={opinion} onChange={(e) => setOpinion(e.target.value)} aria-label="조사관 의견" />
+          <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="메모·판단 이유" aria-label="사건 메모" />
+          <button className="btn btn-primary" type="button" onClick={() => void savePatch()}>사건 고치기</button>
+        </div>
+        <ul className="col" style={{ gap: 4 }}>
+          {detail.events.map((e) => (
+            <li key={e.seq} className="t-xs">{e.seq}. {e.kind} · {e.actorId ?? '시스템'} · {e.note ?? ''} · {e.occurredAt}</li>
+          ))}
+        </ul>
+      </section>
+
       <section className="widget">
         <h2 className="t-sm fw-b">소명·조치</h2>
         <div className="col" style={{ gap: 8 }}>
@@ -248,9 +360,10 @@ export function ConnectedPage() {
           <button className="btn btn-secondary" type="button" onClick={() => void requestAppeal()}>소명 요청</button>
           <button className="btn btn-secondary" type="button" onClick={() => void requestAction()}>조치 요청</button>
           <button className="btn btn-outline" type="button" onClick={() => void closeCase()}>정상 종료</button>
-          <p className="t-xs muted">{revealableNodeIds(graph ?? { nodes: [], edges: [], truncated: false }).length}개 IP 점 · 사유 {reason.length}자</p>
+          <p className="t-xs muted">사유 {reason.length}자</p>
         </div>
       </section>
+
       <section className="widget">
         <h2 className="t-sm fw-b">증거 묶음</h2>
         <button className="btn btn-secondary btn-sm" type="button" onClick={() => void makeBundle()}>증거 묶음 만들기</button>
@@ -265,6 +378,18 @@ export function ConnectedPage() {
             </li>
           ))}
         </ul>
+        {bundleDetail ? (
+          <div className="card-flat pad col" style={{ gap: 4 }}>
+            <p className="mono t-xs">{bundleDetail.bundleId}</p>
+            <p className="t-sm">상태 {String(bundleDetail.data.status ?? '')} · 해시 {String(bundleDetail.data.manifestSha256 ?? '')}</p>
+            <p className="t-xs">파일 {Array.isArray(bundleDetail.data.files) ? bundleDetail.data.files.length : 0}개</p>
+            <ul className="col" style={{ gap: 2 }}>
+              {(Array.isArray(bundleDetail.data.custody) ? bundleDetail.data.custody : []).map((c, i) => (
+                <li key={i} className="t-xs">{String((c as Record<string, unknown>).kind ?? '')} · {String((c as Record<string, unknown>).actorId ?? '')}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </section>
     </div>
   );

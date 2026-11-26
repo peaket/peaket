@@ -120,9 +120,9 @@ export function fraudAppealProblem(e: unknown): { kind: 'auth' | 'deadline' | 'i
 const won = new Intl.NumberFormat('ko-KR');
 const when = new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-export function priorityPurchaseRows(v: FraudLiveView): readonly { seatLabel: string; priceText: string; deadlineText: string; statusText: string }[] {
+export function priorityPurchaseRows(v: FraudLiveView, nowMs: number): readonly { seatLabel: string; priceText: string; deadlineText: string; statusText: string }[] {
   return v.priorityPurchases
-    .filter((p) => p.status === 'OFFERED' && p.expiresAtMs >= Date.now())
+    .filter((p) => p.status === 'OFFERED' && p.expiresAtMs >= nowMs)
     .map((p) => ({ seatLabel: p.seatLabel, priceText: `₩${won.format(p.price)}(원래 가격, 수수료 없음)`, deadlineText: when.format(new Date(p.expiresAtMs)), statusText: '구매 가능' }));
 }
 

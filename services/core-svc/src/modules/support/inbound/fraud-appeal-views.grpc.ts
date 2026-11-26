@@ -13,26 +13,32 @@ const ts = (v: unknown): number | null => {
   return typeof o.seconds === 'number' ? o.seconds * 1_000 + Math.floor((o.nanos ?? 0) / 1_000_000) : null;
 };
 const stateOf = (v: unknown): string => (typeof v === 'string' ? v.replace('FRAUD_APPEAL_VIEW_STATE_', '') : 'OPEN');
-const requestOf = (r: Record<string, any>): Record<string, any> => ({
-  accountId: r.account_id,
-  caseId: r.case_id,
-  eventId: r.event_id,
-  party: r.party || 'PAYER',
-  reasonCategories: r.reason_categories ?? [],
-  dueAtMs: ts(r.due_at),
-  lockedTicketIds: r.locked_ticket_ids ?? [],
-  heldTicketIds: r.held_ticket_ids ?? [],
-  excludedTicketIds: r.excluded_ticket_ids ?? [],
-  lockActive: r.lock_active === true,
-  lockExpiresAtMs: ts(r.lock_expires_at),
-  state: stateOf(r.state),
-  objectionDueAtMs: ts(r.objection_due_at),
-  objectionState: r.objection_state || 'NONE',
-  objectionNote: r.objection_note || null,
-  actionResult: { cancelledTicketIds: r.cancelled_ticket_ids ?? [], ...(ts(r.restricted_until) === null ? {} : { restrictedUntilMs: ts(r.restricted_until) }) },
-  priorityPurchases: (r.priority_purchases ?? []).map((p: any) => ({ grantId: p.grant_id, seatLabel: p.seat_label, price: p.price, expiresAtMs: ts(p.expires_at), status: p.status })),
-  version: r.version ?? 0,
-});
+const requestOf = (r: Record<string, any>): Record<string, any> => {
+  const cancelled = Array.isArray(r.cancelled_ticket_ids) ? r.cancelled_ticket_ids.map(String) : [];
+  const restricted = ts(r.restricted_until);
+  const actionResult = cancelled.length > 0 || restricted !== null ? { cancelledTicketIds: cancelled, ...(restricted === null ? {} : { restrictedUntilMs: restricted }) } : undefined;
+  return {
+    accountId: r.account_id,
+    caseId: r.case_id,
+    eventId: r.event_id,
+    party: r.party || 'PAYER',
+    reasonCategories: r.reason_categories ?? [],
+    dueAtMs: ts(r.due_at),
+    lockedTicketIds: r.locked_ticket_ids ?? [],
+    heldTicketIds: r.held_ticket_ids ?? [],
+    excludedTicketIds: r.excluded_ticket_ids ?? [],
+    lockActive: r.lock_active === true,
+    lockExpiresAtMs: ts(r.lock_expires_at),
+    state: stateOf(r.state),
+    objectionDueAtMs: ts(r.objection_due_at),
+    objectionState: r.objection_state || 'NONE',
+    objectionNote: r.objection_note || null,
+    ...(actionResult ? { actionResult } : {}),
+    priorityPurchases: (r.priority_purchases ?? []).map((p: any) => ({ grantId: p.grant_id, seatLabel: p.seat_label, price: p.price, expiresAtMs: ts(p.expires_at), status: p.status })),
+    version: r.version ?? 0,
+    ...(r.case_status ? { caseStatus: r.case_status } : {}),
+  };
+};
 
 export function startSupportGrpc(o: { port: number; token?: string; views: FraudAppealViews; now?: () => number }): grpc.Server {
   const def = protoLoader.fromJSON(coreV1Core as Parameters<typeof protoLoader.fromJSON>[0], OPTIONS);

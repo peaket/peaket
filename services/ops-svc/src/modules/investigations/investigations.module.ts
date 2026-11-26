@@ -43,6 +43,8 @@ export interface InvestigationsModuleDeps {
   readonly fraudCopies?: FraudAppealCopies;
   /** F-04-15 결제자별 잠금 표 조회(ticket-svc gRPC). 소명 요청 때 사본에 잠글 표를 싣는다 */
   readonly fraudTickets?: Pick<FraudTicketDirectory, 'listForAction'>;
+  /** SCR-071 연결 그래프·IP 원문(IR-01). F-04-16이 실제 조사 원천을 붙인다. */
+  readonly graph?: import('./domain/ports.js').FraudGraphSource;
   /** F-04-14 증거 묶음·외부 게시물 포트 묶음. 없으면 새 경로를 열지 않는다(기준 트리 404) */
   readonly evidence?: EvidenceBundlesDeps;
   /** AppModule이 FraudActions와 같은 인스턴스를 쓰기 위해 미리 만든 서비스. 없으면 evidence로 만든다 */
@@ -74,13 +76,11 @@ export class InvestigationsModule {
           ...(deps.runner ? { runner: deps.runner } : {}),
           ...(deps.fraudCopies ? { copies: deps.fraudCopies } : {}),
           ...(deps.fraudTickets ? { tickets: deps.fraudTickets } : {}),
+          ...(deps.graph ? { graph: deps.graph } : {}),
           ...(evidenceServices
             ? {
                 evidence: {
-                  listBundleIds: async (eventId: string, caseId: string) => {
-                    const page = await evidenceServices.evidence.list({ accountId: 'system', role: 'commander' }, { eventId, limit: 100 });
-                    return page.items.filter((x) => x.caseId === caseId).map((x) => String(x.bundleId));
-                  },
+                  listBundleIds: (eventId: string, caseId: string) => evidenceServices.evidence.listBundleIdsForCase(eventId, caseId),
                 },
               }
             : {}),

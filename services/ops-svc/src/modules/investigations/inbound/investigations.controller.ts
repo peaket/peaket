@@ -15,8 +15,13 @@ import {
   CreateOpsFraudCaseAppealRequestParams,
   CreateOpsFraudCaseAppealRequestResponse,
   CreateOpsFraudCaseBody,
+  CreateOpsFraudCaseIpRevealBody,
+  CreateOpsFraudCaseIpRevealParams,
+  CreateOpsFraudCaseIpRevealResponse,
   GetOpsEventFraudOverviewParams,
   GetOpsEventFraudOverviewResponse,
+  GetOpsFraudCaseGraphParams,
+  GetOpsFraudCaseGraphResponse,
   GetOpsFraudCaseParams,
   GetOpsFraudCaseResponse,
   GetOpsFraudClusterParams,
@@ -171,6 +176,35 @@ export class InvestigationsController {
       const out = await this.investigations.getCase(actorOf(me), params.caseId);
       void reply.header('etag', etag(out.version));
       return out.view;
+    } catch (e) {
+      reject(e);
+    }
+  }
+
+  @Get('fraud-cases/:caseId/graph')
+  @Header('Cache-Control', 'no-store')
+  @Roles([...OPS_ROLES] as AdminRole[])
+  @ContractRouteSchema({ params: GetOpsFraudCaseGraphParams, responses: { 200: GetOpsFraudCaseGraphResponse } })
+  async graph(@ContractParams(GetOpsFraudCaseGraphParams) params: { caseId: string }, @CurrentPrincipal() me: Principal) {
+    try {
+      return await this.investigations.graph(actorOf(me), params.caseId);
+    } catch (e) {
+      reject(e);
+    }
+  }
+
+  @Post('fraud-cases/:caseId/ip-reveals')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  @Roles([...OPS_ROLES] as AdminRole[])
+  @ContractRouteSchema({ params: CreateOpsFraudCaseIpRevealParams, body: CreateOpsFraudCaseIpRevealBody, responses: { 200: CreateOpsFraudCaseIpRevealResponse } })
+  async ipReveal(
+    @ContractParams(CreateOpsFraudCaseIpRevealParams) params: { caseId: string },
+    @ContractBody(CreateOpsFraudCaseIpRevealBody) body: { nodeIds: string[]; reason: string },
+    @CurrentPrincipal() me: Principal,
+  ) {
+    try {
+      return await this.investigations.ipReveal(actorOf(me), params.caseId, body);
     } catch (e) {
       reject(e);
     }

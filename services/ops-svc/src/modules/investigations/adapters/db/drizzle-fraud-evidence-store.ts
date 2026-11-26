@@ -88,6 +88,16 @@ export class DrizzleFraudEvidenceStore implements FraudEvidenceStore {
     return { items: page.map(bundleOf), nextCursor: rows.length > q.limit ? (page.at(-1)?.id ?? null) : null };
   }
 
+  /** 사건 상세 evidenceBundleIds: 만든 순서(같은 시각이면 ID 순)로 준다(IR-07). */
+  async listBundleIdsForCase(eventId: string, caseId: string): Promise<readonly string[]> {
+    const rows = await this.db.db
+      .select({ id: evidenceBundle.id })
+      .from(evidenceBundle)
+      .where(and(eq(evidenceBundle.eventId, eventId), eq(evidenceBundle.caseId, caseId)))
+      .orderBy(asc(evidenceBundle.createdAt), asc(evidenceBundle.id));
+    return rows.map((r) => r.id);
+  }
+
   async listAllBundles(limit: number): Promise<EvidenceBundleRecord[]> {
     const rows = await this.db.db.select().from(evidenceBundle).orderBy(desc(evidenceBundle.createdAt)).limit(limit);
     return rows.map(bundleOf);

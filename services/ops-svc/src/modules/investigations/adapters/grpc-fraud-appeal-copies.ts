@@ -33,7 +33,7 @@ export class GrpcFraudAppealCopies implements FraudAppealCopies {
     this.#token = o.token;
   }
 
-  async set(i: { caseId: string; eventId: string; accountId: string; version: number; lockActive: boolean; objectionDueAtMs: number | null; actionResult: Record<string, unknown> | null; party?: 'PAYER' | 'HOLDER'; state?: 'OPEN' | 'SUBMITTED' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED'; reasonCategories?: readonly string[]; dueAtMs?: number; lockedTicketIds?: readonly string[]; heldTicketIds?: readonly string[]; excludedTicketIds?: readonly string[]; lockExpiresAtMs?: number | null; objectionState?: 'NONE' | 'SUBMITTED' | 'ACCEPTED' | 'REJECTED'; objectionNote?: string | null; priorityPurchases?: readonly Record<string, unknown>[]; restrictedUntilMs?: number | null; cancelledTicketIds?: readonly string[] }): Promise<void> {
+  async set(i: { caseId: string; eventId: string; accountId: string; version: number; lockActive: boolean; objectionDueAtMs: number | null; actionResult: Record<string, unknown> | null; party?: 'PAYER' | 'HOLDER'; state?: 'OPEN' | 'SUBMITTED' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED'; reasonCategories?: readonly string[]; dueAtMs?: number; lockedTicketIds?: readonly string[]; heldTicketIds?: readonly string[]; excludedTicketIds?: readonly string[]; lockExpiresAtMs?: number | null; objectionState?: 'NONE' | 'SUBMITTED' | 'ACCEPTED' | 'REJECTED'; objectionNote?: string | null; priorityPurchases?: readonly Record<string, unknown>[]; restrictedUntilMs?: number | null; cancelledTicketIds?: readonly string[]; caseStatus?: string }): Promise<void> {
     const metadata = new grpc.Metadata();
     if (this.#token) {
       metadata.set(INTERNAL_GRPC_TOKEN_HEADER, this.#token);
@@ -64,6 +64,7 @@ export class GrpcFraudAppealCopies implements FraudAppealCopies {
           party: i.party ?? 'PAYER',
           held_ticket_ids: [...(i.heldTicketIds ?? [])],
           excluded_ticket_ids: [...(i.excludedTicketIds ?? [])],
+          ...(i.caseStatus ? { case_status: i.caseStatus } : {}),
         },
         metadata,
         { deadline: Date.now() + DEADLINE_MS },

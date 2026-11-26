@@ -196,6 +196,8 @@ export interface FraudAppealCopies {
     objectionDueAtMs: number | null;
     actionResult: Record<string, unknown> | null;
     party: 'PAYER' | 'HOLDER';
+    /** 사건 상태. CLEARED면 팬 목록에서 숨긴다(IR-12). */
+    caseStatus?: 'INVESTIGATING' | 'APPEAL_PENDING' | 'DECISION_PENDING' | 'ACTIONED' | 'OBJECTED' | 'CLEARED' | 'REVERSED';
     state?: 'OPEN' | 'SUBMITTED' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED';
     reasonCategories?: readonly string[];
     dueAtMs?: number;
@@ -383,12 +385,39 @@ export interface FraudCompensationCases {
   open(i: { caseId: string; eventId: string; accountId: string; ticketId: string; reason: 'NO_SEAT' | 'ENTRY_STARTED'; actorId: string }): Promise<{ caseId: string }>;
 }
 
+/** SCR-071 연결 그래프. IP 점의 label은 가린 값이고 원문은 revealIps로만 준다(IR-01). */
+export interface FraudGraphNode {
+  readonly nodeId: string;
+  readonly kind: 'ACCOUNT' | 'DEVICE' | 'PAYMENT_METHOD' | 'CONTACT' | 'IP' | 'ASN';
+  readonly label: string;
+  readonly inCluster: boolean;
+}
+export interface FraudGraphEdge {
+  readonly from: string;
+  readonly to: string;
+  readonly kind: string;
+  readonly firstSeenAt: string;
+  readonly lastSeenAt: string;
+  readonly count: number;
+}
+export interface FraudGraphView {
+  readonly nodes: readonly FraudGraphNode[];
+  readonly edges: readonly FraudGraphEdge[];
+  readonly truncated: boolean;
+}
+export interface FraudGraphSource {
+  graph(caseId: string): Promise<FraudGraphView>;
+  revealIps(caseId: string, nodeIds: readonly string[]): Promise<readonly { nodeId: string; ip: string }[]>;
+}
+
 /** F-04-14 증거 저장소. 묶음·관리 연속성·내보내기·외부 게시물을 같은 트랜잭션 규칙으로 쓴다. */
 export interface FraudEvidenceStore {
   readonly auditsWrites: boolean;
   putBundle(b: EvidenceBundleRecord, c: Omit<CustodyRecord, 'seq' | 'prevHash' | 'rowHash'>, o?: { idem?: IdempotentWrite; result?: unknown }): Promise<{ replayed: boolean; result?: unknown }>;
   getBundle(bundleId: string): Promise<EvidenceBundleRecord | null>;
   listBundles(q: { eventId: string; cursor?: string; limit: number }): Promise<{ items: EvidenceBundleRecord[]; nextCursor: string | null }>;
+  /** 사건 상세 evidenceBundleIds를 만든 순서로 준다(IR-07). 없으면 listBundles를 페이지로 읽어 만든 순서로 정렬한다. */
+  listBundleIdsForCase?(eventId: string, caseId: string): Promise<readonly string[]>;
   updateBundle(b: EvidenceBundleRecord, expectedStatus?: readonly EvidenceBundleStatus[]): Promise<boolean>;
   /** 묶음 갱신과 관리 연속성 행 추가를 한 트랜잭션으로 쓴다(IR-06). */
   updateBundleWithCustody?(b: EvidenceBundleRecord, c: Omit<CustodyRecord, 'seq' | 'prevHash' | 'rowHash'>, expectedStatus?: readonly EvidenceBundleStatus[], o?: { idem?: IdempotentWrite; result?: unknown }): Promise<boolean>;

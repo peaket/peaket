@@ -1467,6 +1467,10 @@ export const coreV1Core: Record<string, unknown> = {
                       "rule": "repeated",
                       "type": "string",
                       "id": 19
+                    },
+                    "case_status": {
+                      "type": "string",
+                      "id": 20
                     }
                   }
                 },

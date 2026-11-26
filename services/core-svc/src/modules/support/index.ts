@@ -8,4 +8,5 @@ export { RedisFraudAppealViews } from './adapters/redis-fraud-appeal-views.js';
 export { DrizzleSupportAppealStore } from './adapters/db/drizzle-support-appeal-store.js';
 export { startSupportGrpc } from './inbound/fraud-appeal-views.grpc.js';
 export { HttpFraudCaseAppeals } from './adapters/http-fraud-case-appeals.js';
+export { UnavailableAppealTargets, UnavailableFraudCaseAppeals } from './adapters/unavailable-ports.js';
 export { SupportModule, type SupportWiring } from './support.module.js';

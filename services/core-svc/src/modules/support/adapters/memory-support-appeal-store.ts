@@ -1,6 +1,6 @@
 // F-04-15 support 메모리 저장소(local·ci·시험). 실제 저장소 시험이 이 클래스를 직접 쓴다.
 import type { AppealRecord } from '../domain/appeal.js';
-import type { IdempotentLookup, IdempotentWrite, SupportAppealStore } from '../domain/ports.js';
+import type { IdempotentClaim, IdempotentLookup, IdempotentWrite, SupportAppealStore } from '../domain/ports.js';
 
 const sameHash = (a: Uint8Array, b: Uint8Array): boolean => {
   if (a.length !== b.length) return false;
@@ -11,6 +11,8 @@ const sameHash = (a: Uint8Array, b: Uint8Array): boolean => {
 interface IdemRow {
   readonly requestHash: Uint8Array;
   readonly result: unknown;
+  /** finishClaim까지 끝났는가. false면 아직 처리 중이다. */
+  readonly done: boolean;
 }
 
 export class MemorySupportAppealStore implements SupportAppealStore {
@@ -23,7 +25,7 @@ export class MemorySupportAppealStore implements SupportAppealStore {
       const k = this.keyOf(o.idem);
       const found = this.idem.get(k);
       if (found) return sameHash(found.requestHash, o.idem.requestHash) ? { replayed: true, ...(found.result === undefined ? {} : { result: found.result }) } : { replayed: true, result: undefined };
-      this.idem.set(k, { requestHash: new Uint8Array(o.idem.requestHash), result: o.result });
+      this.idem.set(k, { requestHash: new Uint8Array(o.idem.requestHash), result: o.result, done: true });
     }
     this.rows.set(a.id, { ...a });
     return { replayed: false };
@@ -49,6 +51,34 @@ export class MemorySupportAppealStore implements SupportAppealStore {
   async findIdempotent(idem: IdempotentWrite): Promise<IdempotentLookup> {
     const found = this.idem.get(this.keyOf(idem));
     if (!found) return { kind: 'none' };
-    return sameHash(found.requestHash, idem.requestHash) ? { kind: 'replay', result: found.result } : { kind: 'reused' };
+    if (!sameHash(found.requestHash, idem.requestHash)) return { kind: 'reused' };
+    if (!found.done) return { kind: 'in_progress' };
+    return { kind: 'replay', result: found.result };
+  }
+
+  async claim(idem: IdempotentWrite): Promise<IdempotentClaim> {
+    const k = this.keyOf(idem);
+    const found = this.idem.get(k);
+    if (found) {
+      if (!sameHash(found.requestHash, idem.requestHash)) return { kind: 'reused' };
+      if (!found.done) return { kind: 'in_progress' };
+      return { kind: 'replay', result: found.result };
+    }
+    this.idem.set(k, { requestHash: new Uint8Array(idem.requestHash), result: undefined, done: false });
+    return { kind: 'claimed' };
+  }
+
+  async finishClaim(o: { record: AppealRecord; idem: IdempotentWrite; result: unknown }): Promise<void> {
+    const k = this.keyOf(o.idem);
+    const found = this.idem.get(k);
+    if (!found) throw new Error('멱등 키 선점이 사라졌습니다');
+    this.idem.set(k, { ...found, result: o.result, done: true });
+    this.rows.set(o.record.id, { ...o.record });
+  }
+
+  async releaseClaim(idem: IdempotentWrite): Promise<void> {
+    const k = this.keyOf(idem);
+    const found = this.idem.get(k);
+    if (found && !found.done) this.idem.delete(k);
   }
 }

@@ -106,9 +106,7 @@ export function actionRequestDecision(o: {
         .filter((t) => o.accountIds.includes(t.payerAccountId) && (explicit?.has(t.ticketId) === true || (explicit === undefined && t.holderAccountId === t.payerAccountId)))
         .map((t) => ({ ticketId: t.ticketId, expectedHolderAccountId: t.holderAccountId }));
   if (o.action === 'CANCEL_TICKETS') {
-    // F-04-15 동결 로컬: 여러 계정을 한 번에 요청한데 티켓 조회가 아직 비어 있는 경우는
-    // 승인 업무를 만들고(대상 표 없음) 승인 단계에서 다시 본다. 한 계정 요청의 빈 목록은 계속 422다(F-04-14 IR-10).
-    if (targets.length === 0 && o.accountIds.length === 1) throw problem('action-target-invalid', 422, '취소할 표가 없습니다');
+    if (targets.length === 0) throw problem('action-target-invalid', 422, '취소할 표가 없습니다');
     if (explicit !== undefined) {
       const got = new Set(targets.map((t) => t.ticketId));
       const known = new Set(o.tickets.filter((t) => o.accountIds.includes(t.payerAccountId)).map((t) => t.ticketId));

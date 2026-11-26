@@ -22,6 +22,7 @@ export function FraudAppealLive({ caseId }: { caseId: string }) {
   const [text, setText] = useState('');
   const [screen, setScreen] = useState<'loading' | 'ready' | 'login' | 'missing' | 'error'>('loading');
   const [message, setMessage] = useState('');
+  const [nowMs] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     if (!ensureBrowserApi()) {
@@ -75,9 +76,9 @@ export function FraudAppealLive({ caseId }: { caseId: string }) {
   if (screen === 'error') return <p className="state">{message || '소명을 불러오지 못했습니다'}</p>;
   if (screen === 'loading' || !view) return <p className="state">불러오는 중입니다</p>;
 
-  const sub = submissionOf(view, Date.now());
+  const sub = submissionOf(view, nowMs);
   const reasons = canSeeReasonCategories(view);
-  const priority = priorityPurchaseRows(view);
+  const priority = priorityPurchaseRows(view, nowMs);
 
   return (
     <div className="col" style={{ gap: 20 }}>
@@ -90,7 +91,19 @@ export function FraudAppealLive({ caseId }: { caseId: string }) {
         <h2 className="t-sm fw-b">내 요청</h2>
         <p>{fraudDeadlineText(view)} · 상태 {view.status}</p>
         {reasons ? <p>사유 범주 {view.reasonCategories.join('·')}</p> : null}
-        {view.party === 'HOLDER' ? <p>{holderTicketText(view)} · {view.heldTicketIds.join(', ')}</p> : <p>잠긴 표 {view.lockedTicketIds.length}매 · {view.lockActive ? '양도 잠금' : '잠금 풀림'}</p>}
+        {view.party === 'HOLDER' ? (
+          <div className="col" style={{ gap: 2 }}>
+            <p>{holderTicketText(view)} · {view.heldTicketIds.join(', ')}</p>
+            {view.excludedTicketIds.length > 0 ? <p>조치 대상에서 빠진 표 {view.excludedTicketIds.join(', ')}</p> : null}
+          </div>
+        ) : (
+          <p>
+            잠긴 표 {view.lockedTicketIds.length}매 · {view.lockActive
+              ? `양도 잠금${view.lockExpiresAtMs ? `(늦어도 ${new Date(view.lockExpiresAtMs).toLocaleDateString('ko-KR')}까지)` : ''}`
+              : '잠금 풀림'}
+          </p>
+        )}
+        {view.objectionStatus !== 'NONE' ? <p>이의 {view.objectionStatus}</p> : null}
         {view.actionResult ? <p>취소된 표 {view.actionResult.cancelledTicketIds.length}매{view.actionResult.restrictedUntilMs ? ` · 이용 제한 ${new Date(view.actionResult.restrictedUntilMs).toLocaleDateString('ko-KR')}까지` : ''}</p> : null}
         {view.objectionNote ? <p>이의 결과 이유 {view.objectionNote}</p> : null}
       </section>

@@ -20,15 +20,37 @@ export class SupportAppeals {
     const checked = validateAppealBody(body.body);
     if ('status' in checked) throw problem(checked.type, checked.status, checked.title);
 
+    // IR-06: 저장소가 키 선점을 지원하면 업무(ops 호출 포함) 전에 원자적으로 잡는다.
+    if (this.d.store.claim && this.d.store.finishClaim) {
+      const claim = await this.d.store.claim(idem);
+      if (claim.kind === 'reused') throw problem('idempotency-key-reused', 422, '같은 멱등 키를 다른 요청에 썼습니다');
+      if (claim.kind === 'in_progress') throw problem('idempotency-request-in-progress', 409, '같은 요청을 아직 처리하고 있습니다');
+      if (claim.kind === 'replay') return (claim.result ?? {}) as Record<string, unknown>;
+      try {
+        const made = await this.#create(actor, body, checked.body);
+        await this.d.store.finishClaim({ record: made.record, idem, result: made.result });
+        return made.result;
+      } catch (e) {
+        await this.d.store.releaseClaim?.(idem).catch(() => undefined);
+        throw e;
+      }
+    }
+
     const found = await this.d.store.findIdempotent(idem);
     if (found.kind === 'reused') throw problem('idempotency-key-reused', 422, '같은 멱등 키를 다른 요청에 썼습니다');
     if (found.kind === 'in_progress') throw problem('idempotency-request-in-progress', 409, '같은 요청을 아직 처리하고 있습니다');
     if (found.kind === 'replay') return (found.result ?? {}) as Record<string, unknown>;
 
+    const made = await this.#create(actor, body, checked.body);
+    await this.d.store.put(made.record, { idem, result: made.result });
+    return made.result;
+  }
+
+  async #create(actor: { accountId: string }, body: { kind: AppealKind; targetId: string; body: string }, normalized: string): Promise<{ record: AppealRecord; result: Record<string, unknown> }> {
     const nowMs = this.d.now();
     // 사본은 캐시다. 읽지 못하면 PAYER로 보고, HOLDER 판정은 ops가 다시 한다.
     const party = (await this.d.views.list(actor.accountId).catch(() => [])).find((v) => v.caseId === body.targetId)?.party === 'HOLDER' ? 'HOLDER' : 'PAYER';
-    let record: AppealRecord = newAppeal({ accountId: actor.accountId, kind: body.kind, targetId: body.targetId, body: checked.body, nowMs });
+    let record: AppealRecord = newAppeal({ accountId: actor.accountId, kind: body.kind, targetId: body.targetId, body: normalized, nowMs });
 
     if (body.kind === 'FRAUD_CASE') {
       if (!this.d.fraudCases) throw problem('dependency-unavailable', 503, '조사 사건 연결을 쓸 수 없습니다');
@@ -49,9 +71,7 @@ export class SupportAppeals {
       }
     }
 
-    const result = appealResponse(record);
-    await this.d.store.put(record, { idem, result });
-    return result;
+    return { record, result: appealResponse(record) };
   }
 
   async list(actor: { accountId: string }, q: { cursor?: string; limit: number }): Promise<{ items: Record<string, unknown>[]; nextCursor: string | null }> {
@@ -68,7 +88,10 @@ export class SupportAppeals {
   async fraudViews(actor: { accountId: string }): Promise<{ items: Record<string, unknown>[]; nextCursor: null }> {
     const nowMs = this.d.now();
     const all = await this.d.views.list(actor.accountId);
-    const items = all.filter((v) => v.state === 'OPEN' || nowMs - v.updatedAtMs <= 30 * 24 * 60 * 60 * 1000).map((v) => fraudAppealViewResponse(v));
+    const items = all
+      .filter((v) => v.caseStatus !== 'CLEARED')
+      .filter((v) => v.state === 'OPEN' || v.state === 'SUBMITTED' || nowMs - v.updatedAtMs <= 30 * 24 * 60 * 60 * 1000)
+      .map((v) => fraudAppealViewResponse(v));
     return { items, nextCursor: null };
   }
 
