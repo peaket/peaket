@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { idempotencyKeyReused } from '@peaket/platform';
 import type { SalePolicyRule } from '@peaket/validation/sale-policy';
 import type { CatalogRepository, NameEntry, PlaceNameEntry, EventPublicFields, EventSummaryRow, LayoutFile, LayoutPreview, MemberList, NewProduction, ProductionForUpdate, ProductionPublicFields, RegistrationTx, RequestOnce, SaleEligibilityEvent } from '../domain/ports.js';
+import type { PartnerEventSource, PartnerProductionSource, PartnerProductionSummaryRow, PartnerSellerSource, PartnerTodoRow } from '../domain/partner-home.js';
 import { type CatalogEvent, type EventSaleState, isPublic, type Production } from '../domain/production.js';
 import type { PartnerProductionMedia, ProductionImageTx } from '../domain/media-ports.js';
 import type { ProductionImageRow } from '../domain/production-image.js';
@@ -285,6 +286,142 @@ export class MemoryCatalogRepository implements CatalogRepository {
 
   async deleteWish(accountId: string, productionId: string): Promise<void> {
     this.wishes.get(accountId)?.delete(productionId);
+  }
+
+  /** F-07-12 목록: 테넌트 공연마다 회차·변경분·판매 상태를 모아 한 줄로 만든다. 정렬·필터는 유스케이스가 한다. */
+  async partnerProductions(tenantId: string): Promise<PartnerProductionSummaryRow[]> {
+    return [...this.productions.values()]
+      .filter((p) => p.promoterId === tenantId)
+      .map((p) => {
+        const events = [...this.events.values()].filter((e) => e.productionId === p.id);
+        const pending = this.pending.get(p.id) ?? [];
+        const live = events.filter((e) => e.status !== 'CANCELLED');
+        const opens = [...live.map((e) => e.openAt), ...pending.map((e) => e.openAt)];
+        const firstOpenAt = opens.length > 0 ? new Date(Math.min(...opens.map((d) => d.getTime()))) : null;
+        const saleStates = live.flatMap((e) => {
+          const s = this.saleStates.get(e.id);
+          return s === undefined ? [] : [s];
+        });
+        return {
+          productionId: p.id,
+          title: p.title,
+          eventCount: events.length + pending.length,
+          saleReview: p.saleReview,
+          hasApprovalHistory: p.saleApprovedAt !== null,
+          rejectionReason: p.rejectionReason ?? null,
+          suspensionReasonCode: p.suspensionReasonCode ?? null,
+          firstOpenAt,
+          saleStates,
+        };
+      });
+  }
+
+  async partnerProduction(productionId: string, tenantId: string): Promise<PartnerProductionSource | undefined> {
+    const p = this.productions.get(productionId);
+    if (!p || p.promoterId !== tenantId) return undefined;
+    const existing = [...this.events.values()].filter((e) => e.productionId === productionId).sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime() || (a.id < b.id ? -1 : 1));
+    const pending = this.pending.get(productionId) ?? [];
+    const events: PartnerEventSource[] = [
+      ...existing.map((e) => this.#partnerEvent(e, false)),
+      ...pending.map((e) => this.#pendingPartnerEvent(e)),
+    ].sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime() || (a.eventId < b.eventId ? -1 : 1));
+    const withDetails = existing.find((e) => this.details.has(e.id));
+    const details = withDetails ? this.details.get(withDetails.id) : undefined;
+    const place = details?.place ?? null;
+    const images = [...this.images.values()].filter((i) => i.productionId === productionId).sort((a, b) => (a.kind === b.kind ? a.order - b.order : a.kind === 'POSTER' ? -1 : 1));
+    return {
+      production: {
+        ...p,
+        version: p.version ?? 1,
+        suspensionReasonCode: p.suspensionReasonCode ?? null,
+        ageRating: details?.production?.ageRating ?? null,
+        runningMinutes: details?.production?.runningMinutes ?? null,
+      },
+      events,
+      images,
+      place: place ? { id: place.id, name: place.name } : null,
+      artists: details?.artists ?? [],
+      aliases: [],
+      hasPendingRevision: pending.length > 0,
+      pendingRevisionFields: pending.length > 0 ? ['addedEvents'] : [],
+    };
+  }
+
+  async partnerTodo(tenantId: string): Promise<PartnerTodoRow> {
+    const rejectedSaleReviewCount = [...this.productions.values()].filter((p) => p.promoterId === tenantId && p.saleReview === 'REJECTED').length;
+    return {
+      rejectedSaleReviewCount,
+      settlementDisputeDueCount: null,
+      settlementDisputeEarliestDueAt: null,
+      openGateFlagCount: null,
+      pendingStaffInvitationCount: null,
+    };
+  }
+
+  async partnerSeller(tenantId: string): Promise<PartnerSellerSource | undefined> {
+    const p = this.promoters.get(tenantId);
+    if (!p) return undefined;
+    return {
+      seller: {
+        legalName: p.legalName,
+        representative: p.representative,
+        address: p.address,
+        phone: p.phone,
+        email: p.email,
+        businessRegNo: p.businessRegNo,
+        mailOrderReportNo: p.mailOrderReportNo,
+        exemptionBasis: p.exemptionBasis,
+      },
+      verifiedAt: p.verifiedAt,
+    };
+  }
+
+  #partnerEvent(e: CatalogEvent, pending: boolean): PartnerEventSource {
+    const d = this.details.get(e.id);
+    const extra = e as CatalogEvent & { entryClosedAt?: Date | null };
+    const event = d?.event;
+    const soldPercent = (event as { soldPercent?: number } | undefined)?.soldPercent;
+    return {
+      eventId: e.id,
+      version: this.eventVersions.get(e.id) ?? 1,
+      pending,
+      openAt: e.openAt,
+      lobbyMinutes: event?.lobbyMinutes ?? 10,
+      entryOpensAt: event?.entryOpensAt ?? null,
+      startsAt: e.startsAt,
+      endsAt: event?.endsAt ?? new Date(e.startsAt.getTime() + 2 * 3_600_000),
+      reentryAllowed: event?.reentryAllowed ?? false,
+      lobbyShuffle: event?.lobbyShuffle ?? true,
+      openBatch: event?.openBatch ?? true,
+      seatAssignment: event?.seatAssignment ?? 'PICK',
+      perPersonLimit: event?.perPersonLimit ?? 4,
+      status: e.status,
+      saleStatus: this.saleStates.get(e.id) ?? null,
+      soldPercent: soldPercent ?? null,
+      entryClosedAt: extra.entryClosedAt ?? (event as { entryClosedAt?: Date | null } | undefined)?.entryClosedAt ?? null,
+    };
+  }
+
+  #pendingPartnerEvent(e: PendingEvent): PartnerEventSource {
+    return {
+      eventId: e.eventId,
+      version: 1,
+      pending: true,
+      openAt: e.openAt,
+      lobbyMinutes: e.lobbyMinutes,
+      entryOpensAt: e.entryOpensAt ?? null,
+      startsAt: e.startsAt,
+      endsAt: e.endsAt,
+      reentryAllowed: e.reentryAllowed,
+      lobbyShuffle: e.lobbyShuffle,
+      openBatch: e.openBatch,
+      seatAssignment: e.seatAssignment,
+      perPersonLimit: e.perPersonLimit,
+      status: 'SCHEDULED',
+      saleStatus: null,
+      soldPercent: null,
+      entryClosedAt: null,
+    };
   }
 }
 

@@ -123,6 +123,8 @@ export const production = pgTable(
     requestedPlace: jsonb('requested_place'),
     /** 새 아티스트 이름 요청 [{ name, sortOrder }] */
     requestedArtists: jsonb('requested_artists'),
+    /** 공연 판(0054, 마지막 승인 내용의 판). 읽기만 하고 고치기는 F-07-3 몫이다(F-07-12) */
+    version: integer('version').notNull().default(1),
     createdAt: at('created_at').notNull().defaultNow(),
   },
   (t) => [
@@ -143,6 +145,7 @@ export const production = pgTable(
     check('production_place_check', sql`(${t.placeId} is null) <> (${t.requestedPlace} is null)`),
     check('production_approved_place_check', sql`${t.saleApprovedAt} is null or ${t.placeId} is not null`),
     check('production_sale_policy_version_check', sql`${t.salePolicyVersion} >= 1`),
+    check('production_version_check', sql`${t.version} >= 1`),
     // 회차의 판매자 사본이 공연의 판매자와 같게 묶는 외래키의 대상
     unique('production_id_promoter_uq').on(t.id, t.promoterId),
     index('production_promoter_idx').on(t.promoterId),

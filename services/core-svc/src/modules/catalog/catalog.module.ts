@@ -29,6 +29,8 @@ import { FanFilePublisher } from './application/fan-file-publisher.js';
 import { GetEventSummary } from './application/get-event-summary.js';
 import { ImportSeatmap } from './application/import-seatmap.js';
 import { PartnerDirectory } from './application/partner-directory.js';
+import { PartnerHomeRead } from './application/partner-home.js';
+import { PartnerHomeController } from './inbound/partner-home.controller.js';
 import { ProductionImages } from './application/production-images.js';
 import { SaleEligibilityLists } from './application/sale-eligibility-lists.js';
 import { SalePolicies } from './application/sale-policy.js';
@@ -192,6 +194,10 @@ export class CatalogModule implements NestModule {
         { path: lists, method: RequestMethod.POST },
         { path: lists + '/:listKey', method: RequestMethod.DELETE },
         { path: 'v1/partner/events/:eventId', method: RequestMethod.PATCH },
+        { path: 'v1/partner/productions', method: RequestMethod.GET },
+        { path: 'v1/partner/productions/:productionId', method: RequestMethod.GET },
+        { path: 'v1/partner/todo-summary', method: RequestMethod.GET },
+        { path: 'v1/partner/seller-profile', method: RequestMethod.GET },
         { path: 'v1/events/:eventId/sale-eligibility', method: RequestMethod.GET },
         { path: 'internal/v1/events/:eventId/sale-config', method: RequestMethod.GET },
       );
@@ -222,8 +228,8 @@ export class CatalogModule implements NestModule {
         }
       | { storage: 'memory'; repository?: MemoryCatalogRepository; media?: Partial<MediaWiring>; saleConfigs?: SaleConfigStore; opsApprovals?: OpsApprovalClient; saleOpen?: SaleOpen; saleConfigMetrics?: SaleConfigMetrics; payoutRegistration?: PayoutRegistrationPort },
   ): DynamicModule {
-    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview, GetDemandForecast, ChangeEventScale, Promoters, ApplyContractApproval, RequestSaleReview, OpsSaleReviews];
-    const controllers = [EventSummaryController, PartnerProductionController, PartnerSaleReviewController, PartnerDirectoryController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, InternalSaleConfigController, InternalEntryClosedController, OpsEventController, OpsPromoterController, InternalPromoterController];
+    const shared = [GetEventSummary, CreateProduction, AddProductionEvent, Wishes, PartnerDirectory, PartnerHomeRead, ProductionImages, ImportSeatmap, FanFilePublisher, SeatmapLayouts, SeatmapTemplates, SalePolicies, UpdateProductionEvent, SaleEligibilityLists, FanSaleEligibility, SearchCatalog, PublishSaleConfigs, ApproveSaleReview, RejectSaleReview, GetDemandForecast, ChangeEventScale, Promoters, ApplyContractApproval, RequestSaleReview, OpsSaleReviews];
+    const controllers = [EventSummaryController, PartnerProductionController, PartnerSaleReviewController, PartnerDirectoryController, PartnerHomeController, WishController, PartnerMediaController, PartnerSeatmapController, PartnerSeatmapTemplatesController, PartnerSalePolicyController, PartnerSaleEligibilityController, PartnerEventController, SearchController, OpsSaleReviewController, InternalSaleConfigController, InternalEntryClosedController, OpsEventController, OpsPromoterController, InternalPromoterController];
     if (o.storage === 'database') {
       return {
         module: CatalogModule,

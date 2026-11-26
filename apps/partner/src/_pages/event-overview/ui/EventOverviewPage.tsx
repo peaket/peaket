@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { SELLER_FIELDS, stellaOrg } from '@/entities/partner-org';
 import { ADMIN_ONLY_REASON } from '@/entities/partner-user';
+import { overviewModeOf } from '../model/live';
 import { QUEUE_MODE_LABEL, requireProduction, type Production } from '@/entities/production';
 import { getVenue } from '@/entities/venue';
 import { routes } from '@/shared/config/routes';
@@ -14,6 +15,7 @@ import { performanceSellerNotice } from '@/shared/lib/seller-notice';
 import { BigScreenNotice } from '@/shared/ui/BigScreenNotice';
 import { PreviewStateSwitcher } from '@/shared/ui/PreviewStateSwitcher';
 import { EventContextHeader } from '@/widgets/event-context';
+import { LiveEventOverview } from './LiveEventOverview';
 
 type OverviewState = (typeof OVERVIEW_STATES)[number];
 /** 화면 변형: 기본 · 재승인 대기(오픈 전) · 반려 · 재승인 대기(판매 계속) */
@@ -58,6 +60,7 @@ const HEAD_BADGES: Record<Variant, [string, string][]> = {
 export default async function EventOverviewPage({ params, searchParams }: RouteProps<{ id: string }>) {
   const { id } = await params;
   const sp = await searchParams;
+  if (overviewModeOf(id, { state: readParam(sp, 'state') }) === 'live') return <LiveEventOverview productionId={id} />;
   const pv = readPreview(sp, OVERVIEW_STATES, '기본');
   const production = requireProduction(id);
   const v = variantOf(pv.state, readParam(sp, 'state') !== undefined, production);

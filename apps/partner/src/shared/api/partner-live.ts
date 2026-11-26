@@ -610,3 +610,139 @@ export async function getProductionDetail(productionId: string, signal?: AbortSi
   const r = await partnerApi().request<PartnerProductionDetail>(OPERATIONS.getPartnerProduction, { params: { productionId }, signal });
   return { productionId: r.productionId, title: r.title, ...(r.saleReview ? { saleReview: r.saleReview } : {}), events: Array.isArray(r.events) ? r.events : [] };
 }
+
+/* ---------- F-07-12 SCR-062·063 파트너 홈·공연 개요 ---------- */
+
+export type PartnerHomeSaleReview = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
+export type PartnerHomeSaleStatus = 'UPCOMING' | 'ON_SALE' | 'ALL_HELD' | 'SOLD_OUT' | 'ENDED' | null;
+export type PartnerHomeSuspensionCode = 'SELLER_IDENTITY' | 'LEGAL_REQUEST' | 'FRAUD_SUSPECTED' | 'OTHER' | null;
+
+export interface PartnerHomeSummary {
+  productionId: string;
+  title: string;
+  eventCount: number;
+  saleReview: PartnerHomeSaleReview;
+  hasApprovalHistory: boolean;
+  rejectionReason: string | null;
+  suspensionReasonCode: PartnerHomeSuspensionCode;
+  firstOpenAt?: string;
+  saleStatus: PartnerHomeSaleStatus;
+  pgPrimary: 'TOSS' | 'PORTONE' | null;
+  payoutHoldReason: 'KYC' | 'ACCOUNT_CHANGE' | 'BALANCE' | 'ACCOUNT_MISMATCH' | 'SALE_SUSPENDED' | null;
+}
+
+export interface PartnerHomePage {
+  items: PartnerHomeSummary[];
+  nextCursor: string | null;
+}
+
+export interface PartnerHomeTodo {
+  asOf: string;
+  rejectedSaleReviewCount: number | null;
+  settlementDisputeDueCount: number | null;
+  settlementDisputeEarliestDueAt: string | null;
+  openGateFlagCount: number | null;
+  pendingStaffInvitationCount: number | null;
+}
+
+export interface PartnerHomeEvent {
+  eventId: string;
+  version: number;
+  pending: boolean;
+  openAt: string;
+  lobbyMinutes: number;
+  entryOpensAt: string | null;
+  startsAt: string;
+  endsAt: string;
+  reentryAllowed: boolean;
+  lobbyShuffle: boolean;
+  openBatch: boolean;
+  seatAssignment: 'PICK' | 'AUTO';
+  perPersonLimit: number;
+  status: string;
+  saleStatus: PartnerHomeSaleStatus;
+  soldPercent: number | null;
+  entryClosedAt: string | null;
+}
+
+export interface PartnerHomeImage {
+  imageId: string;
+  kind: 'POSTER' | 'DETAIL';
+  alt: string;
+  order: number;
+  width: number;
+  height: number;
+  version: number;
+  url: string;
+  derivatives: Record<string, string>;
+}
+
+export interface PartnerProductionOverview {
+  productionId: string;
+  version: number;
+  title: string;
+  genre: string;
+  ageRating: string | null;
+  runningMinutes: number | null;
+  place: { placeId: string; name: string } | null;
+  requestedPlace: { name: string; address: string } | null;
+  artists: { artistId: string; name: string }[];
+  aliases: string[];
+  saleReview: PartnerHomeSaleReview;
+  hasApprovalHistory: boolean;
+  saleApprovedAt: string | null;
+  rejectionReason: string | null;
+  suspensionReasonCode: PartnerHomeSuspensionCode;
+  hasPendingRevision: boolean;
+  pendingRevisionFields: string[];
+  progressStage: string;
+  images: PartnerHomeImage[];
+  events: PartnerHomeEvent[];
+}
+
+export interface PartnerSellerProfile {
+  seller: {
+    legalName: string;
+    representative: string | null;
+    address: string | null;
+    phone: string | null;
+    email: string | null;
+    businessRegNo: string | null;
+    mailOrderReportNo: string | null;
+    exemptionBasis: string | null;
+  };
+  verifiedAt: string | null;
+  pendingChange: null;
+}
+
+export interface PartnerHomeQuery {
+  saleReview?: PartnerHomeSaleReview[];
+  hasApprovalHistory?: boolean;
+  saleStatus?: Exclude<PartnerHomeSaleStatus, null>[];
+  from?: string;
+  to?: string;
+  q?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export async function listPartnerProductions(query: PartnerHomeQuery = {}, signal?: AbortSignal): Promise<PartnerHomePage> {
+  const { partnerApi, OPERATIONS } = await load();
+  const q: Record<string, string | number | boolean | undefined | readonly (string | number | boolean)[]> = { ...query };
+  return partnerApi().request<PartnerHomePage>(OPERATIONS.listPartnerProductions, { query: q, signal });
+}
+
+export async function getPartnerTodoSummary(signal?: AbortSignal): Promise<PartnerHomeTodo> {
+  const { partnerApi, OPERATIONS } = await load();
+  return partnerApi().request<PartnerHomeTodo>(OPERATIONS.getPartnerTodoSummary, { signal });
+}
+
+export async function getPartnerProduction(productionId: string, signal?: AbortSignal): Promise<PartnerProductionOverview> {
+  const { partnerApi, OPERATIONS } = await load();
+  return partnerApi().request<PartnerProductionOverview>(OPERATIONS.getPartnerProduction, { params: { productionId }, signal });
+}
+
+export async function getPartnerSellerProfile(signal?: AbortSignal): Promise<PartnerSellerProfile> {
+  const { partnerApi, OPERATIONS } = await load();
+  return partnerApi().request<PartnerSellerProfile>(OPERATIONS.getPartnerSellerProfile, { signal });
+}

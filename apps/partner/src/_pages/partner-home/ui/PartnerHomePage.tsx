@@ -2,7 +2,7 @@
 // 휴대폰: 할 일 2열 · 공연 카드 목록 · 새 공연 등록과 '고쳐서 다시 요청'은 안내 카드 / 태블릿: 할 일 2열 · 가로 스크롤 표 /
 // 데스크톱: 할 일 4열 · 표 / xl 1440: 할 일 6열 · 결제사·정산·현장 스태프 칸과 결제사 거르기.
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import {
   productions,
   SALE_REVIEW_BADGE,
@@ -13,15 +13,24 @@ import {
 } from '@/entities/production';
 import { PARTNER_SUPPORT_HREF as SUPPORT_HREF, routes } from '@/shared/config/routes';
 import { HOME_STATES } from '@/shared/config/states/scr062';
-import { readPreview, type RouteProps } from '@/shared/lib/preview';
+import { readParam, readPreview, type RouteProps } from '@/shared/lib/preview';
 import { BigScreenNotice } from '@/shared/ui/BigScreenNotice';
 import { PreviewStateSwitcher } from '@/shared/ui/PreviewStateSwitcher';
+import { homeModeOf } from '../model/live';
+import { LivePartnerHome } from './LivePartnerHome';
 
 
 type HomeState = (typeof HOME_STATES)[number];
 
 export default async function PartnerHomePage({ searchParams }: RouteProps) {
-  const pv = readPreview(await searchParams, HOME_STATES, '목록');
+  const sp = await searchParams;
+  if (homeModeOf({ state: readParam(sp, 'state') }) === 'live')
+    return (
+      <Suspense fallback={<p role="status">공연 목록을 불러오고 있습니다</p>}>
+        <LivePartnerHome />
+      </Suspense>
+    );
+  const pv = readPreview(sp, HOME_STATES, '목록');
   const st: HomeState = pv.state;
   const reReq = st === '재승인 대기(판매 계속)';
 

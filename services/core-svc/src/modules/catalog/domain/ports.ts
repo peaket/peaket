@@ -5,6 +5,7 @@ import type { CatalogEvent, Genre, Production } from './production.js';
 import type { EventDraft, PendingEvent } from './registration.js';
 import type { DescriptionDoc, KopisFields } from './description.js';
 import type { LayoutDoc, PriceTier } from './seatmap-layout.js';
+import type { PartnerProductionSource, PartnerProductionSummaryRow, PartnerSellerSource, PartnerTodoRow } from './partner-home.js';
 
 /** 회차 공개 요약에 쓰는 회차 칸 */
 export interface EventPublicFields {
@@ -180,6 +181,14 @@ export interface CatalogRepository {
   /** 찜. 공개 공연이 아니면 'not-found', 상한을 넘으면 'limit'. 같은 찜은 처음 시각을 둔다. 계정 단위 잠금 안에서 센다 */
   putWish(accountId: string, productionId: string, now: Date, limit: number): Promise<'ok' | 'not-found' | 'limit'>;
   deleteWish(accountId: string, productionId: string): Promise<void>;
+  /** F-07-12 파트너 홈: 소속 파트너의 공연 목록(테넌트 조건은 저장소가 건다) */
+  partnerProductions(tenantId: string): Promise<PartnerProductionSummaryRow[]>;
+  /** F-07-12 파트너 공연 개요: 소속 파트너의 공연만. 다른 테넌트·없는 공연은 undefined */
+  partnerProduction(productionId: string, tenantId: string): Promise<PartnerProductionSource | undefined>;
+  /** F-07-12 할 일 카드: core가 답할 수 있는 반려 공연 수만 채우고 나머지는 null */
+  partnerTodo(tenantId: string): Promise<PartnerTodoRow>;
+  /** F-07-12 판매자 정보: 소속 파트너의 promoter 행. 없으면 undefined */
+  partnerSeller(tenantId: string): Promise<PartnerSellerSource | undefined>;
 }
 
 export const CATALOG_REPOSITORY = Symbol('CATALOG_REPOSITORY');

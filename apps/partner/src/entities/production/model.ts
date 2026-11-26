@@ -2,36 +2,9 @@
 // 판매 승인 상태는 data.md event.sale_review(DRAFT·SUBMITTED·APPROVED·REJECTED)에 승인 이력 유무와 판매 중지를 더해 화면 이름으로 나눈다
 // (docs/planning/03 §2.14, ADR-0123).
 import { notFound } from 'next/navigation';
+import { SALE_REVIEW_BADGE, SALE_REVIEW_LABEL, type SaleReview } from '@/shared/lib/sale-review';
 
-export type SaleReview =
-  | 'DRAFT'
-  | 'SUBMITTED'
-  | 'RESUBMITTED'
-  | 'APPROVED'
-  | 'REJECTED'
-  | 'CHANGE_REJECTED'
-  | 'SUSPENDED';
-
-export const SALE_REVIEW_LABEL: Record<SaleReview, string> = {
-  DRAFT: '초안',
-  SUBMITTED: '승인 대기',
-  RESUBMITTED: '재승인 대기',
-  APPROVED: '승인',
-  REJECTED: '반려',
-  CHANGE_REJECTED: '변경 반려',
-  SUSPENDED: '판매 중지',
-};
-
-/** 키트 배지 클래스 */
-export const SALE_REVIEW_BADGE: Record<SaleReview, string> = {
-  DRAFT: 'badge',
-  SUBMITTED: 'badge',
-  RESUBMITTED: 'badge badge-warning',
-  APPROVED: 'badge badge-success',
-  REJECTED: 'badge badge-danger',
-  CHANGE_REJECTED: 'badge badge-danger',
-  SUSPENDED: 'badge badge-danger',
-};
+export { SALE_REVIEW_BADGE, SALE_REVIEW_LABEL, type SaleReview } from '@/shared/lib/sale-review';
 
 export type SaleStatus = 'PRIVATE' | 'UPCOMING' | 'ON_SALE' | 'SOLD_OUT' | 'ENDED' | 'OPEN_PAUSED' | 'NONE';
 

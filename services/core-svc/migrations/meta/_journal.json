@@ -302,6 +302,13 @@
       "when": 1795319400000,
       "tag": "0053_compliance_notice",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1795319500000,
+      "tag": "0054_partner_home",
+      "breakpoints": true
     }
   ]
 }

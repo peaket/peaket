@@ -8,6 +8,9 @@ export type Genre = (typeof GENRES)[number];
 /** 판매 승인(POL-037, docs/planning/03 §2.14). 공연마다 하나다(ADR-0093 결정 7) */
 export type SaleReview = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'SUSPENDED';
 
+/** 판매 중지 사유 코드(openapi PartnerProductionSummary.suspensionReasonCode, ADR-0123 결정 2) */
+export type SuspensionReasonCode = 'SELLER_IDENTITY' | 'LEGAL_REQUEST' | 'FRAUD_SUSPECTED' | 'OTHER';
+
 export interface Production {
   id: string;
   promoterId: string;
@@ -28,6 +31,10 @@ export interface Production {
   createdAt?: Date;
   /** 판매 승인 요청 때 파트너가 확인한 휠체어석(FR-023, BAT-616) */
   accessibleSeatingCheck?: boolean;
+  /** 공연 판(0054, 마지막 승인 내용의 판). 없으면 1로 읽는다(F-07-12) */
+  version?: number;
+  /** 판매 중지 사유 코드(SUSPENDED일 때만). 원문 사유는 싣지 않는다(ADR-0123) */
+  suspensionReasonCode?: SuspensionReasonCode | null;
 }
 
 /** 회차 상태(docs/data.md event.status) */
