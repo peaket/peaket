@@ -47,6 +47,7 @@ describe('CoreSaleConfigs: core-svc 판매 설정 사본 읽기', () => {
       rev: 7,
       perPersonLimit: 4,
       saleEndsAtMs: NOW + 3_600_000,
+      eventStartsAtMs: NOW + 86_400_000,
       salePolicy: body().salePolicy,
       eligLists: ['lumen-fanclub-2026'],
       layoutVersion: 3,

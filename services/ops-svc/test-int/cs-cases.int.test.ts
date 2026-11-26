@@ -143,6 +143,14 @@ describe('실제 DB 위 건 받기 [R-T48 ①②]', () => {
     expect(await q('select 1 from cs_case where target_ref = $1', [body.sourceId])).toEqual([]);
     expect(await q('select 1 from cs_case_request where event_key = $1', [body.eventKey])).toEqual([]);
   });
+
+  test('IR-11 TICKET_NOT_ISSUED도 DB에 건을 만든다', async () => {
+    const body = caseRequest('TICKET_NOT_ISSUED');
+    const r = await intake(body);
+    expect(r.accepted).toBe(true);
+    expect(r.caseId).toBeTruthy();
+    expect((await q<{ n: string }>("select count(*)::text as n from cs_case where kind = 'TICKET_NOT_ISSUED' and target_ref = $1", [body.sourceId]))[0]!.n).toBe('1');
+  });
 });
 
 describe('실제 DB 위 갱신 [R-T49 ③④⑥]', () => {

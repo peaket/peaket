@@ -207,6 +207,39 @@ describe('R-T26 ① 시스템 잘못이 확인된 환불', () => {
     expect(state.ticketCalls).toHaveLength(0);
     expect(state.created).toHaveLength(0);
   });
+
+  test('IR-21 orderIds로 여러 주문을 한 승인에서 환급한다', async () => {
+    const OTHER_ORDER = randomUUID();
+    const OTHER_TICKET = randomUUID();
+    state.views.set(OTHER_TICKET, viewOf({ orderId: OTHER_ORDER, ticketId: OTHER_TICKET, price: 12_000 }));
+    const r = await post(full('SYSTEM_FAULT_REFUND', { orderIds: [OTHER_ORDER], amount: PRICE + 12_000 }));
+    expect(r.statusCode).toBe(200);
+    expect(json(r)).toMatchObject({ status: 'REFUNDED', refundAmount: PRICE + 12_000 });
+    expect(state.ticketCalls.map((c) => (c as { orderId: string }).orderId)).toEqual([ORDER, OTHER_ORDER]);
+    expect(state.paymentCalls.map((c) => c.amount)).toEqual([PRICE, 12_000]);
+    expect(state.created.map((c) => c['orderId'])).toEqual([ORDER, OTHER_ORDER]);
+  });
+
+  test('IR-30 취소 행 무효 경로는 ops-svc만 부르고 행을 VOIDED로 끝낸다', async () => {
+    const CANCELLATION = randomUUID();
+    state.records.set(CANCELLATION, { cancellationId: CANCELLATION, orderId: ORDER, ticketId: TICKET, refundAmount: PRICE, state: 'REQUESTED', refundAttempts: 0 });
+    const r = await svc.http.inject({
+      method: 'POST',
+      url: `/internal/v1/cancellations/${CANCELLATION}/void`,
+      headers: { 'content-type': 'application/json', 'x-peaket-internal-token': TOKEN, 'x-peaket-caller': 'ops-svc' },
+      payload: JSON.stringify({}),
+    });
+    expect(r.statusCode).toBe(200);
+    expect(json(r)).toEqual({ voided: true });
+    expect(state.records.get(CANCELLATION)?.state).toBe('VOIDED');
+    const wrong = await svc.http.inject({
+      method: 'POST',
+      url: `/internal/v1/cancellations/${CANCELLATION}/void`,
+      headers: { 'content-type': 'application/json', 'x-peaket-internal-token': TOKEN, 'x-peaket-caller': 'purchase-svc' },
+      payload: JSON.stringify({}),
+    });
+    expect(wrong.statusCode).toBe(403);
+  });
 });
 
 describe('R-T26 ② 재량 면제분만 추가 환급', () => {

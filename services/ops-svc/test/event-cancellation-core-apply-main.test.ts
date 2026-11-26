@@ -4,6 +4,9 @@
 // 자주 놓친 결함 '시작 파일 조립은 따로'. 모듈 가짜(vi.mock)는 파일 전체에 걸리므로 파일을 따로 둔다.
 import { afterAll, afterEach, describe, expect, test, vi } from 'vitest';
 
+// setInterval을 가짜로 바꾸기 전의 원본을 한 번만 잡는다(두 번째 부팅에서 가짜를 원본으로 잡는 재귀를 막는다)
+const realSetInterval = globalThis.setInterval;
+
 const seen = vi.hoisted(() => ({
   databases: [] as { url: string; applicationName?: string; tag: string }[],
   register: undefined as undefined | { database?: { tag?: string }; partnerDatabase?: { tag?: string } },
@@ -26,6 +29,8 @@ vi.mock('@peaket/platform', async (importOriginal) => {
       seen.order.push('createService');
       return {
         metrics: { registry: { registerMetric: () => undefined } },
+        // main.ts가 시작 조립 뒤 ApprovalLifecycle을 configure하므로 가짜 앱에도 get을 둔다
+        app: { get: () => ({ configure: () => undefined }) },
         logger: { warn: (_o: unknown, msg: string) => void seen.warns.push(msg), error: () => undefined, info: () => undefined },
         listen: async () => {
           seen.order.push('listen');
@@ -74,10 +79,9 @@ async function bootMain(env: Record<string, string>): Promise<number[]> {
   seen.warns.length = 0;
   seen.register = undefined;
   const intervals: number[] = [];
-  const real = globalThis.setInterval;
   vi.spyOn(globalThis, 'setInterval').mockImplementation(((fn: () => void, ms?: number) => {
     intervals.push(Number(ms));
-    const h = real(fn, 1_000_000_000);
+    const h = realSetInterval(fn, 1_000_000_000);
     clearInterval(h);
     return h;
   }) as typeof setInterval);

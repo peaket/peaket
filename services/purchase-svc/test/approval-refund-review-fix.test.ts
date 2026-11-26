@@ -14,10 +14,11 @@ const state = {
   orderRows: [] as CancellationOrderView[],
   prior: [] as CancellationRecord[],
   ticketAnswer: 'REFUND_NOW' as unknown,
-  paymentCalls: [] as { amount: number }[],
+  ticketCalls: [] as Record<string, unknown>[],
+  paymentCalls: [] as { amount: number; cancellationId: string }[],
   createOutcome: { status: 'CREATED' } as { status: string },
   created: [] as Record<string, unknown>[],
-  records: new Map<string, CancellationRecord>(),
+  records: new Map<string, CancellationRecord & { approvalId?: string }>(),
   entry: false,
 };
 const orders: CancellationOrders = {
@@ -27,18 +28,24 @@ const orders: CancellationOrders = {
   async findCancellation(id: string) {
     return state.records.get(id);
   },
-  async byOrder() {
-    return state.orderRows.length > 0 ? state.orderRows : [state.view];
+  async approvalRefundOf(approvalId: string) {
+    return [...state.records.values()].filter((r) => r.approvalId === approvalId);
   },
-  async cancellationsOf() {
-    return state.prior;
+  async byOrder(orderId: string) {
+    const rows = state.orderRows.length > 0 ? state.orderRows : [state.view];
+    return rows.filter((r) => r.orderId === orderId);
+  },
+  async cancellationsOf(orderId?: string) {
+    return orderId === undefined ? state.prior : state.prior.filter((r) => r.orderId === orderId);
   },
 } as unknown as CancellationOrders;
 const writes: CancellationWrites = {
   async create(q) {
     state.created.push({ ...q });
     if (state.createOutcome.status === 'CONFLICT') return { status: 'CONFLICT' } as never;
-    state.records.set(q.cancellationId, { cancellationId: q.cancellationId, orderId: q.orderId, ticketId: q.ticketId, refundAmount: q.refundAmount, state: q.status, refundAttempts: 0, ...(typeof (q as { kind?: unknown }).kind === 'string' ? { kind: (q as { kind: string }).kind } : {}) } as CancellationRecord);
+    const record = { cancellationId: q.cancellationId, orderId: q.orderId, ticketId: q.ticketId, refundAmount: q.refundAmount, state: q.status, refundAttempts: 0, ...(typeof (q as { kind?: unknown }).kind === 'string' ? { kind: (q as { kind: string }).kind } : {}) } as CancellationRecord & { approvalId?: string };
+    if (typeof (q as { approvalId?: unknown }).approvalId === 'string') record.approvalId = (q as { approvalId: string }).approvalId;
+    state.records.set(q.cancellationId, record);
     return { status: 'CREATED' };
   },
   async updateStatus() {},
@@ -50,13 +57,14 @@ const writes: CancellationWrites = {
   },
 };
 const tickets: TicketCancellations = {
-  async cancel() {
+  async cancel(q) {
+    state.ticketCalls.push({ ...q });
     return state.ticketAnswer as never;
   },
 };
 const payments: PaymentCancellations = {
   async cancel(q) {
-    state.paymentCalls.push({ amount: q.amount });
+    state.paymentCalls.push({ amount: q.amount, cancellationId: q.cancellationId });
     return 'CANCELLED';
   },
 };
@@ -89,6 +97,7 @@ beforeEach(() => {
   state.orderRows = [];
   state.prior = [];
   state.ticketAnswer = 'REFUND_NOW';
+  state.ticketCalls.length = 0;
   state.paymentCalls.length = 0;
   state.createOutcome = { status: 'CREATED' };
   state.created.length = 0;
@@ -102,7 +111,7 @@ describe('IR-10 부분 환불·이전 취소', () => {
     await expect(refunds.execute(approvalId(), { kind: 'SYSTEM_FAULT_REFUND', orderId: state.view.orderId, amount: PRICE })).rejects.toMatchObject({ status: 422, type: expect.stringContaining('approval-refund-amount-mismatch') });
     const ok = await refunds.execute(approvalId(), { kind: 'SYSTEM_FAULT_REFUND', orderId: state.view.orderId, amount: 10_000 });
     expect(ok.refundAmount).toBe(10_000);
-    expect(state.paymentCalls).toEqual([{ amount: 10_000 }]);
+    expect(state.paymentCalls).toEqual([{ amount: 10_000, cancellationId: expect.any(String) }]);
   });
 
   test('IR-10 이전 취소가 있으면 승인 환불을 거절한다', async () => {
@@ -153,15 +162,85 @@ describe('IR-21 멱등 kind', () => {
   });
 });
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 describe('IR-21 다중 티켓 기록', () => {
   test('IR-21 모든 티켓의 order_cancellation을 남긴다', async () => {
     const a = view({ ticketId: randomUUID(), refundableAmount: 10_000 });
-    const b = view({ ticketId: randomUUID(), refundableAmount: 10_000 });
+    const b = view({ orderId: a.orderId, ticketId: randomUUID(), refundableAmount: 10_000 });
     const orderId = a.orderId;
     state.orderRows = [a, b];
     state.view = { ...a, orderId };
     const out = await refunds.execute(approvalId(), { kind: 'SYSTEM_FAULT_REFUND', orderId, amount: 20_000 });
     expect(out.refundAmount).toBe(20_000);
     expect(state.created.map((c) => c['ticketId'])).toEqual([a.ticketId, b.ticketId]);
+  });
+
+  test('IR-21 둘째 행도 UUID이고 첫 행은 승인 ID다', async () => {
+    const a = view({ ticketId: randomUUID(), refundableAmount: 10_000 });
+    const b = view({ orderId: a.orderId, ticketId: randomUUID(), refundableAmount: 10_000 });
+    const orderId = a.orderId;
+    state.orderRows = [a, b];
+    state.view = { ...a, orderId };
+    const id = approvalId();
+    await refunds.execute(id, { kind: 'SYSTEM_FAULT_REFUND', orderId, amount: 20_000 });
+    const ids = state.created.map((c) => String(c['cancellationId']));
+    expect(ids[0]).toBe(id);
+    expect(ids[1]).toMatch(UUID);
+    expect(new Set(ids).size).toBe(2);
+    expect(state.created.every((c) => c['approvalId'] === id)).toBe(true);
+  });
+
+  test('IR-21 같은 승인 ID로 다시 보내면 모든 행의 합계를 돌려주고 새 행을 쓰지 않는다', async () => {
+    const a = view({ ticketId: randomUUID(), refundableAmount: 10_000 });
+    const b = view({ orderId: a.orderId, ticketId: randomUUID(), refundableAmount: 10_000 });
+    const orderId = a.orderId;
+    state.orderRows = [a, b];
+    state.view = { ...a, orderId };
+    const id = approvalId();
+    const first = await refunds.execute(id, { kind: 'SYSTEM_FAULT_REFUND', orderId, amount: 20_000 });
+    const second = await refunds.execute(id, { kind: 'SYSTEM_FAULT_REFUND', orderId, amount: 20_000 });
+    expect(second).toEqual(first);
+    expect(second.refundAmount).toBe(20_000);
+    expect(state.created).toHaveLength(2);
+    expect(state.paymentCalls).toHaveLength(1);
+  });
+
+  test('IR-21 미발권 두 좌석은 서로 다른 UUID 취소 ID와 티켓 ID를 쓴다', async () => {
+    const a = view({ ticketId: '', refundableAmount: 10_000 });
+    const b = view({ orderId: a.orderId, ticketId: '', refundableAmount: 10_000 });
+    const orderId = a.orderId;
+    state.orderRows = [a, b];
+    state.view = { ...a, orderId };
+    await refunds.execute(approvalId(), { kind: 'SYSTEM_FAULT_REFUND', orderId, amount: 20_000 });
+    const ids = state.created.map((c) => String(c['cancellationId']));
+    const ticketIds = state.created.map((c) => String(c['ticketId']));
+    expect(ids.every((x) => UUID.test(x))).toBe(true);
+    expect(new Set(ids).size).toBe(2);
+    expect(ticketIds.every((x) => UUID.test(x))).toBe(true);
+    expect(new Set(ticketIds).size).toBe(2);
+    expect(state.ticketCalls).toHaveLength(0);
+  });
+
+  test('IR-21 여러 주문의 환급은 주문마다 티켓을 취소하고 결제사를 부른다', async () => {
+    const a = view({ orderId: randomUUID(), ticketId: randomUUID(), refundableAmount: 10_000 });
+    const b = view({ orderId: randomUUID(), ticketId: randomUUID(), refundableAmount: 12_000 });
+    state.orderRows = [a, b];
+    state.view = a;
+    const out = await refunds.execute(approvalId(), { kind: 'SYSTEM_FAULT_REFUND', orderId: a.orderId, orderIds: [b.orderId], amount: 22_000 } as never);
+    expect(out.refundAmount).toBe(22_000);
+    expect(state.ticketCalls.map((c) => c['orderId'])).toEqual([a.orderId, b.orderId]);
+    expect(state.paymentCalls.map((c) => c.amount)).toEqual([10_000, 12_000]);
+    expect(state.created.map((c) => c['orderId'])).toEqual([a.orderId, b.orderId]);
+    expect(state.created.map((c) => c['refundAmount'])).toEqual([10_000, 12_000]);
+  });
+
+  test('IR-11 FLAGGED REFUND는 이미 있는 REQUESTED 취소 행을 그대로 환급한다', async () => {
+    const existing = randomUUID();
+    state.prior = [{ cancellationId: existing, orderId: state.view.orderId, ticketId: state.view.ticketId, refundAmount: PRICE, state: 'REQUESTED', refundAttempts: 0 }];
+    const out = await refunds.execute(approvalId(), { kind: 'SYSTEM_FAULT_REFUND', orderId: state.view.orderId, amount: PRICE });
+    expect(out).toMatchObject({ status: 'REFUNDED', cancellationId: existing, refundAmount: PRICE });
+    expect(state.paymentCalls).toEqual([{ amount: PRICE, cancellationId: existing }]);
+    expect(state.created).toHaveLength(0);
   });
 });

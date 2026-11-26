@@ -92,7 +92,7 @@ describe('구현 재리뷰 IR-03·10·11·21·28·29', () => {
 describe('구현 재리뷰 2 IR-11·21·30·31·32', () => {
   test('IR-11 system-refund·FLAGGED REFUND가 남은 환급액을 승인 금액으로 쓴다', () => {
     const src = read('services/ops-svc/src/modules/cases/inbound/ops-cases.controller.ts');
-    expect(src).toMatch(/refundableAmount\(/);
+    expect(src).toMatch(/refundBasis\(/);
     expect(src).not.toMatch(/amount: 0, reasonCode: 'FLAGGED_REFUND'/);
   });
 
@@ -101,9 +101,19 @@ describe('구현 재리뷰 2 IR-11·21·30·31·32', () => {
     expect(src).toMatch(/orderIds/);
   });
 
+  test('IR-21 HTTP 어댑터가 orderIds를 버리지 않는다', () => {
+    const src = read('services/ops-svc/src/modules/approvals/adapters/service-ports.ts');
+    expect(src).toMatch(/orderIds:\s*i\.orderIds/);
+  });
+
   test('IR-30 VOID가 ticket-svc voidOrder를 부른다', () => {
     const src = read('services/ops-svc/src/modules/cases/inbound/ops-cases.controller.ts');
     expect(src).toMatch(/voidOrder\(/);
+  });
+
+  test('IR-30 ticket 호출이 실제 발권 세대를 싣는다', () => {
+    const src = read('services/ops-svc/src/modules/approvals/adapters/service-ports.ts');
+    expect(src).toMatch(/issue_generation:\s*(o\.)?issueGeneration/);
   });
 
   test('IR-31 공연 시작·입장 기록이 실제 값이다', () => {

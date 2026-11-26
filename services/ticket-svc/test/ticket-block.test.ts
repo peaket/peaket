@@ -20,6 +20,7 @@ const TOKEN = 'ticket-block-test-token';
 interface Client {
   IssueTickets(req: Record<string, unknown>, md: grpc.Metadata, opts: grpc.CallOptions, cb: (err: grpc.ServiceError | null, res: any) => void): void;
   BlockTicketIssuance(req: Record<string, unknown>, md: grpc.Metadata, opts: grpc.CallOptions, cb: (err: grpc.ServiceError | null, res: any) => void): void;
+  VoidTickets(req: Record<string, unknown>, md: grpc.Metadata, opts: grpc.CallOptions, cb: (err: grpc.ServiceError | null, res: any) => void): void;
 }
 
 let server: Awaited<ReturnType<typeof startGrpcServer>>;
@@ -56,10 +57,21 @@ function purchaseMetadata(): grpc.Metadata {
 
 const call = <T>(fn: (cb: (err: grpc.ServiceError | null, res: any) => void) => void): Promise<T> => new Promise((res, rej) => fn((err, r) => (err ? rej(err) : res(r as T))));
 
+/** ops-svc 내부 호출자 메타데이터 */
+function opsMetadata(): grpc.Metadata {
+  const md = new grpc.Metadata();
+  md.set(INTERNAL_GRPC_TOKEN_HEADER, TOKEN);
+  md.set(INTERNAL_GRPC_CALLER_HEADER, 'ops-svc');
+  return md;
+}
+
 const issue = (orderId: string, over: Record<string, unknown> = {}) =>
   call<{ tickets: Array<{ ticket_id: string; status: string }> }>((cb) =>
     client.IssueTickets({ order_id: orderId, event_id: EVENT, payer_account_id: ACCOUNT, seat_ids: [SEAT_A, SEAT_B], issue_generation: 0, ...over }, purchaseMetadata(), {}, cb),
   );
+
+const voidTickets = (orderId: string, issueGeneration = 0) =>
+  call<{ voided: number; already_entered: number }>((cb) => client.VoidTickets({ order_id: orderId, event_id: EVENT, issue_generation: issueGeneration }, opsMetadata(), {}, cb));
 
 const block = (orderId: string, reason = 'EVENT_CANCELLED') =>
   call<{ already_entered: number }>((cb) => client.BlockTicketIssuance({ order_id: orderId, reason }, purchaseMetadata(), {}, cb));
@@ -128,5 +140,50 @@ describe('BlockTicketIssuance 단위 계약 [HOT-161] [P-T15] [P-T39 ③]', () =
     });
     // purchase-svc는 받는다
     expect((await block(orderId)).already_entered).toBe(0);
+  });
+
+  test('IR-30 입장 기록이 없으면 VoidTickets는 아무 티켓도 무효로 하지 않는다', async () => {
+    const orderId = '0190f3a1-7c2e-7a00-8000-000000000121';
+    const issued = await issue(orderId, { issue_generation: 1 });
+    expect(issued.tickets).toHaveLength(2);
+    const out = await voidTickets(orderId, 1);
+    expect(out).toEqual({ voided: 0, already_entered: 0 });
+    const saved = [...store.tickets.values()].filter((t) => t.orderId === orderId);
+    expect(saved.map((t) => t.status)).toEqual(['ISSUED', 'ISSUED']);
+    expect(saved.every((t) => t.keyRevokedAtMs === undefined)).toBe(true);
+  });
+
+  test('IR-30 입장 기록이 있으면 VoidTickets는 그 세대의 티켓만 VOIDED로 바꾼다', async () => {
+    const orderId = '0190f3a1-7c2e-7a00-8000-000000000122';
+    const gen1 = await issue(orderId, { issue_generation: 1 });
+    const gen2 = await issue(orderId, { issue_generation: 2 });
+    store.recordEntry(gen1.tickets[0]!.ticket_id);
+    const out = await voidTickets(orderId, 1);
+    expect(out).toEqual({ voided: 2, already_entered: 1 });
+    const saved = [...store.tickets.values()].filter((t) => t.orderId === orderId);
+    const gen1Ids = new Set(gen1.tickets.map((t) => t.ticket_id));
+    const gen2Ids = new Set(gen2.tickets.map((t) => t.ticket_id));
+    expect(saved.filter((t) => gen1Ids.has(t.ticketId)).map((t) => t.status)).toEqual(['VOIDED', 'VOIDED']);
+    expect(saved.filter((t) => gen2Ids.has(t.ticketId)).map((t) => t.status)).toEqual(['ISSUED', 'ISSUED']);
+  });
+
+  test('IR-30 세대 0은 주문의 모든 세대를 무효로 한다', async () => {
+    const orderId = '0190f3a1-7c2e-7a00-8000-000000000123';
+    const gen1 = await issue(orderId, { issue_generation: 1 });
+    const gen2 = await issue(orderId, { issue_generation: 2 });
+    store.recordEntry(gen1.tickets[0]!.ticket_id);
+    const out = await voidTickets(orderId, 0);
+    expect(out).toEqual({ voided: 4, already_entered: 1 });
+    const saved = [...store.tickets.values()].filter((t) => t.orderId === orderId);
+    expect(saved.every((t) => t.status === 'VOIDED')).toBe(true);
+  });
+
+  test('IR-30 VoidTickets도 ops-svc 호출자만 받는다', async () => {
+    const orderId = '0190f3a1-7c2e-7a00-8000-000000000124';
+    await issue(orderId, { issue_generation: 1 });
+    const purchase = new grpc.Metadata();
+    purchase.set(INTERNAL_GRPC_TOKEN_HEADER, TOKEN);
+    purchase.set(INTERNAL_GRPC_CALLER_HEADER, 'purchase-svc');
+    await expect(call((cb) => client.VoidTickets({ order_id: orderId, event_id: EVENT, issue_generation: 1 }, purchase, {}, cb))).rejects.toMatchObject({ code: grpc.status.PERMISSION_DENIED });
   });
 });

@@ -23,6 +23,8 @@ vi.mock('@peaket/platform', async (importOriginal) => {
       seen.order.push('createService');
       return {
         metrics: { registry: { registerMetric: () => undefined } },
+        // main.ts가 시작 조립 뒤 ApprovalLifecycle을 configure하므로 가짜 앱에도 get을 둔다
+        app: { get: () => ({ configure: () => undefined }) },
         logger: { warn: () => undefined, error: () => undefined, info: () => undefined },
         listen: async () => {
           seen.order.push('listen');
