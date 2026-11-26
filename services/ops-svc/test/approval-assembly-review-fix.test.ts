@@ -88,3 +88,33 @@ describe('구현 재리뷰 IR-03·10·11·21·28·29', () => {
     expect(src).toMatch(/withTickLease|tickLease/);
   });
 });
+
+describe('구현 재리뷰 2 IR-11·21·30·31·32', () => {
+  test('IR-11 system-refund·FLAGGED REFUND가 남은 환급액을 승인 금액으로 쓴다', () => {
+    const src = read('services/ops-svc/src/modules/cases/inbound/ops-cases.controller.ts');
+    expect(src).toMatch(/refundableAmount\(/);
+    expect(src).not.toMatch(/amount: 0, reasonCode: 'FLAGGED_REFUND'/);
+  });
+
+  test('IR-21 실행기가 여러 주문을 넘긴다', () => {
+    const src = read('services/ops-svc/src/modules/approvals/application/approval-lifecycle.ts');
+    expect(src).toMatch(/orderIds/);
+  });
+
+  test('IR-30 VOID가 ticket-svc voidOrder를 부른다', () => {
+    const src = read('services/ops-svc/src/modules/cases/inbound/ops-cases.controller.ts');
+    expect(src).toMatch(/voidOrder\(/);
+  });
+
+  test('IR-31 공연 시작·입장 기록이 실제 값이다', () => {
+    const src = read('services/purchase-svc/src/modules/refund/adapters/db/drizzle-cancellation.ts');
+    expect(src).toMatch(/eventStartsAtMs/);
+    expect(src).toMatch(/entryRecords/);
+    expect(src).not.toMatch(/saleEndsAtMs \+ 86_400_000/);
+  });
+
+  test('IR-32 memory 조립도 ApprovalLifecycle을 export한다', () => {
+    const src = read('services/ops-svc/src/modules/approvals/approvals.module.ts');
+    expect((src.match(/exports: \[ApprovalLifecycle\]/g) ?? []).length).toBe(2);
+  });
+});

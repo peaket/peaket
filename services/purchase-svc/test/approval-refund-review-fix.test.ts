@@ -11,6 +11,7 @@ const PAYER = randomUUID();
 const PRICE = 33_333;
 const state = {
   view: {} as CancellationOrderView,
+  orderRows: [] as CancellationOrderView[],
   prior: [] as CancellationRecord[],
   ticketAnswer: 'REFUND_NOW' as unknown,
   paymentCalls: [] as { amount: number }[],
@@ -27,7 +28,7 @@ const orders: CancellationOrders = {
     return state.records.get(id);
   },
   async byOrder() {
-    return [state.view];
+    return state.orderRows.length > 0 ? state.orderRows : [state.view];
   },
   async cancellationsOf() {
     return state.prior;
@@ -85,6 +86,7 @@ const view = (o: Partial<CancellationOrderView & { refundableAmount?: number }> 
 
 beforeEach(() => {
   state.view = view();
+  state.orderRows = [];
   state.prior = [];
   state.ticketAnswer = 'REFUND_NOW';
   state.paymentCalls.length = 0;
@@ -148,5 +150,18 @@ describe('IR-21 멱등 kind', () => {
     await refunds.execute(id, { kind: 'SYSTEM_FAULT_REFUND', orderId: state.view.orderId, amount: PRICE });
     const other = new ApprovalRefunds({ orders, writes, tickets, payments, clock: { now: () => NOW, monotonicMs: () => NOW }, entryRecords: { async hasEntry() { return state.entry; } } });
     await expect(other.execute(id, { kind: 'MINOR_CONTRACT_CANCEL', orderId: state.view.orderId, amount: PRICE })).rejects.toMatchObject({ status: 409, type: expect.stringContaining('approval-refund-conflict') });
+  });
+});
+
+describe('IR-21 다중 티켓 기록', () => {
+  test('IR-21 모든 티켓의 order_cancellation을 남긴다', async () => {
+    const a = view({ ticketId: randomUUID(), refundableAmount: 10_000 });
+    const b = view({ ticketId: randomUUID(), refundableAmount: 10_000 });
+    const orderId = a.orderId;
+    state.orderRows = [a, b];
+    state.view = { ...a, orderId };
+    const out = await refunds.execute(approvalId(), { kind: 'SYSTEM_FAULT_REFUND', orderId, amount: 20_000 });
+    expect(out.refundAmount).toBe(20_000);
+    expect(state.created.map((c) => c['ticketId'])).toEqual([a.ticketId, b.ticketId]);
   });
 });
