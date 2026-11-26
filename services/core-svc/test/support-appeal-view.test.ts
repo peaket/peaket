@@ -60,7 +60,7 @@ class MemoryAppeals {
     return true;
   }
   async findIdempotent() {
-    return { kind: 'miss' as const };
+    return { kind: 'none' as const };
   }
 }
 

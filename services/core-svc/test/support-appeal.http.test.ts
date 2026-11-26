@@ -39,7 +39,7 @@ class MemoryAppeals {
   }
   async findIdempotent(idem: { key: string }) {
     const found = this.idem.get(idem.key);
-    return found ? { kind: 'replay' as const, result: found.result } : { kind: 'miss' as const };
+    return found ? { kind: 'replay' as const, result: found.result } : { kind: 'none' as const };
   }
 }
 
