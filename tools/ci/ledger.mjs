@@ -281,7 +281,9 @@ export const ASVS_DEFAULT_AREA = {
   // 계약 조건·수수료율(BAT-615)부터 정산 기능 코드가 core-svc·ops-svc·payment-svc에 흩어져 있다.
   // 이 세 곳의 ID 태그를 정산 ASVS 행의 코드 영역으로 인정한다(2026-11-20 BAT-615 시험 담당).
   settlement: ['services/core-svc', 'services/ops-svc', 'services/payment-svc'],
-  support: [],
+  support: ['apps/console-host', 'apps/web', 'services/core-svc', 'services/ops-svc'],
+  // 2026-11-27 F-06-5: 고객 문의·팬 조회의 코드가 core-svc support·ops-svc cases·fan-lookup과 콘솔 SCR-045·SCR-066,
+  // 팬 웹 SCR-056에 생겼다. 빈 목록이면 구현 위치 칸이 경로를 가리켜도 ASVS 태그를 세지 못한다(위 codeArea의 빈 목록 규칙).
   // 2026-11-20 BAT-425: 양도·환불 기능의 코드가 core-svc shop·purchase-svc refund·ticket-svc·payment-svc·ops-svc에 있다.
   // 빈 목록이면 구현 위치 칸이 경로를 가리켜도 코드 영역이 비어 ASVS 태그를 세지 못한다(위 codeArea의 빈 목록 규칙).
   'transfer-refund': ['services/core-svc', 'services/ops-svc', 'services/payment-svc', 'services/purchase-svc', 'services/ticket-svc'],

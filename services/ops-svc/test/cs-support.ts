@@ -54,12 +54,12 @@ export interface CsHarness {
   as(role: OpsRole): Record<string, string>;
   intake(body: unknown): Promise<{ status: number; body: { accepted: boolean; caseId?: string } }>;
   list(h: Record<string, string>, query?: string): Promise<{ status: number; body: Record<string, unknown> }>;
-  get(h: Record<string, string>, caseId: string): Promise<{ status: number; etag: string | undefined; body: Record<string, unknown> }>;
+  get(h: Record<string, string>, caseId: string): Promise<{ status: number; etag: string | undefined; body: Record<string, unknown>; headers: Record<string, unknown> }>;
   patch(h: Record<string, string>, caseId: string, body: unknown, ifMatch?: string): Promise<{ status: number; etag: string | undefined; body: Record<string, unknown> }>;
   /** ops_cs_case_requests_total{kind,result} 값 */
   requests(kind: string, result: string): Promise<number>;
   /** 지급 건처럼 받는 종류 밖의 건을 실제 저장소로 연다 */
-  seed(kind: CsCaseKind, targetRef: string, due?: { progressDueAtMs?: number | null; resultDueAtMs?: number | null }): Promise<string>;
+  seed(kind: CsCaseKind, targetRef: string, due?: { progressDueAtMs?: number | null; resultDueAtMs?: number | null; accountId?: string }): Promise<string>;
   close(): Promise<void>;
 }
 
@@ -70,7 +70,7 @@ type CsAppealsWiring = NonNullable<Parameters<typeof AppModule.register>[0]['csA
 type BackgroundWiring = Exclude<NonNullable<Parameters<typeof AppModule.register>[0]['background']>, false>;
 
 export async function csHarness(
-  o: { nowIso?: string; csAppeals?: CsAppealsWiring; registerSignals?: (registry: Awaited<ReturnType<typeof createService>>['metrics']['registry']) => void; background?: BackgroundWiring } = {},
+  o: { nowIso?: string; csAppeals?: CsAppealsWiring; supportCases?: unknown; fanLookup?: unknown; registerSignals?: (registry: Awaited<ReturnType<typeof createService>>['metrics']['registry']) => void; background?: BackgroundWiring } = {},
 ): Promise<CsHarness> {
   const clock = fakeClock({ now: Date.parse(o.nowIso ?? BASE_ISO) });
   const identity = new FakeIdentity();
@@ -80,7 +80,7 @@ export async function csHarness(
   const signals = new PromCsCaseSignals();
   const svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ memory: true, auditChain: audit, calendar: testCalendar(), caseSignals: signals, adminAccounts: { identity: admins }, ...(o.csAppeals ? { csAppeals: o.csAppeals } : {}), ...(o.background ? { background: o.background } : {}) }),
+    module: AppModule.register({ memory: true, auditChain: audit, calendar: testCalendar(), caseSignals: signals, adminAccounts: { identity: admins }, ...(o.csAppeals ? { csAppeals: o.csAppeals } : {}), ...(o.supportCases ? { supportCases: o.supportCases } : {}), ...(o.fanLookup ? { fanLookup: o.fanLookup } : {}), ...(o.background ? { background: o.background } : {}) } as never),
     env: { PEAKET_ENV: 'ci' },
     clock,
     logDestination: logs.stream,
@@ -111,7 +111,7 @@ export async function csHarness(
     },
     async get(h, caseId) {
       const r = await svc.http.inject({ method: 'GET', url: `/v1/ops/cases/${caseId}`, headers: h });
-      return { status: r.statusCode, etag: etagOf(r.headers), body: parse(r.payload) };
+      return { status: r.statusCode, etag: etagOf(r.headers), body: parse(r.payload), headers: r.headers as Record<string, unknown> };
     },
     async patch(h, caseId, body, ifMatch) {
       const r = await svc.http.inject({
@@ -135,7 +135,8 @@ export async function csHarness(
         nowMs: clock.now(),
         ...(due.progressDueAtMs !== undefined ? { progressDueAtMs: due.progressDueAtMs } : {}),
         ...(due.resultDueAtMs !== undefined ? { resultDueAtMs: due.resultDueAtMs } : {}),
-      });
+        ...(due.accountId !== undefined ? { accountId: due.accountId } : {}),
+      } as never);
       return c.caseId;
     },
     close: () => svc.close(),
