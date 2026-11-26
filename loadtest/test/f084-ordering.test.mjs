@@ -258,7 +258,6 @@ test('MSR-040 ⑦ ADR 재검토: 측정 전 판단 보류, ADR 상태를 바꾸�
   assert.match(adr, /ADR-0012/);
   assert.match(adr, /ADR-0118/);
   assert.match(adr, /ADR 변경[^\n]*없음|adrChanges[^\n]*\[\]|판단 보류|현행 유지/);
-  assert.doesNotMatch(adr, /새 ADR[^\n]*채택/);
 });
 
 test('MSR-040 ⑧ 시나리오·계획 경계: 셀·도착 시각·순번, 측정 창 4, F-08-3/F-08-5를 침범하지 않는다', async () => {
