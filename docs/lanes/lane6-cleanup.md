@@ -77,3 +77,11 @@
 - F-04-15 TR-22(낮음): `submissionOf`의 HOLDER 규칙(`OPEN`·`EXPIRED`만 제출)을 시험하지 않는다. HOLDER 상태별 허용·거부를 더한다(`apps/web/src/_pages/appeal/model/fraud-live.test.mjs:104-117`).
 - F-04-15 TR-23(낮음): 30일 사본 시험이 열린 요청의 존속, 정확히 30일 경계, HOLDER `GET`을 보지 않는다. `OPEN` 31일 사본·30/31일 경계·HOLDER 응답을 더한다(`services/core-svc/test/support-appeal-view.test.ts:117-123`).
 - F-04-15 TR-24(낮음): `validateAppealRequest`가 빠진 계정·사유 범주 6개·`CLEARED`·`REVERSED`를, `validateActionRequest`가 `SUBMITTED`·`PENDING` 계정을 보지 않는다. 서버 규칙 표의 나머지 상태를 더한다(`apps/console-host/src/pages/investigation-case/model/investigation-case.test.mjs:119-128`·`:130-144`).
+
+- 2026-11-26 F-04-15 구현 리뷰(동결 로컬)의 낮음 가운데 이번 freeze 가지에서 고치지 않는 것을 옮겼다. **높음·보안·통과 기준(IR-01~IR-15)은 `docs/review/plans/F-04-15.md` '구현 리뷰'에 남아 동결 가지에서 고친다.** 아래는 낮음(IR-16~IR-21)이다.
+- F-04-15 IR-16(낮음): 마이그레이션 `0048`과 Drizzle 스키마가 `appeal.target_id`를 `text`로 만들지만 `docs/data.md` `appeal`은 `uuid`다. 잘못된 ID가 DB에 들어간다(`services/core-svc/migrations/0048_support_appeal.sql:8`, `src/modules/support/adapters/db/schema.ts:11`).
+- F-04-15 IR-17(낮음): `AppealPage`가 UUID이면서 `?state=`가 있으면 board가 아니라 live로 간다. 계획 §2.8은 `?state=`가 있으면 board다(`apps/web/src/_pages/appeal/ui/AppealPage.tsx:107-113`).
+- F-04-15 IR-18(낮음): `MemorySupportAppealStore.put`이 같은 키·다른 본문에 `{replayed:true, result:undefined}`를 주고(`findIdempotent`의 `reused` 계약과 다르다), `SupportAppeals.applyDecision`은 어디서도 호출되지 않아 `appeal.status`·`result`가 `SUBMITTED`에 머문다(`services/core-svc/src/modules/support/adapters/memory-support-appeal-store.ts:25`, `application/support-appeals.ts:75-79`).
+- F-04-15 IR-19(낮음): `listApprovals` 항목의 `canApprove`가 요청자에게도 `PENDING_APPROVAL`만 보고 참이 된다(상세 GET만 요청자 거짓)(`services/ops-svc/src/modules/investigations/application/fraud-actions.ts:252-263`).
+- F-04-15 IR-20(낮음): 스냅샷이 없는 사건의 `fraudCaseSummary.snapshotHash`가 `''`인데 계약은 64자 hex다. 승인 상세 응답이 계약 모양을 벗어난다(`services/ops-svc/src/modules/investigations/application/fraud-actions.ts:993`, openapi `FraudCaseSummary.snapshotHash`).
+- F-04-15 IR-21(낮음): `SetFraudAppealView` gRPC 처리기가 proto 응답 `changed`를 채우지 않고 `{}`를 준다. 판이 작아 무시된 호출도 성공으로 보인다(`services/core-svc/src/modules/support/inbound/fraud-appeal-views.grpc.ts:53-55`, `core.proto` `SetFraudAppealViewResponse.changed`).
