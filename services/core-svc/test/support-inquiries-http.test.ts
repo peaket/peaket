@@ -128,10 +128,10 @@ describe('R-T27 고객 문의 접수·목록·상세·추가 문의', () => {
   });
 
   test('R-T27 ⑦ [ASVS v5.0.0-1.2.3][ASVS v5.0.0-1.3.5][ASVS v5.0.0-3.2.2] 12개 유형을 받고 외부 되팔이 신고는 INQUIRY 건·category 그대로이며 첨부가 없다', async () => {
-    const accountId = randomUUID();
+    const accounts = [randomUUID(), randomUUID()];
     const categories = ['BOOKING_PAYMENT', 'CANCEL_REFUND', 'TRANSFER', 'ENTRY', 'ACCOUNT', 'AUTOMATED_DECISION', 'SELLER_DISPUTE', 'MINOR_CONTRACT_CANCEL', 'MERCH', 'MODERATION_APPEAL', 'RESALE_POST_REPORT', 'OTHER'];
     for (const [i, category] of categories.entries()) {
-      const r = await submit(h, { accountId, category, title: `문의 유형 확인 ${i}번째`, body: '문의 유형 열두 개를 차례로 접수해 보는 시험 본문입니다.' });
+      const r = await submit(h, { accountId: accounts[Math.floor(i / 6)]!, category, title: `문의 유형 확인 ${i}번째`, body: '문의 유형 열두 개를 차례로 접수해 보는 시험 본문입니다.' });
       expect(r.status, category).toBe(201);
     }
     const rows = h.kit().inquiries.rows();
@@ -143,7 +143,7 @@ describe('R-T27 고객 문의 접수·목록·상세·추가 문의', () => {
     expect(h.kit().inquiries.outbox().find((o) => o.sourceId === dispute.inquiryId)).toMatchObject({ kind: 'DISPUTE', category: 'SELLER_DISPUTE' });
     const minor = rows.find((r) => r.category === 'MINOR_CONTRACT_CANCEL')!;
     expect(h.kit().inquiries.outbox().find((o) => o.sourceId === minor.inquiryId)).toMatchObject({ kind: 'MINOR_CONTRACT_CANCEL', category: 'MINOR_CONTRACT_CANCEL' });
-    const withAttachment = await h.create(h.fanHeaders(accountId), { category: 'MERCH', title: '첨부를 보내 봅니다', body: '첨부 파일을 받지 않는다는 것을 확인하는 시험 본문입니다.', attachment: 'a.png' });
+    const withAttachment = await h.create(h.fanHeaders(accounts[1]!), { category: 'MERCH', title: '첨부를 보내 봅니다', body: '첨부 파일을 받지 않는다는 것을 확인하는 시험 본문입니다.', attachment: 'a.png' });
     expect(withAttachment.status).toBe(400);
   });
 });
