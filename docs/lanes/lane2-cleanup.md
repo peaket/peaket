@@ -250,3 +250,18 @@
 - F-06-3 구현 리뷰 IR-27(낮음): 계획 `:396`은 시험 고정점을 `b1e5a5fa3`으로 적지만 `07012992d`가 시험 3파일을 +8/-8 고쳤다(다시 보기 4가 시험 이의로 닫음). 고정점을 `07012992d` 이후로 정정하거나 감독 예외를 기록한다
 - F-06-4 합성 때 확인할 몫(2026-11-26): ① F-04-13 `0037` 뒤 이 기능 ops `0040`을 적용해 `booking_restriction` 행·판·CHECK·`EXPIRED` 정비·Drizzle 저장소를 실제 PostgreSQL에서 한 번 본다(이 가지 단독에는 표가 없다) ② F-04-13의 `POST /internal/v1/fraud-cases/{caseId}/appeals`(403/404/200 EXPIRED/HOLDER)와 core `HttpFraudAppealClient`의 실제 짝 ③ R-T32 ④·⑤·⑦(조사관 404·이의 OBJECTED·받은 사람 진술), **R-T34 ①~⑥**(FRAUD 승인→집행→해제, `restricted_ci_hold`, 2인 승인, 1년 상한, `LIFT_RESTRICTION` 승인 대기) ④ F-04-13의 `FraudActions.restrict`/`lift`와 이 기능의 제한 엔진이 같은 표를 두 번 쓰지 않게 합성 때 하나로 모은다 ⑤ `approval_request.requested_by`와 `approval_vote.requester_id`가 NOT NULL이라 시스템 요청 종류를 만들려면 스키마 변경이 필요하다. 계획 `docs/review/plans/F-06-4.md` §9
 - F-06-4 시험 리뷰 TR-28(낮음, 2026-11-26): ① `restriction-approval-http.test.ts`의 '정확히 1년' 시험이 201만 보고 승인·DONE은 보지 않는다(이번 고침에서 승인 DONE까지 봄) ② '끝나기 전 새 요청' 시험이 `endsAt`·1년 상한을 보지 않는다 ③ 승인 응답에 `restrictionEndsAt`이 없다 ④ '목록' 제목인데 목록 호출이 없다 ⑤ Problem `type`/`traceId` 단언이 일부뿐이다 ⑥ 실패 건 `targetRef`(이번 고침에서 봄). 남은 ②~⑤는 다음 시험 고침이나 구현 뒤 정리에서 본다. 계획 `docs/review/plans/F-06-4.md` §12
+
+## F-06-4 구현 리뷰 정리(2026-11-27)
+
+- IR-13: 같은 계정의 열린 BOOKING_RESTRICTION 하나를 DB 부분 유일 인덱스만 지키고, 23505를 409/422로 바꾸지 않아 두 번째 요청이 500이다. 메모리 저장소도 같은 규칙을 두지 않는다. 승인 요청 생성에서 409 approval-restriction-open 같은 문제로 바꾸고 메모리 저장소도 같은 규칙을 둔다.
+- IR-15: `sup:rst`·`sup:far`에 TTL이 없고 `GET /v1/fraud-appeal-requests`가 결정 뒤 30일 창을 거르지 않는다. data.md §3·openapi의 수명 규칙대로 TTL을 두고 목록에서 30일 밖을 뺀다.
+- IR-17: F-04-13 합성 지점. `BookingRestrictions.lift`가 FRAUD를 403으로 막아 FRAUD_ACTION 승인 뒤 F-04-13 `FraudActions.lift`가 이 엔진을 쓸 길이 없고, `UnwiredFraudCases`가 늘 조사관 없음이다. 합성 때 `FraudActions`와 실제 `fraud_case` 조사관 어댑터를 잇는다(R-T34는 F-04-13 몫).
+- IR-18: 0040이 더한 `approval_request.restriction_copy_pending`·`restriction_copy_next_at`·`restriction_copy_attempts`를 `docs/data.md` approval_request에 적는다. `queue-admission` §6·`lane2.md` 다음 할 일도 구현 커밋에서 갱신한다.
+- IR-19: `GET /v1/appeals`가 RESTRICTION 소명의 `reasonCode`·`dueAt`을 늘 null로 준다. `sup:rst` 사본의 사유 코드·기한을 싣는다.
+- IR-20: `appeal.case_id`를 쓰는 호출자가 없다. ops `AppealSource.result`에 `caseId`를 더해 core `recordResult`가 적게 한다.
+- IR-21: core 내부 결과가 FRAUD_CASE에도 `resultNote`를 저장한다. FRAUD_CASE 검토 사유는 사건 기록에만 두고 소명 표에는 싣지 않는다.
+- IR-22: 다시 보내기 간격이 1분→10분으로 뛴다. data.md의 1·2·4·8·10분(두 배씩, 10분 상한)으로 바꾸고 시험도 그 경계를 본다.
+- IR-23: `restrictionEndsAt`을 `Date.parse`로만 읽어 오프셋 없는 글·없는 날짜를 서버 시간대로 받는다. RFC3339 date-time 오프셋을 강제한다.
+- IR-24: APPEAL 건 상세 리더가 없어 SCR-045가 제한 ID·기한·결과를 건 상세에서 못 본다. `cases.module`에 appeal 상세 리더(본문 없이)를 둔다.
+
+정본: `docs/review/plans/F-06-4.md` 구현 리뷰 IR-13·15·17·18~24.
