@@ -350,29 +350,22 @@ export class DrizzleCatalogRepository implements CatalogRepository {
     await this.db.db.delete(wish).where(and(eq(wish.accountId, accountId), eq(wish.productionId, productionId)));
   }
 
-  /** F-07-12 목록: 테넌트 공연·회차·검색 읽기 모델의 판매 상태를 한 트랜잭션으로 읽는다. 정렬·필터는 유스케이스가 한다. */
+  /**
+   * F-07-12 목록: 테넌트 공연·회차는 파트너 연결(core_partner)의 행 보안 안에서, 판매 상태 사본(search_document)은
+   * core_app 연결로 읽는다. 사본 표는 core_partner에 SELECT 권한이 없고, 공연 소유는 앞 트랜잭션이 이미 확인했다.
+   */
   async partnerProductions(tenantId: string): Promise<PartnerProductionSummaryRow[]> {
-    return this.db.transaction(
+    const rows = await this.partnerDb.transaction(
       async (tx) => {
         const productions = await tx.select().from(production).where(eq(production.promoterId, tenantId));
         if (productions.length === 0) return [];
         const events = await tx.select().from(event).where(eq(event.promoterId, tenantId));
-        const docs = await tx.execute(sql`
-          select d.production_id, d.sale_status
-            from search_document d
-            join production p on p.id = d.production_id
-           where p.promoter_id = ${tenantId}::uuid`);
-        const saleByProduction = new Map<string, EventSaleState>();
-        for (const r of docs.rows as { production_id: string; sale_status: string }[]) {
-          if (['UPCOMING', 'ON_SALE', 'ALL_HELD', 'SOLD_OUT', 'ENDED'].includes(r.sale_status)) saleByProduction.set(r.production_id, r.sale_status as EventSaleState);
-        }
-        return productions.map((p) => {
+        return productions.map((p): PartnerProductionSummaryRow => {
           const mine = events.filter((e) => e.productionId === p.id);
           const pending = pendingEventsOf(p.pendingRevision);
           const live = mine.filter((e) => e.status !== 'CANCELLED');
           const opens = [...live.map((e) => e.openAt), ...pending.map((e) => new Date(e.openAt))];
           const firstOpenAt = opens.length > 0 ? new Date(Math.min(...opens.map((d) => d.getTime()))) : null;
-          const sale = saleByProduction.get(p.id);
           return {
             productionId: p.id,
             title: p.title,
@@ -382,121 +375,153 @@ export class DrizzleCatalogRepository implements CatalogRepository {
             rejectionReason: p.rejectionReason,
             suspensionReasonCode: p.suspensionReasonCode as PartnerProductionSummaryRow['suspensionReasonCode'],
             firstOpenAt,
-            saleStates: sale === undefined ? [] : [sale],
+            saleStates: [],
           };
         });
       },
       { tenantId, isolationLevel: 'repeatable read', accessMode: 'read only' },
     );
+    if (rows.length === 0) return [];
+    const docs = await this.db.db.execute(sql`
+      select d.production_id, d.sale_status
+        from search_document d
+        join production p on p.id = d.production_id
+       where p.promoter_id = ${tenantId}::uuid`);
+    const saleByProduction = new Map<string, EventSaleState>();
+    for (const r of docs.rows as { production_id: string; sale_status: string }[]) {
+      if (['UPCOMING', 'ON_SALE', 'ALL_HELD', 'SOLD_OUT', 'ENDED'].includes(r.sale_status)) saleByProduction.set(r.production_id, r.sale_status as EventSaleState);
+    }
+    return rows.map((r) => {
+      const sale = saleByProduction.get(r.productionId);
+      return { ...r, saleStates: sale === undefined ? [] : [sale] };
+    });
   }
 
+  /**
+   * F-07-12 공연 개요: 공연·회차·이미지·공연장은 파트너 연결의 행 보안 안에서 읽고, 출연진·다른 이름은
+   * core_partner에 SELECT 권한이 없어 core_app 연결로 읽는다(소유는 앞 트랜잭션이 확인했다).
+   */
   async partnerProduction(productionId: string, tenantId: string): Promise<PartnerProductionSource | undefined> {
     if (!UUID.test(productionId)) return undefined;
-    return this.db.transaction(
+    const base = await this.partnerDb.transaction(
       async (tx) => {
         const [p] = await tx.select().from(production).where(and(eq(production.id, productionId), eq(production.promoterId, tenantId))).limit(1);
         if (!p) return undefined;
-        const [events, images, artists, aliases, placeRow] = await Promise.all([
+        const [events, images, placeRow] = await Promise.all([
           tx.select().from(event).where(and(eq(event.productionId, productionId), eq(event.promoterId, tenantId))),
           tx.select().from(productionImage).where(eq(productionImage.productionId, productionId)),
-          tx
-            .select({ artistId: artist.id, name: artist.name })
-            .from(productionArtist)
-            .innerJoin(artist, eq(artist.id, productionArtist.artistId))
-            .where(eq(productionArtist.productionId, productionId))
-            .orderBy(productionArtist.sortOrder, artist.id),
-          tx.select({ alias: searchAlias.alias }).from(searchAlias).where(and(eq(searchAlias.targetKind, 'PRODUCTION'), eq(searchAlias.targetId, productionId))),
           p.placeId === null ? Promise.resolve([]) : tx.select({ id: place.id, name: place.name }).from(place).where(eq(place.id, p.placeId)).limit(1),
         ]);
-        const pending = pendingEventsOf(p.pendingRevision);
-        const sourceEvents: PartnerEventSource[] = [
-          ...events.map((e) => ({
-            eventId: e.id,
-            version: e.version,
-            pending: false,
-            openAt: e.openAt,
-            lobbyMinutes: e.lobbyMinutes,
-            entryOpensAt: e.entryOpensAt,
-            startsAt: e.startsAt,
-            endsAt: e.endsAt,
-            reentryAllowed: e.reentryAllowed,
-            lobbyShuffle: e.lobbyShuffle,
-            openBatch: e.openBatch,
-            seatAssignment: e.seatAssignment as 'PICK' | 'AUTO',
-            perPersonLimit: e.perPersonLimit,
-            status: e.status as EventStatus,
-            saleStatus: null,
-            soldPercent: null,
-            entryClosedAt: e.entryClosedAt,
-          })),
-          ...pending.map((e) => ({
-            eventId: e.eventId,
-            version: 1,
-            pending: true,
-            openAt: new Date(e.openAt),
-            lobbyMinutes: e.lobbyMinutes,
-            entryOpensAt: e.entryOpensAt ? new Date(e.entryOpensAt) : null,
-            startsAt: new Date(e.startsAt),
-            endsAt: new Date(e.endsAt),
-            reentryAllowed: e.reentryAllowed,
-            lobbyShuffle: e.lobbyShuffle,
-            openBatch: e.openBatch,
-            seatAssignment: e.seatAssignment,
-            perPersonLimit: e.perPersonLimit,
-            status: 'SCHEDULED' as const,
-            saleStatus: null,
-            soldPercent: null,
-            entryClosedAt: null,
-          })),
-        ].sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime() || (a.eventId < b.eventId ? -1 : 1));
-        const placeInfo = (placeRow as { id: string; name: string }[])[0] ?? null;
-        return {
-          production: {
-            id: p.id,
-            promoterId: p.promoterId,
-            placeId: p.placeId,
-            title: p.title,
-            genre: p.genre as Genre,
-            saleReview: p.saleReview as SaleReview,
-            saleApprovedAt: p.saleApprovedAt,
-            saleSubmittedAt: p.saleSubmittedAt,
-            rejectionReason: p.rejectionReason,
-            requestedPlace: p.requestedPlace,
-            version: p.version,
-            suspensionReasonCode: p.suspensionReasonCode as PartnerProductionSource['production']['suspensionReasonCode'],
-            ageRating: p.ageRating,
-            runningMinutes: p.runningMinutes,
-          },
-          events: sourceEvents,
-          images: images.map((i) => ({
-            id: i.id,
-            productionId: i.productionId,
-            promoterId: i.promoterId,
-            kind: i.kind as 'POSTER' | 'DETAIL',
-            alt: i.alt,
-            order: i.displayOrder,
-            width: i.width,
-            height: i.height,
-            version: i.version,
-            createdAt: i.createdAt,
-            updatedAt: i.updatedAt,
-          })),
-          place: placeInfo,
-          artists,
-          aliases: aliases.map((a) => a.alias),
-          hasPendingRevision: pending.length > 0,
-          pendingRevisionFields: pending.length > 0 ? ['addedEvents'] : [],
-        };
+        return { p, events, images, placeRow: placeRow as { id: string; name: string }[] };
       },
       { tenantId, isolationLevel: 'repeatable read', accessMode: 'read only' },
     );
+    if (!base) return undefined;
+    const [artists, aliases] = await Promise.all([
+      this.db.db
+        .select({ artistId: artist.id, name: artist.name })
+        .from(productionArtist)
+        .innerJoin(artist, eq(artist.id, productionArtist.artistId))
+        .where(eq(productionArtist.productionId, productionId))
+        .orderBy(productionArtist.sortOrder, artist.id),
+      this.db.db
+        .select({ alias: searchAlias.alias })
+        .from(searchAlias)
+        .where(and(eq(searchAlias.targetKind, 'PRODUCTION'), eq(searchAlias.targetId, productionId), isNull(searchAlias.removedAt)))
+        .orderBy(asc(searchAlias.alias)),
+    ]);
+    const { p, events, images } = base;
+    const pending = pendingEventsOf(p.pendingRevision);
+    const pendingRevisionFields = pendingRevisionFieldsOf(p.pendingRevision);
+    const sourceEvents: PartnerEventSource[] = [
+      ...events.map((e) => ({
+        eventId: e.id,
+        version: e.version,
+        pending: false,
+        openAt: e.openAt,
+        lobbyMinutes: e.lobbyMinutes,
+        entryOpensAt: e.entryOpensAt,
+        startsAt: e.startsAt,
+        endsAt: e.endsAt,
+        reentryAllowed: e.reentryAllowed,
+        lobbyShuffle: e.lobbyShuffle,
+        openBatch: e.openBatch,
+        seatAssignment: e.seatAssignment as 'PICK' | 'AUTO',
+        perPersonLimit: e.perPersonLimit,
+        status: e.status as EventStatus,
+        saleStatus: null,
+        soldPercent: null,
+        entryClosedAt: e.entryClosedAt,
+      })),
+      ...pending.map((e) => ({
+        eventId: e.eventId,
+        version: 1,
+        pending: true,
+        openAt: new Date(e.openAt),
+        lobbyMinutes: e.lobbyMinutes,
+        entryOpensAt: e.entryOpensAt ? new Date(e.entryOpensAt) : null,
+        startsAt: new Date(e.startsAt),
+        endsAt: new Date(e.endsAt),
+        reentryAllowed: e.reentryAllowed,
+        lobbyShuffle: e.lobbyShuffle,
+        openBatch: e.openBatch,
+        seatAssignment: e.seatAssignment,
+        perPersonLimit: e.perPersonLimit,
+        status: 'SCHEDULED' as const,
+        saleStatus: null,
+        soldPercent: null,
+        entryClosedAt: null,
+      })),
+    ].sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime() || (a.eventId < b.eventId ? -1 : 1));
+    return {
+      production: {
+        id: p.id,
+        promoterId: p.promoterId,
+        placeId: p.placeId,
+        title: p.title,
+        genre: p.genre as Genre,
+        saleReview: p.saleReview as SaleReview,
+        saleApprovedAt: p.saleApprovedAt,
+        saleSubmittedAt: p.saleSubmittedAt,
+        rejectionReason: p.rejectionReason,
+        requestedPlace: p.requestedPlace,
+        version: p.version,
+        suspensionReasonCode: p.suspensionReasonCode as PartnerProductionSource['production']['suspensionReasonCode'],
+        ageRating: p.ageRating,
+        runningMinutes: p.runningMinutes,
+      },
+      events: sourceEvents,
+      images: images.map((i) => ({
+        id: i.id,
+        productionId: i.productionId,
+        promoterId: i.promoterId,
+        kind: i.kind as 'POSTER' | 'DETAIL',
+        alt: i.alt,
+        order: i.displayOrder,
+        width: i.width,
+        height: i.height,
+        version: i.version,
+        createdAt: i.createdAt,
+        updatedAt: i.updatedAt,
+      })),
+      place: base.placeRow[0] ?? null,
+      artists,
+      aliases: aliases.map((a) => a.alias),
+      // 승인 뒤 바꾼 항목 이름(판매 정책만 바꾼 경우에도 true다). 회차 변경분은 events에 pending true로 함께 싣는다.
+      hasPendingRevision: pendingRevisionFields.length > 0,
+      pendingRevisionFields,
+    };
   }
 
   async partnerTodo(tenantId: string): Promise<PartnerTodoRow> {
-    const [{ n }] = await this.db.db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(production)
-      .where(and(eq(production.promoterId, tenantId), eq(production.saleReview, 'REJECTED')));
+    const [{ n }] = await this.partnerDb.transaction(
+      async (tx) =>
+        tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(production)
+          .where(and(eq(production.promoterId, tenantId), eq(production.saleReview, 'REJECTED'))),
+      { tenantId, isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
     return {
       rejectedSaleReviewCount: n,
       settlementDisputeDueCount: null,
@@ -506,23 +531,44 @@ export class DrizzleCatalogRepository implements CatalogRepository {
     };
   }
 
+  /**
+   * F-07-12 판매자 정보: 파트너 연결은 자기 행의 판매자 8칸만 읽는다(0040). verifiedAt은 그 권한 밖이라
+   * core_app 연결로 테넌트 조건을 걸어 읽는다(계약 칸을 채우기 위해서다).
+   */
   async partnerSeller(tenantId: string): Promise<PartnerSellerSource | undefined> {
-    const [p] = await this.db.db.select().from(promoter).where(eq(promoter.id, tenantId)).limit(1);
+    const [p] = await this.partnerDb.transaction(
+      async (tx) =>
+        tx
+          .select({
+            legalName: promoter.legalName,
+            representative: promoter.representative,
+            address: promoter.address,
+            phone: promoter.phone,
+            email: promoter.email,
+            businessRegNo: promoter.businessRegNo,
+            mailOrderReportNo: promoter.mailOrderReportNo,
+            exemptionBasis: promoter.exemptionBasis,
+          })
+          .from(promoter)
+          .where(eq(promoter.id, tenantId))
+          .limit(1),
+      { tenantId, isolationLevel: 'repeatable read', accessMode: 'read only' },
+    );
     if (!p) return undefined;
+    const [v] = await this.db.db.select({ verifiedAt: promoter.verifiedAt }).from(promoter).where(eq(promoter.id, tenantId)).limit(1);
     return {
-      seller: {
-        legalName: p.legalName,
-        representative: p.representative,
-        address: p.address,
-        phone: p.phone,
-        email: p.email,
-        businessRegNo: p.businessRegNo,
-        mailOrderReportNo: p.mailOrderReportNo,
-        exemptionBasis: p.exemptionBasis,
-      },
-      verifiedAt: p.verifiedAt,
+      seller: p,
+      verifiedAt: v?.verifiedAt ?? null,
     };
   }
+}
+
+/** 변경분 JSON에서 값이 있는 항목 이름을 꺼낸다(salePolicy·eventChanges·addedEvents). 모양이 다르면 빈 목록 */
+function pendingRevisionFieldsOf(v: unknown): string[] {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return [];
+  return Object.entries(v as Record<string, unknown>)
+    .filter(([, value]) => value !== null && value !== undefined)
+    .map(([key]) => key);
 }
 
 /** 변경분 JSON의 회차(addedEvents)를 꺼낸다. 모양이 다르면 빈 목록 */
