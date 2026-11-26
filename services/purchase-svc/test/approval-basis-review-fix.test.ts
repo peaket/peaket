@@ -61,7 +61,19 @@ describe('IR-03·31 주문의 모든 티켓 입장 기록', () => {
 
   test('IR-11 취소 ID로 부르면 그 취소의 환급액만 답하고 다른 티켓 금액을 더하지 않는다', async () => {
     const b = await basis.basis(CANCELLATION);
-    expect(b).toMatchObject({ orderId: ORDER, entryRecorded: true, refundableAmount: 11_000 });
+    expect(b).toMatchObject({ orderId: ORDER, entryRecorded: true, refundableAmount: 11_000, cancellationState: 'REQUESTED' });
+    expect((await basis.basis(ORDER))?.cancellationState).toBe('REQUESTED');
+  });
+
+  test('IR-30 취소 행이 REFUNDED면 취소 ID·주문 ID basis 모두 그 상태를 답한다', async () => {
+    const before = records.get(CANCELLATION)!;
+    records.set(CANCELLATION, { ...before, state: 'REFUNDED' });
+    try {
+      expect((await basis.basis(CANCELLATION))?.cancellationState).toBe('REFUNDED');
+      expect((await basis.basis(ORDER))?.cancellationState).toBe('REFUNDED');
+    } finally {
+      records.set(CANCELLATION, before);
+    }
   });
 
   test('IR-31 발권 세대를 승인 근거에 싣는다', async () => {

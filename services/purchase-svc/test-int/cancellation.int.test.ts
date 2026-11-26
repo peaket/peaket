@@ -358,9 +358,12 @@ describe('IR-11 approval-basis 실제 두 장 주문', () => {
       [cancellationId, w.orderId, w.ticketId],
     );
     const basis = new ApprovalBasisOrders(new DrizzleCancellationOrders(purchaseDb, seatMap));
-    expect(await basis.basis(cancellationId)).toMatchObject({ orderId: w.orderId, refundableAmount: 11_000 });
+    expect(await basis.basis(cancellationId)).toMatchObject({ orderId: w.orderId, refundableAmount: 11_000, cancellationState: 'REQUESTED' });
     // 주문 ID로 부르면 그 취소를 뺀 다른 티켓의 남은 금액(12,000)이다
-    expect(await basis.basis(w.orderId)).toMatchObject({ orderId: w.orderId, refundableAmount: 12_000 });
+    expect(await basis.basis(w.orderId)).toMatchObject({ orderId: w.orderId, refundableAmount: 12_000, cancellationState: 'REQUESTED' });
+    await admin.pool.query("update order_cancellation set status = 'REFUNDED', status_changed_at = now() where id = $1", [cancellationId]);
+    expect(await basis.basis(cancellationId)).toMatchObject({ cancellationState: 'REFUNDED' });
+    expect(await basis.basis(w.orderId)).toMatchObject({ cancellationState: 'REFUNDED' });
   });
 });
 

@@ -42,6 +42,18 @@ const quiet = new Writable({
 });
 const clock = fakeClock({ now: NOW });
 const fx = new OrderFakes(clock);
+
+// IR-30 approval-basis HTTP 응답 시험용 주문·취소(REFUNDED)
+const APPROVAL_ORDER = '0190f3a1-7c2e-7a00-8000-0000000000d1';
+const APPROVAL_CANCEL = '0190f3a1-7c2e-7a00-8000-0000000000d2';
+const APPROVAL_TICKET = '0190f3a1-7c2e-7a00-8000-0000000000d3';
+const APPROVAL_ROW = { orderId: APPROVAL_ORDER, eventId: EVENT, ticketId: APPROVAL_TICKET, seatId: '0190f3a1-7c2e-7a00-8000-0000000000d4', payerAccountId: ACCOUNT, ticketPrice: 11_000, bookedAtMs: NOW - DAY, saleEndsAtMs: NOW + DAY, entryOpensAtMs: NOW + DAY, orderStatus: 'CONFIRMED', paidAtMs: NOW - DAY, refundableAmount: 0, entryRecorded: false, issueGeneration: 0 };
+const APPROVAL_RECORD = { cancellationId: APPROVAL_CANCEL, orderId: APPROVAL_ORDER, ticketId: APPROVAL_TICKET, refundAmount: 11_000, state: 'REFUNDED', refundAttempts: 0 };
+const approvalOrders = {
+  async byOrder(orderId: string) { return orderId === APPROVAL_ORDER ? [APPROVAL_ROW] : []; },
+  async findCancellation(cancellationId: string) { return cancellationId === APPROVAL_CANCEL ? APPROVAL_RECORD : undefined; },
+  async cancellationsOf(orderId: string) { return orderId === APPROVAL_ORDER ? [APPROVAL_RECORD] : []; },
+} as never;
 const sessions = new MemoryPurchaseSessions();
 sessions.open({ sessionId: PSID, accountId: ACCOUNT, eventId: EVENT, journeyId: JOURNEY, loginSessionId: LOGIN, key: KEY });
 
@@ -51,7 +63,7 @@ beforeAll(async () => {
   svc = await createService({
     name: 'purchase-svc',
     // 결제 접수 칸(accepts·slots, PRF-162)은 결제 접수 가짜로 채운다(이 파일은 주문 생성만 본다. 결제 접수는 accept-http.test.ts)
-    module: AppModule.register({ memory: true, sessions, booking: { ...fx.ports(), ...new AcceptFakes().bookingPorts(), consentVersion: CONSENT_VERSION, clock } }),
+    module: AppModule.register({ memory: true, sessions, booking: { ...fx.ports(), ...new AcceptFakes().bookingPorts(), consentVersion: CONSENT_VERSION, clock, approvalBasis: { orders: approvalOrders } } }),
     purchaseSessions: sessions,
     env: { PEAKET_ENV: 'ci' },
     clock,
@@ -63,6 +75,17 @@ afterAll(async () => {
 });
 beforeEach(() => {
   fx.reset();
+});
+
+describe('IR-30 approval-basis HTTP', () => {
+  test('취소 ID·주문 ID 응답에 취소 행 상태와 대상 티켓을 싣는다', async () => {
+    const byCancellation = await svc.http.inject({ method: 'GET', url: `/internal/v1/orders/${APPROVAL_CANCEL}/approval-basis` });
+    expect(byCancellation.statusCode, byCancellation.payload).toBe(200);
+    expect(JSON.parse(byCancellation.payload)).toMatchObject({ orderId: APPROVAL_ORDER, cancellationState: 'REFUNDED', ticketIds: [APPROVAL_TICKET] });
+    const byOrder = await svc.http.inject({ method: 'GET', url: `/internal/v1/orders/${APPROVAL_ORDER}/approval-basis` });
+    expect(byOrder.statusCode, byOrder.payload).toBe(200);
+    expect(JSON.parse(byOrder.payload)).toMatchObject({ orderId: APPROVAL_ORDER, cancellationState: 'REFUNDED', ticketIds: [APPROVAL_TICKET] });
+  });
 });
 
 const URL_PATH = '/v1/orders';
