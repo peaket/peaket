@@ -228,7 +228,7 @@ const evidenceKmsKeyId = process.env.PEAKET_EVIDENCE_KMS_KEY_ID;
 const evidenceQuarantineBucket = process.env.PEAKET_EVIDENCE_QUARANTINE_BUCKET;
 const evidenceEndpoint = process.env.PEAKET_EVIDENCE_S3_ENDPOINT;
 const evidenceObjects = evidenceBucket && evidenceKmsKeyId ? new S3EvidenceObjectStore({ bucket: evidenceBucket, kmsKeyId: evidenceKmsKeyId, ...(evidenceEndpoint ? { endpoint: evidenceEndpoint } : {}) }) : undefined;
-const evidenceDisposer = evidenceBucket && evidenceKmsKeyId ? new S3EvidenceDisposer({ bucket: evidenceBucket, kmsKeyId: evidenceKmsKeyId, ...(evidenceEndpoint ? { endpoint: evidenceEndpoint } : {}) }) : undefined;
+const evidenceDisposer = evidenceBucket && evidenceKmsKeyId ? new S3EvidenceDisposer({ bucket: evidenceBucket, kmsKeyId: evidenceKmsKeyId, ...(evidenceQuarantineBucket ? { quarantineBucket: evidenceQuarantineBucket } : {}), ...(evidenceEndpoint ? { endpoint: evidenceEndpoint } : {}) }) : undefined;
 const evidenceCaptures =
   evidenceBucket && evidenceKmsKeyId && evidenceQuarantineBucket
     ? new S3ExternalPostCaptures({

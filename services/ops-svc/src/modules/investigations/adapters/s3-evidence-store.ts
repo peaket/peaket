@@ -117,11 +117,32 @@ export class S3EvidenceObjectStore implements EvidenceObjectStore {
 /** 법적 보존 풀기·판 지우기 전용. 운영 조립은 일반 저장소와 다른 신원의 클라이언트를 넘긴다(IR-09). */
 export class S3EvidenceDisposer implements EvidenceDisposer {
   readonly #store: S3EvidenceObjectStore;
-  constructor(o: S3EvidenceObjectStoreOptions) {
+  readonly #quarantine?: string;
+  readonly #client?: Pick<S3Client, 'send'>;
+  constructor(o: S3EvidenceObjectStoreOptions & { quarantineBucket?: string }) {
     this.#store = new S3EvidenceObjectStore(o);
+    this.#quarantine = o.quarantineBucket;
+    this.#client =
+      o.client ??
+      (o.quarantineBucket
+        ? new S3Client({
+            region: o.region ?? process.env.AWS_REGION ?? 'ap-northeast-2',
+            ...RETRY,
+            requestChecksumCalculation: 'WHEN_REQUIRED',
+            ...(o.endpoint ? { endpoint: o.endpoint, forcePathStyle: true } : { ignoreConfiguredEndpointUrls: true }),
+          })
+        : undefined);
   }
   dispose(prefix: string): Promise<void> {
     return this.#store.dispose(prefix);
+  }
+  async disposeCapture(prefix: string): Promise<void> {
+    await this.dispose(prefix);
+    if (!this.#quarantine || !this.#client) return;
+    const out = await this.#client.send(new ListObjectsV2Command({ Bucket: this.#quarantine, Prefix: prefix }));
+    for (const c of out.Contents ?? []) {
+      if (c.Key) await this.#client.send(new DeleteObjectCommand({ Bucket: this.#quarantine, Key: c.Key }));
+    }
   }
 }
 

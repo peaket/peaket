@@ -308,6 +308,8 @@ export interface EvidenceObjectStore {
 /** 법적 보존 풀기·모든 판 지우기 전용 포트. 일반 저장소와 다른 신원·클라이언트로 조립한다(IR-09). */
 export interface EvidenceDisposer {
   dispose(prefix: string): Promise<void>;
+  /** 외부 게시물 캡처(증거 버킷 + 격리 버킷) 파기. 없으면 dispose로 대신한다. */
+  disposeCapture?(prefix: string): Promise<void>;
 }
 
 export interface EvidenceInventory {

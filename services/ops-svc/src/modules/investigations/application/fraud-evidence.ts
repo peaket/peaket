@@ -379,8 +379,16 @@ export class EvidenceBundles {
       }
       const next: EvidenceBundleRecord = { ...bundle, status: 'DISPOSED' };
       const input = this.#custodyInput(null, '보존 기간 만료', nowMs, 'DISPOSED');
-      const ok = await this.#updateWithCustody(next, input, ['SEALED']);
-      if (!ok) continue;
+      try {
+        const ok = await this.#updateWithCustody(next, input, ['SEALED']);
+        if (!ok) {
+          await this.d.alerts.raise({ eventId: bundle.eventId, version: 1, severity: 'SEV2', kind: 'EVIDENCE_DISPOSE_FAILED' });
+          continue;
+        }
+      } catch {
+        await this.d.alerts.raise({ eventId: bundle.eventId, version: 1, severity: 'SEV2', kind: 'EVIDENCE_DISPOSE_FAILED' });
+        continue;
+      }
       await this.#audit('EVIDENCE_DISPOSED', { bundleId: bundle.bundleId, caseId: bundle.caseId }, nowMs);
       n += 1;
     }
@@ -768,7 +776,9 @@ export class ExternalPosts {
       const event = await this.d.eventInfo.get(post.eventId);
       if (!event || nowMs < event.showAtMs + 30 * DAY) continue;
       try {
-        await this.d.captures.dispose(`captures/${post.postId}/`);
+        if (this.d.disposer?.disposeCapture) await this.d.disposer.disposeCapture(`captures/${post.postId}/`);
+        else if (this.d.disposer) await this.d.disposer.dispose(`captures/${post.postId}/`);
+        else await this.d.captures.dispose(`captures/${post.postId}/`);
         n += 1;
       } catch {
         await this.d.alerts.raise({ eventId: post.eventId, version: 1, severity: 'SEV2', kind: 'EXTERNAL_POST_DISPOSE_FAILED' });
