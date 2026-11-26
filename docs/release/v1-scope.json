@@ -403,7 +403,7 @@
     },
     "F-10-1": {
       "class": "frozen-local",
-      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발."
+      "reason": "동결(범위): ADR-0373 7일 완성 범위 밖. 로컬 트랙에서만 개발. 2026-11-26 계획·시험 시작(`docs/review/plans/F-10-1.md`)."
     },
     "F-10-2": {
       "class": "frozen-local",

@@ -58,6 +58,25 @@
 - 검색 질의는 공유 Aurora 클러스터의 읽기 전용 복제본(Reader)으로 보낸다. 복제가 늦는 시간(보통 1초 아래 [가정])만큼 빠진 공연이 더 보일 수 있다. 법적 이유처럼 바로 빼야 할 때도 이 지연과 CDN 무효화 시간 안에서 빠진다. 자동완성 사전에서는 지운 표시 덕분에 다음 판 확인(10초 [가정]) 한 번 안에 빠진다(SR-T15).
 - 구현 자리(추천 적용, 2026-11-16, ADR-0271): 동기화는 함수 하나(`syncSearchReadModel`)이고 판매 승인·포스터 게시와 지우기·1분 정리 작업이 같은 트랜잭션에서 부른다. 판매 중지·재개(BUILD_ORDER LCH-090), 회차 전부 취소(GAT-110), 운영자의 다른 이름 지우기는 그 단계가 같은 함수를 부르고 커밋 뒤 검색 경로 무효화를 부른다(SR-T8 ③). 계산 원천은 뷰 `search_document_source`이고, 이름 줄의 정규화 값은 §3.1의 같은 함수로 앱이 계산한다. 관심도는 1시간 [가정]마다 다시 세고 찜 쓰기마다 판을 올리지 않는다. 검색 질의는 `search_term`에서 후보 이름 줄만 찾고 그 후보에만 등급을 다시 매긴다(요청마다 전체 문서를 읽지 않는다, 감사 COV2-07). 새 마이그레이션의 첫 문장은 지금 DB의 `pg_database.datctype`이 C·POSIX면 멈춘다(SR-T7). `/v1/search` 아래 정의 밖 경로는 404와 `no-store`다(catalog-review 14.2.5의 원본 몫). 이미 있는 DB는 서버가 뜰 때의 따라잡기(임대를 가진 파드 하나가 끊음마다 트랜잭션 권고 잠금 안에서 하는 전체 동기화)가 채우고, 내려가 있던 동안 지난 시각 경계도 그때 따라잡는다. 검색은 파드에 전체 문서 사본을 두지 않고, 검색어가 없는 목록·관련 공연은 정렬 질의로, 0건 제안은 메모리 사전으로 고른다. 자동완성 요청은 사전을 갱신하지 않는다(갱신은 10초 주기 일만). 이상 추천 적용, 2026-11-16, ADR-0271 결정 12~14.
 
+### 2.4 홈 피드 읽기 모델
+
+홈 피드(SCR-001, `GET /v1/home`)는 검색 읽기 모델 `search_document`와 홈 구성 표(`home_banner`·`home_theme`·`home_theme_item`, docs/data.md §2)를 읽어 한 번에 만든다. 홈 구성 저장·화면(SCR-068)은 OPS-410(F-03-5) 몫이고, 이 절은 읽는 쪽 규칙만 정한다. 값은 모두 추천 적용(2026-11-26)이고 화면 설계(docs/design/d5 §5.1)와 계약(docs/api/openapi.yaml `HomeFeed`·`ProductionCard`)을 따른다.
+
+| 줄 | 고르는 것 | 차례 | 상한 [가정] |
+| --- | --- | --- | --- |
+| 배너 | `home_banner` 가운데 `display_from <= 지금 < display_until`이고 대상 공연이 공개(`isPublic`)인 줄 | `sort_order` 오름차순, `home_banner.id` 오름차순 | 10(계약) |
+| 오픈 예정 | `search_document` 가운데 `sale_status = UPCOMING`인 공연. 다음 오픈 회차는 `next_open_at`이 가장 이른 회차다 | `next_open_at` 오름차순, 공연 ID 오름차순 | 10 |
+| 지금 판매 중 | `search_document` 가운데 `sale_status = ON_SALE`인 공연. 판매 종료는 마지막 회차의 `starts_at − 24시간`(POL-043, ADR-0064) | `sale_ends_at` 오름차순, 공연 ID 오름차순 | 9 |
+| 테마 | `home_theme` 가운데 `display_from <= 지금 < display_until`인 줄. 항목은 공개 공연만, 적힌 차례대로 | `sort_order` 오름차순, `home_theme.id` 오름차순 | 5(계약)·테마마다 20(계약) |
+| 공연장 | 오픈 예정·지금 판매 중 공연이 있는 `place`(공연장) | 그 줄에 든 공연 수 내림차순, 이름 한국어 가나다순, 공연장 ID 오름차순 | 10 |
+
+- `sale_status`가 `SOLD_OUT`·`ENDED`인 공연은 오픈 예정·지금 판매 중 줄에 넣지 않는다. `ALL_HELD`(일시 매진)는 판매 중으로 센다(ADR-0122). core-svc가 좌석 사본을 갖기 전에는 실제 매진을 알 수 없어, 매진 뒤에도 `ON_SALE`로 남을 수 있다. 매진을 알게 된 쪽(purchase-svc)이 홈 캐시를 무효화하고 다음 읽기에서 빠지는 것은 후속 몫이다(HOT-280 known gap).
+- 빈 줄은 빈 배열로 싣고 화면이 그 줄만 숨긴다(openapi `HomeFeed` 설명, d5 §5.1 '섹션 비어 있음'). 응답은 개인 값(찜·알림)을 싣지 않는다.
+- `rankingsPath`는 늘 `/v1/home/rankings.json`이다. 랭킹 파일을 만드는 일은 분석 파이프라인(F-04-5·OPS-230, 동결) 몫이고, 이 기능은 경로만 싣는다. 파일이 없거나 2일 [가정] 넘게 묵으면 화면이 그 줄을 숨긴다(d5 §5.1, docs/features/analytics.md §8.5).
+- 응답 머리는 `Cache-Control: public, max-age=30, stale-while-revalidate=30, stale-if-error=86400` [가정]이고 쿠키를 캐시 키에 넣지 않는다(openapi `getHome`). 200 JSON에만 붙이고 그 밖의 응답은 `no-store`다.
+- 홈 구성 저장(OPS-410이 생기면)·판매 승인·판매 중지·회차 전부 취소로 홈에 보이는 공연이 바뀌면 `home` 태그를 무효화하고 `apps/web`의 내부 처리기로 `revalidateTag('home')`을 부른다. 한쪽이 실패해도 응답을 바꾸지 않고 로그·지표로 알린다. ISR 수명(60초 [가정])이 지나면 저절로 맞는다.
+- 카드 배지(`ProductionCard.badges`)는 HOT-250이 넘긴 남은 갭이다. 검색 읽기 모델 `search_document`가 아직 배지 값을 싣지 않아 홈 피드·검색 결과 카드의 `badges`는 비어 있다. 계약에서 선택 칸이므로 화면은 배지 없이 그리고, 값은 후속 기능에서 대표 회차의 `lobby_shuffle`·`open_batch`·`seat_assignment`와 승인된 판매 정책의 `PRESALE` 조각으로 채운다(ADR-0118, ADR-0261 결정 5). 이 기능은 그 값을 만들지 않는다(동결 로컬 범위, 계획 §10).
+
 ## 3. 한글 입력 처리
 
 ### 3.1 정규화
