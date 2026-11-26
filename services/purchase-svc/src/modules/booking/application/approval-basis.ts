@@ -17,6 +17,8 @@ export interface OrderApprovalBasis {
   issueGeneration: number;
   /** 이 승인 대상의 티켓들(FLAGGED는 취소된 티켓 하나, IR-30) */
   ticketIds: string[];
+  /** 취소 행의 지금 상태(FLAGGED는 취소 ID, 주문 ID면 취소가 하나일 때). 없으면 undefined */
+  cancellationState?: string;
 }
 export interface MinorContractBasis {
   orderId: string;
@@ -29,6 +31,7 @@ export interface MinorContractBasis {
   /** 무효화할 발권 세대(없으면 0) */
   issueGeneration: number;
   ticketIds: string[];
+  cancellationState?: string;
 }
 
 /** 내부 경로(IR-03): /internal/v1/orders/{orderId}/approval-basis, /internal/v1/orders/{orderId}/minor-contract-basis */
@@ -56,6 +59,8 @@ export class ApprovalBasisOrders {
     const refundable = rows.reduce((sum, r) => sum + (r.refundableAmount ?? r.ticketPrice), 0);
     const eventStarts = rows.find((r) => r.eventStartsAtMs !== undefined)?.eventStartsAtMs;
     const entryOpens = rows.find((r) => r.entryOpensAtMs !== undefined)?.entryOpensAtMs;
+    // 취소 ID로 부르면 그 행의 상태를 그대로 싣는다. 주문 ID로 부르면 취소가 하나일 때만 그 상태를 싣는다(여러 개면 고를 수 없다).
+    const cancellationState = cancellation?.state ?? (await this.#singleCancellationState(first.orderId));
     return {
       orderId: first.orderId,
       eventId: first.eventId,
@@ -70,7 +75,13 @@ export class ApprovalBasisOrders {
       refundableAmount: cancellation ? cancellation.refundAmount : refundable,
       issueGeneration: first.issueGeneration ?? 0,
       ticketIds: cancellation ? [cancellation.ticketId] : rows.map((r) => r.ticketId).filter((id) => id.length > 0),
+      ...(cancellationState !== undefined ? { cancellationState } : {}),
     };
+  }
+
+  async #singleCancellationState(orderId: string): Promise<string | undefined> {
+    const all = (await this.orders.cancellationsOf?.(orderId)) ?? [];
+    return all.length === 1 ? all[0]!.state : undefined;
   }
 
   async minorContractBasis(orderId: string): Promise<MinorContractBasis | undefined> {
