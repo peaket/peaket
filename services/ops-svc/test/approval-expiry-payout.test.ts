@@ -163,8 +163,8 @@ const versionOf = async (h: Record<string, string>, id: string): Promise<number>
 };
 const approve = async (h: Record<string, string>, id: string) =>
   svc.http.inject({ method: 'POST', url: `/v1/ops/approval-requests/${id}/approvals`, headers: headers(h, reauth(h), await versionOf(h, id)), payload: '{}' });
-const tick = (token: string | undefined = INTERNAL) =>
-  svc.http.inject({ method: 'POST', url: '/internal/v1/approval-requests/tick', headers: { 'content-type': 'application/json', ...(token === undefined ? {} : { 'x-peaket-internal-token': token }) }, payload: '{}' });
+const tick = (token: string | null = INTERNAL) =>
+  svc.http.inject({ method: 'POST', url: '/internal/v1/approval-requests/tick', headers: { 'content-type': 'application/json', ...(token === null ? {} : { 'x-peaket-internal-token': token }) }, payload: '{}' });
 const getApproval = (h: Record<string, string>, id: string) => svc.http.inject({ method: 'GET', url: `/v1/ops/approval-requests/${id}`, headers: h });
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 const approvalIdOf = (batch: Record<string, unknown>) => batch['approvalId'] as string;
@@ -270,7 +270,7 @@ describe('R-T29 ④ 15시 미승인 만료', () => {
     const op = as('operator');
     await createBatch(op);
     wall = Date.parse(DUE);
-    for (const token of [undefined, 'wrong-token']) expect((await tick(token)).statusCode).toBe(403);
+    for (const token of [null, 'wrong-token']) expect((await tick(token)).statusCode).toBe(403);
     expect(payments.expired).toHaveLength(0);
     expect((await tick()).statusCode).toBe(200);
     expect(payments.expired).toHaveLength(1);

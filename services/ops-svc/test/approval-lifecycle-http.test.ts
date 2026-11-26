@@ -148,8 +148,8 @@ const reject = async (h: Record<string, string>, id: string, reason: string) =>
   svc.http.inject({ method: 'POST', url: `/v1/ops/approval-requests/${id}/rejections`, headers: headers(h, undefined, await versionOf(h, id)), payload: JSON.stringify({ reason }) });
 const withdraw = async (h: Record<string, string>, id: string, reason: string) =>
   svc.http.inject({ method: 'POST', url: `/v1/ops/approval-requests/${id}/withdrawals`, headers: headers(h, undefined, await versionOf(h, id)), payload: JSON.stringify({ reason }) });
-const tick = async (token: string | undefined = INTERNAL) =>
-  svc.http.inject({ method: 'POST', url: '/internal/v1/approval-requests/tick', headers: { 'content-type': 'application/json', ...(token === undefined ? {} : { 'x-peaket-internal-token': token }) }, payload: '{}' });
+const tick = async (token: string | null = INTERNAL) =>
+  svc.http.inject({ method: 'POST', url: '/internal/v1/approval-requests/tick', headers: { 'content-type': 'application/json', ...(token === null ? {} : { 'x-peaket-internal-token': token }) }, payload: '{}' });
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 
 /** 정본의 5영업일(주말만 뺀다, 시작 시각의 같은 KST 시각) */
@@ -655,7 +655,7 @@ describe('요청 본문·대상·내부 경계', () => {
     orderBasis(order, randomUUID());
     const created = json(await waiver(requester, order, 310_000, { reasonCode: 'BEREAVEMENT', reasonText: '사망' }));
     wall = KST('2026-11-27T10:00:00');
-    for (const token of [undefined, 'wrong-token']) {
+    for (const token of [null, 'wrong-token']) {
       const r = await tick(token);
       expect(r.statusCode).toBe(403);
     }

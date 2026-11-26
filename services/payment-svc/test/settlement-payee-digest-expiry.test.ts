@@ -120,10 +120,10 @@ describe('payeeDigest 계산 [ASVS v5.0.0-2.3.3]', () => {
   test('정산서를 넣은 차례가 달라도 같은 지문이다', async () => {
     const rows = await confirmedStatements(2);
     const first = await create();
+    const reversed = [rows[1]!, rows[0]!].map((r) => store.statements.get(r.statementId)!);
     store.batches.clear();
     store.statements.clear();
-    store.sources.clear();
-    await confirmedStatements(2);
+    for (const s of reversed) await store.saveStatement({ ...s, status: 'CONFIRMED', payoutBatchId: null });
     const second = await create();
     expect((second as Record<string, unknown>).payeeDigest as string).toBe((first as Record<string, unknown>).payeeDigest as string);
     expect((first as Record<string, unknown>).payeeDigest as string).toBe(digestOf(rows, { bankCode: BANK, accountLast4: LAST4 }));
