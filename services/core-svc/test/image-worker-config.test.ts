@@ -47,7 +47,7 @@ describe('F-10-2 image-worker 배포·코드 모양', () => {
     expect(values).not.toMatch(/readOnlyRootFilesystem:\s*false|runAsNonRoot:\s*false|allowPrivilegeEscalation:\s*true/);
     // IRSA 서비스 어카운트 주석과 역할 ARN
     expect(values).toMatch(/serviceAccountAnnotations:/);
-    expect(values).toMatch(/eks\.amazonaws\.com\/role-arn:\s*arn:aws:iam::\d{12}:role\/peaket-image-worker/);
+    expect(values).toMatch(/eks\.amazonaws\.com\/role-arn:\s*arn:aws:iam::<ACCOUNT_ID>:role\/peaket-image-worker/);
     expect(helpers, '공용 차트가 serviceAccountAnnotations를 싣지 않는다').toContain('serviceAccountAnnotations');
     // ③ 나가는 통신은 S3 VPC 엔드포인트 하나(10.20.0.0/16 [가정], 443)다. 공인 HTTPS·다른 namespace는 열지 않는다
     expect(values).toMatch(/publicHttps:\s*false/);
@@ -98,7 +98,7 @@ describe('F-10-2 image-worker 배포·코드 모양', () => {
     const all = filesUnder(join(SERVICE, 'src'));
     const sharpUsers = all.filter((f) => /from\s+['"]sharp['"]/.test(readFileSync(f, 'utf8'))).map((f) => relative(REPO, f));
     expect(sharpUsers.length, 'sharp를 쓰는 곳이 없다').toBeGreaterThan(0);
-    for (const f of sharpUsers) expect(f).toMatch(/^services\/core-svc\/src\/image-worker\//);
+    for (const f of sharpUsers) expect(f.replaceAll('\\', '/')).toMatch(/^services\/core-svc\/src\/image-worker\//);
     // 화소 상한은 디코딩 전에 보고, 메타데이터는 지운다(회전은 화소에 반영)
     const process = readFileSync(join(IMAGE_WORKER, 'process.ts'), 'utf8');
     expect(process).toMatch(/limitInputPixels/);

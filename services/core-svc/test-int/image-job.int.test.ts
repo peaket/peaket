@@ -134,9 +134,16 @@ async function eventually(check: () => unknown, ms = 5_000): Promise<void> {
 }
 
 async function waitJob(kind = 'PRODUCTION'): Promise<string> {
+  return waitJobExcept(kind, undefined);
+}
+
+/** 첫 작업 키를 뺀 다음 작업을 기다린다. 끝난 첫 작업을 최신으로 착각하지 않게 한다. */
+async function waitJobExcept(kind: string, exclude: string | undefined): Promise<string> {
   const end = Date.now() + 5_000;
   for (;;) {
-    const r = await admin.pool.query<{ source_key: string }>(`select source_key from image_job where kind = $1 order by created_at desc limit 1`, [kind]);
+    const r = exclude
+      ? await admin.pool.query<{ source_key: string }>(`select source_key from image_job where kind = $1 and source_key <> $2 order by created_at desc limit 1`, [kind, exclude])
+      : await admin.pool.query<{ source_key: string }>(`select source_key from image_job where kind = $1 order by created_at desc limit 1`, [kind]);
     if (r.rows[0]) return r.rows[0].source_key;
     if (Date.now() > end) throw new Error('image_job 행이 생기지 않았다');
     await new Promise((r2) => setTimeout(r2, 20));
@@ -299,8 +306,11 @@ describe('F-10-2 이미지 작업 원장 실제 DB 배선', () => {
   test('F-10-2 포스터를 바꾸면 옛 파생본 정리가 CLEANUP 작업으로 원장에 오르고 워커가 지운다 [ASVS v5.0.0-16.5.3]', async () => {
     ready();
     const first = upload({ kind: 'POSTER' });
-    await waitJob();
+    const firstKey = await waitJob();
+    const firstJob = await jobStore.find(firstKey);
+    const firstJobId = firstJob!.id as string;
     await worker.runOnce(new Date(clock.now()));
+    await eventually(async () => expect(await jobStore.find(firstKey)).toMatchObject({ id: firstJobId, status: 'DONE', leaseUntil: null }));
     const firstId = json(await first).imageId as string;
     expect(publicFiles(firstId)).toHaveLength(namesFor(1200).length);
     // 첫 올리기의 #background 정리가 끝난 뒤에야 남은 시험 객체를 써야 경쟁하지 않는다
@@ -316,8 +326,10 @@ describe('F-10-2 이미지 작업 원장 실제 DB 배선', () => {
     expect(stagingDirs()).toContain(firstId);
     expect(quarantineFiles()).toContain(firstId);
     const second = upload({ kind: 'POSTER' });
-    await waitJob();
+    const secondKey = await waitJobExcept('PRODUCTION', firstKey);
+    expect(secondKey).not.toBe(firstKey);
     await worker.runOnce(new Date(clock.now()));
+    await eventually(async () => expect((await jobStore.find(secondKey))!.status).toBe('DONE'));
     expect((await second).statusCode).toBe(201);
     const cleanupKey = await waitJob('CLEANUP');
     expect(cleanupKey).toBe(`cleanup/production/${firstId}`);

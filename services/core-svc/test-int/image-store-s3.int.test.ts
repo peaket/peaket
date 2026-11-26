@@ -9,6 +9,8 @@ const MOTO_IMAGE = 'motoserver/moto:5.2.5';
 const REGION = 'ap-northeast-2';
 const BUCKET = 'peaket-it-images';
 const ID = randomUUID();
+/** 첫 시험이 덮어쓰기 거절로 쓰는 키와 겹치지 않게, 접두사 왕복 시험은 다른 ID를 쓴다. */
+const PREFIX_ID = randomUUID();
 
 const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 
@@ -124,12 +126,12 @@ describe('F-10-2 S3 이미지 저장소', () => {
       ['banner', '640.avif'],
       ['review', '240.webp'],
     ] as const) {
-      await store.putQuarantine(`quarantine/${kind}/${ID}`, bytes);
-      expect((await head(`quarantine/${kind}/${ID}`)).status, `quarantine/${kind}`).toBe(200);
-      expect((await putRaw(`staging/${kind}/${ID}/${name}`, bytes)).status, `staging/${kind}`).toBe(200);
-      expect(await store.stagingSize(`staging/${kind}/${ID}/${name}`), `staging/${kind}`).toBe(3);
-      await store.putPublic(`${kind}/${ID}/${name}`, bytes, name.endsWith('avif') ? 'image/avif' : 'image/webp');
-      expect((await head(`${kind}/${ID}/${name}`)).status, `${kind} 공개`).toBe(200);
+      await store.putQuarantine(`quarantine/${kind}/${PREFIX_ID}`, bytes);
+      expect((await head(`quarantine/${kind}/${PREFIX_ID}`)).status, `quarantine/${kind}`).toBe(200);
+      expect((await putRaw(`staging/${kind}/${PREFIX_ID}/${name}`, bytes)).status, `staging/${kind}`).toBe(200);
+      expect(await store.stagingSize(`staging/${kind}/${PREFIX_ID}/${name}`), `staging/${kind}`).toBe(3);
+      await store.putPublic(`${kind}/${PREFIX_ID}/${name}`, bytes, name.endsWith('avif') ? 'image/avif' : 'image/webp');
+      expect((await head(`${kind}/${PREFIX_ID}/${name}`)).status, `${kind} 공개`).toBe(200);
     }
     await expect(store.putQuarantine(`quarantine/other/${ID}`, bytes)).rejects.toThrow();
     expect(await store.stagingSize(`staging/production/${ID}/320.webp`)).toBeUndefined();
