@@ -22,7 +22,7 @@ export function FraudAppealLive({ caseId }: { caseId: string }) {
   const [text, setText] = useState('');
   const [screen, setScreen] = useState<'loading' | 'ready' | 'login' | 'missing' | 'error'>('loading');
   const [message, setMessage] = useState('');
-  const [nowMs] = useState(() => Date.now());
+  const nowMs = Date.now();
 
   const load = useCallback(async () => {
     if (!ensureBrowserApi()) {

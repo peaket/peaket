@@ -645,8 +645,12 @@ export class Investigations {
     if (label) await this.d.labels.apply({ eventId: current.eventId, caseId, accountIds: released, label });
     const saved = await this.d.store.getCase(caseId);
     const out = saved ?? next;
-    if (this.d.copies && ((body.appealDecisions?.length ?? 0) > 0 || (body.objectionDecisions?.length ?? 0) > 0)) {
-      const accounts = [...new Set([...(body.appealDecisions ?? []).map((d) => d.accountId), ...(body.objectionDecisions ?? []).map((d) => d.accountId)])];
+    const decided = (body.appealDecisions?.length ?? 0) > 0 || (body.objectionDecisions?.length ?? 0) > 0;
+    const clearedByRemoval = out.status === 'CLEARED' && !decided;
+    if (this.d.copies && (decided || clearedByRemoval)) {
+      const accounts = decided
+        ? [...new Set([...(body.appealDecisions ?? []).map((d) => d.accountId), ...(body.objectionDecisions ?? []).map((d) => d.accountId)])]
+        : out.members.map((m) => m.accountId);
       await this.#writeDecisionCopies(out, current.eventId, accounts, nowMs);
     }
     const snapshot = await this.d.store.latestSnapshot(out.eventId);

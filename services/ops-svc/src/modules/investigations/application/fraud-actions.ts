@@ -252,6 +252,15 @@ export class FraudActions {
       }
     }
     const saved = (await this.d.store.getCase(caseId)) ?? r.next;
+    // IR-12: 정상 종료도 사본의 사건 상태를 CLEARED로 바꿔 팬 목록에서 뺀다.
+    await this.#writeActionCopies({
+      c: saved,
+      version: saved.version,
+      accounts: saved.members.map((m) => m.accountId),
+      targets: lastActionTargets(saved),
+      results: lastActionResultRows(saved),
+      priority: allPriorityGrants(saved),
+    });
     const snapshot = await this.d.store.latestSnapshot(saved.eventId);
     const schedule = await this.#schedule(saved.eventId);
     return { view: this.caseView(saved, snapshot, schedule?.entryOpensAtMs), version: saved.version };
@@ -704,6 +713,21 @@ export class FraudActions {
       const out = await this.d.store.updateCase(next, c.version, events, {});
       if (!out.ok) throw bareProblem('precondition-failed', 412, '다른 곳에서 먼저 고쳤습니다');
     }
+    if (this.d.copies) {
+      for (const d of decisions) {
+        // 이용 제한 풀기 승인이 남은 인정은 승인 실행 때 우선 구매와 함께 다시 쓴다(판이 같아 덮이지 않게).
+        if (d.decision === 'ACCEPTED' && r.liftAccountIds.length > 0) continue;
+        await this.#writeActionCopies({
+          c: next,
+          version: next.version,
+          accounts: [d.accountId],
+          targets: lastActionTargets(next),
+          results: lastActionResultRows(next),
+          priority: granted.filter((g) => g.accountId === d.accountId),
+          objection: { state: d.decision, note: d.reason },
+        });
+      }
+    }
     try {
       for (const id of r.liftAccountIds) await this.d.notifier.objectionDecided({ eventId: c.eventId, caseId: c.caseId, accountId: id, decision: 'ACCEPTED', reason: decisions.find((d) => d.accountId === id)?.reason ?? '', restrictionLifted: false });
       for (const d of decisions) if (d.decision === 'REJECTED') await this.d.notifier.objectionDecided({ eventId: c.eventId, caseId: c.caseId, accountId: d.accountId, decision: 'REJECTED', reason: d.reason, restrictionLifted: false });
@@ -844,6 +868,17 @@ export class FraudActions {
   }): Promise<void> {
     const copies = this.d.copies;
     if (!copies) return;
+    // IR-05: 잠긴 표·가진 표 목록은 그 조치의 대상이 아니라 소명 요청 때 잠근 전체 목록이다.
+    const allTickets = this.d.tickets ? await this.d.tickets.listForAction({ eventId: o.c.eventId, payerAccountIds: o.accounts }).catch(() => []) : [];
+    const requested = [...o.c.events].reverse().find((e) => e.kind === 'APPEAL_REQUESTED' && e.detail);
+    const notified = requested && Array.isArray(requested.detail!.notifiedHolders) ? (requested.detail!.notifiedHolders as { accountId: string; ticketIds: string[] }[]) : [];
+    const lockedOf = (accountId: string): string[] =>
+      allTickets.length > 0 ? allTickets.filter((t) => t.payerAccountId === accountId).map((t) => t.ticketId) : o.targets.filter((t) => t.payerAccountId === accountId).map((t) => t.ticketId);
+    const heldOf = (holderId: string): string[] => {
+      const fromEvent = notified.find((h) => h.accountId === holderId);
+      if (fromEvent) return [...fromEvent.ticketIds];
+      return allTickets.filter((t) => t.holderAccountId === holderId && t.holderAccountId !== t.payerAccountId).map((t) => t.ticketId);
+    };
     const stateOf = (r: string): 'OPEN' | 'SUBMITTED' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED' =>
       r === 'ACCEPTED' || r === 'REJECTED' || r === 'EXPIRED' ? r : r === 'SUBMITTED' ? 'SUBMITTED' : 'OPEN';
     const results = o.results ?? [];
@@ -876,7 +911,7 @@ export class FraudActions {
           caseStatus: o.c.status,
           reasonCategories: [o.c.reasonCategory],
           ...(m?.appealDueAtMs !== undefined && m.appealDueAtMs !== null ? { dueAtMs: m.appealDueAtMs } : o.c.appealDueAtMs !== null ? { dueAtMs: o.c.appealDueAtMs } : {}),
-          lockedTicketIds: targets.map((t) => t.ticketId),
+          lockedTicketIds: lockedOf(accountId),
           heldTicketIds: [],
           excludedTicketIds: [],
           lockActive: false,
@@ -914,7 +949,7 @@ export class FraudActions {
           caseStatus: o.c.status,
           reasonCategories: [],
           lockedTicketIds: [],
-          heldTicketIds: v.held,
+          heldTicketIds: heldOf(holderId),
           excludedTicketIds: v.excluded,
           lockActive: false,
           lockExpiresAtMs: null,

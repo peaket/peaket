@@ -103,9 +103,7 @@ export class DrizzleSupportAppealStore implements SupportAppealStore {
     if (!row) return { kind: 'none' };
     if (!sameHash(Buffer.from(row.request_hash), Buffer.from(i.requestHash))) return { kind: 'reused' };
     if (row.result_ref === RELEASED) return { kind: 'none' };
-    if (row.result_ref === null) {
-      return Date.now() - new Date(row.created_at).getTime() >= WAIT_MS ? { kind: 'none' } : { kind: 'in_progress' };
-    }
+    if (row.result_ref === null) return { kind: 'in_progress' };
     const a = await this.get(row.result_ref);
     return a ? { kind: 'replay', result: appealResponse(a) } : { kind: 'none' };
   }
@@ -118,8 +116,9 @@ export class DrizzleSupportAppealStore implements SupportAppealStore {
       values (${i.accountRef}, ${i.operation}, ${i.key}, ${Buffer.from(i.requestHash)}, null, ${now})
       on conflict (account_ref, operation, idempotency_key) do update
         set request_hash = excluded.request_hash, result_ref = null, created_at = excluded.created_at
-        where (idempotency_record.result_ref is null and idempotency_record.created_at <= ${stale})
-           or idempotency_record.result_ref = ${RELEASED}
+        where ((idempotency_record.result_ref is null and idempotency_record.created_at <= ${stale})
+           or idempotency_record.result_ref = ${RELEASED})
+          and idempotency_record.request_hash = excluded.request_hash
       returning 1 as claimed`);
     if (inserted.rows.length === 1) return { kind: 'claimed' };
     const found = await this.findIdempotent(i);
