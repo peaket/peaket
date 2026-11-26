@@ -41,7 +41,7 @@ export class BookingConfirmedHandler {
     return e.eventKey;
   }
 
-  async handle(e: TradeOrderEventLike): Promise<void> {
+  async handle(e: TradeOrderEventLike, m?: { partition: number; offset: string | number }): Promise<void> {
     if (e.type !== 'CONFIRMED') return;
     const orderId = e.orderId;
     const eventId = e.eventId;
@@ -53,6 +53,18 @@ export class BookingConfirmedHandler {
       throw new Error('trade.orders CONFIRMED 사건 모양이 다르다');
     }
     const items = (e.items ?? []).flatMap((i) => (typeof i.tierId === 'string' ? [{ tierId: i.tierId, ...(typeof i.seatLabel === 'string' ? { seatLabel: i.seatLabel } : {}) }] : []));
-    await this.intake.bookingConfirmed({ type: 'CONFIRMED', orderId, eventId, accountId, eventKey, occurredAtMs, amount, items });
+    const kafkaOffset = m ? Number(m.offset) : undefined;
+    await this.intake.bookingConfirmed({
+      type: 'CONFIRMED',
+      orderId,
+      eventId,
+      accountId,
+      eventKey,
+      occurredAtMs,
+      amount,
+      items,
+      ...(m ? { partition: m.partition } : {}),
+      ...(kafkaOffset !== undefined && Number.isSafeInteger(kafkaOffset) ? { kafkaOffset } : {}),
+    });
   }
 }

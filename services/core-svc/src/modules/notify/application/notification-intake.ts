@@ -89,6 +89,9 @@ export interface BookingConfirmedEvent {
   occurredAtMs: number;
   amount: number;
   items: readonly { tierId: string; seatLabel?: string }[];
+  /** held_event에 남길 Kafka 위치(없으면 0·0) */
+  partition?: number;
+  kafkaOffset?: number;
 }
 
 export interface BookingIntakeResult {
@@ -269,7 +272,11 @@ export class NotificationIntake {
   }
 
   async #readNotice(e: BookingConfirmedEvent): Promise<BookingNoticeView | 'HELD' | undefined> {
-    if (!this.d.noticeReader) return undefined;
+    if (!this.d.noticeReader) {
+      // 조립이 빠진 것을 '알림 불허'로 숨기지 않는다. 재시도·보류로 남겨 오프셋을 커밋하지 않는다.
+      await this.#hold(e);
+      return 'HELD';
+    }
     for (let i = 1; i <= BOOKING_NOTICE_READ_ATTEMPTS; i += 1) {
       try {
         return await this.d.noticeReader.get(e.orderId);
@@ -284,10 +291,22 @@ export class NotificationIntake {
   }
 
   async #readCatalog(e: BookingConfirmedEvent, tierIds: readonly string[]): Promise<Awaited<ReturnType<NoticeCatalogView['getBookingNotice']>> | 'HELD' | undefined> {
-    if (!this.d.catalog) return undefined;
+    if (!this.d.catalog) {
+      await this.#hold(e);
+      return 'HELD';
+    }
     for (let i = 1; i <= BOOKING_NOTICE_READ_ATTEMPTS; i += 1) {
       try {
-        return await this.d.catalog.getBookingNotice(e.eventId, tierIds);
+        const catalog = await this.d.catalog.getBookingNotice(e.eventId, tierIds);
+        // 정본 §4.9.1: 공연명·장소·회차 시각을 읽지 못하면 작업을 만들지 않고 재시도한다.
+        if (!catalog || !catalog.productionName || !catalog.venueName || !catalog.eventStartsAt) {
+          if (i === BOOKING_NOTICE_READ_ATTEMPTS) {
+            await this.#hold(e);
+            return 'HELD';
+          }
+          continue;
+        }
+        return catalog;
       } catch {
         if (i === BOOKING_NOTICE_READ_ATTEMPTS) {
           await this.#hold(e);
@@ -301,7 +320,14 @@ export class NotificationIntake {
   async #hold(e: BookingConfirmedEvent): Promise<void> {
     this.#held.add(e.eventKey);
     await this.d.heldEvents?.hold(
-      { eventKey: e.eventKey, kind: 'BOOKING_CONFIRMED', payload: { eventKey: e.eventKey, orderId: e.orderId }, attempts: BOOKING_NOTICE_READ_ATTEMPTS },
+      {
+        eventKey: e.eventKey,
+        kind: 'BOOKING_CONFIRMED',
+        payload: { eventKey: e.eventKey, orderId: e.orderId },
+        attempts: BOOKING_NOTICE_READ_ATTEMPTS,
+        ...(e.partition !== undefined ? { partition: e.partition } : {}),
+        ...(e.kafkaOffset !== undefined ? { kafkaOffset: e.kafkaOffset } : {}),
+      },
       new Date(this.d.clock.now()),
     );
   }

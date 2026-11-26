@@ -11,8 +11,9 @@ export class CatalogBookingNoticeView implements NoticeCatalogView {
     if (!row) return undefined;
     const s = row.seller;
     const filled = (v: string | null): v is string => v !== null && v.trim() !== '';
+    const hasReportOrExemption = filled(s.mailOrderReportNo ?? null) || filled(s.exemptionBasis ?? null);
     const seller =
-      filled(s.representative) && filled(s.address) && filled(s.phone) && filled(s.email) && filled(s.businessRegNo)
+      filled(s.representative) && filled(s.address) && filled(s.phone) && filled(s.email) && filled(s.businessRegNo) && hasReportOrExemption
         ? {
             legalName: s.legalName,
             representative: s.representative,
@@ -20,7 +21,8 @@ export class CatalogBookingNoticeView implements NoticeCatalogView {
             phone: s.phone,
             email: s.email,
             businessRegNo: s.businessRegNo,
-            mailOrderReportNo: s.mailOrderReportNo ?? '',
+            ...(filled(s.mailOrderReportNo ?? null) ? { mailOrderReportNo: s.mailOrderReportNo! } : {}),
+            ...(filled(s.exemptionBasis ?? null) ? { exemptionBasis: s.exemptionBasis! } : {}),
           }
         : null;
     const names = new Map(row.priceTiers.map((t) => [t.tierId, t.name]));

@@ -14,10 +14,10 @@ export class DrizzleNotifyHeldEvents implements NotifyHeldEvents {
     return (r as unknown as { rows: unknown[] }).rows.length > 0;
   }
 
-  async hold(e: { eventKey: string; kind: string; payload: Record<string, unknown>; attempts: number }, now: Date): Promise<void> {
+  async hold(e: { eventKey: string; kind: string; payload: Record<string, unknown>; attempts: number; partition?: number; kafkaOffset?: number }, now: Date): Promise<void> {
     await this.db.db.execute(sql`
       insert into held_event (id, topic, partition, kafka_offset, event_key, business_key, error, record_at, held_at, headers, value)
-      values (${randomUUID()}::uuid, ${TOPIC}, 0, 0, ${e.eventKey}, ${String(e.payload.orderId ?? e.eventKey)}, ${`notify-intake:${e.kind}:attempts=${e.attempts}`}, ${now}::timestamptz, ${now}::timestamptz, ${JSON.stringify({ kind: e.kind })}::jsonb, null)
+      values (${randomUUID()}::uuid, ${TOPIC}, ${e.partition ?? 0}, ${e.kafkaOffset ?? 0}, ${e.eventKey}, ${String(e.payload.orderId ?? e.eventKey)}, ${`notify-intake:${e.kind}:attempts=${e.attempts}`}, ${now}::timestamptz, ${now}::timestamptz, ${JSON.stringify({ kind: e.kind })}::jsonb, null)
       on conflict do nothing`);
   }
 }

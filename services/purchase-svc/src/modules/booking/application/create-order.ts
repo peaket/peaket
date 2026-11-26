@@ -352,8 +352,11 @@ export class CreateOrder {
 
     // 11. 커밋 뒤 Paying 표시(실패해도 응답을 바꾸지 않는다), 12. 201
     await this.#markPaying(c.purchaseSessionId, outcome.order.orderId, c.deadline);
-    // 시험·옛 저장소는 응답 모습에 예매번호를 싣지 않는다. 쓰임새가 만든 번호를 응답에 함께 둔다(공개 계약은 bookingNumber)
-    const view = bookingNo !== undefined ? ({ ...outcome.order, bookingNo } as typeof outcome.order & { bookingNo: string }) : outcome.order;
+    // 새로 만든 주문에만 이번에 잡은 번호를 함께 둔다. REPLAYED면 먼저 커밋된 주문의 번호를 그대로 둔다(IR068-04).
+    const view =
+      outcome.status === 'CREATED' && bookingNo !== undefined
+        ? ({ ...outcome.order, bookingNo } as typeof outcome.order & { bookingNo: string })
+        : outcome.order;
     return { status: 201, order: view, replayed: outcome.status === 'REPLAYED' };
   }
 

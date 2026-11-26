@@ -105,7 +105,9 @@ export interface SellerNoticeInfo {
   phone: string;
   email: string;
   businessRegNo: string;
-  mailOrderReportNo: string;
+  mailOrderReportNo?: string;
+  /** 통신판매업 신고 면제 근거(신고번호가 없을 때 법정 고지에 쓴다) */
+  exemptionBasis?: string;
 }
 
 export interface BookingNoticeCatalog {
@@ -125,7 +127,7 @@ export interface NoticeCatalogView {
 export interface NotifyHeldEvents {
   /** 있으면 이미 보류한 사건인지 본다(없으면 intake가 이 실행 안에서만 기억한다) */
   find?(eventKey: string): Promise<boolean>;
-  hold(e: { eventKey: string; kind: string; payload: Record<string, unknown>; attempts: number }, now: Date): Promise<void>;
+  hold(e: { eventKey: string; kind: string; payload: Record<string, unknown>; attempts: number; partition?: number; kafkaOffset?: number }, now: Date): Promise<void>;
 }
 
 export interface NotifySignals {

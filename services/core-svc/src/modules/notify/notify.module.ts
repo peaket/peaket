@@ -25,6 +25,7 @@ import { MemoryNotificationEventDirectory } from './adapters/memory-event-direct
 import { DrizzleNotificationEventDirectory } from './adapters/db/drizzle-event-directory.js';
 import { FakeMailTransport, FakePushTransport, unavailableMail, unavailablePush } from './adapters/fake-transports.js';
 import { mailTransportFromEnv } from './adapters/file-mail-transport.js';
+import { sesMailTransportFromEnv } from './adapters/ses-mail-transport.js';
 import { pushTransportFromEnv } from './adapters/file-push-transport.js';
 import { HttpsPushTransport } from './adapters/https-push-transport.js';
 import { GrpcRecipientDirectory, unavailableRecipients } from './adapters/grpc-recipient-directory.js';
@@ -70,7 +71,8 @@ export function fanNotifyProviders(o: { storage: 'memory' | 'database'; wiring?:
   const store = o.storage === 'memory' ? (o.wiring?.store ?? new MemoryFanNotifyStore()) : new DrizzleFanNotifyStore(o.appDatabase!);
   const senderStore = o.storage === 'memory' ? store : new DrizzleFanNotifyStore(o.senderDatabase!);
   const events = o.storage === 'memory' ? (o.wiring?.events ?? new MemoryNotificationEventDirectory(o.catalog ?? new MemoryCatalogRepository())) : new DrizzleNotificationEventDirectory(o.appDatabase!);
-  const mail = o.wiring?.mail ?? mailTransportFromEnv(env) ?? (o.storage === 'memory' ? new FakeMailTransport() : unavailableMail);
+  // 운영은 Amazon SES(서울 리전), local·ci·demo는 파일 대역, 아무것도 없으면 memory는 가짜·database는 불가용이다.
+  const mail = o.wiring?.mail ?? sesMailTransportFromEnv(env) ?? mailTransportFromEnv(env) ?? (o.storage === 'memory' ? new FakeMailTransport() : unavailableMail);
   const push = o.wiring?.push ?? pushTransportFromEnv(env) ?? (o.storage === 'memory' ? new FakePushTransport() : new HttpsPushTransport());
   const recipients = o.wiring?.recipients ?? (env.PEAKET_IDENTITY_GRPC_URL ? new GrpcRecipientDirectory(env.PEAKET_IDENTITY_GRPC_URL) : unavailableRecipients);
   const optOutKey = o.wiring?.optOutKey ?? optOutKeyFromEnv(env);
