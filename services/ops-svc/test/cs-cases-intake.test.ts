@@ -126,8 +126,8 @@ describe('R-T48 ② 멱등', () => {
 });
 
 describe('R-T48 ③ 받지 않는 종류와 칸이 빠진 본문', () => {
-  test('R-T48 ③ INQUIRY·CONTENT_REPORT·APPEAL과 칸이 빠진 본문은 accepted: false이고 행 0, 지표 결과가 ignored다', async () => {
-    for (const kind of ['INQUIRY', 'CONTENT_REPORT', 'APPEAL'] as const) {
+  test('R-T48 ③ INQUIRY·CONTENT_REPORT와 칸이 빠진 본문은 accepted: false이고 행 0, 지표 결과가 ignored다', async () => {
+    for (const kind of ['INQUIRY', 'CONTENT_REPORT'] as const) {
       const r = await h.intake(caseRequest(kind));
       expect([kind, r.status, r.body]).toEqual([kind, 202, { accepted: false }]);
       expect(await h.requests(kind, 'ignored'), kind).toBe(1);
@@ -142,6 +142,10 @@ describe('R-T48 ③ 받지 않는 종류와 칸이 빠진 본문', () => {
       expect((await h.list(h.as(role), 'limit=100')).body.items, role).toEqual([]);
       expect((await h.list(h.as(role), 'status=RESOLVED&limit=100')).body.items, `${role} 해결`).toEqual([]);
     }
+    // F-06-4: APPEAL은 이제 받는 종류다(소명 CS 건). 건이 하나 열린다
+    const appeal = await h.intake(caseRequest('APPEAL'));
+    expect([appeal.status, appeal.body.accepted]).toEqual([202, true]);
+    expect((await h.list(h.as('cs_lead'), 'limit=100')).body.items).toEqual([expect.objectContaining({ kind: 'APPEAL' })]);
   });
 
   test('R-T48 ③ 받지 않는 종류를 purchase-svc 어댑터 꼴로 보내면 2xx라도 연 것이 아니다(생산자가 다시 연다)', async () => {

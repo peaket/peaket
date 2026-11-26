@@ -117,6 +117,7 @@ describe('R-T32 ① 소명 접수와 CS 건', () => {
 describe('R-T13 소명 판단(해제·유지)', () => {
   test('R-T13 소명 인정(ACCEPT) → queue·purchase·view LIFTED 뒤 결과 LIFTED·resultNote를 적고 건 해결·보류 CLOSE·알림', async () => {
     const r = await approvedRestriction(h, { accountId: randomUUID() });
+    h.copies.length = 0;
     const fx = source({ accountId: r.accountId, targetId: r.restrictionId });
     const caseId = await openAppeal(fx);
     const c = await h.caseGet(h.as('cs_lead'), caseId);
@@ -137,6 +138,7 @@ describe('R-T13 소명 판단(해제·유지)', () => {
 
   test('R-T13 소명 기각(REJECT) → 사본 0, 결과 KEPT·resultNote, 건 해결·보류 CLOSE·알림, 제한 ACTIVE 그대로', async () => {
     const r = await approvedRestriction(h, { accountId: randomUUID() });
+    h.copies.length = 0;
     const fx = source({ accountId: r.accountId, targetId: r.restrictionId });
     const caseId = await openAppeal(fx);
     const c = await h.caseGet(h.as('cs_lead'), caseId);
@@ -152,6 +154,7 @@ describe('R-T13 소명 판단(해제·유지)', () => {
 
   test('ASVS v5.0.0-8.3.1 화면용 사본만 실패해도 해제는 RESOLVED·LIFTED이고 queue·purchase는 풀린다', async () => {
     const r = await approvedRestriction(h, { accountId: randomUUID() });
+    h.copies.length = 0;
     const fx = source({ accountId: r.accountId, targetId: r.restrictionId });
     const caseId = await openAppeal(fx);
     const c = await h.caseGet(h.as('cs_lead'), caseId);
@@ -165,6 +168,7 @@ describe('R-T13 소명 판단(해제·유지)', () => {
 
   test('R-T13 purchase 사본이 실패한 해제는 503이고 건 OPEN·행 ACTIVE·view/결과 0·보류 OPEN이다', async () => {
     const r = await approvedRestriction(h, { accountId: randomUUID() });
+    h.copies.length = 0;
     const fx = source({ accountId: r.accountId, targetId: r.restrictionId });
     const caseId = await openAppeal(fx);
     const c = await h.caseGet(h.as('cs_lead'), caseId);

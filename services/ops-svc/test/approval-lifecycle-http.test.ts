@@ -323,7 +323,10 @@ describe('승인 실행과 1·2인 차례', () => {
     orderBasis(order, randomUUID());
     const one = json(await request(requester, { kind: 'SYSTEM_FAULT_REFUND', targetRef: order, amount: 33_333, reasonCode: 'DUPLICATE_PAYMENT', reasonText: '1인' }));
     expect(json(await get(lead, one['approvalId'] as string))).toMatchObject({ canApprove: true });
-    expect(json(await get(commander, one['approvalId'] as string))).toMatchObject({ canApprove: false });
+    // F-06-4: 승인 역할이 아닌 사람에게 상세를 숨긴다(404). 종전에는 canApprove:false로 보였다
+    const hidden = await get(commander, one['approvalId'] as string);
+    expect(hidden.statusCode).toBe(404);
+    expect(json(hidden)).toMatchObject({ type: expect.stringContaining('not-found') });
     expect(json(await get(requester, one['approvalId'] as string))).toMatchObject({ canApprove: false });
 
     const two = json(await waiver(requester, order, 310_000));
@@ -614,11 +617,15 @@ describe('요청 본문·대상·내부 경계', () => {
   });
 
   test('일반 요청 경로가 받지 않는 종류는 모두 422 approval-kind-not-allowed다 [ASVS v5.0.0-8.2.1]', async () => {
-    for (const kind of ['PAYOUT_BATCH', 'SETTLEMENT_ADJUSTMENT', 'COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE', 'SALE_SUSPENSION', 'SALE_RESUMPTION', 'FRAUD_ACTION', 'BOOKING_RESTRICTION']) {
+    for (const kind of ['PAYOUT_BATCH', 'SETTLEMENT_ADJUSTMENT', 'COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE', 'SALE_SUSPENSION', 'SALE_RESUMPTION', 'FRAUD_ACTION']) {
       const r = await requestRaw(lead, { kind, targetRef: randomUUID(), amount: 0, reasonCode: 'X', reasonText: 'X' });
       expect(r.statusCode, kind).toBe(422);
       expect(json(r), kind).toMatchObject({ type: expect.stringContaining('approval-kind-not-allowed') });
     }
+    // F-06-4: BOOKING_RESTRICTION은 이제 받는 종류다. 다만 끝 시각이 없으면 승인 업무를 열지 않고 400이다
+    const booking = await requestRaw(lead, { kind: 'BOOKING_RESTRICTION', targetRef: randomUUID(), amount: 0, reasonCode: 'ABUSE_CANCEL', reasonText: '일반 남용 제한' });
+    expect(booking.statusCode).toBe(400);
+    expect(json(booking)).toMatchObject({ type: expect.stringContaining('invalid-body') });
   });
 
   test('요청 역할이 아닌 사람이 요청하면 403이다(양도 회수를 cs_agent가 요청)', async () => {

@@ -141,7 +141,8 @@ describe('Q-T59 보내는 쪽 사본', () => {
       ['SetBookingRestriction', 'BOOKING_RESTRICTION_STATE_LIFTED', 4],
       ['SetBookingRestriction', 'BOOKING_RESTRICTION_STATE_LIFTED', 4],
     ]);
-    expect(seen[0]!.request.ends_at).toBeUndefined();
+    // ends_at을 보내지 않으면 proto-loader defaults:true가 받는 쪽에서 null로 채운다
+    expect(seen[0]!.request.ends_at).toBeNull();
   });
 
   test('Q-T59 ④ 끝이 지난 ACTIVE는 정비가 EXPIRED로 바꾸고 사본을 더 보내지 않는다', async () => {
