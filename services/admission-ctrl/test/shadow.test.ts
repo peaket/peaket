@@ -3,6 +3,7 @@
 // 실행: pnpm --filter @peaket/admission-ctrl test test/shadow.test.ts
 // 이 시험은 클러스터 없이 가짜 저장소·가짜 Redis로 본다. 실제 읽기 전용 Redis ACL·그림자 트래픽은 미실행이다.
 import { fakeClock, PlatformMetrics } from '@peaket/platform';
+import { readFileSync } from 'node:fs';
 import { expect, test } from 'vitest';
 import * as startModule from '../src/start.js';
 import { RedisLeaderStore } from '../src/modules/leader/adapters/redis-leader-store.js';
@@ -33,6 +34,14 @@ test('OPS-440 ⑥ 그림자 계산은 쓰기 없이 목표 차이를 admission_s
   expect(planOf!({})).toMatchObject({ elector: true, leader: true, control: true, rb35: true, batch: true, shadow: false });
   expect(planOf!({ PEAKET_ADMISSION_SHADOW: '1' })).toMatchObject({ elector: false, leader: false, control: false, rb35: false, batch: false, shadow: true });
   expect(planOf!({ PEAKET_ADMISSION_SHADOW: '0' }).shadow).toBe(false);
+  // start()가 계획을 실제로 쓰는지: 결과 폴더·선출·리더·제어 gRPC·RB-35를 plan으로 가른다(RV0911-02)
+  const startSource = readFileSync(new URL('../src/start.ts', import.meta.url), 'utf8');
+  expect(startSource).toContain('startPlanOf(env)');
+  for (const key of ['elector', 'leader', 'control', 'rb35', 'batch']) {
+    expect(startSource, `start()가 plan.${key}를 쓰지 않는다`).toMatch(new RegExp(`plan\\.${key}\\b`));
+  }
+  expect(startSource).toMatch(/if \(plan\.leader\)[\s\S]{0,300}leader\.start\(\)/);
+  expect(startSource).toMatch(/else[\s\S]{0,160}startShadow\(\)/);
 
   // 2) 그림자가 읽는 activeEvents는 쓰기(만료 정리)를 하지 않는다(RV0911-01)
   const commands: string[] = [];

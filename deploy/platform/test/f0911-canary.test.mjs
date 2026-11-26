@@ -61,14 +61,17 @@ const POLICY = {
   eventLoop: { factor: 1.5 },
 };
 
-/** D-T6·D-T7 판정기. Argo Rollouts 질의가 내는 0(통과)·1(실패)·2(판정 불가)와 같은 규칙이다 */
+/** D-T6·D-T7 판정기. Argo Rollouts 질의가 내는 0(통과)·1(실패)·2(판정 불가)와 같은 규칙이다.
+ *  0.9%−0.4% 같은 0.5%p 경계는 IEEE754에서 0.004999999999999999가 될 수 있어, 정본의 "이상"을
+ *  그대로 재려면 작은 엡실론을 둔다(PromQL `>= bool 0.005`의 의도, RV0911-25). */
+const DELTA_EPSILON = 1e-12;
 function judgeError(o) {
   if (o.canaryRequests < POLICY.error.minRequests) return 'inconclusive';
   const canary = o.canaryErrors / o.canaryRequests;
   const stable = o.stableRequests > 0 ? o.stableErrors / o.stableRequests : 0;
   const fail =
     canary > POLICY.error.multiple * stable &&
-    canary - stable >= POLICY.error.delta &&
+    canary - stable >= POLICY.error.delta - DELTA_EPSILON &&
     o.canaryErrors >= POLICY.error.minErrors;
   return fail ? 'fail' : 'pass';
 }
@@ -176,9 +179,11 @@ test('D-T6 ② 오류 0.5%(200건·1건) 카나리는 오류 5건 미만이라 �
   // 200~999건에서 2배·0.5%p를 넘어도 5건 하한에 못 미치면 통과다
   assert.equal(judgeError({ canaryRequests: 400, canaryErrors: 4, stableRequests: 400, stableErrors: 0 }), 'pass');
   assert.equal(judgeError({ canaryRequests: 400, canaryErrors: 5, stableRequests: 400, stableErrors: 0 }), 'fail');
-  // 경계: 정확히 2배(1.0% 대 0.5%)는 '넘는다'가 아니므로 통과, 0.5%p 경계(0.9% 대 0.4%)는 '이상'이라 실패
+  // 경계: 정확히 2배(1.0% 대 0.5%)는 '넘는다'가 아니므로 통과, 0.5%p 경계(0.9% 대 0.4%)는 '이상'이라 실패.
+  // 부동소수점 오차는 엡실론으로 흡수하고, 확실히 넘는 1.0% 대 0.4%도 함께 둔다(RV0911-25)
   assert.equal(judgeError({ canaryRequests: 1000, canaryErrors: 10, stableRequests: 1000, stableErrors: 5 }), 'pass');
   assert.equal(judgeError({ canaryRequests: 1000, canaryErrors: 9, stableRequests: 1000, stableErrors: 4 }), 'fail');
+  assert.equal(judgeError({ canaryRequests: 1000, canaryErrors: 10, stableRequests: 1000, stableErrors: 4 }), 'fail');
   const q = flat(metric('peaket-canary-error-ratio').provider.prometheus.query);
   assert.match(q, />= bool 5\b/, '오류 5건 하한이 질의에 있다');
   assert.match(q, />= bool 200\b/, '요청 200건 경계가 질의에 있다');
@@ -267,12 +272,16 @@ test('OPS-440 ① 카나리 분석 템플릿은 정본 임계값·최소 표본�
   // 생성 템플릿을 실제로 적용하는 ArgoCD Application이 있어야 롤아웃이 참조할 수 있다(RV0911-07)
   const app = yamlFile(ANALYSIS_APP);
   assert.equal(app.kind, 'Application');
+  assert.equal(app.metadata?.namespace, 'argocd');
   assert.equal(app.spec?.project, 'peaket-platform');
   assert.equal(app.spec?.source?.repoURL, 'https://github.com/peaket/peaket');
   assert.equal(app.spec?.source?.targetRevision, 'develop');
   assert.equal(app.spec?.source?.path, 'deploy/platform/argo-rollouts');
   assert.equal(app.spec?.source?.directory?.include, 'analysis-templates.yaml');
+  assert.equal(app.spec?.destination?.server, 'https://kubernetes.default.svc');
   assert.equal(app.spec?.destination?.namespace, 'argo-rollouts');
+  assert.deepEqual(app.spec?.syncPolicy?.automated, { prune: true, selfHeal: true });
+  assert.ok((app.spec?.syncPolicy?.syncOptions ?? []).includes('CreateNamespace=true'));
 });
 
 test('OPS-440 ② 롤아웃은 5%에 오류·이벤트루프, 25·50%에 오류·지연·이벤트루프 분석을 붙이고 100%에는 붙이지 않는다', () => {
