@@ -86,6 +86,7 @@ describe('F-04-19 조사 갈래 용량 외삽', () => {
     expect(() => m.extrapolateCapacity(measurement(), { factor: 0 })).toThrow(RangeError);
     expect(() => m.extrapolateCapacity(measurement(), { factor: -1 })).toThrow(RangeError);
     expect(() => m.extrapolateCapacity(measurement(), { factor: Number.NaN })).toThrow(RangeError);
+    expect(() => m.extrapolateCapacity(measurement(), { factor: Number.POSITIVE_INFINITY })).toThrow(RangeError);
     expect(() => m.extrapolateCapacity(measurement({ measuredMs: Number.NaN }))).toThrow(RangeError);
     expect(() => m.extrapolateCapacity(measurement({ measuredMs: Number.POSITIVE_INFINITY }))).toThrow(RangeError);
     expect(() => m.extrapolateCapacity(measurement({ measuredMs: -1 }))).toThrow(RangeError);

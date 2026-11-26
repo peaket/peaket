@@ -506,7 +506,17 @@ describe('F-04-19 연구 내보내기 HTTP', () => {
       expect(store.map.get(failId)?.failureType, failureType).toBe(failureType);
       const a = audit.rows.find((r) => r.recordId === failId && r.payload?.outcome === 'FAILED');
       expect(a, failureType).toBeTruthy();
-      expect(a!.payload).toMatchObject({ action: 'BUILD_FAILED', outcome: 'FAILED', problemType: failureType });
+      expect(a!.payload).toMatchObject({
+        action: 'BUILD_FAILED',
+        outcome: 'FAILED',
+        problemType: failureType,
+        role: 'commander',
+        fromMs: 0,
+        toMs: HALF_HOUR,
+        columns: COLUMNS,
+        atMs: NOW,
+      });
+      expect(a!.payload.columns).toHaveLength(16);
       const l = log.rows.find((r) => r.usage?.exportId === failId && r.usage?.outcome === 'FAILED');
       expect(l, failureType).toBeTruthy();
       expect(l!.usage.problemType).toBe(failureType);
@@ -612,6 +622,9 @@ describe('F-04-19 연구 내보내기 HTTP', () => {
     expect(alerts).toHaveLength(4);
     expect(alerts[3]).toMatchObject({ accountId: e['x-user-id'], count: 3 });
     expect((await post(e, body())).statusCode).toBe(429);
+    expect(alerts).toHaveLength(4);
+    // 5·6번째 거절에서도 다시 경보하지 않는다(n % 3 === 0 틀린 구현을 잡는다).
+    for (let n = 0; n < 2; n += 1) expect((await post(e, body())).statusCode).toBe(429);
     expect(alerts).toHaveLength(4);
   });
 });

@@ -105,7 +105,15 @@ describe('F-04-19 연구 내보내기 순수 모델', () => {
     }
     const select = m.researchSelectList();
     expect(select).toHaveLength(16);
+    expect(select).toEqual([
+      't_ms AS t_ms', 'kind AS kind', 'seat AS seat', 'section AS section',
+      'dense_rank() OVER (ORDER BY session_ref) AS session',
+      'result AS result', 'retry AS retry', 'latency_ms AS latency_ms', 'first_hold_ms AS first_hold_ms',
+      "toFloat32('nan') AS entropy", 'toUInt8(0) AS net_type', 'toUInt32(0) AS asn', 'toUInt32(0) AS device_group',
+      'bot_tier AS bot_tier', 'toUInt8(0) AS member', 'toUInt8(0) AS post_seat',
+    ]);
     expect(select.map((x: string) => x.split(' AS ')[1])).toEqual(COLUMNS);
+    expect(select[4]).toBe('dense_rank() OVER (ORDER BY session_ref) AS session');
     expect(select[9]).toBe("toFloat32('nan') AS entropy");
     expect(select[10]).toBe('toUInt8(0) AS net_type');
     expect(select[11]).toBe('toUInt32(0) AS asn');
@@ -120,6 +128,7 @@ describe('F-04-19 연구 내보내기 순수 모델', () => {
     expect(m.researchFileProblem({ ...ok, head: 'ARROW2' })).toBe('INVALID_ENVELOPE');
     expect(m.researchFileProblem({ ...ok, tail: '' })).toBe('INVALID_ENVELOPE');
     expect(m.researchFileProblem({ ...ok, columns: COLUMNS.slice(0, 15) })).toBe('INVALID_COLUMNS');
+    expect(m.researchFileProblem({ ...ok, columns: [...COLUMNS].reverse() })).toBe('INVALID_COLUMNS');
     expect(m.researchFileProblem({ ...ok, rowCount: -1 })).toBe('INVALID_ROW_COUNT');
     expect(m.researchFileProblem({ ...ok, rowCount: 1.5 })).toBe('INVALID_ROW_COUNT');
   });
@@ -264,9 +273,14 @@ describe('F-04-19 연구 내보내기 순수 모델', () => {
     expect(m.denialAlertDue(2)).toBe(false);
     expect(m.denialAlertDue(3)).toBe(true);
     expect(m.denialAlertDue(4)).toBe(false);
+    expect(m.denialAlertDue(5)).toBe(false);
+    expect(m.denialAlertDue(6)).toBe(false);
+    expect(m.denialAlertDue(9)).toBe(false);
   });
 
-  test('FX-T17 ① [ASVS v5.0.0-13.2.2] 연구 모듈은 조사 모듈·inv 저장소를 import하지 않는다', async () => {
+  test('FX-T17 ① [ASVS v5.0.0-13.2.2] 연구 모듈은 조사 모듈·inv 저장소를 import하지 않고 main.ts·AppModule 두 갈래에 조립된다', async () => {
+    const m = await moduleOf();
+    if (!m) return;
     expect(existsSync(MODULE_DIR), `${MODULE_DIR}가 아직 없다`).toBe(true);
     const strip = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     const files: string[] = [];
@@ -286,10 +300,28 @@ describe('F-04-19 연구 내보내기 순수 모델', () => {
         expect(src, `${at}: ${bad}`).not.toContain(bad);
       }
     }
-    // 시작 파일·AppModule 조립: 메모리·DB 두 갈래와 main.ts의 연구 deps가 모두 있어야 한다.
-    const app = readFileSync(new URL('../src/app.module.ts', import.meta.url), 'utf8');
-    const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
-    expect((app.match(/ResearchExportsModule/g) ?? []).length, 'app.module.ts의 메모리·DB 두 갈래').toBeGreaterThanOrEqual(2);
+    // 시작 파일·AppModule 조립: import + 메모리·DB 등록 두 곳, main.ts의 코드(주석 아님)를 본다.
+    const app = strip(readFileSync(new URL('../src/app.module.ts', import.meta.url), 'utf8'));
+    const main = strip(readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8'));
+    expect(app).toContain('ResearchExportsModule');
+    expect((app.match(/ResearchExportsModule\.register/g) ?? []).length, 'app.module.ts의 메모리·DB 두 갈래').toBeGreaterThanOrEqual(2);
+    expect(main).toContain('researchWiringFromEnv(');
     expect(main).toContain('research:');
+
+    // 환경 값이 하나라도 없으면 disabled, 다섯이 모두 있으면 config로 조립한다.
+    const base = {
+      PEAKET_RESEARCH_CLICKHOUSE_URL: 'http://clickhouse',
+      PEAKET_RESEARCH_CLICKHOUSE_USER: 'an_forensic_reader',
+      PEAKET_RESEARCH_ALLOWLIST_VERSION: 'v1',
+      PEAKET_RESEARCH_APPROVED_REVIEW_VERSIONS: 'v1, v2',
+      PEAKET_RESEARCH_PSEUDONYM_KEY_VERSION: 'analytics-v1',
+    };
+    expect(m.researchWiringFromEnv({})).toEqual({ enabled: false });
+    expect(m.researchWiringFromEnv({ ...base, PEAKET_RESEARCH_CLICKHOUSE_URL: '' })).toEqual({ enabled: false });
+    expect(m.researchWiringFromEnv({ ...base, PEAKET_RESEARCH_PSEUDONYM_KEY_VERSION: undefined })).toEqual({ enabled: false });
+    expect(m.researchWiringFromEnv(base)).toEqual({
+      enabled: true,
+      config: { allowlistVersion: 'v1', approvedReviewVersions: ['v1', 'v2'], keyVersion: 'analytics-v1' },
+    });
   });
 });
