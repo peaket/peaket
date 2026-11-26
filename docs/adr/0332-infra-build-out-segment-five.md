@@ -7,6 +7,7 @@
     - [ADR-0331](0331-trim-per-batch-checks-defer-kind.md) 결정 9의 주 1회 kind 예약 실행을 뺀다.
     - 야간 DAST([ADR-0323](0323-dast-baseline-zap-pinned-nightly-kind.md))와 야간 축소 성능 비교(D-T40)의 매일 예약도 멈춘다.
   - 보충(2026-11-21, 소유자 결정 OPEN[53] (가) "추천대로"): 결정 7을 더했다.
+  - **일부 되돌림(2026-11-26, F-09-8 INF-030)**: `ci-kind.yml`·`dast-nightly.yml`·`perf-nightly.yml`의 예약을 되살렸다(ci-kind 매주 토요일 03:00 KST, DAST·야간 성능 매일 03:00 KST). 예약은 기본 가지에서만 돌므로 freeze 가지에서는 수동 실행으로 확인했다. DAST 미끼 점검 실패와 kind 시험 잔여 실패는 F-09-8 측정 기록에 남겼다.
 - **관련**: [docs/BUILD_ORDER.md](../BUILD_ORDER.md) '구간 5', [docs/devops.md](../devops.md) §3.1·§3.3, `.github/workflows/ci-kind.yml`·`dast-nightly.yml`·`perf-nightly.yml`
 - **관련 ID**: 없음(작업 차례와 CI 배치만 바꾼다)
 

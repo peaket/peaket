@@ -16,7 +16,7 @@
 
 - **release 38개**: F-01-1~7, F-02-1·2, F-03-1~4, F-04-1~8·20, F-05-1~7, F-06-2·7, F-07-5~8, F-08-2·7·8.
 - **gate 0개**: 없음(모두 닫힘).
-- **frozen-local 67개**: `docs/BUILD_ORDER.md` 상태가 `동결`인 59개와, 상태가 `대기`·`막힘`이지만 v1 범위 밖인 F-05-10, F-07-13, F-09-8, F-06-6, F-09-1, F-09-9, F-11-1, F-11-3.
+- **frozen-local 67개**: `docs/BUILD_ORDER.md` 상태가 `동결`인 59개와, 상태가 `대기`·`막힘`·`일부 구현 있음`이지만 v1 범위 밖인 F-05-10, F-07-13, F-09-8, F-06-6, F-09-1, F-09-9, F-11-1, F-11-3.
 - **BUILD_ORDER 상태와 분류가 다른 줄**: F-01-6·F-01-7·F-03-1·F-03-2·F-05-4는 표 상태가 아직 `진행`이지만 기능 가지가 `develop`에 합쳐졌고 기록 커밋이 있다. F-05-2는 `일부 구현 있음`이지만 reflow까지 닫혀 출시 몫이 끝났고, 남은 몫은 F-05-11(동결)로 넘겼다. 이 여섯 줄의 근거는 아래 표의 '출시 근거·게이트'에 커밋·R 번호로 적었다. F-03-4는 `일부 완료`라 gate로 둔다.
 
 ## 2. 기능 분류 표(105개)
@@ -121,7 +121,7 @@
 | F-09-3 | 기반·보안 | Redis/Aurora/MSK/Schema Registry/PgBouncer | 동결 | frozen-local | v1 제외(외부 계정): Aurora·MSK·Redis 관리형 설정. | - | - | - | 동결 해제 뒤 freeze/<ID>에서 시작 |
 | F-09-4 | 기반·보안 | TLS/KMS/MSK 역할·비밀 교체·CloudFront/WAF | 동결 | frozen-local | v1 제외(외부 계정): TLS·KMS·CloudFront·WAF 실제 연결. | - | - | - | 동결 해제 뒤 freeze/<ID>에서 시작 |
 | F-09-6 | 기반·보안 | gw-ops IP/VPN·재인증·관리 계정·DAST | 동결 | frozen-local | v1 제외(외부 계정): gw-ops IP/VPN·DAST·관리 계정. | - | - | - | 동결 해제 뒤 freeze/<ID>에서 시작 |
-| F-09-8 | 기반·보안 | kind 재가동·야간 실행 복구 | 대기 | frozen-local | 동결(범위): 구간 5 인프라. 측정에 kind가 필요하면 클러스터 재가동 몫만. | - | - | - | 측정에 kind가 필요할 때 클러스터 재가동만 |
+| F-09-8 | 기반·보안 | kind 재가동·야간 실행 복구 | 일부 구현 있음 | frozen-local | 동결(범위): 구간 5 인프라. 측정에 kind가 필요하면 클러스터 재가동 몫만. 2026-11-26 동결 로컬: 예약 셋·kind 재가동·장부 재확인, DAST·야간 성능·mesh 잔여. | - | - | - | 측정에 kind가 필요할 때 클러스터 재가동만 |
 | F-09-9 | 기반·보안 | 엣지 KVS·KMS 키·WS 게이트웨이 PoC | 막힘 | frozen-local | v1 제외(외부 계정): 엣지 KVS·KMS 키·WS PoC(막힘, ADR-0234). | - | - | - | 클라우드 계정·KMS 키 뒤 |
 | F-09-10 | 기반·보안 | KEDA/Karpenter/Argo Rollouts | 동결 | frozen-local | v1 제외(외부 계정): KEDA·Karpenter·Argo Rollouts 클러스터 설정. | - | - | - | 동결 해제 뒤 freeze/<ID>에서 시작 |
 | F-09-11 | 기반·보안 | 카나리 분석·리더 인지 롤링·그림자 계산 | 동결 | frozen-local | v1 제외(외부 계정): 카나리 분석·그림자 계산 클러스터 설정. | - | - | - | 동결 해제 뒤 freeze/<ID>에서 시작 |
