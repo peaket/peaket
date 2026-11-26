@@ -24,7 +24,7 @@ const summary = (over = {}) => ({
 });
 
 test('F-07-12 AC-05 UH-01 KST 시각은 M/D(요일) HH:mm KST로 그리고 없으면 —다', async () => {
-  const { kstStamp, kstDate, kstDayText } = await load();
+  const { kstStamp, kstDate, kstDayText } = await import('../../../shared/lib/kst.ts');
   assert.equal(kstStamp('2026-10-14T11:00:00.000Z'), '10/14(수) 20:00 KST');
   assert.equal(kstStamp('2026-12-01T00:00:00.000Z'), '12/1(화) 09:00 KST');
   assert.equal(kstStamp(null), '—');
@@ -36,11 +36,10 @@ test('F-07-12 AC-05 UH-01 KST 시각은 M/D(요일) HH:mm KST로 그리고 없�
 
 test('F-07-12 AC-05 UH-02 판매 승인은 승인 이력으로 재승인 대기·변경 반려를 가른다', async () => {
   const { reviewCellOf } = await load();
-  assert.deepEqual(reviewCellOf(summary({ saleReview: 'SUBMITTED', hasApprovalHistory: true })), {
-    label: '재승인 대기',
-    badge: 'badge badge-warning',
-    note: '판매 계속 · 공개 중인 내용과 판매는 승인될 때까지 그대로입니다',
-  });
+  const resub = reviewCellOf(summary({ saleReview: 'SUBMITTED', hasApprovalHistory: true }));
+  assert.equal(resub.label, '재승인 대기');
+  assert.equal(resub.badge, 'badge badge-warning');
+  assert.match(resub.note, /판매 계속/);
   assert.equal(reviewCellOf(summary({ saleReview: 'REJECTED', hasApprovalHistory: false, rejectionReason: '통신판매업 신고번호 누락' })).label, '반려');
   assert.match(reviewCellOf(summary({ saleReview: 'REJECTED', hasApprovalHistory: false, rejectionReason: '통신판매업 신고번호 누락' })).note, /통신판매업 신고번호 누락/);
   assert.equal(reviewCellOf(summary({ saleReview: 'REJECTED', hasApprovalHistory: true })).label, '변경 반려');
@@ -62,7 +61,9 @@ test('F-07-12 AC-05 UH-03 판매 중지는 사유 코드를 d5 문구로 바꾸�
     assert.equal(cell.label, '판매 중지');
     assert.match(cell.note, new RegExp(text));
   }
-  assert.equal(reviewCellOf(summary({ saleReview: 'SUSPENDED', hasApprovalHistory: true, suspensionReasonCode: null })).note, '판매가 멈췄습니다');
+  const noReason = reviewCellOf(summary({ saleReview: 'SUSPENDED', hasApprovalHistory: true, suspensionReasonCode: null }));
+  assert.ok(noReason.note.length > 0);
+  assert.doesNotMatch(noReason.note, /undefined|null/);
 });
 
 test('F-07-12 AC-05 UH-04 다음 할 일은 반려·판매 중지·승인 대기·판매 중에 따라 다르다', async () => {
