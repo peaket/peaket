@@ -273,6 +273,9 @@ importers:
 
   apps/forensics:
     dependencies:
+      '@peaket/api-client':
+        specifier: workspace:*
+        version: link:../../packages/api-client
       '@peaket/ds':
         specifier: workspace:*
         version: link:../../packages/ds

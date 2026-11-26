@@ -32,3 +32,8 @@ export function staticAppHeaders(
   app: 'queue-room' | 'console' | 'scanner' | 'forensics',
   o?: { hashes?: string[]; origins?: Partial<ProdOrigins> & { identity?: string }; remotes?: string[] },
 ): Record<string, string>;
+export function consoleForensicsHeaders(o?: {
+  hashes?: string[];
+  origins?: Partial<ProdOrigins> & { identity?: string };
+  remotes?: string[];
+}): Record<string, string>;

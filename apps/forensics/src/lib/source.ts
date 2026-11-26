@@ -2,10 +2,14 @@
 // OpenSpec add-fraud-investigation-screens design.md 결정 7). 정본은 '연 길이 원천을 정한다'(§4.2·§6.8)이고,
 // 화면 퍼블리싱에서는 연 길 대신 ?source=조사|연구로 고른다(없으면 합성). 한 화면에는 원천 하나뿐이고 화면 안에서 바꾸지 못한다.
 // Node 내장 시험 실행기가 이 파일을 그대로 읽는다(source.test.mjs). 그래서 실행 import를 두지 않고 지울 수 있는 타입 문법만 쓴다.
-import type { ReplaySource, replaySourceLabel } from '@peaket/ds/ReplaySourceBadge';
+// 원천별 문구는 source-specs/로 나눴다. 운영 빌드는 operating.ts가 조사·연구 spec만 가져와 합성 spec을 묶지 않는다(F-04-16).
 import type { Layout } from './layout';
+import { EVENT_LABEL, type Source, type SourceSpec } from './source-spec.ts';
+import { syntheticSpec } from './source-specs/synthetic.ts';
+import { investigationSpec } from './source-specs/investigation.ts';
+import { researchSpec } from './source-specs/research.ts';
 
-export type Source = ReplaySource;
+export type { Source, SourceSpec, CandidateKind } from './source-spec.ts';
 
 export const SOURCES = ['synthetic', 'investigation', 'research'] as const satisfies readonly Source[];
 
@@ -24,126 +28,7 @@ export function parseSource(search: string | URLSearchParams): Source {
   return 'synthetic';
 }
 
-/** 원천 배지 글자. ds 부품(CMP-082)의 글자와 다르면 타입 검사가 막는다 */
-const BADGE = { investigation: '조사', research: '연구', synthetic: '합성 데이터' } as const satisfies typeof replaySourceLabel;
-
-const NOTICE_BOT = '후보 찾기용입니다. 봇 판정은 표본 검토(SCR-067)와 정해진 규칙(POL-006)으로 합니다.';
-const NOTICE_INVESTIGATION = '후보 찾기용입니다. 조치는 사건 작업대에서 소명과 승인을 거쳐 합니다(POL-046).';
-
-/** 조사·연구 원천의 목업 회차(관제 목업 LUMEN 1회차와 같다) */
-const EVENT = 'LUMEN 콘서트 2026 서울 · 10/25(일) 18:00';
-const COPY_OPERATING = '이 탭은 교차 출처 격리를 켜지 않아 복사 방식으로 동작합니다. 결과는 같고 반응이 조금 늦을 수 있습니다';
-
-export type CandidateKind = 'scatter' | 'baseline' | 'distribution';
-
-export interface SourceSpec {
-  source: Source;
-  /** 원천 배지 글자(CMP-082) */
-  badge: string;
-  /** 화면 제목(h1, 화면 낭독기용). 원천을 넣는다(CMP-082 접근성) */
-  title: string;
-  /** 후보 패널에 늘 두는 고정 문구(forensic-replay §2.1) */
-  notice: string;
-  /** 머리 안내 글(조사·연구) */
-  headerNote?: string;
-  /** 머리의 회차(조사·연구) */
-  event?: string;
-  /** 머리의 사건(조사) */
-  caseLabel?: string;
-  /** 머리의 시간창(조사·연구) */
-  window?: string;
-  /** 머리 끝 ( 관제 콘솔 › )이 가는 관제 경로(조사·연구) */
-  consolePath?: string;
-  /** 시나리오 ▾·시드·[다시 만들기]·[파일 불러오기]·[이 시나리오 내려받기]·공유 주소 복사(합성만, §6.8) */
-  synthControls: boolean;
-  /** 정밀도·재현율과 그 경고(정답이 있는 합성만) */
-  precisionRecall: boolean;
-  /** 교차 필터: 봇 등급(합성 정답)·네트워크 유형(합성만), 묶음(조사만) */
-  filters: { botGrade: boolean; network: boolean; group: boolean };
-  /** 후보 패널: 산점도(CMP-079) · 단계별 시간 대 정상 기준선(CMP-083) · 한 축 분포(CMP-079 한 축) */
-  candidate: CandidateKind;
-  /** 후보 패널 제목 */
-  candidateTitle: string;
-  /** 기기 묶음 목록(연구에는 기기 묶음이 없다, §6.3) */
-  deviceGroups: boolean;
-  /** 묶음 계정 좌석·게시물 대조 좌석 점등(조사, §4.2 member·post_seat) */
-  seatMarks: boolean;
-  /** 원천 만료 문구(조사·연구) */
-  expired?: string;
-  /** '후보 고름'에서 교차 필터에 적는 고른 영역 */
-  pickedArea: string;
-  /** 파일 거절 띠의 이유 한 줄 */
-  rejectReason: string;
-  /** 파일 거절 때 좌석맵 자리 안내 */
-  rejectHint: string;
-  /** 복사 방식 띠 */
-  copyNote: string;
-}
-
-const SPECS: Record<Source, SourceSpec> = {
-  synthetic: {
-    source: 'synthetic',
-    badge: BADGE.synthetic,
-    title: '포렌식 리플레이 · 합성 데이터 데모',
-    notice: NOTICE_BOT,
-    synthControls: true,
-    precisionRecall: true,
-    filters: { botGrade: true, network: true, group: false },
-    candidate: 'scatter',
-    candidateTitle: '봇 후보',
-    deviceGroups: true,
-    seatMarks: false,
-    pickedArea: '산점도 영역(100ms 안, 엔트로피 0.24 아래)',
-    rejectReason: '앞뒤 매직 ARROW1이 없습니다. 아무것도 그리지 않았습니다',
-    rejectHint: '프리셋을 고르거나 다른 파일을 불러오세요',
-    copyNote: '이 공개 위치는 교차 출처 격리를 켜지 않아 복사 방식으로 동작합니다. 결과는 같고 반응이 조금 늦을 수 있습니다',
-  },
-  investigation: {
-    source: 'investigation',
-    badge: BADGE.investigation,
-    title: '포렌식 리플레이 · 조사 원천',
-    notice: NOTICE_INVESTIGATION,
-    headerNote: '조사용 기록 · 이 탭에만 있고 내려받지 않습니다',
-    event: EVENT,
-    caseLabel: '사건 CASE-2610-0007',
-    window: '시간창 T−10:00 ~ T+20:00',
-    consolePath: '/investigations/CASE-2610-0007',
-    synthControls: false,
-    precisionRecall: false,
-    filters: { botGrade: false, network: false, group: true },
-    candidate: 'baseline',
-    candidateTitle: '후보 · 단계별 시간 대 정상 기준선',
-    deviceGroups: true,
-    seatMarks: true,
-    expired: '이 회차의 조사용 기록은 보존 기간이 지났습니다. 증거 묶음만 볼 수 있습니다',
-    pickedArea: '기준선 칸(묶음 계정 #3 · 입장 확정 → 첫 홀드)',
-    rejectReason: '받은 파일의 원천이 이 탭을 연 길(사건 작업대 · 조사 원천)과 다릅니다. 아무것도 그리지 않았습니다',
-    rejectHint: '사건 작업대에서 리플레이를 다시 열어 주세요',
-    copyNote: COPY_OPERATING,
-  },
-  research: {
-    source: 'research',
-    badge: BADGE.research,
-    title: '포렌식 리플레이 · 연구 원천',
-    notice: NOTICE_BOT,
-    headerNote: '가명 기록 · 30분 동안 쓰지 않으면 지워짐',
-    event: EVENT,
-    window: '시간창 T+00:00 ~ T+30:00',
-    consolePath: '/dashboard',
-    synthControls: false,
-    precisionRecall: false,
-    filters: { botGrade: false, network: false, group: false },
-    candidate: 'distribution',
-    candidateTitle: "후보 · '입장 확정 → 첫 홀드' 분포",
-    deviceGroups: false,
-    seatMarks: false,
-    expired: '이 회차의 가명 기록은 보존 기간(90일)이 지났습니다',
-    pickedArea: '분포 구간(10ms~100ms)',
-    rejectReason: '받은 파일의 원천이 이 탭을 연 길(연구 메뉴 · 연구 원천)과 다릅니다. 아무것도 그리지 않았습니다',
-    rejectHint: '연구 메뉴에서 리플레이를 다시 열어 주세요',
-    copyNote: COPY_OPERATING,
-  },
-};
+const SPECS: Record<Source, SourceSpec> = { synthetic: syntheticSpec, investigation: investigationSpec, research: researchSpec };
 
 /** 연 길이 넘긴 사건·회차(?case=·?event=). 꼴에 맞지 않는 값은 버린다(관제 링크 경로를 바꾸지 못하게) */
 export interface Opened {
@@ -152,9 +37,6 @@ export interface Opened {
 }
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/;
-
-/** 목업 회차 이름(관제 목업과 같다). 모르는 회차는 ID를 그대로 적는다 */
-const EVENT_LABEL: Record<string, string> = { 'evt-lumen-2026-r1': EVENT };
 
 export function parseOpened(search: string | URLSearchParams): Opened {
   const p = typeof search === 'string' ? new URLSearchParams(search) : search;

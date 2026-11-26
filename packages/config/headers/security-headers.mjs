@@ -177,3 +177,13 @@ export function staticAppHeaders(app, o = {}) {
     ...page,
   };
 }
+
+/**
+ * 관제 콘솔 주소 아래 따로 여는 리플레이 페이지(`/forensics`)의 응답 헤더.
+ * 콘솔 묶음 C에 COEP `require-corp`만 더한다(docs/frontend.md §5.14.1, docs/features/forensic-replay.md §6.8).
+ * 배포(`deploy/`)는 동결 범위라 이 함수만 두고, 동결을 풀 때 CloudFront 헤더 정책에 연결한다.
+ * @param {{ hashes?: string[], origins?: Partial<typeof PROD_ORIGINS> & { identity?: string }, remotes?: string[] }} [o]
+ */
+export function consoleForensicsHeaders(o = {}) {
+  return { ...staticAppHeaders('console', o), 'Cross-Origin-Embedder-Policy': 'require-corp' };
+}
