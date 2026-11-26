@@ -97,3 +97,5 @@ export { GetRecipients } from './application/get-recipients.js';
 export { recipientQueryHandlers } from './inbound/recipient-query.grpc.js';
 export { memberCodeHandlers, RESOLVE_MEMBER_CODES_MAX, type MemberCodeResolver } from './inbound/member-code.grpc.js';
 export { DrizzleMemberCodeResolver } from './adapters/db/drizzle-member-codes.js';
+
+export type { PublicKeys } from './domain/ports.js';

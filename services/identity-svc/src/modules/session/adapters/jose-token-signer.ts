@@ -84,4 +84,22 @@ export class JoseTokenSigner implements TokenSigner {
       .sign(key);
     return { token, expiresAt: exp * 1000 };
   }
+
+  /** 미성년자 계약 취소 확인(F-06-3): 10분, aud identity-minor-contract. ci는 확인의 연계정보 HMAC(hex)이고 저장하지 않는다 */
+  async minorContract(c: { accountId: string; birth?: string; ci: string }, now: number): Promise<SignedToken> {
+    const { kid, key } = this.#keys.signingKey('fan');
+    const exp = seconds(now + 10 * 60_000);
+    const claims: Record<string, string> = { ci: c.ci };
+    if (c.birth) claims.birth = c.birth;
+    const token = await new SignJWT(claims)
+      .setProtectedHeader({ alg: 'ES256', typ: 'minor+jwt', kid })
+      .setIssuer(this.#issuer)
+      .setSubject(c.accountId)
+      .setAudience('identity-minor-contract')
+      .setIssuedAt(seconds(now))
+      .setExpirationTime(exp)
+      .setJti(randomUUID())
+      .sign(key);
+    return { token, expiresAt: exp * 1000 };
+  }
 }

@@ -3,7 +3,7 @@
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { AuditChain, AuditRecord } from '../../../audit/index.js';
 import type { Database } from '@peaket/platform';
-import type { ApprovalLifecycleRecord, LifecycleKind, LifecycleVote } from '../../domain/approval-lifecycle.js';
+import { LIFECYCLE_KINDS, type ApprovalLifecycleRecord, type LifecycleKind, type LifecycleVote } from '../../domain/approval-lifecycle.js';
 import type { ApprovalLifecycleStore } from '../../domain/lifecycle-ports.js';
 import { approvalRequest, approvalVote } from './schema.js';
 
@@ -67,7 +67,7 @@ export class DrizzleApprovalLifecycleStore implements ApprovalLifecycleStore {
   }
 
   async find(approvalId: string): Promise<ApprovalLifecycleRecord | undefined> {
-    const rows = await this.database.db.select().from(approvalRequest).where(eq(approvalRequest.id, approvalId)).limit(1);
+    const rows = await this.database.db.select().from(approvalRequest).where(and(eq(approvalRequest.id, approvalId), inArray(approvalRequest.kind, [...LIFECYCLE_KINDS]))).limit(1);
     if (!rows[0]) return undefined;
     const votes = await this.database.db.select().from(approvalVote).where(eq(approvalVote.requestId, approvalId));
     return recordOf(rows[0], votes);
@@ -97,14 +97,14 @@ export class DrizzleApprovalLifecycleStore implements ApprovalLifecycleStore {
   }
 
   async list(filter: { status?: readonly string[] | undefined; kind?: LifecycleKind | undefined; targetAccountId?: string | undefined; limit: number }): Promise<ApprovalLifecycleRecord[]> {
-    const conditions = [];
+    const conditions = [inArray(approvalRequest.kind, [...LIFECYCLE_KINDS])];
     if (filter.status && filter.status.length > 0) conditions.push(inArray(approvalRequest.status, [...filter.status]));
     if (filter.kind) conditions.push(eq(approvalRequest.kind, filter.kind));
     if (filter.targetAccountId) conditions.push(eq(approvalRequest.targetAccountId, filter.targetAccountId));
     const rows = await this.database.db
       .select()
       .from(approvalRequest)
-      .where(conditions.length > 0 ? and(...conditions) : undefined)
+      .where(and(...conditions))
       .orderBy(desc(approvalRequest.createdAt))
       .limit(filter.limit);
     return rows.map((r) => recordOf(r, []));

@@ -22,6 +22,7 @@ const shellScreens: RouteObject[] = [
   { path: 'cs/inbox/:caseId', lazy: () => import(/* webpackChunkName: "scr-045" */ '@/pages/cs-inbox').then((m) => ({ Component: m.Page })) },
   // SCR-046 승인 업무
   { path: 'cs/approvals', lazy: () => import(/* webpackChunkName: "scr-046" */ '@/pages/cs-approvals').then((m) => ({ Component: m.Page })) },
+  { path: 'cs/approvals/:approvalId', lazy: () => import(/* webpackChunkName: "scr-046" */ '@/pages/cs-approvals').then((m) => ({ Component: m.ConnectedPage })) },
   // SCR-047 회차 취소 판정·일괄 환불
   { path: 'cancellations/:requestId', lazy: () => import(/* webpackChunkName: "scr-047" */ '@/pages/cancellation').then((m) => ({ Component: m.Page })) },
   // SCR-048 판매 승인

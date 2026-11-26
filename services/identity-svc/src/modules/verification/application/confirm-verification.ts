@@ -10,7 +10,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, uuidv7 } from '@peaket/platform';
 import { ACCOUNT_CLOSURE, type AccountClosure } from '../../session/index.js';
-import { IDENTITY_HASHERS, type IdentityHashers, PHONE_REFS, type PhoneRefs, VERIFICATION_PROVIDER, VERIFICATION_STORE, type VerificationProvider, type VerificationStore } from '../domain/ports.js';
+import { IDENTITY_HASHERS, type IdentityHashers, MINOR_CONTRACT_SIGNER, type MinorContractTokenSigner, PHONE_REFS, type PhoneRefs, VERIFICATION_PROVIDER, VERIFICATION_STORE, type VerificationProvider, type VerificationStore } from '../domain/ports.js';
 import {
   acceptsResult,
   ageOnKst,
@@ -32,6 +32,8 @@ export interface VerificationResultView {
   next: string;
   /** 부정 예매 이용 제한이 이어진 사람의 제한 끝(openapi). 그 확인은 BUILD_ORDER BOT-030이 붙이고 그 전에는 늘 null */
   restrictedUntil: string | null;
+  /** MINOR_CONTRACT 확인 POST에만 붙는 10분 확인 토큰(F-06-3). GET·다른 목적에는 없다 */
+  resultToken?: string;
 }
 
 export const viewOf = (a: Attempt, restrictedUntil: number | null = null): VerificationResultView => ({
@@ -52,7 +54,7 @@ export async function restrictedUntilFor(store: Pick<VerificationStore, 'restric
 type Checked =
   | { outcome: 'CANCELLED' | 'FAILED'; personMismatch?: true }
   | { outcome: 'UNDER_14' }
-  | { outcome: 'VERIFIED'; hmacs: { hmac: Buffer; version: number }[]; pid: { pid: Buffer; version: number } | null; phoneRef?: string; phoneRefPrev?: string };
+  | { outcome: 'VERIFIED'; hmacs: { hmac: Buffer; version: number }[]; pid: { pid: Buffer; version: number } | null; birthDate?: string; phoneRef?: string; phoneRefPrev?: string };
 
 /** 트랜잭션 안에서 새로 저장해야 하는데 아직 pid가 없다: 트랜잭션을 되돌리고 pid를 계산해(KMS는 트랜잭션 밖) 한 번 더 한다 */
 class NeedPid extends Error {}
@@ -74,6 +76,8 @@ export class ConfirmVerification {
     @Inject(CLOCK) private readonly clock: Clock,
     /** 본인확인 번호의 연락처 가명(없으면 쓰지 않는다: 시험, identity §9.1 '조사용 값의 첫 구현') */
     @Optional() @Inject(PHONE_REFS) private readonly phoneRefs?: PhoneRefs,
+    /** MINOR_CONTRACT 확인 POST의 resultToken 서명기(F-06-3). 없으면 토큰을 붙이지 않는다 */
+    @Optional() @Inject(MINOR_CONTRACT_SIGNER) private readonly minorContractSigner?: MinorContractTokenSigner,
   ) {}
 
   async run(i: { accountId: string; verificationId: string; providerResult: Record<string, string> }): Promise<VerificationResultView> {
@@ -82,8 +86,10 @@ export class ConfirmVerification {
     if (!seen || !acceptsResult(seen, i.accountId, now)) throw new VerificationError('NOT_FOUND', '없는 건이거나 만료됐거나 다른 계정의 건이다');
     if (seen.status !== 'PENDING') return this.#answer(seen);
     let done: Attempt;
+    let issued: { birth?: string; ci: string } | undefined;
     try {
       const checked = await this.#check(seen, i.providerResult, now);
+      if (checked.outcome === 'VERIFIED') issued = { ...(checked.birthDate ? { birth: checked.birthDate } : {}), ci: checked.hmacs[0]!.hmac.toString('hex') };
       done =
         checked.outcome === 'VERIFIED'
           ? await this.#confirm(i.verificationId, checked, now)
@@ -93,7 +99,11 @@ export class ConfirmVerification {
       // 기관·연계정보·pid 키 장애(첫 저장의 pid 계산 포함): 그 건을 PROVIDER_DOWN으로 마친다(결과 조회가 같은 값을 주고, 다시 보내도 503이다)
       done = await this.#settle(i.verificationId, 'PROVIDER_DOWN', now);
     }
-    return this.#answer(done);
+    const view = await this.#answer(done);
+    if (seen.purpose !== 'MINOR_CONTRACT' || !this.minorContractSigner?.minorContract) return view;
+    const source = issued ?? { ci: '' };
+    const signed = await this.minorContractSigner.minorContract({ accountId: done.accountId, ...(source.birth ? { birth: source.birth } : {}), ci: source.ci }, this.clock.now());
+    return { ...view, resultToken: signed.token };
   }
 
   /** 기관 값 확인 → 정리 중 확인 → 만 나이 → 연계정보 HMAC(모든 판)·pid. 모두 트랜잭션 밖이다 */
@@ -121,7 +131,7 @@ export class ConfirmVerification {
     const phoneRef = outcome.phone === undefined ? undefined : this.phoneRefs?.ref(outcome.phone);
     // 키 회전의 이음 기간이면 옛 판 값도 구해 둔다(회전 전 기록과 잇는다, BOT-046)
     const phoneRefPrev = phoneRef && outcome.phone !== undefined ? this.phoneRefs?.prevRef?.(outcome.phone) : undefined;
-    return { outcome: 'VERIFIED', hmacs, pid: null, ...(phoneRef ? { phoneRef } : {}), ...(phoneRefPrev ? { phoneRefPrev } : {}) };
+    return { outcome: 'VERIFIED', hmacs, pid: null, ...(outcome.birthDate ? { birthDate: outcome.birthDate } : {}), ...(phoneRef ? { phoneRef } : {}), ...(phoneRefPrev ? { phoneRefPrev } : {}) };
   }
 
   async #confirm(verificationId: string, checked: Extract<Checked, { outcome: 'VERIFIED' }>, now: number): Promise<Attempt> {

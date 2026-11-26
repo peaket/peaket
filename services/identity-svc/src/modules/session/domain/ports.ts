@@ -303,6 +303,8 @@ export interface TokenSigner {
   reauth(c: { accountId: string; sessionId: string; provider: Provider; strength: ReauthStrength; operation: ReauthOperation }, now: number): Promise<SignedToken>;
   /** 현장 스태프 토큰(ES256, typ at+jwt, aud scanner, cnf.jkt = 기기 키 지문, 만료 = 역할 유효 끝) */
   staff(c: { accountId: string; scannerSessionId: string; eventId: string; jkt: string; expiresAtMs: number }, now: number): Promise<SignedToken>;
+  /** 미성년자 계약 취소 확인 토큰(F-06-3, 10분, aud identity-minor-contract). ci는 그 확인의 연계정보 HMAC(hex)이고 저장하지 않는다 */
+  minorContract?(c: { accountId: string; birth?: string; ci: string }, now: number): Promise<SignedToken>;
 }
 
 export const DEVICE_REFS = Symbol('identity.DeviceRefs');

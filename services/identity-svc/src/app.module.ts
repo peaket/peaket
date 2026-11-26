@@ -20,9 +20,9 @@ export class AppModule {
     if ('database' in o) {
       return {
         module: AppModule,
-        imports: [databaseModule(o.database), VerificationModule.register({ storage: 'database', ...o.verification }), SessionModule.register({ storage: 'database', ...o.session }), ...admin],
+        imports: [databaseModule(o.database), VerificationModule.register({ storage: 'database', ...o.verification, minorContractPublicKeys: o.session.keys, ...(typeof (o.session.signer as { minorContract?: unknown }).minorContract === 'function' ? { minorContractSigner: o.session.signer as never } : {}) }), SessionModule.register({ storage: 'database', ...o.session }), ...admin],
       };
     }
-    return { module: AppModule, imports: [VerificationModule.register({ storage: 'memory', ...o.verification }), SessionModule.register({ storage: 'memory', ...o.session }), ...admin] };
+    return { module: AppModule, imports: [VerificationModule.register({ storage: 'memory', ...o.verification, minorContractPublicKeys: o.session.keys, ...(typeof (o.session.signer as { minorContract?: unknown }).minorContract === 'function' ? { minorContractSigner: o.session.signer as never } : {}) }), SessionModule.register({ storage: 'memory', ...o.session }), ...admin] };
   }
 }

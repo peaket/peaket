@@ -154,6 +154,12 @@ export interface VerificationStore {
   purgeVerificationRecords(now: number): Promise<number>;
 }
 
+export const MINOR_CONTRACT_SIGNER = Symbol('identity.MinorContractSigner');
+/** resultToken 서명기(F-06-3). JoseTokenSigner가 구현한다 */
+export interface MinorContractTokenSigner {
+  minorContract(c: { accountId: string; birth?: string; ci: string }, now: number): Promise<{ token: string; expiresAt: number }>;
+}
+
 export const PHONE_REFS = Symbol('identity.PhoneRefs');
 /** 본인확인 결과 번호(기관 값 그대로)의 연락처 가명. 맞출 수 없는 번호거나 라벨 키가 없으면 undefined(번호는 저장하지 않는다, identity §9.1) */
 export interface PhoneRefs {

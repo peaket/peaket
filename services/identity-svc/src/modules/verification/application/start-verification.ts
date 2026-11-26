@@ -25,7 +25,6 @@ export class StartVerification {
   async run(i: { accountId: string; sessionId?: string | null; purpose: Purpose; next: string }) {
     if (!safeNextPath(i.next)) throw new VerificationError('NEXT_INVALID', 'next는 같은 출처 경로만 받는다');
     // 미성년자 계약 취소 확인(동의 → 대조 → 만 나이 → resultToken)은 그 단계가 붙인다. 그 전에는 받지 않는다(identity §5)
-    if (i.purpose === 'MINOR_CONTRACT') throw new VerificationError('PURPOSE_UNSUPPORTED', '이 목적은 아직 받지 않는다');
     // 만 14세 미만으로 정리 중인 계정은 다시 본인확인하지 못한다(다른 사람 휴대폰으로 ticket:buy를 받지 못하게, 새 맥락 리뷰 중간 2)
     if ((await this.closure.closureReasonOf(i.accountId)) === 'UNDER_14') throw new VerificationError('UNDER_14', '만 14세 미만으로 정리 중인 계정이다');
     if (i.purpose === 'FIRST' && (await this.store.isVerified(i.accountId))) throw new VerificationError('ALREADY_VERIFIED', '이미 본인확인한 계정이다');

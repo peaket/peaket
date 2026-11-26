@@ -15,6 +15,10 @@ import { GetVerificationResult } from './application/get-verification-result.js'
 import { StartVerification } from './application/start-verification.js';
 import { IDENTITY_HASHERS, type IdentityHashers, PHONE_REFS, type PhoneRefs, VERIFICATION_PROVIDER, VERIFICATION_STORE, type VerificationProvider, type VerificationStore } from './domain/ports.js';
 import { VerificationController } from './inbound/verification.controller.js';
+import { MinorContractController } from './inbound/minor-contract.controller.js';
+import { MinorContractCheck, type MinorContractOrders } from './application/minor-contract-check.js';
+import { MINOR_CONTRACT_SIGNER, type MinorContractTokenSigner } from './domain/ports.js';
+import type { PublicKeys } from '../session/index.js';
 
 export interface VerificationModuleOptions {
   storage: 'database' | 'memory';
@@ -22,6 +26,12 @@ export interface VerificationModuleOptions {
   hashers: IdentityHashers;
   /** 본인확인 번호의 연락처 가명(identity §9.1). 없으면 쓰지 않는다 */
   phoneRefs?: PhoneRefs;
+  /** MINOR_CONTRACT 확인 POST의 resultToken 서명기(F-06-3). 없으면 토큰을 붙이지 않는다 */
+  minorContractSigner?: MinorContractTokenSigner;
+  /** resultToken 검증에 쓰는 팬 공개키 묶음(F-06-3) */
+  minorContractPublicKeys?: PublicKeys;
+  /** 주문별 결제자·결제 승인 시각(F-06-3). 없으면 확인 경로가 503이다 */
+  minorContractOrders?: MinorContractOrders;
 }
 
 @Module({})
@@ -30,7 +40,7 @@ export class VerificationModule {
     return {
       module: VerificationModule,
       global: true,
-      controllers: [VerificationController],
+      controllers: [VerificationController, MinorContractController],
       providers: [
         StartVerification,
         ConfirmVerification,
@@ -38,6 +48,18 @@ export class VerificationModule {
         o.storage === 'database' ? { provide: VERIFICATION_STORE, useClass: DrizzleVerificationStore } : { provide: VERIFICATION_STORE, useValue: new MemoryVerificationStore() },
         { provide: VERIFICATION_PROVIDER, useValue: o.provider },
         { provide: IDENTITY_HASHERS, useValue: o.hashers },
+        ...(o.minorContractSigner ? [{ provide: MINOR_CONTRACT_SIGNER, useValue: o.minorContractSigner }] : []),
+        {
+          provide: MinorContractCheck,
+          useFactory: (store: VerificationStore, clock: Clock) =>
+            new MinorContractCheck({
+              store,
+              clock,
+              publicKeys: o.minorContractPublicKeys ?? { jwks: () => ({ keys: [] }) },
+              orders: o.minorContractOrders ?? { basis: async () => undefined },
+            }),
+          inject: [VERIFICATION_STORE, CLOCK],
+        },
         ...(o.phoneRefs ? [{ provide: PHONE_REFS, useValue: o.phoneRefs }] : []),
         SetRestrictedCiHold,
         // 추가 검증 제출의 본인확인 재통과 확인(gRPC, queue-svc만, BOT-090)
