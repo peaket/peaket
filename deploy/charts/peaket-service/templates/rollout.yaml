@@ -1,6 +1,22 @@
 {{- if and .Values.service.enabled .Values.service.rollout.enabled }}
 {{- $name := include "peaket.name" . }}
 {{- include "peaket.extraPorts" . }}
+{{- $steps := .Values.service.rollout.steps }}
+{{- if not $steps }}{{- fail "service.rollout.steps가 비었다. 카나리 단계를 하나 이상 적는다" }}{{- end }}
+{{- $prev := 0 }}
+{{- $last := int (sub (len $steps) 1) }}
+{{- range $i, $step := $steps }}
+{{- if not (kindIs "map" $step) }}{{- fail "service.rollout.steps의 칸은 weight와 pauseSeconds를 가진 map이어야 한다" }}{{- end }}
+{{- $w := int $step.weight }}
+{{- if or (lt $w 1) (gt $w 100) }}{{- fail (printf "service.rollout.steps의 weight는 1~100이다(%d)" $w) }}{{- end }}
+{{- if le $w $prev }}{{- fail (printf "service.rollout.steps의 weight는 단계마다 커져야 한다(%d 뒤 %d)" $prev $w) }}{{- end }}
+{{- if and (eq $i $last) (hasKey $step "pauseSeconds") }}{{- fail "service.rollout.steps의 마지막 100% 단계에는 pauseSeconds를 두지 않는다(롤아웃이 끝나지 않는다)" }}{{- end }}
+{{- if hasKey $step "pauseSeconds" }}
+{{- if lt (int $step.pauseSeconds) 1 }}{{- fail "service.rollout.steps의 pauseSeconds는 1초 이상이어야 한다" }}{{- end }}
+{{- end }}
+{{- $prev = $w }}
+{{- end }}
+{{- if ne $prev 100 }}{{- fail (printf "service.rollout.steps의 마지막 weight는 100이어야 한다(%d)" $prev) }}{{- end }}
 # Argo Rollouts 카나리(docs/devops.md §6.2, BUILD_ORDER BAS-140). 켜면 Deployment 대신 이 Rollout 하나만 낸다.
 # 단계는 값(service.rollout.steps)의 weight·pauseSeconds를 그대로 옮긴다. 되돌리기는 rollbackWindow.revisions(3) 안에서 Git 되돌리기로 한다
 apiVersion: argoproj.io/v1alpha1
@@ -26,7 +42,7 @@ spec:
       steps:
         {{- range .Values.service.rollout.steps }}
         - setWeight: {{ int .weight }}
-          {{- if .pauseSeconds }}
+          {{- if hasKey . "pauseSeconds" }}
           pause: { duration: {{ printf "%ds" (int .pauseSeconds) }} }
           {{- end }}
         {{- end }}

@@ -1,0 +1,30 @@
+# Argo Rollouts 공식 Helm 차트 2.43.0 설치 값(BUILD_ORDER OPS-430, F-09-10).
+# 정본: docs/devops.md §5.2(애드온은 관제·시스템 풀)·§6.1·§6.2(카나리), docs/infra-handover.md §3.1.
+# 실제 클러스터 설치는 이 동결 트랙에서 하지 않는다(미실행). 차트 판은 2026-11-27 Argo Helm 색인에서 확인했다.
+# 카나리 분석(AnalysisTemplate)·Gateway API 트래픽 라우팅은 F-09-11 몫이라 여기서 켜지 않는다.
+
+controller:
+  # 컨트롤러는 리더 하나가 일한다. 복제 2는 장애 조치용이다( [가정] )
+  replicas: 2
+  nodeSelector:
+    peaket.io/pool: ops
+  tolerations:
+    - key: peaket.io/pool
+      operator: Equal
+      value: ops
+      effect: NoSchedule
+  priorityClassName: peaket-control
+  # 컨트롤러 지표를 긁어 카나리·롤아웃 상태를 본다(docs/observability.md §3)
+  metrics:
+    enabled: true
+  # 노드 정비 때 컨트롤러 하나는 남긴다
+  pdb:
+    enabled: true
+    minAvailable: 1
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+# 대시보드는 이 기능에서 띄우지 않는다(관제 콘솔과 별개다)
+dashboard:
+  enabled: false

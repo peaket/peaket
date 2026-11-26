@@ -53,23 +53,32 @@ service:
   tolerations: []
   # Argo Rollouts 카나리(운영). 켜면 Deployment 대신 Rollout 하나를 내고, local·CI는 기본값(Deployment)을 쓴다
   # 단계의 pauseSeconds는 그 단계 뒤 분석·대기 시간(초)이다. 값은 [가정](docs/devops.md §6.2)
+  # 5% → 25% → 50% → 100%, 단계마다 5분 대기다(docs/devops.md:525). 마지막 100%에는 pause를 두지 않는다
   rollout:
     enabled: false
     steps:
-      - { weight: 10, pauseSeconds: 60 }
-      - { weight: 50, pauseSeconds: 120 }
+      - { weight: 5, pauseSeconds: 300 }
+      - { weight: 25, pauseSeconds: 300 }
+      - { weight: 50, pauseSeconds: 300 }
       - { weight: 100 }
   # PodDisruptionBudget. maxUnavailable: 1은 복제 2 이상일 때 쓴다(docs/devops.md §6.1)
   pdb:
     enabled: false
     maxUnavailable: 1
-  # KEDA ScaledObject(wbs 0.4.4). 지표를 못 읽으면 fallback.replicas(-1)로 지금 복제 수를 유지한다(docs/observability.md §5 G-21)
+  # KEDA ScaledObject(wbs 0.4.4, BUILD_ORDER OPS-430). 지표를 못 읽으면 fallback behavior currentReplicas로 지금 복제 수를 유지한다(docs/observability.md §5 G-21)
+  # 켤 때 minReplicaCount(1 이상)와 maxReplicaCount(min 이상)를 반드시 값으로 준다. 기본 0은 실수로 KEDA 기본값 0/100을 쓰지 않게 렌더를 멈춘다
   keda:
     enabled: false
+    minReplicaCount: 0
+    maxReplicaCount: 0
+    pollingInterval: 30
+    cooldownPeriod: 300
     triggers: []
     fallback:
       failureThreshold: 3
-      replicas: -1
+      # KEDA 스펙은 fallback.replicas를 필수로 받는다. behavior currentReplicas에서는 계산에 쓰지 않는다
+      replicas: 0
+      behavior: currentReplicas
   leaderLease: ""
   # 앱 포트(port) 밖의 포트(BUILD_ORDER PRF-215: 합본은 서비스마다 앱 포트가 다르다). 칸마다 { name, port }이고 컨테이너 포트와 Service 포트가 함께 열린다
   extraPorts: []

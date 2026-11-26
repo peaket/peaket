@@ -1,0 +1,49 @@
+# KEDA 공식 Helm 차트 2.21.1 설치 값(BUILD_ORDER OPS-430, F-09-10).
+# 정본: docs/devops.md §5.2(애드온은 관제·시스템 풀), docs/infra.md §5(프리워밍·런타임 확장),
+# docs/observability.md §5 '자동 제어 입력 감시'(fallback currentReplicas), docs/infra-handover.md §3.1.
+# 실제 클러스터 설치는 이 동결 트랙에서 하지 않는다(미실행). 차트 판은 2026-11-27 KEDA 차트 색인에서 확인했다.
+# KEDA는 ScaledObject마다 HPA를 만들므로, 워크로드의 HPA(service.autoscaling)와 함께 켜지 않는다(공용 차트가 막는다).
+
+# 모든 컴포넌트(operator·metrics server·webhook)를 관제·시스템 풀에 둔다(docs/devops.md §5.2)
+nodeSelector:
+  peaket.io/pool: ops
+tolerations:
+  - key: peaket.io/pool
+    operator: Equal
+    value: ops
+    effect: NoSchedule
+priorityClassName: peaket-control
+
+# 모든 네임스페이스의 ScaledObject를 본다. queue·purchase 같은 업무 네임스페이스의 ScaledObject를 놓치지 않는다
+watchNamespace: ""
+
+operator:
+  # KEDA 컨트롤러는 리더 하나가 일한다. 복제 2는 장애 조치용이다( [가정] )
+  replicaCount: 2
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+metricsServer:
+  replicaCount: 2
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+webhooks:
+  replicaCount: 2
+  # 잘못된 ScaledObject를 조용히 받지 않는다(Kyverno 정책의 failurePolicy Fail과 같은 생각)
+  failurePolicy: Fail
+  timeoutSeconds: 10
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+# 노드 정비 때 컴포넌트마다 하나는 남긴다. 복제 2에서 minAvailable 1이다
+podDisruptionBudget:
+  operator:
+    minAvailable: 1
+  metricServer:
+    minAvailable: 1
+  webhooks:
+    minAvailable: 1

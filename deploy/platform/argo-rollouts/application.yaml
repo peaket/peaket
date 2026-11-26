@@ -1,0 +1,30 @@
+# Argo Rollouts ArgoCD Application(BUILD_ORDER OPS-430, F-09-10, docs/devops.md §5.2).
+# 실제 클러스터 동기화는 이 동결 트랙에서 하지 않는다(미실행). values.yaml만 정적으로 시험한다.
+# - 차트는 Argo Helm의 argo-rollouts 2.43.0이다(2026-11-27 색인 확인).
+# - 두 번째 source는 이 저장소의 values.yaml을 `$values/...`로 읽기 위한 자리다(ArgoCD 다중 source).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argo-rollouts
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: peaket
+    peaket.io/environment: platform
+spec:
+  project: peaket-platform
+  sources:
+    - repoURL: https://argoproj.github.io/argo-helm
+      chart: argo-rollouts
+      targetRevision: 2.43.0
+      helm:
+        valueFiles:
+          - $values/deploy/platform/argo-rollouts/values.yaml
+    - repoURL: https://github.com/peaket/peaket
+      targetRevision: develop
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argo-rollouts
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]

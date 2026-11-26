@@ -1,6 +1,38 @@
 {{- if and .Values.service.enabled .Values.service.keda.enabled }}
 {{- $name := include "peaket.name" . }}
-# KEDA ScaledObject(wbs 0.4.4, docs/observability.md §5 G-21). 지표를 읽지 못하면 fallback.replicas(-1)로 지금 복제 수를 유지한다
+{{- $k := .Values.service.keda }}
+{{- /* KEDA는 ScaledObject마다 HPA를 만든다. 같은 대상에 HPA를 둘 켜면 두 조절기가 복제 수를 다툰다(BUILD_ORDER OPS-430) */}}
+{{- if .Values.service.autoscaling.enabled }}
+{{- fail "KEDA(service.keda)와 HPA(service.autoscaling)를 같은 대상에 함께 켜지 않는다. 하나만 켠다" }}
+{{- end }}
+{{- $min := int $k.minReplicaCount }}
+{{- $max := int $k.maxReplicaCount }}
+{{- if lt $min 1 }}{{- fail "KEDA minReplicaCount는 1 이상이어야 한다(기본 0은 서비스에 맞지 않는다)" }}{{- end }}
+{{- if lt $max $min }}{{- fail "KEDA maxReplicaCount는 minReplicaCount 이상이어야 한다" }}{{- end }}
+{{- if lt (int $k.pollingInterval) 1 }}{{- fail "KEDA pollingInterval은 1초 이상이어야 한다" }}{{- end }}
+{{- if lt (int $k.cooldownPeriod) 1 }}{{- fail "KEDA cooldownPeriod는 1초 이상이어야 한다" }}{{- end }}
+{{- if not $k.triggers }}{{- fail "KEDA triggers가 비었다. 지표 트리거를 하나 이상 적는다" }}{{- end }}
+{{- $required := dict
+  "cron" (list "start" "end" "desiredReplicas" "timezone")
+  "prometheus" (list "serverAddress" "query" "threshold")
+  "kafka" (list "bootstrapServers" "consumerGroup" "topic" "lagThreshold")
+  "redis" (list "listName" "listLength") }}
+{{- range $k.triggers }}
+{{- if not (kindIs "map" .) }}{{- fail "KEDA trigger는 type과 metadata를 가진 map이어야 한다" }}{{- end }}
+{{- $type := toString .type }}
+{{- if not (has $type (list "cron" "prometheus" "kafka" "redis")) }}
+{{- fail (printf "KEDA trigger type %q는 받지 않는다(cron·prometheus·kafka·redis만)" $type) }}
+{{- end }}
+{{- $m := .metadata | default dict }}
+{{- if not (kindIs "map" $m) }}{{- fail (printf "KEDA %s trigger metadata는 map이어야 한다" $type) }}{{- end }}
+{{- range $key := get $required $type }}
+{{- if not (hasKey $m $key) }}{{- fail (printf "KEDA %s trigger에 metadata.%s가 필요하다" $type $key) }}{{- end }}
+{{- end }}
+{{- if eq $type "redis" }}
+{{- if not (or (hasKey $m "address") (hasKey $m "addressFrom")) }}{{- fail "KEDA redis trigger에 metadata.address나 metadata.addressFrom이 필요하다" }}{{- end }}
+{{- end }}
+{{- end }}
+# KEDA ScaledObject(wbs 0.4.4, BUILD_ORDER OPS-430, docs/infra.md §5). 지표를 읽지 못하면 fallback behavior currentReplicas로 지금 복제 수를 유지한다
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
@@ -16,8 +48,13 @@ spec:
     kind: Rollout
     {{- end }}
     name: {{ $name }}
-  triggers: {{- toYaml .Values.service.keda.triggers | nindent 4 }}
+  minReplicaCount: {{ $min }}
+  maxReplicaCount: {{ $max }}
+  pollingInterval: {{ int $k.pollingInterval }}
+  cooldownPeriod: {{ int $k.cooldownPeriod }}
+  triggers: {{- toYaml $k.triggers | nindent 4 }}
   fallback:
-    failureThreshold: {{ int .Values.service.keda.fallback.failureThreshold }}
-    replicas: {{ int .Values.service.keda.fallback.replicas }}
+    failureThreshold: {{ int $k.fallback.failureThreshold }}
+    replicas: {{ int $k.fallback.replicas }}
+    behavior: {{ $k.fallback.behavior | default "currentReplicas" | quote }}
 {{- end }}
