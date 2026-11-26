@@ -107,3 +107,12 @@
 - IR-04(낮음): `apps/partner/src/shared/lib/seller-notice.ts:37` ⑤ "부정판매는 처벌·과징금 대상입니다"는 POL-024 라목 원문이 아닌 요약이다. 요약임을 표시하거나 원문을 쓴다(TR-12).
 - IR-05(낮음): 계획 I-07이 정한 `docs/lanes/lane5.md` F-07-9 진행 로그가 없다. 동결 로컬 범위 기록에서 채운다.
 - IR-06(중간): 계획·시험·구현·기록 커밋이 `lane5-freeze-F-07-9-opencode` 한 세션을 함께 써 `roles-check --base 1d10d6da3 --head HEAD`가 exit 1이다(세션 겹침 3건). 커밋 꼬리말은 고쳐 쓸 수 없으므로 이 동결 가지는 합치지 않고, 기록 커밋에 예외를 남기거나 다음 묶음부터 역할마다 새 세션을 쓴다. 같은 출력의 '시험 리뷰가 구현보다 먼저'·'verify 없음'은 도구가 ADR-0372·0381을 아직 모르는 탓이다.
+
+## F-07-10(2026-11-26, 시험 리뷰)
+
+리뷰 지적 번호는 `docs/review/plans/F-07-10.md` '시험 리뷰' 절의 것이다. 높음·보안·통과 기준 13건(TR-01~13)은 시험 담당이 고치고, 아래 낮은 지적과 남은 위험은 정리 목록에 둔다.
+
+- TR-14(낮음): 계획 §6의 시험 ID 자리표시(`OPS-05~07`·`WEB-01~04`)가 실제(`OPS-05~09`·`WEB-01~05`)와 다르고, 계획 I-07은 `reviewDetailOf`가 폭·높이를 남긴다고 하지만 `OPS-05`는 버린다. `review-photo-upload.test.mjs`는 `out.imageId`·`e.status`·`photo.id`처럼 생성 변수 이름을 고정하고, `review-images.http.test.ts:337`은 `reviewMaintenanceTasks(..., { images } as never)`로 타입을 지운다. `review-panel.test.mjs:85`는 cs_lead의 후기 조치를 허용하지만 openapi `POST /v1/ops/reviews/{reviewId}/moderation`의 `x-peaket-roles`는 cs_agent뿐이다(d5 §7.6 `:3312`는 cs_agent·cs_lead 처리). 계획 §6의 수치와 실제 시험 수를 맞추고, 변수 이름 대신 행동을, 역할은 계약과 d5 가운데 하나로 맞춘다.
+- `review_image`의 실제 SQL(제약·색인·GRANT)과 같은 사진을 두 후기에 동시에 붙이는 경합은 이 환경에서 Docker를 쓰지 않아 `test-int`로 미뤘다. 구현 뒤 Docker 차례가 열리면 `test-int/review-images.int.test.ts`로 확인한다(계획 §검증).
+- SCR-016 사진 업로드·관제 후기 패널의 실제 Chromium 누름은 F-08-7(웨이브 끝 브라우저 확인)로 미뤘다. 이 시험은 소스·모델·HTTP 대역까지다.
+- `image-worker`가 이 저장소에 없어 실제 디코딩·재인코딩·메타데이터 제거는 대역으로만 본다. 개발·운영 업로드는 `image-worker` 배포가 생겨야 끝까지 돈다(계획 §남은 위험).
