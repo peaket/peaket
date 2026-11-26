@@ -385,6 +385,14 @@ ADR-0373 결정 2의 '동결로 미검증'이다. 완성 판정에서 빼고 완
 
 ## F-09-2 이름 기준 자동 시험과 실제 미실행(2026-11-27, RV092-05)
 
-- **D-T8**: `migration-check.test.mjs`의 정적 n1 시험과 `migrations.int.test.ts`의 합성 N-1 질의 시험 이름이 장부를 '자동 시험'으로 채운다. 정본이 요구하는 **identity-svc N-1 앱 통합 시험 묶음**은 Docker·DB가 필요해 이번 동결 로컬 턴에는 `미실행`이다. 구현·검증 차례에 `pnpm --filter @peaket/identity-svc test:integration`을 확장 스키마 위에서 돌리기 전에는 완료로 보고하지 않는다(계획 §8 완료의 정의 3).
-- **D-T44 ⑤**: 차트·스크립트 문자열 시험 이름이 장부를 채우지만, 정본 행동은 **DDL 역할로 실제 접속**하는 것이다. `migrations.int.test.ts`의 `D-T44 ⑤ DDL 역할로 직접 붙어 마이그레이션한다`를 Docker 잠금 아래에서 돌리기 전에는 `미실행`이다(계획 §8 완료의 정의 4).
-- **D-T44 이관**: 기존 `ops_migration`·`ticket_migration`·`drizzle.__drizzle_migrations`를 `peaket_migration`으로 옮기는 실제 DB 이관은 이번 턴 `미실행`이다. 단위·통합 시험 이름만 있다(계획 §8 완료의 정의 5).
+- **D-T8**: `migration-check.test.mjs`의 정적 n1 시험과 `migrations.int.test.ts`의 합성 N-1 질의 시험이 장부를 '자동 시험'으로 채운다. 합성 N-1 질의 시험은 2026-11-27 PostgreSQL 통합 9/9에서 실제로 통과했다. 정본이 요구하는 **identity-svc N-1 앱 통합 시험 묶음**은 아직 `미실행`이다. 구현·검증 차례에 `pnpm --filter @peaket/identity-svc test:integration`을 확장 스키마 위에서 돌리기 전에는 완료로 보고하지 않는다(계획 §8 완료의 정의 3).
+- **D-T44 ⑤**: 차트·스크립트 문자열 시험 이름이 장부를 채우지만, 정본 행동은 **DDL 역할로 실제 접속**하는 것이다. `migrations.int.test.ts`의 `D-T44 ⑤ DDL 역할로 직접 붙어 마이그레이션한다`가 2026-11-27 PostgreSQL 통합 9/9에서 통과했다(계획 §8 완료의 정의 4).
+- **D-T44 이관**: 기존 `ops_migration` 기록을 `peaket_migration`으로 옮기는 통합 시험은 2026-11-27 9/9에서 통과했다. `drizzle.__drizzle_migrations`·`ticket_migration` 이관은 단위 시험이 본다. **실제 기존 운영 DB 이관**은 아직 `미실행`이다(계획 §8 완료의 정의 5).
+
+## F-09-2 PostgreSQL 통합 실행(2026-11-27)
+
+- **실행 ID**: `lane1-F-09-2` docker 잠금, take 04:18:38 → 통합 시작 04:19:34 → drop 04:20:24. 두 번째 권한 확인 take 04:20:56 → drop 04:22:35.
+- **결과**: `packages/platform/test-int/migrations.int.test.ts` **9/9 통과**(15.39초). D-T44 ②③④⑤, D-T10(55P03·57014·재시도), D-T8 합성 N-1, 기존 ops 이관, 드라이런을 실제 PostgreSQL 18.6에서 확인했다.
+- **실패·수정**: 첫 실행은 8/9 실패(`LOCK_BUSY`). `pg_try_advisory_lock`의 실제 결과 열 이름은 `pg_try_advisory_lock`인데 구현이 `locked`만 읽어 잠금을 못 잡은 결함이었다. `packages/platform/src/migrations.ts`에서 두 열을 모두 읽게 고친 뒤 9/9 통과. 플랫폼 단위 28/28도 유지.
+- **권한**: 실제 PostgreSQL에서 `GRANT MAINTAIN ON t TO m` → `has_table_privilege('m','t','MAINTAIN') = true`, `CREATE EXTENSION pgstattuple`·`GRANT EXECUTE` → `has_function_privilege(...) = true`. 컨테이너는 `docker rm -f`로 지웠고 남은 postgres 컨테이너·볼륨은 없다.
+- **남은 미실행**: identity-svc N-1 앱 통합 묶음, 실제 기존 운영 DB 이관, Squawk 실제 실행, Aurora·PgBouncer 연결, 30k/s·100만·K1/K2/K7 수치.
