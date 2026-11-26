@@ -50,12 +50,17 @@ const T = (n: number) => id(0x2000 + n);
 const H = (n: number) => id(0x1800 + n);
 const EVENT = id(0x200);
 const EVENT_BULK = id(0x210);
+const EVENT_COMPLAINT = id(0x220);
+const EVENT_NO_POST = id(0x221);
 const CLUSTER = id(0x300);
 const CASE = id(0x400);
 const REQUEST = id(0x700);
 
 const schedule: SaleScheduleSource = {
-  get: async (eventId: string) => (eventId === EVENT ? { opensAtMs: SHOW - 7 * DAY, saleEndsAtMs: SALE_ENDS, entryOpensAtMs: ENTRY, entryClosedAtMs: ENTRY + 3 * HOUR } : undefined),
+  get: async (eventId: string) =>
+    eventId === EVENT || eventId === EVENT_COMPLAINT || eventId === EVENT_NO_POST
+      ? { opensAtMs: SHOW - 7 * DAY, saleEndsAtMs: SALE_ENDS, entryOpensAtMs: ENTRY, entryClosedAtMs: ENTRY + 3 * HOUR }
+      : undefined,
 };
 
 type Req = { statusCode: number; payload: string; headers: Record<string, string | string[] | undefined>; rawPayload?: Buffer };
@@ -378,7 +383,7 @@ const kit = reauthKit(() => clock.now());
 
 const eventInfo = {
   get: async (eventId: string) =>
-    eventId === EVENT
+    eventId === EVENT || eventId === EVENT_COMPLAINT || eventId === EVENT_NO_POST
       ? { eventName: '겨울 콘서트', showAtMs: SHOW, salesOpenedAtMs: SHOW - 7 * DAY }
       : eventId === EVENT_BULK
         ? { eventName: '대량 콘서트', showAtMs: SHOW, salesOpenedAtMs: SHOW - 7 * DAY }
@@ -589,6 +594,8 @@ const external = () => svc.app.get((investigationsModule as unknown as Record<st
 beforeAll(async () => {
   await cases.putClusters(EVENT, 1, [{ clusterId: CLUSTER, eventId: EVENT, generation: 1, scoreBand: 'HIGH', accountCount: 3, purchaseCount: 9, limitPerPerson: 4, sharedAttributes: ['PAYMENT_METHOD'], signals: ['LINK_GRAPH'], snapshotVersion: 1, createdAtMs: NOW - DAY, members: [memberOf(A(1)), memberOf(A(2)), memberOf(A(3))] } as FraudClusterRecord], 'v1');
   await cases.putSnapshot(snapshotOf(EVENT));
+  await cases.putSnapshot(snapshotOf(EVENT_COMPLAINT));
+  await cases.putSnapshot(snapshotOf(EVENT_NO_POST));
   svc = await createService({
     name: 'ops-svc-fraud-evidence',
     module: AppModule.register({
@@ -844,7 +851,7 @@ describe('F-04-14 HTTP', () => {
     const bundleId = String(json(created).bundleId);
     await evidence().buildDue(clock.now());
     expect((await holdEndRequest(bundleId, who, { basis: '분쟁 종료' })).statusCode).toBe(422);
-    expect((await holdChange(bundleId, who, { holdReason: 'DISPUTE', basis: '소송' })).statusCode).toBe(200);
+    expect((await holdChange(bundleId, who, { holdReason: 'DISPUTE', basis: '민사 소송 접수 2026-5678' })).statusCode).toBe(200);
     const requested = await holdEndRequest(bundleId, who, { basis: '합의 종료 2026-11-26' });
     expect(requested.statusCode, requested.payload).toBe(201);
     expect(json(requested).holdEndRequest).toMatchObject({ requestedBy: who['x-user-id'], basis: '합의 종료 2026-11-26' });
@@ -865,7 +872,8 @@ describe('F-04-14 HTTP', () => {
     expect(detail.holdEndedAt).toBe(json(confirmed).holdEndedAt);
     expect(detail.holdEndRequest).toBeNull();
     const custody = await evidenceStore.listCustody(bundleId);
-    expect(custody.at(-1)).toMatchObject({ action: 'HOLD_ENDED', actorId: approver['x-user-id'] });
+    expect(custody.at(-2)).toMatchObject({ action: 'HOLD_ENDED', actorId: approver['x-user-id'] });
+    expect(custody.at(-1)).toMatchObject({ action: 'VIEWED', actorId: who['x-user-id'] });
     expect(evidenceStore.bundles.get(bundleId)!.holdEndConfirmedBy).toBe(approver['x-user-id']);
     expect(evidenceStore.bundles.get(bundleId)!.holdEndRequestedBy).toBe(who['x-user-id']);
     expect(evidenceStore.bundles.get(bundleId)!.holdEndConfirmedBy).not.toBe(evidenceStore.bundles.get(bundleId)!.holdEndRequestedBy);
@@ -1059,7 +1067,9 @@ describe('F-04-14 HTTP', () => {
 
   test('FX-T20 ⑦ C-T71 ④ COMPLAINT는 개인정보가 없고 statement·bundleManifestSha256이 맞으며 EXPORTED가 남는다', async () => {
     const who = investigator();
+    // 앞선 FX-T19 시험이 EVENT에 남긴 게시물과 격리하려고 두 경우에 전용 회차를 쓴다.
     const c = await seedCase({
+      eventId: EVENT_COMPLAINT,
       status: 'ACTIONED',
       outcomeLabel: 'BOT',
       investigatorOpinion: `연락처 010-1111-2222 IP 127.0.0.1`,
@@ -1069,9 +1079,9 @@ describe('F-04-14 HTTP', () => {
         { seq: 2, kind: 'NOTE', actorId: id(0x900), note: 'contactRef c-1 paymentMethodRef pm-1 deviceRef d-1', detail: { ip: '127.0.0.1' }, occurredAtMs: NOW },
       ],
     });
-    const post = await send('POST', '/v1/ops/external-posts', who, { idem: randomUUID(), multipart: multipart({ fields: { eventId: EVENT, url: 'https://example.com/resale/1', capturedAt: iso(NOW), source: 'MANUAL', postedAt: iso(NOW - HOUR) }, files: [{ field: 'capture', name: 'capture.png', type: 'image/png', bytes: makePng({ width: 2, height: 2 }) }] }) });
+    const post = await send('POST', '/v1/ops/external-posts', who, { idem: randomUUID(), multipart: multipart({ fields: { eventId: EVENT_COMPLAINT, url: 'https://example.com/resale/1', capturedAt: iso(NOW), source: 'MANUAL', postedAt: iso(NOW - HOUR) }, files: [{ field: 'capture', name: 'capture.png', type: 'image/png', bytes: makePng({ width: 2, height: 2 }) }] }) });
     expect(post.statusCode, post.payload).toBe(201);
-    const postNoTime = await send('POST', '/v1/ops/external-posts', who, { idem: randomUUID(), multipart: multipart({ fields: { eventId: EVENT, url: 'https://example.com/resale/2', capturedAt: iso(NOW), source: 'MANUAL' }, files: [{ field: 'capture', name: 'capture.png', type: 'image/png', bytes: makePng({ width: 2, height: 2 }) }] }) });
+    const postNoTime = await send('POST', '/v1/ops/external-posts', who, { idem: randomUUID(), multipart: multipart({ fields: { eventId: EVENT_COMPLAINT, url: 'https://example.com/resale/2', capturedAt: iso(NOW), source: 'MANUAL' }, files: [{ field: 'capture', name: 'capture.png', type: 'image/png', bytes: makePng({ width: 2, height: 2 }) }] }) });
     expect(postNoTime.statusCode, postNoTime.payload).toBe(201);
     scanner.results = ['CLEAN', 'CLEAN'];
     await external().scanDue(clock.now());
@@ -1104,7 +1114,7 @@ describe('F-04-14 HTTP', () => {
     const custody = await evidenceStore.listCustody(bundleId);
     expect(custody.at(-1)).toMatchObject({ action: 'EXPORTED', exportKind: 'COMPLAINT', reason: '고소장' });
 
-    const noPostCase = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', reasonCategory: 'QUEUE_BYPASS', members: [memberOf(A(1), { actionNotifiedAtMs: NOW - DAY })] });
+    const noPostCase = await seedCase({ eventId: EVENT_NO_POST, status: 'ACTIONED', outcomeLabel: 'BOT', reasonCategory: 'QUEUE_BYPASS', members: [memberOf(A(1), { actionNotifiedAtMs: NOW - DAY })] });
     const noPostBundle = String(json(await createBundle(noPostCase.caseId, who)).bundleId);
     await evidence().buildDue(clock.now());
     const noPost = await exportBundle(noPostBundle, who, { kind: 'COMPLAINT', reason: '고소' });
