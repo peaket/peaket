@@ -663,6 +663,7 @@ function kpiOf(a) {
   // 진입 서버 비례 확인의 단계 하나(MSR-020): 진입 SLO(NFR-001)
   if (a.scenario === 'entry') return 'NFR-001';
   if (a.scenario === 'payment') return 'K7';
+  if (a.scenario === 'soak') return 'NFR-027';
   if (a.scenario === 'seat-deltas') return 'K4';
   if (a.scenario === 'gate') return 'K10';
   return a.mode === 'crossed' ? 'K3' : 'K2';
@@ -896,7 +897,7 @@ async function runV0(a, runTag) {
     for (const sg of segments) {
       const name = split ? `loadgen-${runTag}-g${sg.index}` : `loadgen-${runTag}`;
       pods.push(name);
-      await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment', deadlineS: Math.max(60, Math.min(11400, busyS * 2 + 600)), ...(split ? { index: sg.index } : {}) }));
+      await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment', deadlineS: Math.max(60, a.scenario === 'soak' ? busyS + 600 : Math.min(11400, busyS * 2 + 600)), ...(split ? { index: sg.index } : {}) }));
     }
     if (a.scenario === 'seat-deltas') {
       step(`변경분 받는 파드 ${a.listenerPods}대(연결 ${a.connections}개)`);
@@ -907,7 +908,7 @@ async function runV0(a, runTag) {
         if (from >= to) break;
         const name = `loadgen-${runTag}-l${i}`;
         listeners.push(name);
-        await createObject(deltaClientPod({ name, index: i, cpus: LISTENER_CPUS, memoryMi: LISTENER_MEMORY_MI, hostDir, deadlineS: Math.max(60, Math.min(11400, busyS * 2 + 600)), connsFrom: from, connsTo: to, gateway: layout.gatewayUrl.replace(/^https:/, 'wss:'), eventId, origin: ORIGIN, image: V0_IMAGES.app }));
+        await createObject(deltaClientPod({ name, index: i, cpus: LISTENER_CPUS, memoryMi: LISTENER_MEMORY_MI, hostDir, deadlineS: Math.max(60, a.scenario === 'soak' ? busyS + 600 : Math.min(11400, busyS * 2 + 600)), connsFrom: from, connsTo: to, gateway: layout.gatewayUrl.replace(/^https:/, 'wss:'), eventId, origin: ORIGIN, image: V0_IMAGES.app }));
       }
     }
     for (const p of [...pods, ...listeners]) await waitPodReady(p);
@@ -1203,6 +1204,8 @@ const ROUTES_V1 = {
   payment: ['hold', 'order', 'pay_start', 'sim_auth', 'sim_fault', 'payment', 'payment_status'],
   // 진입 비례 확인 단계(MSR-020): 준비의 사전 검증은 점검에서 뺀다
   entry: ['preverify', 'entry'],
+  // 6시간 장시간 시험(F-08-5): 자원 추세는 summary가 아니라 soak-probe가 모은다
+  soak: [],
 };
 /** v1 실행의 시나리오 파일(진입 단계는 V1_SCENARIOS 밖이다) */
 const v1ScenarioFile = (a) => (a.scenario === 'entry' ? V1_ENTRY_SCENARIO : V1_SCENARIOS[a.scenario]);
@@ -1337,6 +1340,10 @@ async function runV1(a, runTag) {
       // 준비(사전 검증)는 k6 시간표의 앞 prepS초 + 여유 1초다(scenarios/v1-entry.js)
       maxRate = a.rate;
       prepS = a.prepS + 1;
+    } else if (a.scenario === 'soak') {
+      // 6시간 장시간 시험은 회차 준비 뒤 바로 정한 도착률로 간다(F-08-5)
+      maxRate = a.rate;
+      prepS = 0;
     } else {
       maxRate = a.rate;
       prepS = 0;
@@ -1421,6 +1428,7 @@ async function runV1(a, runTag) {
       ...(a.scenario === 'queue' ? { ENTRY_RATE: a.entryRate, ADMIT_PER_SECOND: a.admitPerSecond } : {}),
       ...(a.scenario === 'seat-hold' ? { RATE: a.rate, MODE: a.mode, HOLD_SIZE: a.holdSize, HOT_COUNT: a.hotCount, PAIRS: a.pairs, RELEASE_MS: a.releaseMs, KEEP: a.keep ? 1 : 0, PREP_TIMEOUT_S: Math.max(300, prepS * 3) } : {}),
       ...(a.scenario === 'payment' ? { RATE: a.rate, SEATS_PER_ORDER: a.seatsPerOrder, SIM_URL: L.pgSimUrl, FAULT_DROP_PCT: String(a.faultDropPct), FAULT_DELAY_PCT: String(a.faultDelayPct), FAULT_DELAY_MS } : {}),
+      ...(a.scenario === 'soak' ? { TARGET: a.target, RATE: a.rate, DURATION_S: String(a.durationS), PHASE: a.phase, SAMPLE_SEC: String(a.sampleSec), RUN: runTag, CONNECTIONS: String(a.connections ?? 0), HOLD_RATE: String(a.holdRate ?? 0), WS_BASE: 'ws://realtime-gw.realtime-gw.svc.cluster.local:8080' } : {}),
       ...(entryPlan ? { RATE: a.rate, ENTRY_VUS: entryPlan.entryVus } : {}),
     };
     const segments = executionSegments(nGen);
@@ -1433,7 +1441,7 @@ async function runV1(a, runTag) {
     for (const sg of segments) {
       const name = split ? `loadgen-${runTag}-g${sg.index}` : `loadgen-${runTag}`;
       pods.push(name);
-      await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment', deadlineS: Math.max(60, Math.min(11400, busyS * 2 + 600)), ...(split ? { index: sg.index } : {}) }));
+      await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment', deadlineS: Math.max(60, a.scenario === 'soak' ? busyS + 600 : Math.min(11400, busyS * 2 + 600)), ...(split ? { index: sg.index } : {}) }));
     }
     for (const p of pods) await waitPodReady(p);
 

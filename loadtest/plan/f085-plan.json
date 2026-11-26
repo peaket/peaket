@@ -34,7 +34,7 @@
       "errorRateSource": "NFR-001·Q-T2 0.1%",
       "judge": "NFR-027",
       "commands": [
-        "node loadtest/run.mjs v1 soak --target queue-svc --rate 500 --out .cache/peaket-f085/{day}-queue-r{round}"
+        "node loadtest/run.mjs v1 soak --phase 4a --target queue-svc --rate 500 --out .cache/peaket-f085/{day}-queue-r{round}"
       ],
       "artifacts": ["series.ndjson", "errors.json", "summary.json", "records.ndjson", "probe.json", "restarts.json", "host.json", "run.json"]
     },
@@ -50,7 +50,7 @@
       "errorRateSource": "[가정, F-08-5 계획] NFR-003·S-T1에 오류율 기준이 없다",
       "judge": "NFR-027",
       "commands": [
-        "node loadtest/run.mjs v1 soak --target purchase-svc --rate 1000 --out .cache/peaket-f085/{day}-purchase-r{round}"
+        "node loadtest/run.mjs v1 soak --phase 4a --target purchase-svc --rate 1000 --out .cache/peaket-f085/{day}-purchase-r{round}"
       ],
       "artifacts": ["series.ndjson", "errors.json", "summary.json", "records.ndjson", "probe.json", "restarts.json", "host.json", "run.json"]
     },
@@ -65,7 +65,7 @@
       "errorRateSource": "NFR-006 완료율 99.95%·P-T5 0.05% 이하",
       "judge": "NFR-027",
       "commands": [
-        "node loadtest/run.mjs v1 soak --target payment-svc --rate 150 --out .cache/peaket-f085/{day}-payment-r{round}"
+        "node loadtest/run.mjs v1 soak --phase 4b --target payment-svc --rate 150 --out .cache/peaket-f085/{day}-payment-r{round}"
       ],
       "artifacts": ["series.ndjson", "errors.json", "summary.json", "records.ndjson", "probe.json", "restarts.json", "host.json", "run.json"]
     },
@@ -81,7 +81,7 @@
       "errorRateSource": "[가정, F-08-5 계획]",
       "judge": "NFR-027",
       "commands": [
-        "node loadtest/run.mjs v1 soak --target realtime-gw --rate 2500 --connections 2500 --hold-rate 63 --out .cache/peaket-f085/{day}-realtime-r{round}"
+        "node loadtest/run.mjs v1 soak --phase 4b --target realtime-gw --rate 2500 --connections 2500 --hold-rate 63 --out .cache/peaket-f085/{day}-realtime-r{round}"
       ],
       "artifacts": ["series.ndjson", "errors.json", "summary.json", "records.ndjson", "probe.json", "restarts.json", "host.json", "run.json"]
     },
@@ -95,7 +95,7 @@
       "errorRateSource": "[가정, F-08-5 계획]",
       "judge": "NFR-027",
       "commands": [
-        "node loadtest/run.mjs v1 soak --target outbox-relay --rate 100 --out .cache/peaket-f085/{day}-relay-r{round}"
+        "node loadtest/run.mjs v1 soak --phase 4c --target outbox-relay --rate 100 --out .cache/peaket-f085/{day}-relay-r{round}"
       ],
       "artifacts": ["series.ndjson", "errors.json", "summary.json", "records.ndjson", "probe.json", "restarts.json", "host.json", "run.json"]
     }
@@ -113,7 +113,7 @@
     "commands": [
       "git apply loadtest/soak/db-conn-leak.patch",
       "docker build -f services/purchase-svc/Dockerfile -t peaket/purchase-svc:soak-leak .",
-      "node loadtest/run.mjs v1 soak --target purchase-svc --rate 1000 --leak db-conn --out .cache/peaket-f085/{day}-purchase-leak-r{round}"
+      "node loadtest/run.mjs v1 soak --phase 4c --target purchase-svc --rate 1000 --leak db-conn --out .cache/peaket-f085/{day}-purchase-leak-r{round}"
     ]
   },
   "report": "docs/review/measurements/F-08-5-soak.md",

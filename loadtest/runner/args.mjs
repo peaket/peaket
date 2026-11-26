@@ -22,6 +22,8 @@ export class UsageError extends Error {
 import { parseGwArgs } from './gw.mjs';
 // entry-scale.mjs도 같은 꼴로 UsageError를 이 파일에서 가져온다(함수 안에서만 쓴다)
 import { parseEntryStepsArgs } from './entry-scale.mjs';
+// 6시간 장시간 시험은 runV1의 3시간 토큰·인자 상한과 따로 인자를 읽는다(F-08-5)
+import { parseSoakArgs } from './soak.mjs';
 
 /** 입구의 IP당 초당 요청 한도(deploy/envs/local/v0-gateway.yaml PEAKET_V0_RATE_PER_SECOND, 시험이 견준다) */
 export const GATEWAY_RATE_PER_IP = 10;
@@ -29,7 +31,7 @@ export const GATEWAY_RATE_PER_IP = 10;
 /** 시나리오 이름 → 파일 */
 export const SCENARIOS = Object.freeze({ queue: 'v0-queue.js', 'seat-hold': 'v0-seat-hold.js', payment: 'v0-payment.js', 'seat-deltas': 'v0-seat-hold.js', gate: 'v0-gate.js' });
 /** v1 시나리오 이름 → 파일(§3.8 합본으로 보낸다, BUILD_ORDER PRF-215) */
-export const V1_SCENARIOS = Object.freeze({ queue: 'v1-queue.js', 'seat-hold': 'v1-seat-hold.js', payment: 'v1-payment.js' });
+export const V1_SCENARIOS = Object.freeze({ queue: 'v1-queue.js', 'seat-hold': 'v1-seat-hold.js', payment: 'v1-payment.js', soak: 'v1-soak.js' });
 /** v1 진입 비례 확인의 단계 하나(run.mjs v1 entry-steps가 단계마다 부른다. 사용자가 직접 고르는 시나리오가 아니라 V1_SCENARIOS에 넣지 않는다, MSR-020) */
 export const V1_ENTRY_SCENARIO = 'v1-entry.js';
 /** v1 입장 토큰의 최대 체류 45분 [가정](queue-svc MAX_STAY_MS). 준비부터 본구간 끝까지가 이 안이어야 구매 세션이 끝나지 않는다 */
@@ -162,6 +164,79 @@ function parseRates(raw) {
 }
 
 /**
+ * `v1 soak` 전용 인자(F-08-5). runV1의 3시간 토큰·인자 상한을 쓰지 않고 6시간 실행을 받는다.
+ * `parseSoakArgs`의 판정 규칙을 그대로 쓰고, 실행 도구 몫인 `--phase`·`--prom-url`만 더 읽는다.
+ * @param {string[]} argv `v1 soak` 뒤의 인자
+ */
+function parseSoakCommandArgs(argv) {
+  const rest = [];
+  let phase = '4a';
+  let promUrl;
+  let connections;
+  let holdRate;
+  for (let i = 0; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (a === '--phase') {
+      phase = argv[i + 1];
+      if (!['4a', '4b', '4c'].includes(phase)) fail(`--phase는 4a·4b·4c 가운데 하나다: ${phase ?? '(없음)'}`);
+      i += 1;
+    } else if (a === '--prom-url') {
+      promUrl = argv[i + 1];
+      const m = PROM_URL.exec(promUrl ?? '');
+      const port = m ? Number(m[2]) : 0;
+      if (!m || port < 1 || port > 65535) fail(`--prom-url은 http://127.0.0.1:<포트>나 http://localhost:<포트>다: ${promUrl ?? '(없음)'}`);
+      i += 1;
+    } else if (a === '--connections') {
+      connections = Number(argv[i + 1]);
+      if (!Number.isInteger(connections) || connections < 1) fail(`--connections는 1 이상의 정수다: ${argv[i + 1] ?? '(없음)'}`);
+      i += 1;
+    } else if (a === '--hold-rate') {
+      holdRate = Number(argv[i + 1]);
+      if (!Number.isInteger(holdRate) || holdRate < 1) fail(`--hold-rate는 1 이상의 정수다: ${argv[i + 1] ?? '(없음)'}`);
+      i += 1;
+    } else rest.push(a);
+  }
+  let o;
+  try {
+    o = parseSoakArgs(rest);
+  } catch (e) {
+    if (e?.name === 'UsageError') throw new UsageError(e.message);
+    throw e;
+  }
+  if (o.runId !== null && !RUN_ID.test(o.runId)) fail(`--run-id 꼴이 틀렸다(YYYY-MM-DD-영소문자·숫자·-): ${o.runId}`);
+  return {
+    command: 'v1',
+    scenario: 'soak',
+    target: o.target,
+    rate: o.rate,
+    users: 5000,
+    warmS: o.warmupMin * 60,
+    mainS: o.durationMin * 60,
+    durationS: o.durationMin * 60,
+    durationMin: o.durationMin,
+    warmupMin: o.warmupMin,
+    sampleSec: o.sampleSec,
+    phase,
+    ...(connections !== undefined ? { connections } : {}),
+    ...(holdRate !== undefined ? { holdRate } : {}),
+    cpus: DEFAULTS.cpus,
+    memoryMi: DEFAULTS.memoryMi,
+    record: o.record,
+    runId: o.runId,
+    ...(o.record ? { profile: 'local-10k' } : {}),
+    ...(promUrl !== undefined ? { promUrl } : {}),
+    out: o.out,
+    leak: o.leak,
+    rehearsal: o.rehearsal,
+    judged: o.judged,
+    invariants: false,
+    namespace: 'v1',
+    dbStats: false,
+    redisStats: false,
+  };
+}
+
+/**
  * 인자를 읽어 검사한다. 틀리면 UsageError(메시지는 한국어, 무엇이 틀렸는지).
  * 돌려주는 꼴:
  * - cleanup: { command: 'cleanup' }(다른 인자는 받지 않는다)
@@ -230,6 +305,7 @@ export function parseArgs(argv) {
   } else if (command === 'v1') {
     const scenario = rest0[0];
     if (scenario === 'entry-steps') return parseEntryStepsArgs(rest0.slice(1));
+    if (scenario === 'soak') return parseSoakCommandArgs(rest0.slice(1));
     if (!Object.hasOwn(V1_SCENARIOS, scenario ?? '')) fail(`v1 시나리오는 ${Object.keys(V1_SCENARIOS).join('·')} 가운데 하나다: ${scenario ?? '(없음)'}`);
     kind = `v1:${scenario}`;
     rest = rest0.slice(1);

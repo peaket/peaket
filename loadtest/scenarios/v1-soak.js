@@ -8,6 +8,7 @@ import http from 'k6/http';
 import ws from 'k6/ws';
 import { check, sleep } from 'k6';
 import { Counter, Trend } from 'k6/metrics';
+import { markScenarios } from './v1-common.js';
 
 const TARGET = __ENV.TARGET ?? '';
 const RATE = Number(__ENV.RATE ?? 0);
@@ -55,6 +56,7 @@ export const options = {
       exec: 'hit',
       tags: { phase: 'main', target: TARGET },
     },
+    ...markScenarios(WARM_S, WARM_S + DURATION_S),
   },
   thresholds: {
     dropped_iterations: ['count==0'],
@@ -62,16 +64,7 @@ export const options = {
   },
 };
 
-/** 구간 시작 표시(측정 담당이 시각을 맞춘다) */
-export function markStart(label) {
-  console.log(`record ${JSON.stringify({ kind: 'mark', mark: 'start', label, at: Date.now(), target: TARGET, run: RUN })}`);
-}
-
-/** 구간 끝 표시 */
-export function markEnd(label) {
-  console.log(`record ${JSON.stringify({ kind: 'mark', mark: 'end', label, at: Date.now(), target: TARGET, run: RUN })}`);
-}
-
+/** 구간 표시는 v1-common의 markStart/markEnd(markScenarios)를 쓴다 */
 function headers() {
   return { headers: { 'content-type': 'application/json', 'x-peaket-run': RUN, 'x-peaket-target': TARGET } };
 }
