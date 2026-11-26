@@ -36,6 +36,8 @@ export interface ExternalPost {
      * @minimum 0
      */
   matchedTicketCount?: number;
+  /** CLEAN이고 보기용 사본(view.png)이 있으면 참. PDF는 늘 거짓이다(추천 적용 2026-11-26, F-04-14) */
+  viewAvailable?: boolean;
   registeredBy?: string;
   createdAt?: string;
 }

@@ -860,6 +860,7 @@ export const CreateOpsExternalPostResponse = zod.object({
   "captureSha256": zod.string().regex(createOpsExternalPostResponseCaptureSha256RegExp).optional(),
   "scanStatus": zod.enum(['PENDING', 'CLEAN', 'THREAT']).optional(),
   "matchedTicketCount": zod.int().min(createOpsExternalPostResponseMatchedTicketCountMin).optional().describe('좌석 대조로 맞은 티켓 수'),
+  "viewAvailable": zod.boolean().optional().describe('CLEAN이고 보기용 사본(view.png)이 있으면 참. PDF는 늘 거짓이다(추천 적용 2026-11-26, F-04-14)'),
   "registeredBy": zod.string().optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional()
 })
@@ -913,11 +914,22 @@ export const ListOpsExternalPostsResponse = zod.object({
   "captureSha256": zod.string().regex(listOpsExternalPostsResponseItemsItemCaptureSha256RegExp).optional(),
   "scanStatus": zod.enum(['PENDING', 'CLEAN', 'THREAT']).optional(),
   "matchedTicketCount": zod.int().min(listOpsExternalPostsResponseItemsItemMatchedTicketCountMin).optional().describe('좌석 대조로 맞은 티켓 수'),
+  "viewAvailable": zod.boolean().optional().describe('CLEAN이고 보기용 사본(view.png)이 있으면 참. PDF는 늘 거짓이다(추천 적용 2026-11-26, F-04-14)'),
   "registeredBy": zod.string().optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional()
 })).optional(),
   "nextCursor": zod.string().nullish()
 })
+
+/**
+ * FR-072, docs/features/forensic-replay.md §6.7.7. 악성 코드 검사 scanStatus가 CLEAN이고 보기용 사본이 있을 때만 image/png로 준다. 원본 캡처는 이 경로로 내주지 않고, PDF는 보기용 사본이 없다. Cache-Control: no-store, Content-Disposition 없음(추천 적용 2026-10-31, ADR-0173). 지정 확인과 기록은 태그 investigations 설명
+ * @summary 외부 게시물 보기용 사본(마스킹된 PNG)
+ */
+export const GetOpsExternalPostCaptureParams = zod.object({
+  "postId": zod.uuid()
+})
+
+export const GetOpsExternalPostCaptureResponse = zod.unknown()
 
 /**
  * FR-074. 고정 시점 기록 해시, 쓴 질의와 그 판, 묶음 근거, 소명·결정 기록, 외부 게시물 수집본을 모아 파일마다 SHA-256을 내고 목록 파일의 해시로 봉인한다. 조사용 기록과 따로 두고 분쟁·수사가 끝날 때까지 보존한다. 조치한 사건(ACTIONED·OBJECTED·REVERSED)만 받는다(추천 적용 2026-10-31, ADR-0171 결정 5·8)
@@ -1078,6 +1090,61 @@ export const CreateOpsEvidenceBundleHoldEndRequestResponse = zod.object({
   "files": zod.array(zod.object({
   "name": zod.string().optional(),
   "sha256": zod.string().regex(createOpsEvidenceBundleHoldEndRequestResponseFilesItemSha256RegExp).optional(),
+  "sizeBytes": zod.int().optional()
+})).optional(),
+  "holdReason": zod.enum(['DISPUTE', 'INVESTIGATION', 'OBJECTION']).optional().describe('보존 이유. OBJECTION은 이의 창이 끝나면 시스템이 끝낸다. DISPUTE·INVESTIGATION의 끝은 조사관이 요청하고(hold-end-requests) 요청자가 아닌 commander가 확인해야(hold-end-confirmations) 기록되고, 그때부터 파기 시계가 돈다(추천 적용 2026-10-31, ADR-0171)'),
+  "holdEndRequest": zod.object({
+  "requestedBy": zod.string().optional(),
+  "requestedAt": zod.iso.datetime({"offset":true}).optional(),
+  "basis": zod.string().optional()
+}).nullish().describe('확인을 기다리는 보존 끝 요청(요청자, 요청 시각, 근거). 확인되면 null이 되고 holdEndedAt이 찬다'),
+  "holdEndedAt": zod.iso.datetime({"offset":true}).nullish().describe('보존 끝을 확인한 시각. 보존 끝 = 이 시각 + 30일 [가정]'),
+  "custody": zod.array(zod.object({
+  "seq": zod.int().optional(),
+  "action": zod.enum(['CREATED', 'SEALED', 'VIEWED', 'EXPORTED', 'HOLD_CHANGED', 'HOLD_END_REQUESTED', 'HOLD_ENDED', 'DISPOSED']).optional().describe('HOLD_CHANGED는 보존 이유 바꾸기(이의 기간 → 분쟁·수사), HOLD_ENDED는 보존 끝 기록(docs/data.md evidence_custody_log.action, 추천 적용 2026-10-31)'),
+  "actorId": zod.string().optional(),
+  "reason": zod.string().optional(),
+  "occurredAt": zod.iso.datetime({"offset":true}).optional()
+})).optional(),
+  "createdAt": zod.iso.datetime({"offset":true}).optional()
+}).describe('증거 묶음(SCR-071 ⑦, FR-074, docs/data.md evidence_bundle). 파일마다의 SHA-256과 묶음 전체 해시(목록 파일의 SHA-256)를 준다. 열람·내보내기는 관리 연속성 기록(custody)에 더해진다(추천 적용 2026-10-31, ADR-0171 결정 8)')
+
+/**
+ * FR-074, docs/features/forensic-replay.md §6.7.6(추천 적용 2026-11-26, F-04-14). 처음 보존 이유 OBJECTION에서 DISPUTE·INVESTIGATION으로 한 번만 바꾼다. OBJECTION으로 되돌리거나 본문 enum 밖이면 400 invalid-body, 이미 바뀐 이유에서 다시 바꾸면 409, 파기된 묶음은 410이다. 관리 연속성 기록에 HOLD_CHANGED가 남는다. 지정 확인은 태그 investigations 설명
+ * @summary 증거 보존 이유 바꾸기(이의 기간 → 분쟁·수사)
+ */
+export const CreateOpsEvidenceBundleHoldChangeParams = zod.object({
+  "bundleId": zod.uuid()
+})
+
+export const CreateOpsEvidenceBundleHoldChangeHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
+})
+
+export const createOpsEvidenceBundleHoldChangeBodyBasisMin = 5;
+export const createOpsEvidenceBundleHoldChangeBodyBasisMax = 500;
+
+
+
+export const CreateOpsEvidenceBundleHoldChangeBody = zod.object({
+  "holdReason": zod.enum(['DISPUTE', 'INVESTIGATION']),
+  "basis": zod.string().min(createOpsEvidenceBundleHoldChangeBodyBasisMin).max(createOpsEvidenceBundleHoldChangeBodyBasisMax)
+}).strict().describe('보존 이유 바꾸기(이의 기간 → 분쟁·수사, 추천 적용 2026-11-26, F-04-14). 처음 이유 OBJECTION에서 한 번만 바꾼다. 근거는 개인정보를 적지 않는다')
+
+export const createOpsEvidenceBundleHoldChangeResponseSnapshotHashRegExp = new RegExp('^[0-9a-f]{64}$');
+export const createOpsEvidenceBundleHoldChangeResponseManifestSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+export const createOpsEvidenceBundleHoldChangeResponseFilesItemSha256RegExp = new RegExp('^[0-9a-f]{64}$');
+
+
+export const CreateOpsEvidenceBundleHoldChangeResponse = zod.object({
+  "bundleId": zod.uuid().optional(),
+  "caseId": zod.uuid().optional(),
+  "status": zod.enum(['BUILDING', 'SEALED', 'DISPOSED']).optional().describe('만드는 중, 봉인(해시 확정), 파기'),
+  "snapshotHash": zod.string().regex(createOpsEvidenceBundleHoldChangeResponseSnapshotHashRegExp).optional(),
+  "manifestSha256": zod.string().regex(createOpsEvidenceBundleHoldChangeResponseManifestSha256RegExp).nullish().describe('SEALED부터'),
+  "files": zod.array(zod.object({
+  "name": zod.string().optional(),
+  "sha256": zod.string().regex(createOpsEvidenceBundleHoldChangeResponseFilesItemSha256RegExp).optional(),
   "sizeBytes": zod.int().optional()
 })).optional(),
   "holdReason": zod.enum(['DISPUTE', 'INVESTIGATION', 'OBJECTION']).optional().describe('보존 이유. OBJECTION은 이의 창이 끝나면 시스템이 끝낸다. DISPUTE·INVESTIGATION의 끝은 조사관이 요청하고(hold-end-requests) 요청자가 아닌 commander가 확인해야(hold-end-confirmations) 기록되고, 그때부터 파기 시계가 돈다(추천 적용 2026-10-31, ADR-0171)'),

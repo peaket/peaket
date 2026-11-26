@@ -45,6 +45,7 @@ export const ExternalPostPage = zod.object({
   "captureSha256": zod.string().regex(externalPostPageItemsItemCaptureSha256RegExp).optional(),
   "scanStatus": zod.enum(['PENDING', 'CLEAN', 'THREAT']).optional(),
   "matchedTicketCount": zod.int().min(externalPostPageItemsItemMatchedTicketCountMin).optional().describe('좌석 대조로 맞은 티켓 수'),
+  "viewAvailable": zod.boolean().optional().describe('CLEAN이고 보기용 사본(view.png)이 있으면 참. PDF는 늘 거짓이다(추천 적용 2026-11-26, F-04-14)'),
   "registeredBy": zod.string().optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional()
 })).optional(),

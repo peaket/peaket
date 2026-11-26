@@ -160,3 +160,85 @@ export const fraudCaseEvent = pgTable(
   },
   (t) => [primaryKey({ columns: [t.caseId, t.seq] }), index('fraud_case_event_case_seq_idx').on(t.caseId, t.seq)],
 );
+
+// F-04-14 증거 묶음·관리 연속성·외부 게시물·내보내기(마이그레이션 0039).
+export const evidenceBundle = pgTable(
+  'evidence_bundle',
+  {
+    id: uuid('id').primaryKey(),
+    caseId: uuid('case_id').notNull(),
+    eventId: uuid('event_id').notNull(),
+    status: text('status').notNull(),
+    snapshotHash: bytea('snapshot_hash').notNull(),
+    manifestSha256: bytea('manifest_sha256'),
+    queries: jsonb('queries').notNull().$type<Record<string, unknown>>(),
+    s3Prefix: text('s3_prefix').notNull(),
+    holdReason: text('hold_reason').notNull(),
+    holdEndRequestedBy: uuid('hold_end_requested_by'),
+    holdEndRequestedAt: at('hold_end_requested_at'),
+    holdEndBasis: text('hold_end_basis'),
+    holdEndConfirmedBy: uuid('hold_end_confirmed_by'),
+    holdEndedAt: at('hold_ended_at'),
+    createdBy: uuid('created_by'),
+    createdAt: at('created_at').notNull(),
+    files: jsonb('files').notNull().$type<{ name: string; sha256: string; sizeBytes: number }[]>(),
+  },
+  (t) => [index('evidence_bundle_event_created_idx').on(t.eventId, t.createdAt), index('evidence_bundle_case_idx').on(t.caseId)],
+);
+
+export const evidenceCustodyLog = pgTable(
+  'evidence_custody_log',
+  {
+    bundleId: uuid('bundle_id').notNull(),
+    seq: integer('seq').notNull(),
+    action: text('action').notNull(),
+    actorId: uuid('actor_id'),
+    reason: text('reason'),
+    exportKind: text('export_kind'),
+    dataRequestId: uuid('data_request_id'),
+    prevHash: bytea('prev_hash'),
+    rowHash: bytea('row_hash').notNull(),
+    occurredAt: at('occurred_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.bundleId, t.seq] })],
+);
+
+export const externalPost = pgTable(
+  'external_post',
+  {
+    id: uuid('id').primaryKey(),
+    eventId: uuid('event_id').notNull(),
+    url: text('url').notNull(),
+    site: text('site').notNull(),
+    capturedAt: at('captured_at').notNull(),
+    source: text('source').notNull(),
+    reportCaseId: uuid('report_case_id'),
+    claimedSeats: text('claimed_seats'),
+    postedAt: at('posted_at'),
+    maskRegions: jsonb('mask_regions').notNull().$type<{ x: number; y: number; w: number; h: number }[]>(),
+    captureKey: text('capture_key').notNull(),
+    captureSha256: bytea('capture_sha256').notNull(),
+    scanStatus: text('scan_status').notNull(),
+    matchedTicketIds: jsonb('matched_ticket_ids').notNull().$type<string[]>(),
+    registeredBy: uuid('registered_by').notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [index('external_post_event_created_idx').on(t.eventId, t.createdAt)],
+);
+
+export const evidenceExport = pgTable(
+  'evidence_export',
+  {
+    id: uuid('id').primaryKey(),
+    bundleId: uuid('bundle_id').notNull(),
+    kind: text('kind').notNull(),
+    dataRequestId: uuid('data_request_id'),
+    documentId: uuid('document_id'),
+    sha256: bytea('sha256').notNull(),
+    rows: integer('rows').notNull(),
+    reason: text('reason').notNull(),
+    actorId: uuid('actor_id').notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [index('evidence_export_actor_created_idx').on(t.actorId, t.createdAt)],
+);

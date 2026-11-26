@@ -454,6 +454,8 @@ export * from './evidenceExport';
 export * from './evidenceExportCreate';
 export * from './evidenceExportCreateKind';
 export * from './evidenceExportKind';
+export * from './evidenceHoldChangeCreate';
+export * from './evidenceHoldChangeCreateHoldReason';
 export * from './externalPost';
 export * from './externalPostCreate';
 export * from './externalPostCreateSource';

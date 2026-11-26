@@ -105,3 +105,68 @@ export { MemoryFraudApprovalStore } from './adapters/memory-fraud-approval-store
 export { DrizzleFraudApprovalStore } from './adapters/db/drizzle-fraud-approval-store.js';
 export { DrizzleFraudRestrictions } from './adapters/db/drizzle-fraud-restrictions.js';
 export { startFraudActionSweep } from './application/fraud-action-sweep.js';
+export { EvidenceBundles, ExternalPosts, startEvidenceSweep, type EvidenceBundlesDeps, type ExternalPostForm } from './application/fraud-evidence.js';
+export {
+  BULK_EXPORT_ROWS,
+  COMPLAINT_STATEMENT,
+  EVIDENCE_FORMAT,
+  EVIDENCE_OBJECTION_MAX_MS,
+  EVIDENCE_RETENTION_AFTER_HOLD_MS,
+  EXPORT_DAILY_LIMIT,
+  EXPORT_VOLUME_CHECK,
+  authoritySelection,
+  canonicalJson,
+  complaintPacket,
+  custodyRowHash,
+  disposeAfterMs,
+  holdChangeGuard,
+  holdEndConfirmGuard,
+  holdEndRequestGuard,
+  manifestOf,
+  maskCapture,
+  maskRegionsValid,
+  objectionCompensationOf,
+  promoterCsv,
+  sha256Hex,
+  validateExternalPost,
+  verifyCustodyChain,
+  type CustodyRecord,
+  type CustodyAction,
+  type DataRequestScope,
+  type EvidenceBundleRecord,
+  type EvidenceBundleStatus,
+  type EvidenceExportKind,
+  type EvidenceExportRecord,
+  type EvidenceFileRecord,
+  type EvidenceHoldReason,
+  type EvidenceRow,
+  type ExternalPostRecord,
+  type ExternalPostScanStatus,
+  type ExternalPostSource,
+  type MaskRegion,
+} from './domain/fraud-evidence.js';
+export { DrizzleFraudEvidenceStore } from './adapters/db/drizzle-fraud-evidence-store.js';
+export { S3EvidenceObjectStore, S3ExternalPostCaptures } from './adapters/s3-evidence-store.js';
+export {
+  PendingMalwareScanner,
+  UnavailableEvidenceDataRequests,
+  UnavailableEvidenceInventory,
+  UnavailableEvidenceSubmissionBuilder,
+  UnavailableFraudCompensation,
+  UnavailableFraudEventInfo,
+  UnavailableFraudInquiries,
+  UnavailableFraudSeats,
+} from './adapters/unavailable-evidence.js';
+export type {
+  EvidenceDataRequests,
+  EvidenceInventory,
+  EvidenceObjectStore,
+  EvidenceSubmissionBuilder,
+  ExternalPostCaptures,
+  FraudCompensationCases,
+  FraudEventInfo,
+  FraudEvidenceStore,
+  FraudInquiryReports,
+  FraudSeatDirectory,
+  MalwareScanner,
+} from './domain/ports.js';

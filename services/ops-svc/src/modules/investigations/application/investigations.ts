@@ -261,7 +261,7 @@ export class Investigations {
       appealOutcome,
       investigatorOpinion: c.investigatorOpinion,
       evidenceBundleIds: [],
-      events: c.events.map((e) => ({ seq: e.seq, kind: e.kind, actorId: e.actorId, note: e.note, detail: e.detail, occurredAt: iso(e.occurredAtMs) })),
+      events: c.events.map((e) => ({ seq: e.seq, kind: e.kind, actorId: e.actorId, note: e.note, detail: e.detail, occurredAt: iso(e.occurredAtMs), occurredAtMs: e.occurredAtMs })),
       ...(snapshot ? { snapshot: this.snapshotView(snapshot)! } : {}),
     };
   }

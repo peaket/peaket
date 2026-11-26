@@ -6,6 +6,15 @@ import type {
   FraudRunRecord,
   FraudSnapshotRecord,
 } from './investigation.js';
+import type {
+  CustodyRecord,
+  DataRequestScope,
+  EvidenceBundleRecord,
+  EvidenceBundleStatus,
+  EvidenceExportRecord,
+  EvidenceRow,
+  ExternalPostRecord,
+} from './fraud-evidence.js';
 
 export interface InvestigationStore {
   /** 사건·감사 기록이 같은 트랜잭션에 들어가는지. 메모리 판은 감사기를 받았을 때만 참이다 */
@@ -258,6 +267,7 @@ export interface InvestigationAccessLog {
     caseId?: string;
     clusterId?: string;
     rows?: number;
+    detail?: Record<string, unknown>;
     outcome: 'ALLOWED' | 'DENIED';
   }): Promise<void>;
 }
@@ -284,3 +294,88 @@ export interface FraudForensicsRunner {
     { ok: true; resultFingerprint: string; clusterCount: number } | { ok: false; error: unknown }
   >;
 }
+
+/** F-04-14 증거 객체 저장소. ops-svc는 넣기·읽기·법적 보존 걸기만 하고 dispose는 파기 정비만 부른다. */
+export interface EvidenceObjectStore {
+  readonly kind: 'S3' | 'MEMORY';
+  putOnce(key: string, bytes: Uint8Array, contentType: string): Promise<'CREATED' | 'SAME' | 'DIFFERENT'>;
+  get(key: string): Promise<Uint8Array | undefined>;
+  list(prefix: string): Promise<readonly { key: string; sizeBytes: number }[]>;
+  dispose(prefix: string): Promise<void>;
+}
+
+export interface EvidenceInventory {
+  read(i: {
+    eventId: string;
+    accountIds: readonly string[];
+    fromMs: number;
+    toMs: number;
+    snapshotVersions: readonly number[];
+  }): Promise<{
+    files: readonly { name: string; table: string; sql: string; arrow: Uint8Array; rows: readonly EvidenceRow[] }[];
+    snapshots: readonly { version: number; invHash: string; tableRowCounts: Record<string, number> }[];
+  }>;
+}
+
+export interface EvidenceDataRequests {
+  approvedScope(i: { dataRequestId: string; eventId: string }): Promise<DataRequestScope | null>;
+  attachSubmission(i: { dataRequestId: string; document: { mediaType: string; bytes: Uint8Array; sha256: string; rows: number } }): Promise<{ documentId: string; status?: string }>;
+}
+
+export interface EvidenceSubmissionBuilder {
+  build(i: { scope: DataRequestScope; rows: readonly EvidenceRow[]; posts: readonly ExternalPostRecord[] }): Promise<{ mediaType: string; bytes: Uint8Array; sha256: string; rows: number }>;
+}
+
+export interface FraudEventInfo {
+  get(eventId: string): Promise<{ eventName: string; showAtMs: number; salesOpenedAtMs: number } | null>;
+}
+
+export interface ExternalPostCaptures {
+  putQuarantine(key: string, bytes: Uint8Array, contentType: string): Promise<void>;
+  promote(key: string, bytes: Uint8Array, contentType: string): Promise<void>;
+  putView(key: string, bytes: Uint8Array): Promise<void>;
+  get(key: string): Promise<Uint8Array | undefined>;
+  dispose(prefix: string): Promise<void>;
+}
+
+export interface MalwareScanner {
+  scan(i: { key: string; bytes: Uint8Array }): Promise<'CLEAN' | 'THREAT' | 'PENDING'>;
+}
+
+export interface FraudSeatDirectory {
+  match(i: { eventId: string; claimedSeats: string }): Promise<readonly { ticketId: string; accountId: string; seatLabel: string }[]>;
+}
+
+export interface FraudInquiryReports {
+  publicPost(i: { reportCaseId: string; eventId: string }): Promise<{ inquiryType: string; postUrl: string } | null>;
+}
+
+export interface FraudCompensationCases {
+  open(i: { caseId: string; eventId: string; accountId: string; ticketId: string; reason: 'NO_SEAT' | 'ENTRY_STARTED'; actorId: string }): Promise<{ caseId: string }>;
+}
+
+/** F-04-14 증거 저장소. 묶음·관리 연속성·내보내기·외부 게시물을 같은 트랜잭션 규칙으로 쓴다. */
+export interface FraudEvidenceStore {
+  readonly auditsWrites: boolean;
+  putBundle(b: EvidenceBundleRecord, c: Omit<CustodyRecord, 'seq' | 'prevHash' | 'rowHash'>, o?: { idem?: IdempotentWrite; result?: unknown }): Promise<{ replayed: boolean; result?: unknown }>;
+  getBundle(bundleId: string): Promise<EvidenceBundleRecord | null>;
+  listBundles(q: { eventId: string; cursor?: string; limit: number }): Promise<{ items: EvidenceBundleRecord[]; nextCursor: string | null }>;
+  updateBundle(b: EvidenceBundleRecord, expectedStatus?: readonly EvidenceBundleStatus[]): Promise<boolean>;
+  appendCustody(bundleId: string, c: Omit<CustodyRecord, 'seq' | 'prevHash' | 'rowHash'>): Promise<CustodyRecord>;
+  listCustody(bundleId: string): Promise<CustodyRecord[]>;
+  listDueForBuild(nowMs: number, limit: number): Promise<EvidenceBundleRecord[]>;
+  listDueForDispose(nowMs: number, limit: number): Promise<EvidenceBundleRecord[]>;
+  putExport(e: EvidenceExportRecord, custody: Omit<CustodyRecord, 'seq' | 'prevHash' | 'rowHash'>): Promise<void>;
+  exportCountSince(actorId: string, sinceMs: number): Promise<number>;
+  listClosedCases(eventId: string): Promise<FraudCaseRecord[]>;
+  putPost(p: ExternalPostRecord, o?: { idem?: IdempotentWrite; result?: unknown }): Promise<{ replayed: boolean; result?: unknown }>;
+  getPost(postId: string): Promise<ExternalPostRecord | null>;
+  listPosts(q: { eventId: string; cursor?: string; limit: number }): Promise<{ items: ExternalPostRecord[]; nextCursor: string | null }>;
+  updatePost(p: ExternalPostRecord): Promise<boolean>;
+  listPendingScans(limit: number): Promise<ExternalPostRecord[]>;
+  listUnusedPostsForDisposal(beforeMs: number, limit: number): Promise<ExternalPostRecord[]>;
+  findByIdempotent(idem: IdempotentWrite): Promise<IdempotentLookup>;
+  /** 있으면 하루 검증이 프로세스 밖의 묶음까지 본다. 메모리 시험 저장소에는 없다. */
+  listAllBundles?(limit: number): Promise<EvidenceBundleRecord[]>;
+}
+

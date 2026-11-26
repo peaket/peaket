@@ -53,6 +53,19 @@ import {
   GrpcFraudAppealCopies,
   AuditFraudApproverIdentity,
   AdminFraudApproverDirectory,
+  DrizzleFraudEvidenceStore,
+  EvidenceBundles,
+  ExternalPosts,
+  PendingMalwareScanner,
+  S3EvidenceObjectStore,
+  S3ExternalPostCaptures,
+  UnavailableEvidenceDataRequests,
+  UnavailableEvidenceInventory,
+  UnavailableEvidenceSubmissionBuilder,
+  UnavailableFraudEventInfo,
+  UnavailableFraudInquiries,
+  UnavailableFraudSeats,
+  startEvidenceSweep,
 } from './modules/investigations/index.js';
 import { GrantPriority, ResolveFraudObjection, WithdrawPriority } from './modules/priority/index.js';
 import { HttpCoreSaleSchedule, UnavailableSaleSchedule } from './modules/readiness/index.js';
@@ -204,8 +217,45 @@ const fraudApproverDirectory = adminIdentity ? new AdminFraudApproverDirectory(a
 const fraudPriority = priority
   ? new ResolveFraudObjection(new GrantPriority(priority.purchase, priority.copies), new WithdrawPriority(priority.purchase, priority.copies))
   : undefined;
+const investigationStore = new DrizzleInvestigationStore(database);
+const fraudAlerts = new LoggingFraudAlerts();
+const investigationAccess = new LoggingInvestigationAccess();
+// F-04-14 증거 저장소. 버킷·KMS 키가 없으면 증거 경로를 열지 않는다(기준 트리 404).
+const evidenceBucket = process.env.PEAKET_EVIDENCE_BUCKET;
+const evidenceKmsKeyId = process.env.PEAKET_EVIDENCE_KMS_KEY_ID;
+const evidenceEndpoint = process.env.PEAKET_EVIDENCE_S3_ENDPOINT;
+const evidenceObjects = evidenceBucket && evidenceKmsKeyId ? new S3EvidenceObjectStore({ bucket: evidenceBucket, kmsKeyId: evidenceKmsKeyId, ...(evidenceEndpoint ? { endpoint: evidenceEndpoint } : {}) }) : undefined;
+const evidenceCaptures =
+  evidenceBucket && evidenceKmsKeyId
+    ? new S3ExternalPostCaptures({
+        evidenceBucket,
+        quarantineBucket: process.env.PEAKET_EVIDENCE_QUARANTINE_BUCKET ?? evidenceBucket,
+        kmsKeyId: evidenceKmsKeyId,
+        ...(evidenceEndpoint ? { endpoint: evidenceEndpoint } : {}),
+      })
+    : undefined;
+const evidence =
+  evidenceObjects && evidenceCaptures
+    ? {
+        store: new DrizzleFraudEvidenceStore(database, investigationStore),
+        cases: investigationStore,
+        objects: evidenceObjects,
+        inventory: new UnavailableEvidenceInventory(),
+        dataRequests: new UnavailableEvidenceDataRequests(),
+        submission: new UnavailableEvidenceSubmissionBuilder(),
+        eventInfo: new UnavailableFraudEventInfo(),
+        captures: evidenceCaptures,
+        scanner: new PendingMalwareScanner(),
+        seats: new UnavailableFraudSeats(),
+        inquiries: new UnavailableFraudInquiries(),
+        alerts: fraudAlerts,
+        access: investigationAccess,
+        now: () => Date.now(),
+        ...(reauth ? { reauth } : {}),
+      }
+    : undefined;
 const investigations = {
-  store: new DrizzleInvestigationStore(database),
+  store: investigationStore,
   schedule: coreUrl ? HttpCoreSaleSchedule.fromUrl(coreUrl, () => Date.now(), internalToken) : new UnavailableSaleSchedule(),
   locks: ticketGrpcUrl ? new GrpcTransferLocks(ticketGrpcUrl) : new UnavailableTransferLocks(),
   ...(fraudTickets ? { fraudTickets } : {}),
@@ -215,11 +265,12 @@ const investigations = {
   ...(fraudApproverDirectory ? { fraudApproverDirectory } : {}),
   ...(fraudCopies ? { fraudCopies } : {}),
   ...(fraudPriority ? { fraudPriority } : {}),
+  ...(evidence ? { evidence } : {}),
   calendar: caseCalendar,
   notifier: new LoggingFraudNotifier(),
   labels: fraudLabels,
-  alerts: new LoggingFraudAlerts(),
-  access: new LoggingInvestigationAccess(),
+  alerts: fraudAlerts,
+  access: investigationAccess,
   events: new LoggingFraudOpsEvent(),
   verifier: new UnavailableSnapshotVerifier(),
   runner: new UnavailableFraudForensicsRunner(),
@@ -311,6 +362,13 @@ const coreApplyTimer = cancellationDeps.core
 coreApplyTimer?.unref();
 // 부정 예매 조치 정비(1분 [가정], F-04-13): 승인 기한 만료·마감 알림·이의 창이 지난 사건 닫기
 const fraudActionSweep = service.app ? startFraudActionSweep({ actions: service.app.get(FraudActions), intervalMs: 60_000 }) : undefined;
+const evidenceSweep = evidence
+  ? startEvidenceSweep({
+      evidence: service.app.get(EvidenceBundles),
+      posts: service.app.get(ExternalPosts),
+      intervalMs: 60_000,
+    })
+  : undefined;
 
 // 명령 요청·결과 사건 소비자(ops.command-events, BAT-465 R-584). HTTP 수신기와 같은 처리기를 쓴다.
 let consumers: OpsConsumers | undefined;

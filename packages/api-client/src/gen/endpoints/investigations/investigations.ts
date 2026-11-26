@@ -38,6 +38,7 @@ import type {
   EvidenceBundlePage,
   EvidenceExport,
   EvidenceExportCreate,
+  EvidenceHoldChangeCreate,
   ExternalPost,
   ExternalPostCreate,
   ExternalPostPage,
@@ -2128,6 +2129,134 @@ export function useListOpsExternalPosts<TData = Awaited<ReturnType<typeof listOp
 
 
 
+export type getOpsExternalPostCaptureResponse200 = {
+  data: Blob
+  status: 200
+}
+
+export type getOpsExternalPostCaptureResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getOpsExternalPostCaptureResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOpsExternalPostCaptureResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type getOpsExternalPostCaptureResponseSuccess = (getOpsExternalPostCaptureResponse200) & {
+  headers: Headers;
+};
+export type getOpsExternalPostCaptureResponseError = (getOpsExternalPostCaptureResponse403 | getOpsExternalPostCaptureResponse404 | getOpsExternalPostCaptureResponse409) & {
+  headers: Headers;
+};
+
+export const getGetOpsExternalPostCaptureUrl = (postId: string,) => {
+
+
+
+
+  return `/v1/ops/external-posts/${encodeURIComponent(String(postId))}/capture`
+}
+
+/**
+ * FR-072, docs/features/forensic-replay.md §6.7.7. 악성 코드 검사 scanStatus가 CLEAN이고 보기용 사본이 있을 때만 image/png로 준다. 원본 캡처는 이 경로로 내주지 않고, PDF는 보기용 사본이 없다. Cache-Control: no-store, Content-Disposition 없음(추천 적용 2026-10-31, ADR-0173). 지정 확인과 기록은 태그 investigations 설명
+ * @summary 외부 게시물 보기용 사본(마스킹된 PNG)
+ */
+export const getOpsExternalPostCapture = async (postId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsExternalPostCaptureResponseSuccess> => {
+
+  return orvalFetch<getOpsExternalPostCaptureResponseSuccess>(getGetOpsExternalPostCaptureUrl(postId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsExternalPostCaptureQueryKey = (postId: string,) => {
+    return [
+    `/v1/ops/external-posts/${postId}/capture`
+    ] as const;
+    }
+
+
+export const getGetOpsExternalPostCaptureQueryOptions = <TData = Awaited<ReturnType<typeof getOpsExternalPostCapture>>, TError = ErrorType<ProblemResponse>>(postId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsExternalPostCapture>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsExternalPostCaptureQueryKey(postId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsExternalPostCapture>>> = ({ signal }) => getOpsExternalPostCapture(postId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: postId !== null && postId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsExternalPostCapture>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsExternalPostCaptureQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsExternalPostCapture>>>
+export type GetOpsExternalPostCaptureQueryError = ErrorType<ProblemResponse>
+
+
+export function useGetOpsExternalPostCapture<TData = Awaited<ReturnType<typeof getOpsExternalPostCapture>>, TError = ErrorType<ProblemResponse>>(
+ postId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsExternalPostCapture>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsExternalPostCapture>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsExternalPostCapture>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsExternalPostCapture<TData = Awaited<ReturnType<typeof getOpsExternalPostCapture>>, TError = ErrorType<ProblemResponse>>(
+ postId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsExternalPostCapture>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsExternalPostCapture>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsExternalPostCapture>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsExternalPostCapture<TData = Awaited<ReturnType<typeof getOpsExternalPostCapture>>, TError = ErrorType<ProblemResponse>>(
+ postId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsExternalPostCapture>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 외부 게시물 보기용 사본(마스킹된 PNG)
+ */
+
+export function useGetOpsExternalPostCapture<TData = Awaited<ReturnType<typeof getOpsExternalPostCapture>>, TError = ErrorType<ProblemResponse>>(
+ postId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsExternalPostCapture>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsExternalPostCaptureQueryOptions(postId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 export type createOpsFraudCaseEvidenceBundleResponse201 = {
   data: EvidenceBundle
   status: 201
@@ -2622,6 +2751,132 @@ export const useCreateOpsEvidenceBundleHoldEndRequest = <TError = ErrorType<Prob
         TContext
       > => {
       return useMutation(getCreateOpsEvidenceBundleHoldEndRequestMutationOptions(options), queryClient);
+    }
+    export type createOpsEvidenceBundleHoldChangeResponse200 = {
+  data: EvidenceBundle
+  status: 200
+}
+
+export type createOpsEvidenceBundleHoldChangeResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsEvidenceBundleHoldChangeResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsEvidenceBundleHoldChangeResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsEvidenceBundleHoldChangeResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsEvidenceBundleHoldChangeResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createOpsEvidenceBundleHoldChangeResponseSuccess = (createOpsEvidenceBundleHoldChangeResponse200) & {
+  headers: Headers;
+};
+export type createOpsEvidenceBundleHoldChangeResponseError = (createOpsEvidenceBundleHoldChangeResponse400 | createOpsEvidenceBundleHoldChangeResponse403 | createOpsEvidenceBundleHoldChangeResponse404 | createOpsEvidenceBundleHoldChangeResponse409 | createOpsEvidenceBundleHoldChangeResponse410) & {
+  headers: Headers;
+};
+
+export const getCreateOpsEvidenceBundleHoldChangeUrl = (bundleId: string,) => {
+
+
+
+
+  return `/v1/ops/evidence-bundles/${encodeURIComponent(String(bundleId))}/hold-changes`
+}
+
+/**
+ * FR-074, docs/features/forensic-replay.md §6.7.6(추천 적용 2026-11-26, F-04-14). 처음 보존 이유 OBJECTION에서 DISPUTE·INVESTIGATION으로 한 번만 바꾼다. OBJECTION으로 되돌리거나 본문 enum 밖이면 400 invalid-body, 이미 바뀐 이유에서 다시 바꾸면 409, 파기된 묶음은 410이다. 관리 연속성 기록에 HOLD_CHANGED가 남는다. 지정 확인은 태그 investigations 설명
+ * @summary 증거 보존 이유 바꾸기(이의 기간 → 분쟁·수사)
+ */
+export const createOpsEvidenceBundleHoldChange = async (bundleId: string,
+    evidenceHoldChangeCreate: EvidenceHoldChangeCreate, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsEvidenceBundleHoldChangeResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsEvidenceBundleHoldChangeResponseSuccess>(getCreateOpsEvidenceBundleHoldChangeUrl(bundleId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(evidenceHoldChangeCreate)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsEvidenceBundleHoldChangeMutationKey = () => ['createOpsEvidenceBundleHoldChange'] as const;
+
+export const getCreateOpsEvidenceBundleHoldChangeMutationOptions = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsEvidenceBundleHoldChange>>, TError,CreateOpsEvidenceBundleHoldChangeMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsEvidenceBundleHoldChange>>, TError,CreateOpsEvidenceBundleHoldChangeMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsEvidenceBundleHoldChangeMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsEvidenceBundleHoldChange>>, CreateOpsEvidenceBundleHoldChangeMutationVariables> = (props) => {
+          const {bundleId,data} = props ?? {};
+
+          return  createOpsEvidenceBundleHoldChange(bundleId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsEvidenceBundleHoldChangeMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsEvidenceBundleHoldChange>>>
+    export type CreateOpsEvidenceBundleHoldChangeMutationBody = BodyType<EvidenceHoldChangeCreate>
+    export type CreateOpsEvidenceBundleHoldChangeMutationError = ErrorType<ProblemResponse>
+    export type CreateOpsEvidenceBundleHoldChangeMutationVariables = {bundleId: string;data: BodyType<EvidenceHoldChangeCreate>}
+
+    /**
+ * @summary 증거 보존 이유 바꾸기(이의 기간 → 분쟁·수사)
+ */
+export const useCreateOpsEvidenceBundleHoldChange = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsEvidenceBundleHoldChange>>, TError,CreateOpsEvidenceBundleHoldChangeMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsEvidenceBundleHoldChange>>,
+        TError,
+        CreateOpsEvidenceBundleHoldChangeMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsEvidenceBundleHoldChangeMutationOptions(options), queryClient);
     }
     export type createOpsEvidenceBundleHoldEndConfirmationResponse200 = {
   data: CreateOpsEvidenceBundleHoldEndConfirmation200

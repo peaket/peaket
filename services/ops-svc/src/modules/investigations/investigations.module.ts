@@ -5,8 +5,11 @@ import { type AdminIdentity } from '../admin-accounts/index.js';
 import type { SaleScheduleSource } from '../readiness/index.js';
 import { Investigations, type InvestigationsDeps } from './application/investigations.js';
 import { FraudActions } from './application/fraud-actions.js';
+import { EvidenceBundles, ExternalPosts, type EvidenceBundlesDeps } from './application/fraud-evidence.js';
 import { InvestigationsController } from './inbound/investigations.controller.js';
 import { FraudAppealsController } from './inbound/fraud-appeals.controller.js';
+import { EvidenceBundlesController } from './inbound/evidence-bundles.controller.js';
+import { ExternalPostsController } from './inbound/external-posts.controller.js';
 import type {
   FraudAlerts,
   FraudForensicsRunner,
@@ -34,6 +37,10 @@ export interface InvestigationsModuleDeps {
   readonly audit?: InvestigationsDeps['audit'];
   readonly runner?: FraudForensicsRunner;
   readonly fraudActions?: FraudActions;
+  /** F-04-14 증거 묶음·외부 게시물 포트 묶음. 없으면 새 경로를 열지 않는다(기준 트리 404) */
+  readonly evidence?: EvidenceBundlesDeps;
+  /** AppModule이 FraudActions와 같은 인스턴스를 쓰기 위해 미리 만든 서비스. 없으면 evidence로 만든다 */
+  readonly evidenceServices?: { readonly evidence: EvidenceBundles; readonly posts: ExternalPosts };
 }
 
 @Module({})
@@ -62,6 +69,21 @@ export class InvestigationsModule {
     };
     const providers: Provider[] = [service, { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN }, InternalTokenGuard];
     if (deps.fraudActions) providers.push({ provide: FraudActions, useValue: deps.fraudActions });
-    return { module: InvestigationsModule, controllers: deps.fraudActions ? [InvestigationsController, FraudAppealsController] : [InvestigationsController], providers, ...(deps.fraudActions ? { exports: [FraudActions] } : {}) };
+    const evidenceServices = deps.evidenceServices ?? (deps.evidence ? { evidence: new EvidenceBundles(deps.evidence), posts: new ExternalPosts(deps.evidence) } : undefined);
+    if (evidenceServices) {
+      providers.push({ provide: EvidenceBundles, useValue: evidenceServices.evidence }, { provide: ExternalPosts, useValue: evidenceServices.posts });
+      deps.fraudActions?.attachEvidence(evidenceServices.evidence);
+    }
+    const controllers = [
+      InvestigationsController,
+      ...(deps.fraudActions ? [FraudAppealsController] : []),
+      ...(evidenceServices ? [EvidenceBundlesController, ExternalPostsController] : []),
+    ];
+    return {
+      module: InvestigationsModule,
+      controllers,
+      providers,
+      ...(deps.fraudActions || evidenceServices ? { exports: [...(deps.fraudActions ? [FraudActions] : []), ...(evidenceServices ? [EvidenceBundles, ExternalPosts] : [])] } : {}),
+    };
   }
 }

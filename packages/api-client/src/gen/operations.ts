@@ -89,6 +89,7 @@ export type OperationId =
   | 'createOpsEventFraudClusterRun'
   | 'createOpsEventScaleChange'
   | 'createOpsEvidenceBundleExport'
+  | 'createOpsEvidenceBundleHoldChange'
   | 'createOpsEvidenceBundleHoldEndConfirmation'
   | 'createOpsEvidenceBundleHoldEndRequest'
   | 'createOpsExternalPost'
@@ -264,6 +265,7 @@ export type OperationId =
   | 'getOpsEventReport'
   | 'getOpsEventReports'
   | 'getOpsEvidenceBundle'
+  | 'getOpsExternalPostCapture'
   | 'getOpsFan'
   | 'getOpsFraudCase'
   | 'getOpsFraudCaseGraph'
@@ -499,6 +501,7 @@ export const OPERATIONS = {
   createOpsEventFraudClusterRun: {operationId: "createOpsEventFraudClusterRun",method: "POST",path: "/v1/ops/events/{eventId}/fraud-cluster-runs",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsEventScaleChange: {operationId: "createOpsEventScaleChange",method: "POST",path: "/v1/ops/events/{eventId}/scale-changes",host: "ops-api",kind: "write",cookie: true},
   createOpsEvidenceBundleExport: {operationId: "createOpsEvidenceBundleExport",method: "POST",path: "/v1/ops/evidence-bundles/{bundleId}/exports",host: "ops-api",kind: "write",idempotent: true,cookie: true},
+  createOpsEvidenceBundleHoldChange: {operationId: "createOpsEvidenceBundleHoldChange",method: "POST",path: "/v1/ops/evidence-bundles/{bundleId}/hold-changes",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsEvidenceBundleHoldEndConfirmation: {operationId: "createOpsEvidenceBundleHoldEndConfirmation",method: "POST",path: "/v1/ops/evidence-bundles/{bundleId}/hold-end-confirmations",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsEvidenceBundleHoldEndRequest: {operationId: "createOpsEvidenceBundleHoldEndRequest",method: "POST",path: "/v1/ops/evidence-bundles/{bundleId}/hold-end-requests",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsExternalPost: {operationId: "createOpsExternalPost",method: "POST",path: "/v1/ops/external-posts",host: "ops-api",kind: "upload",idempotent: true,cookie: true},
@@ -674,6 +677,7 @@ export const OPERATIONS = {
   getOpsEventReport: {operationId: "getOpsEventReport",method: "GET",path: "/v1/ops/events/{eventId}/reports/{stage}",host: "ops-api",kind: "read",cookie: true},
   getOpsEventReports: {operationId: "getOpsEventReports",method: "GET",path: "/v1/ops/events/{eventId}/reports",host: "ops-api",kind: "read",cookie: true},
   getOpsEvidenceBundle: {operationId: "getOpsEvidenceBundle",method: "GET",path: "/v1/ops/evidence-bundles/{bundleId}",host: "ops-api",kind: "read",cookie: true},
+  getOpsExternalPostCapture: {operationId: "getOpsExternalPostCapture",method: "GET",path: "/v1/ops/external-posts/{postId}/capture",host: "ops-api",kind: "read",cookie: true},
   getOpsFan: {operationId: "getOpsFan",method: "GET",path: "/v1/ops/fans/{accountId}",host: "ops-api",kind: "read",cookie: true},
   getOpsFraudCase: {operationId: "getOpsFraudCase",method: "GET",path: "/v1/ops/fraud-cases/{caseId}",host: "ops-api",kind: "read",cookie: true},
   getOpsFraudCaseGraph: {operationId: "getOpsFraudCaseGraph",method: "GET",path: "/v1/ops/fraud-cases/{caseId}/graph",host: "ops-api",kind: "read",cookie: true},

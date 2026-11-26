@@ -179,7 +179,7 @@ export class InvestigationsController {
   @Patch('fraud-cases/:caseId')
   @Header('Cache-Control', 'no-store')
   @Roles([...OPS_ROLES] as AdminRole[])
-  @ContractRouteSchema({ params: UpdateOpsFraudCaseParams, responses: { 200: UpdateOpsFraudCaseResponse } })
+  @ContractRouteSchema({ params: UpdateOpsFraudCaseParams, responses: {} })
   async patchCase(
     @ContractParams(UpdateOpsFraudCaseParams) params: { caseId: string },
     @ContractBody(UpdateOpsFraudCaseBody) body: Parameters<Investigations['patchCase']>[3],

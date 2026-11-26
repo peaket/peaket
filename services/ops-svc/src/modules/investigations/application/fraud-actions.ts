@@ -65,6 +65,8 @@ export interface FraudActionsDeps {
   readonly notifier: FraudCaseNotifier;
   readonly copies?: FraudAppealCopies;
   readonly priority?: { run(i: { caseId: string; accountId: string; eventId: string; cancelledTicketIds: readonly string[]; cancelledTicketId?: string; decision: 'ACCEPTED' | 'REJECTED'; actedBy: string }): Promise<{ decision: 'ACCEPTED' | 'REJECTED'; grants: readonly Record<string, unknown>[] }> };
+  readonly evidence?: { autoCreate(i: { caseId: string; actorId: string | null }): Promise<void> };
+  readonly compensation?: { open(i: { caseId: string; eventId: string; accountId: string; ticketId: string; reason: 'NO_SEAT' | 'ENTRY_STARTED'; actorId: string }): Promise<{ caseId: string }> };
   readonly approverIdentity?: FraudApproverIdentity;
   readonly approverDirectory?: FraudApproverDirectory;
   readonly reauth?: ApprovalReauthVerifier;
@@ -82,7 +84,15 @@ const iso = (ms: number | null): string | null => (ms === null ? null : new Date
 export class FraudActions {
   readonly executions = new Map<string, { results: readonly any[]; restrictions: Map<string, { restrictionId: string; version: number }> }>();
   readonly #copied = new Set<string>();
-  constructor(private readonly d: FraudActionsDeps) {}
+  #evidence: FraudActionsDeps['evidence'];
+  constructor(private readonly d: FraudActionsDeps) {
+    this.#evidence = d.evidence;
+  }
+
+  /** InvestigationsModule이 같은 EvidenceBundles 인스턴스를 늦게 붙일 때 쓴다. */
+  attachEvidence(evidence: NonNullable<FraudActionsDeps['evidence']>): void {
+    this.#evidence = evidence;
+  }
 
   async request(
     actor: FraudActionActor & { accountId: string },
@@ -432,7 +442,36 @@ export class FraudActions {
         next.events = [...c.events, ev];
         events = [ev];
         priorityGrants = await this.#reversalPriority(c, r, accepted, actor.accountId);
-        if (priorityGrants.length > 0) ev.detail = { ...(ev.detail ?? {}), grants: priorityGrants };
+        if (priorityGrants.length > 0) {
+          ev.detail = { ...(ev.detail ?? {}), grants: priorityGrants };
+          const grantEvent: FraudCaseEventRecord = {
+            seq: (next.events.at(-1)?.seq ?? 0) + 1,
+            kind: 'PRIORITY_GRANTED',
+            actorId: actor.accountId,
+            note: null,
+            detail: { grants: priorityGrants },
+            occurredAtMs: nowMs,
+          };
+          next.events = [...next.events, grantEvent];
+          events = [...events, grantEvent];
+          await this.#openCompensations(c, priorityGrants, actor.accountId);
+        }
+        for (const accountId of accepted) {
+          const member = c.members.find((m) => m.accountId === accountId);
+          try {
+            await this.d.copies?.set({
+              caseId: c.caseId,
+              eventId: c.eventId,
+              accountId,
+              version: next.version,
+              lockActive: false,
+              objectionDueAtMs: member?.actionNotifiedAtMs === undefined || member.actionNotifiedAtMs === null ? null : member.actionNotifiedAtMs + OBJECTION_WINDOW_MS,
+              actionResult: null,
+            });
+          } catch {
+            // 사본 갱신 실패는 승인 결과를 막지 않는다
+          }
+        }
         label = accepted.length > 0 ? 'HUMAN' : null;
         labelAccounts = accepted;
         noticeAccounts = accepted;
@@ -481,6 +520,13 @@ export class FraudActions {
         }
       } catch {
         await this.#note(c.caseId, 'NOTICE_FAILED');
+      }
+      if (next.status === 'ACTIONED') {
+        try {
+          await this.#evidence?.autoCreate({ caseId: r.caseId, actorId: actor.accountId });
+        } catch {
+          await this.#note(c.caseId, 'EVIDENCE_CREATE_FAILED');
+        }
       }
     }
     return this.#approvalView((await this.d.approvals.get(approvalId))!, (await this.d.store.getCase(r.caseId)) ?? next);
@@ -579,8 +625,8 @@ export class FraudActions {
   async decideObjections(actor: FraudActionActor & { accountId: string }, c: FraudCaseRecord, decisions: readonly { accountId: string; decision: 'ACCEPTED' | 'REJECTED'; reason: string }[]): Promise<FraudCaseRecord> {
     const restricted = this.d.restrictions ? await this.d.restrictions.activeForCase(c.caseId) : [];
     const r = this.#domain(() => decideObjections({ case: c, decisions, nowMs: this.d.now(), reversalComplete: false, restrictedAccountIds: restricted.map((x) => x.accountId) }));
-    let next = r.next;
-    let events = [...r.events];
+    let next = { ...r.next, events: r.next.events.map((e) => (e.kind === 'OBJECTION_DECIDED' ? { ...e, actorId: actor.accountId } : e)) };
+    let events = r.events.map((e) => (e.kind === 'OBJECTION_DECIDED' ? { ...e, actorId: actor.accountId } : e));
     const granted: Record<string, unknown>[] = [];
     for (const d of decisions.filter((x) => x.decision === 'ACCEPTED' && !r.liftAccountIds.includes(x.accountId))) {
       const grants = await this.#priorityForAccount(c, c.caseId, d.accountId, actor.accountId);
@@ -589,6 +635,7 @@ export class FraudActions {
         events.push({ seq: (next.events.at(-1)?.seq ?? 0) + 1, kind: 'PRIORITY_GRANTED', actorId: actor.accountId, note: null, detail: { accountId: d.accountId, grants }, occurredAtMs: this.d.now() });
       }
     }
+    if (granted.length > 0) await this.#openCompensations(c, granted, actor.accountId);
     const actioned = active(next).filter((m) => m.actionNotifiedAtMs !== undefined && m.actionNotifiedAtMs !== null);
     if (r.liftAccountIds.length === 0 && actioned.length > 0 && actioned.every((m) => m.objectionResult === 'ACCEPTED')) {
       next.events = next.events.filter((e) => !(e.kind === 'ACTIONED' && e.detail?.reason === 'OBJECTIONS_DECIDED'));
@@ -791,6 +838,31 @@ export class FraudActions {
     return all;
   }
 
+  async #openCompensations(c: FraudCaseRecord, grants: readonly Record<string, unknown>[], actorId: string): Promise<void> {
+    if (!this.d.compensation) return;
+    const accountOf = (ticketId: string): string | null => {
+      for (const e of c.events) {
+        if (e.kind !== 'ACTION_EXECUTED') continue;
+        const targets = Array.isArray(e.detail?.targets) ? (e.detail!.targets as { ticketId?: string; payerAccountId?: string }[]) : [];
+        const found = targets.find((t) => t.ticketId === ticketId)?.payerAccountId;
+        if (found) return found;
+      }
+      return null;
+    };
+    for (const g of grants) {
+      const result = g.result;
+      if (result !== 'NO_SEAT' && result !== 'ENTRY_STARTED') continue;
+      const ticketId = String(g.ticketId ?? '');
+      const accountId = accountOf(ticketId) ?? active(c)[0]?.accountId;
+      if (!ticketId || !accountId) continue;
+      try {
+        await this.d.compensation.open({ caseId: c.caseId, eventId: c.eventId, accountId, ticketId, reason: result, actorId });
+      } catch {
+        // 보상 건 생성 실패는 사건 기록의 PRIORITY_GRANTED에 남고 다음 정비가 다시 볼 수 있다
+      }
+    }
+  }
+
   async #releaseDuringApproval(approvalId: string, caseId: string, eventId: string, accounts: readonly string[], actorId: string, reason: string, nowMs: number): Promise<void> {
     try {
       await this.#release(caseId, eventId, accounts, actorId, reason);
@@ -955,7 +1027,7 @@ export class FraudActions {
       appealOutcome: this.#appealOutcome(c),
       investigatorOpinion: c.investigatorOpinion,
       evidenceBundleIds: [],
-      events: c.events.map((e) => ({ seq: e.seq, kind: e.kind, actorId: e.actorId, note: e.note, detail: e.detail, occurredAt: iso(e.occurredAtMs) })),
+      events: c.events.map((e) => ({ seq: e.seq, kind: e.kind, actorId: e.actorId, note: e.note, detail: e.detail, occurredAt: iso(e.occurredAtMs), occurredAtMs: e.occurredAtMs })),
       ...(snapshot ? { snapshot: { version: snapshot.version, frozenAt: iso(snapshot.frozenAtMs), invHash: snapshot.invHash, late: snapshot.late } } : {}),
     };
   }

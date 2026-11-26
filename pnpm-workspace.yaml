@@ -17,7 +17,8 @@ allowBuilds:                # 설치 스크립트를 허용할 패키지. 빈 �
   '@confluentinc/kafka-javascript': true  # Kafka 기본 클라이언트(docs/streaming.md §2.1). 네이티브 모듈이라 설치 스크립트가 미리 빌드한 librdkafka 바인딩을 받는다(docs/devops.md §4.4)
   '@scarf/scarf': false     # 거부(돌리지 않음): @nestjs/swagger → swagger-ui-dist가 끌고 오는 설치 때 사용 통계 전송. 서비스 OpenAPI 문서 뽑기(D-T38)에는 필요 없다(docs/devops.md §4.4, 추천 적용 2026-11-01)
   protobufjs: false         # 거부(돌리지 않음): OTel 내보내기(@opentelemetry/otlp-transformer)가 끌고 오는 판 표기 경고 스크립트. 동작에 필요 없다(docs/devops.md §4.4, 추천 적용 2026-11-01)
-  msw: false                # 거부(돌리지 않음): @peaket/api-client의 MSW 2 처리기(시험·개발용). 설치 스크립트는 서비스 워커 파일을 앱 public에 복사하는 것이라 시험(Node 처리기)에 필요 없다(docs/devops.md §4.4, 추천 적용 2026-11-05, BAS-041)
+  msw: false                # 거부(돌리지 않음): @peaket/api-client의 MSW 2 처리기 시험·개발용. 설치 스크립트가 서비스 워커 파일을 public에 복사하는 것이 시험(Node 처리)에는 필요 없다(docs/devops.md §4.4, 추천 적용 2026-11-05, BAS-041)
+  sharp: true               # F-04-14 증거 보기용 사본(EXIF·XMP·ICC 제거, 마스킹 PNG)을 만드는 네이티브 모듈. 플랫폼별 바이너리를 받는 설치 스크립트가 필요하다
 overrides:                  # 막힌 판을 요구 범위 안의 출처 증명 있는 앞 판으로 고정한다(docs/devops.md §4.4)
   '@seed-design/react-dismissible-layer': 1.0.1  # 1.0.2는 출처 증명 없음(2026-08-07). react-dialog 2.0.2가 ^1.0.1을 요구
   zod: 4.6.7                # @serwist/build·@serwist/turbopack이 4.6.5를 고정하지만 GHSA-mrhx-c7xc-m3w5(high) 수정 판이 4.6.6이라 올린다(BAT-350, R-560)

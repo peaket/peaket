@@ -83,6 +83,9 @@ export type ProblemType =
   | 'contract-terms-changed'
   | 'contract-terms-missing'
   | 'current-password-invalid'
+  | 'data-request-event-mismatch'
+  | 'data-request-not-approved'
+  | 'data-request-not-found'
   | 'data-request-required'
   | 'deadline-exceeded'
   | 'dependency-unavailable'
@@ -110,7 +113,17 @@ export type ProblemType =
   | 'event-settlement-source-unavailable'
   | 'event-status-conflict'
   | 'event-suspended'
+  | 'evidence-disposed'
+  | 'evidence-integrity-mismatch'
+  | 'evidence-not-sealed'
   | 'export-format-unavailable'
+  | 'export-rate-limited'
+  | 'external-post-capture-pixel-too-large'
+  | 'external-post-capture-too-large'
+  | 'external-post-capture-type-invalid'
+  | 'external-post-scan-pending'
+  | 'external-post-source-invalid'
+  | 'external-post-view-unavailable'
   | 'first-partner-account-must-be-admin'
   | 'fraud-action-requires-case-request'
   | 'fraud-approver-ineligible'
@@ -130,8 +143,10 @@ export type ProblemType =
   | 'guarantee-not-open'
   | 'hold-already-extended'
   | 'hold-already-ordered'
+  | 'hold-end-pending'
   | 'hold-in-payment'
   | 'hold-not-found'
+  | 'hold-reason-invalid'
   | 'human-check-required'
   | 'human-check-unavailable'
   | 'idempotency-key-invalid'
@@ -503,6 +518,9 @@ export const PROBLEM_TYPES = {
   'contract-terms-changed': { status: 409, title: "그 사이 지금 계약이 바뀌었습니다" },
   'contract-terms-missing': { status: 409, title: "지금 계약 조건이 없습니다" },
   'current-password-invalid': { status: 422, title: "지금 비밀번호가 맞지 않습니다" },
+  'data-request-event-mismatch': { status: 409, title: "기관 요청의 회차가 다릅니다" },
+  'data-request-not-approved': { status: 409, title: "승인된 기관 요청이 아닙니다" },
+  'data-request-not-found': { status: 404, title: "없는 기관 요청입니다" },
   'data-request-required': { status: 422, title: "접수된 기관 요청이 필요합니다" },
   'deadline-exceeded': { status: 504, title: "남은 처리 시간이 모자라 요청을 끝내지 못했습니다" },
   'dependency-unavailable': { status: 503, title: "의존 서비스를 잠시 쓸 수 없습니다" },
@@ -530,7 +548,17 @@ export const PROBLEM_TYPES = {
   'event-settlement-source-unavailable': { status: 503, title: "회차 정산 원천을 읽을 수 없습니다" },
   'event-status-conflict': { status: 409, title: "회차 상태와 맞지 않습니다" },
   'event-suspended': { status: 410, title: "판매가 중지된 공연입니다" },
+  'evidence-disposed': { status: 410, title: "파기된 증거 묶음입니다" },
+  'evidence-integrity-mismatch': { status: 409, title: "증거 묶음의 해시가 맞지 않습니다" },
+  'evidence-not-sealed': { status: 409, title: "아직 봉인하지 않은 증거 묶음입니다" },
   'export-format-unavailable': { status: 503, title: "이 파일 형식은 아직 만들 수 없습니다" },
+  'export-rate-limited': { status: 429, title: "증거 내보내기 하루 한도를 넘었습니다" },
+  'external-post-capture-pixel-too-large': { status: 422, title: "화면 캡처의 화소가 너무 많습니다" },
+  'external-post-capture-too-large': { status: 413, title: "화면 캡처는 10MB까지 올릴 수 있습니다" },
+  'external-post-capture-type-invalid': { status: 415, title: "PNG, JPEG, PDF 캡처만 올릴 수 있습니다" },
+  'external-post-scan-pending': { status: 409, title: "악성 코드 검사가 아직 끝나지 않았습니다" },
+  'external-post-source-invalid': { status: 422, title: "신고 출처가 올바르지 않습니다" },
+  'external-post-view-unavailable': { status: 409, title: "보기용 사본을 만들 수 없는 게시물입니다" },
   'first-partner-account-must-be-admin': { status: 422, title: "파트너사의 첫 계정은 관리자여야 합니다" },
   'fraud-action-requires-case-request': { status: 422, title: "FRAUD_ACTION은 사건 조치 요청 경로로만 만듭니다" },
   'fraud-approver-ineligible': { status: 403, title: "이 사건을 승인할 수 없는 계정입니다" },
@@ -550,8 +578,10 @@ export const PROBLEM_TYPES = {
   'guarantee-not-open': { status: 409, title: "열린 미수금이 아닙니다" },
   'hold-already-extended': { status: 409, title: "이미 연장한 홀드입니다" },
   'hold-already-ordered': { status: 409, title: "이 좌석으로 만든 주문이 이미 있습니다" },
+  'hold-end-pending': { status: 409, title: "보존 끝 확인을 기다리는 요청이 있습니다" },
   'hold-in-payment': { status: 409, title: "결제가 진행 중인 홀드입니다" },
   'hold-not-found': { status: 404, title: "홀드를 찾을 수 없습니다" },
+  'hold-reason-invalid': { status: 422, title: "지금 보존 이유에서는 보존 끝을 요청할 수 없습니다" },
   'human-check-required': { status: 428, title: "사람 확인을 마친 뒤 다시 시도해 주세요" },
   'human-check-unavailable': { status: 503, title: "잠시 뒤 다시 시도해 주세요" },
   'idempotency-key-invalid': { status: 400, title: "멱등 키(Idempotency-Key)가 없거나 형식이 맞지 않습니다" },
