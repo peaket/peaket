@@ -142,9 +142,21 @@ export const reviewImage = pgTable(
     check('review_image_alt_check', sql`char_length(${t.altText}) <= 100`),
     check('review_image_sort_check', sql`${t.sort} between 0 and 2`),
     check('review_image_attach_check', sql`(${t.reviewId} is null) = (${t.attachedAt} is null)`),
-    uniqueIndex('review_image_review_sort_uq').on(t.reviewId, t.sort).where(sql`${t.reviewId} is not null`),
+    // 지운 행(DELETED)은 빼서 같은 순서로 새 사진을 다시 붙일 수 있게 한다(구현 리뷰 IR-01)
+    uniqueIndex('review_image_review_sort_uq').on(t.reviewId, t.sort).where(sql`${t.reviewId} is not null and ${t.status} <> 'DELETED'`),
     index('review_image_account_created_idx').on(t.accountId, t.createdAt),
     index('review_image_review_idx').on(t.reviewId),
     index('review_image_status_created_idx').on(t.status, t.createdAt),
   ],
+);
+
+/** 후기 사진 올리기 시도(구현 리뷰 IR-04). 성공 행이 아니라 image-worker를 부른 시도를 세어 계정당 시간당 30장을 지킨다. 파일 이름·사유는 두지 않는다 */
+export const reviewImageUploadAttempt = pgTable(
+  'review_image_upload_attempt',
+  {
+    id: uuid('id').primaryKey(),
+    accountId: uuid('account_id').notNull(),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [index('review_image_upload_attempt_account_created_idx').on(t.accountId, t.createdAt), index('review_image_upload_attempt_created_idx').on(t.createdAt)],
 );

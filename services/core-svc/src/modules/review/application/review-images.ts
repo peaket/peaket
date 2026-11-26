@@ -4,6 +4,7 @@ import type { ImageObjectStore, ImageProcessing, ProcessOutcome } from '../../ca
 import { agreedFormat } from '../../catalog/index.js';
 import {
   REVIEW_IMAGE_CLEANUP_BATCH,
+  REVIEW_IMAGE_CLEANUP_MAX_BATCHES,
   REVIEW_IMAGE_DERIVATIVE_MAX_BYTES,
   REVIEW_IMAGE_ENVELOPE_BYTES,
   REVIEW_IMAGE_MAX_BYTES,
@@ -57,7 +58,8 @@ export class ReviewImages {
     const bytes = await q.file.bytes();
     const head = bytes.subarray(0, Math.min(bytes.length, 64 * 1024));
     if (agreedFormat(head, q.file.type, q.file.name) === undefined) throw rejected('UNSUPPORTED_TYPE');
-    if ((await this.d.store.countImageUploadsSince(q.accountId, now - HOUR_MS)) >= REVIEW_IMAGE_UPLOAD_LIMIT_PER_HOUR) {
+    // 값싼 형식 검사를 통과해 image-worker를 부르는 시도부터 센다(거절·실패 포함). 세고 넣는 일은 저장소가 한 트랜잭션으로 한다
+    if (!(await this.d.store.beginImageUpload(q.accountId, now, now - HOUR_MS, REVIEW_IMAGE_UPLOAD_LIMIT_PER_HOUR))) {
       throw new ProblemError({ type: 'review-image-limited', status: 429, title: '후기 사진을 너무 많이 올렸습니다', retryAfterSeconds: 60 });
     }
 
@@ -131,18 +133,7 @@ export class ReviewImages {
 
   /** 붙이지 않은 24시간 지난 READY와 DELETED 행의 공개 객체·행을 지운다. 다시 돌려도 결과가 같다 */
   async cleanupDue(nowMs: number, limit = REVIEW_IMAGE_CLEANUP_BATCH): Promise<number> {
-    const rows = await this.d.store.imageRowsDueForCleanup(nowMs, limit);
-    for (const row of rows) {
-      for (const name of reviewImageDerivativeNames()) {
-        try {
-          await this.d.objects.deletePublic(reviewImagePublicKey(row.imageId, name));
-        } catch {
-          // 남은 객체는 다음 정리가 같은 행으로 다시 본다
-        }
-      }
-    }
-    await this.d.store.deleteImageRows(rows.map((r) => r.imageId));
-    return rows.length;
+    return (await cleanupDueReviewImages(this.d.store, this.d.objects, nowMs, { batch: limit })).removed;
   }
 
   async #cleanup(imageId: string): Promise<void> {
@@ -160,10 +151,51 @@ export class ReviewImages {
   }
 }
 
+/**
+ * 정리 때가 된 사진 행의 공개 파생본을 지우고, 두 파생본을 모두 지운 행만 행에서 지운다.
+ * 한 객체라도 실패한 행은 남겨 다음 정기 실행에서 다시 지운다(구현 리뷰 IR-03). 묶음이 가득 차면 빈 묶음까지 이어서
+ * 하루 상한(기본 10,000행) 안에서 따라잡는다(구현 리뷰 IR-08). 다시 돌려도 결과가 같다.
+ */
+export async function cleanupDueReviewImages(
+  store: Pick<ReviewStore, 'imageRowsDueForCleanup' | 'deleteImageRows'>,
+  objects: Pick<ImageObjectStore, 'deletePublic'>,
+  nowMs: number,
+  o: { batch?: number; maxBatches?: number; signal?: AbortSignal } = {},
+): Promise<{ removed: number; failed: number }> {
+  const batch = o.batch ?? REVIEW_IMAGE_CLEANUP_BATCH;
+  const maxBatches = o.maxBatches ?? REVIEW_IMAGE_CLEANUP_MAX_BATCHES;
+  let removed = 0;
+  let failed = 0;
+  for (let round = 0; round < maxBatches; round += 1) {
+    if (o.signal?.aborted) break;
+    const rows = await store.imageRowsDueForCleanup(nowMs, batch);
+    if (rows.length === 0) break;
+    const clean: string[] = [];
+    for (const row of rows) {
+      let ok = true;
+      for (const name of reviewImageDerivativeNames()) {
+        try {
+          await objects.deletePublic(reviewImagePublicKey(row.imageId, name));
+        } catch {
+          ok = false;
+        }
+      }
+      if (ok) clean.push(row.imageId);
+    }
+    if (clean.length > 0) await store.deleteImageRows(clean);
+    removed += clean.length;
+    failed += rows.length - clean.length;
+    // 실패한 행이 있으면 같은 행을 다시 잡아 무한히 돌지 않고 다음 정기 실행에 맡긴다
+    if (clean.length < rows.length) break;
+    if (rows.length < batch) break;
+  }
+  return { removed, failed };
+}
+
 const webp = (b: Uint8Array): boolean => b.length >= 12 && String.fromCharCode(...b.subarray(0, 4)) === 'RIFF' && String.fromCharCode(...b.subarray(8, 12)) === 'WEBP';
 
 const rejected = (reason: ReviewImageRejectReason): ProblemError =>
-  new ProblemError({ type: 'review-image-rejected', status: 422, title: '후기 사진을 받을 수 없습니다', extensions: { reason, extensions: { reason } } });
+  new ProblemError({ type: 'review-image-rejected', status: 422, title: '후기 사진을 받을 수 없습니다', extensions: { extensions: { reason } } });
 
 const unavailable = (): ProblemError =>
   new ProblemError({ type: 'review-image-unavailable', status: 503, title: '후기 사진을 잠시 확인할 수 없습니다', retryAfterSeconds: 5 });

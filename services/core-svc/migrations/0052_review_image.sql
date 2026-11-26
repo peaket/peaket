@@ -23,13 +23,24 @@ CREATE TABLE "review_image" (
 	CONSTRAINT "review_image_attach_check" CHECK (("review_image"."review_id" is null) = ("review_image"."attached_at" is null))
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX "review_image_review_sort_uq" ON "review_image" USING btree ("review_id", "sort") WHERE "review_image"."review_id" is not null;
+CREATE UNIQUE INDEX "review_image_review_sort_uq" ON "review_image" USING btree ("review_id", "sort") WHERE "review_image"."review_id" is not null and "review_image"."status" <> 'DELETED';
 --> statement-breakpoint
 CREATE INDEX "review_image_account_created_idx" ON "review_image" USING btree ("account_id", "created_at");
 --> statement-breakpoint
 CREATE INDEX "review_image_review_idx" ON "review_image" USING btree ("review_id");
 --> statement-breakpoint
 CREATE INDEX "review_image_status_created_idx" ON "review_image" USING btree ("status", "created_at");
+--> statement-breakpoint
+-- 올리기 한도는 성공 행이 아니라 시도를 센다(구현 리뷰 IR-04): 거절·실패한 시도도 image-worker를 부르므로 같은 창에서 센다
+CREATE TABLE "review_image_upload_attempt" (
+	"id" uuid PRIMARY KEY,
+	"account_id" uuid NOT NULL,
+	"created_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX "review_image_upload_attempt_account_created_idx" ON "review_image_upload_attempt" USING btree ("account_id", "created_at");
+--> statement-breakpoint
+CREATE INDEX "review_image_upload_attempt_created_idx" ON "review_image_upload_attempt" USING btree ("created_at");
 --> statement-breakpoint
 GRANT SELECT ON "review_image" TO "core_app";
 --> statement-breakpoint
@@ -39,4 +50,14 @@ GRANT UPDATE ("review_id", "alt_text", "sort", "attached_at", "status", "deleted
 --> statement-breakpoint
 GRANT SELECT ON "review_image" TO "core_maintenance";
 --> statement-breakpoint
+GRANT UPDATE ("status", "deleted_at") ON "review_image" TO "core_maintenance";
+--> statement-breakpoint
 GRANT DELETE ON "review_image" TO "core_maintenance";
+--> statement-breakpoint
+GRANT SELECT ON "review_image_upload_attempt" TO "core_app";
+--> statement-breakpoint
+GRANT INSERT ON "review_image_upload_attempt" TO "core_app";
+--> statement-breakpoint
+GRANT SELECT ON "review_image_upload_attempt" TO "core_maintenance";
+--> statement-breakpoint
+GRANT DELETE ON "review_image_upload_attempt" TO "core_maintenance";

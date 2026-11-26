@@ -5213,7 +5213,7 @@
             }
           ],
           "isUnique": true,
-          "where": "\"review_image\".\"review_id\" is not null",
+          "where": "\"review_image\".\"review_id\" is not null and \"review_image\".\"status\" <> 'DELETED'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -5302,6 +5302,74 @@
           "value": "(\"review_image\".\"review_id\" is null) = (\"review_image\".\"attached_at\" is null)"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.review_image_upload_attempt": {
+      "name": "review_image_upload_attempt",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "review_image_upload_attempt_account_created_idx": {
+          "name": "review_image_upload_attempt_account_created_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "review_image_upload_attempt_created_idx": {
+          "name": "review_image_upload_attempt_created_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     }
   },

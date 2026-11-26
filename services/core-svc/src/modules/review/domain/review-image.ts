@@ -12,6 +12,9 @@ export const REVIEW_IMAGE_UPLOAD_LIMIT_PER_HOUR = 30;
 export const REVIEW_IMAGE_UNATTACHED_TTL_MS = 24 * 60 * 60 * 1000;
 export const REVIEW_IMAGE_DERIVATIVE_MAX_BYTES = 5 * 1024 * 1024;
 export const REVIEW_IMAGE_CLEANUP_BATCH = 100;
+/** 하루 정리 한 번에 도는 묶음 상한. 시간당 30장(하루 720장)을 한 번에 따라잡는다 */
+export const REVIEW_IMAGE_CLEANUP_MAX_BATCHES = 100;
+export const REVIEW_IMAGE_UPLOAD_ATTEMPT_TTL_MS = 24 * 60 * 60 * 1000;
 export const FAN_MULTIPART_BULKHEAD = { name: 'fan-multipart', limit: 8, retryAfterSeconds: 10 } as const;
 
 export type ReviewImageStatus = 'UPLOADED' | 'SCANNING' | 'READY' | 'REJECTED' | 'DELETED';
@@ -72,11 +75,14 @@ export function reviewImageSpecViolation(width: number, height: number): 'TOO_SM
   return undefined;
 }
 
-/** 사진 설명: NFC 정규화 뒤 제어·양방향 제어 문자를 지우고 grapheme 100자 이하(빈 값 허용) */
+/**
+ * 사진 설명: NFC 정규화 뒤 제어·양방향 제어 문자를 지우고 코드 포인트 100자 이하(빈 값 허용).
+ * DB CHECK(char_length)와 같은 단위로 센다(구현 리뷰 IR-06). 결합 이모지가 서버를 통과해 DB에서 500이 되지 않게 한다.
+ */
 export function normalizeReviewImageAlt(raw: string | undefined): string {
   if (raw === undefined) return '';
   const text = normalizeText(raw).trim();
-  const n = [...new Intl.Segmenter('ko', { granularity: 'grapheme' }).segment(text)].length;
+  const n = [...text].length;
   if (n > REVIEW_IMAGE_ALT_MAX) throw new ReviewProblem('review-image-invalid', 422, `사진 설명은 ${REVIEW_IMAGE_ALT_MAX}자까지 쓸 수 있습니다`);
   return text;
 }

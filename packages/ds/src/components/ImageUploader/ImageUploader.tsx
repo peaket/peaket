@@ -6,6 +6,7 @@
 // - 상태: idle(타일 "사진 추가 0/3") · uploading(썸네일 위 진행 막대) · scanning("확인하는 중") · ready · error(썸네일 자리 role="alert") · full(추가 타일 비활성)
 //   미리보기 상태는 defaultItems로 넣는다(예: { status: 'uploading', progress: 64 }).
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { beginUpload, failUpload, finishUpload, retryFile } from "./upload-state";
 
 export type ImageUploaderItemStatus = "ready" | "uploading" | "scanning" | "error";
 
@@ -24,6 +25,8 @@ export interface ImageUploaderItem {
   retryable?: boolean;
   /** 미리보기 그림 주소(없으면 그림 자리 아이콘) */
   previewUrl?: string;
+  /** [다시 시도]가 다시 올릴 원본 파일 */
+  file?: File;
 }
 
 export interface ImageUploaderProps {
@@ -106,6 +109,27 @@ export function ImageUploader({
   const describedBy = [full ? maxId : null, hintId].filter(Boolean).join(" ") || undefined;
   const addDisabled = disabled || full;
 
+  async function runUpload(id: string, file: File) {
+    if (!upload) return;
+    // 파일을 보내는 동안 서버 검사 상태(scanning)를 보인다(구현 리뷰 IR-05). 진행률 이벤트가 없어 0%에 머무는 uploading 대신 쓴다
+    updateWith((current) => beginUpload(current, id));
+    try {
+      const out = await upload(file);
+      const result = { imageId: out.imageId };
+      updateWith((current) => finishUpload(current, id, result.imageId));
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "올리지 못했습니다. 다시 시도해 주세요";
+      const retryable = (e as { retryable?: boolean })?.retryable ?? true;
+      updateWith((current) => failUpload(current, id, message, retryable));
+    }
+  }
+
+  function retry(index: number) {
+    const item = items[index];
+    const file = item ? retryFile(items, item.id) : undefined;
+    if (item && file) void runUpload(item.id, file);
+  }
+
   function onPick(files: FileList | null) {
     if (!files || files.length === 0) return;
     const room = max - items.length;
@@ -117,23 +141,21 @@ export function ImageUploader({
         previewUrl = URL.createObjectURL(file);
         urls.current.push(previewUrl);
       }
-      return { id: `${base}-${Date.now()}-${i}`, status: err ? "error" : upload ? "uploading" : "ready", error: err ?? undefined, previewUrl, progress: err || !upload ? undefined : 0 };
+      return {
+        id: `${base}-${Date.now()}-${i}`,
+        status: err ? "error" : upload ? "uploading" : "ready",
+        error: err ?? undefined,
+        previewUrl,
+        progress: err || !upload ? undefined : 0,
+        file: err ? undefined : file,
+      };
     });
     update([...items, ...added]);
     if (upload) {
       for (const [i, item] of added.entries()) {
         const file = picked[i];
         if (!file || item.status === "error") continue;
-        void (async () => {
-          try {
-            const out = await upload(file);
-            updateWith((current) => current.map((x) => (x.id === item.id ? { ...x, status: "ready", imageId: out.imageId, progress: 100 } : x)));
-          } catch (e) {
-            const message = e instanceof Error ? e.message : "올리지 못했습니다. 다시 시도해 주세요";
-            const retryable = (e as { retryable?: boolean })?.retryable ?? true;
-            updateWith((current) => current.map((x) => (x.id === item.id ? { ...x, status: "error", error: message, retryable } : x)));
-          }
-        })();
+        void runUpload(item.id, file);
       }
     }
     setNotice(files.length > picked.length ? `${itemLabel}은 ${max}장까지 올릴 수 있습니다` : `${itemLabel} ${added.length}장을 더했습니다`);
@@ -325,7 +347,7 @@ export function ImageUploader({
                       <button
                         className="btn btn-outline btn-sm"
                         type="button"
-                        onClick={() => update(items.map((x, k) => (k === i ? { ...x, status: "ready", error: undefined } : x)))}
+                        onClick={() => retry(i)}
                       >
                         <i className="ic ic-refresh" aria-hidden="true" />
                         다시 시도

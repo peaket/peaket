@@ -3,11 +3,11 @@
 // 작성자 지우기·탈퇴 파기는 docs/data.md §2 '후기 파기'의 칸을 한 문장으로 비우고, 탈퇴 사건은 파기와 다시 정리 예약을 한 트랜잭션에 쓴다(ADR-0278).
 import { randomUUID } from 'node:crypto';
 import type { Database, DbTransaction } from '@peaket/platform';
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { ReportRecord, ReviewRecord, ReviewSort, TakedownRecord } from '../../domain/review.js';
 import { reviewImageDerivativeNames, reviewImagePublicKey, REVIEW_IMAGE_UNATTACHED_TTL_MS, type ReviewImageAttach, type ReviewImageRecord } from '../../domain/review-image.js';
 import type { HeldWithdrawalRow, ReviewListInput, ReviewListResult, ReviewStore } from '../../domain/ports.js';
-import { contentReport, review, reviewHiddenFingerprint, reviewImage, takedownAction } from './schema.js';
+import { contentReport, review, reviewHiddenFingerprint, reviewImage, reviewImageUploadAttempt, takedownAction } from './schema.js';
 
 type Db = Database['db'] | DbTransaction;
 type ReviewRow = typeof review.$inferSelect;
@@ -201,10 +201,15 @@ export class DrizzleReviewStore implements ReviewStore {
         .where(eq(review.id, reviewId));
       if (images === undefined) return [];
       const keep = new Set(images.map((i) => i.imageId));
-      const existing = await tx.select().from(reviewImage).where(eq(reviewImage.reviewId, reviewId));
+      const existing = await tx.select().from(reviewImage).where(eq(reviewImage.reviewId, reviewId)).for('update');
+      // 먼저 이 후기의 사진을 모두 떼어 (review_id, sort) 부분 유일 인덱스와 부딪히지 않게 한다.
+      // 순서를 맞바꾸거나 빠진 행의 sort를 새 사진이 다시 쓰는 경우가 있다(구현 리뷰 IR-01)
+      await tx.update(reviewImage).set({ reviewId: null, attachedAt: null }).where(eq(reviewImage.reviewId, reviewId));
       const removed: string[] = [];
       for (const row of existing) {
         if (keep.has(row.id)) continue;
+        // 이미 지운 행의 공개 키는 앞선 요청이 돌려줬다. 다시 지우거나 다시 지우라고 하지 않는다
+        if (row.status === 'DELETED') continue;
         await tx.update(reviewImage).set({ status: 'DELETED', deletedAt: new Date(patch.updatedAtMs ?? Date.now()) }).where(eq(reviewImage.id, row.id));
         removed.push(...imageKeys(row.id));
       }
@@ -217,7 +222,7 @@ export class DrizzleReviewStore implements ReviewStore {
     return this.database.transaction(async (tx) => {
       // 작성자 지우기도 탈퇴 파기와 같은 칸을 비운다(docs/data.md §2 '후기 파기', ADR-0086 ⑧)
       await tx.execute(sql`update review set ${purgeSet(nowMs)} where id = ${reviewId}::uuid`);
-      const rows = await tx.select().from(reviewImage).where(eq(reviewImage.reviewId, reviewId));
+      const rows = await tx.select().from(reviewImage).where(eq(reviewImage.reviewId, reviewId)).for('update');
       const keys: string[] = [];
       for (const row of rows) {
         if (row.status === 'DELETED') continue;
@@ -273,7 +278,7 @@ export class DrizzleReviewStore implements ReviewStore {
     const rows = await this.database.db
       .select()
       .from(reviewImage)
-      .where(or(eq(reviewImage.status, 'DELETED'), and(isNull(reviewImage.reviewId), eq(reviewImage.status, 'READY'), lt(reviewImage.createdAt, before))))
+      .where(or(eq(reviewImage.status, 'DELETED'), and(isNull(reviewImage.reviewId), eq(reviewImage.status, 'READY'), lte(reviewImage.createdAt, before))))
       .orderBy(asc(reviewImage.createdAt), asc(reviewImage.id))
       .limit(limit);
     return rows.map(imageOf);
@@ -303,11 +308,22 @@ export class DrizzleReviewStore implements ReviewStore {
     await this.database.db.delete(reviewImage).where(inArray(reviewImage.id, [...imageIds]));
   }
 
-  async countImageUploadsSince(accountId: string, sinceMs: number): Promise<number> {
-    const rows = await this.database.db
-      .select({ id: reviewImage.id })
-      .from(reviewImage)
-      .where(and(eq(reviewImage.accountId, accountId), gt(reviewImage.createdAt, new Date(sinceMs))));
+  async beginImageUpload(accountId: string, nowMs: number, sinceMs: number, limit: number): Promise<boolean> {
+    // 같은 계정의 동시 요청을 한 트랜잭션으로 직렬화한다(계정별 advisory lock). 세고 넣는 사이에 다른 요청이 끼어들지 않는다
+    return this.database.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${accountId}, 0))`);
+      const r = await tx.execute(sql`
+        select count(*)::int as n from review_image_upload_attempt
+         where account_id = ${accountId}::uuid and created_at > ${new Date(sinceMs)}::timestamptz`);
+      const n = Number((r.rows[0] as { n: number | string } | undefined)?.n ?? 0);
+      if (n >= limit) return false;
+      await tx.insert(reviewImageUploadAttempt).values({ id: randomUUID(), accountId, createdAt: new Date(nowMs) });
+      return true;
+    });
+  }
+
+  async deleteUploadAttemptsBefore(beforeMs: number): Promise<number> {
+    const rows = await this.database.db.delete(reviewImageUploadAttempt).where(lt(reviewImageUploadAttempt.createdAt, new Date(beforeMs))).returning({ id: reviewImageUploadAttempt.id });
     return rows.length;
   }
 
@@ -431,6 +447,10 @@ export class DrizzleReviewStore implements ReviewStore {
       const ids = (due.rows as { account_id: string }[]).map((r) => r.account_id);
       if (ids.length === 0) return { accounts: 0, purged: 0 };
       const purgedRows = await tx.execute(sql`update review set ${purgeSet(nowMs)} where account_id = any(${sql.param(ids)}::uuid[]) returning id`);
+      // 탈퇴 직후 늦게 쓴 후기의 사진도 함께 지운다(구현 리뷰 IR-02). 공개 파생본은 정리 작업이 행을 보고 지운다
+      await tx.execute(sql`
+        update review_image set status = 'DELETED', deleted_at = coalesce(deleted_at, ${new Date(nowMs)}::timestamptz)
+         where account_id = any(${sql.param(ids)}::uuid[]) and status <> 'DELETED'`);
       // 처리한 예약은 지운다(계정 ID가 남지 않게)
       await tx.execute(sql`delete from review_withdrawal_recheck where account_id = any(${sql.param(ids)}::uuid[])`);
       return { accounts: ids.length, purged: purgedRows.rows.length };
@@ -492,6 +512,10 @@ export class DrizzleReviewStore implements ReviewStore {
       const last = ids[ids.length - 1];
       if (last === undefined) return { purged: 0 };
       const purged = await tx.execute(sql`update review set ${purgeSet(o.nowMs)} where id = any(${sql.param(ids)}::uuid[]) returning id`);
+      // 이전 판이 남긴 행의 사진도 DELETED로 바꾼다(core_maintenance는 status·deleted_at만 고칠 수 있다). 공개 파생본은 정리 작업이 지운다
+      await tx.execute(sql`
+        update review_image set status = 'DELETED', deleted_at = coalesce(deleted_at, ${new Date(o.nowMs)}::timestamptz)
+         where review_id = any(${sql.param(ids)}::uuid[]) and status <> 'DELETED'`);
       return { purged: purged.rows.length, last };
     });
   }

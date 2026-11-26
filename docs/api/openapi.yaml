@@ -351,7 +351,7 @@ x-peaket-problem-types:
     review-already-written: { status: 409, title: "이 회차의 후기를 이미 썼습니다" }
     review-eligibility-unavailable: { status: 503, title: "후기 자격을 잠시 확인할 수 없습니다" }
     review-event-cancelled: { status: 403, title: "취소된 회차에는 후기를 쓸 수 없습니다" }
-    review-hidden-by-notice: { status: 409, title: "통보로 가린 후기는 고칠 수 없습니다" }
+    review-hidden-by-notice: { status: 409, title: "가린 후기는 고칠 수 없습니다" }
     review-not-author: { status: 403, title: "내 후기만 고칠 수 있습니다" }
     review-not-ended: { status: 403, title: "공연이 끝난 뒤에 후기를 쓸 수 있습니다" }
     review-not-purchaser: { status: 403, title: "이 회차를 예매한 분만 후기를 쓸 수 있습니다" }

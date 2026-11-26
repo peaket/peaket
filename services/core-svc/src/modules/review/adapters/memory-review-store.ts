@@ -78,6 +78,8 @@ export class MemoryReviewStore implements ReviewStore {
   readonly hiddenFingerprints = new Set<string>();
   /** 후기 사진(review_image). 키는 imageId */
   readonly images = new Map<string, ReviewImageRecord>();
+  /** 올리기 시도(review_image_upload_attempt). 계정당 시간당 한도를 성공 행이 아니라 시도로 센다(구현 리뷰 IR-04) */
+  readonly uploadAttempts: { accountId: string; atMs: number }[] = [];
   /** 다시 정리 예약(review_withdrawal_recheck): 계정 ID → 예약 시각·만든 시각(docs/data.md §2 '다시 정리 예약') */
   readonly rechecks = new Map<string, { dueAtMs: number; createdAtMs: number }>();
   /** 시험용 보류 사건(core DB held_event의 대역). 손으로 처리(purgeHeldWithdrawal)가 읽고 다시 처리로 표시한다 */
@@ -114,9 +116,10 @@ export class MemoryReviewStore implements ReviewStore {
     const keep = new Set(planned.map((p) => p.imageId));
     const removed: string[] = [];
     for (const [id, row] of this.images) {
-      if (row.reviewId !== reviewId || keep.has(id)) continue;
-      this.images.set(id, { ...row, status: 'DELETED', deletedAtMs: patch.updatedAtMs ?? Date.now() });
-      removed.push(...derivativeKeys(id));
+      if (row.reviewId !== reviewId) continue;
+      // 지운 사진은 후기 연결을 끊어 같은 순서(sort)로 새 사진을 붙일 수 있게 한다(구현 리뷰 IR-01)
+      this.images.set(id, keep.has(id) ? { ...row, reviewId: null, attachedAtMs: undefined } : { ...row, reviewId: null, attachedAtMs: undefined, status: 'DELETED', deletedAtMs: patch.updatedAtMs ?? Date.now() });
+      if (!keep.has(id) && row.status !== 'DELETED') removed.push(...derivativeKeys(id));
     }
     this.#applyAttach(reviewId, planned, patch.updatedAtMs ?? Date.now());
     return removed;
@@ -362,10 +365,19 @@ export class MemoryReviewStore implements ReviewStore {
     for (const id of imageIds) this.images.delete(id);
   }
 
-  async countImageUploadsSince(accountId: string, sinceMs: number): Promise<number> {
+  async beginImageUpload(accountId: string, nowMs: number, sinceMs: number, limit: number): Promise<boolean> {
+    // 메모리 저장소는 한 스레드에서 세고 넣으므로 이 메서드 안에 await가 없으면 동시 호출도 한도 안으로 직렬화된다
     let n = 0;
-    for (const r of this.images.values()) if (r.accountId === accountId && r.createdAtMs >= sinceMs && r.status !== 'REJECTED') n += 1;
-    return n;
+    for (const attempt of this.uploadAttempts) if (attempt.accountId === accountId && attempt.atMs > sinceMs) n += 1;
+    if (n >= limit) return false;
+    this.uploadAttempts.push({ accountId, atMs: nowMs });
+    return true;
+  }
+
+  async deleteUploadAttemptsBefore(beforeMs: number): Promise<number> {
+    const before = this.uploadAttempts.length;
+    for (let i = this.uploadAttempts.length - 1; i >= 0; i -= 1) if (this.uploadAttempts[i]!.atMs < beforeMs) this.uploadAttempts.splice(i, 1);
+    return before - this.uploadAttempts.length;
   }
 
   #planAttach(reviewId: string, accountId: string, images: readonly ReviewImageAttach[]): { imageId: string; row: ReviewImageRecord; sort: number; alt: string }[] {

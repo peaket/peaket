@@ -53,7 +53,13 @@ export interface ReviewStore {
   imageRowsDueForCleanup(nowMs: number, limit: number): Promise<readonly ReviewImageRecord[]>;
   insertReviewImage(row: ReviewImageRecord): Promise<void>;
   deleteImageRows(imageIds: readonly string[]): Promise<void>;
-  countImageUploadsSince(accountId: string, sinceMs: number): Promise<number>;
+  /**
+   * 한 시간 창의 올리기 시도를 한 트랜잭션으로 세고, 한도 안이면 이번 시도를 넣는다(구현 리뷰 IR-04).
+   * 성공 행이 아니라 image-worker를 부른 시도(거절·실패 포함)를 세며, 동시 요청도 한도 안으로 직렬화한다.
+   */
+  beginImageUpload(accountId: string, nowMs: number, sinceMs: number, limit: number): Promise<boolean>;
+  /** 보관 기간이 지난 올리기 시도 행을 지운다(정비 일). 지운 행 수 */
+  deleteUploadAttemptsBefore(beforeMs: number): Promise<number>;
 
   /** 신고 저장과 불법 촬영물 즉시 가림을 한 트랜잭션으로 한다(2.3.3) */
   insertReport(r: ReportRecord, hide?: { takedown: TakedownRecord; status: 'HIDDEN' }): Promise<void>;

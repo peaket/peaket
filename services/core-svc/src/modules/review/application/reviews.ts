@@ -73,7 +73,7 @@ const selfReport = () => new ProblemError({ type: 'review-self-report', status: 
 const alreadyReported = () => new ProblemError({ type: 'already-reported', status: 409, title: '이미 신고한 후기입니다' });
 const reportLimited = (retryAfterSeconds: number) => new ProblemError({ type: 'report-limited', status: 429, title: '오늘은 더 신고할 수 없습니다', retryAfterSeconds });
 const eligibilityUnavailable = () => new ProblemError({ type: 'review-eligibility-unavailable', status: 503, title: '후기 자격을 잠시 확인할 수 없습니다', retryAfterSeconds: 5 });
-const hiddenByNotice = () => new ProblemError({ type: 'review-hidden-by-notice', status: 409, title: '통보로 가린 후기는 고칠 수 없습니다' });
+const hiddenByHold = () => new ProblemError({ type: 'review-hidden-by-notice', status: 409, title: '가린 후기는 고칠 수 없습니다' });
 const eventNotFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다' });
 const invalidAccount = () => new ReviewProblem('review-invalid', 422, '계정 ID가 올바르지 않습니다');
 
@@ -196,7 +196,9 @@ export class Reviews {
     return guard(async () => {
       const r = await this.#mine(reviewId, accountId);
       const takedowns = await this.d.store.takedownsByReview(reviewId);
-      if (r.notice !== undefined || takedowns.some((t) => t.reason === 'NOTICE' && t.restoredAtMs === undefined)) throw hiddenByNotice();
+      // 통보·불법 촬영물 확인 중 가림이 살아 있으면 고치지 못한다. 고치면 상태가 VISIBLE로 돌아가 가림을 우회한다(구현 리뷰 IR-07)
+      const held = takedowns.some((t) => t.restoredAtMs === undefined && (t.reason === 'NOTICE' || t.reason === 'FILMING_HOLD'));
+      if (r.notice !== undefined || held) throw hiddenByHold();
       const { rating, body, images } = validateReviewWrite(input);
       const fingerprint = contentFingerprint(body);
       const hidden = await this.d.store.hasHiddenFingerprint(fingerprint);
