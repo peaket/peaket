@@ -327,7 +327,7 @@ describe('마이그레이션 실행기', () => {
     expect(client.ledger.size).toBe(0);
   });
 
-  it('[ASVS v5.0.0-13.2.2] roleStatements는 릴레이 최소 권한·앱 order_event 회수·정비 권한을 만든다', () => {
+  it('[ASVS v5.0.0-13.2.2] roleStatements는 릴레이 최소 권한·purchase order_event 회수·정비 네 권한을 만든다', () => {
     const sql = roleStatements('purchase', {
       outboxTable: 'outbox',
       orderEventTable: 'order_event',
@@ -337,8 +337,12 @@ describe('마이그레이션 실행기', () => {
     expect(sql).toMatch(/GRANT UPDATE \(sent_at\) ON (?:TABLE )?"?outbox"? TO "?purchase_outbox_relay"?/i);
     expect(sql).not.toMatch(/GRANT (?:INSERT|DELETE|UPDATE) ON (?:TABLE )?"?outbox"? TO "?purchase_outbox_relay"?/i);
     expect(sql).toMatch(/REVOKE UPDATE, DELETE ON (?:TABLE )?"?order_event"? FROM "?purchase_app"?/i);
-    expect(sql).toMatch(/GRANT SELECT ON (?:TABLE )?"?purchase_order"? TO "?purchase_maintenance"?/i);
+    expect(sql).toMatch(/GRANT MAINTAIN ON (?:TABLE )?"?purchase_order"? TO "?purchase_maintenance"?/i);
     expect(sql).toMatch(/GRANT DELETE ON (?:TABLE )?"?purchase_order"? TO "?purchase_maintenance"?/i);
+    expect(sql).toMatch(/CREATE EXTENSION IF NOT EXISTS pgstattuple/i);
+    expect(sql).toMatch(/GRANT EXECUTE ON FUNCTION pgstattuple/i);
+    const core = roleStatements('core', { outboxTable: 'outbox', maintenanceTables: ['core_order'] }).join('\n');
+    expect(core).not.toMatch(/order_event/);
   });
 
   it('D-T9 트랜잭션 밖 표시는 첫 줄에만 인정한다', async () => {

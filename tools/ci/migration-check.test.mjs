@@ -249,9 +249,15 @@ test('[ASVS v5.0.0-13.2.2] 서비스별 역할 SQL은 릴레이에 SELECT와 sen
     assert.match(text, /GRANT SELECT ON [^;]*outbox/i);
     assert.match(text, /GRANT UPDATE \(sent_at\) ON [^;]*outbox/i);
     assert.doesNotMatch(text, /GRANT (INSERT|DELETE|UPDATE) ON [^;]*outbox[^;]*TO [^;]*_outbox_relay/i);
-    assert.match(text, new RegExp(`REVOKE UPDATE, DELETE ON [^;]*order_event[^;]*FROM [^;]*${db}_app`, 'i'));
-    assert.match(text, new RegExp(`GRANT SELECT ON [^;]*TO [^;]*${db}_maintenance`, 'i'));
+    assert.match(text, new RegExp(`GRANT MAINTAIN ON [^;]*TO [^;]*${db}_maintenance`, 'i'));
     assert.match(text, new RegExp(`GRANT DELETE ON [^;]*TO [^;]*${db}_maintenance`, 'i'));
+    assert.match(text, /CREATE EXTENSION IF NOT EXISTS pgstattuple/i);
+    assert.match(text, /GRANT EXECUTE ON FUNCTION pgstattuple/i);
+    if (service === 'purchase-svc') {
+      assert.match(text, new RegExp(`REVOKE UPDATE, DELETE ON [^;]*order_event[^;]*FROM [^;]*${db}_app`, 'i'));
+    } else {
+      assert.doesNotMatch(text, /REVOKE[^;]*order_event/i, `${service}: order_event는 purchase DB에만 있다`);
+    }
   }
 });
 
@@ -260,9 +266,10 @@ test('[ASVS v5.0.0-13.2.2] roles 검사는 역할 분리를 어긴 db/roles.sql�
     'services/core-svc/db/roles.sql': [
       'GRANT SELECT ON outbox TO core_outbox_relay;',
       'GRANT UPDATE (sent_at) ON outbox TO core_outbox_relay;',
-      'REVOKE UPDATE, DELETE ON order_event FROM core_app;',
-      'GRANT SELECT ON core_order TO core_maintenance;',
+      'GRANT MAINTAIN ON core_order TO core_maintenance;',
       'GRANT DELETE ON core_order TO core_maintenance;',
+      'CREATE EXTENSION IF NOT EXISTS pgstattuple;',
+      'GRANT EXECUTE ON FUNCTION pgstattuple(regclass) TO core_maintenance;',
     ].join('\n'),
   });
   const ok = run(['roles', '--root', good]);
