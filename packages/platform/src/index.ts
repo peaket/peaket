@@ -268,3 +268,5 @@ export {
 } from './grpc-channel.js';
 export { ADMISSION_IAT_SKEW_MS, ADMISSION_TOKEN_MAX_CHARS, AdmissionTokenRejected, MAX_ADMISSION_LISTS, parseAdmissionJwks, verifyAdmissionToken, type AdmissionClaims, type AdmissionKeys, type AdmissionRejectReason } from './admission-token.js';
 export { JWKS_CACHE_MS, JWKS_REFETCH_COOLDOWN_MS, KEY_SET_AUDIENCES, TOKEN_KEY_SETS, TokenKeysUnavailable, TokenRejected, TokenVerifier, type TokenKeySet, type TokenRejectReason, type TokenVerifierOptions, type VerifiedAccess, type VerifiedReauth } from './token-verify.js';
+export { MIGRATION_LOCK_CLASS, MIGRATION_LOCK_OBJECT, NO_TRANSACTION_MARKER, MigrationError, assertDirectDatabaseUrl, planMigrations, readMigrationFiles, roleStatements, runMigrations, type AppliedMigration, type MigrationClient, type MigrationErrorCode, type MigrationFile, type MigrationQueryResult, type RoleSpec, type RunMigrationsOptions, type RunMigrationsResult } from './migrations.js';
+export { FlagError, createReleaseFlags, parseFlagDefinitions, type CreateReleaseFlagsOptions, type FlagDefinition, type FlagDefinitions, type FlagErrorCode, type ReleaseFlags } from './flags.js';

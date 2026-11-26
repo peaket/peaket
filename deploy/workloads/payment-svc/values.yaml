@@ -29,3 +29,8 @@ service:
     # 서비스 파드의 정지 판정자도 쿠버네티스 API 서버(Lease)와 클러스터 Prometheus(입력, PEAKET_PROMETHEUS_URL)에 닿아야 한다(BUILD_ORDER PRF-202). 닿지 못하면 판정자를 뽑지 못하거나 입력 없음으로 돈다
     egress:
       publicHttps: true
+
+# DB 마이그레이션 PreSync Job(BAS-060, F-09-2). 이 서비스만 켠다. Secret 키는 ddl-url·maintenance-url이다.
+migration:
+  enabled: true
+  secretName: payment-svc-migration-db

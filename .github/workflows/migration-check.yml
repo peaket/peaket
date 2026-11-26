@@ -1,0 +1,32 @@
+# DB 마이그레이션 검사(docs/devops.md §7.3, BAS-060, F-09-2). 바뀐 마이그레이션의 Squawk·N-1·역할·파일 규칙을 본다.
+name: migration-check
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  migration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: |
+          pm=$(node -p "require('./package.json').packageManager")
+          case "$pm" in pnpm@[0-9]*) ;; *) echo "::error::packageManager가 pnpm@<판>이 아니다: $pm"; exit 1 ;; esac
+          npm install --global "$pm"
+      - run: pnpm install --frozen-lockfile
+      - run: node tools/ci/migration-check.mjs check
+      - run: node tools/ci/migration-check.mjs roles
+      - run: node tools/ci/migration-check.mjs n1 --base origin/develop
+      # Squawk 실행 파일은 CI 이미지에 아직 없다. 준비된 무대에서만 돌리고, 없으면 통과로 세지 않는다(도구는 끝 코드 2).
+      - if: ${{ vars.PEAKET_SQUAWK_IN_CI == 'true' }}
+        run: node tools/ci/migration-check.mjs squawk --base origin/develop

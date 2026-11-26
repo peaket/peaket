@@ -24,6 +24,10 @@
     {
       "file": "services/invariant-checker/src/run.ts",
       "reason": "검사기 임시 표(pg_temp)에 원본 행을 넣는 INSERT 문의 표·열 이름. 이름은 검사기 코드의 고정 목록에서 오고 ident()가 큰따옴표로 묶어 안의 큰따옴표를 겹친다. 값은 $1 매개변수(json)로 넘긴다"
+    },
+    {
+      "file": "packages/platform/src/migrations.ts",
+      "reason": "마이그레이션 실행기의 SET lock_timeout·SET statement_timeout은 PostgreSQL이 매개변수를 받지 않는 SET 명령이라 숫자 옵션을 글자로 넣는다. 값은 Number.isInteger로 검증한 밀리초(기본 3000·30000)뿐이고, 표·역할 이름은 quoteIdent가 ^[A-Za-z_][A-Za-z0-9_]*$로 걸러 따옴표로 묶는다(ADR-0037, ADR-0083, ASVS 1.2.4)"
     }
   ]
 }

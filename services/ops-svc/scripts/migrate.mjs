@@ -1,61 +1,53 @@
-// ops-svc DB 마이그레이션(로컬·시험 실행용). migrations/*.sql을 이름 순으로 한 번씩 적용하고 ops_migration 표에 남긴다.
-// 운영 실행은 트랜잭션 안의 스키마·인덱스·제약 마이그레이션(BUILD_ORDER BAS-060)이다.
-// 실행: PEAKET_DATABASE_URL=postgres://... node scripts/migrate.mjs
-import { readdirSync, readFileSync } from 'node:fs';
+// ops-svc DB 마이그레이션(BAS-060, F-09-2). 공용 실행기(@peaket/platform/migrations)를 부른다.
+// 운영 실행은 ArgoCD PreSync Job이 같은 이미지의 이 파일을 부른다. DDL·정비 역할 주소는 PEAKET_MIGRATION_DATABASE_URL·PEAKET_MAINTENANCE_DATABASE_URL로만 받는다.
+// 쓰는 법: PEAKET_MIGRATION_DATABASE_URL=postgres://... node scripts/migrate.mjs
 import { fileURLToPath } from 'node:url';
+import { createDatabase, ensureOutboxPartitions, systemClock } from '@peaket/platform';
+import { assertDirectDatabaseUrl, runMigrations } from '@peaket/platform/migrations';
 import pg from 'pg';
 
 const MIGRATIONS = fileURLToPath(new URL('../migrations', import.meta.url));
 
 /**
- * 마이그레이션을 적용한다(시험에서도 부를 수 있다). 이미 적용한 이름은 건너뛴다.
+ * 마이그레이션을 적용한다(시험도 이 함수를 쓴다)
  * @param {string} databaseUrl
- * @returns {Promise<string[]>} 이번에 적용한 이름
  */
 export async function migrateOps(databaseUrl) {
-  const client = new pg.Client({ connectionString: databaseUrl });
+  const client = new pg.Client({ connectionString: databaseUrl, application_name: 'ops-svc-migrate' });
   await client.connect();
-  const applied = [];
   try {
-    await client.query('CREATE TABLE IF NOT EXISTS ops_migration (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-    const names = readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql')).sort();
-    for (const name of names) {
-      const seen = await client.query('SELECT 1 FROM ops_migration WHERE name = $1', [name]);
-      if (seen.rowCount) continue;
-      await client.query('BEGIN');
-      try {
-        await client.query(readFileSync(`${MIGRATIONS}/${name}`, 'utf8'));
-        await client.query('INSERT INTO ops_migration (name) VALUES ($1)', [name]);
-        await client.query('COMMIT');
-        applied.push(name);
-      } catch (err) {
-        await client.query('ROLLBACK');
-        throw err;
-      }
-    }
+    return await runMigrations({
+      client,
+      dir: MIGRATIONS,
+      legacy: { table: 'ops_migration', kind: 'name' },
+      afterMigrate: async () => {
+        const database = createDatabase({
+          url: process.env.PEAKET_MAINTENANCE_DATABASE_URL ?? databaseUrl,
+          applicationName: 'ops-svc-migrate-hooks',
+          max: 1,
+        });
+        try {
+      const { created } = await ensureOutboxPartitions(database, systemClock);
+      console.log(`Outbox 파티션 ${created.length}개를 만들었다`);
+        } finally {
+          await database.close();
+        }
+      },
+      log: (line) => console.log(line),
+    });
   } finally {
     await client.end();
   }
-  return applied;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const url = process.env.PEAKET_DATABASE_URL;
+  const url = process.env.PEAKET_MIGRATION_DATABASE_URL;
   if (!url) {
-    console.error('PEAKET_DATABASE_URL이 없다');
+    console.error('PEAKET_MIGRATION_DATABASE_URL이 없다');
     process.exit(2);
   }
-  const applied = await migrateOps(url);
-  // 명령 6 대체 결제사 전환의 ACKED는 같은 트랜잭션에 표시용 설정 사건(control.settings)을 ops Outbox로 쓴다.
-  // Outbox는 일 파티션이 없으면 그 쓰기가 실패해 ACKED가 남지 않는다(F-03-4 T15가 실제로 드러냄, 2026-11-24).
-  // identity·payment·purchase의 migrate와 같은 자리에서 오늘부터 7일 파티션을 만든다.
-  const { createDatabase, ensureOutboxPartitions, systemClock } = await import('@peaket/platform');
-  const database = createDatabase({ url, applicationName: 'ops-svc-migrate', max: 1 });
-  try {
-    const { created } = await ensureOutboxPartitions(database, systemClock);
-    console.log(`Outbox 파티션 ${created.length}개를 만들었다`);
-  } finally {
-    await database.close();
-  }
-  console.log(`ops 마이그레이션 끝(${applied.length}개 적용)`);
+  const env = process.env.PEAKET_ENV ?? '';
+  assertDirectDatabaseUrl(url, { requireTls: !['local', 'ci'].includes(env) });
+  const result = await migrateOps(url);
+  console.log(`ops-svc 마이그레이션 끝(${result.applied.length}개 적용, ${result.adopted.length}개 이관)`);
 }

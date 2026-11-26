@@ -62,6 +62,11 @@ jobs:
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.tools == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.infra == 'true' || needs.changes.outputs.js == 'true') }}
     uses: ./.github/workflows/tools-check.yml
 
+  migration-check:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.js == 'true' || needs.changes.outputs.tools == 'true' || needs.changes.outputs.ci == 'true') }}
+    uses: ./.github/workflows/migration-check.yml
+
   # 부하 시험 점검(docs/devops.md §3.1): 시나리오 계산·실행 도구 시험과 k6 형식 검사
   loadtest-check:
     needs: changes
@@ -185,7 +190,7 @@ jobs:
     uses: ./.github/workflows/iac-check.yml
 
   ci-summary:
-    needs: [changes, docs-check, tools-check, loadtest-check, gitops-check, contract-check, node, iac-check, kind, spec-check, image, web, security-scan, lint-guard]
+    needs: [changes, docs-check, tools-check, migration-check, loadtest-check, gitops-check, contract-check, node, iac-check, kind, spec-check, image, web, security-scan, lint-guard]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

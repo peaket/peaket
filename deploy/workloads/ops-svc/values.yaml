@@ -50,3 +50,8 @@ service:
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 512Mi }
+
+# DB 마이그레이션 PreSync Job(BAS-060, F-09-2). 이 서비스만 켠다. Secret 키는 ddl-url·maintenance-url이다.
+migration:
+  enabled: true
+  secretName: ops-svc-migration-db

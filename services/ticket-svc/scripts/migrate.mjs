@@ -1,53 +1,55 @@
-// ticket-svc DB 마이그레이션(로컬·시험 실행용). migrations/*.sql을 이름 순으로 한 번씩 적용하고
-// ticket_migration 표에 적용 이름을 남긴다. 운영 실행은 트랜잭션 안의 스키마·인덱스·제약·파티션
-// 마이그레이션(BUILD_ORDER BAS-060)이다(ADR-0037 결정 6).
-// 실행: PEAKET_DATABASE_URL=postgres://... node scripts/migrate.mjs
-import { readdirSync, readFileSync } from 'node:fs';
+// ticket-svc DB 마이그레이션(BAS-060, F-09-2). 공용 실행기(@peaket/platform/migrations)를 부른다.
+// 운영 실행은 ArgoCD PreSync Job이 같은 이미지의 이 파일을 부른다. DDL·정비 역할 주소는 PEAKET_MIGRATION_DATABASE_URL·PEAKET_MAINTENANCE_DATABASE_URL로만 받는다.
+// 쓰는 법: PEAKET_MIGRATION_DATABASE_URL=postgres://... node scripts/migrate.mjs
 import { fileURLToPath } from 'node:url';
+import { createDatabase, ensureMonthlyPartitions, systemClock } from '@peaket/platform';
+import { assertDirectDatabaseUrl, runMigrations } from '@peaket/platform/migrations';
 import pg from 'pg';
 
 const MIGRATIONS = fileURLToPath(new URL('../migrations', import.meta.url));
 
 /**
- * 마이그레이션을 적용한다(시험에서도 부를 수 있다). 이미 적용한 이름은 건너뛴다.
+ * 마이그레이션을 적용한다(시험도 이 함수를 쓴다)
  * @param {string} databaseUrl
- * @returns {Promise<string[]>} 이번에 적용한 이름
  */
 export async function migrateTicket(databaseUrl) {
-  const client = new pg.Client({ connectionString: databaseUrl });
+  const client = new pg.Client({ connectionString: databaseUrl, application_name: 'ticket-svc-migrate' });
   await client.connect();
-  const applied = [];
   try {
-    await client.query('CREATE TABLE IF NOT EXISTS ticket_migration (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())');
-    const names = readdirSync(MIGRATIONS)
-      .filter((n) => n.endsWith('.sql'))
-      .sort();
-    for (const name of names) {
-      const seen = await client.query('SELECT 1 FROM ticket_migration WHERE name = $1', [name]);
-      if (seen.rowCount) continue;
-      await client.query('BEGIN');
-      try {
-        await client.query(readFileSync(`${MIGRATIONS}/${name}`, 'utf8'));
-        await client.query('INSERT INTO ticket_migration (name) VALUES ($1)', [name]);
-        await client.query('COMMIT');
-        applied.push(name);
-      } catch (err) {
-        await client.query('ROLLBACK');
-        throw err;
-      }
-    }
+    return await runMigrations({
+      client,
+      dir: MIGRATIONS,
+      legacy: { table: 'ticket_migration', kind: 'name' },
+      afterMigrate: async () => {
+        const database = createDatabase({
+          url: process.env.PEAKET_MAINTENANCE_DATABASE_URL ?? databaseUrl,
+          applicationName: 'ticket-svc-migrate-hooks',
+          max: 1,
+        });
+        try {
+      const scan = await ensureMonthlyPartitions(database, systemClock, { table: 'scan_event', key: 'uuidv7' });
+      console.log(`입장 기록 파티션 ${scan.created.length}개를 만들었다`);
+      const change = await ensureMonthlyPartitions(database, systemClock, { table: 'scanner_change', key: 'uuidv7' });
+      console.log(`스캐너 변경 파티션 ${change.created.length}개를 만들었다`);
+        } finally {
+          await database.close();
+        }
+      },
+      log: (line) => console.log(line),
+    });
   } finally {
     await client.end();
   }
-  return applied;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const url = process.env.PEAKET_DATABASE_URL;
+  const url = process.env.PEAKET_MIGRATION_DATABASE_URL;
   if (!url) {
-    console.error('PEAKET_DATABASE_URL이 없다');
+    console.error('PEAKET_MIGRATION_DATABASE_URL이 없다');
     process.exit(2);
   }
-  const applied = await migrateTicket(url);
-  console.log(`ticket 마이그레이션 끝(${applied.length}개 적용)`);
+  const env = process.env.PEAKET_ENV ?? '';
+  assertDirectDatabaseUrl(url, { requireTls: !['local', 'ci'].includes(env) });
+  const result = await migrateTicket(url);
+  console.log(`ticket-svc 마이그레이션 끝(${result.applied.length}개 적용, ${result.adopted.length}개 이관)`);
 }

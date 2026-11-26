@@ -36,6 +36,14 @@
     "./token-verify": {
       "types": "./dist/token-verify.d.ts",
       "default": "./dist/token-verify.js"
+    },
+    "./migrations": {
+      "types": "./dist/migrations.d.ts",
+      "default": "./dist/migrations.js"
+    },
+    "./flags": {
+      "types": "./dist/flags.d.ts",
+      "default": "./dist/flags.js"
     }
   },
   "scripts": {

@@ -63,3 +63,8 @@ externalSecret:
     - { secretKey: PEAKET_STAFF_TOKEN_KEY_NEXT, remoteRef: { key: identity/staff-token-key-next } }
     - { secretKey: PEAKET_STAFF_TOKEN_KEY_PREVIOUS, remoteRef: { key: identity/staff-token-key-previous } }
     - { secretKey: PEAKET_STAFF_TOKEN_KEY_PREVIOUS_UNTIL, remoteRef: { key: identity/staff-token-key-previous-until } }
+
+# DB 마이그레이션 PreSync Job(BAS-060, F-09-2). 이 서비스만 켠다. Secret 키는 ddl-url·maintenance-url이다.
+migration:
+  enabled: true
+  secretName: identity-svc-migration-db

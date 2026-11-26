@@ -171,3 +171,10 @@ schemaRegistry:
       set -euo pipefail
       node /app/register-avro.mjs --registry "$PEAKET_SCHEMA_REGISTRY_URL" --topic-map /app/topics.json > /tmp/schema-ids.json
       kubectl create configmap schema-ids --from-file=schema-ids.json=/tmp/schema-ids.json --dry-run=client -o yaml | kubectl apply -f -
+
+# DB 마이그레이션 Job(BAS-060, F-09-2). 기본은 꺼짐이고 DB가 있는 서비스 여섯만 배포 값에서 켠다.
+# 켜면 같은 이미지의 scripts/migrate.mjs를 ArgoCD PreSync로 돌린다. DDL 역할·정비 역할 주소는 Secret에서만 받는다.
+migration:
+  enabled: false
+  # Secret 이름. 키는 ddl-url(DDL 역할)·maintenance-url(정비 역할)이다.
+  secretName: ""
