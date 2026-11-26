@@ -49,14 +49,23 @@ describe('홈 피드 마이그레이션 0051', () => {
     indexOf('home_theme_display_idx', 'home_theme', ['display_from', 'display_until']);
     indexOf('home_theme_item_order_idx', 'home_theme_item', ['theme_id', 'sort_order']);
 
-    // 공개 읽기 경로(core_app)에 SELECT만 준다. TO PUBLIC·다른 역할·GRANT ALL·쓰기 권한은 없다.
-    const grant = sql.match(/GRANT SELECT ON ([^;]+) TO (\w+);/i);
-    expect(grant, 'GRANT SELECT ... TO core_app').not.toBeNull();
-    expect(grant![2]).toBe('core_app');
-    for (const table of ['home_banner', 'home_theme', 'home_theme_item']) expect(grant![1]).toContain(`"${table}"`);
+    // 공개 읽기 경로(core_app)에 SELECT만 준다. 모든 GRANT 문장을 본다(TR-21).
+    const grants = [...sql.matchAll(/GRANT\s+([^;]+);/gi)].map((m) => m[1]!.trim());
+    expect(grants.length).toBeGreaterThan(0);
+    const tables = ['home_banner', 'home_theme', 'home_theme_item'];
+    const granted = new Set<string>();
+    for (const statement of grants) {
+      // GRANT ALL·쓰기 권한·SELECT, UPDATE 같은 섞인 권한은 여기서 떨어진다.
+      const grant = statement.match(/^SELECT\s+ON\s+([\s\S]+?)\s+TO\s+(\w+)$/i);
+      expect(grant, `GRANT SELECT ON ... TO core_app 문장: ${statement}`).not.toBeNull();
+      expect(grant![2], `부여 받는 역할: ${statement}`).toBe('core_app');
+      for (const table of tables) if (grant![1]!.includes(`"${table}"`)) granted.add(table);
+    }
+    expect([...granted].sort()).toEqual([...tables].sort());
+    // core_app 밖의 역할·PUBLIC·GRANT ALL·쓰기 권한은 없다.
     expect(sql).not.toMatch(/GRANT\s+ALL/i);
     expect(sql).not.toMatch(/GRANT\s+SELECT\s*,/i);
-    expect(sql).not.toMatch(/TO\s+(PUBLIC|core_partner|core_ops|core_notify|core_maintenance)\b/i);
+    expect(sql).not.toMatch(/TO\s+(?!core_app\b)\w+/i);
     expect(sql).not.toMatch(/GRANT\s+(INSERT|UPDATE|DELETE)[^;]*"home_(banner|theme)/i);
     // 홈 구성은 공개 콘텐츠라 행 보안을 걸지 않는다(계획 I-01).
     expect(sql).not.toMatch(/ROW LEVEL SECURITY/i);
