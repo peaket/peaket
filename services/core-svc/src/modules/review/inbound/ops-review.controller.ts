@@ -15,9 +15,11 @@ const ReviewRecordSchema = z
     status: z.enum(['VISIBLE', 'HIDDEN', 'DELETED']),
     notice: z.enum(['RIGHTS_TEMP', 'POLICY']).optional(),
     noticeUntil: z.string().optional(),
+    takedownReason: z.enum(['NOTICE', 'SAME_CONTENT', 'RIGHTS_TEMP', 'POLICY', 'FILMING_HOLD']).optional(),
     authorDisplay: z.string(),
     createdAt: z.string(),
     edited: z.boolean(),
+    images: z.array(z.object({ imageId: z.string(), thumbnailUrl: z.string(), url: z.string(), alt: z.string().optional(), width: z.number(), height: z.number() })).max(3),
   })
   .strict();
 const OpsReviewDetail = z.object({

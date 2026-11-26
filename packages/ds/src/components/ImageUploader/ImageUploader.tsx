@@ -12,6 +12,8 @@ export type ImageUploaderItemStatus = "ready" | "uploading" | "scanning" | "erro
 export interface ImageUploaderItem {
   id: string;
   status: ImageUploaderItemStatus;
+  /** 업로드가 끝나 서버가 준 사진 ID */
+  imageId?: string;
   /** uploading일 때 0~100 */
   progress?: number;
   /** 사진 설명(대체 텍스트) */
@@ -45,6 +47,8 @@ export interface ImageUploaderProps {
   itemLabel?: string;
   /** 처음 목록(상태 미리보기) */
   defaultItems?: readonly ImageUploaderItem[];
+  /** 파일을 서버로 올리고 사진 ID를 받는다. 없으면 퍼블리싱 미리보기처럼 화면에만 둔다 */
+  upload?: (file: File) => Promise<{ imageId: string }>;
   onChange?: (items: readonly ImageUploaderItem[]) => void;
   disabled?: boolean;
 }
@@ -54,7 +58,7 @@ const TILE = 72;
 
 function checkFile(file: File, accept: string, maxBytes: number): string | null {
   const types = accept.split(",").map((t) => t.trim());
-  if (!types.includes(file.type)) return "JPEG, PNG, WebP 이미지만 올릴 수 있습니다";
+  if (!types.includes(file.type)) return "JPEG·PNG·WebP 사진만 올릴 수 있습니다";
   if (file.size > maxBytes) return `한 장에 ${Math.round(maxBytes / (1024 * 1024))}MB까지 올릴 수 있습니다`;
   return null;
 }
@@ -70,6 +74,7 @@ export function ImageUploader({
   captionMax = 100,
   itemLabel = "사진",
   defaultItems = [],
+  upload,
   onChange,
   disabled = false,
 }: ImageUploaderProps) {
@@ -85,6 +90,14 @@ export function ImageUploader({
   const update = (next: readonly ImageUploaderItem[]) => {
     setItems(next);
     onChange?.(next);
+  };
+
+  const updateWith = (fn: (previous: readonly ImageUploaderItem[]) => readonly ImageUploaderItem[]) => {
+    setItems((previous) => {
+      const next = fn(previous);
+      onChange?.(next);
+      return next;
+    });
   };
 
   const full = items.length >= max;
@@ -104,9 +117,25 @@ export function ImageUploader({
         previewUrl = URL.createObjectURL(file);
         urls.current.push(previewUrl);
       }
-      return { id: `${base}-${Date.now()}-${i}`, status: err ? "error" : "ready", error: err ?? undefined, previewUrl };
+      return { id: `${base}-${Date.now()}-${i}`, status: err ? "error" : upload ? "uploading" : "ready", error: err ?? undefined, previewUrl, progress: err || !upload ? undefined : 0 };
     });
     update([...items, ...added]);
+    if (upload) {
+      for (const [i, item] of added.entries()) {
+        const file = picked[i];
+        if (!file || item.status === "error") continue;
+        void (async () => {
+          try {
+            const out = await upload(file);
+            updateWith((current) => current.map((x) => (x.id === item.id ? { ...x, status: "ready", imageId: out.imageId, progress: 100 } : x)));
+          } catch (e) {
+            const message = e instanceof Error ? e.message : "올리지 못했습니다. 다시 시도해 주세요";
+            const retryable = (e as { retryable?: boolean })?.retryable ?? true;
+            updateWith((current) => current.map((x) => (x.id === item.id ? { ...x, status: "error", error: message, retryable } : x)));
+          }
+        })();
+      }
+    }
     setNotice(files.length > picked.length ? `${itemLabel}은 ${max}장까지 올릴 수 있습니다` : `${itemLabel} ${added.length}장을 더했습니다`);
     if (inputRef.current) inputRef.current.value = "";
   }

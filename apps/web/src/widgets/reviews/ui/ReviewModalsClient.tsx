@@ -35,6 +35,9 @@ import {
   mapReview,
   mapReviewPage,
   mapReviewSummary,
+  photoUploadFailure,
+  canSubmitWrite,
+  reviewImagePayload,
   reviewSortParam,
   reviewTargetOf,
   sortReviewItems,
@@ -93,7 +96,7 @@ const PHOTO_READY: readonly ImageUploaderItem[] = [
 ];
 
 function writePresetFor(preview: Scr016State | null, editing?: Review): WritePreset {
-  if (editing) return { mode: 'edit', rating: editing.stars, text: editing.body, photos: [], validate: false, already: false };
+  if (editing) return { mode: 'edit', rating: editing.stars, text: editing.body, photos: editing.photos.map((p, i) => ({ id: p.imageId ?? `rw-existing-${i}`, status: 'ready', ...(p.imageId ? { imageId: p.imageId } : {}), caption: p.caption })), validate: false, already: false };
   switch (preview) {
     case '후기 쓰기(사진)':
       return { mode: 'new', rating: 4, text: WRITE_TEXT, photos: [...PHOTO_READY, { id: 'rw-p3', status: 'uploading', progress: 64 }], validate: false, already: false };
@@ -219,6 +222,21 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
     (id: string) => `${typeof window === 'undefined' ? '' : window.location.origin}${path}?reviews=all&review=${encodeURIComponent(id)}`,
     [path],
   );
+
+  const uploadReviewPhoto = useCallback(async (file: File): Promise<{ imageId: string }> => {
+    try {
+      const [{ createReviewImage }] = await Promise.all([import('@peaket/api-client/endpoints/reviews')]);
+      if (!ensureBrowserApi()) throw new Error('no-api');
+      const r = await withFanRefresh(() => createReviewImage({ file }, { headers: { 'X-Requested-With': 'XMLHttpRequest' } }));
+      const imageId = r.data.imageId;
+      if (!imageId) throw new Error('no-image-id');
+      return { imageId };
+    } catch (e) {
+      const reason = e instanceof ApiError ? (typeof e.extensions.reason === 'string' ? e.extensions.reason : e.status === 429 ? 'RATE_LIMITED' : e.status === 503 ? 'UNAVAILABLE' : undefined) : undefined;
+      const failure = photoUploadFailure(reason);
+      throw Object.assign(new Error(failure.message), { retryable: failure.retryable });
+    }
+  }, []);
 
   const showLocalToast = useCallback((t: Omit<LocalToast, 'id'>, persistent = false) => {
     clearTimeout(toastTimer.current);
@@ -398,14 +416,14 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
     }
   };
 
-  const submitWrite = async (rating: number, body: string): Promise<WriteResult> => {
+  const submitWrite = async (rating: number, body: string, images: { imageId: string; alt?: string }[]): Promise<WriteResult> => {
     try {
       const [{ createEventReview, updateReview }] = await Promise.all([import('@peaket/api-client/endpoints/reviews')]);
       if (editing) {
-        await withFanRefresh(() => updateReview(editing.id, { rating, body }));
+        await withFanRefresh(() => updateReview(editing.id, { rating, body, images }));
       } else {
         await withFanRefresh(() =>
-          createEventReview(eventId, { rating, body }, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
+          createEventReview(eventId, { rating, body, images }, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
         );
       }
       setReloadKey((k) => k + 1);
@@ -679,6 +697,7 @@ export function ReviewModalsClient({ init, path, theme, guest, title, rounds, cu
             } else closeAll();
           }}
           onSubmit={submitWrite}
+          uploadReviewPhoto={uploadReviewPhoto}
         />
       ) : null}
 
@@ -1062,16 +1081,19 @@ function WriteModal({
   currentRound,
   onClose,
   onSubmit,
+  uploadReviewPhoto,
 }: {
   preset: WritePreset;
   title: string;
   rounds: readonly { value: string; label: string }[];
   currentRound: string;
   onClose: () => void;
-  onSubmit: (rating: number, body: string) => Promise<WriteResult>;
+  uploadReviewPhoto: (file: File) => Promise<{ imageId: string }>;
+  onSubmit: (rating: number, body: string, images: { imageId: string; alt?: string }[]) => Promise<WriteResult>;
 }) {
   const [rating, setRating] = useState(preset.rating);
   const [text, setText] = useState(preset.text);
+  const [photos, setPhotos] = useState<readonly ImageUploaderItem[]>(preset.photos);
   const [errors, setErrors] = useState<WriteErrors>(() => (preset.validate ? checkWrite(preset.rating, preset.text) : {}));
   const [submitCount, setSubmitCount] = useState(preset.validate ? 1 : 0);
   const [submitting, setSubmitting] = useState(false);
@@ -1083,12 +1105,13 @@ function WriteModal({
 
   const submit = async () => {
     const e = checkWrite(rating, text);
+    if (!canSubmitWrite(photos)) e.server = '사진 올리기를 마쳐 주세요';
     setErrors(e);
     setSubmitCount((c) => c + 1);
-    if (e.rating || e.text || e.banned) return;
+    if (e.rating || e.text || e.banned || e.server) return;
     setSubmitting(true);
     try {
-      const result = await onSubmit(rating, text);
+      const result = await onSubmit(rating, text, reviewImagePayload(photos.map((p) => ({ imageId: p.imageId, caption: p.caption ?? '' }))));
       if (!result.ok) setErrors(result.errors ?? { server: '후기를 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.' });
     } finally {
       setSubmitting(false);
@@ -1163,7 +1186,7 @@ function WriteModal({
           onChange={(e) => setText(e.target.value)}
           error={errors.banned ?? errors.text}
         />
-        <ImageUploader id="rw-ph" hint={PHOTO_HINT} max={3} defaultItems={preset.photos} />
+        <ImageUploader id="rw-ph" hint={PHOTO_HINT} max={3} defaultItems={preset.photos} upload={uploadReviewPhoto} onChange={setPhotos} />
         <div className="flex flex-col-reverse gap-2 md:flex-row md:flex-wrap md:items-center md:justify-end">
           <button className="btn btn-ghost hidden md:inline-flex" type="button" onClick={onClose}>
             닫기

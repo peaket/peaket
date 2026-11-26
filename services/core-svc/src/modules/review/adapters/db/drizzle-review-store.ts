@@ -5,8 +5,9 @@ import { randomUUID } from 'node:crypto';
 import type { Database, DbTransaction } from '@peaket/platform';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { ReportRecord, ReviewRecord, ReviewSort, TakedownRecord } from '../../domain/review.js';
+import { reviewImageDerivativeNames, reviewImagePublicKey, REVIEW_IMAGE_UNATTACHED_TTL_MS, type ReviewImageAttach, type ReviewImageRecord } from '../../domain/review-image.js';
 import type { HeldWithdrawalRow, ReviewListInput, ReviewListResult, ReviewStore } from '../../domain/ports.js';
-import { contentReport, review, reviewHiddenFingerprint, takedownAction } from './schema.js';
+import { contentReport, review, reviewHiddenFingerprint, reviewImage, takedownAction } from './schema.js';
 
 type Db = Database['db'] | DbTransaction;
 type ReviewRow = typeof review.$inferSelect;
@@ -74,6 +75,7 @@ const ACCOUNTS_WITHDRAWN = 'identity.accounts-withdrawn';
 /** 그 계정의 후기를 상태와 관계없이 모두 파기한다(색인 review_account_idx). 바꾼 행 수 */
 async function purgeAccountRows(db: Db, accountId: string, nowMs: number): Promise<number> {
   const r = await db.execute(sql`update review set ${purgeSet(nowMs)} where account_id = ${accountId}::uuid returning id`);
+  await db.execute(sql`update review_image set status = 'DELETED', deleted_at = coalesce(deleted_at, ${new Date(nowMs)}::timestamptz) where account_id = ${accountId}::uuid and status <> 'DELETED'`);
   return r.rows.length;
 }
 
@@ -104,6 +106,25 @@ const takedownOf = (r: TakedownRow): TakedownRecord => ({
   ...(r.restoredAt ? { restoredAtMs: r.restoredAt.getTime() } : {}),
 });
 
+type ReviewImageRow = typeof reviewImage.$inferSelect;
+const imageOf = (r: ReviewImageRow): ReviewImageRecord => ({
+  imageId: r.id,
+  reviewId: r.reviewId,
+  accountId: r.accountId,
+  status: r.status as ReviewImageRecord['status'],
+  ...(r.rejectReason ? { rejectReason: r.rejectReason as ReviewImageRecord['rejectReason'] } : {}),
+  altText: r.altText,
+  width: r.width,
+  height: r.height,
+  sort: r.sort,
+  thumbKey: r.thumbKey,
+  viewKey: r.viewKey,
+  createdAtMs: r.createdAt.getTime(),
+  ...(r.attachedAt ? { attachedAtMs: r.attachedAt.getTime() } : {}),
+  ...(r.deletedAt ? { deletedAtMs: r.deletedAt.getTime() } : {}),
+});
+const imageKeys = (imageId: string): string[] => reviewImageDerivativeNames().map((n) => reviewImagePublicKey(imageId, n));
+
 const visibleWhere = (viewer: string | undefined) =>
   viewer
     ? or(eq(review.status, 'VISIBLE'), isNotNull(review.notice), eq(review.accountId, viewer))
@@ -120,22 +141,25 @@ const cursorWhere = (c: Cursor | undefined, sort: ReviewSort) => {
 export class DrizzleReviewStore implements ReviewStore {
   constructor(private readonly database: Database) {}
 
-  async insertReview(r: ReviewRecord): Promise<void> {
-    await this.database.db.insert(review).values({
-      id: r.reviewId,
-      eventId: r.eventId,
-      accountId: r.accountId,
-      basisOrderId: r.basisOrderId,
-      rating: r.rating,
-      body: r.body,
-      status: r.status,
-      notice: r.notice ?? null,
-      noticeUntil: r.noticeUntilMs === undefined ? null : new Date(r.noticeUntilMs),
-      contentFingerprint: r.contentFingerprint,
-      authorDisplay: r.authorDisplay,
-      edited: r.edited,
-      createdAt: new Date(r.createdAtMs),
-      updatedAt: new Date(r.updatedAtMs),
+  async insertReview(r: ReviewRecord, images: readonly ReviewImageAttach[] = []): Promise<void> {
+    await this.database.transaction(async (tx) => {
+      await tx.insert(review).values({
+        id: r.reviewId,
+        eventId: r.eventId,
+        accountId: r.accountId,
+        basisOrderId: r.basisOrderId,
+        rating: r.rating,
+        body: r.body,
+        status: r.status,
+        notice: r.notice ?? null,
+        noticeUntil: r.noticeUntilMs === undefined ? null : new Date(r.noticeUntilMs),
+        contentFingerprint: r.contentFingerprint,
+        authorDisplay: r.authorDisplay,
+        edited: r.edited,
+        createdAt: new Date(r.createdAtMs),
+        updatedAt: new Date(r.updatedAtMs),
+      });
+      await this.#attachImages(tx, r.reviewId, r.accountId, images, r.createdAtMs);
     });
   }
 
@@ -153,25 +177,55 @@ export class DrizzleReviewStore implements ReviewStore {
     return rows[0] ? this.#withProduction(rows[0].review) : undefined;
   }
 
-  async updateReview(reviewId: string, patch: Partial<Pick<ReviewRecord, 'rating' | 'body' | 'status' | 'notice' | 'noticeUntilMs' | 'contentFingerprint' | 'updatedAtMs' | 'edited'>>): Promise<void> {
-    await this.database.db
-      .update(review)
-      .set({
-        ...(patch.rating !== undefined ? { rating: patch.rating } : {}),
-        ...(patch.body !== undefined ? { body: patch.body } : {}),
-        ...(patch.status !== undefined ? { status: patch.status } : {}),
-        ...('notice' in patch ? { notice: patch.notice ?? null } : {}),
-        ...('noticeUntilMs' in patch ? { noticeUntil: patch.noticeUntilMs === undefined ? null : new Date(patch.noticeUntilMs) } : {}),
-        ...(patch.contentFingerprint !== undefined ? { contentFingerprint: patch.contentFingerprint } : {}),
-        ...(patch.updatedAtMs !== undefined ? { updatedAt: new Date(patch.updatedAtMs) } : {}),
-        ...(patch.edited !== undefined ? { edited: patch.edited } : {}),
-      })
-      .where(eq(review.id, reviewId));
+  async updateReview(
+    reviewId: string,
+    patch: Partial<Pick<ReviewRecord, 'rating' | 'body' | 'status' | 'notice' | 'noticeUntilMs' | 'contentFingerprint' | 'updatedAtMs' | 'edited'>>,
+    images?: readonly ReviewImageAttach[],
+  ): Promise<readonly string[]> {
+    return this.database.transaction(async (tx) => {
+      const rows = await tx.select({ review }).from(review).where(eq(review.id, reviewId)).limit(1);
+      const current = rows[0]?.review;
+      if (!current) return [];
+      await tx
+        .update(review)
+        .set({
+          ...(patch.rating !== undefined ? { rating: patch.rating } : {}),
+          ...(patch.body !== undefined ? { body: patch.body } : {}),
+          ...(patch.status !== undefined ? { status: patch.status } : {}),
+          ...('notice' in patch ? { notice: patch.notice ?? null } : {}),
+          ...('noticeUntilMs' in patch ? { noticeUntil: patch.noticeUntilMs === undefined ? null : new Date(patch.noticeUntilMs) } : {}),
+          ...(patch.contentFingerprint !== undefined ? { contentFingerprint: patch.contentFingerprint } : {}),
+          ...(patch.updatedAtMs !== undefined ? { updatedAt: new Date(patch.updatedAtMs) } : {}),
+          ...(patch.edited !== undefined ? { edited: patch.edited } : {}),
+        })
+        .where(eq(review.id, reviewId));
+      if (images === undefined) return [];
+      const keep = new Set(images.map((i) => i.imageId));
+      const existing = await tx.select().from(reviewImage).where(eq(reviewImage.reviewId, reviewId));
+      const removed: string[] = [];
+      for (const row of existing) {
+        if (keep.has(row.id)) continue;
+        await tx.update(reviewImage).set({ status: 'DELETED', deletedAt: new Date(patch.updatedAtMs ?? Date.now()) }).where(eq(reviewImage.id, row.id));
+        removed.push(...imageKeys(row.id));
+      }
+      await this.#attachImages(tx, reviewId, current.accountId, images, patch.updatedAtMs ?? Date.now());
+      return removed;
+    });
   }
 
-  async softDeleteReview(reviewId: string, nowMs: number): Promise<void> {
-    // 작성자 지우기도 탈퇴 파기와 같은 칸을 비운다(docs/data.md §2 '후기 파기', ADR-0086 ⑧)
-    await this.database.db.execute(sql`update review set ${purgeSet(nowMs)} where id = ${reviewId}::uuid`);
+  async softDeleteReview(reviewId: string, nowMs: number): Promise<readonly string[]> {
+    return this.database.transaction(async (tx) => {
+      // 작성자 지우기도 탈퇴 파기와 같은 칸을 비운다(docs/data.md §2 '후기 파기', ADR-0086 ⑧)
+      await tx.execute(sql`update review set ${purgeSet(nowMs)} where id = ${reviewId}::uuid`);
+      const rows = await tx.select().from(reviewImage).where(eq(reviewImage.reviewId, reviewId));
+      const keys: string[] = [];
+      for (const row of rows) {
+        if (row.status === 'DELETED') continue;
+        await tx.update(reviewImage).set({ status: 'DELETED', deletedAt: new Date(nowMs) }).where(eq(reviewImage.id, row.id));
+        keys.push(...imageKeys(row.id));
+      }
+      return keys;
+    });
   }
 
   async listReviews(input: ReviewListInput): Promise<ReviewListResult> {
@@ -197,6 +251,77 @@ export class DrizzleReviewStore implements ReviewStore {
     if (eventIds.length === 0) return [];
     const rows = await this.database.db.select({ review }).from(review).where(and(inArray(review.eventId, eventIds), eq(review.status, 'VISIBLE')));
     return rows.map((r) => ({ ...recordOf(r.review), productionId }));
+  }
+
+  async imagesByReviews(reviewIds: readonly string[]): Promise<ReadonlyMap<string, readonly ReviewImageRecord[]>> {
+    const out = new Map<string, ReviewImageRecord[]>();
+    for (const id of reviewIds) out.set(id, []);
+    if (reviewIds.length === 0) return out;
+    const rows = await this.database.db.select().from(reviewImage).where(inArray(reviewImage.reviewId, [...reviewIds]));
+    for (const row of rows) out.get(row.reviewId!)?.push(imageOf(row));
+    for (const list of out.values()) list.sort((a, b) => a.sort - b.sort || a.imageId.localeCompare(b.imageId));
+    return out;
+  }
+
+  async imageRowsByAccount(accountId: string): Promise<readonly ReviewImageRecord[]> {
+    const rows = await this.database.db.select().from(reviewImage).where(eq(reviewImage.accountId, accountId));
+    return rows.map(imageOf);
+  }
+
+  async imageRowsDueForCleanup(nowMs: number, limit: number): Promise<readonly ReviewImageRecord[]> {
+    const before = new Date(nowMs - REVIEW_IMAGE_UNATTACHED_TTL_MS);
+    const rows = await this.database.db
+      .select()
+      .from(reviewImage)
+      .where(or(eq(reviewImage.status, 'DELETED'), and(isNull(reviewImage.reviewId), eq(reviewImage.status, 'READY'), lt(reviewImage.createdAt, before))))
+      .orderBy(asc(reviewImage.createdAt), asc(reviewImage.id))
+      .limit(limit);
+    return rows.map(imageOf);
+  }
+
+  async insertReviewImage(row: ReviewImageRecord): Promise<void> {
+    await this.database.db.insert(reviewImage).values({
+      id: row.imageId,
+      reviewId: row.reviewId,
+      accountId: row.accountId,
+      status: row.status,
+      rejectReason: row.rejectReason ?? null,
+      altText: row.altText,
+      width: row.width,
+      height: row.height,
+      sort: row.sort,
+      thumbKey: row.thumbKey,
+      viewKey: row.viewKey,
+      createdAt: new Date(row.createdAtMs),
+      attachedAt: row.attachedAtMs === undefined ? null : new Date(row.attachedAtMs),
+      deletedAt: row.deletedAtMs === undefined ? null : new Date(row.deletedAtMs),
+    });
+  }
+
+  async deleteImageRows(imageIds: readonly string[]): Promise<void> {
+    if (imageIds.length === 0) return;
+    await this.database.db.delete(reviewImage).where(inArray(reviewImage.id, [...imageIds]));
+  }
+
+  async countImageUploadsSince(accountId: string, sinceMs: number): Promise<number> {
+    const rows = await this.database.db
+      .select({ id: reviewImage.id })
+      .from(reviewImage)
+      .where(and(eq(reviewImage.accountId, accountId), gt(reviewImage.createdAt, new Date(sinceMs))));
+    return rows.length;
+  }
+
+  async #attachImages(tx: DbTransaction, reviewId: string, accountId: string, images: readonly ReviewImageAttach[], nowMs: number): Promise<void> {
+    if (images.length === 0) return;
+    const ids = images.map((i) => i.imageId);
+    if (new Set(ids).size !== ids.length) throw new Error('review-image-duplicate');
+    const rows = await tx.select().from(reviewImage).where(inArray(reviewImage.id, ids)).for('update');
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const [sort, item] of images.entries()) {
+      const row = byId.get(item.imageId);
+      if (!row || row.accountId !== accountId || row.status !== 'READY' || (row.reviewId !== null && row.reviewId !== reviewId)) throw new Error('review-image-not-attachable');
+      await tx.update(reviewImage).set({ reviewId, altText: item.alt ?? '', sort, attachedAt: row.attachedAt ?? new Date(nowMs) }).where(eq(reviewImage.id, item.imageId));
+    }
   }
 
   async reportedTargetIds(accountId: string, targetIds: readonly string[]): Promise<ReadonlySet<string>> {

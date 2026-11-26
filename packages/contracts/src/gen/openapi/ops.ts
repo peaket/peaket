@@ -2984,6 +2984,8 @@ export const GetOpsReviewParams = zod.object({
 
 export const getOpsReviewResponseReviewRatingMax = 5;
 
+export const getOpsReviewResponseReviewImagesMax = 3;
+
 
 
 export const GetOpsReviewResponse = zod.object({
@@ -2995,9 +2997,18 @@ export const GetOpsReviewResponse = zod.object({
   "status": zod.enum(['VISIBLE', 'HIDDEN', 'DELETED']).optional(),
   "notice": zod.enum(['RIGHTS_TEMP', 'POLICY']).optional(),
   "noticeUntil": zod.iso.datetime({"offset":true}).optional(),
+  "takedownReason": zod.enum(['NOTICE', 'SAME_CONTENT', 'RIGHTS_TEMP', 'POLICY', 'FILMING_HOLD']).optional().describe('지금 살아 있는 가림 조치의 종류. 신고 처리 공시는 notice에 있고, 법정 통보·같은 내용·불법 촬영물 확인 중은 이 값으로 구분한다(F-07-10)'),
   "authorDisplay": zod.string().optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional(),
-  "edited": zod.boolean().optional()
+  "edited": zod.boolean().optional(),
+  "images": zod.array(zod.object({
+  "imageId": zod.string().optional(),
+  "thumbnailUrl": zod.url().optional().describe('목록 파생본(240px [가정])'),
+  "url": zod.url().optional().describe('보기 파생본(긴 변 1,280px [가정])'),
+  "alt": zod.string().optional().describe('사진 설명. 비었으면 화면이 \'후기 사진 1/3\'으로 읽는다'),
+  "width": zod.int().optional(),
+  "height": zod.int().optional()
+}).describe('후기에 붙은 사진(ADR-0066). 메타데이터를 지운 파생본 2종만 있고 원본은 없다. 이름은 서버가 만든 ID')).max(getOpsReviewResponseReviewImagesMax).optional().describe('후기에 붙은 사진(최대 3장). 목록 240·보기 1,280 파생본 주소와 설명을 싣는다')
 }).optional(),
   "summary": zod.object({
   "total": zod.int().optional(),

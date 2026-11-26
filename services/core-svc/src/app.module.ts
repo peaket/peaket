@@ -68,7 +68,7 @@ export class AppModule {
         imports: [
           databaseModule(o.database),
           CatalogModule.register({ storage: 'database', partnerDatabase: o.partnerDatabase, ...(o.opsDatabase ? { opsDatabase: o.opsDatabase } : {}), ...(o.searchDatabase ? { searchDatabase: o.searchDatabase } : {}), media: o.media, ...(o.opsApprovals ? { opsApprovals: o.opsApprovals } : {}), ...(o.saleConfigStore ? { saleConfigStore: o.saleConfigStore } : {}), ...(o.saleOpen ? { saleOpen: o.saleOpen } : {}), ...(o.saleConfigMetrics ? { saleConfigMetrics: o.saleConfigMetrics } : {}), ...(o.payoutRegistration ? { payoutRegistration: o.payoutRegistration } : {}) }),
-          ReviewModule.register({ storage: 'database', database: o.database, ...(o.review ? o.review : {}) }),
+          ReviewModule.register({ storage: 'database', database: o.database, ...(o.review ? o.review : {}), ...(o.media ? { images: { origin: o.media.imageOrigin, objects: o.media.store, processing: o.media.processing } } : {}) }),
           ShopModule.register({
             storage: 'database',
             database: o.database,
@@ -94,7 +94,7 @@ export class AppModule {
       module: AppModule,
       imports: [
         CatalogModule.register({ storage: 'memory', ...(o.catalog ? { repository: o.catalog } : {}), ...(o.media ? { media: o.media } : {}), ...(o.saleConfigs ? { saleConfigs: o.saleConfigs } : {}), ...(o.opsApprovals ? { opsApprovals: o.opsApprovals } : {}), ...(o.saleOpen ? { saleOpen: o.saleOpen } : {}), ...(o.saleConfigMetrics ? { saleConfigMetrics: o.saleConfigMetrics } : {}), ...(o.payoutRegistration ? { payoutRegistration: o.payoutRegistration } : {}) }),
-        ReviewModule.register({ storage: 'memory', wiring: { ...(o.catalog ? { catalogRepository: o.catalog } : {}), ...(o.review ?? {}) } }),
+        ReviewModule.register({ storage: 'memory', wiring: { ...(o.catalog ? { catalogRepository: o.catalog } : {}), ...(o.review ?? {}), ...(o.media?.store && o.media.processing && o.media.imageOrigin ? { images: { origin: o.media.imageOrigin, objects: o.media.store, processing: o.media.processing } } : {}) } }),
         ShopModule.register({ storage: 'memory', ...(o.shop ? { wiring: o.shop } : {}) }),
         NotifyModule.register({ storage: 'memory', ...(o.notify?.store ? { store: o.notify.store } : {}), ...(o.notify?.notificationTransport ? { notificationTransport: o.notify.notificationTransport } : {}), ...(o.notify?.env ? { env: o.notify.env } : {}), ...(o.notify?.fanNotify ? { fanNotify: o.notify.fanNotify } : {}), ...(o.catalog ? { catalog: o.catalog } : {}) }),
         ExportModule.register({ storage: 'memory', ...(o.export ? { wiring: o.export } : {}) }),

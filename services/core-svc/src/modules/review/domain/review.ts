@@ -1,6 +1,7 @@
 // 관람 후기·게시물 신고·운영자 조치의 순수 규칙(BUILD_ORDER BAT-585, FR-016·FR-033·FR-070, POL-024·POL-042·POL-044, ADR-0066).
 // 저장소·HTTP와 분리해 시험한다. 후기 본문은 NFC, 같은 내용 지문은 NFKC 뒤 공백·문장부호를 지워 만든다.
 import { createHash } from 'node:crypto';
+import { normalizeReviewImageAlt, type ReviewImageView, type ReviewImageAttach } from './review-image.js';
 
 export const REVIEW_BODY_MIN = 10;
 export const REVIEW_BODY_MAX = 1000;
@@ -122,7 +123,7 @@ export interface ReviewView {
   readonly edited: boolean;
   readonly mine: boolean;
   readonly reportedByMe: boolean;
-  readonly images: readonly never[];
+  readonly images: readonly ReviewImageView[];
   readonly status: ReviewStatus;
   readonly notice?: ReviewNotice;
   readonly noticeUntil?: string;
@@ -172,13 +173,14 @@ export function normalizeText(raw: string): string {
   return raw.normalize('NFC').replace(CONTROL, '');
 }
 
-export function validateReviewWrite(input: ReviewWriteInput): { rating: number; body: string } {
+export function validateReviewWrite(input: ReviewWriteInput): { rating: number; body: string; images?: readonly ReviewImageAttach[] } {
   if (!Number.isInteger(input.rating) || input.rating < 1 || input.rating > 5) throw new ReviewProblem('review-invalid', 422, '별점은 1~5점이어야 합니다');
-  if (input.images !== undefined && input.images.length > 0) throw new ReviewProblem('review-images-unavailable', 422, '후기 사진은 아직 받지 않습니다');
+  if (input.images !== undefined && input.images.length > REVIEW_IMAGES_MAX) throw new ReviewProblem('review-invalid', 422, `후기 사진은 ${REVIEW_IMAGES_MAX}장까지 올릴 수 있습니다`);
   const body = normalizeText(input.body);
   const n = graphemes(body).length;
   if (n < REVIEW_BODY_MIN || n > REVIEW_BODY_MAX) throw new ReviewProblem('review-invalid', 422, `후기 본문은 ${REVIEW_BODY_MIN}~${REVIEW_BODY_MAX}자여야 합니다`);
-  return { rating: input.rating, body };
+  const images = input.images?.map((i) => ({ imageId: i.imageId, alt: normalizeReviewImageAlt(i.alt) }));
+  return { rating: input.rating, body, ...(images ? { images } : {}) };
 }
 
 export function validateReport(input: ReportInput): { category: ReportCategory; detail: string; rightsHolder: boolean; notifyChannel?: 'APP' | 'EMAIL' } {
@@ -264,13 +266,14 @@ export function moderationEffect(input: ModerationInput, nowMs: number): Moderat
 }
 
 /** 목록에 보일 모양. 남에게는 가린 후기를 빼고, 신고 처리로 가린 후기는 notice만 보인다(POL-042 ⑦, POL-044 ⑤) */
-export function reviewView(r: ReviewRecord, viewerAccountId: string | undefined, reportedByMe: boolean, attendedStartsAt: string): ReviewView | undefined {
+export function reviewView(r: ReviewRecord, viewerAccountId: string | undefined, reportedByMe: boolean, attendedStartsAt: string, images: readonly ReviewImageView[] = []): ReviewView | undefined {
   const mine = viewerAccountId === r.accountId;
   if (r.status === 'DELETED') return undefined;
   if (r.status === 'HIDDEN') {
     if (r.notice) return { reviewId: r.reviewId, eventId: r.eventId, authorDisplay: r.authorDisplay, attendedStartsAt, createdAt: new Date(r.createdAtMs).toISOString(), edited: r.edited, mine, reportedByMe, images: [], status: 'HIDDEN', notice: r.notice, ...(r.noticeUntilMs ? { noticeUntil: new Date(r.noticeUntilMs).toISOString() } : {}), permalink: `/reviews/${r.reviewId}` };
     if (!mine) return undefined;
   }
+  const visible = r.status === 'VISIBLE';
   return {
     reviewId: r.reviewId,
     eventId: r.eventId,
@@ -283,7 +286,7 @@ export function reviewView(r: ReviewRecord, viewerAccountId: string | undefined,
     edited: r.edited,
     mine,
     reportedByMe,
-    images: [],
+    images: visible ? images : [],
     status: r.status,
     permalink: `/reviews/${r.reviewId}`,
   };

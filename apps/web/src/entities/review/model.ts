@@ -19,6 +19,8 @@ function parseTime(iso: string | undefined): number | undefined {
 }
 
 export interface ReviewPhoto {
+  /** 고치기에서 다시 붙일 때 쓰는 서버 사진 ID */
+  imageId?: string;
   /** 사진 설명(대체 텍스트). 비면 '후기 사진 n/전체'로 읽는다 */
   caption: string;
   /** 큰 사진 주소(서버 파생본) */
@@ -116,7 +118,7 @@ export function mapReview(view: ApiReview): ReviewItem | undefined {
     order,
     stars: restricted ? 0 : (view.rating ?? 0),
     body: restricted ? '' : (view.body ?? ''),
-    photos: restricted ? [] : (view.images ?? []).map((img) => ({ caption: img.alt ?? '', ...(img.url ? { url: img.url } : {}), ...(img.thumbnailUrl ? { thumbnailUrl: img.thumbnailUrl } : {}) })),
+    photos: restricted ? [] : (view.images ?? []).map((img) => ({ ...(img.imageId ? { imageId: img.imageId } : {}), caption: img.alt ?? '', ...(img.url ? { url: img.url } : {}), ...(img.thumbnailUrl ? { thumbnailUrl: img.thumbnailUrl } : {}) })),
     ...(view.mine ? { mine: true } : {}),
     ...(view.reportedByMe ? { reportedByMe: true } : {}),
     ...(restricted ? { restricted: true } : {}),
@@ -160,3 +162,39 @@ export const MY_MASKED_EMAIL = 'ji****@k*****.com';
 
 /** 후기 쓰기 금칙어(정규화 뒤 일치, 화면의 즉시 안내용). 정본은 서버가 가진다 */
 export const BANNED_PHRASES: readonly string[] = ['매크로 대행', '대리 예매', '자동 예매 프로그램 판매'];
+
+/** 사진 설명(대체 텍스트). 비면 '후기 사진 n/전체'로 읽는다 */
+export function photoAltText(photo: Pick<ReviewPhoto, 'caption'>, index: number, total: number): string {
+  const caption = photo.caption.trim();
+  return caption || `후기 사진 ${index}/${total}`;
+}
+
+/** 후기 저장·고치기 본문의 images. imageId가 있는 사진만 순서대로 {imageId, alt}로 만든다 */
+export function reviewImagePayload(photos: readonly ReviewPhoto[]): { imageId: string; alt?: string }[] {
+  return photos.flatMap((p) => {
+    if (!p.imageId) return [];
+    const alt = p.caption.trim();
+    return [{ imageId: p.imageId, ...(alt ? { alt } : {}) }];
+  });
+}
+
+/** 422 사유·네트워크를 d5 §5.16 문구와 다시 시도 여부로 바꾼다 */
+export function photoUploadFailure(reason: string | undefined): { message: string; retryable: boolean } {
+  switch (reason) {
+    case 'UNSUPPORTED_TYPE':
+      return { message: 'JPEG·PNG·WebP 사진만 올릴 수 있습니다', retryable: false };
+    case 'TOO_LARGE':
+      return { message: '한 장에 10MB까지 올릴 수 있습니다', retryable: false };
+    case 'TOO_SMALL':
+      return { message: '사진이 너무 작습니다. 짧은 변이 320px 이상인 사진을 올려 주세요', retryable: false };
+    case 'MALWARE':
+      return { message: '올리지 못했습니다. 다시 시도해 주세요', retryable: false };
+    default:
+      return { message: '올리지 못했습니다. 다시 시도해 주세요', retryable: true };
+  }
+}
+
+/** 올리는 중·오류·imageId 없는 사진이 하나라도 있으면 등록·고치기를 막는다 */
+export function canSubmitWrite(items: readonly { status: string; imageId?: string }[]): boolean {
+  return items.every((i) => i.status === 'ready' && !!i.imageId);
+}

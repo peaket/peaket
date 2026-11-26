@@ -18,6 +18,9 @@ export { saleEligibilityMaintenanceTasks } from './application/eligibility-maint
 export type { EligibilityCopyPut, MemberCodeDirectory, SaleEligibilityCopy } from './domain/eligibility-ports.js';
 export { MemberCodeLookupFailed } from './domain/eligibility-ports.js';
 export { GrpcImageProcessing } from './adapters/image-processing-client.js';
+export { unavailableImageProcessing } from './adapters/cdn-invalidation.js';
+export { agreedFormat, sniffFormat } from './domain/production-image.js';
+export type { ImageObjectStore, ImageProcessing, ProcessImageKind, ProcessOutcome } from './domain/media-ports.js';
 export { GrpcSeatmapParser, hostPort } from './adapters/seatmap-worker-client.js';
 export { LocalFolderImageStore, MemoryImageObjectStore } from './adapters/image-store.js';
 export { LocalFolderPublicFileStore, MemoryPublicFileStore } from './adapters/public-file-store.js';
@@ -81,3 +84,5 @@ export { checkScaleChange, SCALE_CHANGE_CLOSE_MS, LARGE_INTERVAL_MS } from './do
 export { EmptyDemandForecastSource } from './adapters/empty-demand-forecast-source.js';
 export { DEMAND_FORECAST_SOURCE, type DemandForecastSource } from './domain/demand-ports.js';
 export { assertDatabaseRole } from './adapters/db/database-role.js';
+export { readUploadForm, requireXRequestedWith } from './inbound/multipart.js';
+export type { UploadForm } from './application/upload-form.js';

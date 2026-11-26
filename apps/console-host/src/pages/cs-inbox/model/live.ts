@@ -134,6 +134,8 @@ export const FILTER_KINDS: readonly string[] = [
   'SCANNER_UNREPORTED',
   'APPROVAL_EXECUTION_FAILED',
   'STATEMENT_DISPUTE',
+  'CONTENT_REPORT',
+  'RIGHTS_REQUEST',
 ];
 
 /** 지급·대사·KYC 건(operator·commander만 처리, open-items 72번) */
@@ -476,5 +478,153 @@ export function appealPanelOf(appeal: VerificationAppealView, role: string, stat
     decision,
     rows,
     banner,
+  };
+}
+
+// F-07-10: 신고된 후기 패널(SCR-045). 값은 서버가 준 것만 옮기고 신고자·계정·주문·팬 이름은 버린다.
+export interface ReviewDetailImage {
+  thumbnailUrl?: string;
+  url?: string;
+  alt?: string;
+}
+export interface ReviewDetail {
+  review: {
+    reviewId: string;
+    eventId?: string;
+    rating?: number;
+    body?: string;
+    status: 'VISIBLE' | 'HIDDEN';
+    notice?: 'RIGHTS_TEMP' | 'POLICY';
+    noticeUntil?: string;
+    takedownReason?: 'NOTICE' | 'SAME_CONTENT' | 'RIGHTS_TEMP' | 'POLICY' | 'FILMING_HOLD';
+    authorDisplay?: string;
+    createdAt?: string;
+    edited?: boolean;
+    images: readonly ReviewDetailImage[];
+  };
+  summary: {
+    total: number;
+    byCategory: Readonly<Record<string, number>>;
+    reports: readonly { category: string; detail: string }[];
+  };
+}
+
+const REVIEW_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const NOTICES = new Set(['RIGHTS_TEMP', 'POLICY']);
+const TAKEDOWN_REASONS = new Set(['NOTICE', 'SAME_CONTENT', 'RIGHTS_TEMP', 'POLICY', 'FILMING_HOLD']);
+const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+
+/** CS 처리함 건이 신고된 후기 건이면 후기 ID를 준다 */
+export function reviewIdOf(c: CaseView): string | null {
+  if (c.kind !== 'CONTENT_REPORT' && c.kind !== 'RIGHTS_REQUEST') return null;
+  return REVIEW_UUID.test(c.targetRef) ? c.targetRef : null;
+}
+
+export function reviewDetailOf(raw: unknown): ReviewDetail | null {
+  if (!isRecord(raw) || !isRecord(raw.review) || !isRecord(raw.summary)) return null;
+  const reviewId = str(raw.review.reviewId);
+  if (!reviewId || !REVIEW_UUID.test(reviewId)) return null;
+  const status = raw.review.status === 'HIDDEN' ? 'HIDDEN' : 'VISIBLE';
+  const images = Array.isArray(raw.review.images)
+    ? raw.review.images.filter(isRecord).flatMap((i) => {
+        const thumbnailUrl = str(i.thumbnailUrl);
+        const url = str(i.url);
+        if (!thumbnailUrl && !url) return [];
+        const alt = str(i.alt);
+        return [{ ...(thumbnailUrl ? { thumbnailUrl } : {}), ...(url ? { url } : {}), ...(alt ? { alt } : {}) }];
+      })
+    : [];
+  const notice = NOTICES.has(String(raw.review.notice)) ? (raw.review.notice as 'RIGHTS_TEMP' | 'POLICY') : undefined;
+  const takedownReason = TAKEDOWN_REASONS.has(String(raw.review.takedownReason)) ? (raw.review.takedownReason as ReviewDetail['review']['takedownReason']) : undefined;
+  const byCategory = isRecord(raw.summary.byCategory)
+    ? Object.fromEntries(Object.entries(raw.summary.byCategory).filter(([, v]) => typeof v === 'number')) as Record<string, number>
+    : {};
+  const reports = Array.isArray(raw.summary.reports)
+    ? raw.summary.reports.filter(isRecord).flatMap((r) => {
+        const category = str(r.category);
+        if (!category) return [];
+        return [{ category, detail: str(r.detail) ?? '' }];
+      })
+    : [];
+  return {
+    review: {
+      reviewId,
+      ...(str(raw.review.eventId) ? { eventId: str(raw.review.eventId)! } : {}),
+      ...(num(raw.review.rating) !== undefined ? { rating: num(raw.review.rating)! } : {}),
+      ...(str(raw.review.body) !== undefined ? { body: str(raw.review.body)! } : {}),
+      status,
+      ...(notice ? { notice } : {}),
+      ...(str(raw.review.noticeUntil) ? { noticeUntil: str(raw.review.noticeUntil)! } : {}),
+      ...(takedownReason ? { takedownReason } : {}),
+      ...(str(raw.review.authorDisplay) ? { authorDisplay: str(raw.review.authorDisplay)! } : {}),
+      ...(str(raw.review.createdAt) ? { createdAt: str(raw.review.createdAt)! } : {}),
+      ...(typeof raw.review.edited === 'boolean' ? { edited: raw.review.edited } : {}),
+      images,
+    },
+    summary: { total: num(raw.summary.total) ?? reports.length, byCategory, reports },
+  };
+}
+
+export type ReviewAction = 'NO_ACTION' | 'TEMP_BLOCK' | 'BLOCK' | 'RELEASE';
+export interface ReviewActionInput {
+  action: ReviewAction;
+  reason: string;
+  violation?: string;
+  endsAt?: string;
+}
+
+/** 역할·상태·가림 사유별로 그릴 조치. 법정 통보·같은 내용 가림은 법정 통보 경로로 넘긴다 */
+export function reviewActionsFor(detail: ReviewDetail, role: string): ReviewAction[] {
+  if (role !== 'cs_agent' && role !== 'cs_lead') return [];
+  if (detail.review.status === 'VISIBLE') return detail.summary.total > 0 ? ['NO_ACTION', 'TEMP_BLOCK', 'BLOCK'] : ['TEMP_BLOCK'];
+  if (detail.review.notice === 'RIGHTS_TEMP' || detail.review.notice === 'POLICY') return ['RELEASE'];
+  if (detail.review.takedownReason === 'FILMING_HOLD') return ['RELEASE'];
+  return [];
+}
+
+/** 화면의 조치 확인. 사유 1~2,000자, TEMP_BLOCK은 위반 사유와 30일 이내 끝 시각이 필요하다 */
+export function reviewModerationPlan(input: ReviewActionInput, nowMs: number): { ok: true; body: { action: ReviewAction; reason: string; violation?: string; endsAt?: string } } | { ok: false; message: string } {
+  const reason = input.reason.trim();
+  if (reason.length < 1 || reason.length > 2000) return { ok: false, message: '사유를 1~2,000자로 적어 주세요' };
+  if (input.action === 'TEMP_BLOCK') {
+    if (!input.violation) return { ok: false, message: '위반 유형을 골라 주세요' };
+    const ends = input.endsAt === undefined ? Number.NaN : Date.parse(input.endsAt);
+    if (!Number.isFinite(ends) || ends <= nowMs || ends > nowMs + 30 * 24 * 60 * 60 * 1000) return { ok: false, message: '끝 시각은 지금부터 30일 이내로 골라 주세요' };
+    return { ok: true, body: { action: input.action, reason, violation: input.violation, endsAt: new Date(ends).toISOString() } };
+  }
+  if (input.action === 'BLOCK') {
+    if (!input.violation) return { ok: false, message: '위반 유형을 골라 주세요' };
+    return { ok: true, body: { action: input.action, reason, violation: input.violation } };
+  }
+  return { ok: true, body: { action: input.action, reason } };
+}
+
+export interface ReviewPanel {
+  reviewId: string;
+  authorDisplay: string;
+  rating: number | null;
+  body: string;
+  statusLabel: string;
+  noticeText: string | null;
+  images: readonly { url: string; alt: string }[];
+  reports: readonly { category: string; detail: string }[];
+  actions: readonly ReviewAction[];
+}
+
+export function reviewPanelFor(detail: ReviewDetail, role: string): ReviewPanel {
+  const total = detail.review.images.length;
+  const images = detail.review.images.map((img, i) => ({ url: img.url ?? img.thumbnailUrl ?? '', alt: img.alt?.trim() || `후기 사진 ${i + 1}/${total}` }));
+  const noticeText = detail.review.notice === 'RIGHTS_TEMP' ? '권리 침해 신고로 임시조치된 후기입니다' : detail.review.notice === 'POLICY' ? '운영정책에 따라 가려진 후기입니다' : null;
+  return {
+    reviewId: detail.review.reviewId,
+    authorDisplay: detail.review.authorDisplay ?? '***',
+    rating: detail.review.rating ?? null,
+    body: detail.review.body ?? '',
+    statusLabel: detail.review.status === 'VISIBLE' ? '공개 중' : '가려짐',
+    noticeText,
+    images,
+    reports: detail.summary.reports,
+    actions: reviewActionsFor(detail, role),
   };
 }

@@ -5,14 +5,15 @@
 //   id 차례 커서로 1,000행 [가정]씩 묶음마다 커밋하고, 멈춤 신호는 묶음 사이에 본다. 결과는 { purged, remaining }이고 다음 출시의 파기 행 CHECK·VALIDATE 전에 remaining 0이어야 한다.
 import type { Clock, MaintenanceTask } from '@peaket/platform';
 import type { ReviewStore } from '../domain/ports.js';
+import { reviewImageDerivativeNames, reviewImagePublicKey } from '../domain/review-image.js';
 
 /** 이전 판 행 고치기 한 묶음 1,000행 [가정](docs/data.md §2 '이전 판이 남긴 행 고치기') */
 export const REVIEW_PURGE_LEGACY_BATCH = 1_000;
 
 /** o.batch: 이전 판 행 고치기(review-purge-legacy)의 한 묶음 행 수(기본 1,000 [가정]) */
-export function reviewMaintenanceTasks(store: ReviewStore, clock: Clock, o: { batch?: number } = {}): MaintenanceTask[] {
+export function reviewMaintenanceTasks(store: ReviewStore, clock: Clock, o: { batch?: number; images?: { objects: { deletePublic(key: string): Promise<void> } } } = {}): MaintenanceTask[] {
   const batch = o.batch ?? REVIEW_PURGE_LEGACY_BATCH;
-  return [
+  const tasks: MaintenanceTask[] = [
     {
       name: 'review-temp-block-expire',
       when: 'daily',
@@ -39,4 +40,25 @@ export function reviewMaintenanceTasks(store: ReviewStore, clock: Clock, o: { ba
       },
     },
   ];
+  if (o.images) {
+    tasks.push({
+      name: 'review-image-cleanup',
+      when: 'daily',
+      run: async () => {
+        const rows = await store.imageRowsDueForCleanup(clock.now(), 100);
+        for (const row of rows) {
+          for (const name of reviewImageDerivativeNames()) {
+            try {
+              await o.images!.objects.deletePublic(reviewImagePublicKey(row.imageId, name));
+            } catch {
+              // 남은 객체는 다음 정리가 같은 행으로 다시 본다
+            }
+          }
+        }
+        await store.deleteImageRows(rows.map((r) => r.imageId));
+        return { removed: rows.length };
+      },
+    });
+  }
+  return tasks;
 }

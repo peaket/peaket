@@ -829,6 +829,7 @@ export * from './opsReviewDetail';
 export * from './opsReviewDetailReview';
 export * from './opsReviewDetailReviewNotice';
 export * from './opsReviewDetailReviewStatus';
+export * from './opsReviewDetailReviewTakedownReason';
 export * from './opsReviewDetailSummary';
 export * from './opsReviewDetailSummaryByCategory';
 export * from './opsReviewDetailSummaryReportsItem';

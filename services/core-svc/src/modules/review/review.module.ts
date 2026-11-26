@@ -1,7 +1,7 @@
 // review 모듈 조립. 메모리(단위 시험)와 Drizzle(운영) 저장소를 고른다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
 import { type Clock, type Database, CLOCK, DATABASE, INTERNAL_TOKEN, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
-import { MemoryCatalogRepository, type CatalogRepository } from '../catalog/index.js';
+import { MemoryCatalogRepository, MemoryImageObjectStore, type CatalogRepository, type ImageObjectStore, type ImageProcessing, unavailableImageProcessing } from '../catalog/index.js';
 import { DrizzleReviewEventDirectory } from './adapters/db/drizzle-review-event-directory.js';
 import { DrizzleReviewStore } from './adapters/db/drizzle-review-store.js';
 import { MemoryReviewEventDirectory } from './adapters/memory-review-event-directory.js';
@@ -11,10 +11,12 @@ import { MemoryReviewStore } from './adapters/memory-review-store.js';
 import { LogReviewCaseSink, LogReviewNotifier } from './adapters/review-notifier.js';
 import { UnavailableReviewEligibility } from './adapters/unavailable-review-eligibility.js';
 import { Reviews } from './application/reviews.js';
-import { FAN_PROFILE, REVIEW_CASE_SINK, REVIEW_ELIGIBILITY, REVIEW_EVENT_DIRECTORY, REVIEW_NOTIFIER, REVIEW_STORE, type FanProfile, type ReviewCaseSink, type ReviewEligibility, type ReviewEventDirectory, type ReviewNotifier, type ReviewStore } from './domain/ports.js';
+import { ReviewImages } from './application/review-images.js';
+import { FAN_PROFILE, REVIEW_CASE_SINK, REVIEW_ELIGIBILITY, REVIEW_EVENT_DIRECTORY, REVIEW_NOTIFIER, REVIEW_STORE, type FanProfile, type ReviewCaseSink, type ReviewEligibility, type ReviewEventDirectory, type ReviewImageWiring, type ReviewNotifier, type ReviewStore } from './domain/ports.js';
 import { InternalReviewController } from './inbound/internal-review.controller.js';
 import { OpsReviewController } from './inbound/ops-review.controller.js';
 import { ReviewController } from './inbound/review.controller.js';
+import { ReviewImageController } from './inbound/review-image.controller.js';
 
 export interface MemoryReviewWiring {
   store?: ReviewStore;
@@ -24,6 +26,7 @@ export interface MemoryReviewWiring {
   fanProfile?: FanProfile;
   notifier?: ReviewNotifier;
   cases?: ReviewCaseSink;
+  images?: ReviewImageWiring;
 }
 
 export interface DatabaseReviewWiring {
@@ -33,12 +36,17 @@ export interface DatabaseReviewWiring {
   fanProfile?: FanProfile;
   notifier?: ReviewNotifier;
   cases?: ReviewCaseSink;
+  images?: ReviewImageWiring;
 }
 
 @Module({})
 export class ReviewModule {
   static register(o: { storage: 'memory'; wiring?: MemoryReviewWiring } | ({ storage: 'database' } & DatabaseReviewWiring)): DynamicModule {
-    const controllers = [ReviewController, OpsReviewController, InternalReviewController];
+    const controllers = [ReviewController, OpsReviewController, InternalReviewController, ReviewImageController];
+    const imageWiring = o.storage === 'memory' ? o.wiring?.images : o.images;
+    const imageObjects = (imageWiring?.objects ?? new MemoryImageObjectStore()) as unknown as import('../catalog/index.js').ImageObjectStore;
+    const imageProcessing = (imageWiring?.processing ?? unavailableImageProcessing) as unknown as ImageProcessing;
+    const imageOrigin = imageWiring?.origin ?? '';
     const base: Provider[] = [
       { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
       { provide: REVIEW_ELIGIBILITY, useValue: o.storage === 'memory' ? (o.wiring?.eligibility ?? new MemoryReviewEligibility()) : (o.eligibility ?? new UnavailableReviewEligibility()) },
@@ -49,8 +57,13 @@ export class ReviewModule {
         provide: Reviews,
         // 운영 로거는 손으로 처리의 운영 줄(review-purge-manual)에 쓴다
         useFactory: (store: ReviewStore, events: ReviewEventDirectory, eligibility: ReviewEligibility, fanProfile: FanProfile, notifier: ReviewNotifier, cases: ReviewCaseSink, clock: Clock, logger?: PlatformLogger) =>
-          new Reviews({ store, events, eligibility, fanProfile, notifier, cases, clock, ...(logger ? { logger } : {}) }),
+          new Reviews({ store, events, eligibility, fanProfile, notifier, cases, clock, ...(imageWiring ? { images: { origin: imageOrigin, objects: imageWiring.objects } } : {}), ...(logger ? { logger } : {}) }),
         inject: [REVIEW_STORE, REVIEW_EVENT_DIRECTORY, REVIEW_ELIGIBILITY, FAN_PROFILE, REVIEW_NOTIFIER, REVIEW_CASE_SINK, CLOCK, { token: PLATFORM_LOGGER, optional: true }],
+      },
+      {
+        provide: ReviewImages,
+        useFactory: (store: ReviewStore, clock: Clock, logger?: PlatformLogger) => new ReviewImages({ store, processing: imageProcessing, objects: imageObjects, origin: imageOrigin, clock, ...(logger ? { logger } : {}) }),
+        inject: [REVIEW_STORE, CLOCK, { token: PLATFORM_LOGGER, optional: true }],
       },
     ];
     if (o.storage === 'database') {

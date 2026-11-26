@@ -1,6 +1,7 @@
 // 메모리 후기 저장소(단위 시험). 운영은 adapters/db/drizzle-review-store.ts를 쓴다.
 import { randomUUID } from 'node:crypto';
 import { purgedReview, type ReportRecord, type ReviewRecord, type ReviewSort, type TakedownRecord } from '../domain/review.js';
+import { reviewImagePublicKey, reviewImageDerivativeNames, reviewImageAttachable, REVIEW_IMAGE_UNATTACHED_TTL_MS, type ReviewImageAttach, type ReviewImageRecord } from '../domain/review-image.js';
 import type { HeldWithdrawalRow, ReportSummary, ReviewListInput, ReviewListResult, ReviewStore } from '../domain/ports.js';
 
 interface Cursor {
@@ -30,6 +31,8 @@ const decodeCursor = (raw: string | undefined): Cursor | undefined => {
  * 옛 익명화로 참조만 끊긴 살아 있는 후기(account_id = id). Drizzle 저장소의 WHERE와 같은 뜻이다
  */
 const ACCOUNTS_WITHDRAWN = 'identity.accounts-withdrawn';
+
+const derivativeKeys = (imageId: string): string[] => reviewImageDerivativeNames().map((n) => reviewImagePublicKey(imageId, n));
 
 const isLegacyRow = (r: ReviewRecord): boolean =>
   r.status === 'DELETED' ? r.rating !== null || r.contentFingerprint !== null || r.accountId !== r.reviewId : r.accountId === r.reviewId;
@@ -73,13 +76,17 @@ export class MemoryReviewStore implements ReviewStore {
   readonly reports = new Map<string, ReportRecord>();
   readonly takedowns = new Map<string, TakedownRecord>();
   readonly hiddenFingerprints = new Set<string>();
+  /** 후기 사진(review_image). 키는 imageId */
+  readonly images = new Map<string, ReviewImageRecord>();
   /** 다시 정리 예약(review_withdrawal_recheck): 계정 ID → 예약 시각·만든 시각(docs/data.md §2 '다시 정리 예약') */
   readonly rechecks = new Map<string, { dueAtMs: number; createdAtMs: number }>();
   /** 시험용 보류 사건(core DB held_event의 대역). 손으로 처리(purgeHeldWithdrawal)가 읽고 다시 처리로 표시한다 */
   readonly heldEvents: MemoryHeldEvent[] = [];
 
-  async insertReview(r: ReviewRecord): Promise<void> {
+  async insertReview(r: ReviewRecord, images: readonly ReviewImageAttach[] = []): Promise<void> {
+    const planned = this.#planAttach(r.reviewId, r.accountId, images);
     this.reviews.set(r.reviewId, { ...r });
+    this.#applyAttach(r.reviewId, planned, r.createdAtMs);
   }
 
   async findReview(reviewId: string): Promise<ReviewRecord | undefined> {
@@ -92,17 +99,41 @@ export class MemoryReviewStore implements ReviewStore {
     return undefined;
   }
 
-  async updateReview(reviewId: string, patch: Partial<Pick<ReviewRecord, 'rating' | 'body' | 'status' | 'notice' | 'noticeUntilMs' | 'contentFingerprint' | 'updatedAtMs' | 'edited'>>): Promise<void> {
+  async updateReview(
+    reviewId: string,
+    patch: Partial<Pick<ReviewRecord, 'rating' | 'body' | 'status' | 'notice' | 'noticeUntilMs' | 'contentFingerprint' | 'updatedAtMs' | 'edited'>>,
+    images?: readonly ReviewImageAttach[],
+  ): Promise<readonly string[]> {
     const r = this.reviews.get(reviewId);
-    if (!r) return;
-    this.reviews.set(reviewId, { ...r, ...patch });
+    if (!r) return [];
+    // 사진을 보내면 먼저 모두 검사한다. 하나라도 틀리면 후기·사진 어느 것도 바꾸지 않는다(한 트랜잭션)
+    const planned = images === undefined ? undefined : this.#planAttach(reviewId, r.accountId, images);
+    const next = { ...r, ...patch };
+    this.reviews.set(reviewId, next);
+    if (planned === undefined) return [];
+    const keep = new Set(planned.map((p) => p.imageId));
+    const removed: string[] = [];
+    for (const [id, row] of this.images) {
+      if (row.reviewId !== reviewId || keep.has(id)) continue;
+      this.images.set(id, { ...row, status: 'DELETED', deletedAtMs: patch.updatedAtMs ?? Date.now() });
+      removed.push(...derivativeKeys(id));
+    }
+    this.#applyAttach(reviewId, planned, patch.updatedAtMs ?? Date.now());
+    return removed;
   }
 
-  async softDeleteReview(reviewId: string, nowMs: number): Promise<void> {
+  async softDeleteReview(reviewId: string, nowMs: number): Promise<readonly string[]> {
     const r = this.reviews.get(reviewId);
-    if (!r) return;
+    if (!r) return [];
     // 작성자 지우기도 탈퇴 파기와 같은 칸을 비운다(docs/data.md §2 '후기 파기', ADR-0086 ⑧)
     this.reviews.set(reviewId, purgedReview(r, nowMs));
+    const keys: string[] = [];
+    for (const [id, row] of this.images) {
+      if (row.reviewId !== reviewId || row.status === 'DELETED') continue;
+      this.images.set(id, { ...row, status: 'DELETED', deletedAtMs: nowMs });
+      keys.push(...derivativeKeys(id));
+    }
+    return keys;
   }
 
   async listReviews(input: ReviewListInput): Promise<ReviewListResult> {
@@ -179,6 +210,7 @@ export class MemoryReviewStore implements ReviewStore {
       this.reviews.set(id, purgedReview(r, nowMs));
       purged += 1;
     }
+    for (const [id, row] of this.images) if (row.accountId === accountId && row.status !== 'DELETED') this.images.set(id, { ...row, status: 'DELETED', deletedAtMs: nowMs });
     return purged;
   }
 
@@ -240,7 +272,10 @@ export class MemoryReviewStore implements ReviewStore {
       .filter((r) => isLegacyRow(r) && (o.after === undefined || r.reviewId > o.after))
       .sort((a, b) => (a.reviewId < b.reviewId ? -1 : a.reviewId > b.reviewId ? 1 : 0))
       .slice(0, o.limit);
-    for (const r of rows) this.reviews.set(r.reviewId, purgedReview(r, o.nowMs));
+    for (const r of rows) {
+      this.reviews.set(r.reviewId, purgedReview(r, o.nowMs));
+      for (const [id, row] of this.images) if (row.reviewId === r.reviewId && row.status !== 'DELETED') this.images.set(id, { ...row, status: 'DELETED', deletedAtMs: o.nowMs });
+    }
     const last = rows[rows.length - 1];
     return last ? { purged: rows.length, last: last.reviewId } : { purged: 0 };
   }
@@ -293,6 +328,61 @@ export class MemoryReviewStore implements ReviewStore {
       if (t.reason === 'RIGHTS_TEMP' && t.restoredAtMs === undefined && t.endsAtMs !== undefined && t.endsAtMs <= nowMs) this.takedowns.set(id, { ...t, restoredAtMs: nowMs });
     }
     return n;
+  }
+
+  async imagesByReviews(reviewIds: readonly string[]): Promise<ReadonlyMap<string, readonly ReviewImageRecord[]>> {
+    const wanted = new Set(reviewIds);
+    const out = new Map<string, ReviewImageRecord[]>();
+    for (const id of reviewIds) out.set(id, []);
+    for (const row of this.images.values()) {
+      if (row.reviewId === null || !wanted.has(row.reviewId)) continue;
+      out.get(row.reviewId)!.push({ ...row });
+    }
+    for (const rows of out.values()) rows.sort((a, b) => a.sort - b.sort || a.imageId.localeCompare(b.imageId));
+    return out;
+  }
+
+  async imageRowsByAccount(accountId: string): Promise<readonly ReviewImageRecord[]> {
+    return [...this.images.values()].filter((r) => r.accountId === accountId).map((r) => ({ ...r }));
+  }
+
+  async imageRowsDueForCleanup(nowMs: number, limit: number): Promise<readonly ReviewImageRecord[]> {
+    return [...this.images.values()]
+      .filter((r) => r.status === 'DELETED' || (r.reviewId === null && r.status === 'READY' && r.createdAtMs <= nowMs - REVIEW_IMAGE_UNATTACHED_TTL_MS))
+      .sort((a, b) => a.createdAtMs - b.createdAtMs || a.imageId.localeCompare(b.imageId))
+      .slice(0, limit)
+      .map((r) => ({ ...r }));
+  }
+
+  async insertReviewImage(row: ReviewImageRecord): Promise<void> {
+    this.images.set(row.imageId, { ...row });
+  }
+
+  async deleteImageRows(imageIds: readonly string[]): Promise<void> {
+    for (const id of imageIds) this.images.delete(id);
+  }
+
+  async countImageUploadsSince(accountId: string, sinceMs: number): Promise<number> {
+    let n = 0;
+    for (const r of this.images.values()) if (r.accountId === accountId && r.createdAtMs >= sinceMs && r.status !== 'REJECTED') n += 1;
+    return n;
+  }
+
+  #planAttach(reviewId: string, accountId: string, images: readonly ReviewImageAttach[]): { imageId: string; row: ReviewImageRecord; sort: number; alt: string }[] {
+    const seen = new Set<string>();
+    return images.map((i, sort) => {
+      if (seen.has(i.imageId)) throw new Error('review-image-duplicate');
+      seen.add(i.imageId);
+      const row = this.images.get(i.imageId);
+      if (!row || !reviewImageAttachable(row, accountId, reviewId)) throw new Error('review-image-not-attachable');
+      return { imageId: i.imageId, row, sort, alt: i.alt ?? '' };
+    });
+  }
+
+  #applyAttach(reviewId: string, planned: readonly { imageId: string; row: ReviewImageRecord; sort: number; alt: string }[], nowMs: number): void {
+    for (const p of planned) {
+      this.images.set(p.imageId, { ...p.row, reviewId, altText: p.alt, sort: p.sort, attachedAtMs: p.row.attachedAtMs ?? nowMs });
+    }
   }
 
   /** 시험용: 한 후기의 신고 요약 */

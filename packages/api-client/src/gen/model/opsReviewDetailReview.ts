@@ -11,6 +11,8 @@
  */
 import type { OpsReviewDetailReviewNotice } from './opsReviewDetailReviewNotice';
 import type { OpsReviewDetailReviewStatus } from './opsReviewDetailReviewStatus';
+import type { OpsReviewDetailReviewTakedownReason } from './opsReviewDetailReviewTakedownReason';
+import type { ReviewImage } from './reviewImage';
 
 export type OpsReviewDetailReview = {
   reviewId?: string;
@@ -24,7 +26,14 @@ export type OpsReviewDetailReview = {
   status?: OpsReviewDetailReviewStatus;
   notice?: OpsReviewDetailReviewNotice;
   noticeUntil?: string;
+  /** 지금 살아 있는 가림 조치의 종류. 신고 처리 공시는 notice에 있고, 법정 통보·같은 내용·불법 촬영물 확인 중은 이 값으로 구분한다(F-07-10) */
+  takedownReason?: OpsReviewDetailReviewTakedownReason;
   authorDisplay?: string;
   createdAt?: string;
   edited?: boolean;
+  /**
+     * 후기에 붙은 사진(최대 3장). 목록 240·보기 1,280 파생본 주소와 설명을 싣는다
+     * @maxItems 3
+     */
+  images?: ReviewImage[];
 };

@@ -2,7 +2,7 @@
 // 스키마 원본은 migrations/0013_review.sql이다. 후기 사진(review_image)은 사진 올리기 단계가 더한다.
 // 0026(소유자 결정 2026-11-16 OPEN[42]·[44], ADR-0278): 파기한 행의 별점·내용 지문 NULL, 살아 있는 행 CHECK(NOT VALID), 다시 정리 예약 표.
 import { sql } from 'drizzle-orm';
-import { boolean, check, index, pgTable, smallint, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, index, integer, pgTable, smallint, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
@@ -115,4 +115,36 @@ export const reviewWithdrawalRecheck = pgTable(
     createdAt: at('created_at').notNull(),
   },
   (t) => [index('review_withdrawal_recheck_due_idx').on(t.dueAt)],
+);
+
+/** 후기 사진(F-07-10, docs/data.md §2 review_image, ADR-0066). 원본 키는 두지 않고 파생본 두 개의 키만 둔다 */
+export const reviewImage = pgTable(
+  'review_image',
+  {
+    id: uuid('id').primaryKey(),
+    reviewId: uuid('review_id'),
+    accountId: uuid('account_id').notNull(),
+    status: text('status').notNull(),
+    rejectReason: text('reject_reason'),
+    altText: text('alt_text').notNull().default(''),
+    width: integer('width').notNull(),
+    height: integer('height').notNull(),
+    sort: smallint('sort').notNull().default(0),
+    thumbKey: text('thumb_key').notNull(),
+    viewKey: text('view_key').notNull(),
+    createdAt: at('created_at').notNull(),
+    attachedAt: at('attached_at'),
+    deletedAt: at('deleted_at'),
+  },
+  (t) => [
+    check('review_image_status_check', sql`${t.status} in ('UPLOADED', 'SCANNING', 'READY', 'REJECTED', 'DELETED')`),
+    check('review_image_reject_check', sql`${t.rejectReason} is null or ${t.rejectReason} in ('UNSUPPORTED_TYPE', 'TOO_LARGE', 'TOO_SMALL', 'MALWARE')`),
+    check('review_image_alt_check', sql`char_length(${t.altText}) <= 100`),
+    check('review_image_sort_check', sql`${t.sort} between 0 and 2`),
+    check('review_image_attach_check', sql`(${t.reviewId} is null) = (${t.attachedAt} is null)`),
+    uniqueIndex('review_image_review_sort_uq').on(t.reviewId, t.sort).where(sql`${t.reviewId} is not null`),
+    index('review_image_account_created_idx').on(t.accountId, t.createdAt),
+    index('review_image_review_idx').on(t.reviewId),
+    index('review_image_status_created_idx').on(t.status, t.createdAt),
+  ],
 );

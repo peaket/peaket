@@ -25,12 +25,18 @@ import {
   kindLabel,
   kstText,
   noteLength,
+  reviewDetailOf,
+  reviewIdOf,
+  reviewModerationPlan,
+  reviewPanelFor,
   statusLabel,
   verificationAppealOf,
   versionOfEtag,
   type AppealPanel,
   type CaseView,
   type ProblemLike,
+  type ReviewAction,
+  type ReviewDetail,
   type VerificationAppealView,
 } from '../model/live';
 import { ViewerNotice } from './ViewerNotice';
@@ -75,6 +81,14 @@ export function ConnectedPage() {
   const [notice, setNotice] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
   const [noteError, setNoteError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DecisionDialog | null>(null);
+  const [review, setReview] = useState<ReviewDetail | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewAction, setReviewAction] = useState<ReviewAction | null>(null);
+  const [reviewReason, setReviewReason] = useState('');
+  const [reviewViolation, setReviewViolation] = useState('ABUSE');
+  const [reviewEndsAt, setReviewEndsAt] = useState('');
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewNotice, setReviewNotice] = useState<string | null>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
   /** 이의 결정 요청 키(대화상자를 열 때 만든다. 다시 보낼 실패 뒤에는 그대로 둔다) */
@@ -104,6 +118,28 @@ export function ConnectedPage() {
     }
   }, []);
 
+  const loadReview = useCallback(async (c: CaseView) => {
+    const reviewId = reviewIdOf(c);
+    if (!reviewId) {
+      setReview(null);
+      setReviewError(null);
+      return;
+    }
+    if (!ensureConsoleApi() || !opsApiAvailable()) {
+      setConfig(false);
+      return;
+    }
+    try {
+      const { getOpsReview } = await ops();
+      const r = await getOpsReview(reviewId);
+      setReview(reviewDetailOf(r.data));
+      setReviewError(null);
+    } catch {
+      setReview(null);
+      setReviewError('신고된 후기를 불러오지 못했습니다');
+    }
+  }, []);
+
   const loadDetail = useCallback(async (id: string) => {
     if (!ensureConsoleApi() || !opsApiAvailable()) {
       setConfig(false);
@@ -118,7 +154,10 @@ export function ConnectedPage() {
       const c = caseViewOf(r.data);
       const version = versionOfEtag(r.headers.get('etag')) ?? c?.version ?? null;
       if (!c || version === null) setDetail({ kind: 'error', text: '건을 읽지 못했습니다. 다시 불러와 주세요' });
-      else setDetail({ kind: 'ready', c, version, appeal: c.kind === 'VERIFICATION_APPEAL' ? verificationAppealOf(r.data) : null });
+      else {
+        setDetail({ kind: 'ready', c, version, appeal: c.kind === 'VERIFICATION_APPEAL' ? verificationAppealOf(r.data) : null });
+        void loadReview(c);
+      }
     } catch (e) {
       const mapped = errorOf(e as never);
       if (mapped.kind === 'not-found') setDetail({ kind: 'missing' });
@@ -251,6 +290,35 @@ export function ConnectedPage() {
       }
     } finally {
       setBusy(false);
+    }
+  };
+
+  const submitReviewModeration = async () => {
+    if (!review || !reviewAction) return;
+    const endsAt = reviewEndsAt ? new Date(`${reviewEndsAt}T23:59:59+09:00`).toISOString() : undefined;
+    const plan = reviewModerationPlan({ action: reviewAction, reason: reviewReason, ...(reviewViolation ? { violation: reviewViolation } : {}), ...(endsAt ? { endsAt } : {}) }, Date.now());
+    if (!plan.ok) {
+      setReviewNotice(plan.message);
+      return;
+    }
+    setReviewBusy(true);
+    setReviewNotice(null);
+    try {
+      const { createOpsReviewModeration } = await ops();
+      await createOpsReviewModeration(review.review.reviewId, plan.body as never);
+      setReviewAction(null);
+      setReviewReason('');
+      setReviewNotice('후기를 조치했습니다');
+      await loadDetail(caseId);
+      await loadList(filter);
+    } catch (e) {
+      const status = typeof (e as ProblemLike)?.status === 'number' ? (e as ProblemLike).status : 0;
+      if (status === 409) setReviewNotice('지금 상태에서는 이 조치를 할 수 없습니다');
+      else if (status === 422) setReviewNotice('사유·위반 유형·기간을 확인해 주세요');
+      else if (status === 403) setReviewNotice('이 조치를 할 권한이 없습니다');
+      else setReviewNotice('조치하지 못했습니다. 잠시 뒤 다시 시도해 주세요');
+    } finally {
+      setReviewBusy(false);
     }
   };
 
@@ -434,6 +502,24 @@ export function ConnectedPage() {
                 onPatch={(body, done) => void patch(selected.c, selected.version, body, done)}
                 onResolve={() => resolve(selected.c, selected.version)}
                 onOpenDecision={openDecision}
+              />
+            ) : null}
+            {selected && reviewIdOf(selected.c) ? (
+              <ReportedReviewPanel
+                review={review}
+                error={reviewError}
+                role={role}
+                busy={reviewBusy}
+                action={reviewAction}
+                reason={reviewReason}
+                violation={reviewViolation}
+                endsAt={reviewEndsAt}
+                notice={reviewNotice}
+                onAction={setReviewAction}
+                onReason={setReviewReason}
+                onViolation={setReviewViolation}
+                onEndsAt={setReviewEndsAt}
+                onSubmit={() => void submitReviewModeration()}
               />
             ) : null}
             {selected && dialog ? (
@@ -679,6 +765,70 @@ function AppealReview({ panel }: { panel: AppealPanel }) {
           ))}
         </ul>
       ) : null}
+    </section>
+  );
+}
+
+function ReportedReviewPanel(p: {
+  review: ReviewDetail | null;
+  error: string | null;
+  role: string;
+  busy: boolean;
+  action: ReviewAction | null;
+  reason: string;
+  violation: string;
+  endsAt: string;
+  notice: string | null;
+  onAction(a: ReviewAction | null): void;
+  onReason(v: string): void;
+  onViolation(v: string): void;
+  onEndsAt(v: string): void;
+  onSubmit(): void;
+}) {
+  if (p.error) return <p className="t-sm" role="alert">{p.error}</p>;
+  if (!p.review) return <p className="t-sm muted">후기 상세를 불러오는 중…</p>;
+  const panel = reviewPanelFor(p.review, p.role);
+  return (
+    <section className="col" style={{ gap: 10 }} aria-labelledby="h-reviewed">
+      <h3 className="t-sm fw-b" id="h-reviewed">신고된 후기</h3>
+      <div className="row wrap" style={{ gap: 8 }}>
+        <strong className="t-sm">{panel.authorDisplay}</strong>
+        <span className="badge badge-outline">{panel.statusLabel}</span>
+        {panel.rating !== null ? <span className="t-xs muted">별점 {panel.rating}점</span> : null}
+      </div>
+      {panel.noticeText ? <p className="t-sm muted">{panel.noticeText}</p> : null}
+      <p className="t-sm" style={{ whiteSpace: 'pre-wrap' }}>{panel.body}</p>
+      {panel.images.length > 0 ? (
+        <ul className="row wrap" style={{ gap: 8 }} aria-label="후기 사진">
+          {panel.images.map((img, i) => (
+            <li key={i}>
+              <img src={img.url} alt={img.alt} width={72} height={72} style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 8 }} />
+            </li>
+          ))}
+        </ul>
+      ) : <p className="t-xs muted">사진 없음</p>}
+      <h4 className="t-xs fw-b">신고 사유</h4>
+      {panel.reports.length > 0 ? (
+        <ul className="col" style={{ gap: 4, paddingLeft: 16 }}>
+          {panel.reports.map((r, i) => <li key={i} className="t-sm">{r.category} · {r.detail}</li>)}
+        </ul>
+      ) : <p className="t-xs muted">신고 내용 없음</p>}
+      {panel.actions.length > 0 ? (
+        <div className="row wrap" style={{ gap: 6 }} aria-label="후기 조치">
+          {panel.actions.map((a) => <button key={a} className={a === 'RELEASE' ? 'btn btn-outline btn-sm' : 'btn btn-primary btn-sm'} type="button" onClick={() => p.onAction(a)}>{a === 'NO_ACTION' ? '조치 없음' : a === 'TEMP_BLOCK' ? '임시조치' : a === 'BLOCK' ? '노출 차단' : '해제'}</button>)}
+        </div>
+      ) : null}
+      {p.action ? (
+        <div className="col" style={{ gap: 6 }} role="group" aria-label="후기 조치 입력">
+          {p.action === 'TEMP_BLOCK' || p.action === 'BLOCK' ? (
+            <label className="field"><span className="field-label">위반 유형</span><select className="input" value={p.violation} onChange={(e) => p.onViolation(e.target.value)}><option value="ABUSE">욕설·비방</option><option value="SPAM">광고·도배</option><option value="RIGHTS">권리 침해</option><option value="ILLEGAL_FILMING">불법 촬영물</option></select></label>
+          ) : null}
+          {p.action === 'TEMP_BLOCK' ? <label className="field"><span className="field-label">끝나는 날</span><input className="input" type="date" value={p.endsAt} onChange={(e) => p.onEndsAt(e.target.value)} /></label> : null}
+          <label className="field"><span className="field-label">사유(필수, 2,000자까지)</span><textarea className="input" rows={3} value={p.reason} onChange={(e) => p.onReason(e.target.value)} /></label>
+          {p.notice ? <p className="t-sm" role="alert">{p.notice}</p> : null}
+          <div className="row" style={{ gap: 6 }}><button className="btn btn-primary btn-sm" type="button" disabled={p.busy} onClick={p.onSubmit}>{p.busy ? '조치 중…' : '조치하기'}</button><button className="btn btn-ghost btn-sm" type="button" onClick={() => p.onAction(null)}>닫기</button></div>
+        </div>
+      ) : p.notice ? <p className="t-sm" role="alert">{p.notice}</p> : null}
     </section>
   );
 }

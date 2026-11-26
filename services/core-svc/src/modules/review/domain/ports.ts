@@ -1,5 +1,6 @@
 // review 모듈의 포트(도메인이 바깥을 모르게 한다). 어댑터는 메모리(시험)와 Drizzle(운영)이다.
 import type { ReportRecord, ReviewRecord, ReviewSort, TakedownRecord } from './review.js';
+import type { ReviewImageAttach, ReviewImageRecord } from './review-image.js';
 
 export interface ReviewListInput {
   readonly productionId: string;
@@ -30,17 +31,29 @@ export interface HeldWithdrawalRow {
 }
 
 export interface ReviewStore {
-  insertReview(r: ReviewRecord): Promise<void>;
+  /** 후기 저장과 사진 붙이기를 한 트랜잭션으로 한다. 사진 하나라도 틀리면 후기 행도 남기지 않는다 */
+  insertReview(r: ReviewRecord, images?: readonly ReviewImageAttach[]): Promise<void>;
   findReview(reviewId: string): Promise<ReviewRecord | undefined>;
   findReviewByEventAccount(eventId: string, accountId: string): Promise<ReviewRecord | undefined>;
-  updateReview(reviewId: string, patch: Partial<Pick<ReviewRecord, 'rating' | 'body' | 'status' | 'notice' | 'noticeUntilMs' | 'contentFingerprint' | 'updatedAtMs' | 'edited'>>): Promise<void>;
-  /** 작성자 지우기. 그 후기 한 행을 파기 칸대로 비운다(docs/data.md §2 '후기 파기', ADR-0086 ⑧). 지운 시각은 처음 지운 시각(이미 있으면 그대로) */
-  softDeleteReview(reviewId: string, nowMs: number): Promise<void>;
+  /** 후기 고치기와 사진 바꾸기를 한 트랜잭션으로 한다. 빠진 사진의 공개 키를 돌려준다 */
+  updateReview(reviewId: string, patch: Partial<Pick<ReviewRecord, 'rating' | 'body' | 'status' | 'notice' | 'noticeUntilMs' | 'contentFingerprint' | 'updatedAtMs' | 'edited'>>, images?: readonly ReviewImageAttach[]): Promise<readonly string[]>;
+  /** 작성자 지우기. 그 후기 한 행을 파기 칸대로 비우고 사진을 DELETED로 바꾼다. 지운 사진의 공개 키를 돌려준다 */
+  softDeleteReview(reviewId: string, nowMs: number): Promise<readonly string[]>;
   listReviews(input: ReviewListInput): Promise<ReviewListResult>;
   /** 같은 공연의 보이는 후기 전부(요약용). 후기 수가 많지 않은 첫 구현에서 쓴다 */
   listVisibleByProduction(productionId: string): Promise<readonly ReviewRecord[]>;
   /** 이 계정이 신고한 후기 ID(목록의 reportedByMe) */
   reportedTargetIds(accountId: string, targetIds: readonly string[]): Promise<ReadonlySet<string>>;
+
+  /** 후기들의 사진 행(삭제 표시 포함). 목록·요약·단건이 한 번에 읽는다 */
+  imagesByReviews(reviewIds: readonly string[]): Promise<ReadonlyMap<string, readonly ReviewImageRecord[]>>;
+  /** 그 계정의 사진 행 전부(상태 포함). 거절한 업로드가 행을 남기지 않는지와 한도 셈에 쓴다 */
+  imageRowsByAccount(accountId: string): Promise<readonly ReviewImageRecord[]>;
+  /** 정리 때가 된 행: 붙이지 않은 READY(24시간 지남)와 DELETED */
+  imageRowsDueForCleanup(nowMs: number, limit: number): Promise<readonly ReviewImageRecord[]>;
+  insertReviewImage(row: ReviewImageRecord): Promise<void>;
+  deleteImageRows(imageIds: readonly string[]): Promise<void>;
+  countImageUploadsSince(accountId: string, sinceMs: number): Promise<number>;
 
   /** 신고 저장과 불법 촬영물 즉시 가림을 한 트랜잭션으로 한다(2.3.3) */
   insertReport(r: ReportRecord, hide?: { takedown: TakedownRecord; status: 'HIDDEN' }): Promise<void>;
@@ -90,6 +103,23 @@ export interface ReviewStore {
 }
 
 export const REVIEW_STORE = Symbol('REVIEW_STORE');
+
+/** 후기 사진 공개 객체 지우기와 업로드가 쓰는 저장소(운영은 S3, 시험은 메모리) */
+export interface ReviewImageObjects {
+  putQuarantine(key: string, bytes: Uint8Array): Promise<void>;
+  deleteQuarantine(key: string): Promise<void>;
+  readStaging(key: string): Promise<Uint8Array | undefined>;
+  stagingSize(key: string): Promise<number | undefined>;
+  deleteStaging(key: string): Promise<void>;
+  putPublic(key: string, bytes: Uint8Array, contentType: string): Promise<void>;
+  deletePublic(key: string): Promise<void>;
+}
+
+export interface ReviewImageWiring {
+  readonly origin: string;
+  readonly objects: ReviewImageObjects;
+  readonly processing: { process(q: { sourceKey: string; kind: string; timeoutMs: number }): Promise<{ status: string; reason?: string; width?: number; height?: number; derivativeKeys?: string[] }> };
+}
 
 /** 후기 목록·자격에 필요한 회차·공연 정보(카탈로그 논리 DB). 후기 모듈은 카탈로그 모듈을 직접 부르지 않는다 */
 export interface ReviewEvent {

@@ -2,6 +2,9 @@
 import type { ImageKind, ProductionImageRow } from './production-image.js';
 import type { CheckedLayout, SeatmapFormat, SeatmapIssue, TooMany } from './seatmap-import.js';
 
+/** 이미지 처리 작업에 맡기는 종류(공연 포스터·상세, 후기 사진) */
+export type ProcessImageKind = ImageKind | 'REVIEW_PHOTO';
+
 /** image-worker ProcessImage의 최종 결과(SCAN_PENDING은 최종 결과가 아니다, ADR-0257 결정 1) */
 export type ProcessOutcome =
   | { status: 'ACCEPTED'; width: number; height: number; derivativeKeys: string[] }
@@ -15,7 +18,7 @@ export class ImageProcessingUnavailable extends Error {}
 /** 디코딩·다시 인코딩 포트(HOT-190은 ImageService.ProcessImage를 요청 안에서 바로 부르는 어댑터, HOT-200이 작업 원장 어댑터로 바꾼다) */
 export interface ImageProcessing {
   /** timeoutMs는 이 호출의 데드라인(요청의 남은 시간에서 계산한다, ADR-0257 결정 2) */
-  process(q: { sourceKey: string; kind: ImageKind; timeoutMs: number }): Promise<ProcessOutcome>;
+  process(q: { sourceKey: string; kind: ProcessImageKind; timeoutMs: number }): Promise<ProcessOutcome>;
 }
 
 /** 원본과 파생본을 두는 곳(격리 원본 쓰기·지우기, 준비 위치 읽기·지우기, 공개 위치 쓰기·지우기). 키는 서버가 만든 이미지 ID로만 만든다 */

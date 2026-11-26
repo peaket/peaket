@@ -28,8 +28,9 @@ import {
   WITHDRAWAL_RECHECK_DELAY_MS,
   withdrawalRecheckAt,
 } from '../domain/review.js';
-import type { FanProfile, ReviewCaseSink, ReviewEligibility, ReviewEvent, ReviewEventDirectory, ReviewNotifier, ReviewStore } from '../domain/ports.js';
+import type { FanProfile, ReviewCaseSink, ReviewEligibility, ReviewEvent, ReviewEventDirectory, ReviewImageObjects, ReviewNotifier, ReviewStore } from '../domain/ports.js';
 import { ReviewEligibilityUnavailable } from '../domain/ports.js';
+import { reviewImageView, type ReviewImageView } from '../domain/review-image.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -44,6 +45,8 @@ export interface ReviewServiceDeps {
   readonly notifier: ReviewNotifier;
   readonly cases: ReviewCaseSink;
   readonly clock: Clock;
+  /** 사진 공개 주소 출처와 객체 지우기. 없으면 사진 주소가 경로만 남고 지우기는 건너뛴다 */
+  readonly images?: { readonly origin: string; readonly objects: ReviewImageObjects };
   /** 손으로 처리의 운영 줄(review-purge-manual). 없으면 남기지 않는다(소비자 조립·단위 시험) */
   readonly logger?: { info(o: object, msg?: string): void };
 }
@@ -54,6 +57,7 @@ const isUniqueViolation = (e: unknown): boolean => {
   const code = (e as { code?: unknown; cause?: { code?: unknown } } | undefined)?.code ?? (e as { cause?: { code?: unknown } } | undefined)?.cause?.code;
   return code === '23505';
 };
+const isImageAttachFailure = (e: unknown): boolean => e instanceof Error && (e.message === 'review-image-not-attachable' || e.message === 'review-image-duplicate');
 const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
   try {
     return await fn();
@@ -89,8 +93,9 @@ export class Reviews {
       const e = await this.#event(eventId);
       const page = await this.d.store.listReviews({ productionId: e.productionId, sort, ...(cursor ? { cursor } : {}), limit, ...(viewerAccountId ? { viewerAccountId } : {}) });
       const reported = viewerAccountId ? await this.d.store.reportedTargetIds(viewerAccountId, page.items.map((r) => r.reviewId)) : new Set<string>();
+      const images = await this.#imagesOf(page.items.map((r) => r.reviewId));
       const items = page.items.flatMap((r) => {
-        const view = reviewView(r, viewerAccountId, reported.has(r.reviewId), new Date(e.rounds.get(r.eventId) ?? e.startsAtMs).toISOString());
+        const view = reviewView(r, viewerAccountId, reported.has(r.reviewId), new Date(e.rounds.get(r.eventId) ?? e.startsAtMs).toISOString(), images.get(r.reviewId) ?? []);
         return view ? [view] : [];
       });
       return { items, nextCursor: page.nextCursor ?? null };
@@ -104,7 +109,8 @@ export class Reviews {
       if (!r || r.status === 'DELETED') throw notFound();
       const e = await this.#event(r.eventId);
       const reported = viewerAccountId ? await this.d.store.reportedTargetIds(viewerAccountId, [reviewId]) : new Set<string>();
-      const view = reviewView(r, viewerAccountId, reported.has(reviewId), new Date(e.startsAtMs).toISOString());
+      const images = await this.#imagesOf([reviewId]);
+      const view = reviewView(r, viewerAccountId, reported.has(reviewId), new Date(e.startsAtMs).toISOString(), images.get(reviewId) ?? []);
       if (!view) throw notFound();
       return view;
     });
@@ -116,11 +122,12 @@ export class Reviews {
       const all = await this.d.store.listVisibleByProduction(e.productionId);
       const s = summaryOf(all);
       const recent = [...all].sort((a, b) => b.createdAtMs - a.createdAtMs || b.reviewId.localeCompare(a.reviewId)).slice(0, 2);
+      const images = await this.#imagesOf(recent.map((r) => r.reviewId));
       return {
         averageRating: s.averageRating,
         count: s.count,
         recent: recent.flatMap((r) => {
-          const v = reviewView(r, undefined, false, new Date(e.rounds.get(r.eventId) ?? e.startsAtMs).toISOString());
+          const v = reviewView(r, undefined, false, new Date(e.rounds.get(r.eventId) ?? e.startsAtMs).toISOString(), images.get(r.reviewId) ?? []);
           return v ? [v] : [];
         }),
       };
@@ -151,7 +158,7 @@ export class Reviews {
       }
       // 자격 답에 근거 주문이 없으면 저장하지 않는다(빈 UUID로 DB 오류를 내지 않는다)
       if (!eligible.basisOrderId) throw eligibilityUnavailable();
-      const { rating, body } = validateReviewWrite(input);
+      const { rating, body, images } = validateReviewWrite(input);
       const fingerprint = contentFingerprint(body);
       const hidden = await this.d.store.hasHiddenFingerprint(fingerprint);
       const now = this.d.clock.now();
@@ -173,13 +180,15 @@ export class Reviews {
         edited: false,
       };
       try {
-        await this.d.store.insertReview(review);
+        await this.d.store.insertReview(review, images);
       } catch (e) {
         if (isUniqueViolation(e)) throw new ProblemError({ type: 'review-already-written', status: 409, title: '이 회차의 후기를 이미 썼습니다' });
+        if (isImageAttachFailure(e)) throw new ProblemError({ type: 'review-image-invalid', status: 422, title: '사진을 붙일 수 없습니다' });
         throw e;
       }
       if (hidden) await this.d.store.insertTakedown(this.#takedown(id, 'SAME_CONTENT', fingerprint, now));
-      return reviewView(review, accountId, false, new Date(e.rounds.get(e.eventId) ?? e.startsAtMs).toISOString())!;
+      const views = (await this.#imagesOf([id])).get(id) ?? [];
+      return reviewView(review, accountId, false, new Date(e.rounds.get(e.eventId) ?? e.startsAtMs).toISOString(), views)!;
     });
   }
 
@@ -188,24 +197,33 @@ export class Reviews {
       const r = await this.#mine(reviewId, accountId);
       const takedowns = await this.d.store.takedownsByReview(reviewId);
       if (r.notice !== undefined || takedowns.some((t) => t.reason === 'NOTICE' && t.restoredAtMs === undefined)) throw hiddenByNotice();
-      const { rating, body } = validateReviewWrite(input);
+      const { rating, body, images } = validateReviewWrite(input);
       const fingerprint = contentFingerprint(body);
       const hidden = await this.d.store.hasHiddenFingerprint(fingerprint);
       const now = this.d.clock.now();
-      await this.d.store.updateReview(reviewId, { rating, body, status: hidden ? 'HIDDEN' : 'VISIBLE', notice: undefined, noticeUntilMs: undefined, contentFingerprint: fingerprint, updatedAtMs: now, edited: true });
+      let removed: readonly string[] = [];
+      try {
+        removed = await this.d.store.updateReview(reviewId, { rating, body, status: hidden ? 'HIDDEN' : 'VISIBLE', notice: undefined, noticeUntilMs: undefined, contentFingerprint: fingerprint, updatedAtMs: now, edited: true }, images);
+      } catch (e) {
+        if (isImageAttachFailure(e)) throw new ProblemError({ type: 'review-image-invalid', status: 422, title: '사진을 붙일 수 없습니다' });
+        throw e;
+      }
+      await this.#deletePublic(removed);
       const same = takedowns.filter((t) => t.reason === 'SAME_CONTENT' && t.restoredAtMs === undefined);
       if (hidden && same.length === 0) await this.d.store.insertTakedown(this.#takedown(reviewId, 'SAME_CONTENT', fingerprint, now));
       if (!hidden && same.length > 0) await this.d.store.restoreTakedowns(reviewId, now);
       const updated = (await this.d.store.findReview(reviewId))!;
       const e = await this.#event(updated.eventId);
-      return reviewView(updated, accountId, false, new Date(e.startsAtMs).toISOString())!;
+      const views = (await this.#imagesOf([reviewId])).get(reviewId) ?? [];
+      return reviewView(updated, accountId, false, new Date(e.startsAtMs).toISOString(), views)!;
     });
   }
 
   async delete(reviewId: string, accountId: string): Promise<void> {
     return guard(async () => {
       await this.#mine(reviewId, accountId);
-      await this.d.store.softDeleteReview(reviewId, this.d.clock.now());
+      const removed = await this.d.store.softDeleteReview(reviewId, this.d.clock.now());
+      await this.#deletePublic(removed);
     });
   }
 
@@ -254,20 +272,47 @@ export class Reviews {
       if (!UUID.test(reviewId)) throw notFound();
       const r = await this.d.store.findReview(reviewId);
       if (!r || r.status === 'DELETED') throw notFound();
-      const { contentFingerprint: fingerprint } = live(r);
       const now = this.d.clock.now();
+      const takedowns = await this.d.store.takedownsByReview(reviewId);
+      const active = takedowns.filter((t) => t.restoredAtMs === undefined);
+      const activeReasons = new Set(active.map((t) => t.reason));
+      const reports = await this.d.store.reportsByTarget(reviewId);
+      const noReports = () => new ProblemError({ type: 'review-no-reports', status: 409, title: '신고가 없는 후기는 이 조치를 할 수 없습니다' });
+      const notTarget = () => new ProblemError({ type: 'review-not-moderation-target', status: 409, title: '법정 통보 경로로 처리해야 합니다' });
+      const notHidden = () => new ProblemError({ type: 'review-not-hidden', status: 409, title: '가리지 않은 후기는 해제할 수 없습니다' });
+
+      if (input.action === 'RELEASE') {
+        if (r.status !== 'HIDDEN') {
+          // 같은 해제를 다시 보낸 경우(가린 적이 있고 이미 복원됨)만 200이다
+          if (takedowns.some((t) => t.restoredAtMs !== undefined)) return { applied: true };
+          throw notHidden();
+        }
+        const onlySame = activeReasons.has('SAME_CONTENT') && !activeReasons.has('NOTICE') && !activeReasons.has('FILMING_HOLD') && !activeReasons.has('RIGHTS_TEMP') && !activeReasons.has('POLICY');
+        if (onlySame) throw notTarget();
+      } else if (input.action === 'NO_ACTION' || input.action === 'BLOCK') {
+        if (reports.length === 0) throw noReports();
+        if (activeReasons.has('NOTICE') || activeReasons.has('SAME_CONTENT')) throw notTarget();
+      } else if (input.action === 'TEMP_BLOCK') {
+        if (activeReasons.has('NOTICE') || activeReasons.has('SAME_CONTENT')) throw notTarget();
+      }
+
+      // 같은 조치를 다시 보내면 새 기록 없이 지금 상태를 돌려준다
+      if (input.action === 'NO_ACTION' && reports.length > 0 && reports.every((x) => x.status === 'RESOLVED' && x.outcome === 'NO_ACTION')) return { applied: true };
+      if (input.action === 'BLOCK' && r.status === 'HIDDEN' && r.notice === 'POLICY') return { applied: true };
+      if (input.action === 'TEMP_BLOCK' && r.status === 'HIDDEN' && r.notice === 'RIGHTS_TEMP' && r.noticeUntilMs === input.endsAtMs) return { applied: true };
+
       const effect = moderationEffect(input, now);
       await this.d.store.moderate(reviewId, {
         ...(effect.status !== undefined ? { status: effect.status } : {}),
         ...(effect.notice !== undefined ? { notice: effect.notice } : {}),
         ...(effect.noticeUntilMs !== undefined ? { noticeUntilMs: effect.noticeUntilMs } : {}),
-        ...(effect.takedown ? { takedown: this.#takedown(reviewId, effect.takedown.reason, fingerprint, now, effect.takedown.endsAtMs) } : {}),
+        ...(effect.takedown ? { takedown: this.#takedown(reviewId, effect.takedown.reason, live(r).contentFingerprint, now, effect.takedown.endsAtMs) } : {}),
         restoreTakedowns: effect.restoreTakedowns,
         outcome: effect.outcome,
         nowMs: now,
       });
       // 같은 지문에 다른 통보가 살아 있으면 지문을 지우지 않는다(하나를 풀었다고 같은 내용 차단이 풀리면 안 된다)
-      if (effect.restoreTakedowns && !(await this.d.store.hasActiveNoticeFingerprint(fingerprint))) await this.d.store.removeHiddenFingerprint(fingerprint);
+      if (effect.restoreTakedowns && !(await this.d.store.hasActiveNoticeFingerprint(live(r).contentFingerprint))) await this.d.store.removeHiddenFingerprint(live(r).contentFingerprint);
       const updated = (await this.d.store.findReview(reviewId))!;
       await this.d.notifier.moderationApplied(updated, input.action, input.reason);
       return { applied: true };
@@ -290,7 +335,7 @@ export class Reviews {
 
   /** CS 처리함 상세: 신고자 계정은 싣지 않고 사유별 수·신고 내용·후기 본문을 준다 */
   async reportedReview(reviewId: string): Promise<{
-    review: { reviewId: string; eventId: string; rating: number; body: string; status: ReviewRecord['status']; notice?: ReviewRecord['notice']; noticeUntil?: string; authorDisplay: string; createdAt: string; edited: boolean };
+    review: { reviewId: string; eventId: string; rating: number; body: string; status: ReviewRecord['status']; notice?: ReviewRecord['notice']; noticeUntil?: string; takedownReason?: string; authorDisplay: string; createdAt: string; edited: boolean; images: readonly ReviewImageView[] };
     summary: { total: number; byCategory: Record<string, number>; reports: readonly { category: string; detail: string; rightsHolder: boolean; notifyChannel?: string; createdAt: string }[] };
   }> {
     return guard(async () => {
@@ -299,6 +344,9 @@ export class Reviews {
       if (!r || r.status === 'DELETED') throw notFound();
       const { rating } = live(r);
       const reports = await this.d.store.reportsByTarget(reviewId);
+      const takedowns = await this.d.store.takedownsByReview(reviewId);
+      const active = takedowns.filter((t) => t.restoredAtMs === undefined);
+      const takedownReason = r.notice ?? active.at(-1)?.reason;
       const byCategory: Record<string, number> = {};
       for (const x of reports) byCategory[x.category] = (byCategory[x.category] ?? 0) + 1;
       return {
@@ -310,9 +358,11 @@ export class Reviews {
           status: r.status,
           ...(r.notice !== undefined ? { notice: r.notice } : {}),
           ...(r.noticeUntilMs !== undefined ? { noticeUntil: new Date(r.noticeUntilMs).toISOString() } : {}),
+          ...(takedownReason !== undefined ? { takedownReason } : {}),
           authorDisplay: r.authorDisplay,
           createdAt: new Date(r.createdAtMs).toISOString(),
           edited: r.edited,
+          images: (await this.#imagesOf([reviewId])).get(reviewId) ?? [],
         },
         summary: {
           total: reports.length,
@@ -377,6 +427,25 @@ export class Reviews {
   /** 가장 오래 밀린 다시 정리 예약이 예약 시각을 넘긴 시간(ms). 없거나 밀리지 않았으면 0 */
   async oldestOverdueRecheckMs(): Promise<number> {
     return this.d.store.oldestOverdueRecheckMs(this.d.clock.now());
+  }
+
+  async #imagesOf(reviewIds: readonly string[]): Promise<Map<string, ReviewImageView[]>> {
+    const rows = await this.d.store.imagesByReviews(reviewIds);
+    const origin = this.d.images?.origin ?? '';
+    const out = new Map<string, ReviewImageView[]>();
+    for (const [id, list] of rows) out.set(id, list.filter((r) => r.status === 'READY').map((r) => reviewImageView(r, origin)));
+    return out;
+  }
+
+  async #deletePublic(keys: readonly string[]): Promise<void> {
+    if (!this.d.images || keys.length === 0) return;
+    for (const key of keys) {
+      try {
+        await this.d.images.objects.deletePublic(key);
+      } catch {
+        // 지우지 못한 객체는 다음 정리 작업이 남은 행으로 다시 본다(요청은 성공으로 둔다)
+      }
+    }
   }
 
   async #event(eventId: string): Promise<EventInfo> {
