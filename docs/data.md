@@ -1976,6 +1976,11 @@ erDiagram
         text body "2,000자까지. 보존 기한 뒤 파기"
         text status "SUBMITTED|DECIDED|INVALID(대상 아님·기한 경과로 닫힘)"
         text result "LIFTED|KEPT|NOT_RECLAIMED|RECLAIMED|ACCEPTED|REJECTED. 뒤의 둘은 부정 예매 소명의 인정·불인정(추천 적용 2026-10-31, ADR-0171). ops-svc가 support 내부 API로 적는다"
+        text result_note "담당자가 적은 검토 사유(1,000자 [가정]). FRAUD_CASE는 사건 기록에만 두고 여기에는 싣지 않는다(F-06-4 추천 적용 2026-11-26)"
+        text dispatch_state "PENDING|SENT|RETRY|FAILED. CS 건 요청(Outbox)과 FRAUD_CASE 사건 입구로 보내는 작업의 상태. FRAUD_CASE는 403·404면 INVALID로 닫고 EXPIRED 답이면 INVALID, 5xx·연결 실패면 RETRY다(F-06-4 추천 적용 2026-11-26)"
+        int dispatch_attempts "보낸 횟수(0 이상). RETRY면 1 오른다"
+        timestamptz next_dispatch_at "다음에 다시 보낼 시각(1분에서 두 배씩 10분 [가정]까지). SENT·DECIDED면 NULL"
+        timestamptz dispatched_at "마지막으로 보낸 시각"
         uuid case_id "CS 처리함 건(ops 논리 DB라 외래키 없음)"
         timestamptz submitted_at
         timestamptz decided_at
@@ -2493,6 +2498,7 @@ erDiagram
         text target_ref
         text fraud_action "FRAUD_ACTION만. CANCEL_TICKETS|RESTRICT|LIFT_RESTRICTION(표 취소와 환급, 이용 제한 걸기, 풀기). 그 밖의 종류는 NULL(openapi ApprovalRequest.fraudAction, 추천 적용 2026-10-31, ADR-0171)"
         text requested_role "COMMANDER_ROLE_CHANGE만. 승인되면 대상 관리 계정(target_ref)에 줄 역할(commander, 또는 commander에서 내릴 때의 viewer|operator|cs_agent|cs_lead). 그 밖의 종류는 NULL(openapi ApprovalRequest.requestedRole, open-items 73번, 추천 적용 2026-10-30)"
+        timestamptz restriction_ends_at "BOOKING_RESTRICTION만. 요청한 예매 제한의 끝 시각. 그 밖의 종류는 NULL. 요청 시각 + 1년 [가정]을 넘지 못하고, 집행 때 booking_restriction.ends_at에 복사한다(F-06-4 추천 적용 2026-11-26)"
         bigint amount "원 단위. 지급 묶음 합계를 담으므로 bigint(추천 적용 2026-10-28, 기술 검토 높음-20)"
         text reason_code
         text reason_text
@@ -2566,7 +2572,7 @@ erDiagram
     booking_restriction {
         uuid id PK
         uuid account_id
-        text reason_code "사유 코드. FRAUD는 부정 예매 이용 제한이고 걸기·풀기가 모두 POL-038 ⑪의 2인 승인이다(POL-046 ⑥, 추천 적용 2026-10-31, ADR-0171)"
+        text reason_code "사유 코드. FRAUD는 부정 예매 이용 제한이고 걸기·풀기가 모두 POL-038 ⑪의 2인 승인이다(POL-046 ⑥, 추천 적용 2026-10-31, ADR-0171). 일반 남용 제한은 ABUSE_CANCEL·ABUSE_TRANSFER·ABUSE_MULTI_ACCOUNT·ABUSE_RESALE [가정]이고 cs_agent가 요청해 cs_lead가 확인한다(1인 승인, POL-038 ⑤, F-06-4 추천 적용 2026-11-26)"
         uuid fraud_case_id "reason_code FRAUD일 때 그 사건"
         uuid confirmed_by "cs_lead. FRAUD면 승인한 commander"
         timestamptz starts_at
