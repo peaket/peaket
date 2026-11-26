@@ -1,30 +1,42 @@
-// F-07-12 SCR-063 배선(AC-06). 소문자 UUID이고 ?state=가 없을 때만 라이브 경로를 고르고,
-// 라이브 화면이 공연 개요·판매자 정보 API와 순수 변환 함수를 쓰는지 본다.
+// F-07-12 SCR-063 배선(AC-06, TR-03). UUID 공연이고 ?state=가 없을 때만 라이브 경로를 고르며,
+// 목업 `requireProduction`보다 먼저 분기한다. 값·상태 렌더는 live-view.test.mjs가 본다.
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
+import { register } from 'node:module';
 import { test } from 'node:test';
+
+register('../../shared/lib/test-ts-resolve.mjs', import.meta.url);
 
 const pageUrl = new URL('./ui/EventOverviewPage.tsx', import.meta.url);
 const liveUrl = new URL('./ui/LiveEventOverview.tsx', import.meta.url);
+const viewUrl = new URL('./ui/live-view.ts', import.meta.url);
 const page = () => readFileSync(pageUrl, 'utf8');
 const live = () => readFileSync(liveUrl, 'utf8');
+const UUID = '0190f3a1-7c2e-7a00-8000-000000000301';
 
-test('F-07-12 AC-06 UO-06 SCR-063는 UUID 공연이고 ?state=가 없으면 라이브를, 아니면 목업을 고른다', () => {
+test('F-07-12 AC-06 UO-13 UUID+?state= 없음에서만 라이브를 고르고 목업 분기보다 먼저 본다', async () => {
   assert.equal(existsSync(liveUrl), true, 'LiveEventOverview.tsx가 없다');
+  assert.equal(existsSync(viewUrl), true, 'ui/live-view.ts가 없다');
+  const { overviewModeOf } = await import('./model/live.ts');
+  assert.equal(overviewModeOf(UUID, {}), 'live');
+  assert.equal(overviewModeOf(UUID, { state: '기본' }), 'preview');
+  assert.equal(overviewModeOf('evt-lumen-2026', {}), 'preview');
   const src = page();
+  assert.match(src, /overviewModeOf/);
   assert.match(src, /LiveEventOverview/);
-  assert.match(src, /UUID\.test\(id\)/);
-  assert.match(src, /readParam\([^)]*'state'\)|sp\.state/);
+  assert.ok(src.indexOf('overviewModeOf') < src.indexOf('requireProduction'), '목업 requireProduction보다 먼저 분기해야 한다');
   assert.match(src, /PreviewStateSwitcher/, '?state= 목업 미리보기를 지우면 안 된다');
 });
 
-test('F-07-12 AC-06 UO-07 라이브 화면은 개요·판매자 API와 변환 함수를 쓰고 HTML을 주입하지 않는다 [ASVS v5.0.0-1.2.1]', () => {
+test('F-07-12 AC-06 UO-14 라이브 화면은 뷰 함수·개요/판매자 API·allSettled를 쓰고 HTML을 주입하지 않는다 [ASVS v5.0.0-1.2.1]', () => {
   const src = live();
+  assert.match(src, /OverviewLiveView/);
   assert.match(src, /getPartnerProduction/);
   assert.match(src, /getPartnerSellerProfile/);
   assert.match(src, /productionOfDetail/);
   assert.match(src, /progressOf/);
   assert.match(src, /eventRowsOf/);
+  assert.match(src, /Promise\.allSettled/);
   assert.equal(/dangerouslySetInnerHTML|innerHTML/.test(src), false);
   assert.equal(/dangerouslySetInnerHTML|innerHTML/.test(page()), false);
 });

@@ -6,6 +6,7 @@ import { REFLOW_PAGES } from './rules.mjs';
 
 const PARTNER = [
   '/events',
+  '/events/0190f3a1-7c2e-7a00-8000-000000000401',
   '/events/new',
   '/events/evt-lumen-2026',
   '/events/evt-lumen-2026/edit',
@@ -27,7 +28,7 @@ const PARTNER = [
   '/settings/webhooks',
 ];
 
-test('FE-T31 파트너 콘솔 전 화면 20개가 reflow 목록에 있다', () => {
+test('FE-T31 파트너 콘솔 전 화면 21개가 reflow 목록에 있다', () => {
   const paths = REFLOW_PAGES.filter((p) => p.app === 'partner').map((p) => p.path);
   assert.deepEqual([...paths].sort(), [...PARTNER].sort());
 });

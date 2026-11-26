@@ -2,8 +2,11 @@
 // PartnerProductionDetail·PartnerEventDetail, docs/planning/03 §2.14.
 // API 개요를 공연 문맥 머리·회차 표·진행 단계로 바꾸는 순수 함수를 본다. 기준 트리에는 live.ts가 없어 각 시험이 실패한다.
 import assert from 'node:assert/strict';
+import { register } from 'node:module';
 import { test } from 'node:test';
 
+// `@/` 값 가져오기를 node --test에서도 푼다(TR-15, shared/lib/test-ts-resolve.mjs).
+register('../../../shared/lib/test-ts-resolve.mjs', import.meta.url);
 const load = () => import('./live.ts');
 
 const event = (over = {}) => ({
@@ -76,8 +79,9 @@ test('F-07-12 AC-06 UO-03 회차 행은 시작·입장·종료 예정을 KST로,
   const rows = eventRowsOf([
     event(),
     event({ eventId: 'e2', entryOpensAt: null, startsAt: '2026-10-26T08:00:00.000Z', endsAt: '2026-10-26T10:00:00.000Z', saleStatus: 'UPCOMING', soldPercent: null }),
+    event({ eventId: 'e3', startsAt: '2026-10-27T08:00:00.000Z', endsAt: '2026-10-27T10:00:00.000Z', saleStatus: null, soldPercent: null }),
   ]);
-  assert.equal(rows.length, 2);
+  assert.equal(rows.length, 3);
   assert.equal(rows[0].startsAt, '10/25(일) 18:00 KST');
   assert.equal(rows[0].doorsAt, '16:30 KST');
   assert.equal(rows[0].endsAt, '20:00 KST');
@@ -86,6 +90,8 @@ test('F-07-12 AC-06 UO-03 회차 행은 시작·입장·종료 예정을 KST로,
   assert.equal(rows[1].doorsAt, '—');
   assert.equal(rows[1].saleStatusText, '오픈 예정');
   assert.equal(rows[1].saleRateText, '—');
+  assert.equal(rows[2].saleStatusText, '—');
+  assert.equal(rows[2].saleRateText, '—');
 });
 
 test('F-07-12 AC-06 UO-04 공연 문맥 머리는 API 값으로 채우고 없는 값에 목업 LUMEN을 쓰지 않는다', async () => {
@@ -105,6 +111,8 @@ test('F-07-12 AC-06 UO-04 공연 문맥 머리는 API 값으로 채우고 없는
   assert.equal(p.rounds[0].endsAt, '20:00 KST');
   assert.equal(p.rounds[0].saleStatus, 'ON_SALE');
   assert.equal(p.rounds[0].saleRate, 50);
+  assert.equal(p.placeName, '피켓 아레나');
+  assert.deepEqual(p.artistNames, ['루멘']);
 
   const rejected = productionOfDetail(detail({ saleReview: 'REJECTED', hasApprovalHistory: false, rejectionReason: '통신판매업 신고번호 누락', events: [] }));
   assert.equal(rejected.review, 'REJECTED');
@@ -112,6 +120,14 @@ test('F-07-12 AC-06 UO-04 공연 문맥 머리는 API 값으로 채우고 없는
   assert.equal(rejected.firstOpenAt, null);
   assert.equal(rejected.roundCount, 0);
   assert.equal(rejected.saleStatus, 'NONE');
+
+  // TR-12: 없는 값에 목업 LUMEN의 공연장·아티스트·1인 한도를 쓰지 않는다.
+  const empty = productionOfDetail(detail({ place: null, artists: [], events: [] }));
+  assert.equal(empty.placeName, null);
+  assert.deepEqual(empty.artistNames, []);
+  assert.equal(empty.perPersonLimit, 0);
+  assert.equal(empty.firstOpenAt, null);
+  assert.equal(empty.roundCount, 0);
 
   const suspended = productionOfDetail(detail({ saleReview: 'SUSPENDED', suspensionReasonCode: 'SELLER_IDENTITY' }));
   assert.equal(suspended.review, 'SUSPENDED');

@@ -167,6 +167,8 @@ export const REFLOW_PAGES = [
   { app: 'web', locale: 'ko', path: '/my/tickets' },
   { app: 'web', locale: 'ko', path: '/search' },
   { app: 'partner', locale: 'ko', path: '/events' },
+  // F-07-12(HOT-260): SCR-063 라이브 경로. 소문자 UUID+?state= 없음이라 실제 API를 부른다(TR-13).
+  { app: 'partner', locale: 'ko', path: '/events/0190f3a1-7c2e-7a00-8000-000000000401' },
   // F-07-9(LCH-130): 파트너 콘솔 전 화면. 목업 공연·상품 ID라 실제 API를 부르지 않는다.
   { app: 'partner', locale: 'ko', path: '/events/new' },
   { app: 'partner', locale: 'ko', path: '/events/evt-lumen-2026' },

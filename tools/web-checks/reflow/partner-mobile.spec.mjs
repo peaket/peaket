@@ -12,6 +12,69 @@ import { BASE, openReflowPage } from './open.mjs';
 const PARTNER_API = 'https://partner-api.peaket.example';
 const PARTNER_ORIGIN = new URL(BASE.partner).origin;
 const POLICY_PRODUCTION = '0190f3a1-7c2e-7a00-8000-000000000301';
+const LIVE_PRODUCTION = '0190f3a1-7c2e-7a00-8000-000000000401';
+
+const LIVE_EVENT = {
+  eventId: '0190f3a1-7c2e-7a00-8000-000000000402',
+  version: 1,
+  pending: false,
+  openAt: '2026-10-14T11:00:00.000Z',
+  lobbyMinutes: 10,
+  entryOpensAt: '2026-10-25T07:30:00.000Z',
+  startsAt: '2026-10-25T09:00:00.000Z',
+  endsAt: '2026-10-25T11:00:00.000Z',
+  reentryAllowed: false,
+  lobbyShuffle: true,
+  openBatch: true,
+  seatAssignment: 'PICK',
+  perPersonLimit: 4,
+  status: 'SCHEDULED',
+  saleStatus: 'ON_SALE',
+  soldPercent: 50,
+  entryClosedAt: null,
+};
+
+const liveDetail = (events) => ({
+  productionId: LIVE_PRODUCTION,
+  version: 1,
+  title: 'LUMEN ë¼ì´ë¸Œ ê³µì—°',
+  genre: 'ì½˜ì„œíŠ¸',
+  ageRating: null,
+  runningMinutes: null,
+  place: null,
+  requestedPlace: null,
+  artists: [],
+  aliases: [],
+  saleReview: 'APPROVED',
+  hasApprovalHistory: true,
+  saleApprovedAt: '2026-10-08T05:00:00.000Z',
+  rejectionReason: null,
+  suspensionReasonCode: null,
+  hasPendingRevision: false,
+  pendingRevisionFields: [],
+  progressStage: 'SALE',
+  images: [],
+  events,
+});
+
+const LIVE_SELLER = {
+  seller: {
+    legalName: '(ì£¼)í”¼ì¼“ê³µì—°',
+    representative: 'ëŒ€í‘œìž',
+    address: 'ì„œìš¸ ì–´ë”˜ê°€ 1',
+    phone: '02-0000-0000',
+    email: 'seller@example.test',
+    businessRegNo: '123-45-67890',
+    mailOrderReportNo: '2026-ì„œìš¸-0001',
+  },
+  verifiedAt: '2026-10-01T00:00:00.000Z',
+  pendingChange: null,
+};
+
+const liveRoutes = (events) => ({
+  [`/v1/partner/productions/${LIVE_PRODUCTION}`]: liveDetail(events),
+  '/v1/partner/seller-profile': LIVE_SELLER,
+});
 
 const POLICY = {
   version: 3,
@@ -73,6 +136,7 @@ const orderRoutes = (stats) => ({ '/v1/partner/merch-order-stats': stats });
 
 const PARTNER = [
   '/events',
+  '/events/0190f3a1-7c2e-7a00-8000-000000000401',
   '/events/new',
   '/events/evt-lumen-2026',
   '/events/evt-lumen-2026/edit',
@@ -215,3 +279,37 @@ test.describe('FE-T31 íŒŒíŠ¸ë„ˆ 640: íƒœë¸”ë¦¿ 768 ê²½ê³„', () => {
     await expect(page.getByText('ê·œì¹™ íŽ¸ì§‘ê³¼ ì‹œë®¬ë ˆì´ì…˜ì€ íƒœë¸”ë¦¿ì´ë‚˜ ë°ìŠ¤í¬í†±ì—ì„œ í•©ë‹ˆë‹¤')).toBeHidden();
   });
 });
+
+// F-07-12(HOT-260, TR-13): SCR-063 ¶óÀÌºê °³¿äÀÇ ¼º°ø¡¤0°Ç¡¤¿À·ù »óÅÂ¸¦ partner-api ´ë¿ªÀ¸·Î ¿¬´Ù.
+// ºê¶ó¿ìÀú ½ÇÇàÀº ¿þÀÌºê ³¡À¸·Î ¹Ì·ç´õ¶óµµ °æ·Î¡¤´ë¿ª¡¤»óÅÂ¸¦ ¸ñ·Ï¿¡ ³²±ä´Ù.
+for (const size of SIZES) {
+  test.describe(`FE-T31 ÆÄÆ®³Ê ¶óÀÌºê °³¿ä${size.token}${size.name}`, () => {
+    test.use({ viewport: { width: size.width, height: size.height } });
+
+    test('¶óÀÌºê °³¿ä ¼º°ø: È¸Â÷ Ç¥/Ä«µå°¡ º¸ÀÌ°í °¡·Î ½ºÅ©·ÑÀÌ ¾ø´Ù', async ({ page }) => {
+      await stubPartnerApi(page, liveRoutes([LIVE_EVENT]));
+      await openReflowPage(page, { app: 'partner', path: `/events/${LIVE_PRODUCTION}` });
+      await expect(page.getByRole('heading', { name: 'LUMEN ¶óÀÌºê °ø¿¬' })).toBeVisible();
+      await expect(page.getByText('10/25(ÀÏ) 18:00 KST')).toBeVisible();
+      const m = await overflow(page);
+      expect(m.scrollWidth).toBeLessThanOrEqual(m.clientWidth + 1);
+    });
+
+    test('¶óÀÌºê °³¿ä 0°Ç: ºó È¸Â÷ ¾È³»°¡ º¸ÀÎ´Ù', async ({ page }) => {
+      await stubPartnerApi(page, liveRoutes([]));
+      await openReflowPage(page, { app: 'partner', path: `/events/${LIVE_PRODUCTION}` });
+      await expect(page.getByText('µî·ÏµÈ È¸Â÷°¡ ¾ø½À´Ï´Ù')).toBeVisible();
+      const m = await overflow(page);
+      expect(m.scrollWidth).toBeLessThanOrEqual(m.clientWidth + 1);
+    });
+
+    test('¶óÀÌºê °³¿ä ¿À·ù: ¿À·ù Ä«µå¿Í ´Ù½Ã ½Ãµµ°¡ º¸ÀÎ´Ù', async ({ page }) => {
+      await stubPartnerApi(page, {});
+      await openReflowPage(page, { app: 'partner', path: `/events/${LIVE_PRODUCTION}` });
+      await expect(page.getByText('°ø¿¬ °³¿ä¸¦ ºÒ·¯¿ÀÁö ¸øÇß½À´Ï´Ù')).toBeVisible();
+      await expect(page.getByText('´Ù½Ã ½Ãµµ')).toBeVisible();
+      const m = await overflow(page);
+      expect(m.scrollWidth).toBeLessThanOrEqual(m.clientWidth + 1);
+    });
+  });
+}

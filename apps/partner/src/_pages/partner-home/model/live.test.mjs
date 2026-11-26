@@ -2,10 +2,13 @@
 // PartnerProductionSummary·PartnerTodoSummary, docs/planning/03 POL-030·037.
 // 목업이 아니라 API 요약을 화면 말로 바꾸는 순수 함수를 본다. 기준 트리에는 live.ts가 없어 각 시험이 실패한다.
 import assert from 'node:assert/strict';
+import { register } from 'node:module';
 import { test } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
+// `@/` 값 가져오기를 node --test에서도 푼다(TR-15, shared/lib/test-ts-resolve.mjs).
+register('../../../shared/lib/test-ts-resolve.mjs', import.meta.url);
 const load = () => import('./live.ts');
 
 const summary = (over = {}) => ({
@@ -68,17 +71,21 @@ test('F-07-12 AC-05 UH-03 판매 중지는 사유 코드를 d5 문구로 바꾸�
 
 test('F-07-12 AC-05 UH-04 다음 할 일은 반려·판매 중지·승인 대기·판매 중에 따라 다르다', async () => {
   const { nextActionsOf } = await load();
+  const edit = [{ href: '/events/prod-1/edit', label: '고쳐서 다시 요청' }];
   assert.deepEqual(nextActionsOf(summary({ saleReview: 'SUBMITTED', hasApprovalHistory: false })), []);
-  assert.deepEqual(nextActionsOf(summary({ saleReview: 'REJECTED', hasApprovalHistory: false })), [
-    { href: '/events/prod-1/edit', label: '고쳐서 다시 요청' },
-  ]);
+  assert.deepEqual(nextActionsOf(summary({ saleReview: 'SUBMITTED', hasApprovalHistory: true })), []);
+  assert.deepEqual(nextActionsOf(summary({ saleReview: 'REJECTED', hasApprovalHistory: false })), edit);
+  assert.deepEqual(nextActionsOf(summary({ saleReview: 'REJECTED', hasApprovalHistory: true })), edit);
+  assert.deepEqual(nextActionsOf(summary({ saleReview: 'DRAFT', hasApprovalHistory: false })), []);
   assert.deepEqual(nextActionsOf(summary({ saleReview: 'SUSPENDED', hasApprovalHistory: true })), [
     { href: 'mailto:partners@peaket.example', label: '파트너 지원 문의' },
   ]);
-  assert.deepEqual(nextActionsOf(summary({ saleReview: 'APPROVED', saleStatus: 'ON_SALE' })), [
-    { href: '/events/prod-1/live', label: '판매 현황' },
-    { href: '/events/prod-1/staff', label: '현장' },
-  ]);
+  for (const saleStatus of ['UPCOMING', 'ON_SALE', 'ALL_HELD', 'ENDED']) {
+    assert.deepEqual(nextActionsOf(summary({ saleReview: 'APPROVED', saleStatus })), [
+      { href: '/events/prod-1/live', label: '판매 현황' },
+      { href: '/events/prod-1/staff', label: '현장' },
+    ]);
+  }
   assert.deepEqual(nextActionsOf(summary({ saleReview: 'APPROVED', saleStatus: 'SOLD_OUT' })), [
     { href: '/events/prod-1/live', label: '판매 현황' },
   ]);
@@ -97,6 +104,10 @@ test('F-07-12 AC-05 UH-05 필터 이름은 API 값으로 바꾸고 재승인·�
   assert.deepEqual(homeQueryOf({ saleReview: '초안', period: '전체' }, now), { saleReview: ['DRAFT'] });
   assert.deepEqual(homeQueryOf({ saleReview: '승인', period: '전체' }, now), { saleReview: ['APPROVED'] });
   assert.deepEqual(homeQueryOf({ saleReview: '판매 중지', period: '전체' }, now), { saleReview: ['SUSPENDED'] });
+  assert.deepEqual(homeQueryOf({ saleReview: '승인 대기', period: '전체' }, now), { saleReview: ['SUBMITTED'] });
+  assert.deepEqual(homeQueryOf({ saleStatus: '오픈 예정', period: '전체' }, now), { saleStatus: ['UPCOMING'] });
+  assert.deepEqual(homeQueryOf({ saleStatus: '매진', period: '전체' }, now), { saleStatus: ['SOLD_OUT'] });
+  assert.deepEqual(homeQueryOf({ saleStatus: '판매 종료', period: '전체' }, now), { saleStatus: ['ENDED'] });
   assert.deepEqual(homeQueryOf({ period: '다가오는·진행 중 공연' }, now), { from: '2026-11-15' });
   assert.deepEqual(homeQueryOf({ period: '지난 공연' }, now), { to: '2026-11-14' });
   // API 판매 상태에 없는 '오픈 예약 멈춤'은 거르지 않는다
@@ -129,6 +140,21 @@ test('F-07-12 AC-05 UH-06 할 일 카드는 네 이름을 만들고 null은 확�
     none.map((c) => c.value),
     ['확인할 수 없음', '확인할 수 없음', '확인할 수 없음', '확인할 수 없음'],
   );
+
+  // TR-04: 0은 null이 아니라 '0건'이다.
+  const zero = todoCardsOf({
+    asOf: '2026-11-15T00:00:00.000Z',
+    rejectedSaleReviewCount: 0,
+    settlementDisputeDueCount: 0,
+    settlementDisputeEarliestDueAt: null,
+    openGateFlagCount: 0,
+    pendingStaffInvitationCount: 0,
+  });
+  assert.deepEqual(
+    zero.map((c) => c.value),
+    ['0건', '0건', '0건', '0건'],
+  );
+  assert.doesNotMatch(zero.map((c) => c.value).join(' '), /확인할 수 없음/);
 });
 
 test('F-07-12 AC-05 UH-07 목록 행은 계약 값을 화면 순서로 옮기고 제목·사유를 글자로만 둔다 [ASVS v5.0.0-1.2.1] [ASVS v5.0.0-3.2.2]', async () => {
@@ -147,6 +173,7 @@ test('F-07-12 AC-05 UH-07 목록 행은 계약 값을 화면 순서로 옮기고
   assert.match(rows[0].reviewNote, /<img src=x onerror=alert\(1\)>/);
   assert.equal(rows[1].firstOpenText, '—');
   assert.equal(rows[1].saleStatusText, '—');
+  assert.deepEqual(homeRowsOf({ items: [], nextCursor: null }), []);
 
   const html = renderToStaticMarkup(createElement('p', null, rows[0].reviewNote));
   assert.equal(html.includes('<img'), false);
