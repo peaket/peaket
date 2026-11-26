@@ -14,6 +14,8 @@ interface Rule {
   readonly result?: Span;
   /** 원래 승인 업무의 기한을 이어받는다(승인 업무 실행 실패) */
   readonly inherit?: true;
+  /** 요청의 dueBaseAt(또는 createdAt)을 결과 기한으로 그대로 쓴다(F-06-4 FRAUD_CASE 소명) */
+  readonly resultBase?: true;
 }
 
 const bd = (businessDays: number): Span => ({ businessDays });
@@ -56,6 +58,9 @@ function ruleOf(kind: CsCaseKind, category: string): Rule | undefined {
     // d5 §7.6 '결제 뒤 미발권'(확인 4시간, 벽시계). 받기는 BAT-012가 더한다
     case 'TICKET_NOT_ISSUED':
       return { result: { hours: 4 } };
+    // 예매 제한 소명 3영업일. 부정 예매 사건 소명은 사건의 소명 기한(dueBaseAt)을 그대로 쓴다(F-06-4)
+    case 'APPEAL':
+      return category === 'FRAUD_CASE' ? { resultBase: true } : { result: bd(3) };
     default:
       return undefined;
   }
@@ -74,6 +79,7 @@ export function deadlinesOf(
   const rule = ruleOf(i.kind, i.category);
   if (!rule) return { progressDueMs: null, resultDueMs: null };
   if (rule.inherit) return { progressDueMs: null, resultDueMs: i.inheritedDueMs ?? null };
+  if (rule.resultBase) return { progressDueMs: null, resultDueMs: i.baseMs };
   return { progressDueMs: dueOf(rule.progress, i.baseMs, cal), resultDueMs: dueOf(rule.result, i.baseMs, cal) };
 }
 

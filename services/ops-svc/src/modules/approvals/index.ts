@@ -10,4 +10,6 @@ export { MemoryCoreContract, UnavailableCoreContract } from '../../adapters/http
 export type { ContractApprovalRecord, SettlementAdjustmentApprovalFacts, SettlementAdjustmentApprovalRecord, SettlementAdjustmentApprovalView } from './domain/approval.js';
 export type { ContractApprovalStore, CoreContractClient, SettlementAdjustmentApprovalStore } from './domain/ports.js';
 export { ApprovalLifecycle, type ApprovalLifecycleDeps } from './application/approval-lifecycle.js';
+// 예매 제한 사본 상태(F-06-4)를 restrictions 저장소가 같은 트랜잭션에서 읽고 쓴다
+export { approvalRequest } from './adapters/db/schema.js';
 export { HttpApprovalLifecyclePorts, TicketReclaimClient, LogApprovalNotifier, LogApprovalAlerts } from './adapters/service-ports.js';

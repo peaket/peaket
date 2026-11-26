@@ -20,6 +20,7 @@ const CreateBody = z
     reasonText: z.string().min(1).max(2_000),
     evidenceChecked: z.string().min(1).max(200).optional(),
     relatedOrderIds: z.array(z.string().min(1).max(64)).min(1).max(20).optional(),
+    restrictionEndsAt: z.string().min(1).max(64).optional(),
   })
   .strict();
 const ApprovalView = z.record(z.string(), z.unknown());

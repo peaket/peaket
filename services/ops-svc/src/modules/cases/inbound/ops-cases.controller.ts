@@ -5,13 +5,14 @@
 // 추가 검증 이의 인정·기각(F-06-7, openapi createOpsCaseVerificationAppealDecision): 경로 역할은 넷이고(operator·commander가 403 case-update-not-allowed를 받게)
 // 결정은 CS 담당자만 한다. Idempotency-Key(@Idempotent)·If-Match를 읽고 202에 해결한 새 판의 ETag를 싣는다.
 import { Body, Controller, Get, Header, Headers, HttpCode, Optional, Param, Patch, Post, Query, Res } from '@nestjs/common';
-import { CreateOpsCaseVerificationAppealDecisionResponse, GetOpsCaseResponse, ListOpsCasesResponse, UpdateOpsCaseResponse } from '@peaket/contracts/openapi/ops';
+import { CreateOpsCaseRestrictionAppealDecisionResponse, CreateOpsCaseVerificationAppealDecisionResponse, GetOpsCaseResponse, ListOpsCasesResponse, UpdateOpsCaseResponse } from '@peaket/contracts/openapi/ops';
 import { ContractRouteSchema, CurrentPrincipal, Idempotent, IdempotencyRequest, ProblemError, Roles, type Principal } from '@peaket/platform';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { CsCases } from '../application/cs-cases.js';
 import { ApprovalLifecycle } from '../../approvals/index.js';
 import { DECIDE_VERIFICATION_APPEAL, VerificationAppealDecision } from '../application/verification-appeal-decision.js';
+import { RestrictionAppealDecision } from '../application/restriction-appeal-decision.js';
 import { CS_CASE_STATUSES } from '../domain/cs-case.js';
 
 const CASE_ROLES = ['operator', 'commander', 'cs_agent', 'cs_lead'] as const;
@@ -40,6 +41,7 @@ const DecisionBody = z
 
 const CancellationDecisionBody = z.object({ decision: z.enum(['VOID', 'REFUND']), reason: z.string().min(1).max(2_000) }).strict();
 const SystemRefundBody = z.object({ reason: z.string().min(1).max(2_000) }).strict();
+const RestrictionAppealDecisionBody = z.object({ decision: z.enum(['ACCEPT', 'REJECT']), reason: z.string().min(1).max(1_000) }).strict();
 
 const etagOf = (version: number): string => `"${version}"`;
 const actorOf = (me: Principal) => ({ accountId: me.accountId, role: me.role ?? 'viewer' });
@@ -51,6 +53,7 @@ export class OpsCasesController {
     private readonly cases: CsCases,
     private readonly decision: VerificationAppealDecision,
     @Optional() private readonly approvalLifecycle?: ApprovalLifecycle,
+    @Optional() private readonly restrictionDecision?: RestrictionAppealDecision,
   ) {}
 
   @Get()
@@ -85,6 +88,26 @@ export class OpsCasesController {
     const parsed = UpdateBody.safeParse(body ?? {});
     if (!parsed.success) throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
     const out = await this.cases.update(actorOf(me), caseId, one(headers['if-match']), parsed.data);
+    void reply.header('etag', etagOf(out.version));
+    return out.view;
+  }
+
+  @Post(':caseId/restriction-appeal-decision')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  @Roles(['cs_lead'])
+  @ContractRouteSchema({ responses: { 200: CreateOpsCaseRestrictionAppealDecisionResponse } })
+  async restrictionAppealDecision(
+    @Param('caseId') caseId: string,
+    @Body() body: unknown,
+    @CurrentPrincipal() me: Principal,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const parsed = RestrictionAppealDecisionBody.safeParse(body ?? {});
+    if (!parsed.success) throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
+    if (!this.restrictionDecision) throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '예매 제한 연결을 사용할 수 없습니다' });
+    const out = await this.restrictionDecision.decide(actorOf(me), caseId, one(headers['if-match']), parsed.data);
     void reply.header('etag', etagOf(out.version));
     return out.view;
   }

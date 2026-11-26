@@ -1,5 +1,5 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-ops.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
-# openapi info.version 1.0.0-draft · 계약 sha256 8c027e608418370ea19e57ed361e64da9c2284cda280c04402521e6a31133a9c
+# openapi info.version 1.0.0-draft · 계약 sha256 66d0ab877d58f90fdc298b2e417cb8ea5f1dc5aca8d0f6588c5f7d2e414d2686
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -1145,6 +1145,14 @@ spec:
           method: OPTIONS
         - path:
             type: RegularExpression
+            value: /v1/ops/cases/[^/]+/restriction-appeal-decision
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/ops/cases/[^/]+/restriction-appeal-decision
+          method: OPTIONS
+        - path:
+            type: RegularExpression
             value: /v1/ops/cases/[^/]+/system-refund
           method: POST
         - path:
@@ -1154,14 +1162,6 @@ spec:
         - path:
             type: RegularExpression
             value: /v1/ops/cases/[^/]+/verification-appeal-decision
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/ops/cases/[^/]+/verification-appeal-decision
-          method: OPTIONS
-        - path:
-            type: Exact
-            value: /v1/ops/command-dry-runs
           method: POST
       filters:
         - type: RequestHeaderModifier
@@ -1202,6 +1202,14 @@ spec:
   rules:
     - matches:
         - path:
+            type: RegularExpression
+            value: /v1/ops/cases/[^/]+/verification-appeal-decision
+          method: OPTIONS
+        - path:
+            type: Exact
+            value: /v1/ops/command-dry-runs
+          method: POST
+        - path:
             type: Exact
             value: /v1/ops/command-dry-runs
           method: OPTIONS
@@ -1449,14 +1457,6 @@ spec:
             type: RegularExpression
             value: /v1/ops/compliance/notices/[^/]+/documents
           method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/compliance/notices/[^/]+/takedown
-          method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/ops/compliance/notices/[^/]+/takedown
-          method: OPTIONS
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -1481,6 +1481,14 @@ spec:
     - matches:
         - path:
             type: RegularExpression
+            value: /v1/ops/compliance/notices/[^/]+/takedown
+          method: POST
+        - path:
+            type: RegularExpression
+            value: /v1/ops/compliance/notices/[^/]+/takedown
+          method: OPTIONS
+        - path:
+            type: RegularExpression
             value: /v1/ops/compliance/notices/[^/]+/withdrawal
           method: POST
         - path:
@@ -1727,14 +1735,6 @@ spec:
             type: RegularExpression
             value: /v1/ops/fraud-cases/[^/]+/evidence-bundles
           method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/ops/fraud-cases/[^/]+/evidence-bundles
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/fraud-cases/[^/]+/graph
-          method: GET
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -1775,6 +1775,14 @@ spec:
     - matches:
         - path:
             type: RegularExpression
+            value: /v1/ops/fraud-cases/[^/]+/evidence-bundles
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/fraud-cases/[^/]+/graph
+          method: GET
+        - path:
+            type: RegularExpression
             value: /v1/ops/fraud-cases/[^/]+/graph
           method: OPTIONS
         - path:
@@ -2021,14 +2029,6 @@ spec:
             type: RegularExpression
             value: /v1/ops/settlements/[^/]+/dispute-dismissal
           method: POST
-        - path:
-            type: RegularExpression
-            value: /v1/ops/settlements/[^/]+/dispute-dismissal
-          method: OPTIONS
-        - path:
-            type: RegularExpression
-            value: /v1/ops/widgets/[^/]+
-          method: GET
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -2051,6 +2051,14 @@ spec:
           namespace: core
           port: 8080
     - matches:
+        - path:
+            type: RegularExpression
+            value: /v1/ops/settlements/[^/]+/dispute-dismissal
+          method: OPTIONS
+        - path:
+            type: RegularExpression
+            value: /v1/ops/widgets/[^/]+
+          method: GET
         - path:
             type: RegularExpression
             value: /v1/ops/widgets/[^/]+

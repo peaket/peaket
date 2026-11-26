@@ -14,11 +14,14 @@ export type CaseRequestResult = 'opened' | 'existing' | 'duplicate' | 'ignored';
 export interface ReceiveCaseRequestedOptions {
   readonly calendar?: BusinessCalendar;
   readonly signals?: CsCaseSignals;
+  /** APPEAL 건을 연 직후 소명 원본에 잇는다(F-06-4). 실패해도 건은 남는다 */
+  readonly onOpened?: (c: CsCase, nowMs: number) => Promise<void>;
 }
 
 export class ReceiveCaseRequested {
   readonly #calendar: BusinessCalendar;
   readonly #signals: CsCaseSignals | undefined;
+  readonly #onOpened: ((c: CsCase, nowMs: number) => Promise<void>) | undefined;
 
   constructor(
     private readonly store: CsCaseStore,
@@ -26,6 +29,7 @@ export class ReceiveCaseRequested {
   ) {
     this.#calendar = o.calendar ?? weekendOnlyCalendar;
     this.#signals = o.signals;
+    this.#onOpened = o.onOpened;
   }
 
   /** 받지 않은 요청을 지표에 센다(본문 모양이 틀려 handle까지 오지 못한 것) */
@@ -55,6 +59,13 @@ export class ReceiveCaseRequested {
       nowMs,
       ...(payload.detail !== undefined ? { detail: payload.detail } : {}),
     });
+    if (r.result === 'opened' && r.case.kind === 'APPEAL' && this.#onOpened) {
+      try {
+        await this.#onOpened(r.case, nowMs);
+      } catch {
+        // 건은 남는다. 다시 보내기는 구현 뒤 작업이 맡는다
+      }
+    }
     this.#signals?.request(payload.kind, r.result);
     return { accepted: true, result: r.result, case: r.case };
   }

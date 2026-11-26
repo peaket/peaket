@@ -107,7 +107,7 @@ export interface VerdictEvidence {
 
 /** identity-svc AccountHoldService.SetAccountHold(VERIFICATION_APPEAL) */
 export interface AccountHolds {
-  set(i: { accountId: string; caseId: string; state: 'OPEN' | 'CLOSED'; version: number }, o?: CallOptions): Promise<{ changed: boolean }>;
+  set(i: { accountId: string; caseId: string; state: 'OPEN' | 'CLOSED'; version: number; kind?: 'VERIFICATION_APPEAL' | 'APPEAL' }, o?: CallOptions): Promise<{ changed: boolean }>;
 }
 
 /** 받는 쪽 호출의 실패. code는 gRPC 상태 이름(UNAVAILABLE 등)이고, 주소 설정이 없으면 NOT_CONFIGURED다 */

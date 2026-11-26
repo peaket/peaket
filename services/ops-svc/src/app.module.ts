@@ -28,6 +28,10 @@ import { PriorityModule, type PriorityModuleDeps } from './modules/priority/inde
 import { ScannerDevicesModule, type TicketScannerDevices } from './modules/scanner-devices/index.js';
 import { PayoutsModule, UnavailableApprovalVerifier, type PayoutsModuleDeps } from './modules/payouts/index.js';
 import { ApprovalsModule, type ApprovalsModuleDeps } from './modules/approvals/index.js';
+import { RestrictionsModule } from './modules/restrictions/index.js';
+import { MemoryBookingRestrictionStore } from './modules/restrictions/adapters/memory-restrictions.js';
+import { DrizzleBookingRestrictionStore } from './modules/restrictions/adapters/db/drizzle-restrictions.js';
+import type { OpsRestrictionsWiring } from './modules/restrictions/domain/ports.js';
 import { BotReviewModule, type BotReviewSignals, type BotReviewSource, type TrustLabels } from './modules/bot-review/index.js';
 import { RealtimeTableModule, RtWidgetSource, type RealtimeTableModuleDeps } from './modules/realtime-table/index.js';
 import type { AdminIdentity, AdminReauth } from './modules/admin-accounts/domain/ports.js';
@@ -90,6 +94,8 @@ interface CommonWiring {
   readonly payouts?: PayoutsModuleDeps;
   /** 계약 조건 변경 승인 업무(BAT-615). 없으면 메모리 저장·메모리 core 대역, 재인증은 닫힌 대역이다 */
   readonly approvals?: ApprovalsModuleDeps;
+  /** 예매 제한 집행·CS 소명(F-06-4). store·engineRef는 AppModule이 채우고, 사본·소명·보류·알림은 시작 조립이 넘긴다 */
+  readonly restrictions?: Omit<OpsRestrictionsWiring, 'store' | 'engineRef'> & Partial<Pick<OpsRestrictionsWiring, 'store' | 'engineRef'>>;
   /** 관리 계정 REST·승인 업무(BAT-045 BOT-152, ADR-0322). identity는 필수이고, reauth가 없으면 쓰기가 503이다 */
   readonly adminAccounts?: {
     readonly identity: AdminIdentity;
@@ -168,17 +174,18 @@ function eventCancellationDeps(
  * CS 처리함 모듈 조립(F-06-2): cs_lead 배정 대상은 관리 계정 identity로 확인하고, 기한 알림은 배경 작업이 켜진 조립에서만 돈다.
  * 보낼 호출 배경 작업(F-06-7)은 dispatch가 있을 때만 돈다
  */
-function casesModule(o: CommonWiring, kit: CsCaseKit, background: { csCaseDeadlineMs?: number } | undefined, dispatch: { csCaseDispatchMs?: number } | undefined) {
+function casesModule(o: CommonWiring, kit: CsCaseKit, background: { csCaseDeadlineMs?: number } | undefined, dispatch: { csCaseDispatchMs?: number } | undefined, restrictions?: OpsRestrictionsWiring) {
   return CasesModule.register(kit, {
     ...(o.adminAccounts ? { assignees: new IdentityCsAssigneeDirectory(o.adminAccounts.identity) } : {}),
     background: { enabled: background !== undefined, ...(background?.csCaseDeadlineMs !== undefined ? { intervalMs: background.csCaseDeadlineMs } : {}) },
     dispatchBackground: { enabled: dispatch !== undefined, ...(dispatch?.csCaseDispatchMs !== undefined ? { intervalMs: dispatch.csCaseDispatchMs } : {}) },
+    ...(restrictions ? { restrictions } : {}),
   });
 }
 
 /** CS 처리함 부품 한 벌(건 요청 처리기·기한 알림·실패한 승인 업무의 건·이의 보낼 호출) */
-function caseKitOf(o: CommonWiring, store: import('./modules/cases/index.js').CsCaseStore & CsAppealStore, alerts: OpsAlertStore): CsCaseKit {
-  return csCaseKit({ store, alerts, ...(o.calendar ? { calendar: o.calendar } : {}), ...(o.caseSignals ? { signals: o.caseSignals } : {}), ...(o.csAppeals ? { appeals: o.csAppeals } : {}) });
+function caseKitOf(o: CommonWiring, store: import('./modules/cases/index.js').CsCaseStore & CsAppealStore, alerts: OpsAlertStore, restrictions?: OpsRestrictionsWiring): CsCaseKit {
+  return csCaseKit({ store, alerts, ...(o.calendar ? { calendar: o.calendar } : {}), ...(o.caseSignals ? { signals: o.caseSignals } : {}), ...(o.csAppeals ? { appeals: o.csAppeals } : {}), ...(restrictions ? { restrictions } : {}) });
 }
 
 /** 관제 위젯 원천: 환경 값의 Prometheus 원천에 관제 실시간 표(rt-sales.summary, F-04-1)를 더한다. 실시간 표가 없으면 LiveModule 기본 그대로 */
@@ -192,13 +199,15 @@ export class AppModule {
    * partnerDatabase: 파트너 회차 취소 경로의 DB 풀(ops_partner 역할, PEAKET_PARTNER_DATABASE_URL, 웨이브 끝 리뷰 S2). 없으면 관제 풀을 함께 쓴다(local·ci·시험)
    */
   static register(o: ({ database: Database; partnerDatabase?: Database } & CommonWiring) | ({ memory: true } & CommonWiring)): DynamicModule {
+    const restrictionStore = o.restrictions?.store ?? ('database' in o ? new DrizzleBookingRestrictionStore(o.database) : new MemoryBookingRestrictionStore());
+    const restrictions: OpsRestrictionsWiring = { ...(o.restrictions ?? {}), store: restrictionStore, engineRef: o.restrictions?.engineRef ?? {} };
     if ('database' in o) {
       const chain = o.auditChain ?? new DrizzleAuditChain(o.database);
       const checkpoints = new AuditCheckpointService(new DrizzleAuditCheckpointStore(o.database), chain, () => o.nowMs ?? Date.now());
       const store = new DrizzleCommandStore(o.database);
       const cancellations = new DrizzleEventCancellationStore(o.database);
       const alerts = new DrizzleOpsAlertStore(o.database);
-      const cases = caseKitOf(o, new DrizzleCsCaseStore(o.database), alerts);
+      const cases = caseKitOf(o, new DrizzleCsCaseStore(o.database), alerts, restrictions);
       const background = o.background === false ? undefined : (o.background ?? {});
       return {
         module: AppModule,
@@ -223,7 +232,7 @@ export class AppModule {
             },
           }),
           LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints }), liveExtrasOf(o)),
-          casesModule(o, cases, background, background),
+          casesModule(o, cases, background, background, restrictions),
           AlertsModule.register(alerts),
           ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
           ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
@@ -242,6 +251,7 @@ export class AppModule {
             reauth: o.approvals?.reauth ?? o.payouts?.reauth ?? new UnavailableApprovalVerifier(),
             failureCases: cases.approvalFailures,
           }),
+          RestrictionsModule.register({ storage: 'database', database: o.database, deps: restrictions, audit: chain }),
           BotReviewModule.register({ database: o.database, ...(o.botReview ?? {}) }),
           ...(o.realtimeTable ? [RealtimeTableModule.register(o.realtimeTable)] : []),
           EventCancellationsModule.register(
@@ -265,7 +275,7 @@ export class AppModule {
     const store = new MemoryCommandStore(chain);
     const cancellations = new MemoryEventCancellationStore(chain);
     const memoryAlerts = new MemoryOpsAlertStore();
-    const cases = caseKitOf(o, new MemoryCsCaseStore(chain), memoryAlerts);
+    const cases = caseKitOf(o, new MemoryCsCaseStore(chain), memoryAlerts, restrictions);
     return {
       module: AppModule,
       imports: [
@@ -275,7 +285,7 @@ export class AppModule {
         }),
         AuditModule.register(checkpoints, { intake: new MemoryAuditIntakeStore(chain), ...(o.auditSignals ? { signals: o.auditSignals } : {}) }),
         LiveModule.register(new OpsLiveFeed({ commands: store, checkpoints }), liveExtrasOf(o)),
-        casesModule(o, cases, undefined, o.background === false ? undefined : o.background),
+        casesModule(o, cases, undefined, o.background === false ? undefined : o.background, restrictions),
         AlertsModule.register(memoryAlerts),
         ...(o.priority ? [PriorityModule.register({ ...o.priority, audit: chain })] : []),
         ...(o.scannerDevices ? [ScannerDevicesModule.register({ devices: o.scannerDevices, audit: chain })] : []),
@@ -291,6 +301,7 @@ export class AppModule {
             failureCases: cases.approvalFailures,
           },
         }),
+        RestrictionsModule.register({ storage: 'memory', deps: restrictions, audit: chain }),
         BotReviewModule.register({ ...(o.botReview ?? {}) }),
         ...(o.realtimeTable ? [RealtimeTableModule.register(o.realtimeTable)] : []),
         EventCancellationsModule.register(eventCancellationDeps(o, cancellations, { suspension: new MemorySaleSuspensionLookup(store), cases: new CsCaseEventCancellationCases(cases.receive) }, chain)),

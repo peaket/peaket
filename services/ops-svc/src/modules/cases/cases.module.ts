@@ -9,6 +9,8 @@ import { CsApprovalFailureCases } from './application/approval-failure-cases.js'
 import { CS_CASE_DEADLINE_TICK_MS, CsCaseDeadlineTick } from './application/cs-case-deadline-tick.js';
 import { CsCaseDispatch } from './application/cs-case-dispatch.js';
 import { CsCases } from './application/cs-cases.js';
+import { AppealCases } from './application/appeal-cases.js';
+import { RestrictionAppealDecision } from './application/restriction-appeal-decision.js';
 import { ReceiveCaseRequested } from './application/receive-case-requested.js';
 import { VerificationAppealDecision } from './application/verification-appeal-decision.js';
 import { VerificationAppealDetail } from './application/verification-appeal-detail.js';
@@ -28,6 +30,8 @@ export interface CsCaseKitOptions {
   readonly signals?: CsCaseSignals;
   /** 추가 검증 이의 처리 포트(queue·trust·identity gRPC, 지표). 없는 칸은 NOT_CONFIGURED로 쌓는다 */
   readonly appeals?: CsAppealPorts;
+  /** 예매 제한·부정 예매 소명(F-06-4). 없으면 APPEAL 건을 원본에 잇지 않는다 */
+  readonly restrictions?: import('../restrictions/index.js').OpsRestrictionsWiring;
 }
 
 /** 조립 때 한 벌만 만드는 CS 처리함 부품 */
@@ -39,11 +43,17 @@ export interface CsCaseKit {
   readonly approvalFailures: CsApprovalFailureCases;
   readonly appealPorts: CsAppealPorts;
   readonly dispatch: CsCaseDispatch;
+  readonly appealCases?: AppealCases;
 }
 
 export function csCaseKit(o: CsCaseKitOptions): CsCaseKit {
   const calendar = o.calendar ?? weekendOnlyCalendar;
-  const receive = new ReceiveCaseRequested(o.store, { calendar, ...(o.signals ? { signals: o.signals } : {}) });
+  const appealCases = o.restrictions ? new AppealCases({ store: o.store, restrictions: o.restrictions, clock: { now: () => Date.now() } }) : undefined;
+  const receive = new ReceiveCaseRequested(o.store, {
+    calendar,
+    ...(o.signals ? { signals: o.signals } : {}),
+    ...(appealCases ? { onOpened: (c: import('./domain/cs-case.js').CsCase, nowMs: number) => appealCases.onOpened(c, nowMs) } : {}),
+  });
   // 경보 시각은 부르는 쪽 시각(createdAt·resolvedAt)으로 적는다
   const tick = new CsCaseDeadlineTick({ store: o.store, alerts: new RecordOpsAlert(o.alerts, () => Date.now()), calendar, ...(o.signals ? { signals: o.signals } : {}) });
   // 시스템이 닫는 쪽(resolveAsSystem)은 부르는 쪽 시각을 받으므로 시계가 필요 없다
@@ -51,7 +61,7 @@ export function csCaseKit(o: CsCaseKitOptions): CsCaseKit {
   const appealPorts = o.appeals ?? {};
   // 반영 실패 경보 시각은 부르는 쪽 시각(앱 시계)으로 적는다
   const dispatch = new CsCaseDispatch({ store: o.store, ports: appealPorts, alerts: new RecordOpsAlert(o.alerts, () => Date.now()) });
-  return { store: o.store, calendar, receive, tick, approvalFailures: new CsApprovalFailureCases(receive, o.store, systemCases), appealPorts, dispatch };
+  return { store: o.store, calendar, receive, tick, approvalFailures: new CsApprovalFailureCases(receive, o.store, systemCases), appealPorts, dispatch, ...(appealCases ? { appealCases } : {}) };
 }
 
 export interface CasesModuleOptions {
@@ -63,6 +73,8 @@ export interface CasesModuleOptions {
   readonly detailReaders?: ReadonlyMap<CsCaseKind, CsCaseDetailReader>;
   /** 보낼 호출 배경 작업(F-06-7). 없거나 enabled false면 켜지 않는다 */
   readonly dispatchBackground?: { readonly enabled: boolean; readonly intervalMs?: number };
+  /** 예매 제한 소명 판단(F-06-4). 없으면 결정 경로가 503이다 */
+  readonly restrictions?: import('../restrictions/index.js').OpsRestrictionsWiring;
 }
 
 const CS_CASE_KIT = Symbol.for('peaket.ops.cs-case-kit');
@@ -182,6 +194,17 @@ export class CasesModule {
               dispatch: kit.dispatch,
               clock,
               ...(logger ? { log: { warn: (obj: object, msg: string) => logger.warn(obj, msg) } } : {}),
+            }),
+        },
+        {
+          provide: RestrictionAppealDecision,
+          inject: [CsCases, CLOCK],
+          useFactory: (cases: CsCases, clock: Clock) =>
+            new RestrictionAppealDecision({
+              cases,
+              store: kit.store,
+              clock,
+              restrictions: o.restrictions ?? { engineRef: {} },
             }),
         },
         { provide: CS_CASE_BACKGROUND, useValue: { enabled: o.background?.enabled ?? false, intervalMs: o.background?.intervalMs ?? CS_CASE_DEADLINE_TICK_MS } },

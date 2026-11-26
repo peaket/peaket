@@ -29,6 +29,7 @@ const recordOf = (r: typeof approvalRequest.$inferSelect, votes: readonly (typeo
   dueAt: r.dueAt ?? r.createdAt,
   appealNotBefore: r.appealNotBefore,
   entryStartsAt: r.entryStartsAt,
+  restrictionEndsAt: r.restrictionEndsAt,
   escalatedAt: r.escalatedAt,
   createdAt: r.createdAt,
   updatedAt: r.updatedAt,
@@ -61,6 +62,7 @@ export class DrizzleApprovalLifecycleStore implements ApprovalLifecycleStore {
         dueAt: record.dueAt,
         appealNotBefore: record.appealNotBefore,
         entryStartsAt: record.entryStartsAt,
+        restrictionEndsAt: record.restrictionEndsAt,
         escalatedAt: record.escalatedAt,
         approverId: record.approverId,
         createdAt: record.createdAt,
@@ -132,5 +134,5 @@ export class DrizzleApprovalLifecycleStore implements ApprovalLifecycleStore {
   }
 }
 
-const LIFECYCLE_KIND_SET = new Set(['SYSTEM_FAULT_REFUND', 'DISCRETIONARY_WAIVER', 'TRANSFER_RECLAIM', 'MINOR_CONTRACT_CANCEL']);
+const LIFECYCLE_KIND_SET = new Set(['SYSTEM_FAULT_REFUND', 'DISCRETIONARY_WAIVER', 'TRANSFER_RECLAIM', 'MINOR_CONTRACT_CANCEL', 'BOOKING_RESTRICTION']);
 const isLifecycleKind = (kind: string): kind is LifecycleKind => LIFECYCLE_KIND_SET.has(kind);

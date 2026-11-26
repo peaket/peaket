@@ -1,6 +1,6 @@
 // 승인 업무 Drizzle 스키마(ops DB approval_request·approval_vote·promoter_contract_change, BAT-615, ADR-0320).
 import { sql } from 'drizzle-orm';
-import { bigint, check, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 const amount = (name: string) => bigint(name, { mode: 'number' });
@@ -31,6 +31,12 @@ export const approvalRequest = pgTable(
     dueAt: at('due_at'),
     /** 양도 회수의 소명 기한(요청 + 1일, F-06-3) */
     appealNotBefore: at('appeal_not_before'),
+    /** BOOKING_RESTRICTION의 제한 끝 시각(F-06-4) */
+    restrictionEndsAt: at('restriction_ends_at'),
+    /** BOOKING_RESTRICTION의 집행 사본 상태(F-06-4). queue·purchase가 모두 반영되면 false */
+    restrictionCopyPending: boolean('restriction_copy_pending').notNull().default(false),
+    restrictionCopyNextAt: at('restriction_copy_next_at'),
+    restrictionCopyAttempts: integer('restriction_copy_attempts').notNull().default(0),
     /** 양도 회수의 입장 시작(F-06-3) */
     entryStartsAt: at('entry_starts_at'),
     /** 1영업일 상위 알림을 한 번만 열기 위한 시각(F-06-3) */

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, errorSummary, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
+import { supportPortsFromEnv } from './support-wiring.js';
 import type { CoreConsumers } from './consumers/start.js';
 import {
   CompositeSaleConfigStore,
@@ -48,6 +49,7 @@ import {
 } from './modules/review/index.js';
 import { DrizzleWebhookStore, FanNotificationWorker, HttpsWebhookTransport, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
 import { GrpcHeldTickets, GrpcMerchPayments, RedisMerchStock, type ShopLogger, ShopSignals, closedShopReauthGate, shopReauthGateFromEnv, unavailableHeldTickets, unavailableMerchPayments, unavailableMerchStock } from './modules/shop/index.js';
+import { RedisFraudAppealViewStore, RedisRestrictionViewStore } from './modules/support/index.js';
 
 const SERVICE = 'core-svc';
 assertInternalGrpcToken(process.env);
@@ -156,6 +158,20 @@ const opsApprovals = opsHttpUrl
   ? new HttpOpsApprovals(createExternalHttpClient({ provider: 'ops-svc', baseUrl: opsHttpUrl, timeoutCapMs: 3_000 }), process.env.PEAKET_INTERNAL_TOKEN)
   : undefined;
 if (!opsApprovals) console.warn(JSON.stringify({ level: 'warn', kind: 'promoter-contract-wiring', msg: 'PEAKET_OPS_HTTP_URL이 없어 계약 변경 요청이 503 dependency-unavailable이다' }));
+// 소명·화면용 사본(F-06-4). staging·prod는 ops 입구·Redis 주소가 없으면 supportPortsFromEnv가 시작을 막는다
+const supportPortsBase = supportPortsFromEnv(process.env);
+// 화면용 사본은 계정별 Redis 해시(sup:rst·sup:far)에 둔다. 주소가 없으면 local·ci만 메모리 사본이다
+const supportRedis = process.env.PEAKET_REDIS_URL ? await createHotRedis({ url: process.env.PEAKET_REDIS_URL }) : undefined;
+const supportPorts = supportRedis
+  ? {
+      ...supportPortsBase,
+      views: { restriction: new RedisRestrictionViewStore(supportRedis), fraud: new RedisFraudAppealViewStore(supportRedis) },
+      close() {
+        supportPortsBase.close();
+        void supportRedis.close();
+      },
+    }
+  : supportPortsBase;
 
 // 판매 승인 뒤 purchase-svc 내부 판매 열기(BAT-616, ADR-0327). 주소가 없으면 승인은 되고 열기·사본은 'unwired' 경고만 남긴다(대기열은 닫힌 채로 남는다)
 const purchaseHttpUrl = process.env.PEAKET_PURCHASE_HTTP_URL;
@@ -168,8 +184,7 @@ const payoutRegistration = assemblePayoutRegistration(process.env, { warn: (m) =
 // 판매 승인 부수 효과 지표(sale_open_total·sale_config_publish_total). 서비스를 만든 뒤 등록부에 단다
 const saleConfigMetrics = new SaleConfigMetrics();
 
-const database = createDatabase({ url, applicationName: SERVICE });
-const partnerDatabase = createDatabase({ url: partnerUrl, applicationName: `${SERVICE}-partner`, max: PARTNER_POOL_MAX });
+const database = createDatabase({ url, applicationName: SERVICE });const partnerDatabase = createDatabase({ url: partnerUrl, applicationName: `${SERVICE}-partner`, max: PARTNER_POOL_MAX });
 const opsDatabase = createDatabase({ url: opsUrl, applicationName: `${SERVICE}-ops`, max: PARTNER_POOL_MAX });
 // 판매 승인 사본을 core DB와 대기열 Redis에 함께 쓴다(BAT-616). 대기열 주소가 없으면 DB 사본만 쓴다
 const saleConfigStore = queueRedis ? new CompositeSaleConfigStore(new DrizzleSaleConfigStore(opsDatabase), new QueueSaleConfigStore(queueRedis)) : undefined;
@@ -228,6 +243,7 @@ const service = await createService({
       : {}),
     identityGrpc,
     reauthJti: reauthJtiStoreFromEnv(process.env, queueRedis),
+    support: supportPorts,
   }),
 });
 serviceLogger = service.logger;
@@ -323,6 +339,7 @@ function shutdown(): Promise<void> {
         imageProcessing.close();
         seatmapParser.close();
         if (reviewEligibility instanceof GrpcReviewEligibility) reviewEligibility.close();
+        supportPorts.close();
         grpcPayments?.close();
         heldTickets?.close();
         void queueRedis?.close();

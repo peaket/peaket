@@ -237,10 +237,10 @@ export class GrpcAccountHolds implements AccountHolds {
     this.#c = new AppealClient(pkgs().identity.AccountHoldService!, 'identity-svc', o);
   }
 
-  set(i: { accountId: string; caseId: string; state: 'OPEN' | 'CLOSED'; version: number }, o?: CallOptions): Promise<{ changed: boolean }> {
+  set(i: { accountId: string; caseId: string; state: 'OPEN' | 'CLOSED'; version: number; kind?: 'VERIFICATION_APPEAL' | 'APPEAL' }, o?: CallOptions): Promise<{ changed: boolean }> {
     return this.#c.call(
       'SetAccountHold',
-      { account_id: i.accountId, kind: 'ACCOUNT_HOLD_KIND_VERIFICATION_APPEAL', source_ref: i.caseId, state: i.state === 'OPEN' ? 'ACCOUNT_HOLD_STATE_OPEN' : 'ACCOUNT_HOLD_STATE_CLOSED', source_version: i.version },
+      { account_id: i.accountId, kind: i.kind === 'APPEAL' ? 'ACCOUNT_HOLD_KIND_APPEAL' : 'ACCOUNT_HOLD_KIND_VERIFICATION_APPEAL', source_ref: i.caseId, state: i.state === 'OPEN' ? 'ACCOUNT_HOLD_STATE_OPEN' : 'ACCOUNT_HOLD_STATE_CLOSED', source_version: i.version },
       o,
       (v) => ({ changed: v.changed === true }),
     );

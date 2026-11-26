@@ -1,5 +1,5 @@
 # 생성 파일이다. 손으로 고치지 않는다(원천 deploy/gateways/routes/gw-scanner.yaml과 docs/api/openapi.yaml에서 node tools/ci/gateway-routes.mjs --write가 만든다, docs/infra.md §4.1 '경로별 메서드 생성기')
-# openapi info.version 1.0.0-draft · 계약 sha256 8c027e608418370ea19e57ed361e64da9c2284cda280c04402521e6a31133a9c
+# openapi info.version 1.0.0-draft · 계약 sha256 66d0ab877d58f90fdc298b2e417cb8ea5f1dc5aca8d0f6588c5f7d2e414d2686
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

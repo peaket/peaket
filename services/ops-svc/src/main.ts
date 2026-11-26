@@ -36,6 +36,7 @@ import { realtimeTableFromEnv } from './rt-wiring.js';
 import { HttpCoreContract } from './adapters/http-core-contract.js';
 import { PromCsCaseSignals, PromCsDispatchSignals, ReceiveCaseRequested, loadBusinessCalendar } from './modules/cases/index.js';
 import { csAppealPortsFromEnv } from './cs-appeal-wiring.js';
+import { restrictionPortsFromEnv } from './restriction-wiring.js';
 
 const SERVICE = 'ops-svc';
 assertInternalGrpcToken(process.env);
@@ -50,6 +51,8 @@ const caseCalendar = loadBusinessCalendar(process.env, (path) => readFileSync(pa
 const caseSignals = new PromCsCaseSignals();
 // 추가 검증 이의 처리 포트(F-06-7). staging·prod에서 queue·trust 주소가 없으면 여기서 시작 실패다
 const csAppealPorts = csAppealPortsFromEnv(process.env);
+// 예매 제한 집행·CS 소명 포트(F-06-4). staging·prod에서 네 주소가 없으면 여기서 시작 실패다
+const restrictionPorts = restrictionPortsFromEnv(process.env);
 const csDispatchSignals = new PromCsDispatchSignals();
 const database = createDatabase({ url, applicationName: SERVICE });
 // 파트너 회차 취소 경로의 DB 풀(ops_partner 역할 사용자, 행 보안의 대상, 웨이브 끝 리뷰 S2·authz-matrix §5.3). 운영은 PEAKET_PARTNER_DATABASE_URL이 없으면 시작하지 않고,
@@ -209,6 +212,7 @@ const service = await createService({
       ...(csAppealPorts.holds ? { holds: csAppealPorts.holds } : {}),
       signals: csDispatchSignals,
     },
+    restrictions: restrictionPorts,
   }),
 });
 eventCancellationSignals.register(service.metrics.registry);
@@ -319,6 +323,7 @@ process.once('SIGTERM', () => {
       pgSwitchResolver?.close();
       botReviewLabels?.close();
       csAppealPorts.close();
+      restrictionPorts.close();
       adminIdentity.close();
       adminAuthz.close();
       // 종료 세션 목록 소비는 서비스를 닫은 뒤(처리 중인 요청이 끝난 뒤) 끈다

@@ -65,6 +65,10 @@ export const ACCEPTED_KINDS: ReadonlySet<CsCaseKind> = new Set<CsCaseKind>([
   'SETTLEMENT_ADJUSTMENT_SUGGESTED',
   // 결제 뒤 미발권(F-06-3 IR-11, ADR-0106). 대상 = 주문 ID. 확인 4시간, 시스템 잘못 환불 승인 업무로 닫는다
   'TICKET_NOT_ISSUED',
+  // 예매 제한·부정 예매 소명(F-06-4). 대상 = appeal ID. category = RESTRICTION|FRAUD_CASE
+  'APPEAL',
+  // 취소·양도 남용 표시(F-06-4). 대상 = 계정 ID. 시스템이 표시만 하고 cs_agent가 제한 요청을 낸다
+  'ABUSE_FLAG',
 ]);
 
 /**

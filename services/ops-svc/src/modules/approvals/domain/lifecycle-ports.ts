@@ -47,6 +47,8 @@ export interface ApprovalLifecycleExecutors {
   /** FLAGGED 취소 무효(IR-30). ticket-svc가 그 주문·발권 세대의 티켓을 VOIDED로 바꾼다 */
   voidOrder?(i: { orderId: string; reason: string; issueGeneration?: number; eventId?: string; ticketIds?: readonly string[] }): Promise<{ voided: number; alreadyEntered: number }>;
   reclaim(i: { approvalId: string; targetRef: string; targetAccountId: string | null; expectedHolderAccountId: string | null; deadlineMs: number }): Promise<{ result: 'RECLAIMED' | 'SKIPPED_ENTRY_STARTED' | 'SKIPPED_ENTRY_RECORDED' | 'SKIPPED_NOT_TRANSFERRED' | 'SKIPPED_HOLDER_CHANGED'; previousHolderAccountId?: string }>;
+  /** BOOKING_RESTRICTION(F-06-4). 제한 행·queue·purchase·화면 사본을 집행한다. 사본이 아직 안 끝났으면 PENDING(EXECUTING 유지) */
+  restriction?(i: { approvalId: string; targetRef: string; reasonCode: string; restrictionEndsAtMs: number; approvedBy: string | null }): Promise<{ status: 'DONE' | 'PENDING' }>;
 }
 
 export interface ApprovalNotifier {

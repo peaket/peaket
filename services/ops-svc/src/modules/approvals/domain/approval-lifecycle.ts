@@ -14,7 +14,7 @@ export class ApprovalLifecycleProblem extends Error {
   }
 }
 
-export const LIFECYCLE_KINDS = ['SYSTEM_FAULT_REFUND', 'DISCRETIONARY_WAIVER', 'TRANSFER_RECLAIM', 'MINOR_CONTRACT_CANCEL'] as const;
+export const LIFECYCLE_KINDS = ['SYSTEM_FAULT_REFUND', 'DISCRETIONARY_WAIVER', 'TRANSFER_RECLAIM', 'MINOR_CONTRACT_CANCEL', 'BOOKING_RESTRICTION'] as const;
 export type LifecycleKind = (typeof LIFECYCLE_KINDS)[number];
 
 /** 일반 요청 경로가 받지 않는 종류(계약·역할·지급·조정·판매 중지·부정 예매·예매 제한) */
@@ -26,7 +26,6 @@ export const NOT_ALLOWED_KINDS = [
   'SALE_SUSPENSION',
   'SALE_RESUMPTION',
   'FRAUD_ACTION',
-  'BOOKING_RESTRICTION',
 ] as const;
 
 export type LifecycleStatus = 'PENDING_APPROVAL' | 'ESCALATED' | 'REJECTED' | 'WITHDRAWN' | 'EXPIRED' | 'EXECUTING' | 'DONE' | 'FAILED';
@@ -64,6 +63,8 @@ export interface ApprovalLifecycleRecord {
   /** 양도 회수의 소명 기한(요청 + 1일). 이 전에는 승인할 수 없다. */
   appealNotBefore: Date | null;
   entryStartsAt: Date | null;
+  /** BOOKING_RESTRICTION만. 요청한 제한의 끝 시각(F-06-4) */
+  restrictionEndsAt: Date | null;
   escalatedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -87,6 +88,7 @@ export interface ApprovalLifecycleView {
   dueAt: string;
   closeReason: string | null;
   version: number;
+  restrictionEndsAt?: string;
 }
 
 const ALLOWED_APPROVER_ROLES: Record<LifecycleKind, readonly string[]> = {
@@ -94,6 +96,7 @@ const ALLOWED_APPROVER_ROLES: Record<LifecycleKind, readonly string[]> = {
   DISCRETIONARY_WAIVER: ['cs_lead'],
   TRANSFER_RECLAIM: ['commander'],
   MINOR_CONTRACT_CANCEL: ['cs_lead'],
+  BOOKING_RESTRICTION: ['cs_lead'],
 };
 
 const REQUESTER_ROLES: Record<LifecycleKind, readonly string[]> = {
@@ -101,6 +104,7 @@ const REQUESTER_ROLES: Record<LifecycleKind, readonly string[]> = {
   DISCRETIONARY_WAIVER: ['cs_agent'],
   TRANSFER_RECLAIM: ['cs_lead'],
   MINOR_CONTRACT_CANCEL: ['cs_agent'],
+  BOOKING_RESTRICTION: ['cs_agent', 'cs_lead'],
 };
 
 /** 종류별 승인 역할. 재량 면제는 2인(3)일 때만 commander가 더해진다. */
@@ -156,5 +160,6 @@ export const lifecycleView = (r: ApprovalLifecycleRecord, actor: OpsActor): Appr
     dueAt: r.dueAt.toISOString(),
     closeReason: r.closeReason,
     version: r.version,
+    ...(r.restrictionEndsAt ? { restrictionEndsAt: r.restrictionEndsAt.toISOString() } : {}),
   };
 };
