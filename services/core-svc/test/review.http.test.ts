@@ -27,13 +27,16 @@ const identity = new FakeIdentity();
 const PROMOTER = randomUUID();
 const ENDED = new Date('2026-01-01T10:00:00.000Z');
 const FUTURE = new Date('2026-12-24T10:00:00.000Z');
+const INTERNAL_TOKEN = 'f0711-review-http-internal';
+const originalToken = process.env.PEAKET_INTERNAL_TOKEN;
 
 beforeAll(async () => {
+  process.env.PEAKET_INTERNAL_TOKEN = INTERNAL_TOKEN;
   repo.sellerNames.set(PROMOTER, '(주)피켓공연');
   svc = await createService({
     name: 'core-svc',
     module: AppModule.register({ memory: true, catalog: repo, review: { store, eligibility, fanProfile: fanProfiles, notifier, cases } }),
-    env: { PEAKET_ENV: 'ci' },
+    env: { PEAKET_ENV: 'ci', PEAKET_INTERNAL_TOKEN: INTERNAL_TOKEN },
     clock: fakeClock({ now: NOW_MS }),
     logDestination: quiet(),
     adminAuthz: identity,
@@ -42,6 +45,8 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await svc?.close();
+  if (originalToken === undefined) delete process.env.PEAKET_INTERNAL_TOKEN;
+  else process.env.PEAKET_INTERNAL_TOKEN = originalToken;
 });
 
 function seed(o: { startsAt?: Date; status?: 'SCHEDULED' | 'CANCELLED'; saleReview?: SaleReview; saleApprovedAt?: Date | null } = {}): { eventId: string; productionId: string } {
@@ -56,6 +61,14 @@ const postReview = (eventId: string, account: string, body: Record<string, unkno
 const getReviews = (eventId: string, account?: string) => svc.http.inject({ method: 'GET', url: `/v1/events/${eventId}/reviews`, headers: account ? fan(account) : {} });
 const getSummary = (eventId: string) => svc.http.inject({ method: 'GET', url: `/v1/events/${eventId}/review-summary` });
 const getEligibility = (eventId: string, account: string) => svc.http.inject({ method: 'GET', url: `/v1/events/${eventId}/review-eligibility`, headers: fan(account) });
+/** 법정 통보 철회는 운영자 후기 조치(RELEASE)가 아니라 내부 통보 경로다(F-07-11) */
+const withdrawNotice = (noticeId: string) =>
+  svc.http.inject({
+    method: 'POST',
+    url: `/internal/v1/reviews/notice-takedowns/${noticeId}/withdrawal`,
+    headers: { 'x-peaket-internal-token': INTERNAL_TOKEN, 'content-type': 'application/json' },
+    payload: JSON.stringify({ reason: '통보 철회' }),
+  });
 
 describe('관람 후기', () => {
   test('자격 있는 팬이 쓰면 목록·요약에 보이고, 같은 회차에 두 번 쓰면 409다', async () => {
@@ -240,10 +253,13 @@ describe('신고와 운영자 조치', () => {
     await reviews.applyNoticeTakedown({ reviewIds: [first.reviewId], noticeId: noticeA, receivedAtMs: NOW_MS, kind: 'GENERAL', reason: '통보 A' });
     await reviews.applyNoticeTakedown({ reviewIds: [second.reviewId], noticeId: noticeB, receivedAtMs: NOW_MS, kind: 'GENERAL', reason: '통보 B' });
     const cs = identity.ops('cs_agent');
-    await svc.http.inject({ method: 'POST', url: `/v1/ops/reviews/${first.reviewId}/moderation`, headers: { ...cs, 'content-type': 'application/json' }, payload: JSON.stringify({ action: 'RELEASE', reason: '통보 A 철회' }) });
+    const blocked = await svc.http.inject({ method: 'POST', url: `/v1/ops/reviews/${first.reviewId}/moderation`, headers: { ...cs, 'content-type': 'application/json' }, payload: JSON.stringify({ action: 'RELEASE', reason: '통보 A 철회' }) });
+    expect(blocked.statusCode).toBe(409);
+    expect(JSON.parse(blocked.payload)).toMatchObject({ type: 'review-not-moderation-target' });
+    expect((await withdrawNotice(noticeA)).statusCode).toBe(200);
     const stillHidden = await postReview(eventId, c, { rating: 5, body });
     expect(JSON.parse(stillHidden.payload).status).toBe('HIDDEN');
-    await svc.http.inject({ method: 'POST', url: `/v1/ops/reviews/${second.reviewId}/moderation`, headers: { ...cs, 'content-type': 'application/json' }, payload: JSON.stringify({ action: 'RELEASE', reason: '통보 B 철회' }) });
+    expect((await withdrawNotice(noticeB)).statusCode).toBe(200);
     const d = randomUUID();
     eligibility.set(d, eventId, { eligible: true, basisOrderId: randomUUID() });
     const visible = await postReview(eventId, d, { rating: 5, body });
