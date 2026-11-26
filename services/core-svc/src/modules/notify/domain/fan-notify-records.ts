@@ -34,6 +34,8 @@ export interface NotificationJob {
   accountId: string;
   channel: NotificationChannel;
   vars: Vars;
+  /** 만든 때의 문안 판(코드에 고정한 템플릿 version, ADR-0388) */
+  templateVersion?: string;
   status: JobStatus;
   attempts: number;
   nextAttemptAt: Date;
@@ -51,5 +53,7 @@ export interface NotificationDeliveryRecord {
   channel: NotificationChannel;
   status: DeliveryStatus;
   providerMessageId: string | null;
+  /** 실제로 그린 문안 판(ADR-0388) */
+  templateVersion?: string;
   createdAt: Date;
 }

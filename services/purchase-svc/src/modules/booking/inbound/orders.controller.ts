@@ -96,7 +96,7 @@ const DEADLINE_EXCEEDED_PROBLEM: OrderProblemSpec = { status: 504, type: 'deadli
  * SESSION_NOT_FOUND는 플랫폼 구매 요청 확인의 no_session 거절(platform purchase-auth.ts PURCHASE_REJECTION_PROBLEMS, 공개 면에 없어 다시 적는다)과 같은 본문이다. BUYER_INVALID는 요청 검사 실패와 같은 400(about:blank),
  * PRICE_MISSING은 이름 없는 500이다. 503 둘의 Retry-After는 2초 [가정]이다
  */
-export const ORDER_PROBLEMS: Readonly<Record<CreateOrderRejection, OrderProblemSpec>> = {
+export const ORDER_PROBLEMS: Readonly<Record<CreateOrderRejection | 'BOOKING_NUMBER_EXHAUSTED', OrderProblemSpec>> = {
   SESSION_NOT_FOUND: { status: 401, type: 'purchase-session-ended', title: '예매 시간이 끝났습니다' },
   IDEM_REUSED: { status: 422, type: 'idempotency-key-reused', title: '같은 멱등 키를 다른 요청에 썼습니다' },
   HOLD_NOT_FOUND: { status: 404, type: 'not-found', title: '찾을 수 없습니다' },
@@ -118,6 +118,8 @@ export const ORDER_PROBLEMS: Readonly<Record<CreateOrderRejection, OrderProblemS
   HOLD_ALREADY_ORDERED: { status: 409, type: 'hold-already-ordered', title: '이 좌석으로 만든 주문이 이미 있습니다', normalBranch: true },
   // 좌석 Redis를 부르기 전 남은 시간이 모자랐다(Retry-After 없음, 좌석 홀드 504와 같다, 리뷰 고침 L4)
   DEADLINE_EXCEEDED: DEADLINE_EXCEEDED_PROBLEM,
+  // 하루 예매번호 99,999건을 넘어 주문을 닫는다(ADR-0388 결정 1, SEV2)
+  BOOKING_NUMBER_EXHAUSTED: { status: 503, type: 'booking-number-exhausted', title: '오늘 예매번호가 모두 소진되어 주문을 받을 수 없습니다', retryAfterSeconds: 60 },
 };
 
 /** OrderView → 201 본문(items의 unitPrice는 price로) */
@@ -126,6 +128,7 @@ export function orderResponseOf(order: OrderView): OrderResponse {
     orderId: order.orderId,
     amount: order.amount,
     status: order.status,
+    ...(order.bookingNumber !== undefined ? { bookingNumber: order.bookingNumber } : {}),
     items: order.items.map((i) => ({ seatId: i.seatId, tierId: i.tierId, sectionId: i.sectionId, price: i.unitPrice })),
   };
 }

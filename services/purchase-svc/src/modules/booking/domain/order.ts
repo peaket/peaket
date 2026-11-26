@@ -103,6 +103,21 @@ export type OrderEventType =
 /** firstInStage를 셀 수 있는 도착 상태(관제 퍼널 단계, ADR-0099) */
 export const FIRST_IN_STAGE_STATUSES: ReadonlySet<OrderStatus> = new Set<OrderStatus>(['ACCEPTED', 'APPROVED', 'CONFIRMED']);
 
+/**
+ * 예매 확정 알림을 보내도 되는가(notify §4.9.1 `noticeAllowed`). 주문이 CONFIRMED가 아니거나,
+ * 그 주문의 취소(환급 요청·진행)가 끝나지 않았거나, 그 회차의 취소 요청이 승인 전이면 거짓이다.
+ */
+export function noticeAllowedOf(o: {
+  readonly status: OrderStatus;
+  readonly orderCancellationActive: boolean;
+  readonly eventCancellationApprovalPending: boolean;
+}): boolean {
+  if (o.status !== 'CONFIRMED') return false;
+  if (o.orderCancellationActive) return false;
+  if (o.eventCancellationApprovalPending) return false;
+  return true;
+}
+
 /** 좌석 고르기 방식(OrderEvent.seatAssignment) */
 export type SeatAssignment = 'PICK' | 'AUTO';
 

@@ -37,6 +37,7 @@ const job = (r: typeof notificationJob.$inferSelect): NotificationJob => ({
   accountId: r.accountId,
   channel: r.channel as NotificationJob['channel'],
   vars: r.vars,
+  ...(r.templateVersion ? { templateVersion: r.templateVersion } : {}),
   status: r.status as NotificationJob['status'],
   attempts: r.attempts,
   nextAttemptAt: r.nextAttemptAt,
@@ -53,6 +54,7 @@ const delivery = (r: typeof notificationDelivery.$inferSelect): NotificationDeli
   channel: r.channel as NotificationDeliveryRecord['channel'],
   status: r.status as NotificationDeliveryRecord['status'],
   providerMessageId: r.providerMessageId,
+  ...(r.templateVersion ? { templateVersion: r.templateVersion } : {}),
   createdAt: r.createdAt,
 });
 
@@ -183,7 +185,7 @@ export class DrizzleFanNotifyStore implements FanNotifyStore {
     return this.db.transaction(async (tx) => {
       const inserted = await tx.insert(notificationDedup).values({ dedupKey: r.dedupKey, createdAt: now }).onConflictDoNothing().returning({ key: notificationDedup.dedupKey });
       if (inserted.length === 0) return { created: false };
-      await tx.insert(notificationJob).values({ ...r });
+      await tx.insert(notificationJob).values({ ...r, templateVersion: r.templateVersion ?? null });
       return { created: true };
     });
   }
@@ -212,7 +214,7 @@ export class DrizzleFanNotifyStore implements FanNotifyStore {
     await this.db.db.delete(notificationJob).where(eq(notificationJob.dedupKey, dedupKey));
   }
   async insertDelivery(r: NotificationDeliveryRecord) {
-    await this.db.db.insert(notificationDelivery).values({ ...r });
+    await this.db.db.insert(notificationDelivery).values({ ...r, templateVersion: r.templateVersion ?? null });
   }
   async findDelivery(dedupKey: string) {
     const rows = await this.db.db.select().from(notificationDelivery).where(eq(notificationDelivery.dedupKey, dedupKey)).orderBy(desc(notificationDelivery.sentAt)).limit(1);

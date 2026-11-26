@@ -140,6 +140,7 @@ const newOrderViewOf = (o: NewOrder): OrderView => ({
   orderId: o.id,
   amount: o.amount,
   status: 'CREATED',
+  ...(o.bookingNo !== undefined ? { bookingNumber: o.bookingNo } : {}),
   items: o.items.map((i) => ({ seatId: i.seatId, tierId: i.tierId, sectionId: i.sectionId, unitPrice: i.unitPrice })),
 });
 
@@ -152,8 +153,8 @@ const firstResponseOf = (v: OrderView): OrderView => ({ ...v, status: 'CREATED' 
 /** 주문 모습 읽기(트랜잭션 안이면 그 트랜잭션으로, 지금 상태 그대로). 주문 ID가 소문자 UUID가 아니면 없는 것으로 본다 */
 async function readOrderWith(exec: Executor, orderId: string): Promise<OrderView | undefined> {
   if (typeof orderId !== 'string' || !UUID.test(orderId)) return undefined;
-  const head = await exec.execute(sql`select id, amount, status from purchase_order where id = ${orderId}::uuid`);
-  const row = head.rows[0] as { id: string; amount: number | string; status: string } | undefined;
+  const head = await exec.execute(sql`select id, amount, status, booking_no from purchase_order where id = ${orderId}::uuid`);
+  const row = head.rows[0] as { id: string; amount: number | string; status: string; booking_no: string | null } | undefined;
   if (!row) return undefined;
   const lines = await exec.execute(sql`select seat_id, tier, section_id, unit_price from order_item where order_id = ${orderId}::uuid order by line_no`);
   const items: OrderItem[] = (lines.rows as { seat_id: string; tier: string; section_id: string; unit_price: number | string }[]).map((x) => ({
@@ -162,5 +163,5 @@ async function readOrderWith(exec: Executor, orderId: string): Promise<OrderView
     sectionId: x.section_id,
     unitPrice: Number(x.unit_price),
   }));
-  return { orderId: row.id, amount: Number(row.amount), status: row.status as OrderStatus, items };
+  return { orderId: row.id, amount: Number(row.amount), status: row.status as OrderStatus, ...(row.booking_no ? { bookingNumber: row.booking_no } : {}), items };
 }

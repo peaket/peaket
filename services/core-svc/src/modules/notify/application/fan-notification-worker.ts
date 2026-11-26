@@ -14,9 +14,10 @@ import {
   optOutTokenFor,
   type FanNoticeKind,
 } from '../domain/fan-notify.js';
-import { MailTransportError, type FanNotifyStore, type MailTransport, type PushTransport, type Recipient, type RecipientDirectory, type VapidConfig } from '../domain/fan-notify-ports.js';
+import { MailTransportError, type BookingNoticeReader, type BookingNoticeView, type FanNotifyStore, type MailTransport, type NoticeCatalogView, type NotifySignals, type PushTransport, type Recipient, type RecipientDirectory, type VapidConfig } from '../domain/fan-notify-ports.js';
 import type { NotificationDeliveryRecord, NotificationJob, NotificationSubscription } from '../domain/fan-notify-records.js';
 import { encryptWebPush, pushTopic, pushTtlUrgency, vapidAuthorization } from '../domain/push-crypto.js';
+import { renderBookingConfirmed, resolveBookingLocale } from '../templates/booking-confirmed/index.js';
 
 export interface FanNotificationWorkerDeps {
   readonly store: FanNotifyStore;
@@ -29,6 +30,11 @@ export interface FanNotificationWorkerDeps {
   /** 수신 거부 링크의 공개 출처. 운영은 PEAKET_PUBLIC_ORIGIN */
   readonly publicOrigin?: string;
   readonly topicKey?: string;
+  /** F-06-8 보내기 전 noticeAllowed 재확인 */
+  readonly noticeReader?: BookingNoticeReader;
+  /** F-06-8 이메일의 판매자·등급 이름(보낼 때 읽는다) */
+  readonly catalog?: NoticeCatalogView;
+  readonly signals?: NotifySignals;
   readonly log?: (line: Record<string, unknown>) => void;
 }
 
@@ -81,6 +87,8 @@ export class FanNotificationWorker {
   async processDue(now: Date, limit = 20): Promise<WorkerResult> {
     const due = await this.d.store.leaseDueJobs(now, limit, NOTIFY_LEASE_MS);
     const out: WorkerResult = { attempted: due.length, sent: 0, retrying: 0, dead: 0, expired: 0, failed: 0, suppressed: 0 };
+    const bookingDue = due.filter((j) => j.kind === 'BOOKING_CONFIRMED').length;
+    if (bookingDue > 0) this.d.signals?.dueBacklog('BOOKING_CONFIRMED', bookingDue);
     for (const job of due) {
       try {
         await this.#one(job, now, out);
@@ -100,6 +108,17 @@ export class FanNotificationWorker {
       return;
     }
 
+    let notice: BookingNoticeView | undefined;
+    if (job.kind === 'BOOKING_CONFIRMED') {
+      notice = await this.d.noticeReader?.get(job.targetId);
+      if (!notice || !notice.noticeAllowed) {
+        await this.d.store.deleteJob(job.dedupKey);
+        this.d.signals?.suppressed('not_allowed');
+        out.suppressed += 1;
+        return;
+      }
+    }
+
     let subscription: NotificationSubscription | undefined;
     const subKind = subscriptionKindOf(job.kind);
     if (subKind) {
@@ -117,7 +136,7 @@ export class FanNotificationWorker {
     }
 
     if (job.channel === 'EMAIL') {
-      await this.#email(job, now, subscription, out);
+      await this.#email(job, now, subscription, out, notice);
       return;
     }
     if (job.channel === 'WEB_PUSH') {
@@ -128,7 +147,7 @@ export class FanNotificationWorker {
     await this.#terminate(job, now, 'DEAD', null, out, 'dead');
   }
 
-  async #email(job: NotificationJob, now: Date, subscription: NotificationSubscription | undefined, out: WorkerResult): Promise<void> {
+  async #email(job: NotificationJob, now: Date, subscription: NotificationSubscription | undefined, out: WorkerResult, notice?: BookingNoticeView): Promise<void> {
     const [recipient] = await this.d.recipients.getMany([job.accountId], true);
     const r: Recipient | undefined = recipient;
     if (!r || r.status === 'MERGED' || r.status === 'DELETED' || r.status === 'NOT_FOUND') {
@@ -141,8 +160,41 @@ export class FanNotificationWorker {
       return;
     }
 
-    const msg = messageOf(job.kind as FanNoticeKind, job.vars);
     const headers: Record<string, string> = { 'content-type': 'text/plain; charset=utf-8' };
+    let subject = '';
+    let body = '';
+    let html: string | undefined;
+    let templateVersion: string | undefined;
+    if (job.kind === 'BOOKING_CONFIRMED') {
+      if (!notice) {
+        await this.#retry(job, now, out, 'notice-missing');
+        return;
+      }
+      const catalog = await this.d.catalog?.getBookingNotice(notice.eventId, notice.tierIds);
+      if (!catalog || !catalog.seller) {
+        this.d.signals?.emailFailed();
+        await this.#retry(job, now, out, 'seller-missing');
+        return;
+      }
+      const resolved = resolveBookingLocale(r.locale);
+      if (resolved.missing) this.d.signals?.templateMissing(r.locale);
+      const rendered = renderBookingConfirmed(resolved.locale, {
+        vars: job.vars as Record<string, string | number>,
+        seller: catalog.seller,
+        customerCenterUrl: `${(this.d.publicOrigin ?? 'https://peaket.example').replace(/\/+$/, '')}/support`,
+        publicOrigin: this.d.publicOrigin ?? 'https://peaket.example',
+      });
+      subject = rendered.subject;
+      body = rendered.text;
+      html = rendered.html;
+      templateVersion = rendered.version;
+      headers['content-type'] = 'multipart/alternative; charset=utf-8';
+    } else {
+      const msg = messageOf(job.kind as FanNoticeKind, job.vars);
+      subject = msg.title;
+      body = msg.body;
+      templateVersion = job.templateVersion;
+    }
     if (isSubscriptionNotice(job.kind as FanNoticeKind) && subscription) {
       const token = optOutTokenFor(subscription.id, this.d.optOutKey);
       const base = (this.d.publicOrigin ?? 'https://peaket.example').replace(/\/+$/, '');
@@ -150,15 +202,26 @@ export class FanNotificationWorker {
       headers['list-unsubscribe-post'] = 'List-Unsubscribe=One-Click';
     }
     try {
-      const sent = await this.d.mail.send({ to: r.email, subject: msg.title, body: msg.body, headers, messageKey: job.dedupKey });
-      await this.#finish(job, now, 'SENT', sent.providerMessageId ?? null);
+      const sent = await this.d.mail.send({ to: r.email, subject, body, ...(html !== undefined ? { html } : {}), headers, messageKey: job.dedupKey });
+      await this.#finish(job, now, 'SENT', sent.providerMessageId ?? null, job.attempts + 1, templateVersion);
+      this.#observe(job, now);
       out.sent += 1;
+      if (job.kind === 'BOOKING_CONFIRMED') this.d.signals?.emailSent();
     } catch (e) {
+      this.d.signals?.emailFailed();
       const err = e instanceof MailTransportError ? e : new MailTransportError('RETRYABLE', e instanceof Error ? e.message : 'transport-error');
       if (err.kind === 'PERMANENT') await this.#terminate(job, now, 'DEAD', null, out, 'dead');
       else if (err.kind === 'UNKNOWN' && !needsDubiousRetry(job.kind as FanNoticeKind)) await this.#terminate(job, now, 'FAILED', null, out, 'failed');
       else await this.#retry(job, now, out, err.message);
     }
+  }
+
+  /** 확정 사건을 받은 뒤 보낸 지연을 잰다(5분 [가정] 목표, 99% 경보의 원천) */
+  #observe(job: NotificationJob, now: Date): void {
+    if (job.kind !== 'BOOKING_CONFIRMED') return;
+    const seconds = (now.getTime() - job.createdAt.getTime()) / 1000;
+    this.d.signals?.deliveryLatency(job.kind, job.channel, seconds);
+    if (seconds > 300) this.d.signals?.latencyOverTarget(job.kind, job.channel, seconds);
   }
 
   async #webPush(job: NotificationJob, now: Date, out: WorkerResult): Promise<void> {
@@ -229,9 +292,10 @@ export class FanNotificationWorker {
   async #terminate(job: NotificationJob, now: Date, status: 'DEAD' | 'FAILED' | 'EXPIRED', providerMessageId: string | null, out: WorkerResult, which: 'dead' | 'failed' | 'expired'): Promise<void> {
     await this.#finish(job, now, status, providerMessageId, job.attempts + 1);
     out[which] += 1;
+    if (status === 'DEAD' && job.kind === 'BOOKING_CONFIRMED') this.d.signals?.dead(job.kind);
   }
 
-  async #finish(job: NotificationJob, now: Date, status: 'SENT' | 'FAILED' | 'DEAD' | 'EXPIRED', providerMessageId: string | null, attempts = job.attempts + 1): Promise<void> {
+  async #finish(job: NotificationJob, now: Date, status: 'SENT' | 'FAILED' | 'DEAD' | 'EXPIRED', providerMessageId: string | null, attempts = job.attempts + 1, templateVersion?: string): Promise<void> {
     const delivery: NotificationDeliveryRecord = {
       dedupKey: job.dedupKey,
       sentAt: now,
@@ -241,6 +305,7 @@ export class FanNotificationWorker {
       channel: job.channel,
       status,
       providerMessageId,
+      ...(templateVersion !== undefined ? { templateVersion } : {}),
       createdAt: job.createdAt,
     };
     await this.d.store.insertDelivery(delivery);

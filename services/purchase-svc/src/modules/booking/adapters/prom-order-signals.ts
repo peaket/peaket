@@ -52,6 +52,11 @@ export class PromOrderSignals implements OrderSignals, PaymentStatusSignals, Sta
     help: '주문을 커밋한 뒤 구매 세션 Paying 표시를 다시 불러도 하지 못한 수(결제 중 유휴로 끝날 수 있다, POL-009)',
     registers: [],
   });
+  readonly #bookingNoExhausted = new Counter({
+    name: 'purchase_booking_number_exhausted_total',
+    help: '하루 예매번호 99,999건을 넘어 주문을 닫은 수(SEV2, ADR-0388)',
+    registers: [],
+  });
 
   readonly #depositReadFailures = new Counter({
     name: 'purchase_payment_status_deposit_read_failures_total',
@@ -83,6 +88,7 @@ export class PromOrderSignals implements OrderSignals, PaymentStatusSignals, Sta
     registry.registerMetric(this.#fallback);
     registry.registerMetric(this.#payingFailed);
     registry.registerMetric(this.#holdMarkFailed);
+    registry.registerMetric(this.#bookingNoExhausted);
     registry.registerMetric(this.#waiters);
     registry.registerMetric(this.#pollFailures);
     registry.registerMetric(this.#depositReadFailures);
@@ -117,6 +123,11 @@ export class PromOrderSignals implements OrderSignals, PaymentStatusSignals, Sta
   /** purchase_order_hold_mark_failed_total(이름표 없음)을 1 올린다(BUILD_ORDER HOT-070). 던지지 않는다 */
   holdMarkFailed(): void {
     this.#holdMarkFailed.inc();
+  }
+
+  /** purchase_booking_number_exhausted_total을 1 올린다(ADR-0388). 던지지 않는다 */
+  bookingNumberExhausted(): void {
+    this.#bookingNoExhausted.inc();
   }
 
   /** order_history_mismatch를 count로 둔다. 던지지 않는다(붙이기 전에도 값을 둔다) */

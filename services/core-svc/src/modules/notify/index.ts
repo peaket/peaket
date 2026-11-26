@@ -53,7 +53,14 @@ export {
 } from './domain/fan-notify.js';
 export type { NotificationSubscription, PushSubscriptionRecord } from './domain/fan-notify-records.js';
 export type {
+  BookingNoticeCatalog,
+  BookingNoticeReader,
+  BookingNoticeView,
   FanNotifyStore,
+  NoticeCatalogView,
+  NotifyHeldEvents,
+  NotifySignals,
+  SellerNoticeInfo,
   MailMessage,
   MailSendResult,
   MailTransport,
@@ -74,13 +81,19 @@ export type {
 export { MailTransportError } from './domain/fan-notify-ports.js';
 export { encryptWebPush, vapidAuthorization, pushTopic, pushTtlUrgency } from './domain/push-crypto.js';
 export { FanSubscriptions, PushSubscriptions, SubscriptionOptOuts, MemoryRecipientDirectory } from './application/fan-notify.js';
-export { NotificationIntake, type AccountMergedInput, type LoginMethodChangedInput, type NoticeInput, type TicketKeyNoticeEvent, type TradeNoticeEvent } from './application/notification-intake.js';
+export { NotificationIntake, type AccountMergedInput, type BookingConfirmedEvent, type BookingIntakeResult, type LoginMethodChangedInput, type NoticeInput, type TicketKeyNoticeEvent, type TradeNoticeEvent } from './application/notification-intake.js';
 export { InternalNotifyTicketController, TicketKeyNoticeBody, TicketKeyNoticeResponse } from './inbound/internal-notify-ticket.controller.js';
 export { FanNotificationWorker, type WorkerResult } from './application/fan-notification-worker.js';
 export { MemoryFanNotifyStore } from './adapters/memory-fan-notify-store.js';
 export { DrizzleFanNotifyStore } from './adapters/db/drizzle-fan-notify-store.js';
 export { MemoryNotificationEventDirectory } from './adapters/memory-event-directory.js';
 export { FakeMailTransport, FakePushTransport } from './adapters/fake-transports.js';
+export { DrizzleNotifyHeldEvents } from './adapters/db/drizzle-held-events.js';
+export { HttpBookingNoticeReader } from './adapters/http-booking-notice.js';
+export { CatalogBookingNoticeView } from './adapters/catalog-booking-notice.js';
+export { PromNotifySignals } from './adapters/prom-notify-signals.js';
+export { SesMailTransport, SES_REGION, sesMailTransportFromEnv } from './adapters/ses-mail-transport.js';
+export { BOOKING_CONFIRMED_TEMPLATE_VERSION, renderBookingConfirmed, resolveBookingLocale, type BookingLocale, type RenderedBookingEmail } from './templates/booking-confirmed/index.js';
 export { FileMailTransport } from './adapters/file-mail-transport.js';
 export { FilePushTransport } from './adapters/file-push-transport.js';
 export { HttpsPushTransport } from './adapters/https-push-transport.js';

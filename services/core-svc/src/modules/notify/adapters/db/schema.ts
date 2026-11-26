@@ -118,6 +118,7 @@ export const notificationJob = pgTable(
     accountId: uuid('account_id').notNull(),
     channel: text('channel').notNull(),
     vars: jsonb('vars').$type<Record<string, string | number | boolean | null>>().notNull().default({}),
+    templateVersion: text('template_version'),
     status: text('status').notNull().default('PENDING'),
     attempts: integer('attempts').notNull().default(0),
     nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true, mode: 'date' }).notNull(),
@@ -144,6 +145,7 @@ export const notificationDelivery = pgTable(
     channel: text('channel').notNull(),
     status: text('status').notNull(),
     providerMessageId: text('provider_message_id'),
+    templateVersion: text('template_version'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull(),
   },
   (t) => [

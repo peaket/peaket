@@ -34,6 +34,8 @@ export const purchaseOrder = pgTable(
     accountId: uuid('account_id').notNull(),
     eventId: uuid('event_id').notNull(),
     status: text('status').notNull(),
+    // 예매번호(KST 날짜 8자리 + 5자리, ADR-0388). 옛 주문·번호 없이 만든 시험 주문은 null
+    bookingNo: text('booking_no'),
     // 서버가 계산한 금액(원)
     amount: integer('amount').notNull(),
     // 상태 이력 order_event의 마지막 번호. 주문 전이 함수가 상태를 바꾸는 UPDATE에서 1 올린다(ADR-0113)
@@ -73,6 +75,8 @@ export const purchaseOrder = pgTable(
     // 탈퇴 참여자가 그 계정의 주문을 찾는다(탈퇴 참여자 마이그레이션 0028, ADR-0284, BUILD_ORDER PRF-169). 0011과 같은 까닭으로 조건을 두지 않는다:
     // account_id·id는 바뀌지 않아 HOT 갱신을 막지 않고 주문을 넣을 때 항목이 하나 는다(data.md §5.1 '탈퇴 참여자의 계정 주문 찾기')
     index('purchase_order_account_idx').on(t.accountId, t.id),
+    // 예매번호는 UNIQUE(ADR-0388). null은 옛 주문·번호 없이 만든 시험 주문이라 여러 행이어도 된다
+    uniqueIndex('purchase_order_booking_no_key').on(t.bookingNo),
     check('purchase_order_status_check', sql`${t.status} in (${STATUS_LIST})`),
     check('purchase_order_amount_check', sql`${t.amount} >= 0`),
     check('purchase_order_event_seq_check', sql`${t.eventSeq} >= 1`),

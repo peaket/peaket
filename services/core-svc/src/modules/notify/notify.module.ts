@@ -29,7 +29,7 @@ import { pushTransportFromEnv } from './adapters/file-push-transport.js';
 import { HttpsPushTransport } from './adapters/https-push-transport.js';
 import { GrpcRecipientDirectory, unavailableRecipients } from './adapters/grpc-recipient-directory.js';
 import { optOutKeyFromEnv, publicOriginFromEnv, topicKeyFromEnv, vapidFromEnv } from './adapters/config.js';
-import type { FanNotifyStore, MailTransport, NotificationEventDirectory, PushLookup, PushTransport, RecipientDirectory, VapidConfig } from './domain/fan-notify-ports.js';
+import type { BookingNoticeReader, FanNotifyStore, MailTransport, NoticeCatalogView, NotificationEventDirectory, NotifyHeldEvents, NotifySignals, PushLookup, PushTransport, RecipientDirectory, VapidConfig } from './domain/fan-notify-ports.js';
 import { MemoryCatalogRepository } from '../catalog/index.js';
 
 export const NOTIFY_PARTNER_DATABASE = Symbol.for('peaket.notify.partner-database');
@@ -55,6 +55,14 @@ export interface FanNotifyWiring {
   vapid?: VapidConfig;
   publicOrigin?: string;
   topicKey?: string;
+  /** F-06-8 purchase-svc notice-view */
+  bookingNotice?: BookingNoticeReader;
+  /** F-06-8 catalog 판매자·등급 이름 */
+  bookingCatalog?: NoticeCatalogView;
+  /** F-06-8 반복 실패 보류 표 */
+  heldEvents?: NotifyHeldEvents;
+  /** F-06-8 지표 5종 */
+  notifySignals?: NotifySignals;
 }
 
 export function fanNotifyProviders(o: { storage: 'memory' | 'database'; wiring?: FanNotifyWiring; env: Record<string, string | undefined>; appDatabase?: Database; senderDatabase?: Database; catalog?: MemoryCatalogRepository }): { providers: Provider[]; store: FanNotifyStore } {
@@ -89,11 +97,38 @@ export function fanNotifyProviders(o: { storage: 'memory' | 'database'; wiring?:
       inject: [FAN_NOTIFY_STORE, CLOCK, FAN_NOTIFY_LOOKUP],
     },
     { provide: SubscriptionOptOuts, useFactory: (s: FanNotifyStore, k: string) => new SubscriptionOptOuts({ store: s, optOutKey: k }), inject: [FAN_NOTIFY_STORE, FAN_NOTIFY_OPTOUT_KEY] },
-    { provide: NotificationIntake, useFactory: (s: FanNotifyStore, c: Clock, k: string) => new NotificationIntake({ store: s, clock: c, optOutKey: k }), inject: [FAN_NOTIFY_STORE, CLOCK, FAN_NOTIFY_OPTOUT_KEY] },
+    {
+      provide: NotificationIntake,
+      useFactory: (s: FanNotifyStore, c: Clock, k: string) =>
+        new NotificationIntake({
+          store: s,
+          clock: c,
+          optOutKey: k,
+          ...(o.wiring?.bookingNotice ? { noticeReader: o.wiring.bookingNotice } : {}),
+          ...(o.wiring?.bookingCatalog ? { catalog: o.wiring.bookingCatalog } : {}),
+          ...(o.wiring?.heldEvents ? { heldEvents: o.wiring.heldEvents } : {}),
+          ...(o.wiring?.notifySignals ? { signals: o.wiring.notifySignals } : {}),
+        }),
+      inject: [FAN_NOTIFY_STORE, CLOCK, FAN_NOTIFY_OPTOUT_KEY],
+    },
     {
       provide: FanNotificationWorker,
       useFactory: (s: FanNotifyStore, m: MailTransport, p: PushTransport, r: RecipientDirectory, c: Clock, k: string, v?: VapidConfig) =>
-        new FanNotificationWorker({ store: s, mail: m, push: p, recipients: r, clock: c, optOutKey: k, ...(v ? { vapid: v } : {}), publicOrigin: o.wiring?.publicOrigin ?? publicOriginFromEnv(env), topicKey: o.wiring?.topicKey ?? topicKeyFromEnv(env, k), log: (line) => console.log(JSON.stringify(line)) }),
+        new FanNotificationWorker({
+          store: s,
+          mail: m,
+          push: p,
+          recipients: r,
+          clock: c,
+          optOutKey: k,
+          ...(v ? { vapid: v } : {}),
+          ...(o.wiring?.bookingNotice ? { noticeReader: o.wiring.bookingNotice } : {}),
+          ...(o.wiring?.bookingCatalog ? { catalog: o.wiring.bookingCatalog } : {}),
+          ...(o.wiring?.notifySignals ? { signals: o.wiring.notifySignals } : {}),
+          publicOrigin: o.wiring?.publicOrigin ?? publicOriginFromEnv(env),
+          topicKey: o.wiring?.topicKey ?? topicKeyFromEnv(env, k),
+          log: (line) => console.log(JSON.stringify(line)),
+        }),
       inject: [FAN_NOTIFY_SENDER_STORE, FAN_NOTIFY_MAIL, FAN_NOTIFY_PUSH, FAN_NOTIFY_RECIPIENTS, CLOCK, FAN_NOTIFY_OPTOUT_KEY, { token: FAN_NOTIFY_VAPID, optional: true }],
     },
   ];

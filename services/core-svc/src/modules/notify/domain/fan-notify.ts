@@ -11,6 +11,7 @@ export type JobStatus = 'PENDING' | 'RETRYING' | 'DEAD';
 export type DeliveryStatus = 'PENDING' | 'SENT' | 'FAILED' | 'DEAD' | 'EXPIRED';
 export type PushService = 'FCM' | 'MOZILLA' | 'APPLE' | 'WNS';
 export type FanNoticeKind =
+  | 'BOOKING_CONFIRMED'
   | 'EVENT_CANCELLATION_CONFIRMED'
   | 'EVENT_POSTPONED'
   | 'REFUNDED'
@@ -33,7 +34,7 @@ export const NOTIFY_MAX_ATTEMPTS = 6;
 const RETRY_DELAYS_MS = [60_000, 300_000, 1_800_000, 7_200_000, 21_600_000, 43_200_000] as const;
 export const notificationRetryDelayMs = (attempt: number): number => RETRY_DELAYS_MS[Math.max(0, Math.min(RETRY_DELAYS_MS.length - 1, attempt - 1))]!;
 /** 결과를 모르는 실패를 한 번 더 보내도 되는 돈·보안·법정 통지(notify §10, d5 §9.1.1) */
-const DUBIOUS_RETRY_KINDS: ReadonlySet<FanNoticeKind> = new Set(['EVENT_CANCELLATION_CONFIRMED', 'EVENT_POSTPONED', 'REFUNDED', 'REFUND_FAILED', 'DEVICE_KEY_REISSUED', 'DEVICE_KEY_LATE_ISSUE']);
+const DUBIOUS_RETRY_KINDS: ReadonlySet<FanNoticeKind> = new Set(['BOOKING_CONFIRMED', 'EVENT_CANCELLATION_CONFIRMED', 'EVENT_POSTPONED', 'REFUNDED', 'REFUND_FAILED', 'DEVICE_KEY_REISSUED', 'DEVICE_KEY_LATE_ISSUE']);
 export const needsDubiousRetry = (kind: FanNoticeKind): boolean => DUBIOUS_RETRY_KINDS.has(kind);
 /** 신청 알림(신청 하나에 묶인 알림) */
 const SUBSCRIPTION_KINDS: ReadonlySet<FanNoticeKind> = new Set(['OPEN_LOBBY', 'OPEN_VERIFY', 'CANCELLATION_ALERT']);
@@ -42,6 +43,7 @@ export const isSubscriptionNotice = (kind: FanNoticeKind): boolean => SUBSCRIPTI
 export const nightSkipsWebPush = (kind: FanNoticeKind): boolean => kind !== 'AD';
 
 export const FAN_NOTICE_KINDS: readonly FanNoticeKind[] = [
+  'BOOKING_CONFIRMED',
   'EVENT_CANCELLATION_CONFIRMED',
   'EVENT_POSTPONED',
   'REFUNDED',
@@ -74,7 +76,7 @@ const SUBSCRIPTION_KEY = /^[A-Za-z0-9_-]{43}$/;
 
 /** 구독 하나에 묶인 웹 푸시 작업이면 그 구독 키. 계정 단위 작업(로그인 수단·병합 등)이면 undefined(그 계정의 모든 구독에 보낸다) */
 export function webPushTargetOf(kind: string, dedupKey: string): string | undefined {
-  if (!(TICKET_KEY_NOTICE_KINDS as readonly string[]).includes(kind)) return undefined;
+  if (!(TICKET_KEY_NOTICE_KINDS as readonly string[]).includes(kind) && kind !== 'BOOKING_CONFIRMED') return undefined;
   const parts = dedupKey.split(':');
   if (parts.length !== 6 || parts[4] !== 'WEB_PUSH') return undefined;
   const key = parts[5]!;
@@ -83,6 +85,7 @@ export function webPushTargetOf(kind: string, dedupKey: string): string | undefi
 
 /** 문안 변수 허용 목록(notify §12). 주소·전화번호·이름은 종류를 가리지 않고 받지 않는다 */
 const VARS_ALLOWED: Record<FanNoticeKind, readonly string[]> = {
+  BOOKING_CONFIRMED: ['productionName', 'eventStartsAt', 'venueName', 'seatSummary', 'amount', 'bookingNoLast4', 'orderId'],
   EVENT_CANCELLATION_CONFIRMED: ['fanNoticeReason'],
   EVENT_POSTPONED: ['fanNoticeReason', 'postponedTo', 'refundWindowClosesAt'],
   REFUNDED: ['refundAmount'],
@@ -158,6 +161,17 @@ export function messageOf(kind: FanNoticeKind, vars: Vars): NoticeMessage {
   const text = (k: string): string | undefined => (typeof vars[k] === 'string' ? (vars[k] as string) : undefined);
   const safeUrl = (raw: string | undefined): string | undefined => (raw && raw.startsWith('/') && !raw.startsWith('//') && !raw.includes('\\') ? raw : undefined);
   switch (kind) {
+    case 'BOOKING_CONFIRMED': {
+      const production = text('productionName') ?? '공연';
+      const seat = text('seatSummary') ?? '좌석';
+      const starts = text('eventStartsAt');
+      const at = starts ? kstMinuteText(starts) : '';
+      return {
+        title: `${production} 예매가 확정되었습니다`,
+        body: `${at ? `${at} · ` : ''}${seat} · 티켓을 확인하세요`,
+        url: '/my/tickets',
+      };
+    }
     case 'EVENT_CANCELLATION_CONFIRMED':
       return { title: '공연이 취소되었습니다', body: text('fanNoticeReason') ?? '회차가 취소되어 환급을 진행합니다.' };
     case 'EVENT_POSTPONED':

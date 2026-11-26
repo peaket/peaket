@@ -2,7 +2,7 @@
 // 주문 생성 POST /v1/orders와 결제 접수 POST /v1/orders/{orderId}/payment-acceptance다. purchase DB가 없이 뜬 파드는 이 모듈을 넣지 않는다
 // (주문 경로를 열지 않는다, payment §2 '넘긴 것').
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
-import { CLOCK, type Clock, type HotPathMetrics, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
+import { CLOCK, type Clock, type HotPathMetrics, INTERNAL_TOKEN, PLATFORM_LOGGER, type PlatformLogger } from '@peaket/platform';
 import { LoggerOrderLog } from './adapters/order-log.js';
 import { AcceptPayment } from './application/accept-payment.js';
 import { CreateOrder } from './application/create-order.js';
@@ -11,6 +11,8 @@ import { StartPayment } from './application/start-payment.js';
 import type {
   AcceptLog,
   BehaviorSignalPublisher,
+  BookingNoticeReader,
+  BookingNumbers,
   BookingRestrictions,
   ContactRefs,
   IdentityRecheck,
@@ -35,6 +37,7 @@ import type {
   StartPaymentSignals,
   StartPaymentWrites,
 } from './domain/ports.js';
+import { BOOKING_NOTICE_READER, NoticeViewController, NoticeViewTokenGuard } from './inbound/notice-view.controller.js';
 import { CONSENT_VERSION_PATTERN, OrdersController } from './inbound/orders.controller.js';
 
 /**
@@ -100,6 +103,10 @@ export interface BookingModuleDeps {
   };
   /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
   hotPath?: HotPathMetrics;
+  /** F-06-8 예매번호 일련번호. 없으면 번호 없이 만든다 */
+  bookingNumbers?: BookingNumbers;
+  /** F-06-8 내부 notice-view 읽기. 없으면 그 경로가 404를 준다 */
+  noticeViews?: BookingNoticeReader;
 }
 
 @Module({})
@@ -117,7 +124,7 @@ export class BookingModule {
     if (typeof deps.consentVersion !== 'string' || !CONSENT_VERSION_PATTERN.test(deps.consentVersion)) {
       throw new Error(`동의 문안 판(${CONSENT_VERSION_ENV})은 1~32자의 영문·숫자·._-여야 한다`);
     }
-    const { log, acceptLog, clock, accepts, slots, onAccepted, paymentStatus, startPayment, hotPath, ...ports } = deps;
+    const { log, acceptLog, clock, accepts, slots, onAccepted, paymentStatus, startPayment, hotPath, noticeViews, ...ports } = deps;
     const createOrder: Provider = {
       provide: CreateOrder,
       useFactory: (platformClock: Clock, logger?: PlatformLogger) => {
@@ -178,7 +185,20 @@ export class BookingModule {
           },
         ]
       : [];
-    return { module: BookingModule, controllers: [OrdersController], providers: [createOrder, acceptPayment, ...getPaymentStatus, ...startPaymentProvider], exports: [] };
+    return {
+      module: BookingModule,
+      controllers: [OrdersController, NoticeViewController],
+      providers: [
+        createOrder,
+        acceptPayment,
+        ...getPaymentStatus,
+        ...startPaymentProvider,
+        { provide: INTERNAL_TOKEN, useValue: process.env.PEAKET_INTERNAL_TOKEN },
+        { provide: BOOKING_NOTICE_READER, useValue: noticeViews },
+        NoticeViewTokenGuard,
+      ],
+      exports: [],
+    };
   }
 }
 

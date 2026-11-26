@@ -2,8 +2,10 @@
 // 받는 층(inbound/orders.controller.ts)이 플랫폼 가드(신원·역할 ticket:buy·멱등 키 400·구매 세션 서명 401·본문 형식 400)를 지난 요청을 넘긴다.
 // 이 층은 어댑터를 가져오지 않는다(포트로만 쓴다, architecture §3.1). 결과는 던지지 않고 이름 붙은 값으로 돌려주고, 받는 층이 HTTP로 바꾼다.
 import { type Clock, type Deadline, uuidv7 } from '@peaket/platform';
+import { formatBookingNo, kstDayOf } from '../domain/booking-number.js';
 import { buyerOf, consentVerdict, type OrderBuyerInput, type OrderConsents, priceSeats, priceSeatsAt } from '../domain/order-request.js';
 import {
+  type BookingNumbers,
   type BookingRestriction,
   type BookingRestrictions,
   type ContactRefs,
@@ -52,6 +54,8 @@ export interface CreateOrderDeps {
   priorityWithdraw?: (grantId: string) => Promise<unknown>;
   signals: OrderSignals;
   log: OrderLog;
+  /** 예매번호 일련번호. 없으면 번호 없이 만든다(옛 조립·시험) */
+  bookingNumbers?: BookingNumbers;
   /** 판매 종료 비교와 주문 ID(UUIDv7)의 시계 */
   clock: Clock;
   /** 지금 동의 문안 판(환경 값 PEAKET_ORDER_CONSENT_VERSION, ^[0-9A-Za-z._-]{1,32}$) */
@@ -283,12 +287,25 @@ export class CreateOrder {
     const identityDown = answer.status === 'FAILED' && SKIP_CONTACT_REF_AFTER.has(answer.reason);
     const contactRef = identityDown ? undefined : await this.#contactRefOf(buyer.phoneE164, budgetOf(c.deadline, CONTACT_REF_DEADLINE_MS));
 
+    // 9의2. 예매번호 일련번호(ADR-0388). 하루 99,999건을 넘으면 주문을 닫고 SEV2를 올린다
+    let bookingNo: string | undefined;
+    if (d.bookingNumbers) {
+      const nowMs = d.clock.now();
+      const allocation = await d.bookingNumbers.next(nowMs);
+      if ('exhausted' in allocation) {
+        d.signals.bookingNumberExhausted?.();
+        return rejected('BOOKING_NUMBER_EXHAUSTED' as never);
+      }
+      bookingNo = formatBookingNo(kstDayOf(nowMs), allocation.seq);
+    }
+
     // 10. 한 트랜잭션(멱등 기록 잡기 → 주문 만들기). ProblemError(409·422)·DB 오류는 그대로 던진다
     const order: NewOrder = {
       id: uuidv7(d.clock),
       accountId: c.accountId,
       eventId: session.eventId,
       amount: pricing.amount,
+      ...(bookingNo !== undefined ? { bookingNo } : {}),
       buyerName: buyer.name,
       buyerPhone: buyer.phoneE164,
       idempotencyKey: c.idem.key,
@@ -335,7 +352,9 @@ export class CreateOrder {
 
     // 11. 커밋 뒤 Paying 표시(실패해도 응답을 바꾸지 않는다), 12. 201
     await this.#markPaying(c.purchaseSessionId, outcome.order.orderId, c.deadline);
-    return { status: 201, order: outcome.order, replayed: outcome.status === 'REPLAYED' };
+    // 시험·옛 저장소는 응답 모습에 예매번호를 싣지 않는다. 쓰임새가 만든 번호를 응답에 함께 둔다(공개 계약은 bookingNumber)
+    const view = bookingNo !== undefined ? ({ ...outcome.order, bookingNo } as typeof outcome.order & { bookingNo: string }) : outcome.order;
+    return { status: 201, order: view, replayed: outcome.status === 'REPLAYED' };
   }
 
   /**

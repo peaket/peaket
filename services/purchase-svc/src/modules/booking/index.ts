@@ -31,6 +31,9 @@ export {
   type OrderExpiryView,
 } from './domain/order-expiry.js';
 export { DrizzleOrderWrites, ORDER_HOLD_KEY, type DrizzleOrderWritesOptions } from './adapters/db/drizzle-order-writes.js';
+export { DrizzleBookingNumbers } from './adapters/db/drizzle-booking-numbers.js';
+export { DrizzleBookingNoticeReader } from './adapters/db/drizzle-booking-notice.js';
+export { BOOKING_NOTICE_READER, NoticeViewController, NoticeViewTokenGuard } from './inbound/notice-view.controller.js';
 export { orderCancellation, orderCompensation, orderEvent, orderIdempotency, orderItem, orderSagaJob, paymentAttempt, purchaseOrder, ticketIssueJob, ticketVoidJob } from './adapters/db/schema.js';
 export {
   DrizzlePaymentResults,
@@ -508,6 +511,7 @@ export {
 export function orderHistoryCheckTask(deps: OrderHistoryTaskDeps): MaintenanceTask {
   return historyTaskOf({ ...deps, check: deps.check ?? checkOrderHistory });
 }
+export { BOOKING_NO_MAX, BOOKING_NO_PATTERN, formatBookingNo, isBookingNo, kstDayOf } from './domain/booking-number.js';
 export {
   ACTOR_PATTERN,
   buildOrderEvent,
@@ -515,6 +519,7 @@ export {
   ORDER_HISTORY_BATCH,
   ORDER_STATUSES,
   ORDER_TRANSITIONS,
+  noticeAllowedOf,
   orderEventKey,
   orderEventType,
   PAYMENT_RESULT_TRANSITIONS,
@@ -538,6 +543,10 @@ export type {
   AcceptOutcome,
   ActiveAttemptView,
   AttemptMismatchReason,
+  BookingNoticeReader,
+  BookingNoticeView,
+  BookingNumberAllocation,
+  BookingNumbers,
   BookingRestriction,
   BookingRestrictions,
   CommittedAcceptLookup,

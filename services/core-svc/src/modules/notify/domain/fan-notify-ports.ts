@@ -83,10 +83,72 @@ export interface NotificationEventDirectory {
   find(eventId: string): Promise<NotifyEvent | undefined>;
 }
 
+/** 예매 확정 알림의 notice-view(notify §4.9.1). phoneE164는 내부 응답에만 있고 작업·기록·로그에 쓰지 않는다 */
+export interface BookingNoticeView {
+  bookingNo: string | null;
+  status: string;
+  noticeAllowed: boolean;
+  phoneE164: string | null;
+  eventId: string;
+  tierIds: readonly string[];
+}
+
+export interface BookingNoticeReader {
+  /** 원격 읽기 실패는 던진다(쓰임새가 재시도·보류) */
+  get(orderId: string): Promise<BookingNoticeView | undefined>;
+}
+
+export interface SellerNoticeInfo {
+  legalName: string;
+  representative: string;
+  address: string;
+  phone: string;
+  email: string;
+  businessRegNo: string;
+  mailOrderReportNo: string;
+}
+
+export interface BookingNoticeCatalog {
+  productionName: string;
+  venueName: string;
+  eventStartsAt: string;
+  tierNames: Readonly<Record<string, string>>;
+  seller: SellerNoticeInfo | null;
+}
+
+/** 예매 확정 알림의 catalog 읽기(보낼 때 판매자·등급 이름). 없으면 작업을 만들지 않고 재시도한다 */
+export interface NoticeCatalogView {
+  getBookingNotice(eventId: string, tierIds: readonly string[]): Promise<BookingNoticeCatalog | undefined>;
+}
+
+/** 반복 실패 사건을 적는 held_event(ADR-0142). 같은 eventKey는 한 줄이다 */
+export interface NotifyHeldEvents {
+  /** 있으면 이미 보류한 사건인지 본다(없으면 intake가 이 실행 안에서만 기억한다) */
+  find?(eventKey: string): Promise<boolean>;
+  hold(e: { eventKey: string; kind: string; payload: Record<string, unknown>; attempts: number }, now: Date): Promise<void>;
+}
+
+export interface NotifySignals {
+  dueBacklog(kind: string, count: number): void;
+  deliveryLatency(kind: string, channel: string, seconds: number): void;
+  templateMissing(locale: string): void;
+  emailSent(): void;
+  emailFailed(): void;
+  /** DEAD 1건 이상이면 SEV3 */
+  dead(kind: string): void;
+  /** 5분 [가정] 목표를 넘긴 발송(99% 경보의 원천) */
+  latencyOverTarget(kind: string, channel: string, seconds: number): void;
+  suppressed(reason: 'not_confirmed' | 'not_allowed'): void;
+  tierNameMissing(): void;
+  bookingNoInvalid(): void;
+}
+
 export interface MailMessage {
   to: string;
   subject: string;
   body: string;
+  /** HTML 대체 본문(SES text+html multipart, ADR-0388). 없으면 text/plain만 보낸다 */
+  html?: string;
   headers: Record<string, string>;
   messageKey: string;
 }

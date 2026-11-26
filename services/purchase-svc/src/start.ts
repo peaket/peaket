@@ -123,6 +123,8 @@ import {
   type ContactRefs,
   CompensationRunner,
   discardBehaviorSignals,
+  DrizzleBookingNoticeReader,
+  DrizzleBookingNumbers,
   DrizzleOrderAccepts,
   DrizzleOrderStarts,
   DrizzleOrderExpiry,
@@ -651,6 +653,8 @@ export async function start(o: StartOptions): Promise<StartedService> {
         },
         writes: new DrizzleOrderWrites({ database, store: orderStore, clock: systemClock }),
         accepts: new DrizzleOrderAccepts({ database, store: orderStore, clock: systemClock }),
+        bookingNumbers: new DrizzleBookingNumbers(database),
+        noticeViews: new DrizzleBookingNoticeReader(database),
         // 파드 메모리가 정지(명령 3 회차·전체, 판매 중지)라 하면 좌석 Redis를 부르지 않고 PAUSED(423 sale-paused)다(ADR-0365 결정 7)
         slots: pauseAwareSlots(new InventorySeatSlots(new RedisSeatSlots(redis)), saleMemory),
         holds: orderHolds,

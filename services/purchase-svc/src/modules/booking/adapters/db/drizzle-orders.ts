@@ -210,9 +210,9 @@ export class DrizzleOrderStore {
     const lines = order.items.map((item, i) => sql`(${i + 1}::int, ${item.seatId}::uuid, ${item.tierId}, ${item.sectionId}, ${item.unitPrice}::int)`);
     await tx.execute(sql`
       with o as (
-        insert into purchase_order (id, account_id, event_id, status, amount, event_seq, payment_event_seq, buyer_name, buyer_phone, idempotency_key, consent_version, seat_assignment, created_at,
+        insert into purchase_order (id, account_id, event_id, status, amount, event_seq, payment_event_seq, booking_no, buyer_name, buyer_phone, idempotency_key, consent_version, seat_assignment, created_at,
                                     hold_id, purchase_session_id, priority_grant_id)
-        values (${order.id}::uuid, ${order.accountId}::uuid, ${order.eventId}::uuid, ${T1.to}, ${order.amount}::int, 1, 0,
+        values (${order.id}::uuid, ${order.accountId}::uuid, ${order.eventId}::uuid, ${T1.to}, ${order.amount}::int, 1, 0, ${order.bookingNo ?? null},
                 ${order.buyerName}, ${order.buyerPhone}, ${order.idempotencyKey}, ${order.consentVersion}, ${order.seatAssignment}, ${at}::timestamptz,
                 ${order.holdId}::uuid, ${order.purchaseSessionId}, ${order.priorityGrantId ?? null}::uuid)
         returning id

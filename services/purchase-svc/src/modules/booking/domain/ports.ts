@@ -34,6 +34,8 @@ export interface NewOrder {
   readonly eventId: string;
   /** 서버가 계산한 금액(원, 0 이상 정수) */
   readonly amount: number;
+  /** 예매번호(KST 날짜 8자리 + 5자리). 주문 생성 트랜잭션에서 시퀀스로 잡는다(ADR-0388) */
+  readonly bookingNo?: string;
   readonly buyerName: string;
   readonly buyerPhone: string;
   /** 클라이언트 Idempotency-Key 사본(소문자 UUID v4) */
@@ -137,6 +139,8 @@ export interface OrderSignals {
   payingMarkFailed?(): void;
   /** purchase_order_hold_mark_failed_total을 1 올린다(주문 뒤 표시 실패, BUILD_ORDER HOT-070). 던지지 않는다 */
   holdMarkFailed?(): void;
+  /** 예매번호 일련번호가 99,999를 넘어 주문을 닫은 수(SEV2, ADR-0388). 던지지 않는다 */
+  bookingNumberExhausted?(): void;
 }
 
 // ---- 주문 생성 POST /v1/orders(docs/features/payment.md §2 '주문 생성의 첫 구현', BUILD_ORDER PRF-161) ----
@@ -171,6 +175,8 @@ export interface OrderView {
   readonly orderId: string;
   readonly amount: number;
   readonly status: OrderStatus;
+  /** 예매번호(KST 날짜 8자리 + 5자리). 옛 주문은 없을 수 있다 */
+  readonly bookingNumber?: string;
   /** 줄 번호 차례 */
   readonly items: readonly OrderItem[];
 }
@@ -308,6 +314,30 @@ export interface IdentityRecheck {
  */
 export interface ContactRefs {
   compute(phoneE164: string, deadlineMs: number): Promise<string | undefined>;
+}
+
+/** 예매번호 일련번호 배정 결과. 99,999를 넘으면 exhausted(ADR-0388 결정 1) */
+export type BookingNumberAllocation = { readonly seq: number } | { readonly exhausted: true };
+
+/** 예매번호 일련번호 배정 포트(운영은 purchase DB booking_no_sequence, `INSERT … ON CONFLICT`) */
+export interface BookingNumbers {
+  /** 주문 생성 트랜잭션 안에서 원자적으로 다음 일련번호를 잡는다. 99,999를 넘으면 exhausted */
+  next(nowMs: number): Promise<BookingNumberAllocation>;
+}
+
+/** 예매 확정 알림의 notice-view(notify §4.9.1). phoneE164는 내부 응답에만 있고 작업·기록·로그에 남기지 않는다 */
+export interface BookingNoticeView {
+  readonly bookingNo: string | null;
+  readonly status: OrderStatus;
+  readonly noticeAllowed: boolean;
+  readonly phoneE164: string | null;
+  readonly eventId: string;
+  readonly tierIds: readonly string[];
+}
+
+/** notice-view 읽기(운영은 purchase DB, `GET /internal/v1/orders/{orderId}/notice-view`) */
+export interface BookingNoticeReader {
+  get(orderId: string): Promise<BookingNoticeView | undefined>;
 }
 
 /** 예매 제한 사본 하나(s:rst:{account} Hash의 st·until·rid·ver) */

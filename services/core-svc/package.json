@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-ses": "^3.1175.0",
     "@grpc/grpc-js": "1.14.6",
     "@grpc/proto-loader": "0.8.1",
     "@nestjs/common": "^12.3.2",

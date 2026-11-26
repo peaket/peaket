@@ -14,8 +14,9 @@ import {
   type TicketKeyNoticeKind,
   type Vars,
 } from '../domain/fan-notify.js';
-import type { FanNotifyStore } from '../domain/fan-notify-ports.js';
+import type { BookingNoticeReader, BookingNoticeView, FanNotifyStore, NoticeCatalogView, NotifyHeldEvents, NotifySignals } from '../domain/fan-notify-ports.js';
 import type { NotificationJob } from '../domain/fan-notify-records.js';
+import { BOOKING_CONFIRMED_TEMPLATE_VERSION } from '../templates/booking-confirmed/index.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -24,6 +25,13 @@ export interface NotificationIntakeDeps {
   readonly clock: Clock;
   /** 수신 거부 토큰 키. 워커와 같은 값을 쓴다 */
   readonly optOutKey: string;
+  /** F-06-8 예매 확정 알림의 purchase-svc notice-view */
+  readonly noticeReader?: BookingNoticeReader;
+  /** F-06-8 예매 확정 알림의 catalog(공연명·장소·시각·등급 이름) */
+  readonly catalog?: NoticeCatalogView;
+  /** F-06-8 반복 실패 사건 보류 표 */
+  readonly heldEvents?: NotifyHeldEvents;
+  readonly signals?: NotifySignals;
 }
 
 export interface TradeNoticeEvent {
@@ -71,11 +79,106 @@ export interface NoticeInput {
   expiresAt?: Date;
 }
 
+/** F-06-8 `trade.orders` CONFIRMED 사건. type이 CONFIRMED가 아니면 intake가 먼저 억제한다 */
+export interface BookingConfirmedEvent {
+  type: string;
+  eventKey: string;
+  orderId: string;
+  eventId: string;
+  accountId: string;
+  occurredAtMs: number;
+  amount: number;
+  items: readonly { tierId: string; seatLabel?: string }[];
+}
+
+export interface BookingIntakeResult {
+  created: number;
+  duplicate: number;
+  suppressed?: 'not_confirmed' | 'not_allowed';
+  held?: boolean;
+}
+
+const BOOKING_NOTICE_READ_ATTEMPTS = 3;
+const BOOKING_NO = /^[0-9]{8}(?!00000)[0-9]{5}$/;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID.test(v);
 
 export class NotificationIntake {
+  readonly #held = new Set<string>();
+
   constructor(private readonly d: NotificationIntakeDeps) {}
+
+  /**
+   * F-06-8 예매 확정 알림(notify §4.8·§4.9). CONFIRMED만 소비하고, noticeAllowed=false면 작업을 만들지 않는다.
+   * vars는 일곱 키뿐이고 phoneE164·판매자·이름·전화번호·좌석 번호·예매번호 전체를 넣지 않는다.
+   */
+  async bookingConfirmed(e: BookingConfirmedEvent): Promise<BookingIntakeResult> {
+    if (e.type !== 'CONFIRMED') {
+      this.d.signals?.suppressed('not_confirmed');
+      return { created: 0, duplicate: 0, suppressed: 'not_confirmed' };
+    }
+    if (!isUuid(e.orderId) || !isUuid(e.eventId) || !isUuid(e.accountId) || !e.eventKey) throw new FanNotifyProblem('INVALID', '예매 확정 사건 모양이 올바르지 않습니다');
+    if (await this.#isHeld(e.eventKey)) return { created: 0, duplicate: 0, held: true };
+
+    const notice = await this.#readNotice(e);
+    if (notice === 'HELD') return { created: 0, duplicate: 0, held: true };
+    if (!notice || !notice.noticeAllowed) {
+      this.d.signals?.suppressed('not_allowed');
+      return { created: 0, duplicate: 0, suppressed: 'not_allowed' };
+    }
+    if (!notice.bookingNo || !BOOKING_NO.test(notice.bookingNo)) {
+      this.d.signals?.bookingNoInvalid();
+      return { created: 0, duplicate: 0 };
+    }
+
+    const tierIds = [...new Set(e.items.map((i) => i.tierId))].sort();
+    const catalog = await this.#readCatalog(e, tierIds);
+    if (catalog === 'HELD') return { created: 0, duplicate: 0, held: true };
+    if (!catalog) return { created: 0, duplicate: 0 };
+
+    const counts = new Map<string, number>();
+    for (const item of e.items) counts.set(item.tierId, (counts.get(item.tierId) ?? 0) + 1);
+    const names = tierIds.map((id) => catalog.tierNames[id]);
+    let seatSummary: string;
+    if (names.every((n) => typeof n === 'string' && n.length > 0)) {
+      seatSummary = tierIds.map((id) => `${catalog.tierNames[id]!} ${counts.get(id) ?? 0}매`).join(', ');
+    } else {
+      seatSummary = `좌석 ${e.items.length}매`;
+      this.d.signals?.tierNameMissing();
+    }
+    const vars = assertVars('BOOKING_CONFIRMED', {
+      productionName: catalog.productionName,
+      eventStartsAt: catalog.eventStartsAt,
+      venueName: catalog.venueName,
+      seatSummary,
+      amount: e.amount,
+      bookingNoLast4: notice.bookingNo.slice(-4),
+      orderId: e.orderId,
+    });
+
+    const out: BookingIntakeResult = { created: 0, duplicate: 0 };
+    const base = {
+      kind: 'BOOKING_CONFIRMED' as const,
+      targetId: e.orderId,
+      accountId: e.accountId,
+      vars,
+      templateVersion: BOOKING_CONFIRMED_TEMPLATE_VERSION,
+      expiresAt: new Date(e.occurredAtMs + DAY_MS),
+    };
+    const email = await this.enqueue({ ...base, channel: 'EMAIL', dedupKey: `BOOKING_CONFIRMED:${e.orderId}:CONFIRMED:${e.accountId}:EMAIL` });
+    out[email] += 1;
+    for (const sub of await this.d.store.listPushSubscriptions(e.accountId)) {
+      const r = await this.enqueue({
+        ...base,
+        channel: 'WEB_PUSH',
+        dedupKey: `BOOKING_CONFIRMED:${e.orderId}:CONFIRMED:${e.accountId}:WEB_PUSH:${sub.endpointHash}`,
+      });
+      out[r] += 1;
+    }
+    return out;
+  }
 
   async tradeEvent(e: TradeNoticeEvent): Promise<'created' | 'duplicate'> {
     if (!isUuid(e.orderId) || !isUuid(e.eventId) || !isUuid(e.accountId)) throw new FanNotifyProblem('INVALID', 'ID 모양이 올바르지 않습니다');
@@ -158,6 +261,51 @@ export class NotificationIntake {
     });
   }
 
+  async #isHeld(eventKey: string): Promise<boolean> {
+    if (this.#held.has(eventKey)) return true;
+    const found = this.d.heldEvents?.find ? await this.d.heldEvents.find(eventKey).catch(() => false) : false;
+    if (found) this.#held.add(eventKey);
+    return found === true;
+  }
+
+  async #readNotice(e: BookingConfirmedEvent): Promise<BookingNoticeView | 'HELD' | undefined> {
+    if (!this.d.noticeReader) return undefined;
+    for (let i = 1; i <= BOOKING_NOTICE_READ_ATTEMPTS; i += 1) {
+      try {
+        return await this.d.noticeReader.get(e.orderId);
+      } catch {
+        if (i === BOOKING_NOTICE_READ_ATTEMPTS) {
+          await this.#hold(e);
+          return 'HELD';
+        }
+      }
+    }
+    return undefined;
+  }
+
+  async #readCatalog(e: BookingConfirmedEvent, tierIds: readonly string[]): Promise<Awaited<ReturnType<NoticeCatalogView['getBookingNotice']>> | 'HELD' | undefined> {
+    if (!this.d.catalog) return undefined;
+    for (let i = 1; i <= BOOKING_NOTICE_READ_ATTEMPTS; i += 1) {
+      try {
+        return await this.d.catalog.getBookingNotice(e.eventId, tierIds);
+      } catch {
+        if (i === BOOKING_NOTICE_READ_ATTEMPTS) {
+          await this.#hold(e);
+          return 'HELD';
+        }
+      }
+    }
+    return undefined;
+  }
+
+  async #hold(e: BookingConfirmedEvent): Promise<void> {
+    this.#held.add(e.eventKey);
+    await this.d.heldEvents?.hold(
+      { eventKey: e.eventKey, kind: 'BOOKING_CONFIRMED', payload: { eventKey: e.eventKey, orderId: e.orderId }, attempts: BOOKING_NOTICE_READ_ATTEMPTS },
+      new Date(this.d.clock.now()),
+    );
+  }
+
   private tradeVars(e: TradeNoticeEvent): Vars {
     const raw: Vars = {};
     if (e.fanNoticeReason !== undefined) raw.fanNoticeReason = e.fanNoticeReason;
@@ -167,7 +315,7 @@ export class NotificationIntake {
     return assertVars(e.type, raw);
   }
 
-  private async enqueue(o: { kind: FanNoticeKind; targetId: string; accountId: string; channel: NotificationChannel; vars: Vars; dedupKey: string; expiresAt?: Date }): Promise<'created' | 'duplicate'> {
+  private async enqueue(o: { kind: FanNoticeKind; targetId: string; accountId: string; channel: NotificationChannel; vars: Vars; dedupKey: string; expiresAt?: Date; templateVersion?: string }): Promise<'created' | 'duplicate'> {
     const now = new Date(this.d.clock.now());
     const vars = assertVars(o.kind, o.vars);
     const job: NotificationJob = {
@@ -177,6 +325,7 @@ export class NotificationIntake {
       accountId: o.accountId,
       channel: o.channel,
       vars,
+      ...(o.templateVersion !== undefined ? { templateVersion: o.templateVersion } : {}),
       status: 'PENDING',
       attempts: 0,
       nextAttemptAt: now,
