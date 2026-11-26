@@ -132,7 +132,7 @@ export class OpsCasesController {
     }
     if (parsed.data.decision === 'REFUND') {
       if (basis.refundableAmount <= 0) throw new ProblemError({ type: 'case-nothing-to-refund', status: 409, title: '환급할 남은 금액이 없습니다' });
-      await this.approvalLifecycle.request({ kind: 'SYSTEM_FAULT_REFUND', targetRef: basis.orderId, amount: basis.refundableAmount, reasonCode: 'FLAGGED_REFUND', reasonText: parsed.data.reason }, { ...actorOf(me), role: 'cs_agent', sessionId: 'case-action' });
+      await this.approvalLifecycle.request({ kind: 'SYSTEM_FAULT_REFUND', targetRef: before.view.targetRef, amount: basis.refundableAmount, reasonCode: 'FLAGGED_REFUND', reasonText: parsed.data.reason }, { ...actorOf(me), role: 'cs_agent', sessionId: 'case-action' });
     }
     await this.cases.resolveAsSystem(caseId, `cancellation-decision:${parsed.data.decision}:${parsed.data.reason}`, Date.now(), me.accountId);
     const after = await this.cases.get(actorOf(me), caseId);

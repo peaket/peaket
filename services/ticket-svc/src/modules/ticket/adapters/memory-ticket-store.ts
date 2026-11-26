@@ -170,13 +170,13 @@ export class MemoryTicketStore implements TicketStore {
    */
   async voidAfterEntry(input: NormalizedVoidOrderTicketsInput): Promise<BlockTicketIssuanceResult> {
     const tickets = [...this.tickets.values()]
-      .filter((t) => t.orderId === input.orderId && (input.eventId === undefined || t.eventId === input.eventId) && (input.issueGeneration === 0 || t.issueGeneration === input.issueGeneration))
+      .filter((t) => t.orderId === input.orderId && (input.eventId === undefined || t.eventId === input.eventId) && (input.issueGeneration === 0 || t.issueGeneration <= input.issueGeneration))
       .sort((a, b) => a.ticketId.localeCompare(b.ticketId));
     const alreadyEntered = tickets.filter((t) => this.entries.has(t.ticketId)).length;
     if (alreadyEntered === 0) return { voided: 0, alreadyEntered: 0 };
     let voided = 0;
     for (const t of tickets) {
-      if (t.status === 'VOIDED') continue;
+      if (t.status === 'VOIDED' || t.status === 'REFUNDED') continue;
       this.#put({ ...t, status: 'VOIDED', keyRevokedAtMs: input.nowMs, version: t.version + 1 });
       voided += 1;
     }

@@ -17,6 +17,7 @@ export interface ApprovalRefundResult {
 }
 export interface ApprovalRefundInput {
   kind: ApprovalRefundKind;
+  /** 주문 ID. FLAGGED REFUND는 승인 대상인 취소 ID를 그대로 받고 여기서 주문 ID로 푼다 */
   orderId: string;
   /** 같은 승인에 묶인 다른 주문(재량 면제의 relatedOrderIds). 없으면 orderId 하나다 */
   orderIds?: readonly string[];
@@ -64,8 +65,13 @@ export class ApprovalRefunds {
 
   async execute(approvalId: string, input: ApprovalRefundInput): Promise<ApprovalRefundResult> {
     return guard(async () => {
-      const orderIds = [...new Set([input.orderId, ...(input.orderIds ?? [])])].filter((id) => id.length > 0);
       if (!isUuid(approvalId)) throw new ApprovalRefundProblem('invalid-query', 400, '승인 ID가 맞지 않습니다');
+      // FLAGGED REFUND는 승인 대상이 주문 ID가 아니라 취소 ID다. 취소 ID를 주문 ID로 풀고,
+      // 그 취소 하나만 환급 대상으로 고정한다(같은 주문에 활성 취소가 둘 이상일 수 있다, IR-11).
+      const requestedCancellation = await this.d.orders.findCancellation(input.orderId);
+      const cancellationRef = requestedCancellation ? input.orderId : undefined;
+      const primaryOrderId = requestedCancellation?.orderId ?? input.orderId;
+      const orderIds = [...new Set([primaryOrderId, ...(input.orderIds ?? [])])].filter((id) => id.length > 0);
 
       const existing = await this.#approvalRows(approvalId);
       if (existing.length > 0) {
@@ -90,10 +96,11 @@ export class ApprovalRefunds {
       const tickets = new Set(orders.map((o) => o.ticketId).filter((t) => t.length > 0));
       const activePrior = prior.filter((c) => c.state !== 'VOIDED' && tickets.has(c.ticketId));
       if (activePrior.length > 0) {
-        const resumed = await this.#resumeExisting(approvalId, input, activePrior);
+        const resumed = await this.#resumeExisting(approvalId, input, activePrior, cancellationRef);
         if (resumed) return resumed;
         throw new ApprovalRefundProblem('approval-refund-conflict', 409, '이미 취소·환급 기록이 있는 티켓입니다');
       }
+      if (cancellationRef !== undefined) throw new ApprovalRefundProblem('approval-refund-conflict', 409, '지정한 취소를 환급할 수 없습니다');
       if (prior.some((c) => tickets.has(c.ticketId) && c.state !== 'VOIDED')) throw new ApprovalRefundProblem('approval-refund-conflict', 409, '이미 취소·환급 기록이 있는 티켓입니다');
 
       const refundable = orders.reduce((sum, o) => sum + moneyOf(o), 0);
@@ -184,22 +191,24 @@ export class ApprovalRefunds {
   }
 
   /** FLAGGED REFUND(IR-11): 이미 있는 REQUESTED 취소 행을 그대로 환급으로 끝낸다. 합계·종류가 다르면 undefined(409) */
-  async #resumeExisting(approvalId: string, input: ApprovalRefundInput, active: readonly CancellationRecord[]): Promise<ApprovalRefundResult | undefined> {
+  async #resumeExisting(approvalId: string, input: ApprovalRefundInput, active: readonly CancellationRecord[], cancellationRef?: string): Promise<ApprovalRefundResult | undefined> {
     if (input.kind !== 'SYSTEM_FAULT_REFUND') return undefined;
-    if (!active.every((c) => c.state === 'REQUESTED')) return undefined;
-    const total = active.reduce((sum, c) => sum + c.refundAmount, 0);
+    const selected = cancellationRef === undefined ? active : active.filter((c) => c.cancellationId === cancellationRef);
+    if (cancellationRef !== undefined && selected.length !== 1) return undefined;
+    if (!selected.every((c) => c.state === 'REQUESTED')) return undefined;
+    const total = selected.reduce((sum, c) => sum + c.refundAmount, 0);
     if (total !== input.amount) return undefined;
     const nowMs = this.d.clock.now();
     let status: ApprovalRefundStatus = 'REFUNDED';
     this.#kinds.set(approvalId, input.kind);
-    for (const c of active) {
+    for (const c of selected) {
       const outcome = await this.d.payments.cancel({ cancellationId: c.cancellationId, orderId: c.orderId, amount: c.refundAmount, reason: 'EXCEPTION', deadlineMs: nowMs + DEADLINE_MS });
       const next: CancellationStatus = outcome === 'CANCELLED' ? 'REFUNDED' : 'REFUND_PENDING';
       await this.d.writes.updateStatus({ cancellationId: c.cancellationId, status: next, nowMs });
       await this.d.writes.markApproval?.({ cancellationId: c.cancellationId, approvalId });
       if (next !== 'REFUNDED') status = 'REFUND_PENDING';
     }
-    return { status, cancellationId: active[0]!.cancellationId, refundAmount: total };
+    return { status, cancellationId: selected[0]!.cancellationId, refundAmount: total };
   }
 
   /** 주문마다 첫 티켓은 그 주문의 취소 ID, 나머지 티켓은 실제 UUID를 쓴다(IR-21) */

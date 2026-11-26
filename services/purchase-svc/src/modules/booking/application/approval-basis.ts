@@ -62,8 +62,9 @@ export class ApprovalBasisOrders {
       eventStartsAt: eventStarts === undefined ? null : new Date(eventStarts).toISOString(),
       entryOpensAt: entryOpens === undefined ? null : new Date(entryOpens).toISOString(),
       entryRecorded: rows.some((r) => r.entryRecorded === true),
-      // FLAGGED 취소는 그 취소 행의 환급액이 곧 남은 환급액이다(진행 중 취소가 티켓 금액을 이미 덮는다)
-      refundableAmount: Math.max(refundable, cancellation?.refundAmount ?? 0),
+      // FLAGGED 취소는 그 취소 행의 환급액만 답한다. byOrder는 그 취소 티켓의 남은 금액을 이미 0으로 깎고,
+      // 다른 티켓의 남은 금액을 더하면 #resumeExisting의 취소 행 합계와 어긋난다(IR-11).
+      refundableAmount: cancellation ? cancellation.refundAmount : refundable,
       issueGeneration: first.issueGeneration ?? 0,
     };
   }

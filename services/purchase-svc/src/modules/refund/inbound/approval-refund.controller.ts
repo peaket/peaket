@@ -10,6 +10,7 @@ import { ApprovalCancellationVoid } from '../application/approval-cancellation-v
 const InputBody = z
   .object({
     kind: z.enum(['SYSTEM_FAULT_REFUND', 'DISCRETIONARY_WAIVER', 'MINOR_CONTRACT_CANCEL']),
+    /** 주문 ID. FLAGGED REFUND는 취소 ID를 그대로 받는다(IR-11) */
     orderId: z.string().min(1).max(64),
     /** 같은 승인에 묶인 다른 주문(재량 면제의 relatedOrderIds). 없으면 orderId 하나다 */
     orderIds: z.array(z.string().min(1).max(64)).max(50).optional(),

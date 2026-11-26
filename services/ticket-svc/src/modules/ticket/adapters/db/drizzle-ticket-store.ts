@@ -1,7 +1,7 @@
 // 운영 티켓 저장소(BUILD_ORDER HOT-160). 발권은 (order_id, issue_generation) PK의 INSERT 경합으로 한 번만 만들고,
 // 취소는 티켓 행 FOR UPDATE 안에서 조건을 보고 (cancellation_id, ticket_id) 취소표를 남긴다.
 import type { Database, DbTransaction } from '@peaket/platform';
-import { and, asc, desc, eq, gt, inArray, lt, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, lt, lte, or, sql } from 'drizzle-orm';
 import type { IssueStoreInput, TicketStore } from '../../domain/ports.js';
 import {
   type BlockTicketIssuanceResult,
@@ -232,21 +232,23 @@ export class DrizzleTicketStore implements TicketStore {
     return this.o.database.transaction(async (tx) => {
       const conditions = [eq(ticket.orderId, input.orderId)];
       if (input.eventId) conditions.push(eq(ticket.eventId, input.eventId));
-      if (input.issueGeneration > 0) conditions.push(eq(ticket.issueGeneration, input.issueGeneration));
+      // proto의 '그 세대 이하'를 따른다(IR-30). 세대 0은 모든 세대다.
+      if (input.issueGeneration > 0) conditions.push(lte(ticket.issueGeneration, input.issueGeneration));
       const rows = await tx.select().from(ticket).where(and(...conditions)).orderBy(asc(ticket.id)).for('update');
       const entered = await tx.execute(sql`
         select count(distinct s.ticket_id)::int as n
         from ticket t
         join scan_event s on s.ticket_id = t.id and s.event_id = t.event_id
         where t.order_id = ${input.orderId}::uuid
-          and (${input.issueGeneration} = 0 or t.issue_generation = ${input.issueGeneration})
+          and (${input.issueGeneration} = 0 or t.issue_generation <= ${input.issueGeneration})
           ${input.eventId ? sql`and t.event_id = ${input.eventId}::uuid` : sql``}
           and s.direction = 'IN' and s.result = 'PASS'`);
       const alreadyEntered = Number((entered.rows[0] as { n: number | string } | undefined)?.n ?? 0);
       if (alreadyEntered === 0) return { voided: 0, alreadyEntered: 0 };
       let voided = 0;
       for (const row of rows) {
-        if (statusOf(row.status) === 'VOIDED') continue;
+        // 이미 끝난 티켓은 덮지 않는다(REFUNDED도 포함, IR-30)
+        if (statusOf(row.status) === 'VOIDED' || statusOf(row.status) === 'REFUNDED') continue;
         const revokedKeyId = await this.o.deviceKeys?.revokeActiveInTx(tx, row.id, input.nowMs);
         await tx
           .update(ticket)

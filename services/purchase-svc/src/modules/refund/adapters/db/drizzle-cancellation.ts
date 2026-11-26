@@ -237,7 +237,7 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
         q.status === 'REFUNDED'
           ? eq(orderCancellation.status, 'REFUND_PENDING')
           : q.status === 'VOIDED'
-            ? undefined
+            ? and(ne(orderCancellation.status, 'REFUNDED'), ne(orderCancellation.status, 'VOIDED'))
             : and(ne(orderCancellation.status, 'REFUNDED'), ne(orderCancellation.status, 'VOIDED'));
       const updated = await tx
         .update(orderCancellation)
