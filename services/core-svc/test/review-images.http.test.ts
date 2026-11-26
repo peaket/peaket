@@ -140,6 +140,18 @@ async function imageRowsOf(reviewId: string): Promise<readonly { status: string 
   if (!s.imagesByReviews) return [];
   return (await s.imagesByReviews([reviewId])).get(reviewId) ?? [];
 }
+/** 그 계정의 사진 행 전부(상태 포함). 거절한 업로드가 행을 남기지 않는지 본다 */
+async function imageRowsByAccount(accountId: string): Promise<readonly { status: string; reviewId?: string | null }[]> {
+  const s = store as unknown as { imageRowsByAccount?: (id: string) => Promise<readonly { status: string; reviewId?: string | null }[]> };
+  expect(s.imageRowsByAccount).toBeTypeOf('function');
+  return s.imageRowsByAccount ? s.imageRowsByAccount(accountId) : [];
+}
+/** 정리 때가 된 행(붙이지 않은 24시간 지난 READY, DELETED). 정리 작업이 행을 지웠는지 본다 */
+async function dueImageRows(nowMs: number): Promise<readonly { status: string; imageId?: string }[]> {
+  const s = store as unknown as { imageRowsDueForCleanup?: (ms: number, limit: number) => Promise<readonly { status: string; imageId?: string }[]> };
+  expect(s.imageRowsDueForCleanup).toBeTypeOf('function');
+  return s.imageRowsDueForCleanup ? s.imageRowsDueForCleanup(nowMs, 1000) : [];
+}
 
 describe('후기 사진 올리기', () => {
   test('IMG-01 [ASVS v5.0.0-2.2.3] X-Requested-With가 없으면 400이고, JPEG·PNG·WebP만 앞부분·형식·확장자가 모두 같을 때 받는다', async () => {
@@ -201,6 +213,7 @@ describe('후기 사진 올리기', () => {
     expect(objects.published.size).toBe(before);
     expect(objects.quarantine.size).toBe(0);
     expect(objects.staging.size).toBe(0);
+    expect(await imageRowsByAccount(me)).toEqual([]);
   });
 
   test('IMG-04 [ASVS v5.0.0-2.2.3] 돌아온 폭·높이를 다시 본다: 짧은 변 319는 422, 320은 받고, 긴 변 20,000·화소 4,000만은 받으며 20,001·4,000만+1은 422다', async () => {
@@ -417,6 +430,9 @@ describe('후기 사진 보이기·지우기', () => {
     expect(publishedKeys(unattached.imageId)).toHaveLength(2);
 
     clock.advance(24 * 60 * 60 * 1000 + 1);
+    const dueBefore = await dueImageRows(clock.now());
+    expect(dueBefore.map((r) => r.imageId)).toContain(unattached.imageId);
+    expect(dueBefore.map((r) => r.imageId)).not.toContain(attached.imageId);
     const tasks = reviewMaintenanceTasks(store, clock, { images: { objects } } as never);
     const cleanup = tasks.find((t) => t.name === 'review-image-cleanup');
     expect(cleanup).toBeDefined();
@@ -424,10 +440,23 @@ describe('후기 사진 보이기·지우기', () => {
     expect(publishedKeys(unattached.imageId)).toEqual([]);
     expect(publishedKeys(attached.imageId)).toHaveLength(2);
     expect((await imageRowsOf(reviewId)).every((r) => r.status === 'READY')).toBe(true);
+    // 붙이지 않은 사진의 행은 지워지고, 붙인 사진 행만 남는다
+    const rowsAfter = await imageRowsByAccount(me);
+    expect(rowsAfter).toHaveLength(1);
+    expect(rowsAfter[0]!).toMatchObject({ status: 'READY', reviewId });
 
     await cleanup!.run();
     expect(publishedKeys(unattached.imageId)).toEqual([]);
     expect(publishedKeys(attached.imageId)).toHaveLength(2);
+
+    // 후기를 지우면 DELETED 행이 정리 대상이 되고, 정리가 행과 공개 파생본을 지운다
+    expect((await svc.http.inject({ method: 'DELETE', url: `/v1/reviews/${reviewId}`, headers: fan(me) })).statusCode).toBe(204);
+    const dueDeleted = await dueImageRows(clock.now());
+    expect(dueDeleted.map((r) => r.imageId)).toContain(attached.imageId);
+    await cleanup!.run();
+    expect(publishedKeys(attached.imageId)).toEqual([]);
+    expect(await imageRowsOf(reviewId)).toEqual([]);
+    expect(await imageRowsByAccount(me)).toEqual([]);
   });
 });
 
@@ -439,13 +468,14 @@ describe('운영자 후기 상세', () => {
     eligibility.set(me, eventId, { eligible: true, basisOrderId: randomUUID() });
     const a = await uploadOk(me);
     const b = await uploadOk(me);
-    const created = JSON.parse((await postReview(eventId, me, { rating: 5, body: '운영자 상세에 사진이 보일 후기입니다.', images: [{ imageId: a.imageId, alt: '무대' }, { imageId: b.imageId }] })).payload);
+    const c = await uploadOk(me);
+    const created = JSON.parse((await postReview(eventId, me, { rating: 5, body: '운영자 상세에 사진이 보일 후기입니다.', images: [{ imageId: a.imageId, alt: '무대' }, { imageId: b.imageId }, { imageId: c.imageId }] })).payload);
     expect((await report(created.reviewId, reporter, 'SPAM', { detail: '광고입니다' })).statusCode).toBe(201);
 
     const r = await svc.http.inject({ method: 'GET', url: `/v1/ops/reviews/${created.reviewId}`, headers: identity.ops('cs_agent') });
     expect(r.statusCode).toBe(200);
     const body = JSON.parse(r.payload);
-    expect(body.review.images).toHaveLength(2);
+    expect(body.review.images).toHaveLength(3);
     expect(body.review.images[0]).toMatchObject({ imageId: a.imageId, alt: '무대', thumbnailUrl: a.thumbnailUrl, url: `${IMAGE_ORIGIN_TEST}/review/${a.imageId}/1280.webp`, width: 800, height: 600 });
     expect(body.review).toMatchObject({ body: '운영자 상세에 사진이 보일 후기입니다.', rating: 5, status: 'VISIBLE' });
     expect(body.review.notice).toBeUndefined();

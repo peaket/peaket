@@ -57,18 +57,40 @@ describe('F-07-10 마이그레이션 번호와 표', () => {
 
     const sql = lower(sqlOf('0052_review_image.sql'));
     const grants = [...sql.matchAll(/grant\s+([^;]+?)\s+on\s+"review_image"\s+to\s+([^;]+);/g)].map((m) => ({ privileges: m[1]!.trim(), roles: m[2]!.split(',').map((r) => r.trim().replace(/"/g, '')) }));
-    const app = grants.filter((g) => g.roles.includes('core_app'));
-    const maintenance = grants.filter((g) => g.roles.includes('core_maintenance'));
-    expect(app.length).toBeGreaterThanOrEqual(3);
-    const appText = app.map((g) => g.privileges).join(' ');
-    expect(appText).toMatch(/\bselect\b/);
-    expect(appText).toMatch(/\binsert\b/);
-    expect(appText).toMatch(/\bupdate\s*\(\s*"review_id"\s*,\s*"alt_text"\s*,\s*"sort"\s*,\s*"attached_at"\s*,\s*"status"\s*,\s*"deleted_at"\s*\)/);
-    expect(appText).not.toMatch(/\bdelete\b|\btruncate\b|\ball\b/);
-    const maintenanceText = maintenance.map((g) => g.privileges).join(' ');
-    expect(maintenanceText).toMatch(/\bselect\b/);
-    expect(maintenanceText).toMatch(/\bdelete\b/);
-    expect(grants.every((g) => g.roles.every((r) => r === 'core_app' || r === 'core_maintenance'))).toBe(true);
+    const splitTop = (s: string): string[] => {
+      const out: string[] = [];
+      let depth = 0;
+      let cur = '';
+      for (const ch of s) {
+        if (ch === '(') depth++;
+        if (ch === ')') depth--;
+        if (ch === ',' && depth === 0) {
+          if (cur.trim()) out.push(cur.trim());
+          cur = '';
+        } else cur += ch;
+      }
+      if (cur.trim()) out.push(cur.trim());
+      return out;
+    };
+    const parsed = grants.map((g) => ({
+      roles: g.roles,
+      items: splitTop(g.privileges).map((p) => {
+        const update = /^update\s*\((.*)\)$/.exec(p);
+        return update ? { kind: 'update', columns: splitTop(update[1]!).map((c) => c.replace(/"/g, '').trim()) } : { kind: p.toLowerCase(), columns: [] as string[] };
+      }),
+    }));
+    const app = parsed.filter((g) => g.roles.includes('core_app'));
+    const maintenance = parsed.filter((g) => g.roles.includes('core_maintenance'));
+    const appItems = app.flatMap((g) => g.items);
+    const appKinds = new Set(appItems.map((i) => i.kind));
+    expect([...appKinds].sort()).toEqual(['insert', 'select', 'update']);
+    const appUpdateColumns = new Set(appItems.filter((i) => i.kind === 'update').flatMap((i) => i.columns));
+    expect([...appUpdateColumns].sort()).toEqual(['alt_text', 'attached_at', 'deleted_at', 'review_id', 'sort', 'status']);
+    expect(appItems.some((i) => i.kind === 'delete' || i.kind === 'truncate' || i.kind === 'all')).toBe(false);
+    const maintenanceItems = maintenance.flatMap((g) => g.items);
+    expect([...new Set(maintenanceItems.map((i) => i.kind))].sort()).toEqual(['delete', 'select']);
+    expect(maintenanceItems.every((i) => i.kind === 'select' || i.kind === 'delete')).toBe(true);
+    expect(parsed.every((g) => g.roles.every((r) => r === 'core_app' || r === 'core_maintenance'))).toBe(true);
 
     // 정본 권한 표(data.md §2)에 review_image의 역할·칸 목록이 먼저 있다
     const data = readFileSync(`${root}docs/data.md`, 'utf8');

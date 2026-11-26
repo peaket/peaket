@@ -88,6 +88,9 @@ describe('운영자 후기 조치의 409', () => {
     const cs = identity.ops('cs_agent');
     const moderate = (reviewId: string, body: Record<string, unknown>) => svc.http.inject({ method: 'POST', url: `/v1/ops/reviews/${reviewId}/moderation`, headers: { ...cs, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 
+    // ⓪ 없는 후기는 404다
+    expect((await moderate(randomUUID(), { action: 'NO_ACTION', reason: '없는 후기' })).statusCode).toBe(404);
+
     // ① 신고가 없어도 임시조치는 받는다(정보통신망법 §44의3, POL-044 ③). 조치 없음·노출 차단은 신고가 있어야 한다.
     const a = seed();
     const authorA = randomUUID();
@@ -119,6 +122,7 @@ describe('운영자 후기 조치의 409', () => {
     eligibility.set(authorC, c.eventId, { eligible: true, basisOrderId: randomUUID() });
     const rc = JSON.parse((await postReview(c.eventId, authorC, '통보로 가린 뒤 해제할 후기 본문입니다.')).payload);
     expect((await reviews.applyNoticeTakedown({ reviewIds: [rc.reviewId], noticeId: randomUUID(), receivedAtMs: clock.now(), kind: 'GENERAL', reason: '법정 통보' })).applied).toBe(1);
+    expect(JSON.parse((await opsDetail(rc.reviewId)).payload).review.takedownReason).toBe('NOTICE');
     expect((await moderate(rc.reviewId, { action: 'RELEASE', reason: '통보 철회' })).statusCode).toBe(200);
 
     // ④ 통보가 풀린 뒤 SAME_CONTENT만 남은 가림의 해제는 법정 통보 경로로 넘긴다
@@ -132,6 +136,7 @@ describe('운영자 후기 조치의 409', () => {
     expect((await reviews.applyNoticeTakedown({ reviewIds: [rd.reviewId], noticeId: randomUUID(), receivedAtMs: clock.now(), kind: 'GENERAL', reason: '법정 통보' })).applied).toBe(1);
     const re = JSON.parse((await postReview(d.eventId, authorE, body)).payload);
     expect(re.status).toBe('HIDDEN');
+    expect(JSON.parse((await opsDetail(re.reviewId)).payload).review.takedownReason).toBe('SAME_CONTENT');
     expect((await moderate(rd.reviewId, { action: 'RELEASE', reason: '통보 철회' })).statusCode).toBe(200);
     const sameOnly = await moderate(re.reviewId, { action: 'RELEASE', reason: '같은 내용만 남은 가림' });
     expect(sameOnly.statusCode).toBe(409);
@@ -144,6 +149,7 @@ describe('운영자 후기 조치의 409', () => {
     eligibility.set(authorF, f.eventId, { eligible: true, basisOrderId: randomUUID() });
     const rf = JSON.parse((await postReview(f.eventId, authorF, '불법 촬영물로 신고되어 가려질 후기입니다.')).payload);
     expect((await report(rf.reviewId, reporterF, 'ILLEGAL_FILMING')).statusCode).toBe(201);
+    expect(JSON.parse((await opsDetail(rf.reviewId)).payload).review.takedownReason).toBe('FILMING_HOLD');
     expect((await moderate(rf.reviewId, { action: 'RELEASE', reason: '확인 뒤 되돌림' })).statusCode).toBe(200);
   });
 });
@@ -172,7 +178,7 @@ describe('운영자 후기 조치의 효과와 경계', () => {
     expect(effect.outcome).toBe('TEMP_BLOCKED');
 
     const detail = JSON.parse((await opsDetail(reviewId)).payload);
-    expect(detail.review).toMatchObject({ status: 'HIDDEN', notice: 'RIGHTS_TEMP', noticeUntil: endsAt });
+    expect(detail.review).toMatchObject({ status: 'HIDDEN', notice: 'RIGHTS_TEMP', noticeUntil: endsAt, takedownReason: 'RIGHTS_TEMP' });
     const reports = await store.reportsByTarget(reviewId);
     expect(reports.every((r) => r.status === 'RESOLVED' && r.outcome === 'TEMP_BLOCKED')).toBe(true);
     expect((await store.takedownsByReview(reviewId)).filter((t) => t.reason === 'RIGHTS_TEMP')).toHaveLength(1);

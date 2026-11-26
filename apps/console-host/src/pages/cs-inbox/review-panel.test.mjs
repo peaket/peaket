@@ -88,6 +88,7 @@ test('OPS-06 [ASVS v5.0.0-2.3.2] 조치 입력은 사유·위반 유형·30일 �
   assert.equal(live.reviewModerationPlan({ action: 'BLOCK', reason: '차단' }, NOW).ok, false);
   assert.deepEqual(live.reviewModerationPlan({ action: 'BLOCK', reason: '차단', violation: 'SPAM' }, NOW), { ok: true, body: { action: 'BLOCK', reason: '차단', violation: 'SPAM' } });
   assert.deepEqual(live.reviewModerationPlan({ action: 'RELEASE', reason: '해제' }, NOW), { ok: true, body: { action: 'RELEASE', reason: '해제' } });
+  assert.deepEqual(live.reviewModerationPlan({ action: 'NO_ACTION', reason: '조치 없음' }, NOW), { ok: true, body: { action: 'NO_ACTION', reason: '조치 없음' } });
   assert.equal(live.reviewModerationPlan({ action: 'NO_ACTION', reason: '가' }, NOW).ok, true);
   assert.equal(live.reviewModerationPlan({ action: 'NO_ACTION', reason: '가'.repeat(2000) }, NOW).ok, true);
   assert.equal(live.reviewModerationPlan({ action: 'NO_ACTION', reason: '가'.repeat(2001) }, NOW).ok, false);
@@ -135,10 +136,15 @@ test('OPS-08 화면은 후기 ID가 있는 신고 건에서만 상세를 불러 
   has(source, /\breviewPanelFor\(/, 'reviewPanelFor를 쓰지 않는다');
   has(source, /reviewPanel\.actions|panel\.actions/, '패널의 조치 목록을 그리지 않는다');
   has(source, /reviewPanel\.images|panel\.images/, '패널의 사진을 그리지 않는다');
+  has(source, /reviewPanel\.reports|panel\.reports/, '패널의 신고 내용을 그리지 않는다');
+  has(source, /reviewPanel\.reports\.map|panel\.reports\.map|reports\.map\(/, '신고 내용을 목록으로 그리지 않는다');
   has(source, /<img[\s\S]*alt=/, '사진 img·alt가 없다');
   has(source, /409[\s\S]{0,120}422|422[\s\S]{0,120}409|e\.status === 409|e\.status === 422/, '409·422 까닭 표시가 없다');
-  has(source, /await loadDetail\(|void loadDetail\(/, '조치 뒤 상세를 다시 읽지 않는다');
-  has(source, /await loadList\(|void loadList\(/, '조치 뒤 목록을 다시 읽지 않는다');
+  const callAt = source.indexOf('createOpsReviewModeration');
+  assert.ok(callAt >= 0, 'createOpsReviewModeration 호출이 없다');
+  const moderationBlock = source.slice(Math.max(0, callAt - 500), callAt + 1500);
+  has(moderationBlock, /loadDetail\(/, '조치 블록 안에서 상세를 다시 읽지 않는다');
+  has(moderationBlock, /loadList\(/, '조치 블록 안에서 목록을 다시 읽지 않는다');
   assert.equal(count(source, /dangerouslySetInnerHTML|innerHTML/g), 0);
   assert.doesNotMatch(source, /\bfetch\s*\(/);
 
