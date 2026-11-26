@@ -89,7 +89,7 @@ const DECIMALS = {
   '--fault-delay-pct': ['faultDelayPct', 0, 100],
 };
 
-const STRINGS = { '--paired-run': 'pairedRun', '--run-id': 'runId', '--profile': 'profile', '--mode': 'mode', '--out': 'out', '--rates': 'rates', '--namespace': 'namespace', '--prom-url': 'promUrl' };
+const STRINGS = { '--paired-run': 'pairedRun', '--run-id': 'runId', '--profile': 'profile', '--mode': 'mode', '--out': 'out', '--rates': 'rates', '--namespace': 'namespace', '--prom-url': 'promUrl', '--ordering-cell': 'orderingCell' };
 
 const COMMON_RUN = ['--warm', '--main', '--cpus', '--memory-mi', '--record', '--run-id', '--profile', '--invariants', '--out', '--generators', '--namespace', '--settle', '--hpa-timeline', '--prom-url'];
 const COMMON_V0 = ['--users', ...COMMON_RUN];
@@ -112,6 +112,8 @@ for (const k of ['queue', 'seat-hold', 'payment']) ALLOWED[`v1:${k}`].push('--ta
 ALLOWED['v1:seat-hold'].push('--paired-run');
 // v1 DB·Redis·통계(계획 F-08-8 7.1, docs/verification.md §4.1 'DB 쓰기 처리량'·'Redis 메모리'): 셋 모두 --db-stats·--redis-stats를 받는다. v0에는 --redis-stats가 없다
 ALLOWED['v1:queue'].push('--db-stats');
+// F-08-4(MSR-040): K1 모양의 부하 실행을 정렬 셀 설정으로 잰다. 회차 일정 사본의 lobbyShuffle·openBatch를 실행 전에 바꾼다
+ALLOWED['v1:queue'].push('--ordering-cell');
 for (const k of ['queue', 'seat-hold', 'payment']) ALLOWED[`v1:${k}`].push('--redis-stats');
 
 const REQUIRED = {
@@ -159,6 +161,74 @@ function parseRates(raw) {
   const rates = parts.map((p) => decimal('--rates', p, 1, 100000));
   for (let i = 1; i < rates.length; i++) if (rates[i] <= rates[i - 1]) fail('--rates는 엄격히 오름차순이어야 한다');
   return rates;
+}
+
+/** v1 ordering(F-08-4 MSR-040)의 셀과 인자. V1_SCENARIOS에 넣지 않고 여기서 직접 검사한다 */
+export function parseOrderingCellArgs(argv) {
+  const cells = ['hybrid', 'fifo', 'prequeue', 'none'];
+  const valueFlags = new Set(['--cell', '--users', '--batch-users', '--batch-rate', '--lobby-rate', '--entry-rate', '--token-rate', '--warm', '--cpus', '--memory-mi', '--generators', '--run-id', '--profile', '--out']);
+  const flags = new Set(['--baseline', '--record']);
+  const seen = new Map();
+  for (let i = 0; i < argv.length; i++) {
+    const flag = argv[i];
+    if (!valueFlags.has(flag) && !flags.has(flag)) fail(`v1 ordering에 없는 인자다: ${flag}`);
+    if (seen.has(flag)) fail(`${flag}를 두 번 줬다`);
+    if (flags.has(flag)) {
+      seen.set(flag, true);
+      continue;
+    }
+    const v = argv[i + 1];
+    if (v === undefined || v.startsWith('--')) fail(`${flag}에 값이 없다`);
+    seen.set(flag, v);
+    i++;
+  }
+  const intOf = (flag, lo, hi, def) => {
+    if (!seen.has(flag)) return def;
+    return decimal(flag, seen.get(flag), lo, hi);
+  };
+  if (!seen.has('--cell')) fail('--cell이 필요하다(hybrid·fifo·prequeue·none)');
+  const cell = seen.get('--cell');
+  if (!cells.includes(cell)) fail(`--cell은 ${cells.join('·')} 가운데 하나다: ${cell}`);
+  const baseline = seen.has('--baseline');
+  if (cell === 'none' && !baseline) fail('기준선(none)은 운영 구성이 아니다. --baseline을 함께 준다');
+  if (cell !== 'none' && baseline) fail('--baseline은 --cell none과 함께만 준다');
+  const users = intOf('--users', 1, 131072, undefined);
+  if (users === undefined) fail('--users가 필요하다');
+  const batchUsers = intOf('--batch-users', 1, 131072, 10000);
+  if (batchUsers > users) fail(`--batch-users(${batchUsers})는 --users(${users}) 이하다`);
+  const out = seen.get('--out');
+  if (out === undefined || out.length === 0) fail('--out이 필요하다');
+  const record = seen.has('--record');
+  if (record && !seen.has('--run-id')) fail('--record에는 --run-id가 꼭 있어야 한다');
+  if (!record && (seen.has('--run-id') || seen.has('--profile'))) fail('--run-id·--profile은 --record와 함께만 준다');
+  const runId = seen.get('--run-id');
+  if (runId !== undefined && !RUN_ID.test(runId)) fail(`--run-id 꼴이 틀렸다(YYYY-MM-DD-영소문자·숫자·-): ${runId}`);
+  const profile = seen.get('--profile');
+  if (profile !== undefined && !PROFILE.test(profile)) fail(`--profile 꼴이 틀렸다(local-…): ${profile}`);
+  return {
+    command: 'v1',
+    scenario: 'ordering',
+    cell,
+    baseline,
+    users,
+    batchUsers,
+    batchRate: intOf('--batch-rate', 1, 100000, 5000),
+    lobbyRate: intOf('--lobby-rate', 1, 100000, 200),
+    entryRate: intOf('--entry-rate', 1, 100000, 2000),
+    tokenRate: intOf('--token-rate', 1, 100000, 2000),
+    warmS: intOf('--warm', 0, 3600, 10),
+    cpus: intOf('--cpus', 1, 16, DEFAULTS.cpus),
+    memoryMi: intOf('--memory-mi', 256, 32768, DEFAULTS.memoryMi),
+    ...(seen.has('--generators') ? { generators: intOf('--generators', 1, 64, 1) } : {}),
+    record,
+    invariants: false,
+    namespace: 'v1',
+    settle: false,
+    hpaTimeline: false,
+    ...(runId !== undefined ? { runId } : {}),
+    ...(record ? { profile: profile ?? (users <= 1000 ? 'local-1k' : users <= 10000 ? 'local-10k' : 'local-100k') } : {}),
+    out,
+  };
 }
 
 /**
@@ -230,6 +300,9 @@ export function parseArgs(argv) {
   } else if (command === 'v1') {
     const scenario = rest0[0];
     if (scenario === 'entry-steps') return parseEntryStepsArgs(rest0.slice(1));
+    // F-08-4(MSR-040) 정렬 설정 비교: V1_SCENARIOS(사용자가 고르는 K1·K2·K7 시나리오)에 넣지 않는다.
+    //   node loadtest/run.mjs v1 ordering --cell hybrid --users 100000 --out <폴더> [--baseline]
+    if (scenario === 'ordering') return parseOrderingCellArgs(rest0.slice(1));
     if (!Object.hasOwn(V1_SCENARIOS, scenario ?? '')) fail(`v1 시나리오는 ${Object.keys(V1_SCENARIOS).join('·')} 가운데 하나다: ${scenario ?? '(없음)'}`);
     kind = `v1:${scenario}`;
     rest = rest0.slice(1);
@@ -270,6 +343,9 @@ export function parseArgs(argv) {
     const m = PROM_URL.exec(o.promUrl);
     const port = m ? Number(m[2]) : 0;
     if (!m || port < 1 || port > 65535) fail(`--prom-url은 http://127.0.0.1:<포트>나 http://localhost:<포트>다: ${o.promUrl}`);
+  }
+  if (o.orderingCell !== undefined && !['hybrid', 'fifo', 'prequeue', 'none'].includes(o.orderingCell)) {
+    fail(`--ordering-cell은 hybrid·fifo·prequeue·none 가운데 하나다: ${o.orderingCell}`);
   }
 
   if (kind === 'calibrate') {
@@ -346,7 +422,7 @@ export function parseArgs(argv) {
     // v1 통계 칸은 v1에만 둔다(v0 돌려주는 꼴은 그대로)
     ...(v1 ? { redisStats: o.redisStats ?? false } : {}),
   };
-  if (kind === 'queue') return { ...base, entryRate: o.entryRate, admitPerSecond: o.admitPerSecond, ...(v1 ? { dbStats: o.dbStats ?? false } : {}) };
+  if (kind === 'queue') return { ...base, entryRate: o.entryRate, admitPerSecond: o.admitPerSecond, ...(v1 ? { dbStats: o.dbStats ?? false } : {}), ...(o.orderingCell !== undefined ? { orderingCell: o.orderingCell } : {}) };
   if (kind === 'seat-deltas') {
     if (o.users + o.connections > 131072) fail(`가상 사용자(${o.users}) + 연결(${o.connections})이 131,072명을 넘는다`);
     const listenerPods = o.listenerPods ?? Math.ceil(o.connections / DEFAULTS.connectionsPerPod);

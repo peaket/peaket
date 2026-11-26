@@ -40,6 +40,7 @@ import { pollStages } from './lib/model.mjs';
 import { seatCount } from './lib/seats.mjs';
 import { accountRef, pidOf, sidOf } from './lib/users.mjs';
 import { DEFAULTS, SCENARIOS, UsageError, V1_ENTRY_SCENARIO, V1_SCENARIOS, parseArgs } from './runner/args.mjs';
+import { spearman } from './runner/ordering.mjs';
 import { GENERATOR_RATE as ENTRY_GENERATOR_RATE, hostTags, runEntrySteps } from './runner/entry-scale.mjs';
 import { hostBetween, hostSnapshot } from './runner/host-metrics.mjs';
 import { CHECK_PHASES, checksFromSummary, executionSegments, generatorCount, mergeSummaries, withoutHistogramChecks } from './runner/merge.mjs';
@@ -1382,6 +1383,12 @@ async function runV1(a, runTag) {
     seeded = true;
     const opened = await bundleSeed(['open', JSON.stringify(seedReq)]);
     log(`좌석 판매 열기 ${opened.created ? '새로' : '이미'}(세대 ${opened.seatEpoch})`);
+    // F-08-4(MSR-040) 정렬 셀: 회차 일정 사본의 두 값을 실행 전에 바꾼다(seed-cli는 K1 모양으로 연다).
+    // queue-svc·admission-ctrl의 일정 캐시(1초)가 지나야 새 값으로 진입·입장한다
+    if (a.orderingCell !== undefined) {
+      await setEventOrdering(eventId, a.orderingCell);
+      await sleep(1600);
+    }
     const readyAt = opensAtMs + V1_BATCH_WINDOW_MS + V1_DISPERSAL_WAIT_MS;
     if (readyAt > Date.now()) await sleep(readyAt - Date.now());
 
@@ -2500,6 +2507,412 @@ async function runGwLimits(a, runTag) {
   return { outDir, exitCode: r.exitCode };
 }
 
+// ───────────── F-08-4(MSR-040) 정렬 설정 켬·끔 순번 표본(계획 F-08-4 §6) ─────────────
+
+/** 정렬 셀 정의(계획 §6.2). `none`은 운영 구성이 아니다 */
+const ORDERING_CELL_FLAGS = Object.freeze({
+  hybrid: { lobbyShuffle: true, openBatch: true, operating: true },
+  fifo: { lobbyShuffle: false, openBatch: true, operating: true },
+  prequeue: { lobbyShuffle: true, openBatch: false, operating: true },
+  none: { lobbyShuffle: false, openBatch: false, operating: false },
+});
+/** Q-T23의 동시 도착 구간 N(ADR-0041 기본 2초 [가정], 정본 queue-admission Q-T23) */
+const ORDERING_BATCH_WINDOW_MS = 2000;
+
+/**
+ * 회차 일정 사본(q:{event:E}:cfg)의 lobbyShuffle·openBatch를 바꾼다(seed-cli는 K1 모양으로 연다).
+ * queue-svc·admission-ctrl이 1초 캐시를 쓰므로 부르는 쪽이 1.6초 기다린다. `none`(둘 다 끔)은 제품이 거부한다
+ * (ADR-0118 결정 2, redis-event-schedules·redis-leader-store가 0/0을 null로 읽는다). 그 사실을 측정에 적는다.
+ */
+async function setEventOrdering(eventId, cell) {
+  const c = ORDERING_CELL_FLAGS[cell];
+  if (!c) throw new Error(`모르는 정렬 셀이다: ${cell}`);
+  if (cell === 'none') throw new Error('none(둘 다 끔)은 운영 구성이 아니고 제품이 거부한다(ADR-0118 결정 2). 측정하지 않는다');
+  const script = `import { createHotRedis } from '@peaket/platform'; import { readFileSync } from 'node:fs';
+const env = Object.fromEntries(readFileSync(process.env.PEAKET_BUNDLE_ENV_DIR + '/queue-svc.env', 'utf8').split('\\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+const redis = await createHotRedis({ url: env.PEAKET_QUEUE_REDIS_URL, startupTimeoutMs: 30000 });
+const key = ${JSON.stringify(`q:{event:${eventId}}:cfg`)};
+try {
+  await redis.command(['HSET', key, 'lobbyShuffle', '${c.lobbyShuffle ? 1 : 0}', 'openBatch', '${c.openBatch ? 1 : 0}'], { key });
+  const f = await redis.command(['HMGET', key, 'lobbyShuffle', 'openBatch', 'opensAtMs'], { key });
+  console.log('@@RESULT ' + JSON.stringify({ flags: f.map(String) }));
+} finally { await redis.close(); }`;
+  return inBundlePod(script, 60_000);
+}
+
+/** 정렬 표본에 필요한 Redis 표시(게시 시각·머클 루트·최대 번호)와 결과 파일 목록을 합본 파드에서 읽는다 */
+function orderingOutcomeScript(eventId) {
+  const event = JSON.stringify(eventId);
+  return `import { readFileSync, existsSync, readdirSync } from 'node:fs'; import { join } from 'node:path';
+import { createHotRedis } from '@peaket/platform';
+const read = (f) => Object.fromEntries(readFileSync(process.env.PEAKET_BUNDLE_ENV_DIR + '/' + f, 'utf8').split('\\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+const queue = read('queue-svc.env');
+const admission = read('admission-ctrl.env');
+const redis = await createHotRedis({ url: queue.PEAKET_QUEUE_REDIS_URL, startupTimeoutMs: 30000 });
+const eventId = ${event};
+const doneKey = 'q:{event:' + eventId + '}:batch_done';
+const seqKey = 'q:{event:' + eventId + '}:seq';
+let pub, root, seq;
+try {
+  const d = await redis.command(['HMGET', doneKey, 'pub:lobby', 'pub:1', 'root:lobby', 'root:1'], { key: doneKey });
+  pub = { lobby: d[0] === null ? null : Number(String(d[0])), batch: d[1] === null ? null : Number(String(d[1])) };
+  root = { lobby: d[2] === null ? null : String(d[2]), batch: d[3] === null ? null : String(d[3]) };
+  const s = await redis.command(['GET', seqKey], { key: seqKey });
+  seq = s === null ? null : Number(String(s));
+} finally { await redis.close(); }
+const dir = admission.PEAKET_BATCH_RESULT_DIR;
+const readGroup = (name) => {
+  const out = {};
+  const p = join(dir, eventId, name);
+  if (!existsSync(p)) return { entries: out, files: 0 };
+  let files = 0;
+  for (const f of readdirSync(p)) {
+    if (!f.endsWith('.json')) continue;
+    files += 1;
+    try {
+      const o = JSON.parse(readFileSync(join(p, f), 'utf8'));
+      for (const [h, v] of Object.entries(o)) out[h] = Number(v);
+    } catch {
+      // 반쯤 쓴 파일은 버린다(게시는 임시 파일을 바꿔 쓰므로 드물다)
+    }
+  }
+  return { entries: out, files };
+};
+const lobby = readGroup('shuffle-results');
+const batch = readGroup('batch-results');
+console.log('@@RESULT ' + JSON.stringify({ pub, root, seq, lobby, batch, resultDir: dir }));`;
+}
+
+/** 게시 표시(pub:lobby·pub:1)만 읽는다(기다리기용) */
+async function orderingPub(eventId) {
+  const key = JSON.stringify(`q:{event:${eventId}}:batch_done`);
+  const script = `import { createHotRedis } from '@peaket/platform'; import { readFileSync } from 'node:fs';
+const env = Object.fromEntries(readFileSync(process.env.PEAKET_BUNDLE_ENV_DIR + '/queue-svc.env', 'utf8').split('\\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+const redis = await createHotRedis({ url: env.PEAKET_QUEUE_REDIS_URL, startupTimeoutMs: 30000 });
+const key = ${key};
+try {
+  const d = await redis.command(['HMGET', key, 'pub:lobby', 'pub:1'], { key });
+  console.log('@@RESULT ' + JSON.stringify({ lobby: d[0] === null ? null : Number(String(d[0])), batch: d[1] === null ? null : Number(String(d[1])) }));
+} finally { await redis.close(); }`;
+  return inBundlePod(script, 60_000);
+}
+
+/**
+ * 사전 검증 토큰을 측정 전에 한 번 만든다(v1-entry-tokens.js). k6는 준비 시나리오와 본 시나리오의 VU 상태를 잇지 못하므로
+ * 토큰을 파일로 떼어 낸다(2026-11-24 리허설 고침). 만든 수가 필요한 수보다 적으면 시작하지 않는다.
+ */
+async function prepareOrderingTokens({ pod, hostDir, eventId, need, start, rate, runTag, outDir }) {
+  const env = { EVENT_ID: eventId, TOKENS_TOTAL: need, TOKENS_START: start, TOKENS_RATE: rate, RUN_TAG: runTag };
+  putNodeFile(hostDir, 'token.env', `${Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\n')}\n`);
+  const timeout = Math.max(300_000, Math.ceil(need / Math.max(1, rate)) * 4000 + 300_000);
+  await kc(
+    ['-n', NS, 'exec', pod, '--', 'sh', '-c', 'cd /work && set -a && . ./token.env && set +a && rm -f out/prep.ndjson out/prep-k6.log && k6 run --quiet --no-usage-report --log-format=raw --console-output=out/prep.ndjson loadtest/scenarios/v1-entry-tokens.js > out/prep-k6.log 2>&1'],
+    { timeout },
+  );
+  const count = Number(onNode(['sh', '-c', `grep -c '"token"' ${hostDir}/out/prep.ndjson 2>/dev/null || true`], { stdio: ['ignore', 'pipe', 'ignore'] }).trim() || '0');
+  if (!Number.isSafeInteger(count) || count < need) throw new Error(`사전 검증 토큰이 모자란다: ${count} < ${need}(token.env·out/prep-k6.log를 본다)`);
+  const prep = { need, made: count, rate, path: '/work/out/prep.ndjson' };
+  writeFileSync(join(outDir, 'prep.json'), JSON.stringify(prep, null, 2));
+  return prep;
+}
+
+const quantile = (values, q) => {
+  const xs = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (xs.length === 0) return null;
+  const i = Math.min(xs.length - 1, Math.max(0, Math.ceil(q * xs.length) - 1));
+  return xs[i];
+};
+
+/** 정렬 표본 한 회차의 산출물을 만든다. 콘솔 기록 + 게시 결과 파일 + 발생기 판정. */
+function orderingSample(a, records, outcome, dropped) {
+  const cell = ORDERING_CELL_FLAGS[a.cell];
+  const resolved = records.map((r) => {
+    if (Number.isSafeInteger(r.sequence)) return r;
+    const map = r.stage === 'lobby' ? outcome.lobby.entries : outcome.batch.entries;
+    const seq = r.tokenHash !== null && map[r.tokenHash] !== undefined ? map[r.tokenHash] : null;
+    return { ...r, sequence: seq };
+  });
+  const byPerson = new Map();
+  for (const r of resolved) {
+    if (r.result !== 201 && r.result !== 202) continue;
+    if (!Number.isSafeInteger(r.sequence)) continue;
+    if (!byPerson.has(r.i)) byPerson.set(r.i, r);
+  }
+  // 로비를 켠 셀의 10만 표본은 로비 참가(오픈 전 도착)만이다. 오픈 뒤 묶음 표본(다른 사람 번호)은 Q-T23 몫이라 섞지 않는다
+  const sample = [...byPerson.values()].filter((r) => (cell.lobbyShuffle ? r.stage === 'lobby' : r.stage !== 'lobby'));
+  const arrivals = sample.map((r) => r.arrivalMs);
+  const sequences = sample.map((r) => r.sequence);
+  const batchRecords = resolved.filter((r) => r.stage === 'batch' && Number.isFinite(r.sequence) && r.arrivalMs >= 0 && r.arrivalMs <= ORDERING_BATCH_WINDOW_MS);
+  const rho = spearman(arrivals, sequences);
+  const batchRho = spearman(batchRecords.map((r) => r.arrivalMs), batchRecords.map((r) => r.sequence));
+  const p90ArrivalMs = quantile(batchRecords.map((r) => r.arrivalMs), 0.9);
+  const closedAt = (g) => (g === 'batch' ? a.opensAtMs + ORDERING_BATCH_WINDOW_MS : a.opensAtMs);
+  const publishMs = cell.openBatch && outcome.pub.batch !== null
+    ? outcome.pub.batch - closedAt('batch')
+    : cell.lobbyShuffle && outcome.pub.lobby !== null
+      ? outcome.pub.lobby - closedAt('lobby')
+      : null;
+  const batch202 = resolved.filter((r) => r.stage === 'batch' && r.batch === true).length;
+  const batchAttempted = resolved.filter((r) => r.stage === 'batch').length;
+  return {
+    cell: a.cell,
+    flags: cell,
+    users: a.users,
+    sample: {
+      n: sample.length,
+      sampleRate: a.users > 0 ? Math.min(1, sample.length / a.users) : null,
+      rho,
+      arrivalMinMs: arrivals.length ? Math.min(...arrivals) : null,
+      arrivalMaxMs: arrivals.length ? Math.max(...arrivals) : null,
+      runs: 1,
+    },
+    batch: {
+      n: batchRecords.length,
+      rho: batchRho,
+      p90ArrivalMs,
+      batchShare: sample.length ? batch202 / sample.length : null,
+      attempted: batchAttempted,
+      batching: batch202,
+      publishMs,
+      proofMatches: null,
+      proofReason: '시드 공개(오픈+60분) 전이라 검증 재계산을 하지 않았다(정본 Q-T23의 재계산 조건)',
+      botSuccess: null,
+      botReason: '합성 봇 트래픽을 넣지 않았다(사람 표본만)',
+    },
+    publish: { lobby: outcome.pub.lobby, batch: outcome.pub.batch, root: outcome.root, maxSeq: outcome.seq },
+    results: {
+      lobbyFiles: outcome.lobby.files,
+      lobbyEntries: Object.keys(outcome.lobby.entries).length,
+      batchFiles: outcome.batch.files,
+      batchEntries: Object.keys(outcome.batch.entries).length,
+      dropped,
+      entryFailed: resolved.filter((r) => r.stage !== 'lobby' && ![201, 202].includes(r.result)).length,
+    },
+    records: resolved,
+  };
+}
+
+/** `node loadtest/run.mjs v1 ordering`(F-08-4 측정 창 4). 한 셀·한 회차를 잰다. */
+async function runOrdering(a, runTag) {
+  const outDir = resolve(a.out ?? join(OUT_ROOT, `${today()}-v1-ordering-${a.cell}-${runTag}`));
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, 'args.json'), JSON.stringify(a, null, 2));
+  const hostDir = `${NODE_ROOT}/${runTag}`;
+  const eventId = uuidv7Now();
+  const startedAt = new Date().toISOString();
+  let locked = false;
+  let seeded = false;
+  const pods = [];
+  const cleanup = async () => {
+    for (const p of pods) await kc(['-n', NS, 'delete', 'pod', p, '--ignore-not-found', '--wait=true']).catch(() => {});
+    removeNodeDir(hostDir);
+    if (locked && seeded) await bundleSeed(['close', eventId]).catch((e) => console.error(`회차 ${eventId}를 끝내지 못했다: ${e.message}`));
+    if (locked) await releaseLock(runTag);
+  };
+  cleanups.add(cleanup);
+  try {
+    step('v1 무대 확인');
+    await preflightV1();
+    await ensureNamespace();
+    const pub = await stagePublic();
+    const redisTls = pub.redisTls;
+    const cell = ORDERING_CELL_FLAGS[a.cell];
+    if (!cell) throw new Error(`모르는 셀이다: ${a.cell}`);
+    if (a.cell === 'none') throw new Error('none(둘 다 끔)은 제품이 거부한다(ADR-0118 결정 2). Q-T23 기준선은 미측정으로 적는다');
+    step('실행 잠금과 남은 것 쓸어 내기');
+    await acquireLock(runTag, Date.now() + 6 * 3600_000);
+    locked = true;
+    await sweepLeftovers();
+    const others = activeEventsProblem(await bundleSeed(['active']), eventId);
+    if (others) throw new Error(others);
+
+    const prepS = cell.lobbyShuffle ? Math.ceil(a.users / a.lobbyRate) : 0;
+    const mainS = cell.lobbyShuffle ? 0 : Math.ceil((a.users - a.batchUsers) / a.entryRate);
+    const busyS = prepS + a.warmS + 2 + mainS + 120;
+    const needTokens = cell.lobbyShuffle ? a.batchUsers : a.users;
+    const tokenStart = cell.lobbyShuffle ? a.users : 0;
+    step(`회차 ${eventId} 열기(셀 ${a.cell}, 로비 셔플 ${cell.lobbyShuffle ? '켬' : '끔'}, 묶음 ${cell.openBatch ? '켬' : '끔'}), 토큰 ${needTokens}개 준비`);
+    const prelimOpen = Date.now() + 3600_000;
+    seeded = true;
+    const opened = await bundleSeed(['open', JSON.stringify({ eventId, opensAtMs: prelimOpen, startsAtMs: prelimOpen + 25 * 3600_000, seatCount: 1000, batchWindowMs: ORDERING_BATCH_WINDOW_MS, layoutVersion: 1 })]);
+    await setEventOrdering(eventId, a.cell);
+    await sleep(1600);
+    log(`회차 ${opened.created ? '새로' : '이미'} 열기(세대 ${opened.seatEpoch}), 임시 오픈 ${new Date(prelimOpen).toISOString()}`);
+
+    stageInputs(hostDir, { caPem: '', tokens: JSON.stringify(['v1']) });
+    const nGen = a.generators ?? Math.max(1, Math.ceil(a.batchRate / 2500));
+    const split = nGen > 1;
+    const segments = executionSegments(nGen);
+    for (const sg of segments) {
+      const name = split ? `loadgen-${runTag}-g${sg.index}` : `loadgen-${runTag}`;
+      pods.push(name);
+      await createObject(generatorPod({ name, cpus: a.cpus, memoryMi: a.memoryMi, hostDir, deadlineS: Math.min(11400, Math.ceil(busyS * 2 + 900)), ...(split ? { index: sg.index } : {}) }));
+    }
+    for (const p of pods) await waitPodReady(p);
+    const prep = await prepareOrderingTokens({ pod: pods[0], hostDir, eventId, need: needTokens, start: tokenStart, rate: a.tokenRate, runTag, outDir });
+
+    // 토큰을 만든 뒤에 최종 오픈 시각을 정한다(로비 참가는 오픈 전이어야 하고, 토큰은 15분 안에 쓴다)
+    const opensAtMs = Date.now() + 40_000 + prepS * 1000 + a.warmS * 1000;
+    const started = await bundleSeed(['open', JSON.stringify({ eventId, opensAtMs, startsAtMs: opensAtMs + 25 * 3600_000, seatCount: 1000, batchWindowMs: ORDERING_BATCH_WINDOW_MS, layoutVersion: 1 })]);
+    await setEventOrdering(eventId, a.cell);
+    await sleep(1600);
+    a.opensAtMs = opensAtMs;
+    log(`최종 오픈 ${new Date(opensAtMs).toISOString()}(세대 ${started.seatEpoch}), 로비 준비 ${prepS}초, 본구간 ${2 + mainS}초`);
+
+    const baseEnv = {
+      SCENARIO: 'v1-ordering.js',
+      QUEUE_BASE: v1Layout({ redisTls }).queueUrl,
+      RUN_TAG: runTag,
+      USERS_FILE: '/work/users.json',
+      EVENT_ID: eventId,
+      ORDERING_CELL: a.cell,
+      LOBBY_SHUFFLE: cell.lobbyShuffle ? 1 : 0,
+      OPEN_BATCH: cell.openBatch ? 1 : 0,
+      USERS: a.users,
+      BATCH_USERS: a.batchUsers,
+      BATCH_RATE: a.batchRate,
+      ENTRY_RATE: a.entryRate,
+      LOBBY_RATE: a.lobbyRate,
+      PREP_MODE: cell.lobbyShuffle ? 'lobby' : 'none',
+      MAIN_MODE: cell.lobbyShuffle ? 'none' : 'entries',
+      OPENS_AT_MS: opensAtMs,
+      WARM_S: a.warmS,
+      TOKENS_FILE: '/work/out/prep.ndjson',
+    };
+    for (const sg of segments) {
+      const e = split ? { ...baseEnv, OUT_DIR: `/work/out/g${sg.index}`, K6_EXECUTION_SEGMENT: sg.segment, K6_EXECUTION_SEGMENT_SEQUENCE: sg.sequence } : { ...baseEnv, OUT_DIR: '/work/out' };
+      putNodeFile(hostDir, split ? `run-${sg.index}.env` : 'run.env', runEnvFile(e));
+    }
+    const k6Start = opensAtMs - prepS * 1000 - a.warmS * 1000;
+    const waitMs = k6Start - Date.now();
+    if (waitMs < -2000) throw new Error(`k6 시작 시각을 ${Math.round(-waitMs / 1000)}초 넘겼다(측정을 시작하지 않는다)`);
+    if (waitMs > 0) {
+      step(`k6 시작까지 ${Math.round(waitMs / 1000)}초 기다린다`);
+      await sleep(waitMs);
+    }
+    step(`k6 ${nGen}대(배치 ${a.batchRate}/s, 진입 ${a.entryRate}/s, 예상 ${Math.round(busyS)}초)`);
+    for (const p of pods) await kc(['-n', NS, 'exec', p, '--', 'sh', '-c', `nohup sh /work/bin/${split ? 'run-split.sh' : 'run.sh'} >/dev/null 2>&1 &`]);
+    if (split) {
+      await sleep(1000);
+      onNode(['sh', '-c', `touch ${hostDir}/go && chown ${K6_UID}:${K6_UID} ${hostDir}/go`]);
+    }
+    const outs = await Promise.all(segments.map((sg) => waitK6(pods[sg.index], hostDir, split ? `out/g${sg.index}` : 'out', busyS)));
+    const bad = outs.find((o) => o.exit !== 0 && o.exit !== 99);
+    if (bad) throw new Error(`k6가 종료 코드 ${bad.exit}로 끝났다:\n${bad.k6log.slice(-1500)}`);
+    for (const [i, o] of outs.entries()) {
+      const suffix = split ? `-g${i}` : '';
+      writeFileSync(join(outDir, `k6${suffix}.log`), o.k6log);
+      writeFileSync(join(outDir, `cgroup${suffix}.log`), o.cgroup);
+      writeFileSync(join(outDir, `console${suffix}.ndjson`), o.console);
+    }
+    const texts = outs.map((o) => o.console);
+    const parsed = texts.flatMap((text) =>
+      text
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .flatMap((l) => {
+          try {
+            const o = JSON.parse(l);
+            return o && typeof o === 'object' ? [o] : [];
+          } catch {
+            return [];
+          }
+        }),
+    );
+    const records = parsed.filter((o) => o.type === 'ordering_sample');
+    const marks = {};
+    for (const o of parsed) if (o.kind === 'mark' && (o.name === 'main_start' || o.name === 'main_end')) marks[o.name] ??= o.at_ms;
+    if (marks.main_start === undefined || marks.main_end === undefined) throw new Error('본구간 경계 표시가 없다(k6가 본구간까지 가지 못했다)');
+    const sums = outs.map((o) => {
+      if (!o.summary) throw new Error(`k6 요약이 없다(종료 코드 ${o.exit}):\n${o.k6log.slice(-1500)}`);
+      return JSON.parse(o.summary);
+    });
+    const merged = split ? mergeSummaries(sums) : sums[0];
+    writeFileSync(join(outDir, 'summary.json'), JSON.stringify(merged, null, 2));
+    const gens = outs.map((o, i) => {
+      const m = sums[i].metrics;
+      const stats = generatorStats(parseCgroupLog(o.cgroup), { fromMs: marks.main_start, toMs: marks.main_end, cpus: a.cpus, memLimitBytes: a.memoryMi * 1024 * 1024 });
+      const dropped = m.dropped_iterations?.values?.count ?? 0;
+      const scenarioErrors = m.scenario_errors?.values?.count ?? 0;
+      return { cpus: a.cpus, memoryMi: a.memoryMi, stats, dropped, scenarioErrors, vusMax: m.vus_max?.values?.max ?? 0, judge: withScenarioErrors(judgeGenerator({ dropped, cpuMeanPct: stats.cpuMeanPct, memMaxPct: stats.memMaxPct }), scenarioErrors), ...(Number.isFinite(o.started) ? { startedS: o.started } : {}) };
+    });
+    const generator = combineGenerators(gens, marks.main_start - a.warmS * 1000);
+    writeFileSync(join(outDir, 'generator.json'), JSON.stringify(generator, null, 2));
+    log(`발생기 ${nGen}대: CPU 평균 최고 ${generator.cpuMeanPctMax}%, 메모리 최대 ${generator.memMaxPctMax}%, dropped ${generator.dropped} → ${generator.judge.valid ? '유효' : `무효(${generator.judge.reasons.join('; ')})`}`);
+
+    // 게시를 기다린다(로비는 T=0, 묶음은 T+2초가 닫힌 뒤 비콘·파일 쓰기)
+    const groups = [...(cell.lobbyShuffle ? ['lobby'] : []), ...(cell.openBatch ? ['batch'] : [])];
+    let lastPub = { lobby: null, batch: null };
+    const until = Date.now() + 120_000;
+    while (Date.now() < until) {
+      lastPub = await orderingPub(eventId);
+      if (groups.every((g) => lastPub[g] !== null)) break;
+      await sleep(2000);
+    }
+    const outcome = await inBundlePod(orderingOutcomeScript(eventId), 300_000);
+    writeFileSync(join(outDir, 'outcome.json'), JSON.stringify(outcome, null, 2));
+    const analysis = orderingSample(a, records, outcome, generator.dropped);
+    writeFileSync(join(outDir, 'ordering.json'), JSON.stringify({ ...analysis, records: undefined, generator: { valid: generator.judge.valid, reasons: generator.judge.reasons, dropped: generator.dropped, cpuMeanPctMax: generator.cpuMeanPctMax, memMaxPctMax: generator.memMaxPctMax, vusMax: generator.vusMax } }, null, 2));
+    writeFileSync(join(outDir, 'records.ndjson'), analysis.records.length ? `${analysis.records.map((r) => JSON.stringify(r)).join('\n')}\n` : '');
+    log(`표본 ${analysis.sample.n}/${a.users}(표본률 ${analysis.sample.sampleRate?.toFixed(4)}), 스피어만 ${analysis.sample.rho}, 묶음 ${analysis.batch.n}건·rho ${analysis.batch.rho}, 게시 ${analysis.batch.publishMs}ms, 요청 ${records.length}건`);
+    const notes = [
+      `F-08-4 정렬 표본: 셀 ${a.cell}(로비 셔플 ${cell.lobbyShuffle ? '켬' : '끔'}·오픈 직후 묶음 ${cell.openBatch ? '켬' : '끔'}), 사용자 ${a.users}, 묶음 표본 ${a.batchUsers}건 ${a.batchRate}/s, 진입 ${cell.lobbyShuffle ? '없음(로비)' : `${a.entryRate}/s`}`,
+      `표본 ${analysis.sample.n}건(표본률 ${analysis.sample.sampleRate?.toFixed(4)}), 스피어만 ${analysis.sample.rho}, 묶음 스피어만 ${analysis.batch.rho}, p90 도착 ${analysis.batch.p90ArrivalMs}ms, 게시 ${analysis.batch.publishMs}ms`,
+      '검증 재계산은 시드 공개(오픈+60분) 전이라 하지 않았다(proofMatches 미측정). 합성 봇은 넣지 않았다(봇 성공률 미측정)',
+      `로비 판정은 trust-svc 없는 무대라 hd로 이어 간다. 발생기 ${nGen}대(CPU ${a.cpus}·메모리 ${a.memoryMi}Mi)`,
+    ].join('; ');
+    writeFileSync(join(outDir, 'notes.txt'), `${notes}\n`);
+    writeFileSync(join(outDir, 'infra.txt'), `${infraText({ cpus: a.cpus, memoryMi: a.memoryMi, generators: nGen, args: a })}\n${[
+      `정렬 셀: ${a.cell}(로비 셔플 ${cell.lobbyShuffle ? '켬' : '끔'}, 오픈 직후 묶음 ${cell.openBatch ? '켬' : '끔'})`,
+      `Redis TLS ${redisTls ? '켬' : '끔'}, 오픈 ${new Date(opensAtMs).toISOString()}, 로비 준비 ${prepS}초, 본구간 ${2 + mainS}초`,
+      `결과 파일 ${outcome.resultDir}/{회차}/shuffle-results·batch-results, 로비 ${outcome.lobby.files}개 파일·묶음 ${outcome.batch.files}개 파일`,
+    ].join('\n')}\n`);
+    if (a.record) {
+      step(`성능 장부(${a.runId})`);
+      execFileSync(
+        PYTHON,
+        [
+          '-I',
+          '-X',
+          'utf8',
+          ...collectArgs({
+            runId: a.runId,
+            kpi: 'Q-T23',
+            version: 'v1',
+            profile: a.profile,
+            users: a.users,
+            rps: Math.max(a.batchRate, a.entryRate),
+            durationS: 2 + mainS,
+            warmupS: 0,
+            scenario: 'loadtest/scenarios/v1-ordering.js',
+            summaryFile: join(outDir, 'summary.json'),
+            infraFile: join(outDir, 'infra.txt'),
+            notes,
+            start: new Date(marks.main_start).toISOString(),
+            end: new Date(marks.main_end).toISOString(),
+            ...(generator.judge.valid ? {} : { invalidReason: generator.judge.reasons.join('; ') }),
+            generator: `k6 1.4.2, 발생기 파드 ${nGen}대(CPU ${a.cpus}·메모리 ${a.memoryMi}Mi씩, kind 안${split ? ', k6 실행 구간으로 나눔' : ''})`,
+            redisTls,
+            rawBucket: RAW_BUCKET,
+            rawOutbox: RAW_OUTBOX,
+          }),
+        ],
+        { cwd: REPO, stdio: 'inherit' },
+      );
+    }
+    return { outDir, exitCode: 0, eventId };
+  } finally {
+    cleanups.delete(cleanup);
+    await cleanup();
+    try {
+      writeFileSync(join(outDir, 'run.json'), JSON.stringify({ version: 'v1', scenario: 'ordering', cell: a.cell, runTag, eventId, hostDir, namespace: V1_NAMESPACE, args: a, startedAt, endedAt: new Date().toISOString() }, null, 2));
+    } catch (e) {
+      console.error(`run.json을 쓰지 못했다: ${e.message}`);
+    }
+  }
+}
+
 // ───────────── 시작 ─────────────
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -2536,7 +2949,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     });
   }
   try {
-    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : await runV1(a, runTag)) : await runV0(a, runTag);
+    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : a.scenario === 'ordering' ? await runOrdering(a, runTag) : await runV1(a, runTag)) : await runV0(a, runTag);
     log(`\n산출물: ${r.outDir}`);
     process.exit(r.exitCode);
   } catch (e) {
