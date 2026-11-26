@@ -56,39 +56,66 @@ if (!Number.isFinite(USERS) || USERS < 1 || USERS > 5000) throw new Error('USERS
 const records = new Counter('soak_records_total');
 const latency = new Trend('soak_request_duration_ms', true);
 const setupFailed = new Counter('setup_failed');
+const limitHit = new Counter('limit_hit');
+const wsConnections = new Counter('ws_connections');
+const wsDisconnects = new Counter('ws_disconnects');
+const wsReconnects = new Counter('ws_reconnects');
 const prepUsers = TARGET === 'realtime-gw' ? Math.min(CONNECTIONS, USERS) : TARGET === 'queue-svc' ? 0 : USERS;
 const warmRate = Math.max(1, Math.floor(RATE / 2));
+
+// realtime-gw는 열린 도착률이 아니라 VU마다 긴 연결을 유지한다(constant-vus). 나머지는 열린 모델이다.
+const scenarios = TARGET === 'realtime-gw'
+  ? {
+      warm: {
+        executor: 'constant-vus',
+        vus: CONNECTIONS,
+        duration: `${WARM_S}s`,
+        exec: 'stream',
+        tags: { phase: 'warm', target: TARGET },
+      },
+      main: {
+        executor: 'constant-vus',
+        vus: CONNECTIONS,
+        startTime: `${WARM_S}s`,
+        duration: `${DURATION_S}s`,
+        exec: 'stream',
+        tags: { phase: 'main', target: TARGET },
+      },
+      ...markScenarios(WARM_S, WARM_S + DURATION_S),
+    }
+  : {
+      warm: {
+        executor: 'constant-arrival-rate',
+        rate: warmRate,
+        timeUnit: '1s',
+        duration: `${WARM_S}s`,
+        preAllocatedVUs: Math.max(10, Math.ceil(warmRate / 10)),
+        maxVUs: Math.max(50, warmRate),
+        exec: 'hit',
+        tags: { phase: 'warm', target: TARGET },
+      },
+      main: {
+        executor: 'constant-arrival-rate',
+        rate: RATE,
+        timeUnit: '1s',
+        startTime: `${WARM_S}s`,
+        duration: `${DURATION_S}s`,
+        preAllocatedVUs: Math.max(10, Math.ceil(RATE / 10)),
+        maxVUs: Math.max(50, RATE),
+        exec: 'hit',
+        tags: { phase: 'main', target: TARGET },
+      },
+      ...markScenarios(WARM_S, WARM_S + DURATION_S),
+    };
 
 export const options = {
   setupTimeout: `${PREP_TIMEOUT_S}s`,
   // 본구간 경계는 markScenarios가 markStart/markEnd로 남긴다(실행 도구가 host·records 창을 자른다).
-  scenarios: {
-    warm: {
-      executor: 'constant-arrival-rate',
-      rate: warmRate,
-      timeUnit: '1s',
-      duration: `${WARM_S}s`,
-      preAllocatedVUs: Math.max(10, Math.ceil(warmRate / 10)),
-      maxVUs: Math.max(50, warmRate),
-      exec: 'hit',
-      tags: { phase: 'warm', target: TARGET },
-    },
-    main: {
-      executor: 'constant-arrival-rate',
-      rate: RATE,
-      timeUnit: '1s',
-      startTime: `${WARM_S}s`,
-      duration: `${DURATION_S}s`,
-      preAllocatedVUs: Math.max(10, Math.ceil(RATE / 10)),
-      maxVUs: Math.max(50, RATE),
-      exec: 'hit',
-      tags: { phase: 'main', target: TARGET },
-    },
-    ...markScenarios(WARM_S, WARM_S + DURATION_S),
-  },
+  scenarios,
   thresholds: {
     dropped_iterations: ['count==0'],
     setup_failed: ['count==0'],
+    limit_hit: ['count>=0'],
     http_req_failed: ['rate<0.01'],
   },
 };
@@ -192,6 +219,7 @@ function sessionFor(u, data) {
 }
 
 function record(target, route, started, status, ok) {
+  if (status === 409 || status === 422) limitHit.add(1, { target, route, status: String(status) });
   records.add(1, { target, route });
   latency.add(Date.now() - started, { target, route });
   console.log(`record ${JSON.stringify({ kind: 'request', target, route, at: started, ms: Date.now() - started, status, ok, run: RUN_TAG })}`);
@@ -275,6 +303,41 @@ function pay(u, data, retry = 0) {
   record(TARGET, 'payment', Date.now(), accepted.status, accepted.status === 202);
 }
 
+function stream(data) {
+  const u = exec.vu.idInInstance % prepUsers;
+  const token = data.tokens?.[u];
+  if (!token) {
+    setupFailed.add(1, { target: TARGET });
+    scenarioErrors.add(1);
+    return;
+  }
+  const started = Date.now();
+  let opened = false;
+  const phase = exec.scenario.name === 'main' ? 'main' : 'warm';
+  ws.connect(`${envStr('WS_BASE', 'ws://realtime-gw.realtime-gw.svc.cluster.local:8080')}/v1/seats/stream?eventId=${EVENT_ID}&run=${RUN_TAG}`, {
+    headers: { 'x-admission-token': token },
+    tags: { route: 'stream', target: TARGET, phase },
+  }, (socket) => {
+    socket.on('open', () => {
+      opened = true;
+      wsConnections.add(1, { target: TARGET, phase });
+      if (exec.vu.iterationInInstance > 0) wsReconnects.add(1, { target: TARGET, phase });
+      // 연결을 6시간 유지하면서 30초마다 ping을 보낸다(프록시 유휴 끊김 방지, 끊기면 close로 센다)
+      socket.setInterval(() => socket.send(JSON.stringify({ type: 'ping', at: Date.now() })), 30_000);
+    });
+    socket.on('message', () => {});
+    socket.on('close', () => {
+      if (opened) wsDisconnects.add(1, { target: TARGET, phase });
+    });
+    socket.on('error', () => scenarioErrors.add(1));
+    sleep(DURATION_S + 60);
+    socket.close();
+  });
+  if (!opened) scenarioErrors.add(1);
+  record(TARGET, 'stream', started, opened ? 101 : 0, opened);
+}
+
+
 function queueHit(data) {
   const u = exec.scenario.iterationInTest % USERS;
   let entry = data.entries?.[u];
@@ -298,20 +361,8 @@ export function hit(data) {
   if (TARGET === 'purchase-svc') return holdAndRelease(u, data, false);
   if (TARGET === 'outbox-relay') return holdAndRelease(u, data, true);
   if (TARGET === 'payment-svc') return pay(u, data);
-  // realtime-gw: 연결을 맺고 델타를 한 번 읽는다. 연결 수 유지는 측정 창의 별도 부하로 본다.
-  const started = Date.now();
-  let status = 0;
-  ws.connect(`${envStr('WS_BASE', 'ws://realtime-gw.realtime-gw.svc.cluster.local:8080')}/v1/seats/stream?eventId=${EVENT_ID}&run=${RUN_TAG}`, { tags: { route: 'stream', target: TARGET } }, (socket) => {
-    socket.on('open', () => {
-      status = 101;
-      socket.send(JSON.stringify({ type: 'subscribe', eventId: EVENT_ID }));
-    });
-    socket.on('message', () => {});
-    socket.on('error', () => {});
-    sleep(1);
-    socket.close();
-  });
-  record(TARGET, 'stream', started, status, status === 101);
+  if (TARGET === 'realtime-gw') return stream(data);
+  return undefined;
 }
 
 /** 요약과 records.ndjson(실행 도구가 콘솔 `record ` 줄을 모아 채운다) */
@@ -326,6 +377,10 @@ export function handleSummary(data) {
     records: data.metrics.soak_records_total?.values?.count ?? 0,
     dropped: data.metrics.dropped_iterations?.values?.count ?? 0,
     setupFailed: data.metrics.setup_failed?.values?.count ?? 0,
+    limitHits: data.metrics.limit_hit?.values?.count ?? 0,
+    wsConnections: data.metrics.ws_connections?.values?.count ?? 0,
+    wsDisconnects: data.metrics.ws_disconnects?.values?.count ?? 0,
+    wsReconnects: data.metrics.ws_reconnects?.values?.count ?? 0,
   };
   return {
     'records.ndjson': `${JSON.stringify({ kind: 'summary', ...summary })}\n`,

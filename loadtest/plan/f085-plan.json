@@ -76,6 +76,9 @@
       "rateSource": "S-T12 설계 5,000 연결·125/s의 50%(연결 2,500, 홀드 63/s)",
       "connections": 2500,
       "holdRate": 63,
+      "mode": "constant-vus",
+      "holdSeconds": 21600,
+      "assumption": "[가정] 2,500 연결 6시간 유지, 로컬 가능성 측정 창 확인",
       "errorRateLimit": 0.001,
       "minTrials": 2995,
       "errorRateSource": "[가정, F-08-5 계획]",
@@ -115,6 +118,12 @@
       "docker build -f services/purchase-svc/Dockerfile -t peaket/purchase-svc:soak-leak .",
       "node loadtest/run.mjs v1 soak --phase 4c --target purchase-svc --rate 1000 --leak db-conn --out .cache/peaket-f085/{day}-purchase-leak-r{round}"
     ]
+  },
+  "limits": {
+    "purchase-seats": "5,000명×2석을 홀드→해제로 순환(재사용). 6시간 1,000/s는 좌석 풀을 다시 쓴다",
+    "payment-orders": "5,000명×2석·주문 5,000건. 150/s×6시간은 3,240,000건이라 풀을 넘어 limit_hit·부분",
+    "outbox-orders": "5,000명×2석·주문 5,000건. 100/s×6시간은 2,160,000건이라 풀을 넘어 limit_hit·부분",
+    "realtime-connections": "[가정] constant-vus 2,500 연결×6시간. 로컬 불가면 부분·미측정"
   },
   "report": "docs/review/measurements/F-08-5-soak.md",
   "not_included": [

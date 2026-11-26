@@ -157,6 +157,30 @@ export function parseSoakArgs(argv = []) {
 }
 
 /**
+ * 6시간 계획이 좌석·주문 풀 안에 드는지 어림한다. purchase는 홀드→해제로 좌석을 순환하므로
+ * 좌석 풀을 다시 쓰고, payment/Outbox는 주문이 쌓이므로 주문 풀이 상한이다.
+ * `sustainable:false`면 `limit_hit`이 예상되므로 측정 보고서는 `부분`으로 적는다.
+ */
+export function loadBudget({ target, rate, durationMin = SOAK_DEFAULTS.durationMin, users = 5000, seatsPerUser = 2, orderPool = 5000 } = {}) {
+  const t = targetOf(target);
+  if (!t) throw new UsageError(`모르는 target: ${target}`);
+  const planned = Number(rate) * Number(durationMin) * 60;
+  const seatPool = users * seatsPerUser;
+  const orders = target === 'payment-svc' || target === 'outbox-relay' ? planned : 0;
+  const seatLimited = (target === 'payment-svc' || target === 'outbox-relay') && orders > seatPool;
+  const orderLimited = orders > orderPool;
+  return {
+    target,
+    planned,
+    seatPool,
+    orderPool,
+    orders,
+    sustainable: !seatLimited && !orderLimited,
+    limitHitsExpected: Math.max(0, orders - orderPool, seatLimited ? orders - seatPool : 0),
+  };
+}
+
+/**
  * (min, value) 표본의 1차 회귀 기울기(시간당). 표본 2개 미만·같은 시각·빠진 값은 null.
  * 균등 간격을 가정하지 않는다.
  */
@@ -212,6 +236,7 @@ export function judgeNFR027(run = {}) {
     generator: run.generator,
     host: run.host,
     dependencyRestarts: run.dependencyRestarts,
+    limitHits: Number.isFinite(run.limitHits) ? run.limitHits : 0,
   };
   if (!Number.isFinite(run.durationMin) || run.durationMin < SOAK_DEFAULTS.durationMin) {
     return invalid([`실행 길이 ${run.durationMin}분 < 360분`], validity);
@@ -248,6 +273,9 @@ export function judgeNFR027(run = {}) {
   }
   if (!Number.isFinite(run.dependencyRestarts) || run.dependencyRestarts < 0) return invalid(['의존 저장소 재시작 수를 읽지 못했다'], validity);
   if (run.dependencyRestarts > 0) return invalid([`의존 저장소 재시작 ${run.dependencyRestarts}회`], validity);
+  if (validity.limitHits > 0) {
+    return cannotJudge([`limit_hit ${validity.limitHits}건: 좌석·주문 상한에 닿아 유효 부하가 줄었다`], null);
+  }
 
   const metrics = {};
   let missing = false;
