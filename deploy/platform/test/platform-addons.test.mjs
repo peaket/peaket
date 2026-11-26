@@ -14,7 +14,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..', '..');
 const PLATFORM = join(REPO, 'deploy', 'platform');
 const OPS_POOL = { key: 'peaket.io/pool', operator: 'Equal', value: 'ops', effect: 'NoSchedule' };
-const SEMVER = /^\d+\.\d+\.\d+$/;
 
 function yamlFile(rel) {
   const file = join(REPO, rel);
@@ -36,20 +35,25 @@ function assertOpsPlacement(obj, where) {
   assert.ok(Array.isArray(obj.tolerations) && obj.tolerations.some((t) => t.key === OPS_POOL.key && t.value === 'ops' && t.effect === 'NoSchedule'), `${where}: ops 테인트 toleration`);
   assert.equal(obj.priorityClassName, 'peaket-control', `${where}: peaket-control`);
 }
-function assertApplication(rel, { repoURL, chart, namespace }) {
+function assertApplication(rel, { repoURL, chart, namespace, targetRevision }) {
   const app = yamlFile(rel);
   assert.equal(app.apiVersion, 'argoproj.io/v1alpha1', `${rel}: apiVersion`);
   assert.equal(app.kind, 'Application', `${rel}: kind`);
+  assert.equal(app.metadata.namespace, 'argocd', `${rel}: metadata.namespace`);
   assert.equal(app.spec.project, 'peaket-platform', `${rel}: project`);
   assert.equal(app.spec.destination.namespace, namespace, `${rel}: destination.namespace`);
+  assert.equal(app.spec.destination.server, 'https://kubernetes.default.svc', `${rel}: destination.server`);
   assert.deepEqual(app.spec.syncPolicy?.automated, { prune: true, selfHeal: true }, `${rel}: 자동 동기화`);
+  assert.ok((app.spec.syncPolicy?.syncOptions ?? []).includes('CreateNamespace=true'), `${rel}: CreateNamespace`);
   const sources = app.spec.sources ?? [];
   assert.equal(sources.length, 2, `${rel}: source 둘(차트+값)`);
   assert.equal(sources[0].repoURL, repoURL, `${rel}: 차트 저장소`);
   assert.equal(sources[0].chart, chart, `${rel}: 차트 이름`);
-  assert.match(String(sources[0].targetRevision), SEMVER, `${rel}: 차트 판을 고정한다`);
+  // RV0910-02: 정확한 고정 판만 받는다(0.0.1·9.9.9 같은 임의 판을 막는다)
+  assert.equal(sources[0].targetRevision, targetRevision, `${rel}: 차트 판 ${targetRevision}`);
   assert.ok(sources[0].helm?.valueFiles?.includes(`$values/${rel.replace(/application\.yaml$/, 'values.yaml')}`), `${rel}: values 파일 참조`);
   assert.equal(sources[1].repoURL, 'https://github.com/peaket/peaket', `${rel}: 값 저장소`);
+  assert.equal(sources[1].targetRevision, 'develop', `${rel}: 값 저장소 판`);
   assert.equal(sources[1].ref, 'values', `${rel}: values ref`);
 }
 
@@ -72,6 +76,7 @@ test('OPS-430 ④ KEDA_설치값은_관제풀·peaket-control·복제2·PDB·웹
     repoURL: 'https://kedacore.github.io/charts',
     chart: 'keda',
     namespace: 'keda',
+    targetRevision: '2.21.1',
   });
 });
 
@@ -100,6 +105,8 @@ test('OPS-430 ⑤ Karpenter_NodePool_넷은_정본의_구매방식·아키텍처
     const name = pool.metadata.name;
     assert.equal(pool.apiVersion, 'karpenter.sh/v1', `${name}: apiVersion`);
     assert.equal(pool.metadata.labels?.['peaket.io/pool'], name, `${name}: pool 라벨`);
+    // RV0910-05: 워크로드 선택자는 노드 라벨을 본다. 객체 라벨만으로는 부족하다
+    assert.equal(pool.spec.template.metadata.labels?.['peaket.io/pool'], name, `${name}: 노드 라벨`);
     assert.deepEqual(requirement(pool, 'karpenter.sh/capacity-type').values, ['on-demand'], `${name}: 온디맨드만`);
     assert.deepEqual(requirement(pool, 'kubernetes.io/arch').values, ['arm64'], `${name}: Graviton`);
     assert.equal(requirement(pool, 'karpenter.k8s.aws/instance-family').values.length, 1, `${name}: 인스턴스 계열 하나`);
@@ -161,5 +168,6 @@ test('OPS-430 ⑩ Argo_Rollouts_설치값은_관제풀·peaket-control·복제2�
     repoURL: 'https://argoproj.github.io/argo-helm',
     chart: 'argo-rollouts',
     namespace: 'argo-rollouts',
+    targetRevision: '2.43.0',
   });
 });

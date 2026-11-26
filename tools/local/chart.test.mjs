@@ -962,6 +962,20 @@ test('OPS-430 ① KEDA ScaledObject는_최소·최대복제수와_폴링·쿨다
   // 지표를 못 읽으면 0이나 -1로 줄이지 않고 지금 복제 수를 유지한다(docs/observability.md §5 '자동 제어 입력 감시')
   assert.deepEqual(s.spec.fallback, { failureThreshold: 3, replicas: 0, behavior: 'currentReplicas' });
   assert.equal(all(render(BASE).objects, 'ScaledObject').length, 0);
+
+  // RV0910-01: 켤 때 min/max를 값으로 받아야 한다. 생략하면 KEDA 기본값 0/100이 남고, min 0·max<min도 받지 않는다
+  const trigger = ['- type: prometheus', '  metadata:', '    serverAddress: http://prom.observability.svc:9090', '    query: sum(peaket_realtime_gw_connections)', '    threshold: "100"'];
+  const badReplicas = [
+    ['min/max 생략', []],
+    ['min 0', ['minReplicaCount: 0', 'maxReplicaCount: 12']],
+    ['max<min', ['minReplicaCount: 5', 'maxReplicaCount: 2']],
+    ['max 0', ['minReplicaCount: 1', 'maxReplicaCount: 0']],
+  ];
+  for (const [label, configLines] of badReplicas) {
+    const r = renderFiles([kedaValuesWith(configLines, trigger)], BASE);
+    assert.notEqual(r.error, undefined, `${label}: 렌더됐다`);
+    assert.match(r.error, /KEDA|keda|minReplica|maxReplica|autoscaling/, `${label}: 오류 문구`);
+  }
 });
 
 test('CH-05 ExternalSecret을켜면_remoteRef만낸다_값(kty·PEM·value)은렌더에없다 [ASVS v5.0.0-13.1.4] [ASVS v5.0.0-13.3.4]', () => {
@@ -1077,19 +1091,27 @@ test('CH-09 Rollout과KEDA를함께켜면_scaleTargetRef가argoproj.io/v1alpha1_
 // 정본: docs/infra.md §5, docs/devops.md §6.1·§6.2·§6.7, docs/observability.md §5 '자동 제어 입력 감시',
 // KEDA v2.21 ScaledObject 스펙(fallback behavior currentReplicas, 2026-11-27 확인).
 
-function kedaValues(triggerLines) {
+function kedaValuesWith(configLines, triggerLines) {
   return valuesFile(
     [
       'service:',
       '  keda:',
       '    enabled: true',
-      '    minReplicaCount: 2',
-      '    maxReplicaCount: 12',
+      ...configLines.map((l) => `    ${l}`),
       '    triggers:',
       ...triggerLines.map((l) => `      ${l}`),
       '',
     ].join('\n'),
   );
+}
+
+function kedaValues(triggerLines) {
+  return kedaValuesWith(['minReplicaCount: 2', 'maxReplicaCount: 12'], triggerLines);
+}
+
+/** KEDA 트리거 하나의 YAML 줄. kedaValues가 6칸을 더한다 */
+function trigger(type, metadataLines) {
+  return [`- type: ${type}`, '  metadata:', ...metadataLines.map((l) => `    ${l}`)];
 }
 
 test('OPS-430 ② HPA와_KEDA를_같은대상에_함께켜면_렌더를_멈춘다', () => {
@@ -1150,13 +1172,25 @@ test('OPS-430 ③ KEDA_트리거는_cron·prometheus·kafka·redis만_받고_종
   assert.deepEqual(s.spec.triggers.map((t) => t.type), ['cron', 'prometheus', 'kafka', 'redis']);
   assert.equal(s.spec.triggers[0].metadata.timezone, 'Asia/Seoul');
 
+  // RV0910-03: 종류마다 요구하는 metadata 키를 하나씩 빼 본다(구현이 일부만 검사하면 여기서 걸린다)
+  const redisAddress = ['addressFrom:', '  secretKeyRef:', '    name: queue-redis', '    key: host'];
   const badCases = [
     ['모르는 종류', ['- type: sqs', '  metadata: {}']],
     ['CPU 트리거', ['- type: cpu', '  metadata:', '    type: Utilization', '    value: "70"']],
-    ['prometheus threshold 없음', ['- type: prometheus', '  metadata:', '    serverAddress: http://prom.observability.svc:9090', '    query: sum(x)']],
-    ['kafka topic 없음', ['- type: kafka', '  metadata:', '    bootstrapServers: kafka:9092', '    consumerGroup: purchase-svc', '    lagThreshold: "1000"']],
-    ['cron desiredReplicas 없음', ['- type: cron', '  metadata:', '    start: "0 20 * * *"', '    end: "0 22 * * *"', '    timezone: Asia/Seoul']],
-    ['redis listLength 없음', ['- type: redis', '  metadata:', '    addressFrom:', '      secretKeyRef:', '        name: queue-redis', '        key: host', '    listName: "q:{event:*}:wait"']],
+    ['cron.start 없음', trigger('cron', ['end: "0 22 * * *"', 'desiredReplicas: "6"', 'timezone: Asia/Seoul'])],
+    ['cron.end 없음', trigger('cron', ['start: "0 20 * * *"', 'desiredReplicas: "6"', 'timezone: Asia/Seoul'])],
+    ['cron.timezone 없음', trigger('cron', ['start: "0 20 * * *"', 'end: "0 22 * * *"', 'desiredReplicas: "6"'])],
+    ['cron.desiredReplicas 없음', trigger('cron', ['start: "0 20 * * *"', 'end: "0 22 * * *"', 'timezone: Asia/Seoul'])],
+    ['prometheus.serverAddress 없음', trigger('prometheus', ['query: sum(x)', 'threshold: "1000"'])],
+    ['prometheus.query 없음', trigger('prometheus', ['serverAddress: http://prom.observability.svc:9090', 'threshold: "1000"'])],
+    ['prometheus.threshold 없음', trigger('prometheus', ['serverAddress: http://prom.observability.svc:9090', 'query: sum(x)'])],
+    ['kafka.bootstrapServers 없음', trigger('kafka', ['consumerGroup: purchase-svc', 'topic: trade.orders', 'lagThreshold: "1000"'])],
+    ['kafka.consumerGroup 없음', trigger('kafka', ['bootstrapServers: kafka:9092', 'topic: trade.orders', 'lagThreshold: "1000"'])],
+    ['kafka.topic 없음', trigger('kafka', ['bootstrapServers: kafka:9092', 'consumerGroup: purchase-svc', 'lagThreshold: "1000"'])],
+    ['kafka.lagThreshold 없음', trigger('kafka', ['bootstrapServers: kafka:9092', 'consumerGroup: purchase-svc', 'topic: trade.orders'])],
+    ['redis.listName 없음', trigger('redis', [...redisAddress, 'listLength: "1000"'])],
+    ['redis.addressFrom 없음', trigger('redis', ['listName: "q:{event:*}:wait"', 'listLength: "1000"'])],
+    ['redis.listLength 없음', trigger('redis', [...redisAddress, 'listName: "q:{event:*}:wait"'])],
   ];
   for (const [label, lines] of badCases) {
     const r = renderFiles([kedaValues(lines)], BASE);
