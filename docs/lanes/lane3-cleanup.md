@@ -148,3 +148,10 @@
 - F-05-8 IR-10 중간: `peaket.wishQueue`를 잠금 없이 통째로 덮어써 다른 탭이 동시에 다른 공연을 찜하면 한쪽이 사라진다. `peaket.refresh`처럼 Web Locks로 감싼다(`queue.ts`·`LikesLive.tsx`)
 - F-05-8 IR-11 중간: 계획 §6의 GAT-260 화면 시험 `apps/web/src/_pages/likes/model/live.test.mjs`가 없다. `serverLikeCards`·찜 해제 실패 되돌림을 단위로 본다
 - F-05-8 IR-12 낮음: 화면이 `limit:100` 한 쪽만 받아 101번째 찜부터 안 보이고, 안 쓰는 import·부품(`CoreAccountEventHandler`·`serverLikeCards`·`LikesClient.UnlikeButton`)과 `WISH_PAGE_DEFAULT`/`?? 20` 중복이 있다(`LikesLive.tsx`·`main.ts`·`LikesPage.tsx`·`wish.ts`)
+- F-05-9 RV059-12 중간: O-T41 닫힌 고리 측정이 `docs/verification.md` §3.5 규칙 1(고정 도착률)과 다르다. 스태프가 다음 사람을 부르는 실제 레인에는 맞지만, 계획·보고서에 그 까닭과 "절대 분당 값은 서버 용량이 아니다"를 적어 k6/rps 값과 견주지 않게 한다(계획 §5.3)
+- F-05-9 RV059-13 낮음: 계획 §5.3의 `holdMs`·`queueCountAfter`, §5.4의 `summary.json`·`scans.jsonl`·`env.json`을 하네스가 만들지 않는다. O-T41은 `decodedAt`·p50·p95·최댓값도 기록하지 않는다. 기록 형식을 맞추거나 계획을 실제 출력에 맞춘다(`k10-measure.spec.mjs`)
+- F-05-9 RV059-14 낮음: 계획 §13의 `node --check`가 5/5인데 실제는 6/6이다(하네스 5 + 설정 1)
+- F-05-9 RV059-15 낮음: `k10-contract.test.mjs`가 `process.cwd()` 기준이라 저장소 뿌리에서 돌리면 `../../docs`가 저장소 밖을 가리켜 실패한다. `import.meta.url`로 파일 기준 경로를 잡는다(`scanner-k10/k10-contract.test.mjs:9-15`)
+- F-05-9 RV059-16 낮음: S4가 +60초에서만 보정 밖(+31초) QR을 거부하는지 보고, -60초 실행은 보정 밖 QR을 넣지 않는다. 계획 §4 S4의 "±31초" 중 한쪽만 본다(`k10-measure.spec.mjs:122-146`)
+- F-05-9 RV059-17 낮음: O-T41의 사람 20명을 `cursor % 20`으로 항상 채워 `rolesSeen` 20명 검사가 실행기에서 실패할 수 없다. 역할을 명시적으로 모델링하거나 20명은 티켓 섞음이라고 적는다(`k10-measure.spec.mjs:376-383`)
+- F-05-9 RV059-18 낮음: `resultOf`가 글자 포함("통과"·"다시 찍어"·"확인 필요")으로 결과를 가른다. `ScanResult`의 `scan-pass`·`scan-reject`·`scan-check` 클래스를 읽게 한다(`scanner-k10/fixture.mjs:287-292`)
