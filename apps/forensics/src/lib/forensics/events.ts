@@ -166,7 +166,8 @@ export type RejectCode =
   | 'seat-range'
   | 'section-range'
   | 'source-rule'
-  | 'source-mismatch';
+  | 'source-mismatch'
+  | 'arrow-ipc';
 
 export interface Reject {
   ok: false;

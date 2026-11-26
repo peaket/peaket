@@ -1,9 +1,11 @@
-// F-04-16 운영 빌드 화면. 연 길(?case=·?export=)로 원천을 정하고 replay-export를 fetch로만 받는다.
+// F-04-16 운영 빌드 화면 + F-04-17 재생 연결. 연 길(?case=·?export=)로 원천을 정하고 replay-export를 fetch로만 받는다.
 // 정본: docs/features/forensic-replay.md §2.2·§4.2·§6.3·§6.5·§6.8, docs/frontend.md §5.19.
 import { useEffect, useState } from 'react';
 import { ApiError, OPERATIONS, createApiClient, type Operation, type RequestOptions } from '@peaket/api-client';
 import type { OpenTarget, OpenedSource } from '../lib/operating';
 import { resolveOpen } from '../lib/operating';
+import { decodeArrowIpc } from '../lib/replay/arrow-ipc';
+import { prepareReplay, replayScreenState, type ReplaySession } from '../lib/replay/session';
 import {
   replayEnvelopeOf,
   replayFileIssue,
@@ -20,6 +22,7 @@ import { OperatingHead } from './OperatingHead';
 import { ProblemMain } from './ProblemMain';
 import { ReadyMain } from './ReadyMain';
 import { ReceivingMain } from './ReceivingMain';
+import { ReplayMain } from './ReplayMain';
 
 const OPS_ORIGIN: string =
   import.meta.env.VITE_OPS_API_ORIGIN || (import.meta.env.DEV ? 'http://localhost:8080' : 'https://ops-api.peaket.example');
@@ -35,11 +38,13 @@ export function OperatingApp() {
   const search = useSearch();
   const [file, setFile] = useState<Received | null>(null);
   const [problem, setProblem] = useState<ReplayProblem | null>(null);
+  const [session, setSession] = useState<ReplaySession | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
     setFile(null);
     setProblem(null);
+    setSession(null);
     const opened = resolveOpen(search);
     if (!opened.ok) {
       setProblem({ kind: 'error', message: opened.message, retry: false });
@@ -76,14 +81,40 @@ export function OperatingApp() {
     };
   }, [search]);
 
+  // 받은 파일을 한 번 해독하고, F-04-16 경계로 원천·규칙을 검증한 뒤 재생 세션을 만든다.
+  useEffect(() => {
+    if (file === null) {
+      setSession(null);
+      return;
+    }
+    const decoded = decodeArrowIpc(file.bytes, file.envelope);
+    if (!decoded.ok) {
+      setProblem({ kind: 'error', message: decoded.reject.message, retry: false });
+      setFile(null);
+      setSession(null);
+      return;
+    }
+    const validation = validateDecodedReplay(decoded.file, file.target);
+    if (!validation.ok) {
+      setProblem({ kind: 'error', message: validation.message, retry: false });
+      setFile(null);
+      setSession(null);
+      return;
+    }
+    setSession(prepareReplay(decoded.file, validation, file.target));
+    return () => setSession(null);
+  }, [file]);
+
   const opened = resolveOpen(search);
   if (!opened.ok) return <ProblemMain problem={{ kind: 'error', message: opened.message, retry: false }} />;
+
+  const view = replayScreenState({ file: file !== null, problem: problem !== null, session });
   return (
     <div className="col" style={{ minHeight: '100vh' }}>
       <OperatingHead target={opened.target} />
-      {problem ? <ProblemMain problem={problem} /> : null}
-      {!problem && !file ? <ReceivingMain target={opened.target} /> : null}
-      {!problem && file ? <ReadyMain target={file.target} byteLength={file.envelope.byteLength} /> : null}
+      {view === 'problem' && problem ? <ProblemMain problem={problem} /> : null}
+      {view === 'receiving' ? file ? <ReadyMain target={file.target} byteLength={file.envelope.byteLength} /> : <ReceivingMain target={opened.target} /> : null}
+      {view === 'replay' && session ? <ReplayMain session={session} /> : null}
     </div>
   );
 }
