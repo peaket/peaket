@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   K10,
+  intervalStatsOf,
   judgeLane,
   judgeTransition,
   lanePlan,
@@ -192,6 +193,51 @@ test('O-T40 판정은 간격 표본이 없으면 실패한다', () => {
   const verdict = judgeTransition(noTimes);
   assert.equal(verdict.pass, false);
   assert.match(verdict.reasons.join(' / '), /QR 간격 통계가 없다/);
+});
+
+test('O-T40 간격 계산은 2초 간격 330건에서 중앙값 2000ms·2.15초 초과 0을 낸다', () => {
+  const scans = Array.from({ length: 330 }, (_, i) => ({ index: i + 1, presentedAtMs: (i + 1) * 2_000 }));
+  const stats = intervalStatsOf(scans);
+  assert.equal(stats.intervals.length, 329);
+  assert.equal(stats.medianMs, 2_000);
+  assert.equal(stats.maxIntervalMs, 2_000);
+  assert.equal(stats.overruns, 0);
+});
+
+test('O-T40 간격 계산은 2.4초 간격 한 건을 초과 1로 센다', () => {
+  const scans = Array.from({ length: 330 }, (_, i) => ({ index: i + 1, presentedAtMs: (i + 1) * 2_000 }));
+  // 101번째부터 400ms 밀어 100→101번째 간격만 2.4초로 만든다.
+  for (let i = 100; i < scans.length; i++) scans[i].presentedAtMs += 400;
+  const stats = intervalStatsOf(scans);
+  assert.equal(stats.maxIntervalMs, 2_400);
+  assert.equal(stats.overruns, 1);
+  assert.equal(stats.medianMs, 2_000);
+});
+
+test('O-T40 간격 계산은 예열 마지막 QR에서 첫 측정까지의 간격을 넣는다', () => {
+  const scans = [
+    { index: 1, presentedAtMs: 2_000 },
+    { index: 2, presentedAtMs: 4_000 },
+  ];
+  const withoutWarmup = intervalStatsOf(scans);
+  assert.deepEqual(withoutWarmup.intervals, [2_000]);
+  assert.equal(withoutWarmup.medianMs, 2_000);
+
+  const withWarmup = intervalStatsOf(scans, { previousPresentedAtMs: 500 });
+  assert.deepEqual(withWarmup.intervals, [1_500, 2_000]);
+  assert.equal(withWarmup.medianMs, 1_750);
+});
+
+test('O-T40 간격 계산은 표본이 없으면 중앙값·최댓값을 내지 않는다', () => {
+  const empty = intervalStatsOf([]);
+  assert.deepEqual(empty.intervals, []);
+  assert.equal(empty.medianMs, undefined);
+  assert.equal(empty.maxIntervalMs, undefined);
+  assert.equal(empty.overruns, 0);
+
+  const one = intervalStatsOf([{ index: 1, presentedAtMs: 2_000 }]);
+  assert.deepEqual(one.intervals, []);
+  assert.equal(one.medianMs, undefined);
 });
 
 test('O-T40 판정은 실제 오프라인 단절 증거가 없으면 실패한다', () => {

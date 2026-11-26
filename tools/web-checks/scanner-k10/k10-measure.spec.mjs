@@ -190,8 +190,8 @@ test('K10-S5 양도 변경분을 받기 전 옛 키 QR은 통과하고, 받은 �
   // 다음 60초 변경분에 양도된 티켓의 키가 바뀐다.
   api.changesReply = () => ({
     changes: [
-      { seq: 11, kind: 'KEY_REGISTERED', payload: { ticketId: transferred, keyId: newKeyB.keyId, publicKey: newKeyB.publicKey } },
-      { seq: 12, kind: 'KEY_REVOKED', payload: { ticketId: transferred, keyId: oldKey.keyId } },
+      { seq: 11, kind: 'KEY_REGISTERED', payload: { v: 1, ticketId: transferred, keyId: newKeyB.keyId, publicKey: newKeyB.publicKey } },
+      { seq: 12, kind: 'KEY_REVOKED', payload: { v: 1, ticketId: transferred, keyId: oldKey.keyId } },
     ],
     lastSeq: 12,
   });
@@ -450,7 +450,7 @@ test('K10-O-T40-c 변경분 받기가 진행 중일 때 끊겨도 다음 동기�
   const ticket = ticketOf(ticketId(1), key);
   const api = await boot(page, { tickets: [ticket], key, apiOptions: { changesDelayMs: 3_000 } });
   api.changesReply = () => ({
-    changes: [{ seq: 11, kind: 'TICKET_STATUS', payload: { ticketId: ticket.ticketId, status: 'REFUNDED', version: 1 } }],
+    changes: [{ seq: 11, kind: 'TICKET_STATUS', payload: { v: 1, ticketId: ticket.ticketId, status: 'REFUNDED', version: 1 } }],
     lastSeq: 11,
   });
 
