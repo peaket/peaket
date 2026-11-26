@@ -625,8 +625,8 @@ export class FraudActions {
   async decideObjections(actor: FraudActionActor & { accountId: string }, c: FraudCaseRecord, decisions: readonly { accountId: string; decision: 'ACCEPTED' | 'REJECTED'; reason: string }[]): Promise<FraudCaseRecord> {
     const restricted = this.d.restrictions ? await this.d.restrictions.activeForCase(c.caseId) : [];
     const r = this.#domain(() => decideObjections({ case: c, decisions, nowMs: this.d.now(), reversalComplete: false, restrictedAccountIds: restricted.map((x) => x.accountId) }));
-    let next = { ...r.next, events: r.next.events.map((e) => (e.kind === 'OBJECTION_DECIDED' ? { ...e, actorId: actor.accountId } : e)) };
-    let events = r.events.map((e) => (e.kind === 'OBJECTION_DECIDED' ? { ...e, actorId: actor.accountId } : e));
+    let next = { ...r.next, events: r.next.events.map((e) => (e.kind === 'OBJECTION_DECIDED' && e.actorId === null ? { ...e, actorId: actor.accountId } : e)) };
+    let events = r.events.map((e) => (e.kind === 'OBJECTION_DECIDED' && e.actorId === null ? { ...e, actorId: actor.accountId } : e));
     const granted: Record<string, unknown>[] = [];
     for (const d of decisions.filter((x) => x.decision === 'ACCEPTED' && !r.liftAccountIds.includes(x.accountId))) {
       const grants = await this.#priorityForAccount(c, c.caseId, d.accountId, actor.accountId);
@@ -826,7 +826,7 @@ export class FraudActions {
     }
     if (ids.length === 0) return [];
     const out = await this.d.priority.run({ caseId, accountId, eventId: c.eventId, cancelledTicketIds: ids, cancelledTicketId: ids[0]!, decision: 'ACCEPTED', actedBy: actorId });
-    return [...out.grants];
+    return out.grants.map((g, i) => ({ ...g, ...(g.ticketId ? {} : { ticketId: ids[i] ?? ids[0]! }) }));
   }
 
   async #reversalPriority(c: FraudCaseRecord, r: FraudApprovalRecord, accounts: readonly string[], actorId: string): Promise<Record<string, unknown>[]> {
@@ -853,12 +853,15 @@ export class FraudActions {
       const result = g.result;
       if (result !== 'NO_SEAT' && result !== 'ENTRY_STARTED') continue;
       const ticketId = String(g.ticketId ?? '');
-      const accountId = accountOf(ticketId) ?? active(c)[0]?.accountId;
-      if (!ticketId || !accountId) continue;
+      const accountId = accountOf(ticketId);
+      if (!ticketId || !accountId) {
+        await this.#note(c.caseId, 'COMPENSATION_ACCOUNT_UNKNOWN');
+        continue;
+      }
       try {
         await this.d.compensation.open({ caseId: c.caseId, eventId: c.eventId, accountId, ticketId, reason: result, actorId });
       } catch {
-        // 보상 건 생성 실패는 사건 기록의 PRIORITY_GRANTED에 남고 다음 정비가 다시 볼 수 있다
+        await this.#note(c.caseId, 'COMPENSATION_CREATE_FAILED');
       }
     }
   }

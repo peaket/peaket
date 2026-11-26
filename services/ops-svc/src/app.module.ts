@@ -217,10 +217,11 @@ function fraudActionsOf(o: CommonWiring, approvals: import('./modules/investigat
 }
 
 /** F-04-14 증거 서비스 한 벌. FraudActions와 InvestigationsModule이 같은 인스턴스를 쓴다. */
-function evidenceServicesOf(o: CommonWiring): { evidence: EvidenceBundles; posts: ExternalPosts } | undefined {
+function evidenceServicesOf(o: CommonWiring, audit?: InvestigationsModuleDeps['audit']): { evidence: EvidenceBundles; posts: ExternalPosts } | undefined {
   const inv = o.investigations as (InvestigationsModuleDeps & Record<string, any>) | undefined;
   if (!inv?.evidence) return undefined;
-  const deps = inv.evidence as EvidenceBundlesDeps;
+  const deps = { ...(inv.evidence as EvidenceBundlesDeps) } as EvidenceBundlesDeps;
+  if (!deps.audit && audit) deps.audit = audit;
   return { evidence: new EvidenceBundles(deps), posts: new ExternalPosts(deps) };
 }
 
@@ -237,7 +238,7 @@ export class AppModule {
       const cancellations = new DrizzleEventCancellationStore(o.database);
       const alerts = new DrizzleOpsAlertStore(o.database);
       const cases = caseKitOf(o, new DrizzleCsCaseStore(o.database), alerts);
-      const evidenceServices = evidenceServicesOf(o);
+      const evidenceServices = evidenceServicesOf(o, chain);
       const fraudActions = fraudActionsOf(o, new DrizzleFraudApprovalStore(o.database), new DrizzleFraudRestrictions(o.database), evidenceServices);
       const background = o.background === false ? undefined : (o.background ?? {});
       return {
@@ -308,7 +309,7 @@ export class AppModule {
     const cancellations = new MemoryEventCancellationStore(chain);
     const memoryAlerts = new MemoryOpsAlertStore();
     const cases = caseKitOf(o, new MemoryCsCaseStore(chain), memoryAlerts);
-    const evidenceServices = evidenceServicesOf(o);
+    const evidenceServices = evidenceServicesOf(o, chain);
     const fraudActions = fraudActionsOf(o, new MemoryFraudApprovalStore(o.investigations?.store), undefined, evidenceServices);
     return {
       module: AppModule,

@@ -301,6 +301,12 @@ export interface EvidenceObjectStore {
   putOnce(key: string, bytes: Uint8Array, contentType: string): Promise<'CREATED' | 'SAME' | 'DIFFERENT'>;
   get(key: string): Promise<Uint8Array | undefined>;
   list(prefix: string): Promise<readonly { key: string; sizeBytes: number }[]>;
+  /** 시험·메모리 저장소 호환. 운영 파기는 EvidenceDisposer로만 한다(IR-09). */
+  dispose?(prefix: string): Promise<void>;
+}
+
+/** 법적 보존 풀기·모든 판 지우기 전용 포트. 일반 저장소와 다른 신원·클라이언트로 조립한다(IR-09). */
+export interface EvidenceDisposer {
   dispose(prefix: string): Promise<void>;
 }
 
@@ -361,11 +367,13 @@ export interface FraudEvidenceStore {
   getBundle(bundleId: string): Promise<EvidenceBundleRecord | null>;
   listBundles(q: { eventId: string; cursor?: string; limit: number }): Promise<{ items: EvidenceBundleRecord[]; nextCursor: string | null }>;
   updateBundle(b: EvidenceBundleRecord, expectedStatus?: readonly EvidenceBundleStatus[]): Promise<boolean>;
+  /** 묶음 갱신과 관리 연속성 행 추가를 한 트랜잭션으로 쓴다(IR-06). */
+  updateBundleWithCustody?(b: EvidenceBundleRecord, c: Omit<CustodyRecord, 'seq' | 'prevHash' | 'rowHash'>, expectedStatus?: readonly EvidenceBundleStatus[], o?: { idem?: IdempotentWrite; result?: unknown }): Promise<boolean>;
   appendCustody(bundleId: string, c: Omit<CustodyRecord, 'seq' | 'prevHash' | 'rowHash'>): Promise<CustodyRecord>;
   listCustody(bundleId: string): Promise<CustodyRecord[]>;
   listDueForBuild(nowMs: number, limit: number): Promise<EvidenceBundleRecord[]>;
   listDueForDispose(nowMs: number, limit: number): Promise<EvidenceBundleRecord[]>;
-  putExport(e: EvidenceExportRecord, custody: Omit<CustodyRecord, 'seq' | 'prevHash' | 'rowHash'>): Promise<void>;
+  putExport(e: EvidenceExportRecord, custody: Omit<CustodyRecord, 'seq' | 'prevHash' | 'rowHash'>, o?: { idem?: IdempotentWrite; result?: unknown }): Promise<void>;
   exportCountSince(actorId: string, sinceMs: number): Promise<number>;
   listClosedCases(eventId: string): Promise<FraudCaseRecord[]>;
   putPost(p: ExternalPostRecord, o?: { idem?: IdempotentWrite; result?: unknown }): Promise<{ replayed: boolean; result?: unknown }>;

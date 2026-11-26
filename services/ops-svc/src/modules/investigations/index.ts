@@ -146,7 +146,7 @@ export {
   type MaskRegion,
 } from './domain/fraud-evidence.js';
 export { DrizzleFraudEvidenceStore } from './adapters/db/drizzle-fraud-evidence-store.js';
-export { S3EvidenceObjectStore, S3ExternalPostCaptures } from './adapters/s3-evidence-store.js';
+export { S3EvidenceObjectStore, S3EvidenceDisposer, S3ExternalPostCaptures } from './adapters/s3-evidence-store.js';
 export {
   PendingMalwareScanner,
   UnavailableEvidenceDataRequests,

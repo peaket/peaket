@@ -2772,20 +2772,20 @@ export type createOpsEvidenceBundleHoldChangeResponse404 = {
   status: 404
 }
 
-export type createOpsEvidenceBundleHoldChangeResponse409 = {
-  data: ProblemResponse
-  status: 409
-}
-
 export type createOpsEvidenceBundleHoldChangeResponse410 = {
   data: ProblemResponse
   status: 410
 }
 
+export type createOpsEvidenceBundleHoldChangeResponse412 = {
+  data: ProblemResponse
+  status: 412
+}
+
 export type createOpsEvidenceBundleHoldChangeResponseSuccess = (createOpsEvidenceBundleHoldChangeResponse200) & {
   headers: Headers;
 };
-export type createOpsEvidenceBundleHoldChangeResponseError = (createOpsEvidenceBundleHoldChangeResponse400 | createOpsEvidenceBundleHoldChangeResponse403 | createOpsEvidenceBundleHoldChangeResponse404 | createOpsEvidenceBundleHoldChangeResponse409 | createOpsEvidenceBundleHoldChangeResponse410) & {
+export type createOpsEvidenceBundleHoldChangeResponseError = (createOpsEvidenceBundleHoldChangeResponse400 | createOpsEvidenceBundleHoldChangeResponse403 | createOpsEvidenceBundleHoldChangeResponse404 | createOpsEvidenceBundleHoldChangeResponse410 | createOpsEvidenceBundleHoldChangeResponse412) & {
   headers: Headers;
 };
 

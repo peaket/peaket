@@ -11,6 +11,7 @@ import { AcceptMultipart, ContractParams, ContractRouteSchema, CurrentPrincipal,
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { OPS_ROLES, type AdminRole } from '../../admin-accounts/index.js';
 import { ExternalPosts } from '../application/fraud-evidence.js';
+import { Investigations } from '../application/investigations.js';
 import { bareProblem } from '../application/bare-problem.js';
 import { maskRegionsOf, readEvidenceUploadForm, requireXRequestedWith } from './evidence-multipart.js';
 
@@ -28,7 +29,7 @@ const actorOf = (me: Principal) => ({ accountId: me.accountId, role: me.role ?? 
 
 @Controller('v1/ops')
 export class ExternalPostsController {
-  constructor(private readonly posts: ExternalPosts) {}
+  constructor(private readonly posts: ExternalPosts, private readonly investigations: Investigations) {}
 
   @Post('external-posts')
   @HttpCode(201)
@@ -56,6 +57,7 @@ export class ExternalPostsController {
       const capturedAt = field('capturedAt');
       const source = field('source');
       if (!eventId || !url || !capturedAt || (source !== 'REPORT' && source !== 'MANUAL')) throw bareProblem('invalid-body', 400, '필수 칸이 빠졌습니다');
+      await this.investigations.authorize(actorOf(me), 'EXTERNAL_POST_CREATE', { eventId });
       const capture = form.files.find((f) => f.field === 'capture');
       if (!capture) throw bareProblem('invalid-body', 400, '캡처 파일이 없습니다');
       const capturedAtMs = Date.parse(capturedAt);
@@ -88,6 +90,7 @@ export class ExternalPostsController {
     try {
       const eventId = one(q.eventId);
       if (!eventId) throw bareProblem('invalid-query', 400, 'eventId가 필요합니다');
+      await this.investigations.authorize(actorOf(me), 'EXTERNAL_POST_LIST', { eventId });
       return await this.posts.list(actorOf(me), { eventId, ...(one(q.cursor) ? { cursor: one(q.cursor)! } : {}), limit: one(q.limit) ? Math.min(100, Math.max(1, Number(one(q.limit)))) : 50 });
     } catch (e) {
       reject(e);
@@ -100,6 +103,7 @@ export class ExternalPostsController {
   @ContractRouteSchema({ params: GetOpsExternalPostCaptureParams, responses: { 200: GetOpsExternalPostCaptureResponse } })
   async capture(@ContractParams(GetOpsExternalPostCaptureParams) params: { postId: string }, @CurrentPrincipal() me: Principal, @Res() reply: FastifyReply) {
     try {
+      await this.investigations.authorize(actorOf(me), 'EXTERNAL_POST_VIEW', {});
       const out = await this.posts.view(actorOf(me), params.postId);
       void reply.header('cache-control', 'no-store').type('image/png').send(Buffer.from(out.bytes));
     } catch (e) {

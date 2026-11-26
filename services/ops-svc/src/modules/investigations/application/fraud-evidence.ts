@@ -26,6 +26,7 @@ import {
   type CustodyRecord,
   type DataRequestScope,
   type EvidenceBundleRecord,
+  type EvidenceBundleStatus,
   type EvidenceExportKind,
   type EvidenceExportRecord,
   type EvidenceFileRecord,
@@ -76,6 +77,8 @@ export interface EvidenceBundlesDeps {
   access: InvestigationAccessLog;
   now: () => number;
   reauth?: ApprovalReauthVerifier;
+  audit?: { append(r: { recordType: string; recordId: string; payload: Record<string, unknown>; nowMs: number }): Promise<void> };
+  disposer?: import('../domain/ports.js').EvidenceDisposer;
 }
 
 export interface ExternalPostForm {
@@ -119,6 +122,7 @@ export class EvidenceBundles {
     const view = this.#bundleView(bundle, [{ ...(await this.#createdCustody(bundle, actor.accountId, body.reason, nowMs)) }]);
     const out = await this.d.store.putBundle(bundle, this.#custodyInput(actor.accountId, body.reason, nowMs), { idem, result: view });
     this.#known.add(bundle.bundleId);
+    await this.#audit('EVIDENCE_CREATED', { bundleId: bundle.bundleId, caseId }, nowMs);
     if (out.replayed) return (out.result as Record<string, unknown>) ?? view;
     return view;
   }
@@ -144,10 +148,15 @@ export class EvidenceBundles {
       rows: Math.max(1, bundle.files.length),
       outcome: 'ALLOWED',
     });
+    await this.#audit('EVIDENCE_VIEWED', { bundleId: bundle.bundleId, caseId: bundle.caseId }, this.d.now());
     return this.#bundleView(bundle, custody.length > 0 ? custody : [row]);
   }
 
-  async holdChange(actor: { accountId: string; role: string }, bundleId: string, _idem: IdempotentWrite, body: { holdReason: EvidenceHoldReason; basis: string }): Promise<Record<string, unknown>> {
+  async holdChange(actor: { accountId: string; role: string }, bundleId: string, idem: IdempotentWrite, body: { holdReason: EvidenceHoldReason; basis: string }): Promise<Record<string, unknown>> {
+    const found = await this.d.store.findByIdempotent(idem);
+    if (found.kind === 'reused') throw bareProblem('idempotency-key-reused', 422, '같은 멱등 키를 다른 요청에 썼습니다');
+    if (found.kind === 'in_progress') throw bareProblem('idempotency-request-in-progress', 409, '같은 요청을 처리 중입니다');
+    if (found.kind === 'replay') return found.result as Record<string, unknown>;
     const bundle = await this.d.store.getBundle(bundleId);
     if (!bundle) throw bareProblem('not-found', 404, '증거 묶음을 찾을 수 없습니다');
     if (!body || typeof body.basis !== 'string') throw bareProblem('invalid-body', 400, '보존 이유와 근거가 필요합니다');
@@ -156,13 +165,20 @@ export class EvidenceBundles {
     } catch (e) {
       throw asBareProblem(e) as Error;
     }
+    const nowMs = this.d.now();
     const next: EvidenceBundleRecord = { ...bundle, holdReason: body.holdReason };
-    if (!(await this.d.store.updateBundle(next, ['BUILDING', 'SEALED']))) throw bareProblem('precondition-failed', 409, '다른 곳에서 먼저 고쳤습니다');
-    await this.d.store.appendCustody(bundleId, this.#custodyInput(actor.accountId, body.basis, this.d.now(), 'HOLD_CHANGED'));
+    const input = this.#custodyInput(actor.accountId, body.basis, nowMs, 'HOLD_CHANGED');
+    const view = this.#bundleView(next, await this.d.store.listCustody(bundleId));
+    if (!(await this.#updateWithCustody(next, input, ['BUILDING', 'SEALED'], { idem, result: view }))) throw bareProblem('precondition-failed', 412, '다른 곳에서 먼저 고쳤습니다');
+    await this.#audit('EVIDENCE_HOLD_CHANGED', { bundleId, caseId: bundle.caseId, holdReason: body.holdReason }, nowMs);
     return this.#bundleView(next, await this.d.store.listCustody(bundleId));
   }
 
-  async holdEndRequest(actor: { accountId: string; role: string }, bundleId: string, _idem: IdempotentWrite, body: { basis: string }): Promise<Record<string, unknown>> {
+  async holdEndRequest(actor: { accountId: string; role: string }, bundleId: string, idem: IdempotentWrite, body: { basis: string }): Promise<Record<string, unknown>> {
+    const found = await this.d.store.findByIdempotent(idem);
+    if (found.kind === 'reused') throw bareProblem('idempotency-key-reused', 422, '같은 멱등 키를 다른 요청에 썼습니다');
+    if (found.kind === 'in_progress') throw bareProblem('idempotency-request-in-progress', 409, '같은 요청을 처리 중입니다');
+    if (found.kind === 'replay') return found.result as Record<string, unknown>;
     const bundle = await this.d.store.getBundle(bundleId);
     if (!bundle) throw bareProblem('not-found', 404, '증거 묶음을 찾을 수 없습니다');
     if (!body || typeof body.basis !== 'string') throw bareProblem('invalid-body', 400, '근거가 필요합니다');
@@ -173,17 +189,23 @@ export class EvidenceBundles {
     }
     const nowMs = this.d.now();
     const next: EvidenceBundleRecord = { ...bundle, holdEndRequestedBy: actor.accountId, holdEndRequestedAtMs: nowMs, holdEndBasis: body.basis };
-    if (!(await this.d.store.updateBundle(next, ['BUILDING', 'SEALED']))) throw bareProblem('precondition-failed', 409, '다른 곳에서 먼저 고쳤습니다');
-    await this.d.store.appendCustody(bundleId, this.#custodyInput(actor.accountId, body.basis, nowMs, 'HOLD_END_REQUESTED'));
+    const input = this.#custodyInput(actor.accountId, body.basis, nowMs, 'HOLD_END_REQUESTED');
+    const view = this.#bundleView(next, await this.d.store.listCustody(bundleId));
+    if (!(await this.#updateWithCustody(next, input, ['BUILDING', 'SEALED'], { idem, result: view }))) throw bareProblem('precondition-failed', 412, '다른 곳에서 먼저 고쳤습니다');
+    await this.#audit('EVIDENCE_HOLD_END_REQUESTED', { bundleId, caseId: bundle.caseId }, nowMs);
     return this.#bundleView(next, await this.d.store.listCustody(bundleId));
   }
 
   async holdEndConfirm(
     actor: { accountId: string; role: string; sessionId?: string },
     bundleId: string,
-    _idem: IdempotentWrite,
+    idem: IdempotentWrite,
     reauthToken: string | undefined,
   ): Promise<{ bundleId: string; caseId: string; holdEndedAt: string; disposeAfter: string }> {
+    const found = await this.d.store.findByIdempotent(idem);
+    if (found.kind === 'reused') throw bareProblem('idempotency-key-reused', 422, '같은 멱등 키를 다른 요청에 썼습니다');
+    if (found.kind === 'in_progress') throw bareProblem('idempotency-request-in-progress', 409, '같은 요청을 처리 중입니다');
+    if (found.kind === 'replay') return found.result as { bundleId: string; caseId: string; holdEndedAt: string; disposeAfter: string };
     const bundle = await this.d.store.getBundle(bundleId);
     if (!bundle) throw bareProblem('not-found', 404, '증거 묶음을 찾을 수 없습니다');
     try {
@@ -200,17 +222,18 @@ export class EvidenceBundles {
     }
     if (verified.accountId !== actor.accountId) throw bareProblem('reauth-required', 403, '재인증이 필요합니다');
     const nowMs = this.d.now();
-    const next: EvidenceBundleRecord = {
-      ...bundle,
-      holdEndConfirmedBy: actor.accountId,
-      holdEndedAtMs: nowMs,
-    };
-    if (!(await this.d.store.updateBundle(next, ['BUILDING', 'SEALED']))) throw bareProblem('precondition-failed', 409, '다른 곳에서 먼저 고쳤습니다');
-    await this.d.store.appendCustody(bundleId, this.#custodyInput(actor.accountId, bundle.holdEndBasis, nowMs, 'HOLD_ENDED'));
-    return { bundleId, caseId: bundle.caseId, holdEndedAt: new Date(nowMs).toISOString(), disposeAfter: new Date(nowMs + EVIDENCE_RETENTION_AFTER_HOLD_MS).toISOString() };
+    const next: EvidenceBundleRecord = { ...bundle, holdEndConfirmedBy: actor.accountId, holdEndedAtMs: nowMs };
+    const result = { bundleId, caseId: bundle.caseId, holdEndedAt: new Date(nowMs).toISOString(), disposeAfter: new Date(nowMs + EVIDENCE_RETENTION_AFTER_HOLD_MS).toISOString() };
+    if (!(await this.#updateWithCustody(next, this.#custodyInput(actor.accountId, bundle.holdEndBasis, nowMs, 'HOLD_ENDED'), ['BUILDING', 'SEALED'], { idem, result }))) throw bareProblem('precondition-failed', 412, '다른 곳에서 먼저 고쳤습니다');
+    await this.#audit('EVIDENCE_HOLD_ENDED', { bundleId, caseId: bundle.caseId }, nowMs);
+    return result;
   }
 
-  async export(actor: { accountId: string; role: string }, bundleId: string, _idem: IdempotentWrite, body: { kind: EvidenceExportKind; dataRequestId?: string; reason: string }): Promise<Record<string, unknown>> {
+  async export(actor: { accountId: string; role: string }, bundleId: string, idem: IdempotentWrite, body: { kind: EvidenceExportKind; dataRequestId?: string; reason: string }): Promise<Record<string, unknown>> {
+    const found = await this.d.store.findByIdempotent(idem);
+    if (found.kind === 'reused') throw bareProblem('idempotency-key-reused', 422, '같은 멱등 키를 다른 요청에 썼습니다');
+    if (found.kind === 'in_progress') throw bareProblem('idempotency-request-in-progress', 409, '같은 요청을 처리 중입니다');
+    if (found.kind === 'replay') return found.result as Record<string, unknown>;
     if (!body || (body.kind !== 'AUTHORITY' && body.kind !== 'PROMOTER' && body.kind !== 'COMPLAINT')) throw bareProblem('invalid-body', 400, '내보내기 양식이 올바르지 않습니다');
     if (typeof body.reason !== 'string' || body.reason.trim() === '') throw bareProblem('invalid-body', 400, '사유가 필요합니다');
     const bundle = await this.d.store.getBundle(bundleId);
@@ -220,7 +243,10 @@ export class EvidenceBundles {
     if (!(await this.#verifyBundle(bundle))) throw bareProblem('evidence-integrity-mismatch', 409, '증거 묶음의 해시가 맞지 않습니다');
     const since = this.d.now() - (this.d.now() % DAY);
     const count = await this.d.store.exportCountSince(actor.accountId, since);
-    if (count >= EXPORT_DAILY_LIMIT) throw bareProblem('export-rate-limited', 429, '내보내기 하루 한도를 넘었습니다');
+    if (count >= EXPORT_DAILY_LIMIT) {
+      await this.d.access.record({ accountId: actor.accountId, role: actor.role, action: 'EVIDENCE_EXPORT', eventId: bundle.eventId, caseId: bundle.caseId, rows: 0, detail: { reason: 'export-rate-limited' }, outcome: 'DENIED' });
+      throw bareProblem('export-rate-limited', 429, '내보내기 하루 한도를 넘었습니다');
+    }
     const nowMs = this.d.now();
     const detail: Record<string, unknown> = {};
     if (count > EXPORT_VOLUME_CHECK) detail.volumeCheck = 'INV_EXPORT_VOLUME';
@@ -263,8 +289,9 @@ export class EvidenceBundles {
         actorId: actor.accountId,
         createdAtMs: nowMs,
       };
-      await this.d.store.putExport(record, this.#custodyInput(actor.accountId, body.reason, nowMs, 'EXPORTED', 'AUTHORITY', undefined, scope.dataRequestId));
+      await this.d.store.putExport(record, this.#custodyInput(actor.accountId, body.reason, nowMs, 'EXPORTED', 'AUTHORITY', undefined, scope.dataRequestId), { idem, result: this.#exportView(record) });
       await this.#ensureExportCustody(bundleId, this.#custodyInput(actor.accountId, body.reason, nowMs, 'EXPORTED', 'AUTHORITY', undefined, scope.dataRequestId));
+      await this.#audit('EVIDENCE_EXPORTED', { bundleId, caseId: bundle.caseId, kind: 'AUTHORITY', rows: built.rows }, nowMs);
       detail.dataRequestId = scope.dataRequestId;
       if (built.rows > BULK_EXPORT_ROWS) detail.bulk = true;
       await this.d.access.record({ accountId: actor.accountId, role: actor.role, action: 'EVIDENCE_EXPORT', eventId: bundle.eventId, caseId: bundle.caseId, rows: built.rows, detail, outcome: 'ALLOWED' });
@@ -280,14 +307,17 @@ export class EvidenceBundles {
       const sha = sha256Hex(bytes);
       const rows = closed.length;
       const exportId = randomUUID();
+      const result = { kind: 'PROMOTER', exportId, rows, sha256: sha, csv };
       await this.d.store.putExport(
         { exportId, bundleId, kind: 'PROMOTER', dataRequestId: null, documentId: null, sha256: sha, rows, reason: body.reason, actorId: actor.accountId, createdAtMs: nowMs },
         this.#custodyInput(actor.accountId, body.reason, nowMs, 'EXPORTED', 'PROMOTER'),
+        { idem, result },
       );
       await this.#ensureExportCustody(bundleId, this.#custodyInput(actor.accountId, body.reason, nowMs, 'EXPORTED', 'PROMOTER'));
+      await this.#audit('EVIDENCE_EXPORTED', { bundleId, caseId: bundle.caseId, kind: 'PROMOTER', rows }, nowMs);
       if (rows > BULK_EXPORT_ROWS) detail.bulk = true;
       await this.d.access.record({ accountId: actor.accountId, role: actor.role, action: 'EVIDENCE_EXPORT', eventId: bundle.eventId, caseId: bundle.caseId, rows, detail, outcome: 'ALLOWED' });
-      return { kind: 'PROMOTER', exportId, rows, sha256: sha, csv };
+      return result;
     }
 
     const c = await this.d.cases.getCase(bundle.caseId);
@@ -315,8 +345,10 @@ export class EvidenceBundles {
     await this.d.store.putExport(
       { exportId, bundleId, kind: 'COMPLAINT', dataRequestId: null, documentId: null, sha256: sha, rows: 1, reason: body.reason, actorId: actor.accountId, createdAtMs: nowMs },
       this.#custodyInput(actor.accountId, body.reason, nowMs, 'EXPORTED', 'COMPLAINT'),
+      { idem, result: packet },
     );
     await this.#ensureExportCustody(bundleId, this.#custodyInput(actor.accountId, body.reason, nowMs, 'EXPORTED', 'COMPLAINT'));
+    await this.#audit('EVIDENCE_EXPORTED', { bundleId, caseId: bundle.caseId, kind: 'COMPLAINT', rows: 1 }, nowMs);
     await this.d.access.record({ accountId: actor.accountId, role: actor.role, action: 'EVIDENCE_EXPORT', eventId: bundle.eventId, caseId: bundle.caseId, rows: 1, detail, outcome: 'ALLOWED' });
     return packet;
   }
@@ -338,14 +370,18 @@ export class EvidenceBundles {
     let n = 0;
     for (const bundle of due) {
       try {
-        await this.d.objects.dispose(bundle.s3Prefix);
+        if (this.d.disposer) await this.d.disposer.dispose(bundle.s3Prefix);
+        else if (this.d.objects.dispose) await this.d.objects.dispose(bundle.s3Prefix);
+        else throw new Error('파기 포트가 없다');
       } catch {
         await this.d.alerts.raise({ eventId: bundle.eventId, version: 1, severity: 'SEV2', kind: 'EVIDENCE_DISPOSE_FAILED' });
         continue;
       }
       const next: EvidenceBundleRecord = { ...bundle, status: 'DISPOSED' };
-      if (!(await this.d.store.updateBundle(next, ['SEALED']))) continue;
-      await this.d.store.appendCustody(bundle.bundleId, this.#custodyInput(null, '보존 기간 만료', nowMs, 'DISPOSED'));
+      const input = this.#custodyInput(null, '보존 기간 만료', nowMs, 'DISPOSED');
+      const ok = await this.#updateWithCustody(next, input, ['SEALED']);
+      if (!ok) continue;
+      await this.#audit('EVIDENCE_DISPOSED', { bundleId: bundle.bundleId, caseId: bundle.caseId }, nowMs);
       n += 1;
     }
     return n;
@@ -388,11 +424,42 @@ export class EvidenceBundles {
     const posts = await this.d.store.listPosts({ eventId: c.eventId, limit: 1000 });
     const files: { name: string; bytes: Uint8Array }[] = [];
     for (const f of inventory.files) files.push({ name: `records/${f.table}.arrow`, bytes: f.arrow });
-    files.push({ name: 'case.json', bytes: Buffer.from(canonicalJson(c), 'utf8') });
+    const caseForBundle = {
+      caseId: c.caseId,
+      eventId: c.eventId,
+      clusterId: c.clusterId,
+      status: c.status,
+      reasonCategory: c.reasonCategory,
+      cancelDeadlineAtMs: c.cancelDeadlineAtMs,
+      appealDueAtMs: c.appealDueAtMs,
+      approvalId: c.approvalId,
+      outcomeLabel: c.outcomeLabel,
+      version: c.version,
+      createdAtMs: c.createdAtMs,
+      closedAtMs: c.closedAtMs,
+      members: c.members.map((m) => ({
+        ticketCount: m.ticketCount,
+        signals: m.signals,
+        addedBy: m.addedBy,
+        removedAtMs: m.removedAtMs,
+        appealResult: m.appealResult,
+        objectionResult: m.objectionResult,
+        lockExpiresAtMs: m.lockExpiresAtMs,
+      })),
+      events: c.events.map((e) => ({ seq: e.seq, kind: e.kind, occurredAtMs: e.occurredAtMs })),
+    };
+    files.push({ name: 'case.json', bytes: Buffer.from(canonicalJson(caseForBundle), 'utf8') });
     files.push({ name: 'cluster.json', bytes: Buffer.from(canonicalJson(cluster ?? { clusterId: c.clusterId }), 'utf8') });
     files.push({ name: 'snapshots.json', bytes: Buffer.from(canonicalJson(inventory.snapshots), 'utf8') });
     files.push({ name: 'queries.json', bytes: Buffer.from(canonicalJson({ files: inventory.files.map((f) => ({ table: f.table, sql: f.sql })) }), 'utf8') });
-    for (const p of posts.items) files.push({ name: `posts/${p.postId}.json`, bytes: Buffer.from(canonicalJson(p), 'utf8') });
+    for (const p of posts.items) {
+      const capture = await this.d.captures.get(p.captureKey);
+      if (capture) {
+        const ext = p.captureKey.endsWith('.pdf') ? 'pdf' : p.captureKey.endsWith('.jpg') ? 'jpg' : 'png';
+        files.push({ name: `posts/${p.postId}/original.${ext}`, bytes: capture });
+      }
+      files.push({ name: `posts/${p.postId}.json`, bytes: Buffer.from(canonicalJson(p), 'utf8') });
+    }
     const manifest = manifestOf({ caseId: c.caseId, eventId: c.eventId, createdAtMs: bundle.createdAtMs, files });
     for (const f of files) {
       const result = await this.d.objects.putOnce(`${bundle.s3Prefix}${f.name}`, f.bytes, 'application/octet-stream');
@@ -415,7 +482,8 @@ export class EvidenceBundles {
       queries: { files: inventory.files.map((f) => ({ table: f.table, sql: f.sql })), snapshots: inventory.snapshots.map((s) => s.version) },
     };
     if (!(await this.d.store.updateBundle(next, ['BUILDING']))) return false;
-    await this.d.store.appendCustody(bundle.bundleId, this.#custodyInput(null, null, this.d.now(), 'SEALED'));
+    await this.d.store.appendCustody(bundle.bundleId, this.#custodyInput(null, `manifest:${manifest.manifestSha256}`, this.d.now(), 'SEALED'));
+    await this.#audit('EVIDENCE_SEALED', { bundleId: bundle.bundleId, caseId: bundle.caseId, manifestSha256: manifest.manifestSha256 }, this.d.now());
     this.#known.add(bundle.bundleId);
     return true;
   }
@@ -503,6 +571,26 @@ export class EvidenceBundles {
       createdAtMs: nowMs,
       files: [],
     };
+  }
+
+  async #updateWithCustody(
+    next: EvidenceBundleRecord,
+    custody: Omit<CustodyRecord, 'seq' | 'prevHash' | 'rowHash'>,
+    expected: readonly EvidenceBundleStatus[],
+    o?: { idem?: IdempotentWrite; result?: unknown },
+  ): Promise<boolean> {
+    if (this.d.store.updateBundleWithCustody) return this.d.store.updateBundleWithCustody(next, custody, expected, o);
+    if (!(await this.d.store.updateBundle(next, expected))) return false;
+    await this.d.store.appendCustody(next.bundleId, custody);
+    return true;
+  }
+
+  async #audit(action: string, payload: Record<string, unknown>, nowMs: number): Promise<void> {
+    try {
+      await this.d.audit?.append({ recordType: 'ADMIN_DATA_ACCESS', recordId: String(payload.caseId ?? payload.bundleId ?? ''), payload: { action, ...payload }, nowMs });
+    } catch {
+      // 감사 기록 실패는 관리 연속성 기록과 별개다. 정비가 다음에 다시 남긴다.
+    }
   }
 
   #custodyInput(
@@ -624,22 +712,25 @@ export class ExternalPosts {
     const view = this.#postView(post);
     const out = await this.d.store.putPost(post, { idem, result: view });
     if (out.replayed) return (out.result as Record<string, unknown>) ?? view;
+    await this.d.access.record({ accountId: actor.accountId, role: actor.role, action: 'EXTERNAL_POST', eventId: form.eventId, rows: 1, detail: { operation: 'REGISTER', postId }, outcome: 'ALLOWED' });
     if (matched.length > 0) await this.#postMatched(post, matched);
     return view;
   }
 
-  async list(_actor: { accountId: string; role: string }, q: { eventId: string; cursor?: string; limit: number }): Promise<{ items: Record<string, unknown>[]; nextCursor: string | null }> {
+  async list(actor: { accountId: string; role: string }, q: { eventId: string; cursor?: string; limit: number }): Promise<{ items: Record<string, unknown>[]; nextCursor: string | null }> {
     const page = await this.d.store.listPosts(q);
+    await this.d.access.record({ accountId: actor.accountId, role: actor.role, action: 'EXTERNAL_POST', eventId: q.eventId, rows: page.items.length, detail: { operation: 'LIST' }, outcome: 'ALLOWED' });
     return { items: page.items.map((p) => this.#postView(p)), nextCursor: page.nextCursor };
   }
 
-  async view(_actor: { accountId: string; role: string }, postId: string): Promise<{ bytes: Uint8Array; contentType: 'image/png' }> {
+  async view(actor: { accountId: string; role: string }, postId: string): Promise<{ bytes: Uint8Array; contentType: 'image/png' }> {
     const post = await this.d.store.getPost(postId);
     if (!post) throw bareProblem('not-found', 404, '외부 게시물을 찾을 수 없습니다');
     if (post.scanStatus === 'PENDING') throw bareProblem('external-post-scan-pending', 409, '악성 코드 검사가 아직 끝나지 않았습니다');
     if (post.scanStatus !== 'CLEAN' || post.captureKey.endsWith('.pdf')) throw bareProblem('external-post-view-unavailable', 409, '보기용 사본을 만들 수 없는 게시물입니다');
     const bytes = await this.d.captures.get(viewKeyOf(postId));
     if (!bytes) throw bareProblem('external-post-view-unavailable', 409, '보기용 사본이 아직 없습니다');
+    await this.d.access.record({ accountId: actor.accountId, role: actor.role, action: 'EXTERNAL_POST', eventId: post.eventId, rows: 1, detail: { operation: 'VIEW', postId }, outcome: 'ALLOWED' });
     return { bytes, contentType: 'image/png' };
   }
 
@@ -671,14 +762,19 @@ export class ExternalPosts {
 
   async disposeDue(nowMs: number): Promise<number> {
     const rows = await this.d.store.listUnusedPostsForDisposal(nowMs, 1000);
+    let n = 0;
     for (const post of rows) {
+      if (post.matchedTicketIds.length > 0) continue;
+      const event = await this.d.eventInfo.get(post.eventId);
+      if (!event || nowMs < event.showAtMs + 30 * DAY) continue;
       try {
         await this.d.captures.dispose(`captures/${post.postId}/`);
+        n += 1;
       } catch {
         await this.d.alerts.raise({ eventId: post.eventId, version: 1, severity: 'SEV2', kind: 'EXTERNAL_POST_DISPOSE_FAILED' });
       }
     }
-    return rows.length;
+    return n;
   }
 
   async postSeatTicketIds(eventId: string): Promise<readonly string[]> {
@@ -729,11 +825,20 @@ export function startEvidenceSweep(o: { evidence: EvidenceBundles; posts: Extern
   timer.unref?.();
   async function tick(): Promise<void> {
     const now = o.now?.() ?? Date.now();
-    await o.evidence.buildDue(now);
-    await o.evidence.verifyDue(now);
-    await o.evidence.disposeDue(now);
-    await o.posts.scanDue(now);
-    await o.posts.disposeDue(now);
+    const steps: (() => Promise<unknown>)[] = [
+      () => o.evidence.buildDue(now),
+      () => o.evidence.verifyDue(now),
+      () => o.evidence.disposeDue(now),
+      () => o.posts.scanDue(now),
+      () => o.posts.disposeDue(now),
+    ];
+    for (const step of steps) {
+      try {
+        await step();
+      } catch {
+        // 한 단계의 일시 오류가 다음 단계와 프로세스를 멈추지 않게 한다(IR-07).
+      }
+    }
   }
   return { tick, stop: () => clearInterval(timer) };
 }

@@ -223,7 +223,7 @@ export function holdChangeGuard(o: { bundle: EvidenceBundleRecord; holdReason: E
   if (o.bundle.status === 'DISPOSED') throw problem('evidence-disposed', 410, '파기된 증거 묶음입니다');
   if (o.holdReason !== 'DISPUTE' && o.holdReason !== 'INVESTIGATION') throw problem('invalid-body', 400, '보존 이유는 DISPUTE·INVESTIGATION만 고를 수 있습니다');
   if (o.basis.trim().length < 5 || o.basis.length > 500) throw problem('invalid-body', 400, '근거는 5~500자입니다');
-  if (o.bundle.holdReason !== 'OBJECTION') throw problem('precondition-failed', 409, '이미 보존 이유를 바꿨습니다');
+  if (o.bundle.holdReason !== 'OBJECTION') throw problem('precondition-failed', 412, '이미 보존 이유를 바꿨습니다');
 }
 
 export function holdEndRequestGuard(o: { bundle: EvidenceBundleRecord; requesterId: string; basis: string }): void {
@@ -294,7 +294,10 @@ export function promoterCsv(o: { eventName: string; cases: readonly PromoterCase
     }, 0);
   const cancelActions = (c: PromoterCase): number =>
     c.cancelActionCount ?? (c.events ?? []).filter((e) => e.kind === 'ACTION_EXECUTED' && acceptedResults(c) > 0).length;
+  const restrictActions = (c: PromoterCase): number =>
+    c.restrictActionCount ?? (c.events ?? []).filter((e) => e.kind === 'ACTION_EXECUTED' && e.detail?.action === 'RESTRICT').length;
   const cancelled = (c: PromoterCase): number => c.cancelledTicketCount ?? acceptedResults(c);
+  const resold = (c: PromoterCase): number => c.resoldAtFaceValueCount ?? cancelled(c);
   const appealAccepted = (c: PromoterCase): number =>
     c.appealAcceptedCount ?? (c.members ?? []).filter((m) => m.objectionResult === 'ACCEPTED' || m.appealResult === 'ACCEPTED').length;
   const appealJudged = (c: PromoterCase): number =>
@@ -311,9 +314,9 @@ export function promoterCsv(o: { eventName: string; cases: readonly PromoterCase
   const rows: { metric: string; value: string }[] = [];
   rows.push({ metric: 'closed_case_count', value: suppressed(cases.length) });
   rows.push({ metric: 'cancel_action_count', value: suppressed(sum(cancelActions)) });
-  rows.push({ metric: 'restrict_action_count', value: suppressed(sum((c) => c.restrictActionCount ?? 0)) });
+  rows.push({ metric: 'restrict_action_count', value: suppressed(sum(restrictActions)) });
   rows.push({ metric: 'cancelled_ticket_count', value: suppressed(sum(cancelled)) });
-  rows.push({ metric: 'resold_at_face_value_count', value: suppressed(sum((c) => c.resoldAtFaceValueCount ?? 0)) });
+  rows.push({ metric: 'resold_at_face_value_count', value: suppressed(sum(resold)) });
   if (other > 0) {
     // 2차 가림: OTHER를 가렸는데 전체 합계에서 빼면 그 값이 드러나므로, 가장 작은 보이는 칸도 함께 가린다.
     visible.sort((a, b) => a.count - b.count || (a.category < b.category ? -1 : 1));
@@ -468,10 +471,22 @@ export async function maskCapture(o: {
 }): Promise<Uint8Array | undefined> {
   if (o.mediaType === 'application/pdf') return undefined;
   if (!maskRegionsValid(o.regions)) throw problem('invalid-body', 400, '가릴 자리가 올바르지 않습니다');
-  const { data, info } = await sharp(Buffer.from(o.bytes), { failOn: 'none' })
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+  const size = o.mediaType === 'image/png' ? pngSize(o.bytes) : jpegSize(o.bytes);
+  if (size && (size.width > EVIDENCE_CAPTURE_MAX_SIDE || size.height > EVIDENCE_CAPTURE_MAX_SIDE || size.width * size.height > EVIDENCE_CAPTURE_MAX_PIXELS)) {
+    throw problem('external-post-capture-pixel-too-large', 422, '화면 캡처의 화소가 너무 많습니다');
+  }
+  let data: Buffer;
+  let info: { width: number; height: number; channels: number };
+  try {
+    const out = await sharp(Buffer.from(o.bytes), { failOn: 'none', limitInputPixels: EVIDENCE_CAPTURE_MAX_PIXELS })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    data = out.data;
+    info = out.info;
+  } catch {
+    throw problem('external-post-capture-pixel-too-large', 422, '화면 캡처를 읽을 수 없거나 화소가 너무 많습니다');
+  }
   const width = info.width;
   const height = info.height;
   const channels = info.channels;
@@ -491,7 +506,7 @@ export async function maskCapture(o: {
       }
     }
   }
-  return sharp(out, { raw: { width, height, channels } }).png({ compressionLevel: 9 }).toBuffer();
+  return sharp(out, { raw: { width, height, channels: channels as 4 } }).png({ compressionLevel: 9 }).toBuffer();
 }
 
 export function objectionCompensationOf(

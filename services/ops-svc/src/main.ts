@@ -57,11 +57,13 @@ import {
   EvidenceBundles,
   ExternalPosts,
   PendingMalwareScanner,
+  S3EvidenceDisposer,
   S3EvidenceObjectStore,
   S3ExternalPostCaptures,
   UnavailableEvidenceDataRequests,
   UnavailableEvidenceInventory,
   UnavailableEvidenceSubmissionBuilder,
+  UnavailableFraudCompensation,
   UnavailableFraudEventInfo,
   UnavailableFraudInquiries,
   UnavailableFraudSeats,
@@ -223,13 +225,15 @@ const investigationAccess = new LoggingInvestigationAccess();
 // F-04-14 증거 저장소. 버킷·KMS 키가 없으면 증거 경로를 열지 않는다(기준 트리 404).
 const evidenceBucket = process.env.PEAKET_EVIDENCE_BUCKET;
 const evidenceKmsKeyId = process.env.PEAKET_EVIDENCE_KMS_KEY_ID;
+const evidenceQuarantineBucket = process.env.PEAKET_EVIDENCE_QUARANTINE_BUCKET;
 const evidenceEndpoint = process.env.PEAKET_EVIDENCE_S3_ENDPOINT;
 const evidenceObjects = evidenceBucket && evidenceKmsKeyId ? new S3EvidenceObjectStore({ bucket: evidenceBucket, kmsKeyId: evidenceKmsKeyId, ...(evidenceEndpoint ? { endpoint: evidenceEndpoint } : {}) }) : undefined;
+const evidenceDisposer = evidenceBucket && evidenceKmsKeyId ? new S3EvidenceDisposer({ bucket: evidenceBucket, kmsKeyId: evidenceKmsKeyId, ...(evidenceEndpoint ? { endpoint: evidenceEndpoint } : {}) }) : undefined;
 const evidenceCaptures =
-  evidenceBucket && evidenceKmsKeyId
+  evidenceBucket && evidenceKmsKeyId && evidenceQuarantineBucket
     ? new S3ExternalPostCaptures({
         evidenceBucket,
-        quarantineBucket: process.env.PEAKET_EVIDENCE_QUARANTINE_BUCKET ?? evidenceBucket,
+        quarantineBucket: evidenceQuarantineBucket,
         kmsKeyId: evidenceKmsKeyId,
         ...(evidenceEndpoint ? { endpoint: evidenceEndpoint } : {}),
       })
@@ -252,6 +256,7 @@ const evidence =
         access: investigationAccess,
         now: () => Date.now(),
         ...(reauth ? { reauth } : {}),
+        ...(evidenceDisposer ? { disposer: evidenceDisposer } : {}),
       }
     : undefined;
 const investigations = {
@@ -265,6 +270,7 @@ const investigations = {
   ...(fraudApproverDirectory ? { fraudApproverDirectory } : {}),
   ...(fraudCopies ? { fraudCopies } : {}),
   ...(fraudPriority ? { fraudPriority } : {}),
+  fraudCompensation: new UnavailableFraudCompensation(),
   ...(evidence ? { evidence } : {}),
   calendar: caseCalendar,
   notifier: new LoggingFraudNotifier(),

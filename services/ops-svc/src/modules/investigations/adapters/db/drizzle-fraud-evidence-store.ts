@@ -116,6 +116,50 @@ export class DrizzleFraudEvidenceStore implements FraudEvidenceStore {
     return rows.length > 0;
   }
 
+  async updateBundleWithCustody(
+    b: EvidenceBundleRecord,
+    c: Omit<CustodyRecord, 'seq' | 'prevHash' | 'rowHash'>,
+    expectedStatus?: readonly EvidenceBundleStatus[],
+    o?: { idem?: IdempotentWrite; result?: unknown },
+  ): Promise<boolean> {
+    const current = await this.getBundle(b.bundleId);
+    if (!current) return false;
+    if (current.holdReason !== 'OBJECTION' && b.holdReason === 'OBJECTION') throw new Error('보존 이유를 OBJECTION으로 되돌릴 수 없습니다');
+    const run = async (tx: DbTransaction): Promise<boolean> => {
+      const rows = await tx
+        .update(evidenceBundle)
+        .set({
+          status: b.status,
+          manifestSha256: b.manifestSha256,
+          queries: b.queries,
+          holdReason: b.holdReason,
+          holdEndRequestedBy: b.holdEndRequestedBy,
+          holdEndRequestedAt: date(b.holdEndRequestedAtMs),
+          holdEndBasis: b.holdEndBasis,
+          holdEndConfirmedBy: b.holdEndConfirmedBy,
+          holdEndedAt: date(b.holdEndedAtMs),
+          files: b.files,
+        })
+        .where(and(eq(evidenceBundle.id, b.bundleId), ...(expectedStatus ? [inArray(evidenceBundle.status, [...expectedStatus])] : [])))
+        .returning({ id: evidenceBundle.id });
+      if (rows.length === 0) return false;
+      await this.#appendCustodyIn(tx, b.bundleId, c);
+      return true;
+    };
+    if (!o?.idem) return this.db.transaction(run);
+    const resultRef = JSON.stringify(o.result ?? {});
+    return this.db.transaction((tx) =>
+      this.#idem.run<boolean>(tx, o.idem!, {
+        execute: async () => {
+          const ok = await run(tx);
+          if (!ok) throw new Error('bundle-status-conflict');
+          return { resultRef, value: true };
+        },
+        replay: async () => true,
+      }),
+    );
+  }
+
   async appendCustody(bundleId: string, c: Omit<CustodyRecord, 'seq' | 'prevHash' | 'rowHash'>): Promise<CustodyRecord> {
     return this.db.transaction((tx) => this.#appendCustodyIn(tx, bundleId, c));
   }
@@ -141,8 +185,8 @@ export class DrizzleFraudEvidenceStore implements FraudEvidenceStore {
     });
   }
 
-  async putExport(e: EvidenceExportRecord, custody: Omit<CustodyRecord, 'seq' | 'prevHash' | 'rowHash'>): Promise<void> {
-    await this.db.transaction(async (tx) => {
+  async putExport(e: EvidenceExportRecord, custody: Omit<CustodyRecord, 'seq' | 'prevHash' | 'rowHash'>, o?: { idem?: IdempotentWrite; result?: unknown }): Promise<void> {
+    const run = async (tx: DbTransaction) => {
       await tx.insert(evidenceExport).values({
         id: e.exportId,
         bundleId: e.bundleId,
@@ -156,7 +200,21 @@ export class DrizzleFraudEvidenceStore implements FraudEvidenceStore {
         createdAt: new Date(e.createdAtMs),
       });
       await this.#appendCustodyIn(tx, e.bundleId, custody);
-    });
+    };
+    if (!o?.idem) {
+      await this.db.transaction(run);
+      return;
+    }
+    const resultRef = JSON.stringify(o.result ?? {});
+    await this.db.transaction((tx) =>
+      this.#idem.run<void>(tx, o.idem!, {
+        execute: async () => {
+          await run(tx);
+          return { resultRef, value: undefined };
+        },
+        replay: async () => undefined,
+      }),
+    );
   }
 
   async exportCountSince(actorId: string, sinceMs: number): Promise<number> {

@@ -25,6 +25,7 @@ import { ContractBody, ContractParams, ContractRouteSchema, CurrentPrincipal, Id
 import type { FastifyReply } from 'fastify';
 import { OPS_ROLES, type AdminRole } from '../../admin-accounts/index.js';
 import { EvidenceBundles } from '../application/fraud-evidence.js';
+import { Investigations } from '../application/investigations.js';
 import { bareProblem } from '../application/bare-problem.js';
 
 const reject = (e: unknown): never => {
@@ -43,7 +44,7 @@ const ExportResponse = z.union([z.string(), z.looseObject({})]);
 
 @Controller('v1/ops')
 export class EvidenceBundlesController {
-  constructor(private readonly evidence: EvidenceBundles) {}
+  constructor(private readonly evidence: EvidenceBundles, private readonly investigations: Investigations) {}
 
   @Post('fraud-cases/:caseId/evidence-bundles')
   @HttpCode(201)
@@ -59,6 +60,7 @@ export class EvidenceBundlesController {
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     try {
+      await this.investigations.authorize(actorOf(me), 'EVIDENCE_CREATE', { caseId: params.caseId });
       const view = await this.evidence.create(actorOf(me), params.caseId, idem, body);
       void reply.header('location', `/v1/ops/evidence-bundles/${String(view.bundleId)}`);
       return view;
@@ -75,6 +77,7 @@ export class EvidenceBundlesController {
     try {
       const eventId = one(q.eventId);
       if (!eventId) throw bareProblem('invalid-query', 400, 'eventId가 필요합니다');
+      await this.investigations.authorize(actorOf(me), 'EVIDENCE_LIST', { eventId });
       return await this.evidence.list(actorOf(me), { eventId, ...(one(q.cursor) ? { cursor: one(q.cursor)! } : {}), limit: one(q.limit) ? Math.min(100, Math.max(1, Number(one(q.limit)))) : 50 });
     } catch (e) {
       reject(e);
@@ -87,6 +90,7 @@ export class EvidenceBundlesController {
   @ContractRouteSchema({ params: GetOpsEvidenceBundleParams, responses: { 200: z.looseObject({}) } })
   async get(@ContractParams(GetOpsEvidenceBundleParams) params: { bundleId: string }, @CurrentPrincipal() me: Principal) {
     try {
+      await this.investigations.authorize(actorOf(me), 'EVIDENCE_VIEW', {});
       return await this.evidence.get(actorOf(me), params.bundleId);
     } catch (e) {
       reject(e);
@@ -106,6 +110,7 @@ export class EvidenceBundlesController {
     @IdempotencyRequest() idem: IdempotencyRequest,
   ) {
     try {
+      await this.investigations.authorize(actorOf(me), 'EVIDENCE_HOLD_CHANGE', {});
       return await this.evidence.holdChange(actorOf(me), params.bundleId, idem, body);
     } catch (e) {
       reject(e);
@@ -125,6 +130,7 @@ export class EvidenceBundlesController {
     @IdempotencyRequest() idem: IdempotencyRequest,
   ) {
     try {
+      await this.investigations.authorize(actorOf(me), 'EVIDENCE_HOLD_END_REQUEST', {});
       return await this.evidence.holdEndRequest(actorOf(me), params.bundleId, idem, body);
     } catch (e) {
       reject(e);
@@ -163,6 +169,7 @@ export class EvidenceBundlesController {
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     try {
+      await this.investigations.authorize(actorOf(me), 'EVIDENCE_EXPORT', {});
       const out = await this.evidence.export(actorOf(me), params.bundleId, idem, body);
       if (body.kind === 'PROMOTER') {
         void reply.type('text/csv; charset=utf-8').code(200);

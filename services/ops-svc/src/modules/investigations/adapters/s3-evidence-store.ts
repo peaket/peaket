@@ -11,7 +11,7 @@ import {
   PutObjectLegalHoldCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
-import type { EvidenceObjectStore, ExternalPostCaptures } from '../domain/ports.js';
+import type { EvidenceDisposer, EvidenceObjectStore, ExternalPostCaptures } from '../domain/ports.js';
 
 const RETRY = { retryMode: 'standard' as const, maxAttempts: 3 };
 const isNotFound = (e: unknown): boolean => {
@@ -114,6 +114,17 @@ export class S3EvidenceObjectStore implements EvidenceObjectStore {
   }
 }
 
+/** 법적 보존 풀기·판 지우기 전용. 운영 조립은 일반 저장소와 다른 신원의 클라이언트를 넘긴다(IR-09). */
+export class S3EvidenceDisposer implements EvidenceDisposer {
+  readonly #store: S3EvidenceObjectStore;
+  constructor(o: S3EvidenceObjectStoreOptions) {
+    this.#store = new S3EvidenceObjectStore(o);
+  }
+  dispose(prefix: string): Promise<void> {
+    return this.#store.dispose(prefix);
+  }
+}
+
 export interface S3ExternalPostCapturesOptions {
   evidenceBucket: string;
   quarantineBucket?: string;
@@ -131,8 +142,9 @@ export class S3ExternalPostCaptures implements ExternalPostCaptures {
   readonly #kmsKeyId: string;
 
   constructor(o: S3ExternalPostCapturesOptions) {
+    if (!o.quarantineBucket) throw new Error('외부 게시물 격리 버킷 이름이 없다');
     this.#evidence = new S3EvidenceObjectStore({ bucket: o.evidenceBucket, kmsKeyId: o.kmsKeyId, ...(o.region ? { region: o.region } : {}), ...(o.endpoint ? { endpoint: o.endpoint } : {}), ...(o.client ? { client: o.client } : {}) });
-    this.#quarantine = o.quarantineBucket ?? o.evidenceBucket;
+    this.#quarantine = o.quarantineBucket;
     this.#kmsKeyId = o.kmsKeyId;
     this.#client =
       o.client ??
