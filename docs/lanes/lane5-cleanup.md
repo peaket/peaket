@@ -99,3 +99,4 @@
 - RV0715-15(낮음): 재개 조건 시험 이름은 '499bp'인데 실제 값은 497bp(내림)다. 499bp 경계와 `failureRateBp` 내림 규칙을 정본·시험에 맞춘다.
 - RV0715-16(낮음): 계획 §5의 시험 수(ops 7·purchase 9·console 10)와 §6의 실행 수(ops 6·purchase 12·console TAP 6)가 맞지 않는다. 시험을 고친 뒤 실제 수로 다시 적는다.
 - RV0715-17(낮음): `CONTENT_CHANGE`의 '공연 내용이 변경되었습니다'는 d5에 없는 새 문구다. `Object.keys(v).some((k) => /account/i.test(k))`는 `refundAccountRequired` 같은 정당한 칸까지 막는다. 회수 1원 경계와 없는 미수금 404를 보지 않는다.
+- RV0715-02 후속(중간): 재개 조건 시험은 `recent` 대역을 쓰므로 실제 `MemoryEventRefundAttemptStore`·Drizzle `recent`의 `attempted_at > 지금 − 5분` 경계를 저장소 어댑터가 아직 보지 않는다. 구현 때 메모리·통합 시험으로 고정한다.

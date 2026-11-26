@@ -64,7 +64,7 @@ let svc: Awaited<ReturnType<typeof createService>>;
 beforeAll(async () => {
   svc = await createService({
     name: 'ops-svc',
-    module: AppModule.register({ memory: true, payouts: { payments: payments as unknown as PayoutPaymentClient, reauth } }),
+    module: AppModule.register({ memory: true, auditChain: audit, payouts: { payments: payments as unknown as PayoutPaymentClient, reauth } }),
     env: { PEAKET_ENV: 'ci' },
     clock: fakeClock({ now: NOW }),
     logDestination: quiet(),
