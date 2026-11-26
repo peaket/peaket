@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 116 | 45 | 8 | 2 | 0 | 2 | 0 | 22 | 20 | 215 |
-| 합계 | 116 | 45 | 8 | 2 | 0 | 2 | 0 | 22 | 20 | 215 |
+| B | 117 | 45 | 8 | 2 | 0 | 2 | 0 | 22 | 19 | 215 |
+| 합계 | 117 | 45 | 8 | 2 | 0 | 2 | 0 | 22 | 19 | 215 |
 
 ## docs/frontend.md
 
@@ -62,7 +62,7 @@
 | FE-T36 | ② | SEED CSS 싣기와 층 순서(추천 적용 2026-10-28, 기술… | ② 모두 맞고, 크기는 §5.8 CSS 열 안. 예산을 넘은 경로는 예산을 다시 정하는 wbs 7.5.2까지 잰… | 자동 시험 | B | 시험: tools/web-checks/seed-css/css.spec.mjs |
 | FE-T36 | ③ | SEED CSS 싣기와 층 순서(추천 적용 2026-10-28, 기술… | ③ 모두 맞고, 크기는 §5.8 CSS 열 안. 예산을 넘은 경로는 예산을 다시 정하는 wbs 7.5.2까지 잰… | 자동 시험 | B | 시험: tools/web-checks/seed-css/css.spec.mjs |
 | FE-T36 | ④ | SEED CSS 싣기와 층 순서(추천 적용 2026-10-28, 기술… | ④ 모두 맞고, 크기는 §5.8 CSS 열 안. 예산을 넘은 경로는 예산을 다시 정하는 wbs 7.5.2까지 잰… | 자동 시험 | B | 시험: tools/web-checks/seed-css/layers.spec.mjs |
-| FE-T37 | — | 찜 오프라인 동기화(추천 적용 2026-10-28, 기술 검토… | 오프라인에서 화면이 바로 바뀌고, 온라인이 된 뒤 백그라운드에서 서버 저장이 끝나 서버 찜 목록이 화면과 같다(공연 둘). 같은 공연의 중복 저장은 0건이다… | 빈칸 | B | — |
+| FE-T37 | — | 찜 오프라인 동기화(추천 적용 2026-10-28, 기술 검토… | 오프라인에서 화면이 바로 바뀌고, 온라인이 된 뒤 백그라운드에서 서버 저장이 끝나 서버 찜 목록이 화면과 같다(공연 둘). 같은 공연의 중복 저장은 0건이다… | 자동 시험 | B | 시험: apps/web/src/features/wish-queue/queue.test.mjs |
 | FE-T38 | ① | 좌석맵 에디터 가져오기·내보내기와 검사(추천 적용 2026-10-28… | ① JSON으로 다시 가져온 배치의 구역·좌석 수와 좌표가 내보낸 것과 같다 | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/golden.test.mjs, services/core-svc/test-int/seatmap-editor.int.test.ts… |
 | FE-T38 | ② | 좌석맵 에디터 가져오기·내보내기와 검사(추천 적용 2026-10-28… | ② SVG·CSV 가져오기도 같은 구역·좌석 수를 만든다 | 자동 시험 | B | 시험: apps/partner/src/_pages/seatmap-editor/model/export.test.mjs, apps/partner/src/_pages/seatmap-editor/model/golden.te… |
 | FE-T38 | ③ | 좌석맵 에디터 가져오기·내보내기와 검사(추천 적용 2026-10-28… | ③도형 밖 좌석과 겹침은 경고가 글자로 보이고 저장은 막지 않는다(ADR-0063·0066) | 자동 시험 | B | 시험: packages/validation/test/seatmap-checks.test.ts |

@@ -4,8 +4,8 @@
 
 | 등급 | 자동 시험 | ID만 | 측정 | 사람 확인 | 미검증 | 다른 단계 | 없앰 | 해당 없음 | 빈칸 | 합계 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| B | 137 | 100 | 0 | 0 | 0 | 2 | 0 | 19 | 44 | 302 |
-| 합계 | 137 | 100 | 0 | 0 | 0 | 2 | 0 | 19 | 44 | 302 |
+| B | 140 | 100 | 2 | 0 | 0 | 2 | 0 | 19 | 39 | 302 |
+| 합계 | 140 | 100 | 2 | 0 | 0 | 2 | 0 | 19 | 39 | 302 |
 
 ## docs/features/offline-gate.md
 
@@ -15,10 +15,10 @@
 | O-T2 | ① | 동일 구역 다기기 동시 스캔 | ① 오프라인 상태의 두 스캐너에서 같은 티켓을 1분 간격으로 통과시킨 뒤 두 기록이 모두 올라오면 '중복 입장' 이상 표시가 100% 생기고, 정상은 보정… | 자동 시험 | B | 시험: services/ticket-svc/test-int/scanner-gate-awareness.int.test.ts, services/ticket-svc/test/scanner-gate-awareness.tes… |
 | O-T2 | ② | 동일 구역 다기기 동시 스캔 | ② 그 구역 책임자 스캐너와 파트너 콘솔에는 좌석 번호가 보인다(BUILD_ORDER F-05-12) | ID만 | B | 시험: services/ticket-svc/test-int/scanner-gate-awareness.int.test.ts, services/ticket-svc/test/scanner-gate-awareness.tes… |
 | O-T3 | — | 타 게이트 구역 티켓 스캔 | 배정되지 않은 다른 게이트의 스캐너에 찍으면 바로 거절되고, 올바른 게이트 위치가 안내된다. | 자동 시험 | B | 시험: apps/scanner/test/judge.test.ts |
-| O-T4 | — | 분실 스캐너를 악용한 위조 | 분실된 스캐너 안의 데이터베이스만으로 유효한 회전 QR 서명을 위조하려는 시도가 100% 거절된다(통과 0건). | 빈칸 | B | — |
-| O-T5 | — | 단말기 시스템 시계 ±60초 편차 | 시계 편차가 보정되어 정상 티켓이 통과된다. 보정되지 않은 기기의 비정상 요청은 안전하게 거부로 기록된다. | 자동 시험 | B | 시험: apps/scanner/test/judge.test.ts, apps/scanner/test/scan-flow.test.ts 외 1곳 |
+| O-T4 | — | 분실 스캐너를 악용한 위조 | 분실된 스캐너 안의 데이터베이스만으로 유효한 회전 QR 서명을 위조하려는 시도가 100% 거절된다(통과 0건). | 자동 시험 | B | 시험: tools/web-checks/scanner-k10/k10-measure.spec.mjs |
+| O-T5 | — | 단말기 시스템 시계 ±60초 편차 | 시계 편차가 보정되어 정상 티켓이 통과된다. 보정되지 않은 기기의 비정상 요청은 안전하게 거부로 기록된다. | 자동 시험 | B | 시험: apps/scanner/test/judge.test.ts, apps/scanner/test/scan-flow.test.ts 외 2곳 |
 | O-T6 | — | iOS 7일 미사용 저장소 삭제 복구 | 입장 시작 전에는 재인증 뒤 재발급이 되고, 이전 키는 폐기 목록에 오른다. 24시간 안의 두 번째 재발급은 거부되고, 입장 시작 뒤의 재발급 요청은 현장 부스… | 자동 시험 | B | 시험: services/ticket-svc/test-int/wallet-reissue-wiring.int.test.ts, services/ticket-svc/test/device-key-reauth.test.ts |
-| O-T7 | — | 양도 직후 원소유자 입장 시도 | 변경분이 반영된 뒤 양도인의 QR은 '양도·취소·재발급된 티켓의 옛 QR'로 거절된다. 반영 전에 통과한 건은 두 기록이 올라오면 이상 표시로 잡힌다. | 빈칸 | B | — |
+| O-T7 | — | 양도 직후 원소유자 입장 시도 | 변경분이 반영된 뒤 양도인의 QR은 '양도·취소·재발급된 티켓의 옛 QR'로 거절된다. 반영 전에 통과한 건은 두 기록이 올라오면 이상 표시로 잡힌다. | 자동 시험 | B | 시험: tools/web-checks/scanner-k10/k10-measure.spec.mjs |
 | O-T8 | — | 정적 스크린샷 QR 캡처본 검표 | 유효시간(±30초)이 지난 정적 캡처본 이미지는 스캐너 검표 단계에서 100% 거절된다. | 자동 시험 | B | 시험: apps/scanner/test/judge.test.ts |
 | O-T9 | — | 재입장 순서 검증 | 앞선 퇴장 스캔(OUT)이 빠진 재입장 시도에는 '퇴장 기록 없음' 확인 필요가 화면에 바로 표시된다. | 자동 시험 | B | 시험: apps/scanner/test/judge.test.ts, apps/scanner/test/scan-flow.test.ts |
 | O-T10 | — | 오프라인 동기화 멱등성 보장 | 같은 스캔 이벤트 배치를 2회 중복 업로드해도, 데이터베이스에는 단 1건만 정상 적재된다(멱등성: 같은 요청이 여러 번 와도 한 번 처리한 것과 결과가 같은… | 자동 시험 | B | 시험: apps/scanner/test/uploader.test.ts, services/ticket-svc/test-int/scanner-f054.int.test.ts 외 1곳 |
@@ -30,7 +30,7 @@
 | O-T16 | — | 입장 시작 후 예매 취소 건 방어 | 취소하자마자 폐기 목록에 오른다. 오프라인 스캐너가 통과시킨 건은 업로드 뒤 '취소 뒤 입장' 이상 표시가 붙고, CS 확인으로 취소가 무효로 확정된다. | 빈칸 | B | — |
 | O-T17 | — | 스캔 로그의 현장 스태프 감사 추적 | 모든 `scan_event` 레코드에 서버가 세션으로 정한 `staff_account_id`가 기록되고, 스캐너 로컬 화면과 저장소에는 관람객 개인정보가… | 빈칸 | B | — |
 | O-T18 | — | 양도 수락과 스캔 동시 경합 | 입장 시작 전에 받는 사람의 수락과 보낸 사람 QR의 온라인 스캔 수신이 겹치면, 행 잠금으로 하나만 성공한다. 스캔이 먼저면 수락은 409이고, 수락이 먼저면… | 빈칸 | B | — |
-| O-T19 | — | 돌려주기·양도 회수 키 교체 | 입장 시작 전에 돌려주기나 회수를 하면, 변경분이 반영된 뒤 받은 사람의 QR은 거부되고 결제자 기기의 새 키로 입장된다. | 빈칸 | B | — |
+| O-T19 | — | 돌려주기·양도 회수 키 교체 | 입장 시작 전에 돌려주기나 회수를 하면, 변경분이 반영된 뒤 받은 사람의 QR은 거부되고 결제자 기기의 새 키로 입장된다. | 자동 시험 | B | 시험: tools/web-checks/scanner-k10/k10-measure.spec.mjs |
 | O-T20 | — | 스캐너 동기화 신선도 경보 | 입장 시간대에 스캐너 한 대의 네트워크를 3분 끊으면, 2분이 지난 뒤 관제에 SEV2와 현장 책임자 알림이 나온다. 그 스캐너는 오프라인 판정을 계속한다… | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-freshness.test.ts |
 | O-T21 | ① | 해제 15분 뒤 토큰 재사용 | ① 근무 준비·목록·변경분과 책임자 기능(기기 배치·이상 표시·부스 허용)은 401(`invalid_token`)로 거부된다(서버 세션 상태 확인)… | 자동 시험 | B | 시험: packages/platform/test/scanner-auth-f055.test.ts, services/ticket-svc/test-int/scanner-f055.int.test.ts |
 | O-T21 | ② | 해제 15분 뒤 토큰 재사용 | ② 같은 묶음을 토큰 없이 기기 인증만으로 다시 보내면 모두 받고, 해제 뒤 시각의 기록은 '세션 밖 기록'으로 표시된다(ADR-0051 결정 9, O-T26과… | 자동 시험 | B | 시험: services/ticket-svc/test-int/scanner-f055.int.test.ts |
@@ -38,7 +38,7 @@
 | O-T22 | — | 입장 중 소유권 동결 | 입장 시작 뒤 돌려주기·양도 수락·양도 회수 요청은 409 `ENTRY_STARTED`로 거부되고, 키가 바뀌지 않는다. | 빈칸 | B | — |
 | O-T23 | — | 입장 상태 공유 | 같은 구역의 온라인 스캐너 A가 통과시킨 티켓을 2분 [가정] 뒤 스캐너 B로 찍으면 '이미 입장한 티켓'으로 거부된다. | 자동 시험 | B | 시험: apps/scanner/test/judge.test.ts, apps/scanner/test/package-state.test.ts 외 2곳 |
 | O-T24 | — | 다른 기기의 퇴장·재입장 | 재입장을 허용하는 회차에서 기기 X(퇴장 모드)로 OUT한 뒤 기기 Y(입장 모드)로 IN하면 정상이고, 이상 표시가 없다. | 자동 시험 | B | 시험: apps/scanner/test/judge.test.ts, apps/scanner/test/package-state.test.ts 외 2곳 |
-| O-T25 | — | 키 미반영 | 변경분을 받지 못한 오프라인 스캐너는 입장 시작 뒤 처음 등록한 키의 QR을 '키 미반영'으로 거부하고 부스·책임자를 안내한다. | 자동 시험 | B | 시험: apps/scanner/test/judge.test.ts, apps/scanner/test/package-state.test.ts 외 1곳 |
+| O-T25 | — | 키 미반영 | 변경분을 받지 못한 오프라인 스캐너는 입장 시작 뒤 처음 등록한 키의 QR을 '키 미반영'으로 거부하고 부스·책임자를 안내한다. | 자동 시험 | B | 시험: apps/scanner/test/judge.test.ts, apps/scanner/test/package-state.test.ts 외 2곳 |
 | O-T26 | — | 해제·만료 뒤 남은 기록 | 업로드를 기다리는 기록 12건이 남은 채 해제되거나 역할 유효 끝이 지나도, 기기가 연결되면 12건이 모두 올라간다. 해제·만료 뒤 시각의 기록은 '세션 밖… | 자동 시험 | B | 시험: services/ticket-svc/test-int/scanner-f054.int.test.ts |
 | O-T27 | — | 기기 폐기 | SCR-053에서 폐기한 기기가 다음에 보내는 요청은 거부된다. 그 기기의 스태프 세션도 끝나고, 감사 로그에 남는다. | 자동 시험 | B | 시험: apps/console-host/test/scanner-devices-phone.test.ts |
 | O-T28 | — | 부스 재발급 | 본인확인 결과가 보유 계정과 같으면 부스 코드가 나온다. 책임자가 이 코드를 찍은 뒤 10분 안에 한 BOOTH 등록만 성공한다. 결과가 다르면 409… | 빈칸 | B | — |
@@ -71,8 +71,8 @@
 | O-T37 | ⑩ | 기본 기기 키 DPoP(추천 적용 2026-10-28, 기술 검토… | ⑩은 하나만 200이고 다른 하나는 401(`invalid_dpop_proof`, 이름표 `jti`)이며 기록은 한 묶음만 저장된다 | 자동 시험 | B | 시험: services/ticket-svc/test-int/scanner-f055.int.test.ts |
 | O-T38 | — | 목록 생성 중 커밋된 폐기(추천 적용 2026-10-28, 기술 검토… | 한 스냅샷 구현에서는 스캐너가 그 keyId를 폐기로 안다(빠짐 0건). 비교 대상에서는 빠짐이 재현된다. 같은 변경을 두 번 받아도 스캐너 상태가 같다 | 자동 시험 | B | 시험: services/ticket-svc/test-int/scanner-gate.int.test.ts, services/ticket-svc/test/scanner-gate.test.ts |
 | O-T39 | — | 스캔 큐 쓰기의 내구성(추천 적용 2026-10-28, 기술 검토… | 다시 켜면 통과 화면을 본 기록이 모두 스캔 큐에 있다(유실 0건). strict의 판정 지연 p95가 150ms 안이다. 넘으면 wbs 5.4.7에서 예산을… | 빈칸 | B | — |
-| O-T40 | — | 온라인 → 오프라인 전환 중 판정(추천 적용 2026-10-28, 기술… | 결과가 나오지 않거나 오류인 판정이 0건이고, 전환 앞뒤 1분 판정 지연의 최댓값이 평소 p95(150ms) 안 [가정]이다(판정이 멈춘 시간 0초). 끊긴… | 빈칸 | B | — |
-| O-T41 | — | 레인 처리량(추천 적용 2026-10-28, 기술 검토 낮음-058):… | 오프라인의 분당 통과 인원 중앙값이 온라인의 90% [가정] 이상이다. 차이가 나면 판정 지연·화면 갱신·큐 쓰기 가운데 어디서 늘었는지 기록한다 | 빈칸 | B | — |
+| O-T40 | — | 온라인 → 오프라인 전환 중 판정(추천 적용 2026-10-28, 기술… | 결과가 나오지 않거나 오류인 판정이 0건이고, 전환 앞뒤 1분 판정 지연의 최댓값이 평소 p95(150ms) 안 [가정]이다(판정이 멈춘 시간 0초). 끊긴… | 측정 | B | 측정 창 3 / F-05-9 · 실측(PC, Chromium 흉내) `2026-11-27-f059-k10-r2`: 3회 330건, 결과 없음/오류 0·큐 0·오프라인 151건·다시 연결 전 큐 154건. 판정… |
+| O-T41 | — | 레인 처리량(추천 적용 2026-10-28, 기술 검토 낮음-058):… | 오프라인의 분당 통과 인원 중앙값이 온라인의 90% [가정] 이상이다. 차이가 나면 판정 지연·화면 갱신·큐 쓰기 가운데 어디서 늘었는지 기록한다 | 측정 | B | 측정 창 3 / F-05-9 · 실측(PC, Chromium 흉내) `2026-11-27-f059-k10-r2`: 온라인 27.56~27.61/분·오프라인 27.59~27.60/분, 중앙값 비율 100.02%… |
 | O-T42 | ① | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ① 15대 모두 201(성공은 세지 않는다) | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-shift.test.ts |
 | O-T42 | ② | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ② 11번째부터 10분 동안 429 | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-shift-http.test.ts, services/ticket-svc/test/scanner-shift.test.ts |
 | O-T42 | ③ | 기기 등록 시도 제한(추천 적용 2026-10-28, 기술 검토… | ③ 등록 201과 SEV3 경보 하나, 등록 경로는 닫히지 않는다 | 자동 시험 | B | 시험: services/ticket-svc/test/scanner-shift.test.ts |
