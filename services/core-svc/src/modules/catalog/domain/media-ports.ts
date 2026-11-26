@@ -42,6 +42,8 @@ export interface ImageObjectStore {
   stagingSize(key: string): Promise<number | undefined>;
   deleteStaging(key: string): Promise<void>;
   putPublic(key: string, bytes: Uint8Array, contentType: string): Promise<void>;
+  /** 공개 위치에 이미 있는가(재시도 게시의 멱등 확인). 어댑터가 없으면 putPublic이 중복을 막는다 */
+  publicExists?(key: string): Promise<boolean>;
   deletePublic(key: string): Promise<void>;
 }
 

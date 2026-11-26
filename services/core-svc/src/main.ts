@@ -204,6 +204,7 @@ const imageObjectStore = imageBucket
       region: process.env.PEAKET_IMAGE_S3_REGION ?? 'ap-northeast-2',
       ...(process.env.PEAKET_IMAGE_S3_ENDPOINT ? { endpoint: process.env.PEAKET_IMAGE_S3_ENDPOINT } : {}),
       ...(process.env.PEAKET_IMAGE_S3_KMS_KEY_ID ? { kmsKeyId: process.env.PEAKET_IMAGE_S3_KMS_KEY_ID } : {}),
+      ...(process.env.PEAKET_ENV ? { env: process.env.PEAKET_ENV } : {}),
     })
   : new LocalFolderImageStore(imageStoreDir!);
 const imageJobWorker = new ImageJobWorker({ store: imageJobStore, processing: imageWorkerProc, objects: imageObjectStore, clock: systemClock, log: (line) => console.log(JSON.stringify({ level: 'info', ...line })) });

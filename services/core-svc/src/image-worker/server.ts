@@ -8,10 +8,10 @@ import { createImageQueue } from './queue.js';
 import { derivativeNamesFor, prefixOf, stagingKey, type ImageKindProto } from './derivatives.js';
 import { processImage } from './process.js';
 import { scanVerdict } from './scan.js';
-import type { ImageWorkerStore } from './s3.js';
+import { ImageObjectTooLarge, type ImageWorkerStore } from './s3.js';
 
 const ID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-const SOURCE = new RegExp(`^quarantine/(production|banner|review)/${ID}$`);
+const SOURCE = new RegExp(`^quarantine/(production|banner|review)/(${ID})$`);
 const PROTO_LOAD_OPTIONS: protoLoader.Options = { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true };
 
 export function imageServiceDefinition(): grpc.ServiceDefinition {
@@ -46,13 +46,15 @@ export async function startImageWorker(o: ImageWorkerServerOptions): Promise<{ p
     ProcessImage: (call: grpc.ServerUnaryCall<{ source_key: string; kind: string }, unknown>, callback: grpc.sendUnaryData<Reply>) => {
       const sourceKey = call.request.source_key ?? '';
       const kind = call.request.kind as ImageKindProto;
-      if (!SOURCE.test(sourceKey) || !['IMAGE_KIND_PRODUCTION', 'IMAGE_KIND_HOME_BANNER', 'IMAGE_KIND_REVIEW_PHOTO'].includes(kind)) {
+      const matched = sourceKey.match(SOURCE);
+      // 격리 접두사와 kind가 어긋나면 받지 않는다(예: quarantine/banner + IMAGE_KIND_PRODUCTION, IR-15).
+      if (!matched || !['IMAGE_KIND_PRODUCTION', 'IMAGE_KIND_HOME_BANNER', 'IMAGE_KIND_REVIEW_PHOTO'].includes(kind) || matched[1] !== prefixOf(kind)) {
         callback({ code: grpc.status.INVALID_ARGUMENT, details: 'source_key or kind' });
         return;
       }
       const started = performance.now();
-      const imageId = sourceKey.slice(sourceKey.lastIndexOf('/') + 1);
-      const prefix = prefixOf(kind);
+      const imageId = matched[2]!;
+      const prefix = matched[1] as 'production' | 'banner' | 'review';
       const log = (status: string, extra: Record<string, unknown> = {}) =>
         o.logger.info({ event: 'image_process', imageId, kind, active, status, durationMs: Math.round(performance.now() - started), ...extra }, '이미지 처리 작업을 마쳤다');
       queue
@@ -63,7 +65,14 @@ export async function startImageWorker(o: ImageWorkerServerOptions): Promise<{ p
             const verdict = scanVerdict(tags);
             if (verdict === 'PENDING') return { status: 'IMAGE_STATUS_SCAN_PENDING' } satisfies Reply;
             if (verdict === 'THREATS_FOUND') return { status: 'IMAGE_STATUS_REJECTED', reject_reason: 'IMAGE_REJECT_REASON_MALWARE' } satisfies Reply;
-            const bytes = await o.store.read(sourceKey);
+            let bytes: Uint8Array;
+            try {
+              bytes = await o.store.read(sourceKey);
+            } catch (e) {
+              // 격리 객체가 10MB를 넘으면 본문을 다 읽지 않고 TOO_LARGE로 거절한다(IR-16).
+              if (e instanceof ImageObjectTooLarge) return { status: 'IMAGE_STATUS_REJECTED', reject_reason: 'IMAGE_REJECT_REASON_TOO_LARGE' } satisfies Reply;
+              throw e;
+            }
             const result = await processImage({ bytes, kind, maxPixels });
             if (result.status === 'REJECTED') {
               const map = { UNSUPPORTED_TYPE: 'IMAGE_REJECT_REASON_UNSUPPORTED_TYPE', TOO_LARGE: 'IMAGE_REJECT_REASON_TOO_LARGE', TOO_SMALL: 'IMAGE_REJECT_REASON_TOO_SMALL', MALWARE: 'IMAGE_REJECT_REASON_MALWARE' } as const;

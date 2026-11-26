@@ -40,6 +40,9 @@ export class MemoryImageObjectStore implements ImageObjectStore {
   async putPublic(key: string, bytes: Uint8Array, contentType: string): Promise<void> {
     this.published.set(checked(PUBLIC, key), { bytes, contentType });
   }
+  async publicExists(key: string): Promise<boolean> {
+    return this.published.has(checked(PUBLIC, key));
+  }
   async deletePublic(key: string): Promise<void> {
     this.published.delete(checked(PUBLIC, key));
   }
@@ -94,6 +97,15 @@ export class LocalFolderImageStore implements ImageObjectStore {
   }
   async putPublic(key: string, bytes: Uint8Array): Promise<void> {
     await this.#write(this.#path('public', checked(PUBLIC, key)), bytes);
+  }
+  async publicExists(key: string): Promise<boolean> {
+    try {
+      await stat(this.#path('public', checked(PUBLIC, key)));
+      return true;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw e;
+    }
   }
   async deletePublic(key: string): Promise<void> {
     await rm(this.#path('public', checked(PUBLIC, key)), { force: true });

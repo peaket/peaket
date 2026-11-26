@@ -1,7 +1,7 @@
 // F-10-2 S3 이미지 저장소 어댑터(계획 docs/review/plans/F-10-2.md E3·§3, docs/data.md §1, ADR-0257 결정 1).
 // 키는 서버가 만든 이미지 ID와 종류·폭·형식만 받는다. 공개 파생본은 immutable 캐시·inline 파일 이름으로 쓰고 덮어쓰지 않는다.
 // 격리 원본·준비 위치는 비공개(private, no-store)다. endpoint가 있으면 moto/로컬 path-style이다.
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutBucketAclCommand, PutBucketPolicyCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutBucketPolicyCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { ImageObjectStore } from '../domain/media-ports.js';
 
 const ID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
@@ -13,6 +13,9 @@ const PUBLIC = new RegExp(`^${KIND}/${ID}/${NAME}$`);
 const CONTENT_TYPES: Record<string, string> = { webp: 'image/webp', avif: 'image/avif' };
 const PUBLIC_CACHE = 'public, max-age=31536000, immutable';
 const PRIVATE_CACHE = 'private, no-store';
+/** 공개 파생본이 사는 첫 접두사. 격리(quarantine)·준비(staging)는 공개 정책에서 뺀다(IR-10). */
+const PUBLIC_PREFIXES = ['production', 'banner', 'review'] as const;
+const LOCAL_ENVS = new Set(['local', 'ci', 'test']);
 
 function checked(re: RegExp, key: string): string {
   if (!re.test(key)) throw new Error('정한 꼴이 아닌 객체 키');
@@ -28,6 +31,8 @@ export interface S3ImageObjectStoreOptions {
   region: string;
   /** 로컬·CI의 moto 주소. 있으면 path-style과 시험 자격 증명을 쓴다 */
   endpoint?: string;
+  /** 로컬 버킷 정책을 열어도 되는 환경(기본 PEAKET_ENV). production이면 endpoint가 있어도 열지 않는다 */
+  env?: string;
   /** SSE-KMS 키(운영). 없으면 버킷 기본 암호화를 쓴다 */
   kmsKeyId?: string;
   /** 시험에서 S3Client를 바꿔 끼울 때만 */
@@ -45,7 +50,7 @@ export class S3ImageObjectStore implements ImageObjectStore {
   constructor(o: S3ImageObjectStoreOptions) {
     this.#bucket = o.bucket;
     this.#kmsKeyId = o.kmsKeyId;
-    this.#local = o.endpoint !== undefined;
+    this.#local = o.endpoint !== undefined && LOCAL_ENVS.has(o.env ?? process.env.PEAKET_ENV ?? '');
     this.#client =
       o.client ??
       new S3Client({
@@ -60,10 +65,12 @@ export class S3ImageObjectStore implements ImageObjectStore {
       .send(
         new PutBucketPolicyCommand({
           Bucket: this.#bucket,
-          Policy: JSON.stringify({ Version: '2012-10-17', Statement: [{ Effect: 'Allow', Principal: '*', Action: 's3:GetObject', Resource: `arn:aws:s3:::${this.#bucket}/*` }] }),
+          Policy: JSON.stringify({
+            Version: '2012-10-17',
+            Statement: PUBLIC_PREFIXES.map((p) => ({ Effect: 'Allow', Principal: '*', Action: 's3:GetObject', Resource: `arn:aws:s3:::${this.#bucket}/${p}/*` })),
+          }),
         }),
       )
-      .then(() => this.#client.send(new PutBucketAclCommand({ Bucket: this.#bucket, ACL: 'public-read' })))
       .then(() => undefined);
     await this.#localReady;
   }
@@ -77,7 +84,6 @@ export class S3ImageObjectStore implements ImageObjectStore {
         Body: bytes,
         CacheControl: PRIVATE_CACHE,
         ContentType: 'application/octet-stream',
-        ...(this.#local ? { ACL: 'public-read' as const } : {}),
         ...(this.#kmsKeyId ? { ServerSideEncryption: 'aws:kms', SSEKMSKeyId: this.#kmsKeyId } : {}),
       }),
     );
@@ -132,10 +138,19 @@ export class S3ImageObjectStore implements ImageObjectStore {
         ContentType: contentType,
         CacheControl: PUBLIC_CACHE,
         ContentDisposition: `inline; filename="${k.split('/')[1]}.${ext}"`,
-        ...(this.#local ? { ACL: 'public-read' as const } : {}),
         ...(this.#kmsKeyId ? { ServerSideEncryption: 'aws:kms', SSEKMSKeyId: this.#kmsKeyId } : {}),
       }),
     );
+  }
+
+  async publicExists(key: string): Promise<boolean> {
+    try {
+      await this.#client.send(new HeadObjectCommand({ Bucket: this.#bucket, Key: checked(PUBLIC, key) }));
+      return true;
+    } catch (e) {
+      if (isNotFound(e)) return false;
+      throw e;
+    }
   }
 
   async deletePublic(key: string): Promise<void> {

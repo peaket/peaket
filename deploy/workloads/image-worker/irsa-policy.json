@@ -3,7 +3,7 @@
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": "s3:GetObject",
+      "Action": ["s3:GetObject", "s3:GetObjectTagging"],
       "Resource": "arn:aws:s3:::peaket-image/quarantine/*"
     },
     {

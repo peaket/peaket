@@ -11,6 +11,6 @@
  */
 
 /**
- * 파생본 주소 표. 키는 '{폭}.{avif|webp}'(폭 320·640·960·1280 [가정]의 여덟 개), 값은 {기준 주소}/{폭}.{형식}이다. JPEG 파생본은 만들지 않는다(catalog-review 3.2.1, ADR-0257)
+ * 파생본 주소 표. 키는 '{폭}.{avif|webp}'이고 폭 320·640·960·1280 [가정] 중 원본 폭 이하인 것만 만든다(원본보다 넓은 폭은 만들지 않는다). 값은 {기준 주소}/{폭}.{형식}이다. JPEG 파생본은 만들지 않는다(catalog-review 3.2.1, ADR-0257)
  */
 export type ProductionImageDerivatives = {[key: string]: string};

@@ -54,8 +54,8 @@ export async function processImage(o: { bytes: Uint8Array; kind: ImageKindProto;
   } catch {
     return { status: 'REJECTED', reason: 'UNSUPPORTED_TYPE' };
   }
-  const width = meta.width ?? header?.width ?? 0;
-  const height = meta.height ?? header?.height ?? 0;
+  const width = meta.orientation !== undefined && meta.orientation >= 5 && meta.orientation <= 8 ? (meta.height ?? header?.height ?? 0) : (meta.width ?? header?.width ?? 0);
+  const height = meta.orientation !== undefined && meta.orientation >= 5 && meta.orientation <= 8 ? (meta.width ?? header?.width ?? 0) : (meta.height ?? header?.height ?? 0);
   if (!ALLOWED.has(meta.format ?? '')) return { status: 'REJECTED', reason: 'UNSUPPORTED_TYPE' };
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1) return { status: 'REJECTED', reason: 'UNSUPPORTED_TYPE' };
   if (Math.max(width, height) > 20_000 || width * height > o.maxPixels) return { status: 'REJECTED', reason: 'TOO_LARGE' };

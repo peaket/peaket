@@ -46,8 +46,6 @@ export class DrizzleImageJobStore {
 
   /** 같은 원본 키는 한 번만 적는다(멱등). */
   async enqueue(record: { sourceKey: string; kind: ImageJobKind; derivativeKeys?: string[] }, now: Date): Promise<ImageJobRecord | undefined> {
-    // 같은 종류의 끝난 작업은 새 작업을 기다리는 쪽이 옛 행을 최신으로 착각하지 않게 먼저 지운다(작업 원장 보존은 뒤 단계).
-    await this.database.db.execute(sql`delete from image_job where kind = ${record.kind} and status in ('DONE', 'DEAD') and source_key <> ${record.sourceKey}`);
     await this.database.db.execute(sql`
       insert into image_job ("id", "source_key", "kind", "status", "attempts", "next_attempt_at", "derivative_keys", "created_at", "updated_at")
       values (${randomUUID()}::uuid, ${record.sourceKey}, ${record.kind}, 'PENDING', 0, ${now}, ${JSON.stringify(record.derivativeKeys ?? [])}::jsonb, clock_timestamp(), clock_timestamp())
