@@ -27,6 +27,7 @@ import { CORE_APPLY_RETRY_MS, EventCancellations, PromEventCancellationSignals }
 import { AwsWafIpSets, ControlFanout, DrizzleControlDeliveries, GrpcPgAssignmentCheck, GrpcPgSwitchResolver, HttpCoreSaleStart, PromCommandSignals, wafIpSetsConfigFromEnv, type HandleCommandEvent } from './modules/commands/index.js';
 import { GrpcPurchasePriorityGrants, HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
 import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
+import { HttpCoreCompliance } from './modules/compliance/index.js';
 import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts/index.js';
 import { PromBotReviewSignals } from './modules/bot-review/index.js';
 import { botReviewLabelsFromEnv, botReviewSourceFromEnv } from './bot-review-wiring.js';
@@ -182,6 +183,13 @@ const service = await createService({
     approvals,
     adminAccounts: { identity: adminIdentity, ...(reauth ? { reauth } : {}) },
     eventCancellations,
+    ...(coreUrl
+      ? {
+          compliance: {
+            core: new HttpCoreCompliance(createExternalHttpClient({ provider: 'core-svc', baseUrl: coreUrl, timeoutCapMs: 5_000 }), internalToken),
+          },
+        }
+      : {}),
     realtimeTable: realtimeTable.deps,
     botReview: {
       source: botReviewSource.source,

@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { purgedReview, type ReportRecord, type ReviewRecord, type ReviewSort, type TakedownRecord } from '../domain/review.js';
 import { reviewImagePublicKey, reviewImageDerivativeNames, reviewImageAttachable, REVIEW_IMAGE_UNATTACHED_TTL_MS, type ReviewImageAttach, type ReviewImageRecord } from '../domain/review-image.js';
-import type { HeldWithdrawalRow, ReportSummary, ReviewListInput, ReviewListResult, ReviewStore } from '../domain/ports.js';
+import type { HeldWithdrawalRow, NoticeWithdrawResult, ReportSummary, ReviewListInput, ReviewListResult, ReviewStore } from '../domain/ports.js';
 
 interface Cursor {
   readonly t: number;
@@ -185,7 +185,17 @@ export class MemoryReviewStore implements ReviewStore {
   }
 
   async resolveReports(targetId: string, outcome: ReportRecord['outcome'], nowMs: number): Promise<void> {
-    for (const [id, r] of this.reports) if (r.targetId === targetId) this.reports.set(id, { ...r, status: 'RESOLVED', ...(outcome ? { outcome } : {}), resolvedAtMs: nowMs });
+    const purgeAtMs = nowMs + 365 * 24 * 60 * 60 * 1000;
+    for (const [id, r] of this.reports) if (r.targetId === targetId) this.reports.set(id, { ...r, status: 'RESOLVED', ...(outcome ? { outcome } : {}), resolvedAtMs: nowMs, purgeAtMs });
+  }
+
+  async purgeExpiredReports(nowMs: number, limit: number): Promise<number> {
+    const due = [...this.reports.entries()]
+      .filter(([, r]) => r.status === 'RESOLVED' && r.purgeAtMs <= nowMs)
+      .sort((a, b) => a[1].purgeAtMs - b[1].purgeAtMs || a[0].localeCompare(b[0]))
+      .slice(0, limit);
+    for (const [id] of due) this.reports.delete(id);
+    return due.length;
   }
 
   async applyNoticeTakedown(i: { reviewIds: readonly string[]; noticeId: string; nowMs: number }): Promise<{ applied: number }> {
@@ -289,6 +299,15 @@ export class MemoryReviewStore implements ReviewStore {
 
   async takedownsByReview(reviewId: string): Promise<readonly TakedownRecord[]> {
     return [...this.takedowns.values()].filter((t) => t.reviewId === reviewId).map((t) => ({ ...t }));
+  }
+
+  async takedownsByNotice(noticeId: string): Promise<readonly TakedownRecord[]> {
+    return [...this.takedowns.values()].filter((t) => t.noticeId === noticeId).map((t) => ({ ...t }));
+  }
+
+  async takedownsByFingerprints(fingerprints: readonly string[]): Promise<readonly TakedownRecord[]> {
+    const set = new Set(fingerprints);
+    return [...this.takedowns.values()].filter((t) => set.has(t.contentFingerprint)).map((t) => ({ ...t }));
   }
 
   async restoreTakedowns(reviewId: string, nowMs: number): Promise<void> {
@@ -405,3 +424,40 @@ export class MemoryReviewStore implements ReviewStore {
     return { total: reports.length, byCategory, reports };
   }
 }
+
+/**
+ * 통보 철회는 NoticeWithdrawStore 포트다. MemoryReviewStore 기본 클래스에 메서드로 두면
+ * 시험 대역이 `override` 없이 같은 이름을 정의할 수 없어(tsc noImplicitOverride), prototype에 붙인다.
+ */
+function withdrawMemoryNotice(this: MemoryReviewStore, noticeId: string, nowMs: number): NoticeWithdrawResult {
+  const direct = [...this.takedowns.values()].filter((t) => t.noticeId === noticeId && t.reason === 'NOTICE' && t.restoredAtMs === undefined);
+  if (direct.length === 0) return { restored: 0, sameContentRestored: 0, fingerprintsCleared: 0 };
+  const fingerprints = new Set(direct.map((t) => t.contentFingerprint));
+  for (const [id, t] of this.takedowns) if (t.noticeId === noticeId && t.reason === 'NOTICE' && t.restoredAtMs === undefined) this.takedowns.set(id, { ...t, restoredAtMs: nowMs });
+  let sameContentRestored = 0;
+  for (const [id, t] of this.takedowns) {
+    if (t.reason !== 'SAME_CONTENT' || t.restoredAtMs !== undefined || !fingerprints.has(t.contentFingerprint)) continue;
+    const otherNotice = [...this.takedowns.values()].some((x) => x.reason === 'NOTICE' && x.restoredAtMs === undefined && x.contentFingerprint === t.contentFingerprint);
+    if (otherNotice) continue;
+    this.takedowns.set(id, { ...t, restoredAtMs: nowMs });
+    sameContentRestored += 1;
+  }
+  const affected = new Set([...direct.map((t) => t.reviewId), ...[...this.takedowns.values()].filter((t) => fingerprints.has(t.contentFingerprint) && t.reason === 'SAME_CONTENT' && t.restoredAtMs === nowMs).map((t) => t.reviewId)]);
+  let restored = 0;
+  for (const reviewId of affected) {
+    const stillHidden = [...this.takedowns.values()].some((t) => t.reviewId === reviewId && t.restoredAtMs === undefined);
+    if (stillHidden) continue;
+    const r = this.reviews.get(reviewId);
+    if (r && r.status === 'HIDDEN') {
+      this.reviews.set(reviewId, { ...r, status: 'VISIBLE', notice: undefined, noticeUntilMs: undefined, updatedAtMs: nowMs });
+      restored += 1;
+    }
+  }
+  let fingerprintsCleared = 0;
+  for (const fp of fingerprints) {
+    const remains = [...this.takedowns.values()].some((t) => t.reason === 'NOTICE' && t.restoredAtMs === undefined && t.contentFingerprint === fp);
+    if (!remains && this.hiddenFingerprints.delete(fp)) fingerprintsCleared += 1;
+  }
+  return { restored, sameContentRestored, fingerprintsCleared };
+}
+Object.assign(MemoryReviewStore.prototype, { withdrawNotice: withdrawMemoryNotice });

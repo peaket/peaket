@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Badge } from '@peaket/ds/Badge';
 import { NoticeBanner } from '@peaket/ds/NoticeBanner';
+import { SCALPING_REPORT_CENTER_URL } from '@peaket/ds/ReportDialog';
 import { TransferOfferCard } from '@peaket/ds/TransferOfferCard';
 import { createEventSummaryReader, type EventSummary } from '@/entities/event-summary';
 import { reauthFailureText } from '@/shared/lib/reauth-failure';
@@ -337,6 +338,9 @@ export function TicketTransferLive({ ticketId }: { ticketId: string }) {
                 <NoticeBanner tone="legal" role={null} tag="법정 고지">
                   {LEGAL_RESALE_NOTICE}
                 </NoticeBanner>
+                <a className="link" href={SCALPING_REPORT_CENTER_URL} target="_blank" rel="noopener noreferrer" aria-label="온라인 암표신고센터, 새 창">
+                  부정판매 신고 누리집
+                </a>
                 <p className="t-sm">받는 분: {nickname ?? '확인된 회원'}</p>
                 <button className="btn btn-primary btn-lg btn-block" type="button" disabled={busy} onClick={() => void send()}>
                   양도 요청 보내기

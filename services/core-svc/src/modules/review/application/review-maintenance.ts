@@ -27,6 +27,11 @@ export function reviewMaintenanceTasks(store: ReviewStore, clock: Clock, o: { ba
       },
     },
     {
+      name: 'review-report-retention',
+      when: 'daily',
+      run: async () => ({ purged: await store.purgeExpiredReports(clock.now(), 100) }),
+    },
+    {
       name: 'review-purge-legacy',
       when: 'window',
       run: async (signal) => {

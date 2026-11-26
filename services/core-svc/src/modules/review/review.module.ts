@@ -14,6 +14,7 @@ import { Reviews } from './application/reviews.js';
 import { ReviewImages } from './application/review-images.js';
 import { FAN_PROFILE, REVIEW_CASE_SINK, REVIEW_ELIGIBILITY, REVIEW_EVENT_DIRECTORY, REVIEW_NOTIFIER, REVIEW_STORE, type FanProfile, type ReviewCaseSink, type ReviewEligibility, type ReviewEventDirectory, type ReviewImageWiring, type ReviewNotifier, type ReviewStore } from './domain/ports.js';
 import { InternalReviewController } from './inbound/internal-review.controller.js';
+import { InternalNoticeController } from './inbound/internal-notice.controller.js';
 import { OpsReviewController } from './inbound/ops-review.controller.js';
 import { ReviewController } from './inbound/review.controller.js';
 import { ReviewImageController } from './inbound/review-image.controller.js';
@@ -42,7 +43,7 @@ export interface DatabaseReviewWiring {
 @Module({})
 export class ReviewModule {
   static register(o: { storage: 'memory'; wiring?: MemoryReviewWiring } | ({ storage: 'database' } & DatabaseReviewWiring)): DynamicModule {
-    const controllers = [ReviewController, OpsReviewController, InternalReviewController, ReviewImageController];
+    const controllers = [ReviewController, OpsReviewController, InternalReviewController, InternalNoticeController, ReviewImageController];
     const imageWiring = o.storage === 'memory' ? o.wiring?.images : o.images;
     const imageObjects = (imageWiring?.objects ?? new MemoryImageObjectStore()) as unknown as import('../catalog/index.js').ImageObjectStore;
     const imageProcessing = (imageWiring?.processing ?? unavailableImageProcessing) as unknown as ImageProcessing;

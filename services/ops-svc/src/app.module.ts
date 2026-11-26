@@ -22,6 +22,7 @@ import {
 import { CommandsModule, type CommandExecutor, type CommandsModuleExtras, type HandleCommandEvent } from './modules/commands/index.js';
 import { DrizzleCommandStore, IdentityActiveCommanders, MemoryCommandStore } from './modules/commands/index.js';
 import { CasesModule, DrizzleCsCaseStore, IdentityCsAssigneeDirectory, MemoryCsCaseStore, csCaseKit, type BusinessCalendar, type CsAppealPorts, type CsAppealStore, type CsCaseKit, type CsCaseSignals } from './modules/cases/index.js';
+import { AuditCompliance, ComplianceModule, type ComplianceAudit, type ComplianceCore, type ComplianceNoticeStore } from './modules/compliance/index.js';
 import { AlertsModule, DrizzleOpsAlertStore, MemoryOpsAlertStore, type OpsAlertStore } from './modules/alerts/index.js';
 import { LiveModule, OpsLiveFeed, widgetSourcesFromEnv, type LiveModuleExtras } from './modules/live/index.js';
 import { PriorityModule, type PriorityModuleDeps } from './modules/priority/index.js';
@@ -90,6 +91,12 @@ interface CommonWiring {
   readonly payouts?: PayoutsModuleDeps;
   /** 계약 조건 변경 승인 업무(BAT-615). 없으면 메모리 저장·메모리 core 대역, 재인증은 닫힌 대역이다 */
   readonly approvals?: ApprovalsModuleDeps;
+  /** 법정 통보 모듈(F-07-11): 시험 저장소·core 내부 클라이언트·감사 대역. 없으면 메모리 저장소·닫힌 core·감사 없음 */
+  readonly compliance?: {
+    readonly store?: ComplianceNoticeStore;
+    readonly core?: ComplianceCore;
+    readonly audit?: ComplianceAudit;
+  };
   /** 관리 계정 REST·승인 업무(BAT-045 BOT-152, ADR-0322). identity는 필수이고, reauth가 없으면 쓰기가 503이다 */
   readonly adminAccounts?: {
     readonly identity: AdminIdentity;
@@ -257,6 +264,12 @@ export class AppModule {
               chain,
             ),
           ),
+          ComplianceModule.register({
+            storage: 'database',
+            database: o.database,
+            ...(o.compliance?.core ? { core: o.compliance.core } : {}),
+            audit: o.compliance?.audit ?? new AuditCompliance(chain),
+          }),
         ],
       };
     }
@@ -294,6 +307,12 @@ export class AppModule {
         BotReviewModule.register({ ...(o.botReview ?? {}) }),
         ...(o.realtimeTable ? [RealtimeTableModule.register(o.realtimeTable)] : []),
         EventCancellationsModule.register(eventCancellationDeps(o, cancellations, { suspension: new MemorySaleSuspensionLookup(store), cases: new CsCaseEventCancellationCases(cases.receive) }, chain)),
+        ComplianceModule.register({
+          storage: 'memory',
+          ...(o.compliance?.store ? { store: o.compliance.store } : {}),
+          ...(o.compliance?.core ? { core: o.compliance.core } : {}),
+          audit: o.compliance?.audit ?? new AuditCompliance(chain),
+        }),
       ],
     };
   }

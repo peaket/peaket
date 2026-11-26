@@ -6,7 +6,7 @@ import type { Database, DbTransaction } from '@peaket/platform';
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { ReportRecord, ReviewRecord, ReviewSort, TakedownRecord } from '../../domain/review.js';
 import { reviewImageDerivativeNames, reviewImagePublicKey, REVIEW_IMAGE_UNATTACHED_TTL_MS, type ReviewImageAttach, type ReviewImageRecord } from '../../domain/review-image.js';
-import type { HeldWithdrawalRow, ReviewListInput, ReviewListResult, ReviewStore } from '../../domain/ports.js';
+import type { HeldWithdrawalRow, NoticeWithdrawResult, ReviewListInput, ReviewListResult, ReviewStore } from '../../domain/ports.js';
 import { contentReport, review, reviewHiddenFingerprint, reviewImage, reviewImageUploadAttempt, takedownAction } from './schema.js';
 
 type Db = Database['db'] | DbTransaction;
@@ -394,7 +394,18 @@ export class DrizzleReviewStore implements ReviewStore {
   }
 
   async resolveReports(targetId: string, outcome: ReportRecord['outcome'], nowMs: number): Promise<void> {
-    await this.database.db.update(contentReport).set({ status: 'RESOLVED', outcome: outcome ?? null, resolvedAt: new Date(nowMs) }).where(eq(contentReport.targetId, targetId));
+    const purgeAt = new Date(nowMs + 365 * 24 * 60 * 60 * 1000);
+    await this.database.db.update(contentReport).set({ status: 'RESOLVED', outcome: outcome ?? null, resolvedAt: new Date(nowMs), purgeAt }).where(eq(contentReport.targetId, targetId));
+  }
+
+  async purgeExpiredReports(nowMs: number, limit: number): Promise<number> {
+    // DELETE ... WHERE는 status·purge_at만 읽어야 core_maintenance의 칸 한정 SELECT로 통과한다.
+    // limit은 오늘 지울 양의 상한이지만, id를 읽는 하위 질의는 권한 밖이라 한 문장으로 지우고 지운 수를 돌려준다.
+    void limit;
+    const r = await this.database.db.execute(sql`
+      delete from content_report
+       where status = 'RESOLVED' and purge_at <= ${new Date(nowMs)}::timestamptz`);
+    return r.rowCount ?? 0;
   }
 
   async applyNoticeTakedown(i: { reviewIds: readonly string[]; noticeId: string; nowMs: number }): Promise<{ applied: number }> {
@@ -419,6 +430,54 @@ export class DrizzleReviewStore implements ReviewStore {
         applied += 1;
       }
       return { applied };
+    });
+  }
+
+  async withdrawNotice(noticeId: string, nowMs: number): Promise<NoticeWithdrawResult> {
+    return this.database.transaction(async (tx) => {
+      const direct = await tx.execute(sql`
+        select id::text as id, review_id::text as review_id, content_fingerprint
+          from takedown_action
+         where notice_id = ${noticeId}::uuid and reason = 'NOTICE' and restored_at is null
+         for update`);
+      const rows = direct.rows as { id: string; review_id: string; content_fingerprint: string }[];
+      if (rows.length === 0) return { restored: 0, sameContentRestored: 0, fingerprintsCleared: 0 };
+      const fingerprints = [...new Set(rows.map((r) => r.content_fingerprint))];
+      await tx.execute(sql`
+        update takedown_action set restored_at = ${new Date(nowMs)}::timestamptz
+         where notice_id = ${noticeId}::uuid and reason = 'NOTICE' and restored_at is null`);
+      // 같은 지문에 다른 통보(NOTICE)가 살아 있으면 SAME_CONTENT는 그대로 둔다
+      const active = await tx.execute(sql`
+        select distinct content_fingerprint from takedown_action
+         where reason = 'NOTICE' and restored_at is null and content_fingerprint = any(${sql.param(fingerprints)}::text[])`);
+      const activeSet = new Set((active.rows as { content_fingerprint: string }[]).map((r) => r.content_fingerprint));
+      const free = fingerprints.filter((fp) => !activeSet.has(fp));
+      let sameContentRestored = 0;
+      let sameReviews: string[] = [];
+      if (free.length > 0) {
+        const same = await tx.execute(sql`
+          update takedown_action set restored_at = ${new Date(nowMs)}::timestamptz
+           where reason = 'SAME_CONTENT' and restored_at is null and content_fingerprint = any(${sql.param(free)}::text[])
+           returning review_id::text as review_id`);
+        sameReviews = (same.rows as { review_id: string }[]).map((r) => r.review_id);
+        sameContentRestored = sameReviews.length;
+      }
+      const affected = [...new Set([...rows.map((r) => r.review_id), ...sameReviews])];
+      let restored = 0;
+      if (affected.length > 0) {
+        const upd = await tx.execute(sql`
+          update review set status = 'VISIBLE', notice = null, notice_until = null, updated_at = ${new Date(nowMs)}::timestamptz
+           where id = any(${sql.param(affected)}::uuid[]) and status = 'HIDDEN'
+             and not exists (select 1 from takedown_action t where t.review_id = review.id and t.restored_at is null)
+           returning id`);
+        restored = upd.rows.length;
+      }
+      let fingerprintsCleared = 0;
+      if (free.length > 0) {
+        const del = await tx.execute(sql`delete from review_hidden_fingerprint where fingerprint = any(${sql.param(free)}::text[]) returning fingerprint`);
+        fingerprintsCleared = del.rows.length;
+      }
+      return { restored, sameContentRestored, fingerprintsCleared };
     });
   }
 
@@ -526,6 +585,17 @@ export class DrizzleReviewStore implements ReviewStore {
 
   async takedownsByReview(reviewId: string): Promise<readonly TakedownRecord[]> {
     const rows = await this.database.db.select().from(takedownAction).where(eq(takedownAction.reviewId, reviewId)).orderBy(asc(takedownAction.hiddenAt));
+    return rows.map(takedownOf);
+  }
+
+  async takedownsByNotice(noticeId: string): Promise<readonly TakedownRecord[]> {
+    const rows = await this.database.db.select().from(takedownAction).where(eq(takedownAction.noticeId, noticeId)).orderBy(asc(takedownAction.hiddenAt));
+    return rows.map(takedownOf);
+  }
+
+  async takedownsByFingerprints(fingerprints: readonly string[]): Promise<readonly TakedownRecord[]> {
+    if (fingerprints.length === 0) return [];
+    const rows = await this.database.db.select().from(takedownAction).where(inArray(takedownAction.contentFingerprint, [...fingerprints])).orderBy(asc(takedownAction.hiddenAt));
     return rows.map(takedownOf);
   }
 

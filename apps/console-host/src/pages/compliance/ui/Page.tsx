@@ -4,10 +4,12 @@
 import { useBoardPage, type BoardGaps } from '@/shared/lib/board';
 import { usePreviewHost } from '@/features/preview-host';
 import { PreviewSwitcher } from '@/shared/ui/PreviewSwitcher';
+import { useSearchParams } from 'react-router';
 import { DEFAULT, STATES, type State } from '../states';
 import { MainD, valsD } from './board-d';
 import { MainM, valsM } from './board-m';
 import { MainT, OverlaysT, valsT } from './board-t';
+import { ConnectedPage } from './ConnectedPage';
 
 /** 배치 보드에 없는 상태 → 그 배치에서 가장 가까운 상태(null은 그 배치의 기본 상태). 휴대폰 보드에는 노출 차단·해시 불일치·철회 복원이 없다 */
 const GAPS: BoardGaps<State> = {
@@ -19,6 +21,11 @@ const GAPS: BoardGaps<State> = {
 };
 
 export function Page() {
+  const [sp] = useSearchParams();
+  return __PREVIEW__ && sp.get('state') ? <BoardPage /> : <ConnectedPage />;
+}
+
+function BoardPage() {
   const { state, boardStates, layout, close, go } = useBoardPage('법정 조치', STATES, DEFAULT, GAPS);
   const vd = valsD(state);
   const demo = vd.envLbl === '데모 환경';

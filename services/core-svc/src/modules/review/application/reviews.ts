@@ -4,9 +4,11 @@ import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
 import {
   contentFingerprint,
   type EligibilityView,
+  graphemes,
   MANUAL_PURGE_HELD_LIMIT,
   maskAuthor,
   moderationEffect,
+  normalizeText,
   type ModerationInput,
   noticeDeadlineMs,
   type NoticeKind,
@@ -28,7 +30,7 @@ import {
   WITHDRAWAL_RECHECK_DELAY_MS,
   withdrawalRecheckAt,
 } from '../domain/review.js';
-import type { FanProfile, ReviewCaseSink, ReviewEligibility, ReviewEvent, ReviewEventDirectory, ReviewImageObjects, ReviewNotifier, ReviewStore } from '../domain/ports.js';
+import type { FanProfile, NoticeWithdrawResult, NoticeWithdrawStore, ReviewCaseSink, ReviewEligibility, ReviewEvent, ReviewEventDirectory, ReviewImageObjects, ReviewNotifier, ReviewStore } from '../domain/ports.js';
 import { ReviewEligibilityUnavailable } from '../domain/ports.js';
 import { reviewImageView, type ReviewImageView } from '../domain/review-image.js';
 
@@ -110,6 +112,8 @@ export class Reviews {
       const e = await this.#event(r.eventId);
       const reported = viewerAccountId ? await this.d.store.reportedTargetIds(viewerAccountId, [reviewId]) : new Set<string>();
       const images = await this.#imagesOf([reviewId]);
+      // 단건 조회는 남에게 신고 처리 가림의 사유도 숨긴다(목록은 notice 요약만 보인다). 내 후기면 그대로 보인다(F-07-11)
+      if (r.status === 'HIDDEN' && r.notice !== undefined && viewerAccountId !== r.accountId) throw notFound();
       const view = reviewView(r, viewerAccountId, reported.has(reviewId), new Date(e.startsAtMs).toISOString(), images.get(reviewId) ?? []);
       if (!view) throw notFound();
       return view;
@@ -290,7 +294,8 @@ export class Reviews {
           throw notHidden();
         }
         const onlySame = activeReasons.has('SAME_CONTENT') && !activeReasons.has('NOTICE') && !activeReasons.has('FILMING_HOLD') && !activeReasons.has('RIGHTS_TEMP') && !activeReasons.has('POLICY');
-        if (onlySame) throw notTarget();
+        // 통보·같은 내용 가림은 법정 철회 경로만 푼다(F-07-11, openapi 6024행 409)
+        if (onlySame || activeReasons.has('NOTICE')) throw notTarget();
       } else if (input.action === 'NO_ACTION' || input.action === 'BLOCK') {
         if (reports.length === 0) throw noReports();
         if (activeReasons.has('NOTICE') || activeReasons.has('SAME_CONTENT')) throw notTarget();
@@ -322,16 +327,66 @@ export class Reviews {
   }
 
   /** 법정 통보(명령 10): 게시물을 가리고 같은 내용 지문을 등록해 앞으로의 같은 내용도 바로 가린다. 기한은 24시간/10시간이다 */
-  async applyNoticeTakedown(input: { reviewIds: readonly string[]; noticeId: string; receivedAtMs: number; kind: NoticeKind; reason: string }): Promise<{ applied: number; deadlineAt: string }> {
+  async applyNoticeTakedown(input: { reviewIds: readonly string[]; noticeId: string; receivedAtMs: number; kind: NoticeKind; reason: string }): Promise<{ noticeId: string; applied: number; skipped: number; deadlineAt: string }> {
     return guard(async () => {
       if (!UUID.test(input.noticeId)) throw new ReviewProblem('notice-invalid', 422, '통보 문서 ID가 올바르지 않습니다');
-      if (input.reason.trim().length === 0) throw new ReviewProblem('notice-invalid', 422, '통보 사유를 적어 주세요');
+      const reason = normalizeText(input.reason);
+      if (graphemes(reason).length === 0) throw new ReviewProblem('notice-invalid', 422, '통보 사유를 적어 주세요');
+      if (graphemes(reason).length > 2000) throw new ReviewProblem('notice-invalid', 422, '통보 사유는 2,000자까지 쓸 수 있습니다');
       const now = this.d.clock.now();
       const deadline = noticeDeadlineMs(input.receivedAtMs, input.kind);
+      if (input.reviewIds.length === 0 || input.reviewIds.length > 100) throw new ReviewProblem('notice-invalid', 422, '통보 후기 목록은 1~100개입니다');
+      if (new Set(input.reviewIds).size !== input.reviewIds.length) throw new ReviewProblem('notice-invalid', 422, '중복된 후기 ID가 있습니다');
       for (const reviewId of input.reviewIds) if (!UUID.test(reviewId)) throw new ReviewProblem('review-invalid', 422, '후기 ID가 올바르지 않습니다');
       // 후기 갱신·조치 기록·지문 등록을 저장소 한 트랜잭션으로 묶고, 같은 통보·후기는 다시 적용하지 않는다
       const { applied } = await this.d.store.applyNoticeTakedown({ reviewIds: input.reviewIds, noticeId: input.noticeId, nowMs: now });
-      return { applied, deadlineAt: new Date(deadline).toISOString() };
+      return { noticeId: input.noticeId, applied, skipped: input.reviewIds.length - applied, deadlineAt: new Date(deadline).toISOString() };
+    });
+  }
+
+  /** 법정 통보 철회: 그 통보의 NOTICE와 같은 지문의 SAME_CONTENT를 한 트랜잭션으로 되살린다(C-T22) */
+  async withdrawNotice(noticeId: string, reason: string): Promise<NoticeWithdrawResult & { noticeId: string }> {
+    return guard(async () => {
+      if (!UUID.test(noticeId)) throw new ReviewProblem('notice-invalid', 422, '통보 문서 ID가 올바르지 않습니다');
+      const text = normalizeText(reason);
+      if (graphemes(text).length === 0) throw new ReviewProblem('notice-invalid', 422, '통보 철회 사유를 적어 주세요');
+      if (graphemes(text).length > 2000) throw new ReviewProblem('notice-invalid', 422, '통보 철회 사유는 2,000자까지 쓸 수 있습니다');
+      const out = await (this.d.store as ReviewStore & NoticeWithdrawStore).withdrawNotice(noticeId, this.d.clock.now());
+      return { noticeId, ...out };
+    });
+  }
+
+  /** 조치 결과서(C-T22): 통보 하나의 NOTICE와 같은 지문의 SAME_CONTENT를 싣는다(공개 계약 아님) */
+  async noticeReport(noticeId: string): Promise<{
+    noticeId: string;
+    reviews: readonly { reviewId: string; reason: 'NOTICE' | 'SAME_CONTENT'; fingerprint: string; hiddenAt: string; restoredAt: string | null }[];
+    counts: { notice: number; sameContent: number; restored: number; activeSameContent: number };
+  }> {
+    return guard(async () => {
+      if (!UUID.test(noticeId)) throw new ReviewProblem('not-found', 404, '찾을 수 없습니다');
+      const direct = (await this.d.store.takedownsByNotice(noticeId)).filter((t) => t.reason === 'NOTICE');
+      if (direct.length === 0) throw new ReviewProblem('not-found', 404, '찾을 수 없습니다');
+      const fingerprints = [...new Set(direct.map((t) => t.contentFingerprint))];
+      const same = (await this.d.store.takedownsByFingerprints(fingerprints)).filter((t) => t.reason === 'SAME_CONTENT');
+      const rows = [...direct, ...same]
+        .map((t) => ({
+          reviewId: t.reviewId,
+          reason: t.reason as 'NOTICE' | 'SAME_CONTENT',
+          fingerprint: t.contentFingerprint,
+          hiddenAt: new Date(t.hiddenAtMs).toISOString(),
+          restoredAt: t.restoredAtMs === undefined ? null : new Date(t.restoredAtMs).toISOString(),
+        }))
+        .sort((a, b) => (a.hiddenAt === b.hiddenAt ? a.reviewId.localeCompare(b.reviewId) : a.hiddenAt.localeCompare(b.hiddenAt)));
+      return {
+        noticeId,
+        reviews: rows,
+        counts: {
+          notice: direct.length,
+          sameContent: same.length,
+          restored: rows.filter((r) => r.restoredAt !== null).length,
+          activeSameContent: same.filter((t) => t.restoredAtMs === undefined).length,
+        },
+      };
     });
   }
 

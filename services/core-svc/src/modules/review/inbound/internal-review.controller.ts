@@ -3,6 +3,7 @@
 // 같은 트랜잭션에서 다시 정리 예약(지금 + 16분)을 쓰고 보류 행을 다시 처리로 표시한다. 요청자·사유는 필수이고 운영 줄 review-purge-manual에 남는다(계정 ID 없음).
 // 한 번에 보류 행 ID 차례로 50개까지 처리하고, 응답은 처리한 보류 행 수와 ID다(eventKey가 없는 행 포함, W8-audit2a 다시 보기 N1). 남은 행이 있으면 409가 날 때까지 다시 부른다.
 // 옛 경로 /anonymize(계정·주문 참조만 끊음)는 없앴다.
+// 법정 통보의 내부 경로는 internal-notice.controller.ts에 따로 둔다(F-07-11: 그 경로만 401 계약이다).
 import { Body, Controller, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
 import { ContractRouteSchema, InternalTokenGuard, ProblemError, Roles } from '@peaket/platform';
 import { z } from 'zod';

@@ -22,6 +22,13 @@ export interface ReportSummary {
   readonly reports: readonly ReportRecord[];
 }
 
+/** 법정 통보 철회의 효과(F-07-11). restored는 되살린 후기 수, sameContentRestored는 그 가운데 SAME_CONTENT 수 */
+export interface NoticeWithdrawResult {
+  readonly restored: number;
+  readonly sameContentRestored: number;
+  readonly fingerprintsCleared: number;
+}
+
 /** 손으로 처리(purgeHeldWithdrawal)가 처리한 보류 행 하나 */
 export interface HeldWithdrawalRow {
   /** held_event.id(uuid, 보류한 시각과 무작위 값으로 만든 uuidv7이라 사람을 가리키지 않는다) */
@@ -67,11 +74,17 @@ export interface ReviewStore {
   countReportsByReporterSince(reporterAccountId: string, sinceMs: number): Promise<number>;
   reportsByTarget(targetId: string): Promise<readonly ReportRecord[]>;
   resolveReports(targetId: string, outcome: ReportRecord['outcome'], nowMs: number): Promise<void>;
+  /** 처리 뒤 1년이 지난 신고 기록을 지운다(정비 review-report-retention). 지운 행 수 */
+  purgeExpiredReports(nowMs: number, limit: number): Promise<number>;
 
   /** 법정 통보 하나를 후기들에 한 트랜잭션으로 적용한다. 같은 noticeId·reviewId는 다시 적용하지 않는다(멱등) */
   applyNoticeTakedown(input: { reviewIds: readonly string[]; noticeId: string; nowMs: number }): Promise<{ applied: number }>;
   insertTakedown(t: TakedownRecord): Promise<void>;
   takedownsByReview(reviewId: string): Promise<readonly TakedownRecord[]>;
+  /** 통보 하나에 직접 걸린 조치(NOTICE) */
+  takedownsByNotice(noticeId: string): Promise<readonly TakedownRecord[]>;
+  /** 같은 본문 지문의 조치(SAME_CONTENT 포함) */
+  takedownsByFingerprints(fingerprints: readonly string[]): Promise<readonly TakedownRecord[]>;
   restoreTakedowns(reviewId: string, nowMs: number): Promise<void>;
   addHiddenFingerprint(fingerprint: string, noticeId: string | undefined, nowMs: number): Promise<void>;
   removeHiddenFingerprint(fingerprint: string): Promise<void>;
@@ -106,6 +119,11 @@ export interface ReviewStore {
   purgeHeldWithdrawal(accountId: string, o: { nowMs: number; recheckAtMs: number; limit: number }): Promise<{ purged: number; held: HeldWithdrawalRow[] } | undefined>;
   /** 이전 판이 남긴 두 꼴(purgeLegacyRows와 같은 조건)의 행 수. 잠그지 않는다 */
   countLegacyRows(): Promise<number>;
+}
+
+/** 통보 철회는 별도 포트다. MemoryReviewStore 시험 대역이 override를 쓰지 않게 기본 클래스에 두지 않는다(F-07-11) */
+export interface NoticeWithdrawStore {
+  withdrawNotice(noticeId: string, nowMs: number): Promise<NoticeWithdrawResult>;
 }
 
 export const REVIEW_STORE = Symbol('REVIEW_STORE');
