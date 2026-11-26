@@ -18,6 +18,7 @@ const NOW = Date.parse('2026-11-15T00:00:00.000Z');
 const A = randomUUID();
 const B = randomUUID();
 const C = randomUUID(); // 판매자 행이 없는 테넌트
+const D = randomUUID(); // 면제 근거가 빈 문자열인 판매자
 const PLACE = randomUUID();
 const PROD_ON = randomUUID();
 const PROD_DRAFT = randomUUID();
@@ -75,8 +76,20 @@ beforeAll(async () => {
       email: 'seller-b@example.test',
       businessRegNo: '987-65-43210',
       mailOrderReportNo: '2026-부산-0002',
-      exemptionBasis: null,
+      exemptionBasis: '기타 법령에 따른 면제',
       verifiedAt: new Date('2026-10-02T00:00:00Z'),
+    },
+    {
+      id: D,
+      legalName: '(주)빈근거공연',
+      representative: '박대표',
+      address: '대전시 어딘가 3',
+      phone: '042-000-0003',
+      email: 'seller-d@example.test',
+      businessRegNo: '111-22-33333',
+      mailOrderReportNo: '2026-대전-0003',
+      exemptionBasis: '',
+      verifiedAt: new Date('2026-10-03T00:00:00Z'),
     },
   ]);
   await admin.db.insert(place).values({ id: PLACE, name: '피켓홀', address: '서울 어딘가 1', region: '서울', createdBy: randomUUID() });
@@ -297,7 +310,8 @@ describe('F-07-12 실제 PostgreSQL', () => {
     const r = await get('/v1/partner/seller-profile', identity.partner(A));
     expect(r.statusCode).toBe(200);
     expect(r.headers['cache-control']).toBe('no-store');
-    expect(body(r)).toEqual({
+    const a = body(r);
+    expect(a).toEqual({
       seller: {
         legalName: '(주)피켓공연',
         representative: '김대표',
@@ -306,13 +320,21 @@ describe('F-07-12 실제 PostgreSQL', () => {
         email: 'seller-a@example.test',
         businessRegNo: '123-45-67890',
         mailOrderReportNo: '2026-서울-0001',
-        // 계약 SellerInfo는 exemptionBasis를 nullable로 두지 않는다. 저장 값이 null이면 응답 직렬화가 ''로 낸다.
-        exemptionBasis: '',
       },
       verifiedAt: '2026-10-01T00:00:00.000Z',
       pendingChange: null,
     });
-    expect((body(await get('/v1/partner/seller-profile', identity.partner(B))).seller as { legalName: string }).legalName).toBe('(주)다른공연');
+    // 정본 SellerInfo.exemptionBasis는 optional string(nullable 아님). null이면 ''가 아니라 칸을 뺀다.
+    expect(a.seller).not.toHaveProperty('exemptionBasis');
+
+    const b = body(await get('/v1/partner/seller-profile', identity.partner(B)));
+    expect(b.seller).toMatchObject({ legalName: '(주)다른공연', exemptionBasis: '기타 법령에 따른 면제' });
+
+    // 저장 값이 빈 문자열이어도 '면제 근거 없음'을 뜻하는 ''를 내보내지 않는다.
+    const d = body(await get('/v1/partner/seller-profile', identity.partner(D)));
+    expect(d.seller).toMatchObject({ legalName: '(주)빈근거공연' });
+    expect(d.seller).not.toHaveProperty('exemptionBasis');
+
     expect((await get('/v1/partner/seller-profile', identity.partner(C))).statusCode).toBe(404);
   });
 

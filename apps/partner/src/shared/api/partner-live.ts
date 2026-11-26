@@ -709,7 +709,8 @@ export interface PartnerSellerProfile {
     email: string | null;
     businessRegNo: string | null;
     mailOrderReportNo: string | null;
-    exemptionBasis: string | null;
+    /** 정본 SellerInfo.exemptionBasis는 optional string. 없으면 칸이 없다(RV-03). */
+    exemptionBasis?: string;
   };
   verifiedAt: string | null;
   pendingChange: null;

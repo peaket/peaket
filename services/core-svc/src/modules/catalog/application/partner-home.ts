@@ -98,7 +98,8 @@ export interface PartnerSellerProfile {
     email: string | null;
     businessRegNo: string | null;
     mailOrderReportNo: string | null;
-    exemptionBasis: string | null;
+    /** 정본 SellerInfo.exemptionBasis는 optional string(nullable 아님). 없으면 칸을 뺀다(RV-03). */
+    exemptionBasis?: string;
   };
   verifiedAt: string | null;
   pendingChange: null;
@@ -205,6 +206,8 @@ export class PartnerHomeRead {
   async seller(tenantId: string): Promise<PartnerSellerProfile | undefined> {
     const s = await this.repo.partnerSeller(tenantId);
     if (!s) return undefined;
+    // null·빈 문자열은 '면제 근거 미기재'로 보고 칸을 뺀다. ''를 실으면 '면제 근거 없음'과 섞인다(RV-03).
+    const exemptionBasis = s.seller.exemptionBasis?.trim();
     return {
       seller: {
         legalName: s.seller.legalName,
@@ -214,7 +217,7 @@ export class PartnerHomeRead {
         email: s.seller.email,
         businessRegNo: s.seller.businessRegNo,
         mailOrderReportNo: s.seller.mailOrderReportNo,
-        exemptionBasis: s.seller.exemptionBasis,
+        ...(exemptionBasis ? { exemptionBasis } : {}),
       },
       verifiedAt: s.verifiedAt?.toISOString() ?? null,
       pendingChange: null,
