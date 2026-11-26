@@ -4,7 +4,7 @@ import { redactFraudView, type FraudAppealViewRow, type RestrictionViewRow } fro
 import type { FraudAppealViewStore, RestrictionViewStore } from '../domain/ports.js';
 
 export interface RedisCommander {
-  command(args: string[]): Promise<unknown>;
+  command(args: string[], o?: { key?: string }): Promise<unknown>;
 }
 
 const hget = async (redis: RedisCommander, key: string, field: string): Promise<string | undefined> => {
@@ -29,7 +29,7 @@ return 1
 `;
 
 const applyIfGreater = async (redis: RedisCommander, key: string, field: string, version: number, value: string): Promise<boolean> => {
-  const r = await redis.command(['EVAL', APPLY_IF_GREATER, '1', key, field, String(version), value]);
+  const r = await redis.command(['EVAL', APPLY_IF_GREATER, '1', key, field, String(version), value], { key });
   return Number(r) === 1;
 };
 
