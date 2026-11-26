@@ -560,9 +560,19 @@ export type createInquiryResponse201 = {
   status: 201
 }
 
+export type createInquiryResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
 export type createInquiryResponse401 = {
   data: UnauthorizedResponse
   status: 401
+}
+
+export type createInquiryResponse409 = {
+  data: ProblemResponse
+  status: 409
 }
 
 export type createInquiryResponse422 = {
@@ -583,7 +593,7 @@ export type createInquiryResponse503 = {
 export type createInquiryResponseSuccess = (createInquiryResponse201) & {
   headers: Headers;
 };
-export type createInquiryResponseError = (createInquiryResponse401 | createInquiryResponse422 | createInquiryResponse429 | createInquiryResponse503) & {
+export type createInquiryResponseError = (createInquiryResponse400 | createInquiryResponse401 | createInquiryResponse409 | createInquiryResponse422 | createInquiryResponse429 | createInquiryResponse503) & {
   headers: Headers;
 };
 
@@ -630,7 +640,7 @@ return orvalFetch<createInquiryResponseSuccess>(getCreateInquiryUrl(),
 
 export const getCreateInquiryMutationKey = () => ['createInquiry'] as const;
 
-export const getCreateInquiryMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+export const getCreateInquiryMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInquiry>>, TError,CreateInquiryMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createInquiry>>, TError,CreateInquiryMutationVariables, TContext> => {
 
@@ -659,13 +669,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateInquiryMutationResult = NonNullable<Awaited<ReturnType<typeof createInquiry>>>
     export type CreateInquiryMutationBody = BodyType<InquiryCreate>
-    export type CreateInquiryMutationError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
+    export type CreateInquiryMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse | ServiceUnavailableResponse>
     export type CreateInquiryMutationVariables = {data: BodyType<InquiryCreate>}
 
     /**
  * @summary 문의 접수(문의 유형, 관련 주문, 제목, 내용. 첨부 없음)
  */
-export const useCreateInquiry = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
+export const useCreateInquiry = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | TooManyRequestsResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInquiry>>, TError,CreateInquiryMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createInquiry>>,
@@ -928,6 +938,11 @@ export type createInquiryMessageResponse201 = {
   status: 201
 }
 
+export type createInquiryMessageResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
 export type createInquiryMessageResponse401 = {
   data: UnauthorizedResponse
   status: 401
@@ -951,7 +966,7 @@ export type createInquiryMessageResponse422 = {
 export type createInquiryMessageResponseSuccess = (createInquiryMessageResponse201) & {
   headers: Headers;
 };
-export type createInquiryMessageResponseError = (createInquiryMessageResponse401 | createInquiryMessageResponse404 | createInquiryMessageResponse409 | createInquiryMessageResponse422) & {
+export type createInquiryMessageResponseError = (createInquiryMessageResponse400 | createInquiryMessageResponse401 | createInquiryMessageResponse404 | createInquiryMessageResponse409 | createInquiryMessageResponse422) & {
   headers: Headers;
 };
 
@@ -999,7 +1014,7 @@ return orvalFetch<createInquiryMessageResponseSuccess>(getCreateInquiryMessageUr
 
 export const getCreateInquiryMessageMutationKey = () => ['createInquiryMessage'] as const;
 
-export const getCreateInquiryMessageMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+export const getCreateInquiryMessageMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInquiryMessage>>, TError,CreateInquiryMessageMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createInquiryMessage>>, TError,CreateInquiryMessageMutationVariables, TContext> => {
 
@@ -1028,13 +1043,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateInquiryMessageMutationResult = NonNullable<Awaited<ReturnType<typeof createInquiryMessage>>>
     export type CreateInquiryMessageMutationBody = BodyType<CreateInquiryMessageBody>
-    export type CreateInquiryMessageMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type CreateInquiryMessageMutationError = ErrorType<ProblemResponse | UnauthorizedResponse>
     export type CreateInquiryMessageMutationVariables = {inquiryId: string;data: BodyType<CreateInquiryMessageBody>}
 
     /**
  * @summary 추가 문의(닫히지 않은 내 문의에)
  */
-export const useCreateInquiryMessage = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+export const useCreateInquiryMessage = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInquiryMessage>>, TError,CreateInquiryMessageMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createInquiryMessage>>,

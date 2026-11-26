@@ -44,7 +44,7 @@ export const CsCaseDetail = zod.object({
   "kind": zod.enum(['MESSAGE', 'PROGRESS', 'ANSWER']).optional().describe('MESSAGE 문의·추가 문의, PROGRESS 진행 경과, ANSWER 답변'),
   "body": zod.string().optional(),
   "createdAt": zod.iso.datetime({"offset":true}).optional()
-}).describe('문의 기록 한 줄(ADR-0066)')).optional().describe('문의 건만. 시간 순 기록(팬·답변·진행 경과)'),
+}).describe('문의 기록 한 줄(ADR-0066)')).optional().describe('문의 건만. 시간 순 기록(팬·답변·진행 경과). 담당자는 authorDisplay \'피켓 고객센터\'로만 보이고 계좌번호 꼴은 \'(계좌번호 지움)\'으로 가린다(F-06-5)'),
   "reports": zod.array(zod.object({
   "category": zod.enum(['SCALPING', 'MACRO', 'ABUSE', 'RIGHTS', 'ILLEGAL_FILMING', 'SPAM', 'OFF_TOPIC', 'OTHER']).optional(),
   "detail": zod.string().max(csCaseDetailTwoReportsItemDetailMax).nullish().describe('grapheme 500자 [가정]'),

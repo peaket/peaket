@@ -20,7 +20,7 @@ import type { InquiryMessage } from './inquiryMessage';
  * CS 처리함 건 상세(GET /v1/ops/cases/{caseId}, 추천 적용 2026-10-19, ADR-0066). 신고한 계정은 싣지 않는다
  */
 export type CsCaseDetail = CsCase & {
-  /** 문의 건만. 시간 순 기록(팬·답변·진행 경과) */
+  /** 문의 건만. 시간 순 기록(팬·답변·진행 경과). 담당자는 authorDisplay '피켓 고객센터'로만 보이고 계좌번호 꼴은 '(계좌번호 지움)'으로 가린다(F-06-5) */
   messages?: InquiryMessage[];
   /** CONTENT_REPORT·RIGHTS_REQUEST만. 신고마다 사유·자세한 내용·접수 시각(신고한 계정 없음) */
   reports?: CsCaseDetailReportsItem[];

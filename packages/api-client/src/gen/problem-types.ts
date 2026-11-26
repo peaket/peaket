@@ -2,6 +2,7 @@
 
 /** 이름 붙은 오류(RFC 9457 type의 마지막 경로, openapi x-peaket-problem-types, docs/api/guidelines.md §2) */
 export type ProblemType =
+  | 'access-log-unavailable'
   | 'admin-account-locked'
   | 'admin-account-state-conflict'
   | 'admin-account-unavailable'
@@ -59,6 +60,7 @@ export type ProblemType =
   | 'case-already-resolved'
   | 'case-assignee-invalid'
   | 'case-not-actioned'
+  | 'case-not-inquiry'
   | 'case-result-note-required'
   | 'case-status-transition-invalid'
   | 'case-update-not-allowed'
@@ -114,6 +116,8 @@ export type ProblemType =
   | 'event-status-conflict'
   | 'event-suspended'
   | 'export-format-unavailable'
+  | 'fan-lookup-rate-limited'
+  | 'fan-lookup-unavailable'
   | 'first-partner-account-must-be-admin'
   | 'fraud-approver-ineligible'
   | 'fraud-case-exists'
@@ -148,6 +152,9 @@ export type ProblemType =
   | 'image-too-large'
   | 'image-type-unsupported'
   | 'inquiry-closed'
+  | 'inquiry-daily-limit'
+  | 'inquiry-store-unavailable'
+  | 'internal-token-invalid'
   | 'invalid-auto-condition'
   | 'invalid-body'
   | 'invalid-command'
@@ -210,6 +217,8 @@ export type ProblemType =
   | 'open-passed'
   | 'open-too-close'
   | 'order-expired'
+  | 'order-lookup-unavailable'
+  | 'order-not-owned'
   | 'other-partner-device'
   | 'outside-staff-hours'
   | 'partner-admin-required'
@@ -377,6 +386,7 @@ export type ProblemType =
   | 'seatmap-publish-unavailable'
   | 'seatmap-replace-required'
   | 'seatmap-worker-unavailable'
+  | 'self-request-required'
   | 'self-target-forbidden'
   | 'self-transfer'
   | 'seq-not-in-checkpoint'
@@ -400,6 +410,7 @@ export type ProblemType =
   | 'staff-invite-mail-unavailable'
   | 'statement-recalculation-pending'
   | 'subscription-limit'
+  | 'support-unavailable'
   | 'ticket-ended'
   | 'too-many-requests'
   | 'toss-seller-registration-failed'
@@ -431,6 +442,7 @@ export const PROBLEM_TYPE_BASE = "https://peaket.example/problems/";
 
 /** 이름마다 상태 코드와 제목(제목은 화면에 보이지 않는다. 화면은 문구 키로 고른다, docs/frontend.md §5.12) */
 export const PROBLEM_TYPES = {
+  'access-log-unavailable': { status: 503, title: "접속기록을 남기지 못했습니다" },
   'admin-account-locked': { status: 423, title: "계정이 잠겼습니다" },
   'admin-account-state-conflict': { status: 409, title: "지금 계정 상태에서는 할 수 없습니다" },
   'admin-account-unavailable': { status: 503, title: "관리 계정 서비스에 닿지 못했습니다" },
@@ -488,6 +500,7 @@ export const PROBLEM_TYPES = {
   'case-already-resolved': { status: 409, title: "이미 해결한 건입니다" },
   'case-assignee-invalid': { status: 422, title: "맡길 수 없는 계정입니다" },
   'case-not-actioned': { status: 409, title: "조치하지 않은 사건입니다" },
+  'case-not-inquiry': { status: 409, title: "문의가 이어진 건이 아닙니다" },
   'case-result-note-required': { status: 422, title: "결과 메모를 적어 주세요" },
   'case-status-transition-invalid': { status: 422, title: "지금 상태에서 바꿀 수 없는 상태입니다" },
   'case-update-not-allowed': { status: 403, title: "이 건을 고칠 수 있는 역할이 아닙니다" },
@@ -543,6 +556,8 @@ export const PROBLEM_TYPES = {
   'event-status-conflict': { status: 409, title: "회차 상태와 맞지 않습니다" },
   'event-suspended': { status: 410, title: "판매가 중지된 공연입니다" },
   'export-format-unavailable': { status: 503, title: "이 파일 형식은 아직 만들 수 없습니다" },
+  'fan-lookup-rate-limited': { status: 429, title: "오늘은 더 열람할 수 없습니다" },
+  'fan-lookup-unavailable': { status: 503, title: "팬 조회 원천을 사용할 수 없습니다" },
   'first-partner-account-must-be-admin': { status: 422, title: "파트너사의 첫 계정은 관리자여야 합니다" },
   'fraud-approver-ineligible': { status: 403, title: "이 사건을 승인할 수 없는 계정입니다" },
   'fraud-case-exists': { status: 409, title: "이 묶음으로 만든 사건이 이미 있습니다" },
@@ -577,6 +592,9 @@ export const PROBLEM_TYPES = {
   'image-too-large': { status: 413, title: "한 장에 10MB까지 올릴 수 있습니다" },
   'image-type-unsupported': { status: 415, title: "JPEG, PNG, WebP 이미지만 올릴 수 있습니다" },
   'inquiry-closed': { status: 409, title: "닫힌 문의입니다" },
+  'inquiry-daily-limit': { status: 429, title: "오늘은 더 문의할 수 없습니다" },
+  'inquiry-store-unavailable': { status: 503, title: "문의를 저장하지 못했습니다" },
+  'internal-token-invalid': { status: 401, title: "내부 호출 토큰이 올바르지 않습니다" },
   'invalid-auto-condition': { status: 422, title: "희망 조건을 다시 확인해 주세요" },
   'invalid-body': { status: 400, title: "요청 본문이 올바르지 않습니다" },
   'invalid-command': { status: 422, title: "명령 값이 올바르지 않습니다" },
@@ -639,6 +657,8 @@ export const PROBLEM_TYPES = {
   'open-passed': { status: 410, title: "오픈 시각이 지났습니다" },
   'open-too-close': { status: 409, title: "다른 공연과 오픈 시각이 5분 안입니다" },
   'order-expired': { status: 409, title: "결제하지 않아 끝난 주문입니다" },
+  'order-lookup-unavailable': { status: 503, title: "관련 주문을 확인하지 못했습니다" },
+  'order-not-owned': { status: 422, title: "이 계정의 주문이 아닙니다" },
   'other-partner-device': { status: 403, title: "다른 파트너사의 기기입니다" },
   'outside-staff-hours': { status: 403, title: "근무 시간이 아닙니다" },
   'partner-admin-required': { status: 403, title: "파트너 관리자만 할 수 있습니다" },
@@ -806,6 +826,7 @@ export const PROBLEM_TYPES = {
   'seatmap-publish-unavailable': { status: 503, title: "좌석맵 파일을 잠시 게시할 수 없습니다" },
   'seatmap-replace-required': { status: 409, title: "좌석이 있는 좌석맵은 바꾸기로만 가져올 수 있습니다" },
   'seatmap-worker-unavailable': { status: 503, title: "좌석맵 파일을 잠시 확인할 수 없습니다" },
+  'self-request-required': { status: 403, title: "본인 확인을 요청한 건이 아닙니다" },
   'self-target-forbidden': { status: 403, title: "자기 계정에는 할 수 없습니다" },
   'self-transfer': { status: 422, title: "자신에게는 양도할 수 없습니다" },
   'seq-not-in-checkpoint': { status: 422, title: "그 체크포인트가 덮지 않는 기록입니다" },
@@ -829,6 +850,7 @@ export const PROBLEM_TYPES = {
   'staff-invite-mail-unavailable': { status: 503, title: "지금은 초대 메일을 보낼 수 없습니다" },
   'statement-recalculation-pending': { status: 409, title: "회차 취소 다시 계산을 기다리는 정산서입니다" },
   'subscription-limit': { status: 422, title: "알림 신청 수를 넘었습니다" },
+  'support-unavailable': { status: 503, title: "문의 연결을 사용할 수 없습니다" },
   'ticket-ended': { status: 409, title: "이미 끝난 티켓입니다" },
   'too-many-requests': { status: 429, title: "24시간 안에 이미 다시 받았습니다" },
   'toss-seller-registration-failed': { status: 502, title: "결제사 셀러 등록에 실패했습니다" },
