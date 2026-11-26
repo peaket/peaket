@@ -133,6 +133,8 @@ export interface VoidOrderTicketsInput {
   readonly eventId?: string;
   /** 무효로 할 발권 세대. 0이면 주문의 모든 세대다 */
   readonly issueGeneration: number;
+  /** 이 티켓들만 무효로 한다(FLAGGED 취소 무효). 비우면 주문·세대의 티켓 전부다 */
+  readonly ticketIds?: readonly string[];
   readonly reason?: string;
   readonly nowMs?: number;
 }
@@ -151,8 +153,9 @@ export function normalizeVoidOrderTicketsInput(i: VoidOrderTicketsInput): Normal
   if (!Number.isSafeInteger(i.issueGeneration) || i.issueGeneration < 0) throw new TicketInputError('issueGeneration은 0 이상의 정수여야 한다');
   if (i.nowMs !== undefined && (!Number.isFinite(i.nowMs) || i.nowMs < 0)) throw new TicketInputError('nowMs가 올바르지 않다');
   if (i.reason !== undefined && (typeof i.reason !== 'string' || i.reason.length > MAX_BLOCK_REASON_LENGTH)) throw new TicketInputError(`reason은 ${MAX_BLOCK_REASON_LENGTH}자 이하여야 한다`);
+  const why = i.ticketIds === undefined ? undefined : [...new Set(i.ticketIds.map((id) => requireLowerUuid('ticketId', id)))];
   const reason = i.reason?.trim();
-  return { orderId, ...(eventId ? { eventId } : {}), issueGeneration: i.issueGeneration, nowMs: i.nowMs ?? Date.now(), ...(reason ? { reason } : {}) };
+  return { orderId, ...(eventId ? { eventId } : {}), issueGeneration: i.issueGeneration, ...(why && why.length > 0 ? { ticketIds: why } : {}), nowMs: i.nowMs ?? Date.now(), ...(reason ? { reason } : {}) };
 }
 
 export type CancelTicketResult = 'REFUND_NOW' | 'REFUND_AFTER_CLOSE' | 'NOT_PAYER_HOLDER' | 'TRANSFER_PENDING' | 'EVENT_STARTED' | 'ALREADY_CANCELLED';

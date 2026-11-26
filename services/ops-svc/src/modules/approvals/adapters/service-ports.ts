@@ -40,11 +40,12 @@ export class TicketReclaimClient {
     };
   }
 
-  async voidOrder(orderId: string, reason: string, o: { issueGeneration?: number; eventId?: string } = {}): Promise<{ voided: number; alreadyEntered: number }> {
+  async voidOrder(orderId: string, reason: string, o: { issueGeneration?: number; eventId?: string; ticketIds?: readonly string[] } = {}): Promise<{ voided: number; alreadyEntered: number }> {
     const r = await this.#call(this.#client.VoidTickets, {
       order_id: orderId,
       event_id: o.eventId ?? '',
       issue_generation: o.issueGeneration ?? 0,
+      ...(o.ticketIds !== undefined && o.ticketIds.length > 0 ? { ticket_ids: [...o.ticketIds] } : {}),
       ...(reason ? { reason } : {}),
     });
     return { voided: Number(r.voided ?? 0), alreadyEntered: Number(r.already_entered ?? 0) };
@@ -103,6 +104,8 @@ export class HttpApprovalLifecyclePorts implements ApprovalLifecycleTargets, App
       ...(typeof body.refundableAmount === 'number' ? { refundableAmount: body.refundableAmount } : {}),
       ...(typeof body.issueGeneration === 'number' ? { issueGeneration: body.issueGeneration } : {}),
       ...(typeof body.eventId === 'string' && body.eventId ? { eventId: body.eventId } : {}),
+      ...(Array.isArray(body.ticketIds) ? { ticketIds: body.ticketIds.filter((id): id is string => typeof id === 'string' && id.length > 0) } : {}),
+      ...(typeof body.cancellationState === 'string' ? { cancellationState: body.cancellationState } : {}),
     };
   }
 
@@ -131,15 +134,17 @@ export class HttpApprovalLifecyclePorts implements ApprovalLifecycleTargets, App
     return { status, cancellationId: String(body.cancellationId ?? ''), refundAmount: Number(body.refundAmount ?? i.amount) };
   }
 
-  async voidOrder(i: { orderId: string; reason: string; issueGeneration?: number; eventId?: string }): Promise<{ voided: number; alreadyEntered: number }> {
+  async voidOrder(i: { orderId: string; reason: string; issueGeneration?: number; eventId?: string; ticketIds?: readonly string[] }): Promise<{ voided: number; alreadyEntered: number }> {
     if (!this.ticket) throw new ProblemError({ type: 'approval-execution-failed', status: 503, title: 'ticket-svc에 연결하지 못했습니다' });
-    return this.ticket.voidOrder(i.orderId, i.reason, { ...(i.issueGeneration !== undefined ? { issueGeneration: i.issueGeneration } : {}), ...(i.eventId !== undefined ? { eventId: i.eventId } : {}) });
+    return this.ticket.voidOrder(i.orderId, i.reason, { ...(i.issueGeneration !== undefined ? { issueGeneration: i.issueGeneration } : {}), ...(i.eventId !== undefined ? { eventId: i.eventId } : {}), ...(i.ticketIds !== undefined ? { ticketIds: i.ticketIds } : {}) });
   }
 
-  /** purchase의 기존 취소 행을 VOIDED로 끝낸다(IR-30). ticket 무효 뒤에만 부른다 */
-  async voidCancellation(cancellationId: string): Promise<void> {
+  /** purchase의 기존 취소 행을 VOIDED로 끝낸다(IR-30). ticket 무효 뒤에만 부르고, 바꾼 행이 없으면 false */
+  async voidCancellation(cancellationId: string): Promise<boolean> {
     const res = await this.#request('POST', `/internal/v1/cancellations/${cancellationId}/void`, {});
     if (!res.ok) throw new ProblemError({ type: 'approval-execution-failed', status: 502, title: '취소 행을 무효로 끝내지 못했습니다' });
+    const body = (await res.json()) as { voided?: unknown };
+    return body.voided === true;
   }
 
   async reclaim(i: { approvalId: string; targetRef: string; targetAccountId: string | null; expectedHolderAccountId: string | null; deadlineMs: number }) {

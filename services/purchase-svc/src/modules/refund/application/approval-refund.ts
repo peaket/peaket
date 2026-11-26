@@ -203,10 +203,17 @@ export class ApprovalRefunds {
     this.#kinds.set(approvalId, input.kind);
     for (const c of selected) {
       const outcome = await this.d.payments.cancel({ cancellationId: c.cancellationId, orderId: c.orderId, amount: c.refundAmount, reason: 'EXCEPTION', deadlineMs: nowMs + DEADLINE_MS });
-      const next: CancellationStatus = outcome === 'CANCELLED' ? 'REFUNDED' : 'REFUND_PENDING';
-      await this.d.writes.updateStatus({ cancellationId: c.cancellationId, status: next, nowMs });
+      // REQUESTED → REFUNDED를 바로 쓰는 전이는 DB가 REFUND_PENDING에서만 허용한다. 실제 가능한 차례로 옮기고,
+      // 첫 전이가 실패하면 승인을 REFUNDED로 답하지 않는다(IR-11).
+      const moved = await this.d.writes.updateStatus({ cancellationId: c.cancellationId, status: 'REFUND_PENDING', nowMs, refundDueAtMs: nowMs });
+      if (moved === false) throw new ApprovalRefundProblem('approval-refund-conflict', 409, '취소 행 상태를 바꾸지 못했습니다');
       await this.d.writes.markApproval?.({ cancellationId: c.cancellationId, approvalId });
-      if (next !== 'REFUNDED') status = 'REFUND_PENDING';
+      if (outcome !== 'CANCELLED') {
+        status = 'REFUND_PENDING';
+        continue;
+      }
+      const done = await this.d.writes.updateStatus({ cancellationId: c.cancellationId, status: 'REFUNDED', nowMs });
+      if (done === false) status = 'REFUND_PENDING';
     }
     return { status, cancellationId: selected[0]!.cancellationId, refundAmount: total };
   }

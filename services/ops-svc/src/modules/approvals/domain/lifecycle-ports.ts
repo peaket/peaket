@@ -18,6 +18,10 @@ export interface ApprovalTargetBasis {
   issueGeneration?: number;
   /** 회차 ID(IR-30 ticket 호출) */
   eventId?: string;
+  /** 이 승인 대상의 티켓들(FLAGGED는 취소된 티켓 하나, IR-30) */
+  ticketIds?: readonly string[];
+  /** FLAGGED 취소 행의 지금 상태(REFUNDED·VOIDED면 무효로 덮지 않는다, IR-30) */
+  cancellationState?: string;
 }
 
 /** FLAGGED 처리 행동이 읽는 승인 근거(IR-11·IR-30) */
@@ -27,19 +31,21 @@ export interface ApprovalRefundBasis {
   entryRecorded: boolean;
   issueGeneration?: number;
   eventId?: string;
+  ticketIds?: readonly string[];
+  cancellationState?: string;
 }
 
 export interface ApprovalLifecycleTargets {
   basis(kind: LifecycleKind, targetRef: string, relatedOrderIds?: readonly string[]): Promise<ApprovalTargetBasis | undefined>;
   changed(kind: LifecycleKind, targetRef: string, nowMs: number): Promise<'OK' | 'TARGET_CHANGED'>;
-  /** ticket 무효 뒤 purchase의 기존 취소 행을 VOIDED로 끝낸다(IR-30). 없으면 503 */
-  voidCancellation?(cancellationId: string): Promise<void>;
+  /** ticket 무효 뒤 purchase의 기존 취소 행을 VOIDED로 끝낸다(IR-30). 바꾼 행이 없으면 false. 없으면 503 */
+  voidCancellation?(cancellationId: string): Promise<boolean>;
 }
 
 export interface ApprovalLifecycleExecutors {
   refund(i: { approvalId: string; kind: 'SYSTEM_FAULT_REFUND' | 'DISCRETIONARY_WAIVER' | 'MINOR_CONTRACT_CANCEL'; targetRef: string; orderIds?: readonly string[]; targetAccountId: string | null; amount: number; reasonText: string }): Promise<{ status: 'REFUNDED' | 'REFUND_PENDING' | 'REQUESTED'; cancellationId: string; refundAmount: number }>;
   /** FLAGGED 취소 무효(IR-30). ticket-svc가 그 주문·발권 세대의 티켓을 VOIDED로 바꾼다 */
-  voidOrder?(i: { orderId: string; reason: string; issueGeneration?: number; eventId?: string }): Promise<{ voided: number; alreadyEntered: number }>;
+  voidOrder?(i: { orderId: string; reason: string; issueGeneration?: number; eventId?: string; ticketIds?: readonly string[] }): Promise<{ voided: number; alreadyEntered: number }>;
   reclaim(i: { approvalId: string; targetRef: string; targetAccountId: string | null; expectedHolderAccountId: string | null; deadlineMs: number }): Promise<{ result: 'RECLAIMED' | 'SKIPPED_ENTRY_STARTED' | 'SKIPPED_ENTRY_RECORDED' | 'SKIPPED_NOT_TRANSFERRED' | 'SKIPPED_HOLDER_CHANGED'; previousHolderAccountId?: string }>;
 }
 

@@ -132,7 +132,7 @@ export interface CancellationWrites {
    * 환급 상태 바꾸기(REFUNDED·VOIDED). 없으면 조용히 넘어간다. REFUNDED는 REFUND_PENDING 행만 바꾼다(그사이 CS가 무효로 끝낸 취소를 덮지 않는다,
    * BAT-420 GAT-090 A3). 바꾼 행이 없으면 false를 돌려줄 수 있다(대역은 돌려주지 않아도 된다)
    */
-  updateStatus(q: { readonly cancellationId: string; readonly status: CancellationStatus; readonly nowMs: number }): Promise<boolean | void>;
+  updateStatus(q: { readonly cancellationId: string; readonly status: CancellationStatus; readonly nowMs: number; /** REFUND_PENDING으로 옮길 때 환급 예정 시각(FLAGGED REFUND, IR-11) */ readonly refundDueAtMs?: number }): Promise<boolean | void>;
   /** 결제사 결과 모름·일시 실패: REFUND_PENDING 행에만 다음 재시도 시각을 적는다(BAT-420 A3). 바꾼 행이 없으면 false를 돌려줄 수 있다 */
   scheduleRefundRetry(q: { readonly cancellationId: string; readonly attempts: number; readonly nextRetryAtMs: number; readonly lastError: string; readonly nowMs: number }): Promise<boolean | void>;
   /** 재시도 소진·업무 거절: REFUND_PENDING 행에만 CS 처리함 대상 표시(refund_failed_at)를 남긴다(BAT-420 A3). 바꾼 행이 없으면 false를 돌려줄 수 있다 */
@@ -247,7 +247,7 @@ export interface RefundAccountWrites {
     readonly onlyIfAttempt?: number;
   }): Promise<void>;
   /** 결제사가 환급했다: REFUND_PENDING 행을 REFUNDED로 바꾼다(주문 전이는 CancellationWrites.updateStatus와 같은 규칙). answer는 같은 문장에서 쓴다 */
-  updateStatus(q: { readonly cancellationId: string; readonly status: CancellationStatus; readonly nowMs: number; readonly answer?: RefundAccountAnswerWrite }): Promise<boolean | void>;
+  updateStatus(q: { readonly cancellationId: string; readonly status: CancellationStatus; readonly nowMs: number; readonly answer?: RefundAccountAnswerWrite; readonly refundDueAtMs?: number }): Promise<boolean | void>;
   /** 결제사 업무 거절: 계좌 대기 표시를 지운 뒤 CS '환급 실패' 대상 표시(refund_failed_at)를 한 문장으로 남긴다(answer 포함) */
   markFailed(q: { readonly cancellationId: string; readonly attempts: number; readonly lastError: string; readonly nowMs: number; readonly answer?: RefundAccountAnswerWrite }): Promise<boolean | void>;
   /**

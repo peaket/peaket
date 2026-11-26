@@ -374,6 +374,8 @@ export class ApprovalLifecycle {
       entryRecorded: b.entryRecorded === true,
       ...(b.issueGeneration !== undefined ? { issueGeneration: b.issueGeneration } : {}),
       ...(b.eventId !== undefined ? { eventId: b.eventId } : {}),
+      ...(b.ticketIds !== undefined ? { ticketIds: b.ticketIds } : {}),
+      ...(b.cancellationState !== undefined ? { cancellationState: b.cancellationState } : {}),
     };
   }
 
@@ -383,15 +385,21 @@ export class ApprovalLifecycle {
   }
 
   /** FLAGGED 취소 무효(IR-30). 실행기가 없으면 503 */
-  async voidOrder(orderId: string, reason: string, o: { issueGeneration?: number; eventId?: string } = {}): Promise<{ voided: number; alreadyEntered: number }> {
+  async voidOrder(orderId: string, reason: string, o: { issueGeneration?: number; eventId?: string; ticketIds?: readonly string[] } = {}): Promise<{ voided: number; alreadyEntered: number }> {
     if (!this.d.executors?.voidOrder) await unavailable();
-    return this.d.executors!.voidOrder!({ orderId, reason, ...(o.issueGeneration !== undefined ? { issueGeneration: o.issueGeneration } : {}), ...(o.eventId !== undefined ? { eventId: o.eventId } : {}) });
+    return this.d.executors!.voidOrder!({
+      orderId,
+      reason,
+      ...(o.issueGeneration !== undefined ? { issueGeneration: o.issueGeneration } : {}),
+      ...(o.eventId !== undefined ? { eventId: o.eventId } : {}),
+      ...(o.ticketIds !== undefined ? { ticketIds: o.ticketIds } : {}),
+    });
   }
 
-  /** FLAGGED 취소 무효 뒤 purchase의 기존 취소 행을 VOIDED로 끝낸다(IR-30). 포트가 없으면 503 */
-  async voidCancellation(cancellationId: string): Promise<void> {
+  /** FLAGGED 취소 무효 뒤 purchase의 기존 취소 행을 VOIDED로 끝낸다(IR-30). 포트가 없으면 503, 바꾼 행이 없으면 false */
+  async voidCancellation(cancellationId: string): Promise<boolean> {
     if (!this.d.targets?.voidCancellation) await unavailable();
-    await this.d.targets!.voidCancellation!(cancellationId);
+    return this.d.targets!.voidCancellation!(cancellationId);
   }
 
   async #targetChanged(r: ApprovalLifecycleRecord, nowMs: number): Promise<boolean> {

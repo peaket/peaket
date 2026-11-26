@@ -220,7 +220,7 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
     });
   }
 
-  async updateStatus(q: { readonly cancellationId: string; readonly status: 'REQUESTED' | 'REFUND_PENDING' | 'REFUNDED' | 'VOIDED'; readonly nowMs: number; readonly answer?: { readonly idempotencyKey: string; readonly answer: RefundAccountAnswer } }): Promise<boolean> {
+  async updateStatus(q: { readonly cancellationId: string; readonly status: 'REQUESTED' | 'REFUND_PENDING' | 'REFUNDED' | 'VOIDED'; readonly nowMs: number; readonly answer?: { readonly idempotencyKey: string; readonly answer: RefundAccountAnswer }; readonly refundDueAtMs?: number }): Promise<boolean> {
     return this.database.transaction(async (tx) => {
       const [row] = await tx
         .select({ orderId: orderCancellation.orderId, refundAmount: orderCancellation.refundAmount })
@@ -245,6 +245,7 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
           status: q.status,
           statusChangedAt: new Date(q.nowMs),
           nextRefundAt: null,
+          ...(q.refundDueAtMs === undefined ? {} : { refundDueAt: new Date(q.refundDueAtMs) }),
           // 답은 상태 전이와 같은 문장에서 쓴다(재시작·다른 파드 재생, RV-24)
           ...(q.answer === undefined ? {} : { refundAccountAnswer: q.answer.answer }),
         })

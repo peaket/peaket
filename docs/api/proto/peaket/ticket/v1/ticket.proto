@@ -98,6 +98,9 @@ message VoidTicketsRequest {
   string event_id = 2;
   // 무효로 할 발권 세대(되돌린 입금의 승인 사건 순번).
   int64 issue_generation = 3;
+  // 이 티켓들만 무효로 한다(FLAGGED 취소 무효, F-06-3 IR-30). 비우면 주문·세대의 티켓 전부다.
+  // 지정한 티켓은 이미 REFUNDED여도 VOIDED로 끝낼 수 있다. 지정하지 않은 REFUNDED 티켓은 건드리지 않는다.
+  repeated string ticket_ids = 4;
 }
 
 message VoidTicketsResponse {

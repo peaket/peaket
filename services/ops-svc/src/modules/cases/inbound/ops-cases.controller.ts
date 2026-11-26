@@ -124,11 +124,16 @@ export class OpsCasesController {
     const basis = await this.approvalLifecycle.refundBasis(before.view.targetRef);
     if (!basis) throw new ProblemError({ type: 'not-found', status: 404, title: '승인 대상을 찾지 못했습니다' });
     if (parsed.data.decision === 'VOID') {
+      // 취소 행이 이미 끝났으면 티켓을 건드리지 않는다(IR-30)
+      if (basis.cancellationState === 'REFUNDED' || basis.cancellationState === 'VOIDED') throw new ProblemError({ type: 'case-cancellation-not-voidable', status: 409, title: '이미 환급·무효로 끝난 취소입니다' });
       // 취소 무효는 입장 기록이 있어야 한다(계획 §4.1). 없으면 ticket-svc를 부르지 않는다(IR-30)
       if (!basis.entryRecorded) throw new ProblemError({ type: 'case-entry-record-missing', status: 409, title: '입장 기록이 없어 취소를 무효로 할 수 없습니다' });
-      const out = await this.approvalLifecycle.voidOrder(basis.orderId, 'FLAGGED_VOID', { ...(basis.issueGeneration !== undefined ? { issueGeneration: basis.issueGeneration } : {}), ...(basis.eventId !== undefined ? { eventId: basis.eventId } : {}) });
+      const out = await this.approvalLifecycle.voidOrder(basis.orderId, 'FLAGGED_VOID', { ...(basis.issueGeneration !== undefined ? { issueGeneration: basis.issueGeneration } : {}), ...(basis.eventId !== undefined ? { eventId: basis.eventId } : {}), ...(basis.ticketIds !== undefined ? { ticketIds: basis.ticketIds } : {}) });
       if (out.alreadyEntered === 0) throw new ProblemError({ type: 'case-entry-record-missing', status: 409, title: '입장 기록이 없어 취소를 무효로 할 수 없습니다' });
-      if (basis.orderId !== before.view.targetRef) await this.approvalLifecycle.voidCancellation(before.view.targetRef);
+      if (basis.orderId !== before.view.targetRef) {
+        const voided = await this.approvalLifecycle.voidCancellation(before.view.targetRef);
+        if (!voided) throw new ProblemError({ type: 'case-cancellation-void-failed', status: 409, title: '취소 행을 무효로 끝내지 못했습니다' });
+      }
     }
     if (parsed.data.decision === 'REFUND') {
       if (basis.refundableAmount <= 0) throw new ProblemError({ type: 'case-nothing-to-refund', status: 409, title: '환급할 남은 금액이 없습니다' });

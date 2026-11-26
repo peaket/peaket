@@ -15,6 +15,8 @@ export interface OrderApprovalBasis {
   refundableAmount: number;
   /** 무효화할 발권 세대(없으면 0) */
   issueGeneration: number;
+  /** 이 승인 대상의 티켓들(FLAGGED는 취소된 티켓 하나, IR-30) */
+  ticketIds: string[];
 }
 export interface MinorContractBasis {
   orderId: string;
@@ -26,6 +28,7 @@ export interface MinorContractBasis {
   entryRecorded: boolean;
   /** 무효화할 발권 세대(없으면 0) */
   issueGeneration: number;
+  ticketIds: string[];
 }
 
 /** 내부 경로(IR-03): /internal/v1/orders/{orderId}/approval-basis, /internal/v1/orders/{orderId}/minor-contract-basis */
@@ -66,6 +69,7 @@ export class ApprovalBasisOrders {
       // 다른 티켓의 남은 금액을 더하면 #resumeExisting의 취소 행 합계와 어긋난다(IR-11).
       refundableAmount: cancellation ? cancellation.refundAmount : refundable,
       issueGeneration: first.issueGeneration ?? 0,
+      ticketIds: cancellation ? [cancellation.ticketId] : rows.map((r) => r.ticketId).filter((id) => id.length > 0),
     };
   }
 

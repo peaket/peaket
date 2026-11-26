@@ -101,6 +101,11 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "issue_generation": {
                       "type": "int64",
                       "id": 3
+                    },
+                    "ticket_ids": {
+                      "rule": "repeated",
+                      "type": "string",
+                      "id": 4
                     }
                   }
                 },

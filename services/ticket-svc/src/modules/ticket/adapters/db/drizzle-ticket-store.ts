@@ -234,21 +234,26 @@ export class DrizzleTicketStore implements TicketStore {
       if (input.eventId) conditions.push(eq(ticket.eventId, input.eventId));
       // proto의 '그 세대 이하'를 따른다(IR-30). 세대 0은 모든 세대다.
       if (input.issueGeneration > 0) conditions.push(lte(ticket.issueGeneration, input.issueGeneration));
+      if (input.ticketIds !== undefined && input.ticketIds.length > 0) conditions.push(inArray(ticket.id, [...input.ticketIds]));
       const rows = await tx.select().from(ticket).where(and(...conditions)).orderBy(asc(ticket.id)).for('update');
-      const entered = await tx.execute(sql`
-        select count(distinct s.ticket_id)::int as n
-        from ticket t
-        join scan_event s on s.ticket_id = t.id and s.event_id = t.event_id
-        where t.order_id = ${input.orderId}::uuid
-          and (${input.issueGeneration} = 0 or t.issue_generation <= ${input.issueGeneration})
-          ${input.eventId ? sql`and t.event_id = ${input.eventId}::uuid` : sql``}
-          and s.direction = 'IN' and s.result = 'PASS'`);
+      const idArray =
+        rows.length === 0
+          ? sql`array[]::uuid[]`
+          : sql`array[${sql.join(
+              rows.map((r) => sql`${r.id}::uuid`),
+              sql`, `,
+            )}]`;
+      const entered =
+        rows.length === 0
+          ? { rows: [{ n: 0 }] }
+          : await tx.execute(sql`select count(distinct s.ticket_id)::int as n from scan_event s where s.ticket_id = any(${idArray}) and s.direction = 'IN' and s.result = 'PASS'`);
       const alreadyEntered = Number((entered.rows[0] as { n: number | string } | undefined)?.n ?? 0);
+      const targeted = new Set(input.ticketIds ?? []);
       if (alreadyEntered === 0) return { voided: 0, alreadyEntered: 0 };
       let voided = 0;
       for (const row of rows) {
-        // 이미 끝난 티켓은 덮지 않는다(REFUNDED도 포함, IR-30)
-        if (statusOf(row.status) === 'VOIDED' || statusOf(row.status) === 'REFUNDED') continue;
+        // 이미 끝난 티켓은 덮지 않는다. 다만 FLAGGED가 지정한 티켓은 REFUNDED여도 VOIDED로 끝낸다(IR-30).
+        if (statusOf(row.status) === 'VOIDED' || (statusOf(row.status) === 'REFUNDED' && !targeted.has(row.id))) continue;
         const revokedKeyId = await this.o.deviceKeys?.revokeActiveInTx(tx, row.id, input.nowMs);
         await tx
           .update(ticket)
