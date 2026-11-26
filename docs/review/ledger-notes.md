@@ -382,3 +382,16 @@ ADR-0373 결정 2의 '동결로 미검증'이다. 완성 판정에서 빼고 완
 | S-T14 ④ | 미검증 |  | BAT-095(K4, 완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). Degraded Mode 완화 SLO p99 1.5초와 초과 판매 0건도 K4 무대가 필요하다(S-T12 ①과 같은 까닭). ①~③(자동 전환)은 BAT-053(HOT-091) 시험이다 |
 | S-T15 | 미검증 |  | LCH-200(K5, 완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). K5 랩 판정 도구 `loadtest/k5/seatmap-lab.mjs`는 v0 입구 고정이고 v1 좌석맵 랩 판정은 LCH-200(F-08-1, 동결)이다 |
 | P-T31 | 미검증 |  | 구간 측정(완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). 결제사 전환 훈련과 결제사별 동시 입장 목표 상한은 스테이징 무대가 필요하다(F-09 클라우드 기반, 동결) |
+
+## F-06-5 PostgreSQL 18 통합(2026-11-27, 동결 로컬)
+
+- **잠금**: `docker`(lane2-F-06-5) take `2026-11-27T06:44:07+09:00`, drop `2026-11-27T06:56:44+09:00`. `docker-all`·kind·브라우저를 쓰지 않았다. 끝난 뒤 `peaket-f065`·`lane2-F-06-5` 컨테이너·볼륨 0, 잠금 자리 비었음.
+- **계획 기록**: `docs/review/plans/F-06-5.md` `## 구현`의 'PostgreSQL 통합'·'미실행·남은 위험'.
+
+| 실행 ID | 완료 시각 | 시험 | 결과 |
+| --- | --- | --- | --- |
+| `2026-11-27-f065-pg-core-r1` | `2026-11-27T06:56:33+09:00` | core `test-int/support-inquiries.int.test.ts` | **9/9 통과**(0055·0049 적용, 표·CHECK·인덱스·`core_app` 권한, Drizzle 접수·멱등·BOLA·추가 문의·답변·닫기·3년 파기·Outbox 파티션) |
+| `2026-11-27-f065-pg-ops-r1` | `2026-11-27T06:56:40+09:00` | ops `test-int/fan-lookup.int.test.ts` | **3/3 통과**(0041 적용, `admin_data_access` 16칸·CHECK·인덱스·`ops_app` 권한, 접속기록 append/recent·2년 보존, `cs_case.account_id` 채움·계정별 목록) |
+| `2026-11-27-f065-pg-ops-regression-r1` | `2026-11-27T06:55:22+09:00` | ops `test-int/cs-cases.int.test.ts` | 14/15, F-06-2 시험이 `INQUIRY`를 거절한다고 기대하는 낡은 단언 1건 실패(시험 고정 지시로 고치지 않음, 시험 역할 몫) |
+
+- **통합에서 함께 고친 결함**: ① core `_journal.json`에 0049·0055 줄 누락(마이그레이션 미적용·`migrations-journal` 단위 시험 실패) ② support Drizzle의 Outbox ID가 UUIDv4라 UUIDv7 일별 파티션에 안 들어감 ③ `core_app`의 `outbox` INSERT·`outbox_seq` USAGE 권한 없음(문의 저장 503) ④ DB `cs_case.list`가 `accountId`를 거르지 않음. 자세한 파일·검증은 계획 `## 구현`.
