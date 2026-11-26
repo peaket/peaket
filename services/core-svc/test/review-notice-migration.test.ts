@@ -68,11 +68,14 @@ describe('F-07-11 마이그레이션 번호와 색인', () => {
     expect(sql).not.toContain('create table');
     expect(sql).toMatch(/index[^;]*on content_report[^;]*\(purge_at\)/);
     expect(sql).toMatch(/index[^;]*on takedown_action[^;]*\(notice_id\s*,\s*content_fingerprint\)/);
-    expect(sql).toMatch(/grant delete on content_report to core_maintenance/);
+    expect(sql).toMatch(/grant[^;]*delete[^;]*on content_report[^;]*to core_maintenance/);
     expect(existsSync(`${dir}meta/0053_snapshot.json`)).toBe(true);
     const snapshot = readFileSync(`${dir}meta/0053_snapshot.json`, 'utf8');
-    expect(snapshot).toContain('content_report_purge_idx');
-    expect(snapshot).toContain('takedown_action_notice_fingerprint_idx');
+    // 색인 이름은 정본이 정하지 않는다. 표·칸만 본다
+    expect(snapshot).toContain('"content_report"');
+    expect(snapshot).toContain('"purge_at"');
+    expect(snapshot).toContain('"takedown_action"');
+    expect(snapshot).toContain('"content_fingerprint"');
 
     const e = journal().entries;
     const e52 = e.find((x) => x.tag === '0052_review_image');
@@ -80,7 +83,7 @@ describe('F-07-11 마이그레이션 번호와 색인', () => {
     expect({ idx: e53?.idx, later: e53 !== undefined && e52 !== undefined && e53.when > e52.when }).toEqual({ idx: 53, later: true });
   });
 
-  test('MIG-01 권한은 core_maintenance의 content_report 행 지우기뿐이고, 다른 마이그레이션은 같은 색인을 만들지 않는다', () => {
+  test('MIG-01 권한은 core_maintenance의 content_report SELECT·DELETE뿐이고, 다른 마이그레이션은 같은 색인을 만들지 않는다', () => {
     expect(sqlFiles()).toContain('0053_compliance_notice.sql');
     if (!existsSync(`${dir}0053_compliance_notice.sql`)) return;
     for (const f of sqlFiles().filter((f) => f !== '0053_compliance_notice.sql')) {
@@ -88,8 +91,14 @@ describe('F-07-11 마이그레이션 번호와 색인', () => {
       expect({ file: f, purgeIdx: /index[^;]*on content_report[^;]*\(purge_at\)/.test(sql) }).toEqual({ file: f, purgeIdx: false });
     }
     const grants = grantsOf(flatSql(sqlOf('0053_compliance_notice.sql')));
-    expect(grants).toEqual(['core_maintenance content_report DELETE']);
-    // 행 지우기는 정비 역할에만 준다
+    // DELETE는 WHERE(status, purge_at)를 읽으므로 SELECT가 함께 있어야 PostgreSQL이 허용한다
+    const tableSelect = grants.includes('core_maintenance content_report SELECT');
+    const columnSelect = grants
+      .filter((g) => g.startsWith('core_maintenance content_report SELECT ['))
+      .some((g) => g.includes('purge_at') && g.includes('status'));
+    expect(grants).toContain('core_maintenance content_report DELETE');
+    expect(tableSelect || columnSelect).toBe(true);
+    // 행 지우기는 정비 역할에만 주고, 팬 경로에는 주지 않는다
     expect(grants.some((g) => g.startsWith('core_app '))).toBe(false);
   });
 });

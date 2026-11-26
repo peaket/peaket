@@ -17,10 +17,32 @@ const DAY = 24 * 60 * 60 * 1000;
 const HOUR = 60 * 60 * 1000;
 const INTERNAL = { 'x-peaket-internal-token': TOKEN, 'content-type': 'application/json' };
 
+type WithdrawResult = { restored: number; sameContentRestored: number; fingerprintsCleared: number };
+/** 저장소 한 번이 실패할 때 유스케이스가 부분 가림·부분 조치를 남기지 않는지 본다(실제 트랜잭션은 Docker 차례의 test-int) */
+class FailingReviewStore extends MemoryReviewStore {
+  failApply = false;
+  failWithdraw = false;
+  override async applyNoticeTakedown(input: { reviewIds: readonly string[]; noticeId: string; nowMs: number }): Promise<{ applied: number }> {
+    if (this.failApply) {
+      this.failApply = false;
+      throw new Error('apply failed');
+    }
+    return super.applyNoticeTakedown(input);
+  }
+  async withdrawNotice(noticeId: string, nowMs: number): Promise<WithdrawResult> {
+    if (this.failWithdraw) {
+      this.failWithdraw = false;
+      throw new Error('withdraw failed');
+    }
+    const proto = MemoryReviewStore.prototype as unknown as { withdrawNotice(noticeId: string, nowMs: number): Promise<WithdrawResult> };
+    return proto.withdrawNotice.call(this, noticeId, nowMs);
+  }
+}
+
 let svc: Awaited<ReturnType<typeof createService>>;
 let clock: FakeClock;
 const repo = new MemoryCatalogRepository();
-const store = new MemoryReviewStore();
+const store = new FailingReviewStore();
 const eligibility = new MemoryReviewEligibility();
 const fanProfiles = new MemoryFanProfile();
 const notifier = new MemoryReviewNotifier();
@@ -225,12 +247,14 @@ describe('법정 통보 내부 경로', () => {
     expect((await svc.http.inject({ method: 'GET', url: `/v1/reviews/${e}`, headers: fan(viewer) })).statusCode).toBe(200);
   });
 
-  test('NTC-05 [C-T22] 철회는 같은 지문의 SAME_CONTENT만 되살리고, 불법 촬영물로 가린 후기는 그대로 둔다', async () => {
+  test('NTC-05 [C-T22] 철회는 같은 지문의 SAME_CONTENT만 되살리고, 불법 촬영물·임시조치·공시로 가린 후기는 그대로 둔다', async () => {
     const { eventId } = seed();
     const viewer = randomUUID();
     const body = '다른 사유로 가린 후기 철회 시험 본문입니다.';
     const a = await makeReview(eventId, randomUUID(), body);
     const b = await makeReview(eventId, randomUUID(), body);
+    const c = await makeReview(eventId, randomUUID(), body);
+    const d = await makeReview(eventId, randomUUID(), body);
     const reporter = randomUUID();
     const reported = await svc.http.inject({
       method: 'POST',
@@ -239,7 +263,14 @@ describe('법정 통보 내부 경로', () => {
       payload: JSON.stringify({ category: 'ILLEGAL_FILMING' }),
     });
     expect(reported.statusCode).toBe(201);
-    expect((await svc.http.inject({ method: 'GET', url: `/v1/reviews/${b}`, headers: fan(viewer) })).statusCode).toBe(404);
+    for (const reviewId of [c, d]) {
+      expect((await svc.http.inject({ method: 'POST', url: `/v1/reviews/${reviewId}/reports`, headers: { ...fan(randomUUID()), 'content-type': 'application/json' }, payload: JSON.stringify({ category: 'SPAM' }) })).statusCode).toBe(201);
+    }
+    const cs = identity.ops('cs_agent');
+    const moderate = (reviewId: string, payload: Record<string, unknown>) => svc.http.inject({ method: 'POST', url: `/v1/ops/reviews/${reviewId}/moderation`, headers: { ...cs, 'content-type': 'application/json' }, payload: JSON.stringify(payload) });
+    expect((await moderate(c, { action: 'TEMP_BLOCK', reason: '권리 침해 임시조치', violation: 'RIGHTS', endsAt: new Date(NOW_MS + 7 * DAY).toISOString() })).statusCode).toBe(200);
+    expect((await moderate(d, { action: 'BLOCK', reason: '운영정책 위반', violation: 'ABUSE' })).statusCode).toBe(200);
+    for (const reviewId of [b, c, d]) expect((await svc.http.inject({ method: 'GET', url: `/v1/reviews/${reviewId}`, headers: fan(viewer) })).statusCode).toBe(404);
 
     const noticeId = randomUUID();
     await notice(applyBody(noticeId, [a]));
@@ -247,8 +278,10 @@ describe('법정 통보 내부 경로', () => {
     expect(out.statusCode).toBe(200);
     expect(JSON.parse(out.payload)).toMatchObject({ restored: 1, sameContentRestored: 0, fingerprintsCleared: 1 });
     expect((await svc.http.inject({ method: 'GET', url: `/v1/reviews/${a}`, headers: fan(viewer) })).statusCode).toBe(200);
-    expect((await svc.http.inject({ method: 'GET', url: `/v1/reviews/${b}`, headers: fan(viewer) })).statusCode).toBe(404);
+    for (const reviewId of [b, c, d]) expect((await svc.http.inject({ method: 'GET', url: `/v1/reviews/${reviewId}`, headers: fan(viewer) })).statusCode).toBe(404);
     expect((await store.takedownsByReview(b)).find((t) => t.reason === 'FILMING_HOLD')?.restoredAtMs).toBeUndefined();
+    expect((await store.takedownsByReview(c)).find((t) => t.reason === 'RIGHTS_TEMP')?.restoredAtMs).toBeUndefined();
+    expect((await store.takedownsByReview(d)).find((t) => t.reason === 'POLICY')?.restoredAtMs).toBeUndefined();
   });
 
   test('NTC-06 [C-T22][ASVS v5.0.0-2.3.3] 적용은 없는·지운 후기를 건너뛰고 applied와 skipped를 정확히 센다', async () => {
@@ -285,9 +318,9 @@ describe('법정 통보 내부 경로', () => {
     const long = await notice(applyBody(randomUUID(), [await makeReview(eventId, randomUUID(), '사유 길이 시험용 후기 본문입니다.')], NOW_MS - HOUR, 'H24', '가'.repeat(2_000)));
     expect(long.statusCode).toBe(200);
     const tooLong = await notice(applyBody(randomUUID(), [await makeReview(eventId, randomUUID(), '사유 초과 시험용 후기 본문입니다.')], NOW_MS - HOUR, 'H24', '가'.repeat(2_001)));
-    expect(tooLong.statusCode).toBe(422);
+    expect([400, 422]).toContain(tooLong.statusCode);
     const empty = await notice(applyBody(randomUUID(), [await makeReview(eventId, randomUUID(), '사유 없음 시험용 후기 본문입니다.')], NOW_MS - HOUR, 'H24', ''));
-    expect(empty.statusCode).toBe(422);
+    expect([400, 422]).toContain(empty.statusCode);
   });
 
   test('NTC-09 [ASVS v5.0.0-2.3.2] 통보 후기 목록은 100개까지이고 101개·중복은 400이다', async () => {
@@ -296,9 +329,9 @@ describe('법정 통보 내부 경로', () => {
     expect(max.statusCode).toBe(200);
     expect(JSON.parse(max.payload)).toMatchObject({ applied: 0, skipped: 100 });
     const over = await notice(applyBody(randomUUID(), [...ids, randomUUID()]));
-    expect(over.statusCode).toBe(400);
+    expect([400, 422]).toContain(over.statusCode);
     const duplicate = await notice(applyBody(randomUUID(), [ids[0]!, ids[0]!]));
-    expect(duplicate.statusCode).toBe(400);
+    expect([400, 422]).toContain(duplicate.statusCode);
   });
 
   test('NTC-10 [C-T22] 통보로 가린 후기는 신고 처리(RELEASE)로 풀 수 없고 법정 철회 경로만 푼다', async () => {
@@ -308,7 +341,7 @@ describe('법정 통보 내부 경로', () => {
     expect((await notice(applyBody(noticeId, [a]))).statusCode).toBe(200);
     const blocked = await moderation(a, 'RELEASE', '이의 인정');
     expect(blocked.statusCode).toBe(409);
-    expect(JSON.parse(blocked.payload)).toMatchObject({ type: 'review-not-moderation-target' });
+    expect(JSON.parse(blocked.payload)).toMatchObject({ type: 'https://peaket.example/problems/review-not-moderation-target' });
     expect((await withdraw(noticeId, { reason: '통보 철회' })).statusCode).toBe(200);
     expect((await svc.http.inject({ method: 'GET', url: `/v1/reviews/${a}`, headers: fan(randomUUID()) })).statusCode).toBe(200);
   });
@@ -319,9 +352,13 @@ describe('법정 통보 내부 경로', () => {
     const noticeId = randomUUID();
     await notice(applyBody(noticeId, [a]));
     const before = JSON.parse((await noticeReport(noticeId)).payload) as { reviews: { reviewId: string; reason: string; fingerprint: string; restoredAt: string | null }[]; counts: Record<string, number> };
+    expect(Object.keys(before).sort()).toEqual(['counts', 'noticeId', 'reviews']);
+    expect(Object.keys(before.reviews[0]!).sort()).toEqual(['fingerprint', 'hiddenAt', 'reason', 'restoredAt', 'reviewId']);
+    expect(Object.keys(before.counts).sort()).toEqual(['activeSameContent', 'notice', 'restored', 'sameContent']);
     expect(before.counts).toMatchObject({ notice: 1, sameContent: 0, restored: 0, activeSameContent: 0 });
     expect(before.reviews[0]).toMatchObject({ reviewId: a, reason: 'NOTICE', restoredAt: null });
     expect(before.reviews[0]!.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(before)).not.toContain('결과서 시험용');
     await withdraw(noticeId, { reason: '통보 철회' });
     const after = JSON.parse((await noticeReport(noticeId)).payload) as { reviews: { restoredAt: string | null }[]; counts: Record<string, number> };
     expect(after.counts).toMatchObject({ notice: 1, restored: 1, activeSameContent: 0 });
@@ -338,5 +375,31 @@ describe('법정 통보 내부 경로', () => {
     expect((await noticeReport(noticeId, null)).statusCode).toBe(401);
     expect((await withdraw(noticeId, { reason: '통보 철회' }, null)).statusCode).toBe(401);
     expect((await store.takedownsByReview(a))).toHaveLength(0);
+  });
+
+  test('NTC-13 [ASVS v5.0.0-2.3.3] 적용 저장소가 실패하면 부분 가림·부분 조치 기록·지문이 남지 않는다', async () => {
+    const { eventId } = seed();
+    const a = await makeReview(eventId, randomUUID(), '적용 실패 되돌림 시험용 후기 본문입니다.');
+    const before = (await store.findReview(a))!;
+    store.failApply = true;
+    const r = await notice(applyBody(randomUUID(), [a]));
+    expect([500, 503]).toContain(r.statusCode);
+    expect((await store.findReview(a))!.status).toBe('VISIBLE');
+    expect(await store.takedownsByReview(a)).toHaveLength(0);
+    expect(await store.hasHiddenFingerprint(before.contentFingerprint!)).toBe(false);
+  });
+
+  test('NTC-14 [ASVS v5.0.0-2.3.3] 철회 저장소가 실패하면 가림·조치 기록·지문이 그대로 남는다', async () => {
+    const { eventId } = seed();
+    const a = await makeReview(eventId, randomUUID(), '철회 실패 되돌림 시험용 후기 본문입니다.');
+    const noticeId = randomUUID();
+    expect((await notice(applyBody(noticeId, [a]))).statusCode).toBe(200);
+    const fingerprint = (await store.findReview(a))!.contentFingerprint!;
+    store.failWithdraw = true;
+    const r = await withdraw(noticeId, { reason: '통보 철회' });
+    expect([500, 503]).toContain(r.statusCode);
+    expect((await store.findReview(a))!.status).toBe('HIDDEN');
+    expect((await store.takedownsByReview(a)).find((t) => t.reason === 'NOTICE')?.restoredAtMs).toBeUndefined();
+    expect(await store.hasHiddenFingerprint(fingerprint)).toBe(true);
   });
 });

@@ -1,5 +1,6 @@
 // 운영자 후기 조치의 규칙(POL-044 ③, openapi /v1/ops/reviews/{reviewId}/moderation, F-07-10).
 // 신고가 있는 후기만, 통보·같은 내용으로 가린 후기는 법정 통보 경로로만, RELEASE는 가린 후기만 받는다.
+// 법정 통보 가림의 RELEASE는 409이고, 철회는 내부 통보 경로(POST /internal/v1/reviews/notice-takedowns/{noticeId}/withdrawal)만 받는다.
 // 조치·조치 기록·신고 완료는 저장소의 moderate 한 번으로 넘긴다(한 트랜잭션). 같은 조치는 다시 저장하지 않는다.
 // 기준 트리에서는 신고 없는 후기·가리지 않은 후기의 해제도 200이라 새 시험이 실패한다.
 import 'reflect-metadata';
@@ -38,13 +39,16 @@ const identity = new FakeIdentity();
 const clock = fakeClock({ now: NOW_MS });
 const PROMOTER = randomUUID();
 const DAY = 24 * 60 * 60 * 1000;
+const INTERNAL_TOKEN = 'f0711-moderation-internal';
+const originalToken = process.env.PEAKET_INTERNAL_TOKEN;
 
 beforeAll(async () => {
+  process.env.PEAKET_INTERNAL_TOKEN = INTERNAL_TOKEN;
   repo.sellerNames.set(PROMOTER, '(주)피켓공연');
   svc = await createService({
     name: 'core-svc',
     module: AppModule.register({ memory: true, catalog: repo, review: { store, eligibility, fanProfile: fanProfiles, notifier, cases } }),
-    env: { PEAKET_ENV: 'ci' },
+    env: { PEAKET_ENV: 'ci', PEAKET_INTERNAL_TOKEN: INTERNAL_TOKEN },
     clock,
     logDestination: quiet(),
     adminAuthz: identity,
@@ -53,6 +57,8 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await svc?.close();
+  if (originalToken === undefined) delete process.env.PEAKET_INTERNAL_TOKEN;
+  else process.env.PEAKET_INTERNAL_TOKEN = originalToken;
 });
 
 function seed(o: { startsAt?: Date; status?: 'SCHEDULED' | 'CANCELLED'; saleReview?: SaleReview; saleApprovedAt?: Date | null } = {}): { eventId: string; productionId: string } {
@@ -70,6 +76,14 @@ const report = (reviewId: string, account: string, category: string) =>
 const moderate = (reviewId: string, body: Record<string, unknown>) =>
   svc.http.inject({ method: 'POST', url: `/v1/ops/reviews/${reviewId}/moderation`, headers: { ...identity.ops('cs_agent'), 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 const opsDetail = (reviewId: string) => svc.http.inject({ method: 'GET', url: `/v1/ops/reviews/${reviewId}`, headers: identity.ops('cs_agent') });
+/** 법정 통보 철회는 운영자 후기 조치(RELEASE)가 아니라 내부 통보 경로다(F-07-11) */
+const withdrawNotice = (noticeId: string) =>
+  svc.http.inject({
+    method: 'POST',
+    url: `/internal/v1/reviews/notice-takedowns/${noticeId}/withdrawal`,
+    headers: { 'x-peaket-internal-token': INTERNAL_TOKEN, 'content-type': 'application/json' },
+    payload: JSON.stringify({ reason: '통보 철회' }),
+  });
 
 async function createAndReport(): Promise<{ eventId: string; reviewId: string; author: string; reporter: string }> {
   const { eventId } = seed();
@@ -84,7 +98,7 @@ async function createAndReport(): Promise<{ eventId: string; reviewId: string; a
 }
 
 describe('운영자 후기 조치의 409', () => {
-  test('OPS-02 [ASVS v5.0.0-2.3.3] 가림 사유·신고 수에 따른 409 차례: 신고 없는 TEMP_BLOCK은 200, NO_ACTION·BLOCK은 409, SAME_CONTENT만 남은 가림의 RELEASE는 409다', async () => {
+  test('OPS-02 [ASVS v5.0.0-2.3.3] 가림 사유·신고 수에 따른 409 차례: 신고 없는 TEMP_BLOCK은 200, NO_ACTION·BLOCK은 409, NOTICE·SAME_CONTENT만 남은 가림의 RELEASE는 409다', async () => {
     const cs = identity.ops('cs_agent');
     const moderate = (reviewId: string, body: Record<string, unknown>) => svc.http.inject({ method: 'POST', url: `/v1/ops/reviews/${reviewId}/moderation`, headers: { ...cs, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 
@@ -116,14 +130,18 @@ describe('운영자 후기 조치의 409', () => {
     expect(releaseVisible.statusCode).toBe(409);
     expect(JSON.parse(releaseVisible.payload).type).toBe('https://peaket.example/problems/review-not-hidden');
 
-    // ③ 법정 통보로 가린 후기의 해제는 기존 회귀대로 200이다(법정 통보 복원 경로가 생기기 전까지)
+    // ③ 법정 통보로 가린 후기의 RELEASE는 409이고, 법정 철회 경로만 200이다
     const c = seed();
     const authorC = randomUUID();
     eligibility.set(authorC, c.eventId, { eligible: true, basisOrderId: randomUUID() });
     const rc = JSON.parse((await postReview(c.eventId, authorC, '통보로 가린 뒤 해제할 후기 본문입니다.')).payload);
-    expect((await reviews.applyNoticeTakedown({ reviewIds: [rc.reviewId], noticeId: randomUUID(), receivedAtMs: clock.now(), kind: 'GENERAL', reason: '법정 통보' })).applied).toBe(1);
+    const noticeC = randomUUID();
+    expect((await reviews.applyNoticeTakedown({ reviewIds: [rc.reviewId], noticeId: noticeC, receivedAtMs: clock.now(), kind: 'GENERAL', reason: '법정 통보' })).applied).toBe(1);
     expect(JSON.parse((await opsDetail(rc.reviewId)).payload).review.takedownReason).toBe('NOTICE');
-    expect((await moderate(rc.reviewId, { action: 'RELEASE', reason: '통보 철회' })).statusCode).toBe(200);
+    const noticeRelease = await moderate(rc.reviewId, { action: 'RELEASE', reason: '통보 철회' });
+    expect(noticeRelease.statusCode).toBe(409);
+    expect(JSON.parse(noticeRelease.payload).type).toBe('https://peaket.example/problems/review-not-moderation-target');
+    expect((await withdrawNotice(noticeC)).statusCode).toBe(200);
 
     // ④ 통보가 풀린 뒤 SAME_CONTENT만 남은 가림의 해제는 법정 통보 경로로 넘긴다
     const d = seed();
@@ -133,14 +151,18 @@ describe('운영자 후기 조치의 409', () => {
     eligibility.set(authorE, d.eventId, { eligible: true, basisOrderId: randomUUID() });
     const body = '같은 내용으로 남은 가림을 보는 후기 본문입니다.';
     const rd = JSON.parse((await postReview(d.eventId, authorD, body)).payload);
-    expect((await reviews.applyNoticeTakedown({ reviewIds: [rd.reviewId], noticeId: randomUUID(), receivedAtMs: clock.now(), kind: 'GENERAL', reason: '법정 통보' })).applied).toBe(1);
+    const noticeD = randomUUID();
+    expect((await reviews.applyNoticeTakedown({ reviewIds: [rd.reviewId], noticeId: noticeD, receivedAtMs: clock.now(), kind: 'GENERAL', reason: '법정 통보' })).applied).toBe(1);
     const re = JSON.parse((await postReview(d.eventId, authorE, body)).payload);
     expect(re.status).toBe('HIDDEN');
     expect(JSON.parse((await opsDetail(re.reviewId)).payload).review.takedownReason).toBe('SAME_CONTENT');
-    expect((await moderate(rd.reviewId, { action: 'RELEASE', reason: '통보 철회' })).statusCode).toBe(200);
+    const sameContentRelease = await moderate(rd.reviewId, { action: 'RELEASE', reason: '통보 철회' });
+    expect(sameContentRelease.statusCode).toBe(409);
+    expect(JSON.parse(sameContentRelease.payload).type).toBe('https://peaket.example/problems/review-not-moderation-target');
     const sameOnly = await moderate(re.reviewId, { action: 'RELEASE', reason: '같은 내용만 남은 가림' });
     expect(sameOnly.statusCode).toBe(409);
     expect(JSON.parse(sameOnly.payload).type).toBe('https://peaket.example/problems/review-not-moderation-target');
+    expect((await withdrawNotice(noticeD)).statusCode).toBe(200);
 
     // ⑤ 불법 촬영물 확인 중 가림의 해제는 openapi 설명대로 200이다
     const f = seed();

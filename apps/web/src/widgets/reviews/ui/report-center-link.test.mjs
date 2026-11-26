@@ -26,24 +26,33 @@ test('WEB-01 후기 목록·신고 확인 모달의 신고기관 바로가기는
   assert.equal(CENTER.includes('${'), false);
 });
 
-test('WEB-02 양도 화면은 법정 고지와 함께 부정판매 신고 누리집 바로가기를 보인다', () => {
-  assert.match(transfer, /SCALPING_REPORT_CENTER_URL/);
-  assert.match(transfer, /href=\{SCALPING_REPORT_CENTER_URL\}/);
-  assert.match(transfer, /target="_blank"/);
-  assert.match(transfer, /rel="noopener noreferrer"/);
-  assert.match(transfer, /aria-label="온라인 암표신고센터, 새 창"/);
+/** canSend(받는 분 확인 뒤) JSX 블록. 이 블록 밖의 링크는 "확인 전에 보이지 않는다"를 어긴다 */
+function canSendBlock() {
+  const start = transfer.indexOf('{canSend ? (');
+  assert.notEqual(start, -1, 'canSend 블록이 있다');
+  const end = transfer.indexOf(') : null}', start);
+  assert.notEqual(end, -1, 'canSend 블록이 닫힌다');
+  return { start, end, text: transfer.slice(start, end) };
+}
+
+test('WEB-02 양도 화면은 법정 고지와 함께 부정판매 신고 누리집 바로가기를 렌더 자리에서 보인다', () => {
+  const block = canSendBlock();
+  assert.match(block.text, /LEGAL_RESALE_NOTICE/);
+  assert.match(block.text, /href=\{SCALPING_REPORT_CENTER_URL\}/);
+  assert.match(block.text, /target="_blank"/);
+  assert.match(block.text, /rel="noopener noreferrer"/);
+  assert.match(block.text, /aria-label="온라인 암표신고센터, 새 창"/);
   // 법정 고지 문구는 그대로 둔다(공연법 §41·§4의4)
   assert.match(transfer, /1년 이하의 징역 또는 1천만원 이하의 벌금/);
   assert.match(transfer, /판매금액의 50배 이하의 과징금/);
-  // 링크는 법정 고지와 같은 자리(법정 고지 문자열 뒤 800자 안)에 있다
-  const at = transfer.indexOf('LEGAL_RESALE_NOTICE');
-  assert.notEqual(at, -1);
-  assert.ok(transfer.slice(at, at + 800).includes('SCALPING_REPORT_CENTER_URL') || transfer.slice(at, at + 1_600).includes('SCALPING_REPORT_CENTER_URL'));
+  // 링크는 canSend 블록 안에 하나뿐이다(상수 정의·import 제외)
+  assert.equal((transfer.match(/href=\{SCALPING_REPORT_CENTER_URL\}/g) ?? []).length, 1);
 });
 
 test('WEB-03 양도 화면 링크는 받는 분을 확인하기 전에 보이지 않고, 위험한 HTML을 쓰지 않는다', () => {
-  // 법정 고지·링크는 canSend(받는 분 확인 뒤) 블록 안에 있다
-  assert.match(transfer, /canSend \?[\s\S]*LEGAL_RESALE_NOTICE[\s\S]*SCALPING_REPORT_CENTER_URL/);
+  const { start, end } = canSendBlock();
+  const at = transfer.indexOf('href={SCALPING_REPORT_CENTER_URL}');
+  assert.ok(at > start && at < end, '링크가 canSend 블록 안에 있다');
   assert.equal(transfer.includes('dangerouslySetInnerHTML'), false);
   assert.equal(transfer.includes('innerHTML'), false);
 });

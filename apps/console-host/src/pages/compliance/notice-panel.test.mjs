@@ -14,17 +14,28 @@ test('CMS-01 통보 탭은 미리보기(?state=)가 아닐 때 실제 화면으�
   assert.equal(has('./ui/ConnectedPage.tsx'), true);
   const page = read('./ui/Page.tsx');
   assert.match(page, /ConnectedPage/);
-  assert.match(page, /__PREVIEW__ && (?:sp|searchParams)\.get\('state'\)/);
+  assert.match(page, /__PREVIEW__ && [A-Za-z_$][\w$]*\.get\('state'\)/);
 });
 
-test('CMS-02 통보 탭은 목록·상세·등록·차단·철회를 실제 생성 호출로 잇는다', () => {
+test('CMS-02 통보 탭은 목록·상세·등록·차단·철회를 실제 생성 호출·멱등키·재읽기로 잇는다', () => {
   assert.equal(has('./ui/ConnectedPage.tsx'), true);
   const connected = read('./ui/ConnectedPage.tsx');
+  // 접두어가 아니라 호출 식으로 본다(등록 호출이 없어도 Takedown 이름에 걸리지 않게)
   for (const call of ['listOpsComplianceNotices', 'getOpsComplianceNotice', 'createOpsComplianceNotice', 'createOpsComplianceNoticeTakedown', 'createOpsComplianceNoticeWithdrawal']) {
-    assert.equal(connected.includes(call), true, `${call}를 부른다`);
+    assert.match(connected, new RegExp(`${call}\\s*\\(`), `${call}를 부른다`);
   }
   assert.match(connected, /noticeActionsFor/);
   assert.match(connected, /noticeActionPlan/);
+  // 쓰기 세 가지는 Idempotency-Key를 UUID v4로 만들고, 재시도에 같은 키를 쓴다
+  assert.match(connected, /idempotency-key/i);
+  assert.match(connected, /crypto\.randomUUID\s*\(/);
+  assert.match(connected, /2_?000/);
+  assert.match(connected, /확인|대화상자|dialog/i);
+  // 409·503은 까닭을 보이고 상세·목록을 다시 읽는다
+  assert.match(connected, /409/);
+  assert.match(connected, /503/);
+  assert.match(connected, /loadDetail\s*\(/);
+  assert.match(connected, /loadList\s*\(/);
   assert.equal(connected.includes('dangerouslySetInnerHTML'), false);
   assert.equal(connected.includes('innerHTML'), false);
 });

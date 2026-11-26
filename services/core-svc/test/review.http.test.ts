@@ -255,7 +255,7 @@ describe('신고와 운영자 조치', () => {
     const cs = identity.ops('cs_agent');
     const blocked = await svc.http.inject({ method: 'POST', url: `/v1/ops/reviews/${first.reviewId}/moderation`, headers: { ...cs, 'content-type': 'application/json' }, payload: JSON.stringify({ action: 'RELEASE', reason: '통보 A 철회' }) });
     expect(blocked.statusCode).toBe(409);
-    expect(JSON.parse(blocked.payload)).toMatchObject({ type: 'review-not-moderation-target' });
+    expect(JSON.parse(blocked.payload)).toMatchObject({ type: 'https://peaket.example/problems/review-not-moderation-target' });
     expect((await withdrawNotice(noticeA)).statusCode).toBe(200);
     const stillHidden = await postReview(eventId, c, { rating: 5, body });
     expect(JSON.parse(stillHidden.payload).status).toBe('HIDDEN');

@@ -2179,12 +2179,15 @@ erDiagram
 ```mermaid
 erDiagram
     takedown_notice ||--o{ takedown_action : "외래키 없음(ops와 core 논리 DB)"
+    takedown_notice ||--o{ takedown_notice_action : "통보 등록·차단·철회 기록(F-07-11)"
     review ||--o{ takedown_action : ""
     cs_case |o--o{ takedown_action : "신고 처리 조치(외래키 없음)"
     admin_account ||--o{ command_actor : "사람 대응(3년, ADR-0149)"
     data_request ||--o{ provision_ledger : ""
     takedown_notice {
         uuid id PK "칸은 openapi ComplianceNotice와 같다(추천 적용 2026-10-30)"
+        text requested_by "등록한 관리 계정 ID. (requested_by, idempotency_key) 유일(F-07-11)"
+        uuid idempotency_key "등록 요청 Idempotency-Key(UUID v4). 같은 키·같은 본문은 같은 통보(F-07-11)"
         text requester "AGENCY|POLICE"
         text agency_name
         timestamptz received_at "공문 접수 시각. 처리 기한은 여기서 센다"
@@ -2195,6 +2198,8 @@ erDiagram
         text status "OPEN|TAKEN_DOWN|WITHDRAWN"
         timestamptz taken_down_at
         timestamptz withdrawn_at
+        timestamptz created_at
+        timestamptz updated_at
     }
     provision_ledger {
         uuid id PK "칸은 openapi DataRequestSubmissionCreate와 같다(추천 적용 2026-10-30)"
@@ -2248,6 +2253,16 @@ erDiagram
         timestamptz hidden_at
         timestamptz ends_at "RIGHTS_TEMP의 끝 시각(hidden_at + 30일 이내). 지나면 다시 보인다"
         timestamptz restored_at "통보 철회 때 같은 notice_id 전체 복원, 신고 처리 조치는 해제 때"
+    }
+    takedown_notice_action {
+        uuid id PK
+        uuid notice_id "takedown_notice ID(같은 ops 논리 DB). 행 지우기는 주지 않는다"
+        text action "TAKEDOWN|WITHDRAWAL(등록과 구분해 차단·철회만 남긴다)"
+        uuid idempotency_key "요청 Idempotency-Key(UUID v4). (notice_id, action, idempotency_key) 유일"
+        bytea request_hash "메서드·경로·본문 SHA-256. 같은 키의 다른 본문은 422 idempotency-key-reused"
+        text reason "정규화한 사유 1~2,000자(NFC 뒤 제어·양방향 제어 문자 제거)"
+        uuid actor_ref "행위자 가명 참조(command_actor와 같은 규칙, ADR-0149). 관리 계정 ID를 그대로 두지 않는다"
+        timestamptz created_at
     }
     command_event {
         uuid command_id PK
@@ -2921,6 +2936,7 @@ erDiagram
 - 정비 역할 `core_maintenance`(임시조치 끝내기 `review-temp-block-expire`): `review`의 `id`·`status`·`notice`·`notice_until` 읽기와 `status`·`notice`·`notice_until`·`updated_at` 고치기, `takedown_action`의 `reason`·`restored_at`·`ends_at` 읽기와 `restored_at` 고치기. 보류 표 정리(`held-events-delete`)를 위해 `held_event`의 `reprocessed_at` 읽기와 행 지우기. 이전 판이 남긴 후기 행 고치기(`review-purge-legacy`, 아래 '후기 파기')를 위해 0026이 `review`의 `rating`·`content_fingerprint`·`account_id`·`deleted_at` 읽기와 `body`·`rating`·`content_fingerprint`·`author_display`·`account_id`·`basis_order_id`·`deleted_at` 고치기를 더한다. 본문(`body`)은 읽지 못한다(추천 적용 2026-11-16, W8-audit2a 리뷰 A2). 남는 한계: 칸 권한은 어떤 값으로 고치는지를 묶지 못해, 정비 역할로 이 칸들을 파기 칸이 아닌 값으로 고치는 것도 DB가 막지 않는다. 다음 출시의 파기 행 CHECK가 지운 행의 모양을 묶고, 정의자 권한 함수 하나로 좁히는 일은 그때 다시 본다(W8-audit2a 웨이브 끝 보안 리뷰 S2, 구간 끝 정리 목록).
 - 후기 사진 표 `review_image`의 권한(추천 적용 2026-11-26, F-07-10): 팬 경로 `core_app`에는 읽기, 넣기, 칸 고치기 `review_id`·`alt_text`·`sort`·`attached_at`·`status`·`deleted_at`을 준다. `id`·`account_id`·`thumb_key`·`view_key`·`width`·`height`·`created_at`은 고치지 못한다. 행 지우기·자르기는 주지 않는다(지우기는 `status` DELETED로 표시하고 정비가 행을 지운다). 정비 역할 `core_maintenance`에는 읽기, `status`·`deleted_at` 고치기(이전 판 행 고치기에서 사진도 DELETED로 표시), 행 지우기(`review-image-cleanup`)를 준다. 두 역할 밖에는 이 표의 권한을 주지 않는다.
 - 후기 사진 올리기 시도 표 `review_image_upload_attempt`의 권한(추천 적용 2026-11-26, F-07-10 구현 리뷰 IR-04): 쓰는 쪽 `core_app`에는 읽기와 넣기를 주고, 정비 역할 `core_maintenance`에는 읽기와 행 지우기(보관 기간이 지난 시도 정리)를 준다. `id`·`account_id`·`created_at`만 두고 파일 이름·사유·후기 내용은 두지 않는다. 계정별 한 시간 창의 시도를 세어 성공·거절·실패를 모두 계정당 30장 한도에 넣는다.
+- 신고 기록·통보 표의 DB 권한(추천 적용 2026-11-26, F-07-11): 신고 기록 `content_report`의 정리 작업 `review-report-retention`은 `core_maintenance`가 `SELECT ("purge_at", "status")`와 `DELETE`를 쓴다(처리 뒤 1년이 지난 RESOLVED 행만 지운다). `core_app`에는 행 지우기를 주지 않는다. ops 논리 DB의 `takedown_notice`와 `takedown_notice_action`은 `ops_app`에 읽기·넣기·고치기를 주고 행 지우기는 주지 않는다. `takedown_notice_action`의 `actor_ref`는 관리 계정 가명 참조이고, `reason`·`request_hash`에는 개인정보를 싣지 않는다.
 
 후기 파기(소유자 결정 2026-11-16 OPEN[42]·[44], ADR-0278, 칸과 마이그레이션 나눔은 추천 적용 2026-11-16, W8-audit2a): 작성자가 후기를 지우거나 회원이 탈퇴하면 그 행을 파기한다(§6 '관람 후기', ADR-0086 ⑧, docs/features/identity.md §8 '후기 파기').
 
