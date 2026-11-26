@@ -36,6 +36,10 @@
     "./token-verify": {
       "types": "./dist/token-verify.d.ts",
       "default": "./dist/token-verify.js"
+    },
+    "./secret-rotation": {
+      "types": "./dist/secret-rotation.d.ts",
+      "default": "./dist/secret-rotation.js"
     }
   },
   "scripts": {

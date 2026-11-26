@@ -1,0 +1,591 @@
+# F-09-3 데이터 계층 기준(기계가 읽는 원천). 생성 파일은 tools/ci/data-platform.mjs --write로만 만든다.
+# 정본: docs/BUILD_ORDER.md:140·:575, docs/devops.md:689~693·:764·:769·:938·:941,
+# docs/data.md:18~25·:3091~3108·:3163~3177, docs/infra.md:13·:176·:325~327·:478~483·:550~551,
+# docs/security/secrets-and-keys.md:10·:78~80, docs/security/asvs/delivery.md:75·:147.
+version: 1
+
+redis:
+  engine: valkey
+  engineVersion: '8.1'
+  clusterMode: true
+  multiAz: true
+  automaticFailover: true
+  transitEncryption: true
+  atRestEncryption: true
+  auth:
+    mode: rbac
+    defaultUser: 'off'
+  parameterGroup:
+    maxmemory-policy: noeviction
+    latency-tracking: 'yes'
+    slowlog-log-slower-than: '10000'
+    slowlog-max-len: '128'
+  aclUsers:
+    - name: web
+      cluster: session-cache
+      keys: ['~web:*']
+      commands: ['+get', '+set', '+mget']
+    - name: core-eligibility
+      cluster: queue
+      keys: ['~q:{event:*}:elig:*']
+      commands: ['+sadd', '+srem', '+del', '+unlink', '+rename', '+expire', '+pexpire']
+    - name: ops-reader
+      cluster: queue
+      keys: ['~q:*']
+      commands: ['-@all', '+@read', '+@connection']
+  clusters:
+    - name: queue
+      nodeType: cache.r7g.xlarge
+      replicasPerShard: 1
+      keys: ['q:*']
+    - name: seat
+      nodeType: cache.r7g.xlarge
+      replicasPerShard: 1
+      keys: ['s:*']
+    - name: session-cache
+      nodeType: cache.r7g.large
+      replicasPerShard: 1
+      keys: ['id:*', 'rl:*', 'catalog:*', 'web:*', 'shop:*', 'tr:*', 'sup:*', 'scanner:*', 'reauth:*']
+  memoryAlerts:
+    warnPercent: 70
+    criticalPercent: 85
+    evictions: 0
+  ttl:
+    sessionCacheAllKeys: true
+    queueSeatPerKey: true
+
+aurora:
+  engine: aurora-postgresql
+  engineVersion: '18.6.1'
+  tls:
+    forceSsl: true
+    clientSslMode: verify-full
+  parameterGroup:
+    rds.force_ssl: '1'
+    auto_explain.log_min_duration: 500ms
+    auto_explain.sample_rate: '0.1'
+    log_temp_files: '10240'
+    log_parameter_max_length: '0'
+  backup:
+    retentionDays: 35
+    pointInTimeRecovery: true
+    crossRegionSnapshot: true
+    crossRegionRetentionDays: 7
+  deletionProtection: true
+  clusters:
+    - name: purchase
+      databases: [purchase]
+    - name: payment
+      databases: [payment]
+    - name: ticket
+      databases: [ticket]
+    - name: ops
+      databases: [ops]
+    - name: shared
+      databases: [identity, core]
+  pgbouncerReplicas: 3
+  pools:
+    purchase:
+      defaultPoolSize: 20
+      minPoolSize: 5
+      reservePoolSize: 5
+      serverReserve: 50
+      serverConnections: 110
+      maxConnections80Percent: 2800
+      clientBudget:
+        source: F-09-10
+        relayConnections: 4
+        reserve: 50
+    payment:
+      defaultPoolSize: 32
+      minPoolSize: 8
+      reservePoolSize: 8
+      serverReserve: 50
+      serverConnections: 146
+      maxConnections80Percent: 1440
+      clientBudget:
+        source: F-09-10
+        relayConnections: 2
+        reserve: 20
+    ticket:
+      defaultPoolSize: 20
+      minPoolSize: 5
+      reservePoolSize: 5
+      serverReserve: 20
+      serverConnections: 80
+      maxConnections80Percent: 1440
+      clientBudget:
+        source: F-09-10
+        relayConnections: 2
+        reserve: 20
+    ops:
+      defaultPoolSize: 10
+      minPoolSize: 2
+      reservePoolSize: 3
+      serverReserve: 20
+      serverConnections: 50
+      maxConnections80Percent: 1440
+      clientBudget:
+        source: F-09-10
+        relayConnections: 2
+        reserve: 20
+    identity:
+      defaultPoolSize: 10
+      minPoolSize: 2
+      reservePoolSize: 3
+      serverReserve: 20
+      serverConnections: 50
+      maxConnections80Percent: 2800
+      clientBudget:
+        source: F-09-10
+        relayConnections: 2
+        reserve: 20
+    core:
+      defaultPoolSize: 20
+      minPoolSize: 5
+      reservePoolSize: 5
+      serverReserve: 20
+      serverConnections: 80
+      maxConnections80Percent: 2800
+      clientBudget:
+        source: F-09-10
+        relayConnections: 2
+        reserve: 20
+
+msk:
+  engineVersion: '3.9.x'
+  clusters:
+    - name: trade-control
+      brokers: 6
+      replicationFactor: 3
+      minInSyncReplicas: 2
+      uncleanLeaderElection: false
+      autoCreateTopics: false
+      acks: all
+      retentionMs: 604800000
+    - name: telemetry
+      brokers: 3
+      replicationFactor: 3
+      minInSyncReplicas: 2
+      uncleanLeaderElection: false
+      autoCreateTopics: false
+      acks: all
+      retentionMs: 604800000
+    - name: observability
+      brokers: 3
+      replicationFactor: 3
+      minInSyncReplicas: 2
+      uncleanLeaderElection: true
+      autoCreateTopics: true
+      acks: all
+      retentionMs: 604800000
+  topicOverrides:
+    - name: identity.accounts-withdrawn
+      cluster: trade-control
+      partitions: 12
+      replicationFactor: 3
+      retentionMs: 259200000
+      segmentMs: 86400000
+      cleanupPolicy: delete
+    - name: investigation.requests
+      cluster: telemetry
+      partitions: 12
+      replicationFactor: 3
+      retentionMs: 259200000
+      segmentMs: 86400000
+      cleanupPolicy: delete
+    - name: _schemas
+      cluster: trade-control
+      partitions: 3
+      replicationFactor: 3
+      retentionMs: 604800000
+      segmentMs: 86400000
+      cleanupPolicy: compact
+
+schemaRegistry:
+  replicas: 2
+  pdbMinAvailable: 1
+  compatibility: BACKWARD_TRANSITIVE
+  subjectNameStrategy: TopicRecordNameStrategy
+  autoRegisterSchemas: false
+  useLatestVersion: false
+  kafkastore:
+    topic: _schemas
+    topicReplicationFactor: 3
+    leaderEligibility: true
+    securityProtocol: SASL_SSL
+    saslMechanism: AWS_MSK_IAM
+    callbackHandlerClass: software.amazon.msk.auth.iam.IAMClientCallbackHandler
+    roleSessionName: schema-registry-<env>
+    addDefaultProviders: false
+
+pgbouncer:
+  version: '1.26.1'
+  poolMode: transaction
+  maxPreparedStatements: 200
+  queryWaitTimeoutSeconds: 5
+  idleTransactionTimeoutSeconds: 15
+  queryTimeoutSeconds: 65
+  serverIdleTimeoutSeconds: 600
+  serverLifetimeSeconds: 3600
+  authType: scram-sha-256
+  authFile: /etc/pgbouncer/userlist.txt
+  useAuthQuery: false
+  clientTls:
+    sslMode: require
+  serverTls:
+    sslMode: verify-full
+  rotation:
+    strategy: alternating-users
+    intervalDays: 30
+    maintenanceWindow: '04:00-06:00 Asia/Seoul'
+    userlistRefreshSeconds: 60
+    appSecretRefreshSeconds: 3600
+    reloadOnRotation: true
+    reloadCommand: RELOAD
+    connectRetrySeconds: 20
+    connectRetryAttempts: 3
+    restartWithinDays: 30
+    authFailureMetric: datastore_auth_failures_total
+    severity: SEV2
+  pools:
+    purchase:
+      defaultPoolSize: 20
+      minPoolSize: 5
+      reservePoolSize: 5
+    payment:
+      defaultPoolSize: 32
+      minPoolSize: 8
+      reservePoolSize: 8
+    ticket:
+      defaultPoolSize: 20
+      minPoolSize: 5
+      reservePoolSize: 5
+    ops:
+      defaultPoolSize: 10
+      minPoolSize: 2
+      reservePoolSize: 3
+    identity:
+      defaultPoolSize: 10
+      minPoolSize: 2
+      reservePoolSize: 3
+    core:
+      defaultPoolSize: 20
+      minPoolSize: 5
+      reservePoolSize: 5
+
+roles:
+  ddl:
+    statementTimeoutMs: 30000
+    idleInTransactionSessionTimeoutMs: 60000
+  appHotpath:
+    roles: [purchase_app, payment_app, identity_app]
+    statementTimeoutMs: 1000
+    idleInTransactionSessionTimeoutMs: 10000
+  appGeneral:
+    roles: [ticket_app, ops_app, core_app]
+    statementTimeoutMs: 5000
+    idleInTransactionSessionTimeoutMs: 10000
+  maintenance:
+    roles: ['<service>_maintenance']
+    statementTimeoutMs: 60000
+    idleInTransactionSessionTimeoutMs: 60000
+    workMem: 64MB
+  outboxRelay:
+    roles: ['<service>_outbox_relay']
+    statementTimeoutMs: 5000
+    idleInTransactionSessionTimeoutMs: 30000
+
+mskIam:
+  failClosed: true
+  sessionNamePattern: '<workload>-<env>'
+  workloads:
+    - name: purchase-svc-outbox-relay
+      kind: relay
+      podIdentityRole:
+        name: peaket-purchase-svc-outbox-relay
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-purchase-svc-outbox-relay
+        trust:
+          principal: peaket-purchase-svc-outbox-relay
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:WriteData, kafka-cluster:WriteDataIdempotently]
+            resources: [cluster:trade-control, topic:trade.orders, topic:trade.seats, topic:trade.purchase-sessions]
+      sessionName: purchase-svc-outbox-relay-<env>
+      writeTopics: [trade.orders, trade.seats, trade.purchase-sessions]
+      readTopics: []
+      consumerGroups: []
+    - name: purchase-svc
+      kind: api
+      podIdentityRole:
+        name: peaket-purchase-svc
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-purchase-svc
+        trust:
+          principal: peaket-purchase-svc
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:ReadData, kafka-cluster:DescribeGroup]
+            resources: [cluster:trade-control, topic:trade.payments, topic:trade.seats, group:peaket.purchase-svc-hold-ledger.<env>, group:peaket.purchase-svc-order-saga.<env>]
+      sessionName: purchase-svc-<env>
+      writeTopics: []
+      readTopics: [trade.payments, trade.seats]
+      consumerGroups: [peaket.purchase-svc-hold-ledger.<env>, peaket.purchase-svc-order-saga.<env>]
+    - name: queue-svc
+      kind: api
+      podIdentityRole:
+        name: peaket-queue-svc
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-queue-svc
+        trust:
+          principal: peaket-queue-svc
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:ReadData, kafka-cluster:WriteData, kafka-cluster:WriteDataIdempotently, kafka-cluster:DescribeGroup]
+            resources: [cluster:trade-control, cluster:telemetry, topic:trade.purchase-sessions, topic:identity.accounts-withdrawn, topic:trade.seats, topic:support.cases-requested, topic:telemetry.queue, group:peaket.queue-svc.<env>]
+      sessionName: queue-svc-<env>
+      writeTopics: [support.cases-requested, telemetry.queue]
+      readTopics: [trade.purchase-sessions, identity.accounts-withdrawn, trade.seats]
+      consumerGroups: [peaket.queue-svc.<env>]
+    - name: core-svc
+      kind: api
+      podIdentityRole:
+        name: peaket-core-svc
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-core-svc
+        trust:
+          principal: peaket-core-svc
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:ReadData, kafka-cluster:DescribeGroup]
+            resources: [cluster:trade-control, topic:identity.accounts-withdrawn, topic:trade.orders, topic:trade.tickets, group:peaket.core-svc.<env>]
+      sessionName: core-svc-<env>
+      writeTopics: []
+      readTopics: [identity.accounts-withdrawn, trade.orders, trade.tickets]
+      consumerGroups: [peaket.core-svc.<env>]
+    - name: ops-svc
+      kind: api
+      podIdentityRole:
+        name: peaket-ops-svc
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-ops-svc
+        trust:
+          principal: peaket-ops-svc
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:ReadData, kafka-cluster:DescribeGroup]
+            resources: [cluster:trade-control, topic:audit.data-accessed, group:peaket.ops-svc-data-access.<env>]
+      sessionName: ops-svc-<env>
+      writeTopics: []
+      readTopics: [audit.data-accessed]
+      consumerGroups: [peaket.ops-svc-data-access.<env>]
+    - name: trust-svc
+      kind: api
+      podIdentityRole:
+        name: peaket-trust-svc
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-trust-svc
+        trust:
+          principal: peaket-trust-svc
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:ReadData, kafka-cluster:WriteData, kafka-cluster:WriteDataIdempotently, kafka-cluster:DescribeGroup]
+            resources: [cluster:trade-control, cluster:telemetry, topic:control.settings, topic:telemetry.behavior, topic:telemetry.trust-verdicts, group:peaket.trust-svc.<env>]
+      sessionName: trust-svc-<env>
+      writeTopics: [telemetry.behavior, telemetry.trust-verdicts]
+      readTopics: [control.settings]
+      consumerGroups: [peaket.trust-svc.<env>]
+    - name: core-svc-outbox-relay
+      kind: relay
+      podIdentityRole:
+        name: peaket-core-svc-outbox-relay
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-core-svc-outbox-relay
+        trust:
+          principal: peaket-core-svc-outbox-relay
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:WriteData, kafka-cluster:WriteDataIdempotently]
+            resources: [cluster:trade-control, topic:audit.data-accessed]
+      sessionName: core-svc-outbox-relay-<env>
+      writeTopics: [audit.data-accessed]
+      readTopics: []
+      consumerGroups: []
+    - name: identity-svc-outbox-relay
+      kind: relay
+      podIdentityRole:
+        name: peaket-identity-svc-outbox-relay
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-identity-svc-outbox-relay
+        trust:
+          principal: peaket-identity-svc-outbox-relay
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:WriteData, kafka-cluster:WriteDataIdempotently]
+            resources: [cluster:trade-control, topic:identity.accounts-merged, topic:identity.accounts-withdrawn, topic:identity.login-methods-changed, topic:control.sessions-terminated]
+      sessionName: identity-svc-outbox-relay-<env>
+      writeTopics: [identity.accounts-merged, identity.accounts-withdrawn, identity.login-methods-changed, control.sessions-terminated]
+      readTopics: []
+      consumerGroups: []
+    - name: ops-svc-outbox-relay
+      kind: relay
+      podIdentityRole:
+        name: peaket-ops-svc-outbox-relay
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-ops-svc-outbox-relay
+        trust:
+          principal: peaket-ops-svc-outbox-relay
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:WriteData, kafka-cluster:WriteDataIdempotently]
+            resources: [cluster:trade-control, topic:control.settings, topic:ops.command-events]
+      sessionName: ops-svc-outbox-relay-<env>
+      writeTopics: [control.settings, ops.command-events]
+      readTopics: []
+      consumerGroups: []
+    - name: payment-svc-outbox-relay
+      kind: relay
+      podIdentityRole:
+        name: peaket-payment-svc-outbox-relay
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-payment-svc-outbox-relay
+        trust:
+          principal: peaket-payment-svc-outbox-relay
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:WriteData, kafka-cluster:WriteDataIdempotently]
+            resources: [cluster:trade-control, topic:trade.payments, topic:trade.settlements]
+      sessionName: payment-svc-outbox-relay-<env>
+      writeTopics: [trade.payments, trade.settlements]
+      readTopics: []
+      consumerGroups: []
+    - name: ticket-svc-outbox-relay
+      kind: relay
+      podIdentityRole:
+        name: peaket-ticket-svc-outbox-relay
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-ticket-svc-outbox-relay
+        trust:
+          principal: peaket-ticket-svc-outbox-relay
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:WriteData, kafka-cluster:WriteDataIdempotently]
+            resources: [cluster:trade-control, topic:trade.tickets]
+      sessionName: ticket-svc-outbox-relay-<env>
+      writeTopics: [trade.tickets]
+      readTopics: []
+      consumerGroups: []
+    - name: ops-rt
+      kind: worker
+      podIdentityRole:
+        name: peaket-ops-rt
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-ops-rt
+        trust:
+          principal: peaket-ops-rt
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:ReadData, kafka-cluster:DescribeGroup]
+            resources: [cluster:trade-control, cluster:telemetry, topic:trade.orders, topic:trade.payments, topic:trade.seats, topic:trade.tickets, topic:telemetry.queue, topic:telemetry.purchase, topic:telemetry.trust-verdicts, group:peaket.ops-rt.<env>]
+      sessionName: ops-rt-<env>
+      writeTopics: []
+      readTopics: [trade.orders, trade.payments, trade.seats, trade.tickets, telemetry.queue, telemetry.purchase, telemetry.trust-verdicts]
+      consumerGroups: [peaket.ops-rt.<env>]
+    - name: analytics-ingest
+      kind: worker
+      podIdentityRole:
+        name: peaket-analytics-ingest
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-analytics-ingest
+        trust:
+          principal: peaket-analytics-ingest
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:ReadData, kafka-cluster:DescribeGroup]
+            resources: [cluster:trade-control, cluster:telemetry, topic:trade.orders, topic:trade.payments, topic:trade.seats, topic:trade.tickets, topic:trade.purchase-sessions, topic:trade.settlements, topic:identity.accounts-merged, topic:telemetry.queue, topic:telemetry.purchase, topic:telemetry.trust-verdicts, group:peaket.analytics-ingest.<env>]
+      sessionName: analytics-ingest-<env>
+      writeTopics: []
+      readTopics: [trade.orders, trade.payments, trade.seats, trade.tickets, trade.purchase-sessions, trade.settlements, identity.accounts-merged, telemetry.queue, telemetry.purchase, telemetry.trust-verdicts]
+      consumerGroups: [peaket.analytics-ingest.<env>]
+    - name: inv-ingest
+      kind: worker
+      podIdentityRole:
+        name: peaket-inv-ingest
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-inv-ingest
+        trust:
+          principal: peaket-inv-ingest
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:ReadData, kafka-cluster:DescribeGroup]
+            resources: [cluster:trade-control, cluster:telemetry, topic:trade.orders, topic:trade.payments, topic:trade.seats, topic:trade.tickets, topic:trade.purchase-sessions, topic:telemetry.queue, topic:telemetry.purchase, topic:telemetry.trust-verdicts, topic:telemetry.behavior, topic:investigation.requests, group:inv-ingest]
+      sessionName: inv-ingest-<env>
+      writeTopics: []
+      readTopics: [trade.orders, trade.payments, trade.seats, trade.tickets, trade.purchase-sessions, telemetry.queue, telemetry.purchase, telemetry.trust-verdicts, telemetry.behavior, investigation.requests]
+      consumerGroups: [inv-ingest]
+    - name: trust-reassess
+      kind: worker
+      podIdentityRole:
+        name: peaket-trust-reassess
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-trust-reassess
+        trust:
+          principal: peaket-trust-reassess
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:ReadData, kafka-cluster:WriteData, kafka-cluster:WriteDataIdempotently, kafka-cluster:DescribeGroup]
+            resources: [cluster:telemetry, topic:telemetry.behavior, topic:telemetry.trust-candidates, group:peaket.trust-reassess.<env>]
+      sessionName: trust-reassess-<env>
+      writeTopics: [telemetry.trust-candidates]
+      readTopics: [telemetry.behavior]
+      consumerGroups: [peaket.trust-reassess.<env>]
+    - name: rt-pulse
+      kind: worker
+      podIdentityRole:
+        name: peaket-rt-pulse
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-rt-pulse
+        trust:
+          principal: peaket-rt-pulse
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:WriteData, kafka-cluster:WriteDataIdempotently]
+            resources: [cluster:telemetry, topic:telemetry.queue, topic:telemetry.purchase, topic:telemetry.trust-verdicts]
+      sessionName: rt-pulse-<env>
+      writeTopics: [telemetry.queue, telemetry.purchase, telemetry.trust-verdicts]
+      readTopics: []
+      consumerGroups: []
+    - name: schema-registry
+      kind: registry
+      podIdentityRole:
+        name: peaket-schema-registry
+        kafkaActions: []
+      mskRole:
+        name: peaket-msk-schema-registry
+        trust:
+          principal: peaket-schema-registry
+          action: sts:AssumeRole
+        permissions:
+          - actions: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:ReadData, kafka-cluster:WriteData, kafka-cluster:DescribeGroup]
+            resources: [cluster:trade-control, topic:_schemas, group:schema-registry]
+      sessionName: schema-registry-<env>
+      writeTopics: [_schemas]
+      readTopics: [_schemas]
+      consumerGroups: [schema-registry]

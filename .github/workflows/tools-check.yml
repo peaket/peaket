@@ -28,6 +28,9 @@ jobs:
           npm install --global "$pm"
       - run: pnpm install --frozen-lockfile
       - run: node --test "tools/ci/*.test.mjs"
+      # 데이터 계층 기준·생성 파일 대조(F-09-3, HOT-430): 원천 deploy/data/peaket-data.yaml과
+      # 생성 파일 아홉이 다르거나 정본 값(noeviction·ACL·MSK IAM·PgBouncer TLS·연결 예산)을 어기면 실패
+      - run: node tools/ci/data-platform.mjs check
       # 경보 규칙 검사(F-01-7 OPS-130, V-T16·V-T20 ①~③·V-T54 ①②): 주석·이용자 식별값·간격·히스토그램 칸·
       # Alertmanager 묶음 값을 실제 저장소에서 본다. A2 뒤 실제 alertmanager.yaml이 있어 0으로 끝난다.
       - run: node tools/ci/alert-check.mjs
