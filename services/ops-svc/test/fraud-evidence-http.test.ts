@@ -78,6 +78,7 @@ class EvidenceStoreFake {
   forcedExportCount: number | null = null;
   failNextPutBundle = false;
   failNextCustody = false;
+  failNextDisposeUpdate = false;
 
   constructor(private readonly cases: MemoryInvestigationStore) {}
 
@@ -126,6 +127,10 @@ class EvidenceStoreFake {
       this.failNextCustody = false;
       throw new Error('custody append failed');
     }
+    if (this.failNextDisposeUpdate && b.status === 'DISPOSED') {
+      this.failNextDisposeUpdate = false;
+      throw new Error('dispose update failed');
+    }
     const row = this.#row(b.bundleId, c);
     this.bundles.set(b.bundleId, { ...b, files: [...(b.files ?? [])] });
     (this.custody.get(b.bundleId) ?? this.custody.set(b.bundleId, []).get(b.bundleId)!).push(row);
@@ -147,7 +152,14 @@ class EvidenceStoreFake {
   }
   async listDueForDispose(nowMs: number) {
     const domain = investigationsModule as unknown as Record<string, any>;
-    return [...this.bundles.values()].filter((b) => b.status === 'SEALED' && domain.disposeAfterMs({ createdAtMs: b.createdAtMs, holdReason: b.holdReason, holdEndedAtMs: b.holdEndedAtMs }) <= nowMs);
+    return [...this.bundles.values()].filter((b) => {
+      if (b.status !== 'SEALED') return false;
+      try {
+        return domain.disposeAfterMs({ createdAtMs: b.createdAtMs, holdReason: b.holdReason, holdEndedAtMs: b.holdEndedAtMs }) <= nowMs;
+      } catch {
+        return false;
+      }
+    });
   }
   async putExport(e: any, _c?: any, o: any = {}) {
     if (o.idem) {
@@ -308,6 +320,7 @@ class CapturesFake {
   readonly evidence = new Map<string, Uint8Array>();
   readonly views = new Map<string, Uint8Array>();
   readonly calls: any[] = [];
+  readonly disposeCalls: string[] = [];
   async putQuarantine(key: string, bytes: Uint8Array) {
     this.calls.push({ op: 'quarantine', key });
     this.quarantine.set(key, Uint8Array.from(bytes));
@@ -325,6 +338,7 @@ class CapturesFake {
     return this.views.get(key) ?? this.evidence.get(key) ?? this.quarantine.get(key);
   }
   async dispose(prefix: string) {
+    this.disposeCalls.push(prefix);
     for (const key of [...this.quarantine.keys()]) if (key.startsWith(prefix)) this.quarantine.delete(key);
     for (const key of [...this.evidence.keys()]) if (key.startsWith(prefix)) this.evidence.delete(key);
   }
@@ -386,7 +400,18 @@ const alerts: any[] = [];
 const labels: any[] = [];
 const copies: any[] = [];
 const auditEvents: any[] = [];
-const disposer = { calls: [] as string[], async dispose(prefix: string) { this.calls.push(prefix); } };
+const disposer = {
+  calls: [] as string[],
+  captureCalls: [] as string[],
+  async dispose(prefix: string) {
+    this.calls.push(prefix);
+  },
+  async disposeCapture(prefix: string) {
+    this.captureCalls.push(prefix);
+    for (const key of [...captures.quarantine.keys()]) if (key.startsWith(prefix)) captures.quarantine.delete(key);
+    for (const key of [...captures.evidence.keys()]) if (key.startsWith(prefix)) captures.evidence.delete(key);
+  },
+};
 const audit = new MemoryAuditChain();
 const cases = new MemoryInvestigationStore((r) => audit.append(r));
 const evidenceStore = new EvidenceStoreFake(cases);
@@ -669,9 +694,12 @@ beforeEach(() => {
   holderNotices.length = 0;
   auditEvents.length = 0;
   disposer.calls.length = 0;
+  disposer.captureCalls.length = 0;
+  captures.disposeCalls.length = 0;
   evidenceStore.forcedExportCount = null;
   evidenceStore.failNextPutBundle = false;
   evidenceStore.failNextCustody = false;
+  evidenceStore.failNextDisposeUpdate = false;
   objects.nextPutResult = null;
   objects.disposeCalls.length = 0;
   alerts.length = 0;
@@ -1409,6 +1437,8 @@ describe('F-04-14 HTTP', () => {
     expect(await external().disposeDue(clock.now())).toBe(1);
     expect(captures.evidence.has(`captures/${json(unmatched).postId}/original.png`)).toBe(false);
     expect(captures.evidence.has(`captures/${json(matched).postId}/original.png`)).toBe(true);
+    expect(disposer.captureCalls).toContain(`captures/${json(unmatched).postId}/`);
+    expect(captures.disposeCalls).toHaveLength(0);
   });
 
   test('IR-06 묶음 갱신과 관리 연속성 추가는 한 단위라 실패하면 둘 다 남지 않는다', async () => {
@@ -1433,6 +1463,34 @@ describe('F-04-14 HTTP', () => {
     const sealed = (await evidenceStore.listCustody(bundleId)).find((r: any) => r.action === 'SEALED');
     expect(sealed.reason).toContain(b.manifestSha256);
     expect(auditEvents.some((r) => String(r.payload?.action ?? '').startsWith('EVIDENCE_'))).toBe(true);
+  });
+
+  test('IR-30 외부 게시물 캡처 파기는 파기 전용 포트로 보낸다', async () => {
+    const who = investigator();
+    for (const [id] of evidenceStore.posts) evidenceStore.posts.delete(id);
+    const post = await send('POST', '/v1/ops/external-posts', who, { idem: randomUUID(), multipart: multipart({ fields: { eventId: EVENT_DISPOSE, url: 'https://example.com/post/disposer', capturedAt: iso(NOW), source: 'MANUAL' }, files: [{ field: 'capture', name: 'capture.png', type: 'image/png', bytes: makePng({ width: 2, height: 2 }) }] }) });
+    expect(post.statusCode).toBe(201);
+    scanner.results = ['CLEAN'];
+    await external().scanDue(clock.now());
+    clock.advance(SHOW + 30 * DAY - clock.now());
+    expect(await external().disposeDue(clock.now())).toBe(1);
+    expect(disposer.captureCalls).toContain(`captures/${json(post).postId}/`);
+    expect(captures.disposeCalls).toHaveLength(0);
+  });
+
+  test('IR-31 파기 뒤 DB 갱신 실패는 SEV2로 남기고 묶음을 SEALED에 둔다', async () => {
+    const who = investigator();
+    const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(76), { actionNotifiedAtMs: NOW - DAY })] });
+    const bundleId = String(json(await createBundle(c.caseId, who)).bundleId);
+    await evidence().buildDue(clock.now());
+    const bundle = evidenceStore.bundles.get(bundleId)!;
+    bundle.createdAtMs = NOW - 365 * DAY + HOUR;
+    clock.advance(HOUR);
+    alerts.length = 0;
+    evidenceStore.failNextDisposeUpdate = true;
+    expect(await evidence().disposeDue(clock.now())).toBe(0);
+    expect(alerts.some((a) => a.severity === 'SEV2' && a.kind === 'EVIDENCE_DISPOSE_FAILED')).toBe(true);
+    expect(evidenceStore.bundles.get(bundleId)!.status).toBe('SEALED');
   });
 
   test('IR-19 이의 결정자는 그 결정을 내린 사람으로 남고 뒤 결정이 앞 결정자를 덮지 않는다', async () => {
