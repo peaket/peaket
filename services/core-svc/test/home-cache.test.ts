@@ -60,7 +60,8 @@ const revalidate = (svc: Awaited<ReturnType<typeof createService>>, token?: stri
   svc.http.inject({ method: 'POST', url: '/internal/v1/home-cache/revalidate', headers: token === undefined ? {} : { 'x-peaket-internal-token': token } });
 
 describe('홈 캐시 무효화(HOT-305)', () => {
-  test('HOT-305 내부 경로는 토큰이 맞을 때만 204·no-store이고 home 태그와 웹 재검증을 부른다 [ASVS v5.0.0-8.1.1]', async () => {
+  // 서비스 부팅과 대역 HTTP를 함께 재는 시험이라 이 PC에서 기본 5초를 넘는다(IR-01 시험 고침과 함께 20초로 둔다).
+  test('HOT-305 내부 경로는 토큰이 맞을 때만 204·no-store이고 home 태그와 웹 재검증을 부른다 [ASVS v5.0.0-8.1.1]', { timeout: 20_000 }, async () => {
     process.env.PEAKET_INTERNAL_TOKEN = TOKEN;
     const port = await startWeb();
     process.env.PEAKET_WEB_INTERNAL_URL = `http://127.0.0.1:${port}`;
@@ -70,18 +71,21 @@ describe('홈 캐시 무효화(HOT-305)', () => {
       const missing = await revalidate(svc);
       expect(missing.statusCode).toBe(401);
       expect(missing.headers['cache-control']).toBe('no-store');
+      expect(missing.headers['x-peaket-cache-tag']).toBeUndefined();
       expect(cdn.calls).toHaveLength(0);
       expect(hits).toHaveLength(0);
 
       const wrong = await revalidate(svc, 'wrong-token');
       expect(wrong.statusCode).toBe(401);
       expect(wrong.headers['cache-control']).toBe('no-store');
+      expect(wrong.headers['x-peaket-cache-tag']).toBeUndefined();
       expect(cdn.calls).toHaveLength(0);
       expect(hits).toHaveLength(0);
 
       const ok = await revalidate(svc, TOKEN);
       expect(ok.statusCode).toBe(204);
       expect(ok.headers['cache-control']).toBe('no-store');
+      expect(ok.headers['x-peaket-cache-tag']).toBeUndefined();
       expect(cdn.calls).toEqual([['home']]);
       expect(hits).toHaveLength(1);
       expect(hits[0]).toMatchObject({ method: 'POST', url: '/internal/v1/home-cache', token: TOKEN });

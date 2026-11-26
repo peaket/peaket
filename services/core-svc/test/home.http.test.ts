@@ -108,11 +108,13 @@ const getHome = async (s: Awaited<ReturnType<typeof createService>>) => s.http.i
 const bodyOf = (r: { payload: string }) => GetHomeResponse.parse(JSON.parse(r.payload));
 
 describe('홈 피드(HOT-305)', () => {
-  test('HOT-305 빈 피드는 계약 모양·랭킹 경로·생성 시각·캐시 머리를 지키고 개인 값을 싣지 않는다 [ASVS v5.0.0-14.2.5]', async () => {
+  // 서비스 첫 부팅을 포함해 이 PC·병렬 파일 실행에서 기본 5초를 넘는다(IR-01 시험 고침과 함께 20초로 둔다).
+  test('HOT-305 빈 피드는 계약 모양·랭킹 경로·생성 시각·캐시 머리를 지키고 개인 값을 싣지 않는다 [ASVS v5.0.0-14.2.5]', { timeout: 20_000 }, async () => {
     const s = await boot();
     const r = await getHome(s);
     expect(r.statusCode).toBe(200);
     expect(r.headers['cache-control']).toBe('public, max-age=30, stale-while-revalidate=30, stale-if-error=86400');
+    expect(r.headers['x-peaket-cache-tag']).toBe('home');
     // Zod로 모르는 칸을 지우기 전의 원문에서 본다(TR-07).
     const raw = String(r.payload).toLowerCase();
     for (const forbidden of ['accountid', 'cookie', 'authorization', 'wishes', 'subscriptions', '__secure-peaket_at']) expect(raw).not.toContain(forbidden);
@@ -135,6 +137,7 @@ describe('홈 피드(HOT-305)', () => {
     });
     expect(withCredentials.statusCode).toBe(200);
     expect(withCredentials.headers['cache-control']).toBe(r.headers['cache-control']);
+    expect(withCredentials.headers['x-peaket-cache-tag']).toBe('home');
     expect(JSON.parse(withCredentials.payload)).toEqual(body);
   });
 
@@ -435,6 +438,7 @@ describe('홈 피드(HOT-305)', () => {
     const unknown = await bannersDown.http.inject({ method: 'GET', url: '/v1/home/unknown' });
     expect(unknown.statusCode).toBe(404);
     expect(unknown.headers['cache-control']).toBe('no-store');
+    expect(unknown.headers['x-peaket-cache-tag']).toBeUndefined();
 
     const failedSvc = await boot({
       home: {
@@ -451,6 +455,7 @@ describe('홈 피드(HOT-305)', () => {
     expect(failed.statusCode).toBe(503);
     expect(failed.headers['cache-control']).toBe('no-store');
     expect(failed.headers['retry-after']).toBeDefined();
+    expect(failed.headers['x-peaket-cache-tag']).toBeUndefined();
   });
 
   test('HOT-305 다른 메서드는 2xx가 아니고 no-store다 (TR-13)', async () => {
@@ -458,9 +463,11 @@ describe('홈 피드(HOT-305)', () => {
     const post = await s.http.inject({ method: 'POST', url: '/v1/home' });
     expect([404, 405]).toContain(post.statusCode);
     expect(post.headers['cache-control']).toBe('no-store');
+    expect(post.headers['x-peaket-cache-tag']).toBeUndefined();
 
     const internalGet = await s.http.inject({ method: 'GET', url: '/internal/v1/home-cache/revalidate' });
     expect([404, 405]).toContain(internalGet.statusCode);
     expect(internalGet.headers['cache-control']).toBe('no-store');
+    expect(internalGet.headers['x-peaket-cache-tag']).toBeUndefined();
   });
 });
