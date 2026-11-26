@@ -342,6 +342,7 @@ test('FX-T9 ⑤ 후보 영역의 세션 좌석만 점등하고 기기 묶음은 
 
   assert.deepEqual(seatsOf(columns, keep, new Set([1, 2])), [10, 11, 12]);
   assert.deepEqual(seatsOf(columns, keep, new Set([3])), [10]);
+  assert.deepEqual(seatsOf(columns, keep, new Set([7])), [], 'NO_SEAT만 있는 세션은 좌석이 없다');
   assert.deepEqual(seatsOf(columns, keep, new Set([99])), []);
 });
 
@@ -456,6 +457,10 @@ test('FX-T9 ⑦⑧ 한 세션의 여러 행을 하나로 합치고, 마스크·�
   assert.ok(research.histogram);
   assert.equal(research.histogram.bins.reduce((sum, n) => sum + n, 0), 3);
   assert.deepEqual(research.bursts, []);
+  assert.deepEqual(tableRows(research), [
+    { label: '세션', value: 3 },
+    { label: '분포 칸', value: 24 },
+  ]);
 
   const investigationRows = [
     admit(1, 50, Number.NaN, { member: 1, device_group: 4 }),
@@ -469,6 +474,10 @@ test('FX-T9 ⑦⑧ 한 세션의 여러 행을 하나로 합치고, 마스크·�
   assert.equal(investigation.totalSessions, 1);
   assert.equal(investigation.totalBots, 0);
   assert.equal(investigation.bursts.length, 1);
+  assert.deepEqual(tableRows(investigation), [
+    { label: '세션', value: 1 },
+    { label: '기기 묶음', value: 1 },
+  ]);
 
   // keep=0은 모델의 어느 값에도 들어가지 않는다.
   const keepDropped = keepAll(investigationRows.length);

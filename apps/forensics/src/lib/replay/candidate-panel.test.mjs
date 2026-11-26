@@ -63,10 +63,16 @@ test('FX-T9 ①⑨ 후보 패널은 원천에 맞는 제목·문구와 표 보�
   assert.match(panel, /selectionStats\(/, '합성 정답 기준 정밀도·재현율을 세지 않는다');
   assert.match(panel, /candidateTableRows\(/, '요약 표를 같은 모델에서 만들지 않는다');
   assert.match(panel, /histogramRows\(/, '연구 분포 표를 같은 히스토그램에서 만들지 않는다');
+  assert.match(panel, /candidateKeep/, '전체 모델 점을 쓰는 keep을 만들지 않는다');
+  assert.match(panel, /totalBots/, '전체 모델의 봇 수를 쓰지 않는다');
   assert.match(panel, /표로 보기/, '후보 패널에 표로 보기가 없다');
   assert.match(panel, /ReplayTable/, '후보 패널이 공용 표를 쓰지 않는다');
   assert.match(main, /<CandidatePanel/, '재생 화면이 후보 패널을 넣지 않는다');
   assert.match(main, /filter=/, '재생 화면이 교차 필터를 후보 패널에 넘기지 않는다');
+  assert.match(main, /onFilterChange/, '재생 화면이 필터 상태를 내려보내지 않는다');
+  const filters = readOperating('ReplayFilters.tsx');
+  assert.match(filters, /filter/, '교차 필터가 필터 값을 받지 않는다');
+  assert.match(filters, /onFilterChange/, '교차 필터가 필터 변경을 올려보내지 않는다');
 });
 
 test('FX-T9 ⑤ 후보 영역을 고르면 그 세션의 좌석을 점등하고 지우면 점등을 지운다', () => {
@@ -102,13 +108,16 @@ test('UI-12 ② 상태 띠는 필터·프레임·긴 작업과 복사 방식을 
   const strip = readOperating('PerfStrip.tsx');
   const main = readOperating('ReplayMain.tsx');
   assert.match(strip, /perfStatus\(/, '성능 값을 판정하지 않는다');
-  assert.match(strip, /clockModeLabel\(/, '공유 시계 사용 여부를 보이지 않는다');
+  assert.match(strip, /clockModeLabel\(\s*SHARED_CLOCK_ENABLED\s*\)/, '공유 시계 상수로 라벨을 만들지 않는다');
+  assert.doesNotMatch(strip, /clockModeLabel\(\s*true\s*\)/, '공유 시계를 켠 것으로 하드코딩한다');
   assert.match(strip, /SHARED_CLOCK_ENABLED/, '공유 시계를 켰는지 상수를 쓰지 않는다');
   assert.doesNotMatch(strip, /isolationLabel\(/, '격리 여부를 공유 메모리 사용처럼 보인다');
   assert.match(strip, /필터/, '필터 반영 시간이 없다');
   assert.match(strip, /프레임/, '프레임 시간이 없다');
   assert.match(strip, /긴 작업/, '긴 작업 수가 없다');
   assert.match(strip, /—/, '측정 없음을 —로 보이지 않는다');
+  assert.match(strip, /filterP95[\s\S]{0,60}(null|—)/, '필터 p95가 null일 때를 가르지 않는다');
+  assert.match(strip, /frameP95[\s\S]{0,60}(null|—)/, '프레임 p95가 null일 때를 가르지 않는다');
   assert.match(strip, /filterP95/, '필터 p95 값이 없다');
   assert.match(strip, /frameP95/, '프레임 p95 값이 없다');
   assert.match(main, /<PerfStrip/, '재생 화면이 상태 띠를 넣지 않는다');
@@ -123,7 +132,7 @@ test('UI-13 ② [ASVS v5.0.0-1.1.2·1.4.1·3.7.1] Worker 계산·HTML 금지·We
   assert.match(hook, /\{\s*type:\s*['"]module['"]\s*\}/, 'Worker를 module 형식으로 만들지 않는다');
   assert.match(hook, /candidateRequest\(/, '요청 복사본·전송 목록을 만들지 않는다');
   assert.match(hook, /decodeWorkerMessage\(/, 'Worker 응답을 검사하지 않는다');
-  assert.match(hook, /postMessage\(/, 'Worker에 계산을 맡기지 않는다');
+  assert.match(hook, /postMessage\(\s*message\s*,\s*transfer\s*\)/, '후보 요청을 전송 목록과 함께 보내지 않는다');
   assert.match(hook, /candidateModel\(/, 'Worker가 없을 때 메인 스레드 계산이 없다');
   assert.match(hook, /catch/, 'Worker 오류를 잡아 메인 계산으로 돌아가지 않는다');
   assert.match(hook, /terminate\(/, '화면을 떠날 때 Worker를 끝내지 않는다');

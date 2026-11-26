@@ -27,6 +27,25 @@ const nearly = (actual, expected, label) => {
   assert.ok(Math.abs(actual - expected) < 1e-9, `${label}: ${actual} != ${expected}`);
 };
 
+const COLUMN_NAMES = [
+  't_ms',
+  'kind',
+  'seat',
+  'section',
+  'session',
+  'result',
+  'retry',
+  'latency_ms',
+  'first_hold_ms',
+  'entropy',
+  'net_type',
+  'asn',
+  'device_group',
+  'bot_tier',
+  'member',
+  'post_seat',
+];
+
 function codeOnly(source) {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 }
@@ -121,7 +140,7 @@ test('UI-11 ①③ FX-T9 ⑧ 산점도는 로그 가로축·축 밖 가장자리
   assert.equal(planOf(25_000, false).count, 20_000);
 });
 
-test('FX-T5 ① [가정] 성능 판정은 필터 p95 50ms·프레임 p95 20ms 경계로 가른다', () => {
+test('UI-12 ① [가정] 성능 판정은 필터 p95 50ms·프레임 p95 20ms 경계로 가른다', () => {
   const p95 = need(perf, 'perf', 'p95');
   const statusOf = need(perf, 'perf', 'perfStatus');
 
@@ -247,6 +266,23 @@ test('ASVS v5.0.0-3.5.5 Worker 메시지는 정해진 종류·판 번호·형만
   assert.equal(withHistogram.histogram.bins.length, 2);
   assert.equal(withHistogram.histogram.edges.length, 3);
 
+  const baselineDone = decode({
+    kind: 'candidate-done',
+    version: 1,
+    panel: 'baseline',
+    points: new Float32Array(0),
+    sessions: new Uint32Array(0),
+    bots: new Uint8Array(0),
+    totalSessions: 0,
+    totalBots: 0,
+    bursts: [{ deviceGroup: 4, sessions: 1, attempts: 2, firstAtMs: 1_000, lastAtMs: 1_005 }],
+    histogram: null,
+  });
+  assert.ok(baselineDone, '조사 원천 baseline 응답을 받지 않는다');
+
+  // 계획 §4.2: 모르는 키는 무시한다.
+  assert.ok(decode({ ...done, unknownKey: true }), '모르는 키가 있으면 메시지를 버린다');
+
   assert.equal(decode({ kind: 'error', version: 0, message: 'x'.repeat(200) }).message.length, 200);
 });
 
@@ -258,6 +294,7 @@ test('UI-13 ① [ASVS v5.0.0-1.4.3] 공유 시계를 더하지 않고 후보 요
   assert.equal(runtime.SHARED_CLOCK_ENABLED, false);
   assert.equal(clockLabel(false), '복사 방식');
   assert.equal(clockLabel(true), '공유 메모리 켜짐');
+  assert.equal(clockLabel(runtime.SHARED_CLOCK_ENABLED), '복사 방식');
 
   const columns = makeColumns(2);
   columns.t_ms[0] = -100;
@@ -265,19 +302,25 @@ test('UI-13 ① [ASVS v5.0.0-1.4.3] 공유 시계를 더하지 않고 후보 요
   const keep = new Uint8Array([1, 0]);
   const { message, transfer } = requestOf(1, 'SYNTHETIC', columns, keep);
   assert.equal(message.kind, 'candidate');
-  assert.notEqual(message.columns.t_ms, columns.t_ms, '요청은 메인의 열을 그대로 보내지 않는다');
   assert.notEqual(message.keep, keep, '요청은 메인의 keep을 그대로 보내지 않는다');
   assert.equal(message.columns.t_ms[0], -100);
   assert.equal(message.keep[0], 1);
   assert.equal(transfer.length, 17, '열 16개와 keep 하나를 전송한다');
-  assert.ok(transfer.includes(message.columns.t_ms.buffer));
+
+  // 열 16개 전부가 원본과 다른 복사본이고, 버퍼가 전송 목록에 있어야 한다.
+  for (const name of COLUMN_NAMES) {
+    assert.notEqual(message.columns[name], columns[name], `${name} 열을 복사하지 않았다`);
+    assert.ok(transfer.includes(message.columns[name].buffer), `${name} 버퍼가 전송 목록에 없다`);
+  }
   assert.ok(transfer.includes(message.keep.buffer));
 
-  // 전송 목록으로 넘기면 복사본 버퍼는 분리되고, 메인의 원본은 그대로다.
+  // 전송 목록으로 넘기면 복사본 16개와 keep 버퍼는 분리되고, 메인 원본 16개는 그대로다.
   structuredClone(message, { transfer });
-  assert.equal(message.columns.t_ms.buffer.byteLength, 0);
+  for (const name of COLUMN_NAMES) {
+    assert.equal(message.columns[name].buffer.byteLength, 0, `${name} 복사본이 분리되지 않았다`);
+    assert.ok(columns[name].buffer.byteLength > 0, `${name} 메인 원본이 분리됐다`);
+  }
   assert.equal(message.keep.buffer.byteLength, 0);
-  assert.ok(columns.t_ms.buffer.byteLength > 0);
   assert.equal(columns.t_ms[0], -100);
   assert.equal(keep[0], 1);
 
