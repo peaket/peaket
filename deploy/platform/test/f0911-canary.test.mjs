@@ -109,6 +109,13 @@ function analysisArg(step, name) {
 test('D-T6 ① 오류 2% 카나리(1,000건·20건)는 세 조건을 모두 넘어 분석이 실패하고 자동 중단된다', () => {
   // 정본 시나리오: 1,000건 가운데 20건(2%). 안정판은 같은 구간 0건으로 둔다
   assert.equal(judgeError({ canaryRequests: 1000, canaryErrors: 20, stableRequests: 1000, stableErrors: 0 }), 'fail');
+  // 롤아웃에 분석 단계가 붙고 dryRun이 아니어야 실패가 자동 중단으로 이어진다(실제 중단은 미실행)
+  const r = render([...BASE, 'service.rollout.enabled=true', 'service.rollout.analysis.enabled=true']);
+  assert.equal(r.error, undefined, r.error);
+  const rollout = find(r.objects, 'Rollout', 'example-svc');
+  const analysis = rollout.spec.strategy.canary.steps.find((s) => s.analysis);
+  assert.ok(analysis, '롤아웃 분석 단계');
+  assert.equal(analysis.analysis.dryRun, undefined, 'dryRun이면 실패해도 중단하지 않는다');
   const m = metric('peaket-canary-error-ratio');
   const q = flat(m.provider.prometheus.query);
   assert.match(q, /http_server_errors_total/, '5xx 오류 카운터를 센다');
