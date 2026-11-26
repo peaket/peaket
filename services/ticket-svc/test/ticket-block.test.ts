@@ -178,12 +178,22 @@ describe('BlockTicketIssuance 단위 계약 [HOT-161] [P-T15] [P-T39 ③]', () =
     expect(saved.every((t) => t.status === 'VOIDED')).toBe(true);
   });
 
-  test('IR-30 VoidTickets도 ops-svc 호출자만 받는다', async () => {
+  test('IR-30 VoidTickets는 ops-svc(입장 기록 필요)와 purchase-svc(입금 오류 되돌림)만 받는다', async () => {
     const orderId = '0190f3a1-7c2e-7a00-8000-000000000124';
-    await issue(orderId, { issue_generation: 1 });
+    const issued = await issue(orderId, { issue_generation: 1 });
+    expect(issued.tickets).toHaveLength(2);
+    // core-svc는 거절한다
+    const core = new grpc.Metadata();
+    core.set(INTERNAL_GRPC_TOKEN_HEADER, TOKEN);
+    core.set(INTERNAL_GRPC_CALLER_HEADER, 'core-svc');
+    await expect(call((cb) => client.VoidTickets({ order_id: orderId, event_id: EVENT, issue_generation: 1 }, core, {}, cb))).rejects.toMatchObject({ code: grpc.status.PERMISSION_DENIED });
+    // purchase-svc의 입금 오류 되돌림은 입장 기록과 무관하게 무효로 한다(기존 계약)
     const purchase = new grpc.Metadata();
     purchase.set(INTERNAL_GRPC_TOKEN_HEADER, TOKEN);
     purchase.set(INTERNAL_GRPC_CALLER_HEADER, 'purchase-svc');
-    await expect(call((cb) => client.VoidTickets({ order_id: orderId, event_id: EVENT, issue_generation: 1 }, purchase, {}, cb))).rejects.toMatchObject({ code: grpc.status.PERMISSION_DENIED });
+    const out = await call<{ voided: number; already_entered: number }>((cb) => client.VoidTickets({ order_id: orderId, event_id: EVENT, issue_generation: 1 }, purchase, {}, cb));
+    expect(out).toEqual({ voided: 2, already_entered: 0 });
+    const saved = [...store.tickets.values()].filter((t) => t.orderId === orderId);
+    expect(saved.map((t) => t.status)).toEqual(['VOIDED', 'VOIDED']);
   });
 });
