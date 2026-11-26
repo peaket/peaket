@@ -49,6 +49,7 @@ function seriesRows() {
 }
 
 function passFilter(columns, i, filter) {
+  if (filter.sections !== undefined && !filter.sections.includes(columns.section[i])) return false;
   if (filter.results !== undefined && !filter.results.includes(columns.result[i])) return false;
   if (filter.kinds !== undefined && !filter.kinds.includes(columns.kind[i])) return false;
   if (filter.botTiers !== undefined && !filter.botTiers.includes(columns.bot_tier[i])) return false;
