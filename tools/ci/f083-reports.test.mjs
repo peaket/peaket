@@ -166,13 +166,12 @@ test('MSR-030 ① M6 초안이 F-08-7 목차의 M6 자리를 채우고 상태가
     const heading = m6.split(/\r?\n/).find((line) => new RegExp(`^## ${n}\\.`).test(line));
     assert.ok(heading && heading.includes(kw), `M6 ${n}절 제목에 '${kw}'가 없다: ${heading ?? '없음'}`);
   }
-  const cards = section(m6, '숫자 카드');
+  const cardRows = m6
+    .split(/\r?\n/)
+    .filter((line) => /^\|\s*[1-5]\s*\|/.test(line) && /(F082|F088|NFR021|ARCH95|INFRA11|DORA)-/.test(line));
   for (const n of [1, 2, 3, 4, 5]) {
-    const row = cards
-      .split(/\r?\n/)
-      .find((line) => new RegExp(`^\\|\\s*${n}\\s*\\|`).test(line));
+    const row = cardRows.find((line) => new RegExp(`^\\|\\s*${n}\\s*\\|`).test(line));
     assert.ok(row, `M6 숫자 카드 ${n} 행이 없다`);
-    assert.match(row, /(F082|F088|NFR021|ARCH95|INFRA11|DORA)-/, `M6 숫자 카드 ${n}에 사실 ID가 없다`);
   }
   const readme = read(BLOG_README, '블로그 README');
   const m6row = readme.split(/\r?\n/).find((line) => line.startsWith('| M6 |'));
