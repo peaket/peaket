@@ -160,8 +160,9 @@ test('K10-S4 기기 시계가 +60초·-60초 어긋나도 서버 시각 보정 �
       const ok = await scanOnce(page, key, tickets[0].ticketId);
       expect(resultOf(ok.probe.text)).toBe('PASS');
       if (withExpired) {
-        // 보정 밖(±31초) QR은 유효시간이 지난 QR로 거부된다.
-        await presentQr(page, await qrOf(key, tickets[1].ticketId, Date.now() + 31_000));
+        // 보정 밖 QR은 유효시간(±30초)을 넉넉히 넘겨야 한다. 31초는 양성 대조 뒤 경과 시간 때문에
+        // 30초 안으로 들어올 수 있어 60초 앞으로 둔다.
+        await presentQr(page, await qrOf(key, tickets[1].ticketId, Date.now() + 60_000));
         const expired = await waitVerdict(page);
         expect(resultOf(expired.text)).toBe('REJECT');
         expect(expired.text).toContain('유효시간이 지난 QR');
