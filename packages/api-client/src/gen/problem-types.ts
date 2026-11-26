@@ -20,6 +20,9 @@ export type ProblemType =
   | 'already-verified'
   | 'already-waiting'
   | 'anchor-unavailable'
+  | 'appeal-deadline-passed'
+  | 'appeal-kind-not-supported'
+  | 'appeal-result-conflict'
   | 'approval-conflict'
   | 'approval-evidence-required'
   | 'approval-expired'
@@ -116,6 +119,7 @@ export type ProblemType =
   | 'fraud-case-exists'
   | 'fraud-case-state'
   | 'fraud-report-not-ready'
+  | 'fraud-restriction-requires-approval'
   | 'fraud-run-in-progress'
   | 'fraud-run-not-failed'
   | 'fraud-run-retrying'
@@ -315,6 +319,7 @@ export type ProblemType =
   | 'reoffer-not-allowed'
   | 'report-limited'
   | 'research-export-not-ready'
+  | 'restriction-reason-not-allowed'
   | 'restriction-too-long'
   | 'retention-ended'
   | 'review-already-written'
@@ -444,6 +449,9 @@ export const PROBLEM_TYPES = {
   'already-verified': { status: 409, title: "이미 본인확인을 마친 계정입니다" },
   'already-waiting': { status: 409, title: "이미 다른 곳에서 대기 중입니다" },
   'anchor-unavailable': { status: 503, title: "외부 앵커를 지금 쓸 수 없습니다" },
+  'appeal-deadline-passed': { status: 409, title: "소명 기한이 지났습니다" },
+  'appeal-kind-not-supported': { status: 422, title: "지금 받지 않는 소명 종류입니다" },
+  'appeal-result-conflict': { status: 409, title: "같은 소명에 다른 결과가 왔습니다" },
   'approval-conflict': { status: 409, title: "다른 사람이 먼저 처리했습니다" },
   'approval-evidence-required': { status: 422, title: "증빙 확인 사실이 필요합니다" },
   'approval-expired': { status: 409, title: "승인 기한이 지났습니다" },
@@ -540,6 +548,7 @@ export const PROBLEM_TYPES = {
   'fraud-case-exists': { status: 409, title: "이 묶음으로 만든 사건이 이미 있습니다" },
   'fraud-case-state': { status: 409, title: "지금 사건 상태에서는 할 수 없습니다" },
   'fraud-report-not-ready': { status: 404, title: "부정 예매 리포트가 아직 없습니다" },
+  'fraud-restriction-requires-approval': { status: 403, title: "부정 예매 이용 제한은 승인 업무로만 풀 수 있습니다" },
   'fraud-run-in-progress': { status: 409, title: "분석이 아직 돌고 있습니다" },
   'fraud-run-not-failed': { status: 409, title: "다시 돌릴 실패한 분석이 없습니다" },
   'fraud-run-retrying': { status: 409, title: "분석을 자동으로 다시 시도하고 있습니다" },
@@ -739,6 +748,7 @@ export const PROBLEM_TYPES = {
   'reoffer-not-allowed': { status: 409, title: "받은 티켓은 다시 양도할 수 없습니다. 결제자에게 돌려주세요" },
   'report-limited': { status: 429, title: "오늘은 더 신고할 수 없습니다" },
   'research-export-not-ready': { status: 409, title: "연구용 내보내기를 아직 만드는 중입니다" },
+  'restriction-reason-not-allowed': { status: 422, title: "이 경로로 쓸 수 없는 예매 제한 사유입니다" },
   'restriction-too-long': { status: 422, title: "이용 제한은 1년을 넘길 수 없습니다" },
   'retention-ended': { status: 410, title: "보관 기간이 끝났습니다" },
   'review-already-written': { status: 409, title: "이 회차의 후기를 이미 썼습니다" },

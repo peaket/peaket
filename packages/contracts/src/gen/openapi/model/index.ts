@@ -149,6 +149,8 @@ export * from './createOpsBotReviewSampleJudgementHeaders.zod.js';
 export * from './createOpsCaseCancellationDecisionBody.zod.js';
 export * from './createOpsCaseReplyBody.zod.js';
 export * from './createOpsCaseReplyHeaders.zod.js';
+export * from './createOpsCaseRestrictionAppealDecisionBody.zod.js';
+export * from './createOpsCaseRestrictionAppealDecisionHeaders.zod.js';
 export * from './createOpsCaseSystemRefundBody.zod.js';
 export * from './createOpsCaseVerificationAppealDecisionBody.zod.js';
 export * from './createOpsCaseVerificationAppealDecisionHeaders.zod.js';

@@ -23,6 +23,8 @@ export interface ApprovalRequestInput {
      * @maxItems 20
      */
   relatedOrderIds?: string[];
+  /** BOOKING_RESTRICTION만. 예매 제한의 끝 시각. 요청 시각보다 뒤이고 요청 시각 + 1년 [가정]을 넘지 않아야 한다(넘으면 422 restriction-too-long). 다른 종류에 보내면 400 invalid-body다(F-06-4 추천 적용 2026-11-26) */
+  restrictionEndsAt?: string;
   /** 원 단위. 지급 묶음 합계를 담으므로 64비트 정수다(DB bigint, 추천 적용 2026-10-28, 기술 검토 높음-20) */
   amount?: number;
   reasonCode?: string;

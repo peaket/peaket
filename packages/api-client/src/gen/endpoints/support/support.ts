@@ -320,15 +320,25 @@ export type createAppealResponse201 = {
   status: 201
 }
 
+export type createAppealResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
 export type createAppealResponse409 = {
   data: ProblemResponse
   status: 409
 }
 
+export type createAppealResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
 export type createAppealResponseSuccess = (createAppealResponse201) & {
   headers: Headers;
 };
-export type createAppealResponseError = (createAppealResponse409) & {
+export type createAppealResponseError = (createAppealResponse400 | createAppealResponse409 | createAppealResponse422) & {
   headers: Headers;
 };
 

@@ -90,6 +90,7 @@ import type {
   CreateOpsArtistBody,
   CreateOpsAuditCheckpointBody,
   CreateOpsCaseCancellationDecisionBody,
+  CreateOpsCaseRestrictionAppealDecisionBody,
   CreateOpsCaseSystemRefundBody,
   CreateOpsCaseVerificationAppealDecisionBody,
   CreateOpsCommandExtensionBody,
@@ -8270,6 +8271,132 @@ export const useCreateOpsCaseSystemRefund = <TError = ErrorType<ProblemResponse>
       > => {
       return useMutation(getCreateOpsCaseSystemRefundMutationOptions(options), queryClient);
     }
+    export type createOpsCaseRestrictionAppealDecisionResponse200 = {
+  data: CsCase
+  status: 200
+}
+
+export type createOpsCaseRestrictionAppealDecisionResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsCaseRestrictionAppealDecisionResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsCaseRestrictionAppealDecisionResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsCaseRestrictionAppealDecisionResponse412 = {
+  data: ProblemResponse
+  status: 412
+}
+
+export type createOpsCaseRestrictionAppealDecisionResponse428 = {
+  data: ProblemResponse
+  status: 428
+}
+
+export type createOpsCaseRestrictionAppealDecisionResponseSuccess = (createOpsCaseRestrictionAppealDecisionResponse200) & {
+  headers: Headers;
+};
+export type createOpsCaseRestrictionAppealDecisionResponseError = (createOpsCaseRestrictionAppealDecisionResponse403 | createOpsCaseRestrictionAppealDecisionResponse404 | createOpsCaseRestrictionAppealDecisionResponse409 | createOpsCaseRestrictionAppealDecisionResponse412 | createOpsCaseRestrictionAppealDecisionResponse428) & {
+  headers: Headers;
+};
+
+export const getCreateOpsCaseRestrictionAppealDecisionUrl = (caseId: string,) => {
+
+
+
+
+  return `/v1/ops/cases/${encodeURIComponent(String(caseId))}/restriction-appeal-decision`
+}
+
+/**
+ * FR-061, POL-038 ⑤, F-06-4. APPEAL 건 가운데 category RESTRICTION만 받는다. ACCEPT면 제한 해제를 두 집행 사본에 먼저 반영하고(둘 다 성공해야) core 내부 API로 결과 LIFTED를 적으며, REJECT면 KEPT를 적는다. 결정은 건 판으로 한 번이고 이미 해결됐으면 409 case-already-resolved, 다른 종류·category면 409 case-action-not-applicable, FRAUD 사유 제한을 이 경로로 풀려 하면 403 fraud-restriction-requires-approval이다. 없는/볼 수 없는 건은 404다. 감사에 사유가 남는다
+ * @summary 예매 제한 소명 판단(해제·유지, CS 팀장)
+ */
+export const createOpsCaseRestrictionAppealDecision = async (caseId: string,
+    createOpsCaseRestrictionAppealDecisionBody: CreateOpsCaseRestrictionAppealDecisionBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsCaseRestrictionAppealDecisionResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsCaseRestrictionAppealDecisionResponseSuccess>(getCreateOpsCaseRestrictionAppealDecisionUrl(caseId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createOpsCaseRestrictionAppealDecisionBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsCaseRestrictionAppealDecisionMutationKey = () => ['createOpsCaseRestrictionAppealDecision'] as const;
+
+export const getCreateOpsCaseRestrictionAppealDecisionMutationOptions = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsCaseRestrictionAppealDecision>>, TError,CreateOpsCaseRestrictionAppealDecisionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsCaseRestrictionAppealDecision>>, TError,CreateOpsCaseRestrictionAppealDecisionMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsCaseRestrictionAppealDecisionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsCaseRestrictionAppealDecision>>, CreateOpsCaseRestrictionAppealDecisionMutationVariables> = (props) => {
+          const {caseId,data} = props ?? {};
+
+          return  createOpsCaseRestrictionAppealDecision(caseId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsCaseRestrictionAppealDecisionMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsCaseRestrictionAppealDecision>>>
+    export type CreateOpsCaseRestrictionAppealDecisionMutationBody = BodyType<CreateOpsCaseRestrictionAppealDecisionBody>
+    export type CreateOpsCaseRestrictionAppealDecisionMutationError = ErrorType<ProblemResponse>
+    export type CreateOpsCaseRestrictionAppealDecisionMutationVariables = {caseId: string;data: BodyType<CreateOpsCaseRestrictionAppealDecisionBody>}
+
+    /**
+ * @summary 예매 제한 소명 판단(해제·유지, CS 팀장)
+ */
+export const useCreateOpsCaseRestrictionAppealDecision = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsCaseRestrictionAppealDecision>>, TError,CreateOpsCaseRestrictionAppealDecisionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsCaseRestrictionAppealDecision>>,
+        TError,
+        CreateOpsCaseRestrictionAppealDecisionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsCaseRestrictionAppealDecisionMutationOptions(options), queryClient);
+    }
     export type createOpsCaseReplyResponse201 = {
   data: InquiryMessage
   status: 201
@@ -8666,7 +8793,7 @@ export const getCreateOpsApprovalRequestUrl = () => {
 }
 
 /**
- * FR-058, FR-059, FR-061, POL-038. 필요한 승인 인원은 서버가 정함. kind COMMANDER_ROLE_CHANGE는 이 경로로 만들지 않고 PUT /v1/ops/admin-accounts/{adminAccountId}/role의 202만 만든다(그 경로의 대상·역할 조건을 거치게 하려는 것이다, docs/security/authz-matrix.md §6.1). 이 경로로 보내면 422이고, requestedRole은 받지 않는다(추천 적용 2026-10-30). kind FRAUD_ACTION도 이 경로로 만들지 않고 POST /v1/ops/fraud-cases/{caseId}/action-requests만 만든다(조사관 지정과 사건 상태를 거치게 하려는 것이다, 보내면 422, 추천 적용 2026-10-31, ADR-0171) kind CONTRACT_TERMS_CHANGE도 이 경로로 만들지 않고 POST /v1/ops/promoters/{promoterId}/contract-term-changes만 만든다(바꿀 값을 그 경로가 받는다, 보내면 422, ADR-0238)
+ * FR-058, FR-059, FR-061, POL-038. 필요한 승인 인원은 서버가 정함. kind COMMANDER_ROLE_CHANGE는 이 경로로 만들지 않고 PUT /v1/ops/admin-accounts/{adminAccountId}/role의 202만 만든다(그 경로의 대상·역할 조건을 거치게 하려는 것이다, docs/security/authz-matrix.md §6.1). 이 경로로 보내면 422이고, requestedRole은 받지 않는다(추천 적용 2026-10-30). kind FRAUD_ACTION도 이 경로로 만들지 않고 POST /v1/ops/fraud-cases/{caseId}/action-requests만 만든다(조사관 지정과 사건 상태를 거치게 하려는 것이다, 보내면 422, 추천 적용 2026-10-31, ADR-0171) kind CONTRACT_TERMS_CHANGE도 이 경로로 만들지 않고 POST /v1/ops/promoters/{promoterId}/contract-term-changes만 만든다(바꿀 값을 그 경로가 받는다, 보내면 422, ADR-0238). kind BOOKING_RESTRICTION은 cs_agent·cs_lead가 targetRef=계정 ID, reasonCode=ABUSE_CANCEL|ABUSE_TRANSFER|ABUSE_MULTI_ACCOUNT|ABUSE_RESALE [가정], restrictionEndsAt(요청 시각 + 1년 [가정] 이하), amount 0으로 요청하고, 요청자가 아닌 cs_lead 1인이 승인해 집행한다(requiredApprovals 2, F-06-4 추천 적용 2026-11-26). FRAUD 사유는 이 경로가 422 restriction-reason-not-allowed로 닫는다
  * @summary 승인 업무 요청(사유 필수, 증빙은 확인 사실만)
  */
 export const createOpsApprovalRequest = async (approvalRequestInput?: ApprovalRequestInput, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsApprovalRequestResponseSuccess> => {

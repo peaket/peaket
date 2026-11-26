@@ -54,6 +54,7 @@ export type OperationId =
   | 'createOpsBotReviewSampleJudgement'
   | 'createOpsCaseCancellationDecision'
   | 'createOpsCaseReply'
+  | 'createOpsCaseRestrictionAppealDecision'
   | 'createOpsCaseSystemRefund'
   | 'createOpsCaseVerificationAppealDecision'
   | 'createOpsCommand'
@@ -465,6 +466,7 @@ export const OPERATIONS = {
   createOpsBotReviewSampleJudgement: {operationId: "createOpsBotReviewSampleJudgement",method: "POST",path: "/v1/ops/bot-review-samples/{sampleId}/judgement",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsCaseCancellationDecision: {operationId: "createOpsCaseCancellationDecision",method: "POST",path: "/v1/ops/cases/{caseId}/cancellation-decision",host: "ops-api",kind: "write",cookie: true},
   createOpsCaseReply: {operationId: "createOpsCaseReply",method: "POST",path: "/v1/ops/cases/{caseId}/replies",host: "ops-api",kind: "write",idempotent: true,cookie: true},
+  createOpsCaseRestrictionAppealDecision: {operationId: "createOpsCaseRestrictionAppealDecision",method: "POST",path: "/v1/ops/cases/{caseId}/restriction-appeal-decision",host: "ops-api",kind: "write",cookie: true,ifMatch: true},
   createOpsCaseSystemRefund: {operationId: "createOpsCaseSystemRefund",method: "POST",path: "/v1/ops/cases/{caseId}/system-refund",host: "ops-api",kind: "write",cookie: true},
   createOpsCaseVerificationAppealDecision: {operationId: "createOpsCaseVerificationAppealDecision",method: "POST",path: "/v1/ops/cases/{caseId}/verification-appeal-decision",host: "ops-api",kind: "write",idempotent: true,cookie: true,ifMatch: true},
   createOpsCommand: {operationId: "createOpsCommand",method: "POST",path: "/v1/ops/commands",host: "ops-api",kind: "write",idempotent: true,cookie: true},

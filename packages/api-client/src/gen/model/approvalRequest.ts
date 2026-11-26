@@ -31,6 +31,11 @@ export interface ApprovalRequest {
      * @nullable
      */
   requestedRole?: ApprovalRequestRequestedRole;
+  /**
+     * BOOKING_RESTRICTION만. 요청한 예매 제한의 끝 시각(요청 시각 + 1년 [가정] 이하). 그 밖의 종류는 null이다(F-06-4 추천 적용 2026-11-26)
+     * @nullable
+     */
+  restrictionEndsAt?: string | null;
   /** 원 단위. 지급 묶음 합계를 담으므로 64비트 정수다(DB bigint, 추천 적용 2026-10-28, 기술 검토 높음-20) */
   amount?: number;
   reasonCode?: string;

@@ -209,6 +209,8 @@ export * from './createOpsArtistBody';
 export * from './createOpsAuditCheckpointBody';
 export * from './createOpsCaseCancellationDecisionBody';
 export * from './createOpsCaseCancellationDecisionBodyDecision';
+export * from './createOpsCaseRestrictionAppealDecisionBody';
+export * from './createOpsCaseRestrictionAppealDecisionBodyDecision';
 export * from './createOpsCaseSystemRefundBody';
 export * from './createOpsCaseVerificationAppealDecisionBody';
 export * from './createOpsCaseVerificationAppealDecisionBodyOutcome';
