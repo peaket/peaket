@@ -63,7 +63,7 @@ export class BookingRestrictions {
         copyNextAtMs: nowMs,
         copyAttempts: 0,
       };
-      await this.#store.insert(row);
+      await this.#store.insert(row, this.#auditRecord('RESTRICTION_APPLIED', row, nowMs));
     }
     if (row.status !== 'ACTIVE') return { status: 'DONE' };
     if (row.copyNextAtMs !== null && nowMs < row.copyNextAtMs) return { status: 'PENDING' };
@@ -83,7 +83,7 @@ export class BookingRestrictions {
       return { status: 'PENDING' };
     }
     const applied: RestrictionRow = { ...row, deliveryDone: true, copyNextAtMs: null, copyAttempts: 0 };
-    await this.#store.update(applied, this.#auditRecord('RESTRICTION_APPLIED', row, nowMs));
+    await this.#store.update(applied);
     // 화면용 사본은 집행이 아니다. 실패해도 Done을 막지 않는다
     try {
       await this.#copies.view({ ...active, reasonCode: row.reasonCode, startsAtMs: row.startsAtMs, appealDueAtMs: row.appealDueAtMs });
