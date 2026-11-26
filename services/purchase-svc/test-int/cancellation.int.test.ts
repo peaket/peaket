@@ -31,6 +31,7 @@ import { TicketService } from '../../ticket-svc/src/modules/ticket/application/t
 import { ticketPackage, ticketServiceHandlers } from '../../ticket-svc/src/modules/ticket/inbound/ticket.grpc.js';
 import { migrateTicket } from '../../ticket-svc/scripts/migrate.mjs';
 import { DrizzleOrderStore } from '../src/modules/booking/index.js';
+import { ApprovalBasisOrders } from '../src/modules/booking/application/approval-basis.js';
 import { DrizzleSeatSales, MemorySeatMap, RedisSeatStore, seatKeys } from '../src/modules/inventory/index.js';
 import {
   CancelTicket,
@@ -336,6 +337,43 @@ describe('0014 order_cancellation', () => {
     const idx = await admin.pool.query<{ indexname: string; indexdef: string }>("select indexname, indexdef from pg_indexes where schemaname = 'public' and tablename = 'order_cancellation'");
     expect(idx.rows.find((r) => r.indexname === 'order_cancellation_active_key')?.indexdef).toContain("status <> 'VOIDED'");
     expect(idx.rows.find((r) => r.indexname === 'order_cancellation_status_idx')?.indexdef).toContain('(status, created_at)');
+  });
+});
+
+describe('IR-11 approval-basis 실제 두 장 주문', () => {
+  test('취소 티켓의 남은 환급액이 0이어도 취소 ID basis는 그 취소의 환급액만 답한다', async () => {
+    const w = await world({ ticketPrice: 11_000 });
+    const secondSeat = randomUUID();
+    const secondTicket = randomUUID();
+    await admin.pool.query(
+      `insert into order_item (order_id, line_no, seat_id, tier, section_id, unit_price, ticket_id)
+       values ($1, 2, $2, 'R', 'A', 12_000, $3)`,
+      [w.orderId, secondSeat, secondTicket],
+    );
+    const cancellationId = randomUUID();
+    await admin.pool.query(
+      `insert into order_cancellation (id, order_id, ticket_id, reason, days_before, within_24h, deduction_bp, deduction_amount, refund_amount, status, created_at, status_changed_at)
+       values ($1, $2, $3, 'USER', 3, false, 0, 0, 11_000, 'REQUESTED', now(), now())`,
+      [cancellationId, w.orderId, w.ticketId],
+    );
+    const basis = new ApprovalBasisOrders(new DrizzleCancellationOrders(purchaseDb, seatMap));
+    expect(await basis.basis(cancellationId)).toMatchObject({ orderId: w.orderId, refundableAmount: 11_000 });
+    // 주문 ID로 부르면 그 취소를 뺀 다른 티켓의 남은 금액(12,000)이다
+    expect(await basis.basis(w.orderId)).toMatchObject({ orderId: w.orderId, refundableAmount: 12_000 });
+  });
+});
+
+describe('IR-30 취소 행 무효 상태 전이', () => {
+  test('REFUNDED 취소 행은 VOIDED로 덮지 않는다', async () => {
+    const w = await world();
+    const cancellationId = randomUUID();
+    await admin.pool.query(
+      `insert into order_cancellation (id, order_id, ticket_id, reason, days_before, within_24h, deduction_bp, deduction_amount, refund_amount, status, created_at, status_changed_at)
+       values ($1, $2, $3, 'USER', 3, false, 0, 0, $4, 'REFUNDED', now(), now())`,
+      [cancellationId, w.orderId, w.ticketId, PRICE],
+    );
+    expect(await writes.updateStatus({ cancellationId, status: 'VOIDED', nowMs: NOW })).toBe(false);
+    expect((await cancellationRow(cancellationId))?.status).toBe('REFUNDED');
   });
 });
 

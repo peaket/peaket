@@ -33,7 +33,9 @@ const row = (ticketId: string, over: Partial<CancellationOrderView> = {}): Cance
     ...over,
   }) as CancellationOrderView & { issueGeneration?: number };
 
-const rows = [row(FIRST), row(SECOND, { entryRecorded: true, refundableAmount: 12_000, ticketPrice: 12_000 })];
+// 실제 `DrizzleCancellationOrders.byOrder`는 그 취소 티켓의 남은 환급액을 0으로 깎는다(진행 중 취소가 금액을 덮는다).
+// 취소 ID로 부를 때는 그 취소 행의 환급액(11,000)만 답해야 하고, 다른 티켓의 12,000을 더하면 안 된다.
+const rows = [row(FIRST, { refundableAmount: 0 }), row(SECOND, { entryRecorded: true, refundableAmount: 12_000, ticketPrice: 12_000 })];
 const records = new Map<string, CancellationRecord>([[CANCELLATION, { cancellationId: CANCELLATION, orderId: ORDER, ticketId: FIRST, refundAmount: 11_000, state: 'REQUESTED', refundAttempts: 0 }]]);
 
 const orders = {
@@ -51,15 +53,15 @@ const orders = {
 const basis = new ApprovalBasisOrders(orders);
 
 describe('IR-03·31 주문의 모든 티켓 입장 기록', () => {
-  test('IR-03 둘째 티켓만 들어갔어도 entryRecorded가 참이다', async () => {
+  test('IR-03 둘째 티켓만 들어갔어도 entryRecorded가 참이고 주문 기준 남은 금액은 다른 티켓만이다', async () => {
     const b = await basis.basis(ORDER);
-    expect(b).toMatchObject({ orderId: ORDER, entryRecorded: true, refundableAmount: 23_000 });
+    expect(b).toMatchObject({ orderId: ORDER, entryRecorded: true, refundableAmount: 12_000 });
     expect(b?.eventStartsAt).toBe(new Date(NOW + 172_800_000).toISOString());
   });
 
-  test('IR-11 취소 ID로도 주문을 찾아 남은 환급액과 입장 기록을 답한다', async () => {
+  test('IR-11 취소 ID로 부르면 그 취소의 환급액만 답하고 다른 티켓 금액을 더하지 않는다', async () => {
     const b = await basis.basis(CANCELLATION);
-    expect(b).toMatchObject({ orderId: ORDER, entryRecorded: true, refundableAmount: 23_000 });
+    expect(b).toMatchObject({ orderId: ORDER, entryRecorded: true, refundableAmount: 11_000 });
   });
 
   test('IR-31 발권 세대를 승인 근거에 싣는다', async () => {

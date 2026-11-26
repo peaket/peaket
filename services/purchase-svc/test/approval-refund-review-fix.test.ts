@@ -243,4 +243,20 @@ describe('IR-21 다중 티켓 기록', () => {
     expect(state.paymentCalls).toEqual([{ amount: PRICE, cancellationId: existing }]);
     expect(state.created).toHaveLength(0);
   });
+
+  test('IR-11 취소가 둘일 때 지정한 취소 ID 하나만 환급한다', async () => {
+    const first = randomUUID();
+    const second = randomUUID();
+    const orderId = state.view.orderId;
+    state.prior = [
+      { cancellationId: first, orderId, ticketId: state.view.ticketId, refundAmount: 11_000, state: 'REQUESTED', refundAttempts: 0 },
+      { cancellationId: second, orderId, ticketId: randomUUID(), refundAmount: 12_000, state: 'REQUESTED', refundAttempts: 0 },
+    ];
+    state.records.set(first, state.prior[0]!);
+    state.records.set(second, state.prior[1]!);
+    const out = await refunds.execute(approvalId(), { kind: 'SYSTEM_FAULT_REFUND', orderId: first, amount: 11_000 });
+    expect(out).toMatchObject({ status: 'REFUNDED', cancellationId: first, refundAmount: 11_000 });
+    expect(state.paymentCalls).toEqual([{ amount: 11_000, cancellationId: first }]);
+    expect(state.created).toHaveLength(0);
+  });
 });

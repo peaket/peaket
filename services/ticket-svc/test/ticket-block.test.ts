@@ -178,6 +178,38 @@ describe('BlockTicketIssuance 단위 계약 [HOT-161] [P-T15] [P-T39 ③]', () =
     expect(saved.every((t) => t.status === 'VOIDED')).toBe(true);
   });
 
+  test('IR-30 요청한 발권 세대 이하의 티켓을 무효로 한다', async () => {
+    const orderId = '0190f3a1-7c2e-7a00-8000-000000000125';
+    const gen1 = await issue(orderId, { issue_generation: 1 });
+    const gen2 = await issue(orderId, { issue_generation: 2 });
+    store.recordEntry(gen1.tickets[0]!.ticket_id);
+    const out = await voidTickets(orderId, 2);
+    expect(out).toEqual({ voided: 4, already_entered: 1 });
+    const saved = [...store.tickets.values()].filter((t) => t.orderId === orderId);
+    expect(saved.every((t) => t.status === 'VOIDED')).toBe(true);
+    expect(saved.every((t) => t.issueGeneration <= 2)).toBe(true);
+    // 세대 1만 요청하면 세대 2는 그대로다
+    const orderId2 = '0190f3a1-7c2e-7a00-8000-000000000126';
+    const older = await issue(orderId2, { issue_generation: 1 });
+    const newer = await issue(orderId2, { issue_generation: 2 });
+    store.recordEntry(older.tickets[0]!.ticket_id);
+    expect(await voidTickets(orderId2, 1)).toEqual({ voided: 2, already_entered: 1 });
+    const saved2 = [...store.tickets.values()].filter((t) => t.orderId === orderId2);
+    expect(saved2.filter((t) => newer.tickets.some((n) => n.ticket_id === t.ticketId)).map((t) => t.status)).toEqual(['ISSUED', 'ISSUED']);
+  });
+
+  test('IR-30 이미 REFUNDED인 티켓은 VOIDED로 덮지 않는다', async () => {
+    const orderId = '0190f3a1-7c2e-7a00-8000-000000000127';
+    const issued = await issue(orderId, { seat_ids: [SEAT_A] });
+    const target = issued.tickets[0]!.ticket_id;
+    const saved = store.tickets.get(target)!;
+    store.tickets.set(target, { ...saved, status: 'REFUNDED' });
+    store.recordEntry(target);
+    const out = await voidTickets(orderId, 1);
+    expect(out).toEqual({ voided: 0, already_entered: 1 });
+    expect(store.tickets.get(target)?.status).toBe('REFUNDED');
+  });
+
   test('IR-30 VoidTickets는 ops-svc(입장 기록 필요)와 purchase-svc(입금 오류 되돌림)만 받는다', async () => {
     const orderId = '0190f3a1-7c2e-7a00-8000-000000000124';
     const issued = await issue(orderId, { issue_generation: 1 });

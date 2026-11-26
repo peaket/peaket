@@ -68,11 +68,11 @@ const reset = () => {
 };
 
 describe('IR-11 FLAGGED REFUND는 취소 ID를 주문 ID로 풀어 실제 남은 환급액으로 승인한다', () => {
-  test('IR-11 REFUND 승인의 targetRef는 주문 ID이고 금액은 0이 아니다', async () => {
+  test('IR-11 REFUND 승인의 targetRef는 지정한 취소 ID이고 금액은 그 취소의 환급액이다', async () => {
     reset();
     await controller.cancellationDecision(CASE, { decision: 'REFUND', reason: '기록 오류' }, me as never);
     expect(state.requests).toHaveLength(1);
-    expect(state.requests[0]).toMatchObject({ kind: 'SYSTEM_FAULT_REFUND', targetRef: ORDER, amount: 33_333, reasonCode: 'FLAGGED_REFUND' });
+    expect(state.requests[0]).toMatchObject({ kind: 'SYSTEM_FAULT_REFUND', targetRef: CANCELLATION, amount: 33_333, reasonCode: 'FLAGGED_REFUND' });
     expect(state.resolved).toHaveLength(1);
   });
 

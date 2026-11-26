@@ -702,3 +702,35 @@ describe('BAT-415 검증 2단계: 첫 칸 조회의 결과 조건과 0009 사유
     expect((await database.pool.query('select reason from ticket_cancellation where cancellation_id = $1 and ticket_id = $2', [k, t.ticketId])).rows).toEqual([{ reason: 'FRAUD' }]);
   });
 });
+
+describe('F-06-3 IR-30 취소 무효의 DB 경계', () => {
+  let deviceSeq = 0;
+  const scan = (eventId: string, ticketId: string) =>
+    database.pool.query(
+      `insert into scan_event (id, event_id, ticket_id, scanner_device_id, direction, method, result, scanned_at_device, known_seq, device_seq, received_at)
+       values ($1, $2, $3, $4, 'IN', 'QR', 'PASS', now(), 0, $5, now())`,
+      [randomUUID(), eventId, ticketId, randomUUID(), ++deviceSeq],
+    );
+  const statusOf = async (ticketId: string) => (await database.pool.query('select status from ticket where id = $1', [ticketId])).rows[0] as { status: string };
+
+  test('요청한 발권 세대 이하만 VOIDED로 바꾸고 REFUNDED는 덮지 않는다', async () => {
+    const orderId = randomUUID();
+    const eventId = randomUUID();
+    const gen1 = await service.issue({ orderId, eventId, payerAccountId: ACCOUNT, seatIds: [randomUUID()], issueGeneration: 1 });
+    const gen2 = await service.issue({ orderId, eventId, payerAccountId: ACCOUNT, seatIds: [randomUUID()], issueGeneration: 2 });
+    await scan(eventId, gen1.tickets[0]!.ticketId);
+    expect(await service.voidOrderTickets({ orderId, eventId, issueGeneration: 2 })).toEqual({ voided: 2, alreadyEntered: 1 });
+    expect((await statusOf(gen1.tickets[0]!.ticketId)).status).toBe('VOIDED');
+    expect((await statusOf(gen2.tickets[0]!.ticketId)).status).toBe('VOIDED');
+
+    const refundedOrder = randomUUID();
+    const refundedEvent = randomUUID();
+    const refunded = await service.issue({ orderId: refundedOrder, eventId: refundedEvent, payerAccountId: ACCOUNT, seatIds: [randomUUID()], issueGeneration: 1 });
+    const refundedTicket = refunded.tickets[0]!.ticketId;
+    await database.pool.query("update ticket set status = 'REFUNDED' where id = $1", [refundedTicket]);
+    await scan(refundedEvent, refundedTicket);
+    expect(await service.voidOrderTickets({ orderId: refundedOrder, eventId: refundedEvent, issueGeneration: 1 })).toEqual({ voided: 0, alreadyEntered: 1 });
+    expect((await statusOf(refundedTicket)).status).toBe('REFUNDED');
+  });
+});
+
