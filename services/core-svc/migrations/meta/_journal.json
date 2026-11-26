@@ -288,6 +288,13 @@
       "when": 1795319200000,
       "tag": "0047_entry_closed_grant",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1795850000000,
+      "tag": "0048_booking_confirmed_template_version",
+      "breakpoints": true
     }
   ]
 }
