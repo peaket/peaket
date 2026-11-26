@@ -54,12 +54,19 @@ const processing = {
     if (m.includes('SMALL')) return { status: 'REJECTED' as const, reason: 'TOO_SMALL' as const };
     if (m.includes('LARGE')) return { status: 'REJECTED' as const, reason: 'TOO_LARGE' as const };
     if (m.includes('PENDING')) return { status: 'SCAN_PENDING' as const };
+    if (m.includes('THROW')) throw new Error('처리 작업이 던졌다');
+    if (m.includes('UNKNOWN')) return { status: 'UNKNOWN' as const };
     const keys = [`staging/review/${id}/240.webp`, `staging/review/${id}/1280.webp`];
     if (m.includes('BADKEYS')) return { status: 'ACCEPTED' as const, width: 800, height: 600, derivativeKeys: [keys[0]!] };
+    if (m.includes('OUTSIDEKEY')) return { status: 'ACCEPTED' as const, width: 800, height: 600, derivativeKeys: [`staging/other/${id}/240.webp`, `staging/other/${id}/1280.webp`] };
+    if (m.includes('EXTRAKEY')) return { status: 'ACCEPTED' as const, width: 800, height: 600, derivativeKeys: [...keys, `staging/review/${id}/640.webp`] };
     if (m.includes('SHORT319')) return { status: 'ACCEPTED' as const, width: 319, height: 600, derivativeKeys: keys };
+    if (m.includes('SHORT320')) return { status: 'ACCEPTED' as const, width: 320, height: 600, derivativeKeys: keys };
+    if (m.includes('LONG20000')) return { status: 'ACCEPTED' as const, width: 800, height: 20_000, derivativeKeys: keys };
     if (m.includes('LONG20001')) return { status: 'ACCEPTED' as const, width: 800, height: 20_001, derivativeKeys: keys };
+    if (m.includes('PIXELS40000000')) return { status: 'ACCEPTED' as const, width: 8_000, height: 5_000, derivativeKeys: keys };
     if (m.includes('PIXELS40000001')) return { status: 'ACCEPTED' as const, width: 8_000, height: 5_001, derivativeKeys: keys };
-    for (const k of keys) objects.staging.set(k, WEBP);
+    for (const k of keys) objects.staging.set(k, m.includes('BIGDERIV') ? new Uint8Array(5 * 1024 * 1024 + 1) : WEBP);
     return { status: 'ACCEPTED' as const, width: 800, height: 600, derivativeKeys: keys };
   },
 };
@@ -127,6 +134,12 @@ const report = (reviewId: string, account: string, category: string, extra: Reco
   svc.http.inject({ method: 'POST', url: `/v1/reviews/${reviewId}/reports`, headers: { ...fan(account), 'content-type': 'application/json' }, payload: JSON.stringify({ category, ...extra }) });
 
 const publishedKeys = (imageId: string) => [...objects.published.keys()].filter((k) => k.startsWith(`review/${imageId}/`));
+/** 저장소가 후기 사진 행을 돌려주면 그 행(삭제 표시 포함). 구현 전에는 메서드가 없어 빈 배열이라 시험이 실패한다 */
+async function imageRowsOf(reviewId: string): Promise<readonly { status: string }[]> {
+  const s = store as unknown as { imagesByReviews?: (ids: readonly string[]) => Promise<Map<string, readonly { status: string }[]>> };
+  if (!s.imagesByReviews) return [];
+  return (await s.imagesByReviews([reviewId])).get(reviewId) ?? [];
+}
 
 describe('후기 사진 올리기', () => {
   test('IMG-01 [ASVS v5.0.0-2.2.3] X-Requested-With가 없으면 400이고, JPEG·PNG·WebP만 앞부분·형식·확장자가 모두 같을 때 받는다', async () => {
@@ -137,9 +150,16 @@ describe('후기 사진 올리기', () => {
     expect(gif.statusCode).toBe(422);
     expect(JSON.parse(gif.payload).extensions.reason).toBe('UNSUPPORTED_TYPE');
 
-    const mismatch = await upload(me, JPEG, { type: 'image/png', name: 'x.png' });
-    expect(mismatch.statusCode).toBe(422);
-    expect(JSON.parse(mismatch.payload).extensions.reason).toBe('UNSUPPORTED_TYPE');
+    // 앞부분·Content-Type·확장자 가운데 하나만 틀려도 받지 않는다
+    const typeMismatch = await upload(me, JPEG, { type: 'image/png', name: 'x.jpg' });
+    expect(typeMismatch.statusCode).toBe(422);
+    expect(JSON.parse(typeMismatch.payload).extensions.reason).toBe('UNSUPPORTED_TYPE');
+    const extMismatch = await upload(me, JPEG, { type: 'image/jpeg', name: 'x.png' });
+    expect(extMismatch.statusCode).toBe(422);
+    expect(JSON.parse(extMismatch.payload).extensions.reason).toBe('UNSUPPORTED_TYPE');
+    const headMismatch = await upload(me, PNG, { type: 'image/jpeg', name: 'x.jpg' });
+    expect(headMismatch.statusCode).toBe(422);
+    expect(JSON.parse(headMismatch.payload).extensions.reason).toBe('UNSUPPORTED_TYPE');
 
     const png = await upload(me, PNG, { type: 'image/png', name: 'x.png' });
     expect(png.statusCode).toBe(201);
@@ -153,7 +173,12 @@ describe('후기 사진 올리기', () => {
     const me = randomUUID();
     const { imageId } = await uploadOk(me);
     expect(publishedKeys(imageId).sort()).toEqual([`review/${imageId}/1280.webp`, `review/${imageId}/240.webp`]);
-    expect(objects.published.get(`review/${imageId}/240.webp`)?.contentType).toBe('image/webp');
+    for (const k of publishedKeys(imageId)) {
+      const b = objects.published.get(k)!.bytes;
+      expect(text(b.subarray(0, 4))).toBe('RIFF');
+      expect(text(b.subarray(8, 12))).toBe('WEBP');
+      expect(objects.published.get(k)!.contentType).toBe('image/webp');
+    }
     expect(objects.quarantine.size).toBe(0);
     expect(objects.staging.size).toBe(0);
   });
@@ -168,27 +193,45 @@ describe('후기 사진 올리기', () => {
     }
     expect((await upload(me, marked(JPEG, 'PENDING'))).statusCode).toBe(503);
     expect((await upload(me, marked(JPEG, 'BADKEYS'))).statusCode).toBe(503);
+    expect((await upload(me, marked(JPEG, 'OUTSIDEKEY'))).statusCode).toBe(503);
+    expect((await upload(me, marked(JPEG, 'EXTRAKEY'))).statusCode).toBe(503);
+    expect((await upload(me, marked(JPEG, 'BIGDERIV'))).statusCode).toBe(503);
+    expect((await upload(me, marked(JPEG, 'THROW'))).statusCode).toBe(503);
+    expect((await upload(me, marked(JPEG, 'UNKNOWN'))).statusCode).toBe(503);
     expect(objects.published.size).toBe(before);
     expect(objects.quarantine.size).toBe(0);
     expect(objects.staging.size).toBe(0);
   });
 
-  test('IMG-04 [ASVS v5.0.0-2.2.3] 돌아온 폭·높이를 다시 본다: 짧은 변 319는 422, 320은 받고, 긴 변 20,001·화소 4,000만 초과는 422다', async () => {
+  test('IMG-04 [ASVS v5.0.0-2.2.3] 돌아온 폭·높이를 다시 본다: 짧은 변 319는 422, 320은 받고, 긴 변 20,000·화소 4,000만은 받으며 20,001·4,000만+1은 422다', async () => {
     const me = randomUUID();
     const short = await upload(me, marked(JPEG, 'SHORT319'));
     expect(short.statusCode).toBe(422);
     expect(JSON.parse(short.payload).extensions.reason).toBe('TOO_SMALL');
+    expect((await upload(me, marked(JPEG, 'SHORT320'))).statusCode).toBe(201);
+    expect((await upload(me, marked(JPEG, 'LONG20000'))).statusCode).toBe(201);
     expect((await upload(me, marked(JPEG, 'LONG20001'))).statusCode).toBe(422);
+    expect((await upload(me, marked(JPEG, 'PIXELS40000000'))).statusCode).toBe(201);
     expect((await upload(me, marked(JPEG, 'PIXELS40000001'))).statusCode).toBe(422);
-    expect((await upload(me, JPEG)).statusCode).toBe(201);
+
+    // 한 장 10MB 경계. 10MB는 받고 10MB+1은 422 TOO_LARGE다(본문 상한은 10MB+64KB 봉투라 게이트웨이 413이 아니다)
+    const tenMb = new Uint8Array(10 * 1024 * 1024);
+    tenMb.set(JPEG);
+    expect((await upload(me, tenMb)).statusCode).toBe(201);
+    const over = new Uint8Array(10 * 1024 * 1024 + 1);
+    over.set(JPEG);
+    const tooLarge = await upload(me, over);
+    expect(tooLarge.statusCode).toBe(422);
+    expect(JSON.parse(tooLarge.payload).extensions.reason).toBe('TOO_LARGE');
   });
 
-  test('IMG-11 [ASVS v5.0.0-2.4.1][ASVS v5.0.0-2.3.2] 한 계정은 한 시간에 30장까지이고 31번째는 429, 한 시간이 지나면 다시 받는다', async () => {
+  test('IMG-11 [ASVS v5.0.0-2.4.1][ASVS v5.0.0-2.3.2] 한 계정은 한 시간에 30장까지이고 31번째는 429, 다른 계정은 따로 센다. 한 시간이 지나면 다시 받는다', async () => {
     const me = randomUUID();
     for (let i = 0; i < 30; i++) expect((await upload(me, JPEG)).statusCode).toBe(201);
     const limited = await upload(me, JPEG);
     expect(limited.statusCode).toBe(429);
     expect(limited.headers['retry-after']).toBeDefined();
+    expect((await upload(randomUUID(), JPEG)).statusCode).toBe(201);
     clock.advance(60 * 60 * 1000 + 1);
     expect((await upload(me, JPEG)).statusCode).toBe(201);
   });
@@ -211,7 +254,7 @@ describe('후기 쓰기·고치기의 사진', () => {
     expect(created.statusCode).toBe(201);
     const body = JSON.parse(created.payload);
     expect(body.images.map((i: { imageId: string }) => i.imageId)).toEqual([a.imageId, b.imageId, c.imageId]);
-    expect(body.images[0]).toMatchObject({ alt: '무대', width: 800, height: 600, thumbnailUrl: a.thumbnailUrl });
+    expect(body.images[0]).toMatchObject({ alt: '무대', width: 800, height: 600, thumbnailUrl: a.thumbnailUrl, url: `${IMAGE_ORIGIN_TEST}/review/${a.imageId}/1280.webp` });
     expect(body.images[1].alt ?? '').toBe('');
     expect(body.images[2].alt ?? '').toBe('');
 
@@ -237,6 +280,13 @@ describe('후기 쓰기·고치기의 사진', () => {
     const fresh = await uploadOk(me);
     const tooLong = await postReview(e2, me, { rating: 4, body: '사진 설명이 너무 긴 후기입니다.', images: [{ imageId: fresh.imageId, alt: '가'.repeat(101) }] });
     expect(tooLong.statusCode).toBe(422);
+
+    const { eventId: e3 } = seed();
+    eligibility.set(me, e3, { eligible: true, basisOrderId: randomUUID() });
+    const max = await uploadOk(me);
+    const exactly = await postReview(e3, me, { rating: 4, body: '사진 설명이 정확히 100자인 후기입니다.', images: [{ imageId: max.imageId, alt: '가'.repeat(100) }] });
+    expect(exactly.statusCode).toBe(201);
+    expect([...JSON.parse(exactly.payload).images[0].alt].length).toBe(100);
   });
 
   test('IMG-07 [ASVS v5.0.0-2.2.3] 남의 사진·없는 사진·이미 붙은 사진·4장은 거절하고, 빠진 사진은 지운다', async () => {
@@ -296,6 +346,26 @@ describe('후기 쓰기·고치기의 사진', () => {
     const ok = await postReview(eventId, me, { rating: 5, body: '사진 없이 다시 쓴 후기 본문입니다.' });
     expect(ok.statusCode).toBe(201);
     expect(JSON.parse(ok.payload).images).toEqual([]);
+
+    // 고치기에서 새 사진이 틀리면 본문·기존 사진이 그대로다
+    const kept = JSON.parse(ok.payload);
+    const replaced = await patchReview(kept.reviewId, me, { rating: 5, body: '고치다 만 본문입니다.', images: [{ imageId: foreign.imageId }] });
+    expect(replaced.statusCode).toBe(422);
+    const after = JSON.parse((await getReview(kept.reviewId, me)).payload);
+    expect(after.body).toBe('사진 없이 다시 쓴 후기 본문입니다.');
+    expect(after.images).toEqual([]);
+
+    // 같은 사진을 두 후기에 동시에 붙이면 하나만 성공한다
+    const shared = await uploadOk(me);
+    const e3 = seed();
+    const e4 = seed();
+    eligibility.set(me, e3.eventId, { eligible: true, basisOrderId: randomUUID() });
+    eligibility.set(me, e4.eventId, { eligible: true, basisOrderId: randomUUID() });
+    const [r3, r4] = await Promise.all([
+      postReview(e3.eventId, me, { rating: 5, body: '같은 사진을 붙이는 첫 후기입니다.', images: [{ imageId: shared.imageId }] }),
+      postReview(e4.eventId, me, { rating: 5, body: '같은 사진을 붙이는 둘째 후기입니다.', images: [{ imageId: shared.imageId }] }),
+    ]);
+    expect([r3.statusCode, r4.statusCode].sort()).toEqual([201, 422]);
   });
 });
 
@@ -327,18 +397,37 @@ describe('후기 사진 보이기·지우기', () => {
     expect((await svc.http.inject({ method: 'DELETE', url: `/v1/reviews/${reviewId}`, headers: fan(me) })).statusCode).toBe(204);
     expect(publishedKeys(a.imageId)).toEqual([]);
     expect(publishedKeys(b.imageId)).toEqual([]);
+    const rows = await imageRowsOf(reviewId);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.status === 'DELETED')).toBe(true);
+    expect(JSON.parse((await getList(eventId, me)).payload).items).toHaveLength(0);
+    expect(JSON.parse((await getSummary(eventId)).payload).count).toBe(0);
   });
 
-  test('IMG-10 [ASVS v5.0.0-2.3.3] 붙이지 않은 사진은 24시간이 지나면 정리 작업이 공개 파생본과 행을 지운다', async () => {
+  test('IMG-10 [ASVS v5.0.0-2.3.3] 붙이지 않은 사진은 24시간이 지나면 정리하고, 붙인 사진은 남긴다. 같은 정리를 다시 돌려도 결과가 같다', async () => {
+    const { eventId } = seed();
     const me = randomUUID();
-    const { imageId } = await uploadOk(me);
-    expect(publishedKeys(imageId)).toHaveLength(2);
+    eligibility.set(me, eventId, { eligible: true, basisOrderId: randomUUID() });
+    const attached = await uploadOk(me);
+    const review = await postReview(eventId, me, { rating: 5, body: '정리 뒤에도 사진이 남을 후기입니다.', images: [{ imageId: attached.imageId }] });
+    expect(review.statusCode).toBe(201);
+    const reviewId = JSON.parse(review.payload).reviewId;
+    const unattached = await uploadOk(me);
+    expect(publishedKeys(attached.imageId)).toHaveLength(2);
+    expect(publishedKeys(unattached.imageId)).toHaveLength(2);
+
     clock.advance(24 * 60 * 60 * 1000 + 1);
     const tasks = reviewMaintenanceTasks(store, clock, { images: { objects } } as never);
     const cleanup = tasks.find((t) => t.name === 'review-image-cleanup');
     expect(cleanup).toBeDefined();
     await cleanup!.run();
-    expect(publishedKeys(imageId)).toEqual([]);
+    expect(publishedKeys(unattached.imageId)).toEqual([]);
+    expect(publishedKeys(attached.imageId)).toHaveLength(2);
+    expect((await imageRowsOf(reviewId)).every((r) => r.status === 'READY')).toBe(true);
+
+    await cleanup!.run();
+    expect(publishedKeys(unattached.imageId)).toEqual([]);
+    expect(publishedKeys(attached.imageId)).toHaveLength(2);
   });
 });
 
@@ -357,12 +446,24 @@ describe('운영자 후기 상세', () => {
     expect(r.statusCode).toBe(200);
     const body = JSON.parse(r.payload);
     expect(body.review.images).toHaveLength(2);
-    expect(body.review.images[0]).toMatchObject({ imageId: a.imageId, alt: '무대', thumbnailUrl: a.thumbnailUrl });
+    expect(body.review.images[0]).toMatchObject({ imageId: a.imageId, alt: '무대', thumbnailUrl: a.thumbnailUrl, url: `${IMAGE_ORIGIN_TEST}/review/${a.imageId}/1280.webp`, width: 800, height: 600 });
+    expect(body.review).toMatchObject({ body: '운영자 상세에 사진이 보일 후기입니다.', rating: 5, status: 'VISIBLE' });
+    expect(body.review.notice).toBeUndefined();
+    expect(body.review.takedownReason).toBeUndefined();
     expect(body.summary.total).toBe(1);
     expect(body.summary.byCategory.SPAM).toBe(1);
+    expect(body.summary.reports[0]).toMatchObject({ category: 'SPAM', detail: '광고입니다' });
     expect(r.payload).not.toContain(me);
     expect(r.payload).not.toContain(reporter);
     expect(r.payload).not.toContain('basisOrderId');
     expect(r.payload).not.toContain('accountId');
+
+    // 사진이 없는 후기는 빈 배열이다
+    const plain = seed();
+    eligibility.set(me, plain.eventId, { eligible: true, basisOrderId: randomUUID() });
+    const noPhoto = JSON.parse((await postReview(plain.eventId, me, { rating: 3, body: '사진이 없는 후기 본문입니다.' })).payload);
+    const plainDetail = JSON.parse((await svc.http.inject({ method: 'GET', url: `/v1/ops/reviews/${noPhoto.reviewId}`, headers: identity.ops('cs_agent') })).payload);
+    expect(plainDetail.review.images).toEqual([]);
+    expect(plainDetail.summary.total).toBe(0);
   });
 });

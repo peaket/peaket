@@ -84,37 +84,67 @@ async function createAndReport(): Promise<{ eventId: string; reviewId: string; a
 }
 
 describe('운영자 후기 조치의 409', () => {
-  test('OPS-02 [ASVS v5.0.0-2.3.3] 신고가 없는 후기, 가리지 않은 후기의 해제, 통보·같은 내용으로 가린 후기는 409다', async () => {
-    const { eventId } = seed();
-    const author = randomUUID();
-    const other = randomUUID();
-    eligibility.set(author, eventId, { eligible: true, basisOrderId: randomUUID() });
-    eligibility.set(other, eventId, { eligible: true, basisOrderId: randomUUID() });
-    const body = '통보와 같은 내용으로 가리는지 보는 후기 본문입니다.';
-    const created = JSON.parse((await postReview(eventId, author, body)).payload);
+  test('OPS-02 [ASVS v5.0.0-2.3.3] 가림 사유·신고 수에 따른 409 차례: 신고 없는 TEMP_BLOCK은 200, NO_ACTION·BLOCK은 409, SAME_CONTENT만 남은 가림의 RELEASE는 409다', async () => {
+    const cs = identity.ops('cs_agent');
+    const moderate = (reviewId: string, body: Record<string, unknown>) => svc.http.inject({ method: 'POST', url: `/v1/ops/reviews/${reviewId}/moderation`, headers: { ...cs, 'content-type': 'application/json' }, payload: JSON.stringify(body) });
 
-    const noReport = await moderate(created.reviewId, { action: 'NO_ACTION', reason: '신고가 아직 없음' });
-    expect(noReport.statusCode).toBe(409);
-    expect(JSON.parse(noReport.payload).type).toBe('https://peaket.example/problems/review-no-reports');
+    // ① 신고가 없어도 임시조치는 받는다(정보통신망법 §44의3, POL-044 ③). 조치 없음·노출 차단은 신고가 있어야 한다.
+    const a = seed();
+    const authorA = randomUUID();
+    eligibility.set(authorA, a.eventId, { eligible: true, basisOrderId: randomUUID() });
+    const ra = JSON.parse((await postReview(a.eventId, authorA, '신고 없이 임시조치할 후기 본문입니다.')).payload);
+    const noAction = await moderate(ra.reviewId, { action: 'NO_ACTION', reason: '신고가 아직 없음' });
+    expect(noAction.statusCode).toBe(409);
+    expect(JSON.parse(noAction.payload).type).toBe('https://peaket.example/problems/review-no-reports');
+    const noBlock = await moderate(ra.reviewId, { action: 'BLOCK', reason: '신고 없이 차단', violation: 'ABUSE' });
+    expect(noBlock.statusCode).toBe(409);
+    expect(JSON.parse(noBlock.payload).type).toBe('https://peaket.example/problems/review-no-reports');
+    const tempNoReport = await moderate(ra.reviewId, { action: 'TEMP_BLOCK', reason: '권리 침해 임의 임시조치', violation: 'RIGHTS', endsAt: new Date(clock.now() + 7 * DAY).toISOString() });
+    expect(tempNoReport.statusCode).toBe(200);
 
-    expect((await report(created.reviewId, other, 'SPAM')).statusCode).toBe(201);
-    const releaseVisible = await moderate(created.reviewId, { action: 'RELEASE', reason: '가리지 않은 후기' });
+    // ② 보이는 후기의 해제는 409다
+    const b = seed();
+    const authorB = randomUUID();
+    const reporterB = randomUUID();
+    eligibility.set(authorB, b.eventId, { eligible: true, basisOrderId: randomUUID() });
+    const rb = JSON.parse((await postReview(b.eventId, authorB, '가리지 않은 후기를 해제하려는 본문입니다.')).payload);
+    expect((await report(rb.reviewId, reporterB, 'SPAM')).statusCode).toBe(201);
+    const releaseVisible = await moderate(rb.reviewId, { action: 'RELEASE', reason: '가리지 않은 후기' });
     expect(releaseVisible.statusCode).toBe(409);
     expect(JSON.parse(releaseVisible.payload).type).toBe('https://peaket.example/problems/review-not-hidden');
 
-    const noticeId = randomUUID();
-    expect((await reviews.applyNoticeTakedown({ reviewIds: [created.reviewId], noticeId, receivedAtMs: clock.now(), kind: 'GENERAL', reason: '법정 통보' })).applied).toBe(1);
-    const noticeHidden = await moderate(created.reviewId, { action: 'BLOCK', reason: '통보로 가린 후기', violation: 'ABUSE' });
-    expect(noticeHidden.statusCode).toBe(409);
-    expect(JSON.parse(noticeHidden.payload).type).toBe('https://peaket.example/problems/review-not-moderation-target');
+    // ③ 법정 통보로 가린 후기의 해제는 기존 회귀대로 200이다(법정 통보 복원 경로가 생기기 전까지)
+    const c = seed();
+    const authorC = randomUUID();
+    eligibility.set(authorC, c.eventId, { eligible: true, basisOrderId: randomUUID() });
+    const rc = JSON.parse((await postReview(c.eventId, authorC, '통보로 가린 뒤 해제할 후기 본문입니다.')).payload);
+    expect((await reviews.applyNoticeTakedown({ reviewIds: [rc.reviewId], noticeId: randomUUID(), receivedAtMs: clock.now(), kind: 'GENERAL', reason: '법정 통보' })).applied).toBe(1);
+    expect((await moderate(rc.reviewId, { action: 'RELEASE', reason: '통보 철회' })).statusCode).toBe(200);
 
-    // 통보로 등록한 지문과 같은 내용(공백·문장부호 차이)은 새 후기도 바로 HIDDEN이다(C-T22). 그 후기도 이 경로로 바꾸지 못한다.
-    const same = await postReview(eventId, other, '통보와 같은 내용으로 가리는지 보는 후기 본문입니다');
-    expect(same.statusCode).toBe(201);
-    expect(JSON.parse(same.payload).status).toBe('HIDDEN');
-    const sameHidden = await moderate(JSON.parse(same.payload).reviewId, { action: 'NO_ACTION', reason: '같은 내용으로 가림' });
-    expect(sameHidden.statusCode).toBe(409);
-    expect(JSON.parse(sameHidden.payload).type).toBe('https://peaket.example/problems/review-not-moderation-target');
+    // ④ 통보가 풀린 뒤 SAME_CONTENT만 남은 가림의 해제는 법정 통보 경로로 넘긴다
+    const d = seed();
+    const authorD = randomUUID();
+    const authorE = randomUUID();
+    eligibility.set(authorD, d.eventId, { eligible: true, basisOrderId: randomUUID() });
+    eligibility.set(authorE, d.eventId, { eligible: true, basisOrderId: randomUUID() });
+    const body = '같은 내용으로 남은 가림을 보는 후기 본문입니다.';
+    const rd = JSON.parse((await postReview(d.eventId, authorD, body)).payload);
+    expect((await reviews.applyNoticeTakedown({ reviewIds: [rd.reviewId], noticeId: randomUUID(), receivedAtMs: clock.now(), kind: 'GENERAL', reason: '법정 통보' })).applied).toBe(1);
+    const re = JSON.parse((await postReview(d.eventId, authorE, body)).payload);
+    expect(re.status).toBe('HIDDEN');
+    expect((await moderate(rd.reviewId, { action: 'RELEASE', reason: '통보 철회' })).statusCode).toBe(200);
+    const sameOnly = await moderate(re.reviewId, { action: 'RELEASE', reason: '같은 내용만 남은 가림' });
+    expect(sameOnly.statusCode).toBe(409);
+    expect(JSON.parse(sameOnly.payload).type).toBe('https://peaket.example/problems/review-not-moderation-target');
+
+    // ⑤ 불법 촬영물 확인 중 가림의 해제는 openapi 설명대로 200이다
+    const f = seed();
+    const authorF = randomUUID();
+    const reporterF = randomUUID();
+    eligibility.set(authorF, f.eventId, { eligible: true, basisOrderId: randomUUID() });
+    const rf = JSON.parse((await postReview(f.eventId, authorF, '불법 촬영물로 신고되어 가려질 후기입니다.')).payload);
+    expect((await report(rf.reviewId, reporterF, 'ILLEGAL_FILMING')).statusCode).toBe(201);
+    expect((await moderate(rf.reviewId, { action: 'RELEASE', reason: '확인 뒤 되돌림' })).statusCode).toBe(200);
   });
 });
 
@@ -138,6 +168,7 @@ describe('운영자 후기 조치의 효과와 경계', () => {
     expect(effect.notice).toBe('RIGHTS_TEMP');
     expect(effect.noticeUntilMs).toBe(Date.parse(endsAt));
     expect(effect.takedown?.reason).toBe('RIGHTS_TEMP');
+    expect(effect.takedown?.endsAtMs).toBe(Date.parse(endsAt));
     expect(effect.outcome).toBe('TEMP_BLOCKED');
 
     const detail = JSON.parse((await opsDetail(reviewId)).payload);
@@ -154,12 +185,15 @@ describe('운영자 후기 조치의 효과와 경계', () => {
     const released = await moderate(reviewId, { action: 'RELEASE', reason: '조치 해제' });
     expect(released.statusCode).toBe(200);
     expect((await store.findReview(reviewId))?.status).toBe('VISIBLE');
+    expect((await store.findReview(reviewId))?.notice).toBeUndefined();
+    expect((await store.findReview(reviewId))?.noticeUntilMs).toBeUndefined();
     expect((await store.takedownsByReview(reviewId)).every((t) => t.restoredAtMs !== undefined)).toBe(true);
 
     const blocked = await moderate(reviewId, { action: 'BLOCK', reason: '운영정책 위반', violation: 'SPAM' });
     expect(blocked.statusCode).toBe(200);
     expect((await store.findReview(reviewId))?.status).toBe('HIDDEN');
     expect((await store.findReview(reviewId))?.notice).toBe('POLICY');
+    expect((await store.findReview(reviewId))?.noticeUntilMs).toBeUndefined();
     expect((await store.reportsByTarget(reviewId)).some((r) => r.targetId === reviewId && r.outcome === 'BLOCKED' && r.status === 'RESOLVED')).toBe(true);
     expect(reporter).toMatch(/^[0-9a-f-]{36}$/);
   });
@@ -178,6 +212,11 @@ describe('운영자 후기 조치의 효과와 경계', () => {
 
     // 같은 조치를 다시 보내면 새 조치 기록 없이 지금 상태를 돌려준다
     expect((await moderate(reviewId, { action: 'NO_ACTION', reason: '운영정책 위반 없음' })).statusCode).toBe(200);
+    expect(store.moderated).toHaveLength(before + 1);
+
+    // 사유는 1자와 2,000자를 받고 2,001자는 받지 않는다
+    expect((await moderate(reviewId, { action: 'NO_ACTION', reason: '가' })).statusCode).toBe(200);
+    expect((await moderate(reviewId, { action: 'NO_ACTION', reason: '가'.repeat(2000) })).statusCode).toBe(200);
     expect(store.moderated).toHaveLength(before + 1);
 
     const tooLong = await moderate(reviewId, { action: 'NO_ACTION', reason: '가'.repeat(2001) });
