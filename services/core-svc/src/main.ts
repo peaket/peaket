@@ -17,10 +17,14 @@ import {
   assertDatabaseRole,
   DrizzleCommissionRate,
   DrizzleSearchReadModel,
+  DrizzleImageJobStore,
   GrpcAdminAuthz,
   GrpcImageProcessing,
   GrpcMemberCodeDirectory,
   GrpcSeatmapParser,
+  ImageJobProcessing,
+  ImageJobWorker,
+  S3ImageObjectStore,
   HttpOpsApprovals,
   assemblePayoutRegistration,
   LocalFolderImageStore,
@@ -99,11 +103,12 @@ const imageGrpc = need('PEAKET_IMAGE_GRPC_URL', 'image-worker ImageService host:
 const seatmapGrpc = need('PEAKET_SEATMAP_GRPC_URL', 'seatmap-worker SeatmapImportService host:port');
 const imageOrigin = need('PEAKET_IMAGE_BASE_URL', '이미지 출처, 운영 https://img.peaket.example');
 if (!/^https?:\/\/[^/?#]+$/.test(imageOrigin)) throw new Error(`PEAKET_IMAGE_BASE_URL은 경로 없는 출처여야 한다: ${imageOrigin}`);
-const imageStoreDir = need('PEAKET_IMAGE_STORE_DIR', '개발용 이미지 폴더. S3 어댑터는 HOT-200');
+const imageBucket = process.env.PEAKET_IMAGE_BUCKET;
+const imageStoreDir = imageBucket ? process.env.PEAKET_IMAGE_STORE_DIR : need('PEAKET_IMAGE_STORE_DIR', '개발용 이미지 폴더. S3를 쓰면 PEAKET_IMAGE_BUCKET');
 // 팬 좌석맵 파일(v1/events/{회차}/seatmap-layouts/{판}.json)을 두는 폴더(ADR-0260 결정 6). 공개 위치는 public/, 재승인 대기 판의 준비 위치는 staging/ 아래이고
 // 개발 서버는 public/만 정적 파일로 내준다. S3 어댑터는 HOT-200
 const publicFileDir = need('PEAKET_PUBLIC_FILE_DIR', '개발용 팬 좌석맵 파일 폴더. S3 어댑터는 HOT-200');
-const imageProcessing = new GrpcImageProcessing(imageGrpc, lbProfile);
+const imageWorkerProc = new GrpcImageProcessing(imageGrpc, lbProfile);
 const seatmapParser = new GrpcSeatmapParser(seatmapGrpc, lbProfile);
 // 좌석맵 템플릿 10종은 배포 때 넣는 정적 JSON 파일이다(ADR-0066). 폴더가 없거나 파일이 틀리면 시작하지 않는다
 const templateDir = process.env.PEAKET_SEATMAP_TEMPLATE_DIR ?? fileURLToPath(new URL('../seed/seatmap-templates/', import.meta.url));
@@ -190,6 +195,19 @@ await assertDatabaseRole(opsDatabase, 'core_ops');
 await assertDatabaseRole(consumerDatabase, 'core_app');
 await assertDatabaseRole(searchDatabase, 'core_search');
 await assertDatabaseRole(notifyDatabase, 'core_notify');
+// 이미지 작업 원장(HOT-200): 요청은 작업을 적고 기다리며, 워커가 image-worker에 맡긴다. 저장소는 S3 또는 개발 폴더다.
+const imageJobStore = new DrizzleImageJobStore(database);
+const imageProcessing = new ImageJobProcessing({ store: imageJobStore, clock: systemClock, waitMs: 50 });
+const imageObjectStore = imageBucket
+  ? new S3ImageObjectStore({
+      bucket: imageBucket,
+      region: process.env.PEAKET_IMAGE_S3_REGION ?? 'ap-northeast-2',
+      ...(process.env.PEAKET_IMAGE_S3_ENDPOINT ? { endpoint: process.env.PEAKET_IMAGE_S3_ENDPOINT } : {}),
+      ...(process.env.PEAKET_IMAGE_S3_KMS_KEY_ID ? { kmsKeyId: process.env.PEAKET_IMAGE_S3_KMS_KEY_ID } : {}),
+    })
+  : new LocalFolderImageStore(imageStoreDir!);
+const imageJobWorker = new ImageJobWorker({ store: imageJobStore, processing: imageWorkerProc, objects: imageObjectStore, clock: systemClock, log: (line) => console.log(JSON.stringify({ level: 'info', ...line })) });
+imageJobWorker.start(500);
 /** 요청 하나(머리·본문)를 다 받는 시한 [가정]: 천천히 보내는 연결이 올리기 버퍼와 칸막이 자리를 오래 쥐지 않게(ADR-0257 결정 2) */
 const REQUEST_TIMEOUT_MS = 100_000;
 const service = await createService({
@@ -205,7 +223,7 @@ const service = await createService({
     partnerDatabase,
     opsDatabase,
     searchDatabase,
-    media: { imageOrigin, processing: imageProcessing, store: new LocalFolderImageStore(imageStoreDir), seatmap: seatmapParser, publicFiles: new LocalFolderPublicFileStore(publicFileDir), memberCodes, eligibilityCopy, pseudonym, eligibilityMetrics, templates },
+    media: { imageOrigin, processing: imageProcessing, store: imageObjectStore, seatmap: seatmapParser, publicFiles: new LocalFolderPublicFileStore(publicFileDir), memberCodes, eligibilityCopy, pseudonym, eligibilityMetrics, templates },
     review: { eligibility: reviewEligibility, fanProfile: new UnavailableFanProfile() },
     shop: {
       stock: merchStock,
@@ -320,7 +338,8 @@ function shutdown(): Promise<void> {
       .finally(() => {
         adminAuthz.close();
         memberCodes.close();
-        imageProcessing.close();
+        imageJobWorker.stop();
+        imageWorkerProc.close();
         seatmapParser.close();
         if (reviewEligibility instanceof GrpcReviewEligibility) reviewEligibility.close();
         grpcPayments?.close();

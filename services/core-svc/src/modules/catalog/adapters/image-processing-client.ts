@@ -5,8 +5,7 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { imageV1Image } from '@peaket/contracts/proto';
 import { createGrpcClient, type GrpcLbProfile } from '@peaket/platform';
-import { type ImageProcessing, ImageProcessingUnavailable, type ProcessOutcome } from '../domain/media-ports.js';
-import type { ImageKind } from '../domain/production-image.js';
+import { type ImageProcessing, ImageProcessingUnavailable, type ProcessableImageKind, type ProcessOutcome } from '../domain/media-ports.js';
 import { hostPort } from './seatmap-worker-client.js';
 
 export const IMAGE_DEADLINE_MS = 30_000;
@@ -34,10 +33,11 @@ export class GrpcImageProcessing implements ImageProcessing {
     };
   }
 
-  process(q: { sourceKey: string; kind: ImageKind; timeoutMs: number }): Promise<ProcessOutcome> {
+  process(q: { sourceKey: string; kind: ProcessableImageKind; timeoutMs: number }): Promise<ProcessOutcome> {
+    const kind = q.kind === 'HOME_BANNER' ? 'IMAGE_KIND_HOME_BANNER' : q.kind === 'REVIEW_PHOTO' ? 'IMAGE_KIND_REVIEW_PHOTO' : 'IMAGE_KIND_PRODUCTION';
     return new Promise((resolve, reject) => {
       // 공연 포스터·상세 이미지는 같은 종류(IMAGE_KIND_PRODUCTION)이고, 종류별 크기 기준은 core-svc가 다시 본다
-      this.#client.ProcessImage({ source_key: q.sourceKey, kind: 'IMAGE_KIND_PRODUCTION' }, new grpc.Metadata(), { deadline: Date.now() + Math.min(IMAGE_DEADLINE_MS, q.timeoutMs) }, (e, v) => {
+      this.#client.ProcessImage({ source_key: q.sourceKey, kind }, new grpc.Metadata(), { deadline: Date.now() + Math.min(IMAGE_DEADLINE_MS, q.timeoutMs) }, (e, v) => {
         if (e) {
           reject(new ImageProcessingUnavailable(grpc.status[e.code] ?? String(e.code)));
           return;

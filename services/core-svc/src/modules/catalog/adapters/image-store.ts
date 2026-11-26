@@ -5,10 +5,11 @@ import { dirname, join, resolve, sep } from 'node:path';
 import type { ImageObjectStore } from '../domain/media-ports.js';
 
 const ID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-const NAME = '(?:320|640|960|1280)\\.(?:avif|webp)';
-const QUARANTINE = new RegExp(`^quarantine/production/${ID}$`);
-const STAGING = new RegExp(`^staging/production/${ID}/${NAME}$`);
-const PUBLIC = new RegExp(`^production/${ID}/${NAME}$`);
+const KIND = '(?:production|banner|review)';
+const NAME = '(?:(?:320|640|960|1280)\\.(?:avif|webp)|(?:240|1280)\\.webp)';
+const QUARANTINE = new RegExp(`^quarantine/${KIND}/${ID}$`);
+const STAGING = new RegExp(`^staging/${KIND}/${ID}/${NAME}$`);
+const PUBLIC = new RegExp(`^${KIND}/${ID}/${NAME}$`);
 
 function checked(re: RegExp, key: string): string {
   if (!re.test(key)) throw new Error('정한 꼴이 아닌 객체 키');

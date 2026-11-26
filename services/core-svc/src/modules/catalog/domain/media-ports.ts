@@ -6,16 +6,30 @@ import type { CheckedLayout, SeatmapFormat, SeatmapIssue, TooMany } from './seat
 export type ProcessOutcome =
   | { status: 'ACCEPTED'; width: number; height: number; derivativeKeys: string[] }
   | { status: 'REJECTED'; reason: 'UNSUPPORTED_TYPE' | 'TOO_LARGE' | 'TOO_SMALL' | 'MALWARE' | 'UNKNOWN' }
-  | { status: 'SCAN_PENDING' }
+  | { status: 'SCAN_PENDING'; keepSource?: boolean }
   | { status: 'UNKNOWN' };
 
-/** 처리 작업이 답하지 않았다(데드라인 초과·연결 실패·그 밖의 gRPC 오류). fail-closed로 503이다 */
-export class ImageProcessingUnavailable extends Error {}
+/**
+ * 처리 작업이 답하지 않았다(데드라인 초과·연결 실패·그 밖의 gRPC 오류). fail-closed로 503이다.
+ * 작업 원장 어댑터는 작업이 남아 다시 맡길 수 있으므로 keepSource=true로 원본을 남긴다.
+ */
+export class ImageProcessingUnavailable extends Error {
+  constructor(
+    readonly detail: string = '',
+    readonly keepSource = false,
+  ) {
+    super(detail);
+  }
+}
 
 /** 디코딩·다시 인코딩 포트(HOT-190은 ImageService.ProcessImage를 요청 안에서 바로 부르는 어댑터, HOT-200이 작업 원장 어댑터로 바꾼다) */
+export type ProcessableImageKind = ImageKind | 'HOME_BANNER' | 'REVIEW_PHOTO';
+
 export interface ImageProcessing {
   /** timeoutMs는 이 호출의 데드라인(요청의 남은 시간에서 계산한다, ADR-0257 결정 2) */
-  process(q: { sourceKey: string; kind: ImageKind; timeoutMs: number }): Promise<ProcessOutcome>;
+  process(q: { sourceKey: string; kind: ProcessableImageKind; timeoutMs: number }): Promise<ProcessOutcome>;
+  /** 작업 원장 어댑터만 있다. 커밋 뒤 옛 파생본 정리를 작업으로 맡긴다. */
+  enqueueCleanup?(q: { sourceKey: string; kind: 'PRODUCTION' | 'HOME_BANNER' | 'REVIEW_PHOTO'; derivativeKeys: string[] }): Promise<void>;
 }
 
 /** 원본과 파생본을 두는 곳(격리 원본 쓰기·지우기, 준비 위치 읽기·지우기, 공개 위치 쓰기·지우기). 키는 서버가 만든 이미지 ID로만 만든다 */

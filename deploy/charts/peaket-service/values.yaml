@@ -136,6 +136,9 @@ outboxRelay:
 
 # Kubernetes Secret을 External Secrets로 채운다(docs/devops.md §5.2 '비밀 값은 저장소에 없다'). 켜면 ExternalSecret 하나를 낸다.
 # data 칸은 remoteRef(Secrets Manager 경로)만 받고 값은 두지 않는다. 시크릿 저장소 이름·대상 Secret 이름은 값 파일이 준다
+# 서비스 어카운트 주석(IRSA 역할 등). image-worker처럼 AWS S3만 쓰는 작업이 IRSA를 쓸 때 넣는다.
+serviceAccountAnnotations: {}
+
 externalSecret:
   enabled: false
   # remoteRef 경로 앞에 붙는 환경 이름(peaket/<환경>/...). 배포 단위 값은 환경 안쪽 경로만 적고 환경 값이 이 칸을 채운다.

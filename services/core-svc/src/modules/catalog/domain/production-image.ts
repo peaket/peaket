@@ -107,15 +107,23 @@ export function specViolation(kind: ImageKind, width: number, height: number): S
 }
 
 /** 격리 원본 키. 서버가 만든 이미지 ID로만 만든다(사용자 파일 이름은 쓰지 않는다) */
+export type DerivativeKind = 'POSTER' | 'DETAIL' | 'HOME_BANNER' | 'REVIEW_PHOTO';
+
 export const quarantineKey = (imageId: string) => `quarantine/production/${imageId}`;
-/** 파생본 이름 여덟 개('{폭}.{형식}') */
-export const derivativeNames = (): string[] => DERIVATIVE_WIDTHS.flatMap((w) => DERIVATIVE_FORMATS.map((f) => `${w}.${f}`));
+/**
+ * 파생본 이름. 공연·배너는 원본 폭 이하의 320·640·960·1,280px만(원본보다 넓은 칸은 만들지 않는다),
+ * 후기 사진은 240px과 원본 긴 변이 1,280px 이상일 때만 1,280px(WebP)이다(HOT-200, docs/data.md §1).
+ */
+export const derivativeNames = (width: number, kind: DerivativeKind = 'POSTER'): string[] => {
+  if (kind === 'REVIEW_PHOTO') return width >= 1280 ? ['240.webp', '1280.webp'] : ['240.webp'];
+  return DERIVATIVE_WIDTHS.filter((w) => w <= width).flatMap((w) => DERIVATIVE_FORMATS.map((f) => `${w}.${f}`));
+};
 export const stagingKey = (imageId: string, name: string) => `staging/production/${imageId}/${name}`;
 export const publicKey = (imageId: string, name: string) => `production/${imageId}/${name}`;
 
 /** 돌아온 파생본 키가 정확히 그 이미지의 준비 위치 여덟 개인가(모자람·남음·겹침·접두사 밖은 아니다) */
-export function derivativeKeysMatch(imageId: string, keys: readonly string[]): boolean {
-  const want = derivativeNames().map((n) => stagingKey(imageId, n));
+export function derivativeKeysMatch(imageId: string, keys: readonly string[], width: number, kind: DerivativeKind = 'POSTER'): boolean {
+  const want = derivativeNames(width, kind).map((n) => stagingKey(imageId, n));
   return keys.length === want.length && new Set(keys).size === keys.length && want.every((k) => keys.includes(k));
 }
 
@@ -123,9 +131,9 @@ export function derivativeKeysMatch(imageId: string, keys: readonly string[]): b
 export const imageBaseUrl = (origin: string, imageId: string) => `${origin.replace(/\/+$/, '')}/production/${imageId}`;
 
 /** 계약 ProductionImage.derivatives: '{폭}.{형식}' → 주소 */
-export function derivativeUrls(origin: string, imageId: string): Record<string, string> {
+export function derivativeUrls(origin: string, imageId: string, width?: number): Record<string, string> {
   const base = imageBaseUrl(origin, imageId);
-  return Object.fromEntries(derivativeNames().map((n) => [n, `${base}/${n}`]));
+  return Object.fromEntries(derivativeNames(width ?? DERIVATIVE_WIDTHS.at(-1)!).map((n) => [n, `${base}/${n}`]));
 }
 
 /**

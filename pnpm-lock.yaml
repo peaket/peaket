@@ -1196,6 +1196,9 @@ importers:
 
   services/core-svc:
     dependencies:
+      '@aws-sdk/client-s3':
+        specifier: 3.1159.0
+        version: 3.1159.0
       '@grpc/grpc-js':
         specifier: 1.14.6
         version: 1.14.6
@@ -1232,6 +1235,9 @@ importers:
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
+      sharp:
+        specifier: 0.35.5
+        version: 0.35.5(@types/node@24.19.2)
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -8457,8 +8463,7 @@ snapshots:
 
   '@humanwhocodes/retry@0.4.3': {}
 
-  '@img/colour@1.1.0':
-    optional: true
+  '@img/colour@1.1.0': {}
 
   '@img/sharp-darwin-arm64@0.35.5':
     optionalDependencies:
@@ -12824,7 +12829,6 @@ snapshots:
       '@img/sharp-win32-ia32': 0.35.5
       '@img/sharp-win32-x64': 0.35.5
       '@types/node': 24.19.2
-    optional: true
 
   sharp@0.35.5(@types/node@26.6.5):
     dependencies:

@@ -8,6 +8,7 @@ kind: ServiceAccount
 metadata:
   name: {{ $name }}
   labels: {{- include "peaket.labels" . | nindent 4 }}
+  {{- include "peaket.serviceAccountAnnotations" . | nindent 2 }}
 automountServiceAccountToken: false
 ---
 {{- /* Rollout을 켜면 Deployment 대신 Rollout만 낸다(templates/rollout.yaml). local·CI는 기본값(Deployment)을 쓴다 */}}

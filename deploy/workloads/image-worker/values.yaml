@@ -1,0 +1,40 @@
+# image-worker 동결 로컬 무대(계획 docs/review/plans/F-10-2.md E6·D-T35).
+# core-svc와 같은 이미지의 다른 진입점이며 DB·Kafka·Redis Secret을 받지 않는다. AWS는 IRSA로 S3만 쓴다.
+name: image-worker
+
+image:
+  repository: peaket/core-svc
+  tag: demo
+  pullPolicy: Never
+
+# IRSA: 격리 버킷 읽기·준비 위치 쓰기만 하는 역할. 출시 환경 값에는 넣지 않는다(ADR-0386).
+serviceAccountAnnotations:
+  eks.amazonaws.com/role-arn: arn:aws:iam::<ACCOUNT_ID>:role/peaket-image-worker
+
+managementPort: 9464
+probes:
+  enabled: false
+
+service:
+  enabled: true
+  replicas: 1
+  port: 50051
+  command: ["node", "dist/image-worker/main.js"]
+  env:
+    PEAKET_GRPC_PORT: "50051"
+    PEAKET_IMAGE_S3_ENDPOINT: "http://moto.data.svc.cluster.local:5000"
+    PEAKET_IMAGE_S3_REGION: "ap-northeast-2"
+    PEAKET_IMAGE_BUCKET: "peaket-image"
+    PEAKET_IMAGE_CONCURRENCY: "1"
+    PEAKET_IMAGE_TIMEOUT_MS: "30000"
+    PEAKET_IMAGE_MAX_PIXELS: "40000000"
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { cpu: "1", memory: 1Gi }
+  networkPolicy:
+    enabled: true
+    egress:
+      publicHttps: false
+      internal:
+        - cidrs: [10.20.0.0/16]
+          ports: [443]

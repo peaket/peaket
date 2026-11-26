@@ -21,6 +21,14 @@ app.kubernetes.io/part-of: peaket
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
+{{/* 서비스 어카운트 주석(IRSA 역할 등). 값이 없으면 아무것도 만들지 않는다. */}}
+{{- define "peaket.serviceAccountAnnotations" -}}
+{{- with .Values.serviceAccountAnnotations }}
+annotations:
+{{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end -}}
+
 {{/* 서비스 파드 템플릿(Deployment와 Rollout이 함께 쓴다). 파드 라벨·어노테이션·계정·종료 유예·컨테이너(프로브·진단·볼륨)를 담는다.
     우선순위 클래스는 값이 있을 때만 넣는다(빈 값이면 칸을 만들지 않는다, docs/devops.md §5.2) */}}
 {{- define "peaket.servicePodTemplate" -}}

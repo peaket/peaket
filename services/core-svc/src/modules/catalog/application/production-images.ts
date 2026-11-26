@@ -102,7 +102,7 @@ export class ProductionImages {
   ) {}
 
   view(r: ProductionImageRow): ProductionImageView {
-    return { imageId: r.id, kind: r.kind, alt: r.alt, order: r.order, width: r.width, height: r.height, version: r.version, url: imageBaseUrl(this.origin, r.id), derivatives: derivativeUrls(this.origin, r.id) };
+    return { imageId: r.id, kind: r.kind, alt: r.alt, order: r.order, width: r.width, height: r.height, version: r.version, url: imageBaseUrl(this.origin, r.id), derivatives: derivativeUrls(this.origin, r.id, r.width) };
   }
 
   /** 그 테넌트의 공연이 아니면 없는 공연과 같은 404이고 실패한 인가 시도로 남긴다(catalog-review 16.3.2). 받는 층이 다른 검사보다 먼저 부른다 */
@@ -148,7 +148,7 @@ export class ProductionImages {
     const imageId = uuidv7(this.clock);
     const at = { productionId: q.productionId, accountId: q.who.accountId, imageKind: q.kind, imageId };
     const source = quarantineKey(imageId);
-    const staged = derivativeNames().map((n) => stagingKey(imageId, n));
+    const staged = derivativeNames(20_000).map((n) => stagingKey(imageId, n));
     const discard = (published: string[] = []) => this.#cleanup(at, { quarantine: [source], staging: staged, public: published });
     let outcome: ProcessOutcome;
     try {
@@ -163,13 +163,14 @@ export class ProductionImages {
       outcome = await this.processing.process({ sourceKey: source, kind: q.kind, timeoutMs: budget });
     } catch (e) {
       if (e instanceof Error && e.name === 'ProblemError') throw e;
-      await discard();
+      // 작업 원장 어댑터의 실패는 작업이 남아 다시 맡기므로 원본을 지우지 않는다.
+      if (!(e instanceof ImageProcessingUnavailable && e.keepSource)) await discard();
       // 격리 원본 쓰기 실패도 처리 작업을 쓸 수 없는 것과 같은 503이다(fail-closed)
       this.#rejected({ ...at, status: 503, reason: e instanceof ImageProcessingUnavailable ? 'unavailable' : 'store' });
       throw imageProcessingUnavailable(RETRY_UNAVAILABLE_S);
     }
     if (outcome.status === 'SCAN_PENDING') {
-      await discard();
+      if (!outcome.keepSource) await discard();
       this.#rejected({ ...at, status: 503, reason: 'scan_pending' });
       throw imageProcessingUnavailable(RETRY_SCAN_PENDING_S);
     }
@@ -191,7 +192,7 @@ export class ProductionImages {
       this.#rejected({ ...at, status: 422, reason: spec });
       throw imageSpecInvalid(spec);
     }
-    if (!derivativeKeysMatch(imageId, outcome.derivativeKeys)) {
+    if (!derivativeKeysMatch(imageId, outcome.derivativeKeys, outcome.width)) {
       // 키가 모자라거나 남거나 접두사 밖이다: 작업 결과가 바뀐 것으로 보고 게시하지 않는다(접두사 밖 객체는 건드리지 않는다)
       await discard();
       this.#warn({ kind: 'security', event: 'image_worker_result_untrusted', ...at, why: 'derivative_keys', keyCount: outcome.derivativeKeys.length }, 'image-worker의 파생본 키가 정한 여덟 개가 아니다');
@@ -201,7 +202,7 @@ export class ProductionImages {
     // 준비 위치의 파생본을 다시 본다: 크기를 먼저 보고(5MiB를 넘으면 읽지 않는다) 읽은 뒤 파일 앞부분이 이름의 형식과 맞는지 본다
     let why: string | undefined;
     try {
-      for (const name of derivativeNames()) {
+      for (const name of derivativeNames(outcome.width)) {
         const key = stagingKey(imageId, name);
         const size = await this.store.stagingSize(key);
         if (size === undefined) why = 'derivative_missing';
@@ -256,7 +257,8 @@ export class ProductionImages {
     // 커밋 뒤: 원본·준비 위치·옛 포스터 파생본 지우기와 무효화는 뒤에서 한다(응답을 기다리게 하지 않는다. 실패는 기록으로 남긴다)
     const replaced = saved.replaced;
     this.#background(async () => {
-      await this.#cleanup(at, { quarantine: [source], staging: staged, public: replaced ? derivativeNames().map((n) => publicKey(replaced, n)) : [] });
+      await this.#cleanup(at, { quarantine: [source], staging: staged, public: [] });
+      if (replaced) await this.#enqueueCleanup(at, replaced);
       await this.#invalidate(q.productionId);
     });
     this.#info({ event: 'production_image_uploaded', ...at, order: saved.row.order, width: saved.row.width, height: saved.row.height, ...(saved.replaced ? { replaced: saved.replaced } : {}) }, '공연 이미지를 올렸다');
@@ -339,7 +341,7 @@ export class ProductionImages {
     // 커밋 뒤: 공개 파생본 여덟 개를 지우고 공연 태그를 무효화한다(뒤에서 한다)
     const at = { productionId: q.productionId, accountId: q.who.accountId, imageId: q.imageId };
     this.#background(async () => {
-      await this.#cleanup(at, { quarantine: [], staging: [], public: derivativeNames().map((n) => publicKey(q.imageId, n)) });
+      await this.#enqueueCleanup(at, q.imageId);
       await this.#invalidate(q.productionId);
     });
     this.#info({ event: 'production_image_deleted', productionId: q.productionId, accountId: q.who.accountId, imageId: q.imageId }, '공연 이미지를 지웠다');
@@ -351,6 +353,20 @@ export class ProductionImages {
       const b = before.find((x) => x.id === a.id);
       if (b && b.order !== a.order) await tx.update(b.id, { order: a.order, version: b.version + 1, updatedAt: now });
     }
+  }
+
+  /** 커밋 뒤 옛 공개 파생본 정리를 작업 원장에 맡긴다. 작업 원장이 없으면(개발 대역) 바로 지운다. */
+  async #enqueueCleanup(at: Record<string, unknown>, imageId: string): Promise<void> {
+    const keys = derivativeNames(20_000).map((n) => publicKey(imageId, n));
+    if (this.processing.enqueueCleanup) {
+      try {
+        await this.processing.enqueueCleanup({ sourceKey: `cleanup/production/${imageId}`, kind: 'PRODUCTION', derivativeKeys: keys });
+        return;
+      } catch {
+        this.#warn({ event: 'production_image_cleanup_enqueue_failed', ...at, imageId }, '옛 파생본 정리 작업을 맡기지 못해 바로 지운다');
+      }
+    }
+    await this.#cleanup(at, { quarantine: [], staging: [], public: keys });
   }
 
   /**
