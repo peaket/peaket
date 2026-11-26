@@ -135,6 +135,8 @@ export interface CancellationOrderView {
   readonly refundableAmount?: number;
   /** 입장 기록 여부(F-06-3) */
   readonly entryRecorded?: boolean;
+  /** 발권 세대(무효화할 세대, purchase_order.payment_event_seq). 없으면 0(모든 세대) */
+  readonly issueGeneration?: number;
 }
 
 /** 티켓 취소 포트 결과(ticket.proto CancelTicketResult와 같은 뜻) */

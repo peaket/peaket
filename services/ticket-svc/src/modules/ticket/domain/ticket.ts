@@ -123,6 +123,38 @@ export function normalizeBlockIssueInput(i: BlockTicketIssuanceInput): Normalize
   return { orderId, nowMs: i.nowMs, ...(reason ? { reason } : {}) };
 }
 
+// ---- FLAGGED 취소 무효(ticket.proto VoidTickets, F-06-3 IR-30) ----
+
+/** 취소 무효로 티켓을 끝낼 입력(ticket.proto VoidTicketsRequest) */
+export interface VoidOrderTicketsInput {
+  /** 무효로 할 주문(소문자 UUID) */
+  readonly orderId: string;
+  /** 그 회차(없으면 주문의 모든 회차) */
+  readonly eventId?: string;
+  /** 무효로 할 발권 세대. 0이면 주문의 모든 세대다 */
+  readonly issueGeneration: number;
+  readonly reason?: string;
+  readonly nowMs?: number;
+}
+
+export interface NormalizedVoidOrderTicketsInput extends VoidOrderTicketsInput {
+  readonly nowMs: number;
+}
+
+/**
+ * 주문의 티켓을 취소 무효로 끝낸다. 입장 기록(IN·PASS)이 하나도 없으면 아무것도 바꾸지 않는다(FLAGGED VOID는 입장 기록이 있어야 한다).
+ * @throws TicketInputError orderId·eventId가 소문자 UUID가 아님, 세대·시각이 올바르지 않음, 사유가 너무 김
+ */
+export function normalizeVoidOrderTicketsInput(i: VoidOrderTicketsInput): NormalizedVoidOrderTicketsInput {
+  const orderId = requireLowerUuid('orderId', i.orderId);
+  const eventId = i.eventId === undefined || i.eventId === '' ? undefined : requireLowerUuid('eventId', i.eventId);
+  if (!Number.isSafeInteger(i.issueGeneration) || i.issueGeneration < 0) throw new TicketInputError('issueGeneration은 0 이상의 정수여야 한다');
+  if (i.nowMs !== undefined && (!Number.isFinite(i.nowMs) || i.nowMs < 0)) throw new TicketInputError('nowMs가 올바르지 않다');
+  if (i.reason !== undefined && (typeof i.reason !== 'string' || i.reason.length > MAX_BLOCK_REASON_LENGTH)) throw new TicketInputError(`reason은 ${MAX_BLOCK_REASON_LENGTH}자 이하여야 한다`);
+  const reason = i.reason?.trim();
+  return { orderId, ...(eventId ? { eventId } : {}), issueGeneration: i.issueGeneration, nowMs: i.nowMs ?? Date.now(), ...(reason ? { reason } : {}) };
+}
+
 export type CancelTicketResult = 'REFUND_NOW' | 'REFUND_AFTER_CLOSE' | 'NOT_PAYER_HOLDER' | 'TRANSFER_PENDING' | 'EVENT_STARTED' | 'ALREADY_CANCELLED';
 
 export interface CancelTicketsInput {

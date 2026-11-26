@@ -22,6 +22,7 @@ import type {
   ApprovalLifecycleStore,
   ApprovalLifecycleTargets,
   ApprovalNotifier,
+  ApprovalRefundBasis,
 } from '../domain/lifecycle-ports.js';
 
 export interface ApprovalLifecycleDeps {
@@ -360,16 +361,37 @@ export class ApprovalLifecycle {
     return lifecycleView(done, actor);
   }
 
+  /**
+   * FLAGGED 처리 행동의 승인 근거(IR-11·IR-30). 대상이 취소 ID면 purchase basis가 주문 ID로 풀어 준다.
+   * 근거가 없으면 undefined(404)이고, 남은 환급액이 없으면 0이다(0원 승인을 만들지 않는 것은 부르는 쪽이 본다)
+   */
+  async refundBasis(targetRef: string): Promise<ApprovalRefundBasis | undefined> {
+    const b = await this.d.targets?.basis('SYSTEM_FAULT_REFUND', targetRef);
+    if (!b) return undefined;
+    return {
+      orderId: b.orderId ?? targetRef,
+      refundableAmount: typeof b.refundableAmount === 'number' ? b.refundableAmount : 0,
+      entryRecorded: b.entryRecorded === true,
+      ...(b.issueGeneration !== undefined ? { issueGeneration: b.issueGeneration } : {}),
+      ...(b.eventId !== undefined ? { eventId: b.eventId } : {}),
+    };
+  }
+
   /** 승인 업무의 남은 환급액을 대상 포트에서 읽는다(IR-11). 없으면 0 */
   async refundableAmount(targetRef: string): Promise<number> {
-    const b = await this.d.targets?.basis('SYSTEM_FAULT_REFUND', targetRef);
-    return typeof b?.refundableAmount === 'number' ? b.refundableAmount : 0;
+    return (await this.refundBasis(targetRef))?.refundableAmount ?? 0;
   }
 
   /** FLAGGED 취소 무효(IR-30). 실행기가 없으면 503 */
-  async voidOrder(orderId: string, reason: string): Promise<{ voided: boolean; alreadyEntered: boolean }> {
+  async voidOrder(orderId: string, reason: string, o: { issueGeneration?: number; eventId?: string } = {}): Promise<{ voided: number; alreadyEntered: number }> {
     if (!this.d.executors?.voidOrder) await unavailable();
-    return this.d.executors!.voidOrder!({ orderId, reason });
+    return this.d.executors!.voidOrder!({ orderId, reason, ...(o.issueGeneration !== undefined ? { issueGeneration: o.issueGeneration } : {}), ...(o.eventId !== undefined ? { eventId: o.eventId } : {}) });
+  }
+
+  /** FLAGGED 취소 무효 뒤 purchase의 기존 취소 행을 VOIDED로 끝낸다(IR-30). 포트가 없으면 503 */
+  async voidCancellation(cancellationId: string): Promise<void> {
+    if (!this.d.targets?.voidCancellation) await unavailable();
+    await this.d.targets!.voidCancellation!(cancellationId);
   }
 
   async #targetChanged(r: ApprovalLifecycleRecord, nowMs: number): Promise<boolean> {

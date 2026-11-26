@@ -16,6 +16,7 @@ import {
   type ListTicketsInput,
   type ListTicketsResult,
   type NormalizedBlockTicketIssuanceInput,
+  type NormalizedVoidOrderTicketsInput,
   type OperatorCancelInput,
   type OperatorCancelOutcome,
   type OperatorCancelResult,
@@ -218,6 +219,45 @@ export class DrizzleTicketStore implements TicketStore {
         join scan_event s on s.ticket_id = t.id and s.event_id = t.event_id
         where t.order_id = ${input.orderId}::uuid and s.direction = 'IN' and s.result = 'PASS'`);
       const alreadyEntered = Number((entered.rows[0] as { n: number | string } | undefined)?.n ?? 0);
+      return { voided, alreadyEntered };
+    });
+  }
+
+  /**
+   * FLAGGED 취소 무효(IR-30). 행 잠금 안에서 그 주문·세대의 입장 기록(IN·PASS)을 먼저 세고,
+   * 하나도 없으면 아무것도 바꾸지 않는다. 있으면 VOIDED가 아닌 티켓을 VOIDED로 바꾸고 키를 폐기한다(세대 0은 모든 세대)
+   */
+  async voidAfterEntry(input: NormalizedVoidOrderTicketsInput): Promise<BlockTicketIssuanceResult> {
+    const now = new Date(input.nowMs);
+    return this.o.database.transaction(async (tx) => {
+      const conditions = [eq(ticket.orderId, input.orderId)];
+      if (input.eventId) conditions.push(eq(ticket.eventId, input.eventId));
+      if (input.issueGeneration > 0) conditions.push(eq(ticket.issueGeneration, input.issueGeneration));
+      const rows = await tx.select().from(ticket).where(and(...conditions)).orderBy(asc(ticket.id)).for('update');
+      const entered = await tx.execute(sql`
+        select count(distinct s.ticket_id)::int as n
+        from ticket t
+        join scan_event s on s.ticket_id = t.id and s.event_id = t.event_id
+        where t.order_id = ${input.orderId}::uuid
+          and (${input.issueGeneration} = 0 or t.issue_generation = ${input.issueGeneration})
+          ${input.eventId ? sql`and t.event_id = ${input.eventId}::uuid` : sql``}
+          and s.direction = 'IN' and s.result = 'PASS'`);
+      const alreadyEntered = Number((entered.rows[0] as { n: number | string } | undefined)?.n ?? 0);
+      if (alreadyEntered === 0) return { voided: 0, alreadyEntered: 0 };
+      let voided = 0;
+      for (const row of rows) {
+        if (statusOf(row.status) === 'VOIDED') continue;
+        const revokedKeyId = await this.o.deviceKeys?.revokeActiveInTx(tx, row.id, input.nowMs);
+        await tx
+          .update(ticket)
+          .set({ status: 'VOIDED', keyRevokedAt: now, version: row.version + 1 })
+          .where(eq(ticket.id, row.id));
+        if (this.o.changes) {
+          await this.o.changes.append(tx, row.eventId, 'TICKET_STATUS', { v: 1, ticketId: row.id, status: 'VOIDED', version: row.version + 1 });
+          if (revokedKeyId) await this.o.changes.append(tx, row.eventId, 'KEY_REVOKED', { v: 1, ticketId: row.id, keyId: Buffer.from(revokedKeyId).toString('base64url') });
+        }
+        voided += 1;
+      }
       return { voided, alreadyEntered };
     });
   }

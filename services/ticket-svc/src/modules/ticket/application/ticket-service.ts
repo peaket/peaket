@@ -18,6 +18,7 @@ import {
   type ListHeldTicketsInput,
   type ListTicketsInput,
   type ListTicketsResult,
+  type VoidOrderTicketsInput,
   type OperatorCancelInput,
   type OperatorCancelOutcome,
   newTicketKey,
@@ -30,11 +31,13 @@ import {
   normalizeListInput,
   normalizeOperatorCancelInput,
   normalizeReviewEligibilityInput,
+  normalizeVoidOrderTicketsInput,
   qrPayloadOf,
   type ReviewEligibilityInput,
   type ReviewEligibilityResult,
   reviewEligibilityOf,
   type TicketRecord,
+  TicketInputError,
   ticketKeyHash,
   TicketReclaimError,
 } from '../domain/ticket.js';
@@ -105,6 +108,16 @@ export class TicketService {
   async blockIssue(input: BlockTicketIssuanceInput): Promise<BlockTicketIssuanceResult> {
     const n = normalizeBlockIssueInput({ ...input, nowMs: input.nowMs ?? this.deps.clock.now() });
     return this.deps.store.blockIssue(n);
+  }
+
+  /**
+   * FLAGGED 취소 무효(IR-30). 입장 기록이 없으면 아무것도 바꾸지 않고, 있으면 그 세대의 티켓을 VOIDED로 바꾼다.
+   * @throws TicketInputError orderId가 소문자 UUID가 아님, 세대가 0 이상 정수가 아님
+   */
+  async voidOrderTickets(input: VoidOrderTicketsInput): Promise<BlockTicketIssuanceResult> {
+    if (!this.deps.store.voidAfterEntry) throw new TicketInputError('취소 무효를 지원하지 않는 저장소입니다');
+    const n = normalizeVoidOrderTicketsInput({ ...input, nowMs: input.nowMs ?? this.deps.clock.now() });
+    return this.deps.store.voidAfterEntry(n);
   }
 
   /** 부정 예매 운영자 취소(BAT-415 몫 F): 입력 검사 뒤 저장소가 행 잠금 안에서 표마다 가른다. @throws TicketInputError */

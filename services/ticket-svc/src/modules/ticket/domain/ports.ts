@@ -13,6 +13,7 @@ import type {
   ListTicketsInput,
   ListTicketsResult,
   NormalizedBlockTicketIssuanceInput,
+  NormalizedVoidOrderTicketsInput,
   OperatorCancelInput,
   OperatorCancelOutcome,
   ReviewEligibilityTicket,
@@ -41,6 +42,12 @@ export interface TicketStore {
    * 같은 주문의 issue도 먼저 guard 행을 잠그므로 둘은 한 차례로 갈린다
    */
   blockIssue(input: NormalizedBlockTicketIssuanceInput): Promise<BlockTicketIssuanceResult>;
+
+  /**
+   * FLAGGED 취소 무효(IR-30). 한 트랜잭션에서 그 주문·세대의 티켓을 잠그고, 입장 기록(IN·PASS)이 하나도 없으면
+   * 아무것도 바꾸지 않는다. 있으면 VOIDED가 아닌 티켓을 VOIDED로 바꾸고 키를 폐기한다. 주문·세대 단위로 멱등하다
+   */
+  voidAfterEntry?(input: NormalizedVoidOrderTicketsInput): Promise<BlockTicketIssuanceResult>;
 
   /** 티켓마다 행 잠금 안에서 조건을 보고 취소한다. cancellation_id·ticket_id 단위로 멱등하다. */
   cancel(input: CancelTicketsInput): Promise<readonly CancelTicketOutcome[]>;

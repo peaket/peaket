@@ -4,6 +4,7 @@ import { type DynamicModule, Module, type Provider } from '@nestjs/common';
 import { CLOCK, type Clock, InternalTokenGuard } from '@peaket/platform';
 import { CancelTicket } from './application/cancel-ticket.js';
 import { ApprovalRefunds } from './application/approval-refund.js';
+import { ApprovalCancellationVoid } from './application/approval-cancellation-void.js';
 import { Compensations, RequestCompensationAccount } from './application/compensations.js';
 import { EventRefundService } from './application/event-refund-service.js';
 import { QuoteCancellation } from './application/quote-cancellation.js';
@@ -12,7 +13,7 @@ import { REAUTH_GATE, type CancellationOrders, type CancellationWrites, type Com
 import type { BusinessCalendar } from './domain/refund-policy.js';
 import { CancellationAccountController, CompensationController } from './inbound/compensation.controller.js';
 import { EventRefundController } from './inbound/event-refund.controller.js';
-import { ApprovalRefundController } from './inbound/approval-refund.controller.js';
+import { ApprovalCancellationVoidController, ApprovalRefundController } from './inbound/approval-refund.controller.js';
 import { TicketCancellationController, unavailableReauth } from './inbound/ticket-cancellation.controller.js';
 
 export interface RefundModuleDeps {
@@ -76,6 +77,11 @@ export class RefundModule {
       { provide: REAUTH_GATE, useValue: deps.reauth ?? unavailableReauth },
       InternalTokenGuard,
       {
+        provide: ApprovalCancellationVoid,
+        useFactory: (clock: Clock) => new ApprovalCancellationVoid({ writes: deps.writes, clock }),
+        inject: [CLOCK],
+      },
+      {
         provide: ApprovalRefunds,
         useFactory: (clock: Clock) => new ApprovalRefunds({ orders: deps.orders, writes: deps.writes, tickets: deps.tickets, payments: deps.payments, clock, ...(deps.entryRecords ? { entryRecords: deps.entryRecords } : {}) }),
         inject: [CLOCK],
@@ -116,6 +122,7 @@ export class RefundModule {
     const controllers = [
       TicketCancellationController,
       ApprovalRefundController,
+      ApprovalCancellationVoidController,
       ...(deps.eventRefund ? [EventRefundController] : []),
       ...(deps.refundAccountWrites ? [CancellationAccountController] : []),
       ...(deps.compensationStore && deps.compensationTransfer ? [CompensationController] : []),

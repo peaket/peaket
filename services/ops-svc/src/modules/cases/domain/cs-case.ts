@@ -63,6 +63,8 @@ export const ACCEPTED_KINDS: ReadonlySet<CsCaseKind> = new Set<CsCaseKind>([
   'PORTONE_LEDGER_MISMATCH',
   // payment-svc 대사 미완 결제 풀림의 조정 제안(F-07-8 I-05, ADR-0380 결정 7). 사건 키 reconciliation-resolved:{정산서 ID}:{결제 ID}, 대상 = 정산서 ID
   'SETTLEMENT_ADJUSTMENT_SUGGESTED',
+  // 결제 뒤 미발권(F-06-3 IR-11, ADR-0106). 대상 = 주문 ID. 확인 4시간, 시스템 잘못 환불 승인 업무로 닫는다
+  'TICKET_NOT_ISSUED',
 ]);
 
 /**

@@ -286,7 +286,12 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
       }
       const req = call.request;
       useCases.ticket
-        .blockIssue({ orderId: text(req.order_id), reason: text(req.reason) || 'FLAGGED_VOID', nowMs: useCases.nowMs?.() ?? Date.now() })
+        .voidOrderTickets({
+          orderId: text(req.order_id),
+          ...(text(req.event_id) ? { eventId: text(req.event_id) } : {}),
+          issueGeneration: typeof req.issue_generation === 'number' ? req.issue_generation : Number(req.issue_generation ?? 0),
+          nowMs: useCases.nowMs?.() ?? Date.now(),
+        })
         .then((r) => cb(null, { voided: r.voided, already_entered: r.alreadyEntered }))
         .catch((err: unknown) => fail('VoidTickets', err, text(req.order_id), cb, onError));
     },

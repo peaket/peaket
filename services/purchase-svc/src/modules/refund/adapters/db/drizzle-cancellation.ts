@@ -63,6 +63,7 @@ export class DrizzleCancellationOrders implements CancellationOrders {
         accountId: purchaseOrder.accountId,
         status: purchaseOrder.status,
         createdAt: purchaseOrder.createdAt,
+        paymentEventSeq: purchaseOrder.paymentEventSeq,
         ticketId: orderItem.ticketId,
         seatId: orderItem.seatId,
         unitPrice: orderItem.unitPrice,
@@ -98,12 +99,19 @@ export class DrizzleCancellationOrders implements CancellationOrders {
         ...(config.entryOpensAtMs !== undefined ? { entryOpensAtMs: config.entryOpensAtMs } : {}),
         ...(config.eventStartsAtMs !== undefined ? { eventStartsAtMs: config.eventStartsAtMs } : {}),
         orderStatus: row.status,
+        issueGeneration: Number(row.paymentEventSeq),
         ...(paid[0]?.occurredAt ? { paidAtMs: paid[0].occurredAt.getTime() } : {}),
         refundableAmount: Math.max(0, row.unitPrice - active.filter((c) => c.ticketId === row.ticketId).reduce((sum, c) => sum + c.refundAmount, 0)),
         entryRecorded: row.ticketId === null ? false : (await this.entryRecords?.lookup([row.ticketId], Date.now() + 2_000).catch(() => undefined))?.get(row.ticketId)?.entered === true || active.some((c) => c.ticketId === row.ticketId && c.entryRecordedAt !== null),
       });
     }
     return out;
+  }
+
+  /** 승인 ID로 남긴 모든 취소 행(IR-21). 다중 티켓·다중 주문의 다시 오기를 한 번에 본다 */
+  async approvalRefundOf(approvalId: string): Promise<CancellationRecord[]> {
+    const rows = await this.database.db.select().from(orderCancellation).where(eq(orderCancellation.approvalId, approvalId));
+    return rows.map((r) => ({ cancellationId: r.id, orderId: r.orderId, ticketId: r.ticketId, refundAmount: r.refundAmount, state: r.status as CancellationRecord['state'], refundAttempts: r.refundAttempts, ...(r.approvalKind ? { kind: r.approvalKind } : {}) }));
   }
 
   async cancellationsOf(orderId: string): Promise<CancellationRecord[]> {
@@ -263,6 +271,14 @@ export class DrizzleCancellationWrites implements CancellationWrites, Cancellati
   }
 
   /** REFUND_PENDING 행에만 다음 재시도를 적는다(그사이 무효·환급으로 끝난 행을 되돌리지 않는다, BAT-420 A3) */
+  /** 기존 취소 행에 승인 ID를 단다(FLAGGED REFUND를 그 취소에 잇는다, IR-11). 이미 다른 승인 ID가 있으면 그대로 둔다 */
+  async markApproval(q: { readonly cancellationId: string; readonly approvalId: string }): Promise<void> {
+    await this.database.db
+      .update(orderCancellation)
+      .set({ approvalId: q.approvalId })
+      .where(and(eq(orderCancellation.id, q.cancellationId), isNull(orderCancellation.approvalId)));
+  }
+
   async scheduleRefundRetry(q: { readonly cancellationId: string; readonly attempts: number; readonly nextRetryAtMs: number; readonly lastError: string; readonly nowMs: number }): Promise<boolean> {
     const updated = await this.database.db
       .update(orderCancellation)

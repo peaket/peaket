@@ -5,6 +5,7 @@ import type { CancellationOrderView, CancellationOrders, CancellationRecord } fr
 
 export interface OrderApprovalBasis {
   orderId: string;
+  eventId: string;
   payerAccountId: string;
   paidAt: string;
   orderStatus: string;
@@ -12,6 +13,8 @@ export interface OrderApprovalBasis {
   entryOpensAt: string | null;
   entryRecorded: boolean;
   refundableAmount: number;
+  /** 무효화할 발권 세대(없으면 0) */
+  issueGeneration: number;
 }
 export interface MinorContractBasis {
   orderId: string;
@@ -21,6 +24,8 @@ export interface MinorContractBasis {
   eventStartsAt: string | null;
   entryOpensAt: string | null;
   entryRecorded: boolean;
+  /** 무효화할 발권 세대(없으면 0) */
+  issueGeneration: number;
 }
 
 /** 내부 경로(IR-03): /internal/v1/orders/{orderId}/approval-basis, /internal/v1/orders/{orderId}/minor-contract-basis */
@@ -30,21 +35,36 @@ export const MINOR_CONTRACT_BASIS_PATH = '/internal/v1/orders/{orderId}/minor-co
 export class ApprovalBasisOrders {
   constructor(private readonly orders: CancellationOrders) {}
 
-  async basis(orderId: string): Promise<OrderApprovalBasis | undefined> {
-    const rows: CancellationOrderView[] = (await this.orders.byOrder?.(orderId)) ?? [];
+  /**
+   * 주문 ID 또는 취소 ID로 승인 근거를 읽는다(IR-11). FLAGGED 건의 대상은 취소 ID라서 그대로 주문으로 찾으면 404다.
+   * 입장 기록은 주문의 모든 티켓을 보고 하나라도 있으면 참이다(IR-03·31).
+   */
+  async basis(orderRef: string): Promise<OrderApprovalBasis | undefined> {
+    let rows: CancellationOrderView[] = (await this.orders.byOrder?.(orderRef)) ?? [];
+    let cancellation: CancellationRecord | undefined;
+    if (rows.length === 0) {
+      cancellation = await this.orders.findCancellation(orderRef);
+      if (!cancellation) return undefined;
+      rows = (await this.orders.byOrder?.(cancellation.orderId)) ?? [];
+    }
     if (rows.length === 0) return undefined;
     const first = rows[0]!;
     const paidAtMs = first.paidAtMs ?? first.bookedAtMs;
     const refundable = rows.reduce((sum, r) => sum + (r.refundableAmount ?? r.ticketPrice), 0);
+    const eventStarts = rows.find((r) => r.eventStartsAtMs !== undefined)?.eventStartsAtMs;
+    const entryOpens = rows.find((r) => r.entryOpensAtMs !== undefined)?.entryOpensAtMs;
     return {
-      orderId,
+      orderId: first.orderId,
+      eventId: first.eventId,
       payerAccountId: first.payerAccountId,
       paidAt: new Date(paidAtMs).toISOString(),
       orderStatus: first.orderStatus,
-      eventStartsAt: first.eventStartsAtMs === undefined ? null : new Date(first.eventStartsAtMs).toISOString(),
-      entryOpensAt: first.entryOpensAtMs === undefined ? null : new Date(first.entryOpensAtMs).toISOString(),
-      entryRecorded: first.entryRecorded === true,
-      refundableAmount: refundable,
+      eventStartsAt: eventStarts === undefined ? null : new Date(eventStarts).toISOString(),
+      entryOpensAt: entryOpens === undefined ? null : new Date(entryOpens).toISOString(),
+      entryRecorded: rows.some((r) => r.entryRecorded === true),
+      // FLAGGED 취소는 그 취소 행의 환급액이 곧 남은 환급액이다(진행 중 취소가 티켓 금액을 이미 덮는다)
+      refundableAmount: Math.max(refundable, cancellation?.refundAmount ?? 0),
+      issueGeneration: first.issueGeneration ?? 0,
     };
   }
 

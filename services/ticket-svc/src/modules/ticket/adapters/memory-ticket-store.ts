@@ -14,6 +14,7 @@ import {
   type IssueTicketsResult,
   type ListTicketsInput,
   type ListTicketsResult,
+  type NormalizedVoidOrderTicketsInput,
   type OperatorCancelInput,
   type OperatorCancelOutcome,
   operatorCancelResultOf,
@@ -160,6 +161,25 @@ export class MemoryTicketStore implements TicketStore {
       voided += 1;
     }
     const alreadyEntered = [...this.tickets.values()].filter((t) => t.orderId === input.orderId && this.entries.has(t.ticketId)).length;
+    return { voided, alreadyEntered };
+  }
+
+  /**
+   * FLAGGED 취소 무효(IR-30). 입장 기록(IN·PASS)이 하나도 없으면 아무것도 바꾸지 않고,
+   * 있으면 그 주문·세대의 VOIDED가 아닌 티켓을 VOIDED로 바꾸고 키를 폐기한다. 세대 0은 모든 세대다
+   */
+  async voidAfterEntry(input: NormalizedVoidOrderTicketsInput): Promise<BlockTicketIssuanceResult> {
+    const tickets = [...this.tickets.values()]
+      .filter((t) => t.orderId === input.orderId && (input.eventId === undefined || t.eventId === input.eventId) && (input.issueGeneration === 0 || t.issueGeneration === input.issueGeneration))
+      .sort((a, b) => a.ticketId.localeCompare(b.ticketId));
+    const alreadyEntered = tickets.filter((t) => this.entries.has(t.ticketId)).length;
+    if (alreadyEntered === 0) return { voided: 0, alreadyEntered: 0 };
+    let voided = 0;
+    for (const t of tickets) {
+      if (t.status === 'VOIDED') continue;
+      this.#put({ ...t, status: 'VOIDED', keyRevokedAtMs: input.nowMs, version: t.version + 1 });
+      voided += 1;
+    }
     return { voided, alreadyEntered };
   }
 

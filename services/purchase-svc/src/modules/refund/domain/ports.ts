@@ -25,6 +25,8 @@ export interface CancellationOrders {
   byOrder?(orderId: string): Promise<CancellationOrderView[] | undefined>;
   /** 주문의 이전 취소 기록(중복 환급 방지, IR-10) */
   cancellationsOf?(orderId: string): Promise<CancellationRecord[]>;
+  /** 승인 ID로 남긴 모든 취소 행(다중 티켓·다시 오기, IR-21). 없으면 빈 배열 */
+  approvalRefundOf?(approvalId: string): Promise<CancellationRecord[]>;
 }
 
 /** 입장 기록 확인(F-06-3 미성년 계약 취소). 없으면 확인하지 않는다 */
@@ -122,6 +124,8 @@ export interface CancellationWrites {
     readonly fraudCaseId?: string;
     readonly approvalId?: string;
   }): Promise<CancellationWriteOutcome>;
+  /** 기존 취소 행에 승인 ID를 단다(FLAGGED REFUND를 이미 있는 취소에 잇는다, IR-11). 없으면 하지 않는다 */
+  markApproval?(q: { readonly cancellationId: string; readonly approvalId: string }): Promise<void>;
   /** 입장 기록 마감 뒤 환급할 REQUESTED와 재시도할 REFUND_PENDING(환급 시각이 지난 것) */
   dueRefunds(nowMs: number, limit: number): Promise<readonly DueRefund[]>;
   /**
