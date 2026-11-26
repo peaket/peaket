@@ -1,9 +1,8 @@
-// F-04-17 교차 필터·요약·기준선. 정본: docs/features/forensic-replay.md §2.1·§3.5, d5 §7.17.
-// 차원 체크는 비트마스크 요약으로 이어지고, 같은 값을 표로도 보인다.
-import { useMemo, useState } from 'react';
+// F-04-17 교차 필터·요약·기준선. F-04-18에서 필터 상태를 ReplayMain으로 올려 후보 패널과 같은 조건을 쓴다.
+// 정본: docs/features/forensic-replay.md §2.1·§3.5, d5 §7.17.
+import { useMemo } from 'react';
 import { EVENT_KIND, RESULT, type EventColumns, type ForensicSource } from '../lib/forensics/events.ts';
 import { summarize, type ReplayFilter, type ReplaySummary } from '../lib/replay/crossfilter.ts';
-import type { ReplayBounds } from '../lib/replay/session.ts';
 import { baselineRows, stageBands, summaryRows, type BaselineRow, type StageBand, type TableRow } from '../lib/replay/table.ts';
 import { ReplayTable } from './ReplayTable';
 
@@ -67,32 +66,22 @@ export function ReplayFilters({
   columns,
   keep,
   source,
-  bounds,
+  filter,
+  onFilterChange,
 }: {
   columns: EventColumns;
   keep: Uint8Array;
   source: ForensicSource;
-  bounds: ReplayBounds;
+  filter: ReplayFilter;
+  onFilterChange: (next: ReplayFilter) => void;
 }) {
-  const [sections, setSections] = useState<number[]>([]);
-  const [results, setResults] = useState<number[]>([]);
-  const [kinds, setKinds] = useState<number[]>([]);
-  const [botTiers, setBotTiers] = useState<number[]>([]);
-  const [netTypes, setNetTypes] = useState<number[]>([]);
-  const [deviceGroups, setDeviceGroups] = useState<number[]>([]);
-  const [member, setMember] = useState<0 | 1 | undefined>(undefined);
-
-  const filter = useMemo<ReplayFilter>(() => {
-    const out: ReplayFilter = { fromMs: bounds.fromMs, toMs: bounds.toMs };
-    if (sections.length) out.sections = sections;
-    if (results.length) out.results = results;
-    if (kinds.length) out.kinds = kinds;
-    if (botTiers.length) out.botTiers = botTiers;
-    if (netTypes.length) out.netTypes = netTypes;
-    if (deviceGroups.length) out.deviceGroups = deviceGroups;
-    if (member !== undefined) out.member = member;
-    return out;
-  }, [bounds, sections, results, kinds, botTiers, netTypes, deviceGroups, member]);
+  const sections = filter.sections ?? [];
+  const results = filter.results ?? [];
+  const kinds = filter.kinds ?? [];
+  const botTiers = filter.botTiers ?? [];
+  const netTypes = filter.netTypes ?? [];
+  const deviceGroups = filter.deviceGroups ?? [];
+  const member = filter.member;
 
   const summary: ReplaySummary = useMemo(() => summarize(columns, keep, filter), [columns, keep, filter]);
   const summaryTable: TableRow[] = useMemo(() => summaryRows(summary, source), [summary, source]);
@@ -106,6 +95,13 @@ export function ReplayFilters({
   const netValues = useMemo(() => unique(columns.net_type, keep), [columns, keep]);
   const deviceValues = useMemo(() => unique(columns.device_group, keep), [columns, keep]);
 
+  const update = (patch: Partial<ReplayFilter>): void => onFilterChange({ ...filter, ...patch });
+  const clearMember = (): void => {
+    const next = { ...filter };
+    delete next.member;
+    onFilterChange(next);
+  };
+
   return (
     <aside className="col" style={{ gap: 16, minWidth: 0 }} aria-label="교차 필터와 후보 요약">
       <section className="widget" aria-labelledby="fx-filter-h">
@@ -115,16 +111,16 @@ export function ReplayFilters({
           </h2>
         </div>
         <div className="widget-body col" style={{ gap: 12 }}>
-          <CheckGroup title="구역" values={sectionValues} selected={sections} label={(v) => `구역 ${v}`} onToggle={(v) => setSections(toggled(sections, v))} />
-          <CheckGroup title="결과" values={resultValues} selected={results} label={(v) => RESULT_LABEL[v] ?? String(v)} onToggle={(v) => setResults(toggled(results, v))} />
-          <CheckGroup title="사건 종류" values={kindValues} selected={kinds} label={(v) => KIND_LABEL[v] ?? String(v)} onToggle={(v) => setKinds(toggled(kinds, v))} />
+          <CheckGroup title="구역" values={sectionValues} selected={sections} label={(v) => `구역 ${v}`} onToggle={(v) => update({ sections: toggled(sections, v) })} />
+          <CheckGroup title="결과" values={resultValues} selected={results} label={(v) => RESULT_LABEL[v] ?? String(v)} onToggle={(v) => update({ results: toggled(results, v) })} />
+          <CheckGroup title="사건 종류" values={kindValues} selected={kinds} label={(v) => KIND_LABEL[v] ?? String(v)} onToggle={(v) => update({ kinds: toggled(kinds, v) })} />
           {source === 'SYNTHETIC' || source === 'RESEARCH' ? (
-            <CheckGroup title="봇 등급" values={botValues} selected={botTiers} label={(v) => `등급 ${v}`} onToggle={(v) => setBotTiers(toggled(botTiers, v))} />
+            <CheckGroup title="봇 등급" values={botValues} selected={botTiers} label={(v) => `등급 ${v}`} onToggle={(v) => update({ botTiers: toggled(botTiers, v) })} />
           ) : null}
           {source === 'SYNTHETIC' ? (
             <>
-              <CheckGroup title="네트워크 유형" values={netValues} selected={netTypes} label={(v) => `유형 ${v}`} onToggle={(v) => setNetTypes(toggled(netTypes, v))} />
-              <CheckGroup title="기기 묶음" values={deviceValues} selected={deviceGroups} label={(v) => `기기 ${v}`} onToggle={(v) => setDeviceGroups(toggled(deviceGroups, v))} />
+              <CheckGroup title="네트워크 유형" values={netValues} selected={netTypes} label={(v) => `유형 ${v}`} onToggle={(v) => update({ netTypes: toggled(netTypes, v) })} />
+              <CheckGroup title="기기 묶음" values={deviceValues} selected={deviceGroups} label={(v) => `기기 ${v}`} onToggle={(v) => update({ deviceGroups: toggled(deviceGroups, v) })} />
             </>
           ) : null}
           {source === 'INVESTIGATION' ? (
@@ -132,11 +128,11 @@ export function ReplayFilters({
               <legend className="t-xs muted">묶음</legend>
               {[0, 1].map((value) => (
                 <label key={value} className="row t-sm" style={{ gap: 6 }}>
-                  <input type="radio" name="fx-member" checked={member === value} onChange={() => setMember(value as 0 | 1)} />
+                  <input type="radio" name="fx-member" checked={member === value} onChange={() => update({ member: value as 0 | 1 })} />
                   {value === 1 ? '묶음 계정' : '나머지'}
                 </label>
               ))}
-              <button className="btn btn-ghost btn-sm" type="button" onClick={() => setMember(undefined)}>
+              <button className="btn btn-ghost btn-sm" type="button" onClick={clearMember}>
                 묶음 조건 지우기
               </button>
             </fieldset>

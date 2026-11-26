@@ -46,13 +46,16 @@ export function SeatReplay({
   state,
   seatCount,
   playheadMs,
+  highlight = [],
 }: {
   state: Uint8Array;
   seatCount: number;
   playheadMs: number;
+  highlight?: readonly number[];
 }) {
   const canvas = useRef<HTMLCanvasElement | null>(null);
   const legend = useMemo(() => seatLegend(), []);
+  const highlighted = useMemo(() => new Set(highlight), [highlight]);
   const counts = useMemo(() => {
     const out: Record<number, number> = {
       [SEAT_STATE.EMPTY]: 0,
@@ -85,8 +88,13 @@ export function SeatReplay({
       ctx.fillStyle = COLOR[value] ?? COLOR[SEAT_STATE.EMPTY];
       ctx.fillRect(x, y, cell, cell);
       drawPattern(ctx, patternOf.get(value) ?? 'solid', x, y, cell);
+      if (highlighted.has(seat) && cell >= 2) {
+        ctx.strokeStyle = '#f4f4f5';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 0.5, y + 0.5, Math.max(1, cell - 1), Math.max(1, cell - 1));
+      }
     }
-  }, [state, seatCount, legend]);
+  }, [state, seatCount, legend, highlighted]);
 
   return (
     <section className="widget" aria-labelledby="fx-map-h">
@@ -122,6 +130,13 @@ export function SeatReplay({
               {item.label}
             </span>
           ))}
+          <span className="row t-xs muted" style={{ gap: 5 }}>
+            <span
+              aria-hidden="true"
+              style={{ width: 12, height: 12, borderRadius: 2, border: '2px solid #f4f4f5', background: 'transparent' }}
+            />
+            고른 영역
+          </span>
         </div>
         <ReplayTable
           caption="좌석 상태 요약(표로 보기)"
