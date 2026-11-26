@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 
 const headers = await import('@peaket/config/headers/security-headers.mjs');
 
-test('[ASVS v5.0.0-3.4.8] [ASVS v5.0.0-3.5.4] 콘솔 /forensics 경로는 묶음 C에 COEP require-corp를 더하고 COOP same-origin을 유지한다', () => {
+test('[ASVS v5.0.0-3.4.8] [ASVS v5.0.0-3.5.4] 콘솔 /forensics 경로 헤더 생성기는 묶음 C에 COEP require-corp를 더하고 COOP same-origin을 유지한다', () => {
   assert.equal(typeof headers.consoleForensicsHeaders, 'function', 'consoleForensicsHeaders가 없다');
   const h = headers.consoleForensicsHeaders();
   assert.equal(h['Cross-Origin-Embedder-Policy'], 'require-corp');
@@ -14,6 +14,10 @@ test('[ASVS v5.0.0-3.4.8] [ASVS v5.0.0-3.5.4] 콘솔 /forensics 경로는 묶음
   assert.equal(h['Referrer-Policy'], 'no-referrer');
   assert.match(h['Content-Security-Policy'], /connect-src[^;]*ops-api/);
   assert.match(h['Content-Security-Policy'], /frame-ancestors 'none'/);
+
+  // 콘솔 기본 묶음 C에는 COEP가 없고, 이 경로만 더한다
+  const consoleDefault = headers.staticAppHeaders('console');
+  assert.equal(consoleDefault['Cross-Origin-Embedder-Policy'], undefined);
 
   // 시험·시연 빌드는 따로 연 공개 위치의 묶음 G다. connect-src가 'self'뿐이고 COEP는 있다
   const demo = headers.staticAppHeaders('forensics');

@@ -717,6 +717,12 @@ stateDiagram-v2
 | 배포 | console 배포의 S3(아마존의 파일·객체 저장소) `/forensics/`에 둔다. 콘솔이 모든 경로를 'index.html'로 보내는 규칙에서 빼고, 캐시(자주 쓰는 값을 가까운 곳에 복사해 둔 것) 동작 `/forensics*`에 따로 응답 헤더 정책을 단다(docs/frontend.md §5.18, docs/devops.md §6.6) |
 | 예산 | §7.1 그대로. 관제 호스트 예산(docs/frontend.md §5.8)에 들지 않는다 |
 
+**운영 빌드의 주소와 갈래(추천 적용 2026-11-27, F-04-16)**:
+
+- 빌드는 `PEAKET_FORENSICS_MODE=operating`일 때만 운영 빌드다. 값이 없거나 `demo`면 시험·시연 빌드이고, 모르는 값은 빌드를 시작하지 않는다. 운영 빌드는 `operating.html` 하나를 묶고 기반 경로를 `/forensics/`로 둔다.
+- 조사 원천은 사건 작업대(SCR-071)가 `/forensics?event={eventId}&case={caseId}`로 연다. 연구 원천은 연구 메뉴·SCR-031·SCR-067·대시보드가 `/forensics?event={eventId}&export={exportId}`로 연다. `caseId`·`exportId`는 계약의 UUID 꼴이고, 회차는 필수다. 두 키가 함께 있거나 둘 다 없으면 화면을 열지 않는다.
+- 운영 빌드는 `?source=`를 읽지 않는다. `?source=조사|연구`는 시험·시연 퍼블리싱에서만 원천을 고르는 값이고, 운영 빌드의 원천은 위의 연 길이 정한다. 그래서 사건 작업대에서 연 탭은 연구 원천을, 연구 메뉴에서 연 탭은 조사 원천을 열 수 없다(§6.6).
+
 이유:
 
 - 관제 콘솔은 webpack과 원격 위젯 구조이고, 이 앱은 Vite 앱이다. 콘솔 안으로 옮기면 화면을 다시 만들어야 한다. 원격 위젯으로 끼우기에는 원격마다 정한 예산(docs/frontend.md §5.8)보다 크다.

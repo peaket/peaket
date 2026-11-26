@@ -60,6 +60,7 @@ test('[ASVS v5.0.0-3.4.8] 데모 미리보기는 묶음 G, 운영 미리보기�
   assert.match(operating, /ops-api/);
   assert.match(operating, /frame-ancestors 'none'/);
   assert.equal(preview('operating')['Cross-Origin-Embedder-Policy'], 'require-corp');
+  // 배포(deploy/) 연결은 동결 밖이다. 이 시험은 생성기·개발·미리보기 헤더까지만 본다(계획 §6·§14)
 });
 
 test('[ASVS v5.0.0-3.5.4] 운영 빌드는 콘솔과 같은 출처의 /forensics/ 아래에 둔다', () => {
@@ -77,4 +78,6 @@ test('FX-T17 ① vite.config가 빌드 갈래·헤더 함수를 실제로 쓴다
   }
   assert.match(config, /server:\s*\{[^}]*headers:\s*forensicsDevHeaders\(/s);
   assert.match(config, /preview:\s*\{[^}]*headers:\s*forensicsPreviewHeaders\(/s);
+  // 운영 묶음의 진입점은 반드시 forensicsInput(mode)에서 온다(RV0416-03)
+  assert.match(config, /rolldownOptions:\s*\{[^}]*input:\s*forensicsInput\(/s, 'build.rolldownOptions.input이 forensicsInput(mode)을 쓰지 않는다');
 });
