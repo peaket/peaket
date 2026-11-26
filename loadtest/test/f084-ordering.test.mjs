@@ -259,6 +259,12 @@ test('MSR-040 ⑥ 보고서: 표시·10만·금지 주장·실행 ID를 각각 �
   const runExists = (id) => existsSync(P('docs', 'perf-ledger', 'runs', id));
   const md = renderReport({
     title: 'F-08-4 정렬 비교',
+    cells: [
+      { id: 'hybrid', lobbyShuffle: true, openBatch: true, operating: true, status: '미측정' },
+      { id: 'fifo', lobbyShuffle: false, openBatch: true, operating: true, status: '미측정' },
+      { id: 'prequeue', lobbyShuffle: true, openBatch: false, operating: true, status: '미측정' },
+      { id: 'none', lobbyShuffle: false, openBatch: false, operating: false, status: '기준선(운영 아님)' },
+    ],
     rows: [
       { section: 'Q-T1', item: 'hybrid T=0 최고 RPS', value: '미측정', status: '미측정', runId: null },
       { section: 'Q-T23', item: 'hybrid 스피어만', value: '미측정', status: '미측정', runId: null },
@@ -269,22 +275,33 @@ test('MSR-040 ⑥ 보고서: 표시·10만·금지 주장·실행 ID를 각각 �
   });
   assert.match(md, /10만[^\n]*미측정/);
   assert.doesNotMatch(md, /10만[^\n]*실측\(PC\)/);
-  assert.doesNotThrow(() => validateReport(md));
-  assert.doesNotThrow(() => validateReport(md, { runExists: () => true }));
+  assert.match(md, /운영 셀: 3/);
+  const checked = validateReport(md);
+  assert.equal(checked.operatingCells, 3, '보고서 운영 셀 수는 3이다');
+  assert.equal(checked.baselineCells, 1, '보고서 기준선 셀 수는 1이다');
+  assert.equal(validateReport(md, { runExists: () => true }).operatingCells, 3);
 
   assert.throws(() => validateReport(md.replace('미측정', '실측(PC)')), /실측|실행 ID|미측정/);
   const claim = (row) => `${md}\n| Q-T1 | ${row} | 1 | 실측(PC) | ${REAL_RUN} |\n`;
   assert.throws(() => validateReport(claim('초당 30,000건을 달성했다')), /30,000|금지/);
   assert.throws(() => validateReport(claim('100만을 달성했다')), /100만|금지/);
   assert.throws(() => validateReport(claim('K1 통과')), /K1|금지/);
+  assert.throws(() => validateReport(claim('K2 통과')), /K2|금지/);
+  assert.throws(() => validateReport(claim('K7 통과')), /K7|금지/);
   assert.throws(() => validateReport(`${md}\n| Q-T1 | 초당 1,000건 | 1,000 | | |\n`), /표시/);
   assert.throws(
     () => validateReport(`${md}\n| Q-T1 | 값 | 1 | 실측(PC) | 2026-11-30-f084-fake |\n`, { runExists: () => false }),
     /실행 ID|장부/,
   );
   assert.throws(() => validateReport(md.replace('기준선(운영 아님)', '통과')), /기준선|none/);
+  assert.throws(() => validateReport(md.replace('기준선(운영 아님)', '운영')), /기준선|운영|none/);
+  assert.throws(() => validateReport(md.replace('운영 셀: 3', '운영 셀: 4')), /운영 셀|3/);
+  const noneOperating = md.replace(/^(\| none \|[^\n]*\| )아니오( \| 기준선\(운영 아님\) \|)$/m, '$1예$2');
+  assert.notEqual(noneOperating, md, 'none 행의 운영 칸을 찾지 못했다');
+  assert.throws(() => validateReport(noneOperating), /운영|기준선|none/);
 
-  assert.doesNotThrow(() => validateReport(real, { runExists }));
+  const realChecked = validateReport(real, { runExists });
+  assert.equal(realChecked.operatingCells, 3, '실제 보고서의 운영 셀 수는 3이다');
   const measuredRows = real
     .split(/\r?\n/)
     .filter((line) => line.trimStart().startsWith('|') && line.includes('실측(PC)'));
