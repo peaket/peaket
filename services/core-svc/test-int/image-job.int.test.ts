@@ -303,11 +303,18 @@ describe('F-10-2 이미지 작업 원장 실제 DB 배선', () => {
     await worker.runOnce(new Date(clock.now()));
     const firstId = json(await first).imageId as string;
     expect(publicFiles(firstId)).toHaveLength(namesFor(1200).length);
+    // 첫 올리기의 #background 정리가 끝난 뒤에야 남은 시험 객체를 써야 경쟁하지 않는다
+    await eventually(() => {
+      expect(stagingDirs()).not.toContain(firstId);
+      expect(quarantineFiles()).not.toContain(firstId);
+    });
     // 옛 이미지의 준비·격리 위치에 남은 객체도 CLEANUP이 지우는지 보려고 하나씩 남긴다
     mkdirSync(join(dir, 'staging', 'production', firstId), { recursive: true });
     writeFileSync(join(dir, 'staging', 'production', firstId, '320.webp'), derived('320.webp', firstId));
     mkdirSync(join(dir, 'quarantine', 'production'), { recursive: true });
     writeFileSync(join(dir, 'quarantine', 'production', firstId), Buffer.from('orphan'));
+    expect(stagingDirs()).toContain(firstId);
+    expect(quarantineFiles()).toContain(firstId);
     const second = upload({ kind: 'POSTER' });
     await waitJob();
     await worker.runOnce(new Date(clock.now()));
