@@ -47,7 +47,7 @@ function performanceClaims(text) {
 
 // 측정하지 않은 수치를 새로 주장하는 줄을 찾는다. 같은 줄에 미측정·금지·보류 표시가 있으면 설명으로 본다.
 function numberClaimLines(text, patterns) {
-  const context = ['재지', '없', '보류', '미측정', '금지', '주장하지', '동결'];
+  const context = ['재지', '재지 못', '주장하지', '미측정', '보류', '금지', '동결', '측정하지 않'];
   return linesOf(text).filter(
     (line) => patterns.some((pattern) => pattern.test(line)) && !context.some((word) => line.includes(word)),
   );
