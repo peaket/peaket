@@ -61,10 +61,19 @@ const processing = {
     if (m.includes('OUTSIDEKEY')) return { status: 'ACCEPTED' as const, width: 800, height: 600, derivativeKeys: [`staging/other/${id}/240.webp`, `staging/other/${id}/1280.webp`] };
     if (m.includes('EXTRAKEY')) return { status: 'ACCEPTED' as const, width: 800, height: 600, derivativeKeys: [...keys, `staging/review/${id}/640.webp`] };
     if (m.includes('SHORT319')) return { status: 'ACCEPTED' as const, width: 319, height: 600, derivativeKeys: keys };
-    if (m.includes('SHORT320')) return { status: 'ACCEPTED' as const, width: 320, height: 600, derivativeKeys: keys };
-    if (m.includes('LONG20000')) return { status: 'ACCEPTED' as const, width: 800, height: 20_000, derivativeKeys: keys };
+    if (m.includes('SHORT320')) {
+      for (const k of keys) objects.staging.set(k, WEBP);
+      return { status: 'ACCEPTED' as const, width: 320, height: 600, derivativeKeys: keys };
+    }
+    if (m.includes('LONG20000')) {
+      for (const k of keys) objects.staging.set(k, WEBP);
+      return { status: 'ACCEPTED' as const, width: 800, height: 20_000, derivativeKeys: keys };
+    }
     if (m.includes('LONG20001')) return { status: 'ACCEPTED' as const, width: 800, height: 20_001, derivativeKeys: keys };
-    if (m.includes('PIXELS40000000')) return { status: 'ACCEPTED' as const, width: 8_000, height: 5_000, derivativeKeys: keys };
+    if (m.includes('PIXELS40000000')) {
+      for (const k of keys) objects.staging.set(k, WEBP);
+      return { status: 'ACCEPTED' as const, width: 8_000, height: 5_000, derivativeKeys: keys };
+    }
     if (m.includes('PIXELS40000001')) return { status: 'ACCEPTED' as const, width: 8_000, height: 5_001, derivativeKeys: keys };
     for (const k of keys) objects.staging.set(k, m.includes('BIGDERIV') ? new Uint8Array(5 * 1024 * 1024 + 1) : WEBP);
     return { status: 'ACCEPTED' as const, width: 800, height: 600, derivativeKeys: keys };

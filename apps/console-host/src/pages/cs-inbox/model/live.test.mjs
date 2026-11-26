@@ -124,7 +124,7 @@ test('R-T51 ⑤ 처리 버튼: CS 담당자는 CS 건만, operator·commander는
 // F-06-2 검증 2 놓친 표본 반영(시험 담당 lane3-f062-test): 화면 종류 거르기는 서버가 받는 종류 열과 같다.
 // 정본: ADR-0364 결정 4(아홉), ADR-0368 결정 5(정산 이의 STATEMENT_DISPUTE를 받는다), d5 §7.6(CS 담당자에게 지급·대사·KYC 종류는 거르기에도 나오지 않는다, open-items 72번)
 test('R-T51 ① 종류 거르기는 받는 종류 열과 같은 집합이고 지급·대사·KYC 종류가 없다', () => {
-  const accepted = ['REFUND_FAILED', 'FLAGGED', 'JUDGEMENT_PENDING', 'REFUND_ACCOUNT_PENDING', 'COMPENSATION_PENDING', 'VERIFICATION_APPEAL', 'DISPUTE', 'SCANNER_UNREPORTED', 'APPROVAL_EXECUTION_FAILED', 'STATEMENT_DISPUTE'];
+  const accepted = ['REFUND_FAILED', 'FLAGGED', 'JUDGEMENT_PENDING', 'REFUND_ACCOUNT_PENDING', 'COMPENSATION_PENDING', 'VERIFICATION_APPEAL', 'DISPUTE', 'SCANNER_UNREPORTED', 'APPROVAL_EXECUTION_FAILED', 'STATEMENT_DISPUTE', 'CONTENT_REPORT', 'RIGHTS_REQUEST'];
   assert.equal(new Set(FILTER_KINDS).size, FILTER_KINDS.length, '겹친 종류');
   assert.deepEqual([...FILTER_KINDS].sort(), [...accepted].sort());
   for (const k of ['SELLER_KYC_REQUIRED', 'PAYOUT_ERROR', 'PAYOUT_FAILED', 'PAYOUT_DELAYED', 'PORTONE_PAYOUT_EXECUTION', 'PORTONE_LEDGER_MISMATCH', 'PG_BALANCE_MISMATCH']) assert.equal(FILTER_KINDS.includes(k), false, k);

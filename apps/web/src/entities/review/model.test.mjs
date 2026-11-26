@@ -28,7 +28,7 @@ test('SCR016_ API 후기를 화면 카드로 바꾸고 KST 관람·작성일을 
     order: Date.parse('2026-10-25T12:00:00Z'),
     stars: 4,
     body: '무대가 좋았습니다.',
-    photos: [{ caption: '무대', url: 'https://img.test/f.jpg', thumbnailUrl: 'https://img.test/t.jpg' }],
+    photos: [{ imageId: 'i1', caption: '무대', url: 'https://img.test/f.jpg', thumbnailUrl: 'https://img.test/t.jpg' }],
     mine: true,
     reportedByMe: true,
     status: 'VISIBLE',

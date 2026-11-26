@@ -23,13 +23,13 @@ const methodOf = (name) => {
 };
 
 // F-06-7 GAT-280(시험 담당 lane3-f067-test): 이의 심사 패널이 넷째 생성 호출(createOpsCaseVerificationAppealDecision)을 더한다(계획 §4 화면, B-T28 ⑦)
-test('R-T51 ② B-T28 ⑦ 화면은 생성 호출 넷(목록·상세·갱신·이의 결정)과 세션 읽기만 쓰고 fetch를 만들지 않는다', () => {
+test('R-T51 ② B-T28 ⑦ 화면은 생성 호출 여섯(목록·상세·갱신·이의 결정·후기 상세·후기 조치)과 세션 읽기만 쓰고 fetch를 만들지 않는다', () => {
   assert.equal(methodOf('listOpsCases'), 'GET');
   assert.equal(methodOf('getOpsCase'), 'GET');
   assert.equal(methodOf('updateOpsCase'), 'PATCH');
   assert.match(operations, /updateOpsCase: \{[^}]*method: "PATCH",path: "\/v1\/ops\/cases\/\{caseId\}"[^}]*ifMatch: true/);
   const used = [...connected.matchAll(/const \{ (\w+) \} = await ops\(\)/g)].map((m) => m[1]).sort();
-  assert.deepEqual(used, ['createOpsCaseVerificationAppealDecision', 'getMyOpsAuthSession', 'getOpsCase', 'listOpsCases', 'updateOpsCase']);
+  assert.deepEqual(used, ['createOpsCaseVerificationAppealDecision', 'createOpsReviewModeration', 'getMyOpsAuthSession', 'getOpsCase', 'getOpsReview', 'listOpsCases', 'updateOpsCase']);
   assert.match(connected, /const ops = \(\) => import\('@peaket\/api-client\/endpoints\/ops'\)/);
   assert.doesNotMatch(connected, /\bfetch\s*\(/);
   assert.doesNotMatch(connected, /XMLHttpRequest|EventSource|WebSocket/);
