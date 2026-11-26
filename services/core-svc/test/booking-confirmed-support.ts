@@ -63,6 +63,8 @@ export interface HeldEventInput {
   kind: string;
   payload: Record<string, unknown>;
   attempts: number;
+  partition?: number;
+  kafkaOffset?: number;
 }
 
 export interface HeldEventsLike {
@@ -93,6 +95,9 @@ export interface BookingConfirmedEventLike {
   occurredAtMs: number;
   amount: number;
   items: readonly { tierId: string; seatLabel?: string }[];
+  /** held_event에 남길 Kafka 위치(IR068-03) */
+  partition?: number;
+  kafkaOffset?: number;
 }
 
 export interface BookingIntakeResultLike {
@@ -237,6 +242,8 @@ export interface SetupOptions {
   subscriptions?: number;
   /** 주문·결제·발권 변경 스파이를 바꿔 끼울 때 */
   businessChanges?: BusinessChanges;
+  /** true면 intake에 noticeReader를 넘기지 않는다(IR068-06) */
+  withoutNoticeReader?: boolean;
 }
 
 /** 같은 계정·회차·판매자로 시험 무대 하나를 만든다. 실제 주소는 example.test만 쓴다 */
@@ -308,7 +315,7 @@ export function setupBooking(o: SetupOptions = {}): Setup {
     store,
     clock,
     optOutKey: OPTOUT_KEY,
-    noticeReader,
+    ...(o.withoutNoticeReader ? {} : { noticeReader }),
     catalog,
     heldEvents: held,
     signals,

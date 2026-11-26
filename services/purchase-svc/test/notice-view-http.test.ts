@@ -106,4 +106,11 @@ describe('F-06-8 notice-view', () => {
     expect(noticeAllowedOf!({ status: 'CONFIRMED', orderCancellationActive: true, eventCancellationApprovalPending: false })).toBe(false);
     expect(noticeAllowedOf!({ status: 'CONFIRMED', orderCancellationActive: false, eventCancellationApprovalPending: true })).toBe(false);
   });
+
+  test('IR068-02 내부 토큰이 없으면 운영에서 시작을 막는다(fail-closed)', () => {
+    const Guard = booking.NoticeViewTokenGuard as unknown as new (expected?: string, required?: boolean) => { onModuleInit(): void };
+    const guard = new Guard(undefined, true);
+    expect(typeof guard.onModuleInit).toBe('function');
+    expect(() => guard.onModuleInit()).toThrow();
+  });
 });

@@ -6,7 +6,7 @@ import { describe, expect, test } from 'vitest';
 import { CreateOrder } from '../src/modules/booking/application/create-order.js';
 import * as booking from '../src/modules/booking/index.js';
 import { ORDER_PROBLEMS, orderResponseOf, throwOrderProblem, type CreateOrderDeps, type NewOrder } from '../src/modules/booking/index.js';
-import { CONSENT_VERSION, ITEMS, NOW, okBody, okCommand, okIdem, OrderFakes } from './order-cases.js';
+import { AMOUNT, CONSENT_VERSION, ITEMS, NOW, okBody, okCommand, okIdem, OrderFakes } from './order-cases.js';
 
 /** 이 시험의 예매번호 날짜(2026-10-14 KST)와 같은 호출 시각. `order-cases`의 NOW(11-05)와 섞지 않는다 */
 const BOOKING_NOW = Date.parse('2026-10-14T03:00:00.000Z');
@@ -89,6 +89,38 @@ describe('F-06-8 예매번호', () => {
 
     const after = useCase({ now: Date.parse('2026-10-14T15:00:00.000Z'), seqs: [1] });
     expect(created(await after.order.execute(okCommand({ idem: okIdem({ key: randomUUID() }), body: okBody() }))).bookingNo).toBe('2026101500001');
+  });
+
+  test('IR068-04 멱등 재생(REPLAYED)은 원 주문 예매번호를 새 번호로 덮지 않는다', async () => {
+    const clock = fakeClock({ now: BOOKING_NOW });
+    const fx = new OrderFakes(clock);
+    const numbers = numbersOf([1]);
+    const writes = {
+      ...fx.writes,
+      create: async () => ({
+        status: 'REPLAYED' as const,
+        order: {
+          orderId: '0190f3a1-7c2e-7f00-8000-0000000000f1',
+          amount: AMOUNT,
+          status: 'CREATED' as const,
+          items: ITEMS,
+          bookingNumber: '2026100199999',
+        },
+      }),
+    };
+    const deps = {
+      ...fx.ports(),
+      writes,
+      signals: fx.signals,
+      consentVersion: CONSENT_VERSION,
+      clock,
+      bookingNumbers: numbers,
+    } as unknown as CreateOrderDeps;
+    const r = await new CreateOrder(deps).execute(okCommand({ idem: okIdem({ key: randomUUID() }), body: okBody() }));
+    expect(r.status).toBe(201);
+    const order = (r as unknown as { order: { bookingNumber?: string; bookingNo?: string } }).order;
+    expect(order.bookingNumber).toBe('2026100199999');
+    expect(order.bookingNo).toBeUndefined();
   });
 
   test('N-T27 ② 99,999번째는 만들고 100,000번째는 503 booking-number-exhausted로 닫는다', async () => {
