@@ -61,13 +61,25 @@ describe('공연 이미지 규칙', () => {
   test('파생본 키는 그 이미지 원본 폭 이하의 폭만 정확히 갖는다(원본보다 넓은 폭·모자람·남음·접두사 밖 거절) [ASVS v5.0.0-5.3.2]', () => {
     const id = '0190f3a1-7c2e-7a00-8000-000000000001';
     // 구현 전 서명(인자 없음·폭 없음)과 새 서명을 함께 견디게 시험 쪽에서만 넓힌다(시험 먼저, ADR-0372)
-    const names = derivativeNames as unknown as (width: number) => string[];
-    const matches = derivativeKeysMatch as unknown as (imageId: string, keys: string[], width: number) => boolean;
+    const names = derivativeNames as unknown as (width: number, kind?: string) => string[];
+    const matches = derivativeKeysMatch as unknown as (imageId: string, keys: string[], width: number, kind?: string) => boolean;
     const keysFor = (width: number) => names(width).map((n) => stagingKey(id, n));
+    // 폭 경계: 같으면 포함하고 하나 작으면 빼며, 320 미만은 빈 목록이다
+    expect(names(320)).toEqual(['320.avif', '320.webp']);
+    expect(names(319)).toEqual([]);
+    expect(names(639)).toEqual(['320.avif', '320.webp']);
+    expect(names(640)).toEqual([320, 640].flatMap((w) => [`${w}.avif`, `${w}.webp`]));
+    expect(names(959)).toEqual([320, 640].flatMap((w) => [`${w}.avif`, `${w}.webp`]));
+    expect(names(1280)).toEqual([320, 640, 960, 1280].flatMap((w) => [`${w}.avif`, `${w}.webp`]));
     // 1,200px 원본: 320·640·960만. 1,280px 칸은 원본보다 넓으므로 만들지 않는다
     expect(names(1200)).toEqual([320, 640, 960].flatMap((w) => [`${w}.avif`, `${w}.webp`]));
     expect(names(800)).toEqual([320, 640].flatMap((w) => [`${w}.avif`, `${w}.webp`]));
     expect(names(20_000)).toEqual([320, 640, 960, 1280].flatMap((w) => [`${w}.avif`, `${w}.webp`]));
+    // 후기 사진: 240은 늘, 1,280은 원본 긴 변이 1,280 이상일 때만
+    expect(names(1279, 'REVIEW_PHOTO')).toEqual(['240.webp']);
+    expect(names(1280, 'REVIEW_PHOTO')).toEqual(['240.webp', '1280.webp']);
+    // 홈 배너도 공연 이미지와 같은 폭·형식이다
+    expect(names(1240, 'HOME_BANNER')).toEqual([320, 640, 960].flatMap((w) => [`${w}.avif`, `${w}.webp`]));
     expect(keysFor(1200)).toEqual([320, 640, 960].flatMap((w) => [`staging/production/${id}/${w}.avif`, `staging/production/${id}/${w}.webp`]));
     expect(matches(id, keysFor(1200), 1200)).toBe(true);
     expect(matches(id, [...keysFor(1200)].reverse(), 1200)).toBe(true);

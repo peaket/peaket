@@ -34,18 +34,28 @@ describe('F-10-2 image-worker 배포·코드 모양', () => {
     // ① DB·Kafka·Redis Secret을 넣지 않는다(AWS S3 자격 증명은 동결 무대에서 Secret으로 받는다)
     expect(values).not.toMatch(/secretEnvFrom/);
     expect(values).not.toMatch(/^\s*(?:PEAKET_)?(?:DATABASE_URL|PARTNER_DATABASE_URL|OPS_DATABASE_URL|SEARCH_DATABASE_URL|MAINTENANCE_DATABASE_URL|KAFKA_[A-Z_]*|REDIS_[A-Z_]*):/m);
-    // ② 비루트·읽기 전용 루트는 공용 차트가 건다. 값이 덮어쓰지 않는다
+    // 필수 환경 값(계획 §5): 없으면 뜨지 않는 배포 값을 막는다
+    for (const key of ['PEAKET_GRPC_PORT', 'PEAKET_IMAGE_S3_ENDPOINT', 'PEAKET_IMAGE_S3_REGION', 'PEAKET_IMAGE_BUCKET', 'PEAKET_IMAGE_CONCURRENCY', 'PEAKET_IMAGE_TIMEOUT_MS']) {
+      expect(values, `${key}가 없다`).toMatch(new RegExp(`^\\s+${key}:\\s*["']?\\S+`, 'm'));
+    }
+    // ② 비루트·읽기 전용 루트·권한 상승 금지·capability 제거·seccomp는 공용 차트가 건다. 값이 덮어쓰지 않는다
     const helpers = read('deploy/charts/peaket-service/templates/_helpers.tpl');
-    expect(helpers).toMatch(/readOnlyRootFilesystem:\s*true/);
-    expect(helpers).toMatch(/runAsNonRoot:\s*true/);
+    for (const line of ['readOnlyRootFilesystem: true', 'runAsNonRoot: true', 'allowPrivilegeEscalation: false', 'seccompProfile: { type: RuntimeDefault }', 'capabilities: { drop: ["ALL"] }']) {
+      expect(helpers, `공용 차트에 ${line}가 없다`).toContain(line);
+    }
     expect(values).not.toMatch(/^\s*securityContext:/m);
     expect(values).not.toMatch(/readOnlyRootFilesystem:\s*false|runAsNonRoot:\s*false|allowPrivilegeEscalation:\s*true/);
-    // ③ 나가는 통신은 S3 VPC 엔드포인트 하나(443)다. 공인 HTTPS·다른 namespace는 열지 않는다
+    // IRSA 서비스 어카운트 주석과 역할 ARN
+    expect(values).toMatch(/serviceAccountAnnotations:/);
+    expect(values).toMatch(/eks\.amazonaws\.com\/role-arn:\s*arn:aws:iam::\d{12}:role\/peaket-image-worker/);
+    expect(helpers, '공용 차트가 serviceAccountAnnotations를 싣지 않는다').toContain('serviceAccountAnnotations');
+    // ③ 나가는 통신은 S3 VPC 엔드포인트 하나(10.20.0.0/16 [가정], 443)다. 공인 HTTPS·다른 namespace는 열지 않는다
     expect(values).toMatch(/publicHttps:\s*false/);
     expect(values, 'egress 값이 없다').toContain('egress:');
     const egress = values.slice(values.indexOf('egress:'));
     expect((egress.match(/cidrs:/g) ?? []).length).toBe(1);
-    expect(egress).not.toMatch(/namespaces:|publicHttps:\s*true/);
+    expect(egress).toMatch(/cidrs:\s*\[\s*10\.20\.0\.0\/16\s*\]/);
+    expect(egress).not.toMatch(/0\.0\.0\.0\/0|::\/0|namespaces:|publicHttps:\s*true/);
     expect(egress).toMatch(/ports:\s*\[\s*443\s*\]/);
     // 동시 처리 1, 메모리·CPU 상한
     expect(values).toMatch(/PEAKET_IMAGE_CONCURRENCY:\s*["']1["']/);
@@ -63,10 +73,9 @@ describe('F-10-2 image-worker 배포·코드 모양', () => {
     for (const r of rows) {
       expect(r.effect).toBe('Allow');
       expect(['s3:GetObject', 's3:PutObject', 's3:AbortMultipartUpload']).toContain(r.action);
-      expect(r.resource).not.toBe('*');
-      expect(r.resource).toMatch(/quarantine\/\*|staging\/\*/);
-      if (r.action === 's3:GetObject') expect(r.resource).toMatch(/quarantine\/\*/);
-      else expect(r.resource).toMatch(/staging\/\*/);
+      expect(r.resource, '버킷 ARN이 아니다').toMatch(/^arn:aws:s3:::[a-z0-9.-]+\/(?:quarantine|staging)\/\*$/);
+      if (r.action === 's3:GetObject') expect(r.resource).toMatch(/\/quarantine\/\*$/);
+      else expect(r.resource).toMatch(/\/staging\/\*$/);
     }
     expect(rows.some((r) => r.action === 's3:GetObject')).toBe(true);
     expect(rows.some((r) => r.action === 's3:PutObject')).toBe(true);
@@ -80,8 +89,9 @@ describe('F-10-2 image-worker 배포·코드 모양', () => {
       const name = relative(REPO, file);
       expect(text, `${name}가 셸을 부른다`).not.toMatch(/from\s+['"]node:child_process['"]/);
       expect(text, `${name}가 셸을 부른다`).not.toMatch(/\bexec(?:File|Sync)?\s*\(|\bspawn(?:Sync)?\s*\(/);
-      expect(text, `${name}가 HTTP를 직접 부른다`).not.toMatch(/from\s+['"](?:node:http|node:https|undici)['"]/);
-      expect(text, `${name}가 외부 URL을 부른다`).not.toMatch(/\bfetch\s*\(/);
+      expect(text, `${name}가 HTTP를 직접 부른다`).not.toMatch(/from\s+['"](?:node:http|node:https|undici|axios|got|node-fetch|superagent|request)['"]/);
+      expect(text, `${name}가 HTTP를 직접 부른다`).not.toMatch(/\b(?:axios|got|fetch|https?\.request)\s*\(/);
+      expect(text, `${name}가 외부 URL을 부른다`).not.toMatch(/https?:\/\//);
       expect(text, `${name}가 DB·Kafka·Redis 클라이언트를 쓴다`).not.toMatch(/from\s+['"](?:pg|drizzle-orm|kafkajs|redis|ioredis)['"]/);
     }
     // sharp는 image-worker 밖에서 쓰지 않는다(1.4.1)
@@ -93,7 +103,7 @@ describe('F-10-2 image-worker 배포·코드 모양', () => {
     const process = readFileSync(join(IMAGE_WORKER, 'process.ts'), 'utf8');
     expect(process).toMatch(/limitInputPixels/);
     expect(process).toMatch(/\.rotate\(/);
-    expect(process).not.toMatch(/withMetadata\s*\(/);
+    expect(process).not.toMatch(/withMetadata\s*\(|withExif\s*\(|keepExif\s*\(/);
     // 자격 증명 확인과 시작 기록
     const main = readFileSync(join(IMAGE_WORKER, 'main.ts'), 'utf8');
     expect(main).toMatch(/forbiddenCredentialNames|forbiddenCredential/);
@@ -107,6 +117,9 @@ describe('F-10-2 image-worker 배포·코드 모양', () => {
     expect(store).toMatch(/ContentDisposition/);
     expect(store).toMatch(/inline; filename=/);
     expect(store).toMatch(/ContentType/);
-    expect(read('services/core-svc/src/modules/catalog/adapters/image-store.ts')).toMatch(/banner|review/);
+    expect(store).toMatch(/IfNoneMatch|If-None-Match/);
+    for (const kind of ['production', 'banner', 'review']) expect(store, `S3 어댑터에 ${kind} 접두사가 없다`).toContain(kind);
+    const localStore = read('services/core-svc/src/modules/catalog/adapters/image-store.ts');
+    for (const kind of ['production', 'banner', 'review']) expect(localStore, `로컬 저장소에 ${kind} 접두사가 없다`).toContain(kind);
   });
 });

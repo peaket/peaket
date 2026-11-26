@@ -57,19 +57,22 @@ test('D-T35 ④ 모의 검사기는 moto S3에서 EICAR만 THREATS_FOUND로 표�
     assert.ok((await fetch(`${endpoint}/${BUCKET}`, { method: 'PUT' })).status < 300, '버킷을 만들지 못했다');
     assert.ok((await fetch(`${endpoint}/${BUCKET}/clean.png`, { method: 'PUT', body: PNG })).status < 300);
     assert.ok((await fetch(`${endpoint}/${BUCKET}/eicar.png`, { method: 'PUT', body: EICAR })).status < 300);
-    // 이미 태그가 붙은 객체는 건드리지 않는다
+    // 이미 태그가 붙은 객체는 건드리지 않는다. 검사 실패(FAILED)를 clean으로 바꾸지 않는다.
     assert.ok((await fetch(`${endpoint}/${BUCKET}/tagged.png`, { method: 'PUT', body: EICAR, headers: { 'x-amz-tagging': `${TAG_KEY}=NO_THREATS_FOUND` } })).status < 300);
+    assert.ok((await fetch(`${endpoint}/${BUCKET}/tagged-failed.png`, { method: 'PUT', body: PNG, headers: { 'x-amz-tagging': `${TAG_KEY}=FAILED` } })).status < 300);
 
     await scan(endpoint);
     assert.equal(await tagOf(endpoint, 'clean.png'), 'NO_THREATS_FOUND');
     assert.equal(await tagOf(endpoint, 'eicar.png'), 'THREATS_FOUND');
     assert.equal(await tagOf(endpoint, 'tagged.png'), 'NO_THREATS_FOUND');
+    assert.equal(await tagOf(endpoint, 'tagged-failed.png'), 'FAILED');
     // 두 번째 실행은 객체·태그를 바꾸지 않는다(멱등)
     const before = await (await fetch(`${endpoint}/${BUCKET}?list-type=2`)).text();
     await scan(endpoint);
     assert.equal(await tagOf(endpoint, 'clean.png'), 'NO_THREATS_FOUND');
     assert.equal(await tagOf(endpoint, 'eicar.png'), 'THREATS_FOUND');
     assert.equal(await tagOf(endpoint, 'tagged.png'), 'NO_THREATS_FOUND');
+    assert.equal(await tagOf(endpoint, 'tagged-failed.png'), 'FAILED');
     const after = await (await fetch(`${endpoint}/${BUCKET}?list-type=2`)).text();
     assert.equal(after, before, '다시 돌렸더니 객체 목록이 바뀌었다');
   } finally {

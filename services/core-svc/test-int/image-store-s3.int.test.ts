@@ -76,17 +76,28 @@ afterAll(() => {
 });
 
 describe('F-10-2 S3 이미지 저장소', () => {
-  test('D-T35 ④ 공개 파생본은 image/avif·image/webp, immutable 캐시, inline 파일 이름으로 올린다 [ASVS v5.0.0-3.2.1] [ASVS v5.0.0-4.1.1] [ASVS v5.0.0-5.4.1]', async () => {
+  test('D-T35 ④ 공개 파생본은 AVIF·WebP 모두 맞는 Content-Type, immutable 캐시, inline 파일 이름으로 올리고 덮어쓰지 않는다 [ASVS v5.0.0-3.2.1] [ASVS v5.0.0-4.1.1] [ASVS v5.0.0-5.4.1]', async () => {
     ready();
-    const bytes = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x45, 0x42, 0x50]);
-    await store.putPublic(`production/${ID}/320.webp`, bytes, 'image/webp');
-    const h = await head(`production/${ID}/320.webp`);
-    expect(h.status).toBe(200);
-    expect(h.headers.get('content-type')).toBe('image/webp');
-    expect(h.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
-    expect(h.headers.get('content-disposition')).toBe(`inline; filename="${ID}.webp"`);
-    // 준비 위치(격리 원본)는 비공개·no-store다
-    await store.putQuarantine(`quarantine/production/${ID}`, bytes);
+    const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x45, 0x42, 0x50]);
+    const avif = new Uint8Array([0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66]);
+    for (const [name, bytes, type] of [
+      ['320.webp', webp, 'image/webp'],
+      ['320.avif', avif, 'image/avif'],
+    ] as const) {
+      await store.putPublic(`production/${ID}/${name}`, bytes, type);
+      const h = await head(`production/${ID}/${name}`);
+      expect(h.status).toBe(200);
+      expect(h.headers.get('content-type')).toBe(type);
+      expect(h.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+      expect(h.headers.get('content-disposition')).toBe(`inline; filename="${ID}.${name.endsWith('webp') ? 'webp' : 'avif'}"`);
+    }
+    // 확장자와 Content-Type이 맞지 않으면 쓰지 않는다
+    await expect(store.putPublic(`production/${ID}/640.avif`, avif, 'image/webp')).rejects.toThrow();
+    // 공개 파생본은 immutable이라 같은 키를 덮어쓰지 않는다
+    await expect(store.putPublic(`production/${ID}/320.webp`, new Uint8Array([9, 9, 9]), 'image/webp')).rejects.toThrow();
+    expect(Buffer.from(await (await fetch(`http://127.0.0.1:${new URL(endpoint).port}/${BUCKET}/production/${ID}/320.webp`)).arrayBuffer())).toEqual(Buffer.from(webp));
+    // 격리 원본은 비공개·no-store다
+    await store.putQuarantine(`quarantine/production/${ID}`, webp);
     const q = await head(`quarantine/production/${ID}`);
     expect(q.status).toBe(200);
     expect(q.headers.get('cache-control')).toBe('private, no-store');
@@ -107,9 +118,20 @@ describe('F-10-2 S3 이미지 저장소', () => {
     }
     // 원본은 공개 위치로 올리지 못한다(접두사가 다르다)
     await expect(store.putPublic(`quarantine/production/${ID}`, bytes, 'image/webp')).rejects.toThrow();
-    // 후기 사진 접두사는 받는다(정한 꼴 안)
-    await store.putQuarantine(`quarantine/review/${ID}`, bytes);
-    expect((await head(`quarantine/review/${ID}`)).status).toBe(200);
+    // 공연·배너·후기 사진 접두사는 격리·준비·공개 위치 모두 받는다(F-10-1이 같은 규칙을 쓴다)
+    for (const [kind, name] of [
+      ['production', '320.webp'],
+      ['banner', '640.avif'],
+      ['review', '240.webp'],
+    ] as const) {
+      await store.putQuarantine(`quarantine/${kind}/${ID}`, bytes);
+      expect((await head(`quarantine/${kind}/${ID}`)).status, `quarantine/${kind}`).toBe(200);
+      expect((await putRaw(`staging/${kind}/${ID}/${name}`, bytes)).status, `staging/${kind}`).toBe(200);
+      expect(await store.stagingSize(`staging/${kind}/${ID}/${name}`), `staging/${kind}`).toBe(3);
+      await store.putPublic(`${kind}/${ID}/${name}`, bytes, name.endsWith('avif') ? 'image/avif' : 'image/webp');
+      expect((await head(`${kind}/${ID}/${name}`)).status, `${kind} 공개`).toBe(200);
+    }
+    await expect(store.putQuarantine(`quarantine/other/${ID}`, bytes)).rejects.toThrow();
     expect(await store.stagingSize(`staging/production/${ID}/320.webp`)).toBeUndefined();
     expect(await store.readStaging(`staging/production/${ID}/320.webp`)).toBeUndefined();
   });

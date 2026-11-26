@@ -19,12 +19,11 @@ beforeAll(async () => {
   }
 });
 
-type Next = (input: { status: string; attempts: number; outcome: string; now: Date; rejectReason?: string }) => {
+type Next = (input: { status: string; attempts: number; outcome: string; now: Date }) => {
   status: string;
   attempts: number;
   nextAttemptAt?: Date;
   resultStatus?: string;
-  rejectReason?: string;
 };
 
 const next = (): Next => {
@@ -36,8 +35,12 @@ const next = (): Next => {
 
 describe('F-10-2 이미지 작업 상태', () => {
   test('F-10-2 이미지 작업 상태: ACCEPTED는 DONE, SCAN_PENDING은 60초 뒤 RETRYING, 무응답은 5초 뒤 RETRYING, 10회면 DEAD다 [ASVS v5.0.0-16.5.3]', () => {
-    expect(next()({ status: 'SCANNING', attempts: 1, outcome: 'ACCEPTED', now })).toMatchObject({ status: 'DONE', attempts: 1, resultStatus: 'ACCEPTED' });
-    expect(next()({ status: 'SCANNING', attempts: 1, outcome: 'REJECTED', now, rejectReason: 'MALWARE' })).toMatchObject({ status: 'DONE', attempts: 1, resultStatus: 'REJECTED', rejectReason: 'MALWARE' });
+    const accepted = next()({ status: 'SCANNING', attempts: 1, outcome: 'ACCEPTED', now });
+    expect(accepted).toMatchObject({ status: 'DONE', attempts: 1, resultStatus: 'ACCEPTED' });
+    expect(accepted.nextAttemptAt).toBeUndefined();
+    const rejected = next()({ status: 'SCANNING', attempts: 1, outcome: 'REJECTED', now });
+    expect(rejected).toMatchObject({ status: 'DONE', attempts: 1, resultStatus: 'REJECTED' });
+    expect(rejected.nextAttemptAt).toBeUndefined();
     const pending = next()({ status: 'SCANNING', attempts: 1, outcome: 'SCAN_PENDING', now });
     expect(pending.status).toBe('RETRYING');
     expect(pending.attempts).toBe(2);
@@ -46,9 +49,14 @@ describe('F-10-2 이미지 작업 상태', () => {
     expect(down.status).toBe('RETRYING');
     expect(down.attempts).toBe(2);
     expect(down.nextAttemptAt?.getTime()).toBe(now.getTime() + 5_000);
-    // 열 번을 넘으면 더 맡기지 않는다(요청은 503, fail-closed)
-    expect(next()({ status: 'SCANNING', attempts: 10, outcome: 'SCAN_PENDING', now })).toMatchObject({ status: 'DEAD', attempts: 10 });
+    // 열 번을 넘으면 더 맡기지 않는다(요청은 503, fail-closed). 무응답도 같은 상한이다.
+    const scanDead = next()({ status: 'SCANNING', attempts: 10, outcome: 'SCAN_PENDING', now });
+    expect(scanDead).toMatchObject({ status: 'DEAD', attempts: 10 });
+    expect(scanDead.nextAttemptAt).toBeUndefined();
     expect(next()({ status: 'SCANNING', attempts: 9, outcome: 'SCAN_PENDING', now })).toMatchObject({ status: 'RETRYING', attempts: 10 });
+    const downDead = next()({ status: 'SCANNING', attempts: 10, outcome: 'UNAVAILABLE', now });
+    expect(downDead).toMatchObject({ status: 'DEAD', attempts: 10 });
+    expect(downDead.nextAttemptAt).toBeUndefined();
     // 정리 작업은 지운 뒤 DONE·DELETED다
     expect(next()({ status: 'SCANNING', attempts: 1, outcome: 'CLEANUP_DONE', now })).toMatchObject({ status: 'DONE', attempts: 1, resultStatus: 'DELETED' });
   });
@@ -57,13 +65,16 @@ describe('F-10-2 이미지 작업 상태', () => {
     const file = `${dir}0050_image_job.sql`;
     expect(existsSync(file)).toBe(true);
     const sql = readFileSync(file, 'utf8').replace(/\s+/g, ' ');
-    expect(sql).toMatch(/create table (?:if not exists )?image_job/i);
-    expect(sql).toMatch(/source_key text not null/i);
+    expect(sql).toMatch(/create table (?:if not exists )?"?image_job"?/i);
+    for (const column of ['"id" uuid primary key', '"source_key" text not null', '"kind" text not null', '"status" text default \'pending\' not null', '"attempts" integer default 0 not null', '"next_attempt_at" timestamp with time zone', '"lease_until" timestamp with time zone', '"result_status" text', '"width" integer', '"height" integer', '"derivative_keys" jsonb', '"reject_reason" text', '"created_at" timestamp with time zone not null', '"updated_at" timestamp with time zone not null']) {
+      expect(sql.toLowerCase(), `칸 ${column}`).toContain(column);
+    }
     expect(sql).toMatch(/unique[^;]*source_key|source_key[^;]*unique/i);
     expect(sql).toMatch(/status[^;]*in \('PENDING', 'SCANNING', 'RETRYING', 'DONE', 'DEAD'\)/i);
     expect(sql).toMatch(/kind[^;]*in \('PRODUCTION', 'HOME_BANNER', 'REVIEW_PHOTO', 'CLEANUP'\)/i);
+    expect(sql).toMatch(/result_status[^;]*in \('ACCEPTED', 'REJECTED', 'DELETED'\)/i);
     expect(sql).toMatch(/attempts[^;]*>= 0/i);
-    expect(sql).toMatch(/jsonb[^;]*derivative_keys|derivative_keys[^;]*jsonb/i);
     expect(sql).toMatch(/create (?:unique )?index[^;]*image_job[^;]*next_attempt_at/i);
+    expect(sql).toMatch(/grant select, insert, update, delete on "?image_job"? to core_app/i);
   });
 });

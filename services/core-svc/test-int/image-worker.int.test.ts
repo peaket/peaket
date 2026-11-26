@@ -6,6 +6,7 @@
 // 시험 먼저: 구현 전에는 dist/image-worker/main.js가 없어 이 파일이 실패한다(ADR-0372).
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import * as grpc from '@grpc/grpc-js';
@@ -24,6 +25,8 @@ const EICAR = 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$
 const SECRET = 'PEAKET-GPS-SECRET';
 const WIDTHS = [320, 640, 960, 1280];
 const namesFor = (width: number) => WIDTHS.filter((w) => w <= width).flatMap((w) => [`${w}.avif`, `${w}.webp`]);
+const FIXTURES = new URL('../test/fixtures/f10-2/', import.meta.url);
+const fixture64 = (name: string) => Buffer.from(readFileSync(new URL(name, FIXTURES)).toString('utf8').trim(), 'base64');
 
 const docker = (args: string[]) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 }).trim();
 
@@ -237,6 +240,7 @@ describe('F-10-2 image-worker', () => {
     for (const n of namesFor(1200)) {
       const h = await head(`staging/production/${id}/${n}`);
       expect(h.get('content-type')).toBe(n.endsWith('.avif') ? 'image/avif' : 'image/webp');
+      expect(h.get('cache-control')).toBe('private, no-store');
     }
     expect(await list('public/')).toEqual([]);
     // 같은 원본 키로 다시 맡기면 같은 결과이고 객체를 더 쓰지 않는다
@@ -244,6 +248,28 @@ describe('F-10-2 image-worker', () => {
     expect(again).toMatchObject({ status: 'IMAGE_STATUS_ACCEPTED', width: 1200, height: 1600 });
     expect([...(again.derivative_keys as string[])].sort()).toEqual(expected);
     expect(await list(`staging/production/${id}/`)).toEqual(expected);
+  });
+
+  test('D-T35 ④ JPEG·WebP 원본을 디코딩하고 홈 배너는 공연 이미지와 같은 폭·형식 규격을 쓴다 [ASVS v5.0.0-5.1.1] [ASVS v5.0.0-5.2.2]', async () => {
+    ready();
+    for (const [name, bytes] of [
+      ['JPEG', fixture64('poster-800x1000.jpg.b64')],
+      ['WebP', fixture64('poster-800x1000.webp.b64')],
+    ] as const) {
+      const id = randomUUID();
+      const key = `quarantine/production/${id}`;
+      await put(key, bytes, 'NO_THREATS_FOUND');
+      const out = await processImage(key);
+      expect(out.status, name).toBe('IMAGE_STATUS_ACCEPTED');
+      expect([out.width, out.height], name).toEqual([800, 1000]);
+      expect([...(out.derivative_keys as string[])].sort(), name).toEqual(namesFor(800).map((n) => `staging/production/${id}/${n}`));
+    }
+    const id = randomUUID();
+    await put(`quarantine/banner/${id}`, png(1240, 400), 'NO_THREATS_FOUND');
+    const banner = await processImage(`quarantine/banner/${id}`, 'IMAGE_KIND_HOME_BANNER');
+    expect(banner.status).toBe('IMAGE_STATUS_ACCEPTED');
+    expect([...(banner.derivative_keys as string[])].sort()).toEqual(namesFor(1240).map((n) => `staging/banner/${id}/${n}`));
+    expect((banner.derivative_keys as string[]).some((k) => k.includes('/1280.'))).toBe(false);
   });
 
   test('D-T35 ④ EICAR를 THREATS_FOUND로 표시하면 MALWARE로 거절하고 파생본을 쓰지 않는다 [ASVS v5.0.0-5.4.3]', async () => {
@@ -257,40 +283,62 @@ describe('F-10-2 image-worker', () => {
     expect(await list(`staging/production/${id}/`)).toEqual([]);
   });
 
-  test('D-T35 ④ 4,000만 화소를 넘는 이미지는 디코딩 전에 TOO_LARGE로 거절한다 [ASVS v5.0.0-5.2.1] [ASVS v5.0.0-5.2.6]', async () => {
+  test('D-T35 ④ 4,000만 화소·긴 변 20,000 경계는 넘지 않고 하나 넘으면 디코딩 전 2초 안에 TOO_LARGE로 거절한다 [ASVS v5.0.0-5.2.1] [ASVS v5.0.0-5.2.6]', async () => {
     ready();
-    const id = randomUUID();
-    const key = `quarantine/production/${id}`;
-    await put(key, pngHeaderOnly(8000, 5001), 'NO_THREATS_FOUND');
-    const started = Date.now();
-    const out = await processImage(key);
-    expect(out).toMatchObject({ status: 'IMAGE_STATUS_REJECTED', reject_reason: 'IMAGE_REJECT_REASON_TOO_LARGE' });
-    expect(Date.now() - started).toBeLessThan(5_000);
-    expect(await list(`staging/production/${id}/`)).toEqual([]);
+    // 경계값: 화소 40,000,000과 긴 변 20,000은 TOO_LARGE가 아니다(화소 데이터가 없어 그다음 디코딩에서 거절된다)
+    for (const [w, h] of [[8000, 5000], [20_000, 2000]] as const) {
+      const id = randomUUID();
+      await put(`quarantine/production/${id}`, pngHeaderOnly(w, h), 'NO_THREATS_FOUND');
+      const out = await processImage(`quarantine/production/${id}`);
+      expect(out.status).toBe('IMAGE_STATUS_REJECTED');
+      expect(out.reject_reason, `${w}×${h}는 화소 상한 안이다`).not.toBe('IMAGE_REJECT_REASON_TOO_LARGE');
+    }
+    for (const [w, h] of [[8000, 5001], [20_001, 1000]] as const) {
+      const id = randomUUID();
+      await put(`quarantine/production/${id}`, pngHeaderOnly(w, h), 'NO_THREATS_FOUND');
+      const started = Date.now();
+      const out = await processImage(`quarantine/production/${id}`);
+      expect(out).toMatchObject({ status: 'IMAGE_STATUS_REJECTED', reject_reason: 'IMAGE_REJECT_REASON_TOO_LARGE' });
+      expect(Date.now() - started, `${w}×${h}가 2초를 넘었다`).toBeLessThan(2_000);
+      expect(await list(`staging/production/${id}/`)).toEqual([]);
+    }
   });
 
-  test('D-T35 ④ 검사 태그가 없으면 SCAN_PENDING으로 답하고 파생본을 쓰지 않는다 [ASVS v5.0.0-16.5.3]', async () => {
+  test('D-T35 ④ 검사 태그가 없거나 UNSUPPORTED·ACCESS_DENIED·FAILED면 디코딩 전에 SCAN_PENDING으로 답한다 [ASVS v5.0.0-5.4.3] [ASVS v5.0.0-16.5.3]', async () => {
     ready();
-    const id = randomUUID();
-    const key = `quarantine/production/${id}`;
-    await put(key, png(1200, 1600));
-    const out = await processImage(key);
-    expect(out.status).toBe('IMAGE_STATUS_SCAN_PENDING');
-    expect(await list(`staging/production/${id}/`)).toEqual([]);
-    // 원본은 남는다(작업 워커가 60초 뒤 다시 맡긴다)
-    expect((await fetch(url(key), { method: 'HEAD' })).status).toBe(200);
+    // 깨진 PNG를 쓴다: 태그 확인 전에 디코딩하면 UNSUPPORTED_TYPE이 나므로 SCAN_PENDING이면 순서가 맞다.
+    for (const tag of [undefined, 'UNSUPPORTED', 'ACCESS_DENIED', 'FAILED'] as const) {
+      const id = randomUUID();
+      const key = `quarantine/production/${id}`;
+      await put(key, corruptPng(), tag);
+      const out = await processImage(key);
+      expect(out.status, `태그 ${tag ?? '없음'}`).toBe('IMAGE_STATUS_SCAN_PENDING');
+      expect(await list(`staging/production/${id}/`)).toEqual([]);
+      // 원본은 남는다(작업 워커가 60초 뒤 다시 맡긴다)
+      expect((await fetch(url(key), { method: 'HEAD' })).status).toBe(200);
+    }
   });
 
-  test('D-T35 ④ 메타데이터(EXIF GPS)를 지운다 [ASVS v5.0.0-14.2.8]', async () => {
+  test('D-T35 ④ 메타데이터(EXIF GPS)를 AVIF·WebP 모든 폭에서 지운다 [ASVS v5.0.0-14.2.8]', async () => {
     ready();
-    const id = randomUUID();
-    const key = `quarantine/production/${id}`;
-    await put(key, png(1200, 1600, exifWithSecret()), 'NO_THREATS_FOUND');
-    const out = await processImage(key);
-    expect(out.status).toBe('IMAGE_STATUS_ACCEPTED');
-    const bytes = await get(`staging/production/${id}/320.webp`);
-    expect(bytes.toString('latin1')).not.toContain(SECRET);
-    expect(bytes.toString('latin1')).not.toMatch(/exif/i);
+    // PNG eXIf와 JPEG APP1 EXIF를 모두 쓴다. JPEG는 800×1000이라 320·640 파생본이 나온다.
+    for (const [name, bytes, width] of [
+      ['png-exif', png(1200, 1600, exifWithSecret()), 1200],
+      ['jpeg-exif', fixture64('poster-exif-800x1000.jpg.b64'), 800],
+    ] as const) {
+      const id = randomUUID();
+      const key = `quarantine/production/${id}`;
+      await put(key, bytes, 'NO_THREATS_FOUND');
+      const out = await processImage(key);
+      expect(out.status, name).toBe('IMAGE_STATUS_ACCEPTED');
+      const names = namesFor(width);
+      expect(names.length, `${name} 파생본`).toBeGreaterThan(0);
+      for (const n of names) {
+        const b = await get(`staging/production/${id}/${n}`);
+        expect(b.toString('latin1'), `${name} ${n}`).not.toContain(SECRET);
+        expect(b.toString('latin1'), `${name} ${n}`).not.toMatch(/exif|gps/i);
+      }
+    }
   });
 
   test('D-T35 ④ 후기 사진은 240px·긴 변 1,280px WebP만 만들고 JPEG는 만들지 않는다 [ASVS v5.0.0-5.1.1]', async () => {
@@ -305,6 +353,16 @@ describe('F-10-2 image-worker', () => {
     expect((await list(`staging/review/${id}/`)).filter((k) => /\.(jpg|jpeg|avif)$/.test(k))).toEqual([]);
   });
 
+  test('D-T35 ④ 후기 사진 원본 긴 변이 1,280보다 작으면 1,280 파생본을 만들지 않는다 [ASVS v5.0.0-5.1.1]', async () => {
+    ready();
+    const id = randomUUID();
+    await put(`quarantine/review/${id}`, png(1279, 800), 'NO_THREATS_FOUND');
+    const out = await processImage(`quarantine/review/${id}`, 'IMAGE_KIND_REVIEW_PHOTO');
+    expect(out.status).toBe('IMAGE_STATUS_ACCEPTED');
+    expect([...(out.derivative_keys as string[])]).toEqual([`staging/review/${id}/240.webp`]);
+    expect(await list(`staging/review/${id}/`)).toEqual([`staging/review/${id}/240.webp`]);
+  });
+
   test('D-T35 ④ 형식이 아닌 파일(SVG·깨진 PNG)은 UNSUPPORTED_TYPE으로 거절한다 [ASVS v5.0.0-5.2.2]', async () => {
     ready();
     const svg = randomUUID();
@@ -317,19 +375,57 @@ describe('F-10-2 image-worker', () => {
     expect(await list(`staging/production/${broken}/`)).toEqual([]);
   });
 
+  test('D-T35 ④ source_key는 정한 격리 접두사·UUID 꼴만 받고 그 밖은 INVALID_ARGUMENT로 거절한다 [ASVS v5.0.0-5.3.2]', async () => {
+    ready();
+    for (const key of [
+      `quarantine/other/${randomUUID()}`,
+      `quarantine/production/not-a-uuid`,
+      `quarantine/production/${randomUUID()}/../x`,
+      `production/${randomUUID()}`,
+      `arn:aws:s3:::peaket-image/quarantine/production/${randomUUID()}`,
+      `https://example.test/quarantine/production/${randomUUID()}`,
+    ]) {
+      await expect(processImage(key), key).rejects.toThrow(/INVALID_ARGUMENT/i);
+    }
+    expect((await list('staging/')).filter((k) => k.includes('not-a-uuid') || k.includes('..'))).toEqual([]);
+  });
+
   test('D-T35 ① image-worker는 DB·Kafka·Redis 자격 증명이 있으면 뜨지 않고 AWS S3 자격 증명은 받는다 [ASVS v5.0.0-15.2.5]', async () => {
     ready();
-    for (const [name, value] of [
+    const forbidden: [string, string][] = [
       ['PEAKET_DATABASE_URL', 'postgres://u:p@127.0.0.1:1/db'],
+      ['PEAKET_PARTNER_DATABASE_URL', 'postgres://u:p@127.0.0.1:1/db'],
+      ['PEAKET_OPS_DATABASE_URL', 'postgres://u:p@127.0.0.1:1/db'],
+      ['PEAKET_SEARCH_DATABASE_URL', 'postgres://u:p@127.0.0.1:1/db'],
+      ['PEAKET_MAINTENANCE_DATABASE_URL', 'postgres://u:p@127.0.0.1:1/db'],
+      ['DATABASE_URL', 'postgres://u:p@127.0.0.1:1/db'],
       ['PEAKET_KAFKA_BROKERS', '127.0.0.1:9092'],
+      ['KAFKA_BROKERS', '127.0.0.1:9092'],
+      ['KAFKA_BOOTSTRAP_SERVERS', '127.0.0.1:9092'],
       ['PEAKET_REDIS_URL', 'redis://127.0.0.1:6379'],
-    ] as const) {
+      ['REDIS_URL', 'redis://127.0.0.1:6379'],
+      ['PEAKET_REDIS_SEAT_URL', 'redis://127.0.0.1:6379'],
+      // 빈 값도 이름이 있으면 거절한다
+      ['PEAKET_DATABASE_URL', ''],
+      ['KAFKA_BROKERS', ''],
+      ['REDIS_URL', ''],
+    ];
+    for (const [name, value] of forbidden) {
       const port = await freePort();
       const w = spawnImageWorker(port, { [name]: value });
       const code = await Promise.race([w.exited, new Promise<null>((r) => setTimeout(() => r(null), 10_000))]);
       if (code === null) w.child.kill();
-      expect(code, `${name}를 넣었는데 떴다`).not.toBe(0);
+      expect(code, `${name}(${value === '' ? '빈 값' : '값'})를 넣었는데 떴다`).not.toBe(0);
       expect(w.output(), `${name}를 넣었는데 이름을 알리지 않는다`).toContain(name);
+    }
+    // 동시 처리 1이 아니면 뜨지 않는다
+    for (const value of ['0', '2']) {
+      const port = await freePort();
+      const w = spawnImageWorker(port, { PEAKET_IMAGE_CONCURRENCY: value });
+      const code = await Promise.race([w.exited, new Promise<null>((r) => setTimeout(() => r(null), 10_000))]);
+      if (code === null) w.child.kill();
+      expect(code, `동시 처리 ${value}로 떴다`).not.toBe(0);
+      expect(w.output()).toContain('PEAKET_IMAGE_CONCURRENCY');
     }
     // AWS 이름을 받은 본 시험의 image-worker는 이미 떠 있다(beforeAll)
     expect(workerOutput).toContain('image_worker_started');
