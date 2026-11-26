@@ -146,7 +146,8 @@ describe('J-T11 ⑤ ops 수동 전이', () => {
     expect(ok.statusCode).toBe(200);
     expect(payments.calls.at(-1)).toMatchObject({ method: 'BILLED', input: { actor: who['x-user-id'], idempotencyKey: key, reason: '보증 뒤 청구' } });
     payments.fail = true;
-    expect((await post(url, identity.ops('commander'), body, { 'idempotency-key': randomUUID(), 'x-reauth-token': `APPROVAL:${who['x-user-id']}` })).statusCode).toBe(503);
+    const fail = await post(url, who, body, { 'idempotency-key': randomUUID(), 'x-reauth-token': `APPROVAL:${who['x-user-id']}` });
+    expect(fail.statusCode).toBe(503);
     expect(audit.entries.filter((e) => e.recordType === 'RECEIVABLE_BILLED')).toHaveLength(1);
   });
 });

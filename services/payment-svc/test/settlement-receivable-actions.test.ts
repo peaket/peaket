@@ -200,6 +200,14 @@ describe('J-T11 ⑤ 청구·회수·손실', () => {
     await expect(api.collectReceivable(a.receivableId, { ...input({ idempotencyKey: key }), amount: 1 })).rejects.toMatchObject({ type: 'idempotency-key-reused', status: 422 });
     await expect(api.billReceivable(b.receivableId, input({ idempotencyKey: key }))).rejects.toMatchObject({ type: 'idempotency-key-reused', status: 422 });
     expect(store.receivables.get(b.receivableId)?.status).toBe('OPEN');
+
+    // 같은 키·같은 종류(COLLECTED)·같은 미수금에서 금액만 바꾼 경우도 별도로 막는다
+    const c = receivable({ status: 'BILLED', amount: 500_000, remaining: 445_000 });
+    seed(c, statement());
+    const collectKey = randomUUID();
+    await api.collectReceivable(c.receivableId, { ...input({ idempotencyKey: collectKey }), amount: 100_000 });
+    await expect(api.collectReceivable(c.receivableId, { ...input({ idempotencyKey: collectKey }), amount: 200_000 })).rejects.toMatchObject({ type: 'idempotency-key-reused', status: 422 });
+    expect(store.receivables.get(c.receivableId)?.remaining).toBe(345_000);
   });
 
   test('J-T11 ⑤ 회수는 부분·전액이고 0이 되면 CLOSED다', async () => {

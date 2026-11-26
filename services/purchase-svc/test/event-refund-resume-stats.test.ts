@@ -1,5 +1,5 @@
 // R-T45 ④: purchase GetEventRefundJob의 최근 5분 시도 집계(F-07-15 I-06, AC-12).
-// SUCCESS=호출, FAILURE·UNKNOWN=실패, REJECT=제외, attempted_at > 지금 − 5분만 센다.
+// 호출=SUCCESS+FAILURE+UNKNOWN, 실패=FAILURE+UNKNOWN, REJECT=제외, attempted_at > 지금 − 5분만 센다.
 // 기준 트리에는 recent 집계와 progress 칸이 없어 실행 중 실패한다.
 import { describe, expect, test } from 'vitest';
 import { MemoryEventRefundStore } from '../src/modules/refund/adapters/memory-event-refund-store.js';
