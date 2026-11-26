@@ -1,6 +1,6 @@
-// F-06-4 core-svc support(소명·화면 사본) 시험 공용 도우미(시험 담당 lane2-freeze-F-06-4-opencode).
-// 실제 core-svc 조립(AppModule.register({ memory:true }))을 띄우고, 팬 HTTP·내부 HTTP를 실제 Fastify 경로로 부른다.
-// ops의 부정 예매 소명 입구(F-04-13 가지)는 문서화된 계약을 구현한 **로컬 HTTP 서버**로 둔다(업무 포트 가짜가 아니라 바깥 서비스 경계의 대역).
+// F-06-4 core-svc support(소명·화면 사본) 시험 공용 도우미(시험 담당 lane2-freeze-F-06-4-reviewfix, 시험 리뷰 TR-03·TR-05·TR-20 반영).
+// 앱은 시험마다 새로 세운다(저장소·Outbox·사본이 시험 사이에 남지 않는다).
+// ops의 부정 예매 소명 입구(F-04-13 가지)는 문서화된 계약을 구현한 로컬 HTTP 서버로 둔다. 서버는 내부 토큰을 검사한다.
 // 새 부품은 앱 키트(Symbol.for('peaket.core.support-kit'))로만 꺼낸다. 구현 전에는 키트가 없어 그 자리에서 실패한다.
 import 'reflect-metadata';
 import { createServer, type Server } from 'node:http';
@@ -13,7 +13,8 @@ import { FakeIdentity, fan } from './support.js';
 
 export const SUPPORT_KIT = Symbol.for('peaket.core.support-kit');
 export const INTERNAL = 'support-internal-token-000000';
-export const NOW_MS = Date.parse('2026-11-26T01:00:00.000Z');
+/** 계획 §5: 2026-11-26이 아닌 날짜를 고른다(날짜 하드코딩 결함이 숨지 않게). */
+export const NOW_MS = Date.parse('2026-11-20T01:00:00.000Z');
 export const NOW_ISO = new Date(NOW_MS).toISOString();
 
 export interface OpsCall {
@@ -37,6 +38,8 @@ export interface CoreSupportKit {
   readonly outbox: { rows(): Array<Record<string, unknown>> };
   readonly views: { restriction: ViewStore; fraud: ViewStore };
   readonly appeals: { find(id: string): Promise<Record<string, unknown> | undefined> };
+  /** 다음 저장 한 번을 실패시킨다(트랜잭션 되돌림 시험, ASVS 2.3.3) */
+  failNext(op: 'saveAppeal' | 'saveResult'): void;
   dispatchOnce(nowMs: number): Promise<void>;
   readonly grpcHandlers: { bookingRestrictionView: Record<string, unknown>; fraudAppealView: Record<string, unknown> };
 }
@@ -66,7 +69,7 @@ const logSink = () => {
   return { stream, text: () => text, lines: () => text.split('\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l) as Record<string, unknown>) };
 };
 
-export async function supportHarness(): Promise<SupportHarness> {
+export async function supportHarness(o: { token?: string } = {}): Promise<SupportHarness> {
   const clock = fakeClock({ now: NOW_MS });
   const logs = logSink();
   const calls: OpsCall[] = [];
@@ -80,6 +83,12 @@ export async function supportHarness(): Promise<SupportHarness> {
       for (const [k, v] of Object.entries(req.headers)) md[k] = Array.isArray(v) ? v.join(',') : String(v ?? '');
       const call: OpsCall = { method: req.method ?? '', path: req.url ?? '', md, body: raw ? (JSON.parse(raw) as Record<string, unknown>) : {} };
       calls.push(call);
+      // 입구는 내부 토큰을 검사한다(TR-05). 틀리면 401이고 core는 다시 보낸다.
+      if (md['x-peaket-internal-token'] !== INTERNAL) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        res.end('{}');
+        return;
+      }
       Promise.resolve(responder(call)).then(
         (a) => { res.writeHead(a.status, { 'content-type': 'application/json' }); res.end(JSON.stringify(a.body ?? {})); },
         () => { res.writeHead(500); res.end('{}'); },
@@ -88,7 +97,10 @@ export async function supportHarness(): Promise<SupportHarness> {
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
   const port = (server.address() as { port: number }).port;
-  const support = { fraudAppeals: { url: `http://127.0.0.1:${port}`, token: INTERNAL, caller: 'core-svc' }, notifier: { async send(i: (typeof notices)[number]) { notices.push(i); } } };
+  const support = {
+    fraudAppeals: { url: `http://127.0.0.1:${port}`, token: o.token ?? INTERNAL, caller: 'core-svc' },
+    notifier: { async send(i: { appealId: string; accountId: string; event: string; result?: string }) { notices.push(i); } },
+  };
   const svc = await createService({
     name: 'core-svc',
     module: AppModule.register({ memory: true, support: support as never } as never),
@@ -155,13 +167,13 @@ export async function supportHarness(): Promise<SupportHarness> {
   };
 }
 
-export const ACTIVE_VIEW = (o: { accountId: string; restrictionId?: string; reasonCode?: string; appealDueAtMs?: number; status?: 'ACTIVE' | 'LIFTED' }) => ({
+export const ACTIVE_VIEW = (o: { accountId: string; restrictionId?: string; reasonCode?: string; appealDueAtMs?: number; endsAtMs?: number; status?: 'ACTIVE' | 'LIFTED' }) => ({
   accountId: o.accountId,
   restrictionId: o.restrictionId ?? randomUUID(),
   state: o.status ?? 'ACTIVE',
   reasonCode: o.reasonCode ?? 'ABUSE_CANCEL',
   startsAtMs: NOW_MS - 3_600_000,
-  endsAtMs: NOW_MS + 30 * 86_400_000,
+  endsAtMs: o.endsAtMs ?? NOW_MS + 30 * 86_400_000,
   appealDueAtMs: o.appealDueAtMs ?? NOW_MS + 86_400_000,
   version: 1,
 });

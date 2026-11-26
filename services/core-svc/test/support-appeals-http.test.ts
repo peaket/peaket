@@ -1,36 +1,31 @@
-// F-06-4 core-svc support 소명 접수·목록·화면 사본 시험(시험 담당, 2026-11-26).
+// F-06-4 core-svc support 소명 접수·목록·화면 사본 시험(시험 담당 lane2-freeze-F-06-4-reviewfix, 시험 리뷰 TR-03·TR-04·TR-05·TR-13·TR-20·TR-21·TR-22·TR-27 반영).
 // 정본: docs/features/transfer-refund.md §7.1, openapi /v1/appeals·/v1/booking-restrictions/me·/v1/fraud-appeal-requests, docs/data.md appeal·sup:rst·sup:far.
-// 값은 정본에서 가져오고 코드 상수와 같게 고르지 않는다.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { ACTIVE_VIEW, FRAUD_VIEW, NOW_MS, problemType, submit, supportHarness, type SupportHarness } from './support-appeal-support.js';
 
 let h: SupportHarness;
 const items = (b: Record<string, unknown>): Array<Record<string, unknown>> => b.items as Array<Record<string, unknown>>;
-beforeAll(async () => {
+beforeEach(async () => {
   h = await supportHarness();
 });
-afterAll(async () => {
+afterEach(async () => {
   await h?.close();
-});
-beforeEach(() => {
-  h.calls.length = 0;
-  h.notices.length = 0;
-  h.answer({ status: 200, body: { result: 'OBJECTED' } });
 });
 
 describe('R-T32 소명 접수', () => {
-  test('R-T32 ① 예매 제한 소명은 appeal 행·support.cases-requested 한 건(category RESTRICTION)을 남긴다', async () => {
+  test('R-T32 ① 예매 제한 소명은 appeal 행·support.cases-requested 한 건(category RESTRICTION)을 남기고 본문·계정·제한 ID는 Outbox에 싣지 않는다', async () => {
     const accountId = randomUUID();
     const restrictionId = randomUUID();
     const r = await submit(h, { accountId, kind: 'RESTRICTION', targetId: restrictionId });
     expect(r.body).toMatchObject({ kind: 'RESTRICTION', targetId: restrictionId, status: 'SUBMITTED' });
     expect(r.location).toBe(`/v1/appeals/${String(r.body.appealId)}`);
 
-    const rows = h.kit().outbox.rows();
-    expect(rows.filter((x) => x.sourceId === r.body.appealId)).toHaveLength(1);
-    expect(rows.find((x) => x.sourceId === r.body.appealId)).toMatchObject({ kind: 'APPEAL', category: 'RESTRICTION', eventKey: r.body.appealId });
+    const rows = h.kit().outbox.rows().filter((x) => x.sourceId === r.body.appealId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: 'APPEAL', category: 'RESTRICTION', eventKey: r.body.appealId });
+    for (const leak of ['body', 'accountId', 'targetId', 'restrictionId', 'email', 'phone']) expect(rows[0]).not.toHaveProperty(leak);
 
     const internal = await h.internalGet(String(r.body.appealId));
     expect(internal.status).toBe(200);
@@ -41,7 +36,9 @@ describe('R-T32 소명 접수', () => {
   test('R-T32 ① 부정 예매 사건 소명은 category FRAUD_CASE로 한 건을 남긴다', async () => {
     const r = await submit(h, { accountId: randomUUID(), kind: 'FRAUD_CASE', targetId: randomUUID() });
     expect(r.body).toMatchObject({ kind: 'FRAUD_CASE', status: 'SUBMITTED' });
-    expect(h.kit().outbox.rows().find((x) => x.sourceId === r.body.appealId)).toMatchObject({ kind: 'APPEAL', category: 'FRAUD_CASE' });
+    const row = h.kit().outbox.rows().find((x) => x.sourceId === r.body.appealId);
+    expect(row).toMatchObject({ kind: 'APPEAL', category: 'FRAUD_CASE' });
+    expect(row).not.toHaveProperty('body');
   });
 
   test('R-T32 ② 부정 예매 입구가 403이면 대상 아님으로 닫고 팬에게 한 번 알린다(다시 보내도 0)', async () => {
@@ -54,13 +51,25 @@ describe('R-T32 소명 접수', () => {
     expect(h.calls).toHaveLength(1);
     expect(h.calls[0]).toMatchObject({ method: 'POST', path: `/internal/v1/fraud-cases/${caseId}/appeals` });
     expect(h.calls[0]!.md['x-peaket-caller']).toBe('core-svc');
+    expect(h.calls[0]!.md['x-peaket-internal-token']).toBe('support-internal-token-000000');
     expect(h.calls[0]!.body).toMatchObject({ appealId: r.body.appealId, accountId, party: 'PAYER' });
 
     const mine = await h.myAppeals(h.fanHeaders(accountId));
-    expect(mine.body.items).toEqual([expect.objectContaining({ appealId: r.body.appealId, status: 'INVALID' })]);
+    expect(items(mine.body)[0]).toMatchObject({ appealId: r.body.appealId, status: 'INVALID' });
     expect(h.notices.filter((n) => n.appealId === r.body.appealId)).toEqual([expect.objectContaining({ event: 'INVALID', accountId })]);
     await h.dispatch();
     expect(h.calls).toHaveLength(1);
+  });
+
+  test('R-T32 ② 부정 예매 입구가 404여도 대상 아님으로 닫는다', async () => {
+    const accountId = randomUUID();
+    const caseId = randomUUID();
+    await h.kit().views.fraud.apply(FRAUD_VIEW({ accountId, caseId }));
+    const r = await submit(h, { accountId, kind: 'FRAUD_CASE', targetId: caseId });
+    h.answer({ status: 404 });
+    await h.dispatch();
+    expect(items((await h.myAppeals(h.fanHeaders(accountId))).body)[0]).toMatchObject({ appealId: r.body.appealId, status: 'INVALID' });
+    expect(h.notices.filter((n) => n.appealId === r.body.appealId)).toHaveLength(1);
   });
 
   test('R-T32 ③ 부정 예매 입구가 200 {result:EXPIRED}면 기한 경과로 닫고 알린다', async () => {
@@ -70,23 +79,54 @@ describe('R-T32 소명 접수', () => {
     const r = await submit(h, { accountId, kind: 'FRAUD_CASE', targetId: caseId });
     h.answer({ status: 200, body: { result: 'EXPIRED' } });
     await h.dispatch();
-    const mine = await h.myAppeals(h.fanHeaders(accountId));
-    expect(items(mine.body)[0]).toMatchObject({ appealId: r.body.appealId, status: 'INVALID' });
+    expect(items((await h.myAppeals(h.fanHeaders(accountId))).body)[0]).toMatchObject({ appealId: r.body.appealId, status: 'INVALID' });
     expect(h.notices.filter((n) => n.appealId === r.body.appealId)).toEqual([expect.objectContaining({ event: 'INVALID' })]);
   });
 
-  test('R-T32 ③ 입구가 503이면 SUBMITTED로 두고 다음 바퀴 다시 보낸다(성공하면 그대로 SUBMITTED)', async () => {
+  test('R-T32 ③ 입구가 503이면 1분 전에는 다시 보내지 않고 1분 뒤에 한 번, 실패가 이어지면 10분 뒤에 다시 보낸다', async () => {
     const accountId = randomUUID();
     const caseId = randomUUID();
     await h.kit().views.fraud.apply(FRAUD_VIEW({ accountId, caseId }));
     const r = await submit(h, { accountId, kind: 'FRAUD_CASE', targetId: caseId });
     h.answer({ status: 503 });
     await h.dispatch();
+    expect(h.calls).toHaveLength(1);
     expect(items((await h.myAppeals(h.fanHeaders(accountId))).body)[0]).toMatchObject({ appealId: r.body.appealId, status: 'SUBMITTED' });
-    h.answer({ status: 200, body: { result: 'OBJECTED' } });
+
+    h.clock.advance(60_000 - 1);
+    await h.dispatch();
+    expect(h.calls).toHaveLength(1);
+    h.clock.advance(1);
     await h.dispatch();
     expect(h.calls).toHaveLength(2);
+
+    // 두 번째 실패 뒤 다음은 10분이다
+    h.clock.advance(600_000 - 1);
+    await h.dispatch();
+    expect(h.calls).toHaveLength(2);
+    h.clock.advance(1);
+    await h.dispatch();
+    expect(h.calls).toHaveLength(3);
     expect(items((await h.myAppeals(h.fanHeaders(accountId))).body)[0]).toMatchObject({ appealId: r.body.appealId, status: 'SUBMITTED' });
+  });
+
+  test('R-T32 ③ 토큰이 틀린 입구는 401이고 SUBMITTED로 남아 1분 뒤 다시 보낸다', async () => {
+    const wrong = await supportHarness({ token: 'wrong-token' });
+    try {
+      const accountId = randomUUID();
+      const caseId = randomUUID();
+      await wrong.kit().views.fraud.apply(FRAUD_VIEW({ accountId, caseId }));
+      const r = await submit(wrong, { accountId, kind: 'FRAUD_CASE', targetId: caseId });
+      await wrong.dispatch();
+      expect(wrong.calls).toHaveLength(1);
+      expect(wrong.calls[0]!.md['x-peaket-internal-token']).toBe('wrong-token');
+      expect(items((await wrong.myAppeals(wrong.fanHeaders(accountId))).body)[0]).toMatchObject({ appealId: r.body.appealId, status: 'SUBMITTED' });
+      wrong.clock.advance(60_000);
+      await wrong.dispatch();
+      expect(wrong.calls).toHaveLength(2);
+    } finally {
+      await wrong.close();
+    }
   });
 
   test('R-T32 ⑦ 받은 사람(HOLDER) 사본에는 사유 범주·잠금·우선 구매·이의 칸이 없고 가진 표만 있다', async () => {
@@ -96,7 +136,7 @@ describe('R-T32 소명 접수', () => {
     await h.kit().views.fraud.apply(FRAUD_VIEW({ accountId, caseId, party: 'HOLDER', heldTicketIds: held }));
     const r = await h.fraudAppeals(h.fanHeaders(accountId));
     expect(r.status).toBe(200);
-    expect(r.body.items).toEqual([
+    expect(items(r.body)).toEqual([
       expect.objectContaining({
         caseId,
         party: 'HOLDER',
@@ -149,7 +189,7 @@ describe('내 예매 제한·사본 조회', () => {
     expect((await h.restriction(hdrs)).body).toEqual({ status: 'NONE' });
   });
 
-  test('ASVS v5.0.0-8.2.2 소명 목록은 내 것만 최근 제출 순으로 주고 본문은 싣지 않는다', async () => {
+  test('ASVS v5.0.0-8.2.2·15.3.1 소명 목록은 내 것만 최근 제출 순으로 주고 본문·CS 건·담당은 싣지 않는다', async () => {
     const me = randomUUID();
     const other = randomUUID();
     const a = await submit(h, { accountId: me, kind: 'RESTRICTION', targetId: randomUUID(), body: '내 첫 소명-시험7734' });
@@ -159,13 +199,21 @@ describe('내 예매 제한·사본 조회', () => {
     const r = await h.myAppeals(h.fanHeaders(me));
     expect(r.status).toBe(200);
     expect(items(r.body).map((x) => x.appealId)).toEqual([b.body.appealId, a.body.appealId]);
+    const one = items(r.body)[0]!;
+    for (const leak of ['body', 'caseId', 'assignee']) expect(one).not.toHaveProperty(leak);
+    expect(one.resultNote).toBeNull();
     expect(JSON.stringify(r.body)).not.toContain('내 첫 소명');
     expect(r.headers['cache-control']).toBe('private, no-store');
+
+    // 결정 결과의 이유는 팬에게 보이는 값이라 결정 뒤에만 실린다
+    await h.internalResult(String(a.body.appealId), { status: 'DECIDED', result: 'LIFTED', resultNote: '사정이 확인되었습니다-시험7736' });
+    const decided = items((await h.myAppeals(h.fanHeaders(me))).body).find((x) => x.appealId === a.body.appealId);
+    expect(decided).toMatchObject({ status: 'DECIDED', result: 'LIFTED', resultNote: '사정이 확인되었습니다-시험7736' });
   });
 });
 
 describe('ASVS 경계', () => {
-  test('ASVS v5.0.0-2.2.1·2.2.2 받지 않는 종류·빈 글·2,001자·모르는 칸·남의 targetId는 400·422다', async () => {
+  test('ASVS v5.0.0-2.2.1·2.2.2 받지 않는 종류·빈 글·2,001자·모르는 칸·targetId 없음은 400·422이고 2,000자는 201이다', async () => {
     const accountId = randomUUID();
     const hdrs = h.fanHeaders(accountId);
     const wrongKind = await h.post(hdrs, { kind: 'RECLAIM', targetId: randomUUID(), body: '사정-시험7736' });
@@ -174,13 +222,44 @@ describe('ASVS 경계', () => {
     expect(empty.status).toBe(400);
     const long = await h.post(hdrs, { kind: 'RESTRICTION', targetId: randomUUID(), body: '가'.repeat(2_001) });
     expect(long.status).toBe(400);
+    const exact = await h.post(hdrs, { kind: 'RESTRICTION', targetId: randomUUID(), body: '가'.repeat(2_000) });
+    expect(exact.status).toBe(201);
     const extra = await h.post(hdrs, { kind: 'RESTRICTION', targetId: randomUUID(), body: '사정-시험7737', accountId: randomUUID() });
     expect(extra.status).toBe(400);
     const noTarget = await h.post(hdrs, { kind: 'RESTRICTION', body: '사정-시험7738' });
     expect(noTarget.status).toBe(400);
   });
 
-  test('ASVS v5.0.0-14.2.1·14.2.2 예매 제한·부정 예매 사본 조회도 private, no-store다', async () => {
+  test('ASVS v5.0.0-3.5.3 소명 접수·결과는 POST만 받고 GET·PUT은 만들지 않는다', async () => {
+    const accountId = randomUUID();
+    const hdrs = h.fanHeaders(accountId);
+    const before = items((await h.myAppeals(hdrs)).body).length;
+    for (const method of ['PUT', 'PATCH', 'DELETE'] as const) {
+      const r = await h.svc.http.inject({ method, url: '/v1/appeals', headers: { ...hdrs, 'content-type': 'application/json' }, payload: JSON.stringify({ kind: 'RESTRICTION', targetId: randomUUID(), body: '사정-시험7739' }) });
+      expect([404, 405]).toContain(r.statusCode);
+    }
+    expect(items((await h.myAppeals(hdrs)).body)).toHaveLength(before);
+    const created = await submit(h, { accountId, kind: 'RESTRICTION', targetId: randomUUID() });
+    const after = items((await h.myAppeals(hdrs)).body);
+    expect(after).toHaveLength(before + 1);
+    expect(after[0]!.appealId).toBe(created.body.appealId);
+  });
+
+  test('ASVS v5.0.0-2.3.3 소명 저장이 실패하면 Outbox도 남지 않고(한 트랜잭션), 결과 저장 실패는 상태를 바꾸지 않는다', async () => {
+    const accountId = randomUUID();
+    h.kit().failNext('saveAppeal');
+    const failed = await h.post(h.fanHeaders(accountId), { kind: 'RESTRICTION', targetId: randomUUID(), body: '사정-시험7740' });
+    expect(failed.status).toBeGreaterThanOrEqual(500);
+    expect(h.kit().outbox.rows()).toEqual([]);
+
+    const ok = await submit(h, { accountId, kind: 'RESTRICTION', targetId: randomUUID() });
+    h.kit().failNext('saveResult');
+    const failedResult = await h.internalResult(String(ok.body.appealId), { status: 'DECIDED', result: 'LIFTED', resultNote: '해제-시험7741' });
+    expect(failedResult.status).toBeGreaterThanOrEqual(500);
+    expect((await h.internalGet(String(ok.body.appealId))).body.status).toBe('SUBMITTED');
+  });
+
+  test('ASVS v5.0.0-14.3.2 예매 제한·부정 예매 사본 조회도 private, no-store다', async () => {
     const accountId = randomUUID();
     await h.kit().views.fraud.apply(FRAUD_VIEW({ accountId }));
     expect((await h.fraudAppeals(h.fanHeaders(accountId))).headers['cache-control']).toBe('private, no-store');
@@ -210,6 +289,7 @@ describe('ASVS 경계', () => {
     const r = await h.internalGet(randomUUID());
     expect(r.status).toBe(404);
     expect(r.body).toMatchObject({ status: 404, title: expect.any(String) });
+    expect(String(r.body.type)).toContain('not-found');
     expect(h.logs.text()).toContain('404');
   });
 });

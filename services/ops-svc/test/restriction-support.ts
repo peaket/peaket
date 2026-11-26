@@ -1,6 +1,5 @@
-// F-06-4 예매 제한·소명 시험 공용 도우미(시험 담당 lane2-freeze-F-06-4-opencode).
-// 실제 ops-svc 조립(AppModule.register({ memory:true }))을 띄우고, 관제 HTTP·내부 HTTP를 실제 Fastify 경로로 부른다.
-// 사본(queue·purchase·core view)과 소명 출처·조사관·알림·계정 보류는 바깥 서비스 경계의 대역이다(업무 저장소는 앱의 메모리 저장소).
+// F-06-4 예매 제한·소명 시험 공용 도우미(시험 담당 lane2-freeze-F-06-4-reviewfix, 시험 리뷰 TR-01·TR-08·TR-23 반영).
+// 앱은 시험마다 새로 세운다(메모리 저장소가 시험 사이에 남지 않는다). 사본·소명 출처·조사관·알림·계정 보류는 바깥 서비스 경계의 대역이다.
 // 새 부품은 앱 키트(Symbol.for('peaket.ops.restriction-kit'))로만 꺼낸다. 구현 전에는 키트가 없어 그 자리에서 실패한다.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
@@ -12,7 +11,7 @@ import { MemoryAuditChain } from '../src/modules/audit/index.js';
 import { PromCsCaseSignals, type CsCaseKind, type CsCaseKit } from '../src/modules/cases/index.js';
 import { FakeAdminIdentity } from './admin-support.js';
 import { FakeIdentity } from './support.js';
-import { BASE_ISO, HOLIDAYS } from './cs-support.js';
+import { BASE_ISO, HOLIDAYS, testCalendar } from './cs-support.js';
 
 export const RESTRICTION_KIT = Symbol.for('peaket.ops.restriction-kit');
 
@@ -36,14 +35,23 @@ export interface AppealSourceRecord {
   readonly submittedAtMs: number;
 }
 
+export interface RestrictionCopiesPort {
+  queue(input: Record<string, unknown>): Promise<{ changed: boolean }>;
+  purchase(input: Record<string, unknown>): Promise<{ changed: boolean }>;
+  view(input: Record<string, unknown>): Promise<{ changed: boolean }>;
+}
+
 export interface RestrictionHarness {
   readonly svc: Awaited<ReturnType<typeof createService>>;
   readonly clock: FakeClock;
   readonly audit: MemoryAuditChain;
   readonly cs: CsCaseKit;
   readonly copies: CopyCall[];
-  readonly holds: Array<{ accountId: string; caseId: string; state: 'OPEN' | 'CLOSED'; version: number }>;
+  readonly holds: Array<{ accountId: string; caseId: string; kind: 'APPEAL'; state: 'OPEN' | 'CLOSED'; version: number }>;
   readonly notices: Array<{ appealId: string; accountId: string; event: string; result?: string }>;
+  readonly results: Array<{ appealId: string; status: string; result?: string; resultNote?: string }>;
+  /** copy:*·hold:*·result·notice 순서(두 사본 뒤 결과 기록인지 본다) */
+  readonly events: string[];
   readonly appeals: Map<string, AppealSourceRecord>;
   readonly investigators: Map<string, string>;
   failNext(target: 'queue' | 'purchase' | 'view', times?: number): void;
@@ -60,7 +68,6 @@ export interface RestrictionHarness {
   kit(): {
     rows(): Array<Record<string, unknown>>;
     seed(row: Record<string, unknown>): void;
-    applyFraud(i: { accountId: string; fraudCaseId: string; endsAtMs: number; confirmedBy?: string }): Promise<{ restrictionId: string; version: number }>;
   };
   close(): Promise<void>;
 }
@@ -79,12 +86,6 @@ class TestReauth {
   }
 }
 
-export interface RestrictionCopiesPort {
-  queue(input: Record<string, unknown>): Promise<{ changed: boolean }>;
-  purchase(input: Record<string, unknown>): Promise<{ changed: boolean }>;
-  view(input: Record<string, unknown>): Promise<{ changed: boolean }>;
-}
-
 export async function restrictionHarness(o: { nowIso?: string; copies?: RestrictionCopiesPort } = {}): Promise<RestrictionHarness> {
   const clock = fakeClock({ now: Date.parse(o.nowIso ?? NOW_ISO) });
   const identity = new FakeIdentity();
@@ -95,44 +96,62 @@ export async function restrictionHarness(o: { nowIso?: string; copies?: Restrict
   const copies: CopyCall[] = [];
   const holds: RestrictionHarness['holds'] = [];
   const notices: RestrictionHarness['notices'] = [];
+  const results: RestrictionHarness['results'] = [];
+  const events: string[] = [];
   const appeals = new Map<string, AppealSourceRecord>();
   const investigators = new Map<string, string>();
   const fail = { queue: 0, purchase: 0, view: 0 };
   const reauth = new TestReauth();
-  const calendar = (await import('./cs-support.js')).testCalendar();
-  const copiesPort = {
-    async queue(input: Record<string, unknown>) {
+  const copiesPort: RestrictionCopiesPort = {
+    async queue(input) {
       copies.push({ target: 'queue', input });
+      events.push('copy:queue');
       if (fail.queue > 0) { fail.queue -= 1; throw new Error('queue unavailable'); }
       return { changed: true };
     },
-    async purchase(input: Record<string, unknown>) {
+    async purchase(input) {
       copies.push({ target: 'purchase', input });
+      events.push('copy:purchase');
       if (fail.purchase > 0) { fail.purchase -= 1; throw new Error('purchase unavailable'); }
       return { changed: true };
     },
-    async view(input: Record<string, unknown>) {
+    async view(input) {
       copies.push({ target: 'view', input });
+      events.push('copy:view');
       if (fail.view > 0) { fail.view -= 1; throw new Error('view unavailable'); }
       return { changed: true };
     },
   };
   const restrictions = {
     copies: o.copies ?? copiesPort,
-    holds: { async set(i: (typeof holds)[number]) { holds.push({ ...i }); return { changed: true }; } },
+    holds: {
+      async set(i: { accountId: string; caseId: string; kind: 'APPEAL'; state: 'OPEN' | 'CLOSED'; version: number }) {
+        holds.push({ ...i });
+        events.push(`hold:${i.state}`);
+        return { changed: true };
+      },
+    },
     appeals: {
       async read(appealId: string) { return appeals.get(appealId); },
-      async result(appealId: string, r: Record<string, unknown>) { notices.push({ appealId, accountId: '', event: 'RESULT', result: String(r.result ?? r.status) }); },
+      async result(appealId: string, r: { status: string; result?: string; resultNote?: string }) {
+        results.push({ appealId, status: r.status, ...(r.result ? { result: r.result } : {}), ...(r.resultNote ? { resultNote: r.resultNote } : {}) });
+        events.push(`result:${r.status}`);
+      },
     },
     fraudCases: { async investigatorOf(caseId: string) { const id = investigators.get(caseId); return id ? { assigneeId: id } : undefined; } },
-    notifier: { async send(i: { appealId: string; accountId: string; event: string; result?: string }) { notices.push(i); } },
+    notifier: {
+      async send(i: { appealId: string; accountId: string; event: string; result?: string }) {
+        notices.push(i);
+        events.push(`notice:${i.event}`);
+      },
+    },
   };
   const svc = await createService({
     name: 'ops-svc',
     module: AppModule.register({
       memory: true,
       auditChain: audit,
-      calendar,
+      calendar: testCalendar(),
       caseSignals: signals,
       adminAccounts: { identity: admins },
       approvals: { reauth } as never,
@@ -155,13 +174,8 @@ export async function restrictionHarness(o: { nowIso?: string; copies?: Restrict
       raw = undefined;
     }
     if (!raw) throw new Error('예매 제한 키트가 없다(계획 §4, 구현 전)');
-    const k = raw as {
-      rows(): Array<Record<string, unknown>>;
-      seed(row: Record<string, unknown>): void;
-      applyFraud(i: { accountId: string; fraudCaseId: string; endsAtMs: number; confirmedBy?: string }): Promise<{ restrictionId: string; version: number }>;
-      tick(nowMs: number): Promise<void>;
-    };
-    kitValue = { rows: () => k.rows(), seed: (row) => k.seed(row), applyFraud: (i) => k.applyFraud(i) };
+    const k = raw as { rows(): Array<Record<string, unknown>>; seed(row: Record<string, unknown>): void };
+    kitValue = { rows: () => k.rows(), seed: (row) => k.seed(row) };
     return kitValue;
   };
   const parse = (payload: string): Record<string, unknown> => (payload ? (JSON.parse(payload) as Record<string, unknown>) : {});
@@ -183,6 +197,8 @@ export async function restrictionHarness(o: { nowIso?: string; copies?: Restrict
     copies,
     holds,
     notices,
+    results,
+    events,
     appeals,
     investigators,
     failNext(target, times = 1) { fail[target] = times; },
@@ -238,8 +254,7 @@ export const nextYear = (fromMs = NOW_MS): number => {
   return d.getTime();
 };
 
-/** 2026-11-20(금) 23:30 KST에서 1·3영업일을 손으로 센 값. 공휴일은 cs-support의 시험 달력이다 */
-export const BD1 = Date.parse('2026-11-23T14:30:00.000Z');
+/** 2026-11-20(금) 23:30 KST에서 3영업일(11/25 공휴일을 뺀 값) */
 export const BD3 = Date.parse('2026-11-26T14:30:00.000Z');
 
 /** CS 건 요청 본문(asyncapi CaseRequested) */
@@ -255,7 +270,7 @@ export const caseRequest = (kind: CsCaseKind, o: { sourceId?: string; eventKey?:
 export const problemType = (b: Record<string, unknown>): string => String(b.type ?? '').split('/').pop() ?? '';
 
 /** 승인 하나를 만들고 승인까지 마친다(집행 성공을 기대하는 시험의 준비) */
-export async function approvedRestriction(h: RestrictionHarness, o: { reasonCode?: string; endsAtMs?: number; accountId?: string } = {}): Promise<{ approvalId: string; accountId: string; restrictionId: string; version: number }> {
+export async function approvedRestriction(h: RestrictionHarness, o: { reasonCode?: string; endsAtMs?: number; accountId?: string } = {}): Promise<{ approvalId: string; accountId: string; restrictionId: string; version: number; approvedBy: string; approver: Record<string, string> }> {
   const agent = h.as('cs_agent');
   const lead = h.as('cs_lead');
   const body = restrictionBody({ accountId: o.accountId ?? randomUUID(), ...(o.reasonCode ? { reasonCode: o.reasonCode } : {}), ...(o.endsAtMs !== undefined ? { endsAtMs: o.endsAtMs } : {}) });
@@ -267,5 +282,12 @@ export async function approvedRestriction(h: RestrictionHarness, o: { reasonCode
   expect(approved.status, JSON.stringify(approved.body)).toBe(200);
   const restriction = h.kit().rows().find((r) => r.approvalId === created.body.approvalId);
   expect(restriction, '승인 뒤 제한 행').toBeTruthy();
-  return { approvalId: String(created.body.approvalId), accountId: body.targetRef, restrictionId: String(restriction!.restrictionId), version: Number(restriction!.version) };
+  return {
+    approvalId: String(created.body.approvalId),
+    accountId: body.targetRef,
+    restrictionId: String(restriction!.restrictionId),
+    version: Number(restriction!.version),
+    approvedBy: lead['x-user-id']!,
+    approver: lead,
+  };
 }
