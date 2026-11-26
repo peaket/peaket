@@ -76,14 +76,25 @@ describe('F-04-19 조사 갈래 용량 외삽', () => {
     expect(list.every((x: any) => x.extrapolatedMs !== 0)).toBe(true);
   });
 
-  test('FX-T22 ③ 잘못된 입력은 RangeError다', async () => {
+  test('FX-T22 ③ 잘못된 입력은 RangeError이고 0 측정·빈 목록 경계를 지킨다', async () => {
     const m = await moduleOf();
     if (!m) return;
     expect(() => m.extrapolateCapacity(measurement({ rows: 0 }))).toThrow(RangeError);
+    expect(() => m.extrapolateCapacity(measurement({ rows: -1 }))).toThrow(RangeError);
     expect(() => m.extrapolateCapacity(measurement({ targetMs: 0 }))).toThrow(RangeError);
+    expect(() => m.extrapolateCapacity(measurement({ targetMs: -1 }))).toThrow(RangeError);
     expect(() => m.extrapolateCapacity(measurement(), { factor: 0 })).toThrow(RangeError);
+    expect(() => m.extrapolateCapacity(measurement(), { factor: -1 })).toThrow(RangeError);
+    expect(() => m.extrapolateCapacity(measurement(), { factor: Number.NaN })).toThrow(RangeError);
     expect(() => m.extrapolateCapacity(measurement({ measuredMs: Number.NaN }))).toThrow(RangeError);
+    expect(() => m.extrapolateCapacity(measurement({ measuredMs: Number.POSITIVE_INFINITY }))).toThrow(RangeError);
     expect(() => m.extrapolateCapacity(measurement({ measuredMs: -1 }))).toThrow(RangeError);
-    expect(() => m.extrapolateCapacity(measurement(), { factor: Number.POSITIVE_INFINITY })).toThrow(RangeError);
+
+    const zero = m.extrapolateCapacity(measurement({ measuredMs: 0 }));
+    expect(zero).toMatchObject({ measuredMs: 0, extrapolatedMs: 0, ratio: 0, verdict: 'PASS_ESTIMATE', label: '[추정]' });
+    const fail = m.extrapolateCapacity(measurement({ measuredMs: 300 }));
+    expect(fail).toMatchObject({ extrapolatedMs: 3_000, verdict: 'FAIL_ESTIMATE', label: '[추정]', basis: 'MEASURED_EXTRAPOLATION' });
+    expect(fail.assumptions).toEqual(['선형 비례', '1/10 규모 측정값 × 10', '실측 아님']);
+    expect(m.capacityEstimates([])).toEqual([]);
   });
 });

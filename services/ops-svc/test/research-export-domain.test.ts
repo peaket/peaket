@@ -87,6 +87,7 @@ describe('F-04-19 연구 내보내기 순수 모델', () => {
     expect(m.researchDayKey(Date.UTC(2026, 10, 27, 23, 59, 59, 999))).toBe('2026-11-27');
     expect(m.researchDayKey(Date.UTC(2026, 10, 28, 0, 0, 0, 0))).toBe('2026-11-28');
     expect(m.RESEARCH_DAILY_LIMIT).toBe(5);
+    expect(m.RESEARCH_EXPORT_TTL_MS).toBe(1_800_000);
     expect(m.researchQuotaExceeded(4)).toBe(false);
     expect(m.researchQuotaExceeded(5)).toBe(true);
     expect(m.researchQuotaExceeded(6)).toBe(true);
@@ -96,14 +97,31 @@ describe('F-04-19 연구 내보내기 순수 모델', () => {
     const m = await moduleOf();
     if (!m) return;
     expect(m.researchOutputColumns()).toEqual(COLUMNS);
-    expect(m.researchMaskExpression('entropy')).toBe("toFloat32('nan')");
-    expect(m.researchMaskExpression('net_type')).toBe('toUInt8(0)');
-    expect(m.researchMaskExpression('member')).toBe('toUInt8(0)');
-    expect(m.researchMaskExpression('post_seat')).toBe('toUInt8(0)');
-    expect(m.researchMaskExpression('asn')).toBe('toUInt32(0)');
-    expect(m.researchMaskExpression('device_group')).toBe('toUInt32(0)');
-    expect(m.researchMaskExpression('t_ms')).toBe('t_ms');
-    expect(m.researchMaskExpression('bot_tier')).toBe('bot_tier');
+    for (const col of COLUMNS) {
+      if (col === 'entropy') expect(m.researchMaskExpression(col)).toBe("toFloat32('nan')");
+      else if (col === 'net_type' || col === 'member' || col === 'post_seat') expect(m.researchMaskExpression(col)).toBe('toUInt8(0)');
+      else if (col === 'asn' || col === 'device_group') expect(m.researchMaskExpression(col)).toBe('toUInt32(0)');
+      else expect(m.researchMaskExpression(col)).toBe(col);
+    }
+    const select = m.researchSelectList();
+    expect(select).toHaveLength(16);
+    expect(select.map((x: string) => x.split(' AS ')[1])).toEqual(COLUMNS);
+    expect(select[9]).toBe("toFloat32('nan') AS entropy");
+    expect(select[10]).toBe('toUInt8(0) AS net_type');
+    expect(select[11]).toBe('toUInt32(0) AS asn');
+    expect(select[12]).toBe('toUInt32(0) AS device_group');
+    expect(select[14]).toBe('toUInt8(0) AS member');
+    expect(select[15]).toBe('toUInt8(0) AS post_seat');
+
+    const ok = { byteLength: 12, head: 'ARROW1', tail: 'ARROW1', columns: COLUMNS, rowCount: 0 };
+    expect(m.researchFileProblem(ok)).toBeNull();
+    expect(m.researchFileProblem({ ...ok, byteLength: 200 * 1024 * 1024 + 1 })).toBe('TOO_LARGE');
+    expect(m.researchFileProblem({ ...ok, byteLength: 11 })).toBe('INVALID_ENVELOPE');
+    expect(m.researchFileProblem({ ...ok, head: 'ARROW2' })).toBe('INVALID_ENVELOPE');
+    expect(m.researchFileProblem({ ...ok, tail: '' })).toBe('INVALID_ENVELOPE');
+    expect(m.researchFileProblem({ ...ok, columns: COLUMNS.slice(0, 15) })).toBe('INVALID_COLUMNS');
+    expect(m.researchFileProblem({ ...ok, rowCount: -1 })).toBe('INVALID_ROW_COUNT');
+    expect(m.researchFileProblem({ ...ok, rowCount: 1.5 })).toBe('INVALID_ROW_COUNT');
   });
 
   test('FX-T10 ⑦ [ASVS v5.0.0-1.2.4] 회차·시간창은 매개변수로만 넘기고 사용자 값을 SQL에 잇지 않는다', async () => {
@@ -125,10 +143,17 @@ describe('F-04-19 연구 내보내기 순수 모델', () => {
     const q = m.researchQuery({ eventId: 'e', fromMs: 0, toMs: 1 });
     const tables = ['slv_queue_entry', 'slv_purchase_session', 'slv_hold_attempt', 'slv_seat_change', 'slv_payment_attempt', 'slv_ticket', 'slv_trust_label'];
     for (const t of tables) expect(q.sql, t).toContain(`silver.${t}`);
+    const refs = [...q.sql.matchAll(/silver\.([a-z_]+)/g)].map((x: RegExpMatchArray) => x[1]);
+    expect(new Set(refs)).toEqual(new Set(tables));
+    expect(refs).toHaveLength(7);
+    expect(q.sql).not.toMatch(/\b(bronze|gold|trust|inv)\./);
     expect(q.sql).toContain('FORMAT ArrowStream');
     expect(q.sql).toContain("output_format_arrow_compression_method = 'none'");
     expect(q.sql).toContain('output_format_arrow_low_cardinality_as_dictionary = 0');
-    expect(q.sql).toContain('dense_rank()');
+    expect(q.sql).toContain('dense_rank() OVER (ORDER BY session_ref)');
+    for (const col of ['entropy', 'net_type', 'asn', 'device_group', 'member', 'post_seat']) {
+      expect(q.sql, col).toContain(m.researchMaskExpression(col));
+    }
     for (const bad of ['inv.', 'trust.behavior_raw', 'journeyId', 'deviceRef', 'contactRef', 'paymentMethodRef', 'cardBin', 'raw_ip']) {
       expect(q.sql, bad).not.toContain(bad);
     }
@@ -156,10 +181,44 @@ describe('F-04-19 연구 내보내기 순수 모델', () => {
     expect(row.processedFromMs).toBe(nowMs);
     expect(row.destroyDueAtMs).toBe(saleEndsAtMs + 90 * DAY);
     expect(row.items).toBe('회차 가명 세션 번호, 구역·좌석, 단계 시각·결과·응답 지연, 사후 판정 등급');
+    expect(Object.keys(row).sort()).toEqual(['destroyDueAtMs', 'eventId', 'items', 'keyVersion', 'processedFromMs', 'purpose', 'usage']);
     expect(Object.keys(row.usage).sort()).toEqual(['columns', 'exportId', 'fromMs', 'outcome', 'rowCount', 'toMs']);
     expect(row.usage).toMatchObject({ exportId: r.exportId, fromMs: 0, toMs: 1_800_000, rowCount: 7, outcome: 'RECEIVED', columns: COLUMNS });
+    expect(row.usage.problemType).toBeUndefined();
+    expect(row).not.toHaveProperty('id');
+    expect(row).not.toHaveProperty('destroyedAt');
     const text = JSON.stringify(row);
     for (const bad of [r.createdBy, r.createdBySessionId, 'IP', '10.0.0.1', 'x-forwarded', r.reason]) expect(text).not.toContain(bad);
+
+    const denied = m.pseudonymizationLogRow({ record: r, saleEndsAtMs, outcome: 'DENIED', problemType: 'pseudonym-handler-required', nowMs });
+    expect(denied.usage.problemType).toBe('pseudonym-handler-required');
+    expect(Object.keys(denied).sort()).toEqual(['destroyDueAtMs', 'eventId', 'items', 'keyVersion', 'processedFromMs', 'purpose', 'usage']);
+
+    const created = m.researchAuditRecord({ record: r, outcome: 'REQUESTED', actorRole: 'commander', nowMs });
+    expect(created.recordType).toBe('RESEARCH_EXPORT');
+    expect(created.recordId).toBe(r.exportId);
+    expect(created.nowMs).toBe(nowMs);
+    expect(created.payload).toMatchObject({
+      action: 'CREATE',
+      accountId: r.createdBy,
+      role: 'commander',
+      eventId: r.eventId,
+      fromMs: 0,
+      toMs: 1_800_000,
+      columns: COLUMNS,
+      rowCount: 0,
+      reason: r.reason,
+      outcome: 'REQUESTED',
+      atMs: nowMs,
+    });
+    expect(created.payload.problemType).toBeUndefined();
+    const deniedAudit = m.researchAuditRecord({ record: r, outcome: 'DENIED', problemType: 'pseudonym-handler-required', actorRole: 'commander', nowMs });
+    expect(deniedAudit.payload).toMatchObject({ action: 'DENY', outcome: 'DENIED', problemType: 'pseudonym-handler-required', rowCount: 0 });
+    expect(deniedAudit.recordId).toBeTruthy();
+    const received = m.researchAuditRecord({ record: r, outcome: 'RECEIVED', actorRole: 'commander', nowMs });
+    expect(received.payload).toMatchObject({ action: 'RECEIVE', outcome: 'RECEIVED' });
+    const failed = m.researchAuditRecord({ record: r, outcome: 'FAILED', problemType: 'INVALID_COLUMNS', actorRole: 'commander', nowMs });
+    expect(failed.payload).toMatchObject({ action: 'BUILD_FAILED', outcome: 'FAILED', problemType: 'INVALID_COLUMNS' });
   });
 
   test('FX-T10 ⑧ [ASVS v5.0.0-3.5.3] 받기는 cors·same-origin fetch만 허용하고 navigate·cross-site·머리 없음은 거절한다', async () => {
@@ -221,5 +280,10 @@ describe('F-04-19 연구 내보내기 순수 모델', () => {
         expect(src, `${at}: ${bad}`).not.toContain(bad);
       }
     }
+    // 시작 파일·AppModule 조립: 메모리·DB 두 갈래와 main.ts의 연구 deps가 모두 있어야 한다.
+    const app = readFileSync(new URL('../src/app.module.ts', import.meta.url), 'utf8');
+    const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+    expect((app.match(/ResearchExportsModule/g) ?? []).length, 'app.module.ts의 메모리·DB 두 갈래').toBeGreaterThanOrEqual(2);
+    expect(main).toContain('research:');
   });
 });

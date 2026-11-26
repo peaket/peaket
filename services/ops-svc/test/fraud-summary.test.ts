@@ -96,24 +96,64 @@ describe('F-04-19 부정 예매 사건 집계', () => {
     expect(rows.every((r: any) => Object.keys(r).sort().join(',') === keys.join(','))).toBe(true);
   });
 
-  test('A-T24 ② 계정 3개 칸은 OTHER로 합치고 8개 칸은 그대로 둔다', async () => {
+  test('A-T24 ② 계정 4개 칸은 OTHER로 합치고 5개 칸은 그대로 두며, 회차·최댓값·제거 계정·정렬 경계를 지킨다', async () => {
     const m = await moduleOf();
     if (!m) return;
-    const big = Array.from({ length: 8 }, (_, n) => member(`big-${n}`, n === 0 ? { actionNotifiedAtMs: 1, ticketCount: 5 } : {}));
-    const small = Array.from({ length: 3 }, (_, n) => member(`small-${n}`, n === 0 ? { appealRequestedAtMs: 1, appealResult: 'ACCEPTED' } : {}));
+    const big = Array.from({ length: 8 }, (_, n) => member(`big-${n}`, n === 0 ? { actionNotifiedAtMs: 1, ticketCount: 3 } : {}));
+    const bigAgain = [member('big-0', { actionNotifiedAtMs: 1, ticketCount: 7 }), ...Array.from({ length: 7 }, (_, n) => member(`big-${n + 1}`))];
+    const four = Array.from({ length: 4 }, (_, n) => member(`four-${n}`, n === 0 ? { appealRequestedAtMs: 1, appealResult: 'ACCEPTED' } : {}));
+    const five = Array.from({ length: 5 }, (_, n) => member(`five-${n}`));
     const rows = m.fraudSummaryRows([
       caseOf({ members: big, reasonCategory: 'MACRO_BOT' }),
-      caseOf({ members: small, reasonCategory: 'QUEUE_BYPASS' }),
-      caseOf({ members: small, reasonCategory: 'CAPTCHA_BYPASS' }),
+      caseOf({ members: bigAgain, reasonCategory: 'MACRO_BOT' }),
+      caseOf({ members: four, reasonCategory: 'QUEUE_BYPASS' }),
+      caseOf({ members: five, reasonCategory: 'CAPTCHA_BYPASS' }),
     ]);
-    expect(rows.map((r: any) => r.reasonCategory)).toEqual(['MACRO_BOT', 'OTHER']);
-    expect(rows[0].caseCount).toBe(1);
-    expect(rows[0].actionedTickets).toBe(5);
-    // 작은 칸 둘을 합쳐도 계정 집합은 합집합으로 다시 센다(같은 계정 3개를 두 번 세지 않는다).
-    expect(rows[1].caseCount).toBe(2);
-    expect(rows[1].appealRequestedAccounts).toBe(1);
-    expect(rows[1].appealAcceptedAccounts).toBe(1);
-    expect(rows[1].actionedAccounts).toBe(0);
+    expect(rows.map((r: any) => r.reasonCategory)).toEqual(['MACRO_BOT', 'CAPTCHA_BYPASS', 'OTHER']);
+    expect(rows[0].caseCount).toBe(2);
+    expect(rows[0].actionedAccounts).toBe(1);
+    // 같은 계정이 여러 사건에 있으면 ticketCount는 더하지 않고 가장 큰 값 하나만 쓴다.
+    expect(rows[0].actionedTickets).toBe(7);
+    expect(rows[1].caseCount).toBe(1);
+    expect(rows[2].caseCount).toBe(1);
+    expect(rows[2].appealRequestedAccounts).toBe(1);
+    expect(rows[2].appealAcceptedAccounts).toBe(1);
+    expect(rows[2].actionedAccounts).toBe(0);
+
+    // 회차가 다르면 OTHER도 회차마다 따로 만든다.
+    const perEvent = m.fraudSummaryRows([
+      caseOf({ eventId: EVENT, members: four, reasonCategory: 'QUEUE_BYPASS' }),
+      caseOf({ eventId: OTHER_EVENT, members: four, reasonCategory: 'QUEUE_BYPASS' }),
+    ]);
+    expect(perEvent.map((r: any) => `${r.eventId}/${r.reasonCategory}`)).toEqual([`${EVENT}/OTHER`, `${OTHER_EVENT}/OTHER`]);
+
+    // minCell 옵션: 4로 두면 4개 칸은 합치지 않는다.
+    const min4 = m.fraudSummaryRows([caseOf({ members: four, reasonCategory: 'QUEUE_BYPASS' })], { minCell: 4 });
+    expect(min4.map((r: any) => r.reasonCategory)).toEqual(['QUEUE_BYPASS']);
+
+    // removedAtMs가 있는 계정은 그 사건에서 빼므로 5명 중 4명만 세어 OTHER로 합친다.
+    const withRemoved = [member('r-0'), member('r-1'), member('r-2'), member('r-3'), member('r-4', { removedAtMs: 9 })];
+    const removedRows = m.fraudSummaryRows([caseOf({ members: withRemoved, reasonCategory: 'ACCOUNT_LENDING' })]);
+    expect(removedRows.map((r: any) => r.reasonCategory)).toEqual(['OTHER']);
+
+    // 사유 범주의 정렬은 MACRO_BOT·QUEUE_BYPASS·CAPTCHA_BYPASS·ACCOUNT_LENDING·LIMIT_EVASION·OTHER 순서다.
+    const sorted = m.fraudSummaryRows([
+      caseOf({ reasonCategory: 'LIMIT_EVASION', members: five }),
+      caseOf({ reasonCategory: 'ACCOUNT_LENDING', members: five }),
+      caseOf({ reasonCategory: 'CAPTCHA_BYPASS', members: five }),
+      caseOf({ reasonCategory: 'QUEUE_BYPASS', members: five }),
+      caseOf({ reasonCategory: 'MACRO_BOT', members: five }),
+    ]);
+    expect(sorted.map((r: any) => r.reasonCategory)).toEqual(['MACRO_BOT', 'QUEUE_BYPASS', 'CAPTCHA_BYPASS', 'ACCOUNT_LENDING', 'LIMIT_EVASION']);
+    const otherLast = m.fraudSummaryRows([
+      caseOf({ reasonCategory: 'LIMIT_EVASION', members: five }),
+      caseOf({ reasonCategory: 'ACCOUNT_LENDING', members: five }),
+      caseOf({ reasonCategory: 'CAPTCHA_BYPASS', members: five }),
+      caseOf({ reasonCategory: 'QUEUE_BYPASS', members: four }),
+      caseOf({ reasonCategory: 'MACRO_BOT', members: five }),
+    ]);
+    expect(otherLast.map((r: any) => r.reasonCategory)).toEqual(['MACRO_BOT', 'CAPTCHA_BYPASS', 'ACCOUNT_LENDING', 'LIMIT_EVASION', 'OTHER']);
+    expect(m.fraudSummaryRows([])).toEqual([]);
   });
 
   test('A-T24 ③ [ASVS v5.0.0-16.2.5] 출력에는 계정·사건 ID·시각 칸이 없고 JSONEachRow도 수만 담는다', async () => {
