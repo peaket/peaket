@@ -79,8 +79,8 @@ describe('F-05-11 T6 identity ResolvePhone', () => {
     const h = make({ resolvePhone: async () => ({ accountId: B, nickname: '지민' }), resolveNicknames: async () => new Map([[B, '지민']]) }, undefined, { internalToken: 'f0511-identity-token' });
     const md = (token?: string, caller?: string): grpc.Metadata => {
       const m = new grpc.Metadata();
-      if (token !== undefined) m.set('x-peaket-internal-token', token);
-      if (caller !== undefined) m.set('x-peaket-internal-caller', caller);
+      if (token !== undefined) m.set('x-peaket-internal-grpc-token', token);
+      if (caller !== undefined) m.set('x-peaket-internal-grpc-caller', caller);
       return m;
     };
     for (const method of ['ResolvePhone', 'BatchGetNicknames'] as const) {
