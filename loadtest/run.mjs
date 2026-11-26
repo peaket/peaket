@@ -422,6 +422,13 @@ function gridFor(a) {
     seatCount(grid);
     return grid;
   }
+  // 6시간 장시간 시험: 구매·결제·Outbox는 사용자마다 2석을 잡을 수 있게 10,000석 격자를 쓴다
+  if (a.scenario === 'soak' && a.target !== 'queue-svc' && a.target !== 'realtime-gw') {
+    const need = a.users * 2;
+    const grid = { sections: ['A', 'B', 'C', 'D'], rows: Math.max(1, Math.ceil(need / 200)), perRow: 50 };
+    seatCount(grid);
+    return grid;
+  }
   return undefined;
 }
 
@@ -897,7 +904,7 @@ async function runV0(a, runTag) {
     for (const sg of segments) {
       const name = split ? `loadgen-${runTag}-g${sg.index}` : `loadgen-${runTag}`;
       pods.push(name);
-      await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment', deadlineS: Math.max(60, a.scenario === 'soak' ? busyS + 600 : Math.min(11400, busyS * 2 + 600)), ...(split ? { index: sg.index } : {}) }));
+      await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment' || (a.scenario === 'soak' && a.target === 'payment-svc'), deadlineS: Math.max(60, a.scenario === 'soak' ? busyS + 600 : Math.min(11400, busyS * 2 + 600)), ...(split ? { index: sg.index } : {}) }));
     }
     if (a.scenario === 'seat-deltas') {
       step(`변경분 받는 파드 ${a.listenerPods}대(연결 ${a.connections}개)`);
@@ -1207,8 +1214,8 @@ const ROUTES_V1 = {
   // 6시간 장시간 시험(F-08-5): 자원 추세는 summary가 아니라 soak-probe가 모은다
   soak: [],
 };
-/** v1 실행의 시나리오 파일(진입 단계는 V1_SCENARIOS 밖이다) */
-const v1ScenarioFile = (a) => (a.scenario === 'entry' ? V1_ENTRY_SCENARIO : V1_SCENARIOS[a.scenario]);
+/** v1 실행의 시나리오 파일(진입 단계·6시간 soak은 V1_SCENARIOS 밖이다) */
+const v1ScenarioFile = (a) => (a.scenario === 'entry' ? V1_ENTRY_SCENARIO : a.scenario === 'soak' ? 'v1-soak.js' : V1_SCENARIOS[a.scenario]);
 /** 서버 히스토그램 점검(합본의 서비스 꼬리표로 고른다). 대기 상태 파일은 캐시 앞이라 원본 히스토그램으로 보지 않는다 */
 const SERVER_CHECK_V1 = {
   'seat-hold': { route: 'hold', service: 'purchase-svc', path: '/v1/events/{eventId}/holds', le: 0.05, allowed: 0.01, label: 'p99', name: 'hold_server_p99_50ms' },
@@ -1394,10 +1401,12 @@ async function runV1(a, runTag) {
 
     // 구매 세션 클라이언트 키(이 PC에서 계산, k6에는 ECDH가 없다). 시험 값이고 실행 폴더에만 넣는다(산출물에 싣지 않는다)
     const client = v1ClientKey(ecdhPublic);
-    if (a.scenario === 'payment') {
+    let simSecret = null;
+    if (a.scenario === 'payment' || (a.scenario === 'soak' && a.target === 'payment-svc')) {
       const raw = (await kc(['-n', V1_NAMESPACE, 'get', 'secret', 'pg-simulator', '-o', `jsonpath={.data.${SIM_KEY_NAME}}`])).trim();
+      simSecret = Buffer.from(raw, 'base64').toString('utf8');
       await kc(['-n', NS, 'delete', 'secret', SIM_KEY_SECRET, '--ignore-not-found']);
-      await createObject(simKeySecret(Buffer.from(raw, 'base64').toString('utf8')));
+      await createObject(simKeySecret(simSecret));
     }
     // v1은 계정 토큰이 없다(신원 머리). 공통 시나리오 부분이 읽는 사용자 파일 자리만 채운다
     stageInputs(hostDir, { caPem: '', tokens: JSON.stringify(['v1']) });
@@ -1428,7 +1437,7 @@ async function runV1(a, runTag) {
       ...(a.scenario === 'queue' ? { ENTRY_RATE: a.entryRate, ADMIT_PER_SECOND: a.admitPerSecond } : {}),
       ...(a.scenario === 'seat-hold' ? { RATE: a.rate, MODE: a.mode, HOLD_SIZE: a.holdSize, HOT_COUNT: a.hotCount, PAIRS: a.pairs, RELEASE_MS: a.releaseMs, KEEP: a.keep ? 1 : 0, PREP_TIMEOUT_S: Math.max(300, prepS * 3) } : {}),
       ...(a.scenario === 'payment' ? { RATE: a.rate, SEATS_PER_ORDER: a.seatsPerOrder, SIM_URL: L.pgSimUrl, FAULT_DROP_PCT: String(a.faultDropPct), FAULT_DELAY_PCT: String(a.faultDelayPct), FAULT_DELAY_MS } : {}),
-      ...(a.scenario === 'soak' ? { TARGET: a.target, RATE: a.rate, DURATION_S: String(a.durationS), PHASE: a.phase, SAMPLE_SEC: String(a.sampleSec), RUN: runTag, CONNECTIONS: String(a.connections ?? 0), HOLD_RATE: String(a.holdRate ?? 0), WS_BASE: 'ws://realtime-gw.realtime-gw.svc.cluster.local:8080' } : {}),
+      ...(a.scenario === 'soak' ? { TARGET: a.target, RATE: a.rate, DURATION_S: String(a.durationS), PHASE: a.phase, SAMPLE_SEC: String(a.sampleSec), RUN: runTag, CONNECTIONS: String(a.connections ?? 0), HOLD_RATE: String(a.holdRate ?? 0), WS_BASE: 'ws://realtime-gw.realtime-gw.svc.cluster.local:8080', HOLD_SIZE: '2', SEATS_PER_ORDER: '2', SIM_URL: L.pgSimUrl, ...(simSecret ? { PG_SIMULATOR_SECRET_KEY: simSecret } : {}) } : {}),
       ...(entryPlan ? { RATE: a.rate, ENTRY_VUS: entryPlan.entryVus } : {}),
     };
     const segments = executionSegments(nGen);
@@ -1441,7 +1450,7 @@ async function runV1(a, runTag) {
     for (const sg of segments) {
       const name = split ? `loadgen-${runTag}-g${sg.index}` : `loadgen-${runTag}`;
       pods.push(name);
-      await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment', deadlineS: Math.max(60, a.scenario === 'soak' ? busyS + 600 : Math.min(11400, busyS * 2 + 600)), ...(split ? { index: sg.index } : {}) }));
+      await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment' || (a.scenario === 'soak' && a.target === 'payment-svc'), deadlineS: Math.max(60, a.scenario === 'soak' ? busyS + 600 : Math.min(11400, busyS * 2 + 600)), ...(split ? { index: sg.index } : {}) }));
     }
     for (const p of pods) await waitPodReady(p);
 

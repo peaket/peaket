@@ -31,7 +31,7 @@ export const GATEWAY_RATE_PER_IP = 10;
 /** 시나리오 이름 → 파일 */
 export const SCENARIOS = Object.freeze({ queue: 'v0-queue.js', 'seat-hold': 'v0-seat-hold.js', payment: 'v0-payment.js', 'seat-deltas': 'v0-seat-hold.js', gate: 'v0-gate.js' });
 /** v1 시나리오 이름 → 파일(§3.8 합본으로 보낸다, BUILD_ORDER PRF-215) */
-export const V1_SCENARIOS = Object.freeze({ queue: 'v1-queue.js', 'seat-hold': 'v1-seat-hold.js', payment: 'v1-payment.js', soak: 'v1-soak.js' });
+export const V1_SCENARIOS = Object.freeze({ queue: 'v1-queue.js', 'seat-hold': 'v1-seat-hold.js', payment: 'v1-payment.js' });
 /** v1 진입 비례 확인의 단계 하나(run.mjs v1 entry-steps가 단계마다 부른다. 사용자가 직접 고르는 시나리오가 아니라 V1_SCENARIOS에 넣지 않는다, MSR-020) */
 export const V1_ENTRY_SCENARIO = 'v1-entry.js';
 /** v1 입장 토큰의 최대 체류 45분 [가정](queue-svc MAX_STAY_MS). 준비부터 본구간 끝까지가 이 안이어야 구매 세션이 끝나지 않는다 */

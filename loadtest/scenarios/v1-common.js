@@ -22,6 +22,7 @@ export const PURCHASE_BASE = envStr('PURCHASE_BASE', 'http://bundle.v1.svc.clust
 export const HOLD_BASE = envStr('HOLD_BASE', PURCHASE_BASE);
 export const RUN_TAG = envStr('RUN_TAG', 'local');
 const CLIENT_KEY = envStr('CLIENT_KEY', '');
+export { CLIENT_KEY };
 const SHARED_SECRET = __ENV.SHARED_SECRET_HEX ? hexToBytes(__ENV.SHARED_SECRET_HEX) : new Uint8Array(0);
 export const CONSENT_VERSION = envStr('CONSENT_VERSION', 'lt-v1-2026-11');
 
