@@ -14,7 +14,7 @@ async function relay() {
     assert.fail(`runner/relay-fault.mjs를 읽지 못했다: ${e?.message ?? e}`);
   }
   for (const name of [
-    'parseRelayFaultArgs', 'relayLoadPlan', 'faultPlan', 'validateFaultRecords', 'judgeRelayRun',
+    'parseRelayFaultArgs', 'relayLoadPlan', 'relayConsumerPlan', 'faultPlan', 'validateFaultRecords', 'judgeRelayRun',
     'RELAY_EVIDENCE_SQL', 'buildToxiproxy', 'TOXIPROXY_RULES', 'reconcileSimLedger',
     'webhookDuplicatePlan', 'judgeWebhookDuplicates', 'parsePaymentFaultArgs', 'judgePaymentFaultRun',
     'missingRowIds', 'oldLeaderSendCount', 'summarizeSamples',
@@ -31,6 +31,7 @@ const LAG_P99_SECONDS = 0.2;
 const BATCH_P99_SECONDS = 0.05;
 const DB_CPU_INCREASE_PCT_POINTS = 5;
 const PAYMENT_P99_MS = 3000;
+const PAYMENT_RATE = 300;
 const DRAIN_SECONDS = 300;
 
 const usage = (fn) =>
@@ -53,6 +54,7 @@ function goodFaults(plan) {
 function cleanRun(faultPlan) {
   const plan = faultPlan({ mainSeconds: MAIN_SECONDS });
   return {
+    runId: 'run-1',
     mainSeconds: MAIN_SECONDS,
     rate: RATE,
     sentRows: 22_680_000,
@@ -62,8 +64,7 @@ function cleanRun(faultPlan) {
     eventKeyMismatches: 0,
     oldLeaderSends: 0,
     maxKeyRepeats: 100,
-    paymentP99Ms: 2_500,
-    paymentP99BrokerRestartMs: 2_800,
+    payment: { runId: 'run-1', mode: 'load', rate: 300, p99Ms: 2_500, p99BrokerRestartMs: 2_800, pullCount: 7 },
     lagSeconds: [0.01, 0.02, 0.03],
     batchSeconds: [0.001, 0.002, 0.003],
     faults: goodFaults(plan),
@@ -74,8 +75,8 @@ function cleanRun(faultPlan) {
 
 const sim = (rows) => rows.map((r) => JSON.stringify({ kind: 'pg_charge', ...r })).join('\n');
 
-test('F089-1 ① 릴레이 규칙·부하 계획·인자는 30분, 12600/s, DB COPY, 같은 키 반복을 고정한다', async () => {
-  const { RELAY_RULES, relayLoadPlan, parseRelayFaultArgs } = await relay();
+test('F089-1 ① 릴레이 규칙·부하/소비자 계획·인자는 30분, 12600/s, DB COPY, 같은 실행 P-T5를 고정한다', async () => {
+  const { RELAY_RULES, relayLoadPlan, relayConsumerPlan, parseRelayFaultArgs } = await relay();
   assert.equal(RELAY_RULES.mainSeconds, MAIN_SECONDS);
   assert.equal(RELAY_RULES.rateMultiplier, 2);
   assert.equal(RELAY_RULES.brokerStopSeconds, BROKER_STOP_SECONDS);
@@ -92,23 +93,33 @@ test('F089-1 ① 릴레이 규칙·부하 계획·인자는 30분, 12600/s, DB C
   assert.equal(load.receivedTable, 'f089_received');
   assert.ok(load.hotKeyEvery > 0, '같은 좌석 키를 섞는 주기');
   assert.ok(load.batchRows > 0 && load.batchRows < load.rows);
+  const consumer = relayConsumerPlan({ topic: 'trade.events', table: 'f089_received' });
+  assert.equal(consumer.table, 'f089_received');
+  assert.deepEqual(consumer.columns, ['id', 'key', 'seq', 'event_key', 'publisher', 'received_at']);
+  assert.ok(consumer.maxBatch > 0 && consumer.group);
 
   const a = parseRelayFaultArgs([
     '--main', String(MAIN_SECONDS), '--rate', String(RATE), '--relay', 'off',
+    '--payment-rate', String(PAYMENT_RATE), '--payment-mode', 'load',
     '--out', '.cache/peaket-f09/relay', '--record', '--run-id', '2026-11-27-relay-f089',
     '--prom-url', 'http://127.0.0.1:9090',
   ]);
   assert.equal(a.mainSeconds, MAIN_SECONDS);
   assert.equal(a.rate, RATE);
   assert.equal(a.relay, 'off');
+  assert.equal(a.paymentRate, PAYMENT_RATE);
+  assert.equal(a.paymentMode, 'load');
   assert.equal(a.record, true);
   assert.equal(a.runId, '2026-11-27-relay-f089');
-  assert.equal(parseRelayFaultArgs(['--main', String(MAIN_SECONDS)]).rate, RATE);
+  const defaults = parseRelayFaultArgs(['--main', String(MAIN_SECONDS)]);
+  assert.deepEqual([defaults.rate, defaults.paymentRate, defaults.paymentMode], [RATE, PAYMENT_RATE, 'load']);
 
   usage(() => parseRelayFaultArgs(['--main', '59', '--rate', '1']));
   usage(() => parseRelayFaultArgs(['--main', '3601', '--rate', '1']));
   usage(() => parseRelayFaultArgs(['--main', String(MAIN_SECONDS), '--rate', '0']));
   usage(() => parseRelayFaultArgs(['--main', String(MAIN_SECONDS), '--rate', '1', '--relay', 'wat']));
+  usage(() => parseRelayFaultArgs(['--main', String(MAIN_SECONDS), '--rate', '1', '--payment-mode', 'const']));
+  usage(() => parseRelayFaultArgs(['--main', String(MAIN_SECONDS), '--rate', '1', '--payment-rate', '0']));
   usage(() => parseRelayFaultArgs(['--main', String(MAIN_SECONDS), '--rate', '1', '--wat', 'x']));
 });
 
@@ -147,6 +158,8 @@ test('F089-2 ② judgeRelayRun은 DB 건수로 판정하고, 옛 리더·같은 
   const { faultPlan, judgeRelayRun } = await relay();
   const base = cleanRun(faultPlan);
   assert.equal(judgeRelayRun(base).verdict, 'pass');
+  assert.equal(judgeRelayRun(base).summary.paymentPulls, 7);
+  assert.equal(judgeRelayRun(base).summary.paymentP99Ms, 2_500);
 
   assert.equal(judgeRelayRun({ ...base, missingRows: 1 }).verdict, 'fail');
   assert.equal(judgeRelayRun({ ...base, missingRows: 1 }).summary.missing, 1);
@@ -156,9 +169,13 @@ test('F089-2 ② judgeRelayRun은 DB 건수로 판정하고, 옛 리더·같은 
 
   assert.equal(judgeRelayRun({ ...base, maxKeyRepeats: 1 }).verdict, 'invalid');
   assert.equal(judgeRelayRun({ ...base, oldLeaderSends: undefined }).verdict, 'invalid');
-  assert.equal(judgeRelayRun({ ...base, paymentP99Ms: null }).verdict, 'invalid');
-  assert.equal(judgeRelayRun({ ...base, paymentP99BrokerRestartMs: null }).verdict, 'invalid');
+  assert.equal(judgeRelayRun({ ...base, rate: 100 }).verdict, 'invalid', 'V-T27 2배 [가정] 도착률이 아님');
+  assert.equal(judgeRelayRun({ ...base, payment: { ...base.payment, runId: 'other-run' } }).verdict, 'invalid', '다른 실행 P-T5');
+  assert.equal(judgeRelayRun({ ...base, payment: { ...base.payment, mode: 'const' } }).verdict, 'invalid', '상수 P-T5');
+  assert.equal(judgeRelayRun({ ...base, payment: { ...base.payment, p99Ms: null } }).verdict, 'invalid');
+  assert.equal(judgeRelayRun({ ...base, payment: { ...base.payment, p99BrokerRestartMs: null } }).verdict, 'invalid');
   assert.equal(judgeRelayRun({ ...base, faults: [] }).verdict, 'invalid');
+  assert.equal(judgeRelayRun({ ...base, faults: base.faults.map((f) => (f.kind === 'db-cut' ? { ...f, applied: false } : f)) }).verdict, 'invalid', 'applied:false');
   assert.equal(judgeRelayRun({ ...base, lagSeconds: [] }).verdict, 'invalid');
   assert.equal(judgeRelayRun({ ...base, mainSeconds: MAIN_SECONDS - 1 }).verdict, 'invalid');
   assert.equal(judgeRelayRun({ ...base, sentRows: 0 }).verdict, 'invalid');
@@ -186,9 +203,9 @@ test('F089-3 ② V-T27 문턱은 triggers로 남고, 빠진 행은 문턱과 상
   assert.ok(judgeRelayRun({ ...base, batchSeconds: [BATCH_P99_SECONDS + 0.0001] }).triggers.includes('batch'));
   assert.ok(!judgeRelayRun({ ...base, relayCpuPctPoints: DB_CPU_INCREASE_PCT_POINTS }).triggers.includes('db-cpu'));
   assert.ok(judgeRelayRun({ ...base, relayCpuPctPoints: DB_CPU_INCREASE_PCT_POINTS + 0.1 }).triggers.includes('db-cpu'));
-  assert.ok(!judgeRelayRun({ ...base, paymentP99Ms: PAYMENT_P99_MS }).triggers.includes('payment-p99'));
-  assert.ok(judgeRelayRun({ ...base, paymentP99Ms: PAYMENT_P99_MS + 1 }).triggers.includes('payment-p99'));
-  assert.ok(judgeRelayRun({ ...base, paymentP99BrokerRestartMs: PAYMENT_P99_MS + 1 }).triggers.includes('payment-p99-broker'));
+  assert.ok(!judgeRelayRun({ ...base, payment: { ...base.payment, p99Ms: PAYMENT_P99_MS } }).triggers.includes('payment-p99'));
+  assert.ok(judgeRelayRun({ ...base, payment: { ...base.payment, p99Ms: PAYMENT_P99_MS + 1 } }).triggers.includes('payment-p99'));
+  assert.ok(judgeRelayRun({ ...base, payment: { ...base.payment, p99BrokerRestartMs: PAYMENT_P99_MS + 1 } }).triggers.includes('payment-p99-broker'));
 
   assert.equal(judgeRelayRun({ ...base, lagSeconds: [0.5] }).verdict, 'pass');
   const missing = judgeRelayRun({ ...base, lagSeconds: [0.5], missingRows: 1 });

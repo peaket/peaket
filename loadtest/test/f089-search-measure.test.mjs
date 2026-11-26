@@ -107,9 +107,11 @@ test('F089-5 ① 검색 규칙·인자는 크기 1만·2만, 회차 3, 몰림·�
   assert.equal(a.crowdRate, CROWD_RATE);
   assert.equal(a.randomRate, RANDOM_RATE);
   assert.equal(a.durationS, DURATION_S);
+  assert.equal(a.base, 'http://host.docker.internal:3001');
   assert.equal(a.record, true);
   const defaults = parseSearchArgs(['--size', '20000', '--reps', '3']);
   assert.deepEqual([defaults.crowdRate, defaults.randomRate, defaults.durationS, defaults.golden], [CROWD_RATE, RANDOM_RATE, DURATION_S, false]);
+  assert.equal(parseSearchArgs(['--size', '10000', '--reps', '3', '--base', 'http://host.docker.internal:3001']).base, 'http://host.docker.internal:3001');
 
   usage(() => parseSearchArgs(['--size', '9999', '--reps', '3']));
   usage(() => parseSearchArgs(['--size', '20001', '--reps', '3']));
@@ -209,11 +211,14 @@ test('F089-7 ② nfr028Verdict는 구간별 최악 p95·3위·취소 반영까�
 
   const lowTop1 = nfr028Verdict({ search: searchPass, golden: parseGoldenReport({ cases: CASES, top1: 0.89, top3: TOP3, target: { top1: TOP1, top3: TOP3 }, misses: [] }), versionLag: VERSION_LAG_SECONDS, removal: 'SR-T15 ①' });
   assert.equal(lowTop1.parts.top1, 'fail');
+  assert.equal(lowTop1.verdict, 'fail');
   const lowTop3 = nfr028Verdict({ search: searchPass, golden: parseGoldenReport({ cases: CASES, top1: TOP1, top3: 0.97, target: { top1: TOP1, top3: TOP3 }, misses: [] }), versionLag: VERSION_LAG_SECONDS, removal: 'SR-T15 ①' });
   assert.equal(lowTop3.parts.top3, 'fail');
+  assert.equal(lowTop3.verdict, 'fail');
 
   const late = nfr028Verdict({ search: searchPass, golden: goodGolden, versionLag: VERSION_LAG_SECONDS + 1, removal: 'SR-T15 ①' });
   assert.equal(late.parts.versionLag, 'fail');
+  assert.equal(late.verdict, 'fail');
   const noLag = nfr028Verdict({ search: searchPass, golden: goodGolden, versionLag: null, removal: 'SR-T15 ①' });
   assert.equal(noLag.parts.versionLag, '미측정');
   assert.notEqual(noLag.verdict, 'pass');

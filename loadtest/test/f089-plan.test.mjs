@@ -94,6 +94,7 @@ test('F089-9 ② 명령은 2GiB 무대·docker 한 자리·12600/s·20/20/60·P-
   assert.ok(relay.includes('v1') && relay.includes('relay-fault'), relay.join(' '));
   assert.ok(hasPair(relay, '--main', '1800'), 'V-T27 30분');
   assert.ok(hasPair(relay, '--rate', '12600'), 'V-T27 2배 [가정] 12600/s');
+  assert.ok(hasPair(relay, '--payment-rate', '300') && hasPair(relay, '--payment-mode', 'load'), '같은 실행 P-T5 부하');
   assert.ok(relay.includes('--record') && relay.includes('--out') && relay.includes('--prom-url'), '기록·산출물·Prometheus');
 
   const baseline = argvsOf(runOf(plan, 'w2-relay-baseline'));
@@ -106,9 +107,11 @@ test('F089-9 ② 명령은 2GiB 무대·docker 한 자리·12600/s·20/20/60·P-
   assert.ok(search10.includes('v1') && search10.includes('search'), search10.join(' '));
   assert.ok(hasPair(search10, '--size', '10000') && hasPair(search10, '--reps', '3'));
   assert.ok(hasPair(search10, '--crowd-rate', '20') && hasPair(search10, '--random-rate', '20') && hasPair(search10, '--duration', '60'));
+  assert.ok(hasPair(search10, '--base', 'http://host.docker.internal:3001'), '호스트 core-svc 대상');
   assert.ok(search10.includes('--golden'), 'SR-T12 골든 보고');
   const search20 = argvsOf(runOf(plan, 'w2-search-20k'));
   assert.ok(hasPair(search20, '--size', '20000') && hasPair(search20, '--reps', '3'));
+  assert.ok(hasPair(search20, '--base', 'http://host.docker.internal:3001'));
   assert.equal(search20.includes('--golden'), false, '골든은 1만에서 한 번');
 
   const pt1 = argvsOf(runOf(plan, 'w2-pt1-fault'));
@@ -116,6 +119,12 @@ test('F089-9 ② 명령은 2GiB 무대·docker 한 자리·12600/s·20/20/60·P-
   assert.ok(hasPair(pt1, '--payments', '10000') && hasPair(pt1, '--rate', '100'));
   assert.ok(hasPair(pt1, '--generators', '2'), 'P-T1 발생기 2대');
   assert.ok(hasPair(pt1, '--webhook-duplicates', '2'), '웹훅 중복 2회');
+  assert.ok(pt1.includes('--invariants'), 'P-T1 불변식 결과');
+
+  const allArgvs = plan.runs.flatMap((r) => argvsOf(r));
+  const drop = allArgvs.find((a) => a.some((x) => x.endsWith('lock.sh')) && a.includes('drop'));
+  assert.ok(drop, 'Docker 잠금 drop 명령이 없다');
+  assert.ok(drop.includes('docker') && drop.includes('lane4-F-08-9') && !drop.includes('docker-all'), drop.join(' '));
 
   for (const key of MEASURE_KEYS) {
     const argv = argvsOf(runOf(plan, key));
