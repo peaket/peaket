@@ -119,6 +119,13 @@ test('UI-05 소명 제출은 기한·이의 창·상태로만 열리고 본문�
   assert.equal(appealContentError('가'.repeat(2000)), undefined);
   assert.match(appealContentError(''), /1자/);
   assert.match(appealContentError('가'.repeat(2001)), /2,000/);
+  assert.equal(appealContentError('\u1100\u1161'.repeat(1000)), undefined);
+  assert.equal(appealContentError('😀'.repeat(1001)), undefined);
+  assert.equal(appealContentError('가'.repeat(1999) + '😀'), undefined);
+  assert.match(appealContentError('😀'.repeat(2001)), /2,000/);
+  assert.match(appealContentError('가'.repeat(2000) + '😀'), /2,000/);
+  assert.equal(appealContentError('가\u200b\u200b\u0000\u0007'), undefined);
+  assert.match(appealContentError('\u200b'.repeat(2000)), /1자/);
 });
 
 test('UI-05 [ASVS v5.0.0-14.2.6] 받은 사람은 OPEN·EXPIRED에서만 제출하고 판단이 끝난 상태에서는 막는다', () => {

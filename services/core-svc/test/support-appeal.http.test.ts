@@ -113,9 +113,18 @@ describe('support 소명 제출', () => {
     expect(noKey.statusCode).toBe(400);
     expect((await submit(me, { kind: 'FRAUD_CASE', targetId: CASE, body: '   ' })).statusCode).toBe(422);
     expect((await submit(me, { kind: 'FRAUD_CASE', targetId: CASE, body: '\u200b'.repeat(2000) })).statusCode).toBe(422);
-    // 계약 maxLength(2,000)를 넘는 요청은 스키마에서 400이다(TR-05).
+    // 2,001 한글은 계약 상한을 넘어 400이다(TR-05). 이모지는 코드 포인트로 센다.
     expect((await submit(me, { kind: 'FRAUD_CASE', targetId: CASE, body: '가'.repeat(2001) })).statusCode).toBe(400);
-    expect((await submit(me, { kind: 'FRAUD_CASE', targetId: CASE, body: '😀'.repeat(1001) })).statusCode).toBe(400);
+    expect((await submit(me, { kind: 'FRAUD_CASE', targetId: CASE, body: '😀'.repeat(2001) })).statusCode).toBe(400);
+
+    const made2000 = await submit(me, { kind: 'FRAUD_CASE', targetId: CASE, body: '가'.repeat(2000) });
+    expect(made2000.statusCode).toBe(201);
+    expect((await appeals.get(json(made2000).appealId)).body).toBe('가'.repeat(2000));
+
+    const emoji1001 = '😀'.repeat(1001);
+    const madeEmoji1001 = await submit(me, { kind: 'FRAUD_CASE', targetId: CASE, body: emoji1001 });
+    expect(madeEmoji1001.statusCode).toBe(201);
+    expect((await appeals.get(json(madeEmoji1001).appealId)).body).toBe(emoji1001);
 
     const nfc = '\u1100\u1161'.repeat(1000);
     const madeNfc = await submit(me, { kind: 'FRAUD_CASE', targetId: CASE, body: nfc });
