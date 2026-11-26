@@ -113,6 +113,20 @@
 리뷰 지적 번호는 `docs/review/plans/F-07-10.md` '시험 리뷰' 절의 것이다. 높음·보안·통과 기준 13건(TR-01~13)은 시험 담당이 고치고, 아래 낮은 지적과 남은 위험은 정리 목록에 둔다.
 
 - TR-14(낮음): 계획 §6의 시험 ID 자리표시(`OPS-05~07`·`WEB-01~04`)가 실제(`OPS-05~09`·`WEB-01~05`)와 다르고, 계획 I-07은 `reviewDetailOf`가 폭·높이를 남긴다고 하지만 `OPS-05`는 버린다. `review-photo-upload.test.mjs`는 `out.imageId`·`e.status`·`photo.id`처럼 생성 변수 이름을 고정하고, `review-images.http.test.ts:337`은 `reviewMaintenanceTasks(..., { images } as never)`로 타입을 지운다. `review-panel.test.mjs:85`는 cs_lead의 후기 조치를 허용하지만 openapi `POST /v1/ops/reviews/{reviewId}/moderation`의 `x-peaket-roles`는 cs_agent뿐이다(d5 §7.6 `:3312`는 cs_agent·cs_lead 처리). 계획 §6의 수치와 실제 시험 수를 맞추고, 변수 이름 대신 행동을, 역할은 계약과 d5 가운데 하나로 맞춘다.
-- `review_image`의 실제 SQL(제약·색인·GRANT)과 같은 사진을 두 후기에 동시에 붙이는 경합은 이 환경에서 Docker를 쓰지 않아 `test-int`로 미뤘다. 구현 뒤 Docker 차례가 열리면 `test-int/review-images.int.test.ts`로 확인한다(계획 §검증).
+- `review_image`의 실제 SQL(제약·색인·GRANT)과 같은 사진을 두 후기에 동시에 붙이는 경합은 시험 리뷰 때 Docker를 쓰지 않아 `test-int`로 미뤘다. 2026-11-26 구현 리뷰가 Docker `lane5-F-07-10`로 실제 SQL을 확인해 사진 교체·순서 바꾸기의 `23505` 결함(IR-01)을 찾았다. 아래 구현 리뷰와 계획 '구현 리뷰'를 본다.
 - SCR-016 사진 업로드·관제 후기 패널의 실제 Chromium 누름은 F-08-7(웨이브 끝 브라우저 확인)로 미뤘다. 이 시험은 소스·모델·HTTP 대역까지다.
 - `image-worker`가 이 저장소에 없어 실제 디코딩·재인코딩·메타데이터 제거는 대역으로만 본다. 개발·운영 업로드는 `image-worker` 배포가 생겨야 끝까지 돈다(계획 §남은 위험).
+
+### F-07-10 구현 리뷰(2026-11-26)
+
+구현 리뷰 지적 가운데 낮음이다. 자세한 내용과 정본 근거는 `docs/review/plans/F-07-10.md` '구현 리뷰' 절에 있다. 높음·보안·통과 기준(IR-01~09)은 freeze 가지에서 고치고, 아래는 구간 끝 정리로 넘긴다.
+
+- IR-10(낮음): `review-image.ts:68-72`가 처리 작업의 비정상 폭·높이(NaN·0)를 `TOO_LARGE`로 바꿔 `review-images.ts:83-87`이 422(사용자 잘못)로 닫는다. 작업자 잘못은 503으로 분류해 재시도·모니터링이 맞게 한다.
+- IR-11(낮음): 정리 24시간 경계가 Drizzle `lt`(`drizzle-review-store.ts:276`)와 메모리 `<=`(`memory-review-store.ts:351`)로 다르다. 딱 24시간인 행이 DB에서만 다음 날로 밀린다.
+- IR-12(낮음): `ReviewImages.cleanupDue`(`review-images.ts:132-146`)는 아무도 부르지 않는 죽은 코드이고, 정비 일(`review-maintenance.ts:48`)이 같은 로직을 다시 쓰며 묶음 100을 숫자로 박았다. 한 곳으로 모으고 `REVIEW_IMAGE_CLEANUP_BATCH`를 쓴다.
+- IR-13(낮음): `review-images.ts:165-166`이 422 확장을 `{ reason, extensions: { reason } }`로 겹쳐 `extensions.extensions.reason`을 함께 내보낸다. 계약에 없는 칸을 지운다.
+- IR-14(낮음): `review-images.ts:93-108`의 파생본 게시·격리/준비 삭제가 try/catch 밖이라, 두 번째 `putPublic` 실패 때 첫 파생본이 공개된 채 500이 나고 행도 없다. 실패 단계에서 남긴 객체를 지우고 503으로 닫는다.
+- IR-15(낮음): `ConnectedPage.tsx:121-142`가 역할과 무관하게 후기 상세를 불러 operator·commander에게 403 오류 문구를 보이고(openapi GET은 cs_agent·cs_lead만, d5 `:3312`는 operator·commander 조회 허용), 건을 바꿔도 이전 후기 상태를 지우지 않는다. 역할별 호출·상태 초기화를 맞춘다.
+- IR-16(낮음): 계획의 구현 리뷰 범위 `b19fc1416`·설명 길이 부등호는 이번 리뷰 커밋에서 바로잡았다(계획 `:449`·`:475`). `docs/lanes/lane5.md` 진행 로그와 BUILD_ORDER F-07-10 비고는 기록 커밋 몫으로 남는다.
+- **2026-11-26 구현 리뷰가 Docker로 확인한 것**: 잠금 `lane5-F-07-10`로 기존 후기 통합 5파일 20/20을 다시 통과했고, 임시 PostgreSQL에 0052를 적용해 `DrizzleReviewStore`의 사진 교체·순서 바꾸기가 부분 유일 `(review_id, sort)` 때문에 `23505`로 실패하는 것을 재현했다. 아래 계획 §검증 `남은 위험`의 "새 사진 통합 시험 없음"은 이 재현을 `test-int/review-images.int.test.ts`로 남기는 일로 바뀐다(IR-09).
+- **남은 위험(기록)**: 가린 후기의 사진은 API 응답에서만 빠지고 공개 CDN 객체 주소는 남는다. 불법 촬영물 가림처럼 객체 회수가 필요한 경우 F-07-11 전에 공개 객체 삭제·비공개 이동 가운데 하나를 정한다. `review-image-cleanup`은 `PEAKET_IMAGE_STORE_DIR`가 있을 때만 등록되고 차트의 릴레이 파드 값·볼륨은 아직 없어, HOT-200(S3) 뒤에 실제 저장소로 바꿔야 한다.
