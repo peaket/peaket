@@ -124,6 +124,8 @@ describe('Q-T59 보내는 쪽 사본', () => {
     const app = await setup({ copies });
     const r = await approvedRestriction(app, { accountId: '0194f064-0000-7000-8000-000000000002' });
     expect(app.kit().rows().find((x) => x.restrictionId === r.restrictionId)).toMatchObject({ status: 'ACTIVE', version: r.version });
+    const done = await app.get(r.approver, r.approvalId);
+    expect(done.body.status).toBe('DONE');
     // 직접 어댑터도 false를 그대로 돌려준다
     answer.changed = false;
     await expect(grpcCopies!.queue({ accountId: r.accountId, restrictionId: r.restrictionId, state: 'ACTIVE', endsAtMs: NOW_MS + 86_400_000, version: 3 })).resolves.toEqual({ changed: false });

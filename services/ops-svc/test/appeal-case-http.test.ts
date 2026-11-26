@@ -162,6 +162,22 @@ describe('R-T13 소명 판단(해제·유지)', () => {
     expect(h.copies.map((x) => [x.target, x.input.state])).toEqual([['queue', 'LIFTED'], ['purchase', 'LIFTED'], ['view', 'LIFTED']]);
     expect(h.results[0]).toMatchObject({ status: 'DECIDED', result: 'LIFTED' });
   });
+
+  test('R-T13 purchase 사본이 실패한 해제는 503이고 건 OPEN·행 ACTIVE·view/결과 0·보류 OPEN이다', async () => {
+    const r = await approvedRestriction(h, { accountId: randomUUID() });
+    const fx = source({ accountId: r.accountId, targetId: r.restrictionId });
+    const caseId = await openAppeal(fx);
+    const c = await h.caseGet(h.as('cs_lead'), caseId);
+    h.failNext('purchase');
+    const failed = await h.decide(h.as('cs_lead'), caseId, { decision: 'ACCEPT', reason: '해제-시험7747' }, Number(c.body.version));
+    expect(failed.status).toBe(503);
+    expect((await h.caseGet(h.as('cs_lead'), caseId)).body.status).toBe('OPEN');
+    expect(h.kit().rows().find((x) => x.restrictionId === r.restrictionId)).toMatchObject({ status: 'ACTIVE' });
+    expect(h.copies.map((x) => [x.target, x.input.state])).toEqual([['queue', 'LIFTED'], ['purchase', 'LIFTED']]);
+    expect(h.copies.some((x) => x.target === 'view')).toBe(false);
+    expect(h.results).toEqual([]);
+    expect(h.holds.at(-1)).toMatchObject({ kind: 'APPEAL', state: 'OPEN' });
+  });
 });
 
 describe('R-T32 ⑥ 사유 FRAUD 제한의 소명', () => {

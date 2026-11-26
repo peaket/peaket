@@ -233,14 +233,22 @@ describe('ASVS 경계', () => {
   test('ASVS v5.0.0-3.5.3 소명 접수·결과는 POST만 받고 GET·PUT은 만들지 않는다', async () => {
     const accountId = randomUUID();
     const hdrs = h.fanHeaders(accountId);
-    const before = items((await h.myAppeals(hdrs)).body).length;
+    const beforeRes = await h.myAppeals(hdrs);
+    expect(beforeRes.status).toBe(200);
+    expect(Array.isArray(beforeRes.body.items)).toBe(true);
+    const before = items(beforeRes.body).length;
     for (const method of ['PUT', 'PATCH', 'DELETE'] as const) {
       const r = await h.svc.http.inject({ method, url: '/v1/appeals', headers: { ...hdrs, 'content-type': 'application/json' }, payload: JSON.stringify({ kind: 'RESTRICTION', targetId: randomUUID(), body: '사정-시험7739' }) });
       expect([404, 405]).toContain(r.statusCode);
     }
-    expect(items((await h.myAppeals(hdrs)).body)).toHaveLength(before);
+    const sameRes = await h.myAppeals(hdrs);
+    expect(sameRes.status).toBe(200);
+    expect(Array.isArray(sameRes.body.items)).toBe(true);
+    expect(items(sameRes.body)).toHaveLength(before);
     const created = await submit(h, { accountId, kind: 'RESTRICTION', targetId: randomUUID() });
-    const after = items((await h.myAppeals(hdrs)).body);
+    const afterRes = await h.myAppeals(hdrs);
+    expect(afterRes.status).toBe(200);
+    const after = items(afterRes.body);
     expect(after).toHaveLength(before + 1);
     expect(after[0]!.appealId).toBe(created.body.appealId);
   });

@@ -25,10 +25,13 @@ describe('ops 0040 예매 제한 사유·요청 끝', () => {
     // 구조: DO $$ ... BEGIN ... IF to_regclass('booking_restriction') IS NOT NULL THEN ... END IF; ... END $$;
     expect(t).toMatch(/DO \$\$/i);
     expect(t).toMatch(/BEGIN[\s\S]*IF\s+to_regclass\('booking_restriction'\)\s+IS\s+NOT\s+NULL\s+THEN[\s\S]*END\s+IF;[\s\S]*END\s+\$\$/i);
-    const block = /DO \$\$([\s\S]*?)END\s+\$\$/i.exec(t)?.[1] ?? '';
-    expect(block).toMatch(/ALTER TABLE "?booking_restriction"? DROP CONSTRAINT IF EXISTS "?booking_restriction_reason_code_check"?/i);
-    expect(block).toMatch(/ALTER TABLE "?booking_restriction"? ADD CONSTRAINT "?booking_restriction_reason_code_check"? CHECK/i);
-    for (const code of ['FRAUD', 'ABUSE_CANCEL', 'ABUSE_TRANSFER', 'ABUSE_MULTI_ACCOUNT', 'ABUSE_RESALE']) expect(block).toContain(`'${code}'`);
+    const thenBlock = /IF\s+to_regclass\('booking_restriction'\)\s+IS\s+NOT\s+NULL\s+THEN([\s\S]*?)END\s+IF;/i.exec(t)?.[1] ?? '';
+    expect(thenBlock, 'THEN ... END IF 안에 ALTER가 있어야 한다').toMatch(/ALTER TABLE "?booking_restriction"? DROP CONSTRAINT IF EXISTS "?booking_restriction_reason_code_check"?/i);
+    expect(thenBlock).toMatch(/ALTER TABLE "?booking_restriction"? ADD CONSTRAINT "?booking_restriction_reason_code_check"? CHECK/i);
+    for (const code of ['FRAUD', 'ABUSE_CANCEL', 'ABUSE_TRANSFER', 'ABUSE_MULTI_ACCOUNT', 'ABUSE_RESALE']) expect(thenBlock).toContain(`'${code}'`);
+    // END IF 뒤에 ALTER가 밀려나면 표 없는 이 가지에서 0040이 실패한다
+    const afterIf = /END\s+IF;([\s\S]*?)END\s+\$\$/i.exec(t)?.[1] ?? '';
+    expect(afterIf).not.toMatch(/ALTER TABLE "?booking_restriction"?/i);
   });
 
   test('같은 계정에 열린 BOOKING_RESTRICTION 하나를 (kind, target_ref) 열의 부분 유일 인덱스로 막는다', () => {
