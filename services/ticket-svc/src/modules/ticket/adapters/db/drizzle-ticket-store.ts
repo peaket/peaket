@@ -360,8 +360,19 @@ export class DrizzleTicketStore implements TicketStore {
   }
 
   /** 그 표에 들어감(IN)·통과(PASS) 스캔이 있는가(거절·확인·나감은 입장이 아니다) */
+  async reclaimBasis(input: { ticketId: string; nowMs: number }): Promise<import('../../domain/ticket.js').ReclaimBasis | undefined> {
+    const rows = await this.o.database.db.select().from(ticket).where(eq(ticket.id, input.ticketId)).limit(1);
+    const row = rows[0];
+    if (!row) return undefined;
+    return { ticketId: row.id, payerAccountId: row.payerAccountId, holderAccountId: row.accountId, ...(row.eventStartsAt ? { entryStartsAtMs: row.eventStartsAt.getTime() } : {}), entryRecorded: await this.#entryRecorded(this.o.database.db as never, row.eventId, row.id), status: statusOf(row.status) };
+  }
+
   async reclaimTransfer(input: { approvalId: string; ticketId: string; expectedPayerAccountId: string; expectedHolderAccountId: string; nowMs: number }): Promise<TransferReclaimOutcome> {
-    return this.o.database.transaction(async (tx) => {
+    try {
+      return await this.o.database.transaction(async (tx) => {
+      const rows = await tx.select().from(ticket).where(eq(ticket.id, input.ticketId)).for('update');
+      const row = rows[0];
+      if (!row) throw new TicketReclaimError('NOT_FOUND', '티켓을 찾지 못했습니다');
       const prior = await tx
         .select({ ticketId: transferReclaim.ticketId, payer: transferReclaim.expectedPayerAccountId, holder: transferReclaim.expectedHolderAccountId, previousHolder: transferReclaim.previousHolderAccountId, result: transferReclaim.result })
         .from(transferReclaim)
@@ -372,9 +383,6 @@ export class DrizzleTicketStore implements TicketStore {
         if (prior[0].payer !== input.expectedPayerAccountId || prior[0].holder !== input.expectedHolderAccountId) throw new TicketReclaimError('FAILED_PRECONDITION', '같은 승인에 다른 기대 값이 왔습니다');
         return { result: prior[0].result as TransferReclaimOutcome['result'], ticketId: prior[0].ticketId, ...(prior[0].previousHolder ? { previousHolderAccountId: prior[0].previousHolder } : {}) };
       }
-      const rows = await tx.select().from(ticket).where(eq(ticket.id, input.ticketId)).for('update');
-      const row = rows[0];
-      if (!row) throw new TicketReclaimError('NOT_FOUND', '티켓을 찾지 못했습니다');
       if (row.payerAccountId !== input.expectedPayerAccountId) throw new TicketReclaimError('INVALID_ARGUMENT', '기대 결제자가 표의 결제자와 다릅니다');
       let result: TransferReclaimOutcome['result'];
       let previousHolderAccountId: string | undefined;
@@ -389,7 +397,8 @@ export class DrizzleTicketStore implements TicketStore {
       } else {
         previousHolderAccountId = row.accountId;
         result = 'RECLAIMED';
-        await tx.update(ticket).set({ accountId: row.payerAccountId, transferPending: false, version: row.version + 1 }).where(eq(ticket.id, row.id));
+        await this.o.deviceKeys?.revokeActiveInTx(tx, row.id, input.nowMs);
+        await tx.update(ticket).set({ accountId: row.payerAccountId, status: 'ACTIVE', transferPending: false, keyRevokedAt: new Date(input.nowMs), version: row.version + 1 }).where(eq(ticket.id, row.id));
       }
       await tx.insert(transferReclaim).values({
         approvalId: input.approvalId,
@@ -401,7 +410,15 @@ export class DrizzleTicketStore implements TicketStore {
         createdAt: new Date(input.nowMs),
       });
       return { result, ticketId: row.id, ...(previousHolderAccountId ? { previousHolderAccountId } : {}) };
-    });
+      });
+    } catch (e) {
+      if (typeof e === 'object' && e !== null && 'code' in e && (e as { code?: string }).code === '23505') {
+        const prior = await this.o.database.db.select({ ticketId: transferReclaim.ticketId, result: transferReclaim.result, previousHolder: transferReclaim.previousHolderAccountId }).from(transferReclaim).where(eq(transferReclaim.approvalId, input.approvalId)).limit(1);
+        if (prior[0]?.ticketId === input.ticketId) return { result: prior[0].result as TransferReclaimOutcome['result'], ticketId: prior[0].ticketId, ...(prior[0].previousHolder ? { previousHolderAccountId: prior[0].previousHolder } : {}) };
+        throw new TicketReclaimError('ALREADY_EXISTS', '같은 승인 ID에 다른 티켓이 왔습니다');
+      }
+      throw e;
+    }
   }
 
   async #entryRecorded(tx: DbTransaction, eventId: string, ticketId: string): Promise<boolean> {

@@ -23,6 +23,8 @@ export interface CancellationOrders {
   findCancellation(cancellationId: string): Promise<CancellationRecord | undefined>;
   /** 주문 ID의 항목들(F-06-3 승인 환불). 운영 어댑터가 구현한다 */
   byOrder?(orderId: string): Promise<CancellationOrderView[] | undefined>;
+  /** 주문의 이전 취소 기록(중복 환급 방지, IR-10) */
+  cancellationsOf?(orderId: string): Promise<CancellationRecord[]>;
 }
 
 /** 입장 기록 확인(F-06-3 미성년 계약 취소). 없으면 확인하지 않는다 */

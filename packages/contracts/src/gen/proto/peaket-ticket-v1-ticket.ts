@@ -52,6 +52,10 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "ReclaimTransfer": {
                       "requestType": "ReclaimTransferRequest",
                       "responseType": "ReclaimTransferResponse"
+                    },
+                    "GetReclaimBasis": {
+                      "requestType": "GetReclaimBasisRequest",
+                      "responseType": "GetReclaimBasisResponse"
                     }
                   }
                 },
@@ -909,6 +913,42 @@ export const ticketV1Ticket: Record<string, unknown> = {
                     "previous_holder_account_id": {
                       "type": "string",
                       "id": 3
+                    }
+                  }
+                },
+                "GetReclaimBasisRequest": {
+                  "fields": {
+                    "ticket_id": {
+                      "type": "string",
+                      "id": 1
+                    }
+                  }
+                },
+                "GetReclaimBasisResponse": {
+                  "fields": {
+                    "ticket_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "payer_account_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "holder_account_id": {
+                      "type": "string",
+                      "id": 3
+                    },
+                    "entry_starts_at": {
+                      "type": "google.protobuf.Timestamp",
+                      "id": 4
+                    },
+                    "entry_recorded": {
+                      "type": "bool",
+                      "id": 5
+                    },
+                    "status": {
+                      "type": "string",
+                      "id": 6
                     }
                   }
                 },

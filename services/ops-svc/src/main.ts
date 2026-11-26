@@ -28,6 +28,8 @@ import { AwsWafIpSets, ControlFanout, DrizzleControlDeliveries, GrpcPgAssignment
 import { GrpcPurchasePriorityGrants, HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
 import { GrpcTicketScannerDevices } from './modules/scanner-devices/index.js';
 import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts/index.js';
+import { ApprovalLifecycle, HttpApprovalLifecyclePorts, LogApprovalAlerts, LogApprovalNotifier, TicketReclaimClient } from './modules/approvals/index.js';
+import { ApprovalTickJob } from './jobs/approval-tick.js';
 import { PromBotReviewSignals } from './modules/bot-review/index.js';
 import { botReviewLabelsFromEnv, botReviewSourceFromEnv } from './bot-review-wiring.js';
 import { realtimeTableFromEnv } from './rt-wiring.js';
@@ -131,9 +133,13 @@ const payouts = paymentUrl
     }
   : undefined;
 // 계약 조건 변경 승인(BAT-615): core 계약 적용·취소. 주소가 없으면 그 경로가 503이고 시작은 막지 않는다
+const ticketReclaimUrl = process.env.PEAKET_TICKET_GRPC_URL;
+const ticketReclaim = ticketReclaimUrl ? new TicketReclaimClient(ticketReclaimUrl, internalToken) : undefined;
+const approvalPorts = new HttpApprovalLifecyclePorts(purchaseUrl, ticketReclaim, internalToken);
 const approvals = {
   ...(coreUrl ? { core: new HttpCoreContract(createExternalHttpClient({ provider: 'core-svc', baseUrl: coreUrl, timeoutCapMs: 3_000 }), internalToken) } : {}),
   ...(reauth ? { reauth } : {}),
+  lifecycle: { targets: approvalPorts, executors: approvalPorts },
 };
 if (!coreUrl) console.warn(JSON.stringify({ level: 'warn', kind: 'approval-wiring', msg: 'PEAKET_CORE_HTTP_URL이 없어 계약 승인 적용·반려가 503이다' }));
 // core 회차 상태 반영(BAT-420-rest GAT-110): 주소가 없으면 local·ci만 경고로 시작하고 그 밖은 여기서 시작 실패다
@@ -249,6 +255,12 @@ const coreApplyTimer = cancellationDeps.core
 coreApplyTimer?.unref();
 
 // 명령 요청·결과 사건 소비자(ops.command-events, BAT-465 R-584). HTTP 수신기와 같은 처리기를 쓴다.
+// 승인 수명주기 실제 포트와 5분 tick(IR-01·IR-02): 시작 조립이 끝난 뒤 로거·알림을 꽂는다.
+const approvalLifecycle = service.app.get(ApprovalLifecycle);
+approvalLifecycle.configure({ notifier: new LogApprovalNotifier(service.logger), alerts: new LogApprovalAlerts(service.logger) });
+const approvalTick = new ApprovalTickJob(approvalLifecycle, service.logger);
+approvalTick.start();
+
 let consumers: OpsConsumers | undefined;
 try {
   const kafka = kafkaConsumersFromEnv(process.env);
@@ -277,6 +289,7 @@ try {
 
 process.once('SIGTERM', () => {
   if (coreApplyTimer) clearInterval(coreApplyTimer);
+  approvalTick.stop();
   void (async () => {
     try {
       await consumers?.stop();

@@ -62,6 +62,8 @@ export interface TicketStore {
 
   /** 양도 회수(F-06-3). 승인 ID로 멱등하고 티켓 행 잠금 안에서 조건을 다시 본다. */
   reclaimTransfer?(input: { approvalId: string; ticketId: string; expectedPayerAccountId: string; expectedHolderAccountId: string; nowMs: number }): Promise<import('./ticket.js').TransferReclaimOutcome>;
+  /** 양도 회수 승인 전 대상 확인(F-06-3) */
+  reclaimBasis?(input: { ticketId: string; nowMs: number }): Promise<import('./ticket.js').ReclaimBasis | undefined>;
 
   /** 계정의 월렛 목록. 발권 최신순, 커서 페이지. */
   list(input: ListTicketsInput): Promise<ListTicketsResult>;

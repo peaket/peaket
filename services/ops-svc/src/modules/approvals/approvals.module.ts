@@ -65,7 +65,7 @@ export class ApprovalsModule {
       ...(deps.reader ? { reader: deps.reader } : {}),
       ...(deps.failureCases ? { failureCases: deps.failureCases } : {}),
     });
-    const lifecycleStore: ApprovalLifecycleStore = deps.lifecycleStore ?? (o.storage === 'database' ? new DrizzleApprovalLifecycleStore(o.database, audit) : new MemoryApprovalLifecycleStore(audit));
+    const lifecycleStore: ApprovalLifecycleStore = deps.lifecycleStore ?? (o.storage === 'database' ? new DrizzleApprovalLifecycleStore(o.database) : new MemoryApprovalLifecycleStore(audit));
     const providers: Provider[] = [
       { provide: APPROVAL_LIFECYCLE_STORE, useValue: lifecycleStore },
       {
@@ -80,8 +80,16 @@ export class ApprovalsModule {
       },
       {
         provide: ApprovalLifecycle,
-        useFactory: (store: ApprovalLifecycleStore, reauth: ApprovalReauthVerifier, clock: Clock, payouts: PayoutApprovals) =>
-          new ApprovalLifecycle({
+        useFactory: (store: ApprovalLifecycleStore, reauth: ApprovalReauthVerifier, clock: Clock, payouts: PayoutApprovals) => {
+          const failureCases =
+            deps.lifecycle?.failureCases ??
+            (deps.failureCases
+              ? {
+                  failed: (i: { approvalId: string; kind: string; dueAtMs: number | null }) => deps.failureCases!.failed(i, clock.now()),
+                  succeeded: (id: string) => deps.failureCases!.succeeded(id, clock.now()),
+                }
+              : undefined);
+          return new ApprovalLifecycle({
             store,
             reauth,
             clock,
@@ -91,8 +99,9 @@ export class ApprovalsModule {
             ...(deps.lifecycle?.executors ? { executors: deps.lifecycle.executors } : {}),
             ...(deps.lifecycle?.notifier ? { notifier: deps.lifecycle.notifier } : {}),
             ...(deps.lifecycle?.alerts ? { alerts: deps.lifecycle.alerts } : {}),
-            ...(deps.lifecycle?.failureCases ? { failureCases: deps.lifecycle.failureCases } : {}),
-          }),
+            ...(failureCases ? { failureCases } : {}),
+          });
+        },
         inject: [APPROVAL_LIFECYCLE_STORE, APPROVAL_REAUTH, CLOCK, PayoutApprovals],
       },
       {

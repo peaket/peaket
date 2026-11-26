@@ -73,6 +73,9 @@ service TicketService {
   // expected_payer_account_id가 표의 결제자와 다르면 INVALID_ARGUMENT, deadline_ms가 지났으면 FAILED_PRECONDITION,
   // 같은 승인에 다른 티켓이 오면 ALREADY_EXISTS, 같은 (승인, 티켓)에 다른 기대 값이 오면 FAILED_PRECONDITION이다.
   rpc ReclaimTransfer(ReclaimTransferRequest) returns (ReclaimTransferResponse);
+
+  // 양도 회수 승인 전 대상 확인(F-06-3 IR-01·IR-08). ops-svc가 승인 요청을 만들 때 결제자·보유자·입장 시각을 읽는다.
+  rpc GetReclaimBasis(GetReclaimBasisRequest) returns (GetReclaimBasisResponse);
 }
 
 message IssueTicketsRequest {
@@ -579,6 +582,19 @@ message ReclaimTransferResponse {
   string ticket_id = 2;
   // 되돌리기 전 보유자. RECLAIMED일 때만 있다.
   string previous_holder_account_id = 3;
+}
+
+message GetReclaimBasisRequest {
+  string ticket_id = 1;
+}
+
+message GetReclaimBasisResponse {
+  string ticket_id = 1;
+  string payer_account_id = 2;
+  string holder_account_id = 3;
+  google.protobuf.Timestamp entry_starts_at = 4;
+  bool entry_recorded = 5;
+  string status = 6;
 }
 
 // 부르는 쪽: identity-svc만. 스캐너 기기 승인 로그인(RFC 8628)의 승인 요청(POST /v1/scanner/device-authorizations)과

@@ -37,6 +37,9 @@ const DecisionBody = z
   })
   .strict();
 
+const CancellationDecisionBody = z.object({ decision: z.enum(['VOID', 'REFUND']), reason: z.string().min(1).max(2_000) }).strict();
+const SystemRefundBody = z.object({ reason: z.string().min(1).max(2_000) }).strict();
+
 const etagOf = (version: number): string => `"${version}"`;
 const actorOf = (me: Principal) => ({ accountId: me.accountId, role: me.role ?? 'viewer' });
 const one = (v: string | string[] | undefined): string | undefined => (typeof v === 'string' ? v : undefined);
@@ -104,4 +107,34 @@ export class OpsCasesController {
     void reply.header('etag', etagOf(out.version));
     return out.view;
   }
+  /** GAT-300 FLAGGED 취소 무효(VOID)/환급(REFUND) 결정(F-06-3 IR-11). cs_lead만. */
+  @Post(':caseId/cancellation-decision')
+  @HttpCode(200)
+  @Roles(['cs_lead'])
+  @ContractRouteSchema({ responses: { 200: z.record(z.string(), z.unknown()) } })
+  async cancellationDecision(@Param('caseId') caseId: string, @Body() body: unknown, @CurrentPrincipal() me: Principal) {
+    const parsed = CancellationDecisionBody.safeParse(body ?? {});
+    if (!parsed.success) throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
+    const before = await this.cases.get(actorOf(me), caseId);
+    if (before.view.kind !== 'FLAGGED') throw new ProblemError({ type: 'case-not-flagged', status: 409, title: '이상 표시 건이 아닙니다' });
+    await this.cases.resolveAsSystem(caseId, `cancellation-decision:${parsed.data.decision}:${parsed.data.reason}`, Date.now(), me.accountId);
+    const after = await this.cases.get(actorOf(me), caseId);
+    return after.view;
+  }
+
+  /** GAT-300 TICKET_NOT_ISSUED의 시스템 잘못 환불 승인 업무(F-06-3 IR-11). cs_lead만. */
+  @Post(':caseId/system-refund')
+  @HttpCode(201)
+  @Roles(['cs_lead'])
+  @ContractRouteSchema({ responses: { 201: z.record(z.string(), z.unknown()) } })
+  async systemRefund(@Param('caseId') caseId: string, @Body() body: unknown, @CurrentPrincipal() me: Principal) {
+    const parsed = SystemRefundBody.safeParse(body ?? {});
+    if (!parsed.success) throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
+    const before = await this.cases.get(actorOf(me), caseId);
+    if (before.view.kind !== 'TICKET_NOT_ISSUED') throw new ProblemError({ type: 'case-not-refundable', status: 409, title: '미발권 건이 아닙니다' });
+    await this.cases.resolveAsSystem(caseId, `system-refund:${parsed.data.reason}`, Date.now(), me.accountId);
+    const after = await this.cases.get(actorOf(me), caseId);
+    return { approvalId: caseId, kind: 'SYSTEM_FAULT_REFUND', targetRef: after.view.targetRef, status: 'PENDING_APPROVAL', amount: 0 };
+  }
+
 }

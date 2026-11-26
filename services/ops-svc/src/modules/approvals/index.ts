@@ -9,3 +9,5 @@ export { MemoryContractApprovalStore, MemorySettlementAdjustmentApprovalStore } 
 export { MemoryCoreContract, UnavailableCoreContract } from '../../adapters/http-core-contract.js';
 export type { ContractApprovalRecord, SettlementAdjustmentApprovalFacts, SettlementAdjustmentApprovalRecord, SettlementAdjustmentApprovalView } from './domain/approval.js';
 export type { ContractApprovalStore, CoreContractClient, SettlementAdjustmentApprovalStore } from './domain/ports.js';
+export { ApprovalLifecycle, type ApprovalLifecycleDeps } from './application/approval-lifecycle.js';
+export { HttpApprovalLifecyclePorts, TicketReclaimClient, LogApprovalNotifier, LogApprovalAlerts } from './adapters/service-ports.js';

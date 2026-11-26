@@ -36,6 +36,9 @@ import type {
   StartPaymentWrites,
 } from './domain/ports.js';
 import { CONSENT_VERSION_PATTERN, OrdersController } from './inbound/orders.controller.js';
+import { ApprovalBasisOrders } from './application/approval-basis.js';
+import { InternalApprovalBasisController } from './inbound/internal-approval-basis.controller.js';
+import type { CancellationOrders } from '../refund/index.js';
 
 /**
  * 조립 값. 운영(main.ts)은 writes = DrizzleOrderWrites(purchase DB), holds = inventory RedisOrderHolds, saleConfigs = SeatMapSaleConfigs(LayoutSeatMap),
@@ -100,6 +103,8 @@ export interface BookingModuleDeps {
   };
   /** 핫패스 구간 진단(BAT-027). 없으면 계측하지 않는다 */
   hotPath?: HotPathMetrics;
+  /** 승인 근거 내부 조회(F-06-3 IR-03). 없으면 그 경로를 열지 않는다 */
+  approvalBasis?: { orders: CancellationOrders };
 }
 
 @Module({})
@@ -178,7 +183,12 @@ export class BookingModule {
           },
         ]
       : [];
-    return { module: BookingModule, controllers: [OrdersController], providers: [createOrder, acceptPayment, ...getPaymentStatus, ...startPaymentProvider], exports: [] };
+    return {
+      module: BookingModule,
+      controllers: [OrdersController, ...(deps.approvalBasis ? [InternalApprovalBasisController] : [])],
+      providers: [createOrder, acceptPayment, ...getPaymentStatus, ...startPaymentProvider, ...(deps.approvalBasis ? [{ provide: ApprovalBasisOrders, useValue: new ApprovalBasisOrders(deps.approvalBasis.orders) }] : [])],
+      exports: [],
+    };
   }
 }
 

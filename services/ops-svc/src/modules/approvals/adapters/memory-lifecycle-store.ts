@@ -28,12 +28,13 @@ export class MemoryApprovalLifecycleStore implements ApprovalLifecycleStore {
     return this.rows.get(approvalId);
   }
 
-  async save(record: ApprovalLifecycleRecord, audit?: AuditRecord): Promise<boolean> {
+  async save(record: ApprovalLifecycleRecord, audit?: AuditRecord | readonly AuditRecord[]): Promise<boolean> {
     const current = this.rows.get(record.approvalId);
-    // 실행 중→실패처럼 같은 판에서 끝나는 전이는 허용하고, 그 밖에는 한 판씩만 나아간다.
-    if (!current || (current.version !== record.version && current.version !== record.version - 1)) return false;
+    // 실행 중→실패만 같은 판에서 끝나고, 그 밖의 전이는 직전 판에서만 나아간다(동시 승인 두 개가 같은 새 판을 쓰지 못한다).
+    const expected = record.status === 'FAILED' ? record.version : record.version - 1;
+    if (!current || current.version !== expected) return false;
     this.rows.set(record.approvalId, { ...record, approvals: [...record.approvals] });
-    if (audit) await this.audit?.append(audit);
+    if (audit) for (const a of Array.isArray(audit) ? audit : [audit]) await this.audit?.append(a);
     return true;
   }
 

@@ -49,6 +49,10 @@ export interface ApprovalLifecycleRecord {
   evidenceChecked: string | null;
   /** 결제자 계정. 응답·감사·로그에는 싣지 않는다(TR-09). */
   targetAccountId: string | null;
+  /** 양도 회수 승인 시점의 보유자(기대 값, IR-08) */
+  expectedHolderAccountId: string | null;
+  /** 반려한 승인자(IR-14) */
+  approverId: string | null;
   requesterId: string;
   requesterRole: string;
   approverRoles: string[];
@@ -134,7 +138,7 @@ export function nextBusinessDay(date: string): string {
 
 export const lifecycleView = (r: ApprovalLifecycleRecord, actor: OpsActor): ApprovalLifecycleView => {
   const voted = r.approvals.some((v) => v.approverId === actor.accountId);
-  const pending = r.status === 'PENDING_APPROVAL' || r.status === 'ESCALATED';
+  const pending = r.status === 'PENDING_APPROVAL' || r.status === 'ESCALATED' || r.status === 'FAILED';
   return {
     approvalId: r.approvalId,
     kind: r.kind,
@@ -148,7 +152,7 @@ export const lifecycleView = (r: ApprovalLifecycleRecord, actor: OpsActor): Appr
     status: r.status,
     requestedBy: { adminAccountId: r.requesterId, displayName: null, role: r.requesterRole },
     requestedAt: r.createdAt.toISOString(),
-    canApprove: pending && r.requesterId !== actor.accountId && r.approverRoles.includes(actor.role) && !voted,
+    canApprove: pending && r.requesterId !== actor.accountId && r.approverRoles.includes(actor.role) && (!voted || r.status === 'FAILED'),
     dueAt: r.dueAt.toISOString(),
     closeReason: r.closeReason,
     version: r.version,

@@ -137,6 +137,11 @@ export class GrpcTicketCancellations implements TicketCancellations, OperatorTic
    * ticket-svc GetEntryRecords(BAT-420 GAT-090 A, P-T19). 데드라인은 부른 쪽 값과 2초 [가정] 가운데 짧은 것이다.
    * 전송 실패·시간 초과와 답에 빠진 표는 던진다(모르는 것을 입장 없음으로 보지 않는다, 부른 쪽은 환급하지 않는다)
    */
+  async hasEntry(ticketId: string): Promise<boolean> {
+    const map = await this.lookup([ticketId], Date.now() + ENTRY_LOOKUP_DEADLINE_MS);
+    return map.get(ticketId)?.entered === true;
+  }
+
   async lookup(ticketIds: readonly string[], deadlineMs: number): Promise<ReadonlyMap<string, EntryRecordView>> {
     const ms = Math.min(ENTRY_LOOKUP_DEADLINE_MS, Math.max(1, Math.floor(Number.isFinite(deadlineMs) ? deadlineMs : ENTRY_LOOKUP_DEADLINE_MS)));
     const v = await new Promise<Record<string, unknown>>((resolve, reject) => {

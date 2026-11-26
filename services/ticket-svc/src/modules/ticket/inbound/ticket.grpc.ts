@@ -278,6 +278,31 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
         .catch((err: unknown) => fail('ListTickets', err, undefined, cb, onError));
     },
 
+    // 양도 회수 승인 전 대상 확인(F-06-3 IR-01·IR-08). 부르는 쪽은 ops-svc뿐이다.
+    GetReclaimBasis: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      if (o?.internalToken && !verifyInternalGrpcActor(call.metadata, o.internalToken, { caller: 'ops-svc' }).ok) {
+        cb({ code: grpc.status.PERMISSION_DENIED, details: '부를 수 없는 호출자다' });
+        return;
+      }
+      useCases.ticket
+        .reclaimBasis(text(call.request.ticket_id))
+        .then((b) => {
+          if (!b) {
+            cb({ code: grpc.status.NOT_FOUND, details: '티켓을 찾지 못했습니다' });
+            return;
+          }
+          cb(null, {
+            ticket_id: b.ticketId,
+            payer_account_id: b.payerAccountId,
+            holder_account_id: b.holderAccountId,
+            ...(b.entryStartsAtMs !== undefined ? { entry_starts_at: timestampOf(b.entryStartsAtMs) } : {}),
+            entry_recorded: b.entryRecorded,
+            status: b.status,
+          });
+        })
+        .catch((err: unknown) => fail('GetReclaimBasis', err, undefined, cb, onError));
+    },
+
     // 양도 회수(F-06-3). 부르는 쪽은 ops-svc뿐이다. 티켓 행 잠금 안에서 조건을 다시 보고, 승인 ID로 멱등하다.
     ReclaimTransfer: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
       if (o?.internalToken && !verifyInternalGrpcActor(call.metadata, o.internalToken, { caller: 'ops-svc' }).ok) {

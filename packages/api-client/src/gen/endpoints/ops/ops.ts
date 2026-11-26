@@ -89,6 +89,8 @@ import type {
   CreateOpsApprovalRequestWithdrawalBody,
   CreateOpsArtistBody,
   CreateOpsAuditCheckpointBody,
+  CreateOpsCaseCancellationDecisionBody,
+  CreateOpsCaseSystemRefundBody,
   CreateOpsCaseVerificationAppealDecisionBody,
   CreateOpsCommandExtensionBody,
   CreateOpsCommandPostReviewBody,
@@ -8035,6 +8037,238 @@ export const useCreateOpsCaseVerificationAppealDecision = <TError = ErrorType<Pr
         TContext
       > => {
       return useMutation(getCreateOpsCaseVerificationAppealDecisionMutationOptions(options), queryClient);
+    }
+    export type createOpsCaseCancellationDecisionResponse200 = {
+  data: CsCase
+  status: 200
+}
+
+export type createOpsCaseCancellationDecisionResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsCaseCancellationDecisionResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsCaseCancellationDecisionResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsCaseCancellationDecisionResponseSuccess = (createOpsCaseCancellationDecisionResponse200) & {
+  headers: Headers;
+};
+export type createOpsCaseCancellationDecisionResponseError = (createOpsCaseCancellationDecisionResponse403 | createOpsCaseCancellationDecisionResponse404 | createOpsCaseCancellationDecisionResponse409) & {
+  headers: Headers;
+};
+
+export const getCreateOpsCaseCancellationDecisionUrl = (caseId: string,) => {
+
+
+
+
+  return `/v1/ops/cases/${encodeURIComponent(String(caseId))}/cancellation-decision`
+}
+
+/**
+ * GAT-300, F-06-3 IR-11. FLAGGED 건에서 VOID(취소 무효)와 REFUND(기록 오류 환급)를 가른다. 처리 결과는 CS 건 해결 메모에 남긴다
+ * @summary FLAGGED 취소 무효·환급 결정(CS 팀장)
+ */
+export const createOpsCaseCancellationDecision = async (caseId: string,
+    createOpsCaseCancellationDecisionBody: CreateOpsCaseCancellationDecisionBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsCaseCancellationDecisionResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsCaseCancellationDecisionResponseSuccess>(getCreateOpsCaseCancellationDecisionUrl(caseId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createOpsCaseCancellationDecisionBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsCaseCancellationDecisionMutationKey = () => ['createOpsCaseCancellationDecision'] as const;
+
+export const getCreateOpsCaseCancellationDecisionMutationOptions = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsCaseCancellationDecision>>, TError,CreateOpsCaseCancellationDecisionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsCaseCancellationDecision>>, TError,CreateOpsCaseCancellationDecisionMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsCaseCancellationDecisionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsCaseCancellationDecision>>, CreateOpsCaseCancellationDecisionMutationVariables> = (props) => {
+          const {caseId,data} = props ?? {};
+
+          return  createOpsCaseCancellationDecision(caseId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsCaseCancellationDecisionMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsCaseCancellationDecision>>>
+    export type CreateOpsCaseCancellationDecisionMutationBody = BodyType<CreateOpsCaseCancellationDecisionBody>
+    export type CreateOpsCaseCancellationDecisionMutationError = ErrorType<ProblemResponse>
+    export type CreateOpsCaseCancellationDecisionMutationVariables = {caseId: string;data: BodyType<CreateOpsCaseCancellationDecisionBody>}
+
+    /**
+ * @summary FLAGGED 취소 무효·환급 결정(CS 팀장)
+ */
+export const useCreateOpsCaseCancellationDecision = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsCaseCancellationDecision>>, TError,CreateOpsCaseCancellationDecisionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsCaseCancellationDecision>>,
+        TError,
+        CreateOpsCaseCancellationDecisionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsCaseCancellationDecisionMutationOptions(options), queryClient);
+    }
+    export type createOpsCaseSystemRefundResponse201 = {
+  data: ApprovalRequest
+  status: 201
+}
+
+export type createOpsCaseSystemRefundResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsCaseSystemRefundResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsCaseSystemRefundResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsCaseSystemRefundResponseSuccess = (createOpsCaseSystemRefundResponse201) & {
+  headers: Headers;
+};
+export type createOpsCaseSystemRefundResponseError = (createOpsCaseSystemRefundResponse403 | createOpsCaseSystemRefundResponse404 | createOpsCaseSystemRefundResponse409) & {
+  headers: Headers;
+};
+
+export const getCreateOpsCaseSystemRefundUrl = (caseId: string,) => {
+
+
+
+
+  return `/v1/ops/cases/${encodeURIComponent(String(caseId))}/system-refund`
+}
+
+/**
+ * GAT-300, F-06-3 IR-11. 미발권 건에서 시스템 잘못 환불 승인 업무를 만들고 CS 건을 해결한다
+ * @summary TICKET_NOT_ISSUED 시스템 잘못 환불 승인 업무(CS 팀장)
+ */
+export const createOpsCaseSystemRefund = async (caseId: string,
+    createOpsCaseSystemRefundBody: CreateOpsCaseSystemRefundBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsCaseSystemRefundResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsCaseSystemRefundResponseSuccess>(getCreateOpsCaseSystemRefundUrl(caseId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createOpsCaseSystemRefundBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsCaseSystemRefundMutationKey = () => ['createOpsCaseSystemRefund'] as const;
+
+export const getCreateOpsCaseSystemRefundMutationOptions = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsCaseSystemRefund>>, TError,CreateOpsCaseSystemRefundMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsCaseSystemRefund>>, TError,CreateOpsCaseSystemRefundMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsCaseSystemRefundMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsCaseSystemRefund>>, CreateOpsCaseSystemRefundMutationVariables> = (props) => {
+          const {caseId,data} = props ?? {};
+
+          return  createOpsCaseSystemRefund(caseId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsCaseSystemRefundMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsCaseSystemRefund>>>
+    export type CreateOpsCaseSystemRefundMutationBody = BodyType<CreateOpsCaseSystemRefundBody>
+    export type CreateOpsCaseSystemRefundMutationError = ErrorType<ProblemResponse>
+    export type CreateOpsCaseSystemRefundMutationVariables = {caseId: string;data: BodyType<CreateOpsCaseSystemRefundBody>}
+
+    /**
+ * @summary TICKET_NOT_ISSUED 시스템 잘못 환불 승인 업무(CS 팀장)
+ */
+export const useCreateOpsCaseSystemRefund = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsCaseSystemRefund>>, TError,CreateOpsCaseSystemRefundMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsCaseSystemRefund>>,
+        TError,
+        CreateOpsCaseSystemRefundMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsCaseSystemRefundMutationOptions(options), queryClient);
     }
     export type createOpsCaseReplyResponse201 = {
   data: InquiryMessage

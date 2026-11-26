@@ -2945,6 +2945,151 @@ export const CreateOpsCaseVerificationAppealDecisionResponse = zod.object({
 }).describe('CS 처리함 건(POL-038)')
 
 /**
+ * GAT-300, F-06-3 IR-11. FLAGGED 건에서 VOID(취소 무효)와 REFUND(기록 오류 환급)를 가른다. 처리 결과는 CS 건 해결 메모에 남긴다
+ * @summary FLAGGED 취소 무효·환급 결정(CS 팀장)
+ */
+export const CreateOpsCaseCancellationDecisionParams = zod.object({
+  "caseId": zod.string()
+})
+
+export const createOpsCaseCancellationDecisionBodyReasonMax = 2000;
+
+
+
+export const CreateOpsCaseCancellationDecisionBody = zod.object({
+  "decision": zod.enum(['VOID', 'REFUND']),
+  "reason": zod.string().min(1).max(createOpsCaseCancellationDecisionBodyReasonMax)
+}).strict()
+
+export const createOpsCaseCancellationDecisionResponseResultNoteMax = 2000;
+
+
+
+export const CreateOpsCaseCancellationDecisionResponse = zod.object({
+  "caseId": zod.string().optional(),
+  "kind": zod.enum(['UNKNOWN_PAYMENT', 'REFUND_FAILED', 'FLAGGED', 'REFUND_ACCOUNT_PENDING', 'COMPENSATION_PENDING', 'ABUSE_FLAG', 'DISPUTE', 'JUDGEMENT_PENDING', 'STATEMENT_DISPUTE', 'SELLER_KYC_REQUIRED', 'PAYOUT_ERROR', 'PAYOUT_FAILED', 'PAYOUT_DELAYED', 'PORTONE_PAYOUT_EXECUTION', 'SCANNER_UNREPORTED', 'KOPIS_REPORT_FAILED', 'VERIFICATION_APPEAL', 'APPROVAL_EXECUTION_FAILED', 'RETURN_DELAYED', 'MINOR_CONTRACT_CANCEL', 'INQUIRY', 'CONTENT_REPORT', 'RIGHTS_REQUEST', 'PORTONE_LEDGER_MISMATCH', 'TICKET_NOT_ISSUED', 'PG_BALANCE_MISMATCH', 'APPEAL', 'FRAUD_OBJECTION_COMPENSATION', 'SETTLEMENT_ADJUSTMENT_SUGGESTED']).optional().describe('SETTLEMENT_ADJUSTMENT_SUGGESTED는 대사 불일치로 계산에서 뺀 결제가 풀린 뒤의 조정 제안(대상은 조정할 정산서 ID, 본문에 결제 ID·순액. 조정 행은 2인 승인 뒤 적용한다, settlement §4.1, 추천 적용 2026-11-23, ADR-0380 결정 7). APPEAL은 소명(예매 제한·양도 회수 대상 팬의 사정 설명, POST /v1/appeals). core-svc support 모듈이 받아 건을 요청하고, 건은 그 대상(예매 제한, 양도 회수 승인 업무)에 이어진다. 결과 기한은 예매 제한 소명이 3영업일 [가정], 양도 회수 소명이 그 승인 업무의 기한(입장 시작 전)이다(추천 적용 2026-10-30, docs/features/transfer-refund.md §7.1). PG_BALANCE_MISMATCH는 결제사 잔액 대사 차이(결제사·상점별 지급대행 잔액이 PEAKET 원장과 다름. 차이가 0이 아니면 건을 만들고 1만 원 [가정]을 넘으면 SEV3, 지급 묶음은 멈추지 않는다, settlement §5.5, 추천 적용 2026-10-28, 기술 검토 중간-043). TICKET_NOT_ISSUED는 결제 뒤 미발권(승인 뒤 발권 기한 30분 [가정]을 넘겼거나 다시 보내도 같은 오류로 자동 재시도를 멈춘 주문. 확인 4시간 [가정], 발권 다시 실행 또는 \'시스템 잘못이 확인된 환불\', 추천 적용 2026-10-28, ADR-0106). PORTONE_LEDGER_MISMATCH는 포트원 원장 불일치(PEAKET 지급과 이어지지 않거나 금액·받는 계좌가 다른 출금, 콘솔에서 바뀐 파트너 정산 계좌, 이체 원장과 다른 잔액 입력). targetRef는 포트원 이체 ID·파트너 ID·지급 묶음 ID이고, 열린 건에서 (kind, targetRef)가 하나다(settlement §5.3, 추천 적용 2026-10-28, ADR-0108). RETURN_DELAYED는 굿즈 반품 요청 뒤 7일 [가정] 동안 판매자 도착 확인이 없는 건(transfer-refund §7.1). MINOR_CONTRACT_CANCEL은 미성년자 계약 취소 요청(확인 결과 안내 3영업일, 승인 뒤 환급 3영업일, POL-038 ⑧). 추천 적용 2026-10-14, ADR-0062. INQUIRY는 고객 문의(답변 3영업일 [가정], 문의 유형 \'공연(판매자) 관련 분쟁\'은 DISPUTE, \'미성년자 계약 취소\'는 MINOR_CONTRACT_CANCEL로 온다), CONTENT_REPORT는 게시물 신고(같은 후기의 신고는 한 건, 결과 3영업일 [가정]), RIGHTS_REQUEST는 권리 침해 삭제 요청(정보통신망법 §44의2, 1영업일 [가정]). 추천 적용 2026-10-19, ADR-0066'),
+  "targetRef": zod.string().optional().describe('문의 건은 inquiryId, 신고 건은 신고된 reviewId, 소명 건은 appealId, 포트원 원장 불일치는 포트원 이체 ID·파트너 ID·지급 묶음 ID'),
+  "progressDueAt": zod.iso.datetime({"offset":true}).optional(),
+  "resultDueAt": zod.iso.datetime({"offset":true}).optional(),
+  "status": zod.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED']).optional(),
+  "category": zod.string().optional().describe('건 요청의 category(문의 유형·신고 사유·소명 대상 종류·DEDUCTION_GAP·ENTRY_AFTER_CANCEL, 승인 업무 실행 실패면 승인 종류). 없으면 빈 글(추천 적용 2026-11-23, ADR-0364)'),
+  "assignee": zod.string().nullish().describe('담당 관리 계정 ID. 이름은 싣지 않는다. cs_agent는 자기만 맡고 풀며, cs_lead는 활성 CS 담당자 누구에게나 맡긴다(ADR-0364 결정 5)'),
+  "version": zod.int().optional().describe('판 번호(data.md cs_case.version). 단건 응답의 ETag와 같은 값이고 PATCH의 If-Match에 쓴다'),
+  "dueState": zod.enum(['ON_TRACK', 'DUE_SOON', 'OVERDUE', 'NONE']).optional().describe('서버가 영업일 달력으로 센 기한 상태. DUE_SOON은 이른 기한의 1영업일 전이 지남, OVERDUE는 기한이 지남, NONE은 기한 없음이나 해결(추천 적용 2026-11-23, ADR-0364 결정 1·3). 화면은 이 값으로 배지와 위 배너를 그린다(공휴일 달력을 화면이 갖지 않는다)'),
+  "createdAt": zod.iso.datetime({"offset":true}).optional(),
+  "resolvedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "resultNote": zod.string().max(createOpsCaseCancellationDecisionResponseResultNoteMax).nullish().describe('해결 메모(평문). 해결할 때 필수'),
+  "reportSummary": zod.object({
+  "total": zod.int().optional(),
+  "byCategory": zod.record(zod.string(), zod.int()).optional()
+}).optional().describe('CONTENT_REPORT·RIGHTS_REQUEST만. 신고 수와 사유별 수. 신고자는 싣지 않는다(ADR-0066)')
+}).describe('CS 처리함 건(POL-038)')
+
+/**
+ * GAT-300, F-06-3 IR-11. 미발권 건에서 시스템 잘못 환불 승인 업무를 만들고 CS 건을 해결한다
+ * @summary TICKET_NOT_ISSUED 시스템 잘못 환불 승인 업무(CS 팀장)
+ */
+export const CreateOpsCaseSystemRefundParams = zod.object({
+  "caseId": zod.string()
+})
+
+export const createOpsCaseSystemRefundBodyReasonMax = 2000;
+
+
+
+export const CreateOpsCaseSystemRefundBody = zod.object({
+  "reason": zod.string().min(1).max(createOpsCaseSystemRefundBodyReasonMax)
+}).strict()
+
+export const createOpsCaseSystemRefundResponseFraudCaseSummaryOneAccountCountMin = 0;
+
+export const createOpsCaseSystemRefundResponseFraudCaseSummaryOneTicketCountMin = 0;
+
+export const createOpsCaseSystemRefundResponseFraudCaseSummaryOnePurchaseCountMin = 0;
+
+
+export const createOpsCaseSystemRefundResponseFraudCaseSummaryOneAppealCountsAcceptedMin = 0;
+
+export const createOpsCaseSystemRefundResponseFraudCaseSummaryOneAppealCountsRejectedMin = 0;
+
+export const createOpsCaseSystemRefundResponseFraudCaseSummaryOneAppealCountsExpiredMin = 0;
+
+export const createOpsCaseSystemRefundResponseFraudCaseSummaryOneAppealCountsSubmittedMin = 0;
+
+export const createOpsCaseSystemRefundResponseFraudCaseSummaryOneAppealCountsPendingMin = 0;
+
+export const createOpsCaseSystemRefundResponseFraudCaseSummaryOneSnapshotHashRegExp = new RegExp('^[0-9a-f]{64}$');
+export const createOpsCaseSystemRefundResponseFraudCaseSummaryOneTargetsMax = 100;
+
+
+
+export const CreateOpsCaseSystemRefundResponse = zod.object({
+  "approvalId": zod.string().optional(),
+  "kind": zod.enum(['SYSTEM_FAULT_REFUND', 'DISCRETIONARY_WAIVER', 'TRANSFER_RECLAIM', 'BOOKING_RESTRICTION', 'PAYOUT_BATCH', 'SETTLEMENT_ADJUSTMENT', 'COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE', 'MINOR_CONTRACT_CANCEL', 'SALE_SUSPENSION', 'SALE_RESUMPTION', 'FRAUD_ACTION']).optional().describe('FRAUD_ACTION은 부정 예매 조치(표 취소, 이용 제한 걸기·풀기)다. 지정 부정 거래 조사관이 POST /v1/ops/fraud-cases/{caseId}/action-requests로만 만들고(이 스키마의 POST /v1/ops/approval-requests로 보내면 422), targetRef는 사건 ID, 승인자는 요청자가 아니고 가명정보 취급자 지정이 없으며 지난 90일 안에 그 지정을 거둔 적도 없는 commander다(2인, POL-038 ⑪, 추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다. MINOR_CONTRACT_CANCEL은 미성년자 계약 취소(cs_agent 요청, 요청자 아닌 cs_lead 1인 승인, POL-038 ⑧, 추천 적용 2026-10-14, ADR-0062). SALE_SUSPENSION·SALE_RESUMPTION은 승인한 공연의 판매 중지·재개다. targetRef는 공연 ID이고 reasonCode는 SELLER_IDENTITY·LEGAL_REQUEST·FRAUD_SUSPECTED·OTHER [가정] 가운데 하나다. operator 이상이 요청하고 요청자가 아닌 commander가 승인한다(2인, docs/planning/03 §2.14, POL-038 ⑩, 추천 적용 2026-10-28, ADR-0123)'),
+  "targetRef": zod.string().optional(),
+  "requestedRole": zod.union([zod.literal('commander'),zod.literal('viewer'),zod.literal('operator'),zod.literal('cs_agent'),zod.literal('cs_lead'),zod.literal(null)]).nullish().describe('COMMANDER_ROLE_CHANGE에만. 승인되면 대상 관리 계정(targetRef)에 줄 역할이다. commander로 올리면 commander, commander에서 내리면 나머지 관제 역할 가운데 하나다. 그 밖의 종류는 null이다. 요청은 PUT /v1/ops/admin-accounts/{adminAccountId}/role의 202가 만들고, 승인 뒤 ops-svc가 이 값으로 identity-svc ChangeAdminRole을 부른다(docs/data.md approval_request.requested_role, 소유자 결정 2026-10-30, open-items 73번, 칸은 추천 적용 2026-10-30)'),
+  "amount": zod.int().optional().describe('원 단위. 지급 묶음 합계를 담으므로 64비트 정수다(DB bigint, 추천 적용 2026-10-28, 기술 검토 높음-20)'),
+  "reasonCode": zod.string().optional(),
+  "reasonText": zod.string().optional(),
+  "evidenceChecked": zod.string().optional().describe('확인한 증빙 종류만. 파일과 내용은 받지 않는다'),
+  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2),zod.literal(3)]).optional().describe('서버가 정한다'),
+  "approvals": zod.array(zod.string()).optional(),
+  "status": zod.enum(['REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'ESCALATED', 'EXECUTING', 'DONE', 'FAILED', 'WITHDRAWN', 'EXPIRED']).optional().describe('승인 대기 저장 값은 PENDING_APPROVAL. FAILED는 원인을 고친 뒤 승인자가 approve를 다시 부르면 다시 실행한다(docs/planning/03 §2.10, 추천 적용 2026-10-20, ADR-0073). WITHDRAWN은 승인 전 요청자 철회, EXPIRED는 대상 상태가 바뀌었거나 처리 기한이 지나 시스템이 끝낸 것이다(POL-038 공통, 추천 적용 2026-10-28, 기술 검토 낮음-087)'),
+  "dueAt": zod.iso.datetime({"offset":true}).optional(),
+  "fraudAction": zod.union([zod.literal('CANCEL_TICKETS'),zod.literal('RESTRICT'),zod.literal('LIFT_RESTRICTION'),zod.literal(null)]).nullish().describe('FRAUD_ACTION에만. 그 밖의 종류는 null(docs/data.md approval_request.fraud_action)'),
+  "summaryViewedAt": zod.iso.datetime({"offset":true}).nullish().describe('FRAUD_ACTION에만, 읽기 전용. 지금 부른 관리 계정 자신이 이 상세(fraudCaseSummary가 붙은 GET)를 처음 연 시각이다(docs/data.md approval_summary_view.first_viewed_at, 승인자마다 따로). 처음 여는 이번 응답에는 이번 시각이 실린다. 다른 종류면 null이다. 자기 열람 기록이 없는 승인자가 승인하면 409 fraud-summary-not-viewed다(POL-038 ⑪, 자동화된 결정 안내서 pp.7–8의 개입 과정 기록(추천 적용 2026-10-31, ADR-0173)'),
+  "fraudCaseSummary": zod.union([zod.object({
+  "caseId": zod.uuid().optional(),
+  "eventId": zod.string().optional(),
+  "reasonCategory": zod.enum(['MACRO_BOT', 'QUEUE_BYPASS', 'CAPTCHA_BYPASS', 'ACCOUNT_LENDING', 'LIMIT_EVASION']).optional().describe('부정 예매 사유 범주 다섯(POL-046 ①): 자동화 프로그램(매크로·봇), 대기열 우회 링크, 보안문자 우회, 명의 대여·사들인 계정, 1인 매수 제한 회피. 팬에게 알리는 것은 이 범주뿐이고 점수와 가중치는 알리지 않는다(추천 적용 2026-10-31, ADR-0171)'),
+  "accountCount": zod.int().min(createOpsCaseSystemRefundResponseFraudCaseSummaryOneAccountCountMin).optional(),
+  "ticketCount": zod.int().min(createOpsCaseSystemRefundResponseFraudCaseSummaryOneTicketCountMin).optional().describe('조치 대상 티켓 수'),
+  "purchaseCount": zod.int().min(createOpsCaseSystemRefundResponseFraudCaseSummaryOnePurchaseCountMin).optional(),
+  "limitPerPerson": zod.int().min(1).optional(),
+  "sharedAttributes": zod.array(zod.enum(['DEVICE', 'PAYMENT_METHOD', 'CONTACT', 'IP', 'ASN', 'IDENTITY_CONFLICT']).describe('묶음 계정이 함께 쓴 연결 값의 종류(FR-072): 기기 가명(deviceRef), 결제 수단 연결값(paymentMethodRef. 카드 지문이 없어 약한 값이다, docs/features/payment.md), 연락처·수령 정보 가명(contactRef), 시간창 안의 같은 IP, 같은 ASN(망 운영자 번호), 같은 본인확인으로 다른 계정에서 시도한 기록(docs/data.md identity_conflict_attempt). 추천 적용 2026-10-31, ADR-0171')).optional(),
+  "signals": zod.array(zod.enum(['LINK_GRAPH', 'SYNC_STEPS', 'VELOCITY', 'TIMING_BASELINE', 'BYPASS_TRACE', 'POST_MATCH']).describe('근거 신호. ADR-0171 결정 6의 분석 방법 여섯과 같다: 연결 그래프, 거의 같은 시각에 같은 단계를 밟는 동시 행동 군집, 같은 IP·기기에서 여러 계정을 빠르게 오가는 속도 규칙, 판매 시작부터 단계별 걸린 시간이 정상 기준선 밖, 입장 토큰 없는 홀드 시도·우회 링크 흔적, 외부 되팔이 게시물과 좌석 대조. 규칙과 점수는 docs/features/forensic-replay.md가 정한다(추천 적용 2026-10-31)')).optional(),
+  "appealOutcome": zod.enum(['NOT_REQUESTED', 'PENDING', 'ACCEPTED', 'REJECTED', 'PARTIAL']).optional(),
+  "investigatorOpinion": zod.string().nullish(),
+  "cancelDeadlineAt": zod.iso.datetime({"offset":true}).optional().describe('표 취소는 이 시각까지만 승인할 수 있고, 취소한 좌석은 언제나 정가 재판매로 돌린다(2026-10-31 정함, 그래서 예전 초안의 재판매 여부 칸 resaleOnCancel은 뺐다)'),
+  "appealCounts": zod.object({
+  "accepted": zod.int().min(createOpsCaseSystemRefundResponseFraudCaseSummaryOneAppealCountsAcceptedMin).optional(),
+  "rejected": zod.int().min(createOpsCaseSystemRefundResponseFraudCaseSummaryOneAppealCountsRejectedMin).optional(),
+  "expired": zod.int().min(createOpsCaseSystemRefundResponseFraudCaseSummaryOneAppealCountsExpiredMin).optional().describe('기한까지 제출하지 않음'),
+  "submitted": zod.int().min(createOpsCaseSystemRefundResponseFraudCaseSummaryOneAppealCountsSubmittedMin).optional().describe('제출했고 판단 전'),
+  "pending": zod.int().min(createOpsCaseSystemRefundResponseFraudCaseSummaryOneAppealCountsPendingMin).optional().describe('요청했고 제출 전')
+}).optional().describe('계정별 소명 결과의 수. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다(추천 적용 2026-10-31, ADR-0173)'),
+  "snapshotHash": zod.string().regex(createOpsCaseSystemRefundResponseFraudCaseSummaryOneSnapshotHashRegExp).optional().describe('고정 시점 조사용 기록의 해시(fraud_snapshot.inv_hash)'),
+  "targets": zod.array(zod.object({
+  "accountId": zod.string().optional(),
+  "ticketIds": zod.array(zod.string()).optional().describe('이 요청에 든 그 계정 결제 표(CANCEL_TICKETS만)'),
+  "holderTicketIds": zod.array(zod.string()).optional().describe('그 가운데 받은 사람(사건 밖 계정)이 가진 표. 조사관이 받은 사람의 진술을 보고 넣은 표다'),
+  "appealOutcome": zod.enum(['NOT_REQUESTED', 'PENDING', 'SUBMITTED', 'ACCEPTED', 'REJECTED', 'EXPIRED']).optional()
+})).max(createOpsCaseSystemRefundResponseFraudCaseSummaryOneTargetsMax).optional().describe('조치 요청의 대상 계정마다 한 줄. 승인자가 범위를 줄일 때(ApprovalDecisionBody.excludeAccountIds·excludeTicketIds) 고르는 목록이다. 계정 ID(내부 ID)와 표 ID, 그 계정의 소명 결과만 싣고 실명·연락처·가명·IP·연결 값은 싣지 않는다. 범위 줄이기용 targets 말고는 계정 ID를 싣지 않는다. 내부 ID는 API 본문(excludeAccountIds·excludeTicketIds)에 쓰려는 것이고, 화면은 ID를 보이지 않고 줄마다 \'계정 1·2…\'로 이름 붙인다(추천 적용 2026-10-31, ADR-0173)')
+}).describe('승인 업무 FRAUD_ACTION에 붙는 사건 요약(읽기 전용, POL-038 ⑪, SCR-046). 그 업무의 요청자와 승인 자격자만 상세를 받고(그 밖은 404) 그 상세에 늘 실린다(추천 적용 2026-10-31, ADR-0171). 승인자는 조사 경로(/v1/ops/fraud-cases 아래)를 부르지 않고 이것만 본다. 계정 수·근거 신호 범주·소명 결과·조사관 의견과, 범위를 줄이는 데 쓰는 대상 계정·표의 내부 ID(targets)만 싣고, 기기 가명·연락처 가명·IP 같은 연결 값은 싣지 않는다. 열람은 접속기록에 남는다(추천 적용 2026-10-31, ADR-0171 결정 7. targets는 (추천 적용 2026-10-31, ADR-0173))'),zod.null()]).optional().describe('FRAUD_ACTION에만, 읽기 전용. FRAUD_ACTION 상세는 요청자와 승인 자격자만 받으므로(그 밖은 404) 상세에는 늘 실리고, 다른 종류에는 null이다(추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다(POL-038 ⑪·공통, 추천 적용 2026-10-31, ADR-0171)'),
+  "requestedBy": zod.object({
+  "adminAccountId": zod.string().optional(),
+  "displayName": zod.string().nullish(),
+  "role": zod.enum(['viewer', 'operator', 'commander', 'cs_agent', 'cs_lead', 'partner_admin', 'partner_member']).optional().describe('관리 계정 역할 하나(docs/data.md admin_account.role, docs/planning/03 §3). 앞의 다섯은 관제 역할(group OPS), 뒤의 둘은 파트너 역할(group PARTNER)이다')
+}).optional().describe('화면에 보일 관리 계정 행위자. 삭제한 계정은 displayName이 null이고 화면은 \'삭제된 계정\'으로 보인다(docs/data.md admin_account.display_name)'),
+  "requestedAt": zod.iso.datetime({"offset":true}).optional(),
+  "closeReason": zod.string().nullish().describe('WITHDRAWN의 요청자 사유, EXPIRED의 TARGET_CHANGED·DEADLINE_PASSED(docs/data.md approval_request.close_reason)'),
+  "canApprove": zod.boolean().optional().describe('부른 계정이 지금 승인·반려할 수 있는지(요청자 제외). 서버가 판정한다'),
+  "contractTerms": zod.object({
+  "current": zod.object({
+  "commissionRateBp": zod.int().optional(),
+  "guaranteeRateBp": zod.int().optional(),
+  "guaranteeKind": zod.enum(['DEPOSIT', 'PERFORMANCE_BOND']).optional(),
+  "validFrom": zod.iso.datetime({"offset":true}).optional(),
+  "validUntil": zod.iso.datetime({"offset":true}).nullish().describe('null이면 지금 조건'),
+  "approvalId": zod.string().nullish().describe('변경 승인 업무. 첫 계약은 null')
+}).optional().describe('계약 조건 한 기간(docs/data.md promoter_contract)'),
+  "requestedCommissionRateBp": zod.int().nullish(),
+  "requestedGuaranteeRateBp": zod.int().nullish(),
+  "requestedGuaranteeKind": zod.union([zod.literal('DEPOSIT'),zod.literal('PERFORMANCE_BOND'),zod.literal(null)]).nullish()
+}).nullish().describe('CONTRACT_TERMS_CHANGE에만. 지금 값과 바꿀 값. 다른 종류는 null이다')
+}).describe('승인 업무(POL-038)')
+
+/**
  * FR-057, FR-069, POL-038, 추천 적용 2026-10-19, ADR-0066. kind ANSWER는 답변, PROGRESS는 진행 경과다. 문의가 이어진 건(INQUIRY와 문의로 접수한 DISPUTE·MINOR_CONTRACT_CANCEL)만 받고 그 밖은 409. CS 담당자(cs_agent)만(docs/planning/03 §3). ops-svc가 권한과 감사 로그(담당자 관리 계정 ID)를 처리한 뒤 core-svc support 모듈 내부 API로 기록을 넣고 팬에게 알린다(앱 알림·이메일). 팬에게는 '피켓 고객센터'로만 보이고 담당자 이름은 싣지 않는다. ANSWER면 문의가 답변 완료가 되고 답변 뒤 14일 [가정] 동안 추가 문의가 없으면 닫힌다. 담당자가 문의를 닫을 때는 PATCH /v1/ops/cases/{caseId}의 status RESOLVED다. 분쟁 건은 진행 경과 3영업일·결과 10영업일 기한을 지킨다(전자상거래법 §20③, 시행령 §25의2). 휴대폰 화면은 보기만 한다(docs/design/d5 §3.9)
  * @summary 문의 답변·진행 경과 남기기(CS 담당자, 문의가 이어진 건만)
  */

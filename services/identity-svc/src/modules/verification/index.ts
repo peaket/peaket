@@ -14,3 +14,5 @@ export { restrictedCiHoldHandlers } from './inbound/restricted-ci-hold.grpc.js';
 export { CheckReverification } from './application/check-reverification.js';
 export { reverificationCheckHandlers } from './inbound/reverification.grpc.js';
 export { parsePidRotationArgs, PidRotation, PidRotationError } from './application/pid-rotation.js';
+
+export { HttpMinorContractOrders } from './adapters/http-minor-contract-orders.js';

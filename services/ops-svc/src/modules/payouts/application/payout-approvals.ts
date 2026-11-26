@@ -191,12 +191,14 @@ export class PayoutApprovals {
    * 15시 미승인 만료(F-06-3, settlement §5.1). 지급일 전 영업일 15:00이 지난 승인 대기 건을 payment에 만료 요청하고,
    * 성공한 건만 EXPIRED로 바꾸며 파트너 알림·운영 경보를 한 번 낸다. payment가 409로 거절하면 승인은 그대로 두고 failed로 센다.
    */
-  async expireDue(nowMs: number, ports: { notifier?: { send(i: { approvalId: string; event: 'EXPIRED' | 'ESCALATED' | 'WITHDRAWN' | 'PAYOUT_POSTPONED'; recipient: { kind: 'ACCOUNT'; accountId: string } | { kind: 'ROLE'; role: 'cs_lead' | 'commander' }; payoutDate?: string }): Promise<void> }; alerts?: { open(i: { approvalId?: string; kind: 'APPROVAL_ESCALATED' | 'settlement_batch_unapproved'; recipient: { kind: 'ACCOUNT'; accountId: string } | { kind: 'ROLE'; role: 'cs_lead' | 'commander' }; pg?: 'TOSS' | 'PORTONE'; payoutDate?: string }): Promise<void> } }): Promise<{ expired: number; failed: number }> {
+  async expireDue(nowMs: number, ports: { notifier?: { send(i: { approvalId: string; event: 'EXPIRED' | 'ESCALATED' | 'WITHDRAWN' | 'PAYOUT_POSTPONED'; recipient: { kind: 'ACCOUNT'; accountId: string } | { kind: 'ROLE'; role: 'cs_lead' | 'commander' } | { kind: 'PARTNER'; promoterId: string }; payoutDate?: string }): Promise<void> }; alerts?: { open(i: { approvalId?: string; kind: 'APPROVAL_ESCALATED' | 'settlement_batch_unapproved'; recipient: { kind: 'ACCOUNT'; accountId: string } | { kind: 'ROLE'; role: 'cs_lead' | 'commander' } | { kind: 'PARTNER'; promoterId: string }; pg?: 'TOSS' | 'PORTONE'; payoutDate?: string }): Promise<void> } }): Promise<{ expired: number; failed: number }> {
     let expired = 0;
     let failed = 0;
+    const handled = new Set<string>();
     const rows = await this.d.store.list({ status: ['PENDING_APPROVAL'], limit: 10_000 });
     for (const r of rows) {
       if (nowMs < approvalDueAt(r.payoutDate).getTime()) continue;
+      handled.add(r.batchId);
       const postponedPayoutDate = nextBusinessDayOf(r.payoutDate);
       if (!this.d.payments.expireBatch) {
         failed += 1;
@@ -216,7 +218,7 @@ export class PayoutApprovals {
       }
       expired += 1;
       try {
-        await ports.notifier?.send({ approvalId: r.approvalId, event: 'PAYOUT_POSTPONED', recipient: { kind: 'ROLE', role: 'commander' }, payoutDate: postponedPayoutDate });
+        await ports.notifier?.send({ approvalId: r.approvalId, event: 'PAYOUT_POSTPONED', recipient: { kind: 'PARTNER', promoterId: await this.#promoterOf(r.batchId) }, payoutDate: postponedPayoutDate });
       } catch {
         // 알림 실패는 만료를 되돌리지 않는다
       }
@@ -226,7 +228,44 @@ export class PayoutApprovals {
         // 경보 실패는 만료를 되돌리지 않는다
       }
     }
+    // payout_approval 행이 없는 09시 PREPARED 묶음도 15시에 푼다(IR-12).
+    try {
+      for (const b of await this.d.payments.listBatches({ status: ['PREPARED'], limit: 10_000 })) {
+        if (handled.has(b.batchId)) continue;
+        if (nowMs < approvalDueAt(b.payoutDate).getTime()) continue;
+        const postponedPayoutDate = nextBusinessDayOf(b.payoutDate);
+        try {
+          await this.d.payments.expireBatch?.(b.batchId, { approvalId: b.approvalId ?? `system:${b.batchId}`, postponedPayoutDate });
+        } catch {
+          failed += 1;
+          continue;
+        }
+        expired += 1;
+        try {
+          await ports.notifier?.send({ approvalId: b.approvalId ?? b.batchId, event: 'PAYOUT_POSTPONED', recipient: { kind: 'PARTNER', promoterId: await this.#promoterOf(b.batchId) }, payoutDate: postponedPayoutDate });
+        } catch {
+          // 알림 실패는 만료를 되돌리지 않는다
+        }
+        try {
+          await ports.alerts?.open({ approvalId: b.approvalId, kind: 'settlement_batch_unapproved', pg: b.pg, payoutDate: b.payoutDate, recipient: { kind: 'ROLE', role: 'commander' } });
+        } catch {
+          // 경보 실패는 만료를 되돌리지 않는다
+        }
+      }
+    } catch {
+      // 지급 묶음 목록을 못 읽어도 승인 만료는 이미 처리했다
+    }
     return { expired, failed };
+  }
+
+  async #promoterOf(batchId: string): Promise<string> {
+    try {
+      const detail = await this.d.payments.getBatchDetail(batchId);
+      const first = detail.statements.find((s) => typeof s.promoterId === 'string');
+      return typeof first?.promoterId === 'string' ? first.promoterId : '';
+    } catch {
+      return '';
+    }
   }
 
   async reject(approvalId: string, actor: OpsActor, reason: string): Promise<PayoutApprovalView> {

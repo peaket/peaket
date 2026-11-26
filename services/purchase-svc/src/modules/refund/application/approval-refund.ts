@@ -50,13 +50,15 @@ const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
 const DEADLINE_MS = 300_000;
 
 export class ApprovalRefunds {
+  readonly #kinds = new Map<string, ApprovalRefundKind>();
+
   constructor(private readonly d: ApprovalRefundDeps) {}
 
   async execute(approvalId: string, input: ApprovalRefundInput): Promise<ApprovalRefundResult> {
     return guard(async () => {
       const existing = await this.d.orders.findCancellation(approvalId);
       if (existing) {
-        if (existing.orderId !== input.orderId || existing.refundAmount !== input.amount) throw new ApprovalRefundProblem('approval-refund-conflict', 409, '같은 승인 ID에 다른 환불 요청이 왔습니다');
+        if (existing.orderId !== input.orderId || existing.refundAmount !== input.amount || (this.#kinds.has(approvalId) && this.#kinds.get(approvalId) !== input.kind)) throw new ApprovalRefundProblem('approval-refund-conflict', 409, '같은 승인 ID에 다른 환불 요청이 왔습니다');
         return { status: existing.state === 'REFUNDED' ? 'REFUNDED' : existing.state === 'REQUESTED' ? 'REQUESTED' : 'REFUND_PENDING', cancellationId: existing.cancellationId, refundAmount: existing.refundAmount };
       }
       const orders = (await (this.d.orders.byOrder ? this.d.orders.byOrder(input.orderId) : Promise.resolve([]))) ?? [];
@@ -65,10 +67,14 @@ export class ApprovalRefunds {
       if (order.orderStatus === 'REFUNDED' || order.orderStatus === 'CANCELED' || order.orderStatus === 'CANCELLED') {
         throw new ApprovalRefundProblem('approval-refund-conflict', 409, '이미 환급·취소된 주문입니다');
       }
+      const prior = (await this.d.orders.cancellationsOf?.(input.orderId)) ?? [];
+      if (prior.some((c) => c.state !== 'VOIDED')) throw new ApprovalRefundProblem('approval-refund-conflict', 409, '이미 취소·환급 기록이 있는 주문입니다');
+      const refundable = order.refundableAmount ?? order.ticketPrice;
+      this.#kinds.set(approvalId, input.kind);
       if (input.kind === 'DISCRETIONARY_WAIVER') {
-        if (input.amount <= 0 || input.amount > order.ticketPrice) throw new ApprovalRefundProblem('approval-refund-amount-mismatch', 422, '면제 금액이 권면 금액을 넘습니다');
-      } else if (input.amount !== order.ticketPrice) {
-        throw new ApprovalRefundProblem('approval-refund-amount-mismatch', 422, '승인 금액이 권면 전액과 다릅니다');
+        if (input.amount <= 0 || input.amount > refundable) throw new ApprovalRefundProblem('approval-refund-amount-mismatch', 422, '면제 금액이 남은 환급 금액을 넘습니다');
+      } else if (input.amount !== refundable) {
+        throw new ApprovalRefundProblem('approval-refund-amount-mismatch', 422, '승인 금액이 남은 환급 금액과 다릅니다');
       }
       const nowMs = this.d.clock.now();
       const entryStarted = order.entryOpensAtMs !== undefined && nowMs >= order.entryOpensAtMs;
@@ -89,14 +95,13 @@ export class ApprovalRefunds {
         await this.#create({ approvalId, cancellationId, orderId: input.orderId, ticketId: order.ticketId, kind: input.kind, reason, amount: input.amount, status: 'REQUESTED', nowMs });
         return { status: 'REQUESTED', cancellationId, refundAmount: input.amount };
       }
-      const ticket = await this.d.tickets.cancel({ orderId: input.orderId, ticketIds: [order.ticketId], requestedByAccountId: order.payerAccountId, cancellationId, deadlineMs: nowMs + DEADLINE_MS, reason });
+      const ticketIds = orders.map((o) => o.ticketId);
+      const ticket = await this.d.tickets.cancel({ orderId: input.orderId, ticketIds, requestedByAccountId: order.payerAccountId, cancellationId, deadlineMs: nowMs + DEADLINE_MS, reason });
       if (ticket === 'REFUND_AFTER_CLOSE') {
         await this.#create({ approvalId, cancellationId, orderId: input.orderId, ticketId: order.ticketId, kind: input.kind, reason, amount: input.amount, status: 'REQUESTED', nowMs });
         return { status: 'REQUESTED', cancellationId, refundAmount: input.amount };
       }
-      if (ticket !== 'REFUND_NOW' && !(typeof ticket === 'object' && ticket.result === 'ALREADY_CANCELLED')) {
-        throw new ApprovalRefundProblem('approval-refund-conflict', 409, '티켓을 취소할 수 없는 상태입니다');
-      }
+      if (ticket !== 'REFUND_NOW') throw new ApprovalRefundProblem('approval-refund-conflict', 409, '티켓을 취소할 수 없는 상태입니다');
       const outcome = await this.d.payments.cancel({ cancellationId, orderId: input.orderId, amount: input.amount, reason, deadlineMs: nowMs + DEADLINE_MS });
       const status: ApprovalRefundStatus = outcome === 'CANCELLED' ? 'REFUNDED' : 'REFUND_PENDING';
       await this.#create({ approvalId, cancellationId, orderId: input.orderId, ticketId: order.ticketId, kind: input.kind, reason, amount: input.amount, status, nowMs });
@@ -105,7 +110,7 @@ export class ApprovalRefunds {
   }
 
   async #create(i: { approvalId: string; cancellationId: string; orderId: string; ticketId: string; kind: ApprovalRefundKind; reason: CancellationReason; amount: number; status: ApprovalRefundStatus; nowMs: number }): Promise<void> {
-    await this.d.writes.create({
+    const out = await this.d.writes.create({
       cancellationId: i.cancellationId,
       orderId: i.orderId,
       ticketId: i.ticketId,
@@ -120,6 +125,7 @@ export class ApprovalRefunds {
       actor: `approval:${i.approvalId}`,
       ...({ kind: i.kind, approvalId: i.approvalId } as Record<string, unknown>),
     } as never);
+    if ((out as { status?: string }).status === 'CONFLICT') throw new ApprovalRefundProblem('approval-refund-conflict', 409, '같은 주문·티켓의 취소가 이미 진행 중입니다');
   }
 }
 

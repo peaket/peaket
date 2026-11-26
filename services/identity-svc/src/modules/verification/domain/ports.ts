@@ -154,6 +154,14 @@ export interface VerificationStore {
   purgeVerificationRecords(now: number): Promise<number>;
 }
 
+export interface MinorContractOrderBasis {
+  readonly payerAccountId: string;
+  readonly paidAtMs: number;
+}
+export interface MinorContractOrders {
+  basis(orderId: string): Promise<MinorContractOrderBasis | undefined>;
+}
+
 export const MINOR_CONTRACT_SIGNER = Symbol('identity.MinorContractSigner');
 /** resultToken 서명기(F-06-3). JoseTokenSigner가 구현한다 */
 export interface MinorContractTokenSigner {

@@ -125,6 +125,12 @@ export interface CancellationOrderView {
   readonly entryOpensAtMs?: number;
   /** purchase_order.status */
   readonly orderStatus: string;
+  /** 결제 승인 시각(F-06-3 승인 근거). 없으면 bookedAtMs를 쓴다 */
+  readonly paidAtMs?: number;
+  /** 남은 환급 가능 금액(부분 환불 반영, F-06-3) */
+  readonly refundableAmount?: number;
+  /** 입장 기록 여부(F-06-3) */
+  readonly entryRecorded?: boolean;
 }
 
 /** 티켓 취소 포트 결과(ticket.proto CancelTicketResult와 같은 뜻) */

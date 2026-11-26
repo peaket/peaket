@@ -16,8 +16,8 @@ import { StartVerification } from './application/start-verification.js';
 import { IDENTITY_HASHERS, type IdentityHashers, PHONE_REFS, type PhoneRefs, VERIFICATION_PROVIDER, VERIFICATION_STORE, type VerificationProvider, type VerificationStore } from './domain/ports.js';
 import { VerificationController } from './inbound/verification.controller.js';
 import { MinorContractController } from './inbound/minor-contract.controller.js';
-import { MinorContractCheck, type MinorContractOrders } from './application/minor-contract-check.js';
-import { MINOR_CONTRACT_SIGNER, type MinorContractTokenSigner } from './domain/ports.js';
+import { MinorContractCheck } from './application/minor-contract-check.js';
+import { MINOR_CONTRACT_SIGNER, type MinorContractOrders, type MinorContractTokenSigner } from './domain/ports.js';
 import type { PublicKeys } from '../session/index.js';
 
 export interface VerificationModuleOptions {

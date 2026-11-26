@@ -63,6 +63,7 @@ import {
   CheckReverification,
   DrizzleVerificationStore,
   HmacIdentityHashers,
+  HttpMinorContractOrders,
   KmsIdentityHashers,
   kmsMacClient,
   restrictedCiHoldHandlers,
@@ -126,10 +127,11 @@ const signer = new JoseTokenSigner(keys, tokenIssuerFromEnv(process.env));
 const invRefs = InvRefKeyRing.fromEnv(process.env, systemClock, (endpoint) => kmsMacClient({ region: process.env.AWS_REGION ?? 'ap-northeast-2', ...(endpoint ? { endpoint } : {}) }));
 const devices = deviceRefsOf(invRefs.ring);
 // 본인확인기관: 계약 전에는 시험 어댑터만 있다(local·ci·demo). 켜지 않으면 본인확인 시작이 503 PROVIDER_DOWN이다(identity §5)
+// 미성년 확인은 purchase-svc의 /internal/v1/orders/{orderId}/minor-contract-basis를 읽는다(IR-04).
 const verification = process.env[VERIFICATION_PROVIDER_ENV]
   ? // 연계정보·pid 키: KMS 키 목록이 있으면 KMS, 없으면 설정값 키(local·ci·demo만, identity §5 '키 판·만 14세…')
-    { provider: TestVerificationProvider.fromEnv(process.env), hashers: KmsIdentityHashers.fromEnv(process.env) ?? HmacIdentityHashers.fromEnv(process.env), phoneRefs: phoneContactRefs(invRefs.ring) }
-  : { provider: unavailableProvider, hashers: unavailableHashers };
+    { provider: TestVerificationProvider.fromEnv(process.env), hashers: KmsIdentityHashers.fromEnv(process.env) ?? HmacIdentityHashers.fromEnv(process.env), phoneRefs: phoneContactRefs(invRefs.ring), ...(process.env.PEAKET_PURCHASE_HTTP_URL ? { minorContractOrders: new HttpMinorContractOrders(process.env.PEAKET_PURCHASE_HTTP_URL, process.env.PEAKET_INTERNAL_TOKEN) } : {}) }
+  : { provider: unavailableProvider, hashers: unavailableHashers, ...(process.env.PEAKET_PURCHASE_HTTP_URL ? { minorContractOrders: new HttpMinorContractOrders(process.env.PEAKET_PURCHASE_HTTP_URL, process.env.PEAKET_INTERNAL_TOKEN) } : {}) };
 const signals = new PromSessionSignals();
 invRefs.ring.onMissing((label, reason) => signals.invRefMissing(label, reason));
 // 뜰 때 라벨 키를 먼저 받는다(2초 [가정]까지 기다리고, 그 뒤에는 받는 대로 쓴다). 로거가 서기 전의 실패는 모아 두었다가 남긴다

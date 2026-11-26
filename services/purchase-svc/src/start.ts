@@ -417,6 +417,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     const cancellationWrites = new DrizzleCancellationWrites(database, new DrizzleOrderStore(orderStoreOptions));
     refund = {
       orders: new DrizzleCancellationOrders(database, new SeatMapSaleConfigs(seatMap)),
+      entryRecords: refundTickets,
       writes: cancellationWrites,
       seats: new DrizzleSeatReturns(new DrizzleSeatSales(database), seatMap, new RedisSeatReturnNotices(redis)),
       tickets: refundTickets,
@@ -642,6 +643,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   const orderHolds = new RedisOrderHolds(redis, seatMap);
   const booking: BookingModuleDeps | undefined = database
     ? {
+        ...(refund ? { approvalBasis: { orders: refund.orders } } : {}),
         startPayment: {
           starts: new DrizzleOrderStarts({ database, store: orderStore, clock: systemClock }),
           checkouts: { prepare: (q) => (startLate.checkouts ?? simulatorPaymentCheckouts).prepare(q) },

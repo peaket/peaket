@@ -23,6 +23,8 @@ export interface PayoutApprovalRecord {
   statementCount: number;
   /** payment-svc가 묶음을 만들 때 계산한 지급 대상 지문(F-06-3). 옛 행은 없을 수 있다 */
   payeeDigest?: string | null;
+  /** 만료 때 파트너에게 알릴 판매자(지급 묶음의 정산서에서 읽는다, IR-19) */
+  promoterIds?: readonly string[];
   status: PayoutApprovalStatus;
   requesterId: string;
   requesterRole: string;

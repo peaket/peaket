@@ -59,6 +59,15 @@ export interface TransferReclaimOutcome {
   readonly previousHolderAccountId?: string;
 }
 
+export interface ReclaimBasis {
+  readonly ticketId: string;
+  readonly payerAccountId: string;
+  readonly holderAccountId: string;
+  readonly entryStartsAtMs?: number;
+  readonly entryRecorded: boolean;
+  readonly status: string;
+}
+
 export type TicketReclaimErrorCode = 'ALREADY_EXISTS' | 'FAILED_PRECONDITION' | 'INVALID_ARGUMENT' | 'NOT_FOUND';
 export class TicketReclaimError extends Error {
   constructor(

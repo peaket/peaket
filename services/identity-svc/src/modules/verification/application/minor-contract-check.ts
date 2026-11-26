@@ -5,15 +5,7 @@ import { ProblemError, type Clock } from '@peaket/platform';
 import { decodeProtectedHeader, importJWK, jwtVerify, type JWK } from 'jose';
 import type { PublicKeys } from '../../session/index.js';
 import { ageOnKst } from '../domain/verification.js';
-import type { VerificationStore } from '../domain/ports.js';
-
-export interface MinorContractOrderBasis {
-  readonly payerAccountId: string;
-  readonly paidAtMs: number;
-}
-export interface MinorContractOrders {
-  basis(orderId: string): Promise<MinorContractOrderBasis | undefined>;
-}
+import type { MinorContractOrderBasis, MinorContractOrders, VerificationStore } from '../domain/ports.js';
 
 export class MinorContractProblem extends Error {
   constructor(

@@ -13,6 +13,8 @@ export const approvalRequest = pgTable(
     targetRef: text('target_ref').notNull(),
     /** 결제자 계정(F-06-3, 0038). 응답·감사·로그에 싣지 않는다 */
     targetAccountId: uuid('target_account_id'),
+    /** 양도 회수 승인 시점의 보유자(F-06-3, 0039) */
+    expectedHolderAccountId: uuid('expected_holder_account_id'),
     /** 재량 면제의 여러 주문(F-06-3, 0038) */
     relatedOrderIds: jsonb('related_order_ids').$type<string[]>(),
     fraudAction: text('fraud_action'),

@@ -1644,7 +1644,8 @@ export class Settlements {
         payeeDigest: b.payeeDigest ?? null,
         createdAt: now,
       };
-      const events = statements.map((s) => payoutEvent(s, 'PAYOUT_HELD', s.payoutAmount, now, audit.auditId));
+      const affected = [...new Map([...statements, ...movable].map((s) => [s.statementId, s])).values()];
+      const events = affected.map((s) => payoutEvent(s, 'PAYOUT_HELD', s.payoutAmount, now, audit.auditId));
       const expired: PayoutBatchRecord = { ...b, status: 'EXPIRED', updatedAt: now };
       const ok = await this.d.store.expirePayoutBatchAtomically(expired, postponedIds, audit, events, input.postponedPayoutDate);
       if (!ok) {

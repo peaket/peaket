@@ -51,6 +51,10 @@ export class TicketService {
    * 양도 회수(F-06-3). 마감이 지났으면 아무것도 바꾸지 않고 실패한다. 승인 ID 멱등·기대 값 대조는 저장소가
    * 티켓 행 잠금 안에서 한다(입장 시작·입장 기록·보유자·결제자 재확인).
    */
+  async reclaimBasis(ticketId: string): Promise<import('../domain/ticket.js').ReclaimBasis | undefined> {
+    return this.deps.store.reclaimBasis?.({ ticketId, nowMs: this.deps.clock.now() });
+  }
+
   async reclaimTransfer(input: { approvalId: string; ticketId: string; expectedPayerAccountId: string; expectedHolderAccountId: string; deadlineMs: number }): Promise<import('../domain/ticket.js').TransferReclaimOutcome> {
     const nowMs = this.deps.clock.now();
     if (!Number.isFinite(input.deadlineMs) || nowMs >= input.deadlineMs) throw new TicketReclaimError('FAILED_PRECONDITION', '회수 마감이 지났습니다');

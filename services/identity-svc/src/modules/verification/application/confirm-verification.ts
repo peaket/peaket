@@ -100,9 +100,8 @@ export class ConfirmVerification {
       done = await this.#settle(i.verificationId, 'PROVIDER_DOWN', now);
     }
     const view = await this.#answer(done);
-    if (seen.purpose !== 'MINOR_CONTRACT' || !this.minorContractSigner?.minorContract) return view;
-    const source = issued ?? { ci: '' };
-    const signed = await this.minorContractSigner.minorContract({ accountId: done.accountId, ...(source.birth ? { birth: source.birth } : {}), ci: source.ci }, this.clock.now());
+    if (seen.purpose !== 'MINOR_CONTRACT' || !issued || !this.minorContractSigner?.minorContract) return view;
+    const signed = await this.minorContractSigner.minorContract({ accountId: done.accountId, ...(issued.birth ? { birth: issued.birth } : {}), ci: issued.ci }, this.clock.now());
     return { ...view, resultToken: signed.token };
   }
 

@@ -250,6 +250,13 @@ export class MemoryTicketStore implements TicketStore {
     this.entries.add(ticketId);
   }
 
+  async reclaimBasis(input: { ticketId: string; nowMs: number }) {
+    const t = this.tickets.get(input.ticketId);
+    if (!t) return undefined;
+    const entered = this.entries.has(input.ticketId) || (this.scans.get(input.ticketId) ?? []).some((s) => s.direction === 'IN' && s.result === 'PASS');
+    return { ticketId: t.ticketId, payerAccountId: t.payerAccountId, holderAccountId: t.accountId, ...(t.eventStartsAtMs !== undefined ? { entryStartsAtMs: t.eventStartsAtMs } : {}), entryRecorded: entered, status: t.status };
+  }
+
   /** 양도 회수(F-06-3). 승인 ID로 멱등하고, 표의 보유자·입장·결제자를 다시 본다. */
   readonly reclaims = new Map<string, { ticketId: string; payer: string; holder: string; outcome: TransferReclaimOutcome }>();
   async reclaimTransfer(input: { approvalId: string; ticketId: string; expectedPayerAccountId: string; expectedHolderAccountId: string; nowMs: number }): Promise<TransferReclaimOutcome> {
@@ -274,7 +281,7 @@ export class MemoryTicketStore implements TicketStore {
       outcome = { result: 'SKIPPED_HOLDER_CHANGED', ticketId: ticket.ticketId };
     } else {
       const previousHolderAccountId = ticket.accountId;
-      this.tickets.set(ticket.ticketId, { ...ticket, accountId: ticket.payerAccountId, transferPending: false, version: ticket.version + 1 });
+      this.tickets.set(ticket.ticketId, { ...ticket, accountId: ticket.payerAccountId, status: 'ACTIVE', transferPending: false, keyRevokedAtMs: input.nowMs, version: ticket.version + 1 });
       outcome = { result: 'RECLAIMED', ticketId: ticket.ticketId, previousHolderAccountId };
     }
     this.reclaims.set(input.approvalId, { ticketId: input.ticketId, payer: input.expectedPayerAccountId, holder: input.expectedHolderAccountId, outcome });
