@@ -14,6 +14,10 @@ export const K10 = Object.freeze({
   recoveryScans: 30,
   /** O-T40: QR을 대는 간격 2초 [가정] */
   intervalMs: 2_000,
+  /** O-T40: 간격 중앙값이 2초 ±150ms를 벗어나면 실패(브라우저 타이머 흔들림 허용) */
+  intervalToleranceMs: 150,
+  /** O-T40: 한 번이라도 2.5초를 넘으면 실패(창이 1분에서 크게 벗어난다) */
+  intervalMaxMs: 2_500,
   /** O-T41: 사람 역할 20명 [가정] */
   lanePeople: 20,
   /** O-T41: 온라인·오프라인 10분씩 [가정] */
@@ -103,6 +107,30 @@ export function transitionWindowIndexes({ switchAt = K10.transitionAt, total = K
   return windows;
 }
 
+/**
+ * O-T40의 QR을 댄 간격. `scans`는 `presentedAtMs`(페이지 시계)를 가진 측정 표본이다.
+ * `previousPresentedAtMs`를 주면 예열 마지막 QR에서 첫 측정 QR까지의 간격도 넣는다.
+ * 판정: 중앙값이 2초 ±150ms, 2.5초 넘는 간격 0, 2.15초 초과(overrun) 0.
+ */
+export function intervalStatsOf(scans, { previousPresentedAtMs, targetMs = K10.intervalMs, toleranceMs = K10.intervalToleranceMs, maxMs = K10.intervalMaxMs } = {}) {
+  const points = (Array.isArray(scans) ? scans : [])
+    .filter((s) => Number.isFinite(s?.presentedAtMs) && s.presentedAtMs > 0)
+    .sort((a, b) => a.index - b.index);
+  const times = [];
+  if (Number.isFinite(previousPresentedAtMs) && previousPresentedAtMs > 0 && points.length > 0) times.push(points[0].presentedAtMs - previousPresentedAtMs);
+  for (let i = 1; i < points.length; i++) times.push(points[i].presentedAtMs - points[i - 1].presentedAtMs);
+  const intervals = times.filter((v) => Number.isFinite(v) && v > 0);
+  return {
+    targetMs,
+    toleranceMs,
+    maxMs,
+    intervals,
+    medianMs: median(intervals),
+    maxIntervalMs: intervals.length > 0 ? Math.max(...intervals) : undefined,
+    overruns: intervals.filter((v) => v > targetMs + toleranceMs).length,
+  };
+}
+
 /** O-T41의 사람 20명과 10분 창. */
 export function lanePlan({ people = K10.lanePeople, windowMs = K10.laneWindowMs } = {}) {
   if (!Number.isInteger(people) || people <= 0) throw new Error(`people은 1 이상의 정수여야 한다: ${people}`);
@@ -154,12 +182,50 @@ export function judgeTransition(run, opts = {}) {
   const errors = scans.filter((s) => s?.error || s?.result !== 'PASS');
   if (errors.length > 0) reasons.push(`오류·비정상 판정 ${errors.length}건`);
 
+  const ticketIds = scans.map((s) => s?.ticketId).filter((v) => typeof v === 'string' && v.length > 0);
+  if (ticketIds.length !== scans.length) reasons.push('티켓 ID가 없는 판정이 있다');
+  const uniqueTickets = new Set(ticketIds);
+  if (uniqueTickets.size !== ticketIds.length) reasons.push(`티켓 ID가 겹친다(${ticketIds.length - uniqueTickets.size}건)`);
+  if (run?.pageReloaded) reasons.push('측정 중 페이지를 새로고침했다');
+  if ((run?.unknownPaths ?? 0) > 0) reasons.push(`예상 밖 API 경로 ${run.unknownPaths}건`);
+  if (run?.transitionAtScan !== K10.transitionAt) reasons.push(`전환 시각 ${run?.transitionAtScan ?? '없음'}번째 ≠ ${K10.transitionAt}번째`);
+  if (run?.reconnectAtScan !== K10.transitionScans + 1) reasons.push(`복구 시각 ${run?.reconnectAtScan ?? '없음'}번째 ≠ ${K10.transitionScans + 1}번째`);
+
+  const net = run?.networkEvidence;
+  const expectedOfflineScans = K10.transitionScans - K10.transitionAt + 1;
+  if (!net || net.observed !== 'offline') {
+    reasons.push('실제 오프라인 단절 증거가 없다');
+  } else {
+    if (net.before !== 'online' || net.afterReconnect !== 'online') reasons.push('앞뒤 온라인 상태가 계획과 다르다');
+    if (net.afterOffline !== 'offline' || net.beforeReconnect !== 'offline') reasons.push('끊긴 구간의 네트워크 상태가 offline이 아니다');
+    if (net.offlineScans !== expectedOfflineScans) reasons.push(`오프라인 판정 ${net.offlineScans ?? 0}/${expectedOfflineScans}건`);
+    if ((net.offlineScansWithOnlineTrue ?? 0) > 0) reasons.push(`오프라인인데 navigator.onLine이 true인 판정 ${net.offlineScansWithOnlineTrue}건`);
+    if (!(net.queueBeforeReconnect > 0)) reasons.push(`다시 연결하기 전 스캔 큐 ${net.queueBeforeReconnect ?? 0}건: 끊긴 동안 쌓이지 않았다`);
+    if (Number.isFinite(net.offlineScans) && !(net.queueBeforeReconnect >= net.offlineScans)) reasons.push(`다시 연결하기 전 큐 ${net.queueBeforeReconnect ?? 0}건 < 오프라인 판정 ${net.offlineScans}건`);
+    if (net.apiReachableOffline !== false) reasons.push('끊긴 동안 가짜 API에 닿았다');
+    if (net.apiReachableBefore !== true || net.apiReachableAfter !== true) reasons.push('온라인 구간에서 가짜 API에 닿지 못했다');
+  }
+
+  const stats = run?.intervalStats ?? intervalStatsOf(scans, { previousPresentedAtMs: run?.warmupLastPresentedAtMs });
+  const targetMs = stats?.targetMs ?? K10.intervalMs;
+  const toleranceMs = stats?.toleranceMs ?? K10.intervalToleranceMs;
+  const maxIntervalMs = stats?.maxMs ?? K10.intervalMaxMs;
+  if (!stats || !Number.isFinite(stats.medianMs)) {
+    reasons.push('QR 간격 통계가 없다');
+  } else {
+    if (!(stats.medianMs >= targetMs - toleranceMs && stats.medianMs <= targetMs + toleranceMs)) {
+      reasons.push(`간격 중앙값 ${stats.medianMs.toFixed(0)}ms가 ${targetMs}±${toleranceMs}ms 밖이다`);
+    }
+    if (stats.overruns > 0) reasons.push(`2초+${toleranceMs}ms를 넘긴 간격 ${stats.overruns}건`);
+    if (!(stats.maxIntervalMs <= maxIntervalMs)) reasons.push(`최대 간격 ${stats.maxIntervalMs?.toFixed?.(0) ?? '없음'}ms > ${maxIntervalMs}ms`);
+  }
+
   const windows = run?.transitionWindows ?? transitionWindowIndexes();
   const inTransition = (s) => windows.some(([a, b]) => s?.index >= a && s?.index <= b);
-  const warmup = run?.warmup ?? 0;
+  // 예열 10건은 scans 밖이다. 측정된 표본을 예열로 빼지 않는다(RV059-08).
   // 평소 p95는 전환 창 밖의 온라인 구간에서 낸다. 전환 창의 표본은 아래 최댓값으로 따로 본다.
   const normalLatencies = scans
-    .filter((s) => s?.phase === 'online' && s?.index > warmup && !inTransition(s))
+    .filter((s) => s?.phase === 'online' && !inTransition(s))
     .map(latencyOf)
     .filter((v) => v !== undefined);
   const normalP95 = percentile(normalLatencies, 0.95);
@@ -205,6 +271,11 @@ export function judgeTransition(run, opts = {}) {
       transitionMaxMs: transitionMax,
       stoppedMs: stopped,
       queueAfter: run?.queueAfter,
+      intervalMedianMs: stats?.medianMs,
+      intervalMaxMs: stats?.maxIntervalMs,
+      intervalOverruns: stats?.overruns,
+      offlineScans: net?.offlineScans,
+      queueBeforeReconnect: net?.queueBeforeReconnect,
     },
   };
 }
@@ -220,11 +291,25 @@ export function laneRunValidity(run, opts = {}) {
   const reasons = [];
   if (!(Math.abs((run?.windowMs ?? 0) - windowMs) <= toleranceMs)) reasons.push(`창 ${run?.windowMs ?? 0}ms가 ${windowMs}ms ±${toleranceMs}ms 밖이다`);
   if (!(run?.verdicts > 0)) reasons.push('판정이 0건이다');
+  if (!Number.isFinite(run?.perMinute) || !(run.perMinute > 0)) reasons.push('분당 통과 인원이 없다');
   if ((run?.nonPass ?? 0) > 0) reasons.push(`정상 티켓인데 PASS가 아닌 판정 ${run.nonPass}건`);
   if ((run?.missing ?? 0) > 0) reasons.push(`결과 없음 ${run.missing}건`);
+  if ((run?.duplicateTickets ?? 0) > 0) reasons.push(`같은 티켓을 두 번 판정했다(${run.duplicateTickets}건)`);
+  if ((run?.unknownPaths ?? 0) > 0) reasons.push(`예상 밖 API 경로 ${run.unknownPaths}건`);
   const seen = new Set(Array.isArray(run?.roles) ? run.roles : Array.isArray(run?.tickets) ? run.tickets : []);
   if (seen.size < people) reasons.push(`사람 ${seen.size}/${people}명만 나왔다`);
   if (run?.pageReloaded) reasons.push('측정 중 페이지를 새로고침했다');
+  const evidence = run?.networkEvidence;
+  if (!evidence) reasons.push('네트워크 증거가 없다');
+  else if (run?.expectedNetwork === 'offline') {
+    if (!(evidence.offlineSamples > 0)) reasons.push('오프라인 표본이 없다');
+    if ((evidence.onlineSamples ?? 0) > 0) reasons.push(`오프라인 실행인데 온라인 표본 ${evidence.onlineSamples}건`);
+    if (evidence.apiReachableAtStart !== false) reasons.push('끊긴 채 시작하지 않았다(가짜 API에 닿았다)');
+    if (!(evidence.queueDrainCount >= run.verdicts)) reasons.push(`다시 연결하기 전 큐 ${evidence.queueDrainCount ?? 0}건 < 판정 ${run.verdicts}건`);
+  } else if (run?.expectedNetwork === 'online') {
+    if ((evidence.offlineSamples ?? 0) > 0) reasons.push(`온라인 실행인데 오프라인 표본 ${evidence.offlineSamples}건`);
+    if (evidence.apiReachableAtStart !== true) reasons.push('온라인인데 가짜 API에 닿지 못했다');
+  }
   if (run?.network !== run?.expectedNetwork) reasons.push(`네트워크 ${run?.network ?? '없음'} ≠ 계획 ${run?.expectedNetwork ?? '없음'}`);
   if (Number.isFinite(run?.hostCpuPercent) && run.hostCpuPercent > 80) reasons.push(`호스트 CPU ${run.hostCpuPercent}% > 80%`);
   return { valid: reasons.length === 0, reasons };
@@ -251,7 +336,8 @@ export function judgeLane({ onlineRuns = [], offlineRuns = [] } = {}, opts = {})
     reasons.push(`오프라인 ${offlineMedian.toFixed(2)}/분 ÷ 온라인 ${onlineMedian.toFixed(2)}/분 = ${ratioPercent(offlineMedian, onlineMedian).toFixed(1)}% < ${thresholdPercent}%`);
   }
 
-  for (const r of [...online, ...offline]) {
+  for (const r of [...onlineRuns, ...offlineRuns]) {
+    if (r?.perMinute !== undefined && !Number.isFinite(r.perMinute)) reasons.push(`${r?.condition ?? '?'} r${r?.run ?? '?'}: 분당 통과 인원이 수가 아니다`);
     if ((r?.nonPass ?? 0) > 0) reasons.push(`${r?.condition ?? '?'} r${r?.run ?? '?'}: PASS가 아닌 판정 ${r.nonPass}건`);
     if ((r?.missing ?? 0) > 0) reasons.push(`${r?.condition ?? '?'} r${r?.run ?? '?'}: 결과 없음 ${r.missing}건`);
   }

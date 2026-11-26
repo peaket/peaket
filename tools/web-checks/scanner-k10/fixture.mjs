@@ -75,7 +75,7 @@ export function ticketOf(id, key, { status = 'ACTIVE', gateZone = '동문', seat
  */
 export async function installProbe(page) {
   await page.addInitScript(() => {
-    const K = (window.__k10 = { presentedAt: 0, decodedAt: 0, verdictAt: 0, clearedAt: 0, text: '', log: [] });
+    const K = (window.__k10 = { bootId: Math.random().toString(36).slice(2), presentedAt: 0, decodedAt: 0, verdictAt: 0, clearedAt: 0, text: '', log: [] });
     const read = () => {
       const el = document.querySelector('[aria-label="판정 결과"]');
       if (!el) {
@@ -128,7 +128,7 @@ const vector = (seq) => ({ eventId: EVENT, seq, ticketSeq: 0, keySeq: seq, polic
  * `inFlight`는 지금 늦게 답하는 중인 경로(`scans`·`changes`)다.
  */
 export async function fakeApi(page, { tickets, offline = false, scanDelayMs = 0, changesDelayMs = 0, scanReply, changesReply, reentryAllowed = false } = {}) {
-  const log = { scans: [], scanCalls: [], changeCalls: [], order: [], offline, shifts: 0, packages: 0, changes: 0, inFlight: undefined, scanDelayMs, changesDelayMs, scanReply, changesReply };
+  const log = { scans: [], scanCalls: [], changeCalls: [], unknownPaths: [], order: [], offline, shifts: 0, packages: 0, changes: 0, inFlight: undefined, scanDelayMs, changesDelayMs, scanReply, changesReply, loseScanResponseOnce: false };
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   await page.route(`${API}/**`, async (route) => {
     const req = route.request();
@@ -178,7 +178,8 @@ export async function fakeApi(page, { tickets, offline = false, scanDelayMs = 0,
     if (path === `/v1/scanner/events/${EVENT}/changes`) {
       log.changes++;
       log.order.push('changes');
-      const call = { at: Date.now(), aborted: false };
+      const after = new URL(req.url()).searchParams.get('after');
+      const call = { at: Date.now(), after, aborted: false };
       log.changeCalls.push(call);
       if (log.changesDelayMs > 0) {
         log.inFlight = 'changes';
@@ -196,9 +197,17 @@ export async function fakeApi(page, { tickets, offline = false, scanDelayMs = 0,
     if (path === `/v1/scanner/events/${EVENT}/flags`) return json(200, { items: [] });
     if (path === '/v1/scanner/scans' && req.method() === 'POST') {
       const body = req.postDataJSON();
+      const ids = body.map((b) => b.id);
       log.order.push('scans');
-      const call = { at: Date.now(), aborted: false };
+      const call = { at: Date.now(), aborted: false, ids, responseLost: false };
       log.scanCalls.push(call);
+      // 서버가 받고 응답을 잃은 갈래(RV059-04): 같은 ID가 다시 오는 것을 본다.
+      if (log.loseScanResponseOnce) {
+        log.loseScanResponseOnce = false;
+        call.responseLost = true;
+        log.scans.push({ ids, body, ok: true, responseLost: true, at: Date.now() });
+        return route.abort('connectionreset');
+      }
       if (log.scanDelayMs > 0) {
         log.inFlight = 'scans';
         await sleep(log.scanDelayMs);
@@ -210,11 +219,11 @@ export async function fakeApi(page, { tickets, offline = false, scanDelayMs = 0,
         log.inFlight = undefined;
       }
       const reply = log.scanReply?.(log.scans.length + 1) ?? { status: 200 };
-      const ids = body.map((b) => b.id);
       log.scans.push({ ids, body, ok: reply.status === 200, at: Date.now() });
       if (reply.status === 200) return json(200, { acceptedIds: ids, resyncRequired: reply.resyncRequired ?? false, staleIds: [], flags: [] });
       return json(reply.status, { type: `https://peaket.example/problems/${reply.type ?? 'unauthorized'}`, title: '대역', status: reply.status }, reply.headers ?? {});
     }
+    log.unknownPaths.push(path);
     return json(404, { type: 'about:blank', title: '대역에 없는 경로', status: 404 });
   });
   return log;
@@ -311,6 +320,55 @@ export async function queueCount(page) {
     db.close();
     return count;
   });
+}
+
+/** 지금 브라우저가 온라인이라고 보는가(navigator.onLine). */
+export async function onlineState(page) {
+  return page.evaluate(() => navigator.onLine);
+}
+
+/** 가짜 API에 실제로 닿는가. 끊긴 동안은 fetch가 거부되어 false다. */
+export async function apiReachable(page) {
+  return page.evaluate(async (api) => {
+    try {
+      const res = await fetch(`${api}/v1/scanner/shift/readiness`, { method: 'GET', cache: 'no-store' });
+      return res.ok || res.status === 204;
+    } catch {
+      return false;
+    }
+  }, API);
+}
+
+/** 앱이 저장한 티켓 상태(키·폐기·상태·변경분 커서). 변경분이 실제로 적용됐는지 본다. */
+export async function ticketState(page, ticketId) {
+  return page.evaluate(async (id) => {
+    const db = await new Promise((resolve, reject) => {
+      const req = indexedDB.open('peaket-scanner');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    const getAll = (store) =>
+      new Promise((resolve, reject) => {
+        const req = db.transaction(store, 'readonly').objectStore(store).getAll();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    const getOne = (store, key) =>
+      new Promise((resolve, reject) => {
+        const req = db.transaction(store, 'readonly').objectStore(store).get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    const [ticket, revoked, cursors] = await Promise.all([getOne('tickets', id), getAll('revoked'), getAll('cursor')]);
+    db.close();
+    return {
+      status: ticket?.status,
+      statusVersion: ticket?.statusVersion,
+      keys: (ticket?.keys ?? []).map((k) => k.keyId),
+      revoked: revoked.map((r) => r.keyId),
+      cursors: cursors.map((c) => ({ eventId: c.eventId, lastSeq: c.lastSeq })),
+    };
+  }, ticketId);
 }
 
 /** 큐가 기대 건수가 될 때까지 기다린다. Playwright의 waitForFunction은 비동기 조건을 기다리지 않으므로 직접 돈다. */
