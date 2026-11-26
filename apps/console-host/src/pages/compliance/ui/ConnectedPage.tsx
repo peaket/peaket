@@ -68,7 +68,7 @@ export function ConnectedPage() {
     try {
       const ops = await import('@peaket/api-client/endpoints/ops');
       const res = await ops.listOpsComplianceNotices({
-        ...(target.status ? { status: target.status } : {}),
+        ...(target.status ? { status: [target.status] } : {}),
         sort: target.sort,
         limit: target.limit,
         ...(target.cursor ? { cursor: target.cursor } : {}),
@@ -173,7 +173,7 @@ export function ConnectedPage() {
     }
   };
 
-  const actions = detail ? noticeActionsFor(detail, role) : [];
+  const actions = detail ? noticeActionsFor(detail, role ?? undefined) : [];
   const changeFilter = (status: NoticeStatus | undefined): void => setFilter({ ...noticeFilterOf(''), ...(status ? { status } : {}), sort: filter.sort, limit: 50 });
 
   return (
