@@ -1,0 +1,59 @@
+{
+  "run_id": "2026-11-27-f084-hybrid-ordering-r1",
+  "kpi": "Q-T23",
+  "version": "v1",
+  "profile": "local-100k",
+  "scale": {
+    "users": 100000,
+    "arrival_rps": 5000.0,
+    "duration_s": 2,
+    "warmup_s": 0
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v1-ordering.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "619c95b748dd0a160a1c5aab6f73022bdd2f3586",
+    "docs": null
+  },
+  "raw_uri": "s3://peaket-perf-raw/runs/2026-11-27-f084-hybrid-ordering-r1/",
+  "redis_tls": true,
+  "paired_run": null,
+  "host": null,
+  "generator": {
+    "description": "k6 1.4.2, 발생기 파드 2대(CPU 4·메모리 4096Mi씩, kind 안, k6 실행 구간으로 나눔)",
+    "dropped_iterations": 2282
+  },
+  "started_at": "2026-11-26T18:49:17Z",
+  "ended_at": "2026-11-26T18:49:29Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 73.9227015,
+    "p95_ms": 561.5686767,
+    "p99_ms": 841.8579253499995,
+    "error_rate": 0.019846701341363262,
+    "requests": 7306,
+    "rps": 3653,
+    "dropped_iterations": 2282
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt"
+  },
+  "valid": false,
+  "invalid_reason": "발생기 0: 발생기가 반복을 시작하지 못함(dropped_iterations 1099); 발생기 1: 발생기가 반복을 시작하지 못함(dropped_iterations 1183)",
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "baseline",
+  "notes": "F-08-4 정렬 표본: 셀 hybrid(로비 셔플 켬·오픈 직후 묶음 켬), 사용자 100000, 묶음 표본 10000건 5000/s, 진입 없음(로비); 표본 0건(표본률 0.0000), 스피어만 null, 묶음 스피어만 0.07695543448034856, p90 도착 1856ms, 게시 477ms; 검증 재계산은 시드 공개(오픈+60분) 전이라 하지 않았다(proofMatches 미측정). 합성 봇은 넣지 않았다(봇 성공률 미측정); 로비 판정은 trust-svc 없는 무대라 hd로 이어 간다. 발생기 2대(CPU 4·메모리 4096Mi)",
+  "collected_at": "2026-11-26T18:51:37Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

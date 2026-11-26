@@ -1,0 +1,13 @@
+측정 환경(2026-11-26T18:51:37.306Z)
+PC: Intel(R) Core(TM) i9-14900HX 논리 프로세서 32개, 메모리 32 GiB
+Docker 엔진: Docker 29.8.1, CPU 32, 메모리 25194881024 B, 커널 6.18.33.2-microsoft-standard-WSL2, Docker Desktop
+WSL 설정(.wslconfig): [wsl2]; memory=24GB
+클러스터: kind peaket(노드 하나), kubeconfig D:\ticketpass-freeze-F-08-4\.cache\peaket-tools\kubeconfig-lane4-f084
+발생기: k6 grafana/k6:1.4.2@sha256:3656673de3f30424e8ebcfa46acd9558d83b6a43612d0f668ffeac953950c6c7, 파드 2대(CPU 4·메모리 4096Mi씩, 요청 = 한도), GOMAXPROCS 4, k6 실행 구간으로 나눔(docs/verification.md §3.10)
+시계: 발생기와 대상이 같은 PC 커널 시계를 쓴다(시계 차이 0, docs/perf-ledger.md §3 3번)
+CPU 배치: WSL 안에서 어느 코어에 놓일지 고르지 않는다(docs/verification.md §3.5 6번 '코어 혼합'은 표시만)
+인자: {"command":"v1","scenario":"ordering","cell":"hybrid","baseline":false,"users":100000,"batchUsers":10000,"batchRate":5000,"lobbyRate":200,"entryRate":2000,"tokenRate":1000,"warmS":10,"cpus":4,"memoryMi":4096,"record":true,"invariants":false,"namespace":"v1","settle":false,"hpaTimeline":false,"runId":"2026-11-27-f084-hybrid-ordering-r1","profile":"local-100k","out":".cache/peaket-f084/2026-11-27-hybrid-ordering-r1","opensAtMs":1795718957239}
+
+정렬 셀: hybrid(로비 셔플 켬, 오픈 직후 묶음 켬)
+Redis TLS 켬, 오픈 2026-11-26T18:49:17.239Z, 로비 준비 500초, 본구간 2초
+결과 파일 /var/peaket/batch-results/{회차}/shuffle-results·batch-results, 로비 0개 파일·묶음 4096개 파일
