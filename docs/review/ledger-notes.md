@@ -382,3 +382,10 @@ ADR-0373 결정 2의 '동결로 미검증'이다. 완성 판정에서 빼고 완
 | S-T14 ④ | 미검증 |  | BAT-095(K4, 완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). Degraded Mode 완화 SLO p99 1.5초와 초과 판매 0건도 K4 무대가 필요하다(S-T12 ①과 같은 까닭). ①~③(자동 전환)은 BAT-053(HOT-091) 시험이다 |
 | S-T15 | 미검증 |  | LCH-200(K5, 완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). K5 랩 판정 도구 `loadtest/k5/seatmap-lab.mjs`는 v0 입구 고정이고 v1 좌석맵 랩 판정은 LCH-200(F-08-1, 동결)이다 |
 | P-T31 | 미검증 |  | 구간 측정(완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). 결제사 전환 훈련과 결제사별 동시 입장 목표 상한은 스테이징 무대가 필요하다(F-09 클라우드 기반, 동결) |
+
+## F-09-3에서 본 것(2026-11-27, 시험 리뷰 RV093-10)
+
+- `delivery:v5.0.0-13.2.2`·`13.3.4`는 **기준 커밋 장부에서 이미 '자동 시험'**이다(13.2.2는 `tools/local/chart.test.mjs`·`cluster.test.mjs`·`observability.test.mjs`, 13.3.4는 `deploy/workloads/test/workloads.test.mjs`). F-09-3의 새 시험은 그 위에 Redis ACL·MSK 역할·PgBouncer/Aurora 교체 구성의 단언을 더할 뿐이므로, 장부 6/6을 이 기능의 새 시험 성과로 세지 않는다.
+- 13.3.4의 정본 구현 위치에는 ClickHouse·Schema Registry·ElastiCache 교체도 있다. 이 기능은 PgBouncer·Aurora 구성만 보고, 나머지는 F-09-4와 공유한다.
+- D-T34 ①~③은 정적 구성 시험과 `packages/platform/test-int/secret-rotation.int.test.ts`(PostgreSQL 직접 인증)로 나눈다. PgBouncer 컨테이너의 `RELOAD` 경로와 실제 세대 거절은 Docker 통합 시험이 미실행이다.
+- D-T30은 정본이 정적 검사라 시험 이름 기준 자동 시험이 충분하다. D-T34는 실제 실행 전에는 완료로 세지 않는다.

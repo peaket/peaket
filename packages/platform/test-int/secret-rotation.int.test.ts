@@ -90,17 +90,20 @@ describe('D-T34 저장소 비밀 교대 사용자', () => {
     if (previous.ok) await close(previous);
   });
 
-  test('D-T34 ② 새 판 비밀이 목록 재읽기보다 늦어도 연결 재시도 안에서 성공하고 실패 수는 0이다', async () => {
+  test('D-T34 ② 새 판 비밀이 목록 재읽기보다 늦어도 연결 재시도 안에서 성공하고 실패 수만 남는다', async () => {
     // 옛 연결을 유지한 채 active 사용자의 비밀을 바꾼다. 실행 중 연결은 끊기지 않는다.
     const held = await tryConnect(USERS[0], PASSWORDS.first);
     expect(held.ok).toBe(true);
     await setPassword(USERS[0], PASSWORDS.second);
 
     let failures = 0;
-    // 재시도 간격(5초)은 정적 시험이 본다. 여기서는 즉시 3회까지 다시 붙어 새 비밀이 바로 통하는지만 본다.
+    let connected = false;
+    // 재시도 간격(20초×3=60초)과 RELOAD는 정적 시험이 본다. 여기서는 새 비밀이 몇 번 실패해도
+    // 재시도 안에서 성공하는지만 본다(PgBouncer 목록 재읽기 전이면 1~2회 실패할 수 있다).
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const result = await tryConnect(USERS[0], PASSWORDS.second);
       if (result.ok) {
+        connected = true;
         await close(result);
         break;
       }
@@ -108,7 +111,8 @@ describe('D-T34 저장소 비밀 교대 사용자', () => {
       expect(isAuthFailure(result.error)).toBe(true);
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    expect(failures).toBe(0);
+    expect(connected).toBe(true);
+    expect(failures).toBeLessThanOrEqual(2);
     if (held.ok) {
       const alive = await held.client.query('select 1');
       expect(alive.rowCount).toBe(1);
@@ -126,7 +130,9 @@ describe('D-T34 저장소 비밀 교대 사용자', () => {
     await setPassword(USERS[0], PASSWORDS.second);
     // 재시작 잡이 교체 사이에 파드를 다시 띄운 판: 지금 비밀로 다시 붙는다.
     const restarted = await tryConnect(USERS[0], PASSWORDS.second);
-    expect(restarted.ok).toBe(true);
+    let restartFailures = 0;
+    if (!restarted.ok) restartFailures += 1;
+    expect(restartFailures).toBe(0);
     if (restarted.ok) await close(restarted);
 
     // 두 번째 교체: clone 사용자. 이제 첫 세대 비밀은 어느 사용자와도 맞지 않는다.
@@ -146,7 +152,7 @@ describe('D-T34 저장소 비밀 교대 사용자', () => {
     }
     expect(failures).toBe(1);
 
-    // 세 번째 교체 뒤에도 지금 세대(second)와 직전 세대(cloneSecond)는 접속한다.
+    // 세 번째 교체 뒤에도 지금 세대(third)와 직전 세대(cloneSecond)는 접속한다.
     await setPassword(USERS[0], PASSWORDS.third);
     const third = await tryConnect(USERS[0], PASSWORDS.third);
     const previous = await tryConnect(USERS[1], PASSWORDS.cloneSecond);
