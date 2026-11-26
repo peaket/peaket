@@ -1113,7 +1113,7 @@ describe('F-04-14 HTTP', () => {
     expect(json(noPost).bypassedControls.length).toBeGreaterThan(0);
   });
 
-  test('FX-T20 ⑧ C-T71 ① 사유 없음 422·봉인 전 409·파기 410이고 하루 20회를 넘으면 429다', async () => {
+  test('FX-T20 ⑧ C-T71 ① 사유 없음 400·봉인 전 409·파기 410이고 하루 20회를 넘으면 429다', async () => {
     const who = investigator();
     const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(1), { actionNotifiedAtMs: NOW - DAY })] });
     const created = await createBundle(c.caseId, who);
