@@ -48,10 +48,12 @@ import type {
   GetIdentityProviders200,
   GetIdentityScannerSessions200,
   GetIdentitySessions200,
+  GetNotificationUnreadCount200,
   IdentityConsent,
   IdentityProfile,
   IdentityProfileUpdateInput,
   LinkProposal,
+  ListNotifications200,
   ListSubscriptions200,
   ListWishes200,
   MergeProposal,
@@ -81,6 +83,10 @@ export const getCreateStaffInvitationAcceptanceResponseMock = (overrideResponse:
 export const getCreateDeviceApprovalLookupResponseMock = (overrideResponse: Partial<Extract<DeviceApprovalView, object>> = {}): DeviceApprovalView => ({deviceName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), userCode: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), assignments: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({assignmentId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), nickname: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), role: faker.helpers.arrayElement([faker.helpers.arrayElement(['gate_staff','gate_lead'] as const), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['INVITED','ASSIGNED','REVOKED','ENDED','EXPIRED'] as const), undefined]), inviteExpiresAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), validFrom: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), validUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), scanCount: faker.helpers.arrayElement([faker.number.int(), undefined]), overrideCount: faker.helpers.arrayElement([faker.number.int(), undefined])})), undefined]), canProxy: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), ...overrideResponse})
 
 export const getCreateEventSubscriptionResponseMock = (overrideResponse: Partial<Extract<SubscriptionState, object>> = {}): SubscriptionState => (faker.helpers.arrayElement([{eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), open: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), cancellation: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), nightPush: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), cancellationStatus: faker.helpers.arrayElement([faker.helpers.arrayElement(['ACTIVE','ENDED'] as const), null]), endReason: faker.helpers.arrayElement([faker.helpers.arrayElement(['SENT_MAX','BOOKED','SALE_ENDED'] as const), null]), sentCount: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), ...overrideResponse}, {eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), open: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), cancellation: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), nightPush: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), cancellationStatus: faker.helpers.arrayElement([faker.helpers.arrayElement(['ACTIVE','ENDED'] as const), null]), endReason: faker.helpers.arrayElement([faker.helpers.arrayElement(['SENT_MAX','BOOKED','SALE_ENDED'] as const), null]), sentCount: faker.helpers.arrayElement([faker.number.int({min: 0}), undefined]), ...overrideResponse}]))
+
+export const getListNotificationsResponseMock = (overrideResponse: Partial<Extract<ListNotifications200, object>> = {}): ListNotifications200 => ({items: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({notificationId: faker.string.uuid(), category: faker.helpers.arrayElement(['BOOKING','PAYMENT','CANCEL_REFUND','TRANSFER','ENTRY','SUPPORT','SECURITY','EVENT_ALERT','AD'] as const), kind: faker.string.alpha({length: {min: 10, max: 20}}), title: faker.string.alpha({length: {min: 10, max: 20}}), body: faker.string.alpha({length: {min: 10, max: 20}}), url: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), createdAt: faker.date.past().toISOString().slice(0, 19) + 'Z', readAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null])})), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), unreadCount: faker.number.int({min: 0}), ...overrideResponse})
+
+export const getGetNotificationUnreadCountResponseMock = (overrideResponse: Partial<Extract<GetNotificationUnreadCount200, object>> = {}): GetNotificationUnreadCount200 => ({count: faker.number.int({min: 0}), ...overrideResponse})
 
 export const getListWishesResponseMock = (overrideResponse: Partial<Extract<ListWishes200, object>> = {}): ListWishes200 => ({items: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({productionId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), title: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), genre: faker.helpers.arrayElement([faker.helpers.arrayElement(Object.values(Genre)), undefined]), posterUrl: faker.helpers.arrayElement([faker.internet.url(), undefined]), posterAlt: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), placeName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), periodStart: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 10), undefined]), periodEnd: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 10), undefined]), nextOpenAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), nextOpenEventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), saleStatus: faker.helpers.arrayElement([faker.helpers.arrayElement(['UPCOMING','ON_SALE','SOLD_OUT','ENDED'] as const), undefined]), saleEndsAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), minPrice: faker.helpers.arrayElement([faker.number.int(), undefined]), badges: faker.helpers.arrayElement([faker.helpers.arrayElements(['PREQUEUE_SHUFFLE','HYBRID','FIFO','PRESALE','AUTO_SEAT'] as const), undefined])})), undefined]), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
 
@@ -207,6 +213,50 @@ export const getCreateEventSubscriptionMockHandler = (overrideResponse?: Subscri
 
 export const getDeleteEventSubscriptionsMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
   return http.delete<{ eventId: string }>('*/v1/events/:eventId/subscriptions', async (info: Parameters<HttpResponseResolver<{ eventId: string }>>[0]) => {
+  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+
+    return new HttpResponse(null,
+      { status: 204
+      })
+  }, options)
+}
+
+export const getListNotificationsMockHandler = (overrideResponse?: ListNotifications200 | ((info: Parameters<HttpResponseResolver>[0]) => Promise<ListNotifications200> | ListNotifications200), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/notifications', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListNotificationsResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getGetNotificationUnreadCountMockHandler = (overrideResponse?: GetNotificationUnreadCount200 | ((info: Parameters<HttpResponseResolver>[0]) => Promise<GetNotificationUnreadCount200> | GetNotificationUnreadCount200), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/notification-unread-count', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetNotificationUnreadCountResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreateNotificationReadAllMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+  return http.post('*/v1/notification-read-all', async (info: Parameters<HttpResponseResolver>[0]) => {
+  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+
+    return new HttpResponse(null,
+      { status: 204
+      })
+  }, options)
+}
+
+export const getCreateNotificationReadMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ notificationId: string }>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+  return http.post<{ notificationId: string }>('*/v1/notifications/:notificationId/read', async (info: Parameters<HttpResponseResolver<{ notificationId: string }>>[0]) => {
   if (typeof overrideResponse === 'function') {await overrideResponse(info); }
 
     return new HttpResponse(null,
@@ -581,6 +631,10 @@ export const getIdentityMock = () => [
   getCreateDeviceApprovalMockHandler(),
   getCreateEventSubscriptionMockHandler(),
   getDeleteEventSubscriptionsMockHandler(),
+  getListNotificationsMockHandler(),
+  getGetNotificationUnreadCountMockHandler(),
+  getCreateNotificationReadAllMockHandler(),
+  getCreateNotificationReadMockHandler(),
   getListWishesMockHandler(),
   getListSubscriptionsMockHandler(),
   getDeleteProductionWishMockHandler(),

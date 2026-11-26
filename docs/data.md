@@ -805,6 +805,7 @@ erDiagram
         uuid id PK "UUIDv7(시간순). 표는 나누지 않고 보존 기한이 지난 행을 ID 범위로 나눠 지운다(ADR-0114)"
         uuid account_id "인덱스 purchase_order_account_idx (account_id, id)로 탈퇴 참여자가 그 계정의 주문을 찾는다(조건 없음, §5.1, 추천 적용 2026-11-18, BAT-010 계획, ADR-0284)"
         uuid event_id
+        text booking_no "UNIQUE. 예매번호. 한국 시각 날짜 8자리 + 5자리 일련번호(예 2026101400123). 주문 생성 트랜잭션에서 booking_no_sequence로 만든다. CS 문의의 orderRef·화면의 예매번호와 같은 값이고 개인정보가 아니다(추천 적용 2026-11-26, ADR-0388)"
         text status "CREATED|AUTHENTICATED|ACCEPTED|RESERVED|AWAITING_DEPOSIT|APPROVED|UNKNOWN|CONFIRMED|FAILED|COMPENSATED|PARTIALLY_REFUNDED|REFUNDED|EXPIRED(docs/planning/03 §2.4, payment §3). EXPIRED는 결제를 접수하지 않고 끝난 주문(ADR-0107). trade.orders의 DEPOSIT_REVERSED·EVENT_CANCELLATION_CONFIRMED·COMPENSATION_PAID·ISSUE_DELAYED는 사건이라 저장 값이 아니다"
         int amount "서버 계산"
         int event_seq "상태 이력 order_event의 마지막 번호. 주문 전이 함수가 상태를 바꾸는 UPDATE에서 1 올려 이력 번호로 쓴다(빈틈 없음, ADR-0113)"
@@ -820,6 +821,10 @@ erDiagram
         uuid hold_id "주문을 만든 홀드(UNIQUE: 한 홀드에 주문 하나, 겹치면 409 hold-already-ordered). 실패 해제·다시 만들기가 주문 기준으로 쓴다(추천 적용 2026-11-05, BUILD_ORDER PRF-161)"
         text purchase_session_id "주문을 만든 구매 세션. 결제 시도·접수가 '이 구매 세션의 주문'을 가린다(PRF-161, 사건에는 CREATED에만 싣는다). 인덱스 purchase_order_session_idx (purchase_session_id)로 세션이 끝날 때 그 세션의 열린 주문을 찾는다(마이그레이션 0011, 추천 적용 2026-11-09, BUILD_ORDER PRF-172)"
         timestamptz created_at
+    }
+    booking_no_sequence {
+        date day PK "한국 시각 날짜"
+        int next "그날 마지막으로 쓴 일련번호. 주문 생성 트랜잭션의 INSERT … ON CONFLICT (day) DO UPDATE … RETURNING으로 잡는다. 99,999를 넘으면 주문 생성을 닫고 SEV2(추천 적용 2026-11-26, ADR-0388)"
     }
     order_idempotency {
         text account_ref PK "부른 계정 ID. 키 범위는 계정 × 작업이라 다른 계정의 같은 키는 다른 행이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046). 칸은 서비스마다 둔 멱등 기록 표와 같은 꼴이다(packages/platform idempotencyRecordTable, 추천 적용 2026-11-05, BUILD_ORDER PRF-160)"
@@ -2074,7 +2079,10 @@ erDiagram
         text target_ref
         uuid account_id
         text channel
-        jsonb vars "문구 변수만. 받는 주소·전화번호·본문 없음"
+        text template_version "만든 때의 문안 판(코드에 고정한 템플릿의 version). 보낼 때 이 판이 있으면 그 판으로, 없으면 지금 판으로 그리고 기록한다(추천 적용 2026-11-26, ADR-0388)"
+        uuid resend_of "다시 보내기 작업이면 원래 delivery_id. 처음이면 null(추천 적용 2026-11-26, ADR-0389)"
+        int resend_no "다시 보내기 횟수. 처음 0, 다시 보낼 때마다 1씩" 
+        jsonb vars "문구 변수만. 받는 주소·전화번호·본문·판매자 정보 없음. 판매자 정보는 보낼 때 catalog에서 읽는다(추천 적용 2026-11-26, ADR-0388)"
         text status "PENDING|RETRYING|DEAD"
         int attempt_count
         timestamptz next_attempt_at "시각을 잡은 안내와 60초 모으기도 이 값으로 미룬다"
@@ -2082,14 +2090,23 @@ erDiagram
         timestamptz expires_at "알림이 쓸모 있는 기한(지나면 보내지 않고 EXPIRED로 기록)"
     }
     notification_delivery {
-        text dedup_key PK "종류:대상:사건·버전:계정:채널"
+        text dedup_key PK "종류:대상:사건·버전:계정:채널. 알림톡이 문자로 대체되어도 채널 자리는 요청한 ALIMTALK 그대로다(추천 적용 2026-11-26, ADR-0392)"
+        uuid delivery_id "UNIQUE. CS 다시 보내기 API의 대상 ID(UUIDv7). 추천 적용 2026-11-26, ADR-0389"
         text kind
         text target_ref
         uuid account_id
-        text channel "EMAIL|WEB_PUSH|ALIMTALK|SMS|CONSOLE"
-        text status "PENDING|SENT|FAILED|DEAD(소유자 결정 2026-11-11, open-items 101번). DEAD는 마지막 시도까지 실패한 것이고, 이 칸을 읽는 곳은 CS 처리함의 알림 실패 건과 발송 지표다"
+        text channel "EMAIL|WEB_PUSH|ALIMTALK|SMS|CONSOLE. 알림톡이 문자로 대체되면 실제로 나간 SMS를 적는다(추천 적용 2026-11-26, ADR-0392)"
+        text requested_channel "요청한 채널. 알림톡이 문자로 대체되면 channel은 SMS, requested_channel은 ALIMTALK이다(추천 적용 2026-11-26, ADR-0388)"
+        uuid resend_of "다시 보내기로 만든 배송이면 원래 delivery_id. 처음 배송이면 null"
+        int resend_no "다시 보내기 횟수. 처음 0, 다시 보낼 때마다 1씩. 같은 배송은 3회 [가정]까지"
+        text status "PENDING|SENT|FAILED|DEAD(소유자 결정 2026-11-11, open-items 101번). DEAD는 마지막 시도까지 실패한 것이고, 이 칸을 읽는 곳은 CS 처리함의 알림 실패 건과 발송 지표다. 제공자 결과는 provider_status에 따로 적는다"
+        text provider_status "ACCEPTED|DELIVERED|BOUNCED|COMPLAINED|REJECTED|DELAYED|UNKNOWN. 제공자 웹훅 결과(추천 적용 2026-11-26, ADR-0388)"
+        text provider_result_code "제공자 결과 코드(예 SES bounceType, Solapi 4000·3xxx). 본문은 넣지 않는다"
+        text provider_event_id "마지막으로 반영한 notification_provider_event.provider_event_id"
+        timestamptz provider_updated_at "제공자 결과를 마지막으로 반영한 시각"
+        text template_version "실제로 그린 문안 판(추천 적용 2026-11-26, ADR-0388)"
         timestamptz sent_at PK "월 파티션 키. 기본 키 (dedup_key, sent_at), 중복 막기는 notification_dedup(ADR-0086)"
-        text provider_message_id "받는 주소·전화번호·본문은 넣지 않음, 90일 [가정] 뒤 파기(docs/design/d5 §9.1.1, ADR-0062)"
+        text provider_message_id "SES MessageId·Solapi messageId. 받는 주소·전화번호·본문은 넣지 않음, 90일 [가정] 뒤 파기(docs/design/d5 §9.1.1, ADR-0062)"
     }
     notification_subscription {
         uuid id PK
@@ -2106,6 +2123,70 @@ erDiagram
     notification_dedup {
         text dedup_key PK "종류:대상:사건·버전:계정:채널"
         timestamptz created_at "7일 [가정] 뒤 지움(ADR-0086)"
+    }
+    notification_provider_event {
+        text provider PK "SES|SOLAPI"
+        text provider_event_id PK "제공자 사건 ID(SNS MessageId·Solapi report ID). (provider, provider_event_id) 유일"
+        text provider_message_id "SES MessageId·Solapi messageId. notification_delivery.provider_message_id와 맞춘다"
+        text event_type "SES Delivery·Bounce·Complaint·Reject·DeliveryDelay, Solapi SINGLE-REPORT"
+        text result_code "제공자 결과 코드(예 SES bounceType, Solapi 4000/3xxx)"
+        timestamptz occurred_at
+        timestamptz received_at
+        timestamptz applied_at "notification_delivery에 반영한 시각. 반영할 행이 없으면 비운다"
+    }
+    notification_inbox {
+        uuid id PK "UUIDv7. 알림함 항목 ID(추천 적용 2026-11-26, ADR-0390)"
+        uuid account_id "받는 계정. 인덱스 (account_id, created_at DESC, id), 안 읽은 항목 부분 인덱스 (account_id) WHERE read_at IS NULL"
+        text logical_key "UNIQUE(account_id, logical_key). 채널을 뺀 논리 알림 키. 같은 알림이 이메일·푸시·문자로 여러 번 가도 한 항목이다"
+        text kind "알림 종류(§4.11)"
+        text category "BOOKING|PAYMENT|CANCEL_REFUND|TRANSFER|ENTRY|SUPPORT|SECURITY|EVENT_ALERT|AD"
+        text target_ref "이어지는 대상(주문·티켓·문의·회차 등)"
+        jsonb vars "문구 변수만. 주소·전화번호·본문·판매자 정보 없음. 화면 문구는 읽을 때 템플릿과 catalog로 만든다"
+        text template_version "만든 때의 문안 판"
+        timestamptz created_at
+        timestamptz read_at "null이면 읽지 않음. 계정 병합 때 대표 계정으로 옮기고 logical_key가 겹치면 하나만 남긴다"
+    }
+    notification_template {
+        uuid id PK "UUIDv7. 템플릿 판 ID(추천 적용 2026-11-26, ADR-0391)"
+        text kind "알림 종류(예 BOOKING_CONFIRMED)"
+        text locale "ko|en|ja|zh. 알림톡은 ko만"
+        int version "판. (kind, locale, version) 유일. 한 번 검토에 올린 판은 고치지 않는다"
+        text status "DRAFT|IN_REVIEW|READY|SUBMITTED|APPROVED|REJECTED|ACTIVE|RETIRED|SUSPENDED"
+        text template_code "UNIQUE(provider, template_code). 우리 장부 안의 판 키 PEAKET_{KIND}_{LOCALE}_V{n}. 제공자에는 name으로 보낸다"
+        text channel_id "Solapi 템플릿 API v2의 channelId(구 pfId). 보내기 API의 kakaoOptions.pfId와 같은 채널"
+        text category_code "정보성 카테고리 코드. BOOKING_CONFIRMED는 003001 [가정]. 종류별로 Solapi 카테고리 조회로 확인한다"
+        text message_type "BA|EX|AD|MI. 1차 BA"
+        text emphasize_type "NONE|TEXT|IMAGE|ITEM_LIST. 1차 NONE"
+        jsonb buttons "제출한 버튼 스냅숏(WL·linkMo·linkPc). 실제 개인정보는 없다"
+        bool security_flag "1차 false"
+        text content_sha256 "본문·문자 대체·버튼·변수 목록을 정규화한 해시. 검토·제출·활성 때 지금 코드와 견준다"
+        text git_sha "그 판이 들어간 커밋"
+        text body_snapshot "제공자에 낸 본문 스냅숏. 보내는 정본은 코드의 같은 판이고, 이 칸은 심사·감사 증거다"
+        text fallback_body_snapshot "제공자에 낸 문자 대체 본문 스냅숏"
+        text provider "SOLAPI"
+        text provider_template_id "UNIQUE(provider, provider_template_id). 제공자가 발급한 템플릿 ID"
+        text provider_status "PENDING|INSPECTING|APPROVED|REJECTED|SUSPENDED|DELETED|UNKNOWN"
+        text reject_reason_code "CONTENT_PROHIBITED|AD_UNDECLARED|VARIABLE_INVALID|LINK_INVALID|LENGTH|DUPLICATE|PROVIDER_TEMPORARY|OTHER. 제공자 comments를 옮겨 적은 우리 코드이고 공식 열거는 없다"
+        text review_checklist_version "검토 항목 판(예 v1)"
+        uuid reviewed_by "내부 검토자(ops 관리 계정)"
+        uuid submitted_by "제출자"
+        uuid activated_by "활성한 사람"
+        timestamptz created_at
+        timestamptz reviewed_at
+        timestamptz submitted_at
+        timestamptz provider_decided_at
+        timestamptz activated_at
+        timestamptz retired_at "RETIRED로 내린 시각. 런타임 매핑은 이때부터 24시간 [가정] 이 판을 함께 둔다"
+    }
+    notification_template_event {
+        uuid id PK "UUIDv7"
+        uuid template_id "notification_template.id"
+        text event "REGISTERED|REVIEW_REQUESTED|REVIEW_APPROVED|REVIEW_REJECTED|SUBMITTED|PROVIDER_APPROVED|PROVIDER_REJECTED|ACTIVATED|RETIRED|SUSPENDED"
+        uuid actor_id "ops 관리 계정. system이면 null"
+        text reason_code "반려·폐기 사유 코드"
+        text note "사람이 적은 사유(1~1,000자). 본문 원문은 넣지 않는다"
+        text content_sha256 "그 사건 때의 해시"
+        timestamptz created_at
     }
     fraud_appeal_notice {
         uuid account_id PK "부정 예매 소명 알림을 마지막으로 보낸 상태(추천 적용 2026-10-31, ADR-0171, FRN-070, docs/features/notify.md §4.5). identity 논리 DB라 외래키 없음"
@@ -3488,8 +3569,11 @@ erDiagram
 | 가상계좌 입금 안내 (`payment.deposit_due_at`·`virtual_account_bank`·`virtual_account_no`) | 결제사가 입금용으로 발급한 번호이고 이용자의 은행 계좌번호가 아니다. 필드 암호화(AES-256-GCM, 보수적으로 P1 기준)를 쓰고, 원문 로그는 금지한다 | 입금이 확정되거나 입금 기한이 지나면 삭제한다(입금 secret 해시와 같은 수명, ADR-0050 결정 4, 추천 적용 2026-10-14, ADR-0062) |
 | 판매 자격 명단 (`sale_eligibility_list`·`sale_eligibility_member`, 대기열 Redis 사본) | 스토리지 레벨 암호화(P2). 올린 파일은 저장하지 않고, 회원 코드를 계정 ID로 바꾼 집합만 둔다. 감사 로그에는 올린 계정·시각·건수·파일 SHA-256만 남긴다 | 판매 기간 끝 + 1일 [가정]에 DB·Redis에서 파기한다(추천 적용 2026-10-14, ADR-0062) |
 | 미성년자 계약 취소 확인 기록 | 스토리지 레벨 암호화(P2). 계정 ID·주문 ID·확인 방법·결과(계약 당시 만 19세 미만 여부)·확인 일시·확인한 서류 종류와 확인자만 남긴다. 생년월일·연계정보·서류 사본은 저장하지 않는다 | 취소 기록과 함께 5년(전자상거래법 시행령 §6①2호, 추천 적용 2026-10-14, ADR-0062) |
-| 알림 발송 기록 (`notification_delivery`) | 스토리지 레벨 암호화(P2). 중복 키·종류·대상 ID·계정 ID·채널·상태·시각·발송 대행 메시지 ID만 둔다. 받는 주소·전화번호·본문은 넣지 않는다 | 90일 [가정] 뒤 파기한다. 법정 통지를 보낸 사실은 그 건의 처리 기록에 따로 남는다(추천 적용 2026-10-14, ADR-0062). 발송 시각으로 달마다 나눠 파티션째 지우고, 중복 막기는 7일 [가정] 보존하는 `notification_dedup`이 맡는다(추천 적용 2026-10-22, ADR-0086) |
-| 알림 발송 작업 (`notification_job`)과 파트너 웹훅 발송 원장 (`webhook_delivery`) | 스토리지 레벨 암호화. 알림 작업에는 문구 변수만 두고 받는 주소·전화번호·본문은 넣지 않는다(보낼 때 읽는다). 웹훅 원장의 본문은 thin 본문(개인정보·계정 ID·좌석 번호 없음, ADR-0062)이다 | 알림 작업은 보내거나 기한이 지나면 같은 트랜잭션에서 지우고 결과는 `notification_delivery`에 남긴다. 웹훅 원장은 성공·최종 실패 뒤 30일 [가정]에 정비 시간의 묶음 삭제로 지운다(추천 적용 2026-10-28, ADR-0109) |
+| 알림 발송 기록 (`notification_delivery`) | 스토리지 레벨 암호화(P2). 중복 키·종류·대상 ID·계정 ID·채널·요청 채널·상태·시각·발송 대행 메시지 ID·제공자 상태·결과 코드·제공자 사건 ID·문안 판만 둔다. 받는 주소·전화번호·본문은 넣지 않는다 | 90일 [가정] 뒤 파기한다. 법정 통지를 보낸 사실은 그 건의 처리 기록에 따로 남는다(추천 적용 2026-10-14, ADR-0062). 발송 시각으로 달마다 나눠 파티션째 지우고, 중복 막기는 7일 [가정] 보존하는 `notification_dedup`이 맡는다(추천 적용 2026-10-22, ADR-0086) |
+| 알림 제공자 이벤트 (`notification_provider_event`) | 스토리지 레벨 암호화(P2). 제공자·사건 ID·메시지 ID·사건 종류·결과 코드·시각만 둔다. 본문·이메일·전화번호·본문 해시는 넣지 않는다 | 90일 [가정] 뒤 지운다. 같은 사건의 재전송을 멱등하게 막고 CS가 제공자 결과를 확인하는 데 쓴다(추천 적용 2026-11-26, ADR-0388) |
+| 알림함 (`notification_inbox`) | 스토리지 레벨 암호화(P2). 계정 ID·논리 키·종류·분류·대상·문구 변수·문안 판·읽은 시각만 둔다. 주소·전화번호·본문·판매자 정보는 넣지 않는다 | 1년 [가정] 뒤 `created_at` 기준 묶음 삭제. 탈퇴하면 바로 지우고, 계정 병합 때 대표 계정으로 옮기며 `logical_key`가 겹치면 하나만 남긴다(추천 적용 2026-11-26, ADR-0390) |
+| 알림 템플릿 판·심사 기록 (`notification_template`, `notification_template_event`) | 개인정보가 없다. 종류·언어·판·상태·본문 해시·git SHA·제출 본문 스냅숏·제공자 ID·사유 코드·행위자(관리 계정 ID)·시각만 둔다. 실제 수신자 주소·전화번호·이름은 넣지 않는다 | 판은 그 판을 쓰는 작업이 끝나고 1년 [가정], 사건 기록은 3년 [가정] 뒤 지운다. 관리 계정이 지워져도 행위자 ID는 남긴다(추천 적용 2026-11-26, ADR-0391) |
+| 알림 발송 작업 (`notification_job`)과 파트너 웹훅 발송 원장 (`webhook_delivery`) | 스토리지 레벨 암호화. 알림 작업에는 문구 변수와 문안 판만 두고 받는 주소·전화번호·본문·판매자 정보는 넣지 않는다(보낼 때 읽는다). 웹훅 원장의 본문은 thin 본문(개인정보·계정 ID·좌석 번호 없음, ADR-0062)이다 | 알림 작업은 보내거나 기한이 지나면 같은 트랜잭션에서 지우고 결과는 `notification_delivery`에 남긴다. 웹훅 원장은 성공·최종 실패 뒤 30일 [가정]에 정비 시간의 묶음 삭제로 지운다(추천 적용 2026-10-28, ADR-0109) |
 | 알림 대량 발송 (`notification_broadcast`·`notification_broadcast_chunk`) | 스토리지 레벨 암호화. 회차·단계·판·창·신청 ID 범위·합계만 두고 계정 ID·받는 주소·본문은 넣지 않는다 | 발송이 끝난 뒤 30일 [가정]에 정비 시간의 묶음 삭제로 조각과 함께 지운다(추천 적용 2026-10-30, docs/features/notify.md §12) |
 | 오픈 알림·취소표 알림 신청 (`notification_subscription`: 계정 ID, 회차, 종류, 밤 웹 푸시 여부, 보낸 횟수, 상태) | 스토리지 레벨 암호화(P2). 받는 주소는 두지 않는다. 수요 예측에는 회차별 구독 수만 넘긴다(계정 없음, ADR-0078) | 끄면 바로 지운다. 오픈 알림 신청은 그 회차의 오픈 시각(`open_at`)이 지나면 지우고, 끝난 취소표 알림 신청과 남은 신청은 그 회차의 공연 종료 예정 시각(`ends_at`)이 지나면 지운다. 회원이 탈퇴하면 바로 파기한다(추천 적용 2026-10-26, ADR-0089) |
 | 홀드 원장 (`seat_hold`: 회차, 좌석, 계정 ID, 펜싱 토큰, 상태, 만료 시각) | 스토리지 레벨 암호화(P2) | 회차 판매 종료 + 90일 [가정] 뒤 회차 범위 파티션째 지운다. 홀드 사건은 분석 브론즈에도 가명으로 90일 있다(자체 기준, 추천 적용 2026-10-22, ADR-0086). docs/security/data-classification.md '홀드 원장'·'좌석 홀드와 구매 세션의 Redis 키' 행에 법적 근거와 함께 더했다(추천 적용 2026-10-30, docs/security/internal-management-plan.md §2 제13호) |
@@ -3515,7 +3599,7 @@ erDiagram
 | 계정 연동 및 계정 병합 기록 (대표·흡수 계정 ID, 연동 제공자 유형, 이관 항목 통계, 승인 일시) | 스토리지 레벨 암호화(P2)를 쓴다 | 대표 계정이 남아 있는 동안 유지한다. 대표 계정이 탈퇴하면 계정 원장과 함께 파기한다(자체 기준). 흡수된 계정의 원본 이메일과 닉네임은 병합이 끝나는 즉시 영구 파기한다(POL-034) |
 | 법적 동의 기록 (`consent`, 주문·굿즈 주문·현장 스태프 배정의 `consent_version`) | 스토리지 레벨 암호화(P2). 동의 종류·고지 문안의 판·동의 일시만 두고, 문안은 판마다 따로 보관한다 | 법정 보존 기간이 따로 없어 그 동의로 처리하는 기록과 같은 수명으로 둔다. 가입 때 동의는 회원이 탈퇴하면 파기하고(선택 동의는 철회할 때), 주문·굿즈 주문의 동의는 그 기록과 함께 5년, 현장 스태프의 동의는 배정 원장과 같이 회차 종료 1년 뒤 파기한다(추천 적용 2026-10-26, ADR-0089) |
 
-**알림 다섯 표의 구현(2026-11-22, BAT-455 GAT-250)**: 마이그레이션 0046가 `notification_subscription`·`push_subscription`·`notification_dedup`·`notification_job`·`notification_delivery`를 만든다. `notification_delivery`는 `sent_at` 월 파티션이고 첫 파티션은 마이그레이션 직후와 정비 일 `notification-delivery-partitions`가 만든다. 팬 경로 `core_app`은 다섯 표를 쓰고, 발송기 `core_notify`는 신청의 `night_push`·`sent_count`·`status`·`end_reason`·`updated_at`, 구독 읽기·만료 삭제, 중복 키·작업 넣기와 결과 칸, 기록 넣기만 한다. `notification_subscription`·`push_subscription`은 테넌트가 없어 행 보안을 걸지 않고 `account_id`로만 거른다(찜과 같다). `notification_delivery`의 90일 파기는 정비 잡이 파티션째 지우고, 중복 키는 7일 뒤 `notification_dedup`에서 지운다.
+**알림 표의 구현(2026-11-22, BAT-455 GAT-250; 2026-11-26 ADR-0388로 제공자 이벤트 추가)**: 마이그레이션 0046가 `notification_subscription`·`push_subscription`·`notification_dedup`·`notification_job`·`notification_delivery`를 만든다. 2026-11-26 ADR-0388이 `notification_provider_event`와 `notification_delivery`의 제공자 칸(`provider_status`·`provider_result_code`·`provider_event_id`·`provider_updated_at`·`template_version`·`requested_channel`), `notification_job.template_version`을 더한다. 같은 날 ADR-0390이 `notification_inbox`를, ADR-0391이 `notification_template`·`notification_template_event`를 더한다(마이그레이션 번호는 구현 묶음에서). `notification_delivery`는 `sent_at` 월 파티션이고 첫 파티션은 마이그레이션 직후와 정비 일 `notification-delivery-partitions`가 만든다. 팬 경로 `core_app`은 신청·구독·찜 표와 알림함 읽기·읽음 표시를 쓰고, 발송기 `core_notify`는 신청의 `night_push`·`sent_count`·`status`·`end_reason`·`updated_at`, 구독 읽기·만료 삭제, 중복 키·작업 넣기와 결과 칸, 기록 넣기, 제공자 이벤트 넣기와 `provider_*` 칸 고치기, 알림함 넣기, 템플릿 판 읽기·상태 칸 고치기와 사건 넣기만 한다(구현 묶음에서 권한을 더한다). `notification_subscription`·`push_subscription`은 테넌트가 없어 행 보안을 걸지 않고 `account_id`로만 거른다(찜과 같다). `notification_delivery`의 90일 파기는 정비 잡이 파티션째 지우고, 중복 키는 7일 뒤 `notification_dedup`에서 지운다.
 
 **탈퇴 회원 거래 기록의 보존 전용 스키마(추천 적용 2026-10-30, docs/security/internal-management-plan.md §5)**: 법령 때문에 지우지 않는 탈퇴 회원의 주문·결제 기록(5년)과 소비자 불만·분쟁 처리 기록(3년)은 다른 개인정보와 나눠 둔다(개인정보 보호법 제21조 제3항). 표준 개인정보 보호지침 제11조 제1항은 그 방법을 '물리적 또는 기술적 방법으로 분리'라고 정한다(2026-10-30 국가법령정보센터 원문 확인). 기록을 가진 서비스 DB마다 보존 전용 스키마(DB 안에서 표를 묶는 이름 공간) `retention` [가정]을 둔다. 탈퇴 처리 잡이 한 트랜잭션에서 그 회원 기록의 개인 식별 칸을 아래 표로 옮기고 원래 칸을 비운다. 원래 행에는 주문 ID·금액·상태처럼 정산·대사(두 기록을 맞대어 어긋난 곳을 찾는 일)에 필요한 칸만 남는다.
 

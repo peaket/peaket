@@ -51,10 +51,13 @@ import type {
   GetIdentityProviders200,
   GetIdentityScannerSessions200,
   GetIdentitySessions200,
+  GetNotificationUnreadCount200,
   IdentityConsent,
   IdentityProfile,
   IdentityProfileUpdateInput,
   LinkProposal,
+  ListNotifications200,
+  ListNotificationsParams,
   ListStaffAssignmentsParams,
   ListSubscriptions200,
   ListSubscriptionsParams,
@@ -1011,6 +1014,441 @@ export const useDeleteEventSubscriptions = <TError = ErrorType<UnauthorizedRespo
         TContext
       > => {
       return useMutation(getDeleteEventSubscriptionsMutationOptions(options), queryClient);
+    }
+    export type listNotificationsResponse200 = {
+  data: ListNotifications200
+  status: 200
+}
+
+export type listNotificationsResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listNotificationsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listNotificationsResponseSuccess = (listNotificationsResponse200) & {
+  headers: Headers;
+};
+export type listNotificationsResponseError = (listNotificationsResponse400 | listNotificationsResponse401) & {
+  headers: Headers;
+};
+
+export const getListNotificationsUrl = (params?: ListNotificationsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/notifications?${stringifiedParams}` : `/v1/notifications`
+}
+
+/**
+ * FR-053, SCR-072, docs/features/notify.md §4.11, ADR-0390. 채널과 상관없이 논리 알림 하나에 항목 하나다. 최근 순이고 커서·limit(기본 20 [가정], 최대 50), unreadOnly, category(쉼표로 여럿: BOOKING·PAYMENT·CANCEL_REFUND·TRANSFER·ENTRY·SUPPORT·SECURITY·EVENT_ALERT·AD)로 거른다. 응답의 unreadCount는 그 계정의 안 읽은 항목 수다. Cache-Control: private, no-store. 본문은 읽을 때 템플릿과 catalog로 만들고 주소·전화번호·판매자 정보는 싣지 않는다
+ * @summary 알림함 목록(최근 순, 안 읽음·분류 거르기)
+ */
+export const listNotifications = async (params?: ListNotificationsParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listNotificationsResponseSuccess> => {
+
+  return orvalFetch<listNotificationsResponseSuccess>(getListNotificationsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListNotificationsQueryKey = (params?: ListNotificationsParams,) => {
+    return [
+    `/v1/notifications`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListNotificationsQueryOptions = <TData = Awaited<ReturnType<typeof listNotifications>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(params?: ListNotificationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotifications>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListNotificationsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listNotifications>>> = ({ signal }) => listNotifications(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listNotifications>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListNotificationsQueryResult = NonNullable<Awaited<ReturnType<typeof listNotifications>>>
+export type ListNotificationsQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListNotifications<TData = Awaited<ReturnType<typeof listNotifications>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params: undefined |  ListNotificationsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotifications>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listNotifications>>,
+          TError,
+          Awaited<ReturnType<typeof listNotifications>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListNotifications<TData = Awaited<ReturnType<typeof listNotifications>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListNotificationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotifications>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listNotifications>>,
+          TError,
+          Awaited<ReturnType<typeof listNotifications>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListNotifications<TData = Awaited<ReturnType<typeof listNotifications>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListNotificationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotifications>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 알림함 목록(최근 순, 안 읽음·분류 거르기)
+ */
+
+export function useListNotifications<TData = Awaited<ReturnType<typeof listNotifications>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListNotificationsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listNotifications>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListNotificationsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type getNotificationUnreadCountResponse200 = {
+  data: GetNotificationUnreadCount200
+  status: 200
+}
+
+export type getNotificationUnreadCountResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getNotificationUnreadCountResponseSuccess = (getNotificationUnreadCountResponse200) & {
+  headers: Headers;
+};
+export type getNotificationUnreadCountResponseError = (getNotificationUnreadCountResponse401) & {
+  headers: Headers;
+};
+
+export const getGetNotificationUnreadCountUrl = () => {
+
+
+
+
+  return `/v1/notification-unread-count`
+}
+
+/**
+ * SCR-072 머리 배지가 화면이 보일 때와 다시 보일 때 부른다. 폴링하지 않는다. Cache-Control: private, no-store
+ * @summary 알림함 안 읽은 수(머리 종 배지)
+ */
+export const getNotificationUnreadCount = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<getNotificationUnreadCountResponseSuccess> => {
+
+  return orvalFetch<getNotificationUnreadCountResponseSuccess>(getGetNotificationUnreadCountUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetNotificationUnreadCountQueryKey = () => {
+    return [
+    `/v1/notification-unread-count`
+    ] as const;
+    }
+
+
+export const getGetNotificationUnreadCountQueryOptions = <TData = Awaited<ReturnType<typeof getNotificationUnreadCount>>, TError = ErrorType<UnauthorizedResponse>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationUnreadCount>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetNotificationUnreadCountQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getNotificationUnreadCount>>> = ({ signal }) => getNotificationUnreadCount({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getNotificationUnreadCount>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetNotificationUnreadCountQueryResult = NonNullable<Awaited<ReturnType<typeof getNotificationUnreadCount>>>
+export type GetNotificationUnreadCountQueryError = ErrorType<UnauthorizedResponse>
+
+
+export function useGetNotificationUnreadCount<TData = Awaited<ReturnType<typeof getNotificationUnreadCount>>, TError = ErrorType<UnauthorizedResponse>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationUnreadCount>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getNotificationUnreadCount>>,
+          TError,
+          Awaited<ReturnType<typeof getNotificationUnreadCount>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNotificationUnreadCount<TData = Awaited<ReturnType<typeof getNotificationUnreadCount>>, TError = ErrorType<UnauthorizedResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationUnreadCount>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getNotificationUnreadCount>>,
+          TError,
+          Awaited<ReturnType<typeof getNotificationUnreadCount>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetNotificationUnreadCount<TData = Awaited<ReturnType<typeof getNotificationUnreadCount>>, TError = ErrorType<UnauthorizedResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationUnreadCount>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 알림함 안 읽은 수(머리 종 배지)
+ */
+
+export function useGetNotificationUnreadCount<TData = Awaited<ReturnType<typeof getNotificationUnreadCount>>, TError = ErrorType<UnauthorizedResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getNotificationUnreadCount>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetNotificationUnreadCountQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createNotificationReadAllResponse204 = {
+  data: void
+  status: 204
+}
+
+export type createNotificationReadAllResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createNotificationReadAllResponseSuccess = (createNotificationReadAllResponse204) & {
+  headers: Headers;
+};
+export type createNotificationReadAllResponseError = (createNotificationReadAllResponse401) & {
+  headers: Headers;
+};
+
+export const getCreateNotificationReadAllUrl = () => {
+
+
+
+
+  return `/v1/notification-read-all`
+}
+
+/**
+ * SCR-072 [모두 읽음]. 그 계정의 안 읽은 항목만 바꾸고 204다(멱등). Cache-Control: private, no-store
+ * @summary 알림함 모두 읽음
+ */
+export const createNotificationReadAll = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<createNotificationReadAllResponseSuccess> => {
+
+  return orvalFetch<createNotificationReadAllResponseSuccess>(getCreateNotificationReadAllUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreateNotificationReadAllMutationKey = () => ['createNotificationReadAll'] as const;
+
+export const getCreateNotificationReadAllMutationOptions = <TError = ErrorType<UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createNotificationReadAll>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createNotificationReadAll>>, TError,void, TContext> => {
+
+const mutationKey = getCreateNotificationReadAllMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createNotificationReadAll>>, void> = () => {
+
+
+          return  createNotificationReadAll(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateNotificationReadAllMutationResult = NonNullable<Awaited<ReturnType<typeof createNotificationReadAll>>>
+
+    export type CreateNotificationReadAllMutationError = ErrorType<UnauthorizedResponse>
+
+
+    /**
+ * @summary 알림함 모두 읽음
+ */
+export const useCreateNotificationReadAll = <TError = ErrorType<UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createNotificationReadAll>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createNotificationReadAll>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getCreateNotificationReadAllMutationOptions(options), queryClient);
+    }
+    export type createNotificationReadResponse204 = {
+  data: void
+  status: 204
+}
+
+export type createNotificationReadResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createNotificationReadResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createNotificationReadResponseSuccess = (createNotificationReadResponse204) & {
+  headers: Headers;
+};
+export type createNotificationReadResponseError = (createNotificationReadResponse401 | createNotificationReadResponse404) & {
+  headers: Headers;
+};
+
+export const getCreateNotificationReadUrl = (notificationId: string,) => {
+
+
+
+
+  return `/v1/notifications/${encodeURIComponent(String(notificationId))}/read`
+}
+
+/**
+ * SCR-072 항목 열기. 이미 읽었어도 204(멱등). 남의 항목·없는 항목은 404. Cache-Control: private, no-store
+ * @summary 알림함 하나 읽음
+ */
+export const createNotificationRead = async (notificationId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<createNotificationReadResponseSuccess> => {
+
+  return orvalFetch<createNotificationReadResponseSuccess>(getCreateNotificationReadUrl(notificationId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreateNotificationReadMutationKey = () => ['createNotificationRead'] as const;
+
+export const getCreateNotificationReadMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createNotificationRead>>, TError,CreateNotificationReadMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createNotificationRead>>, TError,CreateNotificationReadMutationVariables, TContext> => {
+
+const mutationKey = getCreateNotificationReadMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createNotificationRead>>, CreateNotificationReadMutationVariables> = (props) => {
+          const {notificationId} = props ?? {};
+
+          return  createNotificationRead(notificationId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateNotificationReadMutationResult = NonNullable<Awaited<ReturnType<typeof createNotificationRead>>>
+
+    export type CreateNotificationReadMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type CreateNotificationReadMutationVariables = {notificationId: string}
+
+    /**
+ * @summary 알림함 하나 읽음
+ */
+export const useCreateNotificationRead = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createNotificationRead>>, TError,CreateNotificationReadMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createNotificationRead>>,
+        TError,
+        CreateNotificationReadMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateNotificationReadMutationOptions(options), queryClient);
     }
     export type listWishesResponse200 = {
   data: ListWishes200

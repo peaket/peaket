@@ -2975,6 +2975,418 @@ export const CreateOpsCaseReplyResponse = zod.object({
 }).describe('문의 기록 한 줄(ADR-0066)')
 
 /**
+ * FR-053, docs/features/notify.md §4.10.1, ADR-0389. BOOKING_CONFIRMED 배송 가운데 FAILED·DEAD·EXPIRED만 받는다. SENT·DELIVERED는 409 notification-resend-not-allowed, BOUNCED·COMPLAINED는 같은 주소로 다시 보내지 않는다. 배송당 3회 [가정], 주문 하루 3회 [가정], cs_lead 분당 10회 [가정]. 새 작업은 notice-view·catalog로 vars를 다시 만들고 resend_of·resend_no를 남긴다. 같은 Idempotency-Key는 202 하나다. SCR-045 알림 미도달 건이 부른다
+ * @summary 예매 확정 알림 다시 보내기(CS 책임자, 사유 필수)
+ */
+export const CreateOpsNotificationResendParams = zod.object({
+  "deliveryId": zod.uuid()
+})
+
+export const CreateOpsNotificationResendHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
+})
+
+export const createOpsNotificationResendBodyReasonMax = 200;
+
+
+
+export const CreateOpsNotificationResendBody = zod.object({
+  "reason": zod.string().min(1).max(createOpsNotificationResendBodyReasonMax).describe('다시 보내는 사유. 공백만이면 422')
+}).strict()
+
+export const CreateOpsNotificationResendResponse = zod.object({
+  "status": zod.enum(['PENDING'])
+})
+
+/**
+ * FR-053, docs/features/notify.md §4.12, ADR-0391. 종류·언어별 판과 지금 ACTIVE 판을 최근 판 먼저 준다. viewer·cs_agent는 읽기만 한다. 본문 스냅숏·제공자 ID는 상세에서 주고 목록은 요약만 싣는다. Cache-Control: private, no-store
+ * @summary 알림 템플릿 판 목록(종류·언어·상태, 활성 판)
+ */
+export const listOpsNotificationTemplatesQueryLimitMax = 100;
+
+
+
+export const ListOpsNotificationTemplatesQueryParams = zod.object({
+  "kind": zod.string().optional(),
+  "locale": zod.enum(['ko', 'en', 'ja', 'zh']).optional(),
+  "status": zod.enum(['DRAFT', 'IN_REVIEW', 'READY', 'SUBMITTED', 'APPROVED', 'REJECTED', 'ACTIVE', 'RETIRED', 'SUSPENDED']).optional(),
+  "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
+  "limit": zod.int().min(1).max(listOpsNotificationTemplatesQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+})
+
+
+export const listOpsNotificationTemplatesResponseItemsItemContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const ListOpsNotificationTemplatesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "templateId": zod.uuid(),
+  "kind": zod.string(),
+  "locale": zod.enum(['ko', 'en', 'ja', 'zh']),
+  "version": zod.int().min(1),
+  "status": zod.enum(['DRAFT', 'IN_REVIEW', 'READY', 'SUBMITTED', 'APPROVED', 'REJECTED', 'ACTIVE', 'RETIRED', 'SUSPENDED']),
+  "active": zod.boolean().describe('지금 (kind, locale)의 ACTIVE인지'),
+  "templateCode": zod.string().describe('우리 장부 안의 판 키 PEAKET_{KIND}_{LOCALE}_V{n}. 제공자에는 name으로 보낸다'),
+  "categoryCode": zod.string().nullish().describe('Solapi 정보성 카테고리 코드. 등록 전이면 null'),
+  "messageType": zod.enum(['BA', 'EX', 'AD', 'MI']).optional().describe('1차 BA'),
+  "emphasizeType": zod.enum(['NONE', 'TEXT', 'IMAGE', 'ITEM_LIST']).optional().describe('1차 NONE'),
+  "contentSha256": zod.string().regex(listOpsNotificationTemplatesResponseItemsItemContentSha256RegExp),
+  "gitSha": zod.string(),
+  "provider": zod.string().nullish().describe('SOLAPI. 아직 제출 전이면 null'),
+  "providerTemplateId": zod.string().nullish(),
+  "providerStatus": zod.string().nullish().describe('PENDING|INSPECTING|APPROVED|REJECTED|SUSPENDED|DELETED|UNKNOWN'),
+  "rejectReasonCode": zod.union([zod.literal('CONTENT_PROHIBITED'),zod.literal('AD_UNDECLARED'),zod.literal('VARIABLE_INVALID'),zod.literal('LINK_INVALID'),zod.literal('LENGTH'),zod.literal('DUPLICATE'),zod.literal('PROVIDER_TEMPORARY'),zod.literal('OTHER'),zod.literal(null)]).nullish(),
+  "reviewChecklistVersion": zod.string().nullish(),
+  "createdAt": zod.iso.datetime({"offset":true}),
+  "reviewedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "submittedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "providerDecidedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "activatedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "retiredAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('알림 템플릿 판 요약(목록·상태 변경 응답, docs/features/notify.md §4.12, ADR-0391)')),
+  "nextCursor": zod.string().nullish()
+})
+
+/**
+ * FR-053, docs/features/notify.md §4.12.1, ADR-0391. 코드에 있는 {kind}.{locale}.v{n} 판을 읽어 해시·본문 스냅숏을 만들고 DRAFT로 등록한다. 코드에 판이 없거나 해시를 만들 수 없으면 422다. 같은 (kind, locale, version)은 409 notification-template-version-exists다. 같은 Idempotency-Key는 201 하나다. x-peaket-trace-rare: 한 달에 몇 번 아래인 감사 대상 쓰기다
+ * @summary 알림 템플릿 판 등록(코드에 있는 판을 장부에 올림)
+ */
+export const CreateOpsNotificationTemplateHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
+})
+
+export const createOpsNotificationTemplateBodyKindMax = 64;
+
+
+
+
+export const CreateOpsNotificationTemplateBody = zod.object({
+  "kind": zod.string().min(1).max(createOpsNotificationTemplateBodyKindMax).describe('알림 종류(예 BOOKING_CONFIRMED)'),
+  "locale": zod.enum(['ko', 'en', 'ja', 'zh']),
+  "version": zod.int().min(1)
+}).strict()
+
+
+export const createOpsNotificationTemplateResponseContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const CreateOpsNotificationTemplateResponse = zod.object({
+  "templateId": zod.uuid(),
+  "kind": zod.string(),
+  "locale": zod.enum(['ko', 'en', 'ja', 'zh']),
+  "version": zod.int().min(1),
+  "status": zod.enum(['DRAFT', 'IN_REVIEW', 'READY', 'SUBMITTED', 'APPROVED', 'REJECTED', 'ACTIVE', 'RETIRED', 'SUSPENDED']),
+  "active": zod.boolean().describe('지금 (kind, locale)의 ACTIVE인지'),
+  "templateCode": zod.string().describe('우리 장부 안의 판 키 PEAKET_{KIND}_{LOCALE}_V{n}. 제공자에는 name으로 보낸다'),
+  "categoryCode": zod.string().nullish().describe('Solapi 정보성 카테고리 코드. 등록 전이면 null'),
+  "messageType": zod.enum(['BA', 'EX', 'AD', 'MI']).optional().describe('1차 BA'),
+  "emphasizeType": zod.enum(['NONE', 'TEXT', 'IMAGE', 'ITEM_LIST']).optional().describe('1차 NONE'),
+  "contentSha256": zod.string().regex(createOpsNotificationTemplateResponseContentSha256RegExp),
+  "gitSha": zod.string(),
+  "provider": zod.string().nullish().describe('SOLAPI. 아직 제출 전이면 null'),
+  "providerTemplateId": zod.string().nullish(),
+  "providerStatus": zod.string().nullish().describe('PENDING|INSPECTING|APPROVED|REJECTED|SUSPENDED|DELETED|UNKNOWN'),
+  "rejectReasonCode": zod.union([zod.literal('CONTENT_PROHIBITED'),zod.literal('AD_UNDECLARED'),zod.literal('VARIABLE_INVALID'),zod.literal('LINK_INVALID'),zod.literal('LENGTH'),zod.literal('DUPLICATE'),zod.literal('PROVIDER_TEMPORARY'),zod.literal('OTHER'),zod.literal(null)]).nullish(),
+  "reviewChecklistVersion": zod.string().nullish(),
+  "createdAt": zod.iso.datetime({"offset":true}),
+  "reviewedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "submittedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "providerDecidedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "activatedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "retiredAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('알림 템플릿 판 요약(목록·상태 변경 응답, docs/features/notify.md §4.12, ADR-0391)')
+
+/**
+ * FR-053, docs/features/notify.md §4.12.6, ADR-0391. 본문 스냅숏·문자 대체·검토 항목 판·해시·git SHA·제공자 상태·사건 시간선·이전 판 요약을 준다. 실제 수신자 개인정보는 없다. Cache-Control: private, no-store
+ * @summary 알림 템플릿 판 상세(본문·검토 항목·제공자 시간선)
+ */
+export const GetOpsNotificationTemplateParams = zod.object({
+  "templateId": zod.uuid()
+})
+
+
+export const getOpsNotificationTemplateResponseOneContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const GetOpsNotificationTemplateResponse = zod.object({
+  "templateId": zod.uuid(),
+  "kind": zod.string(),
+  "locale": zod.enum(['ko', 'en', 'ja', 'zh']),
+  "version": zod.int().min(1),
+  "status": zod.enum(['DRAFT', 'IN_REVIEW', 'READY', 'SUBMITTED', 'APPROVED', 'REJECTED', 'ACTIVE', 'RETIRED', 'SUSPENDED']),
+  "active": zod.boolean().describe('지금 (kind, locale)의 ACTIVE인지'),
+  "templateCode": zod.string().describe('우리 장부 안의 판 키 PEAKET_{KIND}_{LOCALE}_V{n}. 제공자에는 name으로 보낸다'),
+  "categoryCode": zod.string().nullish().describe('Solapi 정보성 카테고리 코드. 등록 전이면 null'),
+  "messageType": zod.enum(['BA', 'EX', 'AD', 'MI']).optional().describe('1차 BA'),
+  "emphasizeType": zod.enum(['NONE', 'TEXT', 'IMAGE', 'ITEM_LIST']).optional().describe('1차 NONE'),
+  "contentSha256": zod.string().regex(getOpsNotificationTemplateResponseOneContentSha256RegExp),
+  "gitSha": zod.string(),
+  "provider": zod.string().nullish().describe('SOLAPI. 아직 제출 전이면 null'),
+  "providerTemplateId": zod.string().nullish(),
+  "providerStatus": zod.string().nullish().describe('PENDING|INSPECTING|APPROVED|REJECTED|SUSPENDED|DELETED|UNKNOWN'),
+  "rejectReasonCode": zod.union([zod.literal('CONTENT_PROHIBITED'),zod.literal('AD_UNDECLARED'),zod.literal('VARIABLE_INVALID'),zod.literal('LINK_INVALID'),zod.literal('LENGTH'),zod.literal('DUPLICATE'),zod.literal('PROVIDER_TEMPORARY'),zod.literal('OTHER'),zod.literal(null)]).nullish(),
+  "reviewChecklistVersion": zod.string().nullish(),
+  "createdAt": zod.iso.datetime({"offset":true}),
+  "reviewedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "submittedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "providerDecidedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "activatedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "retiredAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('알림 템플릿 판 요약(목록·상태 변경 응답, docs/features/notify.md §4.12, ADR-0391)').and(zod.object({
+  "body": zod.string().describe('제공자에 낸 본문 스냅숏. 실제 개인정보는 없다'),
+  "fallbackBody": zod.string().describe('제공자에 낸 문자 대체 본문 스냅숏'),
+  "checks": zod.array(zod.string()).describe('검토 항목 ID(C1~C10)'),
+  "previousTemplateId": zod.string().nullish().describe('같은 (kind, locale)의 이전 판 ID'),
+  "previousVersion": zod.int().nullish().describe('이전 판 번호'),
+  "events": zod.array(zod.object({
+  "eventId": zod.uuid(),
+  "event": zod.enum(['REGISTERED', 'REVIEW_REQUESTED', 'REVIEW_APPROVED', 'REVIEW_REJECTED', 'SUBMITTED', 'PROVIDER_APPROVED', 'PROVIDER_REJECTED', 'ACTIVATED', 'RETIRED', 'SUSPENDED']),
+  "actorId": zod.string().nullish().describe('ops 관리 계정 ID. system이면 null'),
+  "reasonCode": zod.string().nullish(),
+  "note": zod.string().nullish().describe('사람이 적은 사유. 본문 원문은 없다'),
+  "createdAt": zod.iso.datetime({"offset":true})
+}))
+})).describe('알림 템플릿 판 상세(본문·검토 항목·제공자 시간선, GET /v1/ops/notification-templates/{templateId})')
+
+/**
+ * FR-053, docs/features/notify.md §4.12.2, ADR-0391. DRAFT/IN_REVIEW만 받는다. APPROVED는 검토 항목 10개와 checklistVersion이 모두 있어야 하고 하나라도 빠지면 409 notification-template-review-required다. REJECTED는 note(1~1,000자)가 필요하고 DRAFT로 되돌린다. 등록자와 같은 사람은 검토할 수 없다(403). 검토 때 지금 코드 해시와 contentSha256이 다르면 409 notification-template-hash-mismatch다. x-peaket-trace-rare: 감사 대상 쓰기다
+ * @summary 알림 템플릿 내부 검토 승인·반려(CS 책임자)
+ */
+export const CreateOpsNotificationTemplateReviewParams = zod.object({
+  "templateId": zod.uuid()
+})
+
+export const CreateOpsNotificationTemplateReviewHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
+})
+
+export const createOpsNotificationTemplateReviewBodyChecklistVersionMax = 32;
+
+export const createOpsNotificationTemplateReviewBodyChecksItemMax = 16;
+
+export const createOpsNotificationTemplateReviewBodyNoteMax = 1000;
+
+
+
+export const CreateOpsNotificationTemplateReviewBody = zod.object({
+  "decision": zod.enum(['APPROVED', 'REJECTED']),
+  "checklistVersion": zod.string().min(1).max(createOpsNotificationTemplateReviewBodyChecklistVersionMax).describe('검토 항목 판(예 v1)'),
+  "checks": zod.array(zod.string().min(1).max(createOpsNotificationTemplateReviewBodyChecksItemMax)).describe('확인한 검토 항목 ID. APPROVED는 C1~C10 열 개가 모두 있어야 한다'),
+  "note": zod.string().max(createOpsNotificationTemplateReviewBodyNoteMax).optional().describe('반려 사유(REJECTED는 1~1,000자 필수, APPROVED는 선택)')
+}).strict()
+
+
+export const createOpsNotificationTemplateReviewResponseContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const CreateOpsNotificationTemplateReviewResponse = zod.object({
+  "templateId": zod.uuid(),
+  "kind": zod.string(),
+  "locale": zod.enum(['ko', 'en', 'ja', 'zh']),
+  "version": zod.int().min(1),
+  "status": zod.enum(['DRAFT', 'IN_REVIEW', 'READY', 'SUBMITTED', 'APPROVED', 'REJECTED', 'ACTIVE', 'RETIRED', 'SUSPENDED']),
+  "active": zod.boolean().describe('지금 (kind, locale)의 ACTIVE인지'),
+  "templateCode": zod.string().describe('우리 장부 안의 판 키 PEAKET_{KIND}_{LOCALE}_V{n}. 제공자에는 name으로 보낸다'),
+  "categoryCode": zod.string().nullish().describe('Solapi 정보성 카테고리 코드. 등록 전이면 null'),
+  "messageType": zod.enum(['BA', 'EX', 'AD', 'MI']).optional().describe('1차 BA'),
+  "emphasizeType": zod.enum(['NONE', 'TEXT', 'IMAGE', 'ITEM_LIST']).optional().describe('1차 NONE'),
+  "contentSha256": zod.string().regex(createOpsNotificationTemplateReviewResponseContentSha256RegExp),
+  "gitSha": zod.string(),
+  "provider": zod.string().nullish().describe('SOLAPI. 아직 제출 전이면 null'),
+  "providerTemplateId": zod.string().nullish(),
+  "providerStatus": zod.string().nullish().describe('PENDING|INSPECTING|APPROVED|REJECTED|SUSPENDED|DELETED|UNKNOWN'),
+  "rejectReasonCode": zod.union([zod.literal('CONTENT_PROHIBITED'),zod.literal('AD_UNDECLARED'),zod.literal('VARIABLE_INVALID'),zod.literal('LINK_INVALID'),zod.literal('LENGTH'),zod.literal('DUPLICATE'),zod.literal('PROVIDER_TEMPORARY'),zod.literal('OTHER'),zod.literal(null)]).nullish(),
+  "reviewChecklistVersion": zod.string().nullish(),
+  "createdAt": zod.iso.datetime({"offset":true}),
+  "reviewedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "submittedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "providerDecidedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "activatedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "retiredAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('알림 템플릿 판 요약(목록·상태 변경 응답, docs/features/notify.md §4.12, ADR-0391)')
+
+/**
+ * FR-053, docs/features/notify.md §4.12.3, ADR-0391. READY만 받는다. 내부 검토·해시를 다시 보고 Solapi POST /kakao/v2/templates에 channelId·name·content·categoryCode·buttons·messageType=BA·emphasizeType=NONE을 보낸 뒤 검수 요청을 따로 보낸다. 등록만 되고 검수 요청이 실패하면 등록을 다시 하지 않고 검수 요청만 다시 한다. 10초 [가정] 안에 답이 없으면 SUBMITTED로 두고 같은 channelId·name·본문 해시로 목록을 조회해 결과를 맞춘다. 같은 Idempotency-Key는 202 하나다. x-peaket-trace-rare: 감사 대상 쓰기다
+ * @summary 알림 템플릿을 제공자에 제출(카카오 심사)
+ */
+export const CreateOpsNotificationTemplateSubmissionParams = zod.object({
+  "templateId": zod.uuid()
+})
+
+export const CreateOpsNotificationTemplateSubmissionHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
+})
+
+
+export const createOpsNotificationTemplateSubmissionResponseContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const CreateOpsNotificationTemplateSubmissionResponse = zod.object({
+  "templateId": zod.uuid(),
+  "kind": zod.string(),
+  "locale": zod.enum(['ko', 'en', 'ja', 'zh']),
+  "version": zod.int().min(1),
+  "status": zod.enum(['DRAFT', 'IN_REVIEW', 'READY', 'SUBMITTED', 'APPROVED', 'REJECTED', 'ACTIVE', 'RETIRED', 'SUSPENDED']),
+  "active": zod.boolean().describe('지금 (kind, locale)의 ACTIVE인지'),
+  "templateCode": zod.string().describe('우리 장부 안의 판 키 PEAKET_{KIND}_{LOCALE}_V{n}. 제공자에는 name으로 보낸다'),
+  "categoryCode": zod.string().nullish().describe('Solapi 정보성 카테고리 코드. 등록 전이면 null'),
+  "messageType": zod.enum(['BA', 'EX', 'AD', 'MI']).optional().describe('1차 BA'),
+  "emphasizeType": zod.enum(['NONE', 'TEXT', 'IMAGE', 'ITEM_LIST']).optional().describe('1차 NONE'),
+  "contentSha256": zod.string().regex(createOpsNotificationTemplateSubmissionResponseContentSha256RegExp),
+  "gitSha": zod.string(),
+  "provider": zod.string().nullish().describe('SOLAPI. 아직 제출 전이면 null'),
+  "providerTemplateId": zod.string().nullish(),
+  "providerStatus": zod.string().nullish().describe('PENDING|INSPECTING|APPROVED|REJECTED|SUSPENDED|DELETED|UNKNOWN'),
+  "rejectReasonCode": zod.union([zod.literal('CONTENT_PROHIBITED'),zod.literal('AD_UNDECLARED'),zod.literal('VARIABLE_INVALID'),zod.literal('LINK_INVALID'),zod.literal('LENGTH'),zod.literal('DUPLICATE'),zod.literal('PROVIDER_TEMPORARY'),zod.literal('OTHER'),zod.literal(null)]).nullish(),
+  "reviewChecklistVersion": zod.string().nullish(),
+  "createdAt": zod.iso.datetime({"offset":true}),
+  "reviewedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "submittedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "providerDecidedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "activatedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "retiredAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('알림 템플릿 판 요약(목록·상태 변경 응답, docs/features/notify.md §4.12, ADR-0391)')
+
+/**
+ * FR-053, docs/features/notify.md §4.12.3, ADR-0391. SUBMITTED·ACTIVE 판의 제공자 상태를 읽어 승인·반려·정지·삭제를 장부에 반영한다. 15분 [가정] 정합 작업과 같은 일을 사람이 지금 부른다. 제공자에 닿지 못하면 503이고 장부는 그대로다
+ * @summary 알림 템플릿 제공자 상태 새로 고침
+ */
+export const CreateOpsNotificationTemplateProviderRefreshParams = zod.object({
+  "templateId": zod.uuid()
+})
+
+
+export const createOpsNotificationTemplateProviderRefreshResponseContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const CreateOpsNotificationTemplateProviderRefreshResponse = zod.object({
+  "templateId": zod.uuid(),
+  "kind": zod.string(),
+  "locale": zod.enum(['ko', 'en', 'ja', 'zh']),
+  "version": zod.int().min(1),
+  "status": zod.enum(['DRAFT', 'IN_REVIEW', 'READY', 'SUBMITTED', 'APPROVED', 'REJECTED', 'ACTIVE', 'RETIRED', 'SUSPENDED']),
+  "active": zod.boolean().describe('지금 (kind, locale)의 ACTIVE인지'),
+  "templateCode": zod.string().describe('우리 장부 안의 판 키 PEAKET_{KIND}_{LOCALE}_V{n}. 제공자에는 name으로 보낸다'),
+  "categoryCode": zod.string().nullish().describe('Solapi 정보성 카테고리 코드. 등록 전이면 null'),
+  "messageType": zod.enum(['BA', 'EX', 'AD', 'MI']).optional().describe('1차 BA'),
+  "emphasizeType": zod.enum(['NONE', 'TEXT', 'IMAGE', 'ITEM_LIST']).optional().describe('1차 NONE'),
+  "contentSha256": zod.string().regex(createOpsNotificationTemplateProviderRefreshResponseContentSha256RegExp),
+  "gitSha": zod.string(),
+  "provider": zod.string().nullish().describe('SOLAPI. 아직 제출 전이면 null'),
+  "providerTemplateId": zod.string().nullish(),
+  "providerStatus": zod.string().nullish().describe('PENDING|INSPECTING|APPROVED|REJECTED|SUSPENDED|DELETED|UNKNOWN'),
+  "rejectReasonCode": zod.union([zod.literal('CONTENT_PROHIBITED'),zod.literal('AD_UNDECLARED'),zod.literal('VARIABLE_INVALID'),zod.literal('LINK_INVALID'),zod.literal('LENGTH'),zod.literal('DUPLICATE'),zod.literal('PROVIDER_TEMPORARY'),zod.literal('OTHER'),zod.literal(null)]).nullish(),
+  "reviewChecklistVersion": zod.string().nullish(),
+  "createdAt": zod.iso.datetime({"offset":true}),
+  "reviewedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "submittedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "providerDecidedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "activatedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "retiredAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('알림 템플릿 판 요약(목록·상태 변경 응답, docs/features/notify.md §4.12, ADR-0391)')
+
+/**
+ * FR-053, docs/features/notify.md §4.12.4, ADR-0391. APPROVED만 받는다. 지금 코드·제공자 승인 해시가 맞아야 하고, 제출자와 같은 사람이면 403 notification-template-activation-forbidden이다(2인 규칙). 새 ACTIVE를 만들고 옛 ACTIVE를 RETIRED로 내린다. 진행 중 작업은 template_version의 옛 판으로 가고 옛 templateId는 24시간 [가정] 런타임 매핑에 남는다. 감사에 바뀐 판·옛 판·행위자를 남긴다. x-peaket-trace-rare: 감사 대상 쓰기다
+ * @summary 알림 템플릿 활성(승인된 판을 지금 판으로)
+ */
+export const CreateOpsNotificationTemplateActivationParams = zod.object({
+  "templateId": zod.uuid()
+})
+
+export const CreateOpsNotificationTemplateActivationHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
+})
+
+export const createOpsNotificationTemplateActivationBodyNoteMax = 1000;
+
+
+
+export const CreateOpsNotificationTemplateActivationBody = zod.object({
+  "note": zod.string().max(createOpsNotificationTemplateActivationBodyNoteMax).optional().describe('활성 사유·메모(선택)')
+}).strict()
+
+
+export const createOpsNotificationTemplateActivationResponseContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const CreateOpsNotificationTemplateActivationResponse = zod.object({
+  "templateId": zod.uuid(),
+  "kind": zod.string(),
+  "locale": zod.enum(['ko', 'en', 'ja', 'zh']),
+  "version": zod.int().min(1),
+  "status": zod.enum(['DRAFT', 'IN_REVIEW', 'READY', 'SUBMITTED', 'APPROVED', 'REJECTED', 'ACTIVE', 'RETIRED', 'SUSPENDED']),
+  "active": zod.boolean().describe('지금 (kind, locale)의 ACTIVE인지'),
+  "templateCode": zod.string().describe('우리 장부 안의 판 키 PEAKET_{KIND}_{LOCALE}_V{n}. 제공자에는 name으로 보낸다'),
+  "categoryCode": zod.string().nullish().describe('Solapi 정보성 카테고리 코드. 등록 전이면 null'),
+  "messageType": zod.enum(['BA', 'EX', 'AD', 'MI']).optional().describe('1차 BA'),
+  "emphasizeType": zod.enum(['NONE', 'TEXT', 'IMAGE', 'ITEM_LIST']).optional().describe('1차 NONE'),
+  "contentSha256": zod.string().regex(createOpsNotificationTemplateActivationResponseContentSha256RegExp),
+  "gitSha": zod.string(),
+  "provider": zod.string().nullish().describe('SOLAPI. 아직 제출 전이면 null'),
+  "providerTemplateId": zod.string().nullish(),
+  "providerStatus": zod.string().nullish().describe('PENDING|INSPECTING|APPROVED|REJECTED|SUSPENDED|DELETED|UNKNOWN'),
+  "rejectReasonCode": zod.union([zod.literal('CONTENT_PROHIBITED'),zod.literal('AD_UNDECLARED'),zod.literal('VARIABLE_INVALID'),zod.literal('LINK_INVALID'),zod.literal('LENGTH'),zod.literal('DUPLICATE'),zod.literal('PROVIDER_TEMPORARY'),zod.literal('OTHER'),zod.literal(null)]).nullish(),
+  "reviewChecklistVersion": zod.string().nullish(),
+  "createdAt": zod.iso.datetime({"offset":true}),
+  "reviewedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "submittedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "providerDecidedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "activatedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "retiredAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('알림 템플릿 판 요약(목록·상태 변경 응답, docs/features/notify.md §4.12, ADR-0391)')
+
+/**
+ * FR-053, docs/features/notify.md §4.12.4·§4.12.5, ADR-0391. ACTIVE만 받는다. emergency=true면 지금 런타임 매핑에서 빼고 그 종류의 알림톡을 멈추며 문자 대체·이메일·웹 푸시로 보낸다(법정 고지가 틀렸을 때). false면 24시간 [가정] 뒤 뺀다. 사유는 필수다. 감사에 행위자·사유·긴급 여부를 남긴다. x-peaket-trace-rare: 감사 대상 쓰기다
+ * @summary 알림 템플릿 폐기·긴급 중지(지금 판을 내림)
+ */
+export const CreateOpsNotificationTemplateRetirementParams = zod.object({
+  "templateId": zod.uuid()
+})
+
+export const CreateOpsNotificationTemplateRetirementHeader = zod.object({
+  "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
+})
+
+export const createOpsNotificationTemplateRetirementBodyReasonMax = 200;
+
+
+
+export const CreateOpsNotificationTemplateRetirementBody = zod.object({
+  "reason": zod.string().min(1).max(createOpsNotificationTemplateRetirementBodyReasonMax),
+  "emergency": zod.boolean().describe('true면 지금 바로 멈추고 문자 대체로 보낸다')
+}).strict()
+
+
+export const createOpsNotificationTemplateRetirementResponseContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const CreateOpsNotificationTemplateRetirementResponse = zod.object({
+  "templateId": zod.uuid(),
+  "kind": zod.string(),
+  "locale": zod.enum(['ko', 'en', 'ja', 'zh']),
+  "version": zod.int().min(1),
+  "status": zod.enum(['DRAFT', 'IN_REVIEW', 'READY', 'SUBMITTED', 'APPROVED', 'REJECTED', 'ACTIVE', 'RETIRED', 'SUSPENDED']),
+  "active": zod.boolean().describe('지금 (kind, locale)의 ACTIVE인지'),
+  "templateCode": zod.string().describe('우리 장부 안의 판 키 PEAKET_{KIND}_{LOCALE}_V{n}. 제공자에는 name으로 보낸다'),
+  "categoryCode": zod.string().nullish().describe('Solapi 정보성 카테고리 코드. 등록 전이면 null'),
+  "messageType": zod.enum(['BA', 'EX', 'AD', 'MI']).optional().describe('1차 BA'),
+  "emphasizeType": zod.enum(['NONE', 'TEXT', 'IMAGE', 'ITEM_LIST']).optional().describe('1차 NONE'),
+  "contentSha256": zod.string().regex(createOpsNotificationTemplateRetirementResponseContentSha256RegExp),
+  "gitSha": zod.string(),
+  "provider": zod.string().nullish().describe('SOLAPI. 아직 제출 전이면 null'),
+  "providerTemplateId": zod.string().nullish(),
+  "providerStatus": zod.string().nullish().describe('PENDING|INSPECTING|APPROVED|REJECTED|SUSPENDED|DELETED|UNKNOWN'),
+  "rejectReasonCode": zod.union([zod.literal('CONTENT_PROHIBITED'),zod.literal('AD_UNDECLARED'),zod.literal('VARIABLE_INVALID'),zod.literal('LINK_INVALID'),zod.literal('LENGTH'),zod.literal('DUPLICATE'),zod.literal('PROVIDER_TEMPORARY'),zod.literal('OTHER'),zod.literal(null)]).nullish(),
+  "reviewChecklistVersion": zod.string().nullish(),
+  "createdAt": zod.iso.datetime({"offset":true}),
+  "reviewedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "submittedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "providerDecidedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "activatedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "retiredAt": zod.iso.datetime({"offset":true}).nullish()
+}).describe('알림 템플릿 판 요약(목록·상태 변경 응답, docs/features/notify.md §4.12, ADR-0391)')
+
+/**
  * FR-057, FR-070, POL-044, ADR-0066. CS 처리함 상세 패널(SCR-045)이 부른다. 후기 본문·평점·상태·공시 표시와 사유별 신고 수·신고 내용을 준다. 신고자 계정과 후기 작성자 계정·기준 주문 ID는 싣지 않는다. cs_agent·cs_lead만.
  * @summary 신고된 후기 상세(사유별 신고 수·내용, 작성자 계정·주문 참조는 싣지 않는다)
  */

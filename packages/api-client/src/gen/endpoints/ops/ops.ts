@@ -108,6 +108,12 @@ import type {
   CreateOpsEventCancellationResumptionBody,
   CreateOpsEventScaleChangeBody,
   CreateOpsHomeLayoutBannerImageBody,
+  CreateOpsNotificationResend202,
+  CreateOpsNotificationResendBody,
+  CreateOpsNotificationTemplateActivationBody,
+  CreateOpsNotificationTemplateBody,
+  CreateOpsNotificationTemplateRetirementBody,
+  CreateOpsNotificationTemplateReviewBody,
   CreateOpsPayoutBatchBody,
   CreateOpsPayoutBatchPortoneExecutionBody,
   CreateOpsPlaceBody,
@@ -167,6 +173,8 @@ import type {
   ListOpsFanTicketsParams,
   ListOpsFanTransfersParams,
   ListOpsNoticeTemplatesParams,
+  ListOpsNotificationTemplates200,
+  ListOpsNotificationTemplatesParams,
   ListOpsPartnerNoticesParams,
   ListOpsPayoutBatchesParams,
   ListOpsPgCircuits200,
@@ -200,6 +208,8 @@ import type {
   OpsFanUnmaskingCreate,
   OpsGoNoGoJudgement,
   OpsGoNoGoJudgementRequest,
+  OpsNotificationTemplate,
+  OpsNotificationTemplateDetail,
   OpsPayoutBatchDetail,
   OpsPromoterCreate,
   OpsPromoterDetail,
@@ -8156,6 +8166,1120 @@ export const useCreateOpsCaseReply = <TError = ErrorType<ProblemResponse>,
         TContext
       > => {
       return useMutation(getCreateOpsCaseReplyMutationOptions(options), queryClient);
+    }
+    export type createOpsNotificationResendResponse202 = {
+  data: CreateOpsNotificationResend202
+  status: 202
+}
+
+export type createOpsNotificationResendResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsNotificationResendResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsNotificationResendResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsNotificationResendResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsNotificationResendResponse429 = {
+  data: ProblemResponse
+  status: 429
+}
+
+export type createOpsNotificationResendResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
+export type createOpsNotificationResendResponseSuccess = (createOpsNotificationResendResponse202) & {
+  headers: Headers;
+};
+export type createOpsNotificationResendResponseError = (createOpsNotificationResendResponse403 | createOpsNotificationResendResponse404 | createOpsNotificationResendResponse409 | createOpsNotificationResendResponse422 | createOpsNotificationResendResponse429 | createOpsNotificationResendResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsNotificationResendUrl = (deliveryId: string,) => {
+
+
+
+
+  return `/v1/ops/notification-deliveries/${encodeURIComponent(String(deliveryId))}/resends`
+}
+
+/**
+ * FR-053, docs/features/notify.md §4.10.1, ADR-0389. BOOKING_CONFIRMED 배송 가운데 FAILED·DEAD·EXPIRED만 받는다. SENT·DELIVERED는 409 notification-resend-not-allowed, BOUNCED·COMPLAINED는 같은 주소로 다시 보내지 않는다. 배송당 3회 [가정], 주문 하루 3회 [가정], cs_lead 분당 10회 [가정]. 새 작업은 notice-view·catalog로 vars를 다시 만들고 resend_of·resend_no를 남긴다. 같은 Idempotency-Key는 202 하나다. SCR-045 알림 미도달 건이 부른다
+ * @summary 예매 확정 알림 다시 보내기(CS 책임자, 사유 필수)
+ */
+export const createOpsNotificationResend = async (deliveryId: string,
+    createOpsNotificationResendBody: CreateOpsNotificationResendBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsNotificationResendResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsNotificationResendResponseSuccess>(getCreateOpsNotificationResendUrl(deliveryId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createOpsNotificationResendBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsNotificationResendMutationKey = () => ['createOpsNotificationResend'] as const;
+
+export const getCreateOpsNotificationResendMutationOptions = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationResend>>, TError,CreateOpsNotificationResendMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationResend>>, TError,CreateOpsNotificationResendMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsNotificationResendMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsNotificationResend>>, CreateOpsNotificationResendMutationVariables> = (props) => {
+          const {deliveryId,data} = props ?? {};
+
+          return  createOpsNotificationResend(deliveryId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsNotificationResendMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsNotificationResend>>>
+    export type CreateOpsNotificationResendMutationBody = BodyType<CreateOpsNotificationResendBody>
+    export type CreateOpsNotificationResendMutationError = ErrorType<ProblemResponse>
+    export type CreateOpsNotificationResendMutationVariables = {deliveryId: string;data: BodyType<CreateOpsNotificationResendBody>}
+
+    /**
+ * @summary 예매 확정 알림 다시 보내기(CS 책임자, 사유 필수)
+ */
+export const useCreateOpsNotificationResend = <TError = ErrorType<ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationResend>>, TError,CreateOpsNotificationResendMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsNotificationResend>>,
+        TError,
+        CreateOpsNotificationResendMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsNotificationResendMutationOptions(options), queryClient);
+    }
+    export type listOpsNotificationTemplatesResponse200 = {
+  data: ListOpsNotificationTemplates200
+  status: 200
+}
+
+export type listOpsNotificationTemplatesResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type listOpsNotificationTemplatesResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type listOpsNotificationTemplatesResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type listOpsNotificationTemplatesResponseSuccess = (listOpsNotificationTemplatesResponse200) & {
+  headers: Headers;
+};
+export type listOpsNotificationTemplatesResponseError = (listOpsNotificationTemplatesResponse400 | listOpsNotificationTemplatesResponse401 | listOpsNotificationTemplatesResponse403) & {
+  headers: Headers;
+};
+
+export const getListOpsNotificationTemplatesUrl = (params?: ListOpsNotificationTemplatesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/v1/ops/notification-templates?${stringifiedParams}` : `/v1/ops/notification-templates`
+}
+
+/**
+ * FR-053, docs/features/notify.md §4.12, ADR-0391. 종류·언어별 판과 지금 ACTIVE 판을 최근 판 먼저 준다. viewer·cs_agent는 읽기만 한다. 본문 스냅숏·제공자 ID는 상세에서 주고 목록은 요약만 싣는다. Cache-Control: private, no-store
+ * @summary 알림 템플릿 판 목록(종류·언어·상태, 활성 판)
+ */
+export const listOpsNotificationTemplates = async (params?: ListOpsNotificationTemplatesParams, options?: Parameters<typeof orvalFetch>[1]): Promise<listOpsNotificationTemplatesResponseSuccess> => {
+
+  return orvalFetch<listOpsNotificationTemplatesResponseSuccess>(getListOpsNotificationTemplatesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListOpsNotificationTemplatesQueryKey = (params?: ListOpsNotificationTemplatesParams,) => {
+    return [
+    `/v1/ops/notification-templates`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListOpsNotificationTemplatesQueryOptions = <TData = Awaited<ReturnType<typeof listOpsNotificationTemplates>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(params?: ListOpsNotificationTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsNotificationTemplates>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListOpsNotificationTemplatesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listOpsNotificationTemplates>>> = ({ signal }) => listOpsNotificationTemplates(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listOpsNotificationTemplates>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListOpsNotificationTemplatesQueryResult = NonNullable<Awaited<ReturnType<typeof listOpsNotificationTemplates>>>
+export type ListOpsNotificationTemplatesQueryError = ErrorType<ProblemResponse | UnauthorizedResponse>
+
+
+export function useListOpsNotificationTemplates<TData = Awaited<ReturnType<typeof listOpsNotificationTemplates>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params: undefined |  ListOpsNotificationTemplatesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsNotificationTemplates>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsNotificationTemplates>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsNotificationTemplates>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsNotificationTemplates<TData = Awaited<ReturnType<typeof listOpsNotificationTemplates>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsNotificationTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsNotificationTemplates>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listOpsNotificationTemplates>>,
+          TError,
+          Awaited<ReturnType<typeof listOpsNotificationTemplates>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListOpsNotificationTemplates<TData = Awaited<ReturnType<typeof listOpsNotificationTemplates>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsNotificationTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsNotificationTemplates>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 알림 템플릿 판 목록(종류·언어·상태, 활성 판)
+ */
+
+export function useListOpsNotificationTemplates<TData = Awaited<ReturnType<typeof listOpsNotificationTemplates>>, TError = ErrorType<ProblemResponse | UnauthorizedResponse>>(
+ params?: ListOpsNotificationTemplatesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listOpsNotificationTemplates>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListOpsNotificationTemplatesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsNotificationTemplateResponse201 = {
+  data: OpsNotificationTemplate
+  status: 201
+}
+
+export type createOpsNotificationTemplateResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createOpsNotificationTemplateResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsNotificationTemplateResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsNotificationTemplateResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsNotificationTemplateResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsNotificationTemplateResponseSuccess = (createOpsNotificationTemplateResponse201) & {
+  headers: Headers;
+};
+export type createOpsNotificationTemplateResponseError = (createOpsNotificationTemplateResponse400 | createOpsNotificationTemplateResponse401 | createOpsNotificationTemplateResponse403 | createOpsNotificationTemplateResponse409 | createOpsNotificationTemplateResponse422) & {
+  headers: Headers;
+};
+
+export const getCreateOpsNotificationTemplateUrl = () => {
+
+
+
+
+  return `/v1/ops/notification-templates`
+}
+
+/**
+ * FR-053, docs/features/notify.md §4.12.1, ADR-0391. 코드에 있는 {kind}.{locale}.v{n} 판을 읽어 해시·본문 스냅숏을 만들고 DRAFT로 등록한다. 코드에 판이 없거나 해시를 만들 수 없으면 422다. 같은 (kind, locale, version)은 409 notification-template-version-exists다. 같은 Idempotency-Key는 201 하나다. x-peaket-trace-rare: 한 달에 몇 번 아래인 감사 대상 쓰기다
+ * @summary 알림 템플릿 판 등록(코드에 있는 판을 장부에 올림)
+ */
+export const createOpsNotificationTemplate = async (createOpsNotificationTemplateBody: CreateOpsNotificationTemplateBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsNotificationTemplateResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsNotificationTemplateResponseSuccess>(getCreateOpsNotificationTemplateUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createOpsNotificationTemplateBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsNotificationTemplateMutationKey = () => ['createOpsNotificationTemplate'] as const;
+
+export const getCreateOpsNotificationTemplateMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplate>>, TError,CreateOpsNotificationTemplateMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplate>>, TError,CreateOpsNotificationTemplateMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsNotificationTemplateMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsNotificationTemplate>>, CreateOpsNotificationTemplateMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createOpsNotificationTemplate(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsNotificationTemplateMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsNotificationTemplate>>>
+    export type CreateOpsNotificationTemplateMutationBody = BodyType<CreateOpsNotificationTemplateBody>
+    export type CreateOpsNotificationTemplateMutationError = ErrorType<ProblemResponse | UnauthorizedResponse>
+    export type CreateOpsNotificationTemplateMutationVariables = {data: BodyType<CreateOpsNotificationTemplateBody>}
+
+    /**
+ * @summary 알림 템플릿 판 등록(코드에 있는 판을 장부에 올림)
+ */
+export const useCreateOpsNotificationTemplate = <TError = ErrorType<ProblemResponse | UnauthorizedResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplate>>, TError,CreateOpsNotificationTemplateMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsNotificationTemplate>>,
+        TError,
+        CreateOpsNotificationTemplateMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsNotificationTemplateMutationOptions(options), queryClient);
+    }
+    export type getOpsNotificationTemplateResponse200 = {
+  data: OpsNotificationTemplateDetail
+  status: 200
+}
+
+export type getOpsNotificationTemplateResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getOpsNotificationTemplateResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getOpsNotificationTemplateResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type getOpsNotificationTemplateResponseSuccess = (getOpsNotificationTemplateResponse200) & {
+  headers: Headers;
+};
+export type getOpsNotificationTemplateResponseError = (getOpsNotificationTemplateResponse401 | getOpsNotificationTemplateResponse403 | getOpsNotificationTemplateResponse404) & {
+  headers: Headers;
+};
+
+export const getGetOpsNotificationTemplateUrl = (templateId: string,) => {
+
+
+
+
+  return `/v1/ops/notification-templates/${encodeURIComponent(String(templateId))}`
+}
+
+/**
+ * FR-053, docs/features/notify.md §4.12.6, ADR-0391. 본문 스냅숏·문자 대체·검토 항목 판·해시·git SHA·제공자 상태·사건 시간선·이전 판 요약을 준다. 실제 수신자 개인정보는 없다. Cache-Control: private, no-store
+ * @summary 알림 템플릿 판 상세(본문·검토 항목·제공자 시간선)
+ */
+export const getOpsNotificationTemplate = async (templateId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<getOpsNotificationTemplateResponseSuccess> => {
+
+  return orvalFetch<getOpsNotificationTemplateResponseSuccess>(getGetOpsNotificationTemplateUrl(templateId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOpsNotificationTemplateQueryKey = (templateId: string,) => {
+    return [
+    `/v1/ops/notification-templates/${templateId}`
+    ] as const;
+    }
+
+
+export const getGetOpsNotificationTemplateQueryOptions = <TData = Awaited<ReturnType<typeof getOpsNotificationTemplate>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(templateId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsNotificationTemplate>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOpsNotificationTemplateQueryKey(templateId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOpsNotificationTemplate>>> = ({ signal }) => getOpsNotificationTemplate(templateId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: templateId !== null && templateId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOpsNotificationTemplate>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetOpsNotificationTemplateQueryResult = NonNullable<Awaited<ReturnType<typeof getOpsNotificationTemplate>>>
+export type GetOpsNotificationTemplateQueryError = ErrorType<UnauthorizedResponse | ProblemResponse>
+
+
+export function useGetOpsNotificationTemplate<TData = Awaited<ReturnType<typeof getOpsNotificationTemplate>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ templateId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsNotificationTemplate>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsNotificationTemplate>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsNotificationTemplate>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsNotificationTemplate<TData = Awaited<ReturnType<typeof getOpsNotificationTemplate>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ templateId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsNotificationTemplate>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getOpsNotificationTemplate>>,
+          TError,
+          Awaited<ReturnType<typeof getOpsNotificationTemplate>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetOpsNotificationTemplate<TData = Awaited<ReturnType<typeof getOpsNotificationTemplate>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ templateId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsNotificationTemplate>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 알림 템플릿 판 상세(본문·검토 항목·제공자 시간선)
+ */
+
+export function useGetOpsNotificationTemplate<TData = Awaited<ReturnType<typeof getOpsNotificationTemplate>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse>>(
+ templateId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getOpsNotificationTemplate>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetOpsNotificationTemplateQueryOptions(templateId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createOpsNotificationTemplateReviewResponse200 = {
+  data: OpsNotificationTemplate
+  status: 200
+}
+
+export type createOpsNotificationTemplateReviewResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsNotificationTemplateReviewResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsNotificationTemplateReviewResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsNotificationTemplateReviewResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsNotificationTemplateReviewResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsNotificationTemplateReviewResponseSuccess = (createOpsNotificationTemplateReviewResponse200) & {
+  headers: Headers;
+};
+export type createOpsNotificationTemplateReviewResponseError = (createOpsNotificationTemplateReviewResponse401 | createOpsNotificationTemplateReviewResponse403 | createOpsNotificationTemplateReviewResponse404 | createOpsNotificationTemplateReviewResponse409 | createOpsNotificationTemplateReviewResponse422) & {
+  headers: Headers;
+};
+
+export const getCreateOpsNotificationTemplateReviewUrl = (templateId: string,) => {
+
+
+
+
+  return `/v1/ops/notification-templates/${encodeURIComponent(String(templateId))}/internal-review`
+}
+
+/**
+ * FR-053, docs/features/notify.md §4.12.2, ADR-0391. DRAFT/IN_REVIEW만 받는다. APPROVED는 검토 항목 10개와 checklistVersion이 모두 있어야 하고 하나라도 빠지면 409 notification-template-review-required다. REJECTED는 note(1~1,000자)가 필요하고 DRAFT로 되돌린다. 등록자와 같은 사람은 검토할 수 없다(403). 검토 때 지금 코드 해시와 contentSha256이 다르면 409 notification-template-hash-mismatch다. x-peaket-trace-rare: 감사 대상 쓰기다
+ * @summary 알림 템플릿 내부 검토 승인·반려(CS 책임자)
+ */
+export const createOpsNotificationTemplateReview = async (templateId: string,
+    createOpsNotificationTemplateReviewBody: CreateOpsNotificationTemplateReviewBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsNotificationTemplateReviewResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsNotificationTemplateReviewResponseSuccess>(getCreateOpsNotificationTemplateReviewUrl(templateId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createOpsNotificationTemplateReviewBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsNotificationTemplateReviewMutationKey = () => ['createOpsNotificationTemplateReview'] as const;
+
+export const getCreateOpsNotificationTemplateReviewMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplateReview>>, TError,CreateOpsNotificationTemplateReviewMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplateReview>>, TError,CreateOpsNotificationTemplateReviewMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsNotificationTemplateReviewMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsNotificationTemplateReview>>, CreateOpsNotificationTemplateReviewMutationVariables> = (props) => {
+          const {templateId,data} = props ?? {};
+
+          return  createOpsNotificationTemplateReview(templateId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsNotificationTemplateReviewMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsNotificationTemplateReview>>>
+    export type CreateOpsNotificationTemplateReviewMutationBody = BodyType<CreateOpsNotificationTemplateReviewBody>
+    export type CreateOpsNotificationTemplateReviewMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type CreateOpsNotificationTemplateReviewMutationVariables = {templateId: string;data: BodyType<CreateOpsNotificationTemplateReviewBody>}
+
+    /**
+ * @summary 알림 템플릿 내부 검토 승인·반려(CS 책임자)
+ */
+export const useCreateOpsNotificationTemplateReview = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplateReview>>, TError,CreateOpsNotificationTemplateReviewMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsNotificationTemplateReview>>,
+        TError,
+        CreateOpsNotificationTemplateReviewMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsNotificationTemplateReviewMutationOptions(options), queryClient);
+    }
+    export type createOpsNotificationTemplateSubmissionResponse202 = {
+  data: OpsNotificationTemplate
+  status: 202
+}
+
+export type createOpsNotificationTemplateSubmissionResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsNotificationTemplateSubmissionResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsNotificationTemplateSubmissionResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsNotificationTemplateSubmissionResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsNotificationTemplateSubmissionResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
+export type createOpsNotificationTemplateSubmissionResponseSuccess = (createOpsNotificationTemplateSubmissionResponse202) & {
+  headers: Headers;
+};
+export type createOpsNotificationTemplateSubmissionResponseError = (createOpsNotificationTemplateSubmissionResponse401 | createOpsNotificationTemplateSubmissionResponse403 | createOpsNotificationTemplateSubmissionResponse404 | createOpsNotificationTemplateSubmissionResponse409 | createOpsNotificationTemplateSubmissionResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsNotificationTemplateSubmissionUrl = (templateId: string,) => {
+
+
+
+
+  return `/v1/ops/notification-templates/${encodeURIComponent(String(templateId))}/submissions`
+}
+
+/**
+ * FR-053, docs/features/notify.md §4.12.3, ADR-0391. READY만 받는다. 내부 검토·해시를 다시 보고 Solapi POST /kakao/v2/templates에 channelId·name·content·categoryCode·buttons·messageType=BA·emphasizeType=NONE을 보낸 뒤 검수 요청을 따로 보낸다. 등록만 되고 검수 요청이 실패하면 등록을 다시 하지 않고 검수 요청만 다시 한다. 10초 [가정] 안에 답이 없으면 SUBMITTED로 두고 같은 channelId·name·본문 해시로 목록을 조회해 결과를 맞춘다. 같은 Idempotency-Key는 202 하나다. x-peaket-trace-rare: 감사 대상 쓰기다
+ * @summary 알림 템플릿을 제공자에 제출(카카오 심사)
+ */
+export const createOpsNotificationTemplateSubmission = async (templateId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsNotificationTemplateSubmissionResponseSuccess> => {
+
+  return orvalFetch<createOpsNotificationTemplateSubmissionResponseSuccess>(getCreateOpsNotificationTemplateSubmissionUrl(templateId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreateOpsNotificationTemplateSubmissionMutationKey = () => ['createOpsNotificationTemplateSubmission'] as const;
+
+export const getCreateOpsNotificationTemplateSubmissionMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplateSubmission>>, TError,CreateOpsNotificationTemplateSubmissionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplateSubmission>>, TError,CreateOpsNotificationTemplateSubmissionMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsNotificationTemplateSubmissionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsNotificationTemplateSubmission>>, CreateOpsNotificationTemplateSubmissionMutationVariables> = (props) => {
+          const {templateId} = props ?? {};
+
+          return  createOpsNotificationTemplateSubmission(templateId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsNotificationTemplateSubmissionMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsNotificationTemplateSubmission>>>
+
+    export type CreateOpsNotificationTemplateSubmissionMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type CreateOpsNotificationTemplateSubmissionMutationVariables = {templateId: string}
+
+    /**
+ * @summary 알림 템플릿을 제공자에 제출(카카오 심사)
+ */
+export const useCreateOpsNotificationTemplateSubmission = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplateSubmission>>, TError,CreateOpsNotificationTemplateSubmissionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsNotificationTemplateSubmission>>,
+        TError,
+        CreateOpsNotificationTemplateSubmissionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsNotificationTemplateSubmissionMutationOptions(options), queryClient);
+    }
+    export type createOpsNotificationTemplateProviderRefreshResponse200 = {
+  data: OpsNotificationTemplate
+  status: 200
+}
+
+export type createOpsNotificationTemplateProviderRefreshResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsNotificationTemplateProviderRefreshResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsNotificationTemplateProviderRefreshResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsNotificationTemplateProviderRefreshResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsNotificationTemplateProviderRefreshResponse503 = {
+  data: ProblemResponse
+  status: 503
+}
+
+export type createOpsNotificationTemplateProviderRefreshResponseSuccess = (createOpsNotificationTemplateProviderRefreshResponse200) & {
+  headers: Headers;
+};
+export type createOpsNotificationTemplateProviderRefreshResponseError = (createOpsNotificationTemplateProviderRefreshResponse401 | createOpsNotificationTemplateProviderRefreshResponse403 | createOpsNotificationTemplateProviderRefreshResponse404 | createOpsNotificationTemplateProviderRefreshResponse409 | createOpsNotificationTemplateProviderRefreshResponse503) & {
+  headers: Headers;
+};
+
+export const getCreateOpsNotificationTemplateProviderRefreshUrl = (templateId: string,) => {
+
+
+
+
+  return `/v1/ops/notification-templates/${encodeURIComponent(String(templateId))}/provider-refresh`
+}
+
+/**
+ * FR-053, docs/features/notify.md §4.12.3, ADR-0391. SUBMITTED·ACTIVE 판의 제공자 상태를 읽어 승인·반려·정지·삭제를 장부에 반영한다. 15분 [가정] 정합 작업과 같은 일을 사람이 지금 부른다. 제공자에 닿지 못하면 503이고 장부는 그대로다
+ * @summary 알림 템플릿 제공자 상태 새로 고침
+ */
+export const createOpsNotificationTemplateProviderRefresh = async (templateId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsNotificationTemplateProviderRefreshResponseSuccess> => {
+
+  return orvalFetch<createOpsNotificationTemplateProviderRefreshResponseSuccess>(getCreateOpsNotificationTemplateProviderRefreshUrl(templateId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreateOpsNotificationTemplateProviderRefreshMutationKey = () => ['createOpsNotificationTemplateProviderRefresh'] as const;
+
+export const getCreateOpsNotificationTemplateProviderRefreshMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplateProviderRefresh>>, TError,CreateOpsNotificationTemplateProviderRefreshMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplateProviderRefresh>>, TError,CreateOpsNotificationTemplateProviderRefreshMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsNotificationTemplateProviderRefreshMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsNotificationTemplateProviderRefresh>>, CreateOpsNotificationTemplateProviderRefreshMutationVariables> = (props) => {
+          const {templateId} = props ?? {};
+
+          return  createOpsNotificationTemplateProviderRefresh(templateId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsNotificationTemplateProviderRefreshMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsNotificationTemplateProviderRefresh>>>
+
+    export type CreateOpsNotificationTemplateProviderRefreshMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type CreateOpsNotificationTemplateProviderRefreshMutationVariables = {templateId: string}
+
+    /**
+ * @summary 알림 템플릿 제공자 상태 새로 고침
+ */
+export const useCreateOpsNotificationTemplateProviderRefresh = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplateProviderRefresh>>, TError,CreateOpsNotificationTemplateProviderRefreshMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsNotificationTemplateProviderRefresh>>,
+        TError,
+        CreateOpsNotificationTemplateProviderRefreshMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsNotificationTemplateProviderRefreshMutationOptions(options), queryClient);
+    }
+    export type createOpsNotificationTemplateActivationResponse200 = {
+  data: OpsNotificationTemplate
+  status: 200
+}
+
+export type createOpsNotificationTemplateActivationResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsNotificationTemplateActivationResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsNotificationTemplateActivationResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsNotificationTemplateActivationResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsNotificationTemplateActivationResponseSuccess = (createOpsNotificationTemplateActivationResponse200) & {
+  headers: Headers;
+};
+export type createOpsNotificationTemplateActivationResponseError = (createOpsNotificationTemplateActivationResponse401 | createOpsNotificationTemplateActivationResponse403 | createOpsNotificationTemplateActivationResponse404 | createOpsNotificationTemplateActivationResponse409) & {
+  headers: Headers;
+};
+
+export const getCreateOpsNotificationTemplateActivationUrl = (templateId: string,) => {
+
+
+
+
+  return `/v1/ops/notification-templates/${encodeURIComponent(String(templateId))}/activation`
+}
+
+/**
+ * FR-053, docs/features/notify.md §4.12.4, ADR-0391. APPROVED만 받는다. 지금 코드·제공자 승인 해시가 맞아야 하고, 제출자와 같은 사람이면 403 notification-template-activation-forbidden이다(2인 규칙). 새 ACTIVE를 만들고 옛 ACTIVE를 RETIRED로 내린다. 진행 중 작업은 template_version의 옛 판으로 가고 옛 templateId는 24시간 [가정] 런타임 매핑에 남는다. 감사에 바뀐 판·옛 판·행위자를 남긴다. x-peaket-trace-rare: 감사 대상 쓰기다
+ * @summary 알림 템플릿 활성(승인된 판을 지금 판으로)
+ */
+export const createOpsNotificationTemplateActivation = async (templateId: string,
+    createOpsNotificationTemplateActivationBody?: CreateOpsNotificationTemplateActivationBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsNotificationTemplateActivationResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsNotificationTemplateActivationResponseSuccess>(getCreateOpsNotificationTemplateActivationUrl(templateId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createOpsNotificationTemplateActivationBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsNotificationTemplateActivationMutationKey = () => ['createOpsNotificationTemplateActivation'] as const;
+
+export const getCreateOpsNotificationTemplateActivationMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplateActivation>>, TError,CreateOpsNotificationTemplateActivationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplateActivation>>, TError,CreateOpsNotificationTemplateActivationMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsNotificationTemplateActivationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsNotificationTemplateActivation>>, CreateOpsNotificationTemplateActivationMutationVariables> = (props) => {
+          const {templateId,data} = props ?? {};
+
+          return  createOpsNotificationTemplateActivation(templateId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsNotificationTemplateActivationMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsNotificationTemplateActivation>>>
+    export type CreateOpsNotificationTemplateActivationMutationBody = BodyType<CreateOpsNotificationTemplateActivationBody> | undefined
+    export type CreateOpsNotificationTemplateActivationMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type CreateOpsNotificationTemplateActivationMutationVariables = {templateId: string;data?: BodyType<CreateOpsNotificationTemplateActivationBody>}
+
+    /**
+ * @summary 알림 템플릿 활성(승인된 판을 지금 판으로)
+ */
+export const useCreateOpsNotificationTemplateActivation = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplateActivation>>, TError,CreateOpsNotificationTemplateActivationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsNotificationTemplateActivation>>,
+        TError,
+        CreateOpsNotificationTemplateActivationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsNotificationTemplateActivationMutationOptions(options), queryClient);
+    }
+    export type createOpsNotificationTemplateRetirementResponse200 = {
+  data: OpsNotificationTemplate
+  status: 200
+}
+
+export type createOpsNotificationTemplateRetirementResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createOpsNotificationTemplateRetirementResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createOpsNotificationTemplateRetirementResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type createOpsNotificationTemplateRetirementResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createOpsNotificationTemplateRetirementResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createOpsNotificationTemplateRetirementResponseSuccess = (createOpsNotificationTemplateRetirementResponse200) & {
+  headers: Headers;
+};
+export type createOpsNotificationTemplateRetirementResponseError = (createOpsNotificationTemplateRetirementResponse401 | createOpsNotificationTemplateRetirementResponse403 | createOpsNotificationTemplateRetirementResponse404 | createOpsNotificationTemplateRetirementResponse409 | createOpsNotificationTemplateRetirementResponse422) & {
+  headers: Headers;
+};
+
+export const getCreateOpsNotificationTemplateRetirementUrl = (templateId: string,) => {
+
+
+
+
+  return `/v1/ops/notification-templates/${encodeURIComponent(String(templateId))}/retirement`
+}
+
+/**
+ * FR-053, docs/features/notify.md §4.12.4·§4.12.5, ADR-0391. ACTIVE만 받는다. emergency=true면 지금 런타임 매핑에서 빼고 그 종류의 알림톡을 멈추며 문자 대체·이메일·웹 푸시로 보낸다(법정 고지가 틀렸을 때). false면 24시간 [가정] 뒤 뺀다. 사유는 필수다. 감사에 행위자·사유·긴급 여부를 남긴다. x-peaket-trace-rare: 감사 대상 쓰기다
+ * @summary 알림 템플릿 폐기·긴급 중지(지금 판을 내림)
+ */
+export const createOpsNotificationTemplateRetirement = async (templateId: string,
+    createOpsNotificationTemplateRetirementBody: CreateOpsNotificationTemplateRetirementBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createOpsNotificationTemplateRetirementResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createOpsNotificationTemplateRetirementResponseSuccess>(getCreateOpsNotificationTemplateRetirementUrl(templateId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createOpsNotificationTemplateRetirementBody)
+  }
+);}
+
+
+
+
+
+export const getCreateOpsNotificationTemplateRetirementMutationKey = () => ['createOpsNotificationTemplateRetirement'] as const;
+
+export const getCreateOpsNotificationTemplateRetirementMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplateRetirement>>, TError,CreateOpsNotificationTemplateRetirementMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplateRetirement>>, TError,CreateOpsNotificationTemplateRetirementMutationVariables, TContext> => {
+
+const mutationKey = getCreateOpsNotificationTemplateRetirementMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createOpsNotificationTemplateRetirement>>, CreateOpsNotificationTemplateRetirementMutationVariables> = (props) => {
+          const {templateId,data} = props ?? {};
+
+          return  createOpsNotificationTemplateRetirement(templateId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateOpsNotificationTemplateRetirementMutationResult = NonNullable<Awaited<ReturnType<typeof createOpsNotificationTemplateRetirement>>>
+    export type CreateOpsNotificationTemplateRetirementMutationBody = BodyType<CreateOpsNotificationTemplateRetirementBody>
+    export type CreateOpsNotificationTemplateRetirementMutationError = ErrorType<UnauthorizedResponse | ProblemResponse>
+    export type CreateOpsNotificationTemplateRetirementMutationVariables = {templateId: string;data: BodyType<CreateOpsNotificationTemplateRetirementBody>}
+
+    /**
+ * @summary 알림 템플릿 폐기·긴급 중지(지금 판을 내림)
+ */
+export const useCreateOpsNotificationTemplateRetirement = <TError = ErrorType<UnauthorizedResponse | ProblemResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createOpsNotificationTemplateRetirement>>, TError,CreateOpsNotificationTemplateRetirementMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createOpsNotificationTemplateRetirement>>,
+        TError,
+        CreateOpsNotificationTemplateRetirementMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateOpsNotificationTemplateRetirementMutationOptions(options), queryClient);
     }
     export type getOpsReviewResponse200 = {
   data: OpsReviewDetail

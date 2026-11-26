@@ -72,6 +72,8 @@ ASVS(웹 보안 기준을 만드는 비영리 단체 OWASP가 만든 웹 앱 보
 - 소유 계정은 요청 본문의 계정 값이 아니라 세션으로 정한다(support.md·catalog-review.md 8.2.2와 같다).
 - 흡수된 계정의 세션은 병합 때 모두 끝나므로(identity §2.1) 흡수 계정으로는 조회하지 못한다. 대표 계정은 계정 묶음으로 흡수 계정의 주문을 함께 본다.
 - operator·commander와 CS 담당자는 팬 데이터를 본인 조건 없이 볼 수 있는 기능(팬 조회, CS 처리함)이 docs/planning/03 §3에 따로 있다(viewer는 둘 다 없다. CS 처리함은 소유자 결정 2026-10-30, open-items 82번 ①). 그때는 §4의 칸 규칙과 열람 사유 기록이 걸린다.
+- **알림 다시 보내기(추천 적용 2026-11-26, ADR-0389)**: SCR-045 알림 미도달 건의 [다시 보내기]는 `cs_lead`만 한다. `cs_agent`·operator·commander는 403이고, 사유 필수·감사 기록·배송당 3회·주문 하루 3회 상한을 서버가 본다. 경로는 `POST /v1/ops/notification-deliveries/{deliveryId}/resends`다.
+- **알림 템플릿 관리(추천 적용 2026-11-26, ADR-0391)**: SCR-073의 목록·상세는 관제 역할 모두(`viewer`·`operator`·`commander`·`cs_agent`·`cs_lead`) 읽는다. 등록·제공자 제출·상태 새로 고침은 `operator`·`commander`, 내부 검토는 `cs_lead`, 활성·폐기는 `commander`만 한다. 등록자와 검토자, 제출자와 활성자는 같을 수 없고(403 `notification-template-activation-forbidden`), 해시·검토 항목·상태는 서버가 다시 본다. 경로는 `/v1/ops/notification-templates*`다. 실제 문안 수정은 이 API가 아니라 코드 변경·배포다.
 
 ### 3.3 파트너 테넌트
 

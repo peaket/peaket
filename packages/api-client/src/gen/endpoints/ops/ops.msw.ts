@@ -110,6 +110,12 @@ import type {
   CreateOpsEventCancellationResumptionBody,
   CreateOpsEventScaleChangeBody,
   CreateOpsHomeLayoutBannerImageBody,
+  CreateOpsNotificationResend202,
+  CreateOpsNotificationResendBody,
+  CreateOpsNotificationTemplateActivationBody,
+  CreateOpsNotificationTemplateBody,
+  CreateOpsNotificationTemplateRetirementBody,
+  CreateOpsNotificationTemplateReviewBody,
   CreateOpsPayoutBatchBody,
   CreateOpsPayoutBatchPortoneExecutionBody,
   CreateOpsPlaceBody,
@@ -145,6 +151,7 @@ import type {
   IncidentFilingCreate,
   InquiryMessage,
   ListOpsArtists200,
+  ListOpsNotificationTemplates200,
   ListOpsPgCircuits200,
   ListOpsPlaces200,
   ListOpsReceivables200,
@@ -170,6 +177,8 @@ import type {
   OpsFanUnmaskingCreate,
   OpsGoNoGoJudgement,
   OpsGoNoGoJudgementRequest,
+  OpsNotificationTemplate,
+  OpsNotificationTemplateDetail,
   OpsPayoutBatchDetail,
   OpsPromoterCreate,
   OpsPromoterDetail,
@@ -371,6 +380,24 @@ export const getCreateOpsCaseVerificationAppealDecisionResponseMock = (overrideR
       }, undefined])}, undefined]), ...overrideResponse})
 
 export const getCreateOpsCaseReplyResponseMock = (overrideResponse: Partial<Extract<InquiryMessage, object>> = {}): InquiryMessage => ({messageId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), authorKind: faker.helpers.arrayElement([faker.helpers.arrayElement(['FAN','AGENT','SYSTEM'] as const), undefined]), authorDisplay: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), kind: faker.helpers.arrayElement([faker.helpers.arrayElement(['MESSAGE','PROGRESS','ANSWER'] as const), undefined]), body: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), ...overrideResponse})
+
+export const getCreateOpsNotificationResendResponseMock = (overrideResponse: Partial<Extract<CreateOpsNotificationResend202, object>> = {}): CreateOpsNotificationResend202 => ({status: faker.helpers.arrayElement(['PENDING'] as const), ...overrideResponse})
+
+export const getListOpsNotificationTemplatesResponseMock = (overrideResponse: Partial<Extract<ListOpsNotificationTemplates200, object>> = {}): ListOpsNotificationTemplates200 => ({items: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({templateId: faker.string.uuid(), kind: faker.string.alpha({length: {min: 10, max: 20}}), locale: faker.helpers.arrayElement(['ko','en','ja','zh'] as const), version: faker.number.int({min: 1}), status: faker.helpers.arrayElement(['DRAFT','IN_REVIEW','READY','SUBMITTED','APPROVED','REJECTED','ACTIVE','RETIRED','SUSPENDED'] as const), active: faker.datatype.boolean(), templateCode: faker.string.alpha({length: {min: 10, max: 20}}), categoryCode: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), messageType: faker.helpers.arrayElement([faker.helpers.arrayElement(['BA','EX','AD','MI'] as const), undefined]), emphasizeType: faker.helpers.arrayElement([faker.helpers.arrayElement(['NONE','TEXT','IMAGE','ITEM_LIST'] as const), undefined]), contentSha256: faker.helpers.fromRegExp("^[a-f0-9]{64}$"), gitSha: faker.string.alpha({length: {min: 10, max: 20}}), provider: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerTemplateId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerStatus: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), rejectReasonCode: faker.helpers.arrayElement([faker.helpers.arrayElement(['CONTENT_PROHIBITED','AD_UNDECLARED','VARIABLE_INVALID','LINK_INVALID','LENGTH','DUPLICATE','PROVIDER_TEMPORARY','OTHER'] as const), null]), reviewChecklistVersion: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), createdAt: faker.date.past().toISOString().slice(0, 19) + 'Z', reviewedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), submittedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), providerDecidedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), activatedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), retiredAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null])})), nextCursor: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), ...overrideResponse})
+
+export const getCreateOpsNotificationTemplateResponseMock = (overrideResponse: Partial<Extract<OpsNotificationTemplate, object>> = {}): OpsNotificationTemplate => ({templateId: faker.string.uuid(), kind: faker.string.alpha({length: {min: 10, max: 20}}), locale: faker.helpers.arrayElement(['ko','en','ja','zh'] as const), version: faker.number.int({min: 1}), status: faker.helpers.arrayElement(['DRAFT','IN_REVIEW','READY','SUBMITTED','APPROVED','REJECTED','ACTIVE','RETIRED','SUSPENDED'] as const), active: faker.datatype.boolean(), templateCode: faker.string.alpha({length: {min: 10, max: 20}}), categoryCode: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), messageType: faker.helpers.arrayElement([faker.helpers.arrayElement(['BA','EX','AD','MI'] as const), undefined]), emphasizeType: faker.helpers.arrayElement([faker.helpers.arrayElement(['NONE','TEXT','IMAGE','ITEM_LIST'] as const), undefined]), contentSha256: faker.helpers.fromRegExp("^[a-f0-9]{64}$"), gitSha: faker.string.alpha({length: {min: 10, max: 20}}), provider: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerTemplateId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerStatus: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), rejectReasonCode: faker.helpers.arrayElement([faker.helpers.arrayElement(['CONTENT_PROHIBITED','AD_UNDECLARED','VARIABLE_INVALID','LINK_INVALID','LENGTH','DUPLICATE','PROVIDER_TEMPORARY','OTHER'] as const), null]), reviewChecklistVersion: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), createdAt: faker.date.past().toISOString().slice(0, 19) + 'Z', reviewedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), submittedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), providerDecidedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), activatedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), retiredAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), ...overrideResponse})
+
+export const getGetOpsNotificationTemplateResponseMock = (): OpsNotificationTemplateDetail => ({...{templateId: faker.string.uuid(), kind: faker.string.alpha({length: {min: 10, max: 20}}), locale: faker.helpers.arrayElement(['ko','en','ja','zh'] as const), version: faker.number.int({min: 1}), status: faker.helpers.arrayElement(['DRAFT','IN_REVIEW','READY','SUBMITTED','APPROVED','REJECTED','ACTIVE','RETIRED','SUSPENDED'] as const), active: faker.datatype.boolean(), templateCode: faker.string.alpha({length: {min: 10, max: 20}}), categoryCode: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), messageType: faker.helpers.arrayElement([faker.helpers.arrayElement(['BA','EX','AD','MI'] as const), undefined]), emphasizeType: faker.helpers.arrayElement([faker.helpers.arrayElement(['NONE','TEXT','IMAGE','ITEM_LIST'] as const), undefined]), contentSha256: faker.helpers.fromRegExp("^[a-f0-9]{64}$"), gitSha: faker.string.alpha({length: {min: 10, max: 20}}), provider: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerTemplateId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerStatus: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), rejectReasonCode: faker.helpers.arrayElement([faker.helpers.arrayElement(['CONTENT_PROHIBITED','AD_UNDECLARED','VARIABLE_INVALID','LINK_INVALID','LENGTH','DUPLICATE','PROVIDER_TEMPORARY','OTHER'] as const), null]), reviewChecklistVersion: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), createdAt: faker.date.past().toISOString().slice(0, 19) + 'Z', reviewedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), submittedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), providerDecidedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), activatedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), retiredAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null])},...{body: faker.string.alpha({length: {min: 10, max: 20}}), fallbackBody: faker.string.alpha({length: {min: 10, max: 20}}), checks: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), previousTemplateId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), previousVersion: faker.helpers.arrayElement([faker.number.int(), null]), events: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({eventId: faker.string.uuid(), event: faker.helpers.arrayElement(['REGISTERED','REVIEW_REQUESTED','REVIEW_APPROVED','REVIEW_REJECTED','SUBMITTED','PROVIDER_APPROVED','PROVIDER_REJECTED','ACTIVATED','RETIRED','SUSPENDED'] as const), actorId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), reasonCode: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), note: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), createdAt: faker.date.past().toISOString().slice(0, 19) + 'Z'}))},})
+
+export const getCreateOpsNotificationTemplateReviewResponseMock = (overrideResponse: Partial<Extract<OpsNotificationTemplate, object>> = {}): OpsNotificationTemplate => ({templateId: faker.string.uuid(), kind: faker.string.alpha({length: {min: 10, max: 20}}), locale: faker.helpers.arrayElement(['ko','en','ja','zh'] as const), version: faker.number.int({min: 1}), status: faker.helpers.arrayElement(['DRAFT','IN_REVIEW','READY','SUBMITTED','APPROVED','REJECTED','ACTIVE','RETIRED','SUSPENDED'] as const), active: faker.datatype.boolean(), templateCode: faker.string.alpha({length: {min: 10, max: 20}}), categoryCode: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), messageType: faker.helpers.arrayElement([faker.helpers.arrayElement(['BA','EX','AD','MI'] as const), undefined]), emphasizeType: faker.helpers.arrayElement([faker.helpers.arrayElement(['NONE','TEXT','IMAGE','ITEM_LIST'] as const), undefined]), contentSha256: faker.helpers.fromRegExp("^[a-f0-9]{64}$"), gitSha: faker.string.alpha({length: {min: 10, max: 20}}), provider: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerTemplateId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerStatus: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), rejectReasonCode: faker.helpers.arrayElement([faker.helpers.arrayElement(['CONTENT_PROHIBITED','AD_UNDECLARED','VARIABLE_INVALID','LINK_INVALID','LENGTH','DUPLICATE','PROVIDER_TEMPORARY','OTHER'] as const), null]), reviewChecklistVersion: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), createdAt: faker.date.past().toISOString().slice(0, 19) + 'Z', reviewedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), submittedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), providerDecidedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), activatedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), retiredAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), ...overrideResponse})
+
+export const getCreateOpsNotificationTemplateSubmissionResponseMock = (overrideResponse: Partial<Extract<OpsNotificationTemplate, object>> = {}): OpsNotificationTemplate => ({templateId: faker.string.uuid(), kind: faker.string.alpha({length: {min: 10, max: 20}}), locale: faker.helpers.arrayElement(['ko','en','ja','zh'] as const), version: faker.number.int({min: 1}), status: faker.helpers.arrayElement(['DRAFT','IN_REVIEW','READY','SUBMITTED','APPROVED','REJECTED','ACTIVE','RETIRED','SUSPENDED'] as const), active: faker.datatype.boolean(), templateCode: faker.string.alpha({length: {min: 10, max: 20}}), categoryCode: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), messageType: faker.helpers.arrayElement([faker.helpers.arrayElement(['BA','EX','AD','MI'] as const), undefined]), emphasizeType: faker.helpers.arrayElement([faker.helpers.arrayElement(['NONE','TEXT','IMAGE','ITEM_LIST'] as const), undefined]), contentSha256: faker.helpers.fromRegExp("^[a-f0-9]{64}$"), gitSha: faker.string.alpha({length: {min: 10, max: 20}}), provider: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerTemplateId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerStatus: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), rejectReasonCode: faker.helpers.arrayElement([faker.helpers.arrayElement(['CONTENT_PROHIBITED','AD_UNDECLARED','VARIABLE_INVALID','LINK_INVALID','LENGTH','DUPLICATE','PROVIDER_TEMPORARY','OTHER'] as const), null]), reviewChecklistVersion: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), createdAt: faker.date.past().toISOString().slice(0, 19) + 'Z', reviewedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), submittedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), providerDecidedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), activatedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), retiredAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), ...overrideResponse})
+
+export const getCreateOpsNotificationTemplateProviderRefreshResponseMock = (overrideResponse: Partial<Extract<OpsNotificationTemplate, object>> = {}): OpsNotificationTemplate => ({templateId: faker.string.uuid(), kind: faker.string.alpha({length: {min: 10, max: 20}}), locale: faker.helpers.arrayElement(['ko','en','ja','zh'] as const), version: faker.number.int({min: 1}), status: faker.helpers.arrayElement(['DRAFT','IN_REVIEW','READY','SUBMITTED','APPROVED','REJECTED','ACTIVE','RETIRED','SUSPENDED'] as const), active: faker.datatype.boolean(), templateCode: faker.string.alpha({length: {min: 10, max: 20}}), categoryCode: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), messageType: faker.helpers.arrayElement([faker.helpers.arrayElement(['BA','EX','AD','MI'] as const), undefined]), emphasizeType: faker.helpers.arrayElement([faker.helpers.arrayElement(['NONE','TEXT','IMAGE','ITEM_LIST'] as const), undefined]), contentSha256: faker.helpers.fromRegExp("^[a-f0-9]{64}$"), gitSha: faker.string.alpha({length: {min: 10, max: 20}}), provider: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerTemplateId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerStatus: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), rejectReasonCode: faker.helpers.arrayElement([faker.helpers.arrayElement(['CONTENT_PROHIBITED','AD_UNDECLARED','VARIABLE_INVALID','LINK_INVALID','LENGTH','DUPLICATE','PROVIDER_TEMPORARY','OTHER'] as const), null]), reviewChecklistVersion: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), createdAt: faker.date.past().toISOString().slice(0, 19) + 'Z', reviewedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), submittedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), providerDecidedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), activatedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), retiredAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), ...overrideResponse})
+
+export const getCreateOpsNotificationTemplateActivationResponseMock = (overrideResponse: Partial<Extract<OpsNotificationTemplate, object>> = {}): OpsNotificationTemplate => ({templateId: faker.string.uuid(), kind: faker.string.alpha({length: {min: 10, max: 20}}), locale: faker.helpers.arrayElement(['ko','en','ja','zh'] as const), version: faker.number.int({min: 1}), status: faker.helpers.arrayElement(['DRAFT','IN_REVIEW','READY','SUBMITTED','APPROVED','REJECTED','ACTIVE','RETIRED','SUSPENDED'] as const), active: faker.datatype.boolean(), templateCode: faker.string.alpha({length: {min: 10, max: 20}}), categoryCode: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), messageType: faker.helpers.arrayElement([faker.helpers.arrayElement(['BA','EX','AD','MI'] as const), undefined]), emphasizeType: faker.helpers.arrayElement([faker.helpers.arrayElement(['NONE','TEXT','IMAGE','ITEM_LIST'] as const), undefined]), contentSha256: faker.helpers.fromRegExp("^[a-f0-9]{64}$"), gitSha: faker.string.alpha({length: {min: 10, max: 20}}), provider: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerTemplateId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerStatus: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), rejectReasonCode: faker.helpers.arrayElement([faker.helpers.arrayElement(['CONTENT_PROHIBITED','AD_UNDECLARED','VARIABLE_INVALID','LINK_INVALID','LENGTH','DUPLICATE','PROVIDER_TEMPORARY','OTHER'] as const), null]), reviewChecklistVersion: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), createdAt: faker.date.past().toISOString().slice(0, 19) + 'Z', reviewedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), submittedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), providerDecidedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), activatedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), retiredAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), ...overrideResponse})
+
+export const getCreateOpsNotificationTemplateRetirementResponseMock = (overrideResponse: Partial<Extract<OpsNotificationTemplate, object>> = {}): OpsNotificationTemplate => ({templateId: faker.string.uuid(), kind: faker.string.alpha({length: {min: 10, max: 20}}), locale: faker.helpers.arrayElement(['ko','en','ja','zh'] as const), version: faker.number.int({min: 1}), status: faker.helpers.arrayElement(['DRAFT','IN_REVIEW','READY','SUBMITTED','APPROVED','REJECTED','ACTIVE','RETIRED','SUSPENDED'] as const), active: faker.datatype.boolean(), templateCode: faker.string.alpha({length: {min: 10, max: 20}}), categoryCode: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), messageType: faker.helpers.arrayElement([faker.helpers.arrayElement(['BA','EX','AD','MI'] as const), undefined]), emphasizeType: faker.helpers.arrayElement([faker.helpers.arrayElement(['NONE','TEXT','IMAGE','ITEM_LIST'] as const), undefined]), contentSha256: faker.helpers.fromRegExp("^[a-f0-9]{64}$"), gitSha: faker.string.alpha({length: {min: 10, max: 20}}), provider: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerTemplateId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), providerStatus: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), rejectReasonCode: faker.helpers.arrayElement([faker.helpers.arrayElement(['CONTENT_PROHIBITED','AD_UNDECLARED','VARIABLE_INVALID','LINK_INVALID','LENGTH','DUPLICATE','PROVIDER_TEMPORARY','OTHER'] as const), null]), reviewChecklistVersion: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), null]), createdAt: faker.date.past().toISOString().slice(0, 19) + 'Z', reviewedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), submittedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), providerDecidedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), activatedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), retiredAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), ...overrideResponse})
 
 export const getGetOpsReviewResponseMock = (overrideResponse: Partial<Extract<OpsReviewDetail, object>> = {}): OpsReviewDetail => ({review: faker.helpers.arrayElement([{reviewId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), eventId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), rating: faker.helpers.arrayElement([faker.number.int({min: 1, max: 5}), undefined]), body: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), status: faker.helpers.arrayElement([faker.helpers.arrayElement(['VISIBLE','HIDDEN','DELETED'] as const), undefined]), notice: faker.helpers.arrayElement([faker.helpers.arrayElement(['RIGHTS_TEMP','POLICY'] as const), undefined]), noticeUntil: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), authorDisplay: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), edited: faker.helpers.arrayElement([faker.datatype.boolean(), undefined])}, undefined]), summary: faker.helpers.arrayElement([{total: faker.helpers.arrayElement([faker.number.int(), undefined]), byCategory: faker.helpers.arrayElement([{
         [faker.string.alphanumeric(5)]: faker.number.int()
@@ -1328,6 +1355,114 @@ export const getCreateOpsCaseReplyMockHandler = (overrideResponse?: InquiryMessa
     ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
     : getCreateOpsCaseReplyResponseMock(),
       { status: 201
+      })
+  }, options)
+}
+
+export const getCreateOpsNotificationResendMockHandler = (overrideResponse?: CreateOpsNotificationResend202 | ((info: Parameters<HttpResponseResolver<{ deliveryId: string }, CreateOpsNotificationResendBody>>[0]) => Promise<CreateOpsNotificationResend202> | CreateOpsNotificationResend202), options?: RequestHandlerOptions) => {
+  return http.post<{ deliveryId: string }, CreateOpsNotificationResendBody>('*/v1/ops/notification-deliveries/:deliveryId/resends', async (info: Parameters<HttpResponseResolver<{ deliveryId: string }, CreateOpsNotificationResendBody>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateOpsNotificationResendResponseMock(),
+      { status: 202
+      })
+  }, options)
+}
+
+export const getListOpsNotificationTemplatesMockHandler = (overrideResponse?: ListOpsNotificationTemplates200 | ((info: Parameters<HttpResponseResolver>[0]) => Promise<ListOpsNotificationTemplates200> | ListOpsNotificationTemplates200), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/ops/notification-templates', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getListOpsNotificationTemplatesResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreateOpsNotificationTemplateMockHandler = (overrideResponse?: OpsNotificationTemplate | ((info: Parameters<HttpResponseResolver<PathParams, CreateOpsNotificationTemplateBody>>[0]) => Promise<OpsNotificationTemplate> | OpsNotificationTemplate), options?: RequestHandlerOptions) => {
+  return http.post<PathParams, CreateOpsNotificationTemplateBody>('*/v1/ops/notification-templates', async (info: Parameters<HttpResponseResolver<PathParams, CreateOpsNotificationTemplateBody>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateOpsNotificationTemplateResponseMock(),
+      { status: 201
+      })
+  }, options)
+}
+
+export const getGetOpsNotificationTemplateMockHandler = (overrideResponse?: OpsNotificationTemplateDetail | ((info: Parameters<HttpResponseResolver<{ templateId: string }>>[0]) => Promise<OpsNotificationTemplateDetail> | OpsNotificationTemplateDetail), options?: RequestHandlerOptions) => {
+  return http.get<{ templateId: string }>('*/v1/ops/notification-templates/:templateId', async (info: Parameters<HttpResponseResolver<{ templateId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetOpsNotificationTemplateResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreateOpsNotificationTemplateReviewMockHandler = (overrideResponse?: OpsNotificationTemplate | ((info: Parameters<HttpResponseResolver<{ templateId: string }, CreateOpsNotificationTemplateReviewBody>>[0]) => Promise<OpsNotificationTemplate> | OpsNotificationTemplate), options?: RequestHandlerOptions) => {
+  return http.post<{ templateId: string }, CreateOpsNotificationTemplateReviewBody>('*/v1/ops/notification-templates/:templateId/internal-review', async (info: Parameters<HttpResponseResolver<{ templateId: string }, CreateOpsNotificationTemplateReviewBody>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateOpsNotificationTemplateReviewResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreateOpsNotificationTemplateSubmissionMockHandler = (overrideResponse?: OpsNotificationTemplate | ((info: Parameters<HttpResponseResolver<{ templateId: string }>>[0]) => Promise<OpsNotificationTemplate> | OpsNotificationTemplate), options?: RequestHandlerOptions) => {
+  return http.post<{ templateId: string }>('*/v1/ops/notification-templates/:templateId/submissions', async (info: Parameters<HttpResponseResolver<{ templateId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateOpsNotificationTemplateSubmissionResponseMock(),
+      { status: 202
+      })
+  }, options)
+}
+
+export const getCreateOpsNotificationTemplateProviderRefreshMockHandler = (overrideResponse?: OpsNotificationTemplate | ((info: Parameters<HttpResponseResolver<{ templateId: string }>>[0]) => Promise<OpsNotificationTemplate> | OpsNotificationTemplate), options?: RequestHandlerOptions) => {
+  return http.post<{ templateId: string }>('*/v1/ops/notification-templates/:templateId/provider-refresh', async (info: Parameters<HttpResponseResolver<{ templateId: string }>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateOpsNotificationTemplateProviderRefreshResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreateOpsNotificationTemplateActivationMockHandler = (overrideResponse?: OpsNotificationTemplate | ((info: Parameters<HttpResponseResolver<{ templateId: string }, CreateOpsNotificationTemplateActivationBody>>[0]) => Promise<OpsNotificationTemplate> | OpsNotificationTemplate), options?: RequestHandlerOptions) => {
+  return http.post<{ templateId: string }, CreateOpsNotificationTemplateActivationBody>('*/v1/ops/notification-templates/:templateId/activation', async (info: Parameters<HttpResponseResolver<{ templateId: string }, CreateOpsNotificationTemplateActivationBody>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateOpsNotificationTemplateActivationResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreateOpsNotificationTemplateRetirementMockHandler = (overrideResponse?: OpsNotificationTemplate | ((info: Parameters<HttpResponseResolver<{ templateId: string }, CreateOpsNotificationTemplateRetirementBody>>[0]) => Promise<OpsNotificationTemplate> | OpsNotificationTemplate), options?: RequestHandlerOptions) => {
+  return http.post<{ templateId: string }, CreateOpsNotificationTemplateRetirementBody>('*/v1/ops/notification-templates/:templateId/retirement', async (info: Parameters<HttpResponseResolver<{ templateId: string }, CreateOpsNotificationTemplateRetirementBody>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreateOpsNotificationTemplateRetirementResponseMock(),
+      { status: 200
       })
   }, options)
 }
@@ -2491,6 +2626,15 @@ export const getOpsMock = () => [
   getUpdateOpsCaseMockHandler(),
   getCreateOpsCaseVerificationAppealDecisionMockHandler(),
   getCreateOpsCaseReplyMockHandler(),
+  getCreateOpsNotificationResendMockHandler(),
+  getListOpsNotificationTemplatesMockHandler(),
+  getCreateOpsNotificationTemplateMockHandler(),
+  getGetOpsNotificationTemplateMockHandler(),
+  getCreateOpsNotificationTemplateReviewMockHandler(),
+  getCreateOpsNotificationTemplateSubmissionMockHandler(),
+  getCreateOpsNotificationTemplateProviderRefreshMockHandler(),
+  getCreateOpsNotificationTemplateActivationMockHandler(),
+  getCreateOpsNotificationTemplateRetirementMockHandler(),
   getGetOpsReviewMockHandler(),
   getCreateOpsReviewModerationMockHandler(),
   getCreateOpsApprovalRequestMockHandler(),

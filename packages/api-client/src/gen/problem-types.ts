@@ -188,6 +188,12 @@ export type ProblemType =
   | 'not-payer'
   | 'not-running'
   | 'not-verifying'
+  | 'notification-resend-not-allowed'
+  | 'notification-template-activation-forbidden'
+  | 'notification-template-hash-mismatch'
+  | 'notification-template-invalid-state'
+  | 'notification-template-review-required'
+  | 'notification-template-version-exists'
   | 'notify-sender-unavailable'
   | 'onsale-window-unavailable'
   | 'open-interval-conflict'
@@ -598,6 +604,12 @@ export const PROBLEM_TYPES = {
   'not-payer': { status: 403, title: "결제한 분만 할 수 있습니다" },
   'not-running': { status: 409, title: "진행 중인 요청이 아닙니다" },
   'not-verifying': { status: 409, title: "추가 검증 중인 대기표가 아닙니다" },
+  'notification-resend-not-allowed': { status: 409, title: "지금은 다시 보낼 수 없습니다" },
+  'notification-template-activation-forbidden': { status: 403, title: "제출자와 다른 사람이 활성해야 합니다" },
+  'notification-template-hash-mismatch': { status: 409, title: "검토한 문안과 지금 코드가 다릅니다" },
+  'notification-template-invalid-state': { status: 409, title: "지금 상태에서는 할 수 없습니다" },
+  'notification-template-review-required': { status: 409, title: "내부 검토를 마쳐야 합니다" },
+  'notification-template-version-exists': { status: 409, title: "이미 있는 템플릿 판입니다" },
   'notify-sender-unavailable': { status: 503, title: "알림 발송기를 쓸 수 없습니다" },
   'onsale-window-unavailable': { status: 503, title: "온세일 윈도우를 지금 확인할 수 없습니다" },
   'open-interval-conflict': { status: 409, title: "다른 대규모 공연과 오픈 시각이 겹칩니다" },

@@ -71,7 +71,7 @@ export const listOrdersResponseItemsItemTiersMax = 20;
 export const ListOrdersResponse = zod.object({
   "items": zod.array(zod.object({
   "orderId": zod.string(),
-  "bookingNumber": zod.string().describe('예매번호 [가정] 날짜 8자리 + 일련번호 5자리(화면 예 2026101400123). 고객 문의의 orderRef와 같은 값. docs/data.md purchase_order에 칸이 아직 없다'),
+  "bookingNumber": zod.string().describe('예매번호. 한국 시각 날짜 8자리 + 5자리 일련번호(화면 예 2026101400123). purchase_order.booking_no(UNIQUE)이고 고객 문의의 orderRef와 같은 값이다(추천 적용 2026-11-26, ADR-0388)'),
   "eventId": zod.string(),
   "eventTitle": zod.string().optional().describe('공연명'),
   "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),
@@ -247,7 +247,7 @@ export const getOrderResponseTwoPaymentCardLast4RegExp = new RegExp('^[0-9]{4}$'
 
 export const GetOrderResponse = zod.object({
   "orderId": zod.string(),
-  "bookingNumber": zod.string().describe('예매번호 [가정] 날짜 8자리 + 일련번호 5자리(화면 예 2026101400123). 고객 문의의 orderRef와 같은 값. docs/data.md purchase_order에 칸이 아직 없다'),
+  "bookingNumber": zod.string().describe('예매번호. 한국 시각 날짜 8자리 + 5자리 일련번호(화면 예 2026101400123). purchase_order.booking_no(UNIQUE)이고 고객 문의의 orderRef와 같은 값이다(추천 적용 2026-11-26, ADR-0388)'),
   "eventId": zod.string(),
   "eventTitle": zod.string().optional().describe('공연명'),
   "eventStartsAt": zod.iso.datetime({"offset":true}).optional().describe('회차 시작'),

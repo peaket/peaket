@@ -184,6 +184,68 @@ export const DeleteEventSubscriptionsQueryParams = zod.object({
 export const DeleteEventSubscriptionsResponse = zod.void()
 
 /**
+ * FR-053, SCR-072, docs/features/notify.md §4.11, ADR-0390. 채널과 상관없이 논리 알림 하나에 항목 하나다. 최근 순이고 커서·limit(기본 20 [가정], 최대 50), unreadOnly, category(쉼표로 여럿: BOOKING·PAYMENT·CANCEL_REFUND·TRANSFER·ENTRY·SUPPORT·SECURITY·EVENT_ALERT·AD)로 거른다. 응답의 unreadCount는 그 계정의 안 읽은 항목 수다. Cache-Control: private, no-store. 본문은 읽을 때 템플릿과 catalog로 만들고 주소·전화번호·판매자 정보는 싣지 않는다
+ * @summary 알림함 목록(최근 순, 안 읽음·분류 거르기)
+ */
+export const listNotificationsQueryLimitMax = 100;
+
+
+
+export const ListNotificationsQueryParams = zod.object({
+  "unreadOnly": zod.boolean().optional(),
+  "category": zod.string().optional().describe('쉼표로 이은 분류. 모르는 값은 400'),
+  "cursor": zod.string().optional().describe('불투명 커서(이전 응답의 nextCursor, guidelines §3)'),
+  "limit": zod.int().min(1).max(listNotificationsQueryLimitMax).optional().describe('한 번에 받을 건수(최대 100, guidelines §3)')
+})
+
+export const listNotificationsResponseUnreadCountMin = 0;
+
+
+
+export const ListNotificationsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "notificationId": zod.uuid(),
+  "category": zod.enum(['BOOKING', 'PAYMENT', 'CANCEL_REFUND', 'TRANSFER', 'ENTRY', 'SUPPORT', 'SECURITY', 'EVENT_ALERT', 'AD']),
+  "kind": zod.string(),
+  "title": zod.string(),
+  "body": zod.string(),
+  "url": zod.string().nullish().describe('같은 출처의 허용한 앞부분만. 없으면 분류별 기본 화면으로 간다'),
+  "createdAt": zod.iso.datetime({"offset":true}),
+  "readAt": zod.iso.datetime({"offset":true}).nullish()
+})),
+  "nextCursor": zod.string().nullish(),
+  "unreadCount": zod.int().min(listNotificationsResponseUnreadCountMin)
+})
+
+/**
+ * SCR-072 머리 배지가 화면이 보일 때와 다시 보일 때 부른다. 폴링하지 않는다. Cache-Control: private, no-store
+ * @summary 알림함 안 읽은 수(머리 종 배지)
+ */
+export const getNotificationUnreadCountResponseCountMin = 0;
+
+
+
+export const GetNotificationUnreadCountResponse = zod.object({
+  "count": zod.int().min(getNotificationUnreadCountResponseCountMin)
+})
+
+/**
+ * SCR-072 [모두 읽음]. 그 계정의 안 읽은 항목만 바꾸고 204다(멱등). Cache-Control: private, no-store
+ * @summary 알림함 모두 읽음
+ */
+export const CreateNotificationReadAllResponse = zod.void()
+
+/**
+ * SCR-072 항목 열기. 이미 읽었어도 204(멱등). 남의 항목·없는 항목은 404. Cache-Control: private, no-store
+ * @summary 알림함 하나 읽음
+ */
+export const CreateNotificationReadParams = zod.object({
+  "notificationId": zod.uuid()
+})
+
+export const CreateNotificationReadResponse = zod.void()
+
+/**
  * FR-019, SCR-001 ③·SCR-054(추천 적용 2026-10-14, ADR-0063). 찜은 공연 단위다(ADR-0093). 홈 피드는 개인 값을 싣지 않으므로 로그인한 브라우저가 따로 부른다. 찜한 최근 순. 판매 승인이 취소된 공연은 빠진다. productionIds를 주면 그 공연들 가운데 찜한 것만 준다(최대 50개, 커서 없음. 공연 상세의 찜 토글 상태, 추천 적용 2026-11-05, HOT-311). Cache-Control: private, no-store
  * @summary 찜한 공연 목록(홈 찜한 공연 줄, 관심 공연 화면)
  */

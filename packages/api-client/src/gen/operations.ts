@@ -25,6 +25,8 @@ export type OperationId =
   | 'createIdentityVerificationResult'
   | 'createInquiry'
   | 'createInquiryMessage'
+  | 'createNotificationRead'
+  | 'createNotificationReadAll'
   | 'createOpsAdminAccount'
   | 'createOpsAdminAccountDesignation'
   | 'createOpsAdminAccountInvitation'
@@ -103,6 +105,13 @@ export type OperationId =
   | 'createOpsHomeLayoutBannerImage'
   | 'createOpsNoticeTemplate'
   | 'createOpsNoticeTemplateApproval'
+  | 'createOpsNotificationResend'
+  | 'createOpsNotificationTemplate'
+  | 'createOpsNotificationTemplateActivation'
+  | 'createOpsNotificationTemplateProviderRefresh'
+  | 'createOpsNotificationTemplateRetirement'
+  | 'createOpsNotificationTemplateReview'
+  | 'createOpsNotificationTemplateSubmission'
   | 'createOpsPartnerNotice'
   | 'createOpsPayoutBatch'
   | 'createOpsPayoutBatchPortoneExecution'
@@ -240,6 +249,7 @@ export type OperationId =
   | 'getInquiry'
   | 'getMyBookingRestriction'
   | 'getMyOpsAuthSession'
+  | 'getNotificationUnreadCount'
   | 'getOpsAdminAccount'
   | 'getOpsApprovalRequest'
   | 'getOpsAuditAnchor'
@@ -270,6 +280,7 @@ export type OperationId =
   | 'getOpsFraudCluster'
   | 'getOpsHomeLayout'
   | 'getOpsLive'
+  | 'getOpsNotificationTemplate'
   | 'getOpsPayoutBatch'
   | 'getOpsPromoter'
   | 'getOpsResearchExport'
@@ -318,6 +329,7 @@ export type OperationId =
   | 'listEventReviews'
   | 'listFraudAppealRequests'
   | 'listInquiries'
+  | 'listNotifications'
   | 'listOpsAdminAccountPermissionChanges'
   | 'listOpsAdminAccounts'
   | 'listOpsAlerts'
@@ -343,6 +355,7 @@ export type OperationId =
   | 'listOpsFraudCases'
   | 'listOpsFraudClusters'
   | 'listOpsNoticeTemplates'
+  | 'listOpsNotificationTemplates'
   | 'listOpsPartnerNotices'
   | 'listOpsPayoutBatches'
   | 'listOpsPgCircuits'
@@ -434,6 +447,8 @@ export const OPERATIONS = {
   createIdentityVerificationResult: {operationId: "createIdentityVerificationResult",method: "POST",path: "/v1/identity/verifications/{verificationId}/result",host: "api",kind: "write",cookie: true},
   createInquiry: {operationId: "createInquiry",method: "POST",path: "/v1/inquiries",host: "api",kind: "write",idempotent: true,cookie: true},
   createInquiryMessage: {operationId: "createInquiryMessage",method: "POST",path: "/v1/inquiries/{inquiryId}/messages",host: "api",kind: "write",idempotent: true,cookie: true},
+  createNotificationRead: {operationId: "createNotificationRead",method: "POST",path: "/v1/notifications/{notificationId}/read",host: "api",kind: "write",cookie: true},
+  createNotificationReadAll: {operationId: "createNotificationReadAll",method: "POST",path: "/v1/notification-read-all",host: "api",kind: "write",cookie: true},
   createOpsAdminAccount: {operationId: "createOpsAdminAccount",method: "POST",path: "/v1/ops/admin-accounts",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsAdminAccountDesignation: {operationId: "createOpsAdminAccountDesignation",method: "POST",path: "/v1/ops/admin-accounts/{adminAccountId}/designations",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsAdminAccountInvitation: {operationId: "createOpsAdminAccountInvitation",method: "POST",path: "/v1/ops/admin-accounts/{adminAccountId}/invitation",host: "ops-api",kind: "write",idempotent: true,cookie: true},
@@ -512,6 +527,13 @@ export const OPERATIONS = {
   createOpsHomeLayoutBannerImage: {operationId: "createOpsHomeLayoutBannerImage",method: "POST",path: "/v1/ops/home-layout/banner-images",host: "ops-api",kind: "upload",cookie: true},
   createOpsNoticeTemplate: {operationId: "createOpsNoticeTemplate",method: "POST",path: "/v1/ops/notice-templates",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsNoticeTemplateApproval: {operationId: "createOpsNoticeTemplateApproval",method: "POST",path: "/v1/ops/notice-templates/{templateId}/approvals",host: "ops-api",kind: "write",cookie: true,ifMatch: true},
+  createOpsNotificationResend: {operationId: "createOpsNotificationResend",method: "POST",path: "/v1/ops/notification-deliveries/{deliveryId}/resends",host: "ops-api",kind: "write",idempotent: true,cookie: true},
+  createOpsNotificationTemplate: {operationId: "createOpsNotificationTemplate",method: "POST",path: "/v1/ops/notification-templates",host: "ops-api",kind: "write",idempotent: true,cookie: true},
+  createOpsNotificationTemplateActivation: {operationId: "createOpsNotificationTemplateActivation",method: "POST",path: "/v1/ops/notification-templates/{templateId}/activation",host: "ops-api",kind: "write",idempotent: true,cookie: true},
+  createOpsNotificationTemplateProviderRefresh: {operationId: "createOpsNotificationTemplateProviderRefresh",method: "POST",path: "/v1/ops/notification-templates/{templateId}/provider-refresh",host: "ops-api",kind: "write",cookie: true},
+  createOpsNotificationTemplateRetirement: {operationId: "createOpsNotificationTemplateRetirement",method: "POST",path: "/v1/ops/notification-templates/{templateId}/retirement",host: "ops-api",kind: "write",idempotent: true,cookie: true},
+  createOpsNotificationTemplateReview: {operationId: "createOpsNotificationTemplateReview",method: "POST",path: "/v1/ops/notification-templates/{templateId}/internal-review",host: "ops-api",kind: "write",idempotent: true,cookie: true},
+  createOpsNotificationTemplateSubmission: {operationId: "createOpsNotificationTemplateSubmission",method: "POST",path: "/v1/ops/notification-templates/{templateId}/submissions",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsPartnerNotice: {operationId: "createOpsPartnerNotice",method: "POST",path: "/v1/ops/partner-notices",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsPayoutBatch: {operationId: "createOpsPayoutBatch",method: "POST",path: "/v1/ops/payout-batches",host: "ops-api",kind: "write",idempotent: true,cookie: true},
   createOpsPayoutBatchPortoneExecution: {operationId: "createOpsPayoutBatchPortoneExecution",method: "POST",path: "/v1/ops/payout-batches/{batchId}/portone-execution",host: "ops-api",kind: "write",cookie: true},
@@ -649,6 +671,7 @@ export const OPERATIONS = {
   getInquiry: {operationId: "getInquiry",method: "GET",path: "/v1/inquiries/{inquiryId}",host: "api",kind: "read",cookie: true},
   getMyBookingRestriction: {operationId: "getMyBookingRestriction",method: "GET",path: "/v1/booking-restrictions/me",host: "api",kind: "read",cookie: true},
   getMyOpsAuthSession: {operationId: "getMyOpsAuthSession",method: "GET",path: "/v1/ops/auth/sessions/me",host: "ops-api",kind: "read",cookie: true},
+  getNotificationUnreadCount: {operationId: "getNotificationUnreadCount",method: "GET",path: "/v1/notification-unread-count",host: "api",kind: "read",cookie: true},
   getOpsAdminAccount: {operationId: "getOpsAdminAccount",method: "GET",path: "/v1/ops/admin-accounts/{adminAccountId}",host: "ops-api",kind: "read",cookie: true},
   getOpsApprovalRequest: {operationId: "getOpsApprovalRequest",method: "GET",path: "/v1/ops/approval-requests/{approvalId}",host: "ops-api",kind: "read",cookie: true},
   getOpsAuditAnchor: {operationId: "getOpsAuditAnchor",method: "GET",path: "/v1/ops/audit-anchors/{checkpointId}",host: "ops-api",kind: "read",cookie: false},
@@ -679,6 +702,7 @@ export const OPERATIONS = {
   getOpsFraudCluster: {operationId: "getOpsFraudCluster",method: "GET",path: "/v1/ops/fraud-clusters/{clusterId}",host: "ops-api",kind: "read",cookie: true},
   getOpsHomeLayout: {operationId: "getOpsHomeLayout",method: "GET",path: "/v1/ops/home-layout",host: "ops-api",kind: "read",cookie: true},
   getOpsLive: {operationId: "getOpsLive",method: "GET",path: "/v1/ops/live",host: "ops-api",kind: "read",cookie: true,sse: true,query: ["eventId","screen"]},
+  getOpsNotificationTemplate: {operationId: "getOpsNotificationTemplate",method: "GET",path: "/v1/ops/notification-templates/{templateId}",host: "ops-api",kind: "read",cookie: true},
   getOpsPayoutBatch: {operationId: "getOpsPayoutBatch",method: "GET",path: "/v1/ops/payout-batches/{batchId}",host: "ops-api",kind: "read",cookie: true},
   getOpsPromoter: {operationId: "getOpsPromoter",method: "GET",path: "/v1/ops/promoters/{promoterId}",host: "ops-api",kind: "read",cookie: true},
   getOpsResearchExport: {operationId: "getOpsResearchExport",method: "GET",path: "/v1/ops/research-exports/{exportId}",host: "ops-api",kind: "read",cookie: true},
@@ -727,6 +751,7 @@ export const OPERATIONS = {
   listEventReviews: {operationId: "listEventReviews",method: "GET",path: "/v1/events/{eventId}/reviews",host: "api",kind: "read",cookie: true,query: ["cursor","limit","sort"]},
   listFraudAppealRequests: {operationId: "listFraudAppealRequests",method: "GET",path: "/v1/fraud-appeal-requests",host: "api",kind: "read",cookie: true,query: ["cursor","limit"]},
   listInquiries: {operationId: "listInquiries",method: "GET",path: "/v1/inquiries",host: "api",kind: "read",cookie: true,query: ["limit","page","status"]},
+  listNotifications: {operationId: "listNotifications",method: "GET",path: "/v1/notifications",host: "api",kind: "read",cookie: true,query: ["category","cursor","limit","unreadOnly"]},
   listOpsAdminAccountPermissionChanges: {operationId: "listOpsAdminAccountPermissionChanges",method: "GET",path: "/v1/ops/admin-accounts/{adminAccountId}/permission-changes",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit"]},
   listOpsAdminAccounts: {operationId: "listOpsAdminAccounts",method: "GET",path: "/v1/ops/admin-accounts",host: "ops-api",kind: "read",cookie: true,query: ["cursor","group","limit","promoterId","status"]},
   listOpsAlerts: {operationId: "listOpsAlerts",method: "GET",path: "/v1/ops/alerts",host: "ops-api",kind: "read",cookie: true,query: ["eventId"]},
@@ -752,6 +777,7 @@ export const OPERATIONS = {
   listOpsFraudCases: {operationId: "listOpsFraudCases",method: "GET",path: "/v1/ops/fraud-cases",host: "ops-api",kind: "read",cookie: true,query: ["cursor","eventId","limit","status"]},
   listOpsFraudClusters: {operationId: "listOpsFraudClusters",method: "GET",path: "/v1/ops/fraud-clusters",host: "ops-api",kind: "read",cookie: true,query: ["cursor","eventId","limit","sort"]},
   listOpsNoticeTemplates: {operationId: "listOpsNoticeTemplates",method: "GET",path: "/v1/ops/notice-templates",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit","status"]},
+  listOpsNotificationTemplates: {operationId: "listOpsNotificationTemplates",method: "GET",path: "/v1/ops/notification-templates",host: "ops-api",kind: "read",cookie: true,query: ["cursor","kind","limit","locale","status"]},
   listOpsPartnerNotices: {operationId: "listOpsPartnerNotices",method: "GET",path: "/v1/ops/partner-notices",host: "ops-api",kind: "read",cookie: true,query: ["cursor","eventId","limit"]},
   listOpsPayoutBatches: {operationId: "listOpsPayoutBatches",method: "GET",path: "/v1/ops/payout-batches",host: "ops-api",kind: "read",cookie: true,query: ["cursor","limit","payoutDate","pg","pgStore","status"]},
   listOpsPgCircuits: {operationId: "listOpsPgCircuits",method: "GET",path: "/v1/ops/pg-circuits",host: "ops-api",kind: "read",cookie: true},

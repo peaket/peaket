@@ -1,0 +1,31 @@
+# ADR-0391: 알림 템플릿 제작·심사·활성 설계(2026-11-26)
+
+- **상태**: 채택(2026-11-26, 소유자 결정 "템플릿 심사쪽도 설계해야 겠네요"). 세부 값은 추천 적용.
+- **관련**: [docs/features/notify.md](../features/notify.md) §4.10.2·§4.12·§11·§12·§14·§16·§17, [docs/data.md](../data.md) `notification_template`·`notification_template_event`, [docs/api/openapi.yaml](../api/openapi.yaml) `/v1/ops/notification-templates*`, [docs/design/d5-screen-blueprint.md](../design/d5-screen-blueprint.md) §7.20, [docs/design/d3-screens.md](../design/d3-screens.md) SCR-073, [docs/planning/04-ia-flows-screens.md](../planning/04-ia-flows-screens.md) SCR-073, [docs/security/authz-matrix.md](../security/authz-matrix.md) §3.2, [docs/security/data-classification.md](../security/data-classification.md), [ADR-0387](0387-notification-provider-amazon-ses-solapi-web-push.md), [ADR-0388](0388-booking-confirmed-data-template-provider-event-detail.md), [ADR-0389](0389-notification-operations-cs-resend-sender-kakao-observability-cost.md)
+- **관련 ID**: FR-053, N-T35, N-T36, N-T37
+
+## 맥락
+
+- 카카오 알림톡은 제공자(카카오)가 심사한 템플릿만 보낼 수 있다. 지금 설계는 "템플릿은 코드에 고정하고, 설정 `PEAKET_SOLAPI_TEMPLATE_IDS`가 `{kind, locale, version} → templateId`를 이룬다"까지만 정했다(ADR-0389 결정 3). 문안을 누가 어떻게 검토하고, 어떤 순서로 제공자에 내고, 반려·정지 때 무엇을 멈추고, 활성 판을 어떻게 되돌리는지는 비어 있었다.
+- 문안을 자유롭게 고칠 수 있게 하면 제공자에 낸 본문과 지금 코드의 본문이 달라져 심사 결과와 실제 발송이 어긋난다. 반대로 코드에만 두고 심사 기록을 남기지 않으면 "무엇을 언제 누가 냈고 무엇이 승인됐나"를 감사·CS에서 확인할 수 없다.
+- 알림톡은 거래 안내(정보성)라 광고 동의 없이 보내지만, 문구가 광고로 읽히면 심사에서 반려되고 법적으로도 광고성 정보 규칙(야간 금지·수신 동의)이 걸린다. 내부 검토에서 이 경계를 먼저 봐야 한다.
+- 알림은 예매·결제와 달리 늦거나 빠져도 거래를 되돌리지 않는다. 그러나 법정 고지가 틀린 문안을 계속 보내면 문제가 커진다. 그래서 "심사를 건너뛰는 긴급 활성"은 만들지 않고, "즉시 멈추고 문자 대체로 보내는 긴급 중지"를 만든다.
+
+## 결정
+
+1. **문안 한 판은 코드의 불변 파일이다.** `{kind}.{locale}.v{n}` 파일 하나가 한 판이고, `IN_REVIEW`에 올린 뒤에는 고치지 않는다. 오타도 `v{n+1}`로 낸다. 보내는 정본은 코드의 그 판이고, `notification_template.body_snapshot`은 제공자에 낸 본문을 남긴 심사·감사 증거일 뿐 보낼 때 다시 읽지 않는다.
+2. **상태를 `DRAFT` → `IN_REVIEW` → `READY` → `SUBMITTED` → `APPROVED`/`REJECTED`, 활성은 `ACTIVE`, 내려간 판은 `RETIRED`, 제공자가 정지하면 `SUSPENDED`로 둔다.** `(kind, locale, version)`, `(provider, template_code)`, `(provider, provider_template_id)`는 유일하고, `(kind, locale)`마다 `ACTIVE`는 하나다(부분 유일 인덱스). `template_code`는 **우리 장부 안의 판 키**이고 제공자에는 `name`으로 보낸다. Solapi는 `name` 중복을 허용할 수 있어 제공자 쪽 중복 제출은 `channelId`·`name`·본문 해시·생성 시각을 함께 보고 가른다. 장부에 `channel_id`·`category_code`·`message_type`(1차 `BA`)·`emphasize_type`(1차 `NONE`)·`buttons`·`security_flag`(1차 `false`)를 둔다.
+3. **내부 검토를 제공자 제출 앞에 둔다.** 등록·제출은 `operator`(또는 `commander`), 내부 검토는 `cs_lead`, 활성·폐기는 `commander`가 한다. `viewer`·`cs_agent`는 읽기만 한다. 등록자와 검토자, 제출자와 활성자는 같을 수 없다(2인 규칙). 검토 항목 열 개(정보성/광고성, 변수, 문자 대체, 링크·버튼, 법정·거래 고지, 길이·표기, 언어, 발신자, 시험 발송, 개인정보)를 모두 확인해야 승인할 수 있고, 검토 항목 판(`review_checklist_version`)을 남긴다.
+4. **해시로 검토·제출·활성의 본문을 묶는다.** 본문·문자 대체·버튼·변수 목록을 정규화한 `content_sha256`과 `git_sha`를 남기고, 각 단계에서 지금 코드의 해시와 견준다. 다르면 409 `notification-template-hash-mismatch`로 막는다. 검토 뒤 파일이 바뀌는 것을 허용하지 않는다.
+5. **제공자 제출·상태 확인은 core-svc notify가 맡고, 제공자 필드는 어댑터가 옮긴다.** `READY`에서 `operator`가 제출하면 Solapi `POST /kakao/v2/templates`에 `channelId`(v2, 구 `pfId`), `name`, `content`, `categoryCode`, `buttons`(`WL`), `messageType=BA`, `emphasizeType=NONE`, `securityFlag=false`를 보내고, 응답의 `templateId`·`status=PENDING`을 받은 뒤 **검수 요청을 따로** 보낸다. 등록만 되고 검수 요청이 실패하면 등록을 다시 하지 않고 검수 요청만 다시 한다. 10초 [가정] 안에 답이 없으면 결과 모름으로 두고 같은 `channelId`·`name`·본문 해시·생성 시각으로 목록을 조회해 입양한다. `PENDING`·`INSPECTING`은 `SUBMITTED`, `APPROVED`는 `APPROVED`, `REJECTED`는 `REJECTED`로 옮긴다. `SUBMITTED`는 10분 [가정]마다, 화면의 [상태 새로 고침]은 `POST .../provider-refresh`로 확인한다. 제공자 사유는 응답의 `comments`(자유 글)를 `CONTENT_PROHIBITED`·`AD_UNDECLARED`·`VARIABLE_INVALID`·`LINK_INVALID`·`LENGTH`·`DUPLICATE`·`PROVIDER_TEMPORARY`·`OTHER`로 옮겨 적는다(공식 코드 열거는 없다). 필드·상태·심사 기한은 2026-11-26 Solapi·카카오 문서로 확인했고(notify §18), 실제 `categoryCode`·`comments` 문구·계약 값만 남았다.
+6. **활성은 승인된 판만, 2인 규칙으로 한다.** `commander`가 활성하고 제출자와 같으면 403 `notification-template-activation-forbidden`이다. 활성은 새 `ACTIVE`를 만들고 옛 `ACTIVE`를 `RETIRED`로 내린다. 진행 중 작업은 `notification_job.template_version`의 옛 판으로 보내고, 옛 `templateId`는 `retired_at`부터 24시간 [가정] 런타임 매핑에 남긴다. 런타임 매핑은 `ACTIVE`와 최근 `RETIRED`를 60초 [가정] 캐시로 읽어 만들고, `PEAKET_SOLAPI_TEMPLATE_IDS`는 DB를 읽지 못할 때의 비상 기본값으로 둔다. 둘이 다르면 DB가 이기고 `notify_template_mapping_mismatch_total`을 올린다.
+7. **반려·정지·긴급 변경은 "멈추고 대체"로 푼다.** 반려는 지금 `ACTIVE` 판을 건드리지 않고 새 판이 승인될 때까지 옛 판으로 보낸다. 법정 고지·금액·일시가 틀리면 `emergency` 폐기로 알림톡을 즉시 멈추고 고친 문자 대체로 보낸다. 심사를 건너뛰는 길은 없다. 15분 [가정]마다 제공자 상태를 확인해 `ACTIVE`가 정지·삭제됐으면 `SUSPENDED`·SEV2로 두고 알림톡을 멈추며 SMS 대체·이메일·웹 푸시로 보낸다. 활성 판이 없으면 알림톡만 건너뛰고 `notify_template_fallback_total{reason="no_active"}`·SEV3다. 이전 `APPROVED` 판이 제공자에 살아 있으면 새 제출 없이 되돌릴 수 있다.
+8. **운영 화면 SCR-073과 감사 기록을 둔다.** `/notifications/templates`는 종류·언어별 `ACTIVE`·상태·제공자 상태·검토에 머문 시간·다음 할 일을, 상세는 본문 미리보기(변수 강조)·문자 대체·검토 항목·해시·git SHA·제공자 시간선·반려 사유·이전 판 비교와 역할별 버튼을 보여 준다. 모든 사건은 `notification_template_event`에 행위자·사유·해시와 함께 남기고, 활성·폐기는 `ops_event`에도 남긴다. 본문 원문은 감사 로그에 남기지 않는다.
+9. **시험은 N-T35(판·상태·내부 검토·활성), N-T36(제공자 제출·반려·정합·문자 대체), N-T37(화면·권한·접근성)이다.** 지표는 `notify_template_status_total`·`notify_template_review_age_hours`·`notify_template_submit_total`·`notify_template_rejected_total`·`notify_template_reconcile_mismatch_total`·`notify_template_mapping_mismatch_total`·`notify_template_fallback_total`·`notify_template_hash_mismatch_total`이고 계정·주문·전화번호 라벨을 쓰지 않는다.
+
+## 결과
+
+- 좋아지는 점: 제공자에 낸 본문·내부에서 검토한 본문·지금 코드가 해시로 묶여 어긋나지 않는다. 누가 언제 무엇을 검토·제출·활성·폐기했는지 남는다. 반려·정지 때 알림톡만 멈추고 문자·이메일·웹 푸시로 이어 보내 거래 안내가 끊기지 않는다. 활성 판을 되돌리는 길이 있어 잘못된 문안을 빨리 내릴 수 있다.
+- 잃는 점: 표 두 개와 API 여덟, 운영 화면 하나가 늘고, 문안 한 줄을 고쳐도 등록·검토·제출·승인·활성 다섯 단계를 거친다. 제공자 심사 1~2영업일 [가정] 동안 급한 문구 변경을 기다려야 한다. 2인 규칙 때문에 한 사람만 있을 때는 소유자 승인과 사유가 필요하다.
+- 남는 한계: Solapi v2 템플릿 등록 API의 필드·상태·심사 기한은 2026-11-26 문서로 확인했지만, **정보성 `categoryCode`의 실제 값**(초기 `BOOKING_CONFIRMED`는 Solapi 주문 알림 예시의 `003001` [가정]), **반려 `comments`의 실제 문구와 우리 코드 매핑**, 채널 ID·계약·계정·심사는 남아 있다. 카카오가 다국어 템플릿·수정 재심사 규칙을 바꾸면 다시 본다. 알림톡 1차는 한국어만이라 영어·일본어·중국어 수신자는 이메일·웹 푸시만 받는다. 템플릿 관리 화면은 설계만 했고 구현은 뒤 몫이다.
+- 검토한 다른 안: 문안을 운영 화면에서 직접 쓰고 DB에 저장(코드·계약·번역 검토가 흩어지고, 보내는 정본이 DB가 되어 배포와 어긋난다), 제공자 심사 없이 활성(카카오가 거절하므로 보낼 수 없다), 반려 때 같은 판을 고쳐 재제출(제공자에 낸 본문과 코드가 달라져 해시·감사가 깨진다), 활성도 `cs_lead`가 하기(제출·검토·활성가 한 사람에게 몰려 2인 규칙이 사라진다), 긴급 활성 예외(법정 고지가 틀린 문안이 심사 없이 나갈 수 있다).

@@ -234,8 +234,8 @@ if (buildText != null) build = parseBuildOrder(buildText);
 if (tableText != null) table = parseScopeTable(tableText);
 if (manifestText != null) manifest = parseManifest(manifestText);
 
-if (build.length !== 105) errors.push(`막음: docs/BUILD_ORDER.md: 기능이 ${build.length}개다(105개여야 한다)`);
-if (table.length !== 105) errors.push(`막음: docs/release/v1-scope.md: 분류 표 줄이 ${table.length}개다(105개여야 한다)`);
+if (build.length !== 109) errors.push(`막음: docs/BUILD_ORDER.md: 기능이 ${build.length}개다(109개여야 한다)`);
+if (table.length !== 109) errors.push(`막음: docs/release/v1-scope.md: 분류 표 줄이 ${table.length}개다(109개여야 한다)`);
 
 const buildById = new Map(build.map((r) => [r.id, r]));
 const tableById = new Map(table.map((r) => [r.id, r]));
