@@ -868,7 +868,7 @@ test('D-T18 ①_local·ci밖에서는_S3주소를바꾸는AWS_ENDPOINT_URL*·AWS
 
 const ROLLOUT_ON = [...BASE, 'service.rollout.enabled=true'];
 
-test('CH-01 Rollout을켜면_Deployment없이Rollout하나이고_카나리10·50·100%·일시정지60·120초·revisionHistoryLimit5·rollbackWindow3이다', () => {
+test('CH-01 Rollout을켜면_Deployment없이Rollout하나이고_카나리5·25·50·100%·일시정지300초·revisionHistoryLimit5·rollbackWindow3이다', () => {
   const { objects, error } = render(ROLLOUT_ON);
   assert.equal(error, undefined, error);
   assert.equal(all(objects, 'Deployment').filter((o) => o.metadata.name === 'example-svc').length, 0, 'Rollout과 Deployment가 함께 렌더됐다');
@@ -879,8 +879,9 @@ test('CH-01 Rollout을켜면_Deployment없이Rollout하나이고_카나리10·50
   assert.equal(r.metadata.name, 'example-svc');
   assert.equal(r.spec.revisionHistoryLimit, 5);
   assert.deepEqual(r.spec.strategy.canary.steps, [
-    { setWeight: 10, pause: { duration: '60s' } },
-    { setWeight: 50, pause: { duration: '120s' } },
+    { setWeight: 5, pause: { duration: '300s' } },
+    { setWeight: 25, pause: { duration: '300s' } },
+    { setWeight: 50, pause: { duration: '300s' } },
     { setWeight: 100 },
   ]);
   assert.equal(r.spec.strategy.canary.rollbackWindow.revisions, 3);
@@ -927,9 +928,24 @@ test('CH-03 PDB를켜면_PodDisruptionBudget하나_maxUnavailable1·unhealthyPod
   assert.notEqual(p.spec.maxUnavailable, 2);
 });
 
-test('CH-04 KEDA를켜면_ScaledObject하나_scaleTargetRef가차트이름이고_triggers를그대로_passed_fallback은3·-1이다', () => {
+test('OPS-430 ① KEDA ScaledObject는_최소·최대복제수와_폴링·쿨다운을_값에서받고_fallback은_currentReplicas다', () => {
   const file = valuesFile(
-    ['service:', '  keda:', '    enabled: true', '    triggers:', '      - type: prometheus', '        metadata:', '          serverAddress: http://prom.observability.svc:9090', '          query: sum(peaket_realtime_gw_connections)', '          threshold: "100"', ''].join('\n'),
+    [
+      'service:',
+      '  keda:',
+      '    enabled: true',
+      '    minReplicaCount: 2',
+      '    maxReplicaCount: 12',
+      '    pollingInterval: 15',
+      '    cooldownPeriod: 600',
+      '    triggers:',
+      '      - type: prometheus',
+      '        metadata:',
+      '          serverAddress: http://prom.observability.svc:9090',
+      '          query: sum(peaket_realtime_gw_connections)',
+      '          threshold: "100"',
+      '',
+    ].join('\n'),
   );
   const { objects, error } = renderFiles([file], BASE);
   assert.equal(error, undefined, error);
@@ -938,9 +954,13 @@ test('CH-04 KEDA를켜면_ScaledObject하나_scaleTargetRef가차트이름이고
   const s = scaled[0];
   assert.equal(s.apiVersion, 'keda.sh/v1alpha1');
   assert.deepEqual(s.spec.scaleTargetRef, { name: 'example-svc' });
+  assert.equal(s.spec.minReplicaCount, 2);
+  assert.equal(s.spec.maxReplicaCount, 12);
+  assert.equal(s.spec.pollingInterval, 15);
+  assert.equal(s.spec.cooldownPeriod, 600);
   assert.deepEqual(s.spec.triggers, [{ type: 'prometheus', metadata: { serverAddress: 'http://prom.observability.svc:9090', query: 'sum(peaket_realtime_gw_connections)', threshold: '100' } }]);
-  // 지표를 못 읽으면 0으로 줄이지 않고 지금 복제 수를 유지한다(-1)
-  assert.deepEqual(s.spec.fallback, { failureThreshold: 3, replicas: -1 });
+  // 지표를 못 읽으면 0이나 -1로 줄이지 않고 지금 복제 수를 유지한다(docs/observability.md §5 '자동 제어 입력 감시')
+  assert.deepEqual(s.spec.fallback, { failureThreshold: 3, replicas: 0, behavior: 'currentReplicas' });
   assert.equal(all(render(BASE).objects, 'ScaledObject').length, 0);
 });
 
@@ -1038,7 +1058,7 @@ test('CH-08 Rollout과HPA를함께켜면_scaleTargetRef가argoproj.io/v1alpha1_R
 
 test('CH-09 Rollout과KEDA를함께켜면_scaleTargetRef가argoproj.io/v1alpha1_Rollout이고_Deployment때는지금처럼이름만이다', () => {
   const file = valuesFile(
-    ['service:', '  keda:', '    enabled: true', '    triggers:', '      - type: prometheus', '        metadata:', '          serverAddress: http://prom.observability.svc:9090', '          query: sum(peaket_realtime_gw_connections)', '          threshold: "100"', ''].join('\n'),
+    ['service:', '  keda:', '    enabled: true', '    minReplicaCount: 2', '    maxReplicaCount: 12', '    triggers:', '      - type: prometheus', '        metadata:', '          serverAddress: http://prom.observability.svc:9090', '          query: sum(peaket_realtime_gw_connections)', '          threshold: "100"', ''].join('\n'),
   );
   const on = renderFiles([file], [...BASE, 'service.rollout.enabled=true']);
   assert.equal(on.error, undefined, on.error);
@@ -1051,4 +1071,128 @@ test('CH-09 Rollout과KEDA를함께켜면_scaleTargetRef가argoproj.io/v1alpha1_
   const off = renderFiles([file], BASE);
   assert.equal(off.error, undefined, off.error);
   assert.deepEqual(find(off.objects, 'ScaledObject', 'example-svc').spec.scaleTargetRef, { name: 'example-svc' });
+});
+
+// --- F-09-10(OPS-430): KEDA 트리거·HPA 충돌·카나리 단계 검증(계획 docs/review/plans/F-09-10.md §5·§6) ---
+// 정본: docs/infra.md §5, docs/devops.md §6.1·§6.2·§6.7, docs/observability.md §5 '자동 제어 입력 감시',
+// KEDA v2.21 ScaledObject 스펙(fallback behavior currentReplicas, 2026-11-27 확인).
+
+function kedaValues(triggerLines) {
+  return valuesFile(
+    [
+      'service:',
+      '  keda:',
+      '    enabled: true',
+      '    minReplicaCount: 2',
+      '    maxReplicaCount: 12',
+      '    triggers:',
+      ...triggerLines.map((l) => `      ${l}`),
+      '',
+    ].join('\n'),
+  );
+}
+
+test('OPS-430 ② HPA와_KEDA를_같은대상에_함께켜면_렌더를_멈춘다', () => {
+  const file = kedaValues([
+    '- type: prometheus',
+    '  metadata:',
+    '    serverAddress: http://prom.observability.svc:9090',
+    '    query: sum(peaket_realtime_gw_connections)',
+    '    threshold: "100"',
+  ]);
+  const both = renderFiles([file], [...BASE, 'service.autoscaling.enabled=true']);
+  assert.notEqual(both.error, undefined, 'HPA와 KEDA를 함께 켰는데 렌더됐다');
+  assert.match(both.error, /KEDA|keda|HPA|autoscaling/);
+  // 하나만 켜면 지금처럼 렌더된다
+  const kedaOnly = renderFiles([file], BASE);
+  assert.equal(kedaOnly.error, undefined, kedaOnly.error);
+  assert.equal(all(kedaOnly.objects, 'ScaledObject').length, 1);
+  assert.equal(all(kedaOnly.objects, 'HorizontalPodAutoscaler').length, 0);
+  const hpaOnly = render([...BASE, 'service.autoscaling.enabled=true']);
+  assert.equal(hpaOnly.error, undefined, hpaOnly.error);
+  assert.equal(all(hpaOnly.objects, 'HorizontalPodAutoscaler').length, 1);
+  assert.equal(all(hpaOnly.objects, 'ScaledObject').length, 0);
+});
+
+test('OPS-430 ③ KEDA_트리거는_cron·prometheus·kafka·redis만_받고_종류마다_필수metadata가_없으면_렌더를_멈춘다', () => {
+  // 네 종류를 한 ScaledObject에 넣어도 각 metadata가 그대로 남는다
+  const valid = kedaValues([
+    '- type: cron',
+    '  metadata:',
+    '    start: "0 20 * * *"',
+    '    end: "0 22 * * *"',
+    '    desiredReplicas: "6"',
+    '    timezone: Asia/Seoul',
+    '- type: prometheus',
+    '  metadata:',
+    '    serverAddress: http://prom.observability.svc:9090',
+    '    query: sum(peaket_queue_waiting)',
+    '    threshold: "1000"',
+    '- type: kafka',
+    '  metadata:',
+    '    bootstrapServers: kafka:9092',
+    '    consumerGroup: purchase-svc',
+    '    topic: trade.orders',
+    '    lagThreshold: "1000"',
+    '- type: redis',
+    '  metadata:',
+    '    addressFrom:',
+    '      secretKeyRef:',
+    '        name: queue-redis',
+    '        key: host',
+    '    listName: "q:{event:*}:wait"',
+    '    listLength: "1000"',
+  ]);
+  const ok = renderFiles([valid], BASE);
+  assert.equal(ok.error, undefined, ok.error);
+  const s = find(ok.objects, 'ScaledObject', 'example-svc');
+  assert.ok(s, 'ScaledObject example-svc');
+  assert.deepEqual(s.spec.triggers.map((t) => t.type), ['cron', 'prometheus', 'kafka', 'redis']);
+  assert.equal(s.spec.triggers[0].metadata.timezone, 'Asia/Seoul');
+
+  const badCases = [
+    ['모르는 종류', ['- type: sqs', '  metadata: {}']],
+    ['CPU 트리거', ['- type: cpu', '  metadata:', '    type: Utilization', '    value: "70"']],
+    ['prometheus threshold 없음', ['- type: prometheus', '  metadata:', '    serverAddress: http://prom.observability.svc:9090', '    query: sum(x)']],
+    ['kafka topic 없음', ['- type: kafka', '  metadata:', '    bootstrapServers: kafka:9092', '    consumerGroup: purchase-svc', '    lagThreshold: "1000"']],
+    ['cron desiredReplicas 없음', ['- type: cron', '  metadata:', '    start: "0 20 * * *"', '    end: "0 22 * * *"', '    timezone: Asia/Seoul']],
+    ['redis listLength 없음', ['- type: redis', '  metadata:', '    addressFrom:', '      secretKeyRef:', '        name: queue-redis', '        key: host', '    listName: "q:{event:*}:wait"']],
+  ];
+  for (const [label, lines] of badCases) {
+    const r = renderFiles([kedaValues(lines)], BASE);
+    assert.notEqual(r.error, undefined, `${label}: 렌더됐다`);
+    assert.match(r.error, /KEDA|keda|trigger|트리거/, `${label}: 오류 문구`);
+  }
+});
+
+test('OPS-430 ⑧ Argo_Rollouts_카나리_단계는_5·25·50·100%와_5분대기이고_rollbackWindow3·revisionHistoryLimit5다', () => {
+  const { objects, error } = render(ROLLOUT_ON);
+  assert.equal(error, undefined, error);
+  const r = find(objects, 'Rollout', 'example-svc');
+  assert.ok(r, 'Rollout example-svc');
+  assert.equal(r.spec.revisionHistoryLimit, 5);
+  assert.deepEqual(r.spec.strategy.canary.steps, [
+    { setWeight: 5, pause: { duration: '300s' } },
+    { setWeight: 25, pause: { duration: '300s' } },
+    { setWeight: 50, pause: { duration: '300s' } },
+    { setWeight: 100 },
+  ]);
+  assert.equal(r.spec.strategy.canary.rollbackWindow.revisions, 3);
+  assert.equal('pause' in r.spec.strategy.canary.steps.at(-1), false, '마지막 100% 단계에 pause가 있으면 롤아웃이 끝나지 않는다');
+});
+
+test('OPS-430 ⑨ Argo_Rollouts_단계가_100%로_끝나지않거나_줄어들면_렌더를_멈춘다', () => {
+  const badSteps = [
+    ['마지막 90', ['- { weight: 50, pauseSeconds: 300 }', '- { weight: 90 }']],
+    ['가중치 감소', ['- { weight: 50, pauseSeconds: 300 }', '- { weight: 25, pauseSeconds: 300 }', '- { weight: 100 }']],
+    ['가중치 0', ['- { weight: 0 }', '- { weight: 100 }']],
+    ['가중치 101', ['- { weight: 101 }']],
+    ['마지막에 pause', ['- { weight: 50, pauseSeconds: 300 }', '- { weight: 100, pauseSeconds: 300 }']],
+  ];
+  for (const [label, lines] of badSteps) {
+    const file = valuesFile(['service:', '  rollout:', '    enabled: true', '    steps:', ...lines.map((l) => `      ${l}`), ''].join('\n'));
+    const r = renderFiles([file], BASE);
+    assert.notEqual(r.error, undefined, `${label}: 렌더됐다`);
+    assert.match(r.error, /rollout|Rollout|카나리|steps|weight/, `${label}: 오류 문구`);
+  }
 });
