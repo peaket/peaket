@@ -4,7 +4,16 @@
 import 'reflect-metadata';
 import { execFileSync } from 'node:child_process';
 import { CreateKeyCommand, KMSClient } from '@aws-sdk/client-kms';
-import { CreateBucketCommand, DeleteObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  CreateBucketCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  HeadObjectCommand,
+  ListObjectVersionsCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import * as inv from '../src/modules/investigations/index.js';
 
@@ -31,9 +40,25 @@ beforeAll(async () => {
   s3 = new S3Client({ endpoint, region: REGION, forcePathStyle: true, credentials: { accessKeyId: 'test', secretAccessKey: 'test' } });
   kms = new KMSClient({ endpoint, region: REGION, credentials: { accessKeyId: 'test', secretAccessKey: 'test' } });
   const deadline = Date.now() + 60_000;
+  // 버킷과 키 생성을 따로 멱등하게 한다(TR-21). 한 try에 묶으면 키 생성 실패 뒤 버킷 중복으로 다시 실패한다.
   for (;;) {
     try {
-      await s3.send(new CreateBucketCommand({ Bucket: BUCKET, ObjectLockEnabledForBucket: true }));
+      await s3.send(new HeadBucketCommand({ Bucket: BUCKET }));
+      break;
+    } catch {
+      try {
+        await s3.send(new CreateBucketCommand({ Bucket: BUCKET, ObjectLockEnabledForBucket: true }));
+        break;
+      } catch (e) {
+        const name = (e as { name?: string }).name;
+        if (name === 'BucketAlreadyOwnedByYou' || name === 'BucketAlreadyExists') break;
+        if (Date.now() > deadline) throw e;
+        await new Promise((r) => setTimeout(r, 300));
+      }
+    }
+  }
+  for (;;) {
+    try {
       kmsKeyId = (await kms.send(new CreateKeyCommand({ Description: 'peaket-evidence-it' }))).KeyMetadata!.KeyId!;
       break;
     } catch (e) {
@@ -59,13 +84,39 @@ afterAll(async () => {
 });
 
 describe('F-04-14 S3 증거 저장소', () => {
-  test('FX-T13 ⑬ [ASVS v5.0.0-13.2.2] moto S3는 법적 보존 ON 객체의 삭제를 거절하고 보존을 푼 뒤 파기 작업이 모든 판을 지운다', async () => {
+  test('FX-T13 ⑬ [ASVS v5.0.0-13.2.2] 법적 보존 ON 객체는 판을 지정해도 지우지 못하고 보존을 푼 뒤 파기 작업이 모든 판을 지운다', async () => {
     const key = 'evidence/case-1/bundle-1/case.json';
     expect(await store.putOnce(key, Buffer.from('{"case":1}'), 'application/json')).toBe('CREATED');
-    const head = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
-    expect(Buffer.from(await head.Body!.transformToByteArray()).toString('utf8')).toBe('{"case":1}');
-    await expect(s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }))).rejects.toThrow();
+    const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }));
+    expect(head.ObjectLockLegalHoldStatus).toBe('ON');
+    expect(head.ServerSideEncryption).toBe('aws:kms');
+    expect(String(head.SSEKMSKeyId)).toContain(kmsKeyId);
+    const body = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
+    expect(Buffer.from(await body.Body!.transformToByteArray()).toString('utf8')).toBe('{"case":1}');
+
+    // 판을 하나 더 만든다. 법적 보존 ON인 판은 VersionId를 지정해도 지울 수 없다.
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+        Body: Buffer.from('{"case":2}'),
+        ContentType: 'application/json',
+        ServerSideEncryption: 'aws:kms',
+        SSEKMSKeyId: kmsKeyId,
+        ObjectLockLegalHoldStatus: 'ON',
+      }),
+    );
+    const versions = await s3.send(new ListObjectVersionsCommand({ Bucket: BUCKET, Prefix: key }));
+    expect(versions.Versions?.length).toBeGreaterThanOrEqual(2);
+    for (const v of versions.Versions ?? []) {
+      await expect(s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key, VersionId: v.VersionId }))).rejects.toThrow();
+    }
+    await expect(s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }))).resolves.toBeTruthy();
+
     await store.dispose('evidence/case-1/bundle-1/');
+    const after = await s3.send(new ListObjectVersionsCommand({ Bucket: BUCKET, Prefix: key }));
+    expect(after.Versions ?? []).toHaveLength(0);
+    expect(after.DeleteMarkers ?? []).toHaveLength(0);
     await expect(s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }))).rejects.toThrow();
   });
 

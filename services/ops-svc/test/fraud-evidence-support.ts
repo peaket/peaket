@@ -50,6 +50,8 @@ export interface MakePngOptions {
   readonly rgb?: readonly [number, number, number];
   /** 메타데이터가 지워지는지 보려고 넣는 tEXt 청크 */
   readonly text?: string;
+  /** 추가 청크(iCCP·eXIf 등). PNG 서명 뒤 IHDR 앞에 넣는다 */
+  readonly extraChunks?: readonly { type: string; data: Uint8Array }[];
 }
 
 /** 인터레이스 없음·8비트 RGBA PNG. 테스트가 직접 만든 작은 그림이다. */
@@ -76,9 +78,56 @@ export function makePng(o: MakePngOptions): Buffer {
   ihdr[11] = 0;
   ihdr[12] = 0;
   const parts = [Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr)];
+  for (const c of o.extraChunks ?? []) {
+    if (c.type === 'iCCP') {
+      // iCCP: 프로필 이름 + 0 + 압축 방식 0 + zlib 압축 프로필
+      const profile = Buffer.concat([Buffer.from('sRGB\0\0', 'latin1'), deflateSync(Buffer.from(c.data))]);
+      parts.push(chunk('iCCP', profile));
+    } else {
+      parts.push(chunk(c.type, c.data));
+    }
+  }
   if (o.text) parts.push(chunk('tEXt', Buffer.from(`Comment\0${o.text}`, 'latin1')));
   parts.push(chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0)));
   return Buffer.concat(parts);
+}
+
+/** PIL로 만든 2×2 sRGB PNG(iCCP 포함). 460바이트 */
+const ICC_PNG_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAABdWlDQ1BJQ0MgUHJvZmlsZQAAeJx1kb1LAnEYxz9qYaThUENIg4NFg0IURGMY5GINapDVoudb4Olxp4S0Bi0NQkPU0tvQf1Br0FoQBEUQ0dzY2xJyPaeCEvocv3s+fH/P9+G558AeKSiq0TcParGsR8Mh32pized8x4UXG36cScXQlmKLcXrGz6NUSjwErV6967qGK50xFLANCM8qml4WlmmIbJU1i/eER5R8Mi18IhzQZUDhW0tPNfnN4lyTvyzW49EFsFs9fbkOTnWwktdV4Ulhv1qoKK15rC9xZ4orMcleOWMYRAkTwkeKCpsUKBOUXJSddfdNNXzLlMSjyFujii6OHHnxBkStSNeM5KzoGXkKVK29/9+nkZ2ZbnZ3h6D/1TQ/x8G5D/Waaf6emmb9DBwvcF1s+0uyp7lv0WttzX8Mnh24vGlrqQO42oXRZy2pJxuSQ449m4WPCxhKwPA9DK43d9W65/wJ4tvyi+7g8AgmpN6z8QcF4GgMvfDbyAAAABJJREFUeJxjPCEnx8DAwMQABgANBAEIoxNOWgAAAABJRU5ErkJggg==';
+/** PIL로 만든 2×2 JPEG(EXIF 포함). 670바이트 */
+const JPEG_B64 =
+  '/9j/4AAQSkZJRgABAQAAAQABAAD/4QAiRXhpZgAATU0AKgAAAAgAAQEOAAIAAAACeAAAAAAAAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQEBQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAEf/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABD/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/EH//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/EH//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/EH//2Q==';
+
+/** iCCP 청크가 있는 실제 PNG(PIL 산출물). 마스킹이 ICC를 지우는지 본다 */
+export function makeIccPng(): Buffer {
+  return Buffer.from(ICC_PNG_B64, 'base64');
+}
+
+/** EXIF가 있는 실제 JPEG(PIL 산출물) */
+export function makeJpegWithExif(): Buffer {
+  return Buffer.from(JPEG_B64, 'base64');
+}
+
+/** IHDR만 있는 PNG 머리. 화소 상한 검사처럼 해독 전에 크기만 보는 시험에 쓴다 */
+export function makePngHeader(width: number, height: number): Buffer {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(Buffer.alloc(0))), chunk('IEND', Buffer.alloc(0))]);
+}
+
+/** 정확한 전체 크기의 유효한 PNG(큰 tEXt 청크로 채운다) */
+export function makePngOfSize(totalBytes: number): Buffer {
+  const base = makePng({ width: 2, height: 2 });
+  const pad = totalBytes - base.length - 12; // tEXt 청크 머리·CRC
+  if (pad < 5) return base.subarray(0, totalBytes);
+  const text = Buffer.concat([Buffer.from('Pad\0', 'latin1'), Buffer.alloc(pad - 4, 0x20)]);
+  const chunked = chunk('tEXt', text);
+  const at = base.length - 12; // IEND 앞
+  return Buffer.concat([base.subarray(0, at), chunked, base.subarray(at)]);
 }
 
 export interface PngImage {

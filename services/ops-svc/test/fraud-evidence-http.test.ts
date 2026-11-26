@@ -6,6 +6,7 @@
 // [ASVS v5.0.0-14.2.6] 최소화, [ASVS v5.0.0-16.3.4] 실패 기록, [ASVS v5.0.0-16.4.2] 관리 연속성.
 import 'reflect-metadata';
 import { createHash, randomUUID } from 'node:crypto';
+import canonicalize from 'canonicalize';
 import { createService, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
@@ -68,10 +69,15 @@ class EvidenceStoreFake {
   readonly posts = new Map<string, any>();
   readonly idem = new Map<string, any>();
   forcedExportCount: number | null = null;
+  failNextPutBundle = false;
 
   constructor(private readonly cases: MemoryInvestigationStore) {}
 
   async putBundle(b: any, c: any, o: any = {}) {
+    if (this.failNextPutBundle) {
+      this.failNextPutBundle = false;
+      throw new Error('evidence store down');
+    }
     if (o.idem) {
       const key = `${o.idem.accountRef}:${o.idem.operation}:${o.idem.key}`;
       if (this.idem.has(key)) return { replayed: true, result: this.idem.get(key) };
@@ -165,6 +171,13 @@ class EvidenceStoreFake {
     const row = this.custody.get(bundleId)?.find((r) => r.seq === seq);
     if (row) row.reason = '고친 행';
   }
+  restoreCustody(bundleId: string, seq: number, reason: string | null) {
+    const row = this.custody.get(bundleId)?.find((r) => r.seq === seq);
+    if (row) row.reason = reason;
+  }
+  custodyOf(bundleId: string) {
+    return [...(this.custody.get(bundleId) ?? [])];
+  }
   #row(bundleId: string, c: any) {
     const rows = this.custody.get(bundleId) ?? [];
     const seq = rows.length + 1;
@@ -178,7 +191,13 @@ class EvidenceStoreFake {
 class ObjectStoreFake {
   readonly objects = new Map<string, { bytes: Uint8Array; contentType: string; legalHold: boolean }>();
   readonly disposeCalls: string[] = [];
+  nextPutResult: 'DIFFERENT' | null = null;
   async putOnce(key: string, bytes: Uint8Array, contentType: string) {
+    if (this.nextPutResult !== null) {
+      const result = this.nextPutResult;
+      this.nextPutResult = null;
+      return result;
+    }
     const have = this.objects.get(key);
     if (have) return Buffer.from(have.bytes).equals(Buffer.from(bytes)) ? 'SAME' : 'DIFFERENT';
     this.objects.set(key, { bytes: Uint8Array.from(bytes), contentType, legalHold: true });
@@ -201,11 +220,6 @@ class ObjectStoreFake {
   tamper(key: string) {
     const o = this.objects.get(key);
     if (o) o.bytes = Buffer.concat([Buffer.from(o.bytes), Buffer.from('x')]);
-  }
-  tryDeleteAsService(key: string): void {
-    const o = this.objects.get(key);
-    if (o?.legalHold) throw new Error('ObjectLockLegalHold');
-    this.objects.delete(key);
   }
 }
 
@@ -230,12 +244,14 @@ class InventoryFake {
 class DataRequestsFake {
   readonly scopes = new Map<string, any>();
   readonly submitted: any[] = [];
+  readonly statuses = new Map<string, string>();
   async approvedScope(i: { dataRequestId: string; eventId: string }) {
     return this.scopes.get(i.dataRequestId) ?? null;
   }
   async attachSubmission(i: any) {
     this.submitted.push(i);
-    return { documentId: id(0x800) };
+    this.statuses.set(i.dataRequestId, 'EXTRACTED');
+    return { documentId: id(0x800), status: 'EXTRACTED' as const };
   }
 }
 
@@ -367,13 +383,17 @@ const cancellations = {
   },
 };
 let priorityResults: ('SAME_SEAT' | 'SAME_TIER' | 'NO_SEAT' | 'ENTRY_STARTED')[] = [];
+const priorityCalls: any[] = [];
 const priority = {
   async run(i: any) {
+    priorityCalls.push(i);
     return {
       decision: 'ACCEPTED',
       grants: i.cancelledTicketIds.map((ticketId: string, n: number) => {
         const result = priorityResults[n] ?? 'SAME_SEAT';
-        return result === 'NO_SEAT' || result === 'ENTRY_STARTED' ? { ticketId, result } : { ticketId, result, grantId: randomUUID(), seatId: randomUUID(), price: 100_000, expiresAt: iso(clock.now() + 48 * HOUR), version: 1 };
+        return result === 'NO_SEAT' || result === 'ENTRY_STARTED'
+          ? { ticketId, result }
+          : { ticketId, result, grantId: randomUUID(), seatId: randomUUID(), price: 100_000, fee: 0, expiresAt: iso(clock.now() + 48 * HOUR), version: 1 };
       }),
     };
   },
@@ -389,11 +409,12 @@ const restrictions = {
   },
 };
 
+const holderNotices: any[] = [];
 const investigationDeps: any = {
   store: cases,
   schedule,
   locks,
-  notifier: { holderNotice: async () => undefined },
+  notifier: { holderNotice: async (i: any) => void holderNotices.push(i) },
   fraudNotifier: {
     actionNotice: async () => undefined,
     holderResult: async () => undefined,
@@ -522,6 +543,10 @@ const createBundle = (caseId: string, who: Record<string, string>, idem = random
 const getBundle = (bundleId: string, who: Record<string, string>) => send('GET', `/v1/ops/evidence-bundles/${bundleId}`, who);
 const listBundles = (who: Record<string, string>) => send('GET', `/v1/ops/evidence-bundles?eventId=${EVENT}`, who);
 const exportBundle = (bundleId: string, who: Record<string, string>, body: any, idem = randomUUID()) => send('POST', `/v1/ops/evidence-bundles/${bundleId}/exports`, who, { idem, body });
+const holdChange = (bundleId: string, who: Record<string, string>, body: any, idem = randomUUID()) => send('POST', `/v1/ops/evidence-bundles/${bundleId}/hold-changes`, who, { idem, body });
+const holdEndRequest = (bundleId: string, who: Record<string, string>, body: any, idem = randomUUID()) => send('POST', `/v1/ops/evidence-bundles/${bundleId}/hold-end-requests`, who, { idem, body });
+const holdEndConfirm = (bundleId: string, who: Record<string, string>, reauth?: string, idem = randomUUID()) =>
+  send('POST', `/v1/ops/evidence-bundles/${bundleId}/hold-end-confirmations`, who, { idem, ...(reauth ? { reauth } : {}) });
 const getApproval = (id: string, who: Record<string, string>) => send('GET', `/v1/ops/approval-requests/${id}`, who);
 const approve = (id: string, who: Record<string, string>) =>
   send('POST', `/v1/ops/approval-requests/${id}/approvals`, who, { reauth: kit.token({ accountId: who['x-user-id']!, sessionId: who['x-session-id']!, act: 'APPROVAL' }), body: { reason: '근거를 확인했다' } });
@@ -561,9 +586,17 @@ beforeEach(() => {
   submission.calls.length = 0;
   submission.nextRows = null;
   dataRequests.submitted.length = 0;
+  dataRequests.statuses.clear();
   priorityResults = [];
+  priorityCalls.length = 0;
   compensation.calls.length = 0;
+  holderNotices.length = 0;
   evidenceStore.forcedExportCount = null;
+  evidenceStore.failNextPutBundle = false;
+  objects.nextPutResult = null;
+  objects.disposeCalls.length = 0;
+  alerts.length = 0;
+  captures.views.clear();
   vi.unstubAllGlobals();
 });
 
@@ -587,6 +620,27 @@ describe('F-04-14 HTTP', () => {
     expect(auto).toBeTruthy();
     expect(auto.status).toBe('SEALED');
     expect(auto.caseId).toBe(c.caseId);
+
+    // 자동 생성이 저장 실패로 막혀도 사건은 ACTIONED에 남고 NOTE를 남긴다. 다음 buildDue가 다시 만든다.
+    const failed = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW - HOUR, members: [memberOf(A(41), { appealResult: 'REJECTED', appealDueAtMs: NOW - HOUR })] });
+    seedTicket({ ticketId: T(41), payerAccountId: A(41) });
+    const created2 = await send('POST', `/v1/ops/fraud-cases/${failed.caseId}/action-requests`, who, { idem: randomUUID(), body: { fraudAction: 'CANCEL_TICKETS', accountIds: [A(41)], reason: '취소' } });
+    const approval2 = String(json(created2).approvalId);
+    expect((await getApproval(approval2, approver)).statusCode).toBe(200);
+    evidenceStore.failNextPutBundle = true;
+    expect((await approve(approval2, approver)).statusCode).toBe(200);
+    const afterFail = json(await getCase(failed.caseId, who));
+    expect(afterFail.status).toBe('ACTIONED');
+    expect(afterFail.events.some((e: any) => e.kind === 'NOTE' && String(e.note ?? '').includes('EVIDENCE_CREATE_FAILED'))).toBe(true);
+    await evidence().buildDue(clock.now());
+    expect(json(await listBundles(who)).items.some((b: any) => b.caseId === failed.caseId)).toBe(true);
+
+    for (const status of ['INVESTIGATING', 'APPEAL_PENDING', 'DECISION_PENDING'] as const) {
+      const seeded = await seedCase({ status, members: [memberOf(A(42), { appealResult: status === 'INVESTIGATING' ? 'NOT_REQUESTED' : 'REJECTED' })] });
+      const rejected = await createBundle(seeded.caseId, who);
+      expect(rejected.statusCode).toBe(409);
+      expect(typeOf(rejected)).toBe('case-not-actioned');
+    }
     const cleared = await seedCase({ status: 'CLEARED', closedAtMs: NOW - HOUR, outcomeLabel: 'HUMAN' });
     const rejected = await createBundle(cleared.caseId, who);
     expect(rejected.statusCode).toBe(409);
@@ -611,10 +665,31 @@ describe('F-04-14 HTTP', () => {
     );
     const manifest = b.files.find((f: any) => f.name === 'manifest.json');
     expect(manifest.sha256).toBe(b.manifestSha256);
-    // 같은 바이트를 다시 쓰는 재시도는 SAME으로 통과한다. 다른 바이트면 DIFFERENT다.
-    expect(await objects.putOnce(`${b.s3Prefix}manifest.json`, objects.objects.get(`${b.s3Prefix}manifest.json`)!.bytes, 'application/json')).toBe('SAME');
-    expect(await objects.putOnce(`${b.s3Prefix}manifest.json`, Buffer.from('다른 바이트'), 'application/json')).toBe('DIFFERENT');
-    expect(() => objects.tryDeleteAsService(`${b.s3Prefix}manifest.json`)).toThrow();
+    // 저장된 실제 바이트로 파일 해시와 목록 해시를 다시 계산한다.
+    for (const f of b.files.filter((x: any) => x.name !== 'manifest.json')) {
+      const bytes = objects.objects.get(`${b.s3Prefix}${f.name}`)!.bytes;
+      expect(createHash('sha256').update(bytes).digest('hex')).toBe(f.sha256);
+      expect(bytes.length).toBe(f.sizeBytes);
+    }
+    const manifestBytes = objects.objects.get(`${b.s3Prefix}manifest.json`)!.bytes;
+    expect(createHash('sha256').update(manifestBytes).digest('hex')).toBe(b.manifestSha256);
+    const manifestJson = JSON.parse(Buffer.from(manifestBytes).toString('utf8'));
+    expect(manifestJson.files).toHaveLength(b.files.length - 1);
+    expect(Buffer.from(manifestBytes).toString('utf8')).toBe(canonicalize(manifestJson));
+
+    // 제품 build가 DIFFERENT를 만나면 봉인하지 않고, 다음 시도에서 정상 봉인한다.
+    const d = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(1), { actionNotifiedAtMs: NOW - DAY })] });
+    const pending = await createBundle(d.caseId, who);
+    const pendingId = String(json(pending).bundleId);
+    objects.nextPutResult = 'DIFFERENT';
+    await evidence().buildDue(clock.now());
+    expect(json(await getBundle(pendingId, who)).status).toBe('BUILDING');
+    await evidence().buildDue(clock.now());
+    const sealedAgain = json(await getBundle(pendingId, who));
+    expect(sealedAgain.status).toBe('SEALED');
+    expect(sealedAgain.manifestSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(objects.disposeCalls).toHaveLength(0);
+    expect([...objects.objects.values()].every((o) => o.legalHold)).toBe(true);
   });
 
   test('FX-T13 ⑥ [ASVS v5.0.0-16.3.4] 파일 한 바이트나 관리 연속성 한 행을 바꾸면 검증 불일치·SEV2·내보내기 차단이다', async () => {
@@ -625,18 +700,25 @@ describe('F-04-14 HTTP', () => {
     await evidence().buildDue(clock.now());
     const b = json(await getBundle(bundleId, who));
     const key = `${b.s3Prefix}records/inv_step.arrow`;
-    objects.tamper(key);
+    const original = Uint8Array.from(objects.objects.get(key)!.bytes);
     alerts.length = 0;
+    objects.tamper(key);
     const verified = await evidence().verifyDue(clock.now());
-    expect(verified.mismatched).toBeGreaterThanOrEqual(1);
+    expect(verified.mismatched).toBe(1);
     expect(alerts.some((a) => a.severity === 'SEV2')).toBe(true);
     const blocked = await exportBundle(bundleId, who, { kind: 'COMPLAINT', reason: '고소' });
     expect(blocked.statusCode).toBe(409);
     expect(typeOf(blocked)).toBe('evidence-integrity-mismatch');
-    objects.tamper(key); // 같은 바이트로 되돌리지 않고 관리 연속성 변조도 본다
+
+    // 객체를 원래 바이트로 되돌리면 다시 맞고, 관리 연속성만 깨면 그것만 잡는다.
+    objects.objects.get(key)!.bytes = original;
+    alerts.length = 0;
+    expect(await evidence().verifyDue(clock.now())).toMatchObject({ mismatched: 0 });
     evidenceStore.tamperCustody(bundleId, 2);
     const second = await evidence().verifyDue(clock.now());
-    expect(second.mismatched).toBeGreaterThanOrEqual(1);
+    expect(second.mismatched).toBe(1);
+    expect(alerts.some((a) => a.severity === 'SEV2')).toBe(true);
+    evidenceStore.restoreCustody(bundleId, 2, null);
   });
 
   test('FX-T13 ⑦ [ASVS v5.0.0-13.2.2] 법적 보존 객체는 ops-svc 신원으로 지우지 못하고 보존 끝 뒤 파기 정비가 지우고 DISPOSED를 남긴다', async () => {
@@ -646,13 +728,25 @@ describe('F-04-14 HTTP', () => {
     const bundleId = String(json(created).bundleId);
     await evidence().buildDue(clock.now());
     const b = json(await getBundle(bundleId, who));
-    const key = `${b.s3Prefix}case.json`;
-    expect(() => objects.tryDeleteAsService(key)).toThrow();
+    expect(objects.disposeCalls).toHaveLength(0);
+    const before = await listBundles(who);
+    expect(before.statusCode).toBe(200);
+    expect((await exportBundle(bundleId, who, { kind: 'COMPLAINT', reason: '정상 내보내기' })).statusCode).toBe(200);
+    expect(objects.disposeCalls).toHaveLength(0);
     const stored = evidenceStore.bundles.get(bundleId)!;
-    stored.createdAtMs = NOW - 2 * 365 * DAY;
-    const disposed = await evidence().disposeDue(clock.now());
-    expect(disposed).toBeGreaterThanOrEqual(1);
+    stored.createdAtMs = NOW - 365 * DAY + HOUR;
+    clock.advance(0);
+    expect(await evidence().disposeDue(clock.now())).toBe(0);
+    expect(objects.disposeCalls).toHaveLength(0);
+    clock.advance(HOUR - 1);
+    expect(await evidence().disposeDue(clock.now())).toBe(0);
+    expect(objects.disposeCalls).toHaveLength(0);
+    clock.advance(1);
+    expect(await evidence().disposeDue(clock.now())).toBe(1);
     expect(objects.disposeCalls).toContain(b.s3Prefix);
+    const custody = await evidenceStore.listCustody(bundleId);
+    expect(custody.at(-1)).toMatchObject({ action: 'DISPOSED', actorId: null });
+    expect(custody.at(-1).reason).toBeTruthy();
     const after = await getBundle(bundleId, who);
     expect(after.statusCode).toBe(410);
     const summary = json(await listBundles(who)).items.find((x: any) => x.bundleId === bundleId);
@@ -677,6 +771,63 @@ describe('F-04-14 HTTP', () => {
     expect(json(detail)).toHaveProperty('files');
     expect((await evidenceStore.listCustody(bundleId)).length).toBe(before + 1);
     expect((await evidenceStore.listCustody(bundleId)).at(-1).action).toBe('VIEWED');
+    const viewedLog = access.records.find((r) => r.action === 'EVIDENCE' && r.caseId === c.caseId);
+    expect(viewedLog).toMatchObject({ action: 'EVIDENCE', caseId: c.caseId });
+    expect(viewedLog.rows).toBeGreaterThan(0);
+  });
+
+  test('FX-T13 ⑮ 보존 이유 변경은 OBJECTION에서만 되고 HOLD_CHANGED를 남긴다', async () => {
+    const who = investigator();
+    const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(1), { actionNotifiedAtMs: NOW - DAY })] });
+    const created = await createBundle(c.caseId, who);
+    const bundleId = String(json(created).bundleId);
+    await evidence().buildDue(clock.now());
+    const objection = await holdChange(bundleId, who, { holdReason: 'OBJECTION', basis: '되돌리기' });
+    expect(objection.statusCode).toBe(422);
+    expect(typeOf(objection)).toBe('hold-reason-invalid');
+    const changed = await holdChange(bundleId, who, { holdReason: 'DISPUTE', basis: '민사 소송 접수 2026-1234' });
+    expect(changed.statusCode, changed.payload).toBe(200);
+    expect(json(changed).holdReason).toBe('DISPUTE');
+    const custody = await evidenceStore.listCustody(bundleId);
+    expect(custody.at(-1)).toMatchObject({ action: 'HOLD_CHANGED', reason: '민사 소송 접수 2026-1234' });
+    const again = await holdChange(bundleId, who, { holdReason: 'INVESTIGATION', basis: '수사 착수' });
+    expect(again.statusCode).toBe(200);
+    expect(json(again).holdReason).toBe('INVESTIGATION');
+  });
+
+  test('FX-T13 ⑯ 보존 끝 요청·확인은 OBJECTION 422·대기 409·요청자 403·재인증 403·commander 확인을 지킨다', async () => {
+    const who = investigator();
+    const approver = commander();
+    const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(1), { actionNotifiedAtMs: NOW - DAY })] });
+    const created = await createBundle(c.caseId, who);
+    const bundleId = String(json(created).bundleId);
+    await evidence().buildDue(clock.now());
+    expect((await holdEndRequest(bundleId, who, { basis: '분쟁 종료' })).statusCode).toBe(422);
+    expect((await holdChange(bundleId, who, { holdReason: 'DISPUTE', basis: '소송' })).statusCode).toBe(200);
+    const requested = await holdEndRequest(bundleId, who, { basis: '합의 종료 2026-11-26' });
+    expect(requested.statusCode, requested.payload).toBe(201);
+    expect(json(requested).holdEndRequest).toMatchObject({ requestedBy: who['x-user-id'], basis: '합의 종료 2026-11-26' });
+    const duplicate = await holdEndRequest(bundleId, who, { basis: '다시' });
+    expect(duplicate.statusCode).toBe(409);
+    expect(typeOf(duplicate)).toBe('hold-end-pending');
+    const self = await holdEndConfirm(bundleId, who, kit.token({ accountId: who['x-user-id']!, sessionId: who['x-session-id']!, act: 'APPROVAL' }));
+    expect(self.statusCode).toBe(403);
+    const noReauth = await holdEndConfirm(bundleId, approver);
+    expect(noReauth.statusCode).toBe(403);
+    expect(typeOf(noReauth)).toBe('reauth-required');
+    const confirmed = await holdEndConfirm(bundleId, approver, kit.token({ accountId: approver['x-user-id']!, sessionId: approver['x-session-id']!, act: 'APPROVAL' }));
+    expect(confirmed.statusCode, confirmed.payload).toBe(200);
+    expect(json(confirmed)).toMatchObject({ bundleId, caseId: c.caseId });
+    expect(Date.parse(json(confirmed).holdEndedAt)).toBe(clock.now());
+    expect(Date.parse(json(confirmed).disposeAfter)).toBe(clock.now() + 30 * DAY);
+    const detail = json(await getBundle(bundleId, who));
+    expect(detail.holdEndedAt).toBe(json(confirmed).holdEndedAt);
+    expect(detail.holdEndRequest).toBeNull();
+    const custody = await evidenceStore.listCustody(bundleId);
+    expect(custody.at(-1)).toMatchObject({ action: 'HOLD_ENDED', actorId: approver['x-user-id'] });
+    expect(evidenceStore.bundles.get(bundleId)!.holdEndConfirmedBy).toBe(approver['x-user-id']);
+    expect(evidenceStore.bundles.get(bundleId)!.holdEndRequestedBy).toBe(who['x-user-id']);
+    expect(evidenceStore.bundles.get(bundleId)!.holdEndConfirmedBy).not.toBe(evidenceStore.bundles.get(bundleId)!.holdEndRequestedBy);
   });
 
   test('FX-T19 ④ [ASVS v5.0.0-5.1.1] 외부 게시물은 PNG·JPEG·PDF만 받고 10MB 초과 413·매직 바이트 불일치 415·화소 상한 422다', async () => {
@@ -704,6 +855,8 @@ describe('F-04-14 HTTP', () => {
     expect(created.statusCode, created.payload).toBe(201);
     const postId = String(json(created).postId);
     expect((await send('GET', `/v1/ops/external-posts/${postId}/capture`, who)).statusCode).toBe(409);
+    expect(captures.views.has(`captures/${postId}/view.png`)).toBe(false);
+    alerts.length = 0;
     scanner.results = ['CLEAN'];
     await external().scanDue(clock.now());
     const view = await send('GET', `/v1/ops/external-posts/${postId}/capture`, who);
@@ -714,9 +867,11 @@ describe('F-04-14 HTTP', () => {
     expect(img.chunks).not.toContain('tEXt');
     expect(pixelAt(img, 1, 1).slice(0, 3)).toEqual([0, 0, 0]);
     const threat = await send('POST', '/v1/ops/external-posts', who, { idem: randomUUID(), multipart: multipart({ fields: { ...fields, url: 'https://example.com/post/threat' }, files: [{ field: 'capture', name: 'capture.png', type: 'image/png', bytes: png }] }) });
+    alerts.length = 0;
     scanner.results = ['THREAT'];
     await external().scanDue(clock.now());
     expect((await send('GET', `/v1/ops/external-posts/${json(threat).postId}/capture`, who)).statusCode).toBe(409);
+    expect(captures.views.has(`captures/${json(threat).postId}/view.png`)).toBe(false);
     expect(alerts.some((a) => a.severity === 'SEV2')).toBe(true);
   });
 
@@ -793,6 +948,10 @@ describe('F-04-14 HTTP', () => {
     const wrongEvent = await exportBundle(bundleId, who, { kind: 'AUTHORITY', dataRequestId: REQUEST, reason: '기관 제출' });
     expect(wrongEvent.statusCode).toBe(409);
     expect(typeOf(wrongEvent)).toBe('data-request-event-mismatch');
+    dataRequests.scopes.delete(REQUEST);
+    const missing = await exportBundle(bundleId, who, { kind: 'AUTHORITY', dataRequestId: REQUEST, reason: '기관 제출' });
+    expect(missing.statusCode).toBe(404);
+    expect(typeOf(missing)).toBe('data-request-not-found');
   });
 
   test('FX-T20 ⑤ C-T71 ② AUTHORITY는 승인 범위의 행만 제출 파일로 넘기고 요청을 EXTRACTED로 옮긴다', async () => {
@@ -801,6 +960,7 @@ describe('F-04-14 HTTP', () => {
     const created = await createBundle(c.caseId, who);
     const bundleId = String(json(created).bundleId);
     await evidence().buildDue(clock.now());
+    inventory.rows.inv_step.push({ table: 'inv_step', accountId: A(1), tsMs: NOW + 2 * HOUR, values: { step: 'SALE', order_id: 'order-outside' } });
     dataRequests.scopes.set(REQUEST, { dataRequestId: REQUEST, eventId: EVENT, status: 'APPROVED', warrant: false, legalBasis: 'PERFORMANCE_ACT', items: ['PURCHASE', 'ACCESS_LOG'], fromMs: NOW - HOUR, toMs: NOW + HOUR, accountIds: [A(1)] });
     const out = await exportBundle(bundleId, who, { kind: 'AUTHORITY', dataRequestId: REQUEST, reason: '공연법 요청' });
     expect(out.statusCode, out.payload).toBe(201);
@@ -810,12 +970,17 @@ describe('F-04-14 HTTP', () => {
     expect(submission.calls[0].rows.map((r: any) => r.accountId)).toEqual([A(1), A(1)]);
     expect(submission.calls[0].rows.every((r: any) => r.table === 'inv_step' || r.table === 'inv_request')).toBe(true);
     expect(submission.calls[0].rows.some((r: any) => r.table === 'inv_link' || r.table === 'inv_behavior')).toBe(false);
+    expect(submission.calls[0].rows.some((r: any) => r.values.order_id === 'order-outside')).toBe(false);
     expect(JSON.stringify(submission.calls[0].rows)).not.toMatch(/ja4|edge_bot_labels|payment_method_ref|card_bin|pid|investigator_opinion/);
     expect(dataRequests.submitted).toHaveLength(1);
     expect(dataRequests.submitted[0].dataRequestId).toBe(REQUEST);
     expect(dataRequests.submitted[0].document.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(dataRequests.statuses.get(REQUEST)).toBe('EXTRACTED');
+    const exportLog = access.records.find((r) => r.action === 'EVIDENCE_EXPORT' && r.detail?.dataRequestId === REQUEST);
+    expect(exportLog).toMatchObject({ action: 'EVIDENCE_EXPORT', rows: 2, detail: { dataRequestId: REQUEST } });
     const custody = await evidenceStore.listCustody(bundleId);
     expect(custody.at(-1)).toMatchObject({ action: 'EXPORTED', exportKind: 'AUTHORITY', dataRequestId: REQUEST, reason: '공연법 요청' });
+    inventory.rows.inv_step.pop();
   });
 
   test('FX-T20 ⑥ C-T71 ③ PROMOTER는 회차 집계 CSV이고 사람 단위 행·좌석 번호가 없다', async () => {
@@ -865,7 +1030,10 @@ describe('F-04-14 HTTP', () => {
     });
     const post = await send('POST', '/v1/ops/external-posts', who, { idem: randomUUID(), multipart: multipart({ fields: { eventId: EVENT, url: 'https://example.com/resale/1', capturedAt: iso(NOW), source: 'MANUAL', postedAt: iso(NOW - HOUR) }, files: [{ field: 'capture', name: 'capture.png', type: 'image/png', bytes: makePng({ width: 2, height: 2 }) }] }) });
     expect(post.statusCode, post.payload).toBe(201);
-    scanner.results = ['CLEAN'];
+    const postNoTime = await send('POST', '/v1/ops/external-posts', who, { idem: randomUUID(), multipart: multipart({ fields: { eventId: EVENT, url: 'https://example.com/resale/2', capturedAt: iso(NOW), source: 'MANUAL' }, files: [{ field: 'capture', name: 'capture.png', type: 'image/png', bytes: makePng({ width: 2, height: 2 }) }] }) });
+    expect(postNoTime.statusCode, postNoTime.payload).toBe(201);
+    scanner.results = ['CLEAN', 'CLEAN'];
+    await external().scanDue(clock.now());
     await external().scanDue(clock.now());
     const created = await createBundle(c.caseId, who);
     const bundleId = String(json(created).bundleId);
@@ -873,6 +1041,7 @@ describe('F-04-14 HTTP', () => {
     const sealed = json(await getBundle(bundleId, who));
     const out = await exportBundle(bundleId, who, { kind: 'COMPLAINT', reason: '고소장' });
     expect(out.statusCode, out.payload).toBe(200);
+    expect(out.headers['cache-control']).toBe('no-store');
     const packet = json(out);
     expect(packet).toMatchObject({
       caseNumber: c.caseId,
@@ -881,12 +1050,26 @@ describe('F-04-14 HTTP', () => {
       bundleManifestSha256: sealed.manifestSha256,
       resaleEvidence: true,
     });
-    expect(packet.resalePosts).toEqual([{ url: 'https://example.com/resale/1', postedAt: iso(NOW - HOUR), captureSha256: json(post).captureSha256 }]);
+    expect(packet.reasonCategories).toEqual(['MACRO_BOT']);
+    expect(packet.bypassedControls.length).toBeGreaterThan(0);
+    expect(packet.resalePosts).toEqual([
+      { url: 'https://example.com/resale/1', postedAt: iso(NOW - HOUR), captureSha256: json(post).captureSha256 },
+      { url: 'https://example.com/resale/2', postedAt: iso(NOW), captureSha256: json(postNoTime).captureSha256 },
+    ]);
     for (const secret of [A(1), '010-1111-2222', '127.0.0.1', 'contactRef', 'paymentMethodRef', 'deviceRef', 'c-1', 'pm-1', 'd-1']) {
       expect(out.payload).not.toContain(secret);
     }
+    expect(out.payload).not.toMatch(/captureKey|capture_key|base64|원본/);
     const custody = await evidenceStore.listCustody(bundleId);
     expect(custody.at(-1)).toMatchObject({ action: 'EXPORTED', exportKind: 'COMPLAINT', reason: '고소장' });
+
+    const noPostCase = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', reasonCategory: 'QUEUE_BYPASS', members: [memberOf(A(1), { actionNotifiedAtMs: NOW - DAY })] });
+    const noPostBundle = String(json(await createBundle(noPostCase.caseId, who)).bundleId);
+    await evidence().buildDue(clock.now());
+    const noPost = await exportBundle(noPostBundle, who, { kind: 'COMPLAINT', reason: '고소' });
+    expect(noPost.statusCode, noPost.payload).toBe(200);
+    expect(json(noPost)).toMatchObject({ resaleEvidence: false, resalePosts: [] });
+    expect(json(noPost).bypassedControls.length).toBeGreaterThan(0);
   });
 
   test('FX-T20 ⑧ C-T71 ① 사유 없음 422·봉인 전 409·파기 410이고 하루 20회를 넘으면 429다', async () => {
@@ -899,9 +1082,12 @@ describe('F-04-14 HTTP', () => {
     expect(typeOf(beforeSeal)).toBe('evidence-not-sealed');
     await evidence().buildDue(clock.now());
     const noReason = await exportBundle(bundleId, who, { kind: 'COMPLAINT' } as any);
-    expect(noReason.statusCode).toBe(400);
+    expect(noReason.statusCode).toBe(422);
+    expect(typeOf(noReason)).toBe('invalid-body');
+    evidenceStore.forcedExportCount = 19;
+    expect((await exportBundle(bundleId, who, { kind: 'PROMOTER', reason: '열아홉' })).statusCode).toBe(200);
     evidenceStore.forcedExportCount = 20;
-    const limited = await exportBundle(bundleId, who, { kind: 'PROMOTER', reason: '보고' });
+    const limited = await exportBundle(bundleId, who, { kind: 'PROMOTER', reason: '스무 번째' });
     expect(limited.statusCode).toBe(429);
     expect(typeOf(limited)).toBe('export-rate-limited');
   });
@@ -912,13 +1098,19 @@ describe('F-04-14 HTTP', () => {
     const created = await createBundle(c.caseId, who);
     const bundleId = String(json(created).bundleId);
     await evidence().buildDue(clock.now());
-    submission.nextRows = 12_000;
-    const big = await exportBundle(bundleId, who, { kind: 'PROMOTER', reason: '큰 보고' });
+    submission.nextRows = 10_000;
+    expect((await exportBundle(bundleId, who, { kind: 'PROMOTER', reason: '만 건' })).statusCode).toBe(200);
+    expect(access.records.filter((r) => r.action === 'EVIDENCE_EXPORT').at(-1)).not.toMatchObject({ detail: { bulk: true } });
+    submission.nextRows = 10_001;
+    const big = await exportBundle(bundleId, who, { kind: 'PROMOTER', reason: '만 건 넘음' });
     expect(big.statusCode, big.payload).toBe(200);
     const bulk = access.records.filter((r) => r.action === 'EVIDENCE_EXPORT').at(-1);
-    expect(bulk).toMatchObject({ rows: 12_000, detail: { bulk: true } });
-    evidenceStore.forcedExportCount = 6;
+    expect(bulk).toMatchObject({ rows: 10_001, detail: { bulk: true } });
+    evidenceStore.forcedExportCount = 5;
     submission.nextRows = 1;
+    expect((await exportBundle(bundleId, who, { kind: 'PROMOTER', reason: '다섯 번째' })).statusCode).toBe(200);
+    expect(JSON.stringify(access.records.at(-1))).not.toContain('INV_EXPORT_VOLUME');
+    evidenceStore.forcedExportCount = 6;
     const six = await exportBundle(bundleId, who, { kind: 'PROMOTER', reason: '여섯 번째' });
     expect(six.statusCode).toBe(200);
     expect(JSON.stringify(access.records.at(-1))).toContain('INV_EXPORT_VOLUME');
@@ -930,6 +1122,10 @@ describe('F-04-14 HTTP', () => {
     const inWindow = await send('POST', `/internal/v1/fraud-cases/${c.caseId}/appeals`, {}, { body: { appealId: randomUUID(), accountId: A(61), party: 'PAYER', submittedAt: iso(NOW) } });
     expect(inWindow.statusCode, inWindow.payload).toBe(200);
     expect(json(inWindow).result).toBe('ACCEPTED');
+    const at = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(63), { actionNotifiedAtMs: NOW - 30 * DAY, appealResult: 'REJECTED' })] });
+    const exact = await send('POST', `/internal/v1/fraud-cases/${at.caseId}/appeals`, {}, { body: { appealId: randomUUID(), accountId: A(63), party: 'PAYER', submittedAt: iso(NOW) } });
+    expect(exact.statusCode).toBe(200);
+    expect(json(exact).result).toBe('EXPIRED');
     const old = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(62), { actionNotifiedAtMs: NOW - 31 * DAY, appealResult: 'REJECTED' })] });
     const expired = await send('POST', `/internal/v1/fraud-cases/${old.caseId}/appeals`, {}, { body: { appealId: randomUUID(), accountId: A(62), party: 'PAYER', submittedAt: iso(NOW) } });
     expect(expired.statusCode).toBe(200);
@@ -961,11 +1157,19 @@ describe('F-04-14 HTTP', () => {
     await send('POST', `/internal/v1/fraud-cases/${c.caseId}/appeals`, {}, { body: { appealId: randomUUID(), accountId: A(64), party: 'PAYER', submittedAt: iso(NOW) } });
     await send('POST', `/internal/v1/fraud-cases/${c.caseId}/appeals`, {}, { body: { appealId: randomUUID(), accountId: A(65), party: 'PAYER', submittedAt: iso(NOW) } });
     const current = json(await getCase(c.caseId, who));
-    const patch = await send('PATCH', `/v1/ops/fraud-cases/${c.caseId}`, who, { ifMatch: `"${current.version}"`, body: { objectionDecisions: [{ accountId: A(64), decision: 'ACCEPTED', reason: '오인' }, { accountId: A(65), decision: 'REJECTED', reason: '근거 유지' }] } });
-    expect(patch.statusCode, patch.payload).toBe(200);
-    expect(json(patch).status).toBe('ACTIONED');
+    const partial = await send('PATCH', `/v1/ops/fraud-cases/${c.caseId}`, who, { ifMatch: `"${current.version}"`, body: { objectionDecisions: [{ accountId: A(64), decision: 'ACCEPTED', reason: '오인' }] } });
+    expect(partial.statusCode, partial.payload).toBe(200);
+    expect(json(partial).status).toBe('OBJECTED');
+    expect(json(partial).outcomeLabel).not.toBe('HUMAN');
+    const decided = json(partial).events.find((e: any) => e.kind === 'OBJECTION_DECIDED' && e.detail?.accountId === A(64));
+    expect(decided).toMatchObject({ actorId: who['x-user-id'], occurredAtMs: NOW, detail: { decision: 'ACCEPTED' } });
+    const afterPartial = json(await getCase(c.caseId, who));
+    expect(afterPartial.status).toBe('OBJECTED');
+    expect(afterPartial.closedAt).toBeNull();
+    const rest = await send('PATCH', `/v1/ops/fraud-cases/${c.caseId}`, who, { ifMatch: `"${afterPartial.version}"`, body: { objectionDecisions: [{ accountId: A(65), decision: 'REJECTED', reason: '근거 유지' }] } });
+    expect(rest.statusCode, rest.payload).toBe(200);
+    expect(json(rest).status).toBe('ACTIONED');
     const after = await getCase(c.caseId, who);
-    expect(json(after).status).toBe('ACTIONED');
     expect(json(after).events.some((e: any) => e.kind === 'OBJECTION_DECIDED' && e.detail?.decision === 'REJECTED')).toBe(true);
   });
 
@@ -978,22 +1182,32 @@ describe('F-04-14 HTTP', () => {
       members: [memberOf(A(66), { actionNotifiedAtMs: NOW - DAY, appealResult: 'REJECTED' })],
       events: [
         { seq: 1, kind: 'CREATED', actorId: id(0x900), note: null, detail: null, occurredAtMs: NOW - DAY },
-        { seq: 2, kind: 'ACTION_EXECUTED', actorId: id(0x900), note: null, detail: { results: [{ ticketId: T(1), outcome: 'ACCEPTED' }, { ticketId: T(2), outcome: 'ACCEPTED' }, { ticketId: T(3), outcome: 'ACCEPTED' }], targets: [{ ticketId: T(1), payerAccountId: A(66) }, { ticketId: T(2), payerAccountId: A(66) }, { ticketId: T(3), payerAccountId: A(66) }] }, occurredAtMs: NOW },
+        { seq: 2, kind: 'ACTION_EXECUTED', actorId: id(0x900), note: null, detail: { results: [{ ticketId: T(1), outcome: 'ACCEPTED' }, { ticketId: T(2), outcome: 'ACCEPTED' }, { ticketId: T(3), outcome: 'ACCEPTED' }, { ticketId: T(4), outcome: 'ACCEPTED' }], targets: [{ ticketId: T(1), payerAccountId: A(66) }, { ticketId: T(2), payerAccountId: A(66) }, { ticketId: T(3), payerAccountId: A(66) }, { ticketId: T(4), payerAccountId: A(66) }] }, occurredAtMs: NOW },
       ],
     });
     activeRestrictions.set(c.caseId, [{ accountId: A(66), caseId: c.caseId, restrictionId: id(0x951), untilMs: NOW + 30 * DAY, version: 1 }]);
     await send('POST', `/internal/v1/fraud-cases/${c.caseId}/appeals`, {}, { body: { appealId: randomUUID(), accountId: A(66), party: 'PAYER', submittedAt: iso(NOW) } });
-    priorityResults = ['SAME_SEAT', 'SAME_TIER', 'NO_SEAT'];
+    priorityResults = ['SAME_SEAT', 'SAME_TIER', 'NO_SEAT', 'ENTRY_STARTED'];
     const current = json(await getCase(c.caseId, who));
     const patch = await send('PATCH', `/v1/ops/fraud-cases/${c.caseId}`, who, { ifMatch: `"${current.version}"`, body: { objectionDecisions: [{ accountId: A(66), decision: 'ACCEPTED', reason: '가족' }] } });
     expect(patch.statusCode, patch.payload).toBe(200);
+    expect(priorityCalls).toHaveLength(0);
     const liftId = String(json(patch).approvalId);
     expect((await getApproval(liftId, approver)).statusCode).toBe(200);
     expect((await approve(liftId, approver)).statusCode).toBe(200);
+    expect(priorityCalls).toHaveLength(1);
+    expect(priorityCalls[0]).toMatchObject({ caseId: c.caseId, accountId: A(66), eventId: EVENT, cancelledTicketIds: [T(1), T(2), T(3), T(4)] });
     const after = await getCase(c.caseId, who);
     expect(json(after).status).toBe('REVERSED');
-    expect(compensation.calls).toEqual([expect.objectContaining({ caseId: c.caseId, accountId: A(66), ticketId: T(3), reason: 'NO_SEAT' })]);
+    expect(compensation.calls).toEqual([
+      expect.objectContaining({ caseId: c.caseId, accountId: A(66), ticketId: T(3), reason: 'NO_SEAT' }),
+      expect.objectContaining({ caseId: c.caseId, accountId: A(66), ticketId: T(4), reason: 'ENTRY_STARTED' }),
+    ]);
     expect(copies.some((x) => x.accountId === A(66) && x.lockActive === false)).toBe(true);
+    const grant = json(after).events.find((e: any) => e.kind === 'PRIORITY_GRANTED');
+    expect(grant.detail.grants[0]).toMatchObject({ result: 'SAME_SEAT', price: 100_000, fee: 0 });
+    expect(Date.parse(grant.detail.grants[0].expiresAt)).toBe(NOW + 48 * HOUR);
+    expect(copies.some((x) => x.accountId === A(66) && x.grantId === grant.detail.grants[0].grantId && x.expiresAt === grant.detail.grants[0].expiresAt)).toBe(true);
   });
 
   test('C-T70 ① C-T70 ② 소명 요청·잠금·받은 사람 알림·돌려주기·인정·해제가 서버에서 이어진다', async () => {
@@ -1003,8 +1217,12 @@ describe('F-04-14 HTTP', () => {
     locks.releases.length = 0;
     const requested = await send('POST', `/v1/ops/fraud-cases/${c.caseId}/appeal-requests`, who, { idem: randomUUID(), body: { accountIds: [A(67)], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + 2 * DAY) } });
     expect(requested.statusCode, requested.payload).toBe(201);
-    expect(json(requested)).toMatchObject({ lockedTicketCount: 2, notifiedHolderCount: 1 });
+    expect(json(requested)).toMatchObject({ lockedTicketCount: 2, notifiedHolderCount: 1, lockExpiresAt: iso(NOW + 14 * DAY) });
     expect(locks.sets).toHaveLength(1);
+    expect(locks.sets[0]).toMatchObject({ caseId: c.caseId, eventId: EVENT, accountIds: [A(67)], expiresAtMs: NOW + 14 * DAY });
+    expect(holderNotices).toHaveLength(1);
+    expect(holderNotices[0]).toMatchObject({ eventId: EVENT, caseId: c.caseId, accountId: H(1), ticketIds: [T(9)] });
+    expect(holderNotices[0]).not.toHaveProperty('reasonCategories');
     expect(await cases.markAppealSubmitted(c.caseId, A(67), clock.now())).toBe(true);
     const current = json(await getCase(c.caseId, who));
     const patch = await send('PATCH', `/v1/ops/fraud-cases/${c.caseId}`, who, { ifMatch: `"${current.version}"`, body: { appealDecisions: [{ accountId: A(67), decision: 'ACCEPTED', reason: '정상 구매' }] } });
@@ -1012,5 +1230,12 @@ describe('F-04-14 HTTP', () => {
     expect(json(patch).status).toBe('CLEARED');
     expect(json(patch).outcomeLabel).toBe('HUMAN');
     expect(locks.releases.length).toBeGreaterThanOrEqual(1);
+
+    // 14일이 지나면 ops-svc가 멈춰도 ticket-svc가 잠금을 풀고, ops 사본도 풀린다.
+    const expiredCase = await seedCase({ status: 'APPEAL_PENDING', appealDueAtMs: NOW + 2 * DAY, members: [memberOf(A(68), { appealResult: 'PENDING', lockExpiresAtMs: NOW + 14 * DAY })] });
+    const fraudActions = svc.app.get((investigationsModule as unknown as Record<string, any>).FraudActions) as any;
+    clock.advance(14 * DAY);
+    await fraudActions.expireDue(clock.now());
+    expect(copies.some((x) => x.caseId === expiredCase.caseId && x.accountId === A(68) && x.lockActive === false)).toBe(true);
   });
 });

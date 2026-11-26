@@ -83,10 +83,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await admin.query('delete from evidence_custody_log');
-  await admin.query('delete from evidence_export');
-  await admin.query('delete from evidence_bundle');
-  await admin.query('delete from external_post');
+  // 0039의 evidence_custody_log BEFORE DELETE 트리거는 행 삭제를 막는다. TRUNCATE는 행 트리거를 타지 않아
+  // 시험 사이 정리로 쓸 수 있다(운영 코드는 이 경로를 쓰지 않는다).
+  await admin.query('truncate evidence_custody_log, evidence_export, evidence_bundle, external_post');
 });
 
 describe('F-04-14 PostgreSQL', () => {

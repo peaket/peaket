@@ -4,7 +4,7 @@
 // [ASVS v5.0.0-11.1.2] 해시 판·알고리즘, [ASVS v5.0.0-14.2.6] 최소화, [ASVS v5.0.0-16.4.2] 관리 연속성.
 import { describe, expect, test } from 'vitest';
 import * as inv from '../src/modules/investigations/index.js';
-import { DAY, HOUR, NOW, id, makePdf, makePng, pixelAt, readPng, sha256 } from './fraud-evidence-support.js';
+import { DAY, HOUR, NOW, id, makeIccPng, makeJpegWithExif, makePdf, makePng, makePngHeader, makePngOfSize, pixelAt, readPng, sha256 } from './fraud-evidence-support.js';
 
 const ev = inv as unknown as Record<string, any>;
 const A = (n: number) => id(0x1000 + n);
@@ -63,11 +63,20 @@ describe('F-04-14 도메인', () => {
     expect(ev.validateExternalPost({ url: 'https://example.com/post/1', source: 'MANUAL', capture: { name: 'a.png', bytes: png } })).toMatchObject({ site: 'example.com', mediaType: 'image/png', extension: 'png', width: 4, height: 4 });
     expect(problemStatus(() => ev.validateExternalPost({ url: 'https://example.com/post/1', source: 'MANUAL', capture: { name: 'a.jpg', bytes: png } }))).toBe(415);
     expect(problemStatus(() => ev.validateExternalPost({ url: 'https://example.com/post/1', source: 'MANUAL', capture: { name: 'a.pdf', bytes: png } }))).toBe(415);
-    expect(problemStatus(() => ev.validateExternalPost({ url: 'https://example.com/post/1', source: 'MANUAL', capture: { name: 'a.png', bytes: Buffer.alloc(10 * 1024 * 1024 + 1) } }))).toBe(413);
-    expect(problemStatus(() => ev.validateExternalPost({ url: 'https://example.com/post/1', source: 'MANUAL', capture: { name: 'a.png', bytes: makePng({ width: 20_001, height: 1 }) } }))).toBe(422);
+    expect(problemStatus(() => ev.validateExternalPost({ url: 'https://example.com/post/1', source: 'MANUAL', capture: { name: 'a.png', bytes: makePngOfSize(10 * 1024 * 1024 + 1) } }))).toBe(413);
+    expect(ev.validateExternalPost({ url: 'https://example.com/post/1', source: 'MANUAL', capture: { name: 'a.png', bytes: makePngOfSize(10 * 1024 * 1024) } })).toMatchObject({ mediaType: 'image/png' });
+    expect(problemStatus(() => ev.validateExternalPost({ url: 'https://example.com/post/1', source: 'MANUAL', capture: { name: 'a.png', bytes: makePngHeader(20_001, 1) } }))).toBe(422);
+    expect(ev.validateExternalPost({ url: 'https://example.com/post/1', source: 'MANUAL', capture: { name: 'a.png', bytes: makePngHeader(8_000, 5_000) } })).toMatchObject({ width: 8_000, height: 5_000 });
+    expect(problemStatus(() => ev.validateExternalPost({ url: 'https://example.com/post/1', source: 'MANUAL', capture: { name: 'a.png', bytes: makePngHeader(8_001, 5_000) } }))).toBe(422);
+    expect(ev.validateExternalPost({ url: 'https://example.com/post/1', source: 'MANUAL', capture: { name: 'a.jpg', bytes: makeJpegWithExif() } })).toMatchObject({ mediaType: 'image/jpeg', extension: 'jpg' });
+    expect(problemStatus(() => ev.validateExternalPost({ url: 'https://example.com/post/1', source: 'MANUAL', capture: { name: 'a.gif', bytes: Buffer.from('GIF89a') } }))).toBe(415);
+    expect(problemStatus(() => ev.validateExternalPost({ url: 'https://example.com/post/1', source: 'MANUAL', capture: { name: 'a.webp', bytes: Buffer.from('RIFF0000WEBP') } }))).toBe(415);
     expect(ev.validateExternalPost({ url: 'https://example.com/post/1', source: 'MANUAL', capture: { name: 'a.pdf', bytes: makePdf() } })).toMatchObject({ mediaType: 'application/pdf', extension: 'pdf', width: null, height: null });
     expect(ev.maskRegionsValid([{ x: 0.1, y: 0.1, w: 0.2, h: 0.2 }])).toBe(true);
     expect(ev.maskRegionsValid([{ x: 1.1, y: 0.1, w: 0.2, h: 0.2 }])).toBe(false);
+    expect(ev.maskRegionsValid([{ x: 1, y: 0, w: 0.1, h: 0.1 }])).toBe(false);
+    expect(ev.maskRegionsValid(Array.from({ length: 20 }, () => ({ x: 0, y: 0, w: 0.1, h: 0.1 })))).toBe(true);
+    expect(ev.maskRegionsValid(Array.from({ length: 21 }, () => ({ x: 0, y: 0, w: 0.1, h: 0.1 })))).toBe(false);
     expect(ev.maskRegionsValid([{ x: 0.1, y: 0.1, w: 0, h: 0.2 }])).toBe(false);
   });
 
@@ -81,9 +90,16 @@ describe('F-04-14 도메인', () => {
     expect(img.chunks).not.toContain('tEXt');
     expect(img.chunks).not.toContain('eXIf');
     expect(img.chunks).not.toContain('iTXt');
+    expect(img.chunks).not.toContain('iCCP');
     expect(pixelAt(img, 1, 1).slice(0, 3)).toEqual([0, 0, 0]);
     expect(pixelAt(img, 2, 2).slice(0, 3)).toEqual([0, 0, 0]);
     expect(pixelAt(img, 0, 0).slice(0, 3)).not.toEqual([0, 0, 0]);
+
+    const icc = await ev.maskCapture({ bytes: makeIccPng(), mediaType: 'image/png', regions: [] });
+    expect(icc).toBeInstanceOf(Uint8Array);
+    expect(readPng(icc).chunks).not.toContain('iCCP');
+    const many = await ev.maskCapture({ bytes: makePng({ width: 4, height: 4 }), mediaType: 'image/png', regions: Array.from({ length: 20 }, () => ({ x: 0, y: 0, w: 0.1, h: 0.1 })) });
+    expect(many).toBeInstanceOf(Uint8Array);
   });
 
   test('FX-T19 ③ PDF는 보기용 사본을 만들지 않는다', async () => {
@@ -132,13 +148,34 @@ describe('F-04-14 도메인', () => {
     const csv = ev.promoterCsv({ eventName: '=HYPERLINK("https://evil.example")', cases });
     expect(csv).toContain("'=HYPERLINK");
     expect(csv).not.toContain('0194b240');
-    expect(csv).not.toContain('MACRO_BOT,6');
     expect(csv).toMatch(/5건 미만/);
-    expect(csv).not.toMatch(/1,2,3,4/);
     const lines = csv.trim().split(/\r?\n/);
     expect(lines[0]).toBe('metric,value');
     expect(lines[1]!.startsWith("'=")).toBe(true);
     expect(csv).toMatch(/appeal_accepted_ratio,/);
+    for (const value of ['+SUM(A1)', '-1', '@cmd', '\tTAB']) {
+      const one = ev.promoterCsv({ eventName: value, cases });
+      expect(one.split(/\r?\n/)[1]!.startsWith("'")).toBe(true);
+    }
+
+    const five = Array.from({ length: 5 }, (_, n) => ({ ...cases[0]!, caseId: id(0x520 + n) }));
+    const fiveCsv = ev.promoterCsv({ eventName: '다섯', cases: five });
+    expect(fiveCsv).toMatch(/reason_MACRO_BOT,5/);
+    const four = five.slice(0, 4);
+    const fourCsv = ev.promoterCsv({ eventName: '넷', cases: four });
+    expect(fourCsv).not.toMatch(/reason_MACRO_BOT,4/);
+    expect(fourCsv).toMatch(/reason_OTHER,5건 미만|reason_MACRO_BOT,5건 미만/);
+
+    // 2차 가림: A 6, B 3, C 1이면 OTHER 4가 가려지고, 합계에서 되살아날 수 있어 다음 칸도 함께 가린다.
+    const second = [
+      ...Array.from({ length: 6 }, (_, n) => ({ ...cases[0]!, caseId: id(0x530 + n), reasonCategory: 'MACRO_BOT' as const })),
+      ...Array.from({ length: 3 }, (_, n) => ({ ...cases[0]!, caseId: id(0x540 + n), reasonCategory: 'QUEUE_BYPASS' as const })),
+      { ...cases[0]!, caseId: id(0x550), reasonCategory: 'CAPTCHA_BYPASS' as const },
+    ];
+    const secondCsv = ev.promoterCsv({ eventName: '이차', cases: second as any });
+    expect(secondCsv.match(/5건 미만/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(secondCsv).not.toMatch(/reason_(QUEUE_BYPASS|CAPTCHA_BYPASS),1/);
+    expect(secondCsv).not.toMatch(/appeal_accepted_ratio,[0-9]/);
   });
 
   test('FX-T20 ③ 고소·고발용 요약은 개인정보 칸 없이 고정 문장과 봉인 해시를 싣는다', () => {
