@@ -155,3 +155,4 @@
 - F-05-9 RV059-16 낮음: S4가 +60초에서만 보정 밖(+31초) QR을 거부하는지 보고, -60초 실행은 보정 밖 QR을 넣지 않는다. 계획 §4 S4의 "±31초" 중 한쪽만 본다(`k10-measure.spec.mjs:122-146`)
 - F-05-9 RV059-17 낮음: O-T41의 사람 20명을 `cursor % 20`으로 항상 채워 `rolesSeen` 20명 검사가 실행기에서 실패할 수 없다. 역할을 명시적으로 모델링하거나 20명은 티켓 섞음이라고 적는다(`k10-measure.spec.mjs:376-383`)
 - F-05-9 RV059-18 낮음: `resultOf`가 글자 포함("통과"·"다시 찍어"·"확인 필요")으로 결과를 가른다. `ScanResult`의 `scan-pass`·`scan-reject`·`scan-check` 클래스를 읽게 한다(`scanner-k10/fixture.mjs:287-292`)
+- F-05-9 MR-08 낮음: 생성 장부 `docs/review/ledger/frontend.md`의 F-05-8 FE-T37 자동 시험은 `wish-queue/queue.test.mjs`(IR-07 큐 시험)이고, F-05-8 IR-11이 말한 화면 시험은 아직 없다(측정 범위 밖, 위 F-05-8 IR-11과 같은 건)

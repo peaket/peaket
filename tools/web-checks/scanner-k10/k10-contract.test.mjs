@@ -9,6 +9,8 @@ import { resolve } from 'node:path';
 const here = process.cwd();
 const read = (p) => readFileSync(resolve(here, p), 'utf8');
 const plan = read('../../docs/review/plans/F-05-9.md');
+const report = read('../../docs/review/measurements/F-05-9-k10.md');
+const blog = read('../../docs/blog/m5-offline-gate.md');
 const spec = read('scanner-k10/k10-measure.spec.mjs');
 const fixture = read('scanner-k10/fixture.mjs');
 const lib = read('scanner-k10/k10-lib.mjs');
@@ -24,15 +26,24 @@ test('K10 시나리오 6종 계약: 계획에 S1~S6이 있고 하네스에 S3~S6
 
 const RUN_ID = '2026-11-27-f059-k10-r2';
 
-test('O-T40 계약: 전환 실행 3회·업로드 중·변경분 중·판정 시험이 있고 측정 결과가 미달로 적혀 있다', () => {
+test('O-T40 계약: 전환 실행 3회·업로드 중·변경분 중·판정 시험이 있고 측정 결과가 미달(150ms)+무효(2초 간격)로 적혀 있다', () => {
   assert.match(spec, /K10-O-T40-a 전환 사이에 끊기 r1/);
   assert.match(spec, /K10-O-T40-a 전환 사이에 끊기 r2/);
   assert.match(spec, /K10-O-T40-a 전환 사이에 끊기 r3/);
   assert.match(spec, /K10-O-T40-b 업로드가 진행 중일 때/);
   assert.match(spec, /K10-O-T40-c 변경분 받기가 진행 중일 때/);
   assert.match(spec, /test\('O-T40 전환 앞뒤 판정이/);
-  assert.ok(plan.includes(`| O-T40 (a) 전환 사이 | \`${RUN_ID}\` | **미달** |`), '계획 §15에 O-T40 미달 결과가 없다');
+  const label = '**미달(150ms) + 무효(2초 간격)**';
+  assert.ok(plan.includes(`| O-T40 (a) 전환 사이 | \`${RUN_ID}\` | ${label} |`), '계획 §15에 O-T40 통합 라벨이 없다');
+  assert.ok(report.includes(label), '보고서에 O-T40 통합 라벨이 없다');
+  assert.ok(blog.includes(label), '블로그에 O-T40 통합 라벨이 없다');
   assert.match(lib, /export function judgeTransition/);
+  // MR-07: runTransition은 간격 초과에서 멈추지 않고, judgeTransition이 그 사유를 낸다.
+  assert.match(spec, /MR-07: 간격 초과는 runTransition 안에서 expect로 멈추지 않고 invalidReasons에 남긴다/);
+  assert.match(lib, /stats\.overruns > 0/);
+  const summaryAt = spec.indexOf("writeRun('o-t40-summary.json'");
+  const failedAt = spec.indexOf('expect(failed');
+  assert.ok(summaryAt > 0 && summaryAt < failedAt, '요약을 실패 단언보다 먼저 쓴다');
 });
 
 test('O-T41 계약: 온라인·오프라인 3회 실행과 판정 시험이 있고 90% 경계·측정 결과가 적혀 있다', () => {

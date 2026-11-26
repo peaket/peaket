@@ -363,6 +363,8 @@ async function runTransition(page, run) {
   if (new Set(ticketIds).size !== ticketIds.length) invalidReasons.push('티켓 ID가 겹친다');
   if (transitionAtScan !== K10.transitionAt) invalidReasons.push(`전환 시각 ${transitionAtScan ?? '없음'}번째`);
   if (reconnectAtScan !== K10.transitionScans + 1) invalidReasons.push(`복구 시각 ${reconnectAtScan ?? '없음'}번째`);
+  // MR-07: 간격 초과는 runTransition 안에서 expect로 멈추지 않고 invalidReasons에 남긴다.
+  // 세 회차를 끝까지 재고 요약 시험이 사유를 한 번에 보이게 하려는 것이다. 판정 기준은 judgeTransition이 그대로 본다.
   if (intervalStats.overruns > 0) invalidReasons.push(`2초+${intervalStats.toleranceMs}ms를 넘긴 간격 ${intervalStats.overruns}건`);
   if (Number.isFinite(intervalStats.medianMs) && Math.abs(intervalStats.medianMs - K10.intervalMs) > K10.intervalToleranceMs) {
     invalidReasons.push(`간격 중앙값 ${intervalStats.medianMs.toFixed(0)}ms`);
@@ -502,6 +504,7 @@ test('O-T40 전환 앞뒤 판정이 오류·결과 없음 0건, 150ms, 멈춘 �
   const verdicts = runs.map((run) => judgeTransition(run));
   const variants = ['o-t40-upload.json', 'o-t40-changes.json'].map((f) => readRun(f));
   const failed = verdicts.filter((v) => !v.pass);
+  // MR-07: 판정이 실패해도 세 회차의 사유를 남기도록 요약을 먼저 쓴다. 실패 단언은 그 뒤에 둔다.
   writeRun('o-t40-summary.json', { verdicts, variants });
   expect(failed, failed.map((v) => v.reasons.join(' / ')).join('\n')).toHaveLength(0);
   expect(variants.every((v) => v.pass)).toBe(true);
