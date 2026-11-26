@@ -392,6 +392,8 @@ ADR-0373 결정 2의 '동결로 미검증'이다. 완성 판정에서 빼고 완
 | --- | --- | --- | --- |
 | `2026-11-27-f065-pg-core-r1` | `2026-11-27T06:56:33+09:00` | core `test-int/support-inquiries.int.test.ts` | **9/9 통과**(0055·0049 적용, 표·CHECK·인덱스·`core_app` 권한, Drizzle 접수·멱등·BOLA·추가 문의·답변·닫기·3년 파기·Outbox 파티션) |
 | `2026-11-27-f065-pg-ops-r1` | `2026-11-27T06:56:40+09:00` | ops `test-int/fan-lookup.int.test.ts` | **3/3 통과**(0041 적용, `admin_data_access` 16칸·CHECK·인덱스·`ops_app` 권한, 접속기록 append/recent·2년 보존, `cs_case.account_id` 채움·계정별 목록) |
-| `2026-11-27-f065-pg-ops-regression-r1` | `2026-11-27T06:55:22+09:00` | ops `test-int/cs-cases.int.test.ts` | 14/15, F-06-2 시험이 `INQUIRY`를 거절한다고 기대하는 낡은 단언 1건 실패(시험 고정 지시로 고치지 않음, 시험 역할 몫) |
+| `2026-11-27-f065-pg-ops-regression-r1` | `2026-11-27T06:55:22+09:00` | ops `test-int/cs-cases.int.test.ts` | 14/15, F-06-2 시험이 `INQUIRY`를 거절한다고 기대하는 낡은 단언 1건 실패(뒤 `F065-IT-01`로 고침) |
+| `2026-11-27-f065-pg-ops-cs-r2` | `2026-11-27T07:02:15+09:00` | ops `test-int/cs-cases.int.test.ts` | **15/15 통과**(`F065-IT-01`: `INQUIRY`를 `accepted: true`·`cs_case` 1행·`cs_case_request` 1행·`account_id` NULL로 고침) |
+| `2026-11-27-f065-pg-core-r2` | `2026-11-27T07:02:22+09:00` | core `test-int/support-inquiries.int.test.ts` | **9/9 통과**(같은 잠금 07:02:02~07:02:27) |
 
-- **통합에서 함께 고친 결함**: ① core `_journal.json`에 0049·0055 줄 누락(마이그레이션 미적용·`migrations-journal` 단위 시험 실패) ② support Drizzle의 Outbox ID가 UUIDv4라 UUIDv7 일별 파티션에 안 들어감 ③ `core_app`의 `outbox` INSERT·`outbox_seq` USAGE 권한 없음(문의 저장 503) ④ DB `cs_case.list`가 `accountId`를 거르지 않음. 자세한 파일·검증은 계획 `## 구현`.
+- **통합에서 함께 고친 결함**: ① core `_journal.json`에 0049·0055 줄 누락(마이그레이션 미적용·`migrations-journal` 단위 시험 실패) ② support Drizzle의 Outbox ID가 UUIDv4라 UUIDv7 일별 파티션에 안 들어감 ③ `core_app`의 `outbox` INSERT·`outbox_seq` USAGE 권한 없음(문의 저장 503) ④ DB `cs_case.list`가 `accountId`를 거르지 않음 ⑤ ops `cs-cases.int.test`의 `INQUIRY` 거절 기대가 F-06-5 동작과 어긋남(`F065-IT-01`, 시험만 실제 동작에 맞춤). 자세한 파일·검증은 계획 `## 구현`.

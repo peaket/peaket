@@ -137,11 +137,14 @@ describe('실제 DB 위 건 받기 [R-T48 ①②]', () => {
     expect((await q<{ n: string }>('select count(*)::text as n from cs_case_request where case_id = $1', [a.caseId]))[0]!.n).toBe('2');
   });
 
-  test('R-T48 ③ 받지 않는 종류는 cs_case·cs_case_request 행이 0이다', async () => {
+  test('R-T48 ③ INQUIRY도 cs_case·cs_case_request 행을 만든다(F-06-5)', async () => {
     const body = caseRequest('INQUIRY');
-    expect(await intake(body)).toEqual({ accepted: false });
-    expect(await q('select 1 from cs_case where target_ref = $1', [body.sourceId])).toEqual([]);
-    expect(await q('select 1 from cs_case_request where event_key = $1', [body.eventKey])).toEqual([]);
+    const r = await intake(body);
+    expect(r.accepted).toBe(true);
+    expect(r.caseId).toBeTruthy();
+    expect((await q<{ n: string }>("select count(*)::text as n from cs_case where kind = 'INQUIRY' and target_ref = $1", [body.sourceId]))[0]!.n).toBe('1');
+    expect((await q<{ n: string }>('select count(*)::text as n from cs_case_request where event_key = $1', [body.eventKey]))[0]!.n).toBe('1');
+    expect((await q<{ account_id: string | null }>('select account_id from cs_case where id = $1', [r.caseId!]))[0]!.account_id).toBeNull();
   });
 
   test('IR-11 TICKET_NOT_ISSUED도 DB에 건을 만든다', async () => {
