@@ -65,7 +65,7 @@ export function fanNotifyProviders(o: { storage: 'memory' | 'database'; wiring?:
   const events = o.storage === 'memory' ? (o.wiring?.events ?? new MemoryNotificationEventDirectory(o.catalog ?? new MemoryCatalogRepository())) : new DrizzleNotificationEventDirectory(o.appDatabase!);
   const mail = o.wiring?.mail ?? mailTransportFromEnv(env) ?? (o.storage === 'memory' ? new FakeMailTransport() : unavailableMail);
   const push = o.wiring?.push ?? pushTransportFromEnv(env) ?? (o.storage === 'memory' ? new FakePushTransport() : new HttpsPushTransport());
-  const recipients = o.wiring?.recipients ?? (env.PEAKET_IDENTITY_GRPC_URL ? new GrpcRecipientDirectory(env.PEAKET_IDENTITY_GRPC_URL) : unavailableRecipients);
+  const recipients = o.wiring?.recipients ?? (env.PEAKET_IDENTITY_GRPC_URL ? new GrpcRecipientDirectory(env.PEAKET_IDENTITY_GRPC_URL, 'service', { ...(env.PEAKET_INTERNAL_GRPC_TOKEN ? { internalToken: env.PEAKET_INTERNAL_GRPC_TOKEN } : {}) }) : unavailableRecipients);
   const optOutKey = o.wiring?.optOutKey ?? optOutKeyFromEnv(env);
   const vapid = o.wiring?.vapid ?? vapidFromEnv(env);
   const lookup = o.wiring?.lookup ?? dnsLookup;

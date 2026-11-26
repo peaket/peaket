@@ -355,6 +355,7 @@ const grpc = await startGrpcServer({
           resolveNicknames: (ids) => memberCodes.resolveNicknames(ids),
         },
         (method, err) => service.logger.error({ err, method }, 'RecipientQueryService 처리 실패'),
+        { ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}) },
       ),
     },
     // 회원 코드 일괄 변환(core-svc 판매 자격 명단·ticket-svc 양도 받는 사람 찾기, GAT-050, ADR-0261 결정 6)

@@ -199,17 +199,16 @@ export class NotificationIntake {
       dedupKey: `${e.type}:${e.offerId}:${e.accountId}:EMAIL`,
     });
     out[email] += 1;
-    for (const sub of await this.d.store.listPushSubscriptions(e.accountId)) {
-      const r = await this.enqueue({
-        kind: e.type,
-        targetId: e.offerId,
-        accountId: e.accountId,
-        channel: 'WEB_PUSH',
-        vars,
-        dedupKey: `${e.type}:${e.offerId}:${e.accountId}:WEB_PUSH:${sub.endpointHash}`,
-      });
-      out[r] += 1;
-    }
+    // 웹 푸시는 계정 단위 작업 하나가 그 계정의 살아 있는 구독마다 나간다(notify §4.8, §4.3)
+    const push = await this.enqueue({
+      kind: e.type,
+      targetId: e.offerId,
+      accountId: e.accountId,
+      channel: 'WEB_PUSH',
+      vars,
+      dedupKey: `${e.type}:${e.offerId}:${e.accountId}:WEB_PUSH`,
+    });
+    out[push] += 1;
     return out;
   }
 

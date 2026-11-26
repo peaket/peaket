@@ -212,15 +212,6 @@ export class EventRefundService {
       if (existing.eventId !== i.eventId || existing.fault !== i.fault || existing.kind !== kind) throw new EventRefundError('CONFLICT', '같은 요청 ID의 회차·판정·종류가 다릅니다');
       return this.get(i.requestId);
     }
-    // 연기 확정 시작은 ticket-svc의 진행 중 양도 요청을 먼저 철회한다(F-05-11, R-T25 ③).
-    // 실패하면 아무것도 쓰지 않고 503(UNAVAILABLE)이다. 같은 요청 ID의 다시 부르기는 위에서 돌아가 한 번만 부른다
-    if (kind === 'POSTPONE' && this.o.transfers) {
-      try {
-        await this.o.transfers.withdrawForEvent({ eventId: i.eventId, nowMs: this.o.nowMs() });
-      } catch (err) {
-        throw new EventRefundError('UNAVAILABLE', `양도 요청을 철회하지 못했습니다: ${err instanceof Error ? err.name : 'unknown'}`);
-      }
-    }
     const nowMs = this.o.nowMs();
     const window = this.#windowOf(kind, i, nowMs);
     const listed = await this.#targets(i.eventId);
@@ -240,6 +231,16 @@ export class EventRefundService {
     const compensationTargets = compensationRows.length;
     const compensationTotal = compensationRows.reduce((sum, row) => sum + row.amount, 0);
     const progress = progressOf(items, [], kind === 'POSTPONE');
+    // 입력 검증·대상 읽기가 끝난 뒤에만 ticket-svc의 진행 중 양도 요청을 철회한다(IR-09).
+    // 실패하면 아무것도 쓰지 않고 503(UNAVAILABLE)이다. 같은 요청 ID의 다시 부르기는 위에서 돌아가 한 번만 부른다
+    if (kind === 'POSTPONE' && this.o.transfers) {
+      try {
+        await this.o.transfers.withdrawForEvent({ eventId: i.eventId, nowMs });
+      } catch (err) {
+        this.o.log?.warn({ event: 'transfer-withdraw-failed', eventId: i.eventId, err: err instanceof Error ? err.name : 'unknown' }, '연기 확정의 양도 요청 철회가 실패했다(503, SEV2 후보)');
+        throw new EventRefundError('UNAVAILABLE', `양도 요청을 철회하지 못했습니다: ${err instanceof Error ? err.name : 'unknown'}`);
+      }
+    }
     const request: EventCancellationRequest = {
       requestId: i.requestId,
       eventId: i.eventId,

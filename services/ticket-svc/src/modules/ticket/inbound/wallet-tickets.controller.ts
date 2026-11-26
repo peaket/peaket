@@ -32,7 +32,7 @@ export class WalletTicketsController {
         limit: q.limit ?? DEFAULT_WALLET_LIMIT,
         ...(q.cursor === undefined ? {} : { cursor: q.cursor }),
       });
-      return { items: r.tickets.map(walletListItemOf), nextCursor: r.nextCursor ?? null };
+      return { items: this.transfers ? await this.transfers.walletItems(r.tickets) : r.tickets.map((t) => walletListItemOf(t)), nextCursor: r.nextCursor ?? null };
     } catch (e) {
       if (e instanceof WalletCursorError) throw new ProblemError({ type: 'invalid-query', status: 400, title: '목록 조건이 올바르지 않습니다' });
       throw e;

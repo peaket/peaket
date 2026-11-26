@@ -110,10 +110,12 @@ export interface TransferStore {
   withdrawForEvent?(i: { readonly eventId: string; readonly reason: 'EVENT_POSTPONED'; readonly nowMs: number }): Promise<{ readonly withdrawn: readonly string[] }>;
   /** 탈퇴 참여자가 정리할 것: 받은 표·보낸 요청·받은 요청 */
   accountTransfers?(i: { readonly accountId: string }): Promise<{ readonly heldReceived: readonly string[]; readonly sentOffers: readonly string[]; readonly receivedOffers: readonly string[] }>;
-  /** 받은 표를 결제자에게 돌려준다. 동결 중이면 키만 폐기하고 FROZEN */
-  returnForAccount?(i: { readonly ticketId: string; readonly accountId: string; readonly nowMs: number }): Promise<'RETURNED' | 'FROZEN'>;
+  /** 받은 표를 결제자에게 돌려준다. 동결 중이면 키만 폐기하고 FROZEN, 입장 기록이 있으면 ENTRY_RECORDED */
+  returnForAccount?(i: { readonly ticketId: string; readonly accountId: string; readonly nowMs: number }): Promise<'RETURNED' | 'FROZEN' | 'ENTRY_RECORDED'>;
   withdrawForAccount?(i: { readonly offerId: string; readonly accountId: string; readonly nowMs: number }): Promise<void>;
   rejectForAccount?(i: { readonly offerId: string; readonly accountId: string; readonly nowMs: number }): Promise<void>;
+  /** 탈퇴 참여자의 모든 정리를 한 트랜잭션으로 한다(IR-15). 없으면 응용이 낱개 메서드로 이어 간다(메모리 짝) */
+  processAccountWithdrawal?(i: { readonly accountId: string; readonly nowMs: number; readonly deadlineAtMs?: number }): Promise<TransferWithdrawalResult>;
 }
 
 /** 알림 보내기 반복이 잡는 행(transfer_notice) */
@@ -136,4 +138,15 @@ export interface TransferNoticeStore {
   reschedule(noticeId: string, nextAttemptAtMs: number): Promise<void>;
   purgeSent(beforeMs: number): Promise<number>;
   backlog(): Promise<{ readonly count: number; readonly oldestCreatedAtMs?: number }>;
+}
+
+/** 탈퇴 참여자 한 번의 결과(인터페이스는 도메인에, 구현은 저장소가 한 트랜잭션으로 낸다) */
+export interface TransferWithdrawalResult {
+  readonly state: 'DONE' | 'PENDING';
+  readonly returnedTickets: number;
+  readonly withdrawnOffers: number;
+  readonly rejectedOffers: number;
+  readonly pendingReceivedTickets: number;
+  readonly pendingSentOffers: number;
+  readonly pendingReceivedOffers: number;
 }

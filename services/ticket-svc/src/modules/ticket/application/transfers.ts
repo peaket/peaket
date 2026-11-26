@@ -18,6 +18,7 @@ import {
   verifyRecipientRef,
   RECIPIENT_REF_TTL_MS,
 } from '../domain/transfer.js';
+import { walletListItemOf, type WalletListItem, type WalletTicket } from '../domain/ticket.js';
 
 export type {
   CreateOfferOutcome,
@@ -353,6 +354,28 @@ export class Transfers {
   /** 그 표의 잠금 표시(화면용). 잠금·풀림·기한·입장 시작을 반영한다 */
   async lockState(ticketId: string, nowMs?: number): Promise<{ readonly locked: boolean }> {
     return { locked: await this.d.store.lockActive(requireUuid('ticketId', ticketId), nowMs ?? this.d.clock.now()) };
+  }
+
+  /**
+   * 월렛 목록에 받은 표의 보낸 분 가린 닉네임을 싣는다(SCR-013, IR-12). 결제자마다 500개까지 한 번에 묻는다.
+   * identity를 못 부르면 '회원'이고 목록은 그대로다(양도를 막지 않는다)
+   */
+  async walletItems(tickets: readonly WalletTicket[]): Promise<readonly WalletListItem[]> {
+    const payers = [...new Set(tickets.filter((t) => !t.heldByPayer).map((t) => t.payerAccountId).filter((id) => UUID.test(id)))];
+    const resolve = this.d.directory.resolveNicknames?.bind(this.d.directory);
+    let names = new Map<string, string>();
+    let unavailable = false;
+    if (resolve && payers.length > 0) {
+      try {
+        names = new Map((await resolve(payers)) ?? []);
+      } catch {
+        // identity를 못 부르면 목록은 '확인할 수 없음'이라 칸을 빼고, 상세만 '회원'으로 채운다
+        unavailable = true;
+      }
+    }
+    return tickets.map((t) =>
+      walletListItemOf(t, t.heldByPayer ? null : resolve === undefined || unavailable ? undefined : maskNickname(names.get(t.payerAccountId) ?? '회원')),
+    );
   }
 
   /** TransferLockService. 입력 검사 뒤 저장소가 표마다 가른다 */

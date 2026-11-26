@@ -2,18 +2,10 @@
 // 한 번 부르면 ① 받은 표를 결제자에게 돌려주고(동결 중이면 키만 폐기) ② 보낸 OFFERED를 WITHDRAWN(ACCOUNT_DELETED)
 // ③ 받은 OFFERED를 REJECTED로 끝낸다. 남은 것이 없으면 DONE, 있으면 PENDING이다(다시 불러도 된다).
 import type { Clock } from '@peaket/platform';
-import type { TransferStore } from '../domain/transfer-ports.js';
+import type { TransferStore, TransferWithdrawalResult } from '../domain/transfer-ports.js';
 import type { Transfers } from './transfers.js';
 
-export interface TransferWithdrawalResult {
-  readonly state: 'DONE' | 'PENDING';
-  readonly returnedTickets: number;
-  readonly withdrawnOffers: number;
-  readonly rejectedOffers: number;
-  readonly pendingReceivedTickets: number;
-  readonly pendingSentOffers: number;
-  readonly pendingReceivedOffers: number;
-}
+export type { TransferWithdrawalResult } from '../domain/transfer-ports.js';
 
 export interface TransferWithdrawalDeps {
   readonly transfers: Transfers;
@@ -24,9 +16,12 @@ export interface TransferWithdrawalDeps {
 export class TransferWithdrawal {
   constructor(private readonly d: TransferWithdrawalDeps) {}
 
-  async run(i: { readonly accountId: string; readonly nowMs?: number }): Promise<TransferWithdrawalResult> {
+  async run(i: { readonly accountId: string; readonly nowMs?: number; readonly deadlineAtMs?: number }): Promise<TransferWithdrawalResult> {
     const nowMs = i.nowMs ?? this.d.clock.now();
     const store = this.d.store;
+    if (store.processAccountWithdrawal) {
+      return store.processAccountWithdrawal({ accountId: i.accountId, nowMs, ...(i.deadlineAtMs === undefined ? {} : { deadlineAtMs: i.deadlineAtMs }) });
+    }
     let returnedTickets = 0;
     let withdrawnOffers = 0;
     let rejectedOffers = 0;

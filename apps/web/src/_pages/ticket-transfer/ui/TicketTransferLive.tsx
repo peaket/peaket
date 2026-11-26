@@ -77,6 +77,8 @@ export function TicketTransferLive({ ticketId }: { ticketId: string }) {
   const [lookedUpAtMs, setLookedUpAtMs] = useState<number | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [code, setCode] = useState('');
+  const [mode, setMode] = useState<'CODE' | 'PHONE'>('CODE');
+  const [phone, setPhone] = useState('');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -132,11 +134,12 @@ export function TicketTransferLive({ ticketId }: { ticketId: string }) {
 
   const lookup = async () => {
     const n = net();
-    if (n === null || code.trim() === '') return;
+    const value = mode === 'PHONE' ? phone.trim() : code.trim();
+    if (n === null || value === '') return;
     setBusy(true);
     setFailure(null);
     setNotice(null);
-    const r = await lookupRecipient({ memberCode: code, ...n });
+    const r = mode === 'PHONE' ? await lookupRecipient({ phoneNumber: value, ...n }) : await lookupRecipient({ memberCode: value, ...n });
     setBusy(false);
     if (r.kind === 'network') {
       setFailure({ state: '확인 시도 초과', text: '연결을 확인한 뒤 다시 시도해 주세요' });
@@ -304,16 +307,33 @@ export function TicketTransferLive({ ticketId }: { ticketId: string }) {
               받는 분 확인
             </h2>
             <div className="field">
+              <div className="row gap-2" role="group" aria-label="받는 분 찾기 방법">
+                <button className={mode === 'CODE' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'} type="button" onClick={() => setMode('CODE')}>
+                  회원 코드
+                </button>
+                <button className={mode === 'PHONE' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'} type="button" onClick={() => setMode('PHONE')}>
+                  휴대폰 번호
+                </button>
+              </div>
               <label className="label" htmlFor="rc-id">
-                받는 분 회원 코드
+                {mode === 'PHONE' ? '받는 분 휴대폰 번호' : '받는 분 회원 코드'}
               </label>
               <div className="row gap-2">
-                <input className="input" id="rc-id" type="text" autoComplete="off" value={code} onChange={(e) => setCode(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
-                <button className="btn btn-secondary" type="button" disabled={busy || code.trim() === ''} onClick={() => void lookup()}>
+                <input
+                  className="input"
+                  id="rc-id"
+                  type={mode === 'PHONE' ? 'tel' : 'text'}
+                  inputMode={mode === 'PHONE' ? 'tel' : 'text'}
+                  autoComplete="off"
+                  value={mode === 'PHONE' ? phone : code}
+                  onChange={(e) => (mode === 'PHONE' ? setPhone(e.target.value) : setCode(e.target.value))}
+                  style={{ flex: 1, minWidth: 0 }}
+                />
+                <button className="btn btn-secondary" type="button" disabled={busy || (mode === 'PHONE' ? phone.trim() === '' : code.trim() === '')} onClick={() => void lookup()}>
                   회원 확인
                 </button>
               </div>
-              <span className="hint">회원 코드는 받는 분의 계정 설정(SCR-017)에 있습니다</span>
+              <span className="hint">{mode === 'PHONE' ? '번호는 저장하지 않고 확인에만 씁니다' : '회원 코드는 받는 분의 계정 설정(SCR-017)에 있습니다'}</span>
             </div>
             {recipientRef !== null && !canSend ? (
               <div className="card-flat row gap-3 px-3.5 py-3" role="status">

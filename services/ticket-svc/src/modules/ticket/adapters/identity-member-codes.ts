@@ -14,7 +14,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export class GrpcMemberCodeDirectory implements MemberCodeDirectory {
   readonly #client: grpc.Client & { ResolveMemberCodes: Unary; ResolvePhone: Unary; BatchGetNicknames: Unary };
 
-  constructor(address: string, profile: GrpcLbProfile = 'service') {
+  constructor(address: string, profile: GrpcLbProfile = 'service', o: { readonly internalToken?: string } = {}) {
     const def = protoLoader.fromJSON(identityV1Identity as Parameters<typeof protoLoader.fromJSON>[0], PROTO_LOAD_OPTIONS);
     const pkg = (grpc.loadPackageDefinition(def) as unknown as { peaket: { identity: { v1: Record<string, unknown> } } }).peaket.identity.v1;
     const at = address.lastIndexOf(':');
@@ -26,6 +26,8 @@ export class GrpcMemberCodeDirectory implements MemberCodeDirectory {
       profile,
       dependency: 'identity-svc',
       timeoutCapMs: DEADLINE_CAP_MS,
+      caller: 'ticket-svc',
+      ...(o.internalToken ? { internalToken: o.internalToken } : {}),
     }) as unknown as grpc.Client & { ResolveMemberCodes: Unary; ResolvePhone: Unary; BatchGetNicknames: Unary };
   }
 

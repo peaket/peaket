@@ -53,6 +53,7 @@ interface LockRow {
 type NoticeRow = Omit<StoredTransferNotice, 'attempts'> & {
   attempts: number;
   nextAttemptAtMs: number;
+  leaseUntilMs?: number;
   sentAtMs?: number;
 };
 
@@ -290,10 +291,11 @@ export class MemoryTransferStore implements TransferStore, TransferNoticeStore {
     return { heldReceived, sentOffers, receivedOffers };
   }
 
-  async returnForAccount(i: { ticketId: string; accountId: string; nowMs: number }): Promise<'RETURNED' | 'FROZEN'> {
+  async returnForAccount(i: { ticketId: string; accountId: string; nowMs: number }): Promise<'RETURNED' | 'FROZEN' | 'ENTRY_RECORDED'> {
     const t = this.o.tickets.tickets.get(i.ticketId);
     if (!t || t.accountId !== i.accountId || t.payerAccountId === i.accountId) throw new Error('돌려줄 받은 표가 아니다');
     if (ENDED_STATUSES.has(t.status)) throw new Error('이미 끝난 표다');
+    if (this.o.tickets.entries.has(t.ticketId)) return 'ENTRY_RECORDED';
     if (ownershipFrozen(t.eventStartsAtMs, this.entryCloses.get(t.eventId), i.nowMs)) {
       // 동결 중에는 키만 폐기하고 보유자는 그대로 둔다(마감 뒤 고리가 다시 부른다)
       this.#revokeKeys(t.ticketId, i.nowMs);
@@ -329,12 +331,13 @@ export class MemoryTransferStore implements TransferStore, TransferNoticeStore {
 
   async claimDue(nowMs: number, limit: number, leaseMs: number): Promise<readonly StoredTransferNotice[]> {
     const due = this.notices
-      .filter((n) => n.sentAtMs === undefined && n.nextAttemptAtMs <= nowMs)
+      .filter((n) => n.sentAtMs === undefined && n.nextAttemptAtMs <= nowMs && (n.leaseUntilMs === undefined || n.leaseUntilMs <= nowMs))
       .sort((a, b) => a.nextAttemptAtMs - b.nextAttemptAtMs || a.createdAtMs - b.createdAtMs)
       .slice(0, limit);
     return due.map((n) => {
       n.attempts += 1;
-      n.nextAttemptAtMs = nowMs + leaseMs;
+      // lease는 next_attempt_at(재시도 간격)을 덮지 않는다. 다른 파드는 lease가 끝난 뒤에만 잡는다
+      n.leaseUntilMs = nowMs + leaseMs;
       return {
         noticeId: n.noticeId,
         type: n.type,
@@ -352,12 +355,18 @@ export class MemoryTransferStore implements TransferStore, TransferNoticeStore {
 
   async markSent(noticeId: string, nowMs: number): Promise<void> {
     const n = this.notices.find((x) => x.noticeId === noticeId);
-    if (n && n.sentAtMs === undefined) n.sentAtMs = nowMs;
+    if (n && n.sentAtMs === undefined) {
+      n.sentAtMs = nowMs;
+      n.leaseUntilMs = undefined;
+    }
   }
 
   async reschedule(noticeId: string, nextAttemptAtMs: number): Promise<void> {
     const n = this.notices.find((x) => x.noticeId === noticeId);
-    if (n && n.sentAtMs === undefined) n.nextAttemptAtMs = nextAttemptAtMs;
+    if (n && n.sentAtMs === undefined) {
+      n.nextAttemptAtMs = nextAttemptAtMs;
+      n.leaseUntilMs = undefined;
+    }
   }
 
   async purgeSent(beforeMs: number): Promise<number> {

@@ -113,7 +113,7 @@ export interface TransferNoticeSenderDeps {
   readonly clock: TransferNoticeClock;
   /** 한 바퀴에 잡는 행 수(기본 50 [가정]) */
   readonly batch?: number;
-  readonly observe?: (result: 'sent' | 'retry') => void;
+  readonly observe?: (o: { readonly type: TransferNoticeType; readonly result: 'sent' | 'retry' }) => void;
 }
 
 export function transferNoticeEventOf(n: StoredTransferNotice): TransferNoticeEvent {
@@ -148,11 +148,11 @@ export class TransferNoticeSender {
       if (r.kind === 'sent') {
         await this.d.store.markSent(n.noticeId, this.d.clock.now());
         sent += 1;
-        this.d.observe?.('sent');
+        this.d.observe?.({ type: n.type, result: 'sent' });
       } else {
         await this.d.store.reschedule(n.noticeId, now + transferNoticeRetryDelayMs(n.attempts));
         retried += 1;
-        this.d.observe?.('retry');
+        this.d.observe?.({ type: n.type, result: 'retry' });
       }
     }
     const purged = await this.d.store.purgeSent(now - TRANSFER_NOTICE_RETENTION_MS);

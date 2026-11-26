@@ -39,6 +39,24 @@ export async function migrateTicket(databaseUrl) {
   } finally {
     await client.end();
   }
+  // Outbox 날짜 파티션은 마이그레이션 직후 만든다(docs/data.md §2 '파티션 표 규칙', ADR-0116).
+  // 기본(DEFAULT) 파티션은 두지 않으므로, 오늘부터 7일 [가정]을 미리 만들지 않으면 첫 사건 쓰기가 실패한다.
+  const { createDatabase, ensureOutboxPartitions, systemClock } = await import('@peaket/platform');
+  const check = new pg.Client({ connectionString: databaseUrl });
+  await check.connect();
+  try {
+    const exists = await check.query("SELECT to_regclass('public.outbox') AS name");
+    if (exists.rows[0]?.name !== null && exists.rows[0]?.name !== undefined) {
+      const database = createDatabase({ url: databaseUrl, applicationName: 'ticket-svc-migrate', max: 1 });
+      try {
+        await ensureOutboxPartitions(database, systemClock);
+      } finally {
+        await database.close();
+      }
+    }
+  } finally {
+    await check.end();
+  }
   return applied;
 }
 

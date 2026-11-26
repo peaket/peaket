@@ -3,7 +3,7 @@
 // 종료 세션 목록(ADR-0333 결정 2): 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고, 서비스를 닫은 뒤 끈다.
 import 'reflect-metadata';
 import type { Writable } from 'node:stream';
-import { type AdminAuthzPort, type Clock, Counter, createDatabase, SCANNER_AUTH_REJECTIONS, type ScannerAuthRejection, createExternalHttpClient, createHotRedis, createService, Gauge, internalGrpcTokenFromEnv, loadPlatformConfig, MemoryDpopReplayStore, reauthJtiStoreFromEnv, type ScannerSessionCheck, systemClock } from '@peaket/platform';
+import { type AdminAuthzPort, type Clock, Counter, createDatabase, SCANNER_AUTH_REJECTIONS, type ScannerAuthRejection, createExternalHttpClient, createHotRedis, createService, Gauge, internalGrpcTokenFromEnv, loadPlatformConfig, MemoryDpopReplayStore, outboxHealth, reauthJtiStoreFromEnv, type ScannerSessionCheck, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { loadTicketServiceConfig, TICKET_DB_POOL_MAX } from './config.js';
@@ -17,6 +17,9 @@ import { Transfers, type TransferReauthGate } from './modules/ticket/application
 import { TransferWithdrawal } from './modules/ticket/application/account-withdrawal.js';
 import { TRANSFER_NOTICE_EVERY_MS, TransferNoticeSender } from './modules/ticket/application/transfer-notices.js';
 import { HttpTransferNoticeSink } from './modules/ticket/adapters/http-transfer-notice-sink.js';
+import { createAvroEncoder, readSchemaIdsFile } from '@peaket/platform/avro';
+import { avroSchemas, localSchemaIds } from '@peaket/contracts/avro';
+import { ticketEventCodec } from './modules/ticket/adapters/ticket-event-codec.js';
 import { transferEventWithdrawalHandlers, transferWithdrawalHandlers } from './modules/ticket/inbound/transfer-withdrawal.grpc.js';
 import { DeviceKeys, type DeviceKeysDeps } from './modules/ticket/application/device-keys.js';
 import { DEVICE_KEY_NOTICE_EVERY_MS, DeviceKeyNoticeSender } from './modules/ticket/application/device-key-notices.js';
@@ -121,23 +124,30 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let expireTimer: ReturnType<typeof setInterval> | undefined;
   let noticeTimer: ReturnType<typeof setInterval> | undefined;
   let transferNoticeTimer: ReturnType<typeof setInterval> | undefined;
+  let transferNoticeMetric: ((o: { readonly type: string; readonly result: 'sent' | 'retry' }) => void) | undefined;
   let entryCloseTimer: ReturnType<typeof setInterval> | undefined;
   let controlSync: { close(): Promise<void> } | undefined;
   // 스캐너 가드 거절 이유 지표(O-T37 ⑨). 서비스 지표 묶음은 createService 뒤에 생기므로 그때 잇는다
   let scannerRejections: Counter<'service' | 'reason'> | undefined;
   try {
     const gateStore = new DrizzleScannerGateStore(database);
+    // trade.tickets Outbox 값은 Confluent Avro다(ADR-0357). local·ci·demo는 계약의 고정 스키마 ID, 그 밖은 ConfigMap이 필수다
+    const localEnv = env.PEAKET_ENV === 'local' || env.PEAKET_ENV === 'ci' || env.PEAKET_ENV === 'demo';
+    const schemaIds = localEnv ? localSchemaIds : readSchemaIdsFile(env);
+    const transferEventCodec = ticketEventCodec(
+      createAvroEncoder({ schemaIds, schemas: avroSchemas, produces: [{ topic: 'trade.tickets', record: 'peaket.trade.TicketEvent' }] }),
+    );
     const shiftStore = new DrizzleScannerShiftStore(database);
     const entryCloseStore = new DrizzleEntryCloseStore(database);
     const deviceKeyStore = new DrizzleDeviceKeyStore({ database, changes: gateStore });
-    const store = new DrizzleTicketStore({ database, changes: gateStore, deviceKeys: deviceKeyStore, clock: systemClock });
+    const store = new DrizzleTicketStore({ database, changes: gateStore, deviceKeys: deviceKeyStore, clock: systemClock, outboxCodec: transferEventCodec });
     const ticket = new TicketService({ store, clock: systemClock });
     const scannerStore = new DrizzleScannerDeviceStore(database);
     const scannerCommands = new DrizzleScannerDeviceCommandStore(database);
     redis = config.redisUrl ? await createHotRedis({ url: config.redisUrl }) : undefined;
     // 양도·돌려주기(GAT-050·055): 행 잠금 저장소, 재인증 확인기, 회원 코드 찾기.
     // 팬 공개키 묶음 주소가 없으면 local·ci만 닫힌 대역(늘 403)이고, 그 밖 환경은 설정이 시작을 막는다
-    const transferStore = new DrizzleTransferStore({ database, deviceKeys: deviceKeyStore, clock: systemClock });
+    const transferStore = new DrizzleTransferStore({ database, deviceKeys: deviceKeyStore, clock: systemClock, outboxCodec: transferEventCodec });
     const jti = reauthJtiStoreFromEnv(env, redis);
     const reauth: TransferReauthGate = config.identityFanJwksUrl
       ? new JwksFanReauthGate({ jwksUrl: config.identityFanJwksUrl, issuer: config.identityIssuer ?? 'https://identity.peaket.example', jti, clock: systemClock })
@@ -159,7 +169,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       observe: (r) => registrationMetric?.(r),
       observeNotice: (r) => noticeMetric?.(r),
     });
-    const memberCodes = config.identityGrpcUrl ? new GrpcMemberCodeDirectory(config.identityGrpcUrl, lbProfile) : undefined;
+    const memberCodes = config.identityGrpcUrl ? new GrpcMemberCodeDirectory(config.identityGrpcUrl, lbProfile, { ...(internalGrpcToken ? { internalToken: internalGrpcToken } : {}) }) : undefined;
     const transfers = new Transfers({
       store: transferStore,
       reauth,
@@ -189,6 +199,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
             config.internalToken,
           ),
           clock: systemClock,
+          observe: (o) => transferNoticeMetric?.(o),
         })
       : undefined;
     const codes = redis ? new RedisEnrollmentCodeStore(redis) : new MemoryEnrollmentCodeStore(systemClock);
@@ -277,6 +288,28 @@ export async function start(o: StartOptions): Promise<StartedService> {
     expireTimer = setInterval(expire, 60_000);
     expireTimer.unref?.();
     expire();
+    // 양도 알림·Outbox 지표(정본 §13). 계정·티켓 ID는 싣지 않는다
+    const transferNoticeCounter = new Counter({
+      name: 'ticket_transfer_notices_total',
+      help: '양도 알림 보내기 결과(type, result)',
+      labelNames: ['service', 'type', 'result'],
+      registers: [service.metrics.registry],
+    });
+    transferNoticeMetric = (o) => transferNoticeCounter.inc({ service: SERVICE, type: o.type, result: o.result });
+    const transferOutboxLag = new Gauge({
+      name: 'ticket_transfer_outbox_lag_seconds',
+      help: '보내지 않은 trade.tickets Outbox 행의 가장 오래된 나이(초)',
+      labelNames: ['service'],
+      registers: [service.metrics.registry],
+    });
+    const transferWithdrawalPending = new Gauge({
+      name: 'ticket_transfer_withdrawal_pending_seconds',
+      help: '탈퇴 참여자가 PENDING으로 남긴 가장 오래된 나이(초). 지금은 0으로 두고 참여자 응답 로그로 본다',
+      labelNames: ['service'],
+      registers: [service.metrics.registry],
+    });
+    transferOutboxLag.set({ service: SERVICE }, 0);
+    transferWithdrawalPending.set({ service: SERVICE }, 0);
     // 양도 알림 보내기 반복(docs/features/notify.md §4.8): 5초 [가정]마다 transfer_notice의 보낼 때가 된 행을 core-svc로 보낸다
     if (transferNotices) {
       const sendTransferNotices = (): void => {
@@ -286,6 +319,18 @@ export async function start(o: StartOptions): Promise<StartedService> {
             if (r.sent > 0 || r.retried > 0) service!.logger.info({ sent: r.sent, retried: r.retried, purged: r.purged }, '양도 알림을 보냈다');
           })
           .catch((err: unknown) => service!.logger.warn({ err }, '양도 알림 보내기가 실패했다(다음 틱에 다시 한다)'));
+        void transferNotices
+          .backlog()
+          .then((b) => {
+            if (b.count > 0 && b.oldestSeconds >= 3_600) service!.logger.warn({ count: b.count, oldestSeconds: b.oldestSeconds }, '보내지 못한 양도 알림이 1시간을 넘었다(SEV3)');
+          })
+          .catch(() => undefined);
+        void outboxHealth(database, systemClock)
+          .then((h) => {
+            transferOutboxLag.set({ service: SERVICE }, h.lagSeconds);
+            if (h.lagSeconds >= 300) service!.logger.warn({ lagSeconds: h.lagSeconds }, 'trade.tickets Outbox 지연이 5분을 넘었다(SEV3)');
+          })
+          .catch(() => undefined);
       };
       transferNoticeTimer = setInterval(sendTransferNotices, TRANSFER_NOTICE_EVERY_MS);
       transferNoticeTimer.unref?.();
@@ -514,7 +559,18 @@ export async function start(o: StartOptions): Promise<StartedService> {
           // 탈퇴 참여자(identity-svc만, I-T43 ①)
           definition: ticketPackage().WithdrawalParticipantService.service,
           handlers: transferWithdrawalHandlers(
-            { process: (i) => transferWithdrawal.run({ accountId: i.accountId }) },
+            {
+              process: (i) =>
+                transferWithdrawal.run({ accountId: i.accountId, ...(i.deadlineAtMs > 0 ? { deadlineAtMs: i.deadlineAtMs } : {}) }).then((r) => {
+                  if (r.state === 'PENDING') {
+                    service!.logger.warn(
+                      { pendingReceivedTickets: r.pendingReceivedTickets, pendingSentOffers: r.pendingSentOffers, pendingReceivedOffers: r.pendingReceivedOffers },
+                      '탈퇴 참여자가 PENDING이다(입장 동결·입장 기록·쓰기 실패. 마감 뒤 고리가 다시 부른다, SEV3 후보)',
+                    );
+                  }
+                  return r;
+                }),
+            },
             (method, err) => {
               service!.logger.error({ method, err }, 'WithdrawalParticipantService 처리 실패');
             },

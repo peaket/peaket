@@ -17,6 +17,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "start": "node --import @peaket/platform/telemetry/register dist/main.js",
+    "relay": "node --import @peaket/platform/telemetry/register dist/relay.js",
     "migrate": "node scripts/migrate.mjs",
     "db:generate": "node scripts/db-generate.mjs",
     "test": "vitest run",

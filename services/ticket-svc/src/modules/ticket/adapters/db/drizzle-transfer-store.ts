@@ -18,6 +18,7 @@ import type {
   TransferNoticeStore,
   TransferOfferListRow,
   TransferStore,
+  TransferWithdrawalResult,
 } from '../../domain/transfer-ports.js';
 import {
   acceptRejectionOf,
@@ -108,15 +109,37 @@ export class DrizzleTransferStore implements TransferStore, TransferNoticeStore 
       if (existing) return { kind: 'REPLAYED', offer: recordOf(existing) };
       const [row] = await tx.select().from(ticket).where(eq(ticket.id, offer.ticketId)).limit(1).for('update');
       if (!row) return { kind: 'REJECTED', reason: 'NOT_HOLDER' };
-      // 기한 지난 요청을 먼저 만료시켜 표시를 푼다(RV-01). 만료 고리가 늦어도 새 요청·취소가 막히지 않는다
+      // 기한 지난 요청을 먼저 만료시켜 표시를 푼다(RV-01). 만료 고리가 늦어도 새 요청·취소가 막히지 않는다.
+      // 만료도 여섯 사건의 하나라 같은 트랜잭션에 사건·알림을 남긴다(IR-07).
+      const expiring = await tx
+        .select()
+        .from(transferOffer)
+        .where(and(eq(transferOffer.ticketId, row.id), eq(transferOffer.status, 'OFFERED'), lte(transferOffer.expiresAt, new Date(nowMs))))
+        .for('update');
       await tx
         .update(transferOffer)
         .set({ status: 'EXPIRED', decidedAt: new Date(nowMs) })
         .where(and(eq(transferOffer.ticketId, row.id), eq(transferOffer.status, 'OFFERED'), lte(transferOffer.expiresAt, new Date(nowMs))));
+      const writeExpired = async (): Promise<void> => {
+        for (const e of expiring) {
+          await writeTransferEffects(tx, this.#outbox, this.#clock(), {
+            ticket: { ticketId: row.id, eventId: row.eventId, orderId: row.orderId },
+            offerId: e.id,
+            type: 'TRANSFER_EXPIRED',
+            fromAccountId: e.fromAccountId,
+            toAccountId: e.toAccountId,
+            accountId: e.fromAccountId,
+            nowMs,
+          });
+        }
+      };
       const open = await tx.select({ id: transferOffer.id }).from(transferOffer).where(and(eq(transferOffer.ticketId, row.id), eq(transferOffer.status, 'OFFERED'))).limit(1);
       // 행 잠금을 기다린 뒤 같은 키의 앞 요청이 먼저 들어갔는지 본다(RV-04)
       const [sameKey] = await tx.select().from(transferOffer).where(eq(transferOffer.id, offer.offerId)).limit(1);
-      if (sameKey) return { kind: 'REPLAYED', offer: recordOf(sameKey) };
+      if (sameKey) {
+        await writeExpired();
+        return { kind: 'REPLAYED', offer: recordOf(sameKey) };
+      }
       let fresh = row;
       if (!open[0] && (row.transferPending || row.status === 'TRANSFER_PENDING')) {
         await tx
@@ -128,7 +151,10 @@ export class DrizzleTransferStore implements TransferStore, TransferNoticeStore 
       }
       const lock = await this.#activeLock(tx, fresh.eventId, fresh.payerAccountId, nowMs);
       const reason = createOfferRejectionOf(snapshotOf(fresh), { callerAccountId: offer.fromAccountId, recipientAccountId: offer.toAccountId, nowMs, lockActive: lock !== undefined });
-      if (reason) return { kind: 'REJECTED', reason };
+      if (reason) {
+        await writeExpired();
+        return { kind: 'REJECTED', reason };
+      }
       const inserted = await tx
         .insert(transferOffer)
         .values({
@@ -145,6 +171,7 @@ export class DrizzleTransferStore implements TransferStore, TransferNoticeStore 
       if (inserted.length === 0) {
         // 같은 키의 동시 요청이거나 다른 요청이 진행 중이다. 같은 키면 처음 결과(REPLAYED), 아니면 409다(RV-04)
         const [sameKey] = await tx.select().from(transferOffer).where(eq(transferOffer.id, offer.offerId)).limit(1);
+        await writeExpired();
         if (sameKey) return { kind: 'REPLAYED', offer: recordOf(sameKey) };
         return { kind: 'REJECTED', reason: 'TRANSFER_PENDING' };
       }
@@ -152,6 +179,7 @@ export class DrizzleTransferStore implements TransferStore, TransferNoticeStore 
         .update(ticket)
         .set({ status: 'TRANSFER_PENDING', transferPending: true, version: fresh.version + 1 })
         .where(eq(ticket.id, fresh.id));
+      await writeExpired();
       await writeTransferEffects(tx, this.#outbox, this.#clock(), {
         ticket: { ticketId: fresh.id, eventId: fresh.eventId, orderId: fresh.orderId },
         offerId: offer.offerId,
@@ -497,11 +525,13 @@ export class DrizzleTransferStore implements TransferStore, TransferNoticeStore 
     return { heldReceived, sentOffers: sent.map((o) => o.id), receivedOffers: received.map((o) => o.id) };
   }
 
-  async returnForAccount(i: { ticketId: string; accountId: string; nowMs: number }): Promise<'RETURNED' | 'FROZEN'> {
+  async returnForAccount(i: { ticketId: string; accountId: string; nowMs: number }): Promise<'RETURNED' | 'FROZEN' | 'ENTRY_RECORDED'> {
     return this.o.database.transaction(async (tx) => {
       const [t] = await tx.select().from(ticket).where(eq(ticket.id, i.ticketId)).limit(1).for('update');
       if (!t || t.accountId !== i.accountId || t.payerAccountId === i.accountId) throw new Error('돌려줄 받은 표가 아니다');
       if (ENDED_STATUSES.has(ticketStatusOf(t.status))) throw new Error('이미 끝난 표다');
+      const entry = (await tx.execute(sql`select 1 from scan_event where event_id = ${t.eventId}::uuid and ticket_id = ${t.id}::uuid and direction = 'IN' and result = 'PASS' limit 1`)).rows.length > 0;
+      if (entry) return 'ENTRY_RECORDED';
       const entryClose = await this.#entryClose(tx, t.eventId);
       if (ownershipFrozen(t.eventStartsAt?.getTime(), entryClose, i.nowMs)) {
         await this.o.deviceKeys?.revokeActiveInTx(tx, t.id, i.nowMs);
@@ -575,6 +605,91 @@ export class DrizzleTransferStore implements TransferStore, TransferNoticeStore 
     });
   }
 
+  /**
+   * 탈퇴 참여자의 정리(IR-15): 받은 표 돌려주기·보낸 요청 철회·받은 요청 거절을 한 트랜잭션으로 한다.
+   * 동결이면 키만 폐기하고 PENDING, 입장 기록이면 손대지 않고 PENDING이다.
+   */
+  async processAccountWithdrawal(i: { accountId: string; nowMs: number; deadlineAtMs?: number }): Promise<TransferWithdrawalResult> {
+    void i.deadlineAtMs;
+    return this.o.database.transaction(async (tx) => {
+      const held = await tx
+        .select()
+        .from(ticket)
+        .where(and(eq(ticket.accountId, i.accountId), sql`${ticket.payerAccountId} <> ${i.accountId}`))
+        .orderBy(asc(ticket.id))
+        .for('update');
+      const offers = await tx
+        .select({ offer: transferOffer, t: ticket })
+        .from(transferOffer)
+        .innerJoin(ticket, eq(ticket.id, transferOffer.ticketId))
+        .where(and(eq(transferOffer.status, 'OFFERED'), or(eq(transferOffer.fromAccountId, i.accountId), eq(transferOffer.toAccountId, i.accountId))))
+        .orderBy(asc(transferOffer.id))
+        .for('update');
+      let returnedTickets = 0;
+      let pendingReceivedTickets = 0;
+      for (const t of held) {
+        if (ENDED_STATUSES.has(ticketStatusOf(t.status))) continue;
+        const entry = (await tx.execute(sql`select 1 from scan_event where event_id = ${t.eventId}::uuid and ticket_id = ${t.id}::uuid and direction = 'IN' and result = 'PASS' limit 1`)).rows.length > 0;
+        const entryClose = await this.#entryClose(tx, t.eventId);
+        if (entry || ownershipFrozen(t.eventStartsAt?.getTime(), entryClose, i.nowMs)) {
+          if (!entry) await this.o.deviceKeys?.revokeActiveInTx(tx, t.id, i.nowMs);
+          pendingReceivedTickets += 1;
+          continue;
+        }
+        await this.o.deviceKeys?.revokeActiveInTx(tx, t.id, i.nowMs);
+        await tx
+          .update(ticket)
+          .set({ accountId: t.payerAccountId, status: 'ACTIVE', transferPending: false, keyRevokedAt: new Date(i.nowMs), version: t.version + 1 })
+          .where(eq(ticket.id, t.id));
+        const offerId = await this.#lastOfferId(tx, t.id);
+        await writeTransferEffects(tx, this.#outbox, this.#clock(), {
+          ticket: { ticketId: t.id, eventId: t.eventId, orderId: t.orderId },
+          offerId,
+          type: 'TICKET_RETURNED',
+          fromAccountId: t.accountId,
+          toAccountId: t.payerAccountId,
+          accountId: t.payerAccountId,
+          nowMs: i.nowMs,
+        });
+        returnedTickets += 1;
+      }
+      let withdrawnOffers = 0;
+      let rejectedOffers = 0;
+      for (const { offer, t } of offers) {
+        if (offer.fromAccountId === i.accountId) {
+          await tx.update(transferOffer).set({ status: 'WITHDRAWN', withdrawReason: 'ACCOUNT_DELETED', decidedAt: new Date(i.nowMs) }).where(eq(transferOffer.id, offer.id));
+          await this.#releaseTicket(tx, t.id, i.nowMs);
+          await writeTransferEffects(tx, this.#outbox, this.#clock(), {
+            ticket: { ticketId: t.id, eventId: t.eventId, orderId: t.orderId },
+            offerId: offer.id,
+            type: 'TRANSFER_WITHDRAWN',
+            fromAccountId: offer.fromAccountId,
+            toAccountId: offer.toAccountId,
+            accountId: offer.fromAccountId,
+            reason: 'OTHER',
+            nowMs: i.nowMs,
+          });
+          withdrawnOffers += 1;
+        } else if (offer.toAccountId === i.accountId) {
+          await tx.update(transferOffer).set({ status: 'REJECTED', decidedAt: new Date(i.nowMs) }).where(eq(transferOffer.id, offer.id));
+          await this.#releaseTicket(tx, t.id, i.nowMs);
+          await writeTransferEffects(tx, this.#outbox, this.#clock(), {
+            ticket: { ticketId: t.id, eventId: t.eventId, orderId: t.orderId },
+            offerId: offer.id,
+            type: 'TRANSFER_REJECTED',
+            fromAccountId: offer.fromAccountId,
+            toAccountId: offer.toAccountId,
+            accountId: offer.fromAccountId,
+            nowMs: i.nowMs,
+          });
+          rejectedOffers += 1;
+        }
+      }
+      const state = pendingReceivedTickets === 0 ? 'DONE' : 'PENDING';
+      return { state, returnedTickets, withdrawnOffers, rejectedOffers, pendingReceivedTickets, pendingSentOffers: 0, pendingReceivedOffers: 0 };
+    });
+  }
+
   // ---- transfer_notice 보내기 표(TransferNoticeStore) ----
 
   async claimDue(nowMs: number, limit: number, leaseMs: number): Promise<readonly StoredTransferNotice[]> {
@@ -582,12 +697,13 @@ export class DrizzleTransferStore implements TransferStore, TransferNoticeStore 
       with due as (
         select id from transfer_notice
         where sent_at is null and next_attempt_at <= ${new Date(nowMs)}
+          and (lease_until is null or lease_until <= ${new Date(nowMs)})
         order by next_attempt_at, created_at
         limit ${limit}
         for update skip locked
       )
       update transfer_notice n
-      set attempts = n.attempts + 1, next_attempt_at = ${new Date(nowMs + leaseMs)}
+      set attempts = n.attempts + 1, lease_until = ${new Date(nowMs + leaseMs)}
       from due
       where n.id = due.id
       returning n.id, n.type, n.party, n.offer_id, n.ticket_id, n.event_id, n.account_id, n.reason, n.created_at, n.attempts`)).rows as {
@@ -617,11 +733,11 @@ export class DrizzleTransferStore implements TransferStore, TransferNoticeStore 
   }
 
   async markSent(noticeId: string, nowMs: number): Promise<void> {
-    await this.o.database.db.update(transferNotice).set({ sentAt: new Date(nowMs) }).where(and(eq(transferNotice.id, noticeId), isNull(transferNotice.sentAt)));
+    await this.o.database.db.update(transferNotice).set({ sentAt: new Date(nowMs), leaseUntil: null }).where(and(eq(transferNotice.id, noticeId), isNull(transferNotice.sentAt)));
   }
 
   async reschedule(noticeId: string, nextAttemptAtMs: number): Promise<void> {
-    await this.o.database.db.update(transferNotice).set({ nextAttemptAt: new Date(nextAttemptAtMs) }).where(and(eq(transferNotice.id, noticeId), isNull(transferNotice.sentAt)));
+    await this.o.database.db.update(transferNotice).set({ nextAttemptAt: new Date(nextAttemptAtMs), leaseUntil: null }).where(and(eq(transferNotice.id, noticeId), isNull(transferNotice.sentAt)));
   }
 
   async purgeSent(beforeMs: number): Promise<number> {

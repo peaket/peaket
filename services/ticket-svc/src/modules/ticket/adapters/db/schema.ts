@@ -266,6 +266,8 @@ export const transferNotice = pgTable(
     createdAt: at('created_at').notNull(),
     attempts: integer('attempts').notNull().default(0),
     nextAttemptAt: at('next_attempt_at').notNull(),
+    /** 다른 파드가 같은 행을 겹쳐 잡지 않게 미는 시각. next_attempt_at(재시도)과 섞지 않는다 */
+    leaseUntil: at('lease_until'),
     sentAt: at('sent_at'),
   },
   (t) => [

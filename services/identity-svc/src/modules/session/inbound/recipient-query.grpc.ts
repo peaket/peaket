@@ -2,6 +2,7 @@
 // F-05-11: 양도 받는 사람 찾기 ResolvePhone과 가린 닉네임 BatchGetNicknames를 더한다(docs/features/transfer-refund.md §4).
 // 부르는 쪽은 core-svc 팬 알림 발송 워커와 ticket-svc다. 읽기라 멱등 키가 없다.
 import * as grpc from '@grpc/grpc-js';
+import { verifyInternalGrpcActor } from '@peaket/platform';
 import type { GetRecipients, RecipientsProblem } from '../application/get-recipients.js';
 
 type Req = Record<string, unknown>;
@@ -32,10 +33,25 @@ export interface RecipientQueryUseCases {
   readonly resolveNicknames?: (accountIds: readonly string[]) => Promise<ReadonlyMap<string, string>>;
 }
 
-export function recipientQueryHandlers(uc: RecipientQueryUseCases, onError?: (method: string, err: unknown) => void): grpc.UntypedServiceImplementation {
+export function recipientQueryHandlers(uc: RecipientQueryUseCases, onError?: (method: string, err: unknown) => void, o?: { readonly internalToken?: string }): grpc.UntypedServiceImplementation {
   const handlers: grpc.UntypedServiceImplementation = {};
+  /** 내부 토큰이 설정된 조립은 정해진 호출자만 받는다. 없으면 local·ci 시험 조립이라 통과한다 */
+  const allowed = (call: grpc.ServerUnaryCall<Req, Req>, caller: string, cb: grpc.sendUnaryData<Req>): boolean => {
+    if (!o?.internalToken) return true;
+    const v = verifyInternalGrpcActor(call.metadata ?? new grpc.Metadata(), o.internalToken, { caller });
+    if (v.ok) return true;
+    cb({ code: v.reason === 'token' ? grpc.status.UNAUTHENTICATED : grpc.status.PERMISSION_DENIED, details: '부를 수 없는 호출자다' });
+    return false;
+  };
   if (uc.recipients) {
     handlers.BatchGetRecipients = (call: grpc.ServerUnaryCall<Req, object>, cb: grpc.sendUnaryData<object>) => {
+      if (o?.internalToken) {
+        const v = verifyInternalGrpcActor(call.metadata ?? new grpc.Metadata(), o.internalToken, { caller: 'core-svc' });
+        if (!v.ok) {
+          cb({ code: v.reason === 'token' ? grpc.status.UNAUTHENTICATED : grpc.status.PERMISSION_DENIED, details: '부를 수 없는 호출자다' });
+          return;
+        }
+      }
       const ids = Array.isArray(call.request.account_ids) ? (call.request.account_ids as unknown[]).map(text) : [];
       uc.recipients!
         .run({ accountIds: ids, includeEmail: call.request.include_email === true })
@@ -60,6 +76,7 @@ export function recipientQueryHandlers(uc: RecipientQueryUseCases, onError?: (me
   }
   if (uc.resolvePhone) {
     handlers.ResolvePhone = (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      if (!allowed(call, 'ticket-svc', cb)) return;
       const digits = normalizePhoneDigits(text(call.request.phone_number));
       if (digits === undefined) {
         cb({ code: grpc.status.INVALID_ARGUMENT, details: '휴대폰 번호 모양이 올바르지 않습니다' });
@@ -77,6 +94,7 @@ export function recipientQueryHandlers(uc: RecipientQueryUseCases, onError?: (me
   }
   if (uc.resolveNicknames) {
     handlers.BatchGetNicknames = (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      if (!allowed(call, 'ticket-svc', cb)) return;
       const raw = Array.isArray(call.request.account_ids) ? (call.request.account_ids as unknown[]).map(text) : [];
       if (raw.length === 0 || raw.length > NICKNAME_BATCH_MAX) {
         cb({ code: grpc.status.INVALID_ARGUMENT, details: `계정 ID는 1~${NICKNAME_BATCH_MAX}개여야 합니다` });

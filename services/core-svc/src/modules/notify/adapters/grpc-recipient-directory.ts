@@ -22,11 +22,19 @@ type Unary = (req: object, md: grpc.Metadata, opts: grpc.CallOptions, cb: (e: gr
 export class GrpcRecipientDirectory implements RecipientDirectory {
   readonly #client: grpc.Client & { BatchGetRecipients: Unary };
 
-  constructor(address: string, profile: GrpcLbProfile = 'service') {
+  constructor(address: string, profile: GrpcLbProfile = 'service', o: { readonly internalToken?: string } = {}) {
     const def = protoLoader.fromJSON(identityV1Identity as Parameters<typeof protoLoader.fromJSON>[0], OPTIONS);
     const pkg = (grpc.loadPackageDefinition(def) as unknown as { peaket: { identity: { v1: Record<string, unknown> } } }).peaket.identity.v1;
     const { host, port } = hostPort(address, 'PEAKET_IDENTITY_GRPC_URL');
-    this.#client = createGrpcClient(pkg.RecipientQueryService as grpc.ServiceClientConstructor, { host, port, profile, dependency: 'identity-svc', timeoutCapMs: DEADLINE_MS }) as unknown as grpc.Client & {
+    this.#client = createGrpcClient(pkg.RecipientQueryService as grpc.ServiceClientConstructor, {
+      host,
+      port,
+      profile,
+      dependency: 'identity-svc',
+      timeoutCapMs: DEADLINE_MS,
+      caller: 'core-svc',
+      ...(o.internalToken ? { internalToken: o.internalToken } : {}),
+    }) as unknown as grpc.Client & {
       BatchGetRecipients: Unary;
     };
   }

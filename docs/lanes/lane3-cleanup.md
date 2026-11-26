@@ -145,3 +145,6 @@
 - F-05-11 TR-16 남음: SCR-013 받은 표의 `receivedFromNickname` 표시는 소스에 이름이 있는지만 본다. `WalletLive`가 실제로 그 값을 글자로 그리는지(받은 표 카드의 조건 분기)는 화면 확인·구현 리뷰에서 본다.
 - F-05-11 TR-18 남음: identity ticket 탈퇴 참여자의 gRPC 답 `state` 매핑(`toWithdrawalAnswer`에 해당하는 ticket 판)은 이름·클라이언트 수만 본다. ticket 참여자 process/state 매핑 시험을 구현 때 더한다.
 - F-05-11 정리: ticket `transfer_notice`의 `effective_*` 칸·7일 purge 인덱스·`0040` 식 인덱스의 EXPLAIN 사용 확인은 구현·운영 리뷰에서 본다.
+- F-05-11 IR-14(중간): Drizzle `withdrawForEvent`는 `transfer_offer JOIN ticket … FOR UPDATE`로 잠그고 `accept`는 티켓 → 요청 차례로 잠근다. 같은 표에서 겹치면 교착(40P01)이 날 수 있으니 잠금 차례를 티켓 → 요청으로 맞추고 교착 재시도를 더한다.
+- F-05-11 IR-16(중간): 받은 요청 목록이 요청 한 건마다 identity `BatchGetNicknames`를 한 번씩 부른다(페이지 20이면 20 RPC). 결제자 계정을 모아 500개까지 한 번에 묻도록 줄인다.
+- F-05-11 IR-17(낮음): `memoryTicketRegistry`(module 전역 Map)와 `MemoryDeviceKeyStore.instances`(static 배열)가 테스트·로컬 조립에 전역 상태를 만든다. `deviceKeys` 포트 주입 짝으로 바꿔 가짜가 진짜와 같은 계약을 쓰게 한다.

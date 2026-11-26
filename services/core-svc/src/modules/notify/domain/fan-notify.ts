@@ -91,20 +91,11 @@ const SUBSCRIPTION_KEY = /^[A-Za-z0-9_-]{43}$/;
 
 /** 구독 하나에 묶인 웹 푸시 작업이면 그 구독 키. 계정 단위 작업(로그인 수단·병합 등)이면 undefined(그 계정의 모든 구독에 보낸다) */
 export function webPushTargetOf(kind: string, dedupKey: string): string | undefined {
-  if ((TICKET_KEY_NOTICE_KINDS as readonly string[]).includes(kind)) {
-    const parts = dedupKey.split(':');
-    if (parts.length !== 6 || parts[4] !== 'WEB_PUSH') return undefined;
-    const key = parts[5]!;
-    return SUBSCRIPTION_KEY.test(key) ? key : undefined;
-  }
-  // 양도 알림의 웹 푸시 작업은 `{type}:{offerId}:{accountId}:WEB_PUSH:{구독 키}`다
-  if (TRANSFER_NOTICE_KINDS.has(kind)) {
-    const parts = dedupKey.split(':');
-    if (parts.length !== 5 || parts[3] !== 'WEB_PUSH') return undefined;
-    const key = parts[4]!;
-    return SUBSCRIPTION_KEY.test(key) ? key : undefined;
-  }
-  return undefined;
+  if (!(TICKET_KEY_NOTICE_KINDS as readonly string[]).includes(kind)) return undefined;
+  const parts = dedupKey.split(':');
+  if (parts.length !== 6 || parts[4] !== 'WEB_PUSH') return undefined;
+  const key = parts[5]!;
+  return SUBSCRIPTION_KEY.test(key) ? key : undefined;
 }
 
 /** 문안 변수 허용 목록(notify §12). 주소·전화번호·이름은 종류를 가리지 않고 받지 않는다 */

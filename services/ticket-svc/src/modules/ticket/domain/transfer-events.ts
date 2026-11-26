@@ -51,7 +51,7 @@ export function transferEventKeyOf(offerId: string, type: TransferEventType): st
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-/** docs/api/avro/peaket/trade/TicketEvent.avsc 모양. some 칸은 JSON 대역에서도 같은 이름을 쓴다 */
+/** docs/api/avro/peaket/trade/TicketEvent.avsc 모양. `occurredAt`은 timestamp-millis(long)다 */
 export function ticketEventOf(e: TransferEventRecord): Record<string, unknown> {
   return {
     ticketId: e.ticketId,
@@ -65,7 +65,7 @@ export function ticketEventOf(e: TransferEventRecord): Record<string, unknown> {
     gateZone: null,
     direction: null,
     scannedAt: null,
-    occurredAt: new Date(e.occurredAtMs).toISOString(),
+    occurredAt: e.occurredAtMs,
     eventKey: transferEventKeyOf(e.offerId, e.type),
   };
 }

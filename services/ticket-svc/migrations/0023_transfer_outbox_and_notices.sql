@@ -15,10 +15,6 @@ CREATE TABLE "outbox" (
 ALTER SEQUENCE "outbox_seq" OWNED BY "outbox"."seq";
 CREATE INDEX "outbox_unsent_idx" ON "outbox" ("seq") WHERE "sent_at" IS NULL;
 
--- 시각을 앞으로 옮기는 시험·비상 시에도 사건을 잃지 않게 기본 파티션을 둔다(플랫폼 template 0002는 두지 않는다.
--- 운영의 7일 미리 만들기 밖으로 날짜가 뛰면 이 표가 받고, 정비 대상(outbox_pYYYYMMDD)에는 들지 않는다).
-CREATE TABLE IF NOT EXISTS "outbox_pdefault" PARTITION OF "outbox" DEFAULT;
-
 -- 양도 사건 알림 행. 사건마다 두 사람(약한 재인증은 한 사람)이고, 중복 키가 같은 사건의 재전송을 한 행으로 막는다.
 CREATE TABLE IF NOT EXISTS "transfer_notice" (
 	"id" uuid PRIMARY KEY,
@@ -32,6 +28,7 @@ CREATE TABLE IF NOT EXISTS "transfer_notice" (
 	"created_at" timestamp with time zone NOT NULL,
 	"attempts" integer NOT NULL DEFAULT 0,
 	"next_attempt_at" timestamp with time zone NOT NULL,
+	"lease_until" timestamp with time zone,
 	"sent_at" timestamp with time zone,
 	CONSTRAINT "transfer_notice_type_check" CHECK ("type" IN (
 		'TRANSFER_OFFERED', 'TRANSFER_ACCEPTED', 'TRANSFER_REJECTED', 'TRANSFER_WITHDRAWN',
