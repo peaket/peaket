@@ -153,6 +153,34 @@ describe('F-05-11 T11 양도 알림 입구', () => {
     expect(store.jobs.size).toBe(before);
   });
 
+  test('F-05-11 T11 ⑦ 웹 푸시는 구독 수와 상관없이 계정 단위 작업 하나이고 중복 키가 정본 모양이다', async () => {
+    const accountId = subscriber();
+    const key = pushKeyPair();
+    store.push.set(`q-${accountId}`, {
+      id: `q-${accountId}`,
+      accountId,
+      endpoint: 'https://fcm.googleapis.com/send/ii',
+      endpointHash: 'j'.repeat(43),
+      service: 'FCM',
+      p256dh: key.p256dh,
+      auth: key.auth,
+      expiresAt: null,
+      boundAt: new Date(NOW_MS),
+      createdAt: new Date(NOW_MS),
+    });
+    const body = base('TRANSFER_ACCEPTED', 'SENDER', accountId);
+    const r = await transferEvent(body);
+    expect(r.statusCode).toBe(202);
+    expect(JSON.parse(r.payload)).toMatchObject({ created: 2, duplicate: 0 });
+    const pushes = [...store.jobs.values()].filter((j) => j.accountId === accountId && j.channel === 'WEB_PUSH');
+    expect(pushes).toHaveLength(1);
+    expect(pushes[0]!.dedupKey).toBe(`TRANSFER_ACCEPTED:${String(body.offerId)}:${accountId}:WEB_PUSH`);
+    // 한 작업이 그 계정의 두 구독에 모두 간다.
+    push.responses.push(201, 201);
+    await svc.app.get(FanNotificationWorker).processDue(new Date(NOW_MS));
+    expect(push.sent.filter((p) => p.endpoint === 'https://fcm.googleapis.com/send/i' || p.endpoint === 'https://fcm.googleapis.com/send/ii')).toHaveLength(2);
+  });
+
   test('F-05-11 T11 ⑥ 내부 토큰이 설정된 조립에서는 토큰 없이 401이다', async () => {
     const secured = await createService({
       name: 'core-svc',

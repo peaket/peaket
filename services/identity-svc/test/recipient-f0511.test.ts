@@ -19,10 +19,10 @@ const B = '0193f2c0-0000-7000-8000-000000511002';
 const C = '0193f2c0-0000-7000-8000-000000511003';
 
 const asUnary = (f: unknown): Unary => f as Unary;
-const call = (request: Req): { request: Req } => ({ request });
-const invoke = (h: Unary, request: Req): Promise<{ err: grpc.ServiceError | null; body: Req | undefined }> => {
+const call = (request: Req, metadata?: grpc.Metadata): { request: Req; metadata?: grpc.Metadata } => ({ request, ...(metadata ? { metadata } : {}) });
+const invoke = (h: Unary, request: Req, metadata?: grpc.Metadata): Promise<{ err: grpc.ServiceError | null; body: Req | undefined }> => {
   if (typeof h !== 'function') return Promise.reject(new Error('RPC 처리기가 없다'));
-  return new Promise((resolve) => h(call(request), (err, body) => resolve({ err, body: body as Req | undefined })));
+  return new Promise((resolve) => h(call(request, metadata), (err, body) => resolve({ err, body: body as Req | undefined })));
 };
 
 async function handlers() {
@@ -71,6 +71,27 @@ describe('F-05-11 T6 identity ResolvePhone', () => {
     const out = await invoke(asUnary(h.ResolvePhone), { phone_number: PHONE_B });
     expect(out.err?.code).toBe(grpc.status.INTERNAL);
     expect(JSON.stringify(out.err)).not.toContain(PHONE_B);
+  });
+  test('F-05-11 T6 ⑦ 내부 토큰이 설정되면 ResolvePhone·BatchGetNicknames는 ticket-svc 호출자만 받는다', async () => {
+    const r = await import(/* @vite-ignore */ new URL('../src/modules/session/inbound/recipient-query.grpc.ts', import.meta.url).href);
+    const make = (r as { recipientQueryHandlers?: (uc: object, onError?: (m: string, e: unknown) => void, o?: { internalToken?: string }) => Record<string, unknown> }).recipientQueryHandlers;
+    if (!make) throw new Error('recipientQueryHandlers가 없다');
+    const h = make({ resolvePhone: async () => ({ accountId: B, nickname: '지민' }), resolveNicknames: async () => new Map([[B, '지민']]) }, undefined, { internalToken: 'f0511-identity-token' });
+    const md = (token?: string, caller?: string): grpc.Metadata => {
+      const m = new grpc.Metadata();
+      if (token !== undefined) m.set('x-peaket-internal-token', token);
+      if (caller !== undefined) m.set('x-peaket-internal-caller', caller);
+      return m;
+    };
+    for (const method of ['ResolvePhone', 'BatchGetNicknames'] as const) {
+      const req = method === 'ResolvePhone' ? { phone_number: PHONE_B } : { account_ids: [B] };
+      const missing = await invoke(asUnary(h[method]), req);
+      expect(missing.err?.code, `${method} 토큰 없음`).toBe(grpc.status.UNAUTHENTICATED);
+      const wrongCaller = await invoke(asUnary(h[method]), req, md('f0511-identity-token', 'core-svc'));
+      expect(wrongCaller.err?.code, `${method} 다른 호출자`).toBe(grpc.status.PERMISSION_DENIED);
+      const ok = await invoke(asUnary(h[method]), req, md('f0511-identity-token', 'ticket-svc'));
+      expect(ok.err?.code, `${method} ticket-svc`).toBeUndefined();
+    }
   });
 });
 

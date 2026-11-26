@@ -81,4 +81,12 @@ describe('F-05-11 T4 R-T25 ③ 연기 확정의 양도 철회', () => {
     expect(again.requestId).toBe(REQUEST);
     expect(n).toBe(1);
   });
+
+  test('F-05-11 T4 R-T25 ③ ④ 잘못된 연기 요청은 철회를 부르기 전에 400/422로 끝난다', async () => {
+    const calls: string[] = [];
+    const f = fixture({ withdrawForEvent: async (i) => { calls.push(i.eventId); return { withdrawn: [] }; } });
+    await expect(start(f.service, { kind: 'POSTPONE' } as never)).rejects.toMatchObject({ code: 'INVALID' });
+    expect(calls).toEqual([]);
+    expect(f.store.requests.size).toBe(0);
+  });
 });

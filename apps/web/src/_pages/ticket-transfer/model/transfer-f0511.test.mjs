@@ -68,6 +68,14 @@ test('F-05-11 T14 R-T31 ①~⑦ 잠금 화면: 기한 −1ms는 잠김·0ms는 �
   assert.ok(src.includes('부정 예매 조사가 끝날 때까지'), 'd5 §5.14 잠금 문구가 없다');
 });
 
+test('F-05-11 T13 ④ 실제 실행부에 회원 코드/휴대폰 번호 갈래가 있고 번호는 본문 phoneNumber로 보낸다', () => {
+  const src = readAll('../ui/TicketTransferLive.tsx', '../ui/TicketTransferPage.tsx');
+  assert.ok(src.includes('휴대폰 번호'), '휴대폰 번호 갈래가 없다');
+  assert.ok(src.includes('phoneNumber'), '휴대폰 번호를 본문에 싣지 않는다');
+  assert.ok(src.includes('memberCode'), '회원 코드 갈래가 사라졌다');
+  assert.ok(/lookupRecipient\(/.test(src), '받는 사람 찾기를 부르지 않는다');
+});
+
 test('F-05-11 T15 받은 표 카드가 receivedFromNickname을 보이고, 없으면 회원이다', () => {
   const src = readAll('../../../widgets/ticket-wallet/ui/WalletLive.tsx', '../../../widgets/ticket-wallet/model/transfer-actions.ts', '../../../widgets/ticket-wallet/model/wallet.ts');
   assert.ok(src.includes('receivedFromNickname'), '받은 분 닉네임을 읽지 않는다');

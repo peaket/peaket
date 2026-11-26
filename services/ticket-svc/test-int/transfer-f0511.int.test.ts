@@ -77,7 +77,7 @@ beforeAll(async () => {
   database = createDatabase({ url: pg.url, applicationName: 'ticket-svc-transfer-f0511-int', max: 12 });
   clock = fakeClock({ now: NOW });
   // 0023이 없는 기준 트리에서는 outbox 표가 없어 파티션을 못 만든다. 그 실패를 여기서 멈추지 않고 시험마다 드러낸다.
-  await ensureOutboxPartitions(database, clock, { daysAhead: 1 }).catch(() => undefined);
+  await ensureOutboxPartitions(database, clock, { daysAhead: 30 }).catch(() => undefined);
   const changes = new DrizzleScannerGateStore(database);
   deviceKeys = new DrizzleDeviceKeyStore({ database, changes });
   tickets = new DrizzleTicketStore({ database, changes, deviceKeys });
@@ -169,6 +169,13 @@ describe('F-05-11 T3 R-T25 ③ 연기 철회(PostgreSQL)', () => {
 });
 
 describe('F-05-11 T8 Outbox 여섯 사건(PostgreSQL)', () => {
+  test('F-05-11 T8 ⓪ Outbox는 기본 파티션 없이 날짜 파티션만 쓴다', async () => {
+    const defaults = await q<{ n: number }>("select count(*)::int as n from pg_class where relname = 'outbox_pdefault'");
+    expect(defaults[0]!.n).toBe(0);
+    const partitions = await q<{ relname: string }>("select c.relname from pg_inherits i join pg_class c on c.oid = i.inhrelid where i.inhparent = 'outbox'::regclass and c.relname like 'outbox_p%'");
+    expect(partitions.length).toBeGreaterThan(0);
+  });
+
   test('F-05-11 T8 ① 요청·거절이 trade.tickets 한 행씩 남고 eventKey가 재생에도 같다', async () => {
     const w = world();
     const t = (await issue(w.a, w.event, 1))[0]!;
@@ -186,6 +193,7 @@ describe('F-05-11 T8 Outbox 여섯 사건(PostgreSQL)', () => {
     expect(await outboxRows(w.event)).toHaveLength(2);
     expect((JSON.parse(String((await outboxRows(w.event))[0]!.payload)) as { eventKey: string }).eventKey).toBe(firstKey);
     expect(firstKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(typeof (JSON.parse(String(first.payload)) as { occurredAt: unknown }).occurredAt).toBe('number');
     // 철회·만료도 실제 표에 한 행씩 남고 accountId가 보낸 사람이다.
     const t2 = (await issue(w.a, w.event, 1))[0]!;
     const o2 = await offerDirect(t2, w.a, w.b);
@@ -198,6 +206,18 @@ describe('F-05-11 T8 Outbox 여섯 사건(PostgreSQL)', () => {
     expect(payloads.filter((p) => p.type === 'TRANSFER_WITHDRAWN')).toHaveLength(1);
     expect(payloads.filter((p) => p.type === 'TRANSFER_EXPIRED')).toHaveLength(1);
     for (const p of payloads.filter((x) => x.type === 'TRANSFER_WITHDRAWN' || x.type === 'TRANSFER_EXPIRED')) expect(p.accountId).toBe(w.a);
+  });
+
+  test('F-05-11 T8 ⑤ 새 요청이 기한 지난 요청을 만료시키면 EXPIRED Outbox가 남는다', async () => {
+    const w = world();
+    const t = (await issue(w.a, w.event, 1))[0]!;
+    await offerDirect(t, w.a, w.b, clock.now() - 1);
+    const found = await transfers.lookupRecipient({ accountId: w.a, memberCode: w.codeB });
+    await transfers.createOffer({ ticketId: t, accountId: w.a, sessionId: SESSION, reauthToken: 'r', recipientRef: found.recipientRef, idempotencyKey: randomUUID() });
+    const payloads = (await outboxRows(w.event)).map((x) => JSON.parse(String(x.payload)) as { type: string; accountId: string });
+    const expired = payloads.filter((p) => p.type === 'TRANSFER_EXPIRED');
+    expect(expired).toHaveLength(1);
+    expect(expired[0]!.accountId).toBe(w.a);
   });
 
   test('F-05-11 T8 ④ outbox 쓰기가 실패하면 상태 변경도 되돌아간다(장애 주입)', async () => {
@@ -216,6 +236,13 @@ describe('F-05-11 T8 Outbox 여섯 사건(PostgreSQL)', () => {
 });
 
 describe('F-05-11 T9 알림 행(PostgreSQL)', () => {
+  test('F-05-11 T9 ⓪ transfer_notice에 lease_until과 next_attempt_at이 따로 있다', async () => {
+    const cols = await q<{ column_name: string }>("select column_name from information_schema.columns where table_name = 'transfer_notice'");
+    const names = cols.map((c) => c.column_name);
+    expect(names).toContain('lease_until');
+    expect(names).toContain('next_attempt_at');
+  });
+
   test('F-05-11 T9 ① 양도 사건마다 두 사람 transfer_notice 행이 생기고 중복 키가 막는다', async () => {
     const w = world();
     const t = (await issue(w.a, w.event, 1))[0]!;
