@@ -1301,6 +1301,9 @@ describe('F-04-14 HTTP', () => {
     expect(json(rest).status).toBe('ACTIONED');
     const after = await getCase(c.caseId, who);
     expect(json(after).events.some((e: any) => e.kind === 'OBJECTION_DECIDED' && e.detail?.decision === 'REJECTED')).toBe(true);
+    // IR-15: 기각도 사본의 이의 상태·이유를 갱신한다.
+    const rejectedCopy = copies.find((x) => x.caseId === c.caseId && x.accountId === A(65) && x.objectionState === 'REJECTED');
+    expect(rejectedCopy).toMatchObject({ state: 'REJECTED', objectionState: 'REJECTED', objectionNote: '근거 유지' });
   });
 
   test('R-T35 ② C-T72 ② A 같은 좌석·B 같은 등급·C 매진은 각각 권리와 FRAUD_OBJECTION_COMPENSATION 건으로 갈린다', async () => {

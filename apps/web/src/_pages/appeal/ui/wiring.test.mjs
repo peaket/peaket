@@ -21,6 +21,9 @@ test('UI-05 SCR-042 실제 화면은 listFraudAppealRequests·createAppeal만 �
   assert.match(page, /excludedTicketIds/);
   assert.match(page, /objectionStatus/);
   assert.match(page, /priorityPurchaseRows\(view,\s*nowMs\)/);
+  // IR-15: 기한 판정은 마운트 때 한 번이 아니라 그릴 때마다 다시 잡는다.
+  assert.match(page, /const nowMs = Date\.now\(\)/);
+  assert.doesNotMatch(page, /useState\(\(\) => Date\.now\(\)\)/);
 });
 
 test('UI-05 SCR-042 목업 보드는 apl- id와 ?state=에만 남는다', () => {

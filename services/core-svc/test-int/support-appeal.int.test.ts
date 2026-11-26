@@ -125,6 +125,24 @@ describe('0048 소명 표(실제 PostgreSQL)', () => {
     expect(await store.findIdempotent(failedIdem)).toMatchObject({ kind: 'replay', result: { appealId: retry.id } });
   });
 
+  test('IR-06 느린 선점은 같은 키 다른 본문을 422로, 같은 본문은 이어받는다', async () => {
+    const me = randomUUID();
+    const key = randomUUID();
+    const first = { accountRef: me, operation: 'CREATE_APPEAL', key, requestHash: new Uint8Array([1, 2, 3]) };
+    const other = { ...first, requestHash: new Uint8Array([9]) };
+    expect(await store.claim(first)).toEqual({ kind: 'claimed' });
+    await new Promise((r) => setTimeout(r, 1_100));
+    // 처리 중인 선점은 1초가 지나도 사라지지 않는다(guideline §4: 기다린 뒤 409).
+    expect(await store.findIdempotent(first)).toEqual({ kind: 'in_progress' });
+    // 다른 본문이면 오래된 선점이라도 덮어쓰지 않고 422다.
+    expect(await store.claim(other)).toEqual({ kind: 'reused' });
+    // 같은 본문이면 죽은 선점을 이어받거나 409로 다시 보내게 한다.
+    const again = await store.claim(first);
+    expect(['claimed', 'in_progress']).toContain(again.kind);
+    await store.releaseClaim(first);
+    expect(await store.findIdempotent(first)).toEqual({ kind: 'none' });
+  });
+
   test('FX-T20 ⑬ appeal 검사는 kind·status·result·본문 2,000자를 지킨다', async () => {
     const row = (over: Record<string, unknown> = {}) => ({
       id: randomUUID(),

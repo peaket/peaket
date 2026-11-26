@@ -1589,5 +1589,70 @@ describe('F-04-13 구현 리뷰 반영', () => {
     clock.advance(2 * HOUR);
     expect((await send('POST', `/internal/v1/fraud-cases/${late.caseId}/appeals`, {}, { body: body(H(8)) })).statusCode).toBe(409);
   });
+
+  test('IR-05 일부 취소·이용 제한에서도 잠긴 표 목록을 그대로 둔다', async () => {
+    const who = investigator();
+    const approver = commander();
+    const makeReady = async (accountId: string, tickets: string[]) => {
+      clock.advance(NOW - clock.now());
+      const c = await seedCase({ status: 'INVESTIGATING', members: [memberOf(accountId)] });
+      for (const ticketId of tickets) seedTicket({ ticketId, payerAccountId: accountId });
+      const requested = await send('POST', `/v1/ops/fraud-cases/${c.caseId}/appeal-requests`, who, {
+        idem: randomUUID(),
+        body: { accountIds: [accountId], reasonCategories: ['MACRO_BOT'], dueAt: iso(NOW + 2 * DAY) },
+      });
+      expect(requested.statusCode, requested.payload).toBe(201);
+      expect(await store.markAppealSubmitted(c.caseId, accountId, clock.now())).toBe(true);
+      const current = json(await getCase(c.caseId, who));
+      const decided = await send('PATCH', `/v1/ops/fraud-cases/${c.caseId}`, who, {
+        ifMatch: `"${current.version}"`,
+        body: { appealDecisions: [{ accountId, decision: 'REJECTED', reason: '근거 유지' }] },
+      });
+      expect(decided.statusCode, decided.payload).toBe(200);
+      clock.advance(2 * DAY);
+      return c.caseId;
+    };
+
+    // 이용 제한: 조치 대상 표가 없어도 소명 요청으로 잠근 표 목록은 그대로다.
+    const restrictCase = await makeReady(A(400), [T(400), T(401)]);
+    const restricted = await actionRequest(restrictCase, who, { fraudAction: 'RESTRICT', accountIds: [A(400)], reason: '제한' });
+    expect(restricted.statusCode, restricted.payload).toBe(201);
+    const restrictId = String(json(restricted).approvalId);
+    expect((await getApproval(restrictId, approver)).statusCode).toBe(200);
+    expect((await approve(restrictId, approver, { reason: '근거' })).statusCode).toBe(200);
+    const restrictCopy = appealCopies.filter((x) => x.caseId === restrictCase && x.accountId === A(400)).at(-1);
+    expect(restrictCopy.lockedTicketIds).toEqual([T(400), T(401)]);
+
+    // 부분 취소: 이번 조치 대상이 한 장이어도 잠긴 표 목록은 줄지 않는다.
+    const cancelCase = await makeReady(A(402), [T(402), T(403)]);
+    const cancelled = await actionRequest(cancelCase, who, { fraudAction: 'CANCEL_TICKETS', accountIds: [A(402)], ticketIds: [T(402)], reason: '일부 취소' });
+    expect(cancelled.statusCode, cancelled.payload).toBe(201);
+    const cancelId = String(json(cancelled).approvalId);
+    expect((await getApproval(cancelId, approver)).statusCode).toBe(200);
+    expect((await approve(cancelId, approver, { reason: '근거' })).statusCode).toBe(200);
+    const cancelCopy = appealCopies.filter((x) => x.caseId === cancelCase && x.accountId === A(402)).at(-1);
+    expect(cancelCopy.lockedTicketIds).toEqual([T(402), T(403)]);
+  });
+
+  test('IR-12 정상 종료·계정 전부 빼기로 CLEARED가 되면 사본 caseStatus도 CLEARED다', async () => {
+    const who = investigator();
+    const cleared = await seedCase({ status: 'INVESTIGATING', members: [memberOf(A(404))] });
+    const r = await clearance(cleared.caseId, who, { reason: '근거 없음', outcomeLabel: 'HUMAN' }, '"1"');
+    expect(r.statusCode, r.payload).toBe(200);
+    expect(json(r).status).toBe('CLEARED');
+    const copy = appealCopies.find((x) => x.caseId === cleared.caseId && x.accountId === A(404));
+    expect(copy).toMatchObject({ caseStatus: 'CLEARED', lockActive: false });
+
+    const removed = await seedCase({ status: 'INVESTIGATING', members: [memberOf(A(405))] });
+    const current = json(await getCase(removed.caseId, who));
+    const patch = await send('PATCH', `/v1/ops/fraud-cases/${removed.caseId}`, who, {
+      ifMatch: `"${current.version}"`,
+      body: { removeMembers: [{ accountId: A(405), reason: '대상 아님' }] },
+    });
+    expect(patch.statusCode, patch.payload).toBe(200);
+    expect(json(patch).status).toBe('CLEARED');
+    const removedCopy = appealCopies.find((x) => x.caseId === removed.caseId && x.accountId === A(405));
+    expect(removedCopy).toMatchObject({ caseStatus: 'CLEARED', lockActive: false });
+  });
 });
 
