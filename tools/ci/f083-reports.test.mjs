@@ -362,7 +362,7 @@ test('MSR-080 ⑥ 보고서의 사실 ID가 대장에 있고 릴리스 범위·�
   assert.equal(check.status, 0, `release-scope --check가 실패했다: ${check.stderr || check.stdout}`);
 
   const all = Object.values(reports).join('\n');
-  for (const m of all.matchAll(/docs\/perf-ledger\/runs\/([0-9A-Za-z._]*[0-9A-Za-z])\b/g)) {
+  for (const m of all.matchAll(/docs\/perf-ledger\/runs\/([0-9A-Za-z._]*[0-9A-Za-z])(?=[\s`'")]|$)/g)) {
     assert.ok(existsSync(P('docs/perf-ledger/runs', m[1])), `보고서가 없는 장부 실행을 가리킨다: ${m[1]}`);
   }
 });
