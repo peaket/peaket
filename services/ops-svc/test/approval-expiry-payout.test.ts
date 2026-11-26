@@ -275,4 +275,21 @@ describe('R-T29 ④ 15시 미승인 만료', () => {
     expect((await tick()).statusCode).toBe(200);
     expect(payments.expired).toHaveLength(1);
   });
+
+  test('IR-12 09시 PREPARED 묶음은 payout_approval 행이 없어도 15시 만료가 찾아 푼다', async () => {
+    const batchId = randomUUID();
+    payments.batches.push({ batchId, pg: 'TOSS', pgStore: 'STANDARD', payoutDate: '2026-12-01', totalAmount: 2_500_000_000, statementCount: 3, status: 'PREPARED' });
+    wall = Date.parse(DUE);
+    const r = await tick();
+    expect(json(r)).toMatchObject({ expired: 1, failed: 0 });
+    expect(payments.expired).toEqual([{ batchId, input: { approvalId: expect.any(String), postponedPayoutDate: '2026-12-02' } }]);
+  });
+
+  test('IR-19 지급 만료의 파트너 알림은 PARTNER 수신자로 간다', async () => {
+    const op = as('operator');
+    await createBatch(op);
+    wall = Date.parse(DUE);
+    await tick();
+    expect(notified).toContainEqual(expect.objectContaining({ event: 'PAYOUT_POSTPONED', recipient: expect.objectContaining({ kind: 'PARTNER' }) }));
+  });
 });

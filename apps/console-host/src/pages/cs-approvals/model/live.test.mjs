@@ -94,6 +94,8 @@ test('요청자·역할·상태로 승인·반려·철회 버튼을 가른다', 
   assert.deepEqual(commander, { approve: true, reject: true, withdraw: false });
   const done = canAct({ ...BASE, status: 'DONE' }, { accountId: 'cmd-1', role: 'commander' });
   assert.deepEqual(done, { approve: false, reject: false, withdraw: false });
+  const failed = canAct({ ...BASE, status: 'FAILED', canApprove: true }, { accountId: 'cmd-1', role: 'commander' });
+  assert.deepEqual(failed, { approve: true, reject: true, withdraw: false });
 });
 
 test('오류 응답을 화면 문구로 옮긴다(만료·대상 변경·자기 승인·역할·소명 기한·지문)', () => {

@@ -79,4 +79,5 @@ test('서버 글은 글자 노드로만 그리고 브라우저 저장소에 승�
 
 test('상세 경로가 라우터에 있다', () => {
   assert.match(router, /cs\/approvals\/:approvalId/);
+  assert.match(router, /path: 'cs\/approvals',[^\n]*Component: m\.ConnectedPage/);
 });

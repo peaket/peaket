@@ -218,12 +218,13 @@ describe('R-T26 ③ 미성년자 계약 취소 확인', () => {
     expect((await check(fanHeaders(s), { orderIds: [order], consent: true, verificationResultToken: token })).statusCode).toBe(403);
   });
 
-  test('본인확인 결과에 생년월일이 없으면 422이고 계산하지 않는다', async () => {
+  test('본인확인 결과에 생년월일이 없으면 확인 토큰을 주지 않는다', async () => {
     const s = await login();
     const order = newKey();
     bases.set(order, { payerAccountId: s.accountId, paidAtMs: KST('2026-11-20T21:00:00') });
     const { token } = await minorConfirmation(s, undefined);
-    expect((await check(fanHeaders(s), { orderIds: [order], consent: true, verificationResultToken: token })).statusCode).toBe(422);
+    expect(token).toBeUndefined();
+    expect((await check(fanHeaders(s), { orderIds: [order], consent: true, verificationResultToken: token })).statusCode).toBe(400);
   });
 
   test('생년월일·토큰 원문은 응답·로그에 남지 않는다 [ASVS v5.0.0-16.3.2]', async () => {
@@ -244,5 +245,16 @@ describe('R-T26 ③ 미성년자 계약 취소 확인', () => {
     const order = newKey();
     bases.set(order, { payerAccountId: s.accountId, paidAtMs: KST('2026-11-20T21:00:00') });
     expect((await check(fanHeaders(s), { orderIds: [order], consent: true, verificationResultToken: 'not-a-token' })).statusCode).toBe(403);
+  });
+
+  test('IR-16 확인되지 않은 MINOR_CONTRACT 결과에는 resultToken을 주지 않는다', async () => {
+    const s = await login();
+    await firstVerify(s, `minor-person-${s.accountId}`);
+    const st = await start(s, 'MINOR_CONTRACT');
+    const id = json(st)['verificationId'] as string;
+    const confirmed = await confirm(s, id, agencyResult(clock, id, { person: `minor-person-${s.accountId}`, birth: undefined }));
+    expect(confirmed.statusCode).toBe(200);
+    expect(json(confirmed)).not.toHaveProperty('resultToken');
+    expect((await result(s, id)).payload).not.toContain('resultToken');
   });
 });
