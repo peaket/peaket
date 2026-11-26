@@ -17,7 +17,7 @@ const atOf = (v: unknown): number | undefined => {
 const stamp = (ms: number) => ({ seconds: Math.floor(ms / 1000), nanos: (ms % 1000) * 1_000_000 });
 
 export class TicketReclaimClient {
-  readonly #client: { GetReclaimBasis: Unary; ReclaimTransfer: Unary };
+  readonly #client: { GetReclaimBasis: Unary; ReclaimTransfer: Unary; VoidTickets: Unary };
   constructor(
     address: string,
     private readonly internalToken: string | undefined,
@@ -25,7 +25,7 @@ export class TicketReclaimClient {
     const at = address.lastIndexOf(':');
     const port = Number(address.slice(at + 1));
     if (at <= 0 || !Number.isInteger(port)) throw new Error('PEAKET_TICKET_GRPC_URL은 host:port여야 한다');
-    this.#client = createGrpcClient(ticketPackageLocal(), { host: address.slice(0, at), port, dependency: 'ticket-svc', caller: 'ops-svc', profile: 'service', timeoutCapMs: 10_000 }) as unknown as { GetReclaimBasis: Unary; ReclaimTransfer: Unary };
+    this.#client = createGrpcClient(ticketPackageLocal(), { host: address.slice(0, at), port, dependency: 'ticket-svc', caller: 'ops-svc', profile: 'service', timeoutCapMs: 10_000 }) as unknown as { GetReclaimBasis: Unary; ReclaimTransfer: Unary; VoidTickets: Unary };
   }
 
   async getBasis(ticketId: string): Promise<{ ticketId: string; payerAccountId: string; holderAccountId: string; entryStartsAtMs?: number; entryRecorded: boolean; status: string } | undefined> {
@@ -38,6 +38,11 @@ export class TicketReclaimClient {
       entryRecorded: r.entry_recorded === true,
       status: String(r.status ?? ''),
     };
+  }
+
+  async voidOrder(orderId: string, reason: string): Promise<{ voided: boolean; alreadyEntered: boolean }> {
+    const r = await this.#call(this.#client.VoidTickets, { order_id: orderId, issue_generation: 0, reason });
+    return { voided: r.voided === true, alreadyEntered: r.already_entered === true };
   }
 
   async reclaim(i: { approvalId: string; ticketId: string; expectedPayerAccountId: string | null; expectedHolderAccountId: string | null; deadlineMs: number }) {
@@ -91,6 +96,7 @@ export class HttpApprovalLifecyclePorts implements ApprovalLifecycleTargets, App
       targetAccountId: typeof body.payerAccountId === 'string' ? body.payerAccountId : null,
       ...(typeof body.entryOpensAt === 'string' ? { entryStartsAtMs: Date.parse(body.entryOpensAt) } : {}),
       ...(body.entryRecorded === true ? { entryRecorded: true } : {}),
+      ...(typeof body.refundableAmount === 'number' ? { refundableAmount: body.refundableAmount } : {}),
     };
   }
 
@@ -116,6 +122,11 @@ export class HttpApprovalLifecyclePorts implements ApprovalLifecycleTargets, App
     const body = (await res.json()) as { status?: unknown; cancellationId?: unknown; refundAmount?: unknown };
     const status: 'REFUNDED' | 'REFUND_PENDING' | 'REQUESTED' = body.status === 'REFUNDED' ? 'REFUNDED' : body.status === 'REQUESTED' ? 'REQUESTED' : 'REFUND_PENDING';
     return { status, cancellationId: String(body.cancellationId ?? ''), refundAmount: Number(body.refundAmount ?? i.amount) };
+  }
+
+  async voidOrder(i: { orderId: string; reason: string }): Promise<{ voided: boolean; alreadyEntered: boolean }> {
+    if (!this.ticket) throw new ProblemError({ type: 'approval-execution-failed', status: 503, title: 'ticket-svc에 연결하지 못했습니다' });
+    return this.ticket.voidOrder(i.orderId, i.reason);
   }
 
   async reclaim(i: { approvalId: string; targetRef: string; targetAccountId: string | null; expectedHolderAccountId: string | null; deadlineMs: number }) {

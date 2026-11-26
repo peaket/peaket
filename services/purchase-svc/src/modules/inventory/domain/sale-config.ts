@@ -10,6 +10,8 @@ export interface EventSaleConfigOverlay {
   perPersonLimit: number;
   /** 판매 종료 시각(epoch ms) */
   saleEndsAtMs: number;
+  /** 공연 시작 시각(epoch ms, core 일정 사본 startsAtMs). 없으면 undefined */
+  eventStartsAtMs?: number;
   /** 승인한 판매 정책 규칙(공개본) */
   salePolicy: readonly SalePolicyRule[];
   /** 그 회차에 걸리는 규칙이 쓰는 명단 키 모두(입장 토큰 lst의 후보) */

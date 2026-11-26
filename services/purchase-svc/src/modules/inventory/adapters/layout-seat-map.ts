@@ -178,6 +178,7 @@ export class LayoutSeatMap implements SeatMap, SeatMapIndex, SeatMapSections, Se
       ...base,
       perAccountLimit: overlay.perPersonLimit,
       saleEndsAtMs: overlay.saleEndsAtMs,
+    ...(overlay.eventStartsAtMs !== undefined ? { eventStartsAtMs: overlay.eventStartsAtMs } : {}),
       salePolicy: overlay.salePolicy,
       eligLists: overlay.eligLists,
       saleConfigRev: overlay.rev,

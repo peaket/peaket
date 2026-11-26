@@ -27,6 +27,7 @@ export function overlayOf(raw: unknown): EventSaleConfigOverlay {
   if (!isSafeInt(o.rev) || o.rev < 1) throw new SaleConfigUnavailable('rev');
   if (!isSafeInt(o.perPersonLimit) || o.perPersonLimit < 1 || o.perPersonLimit > 4) throw new SaleConfigUnavailable('perPersonLimit');
   if (!isSafeInt(o.saleEndsAtMs) || o.saleEndsAtMs < 0) throw new SaleConfigUnavailable('saleEndsAtMs');
+  if (o.startsAtMs !== undefined && o.startsAtMs !== null && (!isSafeInt(o.startsAtMs) || o.startsAtMs < 0)) throw new SaleConfigUnavailable('startsAtMs');
   if (!Array.isArray(o.salePolicy)) throw new SaleConfigUnavailable('salePolicy');
   if (!Array.isArray(o.eligLists) || o.eligLists.length > 10 || !o.eligLists.every((k) => typeof k === 'string' && LIST_KEY.test(k))) throw new SaleConfigUnavailable('eligLists');
   if (new Set(o.eligLists).size !== o.eligLists.length) throw new SaleConfigUnavailable('eligLists');
@@ -36,6 +37,7 @@ export function overlayOf(raw: unknown): EventSaleConfigOverlay {
     rev: o.rev,
     perPersonLimit: o.perPersonLimit,
     saleEndsAtMs: o.saleEndsAtMs,
+    ...(typeof o.startsAtMs === 'number' ? { eventStartsAtMs: o.startsAtMs } : {}),
     salePolicy: o.salePolicy as EventSaleConfigOverlay['salePolicy'],
     eligLists: o.eligLists as string[],
     ...(o.layoutVersion !== undefined ? { layoutVersion: o.layoutVersion } : {}),

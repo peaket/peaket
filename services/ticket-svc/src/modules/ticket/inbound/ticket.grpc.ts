@@ -278,6 +278,19 @@ export function ticketServiceHandlers(useCases: TicketGrpcUseCases, onError: Tic
         .catch((err: unknown) => fail('ListTickets', err, undefined, cb, onError));
     },
 
+    // FLAGGED 취소 무효(F-06-3 IR-30). ops-svc만. 주문의 티켓을 무효로 하고 키를 폐기한다.
+    VoidTickets: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
+      if (o?.internalToken && !verifyInternalGrpcActor(call.metadata, o.internalToken, { caller: 'ops-svc' }).ok) {
+        cb({ code: grpc.status.PERMISSION_DENIED, details: '부를 수 없는 호출자다' });
+        return;
+      }
+      const req = call.request;
+      useCases.ticket
+        .blockIssue({ orderId: text(req.order_id), reason: text(req.reason) || 'FLAGGED_VOID', nowMs: useCases.nowMs?.() ?? Date.now() })
+        .then((r) => cb(null, { voided: r.voided, already_entered: r.alreadyEntered }))
+        .catch((err: unknown) => fail('VoidTickets', err, text(req.order_id), cb, onError));
+    },
+
     // 양도 회수 승인 전 대상 확인(F-06-3 IR-01·IR-08). 부르는 쪽은 ops-svc뿐이다.
     GetReclaimBasis: (call: grpc.ServerUnaryCall<Req, Req>, cb: grpc.sendUnaryData<Req>) => {
       if (o?.internalToken && !verifyInternalGrpcActor(call.metadata, o.internalToken, { caller: 'ops-svc' }).ok) {

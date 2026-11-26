@@ -155,7 +155,7 @@ export interface EventCancellationLookup {
 
 /** 취소 견적·Saga가 읽는 회차 판매 설정(좌석맵 판의 saleEndsAt·entryOpensAt) */
 export interface CancellationConfigs {
-  config(eventId: string): Promise<{ readonly saleEndsAtMs: number; readonly entryOpensAtMs?: number } | undefined>;
+  config(eventId: string): Promise<{ readonly saleEndsAtMs: number; readonly entryOpensAtMs?: number; readonly eventStartsAtMs?: number } | undefined>;
 }
 
 /** 취소표 되돌리기(purchase DB seat_sale RETURNED·한도 감소. Redis 비트맵·델타는 후속) */

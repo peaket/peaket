@@ -8,6 +8,8 @@ export interface ApprovalTargetBasis {
   entryStartsAtMs?: number;
   /** 양도 회수 승인 시점의 보유자(IR-08) */
   expectedHolderAccountId?: string;
+  /** 남은 환급액(IR-11) */
+  refundableAmount?: number;
   entryRecorded?: boolean;
   orderCount?: number;
 }
@@ -18,7 +20,9 @@ export interface ApprovalLifecycleTargets {
 }
 
 export interface ApprovalLifecycleExecutors {
-  refund(i: { approvalId: string; kind: 'SYSTEM_FAULT_REFUND' | 'DISCRETIONARY_WAIVER' | 'MINOR_CONTRACT_CANCEL'; targetRef: string; targetAccountId: string | null; amount: number; reasonText: string }): Promise<{ status: 'REFUNDED' | 'REFUND_PENDING' | 'REQUESTED'; cancellationId: string; refundAmount: number }>;
+  refund(i: { approvalId: string; kind: 'SYSTEM_FAULT_REFUND' | 'DISCRETIONARY_WAIVER' | 'MINOR_CONTRACT_CANCEL'; targetRef: string; orderIds?: readonly string[]; targetAccountId: string | null; amount: number; reasonText: string }): Promise<{ status: 'REFUNDED' | 'REFUND_PENDING' | 'REQUESTED'; cancellationId: string; refundAmount: number }>;
+  /** FLAGGED 취소 무효(IR-30). ticket-svc가 주문 티켓을 VOIDED로 바꾼다 */
+  voidOrder?(i: { orderId: string; reason: string }): Promise<{ voided: boolean; alreadyEntered: boolean }>;
   reclaim(i: { approvalId: string; targetRef: string; targetAccountId: string | null; expectedHolderAccountId: string | null; deadlineMs: number }): Promise<{ result: 'RECLAIMED' | 'SKIPPED_ENTRY_STARTED' | 'SKIPPED_ENTRY_RECORDED' | 'SKIPPED_NOT_TRANSFERRED' | 'SKIPPED_HOLDER_CHANGED'; previousHolderAccountId?: string }>;
 }
 

@@ -119,9 +119,15 @@ export class OpsCasesController {
     if (!parsed.success) throw new ProblemError({ type: 'invalid-body', status: 400, title: '요청 본문이 올바르지 않습니다' });
     const before = await this.cases.get(actorOf(me), caseId);
     if (before.view.kind !== 'FLAGGED') throw new ProblemError({ type: 'case-not-flagged', status: 409, title: '이상 표시 건이 아닙니다' });
+    if (parsed.data.decision === 'VOID') {
+      const out = await this.approvalLifecycle?.voidOrder(before.view.targetRef, 'FLAGGED_VOID');
+      if (!out) throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '승인 업무 연결을 사용할 수 없습니다' });
+      if (out.alreadyEntered) throw new ProblemError({ type: 'case-entry-recorded', status: 409, title: '입장 기록이 있어 취소를 무효로 할 수 없습니다' });
+    }
     if (parsed.data.decision === 'REFUND') {
       if (!this.approvalLifecycle) throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '승인 업무 연결을 사용할 수 없습니다' });
-      await this.approvalLifecycle.request({ kind: 'SYSTEM_FAULT_REFUND', targetRef: before.view.targetRef, amount: 0, reasonCode: 'FLAGGED_REFUND', reasonText: parsed.data.reason }, { ...actorOf(me), role: 'cs_agent', sessionId: 'case-action' });
+      const amount = await this.approvalLifecycle.refundableAmount(before.view.targetRef);
+      await this.approvalLifecycle.request({ kind: 'SYSTEM_FAULT_REFUND', targetRef: before.view.targetRef, amount, reasonCode: 'FLAGGED_REFUND', reasonText: parsed.data.reason }, { ...actorOf(me), role: 'cs_agent', sessionId: 'case-action' });
     }
     await this.cases.resolveAsSystem(caseId, `cancellation-decision:${parsed.data.decision}:${parsed.data.reason}`, Date.now(), me.accountId);
     const after = await this.cases.get(actorOf(me), caseId);
@@ -139,7 +145,8 @@ export class OpsCasesController {
     const before = await this.cases.get(actorOf(me), caseId);
     if (before.view.kind !== 'TICKET_NOT_ISSUED') throw new ProblemError({ type: 'case-not-refundable', status: 409, title: '미발권 건이 아닙니다' });
     if (!this.approvalLifecycle) throw new ProblemError({ type: 'dependency-unavailable', status: 503, title: '승인 업무 연결을 사용할 수 없습니다' });
-    const approval = await this.approvalLifecycle.request({ kind: 'SYSTEM_FAULT_REFUND', targetRef: before.view.targetRef, amount: 0, reasonCode: 'TICKET_NOT_ISSUED', reasonText: parsed.data.reason }, { ...actorOf(me), role: 'cs_agent', sessionId: 'case-action' });
+    const amount = await this.approvalLifecycle.refundableAmount(before.view.targetRef);
+    const approval = await this.approvalLifecycle.request({ kind: 'SYSTEM_FAULT_REFUND', targetRef: before.view.targetRef, amount, reasonCode: 'TICKET_NOT_ISSUED', reasonText: parsed.data.reason }, { ...actorOf(me), role: 'cs_agent', sessionId: 'case-action' });
     await this.cases.resolveAsSystem(caseId, `system-refund:${parsed.data.reason}`, Date.now(), me.accountId);
     return approval;
   }

@@ -269,6 +269,8 @@ export interface OrderHoldLimitQuery {
 export interface SaleConfig {
   /** 판매 종료 시각(epoch ms, 공연 시작 24시간 전, ADR-0064) */
   readonly saleEndsAtMs: number;
+  /** 공연 시작 시각(epoch ms, core sale-config startsAtMs). 없으면 칸이 없다 */
+  readonly eventStartsAtMs?: number;
   /** 등급 ID → 가격(원, 0 이상 정수). 판 파일에 tierPrices가 없으면 빈 객체다(모든 등급의 가격이 없다) */
   readonly tierPrices: Readonly<Record<string, number>>;
   /** 주문명(판 파일의 선택 칸 orderName, 결제 시도가 쓴다, BUILD_ORDER PRF-191). 없으면 칸이 없다 */

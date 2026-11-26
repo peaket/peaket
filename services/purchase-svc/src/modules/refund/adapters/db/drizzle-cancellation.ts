@@ -1,12 +1,12 @@
 // 예매 취소 Saga의 purchase DB 어댑터(GAT-080, docs/data.md order_cancellation).
 // 주문·티켓·좌석은 purchase DB에서 읽고, 취소 행은 한 트랜잭션에 쓴다. 좌석 되돌리기는 inventory의 SeatSales를 쓴다.
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { DATABASE, type Database, type DbTransaction, IdempotencyStore } from '@peaket/platform';
 import { and, eq, isNull, lte, ne, or, sql } from 'drizzle-orm';
 import type { SeatMap, SeatSales } from '../../../inventory/index.js';
 import type { CancellationOrderView, CancellationReason, CancellationRecord, CancellationWriteOutcome, DueRefund, RefundAccountAnswer } from '../../domain/cancellation.js';
 import { REFUND_ACCOUNT_MAX_ATTEMPTS } from '../../domain/cancellation.js';
-import type { CancellationClaims, CancellationConfigs, CancellationOrders, CancellationWrites, RefundAccountWrites, SeatReturnNotices, SeatReturns } from '../../domain/ports.js';
+import type { CancellationClaims, CancellationConfigs, CancellationOrders, CancellationWrites, EntryRecords, RefundAccountWrites, SeatReturnNotices, SeatReturns } from '../../domain/ports.js';
 import { DrizzleOrderStore, orderCancellation, orderEvent, orderItem, purchaseOrder } from '../../../booking/index.js';
 
 /** 같은 트랜잭션의 시도 올리기가 0행일 때 멱등 키 행까지 되돌리는 표지 */
@@ -18,6 +18,7 @@ export class DrizzleCancellationOrders implements CancellationOrders {
   constructor(
     @Inject(DATABASE) private readonly database: Database,
     @Inject('REFUND_CANCELLATION_CONFIGS') private readonly configs: CancellationConfigs,
+    @Optional() @Inject('REFUND_ENTRY_RECORDS') private readonly entryRecords?: EntryRecords,
   ) {}
 
   async findByTicket(ticketId: string): Promise<CancellationOrderView | undefined> {
@@ -83,24 +84,23 @@ export class DrizzleCancellationOrders implements CancellationOrders {
     const active = cancelled.filter((c) => c.status !== 'VOIDED');
     const out: CancellationOrderView[] = [];
     for (const row of rows) {
-      if (row.ticketId === null) continue;
       const config = await this.configs.config(row.eventId);
       if (!config) continue;
       out.push({
         orderId: row.orderId,
         eventId: row.eventId,
-        ticketId: row.ticketId,
+        ticketId: row.ticketId ?? '',
         seatId: row.seatId,
         payerAccountId: row.accountId,
         ticketPrice: row.unitPrice,
         bookedAtMs: row.createdAt.getTime(),
         saleEndsAtMs: config.saleEndsAtMs,
         ...(config.entryOpensAtMs !== undefined ? { entryOpensAtMs: config.entryOpensAtMs } : {}),
-        eventStartsAtMs: config.saleEndsAtMs + 86_400_000,
+        ...(config.eventStartsAtMs !== undefined ? { eventStartsAtMs: config.eventStartsAtMs } : {}),
         orderStatus: row.status,
         ...(paid[0]?.occurredAt ? { paidAtMs: paid[0].occurredAt.getTime() } : {}),
         refundableAmount: Math.max(0, row.unitPrice - active.filter((c) => c.ticketId === row.ticketId).reduce((sum, c) => sum + c.refundAmount, 0)),
-        entryRecorded: active.some((c) => c.ticketId === row.ticketId && c.entryRecordedAt !== null),
+        entryRecorded: row.ticketId === null ? false : (await this.entryRecords?.lookup([row.ticketId], Date.now() + 2_000).catch(() => undefined))?.get(row.ticketId)?.entered === true || active.some((c) => c.ticketId === row.ticketId && c.entryRecordedAt !== null),
       });
     }
     return out;

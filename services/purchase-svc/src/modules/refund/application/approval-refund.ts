@@ -81,7 +81,7 @@ export class ApprovalRefunds {
       const nowMs = this.d.clock.now();
       const entryStarted = order.entryOpensAtMs !== undefined && nowMs >= order.entryOpensAtMs;
       if (input.kind === 'MINOR_CONTRACT_CANCEL') {
-        const recorded = this.d.entryRecords ? await this.d.entryRecords.hasEntry(order.ticketId) : false;
+        const recorded = this.d.entryRecords ? (await Promise.all(orders.map((o) => this.d.entryRecords!.hasEntry(o.ticketId)))).some(Boolean) : false;
         if (entryStarted || recorded) throw new ApprovalRefundProblem('minor-contract-entry-started', 409, '입장이 시작되어 미성년 계약 취소를 할 수 없습니다');
       }
       const cancellationId = approvalId;
@@ -94,21 +94,32 @@ export class ApprovalRefunds {
       }
       // 시스템 잘못 환불이 입장 시작 뒤면 지금 환급하지 않고 마감 뒤 실행기가 맡는다(REQUESTED).
       if (input.kind === 'SYSTEM_FAULT_REFUND' && entryStarted) {
-        await this.#create({ approvalId, cancellationId, orderId: input.orderId, ticketId: order.ticketId, kind: input.kind, reason, amount: input.amount, status: 'REQUESTED', nowMs });
+        await this.#createAll(orders, { approvalId, cancellationId, kind: input.kind, reason, status: 'REQUESTED', nowMs });
         return { status: 'REQUESTED', cancellationId, refundAmount: input.amount };
       }
-      const ticketIds = orders.map((o) => o.ticketId);
-      const ticket = await this.d.tickets.cancel({ orderId: input.orderId, ticketIds, requestedByAccountId: order.payerAccountId, cancellationId, deadlineMs: nowMs + DEADLINE_MS, reason });
-      if (ticket === 'REFUND_AFTER_CLOSE') {
-        await this.#create({ approvalId, cancellationId, orderId: input.orderId, ticketId: order.ticketId, kind: input.kind, reason, amount: input.amount, status: 'REQUESTED', nowMs });
-        return { status: 'REQUESTED', cancellationId, refundAmount: input.amount };
+      const ticketIds = orders.map((o) => o.ticketId).filter((id) => id !== '');
+      if (ticketIds.length > 0) {
+        const ticket = await this.d.tickets.cancel({ orderId: input.orderId, ticketIds, requestedByAccountId: order.payerAccountId, cancellationId, deadlineMs: nowMs + DEADLINE_MS, reason });
+        if (ticket === 'REFUND_AFTER_CLOSE') {
+          await this.#createAll(orders, { approvalId, cancellationId, kind: input.kind, reason, status: 'REQUESTED', nowMs });
+          return { status: 'REQUESTED', cancellationId, refundAmount: input.amount };
+        }
+        if (ticket !== 'REFUND_NOW') throw new ApprovalRefundProblem('approval-refund-conflict', 409, '티켓을 취소할 수 없는 상태입니다');
       }
-      if (ticket !== 'REFUND_NOW') throw new ApprovalRefundProblem('approval-refund-conflict', 409, '티켓을 취소할 수 없는 상태입니다');
       const outcome = await this.d.payments.cancel({ cancellationId, orderId: input.orderId, amount: input.amount, reason, deadlineMs: nowMs + DEADLINE_MS });
       const status: ApprovalRefundStatus = outcome === 'CANCELLED' ? 'REFUNDED' : 'REFUND_PENDING';
-      await this.#create({ approvalId, cancellationId, orderId: input.orderId, ticketId: order.ticketId, kind: input.kind, reason, amount: input.amount, status, nowMs });
+      await this.#createAll(orders, { approvalId, cancellationId, kind: input.kind, reason, status, nowMs });
       return { status, cancellationId, refundAmount: input.amount };
     });
+  }
+
+  async #createAll(orders: readonly { orderId: string; ticketId: string; refundableAmount?: number; ticketPrice: number }[], i: { approvalId: string; cancellationId: string; kind: ApprovalRefundKind; reason: CancellationReason; status: ApprovalRefundStatus; nowMs: number }): Promise<void> {
+    let first = true;
+    for (const o of orders) {
+      const cancellationId = first ? i.cancellationId : `${i.cancellationId}:${o.ticketId}`;
+      first = false;
+      await this.#create({ approvalId: i.approvalId, cancellationId, orderId: o.orderId, ticketId: o.ticketId || '00000000-0000-0000-0000-000000000000', kind: i.kind, reason: i.reason, amount: o.refundableAmount ?? o.ticketPrice, status: i.status, nowMs: i.nowMs });
+    }
   }
 
   async #create(i: { approvalId: string; cancellationId: string; orderId: string; ticketId: string; kind: ApprovalRefundKind; reason: CancellationReason; amount: number; status: ApprovalRefundStatus; nowMs: number }): Promise<void> {

@@ -129,6 +129,7 @@ export class ApprovalsModule {
       module: ApprovalsModule,
       imports: [adminModule],
       controllers: [ApprovalsController, InternalApprovalsController, SettlementAdjustmentsController],
+      exports: [ApprovalLifecycle],
       providers: [...providers, reauthProvider, { provide: APPROVAL_STORE, useValue: deps.store ?? new MemoryContractApprovalStore(audit) }, { provide: CORE_CONTRACT_CLIENT, useValue: deps.core ?? new MemoryCoreContract() }],
     };
   }

@@ -416,7 +416,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     });
     const cancellationWrites = new DrizzleCancellationWrites(database, new DrizzleOrderStore(orderStoreOptions));
     refund = {
-      orders: new DrizzleCancellationOrders(database, new SeatMapSaleConfigs(seatMap)),
+      orders: new DrizzleCancellationOrders(database, new SeatMapSaleConfigs(seatMap), refundTickets),
       entryRecords: refundTickets,
       writes: cancellationWrites,
       seats: new DrizzleSeatReturns(new DrizzleSeatSales(database), seatMap, new RedisSeatReturnNotices(redis)),

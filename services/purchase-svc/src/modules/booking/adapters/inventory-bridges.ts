@@ -27,7 +27,7 @@ import {
 /** inventory SeatMap.config의 필요한 칸(EventSeatConfig의 saleEndsAtMs·tierPrices) */
 export interface SaleConfigSource {
   config(eventId: string): Promise<
-    | { readonly saleEndsAtMs: number; readonly tierPrices?: Readonly<Record<string, number>>; readonly orderName?: string; readonly entryOpensAtMs?: number; readonly virtualAccountAllowed?: boolean }
+    | { readonly saleEndsAtMs: number; readonly eventStartsAtMs?: number; readonly tierPrices?: Readonly<Record<string, number>>; readonly orderName?: string; readonly entryOpensAtMs?: number; readonly virtualAccountAllowed?: boolean }
     | undefined
   >;
 }
@@ -52,6 +52,7 @@ export class SeatMapSaleConfigs implements SaleConfigs {
     if (!c) return undefined;
     return {
       saleEndsAtMs: c.saleEndsAtMs,
+      ...(c.eventStartsAtMs !== undefined ? { eventStartsAtMs: c.eventStartsAtMs } : {}),
       tierPrices: c.tierPrices ?? NO_PRICES,
       ...(c.orderName !== undefined ? { orderName: c.orderName } : {}),
       ...(c.entryOpensAtMs !== undefined ? { entryOpensAtMs: c.entryOpensAtMs } : {}),

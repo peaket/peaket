@@ -326,7 +326,7 @@ export class ApprovalLifecycle {
         const r = await executors.reclaim({ approvalId: executing.approvalId, targetRef: executing.targetRef, targetAccountId: executing.targetAccountId, expectedHolderAccountId: executing.expectedHolderAccountId, deadlineMs: executing.dueAt.getTime() });
         outcome = r.result;
       } else {
-        const r = await executors.refund({ approvalId: executing.approvalId, kind: executing.kind, targetRef: executing.targetRef, targetAccountId: executing.targetAccountId, amount: executing.amount, reasonText: executing.reasonText });
+        const r = await executors.refund({ approvalId: executing.approvalId, kind: executing.kind, targetRef: executing.targetRef, ...(executing.relatedOrderIds.length > 0 ? { orderIds: [executing.targetRef, ...executing.relatedOrderIds] } : {}), targetAccountId: executing.targetAccountId, amount: executing.amount, reasonText: executing.reasonText });
         outcome = r.status;
       }
     } catch (e) {
@@ -358,6 +358,18 @@ export class ApprovalLifecycle {
       // 닫기 실패는 승인 성공을 바꾸지 않는다
     }
     return lifecycleView(done, actor);
+  }
+
+  /** 승인 업무의 남은 환급액을 대상 포트에서 읽는다(IR-11). 없으면 0 */
+  async refundableAmount(targetRef: string): Promise<number> {
+    const b = await this.d.targets?.basis('SYSTEM_FAULT_REFUND', targetRef);
+    return typeof b?.refundableAmount === 'number' ? b.refundableAmount : 0;
+  }
+
+  /** FLAGGED 취소 무효(IR-30). 실행기가 없으면 503 */
+  async voidOrder(orderId: string, reason: string): Promise<{ voided: boolean; alreadyEntered: boolean }> {
+    if (!this.d.executors?.voidOrder) await unavailable();
+    return this.d.executors!.voidOrder!({ orderId, reason });
   }
 
   async #targetChanged(r: ApprovalLifecycleRecord, nowMs: number): Promise<boolean> {
