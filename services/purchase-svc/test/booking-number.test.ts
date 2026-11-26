@@ -8,6 +8,9 @@ import * as booking from '../src/modules/booking/index.js';
 import { ORDER_PROBLEMS, orderResponseOf, throwOrderProblem, type CreateOrderDeps, type NewOrder } from '../src/modules/booking/index.js';
 import { CONSENT_VERSION, ITEMS, NOW, okBody, okCommand, okIdem, OrderFakes } from './order-cases.js';
 
+/** 이 시험의 예매번호 날짜(2026-10-14 KST)와 같은 호출 시각. `order-cases`의 NOW(11-05)와 섞지 않는다 */
+const BOOKING_NOW = Date.parse('2026-10-14T03:00:00.000Z');
+
 type BookingNumberAllocation = { seq: number } | { exhausted: true };
 type BookingNumbers = { next(nowMs: number): Promise<BookingNumberAllocation> };
 type BookingCreateDeps = CreateOrderDeps & { bookingNumbers: BookingNumbers };
@@ -66,13 +69,13 @@ const created = (r: Awaited<ReturnType<CreateOrder['execute']>>): CreatedOrder =
 
 describe('F-06-8 예매번호', () => {
   test('N-T27 ① 한국 시각 2026-10-14에 만든 두 주문의 예매번호가 2026101400001·2026101400002이고 서로 다르다', async () => {
-    const t = useCase({ seqs: [1, 2] });
+    const t = useCase({ now: BOOKING_NOW, seqs: [1, 2] });
     const first = created(await t.order.execute(okCommand({ idem: okIdem({ key: randomUUID() }), body: okBody() })));
     const second = created(await t.order.execute(okCommand({ idem: okIdem({ key: randomUUID() }), body: okBody() })));
     expect(first.bookingNo).toBe('2026101400001');
     expect(second.bookingNo).toBe('2026101400002');
     expect(first.bookingNo).not.toBe(second.bookingNo);
-    expect(t.numbers.calls).toEqual([NOW, NOW]);
+    expect(t.numbers.calls).toEqual([BOOKING_NOW, BOOKING_NOW]);
     expect(t.fx.created).toHaveLength(2);
 
     // 201 응답에도 같은 값이 실린다(openapi Order.bookingNumber)
@@ -89,7 +92,7 @@ describe('F-06-8 예매번호', () => {
   });
 
   test('N-T27 ② 99,999번째는 만들고 100,000번째는 503 booking-number-exhausted로 닫는다', async () => {
-    const last = useCase({ seqs: [99_999] });
+    const last = useCase({ now: BOOKING_NOW, seqs: [99_999] });
     expect(created(await last.order.execute(okCommand({ idem: okIdem({ key: randomUUID() }), body: okBody() }))).bookingNo).toBe('2026101499999');
 
     const full = useCase({ seqs: () => ({ exhausted: true }) });
@@ -121,7 +124,8 @@ describe('F-06-8 예매번호', () => {
       expect.unreachable('BOOKING_NUMBER_EXHAUSTED는 던져야 한다');
     } catch (e) {
       expect(e).toBeInstanceOf(ProblemError);
-      expect(e).toMatchObject({ status: 503, type: 'booking-number-exhausted' });
+      expect(e).toMatchObject({ status: 503 });
+      expect((e as ProblemError).slug).toBe('booking-number-exhausted');
     }
   });
 });

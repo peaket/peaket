@@ -25,7 +25,7 @@ describe('F-06-8 예매 확정 알림', () => {
       expect(job.expiresAt.getTime() - job.createdAt.getTime()).toBe(24 * 60 * 60 * 1000);
       expect(Object.keys(job.vars).sort()).toEqual(VARS_KEYS);
     }
-    expect(t.intake.bookingConfirmed(eventOf(t))).toEqual({ created: 0, duplicate: 3 });
+    expect(await t.intake.bookingConfirmed(eventOf(t))).toEqual({ created: 0, duplicate: 3 });
     expect(t.store.jobs.size).toBe(3);
     // 사건의 좌석 라벨·이름·전화번호는 vars에 들어가지 않는다
     for (const job of t.store.jobs.values()) {
