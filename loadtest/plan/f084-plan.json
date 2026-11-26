@@ -1,0 +1,259 @@
+{
+  "version": 1,
+  "batch": "F-08-4",
+  "feature": "F-08-4",
+  "window": 4,
+  "status": "미측정",
+  "start_gate": "감독이 측정 창 4를 열고 docker lane4-F-08-4 한 자리를 비운 뒤 시작한다",
+  "lock": "docker lane4-F-08-4",
+  "stage": {
+    "cluster": "lane4-f084",
+    "namespace": "v1",
+    "memoryMi": 2048,
+    "replicas": 3,
+    "redisTls": true,
+    "services": [
+      "payment-svc",
+      "purchase-svc",
+      "admission-ctrl",
+      "queue-svc"
+    ]
+  },
+  "cells": [
+    {
+      "id": "hybrid",
+      "lobbyShuffle": true,
+      "openBatch": true,
+      "operating": true
+    },
+    {
+      "id": "fifo",
+      "lobbyShuffle": false,
+      "openBatch": true,
+      "operating": true
+    },
+    {
+      "id": "prequeue",
+      "lobbyShuffle": true,
+      "openBatch": false,
+      "operating": true
+    },
+    {
+      "id": "none",
+      "lobbyShuffle": false,
+      "openBatch": false,
+      "operating": false,
+      "note": "Q-T23 기준선(운영 아님). --baseline일 때만 잰다"
+    }
+  ],
+  "artifacts": {
+    "runDir": ".cache/peaket-f084/{day}-{cell}-r{round}",
+    "records": "records.ndjson",
+    "shuffleResults": "shuffle-results",
+    "batchResults": "batch-results",
+    "shuffleProof": "shuffle-proof",
+    "summary": "summary.json",
+    "generator": "generator.json"
+  },
+  "runs": [
+    {
+      "key": "f084-stage",
+      "window": 4,
+      "estimate_min": 30,
+      "title": "무대 올리기·관측·Prometheus",
+      "commands": [
+        [
+          "node",
+          "tools/local/cluster.mjs",
+          "up"
+        ],
+        [
+          "node",
+          "tools/local/cluster.mjs",
+          "observability"
+        ],
+        [
+          "node",
+          "tools/local/cluster.mjs",
+          "v1",
+          "--redis-tls",
+          "on",
+          "--replicas",
+          "3",
+          "--memory-mi",
+          "2048"
+        ],
+        [
+          "node",
+          "loadtest/run.mjs",
+          "cleanup"
+        ]
+      ],
+      "artifact": ".cache/peaket-f084/{day}-stage"
+    },
+    {
+      "key": "f084-preflight-1k",
+      "window": 4,
+      "estimate_min": 20,
+      "title": "1천 사전 점검(발생기·진입·셀 설정)",
+      "cell": "hybrid",
+      "users": 1000,
+      "entryRate": 1000,
+      "commands": [
+        [
+          "node",
+          "loadtest/run.mjs",
+          "v1",
+          "queue",
+          "--users",
+          "1000",
+          "--entry-rate",
+          "1000",
+          "--admit-per-second",
+          "28",
+          "--generators",
+          "1",
+          "--out",
+          ".cache/peaket-f084/{day}-preflight-1k"
+        ]
+      ],
+      "artifact": ".cache/peaket-f084/{day}-preflight-1k/summary.json"
+    },
+    {
+      "key": "f084-load-10k",
+      "window": 4,
+      "estimate_min": 20,
+      "title": "1만 부하 셀(3회, T=0 최고 RPS·진입 p99·오류율)",
+      "cells": [
+        "hybrid",
+        "fifo",
+        "prequeue",
+        "none"
+      ],
+      "users": 10000,
+      "entryRate": 2000,
+      "rounds": 3,
+      "commands": [
+        [
+          "node",
+          "loadtest/run.mjs",
+          "v1",
+          "queue",
+          "--users",
+          "10000",
+          "--entry-rate",
+          "2000",
+          "--admit-per-second",
+          "28",
+          "--generators",
+          "4",
+          "--out",
+          ".cache/peaket-f084/{day}-{cell}-load-r{round}"
+        ]
+      ],
+      "artifact": ".cache/peaket-f084/{day}-{cell}-load-r{round}/summary.json"
+    },
+    {
+      "key": "f084-ordering-100k",
+      "window": 4,
+      "estimate_min": 60,
+      "title": "10만 순번 표본(로비 셔플·결과 파일 직접 읽기)",
+      "cells": [
+        "hybrid",
+        "fifo",
+        "prequeue",
+        "none"
+      ],
+      "users": 100000,
+      "rounds": 3,
+      "scenario": "loadtest/scenarios/v1-ordering.js",
+      "commands": [
+        [
+          "node",
+          "loadtest/run.mjs",
+          "v1",
+          "ordering",
+          "--cell",
+          "{cell}",
+          "--users",
+          "100000",
+          "--batch-users",
+          "10000",
+          "--batch-rate",
+          "5000",
+          "--out",
+          ".cache/peaket-f084/{day}-{cell}-ordering-r{round}"
+        ]
+      ],
+      "artifact": ".cache/peaket-f084/{day}-{cell}-ordering-r{round}/records.ndjson",
+      "note": "5,000/s가 발생기 한계로 무효면 Q-T23은 미측정/부분이고 다시 도착률을 바꾸지 않는다"
+    },
+    {
+      "key": "f084-load-100k",
+      "window": 4,
+      "estimate_min": 30,
+      "title": "10만 부하 시도(조건부, 1만이 유효할 때 셀마다 1회)",
+      "cells": [
+        "hybrid",
+        "fifo",
+        "prequeue",
+        "none"
+      ],
+      "users": 100000,
+      "entryRate": 2000,
+      "gate": "1만 부하 셀이 유효하고 발생기·무대 여유가 있을 때만",
+      "commands": [
+        [
+          "node",
+          "loadtest/run.mjs",
+          "v1",
+          "queue",
+          "--users",
+          "100000",
+          "--entry-rate",
+          "2000",
+          "--admit-per-second",
+          "28",
+          "--generators",
+          "12",
+          "--memory-mi",
+          "512",
+          "--out",
+          ".cache/peaket-f084/{day}-{cell}-load-100k"
+        ]
+      ],
+      "artifact": ".cache/peaket-f084/{day}-{cell}-load-100k/summary.json",
+      "note": "두 번 연속 무효면 더 돌리지 않고 무효(발생기·무대 한계)로 적는다"
+    },
+    {
+      "key": "f084-report",
+      "window": 4,
+      "estimate_min": 20,
+      "title": "판정·보고서·ADR 재검토",
+      "commands": [
+        [
+          "node",
+          "loadtest/runner/ordering.mjs",
+          "report",
+          "--input",
+          ".cache/peaket-f084/{day}-report.json",
+          "--out",
+          "docs/review/measurements/F-08-4-ordering.md"
+        ]
+      ],
+      "artifact": "docs/review/measurements/F-08-4-ordering.md, docs/review/measurements/F-08-4-adr-review.md"
+    }
+  ],
+  "not_included": [
+    "F-08-3 용량·비용·DORA 보고서 수정",
+    "F-08-5 6시간 장시간 시험·누수 주입",
+    "F-08-6 Game Day",
+    "30,000건/초·100만·K1/K2/K7의 새 수치 주장",
+    "ADR-0012·ADR-0118 상태 변경"
+  ],
+  "remaining_risk": [
+    "10만 부하 지표는 F-08-8 K1 10만 무효(발생기 한계)와 F-08-2 비례 미확인을 이어받는다",
+    "5,000/s Q-T23 표본이 이 PC에서 무효면 Q-T23은 미측정/부분이다",
+    "로비 판정은 trust-svc가 없는 무대라 hd 표시로 이어 간다"
+  ]
+}
