@@ -1,5 +1,5 @@
--- F-05-11 양도 뒤 몫: Outbox 부모 표와 transfer_notice(docs/data.md §4 `transfer_notice`, docs/features/notify.md §4.8,
--- 계획 docs/review/plans/F-05-11.md §3-2·§3-10).
+-- F-05-11 양도 뒤 몫: Outbox 부모 표와 transfer_notice·transfer_withdrawal_run
+-- (docs/data.md §4 `transfer_notice`, docs/features/notify.md §4.8, docs/features/identity.md §8, 계획 §3-2·§3-10).
 -- Outbox는 packages/platform/template/migrations/0002_outbox.sql과 같은 모양이다. 파티션은 @peaket/platform의 ensureOutboxPartitions가 만든다.
 CREATE SEQUENCE "outbox_seq" AS bigint;
 CREATE TABLE "outbox" (
@@ -40,3 +40,20 @@ CREATE TABLE IF NOT EXISTS "transfer_notice" (
 CREATE UNIQUE INDEX IF NOT EXISTS "transfer_notice_event_account_uq" ON "transfer_notice" ("type", "offer_id", "account_id");
 CREATE INDEX IF NOT EXISTS "transfer_notice_due_idx" ON "transfer_notice" ("next_attempt_at") WHERE "sent_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "transfer_notice_sent_idx" ON "transfer_notice" ("sent_at") WHERE "sent_at" IS NOT NULL;
+
+-- 탈퇴 참여자 호출 기록(IR-03·15). deadline_at_ms를 실제 DB에 남기고, 가장 오래된 PENDING의 나이를 지표로 낸다.
+CREATE TABLE IF NOT EXISTS "transfer_withdrawal_run" (
+	"id" uuid PRIMARY KEY,
+	"account_id" uuid NOT NULL,
+	"deadline_at" timestamp with time zone,
+	"state" text NOT NULL,
+	"returned_tickets" integer NOT NULL DEFAULT 0,
+	"withdrawn_offers" integer NOT NULL DEFAULT 0,
+	"rejected_offers" integer NOT NULL DEFAULT 0,
+	"pending_received_tickets" integer NOT NULL DEFAULT 0,
+	"pending_sent_offers" integer NOT NULL DEFAULT 0,
+	"pending_received_offers" integer NOT NULL DEFAULT 0,
+	"created_at" timestamp with time zone NOT NULL,
+	CONSTRAINT "transfer_withdrawal_run_state_check" CHECK ("state" IN ('DONE', 'PENDING'))
+);
+CREATE INDEX IF NOT EXISTS "transfer_withdrawal_run_account_idx" ON "transfer_withdrawal_run" ("account_id", "created_at" DESC);

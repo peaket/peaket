@@ -116,6 +116,10 @@ export interface TransferStore {
   rejectForAccount?(i: { readonly offerId: string; readonly accountId: string; readonly nowMs: number }): Promise<void>;
   /** 탈퇴 참여자의 모든 정리를 한 트랜잭션으로 한다(IR-15). 없으면 응용이 낱개 메서드로 이어 간다(메모리 짝) */
   processAccountWithdrawal?(i: { readonly accountId: string; readonly nowMs: number; readonly deadlineAtMs?: number }): Promise<TransferWithdrawalResult>;
+  /** 응용이 낱개 경로로 처리한 결과를 PENDING 나이 지표에 적는다(메모리 짝). Drizzle은 processAccountWithdrawal이 기록한다 */
+  recordWithdrawalState?(i: { readonly accountId: string; readonly state: 'DONE' | 'PENDING'; readonly nowMs: number }): Promise<void>;
+  /** 가장 오래된 탈퇴 PENDING의 나이(초). PENDING이 없으면 undefined */
+  pendingWithdrawalSeconds?(nowMs: number): Promise<number | undefined>;
 }
 
 /** 알림 보내기 반복이 잡는 행(transfer_notice) */

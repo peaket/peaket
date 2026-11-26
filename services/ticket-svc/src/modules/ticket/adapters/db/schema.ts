@@ -283,3 +283,28 @@ export const transferNotice = pgTable(
     check('transfer_notice_attempts_check', sql`${t.attempts} >= 0`),
   ],
 );
+
+/**
+ * 탈퇴 참여자 호출 기록(docs/features/identity.md §8, 계획 §5 T5, IR-03·15). deadline_at_ms를 실제로 남기고,
+ * 가장 오래된 PENDING의 나이를 `ticket_transfer_withdrawal_pending_seconds`로 낸다.
+ */
+export const transferWithdrawalRun = pgTable(
+  'transfer_withdrawal_run',
+  {
+    id: uuid('id').primaryKey(),
+    accountId: uuid('account_id').notNull(),
+    deadlineAt: at('deadline_at'),
+    state: text('state').notNull(),
+    returnedTickets: integer('returned_tickets').notNull().default(0),
+    withdrawnOffers: integer('withdrawn_offers').notNull().default(0),
+    rejectedOffers: integer('rejected_offers').notNull().default(0),
+    pendingReceivedTickets: integer('pending_received_tickets').notNull().default(0),
+    pendingSentOffers: integer('pending_sent_offers').notNull().default(0),
+    pendingReceivedOffers: integer('pending_received_offers').notNull().default(0),
+    createdAt: at('created_at').notNull(),
+  },
+  (t) => [
+    index('transfer_withdrawal_run_account_idx').on(t.accountId, t.createdAt),
+    check('transfer_withdrawal_run_state_check', sql`${t.state} IN ('DONE', 'PENDING')`),
+  ],
+);

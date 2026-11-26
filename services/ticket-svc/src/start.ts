@@ -124,6 +124,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
   let expireTimer: ReturnType<typeof setInterval> | undefined;
   let noticeTimer: ReturnType<typeof setInterval> | undefined;
   let transferNoticeTimer: ReturnType<typeof setInterval> | undefined;
+  let transferMetricsTimer: ReturnType<typeof setInterval> | undefined;
   let transferNoticeMetric: ((o: { readonly type: string; readonly result: 'sent' | 'retry' }) => void) | undefined;
   let entryCloseTimer: ReturnType<typeof setInterval> | undefined;
   let controlSync: { close(): Promise<void> } | undefined;
@@ -310,6 +311,26 @@ export async function start(o: StartOptions): Promise<StartedService> {
     });
     transferOutboxLag.set({ service: SERVICE }, 0);
     transferWithdrawalPending.set({ service: SERVICE }, 0);
+    // Outbox 지연·탈퇴 PENDING 지표는 core-svc 주소 유무와 상관없이 돈다(IR-03). 5초 [가정]마다 잰다
+    const updateTransferMetrics = (): void => {
+      void outboxHealth(database, systemClock)
+        .then((h) => {
+          transferOutboxLag.set({ service: SERVICE }, h.lagSeconds);
+          if (h.lagSeconds >= 300) service!.logger.warn({ lagSeconds: h.lagSeconds }, 'trade.tickets Outbox 지연이 5분을 넘었다(SEV3)');
+        })
+        .catch(() => undefined);
+      void transferStore
+        .pendingWithdrawalSeconds?.(systemClock.now())
+        .then((seconds) => {
+          const v = seconds ?? 0;
+          transferWithdrawalPending.set({ service: SERVICE }, v);
+          if (v >= 86_400) service!.logger.error({ pendingSeconds: v }, '탈퇴 참여자 PENDING이 24시간을 넘었다(SEV2)');
+        })
+        .catch(() => undefined);
+    };
+    transferMetricsTimer = setInterval(updateTransferMetrics, TRANSFER_NOTICE_EVERY_MS);
+    transferMetricsTimer.unref?.();
+    updateTransferMetrics();
     // 양도 알림 보내기 반복(docs/features/notify.md §4.8): 5초 [가정]마다 transfer_notice의 보낼 때가 된 행을 core-svc로 보낸다
     if (transferNotices) {
       const sendTransferNotices = (): void => {
@@ -323,12 +344,6 @@ export async function start(o: StartOptions): Promise<StartedService> {
           .backlog()
           .then((b) => {
             if (b.count > 0 && b.oldestSeconds >= 3_600) service!.logger.warn({ count: b.count, oldestSeconds: b.oldestSeconds }, '보내지 못한 양도 알림이 1시간을 넘었다(SEV3)');
-          })
-          .catch(() => undefined);
-        void outboxHealth(database, systemClock)
-          .then((h) => {
-            transferOutboxLag.set({ service: SERVICE }, h.lagSeconds);
-            if (h.lagSeconds >= 300) service!.logger.warn({ lagSeconds: h.lagSeconds }, 'trade.tickets Outbox 지연이 5분을 넘었다(SEV3)');
           })
           .catch(() => undefined);
       };
@@ -608,6 +623,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
       if (expireTimer) clearInterval(expireTimer);
       if (noticeTimer) clearInterval(noticeTimer);
       if (transferNoticeTimer) clearInterval(transferNoticeTimer);
+      if (transferMetricsTimer) clearInterval(transferMetricsTimer);
       if (entryCloseTimer) clearInterval(entryCloseTimer);
       return (closing ??= (async () => {
         try {
@@ -630,6 +646,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
     if (expireTimer) clearInterval(expireTimer);
     if (noticeTimer) clearInterval(noticeTimer);
     if (transferNoticeTimer) clearInterval(transferNoticeTimer);
+    if (transferMetricsTimer) clearInterval(transferMetricsTimer);
     if (entryCloseTimer) clearInterval(entryCloseTimer);
     await grpc?.close().catch(() => {});
     await service?.close().catch(() => {});

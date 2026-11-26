@@ -37,7 +37,7 @@ import {
 } from '../../domain/transfer.js';
 import { type TicketStatus } from '../../domain/ticket.js';
 import type { DeviceKeyRevoker } from './drizzle-ticket-store.js';
-import { fraudTransferLock, ticket, ticketReturn, transferNotice, transferOffer, transferRecipientLookup } from './schema.js';
+import { fraudTransferLock, ticket, ticketReturn, transferNotice, transferOffer, transferRecipientLookup, transferWithdrawalRun } from './schema.js';
 import { TransferOutbox, type TransferEventCodec } from '../../domain/transfer-events.js';
 import { writeTransferEffects } from './transfer-effects.js';
 
@@ -610,7 +610,6 @@ export class DrizzleTransferStore implements TransferStore, TransferNoticeStore 
    * 동결이면 키만 폐기하고 PENDING, 입장 기록이면 손대지 않고 PENDING이다.
    */
   async processAccountWithdrawal(i: { accountId: string; nowMs: number; deadlineAtMs?: number }): Promise<TransferWithdrawalResult> {
-    void i.deadlineAtMs;
     return this.o.database.transaction(async (tx) => {
       const held = await tx
         .select()
@@ -686,8 +685,36 @@ export class DrizzleTransferStore implements TransferStore, TransferNoticeStore 
         }
       }
       const state = pendingReceivedTickets === 0 ? 'DONE' : 'PENDING';
+      await tx.insert(transferWithdrawalRun).values({
+        id: randomUUID(),
+        accountId: i.accountId,
+        deadlineAt: i.deadlineAtMs === undefined ? null : new Date(i.deadlineAtMs),
+        state,
+        returnedTickets,
+        withdrawnOffers,
+        rejectedOffers,
+        pendingReceivedTickets,
+        pendingSentOffers: 0,
+        pendingReceivedOffers: 0,
+        createdAt: new Date(i.nowMs),
+      });
       return { state, returnedTickets, withdrawnOffers, rejectedOffers, pendingReceivedTickets, pendingSentOffers: 0, pendingReceivedOffers: 0 };
     });
+  }
+
+  /** 가장 오래된 탈퇴 PENDING(계정별 마지막 호출이 PENDING)의 나이(초). 없으면 undefined */
+  async pendingWithdrawalSeconds(nowMs: number): Promise<number | undefined> {
+    const rows = (await this.o.database.db.execute(sql`
+      select min(r.created_at) as oldest
+      from (
+        select distinct on (account_id) account_id, state, created_at
+        from transfer_withdrawal_run
+        order by account_id, created_at desc, id desc
+      ) r
+      where r.state = 'PENDING'`)).rows as { oldest: Date | string | null }[];
+    const oldest = rows[0]?.oldest;
+    if (oldest === null || oldest === undefined) return undefined;
+    return Math.max(0, (nowMs - new Date(oldest).getTime()) / 1000);
   }
 
   // ---- transfer_notice 보내기 표(TransferNoticeStore) ----

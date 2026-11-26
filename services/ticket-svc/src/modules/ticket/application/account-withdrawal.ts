@@ -61,6 +61,7 @@ export class TransferWithdrawal {
     const pendingSentOffers = after.sentOffers.length;
     const pendingReceivedOffers = after.receivedOffers.length;
     const state = pendingReceivedTickets + pendingSentOffers + pendingReceivedOffers === 0 ? 'DONE' : 'PENDING';
+    await store.recordWithdrawalState?.({ accountId: i.accountId, state, nowMs });
     return { state, returnedTickets, withdrawnOffers, rejectedOffers, pendingReceivedTickets, pendingSentOffers, pendingReceivedOffers };
   }
 }

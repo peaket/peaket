@@ -72,6 +72,8 @@ export class MemoryTransferStore implements TransferStore, TransferNoticeStore {
   readonly notices: NoticeRow[] = [];
   /** entry_close.closed_at 대역(회차 → 마감 시각) */
   readonly entryCloses = new Map<string, number>();
+  /** 탈퇴 참여자가 PENDING으로 남은 계정 → 처음 PENDING이 된 시각 */
+  readonly withdrawalPending = new Map<string, number>();
 
   readonly #outbox: TransferOutbox;
 
@@ -383,6 +385,16 @@ export class MemoryTransferStore implements TransferStore, TransferNoticeStore {
     const open = this.notices.filter((n) => n.sentAtMs === undefined);
     if (open.length === 0) return { count: 0 };
     return { count: open.length, oldestCreatedAtMs: Math.min(...open.map((n) => n.createdAtMs)) };
+  }
+
+  async recordWithdrawalState(i: { accountId: string; state: 'DONE' | 'PENDING'; nowMs: number }): Promise<void> {
+    if (i.state === 'DONE') this.withdrawalPending.delete(i.accountId);
+    else if (!this.withdrawalPending.has(i.accountId)) this.withdrawalPending.set(i.accountId, i.nowMs);
+  }
+
+  async pendingWithdrawalSeconds(nowMs: number): Promise<number | undefined> {
+    if (this.withdrawalPending.size === 0) return undefined;
+    return Math.max(0, (nowMs - Math.min(...this.withdrawalPending.values())) / 1000);
   }
 
   async setTransferLock(input: SetTransferLockInput): Promise<readonly TransferLockOutcome[]> {
