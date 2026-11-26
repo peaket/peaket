@@ -348,6 +348,7 @@ export class FraudActions {
           const closed: FraudCaseEventRecord = { seq: ev.seq + 1, kind: 'ACTIONED', actorId: actor.accountId, note: null, detail: { reason: 'NO_ACTIONABLE_TICKETS' }, occurredAtMs: nowMs };
           next = { ...clone(c), status: 'ACTIONED', outcomeLabel: 'NONE', closedAtMs: nowMs, version: c.version + 1, events: [...c.events, ev, closed] };
           events = [ev, closed];
+          await this.#releaseDuringApproval(approvalId, r.caseId, r.eventId, targetAccounts, actor.accountId, 'ACTION_DONE', nowMs);
         } else {
           const a = this.#actionedCase(c, acceptedAccounts, { approvalId, action: r.action, results, targets, excludedAccounts: [...excludedAccounts], excludedTickets: [...excludedTickets] }, nowMs, actor.accountId);
           next = a.next;
@@ -366,7 +367,9 @@ export class FraudActions {
             else cur.excluded.push(t.ticketId);
             byHolder.set(t.holderAccountId, cur);
           }
-          holderNotices = [...byHolder].flatMap(([accountId, v]) => [
+          holderNotices = [...byHolder]
+            .filter(([accountId]) => !active(c).some((m) => m.accountId === accountId))
+            .flatMap(([accountId, v]) => [
             ...(v.canceled.length > 0 ? [{ accountId, ticketIds: v.canceled, result: 'CANCELED' as const }] : []),
             ...(v.excluded.length > 0 ? [{ accountId, ticketIds: v.excluded, result: 'EXCLUDED' as const }] : []),
           ]);
@@ -533,7 +536,20 @@ export class FraudActions {
     if (r.status !== 'PENDING_APPROVAL' && r.status !== 'FAILED') throw bareProblem('approval-not-pending', 409, '승인 대기 중인 업무가 아닙니다');
     const priorDone = c.events.some((e) => e.kind === 'ACTION_EXECUTED');
     const next = this.#closedCase(c, priorDone ? 'ACTIONED' : 'INVESTIGATING', 'WITHDRAWN', actor.accountId, nowMs);
-    const out = await this.d.approvals.setStatus({ approvalId, status: 'WITHDRAWN', from: ['PENDING_APPROVAL', 'FAILED'], closeReason: reason, nowMs, case: { next: next.next, expectedVersion: c.version, events: next.events } });
+    const approvalEvent: FraudCaseEventRecord = { seq: (next.next.events.at(-1)?.seq ?? 0) + 1, kind: 'ACTION_REJECTED', actorId: actor.accountId, note: reason, detail: { approvalId, reason, closeReason: 'WITHDRAWN' }, occurredAtMs: nowMs };
+    const out = await this.d.approvals.setStatus({
+      approvalId,
+      status: 'WITHDRAWN',
+      from: ['PENDING_APPROVAL', 'FAILED'],
+      closeReason: reason,
+      nowMs,
+      case: {
+        next: { ...next.next, events: [...next.next.events, approvalEvent] },
+        expectedVersion: c.version,
+        events: [...next.events, approvalEvent],
+        audit: { recordType: 'ADMIN_DATA_ACCESS', recordId: r.caseId, payload: { action: 'FRAUD_ACTION_WITHDRAWN', approvalId, requesterId: actor.accountId }, nowMs },
+      },
+    });
     if (!out.ok) throw bareProblem('approval-not-pending', 409, '승인 대기 중인 업무가 아닙니다');
     return this.#approvalView((await this.d.approvals.get(approvalId))!, (await this.d.store.getCase(r.caseId)) ?? next.next);
   }
@@ -564,7 +580,7 @@ export class FraudActions {
     const restricted = this.d.restrictions ? await this.d.restrictions.activeForCase(c.caseId) : [];
     const r = this.#domain(() => decideObjections({ case: c, decisions, nowMs: this.d.now(), reversalComplete: false, restrictedAccountIds: restricted.map((x) => x.accountId) }));
     let next = r.next;
-    const events = [...r.events];
+    let events = [...r.events];
     const granted: Record<string, unknown>[] = [];
     for (const d of decisions.filter((x) => x.decision === 'ACCEPTED' && !r.liftAccountIds.includes(x.accountId))) {
       const grants = await this.#priorityForAccount(c, c.caseId, d.accountId, actor.accountId);
@@ -575,8 +591,8 @@ export class FraudActions {
     }
     const actioned = active(next).filter((m) => m.actionNotifiedAtMs !== undefined && m.actionNotifiedAtMs !== null);
     if (r.liftAccountIds.length === 0 && actioned.length > 0 && actioned.every((m) => m.objectionResult === 'ACCEPTED')) {
-      if (next.events.at(-1)?.kind === 'ACTIONED' && next.events.at(-1)?.detail?.reason === 'OBJECTIONS_DECIDED') next.events = next.events.slice(0, -1);
-      if (events.at(-1)?.kind === 'ACTIONED' && events.at(-1)?.detail?.reason === 'OBJECTIONS_DECIDED') events.pop();
+      next.events = next.events.filter((e) => !(e.kind === 'ACTIONED' && e.detail?.reason === 'OBJECTIONS_DECIDED'));
+      events = events.filter((e) => !(e.kind === 'ACTIONED' && e.detail?.reason === 'OBJECTIONS_DECIDED'));
       next.status = 'REVERSED';
       next.outcomeLabel = 'HUMAN';
       next.closedAtMs = this.d.now();

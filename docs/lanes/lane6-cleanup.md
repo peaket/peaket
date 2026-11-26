@@ -34,3 +34,5 @@
 - F-04-13 IR-37(중간): 사본 어댑터의 `lock_active`·`lock_expires_at`·`locked_ticket_ids`는 실었지만, trust 주소가 없을 때 라벨이 로그로 후퇴하고 사본 어댑터가 core 주소 없이 꺼지는 경계는 그대로다. 시작 경고·대체 저장을 정한다(`adapters/grpc-fraud-appeal-copies.ts`, `main.ts`).
 - F-04-13 IR-38(중간): `reject`·`expireApproval`은 상태 커밋 뒤 잠금을 풀고 NOTE를 남기지만, 잠금 해제가 실패한 뒤 다시 푸는 재시도 큐가 없다. 정비가 NOTE를 읽어 다시 풀게 한다(`application/fraud-actions.ts`).
 - F-04-13 IR-39(낮음): LIFT `ACTION_REQUESTED`의 `eventId`는 넣었지만 `canApprove`가 요청자에게도 true이고 목록·생성 응답의 `summaryViewedAt`은 null이다. 보는 사람과 열람 시각을 화면에 맞춘다(`application/fraud-actions.ts`).
+- F-04-13 IR-45(낮음): 실행 실패(`FAILED`)에도 `ACTION_APPROVED`를 `approved:false`로 남긴다. 승인되지 않은 실행에 ACTION_APPROVED가 생기지 않게 성공 갈래에만 쓰거나 ACTION_FAILED로만 남긴다(`application/fraud-actions.ts`).
+- F-04-13 IR-46(낮음): RESTRICT가 지역 `booking_restriction` 행을 identity·queue·purchase보다 먼저 쓴다. 계획 §2.8의 identity → queue → purchase → 지역 기록 순서와 다르고 identity 실패 때 지역 행만 ACTIVE로 남는다. 순서를 맞추거나 실패 시 행을 되돌린다(`application/fraud-actions.ts`, `adapters/grpc-fraud-restrictions.ts`).

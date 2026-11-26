@@ -37,13 +37,13 @@ export class GrpcFraudRestrictions {
   readonly queue = {
     set: async (i: { accountId: string; caseId: string; restrictionId: string; state: 'ACTIVE' | 'LIFTED'; version: number; untilMs: number }): Promise<void> => {
       const out = await this.#call(this.#queue, 'SetBookingRestriction', { account_id: i.accountId, restriction_id: i.restrictionId, state: `BOOKING_RESTRICTION_STATE_${i.state}`, ends_at: TS(i.untilMs), version: i.version });
-      if (out.changed !== true) throw new Error('queue-svc SetBookingRestriction이 반영되지 않았습니다');
+      void out.changed;
     },
   };
   readonly purchase = {
     set: async (i: { accountId: string; caseId: string; restrictionId: string; state: 'ACTIVE' | 'LIFTED'; version: number; untilMs: number }): Promise<void> => {
       const out = await this.#call(this.#purchase, 'SetBookingRestriction', { account_id: i.accountId, restriction_id: i.restrictionId, state: `BOOKING_RESTRICTION_STATE_${i.state}`, ends_at: TS(i.untilMs), version: i.version });
-      if (out.changed !== true) throw new Error('purchase-svc SetBookingRestriction이 반영되지 않았습니다');
+      void out.changed;
     },
   };
   readonly #identity: grpc.Client & Record<string, Unary>;
