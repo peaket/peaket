@@ -34,10 +34,16 @@ describe('R-T32 소명 접수', () => {
   });
 
   test('R-T32 ① 부정 예매 사건 소명은 category FRAUD_CASE로 한 건을 남긴다', async () => {
-    const r = await submit(h, { accountId: randomUUID(), kind: 'FRAUD_CASE', targetId: randomUUID() });
+    const accountId = randomUUID();
+    const caseId = randomUUID();
+    const dueAtMs = NOW_MS + 2 * 86_400_000;
+    await h.kit().views.fraud.apply(FRAUD_VIEW({ accountId, caseId, dueAtMs }));
+    const r = await submit(h, { accountId, kind: 'FRAUD_CASE', targetId: caseId });
     expect(r.body).toMatchObject({ kind: 'FRAUD_CASE', status: 'SUBMITTED' });
     const row = h.kit().outbox.rows().find((x) => x.sourceId === r.body.appealId);
     expect(row).toMatchObject({ kind: 'APPEAL', category: 'FRAUD_CASE' });
+    // IR-08: CS 건 기한은 사건의 소명 기한(dueAt)에서 센다
+    expect(row?.dueBaseAt).toBe(new Date(dueAtMs).toISOString());
     expect(row).not.toHaveProperty('body');
   });
 
@@ -48,17 +54,23 @@ describe('R-T32 소명 접수', () => {
     const r = await submit(h, { accountId, kind: 'FRAUD_CASE', targetId: caseId });
     h.answer({ status: 403 });
     await h.dispatch();
-    expect(h.calls).toHaveLength(1);
-    expect(h.calls[0]).toMatchObject({ method: 'POST', path: `/internal/v1/fraud-cases/${caseId}/appeals` });
-    expect(h.calls[0]!.md['x-peaket-caller']).toBe('core-svc');
-    expect(h.calls[0]!.md['x-peaket-internal-token']).toBe('support-internal-token-000000');
-    expect(h.calls[0]!.body).toMatchObject({ appealId: r.body.appealId, accountId, party: 'PAYER' });
+    const entrance = h.calls.filter((c) => c.path === `/internal/v1/fraud-cases/${caseId}/appeals`);
+    expect(entrance).toHaveLength(1);
+    expect(entrance[0]).toMatchObject({ method: 'POST' });
+    expect(entrance[0]!.md['x-peaket-caller']).toBe('core-svc');
+    expect(entrance[0]!.md['x-peaket-internal-token']).toBe('support-internal-token-000000');
+    expect(entrance[0]!.body).toMatchObject({ appealId: r.body.appealId, accountId, party: 'PAYER' });
+    // IR-07: 대상 아님으로 닫힌 소명은 ops CS 건·보류도 닫게 알린다
+    const invalid = h.calls.filter((c) => c.path === `/internal/v1/cs-cases/appeals/${String(r.body.appealId)}/invalid`);
+    expect(invalid).toHaveLength(1);
+    expect(invalid[0]!.body).toMatchObject({ reason: '대상 아님' });
 
     const mine = await h.myAppeals(h.fanHeaders(accountId));
     expect(items(mine.body)[0]).toMatchObject({ appealId: r.body.appealId, status: 'INVALID' });
     expect(h.notices.filter((n) => n.appealId === r.body.appealId)).toEqual([expect.objectContaining({ event: 'INVALID', accountId })]);
     await h.dispatch();
-    expect(h.calls).toHaveLength(1);
+    expect(h.calls.filter((c) => c.path === `/internal/v1/fraud-cases/${caseId}/appeals`)).toHaveLength(1);
+    expect(h.calls.filter((c) => c.path === `/internal/v1/cs-cases/appeals/${String(r.body.appealId)}/invalid`)).toHaveLength(1);
   });
 
   test('R-T32 ② 부정 예매 입구가 404여도 대상 아님으로 닫는다', async () => {

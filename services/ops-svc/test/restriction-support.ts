@@ -54,7 +54,7 @@ export interface RestrictionHarness {
   readonly events: string[];
   readonly appeals: Map<string, AppealSourceRecord>;
   readonly investigators: Map<string, string>;
-  failNext(target: 'queue' | 'purchase' | 'view', times?: number): void;
+  failNext(target: 'queue' | 'purchase' | 'view' | 'hold', times?: number): void;
   recover(): void;
   as(role: OpsRole): Record<string, string>;
   create(h: Record<string, string>, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }>;
@@ -63,6 +63,8 @@ export interface RestrictionHarness {
   intake(body: unknown): Promise<{ status: number; body: Record<string, unknown> }>;
   caseGet(h: Record<string, string>, caseId: string): Promise<{ status: number; etag: string | undefined; body: Record<string, unknown> }>;
   decide(h: Record<string, string>, caseId: string, body: Record<string, unknown>, version: number): Promise<{ status: number; body: Record<string, unknown> }>;
+  /** core가 FRAUD_CASE 소명을 대상 아님·기한 경과로 닫을 때 부르는 내부 경로 */
+  invalidate(appealId: string, reason?: string): Promise<{ status: number; body: Record<string, unknown> }>;
   /** 키트의 배경 작업 한 바퀴(다시 보내기·정비) */
   tick(nowMs?: number): Promise<void>;
   kit(): {
@@ -86,7 +88,7 @@ class TestReauth {
   }
 }
 
-export async function restrictionHarness(o: { nowIso?: string; copies?: RestrictionCopiesPort } = {}): Promise<RestrictionHarness> {
+export async function restrictionHarness(o: { nowIso?: string; copies?: RestrictionCopiesPort; holdResult?: Promise<void>; onResult?: () => void } = {}): Promise<RestrictionHarness> {
   const clock = fakeClock({ now: Date.parse(o.nowIso ?? NOW_ISO) });
   const identity = new FakeIdentity();
   const admins = new FakeAdminIdentity();
@@ -100,7 +102,7 @@ export async function restrictionHarness(o: { nowIso?: string; copies?: Restrict
   const events: string[] = [];
   const appeals = new Map<string, AppealSourceRecord>();
   const investigators = new Map<string, string>();
-  const fail = { queue: 0, purchase: 0, view: 0 };
+  const fail = { queue: 0, purchase: 0, view: 0, hold: 0 };
   const reauth = new TestReauth();
   const copiesPort: RestrictionCopiesPort = {
     async queue(input) {
@@ -126,6 +128,7 @@ export async function restrictionHarness(o: { nowIso?: string; copies?: Restrict
     copies: o.copies ?? copiesPort,
     holds: {
       async set(i: { accountId: string; caseId: string; kind: 'APPEAL'; state: 'OPEN' | 'CLOSED'; version: number }) {
+        if (fail.hold > 0) { fail.hold -= 1; throw new Error('hold unavailable'); }
         holds.push({ ...i });
         events.push(`hold:${i.state}`);
         return { changed: true };
@@ -134,6 +137,8 @@ export async function restrictionHarness(o: { nowIso?: string; copies?: Restrict
     appeals: {
       async read(appealId: string) { return appeals.get(appealId); },
       async result(appealId: string, r: { status: string; result?: string; resultNote?: string }) {
+        o.onResult?.();
+        if (o.holdResult) await o.holdResult;
         results.push({ appealId, status: r.status, ...(r.result ? { result: r.result } : {}), ...(r.resultNote ? { resultNote: r.resultNote } : {}) });
         events.push(`result:${r.status}`);
       },
@@ -202,7 +207,7 @@ export async function restrictionHarness(o: { nowIso?: string; copies?: Restrict
     appeals,
     investigators,
     failNext(target, times = 1) { fail[target] = times; },
-    recover() { fail.queue = 0; fail.purchase = 0; fail.view = 0; },
+    recover() { fail.queue = 0; fail.purchase = 0; fail.view = 0; fail.hold = 0; },
     as: (role) => session(randomUUID(), role),
     async create(h, body) {
       const r = await request(h, 'POST', '/v1/ops/approval-requests', body);
@@ -226,6 +231,10 @@ export async function restrictionHarness(o: { nowIso?: string; copies?: Restrict
     },
     async decide(h, caseId, body, version) {
       const r = await request(h, 'POST', `/v1/ops/cases/${caseId}/restriction-appeal-decision`, body, { 'if-match': `"${version}"` });
+      return { status: r.statusCode, body: parse(r.payload) };
+    },
+    async invalidate(appealId, reason = '대상 아님') {
+      const r = await svc.http.inject({ method: 'POST', url: `/internal/v1/cs-cases/appeals/${appealId}/invalid`, headers: { 'content-type': 'application/json' }, payload: JSON.stringify({ reason }) });
       return { status: r.statusCode, body: parse(r.payload) };
     },
     async tick(nowMs) {

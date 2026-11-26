@@ -101,6 +101,20 @@ describe('R-T32 ① 소명 접수와 CS 건', () => {
     expect(h.notices.filter((n) => n.appealId === fx.appealId && n.event === 'INVALID')).toHaveLength(1);
   });
 
+  test('IR-07 FRAUD_CASE 소명이 대상 아님·기한 경과로 닫히면 ops 건과 보류도 닫는다', async () => {
+    const caseId = randomUUID();
+    h.investigators.set(caseId, randomUUID());
+    const fx = source({ accountId: randomUUID(), targetId: caseId, kind: 'FRAUD_CASE' });
+    const opened = await openAppeal(fx, 'FRAUD_CASE');
+    expect(h.holds.at(-1)).toMatchObject({ kind: 'APPEAL', state: 'OPEN' });
+    const invalid = await h.invalidate(fx.appealId, '기한 경과');
+    expect(invalid.status, JSON.stringify(invalid.body)).toBe(200);
+    const c = await h.caseGet(h.as('cs_lead'), opened);
+    expect(c.body.status).toBe('RESOLVED');
+    expect(String(c.body.resultNote)).toContain('기한');
+    expect(h.holds.at(-1)).toMatchObject({ kind: 'APPEAL', state: 'CLOSED' });
+  });
+
   test('R-T32 ① FRAUD_CASE 건에는 예매 제한 해제 결정 경로가 없다(409, 사본·결과 0)', async () => {
     const caseId = randomUUID();
     h.investigators.set(caseId, randomUUID());
@@ -125,6 +139,10 @@ describe('R-T13 소명 판단(해제·유지)', () => {
     expect(decided.status, JSON.stringify(decided.body)).toBe(200);
     expect(decided.body.status).toBe('RESOLVED');
     expect(h.copies.map((x) => [x.target, x.input.state])).toEqual([['queue', 'LIFTED'], ['purchase', 'LIFTED'], ['view', 'LIFTED']]);
+    // IR-01: 해제는 ACTIVE와 같은 판이 아니라 한 판 큰 LIFTED를 보내야 받는 쪽이 반영한다
+    const liftedVersion = r.version + 1;
+    for (const c of h.copies) expect(c.input.version, c.target).toBe(liftedVersion);
+    expect(h.kit().rows().find((x) => x.restrictionId === r.restrictionId)).toMatchObject({ status: 'LIFTED', version: liftedVersion });
     expect(h.results).toEqual([expect.objectContaining({ appealId: fx.appealId, status: 'DECIDED', result: 'LIFTED', resultNote: '사정이 확인되어 해제합니다-시험7733' })]);
     expect(h.notices).toEqual(expect.arrayContaining([expect.objectContaining({ appealId: fx.appealId, event: 'DECIDED' })]));
     expect(h.holds.at(-1)).toMatchObject({ state: 'CLOSED' });
@@ -181,6 +199,47 @@ describe('R-T13 소명 판단(해제·유지)', () => {
     expect(h.copies.some((x) => x.target === 'view')).toBe(false);
     expect(h.results).toEqual([]);
     expect(h.holds.at(-1)).toMatchObject({ kind: 'APPEAL', state: 'OPEN' });
+  });
+
+  test('IR-11 보류 CLOSE가 일시 실패하면 503이고 건은 OPEN으로 남아 다시 결정할 수 있다', async () => {
+    const r = await approvedRestriction(h, { accountId: randomUUID() });
+    h.copies.length = 0;
+    const fx = source({ accountId: r.accountId, targetId: r.restrictionId });
+    const caseId = await openAppeal(fx);
+    const c = await h.caseGet(h.as('cs_lead'), caseId);
+    h.failNext('hold');
+    const failed = await h.decide(h.as('cs_lead'), caseId, { decision: 'ACCEPT', reason: '해제-시험7748' }, Number(c.body.version));
+    expect(failed.status).toBe(503);
+    expect((await h.caseGet(h.as('cs_lead'), caseId)).body.status).toBe('OPEN');
+    expect(h.holds.filter((x) => x.caseId === caseId).map((x) => x.state)).not.toContain('CLOSED');
+    const again = await h.caseGet(h.as('cs_lead'), caseId);
+    expect((await h.decide(h.as('cs_lead'), caseId, { decision: 'ACCEPT', reason: '해제-시험7749' }, Number(again.body.version))).status).toBe(200);
+    expect(h.holds.at(-1)).toMatchObject({ caseId, kind: 'APPEAL', state: 'CLOSED' });
+  });
+
+  test('IR-12 건을 연 뒤 제한이 EXPIRED가 되어도 ACCEPT로 건을 닫는다', async () => {
+    const r = await approvedRestriction(h, { accountId: randomUUID() });
+    h.copies.length = 0;
+    h.kit().seed({
+      restrictionId: r.restrictionId,
+      approvalId: r.approvalId,
+      accountId: r.accountId,
+      reasonCode: 'ABUSE_CANCEL',
+      startsAtMs: NOW_MS - 3_600_000,
+      endsAtMs: NOW_MS + 86_400_000,
+      appealDueAtMs: NOW_MS + 86_400_000,
+      status: 'EXPIRED',
+      version: r.version,
+      deliveryDone: true,
+    });
+    const fx = source({ accountId: r.accountId, targetId: r.restrictionId });
+    const caseId = await openAppeal(fx);
+    const c = await h.caseGet(h.as('cs_lead'), caseId);
+    const decided = await h.decide(h.as('cs_lead'), caseId, { decision: 'ACCEPT', reason: '기한 뒤 해제-시험7752' }, Number(c.body.version));
+    expect(decided.status, JSON.stringify(decided.body)).toBe(200);
+    expect(decided.body.status).toBe('RESOLVED');
+    expect(h.results).toEqual([expect.objectContaining({ appealId: fx.appealId, status: 'DECIDED', result: 'LIFTED' })]);
+    expect(h.holds.at(-1)).toMatchObject({ caseId, kind: 'APPEAL', state: 'CLOSED' });
   });
 });
 
@@ -247,6 +306,47 @@ describe('ASVS 경계', () => {
     expect(lifted).toBe(h.results[0]!.result === 'LIFTED' ? 3 : 0);
   });
 
+  test('IR-06 같은 판 ACCEPT·REJECT가 실제로 겹치면 한쪽만 결과·사본을 내고 다른 쪽은 412다', async () => {
+    const slow = await restrictionHarness();
+    try {
+      const r = await approvedRestriction(slow, { accountId: randomUUID() });
+      slow.copies.length = 0;
+      const fx = source({ accountId: r.accountId, targetId: r.restrictionId });
+      slow.appeals.set(fx.appealId, fx);
+      const intake = await slow.intake(caseRequest('APPEAL', { sourceId: fx.appealId, category: 'RESTRICTION' }));
+      expect(intake.status, JSON.stringify(intake.body)).toBe(202);
+      const caseId = String(intake.body.caseId);
+      const c = await slow.caseGet(slow.as('cs_lead'), caseId);
+      // 두 결정이 같은 판을 읽도록 find를 두 번까지 붙잡는다(HTTP 두 건이 저절로 겹치지 않는 것을 강제)
+      const store = slow.cs.store;
+      const originalFind = store.find.bind(store);
+      let reads = 0;
+      let release!: () => void;
+      const both = new Promise<void>((resolve) => { release = resolve; });
+      store.find = async (id: string) => {
+        if (id === caseId && reads < 2) {
+          reads += 1;
+          const snapshot = await originalFind(id);
+          if (reads === 2) release();
+          await both;
+          return snapshot;
+        }
+        return originalFind(id);
+      };
+      const lead = slow.as('cs_lead');
+      const [a, b] = await Promise.all([
+        slow.decide(lead, caseId, { decision: 'ACCEPT', reason: '해제-시험7750' }, Number(c.body.version)),
+        slow.decide(lead, caseId, { decision: 'REJECT', reason: '유지-시험7751' }, Number(c.body.version)),
+      ]);
+      expect([a.status, b.status].filter((s) => s === 200)).toHaveLength(1);
+      expect([a.status, b.status].filter((s) => s === 409 || s === 412)).toHaveLength(1);
+      expect(slow.results).toHaveLength(1);
+      expect(slow.copies.filter((x) => x.input.state === 'LIFTED').length).toBe(slow.results[0]!.result === 'LIFTED' ? 3 : 0);
+    } finally {
+      await slow.close();
+    }
+  });
+
   test('ASVS v5.0.0-3.5.3 소명 결정 경로는 GET을 받지 않는다', async () => {
     const r = await approvedRestriction(h, { accountId: randomUUID() });
     const fx = source({ accountId: r.accountId, targetId: r.restrictionId });
@@ -256,6 +356,26 @@ describe('ASVS 경계', () => {
     expect([404, 405]).toContain(got.statusCode);
     expect((await h.caseGet(h.as('cs_lead'), caseId)).body.status).toBe('OPEN');
     expect((await h.caseGet(h.as('cs_lead'), caseId)).body.version).toBe(before.body.version);
+  });
+
+  test('IR-04 APPEAL 건은 일반 PATCH로 닫지 못하고 cs_lead 결정 경로만 쓴다', async () => {
+    const r = await approvedRestriction(h, { accountId: randomUUID() });
+    h.copies.length = 0;
+    const fx = source({ accountId: r.accountId, targetId: r.restrictionId });
+    const caseId = await openAppeal(fx);
+    const c = await h.caseGet(h.as('cs_lead'), caseId);
+    for (const role of ['cs_agent', 'cs_lead'] as const) {
+      const patch = await h.svc.http.inject({
+        method: 'PATCH',
+        url: `/v1/ops/cases/${caseId}`,
+        headers: { ...h.as(role), 'content-type': 'application/json', 'if-match': `"${c.body.version}"` },
+        payload: JSON.stringify({ status: 'RESOLVED', resultNote: '일반 PATCH로 닫기' }),
+      });
+      expect([role, patch.statusCode, problemType(JSON.parse(patch.payload) as Record<string, unknown>)]).toEqual([role, 409, 'case-action-not-applicable']);
+    }
+    expect((await h.caseGet(h.as('cs_lead'), caseId)).body.status).toBe('OPEN');
+    expect(h.holds.at(-1)).toMatchObject({ kind: 'APPEAL', state: 'OPEN' });
+    expect(h.results).toEqual([]);
   });
 
   test('ASVS v5.0.0-16.3.2 소명 결정은 감사에 남고 소명 본문은 감사에 실리지 않는다', async () => {

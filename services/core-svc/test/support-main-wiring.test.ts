@@ -65,4 +65,11 @@ describe('TR-16 main.ts 조립', () => {
     expect(main).toMatch(/support:\s*supportPorts/);
     expect(main).toMatch(/PEAKET_OPS_HTTP_URL|supportPortsFromEnv/);
   });
+
+  test('IR-03 main.ts가 FRAUD_CASE 소명 보내기 작업(AppealDispatchJob)을 시작하고 종료 때 멈춘다', () => {
+    const main = readFileSync(join(process.cwd(), 'src', 'main.ts'), 'utf8');
+    expect(main).toMatch(/AppealDispatchJob/);
+    expect(main).toMatch(/appealDispatch\.start\(\)/);
+    expect(main).toMatch(/appealDispatch\.stop\(\)/);
+  });
 });

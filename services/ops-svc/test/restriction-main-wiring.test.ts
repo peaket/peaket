@@ -2,7 +2,7 @@
 // ① restrictionPortsFromEnv(env): staging·prod는 네 주소가 없으면 그 이름을 말하며 던지고, local·ci·demo는 칸이 빈다.
 // ② main.ts를 실제로 읽어 띄우고(바깥 연결만 가짜) 그 포트가 AppModule.register의 restrictions로 넘어가는지 본다.
 // 정본: 계획 §3·§4.4·§6, docs/architecture.md §8.6 4 '시작 조립'.
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
@@ -164,5 +164,12 @@ describe('TR-16 main.ts 조립', () => {
     const r = seen.register?.restrictions as Record<string, Record<string, unknown> | undefined> | undefined;
     expect([typeof r?.copies?.queue, typeof r?.copies?.purchase, typeof r?.copies?.view, typeof r?.appeals?.read, typeof r?.fraudCases?.investigatorOf, typeof r?.notifier?.send, typeof r?.holds?.set]).toEqual(['function', 'function', 'function', 'function', 'function', 'function', 'function']);
     expect(seen.register?.background).not.toBe(false);
+  });
+
+  test('IR-02 main.ts가 10분 정비·다시 보내기 작업(RestrictionMaintenanceJob)을 시작하고 종료 때 멈춘다', () => {
+    const main = readFileSync(join(process.cwd(), 'src', 'main.ts'), 'utf8');
+    expect(main).toMatch(/RestrictionMaintenanceJob/);
+    expect(main).toMatch(/restrictionMaintenance\.start\(\)/);
+    expect(main).toMatch(/restrictionMaintenance\.stop\(\)/);
   });
 });

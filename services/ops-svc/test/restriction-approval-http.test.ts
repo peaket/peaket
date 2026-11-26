@@ -131,6 +131,10 @@ describe('집행 실패·재시도·기한', () => {
     const cases = (await h.cs.store.list({ statuses: ['OPEN'], limit: 100 })).filter((c) => c.kind === 'APPROVAL_EXECUTION_FAILED' && c.category === 'BOOKING_RESTRICTION');
     expect(cases).toHaveLength(1);
     expect(cases[0]!.targetRef).toBe(approvalId);
+    // IR-16: FAILED라도 처리 기한이 지났으면 다시 실행하지 않는다
+    const failedRow = await h.get(h.as('cs_lead'), approvalId);
+    const retry = await h.approve(h.as('cs_lead'), approvalId, Number(failedRow.body.version));
+    expect([retry.status, problemType(retry.body)]).toEqual([409, 'approval-expired']);
   });
 });
 

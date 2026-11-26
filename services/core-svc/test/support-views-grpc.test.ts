@@ -182,6 +182,27 @@ describe('FraudAppealViewService', () => {
     expect(stored!.lockExpiresAtMs).toBe(NOW_MS + 14 * 86_400_000);
   });
 
+  test('IR-09 PAYER 사본의 취소 표·제한 끝이 GET /v1/fraud-appeal-requests의 actionResult에 실린다', async () => {
+    const accountId = '0194f064-0000-7000-8000-000000000020';
+    const caseId = '0194f064-0000-7000-8000-000000000120';
+    const cancelled = '0194f064-0000-7000-8000-000000000220';
+    const restrictedUntil = NOW_MS + 365 * 86_400_000;
+    const req = {
+      account_id: accountId,
+      case_id: caseId,
+      event_id: '0194f064-0000-7000-8000-000000000320',
+      due_at: ts(NOW_MS + 86_400_000),
+      state: 'FRAUD_APPEAL_VIEW_STATE_ACCEPTED',
+      version: 4,
+      party: 'PAYER',
+      cancelled_ticket_ids: [cancelled],
+      restricted_until: ts(restrictedUntil),
+    };
+    expect(await call(fraud, 'SetFraudAppealView', req)).toEqual({ changed: true });
+    const page = await current!.fraudAppeals(current!.fanHeaders(accountId));
+    expect((page.body.items as Array<Record<string, unknown>>)[0]).toMatchObject({ caseId, actionResult: { cancelledTicketIds: [cancelled], restrictedUntil: new Date(restrictedUntil).toISOString() } });
+  });
+
   test('ASVS v5.0.0-2.3.4·8.3.1 판이 작으면 false, 내부 토큰·호출자가 틀리면 모두 PERMISSION_DENIED다', async () => {
     const accountId = '0194f064-0000-7000-8000-000000000018';
     const caseId = '0194f064-0000-7000-8000-000000000118';
