@@ -52,13 +52,14 @@ const EVENT = id(0x200);
 const EVENT_BULK = id(0x210);
 const EVENT_COMPLAINT = id(0x220);
 const EVENT_NO_POST = id(0x221);
+const EVENT_DISPOSE = id(0x222);
 const CLUSTER = id(0x300);
 const CASE = id(0x400);
 const REQUEST = id(0x700);
 
 const schedule: SaleScheduleSource = {
   get: async (eventId: string) =>
-    eventId === EVENT || eventId === EVENT_COMPLAINT || eventId === EVENT_NO_POST
+    eventId === EVENT || eventId === EVENT_COMPLAINT || eventId === EVENT_NO_POST || eventId === EVENT_DISPOSE
       ? { opensAtMs: SHOW - 7 * DAY, saleEndsAtMs: SALE_ENDS, entryOpensAtMs: ENTRY, entryClosedAtMs: ENTRY + 3 * HOUR }
       : undefined,
 };
@@ -76,6 +77,7 @@ class EvidenceStoreFake {
   readonly idem = new Map<string, any>();
   forcedExportCount: number | null = null;
   failNextPutBundle = false;
+  failNextCustody = false;
 
   constructor(private readonly cases: MemoryInvestigationStore) {}
 
@@ -111,6 +113,25 @@ class EvidenceStoreFake {
     this.bundles.set(b.bundleId, { ...b, files: [...(b.files ?? [])] });
     return true;
   }
+  /** 묶음 갱신과 관리 연속성 행 추가를 한 단위로 본다(IR-06). 실패를 주입하면 둘 다 바뀌지 않는다. */
+  async updateBundleWithCustody(b: any, c: any, expectedStatus?: readonly string[], o: any = {}) {
+    const cur = this.bundles.get(b.bundleId);
+    if (!cur) return false;
+    if (expectedStatus && !expectedStatus.includes(cur.status)) return false;
+    if (o.idem) {
+      const key = `${o.idem.accountRef}:${o.idem.operation}:${o.idem.key}`;
+      if (this.idem.has(key)) return true;
+    }
+    if (this.failNextCustody) {
+      this.failNextCustody = false;
+      throw new Error('custody append failed');
+    }
+    const row = this.#row(b.bundleId, c);
+    this.bundles.set(b.bundleId, { ...b, files: [...(b.files ?? [])] });
+    (this.custody.get(b.bundleId) ?? this.custody.set(b.bundleId, []).get(b.bundleId)!).push(row);
+    if (o.idem) this.idem.set(`${o.idem.accountRef}:${o.idem.operation}:${o.idem.key}`, o.result ?? b);
+    return true;
+  }
   async appendCustody(bundleId: string, c: any) {
     const rows = this.custody.get(bundleId) ?? [];
     const row = this.#row(bundleId, c);
@@ -128,7 +149,12 @@ class EvidenceStoreFake {
     const domain = investigationsModule as unknown as Record<string, any>;
     return [...this.bundles.values()].filter((b) => b.status === 'SEALED' && domain.disposeAfterMs({ createdAtMs: b.createdAtMs, holdReason: b.holdReason, holdEndedAtMs: b.holdEndedAtMs }) <= nowMs);
   }
-  async putExport(e: any) {
+  async putExport(e: any, _c?: any, o: any = {}) {
+    if (o.idem) {
+      const key = `${o.idem.accountRef}:${o.idem.operation}:${o.idem.key}`;
+      if (this.idem.has(key)) return;
+      this.idem.set(key, o.result ?? e);
+    }
     this.exports.push({ ...e });
   }
   async exportCountSince(actorId: string, sinceMs: number) {
@@ -300,6 +326,7 @@ class CapturesFake {
   }
   async dispose(prefix: string) {
     for (const key of [...this.quarantine.keys()]) if (key.startsWith(prefix)) this.quarantine.delete(key);
+    for (const key of [...this.evidence.keys()]) if (key.startsWith(prefix)) this.evidence.delete(key);
   }
 }
 
@@ -358,6 +385,8 @@ class FakeAccess implements InvestigationAccessLog {
 const alerts: any[] = [];
 const labels: any[] = [];
 const copies: any[] = [];
+const auditEvents: any[] = [];
+const disposer = { calls: [] as string[], async dispose(prefix: string) { this.calls.push(prefix); } };
 const audit = new MemoryAuditChain();
 const cases = new MemoryInvestigationStore((r) => audit.append(r));
 const evidenceStore = new EvidenceStoreFake(cases);
@@ -383,7 +412,7 @@ const kit = reauthKit(() => clock.now());
 
 const eventInfo = {
   get: async (eventId: string) =>
-    eventId === EVENT || eventId === EVENT_COMPLAINT || eventId === EVENT_NO_POST
+    eventId === EVENT || eventId === EVENT_COMPLAINT || eventId === EVENT_NO_POST || eventId === EVENT_DISPOSE
       ? { eventName: '겨울 콘서트', showAtMs: SHOW, salesOpenedAtMs: SHOW - 7 * DAY }
       : eventId === EVENT_BULK
         ? { eventName: '대량 콘서트', showAtMs: SHOW, salesOpenedAtMs: SHOW - 7 * DAY }
@@ -402,6 +431,7 @@ const cancellations = {
   },
 };
 let priorityResults: ('SAME_SEAT' | 'SAME_TIER' | 'NO_SEAT' | 'ENTRY_STARTED')[] = [];
+let priorityOmitTicketId = false;
 const priorityCalls: any[] = [];
 const priority = {
   async run(i: any) {
@@ -411,8 +441,8 @@ const priority = {
       grants: i.cancelledTicketIds.map((ticketId: string, n: number) => {
         const result = priorityResults[n] ?? 'SAME_SEAT';
         return result === 'NO_SEAT' || result === 'ENTRY_STARTED'
-          ? { ticketId, result }
-          : { ticketId, result, grantId: randomUUID(), seatId: randomUUID(), price: 100_000, fee: 0, expiresAt: iso(clock.now() + 48 * HOUR), version: 1 };
+          ? { ...(priorityOmitTicketId ? {} : { ticketId }), result }
+          : { ...(priorityOmitTicketId ? {} : { ticketId }), result, grantId: randomUUID(), seatId: randomUUID(), price: 100_000, fee: 0, expiresAt: iso(clock.now() + 48 * HOUR), version: 1 };
       }),
     };
   },
@@ -474,6 +504,8 @@ const investigationDeps: any = {
     access,
     now: () => clock.now(),
     reauth: kit.verifier,
+    audit: { append: async (i: any) => void auditEvents.push(i) },
+    disposer,
   },
 };
 
@@ -632,10 +664,14 @@ beforeEach(() => {
   dataRequests.statuses.clear();
   priorityResults = [];
   priorityCalls.length = 0;
+  priorityOmitTicketId = false;
   compensation.calls.length = 0;
   holderNotices.length = 0;
+  auditEvents.length = 0;
+  disposer.calls.length = 0;
   evidenceStore.forcedExportCount = null;
   evidenceStore.failNextPutBundle = false;
+  evidenceStore.failNextCustody = false;
   objects.nextPutResult = null;
   objects.disposeCalls.length = 0;
   alerts.length = 0;
@@ -692,7 +728,7 @@ describe('F-04-14 HTTP', () => {
 
   test('FX-T13 ⑤ [ASVS v5.0.0-11.1.2] 묶음을 만들고 봉인하면 파일 목록·manifest_sha256이 정해지고 같은 파일을 다시 써도 같다', async () => {
     const who = investigator();
-    const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(1), { actionNotifiedAtMs: NOW - DAY })] });
+    const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', investigatorOpinion: '연락처 010-1111-2222 IP 127.0.0.1', members: [memberOf(A(1), { actionNotifiedAtMs: NOW - DAY })] });
     const created = await createBundle(c.caseId, who);
     expect(created.statusCode, created.payload).toBe(201);
     const bundleId = String(json(created).bundleId);
@@ -719,6 +755,10 @@ describe('F-04-14 HTTP', () => {
     const manifestJson = JSON.parse(Buffer.from(manifestBytes).toString('utf8'));
     expect(manifestJson.files).toHaveLength(b.files.length - 1);
     expect(Buffer.from(manifestBytes).toString('utf8')).toBe(canonicalize(manifestJson));
+    const caseBytes = Buffer.from(objects.objects.get(`${b.s3Prefix}case.json`)!.bytes).toString('utf8');
+    expect(caseBytes).not.toContain('010-1111-2222');
+    expect(caseBytes).not.toContain('127.0.0.1');
+    expect(caseBytes).not.toContain('investigatorOpinion');
 
     // 제품 build가 DIFFERENT를 만나면 봉인하지 않고, 다음 시도에서 정상 봉인한다.
     const d = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(1), { actionNotifiedAtMs: NOW - DAY })] });
@@ -786,7 +826,8 @@ describe('F-04-14 HTTP', () => {
     expect(objects.disposeCalls).toHaveLength(0);
     clock.advance(1);
     expect(await evidence().disposeDue(clock.now())).toBe(1);
-    expect(objects.disposeCalls).toContain(b.s3Prefix);
+    expect(disposer.calls).toContain(b.s3Prefix);
+    expect(objects.disposeCalls).toHaveLength(0);
     const custody = await evidenceStore.listCustody(bundleId);
     expect(custody.at(-1)).toMatchObject({ action: 'DISPOSED', actorId: null });
     expect(custody.at(-1).reason).toBeTruthy();
@@ -838,7 +879,8 @@ describe('F-04-14 HTTP', () => {
     expect(custody.filter((r: any) => r.action === 'HOLD_CHANGED')).toHaveLength(1);
     expect(custody.at(-1)).toMatchObject({ action: 'HOLD_CHANGED', reason: '민사 소송 접수 2026-1234' });
     const again = await holdChange(bundleId, who, { holdReason: 'INVESTIGATION', basis: '수사 착수 2026-11-27' });
-    expect(again.statusCode).toBe(409);
+    expect(again.statusCode).toBe(412);
+    expect(typeOf(again)).toBe('precondition-failed');
     expect(evidenceStore.bundles.get(bundleId)!.holdReason).toBe('DISPUTE');
     expect((await evidenceStore.listCustody(bundleId)).filter((r: any) => r.action === 'HOLD_CHANGED')).toHaveLength(1);
   });
@@ -886,6 +928,8 @@ describe('F-04-14 HTTP', () => {
     const ok = await send('POST', '/v1/ops/external-posts', who, { idem: randomUUID(), multipart: multipart({ fields, files: [{ field: 'capture', name: 'capture.png', type: 'image/png', bytes: png }] }) });
     expect(ok.statusCode, ok.payload).toBe(201);
     expect(json(ok).scanStatus).toBe('PENDING');
+    expect(access.records.at(-1)).toMatchObject({ action: 'EXTERNAL_POST', eventId: EVENT, outcome: 'ALLOWED' });
+    expect(access.records.at(-1).detail).toMatchObject({ operation: 'REGISTER' });
     const pdf = await send('POST', '/v1/ops/external-posts', who, { idem: randomUUID(), multipart: multipart({ fields: { ...fields, url: 'https://example.com/post/2' }, files: [{ field: 'capture', name: 'capture.pdf', type: 'application/pdf', bytes: makePdf() }] }) });
     expect(pdf.statusCode, pdf.payload).toBe(201);
     const wrongMagic = await send('POST', '/v1/ops/external-posts', who, { idem: randomUUID(), multipart: multipart({ fields: { ...fields, url: 'https://example.com/post/3' }, files: [{ field: 'capture', name: 'capture.png', type: 'image/png', bytes: Buffer.from('not a png') }] }) });
@@ -912,6 +956,7 @@ describe('F-04-14 HTTP', () => {
     expect(view.statusCode, view.payload).toBe(200);
     expect(view.headers['cache-control']).toBe('no-store');
     expect(view.headers['content-type']).toContain('image/png');
+    expect(access.records.some((r) => r.action === 'EXTERNAL_POST' && r.detail?.operation === 'VIEW')).toBe(true);
     const img = readPng(view.rawPayload ?? Buffer.from(view.payload, 'binary'));
     expect(img.chunks).not.toContain('tEXt');
     expect(pixelAt(img, 1, 1).slice(0, 3)).toEqual([0, 0, 0]);
@@ -1090,6 +1135,8 @@ describe('F-04-14 HTTP', () => {
     const bundleId = String(json(created).bundleId);
     await evidence().buildDue(clock.now());
     const sealed = json(await getBundle(bundleId, who));
+    expect(objects.objects.has(`${sealed.s3Prefix}posts/${json(post).postId}/original.png`)).toBe(true);
+    expect(sealed.files.map((f: any) => f.name)).toEqual(expect.arrayContaining([`posts/${json(post).postId}/original.png`]));
     const out = await exportBundle(bundleId, who, { kind: 'COMPLAINT', reason: '고소장' });
     expect(out.statusCode, out.payload).toBe(200);
     expect(out.headers['cache-control']).toBe('no-store');
@@ -1141,6 +1188,7 @@ describe('F-04-14 HTTP', () => {
     const limited = await exportBundle(bundleId, who, { kind: 'PROMOTER', reason: '스무 번째' });
     expect(limited.statusCode).toBe(429);
     expect(typeOf(limited)).toBe('export-rate-limited');
+    expect(access.records.at(-1)).toMatchObject({ action: 'EVIDENCE_EXPORT', outcome: 'DENIED' });
   });
 
   test('FX-T20 ⑨ 1만 건 넘는 내보내기는 접속기록에 bulk:true, 하루 5건 넘으면 INV_EXPORT_VOLUME 표시다', async () => {
@@ -1242,6 +1290,7 @@ describe('F-04-14 HTTP', () => {
     activeRestrictions.set(c.caseId, [{ accountId: A(66), caseId: c.caseId, restrictionId: id(0x951), untilMs: NOW + 30 * DAY, version: 1 }]);
     await send('POST', `/internal/v1/fraud-cases/${c.caseId}/appeals`, {}, { body: { appealId: randomUUID(), accountId: A(66), party: 'PAYER', submittedAt: iso(NOW) } });
     priorityResults = ['SAME_SEAT', 'SAME_TIER', 'NO_SEAT', 'ENTRY_STARTED'];
+    priorityOmitTicketId = true;
     const current = json(await getCase(c.caseId, who));
     const patch = await send('PATCH', `/v1/ops/fraud-cases/${c.caseId}`, who, { ifMatch: `"${current.version}"`, body: { objectionDecisions: [{ accountId: A(66), decision: 'ACCEPTED', reason: '가족' }] } });
     expect(patch.statusCode, patch.payload).toBe(200);
@@ -1290,5 +1339,115 @@ describe('F-04-14 HTTP', () => {
     clock.advance(14 * DAY);
     await fraudActions.expireDue(clock.now());
     expect(copies.some((x) => x.caseId === expiredCase.caseId && x.accountId === A(68) && x.lockActive === false)).toBe(true);
+  });
+
+  test('IR-01 증거·외부 게시물 경로는 FRAUD_INVESTIGATOR 지정을 요구한다', async () => {
+    const who = investigator();
+    const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(69), { actionNotifiedAtMs: NOW - DAY })] });
+    const created = await createBundle(c.caseId, who);
+    const bundleId = String(json(created).bundleId);
+    await evidence().buildDue(clock.now());
+    for (const role of ['viewer', 'operator', 'cs_agent'] as const) {
+      const other = identity.ops(role);
+      expect((await getBundle(bundleId, other)).statusCode, role).toBe(403);
+      expect((await listBundles(other)).statusCode, role).toBe(403);
+      expect((await exportBundle(bundleId, other, { kind: 'COMPLAINT', reason: '고소' })).statusCode, role).toBe(403);
+      expect((await send('GET', `/v1/ops/external-posts?eventId=${EVENT}`, other)).statusCode, role).toBe(403);
+    }
+  });
+
+  test('IR-02 보존 변경·내보내기는 같은 멱등 키를 재생하고 두 번 적용하지 않는다', async () => {
+    const who = investigator();
+    const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(70), { actionNotifiedAtMs: NOW - DAY })] });
+    const created = await createBundle(c.caseId, who);
+    const bundleId = String(json(created).bundleId);
+    await evidence().buildDue(clock.now());
+    const holdKey = randomUUID();
+    const first = await holdChange(bundleId, who, { holdReason: 'DISPUTE', basis: '민사 소송 접수 2026-3001' }, holdKey);
+    expect(first.statusCode, first.payload).toBe(200);
+    const second = await holdChange(bundleId, who, { holdReason: 'DISPUTE', basis: '민사 소송 접수 2026-3001' }, holdKey);
+    expect(second.statusCode, second.payload).toBe(200);
+    expect((await evidenceStore.listCustody(bundleId)).filter((r: any) => r.action === 'HOLD_CHANGED')).toHaveLength(1);
+    const exportKey = randomUUID();
+    const beforeExports = evidenceStore.exports.filter((e: any) => e.kind === 'COMPLAINT').length;
+    const e1 = await exportBundle(bundleId, who, { kind: 'COMPLAINT', reason: '고소' }, exportKey);
+    expect(e1.statusCode, e1.payload).toBe(200);
+    const e2 = await exportBundle(bundleId, who, { kind: 'COMPLAINT', reason: '고소' }, exportKey);
+    expect(e2.statusCode, e2.payload).toBe(200);
+    expect(evidenceStore.exports.filter((e: any) => e.kind === 'COMPLAINT')).toHaveLength(beforeExports + 1);
+  });
+
+  test('IR-03 봉인 묶음은 외부 게시물 원본 캡처와 메타데이터를 함께 담는다', async () => {
+    const who = investigator();
+    const c = await seedCase({ eventId: EVENT_COMPLAINT, status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(71), { actionNotifiedAtMs: NOW - DAY })] });
+    const post = await send('POST', '/v1/ops/external-posts', who, { idem: randomUUID(), multipart: multipart({ fields: { eventId: EVENT_COMPLAINT, url: 'https://example.com/post/bundle-original', capturedAt: iso(NOW), source: 'MANUAL' }, files: [{ field: 'capture', name: 'capture.png', type: 'image/png', bytes: makePng({ width: 2, height: 2 }) }] }) });
+    expect(post.statusCode, post.payload).toBe(201);
+    scanner.results = ['CLEAN'];
+    await external().scanDue(clock.now());
+    const bundleId = String(json(await createBundle(c.caseId, who)).bundleId);
+    await evidence().buildDue(clock.now());
+    const b = json(await getBundle(bundleId, who));
+    const prefix = `${b.s3Prefix}posts/${json(post).postId}/`;
+    expect(objects.objects.has(`${prefix}original.png`)).toBe(true);
+    expect(b.files.map((f: any) => f.name)).toEqual(expect.arrayContaining([`posts/${json(post).postId}/original.png`, `posts/${json(post).postId}.json`]));
+  });
+
+  test('IR-04 외부 게시물 파기는 공연일 + 30일이고 매칭된 게시물은 지우지 않는다', async () => {
+    const who = investigator();
+    for (const [id] of evidenceStore.posts) evidenceStore.posts.delete(id);
+    const png = makePng({ width: 2, height: 2 });
+    const unmatched = await send('POST', '/v1/ops/external-posts', who, { idem: randomUUID(), multipart: multipart({ fields: { eventId: EVENT_DISPOSE, url: 'https://example.com/post/dispose-1', capturedAt: iso(NOW), source: 'MANUAL' }, files: [{ field: 'capture', name: 'capture.png', type: 'image/png', bytes: png }] }) });
+    seats.map.set('B구역 2열 2번', [{ ticketId: T(71), accountId: A(71), seatLabel: 'B구역 2열 2번' }]);
+    const matched = await send('POST', '/v1/ops/external-posts', who, { idem: randomUUID(), multipart: multipart({ fields: { eventId: EVENT_DISPOSE, url: 'https://example.com/post/dispose-2', capturedAt: iso(NOW), source: 'MANUAL', claimedSeats: 'B구역 2열 2번' }, files: [{ field: 'capture', name: 'capture.png', type: 'image/png', bytes: png }] }) });
+    expect(unmatched.statusCode).toBe(201);
+    expect(matched.statusCode).toBe(201);
+    scanner.results = ['CLEAN', 'CLEAN'];
+    await external().scanDue(clock.now());
+    clock.advance(SHOW + 30 * DAY - HOUR - clock.now());
+    expect(await external().disposeDue(clock.now())).toBe(0);
+    clock.advance(HOUR);
+    expect(await external().disposeDue(clock.now())).toBe(1);
+    expect(captures.evidence.has(`captures/${json(unmatched).postId}/original.png`)).toBe(false);
+    expect(captures.evidence.has(`captures/${json(matched).postId}/original.png`)).toBe(true);
+  });
+
+  test('IR-06 묶음 갱신과 관리 연속성 추가는 한 단위라 실패하면 둘 다 남지 않는다', async () => {
+    const who = investigator();
+    const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(72), { actionNotifiedAtMs: NOW - DAY })] });
+    const bundleId = String(json(await createBundle(c.caseId, who)).bundleId);
+    await evidence().buildDue(clock.now());
+    evidenceStore.failNextCustody = true;
+    const failed = await holdChange(bundleId, who, { holdReason: 'DISPUTE', basis: '민사 소송 접수 2026-3002' });
+    expect(failed.statusCode).toBe(500);
+    expect(evidenceStore.bundles.get(bundleId)!.holdReason).toBe('OBJECTION');
+    expect((await evidenceStore.listCustody(bundleId)).filter((r: any) => r.action === 'HOLD_CHANGED')).toHaveLength(0);
+  });
+
+  test('IR-08 증거 만들기·봉인·열람·내보내기는 관제 감사 기록에 남고 SEALED 행은 목록 해시를 앵커로 남긴다', async () => {
+    const who = investigator();
+    const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(73), { actionNotifiedAtMs: NOW - DAY })] });
+    const bundleId = String(json(await createBundle(c.caseId, who)).bundleId);
+    await evidence().buildDue(clock.now());
+    const b = json(await getBundle(bundleId, who));
+    await exportBundle(bundleId, who, { kind: 'COMPLAINT', reason: '고소' });
+    const sealed = (await evidenceStore.listCustody(bundleId)).find((r: any) => r.action === 'SEALED');
+    expect(sealed.reason).toContain(b.manifestSha256);
+    expect(auditEvents.some((r) => String(r.payload?.action ?? '').startsWith('EVIDENCE_'))).toBe(true);
+  });
+
+  test('IR-19 이의 결정자는 그 결정을 내린 사람으로 남고 뒤 결정이 앞 결정자를 덮지 않는다', async () => {
+    const firstWho = investigator();
+    const secondWho = investigator();
+    const c = await seedCase({ status: 'ACTIONED', outcomeLabel: 'BOT', members: [memberOf(A(74), { actionNotifiedAtMs: NOW - DAY, appealResult: 'REJECTED' }), memberOf(A(75), { actionNotifiedAtMs: NOW - DAY, appealResult: 'REJECTED' })] });
+    await send('POST', `/internal/v1/fraud-cases/${c.caseId}/appeals`, {}, { body: { appealId: randomUUID(), accountId: A(74), party: 'PAYER', submittedAt: iso(NOW) } });
+    await send('POST', `/internal/v1/fraud-cases/${c.caseId}/appeals`, {}, { body: { appealId: randomUUID(), accountId: A(75), party: 'PAYER', submittedAt: iso(NOW) } });
+    const current = json(await getCase(c.caseId, firstWho));
+    expect((await send('PATCH', `/v1/ops/fraud-cases/${c.caseId}`, firstWho, { ifMatch: `"${current.version}"`, body: { objectionDecisions: [{ accountId: A(74), decision: 'ACCEPTED', reason: '오인' }] } })).statusCode).toBe(200);
+    const before = json(await getCase(c.caseId, firstWho));
+    expect((await send('PATCH', `/v1/ops/fraud-cases/${c.caseId}`, secondWho, { ifMatch: `"${before.version}"`, body: { objectionDecisions: [{ accountId: A(75), decision: 'REJECTED', reason: '근거 유지' }] } })).statusCode).toBe(200);
+    const after = json(await getCase(c.caseId, secondWho));
+    const decided = after.events.filter((e: any) => e.kind === 'OBJECTION_DECIDED');
+    expect(decided.find((e: any) => e.detail?.accountId === A(74)).actorId).toBe(firstWho['x-user-id']);
+    expect(decided.find((e: any) => e.detail?.accountId === A(75)).actorId).toBe(secondWho['x-user-id']);
   });
 });

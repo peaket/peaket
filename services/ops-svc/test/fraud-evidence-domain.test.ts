@@ -244,6 +244,17 @@ describe('F-04-14 도메인', () => {
     ]);
     expect(ev.objectionCompensationOf([{ ticketId: T(1), result: 'SAME_SEAT' }])).toEqual([]);
   });
+
+  test('IR-12 기획사 CSV는 사건 기록에서 제한 조치·정가 재판매 수를 센다', () => {
+    const events = Array.from({ length: 5 }, (_, n) => ({ kind: 'ACTION_EXECUTED', detail: { action: 'RESTRICT', results: [{ ticketId: T(200 + n), outcome: 'ACCEPTED' }], targets: [{ ticketId: T(200 + n), payerAccountId: A(200 + n) }] } }));
+    const csv = ev.promoterCsv({ eventName: '집계', cases: [{ caseId: id(0x560), reasonCategory: 'MACRO_BOT', status: 'ACTIONED', events } as any] });
+    expect(csv).toMatch(/restrict_action_count,5/);
+    expect(csv).toMatch(/resold_at_face_value_count,5/);
+  });
+
+  test('IR-16 보기용 사본은 sharp 화소 상한을 넘는 입력을 거절한다', async () => {
+    await expect(ev.maskCapture({ bytes: makePngHeader(20_001, 1), mediaType: 'image/png', regions: [] })).rejects.toMatchObject({ status: 422 });
+  });
 });
 
 function isoOf(ms: number): string {
