@@ -21,10 +21,17 @@ export type ProblemType =
   | 'already-waiting'
   | 'anchor-unavailable'
   | 'approval-conflict'
+  | 'approval-evidence-required'
+  | 'approval-expired'
+  | 'approval-kind-not-allowed'
+  | 'approval-not-pending'
   | 'approval-reason-required'
+  | 'approval-refund-amount-mismatch'
+  | 'approval-refund-conflict'
   | 'approval-role-required'
   | 'approval-scope-invalid'
   | 'approval-self-not-allowed'
+  | 'approval-target-changed'
   | 'approver-ineligible'
   | 'artist-exists'
   | 'assignment-required'
@@ -178,6 +185,10 @@ export type ProblemType =
   | 'merge-check-unavailable'
   | 'merge-invariant-violated'
   | 'merge-proposal-not-found'
+  | 'minor-contract-ci-mismatch'
+  | 'minor-contract-entry-started'
+  | 'minor-contract-mixed-orders'
+  | 'minor-contract-not-owner'
   | 'new-payment-paused'
   | 'next-invalid'
   | 'nickname-check-limited'
@@ -221,7 +232,9 @@ export type ProblemType =
   | 'payout-batch-empty'
   | 'payout-batch-exists'
   | 'payout-batch-not-approved'
+  | 'payout-batch-not-expellable'
   | 'payout-batch-not-portone'
+  | 'payout-batch-payee-mismatch'
   | 'payout-batch-statement-conflict'
   | 'payout-dependency-unavailable'
   | 'payout-gateway-unavailable'
@@ -291,6 +304,7 @@ export type ProblemType =
   | 'reauth-unavailable'
   | 'recalculation-conflict'
   | 'recipient-not-found'
+  | 'reclaim-appeal-window'
   | 'recommended-reason-required'
   | 'refresh-token-invalid'
   | 'refund-account-required'
@@ -431,10 +445,17 @@ export const PROBLEM_TYPES = {
   'already-waiting': { status: 409, title: "이미 다른 곳에서 대기 중입니다" },
   'anchor-unavailable': { status: 503, title: "외부 앵커를 지금 쓸 수 없습니다" },
   'approval-conflict': { status: 409, title: "다른 사람이 먼저 처리했습니다" },
+  'approval-evidence-required': { status: 422, title: "증빙 확인 사실이 필요합니다" },
+  'approval-expired': { status: 409, title: "승인 기한이 지났습니다" },
+  'approval-kind-not-allowed': { status: 422, title: "이 경로로 만들 수 없는 승인 종류입니다" },
+  'approval-not-pending': { status: 409, title: "승인 대기 중인 업무가 아닙니다" },
   'approval-reason-required': { status: 422, title: "승인 사유를 적어 주세요" },
+  'approval-refund-amount-mismatch': { status: 422, title: "승인 금액과 환급 금액이 다릅니다" },
+  'approval-refund-conflict': { status: 409, title: "같은 승인 ID에 다른 환급 요청이 왔습니다" },
   'approval-role-required': { status: 403, title: "commander만 승인할 수 있습니다" },
   'approval-scope-invalid': { status: 422, title: "요청 범위 밖의 대상입니다" },
   'approval-self-not-allowed': { status: 403, title: "요청자는 승인할 수 없습니다" },
+  'approval-target-changed': { status: 409, title: "대상이 바뀌어 승인할 수 없습니다" },
   'approver-ineligible': { status: 403, title: "판정자는 확정할 수 없습니다" },
   'artist-exists': { status: 409, title: "같은 이름의 아티스트가 있습니다" },
   'assignment-required': { status: 422, title: "승인할 배정을 하나 골라 주세요" },
@@ -588,6 +609,10 @@ export const PROBLEM_TYPES = {
   'merge-check-unavailable': { status: 503, title: "잠시 뒤 다시 시도해 주세요" },
   'merge-invariant-violated': { status: 409, title: "지금은 두 계정을 합칠 수 없습니다. 고객센터로 문의해 주세요" },
   'merge-proposal-not-found': { status: 404, title: "병합 제안이 없거나 시간이 지났습니다" },
+  'minor-contract-ci-mismatch': { status: 409, title: "본인확인 결과가 계정의 연계정보와 다릅니다" },
+  'minor-contract-entry-started': { status: 409, title: "입장이 시작되어 미성년자 계약 취소를 할 수 없습니다" },
+  'minor-contract-mixed-orders': { status: 422, title: "미성년자 주문과 아닌 주문이 섞여 있습니다" },
+  'minor-contract-not-owner': { status: 409, title: "내 주문이 아닙니다" },
   'new-payment-paused': { status: 503, title: "새 결제를 잠시 멈췄습니다" },
   'next-invalid': { status: 400, title: "돌아갈 주소가 같은 출처 경로가 아닙니다" },
   'nickname-check-limited': { status: 429, title: "닉네임 확인을 너무 많이 했습니다. 잠시 뒤 다시 시도해 주세요" },
@@ -631,7 +656,9 @@ export const PROBLEM_TYPES = {
   'payout-batch-empty': { status: 409, title: "지급할 확정 정산서가 없습니다" },
   'payout-batch-exists': { status: 409, title: "이미 지급 묶음이 있습니다" },
   'payout-batch-not-approved': { status: 409, title: "승인된 지급 묶음이 아닙니다" },
+  'payout-batch-not-expellable': { status: 409, title: "만료할 수 없는 지급 묶음입니다" },
   'payout-batch-not-portone': { status: 409, title: "포트원 지급 묶음이 아닙니다" },
+  'payout-batch-payee-mismatch': { status: 409, title: "지급 대상이 바뀌었습니다" },
   'payout-batch-statement-conflict': { status: 409, title: "확정 정산서가 아닌 건이 지급 묶음에 섞였습니다" },
   'payout-dependency-unavailable': { status: 503, title: "지급 서비스에 연결하지 못했습니다" },
   'payout-gateway-unavailable': { status: 503, title: "지급대행을 아직 시작할 수 없습니다" },
@@ -701,6 +728,7 @@ export const PROBLEM_TYPES = {
   'reauth-unavailable': { status: 503, title: "재인증 검증기를 쓸 수 없습니다" },
   'recalculation-conflict': { status: 409, title: "같은 요청 ID로 다른 회차·종류의 다시 계산이 있습니다" },
   'recipient-not-found': { status: 404, title: "받을 수 있는 회원을 찾지 못했습니다" },
+  'reclaim-appeal-window': { status: 409, title: "받은 분의 소명 기한이 지나지 않았습니다" },
   'recommended-reason-required': { status: 422, title: "실패한 권고 항목의 사유를 적어 주세요" },
   'refresh-token-invalid': { status: 401, title: "다시 로그인해 주세요" },
   'refund-account-required': { status: 422, title: "환불받을 계좌를 입력해 주세요" },

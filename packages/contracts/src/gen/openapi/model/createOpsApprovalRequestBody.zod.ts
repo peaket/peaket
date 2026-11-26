@@ -11,9 +11,13 @@
  */
 import * as zod from 'zod';
 
+export const createOpsApprovalRequestBodyRelatedOrderIdsMax = 20;
+
+
 export const CreateOpsApprovalRequestBody = zod.object({
   "kind": zod.enum(['SYSTEM_FAULT_REFUND', 'DISCRETIONARY_WAIVER', 'TRANSFER_RECLAIM', 'BOOKING_RESTRICTION', 'PAYOUT_BATCH', 'SETTLEMENT_ADJUSTMENT', 'COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE', 'MINOR_CONTRACT_CANCEL', 'SALE_SUSPENSION', 'SALE_RESUMPTION', 'FRAUD_ACTION']).optional().describe('FRAUD_ACTION은 부정 예매 조치(표 취소, 이용 제한 걸기·풀기)다. 지정 부정 거래 조사관이 POST /v1/ops/fraud-cases/{caseId}/action-requests로만 만들고(이 스키마의 POST /v1/ops/approval-requests로 보내면 422), targetRef는 사건 ID, 승인자는 요청자가 아니고 가명정보 취급자 지정이 없으며 지난 90일 안에 그 지정을 거둔 적도 없는 commander다(2인, POL-038 ⑪, 추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다. MINOR_CONTRACT_CANCEL은 미성년자 계약 취소(cs_agent 요청, 요청자 아닌 cs_lead 1인 승인, POL-038 ⑧, 추천 적용 2026-10-14, ADR-0062). SALE_SUSPENSION·SALE_RESUMPTION은 승인한 공연의 판매 중지·재개다. targetRef는 공연 ID이고 reasonCode는 SELLER_IDENTITY·LEGAL_REQUEST·FRAUD_SUSPECTED·OTHER [가정] 가운데 하나다. operator 이상이 요청하고 요청자가 아닌 commander가 승인한다(2인, docs/planning/03 §2.14, POL-038 ⑩, 추천 적용 2026-10-28, ADR-0123)'),
   "targetRef": zod.string().optional(),
+  "relatedOrderIds": zod.array(zod.string()).max(createOpsApprovalRequestBodyRelatedOrderIdsMax).optional().describe('DISCRETIONARY_WAIVER만. 한 번에 면제를 요청하는 다른 주문 ID. 2개 이상이면 2인 승인(requiredApprovals 3)이다(POL-038 ②, F-06-3 추천 적용 2026-11-26)'),
   "amount": zod.int().optional().describe('원 단위. 지급 묶음 합계를 담으므로 64비트 정수다(DB bigint, 추천 적용 2026-10-28, 기술 검토 높음-20)'),
   "reasonCode": zod.string().optional(),
   "reasonText": zod.string().optional(),

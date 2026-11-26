@@ -156,6 +156,17 @@ describe('payeeDigest 대조 [ASVS v5.0.0-2.3.4]', () => {
     expect(out).toMatchObject({ batchId: batch.batchId, status: 'APPROVED', approvalId: approval.approvalId });
     expect(store.payoutBatchAudits).toContainEqual(expect.objectContaining({ event: 'APPROVED', approvalId: approval.approvalId, amount: batch.totalAmount, payeeDigest: (batch as Record<string, unknown>).payeeDigest }));
   });
+
+  test('승인 뒤 실행 직전에 계좌가 바뀌면 executeBatch가 409 payout-batch-payee-mismatch로 멈추고 지급 건이 0이다 [ASVS v5.0.0-2.3.4]', async () => {
+    await confirmedStatements(1);
+    const batch = await create();
+    const approval = approvalFor(batch);
+    await settlements.approveBatch(batch.batchId, approval.approvalId);
+    await store.savePayoutAccount({ promoterId: PROMOTER, bankCode: BANK, accountLast4: '9999', version: 2, changedAt: NOW, holdUntil: NOW, holderVerified: true });
+    await expect(settlements.executeBatch(batch.batchId)).rejects.toMatchObject({ status: 409, type: expect.stringContaining('payout-batch-payee-mismatch') });
+    expect(await store.findPayoutBatch(batch.batchId)).toMatchObject({ status: 'APPROVED' });
+    expect(payoutsOf(batch.batchId)).toHaveLength(0);
+  });
 });
 
 describe('15시 만료의 트랜잭션 [ASVS v5.0.0-2.3.3] [ASVS v5.0.0-2.3.4]', () => {

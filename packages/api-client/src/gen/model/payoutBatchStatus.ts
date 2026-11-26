@@ -20,4 +20,5 @@ export const PayoutBatchStatus = {
   SUBMITTED: 'SUBMITTED',
   COMPLETED: 'COMPLETED',
   PARTIAL_FAILED: 'PARTIAL_FAILED',
+  EXPIRED: 'EXPIRED',
 } as const;

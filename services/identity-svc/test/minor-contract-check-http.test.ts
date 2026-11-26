@@ -88,7 +88,7 @@ const firstVerify = async (s: { accountId: string; sessionId: string }, person: 
   const verificationId = json(st)['verificationId'] as string;
   const confirmed = await confirm(s, verificationId, agencyResult(clock, verificationId, { person }));
   expect(confirmed.statusCode).toBe(200);
-  return confirmed;
+  return { verificationId, body: json(confirmed) };
 };
 
 describe('R-T26 ③ 미성년자 계약 취소 확인', () => {
@@ -108,11 +108,9 @@ describe('R-T26 ③ 미성년자 계약 취소 확인', () => {
 
   test('FIRST·REVERIFY 확인 POST에는 resultToken이 없고, GET 결과에도 없다', async () => {
     const s = await login();
-    const confirmed = await firstVerify(s, 'first-person');
-    expect(json(confirmed)).not.toHaveProperty('resultToken');
-    const st = await start(s, 'FIRST');
-    expect(st.statusCode).toBe(201);
-    const got = await result(s, json(st)['verificationId'] as string);
+    const first = await firstVerify(s, 'first-person');
+    expect(first.body).not.toHaveProperty('resultToken');
+    const got = await result(s, first.verificationId);
     expect(got.statusCode).toBe(200);
     expect(got.payload).not.toContain('resultToken');
 
@@ -123,6 +121,11 @@ describe('R-T26 ③ 미성년자 계약 취소 확인', () => {
     expect(rc.statusCode).toBe(200);
     expect(json(rc)).not.toHaveProperty('resultToken');
     expect((await result(s, id)).payload).not.toContain('resultToken');
+
+    // 같은 계정의 MINOR_CONTRACT 확인에만 토큰이 붙는다(이 줄이 기준 트리에서 실패해 음성 단언만 통과하는 것을 막는다)
+    const minor = await minorConfirmation(s, '2009-03-01', 'first-person');
+    expect(typeof minor.token).toBe('string');
+    expect(minor.token).not.toBe('');
   });
 
   test('만 19세 생일 당일(KST)은 미성년이 아니다', async () => {
@@ -142,12 +145,17 @@ describe('R-T26 ③ 미성년자 계약 취소 확인', () => {
     expect(json(await check(fanHeaders(s), { orderIds: [order], consent: true, verificationResultToken: token }))).toEqual({ under19AtContract: true });
   });
 
-  test('이미 다른 연계정보로 본인확인한 계정의 MINOR_CONTRACT 확인은 409 minor-contract-ci-mismatch다 [ASVS v5.0.0-8.2.2]', async () => {
+  test('이미 다른 연계정보로 본인확인한 계정의 MINOR_CONTRACT 확인은 확인 경로에서 409 minor-contract-ci-mismatch다 [ASVS v5.0.0-8.2.2]', async () => {
     const s = await login();
     await firstVerify(s, 'lee');
     const st = await start(s, 'MINOR_CONTRACT');
     const verificationId = json(st)['verificationId'] as string;
-    const r = await confirm(s, verificationId, agencyResult(clock, verificationId, { person: 'kim', birth: '2009-03-01' }));
+    const confirmed = await confirm(s, verificationId, agencyResult(clock, verificationId, { person: 'kim', birth: '2009-03-01' }));
+    expect(confirmed.statusCode).toBe(200);
+    const token = json(confirmed)['resultToken'];
+    const order = newKey();
+    bases.set(order, { payerAccountId: s.accountId, paidAtMs: KST('2026-11-20T21:00:00') });
+    const r = await check(fanHeaders(s), { orderIds: [order], consent: true, verificationResultToken: token });
     expect(r.statusCode).toBe(409);
     expect(json(r)).toMatchObject({ type: expect.stringContaining('minor-contract-ci-mismatch') });
   });

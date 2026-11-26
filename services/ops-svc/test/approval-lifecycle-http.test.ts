@@ -249,9 +249,9 @@ describe('R-T6 재량 면제의 1인·2인 판정', () => {
 
     const a = json(await waiver(requester, first));
     expect((await withdraw(requester, a['approvalId'] as string, '철회')).statusCode).toBe(200);
-    expect(json(await waiver(requester, second))).toMatchObject({ requiredApprovals: 2 });
 
     const b = json(await waiver(requester, second));
+    expect(b).toMatchObject({ requiredApprovals: 2 });
     expect((await reject(lead, b['approvalId'] as string, '반려')).statusCode).toBe(200);
     expect(json(await waiver(requester, third))).toMatchObject({ requiredApprovals: 2 });
 

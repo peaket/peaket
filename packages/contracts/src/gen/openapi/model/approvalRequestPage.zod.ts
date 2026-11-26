@@ -42,7 +42,7 @@ export const ApprovalRequestPage = zod.object({
   "reasonCode": zod.string().optional(),
   "reasonText": zod.string().optional(),
   "evidenceChecked": zod.string().optional().describe('확인한 증빙 종류만. 파일과 내용은 받지 않는다'),
-  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2)]).optional().describe('서버가 정한다'),
+  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2),zod.literal(3)]).optional().describe('서버가 정한다'),
   "approvals": zod.array(zod.string()).optional(),
   "status": zod.enum(['REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'ESCALATED', 'EXECUTING', 'DONE', 'FAILED', 'WITHDRAWN', 'EXPIRED']).optional().describe('승인 대기 저장 값은 PENDING_APPROVAL. FAILED는 원인을 고친 뒤 승인자가 approve를 다시 부르면 다시 실행한다(docs/planning/03 §2.10, 추천 적용 2026-10-20, ADR-0073). WITHDRAWN은 승인 전 요청자 철회, EXPIRED는 대상 상태가 바뀌었거나 처리 기한이 지나 시스템이 끝낸 것이다(POL-038 공통, 추천 적용 2026-10-28, 기술 검토 낮음-087)'),
   "dueAt": zod.iso.datetime({"offset":true}).optional(),

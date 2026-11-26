@@ -3041,9 +3041,14 @@ export const CreateOpsApprovalRequestHeader = zod.object({
   "Idempotency-Key": zod.uuid().describe('따옴표 없는 UUID(v4). IETF 초안의 구조화 문자열(큰따옴표로 감싼 값)과 다르게 둔 것은 의도다. 범위는 부른 계정 × 작업(메서드와 경로 틀)이다. 서버는 키와 요청 지문(메서드, 실제 경로, 본문 바이트의 SHA-256. 헤더는 넣지 않음)을 함께 저장하고, 같은 키에 다른 지문이면 422 idempotency-key-reused, 첫 요청이 처리 중이면 1초 [가정] 기다린 뒤에도 끝나지 않을 때 409 idempotency-request-in-progress와 Retry-After, 키가 없거나 UUID가 아니면 400 idempotency-key-invalid로 답한다. 커밋한 결과만 같은 상태 코드·본문으로 다시 돌려준다. 보관 기간은 좌석 홀드가 홀드 TTL(7분), 그 밖은 24시간 [가정]이다(guidelines §4, 추천 적용 2026-10-28, 기술 검토 중간-046)')
 })
 
+export const createOpsApprovalRequestBodyRelatedOrderIdsMax = 20;
+
+
+
 export const CreateOpsApprovalRequestBody = zod.object({
   "kind": zod.enum(['SYSTEM_FAULT_REFUND', 'DISCRETIONARY_WAIVER', 'TRANSFER_RECLAIM', 'BOOKING_RESTRICTION', 'PAYOUT_BATCH', 'SETTLEMENT_ADJUSTMENT', 'COMMANDER_ROLE_CHANGE', 'CONTRACT_TERMS_CHANGE', 'MINOR_CONTRACT_CANCEL', 'SALE_SUSPENSION', 'SALE_RESUMPTION', 'FRAUD_ACTION']).optional().describe('FRAUD_ACTION은 부정 예매 조치(표 취소, 이용 제한 걸기·풀기)다. 지정 부정 거래 조사관이 POST /v1/ops/fraud-cases/{caseId}/action-requests로만 만들고(이 스키마의 POST /v1/ops/approval-requests로 보내면 422), targetRef는 사건 ID, 승인자는 요청자가 아니고 가명정보 취급자 지정이 없으며 지난 90일 안에 그 지정을 거둔 적도 없는 commander다(2인, POL-038 ⑪, 추천 적용 2026-10-31, ADR-0171). 만료는 표 취소(CANCEL_TICKETS)가 취소 마감 시각, 이용 제한 걸기·풀기(RESTRICT·LIFT_RESTRICTION)가 POL-038 공통의 요청 뒤 5영업일 [가정]이다. MINOR_CONTRACT_CANCEL은 미성년자 계약 취소(cs_agent 요청, 요청자 아닌 cs_lead 1인 승인, POL-038 ⑧, 추천 적용 2026-10-14, ADR-0062). SALE_SUSPENSION·SALE_RESUMPTION은 승인한 공연의 판매 중지·재개다. targetRef는 공연 ID이고 reasonCode는 SELLER_IDENTITY·LEGAL_REQUEST·FRAUD_SUSPECTED·OTHER [가정] 가운데 하나다. operator 이상이 요청하고 요청자가 아닌 commander가 승인한다(2인, docs/planning/03 §2.14, POL-038 ⑩, 추천 적용 2026-10-28, ADR-0123)'),
   "targetRef": zod.string().optional(),
+  "relatedOrderIds": zod.array(zod.string()).max(createOpsApprovalRequestBodyRelatedOrderIdsMax).optional().describe('DISCRETIONARY_WAIVER만. 한 번에 면제를 요청하는 다른 주문 ID. 2개 이상이면 2인 승인(requiredApprovals 3)이다(POL-038 ②, F-06-3 추천 적용 2026-11-26)'),
   "amount": zod.int().optional().describe('원 단위. 지급 묶음 합계를 담으므로 64비트 정수다(DB bigint, 추천 적용 2026-10-28, 기술 검토 높음-20)'),
   "reasonCode": zod.string().optional(),
   "reasonText": zod.string().optional(),
@@ -3081,7 +3086,7 @@ export const CreateOpsApprovalRequestResponse = zod.object({
   "reasonCode": zod.string().optional(),
   "reasonText": zod.string().optional(),
   "evidenceChecked": zod.string().optional().describe('확인한 증빙 종류만. 파일과 내용은 받지 않는다'),
-  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2)]).optional().describe('서버가 정한다'),
+  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2),zod.literal(3)]).optional().describe('서버가 정한다'),
   "approvals": zod.array(zod.string()).optional(),
   "status": zod.enum(['REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'ESCALATED', 'EXECUTING', 'DONE', 'FAILED', 'WITHDRAWN', 'EXPIRED']).optional().describe('승인 대기 저장 값은 PENDING_APPROVAL. FAILED는 원인을 고친 뒤 승인자가 approve를 다시 부르면 다시 실행한다(docs/planning/03 §2.10, 추천 적용 2026-10-20, ADR-0073). WITHDRAWN은 승인 전 요청자 철회, EXPIRED는 대상 상태가 바뀌었거나 처리 기한이 지나 시스템이 끝낸 것이다(POL-038 공통, 추천 적용 2026-10-28, 기술 검토 낮음-087)'),
   "dueAt": zod.iso.datetime({"offset":true}).optional(),
@@ -3187,7 +3192,7 @@ export const ListOpsApprovalRequestsResponse = zod.object({
   "reasonCode": zod.string().optional(),
   "reasonText": zod.string().optional(),
   "evidenceChecked": zod.string().optional().describe('확인한 증빙 종류만. 파일과 내용은 받지 않는다'),
-  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2)]).optional().describe('서버가 정한다'),
+  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2),zod.literal(3)]).optional().describe('서버가 정한다'),
   "approvals": zod.array(zod.string()).optional(),
   "status": zod.enum(['REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'ESCALATED', 'EXECUTING', 'DONE', 'FAILED', 'WITHDRAWN', 'EXPIRED']).optional().describe('승인 대기 저장 값은 PENDING_APPROVAL. FAILED는 원인을 고친 뒤 승인자가 approve를 다시 부르면 다시 실행한다(docs/planning/03 §2.10, 추천 적용 2026-10-20, ADR-0073). WITHDRAWN은 승인 전 요청자 철회, EXPIRED는 대상 상태가 바뀌었거나 처리 기한이 지나 시스템이 끝낸 것이다(POL-038 공통, 추천 적용 2026-10-28, 기술 검토 낮음-087)'),
   "dueAt": zod.iso.datetime({"offset":true}).optional(),
@@ -3285,7 +3290,7 @@ export const GetOpsApprovalRequestResponse = zod.object({
   "reasonCode": zod.string().optional(),
   "reasonText": zod.string().optional(),
   "evidenceChecked": zod.string().optional().describe('확인한 증빙 종류만. 파일과 내용은 받지 않는다'),
-  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2)]).optional().describe('서버가 정한다'),
+  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2),zod.literal(3)]).optional().describe('서버가 정한다'),
   "approvals": zod.array(zod.string()).optional(),
   "status": zod.enum(['REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'ESCALATED', 'EXECUTING', 'DONE', 'FAILED', 'WITHDRAWN', 'EXPIRED']).optional().describe('승인 대기 저장 값은 PENDING_APPROVAL. FAILED는 원인을 고친 뒤 승인자가 approve를 다시 부르면 다시 실행한다(docs/planning/03 §2.10, 추천 적용 2026-10-20, ADR-0073). WITHDRAWN은 승인 전 요청자 철회, EXPIRED는 대상 상태가 바뀌었거나 처리 기한이 지나 시스템이 끝낸 것이다(POL-038 공통, 추천 적용 2026-10-28, 기술 검토 낮음-087)'),
   "dueAt": zod.iso.datetime({"offset":true}).optional(),
@@ -3351,6 +3356,7 @@ export const CreateOpsApprovalRequestApprovalParams = zod.object({
 })
 
 export const CreateOpsApprovalRequestApprovalHeader = zod.object({
+  "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)'),
   "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
 })
 
@@ -3403,7 +3409,7 @@ export const CreateOpsApprovalRequestApprovalResponse = zod.object({
   "reasonCode": zod.string().optional(),
   "reasonText": zod.string().optional(),
   "evidenceChecked": zod.string().optional().describe('확인한 증빙 종류만. 파일과 내용은 받지 않는다'),
-  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2)]).optional().describe('서버가 정한다'),
+  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2),zod.literal(3)]).optional().describe('서버가 정한다'),
   "approvals": zod.array(zod.string()).optional(),
   "status": zod.enum(['REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'ESCALATED', 'EXECUTING', 'DONE', 'FAILED', 'WITHDRAWN', 'EXPIRED']).optional().describe('승인 대기 저장 값은 PENDING_APPROVAL. FAILED는 원인을 고친 뒤 승인자가 approve를 다시 부르면 다시 실행한다(docs/planning/03 §2.10, 추천 적용 2026-10-20, ADR-0073). WITHDRAWN은 승인 전 요청자 철회, EXPIRED는 대상 상태가 바뀌었거나 처리 기한이 지나 시스템이 끝낸 것이다(POL-038 공통, 추천 적용 2026-10-28, 기술 검토 낮음-087)'),
   "dueAt": zod.iso.datetime({"offset":true}).optional(),
@@ -3468,6 +3474,10 @@ export const CreateOpsApprovalRequestRejectionParams = zod.object({
   "approvalId": zod.string()
 })
 
+export const CreateOpsApprovalRequestRejectionHeader = zod.object({
+  "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
+})
+
 export const CreateOpsApprovalRequestRejectionBody = zod.object({
   "reason": zod.string()
 }).strict()
@@ -3480,6 +3490,10 @@ export const CreateOpsApprovalRequestRejectionResponse = zod.unknown()
  */
 export const CreateOpsApprovalRequestWithdrawalParams = zod.object({
   "approvalId": zod.string()
+})
+
+export const CreateOpsApprovalRequestWithdrawalHeader = zod.object({
+  "If-Match": zod.string().describe('고칠 자원의 판. 그 자원을 읽은 응답의 ETag(강한 ETag, 자원의 version을 큰따옴표로 감싼 값, 예 "7")를 그대로 보낸다. 지금 판과 다르면 412 precondition-failed(다른 사람이 먼저 고침), 없으면 428 precondition-required(guidelines §12 \'동시 수정\', RFC 9110 §13.1.1, RFC 6585 §3, 추천 적용 2026-10-28, 기술 검토 낮음-030)')
 })
 
 export const CreateOpsApprovalRequestWithdrawalBody = zod.object({
@@ -3517,7 +3531,7 @@ export const CreateOpsApprovalRequestWithdrawalResponse = zod.object({
   "reasonCode": zod.string().optional(),
   "reasonText": zod.string().optional(),
   "evidenceChecked": zod.string().optional().describe('확인한 증빙 종류만. 파일과 내용은 받지 않는다'),
-  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2)]).optional().describe('서버가 정한다'),
+  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2),zod.literal(3)]).optional().describe('서버가 정한다'),
   "approvals": zod.array(zod.string()).optional(),
   "status": zod.enum(['REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'ESCALATED', 'EXECUTING', 'DONE', 'FAILED', 'WITHDRAWN', 'EXPIRED']).optional().describe('승인 대기 저장 값은 PENDING_APPROVAL. FAILED는 원인을 고친 뒤 승인자가 approve를 다시 부르면 다시 실행한다(docs/planning/03 §2.10, 추천 적용 2026-10-20, ADR-0073). WITHDRAWN은 승인 전 요청자 철회, EXPIRED는 대상 상태가 바뀌었거나 처리 기한이 지나 시스템이 끝낸 것이다(POL-038 공통, 추천 적용 2026-10-28, 기술 검토 낮음-087)'),
   "dueAt": zod.iso.datetime({"offset":true}).optional(),
@@ -4346,7 +4360,7 @@ export const CreateOpsSettlementAdjustmentResponse = zod.object({
   "reasonCode": zod.string().optional(),
   "reasonText": zod.string().optional(),
   "evidenceChecked": zod.string().optional().describe('확인한 증빙 종류만. 파일과 내용은 받지 않는다'),
-  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2)]).optional().describe('서버가 정한다'),
+  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2),zod.literal(3)]).optional().describe('서버가 정한다'),
   "approvals": zod.array(zod.string()).optional(),
   "status": zod.enum(['REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'ESCALATED', 'EXECUTING', 'DONE', 'FAILED', 'WITHDRAWN', 'EXPIRED']).optional().describe('승인 대기 저장 값은 PENDING_APPROVAL. FAILED는 원인을 고친 뒤 승인자가 approve를 다시 부르면 다시 실행한다(docs/planning/03 §2.10, 추천 적용 2026-10-20, ADR-0073). WITHDRAWN은 승인 전 요청자 철회, EXPIRED는 대상 상태가 바뀌었거나 처리 기한이 지나 시스템이 끝낸 것이다(POL-038 공통, 추천 적용 2026-10-28, 기술 검토 낮음-087)'),
   "dueAt": zod.iso.datetime({"offset":true}).optional(),
@@ -4442,7 +4456,8 @@ export const CreateOpsPayoutBatchResponse = zod.object({
   "observedAt": zod.iso.datetime({"offset":true}).optional(),
   "observedBy": zod.string().optional().describe('OPERATOR_CONSOLE일 때 입력한 operator')
 }).optional().describe('묶음 때 본 결제사 지급 가능 잔액. 토스페이먼츠는 잔액 API, 포트원은 operator가 콘솔에서 본 값이다. 포트원 값은 검증할 수 없어 지급을 미루는 쪽으로만 쓴다(ADR-0062)'),
-  "status": zod.enum(['PREPARED', 'PENDING_APPROVAL', 'APPROVED', 'SUBMITTED', 'COMPLETED', 'PARTIAL_FAILED']).optional(),
+  "status": zod.enum(['PREPARED', 'PENDING_APPROVAL', 'APPROVED', 'SUBMITTED', 'COMPLETED', 'PARTIAL_FAILED', 'EXPIRED']).optional(),
+  "payeeDigest": zod.string().nullish().describe('정산서별 지급 대상 지문(SHA-256 16진 64자, settlement §5.1). 묶음을 만들 때 계산하고 승인·실행 직전에 다시 계산해 다르면 409 payout-batch-payee-mismatch다(F-06-3, BAT-625 RV-02)'),
   "approvalDueAt": zod.iso.datetime({"offset":true}).nullish().describe('승인 기한(지급일 전 영업일 15시, POL-039)')
 }).describe('지급 묶음(지급일·결제사·결제 상점, 2인 승인)')
 
@@ -4481,7 +4496,8 @@ export const ListOpsPayoutBatchesResponse = zod.object({
   "observedAt": zod.iso.datetime({"offset":true}).optional(),
   "observedBy": zod.string().optional().describe('OPERATOR_CONSOLE일 때 입력한 operator')
 }).optional().describe('묶음 때 본 결제사 지급 가능 잔액. 토스페이먼츠는 잔액 API, 포트원은 operator가 콘솔에서 본 값이다. 포트원 값은 검증할 수 없어 지급을 미루는 쪽으로만 쓴다(ADR-0062)'),
-  "status": zod.enum(['PREPARED', 'PENDING_APPROVAL', 'APPROVED', 'SUBMITTED', 'COMPLETED', 'PARTIAL_FAILED']).optional(),
+  "status": zod.enum(['PREPARED', 'PENDING_APPROVAL', 'APPROVED', 'SUBMITTED', 'COMPLETED', 'PARTIAL_FAILED', 'EXPIRED']).optional(),
+  "payeeDigest": zod.string().nullish().describe('정산서별 지급 대상 지문(SHA-256 16진 64자, settlement §5.1). 묶음을 만들 때 계산하고 승인·실행 직전에 다시 계산해 다르면 409 payout-batch-payee-mismatch다(F-06-3, BAT-625 RV-02)'),
   "approvalDueAt": zod.iso.datetime({"offset":true}).nullish().describe('승인 기한(지급일 전 영업일 15시, POL-039)')
 }).describe('지급 묶음(지급일·결제사·결제 상점, 2인 승인)')).optional(),
   "nextCursor": zod.string().nullish()
@@ -4513,7 +4529,8 @@ export const GetOpsPayoutBatchResponse = zod.object({
   "observedAt": zod.iso.datetime({"offset":true}).optional(),
   "observedBy": zod.string().optional().describe('OPERATOR_CONSOLE일 때 입력한 operator')
 }).optional().describe('묶음 때 본 결제사 지급 가능 잔액. 토스페이먼츠는 잔액 API, 포트원은 operator가 콘솔에서 본 값이다. 포트원 값은 검증할 수 없어 지급을 미루는 쪽으로만 쓴다(ADR-0062)'),
-  "status": zod.enum(['PREPARED', 'PENDING_APPROVAL', 'APPROVED', 'SUBMITTED', 'COMPLETED', 'PARTIAL_FAILED']).optional(),
+  "status": zod.enum(['PREPARED', 'PENDING_APPROVAL', 'APPROVED', 'SUBMITTED', 'COMPLETED', 'PARTIAL_FAILED', 'EXPIRED']).optional(),
+  "payeeDigest": zod.string().nullish().describe('정산서별 지급 대상 지문(SHA-256 16진 64자, settlement §5.1). 묶음을 만들 때 계산하고 승인·실행 직전에 다시 계산해 다르면 409 payout-batch-payee-mismatch다(F-06-3, BAT-625 RV-02)'),
   "approvalDueAt": zod.iso.datetime({"offset":true}).nullish().describe('승인 기한(지급일 전 영업일 15시, POL-039)')
 }).optional().describe('지급 묶음(지급일·결제사·결제 상점, 2인 승인)'),
   "statements": zod.array(zod.object({
@@ -5855,7 +5872,7 @@ export const CreateOpsPromoterContractTermChangeResponse = zod.object({
   "reasonCode": zod.string().optional(),
   "reasonText": zod.string().optional(),
   "evidenceChecked": zod.string().optional().describe('확인한 증빙 종류만. 파일과 내용은 받지 않는다'),
-  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2)]).optional().describe('서버가 정한다'),
+  "requiredApprovals": zod.union([zod.literal(1),zod.literal(2),zod.literal(3)]).optional().describe('서버가 정한다'),
   "approvals": zod.array(zod.string()).optional(),
   "status": zod.enum(['REQUESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'ESCALATED', 'EXECUTING', 'DONE', 'FAILED', 'WITHDRAWN', 'EXPIRED']).optional().describe('승인 대기 저장 값은 PENDING_APPROVAL. FAILED는 원인을 고친 뒤 승인자가 approve를 다시 부르면 다시 실행한다(docs/planning/03 §2.10, 추천 적용 2026-10-20, ADR-0073). WITHDRAWN은 승인 전 요청자 철회, EXPIRED는 대상 상태가 바뀌었거나 처리 기한이 지나 시스템이 끝낸 것이다(POL-038 공통, 추천 적용 2026-10-28, 기술 검토 낮음-087)'),
   "dueAt": zod.iso.datetime({"offset":true}).optional(),

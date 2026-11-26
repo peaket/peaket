@@ -12,6 +12,7 @@
 import * as zod from 'zod';
 
 export const CreateOpsApprovalRequestApprovalHeaders = zod.object({
+  "If-Match": zod.string(),
   "X-Reauth-Token": zod.string()
 })
 

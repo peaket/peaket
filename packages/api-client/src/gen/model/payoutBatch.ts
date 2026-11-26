@@ -31,6 +31,11 @@ export interface PayoutBatch {
   pgBalance?: PayoutBatchPgBalance;
   status?: PayoutBatchStatus;
   /**
+     * 정산서별 지급 대상 지문(SHA-256 16진 64자, settlement §5.1). 묶음을 만들 때 계산하고 승인·실행 직전에 다시 계산해 다르면 409 payout-batch-payee-mismatch다(F-06-3, BAT-625 RV-02)
+     * @nullable
+     */
+  payeeDigest?: string | null;
+  /**
      * 승인 기한(지급일 전 영업일 15시, POL-039)
      * @nullable
      */
