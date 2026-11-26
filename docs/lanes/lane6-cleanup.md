@@ -43,3 +43,17 @@
 - F-04-14 TR-26(낮음): `FX-T19 ⑥`은 문의 유형이 다른 경우와 건이 없는 경우만 본다. 그 건이 `INQUIRY`가 아닌 경우(예: 후기 신고)를 보지 않아 `FraudInquiryReports` 포트가 kind를 확인하지 않는 구현이 통과할 수 있다(`services/ops-svc/test/fraud-evidence-http.test.ts`).
 - F-04-14 TR-27(낮음): `FX-T13 ②`는 한 행의 필드 변조만 본다. `seq` 중간 누락·순서 바꾸기·`prev_hash`만 바꾸기·마지막 행 누락을 보지 않아 사슬 검증의 경계가 약하다(`services/ops-svc/test/fraud-evidence-domain.test.ts`).
 - F-04-14 TR-34(낮음): `FX-T13 ⑮`의 `basis`는 2자 거절과 긴 유효값만 보고 정확히 5자·500자·501자 경계를 보지 않는다. `basis` 5~500자의 양쪽 경계를 더한다(`services/ops-svc/test/fraud-evidence-http.test.ts`).
+
+- 2026-11-26 F-04-14 구현 리뷰(동결 로컬)의 중간·낮음 가운데 이번 freeze 가지에서 고치지 않는 것을 옮겼다. **보안·통과 기준(IR-01~12·14~17·19)은 `docs/review/plans/F-04-14.md` '구현 리뷰'에 남아 동결 가지에서 고친다.** 아래는 그 밖(중간·낮음)이다.
+- F-04-14 IR-13(중간): `decideObjections`가 `PRIORITY_GRANTED`를 `next.events.at(-1).seq + 1`로 여러 개 만들면서 `next.events`를 갱신하지 않아, 한 번에 두 계정을 인정하면 같은 `seq`가 두 번 들어가 `(case_id, seq)` 기본 키와 충돌한다(`services/ops-svc/src/modules/investigations/application/fraud-actions.ts:628-638`).
+- F-04-14 IR-18(중간): 외부 게시물 등록이 `eventId`를 UUID로 검증하지 않고 회차 존재도 보지 않아 없는 회차·비UUID가 DB 500이 되며, multipart 본문을 `@ContractBody`로 검증하지 않아 `additionalProperties:false`를 지키지 않는다(`services/ops-svc/src/modules/investigations/inbound/external-posts.controller.ts:54-58`, `application/fraud-evidence.ts:580-629`).
+- F-04-14 IR-20(중간): `caseView.evidenceBundleIds`가 늘 빈 배열이다. F-04-13 IR-29가 F-04-14 몫으로 넘겼고 정본 §6.7.8이 사건 상세에 만든 순서의 묶음 ID를 요구한다(`services/ops-svc/src/modules/investigations/application/investigations.ts:263`).
+- F-04-14 IR-21(중간): COMPLAINT `evidence_export.sha256`을 `canonicalJson(packet)` 바이트로 계산하지만 실제 응답은 Nest가 직렬화한 JSON이라 받는 쪽이 본문 SHA-256과 견줄 수 없다(`services/ops-svc/src/modules/investigations/application/fraud-evidence.ts:312-317`).
+- F-04-14 IR-22(중간): `verifyDue`를 60초 정비마다 불러 1GB 묶음 전체를 매분 다시 해시한다(정본은 하루 한 번). `ops_event` `EVIDENCE_VERIFY`(묶음 수·불일치 수)도 내지 않는다(`services/ops-svc/src/main.ts:365-371`, `application/fraud-evidence.ts:324-334`).
+- F-04-14 IR-23(중간): 목록 커서가 `id > cursor`인데 정렬은 `createdAt DESC, id`라 다음 페이지에서 행이 빠지거나 중복된다(`services/ops-svc/src/modules/investigations/adapters/db/drizzle-fraud-evidence-store.ts:80-89`·`:201-210`).
+- F-04-14 IR-24(중간): 닫힌 대역 `UnavailableFraudEventInfo`가 null을 돌려 404 '회차 없음', `UnavailableFraudInquiries`가 null을 돌려 REPORT 등록 422가 된다. 계획 §8.1은 포트가 없으면 그 경로만 503 `dependency-unavailable`이라 한다(`services/ops-svc/src/modules/investigations/adapters/unavailable-evidence.ts:40-57`).
+- F-04-14 IR-25(낮음): GET 응답에 계약에 없는 내부 칸 `s3Prefix`·`occurredAtMs`를 느슨한 스키마로 통과시킨다(고정 시험이 그 칸을 읽어 고정됐다). `docs/data.md` `evidence_bundle`에는 구현이 더한 `event_id`도 없다(`inbound/evidence-bundles.controller.ts:87`, `inbound/investigations.controller.ts:182`, `docs/data.md:2805-2821`).
+- F-04-14 IR-26(낮음): `INV_EXPORT_VOLUME`를 `count > 5`로 표시해 이미 5건을 낸 뒤의 6번째 내보내기는 표시하지 않고 7번째에 표시한다. 정본 문구('하루 5건을 넘으면')와 시험의 `forcedExportCount=5/6` 해석이 다르다(`application/fraud-evidence.ts:226`).
+- F-04-14 IR-27(낮음): `csvCell`이 수식 삽입만 막고 쉼표·줄바꿈·큰따옴표를 인용하지 않아, 회차 이름이나 범주에 쉼표가 있으면 CSV 열이 밀린다(`services/ops-svc/src/modules/investigations/domain/fraud-evidence.ts:279-282`·`:332`).
+- F-04-14 IR-28(낮음): `hold-changes`·`exports`가 `@ContractBody`가 아니라 `@Body()`를 써서 `additionalProperties:false`·`dataRequestId` UUID 검증을 경계에서 하지 않는다(`inbound/evidence-bundles.controller.ts:104`·`:160`).
+- F-04-14 IR-29(낮음): `#postMatched`가 `updateCase`의 `{ok:false}`(판 충돌)를 확인하지 않고 `.catch`만 달아 `POST_MATCHED` 기록이 조용히 빠질 수 있다(`application/fraud-evidence.ts:689-705`).
