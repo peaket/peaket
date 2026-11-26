@@ -9,6 +9,7 @@ import {
   DrizzleSaleConfigStore,
   DrizzleSaleMaintenanceStore,
   DrizzleSaleStore,
+  LocalFolderImageStore,
   NoopSaleConfigFacts,
   PublishSaleConfigs,
   SaleConfigMetrics,
@@ -27,7 +28,7 @@ import { DrizzleShopOrderStore, type MerchPayments, MerchUnclaimed, MERCH_UNCLAI
  * shop 정비 일은 상품 속성 검증(product-attributes-check, 정비 시간 안 04:40 KST [가정], ADR-0300 결정 2)과 미수령 자동 취소(merch-unclaimed-cancel, 매일 10:00 KST [가정] 뒤 영업일,
  * ADR-0301 결정 5)다. 둘은 서비스 역할 연결(core_app, PEAKET_DATABASE_URL)이 있을 때만 돈다(BAT-600)
  */
-export const CORE_MAINTENANCE_TASK_NAMES = ['sale-eligibility-purge', 'sale-eligibility-copy', 'sale-config-publish', 'review-temp-block-expire', 'review-purge-legacy', PRODUCT_ATTRIBUTES_TASK, MERCH_UNCLAIMED_TASK, 'notification-delivery-partitions', 'notification-delivery-purge', 'notification-subscription-expired', 'notification-dedup-purge'] as const;
+export const CORE_MAINTENANCE_TASK_NAMES = ['sale-eligibility-purge', 'sale-eligibility-copy', 'sale-config-publish', 'review-temp-block-expire', 'review-purge-legacy', 'review-image-cleanup', PRODUCT_ATTRIBUTES_TASK, MERCH_UNCLAIMED_TASK, 'notification-delivery-partitions', 'notification-delivery-purge', 'notification-subscription-expired', 'notification-dedup-purge'] as const;
 
 export function coreMaintenanceTasks(
   database: Database,
@@ -46,7 +47,8 @@ export function coreMaintenanceTasks(
     const publish = new PublishSaleConfigs(new DrizzleSaleStore(o.opsDatabase), store, new NoopSaleConfigFacts(), clock, o.saleOpen, o.saleConfigMetrics);
     tasks.push(...saleConfigMaintenanceTasks(new DrizzleSaleConfigMaintenanceStore(o.opsDatabase), publish, logger));
   }
-  tasks.push(...reviewMaintenanceTasks(new DrizzleReviewStore(database), clock));
+  const imageStoreDir = env.PEAKET_IMAGE_STORE_DIR;
+  tasks.push(...reviewMaintenanceTasks(new DrizzleReviewStore(database), clock, imageStoreDir ? { images: { objects: new LocalFolderImageStore(imageStoreDir) } } : {}));
   // BAT-455: notification_delivery 월 파티션(90일 보존, docs/data.md §2 '파티션 표 규칙'). 날짜를 박은 첫 파티션을 두지 않는다
   const deliverySpec = { table: 'notification_delivery', key: 'timestamptz' } as const;
   tasks.push({ name: 'notification-delivery-partitions', when: 'daily', run: async () => void (await ensureMonthlyPartitions(database, clock, deliverySpec)) });
