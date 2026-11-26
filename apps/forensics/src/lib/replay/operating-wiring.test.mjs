@@ -21,7 +21,7 @@ function operatingSources() {
     .map((f) => ({ name: f, source: readFileSync(resolve(ROOT, f), 'utf8') }));
 }
 
-test('FX-T21 ⑥ 운영 화면은 해독·검증·재생 준비를 순서대로 잇는다', () => {
+test('FX-T21 ⑥ 운영 화면은 해독·검증·재생 준비를 순서대로 잇고 실패·0행 화면을 가른다', () => {
   const app = read('OperatingApp.tsx');
   const calls = [
     'replayOperation',
@@ -32,16 +32,23 @@ test('FX-T21 ⑥ 운영 화면은 해독·검증·재생 준비를 순서대로 
     'decodeArrowIpc',
     'validateDecodedReplay',
     'prepareReplay',
+    'replayScreenState',
   ];
   const order = calls.map((name) => app.indexOf(`${name}(`));
   for (let i = 0; i < order.length; i += 1) assert.ok(order[i] >= 0, `OperatingApp이 ${calls[i]}을 부르지 않는다`);
   for (let i = 1; i < order.length; i += 1) assert.ok(order[i - 1] < order[i], `${calls[i - 1]} 다음에 ${calls[i]} 순서가 아니다`);
+  assert.equal((app.match(/decodeArrowIpc\(/g) ?? []).length, 1, 'IPC 해독을 정확히 한 번 부른다');
+  assert.equal((app.match(/prepareReplay\(/g) ?? []).length, 1, '재생 세션을 정확히 한 번 만든다');
+  assert.match(app, /replayScreenState\(/, '화면 고르기를 부르지 않는다');
+  assert.match(app, /'problem'|"problem"/, '거절 화면 분기가 없다');
+  assert.match(app, /'replay'|"replay"/, '재생 화면 분기가 없다');
+  assert.match(app, /<ProblemMain/, '거절 화면을 그리지 않는다');
+  assert.match(app, /<ReplayMain/, '재생 화면을 그리지 않는다');
   assert.ok(app.indexOf('replayFileIssue(') < app.indexOf('replayFileValidation('), 'F-04-16 검증 경계가 남아 있어야 한다');
   assert.match(app, /setFile\(null\)/, '화면을 떠날 때 파일을 지우지 않는다');
   assert.match(app, /setSession\(null\)/, '화면을 떠날 때 재생 세션을 지우지 않는다');
   assert.match(app, /AbortController/, '받기를 멈추는 신호가 없다');
   assert.match(app, /<ReadyMain/, '받은 뒤 준비 상태를 보이지 않는다');
-  assert.match(app, /<ReplayMain/, '해독·검증 뒤 재생 화면을 그리지 않는다');
 
   const ipcPath = resolve(REPLAY, 'arrow-ipc.ts');
   const purePath = resolve(REPLAY, 'arrow.ts');
@@ -50,7 +57,9 @@ test('FX-T21 ⑥ 운영 화면은 해독·검증·재생 준비를 순서대로 
   const ipc = readFileSync(ipcPath, 'utf8');
   const pure = readFileSync(purePath, 'utf8');
   assert.match(ipc, /from\s+['"]apache-arrow['"]/);
-  assert.doesNotMatch(pure, /apache-arrow/);
+  assert.equal((ipc.match(/tableFromIPC\(/g) ?? []).length, 1, 'tableFromIPC를 정확히 한 번 부른다');
+  assert.equal((ipc.match(/decodeReplayTable\(/g) ?? []).length, 1, 'decodeReplayTable에 표를 넘긴다');
+  assert.doesNotMatch(pure, /from\s+['"]apache-arrow['"]/);
   for (const { name, source } of operatingSources()) {
     assert.doesNotMatch(source, /from\s+['"]apache-arrow['"]/, `${name}이 apache-arrow를 직접 가져온다`);
   }
@@ -62,9 +71,11 @@ test('FX-T8 ① 타임라인은 role=slider와 aria-value*로 키보드 값을 �
   assert.match(timeline, /aria-valuemin/, 'aria-valuemin이 없다');
   assert.match(timeline, /aria-valuemax/, 'aria-valuemax가 없다');
   assert.match(timeline, /aria-valuenow/, 'aria-valuenow가 없다');
+  assert.match(timeline, /aria-valuetext/, 'aria-valuetext가 없다');
   assert.match(timeline, /tabIndex/, '키보드 초점을 받지 못한다');
   assert.match(timeline, /onKeyDown/, '키보드 처리기가 없다');
   assert.match(timeline, /timelineKey\(/, '키보드 상태 전이를 부르지 않는다');
+  assert.match(timeline, /timelineAria\(/, '접근성 값을 상태에서 만들지 않는다');
   assert.match(timeline, /parseOffset\(/, '숫자 입력을 읽지 않는다');
   assert.match(timeline, /rangeFromInput\(/, '숫자 입력 구간을 만들지 않는다');
   assert.match(timeline, /[×]1|[×]10|[×]60/, '배속 단추가 없다');
@@ -77,17 +88,21 @@ test('FX-T8 ① 타임라인은 role=slider와 aria-value*로 키보드 값을 �
 });
 
 test('FX-T8 ④ 타임라인·요약·기준선에 표로 보기가 있다', () => {
-  const all = operatingSources();
-  const text = all.map((f) => f.source).join('\n');
-  const toggles = text.match(/표로 보기/g) ?? [];
-  assert.ok(toggles.length >= 3, `표로 보기 단추가 3개 미만이다(${toggles.length})`);
-  const tableFile = all.find((f) => f.source.includes('<table'));
-  assert.ok(tableFile, '표를 그리는 파일이 없다');
-  assert.match(tableFile.source, /<caption/, '표에 caption이 없다');
-  assert.match(tableFile.source, /<th/, '표에 머리 칸이 없다');
+  const timeline = read('ReplayTimeline.tsx');
+  const filters = read('ReplayFilters.tsx');
+  const main = read('ReplayMain.tsx');
+  const seat = read('SeatReplay.tsx');
+  const tableSource = read('ReplayTable.tsx');
+  const withTable = [timeline, filters, main, seat].filter((source) => /표로 보기|ReplayTable/.test(source));
+  assert.ok(withTable.length >= 3, `표로 보기가 있는 화면 파일이 3개 미만이다(${withTable.length})`);
+  assert.match(seat, /seatLegend\(/, '좌석 범례를 그리지 않는다');
+  assert.match(seat, /pattern/, '좌석 무늬를 쓰지 않는다');
+  assert.match(tableSource, /<table/, '표를 그리지 않는다');
+  assert.match(tableSource, /<caption/, '표에 caption이 없다');
+  assert.match(tableSource, /<th/, '표에 머리 칸이 없다');
 });
 
-test('FX-T21 ⑥ 버린 사건 warning 띠가 정본 문구를 쓴다', () => {
+test('FX-T21 ⑦ 버린 사건 warning 띠가 정본 문구를 쓴다', () => {
   const main = read('ReplayMain.tsx');
   assert.match(main, /droppedNotice\(/, '버린 사건 수를 정본 문구로 만들지 않는다');
   assert.match(main, /role=["']status["']/, '버린 사건 띠에 알림 역할이 없다');
@@ -97,4 +112,5 @@ test('FX-T21 ⑥ 버린 사건 warning 띠가 정본 문구를 쓴다', () => {
   const session = readFileSync(sessionPath, 'utf8');
   assert.match(session, /규칙에 맞지 않는 사건/, '정본 문구가 없다');
   assert.match(session, /prepareReplay\(/, '재생 세션을 만들지 않는다');
+  assert.match(session, /replayScreenState\(/, '화면 고르기를 만들지 않는다');
 });

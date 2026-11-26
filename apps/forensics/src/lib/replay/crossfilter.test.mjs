@@ -12,8 +12,9 @@ import {
 async function load() {
   try {
     return await import('./crossfilter.ts');
-  } catch {
-    return null;
+  } catch (err) {
+    if (err && err.code === 'ERR_MODULE_NOT_FOUND') return null;
+    throw err;
   }
 }
 
@@ -117,12 +118,34 @@ test('FX-T4 ① 31·32·33·64·65행 경계에서 비트마스크 집계가 기
   const all = constantRows(33);
   const keep = new Uint8Array(33).fill(1);
   const mask = crossfilter.selectionMask(all, keep);
-  assert.equal(mask[0], 0xffffffff);
-  assert.equal(mask[1], 0x00000001, '마지막 단어의 남는 비트는 0이다');
+  assert.deepEqual([...mask], [0xffffffff, 0x00000001], '마지막 단어의 남는 비트는 0이다');
 
   const noKeep = crossfilter.summarize(all, new Uint8Array(33), {});
   assert.deepEqual(noKeep, { rows: 0, sessions: 0, holdTries: 0, conflictRate: 0, holdToSaleRate: 0, candidateRate: 0, memberSessions: 0 });
   assert.deepEqual([...crossfilter.selectionMask(all, new Uint8Array(33))], [0, 0]);
+
+  // 여덟 차원과 keep=0을 비트 값으로 고정한다(RV0417-04). summarize가 마스크를 건너뛰면 여기서 걸린다.
+  const rows = [
+    { t_ms: 0, kind: EVENT_KIND.HOLD_TRY, seat: 1, section: 0, session: 1, result: RESULT.HELD, bot_tier: 0, net_type: 0, device_group: 0, member: 0 },
+    { t_ms: 100, kind: EVENT_KIND.HOLD_TRY, seat: 2, section: 1, session: 2, result: RESULT.CONFLICT, bot_tier: 1, net_type: 2, device_group: 1, member: 1 },
+    { t_ms: 200, kind: EVENT_KIND.SALE, seat: 3, section: 2, session: 2, result: RESULT.PAID, bot_tier: 2, net_type: 3, device_group: 2, member: 1 },
+    { t_ms: 300, kind: EVENT_KIND.QUEUE_ENTER, seat: NO_SEAT, section: 3, session: 3, result: RESULT.NONE, bot_tier: 3, net_type: 4, device_group: 0, member: 0 },
+    { t_ms: 400, kind: EVENT_KIND.PAY_TRY, seat: 4, section: 4, session: 4, result: RESULT.PAID, bot_tier: 0, net_type: 1, device_group: 1, member: 0 },
+  ];
+  const bits = columnsFromRows(rows);
+  const ones = new Uint8Array(5).fill(1);
+  const bit = (f) => [...crossfilter.selectionMask(bits, ones, f)];
+  assert.deepEqual(bit({ sections: [2] }), [4]);
+  assert.deepEqual(bit({ results: [RESULT.CONFLICT] }), [2]);
+  assert.deepEqual(bit({ kinds: [EVENT_KIND.SALE] }), [4]);
+  assert.deepEqual(bit({ botTiers: [2] }), [4]);
+  assert.deepEqual(bit({ netTypes: [3] }), [4]);
+  assert.deepEqual(bit({ deviceGroups: [1] }), [18]);
+  assert.deepEqual(bit({ member: 1 }), [6]);
+  assert.deepEqual(bit({ fromMs: 100, toMs: 300 }), [6]);
+  assert.deepEqual([...crossfilter.selectionMask(bits, new Uint8Array([1, 0, 1, 1, 1]), { sections: [1] })], [0], 'keep=0 행은 필터가 맞아도 0');
+  const edge = columnsFromRows(Array.from({ length: 33 }, (_, i) => ({ t_ms: i, kind: EVENT_KIND.QUEUE_ENTER, session: 1, section: i === 32 ? 1 : 0 })));
+  assert.deepEqual([...crossfilter.selectionMask(edge, new Uint8Array(33).fill(1), { sections: [1] })], [0, 1], '단어 경계를 넘는 비트');
 });
 
 test('FX-T4 ② 무작위 조건 500개에서 요약 값이 전 행을 도는 기준 구현과 같다', () => {

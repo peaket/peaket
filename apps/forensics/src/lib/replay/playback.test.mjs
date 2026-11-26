@@ -6,8 +6,9 @@ import assert from 'node:assert/strict';
 async function load() {
   try {
     return await import('./playback.ts');
-  } catch {
-    return null;
+  } catch (err) {
+    if (err && err.code === 'ERR_MODULE_NOT_FOUND') return null;
+    throw err;
   }
 }
 
@@ -48,6 +49,17 @@ test('FX-T8 ① 타임라인은 ←→ 1초, Shift+←→ 10초, Home·End, Spac
 
   const middle = { ...start, playheadMs: 0 };
   assert.deepEqual(playback.timelineKey(middle, key('a'), BOUNDS), middle, '모르는 키는 상태를 바꾸지 않는다');
+
+  need('timelineAria');
+  assert.deepEqual(playback.timelineAria(start, BOUNDS), { min: -600000, max: 1800000, now: -600000, text: 'T−10:00' });
+  assert.deepEqual(playback.timelineAria(end, BOUNDS), { min: -600000, max: 1800000, now: 1800000, text: 'T+30:00' });
+  const withRange = { ...middle, range: { fromMs: 0, toMs: 60000 } };
+  assert.deepEqual(playback.timelineAria(withRange, BOUNDS), {
+    min: -600000,
+    max: 1800000,
+    now: 0,
+    text: 'T+00:00 · 구간 T+00:00~T+01:00',
+  });
 });
 
 test('FX-T8 ① [ 두 번은 재생 위치로 구간을 만들고 Esc는 지운다', () => {
@@ -104,11 +116,11 @@ test('FX-T8 ③ T+MM:SS·T−MM:SS·MM:SS·-MM:SS·정수 초를 읽고 같은 �
   need('formatOffset');
   assert.equal(playback.parseOffset('T+01:30'), 90000);
   assert.equal(playback.parseOffset('T−01:30'), -90000);
-  assert.equal(playback.parseOffset('T-01:30'), -90000);
   assert.equal(playback.parseOffset('01:30'), 90000);
   assert.equal(playback.parseOffset('-01:30'), -90000);
   assert.equal(playback.parseOffset('90'), 90000);
   assert.equal(playback.parseOffset('0'), 0);
+  assert.equal(playback.parseOffset('T-01:30'), undefined, 'T 뒤 ASCII 하이픈은 정본에 없다');
   for (const bad of ['', 'T+', 'T+00:60', 'T+00:00:01', '1:2', 'abc', '1.5', '+T01:30']) {
     assert.equal(playback.parseOffset(bad), undefined, bad);
   }
@@ -124,11 +136,22 @@ test('FX-T8 ③ T+MM:SS·T−MM:SS·MM:SS·-MM:SS·정수 초를 읽고 같은 �
 
 test('FX-T8 ③ 숫자 입력으로 고른 구간은 끌어서 고른 구간과 같은 값을 낸다', () => {
   need('rangeFromInput');
+  need('initialPlayback');
+  need('timelineKey');
   assert.deepEqual(playback.rangeFromInput('T+01:00', 'T+02:30', BOUNDS), { fromMs: 60000, toMs: 150000 });
   assert.deepEqual(playback.rangeFromInput('T+02:30', 'T+01:00', BOUNDS), { fromMs: 60000, toMs: 150000 }, '뒤집힌 입력을 정리한다');
+  assert.deepEqual(playback.rangeFromInput('T+00:00', 'T+30:00', BOUNDS), { fromMs: 0, toMs: 1800000 }, '경계 끝을 넣는다');
+  assert.deepEqual(playback.rangeFromInput('T−10:00', 'T+30:00', BOUNDS), { fromMs: -600000, toMs: 1800000 }, '양 끝 경계');
   assert.equal(playback.rangeFromInput('T+02:30', 'T+02:30', BOUNDS), undefined, '같은 값은 구간이 아니다');
   assert.equal(playback.rangeFromInput('T−11:00', 'T+01:00', BOUNDS), undefined, '범위 밖은 거절한다');
   assert.equal(playback.rangeFromInput('T+01:00', 'T+31:00', BOUNDS), undefined, '범위 밖은 거절한다');
   assert.equal(playback.rangeFromInput('', 'T+01:00', BOUNDS), undefined);
   assert.equal(playback.rangeFromInput('abc', 'T+01:00', BOUNDS), undefined);
+
+  let state = { ...playback.initialPlayback(BOUNDS), playheadMs: 60000 };
+  state = playback.timelineKey(state, key('['), BOUNDS);
+  state = { ...state, playheadMs: 150000 };
+  state = playback.timelineKey(state, key('['), BOUNDS);
+  assert.deepEqual(state.range, playback.rangeFromInput('T+01:00', 'T+02:30', BOUNDS), '키보드 구간과 숫자 입력이 같다');
+  assert.deepEqual(state.range, { fromMs: 60000, toMs: 150000 });
 });

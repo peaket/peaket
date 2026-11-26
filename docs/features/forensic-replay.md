@@ -249,7 +249,7 @@ Apache Arrow IPC 파일 형식(`.arrow`, 앞뒤 매직 `ARROW1`. Arrow는 열 �
 | `member` | uint8 | 1이면 사건 묶음 계정의 여정(조사 원천만, 그 밖은 0) |
 | `post_seat` | uint8 | 1이면 외부 게시물과 맞은 좌석의 사건(조사 원천만, 그 밖은 0) |
 
-**메타데이터 키(추천 적용 2026-11-27, F-04-17)**: 스키마 메타데이터의 키는 `schema`·`source`·`seatCount`·`sectionCount`·`saleStart`이고, 원천마다 더 두는 값은 위 §4.2 앞머리와 같은 이름(`seed`·`generatorVersion`·`loaderRunId`·`eventId`·`caseId`·`windowFromMs`·`windowToMs`·`snapshotVersion`)으로 적는다. 수는 십진 정수 문자열, 시각은 ISO 8601 문자열이다. 해독기는 열 이름·형·순서와 압축·사전 표시를 먼저 보고(아래 검증 표), 통과한 뒤에 열 값을 읽는다. 열 값이 null이면 `seat`는 `0xFFFFFFFF`, `entropy`는 NaN, 나머지는 0으로 채운다.
+**메타데이터 키(추천 적용 2026-11-27, F-04-17)**: 스키마 메타데이터의 키는 `schema`·`source`·`seatCount`·`sectionCount`·`saleStart`이고, 원천마다 더 두는 값은 위 §4.2 앞머리와 같은 이름(`seed`·`generatorVersion`·`loaderRunId`·`eventId`·`caseId`·`windowFromMs`·`windowToMs`·`snapshotVersion`)으로 적는다. 수는 십진 정수 문자열, 시각은 ISO 8601 문자열이다. 해독기는 열 이름·형·순서와 사전 표시를 먼저 보고(아래 검증 표), 통과한 뒤에 열 값을 읽는다. 열 값이 null이면 `seat`는 `0xFFFFFFFF`, `entropy`는 NaN, 나머지는 0으로 채운다. 몸통 압축은 IPC 해독기(`apache-arrow`)가 풀지 못하면 파일 거절이고, 실제 압축 파일로 확인하는 시험은 미실행이다(추천 적용 2026-11-27, F-04-17).
 
 검증(하나라도 실패하면 아무것도 그리지 않는다, 웹 앱 보안 검증 항목 목록인 ASVS의 5.2·1.5.2):
 
