@@ -74,6 +74,11 @@ function png(width: number, height: number): Uint8Array {
 }
 const idOf = (sourceKey: string) => sourceKey.slice(sourceKey.lastIndexOf('/') + 1);
 const prefixOf = (sourceKey: string) => (sourceKey.includes('/review/') ? 'review' : sourceKey.includes('/banner/') ? 'banner' : 'production');
+/** core-svc가 다시 보는 형식(RIFF????WEBP / ftyp avif)에 맞는 준비 위치 바이트(production-image.int의 derived()와 같다) */
+const derived = (name: string, id: string) =>
+  name.endsWith('.webp')
+    ? Buffer.concat([Buffer.from('RIFF\x10\x00\x00\x00WEBPVP8 ', 'latin1'), Buffer.from(`${id}:${name}`)])
+    : Buffer.concat([Buffer.from('\x00\x00\x00\x1cftypavif\x00\x00\x00\x00', 'latin1'), Buffer.from(`${id}:${name}`)]);
 
 function startImaging(): Promise<number> {
   const def = protoLoader.fromJSON(imageV1Image as Parameters<typeof protoLoader.fromJSON>[0], { keepCase: true, longs: Number, enums: String, defaults: true, oneofs: true });
@@ -94,7 +99,7 @@ function startImaging(): Promise<number> {
       if (!ans?.skipStaging) {
         for (const n of names) {
           mkdirSync(dirname(join(dir, 'staging', prefix, id, n)), { recursive: true });
-          writeFileSync(join(dir, 'staging', prefix, id, n), Buffer.from(`${id}:${n}`));
+          writeFileSync(join(dir, 'staging', prefix, id, n), derived(n, id));
         }
       }
       cb(null, ans ?? { status: 'IMAGE_STATUS_ACCEPTED', derivative_keys: names.map((n) => `staging/${prefix}/${id}/${n}`), width: size.width, height: size.height });
@@ -113,6 +118,20 @@ async function upload(o: { kind?: string; bytes?: Uint8Array; name?: string } = 
 }
 const json = (r: { payload: string }) => JSON.parse(r.payload) as Record<string, unknown>;
 const publicFiles = (id: string) => (existsSync(join(dir, 'public', 'production', id)) ? readdirSync(join(dir, 'public', 'production', id)).sort() : []);
+const stagingDirs = () => (existsSync(join(dir, 'staging', 'production')) ? readdirSync(join(dir, 'staging', 'production')).filter((d) => readdirSync(join(dir, 'staging', 'production', d)).length > 0) : []);
+const quarantineFiles = () => (existsSync(join(dir, 'quarantine', 'production')) ? readdirSync(join(dir, 'quarantine', 'production')) : []);
+async function eventually(check: () => unknown, ms = 5_000): Promise<void> {
+  const end = Date.now() + ms;
+  for (;;) {
+    try {
+      await check();
+      return;
+    } catch (e) {
+      if (Date.now() > end) throw e;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  }
+}
 
 async function waitJob(kind = 'PRODUCTION'): Promise<string> {
   const end = Date.now() + 5_000;
@@ -200,6 +219,8 @@ describe('F-10-2 이미지 작업 원장 실제 DB 배선', () => {
     expect(job).toMatchObject({ kind: 'PRODUCTION', status: 'DONE', resultStatus: 'ACCEPTED', attempts: 1, sourceKey: key });
     expect(job!.leaseUntil).toBeNull();
     expect(publicFiles(id)).toEqual([...namesFor(1200)].sort());
+    // 게시가 끝나면 격리 원본·준비 위치가 남지 않는다
+    await eventually(() => expect({ staging: stagingDirs(), quarantine: quarantineFiles(), public: publicFiles(id) }).toEqual({ staging: [], quarantine: [], public: [...namesFor(1200)].sort() }));
     expect(imaging.calls.at(-1)).toEqual({ source_key: key, kind: 'IMAGE_KIND_PRODUCTION' });
   });
 
@@ -266,6 +287,13 @@ describe('F-10-2 이미지 작업 원장 실제 DB 배선', () => {
     expect((await first).claimed).toBe(1);
     expect((await p).statusCode).toBe(201);
     expect((await jobStore.find(key))!.status).toBe('DONE');
+    // lease가 만료된 작업은 다음 바퀴가 다시 집는다
+    const staleKey = `cleanup/production/${randomUUID()}`;
+    const t0 = clock.now();
+    await jobStore.enqueue({ sourceKey: staleKey, kind: 'CLEANUP' }, new Date(t0));
+    expect((await jobStore.leaseDue(new Date(t0), 1, 1_000))[0]!.sourceKey).toBe(staleKey);
+    expect(await jobStore.leaseDue(new Date(t0 + 999), 1, 1_000)).toEqual([]);
+    expect((await jobStore.leaseDue(new Date(t0 + 1_001), 1, 1_000))[0]!.sourceKey).toBe(staleKey);
   });
 
   test('F-10-2 포스터를 바꾸면 옛 파생본 정리가 CLEANUP 작업으로 원장에 오르고 워커가 지운다 [ASVS v5.0.0-16.5.3]', async () => {
@@ -275,6 +303,11 @@ describe('F-10-2 이미지 작업 원장 실제 DB 배선', () => {
     await worker.runOnce(new Date(clock.now()));
     const firstId = json(await first).imageId as string;
     expect(publicFiles(firstId)).toHaveLength(namesFor(1200).length);
+    // 옛 이미지의 준비·격리 위치에 남은 객체도 CLEANUP이 지우는지 보려고 하나씩 남긴다
+    mkdirSync(join(dir, 'staging', 'production', firstId), { recursive: true });
+    writeFileSync(join(dir, 'staging', 'production', firstId, '320.webp'), derived('320.webp', firstId));
+    mkdirSync(join(dir, 'quarantine', 'production'), { recursive: true });
+    writeFileSync(join(dir, 'quarantine', 'production', firstId), Buffer.from('orphan'));
     const second = upload({ kind: 'POSTER' });
     await waitJob();
     await worker.runOnce(new Date(clock.now()));
@@ -283,6 +316,8 @@ describe('F-10-2 이미지 작업 원장 실제 DB 배선', () => {
     expect(cleanupKey).toBe(`cleanup/production/${firstId}`);
     await worker.runOnce(new Date(clock.now()));
     expect(publicFiles(firstId)).toEqual([]);
+    expect(stagingDirs()).not.toContain(firstId);
+    expect(quarantineFiles()).not.toContain(firstId);
     expect(await jobStore.find(cleanupKey)).toMatchObject({ status: 'DONE', resultStatus: 'DELETED' });
   });
 
