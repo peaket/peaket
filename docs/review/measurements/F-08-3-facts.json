@@ -1,0 +1,893 @@
+{
+  "schema": 1,
+  "asOf": "2026-11-26",
+  "sources": {
+    "f082": "docs/review/measurements/F-08-2-msr020.md",
+    "f088": "docs/review/measurements/F-08-8-after.md",
+    "nfr021": "docs/planning/02-requirements.md",
+    "arch95": "docs/architecture.md",
+    "infra11": "docs/infra.md",
+    "ledgerNotes": "docs/review/ledger-notes.md",
+    "dora20261116": "docs/review/measurements/F-08-3-dora-2026-11-16.md",
+    "dora20261123": "docs/review/measurements/F-08-3-dora-2026-11-23.md"
+  },
+  "facts": [
+    {
+      "id": "F082-X1",
+      "value": 800,
+      "unit": "req/s",
+      "label": "실측(PC)",
+      "source": "f082",
+      "anchor": "X₁(1 vCPU) = 800",
+      "detail": "3회 중앙값(720·800·800), 편차 80",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "F082-N250",
+      "value": 250,
+      "unit": "servers",
+      "label": "외삽",
+      "source": "f082",
+      "anchor": "필요한 대수 250(외삽 배수 31.25, 측정 범위의 4배 초과)",
+      "detail": "200,000 RPS 진입 설계 식 외삽(측정 범위의 4배 초과); 비례 전제 확인 못 함; 100만 외삽 값 아님",
+      "extrapolation": {
+        "target": 200000,
+        "x1": 800,
+        "measuredMax": 8,
+        "factor": 31.25
+      },
+      "usedIn": ["m6", "capacity", "cost"]
+    },
+    {
+      "id": "F082-VT4",
+      "value": null,
+      "unit": "status",
+      "label": "문서 인용",
+      "status": "판정 못 함",
+      "source": "ledgerNotes",
+      "anchor": "세 점 가운데 10만이 없어 V-T4는 **판정 못 함**이다.",
+      "detail": "MSR-010(100만 외삽) 보고서 없음. 창 1 K1 v1 10만 r1·r2 무효(dropped 약 3,000·1,300), r3 skip",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "F082-E8",
+      "value": 0.25,
+      "unit": "ratio",
+      "label": "계산",
+      "source": "f082",
+      "anchor": "| 8 | 640 | 0.250 | 0.100 |",
+      "detail": "0.5 vCPU N=8(1GiB 무대) X=640, 임시 분모 320 기준 E(8)=0.250(설계 800 기준 0.100); N=1 무효로 비례 전제 확인 못 함",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "F082-R",
+      "value": 490800,
+      "unit": "ops/s",
+      "label": "문서 인용",
+      "source": "f082",
+      "anchor": "R=490,800은 계획 §3.3의 2026-11-01 실측을 그대로 썼다(다시 재지 않음).",
+      "detail": "2026-11-01 Redis 한 키 TLS 켬 실측 인용(3회 490,800·497,800·497,500), 이번 창에서 다시 재지 않음",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "F082-N1",
+      "value": null,
+      "unit": "req/s",
+      "label": "실측(PC)",
+      "status": "무효",
+      "source": "f082",
+      "anchor": "| 1 | 320, 200, 찾지 못함 | — | — | 없음 | **무효**(한 회 null) |",
+      "detail": "0.5 vCPU N=1 3회 측정(320·200·찾지 못함, 편차 산정 불가): r3 100/s에서도 200ms 초과 1.37%(p99 297.9ms)·오류 0.13%로 무효",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "F082-N8-X",
+      "value": 640,
+      "unit": "req/s",
+      "label": "실측(PC)",
+      "source": "f082",
+      "anchor": "| 8 | 640, 640, 640 | 640 | 0 | 없음 | 유효 |",
+      "detail": "0.5 vCPU N=8(1GiB 무대) 3회 중앙값 640(640·640·640, 편차 0). N=1 무효로 비례 전제 확인 못 함",
+      "usedIn": ["capacity", "cost"]
+    },
+    {
+      "id": "F082-X1POD-TMP",
+      "value": 320,
+      "unit": "req/s",
+      "label": "계산",
+      "source": "f082",
+      "anchor": "N=1의 두 유효값 320·200의 **최댓값 320**을 `x1pod` 임시 분모·다음 N의 단계 어림으로 썼다.",
+      "detail": "0.5 vCPU N=1 무효로 두 유효값 320·200의 최댓값을 임시 분모로 사용(200,000÷320=625, 측정 최대 8대의 78배)",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "F088-K1-1K-P99",
+      "value": 0.5,
+      "unit": "ms",
+      "label": "실측(PC)",
+      "status": "부분",
+      "source": "f088",
+      "anchor": "| 1,000 | k1-1k-r3 | 0 | 0/1,000 | 0 | 0.5ms | 3.3ms | **pass** |",
+      "detail": "K1 1,000명 3회 유효 중 1/3 통과(r1 dropped 2 무효, r1b·r2 fail, r3 pass; 2GiB 무대). r3 status p99 0.5ms(admission p99 3.3ms, r1b~r3 status p99 편차 0ms)",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "F088-K1-1K-ERR",
+      "value": 0,
+      "unit": "%",
+      "label": "실측(PC)",
+      "status": "부분",
+      "source": "f088",
+      "anchor": "| 1,000 | k1-1k-r3 | 0 | 0/1,000 | 0 | 0.5ms | 3.3ms | **pass** |",
+      "detail": "K1 1,000명 r3 진입 오류율 0%(유효 3회 r1b 8.5%·r2 0.4%·r3 0%, 편차 8.5%p; 1/3 통과, 2GiB 무대)",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "F088-K1-10K",
+      "value": null,
+      "unit": "status",
+      "label": "문서 인용",
+      "status": "미달",
+      "source": "f088",
+      "anchor": "Q-T2(진입·대기 상태·입장 확정 p99 < 200ms, 오류율 < 0.1%): 1k r3만 통과, 나머지 유효 실행은 미달.",
+      "detail": "K1 10,000명 r1·r2·r3 3회 모두 fail(진입 200ms 초과 1.24%·1.72%·1.20%, 진입 오류 0.66%·0.73%·0.80%). 2GiB 무대",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "F088-K1-10K-P99",
+      "value": 0.5,
+      "unit": "ms",
+      "label": "실측(PC)",
+      "status": "미달",
+      "source": "f088",
+      "anchor": "| 10,000 | k1-10k-r1 | 0 | 124/10,000(1.24%) | 66(0.66%) | 0.5ms | 3.4ms | fail |",
+      "detail": "K1 10,000명 3회 모두 fail(r1·r2·r3 모두 status p99 0.5ms·admission p99 3.4ms, 편차 0ms; 진입 200ms 초과로 미달). 2GiB 무대",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "F088-K1-10K-ERR",
+      "value": 0.66,
+      "unit": "%",
+      "label": "실측(PC)",
+      "status": "미달",
+      "source": "f088",
+      "anchor": "| 10,000 | k1-10k-r1 | 0 | 124/10,000(1.24%) | 66(0.66%) | 0.5ms | 3.4ms | fail |",
+      "detail": "K1 10,000명 3회 모두 fail(r1 0.66%·r2 0.73%·r3 0.80%, 편차 0.14%p). r1 진입 오류율(2GiB 무대)",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "F088-K1-100K",
+      "value": null,
+      "unit": "status",
+      "label": "실측(PC)",
+      "status": "무효",
+      "source": "f088",
+      "anchor": "| 100,000 | k1-100k-r1 | 약 3,000 | 9,774/99,952(9.8%) | 3,750(3.75%) | 0.5ms | 3.5ms | 무효 |",
+      "detail": "K1 100,000명 3회 중 r1(dropped 약 3,000)·r2(dropped 약 1,300) 2회 연속 무효(편차 약 1,700), r3 skip(2GiB 무대)",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "F088-K2-R2-P99",
+      "value": 253.3,
+      "unit": "ms",
+      "label": "실측(PC)",
+      "status": "미달",
+      "source": "f088",
+      "anchor": "| k2-hot-tls-r2 | 4대 | 0 | 253.3ms | 180.2ms | 0.77% | 유효·S-T1 미달 |",
+      "detail": "K2 인기 좌석 TLS 켬 3회 중 r1(dropped 258) 무효, r2 253.3ms·r3 262.6ms(유효 2회 편차 9.3ms), S-T1 목표 50ms 미달(2GiB 무대)",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "F088-K2-R2-ERR",
+      "value": 0.77,
+      "unit": "%",
+      "label": "실측(PC)",
+      "status": "미달",
+      "source": "f088",
+      "anchor": "| k2-hot-tls-r2 | 4대 | 0 | 253.3ms | 180.2ms | 0.77% | 유효·S-T1 미달 |",
+      "detail": "K2 인기 좌석 r2 오류율 0.77%(r3 0.85%, 유효 2회 편차 0.08%p). S-T1 미달(2GiB 무대)",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "F088-K2-R3-P99",
+      "value": 262.6,
+      "unit": "ms",
+      "label": "실측(PC)",
+      "status": "미달",
+      "source": "f088",
+      "anchor": "| k2-hot-tls-r3 | 4대 | 0 | 262.6ms | 184.7ms | 0.85% | 유효·S-T1 미달 |",
+      "detail": "K2 인기 좌석 r3 hold p99(k6) 262.6ms(r2 253.3ms, 유효 2회 편차 9.3ms), S-T1 목표 50ms 미달(2GiB 무대)",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "F088-K2-R3-ERR",
+      "value": 0.85,
+      "unit": "%",
+      "label": "실측(PC)",
+      "status": "미달",
+      "source": "f088",
+      "anchor": "| k2-hot-tls-r3 | 4대 | 0 | 262.6ms | 184.7ms | 0.85% | 유효·S-T1 미달 |",
+      "detail": "K2 인기 좌석 r3 오류율 0.85%(r2 0.77%, 유효 2회 편차 0.08%p). S-T1 미달(2GiB 무대)",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "F088-K7A",
+      "value": null,
+      "unit": "status",
+      "label": "실측(PC)",
+      "status": "무효",
+      "source": "f088",
+      "anchor": "K7 ① 유효 실행 0. NFR-006 v1 값은 '판정 못 함/무효'다.",
+      "detail": "K7 ① 300/s 결제 r1(dropped 7,459)·r1b(dropped 3,844) 2회 연속 무효(편차 3,615), r2·r3 skip(2GiB 무대)",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "F088-K7B",
+      "value": null,
+      "unit": "status",
+      "label": "실측(PC)",
+      "status": "부분",
+      "source": "f088",
+      "anchor": "P-T1은 **부분(동결 선행 몫 측정 못 함 + 발생기 무효)**으로 적는다.",
+      "detail": "K7 ② 3회 모두 발생기 무효(dropped 2,335·2,584·2,698, 편차 363; k6 p99 7,970·5,193·6,213ms) 및 동결 선행 미측정; 불변식 PASS 15·SKIP 2",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "F088-K7B-ZERO",
+      "value": 0,
+      "unit": "violations",
+      "label": "실측(PC)",
+      "status": "부분",
+      "source": "f088",
+      "anchor": "이중 결제 0, P6(승인인데 원장에 없음) 0, 좌석 누수 0 — **불변식은 3회 모두 깨끗**하다.",
+      "detail": "K7 ② 3회 반복(k7b-r1~r3, 편차 0건) 모두 이중 결제 0·P6 0·좌석 누수 0(PASS 15·SKIP 2), 단 3회 모두 발생기 무효",
+      "usedIn": ["m6", "capacity"]
+    },
+    {
+      "id": "NFR021-WAIT-Y1",
+      "value": 2000000,
+      "unit": "users",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "합산 동시 대기 인원 200만 → 250만 → 300만 명",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "NFR021-WAIT-Y2",
+      "value": 2500000,
+      "unit": "users",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "합산 동시 대기 인원 200만 → 250만 → 300만 명",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "NFR021-WAIT-Y3",
+      "value": 3000000,
+      "unit": "users",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "합산 동시 대기 인원 200만 → 250만 → 300만 명",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "NFR021-ADMIT-Y1",
+      "value": 10000,
+      "unit": "users",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "합산 동시 입장 상한 1만 → 1.25만 → 1.5만 명",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "NFR021-ADMIT-Y2",
+      "value": 12500,
+      "unit": "users",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "합산 동시 입장 상한 1만 → 1.25만 → 1.5만 명",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "NFR021-ADMIT-Y3",
+      "value": 15000,
+      "unit": "users",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "합산 동시 입장 상한 1만 → 1.25만 → 1.5만 명",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "NFR021-ADMIT-PRE",
+      "value": 5000,
+      "unit": "users",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "그 전에는 합산 5,000명으로 통제한다",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "NFR021-LARGE-Y1",
+      "value": 24,
+      "unit": "events/year",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "대형 공연(동시 대기 50만 명 이상) 개최 횟수 연간 24회 → 36회 → 48회",
+      "usedIn": ["capacity", "cost"]
+    },
+    {
+      "id": "NFR021-LARGE-Y2",
+      "value": 36,
+      "unit": "events/year",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "대형 공연(동시 대기 50만 명 이상) 개최 횟수 연간 24회 → 36회 → 48회",
+      "usedIn": ["capacity", "cost"]
+    },
+    {
+      "id": "NFR021-LARGE-Y3",
+      "value": 48,
+      "unit": "events/year",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "대형 공연(동시 대기 50만 명 이상) 개최 횟수 연간 24회 → 36회 → 48회",
+      "usedIn": ["capacity", "cost"]
+    },
+    {
+      "id": "NFR021-CONC-Y1",
+      "value": 3,
+      "unit": "events",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "동시 온세일 공연 최대 3개 → 4개 → 5개",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "NFR021-CONC-Y2",
+      "value": 4,
+      "unit": "events",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "동시 온세일 공연 최대 3개 → 4개 → 5개",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "NFR021-CONC-Y3",
+      "value": 5,
+      "unit": "events",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "동시 온세일 공연 최대 3개 → 4개 → 5개",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "NFR021-TICKET-Y1",
+      "value": 4000000,
+      "unit": "tickets/year",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "연간 티켓 발행량 400만 → 600만 → 825만 장",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "NFR021-TICKET-Y2",
+      "value": 6000000,
+      "unit": "tickets/year",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "연간 티켓 발행량 400만 → 600만 → 825만 장",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "NFR021-TICKET-Y3",
+      "value": 8250000,
+      "unit": "tickets/year",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "연간 티켓 발행량 400만 → 600만 → 825만 장",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "NFR021-GAP-LARGE",
+      "value": 30,
+      "unit": "minutes",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "대형 공연끼리는 티켓 오픈 시각을 최소 30분 이상 떼고",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "NFR021-GAP-NORMAL",
+      "value": 5,
+      "unit": "minutes",
+      "label": "설계 목표",
+      "source": "nfr021",
+      "anchor": "일반 공연은 최소 5분 이상 간격을 강제한다(POL-030)",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-MEDIUM-Y1",
+      "value": 120,
+      "unit": "events/year",
+      "label": "설계 목표",
+      "source": "arch95",
+      "anchor": "| 중형 공연 (대기 10만~50만 명, 평균 15,000석) | 연간 120회 | 연간 180회 | 연간 240회 |",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-MEDIUM-Y2",
+      "value": 180,
+      "unit": "events/year",
+      "label": "설계 목표",
+      "source": "arch95",
+      "anchor": "| 중형 공연 (대기 10만~50만 명, 평균 15,000석) | 연간 120회 | 연간 180회 | 연간 240회 |",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-MEDIUM-Y3",
+      "value": 240,
+      "unit": "events/year",
+      "label": "설계 목표",
+      "source": "arch95",
+      "anchor": "| 중형 공연 (대기 10만~50만 명, 평균 15,000석) | 연간 120회 | 연간 180회 | 연간 240회 |",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-SMALL-Y1",
+      "value": 2000,
+      "unit": "events/year",
+      "label": "설계 목표",
+      "source": "arch95",
+      "anchor": "| 소형 공연 (대기 10만 명 미만, 평균 500석) | 연간 2,000회 | 연간 3,000회 | 연간 4,500회 |",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-SMALL-Y2",
+      "value": 3000,
+      "unit": "events/year",
+      "label": "설계 목표",
+      "source": "arch95",
+      "anchor": "| 소형 공연 (대기 10만 명 미만, 평균 500석) | 연간 2,000회 | 연간 3,000회 | 연간 4,500회 |",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-SMALL-Y3",
+      "value": 4500,
+      "unit": "events/year",
+      "label": "설계 목표",
+      "source": "arch95",
+      "anchor": "| 소형 공연 (대기 10만 명 미만, 평균 500석) | 연간 2,000회 | 연간 3,000회 | 연간 4,500회 |",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-ORDERS-Y1",
+      "value": 2000000,
+      "unit": "orders/year",
+      "label": "설계 목표",
+      "source": "arch95",
+      "anchor": "| 연간 총 주문 처리 건수 | 200만 건 | 300만 건 | 약 412만 건 |",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-ORDERS-Y2",
+      "value": 3000000,
+      "unit": "orders/year",
+      "label": "설계 목표",
+      "source": "arch95",
+      "anchor": "| 연간 총 주문 처리 건수 | 200만 건 | 300만 건 | 약 412만 건 |",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-ORDERS-Y3",
+      "value": 4120000,
+      "unit": "orders/year",
+      "label": "설계 목표",
+      "source": "arch95",
+      "anchor": "| 연간 총 주문 처리 건수 | 200만 건 | 300만 건 | 약 412만 건 |",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-PG-PEAK",
+      "value": 300,
+      "unit": "TPS",
+      "label": "설계 목표",
+      "source": "arch95",
+      "anchor": "| 결제 승인 요구 피크 트래픽 | 300 TPS(정상 약 56) | 300 TPS(정상 약 69) | 300 TPS(정상 약 83) |",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-ENTRY-LIMIT",
+      "value": 200000,
+      "unit": "req/s",
+      "label": "설계 목표",
+      "source": "arch95",
+      "anchor": "진입 피크의 설계 기준은 공연 하나 기준인 200,000 RPS",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-FILES-Y3",
+      "value": 3000,
+      "unit": "files",
+      "label": "계산",
+      "source": "arch95",
+      "anchor": "대기 상태 파일 수는 약 3,000개 수준이고",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-CDN-Y3",
+      "value": 160000,
+      "unit": "req/s",
+      "label": "설계 목표",
+      "source": "arch95",
+      "anchor": "CDN 엣지 요청은 초당 약 16만 건으로 나뉜다.",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-ORIGIN-Y3",
+      "value": 3000,
+      "unit": "req/s",
+      "label": "계산",
+      "source": "arch95",
+      "anchor": "백엔드 Origin 요청은 초당 약 3,000건 수준으로 여전히 가볍다.",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-SHUFFLE-Y3",
+      "value": 285000,
+      "unit": "req/s",
+      "label": "계산",
+      "source": "arch95",
+      "anchor": "다른 회차의 셔플 결과 조회가 겹치면 초당 약 28.5만 건이 되므로",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-HOLD-Y3",
+      "value": 6000,
+      "unit": "ops/s",
+      "label": "설계 목표",
+      "source": "arch95",
+      "anchor": "좌석 홀드 피크는 초당 최대 약 6,000건",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-COMMIT-Y3",
+      "value": 83,
+      "unit": "ops/s",
+      "label": "계산",
+      "source": "arch95",
+      "anchor": "최종 판매 확정은 초당 약 83건",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-DB-ORDERS-5Y",
+      "value": 17000000,
+      "unit": "rows",
+      "label": "설계 목표",
+      "source": "arch95",
+      "anchor": "주문 약 1,700만 건, 티켓 약 3,500만 장 수준이다.",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "ARCH95-DB-TICKETS-5Y",
+      "value": 35000000,
+      "unit": "rows",
+      "label": "설계 목표",
+      "source": "arch95",
+      "anchor": "주문 약 1,700만 건, 티켓 약 3,500만 장 수준이다.",
+      "usedIn": ["capacity"]
+    },
+    {
+      "id": "INFRA11-BASE-TOTAL",
+      "value": 13822,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| **합계** | | **약 1만 3,822달러** |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-AURORA-PURCHASE",
+      "value": 971,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| Aurora PostgreSQL purchase(쓰기 + 읽기) | 2 × db.r7g.xlarge 0.665달러 | 약 971달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-AURORA-SHARED",
+      "value": 1945,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| Aurora payment·ticket·ops·공유(클러스터마다 쓰기 + 읽기) | 8 × db.r7g.large 0.333달러 | 약 1,945달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-AURORA-TOKYO",
+      "value": 243,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| Aurora ticket 도쿄 보조 클러스터 읽기 | 1 × db.r7g.large 0.333달러(도쿄도 같은 값) | 약 243달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-VALKEY-HOT",
+      "value": 3658,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| ElastiCache Valkey 대기열·좌석(클러스터마다 샤드 3 × 주·복제) | 12 × cache.r7g.xlarge 0.4176달러 | 약 3,658달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-VALKEY-SESSION",
+      "value": 918,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| ElastiCache Valkey 세션·캐시(샤드 3 × 주·복제) | 6 × cache.r7g.large 0.2096달러 | 약 918달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-MSK-TRADE-OBS",
+      "value": 1648,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| MSK 거래·제어(6대, ADR-0141 결정 2), 관측 전용(3대) | 9 × kafka.m7g.large 0.2508달러 | 약 1,648달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-MSK-TELEMETRY",
+      "value": 1098,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| MSK 텔레메트리 | 3 × kafka.m7g.xlarge 0.5015달러 | 약 1,098달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-MSK-STORAGE",
+      "value": 137,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| MSK 저장 | 브로커 12 × 100GB [가정] × GB-월 0.114달러 | 약 137달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-EKS-APP",
+      "value": 1374,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| EKS 노드: 핫패스 c7g.2xlarge 3, 일반 m7g.xlarge 3, 관제 m7g.large 3 | 0.3264·0.2006·0.1003달러 | 약 1,374달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-EKS-DATA-OBS",
+      "value": 1467,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| EKS 노드: 데이터(ClickHouse r7g.2xlarge 2, Keeper·스트림 작업자 m7g.xlarge 1), 관측 r7g.xlarge 3 | 0.5168·0.2006·0.2584달러 | 약 1,467달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-NET-CP",
+      "value": 273,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| EKS 제어 평면, NAT 게이트웨이 3, NLB 3(CloudFront용 사설 2(팬·파트너, 관제)·스캐너용 공개 1, 기술 검토 낮음-009, ADR-0144 결정 1), 공인 IPv4 6 | 0.10·0.059·0.0225·0.005달러 | 약 273달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-WAF-FIXED",
+      "value": 40,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| WAF(웹 ACL 셋·규칙 열하나·Bot Control 하나, ADR-0144 결정 3) | 월 5달러·1달러·10달러 | 약 40달러 [추정] |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-OTHER-FIXED",
+      "value": 50,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| 그 밖의 고정 요금(KMS 키, Secrets Manager 비밀, DNS 등) | — | 약 50달러 [가정] |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-WAF-ONSALE",
+      "value": 20,
+      "unit": "USD/event",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "대기열 API 약 300만·공연 페이지 약 2,000만·`api` 약 1,000만 건 [가정]이면 1회 약 20달러이고",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-WAF-ALL-COMMON",
+      "value": 370,
+      "unit": "USD/event",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "100만 온세일 70분의 대기 상태 조회 약 2.3억 건만으로 1회 약 370달러다.",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-WAF-ALL-TARGETED",
+      "value": 2400,
+      "unit": "USD/event",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "Targeted면 약 2,400달러다 [추정].",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-HOTPATH-NODE",
+      "value": 0.3264,
+      "unit": "USD/hour",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| EKS 노드: 핫패스 c7g.2xlarge 3, 일반 m7g.xlarge 3, 관제 m7g.large 3 | 0.3264·0.2006·0.1003달러 | 약 1,374달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-SAVED-VALKEY",
+      "value": 1144,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "그래서 엔진을 Valkey로 둔 것(ADR-0086)이 이미 월 약 1,144달러를 줄인다.",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-EKS-DEMO-MIN",
+      "value": 133,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-13",
+      "source": "infra11",
+      "anchor": "EKS 제어 평면·NAT 게이트웨이·NLB만으로 월 약 133달러(서울 리전 가격, 2026-10-13 조회)가 들어",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-CUT-TELEMETRY",
+      "value": 1098,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| MSK 텔레메트리를 거래·제어 클러스터에 합치기 | 최대 약 1,098달러",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-CUT-OBS",
+      "value": 549,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| MSK 관측 전용 클러스터를 텔레메트리에 합치기 | 약 549달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-CUT-MSK6TO3",
+      "value": 583,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| MSK 거래·제어 브로커 6 → 3 | 약 583달러",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-CUT-VALKEY-SESS",
+      "value": 612,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| Redis 세션·캐시 샤드 3 → 1(주 1 + 복제 1) | 약 612달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-CUT-AURORA-OPS",
+      "value": 486,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| Aurora ops를 공유 클러스터에 다시 합치기 | 약 486달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-CUT-AURORA-RO",
+      "value": 486,
+      "unit": "USD/month",
+      "label": "[추정]",
+      "priceAsOf": "2026-10-28",
+      "source": "infra11",
+      "anchor": "| 2등급 클러스터(ops·공유)의 읽기 복제 빼기 | 약 486달러 |",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "INFRA11-NO-UNIT-PRICE",
+      "value": null,
+      "unit": "status",
+      "label": "문서 인용",
+      "status": "자료 없음",
+      "source": "infra11",
+      "anchor": "데이터 전송·NAT 처리, CloudFront·WAF 요청 요금, Origin Shield 요청 요금",
+      "detail": "docs/infra.md §11 상시 기본 비용표에 CloudFront·NLB 교차 전송·S3·gp3 볼륨·약정 할인 단가 없음(단가 없음: 미계산)",
+      "usedIn": ["cost"]
+    },
+    {
+      "id": "DORA-W47-DEPLOY",
+      "value": 0,
+      "unit": "deployments",
+      "label": "문서 인용",
+      "source": "dora20261116",
+      "anchor": "| 전체 | 0 | 자료 없음 | 자료 없음 | 자료 없음 | 0 | 자료 없음 |",
+      "detail": "2026-11-16 주(완료, 데모 환경 기준): 빈 배포 기록 실행 결과 성공 배포 0건",
+      "usedIn": ["dora"]
+    },
+    {
+      "id": "DORA-W47-NODATA",
+      "value": null,
+      "unit": "status",
+      "label": "문서 인용",
+      "status": "자료 없음",
+      "source": "dora20261116",
+      "anchor": "값이 없는 칸은 자료 없음이다(0으로 꾸미지 않는다).",
+      "detail": "2026-11-16 주(완료, 데모 환경 기준): 리드타임·변경 실패율·복구 시간·재작업률 모두 null(자료 없음)",
+      "usedIn": ["dora"]
+    },
+    {
+      "id": "DORA-W48-DEPLOY",
+      "value": 0,
+      "unit": "deployments",
+      "label": "문서 인용",
+      "source": "dora20261123",
+      "anchor": "| 전체 | 0 | 자료 없음 | 자료 없음 | 자료 없음 | 0 | 자료 없음 |",
+      "detail": "2026-11-23 주(진행 중, 2026-11-26 기준, 데모 환경 기준): 빈 배포 기록 실행 결과 성공 배포 0건",
+      "usedIn": ["dora"]
+    },
+    {
+      "id": "DORA-W48-NODATA",
+      "value": null,
+      "unit": "status",
+      "label": "문서 인용",
+      "status": "자료 없음",
+      "source": "dora20261123",
+      "anchor": "값이 없는 칸은 자료 없음이다(0으로 꾸미지 않는다).",
+      "detail": "2026-11-23 주(진행 중, 2026-11-26 기준, 데모 환경 기준): 리드타임·변경 실패율·복구 시간·재작업률 모두 null(자료 없음)",
+      "usedIn": ["dora"]
+    }
+  ]
+}

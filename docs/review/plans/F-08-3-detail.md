@@ -176,3 +176,16 @@
 
 - 줄일 곳: DORA 주 수(두 주 유지), 비용의 1~3년 세부 표, 용량의 3년차 세부. 남길 것: 사실 대장, '주장하지 않는 것', 100만/200만 경계, DORA `자료 없음`, 릴리스 범위 검사.
 - 늘릴 곳: 리뷰가 새 경계를 찾으면 계획을 고치고 시험을 먼저 고친다. 3.5일을 넘기면 감독에게 알린다.
+
+
+## 검증(문서 작성 뒤)
+
+- 구현·문서 작성 뒤 `D:/ticketpass-freeze-F-08-3`에서 실행(2026-11-26, `impl` 담당 `lane4-freeze-F-08-3-impl-agy`, Gemini 4 Hydrogen):
+  - `node --test --test-reporter=junit --test-reporter-destination=$env:TEMP\f083-junit.xml tools/ci/f083-reports.test.mjs` → **8시험, 8통과, 0실패** (`MSR-030 ①~②` 2, `MSR-080 ①~⑥` 6 모두 통과)
+  - `node tools/ci/trace-check.mjs --ids "MSR-030,MSR-080" --report $env:TEMP\f083-junit.xml` → **대조 통과: ID 2개(시험 8개를 봄)** (`MSR-030 통과 2`, `MSR-080 통과 6`)
+  - `node --test tools/ci/dora.test.mjs` → **5시험, 5통과, 0실패** (`D-T53 ①~④`)
+  - `corepack pnpm exec eslint tools/ci/f083-reports.test.mjs` → **종료 코드 0(오류 0)**
+  - `python -I -X utf8 tools/doc-check/check_all.py` → **오류 0, 경고 12 → 통과** (파일 2,790개 점검, F-08-3 예정 문서 경고 0)
+  - `node tools/ci/ledger.mjs --batch F-08-3 --require` → **장부 확인 통과(항목 0개, 빈칸 0, 등급 B)**
+  - `node tools/ci/release-scope.mjs --check` → **v1 릴리스 범위 검사 통과** (기능 105개: release 33, gate 5, frozen-local 67)
+  - `git diff --name-only 19b33ba85..HEAD -- docs/infra.md docs/verification.md docs/planning/02-requirements.md docs/architecture.md docs/release/v1-scope.json docs/release/v1-scope.md docs/BUILD_ORDER.md` → **비어 있음(정본·릴리스 범위·BUILD_ORDER 미변경)**
