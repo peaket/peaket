@@ -1005,6 +1005,8 @@ erDiagram
         timestamptz refund_failed_opened_at "환급 실패 CS 건(REFUND_FAILED·REFUND)을 ops-svc가 2xx로 받은 시각. 회차 취소 요청 ID가 없는 행만 쓴다(그 행은 일괄 환불 항목의 failure_case_opened_at이 맡는다). refund_failed_at이 있고 REFUND_PENDING인데 비어 있으면 마감 뒤 환급 실행기 틱 끝에 다시 연다(추천 적용 2026-11-17, BAT-420 다시 보기 2 N2)"
         timestamptz refund_account_required_at "계좌 대기: payment-svc가 REFUND_ACCOUNT_REQUIRED로 답한 시각(REFUND_PENDING만, 가상계좌 결제의 계좌 없음·계좌 거절). 있으면 환급 실행기가 집지 않고(next_refund_at 빔) 재시도 횟수·자동 정지 셈에 넣지 않는다. 계좌는 저장하지 않는다(purchase 0029, 추천 적용 2026-11-19, BUILD_ORDER GAT-090, docs/features/payment.md §6 '계좌 대기')"
         timestamptz refund_account_case_opened_at "CS '환불 대기'(REFUND_ACCOUNT_PENDING) 건을 ops-svc가 2xx로 받은 시각. refund_account_required_at 없이 쓰지 않는다(CHECK). 비어 있으면 마감 뒤 환급 실행기 틱 끝에 다시 연다(purchase 0029)"
+        int refund_account_notice_count "지연 환급 계좌 입력 요청을 보낸 횟수(0부터). 첫 요청은 refund_account_required_at이 쓰인 틱, 그 뒤 다음 영업일 10:00·그다음 영업일 10:00, 그 뒤 7일마다다(purchase 0039, F-07-15, R-T20 ②)"
+        timestamptz refund_account_notice_next_at "다음 계좌 입력 요청을 보낼 시각. refund_account_required_at과 함께 쓰고, 보낸 트랜잭션에서 count+1과 함께 고친다. 없으면 보내지 않는다(purchase 0039)"
         timestamptz entry_recorded_at "입장 시작 뒤 취소(REQUESTED)의 마감 뒤 대조에서 찾은 가장 이른 들어감·통과 시각. 있으면 환급 실행기가 결제사를 부르지 않고 refund_due_at을 비우며 CS 처리함 FLAGGED 건을 연다. 무효·환급은 CS가 정한다(추천 적용 2026-11-16, BUILD_ORDER GAT-090, docs/features/transfer-refund.md §3.1 '입장 기록 대조')"
     }
     fraud_cancellation_request {
@@ -1087,6 +1089,8 @@ erDiagram
         text account_last4 "끝 4자리만(짧은 계좌는 1~4자리), 계좌번호 원문은 저장하지 않는다(POL-014)"
         text transfer_id "payment-svc가 준 송금 ID(ACCOUNT_PENDING이면 null). payment compensation_transfer와 compensation_id로 잇는다"
         text failure_reason "FAILED의 개인정보 없는 까닭 이름표"
+        int account_notice_count "배상 계좌 입력 요청을 보낸 횟수(0부터). 일정은 지연 환급과 같다(purchase 0039, F-07-15, R-T20 ②)"
+        timestamptz account_notice_next_at "다음 배상 계좌 입력 요청을 보낼 시각. ACCOUNT_PENDING으로 만든 트랜잭션에서 createdAt과 함께 쓰고, 보낸 트랜잭션에서 count+1과 함께 고친다(purchase 0039)"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -1531,11 +1535,23 @@ erDiagram
     receivable_movement {
         uuid id PK
         uuid receivable_id
-        uuid statement_id "상계한 정산서(상계·되돌림만)"
+        uuid statement_id "상계·되돌림·충당의 근거 정산서. 청구·회수·손실처럼 근거 정산서가 없는 이동은 NULL이다(payment 0034, F-07-15). 0016의 NOT NULL을 0034가 넓힌다"
         text kind "OFFSET|GUARANTEE|COLLECTED|WRITE_OFF|REVERSAL|SUPERSEDED. SUPERSEDED는 다시 계산으로 옛 판의 NEGATIVE_STATEMENT 미수금을 남은 금액만큼 닫음(2026-11-23, ADR-0380 결정 8)"
         bigint amount "양수. REVERSAL은 되돌린 금액"
         uuid reverses_id "되돌린 이동 기록(REVERSAL만)"
         timestamptz created_at "덧붙이기만 하고 고치거나 지우지 않는다(추천 적용 2026-10-28, 기술 검토 중간-043)"
+    }
+    receivable_action {
+        uuid id PK
+        text idempotency_key "ops가 받은 Idempotency-Key. 부분 유일(같은 키는 한 번). key가 재생되면 처음 action을 그대로 준다(payment 0034, F-07-15)"
+        uuid receivable_id
+        uuid promoter_id "감사·화면 조회용. partner_receivable에서 복사한다"
+        text kind "BILLED|COLLECTED|WRITE_OFF"
+        bigint amount "BILLED는 그때의 remaining, COLLECTED는 받은 금액, WRITE_OFF는 남은 금액"
+        bigint remaining_after "전이 직후 partner_receivable.remaining. 불변식 대조용"
+        text actor "요청한 commander 계정 ID"
+        text reason "사유(1~2,000자). 개인정보 금지"
+        timestamptz created_at
     }
     reconciliation_run {
         uuid id PK

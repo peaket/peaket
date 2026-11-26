@@ -148,6 +148,8 @@ ADR-0109의 규칙 그대로다. 사건을 받은 트랜잭션에서 `notificati
 - 낱건은 초당 수백 건 아래에서 쓴다(ADR-0109 [추정]). 한 사건에서 받는 사람이 1,000명 [가정]을 넘는 알림(오픈 알림, 취소표 알림)은 낱건으로 만들지 않고 §4.2의 대량 발송으로 보낸다. 거래·안전 알림 가운데 받는 사람이 많은 회차 취소·연기 안내(5만 석 회차면 수만 명)는 지금처럼 낱건이다. 2인 확정 뒤 한 번 나가는 알림이고, 수만 행을 몇 분에 나눠 적으면 초당 수백 건 안이다.
 - **회차 취소·연기·환급 알림의 사건(2026-11-15, R-583)**: purchase-svc가 `trade.orders` Outbox에 대상 주문마다 `EVENT_CANCELLATION_CONFIRMED`(회차 취소 확정, `fanNoticeReason`), `EVENT_POSTPONED`(연기 확정, `postponedTo`·`refundWindowClosesAt`), `REFUNDED`(환급 완료, `refundAmount`), `REFUND_FAILED`(환급 실패, `fanNoticeReason`에 실패 사유 코드)를 남긴다. core-svc notify가 이 사건을 받아 결제자용·보유자용 문안으로 보내는 계약까지다.
 - **`core-notify-sender` 첫 몫(2026-11-15, R-592)**: core-svc notify에 `NotificationSender` 포트와 가짜 전송기(`FakeNotificationTransport`), 내부 `POST /internal/v1/notify/trade-events`를 넣었다. 네 사건을 중립 문안으로 바꾸고 같은 주문·종류는 한 번만 보낸다. `PEAKET_NOTIFY_SENDER_MODE=fake`가 아니면 UNAVAILABLE로 답하고 받는 쪽이 503으로 드러낸다. 발송 원장 표(`notification_job`·`notification_delivery`)와 Kafka `trade.orders` 소비자, 실제 웹 푸시·이메일 대행 연결은 이번 마이그레이션 허용 밖이라 후속이다.
+- **계좌 입력 요청의 사건과 일정(추천 적용 2026-11-27, 기능 F-07-15, transfer-refund §11 R-T20 ②)**: purchase-svc가 계좌 대기(`order_cancellation.refund_account_required_at`)와 배상 대기(`compensation` `ACCOUNT_PENDING`)에 `REFUND_ACCOUNT_REQUESTED`·`COMPENSATION_ACCOUNT_REQUESTED`를 `trade.orders` Outbox에 남긴다. 값은 `cancellationId`(환불 계좌만)·`compensationId`(배상만)·`refundAmount`를 더한다. 첫 요청은 계좌 대기가 된 틱에, 그다음은 다음 영업일 10:00·그다음 영업일 10:00(KST), 그 뒤 7일마다 나간다. 같은 대상·같은 회차는 `eventKey`가 같아 Outbox·수신 쪽에서 한 번이다. 계좌 원문은 싣지 않는다(POL-014). 실제 전송 문안·전송기는 F-06-1(동결) 몫이다.
+
 
 ### 4.2 대량 발송(추천 적용 2026-10-30)
 
