@@ -18,7 +18,7 @@ import { LoginSecondStep } from '../src/modules/admin/application/login-second-s
 import { SetAdminPassword } from '../src/modules/admin/application/set-admin-password.js';
 import { BeginTotpEnrollment, ConfirmTotpEnrollment } from '../src/modules/admin/application/totp-enrollment.js';
 import { DEFAULT_ADMIN_AUTH_CONFIG } from '../src/modules/admin/domain/auth-config.js';
-import { ADMIN_LOGIN_STORE, TotpKeyUnavailable } from '../src/modules/admin/domain/ports.js';
+import { ADMIN_LOGIN_STORE, type AdminPasswords, RECOVERY_CODE_HASHER, TotpKeyUnavailable } from '../src/modules/admin/domain/ports.js';
 import { base32Decode, base32Encode, totpAt } from '../src/modules/admin/domain/totp.js';
 import { JoseTokenSigner, TokenKeyRing } from '../src/modules/session/index.js';
 import { HmacIdentityHashers } from '../src/modules/verification/index.js';
@@ -153,6 +153,29 @@ const settings = (a: Account, sid: string) => get(a, sid, '/v1/partner/auth/secu
 const listSessions = (a: Account, sid: string) => get(a, sid, '/v1/partner/auth/sessions');
 const endSession = (a: Account, sid: string, target: string, token: string) => del(a, sid, `/v1/partner/auth/sessions/${target}`, { 'x-reauth-token': token });
 
+const rowOf = (id: string): Record<string, unknown> => store.rowForTest(id) as unknown as Record<string, unknown>;
+const liveCount = (id: string): number => store.sessions(id).filter((s) => s.terminatedAt === null).length;
+
+/** 2단계 실패 수·잠금을 시험 사이에 되돌린다. 옛 복구 코드 10개를 차례로 넣을 때 5번 보호 잠금에 닿지 않게 하려는 시험 장치다 */
+function resetSecondFactor(id: string): void {
+  const r = store.rowForTest(id);
+  if (!r) throw new Error('계정 행이 없다');
+  r.secondFactorFailures = 0;
+  r.lockKind = 'NONE';
+  r.lockedUntil = null;
+  r.failedAttempts = 0;
+}
+
+/** 메모리 저장소의 한 메서드를 시험 동안만 바꾼다(장애 주입). 되돌리는 함수를 준다 */
+function patchStore(name: string, fn: (...args: unknown[]) => unknown): () => void {
+  const o = store as unknown as Record<string, unknown>;
+  const old = o[name];
+  o[name] = fn;
+  return () => {
+    o[name] = old;
+  };
+}
+
 beforeAll(async () => {
   const fan = await fanKey();
   const admin = await fanKey();
@@ -208,6 +231,10 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     const r = await beginTotp(a, s.sid, token);
     expect(r.statusCode, r.payload).toBe(201);
     expect(r.headers['cache-control']).toBe('no-store');
+    expect(Object.keys(json(r)).sort()).toEqual(['otpauthUri']);
+    expect(r.payload).not.toContain('totpSeedEnc');
+    expect(r.payload).not.toContain('pairRef');
+    expect(r.payload).not.toContain('203.0.113.10');
     const uri = new URL(String(json(r).otpauthUri));
     expect(uri.protocol).toBe('otpauth:');
     const secret = uri.searchParams.get('secret');
@@ -227,12 +254,17 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     expect(again.sid).not.toBe('');
   });
 
-  test('I-T53 ③ [ASVS v5.0.0-6.3.3] 인증 앱 확인 코드는 5번까지 422 reauth-code-invalid(남은 수)이고 6번째 410 totp-enrollment-invalid이며 계정 잠금 수는 건드리지 않는다', async () => {
+  test('I-T53 ③ [ASVS v5.0.0-6.3.3] 인증 앱 확인 코드는 5번까지 422 reauth-code-invalid(남은 수)이고 6번째 410 totp-enrollment-invalid이며 다시 시작하면 앞선 대기 시드를 덮어쓰고 실패 수를 0으로 되돌린다', async () => {
     const a = await makeAccount('totp-fail');
     const s1 = await login(a, 'dev-fail-1', '203.0.113.20', UA.chromeWindows);
     const s2 = await login(a, 'dev-fail-2', '203.0.113.21', UA.safariIpad);
     const token = await reauth(a, s1.sid, 'ACCOUNT_SECURITY');
-    expect((await beginTotp(a, s1.sid, token)).statusCode).toBe(201);
+    const firstBegin = await beginTotp(a, s1.sid, token);
+    expect(firstBegin.statusCode).toBe(201);
+    const oldSecret = new URL(String(json(firstBegin).otpauthUri)).searchParams.get('secret');
+    if (!oldSecret) throw new Error('첫 대기 시드가 없다');
+    const oldSeed = base32Decode(oldSecret);
+    const oldPending = (await store.getTotp(a.id))?.pendingEnc;
 
     const valid = totpAt(a.seed, Math.floor(clock.now() / 30_000));
     const wrong = valid === '000001' ? '000002' : '000001';
@@ -240,68 +272,109 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     // 다른 세션은 대기 시드를 확인하지 못하고, 이 실패는 세지 않는다
     expect(problemOf(await confirmTotp(a, s2.sid, wrong))).toEqual({ status: 410, type: 'totp-enrollment-invalid' });
 
+    // 2번 실패한 뒤 다시 시작하면 앞선 대기 시드를 덮어쓰고 실패 수를 0으로 되돌린다
+    expect(json(await confirmTotp(a, s1.sid, wrong)).remainingAttempts).toBe(4);
+    expect(json(await confirmTotp(a, s1.sid, wrong)).remainingAttempts).toBe(3);
+    const secondBegin = await beginTotp(a, s1.sid, await reauth(a, s1.sid, 'ACCOUNT_SECURITY'));
+    expect(secondBegin.statusCode).toBe(201);
+    expect(rowOf(a.id)['totpPendingFailures']).toBe(0);
+    const newSecret = new URL(String(json(secondBegin).otpauthUri)).searchParams.get('secret');
+    if (!newSecret) throw new Error('새 대기 시드가 없다');
+    const newSeed = base32Decode(newSecret);
+    expect((await store.getTotp(a.id))?.pendingEnc?.equals(oldPending!)).toBe(false);
+    // 앞선 대기 시드의 코드는 새 대기 시드에 쓰이지 못한다(옛 코드는 틀린 코드다)
+    const newValid = totpAt(newSeed, Math.floor(clock.now() / 30_000));
+    const oldCodeRaw = totpAt(oldSeed, Math.floor(clock.now() / 30_000));
+    const oldCode = oldCodeRaw === newValid ? (newValid === '000001' ? '000002' : '000001') : oldCodeRaw;
+    expect(problemOf(await confirmTotp(a, s1.sid, oldCode))).toEqual({ status: 422, type: 'reauth-code-invalid' });
+
+    // 새 대기 시드에서 5번 실패하면 6번째에 대기 시드를 버린다
+    const newWrong = newValid === '000001' ? '000002' : '000001';
     for (const remaining of [4, 3, 2, 1, 0]) {
-      const r = await confirmTotp(a, s1.sid, wrong);
+      const r = await confirmTotp(a, s1.sid, newWrong);
       expect(problemOf(r)).toEqual({ status: 422, type: 'reauth-code-invalid' });
       expect(json(r).remainingAttempts).toBe(remaining);
     }
-    expect(problemOf(await confirmTotp(a, s1.sid, wrong))).toEqual({ status: 410, type: 'totp-enrollment-invalid' });
+    expect(problemOf(await confirmTotp(a, s1.sid, newWrong))).toEqual({ status: 410, type: 'totp-enrollment-invalid' });
 
     const row = store.rowForTest(a.id)!;
     expect(row.secondFactorFailures).toBe(0);
     expect(row.lockKind).toBe('NONE');
     expect(row.failedAttempts).toBe(0);
-    const pending = row as unknown as Record<string, unknown>;
-    expect(pending['totpPendingSessionId']).toBeNull();
-    expect(pending['totpPendingFailures']).toBe(0);
+    expect(rowOf(a.id)['totpPendingSessionId']).toBeNull();
+    expect(rowOf(a.id)['totpPendingFailures']).toBe(0);
     expect((await store.getTotp(a.id))?.pendingEnc).toBeNull();
 
     // 다시 시작하면 실패 수는 0에서 다시 센다
     expect((await beginTotp(a, s1.sid, await reauth(a, s1.sid, 'ACCOUNT_SECURITY'))).statusCode).toBe(201);
-    expect((store.rowForTest(a.id) as unknown as Record<string, unknown>)['totpPendingFailures']).toBe(0);
+    expect(rowOf(a.id)['totpPendingFailures']).toBe(0);
 
     // 5번 실패 뒤에도 옛 인증 앱은 살아 있다
     const again = await login(a, 'dev-fail-3', '203.0.113.22', UA.chromeWindows);
     expect(again.sid).not.toBe('');
   });
 
-  test('I-T53 ③ [ASVS v5.0.0-6.4.4] 인증 앱 다시 등록을 마치면 새 시드·복구 코드 10개로 바뀌고 옛 TOTP·옛 복구 코드는 로그인에 쓰이지 못한다', async () => {
+  test('I-T53 ③ [ASVS v5.0.0-6.4.4] 인증 앱 다시 등록을 마치면 새 시드·복구 코드 10개로 바뀌고 같은 칸 재사용·옛 TOTP·옛 복구 코드 10개가 모두 로그인에 쓰이지 못한다', async () => {
     const a = await makeAccount('totp-ok');
     const s = await login(a, 'dev-ok', '203.0.113.30', UA.chromeWindows);
+    const sessionsBefore = liveCount(a.id);
     const token = await reauth(a, s.sid, 'ACCOUNT_SECURITY');
     const begin = await beginTotp(a, s.sid, token);
     expect(begin.statusCode).toBe(201);
     const secret = new URL(String(json(begin).otpauthUri)).searchParams.get('secret');
     if (!secret) throw new Error('새 시드가 없다');
     const newSeed = base32Decode(secret);
-    const newCode = totpAt(newSeed, Math.floor(clock.now() / 30_000));
+    const step = Math.floor(clock.now() / 30_000);
+    const newCode = totpAt(newSeed, step);
 
     const confirmed = await confirmTotp(a, s.sid, newCode);
     expect(confirmed.statusCode, confirmed.payload).toBe(200);
     expect(confirmed.headers['cache-control']).toBe('no-store');
+    expect(Object.keys(json(confirmed))).toEqual(['recoveryCodes']);
     const codes = json(confirmed).recoveryCodes as string[];
     expect(codes).toHaveLength(10);
     expect(new Set(codes).size).toBe(10);
     for (const code of codes) expect(code).toMatch(/^[0-9A-Z]{4}(-[0-9A-Z]{4}){3}$/);
     expect((await store.getTotp(a.id))?.pendingEnc).toBeNull();
     expect((await store.getTotp(a.id))?.seedEnc?.equals(a.seed)).toBe(false);
-    expect((store.rowForTest(a.id) as unknown as Record<string, unknown>)['totpPendingSessionId']).toBeNull();
+    expect(rowOf(a.id)['totpPendingSessionId']).toBeNull();
+    // 확인한 시간 칸을 적고, 세션은 만들거나 끝내지 않는다
+    expect(rowOf(a.id)['totpLastStep']).toBe(step);
+    expect(liveCount(a.id)).toBe(sessionsBefore);
+    expect(json(confirmed)).not.toHaveProperty('totpSeedEnc');
+    expect(confirmed.payload).not.toContain('pairRef');
 
-    // 새 인증 앱 코드로 로그인한다
-    clock.advance(30_000);
-    const newTotp = totpAt(newSeed, Math.floor(clock.now() / 30_000));
-    expect((await tryLogin(a, 'dev-new', '203.0.113.31', UA.chromeWindows, newTotp)).second.statusCode).toBe(200);
+    // 확인에 쓴 코드를 같은 30초 칸에서 로그인 2단계에 다시 쓰지 못한다
+    resetSecondFactor(a.id);
+    const sameStep = await tryLogin(a, 'dev-same-step', '203.0.113.35', UA.chromeWindows, newCode);
+    expect(problemOf(sameStep.second)).toEqual({ status: 401, type: 'admin-login-code-invalid' });
+    resetSecondFactor(a.id);
+
+    // 새 복구 코드는 10개이고, 옛 복구 코드 10개는 모두 틀리다
+    const ok = await settings(a, s.sid);
+    expect(json(ok)).toMatchObject({ totpRegistered: true, recoveryCodesRemaining: 10 });
+    expect(store.recoveryCodes(a.id)).toHaveLength(10);
+    for (const oldCode of a.recoveryCodes) {
+      resetSecondFactor(a.id);
+      const oldRecovery = await tryLogin(a, 'dev-old-rc', '203.0.113.33', UA.chromeWindows, oldCode);
+      expect(problemOf(oldRecovery.second)).toEqual({ status: 401, type: 'admin-login-code-invalid' });
+    }
+    resetSecondFactor(a.id);
 
     // 옛 인증 앱 코드는 이제 틀리다
     const oldTotp = await tryLogin(a, 'dev-old-totp', '203.0.113.32', UA.chromeWindows, a.code());
     expect(problemOf(oldTotp.second)).toEqual({ status: 401, type: 'admin-login-code-invalid' });
+    resetSecondFactor(a.id);
 
-    // 옛 복구 코드도 이제 틀리다
-    const oldRecovery = await tryLogin(a, 'dev-old-rc', '203.0.113.33', UA.chromeWindows, a.recoveryCodes[0]!);
-    expect(problemOf(oldRecovery.second)).toEqual({ status: 401, type: 'admin-login-code-invalid' });
+    // 새 인증 앱 코드로 로그인한다
+    clock.advance(30_000);
+    const newTotp = totpAt(newSeed, Math.floor(clock.now() / 30_000));
+    const newTotpLogin = await tryLogin(a, 'dev-new', '203.0.113.31', UA.chromeWindows, newTotp);
+    expect(newTotpLogin.second.statusCode).toBe(200);
 
-    // 새 복구 코드는 한 번 쓸 수 있다
+    // 새 복구 코드는 한 번 쓸 수 있고, 쓰면 남은 수가 9가 된다
     expect((await tryLogin(a, 'dev-new-rc', '203.0.113.34', UA.chromeWindows, codes[0]!)).second.statusCode).toBe(200);
+    expect(json(await settings(a, newTotpLogin.sid)).recoveryCodesRemaining).toBe(9);
   });
 
   test('I-T53 ③ [ASVS v5.0.0-6.4.4] 복구 코드 다시 만들기는 재인증 뒤 새 10개를 한 번만 주고 옛 코드를 모두 무효로 하며 남은 수를 준다', async () => {
@@ -310,13 +383,19 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     const before = await settings(a, s.sid);
     expect(before.statusCode, before.payload).toBe(200);
     expect(before.headers['cache-control']).toBe('no-store');
+    expect(Object.keys(json(before)).sort()).toEqual(['passkeyCount', 'recoveryCodesRemaining', 'sessionLimit', 'totpRegistered']);
     expect(json(before)).toMatchObject({ totpRegistered: true, recoveryCodesRemaining: 10, passkeyCount: 0, sessionLimit: 2 });
+    expect(before.payload).not.toContain('totpSeedEnc');
+    expect(before.payload).not.toContain('pairRef');
 
     const liveBefore = store.sessions(a.id).filter((x) => x.terminatedAt === null).length;
     const token = await reauth(a, s.sid, 'ACCOUNT_SECURITY');
     const r = await recreateCodes(a, s.sid, token);
     expect(r.statusCode, r.payload).toBe(200);
     expect(r.headers['cache-control']).toBe('no-store');
+    expect(Object.keys(json(r))).toEqual(['recoveryCodes']);
+    expect(r.payload).not.toContain('totpSeedEnc');
+    expect(r.payload).not.toContain('pairRef');
     const codes = json(r).recoveryCodes as string[];
     expect(codes).toHaveLength(10);
     expect(new Set(codes).size).toBe(10);
@@ -344,9 +423,12 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     expect(items[0]).toMatchObject({ sessionId: s1.sid, current: true, otherSessions: 0, deviceName: 'Chrome · Windows' });
     expect(Date.parse(items[0]!.lastActiveAt)).toBe(s1At);
     expect(items[1]).toMatchObject({ current: false, otherSessions: 0, deviceName: 'Safari · iPad' });
+    for (const item of items) expect(Object.keys(item).sort()).toEqual(['current', 'deviceName', 'lastActiveAt', 'otherSessions', 'sessionId']);
 
     const text = r.payload;
     expect(text).not.toContain('pairRef');
+    expect(text).not.toContain('deviceRef');
+    expect(text).not.toContain('203.0.113.50');
     expect(text).not.toContain('Mozilla/');
     expect(text).not.toContain(s1.token);
     expect(text).not.toContain(s2.token);
@@ -359,7 +441,7 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     expect(String(stored['deviceLabel']).length).toBeLessThanOrEqual(40);
   });
 
-  test('I-T53 ③ [ASVS v5.0.0-7.5.2] 다른 기기 로그아웃은 재인증 토큰으로 그 기기 세션을 모두 끝내고 다른 로그인이 없는 지금 세션은 404로 남긴다', async () => {
+  test('I-T53 ③ [ASVS v5.0.0-7.4.3] [ASVS v5.0.0-7.5.2] 다른 기기 로그아웃은 재인증 토큰으로 그 기기 세션을 모두 끝내고 다른 로그인이 없는 지금 세션은 404로 남긴다', async () => {
     const a = await makeAccount('revoke');
     const s1 = await login(a, 'dev-r1', '203.0.113.60', UA.chromeWindows);
     const s2 = await login(a, 'dev-r2', '203.0.113.61', UA.safariIpad);
@@ -370,6 +452,7 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     expect(r.headers['cache-control']).toBe('no-store');
     expect(await guard.getAdminAuthz({ adminAccountId: a.id, sessionId: s2.sid })).toMatchObject({ valid: false });
     expect(store.terminatedEvents().filter((e) => e.accountId === a.id)).toEqual([{ accountId: a.id, sessionId: s2.sid, reason: 'LOGOUT' }]);
+    expect((store.sessions(a.id).find((x) => x.id === s2.sid) as unknown as Record<string, unknown>)['deviceLabel']).toBeNull();
 
     const list = await listSessions(a, s1.sid);
     expect((json(list).items as unknown[]).length).toBe(1);
@@ -388,28 +471,51 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     expect(await guard.getAdminAuthz({ adminAccountId: other.id, sessionId: so.sid })).toMatchObject({ valid: true });
   });
 
-  test('I-T53 ③ [ASVS v5.0.0-7.5.2] 404 session-not-found는 재인증 토큰을 쓰지 않고 다른 세션을 끊는 데 같은 토큰을 다시 쓸 수 있다', async () => {
-    const a = await makeAccount('revoke-404');
-    const s1 = await login(a, 'dev-n1', '203.0.113.70', UA.chromeWindows);
-    const s2 = await login(a, 'dev-n2', '203.0.113.71', UA.safariIpad);
-    const token = await reauth(a, s1.sid, 'ACCOUNT_SECURITY');
+  test('I-T53 ③ [ASVS v5.0.0-7.5.2] 404 session-not-found는 없는 ID·다른 계정·모양 틀린 ID·끝난 세션 모두에서 재인증 토큰을 쓰지 않는다', async () => {
+    const pair = async (label: string, ip: string) => {
+      const a = await makeAccount(label);
+      const s1 = await login(a, `${label}-1`, `${ip}.1`, UA.chromeWindows);
+      const s2 = await login(a, `${label}-2`, `${ip}.2`, UA.safariIpad);
+      return { a, s1, s2 };
+    };
 
-    const missing = randomUUID();
-    const notFound = await endSession(a, s1.sid, missing, token);
-    expect(problemOf(notFound)).toEqual({ status: 404, type: 'session-not-found' });
-    expect(notFound.headers['cache-control']).toBe('no-store');
-    expect(store.terminatedEvents().filter((e) => e.accountId === a.id)).toEqual([]);
-    expect(await guard.getAdminAuthz({ adminAccountId: a.id, sessionId: s2.sid })).toMatchObject({ valid: true });
+    // 없는 ID
+    const c1 = await pair('404-unknown', '203.0.113.70');
+    const t1 = await reauth(c1.a, c1.s1.sid, 'ACCOUNT_SECURITY');
+    const r1 = await endSession(c1.a, c1.s1.sid, randomUUID(), t1);
+    expect(problemOf(r1)).toEqual({ status: 404, type: 'session-not-found' });
+    expect(r1.headers['cache-control']).toBe('no-store');
+    expect(store.terminatedEvents().filter((e) => e.accountId === c1.a.id)).toEqual([]);
+    expect((await endSession(c1.a, c1.s1.sid, c1.s2.sid, t1)).statusCode).toBe(204);
 
-    expect((await endSession(a, s1.sid, s2.sid, token)).statusCode).toBe(204);
-    expect(await guard.getAdminAuthz({ adminAccountId: a.id, sessionId: s2.sid })).toMatchObject({ valid: false });
+    // 다른 계정의 세션
+    const c2 = await pair('404-other', '203.0.113.72');
+    const other = await makeAccount('404-other-target');
+    const so = await login(other, '404-other-dev', '203.0.113.74', UA.chromeWindows);
+    const t2 = await reauth(c2.a, c2.s1.sid, 'ACCOUNT_SECURITY');
+    expect(problemOf(await endSession(c2.a, c2.s1.sid, so.sid, t2))).toEqual({ status: 404, type: 'session-not-found' });
+    expect(await guard.getAdminAuthz({ adminAccountId: other.id, sessionId: so.sid })).toMatchObject({ valid: true });
+    expect((await endSession(c2.a, c2.s1.sid, c2.s2.sid, t2)).statusCode).toBe(204);
+
+    // 모양이 틀린 ID
+    const c3 = await pair('404-shape', '203.0.113.75');
+    const t3 = await reauth(c3.a, c3.s1.sid, 'ACCOUNT_SECURITY');
+    expect(problemOf(await endSession(c3.a, c3.s1.sid, 'not-a-uuid', t3))).toEqual({ status: 404, type: 'session-not-found' });
+    expect((await endSession(c3.a, c3.s1.sid, c3.s2.sid, t3)).statusCode).toBe(204);
+
+    // 끝난 세션
+    const c4 = await pair('404-ended', '203.0.113.76');
+    expect((await del(c4.a, c4.s2.sid, '/v1/partner/auth/sessions/me')).statusCode).toBe(204);
+    const s3 = await login(c4.a, '404-ended-3', '203.0.113.78', UA.chromeWindows);
+    const t4 = await reauth(c4.a, c4.s1.sid, 'ACCOUNT_SECURITY');
+    expect(problemOf(await endSession(c4.a, c4.s1.sid, c4.s2.sid, t4))).toEqual({ status: 404, type: 'session-not-found' });
+    expect((await endSession(c4.a, c4.s1.sid, s3.sid, t4)).statusCode).toBe(204);
   });
 
   test('I-T53 ②③ [ASVS v5.0.0-7.5.1] 재인증 토큰이 없거나 다른 작업 묶음·다른 세션·이미 쓴 것이면 세 경로 모두 403 reauth-required이고 상태를 바꾸지 않는다', async () => {
     const a = await makeAccount('reauth-gate');
     const s1 = await login(a, 'dev-g1', '203.0.113.80', UA.chromeWindows);
     const s2 = await login(a, 'dev-g2', '203.0.113.81', UA.safariIpad);
-    const pendingBefore = (await store.getTotp(a.id))?.pendingEnc ?? null;
     const codesBefore = store.recoveryCodes(a.id).length;
 
     expect(problemOf(await post(a, s1.sid, '/v1/partner/auth/totp-enrollments'))).toEqual({ status: 403, type: 'reauth-required' });
@@ -426,13 +532,14 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     expect(problemOf(await recreateCodes(a, s1.sid, otherSession))).toEqual({ status: 403, type: 'reauth-required' });
     expect(problemOf(await endSession(a, s1.sid, s2.sid, otherSession))).toEqual({ status: 403, type: 'reauth-required' });
 
+    // 거절된 시작들은 대기 칸을 만들지 않는다
+    expect((await store.getTotp(a.id))?.pendingEnc).toBeNull();
     const once = await reauth(a, s1.sid, 'ACCOUNT_SECURITY');
     expect((await beginTotp(a, s1.sid, once)).statusCode).toBe(201);
     expect(problemOf(await recreateCodes(a, s1.sid, once))).toEqual({ status: 403, type: 'reauth-required' });
 
     expect(store.recoveryCodes(a.id).length).toBe(codesBefore);
     expect(await guard.getAdminAuthz({ adminAccountId: a.id, sessionId: s2.sid })).toMatchObject({ valid: true });
-    expect(pendingBefore).toBeNull();
   });
 
   test('I-T53 ③ [ASVS v5.0.0-6.3.3] 패스키가 있는 계정은 패스키 요소 없는 재인증 토큰으로 인증 앱·복구 코드·기기 끊기를 하지 못한다', async () => {
@@ -462,7 +569,7 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     expect((await endSession(a, s1.sid, s2.sid, await reauth(a, s1.sid, 'ACCOUNT_SECURITY', { withPasskey: true, authn }))).statusCode).toBe(204);
   });
 
-  test('I-T53 ③ [ASVS v5.0.0-6.3.3] 파트너 경로는 파트너 역할 세션만 받고 관제 역할·비밀번호 바꾸기 필요 세션은 403이며 모든 응답은 no-store다', async () => {
+  test('I-T53 ③ [ASVS v5.0.0-6.3.3] 파트너 경로는 다른 콘솔 세션을 401로, 비밀번호 바꾸기 필요 파트너 세션을 403으로 거절하고 처리 층 오류는 no-store다', async () => {
     const a = await makeAccount('boundary');
     const s = await login(a, 'dev-bound', '203.0.113.100', UA.chromeWindows);
 
@@ -473,8 +580,9 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     const done = await svc.app.get(LoginSecondStep).run({ aud: 'ops', loginStep: first.loginStep, code: ops.code(), ip: '203.0.113.101', deviceId: 'dev-ops' });
     if (done.kind !== 'DONE') throw new Error(done.kind);
     const opsHeaders = { 'x-user-id': ops.id, 'x-session-id': done.sessionId, 'x-user-aud': 'ops' };
-    expect((await svc.http.inject({ method: 'GET', url: '/v1/partner/auth/security-settings', headers: opsHeaders })).statusCode).toBe(403);
-    expect((await svc.http.inject({ method: 'GET', url: '/v1/partner/auth/sessions', headers: opsHeaders })).statusCode).toBe(403);
+    // 다른 콘솔의 세션은 역할을 보기 전에 401이다(플랫폼 가드의 AUDIENCE_OF)
+    expect((await svc.http.inject({ method: 'GET', url: '/v1/partner/auth/security-settings', headers: opsHeaders })).statusCode).toBe(401);
+    expect((await svc.http.inject({ method: 'GET', url: '/v1/partner/auth/sessions', headers: opsHeaders })).statusCode).toBe(401);
 
     const limited = { 'x-user-scope': 'password:change' };
     expect(problemOf(await get(a, s.sid, '/v1/partner/auth/security-settings', limited))).toEqual({ status: 403, type: 'password-change-required' });
@@ -486,6 +594,9 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     const noToken = await post(a, s.sid, '/v1/partner/auth/totp-enrollments');
     expect(problemOf(noToken)).toEqual({ status: 403, type: 'reauth-required' });
     expect(noToken.headers['cache-control']).toBe('no-store');
+    const invalidBody = await post(a, s.sid, '/v1/partner/auth/totp-enrollments', { unexpected: 1 }, { 'x-reauth-token': await reauth(a, s.sid, 'ACCOUNT_SECURITY') });
+    expect(problemOf(invalidBody)).toEqual({ status: 400, type: 'invalid-body' });
+    expect(invalidBody.headers['cache-control']).toBe('no-store');
     const bad = await confirmTotp(a, s.sid, '000000');
     expect(problemOf(bad)).toEqual({ status: 410, type: 'totp-enrollment-invalid' });
     expect(bad.headers['cache-control']).toBe('no-store');
@@ -505,13 +616,14 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     expect(problemOf(await endSession(a, s1.sid, randomUUID(), token))).toEqual({ status: 404, type: 'session-not-found' });
     expect(problemOf(await endSession(a, s1.sid, 'not-a-uuid', token))).toEqual({ status: 404, type: 'session-not-found' });
 
-    // 스스로 로그아웃한 세션은 목록·끊기에서 404다
+    // 스스로 로그아웃한 세션은 목록·끊기에서 404이고 기기 이름도 비운다
     expect((await del(a, s2.sid, '/v1/partner/auth/sessions/me')).statusCode).toBe(204);
     expect(await guard.getAdminAuthz({ adminAccountId: a.id, sessionId: s2.sid })).toMatchObject({ valid: false });
+    expect((store.sessions(a.id).find((x) => x.id === s2.sid) as unknown as Record<string, unknown>)['deviceLabel']).toBeNull();
     expect(problemOf(await endSession(a, s1.sid, s2.sid, await reauth(a, s1.sid, 'ACCOUNT_SECURITY')))).toEqual({ status: 404, type: 'session-not-found' });
   });
 
-  test('I-T53 ③ [ASVS v5.0.0-6.3.3] 같은 기기에서 두 번 로그인하면 목록은 한 줄 otherSessions 1이고 그 줄을 끊으면 현재 세션만 남는다', async () => {
+  test('I-T53 ③ [ASVS v5.0.0-6.3.3] [ASVS v5.0.0-7.4.3] 같은 기기에서 두 번 로그인하면 목록은 한 줄 otherSessions 1이고 그 줄을 끊으면 현재 세션만 남는다', async () => {
     const a = await makeAccount('same-device');
     const s1 = await login(a, 'same-dev', '203.0.113.120', UA.chromeWindows);
     const s2 = await login(a, 'same-dev', '203.0.113.120', UA.chromeWindows);
@@ -527,6 +639,7 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     expect(await guard.getAdminAuthz({ adminAccountId: a.id, sessionId: s1.sid })).toMatchObject({ valid: false });
     expect(await guard.getAdminAuthz({ adminAccountId: a.id, sessionId: s2.sid })).toMatchObject({ valid: true });
     expect(store.terminatedEvents().filter((e) => e.accountId === a.id)).toEqual([{ accountId: a.id, sessionId: s1.sid, reason: 'LOGOUT' }]);
+    expect((store.sessions(a.id).find((x) => x.id === s1.sid) as unknown as Record<string, unknown>)['deviceLabel']).toBeNull();
 
     const after = await listSessions(a, s2.sid);
     expect((json(after).items as { current: boolean; otherSessions: number }[])[0]).toMatchObject({ current: true, otherSessions: 0 });
@@ -542,6 +655,7 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     row.totpLastStep = null;
     const codesBefore = store.recoveryCodes(a.id).length;
     const sessionsBefore = store.sessions(a.id).filter((x) => x.terminatedAt === null).length;
+    expect(json(await settings(a, s.sid))).toMatchObject({ totpRegistered: false, recoveryCodesRemaining: 0 });
 
     const r = await recreateCodes(a, s.sid, token);
     expect(problemOf(r)).toEqual({ status: 409, type: 'totp-not-registered' });
@@ -550,26 +664,107 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     expect(store.sessions(a.id).filter((x) => x.terminatedAt === null).length).toBe(sessionsBefore);
   });
 
-  test('I-T53 ③ [ASVS v5.0.0-6.3.3] 인증 앱 시드 키 서비스가 답하지 않으면 다시 등록은 503 admin-login-unavailable이고 시드·대기 칸을 바꾸지 않는다', async () => {
-    const a = await makeAccount('key-down');
-    const s = await login(a, 'dev-kd', '203.0.113.140', UA.chromeWindows);
-    const token = await reauth(a, s.sid, 'ACCOUNT_SECURITY');
-    const before = await store.getTotp(a.id);
-    const original = totpCipher.encrypt.bind(totpCipher);
-    totpCipher.encrypt = async () => {
-      throw new TotpKeyUnavailable('시험 주입');
-    };
-    try {
-      const r = await beginTotp(a, s.sid, token);
-      expect(problemOf(r)).toEqual({ status: 503, type: 'admin-login-unavailable' });
-      expect(r.headers['retry-after']).toBe('5');
-      expect(r.headers['cache-control']).toBe('no-store');
-    } finally {
-      totpCipher.encrypt = original;
+  test('I-T53 ③ [ASVS v5.0.0-6.3.3] 시드 키·저장소·해셔·세션 종료 사건이 실패하면 503이고 시드·대기 칸·옛 코드·세션·사건을 바꾸지 않는다', async () => {
+    // 시드 키 서비스 실패
+    {
+      const a = await makeAccount('key-down');
+      const s = await login(a, 'dev-kd', '203.0.113.140', UA.chromeWindows);
+      const token = await reauth(a, s.sid, 'ACCOUNT_SECURITY');
+      const before = await store.getTotp(a.id);
+      const original = totpCipher.encrypt.bind(totpCipher);
+      totpCipher.encrypt = async () => {
+        throw new TotpKeyUnavailable('시험 주입');
+      };
+      try {
+        const r = await beginTotp(a, s.sid, token);
+        expect(problemOf(r)).toEqual({ status: 503, type: 'admin-login-unavailable' });
+        expect(r.headers['retry-after']).toBe('5');
+        expect(r.headers['cache-control']).toBe('no-store');
+      } finally {
+        totpCipher.encrypt = original;
+      }
+      const after = await store.getTotp(a.id);
+      expect(after?.pendingEnc).toBeNull();
+      expect(after?.seedEnc?.equals(before!.seedEnc!)).toBe(true);
+      expect(rowOf(a.id)['totpPendingSessionId']).toBeNull();
     }
-    const after = await store.getTotp(a.id);
-    expect(after?.pendingEnc).toBeNull();
-    expect(after?.seedEnc?.equals(before!.seedEnc!)).toBe(true);
-    expect((store.rowForTest(a.id) as unknown as Record<string, unknown>)['totpPendingSessionId']).toBeNull();
+
+    // 시작·확인의 저장소 쓰기 실패
+    {
+      const a = await makeAccount('store-down');
+      const s = await login(a, 'dev-sd', '203.0.113.150', UA.chromeWindows);
+      const before = await store.getTotp(a.id);
+      const token = await reauth(a, s.sid, 'ACCOUNT_SECURITY');
+      const restoreBegin = patchStore('setTotpPending', async () => {
+        throw new Error('저장소 쓰기 실패');
+      });
+      try {
+        const r = await beginTotp(a, s.sid, token);
+        expect(problemOf(r)).toEqual({ status: 503, type: 'admin-login-unavailable' });
+        expect(r.headers['retry-after']).toBe('5');
+        expect(r.headers['cache-control']).toBe('no-store');
+      } finally {
+        restoreBegin();
+      }
+      expect((await store.getTotp(a.id))?.pendingEnc).toBeNull();
+      expect((await store.getTotp(a.id))?.seedEnc?.equals(before!.seedEnc!)).toBe(true);
+
+      const begin = await beginTotp(a, s.sid, await reauth(a, s.sid, 'ACCOUNT_SECURITY'));
+      const secret = new URL(String(json(begin).otpauthUri)).searchParams.get('secret');
+      if (!secret) throw new Error('대기 시드가 없다');
+      const code = totpAt(base32Decode(secret), Math.floor(clock.now() / 30_000));
+      const restoreConfirm = patchStore('confirmTotpForSession', async () => {
+        throw new Error('저장소 쓰기 실패');
+      });
+      try {
+        const r = await confirmTotp(a, s.sid, code);
+        expect(problemOf(r)).toEqual({ status: 503, type: 'admin-login-unavailable' });
+        expect(r.headers['retry-after']).toBe('5');
+        expect(r.headers['cache-control']).toBe('no-store');
+      } finally {
+        restoreConfirm();
+      }
+      expect((await store.getTotp(a.id))?.pendingEnc).not.toBeNull();
+      expect((await store.getTotp(a.id))?.seedEnc?.equals(before!.seedEnc!)).toBe(true);
+    }
+
+    // 복구 코드 해셔·세션 종료 사건 실패
+    {
+      const a = await makeAccount('hasher-down');
+      const s1 = await login(a, 'dev-hd-1', '203.0.113.151', UA.chromeWindows);
+      const s2 = await login(a, 'dev-hd-2', '203.0.113.152', UA.safariIpad);
+      const codesBefore = store.recoveryCodes(a.id);
+      const hasher = svc.app.get<AdminPasswords>(RECOVERY_CODE_HASHER);
+      const oldHash = hasher.hash;
+      hasher.hash = async () => {
+        throw new Error('해셔 실패');
+      };
+      try {
+        const r = await recreateCodes(a, s1.sid, await reauth(a, s1.sid, 'ACCOUNT_SECURITY'));
+        expect(problemOf(r)).toEqual({ status: 503, type: 'admin-login-unavailable' });
+        expect(r.headers['retry-after']).toBe('5');
+        expect(r.headers['cache-control']).toBe('no-store');
+      } finally {
+        hasher.hash = oldHash;
+      }
+      expect(store.recoveryCodes(a.id)).toEqual(codesBefore);
+      expect(liveCount(a.id)).toBe(2);
+
+      const token = await reauth(a, s1.sid, 'ACCOUNT_SECURITY');
+      const restoreEnd = patchStore('endDeviceSessions', async () => {
+        throw new Error('사건 쓰기 실패');
+      });
+      try {
+        const r = await endSession(a, s1.sid, s2.sid, token);
+        expect(problemOf(r)).toEqual({ status: 503, type: 'admin-login-unavailable' });
+        expect(r.headers['retry-after']).toBe('5');
+        expect(r.headers['cache-control']).toBe('no-store');
+      } finally {
+        restoreEnd();
+      }
+      expect(await guard.getAdminAuthz({ adminAccountId: a.id, sessionId: s2.sid })).toMatchObject({ valid: true });
+      expect(liveCount(a.id)).toBe(2);
+      expect(store.terminatedEvents().filter((e) => e.accountId === a.id)).toEqual([]);
+    }
   });
 });

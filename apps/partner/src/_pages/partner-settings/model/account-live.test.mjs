@@ -20,7 +20,7 @@ const device = (over = {}) => ({
   ...over,
 });
 
-test('I-T53 ③ [ASVS v5.0.0-6.4.4] 보안 요약은 인증 앱 등록 여부와 남은 복구 코드 수를 0~10으로 보인다', async () => {
+test('I-T53 ③ [ASVS v5.0.0-6.4.4] 보안 요약은 인증 앱 등록 여부와 남은 복구 코드 수를 0~10으로 보이고 화면 모드·재인증 패스키·기기 줄 동작·복구 코드 닫기 상태를 값으로 가른다', async () => {
   const { accountSecurityView } = await mod();
   assert.deepEqual(accountSecurityView(setting()), { totpText: '등록됨', recoveryText: '남은 코드 7개', passkeyCount: 1, sessionLimit: 2 });
   assert.deepEqual(accountSecurityView(setting({ totpRegistered: false, recoveryCodesRemaining: 0, passkeyCount: 0 })), {
@@ -34,9 +34,24 @@ test('I-T53 ③ [ASVS v5.0.0-6.4.4] 보안 요약은 인증 앱 등록 여부와
   assert.equal(accountSecurityView(setting({ recoveryCodesRemaining: 11 })).recoveryText, '남은 코드 10개');
   // 음수·모르는 값은 0으로 자른다
   assert.equal(accountSecurityView(setting({ recoveryCodesRemaining: -1 })).recoveryText, '남은 코드 0개');
+
+  // 화면 모드·재인증 패스키·기기 줄 동작·복구 코드 닫기 상태도 같은 모델에서 값으로 가른다
+  const { accountPageMode, reauthWithPasskey, deviceRowActions, recoveryCodeDialogState } = await mod();
+  assert.equal(accountPageMode(undefined), 'live');
+  assert.equal(accountPageMode('내 계정'), 'preview');
+  assert.equal(reauthWithPasskey(0), false);
+  assert.equal(reauthWithPasskey(1), true);
+  assert.equal(reauthWithPasskey(2), true);
+  assert.equal(reauthWithPasskey(-1), false);
+  assert.equal(reauthWithPasskey(1.5), false);
+  assert.deepEqual(deviceRowActions({ current: true, otherSessions: 0 }), { canLogout: false, canEndOtherLogins: false });
+  assert.deepEqual(deviceRowActions({ current: true, otherSessions: 1 }), { canLogout: false, canEndOtherLogins: true });
+  assert.deepEqual(deviceRowActions({ current: false, otherSessions: 0 }), { canLogout: true, canEndOtherLogins: false });
+  assert.equal(recoveryCodeDialogState(false).closeEnabled, false);
+  assert.equal(recoveryCodeDialogState(true).closeEnabled, true);
 });
 
-test('I-T53 ③ [ASVS v5.0.0-7.5.2] 기기 목록은 지금 기기를 맨 앞에 두고 마지막 활동을 KST로 보이며 이름이 없으면 알 수 없는 기기다', async () => {
+test('I-T53 ③ [ASVS v5.0.0-7.5.2] 기기 목록은 지금 기기를 맨 앞에 두고 마지막 활동을 KST로 보이며 이름이 없으면 알 수 없는 기기이고 40자까지 보인다', async () => {
   const { deviceSessionsView } = await mod();
   const now = Date.parse('2026-11-27T11:05:00.000Z'); // 2026-11-27 20:05 KST
   const rows = deviceSessionsView(
@@ -57,6 +72,15 @@ test('I-T53 ③ [ASVS v5.0.0-7.5.2] 기기 목록은 지금 기기를 맨 앞에
   assert.equal(rows[2].label, '알 수 없는 기기');
   // 현재 기기 줄이 입력에 없으면 정렬만 하고 current는 거짓이다
   assert.equal(deviceSessionsView([device({ current: false })], now)[0].current, false);
+
+  // 기기 이름은 40자까지 보이고 41자는 자르며 null·빈 값은 알 수 없는 기기다
+  const { deviceNameText } = await mod();
+  assert.equal(deviceNameText(null), '알 수 없는 기기');
+  assert.equal(deviceNameText(''), '알 수 없는 기기');
+  assert.equal(deviceNameText('   '), '알 수 없는 기기');
+  const forty = '가'.repeat(40);
+  assert.equal(deviceNameText(forty), forty);
+  assert.equal(deviceNameText('가'.repeat(41)), '가'.repeat(40));
 });
 
 test('I-T53 ③ 마지막 활동의 KST 자정 경계는 날짜가 바뀌고, 읽지 못하는 값은 시간을 지어내지 않는다', async () => {
