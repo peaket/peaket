@@ -380,5 +380,17 @@ ADR-0373 결정 2의 '동결로 미검증'이다. 완성 판정에서 빼고 완
 | S-T11 | 미검증 |  | HOT-460(K3, 완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). K3(트랜잭션 격리 수준 비교)도 같은 까닭이다 |
 | S-T12 ① | 미검증 |  | BAT-095(K4, 완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). K4(연결 5,000개·`tc netem` 판정 측정)는 realtime-gw가 v1 합본 무대에 없고 데모 무대에만 있으며 v1 부하 클라이언트가 없다. 그 배포·측정 몫은 INF-020(F-09-8의 동결 몫)이다. ②(지표)는 BAT-052 시험 |
 | S-T14 ④ | 미검증 |  | BAT-095(K4, 완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). Degraded Mode 완화 SLO p99 1.5초와 초과 판매 0건도 K4 무대가 필요하다(S-T12 ①과 같은 까닭). ①~③(자동 전환)은 BAT-053(HOT-091) 시험이다 |
-| S-T15 | 미검증 |  | LCH-200(K5, 완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). K5 랩 판정 도구 `loadtest/k5/seatmap-lab.mjs`는 v0 입구 고정이고 v1 좌석맵 랩 판정은 LCH-200(F-08-1, 동결)이다 |
 | P-T31 | 미검증 |  | 구간 측정(완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). 결제사 전환 훈련과 결제사별 동시 입장 목표 상한은 스테이징 무대가 필요하다(F-09 클라우드 기반, 동결) |
+
+## F-07-12 RV-02 PostgreSQL 통합(2026-11-27, 실행 ID `INT-F07-12-RV02-20261127-1840`)
+
+F-07-12의 남은 위험 RV-02(`saleStatus=ALL_HELD` DB 필터 0건)를 닫은 후속 묶음의 실제 PostgreSQL 확인 기록이다. 장부 항목 상태·등급은 바꾸지 않고(자동 시험 9 그대로) 실행 근거만 더한다.
+
+| 항목 | 결과 | 근거 |
+| --- | --- | --- |
+| 0055 적용 | 통과 | Docker 잠금 `docker`(`lane5-F-07-12-rv02`, 2026-11-27 18:40:22~18:42:45 KST)로 PostgreSQL 18(`postgres:18-alpine`)에 적용. `drizzle.__drizzle_migrations` 45줄, 마지막 when 1795319600000 |
+| `event_sale_state` 제약 | 통과 | PK·FK·CHECK를 `pg_constraint`로 확인. 잘못된 status·version 0은 23514, 없는 event FK는 23503 |
+| `search_apply_event_sale` | 통과 | applied/stale/unknown, `search_version` +1과 `search_document.updated_version` 일치, `sale_status=ALL_HELD` 반영, 늦은 판 7·같은 판 8은 상태 불변 |
+| 파트너 목록·테넌트 | 통과 | `saleStatus=ALL_HELD`가 `PROD_ON`을 반환하고 응답 요약은 `ON_SALE`. B 테넌트 목록에는 없음. 사본 없는 회차는 시간 계산으로 `ON_SALE` |
+| 회귀 | 통과 | `test-int/partner-home.int.test.ts` 7/7(12.75s), `test-int/search-sale-status.int.test.ts`·`test-int/catalog.int.test.ts` 10/10(14.16s) |
+| 정리 | 통과 | 끝난 뒤 바로 잠금을 놓았고 남은 `lane5-rv02-*` 컨테이너·볼륨 0. 다른 작업의 `lane4-f085-control-plane`은 건드리지 않음 |
