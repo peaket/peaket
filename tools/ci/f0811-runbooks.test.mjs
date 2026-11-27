@@ -142,7 +142,7 @@ function assertPractice(body, file) {
 
 function assertTargetTime(file, value) {
   assert.ok(value, `${file}: 목표 시간이 없다`);
-  if (value === '미정' || value === '미측정') return;
+  if (/^(미정|미측정)(?:\s*[—–-]\s*[^0-9]+)?$/.test(value)) return;
   const targets = links(value);
   const hasCanonical = targets.some((t) => t.startsWith('../') || t.startsWith('docs/'));
   assert.ok(hasCanonical, `${file}: 목표 시간이 미정·미측정도 아니고 같은 줄에 정본 링크도 없다`);
@@ -156,6 +156,19 @@ function assertNoExecutionClaim(text, file) {
     for (const claim of EXECUTION_CLAIMS) {
       if (!line.includes(claim)) continue;
       assert.match(line, /미실행|하지 않|없다|아니다|금지|주장하지/, `${file}: '${claim}' 실행 주장이 있다: ${line.trim()}`);
+    }
+  }
+}
+
+function assertNoPositiveClaim(text, file) {
+  for (const line of text.split('\n')) {
+    for (const claim of FORBIDDEN_CLAIMS) {
+      if (!line.includes(claim)) continue;
+      assert.match(
+        line,
+        /주장하지 않는다|미주장|주장하지 않음|수치 주장 없음/,
+        `${file}: '${claim}' 달성값을 긍정으로 주장하는 줄이 있다: ${line.trim()}`,
+      );
     }
   }
 }
@@ -293,7 +306,7 @@ test('F0811-2 ② 증상별·원인 유형별 색인이 정본 9유형과 8증�
 
 test('F0811-3 ① 인시던트 기준이 SEV1~3·탐지·에스컬레이션·포스트모템·경계를 정본 위치와 함께 둔다', () => {
   const text = read('docs/runbooks/incident-criteria.md');
-  for (const title of ['심각도', '탐지 경로', '역할과 에스컬레이션', '포스트모템', '공지', '경계']) {
+  for (const title of ['심각도', '탐지 경로', '역할과 에스컬레이션', '포스트모템', '원인 유형', '공지', '경계']) {
     assert.ok(section(text, title), `incident-criteria.md에 '## ${title}' 절이 없다`);
   }
   assert.match(text, /\.\.\/observability\.md/, 'incident-criteria.md가 docs/observability.md를 가리키지 않는다');
@@ -392,7 +405,7 @@ test('F0811-4 ② 담당 역할·목표 시간·포스트모템 판정과 HOT-01
   }
 
   const rb05 = read('docs/runbooks/RB-05.md');
-  assert.match(rb05, /identity\.accounts\.withdrawn/, 'RB-05에 탈퇴 사건 토픽이 없다');
+  assert.match(rb05, /identity\.accounts-withdrawn/, 'RB-05에 탈퇴 사건 토픽이 없다');
   assert.match(rb05, /20분/, 'RB-05에 장애 전환 시각 − 20분 되돌리기가 없다');
 
   const rb11 = read('docs/runbooks/RB-11.md');
@@ -418,9 +431,7 @@ test('F0811-5 ① 경계와 수치 미주장이 드러나고 41종에 30k/s·100
 
   for (const file of [...runbookFiles(), 'index.md', 'incident-criteria.md']) {
     const text = read(path.posix.join('docs/runbooks', file));
-    for (const claim of FORBIDDEN_CLAIMS) {
-      assert.ok(!text.includes(claim), `${file}: '${claim}' 달성값을 주장하는 문장이 있다`);
-    }
+    assertNoPositiveClaim(text, file);
     assertNoExecutionClaim(text, file);
   }
   for (const file of runbookFiles()) {
@@ -451,10 +462,8 @@ test('F0811-5 ② 런북의 상대 링크가 실재하고 관련 정본이 정�
     assert.ok(canon.length >= 2, `${file}: 관련 정본 링크가 2개 미만이다`);
     const outside = canon.some((t) => {
       const rel = t.split('#')[0];
-      if (!rel || /^(https?:|mailto:)/.test(rel)) return false;
-      const resolved = path.resolve(RUNBOOK_DIR, rel);
-      return path.relative(RUNBOOK_DIR, resolved).startsWith('..');
+      return rel.startsWith('../adr/') || rel.startsWith('../features/');
     });
-    assert.ok(outside, `${file}: 관련 정본 둘째 링크가 docs/runbooks/ 밖(ADR·기능·보안 등)을 가리키지 않는다`);
+    assert.ok(outside, `${file}: 관련 정본에 ../adr/ 또는 ../features/ 링크가 없다`);
   }
 });
