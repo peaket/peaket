@@ -374,6 +374,22 @@ HOST_SATURATED = '호스트 포화'
 HOST_MIXED = '코어 혼합'
 
 
+def parse_experiment(raw):
+    """--experiment <묶음>:<구성>을 manifest experiment 칸으로 바꾼다(docs/perf-ledger.md §2.2, V-T18).
+
+    묶음·구성은 영소문자·숫자·-만이고 콜론 하나로 가른다. 없으면 None. 틀리면 실행 전에 SystemExit(측정 폴더를 만들지 않는다).
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or raw.count(':') != 1:
+        raise SystemExit(f'--experiment는 <묶음>:<구성> 꼴이다: {raw}')
+    ident, config = raw.split(':')
+    for part in (ident, config):
+        if not re.fullmatch(r'[a-z0-9-]+', part or ''):
+            raise SystemExit(f'--experiment의 묶음·구성은 영소문자·숫자·-만 쓴다: {raw}')
+    return {'id': ident, 'config': config}
+
+
 def host_record(path):
     """--host 파일(loadtest/run.mjs v1 entry-steps의 host.json·steps.json host 꼴, 낙타 표기) → manifest host 칸(docs/perf-ledger.md §2.2).
 
@@ -548,6 +564,7 @@ def collect(a, root):
         'scenario': {'path': a.scenario, 'args': a.scenario_args, 'open_model': not a.closed_model},
         # 코드와 문서가 peaket 한 저장소라 커밋 하나가 둘 다 가리킨다. docs 칸은 비워 둔다(ADR-0165).
         'commit': {'code': a.commit or git_commit(root), 'docs': None},
+        'experiment': getattr(a, 'experiment', None),
         'raw_uri': raw_uri,
         'redis_tls': redis_tls,
         'paired_run': paired_run,
@@ -1051,6 +1068,7 @@ def main():
     p.add_argument('--redis-tls', choices=['true', 'false'], help='대기열·좌석 Redis 연결의 TLS 켬·끔(docs/perf-ledger.md §2.2)')
     p.add_argument('--paired-run', help='같은 조건으로 TLS를 반대로 잰 짝 실행의 run_id')
     p.add_argument('--host', help='호스트 지표 JSON(loadtest/run.mjs v1 entry-steps의 host.json, 낙타 표기). manifest host 칸과 호스트 포화·코어 혼합 표시(docs/perf-ledger.md §2.2)')
+    p.add_argument('--experiment', help='실험 묶음:구성(예 split-3way:by-role). manifest experiment 칸(docs/perf-ledger.md §2.2, V-T18)')
     p.add_argument('--commit'); p.add_argument('--generator'); p.add_argument('--region', default='local'); p.add_argument('--cost-krw', type=float); p.add_argument('--exchange-rate', type=float)
     p.add_argument('--checks', help='비율·백분위 점검 JSON(checks·crosscheck, docs/perf-ledger.md §2.2). 있으면 판정을 이 도구가 정한다')
     p.add_argument('--evidence', choices=['측정함', '구현함', '설계만', '계산만'], help='증거 수준(기본 측정함, docs/perf-ledger.md §2.2)')
@@ -1077,6 +1095,7 @@ def main():
     for req in ('run_id', 'kpi', 'version', 'profile'):
         if not getattr(a, req):
             p.error(f'--{req.replace("_", "-")} 가 필요합니다')
+    a.experiment = parse_experiment(a.experiment)
     root = a.root or L.find_root()
     collect(a, root)
 

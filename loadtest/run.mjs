@@ -40,6 +40,7 @@ import { pollStages } from './lib/model.mjs';
 import { seatCount } from './lib/seats.mjs';
 import { accountRef, pidOf, sidOf } from './lib/users.mjs';
 import { DEFAULTS, SCENARIOS, UsageError, V1_ENTRY_SCENARIO, V1_SCENARIOS, parseArgs } from './runner/args.mjs';
+import { assertLocalConfig, compareExperiment, experimentFor, manifestNotes, renderComparison } from './runner/split-compare.mjs';
 import { GENERATOR_RATE as ENTRY_GENERATOR_RATE, hostTags, runEntrySteps } from './runner/entry-scale.mjs';
 import { hostBetween, hostSnapshot } from './runner/host-metrics.mjs';
 import { CHECK_PHASES, checksFromSummary, executionSegments, generatorCount, mergeSummaries, withoutHistogramChecks } from './runner/merge.mjs';
@@ -2322,6 +2323,65 @@ async function runF089Command(a, runTag, kind) {
   return { outDir, exitCode: 0 };
 }
 
+// ───────────── F-08-10 동결 로컬 트랙(v1 compare·compare-report) ─────────────
+
+/**
+ * F-08-10 V-T18 비교 실행 하나. 측정 창 전에는 계획만 쓴다(Docker·kind·k6를 시작하지 않는다).
+ * 실제 두 k6(결제·진입)를 같은 시작 표시로 띄우는 오케스트레이션은 측정 창에서 결선한다(계획 10절 남은 위험).
+ */
+async function runF0810Command(a, runTag) {
+  assertLocalConfig(a.config);
+  const outDir = resolve(a.out ?? join('.cache', 'peaket-f10', 'runs', `${a.config}-${a.entry}-r${a.rep}`));
+  mkdirSync(outDir, { recursive: true });
+  const experiment = experimentFor({ config: a.config, runId: a.runId ?? runTag });
+  const command = {
+    tool: 'compare',
+    args: a,
+    experiment,
+    notes: manifestNotes({ config: a.config, entry: a.entry, rep: a.rep, runId: a.runId ?? runTag }),
+    recordedAt: new Date().toISOString(),
+    execute: process.env.PEAKET_F0810_EXECUTE === '1',
+    status: '미실행',
+    planned: {
+      payment: { scenario: 'v1-payment.js', tps: a.paymentTps },
+      entry: { scenario: 'v1-queue.js', rate: a.entryRate },
+      start: '두 k6를 같은 시작 표시로 함께 띄운다',
+      record: a.record,
+      runId: a.runId,
+      promUrl: a.promUrl,
+      commit: a.commit,
+    },
+  };
+  writeFileSync(join(outDir, 'command.json'), JSON.stringify(command, null, 2));
+  log(`F-08-10 compare: ${a.config}×${a.entry}×${a.rep} 계획을 ${outDir}에 남겼다 (측정 전 — Docker·kind·k6를 시작하지 않는다)`);
+  return { outDir, exitCode: 0 };
+}
+
+/** 실행 폴더의 comparison-run.json을 읽어 실험 묶음 비교를 쓴다. 없으면 미실행 결과를 남긴다. */
+async function runF0810Report(a) {
+  const runsDir = resolve(a.runs ?? join('.cache', 'peaket-f10', 'runs'));
+  const out = resolve(a.out ?? join('.cache', 'peaket-f10', 'comparison.json'));
+  mkdirSync(dirname(out), { recursive: true });
+  const runs = [];
+  if (existsSync(runsDir)) {
+    for (const d of readdirSync(runsDir, { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      const f = join(runsDir, d.name, 'comparison-run.json');
+      if (!existsSync(f)) continue;
+      const r = JSON.parse(readFileSync(f, 'utf8'));
+      if (r?.experiment?.id && r.experiment.id !== a.experiment) continue;
+      runs.push(r);
+    }
+  }
+  const result = compareExperiment(runs);
+  const report = { experiment: a.experiment, runs: runs.length, ...result, note: runs.length ? null : '미실행: 측정 창에서 comparison-run.json을 채운다' };
+  writeFileSync(out, JSON.stringify(report, null, 2));
+  const md = out.replace(/\.json$/i, '.md');
+  writeFileSync(md, renderComparison(result));
+  log(`F-08-10 compare-report: 실행 ${runs.length}개, 판정 ${result.verdict}, ${out}`);
+  return { outDir: dirname(out), exitCode: 0 };
+}
+
 // ───────────── 게이트웨이 차단 상한·검색 IP 한도(gw, V-T43·SR-T13 ②, BAT-056) ─────────────
 
 /** 시나리오가 쓰는 회차 ID(대역 백엔드는 보지 않는다) */
@@ -2534,7 +2594,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } catch (e) {
     if (e instanceof UsageError) {
       console.error(`loadtest/run.mjs: ${e.message}`);
-      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment|entry-steps|relay-fault|search|payment-fault [...] | gw sweep|capacity|ip-limit|limits [...] | cleanup (loadtest/README.md)');
+      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment|entry-steps|relay-fault|search|payment-fault|compare|compare-report [...] | gw sweep|capacity|ip-limit|limits [...] | cleanup (loadtest/README.md)');
       process.exit(2);
     }
     throw e;
@@ -2561,7 +2621,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     });
   }
   try {
-    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : a.scenario === 'relay-fault' ? await runF089Command(a, runTag, 'relay-fault') : a.scenario === 'search' ? await runF089Command(a, runTag, 'search') : a.scenario === 'payment-fault' ? await runF089Command(a, runTag, 'payment-fault') : await runV1(a, runTag)) : await runV0(a, runTag);
+    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : a.scenario === 'relay-fault' ? await runF089Command(a, runTag, 'relay-fault') : a.scenario === 'search' ? await runF089Command(a, runTag, 'search') : a.scenario === 'payment-fault' ? await runF089Command(a, runTag, 'payment-fault') : a.scenario === 'compare' ? await runF0810Command(a, runTag) : a.scenario === 'compare-report' ? await runF0810Report(a) : await runV1(a, runTag)) : await runV0(a, runTag);
     log(`\n산출물: ${r.outDir}`);
     process.exit(r.exitCode);
   } catch (e) {

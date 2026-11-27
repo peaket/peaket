@@ -9,6 +9,8 @@
 //   node loadtest/run.mjs v1 queue|seat-hold|payment …(v0와 같은 인자, docs/verification.md §3.9 'v1 경로'. --namespace·--settle·--hpa-timeline은 없다)
 //     v1만: [--db-stats](queue·seat-hold·payment, purchase·payment DB 통계와 WAL 바이트) [--redis-stats](대기열·좌석 Valkey INFO memory, 계획 F-08-8 7.1)
 //   node loadtest/run.mjs v1 entry-steps --replicas N --pod-cpus <몫> (--start-rate r --step-rate d | --x1-estimate X) […](진입 서버 비례 확인, 인자 규칙은 ./entry-scale.mjs parseEntryStepsArgs)
+//   node loadtest/run.mjs v1 compare --config bundle|by-role|services --entry none|100|120 --rep 1..3 [--entry-max-rate N] [--payment-tps 300] [--record --run-id <ID> --out <폴더> --prom-url …](F-08-10 V-T18, ./split-compare.mjs)
+//   node loadtest/run.mjs v1 compare-report [--experiment split-3way] [--runs <폴더>] [--out <comparison.json>](F-08-10 V-T18 비교 요약)
 //   node loadtest/run.mjs gw sweep|capacity|ip-limit|limits …(게이트웨이 차단 상한·검색 IP 한도, BAT-056·BAT-058. 인자 규칙은 ./gw.mjs parseGwArgs가 맡는다)
 //   공통: [--warm 30] [--main 60] [--cpus 4] [--memory-mi 4096] [--generators N] [--namespace v0|v0-base] [--settle] [--hpa-timeline]
 //         [--record --run-id <ID> [--profile <이름>] [--prom-url http://127.0.0.1:9090]] [--invariants] [--out <폴더>]
@@ -26,6 +28,7 @@ import { parseEntryStepsArgs } from './entry-scale.mjs';
 import { parseRelayFaultArgs } from './relay-fault.mjs';
 import { parseSearchArgs } from './search-measure.mjs';
 import { parsePaymentFaultArgs } from './payment-fault.mjs';
+import { parseCompareArgs, parseCompareReportArgs } from './split-compare.mjs';
 
 /** 입구의 IP당 초당 요청 한도(deploy/envs/local/v0-gateway.yaml PEAKET_V0_RATE_PER_SECOND, 시험이 견준다) */
 export const GATEWAY_RATE_PER_IP = 10;
@@ -238,6 +241,8 @@ export function parseArgs(argv) {
     if (scenario === 'relay-fault') return { command: 'v1', scenario, ...parseRelayFaultArgs(rest0.slice(1)) };
     if (scenario === 'search') return { command: 'v1', scenario, ...parseSearchArgs(rest0.slice(1)) };
     if (scenario === 'payment-fault') return { command: 'v1', scenario, ...parsePaymentFaultArgs(rest0.slice(1)) };
+    if (scenario === 'compare') return { command: 'v1', scenario, ...parseCompareArgs(rest0.slice(1)) };
+    if (scenario === 'compare-report') return { command: 'v1', scenario, ...parseCompareReportArgs(rest0.slice(1)) };
     if (!Object.hasOwn(V1_SCENARIOS, scenario ?? '')) fail(`v1 시나리오는 ${Object.keys(V1_SCENARIOS).join('·')} 가운데 하나다: ${scenario ?? '(없음)'}`);
     kind = `v1:${scenario}`;
     rest = rest0.slice(1);
