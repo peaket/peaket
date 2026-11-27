@@ -18,6 +18,7 @@ import {
   ExecuteCommand,
   HandleCommandEvent,
   MemoryCommandStore,
+  RevertCommand,
   approvalModeOf,
   blockExpiryVerdict,
   reauthRequiredFor,
@@ -233,6 +234,34 @@ describe('C-T12 Degraded Mode 전이 감사 기록', () => {
     expect(finished.state).toBe('ACKED');
     const acked = auditPayloads(audit, 'COMMAND_ACKED');
     expect(acked).toContainEqual(expect.objectContaining({ mode: 'ENTRY_DEGRADED', transition: 'ON' }));
+  });
+
+  test('C-T12 ④ ENTRY_DEGRADED 되돌리기의 감사 기록에 mode와 OFF가 남는다', async () => {
+    const { audit, store } = newStore();
+    const command = await store.create({
+      commandId: randomUUID(),
+      type: 'DEGRADED_MODE',
+      reason: '동결 로컬 F-02-6 계약 시험',
+      params: { mode: 'ENTRY_DEGRADED', expiresAt: new Date(NOW + HOUR).toISOString() },
+      requestedBy: REQUESTER,
+      requestedRole: 'commander',
+      nowMs: NOW,
+      approvalMode: 'ONE',
+    });
+    const executor = {
+      execute: async () => ({ status: 'ACKED' as const, ackedAtMs: NOW }),
+      revert: async () => ({ status: 'ACKED' as const, ackedAtMs: NOW + 1 }),
+    };
+    expect((await new ExecuteCommand(store, executor).run(command, { accountId: REQUESTER, sessionId: '', role: 'commander' }, NOW)).state).toBe('ACKED');
+    const reverted = await new RevertCommand(store, executor).execute({
+      commandId: command.commandId,
+      reason: '진입 Degraded 해제',
+      actor: { accountId: REQUESTER, sessionId: '', role: 'commander' },
+      nowMs: NOW + 1,
+    });
+    expect(reverted.pending).toBe(false);
+    expect(reverted.command.state).toBe('REVERTED');
+    expect(auditPayloads(audit, 'COMMAND_REVERTED')).toContainEqual(expect.objectContaining({ mode: 'ENTRY_DEGRADED', transition: 'OFF' }));
   });
 
   test('C-T12 ② AUTO_ACTION의 DEGRADED_MODE 진입 Degraded도 SYSTEM 행위자로 감사 기록과 DISPATCHED를 남긴다', async () => {
