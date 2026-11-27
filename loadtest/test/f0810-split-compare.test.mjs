@@ -179,9 +179,13 @@ test('F0810-3 ③ compareExperiment: (다)가 있으면 complete, (다)의 진�
   assert.equal(complete.services, 'measured');
   assert.equal(complete.adr0007, 'pass');
 
-  const slow = compareExperiment(withServices(metrics(151, 0.0001, 50, 0.0001, 0.01)));
-  assert.equal(slow.adr0007, 'fail');
+  const slow = compareExperiment(withServices(metrics(150, 0.0001, 50, 0.0001, 0.01)));
+  assert.equal(slow.adr0007, 'fail', 'NFR-005은 150ms 미만이라 경계 150ms는 실패다');
   assert.equal(slow.verdict, 'fail');
+
+  const edge = compareExperiment(withServices(metrics(149.9, 0.0005, 50, 0.0001, 0.01)));
+  assert.equal(edge.adr0007, 'pass', '149.9ms·오류율 0.0005는 기준 안이다');
+  assert.equal(edge.verdict, 'complete');
 
   const errors = compareExperiment(withServices(metrics(100, 0.0006, 50, 0.0001, 0.01)));
   assert.equal(errors.adr0007, 'fail');
