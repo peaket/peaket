@@ -516,6 +516,18 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     const t4 = await reauth(c4.a, c4.s1.sid, 'ACCOUNT_SECURITY');
     expect(problemOf(await endSession(c4.a, c4.s1.sid, c4.s2.sid, t4))).toEqual({ status: 404, type: 'session-not-found' });
     expect((await endSession(c4.a, c4.s1.sid, s3.sid, t4)).statusCode).toBe(204);
+
+    // 사전 확인 뒤 대상이 사라진 경쟁(IR13-03): 저장소가 NOT_FOUND를 돌려도 재인증 토큰을 쓰지 않는다
+    const c5 = await pair('404-race', '203.0.113.79');
+    const t5 = await reauth(c5.a, c5.s1.sid, 'ACCOUNT_SECURITY');
+    const restore = patchStore('endDeviceSessions', async () => ({ kind: 'NOT_FOUND' }));
+    try {
+      const raced = await endSession(c5.a, c5.s1.sid, c5.s2.sid, t5);
+      expect(problemOf(raced)).toEqual({ status: 404, type: 'session-not-found' });
+    } finally {
+      restore();
+    }
+    expect((await endSession(c5.a, c5.s1.sid, c5.s2.sid, t5)).statusCode).toBe(204);
   });
 
   test('I-T53 ②③ [ASVS v5.0.0-7.5.1] 재인증 토큰이 없거나 다른 작업 묶음·다른 세션·이미 쓴 것이면 세 경로 모두 403 reauth-required이고 상태를 바꾸지 않는다', async () => {

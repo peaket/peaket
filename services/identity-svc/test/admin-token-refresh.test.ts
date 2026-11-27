@@ -18,7 +18,7 @@ function harness() {
   const open = async (id: string) => {
     const rt = randomBytes(32).toString('base64url');
     const now = clock.now();
-    await store.createSession({ id, accountId: ACC, aud: 'ops', refreshHash: createHash('sha256').update(rt).digest(), refreshFamily: id, pairRef: 'p'.repeat(32), createdAt: now, absoluteExpiresAt: now + 24 * 60 * M, idleExpiresAt: now + 60 * M }, 2);
+    await store.createSession({ id, accountId: ACC, aud: 'ops', refreshHash: createHash('sha256').update(rt).digest(), refreshFamily: id, pairRef: 'p'.repeat(32), createdAt: now, absoluteExpiresAt: now + 24 * 60 * M, idleExpiresAt: now + 60 * M, deviceLabel: 'Chrome · Windows' }, 2);
     return rt;
   };
   return { clock, store, uc, open, seen };
@@ -45,6 +45,8 @@ test('I-T46⑥_재시도유예는회전뒤30초까지이고_30초를넘기면같
   t.clock.advance(1);
   expect(await t.uc.run({ aud: 'ops', refreshToken: rt })).toEqual({ result: 'REUSED' });
   expect(t.store.terminatedEvents()).toEqual([{ accountId: ACC, sessionId: '0190f3a1-7c2e-7a00-8000-000000000cb2', reason: 'REFRESH_REUSE' }]);
+  // IR13-07: 재사용으로 끝낸 세션도 기기 이름을 같은 자리에서 비운다
+  expect(t.store.sessions(ACC).find((s) => s.id === '0190f3a1-7c2e-7a00-8000-000000000cb2')!.deviceLabel).toBeNull();
   expect(t.seen).toEqual(['ops:rotated', 'ops:retried', 'ops:reused']);
   // 끝난 패밀리의 토큰은 그 뒤 무효(다시 끝내지 않는다)
   expect(await t.uc.run({ aud: 'ops', refreshToken: rt })).toEqual({ result: 'INVALID' });

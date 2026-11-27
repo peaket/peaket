@@ -115,4 +115,16 @@ test('I-T53 ③ [ASVS v5.0.0-7.5.1] 재인증·확인 코드·만료·없는 세
   for (const text of Object.values(m)) assert.equal(text.includes('서버 detail 원문'), false);
   // 흔한 500은 하나의 안내로 모은다
   assert.equal(accountSecurityProblemMessage({ status: 500, type: 'internal', title: '서버 오류' }), accountSecurityProblemMessage({ status: 502, type: 'bad-gateway', title: '게이트웨이 오류' }));
+
+  // IR13-06: 패스키 창을 닫은 경우(NotAllowedError)와 브라우저가 패스키를 못 쓰는 경우는
+  // 서버 오류가 아니라 '패스키 확인을 마치지 못했습니다'로 보이고, 닫기·다시 시도를 안내한다.
+  const { reauthFailureText } = await mod();
+  for (const e of [{ name: 'NotAllowedError' }, new Error('이 브라우저에서는 패스키를 쓸 수 없습니다'), new Error('패스키 확인을 마치지 못했습니다')]) {
+    const text = reauthFailureText(e);
+    assert.match(text, /패스키 확인을 마치지 못했습니다/);
+    assert.match(text, /다시 시도/);
+    assert.doesNotMatch(text, /서버/);
+  }
+  // 그 밖의 연결 실패만 서버 안내로 남긴다
+  assert.match(reauthFailureText(new TypeError('fetch failed')), /서버에 연결하지 못했습니다/);
 });

@@ -40,6 +40,11 @@ test('I-T53 ③ 실제 보안 줄은 partner-live의 여섯 함수만 부르고 
   // QR 라이브러리가 없어 otpauth 주소와 비밀 키를 글로 보인다(계획 §4 [가정])
   assert.match(live, /otpauthUri/);
   assert.doesNotMatch(live, /QRCode|qrcode|qr-code|<canvas|new\s+Canvas/i);
+  // IR13-04: 실제 판도 d5 §6.1의 네 줄(비밀번호·인증 앱·패스키·복구 코드)을 그린다.
+  // 비밀번호·패스키는 이 기능(F-07-13)이 바꾸지 않으므로 자리만 두고 비활성으로 표시한다.
+  assert.match(live, /비밀번호/);
+  assert.match(live, /패스키/);
+  assert.match(live, /아직 바꿀 수 없|준비 중|다음 기능/);
 });
 
 test('I-T53 ③ [ASVS v5.0.0-7.5.1] 재인증은 ACCOUNT_SECURITY로 하고 패스키가 있는 계정만 withPasskey를 켠다', () => {
@@ -80,6 +85,8 @@ test('I-T53 ③ [ASVS v5.0.0-6.4.4] 복구 코드는 한 번만 보이고 저장
   assert.doesNotMatch(live, /console\.(?:log|info|warn|error|debug)/);
   // 닫거나 완료할 때 코드를 지운다
   assert.match(live, /set[A-Z][A-Za-z]*(?:Codes|RecoveryCodes)\(\[\]\)/);
+  // IR13-05: 다시 만들기 성공 뒤에는 요약을 다시 읽어 '남은 코드'가 10개로 바뀐다
+  assert.match(live, /recreatePartnerRecoveryCodes[\s\S]{0,500}summary\.reload\(\)/);
 });
 
 test('I-T53 ③ 실제 보안 줄에는 목업 값(accountSecurity·loginDevices)이 0건이다', () => {
