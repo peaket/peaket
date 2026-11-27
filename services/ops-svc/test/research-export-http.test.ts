@@ -35,14 +35,47 @@ const header = (r: Req, name: string) => {
 class StoreFake {
   readonly map = new Map<string, any>();
   readonly denials: Array<{ accountId: string; atMs: number; problemType: string }> = [];
-  async put(r: any) { this.map.set(r.exportId, { ...r }); }
-  async get(id: string) { return this.map.get(id) ?? null; }
-  async update(r: any) { this.map.set(r.exportId, { ...r }); }
+  failNextGet = false;
+  failNextPut = false;
+  failNextUpdate = false;
+  countDelayMs = 0;
+  async put(r: any) {
+    if (this.failNextPut) {
+      this.failNextPut = false;
+      throw new Error('store put down');
+    }
+    this.map.set(r.exportId, { ...r });
+  }
+  async get(id: string) {
+    if (this.failNextGet) {
+      this.failNextGet = false;
+      throw new Error('store get down');
+    }
+    return this.map.get(id) ?? null;
+  }
+  async update(r: any) {
+    if (this.failNextUpdate) {
+      this.failNextUpdate = false;
+      throw new Error('store update down');
+    }
+    this.map.set(r.exportId, { ...r });
+  }
   async delete(id: string) { this.map.delete(id); }
+  async deleteExpired(nowMs: number) {
+    let deleted = 0;
+    for (const [id, r] of this.map) {
+      if (r.expiresAtMs <= nowMs) {
+        this.map.delete(id);
+        deleted += 1;
+      }
+    }
+    return deleted;
+  }
   async listPending(nowMs: number, limit: number) {
     return [...this.map.values()].filter((r) => r.status === 'PENDING' && r.expiresAtMs > nowMs).slice(0, limit);
   }
   async countCreatedBetween(i: { accountId: string; fromMs: number; toMs: number }) {
+    if (this.countDelayMs > 0) await new Promise((r) => setTimeout(r, this.countDelayMs));
     return [...this.map.values()].filter((r) => r.createdBy === i.accountId && r.createdAtMs >= i.fromMs && r.createdAtMs < i.toMs).length;
   }
   async recordDenial(i: { accountId: string; atMs: number; problemType: string }) { this.denials.push(i); }
@@ -53,8 +86,13 @@ class StoreFake {
 
 class BufferFake {
   readonly map = new Map<string, { bytes: Uint8Array; expiresAtMs: number }>();
+  failNextGet = false;
   async put(exportId: string, bytes: Uint8Array, expiresAtMs: number) { this.map.set(exportId, { bytes, expiresAtMs }); }
   async get(exportId: string, nowMs: number) {
+    if (this.failNextGet) {
+      this.failNextGet = false;
+      throw new Error('buffer get down');
+    }
     const v = this.map.get(exportId);
     return v && v.expiresAtMs > nowMs ? v.bytes : null;
   }
@@ -106,7 +144,12 @@ const log = {
 const alerts: any[] = [];
 const config = { allowlistVersion: 'v1', approvedReviewVersions: ['v1'] as string[], keyVersion: 'analytics-v1' };
 const schedule = {
+  failNext: false,
   async get(eventId: string) {
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error('schedule down');
+    }
     if (eventId === EVENT) return { opensAtMs: NOW - 10 * DAY, saleEndsAtMs: NOW - 9 * DAY };
     if (eventId === OLD) return { opensAtMs: NOW - 100 * DAY, saleEndsAtMs: NOW - 91 * DAY };
     return undefined;
@@ -185,7 +228,12 @@ beforeEach(() => {
   clock.advance(NOW - clock.now());
   store.map.clear();
   store.denials.length = 0;
+  store.failNextGet = false;
+  store.failNextPut = false;
+  store.failNextUpdate = false;
+  store.countDelayMs = 0;
   buffer.map.clear();
+  buffer.failNextGet = false;
   silver.calls.length = 0;
   silver.nextError = null;
   silver.next = null;
@@ -194,6 +242,7 @@ beforeEach(() => {
   log.rows.length = 0;
   log.failNext = false;
   alerts.length = 0;
+  schedule.failNext = false;
   config.allowlistVersion = 'v1';
   config.approvedReviewVersions = ['v1'];
 });
@@ -626,5 +675,192 @@ describe('F-04-19 연구 내보내기 HTTP', () => {
     // 5·6번째 거절에서도 다시 경보하지 않는다(n % 3 === 0 틀린 구현을 잡는다).
     for (let n = 0; n < 2; n += 1) expect((await post(e, body())).statusCode).toBe(429);
     expect(alerts).toHaveLength(4);
+  });
+
+  test('IR0419-01 연구 내보내기 스윕은 tick마다 buildDue를 부르고 stop 뒤에는 부르지 않는다', async () => {
+    const mod = await researchModule();
+    expect(mod, 'research-exports 모듈이 아직 없다').not.toBeNull();
+    if (!mod) return;
+    expect(typeof mod.startResearchExportSweep).toBe('function');
+    if (typeof mod.startResearchExportSweep !== 'function') return;
+    let calls = 0;
+    const sweep = mod.startResearchExportSweep({
+      buildDue: async () => { calls += 1; return 0; },
+      now: () => NOW,
+      intervalMs: 1_000_000,
+    });
+    await sweep.tick();
+    expect(calls).toBe(1);
+    await sweep.tick();
+    expect(calls).toBe(2);
+    sweep.stop();
+    await sweep.tick();
+    expect(calls).toBe(2);
+  });
+
+  test('IR0419-01 스윕의 buildDue는 만료된 레코드를 지운다', async () => {
+    const who = commander();
+    const created = await post(who, body());
+    expect(created.statusCode, created.payload).toBe(202);
+    const id = String(json(created).exportId);
+    const svcMod = await service();
+    if (!svcMod) return;
+    clock.advance(HALF_HOUR + 1);
+    await svcMod.buildDue(clock.now());
+    expect(store.map.has(id)).toBe(false);
+  });
+
+  test('IR0419-04 만료된 PENDING은 409가 아니라 404다', async () => {
+    const who = commander();
+    const created = await post(who, body());
+    expect(created.statusCode, created.payload).toBe(202);
+    const id = String(json(created).exportId);
+    clock.advance(HALF_HOUR + 1);
+    const expired = await get(who, id);
+    expect(expired.statusCode, expired.payload).toBe(404);
+    expect(problemType(expired)).not.toBe('research-export-not-ready');
+  });
+
+  test('IR0419-05 받기의 이용 내역·감사 append 실패는 503이고 파일은 남는다', async () => {
+    const who = commander();
+    const created = await post(who, body());
+    expect(created.statusCode, created.payload).toBe(202);
+    const id = String(json(created).exportId);
+    const svcMod = await service();
+    if (!svcMod) return;
+    await svcMod.buildDue(clock.now());
+
+    log.failNext = true;
+    const logFail = await get(who, id);
+    expect(logFail.statusCode, logFail.payload).toBe(503);
+    expect(problemType(logFail)).toBe('dependency-unavailable');
+    expect((await get(who, id)).statusCode).toBe(200);
+
+    audit.failNext = true;
+    const auditFail = await get(who, id);
+    expect(auditFail.statusCode, auditFail.payload).toBe(503);
+    expect(problemType(auditFail)).toBe('dependency-unavailable');
+    expect((await get(who, id)).statusCode).toBe(200);
+  });
+
+  test('IR0419-05 buildDue의 저장·감사·이용 내역 실패는 레코드를 PENDING으로 남긴다', async () => {
+    const who = commander();
+    const svcMod = await service();
+    if (!svcMod) return;
+    const create = async () => {
+      store.map.clear();
+      buffer.map.clear();
+      const r = await post(who, body());
+      expect(r.statusCode, r.payload).toBe(202);
+      return String(json(r).exportId);
+    };
+
+    const failedLog = await create();
+    silver.nextError = new Error('clickhouse down');
+    log.failNext = true;
+    await svcMod.buildDue(clock.now());
+    expect(store.map.get(failedLog)?.status).toBe('PENDING');
+    expect(store.map.get(failedLog)?.failureType).toBeNull();
+    silver.nextError = null;
+    log.failNext = false;
+
+    const failedAudit = await create();
+    silver.nextError = new Error('clickhouse down');
+    audit.failNext = true;
+    await svcMod.buildDue(clock.now());
+    expect(store.map.get(failedAudit)?.status).toBe('PENDING');
+    silver.nextError = null;
+    audit.failNext = false;
+
+    const readyLog = await create();
+    log.failNext = true;
+    await svcMod.buildDue(clock.now());
+    expect(store.map.get(readyLog)?.status).toBe('PENDING');
+    log.failNext = false;
+    await svcMod.buildDue(clock.now());
+    expect(store.map.get(readyLog)?.status).toBe('READY');
+
+    const readyUpdate = await create();
+    store.failNextUpdate = true;
+    await svcMod.buildDue(clock.now());
+    expect(store.map.get(readyUpdate)?.status).toBe('PENDING');
+    await svcMod.buildDue(clock.now());
+    expect(store.map.get(readyUpdate)?.status).toBe('READY');
+  });
+
+  test('IR0419-06 LoggingResearchAlerts 기본 대역은 SEV3 경보를 JSON 줄로 남긴다', async () => {
+    const mod = await researchModule();
+    expect(mod, 'research-exports 모듈이 아직 없다').not.toBeNull();
+    if (!mod) return;
+    expect(typeof mod.LoggingResearchAlerts).toBe('function');
+    if (typeof mod.LoggingResearchAlerts !== 'function') return;
+    const chunks: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    (process.stdout as unknown as { write: (chunk: unknown) => boolean }).write = (chunk: unknown) => {
+      chunks.push(String(chunk));
+      return true;
+    };
+    try {
+      await new mod.LoggingResearchAlerts().raise({ kind: 'RESEARCH_EXPORT_DENIALS', accountId: 'acct-1', count: 3, atMs: NOW, severity: 'SEV3' });
+    } finally {
+      (process.stdout as unknown as { write: typeof original }).write = original;
+    }
+    const line = chunks.join('');
+    expect(line).toContain('research_export_alert');
+    expect(line).toContain('SEV3');
+    expect(line).toContain('acct-1');
+  });
+
+  test('IR0419-07 같은 계정 동시 POST는 5회를 넘지 않고 같은 키 동시 요청은 한 번만 만든다', async () => {
+    const who = commander();
+    store.countDelayMs = 10;
+    for (let n = 0; n < 4; n += 1) expect((await post(who, body())).statusCode).toBe(202);
+    const [a, b] = await Promise.all([post(who, body()), post(who, body())]);
+    expect([a.statusCode, b.statusCode].sort()).toEqual([202, 429]);
+    expect([...store.map.values()].filter((r) => r.createdBy === who['x-user-id'])).toHaveLength(5);
+
+    const who2 = commander();
+    const key = randomUUID();
+    const before = requestedAudit().length;
+    const [c, d] = await Promise.all([post(who2, body(), key), post(who2, body(), key)]);
+    expect([c.statusCode, d.statusCode]).toEqual([202, 202]);
+    expect([...store.map.values()].filter((r) => r.createdBy === who2['x-user-id'])).toHaveLength(1);
+    expect(requestedAudit().length).toBe(before + 1);
+  });
+
+  test('IR0419-08 schedule·store·buffer 의존 실패는 503이다', async () => {
+    const who = commander();
+    schedule.failNext = true;
+    const scheduleFail = await post(who, body());
+    expect(scheduleFail.statusCode, scheduleFail.payload).toBe(503);
+    expect(problemType(scheduleFail)).toBe('dependency-unavailable');
+    expect(store.map.size).toBe(0);
+
+    const who2 = commander();
+    const created = await post(who2, body());
+    expect(created.statusCode, created.payload).toBe(202);
+    const id = String(json(created).exportId);
+    const svcMod = await service();
+    if (!svcMod) return;
+    await svcMod.buildDue(clock.now());
+
+    store.failNextGet = true;
+    const storeFail = await get(who2, id);
+    expect(storeFail.statusCode, storeFail.payload).toBe(503);
+    expect(problemType(storeFail)).toBe('dependency-unavailable');
+    expect((await get(who2, id)).statusCode).toBe(200);
+
+    buffer.failNextGet = true;
+    const bufferFail = await get(who2, id);
+    expect(bufferFail.statusCode, bufferFail.payload).toBe(503);
+    expect(problemType(bufferFail)).toBe('dependency-unavailable');
+    expect((await get(who2, id)).statusCode).toBe(200);
+
+    const who3 = commander();
+    store.failNextPut = true;
+    const putFail = await post(who3, body());
+    expect(putFail.statusCode, putFail.payload).toBe(503);
+    expect(problemType(putFail)).toBe('dependency-unavailable');
+    expect([...store.map.values()].filter((r) => r.createdBy === who3['x-user-id'])).toHaveLength(0);
   });
 });

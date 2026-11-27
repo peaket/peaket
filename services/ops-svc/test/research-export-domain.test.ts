@@ -157,6 +157,12 @@ describe('F-04-19 연구 내보내기 순수 모델', () => {
     expect(refs).toHaveLength(7);
     expect(q.sql).not.toMatch(/\b(bronze|gold|trust|inv)\./);
     expect(q.sql).toContain('FORMAT ArrowStream');
+    const settingsAt = q.sql.indexOf('SETTINGS');
+    const formatAt = q.sql.indexOf('FORMAT ArrowStream');
+    expect(settingsAt).toBeGreaterThan(-1);
+    expect(formatAt).toBeGreaterThan(settingsAt);
+    expect(q.sql.slice(settingsAt, formatAt)).toContain("output_format_arrow_compression_method = 'none'");
+    expect(q.sql.slice(settingsAt, formatAt)).toContain('output_format_arrow_low_cardinality_as_dictionary = 0');
     expect(q.sql).toContain("output_format_arrow_compression_method = 'none'");
     expect(q.sql).toContain('output_format_arrow_low_cardinality_as_dictionary = 0');
     expect(q.sql).toContain('dense_rank() OVER (ORDER BY session_ref)');
@@ -323,5 +329,13 @@ describe('F-04-19 연구 내보내기 순수 모델', () => {
       enabled: true,
       config: { allowlistVersion: 'v1', approvedReviewVersions: ['v1', 'v2'], keyVersion: 'analytics-v1' },
     });
+  });
+
+  test('IR0419-03 0040은 ops_app에 research_export·research_export_denial·pseudonymization_log 권한을 명시한다', async () => {
+    const sql = readFileSync(new URL('../migrations/0040_research_export.sql', import.meta.url), 'utf8');
+    expect(sql).toContain('GRANT USAGE ON SCHEMA public TO ops_app;');
+    expect(sql).toContain('GRANT SELECT, INSERT, UPDATE ON research_export TO ops_app;');
+    expect(sql).toContain('GRANT SELECT, INSERT ON research_export_denial TO ops_app;');
+    expect(sql).toContain('GRANT SELECT, INSERT ON pseudonymization_log TO ops_app;');
   });
 });
