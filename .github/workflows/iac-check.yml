@@ -29,3 +29,12 @@ jobs:
             terraform -chdir="$stack" validate
             echo "::endgroup::"
           done
+      # 새 플랫폼 모듈(F-09-4): stacks에 들어가기 전에 모듈 자체를 검증한다.
+      # provider 잠금 파일이 없는 동안에도 fmt·validate 대상에서 빠지지 않게 한다.
+      - run: |
+          for module in infra/modules/kms infra/modules/msk-iam infra/modules/cloudfront-waf; do
+            echo "::group::$module"
+            terraform -chdir="$module" init -backend=false -input=false
+            (cd "$module" && terraform validate)
+            echo "::endgroup::"
+          done

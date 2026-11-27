@@ -1,0 +1,201 @@
+{
+  "$comment": "PEAKET 엣지 계획(기능 F-09-4, HOT-450, docs/infra.md §4.1·§9 WAF 규칙표). 값은 tools/ci/platform-security.test.mjs가 정본과 대조한다. 실제 CloudFront·WAF 배포는 AWS 계정 뒤(미실행).",
+  "tls": {
+    "viewerMinimumProtocolVersion": "TLSv1.2_2021",
+    "originProtocolPolicy": "https-only",
+    "originSslProtocols": ["TLSv1.2"]
+  },
+  "distributions": [
+    {
+      "name": "www",
+      "hosts": ["www.peaket.example"],
+      "webAcl": "screen-partner-console",
+      "defaultBehavior": { "path": "default", "cachePolicy": "screen-html", "responseHeadersPolicy": "screen-app-csp", "originRequestPolicy": "www-app", "viewerProtocolPolicy": "redirect-to-https" },
+      "behaviors": [
+        { "path": "/_t/*", "cachePolicy": "no-store", "responseHeadersPolicy": "screen", "originRequestPolicy": "www-app", "viewerProtocolPolicy": "redirect-to-https" },
+        { "path": "/serwist/*", "cachePolicy": "static", "responseHeadersPolicy": "screen", "originRequestPolicy": "static", "viewerProtocolPolicy": "redirect-to-https" }
+      ]
+    },
+    {
+      "name": "queue",
+      "hosts": ["queue.peaket.example"],
+      "webAcl": "queue-api",
+      "defaultBehavior": { "path": "default", "cachePolicy": "no-store", "responseHeadersPolicy": "api", "originRequestPolicy": "queue-api", "viewerProtocolPolicy": "https-only" },
+      "behaviors": []
+    },
+    {
+      "name": "queue-files",
+      "hosts": ["queue-files.peaket.example"],
+      "webAcl": null,
+      "defaultBehavior": { "path": "default", "cachePolicy": "static", "responseHeadersPolicy": "queue-result", "originRequestPolicy": "static", "viewerProtocolPolicy": "redirect-to-https" },
+      "behaviors": [
+        { "path": "/v1/queues/*/shuffle-results/*", "cachePolicy": "static", "responseHeadersPolicy": "queue-result", "originRequestPolicy": "static", "viewerProtocolPolicy": "redirect-to-https" },
+        { "path": "/v1/queues/*/batch-results/*", "cachePolicy": "static", "responseHeadersPolicy": "queue-result", "originRequestPolicy": "static", "viewerProtocolPolicy": "redirect-to-https" },
+        { "path": "/v1/queues/*/shuffle-proof", "cachePolicy": "shuffle-proof", "responseHeadersPolicy": "queue-result", "originRequestPolicy": "static", "viewerProtocolPolicy": "redirect-to-https" }
+      ]
+    },
+    {
+      "name": "api",
+      "hosts": ["api.peaket.example"],
+      "webAcl": "api",
+      "defaultBehavior": { "path": "default", "cachePolicy": "search-api", "responseHeadersPolicy": "api", "originRequestPolicy": "api", "viewerProtocolPolicy": "https-only" },
+      "behaviors": []
+    },
+    {
+      "name": "partner",
+      "hosts": ["partner.peaket.example", "partner-api.peaket.example"],
+      "webAcl": "screen-partner-console",
+      "defaultBehavior": { "path": "default", "cachePolicy": "screen-html", "responseHeadersPolicy": "screen-app-csp", "originRequestPolicy": "www-app", "viewerProtocolPolicy": "redirect-to-https" },
+      "behaviors": [
+        { "path": "/v1/*", "cachePolicy": "no-store", "responseHeadersPolicy": "api", "originRequestPolicy": "api", "viewerProtocolPolicy": "https-only" }
+      ]
+    },
+    {
+      "name": "console",
+      "hosts": ["console.peaket.example", "ops-api.peaket.example"],
+      "webAcl": "screen-partner-console",
+      "defaultBehavior": { "path": "default", "cachePolicy": "screen-html", "responseHeadersPolicy": "console-app-csp", "originRequestPolicy": "www-app", "viewerProtocolPolicy": "redirect-to-https" },
+      "behaviors": [
+        { "path": "/remotes/*", "cachePolicy": "static", "responseHeadersPolicy": "screen", "originRequestPolicy": "static", "viewerProtocolPolicy": "redirect-to-https" },
+        { "path": "/v1/*", "cachePolicy": "no-store", "responseHeadersPolicy": "api", "originRequestPolicy": "api", "viewerProtocolPolicy": "https-only" }
+      ]
+    },
+    {
+      "name": "scanner",
+      "hosts": ["scanner.peaket.example"],
+      "webAcl": "screen-partner-console",
+      "defaultBehavior": { "path": "default", "cachePolicy": "static", "responseHeadersPolicy": "scanner-app-csp", "originRequestPolicy": "static", "viewerProtocolPolicy": "redirect-to-https" },
+      "behaviors": []
+    },
+    {
+      "name": "developers",
+      "hosts": ["developers.peaket.example", "peaket.example"],
+      "webAcl": null,
+      "defaultBehavior": { "path": "default", "cachePolicy": "static", "responseHeadersPolicy": "api", "originRequestPolicy": "static", "viewerProtocolPolicy": "redirect-to-https" },
+      "behaviors": []
+    }
+  ],
+  "cachePolicies": [
+    { "name": "screen-html", "minTtl": 0, "defaultTtl": 60, "maxTtl": 300, "cacheKey": { "cookies": "none", "headers": "none", "queryStrings": [] } },
+    { "name": "no-store", "minTtl": 0, "defaultTtl": 0, "maxTtl": 0, "cacheKey": { "cookies": "none", "headers": "none", "queryStrings": [] } },
+    { "name": "static", "minTtl": 86400, "defaultTtl": 2592000, "maxTtl": 31536000, "cacheKey": { "cookies": "none", "headers": "none", "queryStrings": [] } },
+    { "name": "search-api", "minTtl": 0, "defaultTtl": 60, "maxTtl": 300, "cacheKey": { "cookies": "none", "headers": "none", "queryStrings": ["q", "page", "limit"] } },
+    { "name": "shuffle-proof", "minTtl": 0, "defaultTtl": 5, "maxTtl": 5, "cacheKey": { "cookies": "none", "headers": "none", "queryStrings": [] } }
+  ],
+  "responseHeadersPolicies": [
+    {
+      "name": "screen",
+      "frameAncestors": "none",
+      "headers": {
+        "Strict-Transport-Security": { "value": "max-age=31536000; includeSubDomains", "override": true },
+        "X-Content-Type-Options": { "value": "nosniff", "override": true },
+        "Content-Security-Policy": { "value": "default-src 'none'; frame-ancestors 'none'", "override": true },
+        "Referrer-Policy": { "value": "strict-origin-when-cross-origin", "override": true }
+      }
+    },
+    {
+      "name": "screen-app-csp",
+      "frameAncestors": "none",
+      "appCspVariant": "A",
+      "headers": {
+        "Strict-Transport-Security": { "value": "max-age=31536000; includeSubDomains", "override": true },
+        "X-Content-Type-Options": { "value": "nosniff", "override": true },
+        "Referrer-Policy": { "value": "strict-origin-when-cross-origin", "override": true }
+      }
+    },
+    {
+      "name": "console-app-csp",
+      "frameAncestors": "none",
+      "appCspVariant": "C",
+      "headers": {
+        "Strict-Transport-Security": { "value": "max-age=31536000; includeSubDomains", "override": true },
+        "X-Content-Type-Options": { "value": "nosniff", "override": true },
+        "Referrer-Policy": { "value": "no-referrer", "override": true }
+      }
+    },
+    {
+      "name": "scanner-app-csp",
+      "frameAncestors": "none",
+      "appCspVariant": "D",
+      "headers": {
+        "Strict-Transport-Security": { "value": "max-age=31536000; includeSubDomains", "override": true },
+        "X-Content-Type-Options": { "value": "nosniff", "override": true },
+        "Referrer-Policy": { "value": "no-referrer", "override": true }
+      }
+    },
+    {
+      "name": "api",
+      "frameAncestors": "none",
+      "headers": {
+        "Strict-Transport-Security": { "value": "max-age=31536000; includeSubDomains", "override": true },
+        "X-Content-Type-Options": { "value": "nosniff", "override": true },
+        "Content-Security-Policy": { "value": "default-src 'none'; frame-ancestors 'none'", "override": true },
+        "Referrer-Policy": { "value": "strict-origin-when-cross-origin", "override": true }
+      }
+    },
+    {
+      "name": "queue-result",
+      "frameAncestors": "none",
+      "headers": {
+        "Strict-Transport-Security": { "value": "max-age=31536000; includeSubDomains", "override": true },
+        "X-Content-Type-Options": { "value": "nosniff", "override": true },
+        "Content-Security-Policy": { "value": "default-src 'none'; frame-ancestors 'none'", "override": true },
+        "Referrer-Policy": { "value": "strict-origin-when-cross-origin", "override": true },
+        "Access-Control-Allow-Origin": { "value": "https://www.peaket.example", "override": true }
+      }
+    }
+  ],
+  "webAcls": [
+    {
+      "name": "queue-api",
+      "rules": [
+        { "id": "ip-reputation", "action": "count" },
+        { "id": "common", "action": "count" },
+        { "id": "rate", "action": "count", "windowSec": 300 }
+      ]
+    },
+    {
+      "name": "screen-partner-console",
+      "rules": [
+        { "id": "console-allowlist", "action": "block", "allowlist": ["203.0.113.0/24"], "scopeDown": { "hosts": ["console.peaket.example", "ops-api.peaket.example"] } },
+        { "id": "ip-reputation", "action": "count" },
+        { "id": "common", "action": "count" },
+        { "id": "rate", "action": "count", "windowSec": 300 },
+        { "id": "bot-control", "action": "count", "level": "common", "scopeDown": { "hosts": ["www.peaket.example"], "paths": ["/login/*"] } }
+      ]
+    },
+    {
+      "name": "api",
+      "rules": [
+        { "id": "ip-reputation", "action": "count" },
+        { "id": "common", "action": "count" },
+        { "id": "rate", "action": "count", "windowSec": 300 }
+      ]
+    }
+  ],
+  "logging": {
+    "destination": "s3",
+    "fields": ["date", "time", "cs-method", "cs-uri-stem", "sc-status", "x-edge-result-type"],
+    "dropAllowedVerdicts": true,
+    "queryString": "excluded"
+  },
+  "invalidation": {
+    "tagHeader": "x-peaket-cache-tag",
+    "tags": ["#event:{id}", "#home"],
+    "paths": [{ "distribution": "api", "path": "/v1/search*" }]
+  },
+  "originRequestPolicies": [
+    { "name": "www-app", "headers": ["CloudFront-Viewer-ASN"] },
+    { "name": "queue-api", "headers": ["CloudFront-Viewer-ASN", "CloudFront-Viewer-JA4-Fingerprint"] },
+    { "name": "api", "headers": ["CloudFront-Viewer-ASN", "CloudFront-Viewer-JA4-Fingerprint"] },
+    { "name": "static", "headers": [] }
+  ],
+  "queueFiles": {
+    "fallbackOrigin": { "path": "/queue/fallback", "s3ListBucketPrefixes": ["queue/shuffle-results/", "queue/batch-results/"] },
+    "resultPathPrefixes": ["/v1/queues/*/shuffle-results/*", "/v1/queues/*/batch-results/*"],
+    "errorCachingMinTtl": 1,
+    "resultHeaders": { "Access-Control-Allow-Origin": "https://www.peaket.example" },
+    "shuffleProof": { "path": "/v1/queues/*/shuffle-proof", "cacheControl": "public, max-age=5" }
+  },
+  "staticRetention": { "days": 30, "recentBuilds": 5 }
+}

@@ -1,0 +1,128 @@
+{
+  "$comment": "PEAKET 워크로드별 MSK IAM 역할 계획(기능 F-09-4, HOT-440, docs/devops.md §9.4·D-T30). 토픽·소비자 그룹 권한은 MSK 전용 역할에만 두고, Pod Identity 역할에는 kafka-cluster 권한을 두지 않는다. 실제 역할 생성은 AWS 계정 뒤(미실행).",
+  "workloads": [
+    {
+      "name": "purchase-svc",
+      "podIdentityRole": "peaket-purchase-svc",
+      "mskRole": "peaket-purchase-svc-msk",
+      "trust": { "principal": "pod-identity:peaket-purchase-svc", "actions": ["sts:AssumeRole"] },
+      "sessionName": "purchase-svc-{env}",
+      "podIdentityActions": ["s3:GetObject"],
+      "clusters": {
+        "trade-control": [
+          { "topic": "trade.orders", "group": "purchase-svc", "actions": ["WriteData", "DescribeTopic", "Connect"] }
+        ]
+      }
+    },
+    {
+      "name": "core-svc",
+      "podIdentityRole": "peaket-core-svc",
+      "mskRole": "peaket-core-svc-msk",
+      "trust": { "principal": "pod-identity:peaket-core-svc", "actions": ["sts:AssumeRole"] },
+      "sessionName": "core-svc-{env}",
+      "podIdentityActions": ["s3:GetObject"],
+      "clusters": {
+        "trade-control": [
+          { "topic": "trade.orders", "group": "core-svc", "actions": ["ReadData", "DescribeTopic", "Connect"] }
+        ]
+      }
+    },
+    {
+      "name": "ops-svc",
+      "podIdentityRole": "peaket-ops-svc",
+      "mskRole": "peaket-ops-svc-msk",
+      "trust": { "principal": "pod-identity:peaket-ops-svc", "actions": ["sts:AssumeRole"] },
+      "sessionName": "ops-svc-{env}",
+      "podIdentityActions": ["s3:GetObject"],
+      "clusters": {
+        "control": [
+          { "topic": "control.settings", "group": "ops-svc", "actions": ["ReadData", "DescribeTopic", "Connect"] }
+        ]
+      }
+    },
+    {
+      "name": "queue-svc",
+      "podIdentityRole": "peaket-queue-svc",
+      "mskRole": "peaket-queue-svc-msk",
+      "trust": { "principal": "pod-identity:peaket-queue-svc", "actions": ["sts:AssumeRole"] },
+      "sessionName": "queue-svc-{env}",
+      "podIdentityActions": ["sqs:ReceiveMessage"],
+      "clusters": {
+        "telemetry": [
+          { "topic": "telemetry.queue", "group": "queue-svc", "actions": ["WriteData", "DescribeTopic", "Connect"] }
+        ],
+        "trade-control": [
+          { "topic": "support.cases-requested", "group": "queue-svc-support", "actions": ["WriteData", "DescribeTopic", "Connect"] }
+        ]
+      }
+    },
+    {
+      "name": "trust-svc",
+      "podIdentityRole": "peaket-trust-svc",
+      "mskRole": "peaket-trust-svc-msk",
+      "trust": { "principal": "pod-identity:peaket-trust-svc", "actions": ["sts:AssumeRole"] },
+      "sessionName": "trust-svc-{env}",
+      "podIdentityActions": ["s3:GetObject"],
+      "clusters": {
+        "telemetry": [
+          { "topic": "telemetry.verdicts", "group": "trust-svc", "actions": ["WriteData", "DescribeTopic", "Connect"] }
+        ]
+      }
+    },
+    {
+      "name": "payment-svc",
+      "podIdentityRole": "peaket-payment-svc",
+      "mskRole": "peaket-payment-svc-msk",
+      "trust": { "principal": "pod-identity:peaket-payment-svc", "actions": ["sts:AssumeRole"] },
+      "sessionName": "payment-svc-{env}",
+      "podIdentityActions": ["s3:GetObject"],
+      "clusters": {
+        "trade-control": [
+          { "topic": "trade.orders", "group": "payment-svc", "actions": ["ReadData", "DescribeTopic", "Connect"] }
+        ]
+      }
+    },
+    {
+      "name": "realtime-gw",
+      "podIdentityRole": "peaket-realtime-gw",
+      "mskRole": "peaket-realtime-gw-msk",
+      "trust": { "principal": "pod-identity:peaket-realtime-gw", "actions": ["sts:AssumeRole"] },
+      "sessionName": "realtime-gw-{env}",
+      "podIdentityActions": ["s3:GetObject"],
+      "clusters": {
+        "trade-control": [
+          { "topic": "trade.seats", "group": "realtime-gw", "actions": ["ReadData", "DescribeTopic", "Connect"] }
+        ]
+      }
+    }
+  ],
+  "invRefKeys": [
+    {
+      "label": "device",
+      "alias": "alias/peaket-inv-ref-key-device",
+      "version": 1,
+      "generateMac": ["identity-svc", "trust-svc"],
+      "verifyMac": [],
+      "readers": [
+        { "workload": "identity-svc", "alias": "alias/peaket-inv-ref-key-device", "version": 1 },
+        { "workload": "trust-svc", "alias": "alias/peaket-inv-ref-key-device", "version": 1 }
+      ]
+    },
+    {
+      "label": "contact",
+      "alias": "alias/peaket-inv-ref-key-contact",
+      "version": 1,
+      "generateMac": ["identity-svc"],
+      "verifyMac": [],
+      "readers": [{ "workload": "identity-svc", "alias": "alias/peaket-inv-ref-key-contact", "version": 1 }]
+    },
+    {
+      "label": "pay",
+      "alias": "alias/peaket-inv-ref-key-pay",
+      "version": 1,
+      "generateMac": ["payment-svc"],
+      "verifyMac": [],
+      "readers": [{ "workload": "payment-svc", "alias": "alias/peaket-inv-ref-key-pay", "version": 1 }]
+    }
+  ]
+}

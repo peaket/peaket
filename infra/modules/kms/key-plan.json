@@ -1,0 +1,127 @@
+{
+  "$comment": "PEAKET 서비스 데이터 KMS 키 계획(기능 F-09-4, HOT-440). 정본 docs/security/secrets-and-keys.md. 값은 tools/ci/platform-security.test.mjs가 대조한다. 실제 키 생성·적용은 AWS 계정 뒤(미실행).",
+  "keys": [
+    {
+      "name": "admin-totp",
+      "alias": "alias/peaket-admin-totp",
+      "keySpec": "SYMMETRIC_DEFAULT",
+      "keyUsage": "ENCRYPT_DECRYPT",
+      "multiRegion": true,
+      "rotationDays": 365,
+      "manualRotationDays": null,
+      "deletionWindowDays": 30,
+      "principals": { "encrypt": ["identity-svc"], "decrypt": ["identity-svc"], "generateMac": [], "verifyMac": [] },
+      "encryptionContext": "peaket-admin-totp-v1"
+    },
+    {
+      "name": "virtual-account",
+      "alias": "alias/peaket-virtual-account",
+      "keySpec": "SYMMETRIC_DEFAULT",
+      "keyUsage": "ENCRYPT_DECRYPT",
+      "multiRegion": true,
+      "rotationDays": 365,
+      "manualRotationDays": null,
+      "deletionWindowDays": 30,
+      "principals": { "encrypt": ["payment-svc"], "decrypt": ["payment-svc"], "generateMac": [], "verifyMac": [] },
+      "encryptionContext": "peaket-virtual-account-v1"
+    },
+    {
+      "name": "admin-password-pepper",
+      "alias": "alias/peaket-admin-password-pepper",
+      "keySpec": "HMAC_256",
+      "keyUsage": "GENERATE_VERIFY_MAC",
+      "multiRegion": true,
+      "rotationDays": null,
+      "manualRotationDays": 730,
+      "deletionWindowDays": 30,
+      "principals": { "encrypt": [], "decrypt": [], "generateMac": ["identity-svc"], "verifyMac": ["identity-svc"] }
+    },
+    {
+      "name": "ci-hmac",
+      "alias": "alias/peaket-ci-hmac",
+      "keySpec": "HMAC_256",
+      "keyUsage": "GENERATE_VERIFY_MAC",
+      "multiRegion": true,
+      "rotationDays": null,
+      "manualRotationDays": null,
+      "deletionWindowDays": 30,
+      "principals": { "encrypt": [], "decrypt": [], "generateMac": ["identity-svc"], "verifyMac": [] }
+    },
+    {
+      "name": "pid-hmac",
+      "alias": "alias/peaket-pid-hmac",
+      "keySpec": "HMAC_256",
+      "keyUsage": "GENERATE_VERIFY_MAC",
+      "multiRegion": true,
+      "rotationDays": null,
+      "manualRotationDays": null,
+      "deletionWindowDays": 30,
+      "principals": { "encrypt": [], "decrypt": [], "generateMac": ["identity-svc"], "verifyMac": [] }
+    },
+    {
+      "name": "analytics-pseudonym",
+      "alias": "alias/peaket-analytics-pseudonym",
+      "keySpec": "HMAC_256",
+      "keyUsage": "GENERATE_VERIFY_MAC",
+      "multiRegion": false,
+      "rotationDays": null,
+      "manualRotationDays": 365,
+      "deletionWindowDays": 30,
+      "principals": { "encrypt": [], "decrypt": [], "generateMac": ["analytics-ingest"], "verifyMac": [] }
+    },
+    {
+      "name": "inv-ref-key-device",
+      "alias": "alias/peaket-inv-ref-key-device",
+      "keySpec": "HMAC_256",
+      "keyUsage": "GENERATE_VERIFY_MAC",
+      "multiRegion": true,
+      "rotationDays": null,
+      "manualRotationDays": null,
+      "deletionWindowDays": 30,
+      "principals": { "encrypt": [], "decrypt": [], "generateMac": ["identity-svc", "trust-svc"], "verifyMac": [] },
+      "version": 1
+    },
+    {
+      "name": "inv-ref-key-contact",
+      "alias": "alias/peaket-inv-ref-key-contact",
+      "keySpec": "HMAC_256",
+      "keyUsage": "GENERATE_VERIFY_MAC",
+      "multiRegion": true,
+      "rotationDays": null,
+      "manualRotationDays": null,
+      "deletionWindowDays": 30,
+      "principals": { "encrypt": [], "decrypt": [], "generateMac": ["identity-svc"], "verifyMac": [] },
+      "version": 1
+    },
+    {
+      "name": "inv-ref-key-pay",
+      "alias": "alias/peaket-inv-ref-key-pay",
+      "keySpec": "HMAC_256",
+      "keyUsage": "GENERATE_VERIFY_MAC",
+      "multiRegion": true,
+      "rotationDays": null,
+      "manualRotationDays": null,
+      "deletionWindowDays": 30,
+      "principals": { "encrypt": [], "decrypt": [], "generateMac": ["payment-svc"], "verifyMac": [] },
+      "version": 1
+    },
+    {
+      "name": "shuffle-seed",
+      "alias": "alias/peaket-shuffle-seed",
+      "keySpec": "SYMMETRIC_DEFAULT",
+      "keyUsage": "ENCRYPT_DECRYPT",
+      "multiRegion": false,
+      "rotationDays": null,
+      "manualRotationDays": null,
+      "deletionWindowDays": 30,
+      "principals": { "encrypt": ["queue-svc"], "decrypt": ["admission-ctrl"], "generateMac": [], "verifyMac": [] },
+      "encryptionContext": "peaket-shuffle-seed-v1"
+    }
+  ],
+  "secretsManager": {
+    "rotationDays": 30,
+    "maintenanceWindow": "04:00-06:00 Asia/Seoul",
+    "restartWithinDays": 30,
+    "exclusions": ["onsale", "freeze"]
+  }
+}

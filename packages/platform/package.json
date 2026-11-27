@@ -44,6 +44,14 @@
     "./flags": {
       "types": "./dist/flags.d.ts",
       "default": "./dist/flags.js"
+    },
+    "./secret-rotation": {
+      "types": "./dist/secret-rotation.d.ts",
+      "default": "./dist/secret-rotation.js"
+    },
+    "./cloudfront-invalidation": {
+      "types": "./dist/cloudfront-invalidation.d.ts",
+      "default": "./dist/cloudfront-invalidation.js"
     }
   },
   "scripts": {
