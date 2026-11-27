@@ -1,6 +1,6 @@
 // F-07-12 파트너 홈·공연 개요 읽기의 실제 PostgreSQL 통합 시험(SCR-062·063, HOT-260).
 // 0054 적용과 production.version 기본·CHECK, Drizzle 목록·상세·seller-profile 매핑, core_partner 행 보안,
-// search_document 판매 상태 사본의 한계를 본다(단위 시험은 test/partner-home.http.test.ts가 맡는다).
+// F-07-12 RV-02의 EventSaleChanged ALL_HELD 사본·search_document·목록 필터를 본다(단위 시험은 test/가 맡는다).
 import 'reflect-metadata';
 import { createDatabase, createService, type Database, ensureOutboxPartitions, fakeClock, systemClock } from '@peaket/platform';
 import { randomUUID } from 'node:crypto';
@@ -223,9 +223,9 @@ describe('F-07-12 실제 PostgreSQL', () => {
     expect(column).toEqual([{ data_type: 'integer', is_nullable: 'NO', column_default: '1' }]);
 
     const applied = rows<{ n: number; last_at: string | number }>(await admin.db.execute(sql`select count(*)::int as n, max(created_at) as last_at from drizzle.__drizzle_migrations`));
-    // 저널은 idx 0~54 가운데 44개다(다른 가지가 쓰는 idx 구멍은 그대로). 마지막 적용이 0054의 when이다.
-    expect(applied[0]?.n).toBe(44);
-    expect(Number(applied[0]?.last_at)).toBe(1795319500000);
+    // 저널은 idx 0~55 가운데 45개다(다른 가지가 쓰는 idx 구멍은 그대로). 마지막 적용이 0055의 when이다.
+    expect(applied[0]?.n).toBe(45);
+    expect(Number(applied[0]?.last_at)).toBe(1795319600000);
 
     const [made] = await admin.db.select({ version: production.version }).from(production).where(eq(production.id, PROD_DEFAULT));
     expect(made?.version).toBe(1);
@@ -370,10 +370,34 @@ describe('F-07-12 실제 PostgreSQL', () => {
     expect(await idsOf()).toEqual({ p: [], e: [], s: [] });
   });
 
-  test('S-T42 ⑦ search_document 판매 상태 사본은 ALL_HELD를 담지 못한다(한계 기록)', async () => {
-    const doc = rows<{ sale_status: string }>(await admin.db.execute(sql`select sale_status from search_document where production_id = ${PROD_ON}::uuid`));
-    expect(doc).toEqual([{ sale_status: 'ON_SALE' }]);
-    // 사본 표의 CHECK는 UPCOMING·ON_SALE·SOLD_OUT·ENDED만 받는다. 그래서 DB 목록의 ALL_HELD 필터는 회차 원값을 쓸 수 없다(RV-02).
-    await expect(admin.db.execute(sql`update search_document set sale_status = 'ALL_HELD' where production_id = ${PROD_ON}::uuid`)).rejects.toMatchObject({ cause: { code: '23514' } });
+  test('S-T42 ⑦ EventSaleChanged ALL_HELD가 search_document와 파트너 목록 필터에 반영된다', async () => {
+    const apply = async (eventId: string, status: string, version: number) =>
+      rows<{ result: string }>(await admin.db.execute(sql`select search_apply_event_sale(${eventId}::uuid, ${status}, ${version}, now()) as result`));
+
+    expect(await apply(EVENT_ON, 'ALL_HELD', 8)).toEqual([{ result: 'applied' }]);
+    expect(rows(await admin.db.execute(sql`select status, version from event_sale_state where event_id = ${EVENT_ON}::uuid`))).toEqual([{ status: 'ALL_HELD', version: 8 }]);
+    expect(rows(await admin.db.execute(sql`select sale_status from search_document where production_id = ${PROD_ON}::uuid`))).toEqual([{ sale_status: 'ALL_HELD' }]);
+
+    // 파트너 목록은 회차 원값 ALL_HELD로 거르고, 응답 요약은 계약대로 ON_SALE로 접는다
+    const r = await get('/v1/partner/productions?saleStatus=ALL_HELD', identity.partner(A));
+    expect(r.statusCode).toBe(200);
+    const items = (body(r).items ?? []) as { productionId: string; saleStatus: string }[];
+    expect(items.map((i) => i.productionId)).toEqual([PROD_ON]);
+    expect(items[0]?.saleStatus).toBe('ON_SALE');
+
+    // 늦은 판·같은 판은 쓰지 않고, core에 없는 회차는 unknown이다
+    expect(await apply(EVENT_ON, 'SOLD_OUT', 7)).toEqual([{ result: 'stale' }]);
+    expect(await apply(EVENT_ON, 'SOLD_OUT', 8)).toEqual([{ result: 'stale' }]);
+    expect(await apply(randomUUID(), 'ALL_HELD', 1)).toEqual([{ result: 'unknown' }]);
+    expect(rows(await admin.db.execute(sql`select sale_status from search_document where production_id = ${PROD_ON}::uuid`))).toEqual([{ sale_status: 'ALL_HELD' }]);
+    expect(rows(await admin.db.execute(sql`select production_id from event_sale_state where event_id = ${EVENT_ON}::uuid`))).toEqual([{ production_id: PROD_ON }]);
+
+    // 다른 테넌트의 목록에는 이 공연이 없다
+    const other = await get('/v1/partner/productions?saleStatus=ALL_HELD', identity.partner(B));
+    expect(((body(other).items ?? []) as { productionId: string }[]).map((i) => i.productionId)).not.toContain(PROD_ON);
+
+    // 뒤 시험·정리를 위해 원래 판매 중으로 돌려 둔다
+    expect(await apply(EVENT_ON, 'ON_SALE', 9)).toEqual([{ result: 'applied' }]);
+    expect(rows(await admin.db.execute(sql`select sale_status from search_document where production_id = ${PROD_ON}::uuid`))).toEqual([{ sale_status: 'ON_SALE' }]);
   });
 });

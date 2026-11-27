@@ -10,7 +10,7 @@ import { runKeyedConsumer } from '@peaket/platform/stream-worker';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test, vi } from 'vitest';
-import { CORE_GROUP, CORE_TOPICS, kafkaConsumersFromEnv, pidFreeHeldEventStore } from '../src/consumers/index.js';
+import { CORE_GROUP, CORE_TOPICS, CoreEventsHandler, kafkaConsumersFromEnv, pidFreeHeldEventStore } from '../src/consumers/index.js';
 import { startCoreConsumers } from '../src/consumers/start.js';
 import { ReviewAccountWithdrawnHandler } from '../src/modules/review/index.js';
 
@@ -165,10 +165,13 @@ describe('COV2-06 Kafka 소비자 설정', () => {
     expect(prod.enabled && prod.auth?.mechanism).toBe('msk-iam');
   });
 
-  test('COV2-06 ⑧ 소비자 그룹은 peaket.core-svc.<환경>이고 탈퇴 토픽 하나만 읽는다', () => {
+  test('COV2-06 ⑧ 소비자 그룹은 peaket.core-svc.<환경>이고 탈퇴·회차 판매 상태 두 토픽을 읽는다', () => {
     expect(CORE_GROUP('prod')).toBe('peaket.core-svc.prod');
     expect(CORE_GROUP('staging')).toBe('peaket.core-svc.staging');
-    expect([...CORE_TOPICS]).toEqual(['identity.accounts-withdrawn']);
+    // F-07-12 RV-02: 같은 그룹 하나가 identity.accounts-withdrawn과 trade.seats(EventSaleChanged)를 읽는다
+    expect([...CORE_TOPICS]).toEqual(['identity.accounts-withdrawn', 'trade.seats']);
+    const handler = new CoreEventsHandler({ accountsWithdrawn: { decode: async () => ({}), keyOf: () => 'k', handle: async () => undefined }, saleChanged: { decode: async () => ({}), keyOf: () => 'k', handle: async () => undefined } });
+    expect(handler).toBeInstanceOf(CoreEventsHandler);
   });
 });
 
@@ -246,7 +249,7 @@ describe('COV2-06 시작 파일 조립', () => {
     const run = startCoreConsumers({ env: 'ci', brokers: ['127.0.0.1:9092'], clientId: 'core-svc-ci-test', database: pool, handler, registry, recheck });
     expect(vi.mocked(runKeyedConsumer)).toHaveBeenCalledTimes(1);
     const opts = vi.mocked(runKeyedConsumer).mock.calls[0]![0];
-    expect(opts).toMatchObject({ service: 'core-svc', groupId: 'peaket.core-svc.ci', topics: ['identity.accounts-withdrawn'], maxKeys: 2, partitionsConcurrently: 1 });
+    expect(opts).toMatchObject({ service: 'core-svc', groupId: 'peaket.core-svc.ci', topics: ['identity.accounts-withdrawn', 'trade.seats'], maxKeys: 2, partitionsConcurrently: 1 });
     expect(opts.handler).toBe(handler);
     // 검증 3단계 P04: 받은 지표 저장소를 그대로 넘긴다(넘기지 않으면 소비자 지표·보류 수가 main.ts의 /metrics에 실리지 않는다)
     expect(opts.registry).toBe(registry);
@@ -323,14 +326,15 @@ describe('COV2-06 시작 파일 조립', () => {
     expect(dbClose).toBeGreaterThan(close);
   });
 
-  test('COV2-06 K2 N07 소비자의 익명화 저장소도 소비자 전용 풀을 쓴다', () => {
+  test('COV2-06 K2 N07 소비자의 익명화·판매 상태 저장소도 소비자 전용 풀을 쓴다', () => {
     // 검증 2단계 살아남음 N07: 처리기에 넘기는 Reviews의 저장소를 API 풀(new DrizzleReviewStore(database))로 만들면 사건이 몰릴 때 익명화 UPDATE가
-    // 팬·관제 HTTP 경로의 연결을 쓴다(docs/streaming.md §2.6 'core-svc 소비자': 따로 둔 풀). 보류 표만 소비자 풀로 가는 꼴을 잡는다
+    // 팬·관제 HTTP 경로의 연결을 쓴다(docs/streaming.md §2.6 'core-svc 소비자': 따로 둔 풀). 보류 표만 소비자 풀로 가는 꼴을 잡는다.
+    // F-07-12 RV-02: 회차 판매 상태 사본도 같은 소비자 풀(core_app)로 쓴다(opsDatabase·API database가 아니다)
     const main = mainText();
     const { args, db } = consumerArgs(main);
     expect(db, 'startCoreConsumers 인자의 database 칸').toBeDefined();
     // 처리기는 이름 붙은 Reviews를 받는다(service.app.get(Reviews) 같은 서비스 조립의 것이 아니다)
-    const reviewsName = /handler:\s*new\s+ReviewAccountWithdrawnHandler\(\s*([A-Za-z_$][\w$]*)\s*[,)]/.exec(args)?.[1];
+    const reviewsName = /accountsWithdrawn:\s*new\s+ReviewAccountWithdrawnHandler\(\s*([A-Za-z_$][\w$]*)\s*[,)]/.exec(args)?.[1];
     expect(reviewsName, '처리기에 넘기는 Reviews 이름').toBeDefined();
     const declAt = main.search(new RegExp(String.raw`(?:const|let)\s+${reviewsName}\s*=\s*new\s+Reviews\(\s*\{`));
     expect(declAt, `${reviewsName} = new Reviews({ … })`).toBeGreaterThanOrEqual(0);
@@ -340,6 +344,14 @@ describe('COV2-06 시작 파일 조립', () => {
     expect(store, 'Reviews의 store: new DrizzleReviewStore(풀)').toBeDefined();
     expect(store).toBe(db);
     for (const other of ['database', 'partnerDatabase', 'opsDatabase']) expect(store).not.toBe(other);
+
+    // EventSaleChanged 처리기의 사본 저장소도 같은 소비자 풀이다
+    expect(args).toContain('new CoreEventsHandler({');
+    expect(args).toMatch(/saleChanged:\s*new\s+CoreEventSaleChangedHandler\(/);
+    const saleStore = /saleChanged:\s*new\s+CoreEventSaleChangedHandler\(\s*new\s+DrizzleEventSaleStateStore\(\s*([A-Za-z_$][\w$]*)\s*\)/.exec(args)?.[1];
+    expect(saleStore, 'DrizzleEventSaleStateStore의 풀').toBeDefined();
+    expect(saleStore).toBe(db);
+    for (const other of ['database', 'partnerDatabase', 'opsDatabase']) expect(saleStore).not.toBe(other);
   });
 });
 
@@ -392,7 +404,7 @@ describe('I-T83 다시 정리 반복의 시작과 멈춤', () => {
     const { args } = consumerArgs(mainText());
     const recheckName = /[{,]\s*recheck\s*:\s*([A-Za-z_$][\w$]*)\s*[,}]/.exec(args)?.[1] ?? (/[{,]\s*recheck\s*[,}]/.test(args) ? 'recheck' : undefined);
     expect(recheckName, 'startCoreConsumers 인자의 recheck 칸').toBeDefined();
-    const handlerReviews = /handler:\s*new\s+ReviewAccountWithdrawnHandler\(\s*([A-Za-z_$][\w$]*)\s*[,)]/.exec(args)?.[1];
+    const handlerReviews = /accountsWithdrawn:\s*new\s+ReviewAccountWithdrawnHandler\(\s*([A-Za-z_$][\w$]*)\s*[,)]/.exec(args)?.[1];
     expect(recheckName).toBe(handlerReviews);
   });
 });
