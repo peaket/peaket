@@ -373,10 +373,27 @@ describe('F-07-12 실제 PostgreSQL', () => {
   test('S-T42 ⑦ EventSaleChanged ALL_HELD가 search_document와 파트너 목록 필터에 반영된다', async () => {
     const apply = async (eventId: string, status: string, version: number) =>
       rows<{ result: string }>(await admin.db.execute(sql`select search_apply_event_sale(${eventId}::uuid, ${status}, ${version}, now()) as result`));
+    const versionOf = async () => rows<{ version: number }>(await admin.db.execute(sql`select version::int as version from search_version where id = 1`))[0]!.version;
 
+    // 표·제약: PK·FK·CHECK가 실제 DB에 있다
+    const constraints = rows<{ contype: string }>(await admin.db.execute(sql`select contype from pg_constraint where conrelid = 'event_sale_state'::regclass`));
+    expect(constraints.map((c) => c.contype)).toEqual(expect.arrayContaining(['p', 'f', 'c']));
+    await expect(
+      admin.db.execute(sql`insert into event_sale_state (event_id, production_id, status, version, changed_at) values (${EVENT_B}::uuid, ${PROD_ON}::uuid, 'BROKEN', 1, now())`),
+    ).rejects.toMatchObject({ cause: { code: '23514' } });
+    await expect(
+      admin.db.execute(sql`insert into event_sale_state (event_id, production_id, status, version, changed_at) values (${EVENT_B}::uuid, ${PROD_ON}::uuid, 'ALL_HELD', 0, now())`),
+    ).rejects.toMatchObject({ cause: { code: '23514' } });
+    await expect(
+      admin.db.execute(sql`insert into event_sale_state (event_id, production_id, status, version, changed_at) values (${randomUUID()}::uuid, ${PROD_ON}::uuid, 'ALL_HELD', 1, now())`),
+    ).rejects.toMatchObject({ cause: { code: '23503' } });
+
+    // 적용: 판 번호·search_version·search_document가 함께 움직인다
+    const before = await versionOf();
     expect(await apply(EVENT_ON, 'ALL_HELD', 8)).toEqual([{ result: 'applied' }]);
     expect(rows(await admin.db.execute(sql`select status, version from event_sale_state where event_id = ${EVENT_ON}::uuid`))).toEqual([{ status: 'ALL_HELD', version: 8 }]);
-    expect(rows(await admin.db.execute(sql`select sale_status from search_document where production_id = ${PROD_ON}::uuid`))).toEqual([{ sale_status: 'ALL_HELD' }]);
+    expect(await versionOf()).toBe(before + 1);
+    expect(rows(await admin.db.execute(sql`select sale_status, updated_version::int as updated_version from search_document where production_id = ${PROD_ON}::uuid`))).toEqual([{ sale_status: 'ALL_HELD', updated_version: before + 1 }]);
 
     // 파트너 목록은 회차 원값 ALL_HELD로 거르고, 응답 요약은 계약대로 ON_SALE로 접는다
     const r = await get('/v1/partner/productions?saleStatus=ALL_HELD', identity.partner(A));
@@ -389,8 +406,10 @@ describe('F-07-12 실제 PostgreSQL', () => {
     expect(await apply(EVENT_ON, 'SOLD_OUT', 7)).toEqual([{ result: 'stale' }]);
     expect(await apply(EVENT_ON, 'SOLD_OUT', 8)).toEqual([{ result: 'stale' }]);
     expect(await apply(randomUUID(), 'ALL_HELD', 1)).toEqual([{ result: 'unknown' }]);
+    expect(await versionOf()).toBe(before + 1);
     expect(rows(await admin.db.execute(sql`select sale_status from search_document where production_id = ${PROD_ON}::uuid`))).toEqual([{ sale_status: 'ALL_HELD' }]);
     expect(rows(await admin.db.execute(sql`select production_id from event_sale_state where event_id = ${EVENT_ON}::uuid`))).toEqual([{ production_id: PROD_ON }]);
+    expect(rows(await admin.db.execute(sql`select count(*)::int as n from event_sale_state`))).toEqual([{ n: 1 }]);
 
     // 다른 테넌트의 목록에는 이 공연이 없다
     const other = await get('/v1/partner/productions?saleStatus=ALL_HELD', identity.partner(B));
@@ -398,6 +417,7 @@ describe('F-07-12 실제 PostgreSQL', () => {
 
     // 뒤 시험·정리를 위해 원래 판매 중으로 돌려 둔다
     expect(await apply(EVENT_ON, 'ON_SALE', 9)).toEqual([{ result: 'applied' }]);
+    expect(await versionOf()).toBe(before + 2);
     expect(rows(await admin.db.execute(sql`select sale_status from search_document where production_id = ${PROD_ON}::uuid`))).toEqual([{ sale_status: 'ON_SALE' }]);
   });
 });
