@@ -13,6 +13,25 @@ BEGIN
 END
 $$;
 --> statement-breakpoint
+-- CronJob의 DSN은 이 로그인 역할로 접속해 ops_research_purger로 SET ROLE한다.
+-- 로그인 역할 자체에는 표 권한을 주지 않는다(멤버십으로 함수 EXECUTE만 얻는다).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ops_research_purge_login') THEN
+    CREATE ROLE ops_research_purge_login LOGIN NOSUPERUSER NOBYPASSRLS;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ops_research_purge_login' AND (rolsuper OR rolbypassrls)) THEN
+    RAISE EXCEPTION 'ops_research_purge_login 역할은 SUPERUSER·BYPASSRLS가 없어야 한다';
+  END IF;
+END
+$$;
+--> statement-breakpoint
+GRANT USAGE ON SCHEMA public TO ops_research_purge_login;
+--> statement-breakpoint
+GRANT ops_research_purger TO ops_research_purge_login;
+--> statement-breakpoint
+REVOKE DELETE ON research_export_denial FROM ops_research_purge_login;
+--> statement-breakpoint
 GRANT USAGE ON SCHEMA public TO ops_research_purger;
 --> statement-breakpoint
 -- 0015의 기본 권한이 전체 표에 DELETE를 줄 수 있으므로, 거절 메타데이터는 앱 역할에서 명시적으로 거둔다.

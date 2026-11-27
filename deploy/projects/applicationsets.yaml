@@ -215,3 +215,28 @@ spec:
         - group: gateway.networking.k8s.io
           kind: HTTPRoute
           managedFieldsManagers: [argo-rollouts]
+
+---
+# F-04-19(2026-11-27): deploy/jobs 디렉터리의 정적 CronJob·ExternalSecret을 적용하는 Application.
+# 환경 값 파일 생성기(ApplicationSet)와 달리 디렉터리 전체를 한 번에 맞춘다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: peaket-jobs
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: peaket
+spec:
+  project: peaket-platform
+  source:
+    repoURL: https://github.com/peaket/peaket
+    targetRevision: develop
+    path: deploy/jobs
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=false]
