@@ -403,6 +403,7 @@ ADR-0373 결정 2의 '동결로 미검증'이다. 완성 판정에서 빼고 완
 - **시험**: `services/identity-svc/test/n1-baseline.test.ts` 단위 3/3, `services/identity-svc/test-int/n1-compat.int.test.ts` 통합 4개. 계약은 `713b522a`의 저장소 코드가 보내던 로그인·세션 갱신/종료·관리 계정 로그인·pid/연락처 키 회전 SQL 모양을 고정한다.
 - **단위 결과**: N-1 파일 38개 SHA-256이 `manifest-713b522a.json`과 같고, 0037 변조와 `receivable_movement` 표 음성 대조가 둘 다 던졌다. 2026-11-27 10:27:30 통과.
 - **통합 실행**: docker 잠금 `lane1-F-09-2-n1`, take 2026-11-27 19:25:12 → drop 19:26:34. `n1-compat.int.test.ts` **4/4 통과**(11.54초, 19:25:13). 같은 잠금에서 identity 전체 `test:integration` **37파일 227/227 통과·1 skip**(로컬 스택 도우미 `PEAKET_LOCAL_STACK=1` 전용, 66.60초). 종료 뒤 `postgres:18-alpine` 컨테이너 0개.
+- **앞선 잠금**: 19:19:51 take~drop은 실행 스크립트가 Git Bash에서 `cmd /c`를 잘못 불러 시험이 돌지 않았다(1초, 시험 결과 아님). 19:21:44~19:21:59 4/4 실패, 19:23:21~19:24:03 1/4 통과·3/4 실패. 두 실패는 아래 시험 자료 결함이다.
 - **통합 실패·수정**: 1차 4/4 실패는 `identity_verification.account_id -> account.id` 외래 키(본인확인 계정 행 없음)였다. 2차 3/4 실패는 ① 관리 로그인 1단계를 `token_hash`가 아니라 행 id로 찾은 것 ② N-1 세션 select에 `device_label`이 없던 것이다. 모두 시험 자료 결함이라 `Role: test` `abb979012`·`ab0a8fdcc`로 고친 뒤 3차에서 통과했다. 제품 코드는 바꾸지 않았다.
 - **남은 미실행**: 실제 `713b522a` 앱 프로세스 묶음(계획 §3.3). 계약 4/4와 N 앱 전체 묶음은 통과했지만, N-1 트리를 설치해 돌리는 절차는 아직이다.
 - **계약의 경계**: 앱 프로세스·gRPC/HTTP·업무 규칙·KMS·Valkey는 보지 않는다. DB 표·칸·값과 N↔N-1 양방향 읽기만 본다.
