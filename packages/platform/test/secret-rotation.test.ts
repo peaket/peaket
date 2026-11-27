@@ -4,6 +4,7 @@
 import { createHash, createHmac, pbkdf2Sync } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
 import {
+  connectWithSecretRetry,
   parseScramVerifier,
   rotateDbSecret,
   scramSha256Verifier,
@@ -177,11 +178,19 @@ describe('D-T34 저장소 비밀 교대 교체', () => {
     expect(secrets.versions.get('v0')!.stage).toBe('AWSPREVIOUS');
   });
 
-  test('D-T34 ② 사용자 목록을 다시 읽기 전에 새 판을 받은 파드는 연결 재시도 안에서 성공한다', async () => {
+  test('D-T34 ② 사용자 목록을 다시 읽기 전에 새 판을 받은 파드의 연결 풀이 재시도해 성공한다', async () => {
     const { p, pgbouncer, metrics, secretId } = ports();
+    const rotated = await rotateDbSecret({ secretId, clientRequestToken: 'token-2', ports: p });
+    // 파드가 새 판을 받았지만 PgBouncer가 아직 목록을 반영하지 않았다
     pgbouncer.staleOnceAfterReload = true;
-    const result = await rotateDbSecret({ secretId, clientRequestToken: 'token-2', ports: p, retryDelaysMs: [0, 0, 0] });
-    expect(result.testRetries).toBe(1);
+    const newPassword = (await p.secrets.get(secretId, rotated.versionId)).password;
+    const result = await connectWithSecretRetry({
+      password: newPassword,
+      connect: (password) => pgbouncer.testConnect(rotated.rotatedUser, password),
+      retryDelaysMs: [0, 0, 0],
+      metrics: { increment: (name, labels) => metrics.push({ name, labels }) },
+    });
+    expect(result.attempts).toBe(2);
     expect(metrics.filter((m) => m.name === 'datastore_auth_failures_total')).toEqual([
       { name: 'datastore_auth_failures_total', labels: { store: 'pgbouncer' } },
     ]);
@@ -301,5 +310,55 @@ describe('D-T34 저장소 비밀 교대 교체', () => {
     await expect(rotateDbSecret({ secretId, clientRequestToken: 'token-10', ports: p })).rejects.toMatchObject({
       code: 'USERLIST',
     } satisfies Partial<SecretRotationError>);
+  });
+
+  test('DB 비밀번호 변경이 실패하면 DB_PASSWORD로 멈추고 AWSCURRENT를 옮기지 않는다', async () => {
+    const { p, secrets, database, secretId } = ports();
+    database.fail = true;
+    await expect(rotateDbSecret({ secretId, clientRequestToken: 'token-11', ports: p })).rejects.toMatchObject({
+      code: 'DB_PASSWORD',
+    } satisfies Partial<SecretRotationError>);
+    expect(secrets.currentId).toBe('v0');
+    expect(secrets.stageCalls).toEqual([]);
+    expect(secrets.putCalls).toEqual([]);
+  });
+
+  test('비밀 값의 모양이 틀리면 SECRET_SHAPE로 멈춘다', async () => {
+    const { p, secrets, secretId } = ports({ password: '' });
+    await expect(rotateDbSecret({ secretId, clientRequestToken: 'token-12', ports: p })).rejects.toMatchObject({
+      code: 'SECRET_SHAPE',
+    } satisfies Partial<SecretRotationError>);
+    expect(secrets.currentId).toBe('v0');
+  });
+
+  test('지표를 올리지 못하면 METRIC으로 멈추고 AWSCURRENT를 옮기지 않는다', async () => {
+    const { p, secrets, pgbouncer, secretId } = ports();
+    pgbouncer.rejectUser = 'purchase_app_clone';
+    p.metrics.increment = () => {
+      throw new Error('지표 저장소 실패');
+    };
+    await expect(rotateDbSecret({ secretId, clientRequestToken: 'token-13', ports: p, retryDelaysMs: [0] })).rejects.toMatchObject({
+      code: 'METRIC',
+    } satisfies Partial<SecretRotationError>);
+    expect(secrets.currentId).toBe('v0');
+  });
+
+  test('앱 연결 풀 재시도가 모두 실패하면 마지막 오류로 멈추고 지표를 시도마다 올린다', async () => {
+    const metrics: { name: string; labels?: Record<string, string> }[] = [];
+    let attempts = 0;
+    await expect(
+      connectWithSecretRetry({
+        password: 'new-password',
+        connect: () => {
+          attempts += 1;
+          return Promise.reject(new Error('AUTH_FAILED'));
+        },
+        retryDelaysMs: [0, 0],
+        maxAttempts: 3,
+        metrics: { increment: (name, labels) => metrics.push({ name, labels }) },
+      }),
+    ).rejects.toThrow('AUTH_FAILED');
+    expect(attempts).toBe(3);
+    expect(metrics.filter((m) => m.name === 'datastore_auth_failures_total')).toHaveLength(3);
   });
 });

@@ -4,7 +4,7 @@
 // 이 시험은 교체 함수가 만든 SCRAM 검증기를 실제 PostgreSQL이 받아들이는지와 두 판의 접속·거절을 본다.
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
-import { rotateDbSecret, scramSha256Verifier, type RotationPorts } from '../src/secret-rotation.js';
+import { connectWithSecretRetry, rotateDbSecret, scramSha256Verifier, type RotationPorts } from '../src/secret-rotation.js';
 import { startPostgres, type PostgresContainer } from './postgres.js';
 
 let container: PostgresContainer;
@@ -79,9 +79,8 @@ describe('D-T34 실제 PostgreSQL 교체', () => {
     await client.end();
   });
 
-  function ports(secrets: IntSecrets, options: { failFirstConnect?: boolean; metrics?: { name: string; labels?: Record<string, string> }[] } = {}) {
+  function ports(secrets: IntSecrets, options: { metrics?: { name: string; labels?: Record<string, string> }[] } = {}) {
     const userlist = new Map<string, string>();
-    let failOnce = options.failFirstConnect ?? false;
     const p: RotationPorts = {
       secrets: {
         describe: () => secrets.describe(),
@@ -110,10 +109,6 @@ describe('D-T34 실제 PostgreSQL 교체', () => {
         },
         reload: () => Promise.resolve(),
         testConnect: async (username, password) => {
-          if (failOnce) {
-            failOnce = false;
-            throw new Error('AUTH_FAILED');
-          }
           await connectAs(username, password);
         },
       },
@@ -134,20 +129,29 @@ describe('D-T34 실제 PostgreSQL 교체', () => {
     expect(await connectAs(CLONE, newValue.password)).toBe(CLONE);
   });
 
-  test('D-T34 ② 목록 반영 전에 새 판을 받은 파드는 재시도 안에서 성공한다', async () => {
+  test('D-T34 ② 목록 반영 전에 새 판을 받은 파드의 연결 풀이 재시도해 성공한다', async () => {
     const metrics: { name: string; labels?: Record<string, string> }[] = [];
     const secrets = new IntSecrets(APP, 'first-password');
     await setPassword(APP, 'first-password');
     await setPassword(CLONE, 'clone-password');
-    const result = await rotateDbSecret({
-      secretId: SECRET_ID,
-      clientRequestToken: 'int-token-2',
-      ports: ports(secrets, { failFirstConnect: true, metrics }),
+    const rotated = await rotateDbSecret({ secretId: SECRET_ID, clientRequestToken: 'int-token-2', ports: ports(secrets, { metrics }) });
+    const newValue = secrets.lastValue();
+    let stale = true;
+    const result = await connectWithSecretRetry({
+      password: newValue.password,
+      connect: async (password) => {
+        if (stale) {
+          stale = false;
+          throw new Error('AUTH_FAILED');
+        }
+        await connectAs(rotated.rotatedUser, password);
+      },
       retryDelaysMs: [0, 0, 0],
+      metrics: { increment: (name, labels) => metrics.push({ name, labels }) },
     });
-    expect(result.testRetries).toBe(1);
+    expect(result.attempts).toBe(2);
     expect(metrics.filter((m) => m.name === 'datastore_auth_failures_total')).toHaveLength(1);
-    expect(await connectAs(CLONE, secrets.lastValue().password)).toBe(CLONE);
+    expect(await connectAs(rotated.rotatedUser, newValue.password)).toBe(CLONE);
   });
 
   test('D-T34 ③ 두 번째 교체 뒤 첫 판 비밀번호는 실제 PostgreSQL에서 거절된다', async () => {
