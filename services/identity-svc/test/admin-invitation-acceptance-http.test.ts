@@ -1,7 +1,7 @@
 // 관리 계정 초대 수락 경로(openapi /v1/{partner,ops}/auth/invitation-*, identity §6·§13, BUILD_ORDER F-09-6/BOT-152, BAT-046에서 미뤄 둔 서버 몫).
 // 실제 서비스 뼈대를 띄워 계약 본문·상태 코드·Problem type·단계 차례·만료·되돌림·패스키 필수를 본다. 메모리 저장소만 쓰고 Docker·kind는 쓰지 않는다.
 import 'reflect-metadata';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { type AdminAuthz, createService, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { AppModule } from '../src/app.module.js';
@@ -93,6 +93,15 @@ async function invite(role: 'partner_admin' | 'partner_member' | 'viewer' | 'ope
   return { id: r.account.adminAccountId, email, displayName, role, token };
 }
 
+/** commander는 초대 API로 만들 수 없어(역할 변경 승인으로만 준다) INVITED 행과 토큰을 직접 둔다 */
+async function inviteCommander(email: string) {
+  const id = randomUUID();
+  store.create({ id, role: 'commander', email, status: 'INVITED', displayName: '사령관', now: clock.now() });
+  const token = randomBytes(32).toString('base64url');
+  if (!(await store.setInviteToken(id, createHash('sha256').update(token).digest(), clock.now() + 24 * 60 * 60_000, clock.now()))) throw new Error('사령관 초대 토큰을 두지 못했다');
+  return { id, email, token };
+}
+
 const start = (aud: 'partner' | 'ops', token: string) => post(`${base(aud)}/invitation-acceptances`, { invitationToken: token });
 const stepOf = (r: { statusCode: number; payload: string }) => {
   expect(r.statusCode).toBe(201);
@@ -103,8 +112,9 @@ const stepOf = (r: { statusCode: number; payload: string }) => {
 const setPassword = (aud: 'partner' | 'ops', step: string, password = PW) => post(`${base(aud)}/invitation-passwords`, { acceptanceStep: step, password });
 const enroll = (aud: 'partner' | 'ops', step: string) => post(`${base(aud)}/invitation-totp-enrollments`, { acceptanceStep: step });
 const confirm = (aud: 'partner' | 'ops', step: string, code: string) => post(`${base(aud)}/invitation-totp-confirmations`, { acceptanceStep: step, code });
-const seedOf = (r: { statusCode: number; payload: string }) => {
+const seedOf = (r: { statusCode: number; payload: string; headers: Record<string, unknown> }) => {
   expect(r.statusCode).toBe(201);
+  expect(r.headers['cache-control']).toBe('no-store');
   const uri = String(json(r).otpauthUri);
   return base32Decode(new URL(uri).searchParams.get('secret')!);
 };
@@ -113,11 +123,13 @@ const wrongCode = (seed: Buffer) => String((Number(codeAt(seed)) + 1) % 1_000_00
 const registerPasskey = async (aud: 'partner' | 'ops', step: string) => {
   const begin = await post(`${base(aud)}/invitation-passkey-registrations`, { acceptanceStep: step });
   expect(begin.statusCode).toBe(201);
+  expect(begin.headers['cache-control']).toBe('no-store');
   const b = json(begin) as { registrationId: string; publicKey: { challenge: string; rp: { id: string } } };
   expect(b.publicKey.rp.id).toBe(aud === 'partner' ? 'partner.peaket.example' : 'console.peaket.example');
   const authn = new SoftAuthenticator();
   const created = await post(`${base(aud)}/invitation-passkeys`, { acceptanceStep: step, registrationId: b.registrationId, credential: authn.register(b.publicKey), name: '시험 기기' });
   expect(created.statusCode).toBe(201);
+  expect(created.headers['cache-control']).toBe('no-store');
   return { authn, created };
 };
 const complete = (aud: 'partner' | 'ops', step: string, over: Record<string, unknown> = {}) => post(`${base(aud)}/invitation-completions`, { acceptanceStep: step, recoveryCodesSaved: true, ...over });
@@ -130,6 +142,7 @@ async function completePartnerAdmin(email?: string, displayName = '담당자') {
   const seed = seedOf(await enroll('partner', step));
   const confirmed = await confirm('partner', step, codeAt(seed));
   expect(confirmed.statusCode).toBe(200);
+  expect(confirmed.headers['cache-control']).toBe('no-store');
   await registerPasskey('partner', step);
   expect((await complete('partner', step)).statusCode).toBe(204);
   return { ...a, step, seed };
@@ -154,6 +167,16 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
 
     const viewer = await invite('viewer', { email: 'start-viewer@peaket.example' });
     expect(json(await start('ops', viewer.token))).toMatchObject({ role: 'viewer', passkeyRequired: false });
+
+    // commander는 초대 API로 만들 수 없어 INVITED 행을 직접 둔다. 관제 역할 표를 모두 본다(RV096-05)
+    const commander = await inviteCommander('start-commander@peaket.example');
+    expect(json(await start('ops', commander.token))).toMatchObject({ role: 'commander', passkeyRequired: true });
+    const csAgent = await invite('cs_agent', { email: 'start-cs-agent@peaket.example' });
+    expect(json(await start('ops', csAgent.token))).toMatchObject({ role: 'cs_agent', passkeyRequired: false });
+    const csLead = await invite('cs_lead', { email: 'start-cs-lead@peaket.example' });
+    expect(json(await start('ops', csLead.token))).toMatchObject({ role: 'cs_lead', passkeyRequired: false });
+    // promoterName은 identity가 채우지 않는다(계약상 nullable, RV096-13)
+    expect(b.promoterName ?? null).toBeNull();
   });
 
   test('BOT-152 ② 없는·지난·활성·다른 콘솔 초대 토큰은 모두 같은 410 invitation-invalid다', async () => {
@@ -161,20 +184,31 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
     expect(problemOf(await post(`${base('partner')}/invitation-acceptances`, { invitationToken: 'short' }))).toEqual({ status: 400, type: 'invalid-body' });
 
     const expired = await invite('partner_admin', { email: 'expired@stella.example' });
-    const row = store.peek(expired.id)!;
-    row.inviteExpiresAt = clock.now() - 1;
+    // peek()는 복사본이라 저장소에 닿지 않는다. 행 자체를 고친다(RV096-01)
+    store.rowForTest(expired.id)!.inviteExpiresAt = clock.now() - 1;
     expect(problemOf(await start('partner', expired.token))).toEqual({ status: 410, type: 'invitation-invalid' });
 
     const removed = await invite('partner_admin', { email: 'removed@stella.example' });
-    store.peek(removed.id)!.status = 'REMOVED';
+    store.remove(removed.id);
     expect(problemOf(await start('partner', removed.token))).toEqual({ status: 410, type: 'invitation-invalid' });
 
     const active = await invite('partner_admin', { email: 'active-token@stella.example' });
-    store.peek(active.id)!.status = 'ACTIVE';
+    store.rowForTest(active.id)!.status = 'ACTIVE';
     expect(problemOf(await start('partner', active.token))).toEqual({ status: 410, type: 'invitation-invalid' });
 
     const cross = await invite('partner_admin', { email: 'cross@stella.example' });
     expect(problemOf(await start('ops', cross.token))).toEqual({ status: 410, type: 'invitation-invalid' });
+
+    // 재초대된 옛 토큰은 무효이고 새 토큰만 201이다(RV096-02)
+    const reinvited = await invite('partner_admin', { email: 'reinvited@stella.example' });
+    const oldToken = reinvited.token;
+    expect((await manage.reinvite({ requestId: randomUUID(), actedBy: CMD, accountId: reinvited.id, reason: 'RESEND' })).result).toBe('OK');
+    expect(await dispatch.run()).toMatchObject({ failed: 0 });
+    const newMail = [...mailer.sent].reverse().find((m) => m.to === 'reinvited@stella.example' && m.kind === 'INVITATION');
+    const newToken = /#token=([A-Za-z0-9_-]{43})$/.exec(newMail?.link ?? '')?.[1];
+    expect(newToken).toBeTruthy();
+    expect(problemOf(await start('partner', oldToken))).toEqual({ status: 410, type: 'invitation-invalid' });
+    expect((await start('partner', newToken!)).statusCode).toBe(201);
   });
 
   test('BOT-152 ③ 단계 토큰은 30분·한 초대에 하나이고 다른 초대·지난·모르는 단계 토큰은 410 invitation-step-invalid다', async () => {
@@ -219,7 +253,7 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
     expect(ok.payload).not.toContain(PW);
   });
 
-  test('BOT-152 ⑤ 인증 앱 코드는 5번까지 422 reauth-code-invalid(남은 수)이고 그 뒤 단계가 무효(410)이며 맞으면 복구 코드 10개를 한 번만 준다', async () => {
+  test('BOT-152 ⑤ 인증 앱 코드는 5번까지 422 reauth-code-invalid(남은 수)이고 그 뒤 단계가 무효(410)이며 맞으면 복구 코드 10개를 한 번만 준다 [ASVS v5.0.0-6.3.1]', async () => {
     const a = await invite('partner_admin', { email: 'totp@stella.example' });
     let step = stepOf(await start('partner', a.token));
     expect((await setPassword('partner', step)).statusCode).toBe(200);
@@ -230,14 +264,21 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
       expect(problemOf(r)).toEqual({ status: 422, type: 'reauth-code-invalid' });
       expect(json(r).remainingAttempts).toBe(remaining);
     }
+    // 단계 실패는 계정 로그인 실패·잠금을 건드리지 않는다(RV096-07)
+    const afterAttempts = store.peek(a.id)!;
+    expect(afterAttempts.lockKind).toBe('NONE');
+    expect(afterAttempts.secondFactorFailures).toBe(0);
     expect(problemOf(await confirm('partner', step, wrong))).toEqual({ status: 410, type: 'invitation-step-invalid' });
 
     // 다시 시작하면 새 단계에서 처음부터 한다
     step = stepOf(await start('partner', a.token));
+    expect(store.peek(a.id)!.lockKind).toBe('NONE');
+    expect(store.peek(a.id)!.secondFactorFailures).toBe(0);
     expect((await setPassword('partner', step)).statusCode).toBe(200);
     const seed2 = seedOf(await enroll('partner', step));
     const ok = await confirm('partner', step, codeAt(seed2));
     expect(ok.statusCode).toBe(200);
+    expect(ok.headers['cache-control']).toBe('no-store');
     const b = json(ok) as { recoveryCodes: string[]; next: string };
     expect(b.recoveryCodes).toHaveLength(10);
     expect(new Set(b.recoveryCodes).size).toBe(10);
@@ -248,12 +289,23 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
     expect(ok.payload).not.toContain('seed');
   });
 
-  test('BOT-152 ⑥ partner_admin은 패스키 없이 활성화되지 않고(409), 패스키 등록 뒤 완료는 204이며 계정·토큰·단계가 정리되고 세션은 만들지 않는다', async () => {
+  test('BOT-152 ⑥ partner_admin은 패스키 없이 활성화되지 않고(409), 패스키 등록 뒤 완료는 204이며 계정·토큰·단계가 정리되고 세션은 만들지 않는다 [ASVS v5.0.0-6.3.3]', async () => {
     const a = await invite('partner_admin', { email: 'complete-pa@stella.example' });
     const step = stepOf(await start('partner', a.token));
+    // 비밀번호 전·TOTP 확인 전에는 완료할 수 없다(RV096-03)
+    expect(problemOf(await complete('partner', step))).toEqual({ status: 409, type: 'invitation-step-out-of-order' });
+    expect(store.peek(a.id)!.status).toBe('INVITED');
+    expect(store.sessions(a.id)).toHaveLength(0);
+    expect(store.listRecoveryCodes(a.id)).toHaveLength(0);
     expect((await setPassword('partner', step)).statusCode).toBe(200);
+    expect(problemOf(await complete('partner', step))).toEqual({ status: 409, type: 'invitation-step-out-of-order' });
     const seed = seedOf(await enroll('partner', step));
-    expect((await confirm('partner', step, codeAt(seed))).statusCode).toBe(200);
+    expect(problemOf(await complete('partner', step))).toEqual({ status: 409, type: 'invitation-step-out-of-order' });
+    expect(problemOf(await post(`${base('partner')}/invitation-passkey-registrations`, { acceptanceStep: step }))).toEqual({ status: 409, type: 'invitation-step-out-of-order' });
+    expect(store.peek(a.id)!.status).toBe('INVITED');
+    const confirmed = await confirm('partner', step, codeAt(seed));
+    expect(confirmed.statusCode).toBe(200);
+    expect(confirmed.headers['cache-control']).toBe('no-store');
     expect(problemOf(await complete('partner', step))).toEqual({ status: 409, type: 'passkey-not-registered' });
     await registerPasskey('partner', step);
     expect(problemOf(await complete('partner', step, { recoveryCodesSaved: false }))).toEqual({ status: 400, type: 'invalid-body' });
@@ -261,7 +313,8 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
     expect(done.statusCode).toBe(204);
     const row = store.peek(a.id) as unknown as Record<string, unknown>;
     expect(row).toMatchObject({ status: 'ACTIVE', inviteTokenHash: null, inviteExpiresAt: null, totpPendingEnc: null });
-    expect(row.inviteStepHash ?? null).toBeNull();
+    expect(row).toHaveProperty('inviteStepHash');
+    expect(row.inviteStepHash).toBeNull();
     expect(store.sessions(a.id)).toHaveLength(0);
     expect(store.listPasskeys(a.id)).toHaveLength(1);
     expect(store.listRecoveryCodes(a.id)).toHaveLength(10);
@@ -280,6 +333,7 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
       const seed = seedOf(await enroll(aud, step));
       const confirmed = await confirm(aud, step, codeAt(seed));
       expect(confirmed.statusCode).toBe(200);
+      expect(confirmed.headers['cache-control']).toBe('no-store');
       // 패스키가 필수가 아니어도 화면이 건너뛰기를 보이도록 PASSKEY로 알린다(openapi AdminInvitationTotpConfirmed)
       expect(json(confirmed).next).toBe('PASSKEY');
       expect((await complete(aud, step)).statusCode).toBe(204);
@@ -292,7 +346,9 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
     const step1 = stepOf(await start('partner', a.token));
     expect((await setPassword('partner', step1)).statusCode).toBe(200);
     const seed = seedOf(await enroll('partner', step1));
-    expect((await confirm('partner', step1, codeAt(seed))).statusCode).toBe(200);
+    const confirmed = await confirm('partner', step1, codeAt(seed));
+    expect(confirmed.statusCode).toBe(200);
+    expect(confirmed.headers['cache-control']).toBe('no-store');
     await registerPasskey('partner', step1);
     expect(store.listPasskeys(a.id)).toHaveLength(1);
     expect(store.listRecoveryCodes(a.id)).toHaveLength(10);
@@ -321,6 +377,13 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
     const opStep = stepOf(await start('ops', op.token));
     expect((await setPassword('ops', opStep)).statusCode).toBe(200);
     expect(problemOf(await enroll('partner', opStep))).toEqual({ status: 410, type: 'invitation-step-invalid' });
+    // 관제 패스키 등록·마침·완료도 실제로 지나간다(콘솔 RP ID는 registerPasskey가 본다, RV096-05)
+    const opSeed = seedOf(await enroll('ops', opStep));
+    const opConfirmed = await confirm('ops', opStep, codeAt(opSeed));
+    expect(opConfirmed.statusCode).toBe(200);
+    await registerPasskey('ops', opStep);
+    expect((await complete('ops', opStep)).statusCode).toBe(204);
+    expect(store.rowForTest(op.id)!.status).toBe('ACTIVE');
   });
 
   test('BOT-152 ⑩ 완료한 계정은 새 비밀번호·TOTP로 로그인되고 옛 초대 토큰·단계 토큰은 410이며 응답에 비밀·시드·해시가 없다', async () => {

@@ -68,12 +68,14 @@ describe('BAT-045 남은 관리 계정 결함(F-09-6)', () => {
     admin.actor(operator['x-user-id']!, 'operator');
     const before = { invite: admin.callsOf('invite'), audit: audit.entries.length };
     promoters.answer = false;
+    promoters.calls.length = 0;
     const r = await send('POST', '/v1/ops/admin-accounts', operator, { email: 'unknown-promoter@stella.example', displayName: '담당자', role: 'partner_admin', promoterId: PROMOTER }, {
       'idempotency-key': randomUUID(),
       'x-reauth-token': token(operator),
     });
     expect(r.statusCode, r.payload).toBe(422);
     expect(typeOf(r)).toMatch(/unknown-promoter$/);
+    expect(promoters.calls).toEqual([PROMOTER]);
     expect(admin.callsOf('invite')).toBe(before.invite);
     expect(audit.entries).toHaveLength(before.audit);
   });
@@ -83,6 +85,7 @@ describe('BAT-045 남은 관리 계정 결함(F-09-6)', () => {
     admin.actor(operator['x-user-id']!, 'operator');
     const before = { invite: admin.callsOf('invite'), audit: audit.entries.length };
     promoters.answer = 'throw';
+    promoters.calls.length = 0;
     const r = await send('POST', '/v1/ops/admin-accounts', operator, { email: 'promoter-down@stella.example', displayName: '담당자', role: 'partner_admin', promoterId: PROMOTER }, {
       'idempotency-key': randomUUID(),
       'x-reauth-token': token(operator),
@@ -90,6 +93,7 @@ describe('BAT-045 남은 관리 계정 결함(F-09-6)', () => {
     expect(r.statusCode, r.payload).toBe(503);
     expect(typeOf(r)).toMatch(/promoter-directory-unavailable$/);
     expect(r.headers['retry-after']).toBeTruthy();
+    expect(promoters.calls).toEqual([PROMOTER]);
     expect(admin.callsOf('invite')).toBe(before.invite);
     expect(audit.entries).toHaveLength(before.audit);
   });
@@ -98,12 +102,14 @@ describe('BAT-045 남은 관리 계정 결함(F-09-6)', () => {
     const operator = identity.ops('operator');
     admin.actor(operator['x-user-id']!, 'operator');
     promoters.answer = true;
+    promoters.calls.length = 0;
     const before = { invite: admin.callsOf('invite'), audit: auditOf('ADMIN_ACCOUNT_INVITED', 'SUCCEEDED').length };
     const r = await send('POST', '/v1/ops/admin-accounts', operator, { email: 'known-promoter@stella.example', displayName: '담당자', role: 'partner_admin', promoterId: PROMOTER }, {
       'idempotency-key': randomUUID(),
       'x-reauth-token': token(operator),
     });
     expect(r.statusCode, r.payload).toBe(201);
+    expect(promoters.calls).toEqual([PROMOTER]);
     expect(admin.callsOf('invite')).toBe(before.invite + 1);
     expect(auditOf('ADMIN_ACCOUNT_INVITED', 'SUCCEEDED')).toHaveLength(before.audit + 1);
   });
@@ -124,7 +130,7 @@ describe('BAT-045 남은 관리 계정 결함(F-09-6)', () => {
     expect(json(first)).toMatchObject({ adminAccountId: target, role: 'operator', version: 2 });
     const replay = await send('PUT', `/v1/ops/admin-accounts/${target}/role`, commander, body, { 'if-match': '"2"', 'idempotency-key': key, 'x-reauth-token': token(commander) });
     expect(replay.statusCode, replay.payload).toBe(200);
-    expect(json(replay)).toMatchObject({ adminAccountId: target, role: 'operator', version: 2 });
+    expect(json(replay)).toEqual(json(first));
     expect(admin.callsOf('changeRole')).toBe(before.change + 1);
     expect(auditOf('ADMIN_ACCOUNT_ROLE_CHANGED', 'SUCCEEDED')).toHaveLength(before.succeeded + 1);
     expect(auditOf('ADMIN_ACCOUNT_ROLE_CHANGED', 'REQUESTED')).toHaveLength(before.requested + 1);
@@ -133,6 +139,37 @@ describe('BAT-045 남은 관리 계정 결함(F-09-6)', () => {
     expect(diff.statusCode, diff.payload).toBe(422);
     expect(typeOf(diff)).toMatch(/idempotency-key-reused$/);
     expect(admin.callsOf('changeRole')).toBe(before.change + 1);
+
+    // commander 분기: 승인 업무도 같은 키 재전송에서 하나여야 한다(RV096-04)
+    const cTarget = newId();
+    admin.seed({ adminAccountId: cTarget, role: 'operator', status: 'ACTIVE', version: 1 });
+    const cKey = randomUUID();
+    const cBody = { role: 'commander', reason: '관제 책임자 승진' };
+    const cBefore = { change: admin.callsOf('changeRole'), requested: audit.entries.filter((e) => e.recordId === cTarget && e.recordType === 'ADMIN_ACCOUNT_ROLE_CHANGED' && e.record.payload.status === 'REQUESTED').length };
+    const c1 = await send('PUT', `/v1/ops/admin-accounts/${cTarget}/role`, commander, cBody, { 'if-match': '"1"', 'idempotency-key': cKey, 'x-reauth-token': token(commander) });
+    expect(c1.statusCode, c1.payload).toBe(202);
+    const cApprovalId = String(json(c1).approvalId);
+    expect(cApprovalId).toBeTruthy();
+    const c2 = await send('PUT', `/v1/ops/admin-accounts/${cTarget}/role`, commander, cBody, { 'if-match': '"1"', 'idempotency-key': cKey, 'x-reauth-token': token(commander) });
+    expect(c2.statusCode, c2.payload).toBe(202);
+    expect(json(c2).approvalId).toBe(cApprovalId);
+    expect(admin.callsOf('changeRole')).toBe(cBefore.change);
+    expect(audit.entries.filter((e) => e.recordId === cTarget && e.recordType === 'ADMIN_ACCOUNT_ROLE_CHANGED' && e.record.payload.status === 'REQUESTED')).toHaveLength(cBefore.requested + 1);
+    const cDiff = await send('PUT', `/v1/ops/admin-accounts/${cTarget}/role`, commander, { role: 'commander', reason: '다른 요청' }, { 'if-match': '"1"', 'idempotency-key': cKey, 'x-reauth-token': token(commander) });
+    expect(cDiff.statusCode, cDiff.payload).toBe(422);
+    expect(typeOf(cDiff)).toMatch(/idempotency-key-reused$/);
+    expect(admin.callsOf('changeRole')).toBe(cBefore.change);
+
+    // 승인 뒤 같은 키·본문 재전송도 승인 업무를 새로 만들지 않는다
+    const cApprover = identity.ops('commander');
+    admin.actor(cApprover['x-user-id']!, 'commander');
+    const cApproved = await send('POST', `/v1/ops/approval-requests/${cApprovalId}/approvals`, cApprover, {}, { 'x-reauth-token': token(cApprover, 'APPROVAL') });
+    expect(cApproved.statusCode, cApproved.payload).toBe(200);
+    expect(admin.callsOf('changeRole')).toBe(cBefore.change + 1);
+    const cAfter = await send('PUT', `/v1/ops/admin-accounts/${cTarget}/role`, commander, cBody, { 'if-match': '"2"', 'idempotency-key': cKey, 'x-reauth-token': token(commander) });
+    expect(cAfter.statusCode, cAfter.payload).toBe(202);
+    expect(json(cAfter).approvalId).toBe(cApprovalId);
+    expect(admin.callsOf('changeRole')).toBe(cBefore.change + 1);
   });
 
   test('BOT-152 ⑬ commander 역할 변경 승인 감사에는 요청자와 승인자가 모두 남는다', async () => {

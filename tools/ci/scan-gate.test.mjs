@@ -71,7 +71,7 @@ const exception = (o = {}) => ({ tool: 'codeql', rule: 'js/xss', path: 'apps/web
 // ---------- 13.3.1 비밀 ----------
 
 test('BOT-161 ③ scan-gate --tool zap은 High 8.0을 막고 Medium 5.0은 알림만 남기며 같은 규칙·주소 중복은 1건으로 센다', async () => {
-  const zapResult = (severity, uri = 'https://www.peaket.example/v1/search?q=1', ruleId = 'ZAP-40018') => result(ruleId, uri, 1, { properties: { 'security-severity': String(severity) } });
+  const zapResult = (severity, uri = 'https://www.peaket.example/v1/search?q=1', ruleId = 'ZAP-40018', line = 1) => result(ruleId, uri, line, { properties: { 'security-severity': String(severity) } });
   const zap = (results) => sarif(run({ name: 'ZAP', rules: [rule('ZAP-40018', 8), rule('ZAP-10020', 5)], results }));
   const high = await gate({ tool: 'zap', files: { 'z.sarif': zap([zapResult(8)]) } });
   assert.equal(high.code, 1, high.logs);
@@ -80,9 +80,18 @@ test('BOT-161 ③ scan-gate --tool zap은 High 8.0을 막고 Medium 5.0은 알�
   assert.equal(medium.code, 0, medium.logs);
   assert.equal(medium.report.blocking.length, 0);
   assert.equal(medium.report.notices.length, 1);
-  const duplicate = await gate({ tool: 'zap', files: { 'z.sarif': zap([zapResult(8), zapResult(8)]) } });
+  // 같은 규칙·주소는 줄이 달라도 1건으로 센다(RV096-08)
+  const duplicate = await gate({ tool: 'zap', files: { 'z.sarif': zap([zapResult(8, undefined, 'ZAP-40018', 1), zapResult(8, undefined, 'ZAP-40018', 2)]) } });
   assert.equal(duplicate.code, 1, duplicate.logs);
-  assert.equal(duplicate.report.blocking.length, 1, '같은 규칙·주소 중복을 두 번 셌다');
+  assert.equal(duplicate.report.blocking.length, 1, '같은 규칙·주소가 다른 줄이면 두 번 셌다');
+  // 줄이 없는 결과도 같은 규칙·주소면 1건이다
+  const noLine = await gate({ tool: 'zap', files: { 'z.sarif': zap([zapResult(8, undefined, 'ZAP-40018', null), zapResult(8, undefined, 'ZAP-40018', null)]) } });
+  assert.equal(noLine.code, 1, noLine.logs);
+  assert.equal(noLine.report.blocking.length, 1, '줄 없는 중복을 두 번 셌다');
+  // results 키가 없으면 판정하지 못해 막는다
+  const noResults = await gate({ tool: 'zap', files: { 'z.sarif': JSON.stringify({ version: '2.1.0', runs: [{ tool: { driver: { name: 'ZAP', rules: [] } } }] }) } });
+  assert.equal(noResults.code, 1);
+  assert.match(noResults.report.errors.join('\n'), /results/);
   const wrongTool = await gate({ tool: 'zap', files: { 'z.sarif': sarif(run({ name: 'Other', rules: [], results: [] })) } });
   assert.equal(wrongTool.code, 1);
   assert.match(wrongTool.report.errors.join('\n'), /ZAP/);

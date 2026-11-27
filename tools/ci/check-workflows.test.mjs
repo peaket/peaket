@@ -1211,15 +1211,24 @@ test('BOT-161 dast-nightly.yml의 예약 실패만 SEV3 이슈를 열고, issues
   assert.match(run, /dast-zap/);
 });
 
-test('BOT-161 ④ DAST 예약 실패 이슈는 실행마다 새로 열지 않고 열린 이슈를 찾아 한 번만 열거나 덧붙인다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
+test('BOT-161 ④ DAST 예약 실패 이슈는 열린 이슈가 없을 때만 만들고, 있으면 덧붙이며 제목은 고정이다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
   const d = wfDoc('dast-nightly.yml');
   const run = d.jobs['notify-scheduled-failure'].steps.map((s) => s.run ?? '').join('\n');
-  assert.match(run, /gh issue list/, '열린 이슈를 먼저 찾지 않는다');
-  assert.match(run, /--state open/, '열린 이슈만 찾지 않는다');
-  assert.match(run, /gh issue comment/, '이미 열린 이슈에 실행을 덧붙이지 않는다');
+  assert.match(run, /existing=\$\(gh issue list[^\n]*--state open/, '열린 이슈를 먼저 찾지 않는다');
+  assert.match(run, /if \[ -n "\$existing" \]; then/, '열린 이슈가 있을 때와 없을 때를 가르지 않는다');
+  const ifAt = run.indexOf('if [ -n "$existing" ]; then');
+  const commentAt = run.indexOf('gh issue comment');
+  const elseAt = run.indexOf('else', ifAt);
+  const createAt = run.indexOf('gh issue create');
+  const fiAt = run.indexOf('fi', elseAt);
+  assert.ok(commentAt > ifAt && commentAt < elseAt, '덧붙이기가 있으면 가지 안에 있지 않다');
+  assert.ok(createAt > elseAt && createAt < fiAt, '새 이슈 만들기가 없으면 가지 안에 있지 않다');
+  assert.equal(run.match(/gh issue create/g)?.length, 1, '새 이슈 만들기가 하나가 아니다');
+  assert.equal(run.match(/gh issue comment/g)?.length, 1, '덧붙이기가 하나가 아니다');
   const title = run.split('\n').find((l) => l.includes('--title'));
   assert.ok(title, '이슈 제목 줄이 없다');
-  assert.ok(!title.includes('GITHUB_RUN_ID'), '실행 ID를 제목에 넣어 실행마다 새 이슈가 생긴다');
+  assert.ok(!/GITHUB_RUN_ID|RUN_ID|\$TITLE|run_id|\$\{\{/i.test(title), '실행 ID·동적 제목을 써서 실행마다 새 이슈가 생긴다');
+  assert.match(title, /\[SEV3\]/, 'SEV3 제목이 아니다');
 });
 
 test('BOT-161 security-scan.yml은 예약 실행에도 issues: write를 두지 않고(workflow_call 권한 규칙), security-scan-notify.yml이 예약 실패만 SEV3 이슈로 연다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
