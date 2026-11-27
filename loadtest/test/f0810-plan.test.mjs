@@ -84,11 +84,13 @@ test('F0810-6 ② 무대 둘·18회 측정·보고가 있고, 측정은 구성·
   assert.ok(stage.some((a) => a.join(' ').includes('compare-stage.mjs') && a.includes('bundle')), 'w2-stage에 합본 single 무대 명령이 없다');
   const lock = stage.find((a) => a.some((x) => x.endsWith('lock.sh')));
   assert.ok(lock, 'w2-stage에 Docker 잠금 명령이 없다');
-  assert.ok(lock.includes('take') && lock.includes('docker-all') && lock.includes('lane4-F-08-10'), lock.join(' '));
+  assert.ok(lock.includes('take') && lock.includes('docker') && lock.includes('lane4-F-08-10'), lock.join(' '));
+  assert.equal(lock.includes('docker-all'), false, 'docker-all 두 자리를 쓰면 안 된다');
 
   const switchRole = argvsOf(runOf(plan, 'w2-stage-by-role')).find((a) => a.join(' ').includes('compare-stage.mjs'));
   assert.ok(switchRole, 'w2-stage-by-role에 compare-stage.mjs 명령이 없다');
   assert.ok(switchRole.includes('by-role'), switchRole.join(' '));
+  assert.ok(hasPair(switchRole, '--replicas', '3'), `w2-stage-by-role 복제 3: ${switchRole.join(' ')}`);
 
   for (const key of MEASURE_KEYS) {
     const run = runOf(plan, key);
@@ -113,10 +115,11 @@ test('F0810-6 ② 무대 둘·18회 측정·보고가 있고, 측정은 구성·
   const report = argvsOf(runOf(plan, 'w2-report')).flat();
   assert.ok(report.includes('compare-report'), 'w2-report에 비교 요약 명령이 없다');
   const drop = argvsOf(runOf(plan, 'w2-report')).find((a) => a.some((x) => x.endsWith('lock.sh')));
-  assert.ok(drop && drop.includes('drop') && drop.includes('docker-all') && drop.includes('lane4-F-08-10'), 'w2-report가 잠금을 놓지 않는다');
+  assert.ok(drop && drop.includes('drop') && drop.includes('docker') && drop.includes('lane4-F-08-10'), 'w2-report가 잠금을 놓지 않는다');
+  assert.equal(drop.includes('docker-all'), false, 'drop도 docker-all이면 안 된다');
 });
 
-test('F0810-6 ③ 판정 자리는 V-T18·§3.8만 가리키고, K1/K2/K7·F-08-9·F-08-5·F-08-6을 가리키지 않는다', () => {
+test('F0810-6 ③ 측정 18회의 판정 자리는 V-T18·§3.8만 가리키고, 보고 criteria는 K1/K2/K7을 재판정 없음 문맥에만 쓴다', () => {
   const plan = readPlan();
   for (const key of MEASURE_KEYS) {
     const run = runOf(plan, key);
@@ -127,6 +130,9 @@ test('F0810-6 ③ 판정 자리는 V-T18·§3.8만 가리키고, K1/K2/K7·F-08-
     for (const id of FORBIDDEN) assert.equal(text.includes(id), false, `${key}: criteria가 ${id}를 가리킨다`);
     assert.ok(run.artifact.includes('.cache/peaket-f10/'), `${key}: artifact`);
   }
+  const reportText = runOf(plan, 'w2-report').criteria.join(' ');
+  assert.ok(reportText.includes('V-T18'), '보고 criteria에 V-T18이 없다');
+  assert.match(reportText, /재판정 없음|미사용/, '보고 criteria는 K1/K2/K7을 재판정 없음·미사용 문맥에만 쓴다');
   const all = plan.runs.map((r) => `${r.title} ${r.conditions} ${r.criteria.join(' ')} ${r.ledger}`).join(' ');
   assert.ok(all.includes('split-3way'), '계획이 실험 묶음 split-3way를 밝히지 않는다');
   assert.ok(all.includes('미측정'), '계획이 (다) 미측정을 밝히지 않는다');

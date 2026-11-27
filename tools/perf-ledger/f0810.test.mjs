@@ -50,6 +50,7 @@ function args(root, id, extra = []) {
     '--kpi', 'V-T18',
     '--version', 'v1',
     '--profile', 'local-10k',
+    '--commit', 'f0810-test',
     '--k6-summary', summary,
     ...extra,
   ];
@@ -63,6 +64,7 @@ test('F0810-7 ① collect.py --experiment split-3way:by-role이 manifest.experim
     assert.equal(r.code, 0, r.out);
     const manifest = JSON.parse(readFileSync(join(runDir(root, id), 'manifest.json'), 'utf8'));
     assert.deepEqual(manifest.experiment, { id: 'split-3way', config: 'by-role' });
+    assert.equal(manifest.commit.code, 'f0810-test');
     assert.equal(manifest.valid, true);
   }));
 

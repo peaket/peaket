@@ -140,8 +140,15 @@ test('F0810-3 ① judgeNoDifference: 3회 미만은 무효, 중앙값 차이가 
   assert.equal(boundary.spread, 20);
   assert.equal(boundary.noDifference, true, '경계값(같음)은 차이 없음이다');
 
-  assert.equal(judgeNoDifference([100, 110], [105, 115, 125]).valid, false);
-  assert.equal(judgeNoDifference([], []).valid, false);
+  const short1 = judgeNoDifference([100], [105, 115, 125]);
+  assert.equal(short1.valid, false);
+  assert.equal(short1.noDifference, null, '1회 표본은 차이 없음이 아니다');
+  const short2 = judgeNoDifference([100, 110], [105, 115, 125]);
+  assert.equal(short2.valid, false);
+  assert.equal(short2.noDifference, null, '2회 표본은 차이 없음이 아니다');
+  const empty = judgeNoDifference([], []);
+  assert.equal(empty.valid, false);
+  assert.equal(empty.noDifference, null, '빈 표본은 차이 없음이 아니다');
   assert.equal(judgeNoDifference([100, 110, 120], [105, 115, 125]).noDifference, true);
 });
 
@@ -152,14 +159,26 @@ test('F0810-3 ② compareExperiment: (가)·(나) 3회씩이면 partial·(다) �
   assert.equal(result.services, '미측정');
   assert.equal(result.adr0007, '미측정');
   assert.deepEqual(result.missing, []);
+  assert.equal(result.comparisons.length, 15, '5지표 × 3단계 비교가 있어야 한다');
+  for (const metric of ['paymentP99Ms', 'paymentErrorRate', 'entryP99Ms', 'entryErrorRate', 'cpuThrottleRatio']) {
+    for (const entry of ['none', '100', '120']) {
+      const c = result.comparisons.find((x) => x.metric === metric && x.entry === entry);
+      assert.ok(c, `${metric}/${entry} 비교가 없다`);
+      assert.equal(typeof c.a.median, 'number', `${metric}/${entry} a.median`);
+      assert.equal(typeof c.a.spread, 'number', `${metric}/${entry} a.spread`);
+      assert.equal(typeof c.b.median, 'number', `${metric}/${entry} b.median`);
+      assert.equal(typeof c.b.spread, 'number', `${metric}/${entry} b.spread`);
+      assert.equal(typeof c.noDifference, 'boolean', `${metric}/${entry} noDifference`);
+    }
+  }
   const p99 = result.comparisons.find((c) => c.metric === 'paymentP99Ms' && c.entry === 'none');
-  assert.ok(p99, '결제 접수 p99 비교가 없다');
   assert.equal(p99.noDifference, true);
 
   const missing = localRuns().filter((r) => !(r.config === 'bundle' && r.entry === 'none' && r.rep === 3));
   const bad = compareExperiment(missing);
   assert.equal(bad.verdict, 'invalid');
   assert.ok(bad.missing.some((m) => m.config === 'bundle' && m.entry === 'none' && m.rep === 3), JSON.stringify(bad.missing));
+  assert.equal(bad.comparisons.some((c) => c.metric === 'paymentP99Ms' && c.entry === 'none'), false, '3회 미만 조건은 비교에 쓰지 않는다');
 
   assert.equal(compareExperiment([]).verdict, 'invalid');
 
@@ -178,6 +197,7 @@ test('F0810-3 ③ compareExperiment: (다)가 있으면 complete, (다)의 진�
   assert.equal(complete.verdict, 'complete');
   assert.equal(complete.services, 'measured');
   assert.equal(complete.adr0007, 'pass');
+  assert.equal(complete.comparisons.length, 30, '(가)-(나) 15 + (나)-(다) 15');
 
   const slow = compareExperiment(withServices(metrics(150, 0.0001, 50, 0.0001, 0.01)));
   assert.equal(slow.adr0007, 'fail', 'NFR-005은 150ms 미만이라 경계 150ms는 실패다');
@@ -234,44 +254,66 @@ test('F0810-4 ① judgeCompareRun: 300 TPS 아님·services·진입 도착률 �
   assert.equal(judgeCompareRun(none).verdict, 'pass');
 });
 
-test('F0810-4 ② renderComparison: 차이 없음·차이·미측정을 적고 K1/K2/K7·30,000·100만을 쓰지 않는다', async () => {
+test('F0810-4 ② renderComparison: 5지표×3단계 줄을 적고 partial은 모두 차이 없음, different는 noDifference:false 줄만 차이다', async () => {
   const { compareExperiment, renderComparison } = await split();
+  const labels = ['결제 접수 p99', '결제 접수 오류율', '진입 p99', '진입 오류율', 'CPU 스로틀'];
+  const rows = (text) => text.split('\n').filter((l) => labels.some((x) => l.includes(x)) && l.includes('차이'));
   const partial = compareExperiment(localRuns());
   const text = renderComparison(partial);
-  assert.ok(text.includes('차이 없음'), text);
+  assert.ok(rows(text).length >= 15, `지표 줄이 15개보다 적다: ${rows(text).length}`);
+  for (const label of labels) assert.ok(rows(text).filter((l) => l.includes(label)).length >= 3, `${label} 줄이 3단계보다 적다`);
+  assert.ok(rows(text).every((l) => l.includes('차이 없음')), 'partial의 모든 줄은 차이 없음이어야 한다');
+  assert.equal(rows(text).some((l) => l.includes('차이') && !l.includes('차이 없음')), false, 'partial에 차이 줄이 있으면 안 된다');
   assert.ok(text.includes('미측정'), text);
   assert.doesNotMatch(text, /K1|K2|K7/, 'KPI ID를 비교 글에 쓰지 않는다');
   assert.doesNotMatch(text, /30,000|100만/, '정본 규모 목표를 이 기능 결과로 쓰지 않는다');
 
   const withDifference = localRuns().map((r) => (r.config === 'by-role' && r.entry === 'none' ? { ...r, metrics: metrics(300, 0.0001, 50, 0.0001, 0.01) } : r));
-  const different = renderComparison(compareExperiment(withDifference));
-  assert.ok(different.includes('차이'), different);
+  const differentResult = compareExperiment(withDifference);
+  const different = renderComparison(differentResult);
+  const diffRows = rows(different).filter((l) => l.includes('차이') && !l.includes('차이 없음'));
+  assert.ok(diffRows.length >= 1, '편차 밖 차이는 차이 줄로 적어야 한다');
+  assert.ok(diffRows.some((l) => l.includes('결제 접수 p99') && l.includes('0%')), '결제 p99 0% 줄이 차이여야 한다');
+  assert.ok(rows(different).some((l) => l.includes('차이 없음')), '다른 지표 줄은 차이 없음이어야 한다');
+  const diff = differentResult.comparisons.find((c) => c.metric === 'paymentP99Ms' && c.entry === 'none');
+  assert.equal(diff.noDifference, false);
 });
 
-test('F0810-5 ① M2_DRAFTS: 세 편의 ID·주제·근거·상태·게시자가 HOT-510 범위와 맞는다', async () => {
+test('F0810-5 ① M2_DRAFTS: 세 편의 ID·주제·측정/설계 구분·근거·상태·게시자가 HOT-510 범위와 맞는다', async () => {
   const { M2_DRAFTS } = await split();
   assert.equal(M2_DRAFTS.length, 3);
   assert.deepEqual(M2_DRAFTS.map((d) => d.id), ['m2-entry-wait-state', 'm2-seat-hold-delta', 'm2-payment-idempotency']);
   assert.deepEqual(M2_DRAFTS.map((d) => d.kpis), [['K1'], ['K2', 'K4', 'K5'], ['K7']]);
+  assert.deepEqual(M2_DRAFTS.map((d) => d.evidence), [['F-08-2', 'F-08-8'], ['F-08-8'], ['F-08-8']]);
+  assert.deepEqual(M2_DRAFTS.map((d) => d.measuredKpis), [['K1'], ['K2'], ['K7']]);
+  assert.deepEqual(M2_DRAFTS.map((d) => d.designOnlyKpis), [[], ['K4', 'K5'], []]);
   for (const d of M2_DRAFTS) {
     assert.equal(d.status, 'draft');
     assert.equal(d.publish, 'owner');
     assert.ok(d.evidence.length > 0, `${d.id}: 근거가 없다`);
     for (const e of d.evidence) assert.ok(['F-08-2', 'F-08-8'].includes(e), `${d.id}: 근거 ${e}`);
+    for (const e of d.evidence) assert.equal(e.startsWith('F-08-9'), false, `${d.id}: F-08-9 근거 금지`);
+    assert.ok(d.claims === undefined || (Array.isArray(d.claims) && d.claims.length === 0), `${d.id}: 수치 주장이 없어야 한다`);
   }
 });
 
-test('F0810-5 ② validateDrafts: 세 편 아님·ID 겹침·V-T18 근거·대리 게시·새 수치 주장을 거부한다', async () => {
+test('F0810-5 ② validateDrafts: 세 편 아님·ID 겹침·F-08-9/SR-T13/V-T27 근거·대리 게시·새 수치·K4/K5 측정 주장을 거부한다', async () => {
   const { M2_DRAFTS, validateDrafts } = await split();
   assert.equal(validateDrafts(M2_DRAFTS).ok, true);
-  const base = M2_DRAFTS.map((d) => ({ ...d, evidence: [...d.evidence], kpis: [...d.kpis] }));
+  const base = M2_DRAFTS.map((d) => ({ ...d, evidence: [...d.evidence], kpis: [...d.kpis], measuredKpis: [...d.measuredKpis], designOnlyKpis: [...d.designOnlyKpis] }));
   const cases = [
     base.slice(0, 2),
     [base[0], base[0], base[2]],
     base.map((d, i) => (i === 0 ? { ...d, evidence: ['V-T18'] } : d)),
+    base.map((d, i) => (i === 0 ? { ...d, evidence: ['F-08-9'] } : d)),
+    base.map((d, i) => (i === 0 ? { ...d, evidence: ['SR-T13 ①'] } : d)),
+    base.map((d, i) => (i === 0 ? { ...d, evidence: ['V-T27'] } : d)),
     base.map((d, i) => (i === 0 ? { ...d, publish: 'agent' } : d)),
     base.map((d, i) => (i === 0 ? { ...d, claims: ['30,000/s'] } : d)),
+    base.map((d, i) => (i === 0 ? { ...d, claims: ['결제 확정 p99 93.947초'] } : d)),
     base.map((d, i) => (i === 0 ? { ...d, status: 'published' } : d)),
+    base.map((d, i) => (i === 1 ? { ...d, measuredKpis: ['K2', 'K4'] } : d)),
+    base.map((d, i) => (i === 1 ? { ...d, designOnlyKpis: [] } : d)),
   ];
   for (const c of cases) assert.equal(validateDrafts(c).ok, false, JSON.stringify(c));
 });

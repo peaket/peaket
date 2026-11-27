@@ -27,6 +27,7 @@ test('F0810-8 ① (가) 합본과 (나) 역할별 배포는 네 역할을 한 �
 
   const bundle = compareStagePlan({ config: 'bundle' });
   assert.equal(bundle.config, 'bundle');
+  assert.equal(bundle.scope, 'bundle-four-services');
   assert.equal(bundle.mode, 'single');
   assert.equal(bundle.replicas, 3);
   assert.equal(bundle.deployments.length, 1);
@@ -40,6 +41,7 @@ test('F0810-8 ① (가) 합본과 (나) 역할별 배포는 네 역할을 한 �
 
   const byRole = compareStagePlan({ config: 'by-role' });
   assert.equal(byRole.config, 'by-role');
+  assert.equal(byRole.scope, 'bundle-four-roles-shrink');
   assert.equal(byRole.mode, 'single');
   assert.equal(byRole.replicas, 3);
   assert.equal(byRole.deployments.length, 4);

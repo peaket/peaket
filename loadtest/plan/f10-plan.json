@@ -18,10 +18,10 @@
     "한 번에 한 run만 돈다. 실행 사이 1분 쉰다(앞 실행의 부하가 가라앉게).",
     "실패·무효·미측정·skip은 통과가 아니다. done의 result는 pass·fail·invalid 가운데 하나이고 pass만 통과다.",
     "측정 중에는 다른 시험·빌드를 하지 않고, 측정 단계 커밋에서 node tools/ci/records.mjs를 돌리지 않는다.",
-    "Docker 잠금은 docker-all 두 자리다: C:/Program Files/Git/bin/bash.exe D:/ticketpass-locks/lock.sh take docker-all lane4-F-08-10. 창이 끝나면 drop docker-all lane4-F-08-10.",
+    "Docker 잠금은 docker 한 자리다: C:/Program Files/Git/bin/bash.exe D:/ticketpass-locks/lock.sh take docker lane4-F-08-10. 창이 끝나면 drop docker lane4-F-08-10.",
     "kind 클러스터 이름은 lane4-f10, kubeconfig는 .cache/peaket-tools/kubeconfig-lane4-f10이다.",
-    "진입 100·120%의 --entry-max-rate는 F-08-2 MSR-020의 유효 실행 ID·값을 성능 장부에서 확인해 bat025-plan.mjs --plan loadtest/plan/f10-plan.json set entryRate <값>으로 채운다. 유효한 값이 없으면 100·120% 실행은 skip하고 미측정으로 적는다.",
-    "세 구성 가운데 (가) 한 프로세스 합본과 (나) 역할별 배포만 잰다. (다) 10개 서비스는 로컬 v1 무대에 배포가 없어 계획에 넣지 않고 미측정으로 적는다. V-T18은 부분이다.",
+    "진입 100·120%의 --entry-max-rate는 F-08-2 MSR-020의 1 vCPU X₁ 800/s(중앙값, 2026-11-24-msr020-n1-c1-r1..r3)를 쓴다. 0.5 vCPU N=1 320/s는 무효라 쓰지 않는다. bat025-plan.mjs --plan loadtest/plan/f10-plan.json set entryRate 800으로 채운다. 이 실행 ID·보고서가 없으면 100·120% 실행은 skip하고 미측정으로 적는다.",
+    "세 구성 가운데 (가) 한 프로세스 합본과 축소 (나) 역할별 배포(합본의 네 역할만)만 잰다. (다) 10개 서비스는 로컬 v1 무대에 배포가 없어 계획에 넣지 않고 미측정으로 적는다. V-T18은 부분이다.",
     "F-08-9의 무효·부분 값을 비교 결과로 쓰지 않는다. F-08-8의 K1·K2·K7, F-08-5·F-08-6의 몫을 다시 재지 않는다.",
     "측정 전에 수치를 통과로 적지 않는다. 이 계획의 결과는 측정 창 뒤에만 적는다."
   ],
@@ -40,9 +40,9 @@
       "title": "kind·관측·v1 2GiB·합본 single·Prometheus",
       "estimate_min": 50,
       "stage": "stage",
-      "conditions": "Docker 잠금 docker-all lane4-F-08-10, kind lane4-f10, v1 복제 3·2GiB, 합본 single, Prometheus 127.0.0.1:9090.",
+      "conditions": "Docker 잠금 docker lane4-F-08-10, kind lane4-f10, v1 복제 3·2GiB, 합본 single, Prometheus 127.0.0.1:9090.",
       "commands": [
-        { "label": "Docker 잠금(두 자리)", "argv": ["C:/PROGRA~1/Git/bin/bash.exe", "D:/ticketpass-locks/lock.sh", "take", "docker-all", "lane4-F-08-10"] },
+        { "label": "Docker 잠금(한 자리)", "argv": ["C:/PROGRA~1/Git/bin/bash.exe", "D:/ticketpass-locks/lock.sh", "take", "docker", "lane4-F-08-10"] },
         { "label": "kind 클러스터", "argv": ["node", "tools/local/cluster.mjs", "up"] },
         { "label": "관측 묶음", "argv": ["node", "tools/local/cluster.mjs", "observability"] },
         { "label": "v1 무대 2GiB", "argv": ["node", "tools/local/cluster.mjs", "v1", "--redis-tls", "on", "--replicas", "3", "--memory-mi", "2048"] },
@@ -447,7 +447,7 @@
       "commands": [
         { "label": "비교 요약", "argv": ["node", "loadtest/run.mjs", "v1", "compare-report", "--experiment", "split-3way", "--out", ".cache/peaket-f10/comparison.json"] },
         { "label": "클러스터 내리기", "argv": ["node", "tools/local/cluster.mjs", "down"] },
-        { "label": "Docker 잠금 놓기", "argv": ["C:/PROGRA~1/Git/bin/bash.exe", "D:/ticketpass-locks/lock.sh", "drop", "docker-all", "lane4-F-08-10"] }
+        { "label": "Docker 잠금 놓기", "argv": ["C:/PROGRA~1/Git/bin/bash.exe", "D:/ticketpass-locks/lock.sh", "drop", "docker", "lane4-F-08-10"] }
       ],
       "criteria": [
         "V-T18 결과(부분), (다) 미측정, 3회 편차·차이 없음 표시",
