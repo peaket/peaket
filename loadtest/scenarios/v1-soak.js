@@ -234,11 +234,15 @@ function sessionFor(u, data) {
   return fresh;
 }
 
+let loggedRecords = 0;
 function record(target, route, started, status, ok) {
   if (status === 409 || status === 422) limitHit.add(1, { target, route, status: String(status) });
   records.add(1, { target, route });
   latency.add(Date.now() - started, { target, route });
-  console.log(`record ${JSON.stringify({ kind: 'request', target, route, at: started, ms: Date.now() - started, status, ok, run: RUN_TAG })}`);
+  // 6시간 1,000/s의 모든 요청을 파일로 남기면 실행 도구가 끝에서 읽지 못한다. 100건마다 한 줄만 남기고
+  // 개수·limit_hit·지연은 k6 지표(요약)가 정확히 센다(records.ndjson은 표본이다)
+  loggedRecords += 1;
+  if (loggedRecords % 100 === 0) console.log(`record ${JSON.stringify({ kind: 'request', target, route, at: started, ms: Date.now() - started, status, ok, run: RUN_TAG })}`);
 }
 
 function holdAndRelease(u, data, order = false) {
