@@ -298,6 +298,22 @@ test('F0814-1 ② 입력 표·선행 인용·입력 읽기: F-08-13은 미측정
     assert.equal(got.rows.length, 1);
     assert.equal(got.rows[0].id, 'G-01');
   });
+
+  const md = [
+    '## 2. K8 탐지·전파',
+    '',
+    '| 시나리오 | 탐지(초) | 전파(초) | 판정 | 증거 |',
+    '| --- | --- | --- | --- | --- |',
+    ...K8_IDS.map((id) => `| ${id} | 미측정 | 미측정 | 미측정 | 미측정 |`),
+    '',
+  ].join('\n');
+  withTemp({ 'F-08-6-gameday.md': md, 'empty.md': '| 시나리오 | 탐지(초) | 전파(초) | 판정 | 증거 |\n| --- | --- | --- | --- | --- |\n' }, (p) => {
+    const got = m.readK8Report(p['F-08-6-gameday.md']);
+    assert.equal(got.ok, true);
+    assert.equal(got.rows.length, 10);
+    assert.deepEqual(got.rows.map((r) => r.id), K8_IDS);
+    assert.equal(m.readK8Report(p['empty.md']).ok, false);
+  });
 });
 
 test('F0814-1 ③ K8 경계·간격·k8.csv 시각 칸: 60.000/60.001초, 3.000/3.001초, 분모 10', async () => {
@@ -397,6 +413,14 @@ test('F0814-2 ④ judgeK8 일부 행 → 판정 못 함, 무효·증거 없음·
   noRun[0] = { ...noRun[0], runId: '' };
   assert.equal(m.judgeK8({ rows: noRun }).verdict, '판정 못 함');
 
+  const noRunExists = k8Rows();
+  noRunExists[0] = { ...noRunExists[0], runExists: false };
+  assert.equal(m.judgeK8({ rows: noRunExists }).verdict, '판정 못 함');
+
+  const noTimeline = k8Rows();
+  noTimeline[0] = { ...noTimeline[0], timeline: false };
+  assert.equal(m.judgeK8({ rows: noTimeline }).verdict, '판정 못 함');
+
   const narrow = k8Rows();
   narrow[0] = { ...narrow[0], intervals: { ...narrow[0].intervals, scrapeSec: 1 } };
   assert.equal(m.judgeK8({ rows: narrow }).verdict, '무효');
@@ -472,6 +496,10 @@ test('F0814-3 ③ judgeK9 60.000/60.001·등호 경계·replicasBefore≠1·runI
   assert.equal(m.judgeK9({ runs: [k9Run(60_000, { replicasAfter: 1 })] }).verdict, '무효');
   assert.equal(m.judgeK9({ runs: [k9Run(60_000, { runId: '' })] }).verdict, '판정 못 함');
   assert.equal(m.judgeK9({ runs: [k9Run(60_000, { manifest: false })] }).verdict, '판정 못 함');
+  assert.equal(m.judgeK9({ runs: [k9Run(60_000, { runExists: false })] }).verdict, '판정 못 함');
+  assert.equal(m.judgeK9({ runs: [k9Run(60_000, { timeline: false })] }).verdict, '판정 못 함');
+  assert.equal(m.judgeK9({ runs: [k9Run(60_000, { scaledAtMs: null })] }).verdict, '무효');
+  assert.equal(m.judgeK9({ runs: [k9Run(60_000, { podReadyAtMs: null })] }).verdict, '무효');
   assert.equal(m.judgeK9({ runs: [k9Run(60_000, { settle: false })] }).verdict, '무효');
   assert.equal(m.judgeK9({ runs: [k9Run(60_000, { valid: false })] }).verdict, '무효');
 });
@@ -607,15 +635,16 @@ test('F0814-4 ③ backendCosts 합성 입력의 AMP(agg 포함)·AMG·Datadog·S
   assert.equal(rows.loki.query, 'LogQL');
   assert.equal(rows.tempo.query, 'TraceQL');
 
-  const stores = m.traceStoreCosts({ metrics: METRICS, traceStore: TRACE_STORE, krwPerUsd: 1_400 });
+  const stores = m.traceStoreCosts({ metrics: METRICS, traceStore: TRACE_STORE, krwPerUsd: 1_400, fxSource: '한국은행 기준환율', fxDate: '2026-11-28', priceDate: '2026-11-28' });
   assert.equal(stores.verdict, '통과');
   const byId = Object.fromEntries(stores.rows.map((x) => [x.id, x]));
   assert.deepEqual(Object.keys(byId), ['tempo-msk', 'tempo-monolith', 'xray']);
   assert.ok(Math.abs(byId['tempo-msk'].annualUsd - 4_759.43) < 0.02, `tempo-msk ${byId['tempo-msk'].annualUsd}`);
   assert.ok(Math.abs(byId['tempo-monolith'].annualUsd - 3_559.43) < 0.02, `tempo-monolith ${byId['tempo-monolith'].annualUsd}`);
-  assert.ok(Math.abs(byId.xray.annualUsd - 1_780.71) < 0.02, `xray ${byId.xray.annualUsd}`);
-  assert.equal(byId['tempo-msk'].durable3, true);
-  assert.equal(byId.xray.openPeak, true);
+  assert.ok(Math.abs(byId.xray.annualUsd - 1_907.21) < 0.02, `xray ${byId.xray.annualUsd}`);
+  assert.equal(stores.rows.every((x) => x.durable3 === true), true);
+  assert.equal(stores.rows.every((x) => x.openPeak === true), true);
+  assert.equal(stores.chosen, 'xray');
   assert.equal(r.traceStores.length, 3);
 });
 
@@ -644,6 +673,14 @@ test('F0814-4 ④ 민감도 순위 변화(self 1배 → aws 1.5배)·R3 기본 �
   assert.equal(aws.limits.ampQueryDays, 95);
   assert.equal(aws.limits.ampQueryRps, 300);
   assert.equal(aws.limits.longTermConditional, true);
+
+  const tieMetrics = { activeSeries: 0, samplesPerSecond: 0, metricStorageGB: 40, aggStorageGB: 10, logGBPerDay: 0, traceGBPerDay: 0, profileGBPerDay: 0, spansPerSecond: 0, querySamplesPerYear: 0, nodes: 0, editors: 0, viewers: 0 };
+  const tied = m.backendCosts(backendInput({ metrics: tieMetrics, opsHoursPerYear: { self: 100, aws: 100.014, datadog: 0 } }));
+  assert.equal(tied.tie, true);
+  assert.equal(tied.chosen, 'self');
+  assert.equal(tied.opsSensitive, false);
+  assert.equal(tied.sensitivity[1].ranking[0], 'aws');
+  assert.equal(tied.sensitivity[2].ranking[0], 'self');
 });
 
 test('F0814-4 ⑤ sampleBudget 식·4천만 초과·보내지 않음, 요청 기록 저장소 입력 없음은 미측정', async () => {
@@ -659,17 +696,23 @@ test('F0814-4 ⑤ sampleBudget 식·4천만 초과·보내지 않음, 요청 기
   assert.equal(r.sampleBudget.sent, false);
   assert.equal(r.sampleBudget.max, 40_000_000);
 
-  const noKafka = m.traceStoreCosts({ metrics: METRICS, traceStore: { ...TRACE_STORE, obsKafkaMonthlyUsd: null }, krwPerUsd: 1_400 });
+  const traceBase = { metrics: METRICS, traceStore: TRACE_STORE, krwPerUsd: 1_400, fxSource: '한국은행 기준환율', fxDate: '2026-11-28', priceDate: '2026-11-28' };
+  const noKafka = m.traceStoreCosts({ ...traceBase, traceStore: { ...TRACE_STORE, obsKafkaMonthlyUsd: null } });
   assert.equal(noKafka.rows.find((x) => x.id === 'tempo-msk').verdict, '미측정');
-  const noXray = m.traceStoreCosts({ metrics: METRICS, traceStore: { ...TRACE_STORE, xrayTracesPerMonth: null }, krwPerUsd: 1_400 });
+  const noXray = m.traceStoreCosts({ ...traceBase, traceStore: { ...TRACE_STORE, xrayTracesPerMonth: null } });
   assert.equal(noXray.rows.find((x) => x.id === 'xray').verdict, '미측정');
+  for (const field of ['fxSource', 'fxDate', 'priceDate']) {
+    const bad = m.traceStoreCosts({ ...traceBase, [field]: '' });
+    assert.notEqual(bad.verdict, '통과', `${field} 없이 통과하면 안 된다`);
+    assert.ok(bad.missing.includes(field), `${field}가 missing에 없다`);
+  }
 });
 
 test('F0814-5 ① parseF0814Args: --window 3g 필수, 입력 인자, 금지 인자 거부, UsageError만', async () => {
   const m = need(await load());
-  const a = m.parseF0814Args(['--window', '3g', '--k8', 'k8.json', '--k9', 'k9.json', '--metrics', 'm.json', '--ops-hours', 'ops.csv', '--fx', '1400', '--out', 'out', '--judge', 'j.json']);
+  const a = m.parseF0814Args(['--window', '3g', '--k8', 'k8.md', '--k9', 'k9.json', '--metrics', 'm.json', '--ops-hours', 'ops.csv', '--fx', '1400', '--out', 'out', '--judge', 'j.json']);
   assert.equal(a.window, '3g');
-  assert.equal(a.k8, 'k8.json');
+  assert.equal(a.k8, 'k8.md');
   assert.equal(a.k9, 'k9.json');
   assert.equal(a.metrics, 'm.json');
   assert.equal(a.opsHours, 'ops.csv');
