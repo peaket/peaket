@@ -94,7 +94,6 @@ BAT-085(BAS-150)가 2026-11-20에 끝났다. 아래 항목의 상태·수는 바
 | B-T15 ② | 다른 단계 |  | HOT-400 | `GetVerdictEvidence`를 부르는 신원을 ops-svc로 줄이는 것은 메시 L7 허용 목록이다(B-T20 ⑩과 같다, BAT-200에서 정함, 2026-11-10) |
 | I-T56 ⑤ | 다른 단계 |  | HOT-400 | `CheckReverification`을 queue-svc 신원으로만 받는 것은 메시 L7 허용 목록이다(BAT-200에서 정함, 2026-11-10) |
 | Q-T36 ⑦ | 다른 단계 |  | HOT-251 | 명단 사본(대기열 Redis)이 그 수명에 지워지는 것은 사본을 쓰는 core-svc 어댑터가 본다(소유자 결정 2026-11-10, OPEN[33] (가), ADR-0261 결정 9). 어댑터는 HOT-251(묶음 BAT-158)이 만든다. 사본에 넘기는 수명은 BAT-157의 Q-T36 ④가 본다(2026-11-10) |
-| SR-T11 ② | 다른 단계 |  | HOT-450 | CloudFront 캐시 정책이 쿠키를 키에서 빼는지는 배포 구성 검사다. 입구 CDN 배포(HOT-450, 묶음 BAT-070) 몫이고 BAT-165 범위에서 뺐다(2026-11-16) |
 | catalog-review:v5.0.0-1.3.9 | 해당 없음 |  | — | memcache를 쓰지 않는다. 자동완성은 core-svc 파드 메모리 사전에서 답하고 사용자 입력을 Redis 키로 쓰지 않는다(ADR-0094) |
 | frontend:v5.0.0-3.4.4 | 다른 단계 |  | HOT-450 | 화면 앱은 `nosniff`를 보내지 않고 배포 응답 헤더 정책이 붙인다(docs/devops.md §6.6 '응답 보안 헤더 정책', `packages/config/headers/security-headers.mjs` 주석, 행의 '공통: delivery.md 판정'). 서비스 워커 스크립트(지금 `/serwist/sw.js`, 앱 서버 경로)와 `remoteEntry.js`(관제 정적 배포)도 같은 정책을 받는지는 CloudFront 캐시 동작별 응답 헤더 정책 몫이라 HOT-450 줄에 넘겼다. 게이트웨이 응답은 kind e2e(`tools/local/e2e/v0-deploy.e2e.mjs` BSL050)가 본다. BAT-170 웨이브 7에서 다시 판정(2026-11-16) |
 | D-T18 ② | 다른 단계 |  | BAS-150 | `--disable-sigusr1`이 없는 Node 파드를 거부하는 Kyverno 정책은 Kyverno CEL 정책 단계(BUILD_ORDER BAS-150, 묶음 BAT-085)가 만든다. ①(주석으로 진단 수집)은 BAT-075 시험이다(2026-11-19 계획). BAT-085의 시험 담당이 D-T18 ②를 이름에 단 시험을 더하는 커밋에서 이 줄을 지운다 |
