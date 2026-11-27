@@ -108,7 +108,7 @@ function planFixture(overrides = {}) {
   return {
     batch: 'F-08-15',
     feature: 'F-08-15',
-    windows: { '3g': { hours: 4, steps: ['3g-1', '3g-2', '3g-3'] } },
+    windows: { '3h': { hours: 4, steps: ['3h-1', '3h-2', '3h-3'] } },
     inputs: ['F-08-14', 'F-08-13'],
     dependency: {
       feature: 'F-08-14',
@@ -465,7 +465,7 @@ test('F0815-8 ② 보고서 검증이 증거 없는 통과·실측·금지 수�
   const mod = need(await load());
   const base = read(REPORT);
 
-  const passRow = `${base}\n| 보내기 | 3g-1 | 통과 | — |\n`;
+  const passRow = `${base}\n| 보내기 | 3h-1 | 통과 | — |\n`;
   assert.equal(mod.validateF0815Report(passRow).ok, false);
 
   assert.equal(mod.validateF0815Report(`${base}\n실측(PC)\n`).ok, false);
@@ -478,7 +478,7 @@ test('F0815-8 ② 보고서 검증이 증거 없는 통과·실측·금지 수�
   assert.equal(mod.validateF0815Report(missing).ok, false);
 });
 
-test('F0815-9 ① 계획 JSON이 batch·창 3g·입력·의존·보내기·Sentry·M4·중단 규칙·잠금·경계를 담는다', async () => {
+test('F0815-9 ① 계획 JSON이 batch·창 3h·입력·의존·보내기·Sentry·M4·중단 규칙·잠금·경계를 담는다', async () => {
   const mod = need(await load());
   assert.equal(typeof mod.validateF0815Plan, 'function', 'validateF0815Plan 함수가 없다');
   const plan = readJson(PLAN_JSON);
@@ -486,8 +486,8 @@ test('F0815-9 ① 계획 JSON이 batch·창 3g·입력·의존·보내기·Sentr
   assert.equal(result.ok, true, result.reasons.join('; '));
   assert.equal(plan.batch, 'F-08-15');
   assert.equal(plan.feature, 'F-08-15');
-  assert.ok(plan.windows['3g']);
-  assert.deepEqual(plan.windows['3g'].steps, ['3g-1', '3g-2', '3g-3']);
+  assert.ok(plan.windows['3h']);
+  assert.deepEqual(plan.windows['3h'].steps, ['3h-1', '3h-2', '3h-3']);
   assert.equal(plan.dependency.feature, 'F-08-14');
   assert.equal(plan.dependency.status, '미측정');
   assert.equal(plan.send.external, false);
@@ -511,7 +511,7 @@ test('F0815-9 ② 계획 문서가 정본 자리·범위·계산식·경계·## 
   for (const token of ['## 1. 정본 자리', '## 3. 범위', '## 6. 측정 설계', '## 7. 경계 표', '## 8. 시험', '## 10. F-08-14 의존', '## 검증', '## 담당 표']) {
     assert.ok(markdown.includes(token), `${token}가 없다`);
   }
-  for (const token of ['3g-1', '3g-2', '3g-3', '40,000,000', '86,400', 'R1', 'R2', 'R3', 'GlitchTip', 'm4-control-gameday', 'm4-scaling-cost', 'F-08-14']) {
+  for (const token of ['3h-1', '3h-2', '3h-3', '40,000,000', '86,400', 'R1', 'R2', 'R3', 'GlitchTip', 'm4-control-gameday', 'm4-scaling-cost', 'F-08-14']) {
     assert.ok(markdown.includes(token), `${token}가 없다`);
   }
   for (const id of PRIOR) assert.ok(markdown.includes(id), `${id} 인용이 없다`);
