@@ -80,7 +80,7 @@
 | --- | --- | --- |
 | Q-T69 ②·S-T28 ① | 통과 | gateway-admission 18/18, gateway-admission-fault 3/3 |
 | D-T50·D-T43·V-T43 | 통과 | gateway-limits 18/18, gateway-routes 10/10 |
-| D-T36 | 실패 | mesh-netpol 6/8(MK-01·MK-03) |
+| D-T36 | 통과 | mesh-netpol 8/8(2차). 시험 기대를 현재 라우트에 맞춤(MK-01 payment-svc는 gw-partner만, MK-03 web→ticket-svc gRPC는 거부) |
 | D-T11 ②·D-T18 ② | 통과 | kyverno 5/5 |
 | D-T18 ① | 통과 | diagnose 2/2 |
 | D-T19 ③④ | 통과 | probes 2/2 |
