@@ -5,7 +5,7 @@
 // 기준 트리에서는 새 경로가 없어 404로 단언 실패한다. 구현이 경로를 열면 아래 단언이 판정한다.
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createService, fakeClock } from '@peaket/platform';
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
@@ -38,6 +38,7 @@ class StoreFake {
   failNextGet = false;
   failNextPut = false;
   failNextUpdate = false;
+  failNextDeleteExpired = false;
   countDelayMs = 0;
   async put(r: any) {
     if (this.failNextPut) {
@@ -62,6 +63,10 @@ class StoreFake {
   }
   async delete(id: string) { this.map.delete(id); }
   async deleteExpired(nowMs: number) {
+    if (this.failNextDeleteExpired) {
+      this.failNextDeleteExpired = false;
+      throw new Error('deleteExpired down');
+    }
     let deleted = 0;
     for (const [id, r] of this.map) {
       if (r.expiresAtMs <= nowMs) {
@@ -142,6 +147,7 @@ const log = {
   },
 };
 const alerts: any[] = [];
+const cleanupErrors: unknown[] = [];
 const config = { allowlistVersion: 'v1', approvedReviewVersions: ['v1'] as string[], keyVersion: 'analytics-v1' };
 const schedule = {
   failNext: false,
@@ -213,6 +219,7 @@ beforeAll(async () => {
         alerts: { raise: async (i: any) => void alerts.push(i) },
         schedule,
         now: () => clock.now(),
+        onCleanupError: (e: unknown) => void cleanupErrors.push(e),
       },
     } as any),
     env: { PEAKET_ENV: 'ci', PEAKET_INTERNAL_TOKEN: 'f0419-internal-token' },
@@ -231,6 +238,7 @@ beforeEach(() => {
   store.failNextGet = false;
   store.failNextPut = false;
   store.failNextUpdate = false;
+  store.failNextDeleteExpired = false;
   store.countDelayMs = 0;
   buffer.map.clear();
   buffer.failNextGet = false;
@@ -242,6 +250,7 @@ beforeEach(() => {
   log.rows.length = 0;
   log.failNext = false;
   alerts.length = 0;
+  cleanupErrors.length = 0;
   schedule.failNext = false;
   config.allowlistVersion = 'v1';
   config.approvedReviewVersions = ['v1'];
@@ -696,6 +705,11 @@ describe('F-04-19 연구 내보내기 HTTP', () => {
     sweep.stop();
     await sweep.tick();
     expect(calls).toBe(2);
+
+    // 운영 배선: main.ts가 스윕을 켜고 SIGTERM에서 멈추는지 소스로 고정한다.
+    const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+    expect(main).toMatch(/const researchSweep = research\s*\?[\s\S]*?startResearchExportSweep\(/);
+    expect(main).toMatch(/process\.once\('SIGTERM', \(\) => \{[\s\S]*?researchSweep\?\.stop\(\)/);
   });
 
   test('IR0419-01 스윕의 buildDue는 만료된 레코드를 지운다', async () => {
@@ -708,6 +722,18 @@ describe('F-04-19 연구 내보내기 HTTP', () => {
     clock.advance(HALF_HOUR + 1);
     await svcMod.buildDue(clock.now());
     expect(store.map.has(id)).toBe(false);
+
+    // 정리 실패는 숨기지 않고 onCleanupError로 남긴다. 다음 tick이 다시 지운다.
+    const again = await post(who, body());
+    expect(again.statusCode, again.payload).toBe(202);
+    const againId = String(json(again).exportId);
+    clock.advance(HALF_HOUR + 1);
+    store.failNextDeleteExpired = true;
+    await svcMod.buildDue(clock.now());
+    expect(store.map.has(againId)).toBe(true);
+    expect(cleanupErrors).toHaveLength(1);
+    await svcMod.buildDue(clock.now());
+    expect(store.map.has(againId)).toBe(false);
   });
 
   test('IR0419-04 만료된 PENDING은 409가 아니라 404다', async () => {

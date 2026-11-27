@@ -335,7 +335,9 @@ describe('F-04-19 연구 내보내기 순수 모델', () => {
     const sql = readFileSync(new URL('../migrations/0040_research_export.sql', import.meta.url), 'utf8');
     expect(sql).toContain('GRANT USAGE ON SCHEMA public TO ops_app;');
     expect(sql).toContain('GRANT SELECT, INSERT, UPDATE ON research_export TO ops_app;');
+    expect(sql).toContain('GRANT DELETE ON research_export TO ops_app;');
     expect(sql).toContain('GRANT SELECT, INSERT ON research_export_denial TO ops_app;');
     expect(sql).toContain('GRANT SELECT, INSERT ON pseudonymization_log TO ops_app;');
+    expect(sql).not.toMatch(/GRANT[^;]*DELETE[^;]*(research_export_denial|pseudonymization_log)/);
   });
 });
