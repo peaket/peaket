@@ -556,7 +556,7 @@ erDiagram
         uuid representative_event_id "대표 회차(ADR-0093 결정 8)"
         timestamptz next_open_at
         uuid next_open_event_id "공연 카드의 오픈 알림 대상"
-        text sale_status "UPCOMING|ON_SALE|SOLD_OUT|ENDED. 공연 단위로 회차 판매 상태(purchase-svc event_sale, EventSaleChanged)를 모은 값이고, 일시 매진(ALL_HELD) 회차는 ON_SALE로 센다(docs/planning/03 §2.15, ADR-0122)"
+        text sale_status "UPCOMING|ON_SALE|ALL_HELD|SOLD_OUT|ENDED. 공연 단위로 회차 판매 상태(purchase-svc event_sale, EventSaleChanged)를 모은 값이다. core 사본 event_sale_state가 있으면 그 값을 먼저 쓰고, 없으면 오픈·시작 시각으로 계산한다. 공개 카드(openapi ProductionCard)는 ALL_HELD를 ON_SALE로 접어 네 값만 내보낸다(F-07-12 RV-02, docs/planning/03 §2.15, ADR-0122·ADR-0271)"
         date period_start "첫 회차 시작(KST 날짜)"
         date period_end "마지막 회차 종료(KST 날짜)"
         timestamptz sale_ends_at "마지막 회차의 판매 종료"
@@ -736,6 +736,14 @@ erDiagram
         int rev "판매 정책 판과 회차 판 가운데 큰 값. queue-svc는 이 값이 지금보다 클 때만 바꾼다"
         jsonb payload "EventSaleConfig JSON(salePolicy·eligGates·eligLists·opensAtMs·startsAtMs·lobbyMinutes·lobbyShuffle·openBatch·perPersonLimit·saleEndsAtMs, 선택 layoutVersion·pgKey·pgTps). 판매 승인 LCH-080이 쓰고 purchase-svc BAT-051이 core-svc 내부 HTTP GET /internal/v1/events/{eventId}/sale-config로 읽는다(직접 DB 접속 없음)"
         timestamptz updated_at
+    }
+    event_sale_state {
+        uuid event_id PK "회차. event.id를 가리키고 회차가 지워지면 함께 지운다(F-07-12 RV-02)"
+        uuid production_id "공연. 파트너 목록·검색 읽기 모델이 공연 단위로 모은다"
+        text status "UPCOMING|ON_SALE|ALL_HELD|SOLD_OUT|ENDED. purchase-svc event_sale의 사본(docs/planning/03 §2.15, ADR-0122)"
+        int version "EventSaleChanged.version. 지금 값보다 클 때만 쓴다(늦게 온 사건을 거른다)"
+        timestamptz changed_at "사건이 말하는 바뀐 시각"
+        timestamptz updated_at "사본을 쓴 시각. 쓰기는 SECURITY DEFINER 함수 search_apply_event_sale만 한다"
     }
     sale_eligibility_member {
         uuid list_id FK "PK(list_id, account_id)"
