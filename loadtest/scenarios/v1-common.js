@@ -54,7 +54,8 @@ export function uuid4() {
 export function vcall(base, method, path, o) {
   const headers = { ...(o.anonymous ? {} : v1Headers(RUN_TAG, o.i, { json: o.body !== undefined })), ...(o.headers ?? {}) };
   if (o.anonymous && o.body !== undefined) headers['content-type'] = 'application/json';
-  const tags = { route: o.route, ...(o.phase ? { phase: o.phase } : {}) };
+  // 홀드 해제처럼 경로에 홀드 ID가 들어가는 요청은 name·url 꼬리표를 고정해 k6 지표 시계열이 요청마다 늘지 않게 한다
+  const tags = { route: o.route, ...(o.phase ? { phase: o.phase } : {}), ...(o.name ? { name: o.name, url: `peaket://${o.name}` } : {}) };
   const r = http.request(method, `${base}${path}`, o.body === undefined ? null : o.body, { headers, tags, responseCallback: http.expectedStatuses(...o.expected), ...(o.timeout ? { timeout: o.timeout } : {}) });
   if (!o.noTarget) for (const le of overTargets(o.route, r.timings.duration)) overTarget.add(1, { ...tags, le: String(le) });
   return r;
@@ -191,6 +192,7 @@ export class V1Session {
       ...(bodyObj === undefined ? {} : { body }),
       headers: { ...sig, 'x-admission-token': this.token, 'idempotency-key': uuid4() },
       ...(o.phase ? { phase: o.phase } : {}),
+      ...(o.name ? { name: o.name } : {}),
       ...(o.timeout ? { timeout: o.timeout } : {}),
     });
   }

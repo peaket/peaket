@@ -246,7 +246,7 @@ function holdAndRelease(u, data, order = false) {
   if (!s) return;
   const seats = v1SeatIds(GRID, userSeats(GRID, u, order ? SEATS_PER_ORDER : HOLD_SIZE));
   const started = Date.now();
-  const held = s.session.call('POST', `/v1/events/${EVENT_ID}/holds`, { seatIds: seats }, { route: 'hold', expected: [201, 409, 422], base: HOLD_BASE });
+  const held = s.session.call('POST', `/v1/events/${EVENT_ID}/holds`, { seatIds: seats }, { route: 'hold', name: 'hold', expected: [201, 409, 422], base: HOLD_BASE });
   if (held.status === 401) {
     // 입장 토큰 만료(45분)다. 재입장은 q:adm에 막히므로 같은 반복에서 다시 시도하지 않는다(다음 반복이 새 세션을 만든다)
     sessions.delete(u);
@@ -263,14 +263,14 @@ function holdAndRelease(u, data, order = false) {
       holdId,
       buyer: { name: 'Load Test', phone: '010-1234-5678' },
       consents: { provisionToSeller: true, salesTerms: true, consentVersion: CONSENT_VERSION },
-    }, { route: 'order', expected: [201] });
+    }, { route: 'order', name: 'order', expected: [201] });
     ok = check(ordered, { '주문 201': (r) => r.status === 201 });
     record(TARGET, 'order', ostarted, ordered.status, ok);
     return;
   }
   if (typeof holdId === 'string') {
     const rstarted = Date.now();
-    const released = s.session.call('DELETE', `/v1/holds/${holdId}`, undefined, { route: 'release', expected: [204], base: HOLD_BASE });
+    const released = s.session.call('DELETE', `/v1/holds/${holdId}`, undefined, { route: 'release', name: 'release', expected: [204], base: HOLD_BASE });
     ok = check(released, { '해제 204': (r) => r.status === 204 });
     record(TARGET, 'release', rstarted, released.status, ok);
   }
@@ -280,7 +280,7 @@ function pay(u, data, retry = 0) {
   const s = sessionFor(u, data);
   if (!s) return;
   const seats = v1SeatIds(GRID, userSeats(GRID, u, SEATS_PER_ORDER));
-  const held = s.session.call('POST', `/v1/events/${EVENT_ID}/holds`, { seatIds: seats }, { route: 'hold', expected: [201], base: HOLD_BASE });
+  const held = s.session.call('POST', `/v1/events/${EVENT_ID}/holds`, { seatIds: seats }, { route: 'hold', name: 'hold', expected: [201], base: HOLD_BASE });
   if (held.status === 401) {
     sessions.delete(u);
     if (retry === 0) return pay(u, data, 1);
@@ -294,11 +294,11 @@ function pay(u, data, retry = 0) {
     holdId,
     buyer: { name: 'Load Test', phone: '010-1234-5678' },
     consents: { provisionToSeller: true, salesTerms: true, consentVersion: CONSENT_VERSION },
-  }, { route: 'order', expected: [201] });
+  }, { route: 'order', name: 'order', expected: [201] });
   const order = ordered.status === 201 ? jsonOf(ordered) : undefined;
   record(TARGET, 'order', Date.now(), ordered.status, typeof order?.orderId === 'string');
   if (typeof order?.orderId !== 'string') return;
-  const startedRes = s.session.call('POST', `/v1/orders/${order.orderId}/payments`, {}, { route: 'pay_start', expected: [201] });
+  const startedRes = s.session.call('POST', `/v1/orders/${order.orderId}/payments`, {}, { route: 'pay_start', name: 'pay_start', expected: [201] });
   const attempt = startedRes.status === 201 ? jsonOf(startedRes) : undefined;
   record(TARGET, 'pay_start', Date.now(), startedRes.status, typeof attempt?.attemptId === 'string');
   if (typeof attempt?.attemptId !== 'string') return;
@@ -315,7 +315,7 @@ function pay(u, data, retry = 0) {
     paymentKey,
     amount: order.amount,
     attemptId: attempt.attemptId,
-  }, { route: 'payment', expected: [202] });
+  }, { route: 'payment', name: 'payment', expected: [202] });
   record(TARGET, 'payment', Date.now(), accepted.status, accepted.status === 202);
 }
 
