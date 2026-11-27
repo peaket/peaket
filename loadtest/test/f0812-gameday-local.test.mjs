@@ -481,8 +481,9 @@ test('F0812-3 ④ 탐지는 T1p−T0, 전파는 T3−T2이며 60/3초 경계를 
   assert.equal(clean.verdict, '통과', '깨끗한 시간선이 통과하지 않았다');
   assert.equal(clean.detectionSec, 10);
   assert.equal(clean.propagationSec, 2);
-  assert.equal(jt({ T1p: '2026-11-28T10:01:00.000+09:00', T1: '2026-11-28T10:01:05.000+09:00' }).verdict, '통과');
-  assert.equal(jt({ T1p: '2026-11-28T10:01:00.001+09:00', T1: '2026-11-28T10:01:05.000+09:00' }).verdict, '미달');
+  const after60 = { T1: '2026-11-28T10:01:05.000+09:00', T2: '2026-11-28T10:01:10.000+09:00', T3: '2026-11-28T10:01:12.000+09:00', T4: '2026-11-28T10:01:20.000+09:00' };
+  assert.equal(jt({ ...after60, T1p: '2026-11-28T10:01:00.000+09:00' }).verdict, '통과');
+  assert.equal(jt({ ...after60, T1p: '2026-11-28T10:01:00.001+09:00' }).verdict, '미달');
   assert.equal(jt({ T3: '2026-11-28T10:00:33.000+09:00' }).verdict, '통과');
   assert.equal(jt({ T3: '2026-11-28T10:00:33.001+09:00' }).verdict, '미달');
   assert.equal(jt({ T1p: undefined }).verdict, '판정 못 함');
@@ -546,23 +547,26 @@ test('F0812-4 ③ 보고서·포스트모템이 실행 ID·무대·G-17·48h·20
   const mod = need(await load());
   const pass = reportFixture({ pass: { id: 'G-23', runId: '2026-11-28-g23-f0812' } });
   const options = reportOptions();
-  assert.equal(mod.validateLocalReport(pass, options).ok, true, '정상 통과 행을 거부했다');
-  assert.equal(mod.validateLocalReport(pass, options).passed, 1, '통과 수가 1이 아니다');
+  assert.equal(mod.validateLocalReport(reportFixture(), { ...options, measured: true }).ok, true, '통과 없는 측정 보고서를 거부했다');
+  assert.equal(mod.validateLocalReport(reportFixture(), { ...options, measured: true }).passed, 0, '통과 없는 보고서의 통과 수가 0이 아니다');
+  assert.equal(mod.validateLocalReport(pass, options).ok, false, '무대 없는 G-23 통과를 허용했다');
   assert.equal(mod.validateLocalReport(pass, { ...options, measured: false }).ok, false, '측정 전 통과를 허용했다');
   assert.equal(mod.validateLocalReport(pass, { ...options, runExists: () => false }).ok, false, '실행 ID 없는 통과를 허용했다');
-  assert.equal(mod.validateLocalReport(reportFixture({ pass: { id: 'G-23', runId: '2026-11-28-f0812-g23' } }), options).ok, false, '중간 삽입 실행 ID를 허용했다');
+  const badId = mod.validateLocalReport(reportFixture({ pass: { id: 'G-23', runId: '2026-11-28-f0812-g23' } }), options);
+  assert.equal(badId.ok, false, '중간 삽입 실행 ID를 허용했다');
+  assert.match(badId.reasons.join(' '), /실행 ID|-f0812/, '중간 삽입 실행 ID의 까닭이 없다');
   assert.equal(mod.validateLocalReport(pass, { ...options, runResponseOk: () => false }).ok, false, '기대 대응 없는 통과를 허용했다');
   assert.equal(mod.validateLocalReport(reportFixture({ pass: { id: 'G-30', runId: '2026-11-28-g30-f0812' } }), { ...options, runExists: () => true }).ok, false, '무대 없는 G-30 통과를 허용했다');
   assert.equal(mod.validateLocalReport(reportFixture({ pass: { id: 'G-17', runId: '2026-11-28-g17-f0812' } }), { ...options, runExists: () => true }).ok, false, '설계만 G-17 통과를 허용했다');
   assert.equal(mod.validateLocalReport(reportFixture({ priorOverride: '- F-08-5: 무효·미측정\n- F-08-9: 판정 못 함(무효·부분)\n- F-08-10: 통과' }), { measured: false }).ok, false, 'F-08-10 통과 인용을 허용했다');
 
   const incident = (complete, budget, p0 = 'P0') => `| INC-1 | G-23 | 2026-11-28T10:00:00+09:00 | 2026-11-28T10:30:00+09:00 | ${complete} | ${budget}% | ${p0} | docs/review/measurements/F-08-12-postmortem-1.md |`;
-  const withIncident = (row) => reportFixture({ pass: { id: 'G-23', runId: '2026-11-28-g23-f0812' }, incident: row });
-  assert.equal(mod.validateLocalReport(withIncident(incident('2026-11-30T10:30:00+09:00', '25')), options).ok, true, '48시간 정각을 거부했다');
-  assert.equal(mod.validateLocalReport(withIncident(incident('2026-11-30T10:30:00.001+09:00', '25')), options).ok, false, '48시간+1ms를 허용했다');
-  assert.equal(mod.validateLocalReport(withIncident(incident('2026-11-29T10:30:00+09:00', '20.0', '—')), options).ok, true, '20.0% P0 없음을 거부했다');
-  assert.equal(mod.validateLocalReport(withIncident(incident('2026-11-29T10:30:00+09:00', '20.1', '—')), options).ok, false, '20.1% P0 없음을 허용했다');
-  assert.equal(mod.validateLocalReport(withIncident(incident('2026-11-29T10:30:00+09:00', '25')), { ...options, postmortemExists: () => false }).ok, false, '포스트모템 없는 인시던트를 허용했다');
+  const withIncident = (row) => reportFixture({ incident: row });
+  assert.equal(mod.validateLocalReport(withIncident(incident('2026-11-30T10:30:00+09:00', '25')), { ...options, measured: false }).ok, true, '48시간 정각을 거부했다');
+  assert.equal(mod.validateLocalReport(withIncident(incident('2026-11-30T10:30:00.001+09:00', '25')), { ...options, measured: false }).ok, false, '48시간+1ms를 허용했다');
+  assert.equal(mod.validateLocalReport(withIncident(incident('2026-11-29T10:30:00+09:00', '20.0', '—')), { ...options, measured: false }).ok, true, '20.0% P0 없음을 거부했다');
+  assert.equal(mod.validateLocalReport(withIncident(incident('2026-11-29T10:30:00+09:00', '20.1', '—')), { ...options, measured: false }).ok, false, '20.1% P0 없음을 허용했다');
+  assert.equal(mod.validateLocalReport(withIncident(incident('2026-11-29T10:30:00+09:00', '25')), { ...options, measured: false, postmortemExists: () => false }).ok, false, '포스트모템 없는 인시던트를 허용했다');
   assert.equal(mod.validateLocalReport(`${reportFixture()}\n- 연락처: 010-1234-5678\n`, { measured: false }).ok, false, '보고서 PII를 허용했다');
   assert.equal(mod.validateLocalReport(`${reportFixture()}\n- 내부 주소: http://10.0.0.5:9090\n`, { measured: false }).ok, false, '내부 주소를 허용했다');
   for (const token of FORBIDDEN) {
