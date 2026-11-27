@@ -1450,7 +1450,8 @@ async function runV1(a, runTag) {
     for (const sg of segments) {
       const name = split ? `loadgen-${runTag}-g${sg.index}` : `loadgen-${runTag}`;
       pods.push(name);
-      await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment' || (a.scenario === 'soak' && a.target === 'payment-svc'), deadlineS: Math.max(60, a.scenario === 'soak' ? busyS + 600 : Math.min(11400, busyS * 2 + 600)), allowLong: a.scenario === 'soak', ...(split ? { index: sg.index } : {}) }));
+      // soak은 k6 안의 준비(setup) 시간이 busyS 밖이다. purchase의 5,000명 입장 준비(~20분)를 넣어도 6시간 본구간을 끝까지 채우게 1시간을 더 둔다
+      await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment' || (a.scenario === 'soak' && a.target === 'payment-svc'), deadlineS: Math.max(60, a.scenario === 'soak' ? busyS + 3600 : Math.min(11400, busyS * 2 + 600)), allowLong: a.scenario === 'soak', ...(split ? { index: sg.index } : {}) }));
     }
     for (const p of pods) await waitPodReady(p);
 

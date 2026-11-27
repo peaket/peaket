@@ -125,11 +125,12 @@ export const options = {
 };
 
 /** 사전 검증·진입·입장·스냅샷을 묶음으로 한다. 한 사람이라도 실패하면 setup_failed를 남긴다 */
+/** http.batch에 넘길 요청 서술자(사전 검증·진입·입장을 묶음으로 보낸다) */
 function post(base, path, i, body, route) {
-  return http.post(`${base}${path}`, JSON.stringify(body), {
+  return ['POST', `${base}${path}`, JSON.stringify(body), {
     headers: v1Headers(RUN_TAG, i, { json: true }),
     tags: { phase: 'prep', route },
-  });
+  }];
 }
 
 export function setup() {
@@ -205,23 +206,32 @@ export function setup() {
   return { entries: null, tokens, openedAt };
 }
 
-/** VU 안의 구매 세션. 35분이 지나면 새 입장·스냅샷으로 바꾼다(입장 토큰 45분 상한) */
+/**
+ * VU 안의 구매 세션. 준비(setup)가 연 5,000개의 입장 토큰을 그대로 쓴다.
+ * 입장 토큰은 45분이 지나면 만료되고, 같은 회차에 이미 입장한 계정의 재진입은 409 already-admitted로 막힌다.
+ * 그래서 35분마다 다시 입장하지 않고, 만료는 홀드 401로 드러나게 둔다(6시간 창의 한계, 보고서에 적는다).
+ */
 const sessions = new Map();
 
 function sessionFor(u, data) {
   const now = Date.now();
-  let s = sessions.get(u);
-  const at = s?.at ?? data.openedAt?.[u] ?? 0;
-  if (!s || now - at > 35 * 60 * 1000) {
-    const opened = admitAndOpen(EVENT_ID, u, { phase: 'prep', waitS: 120 });
-    if (!opened) {
-      setupFailed.add(1, { target: TARGET });
-      return undefined;
-    }
-    s = { session: new V1Session(u, opened.admissionToken), at: now };
-    sessions.set(u, s);
+  const s = sessions.get(u);
+  if (s) return s;
+  const token = data.tokens?.[u];
+  if (typeof token === 'string') {
+    const at = data.openedAt?.[u] ?? now;
+    const opened = { session: new V1Session(u, token), at };
+    sessions.set(u, opened);
+    return opened;
   }
-  return s;
+  const opened = admitAndOpen(EVENT_ID, u, { phase: 'prep', waitS: 120 });
+  if (!opened) {
+    setupFailed.add(1, { target: TARGET });
+    return undefined;
+  }
+  const fresh = { session: new V1Session(u, opened.admissionToken), at: now };
+  sessions.set(u, fresh);
+  return fresh;
 }
 
 function record(target, route, started, status, ok) {
@@ -231,15 +241,15 @@ function record(target, route, started, status, ok) {
   console.log(`record ${JSON.stringify({ kind: 'request', target, route, at: started, ms: Date.now() - started, status, ok, run: RUN_TAG })}`);
 }
 
-function holdAndRelease(u, data, order = false, retry = 0) {
+function holdAndRelease(u, data, order = false) {
   const s = sessionFor(u, data);
   if (!s) return;
   const seats = v1SeatIds(GRID, userSeats(GRID, u, order ? SEATS_PER_ORDER : HOLD_SIZE));
   const started = Date.now();
   const held = s.session.call('POST', `/v1/events/${EVENT_ID}/holds`, { seatIds: seats }, { route: 'hold', expected: [201, 409, 422], base: HOLD_BASE });
   if (held.status === 401) {
+    // 입장 토큰 만료(45분)다. 재입장은 q:adm에 막히므로 같은 반복에서 다시 시도하지 않는다(다음 반복이 새 세션을 만든다)
     sessions.delete(u);
-    if (retry === 0) return holdAndRelease(u, data, order, 1);
     scenarioErrors.add(1);
     return;
   }
