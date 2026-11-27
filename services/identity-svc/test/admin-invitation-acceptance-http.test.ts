@@ -126,7 +126,7 @@ const registerPasskey = async (aud: 'partner' | 'ops', step: string) => {
   expect(begin.headers['cache-control']).toBe('no-store');
   const b = json(begin) as { registrationId: string; publicKey: { challenge: string; rp: { id: string } } };
   expect(b.publicKey.rp.id).toBe(aud === 'partner' ? 'partner.peaket.example' : 'console.peaket.example');
-  const authn = new SoftAuthenticator();
+  const authn = new SoftAuthenticator({ origin: aud === 'partner' ? 'https://partner.peaket.example' : 'https://console.peaket.example' });
   const created = await post(`${base(aud)}/invitation-passkeys`, { acceptanceStep: step, registrationId: b.registrationId, credential: authn.register(b.publicKey), name: '시험 기기' });
   expect(created.statusCode).toBe(201);
   expect(created.headers['cache-control']).toBe('no-store');
@@ -175,8 +175,9 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
     expect(json(await start('ops', csAgent.token))).toMatchObject({ role: 'cs_agent', passkeyRequired: false });
     const csLead = await invite('cs_lead', { email: 'start-cs-lead@peaket.example' });
     expect(json(await start('ops', csLead.token))).toMatchObject({ role: 'cs_lead', passkeyRequired: false });
-    // promoterName은 identity가 채우지 않는다(계약상 nullable, RV096-13)
-    expect(b.promoterName ?? null).toBeNull();
+    // promoterName 칸은 늘 있고 identity가 채우지 않는다(계약상 nullable, RV096-13)
+    expect(b).toHaveProperty('promoterName');
+    expect(b.promoterName).toBeNull();
   });
 
   test('BOT-152 ② 없는·지난·활성·다른 콘솔 초대 토큰은 모두 같은 410 invitation-invalid다', async () => {

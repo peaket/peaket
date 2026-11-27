@@ -1214,15 +1214,25 @@ test('BOT-161 dast-nightly.yml의 예약 실패만 SEV3 이슈를 열고, issues
 test('BOT-161 ④ DAST 예약 실패 이슈는 열린 이슈가 없을 때만 만들고, 있으면 덧붙이며 제목은 고정이다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
   const d = wfDoc('dast-nightly.yml');
   const run = d.jobs['notify-scheduled-failure'].steps.map((s) => s.run ?? '').join('\n');
-  assert.match(run, /existing=\$\(gh issue list[^\n]*--state open/, '열린 이슈를 먼저 찾지 않는다');
-  assert.match(run, /if \[ -n "\$existing" \]; then/, '열린 이슈가 있을 때와 없을 때를 가르지 않는다');
-  const ifAt = run.indexOf('if [ -n "$existing" ]; then');
-  const commentAt = run.indexOf('gh issue comment');
-  const elseAt = run.indexOf('else', ifAt);
-  const createAt = run.indexOf('gh issue create');
+  // 변수 이름과 분기 극성(-n/-z, then/else 순서)에 기대지 않고, 목록 변수로 가른 가지 안의 명령을 본다(RV096-09)
+  const assignment = /([A-Za-z_][A-Za-z0-9_]*)=\$\(gh issue list[^\n]*--state open[^\n]*\)/.exec(run);
+  assert.ok(assignment, '열린 이슈 목록을 변수에 담지 않는다');
+  const name = assignment[1];
+  const branch = new RegExp(`if\\s+\\[\\s+(!\\s+)?-(n|z)\\s+"?\\$\\{?${name}\\}?"?\\s+\\]\\s*;\\s*then`).exec(run);
+  assert.ok(branch, '열린 이슈 변수로 분기하지 않는다');
+  const emptyIsThen = branch[2] === 'z' ? !branch[1] : Boolean(branch[1]);
+  const ifEnd = branch.index + branch[0].length;
+  const elseAt = run.indexOf('else', ifEnd);
   const fiAt = run.indexOf('fi', elseAt);
-  assert.ok(commentAt > ifAt && commentAt < elseAt, '덧붙이기가 있으면 가지 안에 있지 않다');
-  assert.ok(createAt > elseAt && createAt < fiAt, '새 이슈 만들기가 없으면 가지 안에 있지 않다');
+  assert.ok(elseAt > ifEnd && fiAt > elseAt, 'then/else/fi가 없다');
+  const thenBlock = run.slice(ifEnd, elseAt);
+  const elseBlock = run.slice(elseAt + 4, fiAt);
+  const thenCmd = emptyIsThen ? 'gh issue create' : 'gh issue comment';
+  const elseCmd = emptyIsThen ? 'gh issue comment' : 'gh issue create';
+  assert.ok(thenBlock.includes(thenCmd), `then 가지에 ${thenCmd}가 없다`);
+  assert.ok(elseBlock.includes(elseCmd), `else 가지에 ${elseCmd}가 없다`);
+  assert.ok(!thenBlock.includes(elseCmd), `then 가지에 ${elseCmd}가 섞였다`);
+  assert.ok(!elseBlock.includes(thenCmd), `else 가지에 ${thenCmd}가 섞였다`);
   assert.equal(run.match(/gh issue create/g)?.length, 1, '새 이슈 만들기가 하나가 아니다');
   assert.equal(run.match(/gh issue comment/g)?.length, 1, '덧붙이기가 하나가 아니다');
   const title = run.split('\n').find((l) => l.includes('--title'));
