@@ -210,6 +210,7 @@ function parseSoakCommandArgs(argv) {
     target: o.target,
     rate: o.rate,
     users: 5000,
+    ...(o.target === 'queue-svc' ? { admitPerSecond: 28, entryUsers: 5000, entrySeconds: 10 } : {}),
     warmS: o.warmupMin * 60,
     mainS: o.durationMin * 60,
     durationS: o.durationMin * 60,

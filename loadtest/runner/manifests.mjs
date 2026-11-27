@@ -156,7 +156,9 @@ export function generatorPod(o) {
     throw new RangeError(`입력 폴더는 ${NODE_ROOT}/<영소문자·숫자 1~16자>다: ${o.hostDir}`);
   }
   const deadlineS = o.deadlineS ?? 11400;
-  if (!intIn(deadlineS, 60, 11400)) throw new RangeError(`파드 실행 시간 상한은 60~11,400초 정수다: ${o.deadlineS}`);
+  // 6시간 장시간 시험(F-08-5)만 로컬 발생기 수명을 8시간까지 늘린다. 다른 실행은 기존 3시간 10분 상한 그대로다.
+  const deadlineMax = o.allowLong === true ? 28800 : 11400;
+  if (!intIn(deadlineS, 60, deadlineMax)) throw new RangeError(`파드 실행 시간 상한은 60~${deadlineMax}초 정수다: ${o.deadlineS}`);
   const resources = { cpu: String(o.cpus), memory: `${o.memoryMi}Mi` };
   const env = [
     { name: 'GOMAXPROCS', value: String(o.cpus) },

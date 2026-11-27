@@ -904,7 +904,7 @@ async function runV0(a, runTag) {
     for (const sg of segments) {
       const name = split ? `loadgen-${runTag}-g${sg.index}` : `loadgen-${runTag}`;
       pods.push(name);
-      await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment' || (a.scenario === 'soak' && a.target === 'payment-svc'), deadlineS: Math.max(60, a.scenario === 'soak' ? busyS + 600 : Math.min(11400, busyS * 2 + 600)), ...(split ? { index: sg.index } : {}) }));
+      await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment' || (a.scenario === 'soak' && a.target === 'payment-svc'), deadlineS: Math.max(60, a.scenario === 'soak' ? busyS + 600 : Math.min(11400, busyS * 2 + 600)), allowLong: a.scenario === 'soak', ...(split ? { index: sg.index } : {}) }));
     }
     if (a.scenario === 'seat-deltas') {
       step(`변경분 받는 파드 ${a.listenerPods}대(연결 ${a.connections}개)`);
@@ -915,7 +915,7 @@ async function runV0(a, runTag) {
         if (from >= to) break;
         const name = `loadgen-${runTag}-l${i}`;
         listeners.push(name);
-        await createObject(deltaClientPod({ name, index: i, cpus: LISTENER_CPUS, memoryMi: LISTENER_MEMORY_MI, hostDir, deadlineS: Math.max(60, a.scenario === 'soak' ? busyS + 600 : Math.min(11400, busyS * 2 + 600)), connsFrom: from, connsTo: to, gateway: layout.gatewayUrl.replace(/^https:/, 'wss:'), eventId, origin: ORIGIN, image: V0_IMAGES.app }));
+        await createObject(deltaClientPod({ name, index: i, cpus: LISTENER_CPUS, memoryMi: LISTENER_MEMORY_MI, hostDir, deadlineS: Math.max(60, a.scenario === 'soak' ? busyS + 600 : Math.min(11400, busyS * 2 + 600)), allowLong: a.scenario === 'soak', connsFrom: from, connsTo: to, gateway: layout.gatewayUrl.replace(/^https:/, 'wss:'), eventId, origin: ORIGIN, image: V0_IMAGES.app }));
       }
     }
     for (const p of [...pods, ...listeners]) await waitPodReady(p);
@@ -1215,7 +1215,7 @@ const ROUTES_V1 = {
   soak: [],
 };
 /** v1 실행의 시나리오 파일(진입 단계·6시간 soak은 V1_SCENARIOS 밖이다) */
-const v1ScenarioFile = (a) => (a.scenario === 'entry' ? V1_ENTRY_SCENARIO : a.scenario === 'soak' ? 'v1-soak.js' : V1_SCENARIOS[a.scenario]);
+const v1ScenarioFile = (a) => (a.scenario === 'entry' ? V1_ENTRY_SCENARIO : a.scenario === 'soak' ? (a.target === 'queue-svc' ? V1_SCENARIOS.queue : 'v1-soak.js') : V1_SCENARIOS[a.scenario]);
 /** 서버 히스토그램 점검(합본의 서비스 꼬리표로 고른다). 대기 상태 파일은 캐시 앞이라 원본 히스토그램으로 보지 않는다 */
 const SERVER_CHECK_V1 = {
   'seat-hold': { route: 'hold', service: 'purchase-svc', path: '/v1/events/{eventId}/holds', le: 0.05, allowed: 0.01, label: 'p99', name: 'hold_server_p99_50ms' },
@@ -1387,7 +1387,7 @@ async function runV1(a, runTag) {
     putHostFile(V1_HOST_DIRS.seatmaps, `${eventId}.json`, JSON.stringify(seatMap), 1000);
     // K1은 v0의 '입장 초당 N명'을 시험 회차의 결제사 승인 상한으로 시드해 v1 입장 제어가 같은 속도로 부르게 한다(§3.9 'K1의 입장 속도')
     // 결제사 묶음 이름은 실행마다 다르다(코드 리뷰 H1)
-    const seedReq = { eventId, opensAtMs, startsAtMs, seatCount: seatCount(grid), batchWindowMs: V1_BATCH_WINDOW_MS, layoutVersion: 1, ...(a.scenario === 'queue' ? { pgTps: a.admitPerSecond, pgKey: stagePgKey(runTag) } : {}) };
+    const seedReq = { eventId, opensAtMs, startsAtMs, seatCount: seatCount(grid), batchWindowMs: V1_BATCH_WINDOW_MS, layoutVersion: 1, ...((a.scenario === 'queue' || (a.scenario === 'soak' && a.target === 'queue-svc')) ? { pgTps: a.admitPerSecond, pgKey: stagePgKey(runTag) } : {}) };
     if (a.scenario === 'entry') {
       // 진입 서버 비례 확인은 진입 서버 수·CPU 몫을 실제 배포에서 확인한다(계획 F-08-2 6.1, 손으로 바꾼 무대를 조용히 재지 않게)
       const problem = entryStageProblem(a, { replicas, cpu: res?.requests?.cpu, cpuLimit: res?.limits?.cpu, redisTls });
@@ -1437,7 +1437,7 @@ async function runV1(a, runTag) {
       ...(a.scenario === 'queue' ? { ENTRY_RATE: a.entryRate, ADMIT_PER_SECOND: a.admitPerSecond } : {}),
       ...(a.scenario === 'seat-hold' ? { RATE: a.rate, MODE: a.mode, HOLD_SIZE: a.holdSize, HOT_COUNT: a.hotCount, PAIRS: a.pairs, RELEASE_MS: a.releaseMs, KEEP: a.keep ? 1 : 0, PREP_TIMEOUT_S: Math.max(300, prepS * 3) } : {}),
       ...(a.scenario === 'payment' ? { RATE: a.rate, SEATS_PER_ORDER: a.seatsPerOrder, SIM_URL: L.pgSimUrl, FAULT_DROP_PCT: String(a.faultDropPct), FAULT_DELAY_PCT: String(a.faultDelayPct), FAULT_DELAY_MS } : {}),
-      ...(a.scenario === 'soak' ? { TARGET: a.target, RATE: a.rate, DURATION_S: String(a.durationS), PHASE: a.phase, SAMPLE_SEC: String(a.sampleSec), RUN: runTag, CONNECTIONS: String(a.connections ?? 0), HOLD_RATE: String(a.holdRate ?? 0), WS_BASE: 'ws://realtime-gw.realtime-gw.svc.cluster.local:8080', HOLD_SIZE: '2', SEATS_PER_ORDER: '2', SIM_URL: L.pgSimUrl, ...(simSecret ? { PG_SIMULATOR_SECRET_KEY: simSecret } : {}) } : {}),
+      ...(a.scenario === 'soak' ? { TARGET: a.target, RATE: a.rate, DURATION_S: String(a.durationS), PHASE: a.phase, SAMPLE_SEC: String(a.sampleSec), RUN: runTag, CONNECTIONS: String(a.connections ?? 0), HOLD_RATE: String(a.holdRate ?? 0), WS_BASE: 'ws://realtime-gw.realtime-gw.svc.cluster.local:8080', HOLD_SIZE: '2', SEATS_PER_ORDER: '2', ...(a.target === 'queue-svc' ? { ENTRY_RATE: String(a.rate), ADMIT_PER_SECOND: String(a.admitPerSecond) } : {}), SIM_URL: L.pgSimUrl, ...(simSecret ? { PG_SIMULATOR_SECRET_KEY: simSecret } : {}) } : {}),
       ...(entryPlan ? { RATE: a.rate, ENTRY_VUS: entryPlan.entryVus } : {}),
     };
     const segments = executionSegments(nGen);
@@ -1450,7 +1450,7 @@ async function runV1(a, runTag) {
     for (const sg of segments) {
       const name = split ? `loadgen-${runTag}-g${sg.index}` : `loadgen-${runTag}`;
       pods.push(name);
-      await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment' || (a.scenario === 'soak' && a.target === 'payment-svc'), deadlineS: Math.max(60, a.scenario === 'soak' ? busyS + 600 : Math.min(11400, busyS * 2 + 600)), ...(split ? { index: sg.index } : {}) }));
+      await createObject(generatorPod({ name, cpus: gen.cpus, memoryMi: gen.memoryMi, hostDir, simKey: a.scenario === 'payment' || (a.scenario === 'soak' && a.target === 'payment-svc'), deadlineS: Math.max(60, a.scenario === 'soak' ? busyS + 600 : Math.min(11400, busyS * 2 + 600)), allowLong: a.scenario === 'soak', ...(split ? { index: sg.index } : {}) }));
     }
     for (const p of pods) await waitPodReady(p);
 

@@ -32,6 +32,8 @@ import {
   V1Session,
 } from './v1-common.js';
 
+export { markEnd, markStart } from './v1-common.js';
+
 const TARGET = envStr('TARGET');
 const RATE = envInt('RATE');
 const DURATION_S = envInt('DURATION_S', 21600);
@@ -40,13 +42,15 @@ const EVENT_ID = envStr('EVENT_ID');
 const USERS = envInt('USERS', 5000);
 const PREP_BATCH = envInt('PREP_BATCH', 100);
 const PREP_TIMEOUT_S = envInt('PREP_TIMEOUT_S', 1800);
+const ENTRY_SECONDS = envInt('ENTRY_SECONDS', 10);
 const GRID = { sections: envStr('SECTIONS').split(','), rows: envInt('ROWS'), perRow: envInt('PER_ROW') };
 const HOLD_SIZE = envInt('HOLD_SIZE', 2);
 const SEATS_PER_ORDER = envInt('SEATS_PER_ORDER', 2);
 const CONNECTIONS = envInt('CONNECTIONS', 2500);
 const HOLD_RATE = envInt('HOLD_RATE', 63);
 const SIM_URL = envStr('SIM_URL', 'http://pg-simulator.v1.svc.cluster.local:8790');
-const SIM_AUTH = `Basic ${encoding.b64encode(`${envStr('PG_SIMULATOR_SECRET_KEY')}:`)}`;
+const SIM_SECRET = __ENV.PG_SIMULATOR_SECRET_KEY ?? '';
+const SIM_AUTH = `Basic ${encoding.b64encode(`${SIM_SECRET}:`)}`;
 const TARGETS = ['queue-svc', 'purchase-svc', 'payment-svc', 'realtime-gw', 'outbox-relay'];
 if (!TARGETS.includes(TARGET)) throw new Error(`TARGET은 ${TARGETS.join('|')} 가운데 하나다: ${TARGET}`);
 if (!Number.isFinite(RATE) || RATE < 1) throw new Error('RATE는 1 이상이다');
@@ -134,10 +138,12 @@ export function setup() {
     for (let from = 0; from < USERS; from += PREP_BATCH) {
       const ids = Array.from({ length: Math.min(PREP_BATCH, USERS - from) }, (_, k) => from + k);
       const pv = http.batch(ids.map((i) => post(QUEUE_BASE, `/v1/queues/${EVENT_ID}/pre-verifications`, i, {}, 'preverify')));
-      const en = http.batch(ids.map((i, k) => post(QUEUE_BASE, `/v1/queues/${EVENT_ID}/entries`, i, { preverifyToken: jsonOf(pv[k])?.preverifyToken ?? '' }, 'entry')));
+      const en = http.batch(ids.map((i, k) => post(QUEUE_BASE, `/v1/queues/${EVENT_ID}/entries`, i, { preverifyToken: jsonOf(pv?.[k])?.preverifyToken ?? '' }, 'entry')));
       en.forEach((r, k) => {
-        if (r.status === 201) entries[ids[k]] = jsonOf(r);
+        if (r?.status === 201) entries[ids[k]] = jsonOf(r);
       });
+      // 5,000명을 10초에 나눠 넣는다(500/s). 마지막 묶음 뒤에는 쉬지 않는다.
+      if (from + PREP_BATCH < USERS) sleep((PREP_BATCH * ENTRY_SECONDS) / USERS);
     }
     if (entries.filter(Boolean).length !== USERS) {
       setupFailed.add(1, { target: TARGET });
@@ -152,8 +158,8 @@ export function setup() {
   for (let from = 0; from < prepUsers; from += PREP_BATCH) {
     const ids = Array.from({ length: Math.min(PREP_BATCH, prepUsers - from) }, (_, k) => from + k);
     const pv = http.batch(ids.map((i) => post(QUEUE_BASE, `/v1/queues/${EVENT_ID}/pre-verifications`, i, {}, 'preverify')));
-    const en = http.batch(ids.map((i, k) => post(QUEUE_BASE, `/v1/queues/${EVENT_ID}/entries`, i, { preverifyToken: jsonOf(pv[k])?.preverifyToken ?? '' }, 'entry')));
-    const entries = en.map((r) => (r.status === 201 ? jsonOf(r) : undefined));
+    const en = http.batch(ids.map((i, k) => post(QUEUE_BASE, `/v1/queues/${EVENT_ID}/entries`, i, { preverifyToken: jsonOf(pv?.[k])?.preverifyToken ?? '' }, 'entry')));
+    const entries = en.map((r) => (r?.status === 201 ? jsonOf(r) : undefined));
     if (entries.some((e) => !e)) {
       setupFailed.add(1, { target: TARGET });
       scenarioErrors.add(1);
@@ -187,7 +193,7 @@ export function setup() {
       tags: { phase: 'prep', route: 'snapshot' },
     }]));
     open.forEach((i, k) => {
-      if (sn[k].status !== 200) tokens[i] = null;
+      if (sn?.[k]?.status !== 200) tokens[i] = null;
     });
   }
   const ready = tokens.filter(Boolean).length;
