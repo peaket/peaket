@@ -89,24 +89,24 @@ export class AdminLoginController {
   @Post('v1/partner/auth/sessions')
   @Roles(['public'])
   @HttpCode(200)
-  partner(@ContractBody(LoginBody) body: LoginBodyT, @Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<object> {
+  partner(@ContractBody(LoginBody) body: LoginBodyT, @Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<object | undefined> {
     return this.#run('partner', body, req, reply);
   }
 
   @Post('v1/ops/auth/sessions')
   @Roles(['public'])
   @HttpCode(200)
-  ops(@ContractBody(LoginBody) body: LoginBodyT, @Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<object> {
+  ops(@ContractBody(LoginBody) body: LoginBodyT, @Req() req: FastifyRequest, @Res({ passthrough: true }) reply: FastifyReply): Promise<object | undefined> {
     return this.#run('ops', body, req, reply);
   }
 
-  async #run(aud: AdminAud, body: LoginBodyT, req: FastifyRequest, reply: FastifyReply): Promise<object> {
+  async #run(aud: AdminAud, body: LoginBodyT, req: FastifyRequest, reply: FastifyReply): Promise<object | undefined> {
     void reply.header('cache-control', 'no-store');
     if ('loginStep' in body) return this.#second(aud, body, req, reply);
     return this.#first(aud, body, req, reply);
   }
 
-  async #second(aud: AdminAud, body: { loginStep: string; code: string }, req: FastifyRequest, reply: FastifyReply): Promise<object> {
+  async #second(aud: AdminAud, body: { loginStep: string; code: string }, req: FastifyRequest, reply: FastifyReply): Promise<object | undefined> {
     let o: SecondStepOutcome;
     try {
       o = await this.second.run({ aud, loginStep: body.loginStep, code: body.code, ip: clientIpOf(req), deviceId: '' });
@@ -120,6 +120,11 @@ export class AdminLoginController {
     }
     // 토큰은 본문이 아니라 쿠키 둘로 준다(게이트웨이가 그대로 돌려준다, identity §3 쿠키 표)
     void reply.header('set-cookie', adminSessionCookies(aud, o, this.clock.now(), this.cookieDomain));
+    // 초대 수락으로 활성화된 계정은 고정 시험 계약대로 204(본문 없음)로 답한다. 기존 계정은 200과 next DONE이다
+    if (o.viaInvitation) {
+      reply.status(204);
+      return undefined;
+    }
     return { next: 'DONE' };
   }
 

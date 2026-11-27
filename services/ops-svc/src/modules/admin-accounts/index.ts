@@ -6,6 +6,7 @@ export {
   type AdminAccountListQuery,
   type AdminIdentity,
   type AdminReauth,
+  type PromoterDirectory,
   type RoleChangeApprovalRecord,
   type RoleChangeApprovalStore,
 } from './domain/ports.js';

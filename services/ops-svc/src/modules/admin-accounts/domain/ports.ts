@@ -27,6 +27,11 @@ export interface AdminIdentity {
 
 export const ADMIN_IDENTITY = Symbol.for('peaket.ops.admin-identity');
 export const ADMIN_REAUTH = Symbol.for('peaket.ops.admin-reauth');
+/** 파트너사 실재 확인(RV-12). 없으면 초대를 422 unknown-promoter, 조회 장애는 503 promoter-directory-unavailable로 닫는다 */
+export interface PromoterDirectory {
+  exists(promoterId: string): Promise<boolean>;
+}
+export const PROMOTER_DIRECTORY = Symbol.for('peaket.ops.promoter-directory');
 
 export type AdminReauth = Pick<ApprovalReauthVerifier, 'verify'>;
 

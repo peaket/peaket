@@ -6,7 +6,7 @@ import { CLOCK, type Clock, CONTROL_TOPICS, DATABASE, type Database, type DbTran
 import { and, asc, eq, gt, gte, inArray, isNull, lt, lte, ne, notInArray, or } from 'drizzle-orm';
 import { type AccountLoginState, FRESH_LOGIN_STATE, type LockKind, type LockReason, type NoticeKind } from '../../domain/login-rules.js';
 import { sql as rawSql } from 'drizzle-orm';
-import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminPasskeyRow, AdminPasskeyStore, AdminReauthRecord, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, DesignationKind, LoginStepRow, PendingNotice, UnlockLinkRow } from '../../domain/ports.js';
+import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminInvitationRow, AdminInvitationStore, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminPasskeyRow, AdminPasskeyStore, AdminReauthRecord, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, InvitationStage, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, DesignationKind, LoginStepRow, PendingNotice, UnlockLinkRow } from '../../domain/ports.js';
 import { DESIGNATION_KINDS, type SecondStepUse } from '../../domain/ports.js';
 import type { ReauthAct, ReauthFactor } from '../../domain/passkey.js';
 
@@ -52,7 +52,7 @@ function stateColumns(s: AccountLoginState) {
 }
 
 @Injectable()
-export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore, AdminPasskeyStore {
+export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore, AdminPasskeyStore, AdminInvitationStore {
   constructor(
     @Inject(DATABASE) private readonly database: Database,
     /** Outbox 행 ID(UUIDv7)의 시계 */
@@ -103,7 +103,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
       .from(adminAccount)
       .where(and(eq(adminAccount.email, email.trim().toLowerCase()), ne(adminAccount.status, 'REMOVED')));
     if (!r) return null;
-    return { id: r.id, role: r.role as AdminRole, status: r.status as AdminStatus, passwordPhc: r.passwordPhc, breachCheckedAt: ms(r.breachCheckedAt), passwordChangeRequired: r.passwordChangeRequired, state: stateOf(r) };
+    return { id: r.id, role: r.role as AdminRole, status: r.status as AdminStatus, passwordPhc: r.passwordPhc, breachCheckedAt: ms(r.breachCheckedAt), passwordChangeRequired: r.passwordChangeRequired, invitationAcceptedAt: ms(r.invitationAcceptedAt), state: stateOf(r) };
   }
 
   async updateLoginState(id: string, now: number, fn: (cur: AccountLoginState) => { next: AccountLoginState; notices: NoticeKind[] } | null): Promise<AccountLoginState | null> {
@@ -170,7 +170,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
       .from(adminAccount)
       .where(and(eq(adminAccount.id, id), ne(adminAccount.status, 'REMOVED')));
     if (!r) return null;
-    return { id: r.id, role: r.role as AdminRole, status: r.status as AdminStatus, passwordPhc: r.passwordPhc, breachCheckedAt: ms(r.breachCheckedAt), passwordChangeRequired: r.passwordChangeRequired, state: stateOf(r), email: r.email ?? '', promoterId: r.promoterId };
+    return { id: r.id, role: r.role as AdminRole, status: r.status as AdminStatus, passwordPhc: r.passwordPhc, breachCheckedAt: ms(r.breachCheckedAt), passwordChangeRequired: r.passwordChangeRequired, invitationAcceptedAt: ms(r.invitationAcceptedAt), state: stateOf(r), email: r.email ?? '', promoterId: r.promoterId };
   }
 
   async getTotp(id: string): Promise<AdminTotpState | null> {
@@ -464,6 +464,164 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
   }
 
   // ── 패스키와 재인증 기록(BOT-122) ──
+  // ── 초대 수락(F-09-6 BOT-152) ──
+  #invitationOf(r: AccountRow): AdminInvitationRow {
+    return {
+      accountId: r.id,
+      role: r.role as AdminRole,
+      email: r.email ?? '',
+      displayName: r.displayName,
+      status: r.status as AdminStatus,
+      inviteExpiresAt: ms(r.inviteExpiresAt),
+      stepStage: (r.inviteStepStage as InvitationStage | null) ?? null,
+      stepExpiresAt: ms(r.inviteStepExpiresAt),
+      stepCodeFailures: r.inviteStepCodeFailures,
+    };
+  }
+
+  async findByInvitationTokenHash(tokenHash: Buffer): Promise<AdminInvitationRow | null> {
+    const [r] = await this.database.db
+      .select()
+      .from(adminAccount)
+      .where(and(eq(adminAccount.inviteTokenHash, tokenHash), eq(adminAccount.status, 'INVITED')));
+    return r ? this.#invitationOf(r) : null;
+  }
+
+  async resetInvitationAcceptance(i: { accountId: string; stepHash: Buffer; expiresAt: number; now: number }): Promise<boolean> {
+    return this.database.transaction(async (tx) => {
+      const [r] = await tx.select().from(adminAccount).where(eq(adminAccount.id, i.accountId)).for('update');
+      if (!r || r.status !== 'INVITED' || !r.inviteExpiresAt || r.inviteExpiresAt.getTime() <= i.now) return false;
+      await tx
+        .update(adminAccount)
+        .set({
+          passwordPhc: null,
+          breachCheckedAt: null,
+          passwordChangeRequired: false,
+          totpSeedEnc: null,
+          totpPendingEnc: null,
+          totpLastStep: null,
+          inviteStepHash: i.stepHash,
+          inviteStepExpiresAt: new Date(i.expiresAt),
+          inviteStepStage: 'PASSWORD',
+          inviteStepCodeFailures: 0,
+          invitationAcceptedAt: null,
+          updatedAt: new Date(i.now),
+        })
+        .where(eq(adminAccount.id, i.accountId));
+      await tx.delete(adminRecoveryCode).where(eq(adminRecoveryCode.adminAccountId, i.accountId));
+      await tx.delete(adminPasskey).where(eq(adminPasskey.adminAccountId, i.accountId));
+      return true;
+    });
+  }
+
+  async findInvitationStep(stepHash: Buffer): Promise<AdminInvitationRow | null> {
+    const [r] = await this.database.db
+      .select()
+      .from(adminAccount)
+      .where(and(eq(adminAccount.inviteStepHash, stepHash), eq(adminAccount.status, 'INVITED')));
+    return r ? this.#invitationOf(r) : null;
+  }
+
+  async advanceInvitationStage(i: { accountId: string; from: InvitationStage; to: InvitationStage; now: number }): Promise<boolean> {
+    const done = await this.database.db
+      .update(adminAccount)
+      .set({ inviteStepStage: i.to, inviteStepCodeFailures: 0, updatedAt: new Date(i.now) })
+      .where(and(eq(adminAccount.id, i.accountId), eq(adminAccount.status, 'INVITED'), eq(adminAccount.inviteStepStage, i.from), gt(adminAccount.inviteStepExpiresAt, new Date(i.now))))
+      .returning({ id: adminAccount.id });
+    return done.length > 0;
+  }
+
+  async recordInvitationCodeFailure(accountId: string, now: number): Promise<{ failures: number; invalidated: boolean }> {
+    return this.database.transaction(async (tx) => {
+      const [r] = await tx
+        .select({ stage: adminAccount.inviteStepStage, failures: adminAccount.inviteStepCodeFailures })
+        .from(adminAccount)
+        .where(and(eq(adminAccount.id, accountId), eq(adminAccount.status, 'INVITED')))
+        .for('update');
+      if (!r || r.stage !== 'TOTP') return { failures: 0, invalidated: true };
+      const failures = r.failures + 1;
+      if (failures >= 5) {
+        await tx
+          .update(adminAccount)
+          .set({ inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, updatedAt: new Date(now) })
+          .where(eq(adminAccount.id, accountId));
+        return { failures, invalidated: true };
+      }
+      await tx.update(adminAccount).set({ inviteStepCodeFailures: failures, updatedAt: new Date(now) }).where(eq(adminAccount.id, accountId));
+      return { failures, invalidated: false };
+    });
+  }
+
+  async confirmInvitationTotp(i: { accountId: string; seedEnc: Buffer; step: number; recoveryPhcs: string[]; now: number }): Promise<boolean> {
+    return this.database.transaction(async (tx) => {
+      const [r] = await tx
+        .select({ pending: adminAccount.totpPendingEnc, stage: adminAccount.inviteStepStage })
+        .from(adminAccount)
+        .where(and(eq(adminAccount.id, i.accountId), eq(adminAccount.status, 'INVITED')))
+        .for('update');
+      if (!r?.pending || r.stage !== 'TOTP' || !Buffer.from(r.pending).equals(i.seedEnc)) return false;
+      await tx
+        .update(adminAccount)
+        .set({ totpSeedEnc: i.seedEnc, totpPendingEnc: null, totpLastStep: i.step, inviteStepStage: 'PASSKEY', inviteStepCodeFailures: 0, updatedAt: new Date(i.now) })
+        .where(eq(adminAccount.id, i.accountId));
+      await tx.delete(adminRecoveryCode).where(eq(adminRecoveryCode.adminAccountId, i.accountId));
+      if (i.recoveryPhcs.length > 0) await tx.insert(adminRecoveryCode).values(i.recoveryPhcs.map((codePhc) => ({ id: randomUUID(), adminAccountId: i.accountId, codePhc, createdAt: new Date(i.now) })));
+      return true;
+    });
+  }
+
+  async addInvitationPasskey(row: AdminPasskeyRow, limit: number, now: number): Promise<'ADDED' | 'LIMIT' | 'EXISTS' | 'NOT_INVITED'> {
+    return this.database.transaction(async (tx) => {
+      const [acc] = await tx.select({ status: adminAccount.status, stage: adminAccount.inviteStepStage }).from(adminAccount).where(eq(adminAccount.id, row.accountId)).for('update');
+      if (!acc || acc.status !== 'INVITED' || acc.stage !== 'PASSKEY') return 'NOT_INVITED';
+      const [n] = await tx.select({ n: rawSql<number>`count(*)::int` }).from(adminPasskey).where(eq(adminPasskey.adminAccountId, row.accountId));
+      if ((n?.n ?? 0) >= limit) return 'LIMIT';
+      const [dup] = await tx.select({ id: adminPasskey.id }).from(adminPasskey).where(eq(adminPasskey.credentialId, row.credentialId));
+      if (dup) return 'EXISTS';
+      await tx.insert(adminPasskey).values({
+        id: row.id,
+        adminAccountId: row.accountId,
+        credentialId: row.credentialId,
+        publicKey: row.publicKey,
+        signCount: row.signCount,
+        transports: row.transports,
+        deviceType: row.deviceType,
+        backedUp: row.backedUp,
+        aaguid: row.aaguid,
+        name: row.name,
+        createdAt: new Date(row.createdAt),
+        lastUsedAt: row.lastUsedAt === null ? null : new Date(row.lastUsedAt),
+      });
+      await tx.insert(adminSecurityNotice).values({ id: randomUUID(), adminAccountId: row.accountId, kind: 'PASSKEY_ADDED', createdAt: new Date(now) });
+      return 'ADDED';
+    });
+  }
+
+  async completeInvitation(i: { accountId: string; displayName?: string; now: number }): Promise<boolean> {
+    return this.database.transaction(async (tx) => {
+      const [r] = await tx.select({ status: adminAccount.status, stage: adminAccount.inviteStepStage, version: adminAccount.version }).from(adminAccount).where(eq(adminAccount.id, i.accountId)).for('update');
+      if (!r || r.status !== 'INVITED' || r.stage !== 'PASSKEY') return false;
+      await tx
+        .update(adminAccount)
+        .set({
+          status: 'ACTIVE',
+          inviteTokenHash: null,
+          inviteExpiresAt: null,
+          inviteStepHash: null,
+          inviteStepExpiresAt: null,
+          inviteStepStage: null,
+          inviteStepCodeFailures: 0,
+          totpPendingEnc: null,
+          invitationAcceptedAt: new Date(i.now),
+          ...(i.displayName !== undefined ? { displayName: i.displayName } : {}),
+          version: r.version + 1,
+          updatedAt: new Date(i.now),
+        })
+        .where(eq(adminAccount.id, i.accountId));
+      return true;
+    });
+  }
+
   #passkeyOf(r: typeof adminPasskey.$inferSelect): AdminPasskeyRow {
     return {
       id: r.id,
@@ -690,12 +848,12 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
           await tx.update(adminAccount).set({ role, ...bump, updatedAt: new Date(now) }).where(eq(adminAccount.id, id));
         },
         resetInvite: async (id, now) => {
-          await tx.update(adminAccount).set({ status: 'INVITED', inviteTokenHash: null, inviteExpiresAt: null, ...bump, updatedAt: new Date(now) }).where(eq(adminAccount.id, id));
+          await tx.update(adminAccount).set({ status: 'INVITED', inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, invitationAcceptedAt: null, ...bump, updatedAt: new Date(now) }).where(eq(adminAccount.id, id));
         },
         wipeCredentials: async (id, now) => {
           await tx
             .update(adminAccount)
-            .set({ status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, ...stateColumns(FRESH_LOGIN_STATE), ...bump, updatedAt: new Date(now) })
+            .set({ status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, invitationAcceptedAt: null, ...stateColumns(FRESH_LOGIN_STATE), ...bump, updatedAt: new Date(now) })
             .where(eq(adminAccount.id, id));
           await tx.delete(adminRecoveryCode).where(eq(adminRecoveryCode.adminAccountId, id));
           // 패스키도 지운다(수락 때 새로 등록한다, ASVS 6.4.4, BOT-122)

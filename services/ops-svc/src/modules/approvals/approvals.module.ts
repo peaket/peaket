@@ -4,7 +4,7 @@
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
 import { type Clock, type Database, CLOCK, INTERNAL_TOKEN } from '@peaket/platform';
 import { MemoryAuditChain, type AuditChain, type AuditChainReader } from '../audit/index.js';
-import { AdminAccountsModule, DrizzleRoleChangeApprovalStore, MemoryRoleChangeApprovalStore, RoleChangeApprovals, UnavailableAdminIdentity, type AdminIdentity, type AdminReauth, type RoleChangeApprovalStore } from '../admin-accounts/index.js';
+import { AdminAccountsModule, DrizzleRoleChangeApprovalStore, MemoryRoleChangeApprovalStore, RoleChangeApprovals, UnavailableAdminIdentity, type AdminIdentity, type AdminReauth, type PromoterDirectory, type RoleChangeApprovalStore } from '../admin-accounts/index.js';
 import { PayoutApprovals, SETTLEMENT_PAYMENT_CLIENT, UnavailableApprovalVerifier, type ApprovalReauthVerifier, type SettlementPaymentClient } from '../payouts/index.js';
 import { ApprovalRouter } from './application/approval-router.js';
 import { ContractApprovals } from './application/contract-approvals.js';
@@ -31,7 +31,7 @@ export interface ApprovalsModuleDeps {
   readonly core?: CoreContractClient;
   readonly reauth?: ApprovalReauthVerifier;
   /** 관리 계정·역할 변경 승인(BAT-045). identity가 없으면 닫힌 대역(503)이다 */
-  readonly admin?: { readonly identity: AdminIdentity; readonly reauth?: AdminReauth };
+  readonly admin?: { readonly identity: AdminIdentity; readonly reauth?: AdminReauth; readonly promoters?: PromoterDirectory };
   /** 시험에서 역할 변경 승인 저장소를 넘긴다. 없으면 storage에 맞는 기본을 만든다 */
   readonly roleChangeStore?: RoleChangeApprovalStore;
   /** 감사 체인 읽기(권한 변경 내역). 없으면 빈 목록이다 */
@@ -51,6 +51,7 @@ export class ApprovalsModule {
     const adminModule = AdminAccountsModule.register({
       identity: deps.admin?.identity ?? new UnavailableAdminIdentity(),
       ...(adminReauth ? { reauth: adminReauth } : {}),
+      ...(deps.admin?.promoters ? { promoters: deps.admin.promoters } : {}),
       store: deps.roleChangeStore ?? (o.storage === 'memory' ? new MemoryRoleChangeApprovalStore() : new DrizzleRoleChangeApprovalStore(o.database)),
       audit,
       ...(deps.reader ? { reader: deps.reader } : {}),

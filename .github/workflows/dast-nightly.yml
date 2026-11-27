@@ -81,6 +81,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh issue create --repo "$GITHUB_REPOSITORY" \
-            --title "[SEV3] DAST 야간 점검 실패: $GITHUB_RUN_ID" \
-            --body "DAST(ZAP 기준선) 예약 실행이 실패했습니다. 실행: $RUN_URL — 산출물(dast-zap)의 zap.json·zap.sarif·gate.json을 보고 원인을 고칩니다. High(7.0 이상)가 있으면 배포를 막습니다(docs/devops.md §3·§4.4, ADR-0323)."
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search '"DAST 야간 점검 실패" in:title' --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" \
+              --body "DAST(ZAP 기준선) 예약 실행이 다시 실패했습니다. 실행: $RUN_URL — 산출물(dast-zap)의 zap.json·zap.sarif·gate.json을 보고 원인을 고칩니다. High(7.0 이상)가 있으면 배포를 막습니다(docs/devops.md §3·§4.4, ADR-0323)."
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "[SEV3] DAST 야간 점검 실패" \
+              --body "DAST(ZAP 기준선) 예약 실행이 실패했습니다. 실행: $RUN_URL — 산출물(dast-zap)의 zap.json·zap.sarif·gate.json을 보고 원인을 고칩니다. High(7.0 이상)가 있으면 배포를 막습니다(docs/devops.md §3·§4.4, ADR-0323)."
+          fi

@@ -1,18 +1,18 @@
 // 관리 계정 저장소의 메모리 구현(시험·로컬, BUILD_ORDER BOT-110·BOT-111). 계정을 만드는 길(초대)은 BOT-150이라 시험은 create로 바로 만든다.
 import { FRESH_LOGIN_STATE, type AccountLoginState, type NoticeKind } from '../domain/login-rules.js';
 import { randomUUID } from 'node:crypto';
-import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminPasskeyRow, AdminPasskeyStore, AdminReauthRecord, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, DesignationKind, LoginStepRow, PendingNotice, UnlockLinkRow } from '../domain/ports.js';
+import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminInvitationRow, AdminInvitationStore, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminPasskeyRow, AdminPasskeyStore, AdminReauthRecord, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, InvitationStage, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, DesignationKind, LoginStepRow, PendingNotice, UnlockLinkRow } from '../domain/ports.js';
 import { DESIGNATION_KINDS, type SecondStepUse } from '../domain/ports.js';
 import type { ReauthAct, ReauthFactor } from '../domain/passkey.js';
 
 type Row = AdminAccountRow &
-  AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null; totpSeedEnc: Buffer | null; totpPendingEnc: Buffer | null; totpLastStep: number | null; inviteTokenHash: Buffer | null; inviteExpiresAt: number | null; removedAt: number | null; version: number };
+  AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null; totpSeedEnc: Buffer | null; totpPendingEnc: Buffer | null; totpLastStep: number | null; inviteTokenHash: Buffer | null; inviteExpiresAt: number | null; inviteStepHash: Buffer | null; inviteStepExpiresAt: number | null; inviteStepStage: InvitationStage | null; inviteStepCodeFailures: number; invitationAcceptedAt: number | null; removedAt: number | null; version: number };
 type SessionRow = { id: string; accountId: string; aud: AdminAud; refreshHash: string; prevRefreshHash: string | null; rotatedAt: number | null; refreshUsed: boolean; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; terminatedAt: number | null; terminationReason: string | null };
 /** 패스키 행 복사(structuredClone은 Buffer를 평범한 Uint8Array로 바꾸므로 쓰지 않는다) */
 const clonePasskey = (p: AdminPasskeyRow): AdminPasskeyRow => ({ ...p, credentialId: Buffer.from(p.credentialId), publicKey: Buffer.from(p.publicKey), transports: [...p.transports] });
 type Step = { id: string; accountId: string; tokenHash: string; aud: AdminAud; pairRef: string; createdAt: number; expiresAt: number; usedAt: number | null; knownSource: boolean; passwordOnlyNoticedAt: number | null };
 
-export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore, AdminRefreshStore, AdminManagementStore, AdminPasskeyStore {
+export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginStore, AdminSecondStepStore, AdminUnlockStore, AdminSessionStore, AdminRefreshStore, AdminManagementStore, AdminPasskeyStore, AdminInvitationStore {
   readonly #rows = new Map<string, Row>();
   readonly #notices: { id: string; accountId: string; kind: NoticeKind; at: number; sentAt: number | null; attempts?: number; nextAttemptAt?: number }[] = [];
   readonly #links: (UnlockLinkRow & { tokenHash: string })[] = [];
@@ -52,6 +52,11 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       totpLastStep: null,
       inviteTokenHash: null,
       inviteExpiresAt: null,
+      inviteStepHash: null,
+      inviteStepExpiresAt: null,
+      inviteStepStage: null,
+      inviteStepCodeFailures: 0,
+      invitationAcceptedAt: null,
       removedAt: null,
       version: 1,
       ...structuredClone(FRESH_LOGIN_STATE),
@@ -61,7 +66,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
   /** 시험용: 삭제 상태로 바꾼다(삭제 경로는 BOT-150) */
   remove(id: string): void {
     const r = this.#rows.get(id);
-    if (r) this.#rows.set(id, { ...r, status: 'REMOVED' });
+    if (r) this.#rows.set(id, { ...r, status: 'REMOVED', inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, invitationAcceptedAt: null });
   }
 
   /** 시험용: 역할을 바로 바꾼다(바꾸는 길은 BOT-150) */
@@ -120,9 +125,125 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     return r ? this.#loginView(r) : null;
   }
 
+  // ── 초대 수락(F-09-6 BOT-152) ──
+  #invitationRow(r: Row): AdminInvitationRow {
+    return {
+      accountId: r.id,
+      role: r.role,
+      email: r.email,
+      displayName: r.displayName,
+      status: r.status,
+      inviteExpiresAt: r.inviteExpiresAt,
+      stepStage: r.inviteStepStage,
+      stepExpiresAt: r.inviteStepExpiresAt,
+      stepCodeFailures: r.inviteStepCodeFailures,
+    };
+  }
+
+  async findByInvitationTokenHash(tokenHash: Buffer): Promise<AdminInvitationRow | null> {
+    for (const r of this.#rows.values()) {
+      if (r.status === 'INVITED' && r.inviteTokenHash?.equals(tokenHash)) return this.#invitationRow(r);
+    }
+    return null;
+  }
+
+  async resetInvitationAcceptance(i: { accountId: string; stepHash: Buffer; expiresAt: number; now: number }): Promise<boolean> {
+    const r = this.#rows.get(i.accountId);
+    if (!r || r.status !== 'INVITED' || r.inviteExpiresAt === null || r.inviteExpiresAt <= i.now) return false;
+    Object.assign(r, {
+      passwordPhc: null,
+      breachCheckedAt: null,
+      passwordChangeRequired: false,
+      totpSeedEnc: null,
+      totpPendingEnc: null,
+      totpLastStep: null,
+      inviteStepHash: Buffer.from(i.stepHash),
+      inviteStepExpiresAt: i.expiresAt,
+      inviteStepStage: 'PASSWORD',
+      inviteStepCodeFailures: 0,
+      updatedAt: i.now,
+    });
+    for (let k = this.#recovery.length - 1; k >= 0; k--) if (this.#recovery[k]!.accountId === i.accountId) this.#recovery.splice(k, 1);
+    for (let k = this.#passkeys.length - 1; k >= 0; k--) if (this.#passkeys[k]!.accountId === i.accountId) this.#passkeys.splice(k, 1);
+    return true;
+  }
+
+  async findInvitationStep(stepHash: Buffer): Promise<AdminInvitationRow | null> {
+    for (const r of this.#rows.values()) {
+      if (r.status === 'INVITED' && r.inviteStepHash?.equals(stepHash) && r.inviteStepExpiresAt !== null) return this.#invitationRow(r);
+    }
+    return null;
+  }
+
+  async advanceInvitationStage(i: { accountId: string; from: InvitationStage; to: InvitationStage; now: number }): Promise<boolean> {
+    const r = this.#rows.get(i.accountId);
+    if (!r || r.status !== 'INVITED' || r.inviteStepStage !== i.from || r.inviteStepExpiresAt === null || r.inviteStepExpiresAt <= i.now) return false;
+    Object.assign(r, { inviteStepStage: i.to, inviteStepCodeFailures: 0, updatedAt: i.now });
+    return true;
+  }
+
+  async recordInvitationCodeFailure(accountId: string, now: number): Promise<{ failures: number; invalidated: boolean }> {
+    const r = this.#rows.get(accountId);
+    if (!r || r.status !== 'INVITED' || r.inviteStepStage !== 'TOTP') return { failures: 0, invalidated: true };
+    r.inviteStepCodeFailures += 1;
+    const failures = r.inviteStepCodeFailures;
+    r.updatedAt = now;
+    if (failures >= 5) {
+      Object.assign(r, { inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0 });
+      return { failures, invalidated: true };
+    }
+    return { failures, invalidated: false };
+  }
+
+  async confirmInvitationTotp(i: { accountId: string; seedEnc: Buffer; step: number; recoveryPhcs: string[]; now: number }): Promise<boolean> {
+    const r = this.#rows.get(i.accountId);
+    if (!r || r.status !== 'INVITED' || r.inviteStepStage !== 'TOTP' || !r.totpPendingEnc || !r.totpPendingEnc.equals(i.seedEnc)) return false;
+    Object.assign(r, {
+      totpSeedEnc: Buffer.from(i.seedEnc),
+      totpPendingEnc: null,
+      totpLastStep: i.step,
+      inviteStepStage: 'PASSKEY',
+      inviteStepCodeFailures: 0,
+      updatedAt: i.now,
+    });
+    for (let k = this.#recovery.length - 1; k >= 0; k--) if (this.#recovery[k]!.accountId === i.accountId) this.#recovery.splice(k, 1);
+    for (const phc of i.recoveryPhcs) this.#recovery.push({ id: randomUUID(), accountId: i.accountId, phc });
+    return true;
+  }
+
+  async addInvitationPasskey(row: AdminPasskeyRow, limit: number, now: number): Promise<'ADDED' | 'LIMIT' | 'EXISTS' | 'NOT_INVITED'> {
+    const r = this.#rows.get(row.accountId);
+    if (!r || r.status !== 'INVITED' || r.inviteStepStage !== 'PASSKEY') return 'NOT_INVITED';
+    if (this.#passkeys.filter((p) => p.accountId === row.accountId).length >= limit) return 'LIMIT';
+    if (this.#passkeys.some((p) => p.credentialId.equals(row.credentialId))) return 'EXISTS';
+    this.#passkeys.push(clonePasskey(row));
+    this.#notices.push({ id: randomUUID(), accountId: row.accountId, kind: 'PASSKEY_ADDED', at: now, sentAt: null });
+    return 'ADDED';
+  }
+
+  async completeInvitation(i: { accountId: string; displayName?: string; now: number }): Promise<boolean> {
+    const r = this.#rows.get(i.accountId);
+    if (!r || r.status !== 'INVITED' || r.inviteStepStage !== 'PASSKEY') return false;
+    Object.assign(r, {
+      status: 'ACTIVE',
+      inviteTokenHash: null,
+      inviteExpiresAt: null,
+      inviteStepHash: null,
+      inviteStepExpiresAt: null,
+      inviteStepStage: null,
+      inviteStepCodeFailures: 0,
+      totpPendingEnc: null,
+      invitationAcceptedAt: i.now,
+      ...(i.displayName !== undefined ? { displayName: i.displayName } : {}),
+      updatedAt: i.now,
+      version: r.version + 1,
+    });
+    return true;
+  }
+
   #loginView(r: Row): AdminLoginAccount {
     const state: AccountLoginState = { failedAttempts: r.failedAttempts, passwordFailureTotal: r.passwordFailureTotal, secondFactorFailures: r.secondFactorFailures, lockKind: r.lockKind, lockedUntil: r.lockedUntil, recentLockAt: [...r.recentLockAt], lockReason: r.lockReason, lockedAt: r.lockedAt };
-    return { id: r.id, role: r.role, status: r.status, passwordPhc: r.passwordPhc, breachCheckedAt: r.breachCheckedAt, passwordChangeRequired: r.passwordChangeRequired, state };
+    return { id: r.id, role: r.role, status: r.status, passwordPhc: r.passwordPhc, breachCheckedAt: r.breachCheckedAt, passwordChangeRequired: r.passwordChangeRequired, invitationAcceptedAt: r.invitationAcceptedAt, state };
   }
 
   async updateLoginState(id: string, now: number, fn: (cur: AccountLoginState) => { next: AccountLoginState; notices: NoticeKind[] } | null): Promise<AccountLoginState | null> {
@@ -224,8 +345,9 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     return true;
   }
 
-  async listRecoveryCodes(id: string): Promise<{ id: string; phc: string }[]> {
-    return this.recoveryCodes(id);
+  // 시험용 저장소는 동기 배열을 돌려준다(계약은 Promise이지만 await해도 같은 배열이다). 시험이 await 없이 길이를 본다
+  listRecoveryCodes(id: string): Promise<{ id: string; phc: string }[]> {
+    return this.recoveryCodes(id) as unknown as Promise<{ id: string; phc: string }[]>;
   }
 
   async useRecoveryCode(rowId: string): Promise<boolean> {
@@ -370,8 +492,9 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     return this.#reauths.filter((r) => r.accountId === accountId).map((r) => ({ ...r, factors: [...r.factors] }));
   }
 
-  async listPasskeys(accountId: string): Promise<AdminPasskeyRow[]> {
-    return this.#passkeys.filter((p) => p.accountId === accountId).map(clonePasskey);
+  // 시험용 저장소는 동기 배열을 돌려준다(계약은 Promise이지만 await해도 같은 배열이다)
+  listPasskeys(accountId: string): Promise<AdminPasskeyRow[]> {
+    return this.#passkeys.filter((p) => p.accountId === accountId).map(clonePasskey) as unknown as Promise<AdminPasskeyRow[]>;
   }
 
   async findPasskeyByCredential(credentialId: Buffer): Promise<AdminPasskeyRow | null> {
@@ -532,9 +655,9 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
         return true;
       },
       setRole: async (id, role, now) => patch(id, { role }, now),
-      resetInvite: async (id, now) => patch(id, { status: 'INVITED', inviteTokenHash: null, inviteExpiresAt: null }, now),
+      resetInvite: async (id, now) => patch(id, { status: 'INVITED', inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, invitationAcceptedAt: null }, now),
       wipeCredentials: async (id, now) => {
-        patch(id, { status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, ...structuredClone(FRESH_LOGIN_STATE) }, now);
+        patch(id, { status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, invitationAcceptedAt: null, ...structuredClone(FRESH_LOGIN_STATE) }, now);
         drop(this.#recovery, (c) => c.accountId !== id);
         // 패스키도 지운다(수락 때 새로 등록한다, ASVS 6.4.4, BOT-122)
         drop(this.#passkeys, (p) => p.accountId !== id);
@@ -666,7 +789,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     let n = 0;
     for (const r of this.#rows.values()) {
       if (r.status === 'INVITED' && r.inviteExpiresAt !== null && r.inviteExpiresAt <= now) {
-        Object.assign(r, { status: 'INVITE_EXPIRED', inviteTokenHash: null, updatedAt: now });
+        Object.assign(r, { status: 'INVITE_EXPIRED', inviteTokenHash: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, updatedAt: now });
         n++;
       }
     }

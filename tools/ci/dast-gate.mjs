@@ -40,11 +40,13 @@ export function toSarif(report) {
       if (alert === null || typeof alert !== 'object') throw new Error(`site[${si}].alerts[${ai}]가 객체가 아니다`);
       const pluginId = str(alert.pluginid) || 'unknown';
       const riskCode = Number(alert.riskcode);
-      const level = riskCode === 3 ? 'error' : riskCode === 2 ? 'warning' : 'note';
-      if (riskCode === 3) high += 1;
+      const known = riskCode === 0 || riskCode === 1 || riskCode === 2 || riskCode === 3;
+      // 모르는/빠진 등급은 High로 보아 막는다(닫힘 실패, BAT-045 RV-13a). 0~3만 지금 등급 그대로다
+      const severity = known ? SEVERITY_OF_RISK[riskCode] : 9.0;
+      const level = severity >= 7 ? 'error' : riskCode === 2 ? 'warning' : 'note';
+      if (severity >= 7) high += 1;
       if (riskCode === 2) medium += 1;
       const ruleId = `ZAP-${pluginId}`;
-      const severity = SEVERITY_OF_RISK[riskCode] ?? 0;
       if (!rules.has(ruleId)) {
         rules.set(ruleId, {
           id: ruleId,

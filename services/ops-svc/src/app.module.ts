@@ -30,7 +30,7 @@ import { PayoutsModule, UnavailableApprovalVerifier, type PayoutsModuleDeps } fr
 import { ApprovalsModule, type ApprovalsModuleDeps } from './modules/approvals/index.js';
 import { BotReviewModule, type BotReviewSignals, type BotReviewSource, type TrustLabels } from './modules/bot-review/index.js';
 import { RealtimeTableModule, RtWidgetSource, type RealtimeTableModuleDeps } from './modules/realtime-table/index.js';
-import type { AdminIdentity, AdminReauth } from './modules/admin-accounts/domain/ports.js';
+import type { AdminIdentity, AdminReauth, PromoterDirectory } from './modules/admin-accounts/domain/ports.js';
 import {
   CsCaseEventCancellationCases,
   DrizzleEventCancellationStore,
@@ -94,6 +94,8 @@ interface CommonWiring {
   readonly adminAccounts?: {
     readonly identity: AdminIdentity;
     readonly reauth?: AdminReauth;
+    /** 파트너사 실재 확인(RV-12). 없으면 확인을 건너뛴다 */
+    readonly promoters?: PromoterDirectory;
   };
   /**
    * 봇 표본 검토(BAT-197 BOT-080, FR-049). source가 없으면 진행·배정이 503이고, labels가 없으면 HUMAN·BOT 판정이 503이다.

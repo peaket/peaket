@@ -19,6 +19,13 @@ export const adminAccount = pgTable(
     displayName: text('display_name'),
     inviteTokenHash: bytea('invite_token_hash'),
     inviteExpiresAt: at('invite_expires_at'),
+    // 초대 수락 단계(F-09-6 BOT-152): 30분 단계 토큰 해시·만료·단계·TOTP 실패 수. 동결 로컬 마이그레이션 0039
+    inviteStepHash: bytea('invite_step_hash'),
+    inviteStepExpiresAt: at('invite_step_expires_at'),
+    inviteStepStage: text('invite_step_stage'),
+    inviteStepCodeFailures: integer('invite_step_code_failures').notNull().default(0),
+    /** 초대 수락을 마친 때. 그 계정의 첫 로그인 2단계 응답을 204로 가른다(고정 시험) */
+    invitationAcceptedAt: at('invitation_accepted_at'),
     lastLoginAt: at('last_login_at'),
     removedAt: at('removed_at'),
     version: bigint('version', { mode: 'number' }).notNull().default(1),
@@ -48,6 +55,7 @@ export const adminAccount = pgTable(
     check('admin_account_lock_kind_check', sql`${t.lockKind} in ('NONE', 'TIMED', 'PROTECT')`),
     check('admin_account_lock_reason_check', sql`${t.lockReason} is null or ${t.lockReason} in ('FAILED_ATTEMPTS', 'SECOND_FACTOR_FAILURES', 'PASSWORD_FAILURE_TOTAL')`),
     check('admin_account_partner_check', sql`(${t.role} in ('partner_admin', 'partner_member')) = (${t.promoterId} is not null)`),
+    check('admin_account_invite_step_stage_check', sql`${t.inviteStepStage} is null or ${t.inviteStepStage} in ('PASSWORD', 'TOTP', 'PASSKEY')`),
   ],
 );
 

@@ -41,7 +41,7 @@ const SOURCE_WINDOW_MS = 60 * 60_000;
 const GLOBAL_WINDOW_MS = 5 * 60_000;
 
 export type SecondStepOutcome =
-  | { kind: 'DONE'; sessionId: string; accessToken: string; accessExpiresAt: number; refreshToken: string; absoluteExpiresAt: number }
+  | { kind: 'DONE'; sessionId: string; accessToken: string; accessExpiresAt: number; refreshToken: string; absoluteExpiresAt: number; viaInvitation: boolean }
   | { kind: 'STEP_INVALID' }
   | { kind: 'CODE_INVALID'; remainingAttempts: number }
   | { kind: 'LOCKED'; lock: 'TIMED'; retryAfterSeconds: number }
@@ -115,7 +115,7 @@ export class LoginSecondStep {
     await this.success.run({ accountId, pair });
     // 익숙한 출발지로 적는다(BOT-123)
     await this.store.touchKnownSource(accountId, pair, now);
-    return { kind: 'DONE', sessionId, accessToken: at.token, accessExpiresAt: at.expiresAt, refreshToken, absoluteExpiresAt };
+    return { kind: 'DONE', sessionId, accessToken: at.token, accessExpiresAt: at.expiresAt, refreshToken, absoluteExpiresAt, viaInvitation: account.invitationAcceptedAt != null };
   }
 
   /**

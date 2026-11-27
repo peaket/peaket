@@ -153,7 +153,8 @@ export function readFindings(inputs, tool) {
     const seen = new Set();
     return {
       findings: findings.filter((f) => {
-        const k = `${f.rule}|${f.path}|${f.line}`;
+        // DAST는 같은 규칙·주소면 줄이 달라도 한 결과로 센다(ADR-0323). 설정 검사는 줄까지 본다
+        const k = tool === 'zap' ? `${f.rule}|${f.path}` : `${f.rule}|${f.path}|${f.line}`;
         if (seen.has(k)) return false;
         seen.add(k);
         return true;

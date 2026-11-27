@@ -7,7 +7,7 @@ import type { ApprovalFailureCases } from '../cases/index.js';
 import { AdminAccounts } from './application/admin-accounts.js';
 import { RoleChangeApprovals } from './application/role-change-approvals.js';
 import { DrizzleRoleChangeApprovalStore, MemoryRoleChangeApprovalStore } from './adapters/db/drizzle-role-change-approvals.js';
-import { ADMIN_IDENTITY, ADMIN_REAUTH, type AdminIdentity, type AdminReauth, type RoleChangeApprovalStore } from './domain/ports.js';
+import { ADMIN_IDENTITY, ADMIN_REAUTH, type AdminIdentity, type AdminReauth, type PromoterDirectory, type RoleChangeApprovalStore } from './domain/ports.js';
 import { AdminAccountsController, AdminSessionSelfController } from './inbound/admin-accounts.controller.js';
 
 export interface AdminAccountsModuleDeps {
@@ -18,6 +18,8 @@ export interface AdminAccountsModuleDeps {
   readonly reader?: AuditChainReader;
   /** CS '승인 업무 실행 실패' 건(F-06-2 ADR-0364 결정 6) */
   readonly failureCases?: ApprovalFailureCases;
+  /** 파트너사 실재 확인(RV-12). 없으면 확인을 건너뛴다 */
+  readonly promoters?: PromoterDirectory;
 }
 
 @Module({})
@@ -38,7 +40,7 @@ export class AdminAccountsModule {
         {
           provide: AdminAccounts,
           useFactory: (approvals: RoleChangeApprovals, clock: Clock) =>
-            new AdminAccounts({ identity: deps.identity, reauth: deps.reauth, approvals, audit: deps.audit, ...(deps.reader ? { reader: deps.reader } : {}), clock }),
+            new AdminAccounts({ identity: deps.identity, reauth: deps.reauth, approvals, audit: deps.audit, ...(deps.reader ? { reader: deps.reader } : {}), ...(deps.promoters ? { promoters: deps.promoters } : {}), clock }),
           inject: [RoleChangeApprovals, CLOCK],
         },
       ],

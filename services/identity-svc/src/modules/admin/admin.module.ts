@@ -6,6 +6,7 @@ import { MemoryLoginCounters } from './adapters/memory-login-counters.js';
 import { MemoryPasskeyChallenges } from './adapters/memory-passkey-challenges.js';
 import { SimpleWebAuthnCeremonies } from './adapters/simple-webauthn.js';
 import { Pbkdf2AdminPasswords, RECOVERY_CODE_ITERATIONS } from './adapters/pbkdf2-admin-passwords.js';
+import { AcceptAdminInvitation } from './application/accept-admin-invitation.js';
 import { LoginPasswordStep } from './application/login-password-step.js';
 import { CONSOLE_ORIGINS, type ConsoleOrigins, DispatchAdminNotices } from './application/dispatch-admin-notices.js';
 import { ChangeAdminPassword } from './application/change-admin-password.js';
@@ -27,6 +28,7 @@ import { type RelyingParties, relyingPartiesOf } from './domain/passkey.js';
 import type { PolicyLists } from './domain/password-policy.js';
 import {
   ADMIN_ACCOUNT_STORE,
+  ADMIN_INVITATION_STORE,
   ADMIN_LOGIN_SIGNALS,
   ADMIN_LOGIN_STORE,
   ADMIN_PASSWORDS,
@@ -62,6 +64,7 @@ import {
   type LoginCounters,
 } from './domain/ports.js';
 import { ADMIN_COOKIE_DOMAIN } from './inbound/admin-cookies.js';
+import { AdminInvitationController } from './inbound/admin-invitation.controller.js';
 import { AdminLoginController } from './inbound/admin-login.controller.js';
 import { AdminPasskeyController } from './inbound/admin-passkey.controller.js';
 import { AdminPasswordChangeController } from './inbound/admin-password-change.controller.js';
@@ -134,10 +137,11 @@ export class AdminModule {
     const store = o.storage === 'database' ? { provide: DrizzleAdminAccountStore, useClass: DrizzleAdminAccountStore } : { provide: DrizzleAdminAccountStore, useValue: new MemoryAdminAccountStore() };
     return {
       module: AdminModule,
-      controllers: [AdminLoginController, AdminUnlockController, AdminPasswordChangeController, AdminTokenController, PartnerTeamAccountsController, AdminPasskeyController],
+      controllers: [AdminInvitationController, AdminLoginController, AdminUnlockController, AdminPasswordChangeController, AdminTokenController, PartnerTeamAccountsController, AdminPasskeyController],
       providers: [
         store,
         { provide: ADMIN_ACCOUNT_STORE, useExisting: DrizzleAdminAccountStore },
+        { provide: ADMIN_INVITATION_STORE, useExisting: DrizzleAdminAccountStore },
         { provide: ADMIN_LOGIN_STORE, useExisting: DrizzleAdminAccountStore },
         { provide: ADMIN_SECOND_STEP_STORE, useExisting: DrizzleAdminAccountStore },
         { provide: ADMIN_UNLOCK_STORE, useExisting: DrizzleAdminAccountStore },
@@ -163,6 +167,7 @@ export class AdminModule {
         { provide: ADMIN_AUTH_CONFIG, useValue: o.config },
         { provide: POLICY_LISTS, useValue: o.lists },
         SetAdminPassword,
+        AcceptAdminInvitation,
         LoginPasswordStep,
         RecordAdminLoginSuccess,
         LoginSecondStep,

@@ -119,6 +119,7 @@ export class RoleChangeApprovals {
         actorAdminAccountId: actor.accountId,
         actorRole: actor.role,
         approvalId: r.approvalId,
+        requestedBy: r.requestedBy,
         reason: r.reason,
         status: 'SUCCEEDED',
         accountVersion: changed.version,

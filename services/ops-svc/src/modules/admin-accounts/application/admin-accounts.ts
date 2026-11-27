@@ -6,7 +6,7 @@ import { ProblemError, uuidv7, type Clock } from '@peaket/platform';
 import type { AuditChain, AuditChainReader } from '../../audit/index.js';
 import { ReauthUnavailable } from '../../payouts/index.js';
 import { type AdminAccountDetail, type AdminAccountView, type AdminPermissionChangeView, type AdminRole, type AdminStatus, type DesignationKind, isPartnerRole, parseIfMatch } from '../domain/admin-account.js';
-import type { AdminIdentity, AdminReauth } from '../domain/ports.js';
+import type { AdminIdentity, AdminReauth, PromoterDirectory } from '../domain/ports.js';
 import { roleChangeApprovalView, type RoleChangeApprovalView } from '../domain/role-change-approval.js';
 import type { RoleChangeApprovals } from './role-change-approvals.js';
 
@@ -23,6 +23,8 @@ export interface AdminAccountsDeps {
   readonly audit: AuditChain;
   readonly reader?: AuditChainReader;
   readonly clock: Clock;
+  /** 파트너사 실재 확인(RV-12). 없으면 기존 시험·대역처럼 확인을 건너뛴다(운영 배선은 반드시 넣는다) */
+  readonly promoters?: PromoterDirectory;
 }
 
 const notFound = () => new ProblemError({ type: 'not-found', status: 404, title: '찾을 수 없습니다', detail: '관리 계정을 찾을 수 없습니다' });
@@ -93,6 +95,16 @@ export class AdminAccounts {
     }
     const key = idempotencyKeyOf(idempotencyKey);
     const bodyHash = bodyHashOf({ email: body.email, displayName: body.displayName, role: body.role, ...(body.promoterId ? { promoterId: body.promoterId } : {}) });
+    // 파트너사가 실제로 있는지 identity를 부르기 전에 본다(RV-12). 조회 장애는 닫힌 쪽(503)이다
+    if (body.promoterId && this.d.promoters) {
+      let exists: boolean;
+      try {
+        exists = await this.d.promoters.exists(body.promoterId);
+      } catch {
+        throw new ProblemError({ type: 'promoter-directory-unavailable', status: 503, title: '파트너사 정보를 확인할 수 없습니다', retryAfterSeconds: 5 });
+      }
+      if (!exists) throw new ProblemError({ type: 'unknown-promoter', status: 422, title: '등록되지 않은 파트너사입니다' });
+    }
     await this.#reauth(reauthToken, actor);
     const requestId = requestIdOf('admin-invite', actor.accountId, key, bodyHash);
     const prior = await this.#prior(actor.accountId, 'admin-invite', key, bodyHash);
@@ -130,7 +142,8 @@ export class AdminAccounts {
     const requestId = key ? requestIdOf('admin-role', accountId, key, bodyHash) : uuidv7(this.d.clock);
     const commanderChange = target.role === 'commander' || body.role === 'commander';
     if (commanderChange) {
-      const prior = key ? await this.#prior(accountId, 'admin-role', key, bodyHash) : null;
+      // 승인 업무는 성공 감사가 없으므로 REQUESTED에 남은 approvalId로도 재전송을 알아본다(RV-17)
+      const prior = key ? await this.#prior(accountId, 'admin-role', key, bodyHash, true) : null;
       if (typeof prior?.approvalId === 'string') {
         const approval = await this.d.approvals.get(prior.approvalId, actor);
         return { kind: 'approval', approval };
@@ -139,10 +152,16 @@ export class AdminAccounts {
       await this.#audit('ADMIN_ACCOUNT_ROLE_CHANGED', accountId, actor, { action: 'ROLE_CHANGED', fromRole: target.role, toRole: body.role, reason, ...(key ? { idempotencyKey: key, bodyHash, operation: 'admin-role' } : {}), requestId, approvalId: r.approvalId, status: 'REQUESTED' });
       return { kind: 'approval', approval: roleChangeApprovalView(r, actor) };
     }
+    // 비-commander 역할 변경은 성공 감사에 같은 키·본문 해시를 남겨 재전송을 같은 답으로 돌려준다(RV-17)
+    const prior = key ? await this.#prior(accountId, 'admin-role', key, bodyHash) : null;
+    if (prior) {
+      const { sessions: _sessions, ...view } = await this.get(accountId);
+      return { kind: 'changed', account: view };
+    }
     await this.#audit('ADMIN_ACCOUNT_ROLE_CHANGED', accountId, actor, { action: 'ROLE_CHANGED', fromRole: target.role, toRole: body.role, reason, ...(key ? { idempotencyKey: key, bodyHash, operation: 'admin-role' } : {}), requestId, status: 'REQUESTED' });
     try {
       const account = await this.d.identity.changeRole({ requestId, actedBy: actor.accountId, adminAccountId: accountId, role: body.role, expectedVersion: version });
-      await this.#audit('ADMIN_ACCOUNT_ROLE_CHANGED', accountId, actor, { action: 'ROLE_CHANGED', fromRole: target.role, toRole: body.role, reason, requestId, accountVersion: account.version, status: 'SUCCEEDED' });
+      await this.#audit('ADMIN_ACCOUNT_ROLE_CHANGED', accountId, actor, { action: 'ROLE_CHANGED', fromRole: target.role, toRole: body.role, reason, ...(key ? { idempotencyKey: key, bodyHash, operation: 'admin-role' } : {}), requestId, accountVersion: account.version, status: 'SUCCEEDED' });
       return { kind: 'changed', account };
     } catch (e) {
       await this.#audit('ADMIN_ACCOUNT_ROLE_CHANGED', accountId, actor, { action: 'ROLE_CHANGED', fromRole: target.role, toRole: body.role, reason, requestId, status: 'FAILED', error: typeOf(e) });
@@ -286,13 +305,19 @@ export class AdminAccounts {
     await this.d.audit.append({ recordType, recordId, payload: { ...payload, actorAdminAccountId: actor.accountId, actorRole: actor.role }, nowMs: this.d.clock.now() });
   }
 
-  /** 같은 키·작업으로 이미 성공한 기록(멱등). 본문 해시가 다르면 422 idempotency-key-reused다 */
-  async #prior(accountId: string, operation: string, idempotencyKey: string, bodyHash: string): Promise<Record<string, unknown> | null> {
+  /**
+   * 같은 키·작업으로 이미 성공한 기록(멱등). 본문 해시가 다르면 422 idempotency-key-reused다.
+   * includeRequestedApproval이면 승인 업무를 만든 REQUESTED 기록(approvalId가 있다)도 성공으로 본다(RV-17 commander 분기).
+   */
+  async #prior(accountId: string, operation: string, idempotencyKey: string, bodyHash: string, includeRequestedApproval = false): Promise<Record<string, unknown> | null> {
     if (!this.d.reader?.entriesOfRecord) return null;
     const page = await this.d.reader.entriesOfRecord(accountId, { limit: 100 });
     for (const e of page.entries) {
       const p = e.record.payload as Record<string, unknown>;
-      if (p.operation !== operation || p.idempotencyKey !== idempotencyKey || p.status !== 'SUCCEEDED') continue;
+      if (p.operation !== operation || p.idempotencyKey !== idempotencyKey) continue;
+      const done = p.status === 'SUCCEEDED';
+      const approvalRequest = includeRequestedApproval && p.status === 'REQUESTED' && typeof p.approvalId === 'string';
+      if (!done && !approvalRequest) continue;
       if (p.bodyHash !== bodyHash) throw new ProblemError({ type: 'idempotency-key-reused', status: 422, title: '같은 멱등 키를 다른 요청에 썼습니다', detail: '같은 Idempotency-Key로 다른 본문을 보냈습니다' });
       return p;
     }

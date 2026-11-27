@@ -78,6 +78,8 @@ export interface AdminLoginAccount {
   passwordPhc: string | null;
   breachCheckedAt: number | null;
   passwordChangeRequired: boolean;
+  /** 초대 수락으로 활성화된 때(그 계정의 첫 로그인 2단계 응답은 204다. 시험 고정 계약) */
+  invitationAcceptedAt?: number | null;
   state: AccountLoginState;
 }
 
@@ -460,6 +462,36 @@ export interface AdminPasskeyRow {
   name: string;
   createdAt: number;
   lastUsedAt: number | null;
+}
+
+// ── 초대 수락(openapi /v1/{partner,ops}/auth/invitation-*, F-09-6 BOT-152) ──
+export type InvitationStage = 'PASSWORD' | 'TOTP' | 'PASSKEY';
+export interface AdminInvitationRow {
+  accountId: string;
+  role: AdminRole;
+  email: string;
+  displayName: string | null;
+  status: AdminStatus;
+  inviteExpiresAt: number | null;
+  stepStage: InvitationStage | null;
+  stepExpiresAt: number | null;
+  stepCodeFailures: number;
+}
+export const ADMIN_INVITATION_STORE = Symbol('identity.AdminInvitationStore');
+export interface AdminInvitationStore {
+  findByInvitationTokenHash(tokenHash: Buffer): Promise<AdminInvitationRow | null>;
+  /** 초대 링크로 수락을 처음부터 다시 시작한다: 비밀번호·TOTP 시드·복구 코드·그 수락의 패스키를 지우고 단계를 PASSWORD로 둔다 */
+  resetInvitationAcceptance(i: { accountId: string; stepHash: Buffer; expiresAt: number; now: number }): Promise<boolean>;
+  findInvitationStep(stepHash: Buffer): Promise<AdminInvitationRow | null>;
+  advanceInvitationStage(i: { accountId: string; from: InvitationStage; to: InvitationStage; now: number }): Promise<boolean>;
+  /** TOTP 확인 실패를 단계에만 센다(계정 로그인 실패·잠금과 섞지 않는다). 5번이면 단계를 무효로 만든다 */
+  recordInvitationCodeFailure(accountId: string, now: number): Promise<{ failures: number; invalidated: boolean }>;
+  /** 대기 시드를 확정하고 복구 코드를 바꾸며 단계를 PASSKEY로 올린다(한 트랜잭션) */
+  confirmInvitationTotp(i: { accountId: string; seedEnc: Buffer; step: number; recoveryPhcs: string[]; now: number }): Promise<boolean>;
+  /** INVITED 계정의 초대 수락 단계에서만 패스키를 더한다(활성 계정의 addPasskey와 나눈다) */
+  addInvitationPasskey(row: AdminPasskeyRow, limit: number, now: number): Promise<'ADDED' | 'LIMIT' | 'EXISTS' | 'NOT_INVITED'>;
+  /** 초대 수락을 끝내 ACTIVE로 바꾸고 초대·단계 토큰과 대기 시드를 지운다(한 트랜잭션) */
+  completeInvitation(i: { accountId: string; displayName?: string; now: number }): Promise<boolean>;
 }
 
 /** 재인증 기록 한 행(docs/data.md admin_reauth) */

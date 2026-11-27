@@ -18,6 +18,7 @@ import { GrpcEventRefunds } from './adapters/grpc-event-refunds.js';
 import { GrpcAdminAuthz } from './adapters/identity-admin-authz.js';
 import { GrpcIdentityAdminAccounts } from './modules/admin-accounts/adapters/grpc-identity-admin-accounts.js';
 import { HttpCommandExecutor } from './adapters/http-command-executor.js';
+import { HttpCorePromoterDirectory, UnavailablePromoterDirectory } from './adapters/http-core-promoters.js';
 import { assertOpsPartnerRole } from './adapters/db/database-role.js';
 import { reauthWiring } from './reauth-wiring.js';
 import { eventCancellationDepsFromEnv, partnerDatabaseUrlFromEnv, partnerRoleCheckRequired, requireCoreEventStatusUrl } from './event-cancellation-wiring.js';
@@ -65,6 +66,9 @@ const adminIdentity = new GrpcIdentityAdminAccounts(identityUrl);
 const purchaseUrl = process.env.PEAKET_PURCHASE_HTTP_URL;
 const purchaseGrpcAddr = process.env.PEAKET_PURCHASE_GRPC_ADDR;
 const coreUrl = process.env.PEAKET_CORE_HTTP_URL;
+const promoterDirectory = coreUrl
+  ? new HttpCorePromoterDirectory(createExternalHttpClient({ provider: 'core-svc', baseUrl: coreUrl, timeoutCapMs: 3_000 }), process.env.PEAKET_INTERNAL_TOKEN)
+  : new UnavailablePromoterDirectory();
 const queueUrl = process.env.PEAKET_QUEUE_HTTP_URL;
 const paymentUrl = process.env.PEAKET_PAYMENT_HTTP_URL;
 const internalToken = process.env.PEAKET_INTERNAL_TOKEN;
@@ -180,7 +184,7 @@ const service = await createService({
     ...(scannerDevices ? { scannerDevices } : {}),
     ...(payouts ? { payouts } : {}),
     approvals,
-    adminAccounts: { identity: adminIdentity, ...(reauth ? { reauth } : {}) },
+    adminAccounts: { identity: adminIdentity, ...(reauth ? { reauth } : {}), promoters: promoterDirectory },
     eventCancellations,
     realtimeTable: realtimeTable.deps,
     botReview: {

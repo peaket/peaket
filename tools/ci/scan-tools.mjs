@@ -929,7 +929,12 @@ export async function runDast({ target, out, docker = dockerAsync, pins = PINS, 
       const port = server.address().port;
       const r = await docker(dastArgs({ target: `http://127.0.0.1:${port}/`, out, report: 'zap-decoy.json', pins }));
       if (r.code !== 0 && r.code !== 1 && r.code !== 2) throw new DecoyError(`ZAP 미끼 점검이 ${r.code}로 끝났다`);
-      const found = readZap(join(out, 'zap-decoy.json'));
+      let found;
+      try {
+        found = readZap(join(out, 'zap-decoy.json'));
+      } catch (e) {
+        throw new DecoyError(`ZAP 미끼 결과를 읽지 못했다: ${e instanceof Error ? e.message : String(e)}`);
+      }
       if (found.high === 0) throw new DecoyError('ZAP 미끼 점검에서 High를 찾지 못했다(도구가 보지 않는 것으로 보고 대상 점검을 하지 않는다)');
     } finally {
       await new Promise((r) => server.close(r));
