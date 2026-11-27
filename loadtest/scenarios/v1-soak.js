@@ -66,6 +66,10 @@ const wsDisconnects = new Counter('ws_disconnects');
 const wsReconnects = new Counter('ws_reconnects');
 const prepUsers = TARGET === 'realtime-gw' ? Math.min(CONNECTIONS, USERS) : TARGET === 'queue-svc' ? 0 : USERS;
 const warmRate = Math.max(1, Math.floor(RATE / 2));
+// 실행 도구가 메모리(4GiB)로 계산한 가상 사용자 상한을 그대로 쓴다. 시나리오가 RATE만큼(1,000 VU) 늘리면
+// 발생기가 OOM으로 죽는다(2026-11-27 r7). 기본값은 도구 없이 돌릴 때의 옛 값이다.
+const PRE_VUS = envInt('PRE_VUS', Math.max(10, Math.ceil(RATE / 10)));
+const MAX_VUS = envInt('MAX_VUS', Math.max(50, RATE));
 
 // realtime-gw는 열린 도착률이 아니라 VU마다 긴 연결을 유지한다(constant-vus). 나머지는 열린 모델이다.
 const scenarios = TARGET === 'realtime-gw'
@@ -94,7 +98,7 @@ const scenarios = TARGET === 'realtime-gw'
         timeUnit: '1s',
         duration: `${WARM_S}s`,
         preAllocatedVUs: Math.max(10, Math.ceil(warmRate / 10)),
-        maxVUs: Math.max(50, warmRate),
+        maxVUs: Math.min(MAX_VUS, Math.max(50, warmRate)),
         exec: 'hit',
         tags: { phase: 'warm', target: TARGET },
       },
@@ -104,8 +108,8 @@ const scenarios = TARGET === 'realtime-gw'
         timeUnit: '1s',
         startTime: `${WARM_S}s`,
         duration: `${DURATION_S}s`,
-        preAllocatedVUs: Math.max(10, Math.ceil(RATE / 10)),
-        maxVUs: Math.max(50, RATE),
+        preAllocatedVUs: PRE_VUS,
+        maxVUs: MAX_VUS,
         exec: 'hit',
         tags: { phase: 'main', target: TARGET },
       },
