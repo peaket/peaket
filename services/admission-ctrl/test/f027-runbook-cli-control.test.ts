@@ -210,8 +210,11 @@ describe('F-02-7 런북 CLI 제어 명령', () => {
     expect(h.sent).toHaveLength(0);
     expect(h.lines.join('\n')).toContain('not-authorized-role');
 
+    // 같은 파일에서 operator 서명을 지우지 않고 commander를 더하면 서명이 셋이 된다. 새 묶음으로 두 commander만 서명한다
+    expect(await draft(h, 'sale-resume')).toBe(0);
+    expect(await runRunbookCli(['sign', '--in', 'bundle.json', '--signer', 'commander-a'], h.deps)).toBe(0);
     expect(await runRunbookCli(['sign', '--in', 'bundle.json', '--signer', 'commander-b'], h.deps)).toBe(0);
-    expect(read(h).signatures).toHaveLength(3);
+    expect(read(h).signatures).toHaveLength(2);
     expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(0);
     expect(h.sent).toHaveLength(3);
     expect(h.audits.at(-1)).toMatchObject({ outcome: 'APPLIED', postReviewRequired: false });
