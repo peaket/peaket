@@ -260,7 +260,17 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
       throw new Error('store down');
     };
     expect(problemOf(await setPassword('partner', step))).toEqual({ status: 503, type: 'admin-login-unavailable' });
-    store.setPassword = writePassword;
+    // 드라이버 오류는 top-level code가 있어도 410이 아니라 503이다(IR096-04 잔여)
+    try {
+      for (const code of ['ECONNREFUSED', '57P01']) {
+        store.setPassword = async () => {
+          throw Object.assign(new Error(`driver down (${code})`), { code });
+        };
+        expect(problemOf(await setPassword('partner', step))).toEqual({ status: 503, type: 'admin-login-unavailable' });
+      }
+    } finally {
+      store.setPassword = writePassword;
+    }
     const ok = await setPassword('partner', step);
     expect(ok.statusCode).toBe(200);
     expect(json(ok)).toEqual({ next: 'TOTP' });
