@@ -114,6 +114,9 @@ const scenarios = TARGET === 'realtime-gw'
 
 export const options = {
   setupTimeout: `${PREP_TIMEOUT_S}s`,
+  // 경로에 홀드 ID가 들어가는 요청이 6시간 1,000/s로 쌓이면 기본 url 태그가 고유 시계열을 수천만 개 만들어
+  // 발생기(4GiB)가 OOM으로 죽는다(2026-11-27 r5). url 태그를 끄고 route·name·status로만 가른다.
+  systemTags: ['status', 'method', 'name', 'scenario', 'expected_response', 'error', 'error_code'],
   // 본구간 경계는 markScenarios가 markStart/markEnd로 남긴다(실행 도구가 host·records 창을 자른다).
   scenarios,
   thresholds: {
