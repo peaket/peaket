@@ -384,3 +384,11 @@ ADR-0373 결정 2의 '동결로 미검증'이다. 완성 판정에서 빼고 완
 | S-T14 ④ | 미검증 |  | BAT-095(K4, 완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). Degraded Mode 완화 SLO p99 1.5초와 초과 판매 0건도 K4 무대가 필요하다(S-T12 ①과 같은 까닭). ①~③(자동 전환)은 BAT-053(HOT-091) 시험이다 |
 | S-T15 | 미검증 |  | LCH-200(K5, 완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). K5 랩 판정 도구 `loadtest/k5/seatmap-lab.mjs`는 v0 입구 고정이고 v1 좌석맵 랩 판정은 LCH-200(F-08-1, 동결)이다 |
 | P-T31 | 미검증 |  | 구간 측정(완성 뒤) | 측정 못 함(ADR-0373 동결 선행): 감독 결정(2026-11-23)으로 F-08-8은 K1·K2·K7만 잰다(계획 docs/review/plans/F-08-8.md 3.2). 결제사 전환 훈련과 결제사별 동시 입장 목표 상한은 스테이징 무대가 필요하다(F-09 클라우드 기반, 동결) |
+
+## F-04-19 0041 PostgreSQL 통합 실행(2026-11-27)
+
+- **실행 ID**: `F0419-PG-20261127-1922`
+- **시각**: 2026-11-27 19:22:52~19:23:27 (잠금 획득 19:22:52, 정리 완료 19:23:27)
+- **결과**: **통과**
+- **내용**: PostgreSQL 18에 0040·0041 적용. `ops_app`은 `research_export` DELETE만 true이고 denial/pseudolog DELETE·purge EXECUTE는 false, `ops_research_purger`는 함수 EXECUTE만 true, `ops_research_purge_login`은 `SET ROLE ops_research_purger`로 함수 실행. 89·90일 유지·91일 삭제(1행), `audit_chain`·`pseudonymization_log`·`research_export` 불변, `ops_app`의 denial/pseudolog/함수 거부와 disposable export DELETE 1 확인. 컨테이너·볼륨·잠금 즉시 정리.
+- **남은 것**: 실제 ArgoCD 동기화·CronJob 실행, `targetRevision`/동결 가지 배포 절차, Secrets Manager 값·`ops_research_purge_login` 인증, 승격 이미지 다이제스트.
