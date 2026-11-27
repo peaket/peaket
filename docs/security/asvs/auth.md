@@ -130,6 +130,8 @@ V6.2와 V6.4 세부 항목은 비밀번호를 쓰는 파트너와 운영자의 �
 | v5.0.0-7.6.1 | L2 | 신뢰 당사자와 IdP 사이의 세션 수명·종료가 문서대로 동작하고, IdP 인증 간격이 최대 시간에 이를 때처럼 필요하면 재인증을 요구한다. | 적용 | `web BFF` 세션 핸들러. 소셜 제공자 세션과 PEAKET 세션은 따로 두고(identity §2), PEAKET 세션의 절대 만료(팬 30일, POL-019)가 지나면 소셜 제공자 로그인을 다시 거친다. 민감 작업 전에는 소셜 제공자 재인증을 요구한다(identity §7) | 미실행 | — |
 | v5.0.0-7.6.2 | L2 | 사용자 동의나 명시적 동작 없이 세션을 만들지 않는다. | 적용 | `web BFF` (로그인 버튼을 눌렀을 때만 OAuth를 시작하고, 무음 자동 로그인은 하지 않는다) | 미실행 | — |
 
+- **2026-11-27 F-07-13 구현 위치**: 파트너 SCR-020 내 계정의 인증 앱 다시 등록·복구 코드 다시 만들기·로그인 기기 목록·끊기를 `services/identity-svc/src/modules/admin/application/manage-account-security.ts`·`inbound/admin-account-security.controller.ts`에 더했다. 재인증은 `ACCOUNT_SECURITY`(그 세션·jti 한 번·패스키가 있으면 passkey 요소)이고, 6.3.3·6.4.4·7.4.3·7.5.1·7.5.2의 이 기능 근거는 `services/identity-svc/test/partner-account-security-http.test.ts` 14건과 `apps/partner/src/_pages/partner-settings/model/account-live.test.mjs`·`ui/account-wiring.test.mjs`다. 실제 TOTP 기기·브라우저 패스키 창·PostgreSQL·Redis는 `미실행`이다.
+
 ## V8 인가(접근통제)
 
 | ASVS ID | 레벨 | 요구사항 요약 | 적용 여부 | 구현 위치 | 테스트 결과 | 미적용 사유 |

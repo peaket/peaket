@@ -260,8 +260,10 @@ erDiagram
         bigint version "판. 역할 변경의 If-Match와 ETag(docs/api/guidelines.md §12, 추천 적용 2026-10-30)"
         text password_phc "pbkdf2-sha256, 600000회 이상, KMS 페퍼 버전 포함(ADR-0033, ADR-0050)"
         bytea totp_seed_enc "AES-256-GCM. KMS 데이터 키 봉투 암호화, 암호화 컨텍스트 {purpose: peaket-admin-totp-v1, accountId}. 꼴은 docs/features/identity.md §6 '관리 계정 TOTP와 로그인 2단계의 첫 구현'(추천 적용 2026-11-05, BOT-120)"
-        bytea totp_pending_enc "등록 중인 TOTP 시드(같은 꼴). 등록 확인 때 totp_seed_enc로 옮기고 지운다(추천 적용 2026-11-05)"
-        bigint totp_last_step "마지막으로 받은 TOTP 시간 칸(유닉스 초 / 30). 그 칸 이하는 다시 받지 않는다(같은 코드 재사용 막기, 추천 적용 2026-11-05)"
+        bytea totp_pending_enc "등록 중인 TOTP 시드(같은 꼴). 등록 확인 때 totp_seed_enc로 옮기고 지운다(추천 적용 2026-11-05). 다시 등록은 그 시드를 시작한 세션에 묶는다(F-07-13)"
+        uuid totp_pending_session_id "다시 등록을 시작한 관리 세션(admin_session.id). 이 세션에서만 확인할 수 있고, 완료·재시작·6번째 실패 때 비운다(F-07-13)"
+        int totp_pending_failures "다시 등록 확인 코드 실패 수. 5번째까지 세고 6번째에 대기 시드를 버린다. 로그인 2단계 실패 수와 별개다(F-07-13)"
+        bigint totp_last_step "마지막으로 받은 TOTP 시간 칸(유닉스 초 / 30). 그 칸 이하는 다시 받지 않는다(같은 코드 재사용 막기, 추천 적용 2026-11-05). 다시 등록 확인도 확인한 칸을 적는다(F-07-13)"
         int failed_attempts "계정 실패 수: 비밀번호·TOTP·복구 코드가 틀릴 때 센다(잠긴 동안 거절한 시도는 세지 않는다). 로그인 성공·시간 잠금을 걸 때·본인 해제 때 0. 3 [가정]이면 사람 확인, 5면 시간 잠금. 출발지가 든 값(묶음 실패 수 등)은 Redis에 둔다(docs/security/auth-controls.md §3.1, 추천 적용 2026-10-30)"
         int second_factor_failures "2단계 실패 수: 비밀번호가 맞은 뒤나 해제 링크에서 TOTP·복구 코드가 틀릴 때 센다. 로그인 성공만 0(시간 잠금·본인 해제로는 0이 되지 않는다). 5 [가정]면 보호 잠금(auth-controls §3.1·§3.2, 추천 적용 2026-10-30)"
         int password_failure_total "비밀번호 연속 실패 누계: 비밀번호가 틀릴 때 센다(잠긴 동안 거절한 시도는 세지 않는다). 비밀번호와 2단계를 모두 통과한 로그인만 0. 50 [가정]이면 알림, 100이면 보호 잠금(NIST SP 800-63B-4 §3.2.2 상한, auth-controls §3.1, 추천 적용 2026-10-30)"
@@ -326,6 +328,7 @@ erDiagram
         bool refresh_used "팬 session과 같은 칸(회전마다 false)"
         uuid refresh_family
         text pair_ref "로그인한 출발지 묶음 해시(admin_login_step과 같다)"
+        text device_label "화면용 기기 이름 '브라우저 · 운영체제'(로그인 기기 목록 SCR-020). 로그인 때 User-Agent에서 정해진 낱말만 뽑고 원문·판 번호는 두지 않는다. 1~40자(CHECK). 세션이 끝나면 같은 트랜잭션에서 비운다(F-07-13)"
         timestamptz created_at
         timestamptz absolute_expires_at "만든 때 + 24시간(POL-019)"
         timestamptz idle_expires_at "마지막 활동 + 1시간(POL-019). 토큰 갱신이 늦춘다(BOT-130)"
