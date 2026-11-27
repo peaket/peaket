@@ -1,0 +1,479 @@
+{
+  "batch": "F-08-13",
+  "feature": "Game Day 모의 진행·복원 연습",
+  "windows": [
+    {
+      "id": "3d",
+      "scenarioIds": [
+        "G-26",
+        "G-27"
+      ],
+      "purpose": "관측 AZ·KMS 정지, 로컬 PostgreSQL 장애 조치 대조"
+    },
+    {
+      "id": "3e",
+      "scenarioIds": [
+        "G-28",
+        "G-32"
+      ],
+      "purpose": "신원 제공자 정지·AZ 전체 정지, PITR·교차 리전 복원 대조"
+    },
+    {
+      "id": "3f",
+      "scenarioIds": [
+        "G-33",
+        "G-18"
+      ],
+      "purpose": "엣지 설정 되돌리기·나쁜 배포 단계 양식, 보고"
+    }
+  ],
+  "lock": {
+    "take": "docker lane4-F-08-13",
+    "drop": "docker lane4-F-08-13",
+    "dockerAll": false,
+    "used": false
+  },
+  "scenarios": [
+    {
+      "id": "G-26",
+      "order": 1,
+      "window": "3d",
+      "name": "관측 스택 AZ 하나 장애",
+      "mode": "대체 장애",
+      "runMode": "모의 진행",
+      "normEvidence": "설계만",
+      "runEvidence": "설계만",
+      "missing": [
+        "Mimir",
+        "Loki",
+        "Tempo",
+        "관측 Kafka",
+        "AZ"
+      ],
+      "runbook": "RB-09·RB-34",
+      "expectedAlert": [
+        "관측 저장소 SEV3(Tempo 소비 지연)"
+      ],
+      "expectedAction": [
+        "지표·로그 쓰기는 정족수로 계속, 조회 결과에 빈칸 없음, 추적 쓰기는 관측 Kafka가 받음, 소비 지연 SEV3 해제, 다시 뜬 소비 부품이 밀린 분량을 따라잡음, SLO 경보·자동 제어 입력 영향 없음"
+      ],
+      "recovery": [
+        "소비 지연 SEV3 해제, 조회 빈칸 0"
+      ],
+      "invariant": [
+        "SLO 경보",
+        "자동 제어"
+      ],
+      "steps": [
+        "① 시나리오·정본·런북을 소리 내어 읽는다",
+        "② T0에 무엇이 일어나는지 말한다(실제 주입 없음)",
+        "③ 기대 경보와 심각도를 말한다",
+        "④ 기대 대응을 런북 순서대로 말한다",
+        "⑤ 복원 확인 항목을 하나씩 말한다",
+        "⑥ 무대에 없는 부품과 판정할 수 없는 부분을 적는다",
+        "⑦ 후속 조치(런북·도구·문서 공백)를 적는다"
+      ],
+      "stageReady": false,
+      "commands": [
+        "node loadtest/run.mjs v1 gameday-recovery --window 3d --scenario G-26 --tabletop --record --run-id 2026-11-29-g-26-f0813 --out .cache/peaket-f0813/g-26"
+      ]
+    },
+    {
+      "id": "G-27",
+      "order": 2,
+      "window": "3d",
+      "name": "KMS 정지 중 명령 2",
+      "mode": "대체 장애",
+      "runMode": "모의 진행",
+      "normEvidence": "측정함",
+      "runEvidence": "설계만",
+      "missing": [
+        "KMS",
+        "도쿄 복제 키"
+      ],
+      "runbook": "RB-08",
+      "expectedAlert": [
+        "감사 체인 mac 빈 행 1분 초과 SEV2, KMS 호출 오류"
+      ],
+      "expectedAction": [
+        "명령이 KMS 없이 커밋·전파(접수 p95 500ms), 재인증은 도쿄 복제 키로, KMS 복구 뒤 체인 따라잡기·1시간 검증 잡 통과"
+      ],
+      "recovery": [
+        "체인 따라잡기, 1시간 검증 잡 통과"
+      ],
+      "invariant": [
+        "접수 p95 500ms",
+        "커밋·전파"
+      ],
+      "steps": [
+        "① 시나리오·정본·런북을 소리 내어 읽는다",
+        "② T0에 무엇이 일어나는지 말한다(실제 주입 없음)",
+        "③ 기대 경보와 심각도를 말한다",
+        "④ 기대 대응을 런북 순서대로 말한다",
+        "⑤ 복원 확인 항목을 하나씩 말한다",
+        "⑥ 무대에 없는 부품과 판정할 수 없는 부분을 적는다",
+        "⑦ 후속 조치(런북·도구·문서 공백)를 적는다"
+      ],
+      "stageReady": false,
+      "commands": [
+        "node loadtest/run.mjs v1 gameday-recovery --window 3d --scenario G-27 --tabletop --record --run-id 2026-11-29-g-27-f0813 --out .cache/peaket-f0813/g-27"
+      ]
+    },
+    {
+      "id": "G-28",
+      "order": 3,
+      "window": "3e",
+      "name": "신원 제공자 정지 중 명령 2",
+      "mode": "모의 진행",
+      "runMode": "모의 진행",
+      "normEvidence": "설계만",
+      "runEvidence": "설계만",
+      "missing": [
+        "IAM Identity Center",
+        "비상 접근 계정",
+        "ops-svc 정지"
+      ],
+      "runbook": "RB-37·RB-08",
+      "expectedAlert": [
+        "평소 로그인·긴급 접근 역할 실패, ops-svc 함께 멈춘 실행은 ops-svc 가용성 SEV1·비상 접근 계정 로그인 SEV1"
+      ],
+      "expectedAction": [
+        "콘솔 로그인은 identity-svc 관리 계정이라 영향 없이 명령 2, ops-svc도 함께 멈춘 실행은 RB-08과 RB-37 비상 접근 계정으로 `ops-breakglass` Job 생성·서명, 명령 전파 p99 10초"
+      ],
+      "recovery": [
+        "평소 경로 복귀, 비상 계정 세션·키 교체·봉인, 감사 로그"
+      ],
+      "invariant": [
+        "관리 계정",
+        "명령 전파 p99 10초"
+      ],
+      "steps": [
+        "① 시나리오·정본·런북을 소리 내어 읽는다",
+        "② T0에 무엇이 일어나는지 말한다(실제 주입 없음)",
+        "③ 기대 경보와 심각도를 말한다",
+        "④ 기대 대응을 런북 순서대로 말한다",
+        "⑤ 복원 확인 항목을 하나씩 말한다",
+        "⑥ 무대에 없는 부품과 판정할 수 없는 부분을 적는다",
+        "⑦ 후속 조치(런북·도구·문서 공백)를 적는다"
+      ],
+      "stageReady": false,
+      "commands": [
+        "node loadtest/run.mjs v1 gameday-recovery --window 3e --scenario G-28 --tabletop --record --run-id 2026-11-29-g-28-f0813 --out .cache/peaket-f0813/g-28"
+      ]
+    },
+    {
+      "id": "G-32",
+      "order": 4,
+      "window": "3e",
+      "name": "AZ 하나 전체 정지와 영역 빼기",
+      "mode": "모의 진행",
+      "runMode": "모의 진행",
+      "normEvidence": "설계만",
+      "runEvidence": "설계만",
+      "missing": [
+        "NLB",
+        "zonal shift",
+        "AZ",
+        "CloudFront VPC 원본"
+      ],
+      "runbook": "RB-13",
+      "expectedAlert": [
+        "게이트웨이·서비스 준비 파드 급감, 그 AZ 쪽 의존성 원인 SEV2, MSK 브로커 신호"
+      ],
+      "expectedAction": [
+        "프리워밍 1.5배 여유로 남은 두 AZ가 피크를 받음, HPA·Karpenter 회복, MSK는 AZ마다 브로커 2대로 쓰기 지속, 영역 빼기 판단→새 연결 차단 시간 기록, CloudFront VPC 원본이 뺀 AZ로 보내는지 확인"
+      ],
+      "recovery": [
+        "세 AZ 정상 대상, 영역 빼기 만료 전 원상 복구, 게이트웨이 5xx 기준 아래"
+      ],
+      "invariant": [
+        "오버셀 0",
+        "이중 결제 0"
+      ],
+      "steps": [
+        "① 시나리오·정본·런북을 소리 내어 읽는다",
+        "② T0에 무엇이 일어나는지 말한다(실제 주입 없음)",
+        "③ 기대 경보와 심각도를 말한다",
+        "④ 기대 대응을 런북 순서대로 말한다",
+        "⑤ 복원 확인 항목을 하나씩 말한다",
+        "⑥ 무대에 없는 부품과 판정할 수 없는 부분을 적는다",
+        "⑦ 후속 조치(런북·도구·문서 공백)를 적는다"
+      ],
+      "stageReady": false,
+      "commands": [
+        "node loadtest/run.mjs v1 gameday-recovery --window 3e --scenario G-32 --tabletop --record --run-id 2026-11-29-g-32-f0813 --out .cache/peaket-f0813/g-32"
+      ]
+    },
+    {
+      "id": "G-33",
+      "order": 5,
+      "window": "3f",
+      "name": "엣지 설정 실수 되돌리기",
+      "mode": "모의 진행",
+      "runMode": "모의 진행",
+      "normEvidence": "설계만",
+      "runEvidence": "설계만",
+      "missing": [
+        "CloudFront 지속적 배포",
+        "NLB 대상 그룹"
+      ],
+      "runbook": "RB-40·RB-23",
+      "expectedAlert": [
+        "① 스테이징 쪽 요청 오류·합성 점검 실패 ② 엣지 502·504 비율이 그 여정의 SLO 오류로 28일 다중 창 경보에 듦(온세일 빠른 경보에는 넣지 않음), 외부 합성 점검 실패"
+      ],
+      "expectedAction": [
+        "① 승격하지 않고 스테이징 배포를 버려 주 배포 유지 ② 되돌리는 커밋으로 대상 그룹 복구, 탐지→복구 시간 기록, 관제 원본 NLB는 따로라 관제 입구는 막히지 않음"
+      ],
+      "recovery": [
+        "주 배포 유지, 대상 그룹 복구, 탐지→복구 시간 기록, 관제 입구 유지"
+      ],
+      "invariant": [
+        "주 배포",
+        "관제 입구"
+      ],
+      "steps": [
+        "① 시나리오·정본·런북을 소리 내어 읽는다",
+        "② T0에 무엇이 일어나는지 말한다(실제 주입 없음)",
+        "③ 기대 경보와 심각도를 말한다",
+        "④ 기대 대응을 런북 순서대로 말한다",
+        "⑤ 복원 확인 항목을 하나씩 말한다",
+        "⑥ 무대에 없는 부품과 판정할 수 없는 부분을 적는다",
+        "⑦ 후속 조치(런북·도구·문서 공백)를 적는다"
+      ],
+      "stageReady": false,
+      "commands": [
+        "node loadtest/run.mjs v1 gameday-recovery --window 3f --scenario G-33 --tabletop --record --run-id 2026-11-29-g-33-f0813 --out .cache/peaket-f0813/g-33"
+      ]
+    },
+    {
+      "id": "G-18",
+      "order": 6,
+      "window": "3f",
+      "name": "나쁜 배포 되돌리기 단계별 측정",
+      "mode": "로컬 실행",
+      "runMode": "단계 양식",
+      "normEvidence": "측정함",
+      "runEvidence": "설계만",
+      "missing": [
+        "Argo Rollouts",
+        "카나리 분석"
+      ],
+      "runbook": "RB-23",
+      "expectedAlert": [
+        "카나리 분석 실패 SEV2(RB-23 링크)"
+      ],
+      "expectedAction": [
+        "분석 두 구간 안에 자동 중단, 안정판 100% 복귀, 되돌리기 결정부터 이전 버전 100%까지 시간 기록(목표 5분 [가정])"
+      ],
+      "recovery": [
+        "안정판 100%, SLO·카나리·오류율 기준 아래, 되돌리기 시간·원인 기록"
+      ],
+      "invariant": [
+        "오류 예산"
+      ],
+      "steps": [
+        "T0",
+        "T1p",
+        "T1",
+        "T2",
+        "T3",
+        "T4"
+      ],
+      "stageReady": false,
+      "commands": [
+        "node loadtest/run.mjs v1 gameday-recovery --window 3f --scenario G-18 --steps --record --run-id 2026-11-29-g-18-f0813 --out .cache/peaket-f0813/g-18"
+      ]
+    }
+  ],
+  "drills": [
+    {
+      "id": "R-PG-FAILOVER",
+      "window": "3d",
+      "name": "로컬 PostgreSQL 장애 조치",
+      "mode": "대체 장애",
+      "runMode": "모의 진행",
+      "normEvidence": "측정함",
+      "runEvidence": "설계만",
+      "missing": [
+        "복제본",
+        "승격"
+      ],
+      "runbook": "RB-10",
+      "checks": [
+        "주 서버 종료 뒤 재시도·멱등·Outbox가 이어지는지",
+        "복제본 승격 시간은 문서 인용인지",
+        "관리형 Aurora 장애 조치 시간과 섞지 않았는지"
+      ],
+      "stageReady": false,
+      "commands": [
+        "node loadtest/run.mjs v1 gameday-recovery --window 3d --drill R-PG-FAILOVER --tabletop --record --run-id 2026-11-29-r-pg-failover-f0813 --out .cache/peaket-f0813/r-pg-failover"
+      ]
+    },
+    {
+      "id": "R-PITR",
+      "window": "3e",
+      "name": "PITR 시점 복원",
+      "mode": "리허설",
+      "runMode": "모의 진행",
+      "normEvidence": "설계만",
+      "runEvidence": "설계만",
+      "missing": [
+        "백업",
+        "WAL 아카이브"
+      ],
+      "runbook": "RB-10",
+      "checks": [
+        "복원 시점",
+        "복원 뒤 파기 감사 로그 재적용",
+        "재적용 건수와 기록 대조, 서비스에 붙이기 전 검증"
+      ],
+      "stageReady": false,
+      "commands": [
+        "node loadtest/run.mjs v1 gameday-recovery --window 3e --drill R-PITR --tabletop --record --run-id 2026-11-29-r-pitr-f0813 --out .cache/peaket-f0813/r-pitr"
+      ]
+    },
+    {
+      "id": "R-CROSS-REGION",
+      "window": "3e",
+      "name": "교차 리전 복원",
+      "mode": "모의 진행",
+      "runMode": "모의 진행",
+      "normEvidence": "설계만",
+      "runEvidence": "설계만",
+      "missing": [
+        "도쿄 스택",
+        "교차 리전 백업"
+      ],
+      "runbook": "RB-18",
+      "checks": [
+        "복구 Terraform 계획과 런북 대조",
+        "걸릴 시간 계산",
+        "실제 복원을 측정으로 주장하지 않았는지"
+      ],
+      "stageReady": false,
+      "commands": [
+        "node loadtest/run.mjs v1 gameday-recovery --window 3e --drill R-CROSS-REGION --tabletop --record --run-id 2026-11-29-r-cross-region-f0813 --out .cache/peaket-f0813/r-cross-region"
+      ]
+    }
+  ],
+  "stopRules": [
+    {
+      "id": "STOP-01",
+      "rule": "무대가 없다고 새로 만들려 한다(Mimir·KMS·NLB·Argo Rollouts 설치 등)."
+    },
+    {
+      "id": "STOP-02",
+      "rule": "모의 진행 기록에 실제 주입·측정값을 지어 넣는다."
+    },
+    {
+      "id": "STOP-03",
+      "rule": "`설계만`을 `통과`·`측정함`으로 적는다."
+    },
+    {
+      "id": "STOP-04",
+      "rule": "런북·정본에 없는 기대 대응을 만든다."
+    },
+    {
+      "id": "STOP-05",
+      "rule": "개인 식별자·연락처·내부 주소가 기록에 들어간다."
+    },
+    {
+      "id": "STOP-06",
+      "rule": "Docker·kind·k6·브라우저를 쓰려 한다(이 기능은 쓰지 않는다. 필요하면 감독에게 묻는다)."
+    },
+    {
+      "id": "STOP-07",
+      "rule": "기록 양식의 필수 칸이 빈다."
+    },
+    {
+      "id": "STOP-08",
+      "rule": "같은 시나리오가 두 번 연속 `무효`다."
+    },
+    {
+      "id": "STOP-09",
+      "rule": "G-18 단계 시간선이 뒤집히거나 T2·T4가 없다."
+    },
+    {
+      "id": "STOP-10",
+      "rule": "감독이 중단을 지시했거나 실제 외부 피해·개인정보 노출이 의심된다."
+    }
+  ],
+  "priorMeasurements": {
+    "F-08-5": "무효·미측정",
+    "F-08-9": "판정 못 함(무효·부분)",
+    "F-08-10": "미측정",
+    "F-08-12": "미측정"
+  },
+  "notIncluded": [
+    "NFR-027",
+    "V-T10",
+    "V-T27",
+    "V-T28",
+    "P-T1",
+    "SR-T13",
+    "NFR-028",
+    "V-T18",
+    "Q-T2",
+    "S-T1",
+    "K1",
+    "K2",
+    "K7",
+    "V-T4",
+    "V-T5",
+    "V-T17",
+    "K8",
+    "K9"
+  ],
+  "boundaries": [
+    {
+      "feature": "F-08-6",
+      "owns": "Game Day 33종 전체·gameday.mjs·SLO/KPI ADR",
+      "doesNot": "33종 재실행, gameday.mjs 복사·재사용"
+    },
+    {
+      "feature": "F-08-9",
+      "owns": "V-T27·V-T28·P-T1·SR-T13·NFR-028",
+      "doesNot": "재측정, 통과 주장"
+    },
+    {
+      "feature": "F-08-10",
+      "owns": "V-T18·세 구성 비교·M2",
+      "doesNot": "비교·블로그"
+    },
+    {
+      "feature": "F-08-11",
+      "owns": "런북 41종·인시던트 기준·색인",
+      "doesNot": "런북 수정, 색인 수정"
+    },
+    {
+      "feature": "F-08-12",
+      "owns": "14종 로컬 실행·gameday-local.mjs·보고서",
+      "doesNot": "14종 재실행, gameday-local.mjs 수정·import"
+    },
+    {
+      "feature": "F-08-14",
+      "owns": "K8·K9·관측 백엔드 비교",
+      "doesNot": "K8 10종·K9 판정, 관측 백엔드 비교"
+    },
+    {
+      "feature": "F-08-8",
+      "owns": "Q-T2·S-T1·P-T1·K1·K2·K7",
+      "doesNot": "K1·K2·K7 재측정, 0건 주장"
+    },
+    {
+      "feature": "F-08-5",
+      "owns": "NFR-027·V-T10 6시간",
+      "doesNot": "6시간 재실행, V-T10 판정"
+    },
+    {
+      "feature": "F-08-2",
+      "owns": "100만 외삽·진입 비례",
+      "doesNot": "100만 실측·외삽"
+    },
+    {
+      "feature": "release/1.0.0",
+      "owns": "v1 출시 계약",
+      "doesNot": "release manifest·체리픽·태그"
+    }
+  ]
+}

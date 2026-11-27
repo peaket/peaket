@@ -42,6 +42,7 @@ import { accountRef, pidOf, sidOf } from './lib/users.mjs';
 import { DEFAULTS, SCENARIOS, UsageError, V1_ENTRY_SCENARIO, V1_SCENARIOS, parseArgs } from './runner/args.mjs';
 import { assertLocalConfig, compareExperiment, experimentFor, manifestNotes, renderComparison } from './runner/split-compare.mjs';
 import { F0812_PRIOR_MEASUREMENTS, F0812_SCENARIOS, F0812_STOP_RULES, F0812_WINDOWS, judgeLocalScenario } from './runner/gameday-local.mjs';
+import { F0813_PRIOR_MEASUREMENTS, F0813_RESTORE_DRILLS, F0813_SCENARIOS, F0813_STOP_RULES, F0813_WINDOWS, judgeG18Steps, judgeRecoveryScenario } from './runner/gameday-recovery.mjs';
 import { GENERATOR_RATE as ENTRY_GENERATOR_RATE, hostTags, runEntrySteps } from './runner/entry-scale.mjs';
 import { hostBetween, hostSnapshot } from './runner/host-metrics.mjs';
 import { CHECK_PHASES, checksFromSummary, executionSegments, generatorCount, mergeSummaries, withoutHistogramChecks } from './runner/merge.mjs';
@@ -2446,6 +2447,81 @@ async function runF0812Command(a) {
   return { outDir, exitCode: 0 };
 }
 
+// ───────────── F-08-13 동결 로컬 트랙(v1 gameday-recovery) ─────────────
+
+/**
+ * F-08-13 Game Day 모의 진행·복원 연습 계획·판정. 측정 창 전에는 계획만 쓰고 Docker·kind·k6를 시작하지 않는다.
+ * `--judge`는 run.json 모양 입력을 판정해 judge.json을 쓴다. G-18은 steps가 있으면 단계 판정을 쓴다.
+ */
+async function runF0813Command(a) {
+  if (a.judge) {
+    const inputPath = resolve(a.judge);
+    if (!existsSync(inputPath)) throw new Error(`판정 입력이 없다: ${inputPath}`);
+    const files = statSync(inputPath).isDirectory()
+      ? readdirSync(inputPath).filter((f) => f.endsWith('.json')).sort().map((f) => join(inputPath, f))
+      : [inputPath];
+    const results = files.map((file) => {
+      const input = JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+      const one = (run) => ({
+        file,
+        scenario: run?.scenario ?? run?.id ?? null,
+        ...(Array.isArray(run?.steps) ? judgeG18Steps(run) : judgeRecoveryScenario({ scenario: run?.scenario ?? run?.id, record: run?.record ?? run, stageReady: run?.stageReady })),
+      });
+      return Array.isArray(input) ? input.map(one) : one(input);
+    }).flat();
+    const out = resolve(a.out ?? join('.cache', 'peaket-f0813', 'judge.json'));
+    mkdirSync(dirname(out), { recursive: true });
+    writeFileSync(out, `${JSON.stringify(results, null, 2)}\n`);
+    log(`F-08-13 gameday-recovery judge: ${results.length}건, ${out}`);
+    return { outDir: dirname(out), exitCode: 0 };
+  }
+  const window = F0813_WINDOWS.find((w) => w.id === a.window);
+  const selected = a.gamedayRecoveryScenario
+    ? F0813_SCENARIOS.filter((s) => s.id === a.gamedayRecoveryScenario)
+    : a.drill
+      ? F0813_RESTORE_DRILLS.filter((d) => d.id === a.drill)
+      : [
+        ...F0813_SCENARIOS.filter((s) => window.scenarioIds.includes(s.id)),
+        ...F0813_RESTORE_DRILLS.filter((d) => d.window === a.window),
+      ];
+  const outDir = resolve(a.out ?? join('.cache', 'peaket-f0813', a.gamedayRecoveryScenario ?? a.drill ?? a.window));
+  mkdirSync(outDir, { recursive: true });
+  const plan = {
+    tool: 'gameday-recovery',
+    window: a.window,
+    scenario: a.gamedayRecoveryScenario,
+    drill: a.drill,
+    tabletop: a.tabletop,
+    steps: a.steps,
+    record: a.record,
+    runId: a.runId,
+    execute: false,
+    status: '미실행',
+    scenarios: selected,
+    stopRules: F0813_STOP_RULES,
+    priorMeasurements: F0813_PRIOR_MEASUREMENTS,
+    notes: [
+      '측정 창 전에는 계획만 쓴다. Docker·kind·k6·브라우저를 시작하지 않는다.',
+      '6종과 복원 3종은 무대가 없어 설계만/판정 못 함이다. 이 무대에서 통과 가능한 시나리오는 0이다.',
+    ],
+  };
+  writeFileSync(join(outDir, 'gameday-recovery-plan.json'), `${JSON.stringify(plan, null, 2)}\n`);
+  if (a.record) {
+    writeFileSync(join(outDir, 'run.json'), `${JSON.stringify({
+      status: '미실행',
+      window: a.window,
+      scenario: a.gamedayRecoveryScenario,
+      drill: a.drill,
+      runId: a.runId,
+      tabletop: a.tabletop,
+      steps: a.steps,
+      note: '측정 창에서 모의 진행 기록을 채운다. 이 파일은 계획 단계의 표시다.',
+    }, null, 2)}\n`);
+  }
+  log(`F-08-13 gameday-recovery: ${selected.length}종 계획을 ${outDir}에 남겼다 (미실행 — Docker·kind·k6를 시작하지 않는다)`);
+  return { outDir, exitCode: 0 };
+}
+
 // ───────────── 게이트웨이 차단 상한·검색 IP 한도(gw, V-T43·SR-T13 ②, BAT-056) ─────────────
 
 /** 시나리오가 쓰는 회차 ID(대역 백엔드는 보지 않는다) */
@@ -2658,7 +2734,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } catch (e) {
     if (e instanceof UsageError) {
       console.error(`loadtest/run.mjs: ${e.message}`);
-      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment|entry-steps|relay-fault|search|payment-fault|compare|compare-report|gameday-local [...] | gw sweep|capacity|ip-limit|limits [...] | cleanup (loadtest/README.md)');
+      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment|entry-steps|relay-fault|search|payment-fault|compare|compare-report|gameday-local|gameday-recovery [...] | gw sweep|capacity|ip-limit|limits [...] | cleanup (loadtest/README.md)');
       process.exit(2);
     }
     throw e;
@@ -2685,7 +2761,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     });
   }
   try {
-    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : a.scenario === 'relay-fault' ? await runF089Command(a, runTag, 'relay-fault') : a.scenario === 'search' ? await runF089Command(a, runTag, 'search') : a.scenario === 'payment-fault' ? await runF089Command(a, runTag, 'payment-fault') : a.scenario === 'compare' ? await runF0810Command(a, runTag) : a.scenario === 'compare-report' ? await runF0810Report(a) : a.scenario === 'gameday-local' ? await runF0812Command(a) : await runV1(a, runTag)) : await runV0(a, runTag);
+    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : a.scenario === 'relay-fault' ? await runF089Command(a, runTag, 'relay-fault') : a.scenario === 'search' ? await runF089Command(a, runTag, 'search') : a.scenario === 'payment-fault' ? await runF089Command(a, runTag, 'payment-fault') : a.scenario === 'compare' ? await runF0810Command(a, runTag) : a.scenario === 'compare-report' ? await runF0810Report(a) : a.scenario === 'gameday-local' ? await runF0812Command(a) : a.scenario === 'gameday-recovery' ? await runF0813Command(a) : await runV1(a, runTag)) : await runV0(a, runTag);
     log(`\n산출물: ${r.outDir}`);
     process.exit(r.exitCode);
   } catch (e) {

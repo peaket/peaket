@@ -73,6 +73,24 @@ node loadtest/run.mjs v1 gameday-local --window 3a --judge .cache/peaket-f0812/g
 - 실행 ID는 `-f0812`로 끝나고, Docker 잠금은 `docker lane4-F-08-12` 한 자리만 씁니다(`docker-all` 금지). 14종 실제 실행·측정은 측정 창 몫이며 이 명령은 실행하지 않습니다.
 - 정본·계획: `docs/observability.md` §12, `docs/verification.md` §5.2, `docs/review/plans/F-08-12.md` §6~§10.
 
+### Game Day 모의 진행·복원 연습(F-08-13)
+
+`v1 gameday-recovery`는 6종(G-26·G-27·G-28·G-32·G-33·G-18)과 복원 연습 3종(R-PG-FAILOVER·R-PITR·R-CROSS-REGION)의 계획·판정을 다룹니다. 측정 창 전에는 `gameday-recovery-plan.json`(또는 `run.json`)만 쓰고 **Docker·kind·k6·브라우저를 시작하지 않습니다.**
+
+```bash
+node loadtest/run.mjs v1 gameday-recovery --window 3d
+node loadtest/run.mjs v1 gameday-recovery --window 3f --scenario G-18 --steps --record --run-id 2026-11-29-g-18-f0813 --out .cache/peaket-f0813/g18
+node loadtest/run.mjs v1 gameday-recovery --window 3d --drill R-PG-FAILOVER --tabletop --record --run-id 2026-11-29-r-pg-failover-f0813 --out .cache/peaket-f0813/rpg
+node loadtest/run.mjs v1 gameday-recovery --window 3d --judge .cache/peaket-f0813/g18/run.json --out .cache/peaket-f0813/judge.json
+```
+
+- 6종·복원 3종은 모두 `stageReady:false`이고 이번 연습은 `설계만`입니다. 이 무대에서 통과 가능한 시나리오는 0입니다. G-18은 Argo Rollouts가 없어 `판정 못 함`입니다.
+- G-18 단계는 **T0 → T1p(`ALERTS` firing) → T1(Alertmanager 웹훅) → T2 → T3 → T4**이고, T1은 null일 수 있습니다. 되돌리기 시간은 T4−T2, 목표 300초 [가정]입니다(300.000 통과·300.001 미달).
+- `통과`는 실행 ID(`-f0813$`)·`runExists`·`manifest`·`timeline`·기대 대응 증거가 모두 있을 때만입니다. 없으면 `판정 못 함`입니다.
+- 보고서·탁상 기록 검증은 전화번호·이메일·사설 IP, `30k/s`·`30,000건/초`·`100만`·`K1`·`K2`·`K7` 주장을 거부합니다.
+- 선행 인용: F-08-5 `무효·미측정`, F-08-9 `판정 못 함(무효·부분)`, F-08-10 `미측정`, F-08-12 `미측정`.
+- 정본·계획: `docs/observability.md` §12, `docs/verification.md` §5.2·§5.3, `docs/review/plans/F-08-13.md` §6~§10.
+
 ### 진입 서버 비례 확인(MSR-020)
 
 무대는 진입 서버 수·CPU 몫·켤 서비스를 정해 올립니다: `node tools/local/cluster.mjs v1 --redis-tls on --replicas N --cpus <몫> --services queue-svc`(넷을 다 켜지 않으면 합본은 single 모드로 뜬다). 단계 올리기 뒤 계산은 `node loadtest/runner/entry-scale.mjs choose|report`입니다.

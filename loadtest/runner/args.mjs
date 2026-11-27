@@ -12,6 +12,7 @@
 //   node loadtest/run.mjs v1 compare --config bundle|by-role|services --entry none|100|120 --rep 1..3 [--entry-max-rate N] [--payment-tps 300] [--record --run-id <ID> --out <폴더> --prom-url …](F-08-10 V-T18, ./split-compare.mjs)
 //   node loadtest/run.mjs v1 compare-report [--experiment split-3way] [--runs <폴더>] [--out <comparison.json>](F-08-10 V-T18 비교 요약)
 //   node loadtest/run.mjs v1 gameday-local --window 3a|3b|3c [--scenario G-xx] [--group A|B] [--record --run-id <ID>] [--partial] [--out <폴더>] [--judge <run.json>](F-08-12 계획·판정, 실행하지 않음)
+//   node loadtest/run.mjs v1 gameday-recovery --window 3d|3e|3f (--scenario G-xx [--tabletop|--steps] | --drill R-xx --tabletop) [--record --run-id <ID>] [--out <폴더>] [--judge <run.json>](F-08-13 계획·판정, 실행하지 않음)
 //   node loadtest/run.mjs gw sweep|capacity|ip-limit|limits …(게이트웨이 차단 상한·검색 IP 한도, BAT-056·BAT-058. 인자 규칙은 ./gw.mjs parseGwArgs가 맡는다)
 //   공통: [--warm 30] [--main 60] [--cpus 4] [--memory-mi 4096] [--generators N] [--namespace v0|v0-base] [--settle] [--hpa-timeline]
 //         [--record --run-id <ID> [--profile <이름>] [--prom-url http://127.0.0.1:9090]] [--invariants] [--out <폴더>]
@@ -31,6 +32,7 @@ import { parseSearchArgs } from './search-measure.mjs';
 import { parsePaymentFaultArgs } from './payment-fault.mjs';
 import { parseCompareArgs, parseCompareReportArgs } from './split-compare.mjs';
 import { parseGamedayLocalArgs } from './gameday-local.mjs';
+import { parseRecoveryArgs } from './gameday-recovery.mjs';
 
 /** 입구의 IP당 초당 요청 한도(deploy/envs/local/v0-gateway.yaml PEAKET_V0_RATE_PER_SECOND, 시험이 견준다) */
 export const GATEWAY_RATE_PER_IP = 10;
@@ -248,6 +250,10 @@ export function parseArgs(argv) {
     if (scenario === 'gameday-local') {
       const parsed = parseGamedayLocalArgs(rest0.slice(1));
       return { ...parsed, command: 'v1', scenario, gamedayScenario: parsed.scenario };
+    }
+    if (scenario === 'gameday-recovery') {
+      const parsed = parseRecoveryArgs(rest0.slice(1));
+      return { ...parsed, command: 'v1', scenario, gamedayRecoveryScenario: parsed.scenario };
     }
     if (!Object.hasOwn(V1_SCENARIOS, scenario ?? '')) fail(`v1 시나리오는 ${Object.keys(V1_SCENARIOS).join('·')} 가운데 하나다: ${scenario ?? '(없음)'}`);
     kind = `v1:${scenario}`;
