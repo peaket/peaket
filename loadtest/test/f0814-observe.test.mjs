@@ -6,6 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -16,25 +17,71 @@ const REPORT = path.join(ROOT, 'docs', 'review', 'measurements', 'F-08-14.md');
 const PLAN_DOC = path.join(ROOT, 'docs', 'review', 'plans', 'F-08-14.md');
 
 const K8_IDS = Array.from({ length: 10 }, (_, i) => `G-${String(i + 1).padStart(2, '0')}`);
+/** docs/observability.md §12:736~747의 이름과 기대 경보. 느슨한 조각이 아니라 전체 문자열이다. */
 const K8_EXPECTED = [
-  { id: 'G-01', name: /대기열 Redis/, alert: /대기열 진입 번 레이트/ },
-  { id: 'G-02', name: /좌석 Redis/, alert: /좌석 홀드|seat_store_unavailable|페일오버/ },
-  { id: 'G-03', name: /CDN 엣지/, alert: /대기 순번 조회|가용성 저하/ },
-  { id: 'G-04', name: /공연 상세/, alert: /공연 정보 페이지|에러 버짓/ },
-  { id: 'G-05', name: /결제 승인 API|결제사|PG/, alert: /결제 확정 임박|RB-07|SEV1/ },
-  { id: 'G-06', name: /realtime-gw|소켓 송신 버퍼/, alert: /버퍼|realtime_gw_degraded/ },
-  { id: 'G-07', name: /ops-rt|스트림 작업자/, alert: /신선도|경고 색/ },
-  { id: 'G-08', name: /ops-svc/, alert: /가용성 상실|SEV1/ },
-  { id: 'G-09', name: /admission-ctrl/, alert: /리더 부재|SEV2/ },
-  { id: 'G-10', name: /MSK|브로커/, alert: /브로커 오프라인|소비 지연/ },
+  {
+    id: 'G-01',
+    name: '대기열 Redis 클러스터 CPU 사용률 > 75% 강제 주입',
+    alert: '대기열 진입 번 레이트 가속 경보 발령',
+  },
+  {
+    id: 'G-02',
+    name: '좌석 Redis 클러스터 프라이머리 마스터 노드 강제 페일오버(고장 난 쪽 대신 예비 쪽으로 넘기는 것)',
+    alert: '좌석 홀드 503(`seat-store-unavailable`) 급증, `seat_store_unavailable{event_id}` = 1, 페일오버 감지 이벤트 수신',
+  },
+  {
+    id: 'G-03',
+    name: 'CDN 엣지의 대기열 상태 조회 파일 응답 오류율 > 1% 주입',
+    alert: '대기 순번 조회 가용성 저하 경보',
+  },
+  {
+    id: 'G-04',
+    name: '공연 상세 페이지 오리진 서버 에러율 > 1% 주입',
+    alert: '공연 정보 페이지 에러 버짓 소진 경보',
+  },
+  {
+    id: 'G-05',
+    name: 'PG사(토스형 시뮬레이터) 결제 승인 API에 지연시간 p99 > 5초인 지연을 일부러 주입',
+    alert: 'SEV2 결제 확정 임박(승인 호출 p99 2초 초과, 호출은 끊지 않는다), 결제 확정 소요 p99 5초 초과로 RB-07 전환 검토, 결제 확정 SLO 소진이 10배에 닿으면 SEV1(ADR-0069)',
+  },
+  {
+    id: 'G-06',
+    name: 'realtime-gw 파드의 소켓 송신 버퍼 큐 포화 상태 유발',
+    alert: '버퍼로 1초 간격이 된 연결 비율 경보(`realtime_gw_buffer_slow_connections` ÷ `realtime_gw_connections` 5% [가정] 30초, SEV2)와 `realtime_gw_degraded` 경보(ADR-0298)',
+  },
+  {
+    id: 'G-07',
+    name: '스트림 작업자 `ops-rt` 밀림 주입(ClickHouse 삽입 지연, ADR-0099)',
+    alert: '판매 중 탭 머리의 신선도가 경고 색(1분 p95 5초 넘음)으로 바뀌는 것이 K8의 탐지다. 3분 넘게 이어지면 SEV3(hygiene, ADR-0071)(추천 적용 2026-10-20, ADR-0073)',
+  },
+  {
+    id: 'G-08',
+    name: 'ops-svc 관제 백엔드 파드 모두 강제 종료 (CrashLoopBackOff)',
+    alert: 'ops-svc 가용성 상실 SEV1(§5 관제 자체·기반 신호, 30초 [가정])',
+  },
+  {
+    id: 'G-09',
+    name: 'admission-ctrl 리더 파드의 프로세스 강제 종료 (SIGKILL)',
+    alert: 'admission-ctrl 리더 부재 30초 [가정] 초과 SEV2(§5)',
+  },
+  {
+    id: 'G-10',
+    name: 'MSK Kafka 브로커 노드 1대 강제 오프라인 격리',
+    alert: '브로커 오프라인 SEV2, 거래 토픽 소비 지연 30초 [가정]·1분이면 같은 SEV2(§5)',
+  },
 ];
+const K8_INTERVALS = Object.fromEntries([
+  ...['G-01', 'G-02', 'G-03', 'G-04', 'G-05', 'G-06'].map((id) => [id, { scrapeSec: 5, evalSec: 5, groupWaitSec: 5, forSec: 0 }]),
+  ['G-07', { scrapeSec: 15, evalSec: 5, groupWaitSec: 5, forSec: 0 }],
+  ...['G-08', 'G-09', 'G-10'].map((id) => [id, { scrapeSec: 15, evalSec: 5, groupWaitSec: 5, forSec: 30 }]),
+]);
 const PRIOR = [
-  { id: 'F-08-5', status: /무효·미측정/ },
-  { id: 'F-08-9', status: /판정 못 함\(무효·부분\)/ },
-  { id: 'F-08-10', status: /미측정/ },
-  { id: 'F-08-12', status: /미측정/ },
-  { id: 'F-08-13', status: /설계만·판정 못 함/ },
-  { id: 'F-08-6', status: /미측정/ },
+  { id: 'F-08-5', status: '무효·미측정', evidence: '측정' },
+  { id: 'F-08-9', status: '판정 못 함(무효·부분)', evidence: '측정' },
+  { id: 'F-08-10', status: '미측정', evidence: '뼈대' },
+  { id: 'F-08-12', status: '미측정', evidence: '뼈대' },
+  { id: 'F-08-13', status: '미측정', evidence: '설계만' },
+  { id: 'F-08-6', status: '미측정', evidence: '뼈대' },
 ];
 const FORBIDDEN = [
   { token: '30k/s', claim: () => true },
@@ -77,29 +124,52 @@ function readJson(file) {
   }
 }
 
-const usage = (fn) => assert.throws(fn, (e) => e?.name === 'UsageError', 'UsageError로 거부해야 한다');
+function withTemp(files, fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'f0814-'));
+  try {
+    const paths = {};
+    for (const [name, text] of Object.entries(files)) {
+      const file = path.join(dir, name);
+      fs.writeFileSync(file, text, 'utf8');
+      paths[name] = file;
+    }
+    return fn(paths, dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 /** K8 입력 한 행. 값은 시험이 손으로 정한 합성값이고 측정값이 아니다. */
 function k8Row(id, overrides = {}) {
   return {
     id,
-    verdict: '통과',
-    detectionSec: 10,
-    propagationSec: 1,
+    t0: 0,
+    t1: 10_000,
+    t1p: 9_000,
+    t2: 20_000,
+    t3: 21_000,
+    runId: `run-${id}`,
+    runExists: true,
+    manifest: true,
+    timeline: true,
+    intervals: { ...K8_INTERVALS[id] },
     evidence: 'Alertmanager 웹훅 수신 로그',
     valid: true,
     stageReady: true,
-    source: 'F-08-6',
+    source: id === 'G-02' || id === 'G-10' ? 'F-08-6·F-08-12' : 'F-08-6',
     ...overrides,
   };
 }
-const k8Rows = (detectionSec = 10, propagationSec = 1) =>
-  K8_IDS.map((id) => k8Row(id, { detectionSec, propagationSec }));
+const k8Rows = (overrides = {}) => K8_IDS.map((id) => k8Row(id, overrides));
 
 /** K9 입력 한 실행. 값은 시험이 손으로 정한 합성값이고 측정값이 아니다. */
 function k9Run(readyMs, overrides = {}) {
   return {
     runId: '2026-11-24-k1-1k-r1-f0814',
+    runExists: true,
+    manifest: true,
+    timeline: true,
+    settle: true,
     valid: true,
     loadStartMs: 0,
     scaledAtMs: 10_000,
@@ -125,12 +195,22 @@ const METRICS = {
   editors: 2,
   viewers: 5,
 };
+const TRACE_STORE = {
+  obsKafkaMonthlyUsd: 100,
+  xrayTracesPerMonth: 2_000_000,
+  xrayQueriesPerMonth: 5_000_000,
+  openPeakOk: { tempoMsk: true, tempoMonolith: true, xray: true },
+  opsHoursPerYear: { tempoMsk: 100, tempoMonolith: 100, xray: 50 },
+};
 const backendInput = (overrides = {}) => ({
   metrics: { ...METRICS, ...(overrides.metrics ?? {}) },
   opsHoursPerYear: { self: 100, aws: 100, datadog: 50, ...(overrides.opsHoursPerYear ?? {}) },
   krwPerUsd: 1_400,
-  r3: { datadog: false, ...(overrides.r3 ?? {}) },
+  fxSource: '한국은행 기준환율',
+  fxDate: '2026-11-28',
   priceDate: '2026-11-28',
+  r3: { datadog: false, ...(overrides.r3 ?? {}) },
+  traceStore: { ...TRACE_STORE, ...(overrides.traceStore ?? {}) },
   ...overrides,
 });
 
@@ -142,8 +222,13 @@ function reportInput(overrides = {}) {
     k8: {
       rows: K8_IDS.map((id) => ({
         id,
-        name: K8_EXPECTED.find((s) => s.id === id).name.source,
+        name: K8_EXPECTED.find((s) => s.id === id).name,
         source: 'F-08-6',
+        t0: null,
+        t1: null,
+        t1p: null,
+        t2: null,
+        t3: null,
         detectionSec: null,
         propagationSec: null,
         verdict: '미측정',
@@ -154,7 +239,7 @@ function reportInput(overrides = {}) {
     backends: { candidates: [], sensitivity: null, chosen: null },
     components: [],
     traceStores: [],
-    prior: PRIOR.map((p) => ({ id: p.id, status: p.id === 'F-08-13' ? '설계만·판정 못 함' : p.id === 'F-08-9' ? '판정 못 함(무효·부분)' : p.id === 'F-08-5' ? '무효·미측정' : '미측정' })),
+    prior: PRIOR.map((p) => ({ ...p })),
     ...overrides,
   };
 }
@@ -169,36 +254,53 @@ test('F0814-1 ① K8 10종 ID·차례·이름·기대 경보가 docs/observabili
     assert.ok(s, `${expected.id}가 카탈로그에 없다`);
     assert.equal(s.order, i + 1);
     assert.equal(s.id, expected.id);
-    assert.match(s.name, expected.name);
-    assert.match(s.expectedAlert, expected.alert);
+    assert.equal(s.name, expected.name);
+    assert.equal(s.expectedAlert, expected.alert);
+    assert.equal(s.canonical, 'docs/observability.md §12');
     assert.ok(String(s.source).includes('F-08-6'), `${expected.id}의 입력에 F-08-6이 없다`);
   }
   for (const s of m.F0814_SCENARIOS) assert.ok(K8_IDS.includes(s.id), `${s.id}는 K8 10종이 아니다`);
   assert.equal(m.F0814_SCENARIOS.some((s) => /^G-(1[1-9]|2[0-9]|3[0-3])$/.test(s.id)), false);
 });
 
-test('F0814-1 ② 입력 표: F-08-6 10행·F-08-12 2행(G-02·G-10)·F-08-13 0행, 선행 인용 다섯 + F-08-6 미측정', async () => {
+test('F0814-1 ② 입력 표·선행 인용·입력 읽기: F-08-13은 미측정(설계만), 파일 없음/0행은 미측정', async () => {
   const m = need(await load());
   const f6 = m.F0814_INPUTS.find((x) => x.id === 'F-08-6');
   const f12 = m.F0814_INPUTS.find((x) => x.id === 'F-08-12');
   const f13 = m.F0814_INPUTS.find((x) => x.id === 'F-08-13');
-  assert.ok(f6 && f12 && f13, 'F-08-6·F-08-12·F-08-13 입력이 모두 있어야 한다');
+  const f8 = m.F0814_INPUTS.find((x) => x.id === 'F-08-8');
+  const ops = m.F0814_INPUTS.find((x) => x.id === 'ops-hours');
+  assert.ok(f6 && f12 && f13 && f8 && ops, 'F-08-6·F-08-12·F-08-13·F-08-8·ops-hours 입력이 모두 있어야 한다');
   assert.deepEqual(f6.k8Ids, K8_IDS);
   assert.deepEqual(f12.k8Ids, ['G-02', 'G-10']);
   assert.deepEqual(f13.k8Ids, []);
   assert.equal(f6.status, '미측정');
   assert.equal(f12.status, '미측정');
-  assert.equal(f13.status, '설계만·판정 못 함');
+  assert.equal(f13.status, '미측정');
+  assert.equal(f13.evidence, '설계만');
+  assert.equal(f8.status, '미측정');
+  assert.equal(f8.k9, true);
+  assert.equal(ops.status, '미측정');
   assert.deepEqual(m.F0814_PRIOR_MEASUREMENTS.map((x) => x.id), PRIOR.map((x) => x.id));
   for (const p of PRIOR) {
     const got = m.F0814_PRIOR_MEASUREMENTS.find((x) => x.id === p.id);
     assert.ok(got, `${p.id} 선행 인용이 없다`);
-    assert.match(got.status, p.status);
+    assert.equal(got.status, p.status);
+    assert.equal(got.evidence, p.evidence);
   }
-  assert.ok(m.F0814_PRIOR_MEASUREMENTS.some((x) => x.id === 'F-08-6' && x.status === '미측정'), 'F-08-6 미측정 인용이 없다');
+
+  const missing = m.readK8Report(path.join(os.tmpdir(), 'f0814-no-such-report.md'));
+  assert.equal(missing.ok, false);
+  assert.equal(missing.missing, true);
+  withTemp({ 'k8.json': JSON.stringify({ rows: [k8Row('G-01')] }) }, (p) => {
+    const got = m.readK8Report(p['k8.json']);
+    assert.equal(got.ok, true);
+    assert.equal(got.rows.length, 1);
+    assert.equal(got.rows[0].id, 'G-01');
+  });
 });
 
-test('F0814-1 ③ K8 경계: 탐지 60.000/60.001초, 전파 3.000/3.001초, 분모 10, 입력 없음 null', async () => {
+test('F0814-1 ③ K8 경계·간격·k8.csv 시각 칸: 60.000/60.001초, 3.000/3.001초, 분모 10', async () => {
   const m = need(await load());
   assert.deepEqual(m.F0814_K8_LIMITS, { detectionSec: 60, propagationSec: 3, detectionRate: 1 });
   assert.deepEqual(m.F0814_K9_LIMITS, { readySec: 60 });
@@ -206,24 +308,32 @@ test('F0814-1 ③ K8 경계: 탐지 60.000/60.001초, 전파 3.000/3.001초, 분
   assert.equal(m.F0814_K8_LIMITS.detectionSec * 1000, 60_000);
   assert.equal(m.F0814_K8_LIMITS.propagationSec * 1000, 3_000);
   assert.equal(m.F0814_K9_LIMITS.readySec * 1000, 60_000);
+  assert.deepEqual(Object.keys(m.F0814_K8_INTERVALS), K8_IDS);
+  assert.deepEqual(m.F0814_K8_INTERVALS['G-01'], { scrapeSec: 5, evalSec: 5, groupWaitSec: 5, forSec: 0 });
+  assert.deepEqual(m.F0814_K8_INTERVALS['G-07'], { scrapeSec: 15, evalSec: 5, groupWaitSec: 5, forSec: 0 });
+  assert.deepEqual(m.F0814_K8_INTERVALS['G-08'], { scrapeSec: 15, evalSec: 5, groupWaitSec: 5, forSec: 30 });
+  assert.deepEqual(m.F0814_ARTIFACTS.k8Csv.columns, ['scenario', 'source', 'run_id', 't0', 't1', 't1p', 't2', 't3', 'detection_sec', 'propagation_sec', 'verdict', 'evidence']);
 });
 
-test('F0814-2 ① judgeK8 기록 없음 → 미측정, detectionRate null, 빠진 ID 10', async () => {
+test('F0814-2 ① judgeK8 기록 없음 → 미측정, detectionRate null, measuredRate 0', async () => {
   const m = need(await load());
   const r = m.judgeK8({ rows: [] });
   assert.equal(r.verdict, '미측정');
   assert.equal(r.detectionRate, null);
+  assert.equal(r.measuredRate, 0);
   assert.equal(r.measured, 0);
   assert.equal(r.detected, 0);
   assert.equal(r.missing.length, 10);
   assert.ok(r.reasons.length > 0);
 });
 
-test('F0814-2 ② judgeK8 10행 모두 60.000초·3.000초 → 통과, 탐지율 1, 최댓값 60', async () => {
+test('F0814-2 ② judgeK8 10행 모두 60.000초·3.000초와 실행 증거·운영 간격 → 통과, 탐지율 1', async () => {
   const m = need(await load());
-  const r = m.judgeK8({ rows: k8Rows(60, 3) });
+  const rows = K8_IDS.map((id) => k8Row(id, { t1: 60_000, t1p: 59_000, t2: 70_000, t3: 73_000 }));
+  const r = m.judgeK8({ rows });
   assert.equal(r.verdict, '통과');
   assert.equal(r.detectionRate, 1);
+  assert.equal(r.measuredRate, 1);
   assert.equal(r.measured, 10);
   assert.equal(r.detected, 10);
   assert.equal(r.within60, 10);
@@ -232,32 +342,40 @@ test('F0814-2 ② judgeK8 10행 모두 60.000초·3.000초 → 통과, 탐지율
   assert.equal(r.propagationVerdict, '통과');
   assert.deepEqual(r.missing, []);
   assert.deepEqual(r.invalid, []);
+  assert.equal(r.perScenario[0].runId, 'run-G-01');
+  assert.equal(r.perScenario[0].detectionSec, 60);
+  assert.equal(r.perScenario[0].propagationSec, 3);
 });
 
-test('F0814-2 ③ judgeK8 60.001초·3.001초·한 행 미탐지 → 미달, 탐지율 0.9', async () => {
+test('F0814-2 ③ judgeK8 60.0005·3.0005·59.9999·2.9999 경계와 미탐지 → 미달, 탐지율 0.9', async () => {
   const m = need(await load());
   const over = k8Rows();
-  over[0].detectionSec = 60.001;
+  over[0] = { ...over[0], t1: 60_000.5, t1p: 59_000 };
   const r1 = m.judgeK8({ rows: over });
   assert.equal(r1.verdict, '미달');
   assert.equal(r1.detectionRate, 0.9);
-  assert.equal(r1.within60, 9);
+  assert.equal(r1.maxDetectionSec, 60.0005);
 
-  const overCmd = k8Rows();
-  overCmd[1].propagationSec = 3.001;
-  const r2 = m.judgeK8({ rows: overCmd });
-  assert.equal(r2.verdict, '미달');
-  assert.equal(r2.propagationVerdict, '미달');
+  const under = K8_IDS.map((id) => k8Row(id, { t1: 59_999.9, t1p: 59_000, t2: 70_000, t3: 72_999.9 }));
+  const r2 = m.judgeK8({ rows: under });
+  assert.equal(r2.verdict, '통과');
+  assert.equal(r2.maxDetectionSec, 59.9999);
+  assert.equal(r2.propagationMaxSec, 2.9999);
+
+  const overCmd = K8_IDS.map((id) => k8Row(id, { t1: 10_000, t2: 70_000, t3: 73_000.5 }));
+  const r3 = m.judgeK8({ rows: overCmd });
+  assert.equal(r3.verdict, '미달');
+  assert.equal(r3.propagationVerdict, '미달');
 
   const missed = k8Rows();
-  missed[2] = { ...missed[2], verdict: '미달', detectionSec: null };
-  const r3 = m.judgeK8({ rows: missed });
-  assert.equal(r3.verdict, '미달');
-  assert.equal(r3.detectionRate, 0.9);
-  assert.equal(r3.maxDetectionSec, 10);
+  missed[2] = { ...missed[2], t1: 120_000, t1p: 119_000 };
+  const r4 = m.judgeK8({ rows: missed });
+  assert.equal(r4.verdict, '미달');
+  assert.equal(r4.detectionRate, 0.9);
+  assert.equal(r4.maxDetectionSec, 120);
 });
 
-test('F0814-2 ④ judgeK8 일부 행 → 판정 못 함, 무효 행 → 무효, 중복·모르는 ID·증거 없음 거부', async () => {
+test('F0814-2 ④ judgeK8 일부 행 → 판정 못 함, 무효·증거 없음·간격 축소·G-07 T1 대체 규칙', async () => {
   const m = need(await load());
   assert.equal(m.judgeK8({ rows: k8Rows().slice(0, 5) }).verdict, '판정 못 함');
 
@@ -272,30 +390,45 @@ test('F0814-2 ④ judgeK8 일부 행 → 판정 못 함, 무효 행 → 무효, 
   assert.equal(m.judgeK8({ rows: unknown }).verdict, '무효');
 
   const noEvidence = k8Rows();
-  noEvidence[0] = { ...noEvidence[0], evidence: '' };
+  noEvidence[0] = { ...noEvidence[0], manifest: false };
   assert.equal(m.judgeK8({ rows: noEvidence }).verdict, '판정 못 함');
 
-  const notReady = k8Rows();
-  notReady[0] = { ...notReady[0], stageReady: false };
-  assert.equal(m.judgeK8({ rows: notReady }).verdict, '판정 못 함');
+  const noRun = k8Rows();
+  noRun[0] = { ...noRun[0], runId: '' };
+  assert.equal(m.judgeK8({ rows: noRun }).verdict, '판정 못 함');
+
+  const narrow = k8Rows();
+  narrow[0] = { ...narrow[0], intervals: { ...narrow[0].intervals, scrapeSec: 1 } };
+  assert.equal(m.judgeK8({ rows: narrow }).verdict, '무효');
+
+  const g7 = k8Rows();
+  g7[6] = { ...g7[6], t1: null, t1p: 12_000 };
+  const r = m.judgeK8({ rows: g7 });
+  assert.equal(r.verdict, '통과');
+  assert.equal(r.perScenario[6].usedT1p, true);
+  assert.equal(r.perScenario[6].detectionSec, 12);
+
+  const g1 = k8Rows();
+  g1[0] = { ...g1[0], t1: null, t1p: 12_000 };
+  assert.equal(m.judgeK8({ rows: g1 }).verdict, '판정 못 함');
 });
 
 test('F0814-2 ⑤ judgeK8 미측정·null 입력을 0으로 바꾸지 않고 0%를 만들지 않는다', async () => {
   const m = need(await load());
-  const rows = K8_IDS.map((id) => k8Row(id, { verdict: '미측정', detectionSec: null, propagationSec: null, evidence: '' }));
+  const rows = K8_IDS.map((id) => k8Row(id, { t0: null, t1: null, t1p: null, t2: null, t3: null, verdict: '미측정', evidence: '' }));
   const r = m.judgeK8({ rows });
   assert.equal(r.verdict, '미측정');
   assert.equal(r.detectionRate, null);
-  assert.equal(r.measuredRate, null);
+  assert.equal(r.measuredRate, 0);
   assert.equal(r.measured, 0);
   assert.notEqual(r.detectionRate, 0);
 
   const fakePass = k8Rows();
-  fakePass[0] = { ...fakePass[0], verdict: '통과', detectionSec: null };
+  fakePass[0] = { ...fakePass[0], manifest: false };
   assert.notEqual(m.judgeK8({ rows: fakePass }).verdict, '통과');
 });
 
-test('F0814-3 ① K9 정의: HPA, 복제 1→N, --hpa-timeline, 준비 60초, v0 인용과 v1 판정 분리', async () => {
+test('F0814-3 ① K9 정의: HPA, 복제 1→N, --hpa-timeline, 준비 60초, 입력 없음 이유', async () => {
   const m = need(await load());
   assert.equal(m.F0814_K9_LIMITS.readySec, 60);
   assert.equal(m.F0814_K9.name, 'hpa-pod-ready');
@@ -304,9 +437,11 @@ test('F0814-3 ① K9 정의: HPA, 복제 1→N, --hpa-timeline, 준비 60초, v0
   assert.match(m.F0814_K9.source, /docs\/verification\.md/);
   assert.match(m.F0814_K9.v0Note, /v0|baseline/);
   assert.equal(m.F0814_K9.v0IsV1Pass, false);
+  assert.equal(m.F0814_K9.inputStatus, '미측정');
+  assert.match(m.F0814_K9.reason, /HPA|범위 밖|끔/);
 });
 
-test('F0814-3 ② judgeK9 실행 없음 → 미측정, maxReadySec null', async () => {
+test('F0814-3 ② judgeK9 실행 없음·K9 요약 없음/빈 목록 → 미측정, maxReadySec null', async () => {
   const m = need(await load());
   const r = m.judgeK9({ runs: [] });
   assert.equal(r.verdict, '미측정');
@@ -314,19 +449,34 @@ test('F0814-3 ② judgeK9 실행 없음 → 미측정, maxReadySec null', async 
   assert.equal(r.medianReadySec, null);
   assert.equal(r.count, 0);
   assert.ok(r.reasons.length > 0);
+
+  const missing = m.readK9Summary(path.join(os.tmpdir(), 'f0814-no-such-k9.json'));
+  assert.equal(missing.ok, false);
+  assert.equal(missing.missing, true);
+  withTemp({ 'k9.json': JSON.stringify({ runs: [] }) }, (p) => {
+    const empty = m.readK9Summary(p['k9.json']);
+    assert.equal(empty.ok, false);
+    assert.equal(empty.runs.length, 0);
+  });
 });
 
-test('F0814-3 ③ judgeK9 60.000/60.001초, 시각 뒤집힘·복제 미증가·누락 → 무효', async () => {
+test('F0814-3 ③ judgeK9 60.000/60.001·등호 경계·replicasBefore≠1·runId/증거/--settle 없음', async () => {
   const m = need(await load());
   assert.equal(m.judgeK9({ runs: [k9Run(60_000)] }).verdict, '통과');
   assert.equal(m.judgeK9({ runs: [k9Run(60_001)] }).verdict, '미달');
+  assert.equal(m.judgeK9({ runs: [k9Run(60_000.5)] }).verdict, '미달');
+  assert.equal(m.judgeK9({ runs: [k9Run(59_999.9)] }).verdict, '통과');
+  assert.equal(m.judgeK9({ runs: [k9Run(0, { scaledAtMs: 0, podReadyAtMs: 0 })] }).verdict, '통과');
   assert.equal(m.judgeK9({ runs: [k9Run(5_000)] }).verdict, '무효');
+  assert.equal(m.judgeK9({ runs: [k9Run(60_000, { replicasBefore: 2 })] }).verdict, '무효');
   assert.equal(m.judgeK9({ runs: [k9Run(60_000, { replicasAfter: 1 })] }).verdict, '무효');
-  assert.equal(m.judgeK9({ runs: [k9Run(60_000, { scaledAtMs: null })] }).verdict, '무효');
+  assert.equal(m.judgeK9({ runs: [k9Run(60_000, { runId: '' })] }).verdict, '판정 못 함');
+  assert.equal(m.judgeK9({ runs: [k9Run(60_000, { manifest: false })] }).verdict, '판정 못 함');
+  assert.equal(m.judgeK9({ runs: [k9Run(60_000, { settle: false })] }).verdict, '무효');
   assert.equal(m.judgeK9({ runs: [k9Run(60_000, { valid: false })] }).verdict, '무효');
 });
 
-test('F0814-3 ④ judgeK9 여러 실행의 최댓값·중앙값, 하나라도 60.001초면 미달', async () => {
+test('F0814-3 ④ judgeK9 여러 실행의 최댓값·중앙값, 유효/무효 혼합은 무효', async () => {
   const m = need(await load());
   const ok = m.judgeK9({ runs: [k9Run(60_000, { runId: 'a' }), k9Run(30_000, { runId: 'b' }), k9Run(45_000, { runId: 'c' })] });
   assert.equal(ok.verdict, '통과');
@@ -335,15 +485,19 @@ test('F0814-3 ④ judgeK9 여러 실행의 최댓값·중앙값, 하나라도 60
   const bad = m.judgeK9({ runs: [k9Run(60_000, { runId: 'a' }), k9Run(60_001, { runId: 'b' })] });
   assert.equal(bad.verdict, '미달');
   assert.equal(bad.maxReadySec, 60.001);
+  const mixed = m.judgeK9({ runs: [k9Run(60_000, { runId: 'a' }), k9Run(60_000, { runId: 'b', valid: false })] });
+  assert.equal(mixed.verdict, '무효');
 });
 
-test('F0814-4 ① OPS-510 가격표·조회 날짜·샘플 예산 4천만·민감도 0.5/1/1.5·10% 유지·시간 단가 49,538원', async () => {
+test('F0814-4 ① OPS-510 가격표·조회 날짜·AMP 2단계·X-Ray 무료 범위·시간 단가 49,538원', async () => {
   const m = need(await load());
   const p = m.F0814_PRICES;
   assert.equal(p.amp.freeSamples, 40_000_000);
   assert.equal(p.amp.ingestTiers[0].upToSamples, 2_000_000_000);
   assert.equal(p.amp.ingestTiers[0].perSamples, 10_000_000);
   assert.equal(p.amp.ingestTiers[0].unitPriceUsd, 0.9);
+  assert.equal(p.amp.ingestTiers[1].upToSamples, 250_000_000_000);
+  assert.equal(p.amp.ingestTiers[1].perSamples, 10_000_000);
   assert.equal(p.amp.ingestTiers[1].unitPriceUsd, 0.35);
   assert.equal(p.amp.storageFreeGB, 10);
   assert.equal(p.amp.storagePerGBMonthUsd, 0.03);
@@ -358,9 +512,15 @@ test('F0814-4 ① OPS-510 가격표·조회 날짜·샘플 예산 4천만·민�
   assert.equal(p.datadog.logsPerGBUsd, 0.1);
   assert.equal(p.xray.perMillionStoredUsd, 5);
   assert.equal(p.xray.perMillionQueriedUsd, 0.5);
+  assert.equal(p.xray.freeTracesPerMonth, 100_000);
+  assert.equal(p.xray.freeQueriesPerMonth, 1_000_000);
   assert.equal(p.s3.perGBMonthUsd, 0.025);
   assert.equal(p.timeRateKrw, 49_538);
-  for (const key of ['amp', 'amg', 'datadog', 'xray', 's3']) assert.match(String(p[key].priceDate), /2026-/, `${key} 가격 조회 날짜가 없다`);
+  assert.equal(p.amp.priceDate, '2026-10-14');
+  assert.equal(p.amg.priceDate, '2026-10-20');
+  assert.equal(p.datadog.priceDate, '2026-10-19');
+  assert.equal(p.xray.priceDate, '2026-09-11');
+  assert.equal(p.s3.priceDate, '2026-10-15');
   assert.deepEqual(m.F0814_SENSITIVITY, [0.5, 1, 1.5]);
   assert.equal(m.F0814_DEFAULTS.sampleBudget, 40_000_000);
   assert.equal(m.F0814_DEFAULTS.tieRatio, 0.1);
@@ -368,47 +528,67 @@ test('F0814-4 ① OPS-510 가격표·조회 날짜·샘플 예산 4천만·민�
   assert.equal(m.F0814_DEFAULTS.postmortemHours, 48);
 });
 
-test('F0814-4 ② backendCosts 입력 없음 → 미측정, 빠진 입력 목록, 후보 합계 없음', async () => {
+test('F0814-4 ② backendCosts 입력 없음·환율 출처/기준일/가격일 없음·ops-hours 0행 → 미측정', async () => {
   const m = need(await load());
   const r = m.backendCosts({ metrics: {}, opsHoursPerYear: {}, krwPerUsd: null, r3: { datadog: false } });
   assert.equal(r.verdict, '미측정');
   assert.ok(r.missing.includes('activeSeries'));
   assert.ok(r.missing.includes('samplesPerSecond'));
   assert.ok(r.missing.includes('krwPerUsd'));
+  assert.ok(r.missing.includes('fxSource'));
+  assert.ok(r.missing.includes('fxDate'));
+  assert.ok(r.missing.includes('priceDate'));
   assert.equal(r.chosen, null);
   assert.equal(r.candidates.length, 0);
 
-  const partial = m.backendCosts({ metrics: { ...METRICS, nodes: null }, opsHoursPerYear: { self: 100, aws: 100, datadog: 50 }, krwPerUsd: 1_400, r3: { datadog: false } });
+  for (const field of ['fxSource', 'fxDate', 'priceDate']) {
+    const bad = m.backendCosts({ ...backendInput(), [field]: '' });
+    assert.equal(bad.verdict, '미측정', `${field} 없이 통과하면 안 된다`);
+    assert.ok(bad.missing.includes(field), `${field}가 missing에 없다`);
+  }
+
+  const partial = m.backendCosts({ ...backendInput(), metrics: { ...METRICS, nodes: null } });
   assert.notEqual(partial.verdict, '통과');
+
+  const missing = m.readOpsHours(path.join(os.tmpdir(), 'f0814-no-such-ops.csv'));
+  assert.equal(missing.ok, false);
+  assert.equal(missing.rows, 0);
+  withTemp({ 'ops.csv': 'date,component,activity,minutes,version_from,version_to,environment,ref,note\n' }, (p) => {
+    const empty = m.readOpsHours(p['ops.csv']);
+    assert.equal(empty.ok, false);
+    assert.equal(empty.rows, 0);
+  });
 });
 
-test('F0814-4 ③ backendCosts 합성 입력의 AMP·AMG·Datadog·S3·운영 시간 계산', async () => {
+test('F0814-4 ③ backendCosts 합성 입력의 AMP(agg 포함)·AMG·Datadog·S3·운영 시간, 구성 요소·요청 기록 저장소', async () => {
   const m = need(await load());
   const r = m.backendCosts(backendInput());
   assert.equal(r.verdict, '통과');
   assert.equal(r.chosen, 'self');
   assert.equal(r.tie, false);
   assert.equal(r.opsSensitive, false);
+  assert.deepEqual(r.candidates.map((c) => c.id), ['self', 'aws']);
   const self = r.candidates.find((c) => c.id === 'self');
   const aws = r.candidates.find((c) => c.id === 'aws');
-  const dd = r.candidates.find((c) => c.id === 'datadog');
-  assert.ok(self && aws && dd, '세 후보가 있어야 한다');
-  assert.ok(Math.abs(aws.annualUsd - 6_595.37) < 0.02, `aws ${aws.annualUsd}`);
+  assert.ok(self && aws, 'R3 기본 제외 뒤 self·aws 후보가 있어야 한다');
+  assert.equal(r.candidates.some((c) => c.id === 'datadog'), false);
+  assert.ok(Math.abs(aws.annualUsd - 6_613.37) < 0.02, `aws ${aws.annualUsd}`);
   assert.ok(Math.abs(self.annualUsd - 3_699.53) < 0.02, `self ${self.annualUsd}`);
-  assert.ok(Math.abs(dd.annualUsd - 68_129.21) < 0.02, `datadog ${dd.annualUsd}`);
-  assert.equal(dd.eligible, false, 'R3 기본값은 Datadog 제외다');
   for (const c of r.candidates) {
     const sum = c.items.reduce((acc, it) => acc + it.annualUsd, 0);
     assert.ok(Math.abs(sum - c.annualUsd) < 0.02, `${c.id} 항목 합계와 총액이 다르다`);
     assert.ok(c.items.every((it) => it.priceDate && it.source), `${c.id} 항목에 가격 날짜·출처가 없다`);
   }
   const ampIngest = aws.items.find((it) => it.item === 'amp-ingest');
+  const ampStorage = aws.items.find((it) => it.item === 'amp-storage');
   assert.ok(Math.abs(ampIngest.quantity - 2_592_000_000) < 1, 'AMP 수집 샘플/월');
   assert.ok(Math.abs(ampIngest.annualUsd - 2_391.84) < 0.02, `AMP 수집 ${ampIngest.annualUsd}`);
+  assert.equal(ampStorage.quantity, 160);
+  assert.ok(Math.abs(ampStorage.annualUsd - 54) < 0.02, `AMP 저장 ${ampStorage.annualUsd}`);
 
   const comp = m.componentCosts({ metrics: METRICS });
   assert.equal(comp.verdict, '통과');
-  const rows = Object.fromEntries(comp.rows.map((r) => [r.id, r]));
+  const rows = Object.fromEntries(comp.rows.map((x) => [x.id, x]));
   assert.deepEqual(Object.keys(rows), ['prometheus', 'mimir', 'loki', 'tempo', 'pyroscope']);
   assert.equal(rows.prometheus.retentionDays, 15);
   assert.equal(rows.prometheus.storageGB, 110);
@@ -426,23 +606,38 @@ test('F0814-4 ③ backendCosts 합성 입력의 AMP·AMG·Datadog·S3·운영 �
   assert.ok(Math.abs(rows.mimir.annualUsd - 48) < 0.01, `mimir ${rows.mimir.annualUsd}`);
   assert.equal(rows.loki.query, 'LogQL');
   assert.equal(rows.tempo.query, 'TraceQL');
+
+  const stores = m.traceStoreCosts({ metrics: METRICS, traceStore: TRACE_STORE, krwPerUsd: 1_400 });
+  assert.equal(stores.verdict, '통과');
+  const byId = Object.fromEntries(stores.rows.map((x) => [x.id, x]));
+  assert.deepEqual(Object.keys(byId), ['tempo-msk', 'tempo-monolith', 'xray']);
+  assert.ok(Math.abs(byId['tempo-msk'].annualUsd - 4_759.43) < 0.02, `tempo-msk ${byId['tempo-msk'].annualUsd}`);
+  assert.ok(Math.abs(byId['tempo-monolith'].annualUsd - 3_559.43) < 0.02, `tempo-monolith ${byId['tempo-monolith'].annualUsd}`);
+  assert.ok(Math.abs(byId.xray.annualUsd - 1_780.71) < 0.02, `xray ${byId.xray.annualUsd}`);
+  assert.equal(byId['tempo-msk'].durable3, true);
+  assert.equal(byId.xray.openPeak, true);
+  assert.equal(r.traceStores.length, 3);
 });
 
-test('F0814-4 ④ 민감도 순위·1.5배 1위 규칙·10% 유지·R3 Datadog 제외/허용·R1 AMP 95일 표시', async () => {
+test('F0814-4 ④ 민감도 순위 변화(self 1배 → aws 1.5배)·R3 기본 제외·R1 AMP 95일·10% 유지', async () => {
   const m = need(await load());
   const base = m.backendCosts(backendInput());
   assert.deepEqual(base.sensitivity.map((s) => s.factor), [0.5, 1, 1.5]);
   assert.equal(base.sensitivity.every((s) => s.ranking[0] === 'self'), true);
+  assert.equal(base.sensitivity.every((s) => !s.ranking.includes('datadog')), true);
+  assert.equal(base.tie, false);
+  assert.equal(base.opsSensitive, false);
 
-  const tied = m.backendCosts(backendInput({ opsHoursPerYear: { self: 190, aws: 100, datadog: 50 } }));
-  assert.equal(tied.tie, true);
-  assert.equal(tied.opsSensitive, true);
-  assert.equal(tied.chosen, 'aws', '1.5배에서 1위가 바뀌면 1.5배 1위를 고른다');
+  const changed = m.backendCosts(backendInput({ opsHoursPerYear: { self: 170, aws: 100, datadog: 50 } }));
+  assert.equal(changed.tie, false);
+  assert.equal(changed.opsSensitive, true);
+  assert.equal(changed.chosen, 'aws');
+  assert.equal(changed.sensitivity[1].ranking[0], 'self');
+  assert.equal(changed.sensitivity[2].ranking[0], 'aws');
 
   const r3 = m.backendCosts(backendInput({ r3: { datadog: true } }));
-  const dd = r3.candidates.find((c) => c.id === 'datadog');
-  assert.equal(dd.eligible, true);
   assert.equal(r3.candidates.length, 3);
+  assert.equal(r3.candidates.find((c) => c.id === 'datadog').eligible, true);
   assert.equal(r3.chosen, 'self');
 
   const aws = base.candidates.find((c) => c.id === 'aws');
@@ -451,7 +646,7 @@ test('F0814-4 ④ 민감도 순위·1.5배 1위 규칙·10% 유지·R3 Datadog �
   assert.equal(aws.limits.longTermConditional, true);
 });
 
-test('F0814-4 ⑤ sampleBudget 식과 4천만 초과 거부, 보내지 않음(sent:false)', async () => {
+test('F0814-4 ⑤ sampleBudget 식·4천만 초과·보내지 않음, 요청 기록 저장소 입력 없음은 미측정', async () => {
   const m = need(await load());
   const ok = m.sampleBudget(2_000, 15, 3);
   assert.equal(ok.samples, 34_560_000);
@@ -463,27 +658,34 @@ test('F0814-4 ⑤ sampleBudget 식과 4천만 초과 거부, 보내지 않음(se
   const r = m.backendCosts(backendInput());
   assert.equal(r.sampleBudget.sent, false);
   assert.equal(r.sampleBudget.max, 40_000_000);
+
+  const noKafka = m.traceStoreCosts({ metrics: METRICS, traceStore: { ...TRACE_STORE, obsKafkaMonthlyUsd: null }, krwPerUsd: 1_400 });
+  assert.equal(noKafka.rows.find((x) => x.id === 'tempo-msk').verdict, '미측정');
+  const noXray = m.traceStoreCosts({ metrics: METRICS, traceStore: { ...TRACE_STORE, xrayTracesPerMonth: null }, krwPerUsd: 1_400 });
+  assert.equal(noXray.rows.find((x) => x.id === 'xray').verdict, '미측정');
 });
 
 test('F0814-5 ① parseF0814Args: --window 3g 필수, 입력 인자, 금지 인자 거부, UsageError만', async () => {
   const m = need(await load());
-  const a = m.parseF0814Args(['--window', '3g', '--k8', 'k8.md', '--k9', 'k9.md', '--metrics', 'm.json', '--ops-hours', 'ops.csv', '--fx', '1400', '--out', 'out', '--judge', 'j.json']);
+  const a = m.parseF0814Args(['--window', '3g', '--k8', 'k8.json', '--k9', 'k9.json', '--metrics', 'm.json', '--ops-hours', 'ops.csv', '--fx', '1400', '--out', 'out', '--judge', 'j.json']);
   assert.equal(a.window, '3g');
-  assert.equal(a.k8, 'k8.md');
-  assert.equal(a.k9, 'k9.md');
+  assert.equal(a.k8, 'k8.json');
+  assert.equal(a.k9, 'k9.json');
   assert.equal(a.metrics, 'm.json');
   assert.equal(a.opsHours, 'ops.csv');
   assert.equal(a.fx, 1_400);
   assert.equal(a.out, 'out');
   assert.equal(a.judge, 'j.json');
   assert.throws(() => m.parseF0814Args([]), (e) => e?.name === 'UsageError');
-  usage(() => m.parseF0814Args(['--window', '3f']));
-  usage(() => m.parseF0814Args(['--window', '3g', '--fx', 'abc']));
-  for (const flag of ['--docker', '--kind', '--k6', '--browser', '--inject']) usage(() => m.parseF0814Args(['--window', '3g', flag]));
+  assert.throws(() => m.parseF0814Args(['--window', '3f']), (e) => e?.name === 'UsageError');
+  assert.throws(() => m.parseF0814Args(['--window', '3g', '--fx', 'abc']), (e) => e?.name === 'UsageError');
+  for (const flag of ['--docker', '--kind', '--k6', '--browser', '--inject']) {
+    assert.throws(() => m.parseF0814Args(['--window', '3g', flag]), (e) => e?.name === 'UsageError');
+  }
   assert.throws(() => m.parseF0814Args(['--window', '3g', '--unknown']), (e) => e?.name === 'UsageError');
 });
 
-test('F0814-5 ② f0814-plan.json: batch·feature·창 3g·K8 10종·K9·후보 3·구성 요소 5·중단 규칙·경계·notIncluded, 주입 명령 없음', async () => {
+test('F0814-5 ② f0814-plan.json: prices·boundaries·commands·notIncluded 전체·traceStores·K8 10종', async () => {
   const m = need(await load());
   const p = readJson(PLAN_JSON);
   assert.equal(m.validateF0814Plan(p).ok, true);
@@ -494,30 +696,47 @@ test('F0814-5 ② f0814-plan.json: batch·feature·창 3g·K8 10종·K9·후보 
   assert.equal(p.k9.metric, 'hpa-pod-ready');
   assert.equal(p.k9.limitSec, 60);
   assert.deepEqual(p.backends.map((x) => x.id), ['self', 'aws', 'datadog']);
+  assert.deepEqual(p.traceStores.map((x) => x.id), ['tempo-msk', 'tempo-monolith', 'xray']);
   assert.deepEqual(p.components.map((x) => x.id), ['prometheus', 'mimir', 'loki', 'tempo', 'pyroscope']);
+  assert.equal(p.prices.amp.priceDate, '2026-10-14');
+  assert.equal(p.prices.amp.ingestTiers[1].upToSamples, 250_000_000_000);
+  assert.equal(p.prices.xray.freeTracesPerMonth, 100_000);
+  assert.equal(p.prices.timeRateKrw, 49_538);
+  assert.ok(Array.isArray(p.boundaries) && p.boundaries.length >= 4);
+  assert.ok(p.boundaries.some((b) => b.feature === 'F-08-13'));
+  assert.ok(Array.isArray(p.commands) && p.commands.length >= 1);
   assert.equal(p.stopRules.length, 10);
-  assert.ok(p.notIncluded.includes('K1'));
-  assert.ok(p.notIncluded.includes('V-T18'));
-  assert.ok(p.notIncluded.includes('V-T27'));
-  assert.ok(p.notIncluded.includes('Q-T2'));
+  for (const id of ['K1', 'K2', 'K7', 'Q-T2', 'S-T1', 'P-T1', 'V-T4', 'V-T5', 'V-T17', 'V-T18', 'V-T27', 'V-T28', 'NFR-027', 'NFR-028', 'OPS-520', 'OPS-530', 'G-11', 'G-33']) {
+    assert.ok(p.notIncluded.includes(id), `${id}가 notIncluded에 없다`);
+  }
   const text = JSON.stringify(p);
   assert.doesNotMatch(text, /--inject|--docker|--kind|--k6|--browser/);
 });
 
-test('F0814-5 ③ renderF0814Report: K8 10행·K9 표·후보 3행·구성 요소 5행·선행 인용 5개·0통과·실측(PC) 없음', async () => {
+test('F0814-5 ③ renderF0814Report: K8 10행·K9 표·후보 3·구성 요소 5·요청 기록 3·선행 상태·0% 없음·48시간/P0', async () => {
   const m = need(await load());
   const md = m.renderF0814Report(reportInput());
   for (const id of K8_IDS) assert.match(md, new RegExp(`\\| ${id} \\|`), `${id} 행이 없다`);
+  assert.equal((md.match(/^\| G-\d\d \|/gm) ?? []).length, 10);
   for (const heading of ['## 1. K8', '## 2. K9', '## 3. OPS-510', '## 4. 구성 요소', '## 5. 요청 기록', '## 6. 선행 측정 인용', '## 7. 한계', '## 8. 장부·게이트', '## 9. 주장하지 않는 것']) assert.ok(md.includes(heading), `${heading}이 없다`);
-  for (const p of PRIOR) assert.ok(md.includes(p.id), `${p.id} 인용이 없다`);
-  assert.ok(md.includes('미측정'));
-  assert.doesNotMatch(md, /실측\(PC\)/);
-  assert.match(md, /0통과|통과 0/);
+  assert.match(md, /\| 실행 ID \| 시작 \| 첫 확장 \| 파드 준비 \| 확장\(초\) \| 준비\(초\) \| 판정 \|/);
+  for (const id of ['self', 'aws', 'datadog']) assert.match(md, new RegExp(`\\| ${id} \\|`), `${id} 후보 행이 없다`);
+  for (const id of ['prometheus', 'mimir', 'loki', 'tempo', 'pyroscope']) assert.match(md, new RegExp(`\\| ${id} \\|`), `${id} 구성 요소 행이 없다`);
+  for (const id of ['tempo-msk', 'tempo-monolith', 'xray']) assert.match(md, new RegExp(`\\| ${id} \\|`), `${id} 요청 기록 행이 없다`);
+  for (const p of PRIOR) {
+    assert.ok(md.includes(p.id), `${p.id} 인용이 없다`);
+    assert.ok(md.includes(p.status), `${p.id} 상태 ${p.status}가 없다`);
+  }
+  assert.ok(md.includes('48시간'));
+  assert.ok(md.includes('P0'));
+  assert.equal(md.includes('0%'), false);
+  assert.match(md, /새 `?실측\(PC\)`? 줄을 만들지 않는다/);
+  assert.doesNotMatch(md, /^\|.*실측\(PC\).*\|/m);
   const v = m.validateF0814Report(md, { runExists: () => false });
   assert.equal(v.ok, true, v.reasons.join(' / '));
 });
 
-test('F0814-5 ④ validateF0814Report: 실행 증거 없는 통과·선행 인용 누락·금지 수치·PII·실측(PC) 거부', async () => {
+test('F0814-5 ④ validateF0814Report: 실행 증거 없는 통과·선행 인용 누락·금지 수치·PII(이메일/카드)·실측(PC) 거부', async () => {
   const m = need(await load());
   const good = m.renderF0814Report(reportInput());
   assert.equal(m.validateF0814Report(good, { runExists: () => false }).ok, true);
@@ -528,13 +747,11 @@ test('F0814-5 ④ validateF0814Report: 실행 증거 없는 통과·선행 인�
   const missingPrior = good.replace(/F-08-13/g, 'F-08-99');
   assert.equal(m.validateF0814Report(missingPrior, { runExists: () => false }).ok, false);
 
-  const badNumber = `${good}\n30,000건/초를 달성했다.\n`;
-  assert.equal(m.validateF0814Report(badNumber, { runExists: () => false }).ok, false);
+  for (const text of [`${good}\n30,000건/초를 달성했다.\n`, `${good}\n문의 a@b.co\n`, `${good}\n카드 1234-5678-9012-3456\n`, `${good}\n연락처 010-1234-5678\n`]) {
+    assert.equal(m.validateF0814Report(text, { runExists: () => false }).ok, false);
+  }
 
-  const pii = `${good}\n연락처 010-1234-5678\n`;
-  assert.equal(m.validateF0814Report(pii, { runExists: () => false }).ok, false);
-
-  const measured = `${good}\n실측(PC)\n`;
+  const measured = `${good}\n| 실행 | 실측(PC) |\n`;
   assert.equal(m.validateF0814Report(measured, { runExists: () => false }).ok, false);
 
   const text = read(REPORT);
@@ -542,13 +759,15 @@ test('F0814-5 ④ validateF0814Report: 실행 증거 없는 통과·선행 인�
   assert.equal(v.ok, true, v.reasons.join(' / '));
 });
 
-test('F0814-5 ⑤ validateF0814Plan: 창·batch·notIncluded·금지 인자 변조를 거부한다', async () => {
+test('F0814-5 ⑤ validateF0814Plan: 창·batch·notIncluded·prices·boundaries·commands 변조를 거부한다', async () => {
   const m = need(await load());
   const p = readJson(PLAN_JSON);
   assert.equal(m.validateF0814Plan(p).ok, true);
   assert.equal(m.validateF0814Plan({ ...p, window: { id: '3f' } }).ok, false);
   assert.equal(m.validateF0814Plan({ ...p, batch: 'F-08-13' }).ok, false);
   assert.equal(m.validateF0814Plan({ ...p, notIncluded: [] }).ok, false);
+  assert.equal(m.validateF0814Plan({ ...p, prices: {} }).ok, false);
+  assert.equal(m.validateF0814Plan({ ...p, boundaries: [] }).ok, false);
   assert.equal(m.validateF0814Plan({ ...p, commands: [{ cmd: 'run --inject' }] }).ok, false);
 });
 
@@ -571,11 +790,11 @@ test('F0814-6 ① 계획 문서: 정본 자리·범위·측정 설계·경계·�
   }
 });
 
-test('F0814-6 ② 계획 문서의 정직성: K8/K9/OPS-510 모두 미측정·판정 못 함, 새 측정·Docker 없음, F-08-13 설계만 인용', async () => {
+test('F0814-6 ② 계획 문서의 정직성: K8/K9/OPS-510 모두 미측정·판정 못 함, 새 측정·Docker 없음, F-08-13 미측정 인용', async () => {
   const md = read(PLAN_DOC);
   assert.match(md, /미측정/);
   assert.match(md, /판정 못 함/);
-  assert.match(md, /설계만·판정 못 함/);
+  assert.match(md, /F-08-13[^\n]*미측정|미측정[^\n]*F-08-13/);
   assert.match(md, /Docker·kind·k6·브라우저를 쓰지 않았다/);
   assert.match(md, /미실행/);
   assert.match(md, /F-08-6/);
@@ -583,4 +802,5 @@ test('F0814-6 ② 계획 문서의 정직성: K8/K9/OPS-510 모두 미측정·�
   assert.match(md, /gameday\.mjs/);
   assert.match(md, /OPS-520|F-08-15/);
   assert.match(md, /장부 항목은 \*\*0개\*\*|항목 0/);
+  assert.match(md, /RV0814-01/);
 });
