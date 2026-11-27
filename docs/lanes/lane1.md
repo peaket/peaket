@@ -1,5 +1,7 @@
 # 갈래 1 — 마지막 상태(2026-11-15, R-591)
 
+- **F-09-11 정적 구현(2026-11-27)**: 카나리 `ClusterAnalysisTemplate` 3개·적용 Application·경보 3개, 차트 롤링 opt-in·PDB `minAvailable`, admission-ctrl 3복제·그림자 워크로드·`shadowTick`/`startPlanOf`/읽기 전용 `activeEvents`. f0911 10/10·shadow 1/1·chart 64/64·platform 5/5·admission 414/414, lint·doc-check·ledger·release-scope·docker-timeouts·alert-check 통과. 실제 클러스터·Argo 분석·리더 교체·그림자 트래픽은 미실행. 계획 `docs/review/plans/F-09-11.md`, 기록 `docs/review/measurements/F-09-11.md`.
+
 - **2026-11-18 갈래 다섯(ADR-0286)**: 배포 기반(BAT-075~085)·실시간 전파(BAT-052)·관측 나머지(BAT-245~275)는 갈래 4, 측정 창은 갈래 5, 구간 마무리(SEG)는 전체 감독으로 옮겼다. 갈래 1은 임계 경로(서비스 분리 → 관측 핵심 → 분석 → 사후 포렌식)만 한다. 진행 기록은 그대로 `docs/PROGRESS.md`다. 첫 바퀴 ADR 번호는 0287~0289(`docs/lanes/coord.md`).
 - 갈래 1의 정본 진행 기록은 `docs/PROGRESS.md`다(ADR-0190 결정 3). 이 파일은 마지막 상태만 짧게 남긴다.
 - **2026-11-22 전환(ADR-0354)**: 다음 기능은 F-01-2(관측 대시보드·Sentry) → F-04-2(분석 이벤트 계약) → F-04-9(포렌식 시드)다. 전환점 BAT-011은 R-773, BAT-215는 R-776, BAT-220은 R-778(2026-11-23)로 끝났다(OPS-160은 기능 표 F-04-1). F-01-2는 R-786(2026-11-23)로 끝났다. F-04-2도 2026-11-23 끝났다(OPS-190 일부, queue-svc 몫은 감독 결정 대기). F-01-1(OPS-030, 증거 수집기·보존 규칙·운영 시간 기록)도 끝났다. F-01-3(OPS-060, 수집기 2단·2차 마스킹 원천)도 끝났다(OPS-070은 F-01-8 동결). F-01-4(OPS-080 앞 몫, 관측 저장소 설정·exporter·서비스 그래프)도 끝났다(뒤 몫은 F-01-9 동결). F-01-5(OPS-090, SLO 기록 규칙·burn-rate 경보, ADR-0382)도 끝났다(뒤 몫은 F-01-10 동결). 옛 BAT-216(OPS-030)은 기능 표 F-01-1로 옮겼고(2026-11-23, 갈래 배치는 감독), BAT-475 차례는 기능 표가 대신한다.
