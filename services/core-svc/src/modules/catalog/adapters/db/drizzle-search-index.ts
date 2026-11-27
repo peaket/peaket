@@ -108,7 +108,7 @@ function keySets(query: string, noConvert: boolean): QueryKeys[] {
 
 // 정렬 키(ADR-0268 결정 3, 도메인 sortDocs와 같은 차례). 고정 글이다
 const BY_TITLE = sql.raw(`title collate "ko-x-icu", production_id`);
-const SALE_RANK = sql.raw(`case sale_status when 'ON_SALE' then 0 when 'UPCOMING' then 1 when 'SOLD_OUT' then 2 else 3 end`);
+const SALE_RANK = sql.raw(`case sale_status when 'ON_SALE' then 0 when 'ALL_HELD' then 0 when 'UPCOMING' then 1 when 'SOLD_OUT' then 2 else 3 end`);
 // 도메인은 nextOpenAt(ISO 글) ?? periodStart(날짜 글) ?? '9999-12-31'을 글로 견준다. 같은 글을 만들어 바이트 차례로 견준다
 const OPEN_KEY = sql.raw(`coalesce(to_char(next_open_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), period_start::text, '9999-12-31') collate "C"`);
 
@@ -127,7 +127,8 @@ function filters(q: Pick<SearchQuery, 'includePast'> & Partial<SearchQuery>): SQ
   if (q.genre !== undefined) parts.push(sql`genre = ${q.genre}`);
   if (q.placeId !== undefined) parts.push(UUID.test(q.placeId) ? sql`place_id = ${q.placeId}::uuid` : sql`false`);
   if (q.artistId !== undefined) parts.push(sql`artist_ids @> ${JSON.stringify([q.artistId])}::jsonb`);
-  if (q.status !== undefined) parts.push(sql`sale_status = ${q.status}`);
+  // 공개 카드에서 ALL_HELD는 ON_SALE로 접는다(search-rows). 필터도 같은 뜻으로 본다
+  if (q.status !== undefined) parts.push(q.status === 'ON_SALE' ? sql`sale_status in ('ON_SALE', 'ALL_HELD')` : sql`sale_status = ${q.status}`);
   if (q.dateFrom !== undefined || q.dateTo !== undefined) parts.push(sql`period_start is not null and period_end is not null`);
   if (q.dateFrom !== undefined) parts.push(sql`period_end >= ${q.dateFrom}::date`);
   if (q.dateTo !== undefined) parts.push(sql`period_start <= ${q.dateTo}::date`);

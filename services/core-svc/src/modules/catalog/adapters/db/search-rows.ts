@@ -1,6 +1,7 @@
 // search_document·search_term 줄 → 도메인 모양(ADR-0271). 검색 질의(DrizzleSearchIndex)와 사전 원천(DrizzleSearchReadModel)이 함께 쓴다.
 import { imageBaseUrl } from '../../domain/production-image.js';
 import type { Genre } from '../../domain/production.js';
+import { publicSaleStatusOf } from '../../domain/event-sale-state.js';
 import type { SearchDocument, SearchTermRow } from '../../domain/search.js';
 
 export interface DocumentRow {
@@ -76,7 +77,7 @@ export function documentOfRow(r: DocumentRow, origin: string | undefined): Searc
     ...(periodStart ? { periodStart } : {}),
     ...(periodEnd ? { periodEnd } : {}),
     ...(r.next_open_at ? { nextOpenAt: isoOf(r.next_open_at), nextOpenEventId: r.next_open_event_id } : {}),
-    saleStatus: r.sale_status as SearchDocument['saleStatus'],
+    saleStatus: publicSaleStatusOf(r.sale_status),
     ...(saleEnds ? { saleEndsAt: saleEnds } : {}),
     ...(r.min_price !== null && r.min_price !== undefined ? { minPrice: Number(r.min_price) } : {}),
     popularity: Number(r.interest ?? 0),

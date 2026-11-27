@@ -1,13 +1,58 @@
 // core-svc Kafka 구독의 공개 면(W7-audit COV2-06, docs/streaming.md §2.6 'core-svc 소비자'). 네이티브 Kafka 모듈을 싣는 시작 함수는 start.ts에서 따로 가져온다
-// (시험이 그것 없이 설정·보류 감싸기만 쓰게). 그룹 peaket.core-svc.<환경> 하나가 identity.accounts-withdrawn을 읽는다.
-import { type HeldEventInput, type HeldEventStore, type KafkaAuth, kafkaAuthFromEnv, PlatformConfigError } from '@peaket/platform';
+// (시험이 그것 없이 설정·보류 감싸기만 쓰게). 그룹 peaket.core-svc.<환경> 하나가 identity.accounts-withdrawn과
+// trade.seats(EventSaleChanged, F-07-12 RV-02)를 읽는다. 토픽마다 그룹을 두지 않는다(파드 수만큼 연결이 는다).
+import { type HeldEventInput, type HeldEventStore, type KafkaAuth, kafkaAuthFromEnv, type KeyedHandler, type ConsumedMessage, PlatformConfigError } from '@peaket/platform';
+import { SEATS_TOPIC } from '../modules/catalog/index.js';
 import { ACCOUNTS_WITHDRAWN_TOPIC, readReviewWithdrawn } from '../modules/review/index.js';
 
 /** 서비스 소비자 그룹 이름(docs/streaming.md §2.6) */
 export const CORE_GROUP = (env: string): string => `peaket.core-svc.${env}`;
 
-/** 읽는 토픽 셋(탈퇴 사건 하나) */
-export const CORE_TOPICS = [ACCOUNTS_WITHDRAWN_TOPIC] as const satisfies readonly ['identity.accounts-withdrawn'];
+/** 읽는 토픽 둘(탈퇴 사건, 회차 판매 상태가 실린 trade.seats) */
+export const CORE_TOPICS = [ACCOUNTS_WITHDRAWN_TOPIC, SEATS_TOPIC] as const;
+
+/** 토픽마다의 처리기 */
+export interface CoreEventHandlers {
+  accountsWithdrawn: KeyedHandler<unknown>;
+  saleChanged: KeyedHandler<unknown>;
+}
+
+/** 읽은 값: 그 토픽 처리기의 값, 또는 모르는 토픽 */
+export type CoreEvent = { topic: string; event: unknown } | { topic: string; unknown: true; key: string };
+
+/** 토픽으로 나눠 맡기는 처리기(queue-svc QueueEventsHandler와 같은 꼴). 업무 키는 토픽 처리기의 것이다 */
+export class CoreEventsHandler implements KeyedHandler<CoreEvent> {
+  readonly #byTopic: Map<string, KeyedHandler<unknown>>;
+
+  constructor(h: CoreEventHandlers) {
+    this.#byTopic = new Map<string, KeyedHandler<unknown>>([
+      [ACCOUNTS_WITHDRAWN_TOPIC, h.accountsWithdrawn],
+      [SEATS_TOPIC, h.saleChanged],
+    ]);
+  }
+
+  async decode(m: ConsumedMessage): Promise<CoreEvent> {
+    const h = this.#byTopic.get(m.topic);
+    if (!h) return { topic: m.topic, unknown: true, key: `bad:${m.topic}:${m.key ?? ''}` };
+    return { topic: m.topic, event: await h.decode(m) };
+  }
+
+  keyOf(e: CoreEvent, m: ConsumedMessage): string {
+    if ('unknown' in e) return e.key;
+    return this.#byTopic.get(e.topic)!.keyOf(e.event, m);
+  }
+
+  eventKeyOf(e: CoreEvent): string | undefined {
+    if ('unknown' in e) return undefined;
+    return this.#byTopic.get(e.topic)!.eventKeyOf?.(e.event);
+  }
+
+  /** @throws RangeError 모르는 토픽(키 단위 소비자가 보류한다). 그 밖은 토픽 처리기의 것 */
+  async handle(e: CoreEvent, m: ConsumedMessage): Promise<void> {
+    if ('unknown' in e) throw new RangeError(`core-svc가 읽지 않는 토픽이다: ${e.topic}`);
+    await this.#byTopic.get(e.topic)!.handle(e.event, m);
+  }
+}
 
 /** 브로커 주소 모양(플랫폼 loadOutboxRelayProcessConfig의 BROKER와 같은 규칙, queue-svc와 같다) */
 const BROKER = /^[A-Za-z0-9.-]+:\d{1,5}$/;

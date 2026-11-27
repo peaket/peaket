@@ -8,6 +8,7 @@ import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, ne, sql } from 'driz
 import type { DescriptionDoc } from '../../domain/description.js';
 import type { CatalogRepository, EventSummaryRow, LayoutPreview, MemberList, NewProduction, ProductionForUpdate, RegistrationTx, RequestOnce, NameEntry, PlaceNameEntry, SaleEligibilityEvent } from '../../domain/ports.js';
 import type { PartnerEventSource, PartnerProductionSource, PartnerProductionSummaryRow, PartnerSellerSource, PartnerTodoRow } from '../../domain/partner-home.js';
+import { isEventSaleState, saleStatesByProduction } from '../../domain/event-sale-state.js';
 import { MAX_ARTISTS, MAX_PUBLIC_ROUNDS } from '../../domain/event-detail.js';
 import { type EventSaleState, type EventStatus, type Genre, isPublic, SALE_END_BEFORE_START_MS, type SaleReview } from '../../domain/production.js';
 import type { EventDraft, PendingEvent } from '../../domain/registration.js';
@@ -351,8 +352,9 @@ export class DrizzleCatalogRepository implements CatalogRepository {
   }
 
   /**
-   * F-07-12 목록: 테넌트 공연·회차는 파트너 연결(core_partner)의 행 보안 안에서, 판매 상태 사본(search_document)은
-   * core_app 연결로 읽는다. 사본 표는 core_partner에 SELECT 권한이 없고, 공연 소유는 앞 트랜잭션이 이미 확인했다.
+   * F-07-12 목록: 테넌트 공연·회차는 파트너 연결(core_partner)의 행 보안 안에서 읽는다. 판매 상태는 회차 원값
+   * (event_sale_state, F-07-12 RV-02)을 core_app으로 읽고, 사본이 없는 회차는 오픈·시작 시각으로 계산한다.
+   * 그래서 `saleStatus=ALL_HELD` 필터가 DB 경로에서도 동작한다.
    */
   async partnerProductions(tenantId: string): Promise<PartnerProductionSummaryRow[]> {
     const rows = await this.partnerDb.transaction(
@@ -382,19 +384,21 @@ export class DrizzleCatalogRepository implements CatalogRepository {
       { tenantId, isolationLevel: 'repeatable read', accessMode: 'read only' },
     );
     if (rows.length === 0) return [];
-    const docs = await this.db.db.execute(sql`
-      select d.production_id, d.sale_status
-        from search_document d
-        join production p on p.id = d.production_id
-       where p.promoter_id = ${tenantId}::uuid`);
-    const saleByProduction = new Map<string, EventSaleState>();
-    for (const r of docs.rows as { production_id: string; sale_status: string }[]) {
-      if (['UPCOMING', 'ON_SALE', 'ALL_HELD', 'SOLD_OUT', 'ENDED'].includes(r.sale_status)) saleByProduction.set(r.production_id, r.sale_status as EventSaleState);
-    }
-    return rows.map((r) => {
-      const sale = saleByProduction.get(r.productionId);
-      return { ...r, saleStates: sale === undefined ? [] : [sale] };
-    });
+    const stateRows = await this.db.db.execute(sql`
+      select e.production_id,
+             coalesce(s.status,
+               case when e.open_at <= now() and e.starts_at - interval '24 hours' > now() then 'ON_SALE'
+                    when e.open_at > now() then 'UPCOMING'
+                    else 'ENDED' end) as status
+        from event e
+        join production p on p.id = e.production_id
+        left join event_sale_state s on s.event_id = e.id
+       where p.promoter_id = ${tenantId}::uuid and e.status <> 'CANCELLED'`);
+    const states = (stateRows.rows as { production_id: string; status: string }[])
+      .filter((r): r is { production_id: string; status: EventSaleState } => isEventSaleState(r.status))
+      .map((r) => ({ productionId: r.production_id, status: r.status }));
+    const statesByProduction = saleStatesByProduction(states);
+    return rows.map((r) => ({ ...r, saleStates: statesByProduction.get(r.productionId) ?? [] }));
   }
 
   /**

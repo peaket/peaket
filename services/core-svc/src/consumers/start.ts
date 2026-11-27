@@ -1,11 +1,10 @@
-// core-svc Kafka 소비자를 건다(W7-audit COV2-06): 플랫폼 키 단위 소비자 하나(runKeyedConsumer, 그룹 peaket.core-svc.<환경>)가 탈퇴 토픽을 읽고
-// ReviewAccountWithdrawnHandler가 후기를 파기하며 다시 정리를 예약한다. 보류는 core DB held_event(pid를 뺀 값, pidFreeHeldEventStore)다.
+// core-svc Kafka 소비자를 건다(W7-audit COV2-06, F-07-12 RV-02): 플랫폼 키 단위 소비자 하나(runKeyedConsumer, 그룹 peaket.core-svc.<환경>)가
+// 탈퇴 토픽과 회차 판매 상태가 실린 trade.seats를 읽는다. 토픽별 처리기는 CoreEventsHandler가 맡긴다. 보류는 core DB held_event(pid를 뺀 값)다.
 // 소비자와 함께 탈퇴 후기 다시 정리 반복(review-recheck.ts, 소유자 결정 2026-11-16 OPEN[44], ADR-0278)을 켜고, 멈출 때는 반복을 먼저 멈춘다.
 // 커밋이 없을 때는 가장 이른 곳부터 읽는다(플랫폼 기본, docs/streaming.md §2.6). 서비스 이름 core-svc로 소비자 지표(consumer_*)를 낸다.
 // 이 파일만 Kafka 클라이언트(네이티브 모듈, @peaket/platform/stream-worker)를 싣는다.
-import { type Clock, type Database, drizzleHeldEventStore, heldEventCounts, type KafkaAuth, type Registry, systemClock } from '@peaket/platform';
+import { type Clock, type Database, drizzleHeldEventStore, heldEventCounts, type KafkaAuth, type KeyedHandler, type Registry, systemClock } from '@peaket/platform';
 import { runKeyedConsumer } from '@peaket/platform/stream-worker';
-import type { ReviewAccountWithdrawnHandler } from '../modules/review/index.js';
 import { CORE_GROUP, CORE_TOPICS, pidFreeHeldEventStore } from './index.js';
 import { type ReviewRecheckLoopOptions, startReviewRecheckLoop } from './review-recheck.js';
 
@@ -17,7 +16,8 @@ export interface CoreConsumersOptions {
   auth?: KafkaAuth;
   /** 소비자 전용 core_app 풀(held_event 보류·보류 수 세기). API 경로의 풀과 따로 둔다(docs/streaming.md §2.6, 리뷰 K2) */
   database: Database;
-  handler: ReviewAccountWithdrawnHandler;
+  /** topic 별 처리기를 맡기는 CoreEventsHandler(탈퇴 사건·회차 판매 상태) */
+  handler: KeyedHandler<unknown>;
   registry?: Registry;
   logger?: { warn(o: object, msg?: string): void; info?(o: object, msg?: string): void };
   clock?: Clock;

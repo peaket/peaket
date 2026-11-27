@@ -84,5 +84,20 @@ export { checkScaleChange, SCALE_CHANGE_CLOSE_MS, LARGE_INTERVAL_MS } from './do
 export { EmptyDemandForecastSource } from './adapters/empty-demand-forecast-source.js';
 export { DEMAND_FORECAST_SOURCE, type DemandForecastSource } from './domain/demand-ports.js';
 export { assertDatabaseRole } from './adapters/db/database-role.js';
+export { CoreEventSaleChangedHandler, jsonEventSaleChangedCodec, SEATS_TOPIC, type EventSaleChangedCodec, type EventSaleRecord } from './inbound/event-sale-changed.handler.js';
+export {
+  effectiveEventSaleStatus,
+  isEventSaleState,
+  publicSaleStatusOf,
+  saleStatesByProduction,
+  searchSaleStatusOf,
+  SEARCH_SALE_STATUSES,
+  shouldApplyEventSale,
+  type EventSaleApplyResult,
+  type EventSaleStateStore,
+  type EventSaleStatusEvent,
+  type SearchSaleStatus,
+} from './domain/event-sale-state.js';
+export { DrizzleEventSaleStateStore } from './adapters/db/drizzle-event-sale-state.js';
 export { readUploadForm, requireXRequestedWith } from './inbound/multipart.js';
 export type { UploadForm } from './application/upload-form.js';

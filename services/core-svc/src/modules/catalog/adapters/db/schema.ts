@@ -572,3 +572,27 @@ export const eventSaleConfig = pgTable(
     index('event_sale_config_production_idx').on(t.productionId),
   ],
 );
+
+/**
+ * 회차 판매 상태 사본(F-07-12 RV-02, 0055). purchase-svc event_sale의 값을 trade.seats EventSaleChanged로 받아
+ * core가 읽기만 하는 사본이다(docs/data.md event_sale, ADR-0122). search_document.sale_status와 파트너 목록의
+ * saleStatus 필터가 이 값을 쓴다. 쓰기는 SECURITY DEFINER 함수 search_apply_event_sale만 한다.
+ */
+export const eventSaleState = pgTable(
+  'event_sale_state',
+  {
+    eventId: uuid('event_id')
+      .primaryKey()
+      .references(() => event.id, { onDelete: 'cascade' }),
+    productionId: uuid('production_id').notNull(),
+    status: text('status').notNull(),
+    version: integer('version').notNull(),
+    changedAt: at('changed_at').notNull(),
+    updatedAt: at('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    check('event_sale_state_status_check', sql`${t.status} in ('UPCOMING', 'ON_SALE', 'ALL_HELD', 'SOLD_OUT', 'ENDED')`),
+    check('event_sale_state_version_check', sql`${t.version} >= 1`),
+    index('event_sale_state_production_idx').on(t.productionId),
+  ],
+);

@@ -5,10 +5,12 @@
 import { fileURLToPath } from 'node:url';
 import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, errorSummary, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
-import { kafkaConsumersFromEnv } from './consumers/index.js';
+import { CoreEventsHandler, kafkaConsumersFromEnv } from './consumers/index.js';
 import type { CoreConsumers } from './consumers/start.js';
 import {
   CompositeSaleConfigStore,
+  CoreEventSaleChangedHandler,
+  DrizzleEventSaleStateStore,
   DrizzleSaleConfigStore,
   HttpPurchaseSaleOpen,
   QueueSaleConfigStore,
@@ -289,7 +291,10 @@ else {
     clientId: `${SERVICE}-${kafka.env}-${pod}`,
     auth: kafka.auth,
     database: consumerDatabase,
-    handler: new ReviewAccountWithdrawnHandler(consumerReviews, undefined, { logger: service.logger }),
+    handler: new CoreEventsHandler({
+      accountsWithdrawn: new ReviewAccountWithdrawnHandler(consumerReviews, undefined, { logger: service.logger }),
+      saleChanged: new CoreEventSaleChangedHandler(new DrizzleEventSaleStateStore(consumerDatabase), undefined, { logger: service.logger }),
+    }),
     recheck: consumerReviews,
     registry: service.metrics.registry,
     logger: service.logger,

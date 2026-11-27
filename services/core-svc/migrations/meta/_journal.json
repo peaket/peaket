@@ -309,6 +309,13 @@
       "when": 1795319500000,
       "tag": "0054_partner_home",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1795319600000,
+      "tag": "0055_event_sale_state",
+      "breakpoints": true
     }
   ]
 }
