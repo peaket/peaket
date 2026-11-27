@@ -17,7 +17,7 @@ const PLAN_DOC = path.join(ROOT, 'docs', 'review', 'plans', 'F-08-12.md');
 const EXPECTED = [
   { id: 'G-02', order: 1, group: 'A', window: '3a', mode: '대체 장애', evidence: '측정함', stageReady: false, missing: ['좌석 Redis', '복제', '승격'], partial: ['Valkey', '503', '오버셀'], runbook: 'RB-06', alert: ['seat-store-unavailable', 'seat_store_unavailable'], action: ['503'], invariant: ['오버셀 0', '이중 홀드 0'], name: /좌석 Redis/ },
   { id: 'G-10', order: 2, group: 'A', window: '3a', mode: '대체 장애', evidence: '측정함', stageReady: false, missing: ['1브로커', 'RF'], partial: [], runbook: 'RB-11', alert: ['브로커', '소비 지연'], action: ['Outbox'], invariant: ['유실 0'], name: /Kafka/ },
-  { id: 'G-29', order: 3, group: 'A', window: '3a', mode: '대체 장애', evidence: '측정함', stageReady: false, missing: ['세션', '캐시', '복제', '승격'], partial: ['메모리', '85'], runbook: 'RB-05', alert: ['85'], action: ['원본 읽기'], invariant: ['유실 0', '축출 0'], name: /세션·캐시 Redis/ },
+  { id: 'G-29', order: 3, group: 'A', window: '3a', mode: '대체 장애', evidence: '측정함', stageReady: false, missing: ['세션', '캐시', '복제', '승격'], partial: ['메모리', '85'], runbook: 'RB-05', alert: ['메모리', '85', 'SEV2'], action: ['원본 읽기'], invariant: ['유실 0', '축출 0'], name: /세션·캐시 Redis/ },
   { id: 'G-30', order: 4, group: 'A', window: '3a', mode: '로컬 실행', evidence: '측정함', stageReady: false, missing: ['Schema Registry', '레지스트리'], partial: [], runbook: 'RB-34', alert: ['레지스트리', '생산자'], action: ['스키마 ID', '기다린다'], invariant: ['주문 실패 0'], name: /Schema Registry/ },
   { id: 'G-31', order: 5, group: 'A', window: '3a', mode: '로컬 실행', evidence: '측정함', stageReady: false, missing: ['경보', '규칙'], partial: ['Outbox', '당기기'], runbook: 'RB-11·RB-39', alert: ['OfflinePartitionsCount', 'SEV1'], action: ['당기기', '명령 6', 'Outbox'], invariant: ['60초', '이중 반영 0'], name: /MSK/ },
   { id: 'G-17', order: 6, group: 'B', window: '3b', mode: '모의 진행', evidence: '설계만', stageReady: true, missing: [], partial: [], runbook: 'RB-20·RB-17', alert: ['보안 사고', 'SEV1'], action: ['24', '2', '72'], invariant: ['실제 신고', '개인정보'], name: /보안 사고/ },
@@ -73,7 +73,7 @@ const RUNBOOK_TITLES = {
   'RB-34': '스트림 작업자 복구',
   'RB-39': 'Outbox 릴레이 밀림',
 };
-const FORBIDDEN = ['30k/s', '100만', 'K1', 'K2', 'K7'];
+const FORBIDDEN = ['30k/s', '30,000건/초', '100만', 'K1', 'K2', 'K7'];
 const EXECUTION_CLAIMS = ['실행했다', '검증됐다', '측정했다'];
 
 async function load() {
@@ -426,6 +426,9 @@ test('F0812-3 ① 무대 없음·부분·방식·증거가 다르면 통과가 �
   for (const id of ['G-21', 'G-23', 'G-31', 'G-30', 'G-02', 'G-20', 'G-24', 'G-29']) {
     assert.equal(verdictOf(mod, id).verdict, '판정 못 함', `${id}가 판정 못 함이 아니다`);
   }
+  for (const id of ['G-10', 'G-18', 'G-19', 'G-22', 'G-25']) {
+    assert.equal(verdictOf(mod, id).verdict, '판정 못 함', `무대 없는 ${id}가 판정 못 함이 아니다`);
+  }
   assert.equal(verdictOf(mod, 'G-17').verdict, '판정 못 함', '모의 진행 G-17이 통과했다');
   assert.equal(verdictOf(mod, 'G-17', { evidence: '측정함' }).verdict, '판정 못 함', 'G-17 증거가 달라도 통과했다');
   for (const id of IDS) assert.notEqual(verdictOf(mod, id).verdict, '통과', `${id}가 이 로컬 무대에서 통과했다`);
@@ -494,6 +497,10 @@ test('F0812-3 ④ 탐지는 T1p−T0, 전파는 T3−T2이며 60/3초 경계를 
   const noCommand = jt({}, { commandExpected: false });
   assert.equal(noCommand.verdict, '통과');
   assert.equal(noCommand.propagationSec, null);
+  const noT1 = timeline({ T1: null });
+  assert.equal(mod.judgeLocalTimeline(noT1, { commandExpected: true }).verdict, '통과', '로컬 T1 null이 통과하지 않았다');
+  assert.equal(mod.judgeLocalTimeline(noT1, { commandExpected: true, requireAlertmanager: true }).verdict, '판정 못 함', 'K8 T1 없음이 거부되지 않았다');
+  assert.equal(mod.judgeLocalRun(runInput({ run: cleanRun({ timeline: noT1 }) })).verdict, '통과', 'judgeLocalRun이 로컬 T1 null을 거부했다');
 });
 
 test('F0812-3 ⑤ 시간선 뜻·순서와 G-17 설계만, 이 무대 통과 0을 지킨다', async () => {
@@ -557,7 +564,14 @@ test('F0812-4 ③ 보고서·포스트모템이 실행 ID·무대·G-17·48h·20
   assert.match(badId.reasons.join(' '), /실행 ID|-f0812/, '중간 삽입 실행 ID의 까닭이 없다');
   assert.equal(mod.validateLocalReport(pass, { ...options, runResponseOk: () => false }).ok, false, '기대 대응 없는 통과를 허용했다');
   assert.equal(mod.validateLocalReport(reportFixture({ pass: { id: 'G-30', runId: '2026-11-28-g30-f0812' } }), { ...options, runExists: () => true }).ok, false, '무대 없는 G-30 통과를 허용했다');
-  assert.equal(mod.validateLocalReport(reportFixture({ pass: { id: 'G-17', runId: '2026-11-28-g17-f0812' } }), { ...options, runExists: () => true }).ok, false, '설계만 G-17 통과를 허용했다');
+  const g17 = reportFixture({ pass: { id: 'G-17', runId: '2026-11-28-g17-f0812' } });
+  assert.equal(mod.validateLocalReport(g17, { ...options, runExists: () => true }).ok, false, '설계만 G-17 통과를 허용했다');
+  const g17NoRun = mod.validateLocalReport(g17, { ...options, runExists: () => false });
+  assert.equal(g17NoRun.ok, false, 'G-17 실행 ID 없는 통과를 허용했다');
+  assert.match(g17NoRun.reasons.join(' '), /실행 ID|-f0812/, 'G-17 실행 ID 실패 이유가 무대·설계만에 가려졌다');
+  const g17NoResponse = mod.validateLocalReport(g17, { ...options, runExists: () => true, runResponseOk: () => false });
+  assert.equal(g17NoResponse.ok, false, 'G-17 기대 대응 없는 통과를 허용했다');
+  assert.match(g17NoResponse.reasons.join(' '), /기대 대응|response/i, 'G-17 기대 대응 실패 이유가 무대·설계만에 가려졌다');
   assert.equal(mod.validateLocalReport(reportFixture({ priorOverride: '- F-08-5: 무효·미측정\n- F-08-9: 판정 못 함(무효·부분)\n- F-08-10: 통과' }), { measured: false }).ok, false, 'F-08-10 통과 인용을 허용했다');
 
   const incident = (complete, budget, p0 = 'P0') => `| INC-1 | G-23 | 2026-11-28T10:00:00+09:00 | 2026-11-28T10:30:00+09:00 | ${complete} | ${budget}% | ${p0} | docs/review/measurements/F-08-12-postmortem-1.md |`;
