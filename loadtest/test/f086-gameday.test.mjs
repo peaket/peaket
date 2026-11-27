@@ -31,8 +31,9 @@ const STAGE_MISSING = ['G-02', 'G-07', 'G-09', 'G-14', 'G-25', 'G-29', 'G-30'];
 const K8_IDS = ALL_IDS.slice(0, 10);
 /** 정본 §4: slo-fast만 긁기 5초, 그 밖은 15초. §12: G-08~G-10은 for 30초 */
 const FAST_INTERVAL = { scrapeSec: 5, evalSec: 5, groupWaitSec: 5, forSec: 0 };
+const OPS_RT_INTERVAL = { scrapeSec: 15, evalSec: 5, groupWaitSec: 5, forSec: 0 };
 const CAUSE_INTERVAL = { scrapeSec: 15, evalSec: 5, groupWaitSec: 5, forSec: 30 };
-const K8_INTERVAL = Object.fromEntries(K8_IDS.map((id) => [id, ['G-08', 'G-09', 'G-10'].includes(id) ? CAUSE_INTERVAL : FAST_INTERVAL]));
+const K8_INTERVAL = Object.fromEntries(K8_IDS.map((id) => [id, id === 'G-07' ? OPS_RT_INTERVAL : ['G-08', 'G-09', 'G-10'].includes(id) ? CAUSE_INTERVAL : FAST_INTERVAL]));
 const MODE_BY_ID = Object.fromEntries(ALL_IDS.map((id) => [id, LOCAL.includes(id) ? '로컬 실행' : ALTERNATE.includes(id) ? '대체 장애' : '모의 진행']));
 const CAUSE_TYPES = ['변경', '외부 의존', '내부 저장소·메시징', '용량·포화', '코드 결함', '데이터', '보안', '운영 조작', '기반', '기타'];
 const RESPONSE_CHECKS = ['expectedAlert', 'expectedAction', 'invariantHeld'];
@@ -117,6 +118,22 @@ function scenarioRun(overrides = {}) {
     },
     observation: { ...base.observation, ...(overrides.observation ?? {}) },
   };
+}
+
+/** 경계용: 경보 시각을 옮기면 사람 인지·명령·ack·T1p·T2·T3·T4를 함께 옮긴다 */
+function scenarioRunWithAlert(alertAt) {
+  const alertMs = Date.parse(alertAt);
+  const at = (offsetMs) => new Date(alertMs + offsetMs).toISOString();
+  return scenarioRun({
+    observation: {
+      firstAlertAt: alertAt,
+      humanNoticedAt: at(5000),
+      commandAt: at(10000),
+      ackAt: at(12000),
+      recoveredAt: at(60000),
+    },
+    run: { timeline: { T1p: at(-5000), T2: alertAt, T3: at(10000), T4: at(60000) } },
+  });
 }
 
 /** 보고서 §1 실행 표의 그 시나리오 줄을 바꾼다. cells는 id 뒤의 7칸이다 */
@@ -266,6 +283,7 @@ test('MSR-060 ② 측정 창 4d~4g·무대·잠금·중단 규칙·인자 규칙
   assert.ok(plan.stage.toxiproxy.includes('kms'), 'G-27 KMS 끝점 Toxiproxy');
   assert.deepEqual(plan.generator, { droppedIterationsMax: 0, cpuPctMax: 80, memPctMax: 90, minHttpReqs: 1 });
   assert.deepEqual(plan.k8.intervals.fast, FAST_INTERVAL);
+  assert.deepEqual(plan.k8.intervals.opsRt, OPS_RT_INTERVAL);
   assert.deepEqual(plan.k8.intervals.cause, CAUSE_INTERVAL);
   assert.equal(plan.k8.minBurnMultiple, 27);
   assert.deepEqual(plan.timeline.columns, ['T0', 'T1', 'T1p', 'T2', 'T3', 'T4']);
@@ -294,11 +312,11 @@ test('MSR-060 ③ K8 간격·탐지 60초·전파 3초·소진 배수·발생기
   assert.equal(r.propagationSec, 2);
   assert.equal(r.alertDetected, true);
 
-  // 탐지 60.000초는 통과, 60.001초는 미달
-  r = m.judgeScenario(scenarioRun({ observation: { firstAlertAt: '2026-11-27T09:01:00.000Z' } }));
+  // 탐지 60.000초는 통과, 60.001초는 미달. 경보 시각을 옮기면 사람 인지·명령·ack·T1p·T2·T3·T4도 함께 옮긴다.
+  r = m.judgeScenario(scenarioRunWithAlert('2026-11-27T09:01:00.000Z'));
   assert.equal(r.detectionSec, 60);
   assert.equal(r.verdict, '통과');
-  r = m.judgeScenario(scenarioRun({ observation: { firstAlertAt: '2026-11-27T09:01:00.001Z' } }));
+  r = m.judgeScenario(scenarioRunWithAlert('2026-11-27T09:01:00.001Z'));
   assert.equal(r.verdict, '미달');
 
   // 전파 3.000초는 통과, 3.001초는 미달
