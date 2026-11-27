@@ -5,7 +5,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { CLOCK, type Clock } from '@peaket/platform';
-import { type AdminPasswordError, type AdminPasswordRejection, REJECTION_TEXT } from './admin-password-error.js';
+import { AdminPasswordError, type AdminPasswordRejection, REJECTION_TEXT } from './admin-password-error.js';
 import { BeginTotpEnrollment } from './totp-enrollment.js';
 import { SetAdminPassword } from './set-admin-password.js';
 import { maskAdminEmail, normalizeDisplayName } from './manage-admin-accounts.js';
@@ -115,11 +115,13 @@ export class AcceptAdminInvitation {
     try {
       await this.passwordSetter.run({ accountId: row.accountId, password });
     } catch (e) {
-      const p = e as AdminPasswordError;
-      if (p.code === 'REJECTED') throw new InvitationAcceptanceError('PASSWORD_REJECTED', { reason: p.reason ?? 'CONTEXT' });
-      // 저장소·페퍼처럼 다시 시도하면 될 장애는 닫힌 쪽(503)이다(IR096-04)
-      if (p.code === 'UNAVAILABLE' || p.code === undefined) throw new InvitationAcceptanceError('UNAVAILABLE');
-      throw new InvitationAcceptanceError('STEP_INVALID');
+      // 정해진 오류만 410/422로 가른다. 드라이버 오류처럼 top-level code가 붙은 raw Error도 503이다(IR096-04 잔여)
+      if (e instanceof AdminPasswordError) {
+        if (e.code === 'REJECTED') throw new InvitationAcceptanceError('PASSWORD_REJECTED', { reason: e.reason ?? 'CONTEXT' });
+        if (e.code === 'UNAVAILABLE') throw new InvitationAcceptanceError('UNAVAILABLE');
+        throw new InvitationAcceptanceError('STEP_INVALID');
+      }
+      throw new InvitationAcceptanceError('UNAVAILABLE');
     }
     if (!(await this.#store(() => this.invitations.advanceInvitationStage({ accountId: row.accountId, from: 'PASSWORD', to: 'TOTP', now: this.clock.now() })))) throw new InvitationAcceptanceError('STEP_INVALID');
     return { next: 'TOTP' };
