@@ -39,6 +39,25 @@ BEGIN
 END;
 $$;
 --> statement-breakpoint
+-- SECURITY DEFINER 소유자가 research_export_denial DELETE를 갖는지 마이그레이션 때 한 번 확인한다.
+-- 소유자가 DELETE를 잃었거나 바꿔야 하면 전용 owner 역할(예: ops_research_purge_owner)을 만들고
+-- ALTER FUNCTION public.research_export_denial_purge() OWNER TO ops_research_purge_owner; 로 옮긴다(출시 전).
+DO $$
+DECLARE
+  owner_name name;
+BEGIN
+  SELECT pg_get_userbyid(p.proowner) INTO owner_name
+  FROM pg_proc p
+  WHERE p.oid = 'public.research_export_denial_purge()'::regprocedure;
+  IF owner_name IS NULL THEN
+    RAISE EXCEPTION 'research_export_denial_purge 함수를 찾지 못했다';
+  END IF;
+  IF NOT has_table_privilege(owner_name, 'public.research_export_denial', 'DELETE') THEN
+    RAISE EXCEPTION 'research_export_denial_purge 소유자 %에게 research_export_denial DELETE가 없다', owner_name;
+  END IF;
+END
+$$;
+--> statement-breakpoint
 REVOKE ALL ON FUNCTION research_export_denial_purge() FROM PUBLIC;
 --> statement-breakpoint
 REVOKE EXECUTE ON FUNCTION research_export_denial_purge() FROM ops_app;

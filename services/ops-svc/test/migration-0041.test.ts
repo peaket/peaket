@@ -25,6 +25,10 @@ describe('F-04-19 마이그레이션 0041 research_export_denial 90일 purge', (
     expect(sql).toContain('REVOKE ALL ON FUNCTION research_export_denial_purge() FROM PUBLIC');
     expect(sql).toContain('REVOKE EXECUTE ON FUNCTION research_export_denial_purge() FROM ops_app');
     expect(sql).toContain('GRANT EXECUTE ON FUNCTION research_export_denial_purge() TO ops_research_purger');
+    expect(sql).not.toMatch(/GRANT[^;]*EXECUTE[^;]*TO ops_app/);
+    expect(sql).toContain('pg_get_userbyid(p.proowner)');
+    expect(sql).toContain('has_table_privilege(owner_name');
+    expect(sql).toContain('ALTER FUNCTION public.research_export_denial_purge() OWNER TO');
     expect(sql).not.toMatch(/GRANT[^;]*DELETE[^;]*research_export_denial/);
   });
 
