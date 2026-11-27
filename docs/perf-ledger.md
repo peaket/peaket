@@ -608,6 +608,7 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | 2026-11-24 | 2026-11-24-msr020-n8-c05-r3-f082-s1 | NFR-001 | v1 | local-100k | 51,202명, 1,280 RPS | 174 | 0.3% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n8-c05-r3-f082-s1/ |
 | 2026-11-24 | 2026-11-24-msr020-n8-c05-r3-f082-s1-b1 | NFR-001 | v1 | local-100k | 25,602명, 640 RPS | 91 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n8-c05-r3-f082-s1-b1/ |
 | 2026-11-24 | 2026-11-24-msr020-n8-c05-r3-f082-s2-b1 | NFR-001 | v1 | local-100k | 61,442명, 1,536 RPS | 188 | 0.3% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n8-c05-r3-f082-s2-b1/ |
+| 2026-11-27 | 2026-11-27-f085-queue-4a | NFR-027 | v1 | local-10k | 5,000명, 500 RPS | 0.00 | 0.0% | 무효(dropped_iterations 2014) | 측정함 | - | perf-ledger/runs/2026-11-27-f085-queue-4a/ |
 <!-- ledger:end -->
 
 표준 서식 예시 (참고용 Mock 데이터):
