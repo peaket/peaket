@@ -1,0 +1,4 @@
+2026-11-27T15:47:46Z 측정 폴더: D:\ticketpass-freeze-F-08-5\docs\perf-ledger\runs\2026-11-27-f085-purchase-4a
+2026-11-27T15:47:46Z 첨부: C:/Users/ghwnd/AppData/Local/Temp/opencode/f085-purchase-r10/infra.txt → infra.txt
+2026-11-27T15:47:46Z 원본 버킷(--raw-bucket)이 없어 큰 원본(metrics/·traces/·grafana/·stdout.log)이 폴더에 남는다. Git에는 작은 파일만 넣는다(docs/perf-ledger.md §2.1)
+2026-11-27T15:47:46Z manifest.json 작성

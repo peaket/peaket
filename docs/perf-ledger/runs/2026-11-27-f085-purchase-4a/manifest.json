@@ -1,0 +1,55 @@
+{
+  "run_id": "2026-11-27-f085-purchase-4a",
+  "kpi": "NFR-027",
+  "version": "v1",
+  "profile": "local-10k",
+  "scale": {
+    "users": 5000,
+    "arrival_rps": 1000.0,
+    "duration_s": 21600,
+    "warmup_s": 1800
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v1-soak.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "baa0df1e1",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "host": null,
+  "generator": {
+    "description": "발생기 1대 CPU 4·메모리 4096Mi. 2026-11-28 00:25:43 KST OOMKilled(31분 45초). k6: Insufficient VUs, reached 100 active VUs",
+    "dropped_iterations": null
+  },
+  "started_at": "2026-11-27T14:53:58Z",
+  "ended_at": "2026-11-27T15:25:43Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": null,
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "series": "series.ndjson",
+    "console": "console-sample.ndjson",
+    "cgroup": "cgroup.log",
+    "k6_log": "k6.log"
+  },
+  "valid": false,
+  "invalid_reason": "발생기 4GiB OOMKilled(31분 45초), k6 요약 없음; 100 VU insufficient, 30초 재홀드 대기 409 표본 6,839",
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": null,
+  "notes": "purchase 4a는 본구간 전 발생기 OOM으로 무효. console 표본 11,315건(1/100): 201 2,221·409 6,839·422 0·503 1, release 204 2,252·503 2. probe 53표본(52분, 마지막 20분은 부하 없음); series.ndjson? soak-probe 1? ?? 53?(??? 20?? ?? ??), console-sample.ndjson? ?? ?? 1/100 ??",
+  "collected_at": "2026-11-27T15:47:46Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

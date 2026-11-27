@@ -1,0 +1,5 @@
+v1 합본(docs/verification.md §3.8): 복제 3, CPU 요청 1·한도 1, 메모리 요청 2048Mi·한도 2048Mi, 모드 split, 서비스 payment-svc,purchase-svc,admission-ctrl,queue-svc, HPA 끔
+대기열·좌석 Redis TLS 켬, 릴레이 purchase·payment 각 2
+PostgreSQL(v1 무대 전용) purchase-svc 클라이언트 연결 21~23
+발생기 1대: CPU 4, 메모리 4096Mi, 1,000/s, 6시간 계획. 실제 2026-11-28 00:25:43 KST OOMKilled(31분 45초, 예열 중)
+발생기 로그: "Insufficient VUs, reached 100 active VUs and cannot initialize more"
