@@ -1,0 +1,144 @@
+{
+  "batch": "F-08-14",
+  "feature": "F-08-14",
+  "title": "K8/K9·관측 백엔드 비교 계산",
+  "window": {
+    "id": "3g",
+    "hours": 10,
+    "rolesHours": 16,
+    "totalDays": 3.25,
+    "openedBy": "감독",
+    "status": "계획",
+    "note": "기존 산출물만 읽는다. 새 측정·Docker·kind·k6·브라우저는 쓰지 않는다."
+  },
+  "lock": {
+    "take": "docker lane4-F-08-14",
+    "drop": "docker lane4-F-08-14",
+    "dockerAll": false,
+    "slots": 1,
+    "used": false
+  },
+  "k8": {
+    "ids": ["G-01", "G-02", "G-03", "G-04", "G-05", "G-06", "G-07", "G-08", "G-09", "G-10"],
+    "detectionSec": 60,
+    "propagationSec": 3,
+    "denominator": 10,
+    "g07Fallback": "T1이 없으면 T1p로 계산하고 usedT1p를 표시한다",
+    "csv": ["scenario", "source", "run_id", "t0", "t1", "t1p", "t2", "t3", "detection_sec", "propagation_sec", "verdict", "evidence"],
+    "rows": [
+      { "id": "G-01", "source": "F-08-6" },
+      { "id": "G-02", "source": "F-08-6·F-08-12" },
+      { "id": "G-03", "source": "F-08-6" },
+      { "id": "G-04", "source": "F-08-6" },
+      { "id": "G-05", "source": "F-08-6" },
+      { "id": "G-06", "source": "F-08-6" },
+      { "id": "G-07", "source": "F-08-6" },
+      { "id": "G-08", "source": "F-08-6" },
+      { "id": "G-09", "source": "F-08-6" },
+      { "id": "G-10", "source": "F-08-6·F-08-12" }
+    ]
+  },
+  "k9": {
+    "metric": "hpa-pod-ready",
+    "limitSec": 60,
+    "flag": "--hpa-timeline",
+    "replicasBefore": 1,
+    "settle": true,
+    "status": "미측정",
+    "reason": "F-08-8은 K9/HPA를 범위 밖으로 두고 HPA를 껐고, K1 실행도 §3.10의 1만·10만 --settle 실행이 아니다"
+  },
+  "backends": [
+    { "id": "self", "name": "직접 운영" },
+    { "id": "aws", "name": "AWS 관리형 AMP·AMG" },
+    { "id": "datadog", "name": "Datadog" }
+  ],
+  "traceStores": [
+    { "id": "tempo-msk", "name": "(가) Tempo 마이크로서비스 + 관측 전용 MSK" },
+    { "id": "tempo-monolith", "name": "(나) Tempo 모놀리식 + 꼬리 표본 상한" },
+    { "id": "xray", "name": "(다) AWS X-Ray" }
+  ],
+  "components": [
+    { "id": "prometheus", "retentionDays": 15 },
+    { "id": "mimir", "retentionDays": 395 },
+    { "id": "loki", "retentionDays": 30 },
+    { "id": "tempo", "retentionDays": 14 },
+    { "id": "pyroscope", "retentionDays": 7 }
+  ],
+  "prices": {
+    "amp": {
+      "freeSamples": 40000000,
+      "ingestTiers": [
+        { "upToSamples": 2000000000, "perSamples": 10000000, "unitPriceUsd": 0.9 },
+        { "upToSamples": 250000000000, "perSamples": 10000000, "unitPriceUsd": 0.35 }
+      ],
+      "storageFreeGB": 10,
+      "storagePerGBMonthUsd": 0.03,
+      "queryFreeSamples": 200000000000,
+      "queryPerBillionUsd": 0.1,
+      "priceDate": "2026-10-14"
+    },
+    "amg": { "editorUsd": 9, "viewerUsd": 5, "priceDate": "2026-10-20" },
+    "datadog": {
+      "infraProPerServerUsd": 15,
+      "apmPerServerUsd": 40,
+      "metricsIncludedPerServer": 100,
+      "extraMetricsPer100Usd": 5,
+      "logsPerGBUsd": 0.1,
+      "priceDate": "2026-10-19"
+    },
+    "xray": {
+      "perMillionStoredUsd": 5,
+      "perMillionQueriedUsd": 0.5,
+      "freeTracesPerMonth": 100000,
+      "freeQueriesPerMonth": 1000000,
+      "priceDate": "2026-09-11"
+    },
+    "s3": { "perGBMonthUsd": 0.025, "priceDate": "2026-10-15" },
+    "timeRateKrw": 49538
+  },
+  "priorMeasurements": [
+    { "id": "F-08-5", "status": "무효·미측정" },
+    { "id": "F-08-9", "status": "판정 못 함(무효·부분)" },
+    { "id": "F-08-10", "status": "미측정" },
+    { "id": "F-08-12", "status": "미측정" },
+    { "id": "F-08-13", "status": "미측정", "evidence": "설계만" },
+    { "id": "F-08-6", "status": "미측정" }
+  ],
+  "boundaries": [
+    { "feature": "F-08-6", "owns": "Game Day 33종 전체·gameday.mjs·SLO/KPI ADR", "doesNot": "이 기능은 K8 10행만 읽고 33종을 다시 만들지 않는다" },
+    { "feature": "F-08-12", "owns": "14종 로컬 실행·gameday-local.mjs·보고서", "doesNot": "이 기능은 G-02·G-10 두 행만 읽고 도구·보고서를 고치지 않는다" },
+    { "feature": "F-08-13", "owns": "G-18·G-26~G-28·G-32·G-33·복원 연습 3종", "doesNot": "이 기능은 K8 10종에 닿지 않고 결과를 미측정(증거 설계만)으로 인용만 한다" },
+    { "feature": "F-08-15", "owns": "OPS-520 보내기 비교·Sentry 운영 방식·OPS-530 M4 블로그", "doesNot": "이 기능은 OPS-510 계산 결과만 넘긴다" }
+  ],
+  "commands": [
+    { "cmd": "node loadtest/run.mjs v1 obs-compare --window 3g --out .cache/peaket-f0814", "note": "입력이 없으면 미측정 보고서를 쓴다" },
+    { "cmd": "node loadtest/run.mjs v1 obs-compare --window 3g --k8 <보고서.md|요약.json> --k9 <요약.json> --metrics <입력.json> --ops-hours docs/perf-ledger/ops-hours.csv --fx <원/달러> --out <폴더>", "note": "산출물을 읽어 판정한다" },
+    { "cmd": "node loadtest/run.mjs v1 obs-compare --window 3g --judge <입력.json>", "note": "K8/K9/후보 판정만 다시 본다" }
+  ],
+  "stopRules": [
+    { "id": "STOP-01", "rule": "입력이 없다고 새 측정·새 무대를 만들려 한다" },
+    { "id": "STOP-02", "rule": "Docker·kind·k6·브라우저를 쓰려 한다" },
+    { "id": "STOP-03", "rule": "입력이 없는데 측정함·통과로 적는다" },
+    { "id": "STOP-04", "rule": "K8 간격을 줄인 시험 설정으로 잰 값을 쓴다" },
+    { "id": "STOP-05", "rule": "탐지율 분모를 10이 아닌 측정 행 수로 바꾼다" },
+    { "id": "STOP-06", "rule": "K9를 --hpa-timeline·--settle·복제 1→N·실행 증거 없이 통과로 적는다" },
+    { "id": "STOP-07", "rule": "OPS-510 가격 조회 날짜·환율 값·출처·기준일·운영 시간 없이 후보 1위를 낸다" },
+    { "id": "STOP-08", "rule": "AWS·Datadog에 자료를 보내거나 유료 등급을 쓴다" },
+    { "id": "STOP-09", "rule": "F-08-6·F-08-12·F-08-13 파일을 고친다" },
+    { "id": "STOP-10", "rule": "금지 수치를 주장하거나 release·develop에 합치려 한다" }
+  ],
+  "notIncluded": [
+    "Q-T2", "S-T1", "P-T1", "V-T4", "V-T5", "V-T17", "V-T18", "V-T27", "V-T28", "NFR-027", "NFR-028",
+    "K1", "K2", "K7", "OPS-520", "OPS-530",
+    "G-11", "G-12", "G-13", "G-14", "G-15", "G-16", "G-17", "G-18", "G-19", "G-20", "G-21", "G-22",
+    "G-23", "G-24", "G-25", "G-26", "G-27", "G-28", "G-29", "G-30", "G-31", "G-32", "G-33"
+  ],
+  "artifacts": {
+    "k8Csv": "k8.csv",
+    "k9Csv": "k9.csv",
+    "backendCostCsv": "backend_cost.csv",
+    "componentsCsv": "components.csv",
+    "traceStoresCsv": "trace_stores.csv",
+    "manifest": "manifest.json"
+  }
+}

@@ -73,6 +73,22 @@ node loadtest/run.mjs v1 gameday-local --window 3a --judge .cache/peaket-f0812/g
 - 실행 ID는 `-f0812`로 끝나고, Docker 잠금은 `docker lane4-F-08-12` 한 자리만 씁니다(`docker-all` 금지). 14종 실제 실행·측정은 측정 창 몫이며 이 명령은 실행하지 않습니다.
 - 정본·계획: `docs/observability.md` §12, `docs/verification.md` §5.2, `docs/review/plans/F-08-12.md` §6~§10.
 
+### K8/K9·관측 백엔드 비교(F-08-14)
+
+`v1 obs-compare`는 K8 10행(G-01~G-10)·K9 HPA 확장·OPS-510 후보/구성 요소/요청 기록 저장소 세 안의 **계획과 판정만** 다룹니다. 기존 산출물(F-08-6 보고서, K9 요약, 운영 시간 CSV, OPS-510 입력)을 읽고, 없으면 `미측정`/`판정 못 함`으로 남깁니다. **Docker·kind·k6·브라우저를 시작하지 않습니다.**
+
+```bash
+node loadtest/run.mjs v1 obs-compare --window 3g
+node loadtest/run.mjs v1 obs-compare --window 3g --k8 <F-08-6 보고서.md> --k9 <K9 요약.json> --metrics <OPS-510 입력.json> --ops-hours docs/perf-ledger/ops-hours.csv --fx 1400 --out .cache/peaket-f0814/3g
+node loadtest/run.mjs v1 obs-compare --window 3g --judge <K8/K9/비용 입력.json> --out .cache/peaket-f0814/judge.json
+```
+
+- K8은 T0·T1·T1p·T2·T3에서 탐지·전파를 계산합니다. G-07만 T1이 없으면 T1p를 쓰고 `usedT1p`로 표시합니다.
+- K9는 복제 1→N·`--settle`·실행 증거를 요구하고, 준비 60초 경계를 봅니다.
+- OPS-510은 `krwPerUsd`·`fxSource`·`fxDate`·`priceDate`가 모두 있어야 계산합니다. X-Ray 테스트 입력은 연 138달러, 운영 50시간 포함 1,907.21달러입니다.
+- Docker 잠금은 쓰지 않습니다. 써야 하면 `docker lane4-F-08-14` 한 자리만 쓰고 `docker-all`은 쓰지 않습니다.
+- 정본·계획: `docs/observability.md` §12, `docs/verification.md` §3.10, `docs/perf-ledger.md` §8·§11, `docs/review/plans/F-08-14.md`.
+
 ### 진입 서버 비례 확인(MSR-020)
 
 무대는 진입 서버 수·CPU 몫·켤 서비스를 정해 올립니다: `node tools/local/cluster.mjs v1 --redis-tls on --replicas N --cpus <몫> --services queue-svc`(넷을 다 켜지 않으면 합본은 single 모드로 뜬다). 단계 올리기 뒤 계산은 `node loadtest/runner/entry-scale.mjs choose|report`입니다.

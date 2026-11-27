@@ -42,6 +42,18 @@ import { accountRef, pidOf, sidOf } from './lib/users.mjs';
 import { DEFAULTS, SCENARIOS, UsageError, V1_ENTRY_SCENARIO, V1_SCENARIOS, parseArgs } from './runner/args.mjs';
 import { assertLocalConfig, compareExperiment, experimentFor, manifestNotes, renderComparison } from './runner/split-compare.mjs';
 import { F0812_PRIOR_MEASUREMENTS, F0812_SCENARIOS, F0812_STOP_RULES, F0812_WINDOWS, judgeLocalScenario } from './runner/gameday-local.mjs';
+import {
+  F0814_PRIOR_MEASUREMENTS,
+  backendCosts,
+  componentCosts,
+  judgeK8,
+  judgeK9,
+  readK8Report,
+  readK9Summary,
+  readOpsHours,
+  renderF0814Report,
+  traceStoreCosts,
+} from './runner/observability-compare.mjs';
 import { GENERATOR_RATE as ENTRY_GENERATOR_RATE, hostTags, runEntrySteps } from './runner/entry-scale.mjs';
 import { hostBetween, hostSnapshot } from './runner/host-metrics.mjs';
 import { CHECK_PHASES, checksFromSummary, executionSegments, generatorCount, mergeSummaries, withoutHistogramChecks } from './runner/merge.mjs';
@@ -2446,6 +2458,99 @@ async function runF0812Command(a) {
   return { outDir, exitCode: 0 };
 }
 
+// ───────────── F-08-14 동결 로컬 트랙(v1 obs-compare) ─────────────
+
+function csvCell(value) {
+  const s = value === null || value === undefined ? '' : String(value);
+  return /[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
+}
+function writeCsv(file, columns, rows) {
+  const body = [columns.join(','), ...rows.map((row) => columns.map((key) => csvCell(row[key])).join(','))].join('\n');
+  writeFileSync(file, `${body}\n`);
+}
+
+/**
+ * F-08-14 K8/K9·OPS-510 계획·판정. 입력 산출물을 읽어 판정·보고서만 만들고
+ * Docker·kind·k6·브라우저를 시작하지 않는다. 입력이 없으면 미측정/판정 못 함이다.
+ */
+async function runF0814Command(a) {
+  if (a.judge) {
+    const inputPath = resolve(a.judge);
+    if (!existsSync(inputPath)) throw new Error(`판정 입력이 없다: ${inputPath}`);
+    const input = JSON.parse(readFileSync(inputPath, 'utf8').replace(/^\uFEFF/, ''));
+    const result = input.rows || input.k8?.rows
+      ? judgeK8({ rows: input.rows ?? input.k8.rows })
+      : input.runs || input.k9?.runs
+        ? judgeK9({ runs: input.runs ?? input.k9.runs })
+        : {
+          backend: backendCosts(input),
+          components: componentCosts(input),
+          traceStores: traceStoreCosts(input).rows,
+        };
+    const out = resolve(a.out ?? join('.cache', 'peaket-f0814', 'judge.json'));
+    mkdirSync(dirname(out), { recursive: true });
+    writeFileSync(out, `${JSON.stringify(result, null, 2)}\n`);
+    log(`F-08-14 obs-compare judge: ${out}`);
+    return { outDir: dirname(out), exitCode: 0 };
+  }
+
+  const outDir = resolve(a.out ?? join('.cache', 'peaket-f0814', a.window));
+  mkdirSync(outDir, { recursive: true });
+  const k8Report = a.k8 ? readK8Report(a.k8) : { ok: false, rows: [], reason: 'K8 입력을 주지 않았다' };
+  const k9Summary = a.k9 ? readK9Summary(a.k9) : { ok: false, runs: [], reason: 'K9 입력을 주지 않았다' };
+  const opsHours = readOpsHours(a.opsHours ?? join('docs', 'perf-ledger', 'ops-hours.csv'));
+  let metricsInput = {};
+  if (a.metrics) {
+    const metricsPath = resolve(a.metrics);
+    if (!existsSync(metricsPath)) throw new Error(`OPS-510 입력이 없다: ${metricsPath}`);
+    metricsInput = JSON.parse(readFileSync(metricsPath, 'utf8').replace(/^\uFEFF/, ''));
+  }
+  if (Number.isFinite(a.fx)) metricsInput = { ...metricsInput, krwPerUsd: a.fx };
+  const k8 = judgeK8({ rows: k8Report.rows });
+  const k9 = judgeK9({ runs: k9Summary.runs });
+  const backend = backendCosts(metricsInput);
+  const components = componentCosts(metricsInput);
+  const trace = traceStoreCosts(metricsInput);
+  const report = renderF0814Report({
+    window: a.window,
+    status: '미실행',
+    k8: { rows: k8Report.ok ? k8Report.rows : [] },
+    k9: { runs: k9Summary.ok ? k9Summary.runs : [] },
+    backends: backend,
+    components: components.rows,
+    traceStores: trace.rows,
+    prior: F0814_PRIOR_MEASUREMENTS,
+  });
+  writeFileSync(join(outDir, 'F-08-14.md'), report);
+  writeCsv(join(outDir, 'k8.csv'), ['scenario', 'source', 'run_id', 't0', 't1', 't1p', 't2', 't3', 'detection_sec', 'propagation_sec', 'verdict', 'evidence'],
+    k8.perScenario.map((r) => ({ scenario: r.id, source: r.source, run_id: r.runId, t0: r.t0, t1: r.t1, t1p: r.t1p, t2: r.t2, t3: r.t3, detection_sec: r.detectionSec, propagation_sec: r.propagationSec, verdict: r.verdict, evidence: r.evidence })));
+  writeCsv(join(outDir, 'k9.csv'), ['run_id', 'load_start_ms', 'scaled_at_ms', 'pod_ready_at_ms', 'scale_sec', 'ready_sec', 'verdict'], k9.runs);
+  writeCsv(join(outDir, 'backend_cost.csv'), ['candidate', 'item', 'quantity', 'unit', 'unit_price_usd', 'price_date', 'annual_usd', 'source'],
+    backend.candidates.flatMap((c) => c.items.map((it) => ({ candidate: c.id, ...it }))));
+  writeCsv(join(outDir, 'components.csv'), ['component', 'retention_days', 'storage_gb', 'annual_usd', 'query', 'ops'],
+    components.rows.map((r) => ({ component: r.id, retention_days: r.retentionDays, storage_gb: r.storageGB, annual_usd: r.annualUsd, query: r.query, ops: r.ops })));
+  writeCsv(join(outDir, 'trace_stores.csv'), ['store', 'storage', 'retention_days', 'annual_usd', 'durable3', 'open_peak', 'verdict'],
+    trace.rows.map((r) => ({ store: r.id, storage: r.storage, retention_days: r.retentionDays, annual_usd: r.annualUsd, durable3: r.durable3, open_peak: r.openPeak, verdict: r.verdict })));
+  const manifest = {
+    tool: 'obs-compare',
+    window: a.window,
+    status: '미실행',
+    execute: false,
+    inputs: {
+      k8: a.k8 ?? null,
+      k9: a.k9 ?? null,
+      metrics: a.metrics ?? null,
+      opsHours: a.opsHours ?? join('docs', 'perf-ledger', 'ops-hours.csv'),
+      opsHoursRows: opsHours.rows,
+    },
+    verdicts: { k8: k8.verdict, k9: k9.verdict, backend: backend.verdict, traceStores: trace.verdict },
+    notes: ['입력 산출물만 읽는다. Docker·kind·k6·브라우저를 시작하지 않는다.', '입력이 없으면 미측정/판정 못 함이다.'],
+  };
+  writeFileSync(join(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  log(`F-08-14 obs-compare: K8 ${k8.verdict}, K9 ${k9.verdict}, OPS-510 ${backend.verdict}/${trace.verdict}, ${outDir}`);
+  return { outDir, exitCode: 0 };
+}
+
 // ───────────── 게이트웨이 차단 상한·검색 IP 한도(gw, V-T43·SR-T13 ②, BAT-056) ─────────────
 
 /** 시나리오가 쓰는 회차 ID(대역 백엔드는 보지 않는다) */
@@ -2658,7 +2763,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } catch (e) {
     if (e instanceof UsageError) {
       console.error(`loadtest/run.mjs: ${e.message}`);
-      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment|entry-steps|relay-fault|search|payment-fault|compare|compare-report|gameday-local [...] | gw sweep|capacity|ip-limit|limits [...] | cleanup (loadtest/README.md)');
+      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment|entry-steps|relay-fault|search|payment-fault|compare|compare-report|gameday-local|obs-compare [...] | gw sweep|capacity|ip-limit|limits [...] | cleanup (loadtest/README.md)');
       process.exit(2);
     }
     throw e;
@@ -2685,7 +2790,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     });
   }
   try {
-    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : a.scenario === 'relay-fault' ? await runF089Command(a, runTag, 'relay-fault') : a.scenario === 'search' ? await runF089Command(a, runTag, 'search') : a.scenario === 'payment-fault' ? await runF089Command(a, runTag, 'payment-fault') : a.scenario === 'compare' ? await runF0810Command(a, runTag) : a.scenario === 'compare-report' ? await runF0810Report(a) : a.scenario === 'gameday-local' ? await runF0812Command(a) : await runV1(a, runTag)) : await runV0(a, runTag);
+    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : a.scenario === 'relay-fault' ? await runF089Command(a, runTag, 'relay-fault') : a.scenario === 'search' ? await runF089Command(a, runTag, 'search') : a.scenario === 'payment-fault' ? await runF089Command(a, runTag, 'payment-fault') : a.scenario === 'compare' ? await runF0810Command(a, runTag) : a.scenario === 'compare-report' ? await runF0810Report(a) : a.scenario === 'gameday-local' ? await runF0812Command(a) : a.scenario === 'obs-compare' ? await runF0814Command(a) : await runV1(a, runTag)) : await runV0(a, runTag);
     log(`\n산출물: ${r.outDir}`);
     process.exit(r.exitCode);
   } catch (e) {
