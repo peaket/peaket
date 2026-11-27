@@ -58,6 +58,21 @@ node loadtest/k5/seatmap-lab.mjs --reps 20
 | `v1 entry-steps` | MSR-020 진입 서버 비례 확인(docs/verification.md §3.3, 계획 docs/review/plans/F-08-2.md 6.3): 도착률 단계 올리기 한 번. 단계마다 새 회차, 준비 구간에 사전 검증을 마치고 진입(`route:entry`)만 정한 도착률로 보낸다(`scenarios/v1-entry.js`). 단계가 SLO(p99 200ms·오류율 0.1% 미만)·발생기·커널 카운터·호스트 포화 가운데 하나라도 어기면 다음 단계를 보내지 않는다. 첫 단계부터 어기면 첫 단계를 절반으로 낮춰 한 번만 다시 돈다 | `--replicas N` `--pod-cpus <0.25·0.5·1~16>`(무대와 같아야 한다) 그리고 `--start-rate r --step-rate d` 또는 `--x1-estimate X̂₁`(첫 단계 0.5 × N × X̂₁, 0.1 × N × X̂₁씩), `--max-steps 8` `--warm 10` `--main 30` `--rest 20` `--generators`(기본 최고 도착률 ÷ 800) `--cpus 2` `--memory-mi 1024`(발생기) `--record --run-id-prefix <ID 앞>`(단계마다 `<앞>-s<단계>`) `--prom-url` `--out`. 결과: `steps.json`(`{ n, podCpus, steps: [{ rate, kept, reasons, entryP99Ms, entryOverRatio, errorRate, sent, dropped, kernel, host }], x, saturated, limitedBy }`)·`step-<번호>/`(요약·`host.json`). 종료 코드는 X를 찾으면 0, 찾지 못하면 1, 인자 오류 2 |
 | `v1 compare`·`v1 compare-report` | F-08-10 V-T18 서비스 분리 효과 비교(계획 docs/review/plans/F-08-10.md 6~7절): (가) 합본과 축소 (나) 네 역할 배포를 결제 300 TPS·진입 0/100/120%로 견준다. 측정 창 전에는 `command.json` 계획만 쓰고 Docker·kind·k6를 시작하지 않는다. `compare-report`는 실행 폴더의 `comparison-run.json`을 모아 `comparison.json`·`comparison.md`를 쓴다 | `v1 compare --config bundle|by-role --entry none|100|120 --rep 1..3 [--entry-max-rate N] [--payment-tps 300] [--record --run-id <ID> --out <폴더> --prom-url …]`, `v1 compare-report [--experiment split-3way] [--runs <폴더>] [--out <comparison.json>]`. `entryRate`는 F-08-2 1 vCPU X₁ 800/s를 인용하고 0.5 vCPU 320/s는 쓰지 않는다. (다) 10개 서비스는 미측정 |
 
+### Game Day 로컬 ①·②(F-08-12)
+
+`v1 gameday-local`은 14종(① G-02·G-10·G-29·G-30·G-31, ② G-17~G-25)의 계획과 판정만 다룹니다. 측정 창 전에는 `gameday-local-plan.json`(또는 `run.json`)만 쓰고 **Docker·kind·k6·브라우저를 시작하지 않습니다.**
+
+```bash
+node loadtest/run.mjs v1 gameday-local --window 3a
+node loadtest/run.mjs v1 gameday-local --window 3c --scenario G-23 --partial --record --run-id 2026-11-28-g23-f0812 --out .cache/peaket-f0812/g23
+node loadtest/run.mjs v1 gameday-local --window 3a --judge .cache/peaket-f0812/g23/run.json --out .cache/peaket-f0812/judge.json
+```
+
+- 로컬 Prometheus에 경보 규칙이 없어 **G-21·G-23·G-31은 `판정 못 함`**입니다. G-10·G-18·G-19·G-22·G-25도 무대가 없고, G-02·G-20·G-23·G-24·G-29·G-31은 일부만 할 수 있습니다. G-17은 설계만입니다. 이 무대에서 통과 가능한 시나리오는 0입니다.
+- 탐지는 T0(주입)→T1p(`ALERTS` firing), 전파는 T2(명령 접수)→T3(파드 반영)입니다. 로컬 T1(Alertmanager)은 null이고 K8 판정은 `requireAlertmanager:true`로 T1을 요구합니다.
+- 실행 ID는 `-f0812`로 끝나고, Docker 잠금은 `docker lane4-F-08-12` 한 자리만 씁니다(`docker-all` 금지). 14종 실제 실행·측정은 측정 창 몫이며 이 명령은 실행하지 않습니다.
+- 정본·계획: `docs/observability.md` §12, `docs/verification.md` §5.2, `docs/review/plans/F-08-12.md` §6~§10.
+
 ### 진입 서버 비례 확인(MSR-020)
 
 무대는 진입 서버 수·CPU 몫·켤 서비스를 정해 올립니다: `node tools/local/cluster.mjs v1 --redis-tls on --replicas N --cpus <몫> --services queue-svc`(넷을 다 켜지 않으면 합본은 single 모드로 뜬다). 단계 올리기 뒤 계산은 `node loadtest/runner/entry-scale.mjs choose|report`입니다.

@@ -25,7 +25,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { cpus as osCpus, totalmem } from 'node:os';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,6 +41,7 @@ import { seatCount } from './lib/seats.mjs';
 import { accountRef, pidOf, sidOf } from './lib/users.mjs';
 import { DEFAULTS, SCENARIOS, UsageError, V1_ENTRY_SCENARIO, V1_SCENARIOS, parseArgs } from './runner/args.mjs';
 import { assertLocalConfig, compareExperiment, experimentFor, manifestNotes, renderComparison } from './runner/split-compare.mjs';
+import { F0812_PRIOR_MEASUREMENTS, F0812_SCENARIOS, F0812_STOP_RULES, F0812_WINDOWS, judgeLocalScenario } from './runner/gameday-local.mjs';
 import { GENERATOR_RATE as ENTRY_GENERATOR_RATE, hostTags, runEntrySteps } from './runner/entry-scale.mjs';
 import { hostBetween, hostSnapshot } from './runner/host-metrics.mjs';
 import { CHECK_PHASES, checksFromSummary, executionSegments, generatorCount, mergeSummaries, withoutHistogramChecks } from './runner/merge.mjs';
@@ -2382,6 +2383,69 @@ async function runF0810Report(a) {
   return { outDir: dirname(out), exitCode: 0 };
 }
 
+// ───────────── F-08-12 동결 로컬 트랙(v1 gameday-local) ─────────────
+
+/**
+ * F-08-12 Game Day 로컬 ①·② 계획·판정. 측정 창 전에는 계획만 쓰고 Docker·kind·k6를 시작하지 않는다.
+ * `--judge`는 run.json 모양의 입력을 판정해 judge.json을 쓴다.
+ */
+async function runF0812Command(a) {
+  if (a.judge) {
+    const inputPath = resolve(a.judge);
+    if (!existsSync(inputPath)) throw new Error(`판정 입력이 없다: ${inputPath}`);
+    const files = statSync(inputPath).isDirectory()
+      ? readdirSync(inputPath).filter((f) => f.endsWith('.json')).sort().map((f) => join(inputPath, f))
+      : [inputPath];
+    const results = files.map((file) => {
+      const input = JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+      const one = (run) => ({ file, scenario: run?.scenario ?? null, ...judgeLocalScenario(run) });
+      return Array.isArray(input) ? input.map(one) : one(input);
+    }).flat();
+    const out = resolve(a.out ?? join('.cache', 'peaket-f0812', 'judge.json'));
+    mkdirSync(dirname(out), { recursive: true });
+    writeFileSync(out, `${JSON.stringify(results, null, 2)}\n`);
+    log(`F-08-12 gameday-local judge: ${results.length}건, ${out}`);
+    return { outDir: dirname(out), exitCode: 0 };
+  }
+  const window = F0812_WINDOWS.find((w) => w.id === a.window);
+  const selected = a.gamedayScenario
+    ? F0812_SCENARIOS.filter((s) => s.id === a.gamedayScenario)
+    : F0812_SCENARIOS.filter((s) => window.scenarioIds.includes(s.id));
+  const outDir = resolve(a.out ?? join('.cache', 'peaket-f0812', a.gamedayScenario ?? a.window));
+  mkdirSync(outDir, { recursive: true });
+  const plan = {
+    tool: 'gameday-local',
+    window: a.window,
+    group: a.group,
+    scenario: a.gamedayScenario,
+    record: a.record,
+    runId: a.runId,
+    partial: a.partial,
+    execute: false,
+    status: '미실행',
+    scenarios: selected,
+    stopRules: F0812_STOP_RULES,
+    priorMeasurements: F0812_PRIOR_MEASUREMENTS,
+    notes: [
+      '측정 창 전에는 계획만 쓴다. Docker·kind·k6·브라우저를 시작하지 않는다.',
+      'G-21·G-23·G-31은 로컬 경보 규칙이 없어 판정 못 함이다. 이 무대에서 통과 가능한 시나리오는 0이다.',
+    ],
+  };
+  writeFileSync(join(outDir, 'gameday-local-plan.json'), `${JSON.stringify(plan, null, 2)}\n`);
+  if (a.record) {
+    writeFileSync(join(outDir, 'run.json'), `${JSON.stringify({
+      status: '미실행',
+      window: a.window,
+      scenario: a.gamedayScenario,
+      runId: a.runId,
+      partial: a.partial,
+      note: '측정 창에서 실행한 뒤 evidence를 채운다. 이 파일은 계획 단계의 표시다.',
+    }, null, 2)}\n`);
+  }
+  log(`F-08-12 gameday-local: ${selected.length}종 계획을 ${outDir}에 남겼다 (미실행 — Docker·kind·k6를 시작하지 않는다)`);
+  return { outDir, exitCode: 0 };
+}
+
 // ───────────── 게이트웨이 차단 상한·검색 IP 한도(gw, V-T43·SR-T13 ②, BAT-056) ─────────────
 
 /** 시나리오가 쓰는 회차 ID(대역 백엔드는 보지 않는다) */
@@ -2594,7 +2658,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } catch (e) {
     if (e instanceof UsageError) {
       console.error(`loadtest/run.mjs: ${e.message}`);
-      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment|entry-steps|relay-fault|search|payment-fault|compare|compare-report [...] | gw sweep|capacity|ip-limit|limits [...] | cleanup (loadtest/README.md)');
+      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment|entry-steps|relay-fault|search|payment-fault|compare|compare-report|gameday-local [...] | gw sweep|capacity|ip-limit|limits [...] | cleanup (loadtest/README.md)');
       process.exit(2);
     }
     throw e;
@@ -2621,7 +2685,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     });
   }
   try {
-    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : a.scenario === 'relay-fault' ? await runF089Command(a, runTag, 'relay-fault') : a.scenario === 'search' ? await runF089Command(a, runTag, 'search') : a.scenario === 'payment-fault' ? await runF089Command(a, runTag, 'payment-fault') : a.scenario === 'compare' ? await runF0810Command(a, runTag) : a.scenario === 'compare-report' ? await runF0810Report(a) : await runV1(a, runTag)) : await runV0(a, runTag);
+    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : a.scenario === 'relay-fault' ? await runF089Command(a, runTag, 'relay-fault') : a.scenario === 'search' ? await runF089Command(a, runTag, 'search') : a.scenario === 'payment-fault' ? await runF089Command(a, runTag, 'payment-fault') : a.scenario === 'compare' ? await runF0810Command(a, runTag) : a.scenario === 'compare-report' ? await runF0810Report(a) : a.scenario === 'gameday-local' ? await runF0812Command(a) : await runV1(a, runTag)) : await runV0(a, runTag);
     log(`\n산출물: ${r.outDir}`);
     process.exit(r.exitCode);
   } catch (e) {

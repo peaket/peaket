@@ -1,0 +1,736 @@
+{
+  "batch": "F-08-12",
+  "feature": "F-08-12",
+  "title": "Game Day 로컬 ①·② — 저장소·메시징, 보안·변경·자동·대응",
+  "grade": "B",
+  "windows": [
+    {
+      "id": "3a",
+      "scenarioIds": [
+        "G-02",
+        "G-10",
+        "G-29",
+        "G-30",
+        "G-31"
+      ],
+      "purpose": "무대·기준선·① 저장소·메시징 5종"
+    },
+    {
+      "id": "3b",
+      "scenarioIds": [
+        "G-17",
+        "G-18",
+        "G-19",
+        "G-20",
+        "G-21"
+      ],
+      "purpose": "② 앞 5종"
+    },
+    {
+      "id": "3c",
+      "scenarioIds": [
+        "G-22",
+        "G-23",
+        "G-24",
+        "G-25"
+      ],
+      "purpose": "② 뒤 4종·보고"
+    }
+  ],
+  "lock": {
+    "take": "docker lane4-F-08-12",
+    "drop": "docker lane4-F-08-12",
+    "dockerAll": false
+  },
+  "stage": {
+    "cluster": "lane4-f0812",
+    "stack": "demo",
+    "alertmanager": false,
+    "localAlertRules": false,
+    "dockerAll": false,
+    "notes": "로컬 Prometheus에 경보 규칙이 없어 G-21·G-23·G-31은 판정 못 함. 14종 실제 실행은 미실행."
+  },
+  "scenarios": [
+    {
+      "id": "G-02",
+      "order": 1,
+      "group": "A",
+      "window": "3a",
+      "name": "좌석 Redis 주 노드 페일오버",
+      "mode": "대체 장애",
+      "evidence": "측정함",
+      "stageReady": false,
+      "missing": [
+        "좌석 Redis 복제본",
+        "승격"
+      ],
+      "partialParts": [
+        "좌석 Valkey 전체 정지",
+        "503 관측",
+        "오버셀 0 확인"
+      ],
+      "runbook": "RB-06",
+      "runbookNote": "",
+      "fault": "좌석 Valkey 전체 정지(승격 없음)",
+      "expectedAlert": "좌석 홀드 503(`seat-store-unavailable`, `seat_store_unavailable`) 급증",
+      "expectedAction": "503으로 미루고 동시 진입 목표를 줄인다",
+      "invariant": "오버셀 0·이중 홀드 0",
+      "load": true,
+      "commandExpected": false,
+      "artifacts": [
+        "timeline.csv",
+        "manifest.json",
+        "alerts.ndjson",
+        "faults.ndjson",
+        "invariants.csv",
+        "host.json",
+        "run.json",
+        "generator.json"
+      ],
+      "commands": [
+        {
+          "role": "record",
+          "argv": [
+            "node",
+            "loadtest/runner/gameday-local.mjs",
+            "--window",
+            "3a",
+            "--scenario",
+            "G-02",
+            "--partial",
+            "--record",
+            "--run-id",
+            "2026-11-28-g-02-f0812",
+            "--out",
+            ".cache/peaket-f0812/g-02"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-10",
+      "order": 2,
+      "group": "A",
+      "window": "3a",
+      "name": "Kafka 브로커 1대 오프라인",
+      "mode": "대체 장애",
+      "evidence": "측정함",
+      "stageReady": false,
+      "missing": [
+        "1브로커·RF 3 없음"
+      ],
+      "partialParts": [],
+      "runbook": "RB-11",
+      "runbookNote": "",
+      "fault": "Kafka 브로커 1대 오프라인(무대 없음)",
+      "expectedAlert": "브로커 오프라인·소비 지연",
+      "expectedAction": "거래가 멈추지 않고 Outbox가 회복한다",
+      "invariant": "결제·주문 유실 0",
+      "load": true,
+      "commandExpected": false,
+      "artifacts": [
+        "timeline.csv",
+        "manifest.json",
+        "alerts.ndjson",
+        "faults.ndjson",
+        "invariants.csv",
+        "host.json",
+        "run.json",
+        "generator.json"
+      ],
+      "commands": []
+    },
+    {
+      "id": "G-29",
+      "order": 3,
+      "group": "A",
+      "window": "3a",
+      "name": "세션·캐시 Redis 장애 조치·메모리 가득",
+      "mode": "대체 장애",
+      "evidence": "측정함",
+      "stageReady": false,
+      "missing": [
+        "세션·캐시 Redis 복제본",
+        "승격"
+      ],
+      "partialParts": [
+        "Valkey 메모리 90%",
+        "85% 경보"
+      ],
+      "runbook": "RB-05",
+      "runbookNote": "세션·캐시 Redis 전용 런북이 없다. RB-05(대기열 Redis 페일오버)와 RB-17(포스트모템)을 가리킨다.",
+      "fault": "Valkey 메모리 90% 채우기",
+      "expectedAlert": "Redis 메모리 85% SEV2",
+      "expectedAction": "원본 읽기로 넘어가고 알림 작업 유실 0",
+      "invariant": "알림 유실 0·축출 0",
+      "load": true,
+      "commandExpected": false,
+      "artifacts": [
+        "timeline.csv",
+        "manifest.json",
+        "alerts.ndjson",
+        "faults.ndjson",
+        "invariants.csv",
+        "host.json",
+        "run.json",
+        "generator.json"
+      ],
+      "commands": [
+        {
+          "role": "record",
+          "argv": [
+            "node",
+            "loadtest/runner/gameday-local.mjs",
+            "--window",
+            "3a",
+            "--scenario",
+            "G-29",
+            "--partial",
+            "--record",
+            "--run-id",
+            "2026-11-28-g-29-f0812",
+            "--out",
+            ".cache/peaket-f0812/g-29"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-30",
+      "order": 4,
+      "group": "A",
+      "window": "3a",
+      "name": "Schema Registry 장애",
+      "mode": "로컬 실행",
+      "evidence": "측정함",
+      "stageReady": false,
+      "missing": [
+        "Schema Registry(레지스트리) 없음"
+      ],
+      "partialParts": [],
+      "runbook": "RB-34",
+      "runbookNote": "Schema Registry 전용 런북이 없다. RB-34(스트림 작업자 복구)를 가리킨다.",
+      "fault": "레지스트리 정지(무대 없음)",
+      "expectedAlert": "레지스트리 가용성 상실·생산자 시작 실패",
+      "expectedAction": "고정 스키마 ID로 주문, 작업자는 기다린다",
+      "invariant": "주문 실패 0",
+      "load": false,
+      "commandExpected": false,
+      "artifacts": [
+        "timeline.csv",
+        "manifest.json",
+        "alerts.ndjson",
+        "faults.ndjson",
+        "invariants.csv",
+        "host.json",
+        "run.json",
+        "generator.json"
+      ],
+      "commands": []
+    },
+    {
+      "id": "G-31",
+      "order": 5,
+      "group": "A",
+      "window": "3a",
+      "name": "거래·제어 MSK 전체 정지 5분",
+      "mode": "로컬 실행",
+      "evidence": "측정함",
+      "stageReady": false,
+      "missing": [
+        "경보 규칙 없음"
+      ],
+      "partialParts": [
+        "Kafka 전체 정지·Outbox 따라잡기",
+        "당기기 반영"
+      ],
+      "runbook": "RB-11·RB-39",
+      "runbookNote": "",
+      "fault": "Kafka 전체 정지 5분(경보 규칙 없음, 부분)",
+      "expectedAlert": "OfflinePartitionsCount SEV1·Outbox 밀림 SEV2",
+      "expectedAction": "결제 당기기·명령 6 ack·Outbox 따라잡기",
+      "invariant": "60초 불변식 SEV1 0·이중 반영 0",
+      "load": true,
+      "commandExpected": true,
+      "artifacts": [
+        "timeline.csv",
+        "manifest.json",
+        "alerts.ndjson",
+        "faults.ndjson",
+        "invariants.csv",
+        "host.json",
+        "run.json",
+        "generator.json"
+      ],
+      "commands": [
+        {
+          "role": "record",
+          "argv": [
+            "node",
+            "loadtest/runner/gameday-local.mjs",
+            "--window",
+            "3a",
+            "--scenario",
+            "G-31",
+            "--partial",
+            "--record",
+            "--run-id",
+            "2026-11-28-g-31-f0812",
+            "--out",
+            ".cache/peaket-f0812/g-31"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-17",
+      "order": 6,
+      "group": "B",
+      "window": "3b",
+      "name": "보안 사고 모의훈련",
+      "mode": "모의 진행",
+      "evidence": "설계만",
+      "stageReady": true,
+      "missing": [],
+      "partialParts": [],
+      "runbook": "RB-20·RB-17",
+      "runbookNote": "",
+      "fault": "탁상(유출 의심·DDoS)",
+      "expectedAlert": "보안 사고 SEV1·기한 임박 SEV2",
+      "expectedAction": "24·2·72시간 할 일과 기한",
+      "invariant": "실제 신고·개인정보 사용 0",
+      "load": false,
+      "commandExpected": false,
+      "artifacts": [
+        "timeline.csv",
+        "manifest.json",
+        "alerts.ndjson",
+        "faults.ndjson",
+        "invariants.csv",
+        "host.json",
+        "run.json",
+        "generator.json"
+      ],
+      "commands": [
+        {
+          "role": "record",
+          "argv": [
+            "node",
+            "loadtest/runner/gameday-local.mjs",
+            "--window",
+            "3b",
+            "--scenario",
+            "G-17",
+            "--record",
+            "--run-id",
+            "2026-11-28-g-17-f0812",
+            "--out",
+            ".cache/peaket-f0812/g-17"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-18",
+      "order": 7,
+      "group": "B",
+      "window": "3b",
+      "name": "나쁜 배포(카나리)",
+      "mode": "로컬 실행",
+      "evidence": "측정함",
+      "stageReady": false,
+      "missing": [
+        "Argo Rollouts 없음"
+      ],
+      "partialParts": [],
+      "runbook": "RB-23",
+      "runbookNote": "",
+      "fault": "나쁜 배포(무대 없음)",
+      "expectedAlert": "카나리 분석 실패 SEV2",
+      "expectedAction": "자동 중단·안정판 100% 복귀",
+      "invariant": "오류 예산 초과 없음",
+      "load": false,
+      "commandExpected": false,
+      "artifacts": [
+        "timeline.csv",
+        "manifest.json",
+        "alerts.ndjson",
+        "faults.ndjson",
+        "invariants.csv",
+        "host.json",
+        "run.json",
+        "generator.json"
+      ],
+      "commands": []
+    },
+    {
+      "id": "G-19",
+      "order": 8,
+      "group": "B",
+      "window": "3b",
+      "name": "변경 동결 창 위반·달력 장애",
+      "mode": "로컬 실행",
+      "evidence": "측정함",
+      "stageReady": false,
+      "missing": [
+        "Argo CD·동결 달력 없음"
+      ],
+      "partialParts": [],
+      "runbook": "RB-28",
+      "runbookNote": "",
+      "fault": "동결 창 위반(무대 없음)",
+      "expectedAlert": "달력 신선도 SEV2",
+      "expectedAction": "승격 게이트가 막고 T-30 점검 통과",
+      "invariant": "동결 창 유지",
+      "load": false,
+      "commandExpected": false,
+      "artifacts": [
+        "timeline.csv",
+        "manifest.json",
+        "alerts.ndjson",
+        "faults.ndjson",
+        "invariants.csv",
+        "host.json",
+        "run.json",
+        "generator.json"
+      ],
+      "commands": []
+    },
+    {
+      "id": "G-20",
+      "order": 9,
+      "group": "B",
+      "window": "3b",
+      "name": "Kyverno 장애 중 확장",
+      "mode": "로컬 실행",
+      "evidence": "측정함",
+      "stageReady": false,
+      "missing": [
+        "투명성 로그 접근 차단 없음"
+      ],
+      "partialParts": [
+        "Kyverno 파드 제거",
+        "60초 복구"
+      ],
+      "runbook": "RB-27",
+      "runbookNote": "",
+      "fault": "Kyverno 파드 1개 제거(부분)",
+      "expectedAlert": "이미지 검증 오류 경보",
+      "expectedAction": "새 파드 60초 안 기동",
+      "invariant": "서명·다이제스트 검증 유지",
+      "load": true,
+      "commandExpected": false,
+      "artifacts": [
+        "timeline.csv",
+        "manifest.json",
+        "alerts.ndjson",
+        "faults.ndjson",
+        "invariants.csv",
+        "host.json",
+        "run.json",
+        "generator.json"
+      ],
+      "commands": [
+        {
+          "role": "record",
+          "argv": [
+            "node",
+            "loadtest/runner/gameday-local.mjs",
+            "--window",
+            "3b",
+            "--scenario",
+            "G-20",
+            "--partial",
+            "--record",
+            "--run-id",
+            "2026-11-28-g-20-f0812",
+            "--out",
+            ".cache/peaket-f0812/g-20"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-21",
+      "order": 10,
+      "group": "B",
+      "window": "3b",
+      "name": "제어 입력 끊김·낡음",
+      "mode": "로컬 실행",
+      "evidence": "측정함",
+      "stageReady": false,
+      "missing": [
+        "경보 규칙 없음",
+        "콘솔 경보"
+      ],
+      "partialParts": [],
+      "runbook": "RB-09",
+      "runbookNote": "",
+      "fault": "스크레이프 대상 차단(경보 규칙 없음)",
+      "expectedAlert": "콘솔 SEV2 '입력 없음' 30초",
+      "expectedAction": "입력 없음 30초 판정·AIMD 증감 0",
+      "invariant": "예산 자동 감축 0",
+      "load": true,
+      "commandExpected": false,
+      "artifacts": [
+        "timeline.csv",
+        "manifest.json",
+        "alerts.ndjson",
+        "faults.ndjson",
+        "invariants.csv",
+        "host.json",
+        "run.json",
+        "generator.json"
+      ],
+      "commands": []
+    },
+    {
+      "id": "G-22",
+      "order": 11,
+      "group": "B",
+      "window": "3c",
+      "name": "KEDA·AIMD 상호작용",
+      "mode": "로컬 실행",
+      "evidence": "측정함",
+      "stageReady": false,
+      "missing": [
+        "KEDA 없음"
+      ],
+      "partialParts": [],
+      "runbook": "RB-30",
+      "runbookNote": "",
+      "fault": "KEDA 확장 중 p99 상승(무대 없음)",
+      "expectedAlert": "AIMD 감축 기록",
+      "expectedAction": "RB-30으로 5분 안 고정",
+      "invariant": "추가 감축 0",
+      "load": true,
+      "commandExpected": false,
+      "artifacts": [
+        "timeline.csv",
+        "manifest.json",
+        "alerts.ndjson",
+        "faults.ndjson",
+        "invariants.csv",
+        "host.json",
+        "run.json",
+        "generator.json"
+      ],
+      "commands": []
+    },
+    {
+      "id": "G-23",
+      "order": 12,
+      "group": "B",
+      "window": "3c",
+      "name": "공유 의존성 장애·프로브",
+      "mode": "로컬 실행",
+      "evidence": "측정함",
+      "stageReady": false,
+      "missing": [
+        "경보 규칙 없음"
+      ],
+      "partialParts": [
+        "좌석 Valkey 정지",
+        "503 관측",
+        "오버셀 0 확인"
+      ],
+      "runbook": "RB-06·RB-32",
+      "runbookNote": "",
+      "fault": "좌석 Valkey 정지·DB 연결 끊기(경보 규칙 없음, 부분)",
+      "expectedAlert": "seat-store-unavailable·의존성 SEV2",
+      "expectedAction": "준비 파드 변화 0·503 미룸·재연결 회복",
+      "invariant": "오버셀 0·재시작 0",
+      "load": true,
+      "commandExpected": false,
+      "artifacts": [
+        "timeline.csv",
+        "manifest.json",
+        "alerts.ndjson",
+        "faults.ndjson",
+        "invariants.csv",
+        "host.json",
+        "run.json",
+        "generator.json"
+      ],
+      "commands": [
+        {
+          "role": "record",
+          "argv": [
+            "node",
+            "loadtest/runner/gameday-local.mjs",
+            "--window",
+            "3c",
+            "--scenario",
+            "G-23",
+            "--partial",
+            "--record",
+            "--run-id",
+            "2026-11-28-g-23-f0812",
+            "--out",
+            ".cache/peaket-f0812/g-23"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-24",
+      "order": 13,
+      "group": "B",
+      "window": "3c",
+      "name": "재시작 전 증거·느린 쿼리",
+      "mode": "로컬 실행",
+      "evidence": "측정함",
+      "stageReady": false,
+      "missing": [
+        "힙 누수 주입 없음"
+      ],
+      "partialParts": [
+        "pg_sleep 느린 쿼리",
+        "RB-32 취소"
+      ],
+      "runbook": "RB-31·RB-32",
+      "runbookNote": "",
+      "fault": "pg_sleep 느린 쿼리(힙 주입 없음)",
+      "expectedAlert": "잠금 대기 p99 상승",
+      "expectedAction": "RB-32로 취소·종료",
+      "invariant": "데이터 손실 0",
+      "load": true,
+      "commandExpected": false,
+      "artifacts": [
+        "timeline.csv",
+        "manifest.json",
+        "alerts.ndjson",
+        "faults.ndjson",
+        "invariants.csv",
+        "host.json",
+        "run.json",
+        "generator.json"
+      ],
+      "commands": [
+        {
+          "role": "record",
+          "argv": [
+            "node",
+            "loadtest/runner/gameday-local.mjs",
+            "--window",
+            "3c",
+            "--scenario",
+            "G-24",
+            "--partial",
+            "--record",
+            "--run-id",
+            "2026-11-28-g-24-f0812",
+            "--out",
+            ".cache/peaket-f0812/g-24"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "G-25",
+      "order": 14,
+      "group": "B",
+      "window": "3c",
+      "name": "조용한 실패(처리량 급감)",
+      "mode": "로컬 실행",
+      "evidence": "측정함",
+      "stageReady": false,
+      "missing": [
+        "브라우저·Playwright·SDK 차단 없음"
+      ],
+      "partialParts": [],
+      "runbook": "RB-33",
+      "runbookNote": "",
+      "fault": "SDK 로드 차단(무대 없음)",
+      "expectedAlert": "처리량 급감 SEV2",
+      "expectedAction": "RB-33으로 SDK 막힌 단계 확인·되돌리기",
+      "invariant": "실패 요청 0·이중 결제 0",
+      "load": true,
+      "commandExpected": false,
+      "artifacts": [
+        "timeline.csv",
+        "manifest.json",
+        "alerts.ndjson",
+        "faults.ndjson",
+        "invariants.csv",
+        "host.json",
+        "run.json",
+        "generator.json"
+      ],
+      "commands": []
+    }
+  ],
+  "stopRules": [
+    {
+      "id": "STOP-01",
+      "rule": "무대가 준비되지 않았다(부품·주소·ALERTS·기록 경로)"
+    },
+    {
+      "id": "STOP-02",
+      "rule": "Docker 잠금이 없거나 docker-all을 썼다"
+    },
+    {
+      "id": "STOP-03",
+      "rule": "호스트가 포화됐다(CPU 85% 이상, procs_running > 논리 프로세서)"
+    },
+    {
+      "id": "STOP-04",
+      "rule": "장애 주입 적용 증거가 없다(빈 PID·신호 실패·정책 미적용)"
+    },
+    {
+      "id": "STOP-05",
+      "rule": "불변식 위반이 1건 이상 나왔다(오버셀·이중 결제·차례 전 입장)"
+    },
+    {
+      "id": "STOP-06",
+      "rule": "이전 시나리오의 롤백에 실패했다"
+    },
+    {
+      "id": "STOP-07",
+      "rule": "디스크가 15GB 미만이거나 메모리 압박이 있다"
+    },
+    {
+      "id": "STOP-08",
+      "rule": "ALERTS·기록 파이프라인이 끊겼다"
+    },
+    {
+      "id": "STOP-09",
+      "rule": "같은 시나리오가 두 번 연속 무효다"
+    },
+    {
+      "id": "STOP-10",
+      "rule": "감독이 중단을 지시했거나 실제 외부 피해·개인정보 노출이 의심된다"
+    }
+  ],
+  "priorMeasurements": {
+    "F-08-5": "무효·미측정",
+    "F-08-9": "판정 못 함(무효·부분)",
+    "F-08-10": "미측정"
+  },
+  "notIncluded": [
+    "F-08-6 Game Day 33종 전체·gameday.mjs 복사·SLO/KPI ADR",
+    "F-08-9 V-T27·V-T28·P-T1·SR-T13·NFR-028",
+    "F-08-10 V-T18·세 구성 비교·M2",
+    "F-08-11 런북 41종 수정",
+    "F-08-13 G-26~G-28·G-32·G-33 모의 진행·복원",
+    "F-08-8 Q-T2·S-T1·P-T1·K1·K2·K7",
+    "F-08-5 NFR-027·V-T10",
+    "F-08-2 100만·30k 외삽",
+    "30,000건/초·100만·K1/K2/K7 0의 새 수치"
+  ],
+  "boundaries": {
+    "F-08-6": "33종 전체·gameday.mjs·SLO/KPI ADR은 F-08-6 몫. 14종 설계 참고만.",
+    "F-08-9": "V-T27·V-T28·P-T1·SR-T13은 F-08-9 몫. 판정 못 함(무효·부분) 인용만.",
+    "F-08-10": "V-T18·M2는 F-08-10 몫. 미측정 인용만.",
+    "F-08-11": "런북 41종·인시던트 기준·색인은 F-08-11 몫. 링크만.",
+    "F-08-13": "G-26~G-28·G-32·G-33 모의 진행·복원은 F-08-13 몫.",
+    "F-08-8": "K1·K2·K7은 F-08-8 몫. 재측정하지 않는다.",
+    "F-08-5": "NFR-027·V-T10은 F-08-5 몫. 무효·미측정 인용만.",
+    "F-08-2": "100만·30k 외삽은 F-08-2 몫. 실측하지 않는다."
+  },
+  "notes": [
+    "미실행: 14종 실제 실행·측정·포스트모템 작성은 측정 창 몫이다.",
+    "로컬 경보 규칙·Alertmanager·Toxiproxy를 새로 만들지 않는다.",
+    "Docker·kind·k6·브라우저는 이 계획 파일을 만드는 턴에 쓰지 않았다."
+  ]
+}
