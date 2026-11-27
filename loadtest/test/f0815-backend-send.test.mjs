@@ -40,7 +40,7 @@ const SENTRY_LOCK = {
   sendClientReports: false,
   maxBreadcrumbs: 0,
   attachStacktrace: false,
-  beforeSend: 'redactDeep',
+  beforeSend: 'lockEvent',
   userRef: 'accountRef',
   replay: false,
   tracing: false,
@@ -335,9 +335,14 @@ test('F0815-3 ① 보내기 판정이 R1·R2·R3·choice를 함께 단언한다'
   assert.equal(passOver.verdict, '통과');
   assert.equal(passOver.choice, 'review-datadog');
 
-  const passWithin = mod.judgeSendComparison(sendInput({ directAnnualUsd: 100, datadogAnnualUsd: 95 }));
+  const passWithin = mod.judgeSendComparison(sendInput({ directAnnualUsd: 100, datadogAnnualUsd: 95, directAnnualUsd15: 150, datadogAnnualUsd15: 145 }));
   assert.equal(passWithin.verdict, '통과');
   assert.equal(passWithin.choice, 'keep-direct');
+
+  const priority15 = mod.judgeSendComparison(sendInput({ directAnnualUsd: 100, datadogAnnualUsd: 95, directAnnualUsd15: 150, datadogAnnualUsd15: 130 }));
+  assert.equal(priority15.verdict, '통과');
+  assert.equal(priority15.choice, 'review-datadog');
+  assert.ok(priority15.reasons.includes('SENSITIVE_TO_OPS_HOURS'));
 
   const reversed = mod.judgeSendComparison(sendInput({ directAnnualUsd: 100, datadogAnnualUsd: 120, directAnnualUsd15: 150, datadogAnnualUsd15: 120 }));
   assert.equal(reversed.verdict, '통과');
@@ -364,11 +369,11 @@ test('F0815-3 ② 백엔드 선택이 R1·R3·비용 없음·10%·1.5배 경계�
   assert.equal(noCost.verdict, '판정 못 함');
   assert.ok(noCost.reasons.includes('R2_INPUT_MISSING'));
 
-  const within = mod.judgeBackendChoice({ r1Fits: true, personalData: false, directAnnualUsd: 100, datadogAnnualUsd: 90, directAnnualUsd15: 150, datadogAnnualUsd15: 90, ownerApproved: true });
+  const within = mod.judgeBackendChoice({ r1Fits: true, personalData: false, directAnnualUsd: 100, datadogAnnualUsd: 90, directAnnualUsd15: 150, datadogAnnualUsd15: 145, ownerApproved: true });
   assert.equal(within.choice, 'keep-direct');
   assert.ok(within.reasons.includes('WITHIN_10PCT'));
 
-  const over = mod.judgeBackendChoice({ r1Fits: true, personalData: false, directAnnualUsd: 100, datadogAnnualUsd: 89.9, directAnnualUsd15: 150, datadogAnnualUsd15: 89.9, ownerApproved: true });
+  const over = mod.judgeBackendChoice({ r1Fits: true, personalData: false, directAnnualUsd: 100, datadogAnnualUsd: 89.9, directAnnualUsd15: 150, datadogAnnualUsd15: 134.9, ownerApproved: true });
   assert.equal(over.choice, 'review-datadog');
 
   const noOwner = mod.judgeBackendChoice({ r1Fits: true, personalData: false, directAnnualUsd: 100, datadogAnnualUsd: 50, directAnnualUsd15: 150, datadogAnnualUsd15: 50, ownerApproved: false });
@@ -442,9 +447,10 @@ test('F0815-4 ② Sentry 판정이 피크·API·국외 이전·가용성 증거 
   assert.equal(noTransfer.verdict, '판정 못 함');
   assert.ok(noTransfer.reasons.includes('R3_NOT_READY'));
 
-  const noAvailability = mod.judgeSentryBackend({ candidate: 'sentry-self-hosted', peakMeasured: true, runId: 'r1', runExists: true, apiConfirmed: true, overseasTransferReady: true, availabilityOk: false, annualCostUsd: 100 });
+  const noAvailability = mod.judgeSentryBackend({ candidate: 'sentry-self-hosted', peakMeasured: true, runId: 'r1', runExists: true, apiConfirmed: true, overseasTransferReady: false, availabilityOk: false, annualCostUsd: 100 });
   assert.equal(noAvailability.verdict, '판정 못 함');
   assert.ok(noAvailability.reasons.includes('AVAILABILITY_RISK'));
+  assert.ok(!noAvailability.reasons.includes('R3_NOT_READY'), '직접 설치(국내 보관)에 국외 이전 요건을 요구했다');
 
   const noCost = mod.judgeSentryBackend({ candidate: 'glitchtip-self-hosted', peakMeasured: true, runId: 'r1', runExists: true, apiConfirmed: true, overseasTransferReady: true, availabilityOk: true, annualCostUsd: null });
   assert.equal(noCost.verdict, '판정 못 함');
@@ -453,6 +459,10 @@ test('F0815-4 ② Sentry 판정이 피크·API·국외 이전·가용성 증거 
   const ok = mod.judgeSentryBackend({ candidate: 'glitchtip-self-hosted', peakMeasured: true, runId: 'r1', runExists: true, apiConfirmed: true, overseasTransferReady: true, availabilityOk: true, annualCostUsd: 100 });
   assert.equal(ok.verdict, '통과');
   for (const id of ['overseas', 'error-peak', 'availability', 'console-api', 'annual-cost']) assert.ok(ok.criteria[id], `criteria.${id}가 없다`);
+
+  const okDomestic = mod.judgeSentryBackend({ candidate: 'glitchtip-self-hosted', peakMeasured: true, runId: 'r1', runExists: true, apiConfirmed: true, overseasTransferReady: false, availabilityOk: true, annualCostUsd: 100 });
+  assert.equal(okDomestic.verdict, '통과', '직접 설치는 국외 이전 요건이 false여도 ①을 통과해야 한다');
+  assert.ok(!okDomestic.reasons.includes('R3_NOT_READY'));
 });
 
 test('F0815-5 ① 오류 피크를 실행 증거 없이 측정했다고 하면 무효다', async () => {
@@ -471,9 +481,9 @@ test('F0815-5 ② 비용 차이 10.0%는 유지, 10.1%는 비교하고 미계산
   const mod = need(await load());
   assert.equal(typeof mod.judgeBackendChoice, 'function', 'judgeBackendChoice 함수가 없다');
 
-  const ten = mod.judgeBackendChoice({ r1Fits: true, personalData: false, directAnnualUsd: 100, datadogAnnualUsd: 90, directAnnualUsd15: 150, datadogAnnualUsd15: 90, ownerApproved: true });
+  const ten = mod.judgeBackendChoice({ r1Fits: true, personalData: false, directAnnualUsd: 100, datadogAnnualUsd: 90, directAnnualUsd15: 150, datadogAnnualUsd15: 135, ownerApproved: true });
   assert.equal(ten.choice, 'keep-direct');
-  const tenOne = mod.judgeBackendChoice({ r1Fits: true, personalData: false, directAnnualUsd: 100, datadogAnnualUsd: 89.9, directAnnualUsd15: 150, datadogAnnualUsd15: 89.9, ownerApproved: true });
+  const tenOne = mod.judgeBackendChoice({ r1Fits: true, personalData: false, directAnnualUsd: 100, datadogAnnualUsd: 89.9, directAnnualUsd15: 150, datadogAnnualUsd15: 134.9, ownerApproved: true });
   assert.equal(tenOne.choice, 'review-datadog');
   const missing = mod.judgeBackendChoice({ r1Fits: true, personalData: false, directAnnualUsd: null, datadogAnnualUsd: 50, ownerApproved: true });
   assert.equal(missing.verdict, '판정 못 함');
@@ -484,6 +494,7 @@ test('F0815-6 ① 가림 계약이 실제 error-reporting.ts 잠금과 F0815_SEN
   const mod = need(await load());
   assert.equal(typeof mod.validateSentryConfig, 'function', 'validateSentryConfig 함수가 없다');
   assert.deepEqual(mod.F0815_SENTRY_LOCK, SENTRY_LOCK);
+  assert.equal(mod.F0815_SENTRY_LOCK.beforeSend, 'lockEvent');
   assert.equal(mod.validateSentryConfig(SENTRY_LOCK).ok, true);
   assert.equal(mod.validateSentryConfig(mod.F0815_SENTRY_LOCK).ok, true);
 
@@ -507,6 +518,7 @@ test('F0815-6 ① 가림 계약이 실제 error-reporting.ts 잠금과 F0815_SEN
     { ...SENTRY_LOCK, traceLifecycle: 'dynamic' },
     { ...SENTRY_LOCK, maxBreadcrumbs: 10 },
     { ...SENTRY_LOCK, attachStacktrace: true },
+    { ...SENTRY_LOCK, beforeSend: 'redactDeep' },
     { ...SENTRY_LOCK, beforeSend: 'none' },
     { ...SENTRY_LOCK, userRef: 'userId' },
     { ...SENTRY_LOCK, replay: true },
@@ -537,6 +549,14 @@ test('F0815-6 ② 2차 마스킹 원천이 있고 containsPii가 사설 IP를 PI
   assert.equal(mod.containsPii('172.20.1.1'), false);
   assert.equal(mod.containsPii('192.168.0.1'), false);
   assert.equal(mod.containsPii('2026-11-28T10:00:00+09:00'), false);
+
+  assert.equal(typeof mod.containsInternalAddress, 'function', 'containsInternalAddress 함수가 없다');
+  for (const text of ['10.1.2.3', '172.20.1.1', '192.168.0.1', '127.0.0.1', '169.254.1.1', '::1', 'db.internal', 'svc.cluster.local', 'localhost']) {
+    assert.equal(mod.containsInternalAddress(text), true, `${text}를 내부 주소로 보지 않았다`);
+  }
+  for (const text of ['8.8.8.8', 'example.com', '2026-11-28T10:00:00+09:00']) {
+    assert.equal(mod.containsInternalAddress(text), false, `${text}를 내부 주소로 잘못 보았다`);
+  }
 });
 
 test('F0815-7 ① M4 초안 계약이 2편·K8/K9·미측정·draft·owner·정확한 근거를 지킨다', async () => {
@@ -573,6 +593,7 @@ test('F0815-7 ② M4 초안 파일이 머리 네 줄·다섯 절·미측정·근
   assert.equal(mod.validateM4Outline(VALID_M4.replace('- **상태**: 초안(2026-11-28, 게시 전)\n', ''), { id: 'm4-control-gameday' }).ok, false);
   assert.equal(mod.validateM4Outline(`${VALID_M4}\n게시했다.\n`, { id: 'm4-control-gameday' }).ok, false);
   assert.equal(mod.validateM4Outline(`${VALID_M4}\n연락처 a@b.co\n`, { id: 'm4-control-gameday' }).ok, false);
+  assert.equal(mod.validateM4Outline(`${VALID_M4}\n내부 주소 10.1.2.3\n`, { id: 'm4-control-gameday' }).ok, false);
   assert.equal(mod.validateM4Outline(`${VALID_M4}\nK8은 미측정이다. 30k/s를 달성했다.\n`, { id: 'm4-control-gameday' }).ok, false);
 
   for (const [id, file] of Object.entries(M4_FILES)) {
@@ -628,7 +649,9 @@ test('F0815-8 ② 보고서 검증이 증거 없는 통과·금지 수치 여섯
   assert.equal(mod.validateF0815Report(`${base}\n연락처 a@b.co\n`).ok, false);
   assert.equal(mod.validateF0815Report(`${base}\n010-1234-5678\n`).ok, false);
   assert.equal(mod.validateF0815Report(`${base}\n카드 1234-5678-9012-3456\n`).ok, false);
-  assert.equal(mod.validateF0815Report(`${base}\n사설 IP 10.1.2.3은 PII가 아니다.\n`).ok, true);
+  for (const internal of ['10.1.2.3', '172.20.1.1', '192.168.0.1', '127.0.0.1', '169.254.1.1', 'db.internal', 'svc.cluster.local']) {
+    assert.equal(mod.validateF0815Report(`${base}\n내부 주소 ${internal}\n`).ok, false, `${internal}를 내부 주소로 거부하지 않았다`);
+  }
 
   let missing = base;
   for (const id of PRIOR) missing = missing.replaceAll(id, '');
@@ -679,7 +702,8 @@ test('F0815-9 ② 계획 문서가 정본 자리·범위·계산식·경계·## 
   for (const token of [
     '3h-1', '3h-2', '3h-3', 'hours: 4', '40,000,000', '86,400', 'R1', 'R2', 'R3',
     'GlitchTip', 'm4-control-gameday', 'm4-scaling-cost', 'F-08-14',
-    'F0815_SENTRY_LOCK', '사설 IP는 이 기능의 PII가 아니다', 'F-08-13 계획의 예정 판정', '476줄', 'docs/blog/README.md',
+    'F0815_SENTRY_LOCK', '사설 IP는 이 기능의 PII가 아니다', 'F-08-13 계획의 예정 판정', '480줄', 'docs/blog/README.md',
+    'containsInternalAddress', '292~404', '635~681',
   ]) {
     assert.ok(markdown.includes(token), `${token}가 없다`);
   }
