@@ -159,11 +159,24 @@ export function setup() {
 
   const tokens = new Array(prepUsers).fill(null);
   const openedAt = new Array(prepUsers).fill(0);
-  for (let from = 0; from < prepUsers; from += PREP_BATCH) {
-    const ids = Array.from({ length: Math.min(PREP_BATCH, prepUsers - from) }, (_, k) => from + k);
+  // 한 묶음(100명)을 사전 검증→진입한다. queue의 503 dependency-unavailable은 짧게 지나가므로
+  // 실패한 사람만 한 번 더 보낸다(2026-11-27 r6 묶음 2,600의 503).
+  const enterBatch = (ids) => {
     const pv = http.batch(ids.map((i) => post(QUEUE_BASE, `/v1/queues/${EVENT_ID}/pre-verifications`, i, {}, 'preverify')));
     const en = http.batch(ids.map((i, k) => post(QUEUE_BASE, `/v1/queues/${EVENT_ID}/entries`, i, { preverifyToken: jsonOf(pv?.[k])?.preverifyToken ?? '' }, 'entry')));
-    const entries = en.map((r) => (r?.status === 201 ? jsonOf(r) : undefined));
+    return en.map((r) => (r?.status === 201 ? jsonOf(r) : undefined));
+  };
+  for (let from = 0; from < prepUsers; from += PREP_BATCH) {
+    const ids = Array.from({ length: Math.min(PREP_BATCH, prepUsers - from) }, (_, k) => from + k);
+    let entries = enterBatch(ids);
+    for (let attempt = 0; attempt < 2 && entries.some((e) => !e); attempt += 1) {
+      const left = ids.filter((_, k) => !entries[k]);
+      const more = enterBatch(left);
+      left.forEach((i, k) => {
+        if (more[k]) entries[ids.indexOf(i)] = more[k];
+      });
+      if (entries.some((e) => !e)) sleep(1);
+    }
     if (entries.some((e) => !e)) {
       setupFailed.add(1, { target: TARGET });
       scenarioErrors.add(1);
