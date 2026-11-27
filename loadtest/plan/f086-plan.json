@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "batch": "F-08-6",
+  "feature": "F-08-6",
+  "window": 4,
+  "windows": [
+    {
+      "id": "4d",
+      "scenarios": ["G-01", "G-02", "G-03", "G-04", "G-05", "G-06", "G-07", "G-08", "G-09", "G-10"],
+      "commands": ["node loadtest/run.mjs v1 gameday --window 4d --record --run-id 2026-11-27-f086-4d"],
+      "artifacts": ["timeline.csv", "manifest.json", "host.json", "run.json", "generator.json", "alerts.ndjson", "commands.ndjson", "faults.ndjson", "invariants.csv"],
+      "estimatedMin": 480
+    },
+    {
+      "id": "4e",
+      "scenarios": ["G-11", "G-12", "G-13", "G-14", "G-15", "G-16", "G-17", "G-18", "G-19", "G-20"],
+      "commands": ["node loadtest/run.mjs v1 gameday --window 4e --record --run-id 2026-11-27-f086-4e"],
+      "artifacts": ["timeline.csv", "manifest.json", "host.json", "run.json", "generator.json", "alerts.ndjson", "commands.ndjson", "faults.ndjson", "invariants.csv"],
+      "estimatedMin": 480
+    },
+    {
+      "id": "4f",
+      "scenarios": ["G-21", "G-22", "G-23", "G-24", "G-25", "G-26", "G-27", "G-28", "G-29", "G-30"],
+      "commands": ["node loadtest/run.mjs v1 gameday --window 4f --record --run-id 2026-11-27-f086-4f"],
+      "artifacts": ["timeline.csv", "manifest.json", "host.json", "run.json", "generator.json", "alerts.ndjson", "commands.ndjson", "faults.ndjson", "invariants.csv"],
+      "estimatedMin": 480
+    },
+    {
+      "id": "4g",
+      "scenarios": ["G-31", "G-32", "G-33"],
+      "commands": ["node loadtest/run.mjs v1 gameday --window 4g --record --run-id 2026-11-27-f086-4g"],
+      "artifacts": ["timeline.csv", "manifest.json", "host.json", "run.json", "generator.json", "alerts.ndjson", "commands.ndjson", "faults.ndjson", "invariants.csv"],
+      "estimatedMin": 420
+    }
+  ],
+  "status": "미실행",
+  "startGate": "감독이 창 4d~4g를 열고 docker lane4-F-08-6 한 자리를 비운 뒤 시작한다",
+  "lock": "docker lane4-F-08-6",
+  "stage": {
+    "cluster": "lane4-f086",
+    "namespace": "v1",
+    "stack": "demo",
+    "bundle": true,
+    "valkeyReplicas": 1,
+    "toxiproxy": ["pg-simulator", "purchase-postgres", "cache", "kms"],
+    "alertmanager": "local",
+    "missing": ["ops-rt", "clickhouse", "schema-registry", "seats-redis-replica", "session-redis-replica", "playwright"]
+  },
+  "scenarioStage": {
+    "G-01": { "ready": true, "requires": ["demo-stack"], "missing": [] },
+    "G-02": { "ready": false, "requires": ["seats-redis-replica", "redis-failover"], "missing": ["좌석 Redis 복제본·승격 없음(Valkey 단일)"] },
+    "G-03": { "ready": true, "requires": ["toxiproxy-cache", "moto-s3"], "missing": [] },
+    "G-04": { "ready": true, "requires": ["demo-stack"], "missing": [] },
+    "G-05": { "ready": true, "requires": ["toxiproxy-pg"], "missing": [] },
+    "G-06": { "ready": true, "requires": ["realtime-gw"], "missing": [] },
+    "G-07": { "ready": false, "requires": ["ops-rt", "clickhouse"], "missing": ["ops-rt·ClickHouse 없음"] },
+    "G-08": { "ready": true, "requires": ["ops-svc"], "missing": [] },
+    "G-09": { "ready": false, "requires": ["admission-ctrl-leader", "separate-pod"], "missing": ["admission-ctrl 리더·개별 파드 없음(bundle 한 파드)"] },
+    "G-10": { "ready": true, "requires": ["local-kafka"], "missing": [] },
+    "G-11": { "ready": true, "requires": ["observability"], "missing": ["외부 데드맨 없음(부분)"] },
+    "G-12": { "ready": true, "requires": ["demo-stack"], "missing": [] },
+    "G-13": { "ready": true, "requires": ["ops-svc"], "missing": [] },
+    "G-14": { "ready": false, "requires": ["purchase-pod", "separate-service"], "missing": ["purchase 개별 파드 없음(bundle 한 파드)"] },
+    "G-15": { "ready": true, "requires": ["toxiproxy-pg"], "missing": [] },
+    "G-16": { "ready": true, "requires": ["gateway"], "missing": ["Karpenter 노드 확장은 문서 인용"] },
+    "G-17": { "ready": false, "requires": ["tabletop"], "missing": ["모의 진행(실행하지 않음)"] },
+    "G-18": { "ready": false, "requires": ["argo-rollouts"], "missing": ["Argo Rollouts 없음"] },
+    "G-19": { "ready": false, "requires": ["argocd", "freeze-calendar"], "missing": ["Argo CD·동결 달력 없음"] },
+    "G-20": { "ready": true, "requires": ["kyverno"], "missing": ["투명성 로그 몫은 판정 못 함"] },
+    "G-21": { "ready": true, "requires": ["prometheus"], "missing": [] },
+    "G-22": { "ready": false, "requires": ["keda"], "missing": ["KEDA 없음"] },
+    "G-23": { "ready": true, "requires": ["toxiproxy-pg"], "missing": [] },
+    "G-24": { "ready": true, "requires": ["demo-stack"], "missing": [] },
+    "G-25": { "ready": false, "requires": ["playwright", "payment-sdk-block"], "missing": ["브라우저·Playwright 금지"] },
+    "G-26": { "ready": false, "requires": ["observability-az"], "missing": ["관측 AZ 장애 재현 불가(설계만)"] },
+    "G-27": { "ready": true, "requires": ["toxiproxy-kms", "moto-kms"], "missing": [] },
+    "G-28": { "ready": false, "requires": ["tabletop", "iam-identity-center"], "missing": ["모의 진행(실행하지 않음)"] },
+    "G-29": { "ready": false, "requires": ["session-redis-replica", "redis-failover"], "missing": ["세션·캐시 Redis 복제본 없음"] },
+    "G-30": { "ready": false, "requires": ["schema-registry"], "missing": ["Schema Registry 없음"] },
+    "G-31": { "ready": true, "requires": ["local-kafka"], "missing": [] },
+    "G-32": { "ready": false, "requires": ["zonal-shift"], "missing": ["NLB 영역 빼기 재현 불가(모의)"] },
+    "G-33": { "ready": false, "requires": ["cloudfront", "nlb"], "missing": ["CloudFront·NLB 재현 불가(모의)"] }
+  },
+  "scenarioModes": { "로컬 실행": 21, "대체 장애": 8, "모의 진행": 4 },
+  "stopRules": [
+    { "id": "STOP-01", "rule": "무대가 준비되지 않았다" },
+    { "id": "STOP-02", "rule": "Docker 잠금이 없거나 docker-all을 썼다" },
+    { "id": "STOP-03", "rule": "호스트가 포화됐다(CPU 85% 이상, procs_running > 논리 프로세서)" },
+    { "id": "STOP-04", "rule": "장애 주입 적용 증거가 없다" },
+    { "id": "STOP-05", "rule": "불변식 위반이 1건 이상 나왔다" },
+    { "id": "STOP-06", "rule": "이전 시나리오의 롤백에 실패했다" },
+    { "id": "STOP-07", "rule": "디스크가 15GB 미만이거나 메모리 압박이 있다" },
+    { "id": "STOP-08", "rule": "경보·기록 파이프라인이 끊겼다" },
+    { "id": "STOP-09", "rule": "같은 시나리오가 두 번 연속 무효다" },
+    { "id": "STOP-10", "rule": "감독이 중단을 지시했다" }
+  ],
+  "generator": { "droppedIterationsMax": 0, "cpuPctMax": 80, "memPctMax": 90, "minHttpReqs": 1 },
+  "k8": {
+    "ids": ["G-01", "G-02", "G-03", "G-04", "G-05", "G-06", "G-07", "G-08", "G-09", "G-10"],
+    "intervals": {
+      "fast": { "scrapeSec": 5, "evalSec": 5, "groupWaitSec": 5, "forSec": 0 },
+      "opsRt": { "scrapeSec": 15, "evalSec": 5, "groupWaitSec": 5, "forSec": 0 },
+      "cause": { "scrapeSec": 15, "evalSec": 5, "groupWaitSec": 5, "forSec": 30 }
+    },
+    "minBurnMultiple": 27
+  },
+  "timeline": {
+    "columns": ["T0", "T1", "T1p", "T2", "T3", "T4"],
+    "path": "timeline.csv",
+    "ledger": "docs/perf-ledger/runs/<실행 ID>/"
+  },
+  "defaults": {
+    "detectLimitSec": 60,
+    "propagationLimitSec": 3,
+    "scrapeFastSec": 5,
+    "scrapeOtherSec": 15,
+    "evalSec": 5,
+    "groupWaitSec": 5,
+    "k8CauseForSec": 30,
+    "k8BurnMultipleMin": 27,
+    "postmortemDueHours": 48,
+    "budgetP0Ratio": 0.2
+  },
+  "priorMeasurements": {
+    "F-08-5": "무효·미측정",
+    "F-08-9": "판정 못 함(무효·부분)",
+    "F-08-10": "미측정"
+  },
+  "report": "docs/review/measurements/F-08-6-gameday.md",
+  "postmortemTemplate": "docs/review/measurements/F-08-6-postmortem-template.md",
+  "sloKpiAdrDraft": "docs/review/measurements/F-08-6-slo-kpi-adr-draft.md",
+  "notIncluded": [
+    "F-08-5 NFR-027·V-T10 6시간 시험",
+    "F-08-9 V-T27·V-T28·P-T1·SR-T13·NFR-028 재측정",
+    "F-08-10 V-T18·세 구성 비교",
+    "F-08-2 V-T4·V-T5·V-T17·100만 외삽",
+    "F-08-8 Q-T2·S-T1·P-T1·K1·K2·K7 재측정",
+    "F-08-3 용량·비용·DORA 수정",
+    "30,000건/초·100만·K1/K2/K7 0의 새 수치",
+    "docker-all 사용"
+  ],
+  "remainingRisk": [
+    "F-08-5 queue 4a는 무효, purchase 이하·V-T10은 미측정이다",
+    "F-08-9는 판정 못 함(무효·부분)이다",
+    "G-02·G-07·G-09·G-14·G-25·G-29·G-30은 이 계획 무대에 없어 판정 못 함이다",
+    "G-26과 모의 진행 4종은 설계만이다",
+    "G-18·G-19·G-22는 Argo·KEDA가 없어 판정 못 함이다",
+    "NFR-027·V-T10·V-T27·V-T28·P-T1·SR-T13·NFR-028·V-T18·V-T4·V-T5·V-T17·Q-T2·S-T1은 이 기능이 닫지 않는다",
+    "30,000건/초·100만·K1/K2/K7 0은 주장하지 않는다"
+  ]
+}

@@ -7,6 +7,7 @@
 //   node loadtest/run.mjs v0 payment --users N --rate R [--seats-per-order 2] [--fault-drop-pct P] [--fault-delay-pct P] [--kill-app-at S] [--db-stats] [공통]
 //   node loadtest/run.mjs v0 seat-deltas --users N --rate R --connections C [--listener-pods P] [--hold-size 2] [공통]
 //   node loadtest/run.mjs v0 gate --scanners S --rate R [--cut-at 60] [--cut-s 60] [공통]
+//   node loadtest/run.mjs v1 queue|seat-hold|payment|entry-steps|gameday …(v1 경로·진입 비례·Game Day. gameday는 --window 4d|4e|4f|4g [--scenario G-01] [--rehearsal] [--record --run-id ID] [--judge <폴더>])
 //   node loadtest/run.mjs gw sweep|capacity|ip-limit …(게이트웨이 차단 상한·검색 IP 한도, V-T43·SR-T13 ②. 인자는 loadtest/runner/gw.mjs 머리, 결과 sweep.json·capacity.json·ip-limit.json)
 //   node loadtest/run.mjs gw limits --from <sweep.json,…> --saturation <수> --pod-cpus <수> [--out <폴더>](k와 운영 차단 상한 셈, 클러스터를 쓰지 않음, 결과 limits.json, BAT-058)
 //   공통: [--warm 30] [--main 60] [--cpus 4] [--memory-mi 4096] [--target-cpus N] [--generators N] [--namespace v0|v0-base] [--settle] [--hpa-timeline]
@@ -71,6 +72,7 @@ import {
   runEnvFile,
   simKeySecret,
 } from './runner/manifests.mjs';
+import { GAMEDAY_SCENARIOS, gamedayCollectArgs, judgeScenario, parseGamedayArgs } from './runner/gameday.mjs';
 import {
   calibrationCapacity,
   collectArgs,
@@ -2517,16 +2519,65 @@ async function runGwLimits(a, runTag) {
   return { outDir, exitCode: r.exitCode };
 }
 
+/** v1 gameday: 33종 계획·판정(실제 실행은 측정 창에서). Docker·kind를 쓰지 않는다(F-08-6) */
+async function runGamedayCommand(a, runTag) {
+  const outDir = resolve(a.out ?? join(OUT_ROOT, `${today()}-gameday-${a.window ?? 'judge'}-${runTag}`));
+  mkdirSync(outDir, { recursive: true });
+  if (a.judge) {
+    const runFile = join(resolve(a.judge), 'run.json');
+    if (!existsSync(runFile)) throw new UsageError(`--judge 폴더에 run.json이 없다: ${runFile}`);
+    const saved = JSON.parse(readFileSync(runFile, 'utf8'));
+    const result = judgeScenario(saved.input ?? saved);
+    writeFileSync(join(outDir, 'judge.json'), JSON.stringify(result, null, 2));
+    log(`${(saved.input ?? saved).scenario ?? '?'}: ${result.verdict}${result.reasons.length ? ` (${result.reasons.join('; ')})` : ''}`);
+    return { outDir, exitCode: result.verdict === '통과' ? 0 : 1 };
+  }
+  const selected = GAMEDAY_SCENARIOS.filter((s) => a.scenarios.includes(s.id));
+  const plan = {
+    batch: 'F-08-6',
+    window: a.window,
+    lock: 'docker lane4-F-08-6',
+    status: '미실행',
+    scenarios: selected.map((s) => ({
+      id: s.id,
+      mode: s.mode,
+      stageReady: s.stageReady,
+      stageMissing: s.stageMissing,
+      requires: s.requires,
+      command: `node loadtest/run.mjs v1 gameday --window ${a.window} --scenario ${s.id}`,
+    })),
+  };
+  writeFileSync(join(outDir, 'plan.json'), JSON.stringify(plan, null, 2));
+  writeFileSync(join(outDir, 'run.json'), JSON.stringify({
+    status: a.rehearsal ? '연습' : '미실행',
+    complete: false,
+    window: a.window,
+    scenarios: a.scenarios,
+    note: '33종 실제 실행은 측정 창에서 한다. 이 파일은 계획·판정용이다',
+  }, null, 2));
+  for (const s of selected) log(`${s.id} ${s.mode} ${s.stageReady ? '무대 준비' : `판정 못 함: ${s.stageMissing.join('·')}`}`);
+  if (a.record) {
+    const saved = JSON.parse(readFileSync(join(outDir, 'run.json'), 'utf8'));
+    if (saved.status !== '실행') throw new UsageError('33종 실제 실행 증거가 없어 장부에 기록하지 않는다(run.json status가 실행일 때만 기록한다)');
+    const result = judgeScenario(saved.input ?? saved);
+    const args = gamedayCollectArgs({ runId: a.runId, outDir, verdict: result.verdict, reasons: result.reasons, notes: `Game Day ${a.window}` });
+    execFileSync(PYTHON, args, { stdio: 'inherit' });
+  }
+  return { outDir, exitCode: 0 };
+}
+
 // ───────────── 시작 ─────────────
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   let a;
+  const rawArgs = process.argv.slice(2);
+  const isGameday = rawArgs[0] === 'v1' && rawArgs[1] === 'gameday';
   try {
-    a = parseArgs(process.argv.slice(2));
+    a = isGameday ? parseGamedayArgs(rawArgs.slice(2)) : parseArgs(rawArgs);
   } catch (e) {
     if (e instanceof UsageError) {
       console.error(`loadtest/run.mjs: ${e.message}`);
-      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment|entry-steps [...] | gw sweep|capacity|ip-limit|limits [...] | cleanup (loadtest/README.md)');
+      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment|entry-steps|gameday [...] | gw sweep|capacity|ip-limit|limits [...] | cleanup (loadtest/README.md)');
       process.exit(2);
     }
     throw e;
@@ -2553,7 +2604,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     });
   }
   try {
-    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : await runV1(a, runTag)) : await runV0(a, runTag);
+    const r = isGameday ? await runGamedayCommand(a, runTag) : a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : await runV1(a, runTag)) : await runV0(a, runTag);
     log(`\n산출물: ${r.outDir}`);
     process.exit(r.exitCode);
   } catch (e) {
