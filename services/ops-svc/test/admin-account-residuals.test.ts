@@ -69,6 +69,16 @@ describe('BAT-045 남은 관리 계정 결함(F-09-6)', () => {
     const before = { invite: admin.callsOf('invite'), audit: audit.entries.length };
     promoters.answer = false;
     promoters.calls.length = 0;
+    // 재인증 없는 요청은 파트너사를 조회하지 않고 403이다(IR096-03)
+    const noReauth = await send('POST', '/v1/ops/admin-accounts', operator, { email: 'no-reauth@stella.example', displayName: '담당자', role: 'partner_admin', promoterId: PROMOTER }, {
+      'idempotency-key': randomUUID(),
+    });
+    expect(noReauth.statusCode, noReauth.payload).toBe(403);
+    expect(typeOf(noReauth)).toMatch(/reauth-required$/);
+    expect(promoters.calls).toEqual([]);
+    expect(admin.callsOf('invite')).toBe(before.invite);
+    expect(audit.entries).toHaveLength(before.audit);
+
     const r = await send('POST', '/v1/ops/admin-accounts', operator, { email: 'unknown-promoter@stella.example', displayName: '담당자', role: 'partner_admin', promoterId: PROMOTER }, {
       'idempotency-key': randomUUID(),
       'x-reauth-token': token(operator),
@@ -76,6 +86,20 @@ describe('BAT-045 남은 관리 계정 결함(F-09-6)', () => {
     expect(r.statusCode, r.payload).toBe(422);
     expect(typeOf(r)).toMatch(/unknown-promoter$/);
     expect(promoters.calls).toEqual([PROMOTER]);
+    expect(admin.callsOf('invite')).toBe(before.invite);
+    expect(audit.entries).toHaveLength(before.audit);
+
+    // 관제 역할에 promoterId를 넣으면 파트너사 조회 없이 422 promoter-mismatch다(IR096-03)
+    const commander = identity.ops('commander');
+    admin.actor(commander['x-user-id']!, 'commander');
+    promoters.calls.length = 0;
+    const opsRole = await send('POST', '/v1/ops/admin-accounts', commander, { email: 'ops-with-promoter@peaket.example', displayName: '담당자', role: 'viewer', promoterId: PROMOTER }, {
+      'idempotency-key': randomUUID(),
+      'x-reauth-token': token(commander),
+    });
+    expect(opsRole.statusCode, opsRole.payload).toBe(422);
+    expect(typeOf(opsRole)).toMatch(/promoter-mismatch$/);
+    expect(promoters.calls).toEqual([]);
     expect(admin.callsOf('invite')).toBe(before.invite);
     expect(audit.entries).toHaveLength(before.audit);
   });
@@ -103,15 +127,22 @@ describe('BAT-045 남은 관리 계정 결함(F-09-6)', () => {
     admin.actor(operator['x-user-id']!, 'operator');
     promoters.answer = true;
     promoters.calls.length = 0;
+    const key = randomUUID();
+    const body = { email: 'known-promoter@stella.example', displayName: '담당자', role: 'partner_admin', promoterId: PROMOTER };
     const before = { invite: admin.callsOf('invite'), audit: auditOf('ADMIN_ACCOUNT_INVITED', 'SUCCEEDED').length };
-    const r = await send('POST', '/v1/ops/admin-accounts', operator, { email: 'known-promoter@stella.example', displayName: '담당자', role: 'partner_admin', promoterId: PROMOTER }, {
-      'idempotency-key': randomUUID(),
-      'x-reauth-token': token(operator),
-    });
+    const r = await send('POST', '/v1/ops/admin-accounts', operator, body, { 'idempotency-key': key, 'x-reauth-token': token(operator) });
     expect(r.statusCode, r.payload).toBe(201);
     expect(promoters.calls).toEqual([PROMOTER]);
     expect(admin.callsOf('invite')).toBe(before.invite + 1);
     expect(auditOf('ADMIN_ACCOUNT_INVITED', 'SUCCEEDED')).toHaveLength(before.audit + 1);
+    // 같은 키 재전송은 파트너사 조회 장애 뒤에도 처음 201을 그대로 준다(IR096-03(c))
+    promoters.answer = 'throw';
+    promoters.calls.length = 0;
+    const replay = await send('POST', '/v1/ops/admin-accounts', operator, body, { 'idempotency-key': key, 'x-reauth-token': token(operator) });
+    expect(replay.statusCode, replay.payload).toBe(201);
+    expect(json(replay).adminAccountId).toBe(json(r).adminAccountId);
+    expect(promoters.calls).toEqual([]);
+    expect(admin.callsOf('invite')).toBe(before.invite + 1);
   });
 
   test('BOT-152 ⑫ 같은 Idempotency-Key의 역할 변경 재전송은 identity 호출·감사 SUCCEEDED가 1회이고 다른 본문은 422다', async () => {
@@ -128,14 +159,14 @@ describe('BAT-045 남은 관리 계정 결함(F-09-6)', () => {
     const first = await send('PUT', `/v1/ops/admin-accounts/${target}/role`, commander, body, { 'if-match': '"1"', 'idempotency-key': key, 'x-reauth-token': token(commander) });
     expect(first.statusCode, first.payload).toBe(200);
     expect(json(first)).toMatchObject({ adminAccountId: target, role: 'operator', version: 2 });
-    const replay = await send('PUT', `/v1/ops/admin-accounts/${target}/role`, commander, body, { 'if-match': '"2"', 'idempotency-key': key, 'x-reauth-token': token(commander) });
+    const replay = await send('PUT', `/v1/ops/admin-accounts/${target}/role`, commander, body, { 'if-match': '"1"', 'idempotency-key': key, 'x-reauth-token': token(commander) });
     expect(replay.statusCode, replay.payload).toBe(200);
     expect(json(replay)).toEqual(json(first));
     expect(admin.callsOf('changeRole')).toBe(before.change + 1);
     expect(auditOf('ADMIN_ACCOUNT_ROLE_CHANGED', 'SUCCEEDED')).toHaveLength(before.succeeded + 1);
     expect(auditOf('ADMIN_ACCOUNT_ROLE_CHANGED', 'REQUESTED')).toHaveLength(before.requested + 1);
 
-    const diff = await send('PUT', `/v1/ops/admin-accounts/${target}/role`, commander, { role: 'cs_agent', reason: '다른 요청' }, { 'if-match': '"2"', 'idempotency-key': key, 'x-reauth-token': token(commander) });
+    const diff = await send('PUT', `/v1/ops/admin-accounts/${target}/role`, commander, { role: 'cs_agent', reason: '다른 요청' }, { 'if-match': '"1"', 'idempotency-key': key, 'x-reauth-token': token(commander) });
     expect(diff.statusCode, diff.payload).toBe(422);
     expect(typeOf(diff)).toMatch(/idempotency-key-reused$/);
     expect(admin.callsOf('changeRole')).toBe(before.change + 1);
@@ -166,7 +197,7 @@ describe('BAT-045 남은 관리 계정 결함(F-09-6)', () => {
     const cApproved = await send('POST', `/v1/ops/approval-requests/${cApprovalId}/approvals`, cApprover, {}, { 'x-reauth-token': token(cApprover, 'APPROVAL') });
     expect(cApproved.statusCode, cApproved.payload).toBe(200);
     expect(admin.callsOf('changeRole')).toBe(cBefore.change + 1);
-    const cAfter = await send('PUT', `/v1/ops/admin-accounts/${cTarget}/role`, commander, cBody, { 'if-match': '"2"', 'idempotency-key': cKey, 'x-reauth-token': token(commander) });
+    const cAfter = await send('PUT', `/v1/ops/admin-accounts/${cTarget}/role`, commander, cBody, { 'if-match': '"1"', 'idempotency-key': cKey, 'x-reauth-token': token(commander) });
     expect(cAfter.statusCode, cAfter.payload).toBe(202);
     expect(json(cAfter).approvalId).toBe(cApprovalId);
     expect(admin.callsOf('changeRole')).toBe(cBefore.change + 1);

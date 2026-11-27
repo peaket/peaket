@@ -144,6 +144,13 @@ test('BOT-161 ① riskcode는 숫자·문자 모두 읽고, 없거나 모르는 
   assert.equal(missing.high, 1);
   assert.equal(missing.sarif.runs[0].results[0].properties['security-severity'], '9.0');
   assert.equal(run(reportOf([alertOf(undefined)])).code, 1);
+  // null·빈 글자·false를 0(Informational)으로 바꾸면 안 된다(IR096-06)
+  for (const value of [null, '', false]) {
+    const r = toSarif(reportOf([alertOf(value)]));
+    assert.equal(r.high, 1, `${JSON.stringify(value)} riskcode가 High가 아니다`);
+    assert.equal(r.sarif.runs[0].results[0].properties['security-severity'], '9.0', `${JSON.stringify(value)} riskcode 등급`);
+    assert.equal(run(reportOf([alertOf(value)])).code, 1, `${JSON.stringify(value)} riskcode가 통과했다`);
+  }
   // 0~3은 지금 등급 그대로다
   const info = toSarif(reportOf([alertOf(0)]));
   assert.equal(info.high, 0);

@@ -14,7 +14,7 @@ import { loadPolicyLists } from '../src/modules/admin/adapters/word-list-files.j
 import { DispatchAdminNotices } from '../src/modules/admin/application/dispatch-admin-notices.js';
 import { ManageAdminAccounts } from '../src/modules/admin/application/manage-admin-accounts.js';
 import { DEFAULT_ADMIN_AUTH_CONFIG } from '../src/modules/admin/domain/auth-config.js';
-import { ADMIN_LOGIN_STORE } from '../src/modules/admin/domain/ports.js';
+import { ADMIN_LOGIN_STORE, PASSKEY_CHALLENGES, TOTP_SEED_CIPHER, PasskeyChallengesUnavailable, type PasskeyChallenges, type TotpSeedCipher, TotpKeyUnavailable } from '../src/modules/admin/domain/ports.js';
 import { base32Decode, totpAt } from '../src/modules/admin/domain/totp.js';
 import { JoseTokenSigner, TokenKeyRing } from '../src/modules/session/index.js';
 import { HmacIdentityHashers } from '../src/modules/verification/index.js';
@@ -248,6 +248,19 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
     expect(context.statusCode).toBe(422);
     expect(problemOf(context)).toEqual({ status: 422, type: 'password-rejected' });
     expect(json(context).reason).toBeTruthy();
+    // 저장소 장애는 503 admin-login-unavailable이다(IR096-04)
+    const findStep = store.findInvitationStep;
+    store.findInvitationStep = async () => {
+      throw new Error('store down');
+    };
+    expect(problemOf(await setPassword('partner', step))).toEqual({ status: 503, type: 'admin-login-unavailable' });
+    store.findInvitationStep = findStep;
+    const writePassword = store.setPassword;
+    store.setPassword = async () => {
+      throw new Error('store down');
+    };
+    expect(problemOf(await setPassword('partner', step))).toEqual({ status: 503, type: 'admin-login-unavailable' });
+    store.setPassword = writePassword;
     const ok = await setPassword('partner', step);
     expect(ok.statusCode).toBe(200);
     expect(json(ok)).toEqual({ next: 'TOTP' });
@@ -258,6 +271,14 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
     const a = await invite('partner_admin', { email: 'totp@stella.example' });
     let step = stepOf(await start('partner', a.token));
     expect((await setPassword('partner', step)).statusCode).toBe(200);
+    // TOTP 시드 키 장애는 503 admin-login-unavailable이다(IR096-04)
+    const cipher = svc.app.get<TotpSeedCipher>(TOTP_SEED_CIPHER);
+    const encrypt = cipher.encrypt;
+    cipher.encrypt = async () => {
+      throw new TotpKeyUnavailable('down');
+    };
+    expect(problemOf(await enroll('partner', step))).toEqual({ status: 503, type: 'admin-login-unavailable' });
+    cipher.encrypt = encrypt;
     const seed = seedOf(await enroll('partner', step));
     const wrong = wrongCode(seed);
     for (const remaining of [4, 3, 2, 1, 0]) {
@@ -297,7 +318,7 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
     expect(problemOf(await complete('partner', step))).toEqual({ status: 409, type: 'invitation-step-out-of-order' });
     expect(store.peek(a.id)!.status).toBe('INVITED');
     expect(store.sessions(a.id)).toHaveLength(0);
-    expect(store.listRecoveryCodes(a.id)).toHaveLength(0);
+    expect(await store.listRecoveryCodes(a.id)).toHaveLength(0);
     expect((await setPassword('partner', step)).statusCode).toBe(200);
     expect(problemOf(await complete('partner', step))).toEqual({ status: 409, type: 'invitation-step-out-of-order' });
     const seed = seedOf(await enroll('partner', step));
@@ -308,6 +329,14 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
     expect(confirmed.statusCode).toBe(200);
     expect(confirmed.headers['cache-control']).toBe('no-store');
     expect(problemOf(await complete('partner', step))).toEqual({ status: 409, type: 'passkey-not-registered' });
+    // 챌린지 저장소 장애는 503 admin-login-unavailable이다(IR096-04)
+    const challenges = svc.app.get<PasskeyChallenges>(PASSKEY_CHALLENGES);
+    const putChallenge = challenges.put;
+    challenges.put = async () => {
+      throw new PasskeyChallengesUnavailable('down');
+    };
+    expect(problemOf(await post(`${base('partner')}/invitation-passkey-registrations`, { acceptanceStep: step }))).toEqual({ status: 503, type: 'admin-login-unavailable' });
+    challenges.put = putChallenge;
     await registerPasskey('partner', step);
     expect(problemOf(await complete('partner', step, { recoveryCodesSaved: false }))).toEqual({ status: 400, type: 'invalid-body' });
     const done = await complete('partner', step);
@@ -317,8 +346,8 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
     expect(row).toHaveProperty('inviteStepHash');
     expect(row.inviteStepHash).toBeNull();
     expect(store.sessions(a.id)).toHaveLength(0);
-    expect(store.listPasskeys(a.id)).toHaveLength(1);
-    expect(store.listRecoveryCodes(a.id)).toHaveLength(10);
+    expect(await store.listPasskeys(a.id)).toHaveLength(1);
+    expect(await store.listRecoveryCodes(a.id)).toHaveLength(10);
     expect(problemOf(await complete('partner', step))).toEqual({ status: 410, type: 'invitation-step-invalid' });
     expect(problemOf(await start('partner', a.token))).toEqual({ status: 410, type: 'invitation-invalid' });
   });
@@ -351,8 +380,8 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
     expect(confirmed.statusCode).toBe(200);
     expect(confirmed.headers['cache-control']).toBe('no-store');
     await registerPasskey('partner', step1);
-    expect(store.listPasskeys(a.id)).toHaveLength(1);
-    expect(store.listRecoveryCodes(a.id)).toHaveLength(10);
+    expect(await store.listPasskeys(a.id)).toHaveLength(1);
+    expect(await store.listRecoveryCodes(a.id)).toHaveLength(10);
 
     const step2 = stepOf(await start('partner', a.token));
     expect(step2).not.toBe(step1);
@@ -360,8 +389,8 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
     expect(row.passwordPhc).toBeNull();
     expect(row.totpPendingEnc).toBeNull();
     expect(row.totpSeedEnc).toBeNull();
-    expect(store.listRecoveryCodes(a.id)).toHaveLength(0);
-    expect(store.listPasskeys(a.id)).toHaveLength(0);
+    expect(await store.listRecoveryCodes(a.id)).toHaveLength(0);
+    expect(await store.listPasskeys(a.id)).toHaveLength(0);
     expect(problemOf(await setPassword('partner', step1))).toEqual({ status: 410, type: 'invitation-step-invalid' });
     expect(problemOf(await enroll('partner', step2))).toEqual({ status: 409, type: 'invitation-step-out-of-order' });
     expect((await setPassword('partner', step2)).statusCode).toBe(200);
@@ -398,9 +427,20 @@ describe('관리 계정 초대 수락(BOT-152, BAT-046 서버 몫)', () => {
     const loginStep = String(json(first).loginStep);
     clock.advance(30_000);
     const second = await post('/v1/partner/auth/sessions', { loginStep, code: codeAt(a.seed) });
-    expect(second.statusCode).toBe(204);
+    expect(second.statusCode).toBe(200);
+    expect(json(second)).toEqual({ next: 'DONE' });
     expect(String(second.headers['set-cookie'])).toContain('__Secure-peaket_partner_at');
     expect(store.sessions(a.id)).toHaveLength(1);
     for (const forbidden of [PW, a.seed.toString('base64url'), 'sha256']) expect(second.payload).not.toContain(forbidden);
+
+    // 초대 수락 계정도 뒤 로그인은 같은 200·next DONE이다(IR096-01)
+    const third = await post('/v1/partner/auth/sessions', { email: a.email, password: PW, deviceId: 'dev-inv-2' });
+    expect(third.statusCode).toBe(200);
+    const loginStep2 = String(json(third).loginStep);
+    clock.advance(30_000);
+    const fourth = await post('/v1/partner/auth/sessions', { loginStep: loginStep2, code: codeAt(a.seed) });
+    expect(fourth.statusCode).toBe(200);
+    expect(json(fourth)).toEqual({ next: 'DONE' });
+    expect(store.sessions(a.id)).toHaveLength(2);
   });
 });
