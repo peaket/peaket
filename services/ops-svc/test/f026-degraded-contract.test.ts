@@ -35,16 +35,32 @@ const degraded = (params: Record<string, unknown>) => ({ type: 'DEGRADED_MODE' a
 const auditPayloads = (audit: MemoryAuditChain, recordType: string): Record<string, unknown>[] =>
   audit.entries.filter((e) => e.recordType === recordType).map((e) => e.record.payload);
 
+/** 검사 거절의 종류(INVALID·OUT_OF_RANGE)와 걸린 한계를 단언하려고 꺼낸다 */
+const rejectionOf = (fn: () => unknown): CommandInputRejected => {
+  try {
+    fn();
+  } catch (e) {
+    if (e instanceof CommandInputRejected) return e;
+    throw e;
+  }
+  throw new Error('CommandInputRejected를 던지지 않았다');
+};
+
 describe('F026-ENTRY 명령 6 진입 Degraded의 매개변수 계약', () => {
   test('F026-ENTRY ① ENTRY_DEGRADED는 expiresAt이 필수이고 24시간을 넘으면 422 command-out-of-range다', () => {
     // expiresAt 없음, 모르는 칸, 24시간 + 1ms, 24시간 정각
-    expect(() => checkCommandParams('DEGRADED_MODE', { mode: 'ENTRY_DEGRADED' }, NOW)).toThrow(CommandInputRejected);
-    expect(() =>
-      checkCommandParams('DEGRADED_MODE', { mode: 'ENTRY_DEGRADED', expiresAt: new Date(NOW + HOUR).toISOString(), on: true }, NOW),
-    ).toThrow(CommandInputRejected);
-    expect(() =>
-      checkCommandParams('DEGRADED_MODE', { mode: 'ENTRY_DEGRADED', expiresAt: new Date(NOW + 24 * HOUR + 1).toISOString() }, NOW),
-    ).toThrow(CommandInputRejected);
+    expect(rejectionOf(() => checkCommandParams('DEGRADED_MODE', { mode: 'ENTRY_DEGRADED' }, NOW))).toMatchObject({
+      kind: 'OUT_OF_RANGE',
+      limit: 'degradedExpiresAt',
+    });
+    expect(
+      rejectionOf(() => checkCommandParams('DEGRADED_MODE', { mode: 'ENTRY_DEGRADED', expiresAt: new Date(NOW + HOUR).toISOString(), on: true }, NOW)),
+    ).toMatchObject({ kind: 'INVALID', limit: 'unknown-field:on' });
+    expect(
+      rejectionOf(() =>
+        checkCommandParams('DEGRADED_MODE', { mode: 'ENTRY_DEGRADED', expiresAt: new Date(NOW + 24 * HOUR + 1).toISOString() }, NOW),
+      ),
+    ).toMatchObject({ kind: 'OUT_OF_RANGE', limit: 'degradedExpiresAt' });
     // 24시간 정각은 받는다(정각 포함 경계). 값은 그대로 돌려준다
     const atLimit = new Date(NOW + 24 * HOUR).toISOString();
     expect(checkCommandParams('DEGRADED_MODE', { mode: 'ENTRY_DEGRADED', expiresAt: atLimit }, NOW)).toEqual({ mode: 'ENTRY_DEGRADED', expiresAt: atLimit });
@@ -52,12 +68,22 @@ describe('F026-ENTRY 명령 6 진입 Degraded의 매개변수 계약', () => {
 
   test('F026-ENTRY ② STATE_DEGRADED는 EVENT면 소문자 회차 1~100개, PLATFORM이면 회차를 받지 않는다', () => {
     const ids = Array.from({ length: 101 }, () => randomUUID());
-    expect(() => checkCommandParams('DEGRADED_MODE', { mode: 'STATE_DEGRADED', scope: 'EVENT', eventIds: ids }, NOW)).toThrow(CommandInputRejected);
-    expect(() => checkCommandParams('DEGRADED_MODE', { mode: 'STATE_DEGRADED', scope: 'EVENT', eventIds: [] }, NOW)).toThrow(CommandInputRejected);
-    expect(() =>
-      checkCommandParams('DEGRADED_MODE', { mode: 'STATE_DEGRADED', scope: 'EVENT', eventIds: [randomUUID(), randomUUID().toUpperCase()] }, NOW),
-    ).toThrow(CommandInputRejected);
-    expect(() => checkCommandParams('DEGRADED_MODE', { mode: 'STATE_DEGRADED', scope: 'PLATFORM', eventIds: [randomUUID()] }, NOW)).toThrow(CommandInputRejected);
+    expect(rejectionOf(() => checkCommandParams('DEGRADED_MODE', { mode: 'STATE_DEGRADED', scope: 'EVENT', eventIds: ids }, NOW))).toMatchObject({
+      kind: 'OUT_OF_RANGE',
+      limit: 'stateDegradedMaxEvents',
+    });
+    expect(rejectionOf(() => checkCommandParams('DEGRADED_MODE', { mode: 'STATE_DEGRADED', scope: 'EVENT', eventIds: [] }, NOW))).toMatchObject({
+      kind: 'INVALID',
+      limit: 'eventIds',
+    });
+    expect(
+      rejectionOf(() =>
+        checkCommandParams('DEGRADED_MODE', { mode: 'STATE_DEGRADED', scope: 'EVENT', eventIds: [randomUUID(), randomUUID().toUpperCase()] }, NOW),
+      ),
+    ).toMatchObject({ kind: 'INVALID', limit: 'eventIds' });
+    expect(
+      rejectionOf(() => checkCommandParams('DEGRADED_MODE', { mode: 'STATE_DEGRADED', scope: 'PLATFORM', eventIds: [randomUUID()] }, NOW)),
+    ).toMatchObject({ kind: 'INVALID', limit: 'eventIds' });
     const one = randomUUID();
     expect(checkCommandParams('DEGRADED_MODE', { mode: 'STATE_DEGRADED', scope: 'EVENT', eventIds: [one] }, NOW)).toEqual({
       mode: 'STATE_DEGRADED',
@@ -67,8 +93,14 @@ describe('F026-ENTRY 명령 6 진입 Degraded의 매개변수 계약', () => {
   });
 
   test('F026-ENTRY ③ STATE_MIRROR_FIXED·SOLD_OUT_STATIC은 mode만 받고 모르는 칸은 422다', () => {
-    expect(() => checkCommandParams('DEGRADED_MODE', { mode: 'STATE_MIRROR_FIXED', on: true }, NOW)).toThrow(CommandInputRejected);
-    expect(() => checkCommandParams('DEGRADED_MODE', { mode: 'SOLD_OUT_STATIC', scope: 'PLATFORM' }, NOW)).toThrow(CommandInputRejected);
+    expect(rejectionOf(() => checkCommandParams('DEGRADED_MODE', { mode: 'STATE_MIRROR_FIXED', on: true }, NOW))).toMatchObject({
+      kind: 'INVALID',
+      limit: 'unknown-field:on',
+    });
+    expect(rejectionOf(() => checkCommandParams('DEGRADED_MODE', { mode: 'SOLD_OUT_STATIC', scope: 'PLATFORM' }, NOW))).toMatchObject({
+      kind: 'INVALID',
+      limit: 'unknown-field:scope',
+    });
     expect(checkCommandParams('DEGRADED_MODE', { mode: 'STATE_MIRROR_FIXED' }, NOW)).toEqual({ mode: 'STATE_MIRROR_FIXED' });
     expect(checkCommandParams('DEGRADED_MODE', { mode: 'SOLD_OUT_STATIC' }, NOW)).toEqual({ mode: 'SOLD_OUT_STATIC' });
   });

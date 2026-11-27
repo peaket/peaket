@@ -69,7 +69,9 @@ describe('F026-WAF 명령 4 WAF 포트', () => {
     expect(failed.lastError).toMatch(/^waf-unavailable/);
     // 다시 하기(T11): 같은 명령·같은 목록, WAF가 돌아오면 ACKED
     f.waf.failApply = false;
-    const retried = await f.execution.run(await f.store.find(f.command.commandId) as never, ACTOR, NOW + 1);
+    const current = await f.store.find(f.command.commandId);
+    expect(current).toBeDefined();
+    const retried = await f.execution.run(current!, ACTOR, NOW + 1);
     expect(retried.state).toBe('ACKED');
     expect(await f.waf.remaining(f.command.commandId)).toEqual({ cidrs: ['198.51.100.0/24'], asns: [64512] });
   });
