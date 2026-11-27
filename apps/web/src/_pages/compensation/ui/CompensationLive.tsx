@@ -167,7 +167,7 @@ export function CompensationLive({ compensationId }: { compensationId: string })
         if (mapped.reauth) {
           setToken(null);
           setAwaitingConfirm(false);
-          setNotice(`${COMPENSATION_REAUTH_EXPIRED}. ${COMPENSATION_REAUTH_NOT_SENT}`);
+          setNotice(COMPENSATION_REAUTH_NOT_SENT);
         }
       } finally {
         setBusy(false);
@@ -236,23 +236,20 @@ export function CompensationLive({ compensationId }: { compensationId: string })
 
           {view?.form && !done ? (
             token && awaitingConfirm ? (
-              <>
-                <NoticeBanner tone="info" role={null}>다시 로그인한 확인을 마쳤습니다. 계좌를 다시 입력해 주세요</NoticeBanner>
-                <BankAccountForm
-                  idPrefix="cp"
-                  purpose="compensation"
-                  layout="split"
-                  label="배상금 받을 계좌"
-                  notice="계좌번호는 저장하지 않고 송금에만 씁니다"
-                  banks={BANKS}
-                  submitHint="송금 요청은 한 번만 보냅니다"
-                  submitLabel="송금 요청"
-                  submitting={busy}
-                  submittingLabel="송금 요청 중"
-                  submittingStatus="송금을 요청하고 있습니다"
-                  onSubmit={(e) => void send(token, e.currentTarget)}
-                />
-              </>
+              <BankAccountForm
+                idPrefix="cp"
+                purpose="compensation"
+                layout="split"
+                label="배상금 받을 계좌"
+                notice="계좌번호는 저장하지 않고 송금에만 씁니다"
+                banks={BANKS}
+                submitHint="송금 요청은 한 번만 보냅니다"
+                submitLabel="송금 요청"
+                submitting={busy}
+                submittingLabel="송금 요청 중"
+                submittingStatus="송금을 요청하고 있습니다"
+                onSubmit={(e) => void send(token, e.currentTarget)}
+              />
             ) : (
               <BankAccountForm
                 idPrefix="cp"

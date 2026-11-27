@@ -182,7 +182,7 @@ export function RefundAccountLive({ refundId }: { refundId: string }) {
         if (mapped.reauth) {
           setToken(null);
           setAwaitingConfirm(false);
-          setNotice(`${REFUND_REAUTH_EXPIRED}. ${REFUND_REAUTH_NOT_SENT}`);
+          setNotice(REFUND_REAUTH_NOT_SENT);
         }
       } finally {
         setBusy(false);
@@ -251,23 +251,20 @@ export function RefundAccountLive({ refundId }: { refundId: string }) {
 
           {view?.form && !done ? (
             token && awaitingConfirm ? (
-              <>
-                <NoticeBanner tone="info" role={null}>다시 로그인한 확인을 마쳤습니다. 계좌를 다시 입력해 주세요</NoticeBanner>
-                <BankAccountForm
-                  idPrefix="rf"
-                  purpose="refund"
-                  layout="split"
-                  label="환불받을 계좌"
-                  notice="계좌번호는 저장하지 않고 환급 요청에만 씁니다"
-                  banks={BANKS}
-                  submitHint="환급 요청은 한 번만 보냅니다"
-                  submitLabel="환급 받기"
-                  submitting={busy}
-                  submittingLabel="환급 요청 중"
-                  submittingStatus="환급을 요청하고 있습니다"
-                  onSubmit={(e) => void send(token, e.currentTarget)}
-                />
-              </>
+              <BankAccountForm
+                idPrefix="rf"
+                purpose="refund"
+                layout="split"
+                label="환불받을 계좌"
+                notice="계좌번호는 저장하지 않고 환급 요청에만 씁니다"
+                banks={BANKS}
+                submitHint="환급 요청은 한 번만 보냅니다"
+                submitLabel="환급 받기"
+                submitting={busy}
+                submittingLabel="환급 요청 중"
+                submittingStatus="환급을 요청하고 있습니다"
+                onSubmit={(e) => void send(token, e.currentTarget)}
+              />
             ) : (
               <BankAccountForm
                 idPrefix="rf"
