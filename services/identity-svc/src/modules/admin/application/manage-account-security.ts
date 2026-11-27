@@ -170,14 +170,30 @@ export class ManageAccountSecurity {
     if (targetRow.pairRef === currentRow.pairRef && live.filter((s) => s.pairRef === targetRow.pairRef && s.id !== i.sessionId).length === 0) {
       throw new AccountSecurityError('SESSION_NOT_FOUND');
     }
-    await this.#authorize(i, now);
-    const done = await this.management.endDeviceSessions({ accountId: i.accountId, currentSessionId: i.sessionId, targetSessionId: target, now });
+    const token = await this.#authorizeToken(i, now);
+    const done = await this.management.endDeviceSessions({
+      accountId: i.accountId,
+      currentSessionId: i.sessionId,
+      targetSessionId: target,
+      now,
+      reauth: { jti: token.jti, accountId: i.accountId, sessionId: i.sessionId },
+    });
     if (done.kind === 'NOT_FOUND') throw new AccountSecurityError('SESSION_NOT_FOUND');
+    if (done.kind === 'REAUTH_REQUIRED') throw new AccountSecurityError('REAUTH_REQUIRED');
     return { ended: done.ended.length };
   }
 
   /** 세션·계정·콘솔·토큰·한 번 쓰기·패스키 요소를 ManagePasskeys와 같은 차례로 본다 */
   async #authorize(i: { aud: AdminAud; accountId: string; sessionId: string; reauthToken: string }, now: number): Promise<{ account: Account; passkeys: AdminPasskeyRow[] }> {
+    const token = await this.#authorizeToken(i, now);
+    const factors = await this.passkeys.useReauth(token.jti, token.account.id, i.sessionId, 'ACCOUNT_SECURITY', now);
+    if (!factors) throw new AccountSecurityError('REAUTH_REQUIRED');
+    if (!accountSecurityAllows(factors, token.passkeys.length > 0)) throw new AccountSecurityError('REAUTH_REQUIRED');
+    return { account: token.account, passkeys: token.passkeys };
+  }
+
+  /** 토큰 서명·세션·계정·패스키 요소까지만 본다(한 번 쓰기는 부르는 쪽 트랜잭션에서) */
+  async #authorizeToken(i: { aud: AdminAud; accountId: string; sessionId: string; reauthToken: string }, now: number): Promise<{ account: Account; passkeys: AdminPasskeyRow[]; jti: string }> {
     const account = await this.second.findLoginById(i.accountId);
     if (!account || account.status !== 'ACTIVE' || !ROLES_OF_AUD[i.aud].includes(account.role)) throw new AccountSecurityError('SESSION_ENDED');
     if (!(await this.#sessionAlive(i.aud, i.accountId, i.sessionId, now))) throw new AccountSecurityError('SESSION_ENDED');
@@ -189,11 +205,17 @@ export class ManageAccountSecurity {
       throw e;
     }
     if (v.accountId !== account.id) throw new AccountSecurityError('REAUTH_REQUIRED');
-    const factors = await this.passkeys.useReauth(v.jti, account.id, i.sessionId, 'ACCOUNT_SECURITY', now);
-    if (!factors) throw new AccountSecurityError('REAUTH_REQUIRED');
     const rows = await this.passkeys.listPasskeys(account.id);
+    const factors = await this.#reauthFactors(v.jti, account.id, i.sessionId, now);
     if (!accountSecurityAllows(factors, rows.length > 0)) throw new AccountSecurityError('REAUTH_REQUIRED');
-    return { account, passkeys: rows };
+    return { account, passkeys: rows, jti: v.jti };
+  }
+
+  /** 한 번 쓰기 전에 그 토큰의 factors를 읽는다. 없으면 REAUTH_REQUIRED(토큰을 쓰지 않는다) */
+  async #reauthFactors(jti: string, accountId: string, sessionId: string, now: number): Promise<string[]> {
+    const factors = await this.passkeys.peekReauth(jti, accountId, sessionId, 'ACCOUNT_SECURITY', now);
+    if (!factors) throw new AccountSecurityError('REAUTH_REQUIRED');
+    return factors;
   }
 
   async #sessionAlive(aud: AdminAud, accountId: string, sessionId: string, now: number): Promise<boolean> {

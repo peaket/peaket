@@ -415,7 +415,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     return true;
   }
 
-  async finishSecondStep(i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number }, limit: number, use: SecondStepUse): Promise<{ kind: 'DONE'; evicted: string[] } | { kind: 'CODE_USED' } | { kind: 'STEP_USED' }> {
+  async finishSecondStep(i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; deviceLabel?: string | null }, limit: number, use: SecondStepUse): Promise<{ kind: 'DONE'; evicted: string[] } | { kind: 'CODE_USED' } | { kind: 'STEP_USED' }> {
     // 모두 되는지 먼저 보고 한꺼번에 쓴다(사이에 await가 없어 한 트랜잭션과 같다)
     const at = i.createdAt;
     const r = this.#rows.get(i.accountId);
@@ -432,7 +432,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
   }
 
   async createSession(
-    i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number },
+    i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; deviceLabel?: string | null },
     limit: number,
   ): Promise<{ evicted: string[] }> {
     return this.#openSession(i, limit);
@@ -583,6 +583,12 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     const r = this.#reauths.find((x) => x.jti === jti && x.accountId === accountId && x.sessionId === sessionId && x.act === act);
     if (!r || r.usedAt !== null || r.expiresAt <= now) return null;
     r.usedAt = now;
+    return [...r.factors];
+  }
+
+  async peekReauth(jti: string, accountId: string, sessionId: string, act: ReauthAct, now: number): Promise<ReauthFactor[] | null> {
+    const r = this.#reauths.find((x) => x.jti === jti && x.accountId === accountId && x.sessionId === sessionId && x.act === act);
+    if (!r || r.usedAt !== null || r.expiresAt <= now) return null;
     return [...r.factors];
   }
 
@@ -825,7 +831,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       .map((s) => ({ id: s.id, pairRef: s.pairRef, deviceLabel: s.deviceLabel, createdAt: s.createdAt, idleExpiresAt: s.idleExpiresAt }));
   }
 
-  async endDeviceSessions(i: { accountId: string; currentSessionId: string; targetSessionId: string; now: number }): Promise<{ kind: 'OK'; ended: string[] } | { kind: 'NOT_FOUND' }> {
+  async endDeviceSessions(i: { accountId: string; currentSessionId: string; targetSessionId: string; now: number; reauth?: { jti: string; accountId: string; sessionId: string } }): Promise<{ kind: 'OK'; ended: string[] } | { kind: 'NOT_FOUND' } | { kind: 'REAUTH_REQUIRED' }> {
     const live = (s: SessionRow) => s.accountId === i.accountId && s.terminatedAt === null && s.idleExpiresAt > i.now && s.absoluteExpiresAt > i.now;
     const current = this.#sessions.find((s) => s.id === i.currentSessionId && live(s));
     const target = this.#sessions.find((s) => s.id === i.targetSessionId && live(s));
@@ -835,6 +841,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       .map((s) => s.id)
       .sort();
     if (ids.length === 0) return { kind: 'NOT_FOUND' };
+    if (i.reauth && !(await this.useReauth(i.reauth.jti, i.reauth.accountId, i.reauth.sessionId, 'ACCOUNT_SECURITY', i.now))) return { kind: 'REAUTH_REQUIRED' };
     for (const id of ids) {
       const s = this.#sessions.find((x) => x.id === id)!;
       Object.assign(s, { terminatedAt: i.now, terminationReason: 'LOGOUT', deviceLabel: null });
@@ -912,7 +919,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
         for (const id of [...ids].sort()) {
           const s = this.#sessions.find((x) => x.id === id);
           if (!s || s.terminatedAt !== null) continue;
-          patch(s, { terminatedAt: now, terminationReason: reason });
+          patch(s, { terminatedAt: now, terminationReason: reason, deviceLabel: null });
           const ev = { accountId: s.accountId, sessionId: s.id, reason };
           this.#terminated.push(ev);
           undo.push(() => this.#terminated.splice(this.#terminated.indexOf(ev), 1));

@@ -44,6 +44,12 @@
 | D-T33 ③ | 측정 |  | BAT-085 | 로컬 kind가 끌어오기 비밀 없이 공개 GHCR 이미지의 다이제스트를 받는지 잰다(예: Kyverno 이미지). 우리 패키지의 실제 익명 끌어오기는 첫 출시 후보 게시와 패키지 공개 설정(소유자 몫) 뒤로 미룬다(docs/devops.md D-T33, ADR-0318 결정 6). 결과 docs/review/measurements/BAT-085-ghcr.md. 2026-11-20 구현 시점에는 Docker/kind를 돌리지 않았다(시험·검증 담당 몫, Docker 잠금 필요). 2026-11-20 BAT-085 완료(R-717) 때도 재지 않았다: 검증 2의 kind e2e 5/5는 GHCR 익명 끌어오기를 넣지 않았고, 계획·감독 결정대로 첫 출시 뒤로 미룬다 |
 | Q-T22 | 측정 |  | OPS-220 | 허니팟 정밀도 표본 검토(100건 [가정])의 정밀도 추정은 BAT-197에서 뺐다(새 `reviewKind`·원천·집계와 화면 상태가 필요해 따로 묶는다, 감독 결정 2026-11-21). OPS-220이 하한 측정과 함께 정한다 |
 
+## F-07-13(2026-11-27, 구현 리뷰 반영)
+
+- 새 시험: `services/identity-svc/test/partner-account-security-http.test.ts` 14건(경로 여섯·재인증·404 토큰 미소비·경쟁 시 404·장애), `apps/partner/src/_pages/partner-settings/model/account-live.test.mjs`·`ui/account-wiring.test.mjs`(화면 모델·배선·복구 코드 다시 읽기·패스키 취소 문구). identity 774·partner 256 그대로.
+- 게이트: `node tools/ci/gateway-routes.mjs --check`를 계획 §9에 더했다(IR13-01, 6건 → 0).
+- 남은 위험: 실제 TOTP 앱·브라우저 패스키 창·PostgreSQL·Drizzle·0040 적용·Redis는 `미실행`이다. 비밀번호·패스키 줄은 비활성 표시이고 QR 코드는 없다. 관제 SCR-028의 같은 줄은 이 기능에 넣지 않았다.
+
 ## BAT-085 완료(2026-11-20, R-717)
 
 BAT-085(BAS-150)가 2026-11-20에 끝났다. 아래 항목의 상태·수는 바꾸지 않고 근거만 더한다(자동 시험 8·측정 1 그대로).

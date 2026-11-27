@@ -14,7 +14,7 @@ import {
 import { isProblem } from '@/shared/api/problem';
 import { ErrorCard, LoadingCard, useAsync } from '@/shared/ui/Async';
 import { Modal } from '@/shared/ui/Modal';
-import { accountSecurityProblemMessage, accountSecurityView, deviceRowActions, deviceSessionsView, recoveryCodeDialogState, reauthWithPasskey } from '../../model/account-live';
+import { accountSecurityProblemMessage, accountSecurityView, deviceRowActions, deviceSessionsView, reauthFailureText, recoveryCodeDialogState, reauthWithPasskey } from '../../model/account-live';
 
 type Action = 'totp' | 'recovery' | 'device';
 
@@ -87,6 +87,8 @@ export function AccountSecurityLive() {
         setRecoveryCodes(next.recoveryCodes);
         setSaved(false);
         setStep('codes');
+        // 다시 만든 뒤 요약의 '남은 코드'도 10개로 맞춘다(IR13-05)
+        summary.reload();
       } else if (action === 'device' && target) {
         await deletePartnerAuthSession(target, token);
         setReauthToken('');
@@ -106,7 +108,7 @@ export function AccountSecurityLive() {
         setAction(null);
         setTarget(null);
       }
-      setError(problem ? accountSecurityProblemMessage(problem) : '서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요');
+      setError(problem ? accountSecurityProblemMessage(problem) : reauthFailureText(e));
     } finally {
       setBusy(false);
     }
@@ -148,12 +150,32 @@ export function AccountSecurityLive() {
           <>
             <div className="row between" style={{ padding: '14px 0', borderTop: '1px solid var(--border)', gap: 12 }}>
               <div className="col" style={{ gap: 4 }}>
+                <h3 className="t-md fw-b">비밀번호</h3>
+                <p className="t-sm">비밀번호 변경은 다음 기능에서 다룹니다</p>
+                <p className="t-xs muted">15자 이상 · 유출된 적 있는 비밀번호는 쓸 수 없습니다</p>
+              </div>
+              <button className="btn btn-outline btn-sm" type="button" aria-disabled="true" disabled>
+                비밀번호 바꾸기
+              </button>
+            </div>
+            <div className="row between" style={{ padding: '14px 0', borderTop: '1px solid var(--border)', gap: 12 }}>
+              <div className="col" style={{ gap: 4 }}>
                 <h3 className="t-md fw-b">인증 앱</h3>
                 <p className="t-sm">{view.totpText}</p>
                 <p className="t-xs muted">로그인할 때마다 인증 앱의 6자리 코드를 씁니다</p>
               </div>
               <button className="btn btn-outline btn-sm" type="button" aria-haspopup="dialog" onClick={() => start('totp')}>
                 인증 앱 다시 등록
+              </button>
+            </div>
+            <div className="row between" style={{ padding: '14px 0', borderTop: '1px solid var(--border)', gap: 12 }}>
+              <div className="col" style={{ gap: 4 }}>
+                <h3 className="t-md fw-b">패스키</h3>
+                <p className="t-sm">{view.passkeyCount > 0 ? `등록된 패스키 ${view.passkeyCount}개` : '등록된 패스키 없음'}</p>
+                <p className="t-xs muted">패스키 등록·지우기는 다음 기능에서 다룹니다. 패스키가 있으면 재인증 때 한 번 더 확인합니다</p>
+              </div>
+              <button className="btn btn-outline btn-sm" type="button" aria-disabled="true" disabled>
+                패스키 관리
               </button>
             </div>
             <div className="row between" style={{ padding: '14px 0', borderTop: '1px solid var(--border)', gap: 12 }}>

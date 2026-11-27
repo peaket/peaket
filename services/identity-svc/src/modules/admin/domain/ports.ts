@@ -452,7 +452,14 @@ export interface AdminManagementStore {
    * 내 계정의 기기 하나를 끊는다(F-07-13). 대상이 지금 세션과 같은 기기면 지금 세션만 남기고 같은 기기의 다른 로그인을,
    * 다른 기기면 그 기기의 살아 있는 세션을 모두 끝낸다(LOGOUT, 세션 종료 사건). 지금 세션 자체는 끝내지 않는다.
    */
-  endDeviceSessions(i: { accountId: string; currentSessionId: string; targetSessionId: string; now: number }): Promise<{ kind: 'OK'; ended: string[] } | { kind: 'NOT_FOUND' }>;
+  endDeviceSessions(i: {
+    accountId: string;
+    currentSessionId: string;
+    targetSessionId: string;
+    now: number;
+    /** 있으면 대상 확인·재인증 토큰 소비·세션 종료를 한 트랜잭션에 한다(IR13-03). 404면 토큰을 쓰지 않는다 */
+    reauth?: { jti: string; accountId: string; sessionId: string };
+  }): Promise<{ kind: 'OK'; ended: string[] } | { kind: 'NOT_FOUND' } | { kind: 'REAUTH_REQUIRED' }>;
   /** 초대 메일을 보낼 때: 아직 INVITED이면 토큰 해시와 만료를 적는다(옛 토큰은 무효). 적었으면 true */
   setInviteToken(id: string, tokenHash: Buffer, expiresAt: number, now: number): Promise<boolean>;
   /** 만료가 지난 INVITED를 INVITE_EXPIRED로 바꾸고 토큰 해시를 지운다(정비 admin-invite-expired) */
@@ -547,6 +554,8 @@ export interface AdminPasskeyStore {
    * 만료 전이면 used_at을 적고 기록의 factors를 돌려준다. 아니면 null
    */
   useReauth(jti: string, accountId: string, sessionId: string, act: ReauthAct, now: number): Promise<ReauthFactor[] | null>;
+  /** useReauth와 같은 조건으로 factors만 읽고 쓰지 않는다(세션 종료처럼 트랜잭션 안에서 한 번 써야 하는 경로의 사전 검사) */
+  peekReauth(jti: string, accountId: string, sessionId: string, act: ReauthAct, now: number): Promise<ReauthFactor[] | null>;
   /** 발급이 before보다 이른 재인증 기록을 지운다(정비 admin-reauth-expired, 90일 [가정]) */
   purgeReauths(before: number): Promise<number>;
 }

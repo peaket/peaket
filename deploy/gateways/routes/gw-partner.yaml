@@ -25,7 +25,8 @@ spec:
     - partner-api.peaket.example
   rules:
     - matches:
-        - path:
+        - method: POST
+          path:
             type: Exact
             value: /v1/partner/auth/sessions
         - path:
@@ -140,9 +141,25 @@ spec:
         - path:
             type: PathPrefix
             value: /v1/partner/auth/reauthentications
+        - method: GET
+          path:
+            type: Exact
+            value: /v1/partner/auth/sessions
         - path:
             type: PathPrefix
-            value: /v1/partner/auth/sessions/me
+            value: /v1/partner/auth/sessions/
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/security-settings
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/totp-enrollments
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/totp-confirmations
+        - path:
+            type: PathPrefix
+            value: /v1/partner/auth/recovery-codes
         - path:
             type: PathPrefix
             value: /v1/partner/team-accounts

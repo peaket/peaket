@@ -775,6 +775,11 @@ export type createPartnerAuthTotpEnrollmentResponse201 = {
   status: 201
 }
 
+export type createPartnerAuthTotpEnrollmentResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
 export type createPartnerAuthTotpEnrollmentResponse401 = {
   data: UnauthorizedResponse
   status: 401
@@ -793,7 +798,7 @@ export type createPartnerAuthTotpEnrollmentResponse503 = {
 export type createPartnerAuthTotpEnrollmentResponseSuccess = (createPartnerAuthTotpEnrollmentResponse201) & {
   headers: Headers;
 };
-export type createPartnerAuthTotpEnrollmentResponseError = (createPartnerAuthTotpEnrollmentResponse401 | createPartnerAuthTotpEnrollmentResponse403 | createPartnerAuthTotpEnrollmentResponse503) & {
+export type createPartnerAuthTotpEnrollmentResponseError = (createPartnerAuthTotpEnrollmentResponse400 | createPartnerAuthTotpEnrollmentResponse401 | createPartnerAuthTotpEnrollmentResponse403 | createPartnerAuthTotpEnrollmentResponse503) & {
   headers: Headers;
 };
 
@@ -826,7 +831,7 @@ export const createPartnerAuthTotpEnrollment = async ( options?: Parameters<type
 
 export const getCreatePartnerAuthTotpEnrollmentMutationKey = () => ['createPartnerAuthTotpEnrollment'] as const;
 
-export const getCreatePartnerAuthTotpEnrollmentMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
+export const getCreatePartnerAuthTotpEnrollmentMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthTotpEnrollment>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthTotpEnrollment>>, TError,void, TContext> => {
 
@@ -855,13 +860,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreatePartnerAuthTotpEnrollmentMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerAuthTotpEnrollment>>>
 
-    export type CreatePartnerAuthTotpEnrollmentMutationError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>
+    export type CreatePartnerAuthTotpEnrollmentMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>
 
 
     /**
  * @summary 내 인증 앱 다시 등록 시작(새 시드, 재인증 토큰 필요)
  */
-export const useCreatePartnerAuthTotpEnrollment = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
+export const useCreatePartnerAuthTotpEnrollment = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthTotpEnrollment>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPartnerAuthTotpEnrollment>>,
@@ -1001,6 +1006,11 @@ export const useCreatePartnerAuthTotpConfirmation = <TError = ErrorType<ProblemR
   status: 200
 }
 
+export type createPartnerAuthRecoveryCodesResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
 export type createPartnerAuthRecoveryCodesResponse401 = {
   data: UnauthorizedResponse
   status: 401
@@ -1024,7 +1034,7 @@ export type createPartnerAuthRecoveryCodesResponse503 = {
 export type createPartnerAuthRecoveryCodesResponseSuccess = (createPartnerAuthRecoveryCodesResponse200) & {
   headers: Headers;
 };
-export type createPartnerAuthRecoveryCodesResponseError = (createPartnerAuthRecoveryCodesResponse401 | createPartnerAuthRecoveryCodesResponse403 | createPartnerAuthRecoveryCodesResponse409 | createPartnerAuthRecoveryCodesResponse503) & {
+export type createPartnerAuthRecoveryCodesResponseError = (createPartnerAuthRecoveryCodesResponse400 | createPartnerAuthRecoveryCodesResponse401 | createPartnerAuthRecoveryCodesResponse403 | createPartnerAuthRecoveryCodesResponse409 | createPartnerAuthRecoveryCodesResponse503) & {
   headers: Headers;
 };
 
@@ -1057,7 +1067,7 @@ export const createPartnerAuthRecoveryCodes = async ( options?: Parameters<typeo
 
 export const getCreatePartnerAuthRecoveryCodesMutationKey = () => ['createPartnerAuthRecoveryCodes'] as const;
 
-export const getCreatePartnerAuthRecoveryCodesMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
+export const getCreatePartnerAuthRecoveryCodesMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthRecoveryCodes>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthRecoveryCodes>>, TError,void, TContext> => {
 
@@ -1086,13 +1096,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreatePartnerAuthRecoveryCodesMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerAuthRecoveryCodes>>>
 
-    export type CreatePartnerAuthRecoveryCodesMutationError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>
+    export type CreatePartnerAuthRecoveryCodesMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>
 
 
     /**
  * @summary 내 복구 코드 다시 만들기(재인증, 새 10개 한 번)
  */
-export const useCreatePartnerAuthRecoveryCodes = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
+export const useCreatePartnerAuthRecoveryCodes = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthRecoveryCodes>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPartnerAuthRecoveryCodes>>,

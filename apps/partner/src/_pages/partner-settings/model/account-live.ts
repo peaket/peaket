@@ -125,3 +125,13 @@ export function accountSecurityProblemMessage(problem: SecurityProblem): string 
   if (problem.status >= 500) return '지금은 처리할 수 없습니다. 잠시 뒤 다시 시도해 주세요';
   return '요청을 마치지 못했습니다. 다시 시도해 주세요';
 }
+
+/** 재인증 중 서버 응답이 아닌 실패(패스키 창 닫기·브라우저 미지원)를 서버 오류와 구분한다 */
+export function reauthFailureText(error: unknown): string {
+  const name = typeof error === 'object' && error !== null && 'name' in error ? String((error as { name?: unknown }).name) : '';
+  const message = error instanceof Error ? error.message : '';
+  if (name === 'NotAllowedError' || name === 'AbortError' || /패스키/.test(message)) {
+    return '패스키 확인을 마치지 못했습니다. 창을 닫았다면 다시 시도해 주세요';
+  }
+  return '서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요';
+}

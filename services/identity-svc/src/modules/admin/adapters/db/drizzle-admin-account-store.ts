@@ -773,6 +773,15 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
     return r ? (r.factors as ReauthFactor[]) : null;
   }
 
+  async peekReauth(jti: string, accountId: string, sessionId: string, act: ReauthAct, now: number): Promise<ReauthFactor[] | null> {
+    const [r] = await this.database.db
+      .select({ factors: adminReauth.factors })
+      .from(adminReauth)
+      .where(and(eq(adminReauth.jti, jti), eq(adminReauth.adminAccountId, accountId), eq(adminReauth.adminSessionId, sessionId), eq(adminReauth.act, act), isNull(adminReauth.usedAt), gt(adminReauth.expiresAt, new Date(now))))
+      .limit(1);
+    return r ? (r.factors as ReauthFactor[]) : null;
+  }
+
   async purgeReauths(before: number): Promise<number> {
     const done = await this.database.db.delete(adminReauth).where(lt(adminReauth.issuedAt, new Date(before))).returning({ jti: adminReauth.jti });
     return done.length;
@@ -901,7 +910,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
         wipeCredentials: async (id, now) => {
           await tx
             .update(adminAccount)
-            .set({ status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, invitationAcceptedAt: null, ...stateColumns(FRESH_LOGIN_STATE), ...bump, updatedAt: new Date(now) })
+            .set({ status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpPendingSessionId: null, totpPendingFailures: 0, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, invitationAcceptedAt: null, ...stateColumns(FRESH_LOGIN_STATE), ...bump, updatedAt: new Date(now) })
             .where(eq(adminAccount.id, id));
           await tx.delete(adminRecoveryCode).where(eq(adminRecoveryCode.adminAccountId, id));
           // 패스키도 지운다(수락 때 새로 등록한다, ASVS 6.4.4, BOT-122)
@@ -918,6 +927,8 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
               passwordPhc: null,
               totpSeedEnc: null,
               totpPendingEnc: null,
+              totpPendingSessionId: null,
+              totpPendingFailures: 0,
               totpLastStep: null,
               inviteTokenHash: null,
               inviteExpiresAt: null,
@@ -1013,7 +1024,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
     return rows.map((r) => ({ id: r.id, pairRef: r.pairRef, deviceLabel: r.deviceLabel, createdAt: r.createdAt.getTime(), idleExpiresAt: r.idleExpiresAt.getTime() }));
   }
 
-  async endDeviceSessions(i: { accountId: string; currentSessionId: string; targetSessionId: string; now: number }): Promise<{ kind: 'OK'; ended: string[] } | { kind: 'NOT_FOUND' }> {
+  async endDeviceSessions(i: { accountId: string; currentSessionId: string; targetSessionId: string; now: number; reauth?: { jti: string; accountId: string; sessionId: string } }): Promise<{ kind: 'OK'; ended: string[] } | { kind: 'NOT_FOUND' } | { kind: 'REAUTH_REQUIRED' }> {
     return this.database.transaction(async (tx) => {
       const now = new Date(i.now);
       const [target] = await tx
@@ -1043,6 +1054,23 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
         .for('update');
       const ids = rows.map((r) => r.id).sort();
       if (ids.length === 0) return { kind: 'NOT_FOUND' };
+      if (i.reauth) {
+        const used = await tx
+          .update(adminReauth)
+          .set({ usedAt: now })
+          .where(
+            and(
+              eq(adminReauth.jti, i.reauth.jti),
+              eq(adminReauth.adminAccountId, i.reauth.accountId),
+              eq(adminReauth.adminSessionId, i.reauth.sessionId),
+              eq(adminReauth.act, 'ACCOUNT_SECURITY'),
+              isNull(adminReauth.usedAt),
+              gt(adminReauth.expiresAt, now),
+            ),
+          )
+          .returning({ factors: adminReauth.factors });
+        if (used.length === 0) return { kind: 'REAUTH_REQUIRED' };
+      }
       await tx.update(adminSession).set({ terminatedAt: now, terminationReason: 'LOGOUT', deviceLabel: null }).where(inArray(adminSession.id, ids));
       const terminatedAt = now.toISOString();
       await writeOutbox(

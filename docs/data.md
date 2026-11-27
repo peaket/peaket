@@ -256,7 +256,7 @@ erDiagram
         bytea invite_token_hash "초대·재초대 링크 토큰(32바이트 난수)의 SHA-256. 수락·새 재초대·만료 때 지운다(추천 적용 2026-10-30)"
         timestamptz invite_expires_at "보낸 때부터 24시간"
         timestamptz last_login_at "마지막 로그인 성공 시각. SCR-064 계정 표와 SCR-020 팀 계정의 마지막 접속(추천 적용 2026-10-30)"
-        timestamptz removed_at "삭제 시각. 삭제하면 email·display_name·password_phc·totp_seed_enc와 패스키·복구 코드, 마지막 접속·유출 대조·실패 수·잠금 칸을 바로 지우고 ID·역할·삭제 시각만 남긴다(파트너사 ID는 역할 묶음 제약 때문에 남는다, BOT-150). 행은 권한 부여·변경·말소 내역과 같이 3년 뒤 지운다(고시 제5조 제3항, 추천 적용 2026-10-30)"
+        timestamptz removed_at "삭제 시각. 삭제하면 email·display_name·password_phc·totp_seed_enc·totp_pending_enc·totp_pending_session_id·totp_pending_failures와 패스키·복구 코드, 마지막 접속·유출 대조·실패 수·잠금 칸을 바로 지우고 ID·역할·삭제 시각만 남긴다(파트너사 ID는 역할 묶음 제약 때문에 남는다, BOT-150). 행은 권한 부여·변경·말소 내역과 같이 3년 뒤 지운다(고시 제5조 제3항, 추천 적용 2026-10-30, F-07-13에서 다시 등록 대기 칸 추가)"
         bigint version "판. 역할 변경의 If-Match와 ETag(docs/api/guidelines.md §12, 추천 적용 2026-10-30)"
         text password_phc "pbkdf2-sha256, 600000회 이상, KMS 페퍼 버전 포함(ADR-0033, ADR-0050)"
         bytea totp_seed_enc "AES-256-GCM. KMS 데이터 키 봉투 암호화, 암호화 컨텍스트 {purpose: peaket-admin-totp-v1, accountId}. 꼴은 docs/features/identity.md §6 '관리 계정 TOTP와 로그인 2단계의 첫 구현'(추천 적용 2026-11-05, BOT-120)"
