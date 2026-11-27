@@ -1211,6 +1211,17 @@ test('BOT-161 dast-nightly.yml의 예약 실패만 SEV3 이슈를 열고, issues
   assert.match(run, /dast-zap/);
 });
 
+test('BOT-161 ④ DAST 예약 실패 이슈는 실행마다 새로 열지 않고 열린 이슈를 찾아 한 번만 열거나 덧붙인다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
+  const d = wfDoc('dast-nightly.yml');
+  const run = d.jobs['notify-scheduled-failure'].steps.map((s) => s.run ?? '').join('\n');
+  assert.match(run, /gh issue list/, '열린 이슈를 먼저 찾지 않는다');
+  assert.match(run, /--state open/, '열린 이슈만 찾지 않는다');
+  assert.match(run, /gh issue comment/, '이미 열린 이슈에 실행을 덧붙이지 않는다');
+  const title = run.split('\n').find((l) => l.includes('--title'));
+  assert.ok(title, '이슈 제목 줄이 없다');
+  assert.ok(!title.includes('GITHUB_RUN_ID'), '실행 ID를 제목에 넣어 실행마다 새 이슈가 생긴다');
+});
+
 test('BOT-161 security-scan.yml은 예약 실행에도 issues: write를 두지 않고(workflow_call 권한 규칙), security-scan-notify.yml이 예약 실패만 SEV3 이슈로 연다', { skip: !YAML && 'yaml 패키지가 없다(pnpm install 전)' }, () => {
   const scan = YAML.parse(wfText('security-scan.yml'));
   assert.ok(!JSON.stringify(scan).includes('issues: write'), 'security-scan.yml에 issues: write가 있다(부르는 쪽 권한을 넘는다)');

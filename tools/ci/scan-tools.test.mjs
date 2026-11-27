@@ -886,6 +886,31 @@ test('BOT-161 미끼 점검이 High를 못 찾으면 대상을 보지 않고 Dec
   assert.ok(!calls.some((a) => a.includes('zap.json')), '대상 결과 파일을 썼다');
 });
 
+test('BOT-161 ② 미끼 결과 파일이 없거나 깨졌으면 DecoyError(종료 코드 3)로 끝나고 대상을 보지 않는다', async () => {
+  const { runDast } = await import('./scan-tools.mjs');
+  // 도구가 미끼 결과 파일을 쓰지 않았다
+  const missingOut = tempDir('dast-decoy-missing-');
+  const missingCalls = [];
+  const missingDocker = async (args) => {
+    missingCalls.push(args.join(' '));
+    return { code: 0 };
+  };
+  await assert.rejects(runDast({ target: 'https://www.peaket.example/', out: missingOut, docker: missingDocker }), DecoyError);
+  assert.equal(missingCalls.length, 1, '미끼 결과가 없는데 대상까지 점검했다');
+  // 도구가 깨진 JSON을 썼다
+  const brokenOut = tempDir('dast-decoy-broken-');
+  const brokenCalls = [];
+  const brokenDocker = async (args) => {
+    brokenCalls.push(args.join(' '));
+    const volume = args[args.indexOf('-v') + 1];
+    const out = volume.slice(0, volume.indexOf(':/zap/wrk'));
+    writeFileSync(join(out, 'zap-decoy.json'), '{');
+    return { code: 0 };
+  };
+  await assert.rejects(runDast({ target: 'https://www.peaket.example/', out: brokenOut, docker: brokenDocker }), DecoyError);
+  assert.equal(brokenCalls.length, 1, '미끼 결과가 깨졌는데 대상까지 점검했다');
+});
+
 test('BOT-161 미끼가 High를 찾으면 그때만 www·api·partner 대상을 점검하고 결과 경로를 돌려준다', async () => {
   const { runDast } = await import('./scan-tools.mjs');
   const { calls, docker } = fakeDastDocker((report) => (report === 'zap-decoy.json' ? [3] : [2]));

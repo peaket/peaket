@@ -127,13 +127,26 @@ test('BOT-161 요청·응답 본문·쿠키·공격 문자열은 SARIF에 옮기
   assert.match(text, /www\.peaket\.example/);
 });
 
-test('BOT-161 riskcode는 숫자·문자 모두 읽고, 모르는 등급은 0.0으로 두되 점검 흔적이 있으면 통과한다', () => {
-  assert.deepEqual({ ...SEVERITY_OF_RISK }, { 3: 8, 2: 5, 1: 3, 0: 0 });
+test('BOT-161 ① riskcode는 숫자·문자 모두 읽고, 없거나 모르는 등급은 9.0(High)으로 막는다', () => {
+  assert.equal(SEVERITY_OF_RISK[3], 8);
+  assert.equal(SEVERITY_OF_RISK[2], 5);
+  assert.equal(SEVERITY_OF_RISK[1], 3);
+  assert.equal(SEVERITY_OF_RISK[0], 0);
   const asText = toSarif(reportOf([alertOf('3')]));
   assert.equal(asText.high, 1);
   assert.equal(asText.sarif.runs[0].results[0].properties['security-severity'], '8.0');
+  // 모르는 등급과 빠진 등급은 High로 보아 막는다(닫힘 실패, BAT-045 RV-13a)
   const unknown = toSarif(reportOf([alertOf(9)]));
-  assert.equal(unknown.high, 0);
-  assert.equal(unknown.sarif.runs[0].results[0].properties['security-severity'], '0.0');
-  assert.equal(run(reportOf([alertOf(9)])).code, 0);
+  assert.equal(unknown.high, 1);
+  assert.equal(unknown.sarif.runs[0].results[0].properties['security-severity'], '9.0');
+  assert.equal(run(reportOf([alertOf(9)])).code, 1);
+  const missing = toSarif(reportOf([alertOf(undefined)]));
+  assert.equal(missing.high, 1);
+  assert.equal(missing.sarif.runs[0].results[0].properties['security-severity'], '9.0');
+  assert.equal(run(reportOf([alertOf(undefined)])).code, 1);
+  // 0~3은 지금 등급 그대로다
+  const info = toSarif(reportOf([alertOf(0)]));
+  assert.equal(info.high, 0);
+  assert.equal(info.sarif.runs[0].results[0].properties['security-severity'], '0.0');
+  assert.equal(run(reportOf([alertOf(0)])).code, 0);
 });

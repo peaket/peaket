@@ -70,6 +70,24 @@ const exception = (o = {}) => ({ tool: 'codeql', rule: 'js/xss', path: 'apps/web
 
 // ---------- 13.3.1 비밀 ----------
 
+test('BOT-161 ③ scan-gate --tool zap은 High 8.0을 막고 Medium 5.0은 알림만 남기며 같은 규칙·주소 중복은 1건으로 센다', async () => {
+  const zapResult = (severity, uri = 'https://www.peaket.example/v1/search?q=1', ruleId = 'ZAP-40018') => result(ruleId, uri, 1, { properties: { 'security-severity': String(severity) } });
+  const zap = (results) => sarif(run({ name: 'ZAP', rules: [rule('ZAP-40018', 8), rule('ZAP-10020', 5)], results }));
+  const high = await gate({ tool: 'zap', files: { 'z.sarif': zap([zapResult(8)]) } });
+  assert.equal(high.code, 1, high.logs);
+  assert.equal(high.report.blocking.length, 1);
+  const medium = await gate({ tool: 'zap', files: { 'z.sarif': zap([zapResult(5, 'https://www.peaket.example/', 'ZAP-10020')]) } });
+  assert.equal(medium.code, 0, medium.logs);
+  assert.equal(medium.report.blocking.length, 0);
+  assert.equal(medium.report.notices.length, 1);
+  const duplicate = await gate({ tool: 'zap', files: { 'z.sarif': zap([zapResult(8), zapResult(8)]) } });
+  assert.equal(duplicate.code, 1, duplicate.logs);
+  assert.equal(duplicate.report.blocking.length, 1, '같은 규칙·주소 중복을 두 번 셌다');
+  const wrongTool = await gate({ tool: 'zap', files: { 'z.sarif': sarif(run({ name: 'Other', rules: [], results: [] })) } });
+  assert.equal(wrongTool.code, 1);
+  assert.match(wrongTool.report.errors.join('\n'), /ZAP/);
+});
+
 test('[ASVS v5.0.0-13.3.1] gitleaks가 누출 아닌 까닭으로 끝나거나 SARIF가 없으면 막는다', async () => {
   const clean = gitleaks([]);
   // 맞춤: 종료 코드 0이고 결과가 없으면 통과한다
