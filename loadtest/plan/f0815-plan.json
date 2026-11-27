@@ -1,0 +1,83 @@
+{
+  "batch": "F-08-15",
+  "feature": "F-08-15",
+  "windows": {
+    "3h": {
+      "hours": 4,
+      "steps": ["3h-1", "3h-2", "3h-3"],
+      "labels": {
+        "3h-1": "보내기 비교",
+        "3h-2": "Sentry vs GlitchTip",
+        "3h-3": "M4 목차·보고"
+      }
+    }
+  },
+  "inputs": ["F-08-14", "F-08-13"],
+  "dependency": {
+    "feature": "F-08-14",
+    "status": "미측정",
+    "inputs": ["K8", "K9", "series", "samplesPerSecond", "logGbPerDay", "traceGbPerDay", "nodes", "consoleUsers", "backendR2"],
+    "note": "F-08-14 결과 파일(backend_cost.csv·components.csv·manifest)만 인용한다. F-08-14 가지 위로 스택하지 않는다."
+  },
+  "send": {
+    "external": false,
+    "freeSamples": 40000000,
+    "priceDate": "2026-10-14",
+    "sampleFormula": "series * (86400 / scrapeSec) * days",
+    "candidates": ["amp", "amg", "datadog", "direct"],
+    "display": "[추정]",
+    "unmeasured": "미계산"
+  },
+  "sentry": {
+    "install": false,
+    "dsn": "",
+    "candidates": 3,
+    "verdict": "판정 못 함",
+    "criteria": ["overseas", "error-peak", "availability", "console-api", "annual-cost"],
+    "lock": "F0815_SENTRY_LOCK",
+    "beforeSend": "lockEvent"
+  },
+  "m4": ["m4-control-gameday", "m4-scaling-cost"],
+  "stopRules": [
+    { "id": "STOP-01", "rule": "외부 계정을 만들거나 자료를 보내려 한다(Datadog·AMP·AMG·Sentry·GlitchTip)" },
+    { "id": "STOP-02", "rule": "PEAKET_SENTRY_DSN을 채우거나 Sentry SDK를 켜려 한다" },
+    { "id": "STOP-03", "rule": "보내지 않았는데 전송·실행 ID를 적는다" },
+    { "id": "STOP-04", "rule": "계산값을 실측·청구서로 적는다" },
+    { "id": "STOP-05", "rule": "오류 피크·API 범위를 확인 없이 통과로 적는다" },
+    { "id": "STOP-06", "rule": "2차 마스킹 원천을 옮겨 적거나 새 정규식을 만든다" },
+    { "id": "STOP-07", "rule": "M4 초안에 측정값·달성·게시를 적는다" },
+    { "id": "STOP-08", "rule": "개인 식별자·연락처·내부 주소가 기록에 들어간다" },
+    { "id": "STOP-09", "rule": "Docker·kind·k6·브라우저를 쓰려 한다" },
+    { "id": "STOP-10", "rule": "감독이 중단을 지시했거나 실제 외부 피해·개인정보 노출이 의심된다" }
+  ],
+  "lock": {
+    "take": "docker lane4-F-08-15",
+    "drop": "docker lane4-F-08-15",
+    "dockerAll": false,
+    "used": false
+  },
+  "boundaries": [
+    { "feature": "F-08-14", "owns": "K8·K9·관측 백엔드 비교 계산" },
+    { "feature": "F-08-6", "owns": "Game Day 33종·gameday.mjs·SLO/KPI ADR" },
+    { "feature": "F-08-13", "owns": "모의 진행·복원 연습" },
+    { "feature": "F-08-12", "owns": "14종 로컬 실행" },
+    { "feature": "F-08-10", "owns": "V-T18·M2" }
+  ],
+  "priorMeasurements": {
+    "F-08-5": "무효·미측정",
+    "F-08-9": "판정 못 함(무효·부분)",
+    "F-08-10": "미측정",
+    "F-08-12": "미측정",
+    "F-08-13": "설계만·판정 못 함",
+    "F-08-14": "미측정"
+  },
+  "notIncluded": ["K8", "K9", "V-T18", "V-T27", "V-T28", "P-T1", "SR-T13", "NFR-028", "Q-T2", "S-T1", "V-T10", "NFR-027", "V-T4", "V-T5", "V-T17"],
+  "artifacts": ["send-budget.json", "sentry-criteria.json", "manifest.json"],
+  "commands": [
+    "node loadtest/run.mjs v1 backend-send --plan loadtest/plan/f0815-plan.json --out .cache/peaket-f0815",
+    "node loadtest/run.mjs v1 backend-send --plan loadtest/plan/f0815-plan.json --check",
+    "node loadtest/run.mjs v1 backend-send --plan loadtest/plan/f0815-plan.json --report docs/review/measurements/F-08-15.md"
+  ],
+  "execute": false,
+  "status": "미실행"
+}

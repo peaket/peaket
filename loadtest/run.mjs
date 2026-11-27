@@ -42,6 +42,7 @@ import { accountRef, pidOf, sidOf } from './lib/users.mjs';
 import { DEFAULTS, SCENARIOS, UsageError, V1_ENTRY_SCENARIO, V1_SCENARIOS, parseArgs } from './runner/args.mjs';
 import { assertLocalConfig, compareExperiment, experimentFor, manifestNotes, renderComparison } from './runner/split-compare.mjs';
 import { F0812_PRIOR_MEASUREMENTS, F0812_SCENARIOS, F0812_STOP_RULES, F0812_WINDOWS, judgeLocalScenario } from './runner/gameday-local.mjs';
+import { renderF0815Report, validateF0815Plan } from './runner/backend-send.mjs';
 import { GENERATOR_RATE as ENTRY_GENERATOR_RATE, hostTags, runEntrySteps } from './runner/entry-scale.mjs';
 import { hostBetween, hostSnapshot } from './runner/host-metrics.mjs';
 import { CHECK_PHASES, checksFromSummary, executionSegments, generatorCount, mergeSummaries, withoutHistogramChecks } from './runner/merge.mjs';
@@ -2446,6 +2447,59 @@ async function runF0812Command(a) {
   return { outDir, exitCode: 0 };
 }
 
+// ───────────── F-08-15 동결 로컬 트랙(v1 backend-send) ─────────────
+
+/**
+ * F-08-15 보내기 비교·Sentry 판정·M4 계획을 읽고 검증한다. 실제 전송·계정·Sentry/GlitchTip 설치를 하지 않는다.
+ * `--check`는 계획만 검증하고, 그 밖에는 산출물 폴더에 계획 사본과 미실행 표시를 쓴다.
+ */
+async function runF0815Command(a) {
+  const planPath = resolve(a.plan ?? 'loadtest/plan/f0815-plan.json');
+  if (!existsSync(planPath)) throw new Error(`F-08-15 계획이 없다: ${planPath}`);
+  const plan = JSON.parse(readFileSync(planPath, 'utf8').replace(/^\uFEFF/, ''));
+  const checked = validateF0815Plan(plan);
+  if (!checked.ok) throw new Error(`F-08-15 계획 검증 실패: ${checked.reasons.join('; ')}`);
+  if (a.check) {
+    log(`F-08-15 backend-send: 계획 검증 통과 (${planPath}) — 전송·계정·설치 없음`);
+    return { outDir: dirname(planPath), exitCode: 0 };
+  }
+  const outDir = resolve(a.out ?? join('.cache', 'peaket-f0815', today()));
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, 'backend-send-plan.json'), `${JSON.stringify(plan, null, 2)}\n`);
+  writeFileSync(join(outDir, 'send-budget.json'), `${JSON.stringify({
+    status: '미실행',
+    window: '3h-1',
+    external: false,
+    samples: null,
+    display: '미계산',
+    note: '샘플 예산·비용은 F-08-14 입력이 생기면 [추정]으로 계산한다. 보내지 않는다.',
+  }, null, 2)}\n`);
+  writeFileSync(join(outDir, 'sentry-criteria.json'), `${JSON.stringify({
+    status: '미실행',
+    window: '3h-2',
+    candidates: ['sentry-cloud', 'sentry-self-hosted', 'glitchtip-self-hosted'],
+    verdict: '판정 못 함',
+    note: '무료 등급 API 범위·오류 피크·GlitchTip API 지원을 확인하지 못했다. 설치하지 않는다.',
+  }, null, 2)}\n`);
+  writeFileSync(join(outDir, 'manifest.json'), `${JSON.stringify({
+    tool: 'backend-send',
+    window: '3h',
+    execute: false,
+    externalSend: false,
+    cloudCost: false,
+    dockerUsed: false,
+    lock: plan.lock,
+    priorMeasurements: plan.priorMeasurements,
+  }, null, 2)}\n`);
+  if (a.report) {
+    const reportPath = resolve(a.report);
+    mkdirSync(dirname(reportPath), { recursive: true });
+    writeFileSync(reportPath, renderF0815Report());
+  }
+  log(`F-08-15 backend-send: 계획·미실행 표시를 ${outDir}에 남겼다 (전송·계정·Sentry/GlitchTip 설치·Docker·kind·k6 없음)`);
+  return { outDir, exitCode: 0 };
+}
+
 // ───────────── 게이트웨이 차단 상한·검색 IP 한도(gw, V-T43·SR-T13 ②, BAT-056) ─────────────
 
 /** 시나리오가 쓰는 회차 ID(대역 백엔드는 보지 않는다) */
@@ -2658,7 +2712,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   } catch (e) {
     if (e instanceof UsageError) {
       console.error(`loadtest/run.mjs: ${e.message}`);
-      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment|entry-steps|relay-fault|search|payment-fault|compare|compare-report|gameday-local [...] | gw sweep|capacity|ip-limit|limits [...] | cleanup (loadtest/README.md)');
+      console.error('쓰는 법: node loadtest/run.mjs calibrate [...] | v0 queue|seat-hold|payment|seat-deltas|gate [...] | v1 queue|seat-hold|payment|entry-steps|relay-fault|search|payment-fault|compare|compare-report|gameday-local|backend-send [...] | gw sweep|capacity|ip-limit|limits [...] | cleanup (loadtest/README.md)');
       process.exit(2);
     }
     throw e;
@@ -2685,7 +2739,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     });
   }
   try {
-    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : a.scenario === 'relay-fault' ? await runF089Command(a, runTag, 'relay-fault') : a.scenario === 'search' ? await runF089Command(a, runTag, 'search') : a.scenario === 'payment-fault' ? await runF089Command(a, runTag, 'payment-fault') : a.scenario === 'compare' ? await runF0810Command(a, runTag) : a.scenario === 'compare-report' ? await runF0810Report(a) : a.scenario === 'gameday-local' ? await runF0812Command(a) : await runV1(a, runTag)) : await runV0(a, runTag);
+    const r = a.command === 'cleanup' ? await runCleanup() : a.command === 'calibrate' ? await runCalibrate(a, runTag) : a.command === 'gw' ? (a.sub === 'limits' ? await runGwLimits(a, runTag) : await runGwCommand(a, runTag)) : a.command === 'v1' ? (a.scenario === 'entry-steps' ? await runEntryStepsCommand(a, runTag) : a.scenario === 'relay-fault' ? await runF089Command(a, runTag, 'relay-fault') : a.scenario === 'search' ? await runF089Command(a, runTag, 'search') : a.scenario === 'payment-fault' ? await runF089Command(a, runTag, 'payment-fault') : a.scenario === 'compare' ? await runF0810Command(a, runTag) : a.scenario === 'compare-report' ? await runF0810Report(a) : a.scenario === 'gameday-local' ? await runF0812Command(a) : a.scenario === 'backend-send' ? await runF0815Command(a) : await runV1(a, runTag)) : await runV0(a, runTag);
     log(`\n산출물: ${r.outDir}`);
     process.exit(r.exitCode);
   } catch (e) {

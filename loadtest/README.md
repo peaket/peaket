@@ -73,6 +73,21 @@ node loadtest/run.mjs v1 gameday-local --window 3a --judge .cache/peaket-f0812/g
 - 실행 ID는 `-f0812`로 끝나고, Docker 잠금은 `docker lane4-F-08-12` 한 자리만 씁니다(`docker-all` 금지). 14종 실제 실행·측정은 측정 창 몫이며 이 명령은 실행하지 않습니다.
 - 정본·계획: `docs/observability.md` §12, `docs/verification.md` §5.2, `docs/review/plans/F-08-12.md` §6~§10.
 
+### 보내기 비교·Sentry 판정·M4 2편(F-08-15)
+
+`v1 backend-send`는 보내기 비교·Sentry vs GlitchTip 판정·M4 블로그 2편의 **계획과 미실행 표시**만 다룹니다. 실제 전송·외부 계정·Sentry/GlitchTip 설치·**Docker·kind·k6·브라우저를 쓰지 않습니다.**
+
+```bash
+node loadtest/run.mjs v1 backend-send --plan loadtest/plan/f0815-plan.json --check
+node loadtest/run.mjs v1 backend-send --plan loadtest/plan/f0815-plan.json --out .cache/peaket-f0815
+node loadtest/run.mjs v1 backend-send --plan loadtest/plan/f0815-plan.json --report docs/review/measurements/F-08-15.md
+```
+
+- 판정은 끝까지 `미측정`·`판정 못 함`이고, 비용은 `[추정]`·`미계산`입니다. 통과를 만들지 않습니다.
+- M4 초안은 `docs/blog/m4-control-gameday.md`·`m4-scaling-cost.md`이고 게시는 소유자 몫입니다.
+- Docker 잠금은 `docker lane4-F-08-15` 한 자리만 씁니다(`docker-all` 금지). 실제 전송·측정은 측정 창 몫이며 이 명령은 실행하지 않습니다.
+- 정본·계획: `docs/observability.md` §1·§11, `docs/perf-ledger.md` §11, `docs/review/plans/F-08-15.md` §6~§10.
+
 ### 진입 서버 비례 확인(MSR-020)
 
 무대는 진입 서버 수·CPU 몫·켤 서비스를 정해 올립니다: `node tools/local/cluster.mjs v1 --redis-tls on --replicas N --cpus <몫> --services queue-svc`(넷을 다 켜지 않으면 합본은 single 모드로 뜬다). 단계 올리기 뒤 계산은 `node loadtest/runner/entry-scale.mjs choose|report`입니다.
