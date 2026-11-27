@@ -1,0 +1,60 @@
+{
+  "run_id": "2026-11-27-f085-queue-4a",
+  "kpi": "NFR-027",
+  "version": "v1",
+  "profile": "local-10k",
+  "scale": {
+    "users": 5000,
+    "arrival_rps": 500.0,
+    "duration_s": 21600,
+    "warmup_s": 1800
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v1-queue.js",
+    "args": null,
+    "open_model": true
+  },
+  "commit": {
+    "code": "e5b25a55b",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "host": null,
+  "generator": {
+    "description": "D:/ticketpass-freeze-F-08-5/.cache/peaket-f085/2026-11-27-queue-4a/generator.json",
+    "dropped_iterations": 2014
+  },
+  "started_at": "2026-11-27T01:22:42Z",
+  "ended_at": "2026-11-27T07:53:40Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 0,
+    "p95_ms": 0,
+    "p99_ms": 0,
+    "error_rate": 0,
+    "requests": 0,
+    "rps": 0,
+    "dropped_iterations": 2014
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt",
+    "series": "series.ndjson"
+  },
+  "valid": false,
+  "invalid_reason": "dropped_iterations 2014",
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": null,
+  "notes": "queue-svc 4a 6시간, 발생기 dropped 2014로 무효. 자원 시계열은 .cache/peaket-f085/2026-11-27-queue-4a/series.ndjson; series.ndjson? soak-probe 1? ??(392?)",
+  "collected_at": "2026-11-27T07:57:53Z",
+  "tool": "tools/perf-ledger/collect.py"
+}
