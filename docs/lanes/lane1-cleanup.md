@@ -307,4 +307,5 @@
   - **IR096-09(중간)**: `services/ops-svc/src/adapters/http-core-promoters.ts`를 직접 보는 시험이 없다. 가짜 HTTP 클라이언트로 404→false·2xx→true·503→throw·내부 토큰 머리·경로를 본다. 고정 시험은 대역 포트만 본다.
   - **IR096-10(낮음)**: Drizzle `markRemoved`·`expireInvites`가 새 `invite_step_*` 칸을 지우지 않는다(메모리는 지운다). 상태 검사가 막지만 계획 B6/B12의 "완료·재초대·만료 때 지운다"와 저장소 짝을 맞춘다. `invitation_accepted_at`은 IR096-01 고침으로 사라졌다.
   - **IR096-11(낮음)**: `#prior`가 대상 계정 감사 기록에서 멱등 키를 찾아 호출자 범위를 보지 않는다. `guidelines` §4의 '부른 계정 × 작업' 범위로 좁히려면 감사 payload의 `actorAdminAccountId`를 대조한다.
+  - **F-09-6 재리뷰 낮은 잔여(2026-11-27, `253ea9703`)**: `memory-admin-account-store.ts`·`admin-invitation.controller.ts` 첫 줄 UTF-8 BOM(동작·lint 영향 없음), `complete()`를 HTTP가 아닌 유스케이스로 직접 부르며 `recoveryCodesSaved: false`면 409(HTTP는 400), IR096-05·12의 `Fix-By: test`/`시험 없음` 꼬리말이 `887e9d29d`에 모인 것(force 금지로 소급 수정 안 함). IR096-04의 code 있는 raw 드라이버 오류는 `d9ec32c5c`에서 503으로 고쳤다.
   - **남은 화면·BAT-045**: SCR-064 관리 계정 화면, 세션 강제 종료 콘솔 표시, BAT-045 RV-10·RV-11a·RV-11b·RV-11d는 이번에도 열려 있다. 실제 PostgreSQL·kind·DAST 야간·IP/VPN/AWS는 미실행이다.
