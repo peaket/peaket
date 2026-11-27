@@ -12,6 +12,8 @@ export interface ResearchExportStore {
   /** 감사·이용 내역이 실패해 만들기를 되돌릴 때 쓴다. */
   delete(exportId: string): Promise<void>;
   listPending(nowMs: number, limit: number): Promise<ResearchExportRecord[]>;
+  /** 만료된 레코드·거절 메타데이터를 지운다(배경 스윕, IR0419-01). 없는 저장소는 건너뛴다. */
+  deleteExpired?(nowMs: number): Promise<number>;
   countCreatedBetween(i: { accountId: string; fromMs: number; toMs: number }): Promise<number>;
   recordDenial(i: { accountId: string; atMs: number; problemType: string }): Promise<void>;
   countDeniedSince(i: { accountId: string; sinceMs: number }): Promise<number>;

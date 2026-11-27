@@ -85,10 +85,16 @@ const latin1 = (bytes: Uint8Array, from: number, to: number): string =>
 export class ResearchExports {
   /** 만들기 멱등 기록(같은 계정·작업·키). DB 판은 뒤 통합에서 idempotency_record로 바꾼다. */
   readonly #idem = new Map<string, { hash: string; exportId: string }>();
+  /** 같은 계정의 만들기를 한 번에 하나씩 처리한다(한도 확인과 put 사이의 경합을 닫는다). */
+  readonly #tails = new Map<string, Promise<void>>();
 
   constructor(private readonly d: ResearchExportsDeps) {}
 
   async request(actor: ResearchActor, body: RequestBody, idem?: ResearchIdempotency): Promise<ResearchExportRecord> {
+    return this.#serialize(actor.accountId, () => this.#doRequest(actor, body, idem));
+  }
+
+  async #doRequest(actor: ResearchActor, body: RequestBody, idem?: ResearchIdempotency): Promise<ResearchExportRecord> {
     const now = this.d.now();
     const idemKey = idem ? `${actor.accountId}\u0000${idem.key}` : null;
     if (idemKey && idem) {
@@ -96,7 +102,12 @@ export class ResearchExports {
       const hash = Buffer.from(idem.requestHash).toString('hex');
       if (seen) {
         if (seen.hash !== hash) throw new ResearchProblem('idempotency-key-reused', 422, '같은 멱등 키를 다른 요청에 썼습니다');
-        const replay = await this.d.store.get(seen.exportId);
+        let replay: ResearchExportRecord | null;
+        try {
+          replay = await this.d.store.get(seen.exportId);
+        } catch {
+          throw new ResearchProblem('dependency-unavailable', 503, '의존 서비스를 잠시 쓸 수 없습니다');
+        }
         if (replay) return replay;
       }
     }
@@ -109,14 +120,24 @@ export class ResearchExports {
       await this.#deny(actor, body, null, now, 'pseudonymization-review-pending', 403);
     }
 
-    const schedule = await this.d.schedule.get(body.eventId);
+    let schedule: { opensAtMs: number; saleEndsAtMs: number } | undefined;
+    try {
+      schedule = await this.d.schedule.get(body.eventId);
+    } catch {
+      throw new ResearchProblem('dependency-unavailable', 503, '의존 서비스를 잠시 쓸 수 없습니다');
+    }
     if (!schedule) await this.#deny(actor, body, null, now, 'about:blank', 422);
     const windowProblem = checkResearchWindow({ fromMs: body.fromMs, toMs: body.toMs, saleEndsAtMs: schedule!.saleEndsAtMs, nowMs: now });
     if (windowProblem) await this.#deny(actor, body, null, now, 'about:blank', 422);
 
     const dayStart = utcDayStart(now);
     const dayEnd = dayStart + DAY;
-    const createdToday = await this.d.store.countCreatedBetween({ accountId: actor.accountId, fromMs: dayStart, toMs: dayEnd });
+    let createdToday: number;
+    try {
+      createdToday = await this.d.store.countCreatedBetween({ accountId: actor.accountId, fromMs: dayStart, toMs: dayEnd });
+    } catch {
+      throw new ResearchProblem('dependency-unavailable', 503, '의존 서비스를 잠시 쓸 수 없습니다');
+    }
     if (researchQuotaExceeded(createdToday)) {
       const retryAfter = Math.max(1, Math.ceil((dayEnd - now) / 1000));
       await this.#deny(actor, body, null, now, 'about:blank', 429, retryAfter);
@@ -182,7 +203,7 @@ export class ResearchExports {
         if (problems) {
           failure = problems;
         } else {
-          await this.d.buffer.put(record.exportId, out.bytes, record.expiresAtMs);
+          // 성공 빌드도 이용 내역을 먼저 남기고 레코드를 READY로 바꾼다. 기록이 실패하면 PENDING으로 두고 다음 tick이 다시 한다.
           const ready: ResearchExportRecord = {
             ...record,
             status: 'READY',
@@ -191,30 +212,42 @@ export class ResearchExports {
             columns: [...RESEARCH_COLUMNS],
             failureType: null,
           };
-          await this.d.store.update(ready);
-          await this.d.log.append(
-            pseudonymizationLogRow({ record: ready, saleEndsAtMs: ready.saleEndsAtMs, outcome: 'READY', rowCount: ready.rowCount, nowMs }),
-          );
-          done += 1;
+          try {
+            await this.d.buffer.put(record.exportId, out.bytes, record.expiresAtMs);
+            await this.d.log.append(
+              pseudonymizationLogRow({ record: ready, saleEndsAtMs: ready.saleEndsAtMs, outcome: 'READY', rowCount: ready.rowCount, nowMs }),
+            );
+            await this.d.store.update(ready);
+            done += 1;
+          } catch {
+            // 버퍼·이용 내역·저장 중 하나가 실패하면 레코드는 PENDING 그대로다. 다음 tick이 다시 만든다.
+          }
           continue;
         }
       } catch {
         failure = 'SILVER_ERROR';
       }
 
+      // 실패도 감사·이용 내역을 먼저 남기고 레코드를 FAILED로 바꾼다. 기록이 실패하면 PENDING으로 두고 다시 시도한다.
       const failed: ResearchExportRecord = { ...record, status: 'FAILED', failureType: failure };
       try {
-        await this.d.store.update(failed);
-        await this.d.audit.append(
-          researchAuditRecord({ record: failed, outcome: 'FAILED', problemType: failure, actorRole: failed.createdByRole, nowMs }),
-        );
         await this.d.log.append(
           pseudonymizationLogRow({ record: failed, saleEndsAtMs: failed.saleEndsAtMs, outcome: 'FAILED', problemType: failure, rowCount: 0, nowMs }),
         );
+        await this.d.audit.append(
+          researchAuditRecord({ record: failed, outcome: 'FAILED', problemType: failure, actorRole: failed.createdByRole, nowMs }),
+        );
+        await this.d.store.update(failed);
+        done += 1;
       } catch {
-        // 실패 기록을 남기지 못해도 다음 레코드를 계속 처리한다. 상태는 FAILED로 남는다.
+        // 기록을 남기지 못했으므로 FAILED로 닫지 않는다. PENDING으로 남겨 다음 tick이 다시 한다.
       }
-      done += 1;
+    }
+    // 만료 레코드·메타데이터 정리(IR0419-01). 실패해도 다음 tick이 다시 한다.
+    try {
+      await this.d.store.deleteExpired?.(nowMs);
+    } catch {
+      // 정리 실패는 빌드 결과를 바꾸지 않는다.
     }
     return done;
   }
@@ -225,7 +258,12 @@ export class ResearchExports {
     fetch: { mode?: string; site?: string },
   ): Promise<{ record: ResearchExportRecord; bytes: Uint8Array }> {
     const now = this.d.now();
-    const record = await this.d.store.get(exportId);
+    let record: ResearchExportRecord | null;
+    try {
+      record = await this.d.store.get(exportId);
+    } catch {
+      throw new ResearchProblem('dependency-unavailable', 503, '의존 서비스를 잠시 쓸 수 없습니다');
+    }
     if (!record) throw new ResearchProblem('not-found', 404, '찾을 수 없습니다');
 
     const designations = await this.#designations(actor);
@@ -239,19 +277,46 @@ export class ResearchExports {
       await this.#deny(actor, record, record, now, 'pseudonym-handler-required', 403);
     }
 
+    if (now >= record.expiresAtMs) throw new ResearchProblem('not-found', 404, '찾을 수 없습니다');
     if (record.status === 'PENDING') {
       const retryAfter = Math.max(1, Math.ceil((record.expiresAtMs - now) / 1000));
       throw new ResearchProblem('research-export-not-ready', 409, '연구용 내보내기를 아직 만드는 중입니다', retryAfter);
     }
     if (record.status === 'FAILED') throw new ResearchProblem('not-found', 404, '찾을 수 없습니다');
-    const bytes = await this.d.buffer.get(record.exportId, now);
+    let bytes: Uint8Array | null;
+    try {
+      bytes = await this.d.buffer.get(record.exportId, now);
+    } catch {
+      throw new ResearchProblem('dependency-unavailable', 503, '의존 서비스를 잠시 쓸 수 없습니다');
+    }
     if (!bytes) throw new ResearchProblem('not-found', 404, '찾을 수 없습니다');
 
-    await this.d.log.append(
-      pseudonymizationLogRow({ record, saleEndsAtMs: record.saleEndsAtMs, outcome: 'RECEIVED', rowCount: record.rowCount, nowMs: now }),
-    );
-    await this.d.audit.append(researchAuditRecord({ record, outcome: 'RECEIVED', actorRole: actor.role, nowMs: now }));
+    try {
+      await this.d.log.append(
+        pseudonymizationLogRow({ record, saleEndsAtMs: record.saleEndsAtMs, outcome: 'RECEIVED', rowCount: record.rowCount, nowMs: now }),
+      );
+      await this.d.audit.append(researchAuditRecord({ record, outcome: 'RECEIVED', actorRole: actor.role, nowMs: now }));
+    } catch {
+      throw new ResearchProblem('dependency-unavailable', 503, '의존 서비스를 잠시 쓸 수 없습니다');
+    }
     return { record, bytes };
+  }
+
+  async #serialize<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.#tails.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = prev.then(() => gate);
+    this.#tails.set(key, tail);
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (this.#tails.get(key) === tail) this.#tails.delete(key);
+    }
   }
 
   async #designations(actor: ResearchActor): Promise<readonly string[]> {
@@ -312,4 +377,44 @@ export class ResearchExports {
     }
     throw new ResearchProblem(problemType, status, status === 429 ? '요청이 너무 많습니다' : '요청을 처리할 수 없습니다', retryAfter);
   }
+}
+
+export const RESEARCH_EXPORT_SWEEP_MS = 5_000;
+
+export interface ResearchExportSweep {
+  tick(): Promise<void>;
+  stop(): void;
+}
+
+/** PENDING 연구 내보내기를 주기적으로 buildDue에 넘긴다. main.ts가 서비스를 만든 뒤 켠다. */
+export function startResearchExportSweep(d: {
+  buildDue: (nowMs: number) => Promise<number>;
+  now: () => number;
+  intervalMs?: number;
+  onError?: (e: unknown) => void;
+}): ResearchExportSweep {
+  let stopped = false;
+  let running = false;
+  const tick = async (): Promise<void> => {
+    if (stopped || running) return;
+    running = true;
+    try {
+      await d.buildDue(d.now());
+    } catch (e) {
+      d.onError?.(e);
+    } finally {
+      running = false;
+    }
+  };
+  const timer = setInterval(() => {
+    void tick();
+  }, d.intervalMs ?? RESEARCH_EXPORT_SWEEP_MS);
+  if (typeof timer.unref === 'function') timer.unref();
+  return {
+    tick,
+    stop: () => {
+      stopped = true;
+      clearInterval(timer);
+    },
+  };
 }

@@ -25,6 +25,16 @@ export class MemoryResearchExportStore implements ResearchExportStore {
       .slice(0, limit)
       .map((r) => ({ ...r }));
   }
+  async deleteExpired(nowMs: number): Promise<number> {
+    let deleted = 0;
+    for (const [id, r] of this.records) {
+      if (r.expiresAtMs <= nowMs) {
+        this.records.delete(id);
+        deleted += 1;
+      }
+    }
+    return deleted;
+  }
   async countCreatedBetween(i: { accountId: string; fromMs: number; toMs: number }): Promise<number> {
     return [...this.records.values()].filter(
       (r) => r.createdBy === i.accountId && r.createdAtMs >= i.fromMs && r.createdAtMs < i.toMs,

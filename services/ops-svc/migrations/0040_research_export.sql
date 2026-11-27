@@ -50,3 +50,11 @@ CREATE TABLE IF NOT EXISTS pseudonymization_log (
 );
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS pseudonymization_log_event_purpose_idx ON pseudonymization_log (event_id, purpose);
+--> statement-breakpoint
+GRANT USAGE ON SCHEMA public TO ops_app;
+--> statement-breakpoint
+GRANT SELECT, INSERT, UPDATE ON research_export TO ops_app;
+--> statement-breakpoint
+GRANT SELECT, INSERT ON research_export_denial TO ops_app;
+--> statement-breakpoint
+GRANT SELECT, INSERT ON pseudonymization_log TO ops_app;

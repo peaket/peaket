@@ -188,8 +188,8 @@ export function researchQuery(i: { eventId: string; fromMs: number; toMs: number
 SELECT ${select}
 FROM events
 WHERE event_id = {eventId:String} AND t_ms >= {fromMs:Int64} AND t_ms < {toMs:Int64}
-FORMAT ArrowStream
-SETTINGS output_format_arrow_compression_method = 'none', output_format_arrow_low_cardinality_as_dictionary = 0`;
+SETTINGS output_format_arrow_compression_method = 'none', output_format_arrow_low_cardinality_as_dictionary = 0
+FORMAT ArrowStream`;
   return { sql, params: { eventId: i.eventId, fromMs: i.fromMs, toMs: i.toMs } };
 }
 

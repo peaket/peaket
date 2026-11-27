@@ -1,6 +1,6 @@
 // F-04-19 연구 내보내기 Drizzle 저장소(ops DB, 마이그레이션 0040). 바이트는 저장하지 않는다.
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, gt, gte, lt } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, lt, lte } from 'drizzle-orm';
 import type { Database } from '@peaket/platform';
 import type { ResearchExportRecord } from '../../domain/research-export.js';
 import type { ResearchExportStore } from '../../domain/ports.js';
@@ -89,6 +89,14 @@ export class DrizzleResearchExportStore implements ResearchExportStore {
       .orderBy(asc(researchExport.createdAt))
       .limit(limit);
     return rows.map(toRecord);
+  }
+
+  async deleteExpired(nowMs: number): Promise<number> {
+    const rows = await this.db.db
+      .delete(researchExport)
+      .where(lte(researchExport.expiresAt, new Date(nowMs)))
+      .returning({ id: researchExport.id });
+    return rows.length;
   }
 
   async countCreatedBetween(i: { accountId: string; fromMs: number; toMs: number }): Promise<number> {

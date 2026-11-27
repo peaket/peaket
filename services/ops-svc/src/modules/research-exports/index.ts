@@ -1,6 +1,6 @@
 // F-04-19 연구 내보내기 공개 면. 다른 컨텍스트·시험은 이 파일로만 가져온다.
 export { ResearchExportsModule, type ResearchExportsModuleDeps } from './research-exports.module.js';
-export { ResearchExports, ResearchProblem, type ResearchExportsDeps } from './application/research-exports.js';
+export { ResearchExports, ResearchProblem, startResearchExportSweep, RESEARCH_EXPORT_SWEEP_MS, type ResearchExportsDeps, type ResearchExportSweep, type ResearchIdempotency } from './application/research-exports.js';
 export { ResearchExportsController } from './inbound/research-exports.controller.js';
 export { MemoryResearchExportStore } from './adapters/memory-research-store.js';
 export { MemoryResearchExportBuffer } from './adapters/memory-buffer.js';

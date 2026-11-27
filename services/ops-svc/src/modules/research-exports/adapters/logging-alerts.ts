@@ -2,7 +2,10 @@
 import type { ResearchAlerts } from '../domain/ports.js';
 
 export class LoggingResearchAlerts implements ResearchAlerts {
-  constructor(private readonly log: (i: { kind: string; accountId: string; count: number; atMs: number; severity: string }) => void = () => undefined) {}
+  constructor(
+    private readonly log: (i: { kind: string; accountId: string; count: number; atMs: number; severity: string }) => void = (i) =>
+      void process.stdout.write(`${JSON.stringify({ level: 'info', service: 'ops-svc', ...i, kind: 'research_export_alert' })}\n`),
+  ) {}
   async raise(i: { kind: 'RESEARCH_EXPORT_DENIALS'; accountId: string; count: number; atMs: number; severity: 'SEV2' | 'SEV3' }): Promise<void> {
     this.log(i);
   }

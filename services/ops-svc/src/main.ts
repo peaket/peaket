@@ -31,7 +31,7 @@ import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts
 import { PromBotReviewSignals } from './modules/bot-review/index.js';
 import { botReviewLabelsFromEnv, botReviewSourceFromEnv } from './bot-review-wiring.js';
 import { realtimeTableFromEnv } from './rt-wiring.js';
-import { DrizzlePseudonymizationLog, DrizzleResearchExportStore, LoggingResearchAlerts, MemoryResearchExportBuffer, UnavailableResearchSilverSource, researchWiringFromEnv } from './modules/research-exports/index.js';
+import { DrizzlePseudonymizationLog, DrizzleResearchExportStore, LoggingResearchAlerts, MemoryResearchExportBuffer, ResearchExports, UnavailableResearchSilverSource, researchWiringFromEnv, startResearchExportSweep } from './modules/research-exports/index.js';
 import { HttpCoreContract } from './adapters/http-core-contract.js';
 import {
   DrizzleInvestigationStore,
@@ -340,6 +340,13 @@ const service = await createService({
     },
   }),
 });
+const researchSweep = research
+  ? startResearchExportSweep({
+      buildDue: (nowMs) => service.app.get(ResearchExports).buildDue(nowMs),
+      now: () => Date.now(),
+      onError: (err) => service.logger.error({ err }, 'research export sweep failed'),
+    })
+  : undefined;
 eventCancellationSignals.register(service.metrics.registry);
 botReviewSignals.register(service.metrics.registry);
 commandSignals.register(service.metrics.registry);
@@ -424,6 +431,7 @@ try {
 process.once('SIGTERM', () => {
   if (coreApplyTimer) clearInterval(coreApplyTimer);
   fraudActionSweep?.stop();
+  researchSweep?.stop();
   void (async () => {
     try {
       await consumers?.stop();
