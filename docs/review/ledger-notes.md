@@ -396,3 +396,11 @@ ADR-0373 결정 2의 '동결로 미검증'이다. 완성 판정에서 빼고 완
 - **실패·수정**: 첫 실행은 8/9 실패(`LOCK_BUSY`). `pg_try_advisory_lock`의 실제 결과 열 이름은 `pg_try_advisory_lock`인데 구현이 `locked`만 읽어 잠금을 못 잡은 결함이었다. `packages/platform/src/migrations.ts`에서 두 열을 모두 읽게 고친 뒤 9/9 통과. 플랫폼 단위 28/28도 유지.
 - **권한**: 실제 PostgreSQL에서 `GRANT MAINTAIN ON t TO m` → `has_table_privilege('m','t','MAINTAIN') = true`, `CREATE EXTENSION pgstattuple`·`GRANT EXECUTE` → `has_function_privilege(...) = true`. 컨테이너는 `docker rm -f`로 지웠고 남은 postgres 컨테이너·볼륨은 없다.
 - **남은 미실행**: identity-svc N-1 앱 통합 묶음, 실제 기존 운영 DB 이관, Squawk 실제 실행, Aurora·PgBouncer 연결, 30k/s·100만·K1/K2/K7 수치.
+
+## F-09-2 identity N-1 계약(2026-11-27)
+
+- **N-1 정의(소유자 결정)**: **N-1 = `713b522a7f4566a7b9ef047012783f9be50bf675`**(develop, 0000~0037, 38개), **migration = `0346eded88e7de8ba108c4288f5aa1c9cd478ffe`**(0038_scanner_session_device_name.sql). 출시 태그가 없어 "마이그레이션 직전 develop 커밋"을 N-1로 쓴다. 출발점 `1b552c61d`는 이미 0038을 포함해 N 스키마와 같으므로 쓰지 않는다.
+- **시험**: `services/identity-svc/test/n1-baseline.test.ts` 단위 3/3, `services/identity-svc/test-int/n1-compat.int.test.ts` 통합 4개. 계약은 `713b522a`의 저장소 코드가 보내던 로그인·세션 갱신/종료·관리 계정 로그인·pid/연락처 키 회전 SQL 모양을 고정한다.
+- **단위 결과**: N-1 파일 38개 SHA-256이 `manifest-713b522a.json`과 같고, 0037 변조와 `receivable_movement` 표 음성 대조가 둘 다 던졌다. 2026-11-27 10:27:30 통과.
+- **통합**: `미실행`. Docker 잠금 `lane4-F-08-5`(2026-11-27 09:54 take)가 쥐고 있어 `docker run`을 부르지 않았다. 실제 `713b522a` 앱 묶음을 돌리는 절차는 계획 §3.3에 설계만 했고, 실행 전에는 D-T8의 정본 행동을 완료로 세지 않는다.
+- **계약의 경계**: 앱 프로세스·gRPC/HTTP·업무 규칙·KMS·Valkey는 보지 않는다. DB 표·칸·값과 N↔N-1 양방향 읽기만 본다.
