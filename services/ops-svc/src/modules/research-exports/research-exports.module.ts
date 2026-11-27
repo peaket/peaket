@@ -25,6 +25,7 @@ export interface ResearchExportsModuleDeps {
   readonly identity: ResearchDesignations;
   readonly schedule: ResearchSchedule;
   readonly now: () => number;
+  readonly onCleanupError?: (e: unknown) => void;
 }
 
 @Module({})
@@ -41,6 +42,7 @@ export class ResearchExportsModule {
       identity: deps.identity,
       schedule: deps.schedule,
       now: deps.now,
+      ...(deps.onCleanupError ? { onCleanupError: deps.onCleanupError } : {}),
     });
     return {
       module: ResearchExportsModule,

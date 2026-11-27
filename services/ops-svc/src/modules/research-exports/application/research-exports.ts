@@ -60,6 +60,8 @@ export interface ResearchExportsDeps {
   identity: ResearchDesignations;
   schedule: ResearchSchedule;
   now: () => number;
+  /** 만료 정리 실패를 로그·지표로 남긴다. 없으면 stderr JSON 줄을 쓴다. */
+  onCleanupError?: (e: unknown) => void;
 }
 
 export interface ResearchIdempotency {
@@ -81,6 +83,11 @@ const utcDayStart = (nowMs: number): number => {
 
 const latin1 = (bytes: Uint8Array, from: number, to: number): string =>
   Buffer.from(bytes.subarray(from, to)).toString('latin1');
+
+const logCleanupError = (e: unknown): void => {
+  const message = e instanceof Error ? e.message : String(e);
+  process.stderr.write(`${JSON.stringify({ level: 'error', service: 'ops-svc', kind: 'research_export_cleanup_error', message })}\n`);
+};
 
 export class ResearchExports {
   /** 만들기 멱등 기록(같은 계정·작업·키). DB 판은 뒤 통합에서 idempotency_record로 바꾼다. */
@@ -243,11 +250,11 @@ export class ResearchExports {
         // 기록을 남기지 못했으므로 FAILED로 닫지 않는다. PENDING으로 남겨 다음 tick이 다시 한다.
       }
     }
-    // 만료 레코드·메타데이터 정리(IR0419-01). 실패해도 다음 tick이 다시 한다.
+    // 만료 레코드 정리(IR0419-01). 실패는 숨기지 않고 남기며 다음 tick이 다시 한다.
     try {
       await this.d.store.deleteExpired?.(nowMs);
-    } catch {
-      // 정리 실패는 빌드 결과를 바꾸지 않는다.
+    } catch (e) {
+      (this.d.onCleanupError ?? logCleanupError)(e);
     }
     return done;
   }

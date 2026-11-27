@@ -55,6 +55,9 @@ GRANT USAGE ON SCHEMA public TO ops_app;
 --> statement-breakpoint
 GRANT SELECT, INSERT, UPDATE ON research_export TO ops_app;
 --> statement-breakpoint
+-- 만료 정리는 research_export만 지운다. research_export_denial은 경보·감사용으로 보존한다.
+GRANT DELETE ON research_export TO ops_app;
+--> statement-breakpoint
 GRANT SELECT, INSERT ON research_export_denial TO ops_app;
 --> statement-breakpoint
 GRANT SELECT, INSERT ON pseudonymization_log TO ops_app;
