@@ -3,6 +3,15 @@
 - 2026-11-18 `docs/PROGRESS.md`의 같은 이름 절에서 옮겼다(ADR-0283 결정 1). 매 턴 읽는 PROGRESS를 가볍게 하려는 것이다. 갈래 1은 SEG 단계에서, 그 밖에는 이 목록을 고칠 때만 읽는다.
 
 - 새 맥락 리뷰의 중간·낮은 지적 가운데 그 단계에서 고치지 않은 것을 '단계 ID: 지적 한 줄(파일)' 꼴로 적는다(ADR-0190 결정 2).
+- F-09-6 구현 리뷰 IR096-05: 초대 수락 완료 유스케이스가 `recoveryCodesSaved`를 받지 않아 HTTP 컨트롤러 밖 호출은 보관 확인을 건너뛸 수 있다(identity `accept-admin-invitation.ts`, `admin-invitation.controller.ts`).
+- F-09-6 구현 리뷰 IR096-07: 메모리 관리 계정 저장소 `listRecoveryCodes`·`listPasskeys`가 동기 배열을 `as unknown as Promise`로 돌려준다. 고정 시험을 `await`로 고친 뒤 캐스트를 없앤다(identity `memory-admin-account-store.ts`).
+- F-09-6 구현 리뷰 IR096-08: 계획의 정본·기록이 빠졌다. identity §6·§12·§13, authz-matrix §6.1, devops §3·§4.4, data.md `admin_account`(0039 새 칸), ledger-notes, 이 파일의 RV-10·11a·11b·11d를 기록 커밋에서 맞춘다.
+- F-09-6 구현 리뷰 IR096-09: `HttpCorePromoterDirectory`의 404→false·2xx→true·그 밖 throw·`x-peaket-internal-token`을 보는 시험이 없다(ops `http-core-promoters.ts`).
+- F-09-6 구현 리뷰 IR096-10: Drizzle `markRemoved`·`expireInvites`가 `invite_step_*`·`invitation_accepted_at`을 지우지 않는다. 메모리 저장소와 짝을 맞춘다(identity `drizzle-admin-account-store.ts`).
+- F-09-6 구현 리뷰 IR096-11: 역할 변경 멱등 `#prior`가 대상 계정 감사에서 찾아 호출자 범위를 보지 않는다. guidelines §4의 '부른 계정 × 작업'으로 좁힌다(ops `admin-accounts.ts`).
+- F-09-6 구현 리뷰 IR096-12: 초대 수락 `beginTotp`가 주입된 시계를 넘기지 않아 `setTotpPending`의 `updated_at`이 `Date.now()`가 된다(identity `accept-admin-invitation.ts`).
+- F-09-6 시험 리뷰 잔여(RV096-06·09): 비밀번호 응답의 `Cache-Control: no-store` 미단언, 야간 이슈 시험이 따옴표 명령 치환·다음 줄 `then`을 받지 않는 낮은 잔여.
+- F-09-6 BAT-045 잔여(RV-10·11a·11b·11d): 세션 강제 종료 REST 재전송의 `already_done` 노출, 세션 브라우저·OS 빈 값, 지정 시각을 identity가 아니라 ops가 만듦, 승인 목록 `cursor` 무시.
 - PRF-136: 구매 세션 확인 경로(`StoredPurchaseSessions.advance`)의 좌석 Redis 메모리 부족 503이 `seat_lua_errors_total`에 세어지지 않는다(홀드·만료만 센다. 지표 script 라벨에 session이 없다, adapters/stored-purchase-sessions.ts).
 - PRF-136: queue-svc의 같은 대기표 다시 받기(ADMIT_LUA)가 자리 점수를 `ZADD XX GT 지금 + 5분`으로 올려, 시작된 세션도 최대 체류 끝 5분 안에 되풀이해 다시 받으면 자리가 최대 체류를 넘겨 산다(queue-svc adapters/admission-lua.ts. purchase-svc는 처음 최대 체류에 세션을 끝낸다).
 - PRF-135: 만료 반복의 BACKOFF와 경고 로그 간격을 단조 시계(`clock.monotonicMs()`)로 잰다(application/expiry-sweeper.ts, application/log-gate.ts, inventory.module.ts).
