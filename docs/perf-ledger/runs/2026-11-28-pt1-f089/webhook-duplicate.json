@@ -1,0 +1,9 @@
+{
+  "sent": 2,
+  "events": 1,
+  "duplicates": 2,
+  "dedupKey": "SIMULATOR:wh_781f4bcdc1e2fcfafcb8ab37",
+  "processed": 1,
+  "verdict": "pass",
+  "paymentKey": "tsim_ars0721685d0a22c16433"
+}

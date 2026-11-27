@@ -1,0 +1,68 @@
+{
+  "cpus": 8,
+  "memoryMi": 8192,
+  "stats": {
+    "cpuMeanPct": 28.2,
+    "cpuMaxPct": 84.3,
+    "memMaxPct": 26.4,
+    "memMaxBytes": 2271625216,
+    "samples": 98
+  },
+  "judge": {
+    "valid": false,
+    "reasons": [
+      "발생기가 반복을 시작하지 못함(dropped_iterations 841)",
+      "시나리오 오류 2511건"
+    ]
+  },
+  "scenarioErrors": 2511,
+  "dropped": 841,
+  "droppedByScenario": {
+    "main": 841
+  },
+  "vusMax": 1987,
+  "perVuBytes": 1143244,
+  "marks": {
+    "main_start": 1795805706520,
+    "main_end": 1795805806511
+  },
+  "startedS": 1795805704,
+  "generators": 1,
+  "loadStartMs": 1795805704772,
+  "startSkewS": 0,
+  "cpuMeanPctMax": 28.2,
+  "cpuMaxPctMax": 84.3,
+  "memMaxPctMax": 26.4,
+  "each": [
+    {
+      "cpus": 8,
+      "memoryMi": 8192,
+      "stats": {
+        "cpuMeanPct": 28.2,
+        "cpuMaxPct": 84.3,
+        "memMaxPct": 26.4,
+        "memMaxBytes": 2271625216,
+        "samples": 98
+      },
+      "judge": {
+        "valid": false,
+        "reasons": [
+          "발생기가 반복을 시작하지 못함(dropped_iterations 841)",
+          "시나리오 오류 2511건"
+        ]
+      },
+      "scenarioErrors": 2511,
+      "dropped": 841,
+      "droppedByScenario": {
+        "main": 841
+      },
+      "vusMax": 1987,
+      "perVuBytes": 1143244,
+      "marks": {
+        "main_start": 1795805706520,
+        "main_end": 1795805806511
+      },
+      "startedS": 1795805704
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "run_id": "2026-11-28-relay-fault-f089",
+  "kpi": "V-T27",
+  "version": "v1",
+  "profile": "local-100k",
+  "scale": {
+    "users": null,
+    "arrival_rps": 12600,
+    "duration_s": 1800,
+    "warmup_s": 0,
+    "baseline_duration_s": 600
+  },
+  "scenario": {
+    "path": "manual: outbox INSERT…SELECT writer + f089_received consumer",
+    "args": "180 batches × 126,000 rows, 20,000 hot keys, topic f089.relay.main.v1",
+    "open_model": true
+  },
+  "commit": {
+    "code": "618f3b0420849d72f78e57c7b666c904d33e9760",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": true,
+  "paired_run": {
+    "run_id": "2026-11-28-relay-baseline-f089",
+    "note": "릴레이 끈 10분 기준(수동, 장부 폴더 없음)"
+  },
+  "host": {
+    "logical_cpus": 32,
+    "memory_mib": 32472,
+    "docker_server": "29.8.1",
+    "kind": "lane4-f09",
+    "v1_bundle_memory_mi": 2048,
+    "kafka_memory_limit": "4Gi",
+    "relay_memory_limit": "1Gi"
+  },
+  "generator": {
+    "description": "host Node pg writer, 180 batches × 126,000 rows, 12,614.8 rows/s, dropped 0(발생기 자체 없음)",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-27T17:21:33.968Z",
+  "ended_at": "2026-11-27T17:51:33.968Z",
+  "k6": null,
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "timeline": "timeline.csv",
+    "faults": "faults.ndjson",
+    "evidence": "f089-evidence.json",
+    "db_cpu": "db-cpu.csv",
+    "generator": "generator.csv",
+    "host": "host.json",
+    "pt5_attempts": [
+      "pt5-attempt-1-summary.json",
+      "pt5-attempt-2-summary.json"
+    ]
+  },
+  "valid": false,
+  "invalid_reason": "V-T28 ①②③ 주입이 적용되지 않았다(릴레이 파드에 kill 실행 파일 없음). 같은 실행 P-T5 결제 부하가 없고(실행기 --prom-url 인자 오류), 리더 변경 시간이 없다. V-T27 부하·지연·DB CPU·유실/순서 증거 자체는 유효하다.",
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함(부분)",
+  "verdict": "invalid",
+  "notes": "V-T27: f089_sent 22,680,000 = f089_received 22,680,000, missing 0, order 0, eventKey 0, maxKeyRepeats 1,260, outbox unsent 0. 릴레이 lag p50 57.786s·p99 147.362s·max 152.269s, batch p99 4.156s, published 평균 11,950/s. DB CPU 99.08%(1코어) vs 기준 30.0%(+69.1%p). 트리거 relay-lag·batch·db-cpu. 릴레이 재시작 0, Kafka 재시작 0, 토픽 f089.relay.main.v1 6파티션 유지. V-T28은 주입기 결함(exec kill 없음)으로 applied=false 3줄이며 무효다. P-T5는 같은 실행에서 못 쟀고, 별도 300/s 두 번은 발생기 dropped 14,309·17,735로 무효다. 소비자 재시작으로 생긴 중복 2,413행은 id 기준으로 지우고 원 수를 보고서에 적었다."
+}

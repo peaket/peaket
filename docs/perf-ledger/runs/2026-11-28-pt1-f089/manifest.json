@@ -1,0 +1,57 @@
+{
+  "run_id": "2026-11-28-pt1-f089",
+  "kpi": "P-T1",
+  "version": "v1",
+  "profile": "local-100k",
+  "scale": {
+    "users": 10102,
+    "arrival_rps": 100,
+    "duration_s": 100,
+    "warmup_s": 1
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v1-payment.js",
+    "args": "fault_drop_pct=5 fault_delay_pct=2, generators=2(1차)·1(2차)",
+    "open_model": true
+  },
+  "commit": {
+    "code": "618f3b0420849d72f78e57c7b666c904d33e9760",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": true,
+  "paired_run": null,
+  "host": {
+    "logical_cpus": 32,
+    "memory_mib": 32472,
+    "docker_server": "29.8.1",
+    "kind": "lane4-f09"
+  },
+  "generator": {
+    "description": "k6 1.4.2, 발생기 1대(CPU 8·메모리 8192Mi), dropped 841(2차)·1,214(1차), VU 최대 1,987(2차)·1,215(1차)",
+    "dropped_iterations": 841
+  },
+  "started_at": "2026-11-28T09:41:00Z",
+  "ended_at": "2026-11-28T09:58:00Z",
+  "k6": null,
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "summary": "summary.json",
+    "attempt1": "attempt-1-summary.json",
+    "invariants": "invariants-attempt-1.csv",
+    "webhook": "webhook-duplicate.json",
+    "reconcile": "reconcile.json",
+    "toxics": "toxics.ndjson",
+    "host": "host.json"
+  },
+  "valid": false,
+  "invalid_reason": "발생기 dropped 841(2차)·1,214(1차)로 무효다. Toxiproxy 지연·시간 초과·연결 끊김 토글도 적용되지 않았다(watcher가 UTF-16 로그를 못 읽음). 불변식 PASS 15·SKIPPED 2(S3·P5), P6 0, 시뮬레이터 원장 10,899=10,899·missing 0·duplicatePayments 0, 웹훅 중복 sent=2·processed=1은 별도로 확인했다.",
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함(부분)",
+  "verdict": "invalid",
+  "notes": "P-T1 추가 몫: 1차(2발생기, 1024Mi) dropped 1,214·오류 608, 2차(1발생기, 8192Mi) dropped 841·오류 2,511. 결제 확정 p99 19,474.5ms(2차)·13,276.8ms(1차)로 3초 목표를 넘는다. 불변식은 1차 PASS 15·SKIPPED 2(S3·P5), P6 0. 시뮬레이터 원장 대조는 누적 10,899/10,899·missing 0·duplicatePayments 0. 웹훅 중복은 같은 transmission-id 2회 보내 receipt 1행(sent=2·processed=1). Toxiproxy는 프록시 생성·직접 조회까지 확인했으나 토글은 적용하지 못했다. ticket-svc 5분 중단·이중 발권·일일 대사는 미측정(S3·P5 SKIPPED)."
+}

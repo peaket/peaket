@@ -1,0 +1,11 @@
+Error: Command failed: D:/ticketpass-freeze-F-08-9/.cache/peaket-tools/kubectl-v1.35.8/kubectl.exe --kubeconfig D:/ticketpass-freeze-F-08-9/.cache/peaket-tools/kubeconfig-lane4-f09 -n v1 exec purchase-svc-outbox-relay-7c7c59d5cf-ptbkb -- kill -STOP 1
+error: Internal error occurred: Internal error occurred: error executing command in container: failed to exec in container: failed to start exec "0dd98f27415456b3a9fb91084c0a5b6530b5ee10f9b795f9a540b07c80b92974": OCI runtime exec failed: exec failed: unable to start container process: exec: "kill": executable file not found in $PATH
+
+    at genericNodeError (node:internal/errors:985:15)
+    at wrappedFn (node:internal/errors:539:14)
+    at checkExecSyncError (node:child_process:925:11)
+    at execFileSync (node:child_process:961:15)
+    at kc (file:///D:/ticketpass-freeze-F-08-9/.cache/peaket-f09/run2/faults.mjs:17:29)
+    at leaderStop (file:///D:/ticketpass-freeze-F-08-9/.cache/peaket-f09/run2/faults.mjs:30:3)
+    at Object.fn (file:///D:/ticketpass-freeze-F-08-9/.cache/peaket-f09/run2/faults.mjs:128:26)
+    at file:///D:/ticketpass-freeze-F-08-9/.cache/peaket-f09/run2/faults.mjs:139:31

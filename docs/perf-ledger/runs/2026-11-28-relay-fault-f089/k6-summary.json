@@ -1,0 +1,8 @@
+{
+  "same_run": false,
+  "reason": "P-T5 같은 실행 실행기 인자 오류(--prom-url without --record)와 별도 300/s 발생기 dropped",
+  "attempts": [
+    "pt5-attempt-1-summary.json",
+    "pt5-attempt-2-summary.json"
+  ]
+}

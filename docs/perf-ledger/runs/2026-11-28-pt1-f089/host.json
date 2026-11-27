@@ -1,0 +1,12 @@
+{
+    "logical_cpus":  32,
+    "cpu_name":  "Intel(R) Core(TM) i9-14900HX",
+    "total_memory_mib":  32472,
+    "free_memory_mib":  2467,
+    "os":  "Microsoft Windows 11 Home",
+    "docker_server":  "29.8.1",
+    "kind":  "lane4-f09",
+    "v1_bundle_memory_mi":  2048,
+    "kafka_memory_limit":  "4Gi",
+    "relay_memory_limit":  "1Gi"
+}

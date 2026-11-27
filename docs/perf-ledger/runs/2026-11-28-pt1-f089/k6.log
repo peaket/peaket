@@ -1,0 +1,78 @@
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+Request Failed
+{
+  "http_reqs": {
+    "count": 22079,
+    "rate": 220.79
+  },
+  "http_req_duration": {
+    "p(99)": 6225.152651800001,
+    "p(99.9)": 19085.416338540137,
+    "avg": 772.6188975875732,
+    "min": 0.217583,
+    "med": 382.855316,
+    "max": 19760.474074,
+    "p(90)": 1669.5425706,
+    "p(95)": 2918.1100358999993
+  },
+  "http_req_failed": {
+    "fails": 18550,
+    "rate": 0.15983513746093572,
+    "passes": 3529
+  },
+  "dropped_iterations": {
+    "rate": 6.925476312876024,
+    "count": 841
+  }
+}
