@@ -1,6 +1,6 @@
 # 갈래 1 — 마지막 상태(2026-11-15, R-591)
 
-- **F-09-11 정적 구현(2026-11-27)**: 카나리 `ClusterAnalysisTemplate` 3개·적용 Application·경보 3개, 차트 롤링 opt-in·PDB `minAvailable`, admission-ctrl 3복제·그림자 워크로드·`shadowTick`/`startPlanOf`/읽기 전용 `activeEvents`. f0911 10/10·shadow 1/1·chart 64/64·platform 5/5·admission 414/414, lint·doc-check·ledger·release-scope·docker-timeouts·alert-check 통과. 실제 클러스터·Argo 분석·리더 교체·그림자 트래픽은 미실행. 계획 `docs/review/plans/F-09-11.md`, 기록 `docs/review/measurements/F-09-11.md`.
+- **F-09-11 정적 구현(2026-11-27)**: 카나리 `ClusterAnalysisTemplate` 3개·적용 Application·경보 3개, 차트 롤링 opt-in·PDB `minAvailable`, admission-ctrl 3복제·그림자 워크로드·`shadowTick`/`startPlanOf`/읽기 전용 `activeEvents`. f0911 10/10·shadow 1/1·chart 64/64·platform 5/5·admission 414/414, lint·doc-check·ledger·release-scope·docker-timeouts·alert-check 통과. 통합 시험 `F0911-IT-01`: Docker 잠금 `docker`(2026-11-27T09:02:23+09:00~09:03:24+09:00)에서 `leader-store.int` 대상 1/1, 전체 재실행 37/37. 실제 클러스터·Argo 분석·리더 교체·그림자 트래픽은 미실행. 계획 `docs/review/plans/F-09-11.md`, 기록 `docs/review/measurements/F-09-11.md`.
 
 - **2026-11-18 갈래 다섯(ADR-0286)**: 배포 기반(BAT-075~085)·실시간 전파(BAT-052)·관측 나머지(BAT-245~275)는 갈래 4, 측정 창은 갈래 5, 구간 마무리(SEG)는 전체 감독으로 옮겼다. 갈래 1은 임계 경로(서비스 분리 → 관측 핵심 → 분석 → 사후 포렌식)만 한다. 진행 기록은 그대로 `docs/PROGRESS.md`다. 첫 바퀴 ADR 번호는 0287~0289(`docs/lanes/coord.md`).
 - 갈래 1의 정본 진행 기록은 `docs/PROGRESS.md`다(ADR-0190 결정 3). 이 파일은 마지막 상태만 짧게 남긴다.

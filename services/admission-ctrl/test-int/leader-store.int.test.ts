@@ -355,15 +355,20 @@ test('[ASVS v5.0.0-15.4.2] 리더의닫기도세대키를보고_장애전환뒤�
   expect(String(await cmd(keys.batchDone(e), ['HGET', keys.batchDone(e), '1']))).toBe('43:2:2');
 });
 
-test('진행중인회차목록은점수(판매종료+1일)가지난회차를지우고_남은회차를준다', async () => {
+test('진행중인회차목록은읽기전용이라만료회차를남기고_pruneEvents가지운다', async () => {
   const a = newEvent();
   const b = newEvent();
   const now = Date.now();
   await cmd(keys.events(), ['ZADD', keys.events(), String(now + DAY), a, String(now - 1), b]);
+  // activeEvents는 그림자도 읽는 읽기 전용 경로다. 만료 회차를 지우지 않는다
   const ids = await store.activeEvents(now);
   expect(ids).toContain(a);
   expect(ids).not.toContain(b);
+  expect(await cmd(keys.events(), ['ZSCORE', keys.events(), b])).not.toBeNull();
+  // 리더만 부르는 pruneEvents가 만료 회차를 지운다
+  await store.pruneEvents(now);
   expect(await cmd(keys.events(), ['ZSCORE', keys.events(), b])).toBeNull();
+  expect(await store.activeEvents(now)).toContain(a);
 });
 
 test('리더상태는운영자목표와수동고정만료_입장일시정지·판매일시정지·판매중지를읽는다', async () => {
