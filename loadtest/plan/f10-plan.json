@@ -1,0 +1,460 @@
+{
+  "plan": "f10-split-compare",
+  "title": "F-08-10 서비스 분리 효과 비교(동결 로컬 트랙, V-T18)",
+  "created": "2026-11-27",
+  "basis": [
+    "docs/review/plans/F-08-10.md 6.2·6.3·6.4·11절",
+    "docs/verification.md §3.8(세 구성 비교)·V-T18",
+    "docs/perf-ledger.md §2.2 experiment·§3 6·7번·§4 local-10k",
+    "docs/planning/02-requirements.md NFR-001·NFR-005",
+    "ADR-0096·ADR-0007·ADR-0262·ADR-0373·ADR-0386"
+  ],
+  "state_file": ".cache/peaket-f10/state.json",
+  "start_gate": "WINDOW-F0810: 감독이 측정 창을 연다(계획 2절 4·11절). 창이 열리기 전에는 next도 실행하지 않는다.",
+  "gates": {
+    "WINDOW-F0810": "감독이 측정 창을 연다"
+  },
+  "rules": [
+    "한 번에 한 run만 돈다. 실행 사이 1분 쉰다(앞 실행의 부하가 가라앉게).",
+    "실패·무효·미측정·skip은 통과가 아니다. done의 result는 pass·fail·invalid 가운데 하나이고 pass만 통과다.",
+    "측정 중에는 다른 시험·빌드를 하지 않고, 측정 단계 커밋에서 node tools/ci/records.mjs를 돌리지 않는다.",
+    "Docker 잠금은 docker-all 두 자리다: C:/Program Files/Git/bin/bash.exe D:/ticketpass-locks/lock.sh take docker-all lane4-F-08-10. 창이 끝나면 drop docker-all lane4-F-08-10.",
+    "kind 클러스터 이름은 lane4-f10, kubeconfig는 .cache/peaket-tools/kubeconfig-lane4-f10이다.",
+    "진입 100·120%의 --entry-max-rate는 F-08-2 MSR-020의 유효 실행 ID·값을 성능 장부에서 확인해 bat025-plan.mjs --plan loadtest/plan/f10-plan.json set entryRate <값>으로 채운다. 유효한 값이 없으면 100·120% 실행은 skip하고 미측정으로 적는다.",
+    "세 구성 가운데 (가) 한 프로세스 합본과 (나) 역할별 배포만 잰다. (다) 10개 서비스는 로컬 v1 무대에 배포가 없어 계획에 넣지 않고 미측정으로 적는다. V-T18은 부분이다.",
+    "F-08-9의 무효·부분 값을 비교 결과로 쓰지 않는다. F-08-8의 K1·K2·K7, F-08-5·F-08-6의 몫을 다시 재지 않는다.",
+    "측정 전에 수치를 통과로 적지 않는다. 이 계획의 결과는 측정 창 뒤에만 적는다."
+  ],
+  "environment": {
+    "stage": "kind lane4-f10 하나. cluster.mjs up → observability → v1 --redis-tls on --replicas 3 --memory-mi 2048. 합본은 compare-stage.mjs apply --config bundle로 single 모드·파드 CPU 4·메모리 2GiB, 역할별은 by-role로 역할마다 복제 3·CPU 1·메모리 512Mi.",
+    "prometheus": "node tools/local/cluster.mjs prometheus (127.0.0.1:9090). 측정 중에는 다른 시험을 돌리지 않는다.",
+    "generator": "k6 1.4.2 이미지를 kind 안 발생기 파드로 띄운다. 결제 300 TPS와 진입 부하를 같은 시작 표시로 함께 보낸다.",
+    "pc": "Docker Desktop CPU 32·메모리 24GiB(2026-11-23 확인). 측정 전에 C:·D: 여유와 docker info를 확인한다."
+  },
+  "runs": [
+    {
+      "n": 1,
+      "gate": "WINDOW-F0810",
+      "key": "w2-stage",
+      "group": "무대",
+      "title": "kind·관측·v1 2GiB·합본 single·Prometheus",
+      "estimate_min": 50,
+      "stage": "stage",
+      "conditions": "Docker 잠금 docker-all lane4-F-08-10, kind lane4-f10, v1 복제 3·2GiB, 합본 single, Prometheus 127.0.0.1:9090.",
+      "commands": [
+        { "label": "Docker 잠금(두 자리)", "argv": ["C:/PROGRA~1/Git/bin/bash.exe", "D:/ticketpass-locks/lock.sh", "take", "docker-all", "lane4-F-08-10"] },
+        { "label": "kind 클러스터", "argv": ["node", "tools/local/cluster.mjs", "up"] },
+        { "label": "관측 묶음", "argv": ["node", "tools/local/cluster.mjs", "observability"] },
+        { "label": "v1 무대 2GiB", "argv": ["node", "tools/local/cluster.mjs", "v1", "--redis-tls", "on", "--replicas", "3", "--memory-mi", "2048"] },
+        { "label": "합본 single 무대", "argv": ["node", "tools/local/compare-stage.mjs", "apply", "--config", "bundle", "--replicas", "3"] },
+        { "label": "Prometheus", "argv": ["node", "tools/local/cluster.mjs", "prometheus"] }
+      ],
+      "criteria": [
+        "계획 6.1: kind lane4-f10·관측·v1 2GiB·합본 single·Prometheus",
+        "계획 2절 3: 합본 파드 CPU 4·메모리 2GiB, 복제 3"
+      ],
+      "ledger": "무대 준비(장부 없음)",
+      "artifact": ".cache/peaket-f10/stage/"
+    },
+    {
+      "n": 2,
+      "gate": "WINDOW-F0810",
+      "key": "w2-bundle-none-r1",
+      "group": "합본",
+      "title": "합본 × 진입 없음 × 1회",
+      "estimate_min": 5,
+      "stage": "bundle",
+      "conditions": "V-T18 비교: bundle × 진입 0% × 1회. 결제 300 TPS만. 같은 코드·자원 합계.",
+      "commands": [
+        { "label": "합본 진입 없음 1회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "bundle", "--entry", "none", "--rep", "1", "--payment-tps", "300", "--record", "--run-id", "2026-11-27-split-bundle-none-r1-f0810", "--out", ".cache/peaket-f10/runs/bundle-none-r1", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/bundle-none-r1/"
+    },
+    {
+      "n": 3,
+      "gate": "WINDOW-F0810",
+      "key": "w2-bundle-none-r2",
+      "group": "합본",
+      "title": "합본 × 진입 없음 × 2회",
+      "estimate_min": 5,
+      "stage": "bundle",
+      "conditions": "V-T18 비교: bundle × 진입 0% × 2회. 결제 300 TPS만. 같은 코드·자원 합계.",
+      "commands": [
+        { "label": "합본 진입 없음 2회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "bundle", "--entry", "none", "--rep", "2", "--payment-tps", "300", "--record", "--run-id", "2026-11-27-split-bundle-none-r2-f0810", "--out", ".cache/peaket-f10/runs/bundle-none-r2", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/bundle-none-r2/"
+    },
+    {
+      "n": 4,
+      "gate": "WINDOW-F0810",
+      "key": "w2-bundle-none-r3",
+      "group": "합본",
+      "title": "합본 × 진입 없음 × 3회",
+      "estimate_min": 5,
+      "stage": "bundle",
+      "conditions": "V-T18 비교: bundle × 진입 0% × 3회. 결제 300 TPS만. 같은 코드·자원 합계.",
+      "commands": [
+        { "label": "합본 진입 없음 3회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "bundle", "--entry", "none", "--rep", "3", "--payment-tps", "300", "--record", "--run-id", "2026-11-27-split-bundle-none-r3-f0810", "--out", ".cache/peaket-f10/runs/bundle-none-r3", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/bundle-none-r3/"
+    },
+    {
+      "n": 5,
+      "gate": "WINDOW-F0810",
+      "key": "w2-bundle-100-r1",
+      "group": "합본",
+      "title": "합본 × 진입 100% × 1회",
+      "estimate_min": 5,
+      "stage": "bundle",
+      "conditions": "V-T18 비교: bundle × 진입 100% × 1회. 결제 300 TPS, 진입 도착률은 F-08-2 {entryRate} 인용. 값이 없으면 skip.",
+      "commands": [
+        { "label": "합본 진입 100% 1회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "bundle", "--entry", "100", "--rep", "1", "--payment-tps", "300", "--entry-max-rate", "{entryRate}", "--record", "--run-id", "2026-11-27-split-bundle-100-r1-f0810", "--out", ".cache/peaket-f10/runs/bundle-100-r1", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), 진입 p99·오류율(NFR-001), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/bundle-100-r1/"
+    },
+    {
+      "n": 6,
+      "gate": "WINDOW-F0810",
+      "key": "w2-bundle-100-r2",
+      "group": "합본",
+      "title": "합본 × 진입 100% × 2회",
+      "estimate_min": 5,
+      "stage": "bundle",
+      "conditions": "V-T18 비교: bundle × 진입 100% × 2회. 결제 300 TPS, 진입 도착률은 F-08-2 {entryRate} 인용. 값이 없으면 skip.",
+      "commands": [
+        { "label": "합본 진입 100% 2회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "bundle", "--entry", "100", "--rep", "2", "--payment-tps", "300", "--entry-max-rate", "{entryRate}", "--record", "--run-id", "2026-11-27-split-bundle-100-r2-f0810", "--out", ".cache/peaket-f10/runs/bundle-100-r2", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), 진입 p99·오류율(NFR-001), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/bundle-100-r2/"
+    },
+    {
+      "n": 7,
+      "gate": "WINDOW-F0810",
+      "key": "w2-bundle-100-r3",
+      "group": "합본",
+      "title": "합본 × 진입 100% × 3회",
+      "estimate_min": 5,
+      "stage": "bundle",
+      "conditions": "V-T18 비교: bundle × 진입 100% × 3회. 결제 300 TPS, 진입 도착률은 F-08-2 {entryRate} 인용. 값이 없으면 skip.",
+      "commands": [
+        { "label": "합본 진입 100% 3회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "bundle", "--entry", "100", "--rep", "3", "--payment-tps", "300", "--entry-max-rate", "{entryRate}", "--record", "--run-id", "2026-11-27-split-bundle-100-r3-f0810", "--out", ".cache/peaket-f10/runs/bundle-100-r3", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), 진입 p99·오류율(NFR-001), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/bundle-100-r3/"
+    },
+    {
+      "n": 8,
+      "gate": "WINDOW-F0810",
+      "key": "w2-bundle-120-r1",
+      "group": "합본",
+      "title": "합본 × 진입 120% × 1회",
+      "estimate_min": 5,
+      "stage": "bundle",
+      "conditions": "V-T18 비교: bundle × 진입 120% × 1회. 결제 300 TPS, 진입 도착률은 F-08-2 {entryRate}의 1.2배. 값이 없으면 skip.",
+      "commands": [
+        { "label": "합본 진입 120% 1회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "bundle", "--entry", "120", "--rep", "1", "--payment-tps", "300", "--entry-max-rate", "{entryRate}", "--record", "--run-id", "2026-11-27-split-bundle-120-r1-f0810", "--out", ".cache/peaket-f10/runs/bundle-120-r1", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), 진입 p99·오류율(NFR-001), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/bundle-120-r1/"
+    },
+    {
+      "n": 9,
+      "gate": "WINDOW-F0810",
+      "key": "w2-bundle-120-r2",
+      "group": "합본",
+      "title": "합본 × 진입 120% × 2회",
+      "estimate_min": 5,
+      "stage": "bundle",
+      "conditions": "V-T18 비교: bundle × 진입 120% × 2회. 결제 300 TPS, 진입 도착률은 F-08-2 {entryRate}의 1.2배. 값이 없으면 skip.",
+      "commands": [
+        { "label": "합본 진입 120% 2회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "bundle", "--entry", "120", "--rep", "2", "--payment-tps", "300", "--entry-max-rate", "{entryRate}", "--record", "--run-id", "2026-11-27-split-bundle-120-r2-f0810", "--out", ".cache/peaket-f10/runs/bundle-120-r2", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), 진입 p99·오류율(NFR-001), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/bundle-120-r2/"
+    },
+    {
+      "n": 10,
+      "gate": "WINDOW-F0810",
+      "key": "w2-bundle-120-r3",
+      "group": "합본",
+      "title": "합본 × 진입 120% × 3회",
+      "estimate_min": 5,
+      "stage": "bundle",
+      "conditions": "V-T18 비교: bundle × 진입 120% × 3회. 결제 300 TPS, 진입 도착률은 F-08-2 {entryRate}의 1.2배. 값이 없으면 skip.",
+      "commands": [
+        { "label": "합본 진입 120% 3회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "bundle", "--entry", "120", "--rep", "3", "--payment-tps", "300", "--entry-max-rate", "{entryRate}", "--record", "--run-id", "2026-11-27-split-bundle-120-r3-f0810", "--out", ".cache/peaket-f10/runs/bundle-120-r3", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), 진입 p99·오류율(NFR-001), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/bundle-120-r3/"
+    },
+    {
+      "n": 11,
+      "gate": "WINDOW-F0810",
+      "key": "w2-stage-by-role",
+      "group": "무대",
+      "title": "역할별 배포로 전환·Ready 확인",
+      "estimate_min": 15,
+      "stage": "stage",
+      "conditions": "같은 저장소·시드. 역할별 Deployment 4, 각 복제 3·CPU 1·메모리 512Mi. Service queue-svc·purchase-svc·payment-svc.",
+      "commands": [
+        { "label": "역할별 배포", "argv": ["node", "tools/local/compare-stage.mjs", "apply", "--config", "by-role", "--replicas", "3"] }
+      ],
+      "criteria": [
+        "계획 6.1: (나) 역할별 배포, 네 역할 Ready, 같은 자원 합계",
+        "계획 2절 3: 역할마다 CPU 1·메모리 512Mi, 복제 3"
+      ],
+      "ledger": "무대 준비(장부 없음)",
+      "artifact": ".cache/peaket-f10/stage/by-role/"
+    },
+    {
+      "n": 12,
+      "gate": "WINDOW-F0810",
+      "key": "w2-by-role-none-r1",
+      "group": "역할별",
+      "title": "역할별 × 진입 없음 × 1회",
+      "estimate_min": 5,
+      "stage": "by-role",
+      "conditions": "V-T18 비교: by-role × 진입 0% × 1회. 결제 300 TPS만. 같은 코드·자원 합계.",
+      "commands": [
+        { "label": "역할별 진입 없음 1회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "by-role", "--entry", "none", "--rep", "1", "--payment-tps", "300", "--record", "--run-id", "2026-11-27-split-by-role-none-r1-f0810", "--out", ".cache/peaket-f10/runs/by-role-none-r1", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/by-role-none-r1/"
+    },
+    {
+      "n": 13,
+      "gate": "WINDOW-F0810",
+      "key": "w2-by-role-none-r2",
+      "group": "역할별",
+      "title": "역할별 × 진입 없음 × 2회",
+      "estimate_min": 5,
+      "stage": "by-role",
+      "conditions": "V-T18 비교: by-role × 진입 0% × 2회. 결제 300 TPS만. 같은 코드·자원 합계.",
+      "commands": [
+        { "label": "역할별 진입 없음 2회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "by-role", "--entry", "none", "--rep", "2", "--payment-tps", "300", "--record", "--run-id", "2026-11-27-split-by-role-none-r2-f0810", "--out", ".cache/peaket-f10/runs/by-role-none-r2", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/by-role-none-r2/"
+    },
+    {
+      "n": 14,
+      "gate": "WINDOW-F0810",
+      "key": "w2-by-role-none-r3",
+      "group": "역할별",
+      "title": "역할별 × 진입 없음 × 3회",
+      "estimate_min": 5,
+      "stage": "by-role",
+      "conditions": "V-T18 비교: by-role × 진입 0% × 3회. 결제 300 TPS만. 같은 코드·자원 합계.",
+      "commands": [
+        { "label": "역할별 진입 없음 3회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "by-role", "--entry", "none", "--rep", "3", "--payment-tps", "300", "--record", "--run-id", "2026-11-27-split-by-role-none-r3-f0810", "--out", ".cache/peaket-f10/runs/by-role-none-r3", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/by-role-none-r3/"
+    },
+    {
+      "n": 15,
+      "gate": "WINDOW-F0810",
+      "key": "w2-by-role-100-r1",
+      "group": "역할별",
+      "title": "역할별 × 진입 100% × 1회",
+      "estimate_min": 5,
+      "stage": "by-role",
+      "conditions": "V-T18 비교: by-role × 진입 100% × 1회. 결제 300 TPS, 진입 도착률은 F-08-2 {entryRate} 인용. 값이 없으면 skip.",
+      "commands": [
+        { "label": "역할별 진입 100% 1회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "by-role", "--entry", "100", "--rep", "1", "--payment-tps", "300", "--entry-max-rate", "{entryRate}", "--record", "--run-id", "2026-11-27-split-by-role-100-r1-f0810", "--out", ".cache/peaket-f10/runs/by-role-100-r1", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), 진입 p99·오류율(NFR-001), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/by-role-100-r1/"
+    },
+    {
+      "n": 16,
+      "gate": "WINDOW-F0810",
+      "key": "w2-by-role-100-r2",
+      "group": "역할별",
+      "title": "역할별 × 진입 100% × 2회",
+      "estimate_min": 5,
+      "stage": "by-role",
+      "conditions": "V-T18 비교: by-role × 진입 100% × 2회. 결제 300 TPS, 진입 도착률은 F-08-2 {entryRate} 인용. 값이 없으면 skip.",
+      "commands": [
+        { "label": "역할별 진입 100% 2회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "by-role", "--entry", "100", "--rep", "2", "--payment-tps", "300", "--entry-max-rate", "{entryRate}", "--record", "--run-id", "2026-11-27-split-by-role-100-r2-f0810", "--out", ".cache/peaket-f10/runs/by-role-100-r2", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), 진입 p99·오류율(NFR-001), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/by-role-100-r2/"
+    },
+    {
+      "n": 17,
+      "gate": "WINDOW-F0810",
+      "key": "w2-by-role-100-r3",
+      "group": "역할별",
+      "title": "역할별 × 진입 100% × 3회",
+      "estimate_min": 5,
+      "stage": "by-role",
+      "conditions": "V-T18 비교: by-role × 진입 100% × 3회. 결제 300 TPS, 진입 도착률은 F-08-2 {entryRate} 인용. 값이 없으면 skip.",
+      "commands": [
+        { "label": "역할별 진입 100% 3회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "by-role", "--entry", "100", "--rep", "3", "--payment-tps", "300", "--entry-max-rate", "{entryRate}", "--record", "--run-id", "2026-11-27-split-by-role-100-r3-f0810", "--out", ".cache/peaket-f10/runs/by-role-100-r3", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), 진입 p99·오류율(NFR-001), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/by-role-100-r3/"
+    },
+    {
+      "n": 18,
+      "gate": "WINDOW-F0810",
+      "key": "w2-by-role-120-r1",
+      "group": "역할별",
+      "title": "역할별 × 진입 120% × 1회",
+      "estimate_min": 5,
+      "stage": "by-role",
+      "conditions": "V-T18 비교: by-role × 진입 120% × 1회. 결제 300 TPS, 진입 도착률은 F-08-2 {entryRate}의 1.2배. 값이 없으면 skip.",
+      "commands": [
+        { "label": "역할별 진입 120% 1회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "by-role", "--entry", "120", "--rep", "1", "--payment-tps", "300", "--entry-max-rate", "{entryRate}", "--record", "--run-id", "2026-11-27-split-by-role-120-r1-f0810", "--out", ".cache/peaket-f10/runs/by-role-120-r1", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), 진입 p99·오류율(NFR-001), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/by-role-120-r1/"
+    },
+    {
+      "n": 19,
+      "gate": "WINDOW-F0810",
+      "key": "w2-by-role-120-r2",
+      "group": "역할별",
+      "title": "역할별 × 진입 120% × 2회",
+      "estimate_min": 5,
+      "stage": "by-role",
+      "conditions": "V-T18 비교: by-role × 진입 120% × 2회. 결제 300 TPS, 진입 도착률은 F-08-2 {entryRate}의 1.2배. 값이 없으면 skip.",
+      "commands": [
+        { "label": "역할별 진입 120% 2회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "by-role", "--entry", "120", "--rep", "2", "--payment-tps", "300", "--entry-max-rate", "{entryRate}", "--record", "--run-id", "2026-11-27-split-by-role-120-r2-f0810", "--out", ".cache/peaket-f10/runs/by-role-120-r2", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), 진입 p99·오류율(NFR-001), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/by-role-120-r2/"
+    },
+    {
+      "n": 20,
+      "gate": "WINDOW-F0810",
+      "key": "w2-by-role-120-r3",
+      "group": "역할별",
+      "title": "역할별 × 진입 120% × 3회",
+      "estimate_min": 5,
+      "stage": "by-role",
+      "conditions": "V-T18 비교: by-role × 진입 120% × 3회. 결제 300 TPS, 진입 도착률은 F-08-2 {entryRate}의 1.2배. 값이 없으면 skip.",
+      "commands": [
+        { "label": "역할별 진입 120% 3회", "argv": ["node", "loadtest/run.mjs", "v1", "compare", "--config", "by-role", "--entry", "120", "--rep", "3", "--payment-tps", "300", "--entry-max-rate", "{entryRate}", "--record", "--run-id", "2026-11-27-split-by-role-120-r3-f0810", "--out", ".cache/peaket-f10/runs/by-role-120-r3", "--prom-url", "http://127.0.0.1:9090"] }
+      ],
+      "criteria": [
+        "V-T18, docs/verification.md §3.8 세 구성 비교(로컬은 (가)·(나))",
+        "결제 접수 p99·오류율(NFR-005), 진입 p99·오류율(NFR-001), CPU 스로틀",
+        "3회 중앙값·편차, 차이 없음 규칙(계획 6.4)"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/runs/by-role-120-r3/"
+    },
+    {
+      "n": 21,
+      "gate": "WINDOW-F0810",
+      "key": "w2-report",
+      "group": "보고",
+      "title": "비교 요약(split-3way)·보고서·정리",
+      "estimate_min": 20,
+      "stage": "report",
+      "conditions": "두 구성 18회 결과를 comparison.json으로 모은다. (다) 미측정, V-T18 부분, F-08-9 값 미사용.",
+      "commands": [
+        { "label": "비교 요약", "argv": ["node", "loadtest/run.mjs", "v1", "compare-report", "--experiment", "split-3way", "--out", ".cache/peaket-f10/comparison.json"] },
+        { "label": "클러스터 내리기", "argv": ["node", "tools/local/cluster.mjs", "down"] },
+        { "label": "Docker 잠금 놓기", "argv": ["C:/PROGRA~1/Git/bin/bash.exe", "D:/ticketpass-locks/lock.sh", "drop", "docker-all", "lane4-F-08-10"] }
+      ],
+      "criteria": [
+        "V-T18 결과(부분), (다) 미측정, 3회 편차·차이 없음 표시",
+        "F-08-9의 무효·부분 값 미사용, F-08-8 K1·K2·K7 재판정 없음"
+      ],
+      "ledger": "V-T18",
+      "artifact": ".cache/peaket-f10/comparison.json"
+    }
+  ]
+}
