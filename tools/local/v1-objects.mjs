@@ -535,6 +535,7 @@ const RELEASES = Object.freeze({ 'v1-bundle': 'bundle', 'v1-purchase-relay': 'pu
 
 /** 합본 CPU 몫: 1~16 정수, 또는 진입 서버 비례 확인의 작은 몫 0.25·0.5(계획 docs/review/plans/F-08-2.md 6.4) */
 const V1_CPU_SHARES = Object.freeze([0.25, 0.5]);
+/** @param {number} c */
 const isBundleCpus = (c) => (Number.isInteger(c) && c >= 1 && c <= 16) || V1_CPU_SHARES.includes(c);
 
 /**
@@ -625,7 +626,7 @@ export function v1Plan(argv) {
       try {
         services = checkBundleServices(v.split(',').map((x) => x.trim()));
       } catch (e) {
-        throw new Error(`--services: ${e.message}`);
+        throw new Error(`--services: ${e instanceof Error ? e.message : String(e)}`);
       }
     } else throw new Error(`v1의 모르는 인자: ${a}(쓰는 법: v1 [--redis-tls on|off] [--replicas N] [--cpus N] [--memory-mi N] [--services <목록>])`);
   }

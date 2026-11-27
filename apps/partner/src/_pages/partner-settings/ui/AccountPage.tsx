@@ -5,10 +5,12 @@ import { stellaOrg } from '@/entities/partner-org';
 import { me, PARTNER_ROLE_LABEL } from '@/entities/partner-user';
 import { routes } from '@/shared/config/routes';
 import { ACCOUNT_STATES } from '@/shared/config/states/scr020-settings';
-import { readPreview, type RouteProps } from '@/shared/lib/preview';
+import { readParam, readPreview, type RouteProps } from '@/shared/lib/preview';
 import { PreviewStateSwitcher } from '@/shared/ui/PreviewStateSwitcher';
+import { accountPageMode } from '../model/account-live';
 import { accountSecurity, loginDevices } from '../model/settings';
 import { ReauthDialog } from './dialogs';
+import { AccountSecurityLive } from './live/AccountSecurityLive';
 import { SettingsFrame } from './SettingsFrame';
 
 /** 보안 한 줄: 데스크톱은 왼쪽 설명 · 오른쪽 버튼, 휴대폰은 제목 줄 오른쪽에 버튼(같은 격자로 둘 다 맞는다) */
@@ -38,9 +40,55 @@ function ReauthButton({ modal, children, label, describedBy = 'ac-ra' }: { modal
 }
 
 export default async function AccountPage({ searchParams }: RouteProps) {
-  const pv = readPreview(await searchParams, ACCOUNT_STATES, '내 계정');
+  const sp = await searchParams;
+  const pv = readPreview(sp, ACCOUNT_STATES, '내 계정');
   const isAdmin = !pv.isMember;
   const lastPasskey = accountSecurity.passkeys.length === 1;
+
+  // ?state=가 없으면 실제 API 판(인증 앱·복구 코드·로그인 기기)을 그리고, 미리보기는 기존 목업을 그린다
+  if (accountPageMode(readParam(sp, 'state')) === 'live') {
+    return (
+      <>
+        <SettingsFrame current="account" isMember={pv.isMember} keep={pv.keep}>
+          <div className="page-head">
+            <div className="col" style={{ gap: 4 }}>
+              <h1>내 계정</h1>
+              <p className="t-sm muted" id="ac-ra-live">
+                보안 설정은 바꾸기 전에 비밀번호와 인증 앱 코드로 다시 인증합니다(5분 안에 한 번).
+              </p>
+            </div>
+          </div>
+
+          <section className="card pad-lg col max-md:p-4" style={{ gap: 16 }} aria-labelledby="h-prof-live">
+            <div className="row" style={{ gap: 12 }}>
+              <span className="avatar" style={{ width: 40, height: 40, fontSize: 15 }} aria-hidden="true">
+                {me.avatarText}
+              </span>
+              <h2 className="t-lg" id="h-prof-live">
+                프로필
+              </h2>
+            </div>
+            <dl className="kv md:grid-cols-[132px_minmax(0,1fr)] md:[&_dd]:text-left">
+              <dt>이름 표시</dt>
+              <dd>{me.displayName}</dd>
+              <dt>업무용 이메일</dt>
+              <dd className="mono">{me.emailMasked}</dd>
+              <dt>역할</dt>
+              <dd>
+                <span className="badge badge-outline">{PARTNER_ROLE_LABEL[pv.role]}</span>
+              </dd>
+              <dt>소속</dt>
+              <dd>{stellaOrg.name}</dd>
+            </dl>
+          </section>
+
+          <AccountSecurityLive />
+        </SettingsFrame>
+
+        <PreviewStateSwitcher path={routes.settingsAccount()} states={ACCOUNT_STATES} current={pv.state} keep={pv.keep} />
+      </>
+    );
+  }
 
   return (
     <>

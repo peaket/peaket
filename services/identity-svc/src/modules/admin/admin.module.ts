@@ -11,6 +11,7 @@ import { LoginPasswordStep } from './application/login-password-step.js';
 import { CONSOLE_ORIGINS, type ConsoleOrigins, DispatchAdminNotices } from './application/dispatch-admin-notices.js';
 import { ChangeAdminPassword } from './application/change-admin-password.js';
 import { EndAdminSession } from './application/end-admin-session.js';
+import { ManageAccountSecurity } from './application/manage-account-security.js';
 import { ManageAdminAccounts } from './application/manage-admin-accounts.js';
 import { TerminateAdminSessions } from './application/terminate-admin-sessions.js';
 import { ManagePasskeys } from './application/manage-passkeys.js';
@@ -64,6 +65,7 @@ import {
   type LoginCounters,
 } from './domain/ports.js';
 import { ADMIN_COOKIE_DOMAIN } from './inbound/admin-cookies.js';
+import { AdminAccountSecurityController } from './inbound/admin-account-security.controller.js';
 import { AdminInvitationController } from './inbound/admin-invitation.controller.js';
 import { AdminLoginController } from './inbound/admin-login.controller.js';
 import { AdminPasskeyController } from './inbound/admin-passkey.controller.js';
@@ -137,7 +139,7 @@ export class AdminModule {
     const store = o.storage === 'database' ? { provide: DrizzleAdminAccountStore, useClass: DrizzleAdminAccountStore } : { provide: DrizzleAdminAccountStore, useValue: new MemoryAdminAccountStore() };
     return {
       module: AdminModule,
-      controllers: [AdminInvitationController, AdminLoginController, AdminUnlockController, AdminPasswordChangeController, AdminTokenController, PartnerTeamAccountsController, AdminPasskeyController],
+      controllers: [AdminInvitationController, AdminLoginController, AdminUnlockController, AdminPasswordChangeController, AdminTokenController, PartnerTeamAccountsController, AdminPasskeyController, AdminAccountSecurityController],
       providers: [
         store,
         { provide: ADMIN_ACCOUNT_STORE, useExisting: DrizzleAdminAccountStore },
@@ -185,8 +187,9 @@ export class AdminModule {
         TerminateAdminSessions,
         ReauthenticateAdmin,
         ManagePasskeys,
+        ManageAccountSecurity,
       ],
-      exports: [SetAdminPassword, LoginPasswordStep, RecordAdminLoginSuccess, LoginSecondStep, BeginTotpEnrollment, ConfirmTotpEnrollment, UnlockWithLink, RequestUnlockLink, DispatchAdminNotices, CheckPasswordOnlyLogins, ChangeAdminPassword, GetAdminAuthz, RefreshAdminSession, EndAdminSession, ManageAdminAccounts, TerminateAdminSessions, ReauthenticateAdmin, ManagePasskeys, ADMIN_ACCOUNT_STORE, ADMIN_LOGIN_STORE, ADMIN_PASSKEY_STORE],
+      exports: [SetAdminPassword, LoginPasswordStep, RecordAdminLoginSuccess, LoginSecondStep, BeginTotpEnrollment, ConfirmTotpEnrollment, UnlockWithLink, RequestUnlockLink, DispatchAdminNotices, CheckPasswordOnlyLogins, ChangeAdminPassword, GetAdminAuthz, RefreshAdminSession, EndAdminSession, ManageAdminAccounts, TerminateAdminSessions, ReauthenticateAdmin, ManagePasskeys, ManageAccountSecurity, ADMIN_ACCOUNT_STORE, ADMIN_LOGIN_STORE, ADMIN_PASSKEY_STORE],
     };
   }
 }

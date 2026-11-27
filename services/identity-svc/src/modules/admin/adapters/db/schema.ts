@@ -32,8 +32,10 @@ export const adminAccount = pgTable(
     // $pbkdf2-sha256$i=…,k=…$솔트$MAC(identity §6 '관리 계정 비밀번호 저장과 정책의 첫 구현')
     passwordPhc: text('password_phc'),
     totpSeedEnc: bytea('totp_seed_enc'),
-    // 등록 중인 시드(같은 꼴)와 마지막으로 받은 TOTP 시간 칸(BOT-120)
+    // 등록 중인 시드(같은 꼴)와 마지막으로 받은 TOTP 시간 칸(BOT-120). 다시 등록은 시작한 세션에 묶는다(F-07-13)
     totpPendingEnc: bytea('totp_pending_enc'),
+    totpPendingSessionId: uuid('totp_pending_session_id'),
+    totpPendingFailures: integer('totp_pending_failures').notNull().default(0),
     totpLastStep: bigint('totp_last_step', { mode: 'number' }),
     failedAttempts: integer('failed_attempts').notNull().default(0),
     secondFactorFailures: integer('second_factor_failures').notNull().default(0),
@@ -56,6 +58,7 @@ export const adminAccount = pgTable(
     check('admin_account_lock_reason_check', sql`${t.lockReason} is null or ${t.lockReason} in ('FAILED_ATTEMPTS', 'SECOND_FACTOR_FAILURES', 'PASSWORD_FAILURE_TOTAL')`),
     check('admin_account_partner_check', sql`(${t.role} in ('partner_admin', 'partner_member')) = (${t.promoterId} is not null)`),
     check('admin_account_invite_step_stage_check', sql`${t.inviteStepStage} is null or ${t.inviteStepStage} in ('PASSWORD', 'TOTP', 'PASSKEY')`),
+    check('admin_account_totp_pending_failures_check', sql`${t.totpPendingFailures} >= 0`),
   ],
 );
 
@@ -125,6 +128,8 @@ export const adminSession = pgTable(
     refreshUsed: boolean('refresh_used').notNull().default(false),
     refreshFamily: uuid('refresh_family').notNull(),
     pairRef: text('pair_ref').notNull(),
+    /** 화면용 기기 이름(브라우저 · 운영체제). 원문 User-Agent는 두지 않는다. 끝나면 비운다(F-07-13) */
+    deviceLabel: text('device_label'),
     createdAt: at('created_at').notNull(),
     absoluteExpiresAt: at('absolute_expires_at').notNull(),
     idleExpiresAt: at('idle_expires_at').notNull(),
@@ -137,6 +142,7 @@ export const adminSession = pgTable(
     index('admin_session_family_idx').on(t.refreshFamily),
     index('admin_session_live_idx').on(t.adminAccountId, t.idleExpiresAt).where(sql`${t.terminatedAt} is null`),
     check('admin_session_aud_check', sql`${t.aud} in ('partner', 'ops')`),
+    check('admin_session_device_label_length_check', sql`${t.deviceLabel} is null or char_length(${t.deviceLabel}) between 1 and 40`),
   ],
 );
 

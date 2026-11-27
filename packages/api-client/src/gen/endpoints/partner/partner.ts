@@ -54,6 +54,7 @@ import type {
   AdminUnlockCreate,
   AdminUnlockLinkCreate,
   AttendeeExportPage,
+  CreatePartnerAuthTotpConfirmationBody,
   CreatePartnerEventAttendeeExportBody,
   CreatePartnerEventCancellationBody,
   CreatePartnerEventStaffInvitationBody,
@@ -94,6 +95,7 @@ import type {
   ListPartnerWebhooksParams,
   LiveSnapshot,
   PartnerAttendeePage,
+  PartnerDeviceSessionList,
   PartnerEventCancellationStatus,
   PartnerEventCreate,
   PartnerEventCreated,
@@ -120,11 +122,15 @@ import type {
   PartnerProductionPage,
   PartnerProductionUpdate,
   PartnerReauthPasswordStep,
+  PartnerRecoveryCodes,
   PartnerSaleReviewStatus,
   PartnerSalesReport,
+  PartnerSecuritySettings,
   PartnerSettlementExportCreate,
   PartnerTeamAccountPage,
   PartnerTodoSummary,
+  PartnerTotpConfirmation,
+  PartnerTotpEnrollment,
   PayoutAccountChange,
   ProblemResponse,
   ProductionImage,
@@ -180,6 +186,134 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export type getPartnerAuthSessionsResponse200 = {
+  data: PartnerDeviceSessionList
+  status: 200
+}
+
+export type getPartnerAuthSessionsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getPartnerAuthSessionsResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getPartnerAuthSessionsResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type getPartnerAuthSessionsResponseSuccess = (getPartnerAuthSessionsResponse200) & {
+  headers: Headers;
+};
+export type getPartnerAuthSessionsResponseError = (getPartnerAuthSessionsResponse401 | getPartnerAuthSessionsResponse403 | getPartnerAuthSessionsResponse503) & {
+  headers: Headers;
+};
+
+export const getGetPartnerAuthSessionsUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/sessions`
+}
+
+/**
+ * F-07-13, ASVS v5.0.0-7.5.2. 살아 있는 관리 세션을 출발지 묶음(pairRef)마다 한 줄로 준다. 지금 세션이 든 줄이 맨 앞이고 나머지는 마지막 활동이 늦은 순이다. 줄에는 대표 세션 ID·화면용 기기 이름·마지막 활동·지금 이 기기·같은 기기의 다른 로그인 수만 싣고 원문 User-Agent·IP·pairRef·토큰은 싣지 않는다. Cache-Control: no-store
+ * @summary 내 로그인 기기 목록(지금 기기 먼저)
+ */
+export const getPartnerAuthSessions = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<getPartnerAuthSessionsResponseSuccess> => {
+
+  return orvalFetch<getPartnerAuthSessionsResponseSuccess>(getGetPartnerAuthSessionsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPartnerAuthSessionsQueryKey = () => {
+    return [
+    `/v1/partner/auth/sessions`
+    ] as const;
+    }
+
+
+export const getGetPartnerAuthSessionsQueryOptions = <TData = Awaited<ReturnType<typeof getPartnerAuthSessions>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthSessions>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPartnerAuthSessionsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPartnerAuthSessions>>> = ({ signal }) => getPartnerAuthSessions({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthSessions>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPartnerAuthSessionsQueryResult = NonNullable<Awaited<ReturnType<typeof getPartnerAuthSessions>>>
+export type GetPartnerAuthSessionsQueryError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>
+
+
+export function useGetPartnerAuthSessions<TData = Awaited<ReturnType<typeof getPartnerAuthSessions>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthSessions>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerAuthSessions>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerAuthSessions>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerAuthSessions<TData = Awaited<ReturnType<typeof getPartnerAuthSessions>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthSessions>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerAuthSessions>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerAuthSessions>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerAuthSessions<TData = Awaited<ReturnType<typeof getPartnerAuthSessions>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthSessions>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내 로그인 기기 목록(지금 기기 먼저)
+ */
+
+export function useGetPartnerAuthSessions<TData = Awaited<ReturnType<typeof getPartnerAuthSessions>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthSessions>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPartnerAuthSessionsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
 
 export type createPartnerAuthSessionResponse200 = {
   data: AdminLoginStep | AdminLoginDone
@@ -401,6 +535,572 @@ export const useDeleteMyPartnerAuthSession = <TError = ErrorType<UnauthorizedRes
         TContext
       > => {
       return useMutation(getDeleteMyPartnerAuthSessionMutationOptions(options), queryClient);
+    }
+    export type deletePartnerAuthSessionResponse204 = {
+  data: void
+  status: 204
+}
+
+export type deletePartnerAuthSessionResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type deletePartnerAuthSessionResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type deletePartnerAuthSessionResponse404 = {
+  data: ProblemResponse
+  status: 404
+}
+
+export type deletePartnerAuthSessionResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type deletePartnerAuthSessionResponseSuccess = (deletePartnerAuthSessionResponse204) & {
+  headers: Headers;
+};
+export type deletePartnerAuthSessionResponseError = (deletePartnerAuthSessionResponse401 | deletePartnerAuthSessionResponse403 | deletePartnerAuthSessionResponse404 | deletePartnerAuthSessionResponse503) & {
+  headers: Headers;
+};
+
+export const getDeletePartnerAuthSessionUrl = (sessionId: string,) => {
+
+
+
+
+  return `/v1/partner/auth/sessions/${encodeURIComponent(String(sessionId))}`
+}
+
+/**
+ * F-07-13, ASVS v5.0.0-7.4.3·7.5.2. 대상 세션과 같은 출발지 묶음의 살아 있는 세션을 지금 세션만 남기고 모두 끝낸다(LOGOUT, 세션 종료 사건). 지금 세션이 든 줄의 대표 세션 ID면 같은 기기의 다른 로그인만 끝내고, 그 줄에 다른 로그인이 없으면 404다. 다른 계정·없는 ID·이미 끝난 세션·모양이 틀린 ID도 같은 404 session-not-found이고 404는 재인증 토큰을 쓰지 않는다. Cache-Control: no-store
+ * @summary 다른 로그인 기기 끊기(재인증 토큰 필요, 지금 세션은 남김)
+ */
+export const deletePartnerAuthSession = async (sessionId: string, options?: Parameters<typeof orvalFetch>[1]): Promise<deletePartnerAuthSessionResponseSuccess> => {
+
+  return orvalFetch<deletePartnerAuthSessionResponseSuccess>(getDeletePartnerAuthSessionUrl(sessionId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeletePartnerAuthSessionMutationKey = () => ['deletePartnerAuthSession'] as const;
+
+export const getDeletePartnerAuthSessionMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePartnerAuthSession>>, TError,DeletePartnerAuthSessionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deletePartnerAuthSession>>, TError,DeletePartnerAuthSessionMutationVariables, TContext> => {
+
+const mutationKey = getDeletePartnerAuthSessionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deletePartnerAuthSession>>, DeletePartnerAuthSessionMutationVariables> = (props) => {
+          const {sessionId} = props ?? {};
+
+          return  deletePartnerAuthSession(sessionId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeletePartnerAuthSessionMutationResult = NonNullable<Awaited<ReturnType<typeof deletePartnerAuthSession>>>
+
+    export type DeletePartnerAuthSessionMutationError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>
+    export type DeletePartnerAuthSessionMutationVariables = {sessionId: string}
+
+    /**
+ * @summary 다른 로그인 기기 끊기(재인증 토큰 필요, 지금 세션은 남김)
+ */
+export const useDeletePartnerAuthSession = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePartnerAuthSession>>, TError,DeletePartnerAuthSessionMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deletePartnerAuthSession>>,
+        TError,
+        DeletePartnerAuthSessionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeletePartnerAuthSessionMutationOptions(options), queryClient);
+    }
+    export type getPartnerAuthSecuritySettingsResponse200 = {
+  data: PartnerSecuritySettings
+  status: 200
+}
+
+export type getPartnerAuthSecuritySettingsResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type getPartnerAuthSecuritySettingsResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type getPartnerAuthSecuritySettingsResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type getPartnerAuthSecuritySettingsResponseSuccess = (getPartnerAuthSecuritySettingsResponse200) & {
+  headers: Headers;
+};
+export type getPartnerAuthSecuritySettingsResponseError = (getPartnerAuthSecuritySettingsResponse401 | getPartnerAuthSecuritySettingsResponse403 | getPartnerAuthSecuritySettingsResponse503) & {
+  headers: Headers;
+};
+
+export const getGetPartnerAuthSecuritySettingsUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/security-settings`
+}
+
+/**
+ * F-07-13, ASVS v5.0.0-6.3.3·6.4.4. 로그인한 계정의 인증 앱 등록 여부, 남은 복구 코드 행 수, 패스키 수, 세션 상한 2를 준다. Cache-Control: no-store
+ * @summary 내 계정 보안 요약(인증 앱·남은 복구 코드·패스키 수)
+ */
+export const getPartnerAuthSecuritySettings = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<getPartnerAuthSecuritySettingsResponseSuccess> => {
+
+  return orvalFetch<getPartnerAuthSecuritySettingsResponseSuccess>(getGetPartnerAuthSecuritySettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPartnerAuthSecuritySettingsQueryKey = () => {
+    return [
+    `/v1/partner/auth/security-settings`
+    ] as const;
+    }
+
+
+export const getGetPartnerAuthSecuritySettingsQueryOptions = <TData = Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPartnerAuthSecuritySettingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>> = ({ signal }) => getPartnerAuthSecuritySettings({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetPartnerAuthSecuritySettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>>
+export type GetPartnerAuthSecuritySettingsQueryError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>
+
+
+export function useGetPartnerAuthSecuritySettings<TData = Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerAuthSecuritySettings<TData = Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>,
+          TError,
+          Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetPartnerAuthSecuritySettings<TData = Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary 내 계정 보안 요약(인증 앱·남은 복구 코드·패스키 수)
+ */
+
+export function useGetPartnerAuthSecuritySettings<TData = Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>, TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getPartnerAuthSecuritySettings>>, TError, TData>>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetPartnerAuthSecuritySettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+export type createPartnerAuthTotpEnrollmentResponse201 = {
+  data: PartnerTotpEnrollment
+  status: 201
+}
+
+export type createPartnerAuthTotpEnrollmentResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerAuthTotpEnrollmentResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createPartnerAuthTotpEnrollmentResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createPartnerAuthTotpEnrollmentResponseSuccess = (createPartnerAuthTotpEnrollmentResponse201) & {
+  headers: Headers;
+};
+export type createPartnerAuthTotpEnrollmentResponseError = (createPartnerAuthTotpEnrollmentResponse401 | createPartnerAuthTotpEnrollmentResponse403 | createPartnerAuthTotpEnrollmentResponse503) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerAuthTotpEnrollmentUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/totp-enrollments`
+}
+
+/**
+ * F-07-13, ASVS v5.0.0-6.3.3. ACCOUNT_SECURITY 재인증 토큰(X-Reauth-Token)을 확인하고 새 시드를 대기 칸에 두고 otpauth 주소를 한 번 준다. 기존 인증 앱 시드는 확인 전까지 그대로이고, 대기 시드는 그 세션에 묶인다. 응답에 시드 원문·토큰·출처 묶음을 싣지 않는다. Cache-Control: no-store
+ * @summary 내 인증 앱 다시 등록 시작(새 시드, 재인증 토큰 필요)
+ */
+export const createPartnerAuthTotpEnrollment = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerAuthTotpEnrollmentResponseSuccess> => {
+
+  return orvalFetch<createPartnerAuthTotpEnrollmentResponseSuccess>(getCreatePartnerAuthTotpEnrollmentUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerAuthTotpEnrollmentMutationKey = () => ['createPartnerAuthTotpEnrollment'] as const;
+
+export const getCreatePartnerAuthTotpEnrollmentMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthTotpEnrollment>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthTotpEnrollment>>, TError,void, TContext> => {
+
+const mutationKey = getCreatePartnerAuthTotpEnrollmentMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerAuthTotpEnrollment>>, void> = () => {
+
+
+          return  createPartnerAuthTotpEnrollment(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerAuthTotpEnrollmentMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerAuthTotpEnrollment>>>
+
+    export type CreatePartnerAuthTotpEnrollmentMutationError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>
+
+
+    /**
+ * @summary 내 인증 앱 다시 등록 시작(새 시드, 재인증 토큰 필요)
+ */
+export const useCreatePartnerAuthTotpEnrollment = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthTotpEnrollment>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerAuthTotpEnrollment>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerAuthTotpEnrollmentMutationOptions(options), queryClient);
+    }
+    export type createPartnerAuthTotpConfirmationResponse200 = {
+  data: PartnerTotpConfirmation
+  status: 200
+}
+
+export type createPartnerAuthTotpConfirmationResponse400 = {
+  data: ProblemResponse
+  status: 400
+}
+
+export type createPartnerAuthTotpConfirmationResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerAuthTotpConfirmationResponse410 = {
+  data: ProblemResponse
+  status: 410
+}
+
+export type createPartnerAuthTotpConfirmationResponse422 = {
+  data: ProblemResponse
+  status: 422
+}
+
+export type createPartnerAuthTotpConfirmationResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createPartnerAuthTotpConfirmationResponseSuccess = (createPartnerAuthTotpConfirmationResponse200) & {
+  headers: Headers;
+};
+export type createPartnerAuthTotpConfirmationResponseError = (createPartnerAuthTotpConfirmationResponse400 | createPartnerAuthTotpConfirmationResponse401 | createPartnerAuthTotpConfirmationResponse410 | createPartnerAuthTotpConfirmationResponse422 | createPartnerAuthTotpConfirmationResponse503) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerAuthTotpConfirmationUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/totp-confirmations`
+}
+
+/**
+ * F-07-13, ASVS v5.0.0-6.3.3·6.4.4. 그 세션이 시작한 대기 시드에 대해서만 지금 30초 칸의 6자리 코드를 본다. 틀리면 422 reauth-code-invalid(remainingAttempts)이고 5번째까지 세며 6번째에 대기 시드를 버리고 410 totp-enrollment-invalid다. 이 실패는 로그인 2단계 실패 수·잠금과 섞지 않는다. 맞으면 새 시드·복구 코드 10개로 바꾸고 복구 코드는 이 응답에 한 번만 준다. Cache-Control: no-store
+ * @summary 내 인증 앱 다시 등록 확인(6자리 코드, 복구 코드 10개 한 번)
+ */
+export const createPartnerAuthTotpConfirmation = async (createPartnerAuthTotpConfirmationBody: CreatePartnerAuthTotpConfirmationBody, options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerAuthTotpConfirmationResponseSuccess> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return orvalFetch<createPartnerAuthTotpConfirmationResponseSuccess>(getCreatePartnerAuthTotpConfirmationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createPartnerAuthTotpConfirmationBody)
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerAuthTotpConfirmationMutationKey = () => ['createPartnerAuthTotpConfirmation'] as const;
+
+export const getCreatePartnerAuthTotpConfirmationMutationOptions = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthTotpConfirmation>>, TError,CreatePartnerAuthTotpConfirmationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthTotpConfirmation>>, TError,CreatePartnerAuthTotpConfirmationMutationVariables, TContext> => {
+
+const mutationKey = getCreatePartnerAuthTotpConfirmationMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerAuthTotpConfirmation>>, CreatePartnerAuthTotpConfirmationMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPartnerAuthTotpConfirmation(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerAuthTotpConfirmationMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerAuthTotpConfirmation>>>
+    export type CreatePartnerAuthTotpConfirmationMutationBody = BodyType<CreatePartnerAuthTotpConfirmationBody>
+    export type CreatePartnerAuthTotpConfirmationMutationError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>
+    export type CreatePartnerAuthTotpConfirmationMutationVariables = {data: BodyType<CreatePartnerAuthTotpConfirmationBody>}
+
+    /**
+ * @summary 내 인증 앱 다시 등록 확인(6자리 코드, 복구 코드 10개 한 번)
+ */
+export const useCreatePartnerAuthTotpConfirmation = <TError = ErrorType<ProblemResponse | UnauthorizedResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthTotpConfirmation>>, TError,CreatePartnerAuthTotpConfirmationMutationVariables, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerAuthTotpConfirmation>>,
+        TError,
+        CreatePartnerAuthTotpConfirmationMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerAuthTotpConfirmationMutationOptions(options), queryClient);
+    }
+    export type createPartnerAuthRecoveryCodesResponse200 = {
+  data: PartnerRecoveryCodes
+  status: 200
+}
+
+export type createPartnerAuthRecoveryCodesResponse401 = {
+  data: UnauthorizedResponse
+  status: 401
+}
+
+export type createPartnerAuthRecoveryCodesResponse403 = {
+  data: ProblemResponse
+  status: 403
+}
+
+export type createPartnerAuthRecoveryCodesResponse409 = {
+  data: ProblemResponse
+  status: 409
+}
+
+export type createPartnerAuthRecoveryCodesResponse503 = {
+  data: ServiceUnavailableResponse
+  status: 503
+}
+
+export type createPartnerAuthRecoveryCodesResponseSuccess = (createPartnerAuthRecoveryCodesResponse200) & {
+  headers: Headers;
+};
+export type createPartnerAuthRecoveryCodesResponseError = (createPartnerAuthRecoveryCodesResponse401 | createPartnerAuthRecoveryCodesResponse403 | createPartnerAuthRecoveryCodesResponse409 | createPartnerAuthRecoveryCodesResponse503) & {
+  headers: Headers;
+};
+
+export const getCreatePartnerAuthRecoveryCodesUrl = () => {
+
+
+
+
+  return `/v1/partner/auth/recovery-codes`
+}
+
+/**
+ * F-07-13, ASVS v5.0.0-6.4.4. ACCOUNT_SECURITY 재인증 토큰을 확인하고 인증 앱이 등록된 계정의 옛 복구 코드를 모두 지우고 새 10개를 한 번만 준다. 세션은 끝내지 않는다. 인증 앱이 없으면 409 totp-not-registered다. Cache-Control: no-store
+ * @summary 내 복구 코드 다시 만들기(재인증, 새 10개 한 번)
+ */
+export const createPartnerAuthRecoveryCodes = async ( options?: Parameters<typeof orvalFetch>[1]): Promise<createPartnerAuthRecoveryCodesResponseSuccess> => {
+
+  return orvalFetch<createPartnerAuthRecoveryCodesResponseSuccess>(getCreatePartnerAuthRecoveryCodesUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCreatePartnerAuthRecoveryCodesMutationKey = () => ['createPartnerAuthRecoveryCodes'] as const;
+
+export const getCreatePartnerAuthRecoveryCodesMutationOptions = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthRecoveryCodes>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthRecoveryCodes>>, TError,void, TContext> => {
+
+const mutationKey = getCreatePartnerAuthRecoveryCodesMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPartnerAuthRecoveryCodes>>, void> = () => {
+
+
+          return  createPartnerAuthRecoveryCodes(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePartnerAuthRecoveryCodesMutationResult = NonNullable<Awaited<ReturnType<typeof createPartnerAuthRecoveryCodes>>>
+
+    export type CreatePartnerAuthRecoveryCodesMutationError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>
+
+
+    /**
+ * @summary 내 복구 코드 다시 만들기(재인증, 새 10개 한 번)
+ */
+export const useCreatePartnerAuthRecoveryCodes = <TError = ErrorType<UnauthorizedResponse | ProblemResponse | ServiceUnavailableResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPartnerAuthRecoveryCodes>>, TError,void, TContext>, request?: SecondParameter<typeof orvalFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createPartnerAuthRecoveryCodes>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getCreatePartnerAuthRecoveryCodesMutationOptions(options), queryClient);
     }
     export type createPartnerAuthAccessTokenResponse204 = {
   data: void

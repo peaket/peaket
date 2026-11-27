@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { LoginPasswordStep, type LoginStepOutcome } from '../application/login-password-step.js';
 import { LoginSecondStep, type SecondStepOutcome } from '../application/login-second-step.js';
 import { type AdminAud, LoginCountersUnavailable, PepperUnavailable, TotpKeyUnavailable } from '../domain/ports.js';
+import { deviceLabelOf } from '../../session/index.js';
 import { ADMIN_COOKIE_DOMAIN, adminSessionCookies } from './admin-cookies.js';
 
 /** 셈 저장소·페퍼 키 서비스·사람 확인 서비스가 답하지 않을 때 다시 해 볼 때까지 [가정] */
@@ -109,7 +110,7 @@ export class AdminLoginController {
   async #second(aud: AdminAud, body: { loginStep: string; code: string }, req: FastifyRequest, reply: FastifyReply): Promise<object | undefined> {
     let o: SecondStepOutcome;
     try {
-      o = await this.second.run({ aud, loginStep: body.loginStep, code: body.code, ip: clientIpOf(req), deviceId: '' });
+      o = await this.second.run({ aud, loginStep: body.loginStep, code: body.code, ip: clientIpOf(req), deviceId: '', deviceLabel: deviceLabelOf(req.headers['user-agent']) });
     } catch (e) {
       if (e instanceof LoginCountersUnavailable || e instanceof PepperUnavailable || e instanceof TotpKeyUnavailable) throw new ProblemError({ type: 'admin-login-unavailable', status: 503, title: '잠시 뒤 다시 시도해 주세요', retryAfterSeconds: RETRY_AFTER_S });
       throw e;

@@ -175,16 +175,16 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
 
   async getTotp(id: string): Promise<AdminTotpState | null> {
     const [r] = await this.database.db
-      .select({ email: adminAccount.email, seedEnc: adminAccount.totpSeedEnc, pendingEnc: adminAccount.totpPendingEnc, lastStep: adminAccount.totpLastStep })
+      .select({ email: adminAccount.email, seedEnc: adminAccount.totpSeedEnc, pendingEnc: adminAccount.totpPendingEnc, lastStep: adminAccount.totpLastStep, pendingSessionId: adminAccount.totpPendingSessionId, pendingFailures: adminAccount.totpPendingFailures })
       .from(adminAccount)
       .where(and(eq(adminAccount.id, id), ne(adminAccount.status, 'REMOVED')));
-    return r ? { email: r.email ?? '', seedEnc: r.seedEnc, pendingEnc: r.pendingEnc, lastStep: r.lastStep } : null;
+    return r ? { email: r.email ?? '', seedEnc: r.seedEnc, pendingEnc: r.pendingEnc, lastStep: r.lastStep, pendingSessionId: r.pendingSessionId, pendingFailures: r.pendingFailures } : null;
   }
 
-  async setTotpPending(id: string, enc: Buffer, now: number): Promise<boolean> {
+  async setTotpPending(id: string, enc: Buffer, now: number, sessionId?: string | null): Promise<boolean> {
     const done = await this.database.db
       .update(adminAccount)
-      .set({ totpPendingEnc: enc, updatedAt: new Date(now) })
+      .set({ totpPendingEnc: enc, totpPendingSessionId: sessionId ?? null, totpPendingFailures: 0, updatedAt: new Date(now) })
       .where(and(eq(adminAccount.id, id), ne(adminAccount.status, 'REMOVED')))
       .returning({ id: adminAccount.id });
     return done.length > 0;
@@ -200,10 +200,57 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
       if (!r?.pending || !Buffer.from(r.pending).equals(i.seedEnc)) return false;
       await tx
         .update(adminAccount)
-        .set({ totpSeedEnc: i.seedEnc, totpPendingEnc: null, totpLastStep: i.step, updatedAt: new Date(i.now) })
+        .set({ totpSeedEnc: i.seedEnc, totpPendingEnc: null, totpPendingSessionId: null, totpPendingFailures: 0, totpLastStep: i.step, updatedAt: new Date(i.now) })
         .where(eq(adminAccount.id, id));
       await tx.delete(adminRecoveryCode).where(eq(adminRecoveryCode.adminAccountId, id));
       if (i.recoveryPhcs.length > 0) await tx.insert(adminRecoveryCode).values(i.recoveryPhcs.map((codePhc) => ({ id: randomUUID(), adminAccountId: id, codePhc, createdAt: new Date(i.now) })));
+      return true;
+    });
+  }
+
+  async confirmTotpForSession(i: { accountId: string; sessionId: string; seedEnc: Buffer; step: number; recoveryPhcs: string[]; now: number }): Promise<boolean> {
+    return this.database.transaction(async (tx) => {
+      const [r] = await tx
+        .select({ pending: adminAccount.totpPendingEnc, pendingSessionId: adminAccount.totpPendingSessionId })
+        .from(adminAccount)
+        .where(and(eq(adminAccount.id, i.accountId), ne(adminAccount.status, 'REMOVED')))
+        .for('update');
+      if (!r?.pending || r.pendingSessionId !== i.sessionId || !Buffer.from(r.pending).equals(i.seedEnc)) return false;
+      await tx
+        .update(adminAccount)
+        .set({ totpSeedEnc: i.seedEnc, totpPendingEnc: null, totpPendingSessionId: null, totpPendingFailures: 0, totpLastStep: i.step, updatedAt: new Date(i.now) })
+        .where(eq(adminAccount.id, i.accountId));
+      await tx.delete(adminRecoveryCode).where(eq(adminRecoveryCode.adminAccountId, i.accountId));
+      if (i.recoveryPhcs.length > 0) await tx.insert(adminRecoveryCode).values(i.recoveryPhcs.map((codePhc) => ({ id: randomUUID(), adminAccountId: i.accountId, codePhc, createdAt: new Date(i.now) })));
+      return true;
+    });
+  }
+
+  async recordTotpPendingFailure(accountId: string, sessionId: string, limit: number, now: number): Promise<{ failures: number; invalidated: boolean }> {
+    return this.database.transaction(async (tx) => {
+      const [r] = await tx
+        .select({ failures: adminAccount.totpPendingFailures, pendingSessionId: adminAccount.totpPendingSessionId })
+        .from(adminAccount)
+        .where(and(eq(adminAccount.id, accountId), ne(adminAccount.status, 'REMOVED')))
+        .for('update');
+      if (!r || r.pendingSessionId !== sessionId) return { failures: 0, invalidated: true };
+      const failures = r.failures + 1;
+      if (failures > limit) {
+        await tx.update(adminAccount).set({ totpPendingEnc: null, totpPendingSessionId: null, totpPendingFailures: 0, updatedAt: new Date(now) }).where(eq(adminAccount.id, accountId));
+        return { failures: limit + 1, invalidated: true };
+      }
+      await tx.update(adminAccount).set({ totpPendingFailures: failures, updatedAt: new Date(now) }).where(eq(adminAccount.id, accountId));
+      return { failures, invalidated: false };
+    });
+  }
+
+  async replaceRecoveryCodes(id: string, recoveryPhcs: string[], now: number): Promise<boolean> {
+    return this.database.transaction(async (tx) => {
+      const [r] = await tx.select({ id: adminAccount.id }).from(adminAccount).where(and(eq(adminAccount.id, id), ne(adminAccount.status, 'REMOVED'))).for('update');
+      if (!r) return false;
+      await tx.delete(adminRecoveryCode).where(eq(adminRecoveryCode.adminAccountId, id));
+      if (recoveryPhcs.length > 0) await tx.insert(adminRecoveryCode).values(recoveryPhcs.map((codePhc) => ({ id: randomUUID(), adminAccountId: id, codePhc, createdAt: new Date(now) })));
+      await tx.update(adminAccount).set({ updatedAt: new Date(now) }).where(eq(adminAccount.id, id));
       return true;
     });
   }
@@ -242,7 +289,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
   }
 
   async createSession(
-    i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number },
+    i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; deviceLabel?: string | null },
     limit: number,
   ): Promise<{ evicted: string[] }> {
     return this.database.transaction(async (tx) => {
@@ -252,7 +299,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
     });
   }
 
-  async finishSecondStep(i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number }, limit: number, use: SecondStepUse): Promise<{ kind: 'DONE'; evicted: string[] } | { kind: 'CODE_USED' } | { kind: 'STEP_USED' }> {
+  async finishSecondStep(i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; deviceLabel?: string | null }, limit: number, use: SecondStepUse): Promise<{ kind: 'DONE'; evicted: string[] } | { kind: 'CODE_USED' } | { kind: 'STEP_USED' }> {
     try {
       return await this.database.transaction(async (tx) => {
         const [acc] = await tx.select({ status: adminAccount.status }).from(adminAccount).where(eq(adminAccount.id, i.accountId)).for('update');
@@ -287,7 +334,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
   }
 
   /** 계정 행을 잠근 트랜잭션에서 세션을 만든다(createSession·finishSecondStep) */
-  async #openSession(tx: DbTransaction, i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number }, limit: number): Promise<{ evicted: string[] }> {
+  async #openSession(tx: DbTransaction, i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; deviceLabel?: string | null }, limit: number): Promise<{ evicted: string[] }> {
       const now = new Date(i.createdAt);
       const live = await tx
         .select({ id: adminSession.id })
@@ -296,7 +343,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
         .orderBy(asc(adminSession.idleExpiresAt));
       const evicted = live.slice(0, Math.max(0, live.length - limit + 1)).map((r) => r.id);
       for (const sid of evicted) {
-        await tx.update(adminSession).set({ terminatedAt: now, terminationReason: 'DEVICE_LIMIT' }).where(eq(adminSession.id, sid));
+        await tx.update(adminSession).set({ terminatedAt: now, terminationReason: 'DEVICE_LIMIT', deviceLabel: null }).where(eq(adminSession.id, sid));
       }
       await tx.insert(adminSession).values({
         id: i.id,
@@ -305,6 +352,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
         refreshHash: i.refreshHash,
         refreshFamily: i.refreshFamily,
         pairRef: i.pairRef,
+        deviceLabel: i.deviceLabel ?? null,
         createdAt: now,
         absoluteExpiresAt: new Date(i.absoluteExpiresAt),
         idleExpiresAt: new Date(i.idleExpiresAt),
@@ -446,7 +494,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
     return this.database.transaction(async (tx) => {
       const ended = await tx
         .update(adminSession)
-        .set({ terminatedAt: new Date(now), terminationReason: reason })
+        .set({ terminatedAt: new Date(now), terminationReason: reason, deviceLabel: null })
         .where(and(eq(adminSession.adminAccountId, accountId), ne(adminSession.id, keepSessionId), isNull(adminSession.terminatedAt)))
         .returning({ id: adminSession.id });
       const ids = ended.map((e) => e.id).sort();
@@ -955,14 +1003,55 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
     return this.#withDesignations(this.database.db as unknown as DbTransaction, rows);
   }
 
-  async liveSessions(id: string, now: number): Promise<{ id: string; createdAt: number; idleExpiresAt: number }[]> {
+  async liveSessions(id: string, now: number): Promise<{ id: string; pairRef: string; deviceLabel: string | null; createdAt: number; idleExpiresAt: number }[]> {
     const t = new Date(now);
     const rows = await this.database.db
-      .select({ id: adminSession.id, createdAt: adminSession.createdAt, idleExpiresAt: adminSession.idleExpiresAt })
+      .select({ id: adminSession.id, pairRef: adminSession.pairRef, deviceLabel: adminSession.deviceLabel, createdAt: adminSession.createdAt, idleExpiresAt: adminSession.idleExpiresAt })
       .from(adminSession)
       .where(and(eq(adminSession.adminAccountId, id), isNull(adminSession.terminatedAt), gt(adminSession.idleExpiresAt, t), gt(adminSession.absoluteExpiresAt, t)))
       .orderBy(asc(adminSession.createdAt));
-    return rows.map((r) => ({ id: r.id, createdAt: r.createdAt.getTime(), idleExpiresAt: r.idleExpiresAt.getTime() }));
+    return rows.map((r) => ({ id: r.id, pairRef: r.pairRef, deviceLabel: r.deviceLabel, createdAt: r.createdAt.getTime(), idleExpiresAt: r.idleExpiresAt.getTime() }));
+  }
+
+  async endDeviceSessions(i: { accountId: string; currentSessionId: string; targetSessionId: string; now: number }): Promise<{ kind: 'OK'; ended: string[] } | { kind: 'NOT_FOUND' }> {
+    return this.database.transaction(async (tx) => {
+      const now = new Date(i.now);
+      const [target] = await tx
+        .select({ id: adminSession.id, pairRef: adminSession.pairRef })
+        .from(adminSession)
+        .where(and(eq(adminSession.id, i.targetSessionId), eq(adminSession.adminAccountId, i.accountId), isNull(adminSession.terminatedAt), gt(adminSession.idleExpiresAt, now), gt(adminSession.absoluteExpiresAt, now)))
+        .for('update');
+      const [current] = await tx
+        .select({ id: adminSession.id, pairRef: adminSession.pairRef })
+        .from(adminSession)
+        .where(and(eq(adminSession.id, i.currentSessionId), eq(adminSession.adminAccountId, i.accountId), isNull(adminSession.terminatedAt), gt(adminSession.idleExpiresAt, now), gt(adminSession.absoluteExpiresAt, now)));
+      if (!target || !current) return { kind: 'NOT_FOUND' };
+      const sameDevice = target.pairRef === current.pairRef;
+      const rows = await tx
+        .select({ id: adminSession.id })
+        .from(adminSession)
+        .where(
+          and(
+            eq(adminSession.adminAccountId, i.accountId),
+            eq(adminSession.pairRef, target.pairRef),
+            isNull(adminSession.terminatedAt),
+            gt(adminSession.idleExpiresAt, now),
+            gt(adminSession.absoluteExpiresAt, now),
+            ...(sameDevice ? [ne(adminSession.id, i.currentSessionId)] : []),
+          ),
+        )
+        .for('update');
+      const ids = rows.map((r) => r.id).sort();
+      if (ids.length === 0) return { kind: 'NOT_FOUND' };
+      await tx.update(adminSession).set({ terminatedAt: now, terminationReason: 'LOGOUT', deviceLabel: null }).where(inArray(adminSession.id, ids));
+      const terminatedAt = now.toISOString();
+      await writeOutbox(
+        tx,
+        this.clock,
+        ids.map((sessionId) => ({ topic: CONTROL_TOPICS.sessionsTerminated, key: i.accountId, payload: Buffer.from(JSON.stringify({ accountId: i.accountId, sessionId, reason: 'LOGOUT', terminatedAt })) })),
+      );
+      return { kind: 'OK', ended: ids };
+    });
   }
 
   async setInviteToken(id: string, tokenHash: Buffer, expiresAt: number, now: number): Promise<boolean> {
@@ -1062,7 +1151,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
     if (ids.length === 0) return [];
     const ended = await tx
       .update(adminSession)
-      .set({ terminatedAt: new Date(now), terminationReason: reason })
+      .set({ terminatedAt: new Date(now), terminationReason: reason, deviceLabel: null })
       .where(and(inArray(adminSession.id, ids), isNull(adminSession.terminatedAt)))
       .returning({ id: adminSession.id, accountId: adminSession.adminAccountId });
     const sorted = ended.sort((a, b) => (a.id < b.id ? -1 : 1));

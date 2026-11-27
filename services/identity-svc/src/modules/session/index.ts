@@ -38,6 +38,7 @@ export { SeparateAccount } from './application/separate-account.js';
 export { RedisLinkProposals } from './adapters/redis-link-proposals.js';
 export { EndSession } from './application/end-session.js';
 export { EndDeviceSession } from './application/end-device-session.js';
+export { deviceLabelOf } from './application/device-label.js';
 export { ListSessions } from './application/list-sessions.js';
 export { ListScannerSessions, type ScannerSessionSelfView } from './application/list-scanner-sessions.js';
 export { EndScannerSession } from './application/end-scanner-session.js';

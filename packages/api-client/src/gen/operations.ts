@@ -134,7 +134,10 @@ export type OperationId =
   | 'createPartnerAuthPasskeyRegistration'
   | 'createPartnerAuthPasswordChange'
   | 'createPartnerAuthReauthentication'
+  | 'createPartnerAuthRecoveryCodes'
   | 'createPartnerAuthSession'
+  | 'createPartnerAuthTotpConfirmation'
+  | 'createPartnerAuthTotpEnrollment'
   | 'createPartnerAuthUnlock'
   | 'createPartnerAuthUnlockLink'
   | 'createPartnerEventAttendeeExport'
@@ -211,6 +214,7 @@ export type OperationId =
   | 'deleteOpsAdminAccountSessions'
   | 'deleteOpsAuthPasskey'
   | 'deletePartnerAuthPasskey'
+  | 'deletePartnerAuthSession'
   | 'deletePartnerProductionImage'
   | 'deletePartnerProductionSaleReview'
   | 'deletePartnerSaleEligibilityList'
@@ -279,6 +283,8 @@ export type OperationId =
   | 'getOrder'
   | 'getOrderPaymentStatus'
   | 'getPartnerAuthPasskeys'
+  | 'getPartnerAuthSecuritySettings'
+  | 'getPartnerAuthSessions'
   | 'getPartnerEventCancellation'
   | 'getPartnerEventFraudReport'
   | 'getPartnerEventGateStatus'
@@ -543,7 +549,10 @@ export const OPERATIONS = {
   createPartnerAuthPasskeyRegistration: {operationId: "createPartnerAuthPasskeyRegistration",method: "POST",path: "/v1/partner/auth/passkey-registrations",host: "partner-api",kind: "write",cookie: true},
   createPartnerAuthPasswordChange: {operationId: "createPartnerAuthPasswordChange",method: "POST",path: "/v1/partner/auth/password-changes",host: "partner-api",kind: "write",cookie: true},
   createPartnerAuthReauthentication: {operationId: "createPartnerAuthReauthentication",method: "POST",path: "/v1/partner/auth/reauthentications",host: "partner-api",kind: "write",cookie: true},
+  createPartnerAuthRecoveryCodes: {operationId: "createPartnerAuthRecoveryCodes",method: "POST",path: "/v1/partner/auth/recovery-codes",host: "partner-api",kind: "write",cookie: true},
   createPartnerAuthSession: {operationId: "createPartnerAuthSession",method: "POST",path: "/v1/partner/auth/sessions",host: "partner-api",kind: "write",cookie: true},
+  createPartnerAuthTotpConfirmation: {operationId: "createPartnerAuthTotpConfirmation",method: "POST",path: "/v1/partner/auth/totp-confirmations",host: "partner-api",kind: "write",cookie: true},
+  createPartnerAuthTotpEnrollment: {operationId: "createPartnerAuthTotpEnrollment",method: "POST",path: "/v1/partner/auth/totp-enrollments",host: "partner-api",kind: "write",cookie: true},
   createPartnerAuthUnlock: {operationId: "createPartnerAuthUnlock",method: "POST",path: "/v1/partner/auth/unlocks",host: "partner-api",kind: "write",cookie: false},
   createPartnerAuthUnlockLink: {operationId: "createPartnerAuthUnlockLink",method: "POST",path: "/v1/partner/auth/unlock-links",host: "partner-api",kind: "write",cookie: false},
   createPartnerEventAttendeeExport: {operationId: "createPartnerEventAttendeeExport",method: "POST",path: "/v1/partner/events/{eventId}/attendee-exports",host: "partner-api",kind: "write",cookie: true},
@@ -620,6 +629,7 @@ export const OPERATIONS = {
   deleteOpsAdminAccountSessions: {operationId: "deleteOpsAdminAccountSessions",method: "DELETE",path: "/v1/ops/admin-accounts/{adminAccountId}/sessions",host: "ops-api",kind: "write",cookie: true},
   deleteOpsAuthPasskey: {operationId: "deleteOpsAuthPasskey",method: "DELETE",path: "/v1/ops/auth/passkeys/{passkeyId}",host: "ops-api",kind: "write",cookie: true},
   deletePartnerAuthPasskey: {operationId: "deletePartnerAuthPasskey",method: "DELETE",path: "/v1/partner/auth/passkeys/{passkeyId}",host: "partner-api",kind: "write",cookie: true},
+  deletePartnerAuthSession: {operationId: "deletePartnerAuthSession",method: "DELETE",path: "/v1/partner/auth/sessions/{sessionId}",host: "partner-api",kind: "write",cookie: true},
   deletePartnerProductionImage: {operationId: "deletePartnerProductionImage",method: "DELETE",path: "/v1/partner/productions/{productionId}/images/{imageId}",host: "partner-api",kind: "write",cookie: true},
   deletePartnerProductionSaleReview: {operationId: "deletePartnerProductionSaleReview",method: "DELETE",path: "/v1/partner/productions/{productionId}/sale-review",host: "partner-api",kind: "write",cookie: true},
   deletePartnerSaleEligibilityList: {operationId: "deletePartnerSaleEligibilityList",method: "DELETE",path: "/v1/partner/productions/{productionId}/sale-eligibility-lists/{listKey}",host: "partner-api",kind: "write",cookie: true},
@@ -688,6 +698,8 @@ export const OPERATIONS = {
   getOrder: {operationId: "getOrder",method: "GET",path: "/v1/orders/{orderId}",host: "api",kind: "read",cookie: true},
   getOrderPaymentStatus: {operationId: "getOrderPaymentStatus",method: "GET",path: "/v1/orders/{orderId}/payment-status",host: "api",kind: "longpoll",cookie: true},
   getPartnerAuthPasskeys: {operationId: "getPartnerAuthPasskeys",method: "GET",path: "/v1/partner/auth/passkeys",host: "partner-api",kind: "read",cookie: true},
+  getPartnerAuthSecuritySettings: {operationId: "getPartnerAuthSecuritySettings",method: "GET",path: "/v1/partner/auth/security-settings",host: "partner-api",kind: "read",cookie: true},
+  getPartnerAuthSessions: {operationId: "getPartnerAuthSessions",method: "GET",path: "/v1/partner/auth/sessions",host: "partner-api",kind: "read",cookie: true},
   getPartnerEventCancellation: {operationId: "getPartnerEventCancellation",method: "GET",path: "/v1/partner/events/{eventId}/cancellation",host: "partner-api",kind: "read",cookie: true},
   getPartnerEventFraudReport: {operationId: "getPartnerEventFraudReport",method: "GET",path: "/v1/partner/events/{eventId}/fraud-report",host: "partner-api",kind: "read",cookie: true},
   getPartnerEventGateStatus: {operationId: "getPartnerEventGateStatus",method: "GET",path: "/v1/partner/events/{eventId}/gate-status",host: "partner-api",kind: "read",cookie: true},

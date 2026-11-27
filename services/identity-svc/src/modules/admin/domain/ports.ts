@@ -212,6 +212,10 @@ export interface AdminTotpState {
   seedEnc: Buffer | null;
   pendingEnc: Buffer | null;
   lastStep: number | null;
+  /** 대기 시드를 시작한 관리 세션(F-07-13). 확인은 이 세션에서만 된다 */
+  pendingSessionId: string | null;
+  /** 다시 등록 확인 코드 실패 수(로그인 2단계 실패 수와 별개) */
+  pendingFailures: number;
 }
 export interface LoginStepRow {
   id: string;
@@ -227,9 +231,16 @@ export const ADMIN_SECOND_STEP_STORE = Symbol('identity.AdminSecondStepStore');
 export interface AdminSecondStepStore {
   findLoginById(id: string): Promise<(AdminLoginAccount & { email: string; promoterId: string | null }) | null>;
   getTotp(id: string): Promise<AdminTotpState | null>;
-  setTotpPending(id: string, enc: Buffer, now: number): Promise<boolean>;
+  /** 대기 시드를 둔다(같은 계정의 앞선 대기 시드는 덮어쓴다). sessionId는 그 대기 시드를 시작한 세션(F-07-13) */
+  setTotpPending(id: string, enc: Buffer, now: number, sessionId?: string | null): Promise<boolean>;
   /** 대기 시드를 확정하고(받은 시간 칸을 적는다) 복구 코드를 모두 바꾼다 */
   confirmTotp(id: string, i: { seedEnc: Buffer; step: number; recoveryPhcs: string[]; now: number }): Promise<boolean>;
+  /** 다시 등록 확인: 그 세션이 시작한 대기 시드일 때만 확정한다(한 트랜잭션) */
+  confirmTotpForSession(i: { accountId: string; sessionId: string; seedEnc: Buffer; step: number; recoveryPhcs: string[]; now: number }): Promise<boolean>;
+  /** 다시 등록 확인 코드 실패를 단계에만 센다. limit번째까지는 남은 수를 주고, limit을 넘으면 대기 시드를 버리고 invalidated 참 */
+  recordTotpPendingFailure(accountId: string, sessionId: string, limit: number, now: number): Promise<{ failures: number; invalidated: boolean }>;
+  /** 인증 앱이 등록된 계정의 복구 코드를 모두 바꾼다(한 트랜잭션) */
+  replaceRecoveryCodes(id: string, recoveryPhcs: string[], now: number): Promise<boolean>;
   /** 그 시간 칸이 마지막으로 받은 칸보다 클 때만 적는다(같은 코드 재사용 막기). 적었으면 true */
   recordTotpStep(id: string, step: number, now: number): Promise<boolean>;
   listRecoveryCodes(id: string): Promise<{ id: string; phc: string }[]>;
@@ -243,14 +254,14 @@ export interface AdminSecondStepStore {
    * 같은 트랜잭션에 세션 종료 사건과 계정 주인 알림(SESSION_LIMIT)을 적는다. 끝낸 세션 ID를 돌려준다
    */
   createSession(
-    i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number },
+    i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; deviceLabel?: string | null },
     limit: number,
   ): Promise<{ evicted: string[] }>;
   /**
    * 로그인 2단계를 마친다(한 트랜잭션, BOT-120이 넘긴 것): 계정 행을 잠그고 코드를 쓴 것으로 적고(시간 칸은 recordTotpStep, 복구 코드는 useRecoveryCode와 같은 조건)
    * 로그인 단계를 쓴 것으로 적고(useLoginStep과 같은 조건) createSession과 같이 세션을 만든다. 그 사이 다른 요청이 코드를 썼으면 CODE_USED, 단계를 썼으면 STEP_USED이고 아무것도 쓰지 않는다
    */
-  finishSecondStep(i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number }, limit: number, use: SecondStepUse): Promise<{ kind: 'DONE'; evicted: string[] } | { kind: 'CODE_USED' } | { kind: 'STEP_USED' }>;
+  finishSecondStep(i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; deviceLabel?: string | null }, limit: number, use: SecondStepUse): Promise<{ kind: 'DONE'; evicted: string[] } | { kind: 'CODE_USED' } | { kind: 'STEP_USED' }>;
 }
 
 /** 2단계에서 쓸 것: 로그인 단계와 코드(TOTP 시간 칸 또는 복구 코드 행) */
@@ -436,7 +447,12 @@ export interface AdminManagementStore {
   getManaged(id: string): Promise<ManagedAccount | null>;
   /** 마지막 접속이 늦은 순(접속하지 않은 계정은 뒤)·ID 순. status는 보이는 상태(만료가 지난 INVITED는 INVITE_EXPIRED)로 거른다 */
   listManaged(q: { roles: readonly AdminRole[]; promoterId?: string; status?: AdminStatus; excludeRemoved?: boolean; after?: { lastLoginAt: number | null; id: string }; offset?: number; limit: number; now: number }): Promise<ManagedAccount[]>;
-  liveSessions(id: string, now: number): Promise<{ id: string; createdAt: number; idleExpiresAt: number }[]>;
+  liveSessions(id: string, now: number): Promise<{ id: string; pairRef: string; deviceLabel: string | null; createdAt: number; idleExpiresAt: number }[]>;
+  /**
+   * 내 계정의 기기 하나를 끊는다(F-07-13). 대상이 지금 세션과 같은 기기면 지금 세션만 남기고 같은 기기의 다른 로그인을,
+   * 다른 기기면 그 기기의 살아 있는 세션을 모두 끝낸다(LOGOUT, 세션 종료 사건). 지금 세션 자체는 끝내지 않는다.
+   */
+  endDeviceSessions(i: { accountId: string; currentSessionId: string; targetSessionId: string; now: number }): Promise<{ kind: 'OK'; ended: string[] } | { kind: 'NOT_FOUND' }>;
   /** 초대 메일을 보낼 때: 아직 INVITED이면 토큰 해시와 만료를 적는다(옛 토큰은 무효). 적었으면 true */
   setInviteToken(id: string, tokenHash: Buffer, expiresAt: number, now: number): Promise<boolean>;
   /** 만료가 지난 INVITED를 INVITE_EXPIRED로 바꾸고 토큰 해시를 지운다(정비 admin-invite-expired) */

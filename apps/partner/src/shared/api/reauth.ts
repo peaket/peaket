@@ -166,3 +166,25 @@ export async function requestReauth(act: 'PAYOUT_ACCOUNT' | 'BOOKER_EXPORT', inp
 export async function requestBookerExportReauth(input: { password: string; code: string }): Promise<string> {
   return requestReauth('BOOKER_EXPORT', input);
 }
+
+/**
+ * 내 계정 보안 설정(ACCOUNT_SECURITY) 재인증(F-07-13). 패스키가 없는 계정은 비밀번호·TOTP 토큰을 바로 받고,
+ * 패스키가 있는 계정은 withPasskey를 켜서 브라우저 패스키 창까지 거친다. 토큰은 서버가 한 번만 받는다.
+ */
+export async function requestAccountSecurityReauth(input: { password: string; code: string; withPasskey: boolean }): Promise<string> {
+  const first = await post({ act: 'ACCOUNT_SECURITY', password: input.password, code: input.code, ...(input.withPasskey ? { withPasskey: true } : {}) });
+  if (!input.withPasskey) {
+    if (first.next !== 'DONE') throw new Error('패스키를 요청하지 않았는데 패스키 단계가 왔습니다');
+    return first.reauthToken;
+  }
+  if (first.next === 'DONE') {
+    if (!hasPasskeyFactor(first.factors)) throw new Error('패스키 확인 없이 발급된 재인증 토큰은 쓸 수 없습니다');
+    return first.reauthToken;
+  }
+  if (typeof navigator === 'undefined' || !navigator.credentials?.get) throw new Error('이 브라우저에서는 패스키를 쓸 수 없습니다');
+  const credential = await navigator.credentials.get({ publicKey: toRequestOptions(first.publicKey) });
+  if (!credential) throw new Error('패스키 확인을 마치지 못했습니다');
+  const second = await post({ reauthStep: first.reauthStep, credential: serializeAssertion(credential) });
+  if (second.next !== 'DONE' || !hasPasskeyFactor(second.factors)) throw new Error('패스키 확인 없이 발급된 재인증 토큰은 쓸 수 없습니다');
+  return second.reauthToken;
+}

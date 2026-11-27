@@ -384,6 +384,8 @@ export type ProblemType =
   | 'ticket-ended'
   | 'too-many-requests'
   | 'toss-seller-registration-failed'
+  | 'totp-enrollment-invalid'
+  | 'totp-not-registered'
   | 'transfer-closed'
   | 'transfer-expired'
   | 'transfer-locked'
@@ -794,6 +796,8 @@ export const PROBLEM_TYPES = {
   'ticket-ended': { status: 409, title: "이미 끝난 티켓입니다" },
   'too-many-requests': { status: 429, title: "24시간 안에 이미 다시 받았습니다" },
   'toss-seller-registration-failed': { status: 502, title: "결제사 셀러 등록에 실패했습니다" },
+  'totp-enrollment-invalid': { status: 410, title: "인증 앱 다시 등록을 처음부터 해 주세요" },
+  'totp-not-registered': { status: 409, title: "인증 앱이 등록되어 있지 않습니다" },
   'transfer-closed': { status: 409, title: "양도 마감(공연 시작 2시간 전)이 지났습니다" },
   'transfer-expired': { status: 409, title: "양도 요청 기한이 지났습니다" },
   'transfer-locked': { status: 409, title: "지금은 양도할 수 없는 티켓입니다" },

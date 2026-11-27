@@ -14,6 +14,26 @@ import * as zod from 'zod';
 
 
 /**
+ * F-07-13, ASVS v5.0.0-7.5.2. 살아 있는 관리 세션을 출발지 묶음(pairRef)마다 한 줄로 준다. 지금 세션이 든 줄이 맨 앞이고 나머지는 마지막 활동이 늦은 순이다. 줄에는 대표 세션 ID·화면용 기기 이름·마지막 활동·지금 이 기기·같은 기기의 다른 로그인 수만 싣고 원문 User-Agent·IP·pairRef·토큰은 싣지 않는다. Cache-Control: no-store
+ * @summary 내 로그인 기기 목록(지금 기기 먼저)
+ */
+export const getPartnerAuthSessionsResponseItemsItemDeviceNameMax = 40;
+
+export const getPartnerAuthSessionsResponseItemsItemOtherSessionsMin = 0;
+
+
+
+export const GetPartnerAuthSessionsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "sessionId": zod.uuid(),
+  "deviceName": zod.string().max(getPartnerAuthSessionsResponseItemsItemDeviceNameMax).nullable(),
+  "lastActiveAt": zod.iso.datetime({"offset":true}),
+  "current": zod.boolean(),
+  "otherSessions": zod.int().min(getPartnerAuthSessionsResponseItemsItemOtherSessionsMin)
+}).describe('로그인 기기 한 줄(F-07-13). 원문 User-Agent·IP·출처 묶음·토큰은 싣지 않는다.'))
+})
+
+/**
  * FR-021, POL-020, ADR-0119(추천 적용 2026-10-28). 파트너 콘솔 화면이 partner-api로 바로 부르고 gw-partner가 identity의 관리 계정 로그인으로 넘긴다(관제 /v1/ops/auth/sessions와 같은 모양, Auth.js Credentials 없음). TOTP까지 맞으면 gw-partner 응답이 파트너 액세스 토큰 쿠키(__Secure-peaket_partner_at)와 리프레시 토큰 쿠키(__Secure-peaket_partner_rt)를 준다. 본문에 토큰 없음. JSON 본문이라 다른 출처면 사전 요청이 생기고 gw-partner가 Origin(파트너 콘솔 출처)을 확인한다
  * @summary 파트너 로그인 1단계(이메일·비밀번호) → 2단계 TOTP. 실패 제한·사람 확인
  */
@@ -56,6 +76,90 @@ export const CreatePartnerAuthSessionResponse = zod.union([zod.object({
  * @summary 파트너 로그아웃(지금 세션 끝내기)
  */
 export const DeleteMyPartnerAuthSessionResponse = zod.void()
+
+/**
+ * F-07-13, ASVS v5.0.0-7.4.3·7.5.2. 대상 세션과 같은 출발지 묶음의 살아 있는 세션을 지금 세션만 남기고 모두 끝낸다(LOGOUT, 세션 종료 사건). 지금 세션이 든 줄의 대표 세션 ID면 같은 기기의 다른 로그인만 끝내고, 그 줄에 다른 로그인이 없으면 404다. 다른 계정·없는 ID·이미 끝난 세션·모양이 틀린 ID도 같은 404 session-not-found이고 404는 재인증 토큰을 쓰지 않는다. Cache-Control: no-store
+ * @summary 다른 로그인 기기 끊기(재인증 토큰 필요, 지금 세션은 남김)
+ */
+export const DeletePartnerAuthSessionParams = zod.object({
+  "sessionId": zod.string()
+})
+
+export const DeletePartnerAuthSessionHeader = zod.object({
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
+})
+
+export const DeletePartnerAuthSessionResponse = zod.void()
+
+/**
+ * F-07-13, ASVS v5.0.0-6.3.3·6.4.4. 로그인한 계정의 인증 앱 등록 여부, 남은 복구 코드 행 수, 패스키 수, 세션 상한 2를 준다. Cache-Control: no-store
+ * @summary 내 계정 보안 요약(인증 앱·남은 복구 코드·패스키 수)
+ */
+export const getPartnerAuthSecuritySettingsResponseRecoveryCodesRemainingMin = 0;
+export const getPartnerAuthSecuritySettingsResponseRecoveryCodesRemainingMax = 10;
+
+export const getPartnerAuthSecuritySettingsResponsePasskeyCountMin = 0;
+export const getPartnerAuthSecuritySettingsResponsePasskeyCountMax = 10;
+
+
+
+export const GetPartnerAuthSecuritySettingsResponse = zod.object({
+  "totpRegistered": zod.boolean(),
+  "recoveryCodesRemaining": zod.int().min(getPartnerAuthSecuritySettingsResponseRecoveryCodesRemainingMin).max(getPartnerAuthSecuritySettingsResponseRecoveryCodesRemainingMax),
+  "passkeyCount": zod.int().min(getPartnerAuthSecuritySettingsResponsePasskeyCountMin).max(getPartnerAuthSecuritySettingsResponsePasskeyCountMax),
+  "sessionLimit": zod.literal(2)
+}).describe('SCR-020 내 계정 보안 요약(F-07-13). 남은 복구 코드는 행 수이고, 세션 상한은 2다.')
+
+/**
+ * F-07-13, ASVS v5.0.0-6.3.3. ACCOUNT_SECURITY 재인증 토큰(X-Reauth-Token)을 확인하고 새 시드를 대기 칸에 두고 otpauth 주소를 한 번 준다. 기존 인증 앱 시드는 확인 전까지 그대로이고, 대기 시드는 그 세션에 묶인다. 응답에 시드 원문·토큰·출처 묶음을 싣지 않는다. Cache-Control: no-store
+ * @summary 내 인증 앱 다시 등록 시작(새 시드, 재인증 토큰 필요)
+ */
+export const CreatePartnerAuthTotpEnrollmentHeader = zod.object({
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
+})
+
+export const CreatePartnerAuthTotpEnrollmentResponse = zod.object({
+  "otpauthUri": zod.string()
+})
+
+/**
+ * F-07-13, ASVS v5.0.0-6.3.3·6.4.4. 그 세션이 시작한 대기 시드에 대해서만 지금 30초 칸의 6자리 코드를 본다. 틀리면 422 reauth-code-invalid(remainingAttempts)이고 5번째까지 세며 6번째에 대기 시드를 버리고 410 totp-enrollment-invalid다. 이 실패는 로그인 2단계 실패 수·잠금과 섞지 않는다. 맞으면 새 시드·복구 코드 10개로 바꾸고 복구 코드는 이 응답에 한 번만 준다. Cache-Control: no-store
+ * @summary 내 인증 앱 다시 등록 확인(6자리 코드, 복구 코드 10개 한 번)
+ */
+export const createPartnerAuthTotpConfirmationBodyCodeMin = 6;
+export const createPartnerAuthTotpConfirmationBodyCodeMax = 32;
+
+
+
+export const CreatePartnerAuthTotpConfirmationBody = zod.object({
+  "code": zod.string().min(createPartnerAuthTotpConfirmationBodyCodeMin).max(createPartnerAuthTotpConfirmationBodyCodeMax)
+}).strict()
+
+export const createPartnerAuthTotpConfirmationResponseRecoveryCodesMin = 10;
+export const createPartnerAuthTotpConfirmationResponseRecoveryCodesMax = 10;
+
+
+
+export const CreatePartnerAuthTotpConfirmationResponse = zod.object({
+  "recoveryCodes": zod.array(zod.string()).min(createPartnerAuthTotpConfirmationResponseRecoveryCodesMin).max(createPartnerAuthTotpConfirmationResponseRecoveryCodesMax)
+})
+
+/**
+ * F-07-13, ASVS v5.0.0-6.4.4. ACCOUNT_SECURITY 재인증 토큰을 확인하고 인증 앱이 등록된 계정의 옛 복구 코드를 모두 지우고 새 10개를 한 번만 준다. 세션은 끝내지 않는다. 인증 앱이 없으면 409 totp-not-registered다. Cache-Control: no-store
+ * @summary 내 복구 코드 다시 만들기(재인증, 새 10개 한 번)
+ */
+export const CreatePartnerAuthRecoveryCodesHeader = zod.object({
+  "X-Reauth-Token": zod.string().describe('재인증 토큰(typ reauth+jwt, 5분 1회용). 팬·관리 계정 모두 이 헤더로만 받는다(guidelines §7). 패스키를 포함한 본인확인 수단으로 발급하며, 검증은 결제사 HTTP URL과 무관하게 identity-svc JWKS로 한다')
+})
+
+export const createPartnerAuthRecoveryCodesResponseRecoveryCodesMin = 10;
+export const createPartnerAuthRecoveryCodesResponseRecoveryCodesMax = 10;
+
+
+
+export const CreatePartnerAuthRecoveryCodesResponse = zod.object({
+  "recoveryCodes": zod.array(zod.string()).min(createPartnerAuthRecoveryCodesResponseRecoveryCodesMin).max(createPartnerAuthRecoveryCodesResponseRecoveryCodesMax)
+})
 
 /**
  * FR-021, POL-019, POL-020, ADR-0011(추천 적용 2026-10-15, ADR-0065 결정 11). 파트너 액세스 토큰(15분)을 유휴 만료(1시간)와 절대 만료(24시간) 안에서만 새로 준다. 지났으면 401이고 비밀번호와 TOTP로 다시 로그인한다. 재사용 탐지 시 패밀리 전체 폐기 + 세션 종료 이벤트(응답을 잃은 재시도의 30초 [가정] 유예는 팬 갱신과 같다, 기술 검토 중간-053). 본문이 없어 사전 요청이 생기지 않으므로 gw-partner가 Origin(파트너 콘솔 출처)을 확인한다

@@ -610,3 +610,55 @@ export async function getProductionDetail(productionId: string, signal?: AbortSi
   const r = await partnerApi().request<PartnerProductionDetail>(OPERATIONS.getPartnerProduction, { params: { productionId }, signal });
   return { productionId: r.productionId, title: r.title, ...(r.saleReview ? { saleReview: r.saleReview } : {}), events: Array.isArray(r.events) ? r.events : [] };
 }
+
+/* ---------- SCR-020 내 계정 보안(F-07-13) ---------- */
+
+/** GET /v1/partner/auth/security-settings 200 */
+export interface PartnerSecuritySettings {
+  totpRegistered: boolean;
+  recoveryCodesRemaining: number;
+  passkeyCount: number;
+  sessionLimit: number;
+}
+
+/** GET /v1/partner/auth/sessions 200의 한 줄 */
+export interface PartnerDeviceSession {
+  sessionId: string;
+  deviceName: string | null;
+  lastActiveAt: string;
+  current: boolean;
+  otherSessions: number;
+}
+
+export async function getPartnerAuthSecuritySettings(signal?: AbortSignal): Promise<PartnerSecuritySettings> {
+  const { partnerApi, OPERATIONS } = await load();
+  return partnerApi().request<PartnerSecuritySettings>(OPERATIONS.getPartnerAuthSecuritySettings, { signal });
+}
+
+export async function getPartnerAuthSessions(signal?: AbortSignal): Promise<PartnerDeviceSession[]> {
+  const { partnerApi, OPERATIONS } = await load();
+  const r = await partnerApi().request<{ items: PartnerDeviceSession[] }>(OPERATIONS.getPartnerAuthSessions, { signal });
+  return r.items;
+}
+
+/** 시작은 재인증 토큰을 X-Reauth-Token 머리로만 싣고 본문은 없다 */
+export async function beginPartnerTotpEnrollment(reauthToken: string): Promise<{ otpauthUri: string }> {
+  const { partnerApi, OPERATIONS } = await load();
+  return partnerApi().request<{ otpauthUri: string }>(OPERATIONS.createPartnerAuthTotpEnrollment, { headers: { 'X-Reauth-Token': reauthToken }, timeoutMs: 20_000 });
+}
+
+/** 확인 코드는 본문 { code }에만 싣는다(토큰·시드를 주소에 싣지 않는다) */
+export async function confirmPartnerTotpEnrollment(code: string): Promise<{ recoveryCodes: string[] }> {
+  const { partnerApi, OPERATIONS } = await load();
+  return partnerApi().request<{ recoveryCodes: string[] }>(OPERATIONS.createPartnerAuthTotpConfirmation, { body: { code }, timeoutMs: 20_000 });
+}
+
+export async function recreatePartnerRecoveryCodes(reauthToken: string): Promise<{ recoveryCodes: string[] }> {
+  const { partnerApi, OPERATIONS } = await load();
+  return partnerApi().request<{ recoveryCodes: string[] }>(OPERATIONS.createPartnerAuthRecoveryCodes, { headers: { 'X-Reauth-Token': reauthToken }, timeoutMs: 20_000 });
+}
+
+export async function deletePartnerAuthSession(sessionId: string, reauthToken: string): Promise<void> {
+  const { partnerApi, OPERATIONS } = await load();
+  await partnerApi().request(OPERATIONS.deletePartnerAuthSession, { params: { sessionId }, headers: { 'X-Reauth-Token': reauthToken }, timeoutMs: 20_000 });
+}

@@ -6,8 +6,8 @@ import { DESIGNATION_KINDS, type SecondStepUse } from '../domain/ports.js';
 import type { ReauthAct, ReauthFactor } from '../domain/passkey.js';
 
 type Row = AdminAccountRow &
-  AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null; totpSeedEnc: Buffer | null; totpPendingEnc: Buffer | null; totpLastStep: number | null; inviteTokenHash: Buffer | null; inviteExpiresAt: number | null; inviteStepHash: Buffer | null; inviteStepExpiresAt: number | null; inviteStepStage: InvitationStage | null; inviteStepCodeFailures: number; invitationAcceptedAt: number | null; removedAt: number | null; version: number };
-type SessionRow = { id: string; accountId: string; aud: AdminAud; refreshHash: string; prevRefreshHash: string | null; rotatedAt: number | null; refreshUsed: boolean; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; terminatedAt: number | null; terminationReason: string | null };
+  AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null; totpSeedEnc: Buffer | null; totpPendingEnc: Buffer | null; totpPendingSessionId: string | null; totpPendingFailures: number; totpLastStep: number | null; inviteTokenHash: Buffer | null; inviteExpiresAt: number | null; inviteStepHash: Buffer | null; inviteStepExpiresAt: number | null; inviteStepStage: InvitationStage | null; inviteStepCodeFailures: number; invitationAcceptedAt: number | null; removedAt: number | null; version: number };
+type SessionRow = { id: string; accountId: string; aud: AdminAud; refreshHash: string; prevRefreshHash: string | null; rotatedAt: number | null; refreshUsed: boolean; refreshFamily: string; pairRef: string; deviceLabel: string | null; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; terminatedAt: number | null; terminationReason: string | null };
 /** 패스키 행 복사(structuredClone은 Buffer를 평범한 Uint8Array로 바꾸므로 쓰지 않는다) */
 const clonePasskey = (p: AdminPasskeyRow): AdminPasskeyRow => ({ ...p, credentialId: Buffer.from(p.credentialId), publicKey: Buffer.from(p.publicKey), transports: [...p.transports] });
 type Step = { id: string; accountId: string; tokenHash: string; aud: AdminAud; pairRef: string; createdAt: number; expiresAt: number; usedAt: number | null; knownSource: boolean; passwordOnlyNoticedAt: number | null };
@@ -49,6 +49,8 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       lastLoginAt: null,
       totpSeedEnc: null,
       totpPendingEnc: null,
+      totpPendingSessionId: null,
+      totpPendingFailures: 0,
       totpLastStep: null,
       inviteTokenHash: null,
       inviteExpiresAt: null,
@@ -156,6 +158,8 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       passwordChangeRequired: false,
       totpSeedEnc: null,
       totpPendingEnc: null,
+      totpPendingSessionId: null,
+      totpPendingFailures: 0,
       totpLastStep: null,
       inviteStepHash: Buffer.from(i.stepHash),
       inviteStepExpiresAt: i.expiresAt,
@@ -201,6 +205,8 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     Object.assign(r, {
       totpSeedEnc: Buffer.from(i.seedEnc),
       totpPendingEnc: null,
+      totpPendingSessionId: null,
+      totpPendingFailures: 0,
       totpLastStep: i.step,
       inviteStepStage: 'PASSKEY',
       inviteStepCodeFailures: 0,
@@ -233,6 +239,8 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       inviteStepStage: null,
       inviteStepCodeFailures: 0,
       totpPendingEnc: null,
+      totpPendingSessionId: null,
+      totpPendingFailures: 0,
       invitationAcceptedAt: i.now,
       ...(i.displayName !== undefined ? { displayName: i.displayName } : {}),
       updatedAt: i.now,
@@ -319,22 +327,59 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
   async getTotp(id: string): Promise<AdminTotpState | null> {
     const r = this.#rows.get(id);
     if (!r || r.status === 'REMOVED') return null;
-    return { email: r.email, seedEnc: r.totpSeedEnc && Buffer.from(r.totpSeedEnc), pendingEnc: r.totpPendingEnc && Buffer.from(r.totpPendingEnc), lastStep: r.totpLastStep };
+    return {
+      email: r.email,
+      seedEnc: r.totpSeedEnc && Buffer.from(r.totpSeedEnc),
+      pendingEnc: r.totpPendingEnc && Buffer.from(r.totpPendingEnc),
+      lastStep: r.totpLastStep,
+      pendingSessionId: r.totpPendingSessionId,
+      pendingFailures: r.totpPendingFailures,
+    };
   }
 
-  async setTotpPending(id: string, enc: Buffer, now: number): Promise<boolean> {
+  async setTotpPending(id: string, enc: Buffer, now: number, sessionId?: string | null): Promise<boolean> {
     const r = this.#rows.get(id);
     if (!r || r.status === 'REMOVED') return false;
-    Object.assign(r, { totpPendingEnc: Buffer.from(enc), updatedAt: now });
+    Object.assign(r, { totpPendingEnc: Buffer.from(enc), totpPendingSessionId: sessionId ?? null, totpPendingFailures: 0, updatedAt: now });
     return true;
   }
 
   async confirmTotp(id: string, i: { seedEnc: Buffer; step: number; recoveryPhcs: string[]; now: number }): Promise<boolean> {
     const r = this.#rows.get(id);
     if (!r || r.status === 'REMOVED' || !r.totpPendingEnc || !r.totpPendingEnc.equals(i.seedEnc)) return false;
-    Object.assign(r, { totpSeedEnc: Buffer.from(i.seedEnc), totpPendingEnc: null, totpLastStep: i.step, updatedAt: i.now });
+    Object.assign(r, { totpSeedEnc: Buffer.from(i.seedEnc), totpPendingEnc: null, totpPendingSessionId: null, totpPendingFailures: 0, totpLastStep: i.step, updatedAt: i.now });
     for (let k = this.#recovery.length - 1; k >= 0; k--) if (this.#recovery[k]!.accountId === id) this.#recovery.splice(k, 1);
     for (const phc of i.recoveryPhcs) this.#recovery.push({ id: randomUUID(), accountId: id, phc });
+    return true;
+  }
+
+  async confirmTotpForSession(i: { accountId: string; sessionId: string; seedEnc: Buffer; step: number; recoveryPhcs: string[]; now: number }): Promise<boolean> {
+    const r = this.#rows.get(i.accountId);
+    if (!r || r.status === 'REMOVED' || !r.totpPendingEnc || r.totpPendingSessionId !== i.sessionId || !r.totpPendingEnc.equals(i.seedEnc)) return false;
+    Object.assign(r, { totpSeedEnc: Buffer.from(i.seedEnc), totpPendingEnc: null, totpPendingSessionId: null, totpPendingFailures: 0, totpLastStep: i.step, updatedAt: i.now });
+    for (let k = this.#recovery.length - 1; k >= 0; k--) if (this.#recovery[k]!.accountId === i.accountId) this.#recovery.splice(k, 1);
+    for (const phc of i.recoveryPhcs) this.#recovery.push({ id: randomUUID(), accountId: i.accountId, phc });
+    return true;
+  }
+
+  async recordTotpPendingFailure(accountId: string, sessionId: string, limit: number, now: number): Promise<{ failures: number; invalidated: boolean }> {
+    const r = this.#rows.get(accountId);
+    if (!r || r.status === 'REMOVED' || r.totpPendingSessionId !== sessionId) return { failures: 0, invalidated: true };
+    r.totpPendingFailures += 1;
+    r.updatedAt = now;
+    if (r.totpPendingFailures > limit) {
+      Object.assign(r, { totpPendingEnc: null, totpPendingSessionId: null, totpPendingFailures: 0 });
+      return { failures: limit + 1, invalidated: true };
+    }
+    return { failures: r.totpPendingFailures, invalidated: false };
+  }
+
+  async replaceRecoveryCodes(id: string, recoveryPhcs: string[], now: number): Promise<boolean> {
+    const r = this.#rows.get(id);
+    if (!r || r.status === 'REMOVED') return false;
+    for (let k = this.#recovery.length - 1; k >= 0; k--) if (this.#recovery[k]!.accountId === id) this.#recovery.splice(k, 1);
+    for (const phc of recoveryPhcs) this.#recovery.push({ id: randomUUID(), accountId: id, phc });
+    r.updatedAt = now;
     return true;
   }
 
@@ -393,19 +438,19 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     return this.#openSession(i, limit);
   }
 
-  #openSession(i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number }, limit: number): { evicted: string[] } {
+  #openSession(i: { id: string; accountId: string; aud: AdminAud; refreshHash: Buffer; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; deviceLabel?: string | null }, limit: number): { evicted: string[] } {
     const now = i.createdAt;
     const live = this.#sessions.filter((s) => s.accountId === i.accountId && s.terminatedAt === null && s.idleExpiresAt > now && s.absoluteExpiresAt > now).sort((a, b) => a.idleExpiresAt - b.idleExpiresAt);
     const evicted: string[] = [];
     while (live.length >= limit) {
       const s = live.shift()!;
-      Object.assign(s, { terminatedAt: now, terminationReason: 'DEVICE_LIMIT' });
+      Object.assign(s, { terminatedAt: now, terminationReason: 'DEVICE_LIMIT', deviceLabel: null });
       this.#terminated.push({ accountId: s.accountId, sessionId: s.id, reason: 'DEVICE_LIMIT' });
       evicted.push(s.id);
     }
     if (evicted.length > 0) this.#notices.push({ id: randomUUID(), accountId: i.accountId, kind: 'SESSION_LIMIT', at: now, sentAt: null });
     this.#issued.set(i.refreshHash.toString('hex'), { sessionId: i.id, refreshFamily: i.refreshFamily, expiresAt: i.absoluteExpiresAt });
-    this.#sessions.push({ id: i.id, accountId: i.accountId, aud: i.aud, refreshHash: i.refreshHash.toString('hex'), prevRefreshHash: null, rotatedAt: null, refreshUsed: false, refreshFamily: i.refreshFamily, pairRef: i.pairRef, createdAt: i.createdAt, absoluteExpiresAt: i.absoluteExpiresAt, idleExpiresAt: i.idleExpiresAt, terminatedAt: null, terminationReason: null });
+    this.#sessions.push({ id: i.id, accountId: i.accountId, aud: i.aud, refreshHash: i.refreshHash.toString('hex'), prevRefreshHash: null, rotatedAt: null, refreshUsed: false, refreshFamily: i.refreshFamily, pairRef: i.pairRef, deviceLabel: i.deviceLabel ?? null, createdAt: i.createdAt, absoluteExpiresAt: i.absoluteExpiresAt, idleExpiresAt: i.idleExpiresAt, terminatedAt: null, terminationReason: null });
     return { evicted };
   }
 
@@ -479,7 +524,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     const ended: string[] = [];
     for (const s of this.#sessions) {
       if (s.accountId !== accountId || s.id === keepSessionId || s.terminatedAt !== null) continue;
-      Object.assign(s, { terminatedAt: now, terminationReason: reason });
+      Object.assign(s, { terminatedAt: now, terminationReason: reason, deviceLabel: null });
       this.#terminated.push({ accountId, sessionId: s.id, reason });
       ended.push(s.id);
     }
@@ -657,7 +702,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       setRole: async (id, role, now) => patch(id, { role }, now),
       resetInvite: async (id, now) => patch(id, { status: 'INVITED', inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, invitationAcceptedAt: null }, now),
       wipeCredentials: async (id, now) => {
-        patch(id, { status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, invitationAcceptedAt: null, ...structuredClone(FRESH_LOGIN_STATE) }, now);
+        patch(id, { status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpPendingSessionId: null, totpPendingFailures: 0, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, invitationAcceptedAt: null, ...structuredClone(FRESH_LOGIN_STATE) }, now);
         drop(this.#recovery, (c) => c.accountId !== id);
         // 패스키도 지운다(수락 때 새로 등록한다, ASVS 6.4.4, BOT-122)
         drop(this.#passkeys, (p) => p.accountId !== id);
@@ -673,6 +718,8 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
             passwordPhc: null,
             totpSeedEnc: null,
             totpPendingEnc: null,
+            totpPendingSessionId: null,
+            totpPendingFailures: 0,
             totpLastStep: null,
             inviteTokenHash: null,
             inviteExpiresAt: null,
@@ -698,7 +745,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
         for (const s of this.#sessions) {
           if (s.accountId !== id || s.terminatedAt !== null) continue;
           const before = { terminatedAt: s.terminatedAt, terminationReason: s.terminationReason };
-          Object.assign(s, { terminatedAt: now, terminationReason: reason });
+          Object.assign(s, { terminatedAt: now, terminationReason: reason, deviceLabel: null });
           const ev = { accountId: id, sessionId: s.id, reason };
           this.#terminated.push(ev);
           undo.push(() => {
@@ -714,7 +761,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
         if (!s) return 'NOT_FOUND';
         if (s.terminatedAt !== null) return 'ALREADY';
         const before = { terminatedAt: s.terminatedAt, terminationReason: s.terminationReason };
-        Object.assign(s, { terminatedAt: now, terminationReason: 'ADMIN_FORCE' });
+        Object.assign(s, { terminatedAt: now, terminationReason: 'ADMIN_FORCE', deviceLabel: null });
         const ev = { accountId: id, sessionId: s.id, reason: 'ADMIN_FORCE' };
         this.#terminated.push(ev);
         undo.push(() => {
@@ -771,11 +818,29 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       .map((r) => this.#managed(r));
   }
 
-  async liveSessions(id: string, now: number): Promise<{ id: string; createdAt: number; idleExpiresAt: number }[]> {
+  async liveSessions(id: string, now: number): Promise<{ id: string; pairRef: string; deviceLabel: string | null; createdAt: number; idleExpiresAt: number }[]> {
     return this.#sessions
       .filter((s) => s.accountId === id && s.terminatedAt === null && s.idleExpiresAt > now && s.absoluteExpiresAt > now)
       .sort((a, b) => a.createdAt - b.createdAt)
-      .map((s) => ({ id: s.id, createdAt: s.createdAt, idleExpiresAt: s.idleExpiresAt }));
+      .map((s) => ({ id: s.id, pairRef: s.pairRef, deviceLabel: s.deviceLabel, createdAt: s.createdAt, idleExpiresAt: s.idleExpiresAt }));
+  }
+
+  async endDeviceSessions(i: { accountId: string; currentSessionId: string; targetSessionId: string; now: number }): Promise<{ kind: 'OK'; ended: string[] } | { kind: 'NOT_FOUND' }> {
+    const live = (s: SessionRow) => s.accountId === i.accountId && s.terminatedAt === null && s.idleExpiresAt > i.now && s.absoluteExpiresAt > i.now;
+    const current = this.#sessions.find((s) => s.id === i.currentSessionId && live(s));
+    const target = this.#sessions.find((s) => s.id === i.targetSessionId && live(s));
+    if (!current || !target) return { kind: 'NOT_FOUND' };
+    const ids = this.#sessions
+      .filter((s) => live(s) && s.pairRef === target.pairRef && (target.pairRef !== current.pairRef || s.id !== current.id))
+      .map((s) => s.id)
+      .sort();
+    if (ids.length === 0) return { kind: 'NOT_FOUND' };
+    for (const id of ids) {
+      const s = this.#sessions.find((x) => x.id === id)!;
+      Object.assign(s, { terminatedAt: i.now, terminationReason: 'LOGOUT', deviceLabel: null });
+      this.#terminated.push({ accountId: i.accountId, sessionId: id, reason: 'LOGOUT' });
+    }
+    return { kind: 'OK', ended: ids };
   }
 
   async setInviteToken(id: string, tokenHash: Buffer, expiresAt: number, now: number): Promise<boolean> {
@@ -886,7 +951,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     for (const id of [...ids].sort()) {
       const s = this.#sessions.find((x) => x.id === id);
       if (!s || s.terminatedAt !== null) continue;
-      Object.assign(s, { terminatedAt: now, terminationReason: reason });
+      Object.assign(s, { terminatedAt: now, terminationReason: reason, deviceLabel: null });
       this.#terminated.push({ accountId: s.accountId, sessionId: s.id, reason });
     }
   }

@@ -54,6 +54,7 @@ import type {
   AdminUnlockCreate,
   AdminUnlockLinkCreate,
   AttendeeExportPage,
+  CreatePartnerAuthTotpConfirmationBody,
   CreatePartnerEventAttendeeExportBody,
   CreatePartnerEventCancellationBody,
   CreatePartnerEventStaffInvitationBody,
@@ -80,6 +81,7 @@ import type {
   LiveSnapshot,
   OpsActor,
   PartnerAttendeePage,
+  PartnerDeviceSessionList,
   PartnerEventCancellationStatus,
   PartnerEventCreate,
   PartnerEventCreated,
@@ -106,11 +108,15 @@ import type {
   PartnerProductionPage,
   PartnerProductionUpdate,
   PartnerReauthPasswordStep,
+  PartnerRecoveryCodes,
   PartnerSaleReviewStatus,
   PartnerSalesReport,
+  PartnerSecuritySettings,
   PartnerSettlementExportCreate,
   PartnerTeamAccountPage,
   PartnerTodoSummary,
+  PartnerTotpConfirmation,
+  PartnerTotpEnrollment,
   PayoutAccountChange,
   ProductionImage,
   PromoterFraudReport,
@@ -140,11 +146,21 @@ import type {
 } from '../../model';
 
 
+export const getGetPartnerAuthSessionsResponseMock = (overrideResponse: Partial<Extract<PartnerDeviceSessionList, object>> = {}): PartnerDeviceSessionList => ({items: Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({sessionId: faker.string.uuid(), deviceName: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 40}}), null]), lastActiveAt: faker.date.past().toISOString().slice(0, 19) + 'Z', current: faker.datatype.boolean(), otherSessions: faker.number.int({min: 0})})), ...overrideResponse})
+
 export const getCreatePartnerAuthSessionResponseAdminLoginStepMock = (overrideResponse: Partial<AdminLoginStep> = {}): AdminLoginStep => ({...{next: faker.helpers.arrayElement(['TOTP'] as const), loginStep: faker.helpers.fromRegExp("^[A-Za-z0-9_-]{43}$"), expiresInSeconds: faker.number.int()}, ...overrideResponse});
 
 export const getCreatePartnerAuthSessionResponseAdminLoginDoneMock = (overrideResponse: Partial<AdminLoginDone> = {}): AdminLoginDone => ({...{next: faker.helpers.arrayElement(['DONE'] as const)}, ...overrideResponse});
 
 export const getCreatePartnerAuthSessionResponseMock = (): AdminLoginStep | AdminLoginDone => (faker.helpers.arrayElement([{...getCreatePartnerAuthSessionResponseAdminLoginStepMock()},{...getCreatePartnerAuthSessionResponseAdminLoginDoneMock()},]))
+
+export const getGetPartnerAuthSecuritySettingsResponseMock = (overrideResponse: Partial<Extract<PartnerSecuritySettings, object>> = {}): PartnerSecuritySettings => ({totpRegistered: faker.datatype.boolean(), recoveryCodesRemaining: faker.number.int({min: 0, max: 10}), passkeyCount: faker.number.int({min: 0, max: 10}), sessionLimit: faker.helpers.arrayElement([2] as const), ...overrideResponse})
+
+export const getCreatePartnerAuthTotpEnrollmentResponseMock = (overrideResponse: Partial<Extract<PartnerTotpEnrollment, object>> = {}): PartnerTotpEnrollment => ({otpauthUri: faker.string.alpha({length: {min: 10, max: 20}}), ...overrideResponse})
+
+export const getCreatePartnerAuthTotpConfirmationResponseMock = (overrideResponse: Partial<Extract<PartnerTotpConfirmation, object>> = {}): PartnerTotpConfirmation => ({recoveryCodes: Array.from({ length: faker.number.int({min: 10, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), ...overrideResponse})
+
+export const getCreatePartnerAuthRecoveryCodesResponseMock = (overrideResponse: Partial<Extract<PartnerRecoveryCodes, object>> = {}): PartnerRecoveryCodes => ({recoveryCodes: Array.from({ length: faker.number.int({min: 10, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), ...overrideResponse})
 
 export const getCreatePartnerAuthReauthenticationResponseAdminReauthPasskeyChallengeMock = (overrideResponse: Partial<AdminReauthPasskeyChallenge> = {}): AdminReauthPasskeyChallenge => ({...{next: faker.helpers.arrayElement(['PASSKEY'] as const), reauthStep: faker.helpers.fromRegExp("^[A-Za-z0-9_-]{43}$"), publicKey: {challenge: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), rpId: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), timeout: faker.helpers.arrayElement([faker.number.int(), undefined]), userVerification: faker.helpers.arrayElement([faker.helpers.arrayElement(['required'] as const), undefined]), allowCredentials: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => ({id: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), type: faker.helpers.arrayElement([faker.helpers.arrayElement(['public-key'] as const), undefined]), transports: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined])})), undefined])}, expiresInSeconds: faker.number.int()}, ...overrideResponse});
 
@@ -309,6 +325,18 @@ export const getCreatePartnerAuthInvitationPasskeyRegistrationResponseMock = (ov
 export const getCreatePartnerAuthInvitationPasskeyResponseMock = (overrideResponse: Partial<Extract<AdminPasskey, object>> = {}): AdminPasskey => ({passkeyId: faker.helpers.arrayElement([faker.string.uuid(), undefined]), name: faker.helpers.arrayElement([faker.string.alpha({length: {min: 10, max: 20}}), undefined]), createdAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', undefined]), lastUsedAt: faker.helpers.arrayElement([faker.date.past().toISOString().slice(0, 19) + 'Z', null]), backedUp: faker.helpers.arrayElement([faker.datatype.boolean(), undefined]), deviceType: faker.helpers.arrayElement([faker.helpers.arrayElement(['singleDevice','multiDevice'] as const), undefined]), transports: faker.helpers.arrayElement([Array.from({ length: faker.number.int({min: 1, max: 10}) }, (_, i) => i + 1).map(() => (faker.string.alpha({length: {min: 10, max: 20}}))), undefined]), ...overrideResponse})
 
 
+export const getGetPartnerAuthSessionsMockHandler = (overrideResponse?: PartnerDeviceSessionList | ((info: Parameters<HttpResponseResolver>[0]) => Promise<PartnerDeviceSessionList> | PartnerDeviceSessionList), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/partner/auth/sessions', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetPartnerAuthSessionsResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
 export const getCreatePartnerAuthSessionMockHandler = (overrideResponse?: AdminLoginStep | AdminLoginDone | ((info: Parameters<HttpResponseResolver<PathParams, AdminLoginPasswordStep | AdminLoginSecondStep>>[0]) => Promise<AdminLoginStep | AdminLoginDone> | AdminLoginStep | AdminLoginDone), options?: RequestHandlerOptions) => {
   return http.post<PathParams, AdminLoginPasswordStep | AdminLoginSecondStep>('*/v1/partner/auth/sessions', async (info: Parameters<HttpResponseResolver<PathParams, AdminLoginPasswordStep | AdminLoginSecondStep>>[0]) => {
 
@@ -327,6 +355,64 @@ export const getDeleteMyPartnerAuthSessionMockHandler = (overrideResponse?: void
 
     return new HttpResponse(null,
       { status: 204
+      })
+  }, options)
+}
+
+export const getDeletePartnerAuthSessionMockHandler = (overrideResponse?: void | ((info: Parameters<HttpResponseResolver<{ sessionId: string }>>[0]) => Promise<void> | void), options?: RequestHandlerOptions) => {
+  return http.delete<{ sessionId: string }>('*/v1/partner/auth/sessions/:sessionId', async (info: Parameters<HttpResponseResolver<{ sessionId: string }>>[0]) => {
+  if (typeof overrideResponse === 'function') {await overrideResponse(info); }
+
+    return new HttpResponse(null,
+      { status: 204
+      })
+  }, options)
+}
+
+export const getGetPartnerAuthSecuritySettingsMockHandler = (overrideResponse?: PartnerSecuritySettings | ((info: Parameters<HttpResponseResolver>[0]) => Promise<PartnerSecuritySettings> | PartnerSecuritySettings), options?: RequestHandlerOptions) => {
+  return http.get('*/v1/partner/auth/security-settings', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getGetPartnerAuthSecuritySettingsResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreatePartnerAuthTotpEnrollmentMockHandler = (overrideResponse?: PartnerTotpEnrollment | ((info: Parameters<HttpResponseResolver>[0]) => Promise<PartnerTotpEnrollment> | PartnerTotpEnrollment), options?: RequestHandlerOptions) => {
+  return http.post('*/v1/partner/auth/totp-enrollments', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreatePartnerAuthTotpEnrollmentResponseMock(),
+      { status: 201
+      })
+  }, options)
+}
+
+export const getCreatePartnerAuthTotpConfirmationMockHandler = (overrideResponse?: PartnerTotpConfirmation | ((info: Parameters<HttpResponseResolver<PathParams, CreatePartnerAuthTotpConfirmationBody>>[0]) => Promise<PartnerTotpConfirmation> | PartnerTotpConfirmation), options?: RequestHandlerOptions) => {
+  return http.post<PathParams, CreatePartnerAuthTotpConfirmationBody>('*/v1/partner/auth/totp-confirmations', async (info: Parameters<HttpResponseResolver<PathParams, CreatePartnerAuthTotpConfirmationBody>>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreatePartnerAuthTotpConfirmationResponseMock(),
+      { status: 200
+      })
+  }, options)
+}
+
+export const getCreatePartnerAuthRecoveryCodesMockHandler = (overrideResponse?: PartnerRecoveryCodes | ((info: Parameters<HttpResponseResolver>[0]) => Promise<PartnerRecoveryCodes> | PartnerRecoveryCodes), options?: RequestHandlerOptions) => {
+  return http.post('*/v1/partner/auth/recovery-codes', async (info: Parameters<HttpResponseResolver>[0]) => {
+
+
+    return HttpResponse.json(overrideResponse !== undefined
+    ? (typeof overrideResponse === "function" ? await overrideResponse(info) : overrideResponse)
+    : getCreatePartnerAuthRecoveryCodesResponseMock(),
+      { status: 200
       })
   }, options)
 }
@@ -1331,8 +1417,14 @@ export const getCreatePartnerAuthInvitationCompletionMockHandler = (overrideResp
   }, options)
 }
 export const getPartnerMock = () => [
+  getGetPartnerAuthSessionsMockHandler(),
   getCreatePartnerAuthSessionMockHandler(),
   getDeleteMyPartnerAuthSessionMockHandler(),
+  getDeletePartnerAuthSessionMockHandler(),
+  getGetPartnerAuthSecuritySettingsMockHandler(),
+  getCreatePartnerAuthTotpEnrollmentMockHandler(),
+  getCreatePartnerAuthTotpConfirmationMockHandler(),
+  getCreatePartnerAuthRecoveryCodesMockHandler(),
   getCreatePartnerAuthAccessTokenMockHandler(),
   getCreatePartnerAuthUnlockMockHandler(),
   getCreatePartnerAuthUnlockLinkMockHandler(),

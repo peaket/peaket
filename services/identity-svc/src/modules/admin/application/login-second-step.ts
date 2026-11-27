@@ -65,7 +65,7 @@ export class LoginSecondStep {
   ) {}
 
   /** @throws LoginCountersUnavailable·PepperUnavailable·TotpKeyUnavailable(받는 층이 503으로) */
-  async run(i: { aud: AdminAud; loginStep: string; code: string; ip: string; deviceId: string }): Promise<SecondStepOutcome> {
+  async run(i: { aud: AdminAud; loginStep: string; code: string; ip: string; deviceId: string; deviceLabel?: string | null }): Promise<SecondStepOutcome> {
     const step = await this.store.findLoginStep(createHash('sha256').update(i.loginStep).digest());
     const now0 = this.clock.now();
     if (!step || step.usedAt !== null || step.expiresAt <= now0 || step.aud !== i.aud) return { kind: 'STEP_INVALID' };
@@ -81,7 +81,7 @@ export class LoginSecondStep {
     }
   }
 
-  async #attempt(i: { aud: AdminAud; code: string; ip: string }, stepId: string, accountId: string, pair: string): Promise<SecondStepOutcome> {
+  async #attempt(i: { aud: AdminAud; code: string; ip: string; deviceLabel?: string | null }, stepId: string, accountId: string, pair: string): Promise<SecondStepOutcome> {
     const now = this.clock.now();
     const account = await this.store.findLoginById(accountId);
     if (!account || account.status !== 'ACTIVE' || !ROLES_OF_AUD[i.aud].includes(account.role)) return { kind: 'STEP_INVALID' };
@@ -105,7 +105,7 @@ export class LoginSecondStep {
     const refreshToken = randomBytes(32).toString('base64url');
     const absoluteExpiresAt = now + ADMIN_SESSION_ABSOLUTE_MS;
     const done = await this.store.finishSecondStep(
-      { id: sessionId, accountId, aud: i.aud, refreshHash: createHash('sha256').update(refreshToken).digest(), refreshFamily: randomUUID(), pairRef: pair, createdAt: now, absoluteExpiresAt, idleExpiresAt: now + ADMIN_SESSION_IDLE_MS },
+      { id: sessionId, accountId, aud: i.aud, refreshHash: createHash('sha256').update(refreshToken).digest(), refreshFamily: randomUUID(), pairRef: pair, createdAt: now, absoluteExpiresAt, idleExpiresAt: now + ADMIN_SESSION_IDLE_MS, deviceLabel: i.deviceLabel ?? null },
       ADMIN_SESSION_LIMIT,
       { stepId, code: check.use },
     );
