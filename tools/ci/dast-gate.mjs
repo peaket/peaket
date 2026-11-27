@@ -39,7 +39,10 @@ export function toSarif(report) {
     for (const [ai, alert] of alerts.entries()) {
       if (alert === null || typeof alert !== 'object') throw new Error(`site[${si}].alerts[${ai}]가 객체가 아니다`);
       const pluginId = str(alert.pluginid) || 'unknown';
-      const riskCode = Number(alert.riskcode);
+      // null·''·false를 Number()로 바꾸면 0(Informational)이 되어 통과한다(IR096-06). 숫자·숫자 글자 0~3만 읽는다
+      const rawRisk = alert.riskcode;
+      const riskText = typeof rawRisk === 'string' ? rawRisk.trim() : rawRisk;
+      const riskCode = typeof riskText === 'number' || (typeof riskText === 'string' && /^[0-3]$/.test(riskText)) ? Number(riskText) : Number.NaN;
       const known = riskCode === 0 || riskCode === 1 || riskCode === 2 || riskCode === 3;
       // 모르는/빠진 등급은 High로 보아 막는다(닫힘 실패, BAT-045 RV-13a). 0~3만 지금 등급 그대로다
       const severity = known ? SEVERITY_OF_RISK[riskCode] : 9.0;

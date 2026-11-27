@@ -95,6 +95,17 @@ export class AdminAccounts {
     }
     const key = idempotencyKeyOf(idempotencyKey);
     const bodyHash = bodyHashOf({ email: body.email, displayName: body.displayName, role: body.role, ...(body.promoterId ? { promoterId: body.promoterId } : {}) });
+    // 재인증·멱등을 먼저 본다: 재인증 없는 요청이나 같은 키 재전송이 파트너사 존재를 떠보거나 조회 장애에 걸리지 않게(IR096-03)
+    await this.#reauth(reauthToken, actor);
+    const requestId = requestIdOf('admin-invite', actor.accountId, key, bodyHash);
+    const prior = await this.#prior(actor.accountId, 'admin-invite', key, bodyHash);
+    if (typeof prior?.createdAccountId === 'string') {
+      const a = await this.d.identity.get(prior.createdAccountId);
+      if (a) return a;
+    }
+    if (body.promoterId && !isPartnerRole(body.role)) {
+      throw new ProblemError({ type: 'promoter-mismatch', status: 422, title: '파트너사 조건이 맞지 않습니다', detail: '관제 역할에는 promoterId를 넣지 않습니다' });
+    }
     // 파트너사가 실제로 있는지 identity를 부르기 전에 본다(RV-12). 조회 장애는 닫힌 쪽(503)이다
     if (body.promoterId && this.d.promoters) {
       let exists: boolean;
@@ -104,13 +115,6 @@ export class AdminAccounts {
         throw new ProblemError({ type: 'promoter-directory-unavailable', status: 503, title: '파트너사 정보를 확인할 수 없습니다', retryAfterSeconds: 5 });
       }
       if (!exists) throw new ProblemError({ type: 'unknown-promoter', status: 422, title: '등록되지 않은 파트너사입니다' });
-    }
-    await this.#reauth(reauthToken, actor);
-    const requestId = requestIdOf('admin-invite', actor.accountId, key, bodyHash);
-    const prior = await this.#prior(actor.accountId, 'admin-invite', key, bodyHash);
-    if (typeof prior?.createdAccountId === 'string') {
-      const a = await this.d.identity.get(prior.createdAccountId);
-      if (a) return a;
     }
     const payload = { action: 'INVITED', role: body.role, ...(body.promoterId ? { promoterId: body.promoterId } : {}), idempotencyKey: key, bodyHash, operation: 'admin-invite' };
     await this.#audit('ADMIN_ACCOUNT_INVITED', actor.accountId, actor, { ...payload, requestId, status: 'REQUESTED' });
@@ -131,32 +135,31 @@ export class AdminAccounts {
     if (target.adminAccountId === actor.accountId) throw new ProblemError({ type: 'self-target-forbidden', status: 403, title: '자기 계정에는 할 수 없습니다', detail: '자기 역할은 바꿀 수 없습니다' });
     if (isPartnerRole(target.role) !== isPartnerRole(body.role)) throw new ProblemError({ type: 'role-group-mismatch', status: 422, title: '파트너 역할과 관제 역할 사이는 바꿀 수 없습니다' });
     if (actor.role !== 'commander' && (!isPartnerRole(target.role) || !isPartnerRole(body.role))) throw new ProblemError({ type: 'admin-role-not-allowed', status: 403, title: '이 역할로는 초대할 수 없습니다', detail: '그 역할의 계정을 다룰 수 없습니다' });
-    const version = parseIfMatch(ifMatch);
-    if (version === null) throw new ProblemError({ type: 'precondition-required', status: 428, title: '고칠 판(If-Match)을 보내 주세요' });
-    if (version !== target.version) throw new ProblemError({ type: 'precondition-failed', status: 412, title: '다른 사람이 먼저 고쳤습니다' });
-    if (target.status === 'REMOVED') throw new ProblemError({ type: 'admin-account-state-conflict', status: 409, title: '지금 계정 상태에서는 할 수 없습니다', detail: '삭제한 계정입니다' });
     const reason = reasonOf(body.reason);
     await this.#reauth(reauthToken, actor);
     const key = idempotencyKey === undefined ? undefined : idempotencyKeyOf(idempotencyKey);
     const bodyHash = bodyHashOf({ role: body.role, reason });
     const requestId = key ? requestIdOf('admin-role', accountId, key, bodyHash) : uuidv7(this.d.clock);
     const commanderChange = target.role === 'commander' || body.role === 'commander';
+    // 같은 키·본문 재전송은 판(If-Match)이 이미 올라갔어도 처음 답을 그대로 준다(IR096-02).
+    // 승인 업무는 성공 감사가 없으므로 REQUESTED에 남은 approvalId로도 알아본다(RV-17)
+    const prior = key ? await this.#prior(accountId, 'admin-role', key, bodyHash, commanderChange) : null;
+    if (commanderChange && typeof prior?.approvalId === 'string') {
+      const approval = await this.d.approvals.get(prior.approvalId, actor);
+      return { kind: 'approval', approval };
+    }
+    if (!commanderChange && prior) {
+      const { sessions: _sessions, ...view } = await this.get(accountId);
+      return { kind: 'changed', account: view };
+    }
+    const version = parseIfMatch(ifMatch);
+    if (version === null) throw new ProblemError({ type: 'precondition-required', status: 428, title: '고칠 판(If-Match)을 보내 주세요' });
+    if (version !== target.version) throw new ProblemError({ type: 'precondition-failed', status: 412, title: '다른 사람이 먼저 고쳤습니다' });
+    if (target.status === 'REMOVED') throw new ProblemError({ type: 'admin-account-state-conflict', status: 409, title: '지금 계정 상태에서는 할 수 없습니다', detail: '삭제한 계정입니다' });
     if (commanderChange) {
-      // 승인 업무는 성공 감사가 없으므로 REQUESTED에 남은 approvalId로도 재전송을 알아본다(RV-17)
-      const prior = key ? await this.#prior(accountId, 'admin-role', key, bodyHash, true) : null;
-      if (typeof prior?.approvalId === 'string') {
-        const approval = await this.d.approvals.get(prior.approvalId, actor);
-        return { kind: 'approval', approval };
-      }
       const r = await this.d.approvals.create({ targetRef: accountId, targetVersion: target.version, fromRole: target.role, requestedRole: body.role, reason, requestedBy: actor.accountId });
       await this.#audit('ADMIN_ACCOUNT_ROLE_CHANGED', accountId, actor, { action: 'ROLE_CHANGED', fromRole: target.role, toRole: body.role, reason, ...(key ? { idempotencyKey: key, bodyHash, operation: 'admin-role' } : {}), requestId, approvalId: r.approvalId, status: 'REQUESTED' });
       return { kind: 'approval', approval: roleChangeApprovalView(r, actor) };
-    }
-    // 비-commander 역할 변경은 성공 감사에 같은 키·본문 해시를 남겨 재전송을 같은 답으로 돌려준다(RV-17)
-    const prior = key ? await this.#prior(accountId, 'admin-role', key, bodyHash) : null;
-    if (prior) {
-      const { sessions: _sessions, ...view } = await this.get(accountId);
-      return { kind: 'changed', account: view };
     }
     await this.#audit('ADMIN_ACCOUNT_ROLE_CHANGED', accountId, actor, { action: 'ROLE_CHANGED', fromRole: target.role, toRole: body.role, reason, ...(key ? { idempotencyKey: key, bodyHash, operation: 'admin-role' } : {}), requestId, status: 'REQUESTED' });
     try {

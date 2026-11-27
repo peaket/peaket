@@ -5,5 +5,4 @@ ALTER TABLE "admin_account" ADD COLUMN "invite_step_hash" bytea;
 ALTER TABLE "admin_account" ADD COLUMN "invite_step_expires_at" timestamptz;
 ALTER TABLE "admin_account" ADD COLUMN "invite_step_stage" text;
 ALTER TABLE "admin_account" ADD COLUMN "invite_step_code_failures" integer NOT NULL DEFAULT 0;
-ALTER TABLE "admin_account" ADD COLUMN "invitation_accepted_at" timestamptz;
 ALTER TABLE "admin_account" ADD CONSTRAINT "admin_account_invite_step_stage_check" CHECK ("invite_step_stage" is null or "invite_step_stage" in ('PASSWORD', 'TOTP', 'PASSKEY'));

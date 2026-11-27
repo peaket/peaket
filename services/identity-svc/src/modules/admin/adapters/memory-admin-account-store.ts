@@ -1,4 +1,4 @@
-// 관리 계정 저장소의 메모리 구현(시험·로컬, BUILD_ORDER BOT-110·BOT-111). 계정을 만드는 길(초대)은 BOT-150이라 시험은 create로 바로 만든다.
+﻿// 관리 계정 저장소의 메모리 구현(시험·로컬, BUILD_ORDER BOT-110·BOT-111). 계정을 만드는 길(초대)은 BOT-150이라 시험은 create로 바로 만든다.
 import { FRESH_LOGIN_STATE, type AccountLoginState, type NoticeKind } from '../domain/login-rules.js';
 import { randomUUID } from 'node:crypto';
 import type { AdminAccountRequestKind, AdminAccountRow, AdminAccountStore, AdminAud, AdminInvitationRow, AdminInvitationStore, AdminLoginAccount, AdminLoginStore, AdminManagementStore, AdminManagementTx, AdminPasskeyRow, AdminPasskeyStore, AdminReauthRecord, AdminRefreshRow, AdminRefreshStore, AdminRefreshTx, AdminRole, InvitationStage, ManagedAccount, AdminSecondStepStore, AdminSessionEndReason, AdminSessionRow, AdminSessionStore, AdminStatus, AdminTotpState, AdminUnlockStore, DesignationKind, LoginStepRow, PendingNotice, UnlockLinkRow } from '../domain/ports.js';
@@ -6,7 +6,7 @@ import { DESIGNATION_KINDS, type SecondStepUse } from '../domain/ports.js';
 import type { ReauthAct, ReauthFactor } from '../domain/passkey.js';
 
 type Row = AdminAccountRow &
-  AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null; totpSeedEnc: Buffer | null; totpPendingEnc: Buffer | null; totpLastStep: number | null; inviteTokenHash: Buffer | null; inviteExpiresAt: number | null; inviteStepHash: Buffer | null; inviteStepExpiresAt: number | null; inviteStepStage: InvitationStage | null; inviteStepCodeFailures: number; invitationAcceptedAt: number | null; removedAt: number | null; version: number };
+  AccountLoginState & { updatedAt: number; passwordChangeRequired: boolean; secondFactorFailures: number; lastLoginAt: number | null; totpSeedEnc: Buffer | null; totpPendingEnc: Buffer | null; totpLastStep: number | null; inviteTokenHash: Buffer | null; inviteExpiresAt: number | null; inviteStepHash: Buffer | null; inviteStepExpiresAt: number | null; inviteStepStage: InvitationStage | null; inviteStepCodeFailures: number; removedAt: number | null; version: number };
 type SessionRow = { id: string; accountId: string; aud: AdminAud; refreshHash: string; prevRefreshHash: string | null; rotatedAt: number | null; refreshUsed: boolean; refreshFamily: string; pairRef: string; createdAt: number; absoluteExpiresAt: number; idleExpiresAt: number; terminatedAt: number | null; terminationReason: string | null };
 /** 패스키 행 복사(structuredClone은 Buffer를 평범한 Uint8Array로 바꾸므로 쓰지 않는다) */
 const clonePasskey = (p: AdminPasskeyRow): AdminPasskeyRow => ({ ...p, credentialId: Buffer.from(p.credentialId), publicKey: Buffer.from(p.publicKey), transports: [...p.transports] });
@@ -56,7 +56,6 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       inviteStepExpiresAt: null,
       inviteStepStage: null,
       inviteStepCodeFailures: 0,
-      invitationAcceptedAt: null,
       removedAt: null,
       version: 1,
       ...structuredClone(FRESH_LOGIN_STATE),
@@ -66,7 +65,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
   /** 시험용: 삭제 상태로 바꾼다(삭제 경로는 BOT-150) */
   remove(id: string): void {
     const r = this.#rows.get(id);
-    if (r) this.#rows.set(id, { ...r, status: 'REMOVED', inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, invitationAcceptedAt: null });
+    if (r) this.#rows.set(id, { ...r, status: 'REMOVED', inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0 });
   }
 
   /** 시험용: 역할을 바로 바꾼다(바꾸는 길은 BOT-150) */
@@ -233,7 +232,6 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
       inviteStepStage: null,
       inviteStepCodeFailures: 0,
       totpPendingEnc: null,
-      invitationAcceptedAt: i.now,
       ...(i.displayName !== undefined ? { displayName: i.displayName } : {}),
       updatedAt: i.now,
       version: r.version + 1,
@@ -243,7 +241,7 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
 
   #loginView(r: Row): AdminLoginAccount {
     const state: AccountLoginState = { failedAttempts: r.failedAttempts, passwordFailureTotal: r.passwordFailureTotal, secondFactorFailures: r.secondFactorFailures, lockKind: r.lockKind, lockedUntil: r.lockedUntil, recentLockAt: [...r.recentLockAt], lockReason: r.lockReason, lockedAt: r.lockedAt };
-    return { id: r.id, role: r.role, status: r.status, passwordPhc: r.passwordPhc, breachCheckedAt: r.breachCheckedAt, passwordChangeRequired: r.passwordChangeRequired, invitationAcceptedAt: r.invitationAcceptedAt, state };
+    return { id: r.id, role: r.role, status: r.status, passwordPhc: r.passwordPhc, breachCheckedAt: r.breachCheckedAt, passwordChangeRequired: r.passwordChangeRequired, state };
   }
 
   async updateLoginState(id: string, now: number, fn: (cur: AccountLoginState) => { next: AccountLoginState; notices: NoticeKind[] } | null): Promise<AccountLoginState | null> {
@@ -345,9 +343,8 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     return true;
   }
 
-  // 시험용 저장소는 동기 배열을 돌려준다(계약은 Promise이지만 await해도 같은 배열이다). 시험이 await 없이 길이를 본다
-  listRecoveryCodes(id: string): Promise<{ id: string; phc: string }[]> {
-    return this.recoveryCodes(id) as unknown as Promise<{ id: string; phc: string }[]>;
+  async listRecoveryCodes(id: string): Promise<{ id: string; phc: string }[]> {
+    return this.recoveryCodes(id);
   }
 
   async useRecoveryCode(rowId: string): Promise<boolean> {
@@ -492,9 +489,8 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
     return this.#reauths.filter((r) => r.accountId === accountId).map((r) => ({ ...r, factors: [...r.factors] }));
   }
 
-  // 시험용 저장소는 동기 배열을 돌려준다(계약은 Promise이지만 await해도 같은 배열이다)
-  listPasskeys(accountId: string): Promise<AdminPasskeyRow[]> {
-    return this.#passkeys.filter((p) => p.accountId === accountId).map(clonePasskey) as unknown as Promise<AdminPasskeyRow[]>;
+  async listPasskeys(accountId: string): Promise<AdminPasskeyRow[]> {
+    return this.#passkeys.filter((p) => p.accountId === accountId).map(clonePasskey);
   }
 
   async findPasskeyByCredential(credentialId: Buffer): Promise<AdminPasskeyRow | null> {
@@ -655,9 +651,9 @@ export class MemoryAdminAccountStore implements AdminAccountStore, AdminLoginSto
         return true;
       },
       setRole: async (id, role, now) => patch(id, { role }, now),
-      resetInvite: async (id, now) => patch(id, { status: 'INVITED', inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, invitationAcceptedAt: null }, now),
+      resetInvite: async (id, now) => patch(id, { status: 'INVITED', inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0 }, now),
       wipeCredentials: async (id, now) => {
-        patch(id, { status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, invitationAcceptedAt: null, ...structuredClone(FRESH_LOGIN_STATE) }, now);
+        patch(id, { status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, ...structuredClone(FRESH_LOGIN_STATE) }, now);
         drop(this.#recovery, (c) => c.accountId !== id);
         // 패스키도 지운다(수락 때 새로 등록한다, ASVS 6.4.4, BOT-122)
         drop(this.#passkeys, (p) => p.accountId !== id);

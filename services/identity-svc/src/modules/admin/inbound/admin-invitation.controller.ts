@@ -336,7 +336,7 @@ export class AdminInvitationController {
 
   async #complete(aud: AdminAud, body: z.output<typeof CompleteBody>): Promise<void> {
     try {
-      await this.invitations.complete(aud, body.acceptanceStep, body.displayName);
+      await this.invitations.complete(aud, body.acceptanceStep, body.recoveryCodesSaved, body.displayName);
     } catch (e) {
       problem(e);
     }

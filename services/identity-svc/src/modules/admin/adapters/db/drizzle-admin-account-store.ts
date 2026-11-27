@@ -103,7 +103,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
       .from(adminAccount)
       .where(and(eq(adminAccount.email, email.trim().toLowerCase()), ne(adminAccount.status, 'REMOVED')));
     if (!r) return null;
-    return { id: r.id, role: r.role as AdminRole, status: r.status as AdminStatus, passwordPhc: r.passwordPhc, breachCheckedAt: ms(r.breachCheckedAt), passwordChangeRequired: r.passwordChangeRequired, invitationAcceptedAt: ms(r.invitationAcceptedAt), state: stateOf(r) };
+    return { id: r.id, role: r.role as AdminRole, status: r.status as AdminStatus, passwordPhc: r.passwordPhc, breachCheckedAt: ms(r.breachCheckedAt), passwordChangeRequired: r.passwordChangeRequired, state: stateOf(r) };
   }
 
   async updateLoginState(id: string, now: number, fn: (cur: AccountLoginState) => { next: AccountLoginState; notices: NoticeKind[] } | null): Promise<AccountLoginState | null> {
@@ -170,7 +170,7 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
       .from(adminAccount)
       .where(and(eq(adminAccount.id, id), ne(adminAccount.status, 'REMOVED')));
     if (!r) return null;
-    return { id: r.id, role: r.role as AdminRole, status: r.status as AdminStatus, passwordPhc: r.passwordPhc, breachCheckedAt: ms(r.breachCheckedAt), passwordChangeRequired: r.passwordChangeRequired, invitationAcceptedAt: ms(r.invitationAcceptedAt), state: stateOf(r), email: r.email ?? '', promoterId: r.promoterId };
+    return { id: r.id, role: r.role as AdminRole, status: r.status as AdminStatus, passwordPhc: r.passwordPhc, breachCheckedAt: ms(r.breachCheckedAt), passwordChangeRequired: r.passwordChangeRequired, state: stateOf(r), email: r.email ?? '', promoterId: r.promoterId };
   }
 
   async getTotp(id: string): Promise<AdminTotpState | null> {
@@ -504,7 +504,6 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
           inviteStepExpiresAt: new Date(i.expiresAt),
           inviteStepStage: 'PASSWORD',
           inviteStepCodeFailures: 0,
-          invitationAcceptedAt: null,
           updatedAt: new Date(i.now),
         })
         .where(eq(adminAccount.id, i.accountId));
@@ -612,7 +611,6 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
           inviteStepStage: null,
           inviteStepCodeFailures: 0,
           totpPendingEnc: null,
-          invitationAcceptedAt: new Date(i.now),
           ...(i.displayName !== undefined ? { displayName: i.displayName } : {}),
           version: r.version + 1,
           updatedAt: new Date(i.now),
@@ -848,12 +846,12 @@ export class DrizzleAdminAccountStore implements AdminManagementStore, AdminAcco
           await tx.update(adminAccount).set({ role, ...bump, updatedAt: new Date(now) }).where(eq(adminAccount.id, id));
         },
         resetInvite: async (id, now) => {
-          await tx.update(adminAccount).set({ status: 'INVITED', inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, invitationAcceptedAt: null, ...bump, updatedAt: new Date(now) }).where(eq(adminAccount.id, id));
+          await tx.update(adminAccount).set({ status: 'INVITED', inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, ...bump, updatedAt: new Date(now) }).where(eq(adminAccount.id, id));
         },
         wipeCredentials: async (id, now) => {
           await tx
             .update(adminAccount)
-            .set({ status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, invitationAcceptedAt: null, ...stateColumns(FRESH_LOGIN_STATE), ...bump, updatedAt: new Date(now) })
+            .set({ status: 'INVITED', passwordPhc: null, totpSeedEnc: null, totpPendingEnc: null, totpLastStep: null, passwordChangeRequired: false, breachCheckedAt: null, inviteTokenHash: null, inviteExpiresAt: null, inviteStepHash: null, inviteStepExpiresAt: null, inviteStepStage: null, inviteStepCodeFailures: 0, ...stateColumns(FRESH_LOGIN_STATE), ...bump, updatedAt: new Date(now) })
             .where(eq(adminAccount.id, id));
           await tx.delete(adminRecoveryCode).where(eq(adminRecoveryCode.adminAccountId, id));
           // 패스키도 지운다(수락 때 새로 등록한다, ASVS 6.4.4, BOT-122)

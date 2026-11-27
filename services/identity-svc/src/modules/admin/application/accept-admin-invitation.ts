@@ -92,10 +92,10 @@ export class AcceptAdminInvitation {
 
   async start(aud: AdminAud, invitationToken: string): Promise<InvitationStartView> {
     const now = this.clock.now();
-    const row = await this.invitations.findByInvitationTokenHash(sha256(invitationToken));
+    const row = await this.#store(() => this.invitations.findByInvitationTokenHash(sha256(invitationToken)));
     if (!this.#usable(row, aud, now) || row!.inviteExpiresAt === null || row!.inviteExpiresAt <= now) throw new InvitationAcceptanceError('INVITATION_INVALID');
     const step = randomBytes(32).toString('base64url');
-    const ok = await this.invitations.resetInvitationAcceptance({ accountId: row!.accountId, stepHash: sha256(step), expiresAt: now + INVITATION_STEP_TTL_MS, now });
+    const ok = await this.#store(() => this.invitations.resetInvitationAcceptance({ accountId: row!.accountId, stepHash: sha256(step), expiresAt: now + INVITATION_STEP_TTL_MS, now }));
     if (!ok) throw new InvitationAcceptanceError('INVITATION_INVALID');
     return {
       acceptanceStep: step,
@@ -117,10 +117,11 @@ export class AcceptAdminInvitation {
     } catch (e) {
       const p = e as AdminPasswordError;
       if (p.code === 'REJECTED') throw new InvitationAcceptanceError('PASSWORD_REJECTED', { reason: p.reason ?? 'CONTEXT' });
-      if (p.code === 'UNAVAILABLE') throw new InvitationAcceptanceError('UNAVAILABLE');
+      // 저장소·페퍼처럼 다시 시도하면 될 장애는 닫힌 쪽(503)이다(IR096-04)
+      if (p.code === 'UNAVAILABLE' || p.code === undefined) throw new InvitationAcceptanceError('UNAVAILABLE');
       throw new InvitationAcceptanceError('STEP_INVALID');
     }
-    if (!(await this.invitations.advanceInvitationStage({ accountId: row.accountId, from: 'PASSWORD', to: 'TOTP', now: this.clock.now() }))) throw new InvitationAcceptanceError('STEP_INVALID');
+    if (!(await this.#store(() => this.invitations.advanceInvitationStage({ accountId: row.accountId, from: 'PASSWORD', to: 'TOTP', now: this.clock.now() })))) throw new InvitationAcceptanceError('STEP_INVALID');
     return { next: 'TOTP' };
   }
 
@@ -128,9 +129,12 @@ export class AcceptAdminInvitation {
     const row = await this.#step(aud, acceptanceStep);
     if (row.stepStage !== 'TOTP') throw new InvitationAcceptanceError('STEP_OUT_OF_ORDER');
     try {
-      return await this.totpBeginner.run({ accountId: row.accountId });
-    } catch {
-      throw new InvitationAcceptanceError('STEP_INVALID');
+      return await this.totpBeginner.run({ accountId: row.accountId, now: this.clock.now() });
+    } catch (e) {
+      // 시드 키 서비스 장애는 410이 아니라 503이다(IR096-04)
+      if (e instanceof TotpKeyUnavailable) throw new InvitationAcceptanceError('UNAVAILABLE');
+      if (e instanceof Error && e.name === 'TotpEnrollmentError') throw new InvitationAcceptanceError('STEP_INVALID');
+      throw new InvitationAcceptanceError('UNAVAILABLE');
     }
   }
 
@@ -138,11 +142,12 @@ export class AcceptAdminInvitation {
     const row = await this.#step(aud, acceptanceStep);
     if (row.stepStage !== 'TOTP') throw new InvitationAcceptanceError('STEP_OUT_OF_ORDER');
     const now = this.clock.now();
-    const t = await this.second.getTotp(row.accountId);
+    const t = await this.#store(() => this.second.getTotp(row.accountId));
     if (!t?.pendingEnc) throw new InvitationAcceptanceError('STEP_OUT_OF_ORDER');
+    const pendingEnc = t.pendingEnc;
     let seed: Buffer;
     try {
-      seed = await this.cipher.decrypt(row.accountId, t.pendingEnc);
+      seed = await this.cipher.decrypt(row.accountId, pendingEnc);
     } catch (e) {
       if (e instanceof TotpSeedUnreadable || e instanceof TotpKeyUnavailable) throw new InvitationAcceptanceError('UNAVAILABLE');
       throw e;
@@ -150,12 +155,12 @@ export class AcceptAdminInvitation {
     const step = matchTotp(seed, code, now, null);
     seed.fill(0);
     if (step === null) {
-      const rec = await this.invitations.recordInvitationCodeFailure(row.accountId, now);
+      const rec = await this.#store(() => this.invitations.recordInvitationCodeFailure(row.accountId, now));
       throw new InvitationAcceptanceError('CODE_INVALID', { remainingAttempts: Math.max(0, 5 - rec.failures) });
     }
     const codes = Array.from({ length: RECOVERY_CODE_COUNT }, newRecoveryCode);
     const recoveryPhcs = await Promise.all(codes.map((c) => this.recovery.hash(row.accountId, normalizeRecoveryCode(c)!)));
-    if (!(await this.invitations.confirmInvitationTotp({ accountId: row.accountId, seedEnc: t.pendingEnc, step, recoveryPhcs, now }))) {
+    if (!(await this.#store(() => this.invitations.confirmInvitationTotp({ accountId: row.accountId, seedEnc: pendingEnc, step, recoveryPhcs, now })))) {
       throw new InvitationAcceptanceError('CODE_INVALID', { remainingAttempts: 0 });
     }
     return { recoveryCodes: codes, next: 'PASSKEY' };
@@ -165,7 +170,7 @@ export class AcceptAdminInvitation {
     const row = await this.#step(aud, acceptanceStep);
     if (row.stepStage !== 'PASSKEY') throw new InvitationAcceptanceError('STEP_OUT_OF_ORDER');
     const now = this.clock.now();
-    const passkeys = await this.passkeys.listPasskeys(row.accountId);
+    const passkeys = await this.#store(() => this.passkeys.listPasskeys(row.accountId));
     if (passkeys.length >= PASSKEY_LIMIT) throw new InvitationAcceptanceError('PASSKEY_LIMIT');
     const challenge = randomBytes(WEBAUTHN_CHALLENGE_BYTES);
     const registrationId = randomBytes(32).toString('base64url');
@@ -178,11 +183,13 @@ export class AcceptAdminInvitation {
       exclude: passkeys.map((p) => ({ id: p.credentialId, transports: p.transports })),
       timeoutMs: WEBAUTHN_CHALLENGE_TTL_MS,
     });
-    await this.challenges.put(
-      'REG',
-      handleHashOf(registrationId),
-      { kind: 'REG', accountId: row.accountId, sessionId: `invitation:${row.accountId}`, aud, challenge: challenge.toString('base64url'), expiresAt: now + WEBAUTHN_CHALLENGE_TTL_MS },
-      WEBAUTHN_CHALLENGE_TTL_MS,
+    await this.#store(() =>
+      this.challenges.put(
+        'REG',
+        handleHashOf(registrationId),
+        { kind: 'REG', accountId: row.accountId, sessionId: `invitation:${row.accountId}`, aud, challenge: challenge.toString('base64url'), expiresAt: now + WEBAUTHN_CHALLENGE_TTL_MS },
+        WEBAUTHN_CHALLENGE_TTL_MS,
+      ),
     );
     return { registrationId, publicKey, expiresInSeconds: WEBAUTHN_CHALLENGE_TTL_MS / 1000 };
   }
@@ -193,7 +200,7 @@ export class AcceptAdminInvitation {
     const passkeyName = normalizePasskeyName(name);
     if (passkeyName === null) throw new InvitationAcceptanceError('PASSKEY_NAME_INVALID');
     const now = this.clock.now();
-    const c = await this.challenges.take('REG', handleHashOf(registrationId), now);
+    const c = await this.#store(() => this.challenges.take('REG', handleHashOf(registrationId), now));
     if (!c || c.accountId !== row.accountId || c.aud !== aud || c.sessionId !== `invitation:${row.accountId}`) throw new InvitationAcceptanceError('REGISTRATION_INVALID');
     const v = await this.webauthn.verifyCreation({ rp: this.rps[aud], challenge: c.challenge, response: credential });
     if (!v) throw new InvitationAcceptanceError('ATTESTATION_INVALID');
@@ -206,10 +213,12 @@ export class AcceptAdminInvitation {
     throw new InvitationAcceptanceError('REGISTRATION_INVALID');
   }
 
-  async complete(aud: AdminAud, acceptanceStep: string, displayName?: string): Promise<void> {
+  async complete(aud: AdminAud, acceptanceStep: string, recoveryCodesSaved: boolean, displayName?: string): Promise<void> {
     const row = await this.#step(aud, acceptanceStep);
     if (row.stepStage !== 'PASSKEY') throw new InvitationAcceptanceError('STEP_OUT_OF_ORDER');
-    if (PASSKEY_REQUIRED_ROLES.includes(row.role) && (await this.passkeys.listPasskeys(row.accountId)).length === 0) throw new InvitationAcceptanceError('PASSKEY_REQUIRED');
+    // 복구 코드를 보관했다는 확인 없이는 활성화하지 않는다(계획 §5, IR096-05)
+    if (recoveryCodesSaved !== true) throw new InvitationAcceptanceError('STEP_OUT_OF_ORDER');
+    if (PASSKEY_REQUIRED_ROLES.includes(row.role) && (await this.#store(() => this.passkeys.listPasskeys(row.accountId))).length === 0) throw new InvitationAcceptanceError('PASSKEY_REQUIRED');
     let normalized: string | undefined;
     if (displayName !== undefined) {
       try {
@@ -218,8 +227,18 @@ export class AcceptAdminInvitation {
         throw new InvitationAcceptanceError('PASSKEY_NAME_INVALID');
       }
     }
-    if (!(await this.invitations.completeInvitation({ accountId: row.accountId, ...(normalized !== undefined ? { displayName: normalized } : {}), now: this.clock.now() }))) {
+    if (!(await this.#store(() => this.invitations.completeInvitation({ accountId: row.accountId, ...(normalized !== undefined ? { displayName: normalized } : {}), now: this.clock.now() })))) {
       throw new InvitationAcceptanceError('STEP_INVALID');
+    }
+  }
+
+  /** 저장소·챌린지·키 서비스 장애는 410/500이 아니라 503(admin-login-unavailable)이다(IR096-04) */
+  async #store<T>(op: () => Promise<T>): Promise<T> {
+    try {
+      return await op();
+    } catch (e) {
+      if (e instanceof InvitationAcceptanceError) throw e;
+      throw new InvitationAcceptanceError('UNAVAILABLE');
     }
   }
 
@@ -229,7 +248,7 @@ export class AcceptAdminInvitation {
 
   async #step(aud: AdminAud, acceptanceStep: string): Promise<AdminInvitationRow> {
     const now = this.clock.now();
-    const row = await this.invitations.findInvitationStep(sha256(acceptanceStep));
+    const row = await this.#store(() => this.invitations.findInvitationStep(sha256(acceptanceStep)));
     if (!row || row.status !== 'INVITED' || !ROLES_OF_AUD[aud].includes(row.role) || row.stepExpiresAt === null || row.stepExpiresAt <= now) throw new InvitationAcceptanceError('STEP_INVALID');
     return row;
   }

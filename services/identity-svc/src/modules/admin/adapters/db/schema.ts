@@ -24,8 +24,6 @@ export const adminAccount = pgTable(
     inviteStepExpiresAt: at('invite_step_expires_at'),
     inviteStepStage: text('invite_step_stage'),
     inviteStepCodeFailures: integer('invite_step_code_failures').notNull().default(0),
-    /** 초대 수락을 마친 때. 그 계정의 첫 로그인 2단계 응답을 204로 가른다(고정 시험) */
-    invitationAcceptedAt: at('invitation_accepted_at'),
     lastLoginAt: at('last_login_at'),
     removedAt: at('removed_at'),
     version: bigint('version', { mode: 'number' }).notNull().default(1),

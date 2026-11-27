@@ -78,8 +78,6 @@ export interface AdminLoginAccount {
   passwordPhc: string | null;
   breachCheckedAt: number | null;
   passwordChangeRequired: boolean;
-  /** 초대 수락으로 활성화된 때(그 계정의 첫 로그인 2단계 응답은 204다. 시험 고정 계약) */
-  invitationAcceptedAt?: number | null;
   state: AccountLoginState;
 }
 
