@@ -94,7 +94,12 @@ describe('N-T19 낱건 원장·워커의 채널', () => {
     expect(t.push.sent).toHaveLength(1);
     expect(t.push.sent[0]!.endpoint).toBe('https://fcm.googleapis.com/send/i');
     expect(t.sms.sent).toHaveLength(1);
-    expect(t.sms.sent[0]).toEqual({ to: '+821012345678', body: '공연이 취소되었습니다\n회차 취소', messageKey: expect.any(String) });
+    expect(t.sms.sent[0]).toEqual({
+      to: '+821012345678',
+      body: '공연이 취소되었습니다\n회차 취소',
+      // 대행사 멱등 키는 이메일과 같이 중복 키다(같은 사건을 다시 보내도 한 번)
+      messageKey: `EVENT_CANCELLATION_CONFIRMED:${targetId}:${accountId}:SMS`,
+    });
 
     // 전화번호는 문자를 보낼 때만, 이메일은 includeEmail=true일 때만 묻는다
     expect(t.recipients.calls).toEqual(
