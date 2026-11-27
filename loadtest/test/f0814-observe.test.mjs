@@ -703,7 +703,7 @@ test('F0814-4 ⑤ sampleBudget 식·4천만 초과·보내지 않음, 요청 기
   assert.equal(noXray.rows.find((x) => x.id === 'xray').verdict, '미측정');
   for (const [field, value] of [['krwPerUsd', null], ['fxSource', ''], ['fxDate', ''], ['priceDate', '']]) {
     const bad = m.traceStoreCosts({ ...traceBase, [field]: value });
-    assert.notEqual(bad.verdict, '통과', `${field} 없이 통과하면 안 된다`);
+    assert.equal(bad.verdict, '미측정', `${field} 없이 통과하면 안 된다`);
     assert.ok(bad.missing.includes(field), `${field}가 missing에 없다`);
   }
 });
