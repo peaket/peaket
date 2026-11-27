@@ -462,7 +462,7 @@ Grafana 대시보드는 Git에 코드로 두고 배포한다(Dashboards as Code)
 | --- | --- | --- |
 | 서버 사양 | 이 문서의 초기 추정(가정 표시) | wbs 2.12.1 측정 → 4.8.1 → 6.4.1 용량 산정서에서 확정하고 이 문서를 고친다 |
 | PgBouncer·Outbox 릴레이·Schema Registry 배치 | 셋 다 정함(2026-10-28, 추천 적용. PgBouncer와 Outbox 릴레이는 ADR-0116, Schema Registry는 기술 검토 중간-088, §3.2 행). Debezium은 쓰지 않는다(ADR-0116) | PgBouncer 풀 크기(`max_client_conn`·`default_pool_size`)는 wbs 2.11.2에서 정해 §3.2를 고친다 |
-| 런북 파일 | 목록만(docs/infra.md §10) | wbs 4.7.1에서 `runbooks/`에 쓰고, 런북마다 담당 역할과 목표 시간을 적는다 |
+| 런북 파일 | `docs/runbooks/`의 RB-01~RB-41 | 런북마다 담당 역할과 목표 시간을 적는다. 실제 인시던트·Game Day는 미실행이다 |
 | 외부 연락처 | 없음 | 계약 때 §5.1에 더한다 |
 | AZ 전체 장애 시험 | 2026-10-29에 G-32 'AZ 하나 전체 정지와 영역 빼기'(모의 진행)를 더했다(추천 적용, ADR-0144). 관측 스택 AZ는 G-26 | 포트폴리오 기간에는 모의 진행이다(로컬 노드 레이블로는 AZ 네트워크 분리를 재현하지 못한다, docs/verification.md §5.2). 운영을 띄우면 실제 실행 방식을 정한다 |
 | 보존 표 빈칸 | 2026-10-22에 docs/observability.md §9에 Kafka(앱용 7일, 관측 전용은 가정), AWS·쿠버네티스·운영 DB 감사 기록, AWS WAF 로그, 저장소 백업 행을 더했다. Sentry 행은 이미 있었다(운영 방식과 함께 wbs 4.8.2에서 정한다). 2026-10-28에 AWS WAF 로그를 정했다: S3, 허용 판정은 남기지 않는 로그 필터, 90일 [가정](추천 적용, 기술 검토 중간-025). 같은 날 배포·경로별 WAF 규칙표를 docs/infra.md §9에 두었다 | 관측 전용 Kafka 보존은 wbs 4.1.4에서 정한다. WAF 로그 버킷을 서울 리전에 둘 수 있는지와 캐시 적중 요청의 WAF 과금은 docs/review/open-items.md 50번에서 확인한다 |
