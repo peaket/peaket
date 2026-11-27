@@ -165,10 +165,11 @@ describe('COV2-06 Kafka 소비자 설정', () => {
     expect(prod.enabled && prod.auth?.mechanism).toBe('msk-iam');
   });
 
-  test('COV2-06 ⑧ 소비자 그룹은 peaket.core-svc.<환경>이고 탈퇴 토픽 하나만 읽는다', () => {
+  test('COV2-06 ⑧ 소비자 그룹은 peaket.core-svc.<환경>이고 탈퇴·알림 토픽 넷을 읽는다', () => {
     expect(CORE_GROUP('prod')).toBe('peaket.core-svc.prod');
     expect(CORE_GROUP('staging')).toBe('peaket.core-svc.staging');
-    expect([...CORE_TOPICS]).toEqual(['identity.accounts-withdrawn']);
+    // F-06-1: 같은 그룹이 후기 탈퇴에 더해 notify 사건(병합·로그인 수단·주문)을 읽는다(계획 §3.2)
+    expect([...CORE_TOPICS]).toEqual(['identity.accounts-withdrawn', 'identity.accounts-merged', 'identity.login-methods-changed', 'trade.orders']);
   });
 });
 
