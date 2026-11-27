@@ -286,11 +286,15 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     const newValid = totpAt(newSeed, Math.floor(clock.now() / 30_000));
     const oldCodeRaw = totpAt(oldSeed, Math.floor(clock.now() / 30_000));
     const oldCode = oldCodeRaw === newValid ? (newValid === '000001' ? '000002' : '000001') : oldCodeRaw;
-    expect(problemOf(await confirmTotp(a, s1.sid, oldCode))).toEqual({ status: 422, type: 'reauth-code-invalid' });
+    const oldAttempt = await confirmTotp(a, s1.sid, oldCode);
+    expect(problemOf(oldAttempt)).toEqual({ status: 422, type: 'reauth-code-invalid' });
+    expect(json(oldAttempt).remainingAttempts).toBe(4);
 
     // 새 대기 시드에서 5번 실패하면 6번째에 대기 시드를 버린다
     const newWrong = newValid === '000001' ? '000002' : '000001';
-    for (const remaining of [4, 3, 2, 1, 0]) {
+    // 옛 대기 코드도 틀린 코드라 실패 수가 이미 1이다: 남은 4에서 시작해 4번 더 틀리면 0, 그다음은 410
+    expect(json(await confirmTotp(a, s1.sid, newWrong)).remainingAttempts).toBe(3);
+    for (const remaining of [2, 1, 0]) {
       const r = await confirmTotp(a, s1.sid, newWrong);
       expect(problemOf(r)).toEqual({ status: 422, type: 'reauth-code-invalid' });
       expect(json(r).remainingAttempts).toBe(remaining);
@@ -354,9 +358,11 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     const ok = await settings(a, s.sid);
     expect(json(ok)).toMatchObject({ totpRegistered: true, recoveryCodesRemaining: 10 });
     expect(store.recoveryCodes(a.id)).toHaveLength(10);
-    for (const oldCode of a.recoveryCodes) {
+    for (const [i, oldCode] of a.recoveryCodes.entries()) {
       resetSecondFactor(a.id);
-      const oldRecovery = await tryLogin(a, 'dev-old-rc', '203.0.113.33', UA.chromeWindows, oldCode);
+      // 같은 IP라도 기기 ID가 다르면 출발지 묶음이 달라 5번째에 423이 되지 않는다.
+      // IP를 여러 개 쓰면 계정 경보(여러 출발지)가 켜져 사람 확인 428이 되므로 IP는 하나로 둔다
+      const oldRecovery = await tryLogin(a, `dev-old-rc-${i}`, '203.0.113.33', UA.chromeWindows, oldCode);
       expect(problemOf(oldRecovery.second)).toEqual({ status: 401, type: 'admin-login-code-invalid' });
     }
     resetSecondFactor(a.id);
@@ -655,7 +661,8 @@ describe('F-07-13 파트너 내 계정 보안', () => {
     row.totpLastStep = null;
     const codesBefore = store.recoveryCodes(a.id).length;
     const sessionsBefore = store.sessions(a.id).filter((x) => x.terminatedAt === null).length;
-    expect(json(await settings(a, s.sid))).toMatchObject({ totpRegistered: false, recoveryCodesRemaining: 0 });
+    // 계획 B1은 '남은 행 수'다. 시드는 지웠지만 makeAccount가 만든 복구 코드 행 10개는 그대로다
+    expect(json(await settings(a, s.sid))).toMatchObject({ totpRegistered: false, recoveryCodesRemaining: 10 });
 
     const r = await recreateCodes(a, s.sid, token);
     expect(problemOf(r)).toEqual({ status: 409, type: 'totp-not-registered' });
