@@ -1,0 +1,75 @@
+{
+  "run_id": "2026-11-27-search-20k-f089",
+  "kpi": "NFR-028",
+  "version": "v1",
+  "profile": "local-100k",
+  "scale": {
+    "users": 100,
+    "arrival_rps": 78.0,
+    "duration_s": 60,
+    "warmup_s": 0
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v1-search.js",
+    "args": "CROWD_RATE=20 RANDOM_RATE=20 DURATION_S=60 x3 reps",
+    "open_model": true
+  },
+  "commit": {
+    "code": "b5be6b76a63f87e155fef695347be6d643ce56d2",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "host": {
+    "cpu_util": null,
+    "procs_running": null,
+    "logical_cpus": 32,
+    "throttle": {},
+    "cpu_assigned": 32,
+    "tags": [
+      "host-core-svc",
+      "docker-k6",
+      "f089-search",
+      "코어 혼합"
+    ],
+    "kernel": {
+      "listen_overflows": null,
+      "listen_drops": null
+    }
+  },
+  "generator": {
+    "description": "k6 1.4.2 Docker, 100 VUs, dropped 0(3회 모두), 3회차",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-27T10:03:09Z",
+  "ended_at": "2026-11-27T10:06:22Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 29.779121,
+    "p95_ms": 99.52084819999995,
+    "p99_ms": 229.1775059000008,
+    "error_rate": 0,
+    "requests": 4687,
+    "rps": 78.07346083556108,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "pass",
+  "notes": "공연 2만 3회차(19:03:09~19:06:22 KST). 3회 모두 pass, 503 0, dropped 0. crowd search p95 92.8~118.0ms, suggest 11.4~14.9ms; random search p95 111.2~145.5ms, suggest 11.4~15.1ms. search_pool_waiting 0이 아닌 표본 r1 1/60, r2/r3 0/60(1초 표본). k6-summary는 r1(가장 나쁜 회차). SR-T13 ① 20k pass.",
+  "collected_at": "2026-11-27T10:09:23Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

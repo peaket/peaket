@@ -1,0 +1,75 @@
+{
+  "run_id": "2026-11-27-search-10k-f089",
+  "kpi": "NFR-028",
+  "version": "v1",
+  "profile": "local-100k",
+  "scale": {
+    "users": 100,
+    "arrival_rps": 78.0,
+    "duration_s": 60,
+    "warmup_s": 0
+  },
+  "scenario": {
+    "path": "loadtest/scenarios/v1-search.js",
+    "args": "CROWD_RATE=20 RANDOM_RATE=20 DURATION_S=60 x3 reps",
+    "open_model": true
+  },
+  "commit": {
+    "code": "b5be6b76a63f87e155fef695347be6d643ce56d2",
+    "docs": null
+  },
+  "raw_uri": null,
+  "redis_tls": null,
+  "paired_run": null,
+  "host": {
+    "cpu_util": null,
+    "procs_running": null,
+    "logical_cpus": 32,
+    "throttle": {},
+    "cpu_assigned": 32,
+    "tags": [
+      "host-core-svc",
+      "docker-k6",
+      "f089-search",
+      "코어 혼합"
+    ],
+    "kernel": {
+      "listen_overflows": null,
+      "listen_drops": null
+    }
+  },
+  "generator": {
+    "description": "k6 1.4.2 Docker, 100 VUs, dropped 0(3회 모두), 3회차",
+    "dropped_iterations": 0
+  },
+  "started_at": "2026-11-27T09:55:55Z",
+  "ended_at": "2026-11-27T10:00:05Z",
+  "region": "local",
+  "cost_krw": null,
+  "exchange_rate": null,
+  "k6": {
+    "p50_ms": 19.78749,
+    "p95_ms": 108.636473,
+    "p99_ms": 291.5253224499996,
+    "error_rate": 0.0049082373026035,
+    "requests": 4686,
+    "rps": 78.06166226015475,
+    "dropped_iterations": 0
+  },
+  "bench": null,
+  "k6_eval": null,
+  "k6_plan": null,
+  "k6_cost": null,
+  "attachments": {
+    "infra": "infra.txt"
+  },
+  "valid": true,
+  "invalid_reason": null,
+  "checks": null,
+  "latency_crosscheck": null,
+  "evidence": "측정함",
+  "verdict": "fail",
+  "notes": "공연 1만 3회차(18:55:55~19:00:05 KST). r1 fail: random search 503 13/1200=1.08%, crowd 10/1201=0.83%; r2/r3 pass 503 0. crowd search p95 41.5~154.4ms, suggest 5.0~34.6ms; random search p95 47.7~175.3ms, suggest 5.2~31.7ms. dropped 0. search_pool_waiting 0이 아닌 표본 r1 1/31(2초 표본), r2/r3 0/31. k6-summary는 r1(가장 나쁜 회차). SR-T13 ① 10k fail.",
+  "collected_at": "2026-11-27T10:09:16Z",
+  "tool": "tools/perf-ledger/collect.py"
+}

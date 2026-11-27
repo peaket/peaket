@@ -1,0 +1,7 @@
+2026-11-27T10:09:23Z 측정 폴더: D:\ticketpass-freeze-F-08-9\docs\perf-ledger\runs\2026-11-27-search-20k-f089
+2026-11-27T10:09:23Z 첨부: .cache/peaket-f09/search/20k-r1/summary.json → k6-summary.json
+2026-11-27T10:09:23Z k6: p99=229.1775059000008 ms, 오류율=0, 요청=4687, 못 보낸 반복=0
+2026-11-27T10:09:23Z 첨부: C:/Users/ghwnd/AppData/Local/Temp/opencode/f089-search-infra.txt → infra.txt
+2026-11-27T10:09:23Z 원본 버킷(--raw-bucket)이 없어 큰 원본(metrics/·traces/·grafana/·stdout.log)이 폴더에 남는다. Git에는 작은 파일만 넣는다(docs/perf-ledger.md §2.1)
+2026-11-27T10:09:23Z 호스트: CPU None%, procs_running None/32, 준 CPU 32, 표시 host-core-svc, docker-k6, f089-search, 코어 혼합
+2026-11-27T10:09:23Z manifest.json 작성

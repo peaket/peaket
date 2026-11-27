@@ -609,6 +609,8 @@ Git에 두는 것과 S3 원본 버킷에 두는 것은 나눈다(추천 적용 2
 | 2026-11-24 | 2026-11-24-msr020-n8-c05-r3-f082-s1-b1 | NFR-001 | v1 | local-100k | 25,602명, 640 RPS | 91 | 0.0% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n8-c05-r3-f082-s1-b1/ |
 | 2026-11-24 | 2026-11-24-msr020-n8-c05-r3-f082-s2-b1 | NFR-001 | v1 | local-100k | 61,442명, 1,536 RPS | 188 | 0.3% | baseline | 측정함 | - | perf-ledger/runs/2026-11-24-msr020-n8-c05-r3-f082-s2-b1/ |
 | 2026-11-27 | 2026-11-27-pt1-f089 | K7 | v1 | local-100k | 10,102명, 100 RPS | 8,720 | 18.0% | 무효(발생기 0: 발생기가 반복을 시작하지 못함(droppe) | 측정함 | - | perf-ledger/runs/2026-11-27-pt1-f089/ |
+| 2026-11-27 | 2026-11-27-search-10k-f089 | NFR-028 | v1 | local-100k | 100명, 78 RPS | 292 | 0.5% | fail | 측정함 | - | perf-ledger/runs/2026-11-27-search-10k-f089/ |
+| 2026-11-27 | 2026-11-27-search-20k-f089 | NFR-028 | v1 | local-100k | 100명, 78 RPS | 229 | 0.0% | pass | 측정함 | - | perf-ledger/runs/2026-11-27-search-20k-f089/ |
 <!-- ledger:end -->
 
 표준 서식 예시 (참고용 Mock 데이터):

@@ -1,0 +1,9 @@
+F-08-9 검색 측정 무대(2026-11-27)
+- 호스트 core-svc :3001, services/core-svc/dist/main.js, Node 24.18.0
+- PostgreSQL 18.7 Docker(f089-core-db, 127.0.0.1:5432/peaket), core-svc 마이그레이션 적용
+- 검색 읽기 모델: fill-search.mjs --count 10000/20000, search_document 10000/20000
+- k6 1.4.2 Docker(grafana/k6:1.4.2), BASE=http://host.docker.internal:3001
+- CROWD_RATE=20, RANDOM_RATE=20, DURATION_S=60, PRE_VUS=50, MAX_VUS=400
+- core-svc 검색 전용 연결 묶음 max 10, connectionTimeoutMillis 100, search_dictionary 갱신 10초
+- 관측: core-svc 관리 포트 9464 /metrics, search_pool_waiting·search_dictionary_version_lag_seconds 1초 표본
+  (10k 첫 회차 r1만 2초 표본, 10k r2/r3과 20k r1~r3은 1초)
