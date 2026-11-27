@@ -211,6 +211,8 @@ export async function runN1Contract(db: N1Queryable, now = Date.UTC(2026, 10, 27
   const ciHmac = randomBytes(32);
   const oldPid = randomBytes(32);
   const newPid = randomBytes(32);
+  // 0.3.0도 본인확인은 이미 있는 계정에만 쓴다(identity_verification.account_id -> account.id 외래 키).
+  await db.query(N1_SQL.createAccount, [verifiedAccountId, null, false, iso(now)]);
   await db.query(N1_SQL.saveVerification, [verifiedAccountId, ciHmac, 1, oldPid, 1, iso(now), `migration-${randomUUID()}`]);
   await db.query(N1_SQL.beginPidRotation, [2, iso(now), iso(now + 7 * 86_400_000)]);
   const openRotation = await db.query(N1_SQL.openPidRotation);

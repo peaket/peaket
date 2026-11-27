@@ -239,6 +239,8 @@ describe('D-T8 identity N-1 앱(713b522a) 호환', () => {
       const verifications = new DrizzleVerificationStore(database);
       const nVerifiedAccountId = randomUUID();
       const nPid = randomBytes(32);
+      // N 앱도 본인확인은 이미 있는 계정에만 쓴다(identity_verification.account_id -> account.id 외래 키).
+      await sessions.transaction((tx) => tx.createAccount({ id: nVerifiedAccountId, email: null, emailVerified: false }, NOW + 40_000));
       await verifications.transaction((tx) =>
         tx.saveVerification({
           accountId: nVerifiedAccountId,
