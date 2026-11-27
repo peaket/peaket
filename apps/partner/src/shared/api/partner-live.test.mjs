@@ -84,3 +84,55 @@ test('J-T42 ② 파트너 정산서 타입에 KYC 예고 칸 kycNotice가 있다
   assert.ok(at >= 0);
   assert.match(src.slice(at, src.indexOf('\n}', at)), /\bkycNotice\??: boolean/);
 });
+
+// ---- F-07-13 SCR-020 내 계정 보안(계획 §4·§6, 계약 operationId 여섯) ----
+test('I-T53 ③ 보안 요약·기기 목록은 계약 GET을 부르고 signal을 넘긴다', () => {
+  assert.equal(methodOf('getPartnerAuthSecuritySettings'), 'GET');
+  assert.equal(methodOf('getPartnerAuthSessions'), 'GET');
+  const summary = fnBody('getPartnerAuthSecuritySettings');
+  assert.match(summary, /^export async function getPartnerAuthSecuritySettings\(signal\?: AbortSignal\)/);
+  assert.match(summary, /OPERATIONS\.getPartnerAuthSecuritySettings/);
+  assert.match(summary, /\bsignal\b/);
+  const list = fnBody('getPartnerAuthSessions');
+  assert.match(list, /^export async function getPartnerAuthSessions\(signal\?: AbortSignal\)/);
+  assert.match(list, /OPERATIONS\.getPartnerAuthSessions/);
+  assert.match(list, /\bsignal\b/);
+});
+
+test('I-T53 ③ [ASVS v5.0.0-7.5.1] 인증 앱 시작·복구 코드 다시 만들기는 재인증 토큰을 X-Reauth-Token 머리로만 보낸다', () => {
+  assert.equal(methodOf('createPartnerAuthTotpEnrollment'), 'POST');
+  assert.equal(methodOf('createPartnerAuthRecoveryCodes'), 'POST');
+  for (const [name, op] of [
+    ['beginPartnerTotpEnrollment', 'createPartnerAuthTotpEnrollment'],
+    ['recreatePartnerRecoveryCodes', 'createPartnerAuthRecoveryCodes'],
+  ]) {
+    const body = fnBody(name);
+    assert.match(body, new RegExp(`^export async function ${name}\\(reauthToken: string\\)`));
+    assert.match(body, new RegExp(`OPERATIONS\\.${op}`));
+    assert.match(body, /'X-Reauth-Token': reauthToken/);
+    assert.doesNotMatch(body, /body: \{[^}]*reauthToken/);
+    assert.doesNotMatch(body, /query:/);
+    assert.doesNotMatch(body, /console\./);
+  }
+});
+
+test('I-T53 ③ 확인 코드는 계약 POST 본문 { code }로만 보내고 토큰·시드를 URL에 싣지 않는다', () => {
+  assert.equal(methodOf('createPartnerAuthTotpConfirmation'), 'POST');
+  const body = fnBody('confirmPartnerTotpEnrollment');
+  assert.match(body, /^export async function confirmPartnerTotpEnrollment\(code: string\)/);
+  assert.match(body, /OPERATIONS\.createPartnerAuthTotpConfirmation/);
+  assert.match(body, /body: \{ code \}/);
+  assert.doesNotMatch(body, /reauthToken|params:|query:/);
+});
+
+test('I-T53 ③ [ASVS v5.0.0-7.5.2] 기기 끊기는 경로 인자 sessionId와 X-Reauth-Token 머리만 쓰고 토큰을 주소에 싣지 않는다', () => {
+  assert.equal(methodOf('deletePartnerAuthSession'), 'DELETE');
+  const body = fnBody('deletePartnerAuthSession');
+  assert.match(body, /^export async function deletePartnerAuthSession\(sessionId: string, reauthToken: string\)/);
+  assert.match(body, /OPERATIONS\.deletePartnerAuthSession/);
+  assert.match(body, /params: \{ sessionId \}/);
+  assert.match(body, /'X-Reauth-Token': reauthToken/);
+  assert.doesNotMatch(body, /body:/);
+  assert.doesNotMatch(body, /query:/);
+  assert.doesNotMatch(body, /console\./);
+});

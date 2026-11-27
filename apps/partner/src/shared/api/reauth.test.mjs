@@ -67,3 +67,21 @@ test('J-T42 ① 명단 내려받기 재인증은 같은 함수를 BOOKER_EXPORT�
 test('J-T42 ① 패스키 등록 변환(내 계정 줄, 동결)은 만들지 않는다', () => {
   assert.doesNotMatch(src, /toCreationOptions|serializeAttestation|navigator\.credentials\.create/);
 });
+
+// ---- F-07-13 SCR-020 내 계정 보안 재인증(계획 §4 'requestAccountSecurityReauth', §6 시험 23) ----
+test('I-T53 ③ [ASVS v5.0.0-7.5.1] ACCOUNT_SECURITY 재인증은 패스키가 없으면 비밀번호·TOTP로, 있으면 패스키 단계까지 거친다', () => {
+  const at = src.indexOf('export async function requestAccountSecurityReauth(');
+  assert.ok(at >= 0, 'requestAccountSecurityReauth가 reauth.ts에 없다');
+  const next = src.indexOf('\nexport ', at + 1);
+  const body = src.slice(at, next < 0 ? undefined : next);
+  assert.match(body, /act: 'ACCOUNT_SECURITY'/);
+  assert.match(body, /withPasskey/);
+  // 패스키 단계는 withPasskey가 참일 때만 연다
+  const gate = body.indexOf('withPasskey');
+  const nav = body.indexOf('navigator.credentials.get');
+  assert.ok(gate >= 0 && nav > gate, 'withPasskey 분기 뒤에 패스키 창이 있어야 한다');
+  assert.match(body, /hasPasskeyFactor/);
+  assert.match(body, /reauthStep: first\.reauthStep/);
+  assert.doesNotMatch(body, /localStorage|sessionStorage|indexedDB|document\.cookie/);
+  assert.doesNotMatch(body, /console\./);
+});
