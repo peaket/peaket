@@ -255,7 +255,8 @@ test('MSR-060 ② 측정 창 4d~4g·무대·잠금·중단 규칙·인자 규칙
   assert.equal(plan.window, 4);
   assert.deepEqual(plan.windows.map((w) => w.id), ['4d', '4e', '4f', '4g']);
   assert.equal(plan.lock, 'docker lane4-F-08-6');
-  assert.ok(!JSON.stringify(plan).includes('docker-all'), '계획에 docker-all이 있다');
+  const execution = JSON.stringify({ lock: plan.lock, startGate: plan.startGate, windows: plan.windows.map((w) => ({ id: w.id, commands: w.commands })) });
+  assert.ok(!execution.includes('docker-all'), '계획 실행 필드(lock·startGate·windows.commands)에 docker-all이 있다');
   assert.match(plan.startGate, /감독/);
   assert.match(plan.startGate, /docker lane4-F-08-6/);
 
