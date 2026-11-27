@@ -31,6 +31,7 @@ import { ApprovalsModule, type ApprovalsModuleDeps } from './modules/approvals/i
 import { BotReviewModule, type BotReviewSignals, type BotReviewSource, type TrustLabels } from './modules/bot-review/index.js';
 import { RealtimeTableModule, RtWidgetSource, type RealtimeTableModuleDeps } from './modules/realtime-table/index.js';
 import { DrizzleFraudApprovalStore, DrizzleFraudRestrictions, EvidenceBundles, ExternalPosts, FraudActions, InvestigationsModule, MemoryFraudApprovalStore, type EvidenceBundlesDeps, type InvestigationsModuleDeps } from './modules/investigations/index.js';
+import { ResearchExportsModule, type ResearchExportsModuleDeps } from './modules/research-exports/index.js';
 import type { AdminIdentity, AdminReauth } from './modules/admin-accounts/domain/ports.js';
 import {
   CsCaseEventCancellationCases,
@@ -110,6 +111,8 @@ interface CommonWiring {
   readonly realtimeTable?: RealtimeTableModuleDeps;
   /** F-04-12 부정 예매 조사 모듈. identity·audit은 AppModule이 채운다 */
   readonly investigations?: Omit<InvestigationsModuleDeps, 'identity' | 'audit'>;
+  /** F-04-19 연구 내보내기 모듈. identity는 AppModule이 채운다. 없으면 그 경로를 열지 않는다(404) */
+  readonly research?: Omit<ResearchExportsModuleDeps, 'identity'>;
   /**
    * 회차 취소 요청(BAT-425 GAT-130 잔여, BAT-420 GAT-110). refunds·reauth가 없으면 요청·확정이 503이다.
    * reader(미리보기·진행률)·stopper(판매 멈춤)·owners(파트너 소속)는 시작 조립(event-cancellation-wiring)이 고른다. 없으면 그 경로가 503이다.
@@ -286,6 +289,7 @@ export class AppModule {
           }),
           BotReviewModule.register({ database: o.database, ...(o.botReview ?? {}) }),
           ...(o.investigations && o.adminAccounts ? [InvestigationsModule.register({ ...o.investigations, identity: o.adminAccounts.identity, audit: chain, ...(fraudActions ? { fraudActions } : {}), ...(evidenceServices ? { evidenceServices } : {}) })] : []),
+          ...(o.research && o.adminAccounts ? [ResearchExportsModule.register({ ...o.research, identity: o.adminAccounts.identity })] : []),
           ...(o.realtimeTable ? [RealtimeTableModule.register(o.realtimeTable)] : []),
           EventCancellationsModule.register(
             eventCancellationDeps(
@@ -339,6 +343,7 @@ export class AppModule {
         }),
         BotReviewModule.register({ ...(o.botReview ?? {}) }),
         ...(o.investigations && o.adminAccounts ? [InvestigationsModule.register({ ...o.investigations, identity: o.adminAccounts.identity, audit: chain, ...(fraudActions ? { fraudActions } : {}), ...(evidenceServices ? { evidenceServices } : {}) })] : []),
+        ...(o.research && o.adminAccounts ? [ResearchExportsModule.register({ ...o.research, identity: o.adminAccounts.identity })] : []),
         ...(o.realtimeTable ? [RealtimeTableModule.register(o.realtimeTable)] : []),
         EventCancellationsModule.register(eventCancellationDeps(o, cancellations, { suspension: new MemorySaleSuspensionLookup(store), cases: new CsCaseEventCancellationCases(cases.receive) }, chain)),
       ],

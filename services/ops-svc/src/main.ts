@@ -22,7 +22,7 @@ import { assertOpsPartnerRole } from './adapters/db/database-role.js';
 import { reauthWiring } from './reauth-wiring.js';
 import { eventCancellationDepsFromEnv, partnerDatabaseUrlFromEnv, partnerRoleCheckRequired, requireCoreEventStatusUrl } from './event-cancellation-wiring.js';
 import { kafkaConsumersFromEnv, type OpsConsumers, startOpsConsumers } from './consumers/index.js';
-import { AuditSignals, auditEnvName } from './modules/audit/index.js';
+import { AuditSignals, DrizzleAuditChain, auditEnvName } from './modules/audit/index.js';
 import { CORE_APPLY_RETRY_MS, EventCancellations, PromEventCancellationSignals } from './modules/event-cancellations/index.js';
 import { AwsWafIpSets, ControlFanout, DrizzleControlDeliveries, GrpcPgAssignmentCheck, GrpcPgSwitchResolver, HttpCoreSaleStart, PromCommandSignals, wafIpSetsConfigFromEnv, type HandleCommandEvent } from './modules/commands/index.js';
 import { GrpcPurchasePriorityGrants, HttpPurchasePriorityGrants, HttpQueuePriorityGrantCopies } from './modules/priority/index.js';
@@ -31,6 +31,7 @@ import { HttpPayoutPaymentClient, JwksApprovalVerifier } from './modules/payouts
 import { PromBotReviewSignals } from './modules/bot-review/index.js';
 import { botReviewLabelsFromEnv, botReviewSourceFromEnv } from './bot-review-wiring.js';
 import { realtimeTableFromEnv } from './rt-wiring.js';
+import { DrizzlePseudonymizationLog, DrizzleResearchExportStore, LoggingResearchAlerts, MemoryResearchExportBuffer, UnavailableResearchSilverSource, researchWiringFromEnv } from './modules/research-exports/index.js';
 import { HttpCoreContract } from './adapters/http-core-contract.js';
 import {
   DrizzleInvestigationStore,
@@ -282,6 +283,22 @@ const investigations = {
   runner: new UnavailableFraudForensicsRunner(),
   now: () => Date.now(),
 };
+// F-04-19 연구 내보내기(동결 로컬). 다섯 환경 값이 없으면 모듈을 만들지 않아 경로가 404다.
+// 실제 ClickHouse an_forensic_reader·ArrowStream→IPC 어댑터는 아직 연결하지 않았다(UnavailableResearchSilverSource).
+const researchWiring = researchWiringFromEnv(process.env);
+const research = researchWiring.enabled
+  ? {
+      store: new DrizzleResearchExportStore(database),
+      buffer: new MemoryResearchExportBuffer(),
+      silver: new UnavailableResearchSilverSource(),
+      audit: new DrizzleAuditChain(database),
+      log: new DrizzlePseudonymizationLog(database),
+      config: researchWiring.config!,
+      alerts: new LoggingResearchAlerts(),
+      schedule: investigations.schedule,
+      now: () => Date.now(),
+    }
+  : undefined;
 // 명령·감사 체인 지표(BAT-355): ops_command_dry_run_unavailable_total, ops_audit_mac_lag_seconds, ops_audit_kms_failover_total. 서비스를 만든 뒤 레지스트리에 붙인다
 const commandSignals = new PromCommandSignals();
 const auditSignals = new AuditSignals();
@@ -302,6 +319,7 @@ const service = await createService({
     eventCancellations,
     realtimeTable: realtimeTable.deps,
     investigations,
+    ...(research ? { research: research } : {}),
     botReview: {
       source: botReviewSource.source,
       ...(botReviewLabels ? { labels: botReviewLabels } : {}),
