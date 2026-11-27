@@ -58,7 +58,7 @@ export const N1_SQL = {
     'update session set prev_refresh_hash = refresh_hash, refresh_hash = $2, rotated_at = $3, last_active_at = $3, refresh_used = false, idle_expires_at = $4 where id = $1',
   terminateSession: 'update session set terminated_at = $2, terminated_reason = $3 where id = $1',
   readSession:
-    'select id, account_id, device_id, refresh_hash, refresh_family, absolute_expires_at, idle_expires_at, login_verdict, terminated_at, terminated_reason from session where id = $1',
+    'select id, account_id, device_id, refresh_hash, refresh_family, absolute_expires_at, idle_expires_at, login_verdict, device_label, last_active_at, terminated_at, terminated_reason from session where id = $1',
 
   // admin/adapters/db/drizzle-admin-account-store.ts(713b522a) create·findForLogin·touchLogin·login step·#openSession·touchKnownSource·addNotice
   createAdmin:
@@ -177,20 +177,21 @@ export async function runN1Contract(db: N1Queryable, now = Date.UTC(2026, 10, 27
   const adminSessionId = randomUUID();
   const adminRefreshHash = randomBytes(32);
   const adminLoginStepId = randomUUID();
+  const adminLoginTokenHash = randomBytes(32);
   await db.query(N1_SQL.createAdmin, [adminAccountId, 'operator', 'INVITED', adminEmail, 'N-1 관리자', iso(now)]);
   const adminByEmail = await db.query(N1_SQL.findAdminForLogin, [adminEmail]);
   await db.query(N1_SQL.touchAdminLogin, [adminAccountId, iso(now + 3_000)]);
   await db.query(N1_SQL.createAdminLoginStep, [
     adminLoginStepId,
     adminAccountId,
-    randomBytes(32),
+    adminLoginTokenHash,
     'ops',
     'k1.pair-n1',
     iso(now),
     iso(now + 300_000),
     false,
   ]);
-  const loginStep = await db.query(N1_SQL.findAdminLoginStep, [adminLoginStepId]);
+  const loginStep = await db.query(N1_SQL.findAdminLoginStep, [adminLoginTokenHash]);
   await db.query(N1_SQL.createAdminSession, [
     adminSessionId,
     adminAccountId,
