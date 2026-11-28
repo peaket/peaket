@@ -202,6 +202,7 @@
 - W12-core-idem R-752 남은 것: RV4 openapi 주문 만들기·부가 상품 404 설명(정본 고침+`gen`), RV7 결제창 결제 식별 칸·통화 대조(또는 '남는 한계'에 적기), OPEN-A 같은 역할 안 계정 묶기, OPEN-B 결제창 값을 저장하지 않는 재생, 정비 연결 역할(BAS-060), ⑧ 소유자를 이름 여섯만 보는 한계(W12-core-rls RV-02와 같은 자리). 이 PC에서 core-svc 단위 전체를 돌리면 CPU 부하 때 5초 시한 초과가 둘(`internal-notify`·`tenant-rate-limit-wiring`) 나고 따로 돌리면 4/4 통과한다(통합의 PRF-168 흔들림과 같은 쪽, 검증 2의 셋째 실행은 779/779 통과). V8·V5 표본 재검사는 Docker 잠금이 갈래 4에 잡혀 검증 2에서 못 했다
 - BAT-177-r2 R-775 RV-03 낮음: `limits.test.mjs` T6 ③·T9 ③이 spec 원문 글 대조라 깨지기 쉽다. 판정 고리를 순수 함수로 빼 시험하는 쪽으로 바꾼다
 - BAT-177-r2 R-775 RV-04 낮음: `report.mjs` `lighthouseTable`이 값이 수가 아니면(NaN) '한도 안'으로 적는다
+- F-02-7 구현 리뷰 IR-11(낮음, 그 밖): 제어 갈래도 `src/runbook-cli.ts`가 대기열 Redis를 먼저 연결해, 대기열 Redis 장애 때 비상 CLI가 명령 파일을 읽지 못한다. RB-35 갈래에서만 Redis를 만들게 나눈다. 또 `command-view.ts`의 `CommandBaseView`가 `runbookCommand`를 omit하지 않아 목록 스키마에 칸이 남고, `viewOf`가 `runbookCommandLine`을 두 번 부르며, `runbook-control.ts`의 `signaturesOf`는 `signature`가 바이트가 아니면 `Buffer.from`에서 던져 16·보안 이벤트 대신 INTERNAL이 될 수 있다(protobuf 경유는 바이트라 지금은 낮음).
 - BAT-177-r2 R-775 RV-05 낮음: ADR-0359의 [가정] 크기를 잰 값 49,720B로, '(gzip)'을 gzip·deflate로 고친다
 - BAT-177-r2 R-775 RV-06 낮음: 구현 I2 커밋 eb0dd4ab6이 기록 몫인 이 파일의 BAT-176 일곱 줄을 '닫음'으로 고쳤다(내용은 맞아 그대로 둔다, 다음부터 기록 커밋에서)
 - BAT-177-r2 R-775 RV-07 낮음: CDN 캐시 열쇠에 `Accept-Encoding`(압축 방식)을 넣는 일을 배포 단계(HOT-450·CDN 설정)에 넘긴다
