@@ -145,6 +145,15 @@ describe('GAT-250 B 운영 대행 어댑터', () => {
     const timeout = new SesMailTransport(sesBase({ send: async () => { throw Object.assign(new Error('timeout'), { name: 'TimeoutError' }); } }));
     await expect(timeout.send(mail())).rejects.toMatchObject({ kind: 'RETRYABLE' });
     expect(new MailTransportError('RETRYABLE', 'x', 429).status).toBe(429);
+
+    const logs: Record<string, unknown>[] = [];
+    const leaky = new SesMailTransport(
+      sesBase({ send: async () => { throw new Error('Authorization: HMAC-SHA256 apiKey=test-api-key, signature=test-api-secret'); } }, { log: (line) => logs.push(line) }),
+    );
+    const err = await leaky.send(mail()).catch((e: unknown) => e);
+    expect(String(err)).not.toContain('test-api-secret');
+    expect(String(err)).not.toContain('test-api-key');
+    expect(JSON.stringify(logs)).not.toContain('test-api-secret');
   });
 
   test('GAT-250 B3 SES 한도는 ratePerSec까지만 부르고 그 뒤는 재시도로 돌려준다', async () => {
