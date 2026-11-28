@@ -316,7 +316,7 @@ describe('C-T12 Degraded Mode 전이 감사 기록', () => {
     const reverted = await new RevertCommand(store, runner).execute({
       commandId: command.commandId,
       reason: '진입 Degraded 해제',
-      actor: { accountId: APPROVER, sessionId: '', role: 'operator' },
+      actor: { accountId: APPROVER, sessionId: '', role: 'commander' },
       nowMs: NOW + 3,
     });
     expect(reverted.pending).toBe(false);
@@ -334,10 +334,15 @@ describe('C-T12 Degraded Mode 전이 감사 기록', () => {
 describe('F026-AUTO AUTO_ACTION 계약 확장', () => {
   test('F026-AUTO ① asyncapi OpsCommandAutoAction과 ADR-0340 보충이 DEGRADED_MODE·ENTRY_DEGRADED·expiresAt을 싣는다', () => {
     const asyncapi = readDoc('docs/api/asyncapi.yaml');
-    const start = asyncapi.indexOf('OpsCommandAutoAction:');
-    const end = asyncapi.indexOf('QueueAggregate:', start);
-    expect(start).toBeGreaterThanOrEqual(0);
-    const block = asyncapi.slice(start, end);
+    // 첫 번째는 채널의 $ref, 마지막은 components.messages의 실제 스키마다.
+    const channelStart = asyncapi.indexOf('OpsCommandAutoAction:');
+    const componentStart = asyncapi.lastIndexOf('OpsCommandAutoAction:');
+    expect(channelStart).toBeGreaterThanOrEqual(0);
+    expect(componentStart).toBeGreaterThan(channelStart);
+    const channel = asyncapi.slice(channelStart, componentStart);
+    expect(channel).toContain('DEGRADED_MODE');
+    const end = asyncapi.indexOf('QueueAggregate:', componentStart);
+    const block = asyncapi.slice(componentStart, end);
     expect(block).toContain('DEGRADED_MODE');
     expect(block).toContain('ENTRY_DEGRADED');
     expect(block).toContain('expiresAt');

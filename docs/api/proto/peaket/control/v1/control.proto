@@ -33,7 +33,9 @@ enum ControlKind {
   CONTROL_KIND_ADMISSION_PAUSE = 2;
   // 명령 3 판매 일시정지(admission-ctrl·purchase-svc·queue-svc, 만료 없음)
   CONTROL_KIND_SALE_PAUSE = 3;
-  // 명령 6 가운데 대기열 진입 Degraded(admission-ctrl)
+  // 명령 6 가운데 대기열 진입 Degraded. 2026-11-28 확정: 이 종류는 쓰지 않는다.
+  // 진입 Degraded는 엣지 저장소 키 mode:entry를 ops-svc EdgeCommandExecutor가 쓰고(ADR-0234 결정 5),
+  // admission-ctrl은 그 값을 쓰지 않는다. 상태 조회 Degraded는 queue-svc의 별도 종류다.
   CONTROL_KIND_ENTRY_DEGRADED = 4;
   // 명령 7 대기실 공지 배너(queue-svc)
   CONTROL_KIND_LOBBY_BANNER = 5;
