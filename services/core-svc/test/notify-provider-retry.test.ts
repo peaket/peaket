@@ -59,7 +59,7 @@ describe('GAT-250 E 대행사 Retry-After', () => {
     expect(existsSync(sesPath)).toBe(true);
     if (!existsSync(sesPath)) return;
     const mod = (await import(/* @vite-ignore */ sesUrl)) as { SesMailTransport?: new (o: {
-      client: SesClient; from: string; fromDomain: string; configurationSet: string;
+      client: SesClient; region: string; snsTopicArn: string; from: string; fromDomain: string; configurationSet: string;
     }) => SesTransport };
     expect(typeof mod.SesMailTransport).toBe('function');
     if (typeof mod.SesMailTransport !== 'function') return;
@@ -70,7 +70,14 @@ describe('GAT-250 E 대행사 Retry-After', () => {
         throw Object.assign(new Error('429'), { $metadata: { httpStatusCode: 429 }, $response: { headers: { 'retry-after': retryAfter } } });
       },
     };
-    const mail = new mod.SesMailTransport({ client, from: 'no-reply@notify.peaket.example', fromDomain: 'notify.peaket.example', configurationSet: 'peaket-notify-events' });
+    const mail = new mod.SesMailTransport({
+      client,
+      region: 'ap-northeast-2',
+      snsTopicArn: 'arn:aws:sns:ap-northeast-2:123456789012:peaket-notify-events',
+      from: 'no-reply@notify.peaket.example',
+      fromDomain: 'notify.peaket.example',
+      configurationSet: 'peaket-notify-events',
+    });
     const t = setup(mail);
     await t.intake.tradeEvent({ type: 'REFUNDED', orderId: randomUUID(), eventId: randomUUID(), accountId: t.accountId, occurredAtMs: NOW_MS, refundAmount: 110_000 });
     expect(await t.worker.processDue(new Date(NOW_MS))).toMatchObject({ retrying: 1 });

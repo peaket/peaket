@@ -26,6 +26,8 @@ interface SesClient {
 }
 interface SesOptions {
   client: SesClient;
+  region: string;
+  snsTopicArn: string;
   from: string;
   fromDomain: string;
   configurationSet: string;
@@ -84,6 +86,8 @@ const mail = (over: Partial<MailMessage> = {}): MailMessage => ({
 
 const sesBase = (client: SesClient, over: Partial<SesOptions> = {}): SesOptions => ({
   client,
+  region: 'ap-northeast-2',
+  snsTopicArn: 'arn:aws:sns:ap-northeast-2:123456789012:peaket-notify-events',
   from: 'no-reply@notify.peaket.example',
   fromDomain: 'notify.peaket.example',
   configurationSet: 'peaket-notify-events',
