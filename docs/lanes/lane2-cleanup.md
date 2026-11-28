@@ -247,3 +247,8 @@
 - F-06-1 리뷰 RV061-13 낮음(시험): `RecordingSms`·`MemoryMergeNotice`를 포트에 `implements`/`satisfies`로 묶고, `N-T19 ⑦`은 `arrayContaining` 대신 `recipients.calls` 전체를 견주어 `includePhone`이 SMS에만 있는지 본다. SMS에 `includeEmail:false`를 요구하려면 §3.3에 그 규칙을 적고, `ACCOUNT_MERGED_ABSORBED`가 `FAN_NOTICE_KINDS`에 드는지와 계획이 말한 `FakeSmsTransport`·`FileSmsTransport` 어댑터(JSONL, PII 없음)도 시험한다(`services/core-svc/test/notify-channels.test.ts`, `services/core-svc/test/notify-identity-merge-notice.test.ts`)
 - F-06-1 리뷰 RV061-14 낮음(동시 실행·운영): `trade.orders`를 법정 탈퇴 후기 파기와 같은 소비자 그룹·파티션 1개·업무 키 2개에 더한다. 대부분 no-op이어도 초당 약 1,500건이 밀리면 16분 뒤 다시 파기 예약이 늦어질 수 있으니, no-op 빠른 길(DB 없음)·소비 밀림 경보·따로 그룹을 둘 조건을 정본에 적는다(`docs/streaming.md` §2.6, ADR-0142·ADR-0278, `services/core-svc/src/consumers/start.ts`)
 - F-06-1 리뷰 RV061-15 낮음(그 밖): `account_merge_notice`를 "이름 잠정"이라 적었지만 시험이 그 이름을 박아 두어 구현이 다른 이름을 고를 수 없다. 이름을 확정하거나 시험·정본이 같은 상수를 읽게 하고, 같은 `N-T23 ③`을 쓰는 두 시험은 갈래를 구분할 세부 번호를 붙인다(`docs/review/plans/F-06-1.md`, `services/core-svc/test/notify-identity-merge-notice.test.ts`)
+- F-06-6 RV066-12: 계획은 알림톡 worker를 연결하지 않고 `ALIMTALK` 작업을 `DEAD`로 둔다고 했지만 이를 고정하는 시험이 없다. 구현 때 알림톡 `DEAD` 갈래를 시험으로 고정하거나, 연결하면 계획의 '미실행' 표시를 함께 고친다.
+- F-06-6 RV066-13: Solapi 문자 어댑터의 `PEAKET_NOTIFY_SMS_RATE_PER_SEC` 토큰 버킷 시험이 없다. B3처럼 SES·Solapi 양쪽 한도 경계를 시험한다.
+- F-06-6 RV066-18: `existsSync` 뒤 내보내기 확인만 하고 단언 없이 return하는 갈래(B1·C1·B4 등)가 있다. 파일은 있는데 내보내기가 없으면 그 시험이 조용히 통과하므로, 내보내기 부재를 단언으로 바꾼다.
+- F-06-6 RV066-19: A8의 '/local/' 문구 의존, A2 빈 문자열 미검사, C7 256KiB 경계(256KiB·+1) 미검사, B6 알림톡 text 미단언을 정리한다.
+- F-06-6 RV066-20: SES SDK 클라이언트를 주입형으로만 두어 `maxAttempts: 1`(자체 재시도 끔) 설정을 시험이 볼 수 없다. 실제 클라이언트 팩토리 설정을 시험하거나 클라이언트 옵션을 노출한다.

@@ -7,8 +7,6 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 import { MailTransportError, SmsTransportError, type MailMessage } from '../src/modules/notify/index.js';
 
-type Env = Record<string, string | undefined>;
-
 interface SesInput {
   FromEmailAddress: string;
   Destination: { ToAddresses: string[] };
@@ -34,9 +32,16 @@ interface SesOptions {
   replyTo?: string;
   ratePerSec?: number;
   clock?: () => number;
+  log?: (line: Record<string, unknown>) => void;
 }
 interface SesTransport {
   send(input: MailMessage): Promise<{ providerMessageId?: string }>;
+  describe?(): Record<string, unknown>;
+}
+interface SolapiResult {
+  status: number;
+  headers?: Record<string, string>;
+  text(): Promise<string>;
 }
 interface SolapiOptions {
   apiKey: string;
@@ -44,11 +49,13 @@ interface SolapiOptions {
   senderNumber: string;
   ratePerSec?: number;
   clock?: () => number;
-  fetch: (url: string, init: { method: 'POST'; headers: Record<string, string>; body: string }) => Promise<{ status: number; text(): Promise<string> }>;
+  fetch: (url: string, init: { method: 'POST'; headers: Record<string, string>; body: string }) => Promise<SolapiResult>;
   alimtalk?: { pfId: string; templates: Record<string, string> };
+  log?: (line: Record<string, unknown>) => void;
 }
 interface SolapiTransport {
   send(input: { to: string; body: string; messageKey: string; kind?: string; templateVariables?: Record<string, string> }): Promise<{ providerMessageId?: string }>;
+  describe?(): Record<string, unknown>;
 }
 
 const sesUrl = new URL('../src/modules/notify/adapters/ses-mail-transport.ts', import.meta.url).href;
@@ -83,11 +90,17 @@ const sesBase = (client: SesClient, over: Partial<SesOptions> = {}): SesOptions 
   ...over,
 });
 
-const sesError = (status: number): Error => Object.assign(new Error(`ses-${status}`), { $metadata: { httpStatusCode: status }, status });
-const jsonOk = (body: unknown) => ({ status: 200, text: async () => JSON.stringify(body) });
+const sesError = (status: number, retryAfter?: string): Error =>
+  Object.assign(new Error(`ses-${status}`), {
+    $metadata: { httpStatusCode: status },
+    status,
+    ...(retryAfter ? { $response: { headers: { 'retry-after': retryAfter } } } : {}),
+  });
+const jsonOk = (body: unknown): SolapiResult => ({ status: 200, text: async () => JSON.stringify(body) });
+const jsonStatus = (status: number, headers?: Record<string, string>): SolapiResult => ({ status, headers, text: async () => '{"error":"x"}' });
 
 describe('GAT-250 B 운영 대행 어댑터', () => {
-  test('GAT-250 B1 SES 요청은 발신 도메인·평문 본문·허용 머리·해시 태그만 보낸다', async () => {
+  test('GAT-250 B1 SES 요청은 발신 도메인·평문 본문·허용 머리·해시 태그 하나만 보내고 CR/LF 머리를 거부한다', async () => {
     expect(existsSync(sesPath)).toBe(true);
     if (!existsSync(sesPath)) return;
     const { SesMailTransport } = await loadSes();
@@ -106,23 +119,29 @@ describe('GAT-250 B 운영 대행 어댑터', () => {
     expect(s.Content.Simple.Subject.Data).toBe('환급이 완료되었습니다');
     expect(s.Content.Simple.Body.Text.Data).toContain('110,000원');
     expect((s.Content.Simple.Headers ?? []).map((h) => h.Name.toLowerCase())).toEqual(['list-unsubscribe', 'list-unsubscribe-post']);
-    const tag = s.EmailTags.find((x) => x.Name === 'peaket-dedup');
-    expect(tag?.Value).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(tag?.Value).toBe(createHash('sha256').update(mail().messageKey, 'utf8').digest('base64url'));
-    expect(tag?.Value).not.toContain('01900000');
+    expect(s.EmailTags).toEqual([{ Name: 'peaket-dedup', Value: createHash('sha256').update(mail().messageKey, 'utf8').digest('base64url') }]);
+    expect(s.EmailTags[0]!.Value).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(s.EmailTags[0]!.Value).not.toContain('01900000');
     expect(r.providerMessageId).toBe('ses-1');
+
+    await expect(t.send(mail({ headers: { 'list-unsubscribe': '<https://peaket.example/x>\r\nBcc: evil@example.com' } }))).rejects.toMatchObject({
+      name: 'MailTransportError',
+      kind: 'PERMANENT',
+    });
   });
 
-  test('GAT-250 B2 SES 오류는 400 영구, 429·5xx·시간 초과는 재시도, 그 밖은 결과 모름이다', async () => {
+  test('GAT-250 B2 SES 오류는 400 영구, 429·5xx·시간 초과는 재시도, 300·418은 결과 모름이고 Retry-After를 읽는다', async () => {
     expect(existsSync(sesPath)).toBe(true);
     if (!existsSync(sesPath)) return;
     const { SesMailTransport } = await loadSes();
     if (typeof SesMailTransport !== 'function') return;
 
-    for (const [status, kind] of [[400, 'PERMANENT'], [401, 'RETRYABLE'], [403, 'RETRYABLE'], [404, 'RETRYABLE'], [409, 'RETRYABLE'], [429, 'RETRYABLE'], [500, 'RETRYABLE'], [503, 'RETRYABLE']] as const) {
+    for (const [status, kind] of [[400, 'PERMANENT'], [401, 'RETRYABLE'], [403, 'RETRYABLE'], [404, 'RETRYABLE'], [409, 'RETRYABLE'], [429, 'RETRYABLE'], [500, 'RETRYABLE'], [503, 'RETRYABLE'], [300, 'UNKNOWN'], [418, 'UNKNOWN']] as const) {
       const t = new SesMailTransport(sesBase({ send: async () => { throw sesError(status); } }));
       await expect(t.send(mail())).rejects.toMatchObject({ name: 'MailTransportError', kind });
     }
+    const limited = new SesMailTransport(sesBase({ send: async () => { throw sesError(429, '300'); } }));
+    await expect(limited.send(mail())).rejects.toMatchObject({ kind: 'RETRYABLE', retryAfterMs: 300_000 });
     const timeout = new SesMailTransport(sesBase({ send: async () => { throw Object.assign(new Error('timeout'), { name: 'TimeoutError' }); } }));
     await expect(timeout.send(mail())).rejects.toMatchObject({ kind: 'RETRYABLE' });
     expect(new MailTransportError('RETRYABLE', 'x', 429).status).toBe(429);
@@ -178,21 +197,36 @@ describe('GAT-250 B 운영 대행 어댑터', () => {
     expect(r.providerMessageId).toBe('solapi-1');
   });
 
-  test('GAT-250 B5 Solapi 오류는 400 영구, 401·409·429·5xx·연결 실패는 재시도, 잘못된 응답은 결과 모름이다', async () => {
+  test('GAT-250 B5 Solapi 오류는 400 영구, 401~404·429·5xx·시간 초과는 재시도, 300·418은 결과 모름이고 Retry-After·비밀을 지킨다', async () => {
     expect(existsSync(solapiPath)).toBe(true);
     if (!existsSync(solapiPath)) return;
     const { SolapiSmsTransport } = await loadSolapi();
     if (typeof SolapiSmsTransport !== 'function') return;
 
-    const base: Omit<SolapiOptions, 'fetch'> = { apiKey: 'k', apiSecret: 's', senderNumber: '01012345678' };
-    for (const [status, kind] of [[400, 'PERMANENT'], [401, 'RETRYABLE'], [403, 'RETRYABLE'], [409, 'RETRYABLE'], [429, 'RETRYABLE'], [500, 'RETRYABLE'], [503, 'RETRYABLE']] as const) {
-      const t = new SolapiSmsTransport({ ...base, fetch: async () => ({ status, text: async () => '{"error":"x"}' }) });
+    const base: Omit<SolapiOptions, 'fetch'> = { apiKey: 'test-api-key', apiSecret: 'test-api-secret', senderNumber: '01012345678' };
+    for (const [status, kind] of [[400, 'PERMANENT'], [401, 'RETRYABLE'], [403, 'RETRYABLE'], [404, 'RETRYABLE'], [409, 'RETRYABLE'], [429, 'RETRYABLE'], [500, 'RETRYABLE'], [503, 'RETRYABLE'], [300, 'UNKNOWN'], [418, 'UNKNOWN']] as const) {
+      const t = new SolapiSmsTransport({ ...base, fetch: async () => jsonStatus(status) });
       await expect(t.send({ to: '01099998888', body: '[피켓] x', messageKey: 'k' })).rejects.toMatchObject({ name: 'SmsTransportError', kind });
     }
+    const limited = new SolapiSmsTransport({ ...base, fetch: async () => jsonStatus(429, { 'retry-after': '300' }) });
+    await expect(limited.send({ to: '01099998888', body: '[피켓] x', messageKey: 'k' })).rejects.toMatchObject({ retryAfterMs: 300_000 });
+    const short = new SolapiSmsTransport({ ...base, fetch: async () => jsonStatus(429, { 'retry-after': '10' }) });
+    await expect(short.send({ to: '01099998888', body: '[피켓] x', messageKey: 'k' })).rejects.toMatchObject({ retryAfterMs: 10_000 });
     const network = new SolapiSmsTransport({ ...base, fetch: async () => { throw new TypeError('fetch failed'); } });
     await expect(network.send({ to: '01099998888', body: '[피켓] x', messageKey: 'k' })).rejects.toMatchObject({ kind: 'RETRYABLE' });
     const broken = new SolapiSmsTransport({ ...base, fetch: async () => ({ status: 200, text: async () => 'not-json' }) });
     await expect(broken.send({ to: '01099998888', body: '[피켓] x', messageKey: 'k' })).rejects.toMatchObject({ kind: 'UNKNOWN' });
+
+    const logs: Record<string, unknown>[] = [];
+    const leaky = new SolapiSmsTransport({
+      ...base,
+      log: (line) => logs.push(line),
+      fetch: async () => { throw new Error('Authorization: HMAC-SHA256 apiKey=test-api-key, signature=test-api-secret'); },
+    });
+    const err = await leaky.send({ to: '01099998888', body: '[피켓] x', messageKey: 'k' }).catch((e: unknown) => e);
+    expect(String(err)).not.toContain('test-api-secret');
+    expect(String(err)).not.toContain('test-api-key');
+    expect(JSON.stringify(logs)).not.toContain('test-api-secret');
     expect(new SmsTransportError('RETRYABLE', 'x', 503).status).toBe(503);
   });
 
