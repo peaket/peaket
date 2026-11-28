@@ -17,43 +17,46 @@ describe('F026-STATE 상태 조회 Degraded notice 계약', () => {
     // 받는 종류·칸 이름
     expect(QUEUE_NOTICE_KINDS).toContain(STATE_KIND);
     expect(FIELDS[STATE_KIND]).toEqual({ value: 'stateDegraded', rev: 'stateDegradedRev', cmd: 'stateDegradedCmd' });
-    // 바라는 상태 꼴: {"on": bool}만. 모르는 칸·틀린 꼴은 undefined(받는 층 INVALID_ARGUMENT)
-    expect(noticeValueOf(STATE_KIND, '{"on":true}')).toEqual({ value: '1' });
-    expect(noticeValueOf(STATE_KIND, '{"on":false}')).toEqual({ value: '0' });
-    expect(noticeValueOf(STATE_KIND, '{"on":1}')).toBeUndefined();
-    expect(noticeValueOf(STATE_KIND, '{"stateDegraded":true}')).toBeUndefined();
+    // 바라는 상태 꼴은 하나다: {"stateDegraded": bool}. {"on": bool}은 받지 않는다(ops 제어와 같은 꼴)
+    expect(noticeValueOf(STATE_KIND, '{"stateDegraded":true}')).toEqual({ value: '1' });
+    expect(noticeValueOf(STATE_KIND, '{"stateDegraded":false}')).toEqual({ value: '0' });
+    expect(noticeValueOf(STATE_KIND, '{"stateDegraded":1}')).toBeUndefined();
+    expect(noticeValueOf(STATE_KIND, '{"on":true}')).toBeUndefined();
 
     const notices = new MemoryQueueNotices();
     const set = new SetQueueNotice(notices);
     const platformCommand = randomUUID();
     // 전체 범위 켜기: 판 10
-    expect(await set.run({ kind: STATE_KIND, scope: 'PLATFORM', desiredStateJson: '{"on":true}', commandId: platformCommand, version: 10 })).toBe(10);
+    expect(await set.run({ kind: STATE_KIND, scope: 'PLATFORM', desiredStateJson: '{"stateDegraded":true}', commandId: platformCommand, version: 10 })).toBe(10);
     expect(notices.written.get('PLATFORM')).toMatchObject({
       stateDegraded: '1',
       stateDegradedRev: '10',
       stateDegradedCmd: platformCommand,
     });
     // 낮은 판 9는 쓰지 않고 지금 판 10을 돌려준다
-    expect(await set.run({ kind: STATE_KIND, scope: 'PLATFORM', desiredStateJson: '{"on":false}', commandId: randomUUID(), version: 9 })).toBe(10);
+    expect(await set.run({ kind: STATE_KIND, scope: 'PLATFORM', desiredStateJson: '{"stateDegraded":false}', commandId: randomUUID(), version: 9 })).toBe(10);
     expect(notices.written.get('PLATFORM')).toMatchObject({ stateDegraded: '1', stateDegradedRev: '10', stateDegradedCmd: platformCommand });
     // 같은 판 10도 쓰지 않는다
-    expect(await set.run({ kind: STATE_KIND, scope: 'PLATFORM', desiredStateJson: '{"on":false}', commandId: randomUUID(), version: 10 })).toBe(10);
+    expect(await set.run({ kind: STATE_KIND, scope: 'PLATFORM', desiredStateJson: '{"stateDegraded":false}', commandId: randomUUID(), version: 10 })).toBe(10);
+    // 전체 범위 끄기: 판 11 → stateDegraded '0'
+    expect(await set.run({ kind: STATE_KIND, scope: 'PLATFORM', desiredStateJson: '{"stateDegraded":false}', commandId: randomUUID(), version: 11 })).toBe(11);
+    expect(notices.written.get('PLATFORM')).toMatchObject({ stateDegraded: '0', stateDegradedRev: '11' });
 
     // 회차 범위는 회차 키에 따로 쓴다
     const eventId = randomUUID();
     const eventCommand = randomUUID();
-    expect(await set.run({ kind: STATE_KIND, scope: eventId, desiredStateJson: '{"on":true}', commandId: eventCommand, version: 11 })).toBe(11);
-    expect(notices.written.get(eventId)).toMatchObject({ stateDegraded: '1', stateDegradedRev: '11', stateDegradedCmd: eventCommand });
+    expect(await set.run({ kind: STATE_KIND, scope: eventId, desiredStateJson: '{"stateDegraded":true}', commandId: eventCommand, version: 12 })).toBe(12);
+    expect(notices.written.get(eventId)).toMatchObject({ stateDegraded: '1', stateDegradedRev: '12', stateDegradedCmd: eventCommand });
     // 끄기는 0을 쓴다(칸을 지우지 않는다: 파일 생성이 0을 읽어 힌트를 끈다)
-    expect(await set.run({ kind: STATE_KIND, scope: eventId, desiredStateJson: '{"on":false}', commandId: randomUUID(), version: 12 })).toBe(12);
-    expect(notices.written.get(eventId)).toMatchObject({ stateDegraded: '0', stateDegradedRev: '12' });
+    expect(await set.run({ kind: STATE_KIND, scope: eventId, desiredStateJson: '{"stateDegraded":false}', commandId: randomUUID(), version: 13 })).toBe(13);
+    expect(notices.written.get(eventId)).toMatchObject({ stateDegraded: '0', stateDegradedRev: '13' });
   });
 
   test('F026-STATE ① STATE_DEGRADED는 회차 범위 글자가 틀리면 아무것도 쓰지 않는다', async () => {
     const notices = new MemoryQueueNotices();
     const set = new SetQueueNotice(notices);
     await expect(
-      set.run({ kind: STATE_KIND, scope: 'NOT-A-UUID', desiredStateJson: '{"on":true}', commandId: randomUUID(), version: 1 }),
+      set.run({ kind: STATE_KIND, scope: 'NOT-A-UUID', desiredStateJson: '{"stateDegraded":true}', commandId: randomUUID(), version: 1 }),
     ).rejects.toThrow();
     expect(notices.written.size).toBe(0);
   });
