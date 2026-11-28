@@ -428,7 +428,7 @@ describe('F-02-7 C-T28 받는 쪽 서명 묶음(purchase-svc)', () => {
     const sigs = signBundle(b, [operatorC]);
     await expect(applyControl(requestOf(b, sigs), h.deps)).rejects.toMatchObject({ code: 16 });
     const e = h.events[0]!;
-    expect(Object.keys(e).sort()).toEqual(['atMs', 'commandId', 'kind', 'kindName', 'keyIds', 'podName', 'reason', 'scope', 'service']);
+    expect(new Set(Object.keys(e))).toEqual(new Set(['atMs', 'commandId', 'kind', 'kindName', 'keyIds', 'podName', 'reason', 'scope', 'service']));
     expect(JSON.stringify(e)).not.toContain(sigs[0]!.signature.toString('base64'));
     expect(JSON.stringify(e)).not.toContain(b.reason);
   });
