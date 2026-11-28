@@ -57,6 +57,13 @@ describe('N-T24 받는 사람 묶음 조회', () => {
     expect(withPhone[1]).toMatchObject({ status: 'MERGED', email: null });
     expect(JSON.stringify(withPhone[1])).not.toContain('+821012345678');
 
+    // 워커의 문자 조회와 같은 includeEmail=false·includePhone=true 갈래
+    const phoneOnlyInput = { accountIds: [a, merged], includeEmail: false, includePhone: true };
+    const phoneOnly = await get.run(phoneOnlyInput);
+    expect(phoneOnly[0]).toMatchObject({ phone: '+821012345678' });
+    expect(JSON.stringify(phoneOnly[0])).not.toContain('a@example.com');
+    expect(JSON.stringify(phoneOnly[1])).not.toContain('+821012345678');
+
     const withoutInput = { accountIds: [a], includeEmail: false, includePhone: false };
     const without = await get.run(withoutInput);
     expect(JSON.stringify(without[0])).not.toContain('"phone"');

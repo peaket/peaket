@@ -9,6 +9,7 @@ import {
   FakeMailTransport,
   FakePushTransport,
   FanNotificationWorker,
+  MailTransportError,
   MemoryFanNotifyStore,
   NotificationIntake,
   type NotificationJob,
@@ -19,7 +20,13 @@ import { NOW_MS } from './support.js';
 import { OPTOUT_KEY, vapidKeys } from './fan-notify-support.js';
 
 /** 프로세스 안의 흡수 계정 주소 inbox(디스크·DB·로그 없음). 계획 §4 `AbsorbedNoticeInbox`와 같은 모양 */
-class MemoryAbsorbedInbox {
+interface AbsorbedNoticeInboxPort {
+  put(dedupKey: string, email: string): void;
+  get(dedupKey: string): string | undefined;
+  delete(dedupKey: string): void;
+}
+
+class MemoryAbsorbedInbox implements AbsorbedNoticeInboxPort {
   readonly rows = new Map<string, string>();
   put(dedupKey: string, email: string) {
     this.rows.set(dedupKey, email);
@@ -115,6 +122,13 @@ describe('N-T23 계정 병합 흡수 계정 이메일', () => {
     expect(await t.planned.accountMergedAbsorbed({ mergeId, absorbedAccountId: absorbed, absorbedEmail: 'absorbed@example.com' })).toEqual({ created: 0, duplicate: 1 });
     expect(await t.worker.processDue(new Date(NOW_MS))).toMatchObject({ attempted: 0 });
     expect(t.mail.sent).toHaveLength(1);
+
+    // 발송 실패 로그에도 주소가 없다(재시도 로그는 중복 키만 남긴다)
+    const failMerge = randomUUID();
+    expect(await t.planned.accountMergedAbsorbed({ mergeId: failMerge, absorbedAccountId: absorbed, absorbedEmail: 'fail@example.com' })).toEqual({ created: 1, duplicate: 0 });
+    t.mail.fail.push(new MailTransportError('RETRYABLE', '503', 503));
+    expect(await t.worker.processDue(new Date(NOW_MS))).toMatchObject({ attempted: 1, retrying: 1 });
+    expect(t.logs.join('\n')).not.toContain('fail@example.com');
   });
 
   test('N-T23 ③ 전달된 주소가 없는 작업은 identity 재조회 없이 FAILED다', async () => {

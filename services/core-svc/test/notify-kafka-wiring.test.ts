@@ -69,9 +69,15 @@ describe('N-T19 Kafka trade.orders 처리기', () => {
     if (!imported) return;
     const { handler, intake } = imported;
 
-    for (const type of ['EVENT_CANCELLATION_CONFIRMED', 'EVENT_POSTPONED', 'REFUNDED', 'REFUND_FAILED']) {
+    const decodedOrder = (type: string) => {
       const order = orderEvent(type);
-      const event = { topic: 'trade.orders', order };
+      const event = handler.decode({ topic: 'trade.orders', value: Buffer.from(JSON.stringify(order)) }) as { topic: string; order: Record<string, unknown> };
+      expect(event).toMatchObject({ topic: 'trade.orders', order: { type, orderId: order.orderId } });
+      return { order, event };
+    };
+
+    for (const type of ['EVENT_CANCELLATION_CONFIRMED', 'EVENT_POSTPONED', 'REFUNDED', 'REFUND_FAILED']) {
+      const { order, event } = decodedOrder(type);
       expect(handler.keyOf(event)).toBe(order.orderId);
       await handler.handle(event);
     }
@@ -84,10 +90,12 @@ describe('N-T19 Kafka trade.orders 처리기', () => {
     expect(intake.trade[2]).toMatchObject({ refundAmount: 110_000 });
     expect(intake.trade[3]).toMatchObject({ fanNoticeReason: 'failed' });
 
-    // 알림 대상이 아닌 주문 사건은 인테이크를 부르지 않는다
+    // 알림 대상이 아닌 주문 사건도 decode를 지나 인테이크를 부르지 않는다
     const before = intake.trade.length;
-    await handler.handle({ topic: 'trade.orders', order: orderEvent('CONFIRMED') });
-    await handler.handle({ topic: 'trade.orders', order: orderEvent('APPROVED') });
+    for (const type of ['CONFIRMED', 'APPROVED']) {
+      const { event } = decodedOrder(type);
+      await handler.handle(event);
+    }
     expect(intake.trade).toHaveLength(before);
 
     // 계약에 맞지 않는 값은 던져 플랫폼이 보류하게 한다
@@ -105,15 +113,14 @@ describe('N-T23 identity 사건 처리기와 계약', () => {
     if (!imported) return;
     const { handler, intake } = imported;
 
-    const merged = {
-      topic: 'identity.accounts-merged',
-      merged: {
-        mergeId: '01900000-0000-7000-8000-0000000000b1',
-        primaryAccountId: '01900000-0000-7000-8000-0000000000a1',
-        mergedAccountId: '01900000-0000-7000-8000-0000000000a2',
-        confirmedAt: '2026-11-28T00:00:00.000Z',
-      },
+    const mergedPayload = {
+      mergeId: '01900000-0000-7000-8000-0000000000b1',
+      primaryAccountId: '01900000-0000-7000-8000-0000000000a1',
+      mergedAccountId: '01900000-0000-7000-8000-0000000000a2',
+      confirmedAt: '2026-11-28T00:00:00.000Z',
     };
+    const merged = handler.decode({ topic: 'identity.accounts-merged', value: Buffer.from(JSON.stringify(mergedPayload)) }) as { topic: string; merged: Record<string, unknown> };
+    expect(merged).toMatchObject({ topic: 'identity.accounts-merged', merged: mergedPayload });
     expect(handler.keyOf(merged)).toBe('01900000-0000-7000-8000-0000000000b1');
     await handler.handle(merged);
     expect(intake.merges).toEqual([
@@ -124,16 +131,15 @@ describe('N-T23 identity 사건 처리기와 계약', () => {
       }),
     ]);
 
-    const login = {
-      topic: 'identity.login-methods-changed',
-      login: {
-        eventKey: '01900000-0000-7000-8000-0000000000c1',
-        accountId: '01900000-0000-7000-8000-0000000000a1',
-        change: 'LINKED',
-        provider: 'google',
-        occurredAt: '2026-11-28T00:00:00.000Z',
-      },
+    const loginPayload = {
+      eventKey: '01900000-0000-7000-8000-0000000000c1',
+      accountId: '01900000-0000-7000-8000-0000000000a1',
+      change: 'LINKED',
+      provider: 'google',
+      occurredAt: '2026-11-28T00:00:00.000Z',
     };
+    const login = handler.decode({ topic: 'identity.login-methods-changed', value: Buffer.from(JSON.stringify(loginPayload)) }) as { topic: string; login: Record<string, unknown> };
+    expect(login).toMatchObject({ topic: 'identity.login-methods-changed', login: loginPayload });
     expect(handler.keyOf(login)).toBe('01900000-0000-7000-8000-0000000000a1');
     await handler.handle(login);
     expect(intake.logins).toEqual([

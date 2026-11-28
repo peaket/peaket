@@ -35,8 +35,13 @@ class FakeSmsError extends Error {
   }
 }
 
-/** 문자 대행 자리(운영 Solapi 어댑터는 F-06-6). SmsTransport와 같은 모양이다 */
-class RecordingSms {
+/** SmsTransport 포트와 같은 모양(기준 트리에는 아직 타입이 없어 시험 쪽에서 짝을 맞춘다) */
+interface SmsTransportPort {
+  send(input: { to: string; body: string; messageKey: string }): Promise<{ providerMessageId?: string }>;
+}
+
+/** 문자 대행 자리(운영 Solapi 어댑터는 F-06-6) */
+class RecordingSms implements SmsTransportPort {
   readonly sent: { to: string; body: string; messageKey: string }[] = [];
   readonly fail: FakeSmsError[] = [];
   async send(input: { to: string; body: string; messageKey: string }) {
@@ -125,8 +130,21 @@ describe('N-T19 낱건 원장·워커의 채널', () => {
     const vars = { provider: 'google' };
     await t.intake.notice({ kind: 'LOGIN_METHOD_LINKED', targetId, accountId, channel: 'EMAIL', vars });
     await t.intake.notice({ kind: 'LOGIN_METHOD_LINKED', targetId, accountId, channel: 'WEB_PUSH', vars });
-    const wallet = smsJob({ accountId });
-    await t.store.enqueue(wallet, new Date(NOW_MS));
+
+    // 월렛·키 미등록은 store.enqueue가 아니라 intake.notice의 FAN_NOTICE_KINDS·VARS_ALLOWED·SMS_ALLOWED_KINDS 경로로 만든다
+    const fanNotify = (await import(/* @vite-ignore */ new URL('../src/modules/notify/domain/fan-notify.ts', import.meta.url).href)) as { FAN_NOTICE_KINDS?: readonly string[] };
+    expect(fanNotify.FAN_NOTICE_KINDS).toEqual(expect.arrayContaining(['WALLET_OPEN_REMINDER', 'ACCOUNT_MERGED_ABSORBED']));
+    type PlannedNotice = { kind: string; targetId: string; accountId: string; channel: 'SMS'; vars: Vars };
+    type PlannedIntake = NotificationIntake & { notice(i: PlannedNotice): Promise<'created' | 'duplicate'> };
+    const planned = t.intake as PlannedIntake;
+    const wallet = {
+      kind: 'WALLET_OPEN_REMINDER',
+      targetId: randomUUID(),
+      accountId,
+      channel: 'SMS' as const,
+      vars: { title: '공연 전날 월렛 안내', body: '내일 공연입니다. 월렛에서 티켓을 열어 두세요.', url: '/my/tickets' } satisfies Vars,
+    };
+    expect(await planned.notice(wallet)).toBe('created');
     expect(t.store.jobs.size).toBe(3);
 
     expect(await t.worker.processDue(new Date(NOW_MS))).toEqual({ attempted: 3, sent: 3, retrying: 0, dead: 0, expired: 0, failed: 0, suppressed: 0 });
@@ -139,16 +157,15 @@ describe('N-T19 낱건 원장·워커의 채널', () => {
     expect(t.sms.sent[0]).toEqual({
       to: '+821012345678',
       body: '[피켓] 공연 전날 월렛 안내\n내일 공연입니다. 월렛에서 티켓을 열어 두세요.',
-      messageKey: wallet.dedupKey,
+      messageKey: `WALLET_OPEN_REMINDER:${wallet.targetId}:${accountId}:SMS`,
     });
 
-    // 전화번호는 문자를 보낼 때만, 이메일은 includeEmail=true일 때만 묻는다
-    expect(t.recipients.calls).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ includeEmail: true }),
-        expect.objectContaining({ includeEmail: false, includePhone: true }),
-      ]),
-    );
+    // 전화번호는 문자를 보낼 때만(includeEmail=false·includePhone=true), 이메일은 includeEmail=true일 때만 묻는다
+    const smsCalls = t.recipients.calls.filter((c) => c.includePhone === true);
+    expect(smsCalls).toEqual([{ ids: [accountId], includeEmail: false, includePhone: true }]);
+    const emailCalls = t.recipients.calls.filter((c) => c.includeEmail === true);
+    expect(emailCalls).toHaveLength(1);
+    expect(emailCalls[0]!.includePhone).toBeUndefined();
     expect(t.store.deliveries.map((d) => d.channel).sort()).toEqual(['EMAIL', 'SMS', 'WEB_PUSH']);
     expect(t.store.deliveries.every((d) => d.status === 'SENT')).toBe(true);
 
@@ -167,15 +184,38 @@ describe('N-T19 낱건 원장·워커의 채널', () => {
     const accountId = account(t, null);
     const rejected: { kind: FanNoticeKind; vars: Vars }[] = [
       { kind: 'EVENT_CANCELLATION_CONFIRMED', vars: { fanNoticeReason: '회차 취소' } },
+      { kind: 'EVENT_POSTPONED', vars: { fanNoticeReason: '연기', postponedTo: '2026-12-01T10:00:00.000Z', refundWindowClosesAt: '2026-12-08T10:00:00.000Z' } },
       { kind: 'REFUNDED', vars: { refundAmount: 110_000 } },
+      { kind: 'REFUND_FAILED', vars: { fanNoticeReason: 'failed' } },
       { kind: 'DEVICE_KEY_REISSUED', vars: { type: 'DEVICE_KEY_REISSUED', registeredAt: new Date(NOW_MS).toISOString(), ticketId: randomUUID() } },
+      { kind: 'DEVICE_KEY_LATE_ISSUE', vars: { type: 'DEVICE_KEY_LATE_ISSUE', registeredAt: new Date(NOW_MS).toISOString(), ticketId: randomUUID() } },
       { kind: 'OPEN_LOBBY', vars: { title: '대기실이 열렸습니다', body: '공연 상세에서 들어가세요.', url: '/events/x' } },
-      { kind: 'AD', vars: { title: '피켓 소식', body: '새 소식', sender: '피켓', contact: 'help@peaket.example', unsubscribeUrl: '/u' } },
+      { kind: 'OPEN_VERIFY', vars: { title: '본인확인을 마쳐 주세요', body: '대기실에 들어가려면 본인확인이 필요합니다.', url: '/events/x' } },
+      { kind: 'CANCELLATION_ALERT', vars: { title: '취소표가 나왔습니다', body: '좌석이 돌아왔습니다.', url: '/events/x', eventTitle: '겨울 콘서트', startsAt: '2026-12-24T19:00:00+09:00' } },
+      // contact에 이메일 꼴을 넣지 않는다. 그래야 '광고라서 SMS를 거절'하는지 본다
+      { kind: 'AD', vars: { title: '피켓 소식', body: '새 소식', sender: '피켓', contact: '피켓 고객센터', unsubscribeUrl: '/u' } },
     ];
     for (const one of rejected) {
-      await expect(t.intake.notice({ kind: one.kind, targetId: randomUUID(), accountId, channel: 'SMS', vars: one.vars })).rejects.toMatchObject({ code: 'INVALID' });
+      await expect(t.intake.notice({ kind: one.kind, targetId: randomUUID(), accountId, channel: 'SMS', vars: one.vars })).rejects.toMatchObject({
+        code: 'INVALID',
+        message: expect.stringContaining('문자'),
+      });
     }
     expect(t.store.jobs.size).toBe(0);
+
+    // 웹 푸시 실패 뒤 대체 채널: 웹 푸시가 주 채널인 거래·안전 알림만 SMS 대체 작업을 만든다
+    const fallback = harness();
+    const fallbackAccount = account(fallback);
+    type PlannedFallback = NotificationIntake & { smsFallback(i: { kind: string; targetId: string; accountId: string }): Promise<'created' | 'duplicate' | 'not-applicable'> };
+    const fallbackIntake = fallback.intake as PlannedFallback;
+    expect(typeof fallbackIntake.smsFallback).toBe('function');
+    if (typeof fallbackIntake.smsFallback !== 'function') return;
+    const fallbackTarget = randomUUID();
+    expect(await fallbackIntake.smsFallback({ kind: 'ACCOUNT_MERGED', targetId: fallbackTarget, accountId: fallbackAccount })).toBe('created');
+    expect([...fallback.store.jobs.keys()]).toEqual([`ACCOUNT_MERGED:${fallbackTarget}:${fallbackAccount}:SMS:fallback`]);
+    expect(await fallbackIntake.smsFallback({ kind: 'EVENT_CANCELLATION_CONFIRMED', targetId: randomUUID(), accountId: fallbackAccount })).toBe('not-applicable');
+    expect(await fallback.worker.processDue(new Date(NOW_MS))).toMatchObject({ attempted: 1, sent: 1 });
+    expect(fallback.sms.sent[0]!.body.startsWith('[피켓] ')).toBe(true);
 
     await t.store.enqueue(smsJob({ accountId }), new Date(NOW_MS));
     expect(await t.worker.processDue(new Date(NOW_MS))).toMatchObject({ attempted: 1, sent: 0, retrying: 0, dead: 0, failed: 1 });
@@ -185,17 +225,23 @@ describe('N-T19 낱건 원장·워커의 채널', () => {
   });
 
   test('N-T19 ⑨ 문자 429·5xx는 재시도하고 400은 DEAD, 결과 모름은 한 번 더, 2,000자 초과는 FAILED다', async () => {
-    // 429/5xx: 1분 뒤 다시 보내고 성공한다(경계 −1ms는 집지 않는다)
+    // 429와 503: 1분·5분 뒤 다시 보내고 성공한다(경계 −1ms는 집지 않는다)
     const retry = harness();
     const retryAccount = account(retry);
     await retry.store.enqueue(smsJob({ accountId: retryAccount }), new Date(NOW_MS));
     retry.sms.fail.push(new FakeSmsError('RETRYABLE', '429', 429));
     expect(await retry.worker.processDue(new Date(NOW_MS))).toMatchObject({ attempted: 1, retrying: 1 });
-    const retried = [...retry.store.jobs.values()][0]!;
-    expect(retried).toMatchObject({ status: 'RETRYING', attempts: 1 });
-    expect(retried.nextAttemptAt.getTime()).toBe(NOW_MS + 60_000);
+    const firstRetry = [...retry.store.jobs.values()][0]!;
+    expect(firstRetry).toMatchObject({ status: 'RETRYING', attempts: 1 });
+    expect(firstRetry.nextAttemptAt.getTime()).toBe(NOW_MS + 60_000);
     expect(await retry.worker.processDue(new Date(NOW_MS + 60_000 - 1))).toMatchObject({ attempted: 0 });
-    expect(await retry.worker.processDue(new Date(NOW_MS + 60_000))).toMatchObject({ sent: 1 });
+
+    retry.sms.fail.push(new FakeSmsError('RETRYABLE', '503', 503));
+    expect(await retry.worker.processDue(new Date(NOW_MS + 60_000))).toMatchObject({ retrying: 1 });
+    const secondRetry = [...retry.store.jobs.values()][0]!;
+    expect(secondRetry).toMatchObject({ status: 'RETRYING', attempts: 2 });
+    expect(secondRetry.nextAttemptAt.getTime()).toBe(NOW_MS + 60_000 + 300_000);
+    expect(await retry.worker.processDue(new Date(NOW_MS + 60_000 + 300_000))).toMatchObject({ sent: 1 });
     expect(retry.sms.sent).toHaveLength(1);
 
     // 400: 재시도 없이 DEAD
