@@ -6,6 +6,10 @@ export interface CommanderKey {
   id: string;
   role: string;
   key: KeyObject;
+  /** 런북 공개키 목록의 운영자 ID(없으면 id). RB-35는 쓰지 않고 F-02-7 CLI가 쓴다 */
+  operatorId?: string;
+  /** 운영자 KMS 키 ARN(없으면 --key나 서명자 ID). RB-35는 쓰지 않는다 */
+  kmsKeyArn?: string;
 }
 
 export type VerifyRejection = 'window' | 'expired' | 'not_yet_valid' | 'unknown_signer' | 'not_commander' | 'bad_signature' | 'two_commanders';

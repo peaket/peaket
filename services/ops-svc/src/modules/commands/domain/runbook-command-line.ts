@@ -14,9 +14,10 @@ export function runbookCommandLine(c: Pick<Command, 'state' | 'type' | 'commandI
   const out = `--out runbook-${commandId}.json`;
   switch (c.type) {
     case 'KILL_SWITCH': {
-      const platform = c.params.scope === 'PLATFORM' || c.eventId === undefined;
-      const scope = platform ? '--scope platform' : `--event ${c.eventId}`;
-      return `peaket-runbook draft sale-pause ${scope} --reason ${quote(c.reason)} --command-id ${commandId} ${out}`;
+      // PLATFORM만 전체 한 줄이다. scope: EVENT인데 회차가 여럿(eventId 없음)이면 한 줄로 담을 수 없어 만들지 않는다
+      if (c.params.scope === 'PLATFORM') return `peaket-runbook draft sale-pause --scope platform --reason ${quote(c.reason)} --command-id ${commandId} ${out}`;
+      if (c.eventId === undefined) return undefined;
+      return `peaket-runbook draft sale-pause --event ${c.eventId} --reason ${quote(c.reason)} --command-id ${commandId} ${out}`;
     }
     case 'ADMISSION_PAUSE': {
       if (c.eventId === undefined) return undefined;

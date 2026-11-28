@@ -64,5 +64,8 @@ export function runbookGateConfigFromProcess(
     if (production) throw new Error(`${RUNBOOK_KEYS_ENV}가 없다(런북 운영자 공개키 목록)`);
     return { keys: undefined, service, replay: new MemoryRunbookReplayGuard(), ...(security ? { security } : {}) };
   }
-  return { keys: runbookOperatorKeysFromEnv(raw), service, replay: new MemoryRunbookReplayGuard(), ...(security ? { security } : {}) };
+  const keys = runbookOperatorKeysFromEnv(raw);
+  // 운영은 commander 둘 이상이어야 판매 재개(서로 다른 commander 2명)를 받을 수 있다
+  if (production && [...keys.values()].filter((k) => k.role === 'commander').length < 2) throw new Error(`${RUNBOOK_KEYS_ENV}에 commander가 두 명 이상이어야 한다`);
+  return { keys, service, replay: new MemoryRunbookReplayGuard(), ...(security ? { security } : {}) };
 }

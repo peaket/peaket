@@ -134,7 +134,8 @@ async function sign(args: string[], deps: ControlCliDeps): Promise<number> {
   if (!found) throw new ControlCliError(`운영자 키를 찾지 못했다: ${values.signer}`, EXIT.verify);
   const { bundle, signatures } = readControlFile(deps, values.in);
   const bytes = Buffer.from(canonicalizeRunbook(bundle), 'utf8');
-  const kmsKey = values.key ?? (found.key as CommanderKeyLike & { kmsKeyArn?: string }).kmsKeyArn ?? values.signer;
+  deps.print(`서명할 내용: ${bundle.kind}, 범위 ${bundle.scope}, 사유 "${bundle.reason}", 요청 ${JSON.stringify(bundle.requests)}`);
+  const kmsKey = values.key ?? found.key.kmsKeyArn ?? deps.defaultSigningKey ?? values.signer;
   let sig: Buffer;
   try {
     sig = await deps.kmsSign(kmsKey, bytes);
@@ -151,6 +152,24 @@ async function sign(args: string[], deps: ControlCliDeps): Promise<number> {
   return EXIT.ok;
 }
 
+function expectedServicesOf(kind: string): readonly RunbookService[] | null {
+  switch (kind) {
+    case 'CONTROL_KIND_SALE_PAUSE':
+      return ['purchase-svc', 'admission-ctrl', 'queue-svc'];
+    case 'CONTROL_KIND_ADMISSION_PAUSE':
+    case 'CONTROL_KIND_AUTOMATION_STOP':
+      return ['admission-ctrl'];
+    case 'CONTROL_KIND_PG_SWITCH':
+      return ['payment-svc', 'admission-ctrl'];
+    case 'CONTROL_KIND_ENTRY_PAUSE_RELEASE':
+      return ['payment-svc'];
+    default:
+      return null;
+  }
+}
+
+const sameServiceSet = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && [...b].sort().every((v, i) => [...a].sort()[i] === v);
+
 async function run(args: string[], deps: ControlCliDeps): Promise<number> {
   const { values } = parseArgs({ args, options: { in: { type: 'string' } } });
   if (!values.in) throw new ControlCliError('--in이 필요하다');
@@ -159,6 +178,11 @@ async function run(args: string[], deps: ControlCliDeps): Promise<number> {
   if (!keys) throw new ControlCliError('공개키 목록이 없다(PEAKET_RUNBOOK_COMMANDER_KEYS)', EXIT.verify);
   const bytes = Buffer.from(canonicalizeRunbook(bundle), 'utf8');
   const services = Object.keys(bundle.requests) as RunbookService[];
+  const expected = expectedServicesOf(bundle.kind);
+  if (!expected || !sameServiceSet(services, expected)) {
+    deps.print('서명 확인 실패: mismatch');
+    return EXIT.verify;
+  }
   const first = services[0];
   if (!first) throw new ControlCliError('묶음에 받는 서비스가 없다', EXIT.verify);
   const verified = verifyRunbookControl({
@@ -182,8 +206,16 @@ async function run(args: string[], deps: ControlCliDeps): Promise<number> {
     throw new ControlCliError('감사 sink를 읽지 못했다', EXIT.external);
   }
   if (earlier) {
-    deps.print(`이미 적용됐다: ${earlier.outcome} (명령 ID ${bundle.commandId})`);
-    return EXIT.ok;
+    if (earlier.outcome === 'APPLIED') {
+      deps.print(`이미 적용됐다: APPLIED (명령 ID ${bundle.commandId})`);
+      return EXIT.ok;
+    }
+    if (earlier.outcome === 'REJECTED') {
+      deps.print(`이전 결과: REJECTED (명령 ID ${bundle.commandId})`);
+      return EXIT.rejected;
+    }
+    deps.print(`이전 결과: ${earlier.outcome} (명령 ID ${bundle.commandId})`);
+    return EXIT.timeout;
   }
   if (!deps.control) throw new ControlCliError('제어 전송 포트가 없다', EXIT.external);
   for (const service of services) {
@@ -191,6 +223,8 @@ async function run(args: string[], deps: ControlCliDeps): Promise<number> {
   }
   try {
     await deps.audit.writeIntent({
+      v: 1,
+      type: 'intent',
       commandId: bundle.commandId,
       services: [...services].sort(),
       canonicalBundle: bytes.toString('base64'),
@@ -221,15 +255,31 @@ async function run(args: string[], deps: ControlCliDeps): Promise<number> {
         });
         applied.push({ service, address, podName: ack.podName, appliedVersion: ack.appliedVersion, appliedAtMs: ack.appliedAtMs });
       } catch (err) {
-        const code = (err as { code?: unknown }).code;
-        failed.push({ service, address, reason: code === 4 ? 'send-deadline' : 'send-failed' });
+        const code = (err as { code?: number }).code;
+        const message = err instanceof Error ? err.message : '';
+        const reason =
+          code === 4
+            ? 'send-deadline'
+            : code === 16
+              ? `rejected:${message || 'rejected'}`
+              : code === 6
+                ? message === 'conflict'
+                  ? 'conflict'
+                  : 'replayed'
+                : code === 14
+                  ? `unavailable:${message || 'unavailable'}`
+                  : 'send-failed';
+        failed.push({ service, address, reason });
       }
     }
   }
-  const outcome = failed.length === 0 ? 'APPLIED' : applied.length === 0 ? 'REJECTED' : 'PARTIAL';
+  const rejectedOnly = failed.length > 0 && failed.every((f) => f.reason.startsWith('rejected:') || f.reason === 'replayed' || f.reason === 'conflict');
+  const outcome = failed.length === 0 ? 'APPLIED' : applied.length === 0 ? (rejectedOnly ? 'REJECTED' : 'FAILED') : 'PARTIAL';
   const postReviewRequired = runbookApprovalOf(bundle) === 'ONE_COMMANDER';
   try {
     await deps.audit.writeResult({
+      v: 1,
+      type: 'result',
       commandId: bundle.commandId,
       outcome,
       applied,
@@ -245,7 +295,7 @@ async function run(args: string[], deps: ControlCliDeps): Promise<number> {
   for (const f of failed) deps.print(`실패: ${f.service} ${f.address} (${f.reason})`);
   if (postReviewRequired) deps.print('사후 검토 보고서 할 일이 생겼다(48시간).');
   if (outcome === 'APPLIED') return EXIT.ok;
-  return outcome === 'PARTIAL' ? EXIT.timeout : EXIT.rejected;
+  return outcome === 'PARTIAL' || outcome === 'FAILED' ? EXIT.timeout : EXIT.rejected;
 }
 
 /** control 갈래만 처리한다(호출자는 rb35 갈래와 구분해 부른다) */

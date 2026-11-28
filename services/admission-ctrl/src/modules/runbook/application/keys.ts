@@ -9,6 +9,7 @@ export interface CommanderKeyLike {
   readonly role: string;
   readonly key?: KeyObject;
   readonly publicKey?: KeyObject;
+  readonly kmsKeyArn?: string;
 }
 
 export function operatorKeysOf(keys: ReadonlyMap<string, CommanderKeyLike> | null | undefined): Map<string, RunbookOperatorKey> | null {

@@ -220,3 +220,4 @@ process.once('SIGTERM', async () => { await relay.stop(); /* 그 뒤 생산자·
 ## 아직 없는 것
 
 MSK IAM 토큰 함수(FND-120), Avro 인코더·디코더(BAS-030), 마이그레이션 직후 파티션 만들기와 `pgstattuple`·정비 역할(BAS-060), 온세일 구간 로그 표본 비율 연결(미해결 OPEN[09]), 현장 스태프 역할 판정(GAT-170), Outbox 릴레이 프로세스의 진단 수집(차트는 실행 옵션·/diag를 넣지만 수집은 서비스 뼈대만 한다), 구매 세션 저장소 어댑터와 서버 ECDH 키(BOT-100), 엣지 게이트웨이의 추적 헤더 지우기와 앱 서버 연결(2.11.1), 동적 로그 수준 명령(관제 명령 8), exemplar·Pyroscope(4.1.1).
+| `canonicalizeRunbook`·`parseRunbookControl`·`verifyRunbookControl`·`withRunbookControl`·`MemoryRunbookReplayGuard`·`runbookOperatorKeysFromEnv`·`runbookGateConfigFromProcess` | 비상 런북 제어 묶음(F-02-7): RFC 8785 정규화, 모양·요청 대조·ECDSA P-256 서명·역할(정지 commander 1명·재개 commander 2명·그 밖 운영자 2명)·5분 창, commandId 재생/충돌/동시 예약, 거부 보안 이벤트, `PEAKET_RUNBOOK_COMMANDER_KEYS` 공개키와 prod commander 2명 검사. 받는 쪽 네 서비스가 쓰고, CLI는 `packages/platform`의 같은 코드로 보내기 전에 다시 본다 | ADR-0053 결정 11, ADR-0095, C-T28, ASVS 4.1.5·16.3.3·16.5.2 |

@@ -27,9 +27,11 @@ export function commanderKeysFromEnv(raw: string): Map<string, CommanderKey> {
   if (!Array.isArray(list) || list.length === 0) throw new Error(`${COMMANDER_KEYS_ENV}는 비어 있지 않은 배열이다`);
   const out = new Map<string, CommanderKey>();
   const seen = new Map<string, string>();
-  for (const e of list as { id?: unknown; role?: unknown; publicKey?: unknown }[]) {
+  for (const e of list as { id?: unknown; operatorId?: unknown; role?: unknown; publicKey?: unknown; kmsKeyArn?: unknown }[]) {
     if (typeof e?.id !== 'string' || e.id === '' || typeof e.role !== 'string' || e.role === '') throw new Error(`${COMMANDER_KEYS_ENV}의 항목에 id·role이 없다`);
     if (out.has(e.id)) throw new Error(`${COMMANDER_KEYS_ENV}에 같은 id가 있다: ${e.id}`);
+    if (e.operatorId !== undefined && (typeof e.operatorId !== 'string' || e.operatorId === '')) throw new Error(`${COMMANDER_KEYS_ENV}의 ${e.id}: operatorId가 빈 값이다`);
+    if (e.kmsKeyArn !== undefined && (typeof e.kmsKeyArn !== 'string' || e.kmsKeyArn === '')) throw new Error(`${COMMANDER_KEYS_ENV}의 ${e.id}: kmsKeyArn이 빈 값이다`);
     const key = publicKeyOf(e.id, e.publicKey);
     // 압축·비압축 SPKI는 바이트가 달라도 같은 점이다. 좌표로 견준다
     const jwk = key.export({ format: 'jwk' });
@@ -37,7 +39,7 @@ export function commanderKeysFromEnv(raw: string): Map<string, CommanderKey> {
     const dup = seen.get(fp);
     if (dup) throw new Error(`${COMMANDER_KEYS_ENV}에 같은 공개키가 있다(${dup}·${e.id})`);
     seen.set(fp, e.id);
-    out.set(e.id, { id: e.id, role: e.role, key });
+    out.set(e.id, { id: e.id, role: e.role, key, ...(typeof e.operatorId === 'string' ? { operatorId: e.operatorId } : {}), ...(typeof e.kmsKeyArn === 'string' ? { kmsKeyArn: e.kmsKeyArn } : {}) });
   }
   return out;
 }

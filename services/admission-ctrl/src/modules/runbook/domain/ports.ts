@@ -23,6 +23,7 @@ export interface RunbookControlTransport {
 }
 
 export interface RunbookAuditIntent {
+  readonly v: 1;
   readonly type: 'intent';
   readonly commandId: string;
   readonly services: readonly string[];
@@ -34,9 +35,10 @@ export interface RunbookAuditIntent {
 }
 
 export interface RunbookAuditResult {
+  readonly v: 1;
   readonly type: 'result';
   readonly commandId: string;
-  readonly outcome: 'APPLIED' | 'REJECTED' | 'PARTIAL' | 'TIMEOUT';
+  readonly outcome: 'APPLIED' | 'REJECTED' | 'PARTIAL' | 'FAILED';
   readonly applied: readonly { readonly service: string; readonly address: string; readonly podName: string; readonly appliedVersion: number; readonly appliedAtMs: number }[];
   readonly failed: readonly { readonly service: string; readonly address: string; readonly reason: string }[];
   readonly postReviewRequired: boolean;
@@ -44,8 +46,8 @@ export interface RunbookAuditResult {
 }
 
 export interface RunbookAuditSink {
-  writeIntent(i: Omit<RunbookAuditIntent, 'type'>): Promise<void>;
-  writeResult(r: Omit<RunbookAuditResult, 'type'>): Promise<void>;
+  writeIntent(i: RunbookAuditIntent): Promise<void>;
+  writeResult(r: RunbookAuditResult): Promise<void>;
   readResult(commandId: string): Promise<RunbookAuditResult | null>;
 }
 

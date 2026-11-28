@@ -245,3 +245,6 @@
 - F-02-7 시험 리뷰 RV027-17(중간): F-02-6 계획이 `docs/api/openapi.yaml` `Command.params`, `packages/contracts`·`packages/api-client` 생성물, ASVS 16.5.2를 건드린다. 두 동결 트랙이 같은 파일·행을 고치므로, F-02-6이 먼저 합쳐질 때 F-02-7이 `Command.params`·16.5.2 문장·생성물을 보존하고 `CommandState.runbookCommand`만 더한 뒤 두 `gen`을 다시 돌리는 차례를 계획 §3에 적었다. 실제 합칠 때 파일·행 충돌을 이 차례로 푼다.
 - F-02-7 시험 리뷰 RV027-19(낮음): `deploy/platform/mesh/test/runbook-control-port.test.mjs`의 C-T28 ⑦ 첫 시험은 `AuthorizationPolicy.from.source.principals`만 견주고 같은 규칙의 `ipBlocks`·`namespaceSelector`를 보지 않는다. R23의 '클러스터 밖 ipBlock·모든 네임스페이스 선택자 없음'을 `rule.from` 전체로 단언하게 보강한다.
 - F-02-7 시험 리뷰 RV027-20(낮음): 장부 정직성. C-T13은 비상 Job·p99·S3 앵커·복구 편입이 `미실행`인데 시험 이름 `C-T13`으로 장부 '자동 시험'이 된다. C-T7 ②의 새 시험은 서버 `viewOf` 필드이고 화면 [다시 시도]는 기존 `apps/console-host/src/pages/commands/model/card-state.test.mjs`가 맡는다. 완료 보고에서 둘을 '전부 완료'로 세지 말고, console-host 시험을 게이트에 넣거나 결과를 함께 적는다.
+
+- F-02-7 구현 리뷰 IR027-11(낮음): `CommandBaseView`가 `runbookCommand`를 omit하지 않아 목록 스키마에 칸이 남고, `viewOf`가 `runbookCommandLine`을 두 번 부른다. 목록에서 빼고 한 번만 계산한다(services/ops-svc/src/modules/commands/inbound/command-view.ts).
+- F-02-7 구현 리뷰 IR027-11(낮음): `signaturesOf`가 `signature`가 바이트가 아니면 `Buffer.from`에서 던져 16·보안 이벤트 대신 INTERNAL이 될 수 있다. protobuf 경유는 바이트라 지금은 낮음이지만, 모양 검사로 16을 유지한다(packages/platform/src/runbook-control.ts).
