@@ -10,6 +10,8 @@
 
 **구현 상태(2026-11-22, BAT-455 GAT-250)**: 팬 알림 신청·웹 푸시 구독·한 번 누름 수신 거부 API와 `notification_subscription`·`push_subscription`·`notification_dedup`·`notification_job`·`notification_delivery`(0046)를 넣었다. 발송기는 이메일 파일 대역·RFC 8291 암호화·RFC 8292 VAPID JWT·404/410/403 구독 삭제·429/5xx 재시도·DEAD·EXPIRED를 시험한다. `BatchGetRecipients`(identity-svc)와 로그인 수단 변경·계정 병합 원장(I-T34·POL-034)도 넣었다. 아래 행의 `테스트 결과`는 자동 리포트가 채우고, 1.1.1·1.3.6·2.1.3·2.2.1·8.4.1·13.2.1·14.2.1·14.3.2·15.3.4·16.2.5 태그를 새 시험에 달았다. 13.2.1은 운영 이메일 대행사가 정해지지 않아 계속 부분 적용이다(메일은 IAM 역할 인증 조건, 대행사 계약 뒤 다시 판정).
 
+**계획 메모(2026-11-28, F-06-6, GAT-250)**: 운영 메일(Amazon SES)·문자(Solapi)·VAPID 운영 키·대행사 결과 웹훅을 잇는 계획이다. 실제 발송은 자격 증명이 없어 **미실행**이고, 이번 가지는 설정 계약·fail-closed·서명 검증 시험까지 둔다([계획](../../review/plans/F-06-6.md)). 이 계획이 닿는 행은 11.1.1·11.1.2(VAPID·대행사 키 수명·보관), 13.2.1·13.2.2(SES는 IAM 역할, Solapi 키는 Secrets Manager 최소 권한), 13.2.4(SES·Solapi·SNS 나가는 443), 14.1.2·14.2.4(로그·비밀), 1.3.6(외부 호출 실패)이다. 구현 뒤 각 행의 '테스트 범위'에 `notify-provider-config.test.ts`·`notify-provider-adapters.test.ts`·`notify-provider-webhook.test.ts`를 적고 13.2.1을 다시 판정한다.
+
 **작성 및 판독 가이드**
 
 - **적용 여부**: 적용, 부분 적용, 미적용 중 하나로 적는다.
