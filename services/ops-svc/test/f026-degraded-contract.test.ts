@@ -29,6 +29,7 @@ import {
   reauthRequiredFor,
   type Command,
 } from '../src/modules/commands/index.js';
+import * as commandsModule from '../src/modules/commands/index.js';
 
 const NOW = Date.parse('2026-11-28T00:00:00.000Z');
 const HOUR = 60 * 60_000;
@@ -54,6 +55,11 @@ const rejectionOf = (fn: () => unknown): CommandInputRejected => {
   }
   throw new Error('CommandInputRejected를 던지지 않았다');
 };
+
+/** 구현 전에는 없는 공개 함수를 이름으로 꺼낸다(모듈은 있고 함수만 없다: 시험 파일은 로드된다) */
+type DegradedScopeOf = (type: 'DEGRADED_MODE', params: Record<string, unknown>) => string;
+const degradedScopeOfOf = (): DegradedScopeOf | undefined =>
+  (commandsModule as unknown as { degradedScopeOf?: DegradedScopeOf }).degradedScopeOf;
 
 describe('F026-ENTRY 명령 6 진입 Degraded의 매개변수 계약', () => {
   test('F026-ENTRY ① ENTRY_DEGRADED는 expiresAt이 필수이고 24시간을 넘으면 422 command-out-of-range다', () => {
@@ -250,8 +256,10 @@ describe('C-T12 Degraded Mode 전이 감사 기록', () => {
     return (decision as { command: Command }).command;
   };
 
-  test('C-T12 ① 수동 명령 6의 네 모드가 2인 접수 감사 기록에 mode·scope·ON을 남긴다', async () => {
+  test('C-T12 ① 수동 명령 6의 네 모드가 2인 접수 감사 기록에 mode·degradedScopeOf·ON을 남긴다', async () => {
     const { audit, store } = newStore();
+    const degradedScopeOf = degradedScopeOfOf();
+    expect(typeof degradedScopeOf, 'degradedScopeOf가 공개 면에 없다').toBe('function');
     const eventId = randomUUID();
     const modes = [
       { params: { mode: 'ENTRY_DEGRADED', expiresAt: new Date(NOW + HOUR).toISOString() }, scope: 'PLATFORM' },
@@ -263,8 +271,11 @@ describe('C-T12 Degraded Mode 전이 감사 기록', () => {
     const created = auditPayloads(audit, 'COMMAND_CREATED');
     expect(created).toHaveLength(4);
     for (const m of modes) {
+      // 기대 scope를 하드코딩하지 않고 공개 함수가 낸 값으로 감사 기록을 단언한다.
+      const scope = degradedScopeOf!('DEGRADED_MODE', m.params);
+      expect(scope).toBe(m.scope);
       expect(created).toContainEqual(
-        expect.objectContaining({ type: 'DEGRADED_MODE', state: 'PENDING_APPROVAL', mode: m.params.mode, transition: 'ON', scope: m.scope }),
+        expect.objectContaining({ type: 'DEGRADED_MODE', state: 'PENDING_APPROVAL', mode: m.params.mode, transition: 'ON', scope }),
       );
     }
   });
@@ -305,13 +316,17 @@ describe('C-T12 Degraded Mode 전이 감사 기록', () => {
 
   test('C-T12 ③ 수동 ENTRY_DEGRADED의 승인·실행·되돌리기 감사 기록에 mode·transition·scope가 남는다', async () => {
     const { audit, store } = newStore();
+    const degradedScopeOf = degradedScopeOfOf();
+    expect(typeof degradedScopeOf, 'degradedScopeOf가 공개 면에 없다').toBe('function');
     const command = await pending(store, { mode: 'ENTRY_DEGRADED', expiresAt: new Date(NOW + HOUR).toISOString() });
+    const scope = degradedScopeOf!('DEGRADED_MODE', command.params);
+    expect(scope).toBe('PLATFORM');
     const approved = await approve(store, command.commandId);
     const runner = executor();
     const finished = await new ExecuteCommand(store, runner).run(approved, { accountId: APPROVER, sessionId: '', role: 'operator' }, NOW + 2);
     expect(finished.state).toBe('ACKED');
     const dispatched = store.eventsOf(command.commandId).find((e) => e.type === 'DISPATCHED');
-    expect(dispatched?.detail).toMatchObject({ mode: 'ENTRY_DEGRADED', transition: 'ON', scope: 'PLATFORM' });
+    expect(dispatched?.detail).toMatchObject({ mode: 'ENTRY_DEGRADED', transition: 'ON', scope });
 
     const reverted = await new RevertCommand(store, runner).execute({
       commandId: command.commandId,
@@ -323,10 +338,10 @@ describe('C-T12 Degraded Mode 전이 감사 기록', () => {
     expect(reverted.command.state).toBe('REVERTED');
 
     for (const record of ['COMMAND_APPROVED', 'COMMAND_EXECUTION_STARTED', 'COMMAND_ACKED']) {
-      expect(auditPayloads(audit, record)).toContainEqual(expect.objectContaining({ mode: 'ENTRY_DEGRADED', transition: 'ON', scope: 'PLATFORM' }));
+      expect(auditPayloads(audit, record)).toContainEqual(expect.objectContaining({ mode: 'ENTRY_DEGRADED', transition: 'ON', scope }));
     }
     for (const record of ['COMMAND_REVERT_STARTED', 'COMMAND_REVERTED']) {
-      expect(auditPayloads(audit, record)).toContainEqual(expect.objectContaining({ mode: 'ENTRY_DEGRADED', transition: 'OFF', scope: 'PLATFORM' }));
+      expect(auditPayloads(audit, record)).toContainEqual(expect.objectContaining({ mode: 'ENTRY_DEGRADED', transition: 'OFF', scope }));
     }
   });
 });
@@ -334,13 +349,21 @@ describe('C-T12 Degraded Mode 전이 감사 기록', () => {
 describe('F026-AUTO AUTO_ACTION 계약 확장', () => {
   test('F026-AUTO ① asyncapi OpsCommandAutoAction과 ADR-0340 보충이 DEGRADED_MODE·ENTRY_DEGRADED·expiresAt을 싣는다', () => {
     const asyncapi = readDoc('docs/api/asyncapi.yaml');
-    // 첫 번째는 채널의 $ref, 마지막은 components.messages의 실제 스키마다.
-    const channelStart = asyncapi.indexOf('OpsCommandAutoAction:');
-    const componentStart = asyncapi.lastIndexOf('OpsCommandAutoAction:');
+    // 실제 ops.command-events 채널 블록(:112-118)의 설명만 본다. 다른 채널·설정 줄의 DEGRADED_MODE를 잡으면 거짓 통과다.
+    const channelStart = asyncapi.indexOf('  ops.command-events:');
+    const channelEnd = asyncapi.indexOf('  telemetry.queue:', channelStart);
     expect(channelStart).toBeGreaterThanOrEqual(0);
-    expect(componentStart).toBeGreaterThan(channelStart);
-    const channel = asyncapi.slice(channelStart, componentStart);
-    expect(channel).toContain('DEGRADED_MODE');
+    const channel = asyncapi.slice(channelStart, channelEnd);
+    const descriptionAt = channel.indexOf('description:');
+    const descriptionEnd = channel.indexOf('\n', descriptionAt);
+    expect(descriptionAt).toBeGreaterThanOrEqual(0);
+    const description = channel.slice(descriptionAt, descriptionEnd);
+    expect(description).toContain('DEGRADED_MODE');
+    expect(description).toContain('ENTRY_DEGRADED');
+
+    // components.messages의 실제 스키마는 마지막 OpsCommandAutoAction:부터 QueueAggregate: 전까지다.
+    const componentStart = asyncapi.lastIndexOf('OpsCommandAutoAction:');
+    expect(componentStart).toBeGreaterThan(channelEnd);
     const end = asyncapi.indexOf('QueueAggregate:', componentStart);
     const block = asyncapi.slice(componentStart, end);
     expect(block).toContain('DEGRADED_MODE');

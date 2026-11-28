@@ -182,10 +182,11 @@ stateDiagram-v2
 | 받는 쪽(명령) | 적용한 상태를 두는 곳 | 집행 |
 | --- | --- | --- |
 | purchase-svc(명령 3) | purchase DB `sale_control`(원본), 좌석 Redis `s:{event:E}:ctl`(사본. 회차 범위와 전체 범위를 합친 그 회차의 정지) | 홀드 Lua가 사본을 함께 읽어 423. 결제 시도·결제 접수는 파드 메모리의 같은 상태로 확인한다(docs/features/seat-hold.md §3, docs/features/payment.md §2) |
-| admission-ctrl(명령 1·2·3·6 진입·6 대체 결제사 전환·11) | `q:{event:E}:ctl`·`q:{admission}:ctl`(지금 그대로, ADR-0056). 대체 결제사 전환은 판 번호와 함께 `q:{event:E}:ctl`에 적는다(추천 적용 2026-10-29, ADR-0143) | 리더 루프. 대체 결제사 전환이면 대체 결제사의 채널 상한으로 동시 입장 목표 상한을 다시 계산한다 |
+| admission-ctrl(명령 1·2·3·6 대체 결제사 전환·11) | `q:{event:E}:ctl`·`q:{admission}:ctl`(지금 그대로, ADR-0056). 대체 결제사 전환은 판 번호와 함께 `q:{event:E}:ctl`에 적는다(추천 적용 2026-10-29, ADR-0143) | 리더 루프. 대체 결제사 전환이면 대체 결제사의 채널 상한으로 동시 입장 목표 상한을 다시 계산한다 |
 | payment-svc(명령 6 대체 결제사 전환, 추천 적용 2026-10-29, ADR-0143) | payment DB `pg_switch`(범위: 회차 또는 플랫폼, 판 번호. 칸 목록은 아직 정본에 없다, docs/review/open-items.md 101번, 2026-11-02 정합 점검). 판 번호가 지금보다 클 때만 쓴다 | 결제사 선택기가 새 결제 시도마다 읽는다. 모든 파드가 2초 [가정]마다 다시 읽어 맞추고, 새 파드는 이 표를 읽어야 준비 상태가 된다 |
-| queue-svc(명령 3·7) | `q:{event:E}:notice`(판매 상태, 공지 템플릿, 판 번호) | 대기 상태 파일을 만들 때(1초) 읽는다 |
-| 각 서비스(명령 5·6 대기열 진입과 대체 결제사 전환 밖·7 purchase-svc 공지·8·9·12) | 압축 토픽 `control.settings` | 서비스 메모리 |
+| queue-svc(명령 3·7·6 상태 조회 Degraded) | `q:{event:E}:notice`(판매 상태, 공지 템플릿, 판 번호, `stateDegraded`·`stateDegradedRev`·`stateDegradedCmd`) | 대기 상태 파일을 만들 때(1초) 읽는다. `stateDegraded=1`이면 `pollHintMs`를 두 배로 싣는다 |
+| 엣지 저장소(명령 6 진입 Degraded, 2026-11-28 확정) | CloudFront KeyValueStore `mode:entry`(ops-svc `EdgeCommandExecutor`가 ADR-0234 쓰기 전용 함수로 씀) | 엣지 함수가 읽어 도착 시각 쿠키를 발급하고, 만료·끔이면 원본으로 보낸다 |
+| 각 서비스(명령 5·6의 엣지 저장소·대체 결제사 전환 밖 나머지 모드·7 purchase-svc 공지·8·9·12) | 압축 토픽 `control.settings` | 서비스 메모리 |
 | 위 세 받는 쪽(판매 승인의 판매 중지, 추천 적용 2026-10-28, ADR-0123) | 명령 3과 같은 저장소에 따로 둔 판매 중지 표시(`sale_control.suspended`, `s:{event:E}:ctl`·`q:{event:E}:ctl`·`q:{event:E}:notice`의 같은 이름 필드) | 명령 3과 같이 막는다(하나라도 참이면 막고, 대기 상태 파일은 PAUSED). 운영 명령이 아니라 판매 중지 승인 업무(2인)를 실행할 때 ops-svc가 `CONTROL_KIND_SALE_SUSPENSION`으로 회차마다 보내며, 명령 3의 재개로는 풀리지 않는다(docs/planning/03 §2.14). **2026-11-15 R-584 구현**: 운영 명령 `SALE_STOP`·`SALE_RESUME`(둘 다 2인 승인)이 purchase-svc 내부 HTTP(원본 `sale_control` 0019·좌석 사본)와 queue-svc 내부 HTTP(대기열 사본)를 차례로 부르고, 두 주소가 있으면 제어 gRPC `ControlReceiver.ApplyControl`(판 번호 ack)이 정본이다. purchase-svc·queue-svc는 `PEAKET_*_CONTROL_GRPC_PORT`로 제어 전용 포트를 열고, ops-svc는 `PEAKET_PURCHASE_CONTROL_GRPC_ADDR`·`PEAKET_QUEUE_CONTROL_GRPC_ADDR`로 부른다. **2026-11-22 BAT-620 구현**: core-svc가 내부 HTTP `GET /internal/v1/events/{eventId}/sale-review-scope`와 `POST …/sale-review-result`로 공연 판매 승인 상태(`production.sale_review` SUSPENDED·APPROVED)와 검색 읽기 모델을 한 트랜잭션으로 바꾸고(0045), 커밋 뒤 CDN 검색 경로·공연 태그를 비운다. ops-svc는 중지 때 회차 목록을 먼저 받아 모두 막은 뒤 core를 내리고, 재개는 core를 먼저 올린 뒤 core가 준 다시 열 회차만 연다(중지 동안 오픈 시각이 지난 회차는 열지 않는다). SCR-048 단추와 정산 보류는 아직이다 |
 
 - 받는 쪽은 판 번호가 지금 것보다 클 때만 적용한다(비교하고 쓰기).
