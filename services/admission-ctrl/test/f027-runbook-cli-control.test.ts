@@ -4,6 +4,7 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
 import { commanderKeysFromProcess, type RunbookDeps, runRunbookCli } from '../src/modules/rb35/index.js';
+import { runEntrypointScenario } from './f027-entry-support.js';
 
 const NOW = Date.parse('2026-11-28T00:00:00.000Z');
 const EVENT = '0193a000-0000-7000-9000-0000000000e1';
@@ -57,6 +58,7 @@ interface Sent {
 }
 
 interface AuditIntent {
+  v: 1;
   type: 'intent';
   commandId: string;
   services: string[];
@@ -67,9 +69,10 @@ interface AuditIntent {
   writtenAtMs: number;
 }
 interface AuditResult {
+  v: 1;
   type: 'result';
   commandId: string;
-  outcome: string;
+  outcome: 'APPLIED' | 'REJECTED' | 'PARTIAL' | 'FAILED';
   applied: { service: string; address: string; podName: string; appliedVersion: number; appliedAtMs: number }[];
   failed: { service: string; address: string; reason: string }[];
   postReviewRequired: boolean;
@@ -104,7 +107,7 @@ function harness(
       result: async () => null,
     },
     clock: { now: () => NOW, monotonicMs: () => 0 },
-    keys: new Map([...KEYS.values()].map((k) => [k.keyId, { id: k.keyId, operatorId: k.operatorId, role: k.role, key: k.publicKey }])),
+    keys: new Map([...KEYS.values()].map((k) => [k.keyId, { id: k.keyId, operatorId: k.operatorId, role: k.role, key: k.publicKey, kmsKeyArn: k.keyId }])),
     readFile: (p: string) => {
       const v = files.get(p);
       if (v === undefined) throw new Error(`없는 파일: ${p}`);
@@ -137,17 +140,16 @@ function harness(
       },
     },
     audit: {
-      writeIntent: async (i: Omit<AuditIntent, 'type'>) => {
+      writeIntent: async (i: AuditIntent) => {
         calls.push('intent');
         if (o.failIntent) throw new Error('S3 unavailable');
-        audits.push({ type: 'intent', ...i });
+        audits.push(i);
       },
-      writeResult: async (r: Omit<AuditResult, 'type'>) => {
+      writeResult: async (r: AuditResult) => {
         calls.push('result');
         if (o.failResult) throw new Error('S3 unavailable');
-        const result = { type: 'result' as const, ...r };
-        audits.push(result);
-        existing = result;
+        audits.push(r);
+        existing = r;
       },
       readResult: async (commandId: string) => {
         calls.push('readResult');
@@ -196,6 +198,7 @@ describe('F-02-7 런북 CLI 제어 명령', () => {
     }
 
     const intent = h.audits.find((a): a is AuditIntent => a.type === 'intent')!;
+    expect(intent).toMatchObject({ v: 1, type: 'intent' });
     expect(intent.commandId).toBe(UUID(1));
     expect(intent.services.sort()).toEqual(['admission-ctrl', 'purchase-svc', 'queue-svc']);
     expect(JSON.parse(Buffer.from(intent.canonicalBundle, 'base64').toString('utf8'))).toEqual(f.bundle);
@@ -206,7 +209,7 @@ describe('F-02-7 런북 CLI 제어 명령', () => {
     expect(intent.writtenAtMs).toBe(NOW);
 
     const result = h.audits.find((a): a is AuditResult => a.type === 'result')!;
-    expect(result).toMatchObject({ commandId: UUID(1), outcome: 'APPLIED', postReviewRequired: true, failed: [] });
+    expect(result).toMatchObject({ v: 1, type: 'result', commandId: UUID(1), outcome: 'APPLIED', postReviewRequired: true, failed: [] });
     expect(result.applied.map((a) => a.service).sort()).toEqual(['admission-ctrl', 'purchase-svc', 'queue-svc']);
     for (const a of result.applied) {
       expect(a.address).toBe(`${a.service}:50061`);
@@ -217,6 +220,9 @@ describe('F-02-7 런북 CLI 제어 명령', () => {
     expect(h.calls[0]).toBe('readResult');
     expect(h.calls[1]).toBe('intent');
     expect(h.calls.at(-1)).toBe('result');
+
+    // 진입점이 실제 gRPC·파일 감사·주소로 가는지, prod 키 검사가 진입점에서 도는지(IR027-01·02)
+    await runEntrypointScenario();
   });
 
   test('C-T13 pg-switch는 payment-svc와 admission-ctrl에 서로 다른 바라는 상태를 보낸다', async () => {
@@ -271,6 +277,8 @@ describe('F-02-7 런북 CLI 제어 명령', () => {
     // 재개 1명은 거부
     expect(await draft(h, 'sale-resume', UUID(9))).toBe(0);
     expect(await signAs(h, 'commander-a')).toBe(0);
+    expect(h.lines.join('\n')).toContain('서명할 내용');
+    expect(h.lines.join('\n')).toContain('"purchase-svc"');
     expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(3);
     expect(h.sent).toHaveLength(0);
     expect(h.lines.join('\n')).toContain('signature-count');
@@ -312,6 +320,16 @@ describe('F-02-7 런북 CLI 제어 명령', () => {
     expect(h.sent).toHaveLength(3);
     expect(h.lines.join('\n')).toContain('mismatch');
 
+    // 서비스가 빠진 판매 정지 묶음은 세 서비스 집합과 달라 보내지 않는다
+    expect(await draft(h, 'sale-pause', UUID(14))).toBe(0);
+    const missing = read(h);
+    delete missing.bundle.requests['queue-svc'];
+    h.files.set('bundle.json', JSON.stringify(missing));
+    expect(await signAs(h, 'commander-a')).toBe(0);
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(3);
+    expect(h.sent).toHaveLength(3);
+    expect(h.lines.join('\n')).toContain('mismatch');
+
     // 정지 1명은 수용하고 사후 검토 할 일이 남는다
     expect(await draft(h, 'sale-pause', UUID(12))).toBe(0);
     expect(await signAs(h, 'commander-a')).toBe(0);
@@ -320,17 +338,35 @@ describe('F-02-7 런북 CLI 제어 명령', () => {
     expect((h.audits.filter((a): a is AuditResult => a.type === 'result').at(-1)!).postReviewRequired).toBe(true);
   });
 
-  test('C-T28 ⑮ 같은 commandId의 결과가 이미 있으면 다시 보내지 않고 그 결과를 보고한다', async () => {
-    const h = harness({
-      existing: { type: 'result', commandId: UUID(1), outcome: 'APPLIED', applied: [], failed: [], postReviewRequired: true, finishedAtMs: NOW },
+  test('C-T28 ⑮ 같은 commandId의 이전 결과를 outcome별로 보존한다', async () => {
+    const applied = harness({
+      existing: { v: 1, type: 'result', commandId: UUID(1), outcome: 'APPLIED', applied: [], failed: [], postReviewRequired: true, finishedAtMs: NOW },
     });
-    expect(await draft(h, 'sale-pause')).toBe(0);
-    expect(await signAs(h, 'commander-a')).toBe(0);
-    expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(0);
-    expect(h.calls).toContain('readResult');
-    expect(h.calls).not.toContain('intent');
-    expect(h.sent).toHaveLength(0);
-    expect(h.lines.join('\n')).toContain('이미 적용됐다');
+    expect(await draft(applied, 'sale-pause')).toBe(0);
+    expect(await signAs(applied, 'commander-a')).toBe(0);
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], applied.deps)).toBe(0);
+    expect(applied.calls).toContain('readResult');
+    expect(applied.calls).not.toContain('intent');
+    expect(applied.sent).toHaveLength(0);
+    expect(applied.lines.join('\n')).toContain('이미 적용됐다');
+
+    const rejected = harness({
+      existing: { v: 1, type: 'result', commandId: UUID(1), outcome: 'REJECTED', applied: [], failed: [{ service: 'purchase-svc', address: 'purchase-svc:50061', reason: 'rejected:bad-signature' }], postReviewRequired: false, finishedAtMs: NOW },
+    });
+    expect(await draft(rejected, 'sale-pause')).toBe(0);
+    expect(await signAs(rejected, 'commander-a')).toBe(0);
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], rejected.deps)).toBe(5);
+    expect(rejected.sent).toHaveLength(0);
+    expect(rejected.lines.join('\n')).toContain('이전 결과: REJECTED');
+
+    const partial = harness({
+      existing: { v: 1, type: 'result', commandId: UUID(1), outcome: 'PARTIAL', applied: [], failed: [{ service: 'queue-svc', address: 'queue-svc:50061', reason: 'send-failed' }], postReviewRequired: false, finishedAtMs: NOW },
+    });
+    expect(await draft(partial, 'sale-pause')).toBe(0);
+    expect(await signAs(partial, 'commander-a')).toBe(0);
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], partial.deps)).toBe(4);
+    expect(partial.sent).toHaveLength(0);
+    expect(partial.lines.join('\n')).toContain('이전 결과: PARTIAL');
   });
 
   test('[ASVS v5.0.0-4.1.5] run은 보내기 전에 키 목록·역할·시간·창을 다시 확인한다', async () => {
@@ -417,6 +453,23 @@ describe('F-02-7 런북 CLI 제어 명령', () => {
     expect(partialResult.applied).toHaveLength(2);
     expect(partialResult.failed).toHaveLength(1);
     expect(partialResult.failed[0]).toMatchObject({ service: 'queue-svc', address: 'queue-svc:50061' });
+
+    // 받는 쪽 거부 사유는 보존하고, 전부 전송 실패는 REJECTED가 아니라 FAILED다
+    const rejected = harness({ sendError: (address) => (address.startsWith('queue-svc') ? { code: 16, message: 'bad-signature' } : undefined) });
+    expect(await draft(rejected, 'sale-pause', UUID(19))).toBe(0);
+    expect(await signAs(rejected, 'commander-a')).toBe(0);
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], rejected.deps)).toBe(4);
+    const rejectedResult = rejected.audits.find((a): a is AuditResult => a.type === 'result')!;
+    expect(rejectedResult.outcome).toBe('PARTIAL');
+    expect(rejectedResult.failed[0]).toMatchObject({ service: 'queue-svc', reason: 'rejected:bad-signature' });
+
+    const allFailed = harness({ sendError: () => ({}) });
+    expect(await draft(allFailed, 'sale-pause', UUID(20))).toBe(0);
+    expect(await signAs(allFailed, 'commander-a')).toBe(0);
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], allFailed.deps)).toBe(4);
+    const allFailedResult = allFailed.audits.find((a): a is AuditResult => a.type === 'result')!;
+    expect(allFailedResult.outcome).toBe('FAILED');
+    expect(allFailedResult.failed).toHaveLength(3);
 
     // 결과 대기 TIMEOUT이 아니라 보내기 시한(DEADLINE_EXCEEDED)은 PARTIAL·send-deadline이다
     const sendDeadline = harness({ sendError: (address) => (address.startsWith('queue-svc') ? { code: 4 } : undefined) });

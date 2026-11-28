@@ -121,10 +121,14 @@ describe('F-02-7 C-T7 런북 한 줄', () => {
     expect(stopLine).toContain('draft automation-stop --scope platform');
   });
 
-  test('C-T7 ③ 런북 프리셋이 없는 명령(대기실 공지)에는 한 줄을 만들지 않는다', async () => {
+  test('C-T7 ③ 런북 프리셋이 없는 명령과 여러 회차 KILL_SWITCH에는 한 줄을 만들지 않는다', async () => {
     const h = harness();
     const banner = await h.run(await h.dispatched('LOBBY_BANNER', { eventId: EVENT, templateId: 'notice-1' }, EVENT));
     const view = viewOf(banner) as unknown as { runbookCommand?: string };
     expect(view.runbookCommand).toBeUndefined();
+
+    // scope: EVENT인데 회차가 여럿이면 한 줄로 담을 수 없다(전체 정지로 승격하지 않는다)
+    const multi = await h.run(await h.dispatched('KILL_SWITCH', { scope: 'EVENT', eventIds: [EVENT, '0193a000-0000-7000-9000-0000000000e2'] }));
+    expect((viewOf(multi) as unknown as { runbookCommand?: string }).runbookCommand).toBeUndefined();
   });
 });
