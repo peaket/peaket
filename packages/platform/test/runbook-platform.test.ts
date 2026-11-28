@@ -42,7 +42,8 @@ describe('F-02-7 platform 런북', () => {
     expect(guard.begin('b', 'd1', NOW + 300_000, NOW)).toBe('reserved');
     guard.abort('b');
     expect(guard.begin('b', 'd1', NOW + 300_000, NOW)).toBe('reserved');
-    expect(guard.begin('c', 'd1', NOW + 300_000, NOW + 600_000 + 1)).toBe('reserved');
+    // 기억이 expiresAt+5분을 지난 a를 정리해야 같은 commandId를 다시 받는다
+    expect(guard.begin('a', 'd1', NOW + 300_000, NOW + 600_000 + 1)).toBe('reserved');
 
     expect(() => runbookGateConfigFromProcess({ PEAKET_ENV: 'prod' }, 'purchase-svc')).toThrow();
     expect(() => runbookGateConfigFromProcess({ PEAKET_ENV: 'prod', PEAKET_RUNBOOK_COMMANDER_KEYS: JSON.stringify([key('commander-a', 'commander'), key('operator-c', 'operator')]) }, 'purchase-svc')).toThrow();

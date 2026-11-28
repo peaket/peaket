@@ -248,3 +248,5 @@
 
 - F-02-7 구현 리뷰 IR027-11(낮음): `CommandBaseView`가 `runbookCommand`를 omit하지 않아 목록 스키마에 칸이 남고, `viewOf`가 `runbookCommandLine`을 두 번 부른다. 목록에서 빼고 한 번만 계산한다(services/ops-svc/src/modules/commands/inbound/command-view.ts).
 - F-02-7 구현 리뷰 IR027-11(낮음): `signaturesOf`가 `signature`가 바이트가 아니면 `Buffer.from`에서 던져 16·보안 이벤트 대신 INTERNAL이 될 수 있다. protobuf 경유는 바이트라 지금은 낮음이지만, 모양 검사로 16을 유지한다(packages/platform/src/runbook-control.ts).
+
+- F-02-7 구현 리뷰 IR027-12(낮음): `services/admission-ctrl/src/runbook-cli-main.ts`의 `LOCAL_ENVS`에 `demo`가 있어 `PEAKET_KMS_ENDPOINT`와 `--param pg=SIMULATOR`를 demo에서도 허용한다. 계획 6.2는 local·ci만이고 payment-svc의 `SIMULATOR_RELEASE_ENVS`도 local·ci라 demo 묶음은 받는 쪽이 거부하는 닫힌 실패다. KMS endpoint 허용을 local·ci로 좁히거나 정본에 demo를 명시한다.
