@@ -12,6 +12,7 @@ export {
 } from './application/handle-command-event.js';
 export { DecideCommand } from './application/decide-command.js';
 export { ExecuteCommand } from './application/execute-command.js';
+export { EdgeCommandExecutor, type EdgeCommandExecutorDeps, type EdgeCommandResult } from './application/edge-command-executor.js';
 export { GetCommand } from './application/get-command.js';
 export { ListCommands } from './application/list-commands.js';
 export { MaintainCommands, type MaintainCommandsExtras, type MaintainCommandsOptions, type MaintenanceRound } from './application/maintain-commands.js';
@@ -60,6 +61,43 @@ export {
 } from './domain/command.js';
 export { CommandInputRejected, checkCommandParams, normalizeReason, BOT_LEVELS, BOT_REASSESS_MODES, KILL_SWITCH_SCOPES } from './domain/command-params.js';
 export {
+  DEGRADED_SCOPE_PLATFORM,
+  ENTRY_DEGRADED,
+  ENTRY_DEGRADED_MAX_TTL_MS,
+  SOLD_OUT_STATIC,
+  STATE_DEGRADED,
+  STATE_DEGRADED_MAX_EVENTS,
+  STATE_MIRROR_FIXED,
+  degradedAuditOf,
+  degradedModeOf,
+  degradedScopeOf,
+  isCdnModeParams,
+  isEntryDegradedParams,
+  isNewDegradedMode,
+  isStateDegradedParams,
+  type CdnDegradedParams,
+  type DegradedMode,
+  type EntryDegradedParams,
+  type StateDegradedParams,
+} from './domain/degraded-modes.js';
+export {
+  WafBlockApplyError,
+  type CdnEdgeChange,
+  type CdnEdgeSettings,
+  type CdnEdgeState,
+  type CdnOriginGroup,
+  type EntryModeStore,
+  type EntryModeValue,
+  type WafBlockInput,
+  type WafBlockPart,
+  type WafBlockRemaining,
+  type WafBlocks,
+} from './domain/edge-ports.js';
+export { MemoryCdnEdgeSettings } from './adapters/memory-cdn-edge-settings.js';
+export { MemoryEntryMode } from './adapters/memory-entry-mode.js';
+export { MemoryWafBlocks } from './adapters/memory-waf-blocks.js';
+export { WafAsnWriteOnly, type WafAsnFunction } from './adapters/waf-asn-write-only.js';
+export {
   BLOCK_IPV4_TWO_PERSON_BELOW,
   BLOCK_IPV6_TWO_PERSON_BELOW,
   blockApprovalOf,
@@ -106,6 +144,8 @@ export {
   type CommandWriter,
 } from './domain/ports.js';
 export { MemoryCommandStore, type MemoryCommandActor, type MemoryCommandEvent } from './adapters/memory-command-store.js';
+// 시험이 명령 모듈의 공개 면만으로 메모리 저장소·감사 체인을 함께 세운다(F-02-6 포트·감사 계약 시험)
+export { MemoryAuditChain } from '../audit/index.js';
 export { DrizzleCommandStore } from './adapters/db/drizzle-command-store.js';
 export { UnavailableDryRunSource, DRY_RUN_SOURCE_NOT_WIRED } from './adapters/unavailable-dry-run-source.js';
 export { LogCommandSecurityEvents, PromCommandSignals } from './adapters/command-signals.js';
@@ -181,6 +221,7 @@ export {
   ipSetKeys,
   liveBlockKeys,
   type BlockExpiryRow,
+  type BlockAsnSets,
   type BlockExpiryVerdict,
   type BlockRemoval,
   type ExpiredBlockCommand,

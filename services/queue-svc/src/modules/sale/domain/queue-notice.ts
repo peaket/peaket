@@ -1,10 +1,11 @@
 // 제어 gRPC로 받는 대기 화면 제어 상태(F-02-1 OPS-300, ADR-0365 결정 2·6, ADR-0214 결정 4, docs/data.md §3 q:{event:E}:notice).
-// 명령 3 판매 일시정지(SALE_PAUSE, {"paused": bool})와 명령 7 대기실 공지(LOBBY_BANNER, {"banner": 글 또는 null})를 notice 키에 종류마다의 판·명령 칸과 함께 둔다.
+// 명령 3 판매 일시정지(SALE_PAUSE, {"paused": bool})와 명령 7 대기실 공지(LOBBY_BANNER, {"banner": 글 또는 null}),
+// 명령 6 상태 조회 Degraded(STATE_DEGRADED, {"stateDegraded": bool})를 notice 키에 종류마다의 판·명령 칸과 함께 둔다.
 // 범위가 전체면 회차 자리에 PLATFORM을 쓴 키(q:{event:PLATFORM}:notice)다. 대기 상태 파일이 두 키를 함께 읽는다(HOT-010).
 // 이 파일은 프레임워크를 모른다. 바라는 상태 꼴 검사와 칸 이름만 둔다.
 
 /** 받는 제어 종류(proto ControlKind 이름) */
-export const QUEUE_NOTICE_KINDS = ['CONTROL_KIND_SALE_PAUSE', 'CONTROL_KIND_LOBBY_BANNER'] as const;
+export const QUEUE_NOTICE_KINDS = ['CONTROL_KIND_SALE_PAUSE', 'CONTROL_KIND_LOBBY_BANNER', 'CONTROL_KIND_STATE_DEGRADED'] as const;
 export type QueueNoticeKind = (typeof QUEUE_NOTICE_KINDS)[number];
 
 /** 전체 범위 이름 */
@@ -17,6 +18,7 @@ export const LOBBY_BANNER_MAX = 500;
 export const QUEUE_NOTICE_FIELDS: Readonly<Record<QueueNoticeKind, { readonly value: string; readonly rev: string; readonly cmd: string }>> = Object.freeze({
   CONTROL_KIND_SALE_PAUSE: { value: 'paused', rev: 'pausedRev', cmd: 'pausedCmd' },
   CONTROL_KIND_LOBBY_BANNER: { value: 'banner', rev: 'bannerRev', cmd: 'bannerCmd' },
+  CONTROL_KIND_STATE_DEGRADED: { value: 'stateDegraded', rev: 'stateDegradedRev', cmd: 'stateDegradedCmd' },
 });
 
 /** notice 한 칸 쓰기. value가 null이면 값 칸을 지운다(배너 내리기) */
@@ -54,6 +56,7 @@ function objectOf(json: string): Record<string, unknown> | undefined {
  * 종류마다의 바라는 상태를 저장할 값으로 바꾼다(ADR-0365 결정 2). 모르는 칸·틀린 꼴이면 undefined(받는 층이 INVALID_ARGUMENT, 쓰기 0).
  * - SALE_PAUSE: {"paused": bool} → '1'·'0'
  * - LOBBY_BANNER: {"banner": 글 | null} → 글(1~500자, NFC, 제어·양방향 제어 문자 없음) 또는 null
+ * - STATE_DEGRADED: {"stateDegraded": bool} → '1'·'0'
  */
 export function noticeValueOf(kind: QueueNoticeKind, json: string): { readonly value: string | null } | undefined {
   const v = objectOf(json);
@@ -62,6 +65,10 @@ export function noticeValueOf(kind: QueueNoticeKind, json: string): { readonly v
   if (kind === 'CONTROL_KIND_SALE_PAUSE') {
     if (keys.length !== 1 || keys[0] !== 'paused' || typeof v.paused !== 'boolean') return undefined;
     return { value: v.paused ? '1' : '0' };
+  }
+  if (kind === 'CONTROL_KIND_STATE_DEGRADED') {
+    if (keys.length !== 1 || keys[0] !== 'stateDegraded' || typeof v.stateDegraded !== 'boolean') return undefined;
+    return { value: v.stateDegraded ? '1' : '0' };
   }
   if (keys.length !== 1 || keys[0] !== 'banner') return undefined;
   const banner = v.banner;

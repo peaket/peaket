@@ -12,13 +12,16 @@ export const opsCommandAutoActionReasonMax = 2000;
 export const OpsCommandAutoAction = zod.object({
   "eventKey": zod.string().describe('중복 제거 키. 같은 사건을 다시 보내면 같은 값이고 명령 ID도 같다'),
   "kind": zod.enum(['AUTO_ACTION']),
-  "type": zod.enum(['ADMISSION_TARGET']).describe('받는 유형은 명령 1의 목표 낮추기뿐이다(ADR-0340 결정 6)'),
-  "params": zod.object({
+  "type": zod.enum(['ADMISSION_TARGET', 'DEGRADED_MODE']).describe('받는 유형은 명령 1의 목표 낮추기와 명령 6의 ENTRY_DEGRADED다(ADR-0340 결정 6 보충, F-02-6)'),
+  "params": zod.union([zod.object({
   "eventId": zod.uuid(),
   "target": zod.int().describe('새 목표. 절대 하한 1,000 이상, 상한 8,000 이하(control-tower §3), fromTarget보다 작아야 한다'),
   "fromTarget": zod.int().describe('자동 조치가 본 지금 목표(낮추기인지 ops-svc가 본다)')
-}).strict(),
-  "reason": zod.string().max(opsCommandAutoActionReasonMax).describe('자동 조치 사유(예: AIMD 감축, 버짓 50% 사용)'),
+}).strict().describe('명령 1 목표 낮추기(AIMD·버짓 연동 감축). target은 fromTarget보다 작아야 한다'),zod.object({
+  "mode": zod.enum(['ENTRY_DEGRADED']),
+  "expiresAt": zod.iso.datetime({"offset":true}).describe('엣지 저장소 mode:entry의 expireAtMs가 될 시각. 지금보다 늦고 지금 + 24시간 이하[가정]')
+}).strict().describe('명령 6 진입 Degraded 자동 전환(control-tower §3 명령 6, ADR-0234 결정 5)')]),
+  "reason": zod.string().max(opsCommandAutoActionReasonMax).describe('자동 조치 사유(예: AIMD 감축, 버짓 50% 사용, 진입 지연 자동 전환)'),
   "occurredAt": zod.iso.datetime({"offset":true}).optional()
 })
 

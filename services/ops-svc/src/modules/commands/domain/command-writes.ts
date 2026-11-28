@@ -22,6 +22,7 @@ import {
   type NewCommand,
 } from './command.js';
 import { controlKindOf, controlScopesOf } from './control-kinds.js';
+import { degradedAuditOf } from './degraded-modes.js';
 import type { CommandDecision, CommandWriter, NewCommandEvent } from './ports.js';
 import { isPostReviewType, POST_REVIEW_DUE_MS } from './post-review.js';
 
@@ -77,6 +78,7 @@ export function blockExpiresAtOf(input: Pick<NewCommand, 'type' | 'params'>): nu
 export function planCreation(input: NewCommand, requesterRef: string): CreationPlan {
   const dryRun = input.dryRun ?? emptyDryRun(input);
   const digest = recordDigest(dryRun);
+  const degraded = degradedAuditOf(input.type, input.params, 'ON');
   if (input.system) {
     const state = nextCommandState(undefined, 'DISPATCHED', input.type);
     return {
@@ -84,8 +86,20 @@ export function planCreation(input: NewCommand, requesterRef: string): CreationP
       attempts: 1,
       ...(hasPrediction(dryRun) ? { compareDueAtMs: input.nowMs + DRY_RUN_COMPARE_DELAY_MS } : {}),
       requesterRef: SYSTEM_ACTOR_REF,
-      events: [{ type: 'DISPATCHED', actorRef: SYSTEM_ACTOR_REF, actorRole: SYSTEM_ROLE, reason: input.reason, dryRun }],
-      audit: { recordType: 'COMMAND_AUTO_ACTION', payload: { type: input.type, state, requestedBy: SYSTEM_ACTOR_REF, requestedRole: SYSTEM_ROLE, reason: input.reason, dryRunSha256: digest } },
+      events: [
+        {
+          type: 'DISPATCHED',
+          actorRef: SYSTEM_ACTOR_REF,
+          actorRole: SYSTEM_ROLE,
+          reason: input.reason,
+          dryRun,
+          ...(degraded !== undefined ? { detail: degraded } : {}),
+        },
+      ],
+      audit: {
+        recordType: 'COMMAND_AUTO_ACTION',
+        payload: { type: input.type, state, requestedBy: SYSTEM_ACTOR_REF, requestedRole: SYSTEM_ROLE, reason: input.reason, dryRunSha256: digest, ...(degraded ?? {}) },
+      },
     };
   }
   const mode = input.approvalMode ?? approvalModeOf(input.type, input.params);
@@ -106,7 +120,10 @@ export function planCreation(input: NewCommand, requesterRef: string): CreationP
       { type: 'DRY_RUN', ...by, dryRun },
       { type: state, ...by },
     ],
-    audit: { recordType: 'COMMAND_CREATED', payload: { type: input.type, state, requestedBy: requesterRef, requestedRole: input.requestedRole, reason: input.reason, dryRunSha256: digest } },
+    audit: {
+      recordType: 'COMMAND_CREATED',
+      payload: { type: input.type, state, requestedBy: requesterRef, requestedRole: input.requestedRole, reason: input.reason, dryRunSha256: digest, ...(degraded ?? {}) },
+    },
   };
 }
 
@@ -143,6 +160,7 @@ export async function writeDecision(w: CommandWriter, q: { accountId: string; ro
   if (c.state !== 'PENDING_APPROVAL' && c.state !== 'REVERT_PENDING') return { status: 'NOT_PENDING' };
   if (await closeIfApprovalExpired(w, q.nowMs)) return { status: 'EXPIRED', command: w.current };
   const revert = c.state === 'REVERT_PENDING';
+  const degraded = degradedAuditOf(c.type, c.params, revert ? 'OFF' : 'ON');
   // 기존 행이 commander 전용 유형을 operator가 요청한 경우도 승인 단계에서 닫는다(B3-H01)
   if (!revert && !requesterRolesOf(c.type).includes(c.requestedRole)) return { status: 'ROLE_FORBIDDEN' };
   if (!(revert ? REVERT_APPROVER_ROLES : approverRolesOf(c.type)).includes(q.role)) return { status: 'ROLE_FORBIDDEN' };
@@ -157,20 +175,20 @@ export async function writeDecision(w: CommandWriter, q: { accountId: string; ro
   const reasonPayload = q.reason !== undefined ? { reason: q.reason } : {};
   if (!revert) {
     const to = nextCommandState(c.state, q.decision, c.type);
-    await w.audit(q.decision === 'APPROVED' ? 'COMMAND_APPROVED' : 'COMMAND_REJECTED', { decision: q.decision, approverRef: ref, approverRole: q.role, ...reasonPayload }, q.nowMs);
+    await w.audit(q.decision === 'APPROVED' ? 'COMMAND_APPROVED' : 'COMMAND_REJECTED', { decision: q.decision, approverRef: ref, approverRole: q.role, ...reasonPayload, ...(degraded ?? {}) }, q.nowMs);
     await w.event({ type: q.decision, actorRef: ref, actorRole: q.role, reason: q.reason ?? c.reason, nowMs: q.nowMs });
     await w.patch({ state: to, approvalExpiresAtMs: null, nowMs: q.nowMs });
     return { status: 'APPLIED', command: w.current };
   }
   if (q.decision === 'REJECTED') {
     const to = nextCommandState(c.state, 'ACKED', c.type);
-    await w.audit('COMMAND_REVERT_REJECTED', { round, approverRef: ref, approverRole: q.role, ...reasonPayload }, q.nowMs);
+    await w.audit('COMMAND_REVERT_REJECTED', { round, approverRef: ref, approverRole: q.role, ...reasonPayload, ...(degraded ?? {}) }, q.nowMs);
     await w.event({ type: 'REVERT_REJECTED', actorRef: ref, actorRole: q.role, reason: q.reason ?? c.reason, nowMs: q.nowMs });
     await w.patch({ state: to, approvalExpiresAtMs: null, nowMs: q.nowMs });
     return { status: 'APPLIED', command: w.current };
   }
   // 되돌리기 승인: 보내기 전에 감사·사건을 남긴다. 상태는 보낸 결과가 정한다(REVERTED 또는 ACKED)
-  await w.audit('COMMAND_REVERT_APPROVED', { round, approverRef: ref, approverRole: q.role }, q.nowMs);
+  await w.audit('COMMAND_REVERT_APPROVED', { round, approverRef: ref, approverRole: q.role, ...(degraded ?? {}) }, q.nowMs);
   await w.event({ type: 'REVERT_APPROVED', actorRef: ref, actorRole: q.role, reason: c.reason, nowMs: q.nowMs });
   return { status: 'APPLIED', command: w.current, revert: { actorRef: ref, actorRole: q.role } };
 }
@@ -206,8 +224,9 @@ export async function writeDispatched(w: CommandWriter, q: { nowMs: number; acto
     actorRole = q.actor.role;
   }
   const firstCompare = attempts === 1 && c.compareDueAtMs === undefined && hasPrediction(c.dryRun);
-  await w.audit('COMMAND_EXECUTION_STARTED', { state: 'DISPATCHED', attempt: attempts, actorRef, actorRole }, q.nowMs);
-  await w.event({ type: 'DISPATCHED', actorRef, actorRole, reason: c.reason, nowMs: q.nowMs });
+  const degraded = degradedAuditOf(c.type, c.params, 'ON');
+  await w.audit('COMMAND_EXECUTION_STARTED', { state: 'DISPATCHED', attempt: attempts, actorRef, actorRole, ...(degraded ?? {}) }, q.nowMs);
+  await w.event({ type: 'DISPATCHED', actorRef, actorRole, reason: c.reason, ...(degraded !== undefined ? { detail: degraded } : {}), nowMs: q.nowMs });
   await w.patch({ state: to, attempts, lastError: null, executedAtMs: null, ...(firstCompare ? { compareDueAtMs: q.nowMs + DRY_RUN_COMPARE_DELAY_MS } : {}), ...control, nowMs: q.nowMs });
   // 승인 없이 실행한 명령 3·11은 처음 DISPATCHED와 같은 트랜잭션에서 사후 검토 할 일을 연다(작성 기한 + 48시간, ADR-0349 결정 7)
   if (attempts === 1 && isPostReviewType(c.type)) await openPostReviewIn(w, q.nowMs);
@@ -238,16 +257,17 @@ export async function writeSucceeded(w: CommandWriter, q: { result?: Record<stri
   const success = successStateOf(c.type);
   const to = nextCommandState(c.state, success, c.type);
   const result = q.result !== undefined ? { result: q.result } : {};
+  const degraded = degradedAuditOf(c.type, c.params, 'ON');
   if (success === 'ACKED') {
     const ackedAtMs = q.ackedAtMs ?? q.nowMs;
     const ttl = expiryAfterAckMs(c.type);
     const expiresAtMs = ttl !== undefined && c.expiresAtMs === undefined ? ackedAtMs + ttl : undefined;
-    await w.audit('COMMAND_ACKED', { state: to, ackedAt: iso(ackedAtMs), ...(expiresAtMs !== undefined ? { expiresAt: iso(expiresAtMs) } : {}), ...result }, q.nowMs);
+    await w.audit('COMMAND_ACKED', { state: to, ackedAt: iso(ackedAtMs), ...(expiresAtMs !== undefined ? { expiresAt: iso(expiresAtMs) } : {}), ...result, ...(degraded ?? {}) }, q.nowMs);
     await w.event({ type: 'ACKED', actorRef: SYSTEM_ACTOR_REF, actorRole: SYSTEM_ROLE, reason: c.reason, ackedAtMs, nowMs: q.nowMs });
     await w.patch({ state: to, lastError: null, executedAtMs: q.nowMs, result: q.result ?? null, ...(expiresAtMs !== undefined ? { expiresAtMs } : {}), nowMs: q.nowMs });
     return w.current;
   }
-  await w.audit('COMMAND_SUCCEEDED', { state: to, ...result }, q.nowMs);
+  await w.audit('COMMAND_SUCCEEDED', { state: to, ...result, ...(degraded ?? {}) }, q.nowMs);
   await w.event({ type: 'SUCCEEDED', actorRef: SYSTEM_ACTOR_REF, actorRole: SYSTEM_ROLE, reason: c.reason, nowMs: q.nowMs });
   await w.patch({ state: to, lastError: null, executedAtMs: q.nowMs, result: q.result ?? null, nowMs: q.nowMs });
   return w.current;
@@ -277,12 +297,13 @@ export async function writeRevertRequest(w: CommandWriter, q: { accountId: strin
   // 명령 6 해제 갈래는 되돌리지 않는다(다시 멈추는 자동 조건이 되돌림 몫을 한다, ADR-0366 결정 8)
   if (!isRevertibleCommand(c) || c.state !== 'ACKED') return { status: 'NOT_REVERTIBLE' };
   if (!requesterRolesOf(c.type).includes(q.role)) return { status: 'ROLE_FORBIDDEN' };
+  const degraded = degradedAuditOf(c.type, c.params, 'OFF');
   if (REVERT_NEEDS_APPROVAL.includes(c.type)) {
     const to = nextCommandState(c.state, 'REVERT_PENDING', c.type);
     const round = (c.round ?? 0) + 1;
     const ref = await w.actor('REQUESTER', round, q.accountId, q.nowMs);
     const approvalExpiresAtMs = q.nowMs + APPROVAL_TTL_MS;
-    await w.audit('COMMAND_REVERT_REQUESTED', { round, requesterRef: ref, requesterRole: q.role, reason: q.reason, approvalExpiresAt: iso(approvalExpiresAtMs) }, q.nowMs);
+    await w.audit('COMMAND_REVERT_REQUESTED', { round, requesterRef: ref, requesterRole: q.role, reason: q.reason, approvalExpiresAt: iso(approvalExpiresAtMs), ...(degraded ?? {}) }, q.nowMs);
     await w.event({ type: 'REVERT_REQUESTED', actorRef: ref, actorRole: q.role, reason: q.reason, nowMs: q.nowMs });
     await w.patch({ state: to, round, approvalExpiresAtMs, nowMs: q.nowMs });
     return { status: 'PENDING', command: w.current };
@@ -290,8 +311,8 @@ export async function writeRevertRequest(w: CommandWriter, q: { accountId: strin
   // 보내기 전에 전이가 표에 있는지 본다(T13)
   nextCommandState(c.state, 'REVERTED', c.type);
   const ref = await w.actor('ACTOR', c.round ?? 0, q.accountId, q.nowMs);
-  await w.audit('COMMAND_REVERT_STARTED', { actorRef: ref, actorRole: q.role, reason: q.reason }, q.nowMs);
-  await w.event({ type: 'REVERT_STARTED', actorRef: ref, actorRole: q.role, reason: q.reason, nowMs: q.nowMs });
+  await w.audit('COMMAND_REVERT_STARTED', { actorRef: ref, actorRole: q.role, reason: q.reason, ...(degraded ?? {}) }, q.nowMs);
+  await w.event({ type: 'REVERT_STARTED', actorRef: ref, actorRole: q.role, reason: q.reason, ...(degraded !== undefined ? { detail: degraded } : {}), nowMs: q.nowMs });
   return { status: 'DISPATCH', command: w.current, actorRef: ref, actorRole: q.role };
 }
 
@@ -302,20 +323,21 @@ export async function writeRevertRequest(w: CommandWriter, q: { accountId: strin
 export async function writeRevertResult(w: CommandWriter, q: { ok: boolean; error?: string; actorRef: string; actorRole: string; fromPending: boolean; nowMs: number }): Promise<boolean> {
   const c = w.current;
   const expected: CommandState = q.fromPending ? 'REVERT_PENDING' : 'ACKED';
+  const degraded = degradedAuditOf(c.type, c.params, 'OFF');
   if (c.state !== expected) {
-    await w.audit('COMMAND_REVERT_FAILED', { actorRef: q.actorRef, actorRole: q.actorRole, reason: 'state-changed' }, q.nowMs);
+    await w.audit('COMMAND_REVERT_FAILED', { actorRef: q.actorRef, actorRole: q.actorRole, reason: 'state-changed', ...(degraded ?? {}) }, q.nowMs);
     await w.event({ type: 'REVERT_FAILED', actorRef: q.actorRef, actorRole: q.actorRole, reason: 'state-changed', nowMs: q.nowMs });
     return false;
   }
   if (q.ok) {
     const to = nextCommandState(c.state, 'REVERTED', c.type);
-    await w.audit('COMMAND_REVERTED', { round: c.round ?? 0, actorRef: q.actorRef, actorRole: q.actorRole }, q.nowMs);
+    await w.audit('COMMAND_REVERTED', { round: c.round ?? 0, actorRef: q.actorRef, actorRole: q.actorRole, ...(degraded ?? {}) }, q.nowMs);
     await w.event({ type: 'REVERTED', actorRef: q.actorRef, actorRole: q.actorRole, reason: c.reason, nowMs: q.nowMs });
     await w.patch({ state: to, approvalExpiresAtMs: null, nowMs: q.nowMs });
     return true;
   }
   const error = q.error ?? 'revert-failed';
-  await w.audit('COMMAND_REVERT_FAILED', { actorRef: q.actorRef, actorRole: q.actorRole, reason: error }, q.nowMs);
+  await w.audit('COMMAND_REVERT_FAILED', { actorRef: q.actorRef, actorRole: q.actorRole, reason: error, ...(degraded ?? {}) }, q.nowMs);
   await w.event({ type: 'REVERT_FAILED', actorRef: q.actorRef, actorRole: q.actorRole, reason: error, nowMs: q.nowMs });
   if (q.fromPending) await w.patch({ state: nextCommandState(c.state, 'ACKED', c.type), approvalExpiresAtMs: null, nowMs: q.nowMs });
   return false;

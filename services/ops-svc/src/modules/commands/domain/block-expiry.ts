@@ -120,23 +120,39 @@ export interface ExpiredBlockCommand {
   readonly commandId: string;
   readonly cidrs: readonly string[];
   readonly asnCount: number;
+  /** 실제 ASN 목록(있으면 만료 판정의 own/live 비교에 쓴다) */
+  readonly asns?: readonly number[];
   readonly expiresAtMs: number;
 }
 
 export type BlockExpiryVerdict =
-  /** 대역이 모두 IP 집합에 없거나 만료 전 다른 명령 4가 같은 대역을 막는다: AUTO_EXPIRED */
+  /** 대역·ASN이 모두 WAF에서 빠졌거나 만료 전 다른 명령 4가 같은 항목을 덮는다: AUTO_EXPIRED */
   | { readonly expire: true; readonly reason: 'waf-removed' | 'superseded' }
-  /** 아직(만료 전, 집합에 남은 대역, ASN 항목, 그 가족의 집합을 읽지 못함) */
+  /** 아직(만료 전, WAF에 남은 대역·ASN, 그 가족의 집합을 읽지 못함, ASN 판정 인자 없음) */
   | { readonly expire: false; readonly why: 'not-expired' | 'still-blocked' | 'asn' | 'ip-set-unread' };
 
+/** ASN 만료 판정 입력: own은 이 명령의 ASN 가운데 WAF에 남은 것, live는 만료 전 다른 ACKED 명령 4의 ASN */
+export interface BlockAsnSets {
+  readonly own: ReadonlySet<number>;
+  readonly live: ReadonlySet<number>;
+}
+
 /**
- * 명령 4 하나의 AUTO_EXPIRED 판정(ADR-0349 결정 10).
+ * 명령 4 하나의 AUTO_EXPIRED 판정(ADR-0349 결정 10, F-02-6 RV026-03).
+ * CIDR과 ASN을 같은 소유권 규칙으로 본다: 이 명령의 항목이 WAF에 없거나, 남아 있어도 만료 전 다른 명령이 덮으면
+ * `superseded`로 만료할 수 있다. 이 명령만 막고 있으면 `still-blocked`다.
  * @param sets 가족별 IP 집합의 대역 키(읽지 못한 가족은 없다)
  * @param liveOthers 만료 전 다른 ACKED 명령 4의 대역 키
+ * @param asns ASN 판정 입력. 주지 않으면 ASN 항목이 있는 명령은 기존처럼 `{expire:false, why:'asn'}`이다
  */
-export function blockExpiryVerdict(c: ExpiredBlockCommand, nowMs: number, sets: Partial<Record<IpFamily, ReadonlySet<string>>>, liveOthers: ReadonlySet<string>): BlockExpiryVerdict {
+export function blockExpiryVerdict(
+  c: ExpiredBlockCommand,
+  nowMs: number,
+  sets: Partial<Record<IpFamily, ReadonlySet<string>>>,
+  liveOthers: ReadonlySet<string>,
+  asns?: BlockAsnSets,
+): BlockExpiryVerdict {
   if (!blockExpired(c.expiresAtMs, nowMs)) return { expire: false, why: 'not-expired' };
-  if (c.asnCount > 0) return { expire: false, why: 'asn' };
   let superseded = false;
   for (const raw of c.cidrs) {
     const p = keyOf(raw);
@@ -150,12 +166,24 @@ export function blockExpiryVerdict(c: ExpiredBlockCommand, nowMs: number, sets: 
     }
     return { expire: false, why: 'still-blocked' };
   }
+  if (c.asnCount > 0) {
+    if (!asns) return { expire: false, why: 'asn' };
+    for (const asn of c.asns ?? []) {
+      // 다른 살아 있는 명령이 덮으면 WAF에 남아 있어도 이 명령 몫은 만료할 수 있다(CIDR의 superseded와 같은 규칙)
+      if (asns.live.has(asn)) {
+        superseded = true;
+        continue;
+      }
+      if (!asns.own.has(asn)) continue;
+      return { expire: false, why: 'still-blocked' };
+    }
+  }
   return { expire: true, reason: superseded ? 'superseded' : 'waf-removed' };
 }
 
-/** params(명령 4)에서 대역 글자와 ASN 수를 읽는다(접수 때 검사를 지난 값) */
+/** params(명령 4)에서 대역 글자와 ASN 목록을 읽는다(접수 때 검사를 지난 값) */
 export function blockCommandOf(commandId: string, params: Record<string, unknown>, expiresAtMs: number): ExpiredBlockCommand {
   const cidrs = Array.isArray(params.cidrs) ? params.cidrs.filter((v): v is string => typeof v === 'string') : [];
-  const asnCount = Array.isArray(params.asns) ? params.asns.length : 0;
-  return { commandId, cidrs, asnCount, expiresAtMs };
+  const asns = Array.isArray(params.asns) ? params.asns.filter((v): v is number => typeof v === 'number' && Number.isSafeInteger(v)) : [];
+  return { commandId, cidrs, asnCount: asns.length, asns, expiresAtMs };
 }

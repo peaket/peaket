@@ -5,6 +5,7 @@
 // 이 파일은 프레임워크를 모른다.
 import { isEntryReleaseParams, SAFETY_LIMITS, type Command, type CommandType } from './command.js';
 import { CommandInputRejected, isPgFallbackParams } from './command-params.js';
+import { isStateDegradedParams } from './degraded-modes.js';
 import { entryReleaseStates, pgSwitchDesiredStates, pgSwitchOffStates, type PgSwitchRoutes } from './pg-switch.js';
 import type { PgName } from './ports.js';
 
@@ -24,7 +25,8 @@ export type ControlKindName =
   | 'CONTROL_KIND_AUTOMATION_STOP'
   | 'CONTROL_KIND_SALE_SUSPENSION'
   | 'CONTROL_KIND_PG_SWITCH'
-  | 'CONTROL_KIND_ENTRY_PAUSE_RELEASE';
+  | 'CONTROL_KIND_ENTRY_PAUSE_RELEASE'
+  | 'CONTROL_KIND_STATE_DEGRADED';
 
 /** 명령 1의 수동 고정 만료: 지정 시각 + 15분(ADR-0226 결정 7) */
 export const ADMISSION_TARGET_HOLD_MS = 15 * 60_000;
@@ -58,6 +60,7 @@ export function controlKindOf(type: CommandType, params?: unknown): ControlKindN
   if (type === 'DEGRADED_MODE') {
     if (isPgFallbackParams(type, params)) return 'CONTROL_KIND_PG_SWITCH';
     if (isEntryReleaseParams(type, params)) return 'CONTROL_KIND_ENTRY_PAUSE_RELEASE';
+    if (isStateDegradedParams(type, params)) return 'CONTROL_KIND_STATE_DEGRADED';
     return undefined;
   }
   return KIND_OF[type];
@@ -100,6 +103,11 @@ export function controlScopesOf(c: Pick<Command, 'type' | 'params'>): string[] {
     case 'DEGRADED_MODE': {
       // 명령 6 결제 갈래: EVENT면 회차마다(소문자), PLATFORM이면 PLATFORM 하나. 해제는 PLATFORM(ADR-0366 결정 1·8)
       if (isEntryReleaseParams(c.type, p)) return [CONTROL_SCOPE_PLATFORM];
+      if (isStateDegradedParams(c.type, p)) {
+        if (p.scope === CONTROL_SCOPE_PLATFORM) return [CONTROL_SCOPE_PLATFORM];
+        if (p.scope !== 'EVENT' || !Array.isArray(p.eventIds) || p.eventIds.length === 0) return invalid('eventIds');
+        return [...new Set((p.eventIds as unknown[]).map(eventOf))].sort();
+      }
       if (!isPgFallbackParams(c.type, p)) return [];
       if (p.scope === 'PLATFORM') return [CONTROL_SCOPE_PLATFORM];
       if (p.scope !== 'EVENT' || !Array.isArray(p.eventIds) || p.eventIds.length === 0) return invalid('eventIds');
@@ -167,6 +175,11 @@ export function controlDeliveriesOf(c: Pick<Command, 'type' | 'params'>, phase: 
         const actor = times.actorAccountId;
         if (actor === undefined || actor === '') return invalid('actor');
         return entryReleaseStates([c.params.pg as PgName], actor);
+      }
+      if (kind === 'CONTROL_KIND_STATE_DEGRADED') {
+        if (phase !== 'APPLY' && phase !== 'REVERT') return invalid('not-control');
+        const desiredStateJson = json({ stateDegraded: phase === 'APPLY' });
+        return scopes.map((scope) => ({ service: 'queue-svc', scope, kind, desiredStateJson }));
       }
       if (phase === 'REVERT') return pgSwitchOffStates(scopes);
       if (phase !== 'APPLY') return invalid('not-control');

@@ -7,6 +7,7 @@ import { ComputeDryRun } from './application/compute-dry-run.js';
 import { CreateCommand, PreviewCommand } from './application/create-command.js';
 import { DecideCommand } from './application/decide-command.js';
 import { ControlAwareExecutor, ControlDispatcher, type ControlFanout } from './application/dispatch-control.js';
+import { EdgeCommandExecutor } from './application/edge-command-executor.js';
 import { ExecuteCommand } from './application/execute-command.js';
 import { PgAssignmentGate } from './application/pg-assignment-gate.js';
 import { GetCommand } from './application/get-command.js';
@@ -18,6 +19,7 @@ import { RetryCommand } from './application/retry-command.js';
 import { ExtendCommand, RevertCommand } from './application/revert-command.js';
 import { COMMAND_MAINTENANCE_INTERVAL_MS, type CommandType } from './domain/command.js';
 import type { DryRunSource } from './domain/dry-run.js';
+import type { CdnEdgeSettings, EntryModeStore, WafBlocks } from './domain/edge-ports.js';
 import type { CancelledEventGuard, CommandExecutor, CommandSignals, CommandStore, ControlDeliveries, LobbyBannerTemplates, OnsaleStartSource, PgAssignmentCheck, PgSwitchResolver } from './domain/ports.js';
 import { PgSwitchPlanner } from './application/pg-switch-plan.js';
 import type { ProtectedRangeList } from './domain/protected-ranges.js';
@@ -55,6 +57,11 @@ export interface CommandsModuleExtras {
   readonly postReviews?: { readonly commanders?: ActiveCommanders; readonly alerts?: OpsAlertStore };
   /** 명령 4 만료 확인이 읽는 WAF IP 집합 둘(ADR-0349 결정 10). 없으면 명령 4는 정비가 AUTO_EXPIRED로 적지 않는다 */
   readonly blockIpSets?: BlockIpSetReader;
+  /**
+   * 명령 4 WAF 전송·명령 6 엣지/CloudFront 설정 포트(F-02-6). 주면 EdgeCommandExecutor가 그 유형을 맡고,
+   * 정비는 같은 WAF 포트로 ASN 만료를 뺀다. 실제 AWS 어댑터 배선은 F-09-4(미실행)다
+   */
+  readonly edge?: { readonly waf: WafBlocks; readonly entryMode: EntryModeStore; readonly cdn: CdnEdgeSettings };
   /** 운영 사건 줄 ops_event(ADR-0349 결정 8). 없으면 서비스 로거로 낸다(시험이 받는 쪽을 넣는다) */
   readonly opsEvents?: OpsEventLog;
   /**
@@ -105,12 +112,16 @@ export class CommandsModule {
     // 명령 6 결제 갈래(F-02-2): 전환의 갈 곳 묻기는 승인 요청(접수 전)·실행·이어 보내기가 같은 객체를 쓴다(ADR-0366 결정 5)
     const pgSwitch = new PgSwitchPlanner(extras.control?.pgSwitch ? { resolver: extras.control.pgSwitch } : {});
     const dispatcher = extras.control ? new ControlDispatcher({ store, fanout: extras.control.fanout, clock: extras.control.clock ?? { now: () => Date.now() }, pgSwitch }) : undefined;
-    const sender: CommandExecutor | undefined = dispatcher ? new ControlAwareExecutor(executor, dispatcher) : executor;
+    // 명령 4 WAF·명령 6 엣지/CloudFront 설정은 EdgeCommandExecutor가 맡고 그 밖의 유형은 기존 실행기에 넘긴다(F-02-6)
+    const edgeExecutor: CommandExecutor | undefined = extras.edge
+      ? new EdgeCommandExecutor({ waf: extras.edge.waf, entryMode: extras.edge.entryMode, cdn: extras.edge.cdn, ...(executor ? { next: executor } : {}) })
+      : executor;
+    const sender: CommandExecutor | undefined = dispatcher ? new ControlAwareExecutor(edgeExecutor, dispatcher) : edgeExecutor;
     const execution = new ExecuteCommand(store, sender, checkpoints, guard, { pgGate, pgSwitch, ...(dispatcher ? { control: dispatcher } : {}) });
     const wired = sender || extras.pgAssignment ? execution : undefined;
     const createCommand = new CreateCommand(store, wired, guard, { dryRun, security, pgGate, ...(extras.bannerTemplates ? { bannerTemplates: extras.bannerTemplates } : {}), ...(extras.control?.simulatorPg ? { simulatorPg: true } : {}) });
     const postReviews = new PostReviews({ store, ...(extras.postReviews?.commanders ? { commanders: extras.postReviews.commanders } : {}), ...(extras.postReviews?.alerts ? { alerts: extras.postReviews.alerts } : {}) });
-    const maintain = new MaintainCommands(store, dryRun, extras.maintenance ?? {}, { postReviews, ...(extras.blockIpSets ? { blockIpSets: extras.blockIpSets } : {}), ...(dispatcher ? { control: dispatcher } : {}) });
+    const maintain = new MaintainCommands(store, dryRun, extras.maintenance ?? {}, { postReviews, ...(extras.blockIpSets ? { blockIpSets: extras.blockIpSets } : {}), ...(extras.edge ? { waf: extras.edge.waf } : {}), ...(dispatcher ? { control: dispatcher } : {}) });
     const maintenance: CommandMaintenanceOptions = { enabled: extras.maintenance?.enabled ?? false, intervalMs: extras.maintenance?.intervalMs ?? COMMAND_MAINTENANCE_INTERVAL_MS };
     // HTTP 수신기와 Kafka 소비자가 같은 처리기를 쓴다(두 길로 같은 사건이 와도 한 번만 만든다).
     onCommandEvent?.(new HandleCommandEvent({ createCommand, store }));

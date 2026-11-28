@@ -3,12 +3,13 @@
 // 만료가 지난 명령 2·8 → AUTO_EXPIRED(SYSTEM), 비교 때가 된 명령 → DRY_RUN_COMPARED(예측·실제, 세지 못하면 unavailable)를 남긴다.
 // 하루 한 번 3년 [가정] 지난 관리 계정 대응 행을 지운다(삭제 보류 행은 남긴다).
 // BAT-360(ADR-0349 결정 7·10): 만료가 지난 ACKED 명령 4는 WAF IP 집합 둘을 읽어 대역이 모두 빠졌거나 만료 전 다른 명령 4가 같은 대역을 막을 때만 AUTO_EXPIRED(SYSTEM)로 적고,
-//   IP 집합을 읽지 못하면 그대로 두고 다음 바퀴에 다시 본다(ASN 항목이 있는 명령은 이 확인 밖이다). 사후 검토는 놓친 할 일을 열고 기한 넘김 SEV3를 한 번 낸다.
-//   새 몫의 수(blocksExpired·postReviewsOpened·postReviewAlerts)는 0이 아닐 때만 결과에 싣는다.
+//   IP 집합을 읽지 못하면 그대로 두고 다음 바퀴에 다시 본다. ASN 항목은 WAF 포트가 있으면 그 명령 몫을 빼고 같은 소유권 규칙(공유 ASN은 superseded)으로 판정한다.
+//   사후 검토는 놓친 할 일을 열고 기한 넘김 SEV3를 한 번 낸다. 새 몫의 수(blocksExpired·postReviewsOpened·postReviewAlerts)는 0이 아닐 때만 결과에 싣는다.
 import { ACTOR_MAPPING_PURGE_INTERVAL_MS, ACTOR_MAPPING_RETENTION_MS, type Command } from '../domain/command.js';
-import { blockCommandOf, blockExpired, blockExpiryVerdict, ipSetKeys, type IpFamily } from '../domain/block-expiry.js';
+import { blockCommandOf, blockExpired, blockExpiryVerdict, ipSetKeys, type BlockAsnSets, type IpFamily } from '../domain/block-expiry.js';
 import { closeIfApprovalExpired, writeAutoExpired, writeComparison } from '../domain/command-writes.js';
 import { compareDryRun, type DryRunPrediction } from '../domain/dry-run.js';
+import type { WafBlocks } from '../domain/edge-ports.js';
 import type { BlockIpSetReader, CommandDueKind, CommandStore } from '../domain/ports.js';
 import type { ComputeDryRun } from './compute-dry-run.js';
 import type { PostReviews } from './post-review.js';
@@ -22,8 +23,10 @@ export interface MaintainCommandsOptions {
 
 /** 정비가 더 보는 몫(BAT-360). 주지 않으면 그 몫을 하지 않는다 */
 export interface MaintainCommandsExtras {
-  /** 명령 4 만료 확인이 읽는 WAF IP 집합 둘. 없으면(local·ci, 설정 없음) 명령 4는 ACKED 그대로다 */
+  /** 명령 4 만료 확인이 읽는 WAF IP 집합 둘. 없으면(local·ci, 설정 없음) CIDR 명령 4는 ACKED 그대로다 */
   readonly blockIpSets?: BlockIpSetReader;
+  /** 명령 4 ASN 만료를 WAF에서 빼는 포트(F-02-6). 없으면 ASN 항목이 있는 명령은 ACKED 그대로다 */
+  readonly waf?: WafBlocks;
   /** 사후 검토 할 일 열기·기한 경보 */
   readonly postReviews?: PostReviews;
   /**
@@ -143,11 +146,14 @@ export class MaintainCommands {
 
   /**
    * 만료가 지난 ACKED 명령 4의 AUTO_EXPIRED 확인(ADR-0349 결정 10, C-T61 ⑥). 만료 − 1ms에는 아니다.
-   * 만료 전 다른 ACKED 명령 4의 대역은 '덮음'으로 본다. 그 가족의 IP 집합을 읽지 못한 명령은 그대로 둔다. 적은 수
+   * CIDR은 만료 전 다른 ACKED 명령 4의 대역을 '덮음'으로 보고, 그 가족의 IP 집합을 읽지 못한 명령은 그대로 둔다.
+   * ASN은 WAF 포트가 있으면 그 명령 몫을 먼저 빼고(release) 남은 소유·다른 살아 있는 명령의 ASN으로 같은 규칙(공유는 superseded)을 본다.
+   * 적은 수
    */
   async expireBlocks(nowMs: number): Promise<number> {
     const sets = this.extras.blockIpSets;
-    if (!sets) return 0;
+    const waf = this.extras.waf;
+    if (!sets && !waf) return 0;
     const acked: Command[] = [];
     let cursor: string | undefined;
     for (let page = 0; page < BLOCK_PAGES; page += 1) {
@@ -158,18 +164,37 @@ export class MaintainCommands {
     }
     const expired = acked.filter((c) => c.expiresAtMs !== undefined && blockExpired(c.expiresAtMs, nowMs));
     if (expired.length === 0) return 0;
-    const live = ipSetKeys(acked.filter((c) => c.expiresAtMs !== undefined && !blockExpired(c.expiresAtMs, nowMs)).flatMap((c) => blockCommandOf(c.commandId, c.params, c.expiresAtMs!).cidrs));
+    const liveCommands = acked.filter((c) => c.expiresAtMs !== undefined && !blockExpired(c.expiresAtMs, nowMs));
+    const live = ipSetKeys(liveCommands.flatMap((c) => blockCommandOf(c.commandId, c.params, c.expiresAtMs!).cidrs));
+    const liveAsns = new Set(liveCommands.flatMap((c) => blockCommandOf(c.commandId, c.params, c.expiresAtMs!).asns ?? []));
     const read: Partial<Record<IpFamily, ReadonlySet<string>>> = {};
-    for (const family of [4, 6] as const) {
-      try {
-        read[family] = ipSetKeys(await sets.read(family));
-      } catch {
-        // 읽지 못한 가족의 명령은 다음 바퀴에 다시 본다
+    if (sets) {
+      for (const family of [4, 6] as const) {
+        try {
+          read[family] = ipSetKeys(await sets.read(family));
+        } catch {
+          // 읽지 못한 가족의 CIDR 명령은 다음 바퀴에 다시 본다
+        }
       }
     }
     let n = 0;
     for (const c of expired.slice(0, this.#batch)) {
-      const verdict = blockExpiryVerdict(blockCommandOf(c.commandId, c.params, c.expiresAtMs!), nowMs, read, live);
+      const block = blockCommandOf(c.commandId, c.params, c.expiresAtMs!);
+      // CIDR이 아직 막혀 있으면 ASN을 빼기 전에 이번 바퀴를 건너뛴다(명령은 ACKED 그대로, 다음 바퀴에 다시)
+      if (block.cidrs.length > 0) {
+        if (!sets || !blockExpiryVerdict({ ...block, asnCount: 0, asns: [] }, nowMs, read, live).expire) continue;
+      }
+      let asns: BlockAsnSets | undefined;
+      if (block.asnCount > 0) {
+        if (!waf) continue;
+        try {
+          await waf.release(c.commandId);
+          asns = { own: new Set((await waf.remaining(c.commandId)).asns), live: liveAsns };
+        } catch {
+          continue;
+        }
+      }
+      const verdict = blockExpiryVerdict(block, nowMs, read, live, asns);
       if (!verdict.expire) continue;
       const done = await this.store.mutate(c.commandId, async (w) =>
         w.current.state === 'ACKED' && w.current.expiresAtMs !== undefined && blockExpired(w.current.expiresAtMs, nowMs) ? writeAutoExpired(w, { reason: verdict.reason, nowMs }) : false,

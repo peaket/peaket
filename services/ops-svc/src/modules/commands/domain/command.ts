@@ -237,8 +237,8 @@ export const COMMAND_TRANSITIONS: readonly CommandTransition[] = Object.freeze([
   { id: 'T9S', from: 'DISPATCHED', to: 'SUCCEEDED', only: (t: CommandType) => !isCatalogCommand(t) },
   { id: 'T10', from: 'DISPATCHED', to: 'FAILED' },
   { id: 'T11', from: 'FAILED', to: 'DISPATCHED' },
-  // 시스템 자동 조치는 명령 1의 목표 낮추기뿐이다(ADR-0340 결정 6)
-  { id: 'T12', from: undefined, to: 'DISPATCHED', only: (t: CommandType) => t === 'ADMISSION_TARGET' },
+  // 시스템 자동 조치는 명령 1의 목표 낮추기와 명령 6 ENTRY_DEGRADED뿐이다(ADR-0340 결정 6 보충, 2026-11-28)
+  { id: 'T12', from: undefined, to: 'DISPATCHED', only: (t: CommandType) => t === 'ADMISSION_TARGET' || t === 'DEGRADED_MODE' },
   { id: 'T13', from: 'ACKED', to: 'REVERTED', only: oneStepRevert },
   { id: 'T14', from: 'ACKED', to: 'REVERT_PENDING', only: twoStepRevert },
   { id: 'T15', from: 'REVERT_PENDING', to: 'REVERTED', only: twoStepRevert },

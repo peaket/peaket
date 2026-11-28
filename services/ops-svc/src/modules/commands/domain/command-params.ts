@@ -4,6 +4,17 @@
 // 꼴이 틀리면 'INVALID'(422 invalid-command), 안전 한계 밖이면 'OUT_OF_RANGE'(422 command-out-of-range, 걸린 한계 이름)다. 저장 전에 거른다.
 import { BlockListInvalid, blockListsOf, type BlockParams } from './block-ranges.js';
 import { PAYMENT_ENTRY_RELEASE, SAFETY_LIMITS, type CommandType } from './command.js';
+import {
+  ENTRY_DEGRADED,
+  ENTRY_DEGRADED_MAX_TTL_MS,
+  SOLD_OUT_STATIC,
+  STATE_DEGRADED,
+  STATE_DEGRADED_MAX_EVENTS,
+  STATE_MIRROR_FIXED,
+  type CdnDegradedParams,
+  type EntryDegradedParams,
+  type StateDegradedParams,
+} from './degraded-modes.js';
 
 /** 접수 검사 거절. 받는 층이 422로 바꾼다 */
 export class CommandInputRejected extends Error {
@@ -168,6 +179,44 @@ export function entryReleaseParamsOf(p: Record<string, unknown>, o: { readonly s
   return { mode: PAYMENT_ENTRY_RELEASE, pg: p.pg as EntryReleasePg };
 }
 
+/** ENTRY_DEGRADED: {mode, expiresAt}. 만료는 필수이고 지금보다 늦고 24시간 이하다 */
+function entryDegradedParamsOf(p: Record<string, unknown>, nowMs: number): EntryDegradedParams {
+  onlyKeys(p, ['mode', 'expiresAt']);
+  if (p.mode !== ENTRY_DEGRADED) invalid('mode');
+  const raw = p.expiresAt;
+  if (raw === undefined) throw new CommandInputRejected('OUT_OF_RANGE', 'degradedExpiresAt');
+  const expiresAt = typeof raw === 'string' ? raw : invalid('expiresAt');
+  const expiresAtMs = Date.parse(expiresAt);
+  if (!Number.isFinite(expiresAtMs)) invalid('expiresAt');
+  if (expiresAtMs <= nowMs || expiresAtMs > nowMs + ENTRY_DEGRADED_MAX_TTL_MS) throw new CommandInputRejected('OUT_OF_RANGE', 'degradedExpiresAt');
+  return { mode: ENTRY_DEGRADED, expiresAt };
+}
+
+/** STATE_DEGRADED: {mode, scope, eventIds?}. EVENT면 소문자 회차 1~100개(겹침 없음), PLATFORM이면 회차를 받지 않는다 */
+function stateDegradedParamsOf(p: Record<string, unknown>): StateDegradedParams {
+  onlyKeys(p, ['mode', 'scope', 'eventIds']);
+  if (p.mode !== STATE_DEGRADED) invalid('mode');
+  const scope = p.scope;
+  if (scope !== 'EVENT' && scope !== 'PLATFORM') invalid('scope');
+  const rawIds = p.eventIds;
+  if (scope === 'PLATFORM') {
+    if (rawIds !== undefined && (!Array.isArray(rawIds) || rawIds.length > 0)) invalid('eventIds');
+    return { mode: STATE_DEGRADED, scope: 'PLATFORM' };
+  }
+  const rawList = Array.isArray(rawIds) && rawIds.length > 0 ? rawIds : invalid('eventIds');
+  if (rawList.length > STATE_DEGRADED_MAX_EVENTS) throw new CommandInputRejected('OUT_OF_RANGE', 'stateDegradedMaxEvents');
+  const ids = rawList.map((v) => (typeof v === 'string' && LOWER_UUID.test(v) ? v : invalid('eventIds')));
+  if (new Set(ids).size !== ids.length) invalid('eventIds-duplicate');
+  return { mode: STATE_DEGRADED, scope: 'EVENT', eventIds: ids };
+}
+
+/** CDN 갈래: {mode}만. S3 사본 고정·매진 정적 응답 */
+function cdnModeParamsOf(p: Record<string, unknown>): CdnDegradedParams {
+  onlyKeys(p, ['mode']);
+  const mode = p.mode === STATE_MIRROR_FIXED || p.mode === SOLD_OUT_STATIC ? p.mode : invalid('mode');
+  return { mode };
+}
+
 /**
  * 명령 4: {cidrs?, asns?, expiresAt}(ADR-0339 결정 1·2). 꼴이 틀린 대역·호스트 비트·/0·빈 목록 둘·같은 항목 두 번은 INVALID,
  * 항목 합계 100개 초과·만료 없음·지금 이하·지금 + 24시간 초과는 OUT_OF_RANGE다
@@ -211,8 +260,11 @@ export function checkCommandParams(type: CommandType, params: unknown, nowMs: nu
     case 'PG_ASSIGN':
       return { ...pgAssignParamsOf(params) };
     case 'DEGRADED_MODE': {
-      // 결제 갈래(ADR-0349 결정 6)와 해제 갈래(ADR-0366 결정 8)를 닫는다. 다른 모드는 F-02-6이 닫을 때까지 객체만 본다
+      // 결제 갈래(ADR-0349 결정 6)·해제 갈래(ADR-0366 결정 8)·F-02-6의 네 갈래를 닫는다. 그 밖의 모드는 지금처럼 객체만 본다
       if (params.mode === PAYMENT_ENTRY_RELEASE) return { ...entryReleaseParamsOf(params, o) };
+      if (params.mode === ENTRY_DEGRADED) return { ...entryDegradedParamsOf(params, nowMs) };
+      if (params.mode === STATE_DEGRADED) return { ...stateDegradedParamsOf(params) };
+      if (params.mode === STATE_MIRROR_FIXED || params.mode === SOLD_OUT_STATIC) return { ...cdnModeParamsOf(params) };
       if (params.mode !== PAYMENT_PG_FALLBACK) return params;
       const f = pgFallbackParamsOf(params);
       return { mode: f.mode, scope: f.scope, ...(f.scope === 'EVENT' ? { eventIds: [...f.eventIds] } : {}), ...(f.toPg !== undefined ? { toPg: f.toPg } : {}) };
