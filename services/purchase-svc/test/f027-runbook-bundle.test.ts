@@ -346,7 +346,8 @@ describe('F-02-7 C-T28 받는 쪽 서명 묶음(purchase-svc)', () => {
     const malformed = (change: (x: Bundle) => Record<string, unknown>): ControlRequest => {
       const base = suspensionBundle(UUID(18));
       const x = change(structuredClone(base));
-      const bytes = Buffer.from(JSON.stringify(x), 'utf8');
+      // 모양 오류만 보려면 정규화한 바이트에 서명한다. 정규화 검사가 먼저여도 통과하고, 그 뒤 모양 검사가 거부한다
+      const bytes = Buffer.from(canonical(x), 'utf8');
       const desired = (x.requests as Record<string, Record<string, unknown>> | undefined)?.['purchase-svc'] ?? { suspended: true };
       return {
         commandId: x.commandId,
@@ -438,12 +439,12 @@ describe('F-02-7 C-T28 받는 쪽 서명 묶음(purchase-svc)', () => {
     const sigs = signBundle(b, [operatorC, operatorD]);
     const withoutRunbook = { ...(h.deps as unknown as Record<string, unknown>) } as Record<string, unknown>;
     delete withoutRunbook.runbook;
-    await expect(applyControl(requestOf(b, sigs), withoutRunbook as unknown as ControlDeps)).rejects.toMatchObject({ code: 16 });
+    await expect(applyControl(requestOf(b, sigs), withoutRunbook as unknown as ControlDeps)).rejects.toMatchObject({ code: 16, message: expect.stringContaining('bundle-malformed') });
 
     const noKeys = { ...h.deps, runbook: { ...(h.deps as unknown as { runbook: object }).runbook, keys: undefined } } as unknown as ControlDeps;
-    await expect(applyControl(requestOf(b, sigs), noKeys)).rejects.toMatchObject({ code: 16 });
+    await expect(applyControl(requestOf(b, sigs), noKeys)).rejects.toMatchObject({ code: 16, message: expect.stringContaining('bundle-malformed') });
     const emptyKeys = { ...h.deps, runbook: { ...(h.deps as unknown as { runbook: object }).runbook, keys: new Map() } } as unknown as ControlDeps;
-    await expect(applyControl(requestOf(b, sigs), emptyKeys)).rejects.toMatchObject({ code: 16 });
+    await expect(applyControl(requestOf(b, sigs), emptyKeys)).rejects.toMatchObject({ code: 16, message: expect.stringContaining('unknown-key') });
     expect(h.writes()).toBe(0);
     expect(h.events.at(-1)?.reason).toBe('unknown-key');
   });

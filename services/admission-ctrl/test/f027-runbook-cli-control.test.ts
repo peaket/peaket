@@ -275,8 +275,13 @@ describe('F-02-7 런북 CLI 제어 명령', () => {
     expect(h.sent).toHaveLength(0);
     expect(h.lines.join('\n')).toContain('signature-count');
 
-    // 재개 2명은 수용
+    // 재개 2명은 수용하고, 세 서비스가 모두 {paused:false}여야 한다
     expect(await draft(h, 'sale-resume', UUID(10))).toBe(0);
+    expect(read(h).bundle.requests).toEqual({
+      'purchase-svc': { paused: false },
+      'admission-ctrl': { paused: false },
+      'queue-svc': { paused: false },
+    });
     expect(await signAs(h, 'commander-a')).toBe(0);
     expect(await signAs(h, 'commander-b')).toBe(0);
     expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(0);
@@ -285,11 +290,27 @@ describe('F-02-7 런북 CLI 제어 명령', () => {
 
     // 정지 2명은 거부
     expect(await draft(h, 'sale-pause', UUID(11))).toBe(0);
+    expect(read(h).bundle.requests).toEqual({
+      'purchase-svc': { paused: true },
+      'admission-ctrl': { paused: true },
+      'queue-svc': { paused: true },
+    });
     expect(await signAs(h, 'commander-a')).toBe(0);
     expect(await signAs(h, 'commander-b')).toBe(0);
     expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(3);
     expect(h.sent).toHaveLength(3);
     expect(h.lines.join('\n')).toContain('signature-count');
+
+    // 한 서비스만 재개/정지로 갈린 묶음은 모양이 틀려 보내지 않는다
+    expect(await draft(h, 'sale-resume', UUID(13))).toBe(0);
+    const mixed = read(h);
+    mixed.bundle.requests['queue-svc'] = { paused: true };
+    h.files.set('bundle.json', JSON.stringify(mixed));
+    expect(await signAs(h, 'commander-a')).toBe(0);
+    expect(await signAs(h, 'commander-b')).toBe(0);
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(3);
+    expect(h.sent).toHaveLength(3);
+    expect(h.lines.join('\n')).toContain('mismatch');
 
     // 정지 1명은 수용하고 사후 검토 할 일이 남는다
     expect(await draft(h, 'sale-pause', UUID(12))).toBe(0);
@@ -360,6 +381,14 @@ describe('F-02-7 런북 CLI 제어 명령', () => {
     h.files.set('bundle.json', JSON.stringify(wide));
     expect(await signAs(h, 'commander-a')).toBe(0);
     await assertRejected('window');
+
+    // 서명한 뒤 사유를 고친 묶음은 run 전에 bad-signature로 끝난다
+    expect(await draft(h, 'sale-pause', UUID(17))).toBe(0);
+    expect(await signAs(h, 'commander-a')).toBe(0);
+    const tampered = read(h);
+    tampered.bundle.reason = '고친 사유';
+    h.files.set('bundle.json', JSON.stringify(tampered));
+    await assertRejected('bad-signature');
   });
 
   test('[ASVS v5.0.0-16.5.2] 감사 선행·결과 쓰기·부분 실패를 가른다', async () => {
@@ -389,13 +418,14 @@ describe('F-02-7 런북 CLI 제어 명령', () => {
     expect(partialResult.failed).toHaveLength(1);
     expect(partialResult.failed[0]).toMatchObject({ service: 'queue-svc', address: 'queue-svc:50061' });
 
-    const timeout = harness({ sendError: (address) => (address.startsWith('queue-svc') ? { code: 4 } : undefined) });
-    expect(await draft(timeout, 'sale-pause', UUID(17))).toBe(0);
-    expect(await signAs(timeout, 'commander-a')).toBe(0);
-    expect(await runRunbookCli(['run', '--in', 'bundle.json'], timeout.deps)).toBe(4);
-    const timeoutResult = timeout.audits.find((a): a is AuditResult => a.type === 'result')!;
-    expect(['TIMEOUT', 'PARTIAL']).toContain(timeoutResult.outcome);
-    expect(timeoutResult.failed[0]?.service).toBe('queue-svc');
+    // 결과 대기 TIMEOUT이 아니라 보내기 시한(DEADLINE_EXCEEDED)은 PARTIAL·send-deadline이다
+    const sendDeadline = harness({ sendError: (address) => (address.startsWith('queue-svc') ? { code: 4 } : undefined) });
+    expect(await draft(sendDeadline, 'sale-pause', UUID(18))).toBe(0);
+    expect(await signAs(sendDeadline, 'commander-a')).toBe(0);
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], sendDeadline.deps)).toBe(4);
+    const sendDeadlineResult = sendDeadline.audits.find((a): a is AuditResult => a.type === 'result')!;
+    expect(sendDeadlineResult.outcome).toBe('PARTIAL');
+    expect(sendDeadlineResult.failed[0]).toMatchObject({ service: 'queue-svc', reason: expect.stringContaining('send-deadline') });
   });
 
   test('[ASVS v5.0.0-16.5.2] KMS 서명이 실패하면 파일을 바꾸지 않고, prod는 키 없이 뜨지 않는다', async () => {
