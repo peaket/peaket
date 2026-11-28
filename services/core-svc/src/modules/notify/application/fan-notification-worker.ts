@@ -3,6 +3,7 @@
 import type { Clock } from '@peaket/platform';
 import {
   FanNotifyProblem,
+  isAdSendAllowed,
   isNightKst,
   isSmsJobAllowed,
   isSubscriptionNotice,
@@ -47,6 +48,12 @@ export interface FanNotificationWorkerDeps {
   readonly publicOrigin?: string;
   readonly topicKey?: string;
   readonly log?: (line: Record<string, unknown>) => void;
+  /** 보내지 않고 건너뛴 이유(notify_suppressed_total). 시험·운영 지표가 쓴다 */
+  readonly signals?: NotificationWorkerSignals;
+}
+
+export interface NotificationWorkerSignals {
+  suppressed(reason: 'night' | 'quiet_ad' | 'unsubscribed' | 'expired'): void;
 }
 
 export interface WorkerResult {
@@ -116,6 +123,14 @@ export class FanNotificationWorker {
       out.expired += 1;
       return;
     }
+    // 광고는 보내는 순간이 21:00~08:00 KST면 어느 채널로도 보내지 않는다. 다음 낮으로 미루지 않는다(notify §7.3)
+    if (job.kind === 'AD' && !isAdSendAllowed(job.kind, now.getTime())) {
+      await this.d.store.deleteJob(job.dedupKey);
+      out.suppressed += 1;
+      this.d.signals?.suppressed('quiet_ad');
+      this.d.log?.({ kind: 'notify-suppressed', reason: 'quiet_ad', dedupKey: job.dedupKey });
+      return;
+    }
 
     let subscription: NotificationSubscription | undefined;
     const subKind = subscriptionKindOf(job.kind);
@@ -124,11 +139,13 @@ export class FanNotificationWorker {
       if (!subscription || subscription.status !== 'ACTIVE') {
         await this.d.store.deleteJob(job.dedupKey);
         out.suppressed += 1;
+        this.d.signals?.suppressed('unsubscribed');
         return;
       }
       if (job.channel === 'WEB_PUSH' && isNightKst(now.getTime()) && !subscription.nightPush) {
         await this.d.store.deleteJob(job.dedupKey);
         out.suppressed += 1;
+        this.d.signals?.suppressed('night');
         return;
       }
     }
@@ -169,7 +186,7 @@ export class FanNotificationWorker {
         const err = e instanceof MailTransportError ? e : new MailTransportError('RETRYABLE', e instanceof Error ? e.message : 'transport-error');
         if (err.kind === 'PERMANENT') await this.#terminate(job, now, 'DEAD', null, out, 'dead');
         else if (err.kind === 'UNKNOWN' && !needsDubiousRetry(job.kind as FanNoticeKind)) await this.#terminate(job, now, 'FAILED', null, out, 'failed');
-        else await this.#retry(job, now, out, err.message);
+        else await this.#retry(job, now, out, err.message, err.retryAfterMs);
       }
       return;
     }
@@ -202,7 +219,7 @@ export class FanNotificationWorker {
       const err = e instanceof MailTransportError ? e : new MailTransportError('RETRYABLE', e instanceof Error ? e.message : 'transport-error');
       if (err.kind === 'PERMANENT') await this.#terminate(job, now, 'DEAD', null, out, 'dead');
       else if (err.kind === 'UNKNOWN' && !needsDubiousRetry(job.kind as FanNoticeKind)) await this.#terminate(job, now, 'FAILED', null, out, 'failed');
-      else await this.#retry(job, now, out, err.message);
+      else await this.#retry(job, now, out, err.message, err.retryAfterMs);
     }
   }
 
@@ -283,17 +300,18 @@ export class FanNotificationWorker {
       const err = e instanceof SmsTransportError ? e : new SmsTransportError(smsFailureKind(e), e instanceof Error ? e.message : 'transport-error');
       if (err.kind === 'PERMANENT') await this.#terminate(job, now, 'DEAD', null, out, 'dead');
       else if (err.kind === 'UNKNOWN' && !needsDubiousRetry(job.kind as FanNoticeKind)) await this.#terminate(job, now, 'FAILED', null, out, 'failed');
-      else await this.#retry(job, now, out, err.message);
+      else await this.#retry(job, now, out, err.message, err.retryAfterMs);
     }
   }
 
-  async #retry(job: NotificationJob, now: Date, out: WorkerResult, reason: string): Promise<void> {
+  async #retry(job: NotificationJob, now: Date, out: WorkerResult, reason: string, retryAfterMs?: number): Promise<void> {
     const attempt = job.attempts + 1;
     if (attempt >= NOTIFY_MAX_ATTEMPTS) {
       await this.#terminate(job, now, 'DEAD', null, out, 'dead');
       return;
     }
-    const next = new Date(now.getTime() + notificationRetryDelayMs(attempt));
+    const delay = Math.max(notificationRetryDelayMs(attempt), retryAfterMs ?? 0);
+    const next = new Date(now.getTime() + delay);
     if (next.getTime() >= job.expiresAt.getTime()) {
       await this.#terminate(job, now, 'EXPIRED', null, out, 'expired');
       return;

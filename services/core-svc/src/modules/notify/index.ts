@@ -101,3 +101,26 @@ export { FileSmsTransport } from './adapters/file-sms-transport.js';
 export { MemoryAbsorbedNoticeInbox } from './application/absorbed-notices.js';
 export { HttpsPushTransport } from './adapters/https-push-transport.js';
 export { GrpcRecipientDirectory } from './adapters/grpc-recipient-directory.js';
+export { ProviderEvents, ProviderEventsMetrics, NotifyWorkerMetrics, type ProviderEventsWiring, type ProviderEventSignals } from './application/provider-events.js';
+export { ProviderEventsController } from './inbound/provider-events.controller.js';
+export {
+  PROVIDER_EVENTS_METRIC,
+  PROVIDER_EVENTS_LABELS,
+  PROVIDER_REJECTED_METRIC,
+  PROVIDER_REJECTED_LABELS,
+  ProviderWebhookError,
+  type ProviderEventKind,
+  type ProviderEvent,
+} from './domain/provider-webhook.js';
+export {
+  mailProviderConfigFromEnv,
+  smsProviderConfigFromEnv,
+  mailTransportFromEnv,
+  smsTransportFromEnv,
+  providerConfigSummary,
+  redactProviderText,
+  vapidFromEnv,
+} from './adapters/config.js';
+export { SesMailTransport } from './adapters/ses-mail-transport.js';
+export { SolapiSmsTransport } from './adapters/solapi-sms-transport.js';
+export { RefillingRateLimiter } from './adapters/rate-limit.js';

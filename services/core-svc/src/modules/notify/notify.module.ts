@@ -1,7 +1,7 @@
 // notify 모듈 조립. 웹훅 관리·발송기와 BAT-455 팬 알림(신청·푸시 구독·원장·워커)을 싣는다.
 // 주기 실행은 main의 WebhookWorker·FanNotificationWorker가 맡는다.
 import { type DynamicModule, Module, type Provider } from '@nestjs/common';
-import { type Clock, type Database, CLOCK, INTERNAL_TOKEN } from '@peaket/platform';
+import { type Clock, type Database, CLOCK, INTERNAL_TOKEN, createExternalHttpClient, isProductionLikeEnv } from '@peaket/platform';
 import { dnsLookup } from './adapters/dns-lookup.js';
 import { Webhooks } from './application/webhooks.js';
 import { WebhookDispatcher } from './application/dispatcher.js';
@@ -24,14 +24,15 @@ import { DrizzleFanNotifyStore } from './adapters/db/drizzle-fan-notify-store.js
 import { MemoryNotificationEventDirectory } from './adapters/memory-event-directory.js';
 import { DrizzleNotificationEventDirectory } from './adapters/db/drizzle-event-directory.js';
 import { FakeMailTransport, FakePushTransport, FakeSmsTransport, unavailableMail, unavailablePush, unavailableSms } from './adapters/fake-transports.js';
-import { mailTransportFromEnv } from './adapters/file-mail-transport.js';
 import { pushTransportFromEnv } from './adapters/file-push-transport.js';
-import { smsTransportFromEnv } from './adapters/file-sms-transport.js';
 import { MemoryAbsorbedNoticeInbox } from './application/absorbed-notices.js';
 import { HttpsPushTransport } from './adapters/https-push-transport.js';
 import { GrpcRecipientDirectory, unavailableRecipients } from './adapters/grpc-recipient-directory.js';
-import { optOutKeyFromEnv, publicOriginFromEnv, topicKeyFromEnv, vapidFromEnv } from './adapters/config.js';
+import { mailProviderConfigFromEnv, mailTransportFromEnv, optOutKeyFromEnv, publicOriginFromEnv, smsProviderConfigFromEnv, smsTransportFromEnv, topicKeyFromEnv, vapidFromEnv } from './adapters/config.js';
+import { NotifyWorkerMetrics, ProviderEvents, ProviderEventsMetrics, type ProviderEventsWiring } from './application/provider-events.js';
+import { ProviderEventsController } from './inbound/provider-events.controller.js';
 import type { AbsorbedNoticeInbox, FanNotifyStore, MailTransport, NotificationEventDirectory, PushLookup, PushTransport, RecipientDirectory, SmsTransport, VapidConfig } from './domain/fan-notify-ports.js';
+import type { NotificationWorkerSignals } from './application/fan-notification-worker.js';
 import { MemoryCatalogRepository } from '../catalog/index.js';
 
 export const NOTIFY_PARTNER_DATABASE = Symbol.for('peaket.notify.partner-database');
@@ -40,6 +41,7 @@ export const FAN_NOTIFY_STORE = Symbol.for('peaket.notify.fan-store');
 export const FAN_NOTIFY_SENDER_STORE = Symbol.for('peaket.notify.fan-sender-store');
 export const FAN_NOTIFY_EVENTS = Symbol.for('peaket.notify.fan-events');
 export const FAN_NOTIFY_MAIL = Symbol.for('peaket.notify.mail');
+export const FAN_NOTIFY_SMS = Symbol.for('peaket.notify.sms');
 export const FAN_NOTIFY_PUSH = Symbol.for('peaket.notify.push');
 export const FAN_NOTIFY_RECIPIENTS = Symbol.for('peaket.notify.recipients');
 export const FAN_NOTIFY_OPTOUT_KEY = Symbol.for('peaket.notify.optout-key');
@@ -59,10 +61,18 @@ export interface FanNotifyWiring {
   vapid?: VapidConfig;
   publicOrigin?: string;
   topicKey?: string;
+  providerEvents?: ProviderEventsWiring;
+  signals?: NotificationWorkerSignals;
 }
 
 export function fanNotifyProviders(o: { storage: 'memory' | 'database'; wiring?: FanNotifyWiring; env: Record<string, string | undefined>; appDatabase?: Database; senderDatabase?: Database; catalog?: MemoryCatalogRepository }): { providers: Provider[]; store: FanNotifyStore } {
   const env = o.env;
+  // 운영은 provider·SES·Solapi·VAPID 필수 값이 없으면 여기서 던져 listen() 전에 멈춘다
+  if (isProductionLikeEnv(env)) {
+    mailProviderConfigFromEnv(env);
+    smsProviderConfigFromEnv(env);
+    vapidFromEnv(env);
+  }
   const store = o.storage === 'memory' ? (o.wiring?.store ?? new MemoryFanNotifyStore()) : new DrizzleFanNotifyStore(o.appDatabase!);
   const senderStore = o.storage === 'memory' ? store : new DrizzleFanNotifyStore(o.senderDatabase!);
   const events = o.storage === 'memory' ? (o.wiring?.events ?? new MemoryNotificationEventDirectory(o.catalog ?? new MemoryCatalogRepository())) : new DrizzleNotificationEventDirectory(o.appDatabase!);
@@ -74,16 +84,27 @@ export function fanNotifyProviders(o: { storage: 'memory' | 'database'; wiring?:
   const optOutKey = o.wiring?.optOutKey ?? optOutKeyFromEnv(env);
   const vapid = o.wiring?.vapid ?? vapidFromEnv(env);
   const lookup = o.wiring?.lookup ?? dnsLookup;
+  const providerEventsMetrics = new ProviderEventsMetrics();
+  const workerMetrics = new NotifyWorkerMetrics();
+  const providerEvents = new ProviderEvents({
+    wiring: o.wiring?.providerEvents ?? providerEventsWiringFromEnv(env),
+    signals: providerEventsMetrics,
+    log: (line) => console.log(JSON.stringify(line)),
+  });
   const providers: Provider[] = [
     { provide: FAN_NOTIFY_STORE, useValue: store },
     { provide: FAN_NOTIFY_SENDER_STORE, useValue: senderStore },
     { provide: FAN_NOTIFY_EVENTS, useValue: events },
     { provide: FAN_NOTIFY_MAIL, useValue: mail },
+    { provide: FAN_NOTIFY_SMS, useValue: sms },
     { provide: FAN_NOTIFY_PUSH, useValue: push },
     { provide: FAN_NOTIFY_RECIPIENTS, useValue: recipients },
     { provide: FAN_NOTIFY_OPTOUT_KEY, useValue: optOutKey },
     { provide: FAN_NOTIFY_LOOKUP, useValue: lookup },
-    ...(vapid ? [{ provide: FAN_NOTIFY_VAPID, useValue: vapid }] : []),
+    { provide: FAN_NOTIFY_VAPID, useValue: vapid },
+    { provide: ProviderEvents, useValue: providerEvents },
+    { provide: ProviderEventsMetrics, useValue: providerEventsMetrics },
+    { provide: NotifyWorkerMetrics, useValue: workerMetrics },
     {
       provide: FanSubscriptions,
       useFactory: (s: FanNotifyStore, e: NotificationEventDirectory, c: Clock) => new FanSubscriptions({ store: s, events: e, clock: c }),
@@ -99,11 +120,34 @@ export function fanNotifyProviders(o: { storage: 'memory' | 'database'; wiring?:
     {
       provide: FanNotificationWorker,
       useFactory: (s: FanNotifyStore, m: MailTransport, p: PushTransport, r: RecipientDirectory, c: Clock, k: string, v?: VapidConfig) =>
-        new FanNotificationWorker({ store: s, mail: m, push: p, sms, recipients: r, clock: c, optOutKey: k, absorbedNotices, ...(v ? { vapid: v } : {}), publicOrigin: o.wiring?.publicOrigin ?? publicOriginFromEnv(env), topicKey: o.wiring?.topicKey ?? topicKeyFromEnv(env, k), log: (line) => console.log(JSON.stringify(line)) }),
+        new FanNotificationWorker({ store: s, mail: m, push: p, sms, recipients: r, clock: c, optOutKey: k, absorbedNotices, ...(v ? { vapid: v } : {}), publicOrigin: o.wiring?.publicOrigin ?? publicOriginFromEnv(env), topicKey: o.wiring?.topicKey ?? topicKeyFromEnv(env, k), signals: o.wiring?.signals ?? workerMetrics, log: (line) => console.log(JSON.stringify(line)) }),
       inject: [FAN_NOTIFY_SENDER_STORE, FAN_NOTIFY_MAIL, FAN_NOTIFY_PUSH, FAN_NOTIFY_RECIPIENTS, CLOCK, FAN_NOTIFY_OPTOUT_KEY, { token: FAN_NOTIFY_VAPID, optional: true }],
     },
   ];
   return { providers, store };
+}
+
+/** 설정이 있으면 대행사 웹훅 수신기를 조립한다. 없으면 두 경로 모두 403이다 */
+function providerEventsWiringFromEnv(env: Record<string, string | undefined>): ProviderEventsWiring {
+  const mail = mailProviderConfigFromEnv(env);
+  const sms = smsProviderConfigFromEnv(env);
+  const ses = mail.kind === 'ses'
+    ? {
+        allowedTopicArn: mail.snsTopicArn,
+        certHost: `sns.${mail.region}.amazonaws.com`,
+        certResolver: async (url: string) => {
+          const cert = new URL(url);
+          const client = createExternalHttpClient({ provider: 'sns-cert', baseUrl: cert.origin, timeoutCapMs: 5_000 });
+          const res = await client.request({ method: 'GET', path: cert.pathname });
+          if (!res.ok) throw new Error(`SNS 인증서 응답 ${res.status}`);
+          const body = await res.text();
+          if (body.length > 64 * 1024) throw new Error('SNS 인증서가 너무 큽니다');
+          return body;
+        },
+      }
+    : undefined;
+  const smsCfg = sms.kind === 'solapi' ? { secret: sms.webhookSecret } : undefined;
+  return { ...(ses ? { ses } : {}), ...(smsCfg ? { sms: smsCfg } : {}) };
 }
 
 @Module({})
@@ -151,7 +195,7 @@ export class NotifyModule {
       },
       ...fan.providers,
     ];
-    const controllers = [PartnerWebhookController, InternalWebhookEventController, InternalNotifyController, FanNotifyController, InternalNotifyIdentityController, InternalNotifyTicketController];
+    const controllers = [PartnerWebhookController, InternalWebhookEventController, InternalNotifyController, FanNotifyController, InternalNotifyIdentityController, InternalNotifyTicketController, ProviderEventsController];
     if (o.storage === 'database') {
       return {
         module: NotifyModule,

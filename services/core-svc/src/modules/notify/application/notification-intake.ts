@@ -2,6 +2,7 @@
 // 사건을 받은 트랜잭션에서 중복 키를 먼저 넣고, 들어갔을 때만 작업을 적는다(ADR-0109).
 import type { Clock } from '@peaket/platform';
 import {
+  ALIMTALK_ALLOWED_KINDS,
   assertVars,
   FAN_NOTICE_KINDS,
   FanNotifyProblem,
@@ -194,6 +195,8 @@ export class NotificationIntake {
     if (!['EMAIL', 'WEB_PUSH', 'ALIMTALK', 'SMS'].includes(i.channel)) throw new FanNotifyProblem('INVALID', '알 수 없는 채널입니다');
     // 문자는 d5 §9.1의 월렛·키 미등록과 웹 푸시 실패 대체뿐이다. 나머지는 '문자'가 들어간 오류로 거절한다
     if (i.channel === 'SMS' && !SMS_ALLOWED_KINDS.has(i.kind)) throw new FanNotifyProblem('INVALID', `문자(SMS)로 보낼 수 없는 알림 종류입니다: ${i.kind}`);
+    // 알림톡은 d5 §9.1의 거래·안전·월렛 안내뿐이다. 광고는 알림톡으로 만들지 않는다(템플릿 심사 전 worker 연결도 미실행)
+    if (i.channel === 'ALIMTALK' && !ALIMTALK_ALLOWED_KINDS.has(i.kind)) throw new FanNotifyProblem('INVALID', `알림톡으로 보낼 수 없는 알림 종류입니다: ${i.kind}`);
     return this.enqueue({
       kind: i.kind,
       targetId: i.targetId,

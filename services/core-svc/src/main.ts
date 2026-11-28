@@ -46,7 +46,7 @@ import {
   UnavailableReviewEligibility,
   UnavailableFanProfile,
 } from './modules/review/index.js';
-import { DrizzleWebhookStore, FanNotificationWorker, HttpsWebhookTransport, mergeNoticeHandlers, mergeNoticeServiceDefinition, NotificationIntake, NotifyEventHandler, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
+import { DrizzleWebhookStore, FanNotificationWorker, HttpsWebhookTransport, mergeNoticeHandlers, mergeNoticeServiceDefinition, NotificationIntake, NotifyEventHandler, NotifyWorkerMetrics, ProviderEventsMetrics, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
 import { GrpcHeldTickets, GrpcMerchPayments, RedisMerchStock, type ShopLogger, ShopSignals, closedShopReauthGate, shopReauthGateFromEnv, unavailableHeldTickets, unavailableMerchPayments, unavailableMerchStock } from './modules/shop/index.js';
 
 const SERVICE = 'core-svc';
@@ -233,6 +233,8 @@ const service = await createService({
 serviceLogger = service.logger;
 shopSignals.register(service.metrics.registry);
 saleConfigMetrics.register(service.metrics.registry);
+service.app.get(ProviderEventsMetrics).register(service.metrics.registry);
+service.app.get(NotifyWorkerMetrics).register(service.metrics.registry);
 if (eligibilityCopy instanceof UnwiredSaleEligibilityCopy) eligibilityCopy.register(service.metrics.registry);
 eligibilityMetrics.register(service.metrics.registry);
 // 검색 전용 연결 묶음의 대기 수(게이지 search_pool_waiting, SR-T13 ①). 기본 core_app 묶음이 아니라 검색 묶음을 넘긴다

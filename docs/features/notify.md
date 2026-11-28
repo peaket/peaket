@@ -217,8 +217,11 @@ stateDiagram-v2
 - 보내는 주소는 알림 전용 하위 도메인(예: `no-reply@notify.peaket.example`)이고 SPF·DKIM·DMARC를 둔다(docs/design/d5 §9.1.1).
 - 받는 쪽 메일 서비스의 한도: Gmail은 하루 5,000통 넘게 보내는 발신자에게 SPF·DKIM·DMARC, 스팸 신고율 0.3% 미만, 마케팅·구독 메시지의 한 번 누름 수신 거부(RFC 8058)를 요구한다. 또 일정한 속도로 보내고 갑자기 몰아 보내지 말며, 한도를 넘어 4.7.28 오류를 받으면 10분 이상 쉬라고 한다(Google 발신자 안내 2026-10-30 확인). 그래서 대량 이메일은 몇 시간 창에 고르게 보내고(§5.2), 신청 알림 이메일에 한 번 누름 수신 거부를 둔다(§7.4). 네이버·다음 메일의 한도는 [확인 필요]다.
 - 참고로 같은 AWS 안의 Amazon SES는 샌드박스에서 하루 200통·초당 1통이고, 운영으로 옮기면 쓰임새에 따라 한도가 정해지며 요청해 올릴 수 있다. 또 갑작스러운 몰림이 받는 쪽의 차단을 부르지 않게 한도를 단계적으로 올린다고 적는다(AWS 문서 2026-10-30 확인). 대행사를 고를 때의 비교 자료이고, SES로 정한 것은 아니다.
+- **F-06-6 동결 로컬 구현(2026-11-28)**: 이메일 운영 어댑터 `SesMailTransport`를 넣었다. IAM 역할(Pod Identity)로 `ses:SendEmail`만 쓰고 정적 키를 두지 않는다. `PEAKET_NOTIFY_MAIL_PROVIDER=ses`와 `PEAKET_SES_REGION=ap-northeast-2`·`PEAKET_NOTIFY_MAIL_FROM`·`PEAKET_NOTIFY_MAIL_FROM_DOMAIN`·`PEAKET_SES_CONFIGURATION_SET`·`PEAKET_SES_SNS_TOPIC_ARN`·`PEAKET_NOTIFY_MAIL_RATE_PER_SEC`가 staging·prod 필수이고, 없거나 틀리면 시작 전에 실패한다. 발신 주소는 발신 도메인과 맞아야 하고, 본문은 평문, 머리는 `List-Unsubscribe`·`List-Unsubscribe-Post`만, 태그는 `peaket-dedup`(SHA-256 43자) 하나만 보낸다. 400은 `PERMANENT`, 401·403·404·409·429·5xx·시간 초과는 `RETRYABLE`, 300·418은 `UNKNOWN`이고 `Retry-After`를 `retryAfterMs`로 읽는다. SDK 자체 재시도는 끄고(`maxAttempts: 1`) 원장 재시도 하나만 쓴다. 실제 SES 계정·production access·도메인 검증·키는 소유자 몫이라 발송은 **미실행**이다.
 
 **알림톡·문자**: 발송 대행 계약 뒤에 켜고, 그 전에는 이메일과 웹 푸시로만 보낸다(ADR-0060 결정 13). 신청 알림에는 쓰지 않는다(docs/design/d5 §9.1.1). 쓰는 곳은 §8이다.
+
+- **F-06-6 동결 로컬 구현(2026-11-28)**: 문자 운영 어댑터 `SolapiSmsTransport`를 넣었다. HMAC 인증, 발신번호(숫자만), 문자 본문, 알림톡 `pfId`·템플릿 ID·허용 변수 payload, `Retry-After`, 초당 한도를 담당한다. staging·prod는 `PEAKET_NOTIFY_SMS_PROVIDER`·`PEAKET_NOTIFY_ALIMTALK_PROVIDER`를 `solapi` 또는 `off`로 명시해야 하고, `solapi`면 `PEAKET_SOLAPI_API_KEY`·`PEAKET_SOLAPI_API_SECRET`·`PEAKET_SOLAPI_SENDER_NUMBER`·`PEAKET_NOTIFY_SMS_RATE_PER_SEC`·`PEAKET_NOTIFY_SMS_WEBHOOK_SECRET`, 알림톡이면 `PEAKET_SOLAPI_ALIMTALK_PF_ID`·`PEAKET_NOTIFY_ALIMTALK_TEMPLATES`가 필수다. **알림톡 worker 연결은 템플릿 심사 전이라 미실행**이고, 문자(SMS)만 worker에 연결한다. 실제 Solapi 계정·발신번호 등록·채널·템플릿은 소유자 몫이라 발송은 **미실행**이다.
 
 ### 4.5 부정 예매 소명·조치 알림(추천 적용 2026-10-31, ADR-0171, FRN-070)
 
@@ -259,6 +262,7 @@ stateDiagram-v2
 - **I-T34·POL-034**: 내부 입구 `POST /internal/v1/notify/identity-events`가 `LOGIN_METHOD_CHANGED`를 받아 이메일·웹 푸시 작업을 한 번 적고, `ACCOUNT_MERGED`를 받아 흡수 계정의 신청·구독을 대표 계정으로 옮긴다(겹치면 하나, 보낸 횟수는 큰 쪽). 대표 계정에 완료 통지를 적는다. 흡수 계정 이메일은 identity가 병합 트랜잭션 안에서 core.proto `MergeNoticeService.SendAbsorbedNotice`로 한 번 넘기고, notify는 `ACCOUNT_MERGED_ABSORBED` 작업과 프로세스 메모리 inbox로 보낸다(2026-11-28 소유자 결정, §16).
 - **F-06-1 동결 로컬 구현(2026-11-28)**: notify Kafka 소비자 그룹이 `identity.accounts-withdrawn`에 더해 `identity.accounts-merged`·`identity.login-methods-changed`·`trade.orders`를 읽고, `orderId`/`mergeId`/`accountId` 업무 키로 인테이크를 부른다. 문자는 d5 §9.1의 `WALLET_OPEN_REMINDER`(월렛·키 미등록)와 웹 푸시 실패 뒤 `smsFallback` 대체만 `[피켓]` 머리로 보내며, 429·5xx 재시도·400 DEAD·결과 모름·2,000자 상한을 따른다. identity `BatchGetRecipients`는 `include_phone`일 때만 전화번호를 준다.
 - **남은 것**: 운영 메일 대행 계약과 `PEAKET_VAPID_PRIVATE_KEY`·`PEAKET_VAPID_PUBLIC_KEY`(OPEN[10]), 문자·알림톡 대행, 대량 발송 조각 원장(§4.2). 흡수 계정 주소는 프로세스 메모리에만 있어 gRPC를 받은 파드와 워커 파드가 다르면 `FAILED`다(운영 전 대책은 F-06-6·소유자).
+- **F-06-6 동결 로컬 구현(2026-11-28)**: `SesMailTransport`·`SolapiSmsTransport`·`ProviderEventsController`/`ProviderEvents`·`domain/provider-webhook.ts`·`redactProviderText`·설정 fail-closed·`Retry-After`·광고 밤 경계를 넣었다. staging·prod는 `PEAKET_NOTIFY_MAIL_PROVIDER`·`PEAKET_NOTIFY_SMS_PROVIDER`·`PEAKET_NOTIFY_ALIMTALK_PROVIDER`와 SES·Solapi·VAPID 필수 값이 없으면 `listen()` 전에 실패한다. `NODE_ENV=production`도 운영이다. 대행사 웹훅은 `POST /internal/v1/notify/provider-events/ses`(SNS 서명·토픽·인증서·timestamp)와 `/sms`(base64url 바이트 키 HMAC)이고, 받으면 202, 서명 불일치 401, 그 밖 거절 403이다. 지표는 `notify_provider_events_total{provider,kind,result}`·`notify_provider_webhook_rejected_total{provider,reason}`·`notify_suppressed_total{reason}`이다. **실제 SES·Solapi·VAPID 운영 키와 대행사 발송은 미실행**이고, 알림톡 worker 연결도 템플릿 심사 전이라 미실행이다.
 
 ### 4.7 입장 키 알림(추천 적용 2026-11-23, ADR-0363 결정 4, BUILD_ORDER GAT-020)
 
@@ -452,6 +456,8 @@ T는 오픈 시각(`open_at`), L은 로비 개방 리드(기본 10분, 회차 �
 | 알림톡·문자 지연·거절·한도 초과(대행 계약 뒤, 추천 적용 2026-11-03, ADR-0180) | 대행사 한도·장애 | 이메일 행처럼 쓸모 기한 안에서 지수 간격으로 다시 보낸다. 계약 전에는 이 채널로 보내지 않는다(§4.4) |
 | 어느 채널이든 끝내 실패(DEAD)하거나 늦어짐(추천 적용 2026-11-03, ADR-0180) | — | 알림 실패는 예매·결제·발권을 되돌리지 않는다. 알림은 예매 확정 사건을 받아 뒤에서 보내는 일이라, 그때 예매는 이미 끝났다. 예매 완료 알림은 확정 뒤 5분 [가정] 안에 가면 된다(§11의 낱건 발송 밀림 경보와 같은 값). 팬은 확정 화면과 마이 티켓(SCR-013)에서 결과를 바로 본다. DEAD는 1건이면 SEV3다(§11) |
 
+- **F-06-6(2026-11-28)**: 대행사가 `Retry-After`를 주면 `MailTransportError`·`SmsTransportError`의 `retryAfterMs`에 실어, 워커가 `max(정본 재시도 간격, retryAfterMs)`로 다음 시각을 잡는다. 그 시각이 `expiresAt`을 넘으면 `EXPIRED`다. 대행사 SDK/HTTP 클라이언트의 자체 재시도는 끄고 원장 하나만 쓴다.
+
 ## 11. 관측 지표·경보
 
 docs/architecture.md §8.4의 운영 확인 계측 표다. SLI는 실제로 재는 서비스 품질 값이고, 히스토그램은 값을 구간별로 나눠 센 분포 지표, 카나리 비교는 새 버전을 일부 요청에만 먼저 보내 안정판과 견주는 배포 단계의 확인이다. 지표 라벨에는 계정·주문·구독 주소를 쓰지 않는다(docs/observability.md §8). `event_id`는 진행 중인 온세일 회차에만 붙인다.
@@ -467,6 +473,7 @@ docs/architecture.md §8.4의 운영 확인 계측 표다. SLI는 실제로 재�
 | 파트너 웹훅이 간다 | `webhook_delivery` 상태별 수, `webhook_endpoint_failing`(계속 실패하는 엔드포인트 수) | 없다 | 발송 원장 | DEAD 1건이면 SEV3(ADR-0078), 서명 비밀을 읽지 못하면 SEV3 | V-T24·V-T34 |
 
 - 공연 리포트(R1)에 오픈 알림 발송 합계(단계별 대상·보냄·건너뜀·만료), 푸시 서비스별 429 비율, ③ 창 안 초당 발송 수를 남긴다. 바깥 한도의 [추정]을 실제 값으로 바꾸는 근거다.
+- **대행사 결과 웹훅(F-06-6, 2026-11-28)**: `notify_provider_events_total{provider,kind,result}`(받은 사건)와 `notify_provider_webhook_rejected_total{provider,reason}`(거절)를 둔다. 라벨 값은 provider(ses·solapi)·kind(BOUNCE·COMPLAINT·DELIVERY·SMS_DELIVERED·SMS_FAILED)·result(accepted·ignored)·reason(서명·토픽·인증서·시각·모양·상한·구독 확인)뿐이고 계정·주소·전화번호·메시지 ID를 쓰지 않는다. 연속 거절은 SEV3 후보이고, 반송·스팸 신고를 신청 삭제로 잇는 일은 `notification_delivery.provider_message_id` 조회 인덱스가 필요해 F-06-9·소유자 몫으로 남긴다.
 
 ## 12. 데이터·보존·개인정보
 
@@ -481,7 +488,7 @@ docs/architecture.md §8.4의 운영 확인 계측 표다. SLI는 실제로 재�
 
 - **알림 문구 변수 규칙**(추천 적용 2026-10-30): `notification_job.vars`에는 그 알림 종류의 허용 목록 스키마에 있는 값만 넣는다. 넣을 수 있는 것은 대상 ID와 화면에 보일 공개 값(공연명, 회차 일시, 좌석 등급, 금액, 예매번호 끝 4자리, 기한)이다. 이름·이메일·전화번호·주소·계좌번호·연계정보·pid·예매번호 전체·좌석 번호·문의 본문은 넣지 않는다. 작업을 만들 때 스키마 검사(Zod)가 모르는 키를 거부하고, 값 안의 이메일·전화번호 꼴(docs/features/search.md §11과 같은 패턴)을 찾으면 그 작업을 만들지 않고 오류로 센다. 받는 주소·전화번호는 보낼 때 identity에서 읽는다. 변수는 1KB [가정]까지다. 대량 발송은 변수를 조각에 두지 않고 보낼 때 카탈로그에서 읽는다.
 - **웹 푸시와 국외 이전**: 구독 주소·암호화한 본문·TTL·긴급도·Topic 머리·보낸 시각과 길이가 이용자 브라우저 회사의 푸시 서비스(주로 미국)로 간다(data-classification 국외 이전 목록 국-09). 국외 이전인지는 법률 확인 필요이고, 그 전까지 처리방침에 보수적으로 공개한다(ADR-0139 결정 6). Topic은 HMAC 값, 본문은 RFC 8291 암호화, VAPID `sub`는 팀 메일이다.
-- **이메일 대행**: 대행사를 정하면 처리 위탁 수탁자 목록과 국외 재이전 여부를 처리방침에 적는다(ADR-0139 결정 9·10).
+- **이메일 대행**: 대행사를 정하면 처리 위탁 수탁자 목록과 국외 재이전 여부를 처리방침에 적는다(ADR-0139 결정 9·10). F-06-6은 SES를 `ap-northeast-2`(서울)로 고정했고, 다른 리전은 staging·prod 시작 실패다. Solapi는 국내 사업자로 계약하되 재위탁·보관 위치를 계약 때 확인해 목록에 적는다([확인 필요]). 실제 계약 전에는 처리방침에 확정 수탁자로 적지 않는다.
 - **수요 예측**: 회차별 구독 수만 넘기고 계정은 넘기지 않는다(ADR-0078).
 - **로그**: 구독 주소, 이메일 주소, 수신 거부 토큰은 로그·요청 기록에 남기지 않는다. 남는 것은 계정 ID와 회차 ID, 경로 템플릿이다.
 
@@ -551,7 +558,7 @@ docs/verification.md의 V-T36(알림 규칙)을 여기 N-T1~N-T5로 옮겼다. �
 - 취소표 알림은 좌석 몇 개에 많은 사람이 받는다. 받은 사람은 대기열 맨 뒤에 선다.
 - 푸시 서비스와 메일 서비스의 실제 한도는 문서에 없거나(Apple·Mozilla·Microsoft의 전체 한도) 우리 방식에 걸리는지 모른다(FCM). 처음 크게 보낼 때 429가 많으면 ③이 창보다 늦어질 수 있다.
 - 첫 대형 공연 전에 메일 발송량을 늘려 두지 않으면 메일 서비스가 늦추거나 스팸으로 분류할 수 있다.
-- 이메일 대행사·알림톡·문자 대행사가 정해지지 않아 결과 조회·반송 처리·한도는 조건으로만 적었다. BAT-455는 포트와 local·ci 파일 대역까지 했고, 운영 대행 어댑터·계정·VAPID 운영 키는 밖에서 막힌다.
+- 이메일 대행사·알림톡·문자 대행사가 정해지지 않아 결과 조회·반송 처리·한도는 조건으로만 적었다. BAT-455는 포트와 local·ci 파일 대역까지 했고, F-06-6이 SES·Solapi 어댑터·설정 fail-closed·대행사 웹훅 수신기까지 동결 로컬로 넣었다. **실제 계정·운영 키·발송·알림톡 worker 연결은 미실행**이다. 반송·스팸 신고로 신청을 지우는 일은 원장 조회 인덱스가 필요해 F-06-9·소유자 몫으로 남는다.
 - POL-034 흡수 계정 이메일은 identity가 병합 트랜잭션 안에서 core.proto `MergeNoticeService.SendAbsorbedNotice` 요청에만 실어 한 번 넘긴다. identity는 주소를 저장하지 않고, notify는 프로세스 메모리 inbox에 둔 주소로 `ACCOUNT_MERGED_ABSORBED`를 보낸다. gRPC를 받은 파드와 워커 파드가 다르거나 프로세스가 다시 뜨면 주소가 없어 `FAILED`다(운영 전 대책은 F-06-6·소유자).
 - 신청 알림의 대량 발송 조각 원장(§4.2)은 이 묶음 밖이다. Kafka 소비자 그룹은 `identity.accounts-withdrawn`·`identity.accounts-merged`·`identity.login-methods-changed`·`trade.orders`를 읽고, local·ci는 내부 입구 `POST /internal/v1/notify/identity-events`·`POST /internal/v1/notify/trade-events`도 남긴다.
 - 수치(창, 비율, 조각 크기, 체크포인트, 한도, 경보 기준)는 재지 않은 가정이다.

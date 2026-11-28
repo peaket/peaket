@@ -31,6 +31,8 @@ export const SUBSCRIPTION_LIMIT = 200;
 export const PUSH_SUBSCRIPTION_LIMIT = 10;
 export const NOTIFY_LEASE_MS = 120_000;
 export const NOTIFY_MAX_ATTEMPTS = 6;
+/** 21:00~08:00 KST에 광고를 보내지 못하게 막은 수(notify §11) */
+export const NOTIFY_SUPPRESSED_METRIC = 'notify_suppressed_total';
 /** 이메일·푸시 재시도 간격(1분·5분·30분·2시간·6시간·12시간 [가정], notify §10) */
 const RETRY_DELAYS_MS = [60_000, 300_000, 1_800_000, 7_200_000, 21_600_000, 43_200_000] as const;
 export const notificationRetryDelayMs = (attempt: number): number => RETRY_DELAYS_MS[Math.max(0, Math.min(RETRY_DELAYS_MS.length - 1, attempt - 1))]!;
@@ -53,6 +55,14 @@ export const nightSkipsWebPush = (kind: FanNoticeKind): boolean => kind !== 'AD'
 
 /** 문자로 바로 보내는 종류(d5 §9.1 4144: 공연 전날·당일 아침 월렛, 입장 24시간 전 키 미등록) */
 export const SMS_ALLOWED_KINDS: ReadonlySet<FanNoticeKind> = new Set(['WALLET_OPEN_REMINDER']);
+/** 알림톡으로 보낼 수 있는 종류(d5 §9.1). 광고는 넣지 않는다. worker 연결은 템플릿 심사 전이라 미실행이다 */
+export const ALIMTALK_ALLOWED_KINDS: ReadonlySet<FanNoticeKind> = new Set([
+  'WALLET_OPEN_REMINDER',
+  'EVENT_CANCELLATION_CONFIRMED',
+  'EVENT_POSTPONED',
+  'REFUNDED',
+  'REFUND_FAILED',
+]);
 /** 웹 푸시가 주 채널인 거래·안전 알림. 웹 푸시가 끝내 실패하면 문자 대체를 허용한다(d5 §9.1 4217) */
 export const WEB_PUSH_PRIMARY_KINDS: ReadonlySet<FanNoticeKind> = new Set(['LOGIN_METHOD_LINKED', 'LOGIN_METHOD_UNLINKED', 'ACCOUNT_MERGED']);
 export const SMS_MAX_CHARS = 2_000;
@@ -170,6 +180,15 @@ export function assertVars(kind: FanNoticeKind, vars: Vars | undefined): Vars {
     if (/[\u0000-\u001f\u007f]/.test(value)) throw bad('알림 문구 변수에 제어 문자가 있습니다');
   }
   if (Buffer.byteLength(JSON.stringify(v), 'utf8') > VARS_MAX_BYTES) throw bad('알림 문구 변수가 1KB를 넘습니다');
+  if (kind === 'AD') {
+    // 정보통신망법 §50④: 전송자 명칭·연락처·수신 거부 방법과 광고 표시. https 수신 거부만 받는다
+    for (const key of ['sender', 'contact', 'unsubscribeUrl'] as const) {
+      if (typeof v[key] !== 'string' || v[key].trim() === '') throw bad(`광고 문안에는 ${key}가 필요합니다`);
+    }
+    if (!(v.unsubscribeUrl as string).startsWith('https://')) throw bad('광고 수신 거부 주소는 https여야 합니다');
+    const text = `${typeof v.title === 'string' ? v.title : ''}\n${typeof v.body === 'string' ? v.body : ''}`;
+    if (!text.includes('(광고)')) throw bad('광고 문안에는 (광고) 표시가 필요합니다');
+  }
   return v;
 }
 
@@ -246,6 +265,11 @@ function kstMinuteText(iso: string | undefined): string {
 export function isNightKst(nowMs: number): boolean {
   const kstHour = new Date(nowMs + 9 * 60 * 60 * 1000).getUTCHours();
   return kstHour >= 21 || kstHour < 8;
+}
+
+/** 광고는 08:00~20:59:59 KST에만 보낸다. 비광고는 밤에도 보낸다(notify §7.2·§7.3) */
+export function isAdSendAllowed(kind: string, nowMs: number): boolean {
+  return kind !== 'AD' || !isNightKst(nowMs);
 }
 
 export function subscriptionKeyOf(endpoint: string): string {

@@ -107,6 +107,8 @@ export class MailTransportError extends Error {
     readonly kind: MailFailureKind,
     message: string,
     readonly status?: number,
+    /** 대행사 Retry-After(ms). 워커가 max(정본 간격, 이 값)으로 다음 시도를 잡는다 */
+    readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = 'MailTransportError';
@@ -145,6 +147,10 @@ export interface SmsMessage {
   to: string;
   body: string;
   messageKey: string;
+  /** 알림톡이면 종류(템플릿 ID를 찾는 데 쓴다). 문자는 없거나 'SMS' */
+  kind?: string;
+  /** 알림톡 템플릿 변수(호출자가 허용 목록으로 만든 값만) */
+  templateVariables?: Record<string, string>;
 }
 
 export interface SmsSendResult {
@@ -162,6 +168,8 @@ export class SmsTransportError extends Error {
     readonly kind: SmsFailureKind,
     message: string,
     readonly status?: number,
+    /** 대행사 Retry-After(ms). 워커가 max(정본 간격, 이 값)으로 다음 시도를 잡는다 */
+    readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = 'SmsTransportError';

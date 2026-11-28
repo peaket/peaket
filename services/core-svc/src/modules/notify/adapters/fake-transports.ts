@@ -22,13 +22,13 @@ export class FakePushTransport implements PushTransport {
 }
 
 export class FakeSmsTransport implements SmsTransport {
-  readonly sent: SmsMessage[] = [];
-  readonly fail: Error[] = [];
+  readonly sent?: SmsMessage[] = [];
+  readonly fail?: Error[] = [];
   async send(input: SmsMessage): Promise<SmsSendResult> {
-    const e = this.fail.shift();
+    const e = this.fail?.shift();
     if (e) throw e;
-    this.sent.push(input);
-    return { providerMessageId: `sms-${this.sent.length}` };
+    this.sent?.push(input);
+    return { providerMessageId: `sms-${this.sent?.length ?? 0}` };
   }
 }
 
