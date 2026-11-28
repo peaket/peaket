@@ -23,6 +23,8 @@ export type FanNoticeKind =
   | 'OPEN_LOBBY'
   | 'OPEN_VERIFY'
   | 'CANCELLATION_ALERT'
+  | 'WALLET_OPEN_REMINDER'
+  | 'ACCOUNT_MERGED_ABSORBED'
   | 'AD';
 
 export const SUBSCRIPTION_LIMIT = 200;
@@ -32,14 +34,36 @@ export const NOTIFY_MAX_ATTEMPTS = 6;
 /** 이메일·푸시 재시도 간격(1분·5분·30분·2시간·6시간·12시간 [가정], notify §10) */
 const RETRY_DELAYS_MS = [60_000, 300_000, 1_800_000, 7_200_000, 21_600_000, 43_200_000] as const;
 export const notificationRetryDelayMs = (attempt: number): number => RETRY_DELAYS_MS[Math.max(0, Math.min(RETRY_DELAYS_MS.length - 1, attempt - 1))]!;
-/** 결과를 모르는 실패를 한 번 더 보내도 되는 돈·보안·법정 통지(notify §10, d5 §9.1.1) */
-const DUBIOUS_RETRY_KINDS: ReadonlySet<FanNoticeKind> = new Set(['EVENT_CANCELLATION_CONFIRMED', 'EVENT_POSTPONED', 'REFUNDED', 'REFUND_FAILED', 'DEVICE_KEY_REISSUED', 'DEVICE_KEY_LATE_ISSUE']);
+/** 결과를 모르는 실패를 한 번 더 보내도 되는 돈·보안·법정 통지(notify §10, d5 §9.1.1). 월렛·입장 키 미등록도 입장에 꼭 필요하다 */
+const DUBIOUS_RETRY_KINDS: ReadonlySet<FanNoticeKind> = new Set([
+  'EVENT_CANCELLATION_CONFIRMED',
+  'EVENT_POSTPONED',
+  'REFUNDED',
+  'REFUND_FAILED',
+  'DEVICE_KEY_REISSUED',
+  'DEVICE_KEY_LATE_ISSUE',
+  'WALLET_OPEN_REMINDER',
+]);
 export const needsDubiousRetry = (kind: FanNoticeKind): boolean => DUBIOUS_RETRY_KINDS.has(kind);
 /** 신청 알림(신청 하나에 묶인 알림) */
 const SUBSCRIPTION_KINDS: ReadonlySet<FanNoticeKind> = new Set(['OPEN_LOBBY', 'OPEN_VERIFY', 'CANCELLATION_ALERT']);
 export const isSubscriptionNotice = (kind: FanNoticeKind): boolean => SUBSCRIPTION_KINDS.has(kind);
 /** 밤에도 웹 푸시를 보내지 않는 채널 규칙: 이메일은 늘 보내고 웹 푸시만 nightPush를 본다 */
 export const nightSkipsWebPush = (kind: FanNoticeKind): boolean => kind !== 'AD';
+
+/** 문자로 바로 보내는 종류(d5 §9.1 4144: 공연 전날·당일 아침 월렛, 입장 24시간 전 키 미등록) */
+export const SMS_ALLOWED_KINDS: ReadonlySet<FanNoticeKind> = new Set(['WALLET_OPEN_REMINDER']);
+/** 웹 푸시가 주 채널인 거래·안전 알림. 웹 푸시가 끝내 실패하면 문자 대체를 허용한다(d5 §9.1 4217) */
+export const WEB_PUSH_PRIMARY_KINDS: ReadonlySet<FanNoticeKind> = new Set(['LOGIN_METHOD_LINKED', 'LOGIN_METHOD_UNLINKED', 'ACCOUNT_MERGED']);
+export const SMS_MAX_CHARS = 2_000;
+const SMS_FALLBACK_SUFFIX = ':SMS:fallback';
+export const smsFallbackDedupKey = (o: { kind: string; targetId: string; accountId: string }): string => `${o.kind}:${o.targetId}:${o.accountId}${SMS_FALLBACK_SUFFIX}`;
+export const isSmsFallbackJob = (dedupKey: string): boolean => dedupKey.endsWith(SMS_FALLBACK_SUFFIX);
+/** 문자 작업을 보내도 되는가: 직접 허용 종류 또는 웹 푸시 주 채널의 대체 작업 */
+export const isSmsJobAllowed = (kind: string, dedupKey: string): boolean => {
+  const k = kind as FanNoticeKind;
+  return SMS_ALLOWED_KINDS.has(k) || (isSmsFallbackJob(dedupKey) && WEB_PUSH_PRIMARY_KINDS.has(k));
+};
 
 export const FAN_NOTICE_KINDS: readonly FanNoticeKind[] = [
   'EVENT_CANCELLATION_CONFIRMED',
@@ -54,6 +78,8 @@ export const FAN_NOTICE_KINDS: readonly FanNoticeKind[] = [
   'OPEN_LOBBY',
   'OPEN_VERIFY',
   'CANCELLATION_ALERT',
+  'WALLET_OPEN_REMINDER',
+  'ACCOUNT_MERGED_ABSORBED',
   'AD',
 ];
 
@@ -95,6 +121,8 @@ const VARS_ALLOWED: Record<FanNoticeKind, readonly string[]> = {
   OPEN_LOBBY: ['title', 'body', 'url'],
   OPEN_VERIFY: ['title', 'body', 'url'],
   CANCELLATION_ALERT: ['title', 'body', 'url', 'eventTitle', 'startsAt'],
+  WALLET_OPEN_REMINDER: ['title', 'body', 'url'],
+  ACCOUNT_MERGED_ABSORBED: [],
   AD: ['title', 'body', 'url', 'sender', 'contact', 'unsubscribeUrl'],
 };
 const EMAIL_LIKE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
@@ -175,6 +203,7 @@ export function messageOf(kind: FanNoticeKind, vars: Vars): NoticeMessage {
       return { title: '로그인 수단을 해제했습니다', body: `${p} 로그인 수단을 해제했습니다. 본인이 아니라면 고객센터에 알려 주세요.`, url: '/my/settings' };
     }
     case 'ACCOUNT_MERGED':
+    case 'ACCOUNT_MERGED_ABSORBED':
       return { title: '계정을 합쳤습니다', body: 'PEAKET 계정 두 개를 하나로 합쳤습니다. 예매·알림 설정은 대표 계정에서 확인해 주세요.', url: '/my' };
     case 'DEVICE_KEY_REISSUED':
     case 'DEVICE_KEY_LATE_ISSUE': {
@@ -194,10 +223,15 @@ export function messageOf(kind: FanNoticeKind, vars: Vars): NoticeMessage {
       return { title: text('title') ?? '본인확인을 마쳐 주세요', body: text('body') ?? '대기실에 들어가려면 휴대폰 본인확인이 필요합니다.', ...(safeUrl(text('url')) ? { url: safeUrl(text('url')) } : {}) };
     case 'CANCELLATION_ALERT':
       return { title: text('title') ?? '취소표가 나왔습니다', body: text('body') ?? '좌석이 돌아왔습니다. 공연 상세에서 확인해 주세요.', ...(safeUrl(text('url')) ? { url: safeUrl(text('url')) } : {}) };
+    case 'WALLET_OPEN_REMINDER':
+      return { title: text('title') ?? '월렛 안내', body: text('body') ?? '공연 전날과 당일 아침에 월렛에서 티켓을 열어 두세요.', ...(safeUrl(text('url')) ? { url: safeUrl(text('url')) } : {}) };
     case 'AD':
       return { title: text('title') ?? '피켓 소식', body: text('body') ?? '', ...(safeUrl(text('url')) ? { url: safeUrl(text('url')) } : {}) };
   }
 }
+
+/** 문자 본문: d5 §9.1 4190의 `[피켓]` 머리 + 제목 + 줄바꿈 + 본문 */
+export const smsBodyOf = (msg: NoticeMessage): string => `[피켓] ${msg.title}\n${msg.body}`;
 
 /** 등록 시각(ISO 8601)을 KST 'YYYY-MM-DD HH:mm'으로. 읽지 못하면 '방금' */
 function kstMinuteText(iso: string | undefined): string {

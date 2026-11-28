@@ -18,7 +18,7 @@ export function recipientQueryHandlers(uc: { recipients: Pick<GetRecipients, 'ru
     BatchGetRecipients: (call: grpc.ServerUnaryCall<Req, object>, cb: grpc.sendUnaryData<object>) => {
       const ids = Array.isArray(call.request.account_ids) ? (call.request.account_ids as unknown[]).map(text) : [];
       uc.recipients
-        .run({ accountIds: ids, includeEmail: call.request.include_email === true })
+        .run({ accountIds: ids, includeEmail: call.request.include_email === true, includePhone: call.request.include_phone === true })
         .then(
           (rows) =>
             cb(null, {
@@ -28,6 +28,7 @@ export function recipientQueryHandlers(uc: { recipients: Pick<GetRecipients, 'ru
                 verified: r.verified,
                 locale: r.locale,
                 ...(r.email === undefined ? {} : { email: r.email ?? '' }),
+                ...(r.phone === undefined ? {} : { phone: r.phone ?? '' }),
               })),
             }),
           (err: unknown) => {

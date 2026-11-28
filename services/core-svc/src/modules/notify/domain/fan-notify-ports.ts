@@ -63,10 +63,11 @@ export interface Recipient {
   verified: boolean;
   locale: string;
   email?: string | null;
+  phone?: string | null;
 }
 
 export interface RecipientDirectory {
-  getMany(accountIds: readonly string[], includeEmail: boolean): Promise<Recipient[]>;
+  getMany(accountIds: readonly string[], includeEmail: boolean, includePhone?: boolean): Promise<Recipient[]>;
 }
 
 /** 신청 받는 때를 가르는 회차 정보(공개 판매 승인·오픈 시각·공연 시작). 카탈로그 경계의 작은 포트다 */
@@ -138,3 +139,38 @@ export interface VapidConfig {
 }
 
 export type PushLookup = (hostname: string) => Promise<readonly { address: string; family: number }[]>;
+
+// BAT-455 F-06-1 문자 채널(운영 대행 어댑터는 F-06-6). 이메일 포트와 같은 모양이다.
+export interface SmsMessage {
+  to: string;
+  body: string;
+  messageKey: string;
+}
+
+export interface SmsSendResult {
+  providerMessageId?: string;
+}
+
+export interface SmsTransport {
+  send(input: SmsMessage): Promise<SmsSendResult>;
+}
+
+export type SmsFailureKind = 'RETRYABLE' | 'PERMANENT' | 'UNKNOWN';
+
+export class SmsTransportError extends Error {
+  constructor(
+    readonly kind: SmsFailureKind,
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = 'SmsTransportError';
+  }
+}
+
+/** 프로세스 안에만 두는 흡수 계정 주소(디스크·DB·로그 없음). 키 = ACCOUNT_MERGED_ABSORBED 중복 키 */
+export interface AbsorbedNoticeInbox {
+  put(dedupKey: string, email: string): void;
+  get(dedupKey: string): string | undefined;
+  delete(dedupKey: string): void;
+}

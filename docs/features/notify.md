@@ -256,8 +256,9 @@ stateDiagram-v2
 - **API**: `POST`·`DELETE /v1/events/{eventId}/subscriptions`(OPEN·CANCELLATION, 200/201/410/422), `GET /v1/subscriptions`(회차 50개·커서), `POST`·`DELETE /v1/push-subscriptions`(허용 호스트·공인 IP·키 검사·계정당 10개·SHA-256 해시), `POST /v1/subscription-opt-outs/{optOutToken}`(RFC 8058 한 번 누름). 구현은 `services/core-svc/src/modules/notify/application/fan-notify.ts`와 `inbound/fan-notify.controller.ts`다.
 - **워커**: `FanNotificationWorker`가 `notification_job`을 임대 2분으로 집어 이메일·웹 푸시로 보낸다. 이메일은 `MailTransport` 포트(운영 대행 어댑터 자리)와 local·ci 파일 대역(`PEAKET_NOTIFY_MAIL_DIR`)이고, 웹 푸시는 RFC 8291 `aes128gcm` 암호화·RFC 8292 VAPID ES256 JWT를 만들고 local·ci 파일 대역(`PEAKET_NOTIFY_PUSH_DIR`) 또는 HTTPS로 보낸다. 404·410·403 구독은 지우고, 429·5xx는 남은 TTL 안에서 1분·5분·30분·2시간·6시간·12시간 [가정]으로 다시 보낸다. 결과를 모르는 신청 알림·광고는 다시 보내지 않고 돈·보안·법정 통지만 같은 키로 한 번 더 본다.
 - **받는 사람**: identity-svc `RecipientQueryService.BatchGetRecipients`를 구현했다(계정 500개, `includeEmail`, MERGED·DELETED·없는 계정 한 줄). core-svc 워커는 `RecipientDirectory` 포트로 부른다.
-- **I-T34·POL-034**: 내부 입구 `POST /internal/v1/notify/identity-events`가 `LOGIN_METHOD_CHANGED`를 받아 이메일·웹 푸시 작업을 한 번 적고, `ACCOUNT_MERGED`를 받아 흡수 계정의 신청·구독을 대표 계정으로 옮긴다(겹치면 하나, 보낸 횟수는 큰 쪽). 대표 계정에 완료 통지를 적는다. 흡수 계정 이메일 통지는 사건에 주소가 없어 남은 한계다(§16).
-- **남은 것**: 운영 메일 대행 계약과 `PEAKET_VAPID_PRIVATE_KEY`·`PEAKET_VAPID_PUBLIC_KEY`(OPEN[10]), 문자·알림톡 대행, 대량 발송 조각 원장(§4.2), Kafka 소비자 배선(지금은 내부 입구), POL-034 흡수 계정 이메일.
+- **I-T34·POL-034**: 내부 입구 `POST /internal/v1/notify/identity-events`가 `LOGIN_METHOD_CHANGED`를 받아 이메일·웹 푸시 작업을 한 번 적고, `ACCOUNT_MERGED`를 받아 흡수 계정의 신청·구독을 대표 계정으로 옮긴다(겹치면 하나, 보낸 횟수는 큰 쪽). 대표 계정에 완료 통지를 적는다. 흡수 계정 이메일은 identity가 병합 트랜잭션 안에서 core.proto `MergeNoticeService.SendAbsorbedNotice`로 한 번 넘기고, notify는 `ACCOUNT_MERGED_ABSORBED` 작업과 프로세스 메모리 inbox로 보낸다(2026-11-28 소유자 결정, §16).
+- **F-06-1 동결 로컬 구현(2026-11-28)**: notify Kafka 소비자 그룹이 `identity.accounts-withdrawn`에 더해 `identity.accounts-merged`·`identity.login-methods-changed`·`trade.orders`를 읽고, `orderId`/`mergeId`/`accountId` 업무 키로 인테이크를 부른다. 문자는 d5 §9.1의 `WALLET_OPEN_REMINDER`(월렛·키 미등록)와 웹 푸시 실패 뒤 `smsFallback` 대체만 `[피켓]` 머리로 보내며, 429·5xx 재시도·400 DEAD·결과 모름·2,000자 상한을 따른다. identity `BatchGetRecipients`는 `include_phone`일 때만 전화번호를 준다.
+- **남은 것**: 운영 메일 대행 계약과 `PEAKET_VAPID_PRIVATE_KEY`·`PEAKET_VAPID_PUBLIC_KEY`(OPEN[10]), 문자·알림톡 대행, 대량 발송 조각 원장(§4.2). 흡수 계정 주소는 프로세스 메모리에만 있어 gRPC를 받은 파드와 워커 파드가 다르면 `FAILED`다(운영 전 대책은 F-06-6·소유자).
 
 ### 4.7 입장 키 알림(추천 적용 2026-11-23, ADR-0363 결정 4, BUILD_ORDER GAT-020)
 
@@ -551,8 +552,8 @@ docs/verification.md의 V-T36(알림 규칙)을 여기 N-T1~N-T5로 옮겼다. �
 - 푸시 서비스와 메일 서비스의 실제 한도는 문서에 없거나(Apple·Mozilla·Microsoft의 전체 한도) 우리 방식에 걸리는지 모른다(FCM). 처음 크게 보낼 때 429가 많으면 ③이 창보다 늦어질 수 있다.
 - 첫 대형 공연 전에 메일 발송량을 늘려 두지 않으면 메일 서비스가 늦추거나 스팸으로 분류할 수 있다.
 - 이메일 대행사·알림톡·문자 대행사가 정해지지 않아 결과 조회·반송 처리·한도는 조건으로만 적었다. BAT-455는 포트와 local·ci 파일 대역까지 했고, 운영 대행 어댑터·계정·VAPID 운영 키는 밖에서 막힌다.
-- POL-034의 '두 계정 이메일 완료 통지' 가운데 흡수 계정 이메일은 병합 확정 트랜잭션이 주소를 지우고 `identity.accounts-merged`에도 주소가 없어 아직 보내지 못한다. BAT-455는 대표 계정 이메일과 흡수 계정의 남은 웹 푸시 구독으로 통지한다. 주소를 Kafka에 싣지 않는 계약(짧게 보관하는 암호화 사본 또는 identity 내부 통지 입구)을 정한 뒤 후속으로 채운다.
-- 신청 알림의 대량 발송 조각 원장(§4.2)과 Kafka 소비자 배선은 이 묶음 밖이다. 지금은 내부 입구 `POST /internal/v1/notify/identity-events`와 `POST /internal/v1/notify/trade-events`가 사건을 넣는다.
+- POL-034 흡수 계정 이메일은 identity가 병합 트랜잭션 안에서 core.proto `MergeNoticeService.SendAbsorbedNotice` 요청에만 실어 한 번 넘긴다. identity는 주소를 저장하지 않고, notify는 프로세스 메모리 inbox에 둔 주소로 `ACCOUNT_MERGED_ABSORBED`를 보낸다. gRPC를 받은 파드와 워커 파드가 다르거나 프로세스가 다시 뜨면 주소가 없어 `FAILED`다(운영 전 대책은 F-06-6·소유자).
+- 신청 알림의 대량 발송 조각 원장(§4.2)은 이 묶음 밖이다. Kafka 소비자 그룹은 `identity.accounts-withdrawn`·`identity.accounts-merged`·`identity.login-methods-changed`·`trade.orders`를 읽고, local·ci는 내부 입구 `POST /internal/v1/notify/identity-events`·`POST /internal/v1/notify/trade-events`도 남긴다.
 - 수치(창, 비율, 조각 크기, 체크포인트, 한도, 경보 기준)는 재지 않은 가정이다.
 
 **다른 문서·통합 담당이 고칠 것**(이 문서가 고치지 않은 파일. 처음 적은 목록이며, 대부분 2026-10-30 2차 반영 등으로 이미 고쳐졌다. 끝난 것은 이 목록 끝 줄에 적었다)

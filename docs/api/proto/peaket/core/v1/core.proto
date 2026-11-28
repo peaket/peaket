@@ -231,6 +231,27 @@ message CheckAccountMergeResponse {
   int32 absorbed_addresses = 4;
 }
 
+// 부르는 쪽: identity-svc만. 계정 병합 확정 트랜잭션 안에서 흡수 계정의 완료 통지를 한 번 넘긴다
+// (POL-034, docs/features/identity.md §2.1·§22, docs/features/notify.md §4.1). 주소는 요청에만 있고
+// identity는 저장하지 않는다. 실패는 identity의 merge_notice_failed 지표로만 남기고 병합을 막지 않는다.
+service MergeNoticeService {
+  rpc SendAbsorbedNotice(SendAbsorbedNoticeRequest) returns (SendAbsorbedNoticeResponse);
+}
+
+message SendAbsorbedNoticeRequest {
+  // 병합 ID(account_merge.id). notify의 중복 키에 쓴다.
+  string merge_id = 1;
+  // 흡수 계정 ID(병합 뒤 MERGED).
+  string absorbed_account_id = 2;
+  // 흡수 계정 이메일. 요청에만 싣고 identity는 저장하지 않는다.
+  string absorbed_email = 3;
+}
+
+message SendAbsorbedNoticeResponse {
+  // 작업을 새로 적었거나 이미 같은 작업이 있으면 true(한 번 전달의 멱등 확인).
+  bool accepted = 1;
+}
+
 // 부르는 쪽: ops-svc만(CS 처리함 상세 SCR-045의 문의 건, ADR-0148 결정 7).
 // ops-svc가 권한(docs/planning/03 §3 'CS 처리함' 행)과 감사 기록을 처리한 뒤 관리 계정 ID(acted_by)를 실어 부른다.
 // core-svc support 모듈은 관리 권한을 다시 판정하지 않고, 웨이포인트 허용 목록으로 ops-svc만 받는다.

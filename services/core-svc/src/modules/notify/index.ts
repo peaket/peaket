@@ -30,6 +30,13 @@ export {
   notificationRetryDelayMs,
   optOutTokenFor,
   readOptOutToken,
+  smsBodyOf,
+  smsFallbackDedupKey,
+  isSmsFallbackJob,
+  isSmsJobAllowed,
+  SMS_ALLOWED_KINDS,
+  SMS_MAX_CHARS,
+  WEB_PUSH_PRIMARY_KINDS,
   subscriptionKeyOf,
   TICKET_KEY_NOTICE_KINDS,
   ticketKeyNoticeDedupKey,
@@ -67,21 +74,30 @@ export type {
   PushTransport,
   Recipient,
   RecipientDirectory,
+  SmsFailureKind,
+  SmsMessage,
+  SmsSendResult,
+  SmsTransport,
+  AbsorbedNoticeInbox,
   SubscriptionPage,
   SubscriptionStateView,
   VapidConfig,
 } from './domain/fan-notify-ports.js';
-export { MailTransportError } from './domain/fan-notify-ports.js';
+export { MailTransportError, SmsTransportError } from './domain/fan-notify-ports.js';
 export { encryptWebPush, vapidAuthorization, pushTopic, pushTtlUrgency } from './domain/push-crypto.js';
 export { FanSubscriptions, PushSubscriptions, SubscriptionOptOuts, MemoryRecipientDirectory } from './application/fan-notify.js';
 export { NotificationIntake, type AccountMergedInput, type LoginMethodChangedInput, type NoticeInput, type TicketKeyNoticeEvent, type TradeNoticeEvent } from './application/notification-intake.js';
+export { NotifyEventHandler, type NotifyKafkaEvent } from './inbound/notify-events.handler.js';
+export { mergeNoticeHandlers, mergeNoticeServiceDefinition } from './inbound/merge-notice.grpc.js';
 export { InternalNotifyTicketController, TicketKeyNoticeBody, TicketKeyNoticeResponse } from './inbound/internal-notify-ticket.controller.js';
 export { FanNotificationWorker, type WorkerResult } from './application/fan-notification-worker.js';
 export { MemoryFanNotifyStore } from './adapters/memory-fan-notify-store.js';
 export { DrizzleFanNotifyStore } from './adapters/db/drizzle-fan-notify-store.js';
 export { MemoryNotificationEventDirectory } from './adapters/memory-event-directory.js';
-export { FakeMailTransport, FakePushTransport } from './adapters/fake-transports.js';
+export { FakeMailTransport, FakePushTransport, FakeSmsTransport } from './adapters/fake-transports.js';
 export { FileMailTransport } from './adapters/file-mail-transport.js';
 export { FilePushTransport } from './adapters/file-push-transport.js';
+export { FileSmsTransport } from './adapters/file-sms-transport.js';
+export { MemoryAbsorbedNoticeInbox } from './application/absorbed-notices.js';
 export { HttpsPushTransport } from './adapters/https-push-transport.js';
 export { GrpcRecipientDirectory } from './adapters/grpc-recipient-directory.js';

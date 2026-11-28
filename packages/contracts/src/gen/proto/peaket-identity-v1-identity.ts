@@ -639,6 +639,10 @@ export const identityV1Identity: Record<string, unknown> = {
                     "include_email": {
                       "type": "bool",
                       "id": 2
+                    },
+                    "include_phone": {
+                      "type": "bool",
+                      "id": 3
                     }
                   }
                 },
@@ -673,6 +677,10 @@ export const identityV1Identity: Record<string, unknown> = {
                     "email": {
                       "type": "string",
                       "id": 5
+                    },
+                    "phone": {
+                      "type": "string",
+                      "id": 6
                     }
                   }
                 },

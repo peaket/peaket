@@ -3,7 +3,7 @@
 // 듣기 시작한 뒤 Kafka 소비자(탈퇴 사건의 후기 파기와 16분 뒤 다시 정리, W7-audit COV2-06·ADR-0278, docs/streaming.md §2.6 'core-svc 소비자')를 켠다. 브로커 주소(PEAKET_KAFKA_BROKERS)가 없으면
 // local·ci만 경고 한 줄로 소비자 없이 뜨고 그 밖의 환경은 시작하지 않는다. 소비자를 켜지 못하면 오류 한 줄 뒤 SIGTERM과 같은 차례로 끝내고 종료 코드 1을 둔다.
 import { fileURLToPath } from 'node:url';
-import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, errorSummary, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, systemClock } from '@peaket/platform';
+import { assertInternalGrpcToken, createDatabase, createExternalHttpClient, createHotRedis, createService, errorSummary, loadLogPseudonymizer, loadPlatformConfig, reauthJtiStoreFromEnv, startGrpcServer, type StartedGrpcServer, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
 import type { CoreConsumers } from './consumers/start.js';
@@ -46,7 +46,7 @@ import {
   UnavailableReviewEligibility,
   UnavailableFanProfile,
 } from './modules/review/index.js';
-import { DrizzleWebhookStore, FanNotificationWorker, HttpsWebhookTransport, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
+import { DrizzleWebhookStore, FanNotificationWorker, HttpsWebhookTransport, mergeNoticeHandlers, mergeNoticeServiceDefinition, NotificationIntake, NotifyEventHandler, WebhookDispatcher, WebhookWorker } from './modules/notify/index.js';
 import { GrpcHeldTickets, GrpcMerchPayments, RedisMerchStock, type ShopLogger, ShopSignals, closedShopReauthGate, shopReauthGateFromEnv, unavailableHeldTickets, unavailableMerchPayments, unavailableMerchStock } from './modules/shop/index.js';
 
 const SERVICE = 'core-svc';
@@ -251,6 +251,32 @@ const searchTimers = new SearchReadModelTimers({
 const { startServiceControlSync } = await import('@peaket/platform/stream-worker');
 const controlSync = startServiceControlSync(service, process.env);
 await service.listen();
+
+// F-06-1 POL-034: identity가 병합 트랜잭션 안에서 부르는 내부 gRPC. 전용 포트(PEAKET_NOTIFY_GRPC_PORT)가 있을 때만 연다.
+// 파드 안에서 HTTP와 같은 프로세스가 열고, 주소는 PEAKET_CORE_GRPC_URL로 identity에 준다. 동결 로컬은 이 포트를 직접 띄운다.
+let notifyGrpc: StartedGrpcServer | undefined;
+const notifyGrpcPort = process.env.PEAKET_NOTIFY_GRPC_PORT;
+if (notifyGrpcPort !== undefined && notifyGrpcPort !== '') {
+  const port = Number(notifyGrpcPort);
+  if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error(`PEAKET_NOTIFY_GRPC_PORT가 올바르지 않다: ${notifyGrpcPort}`);
+  notifyGrpc = await startGrpcServer({
+    host: process.env.PEAKET_GRPC_HOST ?? '0.0.0.0',
+    port,
+    profile: service.config.grpcLbProfile,
+    metrics: service.metrics,
+    ...(process.env.PEAKET_INTERNAL_TOKEN ? { internal: { token: process.env.PEAKET_INTERNAL_TOKEN, services: ['peaket.core.v1.MergeNoticeService'] } } : {}),
+    services: [
+      {
+        definition: mergeNoticeServiceDefinition(),
+        handlers: mergeNoticeHandlers(service.app.get(NotificationIntake), (method, err) => service.logger.error({ err, method }, 'MergeNoticeService 처리 실패')),
+      },
+    ],
+  });
+  service.logger.info({ port: notifyGrpc.port }, '알림 병합 통지 gRPC 포트를 열었다');
+} else {
+  service.logger.warn({ dep: 'notify-merge-notice' }, 'PEAKET_NOTIFY_GRPC_PORT가 없어 MergeNoticeService를 열지 않는다');
+}
+
 // 시작 따라잡기(ADR-0271 결정 12) → 사전 첫 읽기 → 주기 일. 둘 다 준비 확인에 넣지 않는다: 그동안 /ready는 200이고 검색은 표에 있는 줄로, 자동완성은 빈 후보·no-store로 답한다(결정 14)
 await searchTimers.start();
 
@@ -290,6 +316,7 @@ else {
     auth: kafka.auth,
     database: consumerDatabase,
     handler: new ReviewAccountWithdrawnHandler(consumerReviews, undefined, { logger: service.logger }),
+    notify: new NotifyEventHandler({ intake: service.app.get(NotificationIntake), logger: service.logger }),
     recheck: consumerReviews,
     registry: service.metrics.registry,
     logger: service.logger,
@@ -310,6 +337,7 @@ function shutdown(): Promise<void> {
   closing ??= (async () => {
     webhookWorker?.stop();
     fanNotifyWorker?.stop();
+    await notifyGrpc?.close();
     searchTimers.stop();
     // Kafka 소비자를 먼저 멈춘다(받기를 멈추고 처리 중인 키를 마친 뒤 커밋). 실패해도 나머지는 그대로 끝낸다
     await consumers?.stop().catch((err: unknown) => service.logger.error({ dep: 'kafka', err: errorSummary(err) }, 'Kafka 소비자 멈추기 실패(나머지는 그대로 끝낸다)'));

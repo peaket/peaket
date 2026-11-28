@@ -57,6 +57,8 @@ import {
   withdrawalParticipantsFromEnv,
   DrizzleMemberCodeResolver,
   memberCodeHandlers,
+  GrpcMergeNotice,
+  MergeNoticeSignals,
 } from './modules/session/index.js';
 import {
   assertKeyVersions,
@@ -168,6 +170,16 @@ const deviceApprovalLimits = cache ? new RedisDeviceApprovalLimits(cache) : unde
 const scannerDpopReplay = cache ? new RedisScannerDpopReplayStore(cache) : undefined;
 // 계정 병합의 세 서비스 확인(identity §2.1 '계정 병합의 첫 구현'). 주소가 없으면 로컬·CI만 대역, 운영·데모는 병합하지 않는다
 const merge = mergeCheckersFromEnv(process.env, loadPlatformConfig(process.env).grpcLbProfile, (dependency) => lateBreaker(dependency, MERGE_CHECK_BREAKER));
+// POL-034 흡수 계정 완료 통지(2026-11-28 소유자 결정): core-svc MergeNoticeService. 주소는 요청에만 있고 저장하지 않는다.
+// 주소가 없으면 로컬·시험은 보내지 않는 대역이고, 실패는 merge_notice_failed 지표로만 남긴다.
+const mergeNoticeSignals = new MergeNoticeSignals();
+const coreGrpcUrl = process.env.PEAKET_CORE_GRPC_URL;
+const mergeNotice = coreGrpcUrl
+  ? (() => {
+      const client = new GrpcMergeNotice(coreGrpcUrl, loadPlatformConfig(process.env).grpcLbProfile);
+      return { send: (i: { mergeId: string; absorbedAccountId: string; absorbedEmail: string }) => client.send(i), failed: (reason: string) => mergeNoticeSignals.failed(reason) };
+    })()
+  : undefined;
 // 탈퇴 참여자(identity §8 '탈퇴 참여자와 탈퇴 미룸의 첫 구현', ADR-0284, PRF-169): purchase-svc WithdrawalParticipantService. 병합 확인과 같은 purchase-svc 차단기다.
 // 주소가 없으면 local·ci만 '늘 DONE' 대역, 그 밖은 '늘 답하지 않음'(탈퇴가 늘 202)
 const withdrawal = withdrawalParticipantsFromEnv(process.env, loadPlatformConfig(process.env).grpcLbProfile, (dependency) => lateBreaker(dependency, MERGE_CHECK_BREAKER));
@@ -183,8 +195,9 @@ const service = await createService({
   // 파트너 테넌트당 600회/분 공용 가드(BAT-173, D-T50 ⑦). identity의 Redis는 세션·캐시 클러스터다
   ...(cache ? { tenantRateLimit: { redis: cache } } : {}),
   ...(adminPepper ? { adminAuthz } : {}),
-  module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now), nicknameCheckLimits: new RedisNicknameCheckLimits(cache) } : {}), mergeCheckers: merge.checkers, withdrawalParticipants: withdrawal.participants, withdrawalSignals: signals, invRefs: invRefs.ring, ...(loginRisk ? { loginRisk } : {}), ...(contactRefRps ? { contactRefRps } : {}), ...(deviceAuthorizations ? { deviceAuthorizations } : {}), ...(deviceApprovalLimits ? { deviceApprovalLimits } : {}), ...(scannerDevices ? { scannerDevices } : {}), ...(scannerDpopReplay ? { scannerDpopReplay } : {}), ...(coreEventOwners ? { coreEventOwners } : {}), ...(staffInviteMailer ? { staffInviteMailer } : {}), staffInvitationUrl, partnerStaff: Boolean(adminPepper) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, reauthVerifier: keys.has('admin') ? new JoseAdminReauthVerifier(keys, tokenIssuerFromEnv(process.env), systemClock) : null, relyingParties, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache), passkeyChallenges: new RedisPasskeyChallenges(cache) } : {}) } } : {}) }) });
+  module: AppModule.register({ database, session: { signer, keys, deviceRefs: devices, signals, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, ...(cache ? { linkProposals: new RedisLinkProposals(cache, Date.now), mergeProposals: new RedisMergeProposals(cache, Date.now), nicknameCheckLimits: new RedisNicknameCheckLimits(cache) } : {}), mergeCheckers: merge.checkers, ...(mergeNotice ? { mergeNotice } : {}), withdrawalParticipants: withdrawal.participants, withdrawalSignals: signals, invRefs: invRefs.ring, ...(loginRisk ? { loginRisk } : {}), ...(contactRefRps ? { contactRefRps } : {}), ...(deviceAuthorizations ? { deviceAuthorizations } : {}), ...(deviceApprovalLimits ? { deviceApprovalLimits } : {}), ...(scannerDevices ? { scannerDevices } : {}), ...(scannerDpopReplay ? { scannerDpopReplay } : {}), ...(coreEventOwners ? { coreEventOwners } : {}), ...(staffInviteMailer ? { staffInviteMailer } : {}), staffInvitationUrl, partnerStaff: Boolean(adminPepper) }, verification, ...(adminPepper ? { admin: { config: adminAuth, lists: adminLists, pepper: adminPepper, breaches: adminBreaches, humanCheck: adminHumanCheck, signals: adminSignals, totpCipher: adminTotpCipher, signer: keys.has('admin') ? new JoseAdminTokenSigner(keys, tokenIssuerFromEnv(process.env)) : null, reauthVerifier: keys.has('admin') ? new JoseAdminReauthVerifier(keys, tokenIssuerFromEnv(process.env), systemClock) : null, relyingParties, cookieDomain: process.env.PEAKET_COOKIE_DOMAIN || undefined, mailer: adminMailer, consoleOrigins, ...(cache ? { counters: new RedisLoginCounters(cache), passkeyChallenges: new RedisPasskeyChallenges(cache) } : {}) } } : {}) }) });
 signals.register(service.metrics.registry);
+mergeNoticeSignals.register(service.metrics.registry);
 adminSignals.register(service.metrics.registry);
 for (const [dependency, settings] of breakerSettings) breakers.set(dependency, new CircuitBreaker({ service: SERVICE, dependency, registry: service.metrics.registry, logger: service.logger, ...settings }));
 kmsFailoverLog.warn = (use, error) => service.logger.warn({ use, error }, '서울 KMS가 응답하지 않아 복제 키로 넘겼다(ADR-0102)');

@@ -20,7 +20,7 @@ import { RefreshSession } from './application/refresh-session.js';
 import { WithdrawAccount } from './application/withdraw-account.js';
 import { RetryPendingWithdrawals } from './application/retry-pending-withdrawals.js';
 import { WITHDRAWAL_PARTICIPANTS, WITHDRAWAL_SIGNALS, type WithdrawalParticipant, type WithdrawalSignals } from './domain/withdrawal.js';
-import { LOGIN_RISK, type LoginRisk, ACCOUNT_CLOSURE, DEVICE_REFS, type DeviceRefs, INV_REFS, type InvRefs, LINK_PROPOSALS, type LinkProposals, MERGE_CHECKERS, MERGE_PROPOSALS, type MergeChecker, type MergeProposals, PUBLIC_KEYS, type PublicKeys, REAUTH_VERIFIER, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, TOKEN_SIGNER, type TokenSigner } from './domain/ports.js';
+import { LOGIN_RISK, type LoginRisk, ACCOUNT_CLOSURE, DEVICE_REFS, type DeviceRefs, INV_REFS, type InvRefs, LINK_PROPOSALS, type LinkProposals, MERGE_CHECKERS, MERGE_NOTICE, MERGE_PROPOSALS, type MergeChecker, type MergeNoticeSender, type MergeProposals, PUBLIC_KEYS, type PublicKeys, REAUTH_VERIFIER, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, TOKEN_SIGNER, type TokenSigner, noMergeNotice } from './domain/ports.js';
 import { AccountController, ProvidersController } from './inbound/account.controller.js';
 import { ListProviders } from './application/list-providers.js';
 import { GetRecipients } from './application/get-recipients.js';
@@ -84,6 +84,8 @@ export interface SessionModuleOptions {
   mergeProposals?: MergeProposals;
   /** 세 서비스의 CheckAccountMerge. 없으면 막는 것이 없다고 보는 대역(시험) */
   mergeCheckers?: MergeChecker[];
+  /** POL-034 흡수 계정 완료 통지. 없으면 보내지 않는 대역(로컬·시험) */
+  mergeNotice?: MergeNoticeSender;
   /** 조사용 가명(라벨 키 링, identity §9.1). 없으면 늘 비운다(시험) */
   invRefs?: InvRefs;
   /** 로그인 판정(trust-svc, identity §7). 없으면 세션의 판정이 UNKNOWN이다 */
@@ -212,6 +214,7 @@ export class SessionModule {
         GetInvestigationRefs,
         BackfillContactRefs,
         { provide: INV_REFS, useValue: o.invRefs ?? { ref: () => undefined } },
+        { provide: MERGE_NOTICE, useValue: o.mergeNotice ?? noMergeNotice },
         { provide: CONTACT_REF_RPS, useValue: o.contactRefRps ?? DEFAULT_CONTACT_REF_RPS },
         // 재인증 토큰은 이 서비스의 팬 공개키 묶음과 발급자로 확인한다(identity §8 '탈퇴의 첫 구현')
         { provide: REAUTH_VERIFIER, useFactory: (clock: Clock) => new JoseReauthVerifier(o.keys, o.signer.issuer, clock), inject: [CLOCK] },

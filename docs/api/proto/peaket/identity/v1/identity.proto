@@ -437,6 +437,8 @@ message BatchGetRecipientsRequest {
   repeated string account_ids = 1;
   // 이메일 단계만 true. 웹 푸시 단계는 주소를 받지 않는다(받는 값을 줄인다).
   bool include_email = 2;
+  // 문자 단계만 true. 계정에 저장된 휴대폰 번호(가입 때 선택 동의한 경우만)를 준다.
+  bool include_phone = 3;
 }
 
 // 계정 상태(docs/data.md account.status). 계정이 없으면 NOT_FOUND다.
@@ -461,6 +463,8 @@ message Recipient {
   string locale = 4;
   // include_email이 true일 때만 채운다
   string email = 5;
+  // include_phone이 true이고 병합·탈퇴 계정이 아닐 때만 채운다(문자 대체·월렛 안내)
+  string phone = 6;
 }
 
 message BatchGetRecipientsResponse {

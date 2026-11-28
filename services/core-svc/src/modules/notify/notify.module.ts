@@ -23,13 +23,15 @@ import { MemoryFanNotifyStore } from './adapters/memory-fan-notify-store.js';
 import { DrizzleFanNotifyStore } from './adapters/db/drizzle-fan-notify-store.js';
 import { MemoryNotificationEventDirectory } from './adapters/memory-event-directory.js';
 import { DrizzleNotificationEventDirectory } from './adapters/db/drizzle-event-directory.js';
-import { FakeMailTransport, FakePushTransport, unavailableMail, unavailablePush } from './adapters/fake-transports.js';
+import { FakeMailTransport, FakePushTransport, FakeSmsTransport, unavailableMail, unavailablePush, unavailableSms } from './adapters/fake-transports.js';
 import { mailTransportFromEnv } from './adapters/file-mail-transport.js';
 import { pushTransportFromEnv } from './adapters/file-push-transport.js';
+import { smsTransportFromEnv } from './adapters/file-sms-transport.js';
+import { MemoryAbsorbedNoticeInbox } from './application/absorbed-notices.js';
 import { HttpsPushTransport } from './adapters/https-push-transport.js';
 import { GrpcRecipientDirectory, unavailableRecipients } from './adapters/grpc-recipient-directory.js';
 import { optOutKeyFromEnv, publicOriginFromEnv, topicKeyFromEnv, vapidFromEnv } from './adapters/config.js';
-import type { FanNotifyStore, MailTransport, NotificationEventDirectory, PushLookup, PushTransport, RecipientDirectory, VapidConfig } from './domain/fan-notify-ports.js';
+import type { AbsorbedNoticeInbox, FanNotifyStore, MailTransport, NotificationEventDirectory, PushLookup, PushTransport, RecipientDirectory, SmsTransport, VapidConfig } from './domain/fan-notify-ports.js';
 import { MemoryCatalogRepository } from '../catalog/index.js';
 
 export const NOTIFY_PARTNER_DATABASE = Symbol.for('peaket.notify.partner-database');
@@ -49,7 +51,9 @@ export interface FanNotifyWiring {
   events?: NotificationEventDirectory;
   mail?: MailTransport;
   push?: PushTransport;
+  sms?: SmsTransport;
   recipients?: RecipientDirectory;
+  absorbedNotices?: AbsorbedNoticeInbox;
   lookup?: PushLookup;
   optOutKey?: string;
   vapid?: VapidConfig;
@@ -64,6 +68,8 @@ export function fanNotifyProviders(o: { storage: 'memory' | 'database'; wiring?:
   const events = o.storage === 'memory' ? (o.wiring?.events ?? new MemoryNotificationEventDirectory(o.catalog ?? new MemoryCatalogRepository())) : new DrizzleNotificationEventDirectory(o.appDatabase!);
   const mail = o.wiring?.mail ?? mailTransportFromEnv(env) ?? (o.storage === 'memory' ? new FakeMailTransport() : unavailableMail);
   const push = o.wiring?.push ?? pushTransportFromEnv(env) ?? (o.storage === 'memory' ? new FakePushTransport() : new HttpsPushTransport());
+  const sms = o.wiring?.sms ?? smsTransportFromEnv(env) ?? (o.storage === 'memory' ? new FakeSmsTransport() : unavailableSms);
+  const absorbedNotices = o.wiring?.absorbedNotices ?? new MemoryAbsorbedNoticeInbox();
   const recipients = o.wiring?.recipients ?? (env.PEAKET_IDENTITY_GRPC_URL ? new GrpcRecipientDirectory(env.PEAKET_IDENTITY_GRPC_URL) : unavailableRecipients);
   const optOutKey = o.wiring?.optOutKey ?? optOutKeyFromEnv(env);
   const vapid = o.wiring?.vapid ?? vapidFromEnv(env);
@@ -89,11 +95,11 @@ export function fanNotifyProviders(o: { storage: 'memory' | 'database'; wiring?:
       inject: [FAN_NOTIFY_STORE, CLOCK, FAN_NOTIFY_LOOKUP],
     },
     { provide: SubscriptionOptOuts, useFactory: (s: FanNotifyStore, k: string) => new SubscriptionOptOuts({ store: s, optOutKey: k }), inject: [FAN_NOTIFY_STORE, FAN_NOTIFY_OPTOUT_KEY] },
-    { provide: NotificationIntake, useFactory: (s: FanNotifyStore, c: Clock, k: string) => new NotificationIntake({ store: s, clock: c, optOutKey: k }), inject: [FAN_NOTIFY_STORE, CLOCK, FAN_NOTIFY_OPTOUT_KEY] },
+    { provide: NotificationIntake, useFactory: (s: FanNotifyStore, c: Clock, k: string) => new NotificationIntake({ store: s, clock: c, optOutKey: k, absorbedNotices }), inject: [FAN_NOTIFY_STORE, CLOCK, FAN_NOTIFY_OPTOUT_KEY] },
     {
       provide: FanNotificationWorker,
       useFactory: (s: FanNotifyStore, m: MailTransport, p: PushTransport, r: RecipientDirectory, c: Clock, k: string, v?: VapidConfig) =>
-        new FanNotificationWorker({ store: s, mail: m, push: p, recipients: r, clock: c, optOutKey: k, ...(v ? { vapid: v } : {}), publicOrigin: o.wiring?.publicOrigin ?? publicOriginFromEnv(env), topicKey: o.wiring?.topicKey ?? topicKeyFromEnv(env, k), log: (line) => console.log(JSON.stringify(line)) }),
+        new FanNotificationWorker({ store: s, mail: m, push: p, sms, recipients: r, clock: c, optOutKey: k, absorbedNotices, ...(v ? { vapid: v } : {}), publicOrigin: o.wiring?.publicOrigin ?? publicOriginFromEnv(env), topicKey: o.wiring?.topicKey ?? topicKeyFromEnv(env, k), log: (line) => console.log(JSON.stringify(line)) }),
       inject: [FAN_NOTIFY_SENDER_STORE, FAN_NOTIFY_MAIL, FAN_NOTIFY_PUSH, FAN_NOTIFY_RECIPIENTS, CLOCK, FAN_NOTIFY_OPTOUT_KEY, { token: FAN_NOTIFY_VAPID, optional: true }],
     },
   ];

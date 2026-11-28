@@ -31,24 +31,25 @@ export class GrpcRecipientDirectory implements RecipientDirectory {
     };
   }
 
-  async getMany(accountIds: readonly string[], includeEmail: boolean): Promise<Recipient[]> {
+  async getMany(accountIds: readonly string[], includeEmail: boolean, includePhone = false): Promise<Recipient[]> {
     if (accountIds.length === 0) return [];
     if (accountIds.length > 500) throw new Error('받는 사람 묶음은 500명까지입니다');
     const v = await new Promise<Record<string, unknown>>((resolve, reject) => {
-      this.#client.BatchGetRecipients({ account_ids: accountIds, include_email: includeEmail }, new grpc.Metadata(), { deadline: Date.now() + DEADLINE_MS }, (e, res) =>
+      this.#client.BatchGetRecipients({ account_ids: accountIds, include_email: includeEmail, include_phone: includePhone }, new grpc.Metadata(), { deadline: Date.now() + DEADLINE_MS }, (e, res) =>
         e ? reject(new Error(`identity 받는 사람 조회 실패: ${grpc.status[e.code] ?? String(e.code)}`)) : resolve(res ?? {}),
       );
     });
     const rows = Array.isArray(v.recipients) ? (v.recipients as Record<string, unknown>[]) : [];
     return accountIds.map((accountId) => {
       const r = rows.find((x) => x.account_id === accountId);
-      if (!r) return { accountId, status: 'NOT_FOUND', verified: false, locale: 'ko', ...(includeEmail ? { email: null } : {}) };
+      if (!r) return { accountId, status: 'NOT_FOUND', verified: false, locale: 'ko', ...(includeEmail ? { email: null } : {}), ...(includePhone ? { phone: null } : {}) };
       return {
         accountId,
         status: STATUS[String(r.status)] ?? 'NOT_FOUND',
         verified: r.verified === true,
         locale: typeof r.locale === 'string' && r.locale ? r.locale : 'ko',
         ...(includeEmail ? { email: typeof r.email === 'string' && r.email ? r.email : null } : {}),
+        ...(includePhone ? { phone: typeof r.phone === 'string' && r.phone ? r.phone : null } : {}),
       };
     });
   }
@@ -59,5 +60,6 @@ export class GrpcRecipientDirectory implements RecipientDirectory {
 }
 
 export const unavailableRecipients: RecipientDirectory = {
-  getMany: async (ids) => ids.map((accountId) => ({ accountId, status: 'NOT_FOUND', verified: false, locale: 'ko', email: null })),
+  getMany: async (ids, _includeEmail, includePhone) =>
+    ids.map((accountId) => ({ accountId, status: 'NOT_FOUND', verified: false, locale: 'ko', email: null, ...(includePhone ? { phone: null } : {}) })),
 };

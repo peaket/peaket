@@ -352,6 +352,38 @@ export const coreV1Core: Record<string, unknown> = {
                     }
                   }
                 },
+                "MergeNoticeService": {
+                  "methods": {
+                    "SendAbsorbedNotice": {
+                      "requestType": "SendAbsorbedNoticeRequest",
+                      "responseType": "SendAbsorbedNoticeResponse"
+                    }
+                  }
+                },
+                "SendAbsorbedNoticeRequest": {
+                  "fields": {
+                    "merge_id": {
+                      "type": "string",
+                      "id": 1
+                    },
+                    "absorbed_account_id": {
+                      "type": "string",
+                      "id": 2
+                    },
+                    "absorbed_email": {
+                      "type": "string",
+                      "id": 3
+                    }
+                  }
+                },
+                "SendAbsorbedNoticeResponse": {
+                  "fields": {
+                    "accepted": {
+                      "type": "bool",
+                      "id": 1
+                    }
+                  }
+                },
                 "SupportCaseService": {
                   "methods": {
                     "GetInquiryRecord": {

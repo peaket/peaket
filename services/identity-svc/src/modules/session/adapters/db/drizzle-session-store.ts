@@ -197,7 +197,7 @@ export class DrizzleSessionStore implements SessionStore {
     return { cleared, removed };
   }
 
-  async recipientsOf(accountIds: readonly string[], includeEmail: boolean): Promise<RecipientRow[]> {
+  async recipientsOf(accountIds: readonly string[], includeEmail: boolean, includePhone = false): Promise<RecipientRow[]> {
     if (accountIds.length === 0) return [];
     const ids = [...new Set(accountIds)];
     const rows = await this.database.db
@@ -205,6 +205,7 @@ export class DrizzleSessionStore implements SessionStore {
         id: account.id,
         status: account.status,
         email: account.email,
+        phone: account.phone,
         locale: account.locale,
         verified: sql<boolean>`exists (select 1 from identity_verification v where v.account_id = ${account.id})`,
       })
@@ -213,13 +214,14 @@ export class DrizzleSessionStore implements SessionStore {
     const byId = new Map(rows.map((r) => [r.id, r]));
     return accountIds.map((accountId) => {
       const r = byId.get(accountId);
-      if (!r) return { accountId, status: 'NOT_FOUND' as const, verified: false, locale: 'ko', ...(includeEmail ? { email: null } : {}) };
+      if (!r) return { accountId, status: 'NOT_FOUND' as const, verified: false, locale: 'ko', ...(includeEmail ? { email: null } : {}), ...(includePhone ? { phone: null } : {}) };
       return {
         accountId,
         status: r.status as RecipientRow['status'],
         verified: r.verified === true,
         locale: r.locale || 'ko',
         ...(includeEmail ? { email: r.status === 'MERGED' || r.status === 'DELETED' ? null : r.email } : {}),
+        ...(includePhone ? { phone: r.status === 'MERGED' || r.status === 'DELETED' ? null : r.phone } : {}),
       };
     });
   }
@@ -508,6 +510,10 @@ export class DrizzleSessionStore implements SessionStore {
       accountStatusOf: async (accountId) => {
         const [r] = await tx.select({ status: account.status }).from(account).where(eq(account.id, accountId));
         return r ? (r.status as AccountStatus) : null;
+      },
+      emailOf: async (accountId) => {
+        const [r] = await tx.select({ email: account.email }).from(account).where(eq(account.id, accountId));
+        return r?.email ?? null;
       },
       eraseAccount: async (accountId, now) => {
         // 프로필 칸을 비우고 DELETED로. 회원 코드도 비운다(UNIQUE). 계정 행과 ID는 다른 서비스의 법정 기록이 잇는 값이라 남긴다(docs/data.md §6)

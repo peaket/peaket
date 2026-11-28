@@ -7,14 +7,17 @@ import {
   FanNotifyProblem,
   isSubscriptionNotice,
   newId,
+  smsFallbackDedupKey,
+  SMS_ALLOWED_KINDS,
   TICKET_KEY_NOTICE_KINDS,
   ticketKeyNoticeDedupKey,
+  WEB_PUSH_PRIMARY_KINDS,
   type FanNoticeKind,
   type NotificationChannel,
   type TicketKeyNoticeKind,
   type Vars,
 } from '../domain/fan-notify.js';
-import type { FanNotifyStore } from '../domain/fan-notify-ports.js';
+import type { AbsorbedNoticeInbox, FanNotifyStore } from '../domain/fan-notify-ports.js';
 import type { NotificationJob } from '../domain/fan-notify-records.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -24,6 +27,8 @@ export interface NotificationIntakeDeps {
   readonly clock: Clock;
   /** 수신 거부 토큰 키. 워커와 같은 값을 쓴다 */
   readonly optOutKey: string;
+  /** 흡수 계정 주소의 프로세스 메모리 inbox(디스크·DB 없음, F-06-1 POL-034) */
+  readonly absorbedNotices?: AbsorbedNoticeInbox;
 }
 
 export interface TradeNoticeEvent {
@@ -117,6 +122,46 @@ export class NotificationIntake {
   }
 
   /**
+   * POL-034 흡수 계정 완료 통지. identity가 병합 트랜잭션 안 gRPC로 넘긴 주소를 저장하지 않고,
+   * 프로세스 inbox에 잠깐 두었다가 워커가 보낸다(계획 §3.1). 받는 계정은 이미 MERGED라
+   * 워커는 identity 받는 사람 조회를 하지 않는다.
+   */
+  async accountMergedAbsorbed(i: { mergeId: string; absorbedAccountId: string; absorbedEmail: string }): Promise<{ created: number; duplicate: number }> {
+    if (!isUuid(i.mergeId) || !isUuid(i.absorbedAccountId)) throw new FanNotifyProblem('INVALID', '병합 흡수 계정 통지 모양이 올바르지 않습니다');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(i.absorbedEmail)) throw new FanNotifyProblem('INVALID', '흡수 계정 이메일 모양이 올바르지 않습니다');
+    const dedupKey = `ACCOUNT_MERGED_ABSORBED:${i.mergeId}:${i.absorbedAccountId}:EMAIL`;
+    const r = await this.enqueue({
+      kind: 'ACCOUNT_MERGED_ABSORBED',
+      targetId: i.mergeId,
+      accountId: i.absorbedAccountId,
+      channel: 'EMAIL',
+      vars: {},
+      dedupKey,
+    });
+    if (r === 'created') this.d.absorbedNotices?.put(dedupKey, i.absorbedEmail);
+    return { created: r === 'created' ? 1 : 0, duplicate: r === 'duplicate' ? 1 : 0 };
+  }
+
+  /**
+   * 웹 푸시가 끝내 실패한 거래·안전 알림의 문자 대체 작업(d5 §9.1 4217).
+   * 신청 알림·광고·이메일 주 채널 알림에는 만들지 않는다. 작업 키에 `:SMS:fallback`을 붙여
+   * 워커가 대체 작업임을 안다.
+   */
+  async smsFallback(i: { kind: string; targetId: string; accountId: string }): Promise<'created' | 'duplicate' | 'not-applicable'> {
+    if (!WEB_PUSH_PRIMARY_KINDS.has(i.kind as FanNoticeKind)) return 'not-applicable';
+    if (!isUuid(i.accountId) || !i.targetId) throw new FanNotifyProblem('INVALID', '문자 대체 알림 대상이 올바르지 않습니다');
+    const r = await this.enqueue({
+      kind: i.kind as FanNoticeKind,
+      targetId: i.targetId,
+      accountId: i.accountId,
+      channel: 'SMS',
+      vars: {},
+      dedupKey: smsFallbackDedupKey({ kind: i.kind, targetId: i.targetId, accountId: i.accountId }),
+    });
+    return r === 'created' ? 'created' : 'duplicate';
+  }
+
+  /**
    * 입장 키 알림(notify §4.7): 이메일 하나와 그 계정의 살아 있는 웹 푸시 구독마다 하나. 중복 키에 noticeId가 들어가 같은 사건이 다시 와도 작업은 하나다.
    * 변수는 type·registeredAt·ticketId 셋이고 공개키·keyId·이메일 주소는 싣지 않는다. 밤에도 보낸다(거래·안전 알림, §7.2)
    */
@@ -147,6 +192,8 @@ export class NotificationIntake {
     if (!FAN_NOTICE_KINDS.includes(i.kind)) throw new FanNotifyProblem('INVALID', '알 수 없는 알림 종류입니다');
     if (!isUuid(i.accountId) || !i.targetId) throw new FanNotifyProblem('INVALID', '알림 대상이 올바르지 않습니다');
     if (!['EMAIL', 'WEB_PUSH', 'ALIMTALK', 'SMS'].includes(i.channel)) throw new FanNotifyProblem('INVALID', '알 수 없는 채널입니다');
+    // 문자는 d5 §9.1의 월렛·키 미등록과 웹 푸시 실패 대체뿐이다. 나머지는 '문자'가 들어간 오류로 거절한다
+    if (i.channel === 'SMS' && !SMS_ALLOWED_KINDS.has(i.kind)) throw new FanNotifyProblem('INVALID', `문자(SMS)로 보낼 수 없는 알림 종류입니다: ${i.kind}`);
     return this.enqueue({
       kind: i.kind,
       targetId: i.targetId,

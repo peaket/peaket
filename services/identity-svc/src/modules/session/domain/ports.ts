@@ -25,6 +25,7 @@ export interface RecipientRow {
   verified: boolean;
   locale: string;
   email?: string | null;
+  phone?: string | null;
 }
 
 export interface SessionRow {
@@ -174,6 +175,8 @@ export interface SessionTx {
   oldestPendingWithdrawalSince(): Promise<number | null>;
   /** 계정 상태. 없으면 null */
   accountStatusOf(accountId: string): Promise<AccountStatus | null>;
+  /** 계정 이메일. 없으면 null. 병합 확정 트랜잭션에서 흡수 계정 주소를 지우기 전에 읽는다(POL-034) */
+  emailOf?(accountId: string): Promise<string | null>;
   /** 가입 마무리 상태. 계정이 없으면 null. 계정 잠금과 함께 쓰면 잠근 뒤의 값이다 */
   signupStateOf(accountId: string): Promise<SignupState | null>;
   /** 닉네임 키를 트랜잭션 끝까지 잠근다(같은 키는 한 번에 하나만, ADR-0203 결정 2). 키를 저장하기 전에 부른다 */
@@ -250,7 +253,7 @@ export interface SessionStore {
    */
   investigationRefsOf(accountIds: readonly string[], since: number): Promise<InvestigationRefsRow[]>;
   /** 받는 사람 묶음(최대 500, 요청 순서). 이메일은 includeEmail일 때만 채운다(identity.proto RecipientQueryService, notify §2.1 E6) */
-  recipientsOf(accountIds: readonly string[], includeEmail: boolean): Promise<RecipientRow[]>;
+  recipientsOf(accountIds: readonly string[], includeEmail: boolean, includePhone?: boolean): Promise<RecipientRow[]>;
   /** 이메일은 있는데 EMAIL 연락처 가명 행이 없는 ACTIVE 계정을 ID 순으로 after 뒤부터 최대 limit개(정비 contact-ref-backfill) */
   accountsMissingEmailRef(after: string, limit: number): Promise<{ accountId: string; email: string }[]>;
   /** 새 판(writePrefix, 예 'k2.')이 아닌 EMAIL 행을 가진 ACTIVE 계정과 그 이메일·지금 값을 ID 순으로 after 뒤부터 최대 limit개(정비 contact-ref-rotate, BOT-046) */
@@ -482,6 +485,17 @@ export class MergeCheckUnavailable extends Error {
     this.name = 'MergeCheckUnavailable';
   }
 }
+
+/** POL-034 흡수 계정 완료 통지. 주소는 요청에만 있고 저장하지 않는다(2026-11-28 소유자 결정) */
+export interface MergeNoticeSender {
+  send(i: { mergeId: string; absorbedAccountId: string; absorbedEmail: string }): Promise<boolean>;
+  failed(reason: string): void;
+}
+
+export const MERGE_NOTICE = Symbol('identity.MergeNotice');
+
+/** 병합 통지 송신기가 조립되지 않았을 때(로컬·시험). 병합은 그대로 끝나고 지표만 없다 */
+export const noMergeNotice: MergeNoticeSender = { send: async () => false, failed: () => undefined };
 
 export const MERGE_PROPOSALS = Symbol('identity.MergeProposals');
 /** 병합 제안(세션·캐시 Redis id:merge, 10분). 모든 메서드: @throws LinkStoreUnavailable 저장소에 닿지 못함 */

@@ -6,8 +6,13 @@ import { ACCOUNTS_WITHDRAWN_TOPIC, readReviewWithdrawn } from '../modules/review
 /** 서비스 소비자 그룹 이름(docs/streaming.md §2.6) */
 export const CORE_GROUP = (env: string): string => `peaket.core-svc.${env}`;
 
-/** 읽는 토픽 셋(탈퇴 사건 하나) */
-export const CORE_TOPICS = [ACCOUNTS_WITHDRAWN_TOPIC] as const satisfies readonly ['identity.accounts-withdrawn'];
+/** 읽는 토픽 넷(후기 탈퇴 + F-06-1 notify: 병합·로그인 수단·주문) */
+export const CORE_TOPICS = [
+  ACCOUNTS_WITHDRAWN_TOPIC,
+  'identity.accounts-merged',
+  'identity.login-methods-changed',
+  'trade.orders',
+] as const satisfies readonly ['identity.accounts-withdrawn', 'identity.accounts-merged', 'identity.login-methods-changed', 'trade.orders'];
 
 /** 브로커 주소 모양(플랫폼 loadOutboxRelayProcessConfig의 BROKER와 같은 규칙, queue-svc와 같다) */
 const BROKER = /^[A-Za-z0-9.-]+:\d{1,5}$/;

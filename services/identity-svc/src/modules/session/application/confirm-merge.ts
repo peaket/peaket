@@ -5,7 +5,8 @@
 // 대표 계정의 다른 세션 끝내기(LOGIN_METHOD_CHANGED: 흡수 계정의 수단이 옮겨 와 인증 요소가 바뀌었다. 제안한 세션이 대표 계정의 것이면 그 세션만 남긴다, ASVS 7.4.3, BOT-044, ADR-0209 결정 5) → 병합 사건.
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { CLOCK, type Clock, PLATFORM_LOGGER, uuidv7 } from '@peaket/platform';
-import { MERGE_PROPOSALS, type MergeProposals, MergeCheckUnavailable, REAUTH_VERIFIER, ReauthRejected, type ReauthVerifier, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, type SessionStore, type SignupState } from '../domain/ports.js';
+import { MERGE_NOTICE, MERGE_PROPOSALS, type MergeNoticeSender, type MergeProposals, MergeCheckUnavailable, REAUTH_VERIFIER, ReauthRejected, type ReauthVerifier, SESSION_SIGNALS, SESSION_STORE, type SessionSignals, type SessionStore, type SignupState } from '../domain/ports.js';
+import { sendAbsorbedNoticeOnce } from './absorbed-notice.js';
 import { STAFF_ASSIGNMENT_STORE, type StaffAssignmentStore } from '../domain/staff.js';
 import { signupCompleted } from '../domain/signup.js';
 import { choosePrimary, sharedProviderKinds } from '../domain/merge.js';
@@ -15,6 +16,7 @@ import { MergeError } from './merge-error.js';
 import { MergePlanner } from './plan-merge.js';
 
 const PROPOSAL_ID = /^[A-Za-z0-9_-]{22}$/;
+const MERGE_NOTICE_FAILED = 'merge_notice_failed';
 
 @Injectable()
 export class ConfirmMerge {
@@ -28,6 +30,8 @@ export class ConfirmMerge {
     /** 흡수 계정의 스태프 배정·스캐너 세션 정리(없으면 계정 상태 확인이 안전을 지킨다) */
     @Optional() @Inject(STAFF_ASSIGNMENT_STORE) private readonly staff?: StaffAssignmentStore,
     @Optional() @Inject(PLATFORM_LOGGER) private readonly logger?: { warn(o: object, msg?: string): void },
+    /** POL-034 흡수 계정 완료 통지(없으면 보내지 않는다. 로컬·시험) */
+    @Optional() @Inject(MERGE_NOTICE) private readonly mergeNotice?: MergeNoticeSender,
   ) {}
 
   /** @throws MergeError NOT_FOUND·REAUTH_REQUIRED·BLOCKED·INVARIANT·UNAVAILABLE */
@@ -99,6 +103,8 @@ export class ConfirmMerge {
         const same = sharedProviderKinds((await tx.providersOf(p.primaryAccountId)).map((x) => x.provider), (await tx.providersOf(p.absorbedAccountId)).map((x) => x.provider));
         if (same.length > 0) throw new MergeError('BLOCKED', '두 계정에 같은 종류의 다른 로그인 수단이 있다', ['SAME_PROVIDER_KIND'], same);
         const open = await tx.unterminatedSessions(p.absorbedAccountId);
+        // POL-034: mergeAccounts가 프로필(이메일)을 지우므로 그 전에 흡수 계정 주소를 읽는다. 주소는 저장하지 않고 요청에만 싣는다
+        const absorbedEmail = (await tx.emailOf?.(p.absorbedAccountId)) ?? null;
         // 대표 계정에 흡수 계정의 로그인 수단이 옮겨 온다: 제안한 세션(대표 계정의 것일 때) 말고 대표 계정의 세션을 모두 끝낸다(쓰기 잠금은 여기서 잡는다)
         const primaryOthers = await otherLiveSessions(tx, p.primaryAccountId, accountId === p.primaryAccountId ? sessionId : null, now);
         await tx.mergeAccounts({ mergeId, primaryAccountId: p.primaryAccountId, absorbedAccountId: p.absorbedAccountId, mergedProvider: p.newProvider, moved: { ...plan.moved }, requestedAt: p.createdAt, now });
@@ -106,6 +112,19 @@ export class ConfirmMerge {
         await tx.endSessions([...open.map((id) => ({ id, reason: 'MERGED' as const })), ...primaryOthers.map((id) => ({ id, reason: 'LOGIN_METHOD_CHANGED' as const }))], now);
         ended = primaryOthers.length;
         await tx.recordAccountMerged({ mergeId, primaryAccountId: p.primaryAccountId, mergedAccountId: p.absorbedAccountId, confirmedAt: now });
+        // 병합 트랜잭션 안에서 한 번 전달한다. 실패해도 sendAbsorbedNoticeOnce가 삼켜 지표만 남기므로 병합은 계속된다
+        if (this.mergeNotice && absorbedEmail) {
+          await sendAbsorbedNoticeOnce(
+            {
+              send: (input) => this.mergeNotice!.send(input),
+              failed: (reason) => {
+                this.mergeNotice!.failed(reason);
+                this.logger?.warn({ kind: MERGE_NOTICE_FAILED, reason }, '흡수 계정 완료 통지를 보내지 못했다(병합은 계속)');
+              },
+            },
+            { mergeId, absorbedAccountId: p.absorbedAccountId, absorbedEmail },
+          );
+        }
       });
     } catch (e) {
       // 병합할 수 없게 된 제안은 지운다(다시 추가하면 지금 상태로 새 제안을 만든다)

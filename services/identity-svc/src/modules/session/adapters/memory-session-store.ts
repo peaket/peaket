@@ -115,16 +115,17 @@ export class MemorySessionStore implements SessionStore {
     if (a) this.#state.accounts.set(accountId, { ...a, verified: true });
   }
 
-  async recipientsOf(accountIds: readonly string[], includeEmail: boolean): Promise<import('../domain/ports.js').RecipientRow[]> {
+  async recipientsOf(accountIds: readonly string[], includeEmail: boolean, includePhone = false): Promise<import('../domain/ports.js').RecipientRow[]> {
     return accountIds.map((accountId) => {
       const a = this.#state.accounts.get(accountId);
-      if (!a) return { accountId, status: 'NOT_FOUND', verified: false, locale: 'ko', ...(includeEmail ? { email: null } : {}) };
+      if (!a) return { accountId, status: 'NOT_FOUND', verified: false, locale: 'ko', ...(includeEmail ? { email: null } : {}), ...(includePhone ? { phone: null } : {}) };
       return {
         accountId,
         status: a.status,
         verified: a.verified === true,
         locale: a.locale ?? 'ko',
         ...(includeEmail ? { email: a.status === 'MERGED' || a.status === 'DELETED' ? null : a.email } : {}),
+        ...(includePhone ? { phone: a.status === 'MERGED' || a.status === 'DELETED' ? null : (a.phone ?? null) } : {}),
       };
     });
   }
@@ -536,6 +537,7 @@ export class MemorySessionStore implements SessionStore {
         return starts.length > 0 ? Math.min(...starts) : null;
       },
       accountStatusOf: async (accountId) => s.accounts.get(accountId)?.status ?? null,
+      emailOf: async (accountId) => s.accounts.get(accountId)?.email ?? null,
       signupStateOf: async (accountId) => signupStateIn(s, accountId),
       lockNicknameKey: async () => {},
       nicknameKeyTaken: async (key) => nicknameTakenIn(s, key),

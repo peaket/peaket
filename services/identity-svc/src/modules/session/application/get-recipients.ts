@@ -17,11 +17,11 @@ export class RecipientsProblem extends Error {
 export class GetRecipients {
   constructor(private readonly store: Pick<SessionStore, 'recipientsOf'>) {}
 
-  async run(input: { accountIds: readonly string[]; includeEmail: boolean }): Promise<RecipientRow[]> {
+  async run(input: { accountIds: readonly string[]; includeEmail: boolean; includePhone?: boolean }): Promise<RecipientRow[]> {
     if (input.accountIds.length > 500) throw new RecipientsProblem('INVALID_ARGUMENT', '받는 사람은 500명까지입니다');
     if (input.accountIds.some((id) => !UUID.test(id))) throw new RecipientsProblem('INVALID_ARGUMENT', '계정 ID 모양이 올바르지 않습니다');
     const unique = [...new Set(input.accountIds.map((id) => id.toLowerCase()))];
-    const rows = await this.store.recipientsOf(unique, input.includeEmail);
+    const rows = await this.store.recipientsOf(unique, input.includeEmail, input.includePhone);
     const byId = new Map(rows.map((r) => [r.accountId, r]));
     return input.accountIds.map((id) => byId.get(id.toLowerCase()) ?? { accountId: id, status: 'NOT_FOUND', verified: false, locale: 'ko', ...(input.includeEmail ? { email: null } : {}) });
   }

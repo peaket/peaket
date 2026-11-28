@@ -4,9 +4,12 @@ import type { Clock } from '@peaket/platform';
 import {
   FanNotifyProblem,
   isNightKst,
+  isSmsJobAllowed,
   isSubscriptionNotice,
   messageOf,
   needsDubiousRetry,
+  smsBodyOf,
+  SMS_MAX_CHARS,
   webPushTargetOf,
   NOTIFY_LEASE_MS,
   NOTIFY_MAX_ATTEMPTS,
@@ -14,7 +17,19 @@ import {
   optOutTokenFor,
   type FanNoticeKind,
 } from '../domain/fan-notify.js';
-import { MailTransportError, type FanNotifyStore, type MailTransport, type PushTransport, type Recipient, type RecipientDirectory, type VapidConfig } from '../domain/fan-notify-ports.js';
+import {
+  MailTransportError,
+  SmsTransportError,
+  type AbsorbedNoticeInbox,
+  type FanNotifyStore,
+  type MailTransport,
+  type PushTransport,
+  type Recipient,
+  type RecipientDirectory,
+  type SmsFailureKind,
+  type SmsTransport,
+  type VapidConfig,
+} from '../domain/fan-notify-ports.js';
 import type { NotificationDeliveryRecord, NotificationJob, NotificationSubscription } from '../domain/fan-notify-records.js';
 import { encryptWebPush, pushTopic, pushTtlUrgency, vapidAuthorization } from '../domain/push-crypto.js';
 
@@ -22,9 +37,11 @@ export interface FanNotificationWorkerDeps {
   readonly store: FanNotifyStore;
   readonly mail: MailTransport;
   readonly push: PushTransport;
+  readonly sms?: SmsTransport;
   readonly recipients: RecipientDirectory;
   readonly clock: Clock;
   readonly optOutKey: string;
+  readonly absorbedNotices?: AbsorbedNoticeInbox;
   readonly vapid?: VapidConfig;
   /** 수신 거부 링크의 공개 출처. 운영은 PEAKET_PUBLIC_ORIGIN */
   readonly publicOrigin?: string;
@@ -124,11 +141,39 @@ export class FanNotificationWorker {
       await this.#webPush(job, now, out);
       return;
     }
-    // 알림톡·문자는 대행 계약 전이다. 지금은 영구 실패로 남긴다(ADR-0060 결정 13)
+    if (job.channel === 'SMS') {
+      await this.#sms(job, now, out);
+      return;
+    }
+    // 알림톡은 대행 계약 전이다. 지금은 영구 실패로 남긴다(ADR-0060 결정 13)
     await this.#terminate(job, now, 'DEAD', null, out, 'dead');
   }
 
   async #email(job: NotificationJob, now: Date, subscription: NotificationSubscription | undefined, out: WorkerResult): Promise<void> {
+    // 흡수 계정은 이미 MERGED라 identity 받는 사람 조회가 주소를 주지 않는다. gRPC로 받아 inbox에 둔 주소로만 보낸다
+    if (job.kind === 'ACCOUNT_MERGED_ABSORBED') {
+      const email = this.d.absorbedNotices?.get(job.dedupKey);
+      if (!email) {
+        await this.#finish(job, now, 'FAILED', null);
+        out.failed += 1;
+        this.d.log?.({ kind: 'notify-absorbed-missing', dedupKey: job.dedupKey });
+        return;
+      }
+      const msg = messageOf(job.kind as FanNoticeKind, job.vars);
+      const headers: Record<string, string> = { 'content-type': 'text/plain; charset=utf-8' };
+      try {
+        const sent = await this.d.mail.send({ to: email, subject: msg.title, body: msg.body, headers, messageKey: job.dedupKey });
+        await this.#finish(job, now, 'SENT', sent.providerMessageId ?? null);
+        out.sent += 1;
+      } catch (e) {
+        const err = e instanceof MailTransportError ? e : new MailTransportError('RETRYABLE', e instanceof Error ? e.message : 'transport-error');
+        if (err.kind === 'PERMANENT') await this.#terminate(job, now, 'DEAD', null, out, 'dead');
+        else if (err.kind === 'UNKNOWN' && !needsDubiousRetry(job.kind as FanNoticeKind)) await this.#terminate(job, now, 'FAILED', null, out, 'failed');
+        else await this.#retry(job, now, out, err.message);
+      }
+      return;
+    }
+
     const [recipient] = await this.d.recipients.getMany([job.accountId], true);
     const r: Recipient | undefined = recipient;
     if (!r || r.status === 'MERGED' || r.status === 'DELETED' || r.status === 'NOT_FOUND') {
@@ -210,6 +255,38 @@ export class FanNotificationWorker {
     }
   }
 
+  async #sms(job: NotificationJob, now: Date, out: WorkerResult): Promise<void> {
+    if (!isSmsJobAllowed(job.kind, job.dedupKey) || !this.d.sms) {
+      await this.#finish(job, now, 'FAILED', null);
+      out.failed += 1;
+      return;
+    }
+    const [r] = await this.d.recipients.getMany([job.accountId], false, true);
+    if (!r || r.status === 'MERGED' || r.status === 'DELETED' || r.status === 'NOT_FOUND' || !r.phone) {
+      await this.#finish(job, now, 'FAILED', null);
+      out.failed += 1;
+      return;
+    }
+    const msg = messageOf(job.kind as FanNoticeKind, job.vars);
+    const body = smsBodyOf(msg);
+    if (body.length > SMS_MAX_CHARS) {
+      await this.#finish(job, now, 'FAILED', null);
+      out.failed += 1;
+      this.d.log?.({ kind: 'notify-sms-too-long', dedupKey: job.dedupKey, length: body.length });
+      return;
+    }
+    try {
+      const sent = await this.d.sms.send({ to: r.phone, body, messageKey: job.dedupKey });
+      await this.#finish(job, now, 'SENT', sent.providerMessageId ?? null);
+      out.sent += 1;
+    } catch (e) {
+      const err = e instanceof SmsTransportError ? e : new SmsTransportError(smsFailureKind(e), e instanceof Error ? e.message : 'transport-error');
+      if (err.kind === 'PERMANENT') await this.#terminate(job, now, 'DEAD', null, out, 'dead');
+      else if (err.kind === 'UNKNOWN' && !needsDubiousRetry(job.kind as FanNoticeKind)) await this.#terminate(job, now, 'FAILED', null, out, 'failed');
+      else await this.#retry(job, now, out, err.message);
+    }
+  }
+
   async #retry(job: NotificationJob, now: Date, out: WorkerResult, reason: string): Promise<void> {
     const attempt = job.attempts + 1;
     if (attempt >= NOTIFY_MAX_ATTEMPTS) {
@@ -245,8 +322,15 @@ export class FanNotificationWorker {
     };
     await this.d.store.insertDelivery(delivery);
     await this.d.store.deleteJob(job.dedupKey);
+    if (job.kind === 'ACCOUNT_MERGED_ABSORBED') this.d.absorbedNotices?.delete(job.dedupKey);
     if (status === 'DEAD') this.d.log?.({ kind: 'notify-dead', dedupKey: job.dedupKey, channel: job.channel, attempts });
   }
+}
+
+/** 문자 대행 오류의 `kind`를 읽는다. `kind`가 없는 오류는 다시 보낼 수 있는 실패로 본다 */
+function smsFailureKind(e: unknown): SmsFailureKind {
+  const kind = e !== null && typeof e === 'object' && 'kind' in e ? (e as { kind?: unknown }).kind : undefined;
+  return kind === 'RETRYABLE' || kind === 'PERMANENT' || kind === 'UNKNOWN' ? kind : 'RETRYABLE';
 }
 
 /** 워커 조립이 빠졌을 때의 한국어 오류(시작 확인) */
