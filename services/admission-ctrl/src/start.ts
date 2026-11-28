@@ -3,7 +3,7 @@
 // 관리 포트(/metrics, /ready)는 서비스 뼈대가 연다. 리더 하나만 200ms 루프를 돈다(쿠버네티스 Lease, ADR-0056·0182).
 import 'reflect-metadata';
 import type { Writable } from 'node:stream';
-import { createHotRedis, createService, inClusterLeaseApi, LeaseElector, type LeaseApi, memoryLeaseApi, systemClock } from '@peaket/platform';
+import { createHotRedis, createService, inClusterLeaseApi, LeaseElector, type LeaseApi, memoryLeaseApi, runbookGateConfigFromProcess, systemClock } from '@peaket/platform';
 import { AppModule } from './app.module.js';
 import { CommittedSeedSource, kmsSeedClient, LocalResultFiles, minReplicasOf, RedisBatchStore, RedisShuffleRecords, shuffleRuntimeFromEnv } from './modules/batch/index.js';
 import { AdmissionLeader, ApplyLeaderControl, LEADER_STORE, LeaderMetrics, type LeaderStore, PrometheusControlInputs } from './modules/leader/index.js';
@@ -91,6 +91,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
             apply: new ApplyLeaderControl(service.app.get(LEADER_STORE) as LeaderStore, elector, leader),
             podName: (env.PEAKET_POD ?? env.HOSTNAME ?? `${SERVICE}-local`).slice(0, 64),
             nowMs: () => systemClock.now(),
+            runbook: runbookGateConfigFromProcess(env, 'admission-ctrl', (e) => service.logger.warn({ runbookSecurity: e }, '런북 묶음을 거부했다')),
             onError: (method, err) => service.logger.error({ method, err: err instanceof Error ? { type: err.name, message: err.message } : String(err) }, 'ControlReceiver 처리 실패'),
           },
         })

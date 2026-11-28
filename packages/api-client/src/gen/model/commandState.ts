@@ -70,6 +70,8 @@ export interface CommandState {
      * @nullable
      */
   postReviewDueAt?: string | null;
+  /** ack 시간 초과로 FAILED가 된 명령을 채운 비상 런북 CLI 한 줄(C-T7 ③, F-02-7). 상세에만 싣고 목록에는 싣지 않는다. 런북 사유 200자를 넘거나 프리셋이 없는 명령이면 없다 */
+  runbookCommand?: string;
   /**
      * 전파 상태. 제어 gRPC 명령은 ack 수, 설정형 명령은 적용 확인(ADR-0143). 상세에만 싣는다
      * @nullable

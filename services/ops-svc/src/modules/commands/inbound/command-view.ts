@@ -3,6 +3,7 @@
 import type { Principal } from '@peaket/platform';
 import { z } from 'zod';
 import { COMMAND_STATES, COMMAND_TYPES, REVERT_APPROVER_ROLES, approverRolesOf, type Command } from '../domain/command.js';
+import { runbookCommandLine } from '../domain/runbook-command-line.js';
 
 export const CommandIdParams = z.object({ commandId: z.uuid() }).strict();
 export const CommandBody = z
@@ -60,6 +61,8 @@ export const CommandView = z.object({
     .object({ kind: z.enum(['ACK', 'APPLY_CHECK']), ackedCount: z.number(), targetCount: z.number(), unackedTargets: z.array(z.string()), applyStatus: z.string().nullable().optional() })
     .nullable()
     .optional(),
+  /** ack 시간 초과 FAILED 명령의 런북 CLI 한 줄(C-T7 ③, 상세에만) */
+  runbookCommand: z.string().optional(),
 });
 export const CommandBaseView = CommandView.omit({ params: true, dryRun: true, delivery: true });
 export const CommandPageView = z.object({ items: z.array(CommandBaseView), nextCursor: z.string().nullable() });
@@ -98,4 +101,5 @@ export const viewOf = (c: Command, me?: Principal): z.output<typeof CommandView>
   params: c.params,
   ...(c.dryRun !== undefined ? { dryRun: c.dryRun as z.output<typeof CommandDryRunView> } : {}),
   ...(c.delivery !== undefined ? { delivery: { kind: c.delivery.kind, ackedCount: c.delivery.ackedCount, targetCount: c.delivery.targetCount, unackedTargets: [...c.delivery.unackedTargets] } } : {}),
+  ...(runbookCommandLine(c) !== undefined ? { runbookCommand: runbookCommandLine(c) } : {}),
 });

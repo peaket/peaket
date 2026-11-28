@@ -5,6 +5,7 @@
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { controlV1Control } from '@peaket/contracts/proto';
+import { type RunbookGateConfig, type RunbookProtoBundle, withRunbookControl } from '@peaket/platform';
 import { type GrpcServiceBinding, startGrpcServer } from '../grpc-server.js';
 import { QUEUE_NOTICE_KINDS, QueueNoticeRejected, type QueueNoticeKind, type SetQueueNotice, type SetSaleSuspensionCopy } from '../modules/sale/index.js';
 
@@ -38,6 +39,8 @@ export interface QueueControlDeps {
   readonly podName: string;
   readonly nowMs?: () => number;
   readonly onError?: (method: string, err: unknown) => void;
+  /** 런북 서명 관문 설정(없으면 묶음이 올 때 bundle-malformed) */
+  readonly runbook?: RunbookGateConfig;
 }
 
 /** ControlReceiver의 queue-svc 처리기(ApplyControl 하나) */
@@ -53,10 +56,6 @@ export function saleSuspensionControlBinding(deps: QueueControlDeps): GrpcServic
         deps.onError?.('ApplyControl', new Error(message));
         cb({ code, message });
       };
-      const notice = (QUEUE_NOTICE_KINDS as readonly string[]).includes(kind) && deps.setNotice !== undefined;
-      if (kind !== CONTROL_KIND_SALE_SUSPENSION && !notice) return fail(grpc.status.UNIMPLEMENTED, '이 제어 종류는 받지 않는다');
-      if (!UUID.test(commandId)) return fail(grpc.status.INVALID_ARGUMENT, 'command_id는 UUID여야 한다');
-      if (!Number.isSafeInteger(version) || version <= 0) return fail(grpc.status.INVALID_ARGUMENT, 'version은 1 이상의 안전 정수여야 한다');
       const nowMs = deps.nowMs?.() ?? Date.now();
       const ack = (applied: number): void =>
         cb(null, {
@@ -64,16 +63,42 @@ export function saleSuspensionControlBinding(deps: QueueControlDeps): GrpcServic
           pod_name: deps.podName,
           applied_at: { seconds: Math.floor(nowMs / 1000), nanos: (nowMs % 1000) * 1_000_000 },
         });
-      const failed = (err: unknown): void =>
-        err instanceof QueueNoticeRejected ? fail(grpc.status.INVALID_ARGUMENT, `${err.why}가 올바르지 않다`) : fail(grpc.status.INTERNAL, err instanceof Error ? err.message : 'control-failed');
-      if (notice) {
-        deps.setNotice!.run({ kind: kind as QueueNoticeKind, scope, desiredStateJson: String(r.desired_state_json ?? ''), commandId, version }).then(ack, failed);
+      const failed = (err: unknown): void => {
+        if (err instanceof QueueNoticeRejected) return fail(grpc.status.INVALID_ARGUMENT, `${err.why}가 올바르지 않다`);
+        const code = (err as { code?: unknown }).code;
+        return fail(typeof code === 'number' ? code : grpc.status.INTERNAL, err instanceof Error ? err.message : 'control-failed');
+      };
+      const inner = async (): Promise<number> => {
+        const notice = (QUEUE_NOTICE_KINDS as readonly string[]).includes(kind) && deps.setNotice !== undefined;
+        if (kind !== CONTROL_KIND_SALE_SUSPENSION && !notice) throw Object.assign(new Error('이 제어 종류는 받지 않는다'), { code: grpc.status.UNIMPLEMENTED });
+        if (!UUID.test(commandId)) throw Object.assign(new Error('command_id는 UUID여야 한다'), { code: grpc.status.INVALID_ARGUMENT });
+        if (!Number.isSafeInteger(version) || version <= 0) throw Object.assign(new Error('version은 1 이상의 안전 정수여야 한다'), { code: grpc.status.INVALID_ARGUMENT });
+        if (notice) return deps.setNotice!.run({ kind: kind as QueueNoticeKind, scope, desiredStateJson: String(r.desired_state_json ?? ''), commandId, version });
+        if (!UUID.test(scope)) throw Object.assign(new Error('scope는 회차 ID여야 한다'), { code: grpc.status.INVALID_ARGUMENT });
+        const suspended = suspendedOf(String(r.desired_state_json ?? ''));
+        if (suspended === undefined) throw Object.assign(new Error('desired_state_json이 {"suspended": bool}이 아니다'), { code: grpc.status.INVALID_ARGUMENT });
+        const result = await deps.setSuspension.run({ eventId: scope, action: suspended ? 'SUSPEND' : 'RESUME', commandId, revision: version });
+        return result.revision;
+      };
+      if (r.runbook_bundle) {
+        withRunbookControl({
+          config: deps.runbook,
+          bundle: r.runbook_bundle as RunbookProtoBundle,
+          request: { commandId, kind, scope, version, desiredStateJson: String(r.desired_state_json ?? '') },
+          service: 'queue-svc',
+          podName: deps.podName,
+          apply: async () => {
+            try {
+              return await inner();
+            } catch (err) {
+              if (err instanceof QueueNoticeRejected) throw Object.assign(err, { code: grpc.status.INVALID_ARGUMENT });
+              throw err;
+            }
+          },
+        }).then(ack, failed);
         return;
       }
-      if (!UUID.test(scope)) return fail(grpc.status.INVALID_ARGUMENT, 'scope는 회차 ID여야 한다');
-      const suspended = suspendedOf(String(r.desired_state_json ?? ''));
-      if (suspended === undefined) return fail(grpc.status.INVALID_ARGUMENT, 'desired_state_json이 {"suspended": bool}이 아니다');
-      deps.setSuspension.run({ eventId: scope, action: suspended ? 'SUSPEND' : 'RESUME', commandId, revision: version }).then((result) => ack(result.revision), failed);
+      inner().then(ack, failed);
     },
   };
   return { definition: controlPackage().ControlReceiver.service, handlers };

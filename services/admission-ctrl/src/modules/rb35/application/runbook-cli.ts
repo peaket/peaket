@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util';
 import { type Clock, uuidv7 } from '@peaket/platform';
 import { drandRoundAfter } from '@peaket/shuffle';
 import { fixAtOf, type ShuffleGroup } from '../../batch/index.js';
+import { isControlFile, isControlPreset, runControlCli, type RunbookControlService, type RunbookAuditSink, type RunbookControlTransport } from '../../runbook/index.js';
 import { BUNDLE_VALID_MS, bundleBytes, parseSigned, RB35_COMMANDS, RECOMMIT_MIN_LEAD_MS, type Rb35Command, type SignedBundle } from '../domain/bundle.js';
 import type { Rb35Store } from '../domain/ports.js';
 import { type CommanderKey, verifySigned } from '../domain/verify.js';
@@ -31,6 +32,11 @@ export interface RunbookDeps {
   waitResultMs?: number;
   /** 결과를 다시 보는 간격(기본 500ms) */
   pollMs?: number;
+  /** 제어 명령 갈래(F-02-7). 없으면 control 프리셋을 쓰지 않는다 */
+  control?: RunbookControlTransport;
+  audit?: RunbookAuditSink;
+  controlAddresses?: Partial<Record<RunbookControlService, readonly string[]>>;
+  allowSimulator?: boolean;
 }
 
 const DEFAULT_WAIT_RESULT_MS = 30_000;
@@ -152,6 +158,11 @@ function report(deps: RunbookDeps, commandId: string, result: string): number {
 /** 종료 코드를 돌려준다(시험에서 그대로 본다) */
 export async function runRunbookCli(argv: string[], deps: RunbookDeps): Promise<number> {
   const [sub, ...rest] = argv;
+  const inAt = rest.indexOf('--in');
+  const inPath = inAt >= 0 ? rest[inAt + 1] : undefined;
+  if ((sub === 'draft' && isControlPreset(rest[0])) || ((sub === 'sign' || sub === 'run') && isControlFile(deps, inPath))) {
+    return runControlCli(argv, deps);
+  }
   try {
     if (sub === 'draft') return await draft(rest, deps);
     if (sub === 'sign') return await sign(rest, deps);

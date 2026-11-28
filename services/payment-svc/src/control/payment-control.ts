@@ -8,7 +8,7 @@
 // - listen: PEAKET_PAYMENT_CONTROL_GRPC_PORT가 있으면 제어 전용 포트를 연다(운영 50061, local·ci·시험은 0이면 빈 포트)
 // - stop: 시작 읽기를 멈추고 제어 포트를 닫는다
 // 환경 값은 인자로만 받는다(process.env를 읽지 않는다).
-import { type Clock, CONTROL_SYNC_DEFAULTS, type Database, type GrpcLbProfile, type PlatformMetrics } from '@peaket/platform';
+import { type Clock, CONTROL_SYNC_DEFAULTS, type Database, type GrpcLbProfile, type PlatformMetrics, runbookGateConfigFromProcess } from '@peaket/platform';
 import { ENTRY_PAUSE_CACHE_TTL_MS } from '../modules/payment/server.js';
 import type * as grpc from '@grpc/grpc-js';
 import {
@@ -144,6 +144,7 @@ export function paymentControlPlane(o: PaymentControlOptions): PaymentControlPla
           podName: o.podName,
           allowSimulator,
           nowMs: () => o.clock.now(),
+          runbook: runbookGateConfigFromProcess(o.env, 'payment-svc', (e) => o.logger.warn({ runbookSecurity: e }, '런북 묶음을 거부했다')),
           log: { applied: ({ kind, ...rest }) => o.logger.info({ kind: 'payment-control', controlKind: kind, ...rest }, '제어 명령을 받았다') },
           onError: (method, err) => o.logger.error({ kind: 'payment-control', method, err: err instanceof Error ? err.name : 'unknown' }, '제어 명령 처리 실패'),
         },

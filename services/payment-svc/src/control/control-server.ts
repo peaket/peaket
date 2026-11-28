@@ -6,7 +6,7 @@
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { controlV1Control } from '@peaket/contracts/proto';
-import { type GrpcLbProfile, type PlatformMetrics, type StartedGrpcServer } from '@peaket/platform';
+import { type GrpcLbProfile, type PlatformMetrics, type RunbookGateConfig, type RunbookProtoBundle, type StartedGrpcServer, withRunbookControl } from '@peaket/platform';
 import { startGrpcServer } from '../grpc-server.js';
 import { type ApplyEntryPauseRelease, type ApplyPgSwitch, entryReleaseDesiredOf, PaymentInputError, PgSwitchControlRejected, pgSwitchDesiredOf, pgSwitchScopeOf } from '../modules/payment/server.js';
 
@@ -28,6 +28,8 @@ export interface PaymentControlDeps {
   readonly nowMs?: () => number;
   readonly log?: PaymentControlLog;
   readonly onError?: (method: string, err: unknown) => void;
+  /** 런북 서명 관문 설정(없으면 묶음이 올 때 bundle-malformed) */
+  readonly runbook?: RunbookGateConfig;
 }
 
 const fail = (code: number, message: string): never => {
@@ -36,6 +38,26 @@ const fail = (code: number, message: string): never => {
 
 /** 요청 하나를 처리한다. 거절은 grpc 상태 코드를 단 Error로 던진다 */
 export async function applyPaymentControl(r: Record<string, unknown>, deps: PaymentControlDeps): Promise<{ appliedVersion: number; podName: string; appliedAtMs: number }> {
+  if (r.runbook_bundle) {
+    return withRunbookControl({
+      config: deps.runbook,
+      bundle: r.runbook_bundle as RunbookProtoBundle,
+      request: {
+        commandId: String(r.command_id ?? ''),
+        kind: String(r.kind ?? ''),
+        scope: String(r.scope ?? ''),
+        version: Number(r.version ?? 0),
+        desiredStateJson: String(r.desired_state_json ?? ''),
+      },
+      service: 'payment-svc',
+      podName: deps.podName,
+      apply: () => applyPaymentInner(r, deps),
+    });
+  }
+  return applyPaymentInner(r, deps);
+}
+
+async function applyPaymentInner(r: Record<string, unknown>, deps: PaymentControlDeps): Promise<{ appliedVersion: number; podName: string; appliedAtMs: number }> {
   const kind = String(r.kind ?? '');
   const commandId = String(r.command_id ?? '');
   const version = Number(r.version ?? 0);

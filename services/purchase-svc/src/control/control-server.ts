@@ -7,7 +7,7 @@
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import { controlV1Control } from '@peaket/contracts/proto';
-import { grpcServerOptions } from '@peaket/platform';
+import { grpcServerOptions, withRunbookControl, type RunbookGateConfig, type RunbookProtoBundle } from '@peaket/platform';
 import type { SetSalePause, SetSaleSuspension } from '../modules/sale-control/index.js';
 
 export const CONTROL_KIND_SALE_SUSPENSION = 'CONTROL_KIND_SALE_SUSPENSION';
@@ -32,6 +32,8 @@ export interface ControlRequest {
   readonly kind: string;
   readonly version: number;
   readonly desiredStateJson: string;
+  /** 비상 런북 묶음(있으면 쓰기 전에 관문을 통과한다) */
+  readonly runbookBundle?: RunbookProtoBundle;
 }
 
 export interface ControlDeps {
@@ -40,6 +42,8 @@ export interface ControlDeps {
   readonly setPause?: SetSalePause;
   readonly podName: string;
   readonly nowMs?: () => number;
+  /** 런북 서명 관문 설정(없으면 묶음이 올 때 bundle-malformed) */
+  readonly runbook?: RunbookGateConfig;
 }
 
 const invalid = (message: string): Error => Object.assign(new Error(message), { code: grpc.status.INVALID_ARGUMENT });
@@ -69,6 +73,21 @@ export const validControlVersion = (v: number): boolean => Number.isSafeInteger(
 
 /** ApplyControl 하나를 처리한다. 거절은 grpc 상태 코드를 단 Error로 던진다 */
 export async function applyControl(req: ControlRequest, deps: ControlDeps): Promise<ControlAck> {
+  const raw = req.runbookBundle ?? (req as { runbook_bundle?: RunbookProtoBundle }).runbook_bundle;
+  if (raw) {
+    return withRunbookControl({
+      config: deps.runbook,
+      bundle: raw,
+      request: { commandId: req.commandId, kind: req.kind, scope: req.scope, version: req.version, desiredStateJson: req.desiredStateJson },
+      service: 'purchase-svc',
+      podName: deps.podName,
+      apply: () => applyInner(req, deps),
+    });
+  }
+  return applyInner(req, deps);
+}
+
+async function applyInner(req: ControlRequest, deps: ControlDeps): Promise<ControlAck> {
   const pause = req.kind === CONTROL_KIND_SALE_PAUSE && deps.setPause !== undefined;
   if (req.kind !== CONTROL_KIND_SALE_SUSPENSION && !pause) throw Object.assign(new Error('이 제어 종류는 받지 않는다'), { code: grpc.status.UNIMPLEMENTED });
   if (!UUID.test(req.commandId)) throw invalid('command_id는 UUID여야 한다');
@@ -114,6 +133,7 @@ export async function startControlServer(o: { host: string; port: number; deps: 
         kind: String(r.kind ?? ''),
         version: Number(r.version ?? 0),
         desiredStateJson: String(r.desired_state_json ?? ''),
+        ...(r.runbook_bundle ? { runbookBundle: r.runbook_bundle as RunbookProtoBundle } : {}),
       };
       applyControl(req, o.deps).then(
         (ack) =>

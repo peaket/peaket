@@ -69,6 +69,7 @@ export const CommandState = zod.object({
 }).nullish().describe('대상이 돌려준 결과(성공했을 때만)'),
   "canApprove": zod.boolean().optional().describe('부른 계정이 지금 승인·거부할 수 있는지(요청자 제외). 서버가 판정한다'),
   "postReviewDueAt": zod.iso.datetime({"offset":true}).nullish().describe('명령 3·11의 사후 검토 보고서 기한(48시간, control-tower §6)'),
+  "runbookCommand": zod.string().optional().describe('ack 시간 초과로 FAILED가 된 명령을 채운 비상 런북 CLI 한 줄(C-T7 ③, F-02-7). 상세에만 싣고 목록에는 싣지 않는다. 런북 사유 200자를 넘거나 프리셋이 없는 명령이면 없다'),
   "delivery": zod.object({
   "kind": zod.enum(['ACK', 'APPLY_CHECK']).optional(),
   "ackedCount": zod.int().optional(),

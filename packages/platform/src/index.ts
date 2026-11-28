@@ -77,6 +77,10 @@ export { parseAsnTable, ReloadingAsnTable, type AsnClassifier, type AsnTableData
 export { INV_REF_KEY_TTL_MS, INV_REF_RETRY_DELAYS_MS, InvRefKeyRing, invRef, invRefEnvPrefix, invRefKeyInfoGauge, invRefSourcesFromEnv, KMS_ENDPOINT_ENV, labelKeyMessage, type LabelMacClient, type LabelSource, type MissingReason } from './inv-ref.js';
 export { kafkaTelemetrySend, TELEMETRY_BATCH_SIZE, TELEMETRY_BUFFER_CAPACITY, TELEMETRY_CONNECT_TIMEOUT_MS, TELEMETRY_LINGER_MS, TELEMETRY_RETRY_AFTER_MS, TELEMETRY_SEND_TIMEOUT_MS, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink, type KafkaTelemetrySender, type KafkaTelemetrySendOptions, type TelemetryDropped, type TelemetryKafkaConfig, type TelemetryMessage, type TelemetryProducer, type TelemetrySend, type TelemetrySinkOptions } from './telemetry-sink.js';
 export { TRACE_PROPAGATION_HEADERS, createExternalHttpClient, type ExternalHttpClient, type ExternalHttpClientOptions, type ExternalRequest } from './http-client.js';
+export { RUNBOOK_BUNDLE_VALID_MS, RUNBOOK_CLOCK_SKEW_MS, RUNBOOK_REASON_MAX, RUNBOOK_REPLAY_KEEP_MS, RUNBOOK_SERVICES, canonicalizeRunbook, parseRunbookControl, runbookApprovalOf, verifyRunbookControl, type RunbookControlBundle, type RunbookControlRequest, type RunbookOperatorKey, type RunbookOperatorRole, type RunbookRejectReason, type RunbookService, type RunbookSignature, type RunbookVerification } from './runbook-bundle.js';
+export { MemoryRunbookReplayGuard, type RunbookReplayGuard, type RunbookReplayVerdict } from './runbook-replay.js';
+export { RUNBOOK_ALREADY_EXISTS_CODE, RUNBOOK_REJECTED_CODE, RUNBOOK_UNAVAILABLE_CODE, withRunbookControl, type RunbookGateConfig, type RunbookProtoBundle, type RunbookProtoSignature, type RunbookSecurityEvent } from './runbook-control.js';
+export { RUNBOOK_KEYS_ENV, runbookGateConfigFromProcess, runbookOperatorKeysFromEnv } from './runbook-keys.js';
 export { BoundaryPropagator, BoundarySpanProcessor, withoutTracePropagation, type InboundTrust } from './trace-boundary.js';
 export { rawBodyOf } from './raw-body.js';
 export {

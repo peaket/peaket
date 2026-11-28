@@ -5,7 +5,7 @@
 // 듣기 전에 제어 토픽(설정·종료 세션) 소비를 켜고(ADR-0333 결정 2), 듣기 시작한 뒤 Kafka 소비자(구매 세션·탈퇴·회차 판매 상태, ADR-0214)를 켠다.
 import 'reflect-metadata';
 import type { Writable } from 'node:stream';
-import { CircuitBreaker, Counter, createExternalHttpClient, createHotRedis, createService, errorSummary, Gauge, HotPathMetrics, loadPlatformConfig, ReloadingAsnTable, systemClock } from '@peaket/platform';
+import { CircuitBreaker, Counter, createExternalHttpClient, createHotRedis, createService, errorSummary, Gauge, HotPathMetrics, loadPlatformConfig, ReloadingAsnTable, runbookGateConfigFromProcess, systemClock } from '@peaket/platform';
 import { startServiceControlSync } from '@peaket/platform/stream-worker';
 import { AppModule } from './app.module.js';
 import { kafkaConsumersFromEnv } from './consumers/index.js';
@@ -251,6 +251,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
             setNotice: new SetQueueNotice(new RedisQueueNotices(redis)),
             podName: (env.PEAKET_POD ?? env.HOSTNAME ?? 'local').slice(0, 64),
             nowMs: () => systemClock.now(),
+            runbook: runbookGateConfigFromProcess(env, 'queue-svc', (e) => service.logger.warn({ runbookSecurity: e }, '런북 묶음을 거부했다')),
             onError: (method, err) => service.logger.error({ err: errorSummary(err), method }, 'ControlReceiver 처리 실패'),
           },
         })

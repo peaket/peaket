@@ -34,7 +34,7 @@ import 'reflect-metadata';
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import type { Writable } from 'node:stream';
-import { CircuitBreaker, createDatabase, createExternalHttpClient, createHotRedis, createService, type Database, errorSummary, HotPathMetrics, internalGrpcTokenFromEnv, kafkaTelemetrySend, type KafkaTelemetrySender, RedisReauthJtiStore, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
+import { CircuitBreaker, createDatabase, createExternalHttpClient, createHotRedis, createService, type Database, errorSummary, HotPathMetrics, internalGrpcTokenFromEnv, kafkaTelemetrySend, type KafkaTelemetrySender, RedisReauthJtiStore, runbookGateConfigFromProcess, systemClock, telemetryDroppedCounter, telemetryKafkaFromEnv, TelemetrySink } from '@peaket/platform';
 import { createKafkaProducer, type KafkaProducer, startServiceControlSync } from '@peaket/platform/stream-worker';
 import { checkProducerSchemas, createAvroEncoder, readSchemaIdsFile, type AvroEncoder } from '@peaket/platform/avro';
 import { avroSchemas } from '@peaket/contracts/avro';
@@ -597,6 +597,7 @@ export async function start(o: StartOptions): Promise<StartedService> {
             setPause: new SetSalePause(saleControl.store, saleControl.copies, saleControl.memory),
             podName: podId,
             nowMs: () => systemClock.now(),
+            runbook: runbookGateConfigFromProcess(env, 'purchase-svc', (e) => service.logger.warn({ runbookSecurity: e }, '런북 묶음을 거부했다')),
           },
         })
       : undefined;
