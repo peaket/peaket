@@ -2,11 +2,12 @@
 // 정본: docs/features/control-tower.md §4 T10·§14 C-T7, docs/review/plans/F-02-7.md 6.7·8절.
 // 시험은 메모리 원장·가짜 전송으로만 한다(PostgreSQL·Docker 없음).
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import type { Clock } from '@peaket/platform';
 import { describe, expect, test } from 'vitest';
 import { MemoryAuditChain } from '../src/modules/audit/index.js';
 import { type Command, type CommandType, ControlDispatcher, ControlFanout, type ControlTargets, type ControlTransport, MemoryCommandStore } from '../src/modules/commands/index.js';
-import { viewOf } from '../src/modules/commands/inbound/command-view.js';
+import { baseViewOf, viewOf } from '../src/modules/commands/inbound/command-view.js';
 
 const T = Date.parse('2026-11-28T00:00:00.000Z');
 const EVENT = '0193a000-0000-7000-9000-0000000000e1';
@@ -79,17 +80,27 @@ describe('F-02-7 C-T7 런북 한 줄', () => {
     expect(view.state).toBe('FAILED');
   });
 
-  test('C-T7 ③ FAILED 명령 상세에 채운 런북 CLI 한 줄이 나오고 사유의 따옴표·$를 안전하게 인용한다', async () => {
+  test('C-T7 ③ FAILED 상세에만 런북 한 줄이 있고, 목록에는 없으며, 따옴표·$·백틱·역슬래시를 인용한다', async () => {
     const h = harness();
     const failed = await h.run(await h.dispatched('KILL_SWITCH', { scope: 'EVENT', eventIds: [EVENT] }, EVENT));
-    const view = viewOf({ ...failed, reason: '결제사 "장애" $HOME' });
+    const reason = '결제사 `장애` \\ $HOME "따옴표"';
+    const view = viewOf({ ...failed, reason });
     const line = (view as unknown as { runbookCommand?: string }).runbookCommand;
     expect(line).toBeDefined();
     expect(line).toContain('draft sale-pause');
     expect(line).toContain(`--event ${EVENT}`);
-    expect(line).toContain('--reason "결제사 \\"장애\\" \\$HOME"');
+    expect(line).toContain('--reason "결제사 \\`장애\\` \\\\ \\$HOME \\"따옴표\\""');
     expect(line).toContain(`--command-id ${failed.commandId}`);
     expect(line).toContain(`--out runbook-${failed.commandId}.json`);
+    // 목록·목록 상세(base)에는 싣지 않고, FAILED가 아닌 명령에도 만들지 않는다
+    expect((baseViewOf(failed) as unknown as { runbookCommand?: string }).runbookCommand).toBeUndefined();
+    expect((viewOf({ ...failed, state: 'ACKED' }) as unknown as { runbookCommand?: string }).runbookCommand).toBeUndefined();
+    // 명령 사유는 2,000자까지 받지만 런북 사유는 200자까지라, 넘으면 한 줄을 만들지 않는다
+    expect((viewOf({ ...failed, reason: '가'.repeat(200) }) as unknown as { runbookCommand?: string }).runbookCommand).toBeDefined();
+    expect((viewOf({ ...failed, reason: '가'.repeat(201) }) as unknown as { runbookCommand?: string }).runbookCommand).toBeUndefined();
+    // openapi CommandState에도 칸이 있어야 화면이 읽는다(생성물 대조는 완료의 정의에서 gen:check·api-client 시험)
+    const openapi = readFileSync(new URL('../../../docs/api/openapi.yaml', import.meta.url), 'utf8');
+    expect(openapi).toMatch(/CommandState:[\s\S]*?runbookCommand:/);
   });
 
   test('C-T7 ③ 플랫폼 범위는 --scope platform, 입장 일시정지는 --param expiresInSec=600을 쓴다', async () => {

@@ -3,10 +3,11 @@
 // docs/review/plans/F-02-7.md 6·8·10절. 실제 KMS·S3 없이 시험용 P-256 키와 메모리 sink만 쓴다.
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { describe, expect, test } from 'vitest';
-import { type RunbookDeps, runRunbookCli } from '../src/modules/rb35/index.js';
+import { commanderKeysFromProcess, type RunbookDeps, runRunbookCli } from '../src/modules/rb35/index.js';
 
 const NOW = Date.parse('2026-11-28T00:00:00.000Z');
 const EVENT = '0193a000-0000-7000-9000-0000000000e1';
+const ACTOR = '0193a000-0000-7000-8000-0000ffff0001';
 const EXTERNAL_FAILURE = 6;
 const UUID = (n: number): string => `0193a000-0000-7000-9000-00000000af${String(n).padStart(2, '0')}`;
 
@@ -24,7 +25,8 @@ const keyOf = (id: string, role: TestKey['role']): TestKey => {
 const commanderA = keyOf('commander-a', 'commander');
 const commanderB = keyOf('commander-b', 'commander');
 const operatorC = keyOf('operator-c', 'operator');
-const KEYS = new Map<string, TestKey>([commanderA, commanderB, operatorC].map((k) => [k.keyId, k]));
+const operatorD = keyOf('operator-d', 'operator');
+const KEYS = new Map<string, TestKey>([commanderA, commanderB, operatorC, operatorD].map((k) => [k.keyId, k]));
 
 interface SignedFile {
   bundle: {
@@ -54,15 +56,36 @@ interface Sent {
   };
 }
 
-interface Audit {
-  type: 'intent' | 'result';
+interface AuditIntent {
+  type: 'intent';
   commandId: string;
-  outcome?: string;
-  postReviewRequired?: boolean;
-  applied?: { service: string; address: string; appliedVersion: number }[];
+  services: string[];
+  canonicalBundle: string;
+  signatures: { keyId: string; signature: string }[];
+  issuedAt: number;
+  expiresAt: number;
+  writtenAtMs: number;
 }
+interface AuditResult {
+  type: 'result';
+  commandId: string;
+  outcome: string;
+  applied: { service: string; address: string; podName: string; appliedVersion: number; appliedAtMs: number }[];
+  failed: { service: string; address: string; reason: string }[];
+  postReviewRequired: boolean;
+  finishedAtMs: number;
+}
+type Audit = AuditIntent | AuditResult;
 
-function harness(o: { failIntent?: boolean; failKms?: boolean; existing?: Audit | null } = {}) {
+function harness(
+  o: {
+    failIntent?: boolean;
+    failResult?: boolean;
+    failKms?: boolean;
+    existing?: AuditResult | null;
+    sendError?: (address: string) => { code?: number } | undefined;
+  } = {},
+) {
   const files = new Map<string, string>();
   const lines: string[] = [];
   const sent: Sent[] = [];
@@ -81,9 +104,7 @@ function harness(o: { failIntent?: boolean; failKms?: boolean; existing?: Audit 
       result: async () => null,
     },
     clock: { now: () => NOW, monotonicMs: () => 0 },
-    keys: new Map(
-      [...KEYS.values()].map((k) => [k.keyId, { id: k.keyId, operatorId: k.operatorId, role: k.role, key: k.publicKey }]),
-    ),
+    keys: new Map([...KEYS.values()].map((k) => [k.keyId, { id: k.keyId, operatorId: k.operatorId, role: k.role, key: k.publicKey }])),
     readFile: (p: string) => {
       const v = files.get(p);
       if (v === undefined) throw new Error(`없는 파일: ${p}`);
@@ -110,19 +131,23 @@ function harness(o: { failIntent?: boolean; failKms?: boolean; existing?: Audit 
       send: async (address: string, request: Sent['request']) => {
         calls.push(`send:${address}`);
         sent.push({ address, request });
+        const err = o.sendError?.(address);
+        if (err) throw Object.assign(new Error('send failed'), err);
         return { appliedVersion: request.version, podName: `${address}-pod`, appliedAtMs: NOW };
       },
     },
     audit: {
-      writeIntent: async (i: { commandId: string }) => {
+      writeIntent: async (i: Omit<AuditIntent, 'type'>) => {
         calls.push('intent');
         if (o.failIntent) throw new Error('S3 unavailable');
-        audits.push({ type: 'intent', commandId: i.commandId });
+        audits.push({ type: 'intent', ...i });
       },
-      writeResult: async (r: { commandId: string; outcome: string; postReviewRequired: boolean; applied: Audit['applied'] }) => {
+      writeResult: async (r: Omit<AuditResult, 'type'>) => {
         calls.push('result');
-        audits.push({ type: 'result', commandId: r.commandId, outcome: r.outcome, postReviewRequired: r.postReviewRequired, applied: r.applied });
-        existing = { type: 'result', commandId: r.commandId, outcome: r.outcome, postReviewRequired: r.postReviewRequired, applied: r.applied };
+        if (o.failResult) throw new Error('S3 unavailable');
+        const result = { type: 'result' as const, ...r };
+        audits.push(result);
+        existing = result;
       },
       readResult: async (commandId: string) => {
         calls.push('readResult');
@@ -130,17 +155,19 @@ function harness(o: { failIntent?: boolean; failKms?: boolean; existing?: Audit 
       },
     },
   } as unknown as RunbookDeps;
-  return { deps, files, lines, sent, calls, audits, kmsCalls, exists: () => files.has('bundle.json') };
+  return { deps, files, lines, sent, calls, audits, kmsCalls };
 }
 
-async function draft(h: ReturnType<typeof harness>, preset: string, extra: string[] = []): Promise<number> {
-  return runRunbookCli(['draft', preset, '--event', EVENT, '--reason', '결제사 장애로 판매를 멈춘다', '--command-id', UUID(1), '--out', 'bundle.json', ...extra], h.deps);
+async function draft(h: ReturnType<typeof harness>, preset: string, commandId = UUID(1), extra: string[] = []): Promise<number> {
+  return runRunbookCli(['draft', preset, '--event', EVENT, '--reason', '결제사 장애로 판매를 멈춘다', '--command-id', commandId, '--out', 'bundle.json', ...extra], h.deps);
 }
 
 const read = (h: ReturnType<typeof harness>): SignedFile => JSON.parse(h.files.get('bundle.json')!) as SignedFile;
+const serviceOf = (address: string): string => address.split(':')[0]!;
+const signAs = (h: ReturnType<typeof harness>, id: string) => runRunbookCli(['sign', '--in', 'bundle.json', '--signer', id], h.deps);
 
 describe('F-02-7 런북 CLI 제어 명령', () => {
-  test('C-T13 ops-svc가 없어도 런북 CLI가 세 받는 쪽에 같은 명령 ID·판으로 보내고 감사 sink에 intent→result를 남긴다', async () => {
+  test('C-T13 ops-svc가 없어도 세 받는 쪽에 같은 묶음을 보내고 감사 intent→result를 남긴다', async () => {
     const h = harness();
     expect(await draft(h, 'sale-pause')).toBe(0);
     const f = read(h);
@@ -148,82 +175,136 @@ describe('F-02-7 런북 CLI 제어 명령', () => {
     expect(f.bundle).toMatchObject({ kind: 'CONTROL_KIND_SALE_PAUSE', scope: EVENT, reason: '결제사 장애로 판매를 멈춘다' });
     expect(f.bundle.version).toBe(f.bundle.issuedAt);
     expect(f.bundle.expiresAt - f.bundle.issuedAt).toBe(5 * 60_000);
-    expect(Object.keys(f.bundle.requests).sort()).toEqual(['admission-ctrl', 'purchase-svc', 'queue-svc']);
-    expect(f.bundle.requests['purchase-svc']).toEqual({ paused: true });
+    expect(f.bundle.requests).toEqual({
+      'purchase-svc': { paused: true },
+      'admission-ctrl': { paused: true },
+      'queue-svc': { paused: true },
+    });
 
-    expect(await runRunbookCli(['sign', '--in', 'bundle.json', '--signer', 'commander-a'], h.deps)).toBe(0);
+    expect(await signAs(h, 'commander-a')).toBe(0);
     expect(read(h).signatures).toEqual([{ keyId: 'commander-a', signature: expect.any(String) }]);
 
     expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(0);
+    expect(h.sent).toHaveLength(3);
     expect(h.sent.map((s) => s.address).sort()).toEqual(['admission-ctrl:50061', 'purchase-svc:50061', 'queue-svc:50061']);
-    expect(new Set(h.sent.map((s) => s.request.commandId))).toEqual(new Set([UUID(1)]));
-    expect(new Set(h.sent.map((s) => s.request.version))).toEqual(new Set([f.bundle.version]));
-    expect(h.sent.every((s) => s.request.kind === 'CONTROL_KIND_SALE_PAUSE' && JSON.parse(s.request.canonicalBundle.toString('utf8')))).toEqual(f.bundle);
+    for (const s of h.sent) {
+      expect(s.request.commandId).toBe(UUID(1));
+      expect(s.request.version).toBe(f.bundle.version);
+      expect(s.request.kind).toBe('CONTROL_KIND_SALE_PAUSE');
+      expect(JSON.parse(s.request.desiredStateJson)).toEqual(f.bundle.requests[serviceOf(s.address)]);
+      expect(JSON.parse(s.request.canonicalBundle.toString('utf8'))).toEqual(f.bundle);
+    }
+
+    const intent = h.audits.find((a): a is AuditIntent => a.type === 'intent')!;
+    expect(intent.commandId).toBe(UUID(1));
+    expect(intent.services.sort()).toEqual(['admission-ctrl', 'purchase-svc', 'queue-svc']);
+    expect(JSON.parse(Buffer.from(intent.canonicalBundle, 'base64').toString('utf8'))).toEqual(f.bundle);
+    expect(intent.signatures).toHaveLength(1);
+    expect(intent.signatures[0]?.keyId).toBe('commander-a');
+    expect(intent.issuedAt).toBe(f.bundle.issuedAt);
+    expect(intent.expiresAt).toBe(f.bundle.expiresAt);
+    expect(intent.writtenAtMs).toBe(NOW);
+
+    const result = h.audits.find((a): a is AuditResult => a.type === 'result')!;
+    expect(result).toMatchObject({ commandId: UUID(1), outcome: 'APPLIED', postReviewRequired: true, failed: [] });
+    expect(result.applied.map((a) => a.service).sort()).toEqual(['admission-ctrl', 'purchase-svc', 'queue-svc']);
+    for (const a of result.applied) {
+      expect(a.address).toBe(`${a.service}:50061`);
+      expect(a.podName).toBe(`${a.address}-pod`);
+      expect(a.appliedVersion).toBe(f.bundle.version);
+      expect(a.appliedAtMs).toBe(NOW);
+    }
     expect(h.calls[0]).toBe('readResult');
     expect(h.calls[1]).toBe('intent');
     expect(h.calls.at(-1)).toBe('result');
-    expect(h.audits.at(-1)).toMatchObject({ type: 'result', commandId: UUID(1), outcome: 'APPLIED', postReviewRequired: true });
-    expect(h.audits.at(-1)?.applied).toHaveLength(3);
   });
 
   test('C-T13 pg-switch는 payment-svc와 admission-ctrl에 서로 다른 바라는 상태를 보낸다', async () => {
     const h = harness();
-    expect(await draft(h, 'pg-switch', ['--param', 'toPg=PORTONE', '--param', 'pgTps=50'])).toBe(0);
+    expect(await draft(h, 'pg-switch', UUID(2), ['--param', 'toPg=PORTONE', '--param', 'pgTps=50'])).toBe(0);
     const f = read(h);
     expect(f.bundle.kind).toBe('CONTROL_KIND_PG_SWITCH');
-    expect(f.bundle.requests['payment-svc']).toEqual({ switched: true, toPg: 'PORTONE' });
-    expect(f.bundle.requests['admission-ctrl']).toEqual({ switched: true, pgKey: 'PORTONE', pgTps: 50 });
-    expect(f.bundle.requests['purchase-svc']).toBeUndefined();
+    expect(f.bundle.requests).toEqual({
+      'payment-svc': { switched: true, toPg: 'PORTONE' },
+      'admission-ctrl': { switched: true, pgKey: 'PORTONE', pgTps: 50 },
+    });
+    expect(await signAs(h, 'operator-c')).toBe(0);
+    expect(await signAs(h, 'operator-d')).toBe(0);
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(0);
+    expect(h.sent.map((s) => s.address).sort()).toEqual(['admission-ctrl:50061', 'payment-svc:50061']);
+    for (const s of h.sent) expect(JSON.parse(s.request.desiredStateJson)).toEqual(f.bundle.requests[serviceOf(s.address)]);
   });
 
-  test('C-T13 나머지 프리셋도 정한 kind·scope·requests를 만든다', async () => {
-    const run = (preset: string, args: string[]) => runRunbookCli(['draft', preset, ...args, '--reason', '비상 조치', '--command-id', UUID(2), '--out', 'bundle.json'], h.deps);
+  test('C-T13 나머지 프리셋도 주소·ack·감사 결과까지 간다', async () => {
     const h = harness();
-    expect(await run('admission-pause', ['--event', EVENT])).toBe(0);
-    expect(read(h).bundle).toMatchObject({ kind: 'CONTROL_KIND_ADMISSION_PAUSE', scope: EVENT });
-    expect(read(h).bundle.requests).toEqual({ 'admission-ctrl': { paused: true, expiresAtMs: NOW + 600_000 } });
-
-    expect(await run('admission-resume', ['--event', EVENT])).toBe(0);
-    expect(read(h).bundle.requests).toEqual({ 'admission-ctrl': { paused: false, expiresAtMs: null } });
-
-    expect(await run('automation-stop', ['--scope', 'platform'])).toBe(0);
-    expect(read(h).bundle).toMatchObject({ kind: 'CONTROL_KIND_AUTOMATION_STOP', scope: 'PLATFORM' });
-    expect(read(h).bundle.requests).toEqual({ 'admission-ctrl': { stopped: true } });
-
-    expect(await run('automation-resume', ['--scope', 'platform'])).toBe(0);
-    expect(read(h).bundle.requests).toEqual({ 'admission-ctrl': { stopped: false } });
-
-    expect(await run('pg-switch-off', ['--event', EVENT])).toBe(0);
-    expect(read(h).bundle.requests).toEqual({ 'payment-svc': { switched: false, toPg: null }, 'admission-ctrl': { switched: false, pgKey: null, pgTps: null } });
-
-    expect(await run('entry-pause-release', ['--scope', 'platform', '--param', 'pg=TOSS', '--param', 'actor=0193a000-0000-7000-8000-0000ffff0001'])).toBe(0);
-    expect(read(h).bundle).toMatchObject({ kind: 'CONTROL_KIND_ENTRY_PAUSE_RELEASE', scope: 'PLATFORM' });
-    expect(read(h).bundle.requests).toEqual({ 'payment-svc': { pg: 'TOSS', actor: '0193a000-0000-7000-8000-0000ffff0001' } });
+    const cases: { preset: string; id: string; args: string[]; services: string[] }[] = [
+      { preset: 'admission-pause', id: UUID(3), args: ['--event', EVENT], services: ['admission-ctrl'] },
+      { preset: 'admission-resume', id: UUID(4), args: ['--event', EVENT], services: ['admission-ctrl'] },
+      { preset: 'automation-stop', id: UUID(5), args: ['--scope', 'platform'], services: ['admission-ctrl'] },
+      { preset: 'automation-resume', id: UUID(6), args: ['--scope', 'platform'], services: ['admission-ctrl'] },
+      { preset: 'pg-switch-off', id: UUID(7), args: ['--event', EVENT], services: ['admission-ctrl', 'payment-svc'] },
+      { preset: 'entry-pause-release', id: UUID(8), args: ['--scope', 'platform', '--param', 'pg=TOSS', '--param', `actor=${ACTOR}`], services: ['payment-svc'] },
+    ];
+    for (const c of cases) {
+      expect(await runRunbookCli(['draft', c.preset, ...c.args, '--reason', '비상 조치', '--command-id', c.id, '--out', 'bundle.json'], h.deps)).toBe(0);
+      expect(await signAs(h, 'operator-c')).toBe(0);
+      expect(await signAs(h, 'operator-d')).toBe(0);
+      expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(0);
+      const result = h.audits.filter((a): a is AuditResult => a.type === 'result').at(-1)!;
+      expect(result.outcome).toBe('APPLIED');
+      expect(result.applied.map((a) => a.service).sort()).toEqual(c.services);
+      expect(result.postReviewRequired).toBe(false);
+    }
+    expect(h.sent.map((s) => s.address).sort()).toEqual([
+      'admission-ctrl:50061',
+      'admission-ctrl:50061',
+      'admission-ctrl:50061',
+      'admission-ctrl:50061',
+      'admission-ctrl:50061',
+      'payment-svc:50061',
+      'payment-svc:50061',
+    ]);
   });
 
-  test('C-T28 ⑭ 판매 재개는 서로 다른 commander 두 명이 서명해야 보내고, commander+operator면 보내지 않는다', async () => {
+  test('C-T28 ⑭ 판매 재개는 commander 두 명만, 판매 정지는 commander 한 명만 보낸다', async () => {
     const h = harness();
-    expect(await draft(h, 'sale-resume')).toBe(0);
-    expect(await runRunbookCli(['sign', '--in', 'bundle.json', '--signer', 'commander-a'], h.deps)).toBe(0);
-    expect(await runRunbookCli(['sign', '--in', 'bundle.json', '--signer', 'operator-c'], h.deps)).toBe(0);
+    // 재개 1명은 거부
+    expect(await draft(h, 'sale-resume', UUID(9))).toBe(0);
+    expect(await signAs(h, 'commander-a')).toBe(0);
     expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(3);
     expect(h.sent).toHaveLength(0);
-    expect(h.lines.join('\n')).toContain('not-authorized-role');
+    expect(h.lines.join('\n')).toContain('signature-count');
 
-    // 같은 파일에서 operator 서명을 지우지 않고 commander를 더하면 서명이 셋이 된다. 새 묶음으로 두 commander만 서명한다
-    expect(await draft(h, 'sale-resume')).toBe(0);
-    expect(await runRunbookCli(['sign', '--in', 'bundle.json', '--signer', 'commander-a'], h.deps)).toBe(0);
-    expect(await runRunbookCli(['sign', '--in', 'bundle.json', '--signer', 'commander-b'], h.deps)).toBe(0);
-    expect(read(h).signatures).toHaveLength(2);
+    // 재개 2명은 수용
+    expect(await draft(h, 'sale-resume', UUID(10))).toBe(0);
+    expect(await signAs(h, 'commander-a')).toBe(0);
+    expect(await signAs(h, 'commander-b')).toBe(0);
     expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(0);
     expect(h.sent).toHaveLength(3);
-    expect(h.audits.at(-1)).toMatchObject({ outcome: 'APPLIED', postReviewRequired: false });
+    expect((h.audits.filter((a): a is AuditResult => a.type === 'result').at(-1)!).postReviewRequired).toBe(false);
+
+    // 정지 2명은 거부
+    expect(await draft(h, 'sale-pause', UUID(11))).toBe(0);
+    expect(await signAs(h, 'commander-a')).toBe(0);
+    expect(await signAs(h, 'commander-b')).toBe(0);
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(3);
+    expect(h.sent).toHaveLength(3);
+    expect(h.lines.join('\n')).toContain('signature-count');
+
+    // 정지 1명은 수용하고 사후 검토 할 일이 남는다
+    expect(await draft(h, 'sale-pause', UUID(12))).toBe(0);
+    expect(await signAs(h, 'commander-a')).toBe(0);
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(0);
+    expect(h.sent).toHaveLength(6);
+    expect((h.audits.filter((a): a is AuditResult => a.type === 'result').at(-1)!).postReviewRequired).toBe(true);
   });
 
   test('C-T28 ⑮ 같은 commandId의 결과가 이미 있으면 다시 보내지 않고 그 결과를 보고한다', async () => {
-    const h = harness({ existing: { type: 'result', commandId: UUID(1), outcome: 'APPLIED', postReviewRequired: true, applied: [] } });
+    const h = harness({
+      existing: { type: 'result', commandId: UUID(1), outcome: 'APPLIED', applied: [], failed: [], postReviewRequired: true, finishedAtMs: NOW },
+    });
     expect(await draft(h, 'sale-pause')).toBe(0);
-    expect(await runRunbookCli(['sign', '--in', 'bundle.json', '--signer', 'commander-a'], h.deps)).toBe(0);
+    expect(await signAs(h, 'commander-a')).toBe(0);
     expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(0);
     expect(h.calls).toContain('readResult');
     expect(h.calls).not.toContain('intent');
@@ -231,35 +312,102 @@ describe('F-02-7 런북 CLI 제어 명령', () => {
     expect(h.lines.join('\n')).toContain('이미 적용됐다');
   });
 
-  test('[ASVS v5.0.0-4.1.5] run은 보내기 전에 서명을 다시 확인하고, 묶음을 고치면 보내지 않는다', async () => {
+  test('[ASVS v5.0.0-4.1.5] run은 보내기 전에 키 목록·역할·시간·창을 다시 확인한다', async () => {
+    const noKeys = harness();
+    expect(await draft(noKeys, 'sale-pause')).toBe(0);
+    expect(await signAs(noKeys, 'commander-a')).toBe(0);
+    (noKeys.deps as unknown as { keys: null }).keys = null;
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], noKeys.deps)).toBe(3);
+    expect(noKeys.sent).toHaveLength(0);
+
     const h = harness();
-    expect(await draft(h, 'sale-pause')).toBe(0);
-    expect(await runRunbookCli(['sign', '--in', 'bundle.json', '--signer', 'commander-a'], h.deps)).toBe(0);
-    const f = read(h);
-    f.bundle.reason = '고친 사유';
-    h.files.set('bundle.json', JSON.stringify(f));
-    expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(3);
-    expect(h.sent).toHaveLength(0);
-    expect(h.lines.join('\n')).toContain('bad-signature');
+    const assertRejected = async (id: string) => {
+      expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(3);
+      expect(h.sent).toHaveLength(0);
+      expect(h.calls).not.toContain('intent');
+      expect(h.lines.join('\n')).toContain(id);
+    };
+
+    // 역할 위반
+    expect(await draft(h, 'sale-resume', UUID(13))).toBe(0);
+    expect(await signAs(h, 'commander-a')).toBe(0);
+    await assertRejected('signature-count');
+
+    // 만료
+    expect(await draft(h, 'sale-pause', UUID(14))).toBe(0);
+    const expired = read(h);
+    expired.bundle.issuedAt = NOW - 400_000;
+    expired.bundle.expiresAt = NOW - 100_000;
+    expired.bundle.version = expired.bundle.issuedAt;
+    h.files.set('bundle.json', JSON.stringify(expired));
+    expect(await signAs(h, 'commander-a')).toBe(0);
+    await assertRejected('expired');
+
+    // 미래 issuedAt
+    expect(await draft(h, 'sale-pause', UUID(15))).toBe(0);
+    const future = read(h);
+    future.bundle.issuedAt = NOW + 31_000;
+    future.bundle.expiresAt = future.bundle.issuedAt + 300_000;
+    future.bundle.version = future.bundle.issuedAt;
+    h.files.set('bundle.json', JSON.stringify(future));
+    expect(await signAs(h, 'commander-a')).toBe(0);
+    await assertRejected('not-yet-valid');
+
+    // 5분 창 위반
+    expect(await draft(h, 'sale-pause', UUID(16))).toBe(0);
+    const wide = read(h);
+    wide.bundle.expiresAt = wide.bundle.issuedAt + 300_001;
+    h.files.set('bundle.json', JSON.stringify(wide));
+    expect(await signAs(h, 'commander-a')).toBe(0);
+    await assertRejected('window');
   });
 
-  test('[ASVS v5.0.0-16.5.2] 감사 sink에 묶음을 쓰지 못하면 명령을 보내지 않는다', async () => {
-    const h = harness({ failIntent: true });
-    expect(await draft(h, 'sale-pause')).toBe(0);
-    expect(await runRunbookCli(['sign', '--in', 'bundle.json', '--signer', 'commander-a'], h.deps)).toBe(0);
-    expect(await runRunbookCli(['run', '--in', 'bundle.json'], h.deps)).toBe(EXTERNAL_FAILURE);
-    expect(h.calls).toContain('intent');
-    expect(h.calls).not.toContain('send:purchase-svc:50061');
-    expect(h.sent).toHaveLength(0);
+  test('[ASVS v5.0.0-16.5.2] 감사 선행·결과 쓰기·부분 실패를 가른다', async () => {
+    const noIntent = harness({ failIntent: true });
+    expect(await draft(noIntent, 'sale-pause')).toBe(0);
+    expect(await signAs(noIntent, 'commander-a')).toBe(0);
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], noIntent.deps)).toBe(EXTERNAL_FAILURE);
+    expect(noIntent.calls).toContain('intent');
+    expect(noIntent.calls).not.toContain('send:purchase-svc:50061');
+    expect(noIntent.sent).toHaveLength(0);
+
+    const noResult = harness({ failResult: true });
+    expect(await draft(noResult, 'sale-pause')).toBe(0);
+    expect(await signAs(noResult, 'commander-a')).toBe(0);
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], noResult.deps)).toBe(EXTERNAL_FAILURE);
+    expect(noResult.sent).toHaveLength(3);
+    expect(noResult.lines.join('\n')).toContain(UUID(1));
+    expect(noResult.lines.join('\n')).toContain('적용됐을 수 있다');
+
+    const partial = harness({ sendError: (address) => (address.startsWith('queue-svc') ? {} : undefined) });
+    expect(await draft(partial, 'sale-pause')).toBe(0);
+    expect(await signAs(partial, 'commander-a')).toBe(0);
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], partial.deps)).toBe(4);
+    const partialResult = partial.audits.find((a): a is AuditResult => a.type === 'result')!;
+    expect(partialResult.outcome).toBe('PARTIAL');
+    expect(partialResult.applied).toHaveLength(2);
+    expect(partialResult.failed).toHaveLength(1);
+    expect(partialResult.failed[0]).toMatchObject({ service: 'queue-svc', address: 'queue-svc:50061' });
+
+    const timeout = harness({ sendError: (address) => (address.startsWith('queue-svc') ? { code: 4 } : undefined) });
+    expect(await draft(timeout, 'sale-pause', UUID(17))).toBe(0);
+    expect(await signAs(timeout, 'commander-a')).toBe(0);
+    expect(await runRunbookCli(['run', '--in', 'bundle.json'], timeout.deps)).toBe(4);
+    const timeoutResult = timeout.audits.find((a): a is AuditResult => a.type === 'result')!;
+    expect(['TIMEOUT', 'PARTIAL']).toContain(timeoutResult.outcome);
+    expect(timeoutResult.failed[0]?.service).toBe('queue-svc');
   });
 
-  test('[ASVS v5.0.0-16.5.2] KMS 서명이 실패하면 묶음 파일을 바꾸지 않고 실패한다', async () => {
+  test('[ASVS v5.0.0-16.5.2] KMS 서명이 실패하면 파일을 바꾸지 않고, prod는 키 없이 뜨지 않는다', async () => {
     const h = harness({ failKms: true });
     expect(await draft(h, 'sale-pause')).toBe(0);
     const before = h.files.get('bundle.json');
-    expect(await runRunbookCli(['sign', '--in', 'bundle.json', '--signer', 'commander-a'], h.deps)).toBe(EXTERNAL_FAILURE);
+    expect(await signAs(h, 'commander-a')).toBe(EXTERNAL_FAILURE);
     expect(h.kmsCalls).toEqual(['commander-a']);
     expect(h.files.get('bundle.json')).toBe(before);
     expect(read(h).signatures).toEqual([]);
+
+    expect(() => commanderKeysFromProcess({ PEAKET_ENV: 'prod' })).toThrow();
+    expect(commanderKeysFromProcess({ PEAKET_ENV: 'local' })).toBeNull();
   });
 });

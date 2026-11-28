@@ -241,3 +241,6 @@
 - F-05-3 구현 리뷰 IR-10(낮음): 대조 한 틱이 100개를 차례로 2초 데드라인으로 보내 최악 200초까지 늘어난다. 한 틱 시간 한도나 병렬 상한을 두고, `queue.proto`의 1초 주석과 클라이언트 2초도 맞춘다
 
 - ~~F-05-2 뒤 web reflow wallet-enroll·wallet-live (CI 45267206465)~~ — **닫힘(2026-11-24, 073dc18c3·c3175c7b5)**: wallet-enroll은 live 목록·회차 요약 대역과 UUIDv7 티켓으로 바꾸고, wallet-live O-T52 ⑥은 데스크톱 안내 뒤 [그래도 이 기기에 등록]을 누르게 고쳤다. `web / reflow`·`visual`·`console-csp` 모두 통과(9ebc100ec·c3175c7b5). 남은 것은 서비스 워커가 제어하는 페이지의 등록·갱신을 이 두 시험이 덮지 않는 점(wallet-sw가 따로 본다)
+- F-02-7 시험 리뷰 RV027-17(중간): F-02-6 계획이 `docs/api/openapi.yaml` `Command.params`, `packages/contracts`·`packages/api-client` 생성물, ASVS 16.5.2를 건드린다. 두 동결 트랙이 같은 파일·행을 고치므로, F-02-6이 먼저 합쳐질 때 F-02-7이 `Command.params`·16.5.2 문장·생성물을 보존하고 `CommandState.runbookCommand`만 더한 뒤 두 `gen`을 다시 돌리는 차례를 계획 §3에 적었다. 실제 합칠 때 파일·행 충돌을 이 차례로 푼다.
+- F-02-7 시험 리뷰 RV027-19(낮음): `deploy/platform/mesh/test/runbook-control-port.test.mjs`의 C-T28 ⑦ 첫 시험은 `AuthorizationPolicy.from.source.principals`만 견주고 같은 규칙의 `ipBlocks`·`namespaceSelector`를 보지 않는다. R23의 '클러스터 밖 ipBlock·모든 네임스페이스 선택자 없음'을 `rule.from` 전체로 단언하게 보강한다.
+- F-02-7 시험 리뷰 RV027-20(낮음): 장부 정직성. C-T13은 비상 Job·p99·S3 앵커·복구 편입이 `미실행`인데 시험 이름 `C-T13`으로 장부 '자동 시험'이 된다. C-T7 ②의 새 시험은 서버 `viewOf` 필드이고 화면 [다시 시도]는 기존 `apps/console-host/src/pages/commands/model/card-state.test.mjs`가 맡는다. 완료 보고에서 둘을 '전부 완료'로 세지 말고, console-host 시험을 게이트에 넣거나 결과를 함께 적는다.
