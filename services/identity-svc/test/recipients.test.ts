@@ -36,4 +36,29 @@ describe('N-T24 받는 사람 묶음 조회', () => {
     expect(await get.run({ accountIds: [], includeEmail: false })).toEqual([]);
     await expect(get.run({ accountIds: Array.from({ length: 501 }, (_, i) => `id-${i}`), includeEmail: false })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
   });
+
+  test('N-T24 ③ includePhone일 때만 전화번호를 주고, 병합 계정은 비운다 [ASVS v5.0.0-14.3.2]', async () => {
+    const store = new MemorySessionStore();
+    const a = '01900000-0000-7000-8000-000000000011';
+    const merged = '01900000-0000-7000-8000-000000000012';
+    await store.transaction((tx) => tx.createAccount({ id: a, email: 'a@example.com', emailVerified: true }, NOW));
+    await store.transaction((tx) =>
+      tx.completeSignup({ accountId: a, nickname: '가온', nicknameKey: '가온', phone: '+821012345678', memberCode: 'AAA-0001', consents: [], now: NOW }),
+    );
+    await store.transaction((tx) => tx.createAccount({ id: merged, email: 'm@example.com', emailVerified: true }, NOW));
+    await store.transaction((tx) =>
+      tx.mergeAccounts({ mergeId: 'm-phone', primaryAccountId: a, absorbedAccountId: merged, mergedProvider: 'google', moved: {}, requestedAt: NOW - 1000, now: NOW }),
+    );
+
+    const get = new GetRecipients(store);
+    const withPhoneInput = { accountIds: [a, merged], includeEmail: true, includePhone: true };
+    const withPhone = await get.run(withPhoneInput);
+    expect(withPhone[0]).toMatchObject({ status: 'ACTIVE', email: 'a@example.com', phone: '+821012345678' });
+    expect(withPhone[1]).toMatchObject({ status: 'MERGED', email: null });
+    expect(JSON.stringify(withPhone[1])).not.toContain('+821012345678');
+
+    const withoutInput = { accountIds: [a], includeEmail: false, includePhone: false };
+    const without = await get.run(withoutInput);
+    expect(JSON.stringify(without[0])).not.toContain('"phone"');
+  });
 });

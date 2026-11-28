@@ -1,88 +1,154 @@
-// F-06-1 N-T19 ⑨·N-T23 ④·N-T24 ②: notify Kafka 소비자 배선과 identity 계약의 정적 대조.
-// Kafka·Docker를 이번 턴에 쓰지 않으므로, 배선(주제·처리기·조립)과 계약 모양을 파일에서 확인한다.
-// 동작(중복·재시도·보류)은 인테이크·워커 시험과 구현 뒤 통합 시험이 본다.
+// F-06-1 N-T19 ⑩·N-T23 ④: notify Kafka 처리기의 동작과 asyncapi 계약.
+// 파일이 없으면 단언으로 실패하고, 있으면 실제 처리기를 동적 import해 decode·keyOf·handle을 돌린다.
+// 정본: docs/streaming.md §2.6, docs/features/notify.md §2.1 E2·§4.1, asyncapi `OrderEvent`·`AccountMerged`·`LoginMethodChanged`.
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 import { CORE_TOPICS } from '../src/consumers/index.js';
 
-const readService = (p: string): string => readFileSync(fileURLToPath(new URL(`../${p}`, import.meta.url)), 'utf8');
+const handlerUrl = new URL('../src/modules/notify/inbound/notify-events.handler.ts', import.meta.url).href;
+const handlerPath = fileURLToPath(handlerUrl);
 const readRepo = (p: string): string => readFileSync(fileURLToPath(new URL(`../../../${p}`, import.meta.url)), 'utf8');
-const handlerPath = fileURLToPath(new URL('../src/modules/notify/inbound/notify-events.handler.ts', import.meta.url));
 
-/** `이름({`부터 균형 잡힌 닫는 `}`까지 잘라 낸다(조립 인자 검사, core-consumers.test.ts와 같은 방식) */
-const callArgs = (source: string, needle: string): string => {
-  const call = source.indexOf(needle);
-  expect(call, needle).toBeGreaterThanOrEqual(0);
-  const open = source.indexOf('{', call);
-  let depth = 0;
-  for (let i = open; i < source.length; i += 1) {
-    if (source[i] === '{') depth += 1;
-    else if (source[i] === '}') {
-      depth -= 1;
-      if (depth === 0) return source.slice(open, i + 1);
-    }
-  }
-  throw new Error(`${needle}의 인자 객체를 찾지 못했다`);
+type Handler = {
+  decode(m: { topic: string; value: Buffer | null }): unknown;
+  keyOf(e: unknown): string;
+  handle(e: unknown): Promise<void>;
 };
 
-describe('N-T19 Kafka trade.orders 소비자 배선', () => {
-  test('N-T19 ⑨ 소비자 그룹이 네 주제를 읽고, trade.orders 처리기는 알림 네 종류만 인테이크로 넘긴다', () => {
-    expect([...CORE_TOPICS]).toEqual(['identity.accounts-withdrawn', 'identity.accounts-merged', 'identity.login-methods-changed', 'trade.orders']);
+/** 실제 인테이크 대신 부른 자리와 인자만 기록한다(경계 가짜) */
+class FakeIntake {
+  readonly trade: Record<string, unknown>[] = [];
+  readonly logins: Record<string, unknown>[] = [];
+  readonly merges: Record<string, unknown>[] = [];
+  async tradeEvent(e: Record<string, unknown>) {
+    this.trade.push(e);
+    return 'created';
+  }
+  async loginMethodChanged(e: Record<string, unknown>) {
+    this.logins.push(e);
+    return { created: 1, duplicate: 0 };
+  }
+  async accountMerged(e: Record<string, unknown>) {
+    this.merges.push(e);
+    return { created: 1, duplicate: 0, subscriptionsMoved: 0, pushMoved: 0 };
+  }
+}
 
+const orderEvent = (type: string) => ({
+  eventId: '01900000-0000-7000-8000-0000000000e1',
+  orderId: '01900000-0000-7000-8000-0000000000d1',
+  accountId: '01900000-0000-7000-8000-0000000000a1',
+  type,
+  amount: 110_000,
+  seatIds: [],
+  items: [],
+  seatAssignment: 'PICK',
+  occurredAt: '2026-11-28T00:00:00.000Z',
+  eventKey: '01900000-0000-7000-8000-0000000000f1',
+  ...(type === 'REFUND_FAILED' ? { fanNoticeReason: 'failed' } : {}),
+  ...(type === 'REFUNDED' ? { refundAmount: 110_000 } : {}),
+  ...(type === 'EVENT_POSTPONED' ? { fanNoticeReason: '연기', postponedTo: '2026-12-01T10:00:00.000Z', refundWindowClosesAt: '2026-12-08T10:00:00.000Z' } : {}),
+});
+
+const importHandler = async (): Promise<{ handler: Handler; intake: FakeIntake } | undefined> => {
+  const mod = (await import(/* @vite-ignore */ handlerUrl)) as { NotifyEventHandler?: new (deps: { intake: FakeIntake }) => Handler };
+  if (typeof mod.NotifyEventHandler !== 'function') return undefined;
+  const intake = new FakeIntake();
+  return { handler: new mod.NotifyEventHandler({ intake }), intake };
+};
+
+describe('N-T19 Kafka trade.orders 처리기', () => {
+  test('N-T19 ⑩ orderId를 업무 키로 쓰고 알림 네 종류만 인테이크로 넘기며 나머지는 no-op이다', async () => {
+    expect([...CORE_TOPICS]).toEqual(['identity.accounts-withdrawn', 'identity.accounts-merged', 'identity.login-methods-changed', 'trade.orders']);
     expect(existsSync(handlerPath)).toBe(true);
     if (!existsSync(handlerPath)) return;
-    const handler = readFileSync(handlerPath, 'utf8');
-    expect(handler).toContain("'trade.orders'");
-    for (const type of ['EVENT_CANCELLATION_CONFIRMED', 'EVENT_POSTPONED', 'REFUNDED', 'REFUND_FAILED']) expect(handler).toContain(type);
-    expect(handler).toContain('tradeEvent(');
 
-    const start = readService('src/consumers/start.ts');
-    expect(start).toContain('NotifyEventHandler');
-    expect(start).toMatch(/topics:\s*\[\.\.\.CORE_TOPICS\]/);
+    const imported = await importHandler();
+    expect(imported).toBeDefined();
+    if (!imported) return;
+    const { handler, intake } = imported;
 
-    const main = readService('src/main.ts');
-    expect(main).toContain('new NotifyEventHandler(');
-    expect(main).toContain('service.app.get(NotificationIntake)');
-    expect(callArgs(main, 'startCoreConsumers(')).toMatch(/\bnotify\b/);
+    for (const type of ['EVENT_CANCELLATION_CONFIRMED', 'EVENT_POSTPONED', 'REFUNDED', 'REFUND_FAILED']) {
+      const order = orderEvent(type);
+      const event = { topic: 'trade.orders', order };
+      expect(handler.keyOf(event)).toBe(order.orderId);
+      await handler.handle(event);
+    }
+    expect(intake.trade.map((e) => e.type)).toEqual(['EVENT_CANCELLATION_CONFIRMED', 'EVENT_POSTPONED', 'REFUNDED', 'REFUND_FAILED']);
+    expect(intake.trade[0]).toMatchObject({
+      orderId: '01900000-0000-7000-8000-0000000000d1',
+      eventId: '01900000-0000-7000-8000-0000000000e1',
+      accountId: '01900000-0000-7000-8000-0000000000a1',
+    });
+    expect(intake.trade[2]).toMatchObject({ refundAmount: 110_000 });
+    expect(intake.trade[3]).toMatchObject({ fanNoticeReason: 'failed' });
+
+    // 알림 대상이 아닌 주문 사건은 인테이크를 부르지 않는다
+    const before = intake.trade.length;
+    await handler.handle({ topic: 'trade.orders', order: orderEvent('CONFIRMED') });
+    await handler.handle({ topic: 'trade.orders', order: orderEvent('APPROVED') });
+    expect(intake.trade).toHaveLength(before);
+
+    // 계약에 맞지 않는 값은 던져 플랫폼이 보류하게 한다
+    expect(() => handler.decode({ topic: 'trade.orders', value: Buffer.from('{"type":"CREATED"}') })).toThrow();
+    expect(() => handler.decode({ topic: 'trade.orders', value: null })).toThrow();
   });
 });
 
-describe('N-T23 identity 사건 소비자와 계약', () => {
-  test('N-T23 ④ 처리기가 identity 두 사건을 인테이크로 넘기고, AccountMerged에는 주소 칸이 없다', () => {
+describe('N-T23 identity 사건 처리기와 계약', () => {
+  test('N-T23 ④ mergeId·accountId 업무 키로 인테이크를 부르고, AccountMerged 메시지 전체에 주소가 없다', async () => {
     expect(existsSync(handlerPath)).toBe(true);
     if (!existsSync(handlerPath)) return;
-    const handler = readFileSync(handlerPath, 'utf8');
-    expect(handler).toContain("'identity.accounts-merged'");
-    expect(handler).toContain("'identity.login-methods-changed'");
-    expect(handler).toContain('accountMerged(');
-    expect(handler).toContain('loginMethodChanged(');
-    // 병합 업무 키는 mergeId, 로그인 수단 업무 키는 accountId다(docs/streaming.md §2.6)
-    expect(handler).toMatch(/keyOf[\s\S]*mergeId/);
-    expect(handler).toMatch(/keyOf[\s\S]*accountId/);
+    const imported = await importHandler();
+    expect(imported).toBeDefined();
+    if (!imported) return;
+    const { handler, intake } = imported;
 
+    const merged = {
+      topic: 'identity.accounts-merged',
+      merged: {
+        mergeId: '01900000-0000-7000-8000-0000000000b1',
+        primaryAccountId: '01900000-0000-7000-8000-0000000000a1',
+        mergedAccountId: '01900000-0000-7000-8000-0000000000a2',
+        confirmedAt: '2026-11-28T00:00:00.000Z',
+      },
+    };
+    expect(handler.keyOf(merged)).toBe('01900000-0000-7000-8000-0000000000b1');
+    await handler.handle(merged);
+    expect(intake.merges).toEqual([
+      expect.objectContaining({
+        eventKey: '01900000-0000-7000-8000-0000000000b1',
+        primaryAccountId: '01900000-0000-7000-8000-0000000000a1',
+        mergedAccountId: '01900000-0000-7000-8000-0000000000a2',
+      }),
+    ]);
+
+    const login = {
+      topic: 'identity.login-methods-changed',
+      login: {
+        eventKey: '01900000-0000-7000-8000-0000000000c1',
+        accountId: '01900000-0000-7000-8000-0000000000a1',
+        change: 'LINKED',
+        provider: 'google',
+        occurredAt: '2026-11-28T00:00:00.000Z',
+      },
+    };
+    expect(handler.keyOf(login)).toBe('01900000-0000-7000-8000-0000000000a1');
+    await handler.handle(login);
+    expect(intake.logins).toEqual([
+      expect.objectContaining({ eventKey: '01900000-0000-7000-8000-0000000000c1', accountId: '01900000-0000-7000-8000-0000000000a1', change: 'LINKED', provider: 'google' }),
+    ]);
+
+    // components.messages.AccountMerged 전체(채널의 한 줄 참조가 아니다)
     const asyncapi = readRepo('docs/api/asyncapi.yaml');
-    const start = asyncapi.indexOf('    AccountMerged:');
-    const end = asyncapi.indexOf('    AccountWithdrawn:');
+    const start = asyncapi.indexOf('\n    AccountMerged:\n');
+    const end = asyncapi.indexOf('\n    AccountWithdrawn:\n', start);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     const block = asyncapi.slice(start, end);
     expect(block).toContain('required: [mergeId, primaryAccountId, mergedAccountId, confirmedAt]');
     expect(block).not.toContain('email');
     expect(block).not.toContain('phone');
-  });
-});
-
-describe('N-T24 받는 사람 묶음의 전화번호', () => {
-  test('N-T24 ② includePhone일 때만 전화번호를 주는 계약이 proto·identity 조회에 있다 [ASVS v5.0.0-14.3.2]', () => {
-    const proto = readRepo('docs/api/proto/peaket/identity/v1/identity.proto');
-    expect(proto).toContain('bool include_phone = 3;');
-    expect(proto).toMatch(/message Recipient \{[\s\S]*string phone = 6;/);
-
-    const getRecipients = readRepo('services/identity-svc/src/modules/session/application/get-recipients.ts');
-    expect(getRecipients).toContain('includePhone');
-    const grpc = readRepo('services/identity-svc/src/modules/session/inbound/recipient-query.grpc.ts');
-    expect(grpc).toContain('include_phone');
-    expect(grpc).toContain('phone');
   });
 });
